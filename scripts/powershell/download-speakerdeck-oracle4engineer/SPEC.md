@@ -81,7 +81,8 @@ scripts/python/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` is a **pure Python** static analyzer (no PowerShell installation
-required) with 10 checks (C1–C10), originally developed for the
+required), version **2.3.0** at the time of this writing, with a 27-rule
+check set spanning `PSA1001`..`PSA6006`. It was originally developed for the
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
 repository. Within this repository it must be:
 
@@ -89,10 +90,16 @@ repository. Within this repository it must be:
   `scripts/python/powershell-static-analyzer/psa.py`
   (do not fork or maintain a separate copy)
 - Used as the gate before every commit
+- Configured per-script-directory via a local `.psa.config.json` when
+  rule disables are warranted (see A.11)
 
-See A.11 for details and
-[`scripts/python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
-for usage / rationale.
+Legacy v1.x codes `C1`..`C10` remain accepted as aliases for backward
+compatibility.
+
+See A.11 for project-local conventions and
+[`scripts/python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
+([日本語](../../python/powershell-static-analyzer/SPEC.ja.md))
+for the authoritative rule specification.
 
 ### A.1.3 Companion specifications (this folder)
 
@@ -612,39 +619,66 @@ Based on the longest successful path length, classify into:
 ```
 <repo>/
   scripts/
+    powershell/
+      download-speakerdeck-oracle4engineer/
+        .psa.config.json     # project-local config (disables PSA6003)
     python/
       powershell-static-analyzer/
-        psa.py              # canonical location (mirrored from upstream)
+        psa.py               # canonical location, v2.3.0
+        SPEC.md / SPEC.ja.md # authoritative analyzer specification
 ```
 
 ### Required gate
 
-Before every commit:
+Before every commit, run `psa.py` from this script directory (so that the
+project-local `.psa.config.json` is auto-discovered):
 
 ```bash
-python3 scripts/python/powershell-static-analyzer/psa.py path/to/script.ps1
+cd scripts/powershell/download-speakerdeck-oracle4engineer
+python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
+python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 ```
 
-Must pass with **0 errors / 0 warnings / 0 info**.
+Both must pass with **0 errors / 0 warnings / 0 info**.
 
-### Check coverage (C1-C10)
+### Rule coverage (psa.py v2.3.0)
 
-`psa.py` covers:
+`psa.py` v2.3.0 ships with a 27-rule check set `PSA1001`..`PSA6006`, grouped
+into six categories. A condensed table is reproduced in
+[`README.md`](./README.md) and [`README.ja.md`](./README.ja.md). For the
+authoritative specification of every rule (severity, examples, suppression
+guidance), see
+[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
+([日本語](../../python/powershell-static-analyzer/SPEC.ja.md)) §4.
 
-- **C1** (error): Brace `{}` balance
-- **C2** (error): Paren `()` balance
-- **C3** (error): Bracket `[]` balance
-- **C4** (error): Undefined variable references (heuristic, function-scoped)
-- **C5** (warning): Auto-variable shadowing (`$args`, `$matches`, `$null`, etc.)
-- **C6** (warning): `Start-Process -ArgumentList` usage
-- **C7** (warning): `-match` against bare `$variable` (null-on-right risk)
-- **C8** (info): TODO / FIXME / XXX / HACK markers
-- **C9** (warning): Trailing backtick before empty line
-- **C10** (warning): `-match` against literal empty string `""` / `''`
+Legacy v1.x codes `C1`..`C10` are accepted as aliases (for example, `C7`
+is the same rule as `PSA2003`). The canonical name should be the new code
+in any new documentation.
 
-(Exact check list may evolve; consult psa.py's source or
-[`scripts/python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
-for the authoritative table.)
+### Project-local suppression policy
+
+This project applies suppression at two levels:
+
+1. **Project-level (`.psa.config.json`)**
+   - `PSA6003` (plural function noun) is disabled. The three legacy
+     plural-noun functions in `Download-SpeakerDeck.ps1`
+     (`Resolve-RuntimeDirectories`, `Invoke-CleanupDirectories`,
+     `Read-YearOverrides`) intentionally describe collections, so renaming
+     them would either misrepresent behaviour or break call sites. The
+     rationale is documented inline in the config file.
+
+2. **Inline (`# psa-disable-line PSA3004 -- <reason>`)**
+   - All intentional empty `catch` blocks carry an inline suppression with
+     a one-line justification. Categories covered:
+     - Best-effort diagnostic capture where the retry/error path is driven
+       by other state.
+     - `foreach`-format / `foreach`-pattern loops where per-iteration
+       failure correctly means "try the next candidate".
+     - Cross-host compatibility shims (e.g., TLS enum values not present
+       on older PowerShell hosts).
+
+Any new suppression must include a justification comment naming the rule
+code and the reason. Suppressions without a reason are not acceptable.
 
 ### When psa.py produces false positives
 
@@ -652,11 +686,13 @@ Common cases and their resolutions:
 
 | False positive | Resolution |
 |---|---|
-| C4 "undefined variable" for `$Script:Foo` set in a different function | Initialize at script load: `$Script:Foo = $null` |
-| C7 "-match against bare $variable" where `$variable` is guaranteed non-null | Wrap with `[string]::IsNullOrEmpty($variable)` guard or refactor |
+| `PSA2001` (legacy `C4`) "undefined variable" for `$Script:Foo` set in a different function | Initialize at script load: `$Script:Foo = $null` |
+| `PSA2003` (legacy `C7`) "-match against bare `$variable`" where `$variable` is guaranteed non-null | Wrap with `[string]::IsNullOrEmpty($variable)` guard, or refactor to `[regex]::Match()` |
+| `PSA3004` (empty `catch`) intentional silent failure | Add `# psa-disable-line PSA3004 -- <reason>` |
+| `PSA6003` plural noun in legacy function name | Already disabled at project level in `.psa.config.json` |
 
-If psa.py systematically misclassifies a pattern, raise an issue upstream
-rather than suppressing locally.
+If `psa.py` systematically misclassifies a pattern, raise an issue upstream
+in the analyzer's own repository rather than suppressing locally.
 
 ## A.12 Bilingual Documentation
 

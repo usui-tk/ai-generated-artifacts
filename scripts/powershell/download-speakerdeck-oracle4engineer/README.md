@@ -489,9 +489,12 @@ check, regression-fix evidence for r17), see **[TESTING.md](TESTING.md)**
 ([日本語](TESTING.ja.md)). It documents the most recent successful
 real-run (`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
 
-For details on the `psa.py` static analyzer (10 checks C1–C10 +
-CI integration), see
-[`../../python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
+For details on the `psa.py` static analyzer (v2.3.0, 27-rule check set
+`PSA1001`..`PSA6006` plus CI integration), see
+[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
+([日本語](../../python/powershell-static-analyzer/SPEC.ja.md))
+or the analyzer's
+[`README.md`](../../python/powershell-static-analyzer/README.md)
 ([日本語](../../python/powershell-static-analyzer/README.ja.md)).
 
 The **single most important rule** for new development: do not re-derive
@@ -510,32 +513,42 @@ It originated in the
 project and is a pure-Python tool with no external dependencies.
 
 ```bash
-# Run static analysis (from repository root)
-python3 scripts/python/powershell-static-analyzer/psa.py \
-        scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+# Run static analysis (psa.py auto-discovers the local .psa.config.json)
+cd scripts/powershell/download-speakerdeck-oracle4engineer
+python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### Checks performed (10 categories)
+### Rule coverage (psa.py v2.3.0 — 27 rules)
 
-| Code | Check                                                | Severity |
-| ---- | ---------------------------------------------------- | -------- |
-| C1   | Brace `{}` balance                                   | error    |
-| C2   | Paren `()` balance                                   | error    |
-| C3   | Bracket `[]` balance                                 | error    |
-| C4   | Undefined variable references                        | error    |
-| C5   | Auto-variable shadowing                              | warning  |
-| C6   | `Start-Process -ArgumentList` warning                | warning  |
-| C7   | `-match $variable` (always-true on $null) warning    | warning  |
-| C8   | TODO/FIXME/XXX/HACK markers                          | info     |
-| C9   | Trailing backtick before empty line                  | warning  |
-| C10  | `-match ''` (empty string) warning                   | warning  |
+`psa.py` v2.3.0 groups its 27 rules into six categories:
+
+| Category | Code range | Examples |
+| -------- | ---------- | -------- |
+| Syntax balance      | `PSA1001`..`PSA1003` | brace / paren / bracket balance |
+| Semantics           | `PSA2001`..`PSA2006` | undefined variable, auto-variable shadowing, `-match` against bare variable (legacy `C7`), `$null` on the right of `-eq`/`-ne` |
+| Style               | `PSA3001`..`PSA3004` | `Start-Process -ArgumentList` (legacy `C6`), trailing backtick before empty line (legacy `C9`), empty `catch` block |
+| Hygiene             | `PSA4001`..`PSA4004` | unfinished markers (legacy `C8`), trailing whitespace, long line, trailing semicolon |
+| Security            | `PSA5001`..`PSA5004` | plain-text password parameter, `Invoke-Expression`, broken hash algorithm, hardcoded `ComputerName` |
+| Best practice       | `PSA6001`..`PSA6006` | non-approved verb, cmdlet alias, plural function noun, `$global:` definition, mandatory parameter with default, switch defaulting to `$true` |
+
+Legacy `C1`..`C10` codes from v1.x are accepted as aliases. For the full
+specification of each rule, see
+[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4.
+
+### Project-local configuration
+
+This script directory ships a `.psa.config.json` that disables `PSA6003`
+(plural function noun). Three intentional plural-noun functions in
+`Download-SpeakerDeck.ps1` motivate this exemption; the rationale is
+recorded inline in the config file. Empty `catch` blocks (`PSA3004`) that
+are intentional carry `# psa-disable-line PSA3004 -- <reason>` directives.
 
 ### Current verification result
 
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 4106
+Lines  : 4107
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)

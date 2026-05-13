@@ -27,8 +27,8 @@
 
 | 項目 | ステータス | 最終検証日 |
 |---|---|---|
-| `psa.py` on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r20 ビルド |
-| `psa.py` on `Test-PdfMetadata.ps1`     | **0 errors / 0 warnings / 0 info** ✓ | r20 ビルド |
+| `psa.py` v2.3.0 on `Download-SpeakerDeck.ps1`（プロジェクト `.psa.config.json` 適用） | **0 errors / 0 warnings / 0 info** ✓ | psa-baseline-sync |
+| `psa.py` v2.3.0 on `Test-PdfMetadata.ps1`（プロジェクト `.psa.config.json` 適用）     | **0 errors / 0 warnings / 0 info** ✓ | psa-baseline-sync |
 | ファイルエンコーディング (UTF-8 BOM、BOM 以外は ASCII) | ✓ 両 `.ps1` | r20 ビルド |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ パス | 2026-05-11 |
 | Phase 2〜5 (Scan / Plan) — DryRun モード | ✓ 804 デッキを評価 | 2026-05-11 |
@@ -42,27 +42,59 @@
 
 ## 1. 静的解析ゲート
 
-`psa.py` はすべてのコミット前に合格必須です（[SPEC.ja.md](./SPEC.ja.md) Part C 参照）。
+`psa.py` v2.3.0（27 ルール体系 `PSA1001`〜`PSA6006`）はすべてのコミット前に合格必須です
+（[SPEC.ja.md](./SPEC.ja.md) Part C 参照）。
+
+`psa.py` は CWD から `.psa.config.json` を自動発見するため、
+正規の起動方法はこのスクリプトディレクトリから実行することです：
 
 ```bash
+cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 ```
 
-期待出力（両方同様）：
+ローカルの `.psa.config.json` は、このディレクトリに限り `PSA6003`（関数名詞の複数形）
+を disable しています。理由は、`Download-SpeakerDeck.ps1` 内の 3 関数
+（`Resolve-RuntimeDirectories`、`Invoke-CleanupDirectories`、`Read-YearOverrides`）が
+意図的に複数形名詞を使っているためです（複数リソースを扱う処理の意味的に正確だから）。
+config ファイル内にコメントで根拠を記録済み。新規関数は単数形を推奨します。
+
+期待出力（両スクリプト同様）：
 
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 4106
+Lines  : 4107
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
 ```
 
-`0 / 0 / 0` から外れた場合はコミット禁止。psa.py がカバーする 10 種類のチェック（C1〜C10）の詳細は
-[`../../python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
-を参照。
+`0 / 0 / 0` から外れた場合はコミット禁止。27 ルールの完全仕様は
+[`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md)
+§4 を参照（`PSA1xxx` 構文 / `PSA2xxx` 意味 / `PSA3xxx` スタイル / `PSA4xxx` 衛生 /
+`PSA5xxx` セキュリティ / `PSA6xxx` ベストプラクティス）。
+v1.x のレガシーコード `C1`〜`C10` はエイリアスとして引き続き受理されます。
+
+### 1.1 抑制ポリシー
+
+「意図的な」空 catch ブロック（`PSA3004`）には、理由コメント付きの
+インライン抑制ディレクティブを付与しています：
+
+```powershell
+try { ... } catch { } # psa-disable-line PSA3004 -- diagnostic only; ...
+```
+
+本スクリプト内のすべての `psa-disable-line PSA3004` は個別レビュー済みで、
+以下のいずれかに分類されます：
+
+- 診断情報のベストエフォート取得（ステータスコード・レスポンスヘッダ・ボディ）。
+  リトライ／エラーハンドリングの判定は別の状態変数で行うため、診断取得失敗を
+  握り潰しても安全。
+- `foreach`-format / `foreach`-pattern ループ内のフォールバック。
+  反復ごとの失敗は「次の候補を試す」という意味で正しい挙動。
+- ホスト互換性のためのシム（古い PowerShell ホストに存在しない TLS enum 値など）。
 
 ---
 
@@ -299,12 +331,12 @@ jobs:
           python-version: '3.x'
       - name: Static-analyze main script
         run: |
-          python3 scripts/python/powershell-static-analyzer/psa.py \
-                  scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+          cd scripts/powershell/download-speakerdeck-oracle4engineer
+          python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
       - name: Static-analyze PoC script
         run: |
-          python3 scripts/python/powershell-static-analyzer/psa.py \
-                  scripts/powershell/download-speakerdeck-oracle4engineer/Test-PdfMetadata.ps1
+          cd scripts/powershell/download-speakerdeck-oracle4engineer
+          python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 ```
 
 Windows 側の機能 CI ジョブは現在計画されていません。理由：

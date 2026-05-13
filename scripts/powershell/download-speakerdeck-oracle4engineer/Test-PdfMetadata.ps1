@@ -132,7 +132,7 @@ try {
         [Net.SecurityProtocolType]::Tls12 -bor `
         [Net.SecurityProtocolType]::Tls11 -bor `
         [Net.SecurityProtocolType]::Tls
-} catch { }
+} catch { } # psa-disable-line PSA3004 -- older PS hosts may lack newer enum values; ignore silently
 
 # ============================================================
 # Compatibility check

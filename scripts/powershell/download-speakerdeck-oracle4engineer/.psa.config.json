@@ -1,0 +1,26 @@
+// psa.py v2.3.0 project configuration for download-speakerdeck-oracle4engineer
+//
+// Why PSA6003 is disabled:
+//   This script and its companion intentionally use plural-noun function names
+//   for functions that operate on collections of resources rather than a single
+//   item. Examples in this project:
+//
+//     - Resolve-RuntimeDirectories  : returns a set of runtime directories
+//     - Invoke-CleanupDirectories   : cleans up multiple directory trees
+//     - Read-YearOverrides          : reads a table of (filename, year)
+//                                     override entries
+//
+//   Renaming these to singular forms (e.g., -Directory) would either
+//   misrepresent the function's behaviour or require breaking changes to
+//   callers. The plural form is the more accurate description here, so we
+//   suppress PSA6003 at the project level and document the convention in
+//   SPEC.md (testing baseline).
+//
+//   New code added to this directory should still prefer singular nouns where
+//   appropriate. PSA6003 is suppressed only because the legacy plural names
+//   are intentional, not because the rule is unwanted in general.
+{
+  "disable": [
+    "PSA6003"
+  ]
+}

@@ -17,7 +17,8 @@
       - Internet access to speakerdeck.com and files.speakerdeck.com
       - TLS 1.2 capable runtime (the script forces TLS 1.2)
       - Optional: registry "LongPathsEnabled" = 1 for paths > 260 chars
-      - Optional: python3 + tools/psa.py for static analysis
+      - Optional: python3 + scripts/python/powershell-static-analyzer/psa.py
+        (v2.3.0, 27-rule check set PSA1001..PSA6006) for static analysis
 
     Known limitations:
       - Speaker Deck only (not designed for SlideShare or other sites)
@@ -208,10 +209,10 @@ try {
         [Net.SecurityProtocolType]::Tls12 -bor `
         [Net.SecurityProtocolType]::Tls11 -bor `
         [Net.SecurityProtocolType]::Tls
-} catch { }
+} catch { } # psa-disable-line PSA3004 -- older PS hosts may lack newer enum values; ignore silently
 
 # Load System.Web for HtmlDecode
-try { Add-Type -AssemblyName System.Web -ErrorAction SilentlyContinue } catch { }
+try { Add-Type -AssemblyName System.Web -ErrorAction SilentlyContinue } catch { } # psa-disable-line PSA3004 -- already uses -ErrorAction SilentlyContinue; catch is a defensive net
 
 # Constants
 $Script:BaseUrl   = "https://speakerdeck.com"
@@ -535,7 +536,7 @@ function Test-DangerousPath {
     # After TrimEnd, 'C:\' becomes 'C:' (2 chars). Treat <=2 as drive root.
     if ($abs.Length -le 3) { return $true }
     $sr = $null
-    try { $sr = $Script:ScriptRoot.TrimEnd('\','/') } catch { }
+    try { $sr = $Script:ScriptRoot.TrimEnd('\','/') } catch { } # psa-disable-line PSA3004 -- null/missing ScriptRoot is handled by the `if (-not $sr)` guard immediately below
     if (-not $sr) { return $false }
     if ($abs -ieq $sr) { return $true }
     # $abs contains the script (script lives inside $abs)
@@ -577,7 +578,7 @@ function Invoke-CleanupDirectories {
             $bytes   = ($items | Measure-Object -Property Length -Sum).Sum
             if ($bytes) { $sizeMb = $bytes / 1MB }
             $fileCnt = if ($items) { $items.Count } else { 0 }
-        } catch { }
+        } catch { } # psa-disable-line PSA3004 -- best-effort size/count reporting only; do not block cleanup on stat errors
 
         Write-Skip ("  removing: {0,-10} ({1,7:N1} MB / {2,5} files): {3}" -f `
             $name, $sizeMb, $fileCnt, $path)
@@ -864,7 +865,7 @@ function Invoke-WebRequestWithRetry {
         catch {
             $lastError = $_
             $statusCode = $null
-            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch { }
+            try { if ($_.Exception.Response) { $statusCode = [int]$_.Exception.Response.StatusCode } } catch { } # psa-disable-line PSA3004 -- status code is diagnostic only; the retry loop uses $lastError to decide control flow
 
             if ($statusCode -eq 429 -or $statusCode -eq 503) {
                 $wait = [Math]::Pow(2, $attempt) * 3
@@ -952,7 +953,7 @@ function Get-DateFromFilename {
                 -and $day -ge 1 -and $day -le 31) {
                 return $dateStr
             }
-        } catch { }
+        } catch { } # psa-disable-line PSA3004 -- substring/parse failure means this candidate is invalid; loop continues with next match
     }
     return $null
 }
@@ -977,7 +978,7 @@ function Convert-DateStringToYYYYMMDD {
         try {
             $date = [DateTime]::ParseExact($DateString, $fmt, $culture)
             return $date.ToString("yyyyMMdd")
-        } catch { }
+        } catch { } # psa-disable-line PSA3004 -- ParseExact failure means this format does not match; loop tries the next format
     }
 
     # Final fallback: lenient parse
@@ -1285,9 +1286,9 @@ function Get-DeckYear {
     }
 
     # 1. OriginalFilename: YYYYMMDD pattern (or hyphen / underscore variants).
-    # Using [regex]::Match directly instead of -match avoids the psa.py C7
-    # warning about -match against a bare variable (which would return true
-    # for $null on the left-hand side).
+    # Using [regex]::Match directly instead of -match avoids the psa.py
+    # PSA2003 warning (legacy alias: C7) about -match against a bare variable
+    # (which would return true for $null on the left-hand side).
     if (-not [string]::IsNullOrEmpty($OriginalFilename)) {
         $patterns = @(
             '(?<![0-9])(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?![0-9])',
@@ -2007,7 +2008,7 @@ function Get-AllDeckList {
                         Write-Warn "  -> Deck slugs exist but regex did not match."
                         Write-Warn "     Inspect the saved HTML to see the new structure."
                     }
-                } catch { }
+                } catch { } # psa-disable-line PSA3004 -- diagnostic stats block; failure here must not mask the original parse-failure path
             }
 
             if ($pageDecks.Count -eq 0) {
@@ -2165,7 +2166,7 @@ function Invoke-Phase4Evaluation {
             $formats = @("MMM dd, yyyy","MMMM dd, yyyy","yyyy-MM-ddTHH:mm:sszzz","yyyy-MM-ddTHH:mm:ssZ","yyyy-MM-dd","yyyy/MM/dd")
             $culture = [System.Globalization.CultureInfo]::InvariantCulture
             foreach ($fmt in $formats) {
-                try { return ([DateTime]::ParseExact($DateString, $fmt, $culture)).ToString("yyyyMMdd") } catch { }
+                try { return ([DateTime]::ParseExact($DateString, $fmt, $culture)).ToString("yyyyMMdd") } catch { } # psa-disable-line PSA3004 -- ParseExact failure means format mismatch; loop tries the next format
             }
             try { return ([DateTime]::Parse($DateString, $culture)).ToString("yyyyMMdd") } catch { return $null }
         }
@@ -2798,7 +2799,7 @@ function Invoke-Phase6Download {
                 catch {
                     $lastErr = $_
                     $lastStatusCode = $null
-                    try { if ($_.Exception.Response) { $lastStatusCode = [int]$_.Exception.Response.StatusCode } } catch { }
+                    try { if ($_.Exception.Response) { $lastStatusCode = [int]$_.Exception.Response.StatusCode } } catch { } # psa-disable-line PSA3004 -- status code is diagnostic only; $lastErr drives the retry decision
 
                     # Capture response headers (if any) for diagnostic purposes.
                     # Each attempt overwrites the previous capture; the final
@@ -2812,7 +2813,7 @@ function Invoke-Phase6Download {
                             }
                             $lastResponseHeaders = $hdrSb.ToString()
                         }
-                    } catch { }
+                    } catch { } # psa-disable-line PSA3004 -- response headers are best-effort diagnostics; never block the retry path on a header read failure
 
                     # Try to capture the response body. In PS 5.1 the body
                     # of an HTTP error response is usually surfaced via
@@ -2826,7 +2827,7 @@ function Invoke-Phase6Download {
                             }
                             $lastBodyPreview = $bp
                         }
-                    } catch { }
+                    } catch { } # psa-disable-line PSA3004 -- body preview is best-effort diagnostics; never block the retry path on a body read failure
 
                     # Clean up the temp file (may carry wildcard-ish chars
                     # in OutputFullPath, so -LiteralPath is required).
@@ -3171,7 +3172,7 @@ function Invoke-Phase7Reconciliation {
     # ----- Reconcile each Plan row -----
     $final = New-Object System.Collections.ArrayList
     foreach ($p in $Plan) {
-        $dl       = if ($p.Index -ne $null -and $dlByIndex.ContainsKey([int]$p.Index)) { $dlByIndex[[int]$p.Index] } else { $null }
+        $dl       = if ($null -ne $p.Index -and $dlByIndex.ContainsKey([int]$p.Index)) { $dlByIndex[[int]$p.Index] } else { $null }
         $fileInfo = if ($p.OutputFullPath -and $diskByPath.ContainsKey($p.OutputFullPath)) { $diskByPath[$p.OutputFullPath] } else { $null }
 
         # WrongYearFolder detection: if the planned file is not at the
@@ -3222,7 +3223,7 @@ function Invoke-Phase7Reconciliation {
         if (-not $p.Downloadable) {
             $disc = 'NotAttempted-NotDownloadable'
         }
-        elseif ($wrongYearFile -ne $null) {
+        elseif ($null -ne $wrongYearFile) {
             $disc = 'WrongYearFolder'
         }
         elseif ($dlStatus -eq 'Success' -and $fileExists -and ($actualBytes -eq $dlBytes)) {

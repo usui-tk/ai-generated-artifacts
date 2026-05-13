@@ -420,8 +420,11 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 実際の検証結果（DryRun、本番実行出力、冪等性チェック、r17 のリグレッション修正証跡）については **[TESTING.ja.md](TESTING.ja.md)**（英語版は [TESTING.md](TESTING.md)）を参照してください。直近の本番実行成功結果（`804/804 デッキ、失敗ゼロ、合計 10 分 4.4 秒、5.7 GB`）が記録されています。
 
-`psa.py` 静的解析ツールの詳細（10 種類のチェック C1〜C10 + CI 連携）は
-[`../../python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
+`psa.py` 静的解析ツールの詳細（v2.3.0、27 ルール体系 `PSA1001`〜`PSA6006` + CI 連携）は
+[`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md)
+（英語版は [SPEC.md](../../python/powershell-static-analyzer/SPEC.md)）、
+または同ディレクトリの
+[`README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
 （英語版は [README.md](../../python/powershell-static-analyzer/README.md)）
 を参照してください。
 
@@ -440,32 +443,42 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 外部依存はありません。
 
 ```bash
-# 静的解析の実行（レポジトリルートから実行）
-python3 scripts/python/powershell-static-analyzer/psa.py \
-        scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+# 静的解析の実行（psa.py がローカルの .psa.config.json を自動発見します）
+cd scripts/powershell/download-speakerdeck-oracle4engineer
+python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### 検出される 10 種類のチェック
+### ルールカバレッジ（psa.py v2.3.0 — 27 ルール）
 
-| Code | チェック内容                                              | Severity |
-| ---- | --------------------------------------------------------- | -------- |
-| C1   | 波括弧 `{}` の整合性                                      | error    |
-| C2   | 丸括弧 `()` の整合性                                      | error    |
-| C3   | 角括弧 `[]` の整合性                                      | error    |
-| C4   | 未定義変数の参照                                          | error    |
-| C5   | 自動変数のシャドウイング                                  | warning  |
-| C6   | `Start-Process -ArgumentList` の警告                      | warning  |
-| C7   | `-match $変数` の罠（$null のとき常に true を返す）       | warning  |
-| C8   | TODO/FIXME/XXX/HACK マーカー                              | info     |
-| C9   | バックティック行継続後の空行                              | warning  |
-| C10  | `-match ''`（空文字 match、常に true）の警告              | warning  |
+`psa.py` v2.3.0 は 27 ルールを 6 カテゴリに分類しています：
+
+| カテゴリ | コード範囲 | 例 |
+| -------- | ---------- | -- |
+| 構文の整合性  | `PSA1001`〜`PSA1003` | 波括弧 / 丸括弧 / 角括弧の整合性 |
+| 意味解析      | `PSA2001`〜`PSA2006` | 未定義変数、自動変数のシャドウイング、`-match $変数` の罠（レガシー `C7`）、`$null` を `-eq`/`-ne` の右辺に置く問題 |
+| スタイル      | `PSA3001`〜`PSA3004` | `Start-Process -ArgumentList`（レガシー `C6`）、バックティック行継続後の空行（レガシー `C9`）、空の `catch` ブロック |
+| 衛生          | `PSA4001`〜`PSA4004` | 未完了マーカー（レガシー `C8`）、行末空白、長い行、行末セミコロン |
+| セキュリティ  | `PSA5001`〜`PSA5004` | 平文パスワードパラメーター、`Invoke-Expression`、壊れたハッシュアルゴリズム、`ComputerName` ハードコード |
+| ベストプラクティス | `PSA6001`〜`PSA6006` | 非承認動詞、コマンドレットエイリアス、複数形名詞の関数名、`$global:` 定義、必須パラメーターのデフォルト値、`$true` がデフォルトのスイッチパラメーター |
+
+v1.x のレガシーコード `C1`〜`C10` はエイリアスとして引き続き受理されます。
+各ルールの完全仕様は
+[`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md) §4 を参照。
+
+### プロジェクト固有設定
+
+このスクリプトディレクトリには `.psa.config.json` を同梱しており、`PSA6003`（関数名詞の複数形）
+を disable しています。`Download-SpeakerDeck.ps1` 内の 3 つの関数が意図的に複数形名詞を使用
+しているためで、根拠は config ファイル内にコメントで記録済みです。
+意図的な空 `catch` ブロック（`PSA3004`）には `# psa-disable-line PSA3004 -- <理由>` を付与
+しています。
 
 ### 現在の検証結果
 
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 4106
+Lines  : 4107
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
