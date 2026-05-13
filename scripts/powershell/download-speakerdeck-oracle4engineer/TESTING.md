@@ -3,7 +3,7 @@
 This document consolidates everything needed to verify and evaluate
 `Download-SpeakerDeck.ps1`. It covers three areas:
 
-1. **Static analysis** — `tools/psa.py` gate (must pass before every commit)
+1. **Static analysis** — `scripts/python/powershell-static-analyzer/psa.py` gate (must pass before every commit)
 2. **Functional verification — DryRun** — Phase 1–5 dry execution against the
    live Speaker Deck site (read-only)
 3. **Functional verification — Real run** — full Phase 1–9 download against
@@ -31,8 +31,8 @@ This document consolidates everything needed to verify and evaluate
 
 | Item | Status | Last verified |
 |---|---|---|
-| `tools/psa.py` on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r20 build |
-| `tools/psa.py` on `Test-PdfMetadata.ps1`     | **0 errors / 0 warnings / 0 info** ✓ | r20 build |
+| `psa.py` on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r20 build |
+| `psa.py` on `Test-PdfMetadata.ps1`     | **0 errors / 0 warnings / 0 info** ✓ | r20 build |
 | File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ both `.ps1` files | r20 build |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ pass | 2026-05-11 |
 | Phase 2–5 (Scan / Plan) — DryRun mode | ✓ 804 decks evaluated | 2026-05-11 |
@@ -49,8 +49,8 @@ This document consolidates everything needed to verify and evaluate
 `psa.py` must pass before every commit (see Part C of [SPEC.md](./SPEC.md)).
 
 ```bash
-python3 tools/psa.py Download-SpeakerDeck.ps1
-python3 tools/psa.py Test-PdfMetadata.ps1
+python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
+python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 ```
 
 Expected output (both):
@@ -64,7 +64,8 @@ Issues : 0 errors, 0 warnings, 0 info
   (no issues found)
 ```
 
-Any deviation from `0 / 0 / 0` blocks the commit. See [`tools/README.md`](./tools/README.md)
+Any deviation from `0 / 0 / 0` blocks the commit. See
+[`../../python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
 for the 10 check categories (C1–C10) covered by psa.py.
 
 ---
@@ -294,7 +295,7 @@ before running.
 | **r17** | **`Invoke-WebRequest -OutFile` wildcard interpretation breaks `[ ]` paths** | **High** | **Safe-temp GUID file + `Move-Item -LiteralPath`** |
 | r18 | Folder layout integration with `ai-generated-artifacts` repo | Cosmetic | Update README + SPEC for repo placement |
 | r19 | Single account folder couldn't host multiple targets | Cosmetic | Add `-<account>` suffix to folder name |
-| r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.ja.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md + tools/README.md |
+| r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.ja.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md (psa.py later promoted to `scripts/python/powershell-static-analyzer/` as the repository-wide canonical location) |
 
 See [SPEC.md](./SPEC.md) Part D for the formalized "Known Pitfalls" entries
 that bake each of these fixes into the project's institutional memory.
@@ -320,11 +321,11 @@ jobs:
           python-version: '3.x'
       - name: Static-analyze main script
         run: |
-          python3 scripts/powershell/download-speakerdeck-oracle4engineer/tools/psa.py \
+          python3 scripts/python/powershell-static-analyzer/psa.py \
                   scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
       - name: Static-analyze PoC script
         run: |
-          python3 scripts/powershell/download-speakerdeck-oracle4engineer/tools/psa.py \
+          python3 scripts/python/powershell-static-analyzer/psa.py \
                   scripts/powershell/download-speakerdeck-oracle4engineer/Test-PdfMetadata.ps1
 ```
 

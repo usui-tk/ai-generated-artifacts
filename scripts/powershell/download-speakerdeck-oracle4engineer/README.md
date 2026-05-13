@@ -58,10 +58,11 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
   README.md / README.ja.md     # End-user documentation (you are reading these)
   SPEC.md / SPEC.ja.md         # Developer / LLM specification (see "Developer specification" below)
   TESTING.md / TESTING.ja.md   # Verification procedure and real-run results
-  tools/
-    psa.py                     # Pure-Python PowerShell static analyzer
-    README.md                  # psa.py usage guide and CI integration
 ```
+
+The PowerShell static analyzer (`psa.py`) used to verify this script lives at
+the repository-wide canonical location:
+[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/).
 
 If you only want to **run** the script, read this README. If you want to
 **extend it or build a similar script**, also read `SPEC.md`.
@@ -489,7 +490,9 @@ check, regression-fix evidence for r17), see **[TESTING.md](TESTING.md)**
 real-run (`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
 
 For details on the `psa.py` static analyzer (10 checks C1–C10 +
-CI integration), see [`tools/README.md`](tools/README.md).
+CI integration), see
+[`../../python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
+([日本語](../../python/powershell-static-analyzer/README.ja.md)).
 
 The **single most important rule** for new development: do not re-derive
 phase headers, log markers, or psa.py — copy them from the existing
@@ -499,13 +502,17 @@ implementation. Reuse before invention.
 
 ## Developer notes: static analysis
 
-This script is verified with `psa.py` (PowerShell Static Analyzer), reused
-from the [Deploy-AMD-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
-project. It is a pure-Python tool with no external dependencies.
+This script is verified with `psa.py` (PowerShell Static Analyzer), which
+lives at the repository-wide canonical location
+[`scripts/python/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py).
+It originated in the
+[Deploy-AMD-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+project and is a pure-Python tool with no external dependencies.
 
 ```bash
-# Run static analysis
-python3 tools/psa.py Download-SpeakerDeck.ps1
+# Run static analysis (from repository root)
+python3 scripts/python/powershell-static-analyzer/psa.py \
+        scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
 ```
 
 ### Checks performed (10 categories)

@@ -43,10 +43,12 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
   README.md / README.ja.md     # エンドユーザー向けドキュメント（このファイル群）
   SPEC.md / SPEC.ja.md         # 開発者 / LLM 向け仕様書（下記「開発者向け仕様」参照）
   TESTING.md / TESTING.ja.md   # 検証手順と実行結果
-  tools/
-    psa.py                     # 純 Python の PowerShell 静的解析ツール
-    README.md                  # psa.py 使用ガイドおよび CI 連携
 ```
+
+本スクリプトの検証に用いる PowerShell 静的解析ツール `psa.py` は、
+レポジトリ全体での正規配置場所
+[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
+に格納されています。
 
 スクリプトを **実行するだけ** であれば、この README を読めば十分です。**拡張や類似スクリプト作成** の場合は `SPEC.ja.md` も併せてご確認ください。
 
@@ -418,7 +420,10 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 実際の検証結果（DryRun、本番実行出力、冪等性チェック、r17 のリグレッション修正証跡）については **[TESTING.ja.md](TESTING.ja.md)**（英語版は [TESTING.md](TESTING.md)）を参照してください。直近の本番実行成功結果（`804/804 デッキ、失敗ゼロ、合計 10 分 4.4 秒、5.7 GB`）が記録されています。
 
-`psa.py` 静的解析ツールの詳細（10 種類のチェック C1〜C10 + CI 連携）は [`tools/README.md`](tools/README.md) を参照。
+`psa.py` 静的解析ツールの詳細（10 種類のチェック C1〜C10 + CI 連携）は
+[`../../python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
+（英語版は [README.md](../../python/powershell-static-analyzer/README.md)）
+を参照してください。
 
 **新規開発における最重要ルール**：フェーズヘッダー、ログマーカー、psa.py を一から再導出しないこと。既存実装からコピーすること。**発明より再利用**。
 
@@ -426,11 +431,18 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 ## 開発者向け：静的解析
 
-このスクリプトは別プロジェクト [Deploy-AMD-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer) から再利用した `psa.py`（PowerShell Static Analyzer）で検証済みです。Pure Python（標準ライブラリのみ）で実装されており、外部依存はありません。
+このスクリプトは `psa.py`（PowerShell Static Analyzer）で検証済みです。
+このツールはレポジトリ全体での正規配置場所
+[`scripts/python/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py)
+に格納されており、別プロジェクト
+[Deploy-AMD-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+で生まれたものです。Pure Python（標準ライブラリのみ）で実装されており、
+外部依存はありません。
 
 ```bash
-# 静的解析の実行
-python3 tools/psa.py Download-SpeakerDeck.ps1
+# 静的解析の実行（レポジトリルートから実行）
+python3 scripts/python/powershell-static-analyzer/psa.py \
+        scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
 ```
 
 ### 検出される 10 種類のチェック

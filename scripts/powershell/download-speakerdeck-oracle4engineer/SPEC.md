@@ -77,19 +77,22 @@ reference URL, because the in-house copy may carry already-applied fixes.
 ### A.1.2 Static analyzer
 
 ```
-tools/psa.py
+scripts/python/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` is a **pure Python** static analyzer (no PowerShell installation
 required) with 10 checks (C1–C10), originally developed for the
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
-repository. It must be:
+repository. Within this repository it must be:
 
-- Reused as-is from upstream (do not fork or modify without coordinating)
-- Placed under `tools/psa.py` in the new script's folder
+- Reused as-is from the canonical location
+  `scripts/python/powershell-static-analyzer/psa.py`
+  (do not fork or maintain a separate copy)
 - Used as the gate before every commit
 
-See A.11 for details and `tools/README.md` for usage / rationale.
+See A.11 for details and
+[`scripts/python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
+for usage / rationale.
 
 ### A.1.3 Companion specifications (this folder)
 
@@ -101,7 +104,11 @@ mirroring the pattern of [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https:
 - `SPEC.md` / `SPEC.ja.md` — developer / LLM specification (this file)
 - `TESTING.md` / `TESTING.ja.md` — verification procedure and recorded
   real-run results
-- `tools/README.md` — `psa.py` usage guide and CI integration recipes
+
+The `psa.py` static analyzer used by these scripts lives at the
+repository-wide canonical location
+[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/),
+not inside each script folder.
 
 Repository-level files like `LICENSE`, `CONTRIBUTING.md`, and the top-level
 `README.md` / `README.ja.md` live at the repository root and are shared
@@ -604,8 +611,10 @@ Based on the longest successful path length, classify into:
 
 ```
 <repo>/
-  tools/
-    psa.py              # pulled from upstream
+  scripts/
+    python/
+      powershell-static-analyzer/
+        psa.py              # canonical location (mirrored from upstream)
 ```
 
 ### Required gate
@@ -613,7 +622,7 @@ Based on the longest successful path length, classify into:
 Before every commit:
 
 ```bash
-python3 tools/psa.py path/to/script.ps1
+python3 scripts/python/powershell-static-analyzer/psa.py path/to/script.ps1
 ```
 
 Must pass with **0 errors / 0 warnings / 0 info**.
@@ -622,18 +631,20 @@ Must pass with **0 errors / 0 warnings / 0 info**.
 
 `psa.py` covers:
 
-- C1: Encoding (UTF-8 BOM present, ASCII-only outside BOM)
-- C2: Critical token balance (braces, parens, brackets)
-- C3: Quoting consistency
-- C4: Undefined-variable detection (within function scope)
-- C5: Deprecated-cmdlet usage
-- C6: Missing `-LiteralPath` where likely needed
-- C7: `-match` against bare `$var` (null-on-left risk)
-- C8: Forbidden patterns (`Invoke-Expression` etc.)
-- C9: Bad string concatenation
-- C10: Phase-ID consistency
+- **C1** (error): Brace `{}` balance
+- **C2** (error): Paren `()` balance
+- **C3** (error): Bracket `[]` balance
+- **C4** (error): Undefined variable references (heuristic, function-scoped)
+- **C5** (warning): Auto-variable shadowing (`$args`, `$matches`, `$null`, etc.)
+- **C6** (warning): `Start-Process -ArgumentList` usage
+- **C7** (warning): `-match` against bare `$variable` (null-on-right risk)
+- **C8** (info): TODO / FIXME / XXX / HACK markers
+- **C9** (warning): Trailing backtick before empty line
+- **C10** (warning): `-match` against literal empty string `""` / `''`
 
-(Exact check list may evolve; consult psa.py's `--help`.)
+(Exact check list may evolve; consult psa.py's source or
+[`scripts/python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
+for the authoritative table.)
 
 ### When psa.py produces false positives
 
@@ -641,8 +652,8 @@ Common cases and their resolutions:
 
 | False positive | Resolution |
 |---|---|
-| C4 "undefined variable" for `$Script:Foo` set in different function | Initialize at script load: `$Script:Foo = $null` |
-| C6 "missing -LiteralPath" on a cmdlet that doesn't support it | Add inline comment `# psa-ignore-C6: cmdlet has no -LiteralPath` |
+| C4 "undefined variable" for `$Script:Foo` set in a different function | Initialize at script load: `$Script:Foo = $null` |
+| C7 "-match against bare $variable" where `$variable` is guaranteed non-null | Wrap with `[string]::IsNullOrEmpty($variable)` guard or refactor |
 
 If psa.py systematically misclassifies a pattern, raise an issue upstream
 rather than suppressing locally.
@@ -892,7 +903,7 @@ Before any commit, all of the following must pass:
 
 ### Static checks
 
-- [ ] `python3 tools/psa.py <script>.ps1` → 0 errors / 0 warnings / 0 info
+- [ ] `python3 ../../python/powershell-static-analyzer/psa.py <script>.ps1` → 0 errors / 0 warnings / 0 info
 - [ ] File starts with UTF-8 BOM (`EF BB BF`)
 - [ ] No non-ASCII bytes outside the BOM
 - [ ] Line count in script matches `Lines : NNNN` in README.md AND README.ja.md
@@ -1003,7 +1014,9 @@ When asked to create a new PowerShell script in this style:
    - `Show-PowerShellEnvironment` / `Assert-PowerShellCompatibility`
    - `Format-Elapsed`
    - The CSV / JSONL writers
-   - `tools/psa.py` from upstream
+   - Reference the canonical `psa.py` at
+     `scripts/python/powershell-static-analyzer/psa.py` (do not duplicate
+     it into a per-script `tools/` folder)
 4. Replace the phase bodies with the new script's logic.
 5. Renumber phases starting from P01.
 6. Fill in Part B template fields.

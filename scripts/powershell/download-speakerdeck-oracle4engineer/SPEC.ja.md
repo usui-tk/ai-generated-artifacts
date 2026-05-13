@@ -66,18 +66,21 @@ https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer
 ### A.1.2 静的解析ツール
 
 ```
-tools/psa.py
+scripts/python/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` は **純粋な Python**(PowerShell インストール不要)の静的解析ツールで、10 種類のチェック(C1〜C10)を実装しています。元々
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
-リポジトリで開発されました。以下のように使用すること:
+リポジトリで開発されました。本レポジトリ内では以下のように使用すること:
 
-- 上流からそのまま再利用(フォークや変更を行う場合は上流と調整)
-- 新しいスクリプトフォルダの `tools/psa.py` に配置
+- 正規配置場所
+  `scripts/python/powershell-static-analyzer/psa.py` からそのまま再利用
+  (フォークや個別コピーは作らない)
 - すべてのコミット前のゲートとして使用
 
-詳細は A.11 を参照。使用方法や設計理念は `tools/README.md` を参照。
+詳細は A.11 を参照。使用方法や設計理念は
+[`scripts/python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
+を参照。
 
 ### A.1.3 併用仕様書(本フォルダ内)
 
@@ -88,7 +91,11 @@ tools/psa.py
   (インストール、クイックスタート、パラメーター、トラブルシューティング)
 - `SPEC.md` / `SPEC.ja.md` — 開発者 / LLM 向け仕様書(本ファイル)
 - `TESTING.md` / `TESTING.ja.md` — 検証手順と本番実行結果の記録
-- `tools/README.md` — `psa.py` 使用ガイドおよび CI 連携レシピ
+
+なお、これらのスクリプトが利用する `psa.py` 静的解析ツールは、
+レポジトリ全体での正規配置場所
+[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
+に格納されており、各スクリプトフォルダ内には配置しません。
 
 `LICENSE`、`CONTRIBUTING.md`、リポジトリトップレベルの `README.md` / `README.ja.md` 等のリポジトリレベルのファイルは、リポジトリルートに配置され、リポジトリ内のすべてのスクリプトで共有されます。
 
@@ -549,8 +556,10 @@ work/logs/url_cache.csv
 
 ```
 <repo>/
-  tools/
-    psa.py              # 上流からプル
+  scripts/
+    python/
+      powershell-static-analyzer/
+        psa.py              # 正規配置場所(上流からミラー)
 ```
 
 ### 必須ゲート
@@ -558,7 +567,7 @@ work/logs/url_cache.csv
 すべてのコミット前に:
 
 ```bash
-python3 tools/psa.py path/to/script.ps1
+python3 scripts/python/powershell-static-analyzer/psa.py path/to/script.ps1
 ```
 
 **0 errors / 0 warnings / 0 info** で合格すること。
@@ -567,18 +576,20 @@ python3 tools/psa.py path/to/script.ps1
 
 `psa.py` は以下をカバー:
 
-- C1: エンコーディング(UTF-8 BOM の存在、BOM 以外は ASCII のみ)
-- C2: 主要トークンのバランス(中括弧、丸括弧、角括弧)
-- C3: 引用符の整合性
-- C4: 未定義変数の検出(関数スコープ内)
-- C5: 非推奨コマンドレットの使用
-- C6: `-LiteralPath` の欠落(必要そうな箇所)
-- C7: ベア `$var` に対する `-match`(左辺 null 時のリスク)
-- C8: 禁止パターン(`Invoke-Expression` など)
-- C9: 不適切な文字列連結
-- C10: フェーズ ID の整合性
+- **C1** (error): 波括弧 `{}` の整合性
+- **C2** (error): 丸括弧 `()` の整合性
+- **C3** (error): 角括弧 `[]` の整合性
+- **C4** (error): 未定義変数の参照(ヒューリスティック、関数スコープ内)
+- **C5** (warning): 自動変数のシャドーイング(`$args`、`$matches`、`$null` など)
+- **C6** (warning): `Start-Process -ArgumentList` の使用
+- **C7** (warning): ベア `$variable` に対する `-match`(右辺 null 時のリスク)
+- **C8** (info): TODO / FIXME / XXX / HACK マーカー
+- **C9** (warning): 空行直前の行末バックティック
+- **C10** (warning): リテラル空文字列 `""` / `''` に対する `-match`
 
-(正確なチェックリストは進化する可能性があります。`psa.py --help` を参照)
+(正確なチェックリストは進化する可能性があります。psa.py のソースまたは
+[`scripts/python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
+の正規表を参照してください。)
 
 ### psa.py が誤検出を出した場合
 
@@ -587,7 +598,7 @@ python3 tools/psa.py path/to/script.ps1
 | 誤検出 | 解決策 |
 |---|---|
 | 異なる関数で設定された `$Script:Foo` に対する C4「undefined variable」 | スクリプトロード時に初期化:`$Script:Foo = $null` |
-| `-LiteralPath` をサポートしないコマンドレットに対する C6 | インラインコメント `# psa-ignore-C6: cmdlet has no -LiteralPath` を追加 |
+| 非 null が保証されている `$variable` に対する C7「-match against bare $variable」 | `[string]::IsNullOrEmpty($variable)` でガードするかリファクタ |
 
 psa.py が特定のパターンを体系的に誤分類する場合は、ローカルで抑制するのではなく、上流に issue を上げてください。
 
@@ -808,7 +819,7 @@ A.6 のワイルドカード問題を解決する正規の安全 temp パター�
 
 ### 静的チェック
 
-- [ ] `python3 tools/psa.py <script>.ps1` → 0 errors / 0 warnings / 0 info
+- [ ] `python3 ../../python/powershell-static-analyzer/psa.py <script>.ps1` → 0 errors / 0 warnings / 0 info
 - [ ] ファイルは UTF-8 BOM (`EF BB BF`) で開始
 - [ ] BOM 以外に非 ASCII バイトが存在しない
 - [ ] スクリプトの行数が README.md と README.ja.md の `Lines : NNNN` と一致
@@ -897,7 +908,8 @@ A.6 のワイルドカード問題を解決する正規の安全 temp パター�
    - `Show-PowerShellEnvironment` / `Assert-PowerShellCompatibility`
    - `Format-Elapsed`
    - CSV / JSONL writer
-   - 上流からの `tools/psa.py`
+   - 正規 `psa.py`(`scripts/python/powershell-static-analyzer/psa.py`)
+     を参照(スクリプト毎の `tools/` フォルダに複製しない)
 4. フェーズ本体を新スクリプトのロジックに置き換え
 5. フェーズを P01 から振り直し
 6. Part B のテンプレートフィールドを埋める

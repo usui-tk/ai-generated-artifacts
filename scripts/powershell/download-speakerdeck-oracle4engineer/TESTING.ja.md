@@ -2,7 +2,7 @@
 
 本ドキュメントは `Download-SpeakerDeck.ps1` の検証および評価に必要なすべての情報を集約しています。以下の 3 つの領域を網羅します：
 
-1. **静的解析** — `tools/psa.py` のゲート（すべてのコミット前に合格必須）
+1. **静的解析** — `scripts/python/powershell-static-analyzer/psa.py` のゲート（すべてのコミット前に合格必須）
 2. **機能検証 — DryRun** — Speaker Deck の本番サイトに対する Phase 1〜5 のドライ実行（読み取り専用）
 3. **機能検証 — 本番実行** — `oracle4engineer` アカウントに対する Phase 1〜9 の完全実行と、r16 → r17 のリグレッション修正の証跡
 
@@ -27,8 +27,8 @@
 
 | 項目 | ステータス | 最終検証日 |
 |---|---|---|
-| `tools/psa.py` on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r20 ビルド |
-| `tools/psa.py` on `Test-PdfMetadata.ps1`     | **0 errors / 0 warnings / 0 info** ✓ | r20 ビルド |
+| `psa.py` on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r20 ビルド |
+| `psa.py` on `Test-PdfMetadata.ps1`     | **0 errors / 0 warnings / 0 info** ✓ | r20 ビルド |
 | ファイルエンコーディング (UTF-8 BOM、BOM 以外は ASCII) | ✓ 両 `.ps1` | r20 ビルド |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ パス | 2026-05-11 |
 | Phase 2〜5 (Scan / Plan) — DryRun モード | ✓ 804 デッキを評価 | 2026-05-11 |
@@ -45,8 +45,8 @@
 `psa.py` はすべてのコミット前に合格必須です（[SPEC.ja.md](./SPEC.ja.md) Part C 参照）。
 
 ```bash
-python3 tools/psa.py Download-SpeakerDeck.ps1
-python3 tools/psa.py Test-PdfMetadata.ps1
+python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
+python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 ```
 
 期待出力（両方同様）：
@@ -60,7 +60,9 @@ Issues : 0 errors, 0 warnings, 0 info
   (no issues found)
 ```
 
-`0 / 0 / 0` から外れた場合はコミット禁止。psa.py がカバーする 10 種類のチェック（C1〜C10）の詳細は [`tools/README.md`](./tools/README.md) を参照。
+`0 / 0 / 0` から外れた場合はコミット禁止。psa.py がカバーする 10 種類のチェック（C1〜C10）の詳細は
+[`../../python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
+を参照。
 
 ---
 
@@ -272,7 +274,7 @@ Move-Item -LiteralPath $safeTmp -Destination $tmpFile -Force
 | **r17** | **`Invoke-WebRequest -OutFile` のワイルドカード解釈で `[ ]` パスが破綻** | **高** | **GUID 名の安全な一時ファイル + `Move-Item -LiteralPath`** |
 | r18 | `ai-generated-artifacts` リポジトリへのフォルダ配置統合 | 装飾的 | リポジトリ配置に合わせて README + SPEC を更新 |
 | r19 | 単一アカウントフォルダで複数ターゲットをホストできない | 装飾的 | フォルダ名に `-<account>` サフィックスを追加 |
-| r20 | SPEC ファイル命名が上流リポジトリと不整合 | 装飾的 | `spec.en.md` を `SPEC.md` に、`spec.ja.md` を `SPEC.ja.md` にリネーム、A.1.x 構造を刷新、psa.py を上流と同期、TESTING.md + tools/README.md を追加 |
+| r20 | SPEC ファイル命名が上流リポジトリと不整合 | 装飾的 | `spec.en.md` を `SPEC.md` に、`spec.ja.md` を `SPEC.ja.md` にリネーム、A.1.x 構造を刷新、psa.py を上流と同期、TESTING.md を追加（その後 psa.py は `scripts/python/powershell-static-analyzer/` にレポジトリ全体の正規配置場所として昇格） |
 
 [SPEC.ja.md](./SPEC.ja.md) Part D の「既知の落とし穴」エントリで、これらの各修正をプロジェクトの組織記憶として正式化しています。
 
@@ -297,11 +299,11 @@ jobs:
           python-version: '3.x'
       - name: Static-analyze main script
         run: |
-          python3 scripts/powershell/download-speakerdeck-oracle4engineer/tools/psa.py \
+          python3 scripts/python/powershell-static-analyzer/psa.py \
                   scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
       - name: Static-analyze PoC script
         run: |
-          python3 scripts/powershell/download-speakerdeck-oracle4engineer/tools/psa.py \
+          python3 scripts/python/powershell-static-analyzer/psa.py \
                   scripts/powershell/download-speakerdeck-oracle4engineer/Test-PdfMetadata.ps1
 ```
 
