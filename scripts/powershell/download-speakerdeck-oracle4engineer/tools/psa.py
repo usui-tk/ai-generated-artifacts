@@ -102,15 +102,18 @@ def check_balance(text, open_ch, close_ch, code, name):
 
 
 ASSIGN_PATTERNS = [
+    # $Name = ..., $Script:Name = ..., $local:Name = ... (scope is case-insensitive)
     re.compile(r'\$(?:[A-Za-z]+:)?([A-Za-z_][A-Za-z0-9_]*)\s*='),
     re.compile(r'foreach\s*\(\s*\$([A-Za-z_][A-Za-z0-9_]*)\s+in\b', re.IGNORECASE),
     re.compile(r'for\s*\(\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*=', re.IGNORECASE),
 ]
 PARAM_PATTERN = re.compile(r'\bparam\s*\(([^)]*?)\)', re.IGNORECASE | re.DOTALL)
 PARAM_VAR = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)')
+# Inline param syntax: function Name ($a, $b, $c) { ... }
 INLINE_FN_PARAMS = re.compile(
     r'^\s*function\s+[A-Za-z_][A-Za-z0-9_-]*\s*\(([^)]*)\)\s*\{?',
     re.IGNORECASE)
+# Reference: $name | $Script:name | $env:VAR  (env/using are skipped later)
 REFERENCE_PATTERN = re.compile(
     r'\$(?:(?P<scope>[A-Za-z]+):)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)')
 EXTERNAL_SCOPES = {'env', 'using'}
@@ -139,6 +142,8 @@ def find_function_blocks(text):
 
 
 def find_param_blocks(body):
+    """Find all param(...) blocks with properly balanced parens.
+    Returns the inner content of each param block."""
     blocks = []
     pat = re.compile(r'\bparam\s*\(', re.IGNORECASE)
     pos = 0
@@ -169,10 +174,13 @@ def collect_assignments(body):
         for pat in ASSIGN_PATTERNS:
             for m in pat.finditer(clean):
                 assigned.add(m.group(1).lower())
+        # Inline param syntax on the function line itself.
         m = INLINE_FN_PARAMS.match(clean)
         if m:
             for vm in PARAM_VAR.finditer(m.group(1)):
                 assigned.add(vm.group(1).lower())
+    # Multi-line param() blocks with balanced parens (handles
+    # [Parameter(Mandatory)] [type]$Name etc.)
     full = '\n'.join(strip_strings_and_comments(l) for l in body.split('\n'))
     for block in find_param_blocks(full):
         for vm in PARAM_VAR.finditer(block):
@@ -187,7 +195,7 @@ def collect_references(body):
         for m in REFERENCE_PATTERN.finditer(clean):
             scope = (m.group('scope') or '').lower()
             if scope in EXTERNAL_SCOPES:
-                continue
+                continue  # $env:X, $using:X are externally defined
             after = clean[m.end():m.end() + 4].lstrip()
             if after.startswith('='):
                 continue
@@ -251,6 +259,8 @@ def check_match_var(text):
 def check_shadow(text):
     risky = {'args', 'lastexitcode', 'input', 'matches', 'foreach',
              'host', 'true', 'false'}
+    # Note: $null = ... is NOT flagged because it is a standard
+    # PowerShell idiom for suppressing output (equivalent to | Out-Null).
     out = []
     for ln, line in enumerate(text.split('\n'), 1):
         clean = strip_strings_and_comments(line)

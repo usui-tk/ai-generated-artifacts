@@ -48,45 +48,69 @@
 These are the canonical sources for shared logic. **Pull from these directly;
 do not re-implement.**
 
-### A.1.1 Reference PowerShell Script (phase / banner / log patterns)
+### A.1.1 Reference PowerShell scripts (phase / banner / log patterns)
 
 ```
-https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/Deploy-AMDChipsetDriverOnWindowsServer.ps1
+https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer
+  ├── Deploy-AMDChipsetDriverOnWindowsServer.ps1   (21-phase canonical, r47)
+  ├── Deploy-AMDGraphicsDriverOnWindowsServer.ps1  (r16, graphics-specific)
+  └── Deploy-AMDNpuDriverOnWindowsServer.ps1       (r2/r3, NPU-specific)
 ```
 
-This 21-phase deployment script is the canonical source for:
+These 21-phase deployment scripts are the canonical source for:
 
-- `Write-PhaseHeader` / `Write-PhaseFooter` / `Show-PhaseSummary`
-- `Write-Step` / `Write-Ok` / `Write-Warn` / `Write-Fail` / `Write-Skip`
-- `Format-Elapsed` (human-friendly duration formatting)
-- Banner block layout
-- `Show-PowerShellEnvironment` (Phase 1 Step 0 environment dump)
-- `Assert-PowerShellCompatibility` (hard-fail check)
+- `Write-PhaseHeader` / `Write-PhaseFooter` / `Format-Elapsed`
+- `Write-Step` / `Write-Ok` / `Write-Warn2` / `Write-Fail` / `Write-Skip`
+- `Write-SubHeader` / `Write-SubHeader2` (Level-1 / Level-2 in-phase banners)
+- Banner block layout (Magenta `=` × 72, script-tag line, phase entry / exit)
+- `Show-PowerShellEnvironment` (P00 environment dump)
+- `Show-OperatingSystemDetail` (OS profile / build resolution)
+- `Test-AdminPrivilege` (hard-fail check on non-elevated session, if needed)
+- `Set-NetworkProtocol` (TLS hardening)
+- `Show-RunSummary` (per-action summary with PhaseTimings + ScriptHash)
 
 When starting a new script, **copy these helpers verbatim** from the most
 recent in-house implementation (typically the latest revision of an existing
-production script in the same repo) rather than from this reference URL,
-because the in-house copy may carry already-applied fixes.
+production script in the same repo or sister repo) rather than from the
+reference URL, because the in-house copy may carry already-applied fixes.
 
-### A.1.2 Static Analyzer
+### A.1.2 Static analyzer
 
 ```
-https://github.com/usui-tk/deploy-amd-drivers-for-windowsserver/blob/main/tools/psa.py
+tools/psa.py
 ```
 
 `psa.py` is a **pure Python** static analyzer (no PowerShell installation
-required) with 10 checks (C1–C10). It must be:
+required) with 10 checks (C1–C10), originally developed for the
+[`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+repository. It must be:
 
-- Reused as-is (do not fork or modify without coordinating with upstream)
-- Placed under `tools/psa.py` in the new script's repo
+- Reused as-is from upstream (do not fork or modify without coordinating)
+- Placed under `tools/psa.py` in the new script's folder
 - Used as the gate before every commit
 
-See A.11 for details.
+See A.11 for details and `tools/README.md` for usage / rationale.
 
-### A.1.3 Companion in-house script (recommended)
+### A.1.3 Companion specifications (this folder)
 
-The Speaker Deck Bulk Downloader (`Download-SpeakerDeck.ps1`, r19 as of
-2026-05-11, located at
+Each script folder in this style carries the following set of documentation,
+mirroring the pattern of [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer):
+
+- `README.md` / `README.ja.md` — end-user documentation
+  (installation, quick start, parameters, troubleshooting)
+- `SPEC.md` / `SPEC.ja.md` — developer / LLM specification (this file)
+- `TESTING.md` / `TESTING.ja.md` — verification procedure and recorded
+  real-run results
+- `tools/README.md` — `psa.py` usage guide and CI integration recipes
+
+Repository-level files like `LICENSE`, `CONTRIBUTING.md`, and the top-level
+`README.md` / `README.ja.md` live at the repository root and are shared
+across all scripts in the repository.
+
+### A.1.4 Companion in-house script (latest reference)
+
+The Speaker Deck Bulk Downloader (`Download-SpeakerDeck.ps1`, r20 as of
+2026-05-13, located at
 `scripts/powershell/download-speakerdeck-oracle4engineer/`) is the most
 recent reference for:
 
@@ -98,7 +122,7 @@ recent reference for:
 When asked to build a new bulk-fetch or data-processing script, **start by
 reading this script** and copying its skeleton.
 
-### A.1.4 Folder naming convention for target-specific scripts
+### A.1.5 Folder naming convention for target-specific scripts
 
 When a single script is generic enough to be reused against multiple
 target accounts, services, or tenants, the script body itself stays
@@ -634,8 +658,8 @@ repository) carries:
 |---|---|
 | `README.md` | English, primary documentation |
 | `README.ja.md` | Japanese mirror, kept in sync with `README.md` |
-| `spec.en.md` | Developer / LLM specification (this file's pattern) |
-| `spec.ja.md` | Japanese mirror of the specification |
+| `SPEC.md` | Developer / LLM specification (this file's pattern) |
+| `SPEC.ja.md` | Japanese mirror of the specification |
 
 When the script lives inside a larger multi-script repository (e.g.,
 `usui-tk/ai-generated-artifacts/scripts/powershell/<name>/`), the
@@ -702,7 +726,7 @@ update the license name and one-paragraph summary to match.
 4. Inspect plan CSVs
 5. Run live
 6. Inspect error JSONL + final state CSV
-7. If new failure pattern found, update spec.en.md Part D
+7. If new failure pattern found, update SPEC.md Part D
 ```
 
 ### Revision discipline
@@ -736,7 +760,7 @@ When a new feature is needed, in order:
 |---|---|
 | Script name | `Download-SpeakerDeck.ps1` |
 | Display name | Speaker Deck Bulk Downloader |
-| Current revision | r17 (`outfile-wildcard-fix`) |
+| Current revision | r20 (`upstream-spec-style-alignment`) |
 | Purpose | Bulk-download all public PDFs from a Speaker Deck account |
 | Owner | (fill in) |
 
@@ -984,7 +1008,7 @@ When asked to create a new PowerShell script in this style:
 5. Renumber phases starting from P01.
 6. Fill in Part B template fields.
 7. Run quality gates (Part C).
-8. Update spec.en.md Part D if a new pitfall is discovered.
+8. Update SPEC.md Part D if a new pitfall is discovered.
 
 This document is itself versioned. Always check that the SPEC revision you
 are reading matches the script revision you are working on.

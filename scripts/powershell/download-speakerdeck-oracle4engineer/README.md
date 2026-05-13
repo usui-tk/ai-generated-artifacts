@@ -56,13 +56,15 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
   Download-SpeakerDeck.ps1     # Main script (this README documents it)
   Test-PdfMetadata.ps1         # Read-only PoC for the Phase 8 PDF metadata path
   README.md / README.ja.md     # End-user documentation (you are reading these)
-  spec.en.md / spec.ja.md      # Developer / LLM specification (see "Developer specification" below)
+  SPEC.md / SPEC.ja.md         # Developer / LLM specification (see "Developer specification" below)
+  TESTING.md / TESTING.ja.md   # Verification procedure and real-run results
   tools/
     psa.py                     # Pure-Python PowerShell static analyzer
+    README.md                  # psa.py usage guide and CI integration
 ```
 
 If you only want to **run** the script, read this README. If you want to
-**extend it or build a similar script**, also read `spec.en.md`.
+**extend it or build a similar script**, also read `SPEC.md`.
 
 ## Quick start
 
@@ -466,8 +468,8 @@ directory, equals a drive root, or contains the script.
 ## Developer specification
 
 If you want to extend this script, change its phase structure, or build a
-similar script in this repo's style, read **[spec.en.md](spec.en.md)**
-([日本語](spec.ja.md)) first. That document captures:
+similar script in this repo's style, read **[SPEC.md](SPEC.md)**
+([日本語](SPEC.ja.md)) first. That document captures:
 
 - **Part A (Common Spec)** — conventions inherited by every script in this
   family: source file format (UTF-8 BOM + ASCII-only), phase architecture,
@@ -480,6 +482,14 @@ similar script in this repo's style, read **[spec.en.md](spec.en.md)**
 - **Part D (Known Pitfalls)** — documented bugs from past revisions including
   the `[ ]` wildcard issue in PowerShell paths (r10, r17) and phase
   renumbering safety (r16)
+
+For the actual verification results (DryRun, real-run output, idempotency
+check, regression-fix evidence for r17), see **[TESTING.md](TESTING.md)**
+([日本語](TESTING.ja.md)). It documents the most recent successful
+real-run (`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
+
+For details on the `psa.py` static analyzer (10 checks C1–C10 +
+CI integration), see [`tools/README.md`](tools/README.md).
 
 The **single most important rule** for new development: do not re-derive
 phase headers, log markers, or psa.py — copy them from the existing
@@ -525,7 +535,7 @@ Issues : 0 errors, 0 warnings, 0 info
 ```
 
 Run the analyzer above before committing any change to the script.
-This is also enforced as a quality gate in spec.en.md Part C.
+This is also enforced as a quality gate in SPEC.md Part C.
 
 ## Console output format
 

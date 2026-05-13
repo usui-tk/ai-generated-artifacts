@@ -41,37 +41,58 @@
 ### A.1.1 参考 PowerShell スクリプト（フェーズ / バナー / ログのパターン）
 
 ```
-https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/Deploy-AMDChipsetDriverOnWindowsServer.ps1
+https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer
+  ├── Deploy-AMDChipsetDriverOnWindowsServer.ps1   (21 フェーズ正規実装、r47)
+  ├── Deploy-AMDGraphicsDriverOnWindowsServer.ps1  (r16、グラフィックス固有)
+  └── Deploy-AMDNpuDriverOnWindowsServer.ps1       (r2/r3、NPU 固有)
 ```
 
-この 21 フェーズ構成のデプロイメントスクリプトは、以下の正規ソースです：
+これらの 21 フェーズ構成のデプロイメントスクリプトは、以下の正規ソースです：
 
-- `Write-PhaseHeader` / `Write-PhaseFooter` / `Show-PhaseSummary`
-- `Write-Step` / `Write-Ok` / `Write-Warn` / `Write-Fail` / `Write-Skip`
-- `Format-Elapsed`（人間が読みやすい経過時間フォーマット）
-- バナーブロックのレイアウト
-- `Show-PowerShellEnvironment`（Phase 1 Step 0 の環境ダンプ）
-- `Assert-PowerShellCompatibility`（強制終了チェック）
+- `Write-PhaseHeader` / `Write-PhaseFooter` / `Format-Elapsed`
+- `Write-Step` / `Write-Ok` / `Write-Warn2` / `Write-Fail` / `Write-Skip`
+- `Write-SubHeader` / `Write-SubHeader2`（Level-1 / Level-2 フェーズ内バナー）
+- バナーブロックレイアウト（Magenta `=` × 72、script-tag 行、フェーズ entry / exit）
+- `Show-PowerShellEnvironment`（P00 環境ダンプ）
+- `Show-OperatingSystemDetail`（OS プロファイル / ビルド解決）
+- `Test-AdminPrivilege`（非昇格セッションでのハードフェイルチェック、必要時）
+- `Set-NetworkProtocol`（TLS ハードニング）
+- `Show-RunSummary`（PhaseTimings + ScriptHash 含むアクションごとのサマリー）
 
-新しいスクリプトを開始する際は、この参考 URL ではなく、**同じリポジトリ内の既存の本番スクリプトの最新リビジョンから、これらのヘルパーをそのままコピー** してください。社内コピーには既に適用済みのバグ修正が含まれている可能性があるためです。
+新しいスクリプトを開始する際は、この参考 URL ではなく、**同じリポジトリ内（または姉妹リポジトリ内）の既存の本番スクリプトの最新リビジョンから、これらのヘルパーをそのままコピー** してください。社内コピーには既に適用済みのバグ修正が含まれている可能性があるためです。
 
 ### A.1.2 静的解析ツール
 
 ```
-https://github.com/usui-tk/deploy-amd-drivers-for-windowsserver/blob/main/tools/psa.py
+tools/psa.py
 ```
 
-`psa.py` は **純粋な Python**（PowerShell インストール不要）の静的解析ツールで、10 種類のチェック（C1〜C10）を実装しています。以下のように使用すること：
+`psa.py` は **純粋な Python**（PowerShell インストール不要）の静的解析ツールで、10 種類のチェック（C1〜C10）を実装しています。元々
+[`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+リポジトリで開発されました。以下のように使用すること：
 
-- そのまま再利用（上流と調整せずにフォークまたは変更しないこと）
-- 新しいスクリプトのリポジトリの `tools/psa.py` に配置
+- 上流からそのまま再利用（フォークや変更を行う場合は上流と調整）
+- 新しいスクリプトフォルダの `tools/psa.py` に配置
 - すべてのコミット前のゲートとして使用
 
-詳細は A.11 を参照。
+詳細は A.11 を参照。使用方法や設計理念は `tools/README.md` を参照。
 
-### A.1.3 社内併用スクリプト（推奨）
+### A.1.3 併用仕様書（このフォルダ内）
 
-Speaker Deck Bulk Downloader（`Download-SpeakerDeck.ps1`、2026-05-11 時点で r19、配置: `scripts/powershell/download-speakerdeck-oracle4engineer/`）は、以下の最新参考実装です：
+このスタイルの各スクリプトフォルダは、[`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+のパターンに倣って、以下の文書セットを保持します：
+
+- `README.md` / `README.ja.md` — エンドユーザー向けドキュメント
+  （インストール、クイックスタート、パラメーター、トラブルシューティング）
+- `SPEC.md` / `SPEC.ja.md` — 開発者 / LLM 向け仕様書（本ファイル）
+- `TESTING.md` / `TESTING.ja.md` — 検証手順と本番実行結果の記録
+- `tools/README.md` — `psa.py` 使用ガイドおよび CI 連携レシピ
+
+`LICENSE`、`CONTRIBUTING.md`、リポジトリトップレベルの `README.md` / `README.ja.md` 等のリポジトリレベルのファイルは、リポジトリルートに配置され、リポジトリ内のすべてのスクリプトで共有されます。
+
+### A.1.4 社内併用スクリプト（最新参考実装）
+
+Speaker Deck Bulk Downloader（`Download-SpeakerDeck.ps1`、2026-05-13 時点で r20、配置: `scripts/powershell/download-speakerdeck-oracle4engineer/`）は、以下の最新参考実装です：
 
 - 9 フェーズアーキテクチャ + 年フォルダ出力構成
 - Runspace Pool 経由の適応的並列ダウンロード
@@ -80,7 +101,7 @@ Speaker Deck Bulk Downloader（`Download-SpeakerDeck.ps1`、2026-05-11 時点で
 
 新しい一括取得スクリプトやデータ処理スクリプトの作成を依頼された場合は、**まずこのスクリプトを読み**、そのスケルトンをコピーしてください。
 
-### A.1.4 ターゲット別スクリプトのフォルダ命名規則
+### A.1.5 ターゲット別スクリプトのフォルダ命名規則
 
 スクリプトが汎用化されており、複数の対象アカウント・サービス・テナントに対して再利用可能な場合、スクリプト本体は汎用のまま（`-Account` や `-Subscription` 等でパラメーター化）を維持しつつ、**フォルダ名** に実際のターゲット名をサフィックスとして付与し、別ターゲット用に展開した際の名前衝突を回避します。
 
@@ -578,8 +599,8 @@ psa.py が特定のパターンを体系的に誤分類する場合は、ロー�
 |---|---|
 | `README.md` | 英語版、一次ドキュメント |
 | `README.ja.md` | 日本語版ミラー、`README.md` と同期 |
-| `spec.en.md` | 開発者 / LLM 向け仕様書（本ファイルのパターン）|
-| `spec.ja.md` | 仕様書の日本語版ミラー |
+| `SPEC.md` | 開発者 / LLM 向け仕様書（本ファイルのパターン）|
+| `SPEC.ja.md` | 仕様書の日本語版ミラー |
 
 スクリプトが大きなマルチスクリプトリポジトリ内に配置される場合（例：`usui-tk/ai-generated-artifacts/scripts/powershell/<name>/`）、`LICENSE` ファイルはリポジトリルートに配置され、すべてのスクリプトで共有されます。スクリプトが独立したリポジトリの場合は、同じディレクトリに `LICENSE` ファイルを配置します。
 
@@ -632,7 +653,7 @@ Permission is hereby granted, ...
 4. plan CSV を確認
 5. 本番実行
 6. error JSONL と final state CSV を確認
-7. 新しい失敗パターンが見つかれば、spec.en.md Part D を更新
+7. 新しい失敗パターンが見つかれば、SPEC.md Part D を更新
 ```
 
 ### リビジョン規律
@@ -662,7 +683,7 @@ Permission is hereby granted, ...
 |---|---|
 | スクリプト名 | `Download-SpeakerDeck.ps1` |
 | 表示名 | Speaker Deck Bulk Downloader |
-| 現在のリビジョン | r17（`outfile-wildcard-fix`）|
+| 現在のリビジョン | r20（`upstream-spec-style-alignment`）|
 | 目的 | Speaker Deck アカウントの全公開 PDF を一括ダウンロード |
 | オーナー | （記入）|
 
@@ -879,6 +900,6 @@ A.6 のワイルドカード問題を解決する正規の安全 temp パター�
 5. フェーズを P01 から振り直し
 6. Part B のテンプレートフィールドを埋める
 7. 品質ゲート（Part C）を実行
-8. 新しい落とし穴が発見されたら spec.en.md Part D を更新
+8. 新しい落とし穴が発見されたら SPEC.md Part D を更新
 
 本ドキュメント自体もバージョン管理されています。読んでいる SPEC のリビジョンが、作業中のスクリプトのリビジョンと一致していることを必ず確認してください。

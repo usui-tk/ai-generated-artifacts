@@ -31,7 +31,7 @@
         deleting it resets Phase 8 rescue history
 
     AI tool: Generated and iteratively refined with Anthropic Claude
-            (Sonnet 4.5 / Opus 4.6 era; latest revision r19 on 2026-05-11).
+            (Sonnet 4.5 / Opus 4.6 era; latest revision r20 on 2026-05-13).
 
 .DESCRIPTION_PHASES
     Phases:
@@ -324,8 +324,8 @@ function Initialize-RuntimeDirectories {
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'speakerdeck-2026.05.11-r19'
-$Script:ScriptTag     = 'account-suffixed-folder'
+$Script:ScriptVersion = 'speakerdeck-2026.05.13-r20'
+$Script:ScriptTag     = 'upstream-spec-style-alignment'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
