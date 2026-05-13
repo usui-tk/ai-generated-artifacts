@@ -1,23 +1,267 @@
 #!/usr/bin/env python3
-"""psa.py - PowerShell Static Analyzer (shellcheck-equivalent)
+"""psa.py - PowerShell Static Analyzer (PSScriptAnalyzer-inspired)
 
-Checks performed:
-  C1  Brace balance
-  C2  Paren balance
-  C3  Bracket balance
-  C4  Undefined variable references
-  C5  Auto-variable shadowing
-  C6  Start-Process -ArgumentList warning
-  C7  -match against bare variable
-  C8  TODO/FIXME markers
-  C9  Trailing backtick before empty line
-  C10 -match against empty string
+A single-file Python 3 static analyzer for PowerShell scripts.
+No external dependencies; standard library only.
 
-Exit codes: 0=clean, 1=warnings only, 2=errors found
+Rules
+-----
+Parse / structural (PSA1xxx):
+  PSA1001  Brace balance ......................... Error
+  PSA1002  Paren balance ......................... Error
+  PSA1003  Bracket balance ....................... Error
+
+Variable / scope (PSA2xxx):
+  PSA2001  Undefined variable reference .......... Warning   (= legacy C4)
+  PSA2002  Auto-variable shadowing ............... Warning   (= legacy C5)
+  PSA2003  -match against bare variable .......... Warning   (= legacy C7)
+  PSA2004  $x -eq $null  (use $null -eq $x) ...... Warning
+  PSA2005  Assignment operator in conditional .... Warning
+  PSA2006  Redirection operator in conditional ... Warning
+
+Coding-pattern (PSA3xxx):
+  PSA3001  Start-Process -ArgumentList ........... Warning   (= legacy C6)
+  PSA3002  Backtick before empty line ............ Warning   (= legacy C9)
+  PSA3003  -match against empty string ........... Warning   (= legacy C10)
+  PSA3004  Empty catch block ..................... Warning
+
+Style / info (PSA4xxx):
+  PSA4001  TODO / FIXME marker ................... Info      (= legacy C8)
+  PSA4002  Trailing whitespace ................... Info
+  PSA4003  Long line (default: disabled) ......... Info
+  PSA4004  Trailing semicolon at line end ........ Info
+
+Security (PSA5xxx):
+  PSA5001  Plain-text password parameter ......... Error
+  PSA5002  Invoke-Expression usage ............... Warning
+  PSA5003  Broken hash algorithm (MD5, SHA1) ..... Warning
+  PSA5004  Hardcoded ComputerName ................ Warning
+
+Best-practice (PSA6xxx):
+  PSA6001  Non-approved verb in function name .... Warning
+  PSA6002  Cmdlet alias (default: disabled) ...... Warning
+  PSA6003  Plural noun in function name .......... Warning
+  PSA6004  $global: variable definition .......... Warning
+  PSA6005  Default value on Mandatory parameter .. Warning
+  PSA6006  Switch parameter defaults to $true .... Warning
+
+Usage
+-----
+  psa.py <file.ps1>                       Analyze a single file
+  psa.py file1.ps1 file2.ps1              Multiple files
+  psa.py -r <directory>                   Recursive directory scan
+  psa.py --format json <file>             JSON output (also: text, sarif)
+  psa.py --severity warning <file>        Show warnings and errors only
+  psa.py --enable PSA6002 <file>          Enable a disabled-by-default rule
+  psa.py --disable PSA2001 <file>         Disable a specific rule
+  psa.py --include PSA1001,PSA2001 <f>    Only run listed rules
+  psa.py --config .psa.config.json <f>    Use explicit config file
+  psa.py --no-color <file>                Disable ANSI color output
+  psa.py --list-rules                     Print the rule catalog and exit
+  psa.py --version                        Print version and exit
+
+Environment detection
+---------------------
+psa.py can probe the runtime for PowerShell and PSScriptAnalyzer:
+
+  psa.py --check-env                      Detect and report; do not analyze
+  psa.py --show-env <file>                Analyze and prepend env summary
+
+Environment information is purely informational. It is emitted at info
+level only, never affects exit codes, and never alters issue counts.
+When PSScriptAnalyzer is detected, psa.py prints a recommendation to
+also run `Invoke-ScriptAnalyzer` for complementary coverage.
+
+Inline suppression
+------------------
+  # psa-disable-line PSA3001
+  # psa-disable-next-line PSA3001,PSA3002
+  # psa-disable-file PSA3001              (suppress for the entire file)
+
+Configuration file (.psa.config.json)
+-------------------------------------
+  {
+    "enable":  ["PSA6002"],
+    "disable": ["PSA4001"],
+    "severity": "warning",
+    "max_line_length": 120
+  }
+
+  Configuration files are JSONC: regular JSON plus // line comments and
+  /* ... */ block comments. The companion file `.psa.config.json.template`
+  in this directory documents every option with its built-in default.
+
+  The --config flag accepts BOTH a local filesystem path AND an
+  http(s):// URL:
+
+    psa.py --config ./team-rules.json <script>.ps1
+    psa.py --config https://raw.githubusercontent.com/owner/repo/main/.psa.config.json <script>.ps1
+
+  Remote fetch behaviour:
+    - Browser-like User-Agent (Chrome 131) + Sec-Ch-Ua client hints,
+      so reachable through Cloudflare / WAF defaults that filter
+      obvious bot UAs.
+    - Explicit TLS 1.2 minimum; maximum auto-negotiated (typically
+      TLS 1.3). Older TLS 1.0/1.1 are NOT offered (deprecated, RFC 8996).
+    - Exponential-backoff retries on 5xx and network errors. 4xx
+      responses are NOT retried.
+    - Tunable via env vars: PSA_CONFIG_TIMEOUT (default 30s),
+      PSA_CONFIG_MAX_RETRIES (default 3), PSA_CONFIG_QUIET.
+
+Backward compatibility
+----------------------
+  Legacy C1-C10 codes are still accepted in CLI and inline-suppression
+  arguments; they are mapped internally to the corresponding PSA codes.
+  Text output prints the new PSA code with the legacy code as an alias
+  in parentheses (when applicable).
+
+Exit codes: 0 = clean, 1 = warnings only, 2 = errors found
 """
-import re, sys
+
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+import platform as _platform
+import re
+import shutil
+import ssl
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
+__version__ = '2.3.0'
+
+# ---------------------------------------------------------------------------
+# Severity and rule registry
+# ---------------------------------------------------------------------------
+
+SEVERITY_ORDER = {'error': 3, 'warning': 2, 'info': 1}
+
+# (new_code, severity, legacy_code, default_enabled, short_message)
+RULES = [
+    ('PSA1001', 'error',   None,   True,
+     'Brace balance'),
+    ('PSA1002', 'error',   None,   True,
+     'Paren balance'),
+    ('PSA1003', 'error',   None,   True,
+     'Bracket balance'),
+
+    ('PSA2001', 'error', 'C4',   True,
+     'Undefined variable reference'),
+    ('PSA2002', 'warning', 'C5',   True,
+     'Auto-variable shadowing'),
+    ('PSA2003', 'warning', 'C7',   True,
+     '-match against bare variable'),
+    ('PSA2004', 'warning', None,   True,
+     '$null should be on the left side of -eq/-ne'),
+    ('PSA2005', 'warning', None,   True,
+     'Assignment operator (=) inside conditional'),
+    ('PSA2006', 'warning', None,   True,
+     'Redirection operator (>, <) inside conditional'),
+
+    ('PSA3001', 'warning', 'C6',   True,
+     'Start-Process -ArgumentList; prefer ProcessStartInfo'),
+    ('PSA3002', 'warning', 'C9',   True,
+     'Backtick continuation followed by empty line'),
+    ('PSA3003', 'warning', 'C10',  True,
+     '-match against literal empty string'),
+    ('PSA3004', 'warning', None,   True,
+     'Empty catch block'),
+
+    ('PSA4001', 'info',    'C8',   True,
+     'Unfinished marker (TODO/FIXME/XXX/HACK)'),
+    ('PSA4002', 'info',    None,   True,
+     'Trailing whitespace at end of line'),
+    ('PSA4003', 'info',    None,   False,
+     'Long line exceeds max_line_length'),
+    ('PSA4004', 'info',    None,   True,
+     'Trailing semicolon at end of line'),
+
+    ('PSA5001', 'error',   None,   True,
+     'Plain-text password parameter ([string]$Password)'),
+    ('PSA5002', 'warning', None,   True,
+     'Invoke-Expression should be avoided'),
+    ('PSA5003', 'warning', None,   True,
+     'Broken hash algorithm (MD5 / SHA1)'),
+    ('PSA5004', 'warning', None,   True,
+     'Hardcoded ComputerName'),
+
+    ('PSA6001', 'warning', None,   True,
+     'Function uses non-approved verb'),
+    ('PSA6002', 'warning', None,   False,
+     'Cmdlet alias used (e.g., ls, cd, dir, where)'),
+    ('PSA6003', 'warning', None,   True,
+     'Function noun should be singular'),
+    ('PSA6004', 'warning', None,   True,
+     'Avoid $global: variable definition'),
+    ('PSA6005', 'warning', None,   True,
+     'Mandatory parameter must not have a default value'),
+    ('PSA6006', 'warning', None,   True,
+     'Switch parameter must not default to $true'),
+]
+
+CODE_TO_RULE = {r[0]: r for r in RULES}
+LEGACY_TO_NEW = {r[2]: r[0] for r in RULES if r[2]}
+
+# ---------------------------------------------------------------------------
+# PowerShell approved verbs (subset; from Get-Verb output, Sep 2024)
+# ---------------------------------------------------------------------------
+
+APPROVED_VERBS = {
+    # Common
+    'add', 'clear', 'close', 'copy', 'enter', 'exit', 'find', 'format',
+    'get', 'hide', 'join', 'lock', 'move', 'new', 'open', 'optimize',
+    'pop', 'push', 'redo', 'remove', 'rename', 'reset', 'resize', 'search',
+    'select', 'set', 'show', 'skip', 'split', 'step', 'switch', 'undo',
+    'unlock', 'watch',
+    # Communications
+    'connect', 'disconnect', 'read', 'receive', 'send', 'write',
+    # Data
+    'backup', 'checkpoint', 'compare', 'compress', 'convert', 'convertfrom',
+    'convertto', 'dismount', 'edit', 'expand', 'export', 'group', 'import',
+    'initialize', 'limit', 'merge', 'mount', 'out', 'publish', 'restore',
+    'save', 'sync', 'unpublish', 'update',
+    # Diagnostic
+    'debug', 'measure', 'ping', 'repair', 'resolve', 'test', 'trace',
+    # Lifecycle
+    'approve', 'assert', 'build', 'complete', 'confirm', 'deny', 'deploy',
+    'disable', 'enable', 'install', 'invoke', 'register', 'request',
+    'restart', 'resume', 'start', 'stop', 'submit', 'suspend',
+    'uninstall', 'unregister', 'wait',
+    # Security
+    'block', 'grant', 'protect', 'revoke', 'unblock', 'unprotect',
+    # Other
+    'use',
+}
+
+# Common cmdlet aliases (subset of Get-Alias output)
+CMDLET_ALIASES = {
+    'ac', 'asnp', 'cat', 'cd', 'chdir', 'clc', 'clear', 'clhy', 'cli',
+    'clp', 'cls', 'clv', 'compare', 'copy', 'cp', 'cpi', 'cpp', 'curl',
+    'cvpa', 'dbp', 'del', 'diff', 'dir', 'dnsn', 'ebp', 'echo', 'epal',
+    'epcsv', 'epsn', 'erase', 'etsn', 'exsn', 'fc', 'fl', 'foreach',
+    'ft', 'fw', 'gal', 'gbp', 'gc', 'gci', 'gcm', 'gcs', 'gdr', 'ghy',
+    'gi', 'gjb', 'gl', 'gm', 'gmo', 'gp', 'gps', 'group', 'gsn', 'gsnp',
+    'gsv', 'gu', 'gv', 'gwmi', 'h', 'history', 'icm', 'iex', 'ihy', 'ii',
+    'ipal', 'ipcsv', 'ipmo', 'ipsn', 'irm', 'ise', 'iwmi', 'iwr', 'kill',
+    'lp', 'ls', 'man', 'md', 'measure', 'mi', 'mount', 'move', 'mp',
+    'mv', 'nal', 'ndr', 'ni', 'nmo', 'npssc', 'nsn', 'nv', 'ogv', 'oh',
+    'popd', 'ps', 'pushd', 'pwd', 'r', 'rbp', 'rcjb', 'rcsn', 'rd',
+    'rdr', 'ren', 'ri', 'rjb', 'rm', 'rmdir', 'rmo', 'rni', 'rnp', 'rp',
+    'rsn', 'rsnp', 'rujb', 'rv', 'rvpa', 'rwmi', 'sajb', 'sal', 'saps',
+    'sasv', 'sbp', 'sc', 'select', 'set', 'shcm', 'si', 'sl', 'sleep',
+    'sls', 'sort', 'sp', 'spjb', 'spps', 'spsv', 'start', 'stz', 'sv',
+    'swmi', 'tee', 'trcm', 'type', 'where', 'wjb', 'write',
+}
+
+# Auto-variables (from about_Automatic_Variables)
 AUTO_VARS = {
     '_', '?', '$', '^',
     'args', 'consolefilename', 'error', 'event', 'eventargs',
@@ -30,106 +274,253 @@ AUTO_VARS = {
     'sender', 'shellid', 'stacktrace', 'switch', 'this', 'true',
 }
 
+EXTERNAL_SCOPES = {'env', 'using'}
 
-def strip_strings_and_comments(line):
-    out, in_sq, in_dq, i = [], False, False, 0
-    while i < len(line):
-        c = line[i]
-        nxt = line[i + 1] if i + 1 < len(line) else ''
-        if not in_sq and not in_dq and c == '#':
-            break
-        if not in_dq and c == "'":
-            if in_sq and nxt == "'":
-                i += 2; continue
-            in_sq = not in_sq; out.append(' '); i += 1; continue
-        if not in_sq and c == '"':
-            if in_dq and i > 0 and line[i - 1] == '`':
-                out.append(c); i += 1; continue
-            in_dq = not in_dq; out.append(' '); i += 1; continue
-        if in_dq:
-            if c == '$':
-                out.append(c); i += 1
-                while i < len(line) and (line[i].isalnum() or line[i] in '_:'):
-                    out.append(line[i]); i += 1
+# Auto-variables that are particularly risky to shadow
+RISKY_SHADOW_VARS = {
+    'args', 'lastexitcode', 'input', 'matches', 'foreach',
+    'host', 'true', 'false',
+}
+
+# ---------------------------------------------------------------------------
+# Tokenizer / string stripper
+# ---------------------------------------------------------------------------
+# Strategy: a single forward pass that knows about
+#   - line comments       (# ... end-of-line)
+#   - block comments      (<# ... #>)
+#   - single-quoted str   ('...', no interpolation, '' escape)
+#   - double-quoted str   ("...", with $var interpolation kept visible)
+#   - here-string (sq)    (@'\n ... \n'@)
+#   - here-string (dq)    (@"\n ... \n"@, with $var interpolation kept)
+# Output: characters at the same position, but with quoted / commented text
+# replaced by spaces so that downstream regex sees only "real" PowerShell
+# code. The exception is $var inside "..." which we preserve so that
+# reference-collection rules still see it.
+
+
+def strip_strings_and_comments(text):
+    """Return a copy of text with all comments and string contents replaced
+    by spaces, but with $variables inside double-quoted strings preserved.
+
+    The returned string has the same length and same line breaks as the
+    original, so line numbers and column offsets are preserved.
+    """
+    out = []
+    i, n = 0, len(text)
+    in_sq = False         # single-quoted string
+    in_dq = False         # double-quoted string
+    in_lc = False         # single-line comment
+    in_bc = False         # block comment
+    in_here_sq = False    # @' ... '@
+    in_here_dq = False    # @" ... "@
+
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ''
+        nxt2 = text[i + 2] if i + 2 < n else ''
+
+        # newline always preserved; resets line comment
+        if c == '\n':
+            out.append('\n')
+            if in_lc:
+                in_lc = False
+            i += 1
+            continue
+
+        # --- end of states ---
+        if in_lc:
+            out.append(' ')
+            i += 1
+            continue
+
+        if in_bc:
+            if c == '#' and nxt == '>':
+                out.append('  ')
+                in_bc = False
+                i += 2
                 continue
-            out.append(' '); i += 1; continue
+            out.append(' ')
+            i += 1
+            continue
+
+        if in_here_sq:
+            # close: line-start (or just whitespace) followed by '@
+            # PowerShell requires '@ at column 0 of a line; we accept any
+            # position for robustness.
+            if c == "'" and nxt == '@':
+                out.append('  ')
+                in_here_sq = False
+                i += 2
+                continue
+            out.append(' ')
+            i += 1
+            continue
+
+        if in_here_dq:
+            if c == '"' and nxt == '@':
+                out.append('  ')
+                in_here_dq = False
+                i += 2
+                continue
+            # preserve $variables for reference scanning
+            if c == '$':
+                out.append('$')
+                i += 1
+                while i < n and (text[i].isalnum() or text[i] in '_:'):
+                    out.append(text[i])
+                    i += 1
+                continue
+            out.append(' ')
+            i += 1
+            continue
+
         if in_sq:
-            out.append(' '); i += 1; continue
-        out.append(c); i += 1
+            if c == "'":
+                if nxt == "'":   # '' is an escaped single quote
+                    out.append('  ')
+                    i += 2
+                    continue
+                in_sq = False
+                out.append(' ')
+                i += 1
+                continue
+            out.append(' ')
+            i += 1
+            continue
+
+        if in_dq:
+            if c == '"':
+                # backtick-escaped quote inside double-quoted string
+                if i > 0 and text[i - 1] == '`':
+                    out.append(' ')
+                    i += 1
+                    continue
+                in_dq = False
+                out.append(' ')
+                i += 1
+                continue
+            if c == '$':
+                out.append('$')
+                i += 1
+                # collect identifier  $var, $scope:var, ${complex}
+                if i < n and text[i] == '{':
+                    out.append('{')
+                    i += 1
+                    while i < n and text[i] != '}':
+                        out.append(text[i])
+                        i += 1
+                    if i < n:
+                        out.append('}')
+                        i += 1
+                    continue
+                while i < n and (text[i].isalnum() or text[i] in '_:'):
+                    out.append(text[i])
+                    i += 1
+                continue
+            out.append(' ')
+            i += 1
+            continue
+
+        # --- start of states ---
+        # here-string start must be checked before single/double quote
+        if c == '@' and nxt == "'":
+            out.append('  ')
+            in_here_sq = True
+            i += 2
+            continue
+        if c == '@' and nxt == '"':
+            out.append('  ')
+            in_here_dq = True
+            i += 2
+            continue
+        if c == '<' and nxt == '#':
+            out.append('  ')
+            in_bc = True
+            i += 2
+            continue
+        if c == '#':
+            out.append(' ')
+            in_lc = True
+            i += 1
+            continue
+        if c == "'":
+            in_sq = True
+            out.append(' ')
+            i += 1
+            continue
+        if c == '"':
+            in_dq = True
+            out.append(' ')
+            i += 1
+            continue
+
+        out.append(c)
+        i += 1
+
     return ''.join(out)
 
 
-def check_balance(text, open_ch, close_ch, code, name):
-    in_sq = in_dq = in_lc = in_bc = False
-    open_cnt = close_cnt = 0
-    line_no = 1
-    i = 0
-    while i < len(text):
-        c = text[i]
-        nxt = text[i + 1] if i + 1 < len(text) else ''
-        if c == '\n':
-            line_no += 1; in_lc = False; i += 1; continue
-        if not in_sq and not in_dq:
-            if not in_bc and c == '<' and nxt == '#':
-                in_bc = True; i += 2; continue
-            if in_bc and c == '#' and nxt == '>':
-                in_bc = False; i += 2; continue
-            if in_bc:
-                i += 1; continue
-            if c == '#' and not in_lc:
-                in_lc = True; i += 1; continue
-            if in_lc:
-                i += 1; continue
-        if not in_dq and c == "'":
-            if in_sq and nxt == "'":
-                i += 2; continue
-            in_sq = not in_sq; i += 1; continue
-        if not in_sq and c == '"':
-            if in_dq and i > 0 and text[i - 1] == '`':
-                i += 1; continue
-            in_dq = not in_dq; i += 1; continue
-        if in_sq or in_dq:
-            i += 1; continue
-        if c == open_ch:
-            open_cnt += 1
-        elif c == close_ch:
-            close_cnt += 1
-        i += 1
-    if open_cnt != close_cnt:
-        return [{'severity': 'error', 'code': code, 'line': 0,
-                 'message': f'{name} mismatch: {open_cnt} {open_ch} vs {close_cnt} {close_ch}'}]
+# ---------------------------------------------------------------------------
+# Bracket / paren / brace balance
+# ---------------------------------------------------------------------------
+
+def _balance(clean, open_ch, close_ch):
+    """Count occurrences of open_ch and close_ch in *clean* (which has had
+    comments and strings stripped). Returns (open_count, close_count)."""
+    return clean.count(open_ch), clean.count(close_ch)
+
+
+def check_balance(text, clean, open_ch, close_ch, code):
+    o, c = _balance(clean, open_ch, close_ch)
+    if o != c:
+        return [{
+            'severity': 'error', 'code': code, 'line': 0, 'col': 0,
+            'message': f'{open_ch}{close_ch} mismatch: {o} {open_ch} vs {c} {close_ch}',
+        }]
     return []
 
 
+# ---------------------------------------------------------------------------
+# Function / param parsing
+# ---------------------------------------------------------------------------
+
 ASSIGN_PATTERNS = [
-    # $Name = ..., $Script:Name = ..., $local:Name = ... (scope is case-insensitive)
     re.compile(r'\$(?:[A-Za-z]+:)?([A-Za-z_][A-Za-z0-9_]*)\s*='),
-    re.compile(r'foreach\s*\(\s*\$([A-Za-z_][A-Za-z0-9_]*)\s+in\b', re.IGNORECASE),
-    re.compile(r'for\s*\(\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*=', re.IGNORECASE),
+    re.compile(r'foreach\s*\(\s*\$([A-Za-z_][A-Za-z0-9_]*)\s+in\b',
+               re.IGNORECASE),
+    re.compile(r'for\s*\(\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*=',
+               re.IGNORECASE),
 ]
-PARAM_PATTERN = re.compile(r'\bparam\s*\(([^)]*?)\)', re.IGNORECASE | re.DOTALL)
 PARAM_VAR = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)')
-# Inline param syntax: function Name ($a, $b, $c) { ... }
 INLINE_FN_PARAMS = re.compile(
     r'^\s*function\s+[A-Za-z_][A-Za-z0-9_-]*\s*\(([^)]*)\)\s*\{?',
     re.IGNORECASE)
-# Reference: $name | $Script:name | $env:VAR  (env/using are skipped later)
 REFERENCE_PATTERN = re.compile(
     r'\$(?:(?P<scope>[A-Za-z]+):)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)')
-EXTERNAL_SCOPES = {'env', 'using'}
 
 
-def find_function_blocks(text):
-    blocks, lines, i = [], text.split('\n'), 0
+def find_function_blocks(clean):
+    """Find every 'function Name { ... }' block in *clean* (already stripped).
+    Returns list of (name, start_line_1based, end_line_1based, body_text)."""
+    blocks = []
+    lines = clean.split('\n')
+    i = 0
     while i < len(lines):
-        m = re.match(r'^\s*function\s+([A-Za-z_][A-Za-z0-9_-]*)\s*\{?', lines[i])
+        m = re.match(
+            r'^\s*function\s+([A-Za-z_][A-Za-z0-9_-]*)\s*\{?', lines[i])
         if not m:
-            i += 1; continue
-        name, start, depth, seen, j = m.group(1), i, 0, False, i
+            i += 1
+            continue
+        name = m.group(1)
+        start = i
+        depth = 0
+        seen = False
+        j = i
         while j < len(lines):
-            for ch in strip_strings_and_comments(lines[j]):
+            for ch in lines[j]:
                 if ch == '{':
-                    depth += 1; seen = True
+                    depth += 1
+                    seen = True
                 elif ch == '}':
                     depth -= 1
             if seen and depth == 0:
@@ -142,9 +533,8 @@ def find_function_blocks(text):
 
 
 def find_param_blocks(body):
-    """Find all param(...) blocks with properly balanced parens.
-    Returns the inner content of each param block."""
-    blocks = []
+    """Find each param(...) block with balanced parens; return inner text."""
+    out = []
     pat = re.compile(r'\bparam\s*\(', re.IGNORECASE)
     pos = 0
     while True:
@@ -162,63 +552,67 @@ def find_param_blocks(body):
                 depth -= 1
             i += 1
         if depth == 0:
-            blocks.append(body[start:i - 1])
+            out.append(body[start:i - 1])
         pos = i
-    return blocks
+    return out
 
 
 def collect_assignments(body):
+    """Collect names that are assigned within *body*. *body* is already
+    stripped of strings/comments."""
     assigned = set()
     for line in body.split('\n'):
-        clean = strip_strings_and_comments(line)
         for pat in ASSIGN_PATTERNS:
-            for m in pat.finditer(clean):
+            for m in pat.finditer(line):
                 assigned.add(m.group(1).lower())
-        # Inline param syntax on the function line itself.
-        m = INLINE_FN_PARAMS.match(clean)
+        m = INLINE_FN_PARAMS.match(line)
         if m:
             for vm in PARAM_VAR.finditer(m.group(1)):
                 assigned.add(vm.group(1).lower())
-    # Multi-line param() blocks with balanced parens (handles
-    # [Parameter(Mandatory)] [type]$Name etc.)
-    full = '\n'.join(strip_strings_and_comments(l) for l in body.split('\n'))
-    for block in find_param_blocks(full):
+    for block in find_param_blocks(body):
         for vm in PARAM_VAR.finditer(block):
             assigned.add(vm.group(1).lower())
     return assigned
 
 
 def collect_references(body):
+    """Yield (name, relative_line_1based) for each $variable reference
+    that is NOT the target of an assignment, and NOT an external scope
+    ($env:..., $using:...)."""
     refs = []
     for ln_no, line in enumerate(body.split('\n'), start=1):
-        clean = strip_strings_and_comments(line)
-        for m in REFERENCE_PATTERN.finditer(clean):
+        for m in REFERENCE_PATTERN.finditer(line):
             scope = (m.group('scope') or '').lower()
             if scope in EXTERNAL_SCOPES:
-                continue  # $env:X, $using:X are externally defined
-            after = clean[m.end():m.end() + 4].lstrip()
+                continue
+            after = line[m.end():m.end() + 4].lstrip()
             if after.startswith('='):
                 continue
             refs.append((m.group('name').lower(), ln_no))
     return refs
 
 
-def check_undefined_vars(text):
-    issues, blocks = [], find_function_blocks(text)
+# ---------------------------------------------------------------------------
+# Individual checks
+# ---------------------------------------------------------------------------
+
+def check_undefined_vars(text, clean):
+    """PSA2001 (legacy C4): heuristic undefined-variable warning."""
+    issues = []
+    blocks = find_function_blocks(clean)
     fn_ranges = [(b[1], b[2]) for b in blocks]
+
     def in_fn(n):
-        for s, e in fn_ranges:
-            if s <= n <= e:
-                return True
-        return False
+        return any(s <= n <= e for s, e in fn_ranges)
+
     global_assigned = set()
-    for ln_no, line in enumerate(text.split('\n'), start=1):
+    for ln_no, line in enumerate(clean.split('\n'), start=1):
         if in_fn(ln_no):
             continue
-        clean = strip_strings_and_comments(line)
         for pat in ASSIGN_PATTERNS:
-            for m in pat.finditer(clean):
+            for m in pat.finditer(line):
                 global_assigned.add(m.group(1).lower())
+
     seen = set()
     for fname, start, _end, body in blocks:
         local = collect_assignments(body)
@@ -229,121 +623,1450 @@ def check_undefined_vars(text):
             if key in seen:
                 continue
             seen.add(key)
-            issues.append({'severity': 'error', 'code': 'C4',
-                           'line': start + ln - 1,
-                           'message': f'undefined variable ${name} in function {fname}'})
+            issues.append({
+                'severity': 'error', 'code': 'PSA2001',
+                'line': start + ln - 1, 'col': 0,
+                'message': f'undefined variable ${name} in function {fname}',
+            })
     return issues
 
 
-def check_argumentlist(text):
+def check_shadow(clean):
+    """PSA2002 (legacy C5): assigning to a risky auto-variable."""
     out = []
-    for ln, line in enumerate(text.split('\n'), 1):
-        clean = strip_strings_and_comments(line)
-        if re.search(r'Start-Process\b.*-ArgumentList\b', clean, re.IGNORECASE):
-            out.append({'severity': 'warning', 'code': 'C6', 'line': ln,
-                        'message': 'Start-Process -ArgumentList; prefer ProcessStartInfo'})
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in re.finditer(r'\$([A-Za-z_][A-Za-z0-9_]*)\s*=', line):
+            if m.group(1).lower() in RISKY_SHADOW_VARS:
+                out.append({
+                    'severity': 'warning', 'code': 'PSA2002',
+                    'line': ln, 'col': m.start() + 1,
+                    'message': f'shadowing auto-variable ${m.group(1)}',
+                })
     return out
 
 
-def check_match_var(text):
-    pat = re.compile(r'-match\s+\$(?!null\b)([A-Za-z_][A-Za-z0-9_:]*)', re.IGNORECASE)
+def check_match_var(clean):
+    """PSA2003 (legacy C7): -match against bare $variable."""
+    pat = re.compile(
+        r'-match\s+\$(?!null\b)([A-Za-z_][A-Za-z0-9_:]*)', re.IGNORECASE)
     out = []
-    for ln, line in enumerate(text.split('\n'), 1):
-        clean = strip_strings_and_comments(line)
-        for m in pat.finditer(clean):
-            out.append({'severity': 'warning', 'code': 'C7', 'line': ln,
-                        'message': f'-match against bare ${m.group(1)} - $null pattern returns true'})
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            out.append({
+                'severity': 'warning', 'code': 'PSA2003',
+                'line': ln, 'col': m.start() + 1,
+                'message': (f'-match against bare ${m.group(1)} - '
+                            '$null pattern returns true'),
+            })
     return out
 
 
-def check_shadow(text):
-    risky = {'args', 'lastexitcode', 'input', 'matches', 'foreach',
-             'host', 'true', 'false'}
-    # Note: $null = ... is NOT flagged because it is a standard
-    # PowerShell idiom for suppressing output (equivalent to | Out-Null).
+def check_null_on_right(clean):
+    """PSA2004: $x -eq $null should be $null -eq $x.
+
+    The right-hand-$null form is dangerous when $x is a collection — it
+    returns the elements equal to $null, not a boolean.
+    """
+    pat = re.compile(
+        r'\$[A-Za-z_][A-Za-z0-9_:.]*\s*(-eq|-ne|-ceq|-cne|-ieq|-ine)\s*\$null\b',
+        re.IGNORECASE)
     out = []
-    for ln, line in enumerate(text.split('\n'), 1):
-        clean = strip_strings_and_comments(line)
-        for m in re.finditer(r'\$([A-Za-z_][A-Za-z0-9_]*)\s*=', clean):
-            if m.group(1).lower() in risky:
-                out.append({'severity': 'warning', 'code': 'C5', 'line': ln,
-                            'message': f'shadowing auto-variable ${m.group(1)}'})
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            out.append({
+                'severity': 'warning', 'code': 'PSA2004',
+                'line': ln, 'col': m.start() + 1,
+                'message': f'place $null on the left side of {m.group(1)}',
+            })
     return out
 
 
-def check_todo(text):
+def check_assign_in_conditional(clean):
+    """PSA2005: 'if ($x = 5)' is almost always a typo for '-eq'."""
+    # Match: if/while/elseif ( $var = <not = or comparison> ... )
+    pat = re.compile(
+        r'\b(if|while|elseif)\s*\(\s*\$[A-Za-z_][A-Za-z0-9_:.]*\s*=(?!=)',
+        re.IGNORECASE)
     out = []
-    for ln, line in enumerate(text.split('\n'), 1):
-        m = re.search(r'\b(TODO|FIXME|XXX|HACK)\b', line)
-        if m:
-            out.append({'severity': 'info', 'code': 'C8', 'line': ln,
-                        'message': f'unfinished marker: {m.group(1)}'})
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            out.append({
+                'severity': 'warning', 'code': 'PSA2005',
+                'line': ln, 'col': m.start() + 1,
+                'message': (f'assignment operator (=) inside '
+                            f'{m.group(1)} condition; did you mean -eq?'),
+            })
+    return out
+
+
+def check_redirect_in_conditional(clean):
+    """PSA2006: 'if ($x > 5)' is a redirection, not a comparison."""
+    pat = re.compile(
+        r'\b(if|while|elseif)\s*\(\s*\$[A-Za-z_][A-Za-z0-9_:.]*\s*[<>][^=\-]',
+        re.IGNORECASE)
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            out.append({
+                'severity': 'warning', 'code': 'PSA2006',
+                'line': ln, 'col': m.start() + 1,
+                'message': (f'redirection operator inside {m.group(1)} '
+                            'condition; use -gt / -lt'),
+            })
+    return out
+
+
+def check_argumentlist(clean):
+    """PSA3001 (legacy C6): Start-Process -ArgumentList."""
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        if re.search(r'Start-Process\b.*-ArgumentList\b',
+                     line, re.IGNORECASE):
+            out.append({
+                'severity': 'warning', 'code': 'PSA3001',
+                'line': ln, 'col': 0,
+                'message': ('Start-Process -ArgumentList; '
+                            'prefer ProcessStartInfo'),
+            })
     return out
 
 
 def check_backtick(text):
-    out, lines = [], text.split('\n')
+    """PSA3002 (legacy C9): trailing backtick before empty line.
+
+    Uses the *raw* text so that trailing whitespace after the backtick
+    can also be flagged. Comments are unlikely to end in backtick, so we
+    skip the strip for this check.
+    """
+    out = []
+    lines = text.split('\n')
     for i, line in enumerate(lines):
         s = line.rstrip('\r\n')
         if s.endswith('`') and not s.endswith('``'):
             if i + 1 < len(lines) and not lines[i + 1].strip():
-                out.append({'severity': 'warning', 'code': 'C9', 'line': i + 1,
-                            'message': 'backtick continuation followed by empty line'})
+                out.append({
+                    'severity': 'warning', 'code': 'PSA3002',
+                    'line': i + 1, 'col': len(s),
+                    'message': ('backtick continuation followed by '
+                                'empty line'),
+                })
     return out
 
 
-def check_empty_match(text):
+def check_empty_match(clean):
+    """PSA3003 (legacy C10): -match against literal empty string.
+
+    We rely on the *raw* form via the regex below — but since the strip
+    pass replaces quoted contents with spaces, we use a slightly different
+    detection: '-match' immediately followed by quote-quote pattern in
+    the raw text.
+    """
+    # Use raw text scan because strip converts "" to spaces.
+    return _check_empty_match_raw_marker(clean)
+
+
+def _check_empty_match_raw_marker(text):
     pat = re.compile(r"-match\s+(?:''|\"\")")
     out = []
     for ln, line in enumerate(text.split('\n'), 1):
         if pat.search(line):
-            out.append({'severity': 'warning', 'code': 'C10', 'line': ln,
-                        'message': '-match against empty string is always true'})
+            out.append({
+                'severity': 'warning', 'code': 'PSA3003',
+                'line': ln, 'col': 0,
+                'message': '-match against empty string is always true',
+            })
     return out
 
 
-def main():
-    if len(sys.argv) != 2:
-        print(__doc__, file=sys.stderr); return 2
-    path = Path(sys.argv[1])
-    text = path.read_text(encoding='utf-8', errors='replace')
+def check_empty_catch(clean):
+    """PSA3004: catch { } with no body."""
+    pat = re.compile(
+        r'\bcatch\s*(\[[^\]]+\]\s*)*\{\s*\}',
+        re.IGNORECASE | re.DOTALL)
+    out = []
+    # Search line-by-line to keep line numbers.  Also handle multi-line
+    # 'catch {\n}' by joining short windows.
+    lines = clean.split('\n')
+    for i, line in enumerate(lines):
+        # Look ahead up to 3 lines for opening/closing brace pair.
+        window = '\n'.join(lines[i:i + 4])
+        m = pat.match(window.lstrip())
+        if not m:
+            # Try inline match anywhere on this line.
+            if pat.search(line):
+                out.append({
+                    'severity': 'warning', 'code': 'PSA3004',
+                    'line': i + 1, 'col': 0,
+                    'message': 'empty catch block',
+                })
+        else:
+            out.append({
+                'severity': 'warning', 'code': 'PSA3004',
+                'line': i + 1, 'col': 0,
+                'message': 'empty catch block',
+            })
+    return out
 
-    issues = []
-    issues += check_balance(text, '{', '}', 'C1', 'Brace')
-    issues += check_balance(text, '(', ')', 'C2', 'Paren')
-    issues += check_balance(text, '[', ']', 'C3', 'Bracket')
-    issues += check_undefined_vars(text)
-    issues += check_shadow(text)
-    issues += check_argumentlist(text)
-    issues += check_match_var(text)
-    issues += check_todo(text)
-    issues += check_backtick(text)
-    issues += check_empty_match(text)
-    issues.sort(key=lambda x: (x['line'], x['code']))
 
+def check_todo(text):
+    """PSA4001 (legacy C8): TODO/FIXME markers (in comments only)."""
+    out = []
+    # We scan the RAW text because we want markers inside # comments.
+    for ln, line in enumerate(text.split('\n'), 1):
+        # Markers only count when they appear in a comment context.  We
+        # look for '#' followed by the keyword somewhere on the line, OR
+        # the keyword anywhere if the line starts with '#' (block-comment
+        # support is simplified).
+        if '#' not in line:
+            continue
+        m = re.search(r'#[^\n]*\b(TODO|FIXME|XXX|HACK)\b', line)
+        if m:
+            out.append({
+                'severity': 'info', 'code': 'PSA4001',
+                'line': ln, 'col': m.start(1) + 1,
+                'message': f'unfinished marker: {m.group(1)}',
+            })
+    return out
+
+
+def check_trailing_whitespace(text):
+    """PSA4002: trailing whitespace at end of line."""
+    out = []
+    for ln, line in enumerate(text.split('\n'), 1):
+        s = line.rstrip('\r\n')
+        if s and s != s.rstrip():
+            out.append({
+                'severity': 'info', 'code': 'PSA4002',
+                'line': ln, 'col': len(s.rstrip()) + 1,
+                'message': 'trailing whitespace',
+            })
+    return out
+
+
+def check_long_line(text, max_len):
+    """PSA4003: line exceeds max_line_length characters."""
+    out = []
+    for ln, line in enumerate(text.split('\n'), 1):
+        s = line.rstrip('\r\n')
+        if len(s) > max_len:
+            out.append({
+                'severity': 'info', 'code': 'PSA4003',
+                'line': ln, 'col': max_len + 1,
+                'message': f'line is {len(s)} chars (max {max_len})',
+            })
+    return out
+
+
+def check_trailing_semicolon(clean):
+    """PSA4004: line ends with a semicolon (PowerShell idiom prefers no ;)."""
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        s = line.rstrip()
+        if s.endswith(';') and not s.endswith(';;'):
+            out.append({
+                'severity': 'info', 'code': 'PSA4004',
+                'line': ln, 'col': len(s),
+                'message': 'trailing semicolon is redundant',
+            })
+    return out
+
+
+def check_plaintext_password(clean):
+    """PSA5001: [string]$Password (and similar) is plain-text."""
+    pat = re.compile(
+        r'\[string\]\s*\$(\w*[Pp]assword\w*|\w*[Pp]wd\w*|\w*[Cc]redential\w*)',
+        re.IGNORECASE)
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            out.append({
+                'severity': 'error', 'code': 'PSA5001',
+                'line': ln, 'col': m.start() + 1,
+                'message': (f'plain-text password parameter ${m.group(1)}; '
+                            'use [SecureString] or [PSCredential]'),
+            })
+    return out
+
+
+def check_invoke_expression(clean):
+    """PSA5002: Invoke-Expression is an arbitrary-code-execution risk."""
+    pat = re.compile(r'\b(Invoke-Expression|\biex)\b', re.IGNORECASE)
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            out.append({
+                'severity': 'warning', 'code': 'PSA5002',
+                'line': ln, 'col': m.start() + 1,
+                'message': ('Invoke-Expression executes arbitrary strings; '
+                            'consider safer alternatives'),
+            })
+    return out
+
+
+def check_broken_hash(clean):
+    """PSA5003: MD5 / SHA1 are cryptographically broken."""
+    pat = re.compile(
+        r'(MD5|SHA1)(?:CryptoServiceProvider|Managed)?\b|'
+        r'-Algorithm\s+["\']?(MD5|SHA1)\b',
+        re.IGNORECASE)
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            algo = (m.group(1) or m.group(2)).upper()
+            out.append({
+                'severity': 'warning', 'code': 'PSA5003',
+                'line': ln, 'col': m.start() + 1,
+                'message': (f'{algo} is cryptographically broken; '
+                            'use SHA-256 or stronger'),
+            })
+    return out
+
+
+def check_hardcoded_computername(clean):
+    """PSA5004: -ComputerName "literal string" (not $var)."""
+    pat = re.compile(
+        r'-ComputerName\s+(?:"([^"]+)"|\'([^\']+)\')',
+        re.IGNORECASE)
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            host = m.group(1) or m.group(2)
+            # localhost / . are common legitimate uses
+            if host.lower() in ('localhost', '.', '127.0.0.1'):
+                continue
+            out.append({
+                'severity': 'warning', 'code': 'PSA5004',
+                'line': ln, 'col': m.start() + 1,
+                'message': (f'hardcoded ComputerName "{host}"; '
+                            'pass via parameter'),
+            })
+    return out
+
+
+def check_approved_verb(clean):
+    """PSA6001: function name uses non-approved verb."""
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        m = re.match(
+            r'^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)-([A-Za-z_][A-Za-z0-9_]*)',
+            line)
+        if not m:
+            continue
+        verb = m.group(1).lower()
+        if verb not in APPROVED_VERBS:
+            out.append({
+                'severity': 'warning', 'code': 'PSA6001',
+                'line': ln, 'col': 0,
+                'message': (f'non-approved verb "{m.group(1)}"; '
+                            'see Get-Verb'),
+            })
+    return out
+
+
+def check_cmdlet_alias(clean):
+    """PSA6002: alias used instead of a full cmdlet name.
+
+    Only matches at the start of a logical command position: line start,
+    after a semicolon, after a pipe, or at the start of a parenthesised
+    sub-expression.  This dramatically reduces noise from words like
+    'where' appearing inside comments — already stripped — or as a
+    parameter value (still possible but rare).
+
+    Special-case: `foreach (` and `switch (` are PowerShell keywords for
+    loops, not aliases for `ForEach-Object` / `Switch-Statement`. They
+    are excluded.
+    """
+    out = []
+    pat = re.compile(
+        r'(?:^|[;|&]|\(\s*)\s*(' + '|'.join(re.escape(a)
+                                            for a in sorted(CMDLET_ALIASES,
+                                                            key=len,
+                                                            reverse=True)) +
+        r')\b(?=\s|$)',
+        re.IGNORECASE | re.MULTILINE)
+    # Keywords that share their name with an alias must be skipped when
+    # used in their statement form (followed by '(').
+    KEYWORD_FORMS = {'foreach', 'switch', 'select', 'sort', 'set'}
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            alias = m.group(1).lower()
+            # Skip the PowerShell keyword form: `foreach (`, `switch (`...
+            tail = line[m.end():m.end() + 2].lstrip()
+            if alias in KEYWORD_FORMS and tail.startswith('('):
+                continue
+            # Skip hashtable-key / property-assignment form:
+            #   @{ type = 'foo' }  or  $obj.type = 1  etc.
+            if re.match(r'\s*=(?!=)', line[m.end():]):
+                continue
+            out.append({
+                'severity': 'warning', 'code': 'PSA6002',
+                'line': ln, 'col': m.start(1) + 1,
+                'message': (f'cmdlet alias "{alias}" used; '
+                            'prefer the full cmdlet name'),
+            })
+    return out
+
+
+def check_singular_noun(clean):
+    """PSA6003: function noun should be singular (heuristic: ends in 's').
+
+    False-positive prone (e.g., Get-Process is correct), so we use a
+    small whitelist of legitimately-plural nouns commonly seen.
+    """
+    LEGIT_PLURAL = {
+        'process', 'address', 'progress', 'access', 'success', 'class',
+        'pass', 'business', 'analysis', 'basis', 'series', 'species',
+        'thesis', 'crisis', 'status', 'bus',
+    }
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        m = re.match(
+            r'^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)-'
+            r'([A-Za-z_][A-Za-z0-9_]*)',
+            line)
+        if not m:
+            continue
+        noun = m.group(2)
+        nl = noun.lower()
+        if nl.endswith('s') and nl not in LEGIT_PLURAL and not nl.endswith('ss'):
+            out.append({
+                'severity': 'warning', 'code': 'PSA6003',
+                'line': ln, 'col': 0,
+                'message': (f'function noun "{noun}" appears plural; '
+                            'use singular form'),
+            })
+    return out
+
+
+def check_global_var(clean):
+    """PSA6004: avoid $global: variable definition."""
+    pat = re.compile(r'\$global:[A-Za-z_][A-Za-z0-9_]*\s*=', re.IGNORECASE)
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            out.append({
+                'severity': 'warning', 'code': 'PSA6004',
+                'line': ln, 'col': m.start() + 1,
+                'message': ('avoid defining $global: variables; '
+                            'use $script: or pass as parameter'),
+            })
+    return out
+
+
+def check_mandatory_default(clean):
+    """PSA6005: [Parameter(Mandatory)] with default value."""
+    # Find lines like  [Parameter(Mandatory ...)] [type] $Name = default
+    out = []
+    pat = re.compile(
+        r'\[Parameter\([^)]*Mandatory[^)]*\)\][^=\n]*\$[A-Za-z_]\w*\s*=',
+        re.IGNORECASE)
+    for ln, line in enumerate(clean.split('\n'), 1):
+        if pat.search(line):
+            out.append({
+                'severity': 'warning', 'code': 'PSA6005',
+                'line': ln, 'col': 0,
+                'message': ('Mandatory parameter must not have a default '
+                            'value'),
+            })
+    return out
+
+
+def check_switch_default_true(clean):
+    """PSA6006: [switch]$Name = $true."""
+    pat = re.compile(
+        r'\[switch\]\s*\$[A-Za-z_]\w*\s*=\s*\$true\b',
+        re.IGNORECASE)
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        if pat.search(line):
+            out.append({
+                'severity': 'warning', 'code': 'PSA6006',
+                'line': ln, 'col': 0,
+                'message': ('switch parameter must not default to $true; '
+                            'switches default to $false'),
+            })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Inline suppression
+# ---------------------------------------------------------------------------
+
+SUPPRESS_LINE_PAT = re.compile(
+    r'#\s*psa-disable-line\s+([A-Z0-9, ]+)', re.IGNORECASE)
+SUPPRESS_NEXT_PAT = re.compile(
+    r'#\s*psa-disable-next-line\s+([A-Z0-9, ]+)', re.IGNORECASE)
+SUPPRESS_FILE_PAT = re.compile(
+    r'#\s*psa-disable-file\s+([A-Z0-9, ]+)', re.IGNORECASE)
+
+
+def _normalize_codes(raw):
+    """Accept 'PSA2001', 'C4', 'C4,C7,PSA2001' -> set of new codes."""
+    out = set()
+    for tok in re.split(r'[,\s]+', raw):
+        tok = tok.strip().upper()
+        if not tok:
+            continue
+        if tok in LEGACY_TO_NEW:
+            tok = LEGACY_TO_NEW[tok]
+        out.add(tok)
+    return out
+
+
+def collect_suppressions(text):
+    """Parse the raw text for inline-suppression comments.
+
+    Returns:
+        file_supp:   set of codes suppressed for the whole file
+        line_supp:   {line_no: set(codes)} per-line suppression
+    """
+    file_supp = set()
+    line_supp = {}
+    for ln_no, line in enumerate(text.split('\n'), start=1):
+        m = SUPPRESS_FILE_PAT.search(line)
+        if m:
+            file_supp |= _normalize_codes(m.group(1))
+        m = SUPPRESS_LINE_PAT.search(line)
+        if m:
+            line_supp.setdefault(ln_no, set()).update(
+                _normalize_codes(m.group(1)))
+        m = SUPPRESS_NEXT_PAT.search(line)
+        if m:
+            line_supp.setdefault(ln_no + 1, set()).update(
+                _normalize_codes(m.group(1)))
+    return file_supp, line_supp
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+# -- Remote-fetch tuning. Environment variables override defaults at startup
+#    so that CI pipelines can tune behaviour without code changes:
+#
+#       PSA_CONFIG_TIMEOUT       per-attempt connect+read timeout (seconds)
+#       PSA_CONFIG_MAX_RETRIES   total attempts including the first one
+#       PSA_CONFIG_QUIET         set to "1" to suppress retry log lines
+
+def _env_int(name, default):
+    """Read a positive integer from the environment, falling back to *default*
+    on any error (missing, non-numeric, or non-positive)."""
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        v = int(raw)
+    except ValueError:
+        return default
+    return v if v > 0 else default
+
+
+CONFIG_FETCH_TIMEOUT = _env_int('PSA_CONFIG_TIMEOUT', 30)
+CONFIG_MAX_RETRIES = _env_int('PSA_CONFIG_MAX_RETRIES', 3)
+
+# -- Browser-like User-Agent. Some CDNs / WAFs (notably Cloudflare-fronted
+#    sites) default-reject obviously-bot UAs even on public raw files; a
+#    realistic browser identifier is the pragmatic way to be reachable.
+#    Updated to mirror Chrome 131 (released late 2024). The accompanying
+#    Sec-Ch-Ua client hints MUST agree with this string — keep them in
+#    sync if you bump the version.
+
+CONFIG_BROWSER_USER_AGENT = (
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+    'AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/131.0.0.0 Safari/537.36'
+)
+
+CONFIG_BROWSER_HEADERS = {
+    'User-Agent': CONFIG_BROWSER_USER_AGENT,
+    'Accept': 'application/json, text/plain, text/*, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    # Identity encoding: avoids the complexity of decompressing gzip /
+    # brotli responses inside an analyzer process.
+    'Accept-Encoding': 'identity',
+    # Client hints that match the Chrome 131 UA above
+    'Sec-Ch-Ua': ('"Google Chrome";v="131", "Chromium";v="131", '
+                  '"Not_A Brand";v="24"'),
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+}
+
+
+def _build_tls_context():
+    """Return an explicit SSL context with TLS 1.2 minimum.
+
+    - **minimum_version = TLS 1.2**: industry baseline since 2020. GitHub,
+      most CDNs, and all major SaaS providers require at least this.
+      TLS 1.0 and TLS 1.1 are deprecated (RFC 8996, 2021) and not
+      offered here.
+    - **maximum_version left at default**: this lets the TLS handshake
+      pick the strongest mutually-supported version, typically TLS 1.3
+      against modern servers and automatically falling back to TLS 1.2
+      against older ones. The "automatic downshift to whatever the
+      server supports" behaviour is therefore intrinsic to the
+      handshake, not a custom retry loop.
+    - **Certificate verification on**: `create_default_context()` loads
+      the OS trust store and enables hostname checks. Do not disable.
+    """
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    # ctx.maximum_version is intentionally left unset (default
+    # TLSVersion.MAXIMUM_SUPPORTED) so the handshake auto-selects.
+    return ctx
+
+
+def _retry_log(msg):
+    """Emit a retry-progress line on stderr unless PSA_CONFIG_QUIET is set."""
+    if os.environ.get('PSA_CONFIG_QUIET'):
+        return
+    print(f'psa.py: {msg}', file=sys.stderr)
+
+
+def _fetch_remote_config(url):
+    """Fetch *url* with browser-like headers, TLS 1.2+, and retry/backoff.
+
+    Retry policy mirrors the Invoke-WebRequestWithRetry pattern used in
+    the companion PowerShell project (Download-SpeakerDeck.ps1):
+
+    - **5xx server errors**  → retry, sleeping 2^attempt × 3 seconds
+      between tries. Server errors are usually transient (overload,
+      brief outage) and benefit from a longer wait.
+    - **Network / timeout / connection errors** → retry, sleeping
+      2^attempt seconds. Local hiccups recover quickly.
+    - **4xx client errors** → NO retry. 404 / 403 / 401 are persistent;
+      retrying just wastes time.
+
+    Returns: response body as bytes.
+    Raises:  the most recent exception after retries are exhausted.
+             Callers are expected to wrap this in a user-facing error.
+    """
+    ctx = _build_tls_context()
+    req = urllib.request.Request(url, headers=dict(CONFIG_BROWSER_HEADERS))
+
+    last_exc = None
+    last_attempt = CONFIG_MAX_RETRIES - 1
+    for attempt in range(CONFIG_MAX_RETRIES):
+        try:
+            with urllib.request.urlopen(
+                    req,
+                    timeout=CONFIG_FETCH_TIMEOUT,
+                    context=ctx) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as e:
+            # 4xx: persistent client error. Don't retry.
+            if 400 <= e.code < 500:
+                raise
+            last_exc = e
+            if attempt < last_attempt:
+                wait = (2 ** (attempt + 1)) * 3
+                _retry_log(
+                    f'HTTP {e.code} from {url}; retry '
+                    f'{attempt + 1}/{last_attempt} in {wait}s')
+                time.sleep(wait)
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_exc = e
+            if attempt < last_attempt:
+                wait = 2 ** (attempt + 1)
+                _retry_log(
+                    f'Network error from {url}: {e}; retry '
+                    f'{attempt + 1}/{last_attempt} in {wait}s')
+                time.sleep(wait)
+
+    assert last_exc is not None  # safety net; loop runs ≥ once
+    raise last_exc
+
+
+def _strip_jsonc_comments(text):
+    """Return *text* with JSONC comments removed.
+
+    Supports two comment forms, like JavaScript / C:
+        // line comment, terminated by newline
+        /* block comment, may span multiple lines */
+
+    Comment-like sequences inside JSON string literals are preserved.
+    Newlines inside block comments are preserved so that downstream
+    line numbers in error messages stay meaningful.
+
+    This is intentionally a small handwritten state machine instead of a
+    regex: the latter is error-prone with nested-looking strings.
+    """
+    out = []
+    i, n = 0, len(text)
+    in_str = False
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ''
+
+        if in_str:
+            out.append(c)
+            # Handle backslash-escaped chars, especially \"
+            if c == '\\' and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if c == '"':
+                in_str = False
+            i += 1
+            continue
+
+        if c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+            continue
+
+        # Line comment: skip to (but keep) the newline so line numbers
+        # in any subsequent JSON parse-error align with the source.
+        if c == '/' and nxt == '/':
+            while i < n and text[i] != '\n':
+                i += 1
+            continue
+
+        # Block comment: skip everything until */; emit any newlines we
+        # crossed so that line numbers are preserved.
+        if c == '/' and nxt == '*':
+            i += 2
+            while i < n:
+                if i + 1 < n and text[i] == '*' and text[i + 1] == '/':
+                    i += 2
+                    break
+                if text[i] == '\n':
+                    out.append('\n')
+                i += 1
+            continue
+
+        out.append(c)
+        i += 1
+
+    return ''.join(out)
+
+
+def _is_url(s):
+    """Return True if *s* parses as an http(s) URL."""
+    try:
+        parsed = urllib.parse.urlparse(s)
+    except (ValueError, AttributeError):
+        return False
+    return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+
+
+def _load_config_source(path_or_url):
+    """Read configuration content from either a local path or http(s) URL.
+
+    Remote fetches are performed by `_fetch_remote_config()`, which
+    applies browser-like headers, an explicit TLS 1.2-minimum context,
+    and exponential-backoff retries on transient failures (see that
+    function's docstring for the full policy).
+
+    GitHub repositories should be referenced via the raw URL form, e.g.::
+
+        https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json
+
+    A regular blob URL (https://github.com/.../blob/...) returns HTML and
+    will not parse as JSON.
+
+    Returns:
+        str: The configuration file contents, decoded as UTF-8.
+
+    Raises:
+        OSError: Local file unreadable.
+        urllib.error.URLError / HTTPError: Remote fetch failed (after
+            retries for transient errors).
+        UnicodeDecodeError: Remote content not valid UTF-8.
+
+    Callers are expected to catch these and convert into a user-facing
+    error; see Config.load().
+    """
+    if _is_url(path_or_url):
+        return _fetch_remote_config(path_or_url).decode('utf-8')
+    with open(path_or_url, 'r', encoding='utf-8') as fh:
+        return fh.read()
+
+
+class Config:
+    """Resolved configuration for a single analyzer run."""
+
+    def __init__(self):
+        # rule_id -> bool (enabled)
+        self.enabled = {r[0]: r[3] for r in RULES}
+        self.max_line_length = 120
+        self.min_severity = 'info'
+        self.format = 'text'
+        self.no_color = False
+
+    @classmethod
+    def load(cls, args):
+        c = cls()
+        # 1) config file (lowest priority)
+        cfg_path = args.config
+        if cfg_path is None:
+            # Implicit search: .psa.config.json in current dir
+            implicit = Path.cwd() / '.psa.config.json'
+            if implicit.exists():
+                cfg_path = str(implicit)
+        if cfg_path:
+            try:
+                raw_text = _load_config_source(cfg_path)
+                clean_text = _strip_jsonc_comments(raw_text)
+                data = json.loads(clean_text)
+            except (OSError, urllib.error.URLError,
+                    ssl.SSLError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError) as e:
+                print(f'psa.py: cannot load config {cfg_path}: {e}',
+                      file=sys.stderr)
+                raise SystemExit(2)
+            if not isinstance(data, dict):
+                print(f'psa.py: config {cfg_path} did not parse to a '
+                      f'JSON object (got {type(data).__name__})',
+                      file=sys.stderr)
+                raise SystemExit(2)
+            for code in data.get('enable', []):
+                code = LEGACY_TO_NEW.get(code.upper(), code.upper())
+                if code in c.enabled:
+                    c.enabled[code] = True
+            for code in data.get('disable', []):
+                code = LEGACY_TO_NEW.get(code.upper(), code.upper())
+                if code in c.enabled:
+                    c.enabled[code] = False
+            if 'severity' in data:
+                c.min_severity = data['severity']
+            if 'max_line_length' in data:
+                c.max_line_length = int(data['max_line_length'])
+        # 2) CLI args (highest priority)
+        for code in (args.enable or []):
+            code = LEGACY_TO_NEW.get(code.upper(), code.upper())
+            if code in c.enabled:
+                c.enabled[code] = True
+        for code in (args.disable or []):
+            code = LEGACY_TO_NEW.get(code.upper(), code.upper())
+            if code in c.enabled:
+                c.enabled[code] = False
+        if args.include:
+            include = set()
+            for code in args.include:
+                code = LEGACY_TO_NEW.get(code.upper(), code.upper())
+                include.add(code)
+            for k in c.enabled:
+                c.enabled[k] = (k in include)
+        if args.severity:
+            c.min_severity = args.severity
+        if args.format:
+            c.format = args.format
+        if args.no_color or not sys.stdout.isatty() \
+                or os.environ.get('NO_COLOR'):
+            c.no_color = True
+        if args.max_line_length:
+            c.max_line_length = args.max_line_length
+        return c
+
+
+# ---------------------------------------------------------------------------
+# Analyzer driver
+# ---------------------------------------------------------------------------
+
+def analyze_text(text, cfg):
+    """Run every enabled rule over *text*; return a sorted list of issues."""
+    clean = strip_strings_and_comments(text)
+
+    raw = []  # list of issue dicts
+
+    if cfg.enabled['PSA1001']:
+        raw += check_balance(text, clean, '{', '}', 'PSA1001')
+    if cfg.enabled['PSA1002']:
+        raw += check_balance(text, clean, '(', ')', 'PSA1002')
+    if cfg.enabled['PSA1003']:
+        raw += check_balance(text, clean, '[', ']', 'PSA1003')
+
+    if cfg.enabled['PSA2001']:
+        raw += check_undefined_vars(text, clean)
+    if cfg.enabled['PSA2002']:
+        raw += check_shadow(clean)
+    if cfg.enabled['PSA2003']:
+        raw += check_match_var(clean)
+    if cfg.enabled['PSA2004']:
+        raw += check_null_on_right(clean)
+    if cfg.enabled['PSA2005']:
+        raw += check_assign_in_conditional(clean)
+    if cfg.enabled['PSA2006']:
+        raw += check_redirect_in_conditional(clean)
+
+    if cfg.enabled['PSA3001']:
+        raw += check_argumentlist(clean)
+    if cfg.enabled['PSA3002']:
+        raw += check_backtick(text)
+    if cfg.enabled['PSA3003']:
+        raw += _check_empty_match_raw_marker(text)
+    if cfg.enabled['PSA3004']:
+        raw += check_empty_catch(clean)
+
+    if cfg.enabled['PSA4001']:
+        raw += check_todo(text)
+    if cfg.enabled['PSA4002']:
+        raw += check_trailing_whitespace(text)
+    if cfg.enabled['PSA4003']:
+        raw += check_long_line(text, cfg.max_line_length)
+    if cfg.enabled['PSA4004']:
+        raw += check_trailing_semicolon(clean)
+
+    if cfg.enabled['PSA5001']:
+        raw += check_plaintext_password(clean)
+    if cfg.enabled['PSA5002']:
+        raw += check_invoke_expression(clean)
+    if cfg.enabled['PSA5003']:
+        raw += check_broken_hash(clean)
+    if cfg.enabled['PSA5004']:
+        raw += check_hardcoded_computername(clean)
+
+    if cfg.enabled['PSA6001']:
+        raw += check_approved_verb(clean)
+    if cfg.enabled['PSA6002']:
+        raw += check_cmdlet_alias(clean)
+    if cfg.enabled['PSA6003']:
+        raw += check_singular_noun(clean)
+    if cfg.enabled['PSA6004']:
+        raw += check_global_var(clean)
+    if cfg.enabled['PSA6005']:
+        raw += check_mandatory_default(clean)
+    if cfg.enabled['PSA6006']:
+        raw += check_switch_default_true(clean)
+
+    # Inline suppression
+    file_supp, line_supp = collect_suppressions(text)
+    raw = [
+        i for i in raw
+        if i['code'] not in file_supp
+        and i['code'] not in line_supp.get(i['line'], set())
+    ]
+
+    # Severity floor
+    min_rank = SEVERITY_ORDER.get(cfg.min_severity, 1)
+    raw = [i for i in raw if SEVERITY_ORDER[i['severity']] >= min_rank]
+
+    # Deduplicate identical entries (some rules can fire twice on one line)
+    seen = set()
+    out = []
+    for i in raw:
+        key = (i['code'], i['line'], i['col'], i['message'])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(i)
+
+    # Stable sort: by line, then by code
+    out.sort(key=lambda x: (x['line'], x['col'], x['code']))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Environment detection
+# ---------------------------------------------------------------------------
+# Probe the runtime for PowerShell and PSScriptAnalyzer. Used to inform the
+# user that, if those tools are available, they should also run them for
+# complementary coverage. Output is purely informational and NEVER affects
+# the analyzer's exit code or issue count.
+
+# Timeout in seconds for each external probe; keep small to avoid blocking
+# CI runs when PowerShell hangs on first invocation (rare but possible).
+ENV_PROBE_TIMEOUT = 10
+
+
+def _probe_powershell_binary():
+    """Locate a usable PowerShell binary.
+
+    Search order is `pwsh` (PowerShell 7+, preferred and cross-platform),
+    then `powershell` (Windows PowerShell 5.1, Windows-only), then the
+    fully-qualified `powershell.exe` (Windows). Return None if no
+    candidate exists on PATH.
+    """
+    for cmd in ('pwsh', 'powershell', 'powershell.exe'):
+        path = shutil.which(cmd)
+        if path:
+            return cmd, path
+    return None, None
+
+
+def _run_ps(ps_cmd, ps_script):
+    """Run a one-liner PowerShell script and return its stdout (stripped).
+
+    On any error (timeout, non-zero exit, missing binary, FileNotFoundError)
+    return None. Never raises; environment detection must be best-effort.
+    """
+    try:
+        result = subprocess.run(
+            [ps_cmd, '-NoProfile', '-NonInteractive',
+             '-Command', ps_script],
+            capture_output=True, text=True,
+            timeout=ENV_PROBE_TIMEOUT,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    out = (result.stdout or '').strip()
+    return out or None
+
+
+def detect_environment():
+    """Detect the runtime environment.
+
+    Returns a dict with these keys:
+        python_version       str   e.g. '3.11.4'
+        python_executable    str   absolute path to the Python interpreter
+        platform             str   e.g. 'Linux 6.5.0-21-generic' / 'Darwin 23.4.0'
+        psa_version          str   psa.py's own __version__
+        powershell           dict or None:
+            command          str   binary name used ('pwsh' / 'powershell' / ...)
+            path             str   absolute path of the binary
+            version          str   PSVersion string
+        psscriptanalyzer     dict or None:
+            version          str   module version string
+
+    Either `powershell` or `psscriptanalyzer` (or both) may be None when
+    not installed. This function never raises.
+    """
+    info = {
+        'python_version': sys.version.split()[0],
+        'python_executable': sys.executable,
+        'platform': f'{_platform.system()} {_platform.release()}',
+        'psa_version': __version__,
+        'powershell': None,
+        'psscriptanalyzer': None,
+    }
+
+    ps_cmd, ps_path = _probe_powershell_binary()
+    if not ps_cmd:
+        return info
+
+    # Probe PowerShell version
+    ps_version = _run_ps(ps_cmd, '$PSVersionTable.PSVersion.ToString()')
+    if ps_version:
+        info['powershell'] = {
+            'command': ps_cmd,
+            'path': ps_path,
+            'version': ps_version,
+        }
+    else:
+        # Found the binary but couldn't run it; nothing more to probe.
+        return info
+
+    # Probe PSScriptAnalyzer module
+    psa_version = _run_ps(
+        ps_cmd,
+        '$m = Get-Module -ListAvailable PSScriptAnalyzer | '
+        'Sort-Object Version -Descending | Select-Object -First 1; '
+        'if ($m) { $m.Version.ToString() }'
+    )
+    if psa_version:
+        info['psscriptanalyzer'] = {'version': psa_version}
+
+    return info
+
+
+def format_environment_text(env, no_color):
+    """Render the environment detection result as human-readable text.
+
+    Output is multi-line and uses the same colour scheme as analyzer
+    output. Suitable for prepending to a normal analysis report when
+    --show-env is passed, or as the entire output of --check-env.
+    """
+    lines = []
+    lines.append(
+        _color('==== psa.py: Environment Detection ====',
+               ANSI_BLD, no_color))
+    lines.append(f'psa.py        : {env["psa_version"]}')
+    lines.append(f'Python        : {env["python_version"]} '
+                 f'({env["platform"]})')
+
+    ps = env['powershell']
+    if ps:
+        lines.append(
+            f'PowerShell    : {ps["command"]} {ps["version"]} '
+            f'at {ps["path"]}')
+    else:
+        lines.append('PowerShell    : not found on PATH')
+
+    psa_mod = env['psscriptanalyzer']
+    if psa_mod:
+        lines.append(f'PSScriptAnalyzer : '
+                     f'{psa_mod["version"]} (available)')
+    else:
+        lines.append('PSScriptAnalyzer : not installed')
+
+    lines.append('')
+
+    # Recommendation: pick exactly one of three message variants based on
+    # which tools are detected. All three are info-level only; the exit
+    # code is unaffected.
+    if psa_mod and ps:
+        lines.append(_color('Info:', ANSI_CYA, no_color))
+        lines.append(
+            '  PSScriptAnalyzer is available in this environment. For')
+        lines.append(
+            '  comprehensive PowerShell static analysis, consider running')
+        lines.append(
+            '  Microsoft\'s analyzer in addition to psa.py:')
+        lines.append('')
+        lines.append(
+            f'    {ps["command"]} -Command "Invoke-ScriptAnalyzer '
+            '-Path <script>.ps1"')
+        lines.append('')
+        lines.append(
+            '  The two tools have largely complementary check sets;')
+        lines.append('  running both maximizes coverage.')
+    elif ps and not psa_mod:
+        lines.append(_color('Info:', ANSI_CYA, no_color))
+        lines.append(
+            '  PowerShell is available, but PSScriptAnalyzer is not')
+        lines.append('  installed. To install it for complementary checks:')
+        lines.append('')
+        lines.append(
+            f'    {ps["command"]} -Command "Install-Module -Name '
+            'PSScriptAnalyzer -Scope CurrentUser -Force"')
+    else:
+        lines.append(_color('Info:', ANSI_CYA, no_color))
+        lines.append(
+            '  psa.py is operating in standalone mode. No PowerShell')
+        lines.append(
+            '  runtime was detected on PATH, so PSScriptAnalyzer cannot')
+        lines.append(
+            '  be invoked from this environment. psa.py will still run')
+        lines.append(
+            '  its full 27-rule check set against your PowerShell files.')
+
+    return '\n'.join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Formatters
+# ---------------------------------------------------------------------------
+
+ANSI_RED = '\x1b[31m'
+ANSI_YEL = '\x1b[33m'
+ANSI_CYA = '\x1b[36m'
+ANSI_BLD = '\x1b[1m'
+ANSI_RST = '\x1b[0m'
+
+
+def _color(s, code, no_color):
+    return s if no_color else f'{code}{s}{ANSI_RST}'
+
+
+def _alias_suffix(code):
+    rule = CODE_TO_RULE.get(code)
+    if rule and rule[2]:
+        return f' (={rule[2]})'
+    return ''
+
+
+def format_text(path, text, issues, no_color):
     err = sum(1 for i in issues if i['severity'] == 'error')
     warn = sum(1 for i in issues if i['severity'] == 'warning')
     info = sum(1 for i in issues if i['severity'] == 'info')
-
-    print('==== psa.py: PowerShell Static Analyzer ====')
-    print(f'File   : {path}')
-    print(f'Lines  : {len(text.splitlines())}')
-    print(f'Issues : {err} errors, {warn} warnings, {info} info\n')
-
+    line_count = len(text.splitlines())
+    lines = []
+    lines.append(
+        _color('==== psa.py: PowerShell Static Analyzer ====',
+               ANSI_BLD, no_color))
+    lines.append(f'File   : {path}')
+    lines.append(f'Lines  : {line_count}')
+    lines.append(f'Issues : {err} errors, {warn} warnings, {info} info')
+    lines.append('')
     if not issues:
-        print('  (no issues found)')
-    else:
-        for sev in ('error', 'warning', 'info'):
-            sub = [i for i in issues if i['severity'] == sev]
-            if not sub:
-                continue
-            print(f'---- {sev.upper()} ({len(sub)}) ----')
-            for i in sub:
-                print(f"  [{i['code']}] line {i['line']:>5}: {i['message']}")
+        lines.append('  (no issues found)')
+        return '\n'.join(lines)
+    for sev, col in (('error', ANSI_RED),
+                     ('warning', ANSI_YEL),
+                     ('info', ANSI_CYA)):
+        sub = [i for i in issues if i['severity'] == sev]
+        if not sub:
+            continue
+        lines.append(_color(f'---- {sev.upper()} ({len(sub)}) ----',
+                            col, no_color))
+        for i in sub:
+            alias = _alias_suffix(i['code'])
+            loc = (f"line {i['line']:>5}:{i['col']:>3}"
+                   if i['col'] else f"line {i['line']:>5}     ")
+            lines.append(
+                f"  [{_color(i['code'], col, no_color)}{alias}] "
+                f"{loc}: {i['message']}")
+        lines.append('')
+    return '\n'.join(lines)
+
+
+def format_json(path, text, issues):
+    payload = {
+        'file': str(path),
+        'lines': len(text.splitlines()),
+        'summary': {
+            'errors':   sum(1 for i in issues if i['severity'] == 'error'),
+            'warnings': sum(1 for i in issues if i['severity'] == 'warning'),
+            'info':     sum(1 for i in issues if i['severity'] == 'info'),
+        },
+        'issues': [
+            {
+                'code': i['code'],
+                'legacy_code': CODE_TO_RULE[i['code']][2]
+                if i['code'] in CODE_TO_RULE else None,
+                'severity': i['severity'],
+                'line': i['line'],
+                'col': i['col'],
+                'message': i['message'],
+            }
+            for i in issues
+        ],
+    }
+    return json.dumps(payload, indent=2, ensure_ascii=False)
+
+
+def format_sarif(per_file_results, env_info=None):
+    """Emit SARIF 2.1.0.
+
+    *per_file_results* is a list of (path, text, issues). *env_info* is the
+    optional environment-detection dict returned by detect_environment();
+    when present, it is recorded in the SARIF run's `properties` block
+    (SARIF spec permits tool-specific properties via the `properties` bag).
+    """
+    rules_section = []
+    for r in RULES:
+        code, sev, legacy, _enabled, msg = r
+        sarif_level = {'error': 'error',
+                       'warning': 'warning',
+                       'info': 'note'}.get(sev, 'note')
+        rules_section.append({
+            'id': code,
+            'name': code,
+            'shortDescription': {'text': msg},
+            'fullDescription': {'text': msg},
+            'defaultConfiguration': {'level': sarif_level},
+            'helpUri': 'https://github.com/usui-tk/ai-generated-artifacts'
+                       '/tree/main/scripts/python/powershell-static-analyzer',
+        })
+    results = []
+    for path, _text, issues in per_file_results:
+        for i in issues:
+            sarif_level = {'error': 'error',
+                           'warning': 'warning',
+                           'info': 'note'}.get(i['severity'], 'note')
+            results.append({
+                'ruleId': i['code'],
+                'level': sarif_level,
+                'message': {'text': i['message']},
+                'locations': [{
+                    'physicalLocation': {
+                        'artifactLocation': {'uri': str(path)},
+                        'region': {
+                            'startLine': max(i['line'], 1),
+                            'startColumn': max(i['col'], 1),
+                        },
+                    },
+                }],
+            })
+    run = {
+        'tool': {
+            'driver': {
+                'name': 'psa.py',
+                'version': __version__,
+                'informationUri': 'https://github.com/usui-tk/'
+                                  'ai-generated-artifacts',
+                'rules': rules_section,
+            },
+        },
+        'results': results,
+    }
+    if env_info is not None:
+        run['properties'] = {'environment': env_info}
+    sarif = {
+        '$schema': 'https://json.schemastore.org/sarif-2.1.0.json',
+        'version': '2.1.0',
+        'runs': [run],
+    }
+    return json.dumps(sarif, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Path expansion
+# ---------------------------------------------------------------------------
+
+def expand_paths(paths, recursive):
+    out = []
+    for p in paths:
+        # Allow shell globs even on platforms that didn't expand them
+        matches = glob.glob(p, recursive=True) or [p]
+        for m in matches:
+            path = Path(m)
+            if path.is_dir():
+                if recursive:
+                    out.extend(sorted(path.rglob('*.ps1')))
+                    out.extend(sorted(path.rglob('*.psm1')))
+                else:
+                    print(f'psa.py: skipping directory (use -r): {path}',
+                          file=sys.stderr)
+            else:
+                out.append(path)
+    # Deduplicate, preserve order
+    seen = set()
+    uniq = []
+    for p in out:
+        rp = p.resolve()
+        if rp in seen:
+            continue
+        seen.add(rp)
+        uniq.append(p)
+    return uniq
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing / main
+# ---------------------------------------------------------------------------
+
+def list_rules(no_color):
+    print(_color('PSA Rule Catalog', ANSI_BLD, no_color))
+    print()
+    print(f'{"Code":<8} {"Severity":<8} {"Default":<8} {"Legacy":<7} '
+          f'Description')
+    print('-' * 78)
+    for code, sev, legacy, default, msg in RULES:
+        default_str = 'on' if default else 'OFF'
+        legacy_str = legacy or '-'
+        print(f'{code:<8} {sev:<8} {default_str:<8} {legacy_str:<7} {msg}')
+    return 0
+
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(
+        prog='psa.py',
+        description='PowerShell static analyzer (PSScriptAnalyzer-inspired).',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument('paths', nargs='*',
+                   help='PowerShell files or directories to analyze')
+    p.add_argument('-r', '--recursive', action='store_true',
+                   help='Recursively scan directories for .ps1 / .psm1')
+    p.add_argument('--format', choices=('text', 'json', 'sarif'),
+                   default='text', help='Output format (default: text)')
+    p.add_argument('--severity', choices=('error', 'warning', 'info'),
+                   help='Minimum severity to report')
+    p.add_argument('--enable', action='append', metavar='CODE',
+                   help='Enable a disabled-by-default rule')
+    p.add_argument('--disable', action='append', metavar='CODE',
+                   help='Disable a specific rule')
+    p.add_argument('--include', action='append', metavar='CODE',
+                   help='Only run the listed rules (comma-separated OK)')
+    p.add_argument('--config', metavar='PATH_OR_URL',
+                   help=('Path to a local .psa.config.json (JSONC) file '
+                         'OR an http(s):// URL. Default: implicit search '
+                         'for .psa.config.json in CWD.'))
+    p.add_argument('--max-line-length', type=int, metavar='N',
+                   help='Maximum line length for PSA4003 (default: 120)')
+    p.add_argument('--no-color', action='store_true',
+                   help='Disable ANSI color output')
+    p.add_argument('--list-rules', action='store_true',
+                   help='Print the rule catalog and exit')
+    p.add_argument('--check-env', action='store_true',
+                   help=('Detect PowerShell / PSScriptAnalyzer availability '
+                         'and exit (informational, exit code 0)'))
+    p.add_argument('--show-env', action='store_true',
+                   help=('Prepend an environment summary to the normal '
+                         'analysis output (informational only)'))
+    p.add_argument('--version', action='version',
+                   version=f'psa.py {__version__}')
+
+    args = p.parse_args(argv)
+    # Allow comma-separated values for --enable/--disable/--include
+    for attr in ('enable', 'disable', 'include'):
+        vals = getattr(args, attr)
+        if vals is None:
+            continue
+        flat = []
+        for v in vals:
+            flat.extend(s.strip() for s in v.split(',') if s.strip())
+        setattr(args, attr, flat)
+    return args
+
+
+def main(argv=None):
+    args = parse_args(argv)
+
+    cfg = Config.load(args)
+
+    if args.list_rules:
+        return list_rules(cfg.no_color)
+
+    # --check-env: detect environment and exit (no file analysis)
+    if args.check_env:
+        env = detect_environment()
+        if cfg.format == 'json':
+            print(json.dumps(env, indent=2, ensure_ascii=False))
+        else:
+            print(format_environment_text(env, cfg.no_color))
+        return 0
+
+    if not args.paths:
+        print('psa.py: no input files specified. Use --help.',
+              file=sys.stderr)
+        return 2
+
+    # --show-env: prepend env summary to normal output (informational)
+    env_info = None
+    if args.show_env:
+        env_info = detect_environment()
+        if cfg.format == 'text':
+            print(format_environment_text(env_info, cfg.no_color))
             print()
 
-    return 2 if err else (1 if warn else 0)
+    files = expand_paths(args.paths, args.recursive)
+    if not files:
+        print('psa.py: no PowerShell files found.', file=sys.stderr)
+        return 2
+
+    per_file = []
+    total_err = total_warn = 0
+    for path in files:
+        try:
+            text = path.read_text(encoding='utf-8', errors='replace')
+        except OSError as e:
+            print(f'psa.py: cannot read {path}: {e}', file=sys.stderr)
+            continue
+        issues = analyze_text(text, cfg)
+        per_file.append((path, text, issues))
+        total_err += sum(1 for i in issues if i['severity'] == 'error')
+        total_warn += sum(1 for i in issues if i['severity'] == 'warning')
+
+    if cfg.format == 'sarif':
+        print(format_sarif(per_file, env_info))
+    elif cfg.format == 'json':
+        if len(per_file) == 1:
+            path, text, issues = per_file[0]
+            payload = json.loads(format_json(path, text, issues))
+            if env_info is not None:
+                payload['environment'] = env_info
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+        else:
+            payload = {'files': [json.loads(format_json(p, t, i))
+                                 for p, t, i in per_file]}
+            if env_info is not None:
+                payload['environment'] = env_info
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        for path, text, issues in per_file:
+            print(format_text(path, text, issues, cfg.no_color))
+            if len(per_file) > 1:
+                print()
+
+    return 2 if total_err else (1 if total_warn else 0)
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        # Triggered when output is piped to a consumer that closed early
+        # (e.g. `| head`). Suppress the traceback and exit cleanly.
+        try:
+            sys.stdout.close()
+        except Exception:
+            pass
+        sys.exit(0)
+    except KeyboardInterrupt:
+        sys.exit(130)

@@ -3,13 +3,119 @@
 > 🇺🇸 English / 🇯🇵 [日本語](./README.ja.md)
 
 A single-file Python 3 static analyzer for PowerShell scripts (`psa.py`).
-Catches the classes of bugs that the regular PowerShell parser doesn't flag at
-parse time, but which routinely break long-running scripts in surprising ways.
+Catches the classes of bugs that the regular PowerShell parser doesn't
+flag at parse time, but which routinely break long-running scripts in
+surprising ways.
 
-This directory is the **single canonical source** of `psa.py`. All consumers —
-both PowerShell scripts within this `ai-generated-artifacts` repository and
-external repositories — reference this file rather than maintaining their own
-copy.
+This directory is the **single canonical source** of `psa.py`. All
+consumers — both PowerShell scripts within this `ai-generated-artifacts`
+repository and external repositories — reference this file rather than
+maintaining their own copy.
+
+For the formal specification (CLI contract, rule semantics, output
+schemas, environment detection contract), see [`SPEC.md`](./SPEC.md).
+日本語版は [`SPEC.ja.md`](./SPEC.ja.md) を参照してください。
+
+**Current version: 2.3.0** (hardened remote fetch + JSONC config + environment detection)
+
+---
+
+## What's new
+
+### 2.3.0 — Hardened remote-config fetch
+
+The `--config <URL>` code path is now production-grade:
+
+- **Browser-like User-Agent** (Chrome 131) plus `Sec-Ch-Ua` client
+  hints, so CDN / WAF defaults that block obvious bot UAs (notably
+  Cloudflare-fronted sites) do not interfere.
+- **Explicit TLS 1.2 minimum**, maximum auto-negotiated to TLS 1.3
+  against modern servers. Old TLS 1.0/1.1 are not offered (RFC 8996).
+  Certificate verification is always on.
+- **Exponential-backoff retries** on transient failures, modelled on
+  the `Invoke-WebRequestWithRetry` pattern from the companion
+  PowerShell project:
+  - 5xx responses → retry, waiting `2^attempt × 3` seconds (6 s, 12 s, …)
+  - Network / timeout errors → retry, waiting `2^attempt` seconds (2 s, 4 s, …)
+  - 4xx responses → fail immediately (persistent client error)
+- **Env-var tuning** for CI flexibility:
+  - `PSA_CONFIG_TIMEOUT` — per-attempt timeout (default 30s)
+  - `PSA_CONFIG_MAX_RETRIES` — total attempts (default 3)
+  - `PSA_CONFIG_QUIET` — suppress retry-progress messages on stderr
+
+See [SPEC §5.4](./SPEC.md#54-remote-configuration-http--https) for the
+full contract.
+
+### 2.2.0 — JSONC configuration & remote config URLs
+
+- **Configuration files are now JSONC.** Add `// line comments` and
+  `/* block comments */` to `.psa.config.json` as freely as you would
+  in JavaScript. Comment-like text inside string literals is preserved
+  intact.
+- **`--config` accepts URLs.** In addition to a local path, you can
+  point `--config` at any http(s) URL — most commonly a GitHub raw URL
+  for sharing a team-wide configuration:
+
+  ```bash
+  psa.py --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json <script>.ps1
+  ```
+- **Template file shipped.** A new file `.psa.config.json.template`
+  ships next to `psa.py` in this directory.
+
+### 2.1.0 — environment detection
+
+Adds a runtime probe (`--check-env` / `--show-env`) that reports
+whether PowerShell and PSScriptAnalyzer are available on the current
+host. The output is purely informational; it never affects exit codes
+or issue counts.
+
+```
+==== psa.py: Environment Detection ====
+psa.py        : 2.2.0
+Python        : 3.12.3 (Linux 6.18.5)
+PowerShell    : pwsh 7.4.6 at /usr/bin/pwsh
+PSScriptAnalyzer : 1.22.0 (available)
+
+Info:
+  PSScriptAnalyzer is available in this environment. For
+  comprehensive PowerShell static analysis, consider running
+  Microsoft's analyzer in addition to psa.py:
+
+    pwsh -Command "Invoke-ScriptAnalyzer -Path <script>.ps1"
+```
+
+This is particularly useful for AI agents (Claude, etc.) and CI
+sandboxes where the availability of PowerShell may vary per execution.
+The probe is fast, side-effect-free, and bypasses user profiles
+(`-NoProfile -NonInteractive`).
+
+### 2.0.0 — rule-taxonomy overhaul
+
+Version 2.0 is a major release inspired by Microsoft's
+[PSScriptAnalyzer][PSScriptAnalyzer] and Vidar Holen's
+[shellcheck][shellcheck]. It expanded the rule set from 10 to **27 rules**
+and added JSON / SARIF output, inline suppression, configuration files,
+and multi-file scanning — while preserving the single-file,
+zero-dependency design.
+
+| Area | v1.x | v2.0 |
+|:---|:---|:---|
+| Rule codes | `C1`–`C10` (legacy) | `PSA1001`–`PSA6006` (27 rules) |
+| Output formats | Text only | Text / JSON / SARIF 2.1.0 |
+| Suppression | None | `# psa-disable-line`, `next-line`, `file` |
+| Configuration | CLI only | `.psa.config.json` + CLI |
+| File handling | Single file | Multiple files / directories / glob |
+| Color output | None | TTY-aware ANSI (NO_COLOR honored) |
+| Heredoc / sub-expr | Limited | Full `@"…"@`, `@'…'@`, `$()`, `@()` |
+
+**Backward compatibility.** Legacy codes (`C1`–`C10`) remain accepted in
+`--enable` / `--disable` flags and inline-suppression comments. Text
+output prints the new code with the legacy code as an alias (e.g.,
+`[PSA2003 (=C7)]`). The exit-code semantics (`0` / `1` / `2`) are
+unchanged.
+
+[PSScriptAnalyzer]: https://github.com/PowerShell/PSScriptAnalyzer
+[shellcheck]: https://github.com/koalaman/shellcheck
 
 ---
 
@@ -18,42 +124,44 @@ copy.
 `psa.py` originated in
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
 under `tools/psa.py`. It was subsequently consolidated into this
-`ai-generated-artifacts` repository as the **single canonical source**, and
-the original copy under `tools/psa.py` in the
-`Deploy-AMD-Drivers-For-WindowsServer` repository was removed. That repository
-now references `psa.py` here as an external dependency (see its
-[SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy)).
+`ai-generated-artifacts` repository as the **single canonical source**,
+and the original copy under `tools/psa.py` in the
+`Deploy-AMD-Drivers-For-WindowsServer` repository was removed. That
+repository now references `psa.py` here as an external dependency (see
+its [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy)).
 
 **All bug fixes, new checks, and auto-variable list updates must be made
-here.** Consumer repositories pull `psa.py` either by `git clone` of this
-repository or by single-file download of the raw blob (see Usage below). No
-downstream forks are maintained.
+here.** Consumer repositories pull `psa.py` either by `git clone` of
+this repository or by single-file download of the raw blob (see Usage
+below). No downstream forks are maintained.
 
 ---
 
 ## Why a custom analyzer?
 
-Microsoft ships [PSScriptAnalyzer](https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/overview),
-which is excellent and should be used too. But PSScriptAnalyzer has two
-limitations for our use cases:
+Microsoft ships [PSScriptAnalyzer][PSScriptAnalyzer], which is excellent
+and should be used too. But PSScriptAnalyzer has two limitations:
 
-1. It requires PowerShell 5.1+ to run (chicken-and-egg if your CI doesn't have
-   Windows / PowerShell yet).
-2. It catches a different set of issues — primarily style and best-practice
-   violations. It does **not** by default catch unbalanced braces in
-   thousand-line scripts, undefined variable references that are typos, or
-   `-match` against a bare `$variable` that returns true on `$null`.
+1. It requires PowerShell 5.1+ to run (chicken-and-egg if your CI
+   doesn't have Windows / PowerShell yet).
+2. It catches a different set of issues — primarily style and
+   best-practice violations. It does **not** by default catch unbalanced
+   braces in thousand-line scripts, undefined variable references that
+   are typos, or `-match` against a bare `$variable` that returns true
+   on `$null`.
 
-`psa.py` is a Python script (running anywhere Python 3 runs) that performs a
-complementary set of checks. It's not a replacement for PSScriptAnalyzer; it's
-an extra net.
+`psa.py` is a Python script (running anywhere Python 3 runs) that
+performs a complementary set of checks. It is not a drop-in replacement
+for PSScriptAnalyzer; it is an extra net, designed to run in CI
+pipelines that don't have PowerShell available.
 
 ---
 
 ## Prerequisites
 
-- Python 3.x (no external dependencies; standard library only)
-- A `.ps1` file to analyze
+- Python 3.8 or newer
+- Standard library only — **no external dependencies**
+- A `.ps1` or `.psm1` file to analyze
 
 ---
 
@@ -63,20 +171,58 @@ an extra net.
 # Analyze a single script
 python3 scripts/python/powershell-static-analyzer/psa.py path/to/script.ps1
 
-# Example: analyze a script in this repository
+# Multiple files / glob
+python3 scripts/python/powershell-static-analyzer/psa.py *.ps1
+
+# Recursive directory scan (PS1 + PSM1)
+python3 scripts/python/powershell-static-analyzer/psa.py -r ./scripts
+
+# JSON output (machine-readable)
+python3 scripts/python/powershell-static-analyzer/psa.py --format json script.ps1
+
+# SARIF output (for GitHub Code Scanning / IDE plugins)
+python3 scripts/python/powershell-static-analyzer/psa.py --format sarif script.ps1 > result.sarif
+
+# Filter by severity
+python3 scripts/python/powershell-static-analyzer/psa.py --severity error script.ps1
+
+# Enable a disabled-by-default rule
+python3 scripts/python/powershell-static-analyzer/psa.py --enable PSA6002 script.ps1
+
+# Disable a specific rule
+python3 scripts/python/powershell-static-analyzer/psa.py --disable PSA2001 script.ps1
+
+# Run only a specific subset of rules
+python3 scripts/python/powershell-static-analyzer/psa.py --include PSA1001,PSA1002 script.ps1
+
+# Use an explicit configuration file (local path)
+python3 scripts/python/powershell-static-analyzer/psa.py --config .psa.config.json script.ps1
+
+# Use a remote configuration file (http(s) URL — GitHub raw recommended)
 python3 scripts/python/powershell-static-analyzer/psa.py \
-        scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+        --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json script.ps1
+
+# Print the rule catalog
+python3 scripts/python/powershell-static-analyzer/psa.py --list-rules
+
+# Detect PowerShell / PSScriptAnalyzer availability (informational)
+python3 scripts/python/powershell-static-analyzer/psa.py --check-env
+
+# Prepend environment summary to normal analysis output (informational)
+python3 scripts/python/powershell-static-analyzer/psa.py --show-env script.ps1
 ```
 
-Exit codes:
+### Exit codes
 
-- `0` — clean (no errors, no warnings)
-- `1` — warnings only (CI may treat as soft-fail)
-- `2` — errors found (CI must fail)
+| Code | Meaning |
+|:---:|:---|
+| `0` | Clean (no errors, no warnings) |
+| `1` | Warnings only (CI may treat as soft-fail) |
+| `2` | Errors found (CI must fail) |
 
 ---
 
-## Output format
+## Output format (text)
 
 ```
 ==== psa.py: PowerShell Static Analyzer ====
@@ -92,82 +238,219 @@ When issues are present:
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : path/to/script.ps1
-Lines  : 8680
-Issues : 0 errors, 9 warnings, 0 info
+Lines  : 8792
+Issues : 1 errors, 42 warnings, 31 info
 
----- WARNING (9) ----
-  [C7] line  2215: -match against bare $noisePattern - $null pattern returns true
-  [C6] line  2300: Start-Process -ArgumentList; prefer ProcessStartInfo
+---- ERROR (1) ----
+  [PSA5001] line   499:  5: plain-text password parameter $PfxPassword;
+                                use [SecureString] or [PSCredential]
+
+---- WARNING (42) ----
+  [PSA3004]            line  1076     : empty catch block
+  [PSA2003 (=C7)]      line  2337: 22: -match against bare $noisePattern ...
+  [PSA3001 (=C6)]      line  2422     : Start-Process -ArgumentList; ...
   ...
 ```
 
-Each issue has a check code (C1–C10), severity, line number, and short message.
+Each issue contains the new `PSAxxxx` code, an optional legacy alias
+`(=Cn)` for codes that existed in v1.x, the severity, the line and
+optional column, and a short message.
 
 ---
 
-## Checks implemented
+## Rule catalog
 
-| Code | Severity | What it catches | Why it matters |
-| --- | --- | --- | --- |
-| **C1** | error | Brace balance: `{` count vs `}` count | A single unmatched brace in a multi-thousand-line script is impossible to debug by eye. The parser reports it as a syntax error at EOF, not at the actual mismatch. `psa.py` reports both counts so you can `grep -n '^[}]'` and trace. |
-| **C2** | error | Paren balance: `(` vs `)` | Same as C1 but for `()`. |
-| **C3** | error | Bracket balance: `[` vs `]` | Same as C1 but for `[]`. |
-| **C4** | warning | Undefined variable references (heuristic) | Catches typos like `$matchedDeciks` instead of `$matchedDecks`. Heuristic — false positives possible for `$global:` / `$script:` scoped vars assigned elsewhere. |
-| **C5** | warning | Auto-variable shadowing | Assigning to `$args`, `$_`, `$matches`, `$null`, etc. silently breaks PowerShell built-ins. The list of auto-vars is from [about_Automatic_Variables](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables). |
-| **C6** | warning | `Start-Process -ArgumentList` (without `-PassThru` / `Wait-Process` etc.) | `Start-Process` is convenient but mishandles paths with spaces, gives a poor exit code path, and drops stderr. Prefer `[System.Diagnostics.Process]::Start([ProcessStartInfo]@{...})` for any script that needs reliability. |
-| **C7** | warning | `-match` against bare `$variable` (e.g. `$line -match $pattern`) where `$pattern` could be `$null` | `$line -match $null` is `True` and **assigns `$matches = $null`**. Wrap with `[string]::IsNullOrEmpty($pattern)` before matching. |
-| **C8** | info | TODO / FIXME markers | Just a reminder of pending work. Not a failure. |
-| **C9** | warning | Trailing backtick before empty line | The PowerShell line-continuation backtick is fragile. If the next line is blank (visible) or has trailing whitespace, the continuation breaks silently. |
-| **C10** | warning | `-match` against literal empty string `""` or `''` | `$x -match ""` is **always True** for any string, including empty. Almost always a coding mistake. |
+`PSA1xxx` — parse / structural checks (always Error)
+
+| Code | Legacy | Default | Description |
+|:---|:---:|:---:|:---|
+| **PSA1001** | – | ✅ on | Brace balance: `{` count vs `}` count |
+| **PSA1002** | – | ✅ on | Paren balance: `(` vs `)` |
+| **PSA1003** | – | ✅ on | Bracket balance: `[` vs `]` |
+
+`PSA2xxx` — variable / scope (Error / Warning)
+
+| Code | Legacy | Sev | Default | Description |
+|:---|:---:|:---:|:---:|:---|
+| **PSA2001** | C4 | Error | ✅ on | Undefined variable reference (heuristic) |
+| **PSA2002** | C5 | Warning | ✅ on | Auto-variable shadowing (`$args`, `$matches`, …) |
+| **PSA2003** | C7 | Warning | ✅ on | `-match` against bare `$variable` |
+| **PSA2004** | – | Warning | ✅ on | `$x -eq $null` (use `$null -eq $x` to avoid the collection trap) |
+| **PSA2005** | – | Warning | ✅ on | Assignment operator (`=`) inside `if` / `while` |
+| **PSA2006** | – | Warning | ✅ on | Redirection operator (`>` / `<`) inside `if` / `while` |
+
+`PSA3xxx` — coding patterns (Warning)
+
+| Code | Legacy | Default | Description |
+|:---|:---:|:---:|:---|
+| **PSA3001** | C6 | ✅ on | `Start-Process -ArgumentList`; prefer `ProcessStartInfo` |
+| **PSA3002** | C9 | ✅ on | Backtick continuation followed by an empty line |
+| **PSA3003** | C10 | ✅ on | `-match` against literal empty string |
+| **PSA3004** | – | ✅ on | Empty `catch { }` block |
+
+`PSA4xxx` — style / informational (Info)
+
+| Code | Legacy | Default | Description |
+|:---|:---:|:---:|:---|
+| **PSA4001** | C8 | ✅ on | Unfinished marker (TODO / FIXME / XXX / HACK) |
+| **PSA4002** | – | ✅ on | Trailing whitespace at end of line |
+| **PSA4003** | – | ⛔ off | Long line exceeds `max_line_length` (default 120) |
+| **PSA4004** | – | ✅ on | Trailing semicolon at end of line |
+
+`PSA5xxx` — security (Error / Warning)
+
+| Code | Sev | Default | Description |
+|:---|:---:|:---:|:---|
+| **PSA5001** | Error | ✅ on | Plain-text password parameter (`[string]$Password`) |
+| **PSA5002** | Warning | ✅ on | `Invoke-Expression` usage |
+| **PSA5003** | Warning | ✅ on | Broken hash algorithm (MD5 / SHA1) |
+| **PSA5004** | Warning | ✅ on | Hardcoded `ComputerName` (literal string) |
+
+`PSA6xxx` — best-practice (Warning)
+
+| Code | Default | Description |
+|:---|:---:|:---|
+| **PSA6001** | ✅ on | Function uses non-approved verb (cf. `Get-Verb`) |
+| **PSA6002** | ⛔ off | Cmdlet alias used (`ls`, `cd`, `dir`, `where`, …) |
+| **PSA6003** | ✅ on | Function noun should be singular |
+| **PSA6004** | ✅ on | Avoid `$global:` variable definition |
+| **PSA6005** | ✅ on | Mandatory parameter must not have a default value |
+| **PSA6006** | ✅ on | Switch parameter must not default to `$true` |
+
+### Why some rules are disabled by default
+
+Two rules are off by default to keep the signal-to-noise ratio high on
+real-world scripts:
+
+- **PSA4003 (long line)** — line-length is mostly stylistic and very
+  context-dependent (comment headers, long URLs, ARN-like strings).
+  Enable per project when you have agreed on a length limit.
+- **PSA6002 (cmdlet alias)** — many production scripts use `foreach`
+  and `where` deliberately. Enable when your style guide forbids
+  aliases.
+
+Use `--enable PSA6002` on the command line or add it to your
+`.psa.config.json` `enable` list.
 
 ---
 
 ## What the analyzer does NOT check
 
 - Cmdlet existence (would require a PowerShell session)
-- Type correctness (PowerShell is dynamically typed; this is shell scripting, not C#)
+- Type correctness (PowerShell is dynamically typed)
 - Module imports (`Import-Module` resolution)
-- Function signature correctness (param types, mandatory parameters)
-- Best-practice style violations (covered by PSScriptAnalyzer)
+- Best-practice style violations covered by PSScriptAnalyzer that need
+  AST analysis (e.g., `PSUseConsistentIndentation`, `PSUseCorrectCasing`)
 
 ---
 
-## Running PSScriptAnalyzer alongside
+## Inline suppression
 
-If you have PowerShell 5.1+ available, run both:
+Per-line:
 
 ```powershell
-# In addition to psa.py
-Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
-Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
+$x -match $pattern  # psa-disable-line PSA2003
 ```
+
+Next line:
+
+```powershell
+# psa-disable-next-line PSA3001,PSA3002
+Start-Process -ArgumentList $args ...
+```
+
+Whole file (place anywhere, typically near the top):
+
+```powershell
+# psa-disable-file PSA4001
+```
+
+Both new (`PSAxxxx`) and legacy (`Cn`) codes are accepted.
 
 ---
 
-## Adding a new check
+## Configuration file (`.psa.config.json`)
 
-The structure of `psa.py` is intentionally minimal. To add a new check `C11`:
+When run from a directory containing `.psa.config.json`, `psa.py` picks
+it up automatically. Use `--config PATH_OR_URL` for an explicit file
+or a remote one (see "Remote configuration" below).
 
-1. Add a function `check_yourthing(text)` that returns a list of dicts with
-   keys `severity`, `code`, `line`, `message`.
-2. Call it from `main()` and append to `issues`.
-3. Document the new code in the table above.
-4. Notify downstream consumer repositories (e.g.,
-   [`Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer))
-   so they can update their own SPEC / README check tables to match.
+Configuration files are **JSONC** — JSON plus `//` line comments and
+`/* */` block comments.
 
-The `strip_strings_and_comments(line)` helper is the standard preamble for
-any check that wants to ignore content inside `''` / `""` / `# ...` — use it.
+```jsonc
+{
+  // Enable rules that are off by default
+  "enable":  ["PSA6002"],
 
-**Reminder:** This directory is the **single canonical source** for `psa.py`.
-All changes are made here; downstream consumers pull the updated file rather
-than maintaining their own copies.
+  // Disable rules that are on by default
+  "disable": ["PSA4001"],
+
+  // Minimum severity to report: "error", "warning", or "info"
+  "severity": "warning",
+
+  // Line-length limit for PSA4003
+  "max_line_length": 120
+}
+```
+
+### Template file
+
+A template named [`.psa.config.json.template`](./.psa.config.json.template)
+ships in this directory. It documents every option with its built-in
+default value, all commented out. Copy it to bootstrap your own
+configuration:
+
+```bash
+cp scripts/python/powershell-static-analyzer/.psa.config.json.template \
+   .psa.config.json
+# then uncomment only what you want to override
+```
+
+### Remote configuration (HTTP / HTTPS)
+
+`--config` accepts an http(s) URL as well as a local path. This is
+ideal for sharing a team-wide configuration stored in a GitHub
+repository — use the **raw** URL form:
+
+```bash
+psa.py --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json <script>.ps1
+```
+
+**Robustness features (since 2.3.0):**
+
+- Sends a Chrome-131 User-Agent + Sec-Ch-Ua client hints, so the
+  request passes CDN/WAF default filters that reject obvious bots.
+- Builds an explicit TLS 1.2-minimum SSL context; maximum auto-
+  negotiated up to TLS 1.3. Certificate verification is always on.
+- Retries on 5xx and network errors with exponential backoff
+  (6s → 12s → 24s for server errors; 2s → 4s → 8s for network errors).
+  4xx responses fail immediately.
+- Tunable via env vars: `PSA_CONFIG_TIMEOUT` (default 30s),
+  `PSA_CONFIG_MAX_RETRIES` (default 3), `PSA_CONFIG_QUIET`.
+
+Use `raw.githubusercontent.com/...`, NOT the blob URL
+(`github.com/.../blob/...`) — the latter returns HTML.
+
+Fetched content is not cached by `psa.py`; each invocation hits the
+URL. See [SPEC §5.4](./SPEC.md#54-remote-configuration-http--https)
+for the full contract.
+
+### Resolution order (lowest priority → highest priority)
+
+1. Built-in defaults
+2. `.psa.config.json` (implicit search) OR `--config` (explicit, local
+   or URL)
+3. CLI flags (`--enable`, `--disable`, `--include`, `--severity`,
+   `--max-line-length`)
+4. Inline suppression comments
 
 ---
 
 ## CI integration example
 
-GitHub Actions workflow snippet (Linux runner, no Windows / PowerShell required):
+GitHub Actions workflow snippet (Linux runner, no Windows / PowerShell
+required):
 
 ```yaml
 name: Lint
@@ -182,18 +465,74 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Run psa.py on script
+      - name: Run psa.py
+        run: |
+          python3 scripts/python/powershell-static-analyzer/psa.py -r \
+                  --format sarif scripts/ > psa.sarif
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: psa.sarif
+```
+
+For a minimal text-only run that fails the build on errors only:
+
+```yaml
+      - name: Run psa.py (errors only)
         run: |
           python3 scripts/python/powershell-static-analyzer/psa.py \
+                  --severity error \
                   scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
 ```
 
 ---
 
-## Consumers
+## Running PSScriptAnalyzer alongside
 
-The following repositories and PowerShell scripts are verified with `psa.py`
-(this canonical source).
+If you have PowerShell 5.1+ available, run both for the best coverage:
+
+```powershell
+Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
+```
+
+`psa.py` and PSScriptAnalyzer have complementary, mostly non-overlapping
+checks; the rules they share (e.g., empty-catch detection) usually
+agree.
+
+---
+
+## Adding a new check
+
+The structure of `psa.py` is intentionally minimal. To add a new check
+`PSA7001`:
+
+1. Add an entry to the `RULES` tuple list at the top of `psa.py`
+   (code, severity, legacy_code or `None`, default-enabled, message).
+2. Write a `check_yourthing(text|clean)` function that returns a list of
+   dicts with keys `severity`, `code`, `line`, `col`, `message`.
+3. Call it from `analyze_text()` guarded by
+   `if cfg.enabled['PSA7001']:`.
+4. Document the new code in the rule catalog above and in
+   `README.ja.md`.
+5. Notify downstream consumer repositories (e.g.,
+   [`Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer))
+   so they can update their own SPEC / README check tables to match.
+
+The `strip_strings_and_comments(text)` helper is the standard preamble
+for any check that wants to ignore content inside `''`, `""`,
+`@'…'@`, `@"…"@`, `# …`, and `<# … #>` — use it.
+
+**Reminder:** This directory is the **single canonical source** for
+`psa.py`. All changes are made here; downstream consumers pull the
+updated file rather than maintaining their own copies.
+
+---
+
+## Verified consumers
+
+The following repositories and PowerShell scripts are verified with
+`psa.py` (this canonical source).
 
 ### Within this repository
 
@@ -208,12 +547,31 @@ The following repositories and PowerShell scripts are verified with `psa.py`
 |:---|:---|:---|
 | [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`, `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`, `Deploy-AMDNpuDriverOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy) |
 
-(Update this list when new PowerShell scripts — internal or external — adopt
-`psa.py` for verification.)
+(Update this list when new PowerShell scripts — internal or external —
+adopt `psa.py` for verification.)
+
+---
+
+## Design philosophy
+
+- **Single file, standard library only.** No `pip install`, no virtual
+  environment, no version conflicts. Drop `psa.py` anywhere Python 3
+  runs.
+- **Conservative on false positives.** A static analyzer that cries
+  wolf gets ignored. When in doubt, a rule is disabled by default and
+  the user opts in.
+- **Backward compatible.** Legacy `C1`–`C10` codes never silently break.
+  CIs that grep for `C7` continue to work because the new text output
+  prints `[PSA2003 (=C7)]`.
+- **PowerShell-aware tokenizer.** Heredocs (`@"…"@`, `@'…'@`),
+  sub-expressions (`$()`, `@()`), and the `$env:` / `$using:` scopes
+  are handled correctly so that downstream regex rules see only
+  meaningful code.
 
 ---
 
 ## License
 
-`psa.py` is released under the same MIT License as the rest of this repository.
-See the [`LICENSE`](../../../LICENSE) at the repository root.
+`psa.py` is released under the same MIT License as the rest of this
+repository. See the [`LICENSE`](../../../LICENSE) at the repository
+root.

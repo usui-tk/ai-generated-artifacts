@@ -1,83 +1,218 @@
 # powershell-static-analyzer
 
-> 🇯🇵 日本語 / 🇺🇸 [English](./README.md)
+> 🇺🇸 [English](./README.md) / 🇯🇵 日本語
 
-PowerShell スクリプト用の単一ファイル Python 3 静的解析ツール（`psa.py`）です。
-通常の PowerShell パーサーが構文解析時には検出しない、しかし長尺スクリプトを
-予期せず壊しがちな種類のバグを捕捉します。
+PowerShell スクリプト用の単一 Python 3 ファイル静的解析ツール (`psa.py`)
+です。PowerShell の通常のパーサーが構文解析時には検出しないが、長尺の
+スクリプトを地味に壊してしまうクラスのバグを検出します。
 
-このディレクトリは `psa.py` の **唯一の正本 (canonical source)** です。
-本 `ai-generated-artifacts` レポジトリ内の PowerShell スクリプトおよび外部
-レポジトリの consumer は、いずれも自前のコピーを持たずにこのファイルを
-参照します。
+このディレクトリは `psa.py` の**唯一の正典ソース**です。本 `ai-generated-artifacts`
+リポジトリ内の PowerShell スクリプトも、外部リポジトリも、各々が独自の
+コピーを保持するのではなく、このファイルを参照します。
+
+正式な仕様書（CLI 契約、ルール意味論、出力スキーマ、環境検出契約）に
+ついては [`SPEC.ja.md`](./SPEC.ja.md) を参照してください。
+英語版は [`SPEC.md`](./SPEC.md) を参照してください。
+
+**現在のバージョン: 2.3.0**（リモート取得堅牢化 + JSONC 設定 + 環境検出）
 
 ---
 
-## 起源と保守ポリシー
+## 更新履歴
 
-`psa.py` は
+### 2.3.0 — リモート設定取得の堅牢化
+
+`--config <URL>` のコードパスを実運用品質に引き上げ:
+
+- **ブラウザライク User-Agent**（Chrome 131）と `Sec-Ch-Ua` クライアント
+  ヒントを送出。明らかな Bot UA を弾く CDN / WAF（特に Cloudflare
+  配下のサイト）でも到達可能に。
+- **明示的な TLS 1.2 最小バージョン設定**、最大はモダンサーバー相手に
+  TLS 1.3 まで自動ネゴシエート。古い TLS 1.0/1.1 は提供せず
+  （RFC 8996）。証明書検証は常に ON。
+- **指数バックオフによるリトライ**を一時的な失敗に対して実施。
+  姉妹プロジェクトの `Invoke-WebRequestWithRetry` パターンを移植:
+  - 5xx 応答 → `2^attempt × 3` 秒待機して再試行（6秒・12秒・…）
+  - ネットワーク / タイムアウトエラー → `2^attempt` 秒待機（2秒・4秒・…）
+  - 4xx 応答 → 即座に失敗（永続的なクライアントエラー）
+- **環境変数による CI 向けチューニング**:
+  - `PSA_CONFIG_TIMEOUT` — 1試行のタイムアウト（既定 30 秒）
+  - `PSA_CONFIG_MAX_RETRIES` — 総試行回数（既定 3）
+  - `PSA_CONFIG_QUIET` — stderr へのリトライ進捗メッセージを抑制
+
+詳細は [SPEC.ja.md §5.4](./SPEC.ja.md#54-リモート設定http--https) を参照。
+
+### 2.2.0 — JSONC 設定とリモート設定 URL
+
+- **設定ファイルが JSONC 対応に**。`.psa.config.json` に `// 行コメント`
+  や `/* ブロックコメント */` を JavaScript と同じ感覚で自由に記述できます。
+- **`--config` が URL を受け付けるように**。ローカルパスに加え、任意の
+  http(s) URL を `--config` に渡せます:
+
+  ```bash
+  psa.py --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json <script>.ps1
+  ```
+- **テンプレートファイルを同梱**。`psa.py` と同じディレクトリに
+  `.psa.config.json.template` を新規追加。
+
+### 2.1.0 — 環境検出機能
+
+実行環境に PowerShell と PSScriptAnalyzer が存在するかを確認する
+ランタイムプローブ（`--check-env` / `--show-env`）を追加しました。
+出力は純粋に情報提供のみで、終了コードや issue 数には**一切影響しません**。
+
+```
+==== psa.py: Environment Detection ====
+psa.py        : 2.2.0
+Python        : 3.12.3 (Linux 6.18.5)
+PowerShell    : pwsh 7.4.6 at /usr/bin/pwsh
+PSScriptAnalyzer : 1.22.0 (available)
+
+Info:
+  PSScriptAnalyzer is available in this environment. For
+  comprehensive PowerShell static analysis, consider running
+  Microsoft's analyzer in addition to psa.py:
+
+    pwsh -Command "Invoke-ScriptAnalyzer -Path <script>.ps1"
+```
+
+これは AI エージェント（Claude など）や CI サンドボックス環境で
+PowerShell の利用可否が実行ごとに変わりうる場合に特に有用です。プローブ
+は高速・副作用なし・ユーザープロファイルをバイパス（`-NoProfile
+-NonInteractive`）して実行されます。
+
+### 2.0.0 — ルール体系刷新
+
+バージョン 2.0 は、Microsoft の [PSScriptAnalyzer][PSScriptAnalyzer]
+と Vidar Holen 氏の [shellcheck][shellcheck] に着想を得たメジャー
+リリースでした。ルール数を 10 から **27** に拡張し、JSON / SARIF 出力、
+インライン抑制、設定ファイル、複数ファイル走査を追加。それでいて
+**単一ファイル + 外部依存ゼロ**の設計は維持しています。
+
+| 項目 | v1.x | v2.0 |
+|:---|:---|:---|
+| ルール番号 | `C1`〜`C10` (レガシー) | `PSA1001`〜`PSA6006` (27 ルール) |
+| 出力形式 | テキストのみ | テキスト / JSON / SARIF 2.1.0 |
+| 抑制機能 | なし | `# psa-disable-line` / `next-line` / `file` |
+| 設定 | CLI のみ | `.psa.config.json` + CLI |
+| ファイル処理 | 単一ファイル | 複数ファイル / ディレクトリ / glob |
+| カラー出力 | なし | TTY 検出 + ANSI (NO_COLOR 対応) |
+| ヒアドキュメント / サブ式 | 限定的 | `@"…"@`, `@'…'@`, `$()`, `@()` を完全サポート |
+
+**後方互換性**: レガシーコード（`C1`〜`C10`）は `--enable` / `--disable`
+引数とインライン抑制コメントの両方で受け付けます。テキスト出力では
+新コードとレガシーコードを並記します（例: `[PSA2003 (=C7)]`）。
+終了コードの意味（`0` / `1` / `2`）は変更ありません。
+
+[PSScriptAnalyzer]: https://github.com/PowerShell/PSScriptAnalyzer
+[shellcheck]: https://github.com/koalaman/shellcheck
+
+---
+
+## 由来と保守ポリシー
+
+`psa.py` はもともと
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
-の `tools/psa.py` で誕生しました。その後、本 `ai-generated-artifacts`
-レポジトリへ集約し、**唯一の正本 (canonical source)** として一元管理する
-方針に変更しました。これに伴い、`Deploy-AMD-Drivers-For-WindowsServer`
-レポジトリ側の `tools/psa.py` は削除済みで、同レポジトリは本ファイルを
-外部依存として参照する形になっています
-（[SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.ja.md#a11-psapy-による静的解析)
+の `tools/psa.py` として誕生しました。その後、本 `ai-generated-artifacts`
+リポジトリに**唯一の正典ソース**として集約され、
+`Deploy-AMD-Drivers-For-WindowsServer` リポジトリ側の `tools/psa.py`
+は削除されました。同リポジトリは現在、`psa.py` をこちらの外部依存として
+参照しています（同リポジトリの [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy)
 を参照）。
 
-**バグ修正・新規チェック追加・auto-variable 一覧更新は、すべて本ディレクトリ
-で実施してください**。consumer レポジトリは、本レポジトリを `git clone`
-するか、`psa.py` を単一ファイルダウンロード（後述の Usage 節参照）して取得
-します。下流フォークは保守しません。
+**バグ修正・新規チェックの追加・auto-variable 一覧の更新は、すべて
+このディレクトリの `psa.py` に対して行ってください**。下流の利用側
+リポジトリは、`git clone` または raw blob の単一ファイルダウンロードに
+よって最新版を取得します。フォークの保守は行いません。
 
 ---
 
-## なぜカスタム解析ツールなのか
+## なぜ独自アナライザを作るのか
 
-Microsoft は [PSScriptAnalyzer](https://learn.microsoft.com/ja-jp/powershell/utility-modules/psscriptanalyzer/overview)
-を提供しており、これは優秀なツールで併用すべきです。ただし PSScriptAnalyzer
-には本ユースケースにおいて以下の 2 つの制約があります。
+Microsoft は [PSScriptAnalyzer][PSScriptAnalyzer] を提供しており、これは
+素晴らしいツールで併用すべきです。ただし PSScriptAnalyzer には 2 つの
+制約があります。
 
-1. 実行に PowerShell 5.1 以上が必要（CI に Windows / PowerShell がまだ無い
-   場合は鶏と卵の問題になる）。
-2. 検出する問題の種類が異なる ― 主にスタイルおよびベストプラクティス違反。
-   数千行スクリプトの波括弧不整合、誤字による未定義変数参照、
-   `$null` で `True` を返す裸の `$variable` に対する `-match` などは
-   **デフォルトでは検出しない**。
+1. 実行に PowerShell 5.1 以降が必要（Windows / PowerShell がまだ用意
+   されていない CI 環境では「鶏と卵」の状態）。
+2. 検出するバグの種類が異なり、主にスタイルやベストプラクティス違反を
+   対象としています。数千行スクリプトの**括弧アンバランス**、**タイポ
+   による未定義変数参照**、**`-match` を素の `$variable` に対して使う**
+   といった問題は、デフォルトでは検出されません。
 
-`psa.py` は Python 3 が動く環境ならどこでも動作する Python スクリプトであり、
-補完的なチェックを実行します。PSScriptAnalyzer の代替ではなく、
-**追加のセーフティネット**として位置付けています。
+`psa.py` は Python 3 が動く環境ならどこでも動作するスクリプトで、
+PSScriptAnalyzer を補完するチェックを提供します。PSScriptAnalyzer の
+代替品ではなく、**PowerShell が動かない CI パイプライン**でも使える
+追加のセーフティネットとして設計されています。
 
 ---
 
 ## 前提条件
 
-- Python 3.x（外部依存なし。標準ライブラリのみ）
-- 解析対象の `.ps1` ファイル
+- Python 3.8 以降
+- 標準ライブラリのみ — **外部依存ゼロ**
+- 解析対象の `.ps1` または `.psm1` ファイル
 
 ---
 
-## 使用方法
+## 使い方
 
 ```bash
 # 単一スクリプトを解析
 python3 scripts/python/powershell-static-analyzer/psa.py path/to/script.ps1
 
-# 例：本レポジトリ内のスクリプトを解析
+# 複数ファイル / glob
+python3 scripts/python/powershell-static-analyzer/psa.py *.ps1
+
+# ディレクトリを再帰的にスキャン (.ps1 + .psm1)
+python3 scripts/python/powershell-static-analyzer/psa.py -r ./scripts
+
+# JSON 出力（機械可読）
+python3 scripts/python/powershell-static-analyzer/psa.py --format json script.ps1
+
+# SARIF 出力（GitHub Code Scanning / IDE プラグイン用）
+python3 scripts/python/powershell-static-analyzer/psa.py --format sarif script.ps1 > result.sarif
+
+# 重大度でフィルタ
+python3 scripts/python/powershell-static-analyzer/psa.py --severity error script.ps1
+
+# デフォルト無効ルールを有効化
+python3 scripts/python/powershell-static-analyzer/psa.py --enable PSA6002 script.ps1
+
+# 特定ルールを無効化
+python3 scripts/python/powershell-static-analyzer/psa.py --disable PSA2001 script.ps1
+
+# 指定したルールのみ実行
+python3 scripts/python/powershell-static-analyzer/psa.py --include PSA1001,PSA1002 script.ps1
+
+# 明示的に設定ファイルを指定 (ローカルパス)
+python3 scripts/python/powershell-static-analyzer/psa.py --config .psa.config.json script.ps1
+
+# リモート設定ファイルを使用 (http(s) URL、GitHub raw 推奨)
 python3 scripts/python/powershell-static-analyzer/psa.py \
-        scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+        --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json script.ps1
+
+# ルール一覧を表示
+python3 scripts/python/powershell-static-analyzer/psa.py --list-rules
+
+# PowerShell / PSScriptAnalyzer の利用可否を検出（情報提供のみ）
+python3 scripts/python/powershell-static-analyzer/psa.py --check-env
+
+# 通常解析出力に環境サマリを前置（情報提供のみ）
+python3 scripts/python/powershell-static-analyzer/psa.py --show-env script.ps1
 ```
 
-終了コード：
+### 終了コード
 
-- `0` — クリーン（エラー無し、警告無し）
-- `1` — 警告のみ（CI ではソフトフェイル扱いも可）
-- `2` — エラーあり（CI は必ず失敗扱いとする）
+| コード | 意味 |
+|:---:|:---|
+| `0` | クリーン（error も warning もなし） |
+| `1` | warning のみ（CI ではソフトフェイル扱いも可） |
+| `2` | error あり（CI は必ず失敗扱い） |
 
 ---
 
-## 出力フォーマット
+## 出力フォーマット（テキスト）
 
 ```
 ==== psa.py: PowerShell Static Analyzer ====
@@ -88,89 +223,224 @@ Issues : 0 errors, 0 warnings, 0 info
   (no issues found)
 ```
 
-検出時：
+問題が検出された場合:
 
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : path/to/script.ps1
-Lines  : 8680
-Issues : 0 errors, 9 warnings, 0 info
+Lines  : 8792
+Issues : 1 errors, 42 warnings, 31 info
 
----- WARNING (9) ----
-  [C7] line  2215: -match against bare $noisePattern - $null pattern returns true
-  [C6] line  2300: Start-Process -ArgumentList; prefer ProcessStartInfo
+---- ERROR (1) ----
+  [PSA5001] line   499:  5: plain-text password parameter $PfxPassword;
+                                use [SecureString] or [PSCredential]
+
+---- WARNING (42) ----
+  [PSA3004]            line  1076     : empty catch block
+  [PSA2003 (=C7)]      line  2337: 22: -match against bare $noisePattern ...
+  [PSA3001 (=C6)]      line  2422     : Start-Process -ArgumentList; ...
   ...
 ```
 
-各 issue にはチェックコード（C1〜C10）、重大度、行番号、短いメッセージが
-含まれます。
+各 issue には新しい `PSAxxxx` コード、v1.x 時代のレガシーコード
+（該当する場合は `(=Cn)` の形）、severity、行・列、短いメッセージ
+が含まれます。
 
 ---
 
-## 実装されているチェック
+## ルールカタログ
 
-| コード | 重大度 | 検出内容 | 重要性 |
-| --- | --- | --- | --- |
-| **C1** | error | 波括弧バランス：`{` の数 vs `}` の数 | 数千行スクリプトでの 1 個の波括弧不整合は目視デバッグ不可能。パーサーは EOF で構文エラーを報告するため、実際の不整合箇所は分からない。`psa.py` は双方の数を報告するので `grep -n '^[}]'` でトレース可能。 |
-| **C2** | error | 丸括弧バランス：`(` vs `)` | C1 と同じだが `()` 用。 |
-| **C3** | error | 角括弧バランス：`[` vs `]` | C1 と同じだが `[]` 用。 |
-| **C4** | warning | 未定義変数参照（ヒューリスティック） | `$matchedDeciks` のような `$matchedDecks` の誤字を検出。ヒューリスティックのため、他箇所で代入されている `$global:` / `$script:` スコープ変数では誤検出の可能性あり。 |
-| **C5** | warning | 自動変数のシャドーイング | `$args`、`$_`、`$matches`、`$null` などへの代入は PowerShell 組み込みを無言で破壊する。自動変数のリストは [about_Automatic_Variables](https://learn.microsoft.com/ja-jp/powershell/module/microsoft.powershell.core/about/about_automatic_variables) に基づく。 |
-| **C6** | warning | `Start-Process -ArgumentList`（`-PassThru` / `Wait-Process` 等を伴わない） | `Start-Process` は便利だが、スペースを含むパスを誤処理し、終了コードのパスが貧弱で stderr を捨てる。信頼性が必要なスクリプトでは `[System.Diagnostics.Process]::Start([ProcessStartInfo]@{...})` を推奨。 |
-| **C7** | warning | 裸の `$variable` に対する `-match`（例：`$line -match $pattern`）で `$pattern` が `$null` の可能性あり | `$line -match $null` は `True` を返し**かつ `$matches = $null` を代入**する。マッチ前に `[string]::IsNullOrEmpty($pattern)` でラップすること。 |
-| **C8** | info | TODO / FIXME マーカー | 残作業のリマインダー。失敗扱いではない。 |
-| **C9** | warning | 空行直前の行末バックティック | PowerShell の行継続バックティックは脆弱。次行が空（可視）または末尾空白を含む場合、継続が無言で破綻する。 |
-| **C10** | warning | リテラル空文字列 `""` または `''` に対する `-match` | `$x -match ""` は空文字列も含めた**任意の文字列に対して常に True**。ほぼ必ずコーディング誤り。 |
+`PSA1xxx` — パース・構文系（常に Error）
+
+| コード | レガシー | デフォルト | 内容 |
+|:---|:---:|:---:|:---|
+| **PSA1001** | – | ✅ 有効 | 中括弧バランス: `{` の数 vs `}` の数 |
+| **PSA1002** | – | ✅ 有効 | 丸括弧バランス: `(` vs `)` |
+| **PSA1003** | – | ✅ 有効 | 角括弧バランス: `[` vs `]` |
+
+`PSA2xxx` — 変数・スコープ系（Error / Warning）
+
+| コード | レガシー | 重大度 | デフォルト | 内容 |
+|:---|:---:|:---:|:---:|:---|
+| **PSA2001** | C4 | Error | ✅ 有効 | 未定義変数参照（ヒューリスティック） |
+| **PSA2002** | C5 | Warning | ✅ 有効 | auto-variable 上書き（`$args`, `$matches`, …） |
+| **PSA2003** | C7 | Warning | ✅ 有効 | `-match` を素の `$variable` に対して使用 |
+| **PSA2004** | – | Warning | ✅ 有効 | `$x -eq $null` は `$null -eq $x` を推奨（コレクションの罠回避） |
+| **PSA2005** | – | Warning | ✅ 有効 | `if` / `while` 条件内に代入演算子 `=` |
+| **PSA2006** | – | Warning | ✅ 有効 | `if` / `while` 条件内にリダイレクト演算子 `>` / `<` |
+
+`PSA3xxx` — コーディングパターン（Warning）
+
+| コード | レガシー | デフォルト | 内容 |
+|:---|:---:|:---:|:---|
+| **PSA3001** | C6 | ✅ 有効 | `Start-Process -ArgumentList`; `ProcessStartInfo` を推奨 |
+| **PSA3002** | C9 | ✅ 有効 | 行末バッククォートの直後が空行 |
+| **PSA3003** | C10 | ✅ 有効 | `-match` を空文字列リテラルに対して使用 |
+| **PSA3004** | – | ✅ 有効 | 空の `catch { }` ブロック |
+
+`PSA4xxx` — スタイル・情報（Info）
+
+| コード | レガシー | デフォルト | 内容 |
+|:---|:---:|:---:|:---|
+| **PSA4001** | C8 | ✅ 有効 | 未完了マーカー（TODO / FIXME / XXX / HACK） |
+| **PSA4002** | – | ✅ 有効 | 行末の余分な空白 |
+| **PSA4003** | – | ⛔ 無効 | `max_line_length` 超過（既定 120 文字） |
+| **PSA4004** | – | ✅ 有効 | 行末セミコロン |
+
+`PSA5xxx` — セキュリティ（Error / Warning）
+
+| コード | 重大度 | デフォルト | 内容 |
+|:---|:---:|:---:|:---|
+| **PSA5001** | Error | ✅ 有効 | 平文パスワードパラメータ（`[string]$Password`） |
+| **PSA5002** | Warning | ✅ 有効 | `Invoke-Expression` の使用 |
+| **PSA5003** | Warning | ✅ 有効 | 脆弱なハッシュアルゴリズム（MD5 / SHA1） |
+| **PSA5004** | Warning | ✅ 有効 | `ComputerName` のリテラル文字列ハードコード |
+
+`PSA6xxx` — ベストプラクティス（Warning）
+
+| コード | デフォルト | 内容 |
+|:---|:---:|:---|
+| **PSA6001** | ✅ 有効 | 関数名に PowerShell 承認動詞以外を使用（`Get-Verb` 参照） |
+| **PSA6002** | ⛔ 無効 | cmdlet エイリアスを使用（`ls`, `cd`, `dir`, `where`, …） |
+| **PSA6003** | ✅ 有効 | 関数名の名詞は単数形であるべき |
+| **PSA6004** | ✅ 有効 | `$global:` 変数の定義を避ける |
+| **PSA6005** | ✅ 有効 | Mandatory パラメータにデフォルト値を持たせない |
+| **PSA6006** | ✅ 有効 | switch パラメータのデフォルト値を `$true` にしない |
+
+### 一部ルールがデフォルト無効である理由
+
+シグナル対ノイズ比を高く保つため、2 つのルールはデフォルト無効に
+しています。
+
+- **PSA4003（長すぎる行）** — 行長はスタイル的要素が強く、コメント
+  ヘッダー、長い URL、ARN ライクな文字列など文脈に大きく依存します。
+  チームで長さ制限を合意した時にプロジェクト単位で有効化してください。
+- **PSA6002（cmdlet エイリアス）** — 多くの実運用スクリプトで `foreach`
+  や `where` が意図的に使われています。スタイルガイドでエイリアスを
+  禁止している場合に有効化してください。
+
+コマンドラインで `--enable PSA6002` を指定するか、`.psa.config.json`
+の `enable` リストに追加してください。
 
 ---
 
-## 解析ツールがチェックしないもの
+## 検出**しない**事項
 
-- コマンドレットの存在（PowerShell セッションが必要）
-- 型の正しさ（PowerShell は動的型付け。これはシェルスクリプトであり C# ではない）
+- cmdlet の存在確認（PowerShell セッションが必要）
+- 型の正しさ（PowerShell は動的型）
 - モジュールインポート（`Import-Module` の解決）
-- 関数シグネチャの正しさ（param 型、必須パラメータ）
-- ベストプラクティスのスタイル違反（PSScriptAnalyzer の領域）
+- AST 解析を要するスタイルチェック（`PSUseConsistentIndentation`、
+  `PSUseCorrectCasing` など — これらは PSScriptAnalyzer の領分）
 
 ---
 
-## PSScriptAnalyzer との併用
+## インライン抑制
 
-PowerShell 5.1 以上が利用可能な場合は併用してください。
+行単位:
 
 ```powershell
-# psa.py に加えて
-Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
-Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
+$x -match $pattern  # psa-disable-line PSA2003
 ```
 
----
+次の行:
 
-## 新しいチェックの追加
+```powershell
+# psa-disable-next-line PSA3001,PSA3002
+Start-Process -ArgumentList $args ...
+```
 
-`psa.py` の構造は意図的にミニマルです。新しいチェック `C11` を追加するには：
+ファイル全体（通常はファイル先頭付近に配置）:
 
-1. `check_yourthing(text)` 関数を追加。`severity`、`code`、`line`、`message`
-   をキーとする dict のリストを返すこと。
-2. `main()` から呼び出し、`issues` に append する。
-3. 新しいコードを上記の表にドキュメント化する。
-4. 下流の consumer レポジトリ
-   （例：[`Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)）
-   に通知し、各レポジトリ側の SPEC / README チェック表も同期更新できるよう
-   にしてください。
+```powershell
+# psa-disable-file PSA4001
+```
 
-`strip_strings_and_comments(line)` ヘルパーは `''` / `""` / `# ...` の中身を
-無視したいチェックの標準的な前処理です。利用してください。
-
-**注意：** このディレクトリは `psa.py` の **唯一の正本 (canonical source)**
-です。変更はすべてここで行います。下流の consumer は自前コピーを保持せず、
-本ファイルを取り込みます。
+新コード（`PSAxxxx`）とレガシーコード（`Cn`）の両方が受け付けられます。
 
 ---
 
-## CI 連携例
+## 設定ファイル（`.psa.config.json`）
 
-GitHub Actions ワークフロー断片（Linux ランナー、Windows / PowerShell 不要）：
+`.psa.config.json` がカレントディレクトリにあると、`psa.py` は自動的に
+これを読み込みます。明示的に指定するには `--config PATH_OR_URL` を
+使います（ローカル・リモート両対応 — 後述）。
+
+設定ファイルは **JSONC** 形式です。JSON に加え、`//` 行コメントと
+`/* */` ブロックコメントが使えます。
+
+```jsonc
+{
+  // デフォルト無効ルールを有効化
+  "enable":  ["PSA6002"],
+
+  // デフォルト有効ルールを無効化
+  "disable": ["PSA4001"],
+
+  // 最低重大度: "error" / "warning" / "info"
+  "severity": "warning",
+
+  // PSA4003 の行長制限
+  "max_line_length": 120
+}
+```
+
+### テンプレートファイル
+
+このディレクトリに [`.psa.config.json.template`](./.psa.config.json.template)
+というテンプレートを同梱しています。全オプションをビルトインデフォルト
+付きで全てコメントアウト状態で記載しているため、これをコピーして
+自分の設定の出発点にできます:
+
+```bash
+cp scripts/python/powershell-static-analyzer/.psa.config.json.template \
+   .psa.config.json
+# 上書きしたい項目だけコメントを外して編集
+```
+
+### リモート設定（HTTP / HTTPS）
+
+`--config` はローカルパスに加え、http(s) URL も受け付けます。GitHub
+レポジトリに置いたチーム共通設定を参照するのに便利です。**raw** URL
+形式を使ってください:
+
+```bash
+psa.py --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json <script>.ps1
+```
+
+**堅牢性の強化（2.3.0 以降）:**
+
+- Chrome 131 の User-Agent と Sec-Ch-Ua クライアントヒントを送出
+  するため、Bot を弾く CDN/WAF のデフォルトフィルタを通過できます。
+- TLS 1.2 を最小として明示設定。最大は TLS 1.3 まで自動ネゴシエート。
+  証明書検証は常に ON。
+- 5xx およびネットワークエラーで指数バックオフリトライ
+  （サーバーエラーは 6秒→12秒→24秒、ネットワークエラーは
+  2秒→4秒→8秒）。4xx は即座に失敗。
+- 環境変数でチューニング可能: `PSA_CONFIG_TIMEOUT`（既定 30 秒）、
+  `PSA_CONFIG_MAX_RETRIES`（既定 3）、`PSA_CONFIG_QUIET`。
+
+`raw.githubusercontent.com/...` を使うこと。blob URL
+（`github.com/.../blob/...`）は HTML を返すためパース不能。
+
+取得内容は `psa.py` 側ではキャッシュされず、毎回 URL にアクセスします。
+詳細な契約は [SPEC.ja.md §5.4](./SPEC.ja.md#54-リモート設定http--https)
+を参照。
+
+### 優先順位（低 → 高）
+
+1. ビルトインのデフォルト
+2. `.psa.config.json`（暗黙検出） または `--config`（明示指定、
+   ローカルファイルまたは URL）
+3. CLI 引数（`--enable`, `--disable`, `--include`, `--severity`,
+   `--max-line-length`）
+4. インライン抑制コメント
+
+---
+
+## CI への組み込み例
+
+GitHub Actions のワークフロー断片（Linux ランナー、Windows / PowerShell
+不要）:
 
 ```yaml
 name: Lint
@@ -185,37 +455,109 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
-      - name: Run psa.py on script
+      - name: Run psa.py
+        run: |
+          python3 scripts/python/powershell-static-analyzer/psa.py -r \
+                  --format sarif scripts/ > psa.sarif
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: psa.sarif
+```
+
+error のみで CI を落とす最小構成:
+
+```yaml
+      - name: Run psa.py (errors only)
         run: |
           python3 scripts/python/powershell-static-analyzer/psa.py \
+                  --severity error \
                   scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
 ```
 
 ---
 
-## コンシューマー
+## PSScriptAnalyzer との併用
 
-以下のレポジトリ・PowerShell スクリプトが `psa.py`（本正本）で検証されています。
+PowerShell 5.1 以降が使える環境では、両方走らせるとカバレッジが最大化
+されます。
 
-### 本レポジトリ内
+```powershell
+Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
+```
+
+`psa.py` と PSScriptAnalyzer はほぼ重複しない補完的なチェックを持ち、
+共通するルール（例: 空 catch 検出）も通常は同じ判断をします。
+
+---
+
+## 新規チェックの追加方法
+
+`psa.py` の構造は意図的に最小限です。新規チェック `PSA7001` を追加
+する手順:
+
+1. `psa.py` 冒頭の `RULES` タプルリストにエントリを追加
+   （`(code, severity, legacy_code or None, default_enabled, message)`）。
+2. `check_yourthing(text|clean)` 関数を作成し、
+   `severity` / `code` / `line` / `col` / `message` をキーとする dict の
+   リストを返す形にする。
+3. `analyze_text()` から `if cfg.enabled['PSA7001']:` でガードして呼ぶ。
+4. 上記のルールカタログと `README.md` にも新コードを記載する。
+5. 下流の利用側リポジトリ（例:
+   [`Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)）
+   に通知し、SPEC / README のチェック表を更新してもらう。
+
+`strip_strings_and_comments(text)` ヘルパーは、`''`, `""`, `@'…'@`,
+`@"…"@`, `# …`, `<# … #>` 内のコンテンツを無視したいチェックの標準
+前処理です — 必ず使用してください。
+
+**リマインダー**: このディレクトリは `psa.py` の**唯一の正典ソース**
+です。変更はすべてここで行い、下流の利用側は更新版を取得します。
+
+---
+
+## 動作確認済みの利用側
+
+以下のリポジトリ／PowerShell スクリプトは、（正典ソースである）この
+`psa.py` で動作確認されています。
+
+### 同一リポジトリ内
 
 | スクリプト | パス |
 |:---|:---|
 | `Download-SpeakerDeck.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
 | `Test-PdfMetadata.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
 
-### 外部レポジトリ
+### 外部リポジトリ
 
-| レポジトリ | 対象スクリプト | 参照 |
+| リポジトリ | スクリプト | 参照 |
 |:---|:---|:---|
-| [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`、`Deploy-AMDGraphicsDriverOnWindowsServer.ps1`、`Deploy-AMDNpuDriverOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.ja.md#a11-psapy-による静的解析) |
+| [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`, `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`, `Deploy-AMDNpuDriverOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy) |
 
-（新しい PowerShell スクリプト ─ 内部・外部いずれも ─ が `psa.py` を採用
-した際は、このリストを更新してください。）
+（新しい PowerShell スクリプト — 内部または外部 — が `psa.py` を
+採用したら、このリストを更新してください。）
+
+---
+
+## 設計思想
+
+- **単一ファイル、標準ライブラリのみ**: `pip install` 不要、仮想環境
+  不要、バージョン衝突なし。Python 3 が動く環境ならどこにでも置けます。
+- **誤検出には保守的**: 「狼が来た」と叫び続けるアナライザは無視される
+  運命です。判断に迷うルールはデフォルト無効にし、ユーザーが明示的に
+  有効化する設計にしています。
+- **後方互換性を維持**: レガシーコード `C1`〜`C10` は決して黙って
+  壊れません。`C7` を grep していた CI も、新テキスト出力で
+  `[PSA2003 (=C7)]` と表示されるため、引き続き動作します。
+- **PowerShell を理解するトークナイザ**: ヒアドキュメント（`@"…"@`,
+  `@'…'@`）、サブ式（`$()`, `@()`）、`$env:` / `$using:` スコープを
+  正しく扱い、下流の正規表現ルールが「意味のあるコード」だけを見られる
+  ようにしています。
 
 ---
 
 ## ライセンス
 
-`psa.py` は本レポジトリの他の部分と同じ MIT ライセンスの下で公開されています。
-レポジトリルートの [`LICENSE`](../../../LICENSE) を参照してください。
+`psa.py` は本リポジトリと同じ MIT License で公開されています。
+リポジトリルートの [`LICENSE`](../../../LICENSE) を参照してください。
