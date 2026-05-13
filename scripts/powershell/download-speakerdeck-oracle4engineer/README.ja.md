@@ -23,7 +23,7 @@ Windows 11 + Windows PowerShell 5.1 を想定（PowerShell 7+ でも動作しま
 本ツールは節度を持ってご利用ください。レート制限を尊重してください（スクリプトには組み込みのスロットリングがありますが、これを回避してはいけません）。必要以上に高速・頻繁にコンテンツをダウンロードしないでください。
 
 本リポジトリ内のすべての成果物に適用される完全な免責事項と自己責任条項については、
-[ルート README](../../../README.md)
+[ルート README](../../../README.ja.md)
 （[English](../../../README.md)）を参照してください。
 
 ## ライセンス
@@ -80,7 +80,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 | `-MinConcurrency`    | `1`              | 並列ダウンロードの下限（スロットリング時に使用）                    |
 | `-MaxRetries`        | `3`              | ダウンロード 1 件あたりの最大リトライ回数                           |
 | `-Force`             | (off)            | 既存ファイルを上書き（指定なしの場合、1 KB 超の既存ファイルはスキップ） |
-| `-DryRun`            | (off)            | Phase 1 〜 Phase 5 のみ実行（実ダウンロードなし、Phase 5 ファイル名計画は出力）|
+| `-DryRun`            | (off)            | Phase 1 〜 5 を完全に実行（Phase 5 のファイル名計画 CSV まで出力）。Phase 6/7/8 は明示的に SKIPPED と記録され、Phase 9 のレポート出力は実施される |
 | `-SkipEnvCheck`      | (off)            | Phase 1 をスキップし、安全側のデフォルト閾値を使用                  |
 | `-Clean`             | (off)            | 実行前に OutputDir と WorkDir を削除（クリーンな再実行）            |
 | `-CleanOnly`         | (off)            | `-Clean` と同じ削除を行い、Phase 実行せず即終了                     |
@@ -192,7 +192,7 @@ Phase 8 : PDF メタデータによる事後分類      (Verify) -- DryRun 時�
             (2010..currentYear+1) が得られたら _undated/<file>.pdf
             から <year>/<file>.pdf へファイルを移動
           - work/logs/year_overrides.csv に追記
-            （次回実行時の Phase 4 が優先順位 0 で参照することで
+            （次回実行時の Phase 5 が優先順位 0 で参照することで
             再ランでも一貫性が保たれる：再ランでは何もしない）
           - -SkipPdfReclassification でオプトアウト可能
           - -FlatLayout 指定時は自動的にスキップ
@@ -277,12 +277,12 @@ Windows で禁止される文字は、ASCII 互換文字へ置換します：
 `downloads\` ツリーには Speaker Deck から取得した PDF コンテンツのみが配置されます。スクリプトが生成する管理ファイル（ログ・診断ダンプ）はすべて `work\` 配下にまとめられます。CSV/JSONL ログには **`P##_` プリフィックス** が付いており、アルファベット順 = Phase 実行順となります。
 
 * `<OutputDir>\<title>__<filename>.<ext>`               — ダウンロードされた資料本体（コンテンツのみ）
-* `<WorkDir>\logs\P04_evaluation_log.csv`               — Phase 3 のダウンロード可否判定結果（DryRun 時のみ）
-* `<WorkDir>\logs\P05_filename_plan.csv`                — Phase 4 のファイル名計画（常に生成）
-* `<WorkDir>\logs\P06_download_log.csv`                 — Phase 5 の本番実行結果（本番実行時のみ）
+* `<WorkDir>\logs\P04_evaluation_log.csv`               — Phase 4 のデッキ別ダウンロード可否判定結果（DryRun 時のみ）
+* `<WorkDir>\logs\P05_filename_plan.csv`                — Phase 5 の事前計算ファイル名計画（常に生成）
+* `<WorkDir>\logs\P06_download_log.csv`                 — Phase 6 のデッキ別 CSV サマリー（本番実行時のみ）
 * `<WorkDir>\logs\P06_errors.jsonl`                     — Phase 6 の構造化エラーログ（JSONL、失敗 1 件 = 1 行、失敗発生時のみ）
-* `<WorkDir>\logs\P07_final_state.csv`                  — Phase 6 の突合結果（Plan + Download Log + ディスク実体を統合、Discrepancy フラグ付き、本番実行時のみ）
-* `<WorkDir>\logs\year_overrides.csv`                   — Phase 8 の PDF メタデータ救済履歴。次回実行時の Phase 4 が優先順位 0 で参照する（初回救済成功時に遅延作成）
+* `<WorkDir>\logs\P07_final_state.csv`                  — Phase 7 の突合結果（Plan + Download Log + ディスク実体を統合、行ごとに Discrepancy フラグ付き、本番実行時のみ）
+* `<WorkDir>\logs\year_overrides.csv`                   — Phase 8 の PDF メタデータ救済履歴。次回実行時の Phase 5 が優先順位 0 で参照する（初回救済成功時に遅延作成）
 * `<WorkDir>\diag\speakerdeck_diag_<account>_*.html`    — Phase 2 が 0 件検知時の生 HTML ダンプ
 * `<WorkDir>\diag\failed\<index>_<slug>.txt`            — Phase 6 失敗 1 件ごとの詳細診断（HTTP ステータス、ヘッダー、レスポンスボディ先頭、スタックトレース、リトライ履歴）
 

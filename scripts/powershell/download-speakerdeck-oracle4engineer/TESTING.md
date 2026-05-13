@@ -294,7 +294,7 @@ before running.
 | **r17** | **`Invoke-WebRequest -OutFile` wildcard interpretation breaks `[ ]` paths** | **High** | **Safe-temp GUID file + `Move-Item -LiteralPath`** |
 | r18 | Folder layout integration with `ai-generated-artifacts` repo | Cosmetic | Update README + SPEC for repo placement |
 | r19 | Single account folder couldn't host multiple targets | Cosmetic | Add `-<account>` suffix to folder name |
-| r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md + tools/README.md |
+| r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.ja.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md + tools/README.md |
 
 See [SPEC.md](./SPEC.md) Part D for the formalized "Known Pitfalls" entries
 that bake each of these fixes into the project's institutional memory.

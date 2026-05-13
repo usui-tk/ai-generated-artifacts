@@ -188,10 +188,10 @@ Every phase MUST:
 
 | Marker | Helper | ANSI Color | Semantic |
 |--------|--------|------------|----------|
-| `[STEP]` | `log_step` | Bold magenta | Phase header banner |
-| `[INFO]` | `log_info` | Blue | Informational; progress |
-| `[WARN]` | `log_warn` | Yellow | Degraded but non-fatal |
-| `[ERROR]` | `log_error` | Red | Failure; usually followed by `die` |
+| `[STEP]` | `log_step` | Bold green | Phase header banner |
+| `[INFO]` | `log_info` | Bold blue | Informational; progress |
+| `[WARN]` | `log_warn` | Bold yellow | Degraded but non-fatal |
+| `[ERROR]` | `log_error` | Bold red | Failure; usually followed by `die` |
 
 ### Line format
 

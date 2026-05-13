@@ -160,8 +160,8 @@ D:\OC\
       |   +-- failed\
       |       +-- 0042_<slug>.txt           <- Per-failure diagnostic (only on Phase 6 failures)
       +-- logs\
-          +-- P04_evaluation_log.csv        <- Phase 6 results (DryRun only)
-          +-- P05_filename_plan.csv         <- Phase 6 results (always)
+          +-- P04_evaluation_log.csv        <- Phase 4 results (DryRun only)
+          +-- P05_filename_plan.csv         <- Phase 5 results (always)
           +-- P06_download_log.csv          <- Phase 6 results (real run only)
           +-- P06_errors.jsonl              <- Phase 6 failures (JSONL, only on failure)
           +-- P07_final_state.csv           <- Phase 7 reconciliation (real run only)
@@ -254,13 +254,13 @@ DeckUrl, OriginalFilename, PlanYearFolder, ResolvedYearFolder,
 ResolvedDate, YearSource, DetectedAt
 ```
 
-On the **next** run, Phase 4's `Get-DeckYear` consults this CSV at
+On the **next** run, Phase 5's `Get-DeckYear` consults this CSV at
 **priority 0** (before every other heuristic). This means:
 
 * Decks rescued in a previous run go directly to the correct year
   folder this time
-* Phase 5 finds the file already in place and skips re-downloading
-* Phase 6 sees no discrepancy (no false `WrongYearFolder` warnings)
+* Phase 6 finds the file already in place and skips re-downloading
+* Phase 7 sees no discrepancy (no false `WrongYearFolder` warnings)
 * Phase 8 finds nothing to rescue (`Examined: 0`)
 
 To re-trigger rescue from scratch, delete `year_overrides.csv` or

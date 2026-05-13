@@ -272,7 +272,7 @@ Move-Item -LiteralPath $safeTmp -Destination $tmpFile -Force
 | **r17** | **`Invoke-WebRequest -OutFile` のワイルドカード解釈で `[ ]` パスが破綻** | **高** | **GUID 名の安全な一時ファイル + `Move-Item -LiteralPath`** |
 | r18 | `ai-generated-artifacts` リポジトリへのフォルダ配置統合 | 装飾的 | リポジトリ配置に合わせて README + SPEC を更新 |
 | r19 | 単一アカウントフォルダで複数ターゲットをホストできない | 装飾的 | フォルダ名に `-<account>` サフィックスを追加 |
-| r20 | SPEC ファイル命名が上流リポジトリと不整合 | 装飾的 | `spec.en.md` を `SPEC.md` にリネーム、A.1.x 構造を刷新、psa.py を上流と同期、TESTING.md + tools/README.md を追加 |
+| r20 | SPEC ファイル命名が上流リポジトリと不整合 | 装飾的 | `spec.en.md` を `SPEC.md` に、`spec.ja.md` を `SPEC.ja.md` にリネーム、A.1.x 構造を刷新、psa.py を上流と同期、TESTING.md + tools/README.md を追加 |
 
 [SPEC.ja.md](./SPEC.ja.md) Part D の「既知の落とし穴」エントリで、これらの各修正をプロジェクトの組織記憶として正式化しています。
 
