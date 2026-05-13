@@ -2,8 +2,9 @@
 
 English | [日本語](./README.ja.md)
 
-> 📂 Part of [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) → [`scripts/aws/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/aws/ol-aws-ami-builder)
+> 📂 Part of [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) → [`scripts/aws/ol-aws-ami-builder/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/aws/ol-aws-ami-builder)
 > ⚠️ **AI-generated content** — review the source before executing. See the [scripts directory policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) for the full disclaimer.
+> 📐 **Developer specification**: [SPEC.md](./SPEC.md) ([日本語](./SPEC.ja.md)) — phase contract, log conventions, env property keys, and the historical pitfalls already accounted for in the current implementation.
 
 A set of wrapper scripts that build AWS AMIs for **Oracle Linux 8, 9, or 10** (x86_64) using the official Oracle [`oracle-linux-image-tools`](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) project.
 
@@ -11,6 +12,23 @@ Created in response to the discontinuation of Oracle's official AMI offerings (o
 
 > **Aligned with the AWS feature released in February 2026**
 > Now that AWS supports nested virtualization on C8i / M8i / R8i instances, this guide **recommends building on M8i-class instances as the primary path**. This removes the need for bare-metal instances (`.metal`) and brings the cost down to **approximately 1/15 of the previous approach**.
+
+---
+
+## ⚠️ Disclaimer (read before running)
+
+**USE AT YOUR OWN RISK.** These scripts are provided "AS IS" without warranty of any kind, express or implied. The authors and contributors are not liable for any damages, data loss, unintended cloud spend, account suspension, or any other problems — direct or indirect — that may arise from using, modifying, or distributing these scripts.
+
+By running these scripts, you acknowledge that:
+
+* You are solely responsible for verifying that your use complies with **Oracle's End User License Agreement** for Oracle Linux, **AWS's Service Terms** (especially for VM Import/Export and EC2), and any applicable laws or regulations.
+* The scripts will **invoke `sudo`** on the build host to install KVM/libvirt and modify ACLs on directories under `${WORKSPACE}`. You will review what is installed (Phase 1) and consent to those changes.
+* The scripts will **incur AWS charges**: EC2 instance hours on the builder, EBS snapshot storage for the imported image, and S3 storage for the staged VMDK. **You are responsible for monitoring and cleaning up these resources.**
+* `import-snapshot` and `register-image` calls will create **persistent AWS resources** (EBS snapshots and AMIs). Deletion is your responsibility — orphaned snapshots are a common source of unexpected AWS bills.
+* You will review the script source code (or the [SPEC.md](./SPEC.md) specification) before running it in any environment.
+* The build process modifies kernel-level features on the **temporary inner VM** only — your build host is not modified beyond the package installation in Phase 1 and the ACL adjustments in Phase 2. Even so, the build host is best treated as **ephemeral** (a dedicated EC2 instance is ideal).
+
+Operate these tools considerately. **Always prefer official Oracle-distributed AMIs when they exist.** This repository targets the narrow case where Oracle does not publish AMIs for the desired release on the AWS Marketplace and you are willing to operate self-built AMIs on your own AWS account.
 
 ---
 
@@ -23,8 +41,10 @@ Created in response to the discontinuation of Oracle's official AMI offerings (o
 | `env.properties.aws-ol9` | Build parameters for **Oracle Linux 9 Update 7** (x86_64). |
 | `env.properties.aws-ol8` | Build parameters for **Oracle Linux 8 Update 10** (x86_64). |
 | `setup-vmimport-role.sh` | One-time setup script that creates the `vmimport` IAM service role for AWS VM Import/Export. |
-| `README.md` | This document (English). |
-| `README.ja.md` | Japanese version of this document. |
+| `README.md` | End-user documentation (English, baseline). |
+| `README.ja.md` | End-user documentation (Japanese). |
+| `SPEC.md` | Developer specification (English) — phase contract, log conventions, design decisions. |
+| `SPEC.ja.md` | Developer specification (Japanese). |
 
 ---
 
@@ -346,44 +366,34 @@ cloud-init deploys your public key under the `ec2-user` account on first boot.
 
 ---
 
-## 9. Key Design Decisions
+## 9. Key Design Decisions (summary)
 
-### 9.1 Using `import-snapshot` + `register-image` instead of `import-image`
+> **Full rationale** for every design choice — phase numbering, log conventions, env property auto-detection, AWS quirks — lives in [SPEC.md](./SPEC.md) ([日本語](./SPEC.ja.md)). The summary below highlights the points most relevant to operators; refer to SPEC for the historical context (Part C) behind each.
 
-AWS VM Import/Export offers two import flows:
+### 9.1 `import-snapshot` + `register-image` over `import-image`
 
-| Approach | Characteristics |
-|----------|-----------------|
-| `import-image` | AWS auto-detects the OS and registers the AMI directly. Convenient, but OL10 is likely missing from the supported-OS list. |
-| `import-snapshot` + `register-image` | Creates only the snapshot, then **explicitly controls AMI attributes** (BootMode / ENA / TPM / IMDS) on our side. |
+The two-step flow (`import-snapshot` to create the EBS snapshot, then `register-image` to attach AMI attributes) gives explicit control over `BootMode`, ENA, NitroTPM, and IMDS settings. `import-image` is convenient but relies on AWS auto-detecting the OS, and newer Oracle Linux releases may not yet appear in AWS's supported-OS list. See SPEC §B.1 for which `register-image` flags are unconditional vs. conditional.
 
-For newer distributions like OL10, the second approach is safer and more reliable, so this script uses it. It allows us to set:
+### 9.2 ENA / NVMe drivers in the resulting AMI
 
-- `--ena-support`: enable ENA (Elastic Network Adapter)
-- `--boot-mode uefi-preferred`: boot via UEFI on UEFI-capable instances, fall back to BIOS otherwise
-- `--tpm-support v2.0`: enable NitroTPM
-- `--imds-support v2.0`: enforce IMDSv2
+The `cloud=aws` target of `oracle-linux-image-tools` bundles the Amazon ENA driver and `cloud-init` into the image. The OL8/9/10 kernels (UEK or RHCK) ship `ena` and `nvme` modules natively, so no extra driver injection is required for full Nitro-instance compatibility.
 
-### 9.2 ENA / NVMe drivers
+### 9.3 `BOOT_MODE_BUILD = "bios"` (mandatory for AWS)
 
-The `cloud=aws` target of `oracle-linux-image-tools` packages the Amazon ENA driver and cloud-init in (as the upstream README notes). The OL10 kernel (UEK 7-series or RHCK 6.x) ships with the `ena` and `nvme` modules natively, so no extra driver injection is required.
-
-### 9.3 `BOOT_MODE_BUILD = "hybrid"`
-
-Building with hybrid creates an image with **GPT + ESP (EFI System Partition) + BIOS Boot Partition**, which can boot in both modes. Combined with the AMI-side `--boot-mode uefi-preferred`, this lets the AMI run on both UEFI-capable and legacy-BIOS-only instance types.
+Oracle's upstream `bin/build-image.sh` enforces `BOOT_MODE=bios` for AWS targets and rejects `uefi` or `hybrid`. The resulting AMI is registered as `legacy-bios`. This is the **only** working combination today — see SPEC §C.4 for the discovery history. The AMI boots on every Nitro instance type; the trade-off is that NitroTPM and UEFI Secure Boot cannot be enabled.
 
 ### 9.4 cloud-init / ec2-user
 
-Setting `CLOUD_INIT="Yes"` and `CLOUD_USER="ec2-user"` aligns with the AWS convention of logging in as `ec2-user` with key-pair authentication.
+Setting `CLOUD_INIT="Yes"` and `CLOUD_USER="ec2-user"` aligns with the AWS convention of first-login via SSH key on the `ec2-user` account. This is the default in all three env templates.
 
 ### 9.5 Why nested virtualization is the primary recommendation
 
-Now that AWS officially supports nested virtualization on C8i/M8i/R8i (since February 2026), this approach delivers:
+Now that AWS officially supports nested virtualization on C8i / M8i / R8i (since February 2026), this approach delivers:
 
-1. **Compatibility with the official Oracle tooling** at a **dramatically lower cost**
-2. **Realistic CI/CD integration** thanks to the pricing
-3. Faster end-to-end time, since you avoid the multi-minute startup latency typical of bare-metal instances
-4. Compatibility with Spot Instances and Auto Scaling for further cost optimization
+1. **Compatibility with the official Oracle tooling** at a **dramatically lower cost** (≈$0.30/build on `m8i.xlarge` vs. ≈$5/build on `c5n.metal`).
+2. **Realistic CI/CD integration** thanks to the pricing.
+3. Faster end-to-end time, avoiding the multi-minute startup latency typical of bare-metal instances.
+4. Compatibility with Spot Instances and Auto Scaling for further cost optimization.
 
 ---
 
@@ -469,7 +479,18 @@ The upstream `oracle-linux-image-tools` project that this wrapper drives is inde
 
 Provided **AS IS, without warranty of any kind**. The author and AI tool are not liable for any damages arising from use. See the [repository-level disclaimer](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md) for full terms.
 
-### Feedback / corrections
+### Feedback / corrections / contributing
 
-If you encounter a problem or improvement, please open an issue at:
+If you encounter a problem, want to suggest an improvement, or have used these scripts on a new Oracle Linux release we should add a template for, please open an issue at:
+
 https://github.com/usui-tk/ai-generated-artifacts/issues
+
+When filing a bug, please include:
+
+- **Build host**: OS / version / instance type (if EC2) / whether nested-virt is enabled
+- **Target**: which `env.properties.aws-ol{N}` you used, plus any keys you customized
+- **Phase that failed**: the `========== Phase N: ...` banner just before the error
+- **Log excerpt**: 10–50 lines around the failure (not the whole 1000+ line log)
+- **What you already tried**: e.g. cleaned `${WORKSPACE}`, switched WORKSPACE filesystem, etc.
+
+For code-level changes, please consult [SPEC.md](./SPEC.md) first — Part C ("Known Pitfalls & Lessons Learned") documents bugs the current implementation already handles, and Part A defines the conventions any new code must follow.

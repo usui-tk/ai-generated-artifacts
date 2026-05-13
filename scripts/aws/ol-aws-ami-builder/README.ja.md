@@ -2,8 +2,9 @@
 
 [English](./README.md) | 日本語
 
-> 📂 [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) リポジトリの [`scripts/aws/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/aws/ol-aws-ami-builder) 配下のアーティファクトです
+> 📂 [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) リポジトリの [`scripts/aws/ol-aws-ami-builder/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/aws/ol-aws-ami-builder) 配下のアーティファクトです
 > ⚠️ **AI 生成コンテンツ** — 実行前にソースコードを確認してください。[`scripts/` ディレクトリ規約](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md)で完全な免責事項を確認できます。
+> 📐 **開発者向け仕様書**:[SPEC.ja.md](./SPEC.ja.md)([English](./SPEC.md)) — phase contract、ログ規約、env プロパティキー、現実装ですでに対処済みの過去の落とし穴を記録
 
 Oracle 公式の [`oracle-linux-image-tools`](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) を活用し、Oracle Linux 8 / 9 / 10 (x86_64) の AWS AMI を自前で構築するためのラッパースクリプト一式です。
 
@@ -11,6 +12,23 @@ Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が�
 
 > **2026 年 2 月以降の AWS 新機能対応**
 > AWS が C8i / M8i / R8i インスタンスでネスト仮想化をサポートしたことに伴い、本ガイドは **M8i 系インスタンスでのビルドを主推奨**としています。これによりベアメタルインスタンス(`.metal`)を使う必要がなく、**コストが従来の約 1/15** になります。
+
+---
+
+## ⚠️ 免責事項(実行前に必ずお読みください)
+
+**自己責任でご利用ください。** 本スクリプトは「現状有姿(AS IS)」で提供され、明示・黙示を問わずいかなる保証もありません。作者および貢献者は、本スクリプトの使用、改変、再配布に起因する直接・間接の損害(データ消失、想定外のクラウド料金、アカウント停止など)について一切責任を負いません。
+
+本スクリプトを実行することで、以下を承諾したものとみなします。
+
+* Oracle Linux に関する **Oracle のエンドユーザライセンス契約**、**AWS のサービス利用規約**(特に VM Import/Export および EC2)、および関連法規への準拠は利用者の責任で確認すること
+* スクリプトはビルドホスト上で **`sudo` を実行**し、KVM/libvirt のインストールや `${WORKSPACE}` 配下ディレクトリの ACL 変更を行うこと(Phase 1 で導入される内容を確認し、これらの変更に同意したものとみなします)
+* スクリプトは **AWS の課金を発生**させます:ビルダーの EC2 インスタンス時間、インポートされたイメージの EBS スナップショットストレージ、ステージング VMDK の S3 ストレージ。**これらのリソースの監視とクリーンアップは利用者の責任**です
+* `import-snapshot` と `register-image` の呼び出しは **永続的な AWS リソース**(EBS スナップショットと AMI)を作成します。削除は利用者の責任で行ってください。孤立したスナップショットは予期せぬ AWS 課金の典型的な原因です
+* 任意の環境で実行する前に、スクリプトのソースコード(または [SPEC.ja.md](./SPEC.ja.md) 仕様書)をレビューすること
+* ビルドプロセスは **一時的な内部 VM のみ**でカーネルレベル機能の変更を行います。ビルドホスト自体は Phase 1 のパッケージ導入と Phase 2 の ACL 調整以外には変更されません。とはいえ、ビルドホストは **使い捨て**(専用 EC2 インスタンスが理想)として扱うことを強く推奨します
+
+これらのツールは慎重に運用してください。**Oracle が公式に配布する AMI が存在する場合はそちらを優先**してください。本リポジトリは、Oracle が AWS Marketplace に対象リリースの AMI を公開していない、かつ利用者が自前ビルド AMI を自身の AWS アカウントで運用する意思がある、というニッチなケースを対象としています。
 
 ---
 
@@ -23,8 +41,10 @@ Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が�
 | `env.properties.aws-ol9` | **Oracle Linux 9 Update 7**(x86_64)用パラメータ |
 | `env.properties.aws-ol8` | **Oracle Linux 8 Update 10**(x86_64)用パラメータ |
 | `setup-vmimport-role.sh` | AWS VM Import/Export 用の `vmimport` IAM サービスロールを初回のみ作成 |
-| `README.md` | 英語版ドキュメント(ベースライン) |
-| `README.ja.md` | 本ドキュメント(日本語) |
+| `README.md` | エンドユーザ向けドキュメント(英語、ベースライン) |
+| `README.ja.md` | エンドユーザ向けドキュメント(日本語) |
+| `SPEC.md` | 開発者向け仕様書(英語)— phase contract、ログ規約、設計判断の詳細 |
+| `SPEC.ja.md` | 開発者向け仕様書(日本語) |
 
 ---
 
@@ -346,41 +366,31 @@ ssh -i your-keypair.pem ec2-user@<public-ip>
 
 ---
 
-## 9. 主な設計判断
+## 9. 主な設計判断(サマリ)
+
+> **すべての設計判断の詳細**(phase 番号付け、ログ規約、env プロパティ自動検出、AWS 固有の癖)は [SPEC.ja.md](./SPEC.ja.md)([English](./SPEC.md))にあります。以下は運用者にとって特に重要なポイントのみ抜粋しています。各項目の歴史的経緯は SPEC の Part C を参照してください。
 
 ### 9.1 import-image ではなく import-snapshot + register-image
 
-AWS VM Import/Export には 2 つの取り込み方式があります。
-
-| 方式 | 特徴 |
-|------|------|
-| `import-image` | OS を AWS が自動検出して AMI を直接登録。簡単だが OL10 はサポート OS リストに未登録の可能性が高い |
-| `import-snapshot` + `register-image` | スナップショットだけ作成し、AMI 属性(BootMode / ENA / TPM / IMDS)を**こちら側で明示的に制御** |
-
-OL10 のような新しめのディストロでは **後者** が安全かつ確実なので、本スクリプトはこの方式を採用しています。これにより以下を明示指定できます。
-
-- `--ena-support`: ENA(拡張ネットワーキング)有効
-- `--boot-mode uefi-preferred`: UEFI 対応インスタンスでは UEFI、非対応では BIOS で起動
-- `--tpm-support v2.0`: NitroTPM サポート
-- `--imds-support v2.0`: IMDSv2 を強制
+2 段階フロー(`import-snapshot` で EBS スナップショット作成 → `register-image` で AMI 属性付与)を採用することで、`BootMode`、ENA、NitroTPM、IMDS の設定を明示制御できます。`import-image` は便利ですが、AWS の OS 自動判別に依存しており、新しい Oracle Linux リリースは AWS のサポート OS リストに未登録の可能性があります。どの `register-image` フラグが無条件 / 条件付きかは SPEC §B.1 を参照。
 
 ### 9.2 ENA / NVMe ドライバ
 
-`oracle-linux-image-tools` の `cloud=aws` ターゲットは、Amazon ENA ドライバと cloud-init を組み込んでパッケージングします(README に明記)。OL10 のカーネル(UEK 7 系または RHCK 6.x)はネイティブで `ena` モジュール、`nvme` モジュールを含むため、別途のドライバ追加は不要です。
+`oracle-linux-image-tools` の `cloud=aws` ターゲットは、Amazon ENA ドライバと `cloud-init` をイメージに同梱します。OL8/9/10 のカーネル(UEK または RHCK)はネイティブで `ena` モジュールと `nvme` モジュールを含むため、Nitro インスタンスとの完全互換性のために別途のドライバ追加は不要です。
 
-### 9.3 BOOT_MODE_BUILD = "hybrid"
+### 9.3 `BOOT_MODE_BUILD = "bios"`(AWS 向けは必須)
 
-ビルド時に hybrid を選ぶことで、生成イメージは **GPT + ESP(EFI System Partition)+ BIOS Boot Partition** の両モード起動に対応します。これと AMI 側の `--boot-mode uefi-preferred` を組み合わせることで、UEFI 対応 / 非対応の双方のインスタンスタイプで起動可能になります。
+Oracle 上位の `bin/build-image.sh` は AWS 対象に対し `BOOT_MODE=bios` を強制し、`uefi` や `hybrid` は拒否します。生成 AMI は `legacy-bios` として登録されます。これは今日時点で **唯一動作する組み合わせ** です — 発見経緯は SPEC §C.4 を参照。AMI はすべての Nitro インスタンスタイプで起動可能。トレードオフとして、NitroTPM と UEFI Secure Boot は有効化できません。
 
 ### 9.4 cloud-init / ec2-user
 
-`CLOUD_INIT="Yes"` と `CLOUD_USER="ec2-user"` を指定することで、AWS 慣習に合わせた `ec2-user` でのキーペア認証ログインが可能になります。
+`CLOUD_INIT="Yes"` と `CLOUD_USER="ec2-user"` を指定することで、AWS 慣習に合わせた `ec2-user` 経由の SSH 鍵ログインが可能になります。3 つの env テンプレートすべてでデフォルト。
 
 ### 9.5 ネスト仮想化を主推奨にする理由
 
-2026 年 2 月以降、AWS が C8i/M8i/R8i でネスト仮想化を正式サポートしたことで、以下が達成されました。
+2026 年 2 月以降、AWS が C8i / M8i / R8i でネスト仮想化を正式サポートしたことで、以下が達成されました。
 
-1. **Oracle 公式ツールに準拠**したまま、**安価**にビルド可能
+1. **Oracle 公式ツールに準拠**したまま、**圧倒的に安価**にビルド可能(`m8i.xlarge` で約 $0.30/ビルド vs `c5n.metal` で約 $5/ビルド)
 2. **CI/CD パイプライン化が現実解**になる経済性
 3. ベアメタル特有の起動遅延(数分待ち)が発生せず、ビルド全体時間が短縮
 4. Spot Instance / Auto Scaling との組み合わせも視野に入る
@@ -470,7 +480,18 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 
 **現状有姿(AS IS)で、いかなる保証もなく**提供されます。本スクリプトの利用によって生じたいかなる損害についても、作者および AI ツールは責任を負いません。完全な免責事項は[リポジトリルートの免責事項](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.ja.md)を参照してください。
 
-### フィードバック / 修正依頼
+### フィードバック / 修正依頼 / コントリビューション
 
-問題報告や改善提案がある場合は Issue を作成してください:
+問題報告、改善提案、または新しい Oracle Linux リリース用テンプレート追加の要望は、Issue を作成してください:
+
 https://github.com/usui-tk/ai-generated-artifacts/issues
+
+バグ報告では、以下を含めてください。
+
+- **ビルドホスト**:OS / バージョン / インスタンスタイプ(EC2 の場合)/ nested-virt 有効化の有無
+- **対象**:使用した `env.properties.aws-ol{N}`、およびカスタマイズしたキー
+- **失敗したフェーズ**:エラー直前の `========== Phase N: ...` バナー
+- **ログ抜粋**:失敗周辺の 10〜50 行(1000 行以上のログ全体ではなく)
+- **すでに試したこと**:例: `${WORKSPACE}` のクリーン、WORKSPACE のファイルシステム切り替えなど
+
+コードレベルの変更については、まず [SPEC.ja.md](./SPEC.ja.md) を参照してください。Part C(「既知の落とし穴と教訓」)は現実装ですでに対処済みのバグを記録しており、Part A は新コードが従うべき規約を定義しています。
