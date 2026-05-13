@@ -6,22 +6,29 @@ PowerShell スクリプト用の単一ファイル Python 3 静的解析ツー�
 通常の PowerShell パーサーが構文解析時には検出しない、しかし長尺スクリプトを
 予期せず壊しがちな種類のバグを捕捉します。
 
-このディレクトリは `ai-generated-artifacts` レポジトリ内における `psa.py` の
-**正規配置場所**です。本レポジトリ内の他の PowerShell スクリプト
-（例：[`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/)）
-は、各自のコピーを持たずに、このパスを参照する形で利用します。
+このディレクトリは `psa.py` の **唯一の正本 (canonical source)** です。
+本 `ai-generated-artifacts` レポジトリ内の PowerShell スクリプトおよび外部
+レポジトリの consumer は、いずれも自前のコピーを持たずにこのファイルを
+参照します。
 
 ---
 
-## 起源と上流レポジトリ
+## 起源と保守ポリシー
 
 `psa.py` は
-[`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/tools/psa.py)
-で誕生し、設計理念は引き続き上記レポジトリで管理されています。本ディレクトリ
-のコピーは、上流の `tools/psa.py` と同期して維持されます。
+[`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+の `tools/psa.py` で誕生しました。その後、本 `ai-generated-artifacts`
+レポジトリへ集約し、**唯一の正本 (canonical source)** として一元管理する
+方針に変更しました。これに伴い、`Deploy-AMD-Drivers-For-WindowsServer`
+レポジトリ側の `tools/psa.py` は削除済みで、同レポジトリは本ファイルを
+外部依存として参照する形になっています
+（[SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.ja.md#a11-psapy-による静的解析)
+を参照）。
 
-**バグ修正および新しいチェックは、まず上流に貢献**してから本ディレクトリに
-同期してください。
+**バグ修正・新規チェック追加・auto-variable 一覧更新は、すべて本ディレクトリ
+で実施してください**。consumer レポジトリは、本レポジトリを `git clone`
+するか、`psa.py` を単一ファイルダウンロード（後述の Usage 節参照）して取得
+します。下流フォークは保守しません。
 
 ---
 
@@ -146,15 +153,18 @@ Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
 1. `check_yourthing(text)` 関数を追加。`severity`、`code`、`line`、`message`
    をキーとする dict のリストを返すこと。
 2. `main()` から呼び出し、`issues` に append する。
-3. 新しいコードを上記表および上流レポジトリ
-   ([`Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer))
-   にドキュメント化する。
+3. 新しいコードを上記の表にドキュメント化する。
+4. 下流の consumer レポジトリ
+   （例：[`Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)）
+   に通知し、各レポジトリ側の SPEC / README チェック表も同期更新できるよう
+   にしてください。
 
 `strip_strings_and_comments(line)` ヘルパーは `''` / `""` / `# ...` の中身を
 無視したいチェックの標準的な前処理です。利用してください。
 
-**注意：** まず上流に変更を貢献してから、更新された `psa.py` を本ディレクトリ
-に同期してください。
+**注意：** このディレクトリは `psa.py` の **唯一の正本 (canonical source)**
+です。変更はすべてここで行います。下流の consumer は自前コピーを保持せず、
+本ファイルを取り込みます。
 
 ---
 
@@ -183,17 +193,25 @@ jobs:
 
 ---
 
-## 本レポジトリ内のコンシューマー
+## コンシューマー
 
-以下の PowerShell スクリプトは `psa.py`（本正規配置場所）で検証されています。
+以下のレポジトリ・PowerShell スクリプトが `psa.py`（本正本）で検証されています。
+
+### 本レポジトリ内
 
 | スクリプト | パス |
 |:---|:---|
 | `Download-SpeakerDeck.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
 | `Test-PdfMetadata.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
 
-（新しい PowerShell スクリプトが `psa.py` を採用した際は、このリストを
-更新してください。）
+### 外部レポジトリ
+
+| レポジトリ | 対象スクリプト | 参照 |
+|:---|:---|:---|
+| [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`、`Deploy-AMDGraphicsDriverOnWindowsServer.ps1`、`Deploy-AMDNpuDriverOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.ja.md#a11-psapy-による静的解析) |
+
+（新しい PowerShell スクリプト ─ 内部・外部いずれも ─ が `psa.py` を採用
+した際は、このリストを更新してください。）
 
 ---
 
