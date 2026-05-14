@@ -52,7 +52,7 @@ setup-vmimport-role.sh      AWS IAM ロールの初回セットアップ
 これらのスクリプトは以下の正規実装の出所です。
 
 - `log_step` / `log_info` / `log_warn` / `log_error` / `die`(出力ヘルパー)
-- `detect_ec2_environment` / `guide_ec2_kvm_issue`(EC2 自己診断)
+- `detect_ec2_environment` / `resolve_aws_region` / `guide_ec2_kvm_issue`(EC2 自己診断とリージョン解決)
 - `detect_qemu_user` / `phase2_grant_qemu_access`(libvirt ACL 設定)
 - `parse_ol_version_from_iso` / `detect_os_variant`(OL バージョン推測)
 - `derive_oracle_checksum_url`(ISO チェックサム URL フォールバック)
@@ -74,6 +74,7 @@ env.properties.aws-ol10     Oracle Linux 10 Update 1 用テンプレート
 env.properties.aws-ol9      Oracle Linux 9  Update 7 用テンプレート
 env.properties.aws-ol8      Oracle Linux 8  Update 10 用テンプレート
 env.properties.aws-ol7      Oracle Linux 7  Update 9 用テンプレート(実験的 — B.3 / C.10 参照)
+env.properties.aws-ol6      Oracle Linux 6  Update 10 用テンプレート(実験的 — B.4 / C.11–C.16 / Part D 参照)
 README.md / README.ja.md    エンドユーザ向けドキュメント(バイリンガル)
 SPEC.md  / SPEC.ja.md       本仕様書(バイリンガル)
 ```
@@ -97,7 +98,7 @@ SPEC.md  / SPEC.ja.md       本仕様書(バイリンガル)
 6. ロギングヘルパー                 log_step, log_info, log_warn, log_error, die
 7. 引数解析                         usage, parse_args
 8. 環境ロード                       parse_ol_version_from_iso, load_env
-9. EC2 ヘルパー                     detect_ec2_environment, guide_ec2_kvm_issue
+9. EC2 ヘルパー                     detect_ec2_environment, resolve_aws_region, guide_ec2_kvm_issue
 10. Phase 0–8 関数                  phase0_preflight_checks ... phase8_register_ami
 11. ヘルパー関数(関連箇所に配置)   detect_qemu_user, derive_oracle_checksum_url, detect_os_variant
 12. main()                          phase0..phase8 を skip/build-only 分岐付きで呼び出し
@@ -579,9 +580,63 @@ OL6 テンプレートはさらに実験的扱い: アップストリームに�
 | `# AMI_NAME` 例示 | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` | `OracleLinux-6-U10-...` |
 | `KERNEL` | 未設定(distr デフォルト) | 未設定 | 未設定 | `uek`(必須 — C.10 参照) | `uek`(必須 — C.12 参照) |
 | `UEK_RELEASE` | 未設定 | 未設定 | 未設定 | `6`(OL7 で唯一現実的な UEK) | `4`(OL6 で唯一現実的な UEK) |
-| `ROOT_FS` | 未設定(xfs デフォルト) | 未設定 | 未設定 | 未設定 | `ext4`(xfs も可。lvm/btrfs 不可) |
+| `ROOT_FS` | 未設定(xfs デフォルト) | 未設定 | 未設定 | `xfs`(上流 OL7+ では xfs/btrfs/lvm のみ可) | `xfs`(xfs または ext4 が可。`/boot` は ext4 を維持 — B.4 / C.16 参照) |
 | `BOOT_MODE_BUILD` | 未設定 | 未設定 | 未設定 | `bios` | `bios` |
 | ファイル冒頭警告バナー | なし | なし | なし | EOL / パッチ / 本番禁止の旨を記載 | EOL / **パッチ 2 種** / `distr/` ランタイム合成 / 本番禁止の旨を記載 |
+
+### バージョン横断で共通化された項目
+
+以下のキーは全 5 テンプレートで意図的に同一値に揃えられており、運用者は任意のテンプレートを `env.properties.local` にコピーし、`# AMI_NAME` 行(と必要に応じて `WORKSPACE`)だけ書き換えれば動かせる構成になっています。
+
+| キー | 共通値 | 理由 |
+|------|--------|------|
+| `S3_BUCKET` | `my-oracle-linux-ami-import-bucket` | 1 つの IAM ロール(`vmimport`)と 1 つの S3 バケットで全バージョンをカバー。バージョンごとの分離は `S3_KEY_PREFIX` で実現。B.3.1 参照。 |
+| `AWS_REGION` | `""`(空) | ランタイムに IMDSv2 → IMDSv1 → `ap-northeast-1` の順で動的解決。B.3.2 と §B.1 の `resolve_aws_region()` 解説を参照。 |
+| `UPDATE_TO_LATEST` | `"yes"` | ISO ベースインストール完了後、ゲスト VM 内で `dnf/yum update -y` を実行し、ISO リリース以降の kernel および userspace の CVE を取り込み。B.3.3 参照。 |
+
+### B.3.1 全バージョン共通の `S3_BUCKET` と `vmimport` IAM ロール
+
+リファクタリング前は、各 env テンプレートにバージョンごとのバケット名(`my-ol10-ami-import-bucket`、`my-ol9-ami-import-bucket`…)が含まれており、運用者は以下のいずれかが必要でした:
+
+- `setup-vmimport-role.sh` を 5 回実行(バケットごとに 1 回ずつ。後続実行が前のトラストポリシーを上書き)
+- `vmimport-policy` JSON の `Resource` 配列を手動編集して 5 バケットを列挙
+
+統一バケット `my-oracle-linux-ami-import-bucket` 方式により、これらの運用負担はいずれも解消されました。`setup-vmimport-role.sh` は **AWS アカウントごとに 1 回**、この単一のバケット名で実行するだけです。以降の `build-ol-aws-ami.sh` 呼び出しは同じロールポリシーを変更なしで再利用します。バージョンごとの VMDK 分離は各 env テンプレートの `S3_KEY_PREFIX="ol{N}-ami-import"` で確保されており、ステージ済みオブジェクトは `s3://my-oracle-linux-ami-import-bucket/ol{N}-ami-import/...` に格納されます。
+
+S3 バケット自体は `phase6_upload_to_s3` 内で未作成の場合に自動生成されます(public access はブロック)。運用者が事前作成する必要はありません。
+
+### B.3.2 動的な `AWS_REGION` 解決
+
+`build-ol-aws-ami.sh` 内の `resolve_aws_region()`(`load_env` から呼び出し)が以下の 3 段階解決チェーンを実装します:
+
+| ステップ | ソース | 方法 | コスト |
+|---------|--------|------|--------|
+| 1 | env ファイル(明示指定) | `AWS_REGION` が非空ならチェーンを短絡 | 0 |
+| 2a | IMDSv2 | `curl PUT /latest/api/token` でトークン取得後、トークン付きで `GET /latest/meta-data/placement/region` | 最大 2 × 2 秒 |
+| 2b | IMDSv1 | `curl GET /latest/meta-data/placement/region`(トークン無し)。ステップ 2a がトークンを返さなかった場合のみ実行 | 最大 1 × 2 秒 |
+| 3 | フォールバック定数 | `AWS_REGION="ap-northeast-1"` | 0 |
+
+関数は `AWS_REGION_SOURCE` を `env` / `imdsv2` / `imdsv1` / `fallback` に設定し、選択結果は `load_env` のバナーに表示されます:
+
+```
+[INFO] AWS_REGION         = us-east-1 (source: imdsv2)
+```
+
+**v2 と v1 を両方サポートする理由**: AWS はセキュリティ上 v2 を推奨(トークンで SSRF を緩和)していますが、2024 年半ば以前に起動された EC2 インスタンスは `HttpTokens=optional` の可能性があり、v1 でも動作します。`HttpTokens=disabled` のインスタンス(まれですが有効な設定)では PUT が失敗し、v1 で取得できます。`HttpTokens=required` のインスタンス(モダンなハードニング済みデフォルト)では v1 は 401 を返すため、本ラッパーはフォールバック定数まで進みます。各 curl 呼び出しは `--max-time 2` で 2 秒に制限されているため、両 IMDS 呼び出しが失敗してもレイテンシ予算は約 4 秒以内に収まります(オンプレミスホストなどメタデータサービスが存在しない場合の典型)。
+
+**フォールバックに `ap-northeast-1` を選んだ理由**: リファクタリング前のバージョンごとテンプレートの歴史的デフォルトと一致し、また本ラッパーの end-to-end 検証時のビルドホストリージョンとも一致するため。他リージョンで運用する場合は `env.properties.local` で `AWS_REGION` を明示してください。
+
+### B.3.3 `UPDATE_TO_LATEST` のラッパー層パススルー
+
+アップストリームの `distr/ol{N}-slim/env.properties` 全ファイルが `UPDATE_TO_LATEST="yes"` をデフォルトとしているため、本ラッパーが何も指定しなくても `distr::configure` 内で `dnf update -y`(OL8/9/10)または `yum update -y`(OL6/7)が実行されます。リファクタリング前のラッパーはこの暗黙のデフォルトに依存しており、ログ出力も一切なかったため、運用者はラッパー層の env ファイルからアップデートの有無を判別できませんでした。
+
+リファクタリング後:
+
+1. 全ラッパー層 env テンプレートで `UPDATE_TO_LATEST="yes"` を明示宣言し、許容される 3 値(`yes` / `security` / `no`)をまとめたコメントブロックを付加。
+2. `phase4_prepare_env_properties` が生成する `env.properties.local` に `${UPDATE_TO_LATEST:+...}` 行を出力。運用者が `yes` 以外(例: バイト単位再現性のためのビルドで `no`)に設定したオーバーライドが、暗黙に無視されることなくアップストリーム層まで届きます。
+3. OL6 ランタイム生成版 `distr/ol6-slim/env.properties` テンプレート(`phase3_clone_repository` 内の heredoc で出力)も同じ `UPDATE_TO_LATEST="yes"` デフォルトを持ち、合成版 `distr::common_cfg` が同じ env レイヤーオーバーライド機構経由でラッパー指定値を尊重します。
+
+本変更はドキュメンテーションとログ出力主体の改修です。env ファイルを変更しない場合のランタイム挙動はリファクタリング前と同じ(暗黙のアップストリームデフォルト `yes` により同じ `dnf update -y` が実行される)です。
 
 ### 保守規則
 
@@ -884,6 +939,41 @@ candidates+=("ol${major}-unknown" "ol${major}")
 レガシーの `oraclelinux{N}.{U}` ファミリは直下に残置。両方とも持たない OL6 ビルダーの場合、チェーンは `rhel6.{U}` へフォールスルーする(OL6 とバイナリ互換であり、ほぼ常時存在)。
 
 **注意点**: 本ラッパーが行う `osinfo-query` 呼び出しはすべて読み取り専用で副作用は無い。`osinfo-query` 自体が利用不可な場合(2026 時点ではまれだが、絞り込み済みのビルダーイメージでは起こり得る)、`detect_os_variant()` は 1 を返し、運用者は env ファイルで `OS_VARIANT` を手動設定する必要がある。
+
+---
+
+## C.16 OL6 `ROOT_FS=xfs` 時に `/boot` を ext4 のまま維持
+
+**症状**: OL6 の env テンプレートのデフォルトを `ROOT_FS="ext4"` から `ROOT_FS="xfs"`(OL7/8/9/10 と整合)に変更した当初、ラッパー合成版 `distr/ol6-slim/image-scripts.sh` 内の `distr::kickstart` 実装は以下のグローバル置換を行っていました:
+
+```bash
+sed -i -e 's!--fstype="ext4"!--fstype="xfs"!g' "${ks_file}"
+```
+
+この実装は `/boot` と `/` の **両方** のパーティションを xfs に書き換えてしまいます:
+
+```
+part /boot    --fstype="xfs" --ondisk=sda --size=500  --label=/boot
+part /        --fstype="xfs" --ondisk=sda --size=4096 --label=root  --grow
+```
+
+**根本原因**: OL6 のブートローダーは GRUB Legacy 0.97。grub-0.97 は OL6 のパッチビルドでは XFS 読み取りに対応していますが、GRUB 2(OL7 以降)上での XFS と比較すると実戦投入の経験が浅い組み合わせです。OL6 で XFS ルートを使用する業界標準のプラクティスは、より小さな `/boot` 専用 ext4 パーティションを残すこと。RHEL 6 / OL 6 anaconda の自動パーティショニングがユーザーに XFS ルートを選ばせた場合と同じ構成です。
+
+**対処**: 置換パターンを行アンカー付きの、ルートパーティション専用パターンに変更:
+
+```bash
+sed -i -e 's!^\(part /        --fstype=\)"ext4"!\1"xfs"!' "${ks_file}"
+```
+
+このパターンは `phase3_clone_repository` 内に埋め込まれた kickstart テンプレートの `part /` と `--fstype=` の間にある 4 つのスペースに依存しています。もし将来このテンプレートが再フォーマットされたら、この置換も連動して更新する必要があります(kickstart テンプレートと sed パターンが `build-ol-aws-ami.sh` 内で同一ファイル内に配置されているのは、まさにこの連動を見落としにくくするためです)。
+
+**検証**: 静的検証で以下を確認:
+
+1. このパターンは埋め込み kickstart テンプレートの `part /        --fstype="ext4"` 行にバイト単位で一致する。
+2. このパターンは `part /boot    --fstype="ext4"` 行には一致しない(スペース数が異なる。アンカー `part /        ` は `/` と `--fstype=` の間に 8 文字を要求するが、`/boot    ` はその条件を満たさない)。
+3. このパターンは冪等。既に置換済みの行に対する再実行は no-op(`"xfs"` はリテラルの `"ext4"` 文字列にマッチしない)。
+
+**注意点**: OL6 の `ROOT_FS=xfs` 設定に対する end-to-end(Phase C)検証は、本ドキュメント作成時点で著者により未実施(OL6 ビルドパイプライン全体としても Phase A/B 検証のみの状態)。OL7 リファレンス kickstart と GRUB Legacy の XFS ドキュメントに基づき構造的には正しい修正ですが、OL6+XFS を本格利用する運用者は、初回起動時に anaconda や grub の挙動不良が発生した際のデバッグを想定しておいてください。
 
 ---
 

@@ -220,10 +220,10 @@ aws sts get-caller-identity
 ### 5.3 vmimport IAM ロールの作成 (初回のみ)
 
 ```bash
-./setup-vmimport-role.sh my-ol10-ami-import-bucket
+./setup-vmimport-role.sh my-oracle-linux-ami-import-bucket
 ```
 
-このロールは AWS VM Import/Export が S3 から VMDK を読み出すために必須です。**初回 1 回のみ**作成してください。
+このロールは AWS VM Import/Export が S3 から VMDK を読み出すために必須です。**初回 1 回のみ**作成してください。上記のバケット名は、本ディレクトリ内のすべての `env.properties.aws-ol{N}` テンプレートで共有される `S3_BUCKET` の値と一致しているため、この 1 つのロールで OL6 / OL7 / OL8 / OL9 / OL10 すべてのビルドをカバーします。各 env ファイルの `S3_KEY_PREFIX`(例: `ol10-ami-import`)によって、バケット内でバージョンごとに VMDK が分離されます。
 
 ### 5.4 環境設定ファイルの編集
 
@@ -255,8 +255,9 @@ vi env.properties.local
 | パラメータ | 例 |
 |-----------|----|
 | `WORKSPACE` | `/tmp/ol10-build-ws`(デフォルト。qemu ユーザーから普通に到達可能。`/tmp` が tmpfs でサイズ不足の場合は `/var/tmp/ol10-build-ws` に変更) |
-| `S3_BUCKET` | `my-ol10-ami-import-bucket`(`setup-vmimport-role.sh` と一致) |
-| `AWS_REGION` | `ap-northeast-1` |
+| `S3_BUCKET` | `my-oracle-linux-ami-import-bucket`(全 OL バージョン共通。`setup-vmimport-role.sh` と一致) |
+| `AWS_REGION` | 空のままにすると EC2 IMDSv2/v1 から自動取得(EC2 外では `ap-northeast-1` にフォールバック)。明示的に指定するとオーバーライドされます。 |
+| `UPDATE_TO_LATEST` | デフォルト `yes`。ゲスト VM 内でインストール後に `dnf/yum update` を実行し、ISO リリース以降に発見された kernel および userspace の CVE を解消します。トレードオフを理解した上でのみ `security` や `no` に変更してください。 |
 | `AMI_NAME` | 任意。未指定なら日時付きで自動生成 |
 
 ---
@@ -396,7 +397,27 @@ Oracle 上位の `bin/build-image.sh` は AWS 対象に対し `BOOT_MODE=bios` �
 
 ### 9.4 cloud-init / ec2-user
 
-`CLOUD_INIT="Yes"` と `CLOUD_USER="ec2-user"` を指定することで、AWS 慣習に合わせた `ec2-user` 経由の SSH 鍵ログインが可能になります。3 つの env テンプレートすべてでデフォルト。
+`CLOUD_INIT="Yes"` と `CLOUD_USER="ec2-user"` を指定することで、AWS 慣習に合わせた `ec2-user` 経由の SSH 鍵ログインが可能になります。すべての env テンプレート(OL6 / OL7 / OL8 / OL9 / OL10)でデフォルト。
+
+### 9.4a 全バージョン共通の `S3_BUCKET`
+
+すべての `env.properties.aws-ol{N}` テンプレートは `S3_BUCKET="my-oracle-linux-ami-import-bucket"` を共有しているため、1 つの S3 バケットと 1 つの `vmimport` IAM ロール(`./setup-vmimport-role.sh my-oracle-linux-ami-import-bucket` で作成)で、全 OL バージョンのビルドをカバーできます。バージョンごとの `S3_KEY_PREFIX`(例: `ol10-ami-import`)により、バケット内でビルドごとの VMDK が分離されます。
+
+### 9.4b 動的な `AWS_REGION` 解決
+
+すべての env テンプレートで `AWS_REGION=""` がデフォルトです。空の場合、ラッパーは `load_env` 時に以下の順序でリージョンを解決します。
+
+1. **IMDSv2** — `http://169.254.169.254/latest/meta-data/placement/region` へのトークンベース呼び出し
+2. **IMDSv1** — 同エンドポイントへのトークン無し GET。IMDSv2 のトークン取得 PUT が失敗した場合のみ使用(`HttpTokens=disabled` のレガシーホストやネットワーク制限環境を想定)
+3. **フォールバック定数 `ap-northeast-1`** — IMDS パスのいずれも値を返さない場合に使用(オンプレミス KVM ビルドホストの通常ケース)
+
+各 curl 呼び出しは `--max-time 2` で 2 秒に制限されているため、非 EC2 ホストでの起動時オーバーヘッドは最大でも約 4 秒です。選択された値とソースは毎回ビルド冒頭にログ出力されます: `AWS_REGION = us-east-1 (source: imdsv2)`
+
+ビルド実行環境に依存せず特定のリージョンに固定したい場合は、`env.properties.local` に `AWS_REGION="ap-northeast-1"`(または他のリージョン)を明示設定してください。
+
+### 9.4c `UPDATE_TO_LATEST` とカーネルレベル CVE 対策
+
+すべての env テンプレートで `UPDATE_TO_LATEST="yes"` がデフォルトです。この設定は Phase 4 を経由して上位の `distr/ol{N}-slim/provision.sh` 内 `distr::configure` 関数に伝達され、ISO ベースのインストール完了後にゲスト VM 内で `dnf update -y`(OL8/9/10)または `yum update -y`(OL6/7)が実行されます。このステップが無いと、生成 AMI には ISO 同梱のパッケージしか含まれず、その後に公開された kernel や userspace の修正がすべて取り込まれません。特に OL10 U1 では Linux Kernel CVE の発見頻度が高く、無視できない露出となります。バイト単位の再現性が必要などの理由で ISO 後の更新を明示的に行いたくない場合は、`env.properties.local` で `UPDATE_TO_LATEST="no"` を指定してください。セキュリティ識別済みのエラータのみに限定する `"security"` も指定可能です。
 
 ### 9.5 ネスト仮想化を主推奨にする理由
 
@@ -535,6 +556,8 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 ### AI 生成について
 
 本ラッパースクリプトは、**Anthropic 社の Claude (Sonnet 4.5)** との対話を通じて 2026 年 5 月に反復的に開発・改善されたものです。Oracle Linux 8 / 9 / 10 の AWS 上での実ビルドで end-to-end の動作確認まで完了しています。Oracle Linux 7 の実験的サポートは、その後 2026 年 5 月に **Anthropic 社の Claude (Opus 4.7)** を用いて追加されました。OL7 パッチ機構自体は検証済み(sed 置換動作、構文整合性、冪等性)ですが、**OL7 の end-to-end AMI ビルドは作者により検証されていません**。さらに 2026 年 5 月、**Anthropic 社の Claude (Opus 4.7)** を用いて Oracle Linux 6 の実験的サポートを追加しました。事前の 2 フェーズ検証(Phase A:静的検証 9 項目 — osinfo-db、ISO チェックサム、リポジトリ HTTPS、dracut フラグ、cloud-init 等。Phase B:libvirt 11.5 / qemu 10.0 環境で virt-install + Anaconda 13.21.263 TUI ブートテスト)を経て、2 つのランタイムパッチおよび動的生成 `distr/ol6-slim/` の構文検証は完了していますが、**OL6 の end-to-end AMI ビルド(kickstart 完走から AWS Nitro 起動まで)は作者により検証されていません**。
+
+さらにその後の 2026 年 5 月のクロスバージョンリファクタリング(同じく Anthropic Claude Opus 4.7 を使用)では、`S3_BUCKET` を 5 テンプレート全てで `my-oracle-linux-ami-import-bucket` に統一し、ランタイム解決チェーン `resolve_aws_region()`(IMDSv2 → IMDSv1 → `ap-northeast-1` フォールバック)を追加することで全テンプレートが `AWS_REGION=""` をデフォルトとできるようにし、上位の `UPDATE_TO_LATEST="yes"` デフォルトを各 env ファイルで明示宣言し Phase 4 でラッパー層パススルーを実装し、OL6 テンプレートの `ROOT_FS` デフォルトを `ext4` から `xfs` に切り替え(`/boot` を ext4 のまま維持する行アンカー付き sed パターンで GRUB Legacy 互換性を確保)、5 つの `ISO_CHECKSUM` リファレンス値を RHEL 10.1 のビルドホスト上で `linux.oracle.com/security/gpg/checksum/` に対して検証しました。リファクタリングには README と SPEC の対応更新が含まれており、bash `-n` および shellcheck エラークラスでは静的検証済みですが、**リファクタリング後の構成での AWS 実環境 end-to-end 再実行は未実施です**。
 
 本ラッパーから呼び出される上位の `oracle-linux-image-tools` プロジェクトは Oracle 社が独自に開発・公開しているもので、本リポジトリとは独立しています。
 

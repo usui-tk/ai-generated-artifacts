@@ -64,7 +64,7 @@ setup-vmimport-role.sh      one-time AWS IAM role bootstrap
 These scripts are the canonical source for:
 
 - `log_step` / `log_info` / `log_warn` / `log_error` / `die` (output helpers)
-- `detect_ec2_environment` / `guide_ec2_kvm_issue` (EC2 self-diagnosis)
+- `detect_ec2_environment` / `resolve_aws_region` / `guide_ec2_kvm_issue` (EC2 self-diagnosis and region resolution)
 - `detect_qemu_user` / `phase2_grant_qemu_access` (libvirt ACL bootstrap)
 - `parse_ol_version_from_iso` / `detect_os_variant` (OL version inference)
 - `derive_oracle_checksum_url` (ISO checksum URL fallback chain)
@@ -89,6 +89,7 @@ env.properties.aws-ol10     Oracle Linux 10 Update 1 template
 env.properties.aws-ol9      Oracle Linux 9  Update 7 template
 env.properties.aws-ol8      Oracle Linux 8  Update 10 template
 env.properties.aws-ol7      Oracle Linux 7  Update 9 template (experimental — see B.3, C.10)
+env.properties.aws-ol6      Oracle Linux 6  Update 10 template (experimental — see B.4, C.11–C.16, Part D)
 README.md / README.ja.md    end-user documentation (bilingual)
 SPEC.md  / SPEC.ja.md       this developer specification (bilingual)
 ```
@@ -116,7 +117,7 @@ and C.3 for the full rationale.
 6. Logging helpers                    log_step, log_info, log_warn, log_error, die
 7. Argument parsing                   usage, parse_args
 8. Environment loading                parse_ol_version_from_iso, load_env
-9. EC2 helpers                        detect_ec2_environment, guide_ec2_kvm_issue
+9. EC2 helpers                        detect_ec2_environment, resolve_aws_region, guide_ec2_kvm_issue
 10. Phase 0–8 functions               phase0_preflight_checks ... phase8_register_ami
 11. Helper functions interleaved      detect_qemu_user, derive_oracle_checksum_url, detect_os_variant
 12. main()                            Calls phase0..phase8 with skip/build-only branching
@@ -685,9 +686,109 @@ for design rationale, and Part D for the overall OL6 architecture.
 | `# AMI_NAME` example | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` | `OracleLinux-6-U10-...` |
 | `KERNEL` | unset (use distr default) | unset | unset | `uek` (required — see C.10) | `uek` (required — see C.12) |
 | `UEK_RELEASE` | unset | unset | unset | `6` (the only viable UEK for OL7) | `4` (the only viable UEK for OL6) |
-| `ROOT_FS` | unset (xfs default) | unset | unset | unset | `ext4` (xfs also valid; no lvm/btrfs) |
+| `ROOT_FS` | unset (xfs default) | unset | unset | `xfs` (only xfs/btrfs/lvm valid in upstream OL7+) | `xfs` (xfs or ext4; /boot kept on ext4 — see B.4 / C.16) |
 | `BOOT_MODE_BUILD` | unset | unset | unset | `bios` | `bios` |
 | Top-of-file warning banner | none | none | none | EOL / patch / production-prohibited notice | EOL / **2 patches** / runtime-synthesized `distr/` / production-prohibited notice |
+
+### Cross-version uniform fields
+
+The following keys are intentionally identical across all five templates so
+that operators can copy any of them to `env.properties.local` and only need
+to change the `# AMI_NAME` line and (optionally) `WORKSPACE`:
+
+| Key | Uniform value | Rationale |
+|-----|---------------|-----------|
+| `S3_BUCKET` | `my-oracle-linux-ami-import-bucket` | One IAM role (`vmimport`) and one S3 bucket cover every version. Per-version isolation comes from `S3_KEY_PREFIX`. See B.3.1 below. |
+| `AWS_REGION` | `""` (empty) | Resolved dynamically at runtime via IMDSv2 → IMDSv1 → `ap-northeast-1` fallback. See B.3.2 below and §B.1's `resolve_aws_region()` description. |
+| `UPDATE_TO_LATEST` | `"yes"` | Run `dnf/yum update -y` inside the guest after install, addressing kernel and userspace CVEs published after the ISO date. See B.3.3 below. |
+
+### B.3.1 Shared `S3_BUCKET` and the `vmimport` IAM role
+
+Pre-refactor, every env template carried a per-version bucket name
+(`my-ol10-ami-import-bucket`, `my-ol9-ami-import-bucket`, …) which forced
+operators to either:
+
+- run `setup-vmimport-role.sh` five times (once per bucket), each call
+  replacing the previous IAM trust policy; or
+- manually edit the `Resource` array in the `vmimport-policy` JSON to
+  enumerate all five buckets.
+
+The unified `my-oracle-linux-ami-import-bucket` approach eliminates both
+operational burdens. `setup-vmimport-role.sh` is run **once per AWS
+account** with that single bucket name, and every `build-ol-aws-ami.sh`
+invocation reuses the resulting role policy unchanged. Per-version VMDK
+isolation is preserved by `S3_KEY_PREFIX="ol{N}-ami-import"` in each env
+template, which causes the staged objects to land under
+`s3://my-oracle-linux-ami-import-bucket/ol{N}-ami-import/...`.
+
+The bucket itself is created lazily by `phase6_upload_to_s3` if missing
+(public access blocked), so the operator does not need to pre-create it.
+
+### B.3.2 Dynamic `AWS_REGION` resolution
+
+`resolve_aws_region()` (in `build-ol-aws-ami.sh`, called from `load_env`)
+implements a 3-step resolution chain:
+
+| Step | Source | Method | Cost |
+|------|--------|--------|------|
+| 1 | Env file (explicit) | Non-empty `AWS_REGION` value short-circuits the chain. | 0 |
+| 2a | IMDSv2 | `curl PUT /latest/api/token` then `GET /latest/meta-data/placement/region` with the token. | ~2 × max-2s |
+| 2b | IMDSv1 | `curl GET /latest/meta-data/placement/region` (token-less). Only attempted if step 2a returns no token. | ~1 × max-2s |
+| 3 | Fallback constant | `AWS_REGION="ap-northeast-1"` | 0 |
+
+The function sets `AWS_REGION_SOURCE` to `env` / `imdsv2` / `imdsv1` /
+`fallback` so the choice is visible in the load-env banner:
+
+```
+[INFO] AWS_REGION         = us-east-1 (source: imdsv2)
+```
+
+**Why both v2 and v1?** AWS recommends v2 for security (token mitigates
+SSRF), but EC2 instances launched before mid-2024 may still have
+`HttpTokens=optional` (where v1 also works). On instances with
+`HttpTokens=disabled` (a rare but valid configuration), the PUT call
+fails and v1 succeeds. On instances with `HttpTokens=required` (the
+modern hardened default), v1 returns 401 and the wrapper falls through
+to the fallback constant. The 2-second `--max-time` cap on every curl
+call keeps the latency budget under ~4 seconds even when both IMDS calls
+fail (i.e., on on-premises hosts where there is no metadata service at
+all).
+
+**Why `ap-northeast-1` as the fallback?** It matches the historical
+default in the per-version templates pre-refactor, and matches the
+build-host region used during the wrapper's own end-to-end verification.
+Operators in other regions should set `AWS_REGION` explicitly in
+`env.properties.local`.
+
+### B.3.3 `UPDATE_TO_LATEST` wrapper-level passthrough
+
+The upstream `distr/ol{N}-slim/env.properties` files all default
+`UPDATE_TO_LATEST="yes"`, which means `dnf update -y` (OL8/9/10) or
+`yum update -y` (OL6/7) runs during `distr::configure` regardless of
+whether the wrapper specifies anything. Pre-refactor, the wrapper relied
+on this implicit default and emitted no log line about it; operators had
+no way to tell from the wrapper-level env file whether the update would
+happen.
+
+Post-refactor:
+
+1. Every wrapper-level env template declares `UPDATE_TO_LATEST="yes"`
+   explicitly, with a comment block summarizing the three accepted
+   values (`yes` / `security` / `no`).
+2. `phase4_prepare_env_properties` emits a `${UPDATE_TO_LATEST:+...}`
+   line into the generated `env.properties.local`, so when the operator
+   sets the value to something other than `yes` (e.g. `no` for byte-for-
+   byte reproducibility builds) the override actually reaches the
+   upstream layer instead of being silently dropped.
+3. The OL6 runtime-generated `distr/ol6-slim/env.properties` template
+   (emitted from a heredoc in `phase3_clone_repository`) carries the
+   same `UPDATE_TO_LATEST="yes"` default, and its synthesized
+   `distr::common_cfg` honours the wrapper-supplied value through the
+   same env-layer override mechanism.
+
+This change is documentation-and-logging-focused; the runtime behaviour
+of an unchanged env file is identical to pre-refactor (the implicit
+upstream default of `yes` produces the same `dnf update -y` execution).
 
 ### Maintenance rule
 
@@ -1219,6 +1320,67 @@ read-only and have no side effects. If `osinfo-query` itself is
 unavailable (uncommon in 2026 but possible on stripped-down builder
 images), `detect_os_variant()` returns 1 and the operator must set
 `OS_VARIANT` manually in the env file.
+
+---
+
+## C.16 OL6 `ROOT_FS=xfs` must keep `/boot` on ext4
+
+**Symptom**: When the OL6 env template defaults shifted from
+`ROOT_FS="ext4"` to `ROOT_FS="xfs"` (to align with OL7/8/9/10), the
+initial `distr::kickstart` implementation in the wrapper-synthesized
+`distr/ol6-slim/image-scripts.sh` performed a global substitution:
+
+```bash
+sed -i -e 's!--fstype="ext4"!--fstype="xfs"!g' "${ks_file}"
+```
+
+This rewrote **both** `/boot` and `/` partitions to xfs:
+
+```
+part /boot    --fstype="xfs" --ondisk=sda --size=500  --label=/boot
+part /        --fstype="xfs" --ondisk=sda --size=4096 --label=root  --grow
+```
+
+**Root cause**: OL6 ships GRUB Legacy 0.97 as the bootloader. While
+grub-0.97 *does* include XFS read support in OL6's patched build, the
+combination has been less battle-tested than XFS on grub2 (OL7+). The
+industry-standard practice on OL6 systems running an XFS root is to keep
+`/boot` on a smaller ext4 partition; this is also what RHEL 6 / OL 6
+anaconda's automatic partitioning chooses when the user opts for XFS as
+the root filesystem.
+
+**Fix**: The substitution was changed to a line-anchored, partition-
+specific pattern that targets only the root partition:
+
+```bash
+sed -i -e 's!^\(part /        --fstype=\)"ext4"!\1"xfs"!' "${ks_file}"
+```
+
+The pattern relies on the four-space alignment between `part /` and
+`--fstype=` in the kickstart template embedded in
+`phase3_clone_repository`. If that template is ever reformatted, this
+substitution must be updated together with it (the kickstart template
+and the sed pattern are co-located in `build-ol-aws-ami.sh` precisely so
+this co-evolution is easy to spot).
+
+**Verification**: A static check confirmed:
+
+1. The pattern matches the `part /        --fstype="ext4"` line in the
+   embedded kickstart template byte-for-byte.
+2. The pattern does NOT match the `part /boot    --fstype="ext4"` line
+   (different number of spaces; the anchor `part /        ` requires
+   eight characters between `/` and `--fstype=`, which `/boot    ` does
+   not satisfy).
+3. The pattern is idempotent: re-running it on an already-substituted
+   line is a no-op because `"xfs"` no longer matches the literal
+   `"ext4"` source string.
+
+**Caveat**: End-to-end (Phase C) validation of OL6 with `ROOT_FS=xfs`
+has not yet been performed by the author (the OL6 build pipeline as a
+whole remains Phase A/B verified only). The fix is structurally
+correct based on the OL7 reference kickstart and GRUB Legacy XFS
+documentation, but operators running OL6+XFS in anger should expect to
+debug if anaconda or grub2 misbehaves on first boot.
 
 ---
 

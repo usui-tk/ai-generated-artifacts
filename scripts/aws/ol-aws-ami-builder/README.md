@@ -220,10 +220,10 @@ Minimum IAM permissions required:
 ### 5.3 Create the vmimport IAM role (one-time)
 
 ```bash
-./setup-vmimport-role.sh my-ol10-ami-import-bucket
+./setup-vmimport-role.sh my-oracle-linux-ami-import-bucket
 ```
 
-This role is required by AWS VM Import/Export to read the staged VMDK from S3. Run this **only once per AWS account**.
+This role is required by AWS VM Import/Export to read the staged VMDK from S3. Run this **only once per AWS account**. The bucket name above matches the `S3_BUCKET` value shared by every `env.properties.aws-ol{N}` template in this directory, so the single role covers builds for OL6 / OL7 / OL8 / OL9 / OL10 alike. The `S3_KEY_PREFIX` in each env file (e.g. `ol10-ami-import`) keeps the per-version VMDKs isolated within the bucket.
 
 ### 5.4 Edit the environment file
 
@@ -255,8 +255,9 @@ The script auto-detects the OL major and update version from `ISO_URL`, so switc
 | Parameter | Example |
 |-----------|---------|
 | `WORKSPACE` | `/tmp/ol10-build-ws` (default — universally accessible by the qemu user; switch to `/var/tmp/ol10-build-ws` if `/tmp` is tmpfs and too small) |
-| `S3_BUCKET` | `my-ol10-ami-import-bucket` (must match `setup-vmimport-role.sh`) |
-| `AWS_REGION` | `ap-northeast-1` |
+| `S3_BUCKET` | `my-oracle-linux-ami-import-bucket` (shared across all OL versions; must match `setup-vmimport-role.sh`) |
+| `AWS_REGION` | Leave empty for auto-detection via EC2 IMDSv2/v1 (falls back to `ap-northeast-1` outside EC2). Set explicitly to override. |
+| `UPDATE_TO_LATEST` | Defaults to `yes` — runs `dnf/yum update` inside the guest after install, addressing kernel and userspace CVEs published after the ISO date. Override with `security` or `no` only when you understand the trade-off. |
 | `AMI_NAME` | Optional; auto-generates with timestamp if unset |
 
 ---
@@ -396,7 +397,27 @@ Oracle's upstream `bin/build-image.sh` enforces `BOOT_MODE=bios` for AWS targets
 
 ### 9.4 cloud-init / ec2-user
 
-Setting `CLOUD_INIT="Yes"` and `CLOUD_USER="ec2-user"` aligns with the AWS convention of first-login via SSH key on the `ec2-user` account. This is the default in all three env templates.
+Setting `CLOUD_INIT="Yes"` and `CLOUD_USER="ec2-user"` aligns with the AWS convention of first-login via SSH key on the `ec2-user` account. This is the default in every env template (OL6 / OL7 / OL8 / OL9 / OL10).
+
+### 9.4a Shared `S3_BUCKET` across versions
+
+Every `env.properties.aws-ol{N}` template ships with `S3_BUCKET="my-oracle-linux-ami-import-bucket"`, so a single bucket and a single `vmimport` IAM role (created by `./setup-vmimport-role.sh my-oracle-linux-ami-import-bucket`) cover builds for every OL version. The per-version `S3_KEY_PREFIX` (e.g. `ol10-ami-import`) keeps each build's staged VMDK isolated within the bucket.
+
+### 9.4b Dynamic `AWS_REGION` resolution
+
+Every env template ships with `AWS_REGION=""`. When empty, the wrapper resolves the region at `load_env` time via the following chain:
+
+1. **IMDSv2** — token-based call to `http://169.254.169.254/latest/meta-data/placement/region`.
+2. **IMDSv1** — token-less GET to the same endpoint, used only when the IMDSv2 PUT call to obtain a token fails (typical on legacy hosts where `HttpTokens` is set to `disabled`, or in network-restricted setups).
+3. **Fallback constant `ap-northeast-1`** — used when neither IMDS path returns a value, which is the normal case for on-premises KVM build hosts.
+
+Each curl call is capped at 2 seconds (`--max-time 2`), so a non-EC2 host adds at most ~4 seconds to startup. The chosen value and its source are logged at the top of every build: `AWS_REGION = us-east-1 (source: imdsv2)`.
+
+To pin a specific region regardless of where the build runs, set `AWS_REGION="ap-northeast-1"` (or another region) in your `env.properties.local`.
+
+### 9.4c `UPDATE_TO_LATEST` and kernel-level CVE remediation
+
+Every env template ships with `UPDATE_TO_LATEST="yes"`. The setting flows through Phase 4 into the upstream `distr/ol{N}-slim/provision.sh` `distr::configure` routine, which runs `dnf update -y` (OL8/9/10) or `yum update -y` (OL6/7) inside the guest after the ISO-based install completes. Without this step the resulting AMI would ship only the packages bundled on the ISO, missing every kernel and userspace fix published afterwards — a meaningful exposure for OL10 U1 in particular, where Linux kernel CVEs continue to surface frequently. Operators who explicitly do not want post-ISO updates (e.g. for byte-for-byte reproducibility) can set `UPDATE_TO_LATEST="no"` in `env.properties.local`; `"security"` is also accepted to restrict the update to security-tagged errata.
 
 ### 9.5 Why nested virtualization is the primary recommendation
 
@@ -534,6 +555,8 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 ### AI generation
 
 This wrapper was **iteratively developed with Anthropic Claude (Sonnet 4.5)** in 2026-05, then refined based on real build runs against Oracle Linux 8 / 9 / 10 on AWS until all three versions completed end-to-end successfully. Oracle Linux 7 experimental support was added in a subsequent 2026-05 revision using Anthropic Claude (Opus 4.7); the OL7 patch mechanism has been verified (sed substitution, syntax integrity, idempotency) but **end-to-end OL7 AMI builds have not been validated by the author**. Oracle Linux 6 experimental support was added in a further 2026-05 revision using Anthropic Claude (Opus 4.7) after a two-phase verification session (Phase A: 9 static checks against osinfo-db, ISO/checksum, repo HTTPS, dracut, cloud-init; Phase B: virt-install + Anaconda 13.21.263 TUI boot test on libvirt 11.5 / qemu 10.0). The two OL6 runtime patches and the runtime-generated `distr/ol6-slim/` have been syntactically validated, but **end-to-end OL6 AMI builds (kickstart completion through AWS Nitro launch) have not been validated by the author**.
+
+A subsequent 2026-05 cross-version refactor (also using Anthropic Claude Opus 4.7) unified `S3_BUCKET` to `my-oracle-linux-ami-import-bucket` across all five templates, added the `resolve_aws_region()` runtime resolution chain (IMDSv2 → IMDSv1 → `ap-northeast-1` fallback) so every template ships with `AWS_REGION=""`, surfaced the upstream `UPDATE_TO_LATEST="yes"` default explicitly in every env file with wrapper-layer passthrough through Phase 4, switched the OL6 template's `ROOT_FS` default from `ext4` to `xfs` (with a targeted sed pattern that keeps `/boot` on ext4 to preserve GRUB Legacy compatibility), and verified the five `ISO_CHECKSUM` reference values against `linux.oracle.com/security/gpg/checksum/` on a RHEL 10.1 build host. The refactor includes corresponding README and SPEC updates and was statically validated (bash `-n`, shellcheck error-class clean); **the resulting env files have not been re-run end-to-end against AWS in the refactored configuration**.
 
 The upstream `oracle-linux-image-tools` project that this wrapper drives is independent and produced by Oracle.
 

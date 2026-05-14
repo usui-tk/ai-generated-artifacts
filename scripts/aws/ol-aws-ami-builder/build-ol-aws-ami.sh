@@ -267,7 +267,11 @@ load_env() {
   # Required parameters for AWS import (unless skipped)
   if [[ ${SKIP_AWS_IMPORT} -eq 0 && ${BUILD_ONLY} -eq 0 ]]; then
     : "${S3_BUCKET:?S3_BUCKET is not defined}"
-    : "${AWS_REGION:?AWS_REGION is not defined}"
+    # Resolve AWS_REGION dynamically when the env file leaves it empty.
+    # See resolve_aws_region() for the IMDSv2 -> IMDSv1 -> "ap-northeast-1"
+    # fallback chain. Sets AWS_REGION_SOURCE for downstream logging.
+    resolve_aws_region
+    : "${AWS_REGION:?AWS_REGION could not be resolved (this should not happen)}"
     : "${AMI_NAME:=OracleLinux-${OL_MAJOR_VERSION}-U${OL_UPDATE_VERSION}-x86_64-$(date +%Y%m%d-%H%M)}"
     : "${AMI_DESCRIPTION:=Oracle Linux ${OL_MAJOR_VERSION} Update ${OL_UPDATE_VERSION} (x86_64) custom AMI built via oracle-linux-image-tools}"
     # AMI registration boot mode.
@@ -299,7 +303,7 @@ load_env() {
   log_info "ISO_URL            = ${ISO_URL}"
   log_info "WORK_REPO_DIR      = ${WORK_REPO_DIR}"
   if [[ ${SKIP_AWS_IMPORT} -eq 0 && ${BUILD_ONLY} -eq 0 ]]; then
-    log_info "AWS_REGION         = ${AWS_REGION}"
+    log_info "AWS_REGION         = ${AWS_REGION} (source: ${AWS_REGION_SOURCE:-unknown})"
     log_info "S3_BUCKET          = ${S3_BUCKET}"
     log_info "AMI_NAME           = ${AMI_NAME}"
     log_info "BOOT_MODE          = ${BOOT_MODE}"
@@ -329,33 +333,105 @@ load_env() {
 #------------------------------------------------------------------------------
 # Detect the runtime environment (EC2 instance type, ID, region)
 #
-# Uses IMDSv2 to query EC2 metadata. Returns silently when not on EC2.
+# Uses IMDSv2 first (token-based; preferred). When IMDSv2 fails — typically
+# on legacy instances where the IMDS service is configured with HttpTokens
+# disabled, or in network-restricted setups where the PUT call cannot return
+# a token — falls back to IMDSv1 (token-less GET) for the same metadata
+# paths. Each curl call is capped at 2 seconds so non-EC2 hosts time out
+# quickly.
+#
+# Idempotent: subsequent calls return the cached IS_EC2 / EC2_REGION values
+# without re-querying the metadata service.
+#
 # Globals (set):
-#   IS_EC2 (0/1), EC2_INSTANCE_TYPE, EC2_INSTANCE_ID, EC2_REGION
+#   IS_EC2 (0/1), EC2_INSTANCE_TYPE, EC2_INSTANCE_ID, EC2_REGION,
+#   EC2_IMDS_VERSION ("v2" / "v1" / "" when not on EC2)
 #------------------------------------------------------------------------------
 detect_ec2_environment() {
+  # Idempotent guard: return cached result on repeat calls.
+  if [[ "${EC2_IMDS_DETECTED:-0}" -eq 1 ]]; then
+    return 0
+  fi
+  EC2_IMDS_DETECTED=1
+
   IS_EC2=0
   EC2_INSTANCE_TYPE=""
   EC2_INSTANCE_ID=""
   EC2_REGION=""
+  EC2_IMDS_VERSION=""
 
   local token
+
+  # ---- IMDSv2 attempt -----------------------------------------------------
   token=$(curl -fsS --max-time 2 \
     -X PUT "http://169.254.169.254/latest/api/token" \
     -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
 
-  [[ -z "${token}" ]] && return 0   # Not running on EC2
+  if [[ -n "${token}" ]]; then
+    IS_EC2=1
+    EC2_IMDS_VERSION="v2"
+    EC2_INSTANCE_TYPE=$(curl -fsS --max-time 2 \
+      -H "X-aws-ec2-metadata-token: ${token}" \
+      http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "")
+    EC2_INSTANCE_ID=$(curl -fsS --max-time 2 \
+      -H "X-aws-ec2-metadata-token: ${token}" \
+      http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "")
+    EC2_REGION=$(curl -fsS --max-time 2 \
+      -H "X-aws-ec2-metadata-token: ${token}" \
+      http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "")
+    return 0
+  fi
 
-  IS_EC2=1
-  EC2_INSTANCE_TYPE=$(curl -fsS --max-time 2 \
-    -H "X-aws-ec2-metadata-token: ${token}" \
-    http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "")
-  EC2_INSTANCE_ID=$(curl -fsS --max-time 2 \
-    -H "X-aws-ec2-metadata-token: ${token}" \
-    http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "")
-  EC2_REGION=$(curl -fsS --max-time 2 \
-    -H "X-aws-ec2-metadata-token: ${token}" \
+  # ---- IMDSv1 fallback ----------------------------------------------------
+  # Attempt a single token-less GET. This succeeds when the IMDS endpoint
+  # is reachable AND the instance has HttpTokens=optional (the EC2 default
+  # prior to mid-2024). When HttpTokens=required, IMDSv1 returns 401 and
+  # this branch leaves IS_EC2=0.
+  local v1_region
+  v1_region=$(curl -fsS --max-time 2 \
     http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "")
+
+  if [[ -n "${v1_region}" ]]; then
+    IS_EC2=1
+    EC2_IMDS_VERSION="v1"
+    EC2_REGION="${v1_region}"
+    EC2_INSTANCE_TYPE=$(curl -fsS --max-time 2 \
+      http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null || echo "")
+    EC2_INSTANCE_ID=$(curl -fsS --max-time 2 \
+      http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "")
+  fi
+}
+
+#------------------------------------------------------------------------------
+# Resolve AWS_REGION when the env file leaves it empty.
+#
+# Resolution order (matches the documented behaviour in env.properties.aws-ol*):
+#   1. Explicit AWS_REGION value from the env file (no-op; returns immediately).
+#   2. EC2 Instance Metadata Service:
+#      a. IMDSv2 (token-based; preferred)
+#      b. IMDSv1 (legacy token-less GET; used only when IMDSv2 fails)
+#   3. Fallback constant "ap-northeast-1" (covers non-EC2 build hosts).
+#
+# Globals (read):  AWS_REGION  (may be empty)
+# Globals (set):   AWS_REGION  (always non-empty on return)
+#                  AWS_REGION_SOURCE  ("env" | "imdsv2" | "imdsv1" | "fallback")
+#------------------------------------------------------------------------------
+resolve_aws_region() {
+  if [[ -n "${AWS_REGION:-}" ]]; then
+    AWS_REGION_SOURCE="env"
+    return 0
+  fi
+
+  detect_ec2_environment
+
+  if [[ ${IS_EC2} -eq 1 && -n "${EC2_REGION}" ]]; then
+    AWS_REGION="${EC2_REGION}"
+    AWS_REGION_SOURCE="imds${EC2_IMDS_VERSION}"
+    return 0
+  fi
+
+  AWS_REGION="ap-northeast-1"
+  AWS_REGION_SOURCE="fallback"
 }
 
 #------------------------------------------------------------------------------
@@ -979,9 +1055,21 @@ distr::validate() {
 distr::kickstart() {
   local ks_file="$1"
 
-  # For OL6, ROOT_FS can be ext4 or xfs. Kickstart is populated for ext4; switch to xfs if requested.
+  # For OL6, ROOT_FS can be ext4 or xfs. The kickstart is populated for ext4
+  # on both /boot and /. When ROOT_FS=xfs we rewrite ONLY the root partition
+  # ('part /        ...') and intentionally leave '/boot' on ext4.
+  #
+  # Why /boot stays on ext4:
+  #   GRUB Legacy 0.97 (the bootloader on OL6) reads ext4 most reliably.
+  #   XFS support exists in OL6 GRUB but is less battle-tested for /boot.
+  #   The industry-standard combination on OL6 systems running an XFS root
+  #   is /boot=ext4 + /=xfs, so we follow that convention.
   if [[ "${ROOT_FS,,}" = "xfs" ]]; then
-    sed -i -e 's!--fstype="ext4"!--fstype="xfs"!g' "${ks_file}"
+    # Anchor the substitution at the root partition line. The kickstart uses
+    # exactly four spaces between 'part /' and '--fstype=' (see ol6-ks.cfg
+    # template in build-ol-aws-ami.sh phase3_clone_repository), so the
+    # regex matches that line uniquely without touching '/boot'.
+    sed -i -e 's!^\(part /        --fstype=\)"ext4"!\1"xfs"!' "${ks_file}"
   fi
 
   # Pass kernel selection (always uek for OL6+AWS, but propagate for completeness)
@@ -1664,6 +1752,13 @@ ${KERNEL:+KERNEL=${KERNEL}}
 # upstream default is UEK6). Pass through verbatim so the upstream tooling
 # can pick the appropriate kernel-uek package.
 ${UEK_RELEASE:+UEK_RELEASE=${UEK_RELEASE}}
+
+# RPM update policy.
+# Propagates the wrapper-level UPDATE_TO_LATEST (yes / security / no) into
+# the upstream distr/ol{N}-slim/provision.sh distr::configure routine. When
+# unset, the distr-level default (currently "yes" for OL7/8/9/10 and for
+# the runtime-generated ol6-slim template) is inherited.
+${UPDATE_TO_LATEST:+UPDATE_TO_LATEST=${UPDATE_TO_LATEST}}
 
 # linux-firmware retention - "No" recommended for cloud VMs (smaller image)
 ${LINUX_FIRMWARE:+LINUX_FIRMWARE=${LINUX_FIRMWARE}}
