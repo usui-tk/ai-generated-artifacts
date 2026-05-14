@@ -29,7 +29,7 @@
 - [Part B — スクリプト個別仕様](#part-b--スクリプト個別仕様)
   - [B.1 build-ol-aws-ami.sh](#b1-build-ol-aws-amish)
   - [B.2 setup-vmimport-role.sh](#b2-setup-vmimport-rolesh)
-  - [B.3 env.properties.aws-ol{8,9,10}](#b3-envpropertiesaws-ol8910)
+  - [B.3 env.properties.aws-ol{7,8,9,10}](#b3-envpropertiesaws-ol78910)
 - [Part C — 既知の落とし穴と教訓](#part-c--既知の落とし穴と教訓)
 
 ---
@@ -71,6 +71,7 @@ https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools
 env.properties.aws-ol10     Oracle Linux 10 Update 1 用テンプレート
 env.properties.aws-ol9      Oracle Linux 9  Update 7 用テンプレート
 env.properties.aws-ol8      Oracle Linux 8  Update 10 用テンプレート
+env.properties.aws-ol7      Oracle Linux 7  Update 9 用テンプレート(実験的 — B.3 / C.10 参照)
 README.md / README.ja.md    エンドユーザ向けドキュメント(バイリンガル)
 SPEC.md  / SPEC.ja.md       本仕様書(バイリンガル)
 ```
@@ -128,7 +129,7 @@ SPEC.md  / SPEC.ja.md       本仕様書(バイリンガル)
 | 0 | `phase0_preflight_checks` | 検証 | KVM 露出、必須コマンド、空き容量、tmpfs/noexec チェック |
 | 1 | `phase1_install_prerequisites` | プロビジョニング | KVM/libvirt/virt-install/libguestfs/osinfo-db/acl 導入 |
 | 2 | `phase2_grant_qemu_access` | プロビジョニング | WORKSPACE 親パス連鎖への `setfacl u:qemu:x` |
-| 3 | `phase3_clone_repository` | ビルド | oracle/oracle-linux を `git clone --depth 1` |
+| 3 | `phase3_clone_repository` | ビルド | oracle/oracle-linux を `git clone --depth 1`。**OL7 のみ**: `cloud/aws/image-scripts.sh` の OL7 拒否行を no-op に書き換える(`.ol7-patch.bak` バックアップを残す)。C.10 を参照 |
 | 4 | `phase4_prepare_env_properties` | ビルド | ISO チェックサム、OS_VARIANT 解決、`env.properties.local` 生成 |
 | 5 | `phase5_run_build` | ビルド | `bin/build-image.sh` 呼び出し、VMDK 生成 |
 | 6 | `phase6_upload_to_s3` | AWS | `aws s3 cp` で VMDK をアップロード |
@@ -285,7 +286,7 @@ KEY="value"     # bash 代入。空白を許容するためクォート
 
 ### パススルーキー(`oracle-linux-image-tools` が消費)
 
-以下のキーは `build-ol-aws-ami.sh` 自身は解釈せず、上位ツール `oracle-linux-image-tools` の `bin/build-image.sh` が読み込む `env.properties.local` にそのまま書き込まれる。同梱されている `env.properties.aws-ol{8,9,10}` テンプレートに妥当なデフォルト値が設定されており、通常は変更不要。
+以下のキーは `build-ol-aws-ami.sh` 自身は解釈せず、上位ツール `oracle-linux-image-tools` の `bin/build-image.sh` が読み込む `env.properties.local` にそのまま書き込まれる。同梱されている `env.properties.aws-ol{7,8,9,10}` テンプレートに妥当なデフォルト値が設定されており、通常は変更不要。
 
 | キー | 標準値 | 用途 |
 |------|--------|------|
@@ -297,18 +298,22 @@ KEY="value"     # bash 代入。空白を許容するためクォート
 | `SERIAL_CONSOLE_RUNTIME` | `Yes` | EC2 Serial Console を利用する場合に必須 |
 | `CLOUD_INIT` | `Yes` | AMI で cloud-init を有効化 |
 | `CLOUD_USER` | `ec2-user` | AWS 慣習の初回ログインユーザー |
+| `KERNEL` | `uek`(OL7)/ 未設定(OL8 以上) | OL7 は UEK 必須(C.10 参照) |
+| `UEK_RELEASE` | `6`(OL7 のみ) | UEK メジャーリリース。OL7 でのみ意味を持つ |
 | `S3_KEY_PREFIX` | `ol${MAJOR}-ami-import` | `S3_BUCKET` 内のキープレフィックス |
 | `VMIMPORT_ROLE_NAME` | `vmimport` | `setup-vmimport-role.sh` と一致させること |
 
 `oracle-linux-image-tools` で上流側のキーが追加・改名・削除された場合は、テンプレートと本表を同期して更新する。
 
+`UEK_RELEASE` についての補足: 上位ツールは `KERNEL=uek` のときのみこのキーを使う。OL7 では UEK6 のみが現実的に有効。OL8 以上では指定しても無害(distr レベルのデフォルトが優先される)。
+
 ### ファイル命名規則
 
 ```
-env.properties.aws-ol{N}    N は 8、9、10 のいずれか
+env.properties.aws-ol{N}    N は 7、8、9、10 のいずれか
 ```
 
-OL メジャーリリースごとに 3 つのテンプレートをリポジトリにコミット。利用者は編集前に `cp env.properties.aws-olN env.properties.local` を行う。`*.local` は git 除外対象。
+OL メジャーリリースごとに 4 つのテンプレートをリポジトリにコミット。利用者は編集前に `cp env.properties.aws-olN env.properties.local` を行う。`*.local` は git 除外対象。OL7 テンプレートは実験的扱い(B.3 / C.10 参照)。
 
 ---
 
@@ -320,13 +325,15 @@ OL メジャーリリースごとに 3 つのテンプレートをリポジト�
 OracleLinux-R([0-9]+)-U([0-9]+)
 ```
 
-これは Oracle 公式の ISO 命名規約(OL7 から OL10 まで)にマッチする。検出された値は以下に伝播される。
+これは Oracle 公式の ISO 命名規約(OL7 から OL10 まで)にマッチする。OL7 の `Server-` 接中辞は正規表現が前方一致(完全一致ではない)のため自然にマッチする。検出された値は以下に伝播される。
 
-- `DISTR`(例: `ol10-slim`)
+- `DISTR`(例: `ol10-slim`、`ol7-slim`)
 - `AMI_NAME` デフォルト
 - `AMI_DESCRIPTION` デフォルト
 - AMI タグ `OS=OracleLinux${MAJOR}U${UPDATE}`
 - `detect_os_variant` の優先順位リスト
+- `load_env` が出力する OL7 専用警告バナー
+- `phase3_clone_repository` での OL7 パッチ適用トリガ
 
 正規表現マッチに失敗した場合(独自 ISO URL、ミラーサイト等)、ユーザーは env ファイルで `OL_MAJOR_VERSION` と `OL_UPDATE_VERSION` を明示設定する必要がある。
 
@@ -338,11 +345,11 @@ OracleLinux-R([0-9]+)-U([0-9]+)
 2. `oraclelinux${MAJOR}.${UPDATE-1}`, …, `oraclelinux${MAJOR}.0`
 3. `oraclelinux${MAJOR}-unknown`, `oraclelinux${MAJOR}`
 4. `rhel${MAJOR}.${UPDATE}`, …, `rhel${MAJOR}.0`, `rhel${MAJOR}-unknown`, `rhel${MAJOR}`(バイナリ互換)
-5. `centos-stream${MAJOR}`, `centos-stream-${MAJOR}`
-6. `oraclelinux${MAJOR-1}.10`, …, `oraclelinux${MAJOR-1}.0`, `oraclelinux${MAJOR-1}`(緩やかな縮退)
-7. `linux2024`, `linux2023`, `linux2022`, `linux2020`, `linux2018`(汎用フォールバック)
+5. `centos-stream${MAJOR}`, `centos-stream-${MAJOR}`(`MAJOR == 7` の場合は `centos7.0`、`centos7` も追加)
+6. `oraclelinux${MAJOR-1}.10`, …, `oraclelinux${MAJOR-1}.0`, `oraclelinux${MAJOR-1}`(緩やかな縮退 — `MAJOR > 8` のときのみ適用)
+7. `linux2024`, `linux2023`, `linux2022`, `linux2020`, `linux2018`, `linux2016`, `linux2014`(汎用フォールバック)
 
-最初にマッチしたものが採用される。スクリプトはどの variant が選択されたかを `log_info` で出力し、(Native / Compatible / Older / Generic) として分類することで運用者の期待値を整える。
+最初にマッチしたものが採用される。スクリプトはどの variant が選択されたかを `log_info` で出力し、(Native / Compatible / Older / Generic) として分類することで運用者の期待値を整える。OL7 では RHEL 系のビルドホストでもっとも現実的なマッチは `rhel7.9`(古い osinfo-db では `centos7`)になる。
 
 ---
 
@@ -549,21 +556,26 @@ AWS VM Import/Export に必要な `vmimport` IAM サービスロールを作成�
 
 ---
 
-## B.3 `env.properties.aws-ol{8,9,10}`
+## B.3 `env.properties.aws-ol{7,8,9,10}`
 
 ### 識別情報
 
-サポートする OL メジャーリリースごとに 1 つずつ、計 3 つの付随テンプレート。本ディレクトリにコミットされており、編集前に `env.properties.local` にコピーすべきもの。
+サポートする OL メジャーリリースごとに 1 つずつ、計 4 つの付随テンプレート。本ディレクトリにコミットされており、編集前に `env.properties.local` にコピーすべきもの。
+
+OL7 テンプレートは実験的扱い — 上流の AWS クラウドターゲットに対して OL7 が動作するようにするランタイムパッチの根拠は C.10 を参照のこと。
 
 ### テンプレート間の差異
 
-| キー | OL10 テンプレート | OL9 テンプレート | OL8 テンプレート |
-|------|-----------------|----------------|----------------|
-| `WORKSPACE` | `/tmp/ol10-build-ws` | `/tmp/ol9-build-ws` | `/tmp/ol8-build-ws` |
-| `DISTR` | `ol10-slim` | `ol9-slim` | `ol8-slim` |
-| `ISO_URL` | OL10 U1 | OL9 U7 | OL8 U10 |
-| `# OS_VARIANT` 例示 | `rhel10.1` | `rhel9.7` | `rhel8.10` |
-| `# AMI_NAME` 例示 | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` |
+| キー | OL10 テンプレート | OL9 テンプレート | OL8 テンプレート | OL7 テンプレート |
+|------|-----------------|----------------|----------------|----------------|
+| `WORKSPACE` | `/tmp/ol10-build-ws` | `/tmp/ol9-build-ws` | `/tmp/ol8-build-ws` | `/tmp/ol7-build-ws` |
+| `DISTR` | `ol10-slim` | `ol9-slim` | `ol8-slim` | `ol7-slim` |
+| `ISO_URL` | OL10 U1 | OL9 U7 | OL8 U10 | OL7 U9(`Server-` 接中辞付き) |
+| `# OS_VARIANT` 例示 | `rhel10.1` | `rhel9.7` | `rhel8.10` | `rhel7.9` |
+| `# AMI_NAME` 例示 | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` |
+| `KERNEL` | 未設定(distr デフォルト) | 未設定 | 未設定 | `uek`(必須 — C.10 参照) |
+| `UEK_RELEASE` | 未設定 | 未設定 | 未設定 | `6`(OL7 で唯一現実的な UEK) |
+| ファイル冒頭警告バナー | なし | なし | なし | EOL / パッチ / 本番禁止の旨を記載 |
 
 ### 保守規則
 
@@ -578,6 +590,12 @@ AWS VM Import/Export に必要な `vmimport` IAM サービスロールを作成�
 1. `env.properties.aws-ol11` を追加(OL10 からコピーして 10→11 置換)
 2. README と SPEC の表に対応行を追加
 3. Oracle が `OracleLinux-R{N}-U{M}` の ISO 命名規約を維持する限り、スクリプト変更は不要
+
+上流が OL7 の `cloud=aws` チェックを書き換えた場合:
+
+1. `phase3_clone_repository` の `sed` パターンを再評価する。現在のパターンは `AWS images builder only supports OL8 and above` という厳密な文字列でアンカーされている
+2. 上流が OL7 ブロックを完全に削除した場合、`grep -Fq` ガードによりパッチは no-op になり、`log_warn` で運用者に通知される。強制的な動作変更は発生しない
+3. 上流がチェックを意味論的に異なる形(例: 許可リスト方式)に置き換えた場合、OL7 パッチは再設計が必要。本セクションと `phase3_clone_repository` のコメントを一緒に更新すること
 
 ---
 
@@ -671,6 +689,44 @@ Cannot access storage file '.../tmp.XXXXX/sparsifyXXX.qcow2'
 **根本原因**: 元のループは空 status の扱いもハードタイムアウトも持たなかった。空入力に対する `case "${status}"` はどの分岐にもマッチせず、`sleep 60` に戻ってループを継続した。
 
 **修正**: 空文字列の明示的な検出(一時的とみなし retry)と 90 分のハードタイムアウト(60 秒 × 90 反復)を追加。API 失敗は `|| true` で catch して retry。
+
+## C.10 アップストリームが OL7 を AWS クラウドターゲットで拒否
+
+**症状**: `DISTR=ol7-slim` と `CLOUD=aws` を指定して Phase 5 を実行すると、以下のメッセージで即座に中断される。
+
+```
+ERROR: AWS images builder only supports OL8 and above
+```
+
+**根本原因**: `oracle-linux-image-tools/cloud/aws/image-scripts.sh` が定義する `cloud::validate()` 内に、以下のハードガードがある。
+
+```bash
+[[ ${ORACLE_RELEASE} -lt 8 ]] && common::error "AWS images builder only supports OL8 and above"
+```
+
+このガードは初期 AWS サポートと同時に導入(上流 CHANGELOG, 2026 年 3 月)されたものであり、OL7 Premier Support の EOL(2024-12-31)よりも後に追加されている。拒否は技術的非互換ではなくポリシー判断: OL7 の UEK6 は Amazon ENA ドライバを含み、`cloud-init` も入手可能で、`cloud::install_aws_packages` 内の `kernel-uek-modules` も正しく解決する。
+
+**修正**: `phase3_clone_repository` は clone 後に `OL_MAJOR_VERSION -eq 7` を検出し、作業コピー側の `cloud/aws/image-scripts.sh` の該当行を no-op に書き換える。
+
+```bash
+  : # [ol-aws-ami-builder OL7 PATCH] upstream OL7 block removed (see build-ol-aws-ami.sh phase3)
+```
+
+書き換えは `sed -i.ol7-patch.bak …` で行われ、デリミタとして `|` を使用する(`#` はシェルコメント開始記号として置換テキスト内で意味を持つため避ける)。元の行は `cloud/aws/image-scripts.sh.ol7-patch.bak` に保存される。
+
+**ガード機構**:
+
+1. 置換前に `grep -Fq 'AWS images builder only supports OL8 and above'` で該当行の存在を確認。行が存在しない場合(上流が削除・修正済み)、パッチをスキップして `log_warn` で「新しい上流バリデーションに従う」旨を通知する。
+2. 置換後に `grep -Fq '[ol-aws-ami-builder OL7 PATCH]'` でマーカーの存在を確認。マーカーが見つからない場合、Phase 5 で不明な失敗が起きる前に `die` する。
+3. 置換後の行はリテラル `:` no-op であり、`cloud::validate()` が後でリファクタされても bash 構文上の正当性を保つ。
+
+**意図的に対応していないこと**:
+
+- パッチは AWS 固有の OL7 ブロックのみを削除する。OL7 ディストリ自体は `BOOT_MODE=bios` を強制する(`bin/build-image.sh`: `OL7 only supports bios BOOT_MODE`)。これは AWS の要件と一致するため矛盾しない
+- `KERNEL=rhck` は理屈上 OL7 でも到達可能だが、`cloud::install_aws_packages` が要求する `kernel-modules` パッケージを OL7 の RHCK は分割していない。OL7 env テンプレートは `KERNEL=uek` と `UEK_RELEASE=6` をハードコードしてこの罠を回避する
+- aarch64 は対応しない: OL7 の `distr/` には `_aarch64` バリアントが無く、上流の AWS バリデータも `*_aarch64` を拒否する。両方のブロッカーが OL7 ではそのまま残る
+
+**将来への対応**: 将来の上流コミットで OL7 チェックが別の場所(例: `bin/build-image.sh` 内)に移動した場合、既存パッチは no-op となり、新しいパッチ箇所の追加が必要になる。書き換え後の行に含まれる `[ol-aws-ami-builder OL7 PATCH]` マーカーは意図的に独特な文字列にしてあり、clone ツリー内で `grep -r` してラッパーが適用したパッチを全て発見できる。
 
 ---
 

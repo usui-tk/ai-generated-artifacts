@@ -8,6 +8,8 @@
 
 Oracle 公式の [`oracle-linux-image-tools`](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) を活用し、Oracle Linux 8 / 9 / 10 (x86_64) の AWS AMI を自前で構築するためのラッパースクリプト一式です。
 
+**Oracle Linux 7** (x86_64) も実験的にサポートしています — 詳細は [セクション 1](#1-構成ファイル) 末尾の注記、[セクション 9.6](#96-oracle-linux-7-サポート実験的) および [セクション 10](#10-既知の制約注意事項) の警告を参照してください。
+
 Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が終了したため、独自の AMI 構築・運用フローを確立する目的で作成しています。
 
 > **2026 年 2 月以降の AWS 新機能対応**
@@ -40,6 +42,7 @@ Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が�
 | `env.properties.aws-ol10` | **Oracle Linux 10 Update 1**(x86_64)用パラメータ |
 | `env.properties.aws-ol9` | **Oracle Linux 9 Update 7**(x86_64)用パラメータ |
 | `env.properties.aws-ol8` | **Oracle Linux 8 Update 10**(x86_64)用パラメータ |
+| `env.properties.aws-ol7` | **Oracle Linux 7 Update 9**(x86_64)用パラメータ — **実験的・アップストリーム非推奨**。重要な注意事項はセクション 9.6 および 10 を参照 |
 | `setup-vmimport-role.sh` | AWS VM Import/Export 用の `vmimport` IAM サービスロールを初回のみ作成 |
 | `README.md` | エンドユーザ向けドキュメント(英語、ベースライン) |
 | `README.ja.md` | エンドユーザ向けドキュメント(日本語) |
@@ -233,6 +236,9 @@ cp env.properties.aws-ol9 env.properties.local
 # Oracle Linux 8 Update 10
 cp env.properties.aws-ol8 env.properties.local
 
+# Oracle Linux 7 Update 9 (実験的 — セクション 9.6 および 10 を必ず参照)
+cp env.properties.aws-ol7 env.properties.local
+
 vi env.properties.local
 ```
 
@@ -395,6 +401,19 @@ Oracle 上位の `bin/build-image.sh` は AWS 対象に対し `BOOT_MODE=bios` �
 3. ベアメタル特有の起動遅延(数分待ち)が発生せず、ビルド全体時間が短縮
 4. Spot Instance / Auto Scaling との組み合わせも視野に入る
 
+### 9.6 Oracle Linux 7 サポート(実験的)
+
+OL7 はベストエフォートでサポートされており、以下の挙動上の特徴があります。
+
+- **ランタイムパッチ**: アップストリームの `cloud/aws/image-scripts.sh` には `AWS images builder only supports OL8 and above` という OL7 拒否チェックがハードコードされています。`build-ol-aws-ami.sh` の Phase 3 はリポジトリ clone 直後に `OL_MAJOR_VERSION == 7` を検出し、該当行を no-op に書き換えます(参考用にパッチ済みファイルの隣に `image-scripts.sh.ol7-patch.bak` を残します)。
+- **アップストリームへは何もコミットしません**: パッチは `${WORKSPACE}/oracle-linux/` 配下のローカル作業ツリーのみに適用されます。`oracle/oracle-linux` への変更は行いません。
+- **動作する理由**: OL7 は他の点ではアップストリームのツーリングで完全に保持されており(`distr/ol7-slim/` は健在、AWS プロビジョニング処理が要求する `kernel-uek-modules` も OL7 の UEK6 が提供します)、OL7 拒否は技術的非互換ではなく純粋にポリシー上のガードです。
+- **強制される設定**: `BOOT_MODE_BUILD=bios` は二重の理由で必須です。AWS ターゲットが強制する点に加え、OL7 自体も強制します(`bin/build-image.sh`: `OL7 only supports bios BOOT_MODE`)。他の値を指定するとビルドは即座に中断されます。
+- **推奨カーネル**: OL7 では `KERNEL=uek` のままにしてください。RHCK パスは別パッケージ `kernel-modules` を必要としますが OL7 はこれを分割していないため、アップストリームの `cloud/aws/provision.sh` が `KERNEL=rhck` だと失敗します。UEK6 は Amazon ENA ドライバを含み、アップストリームの OL7 デフォルトでもあります。
+- **起動時の警告バナー**: `load_env` で `OL_MAJOR_VERSION == 7` が検出されると、EOL ステータス、ランタイムパッチの挙動、本番利用禁止について複数行の警告が prominent に出力されます。
+
+OL7 関連の制約の全容は [セクション 10](#10-既知の制約注意事項) の項目 7 を参照してください。
+
 ---
 
 ## 10. 既知の制約・注意事項
@@ -416,6 +435,15 @@ Oracle 上位の `bin/build-image.sh` は AWS 対象に対し `BOOT_MODE=bios` �
 
 6. **ネスト仮想化の性能**
    AWS は性能要件・低遅延要件の厳しいワークロードについては引き続きベアメタルを推奨しています。本ツールのビルド処理は IO バウンドであり、ネスト仮想化の性能オーバーヘッドは実用上問題になりません。
+
+7. **Oracle Linux 7 固有の制約**
+   - **EOL**: Premier Support は 2024-12-31 で終了しました。Oracle はアップストリームの `oracle-linux-image-tools` README で OL7 を deprecated 扱いとしています。
+   - **アップストリームの AWS サポート外**: アップストリームは `cloud=aws` で OL7 を明示的に拒否します。本ラッパーは Phase 3 でランタイムパッチを当ててこれを回避します([9.6](#96-oracle-linux-7-サポート実験的) 参照)。将来のアップストリームリファクタでパッチが効かなくなる可能性があります。
+   - **x86_64 のみ**: OL7 では aarch64 AMI 経路は存在しません。OL8/9/10 にある `distr/_aarch64` の OL7 対応版はありません。
+   - **BIOS のみ**: UEFI / hybrid ブートモードは利用できません。NitroTPM や UEFI Secure Boot を有効化できない AMI になります。
+   - **UEK カーネル事実上必須**: 理屈上は `KERNEL=rhck` を指定できますが、アップストリームの AWS プロビジョニング処理が要求する `kernel-modules` パッケージを OL7 の RHCK は分割していないため、`KERNEL=uek`(OL7 env テンプレートのデフォルト)のまま使ってください。
+   - **`lvm` ルートファイルシステム非対応**: OL7 はこのレイヤーでは `xfs` と `btrfs` のみサポートします(`lvm` は OL8 で追加)。
+   - **本番利用禁止**: 検証・学習・レガシーマイグレーション以外には使用しないでください。
 
 ---
 
@@ -472,7 +500,7 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 
 ### AI 生成について
 
-本ラッパースクリプトは、**Anthropic 社の Claude (Sonnet 4.5)** との対話を通じて 2026 年 5 月に反復的に開発・改善されたものです。Oracle Linux 8 / 9 / 10 の AWS 上での実ビルドで end-to-end の動作確認まで完了しています。
+本ラッパースクリプトは、**Anthropic 社の Claude (Sonnet 4.5)** との対話を通じて 2026 年 5 月に反復的に開発・改善されたものです。Oracle Linux 8 / 9 / 10 の AWS 上での実ビルドで end-to-end の動作確認まで完了しています。Oracle Linux 7 の実験的サポートは、その後 2026 年 5 月に **Anthropic 社の Claude (Opus 4.7)** を用いて追加されました。OL7 パッチ機構自体は検証済み(sed 置換動作、構文整合性、冪等性)ですが、**OL7 の end-to-end AMI ビルドは作者により検証されていません**。
 
 本ラッパーから呼び出される上位の `oracle-linux-image-tools` プロジェクトは Oracle 社が独自に開発・公開しているもので、本リポジトリとは独立しています。
 

@@ -41,7 +41,7 @@
 - [Part B — Script-specific Specifications](#part-b--script-specific-specifications)
   - [B.1 build-ol-aws-ami.sh](#b1-build-ol-aws-amish)
   - [B.2 setup-vmimport-role.sh](#b2-setup-vmimport-rolesh)
-  - [B.3 env.properties.aws-ol{8,9,10}](#b3-envpropertiesaws-ol8910)
+  - [B.3 env.properties.aws-ol{7,8,9,10}](#b3-envpropertiesaws-ol78910)
 - [Part C — Known Pitfalls & Lessons Learned](#part-c--known-pitfalls--lessons-learned)
 
 ---
@@ -86,6 +86,7 @@ and reflected in `load_env` validation.
 env.properties.aws-ol10     Oracle Linux 10 Update 1 template
 env.properties.aws-ol9      Oracle Linux 9  Update 7 template
 env.properties.aws-ol8      Oracle Linux 8  Update 10 template
+env.properties.aws-ol7      Oracle Linux 7  Update 9 template (experimental — see B.3, C.10)
 README.md / README.ja.md    end-user documentation (bilingual)
 SPEC.md  / SPEC.ja.md       this developer specification (bilingual)
 ```
@@ -148,7 +149,7 @@ repository-level `scripts/README.md` policy:
 | 0 | `phase0_preflight_checks` | Validation | KVM exposure, required commands, free disk, tmpfs/noexec checks |
 | 1 | `phase1_install_prerequisites` | Provisioning | Install KVM/libvirt/virt-install/libguestfs/osinfo-db/acl |
 | 2 | `phase2_grant_qemu_access` | Provisioning | setfacl `u:qemu:x` on WORKSPACE parent chain |
-| 3 | `phase3_clone_repository` | Build | `git clone --depth 1` of oracle/oracle-linux |
+| 3 | `phase3_clone_repository` | Build | `git clone --depth 1` of oracle/oracle-linux. **For OL7 only**: rewrites the OL7-blocking line in `cloud/aws/image-scripts.sh` to a no-op (`.ol7-patch.bak` backup left in place). See C.10. |
 | 4 | `phase4_prepare_env_properties` | Build | Resolve ISO checksum, OS_VARIANT, generate `env.properties.local` |
 | 5 | `phase5_run_build` | Build | Invoke `bin/build-image.sh`; produce VMDK |
 | 6 | `phase6_upload_to_s3` | AWS | `aws s3 cp` the VMDK |
@@ -334,7 +335,7 @@ bash. Avoid command substitutions in env files (security and reproducibility).
 These keys are not interpreted by `build-ol-aws-ami.sh` itself; they are
 written through to the upstream `env.properties.local` that the
 `oracle-linux-image-tools` `bin/build-image.sh` reads. They appear in
-the shipped `env.properties.aws-ol{8,9,10}` templates with sane defaults
+the shipped `env.properties.aws-ol{7,8,9,10}` templates with sane defaults
 and should usually be left alone.
 
 | Key | Typical value | Purpose |
@@ -347,21 +348,29 @@ and should usually be left alone.
 | `SERIAL_CONSOLE_RUNTIME` | `Yes` | Required for EC2 Serial Console |
 | `CLOUD_INIT` | `Yes` | Enable cloud-init in the AMI |
 | `CLOUD_USER` | `ec2-user` | AWS-convention first-login user |
+| `KERNEL` | `uek` (OL7) / unset (OL8+) | OL7 requires UEK; see C.10 |
+| `UEK_RELEASE` | `6` (OL7 only) | UEK major release; only meaningful for OL7 |
 | `S3_KEY_PREFIX` | `ol${MAJOR}-ami-import` | Key prefix inside `S3_BUCKET` |
 | `VMIMPORT_ROLE_NAME` | `vmimport` | Must match `setup-vmimport-role.sh` |
 
 If `oracle-linux-image-tools` adds, renames, or drops keys upstream,
 update the templates and this table in lockstep.
 
+Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
+when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable
+release for OL7) and harmless to set (or omit) on OL8/9/10 where the
+upstream distr-level default is preferred.
+
 ### File naming convention
 
 ```
-env.properties.aws-ol{N}   where N = 8, 9, or 10
+env.properties.aws-ol{N}   where N = 7, 8, 9, or 10
 ```
 
-Three companion files are committed to the repository, one per major OL
+Four companion files are committed to the repository, one per major OL
 release. Users `cp env.properties.aws-olN env.properties.local` before
-editing. `*.local` is git-ignored.
+editing. `*.local` is git-ignored. The OL7 template is experimental;
+see B.3 and C.10 for the patch mechanism that allows it to function.
 
 ---
 
@@ -374,14 +383,17 @@ and `OL_UPDATE_VERSION` from the `ISO_URL`. The regex is:
 OracleLinux-R([0-9]+)-U([0-9]+)
 ```
 
-This matches Oracle's published ISO naming convention for OL7 through OL10.
-Detected values propagate to:
+This matches Oracle's published ISO naming convention for OL7 through OL10
+(OL7's `Server-` infix is naturally accommodated because the regex is
+prefix-anchored and not full-match). Detected values propagate to:
 
-- `DISTR` (e.g. `ol10-slim`)
+- `DISTR` (e.g. `ol10-slim`, `ol7-slim`)
 - `AMI_NAME` default
 - `AMI_DESCRIPTION` default
 - AMI tag `OS=OracleLinux${MAJOR}U${UPDATE}`
 - `detect_os_variant` priority list
+- The OL7-specific warning banner emitted by `load_env`
+- The OL7 patch trigger in `phase3_clone_repository`
 
 If the regex fails (custom ISO URL, mirror site, etc.), the user MUST set
 `OL_MAJOR_VERSION` and `OL_UPDATE_VERSION` explicitly in their env file.
@@ -394,13 +406,14 @@ Generated dynamically from `OL_MAJOR_VERSION` / `OL_UPDATE_VERSION`:
 2. `oraclelinux${MAJOR}.${UPDATE-1}`, …, `oraclelinux${MAJOR}.0`
 3. `oraclelinux${MAJOR}-unknown`, `oraclelinux${MAJOR}`
 4. `rhel${MAJOR}.${UPDATE}`, …, `rhel${MAJOR}.0`, `rhel${MAJOR}-unknown`, `rhel${MAJOR}` (binary-compatible)
-5. `centos-stream${MAJOR}`, `centos-stream-${MAJOR}`
-6. `oraclelinux${MAJOR-1}.10`, …, `oraclelinux${MAJOR-1}.0`, `oraclelinux${MAJOR-1}` (gracefully degrade)
-7. `linux2024`, `linux2023`, `linux2022`, `linux2020`, `linux2018` (generic fallbacks)
+5. `centos-stream${MAJOR}`, `centos-stream-${MAJOR}` (plus `centos7.0`, `centos7` when `MAJOR == 7`)
+6. `oraclelinux${MAJOR-1}.10`, …, `oraclelinux${MAJOR-1}.0`, `oraclelinux${MAJOR-1}` (gracefully degrade — applies only when `MAJOR > 8`)
+7. `linux2024`, `linux2023`, `linux2022`, `linux2020`, `linux2018`, `linux2016`, `linux2014` (generic fallbacks)
 
 First match wins. The script `log_info`s which variant was selected and
 classifies it (Native / Compatible / Older / Generic) to set operator
-expectations.
+expectations. For OL7 the most realistic match on RHEL-family build hosts
+is `rhel7.9` (or `centos7` on older osinfo-db packages).
 
 ---
 
@@ -643,23 +656,29 @@ attached policy.
 
 ---
 
-## B.3 `env.properties.aws-ol{8,9,10}`
+## B.3 `env.properties.aws-ol{7,8,9,10}`
 
 ### Identification
 
-Three companion templates, one per major Oracle Linux release supported.
+Four companion templates, one per major Oracle Linux release supported.
 They are committed in this directory and should be copied to
 `env.properties.local` before editing.
 
+The OL7 template is experimental — see C.10 for the rationale behind the
+runtime patch that makes it work against the upstream AWS cloud target.
+
 ### Per-template differences
 
-| Key | OL10 template | OL9 template | OL8 template |
-|-----|--------------|--------------|--------------|
-| `WORKSPACE` | `/tmp/ol10-build-ws` | `/tmp/ol9-build-ws` | `/tmp/ol8-build-ws` |
-| `DISTR` | `ol10-slim` | `ol9-slim` | `ol8-slim` |
-| `ISO_URL` | OL10 U1 | OL9 U7 | OL8 U10 |
-| `# OS_VARIANT` example | `rhel10.1` | `rhel9.7` | `rhel8.10` |
-| `# AMI_NAME` example | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` |
+| Key | OL10 template | OL9 template | OL8 template | OL7 template |
+|-----|--------------|--------------|--------------|--------------|
+| `WORKSPACE` | `/tmp/ol10-build-ws` | `/tmp/ol9-build-ws` | `/tmp/ol8-build-ws` | `/tmp/ol7-build-ws` |
+| `DISTR` | `ol10-slim` | `ol9-slim` | `ol8-slim` | `ol7-slim` |
+| `ISO_URL` | OL10 U1 | OL9 U7 | OL8 U10 | OL7 U9 (with `Server-` infix) |
+| `# OS_VARIANT` example | `rhel10.1` | `rhel9.7` | `rhel8.10` | `rhel7.9` |
+| `# AMI_NAME` example | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` |
+| `KERNEL` | unset (use distr default) | unset | unset | `uek` (required — see C.10) |
+| `UEK_RELEASE` | unset | unset | unset | `6` (the only viable UEK for OL7) |
+| Top-of-file warning banner | none | none | none | EOL / patch / production-prohibited notice |
 
 ### Maintenance rule
 
@@ -676,6 +695,18 @@ When a new Oracle Linux major release ships (e.g. OL11):
 2. Add corresponding row to README and SPEC tables.
 3. No script changes required, assuming Oracle keeps the
    `OracleLinux-R{N}-U{M}` ISO naming convention.
+
+When the upstream rewrites the OL7 cloud=aws check:
+
+1. Re-evaluate the `sed` pattern in `phase3_clone_repository`. The current
+   pattern is anchored on the exact string `AWS images builder only supports OL8 and above`.
+2. If the upstream removes the OL7 block entirely, the `grep -Fq` guard
+   makes the patch a no-op and a `log_warn` notifies the operator. No
+   action is forced.
+3. If the upstream replaces the check with something semantically
+   different (e.g. allowlist-style validation), the OL7 patch may need
+   to be redesigned — update the section here and the comments in
+   `phase3_clone_repository` together.
 
 ---
 
@@ -832,6 +863,76 @@ branch and looped back to `sleep 60`.
 **Fix**: Added explicit empty-string detection (treats as transient,
 retries) and a 90-minute hard timeout (90 iterations × 60s). API
 failures are caught with `|| true` and retried.
+
+## C.10 Upstream rejects OL7 for the AWS cloud target
+
+**Symptom**: A Phase 5 invocation with `DISTR=ol7-slim` and `CLOUD=aws`
+aborts immediately with:
+
+```
+ERROR: AWS images builder only supports OL8 and above
+```
+
+**Root cause**: `oracle-linux-image-tools/cloud/aws/image-scripts.sh`
+defines `cloud::validate()` which contains a hard guard:
+
+```bash
+[[ ${ORACLE_RELEASE} -lt 8 ]] && common::error "AWS images builder only supports OL8 and above"
+```
+
+This guard was introduced together with the initial AWS support (upstream
+CHANGELOG, March 2026) and post-dates the OL7 Premier Support EOL
+(2024-12-31). The rejection is a policy decision, not a technical
+incompatibility: OL7's UEK6 includes the Amazon ENA driver, `cloud-init`
+is available, and `kernel-uek-modules` resolves correctly during
+`cloud::install_aws_packages`.
+
+**Fix**: `phase3_clone_repository` detects `OL_MAJOR_VERSION -eq 7`
+after the clone and rewrites the offending line in the working-copy
+`cloud/aws/image-scripts.sh` to a no-op:
+
+```bash
+  : # [ol-aws-ami-builder OL7 PATCH] upstream OL7 block removed (see build-ol-aws-ami.sh phase3)
+```
+
+The substitution is performed by `sed -i.ol7-patch.bak …` with `|` as
+the delimiter (avoiding the `#` character that is significant in shell
+comments). The original line is preserved in
+`cloud/aws/image-scripts.sh.ol7-patch.bak`.
+
+**Guard rails**:
+
+1. A `grep -Fq 'AWS images builder only supports OL8 and above'` test runs
+   before the substitution. If the line is absent (upstream removed or
+   reworded it), the patch is skipped and a `log_warn` informs the
+   operator that the build will rely on whatever the new upstream
+   validation enforces.
+2. A second `grep -Fq '[ol-aws-ami-builder OL7 PATCH]'` test runs after
+   the substitution. If the marker is missing, the script `die`s rather
+   than letting Phase 5 hit an unclear failure later.
+3. The patched line is a literal `:` no-op so bash syntax remains valid
+   even if `cloud::validate()` is later refactored to reference the
+   surrounding code.
+
+**Caveats deliberately not addressed**:
+
+- The patch only removes the AWS-specific OL7 block. The OL7 distro
+  itself still enforces `BOOT_MODE=bios` (`bin/build-image.sh`: `OL7 only supports bios BOOT_MODE`),
+  which happens to align with the AWS requirement.
+- `KERNEL=rhck` is theoretically reachable on OL7 but
+  `cloud::install_aws_packages` requires the `kernel-modules` package
+  that OL7's RHCK does not split out. The OL7 env template hardcodes
+  `KERNEL=uek` with `UEK_RELEASE=6` to avoid this trap.
+- aarch64 is not addressed: the OL7 `distr/` has no `_aarch64` variant,
+  and the upstream AWS validator also rejects `*_aarch64`. Both
+  blockers remain in place for OL7.
+
+**Future-proofing**: If a future upstream commit moves the OL7 check
+elsewhere (e.g. into `bin/build-image.sh` itself), the existing patch
+becomes a no-op and a new patch site must be added. The marker
+`[ol-aws-ami-builder OL7 PATCH]` in the rewritten line is intentionally
+distinctive so that `grep -r` can find all wrapper-applied patches in
+the cloned tree.
 
 ---
 

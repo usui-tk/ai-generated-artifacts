@@ -8,6 +8,8 @@ English | [日本語](./README.ja.md)
 
 A set of wrapper scripts that build AWS AMIs for **Oracle Linux 8, 9, or 10** (x86_64) using the official Oracle [`oracle-linux-image-tools`](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) project.
 
+Experimental support is also provided for **Oracle Linux 7** (x86_64) — see the OL7 note at the end of [section 1](#1-repository-layout) and the dedicated warnings in [section 10](#10-known-limitations-and-caveats).
+
 Created in response to the discontinuation of Oracle's official AMI offerings (owner ID `131827586825`) on the AWS Marketplace, with the goal of establishing an independent build and operations workflow for Oracle Linux AMIs.
 
 > **Aligned with the AWS feature released in February 2026**
@@ -40,6 +42,7 @@ Operate these tools considerately. **Always prefer official Oracle-distributed A
 | `env.properties.aws-ol10` | Build parameters for **Oracle Linux 10 Update 1** (x86_64). |
 | `env.properties.aws-ol9` | Build parameters for **Oracle Linux 9 Update 7** (x86_64). |
 | `env.properties.aws-ol8` | Build parameters for **Oracle Linux 8 Update 10** (x86_64). |
+| `env.properties.aws-ol7` | Build parameters for **Oracle Linux 7 Update 9** (x86_64) — **experimental / deprecated upstream**. See sections 9.6 and 10 for important caveats. |
 | `setup-vmimport-role.sh` | One-time setup script that creates the `vmimport` IAM service role for AWS VM Import/Export. |
 | `README.md` | End-user documentation (English, baseline). |
 | `README.ja.md` | End-user documentation (Japanese). |
@@ -233,6 +236,9 @@ cp env.properties.aws-ol9 env.properties.local
 # Oracle Linux 8 Update 10
 cp env.properties.aws-ol8 env.properties.local
 
+# Oracle Linux 7 Update 9 (experimental — see 9.6 and section 10)
+cp env.properties.aws-ol7 env.properties.local
+
 vi env.properties.local
 ```
 
@@ -395,6 +401,19 @@ Now that AWS officially supports nested virtualization on C8i / M8i / R8i (since
 3. Faster end-to-end time, avoiding the multi-minute startup latency typical of bare-metal instances.
 4. Compatibility with Spot Instances and Auto Scaling for further cost optimization.
 
+### 9.6 Oracle Linux 7 support (experimental)
+
+OL7 is supported on a best-effort basis with the following key behaviors:
+
+- **Runtime patch.** The upstream `cloud/aws/image-scripts.sh` hard-codes a check that rejects OL7 (`AWS images builder only supports OL8 and above`). Phase 3 of `build-ol-aws-ami.sh` detects `OL_MAJOR_VERSION == 7` after the repository clone and rewrites that single line to a no-op (a backup file `image-scripts.sh.ol7-patch.bak` is left next to the patched file for reference).
+- **No upstream commits.** The patch is applied only to the local working clone in `${WORKSPACE}/oracle-linux/`. No changes are pushed back to `oracle/oracle-linux`.
+- **Why this works.** OL7 is otherwise still a complete distribution in the upstream tooling (`distr/ol7-slim/` is intact, and the AWS provisioning step installs `kernel-uek-modules` which OL7's UEK6 provides). The OL7 rejection is purely a policy guard, not a technical incompatibility.
+- **Forced settings.** `BOOT_MODE_BUILD=bios` is mandatory on two grounds: the AWS target enforces it, **and** OL7 itself enforces it (`bin/build-image.sh`: `OL7 only supports bios BOOT_MODE`). Setting anything else aborts the build immediately.
+- **Recommended kernel.** Leave `KERNEL=uek` for OL7. The RHCK path requires a separate `kernel-modules` package that OL7 does not split out, so the upstream `cloud/aws/provision.sh` invocation will fail with `KERNEL=rhck` on OL7. UEK6 includes the Amazon ENA driver and is the upstream OL7 default.
+- **Boot startup banner.** When `OL_MAJOR_VERSION == 7` is detected at `load_env` time, the script emits a prominent multi-line warning summarizing the EOL status, the runtime patch behavior, and the production-use prohibition.
+
+See [section 10](#10-known-limitations-and-caveats) item 7 for the full list of OL7 caveats.
+
 ---
 
 ## 10. Known Limitations and Caveats
@@ -416,6 +435,15 @@ Now that AWS officially supports nested virtualization on C8i / M8i / R8i (since
 
 6. **Performance of nested virtualization.**
    AWS still recommends bare-metal for workloads with strict performance/latency requirements. The build process here is I/O bound, so the overhead of nested virtualization is not a practical concern.
+
+7. **Oracle Linux 7 specific limitations.**
+   - **EOL.** Premier Support ended on 2024-12-31. Oracle marks OL7 as deprecated in the upstream `oracle-linux-image-tools` README.
+   - **Not supported upstream for AWS.** The upstream tool explicitly rejects OL7 for `cloud=aws`. This wrapper patches the rejection at runtime in Phase 3 (see [9.6](#96-oracle-linux-7-support-experimental)). Future upstream refactors may break the patch.
+   - **x86_64 only.** OL7 has no aarch64 AMI path. The OL8/9/10 `_aarch64` directories under `distr/` have no OL7 counterpart.
+   - **BIOS only.** UEFI / hybrid boot modes are unavailable; NitroTPM and UEFI Secure Boot cannot be enabled on the resulting AMI.
+   - **UEK kernel mandatory in practice.** Although `KERNEL=rhck` is theoretically accepted, the upstream AWS provisioning step requires the `kernel-modules` package which OL7's RHCK does not split out. Stay with `KERNEL=uek` (the default in the OL7 env template).
+   - **No `lvm` root filesystem.** OL7 supports only `xfs` and `btrfs` at this layer; the `lvm` option (added in OL8) is not available.
+   - **Production prohibited.** Use the resulting AMI strictly for verification, learning, or legacy-migration scenarios.
 
 ---
 
@@ -471,7 +499,7 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 
 ### AI generation
 
-This wrapper was **iteratively developed with Anthropic Claude (Sonnet 4.5)** in 2026-05, then refined based on real build runs against Oracle Linux 8 / 9 / 10 on AWS until all three versions completed end-to-end successfully.
+This wrapper was **iteratively developed with Anthropic Claude (Sonnet 4.5)** in 2026-05, then refined based on real build runs against Oracle Linux 8 / 9 / 10 on AWS until all three versions completed end-to-end successfully. Oracle Linux 7 experimental support was added in a subsequent 2026-05 revision using Anthropic Claude (Opus 4.7); the OL7 patch mechanism has been verified (sed substitution, syntax integrity, idempotency) but **end-to-end OL7 AMI builds have not been validated by the author**.
 
 The upstream `oracle-linux-image-tools` project that this wrapper drives is independent and produced by Oracle.
 

@@ -8,9 +8,18 @@
 # provisioning -> VM build -> S3 upload -> AMI registration) is automated.
 #
 # Supported Oracle Linux versions: 8 / 9 / 10 (x86_64).
+# Experimental support: 7 (x86_64; deprecated upstream, verification use only).
 # The actual version, ISO URL, and AMI naming are driven from the env
 # properties file specified with --env. See env.properties.aws-ol10 (or
-# env.properties.aws-ol9 / env.properties.aws-ol8) for working examples.
+# env.properties.aws-ol9 / env.properties.aws-ol8 / env.properties.aws-ol7)
+# for working examples.
+#
+# Note on OL7:
+#   The upstream oracle-linux-image-tools project explicitly rejects OL7 for
+#   the AWS cloud target via a hard-coded check in cloud/aws/image-scripts.sh.
+#   This wrapper applies a runtime patch in Phase 3 (after cloning the
+#   upstream repository) to allow OL7 builds. Use at your own risk; OL7
+#   Premier Support ended on 2024-12-31.
 #
 # Upstream reference:
 #   https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools
@@ -80,9 +89,13 @@
 #     For very high-volume CI usage, request a quota increase.
 #
 # ----- AI generation info -----------------------------------------------------
-#   AI tool: Anthropic Claude (Sonnet 4.5)
+#   AI tool: Anthropic Claude (Sonnet 4.5) for OL8/9/10 base, Claude (Opus 4.7)
+#            for the OL7 experimental support layer added in 2026-05.
 #   Generated / iteratively refined: 2026-05
 #   Verified by the author against real OL8 / OL9 / OL10 builds on AWS.
+#   OL7 support has been verified only at the patch-mechanism level
+#   (sed substitution, syntax integrity); end-to-end OL7 AMI builds
+#   have NOT been validated by the author. Use at your own risk.
 #==============================================================================
 
 set -euo pipefail
@@ -93,8 +106,9 @@ readonly OL_TOOLS_SUBDIR="oracle-linux-image-tools"
 # Default ISO information.
 # DEFAULT_ISO_URL is consumed in load_env() as the fallback when the user
 # has not set ISO_URL in their env.properties. The default points to the
-# latest OL10 release; users targeting OL9 or OL8 must set ISO_URL in their
-# env file (see env.properties.aws-ol9 / env.properties.aws-ol8).
+# latest OL10 release; users targeting OL9, OL8, or OL7 must set ISO_URL in
+# their env file (see env.properties.aws-ol9 / env.properties.aws-ol8 /
+# env.properties.aws-ol7).
 readonly DEFAULT_ISO_URL="https://yum.oracle.com/ISOS/OracleLinux/OL10/u1/x86_64/OracleLinux-R10-U1-x86_64-dvd.iso"
 
 # Execution mode flags
@@ -146,9 +160,10 @@ parse_args() {
 # Parse the OL major and update version from an ISO URL or filename.
 #
 # Examples:
-#   OracleLinux-R10-U1-x86_64-dvd.iso  -> major=10, update=1
-#   OracleLinux-R9-U7-x86_64-dvd.iso   -> major=9,  update=7
-#   OracleLinux-R8-U10-x86_64-dvd.iso  -> major=8,  update=10
+#   OracleLinux-R10-U1-x86_64-dvd.iso         -> major=10, update=1
+#   OracleLinux-R9-U7-x86_64-dvd.iso          -> major=9,  update=7
+#   OracleLinux-R8-U10-x86_64-dvd.iso         -> major=8,  update=10
+#   OracleLinux-R7-U9-Server-x86_64-dvd.iso   -> major=7,  update=9
 #
 # Sets the global variables OL_MAJOR_VERSION and OL_UPDATE_VERSION.
 # Returns 1 if no match.
@@ -192,8 +207,27 @@ load_env() {
     fi
   fi
 
+  # Emit a prominent advisory when the user targets OL7. OL7 is deprecated
+  # upstream (cloud/aws/image-scripts.sh explicitly rejects it) and Premier
+  # Support ended on 2024-12-31. This wrapper patches the upstream block in
+  # Phase 3, but operators should understand the support implications before
+  # putting the resulting AMI into production.
+  if [[ "${OL_MAJOR_VERSION}" -eq 7 ]]; then
+    log_warn "============================================================================"
+    log_warn " Oracle Linux 7 target selected (OL${OL_MAJOR_VERSION}U${OL_UPDATE_VERSION})."
+    log_warn ""
+    log_warn "  * OL7 Premier Support ended on 2024-12-31."
+    log_warn "  * Upstream oracle-linux-image-tools EXCLUDES OL7 from the AWS cloud"
+    log_warn "    target; build-ol-aws-ami.sh applies a runtime patch in Phase 3."
+    log_warn "  * OL7 only supports x86_64 (no aarch64) and bios boot (no UEFI)."
+    log_warn "  * Do NOT use the resulting AMI for production workloads requiring"
+    log_warn "    Oracle Premier Support. Intended for verification, learning, or"
+    log_warn "    legacy migration scenarios."
+    log_warn "============================================================================"
+  fi
+
   # DISTR slug used by oracle-linux-image-tools.
-  # Convention: ol{major}-slim (e.g. ol10-slim, ol9-slim, ol8-slim).
+  # Convention: ol{major}-slim (e.g. ol10-slim, ol9-slim, ol8-slim, ol7-slim).
   : "${DISTR:=ol${OL_MAJOR_VERSION}-slim}"
 
   # Resolve workspace to an absolute path
@@ -675,6 +709,54 @@ phase3_clone_repository() {
   [[ -d "${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}" ]] \
     || die "Directory ${OL_TOOLS_SUBDIR} not found in the clone"
 
+  # Apply the OL7 compatibility patch when targeting Oracle Linux 7.
+  #
+  # Background:
+  #   The upstream cloud/aws/image-scripts.sh contains a hard validation
+  #   that rejects OL7 outright:
+  #     [[ ${ORACLE_RELEASE} -lt 8 ]] && common::error "AWS images builder only supports OL8 and above"
+  #
+  # Justification:
+  #   OL7 is otherwise still a valid distribution in the upstream tooling
+  #   (distr/ol7-slim/ remains present, and cloud/aws/provision.sh's logic
+  #   for installing the ENA driver works on OL7's UEK6 kernel without
+  #   modification). Removing only the AWS-specific validation guard
+  #   lets the existing pipeline run end-to-end against OL7.
+  #
+  # Caveat:
+  #   The patch is intentionally local to the cloned working copy and
+  #   does NOT touch the upstream repository. It must be re-applied on
+  #   every clone, which is why this lives in Phase 3 (post-clone).
+  #   If the upstream check is refactored, this patch will silently
+  #   no-op (see the grep guard below) and the build will rely on
+  #   whatever the new upstream validation does.
+  if [[ "${OL_MAJOR_VERSION}" -eq 7 ]]; then
+    local aws_image_scripts="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/image-scripts.sh"
+    log_info "Applying OL7 compatibility patch to upstream cloud/aws/image-scripts.sh"
+
+    if [[ ! -f "${aws_image_scripts}" ]]; then
+      die "Cannot apply OL7 patch: ${aws_image_scripts} not found"
+    fi
+
+    if grep -Fq 'AWS images builder only supports OL8 and above' "${aws_image_scripts}"; then
+      # Replace the entire OL7-blocking line with a clearly-marked no-op,
+      # using '|' as the sed delimiter to avoid clashing with '#' (which
+      # is significant in the replacement text as a shell comment marker).
+      sed -i.ol7-patch.bak \
+        -e 's|^.*ORACLE_RELEASE.*-lt 8.*AWS images builder only supports OL8 and above.*$|  : # [ol-aws-ami-builder OL7 PATCH] upstream OL7 block removed (see build-ol-aws-ami.sh phase3)|' \
+        "${aws_image_scripts}"
+
+      if grep -Fq '[ol-aws-ami-builder OL7 PATCH]' "${aws_image_scripts}"; then
+        log_info "  -> OL7 patch applied (backup at ${aws_image_scripts}.ol7-patch.bak)"
+      else
+        die "Failed to apply OL7 patch to ${aws_image_scripts}"
+      fi
+    else
+      log_warn "  Upstream OL7 restriction line not found in ${aws_image_scripts}."
+      log_warn "  Assuming the upstream check has been removed/refactored; proceeding."
+    fi
+  fi
+
   log_info "Repository ready"
 }
 
@@ -698,6 +780,7 @@ derive_oracle_checksum_url() {
   #   OracleLinux-R10-U1-x86_64-dvd.iso
   #   OracleLinux-R9-U7-x86_64-dvd.iso
   #   OracleLinux-R8-U1-Server-x86_64-dvd.iso  (older naming)
+  #   OracleLinux-R7-U9-Server-x86_64-dvd.iso  (OL7 always uses Server infix)
   if [[ "${iso_filename}" =~ ^OracleLinux-R([0-9]+)-U([0-9]+)-(Server-)?([^-]+)-(dvd|boot)(-uek)?\.iso$ ]]; then
     local release="R${BASH_REMATCH[1]}"
     local update="U${BASH_REMATCH[2]}"
@@ -727,7 +810,8 @@ derive_oracle_checksum_url() {
 # Priority order:
 #   1. Native oraclelinux{N}.{U} (most specific)
 #   2. oraclelinux{N}.{U-1}, ..., oraclelinux{N} (older updates of the same major)
-#   3. rhel{N}.* / centos-stream{N} (binary-compatible stand-ins)
+#   3. rhel{N}.* / centos-stream{N} (binary-compatible stand-ins).
+#      For OL7 also include classic 'centos7' (pre-Stream).
 #   4. older oraclelinux majors / generic linuxYYYY (last resort)
 #------------------------------------------------------------------------------
 detect_os_variant() {
@@ -751,8 +835,13 @@ detect_os_variant() {
   done
   candidates+=("rhel${major}-unknown" "rhel${major}")
 
-  # 3. CentOS Stream of the same major
+  # 3. CentOS Stream of the same major (modern OL8+ stand-ins).
+  # For OL7, also add 'centos7' which is the classic (non-Stream) CentOS 7
+  # short-id used in older osinfo-db packages.
   candidates+=("centos-stream${major}" "centos-stream-${major}")
+  if [[ "${major}" -eq 7 ]]; then
+    candidates+=("centos7.0" "centos7")
+  fi
 
   # 4. Older OL majors (one step down) as a graceful degradation path
   if [[ "${major}" -gt 8 ]]; then
@@ -766,7 +855,7 @@ detect_os_variant() {
   fi
 
   # 5. Generic linuxYYYY fallbacks (osinfo-db ships these as catch-alls)
-  candidates+=("linux2024" "linux2023" "linux2022" "linux2020" "linux2018")
+  candidates+=("linux2024" "linux2023" "linux2022" "linux2020" "linux2018" "linux2016" "linux2014")
 
   if ! command -v osinfo-query >/dev/null 2>&1; then
     return 1
@@ -940,6 +1029,11 @@ BOOT_MODE=${BOOT_MODE_BUILD}
 
 # Kernel selection (uek or rhck) - falls back to distr default if unset
 ${KERNEL:+KERNEL=${KERNEL}}
+
+# UEK release (relevant when KERNEL=uek; only meaningful for OL7 where the
+# upstream default is UEK6). Pass through verbatim so the upstream tooling
+# can pick the appropriate kernel-uek package.
+${UEK_RELEASE:+UEK_RELEASE=${UEK_RELEASE}}
 
 # linux-firmware retention - "No" recommended for cloud VMs (smaller image)
 ${LINUX_FIRMWARE:+LINUX_FIRMWARE=${LINUX_FIRMWARE}}
