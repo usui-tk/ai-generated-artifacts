@@ -5,8 +5,8 @@
 This is the formal specification for `psa.py`, the PowerShell static
 analyzer maintained in this directory.
 
-**Document version**: 2.3.0
-**Applies to**: `psa.py` 2.3.0 and later 2.x releases
+**Document version**: 3.0.0
+**Applies to**: `psa.py` 3.0.0 and later 3.x releases
 **Status**: Normative
 
 For a user-facing overview, see [`README.md`](./README.md). This
@@ -28,9 +28,8 @@ patch releases without notice.
 7. [Inline suppression](#7-inline-suppression)
 8. [Environment detection](#8-environment-detection)
 9. [Exit codes](#9-exit-codes)
-10. [Backward compatibility](#10-backward-compatibility)
-11. [Tokenizer behaviour](#11-tokenizer-behaviour)
-12. [Extension guide](#12-extension-guide)
+10. [Tokenizer behaviour](#10-tokenizer-behaviour)
+11. [Extension guide](#11-extension-guide)
 
 ---
 
@@ -205,18 +204,9 @@ psa.py --version
 
 ### 3.4 Argument forms
 
-Rule codes may be specified in two forms:
-
-- **New form**: `PSAxxxx` (e.g., `PSA2001`)
-- **Legacy form**: `Cn` (e.g., `C4`) — case-insensitive
-
-Both forms are accepted everywhere a code is expected (`--enable`,
-`--disable`, `--include`, inline suppression comments,
-`.psa.config.json`). Legacy codes are mapped internally to their `PSA`
-equivalent before any processing.
-
-Comma-separated lists are accepted as a single argument value, e.g.,
-`--disable PSA4001,PSA4002`.
+Rule codes are specified in the `PSAxxxx` form (e.g., `PSA2001`),
+case-insensitive. Comma-separated lists are accepted as a single
+argument value, e.g., `--disable PSA4001,PSA4002`.
 
 ### 3.5 Configuration resolution order
 
@@ -243,7 +233,6 @@ the same behaviour.
 
 - **Severity**: Error
 - **Default**: enabled
-- **Legacy**: —
 
 **Detection**: After string/comment stripping (§11), count occurrences
 of `{` and `}` in the cleaned text. Report if counts differ.
@@ -264,11 +253,10 @@ of `{` and `}` in the cleaned text. Report if counts differ.
 
 **Detection**: Same as PSA1001 but for `[` / `]`.
 
-### 4.4 PSA2001 — Undefined variable reference (legacy C4)
+### 4.4 PSA2001 — Undefined variable reference
 
 - **Severity**: Error
 - **Default**: enabled
-- **Legacy**: C4
 
 **Detection**: Heuristic. For each function block (`function Name { … }`):
 
@@ -288,22 +276,20 @@ splatting (`@args`), dynamically-resolved variable names
 (`Get-Variable`), or modules' exported variables. False positives are
 possible; suppress with `# psa-disable-line PSA2001` when intentional.
 
-### 4.5 PSA2002 — Auto-variable shadowing (legacy C5)
+### 4.5 PSA2002 — Auto-variable shadowing
 
 - **Severity**: Warning
 - **Default**: enabled
-- **Legacy**: C5
 
 **Detection**: Any assignment `$name = …` where `name` (lowercased) is
 in the RISKY_SHADOW_VARS set:
 `args`, `lastexitcode`, `input`, `matches`, `foreach`, `host`,
 `true`, `false`.
 
-### 4.6 PSA2003 — `-match` against bare variable (legacy C7)
+### 4.6 PSA2003 — `-match` against bare variable
 
 - **Severity**: Warning
 - **Default**: enabled
-- **Legacy**: C7
 
 **Detection**: Pattern `-match $name` where `$name` is not `$null`.
 This is bug-prone because `-match $null` returns `$true` in PowerShell.
@@ -335,21 +321,19 @@ is not followed by another `=` (avoiding `==` false-positives).
 In PowerShell, `>` and `<` are file redirection, not comparison.
 Use `-gt` / `-lt`.
 
-### 4.10 PSA3001 — `Start-Process -ArgumentList` (legacy C6)
+### 4.10 PSA3001 — `Start-Process -ArgumentList`
 
 - **Severity**: Warning
 - **Default**: enabled
-- **Legacy**: C6
 
 **Detection**: Pattern `Start-Process … -ArgumentList`. The
 `-ArgumentList` parameter has known quoting issues with paths
 containing spaces; prefer `System.Diagnostics.ProcessStartInfo`.
 
-### 4.11 PSA3002 — Backtick continuation before empty line (legacy C9)
+### 4.11 PSA3002 — Backtick continuation before empty line
 
 - **Severity**: Warning
 - **Default**: enabled
-- **Legacy**: C9
 
 **Detection**: A line ending in a single backtick (not `` `` ``)
 followed by a line that is empty or contains only whitespace.
@@ -357,11 +341,10 @@ followed by a line that is empty or contains only whitespace.
 **Source text**: This rule examines the raw text (not the stripped
 form) because trailing whitespace after the backtick is significant.
 
-### 4.12 PSA3003 — `-match` against empty string (legacy C10)
+### 4.12 PSA3003 — `-match` against empty string
 
 - **Severity**: Warning
 - **Default**: enabled
-- **Legacy**: C10
 
 **Detection**: Pattern `-match ''` or `-match ""`. Always true.
 
@@ -373,11 +356,10 @@ form) because trailing whitespace after the backtick is significant.
 **Detection**: `catch [Type]? { }` with no content between the braces.
 A 4-line look-ahead window allows `catch {\n}` to be detected.
 
-### 4.14 PSA4001 — Unfinished marker (legacy C8)
+### 4.14 PSA4001 — Unfinished marker
 
 - **Severity**: Info
 - **Default**: enabled
-- **Legacy**: C8
 
 **Detection**: Within a `#` comment, the words `TODO`, `FIXME`, `XXX`,
 or `HACK` (case-sensitive, word-bounded).
@@ -558,7 +540,7 @@ a valid configuration.
 
 | Field | Type | Default | Notes |
 |:---|:---|:---|:---|
-| `enable` | array of strings | `[]` | Each string is a rule code (`PSAxxxx` or legacy `Cn`). Unknown codes are silently ignored. |
+| `enable` | array of strings | `[]` | Each string is a rule code (`PSAxxxx`). Unknown codes are silently ignored. |
 | `disable` | array of strings | `[]` | Same format as `enable`. |
 | `severity` | string | `"info"` | Floor for the displayed severity. |
 | `max_line_length` | integer | `120` | Must be positive. |
@@ -675,7 +657,7 @@ Lines  : <total-line-count>
 Issues : <N> errors, <M> warnings, <K> info
 
 ---- ERROR (<N>) ----
-  [<CODE>(=<LEGACY>)? ] line <L>:<C>: <message>
+  [<CODE>] line <L>:<C>: <message>
   ...
 
 ---- WARNING (<M>) ----
@@ -707,7 +689,6 @@ Produced by `--format json`. For a single input file:
   "issues": [
     {
       "code": "PSA3004",
-      "legacy_code": null,
       "severity": "warning",
       "line": 211,
       "col": 0,
@@ -952,57 +933,7 @@ the environment probe reports.
 
 ---
 
-## 10. Backward compatibility
-
-### 10.1 Legacy rule codes
-
-The legacy codes `C1` through `C10` from `psa.py` 1.x are accepted
-input forms (in `--enable`, `--disable`, `--include`, configuration
-file, inline suppression) and are mapped internally to their `PSA`
-equivalents:
-
-| Legacy | New | Note |
-|:---:|:---:|:---|
-| C1 | PSA1001 | (\*) |
-| C2 | PSA1002 | (\*) |
-| C3 | PSA1003 | (\*) |
-| C4 | PSA2001 | severity preserved (Error) |
-| C5 | PSA2002 | |
-| C6 | PSA3001 | |
-| C7 | PSA2003 | |
-| C8 | PSA4001 | |
-| C9 | PSA3002 | |
-| C10 | PSA3003 | |
-
-(\*) `C1`, `C2`, `C3` mapped to balance rules. The legacy implementation
-treated the three brace-types as a single check; the new implementation
-splits them, but the legacy alias `C1`/`C2`/`C3` is not strictly
-necessary because the brace/paren/bracket checks were already
-error-severity in 1.x.
-
-The text output prints both forms when a legacy code exists, e.g.,
-`[PSA2003 (=C7)] line 2337: 22: …`. Tools that grep for `C7` in CI
-logs continue to function.
-
-### 10.2 Exit code stability
-
-The `0` / `1` / `2` exit code contract is preserved from 1.x. Some
-files that produced 0 errors in 1.x might produce errors in 2.x due to
-new security rules (notably PSA5001). This is deliberate; the rule set
-expanded.
-
-### 10.3 Configuration file stability
-
-`psa.py` 2.x adds the `.psa.config.json` file. Earlier versions ignored
-all configuration files; the addition is purely additive.
-
-### 10.4 Removed / changed behaviour
-
-None. `psa.py` 2.x is strictly additive over 1.x feature-wise.
-
----
-
-## 11. Tokenizer behaviour
+## 10. Tokenizer behaviour
 
 The tokenizer (`strip_strings_and_comments`) replaces the content of
 strings, here-strings, and comments with space characters while
@@ -1010,7 +941,7 @@ preserving line numbers and column offsets. This guarantees that
 downstream regex-based rules see only "real" PowerShell code without
 having to re-implement quoting rules.
 
-### 11.1 Recognized constructs
+### 10.1 Recognized constructs
 
 | Construct | Behaviour |
 |:---|:---|
@@ -1021,7 +952,7 @@ having to re-implement quoting rules.
 | `@'\n…\n'@` | Here-string (single-quoted). Replaced with spaces. |
 | `@"\n…\n"@` | Here-string (double-quoted). Same as `"…"`: `$variable` preserved. |
 
-### 11.2 Variable identifier extraction
+### 10.2 Variable identifier extraction
 
 Inside double-quoted strings and here-strings, variable references are
 preserved in these forms:
@@ -1030,7 +961,7 @@ preserved in these forms:
 - `$scope:name` — scoped (`$env:`, `$using:`, etc.)
 - `${complex}` — brace-quoted (any content)
 
-### 11.3 Line preservation
+### 10.3 Line preservation
 
 The tokenizer's output has exactly the same number of characters per
 line and the same number of lines as the input. This is critical for
@@ -1038,9 +969,9 @@ accurate line / column reporting.
 
 ---
 
-## 12. Extension guide
+## 11. Extension guide
 
-### 12.1 Adding a new rule
+### 11.1 Adding a new rule
 
 To add `PSA7001`:
 
@@ -1050,7 +981,7 @@ To add `PSA7001`:
    ('PSA7001', 'warning', None, True, 'Short message'),
    ```
 
-   The 5-tuple is `(code, severity, legacy_code_or_None, default_enabled, short_message)`.
+   The 4-tuple is `(code, severity, default_enabled, short_message)`.
 
 2. Implement a `check_yourthing(...)` function that returns a list of
    issue dicts with the standard 5 keys (see §2.3).
@@ -1067,7 +998,7 @@ To add `PSA7001`:
 
 5. Bump the minor version (e.g., `2.1.0` → `2.2.0`).
 
-### 12.2 Adding a new output format
+### 11.2 Adding a new output format
 
 1. Implement `format_yourformat(per_file_results, env_info=None)`.
 
@@ -1086,7 +1017,7 @@ To add `PSA7001`:
 
 4. Document in §6 of this SPEC.
 
-### 12.3 Adding a new configuration field
+### 11.3 Adding a new configuration field
 
 1. Add the field to `Config.__init__()` with a default value.
 
@@ -1100,35 +1031,35 @@ To add `PSA7001`:
 
 ## Appendix A — Rule severity matrix
 
-| Code | Severity | Default | Legacy |
-|:---|:---|:---:|:---:|
-| PSA1001 | error | ✅ | — |
-| PSA1002 | error | ✅ | — |
-| PSA1003 | error | ✅ | — |
-| PSA2001 | error | ✅ | C4 |
-| PSA2002 | warning | ✅ | C5 |
-| PSA2003 | warning | ✅ | C7 |
-| PSA2004 | warning | ✅ | — |
-| PSA2005 | warning | ✅ | — |
-| PSA2006 | warning | ✅ | — |
-| PSA3001 | warning | ✅ | C6 |
-| PSA3002 | warning | ✅ | C9 |
-| PSA3003 | warning | ✅ | C10 |
-| PSA3004 | warning | ✅ | — |
-| PSA4001 | info | ✅ | C8 |
-| PSA4002 | info | ✅ | — |
-| PSA4003 | info | ⛔ | — |
-| PSA4004 | info | ✅ | — |
-| PSA5001 | error | ✅ | — |
-| PSA5002 | warning | ✅ | — |
-| PSA5003 | warning | ✅ | — |
-| PSA5004 | warning | ✅ | — |
-| PSA6001 | warning | ✅ | — |
-| PSA6002 | warning | ⛔ | — |
-| PSA6003 | warning | ✅ | — |
-| PSA6004 | warning | ✅ | — |
-| PSA6005 | warning | ✅ | — |
-| PSA6006 | warning | ✅ | — |
+| Code | Severity | Default |
+|:---|:---|:---:|
+| PSA1001 | error | ✅ |
+| PSA1002 | error | ✅ |
+| PSA1003 | error | ✅ |
+| PSA2001 | error | ✅ |
+| PSA2002 | warning | ✅ |
+| PSA2003 | warning | ✅ |
+| PSA2004 | warning | ✅ |
+| PSA2005 | warning | ✅ |
+| PSA2006 | warning | ✅ |
+| PSA3001 | warning | ✅ |
+| PSA3002 | warning | ✅ |
+| PSA3003 | warning | ✅ |
+| PSA3004 | warning | ✅ |
+| PSA4001 | info | ✅ |
+| PSA4002 | info | ✅ |
+| PSA4003 | info | ⛔ |
+| PSA4004 | info | ✅ |
+| PSA5001 | error | ✅ |
+| PSA5002 | warning | ✅ |
+| PSA5003 | warning | ✅ |
+| PSA5004 | warning | ✅ |
+| PSA6001 | warning | ✅ |
+| PSA6002 | warning | ⛔ |
+| PSA6003 | warning | ✅ |
+| PSA6004 | warning | ✅ |
+| PSA6005 | warning | ✅ |
+| PSA6006 | warning | ✅ |
 
 ---
 

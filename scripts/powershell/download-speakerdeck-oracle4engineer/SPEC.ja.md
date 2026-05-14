@@ -70,7 +70,7 @@ scripts/python/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` は **純粋な Python**(PowerShell インストール不要)の静的解析ツールで、
-現時点でのバージョンは **2.3.0**、`PSA1001`〜`PSA6006` の 27 ルール体系を実装
+現時点でのバージョンは **3.0.0**、`PSA1001`〜`PSA6006` の 27 ルール体系を実装
 しています。元々
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
 リポジトリで開発されました。本レポジトリ内では以下のように使用すること:
@@ -81,8 +81,6 @@ scripts/python/powershell-static-analyzer/psa.py
 - すべてのコミット前のゲートとして使用
 - ルールを disable する必要がある場合は、スクリプトディレクトリごとに
   ローカル `.psa.config.json` で設定(A.11 参照)
-
-v1.x のレガシーコード `C1`〜`C10` はエイリアスとして引き続き受理されます。
 
 プロジェクト固有の運用については A.11 を、ルールの正規仕様については
 [`scripts/python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md)
@@ -569,7 +567,7 @@ work/logs/url_cache.csv
         .psa.config.json     # プロジェクトローカル config (PSA6003 を disable)
     python/
       powershell-static-analyzer/
-        psa.py               # 正規配置場所、v2.3.0
+        psa.py               # 正規配置場所、v3.0.0
         SPEC.md / SPEC.ja.md # 解析ツールの正規仕様
 ```
 
@@ -586,18 +584,14 @@ python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 
 両スクリプトとも **0 errors / 0 warnings / 0 info** で合格すること。
 
-### ルールカバレッジ (psa.py v2.3.0)
+### ルールカバレッジ (psa.py v3.0.0)
 
-`psa.py` v2.3.0 は `PSA1001`〜`PSA6006` の 27 ルール体系を 6 カテゴリに分けて
+`psa.py` v3.0.0 は `PSA1001`〜`PSA6006` の 27 ルール体系を 6 カテゴリに分けて
 実装しています。簡略表は [`README.md`](./README.md) /
 [`README.ja.md`](./README.ja.md) に再掲しています。各ルールの正規仕様
 (深刻度、例、抑制ガイドライン)については
 [`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md)
 (英語版は [SPEC.md](../../python/powershell-static-analyzer/SPEC.md))の §4 を参照。
-
-v1.x のレガシーコード `C1`〜`C10` はエイリアスとして引き続き受理されます
-(例: `C7` は `PSA2003` と同一ルール)。新規ドキュメントでは新コード名を主名称として
-使用してください。
 
 ### プロジェクトローカルの抑制ポリシー
 
@@ -628,10 +622,10 @@ v1.x のレガシーコード `C1`〜`C10` はエイリアスとして引き続�
 
 | 誤検出 | 解決策 |
 |---|---|
-| 異なる関数で設定された `$Script:Foo` に対する `PSA2001` (レガシー `C4`) 「undefined variable」 | スクリプトロード時に初期化: `$Script:Foo = $null` |
-| 非 null が保証されている `$variable` に対する `PSA2003` (レガシー `C7`)「-match against bare $variable」 | `[string]::IsNullOrEmpty($variable)` でガード、または `[regex]::Match()` にリファクタ |
+| 異なる関数で設定された `$Script:Foo` に対する `PSA2001`「undefined variable」 | スクリプトロード時に初期化: `$Script:Foo = $null` |
+| 非 null が保証されている `$variable` に対する `PSA2003`「-match against bare $variable」 | `[string]::IsNullOrEmpty($variable)` でガード、または `[regex]::Match()` にリファクタ |
 | `PSA3004`(空 `catch`)で、意図的にエラーを握り潰している場合 | `# psa-disable-line PSA3004 -- <理由>` を付与 |
-| レガシー関数名の複数形名詞による `PSA6003` | 既にプロジェクト config (`.psa.config.json`) で disable 済み |
+| 既存の関数名の複数形名詞による `PSA6003` | 既にプロジェクト config (`.psa.config.json`) で disable 済み |
 
 `psa.py` が特定のパターンを体系的に誤分類する場合は、ローカルで抑制するのではなく、
 解析ツール自体のレポジトリに issue を上げてください。

@@ -27,8 +27,8 @@
 
 | 項目 | ステータス | 最終検証日 |
 |---|---|---|
-| `psa.py` v2.3.0 on `Download-SpeakerDeck.ps1`（プロジェクト `.psa.config.json` 適用） | **0 errors / 0 warnings / 0 info** ✓ | psa-baseline-sync |
-| `psa.py` v2.3.0 on `Test-PdfMetadata.ps1`（プロジェクト `.psa.config.json` 適用）     | **0 errors / 0 warnings / 0 info** ✓ | psa-baseline-sync |
+| `psa.py` v3.0.0 on `Download-SpeakerDeck.ps1`（プロジェクト `.psa.config.json` 適用） | **0 errors / 0 warnings / 0 info** ✓ | psa-baseline-sync |
+| `psa.py` v3.0.0 on `Test-PdfMetadata.ps1`（プロジェクト `.psa.config.json` 適用）     | **0 errors / 0 warnings / 0 info** ✓ | psa-baseline-sync |
 | ファイルエンコーディング (UTF-8 BOM、BOM 以外は ASCII) | ✓ 両 `.ps1` | r20 ビルド |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ パス | 2026-05-11 |
 | Phase 2〜5 (Scan / Plan) — DryRun モード | ✓ 804 デッキを評価 | 2026-05-11 |
@@ -42,7 +42,7 @@
 
 ## 1. 静的解析ゲート
 
-`psa.py` v2.3.0（27 ルール体系 `PSA1001`〜`PSA6006`）はすべてのコミット前に合格必須です
+`psa.py` v3.0.0（27 ルール体系 `PSA1001`〜`PSA6006`）はすべてのコミット前に合格必須です
 （[SPEC.ja.md](./SPEC.ja.md) Part C 参照）。
 
 `psa.py` は CWD から `.psa.config.json` を自動発見するため、
@@ -75,7 +75,6 @@ Issues : 0 errors, 0 warnings, 0 info
 [`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md)
 §4 を参照（`PSA1xxx` 構文 / `PSA2xxx` 意味 / `PSA3xxx` スタイル / `PSA4xxx` 衛生 /
 `PSA5xxx` セキュリティ / `PSA6xxx` ベストプラクティス）。
-v1.x のレガシーコード `C1`〜`C10` はエイリアスとして引き続き受理されます。
 
 ### 1.1 抑制ポリシー
 

@@ -18,7 +18,7 @@
       - TLS 1.2 capable runtime (the script forces TLS 1.2)
       - Optional: registry "LongPathsEnabled" = 1 for paths > 260 chars
       - Optional: python3 + scripts/python/powershell-static-analyzer/psa.py
-        (v2.3.0, 27-rule check set PSA1001..PSA6006) for static analysis
+        (v3.0.0, 27-rule check set PSA1001..PSA6006) for static analysis
 
     Known limitations:
       - Speaker Deck only (not designed for SlideShare or other sites)
@@ -1287,7 +1287,7 @@ function Get-DeckYear {
 
     # 1. OriginalFilename: YYYYMMDD pattern (or hyphen / underscore variants).
     # Using [regex]::Match directly instead of -match avoids the psa.py
-    # PSA2003 warning (legacy alias: C7) about -match against a bare variable
+    # PSA2003 warning about -match against a bare variable
     # (which would return true for $null on the left-hand side).
     if (-not [string]::IsNullOrEmpty($OriginalFilename)) {
         $patterns = @(

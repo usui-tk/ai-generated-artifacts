@@ -5,7 +5,7 @@
 // File format : JSONC  (JSON with C-style line `//` and block `/* */` comments)
 // Encoding    : UTF-8
 // Schema      : SPEC.md §5  /  SPEC.ja.md §5
-// Applies to  : psa.py 2.3.0 and later 2.x releases
+// Applies to  : psa.py 3.0.0 and later 3.x releases
 //
 // -----------------------------------------------------------------------------
 // How to use this template
@@ -36,7 +36,7 @@
 // NOT the regular blob URL (https://github.com/<owner>/<repo>/blob/...) —
 // that one returns HTML and will not parse as JSON.
 //
-// Robustness of the remote fetch (since psa.py 2.3.0):
+// Robustness of the remote fetch:
 //
 //   - User-Agent  : Chrome 131 + Sec-Ch-Ua client hints, so CDN/WAF
 //                   defaults do not block the request as a bot.
@@ -68,9 +68,8 @@
   // enable: rules to force-ENABLE
   // ===========================================================================
   //
-  // Turn ON rules that are disabled by default. Accepts both new-form codes
-  // (PSAxxxx) and legacy v1.x codes (Cn). Unknown codes are silently
-  // ignored. Order does not matter.
+  // Turn ON rules that are disabled by default. Accepts `PSAxxxx` codes.
+  // Unknown codes are silently ignored. Order does not matter.
   //
   // Default-disabled rules in this psa.py version:
   //

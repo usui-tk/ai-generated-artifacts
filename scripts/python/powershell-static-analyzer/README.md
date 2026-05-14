@@ -16,7 +16,7 @@ For the formal specification (CLI contract, rule semantics, output
 schemas, environment detection contract), see [`SPEC.md`](./SPEC.md).
 日本語版は [`SPEC.ja.md`](./SPEC.ja.md) を参照してください。
 
-**Current version: 2.3.0** (hardened remote fetch + JSONC config + environment detection)
+**Current version: 3.0.0**
 
 ---
 
@@ -93,26 +93,20 @@ The probe is fast, side-effect-free, and bypasses user profiles
 
 Version 2.0 is a major release inspired by Microsoft's
 [PSScriptAnalyzer][PSScriptAnalyzer] and Vidar Holen's
-[shellcheck][shellcheck]. It expanded the rule set from 10 to **27 rules**
+[shellcheck][shellcheck]. It expanded the rule set to **27 rules**
 and added JSON / SARIF output, inline suppression, configuration files,
 and multi-file scanning — while preserving the single-file,
 zero-dependency design.
 
-| Area | v1.x | v2.0 |
-|:---|:---|:---|
-| Rule codes | `C1`–`C10` (legacy) | `PSA1001`–`PSA6006` (27 rules) |
-| Output formats | Text only | Text / JSON / SARIF 2.1.0 |
-| Suppression | None | `# psa-disable-line`, `next-line`, `file` |
-| Configuration | CLI only | `.psa.config.json` + CLI |
-| File handling | Single file | Multiple files / directories / glob |
-| Color output | None | TTY-aware ANSI (NO_COLOR honored) |
-| Heredoc / sub-expr | Limited | Full `@"…"@`, `@'…'@`, `$()`, `@()` |
-
-**Backward compatibility.** Legacy codes (`C1`–`C10`) remain accepted in
-`--enable` / `--disable` flags and inline-suppression comments. Text
-output prints the new code with the legacy code as an alias (e.g.,
-`[PSA2003 (=C7)]`). The exit-code semantics (`0` / `1` / `2`) are
-unchanged.
+| Area | v2.0 |
+|:---|:---|
+| Rule codes | `PSA1001`–`PSA6006` (27 rules) |
+| Output formats | Text / JSON / SARIF 2.1.0 |
+| Suppression | `# psa-disable-line`, `next-line`, `file` |
+| Configuration | `.psa.config.json` + CLI |
+| File handling | Multiple files / directories / glob |
+| Color output | TTY-aware ANSI (NO_COLOR honored) |
+| Heredoc / sub-expr | Full `@"…"@`, `@'…'@`, `$()`, `@()` |
 
 [PSScriptAnalyzer]: https://github.com/PowerShell/PSScriptAnalyzer
 [shellcheck]: https://github.com/koalaman/shellcheck
@@ -247,13 +241,12 @@ Issues : 1 errors, 42 warnings, 31 info
 
 ---- WARNING (42) ----
   [PSA3004]            line  1076     : empty catch block
-  [PSA2003 (=C7)]      line  2337: 22: -match against bare $noisePattern ...
-  [PSA3001 (=C6)]      line  2422     : Start-Process -ArgumentList; ...
+  [PSA2003]            line  2337: 22: -match against bare $noisePattern ...
+  [PSA3001]            line  2422     : Start-Process -ArgumentList; ...
   ...
 ```
 
-Each issue contains the new `PSAxxxx` code, an optional legacy alias
-`(=Cn)` for codes that existed in v1.x, the severity, the line and
+Each issue contains the `PSAxxxx` code, the severity, the line and
 optional column, and a short message.
 
 ---
@@ -262,40 +255,40 @@ optional column, and a short message.
 
 `PSA1xxx` — parse / structural checks (always Error)
 
-| Code | Legacy | Default | Description |
-|:---|:---:|:---:|:---|
-| **PSA1001** | – | ✅ on | Brace balance: `{` count vs `}` count |
-| **PSA1002** | – | ✅ on | Paren balance: `(` vs `)` |
-| **PSA1003** | – | ✅ on | Bracket balance: `[` vs `]` |
+| Code | Default | Description |
+|:---|:---:|:---|
+| **PSA1001** | ✅ on | Brace balance: `{` count vs `}` count |
+| **PSA1002** | ✅ on | Paren balance: `(` vs `)` |
+| **PSA1003** | ✅ on | Bracket balance: `[` vs `]` |
 
 `PSA2xxx` — variable / scope (Error / Warning)
 
-| Code | Legacy | Sev | Default | Description |
-|:---|:---:|:---:|:---:|:---|
-| **PSA2001** | C4 | Error | ✅ on | Undefined variable reference (heuristic) |
-| **PSA2002** | C5 | Warning | ✅ on | Auto-variable shadowing (`$args`, `$matches`, …) |
-| **PSA2003** | C7 | Warning | ✅ on | `-match` against bare `$variable` |
-| **PSA2004** | – | Warning | ✅ on | `$x -eq $null` (use `$null -eq $x` to avoid the collection trap) |
-| **PSA2005** | – | Warning | ✅ on | Assignment operator (`=`) inside `if` / `while` |
-| **PSA2006** | – | Warning | ✅ on | Redirection operator (`>` / `<`) inside `if` / `while` |
+| Code | Sev | Default | Description |
+|:---|:---:|:---:|:---|
+| **PSA2001** | Error | ✅ on | Undefined variable reference (heuristic) |
+| **PSA2002** | Warning | ✅ on | Auto-variable shadowing (`$args`, `$matches`, …) |
+| **PSA2003** | Warning | ✅ on | `-match` against bare `$variable` |
+| **PSA2004** | Warning | ✅ on | `$x -eq $null` (use `$null -eq $x` to avoid the collection trap) |
+| **PSA2005** | Warning | ✅ on | Assignment operator (`=`) inside `if` / `while` |
+| **PSA2006** | Warning | ✅ on | Redirection operator (`>` / `<`) inside `if` / `while` |
 
 `PSA3xxx` — coding patterns (Warning)
 
-| Code | Legacy | Default | Description |
-|:---|:---:|:---:|:---|
-| **PSA3001** | C6 | ✅ on | `Start-Process -ArgumentList`; prefer `ProcessStartInfo` |
-| **PSA3002** | C9 | ✅ on | Backtick continuation followed by an empty line |
-| **PSA3003** | C10 | ✅ on | `-match` against literal empty string |
-| **PSA3004** | – | ✅ on | Empty `catch { }` block |
+| Code | Default | Description |
+|:---|:---:|:---|
+| **PSA3001** | ✅ on | `Start-Process -ArgumentList`; prefer `ProcessStartInfo` |
+| **PSA3002** | ✅ on | Backtick continuation followed by an empty line |
+| **PSA3003** | ✅ on | `-match` against literal empty string |
+| **PSA3004** | ✅ on | Empty `catch { }` block |
 
 `PSA4xxx` — style / informational (Info)
 
-| Code | Legacy | Default | Description |
-|:---|:---:|:---:|:---|
-| **PSA4001** | C8 | ✅ on | Unfinished marker (TODO / FIXME / XXX / HACK) |
-| **PSA4002** | – | ✅ on | Trailing whitespace at end of line |
-| **PSA4003** | – | ⛔ off | Long line exceeds `max_line_length` (default 120) |
-| **PSA4004** | – | ✅ on | Trailing semicolon at end of line |
+| Code | Default | Description |
+|:---|:---:|:---|
+| **PSA4001** | ✅ on | Unfinished marker (TODO / FIXME / XXX / HACK) |
+| **PSA4002** | ✅ on | Trailing whitespace at end of line |
+| **PSA4003** | ⛔ off | Long line exceeds `max_line_length` (default 120) |
+| **PSA4004** | ✅ on | Trailing semicolon at end of line |
 
 `PSA5xxx` — security (Error / Warning)
 
@@ -364,8 +357,6 @@ Whole file (place anywhere, typically near the top):
 ```powershell
 # psa-disable-file PSA4001
 ```
-
-Both new (`PSAxxxx`) and legacy (`Cn`) codes are accepted.
 
 ---
 
@@ -508,7 +499,7 @@ The structure of `psa.py` is intentionally minimal. To add a new check
 `PSA7001`:
 
 1. Add an entry to the `RULES` tuple list at the top of `psa.py`
-   (code, severity, legacy_code or `None`, default-enabled, message).
+   (code, severity, default-enabled, message).
 2. Write a `check_yourthing(text|clean)` function that returns a list of
    dicts with keys `severity`, `code`, `line`, `col`, `message`.
 3. Call it from `analyze_text()` guarded by
@@ -560,9 +551,6 @@ adopt `psa.py` for verification.)
 - **Conservative on false positives.** A static analyzer that cries
   wolf gets ignored. When in doubt, a rule is disabled by default and
   the user opts in.
-- **Backward compatible.** Legacy `C1`–`C10` codes never silently break.
-  CIs that grep for `C7` continue to work because the new text output
-  prints `[PSA2003 (=C7)]`.
 - **PowerShell-aware tokenizer.** Heredocs (`@"…"@`, `@'…'@`),
   sub-expressions (`$()`, `@()`), and the `$env:` / `$using:` scopes
   are handled correctly so that downstream regex rules see only

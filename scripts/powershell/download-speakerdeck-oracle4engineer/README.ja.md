@@ -420,7 +420,7 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 実際の検証結果（DryRun、本番実行出力、冪等性チェック、r17 のリグレッション修正証跡）については **[TESTING.ja.md](TESTING.ja.md)**（英語版は [TESTING.md](TESTING.md)）を参照してください。直近の本番実行成功結果（`804/804 デッキ、失敗ゼロ、合計 10 分 4.4 秒、5.7 GB`）が記録されています。
 
-`psa.py` 静的解析ツールの詳細（v2.3.0、27 ルール体系 `PSA1001`〜`PSA6006` + CI 連携）は
+`psa.py` 静的解析ツールの詳細（v3.0.0、27 ルール体系 `PSA1001`〜`PSA6006` + CI 連携）は
 [`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md)
 （英語版は [SPEC.md](../../python/powershell-static-analyzer/SPEC.md)）、
 または同ディレクトリの
@@ -448,20 +448,19 @@ cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### ルールカバレッジ（psa.py v2.3.0 — 27 ルール）
+### ルールカバレッジ（psa.py v3.0.0 — 27 ルール）
 
-`psa.py` v2.3.0 は 27 ルールを 6 カテゴリに分類しています：
+`psa.py` v3.0.0 は 27 ルールを 6 カテゴリに分類しています：
 
 | カテゴリ | コード範囲 | 例 |
 | -------- | ---------- | -- |
 | 構文の整合性  | `PSA1001`〜`PSA1003` | 波括弧 / 丸括弧 / 角括弧の整合性 |
-| 意味解析      | `PSA2001`〜`PSA2006` | 未定義変数、自動変数のシャドウイング、`-match $変数` の罠（レガシー `C7`）、`$null` を `-eq`/`-ne` の右辺に置く問題 |
-| スタイル      | `PSA3001`〜`PSA3004` | `Start-Process -ArgumentList`（レガシー `C6`）、バックティック行継続後の空行（レガシー `C9`）、空の `catch` ブロック |
-| 衛生          | `PSA4001`〜`PSA4004` | 未完了マーカー（レガシー `C8`）、行末空白、長い行、行末セミコロン |
+| 意味解析      | `PSA2001`〜`PSA2006` | 未定義変数、自動変数のシャドウイング、`-match $変数` の罠、`$null` を `-eq`/`-ne` の右辺に置く問題 |
+| スタイル      | `PSA3001`〜`PSA3004` | `Start-Process -ArgumentList`、バックティック行継続後の空行、空の `catch` ブロック |
+| 衛生          | `PSA4001`〜`PSA4004` | 未完了マーカー、行末空白、長い行、行末セミコロン |
 | セキュリティ  | `PSA5001`〜`PSA5004` | 平文パスワードパラメーター、`Invoke-Expression`、壊れたハッシュアルゴリズム、`ComputerName` ハードコード |
 | ベストプラクティス | `PSA6001`〜`PSA6006` | 非承認動詞、コマンドレットエイリアス、複数形名詞の関数名、`$global:` 定義、必須パラメーターのデフォルト値、`$true` がデフォルトのスイッチパラメーター |
 
-v1.x のレガシーコード `C1`〜`C10` はエイリアスとして引き続き受理されます。
 各ルールの完全仕様は
 [`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md) §4 を参照。
 

@@ -12,21 +12,21 @@ Parse / structural (PSA1xxx):
   PSA1003  Bracket balance ....................... Error
 
 Variable / scope (PSA2xxx):
-  PSA2001  Undefined variable reference .......... Warning   (= legacy C4)
-  PSA2002  Auto-variable shadowing ............... Warning   (= legacy C5)
-  PSA2003  -match against bare variable .......... Warning   (= legacy C7)
+  PSA2001  Undefined variable reference .......... Warning
+  PSA2002  Auto-variable shadowing ............... Warning
+  PSA2003  -match against bare variable .......... Warning
   PSA2004  $x -eq $null  (use $null -eq $x) ...... Warning
   PSA2005  Assignment operator in conditional .... Warning
   PSA2006  Redirection operator in conditional ... Warning
 
 Coding-pattern (PSA3xxx):
-  PSA3001  Start-Process -ArgumentList ........... Warning   (= legacy C6)
-  PSA3002  Backtick before empty line ............ Warning   (= legacy C9)
-  PSA3003  -match against empty string ........... Warning   (= legacy C10)
+  PSA3001  Start-Process -ArgumentList ........... Warning
+  PSA3002  Backtick before empty line ............ Warning
+  PSA3003  -match against empty string ........... Warning
   PSA3004  Empty catch block ..................... Warning
 
 Style / info (PSA4xxx):
-  PSA4001  TODO / FIXME marker ................... Info      (= legacy C8)
+  PSA4001  TODO / FIXME marker ................... Info
   PSA4002  Trailing whitespace ................... Info
   PSA4003  Long line (default: disabled) ......... Info
   PSA4004  Trailing semicolon at line end ........ Info
@@ -108,13 +108,6 @@ Configuration file (.psa.config.json)
     - Tunable via env vars: PSA_CONFIG_TIMEOUT (default 30s),
       PSA_CONFIG_MAX_RETRIES (default 3), PSA_CONFIG_QUIET.
 
-Backward compatibility
-----------------------
-  Legacy C1-C10 codes are still accepted in CLI and inline-suppression
-  arguments; they are mapped internally to the corresponding PSA codes.
-  Text output prints the new PSA code with the legacy code as an alias
-  in parentheses (when applicable).
-
 Exit codes: 0 = clean, 1 = warnings only, 2 = errors found
 """
 
@@ -136,7 +129,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '2.3.0'
+__version__ = '3.0.0'
 
 # ---------------------------------------------------------------------------
 # Severity and rule registry
@@ -144,71 +137,70 @@ __version__ = '2.3.0'
 
 SEVERITY_ORDER = {'error': 3, 'warning': 2, 'info': 1}
 
-# (new_code, severity, legacy_code, default_enabled, short_message)
+# (new_code, severity, default_enabled, short_message)
 RULES = [
-    ('PSA1001', 'error',   None,   True,
+    ('PSA1001', 'error',   True,
      'Brace balance'),
-    ('PSA1002', 'error',   None,   True,
+    ('PSA1002', 'error',   True,
      'Paren balance'),
-    ('PSA1003', 'error',   None,   True,
+    ('PSA1003', 'error',   True,
      'Bracket balance'),
 
-    ('PSA2001', 'error', 'C4',   True,
+    ('PSA2001', 'error',   True,
      'Undefined variable reference'),
-    ('PSA2002', 'warning', 'C5',   True,
+    ('PSA2002', 'warning', True,
      'Auto-variable shadowing'),
-    ('PSA2003', 'warning', 'C7',   True,
+    ('PSA2003', 'warning', True,
      '-match against bare variable'),
-    ('PSA2004', 'warning', None,   True,
+    ('PSA2004', 'warning', True,
      '$null should be on the left side of -eq/-ne'),
-    ('PSA2005', 'warning', None,   True,
+    ('PSA2005', 'warning', True,
      'Assignment operator (=) inside conditional'),
-    ('PSA2006', 'warning', None,   True,
+    ('PSA2006', 'warning', True,
      'Redirection operator (>, <) inside conditional'),
 
-    ('PSA3001', 'warning', 'C6',   True,
+    ('PSA3001', 'warning', True,
      'Start-Process -ArgumentList; prefer ProcessStartInfo'),
-    ('PSA3002', 'warning', 'C9',   True,
+    ('PSA3002', 'warning', True,
      'Backtick continuation followed by empty line'),
-    ('PSA3003', 'warning', 'C10',  True,
+    ('PSA3003', 'warning', True,
      '-match against literal empty string'),
-    ('PSA3004', 'warning', None,   True,
+    ('PSA3004', 'warning', True,
      'Empty catch block'),
 
-    ('PSA4001', 'info',    'C8',   True,
+    ('PSA4001', 'info',    True,
      'Unfinished marker (TODO/FIXME/XXX/HACK)'),
-    ('PSA4002', 'info',    None,   True,
+    ('PSA4002', 'info',    True,
      'Trailing whitespace at end of line'),
-    ('PSA4003', 'info',    None,   False,
+    ('PSA4003', 'info',    False,
      'Long line exceeds max_line_length'),
-    ('PSA4004', 'info',    None,   True,
+    ('PSA4004', 'info',    True,
      'Trailing semicolon at end of line'),
 
-    ('PSA5001', 'error',   None,   True,
+    ('PSA5001', 'error',   True,
      'Plain-text password parameter ([string]$Password)'),
-    ('PSA5002', 'warning', None,   True,
+    ('PSA5002', 'warning', True,
      'Invoke-Expression should be avoided'),
-    ('PSA5003', 'warning', None,   True,
+    ('PSA5003', 'warning', True,
      'Broken hash algorithm (MD5 / SHA1)'),
-    ('PSA5004', 'warning', None,   True,
+    ('PSA5004', 'warning', True,
      'Hardcoded ComputerName'),
 
-    ('PSA6001', 'warning', None,   True,
+    ('PSA6001', 'warning', True,
      'Function uses non-approved verb'),
-    ('PSA6002', 'warning', None,   False,
+    ('PSA6002', 'warning', False,
      'Cmdlet alias used (e.g., ls, cd, dir, where)'),
-    ('PSA6003', 'warning', None,   True,
+    ('PSA6003', 'warning', True,
      'Function noun should be singular'),
-    ('PSA6004', 'warning', None,   True,
+    ('PSA6004', 'warning', True,
      'Avoid $global: variable definition'),
-    ('PSA6005', 'warning', None,   True,
+    ('PSA6005', 'warning', True,
      'Mandatory parameter must not have a default value'),
-    ('PSA6006', 'warning', None,   True,
+    ('PSA6006', 'warning', True,
      'Switch parameter must not default to $true'),
 ]
 
 CODE_TO_RULE = {r[0]: r for r in RULES}
-LEGACY_TO_NEW = {r[2]: r[0] for r in RULES if r[2]}
 
 # ---------------------------------------------------------------------------
 # PowerShell approved verbs (subset; from Get-Verb output, Sep 2024)
@@ -597,7 +589,7 @@ def collect_references(body):
 # ---------------------------------------------------------------------------
 
 def check_undefined_vars(text, clean):
-    """PSA2001 (legacy C4): heuristic undefined-variable warning."""
+    """PSA2001: heuristic undefined-variable warning."""
     issues = []
     blocks = find_function_blocks(clean)
     fn_ranges = [(b[1], b[2]) for b in blocks]
@@ -632,7 +624,7 @@ def check_undefined_vars(text, clean):
 
 
 def check_shadow(clean):
-    """PSA2002 (legacy C5): assigning to a risky auto-variable."""
+    """PSA2002: assigning to a risky auto-variable."""
     out = []
     for ln, line in enumerate(clean.split('\n'), 1):
         for m in re.finditer(r'\$([A-Za-z_][A-Za-z0-9_]*)\s*=', line):
@@ -646,7 +638,7 @@ def check_shadow(clean):
 
 
 def check_match_var(clean):
-    """PSA2003 (legacy C7): -match against bare $variable."""
+    """PSA2003: -match against bare $variable."""
     pat = re.compile(
         r'-match\s+\$(?!null\b)([A-Za-z_][A-Za-z0-9_:]*)', re.IGNORECASE)
     out = []
@@ -717,7 +709,7 @@ def check_redirect_in_conditional(clean):
 
 
 def check_argumentlist(clean):
-    """PSA3001 (legacy C6): Start-Process -ArgumentList."""
+    """PSA3001: Start-Process -ArgumentList."""
     out = []
     for ln, line in enumerate(clean.split('\n'), 1):
         if re.search(r'Start-Process\b.*-ArgumentList\b',
@@ -732,7 +724,7 @@ def check_argumentlist(clean):
 
 
 def check_backtick(text):
-    """PSA3002 (legacy C9): trailing backtick before empty line.
+    """PSA3002: trailing backtick before empty line.
 
     Uses the *raw* text so that trailing whitespace after the backtick
     can also be flagged. Comments are unlikely to end in backtick, so we
@@ -754,7 +746,7 @@ def check_backtick(text):
 
 
 def check_empty_match(clean):
-    """PSA3003 (legacy C10): -match against literal empty string.
+    """PSA3003: -match against literal empty string.
 
     We rely on the *raw* form via the regex below — but since the strip
     pass replaces quoted contents with spaces, we use a slightly different
@@ -809,7 +801,7 @@ def check_empty_catch(clean):
 
 
 def check_todo(text):
-    """PSA4001 (legacy C8): TODO/FIXME markers (in comments only)."""
+    """PSA4001: TODO/FIXME markers (in comments only)."""
     out = []
     # We scan the RAW text because we want markers inside # comments.
     for ln, line in enumerate(text.split('\n'), 1):
@@ -1101,14 +1093,12 @@ SUPPRESS_FILE_PAT = re.compile(
 
 
 def _normalize_codes(raw):
-    """Accept 'PSA2001', 'C4', 'C4,C7,PSA2001' -> set of new codes."""
+    """Accept 'PSA2001', 'PSA2001,PSA2003' -> set of codes."""
     out = set()
     for tok in re.split(r'[,\s]+', raw):
         tok = tok.strip().upper()
         if not tok:
             continue
-        if tok in LEGACY_TO_NEW:
-            tok = LEGACY_TO_NEW[tok]
         out.add(tok)
     return out
 
@@ -1388,7 +1378,7 @@ class Config:
 
     def __init__(self):
         # rule_id -> bool (enabled)
-        self.enabled = {r[0]: r[3] for r in RULES}
+        self.enabled = {r[0]: r[2] for r in RULES}
         self.max_line_length = 120
         self.min_severity = 'info'
         self.format = 'text'
@@ -1422,11 +1412,11 @@ class Config:
                       file=sys.stderr)
                 raise SystemExit(2)
             for code in data.get('enable', []):
-                code = LEGACY_TO_NEW.get(code.upper(), code.upper())
+                code = code.upper()
                 if code in c.enabled:
                     c.enabled[code] = True
             for code in data.get('disable', []):
-                code = LEGACY_TO_NEW.get(code.upper(), code.upper())
+                code = code.upper()
                 if code in c.enabled:
                     c.enabled[code] = False
             if 'severity' in data:
@@ -1435,18 +1425,17 @@ class Config:
                 c.max_line_length = int(data['max_line_length'])
         # 2) CLI args (highest priority)
         for code in (args.enable or []):
-            code = LEGACY_TO_NEW.get(code.upper(), code.upper())
+            code = code.upper()
             if code in c.enabled:
                 c.enabled[code] = True
         for code in (args.disable or []):
-            code = LEGACY_TO_NEW.get(code.upper(), code.upper())
+            code = code.upper()
             if code in c.enabled:
                 c.enabled[code] = False
         if args.include:
             include = set()
             for code in args.include:
-                code = LEGACY_TO_NEW.get(code.upper(), code.upper())
-                include.add(code)
+                include.add(code.upper())
             for k in c.enabled:
                 c.enabled[k] = (k in include)
         if args.severity:
@@ -1752,13 +1741,6 @@ def _color(s, code, no_color):
     return s if no_color else f'{code}{s}{ANSI_RST}'
 
 
-def _alias_suffix(code):
-    rule = CODE_TO_RULE.get(code)
-    if rule and rule[2]:
-        return f' (={rule[2]})'
-    return ''
-
-
 def format_text(path, text, issues, no_color):
     err = sum(1 for i in issues if i['severity'] == 'error')
     warn = sum(1 for i in issues if i['severity'] == 'warning')
@@ -1784,11 +1766,10 @@ def format_text(path, text, issues, no_color):
         lines.append(_color(f'---- {sev.upper()} ({len(sub)}) ----',
                             col, no_color))
         for i in sub:
-            alias = _alias_suffix(i['code'])
             loc = (f"line {i['line']:>5}:{i['col']:>3}"
                    if i['col'] else f"line {i['line']:>5}     ")
             lines.append(
-                f"  [{_color(i['code'], col, no_color)}{alias}] "
+                f"  [{_color(i['code'], col, no_color)}] "
                 f"{loc}: {i['message']}")
         lines.append('')
     return '\n'.join(lines)
@@ -1806,8 +1787,6 @@ def format_json(path, text, issues):
         'issues': [
             {
                 'code': i['code'],
-                'legacy_code': CODE_TO_RULE[i['code']][2]
-                if i['code'] in CODE_TO_RULE else None,
                 'severity': i['severity'],
                 'line': i['line'],
                 'col': i['col'],
@@ -1829,7 +1808,7 @@ def format_sarif(per_file_results, env_info=None):
     """
     rules_section = []
     for r in RULES:
-        code, sev, legacy, _enabled, msg = r
+        code, sev, _enabled, msg = r
         sarif_level = {'error': 'error',
                        'warning': 'warning',
                        'info': 'note'}.get(sev, 'note')
@@ -1923,13 +1902,11 @@ def expand_paths(paths, recursive):
 def list_rules(no_color):
     print(_color('PSA Rule Catalog', ANSI_BLD, no_color))
     print()
-    print(f'{"Code":<8} {"Severity":<8} {"Default":<8} {"Legacy":<7} '
-          f'Description')
+    print(f'{"Code":<8} {"Severity":<8} {"Default":<8} Description')
     print('-' * 78)
-    for code, sev, legacy, default, msg in RULES:
+    for code, sev, default, msg in RULES:
         default_str = 'on' if default else 'OFF'
-        legacy_str = legacy or '-'
-        print(f'{code:<8} {sev:<8} {default_str:<8} {legacy_str:<7} {msg}')
+        print(f'{code:<8} {sev:<8} {default_str:<8} {msg}')
     return 0
 
 

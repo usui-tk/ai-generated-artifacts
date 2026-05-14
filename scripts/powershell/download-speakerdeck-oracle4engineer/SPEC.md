@@ -81,7 +81,7 @@ scripts/python/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` is a **pure Python** static analyzer (no PowerShell installation
-required), version **2.3.0** at the time of this writing, with a 27-rule
+required), version **3.0.0** at the time of this writing, with a 27-rule
 check set spanning `PSA1001`..`PSA6006`. It was originally developed for the
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
 repository. Within this repository it must be:
@@ -92,9 +92,6 @@ repository. Within this repository it must be:
 - Used as the gate before every commit
 - Configured per-script-directory via a local `.psa.config.json` when
   rule disables are warranted (see A.11)
-
-Legacy v1.x codes `C1`..`C10` remain accepted as aliases for backward
-compatibility.
 
 See A.11 for project-local conventions and
 [`scripts/python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
@@ -624,7 +621,7 @@ Based on the longest successful path length, classify into:
         .psa.config.json     # project-local config (disables PSA6003)
     python/
       powershell-static-analyzer/
-        psa.py               # canonical location, v2.3.0
+        psa.py               # canonical location, v3.0.0
         SPEC.md / SPEC.ja.md # authoritative analyzer specification
 ```
 
@@ -641,9 +638,9 @@ python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 
 Both must pass with **0 errors / 0 warnings / 0 info**.
 
-### Rule coverage (psa.py v2.3.0)
+### Rule coverage (psa.py v3.0.0)
 
-`psa.py` v2.3.0 ships with a 27-rule check set `PSA1001`..`PSA6006`, grouped
+`psa.py` v3.0.0 ships with a 27-rule check set `PSA1001`..`PSA6006`, grouped
 into six categories. A condensed table is reproduced in
 [`README.md`](./README.md) and [`README.ja.md`](./README.ja.md). For the
 authoritative specification of every rule (severity, examples, suppression
@@ -651,16 +648,12 @@ guidance), see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
 ([日本語](../../python/powershell-static-analyzer/SPEC.ja.md)) §4.
 
-Legacy v1.x codes `C1`..`C10` are accepted as aliases (for example, `C7`
-is the same rule as `PSA2003`). The canonical name should be the new code
-in any new documentation.
-
 ### Project-local suppression policy
 
 This project applies suppression at two levels:
 
 1. **Project-level (`.psa.config.json`)**
-   - `PSA6003` (plural function noun) is disabled. The three legacy
+   - `PSA6003` (plural function noun) is disabled. The three
      plural-noun functions in `Download-SpeakerDeck.ps1`
      (`Resolve-RuntimeDirectories`, `Invoke-CleanupDirectories`,
      `Read-YearOverrides`) intentionally describe collections, so renaming
@@ -686,10 +679,10 @@ Common cases and their resolutions:
 
 | False positive | Resolution |
 |---|---|
-| `PSA2001` (legacy `C4`) "undefined variable" for `$Script:Foo` set in a different function | Initialize at script load: `$Script:Foo = $null` |
-| `PSA2003` (legacy `C7`) "-match against bare `$variable`" where `$variable` is guaranteed non-null | Wrap with `[string]::IsNullOrEmpty($variable)` guard, or refactor to `[regex]::Match()` |
+| `PSA2001` "undefined variable" for `$Script:Foo` set in a different function | Initialize at script load: `$Script:Foo = $null` |
+| `PSA2003` "-match against bare `$variable`" where `$variable` is guaranteed non-null | Wrap with `[string]::IsNullOrEmpty($variable)` guard, or refactor to `[regex]::Match()` |
 | `PSA3004` (empty `catch`) intentional silent failure | Add `# psa-disable-line PSA3004 -- <reason>` |
-| `PSA6003` plural noun in legacy function name | Already disabled at project level in `.psa.config.json` |
+| `PSA6003` plural noun in pre-existing function name | Already disabled at project level in `.psa.config.json` |
 
 If `psa.py` systematically misclassifies a pattern, raise an issue upstream
 in the analyzer's own repository rather than suppressing locally.

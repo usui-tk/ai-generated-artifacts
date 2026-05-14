@@ -14,7 +14,7 @@ PowerShell スクリプト用の単一 Python 3 ファイル静的解析ツー�
 ついては [`SPEC.ja.md`](./SPEC.ja.md) を参照してください。
 英語版は [`SPEC.md`](./SPEC.md) を参照してください。
 
-**現在のバージョン: 2.3.0**（リモート取得堅牢化 + JSONC 設定 + 環境検出）
+**現在のバージョン: 3.0.0**
 
 ---
 
@@ -85,24 +85,19 @@ PowerShell の利用可否が実行ごとに変わりうる場合に特に有用
 
 バージョン 2.0 は、Microsoft の [PSScriptAnalyzer][PSScriptAnalyzer]
 と Vidar Holen 氏の [shellcheck][shellcheck] に着想を得たメジャー
-リリースでした。ルール数を 10 から **27** に拡張し、JSON / SARIF 出力、
+リリースでした。ルール数を **27** に拡張し、JSON / SARIF 出力、
 インライン抑制、設定ファイル、複数ファイル走査を追加。それでいて
 **単一ファイル + 外部依存ゼロ**の設計は維持しています。
 
-| 項目 | v1.x | v2.0 |
-|:---|:---|:---|
-| ルール番号 | `C1`〜`C10` (レガシー) | `PSA1001`〜`PSA6006` (27 ルール) |
-| 出力形式 | テキストのみ | テキスト / JSON / SARIF 2.1.0 |
-| 抑制機能 | なし | `# psa-disable-line` / `next-line` / `file` |
-| 設定 | CLI のみ | `.psa.config.json` + CLI |
-| ファイル処理 | 単一ファイル | 複数ファイル / ディレクトリ / glob |
-| カラー出力 | なし | TTY 検出 + ANSI (NO_COLOR 対応) |
-| ヒアドキュメント / サブ式 | 限定的 | `@"…"@`, `@'…'@`, `$()`, `@()` を完全サポート |
-
-**後方互換性**: レガシーコード（`C1`〜`C10`）は `--enable` / `--disable`
-引数とインライン抑制コメントの両方で受け付けます。テキスト出力では
-新コードとレガシーコードを並記します（例: `[PSA2003 (=C7)]`）。
-終了コードの意味（`0` / `1` / `2`）は変更ありません。
+| 項目 | v2.0 |
+|:---|:---|
+| ルール番号 | `PSA1001`〜`PSA6006` (27 ルール) |
+| 出力形式 | テキスト / JSON / SARIF 2.1.0 |
+| 抑制機能 | `# psa-disable-line` / `next-line` / `file` |
+| 設定 | `.psa.config.json` + CLI |
+| ファイル処理 | 複数ファイル / ディレクトリ / glob |
+| カラー出力 | TTY 検出 + ANSI (NO_COLOR 対応) |
+| ヒアドキュメント / サブ式 | `@"…"@`, `@'…'@`, `$()`, `@()` を完全サポート |
 
 [PSScriptAnalyzer]: https://github.com/PowerShell/PSScriptAnalyzer
 [shellcheck]: https://github.com/koalaman/shellcheck
@@ -237,13 +232,12 @@ Issues : 1 errors, 42 warnings, 31 info
 
 ---- WARNING (42) ----
   [PSA3004]            line  1076     : empty catch block
-  [PSA2003 (=C7)]      line  2337: 22: -match against bare $noisePattern ...
-  [PSA3001 (=C6)]      line  2422     : Start-Process -ArgumentList; ...
+  [PSA2003]            line  2337: 22: -match against bare $noisePattern ...
+  [PSA3001]            line  2422     : Start-Process -ArgumentList; ...
   ...
 ```
 
-各 issue には新しい `PSAxxxx` コード、v1.x 時代のレガシーコード
-（該当する場合は `(=Cn)` の形）、severity、行・列、短いメッセージ
+各 issue には `PSAxxxx` コード、severity、行・列、短いメッセージ
 が含まれます。
 
 ---
@@ -252,40 +246,40 @@ Issues : 1 errors, 42 warnings, 31 info
 
 `PSA1xxx` — パース・構文系（常に Error）
 
-| コード | レガシー | デフォルト | 内容 |
-|:---|:---:|:---:|:---|
-| **PSA1001** | – | ✅ 有効 | 中括弧バランス: `{` の数 vs `}` の数 |
-| **PSA1002** | – | ✅ 有効 | 丸括弧バランス: `(` vs `)` |
-| **PSA1003** | – | ✅ 有効 | 角括弧バランス: `[` vs `]` |
+| コード | デフォルト | 内容 |
+|:---|:---:|:---|
+| **PSA1001** | ✅ 有効 | 中括弧バランス: `{` の数 vs `}` の数 |
+| **PSA1002** | ✅ 有効 | 丸括弧バランス: `(` vs `)` |
+| **PSA1003** | ✅ 有効 | 角括弧バランス: `[` vs `]` |
 
 `PSA2xxx` — 変数・スコープ系（Error / Warning）
 
-| コード | レガシー | 重大度 | デフォルト | 内容 |
-|:---|:---:|:---:|:---:|:---|
-| **PSA2001** | C4 | Error | ✅ 有効 | 未定義変数参照（ヒューリスティック） |
-| **PSA2002** | C5 | Warning | ✅ 有効 | auto-variable 上書き（`$args`, `$matches`, …） |
-| **PSA2003** | C7 | Warning | ✅ 有効 | `-match` を素の `$variable` に対して使用 |
-| **PSA2004** | – | Warning | ✅ 有効 | `$x -eq $null` は `$null -eq $x` を推奨（コレクションの罠回避） |
-| **PSA2005** | – | Warning | ✅ 有効 | `if` / `while` 条件内に代入演算子 `=` |
-| **PSA2006** | – | Warning | ✅ 有効 | `if` / `while` 条件内にリダイレクト演算子 `>` / `<` |
+| コード | 重大度 | デフォルト | 内容 |
+|:---|:---:|:---:|:---|
+| **PSA2001** | Error | ✅ 有効 | 未定義変数参照（ヒューリスティック） |
+| **PSA2002** | Warning | ✅ 有効 | auto-variable 上書き（`$args`, `$matches`, …） |
+| **PSA2003** | Warning | ✅ 有効 | `-match` を素の `$variable` に対して使用 |
+| **PSA2004** | Warning | ✅ 有効 | `$x -eq $null` は `$null -eq $x` を推奨（コレクションの罠回避） |
+| **PSA2005** | Warning | ✅ 有効 | `if` / `while` 条件内に代入演算子 `=` |
+| **PSA2006** | Warning | ✅ 有効 | `if` / `while` 条件内にリダイレクト演算子 `>` / `<` |
 
 `PSA3xxx` — コーディングパターン（Warning）
 
-| コード | レガシー | デフォルト | 内容 |
-|:---|:---:|:---:|:---|
-| **PSA3001** | C6 | ✅ 有効 | `Start-Process -ArgumentList`; `ProcessStartInfo` を推奨 |
-| **PSA3002** | C9 | ✅ 有効 | 行末バッククォートの直後が空行 |
-| **PSA3003** | C10 | ✅ 有効 | `-match` を空文字列リテラルに対して使用 |
-| **PSA3004** | – | ✅ 有効 | 空の `catch { }` ブロック |
+| コード | デフォルト | 内容 |
+|:---|:---:|:---|
+| **PSA3001** | ✅ 有効 | `Start-Process -ArgumentList`; `ProcessStartInfo` を推奨 |
+| **PSA3002** | ✅ 有効 | 行末バッククォートの直後が空行 |
+| **PSA3003** | ✅ 有効 | `-match` を空文字列リテラルに対して使用 |
+| **PSA3004** | ✅ 有効 | 空の `catch { }` ブロック |
 
 `PSA4xxx` — スタイル・情報（Info）
 
-| コード | レガシー | デフォルト | 内容 |
-|:---|:---:|:---:|:---|
-| **PSA4001** | C8 | ✅ 有効 | 未完了マーカー（TODO / FIXME / XXX / HACK） |
-| **PSA4002** | – | ✅ 有効 | 行末の余分な空白 |
-| **PSA4003** | – | ⛔ 無効 | `max_line_length` 超過（既定 120 文字） |
-| **PSA4004** | – | ✅ 有効 | 行末セミコロン |
+| コード | デフォルト | 内容 |
+|:---|:---:|:---|
+| **PSA4001** | ✅ 有効 | 未完了マーカー（TODO / FIXME / XXX / HACK） |
+| **PSA4002** | ✅ 有効 | 行末の余分な空白 |
+| **PSA4003** | ⛔ 無効 | `max_line_length` 超過（既定 120 文字） |
+| **PSA4004** | ✅ 有効 | 行末セミコロン |
 
 `PSA5xxx` — セキュリティ（Error / Warning）
 
@@ -354,8 +348,6 @@ Start-Process -ArgumentList $args ...
 ```powershell
 # psa-disable-file PSA4001
 ```
-
-新コード（`PSAxxxx`）とレガシーコード（`Cn`）の両方が受け付けられます。
 
 ---
 
@@ -498,7 +490,7 @@ Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
 する手順:
 
 1. `psa.py` 冒頭の `RULES` タプルリストにエントリを追加
-   （`(code, severity, legacy_code or None, default_enabled, message)`）。
+   （`(code, severity, default_enabled, message)`）。
 2. `check_yourthing(text|clean)` 関数を作成し、
    `severity` / `code` / `line` / `col` / `message` をキーとする dict の
    リストを返す形にする。
@@ -547,9 +539,6 @@ Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
 - **誤検出には保守的**: 「狼が来た」と叫び続けるアナライザは無視される
   運命です。判断に迷うルールはデフォルト無効にし、ユーザーが明示的に
   有効化する設計にしています。
-- **後方互換性を維持**: レガシーコード `C1`〜`C10` は決して黙って
-  壊れません。`C7` を grep していた CI も、新テキスト出力で
-  `[PSA2003 (=C7)]` と表示されるため、引き続き動作します。
 - **PowerShell を理解するトークナイザ**: ヒアドキュメント（`@"…"@`,
   `@'…'@`）、サブ式（`$()`, `@()`）、`$env:` / `$using:` スコープを
   正しく扱い、下流の正規表現ルールが「意味のあるコード」だけを見られる

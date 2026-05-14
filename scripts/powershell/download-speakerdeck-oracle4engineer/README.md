@@ -489,7 +489,7 @@ check, regression-fix evidence for r17), see **[TESTING.md](TESTING.md)**
 ([日本語](TESTING.ja.md)). It documents the most recent successful
 real-run (`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
 
-For details on the `psa.py` static analyzer (v2.3.0, 27-rule check set
+For details on the `psa.py` static analyzer (v3.0.0, 27-rule check set
 `PSA1001`..`PSA6006` plus CI integration), see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
 ([日本語](../../python/powershell-static-analyzer/SPEC.ja.md))
@@ -518,21 +518,20 @@ cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### Rule coverage (psa.py v2.3.0 — 27 rules)
+### Rule coverage (psa.py v3.0.0 — 27 rules)
 
-`psa.py` v2.3.0 groups its 27 rules into six categories:
+`psa.py` v3.0.0 groups its 27 rules into six categories:
 
 | Category | Code range | Examples |
 | -------- | ---------- | -------- |
 | Syntax balance      | `PSA1001`..`PSA1003` | brace / paren / bracket balance |
-| Semantics           | `PSA2001`..`PSA2006` | undefined variable, auto-variable shadowing, `-match` against bare variable (legacy `C7`), `$null` on the right of `-eq`/`-ne` |
-| Style               | `PSA3001`..`PSA3004` | `Start-Process -ArgumentList` (legacy `C6`), trailing backtick before empty line (legacy `C9`), empty `catch` block |
-| Hygiene             | `PSA4001`..`PSA4004` | unfinished markers (legacy `C8`), trailing whitespace, long line, trailing semicolon |
+| Semantics           | `PSA2001`..`PSA2006` | undefined variable, auto-variable shadowing, `-match` against bare variable, `$null` on the right of `-eq`/`-ne` |
+| Style               | `PSA3001`..`PSA3004` | `Start-Process -ArgumentList`, trailing backtick before empty line, empty `catch` block |
+| Hygiene             | `PSA4001`..`PSA4004` | unfinished markers, trailing whitespace, long line, trailing semicolon |
 | Security            | `PSA5001`..`PSA5004` | plain-text password parameter, `Invoke-Expression`, broken hash algorithm, hardcoded `ComputerName` |
 | Best practice       | `PSA6001`..`PSA6006` | non-approved verb, cmdlet alias, plural function noun, `$global:` definition, mandatory parameter with default, switch defaulting to `$true` |
 
-Legacy `C1`..`C10` codes from v1.x are accepted as aliases. For the full
-specification of each rule, see
+For the full specification of each rule, see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4.
 
 ### Project-local configuration
