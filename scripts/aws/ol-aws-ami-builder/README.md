@@ -393,7 +393,7 @@ The `cloud=aws` target of `oracle-linux-image-tools` bundles the Amazon ENA driv
 
 ### 9.3 `BOOT_MODE_BUILD = "bios"` (mandatory for AWS)
 
-Oracle's upstream `bin/build-image.sh` enforces `BOOT_MODE=bios` for AWS targets and rejects `uefi` or `hybrid`. The resulting AMI is registered as `legacy-bios`. This is the **only** working combination today — see SPEC §C.4 for the discovery history. The AMI boots on every Nitro instance type; the trade-off is that NitroTPM and UEFI Secure Boot cannot be enabled.
+Oracle's upstream `bin/build-image.sh` enforces `BOOT_MODE=bios` for AWS targets and rejects `uefi` or `hybrid`. The resulting AMI is registered as `legacy-bios`. This is the **only** working combination today — see SPEC §D.4 for the discovery history. The AMI boots on every Nitro instance type; the trade-off is that NitroTPM and UEFI Secure Boot cannot be enabled.
 
 ### 9.4 cloud-init / ec2-user
 

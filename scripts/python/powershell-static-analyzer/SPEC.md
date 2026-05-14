@@ -31,6 +31,13 @@ patch releases without notice.
 10. [Tokenizer behaviour](#10-tokenizer-behaviour)
 11. [Extension guide](#11-extension-guide)
 
+Appendices:
+
+- [Appendix A — Rule severity matrix](#appendix-a--rule-severity-matrix)
+- [Appendix B — Document history](#appendix-b--document-history)
+- [Appendix C — Quality Gates & Validation Checklist](#appendix-c--quality-gates--validation-checklist)
+- [Appendix D — Known Pitfalls & Lessons Learned](#appendix-d--known-pitfalls--lessons-learned)
+
 ---
 
 ## 1. Scope
@@ -1070,3 +1077,149 @@ To add `PSA7001`:
 | 2.3.0 | 2026 | Remote-config fetch hardened: explicit TLS 1.2 minimum (max auto-negotiated to TLS 1.3); browser-like User-Agent (Chrome 131) + Sec-Ch-Ua client hints; exponential-backoff retries on 5xx and network errors (4xx not retried); env-var tuning (`PSA_CONFIG_TIMEOUT`, `PSA_CONFIG_MAX_RETRIES`, `PSA_CONFIG_QUIET`). See §5.4. |
 | 2.2.0 | 2026 | Configuration file becomes JSONC (line `//` and block `/* */` comments). `--config` accepts http(s) URLs in addition to local paths (§5.4). New companion file `.psa.config.json.template` documents every option with built-in defaults. |
 | 2.1.0 | 2026 | Initial SPEC document. Adds §8 (environment detection) for `psa.py` 2.1.0. Existing behaviour (rules, formats, CLI) inherited from `psa.py` 2.0.0. |
+
+---
+
+## Appendix C — Quality Gates & Validation Checklist
+
+> This appendix mirrors the **Part C** convention used by sibling script
+> SPECs in this repository (`ol-aws-ami-builder/SPEC.md`,
+> `download-speakerdeck-oracle4engineer/SPEC.md`). Because `psa.py`'s
+> primary specification body is a formal API spec (numbered sections
+> 1–11), the equivalent material is anchored here as an appendix.
+
+Before any commit to `psa.py`, all of the following must pass.
+
+### Static checks
+
+- [ ] `python3 -m py_compile psa.py` → 0 errors (parse-only check)
+- [ ] `python3 psa.py --list-rules` exits 0 and lists every documented rule (sanity that `RULES` tuple is internally consistent)
+- [ ] No new external dependencies are introduced (`psa.py` MUST remain pure stdlib per §1.3)
+- [ ] `psa.py` runs unchanged on Python 3.8 (the minimum-supported version per §1.3)
+- [ ] All new rule code names follow the `PSAxxxx` pattern (§4)
+
+### Functional checks (self-analysis)
+
+- [ ] `python3 psa.py psa.py` produces no `PSA1xxx` (parse/structural) issues — the tool can analyze itself
+- [ ] `python3 psa.py --format json psa.py` produces valid JSON parsable by `python3 -c "import json,sys; json.load(open('output.json'))"`
+- [ ] `python3 psa.py --format sarif psa.py` produces a SARIF 2.1.0 document accepted by `github/codeql-action/upload-sarif`
+- [ ] Inline suppression directives (`# psa-disable-line`, `# psa-disable-next-line`, `# psa-disable-file`) suppress the targeted code without affecting others (§7)
+
+### Consumer regression checks
+
+- [ ] `python3 psa.py ../../powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1` reports 0 errors / 0 warnings / 0 info (steady-state for the in-repo consumer)
+- [ ] `python3 psa.py ../../powershell/download-speakerdeck-oracle4engineer/Test-PdfMetadata.ps1` reports 0 / 0 / 0
+- [ ] External consumers (`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`) are notified of any rule change that could newly flag previously-clean scripts (per "Adding a new check" in README.md)
+
+### Documentation checks
+
+- [ ] `README.md` mentions every new CLI flag, rule code, or configuration field
+- [ ] `README.ja.md` is structurally equivalent (table layout, section order match)
+- [ ] If a new rule is added, the rule catalog in `README.md` AND `README.ja.md` AND this SPEC's §4 AND Appendix A are all updated together
+- [ ] Version bump (Appendix B) reflects the change category: patch (bug fix), minor (new rule / new feature), major (breaking CLI / schema change)
+- [ ] `--check-env` / `--show-env` output remains stable (no schema break for CI integrations)
+
+### Cross-format / schema checks
+
+- [ ] JSON output schema (§6.2) — no field renaming or type change in a patch or minor release
+- [ ] SARIF output (§6.3) — `tool.driver.version` matches `psa.py`'s self-reported version
+- [ ] Exit codes (§9) — same triple `0 / 1 / 2` semantics across all releases in the same major version
+
+---
+
+## Appendix D — Known Pitfalls & Lessons Learned
+
+> Each entry documents a real bug surfaced in production use of `psa.py`,
+> together with the fix and the design rule that prevents recurrence.
+> Future revisions inherit the fix; never reintroduce the bug.
+
+### D.1 Heredoc / sub-expression tokens leaking into rule scans (2.0.0)
+
+**Symptom**: Rules like `PSA2003` (`-match` against bare `$variable`)
+fired inside `@"…"@` here-strings, producing false positives wherever a
+docstring or `Write-Host` block contained PowerShell-like syntax for
+demonstration purposes.
+
+**Root cause**: The original `strip_strings_and_comments()` did not
+recognize PowerShell here-strings; their content reached the regex
+rules unchanged.
+
+**Fix**: The tokenizer (§10) now removes the contents of `@"…"@`,
+`@'…'@`, `$()`, and `@()` constructs while preserving line numbers
+(filled with spaces). Every new rule MUST consume the tokenized text
+unless it specifically wants the raw form.
+
+### D.2 Auto-variable list drift (`$using:` introduction)
+
+**Symptom**: After Windows PowerShell 5.1 introduced `$using:` for
+remote scopes, `PSA2001` falsely flagged variables prefixed with
+`$using:` as undefined.
+
+**Root cause**: The auto-variable allow-list in `psa.py` did not
+include `$using:` as a scope prefix.
+
+**Fix**: Scope prefixes (`$global:`, `$script:`, `$local:`, `$private:`,
+`$using:`, `$env:`, `$variable:`) are stripped before the auto-variable
+lookup. Any new PowerShell scope-prefix discovered upstream must be
+added to this list, along with a test PowerShell snippet pinned in the
+relevant rule's docstring.
+
+### D.3 SARIF output rejected by GitHub Code Scanning (early 2.0.x)
+
+**Symptom**: Uploaded SARIF documents were rejected with
+`The SARIF file contains a Validation Error`.
+
+**Root cause**: Early SARIF output omitted the `tool.driver.rules`
+array. GitHub's validator treats this as a hard error even though the
+SARIF 2.1.0 specification considers it optional.
+
+**Fix**: `format_sarif()` always emits the `rules` array with every
+known rule (whether or not it produced findings in the current run).
+This is now a permanent contract — do not optimize it out.
+
+### D.4 `.psa.config.json` discovered in CI's `$HOME`
+
+**Symptom**: CI runs occasionally picked up a stale configuration from
+the runner's home directory, disabling rules that should have been
+active.
+
+**Root cause**: The original implicit-discovery walk searched ancestor
+directories up to `/` without bounding to the project tree, so a
+`.psa.config.json` in `$HOME` (which `/home/runner` was an ancestor
+of) won.
+
+**Fix**: Implicit discovery stops at the first ancestor that contains
+`.psa.config.json`, OR at the first ancestor that is itself a git
+repository root (`.git/` present), whichever comes first. Use
+`--config <path>` for fully-explicit configuration in CI.
+
+### D.5 Remote `--config` fetch blocked by CDN bot filters (pre-2.3.0)
+
+**Symptom**: `--config https://raw.githubusercontent.com/...` worked
+on developer laptops but failed in CI with HTTP 403 or TLS handshake
+errors against Cloudflare-fronted forks.
+
+**Root cause**: The default `urllib` User-Agent (`Python-urllib/3.x`)
+is a known WAF heuristic for bot traffic; some CDN defaults reject it
+outright. Additionally, `urllib` may negotiate TLS 1.0/1.1 if the OS
+default permits, which modern servers refuse.
+
+**Fix**: §5.4 — explicit TLS 1.2 minimum SSL context; Chrome 131
+User-Agent and Sec-Ch-Ua client hints; exponential-backoff retry on
+5xx and network errors (4xx not retried). Tunable via
+`PSA_CONFIG_TIMEOUT`, `PSA_CONFIG_MAX_RETRIES`, `PSA_CONFIG_QUIET`.
+
+### D.6 JSONC comment-in-string-literal false strip
+
+**Symptom**: A `.psa.config.json` containing
+`"description": "use // to enable trace"` produced a JSON parse error
+after the comment-stripper ran.
+
+**Root cause**: The first-pass comment stripper did not respect string
+boundaries.
+
+**Fix**: The JSONC stripper now tracks string-literal state
+(considering escaped quotes) and only strips `//` and `/* */` outside
+of string literals. Single-line `//` inside a string is preserved
+verbatim.
+

@@ -393,7 +393,7 @@ ssh -i your-keypair.pem ec2-user@<public-ip>
 
 ### 9.3 `BOOT_MODE_BUILD = "bios"`(AWS 向けは必須)
 
-Oracle 上位の `bin/build-image.sh` は AWS 対象に対し `BOOT_MODE=bios` を強制し、`uefi` や `hybrid` は拒否します。生成 AMI は `legacy-bios` として登録されます。これは今日時点で **唯一動作する組み合わせ** です — 発見経緯は SPEC §C.4 を参照。AMI はすべての Nitro インスタンスタイプで起動可能。トレードオフとして、NitroTPM と UEFI Secure Boot は有効化できません。
+Oracle 上位の `bin/build-image.sh` は AWS 対象に対し `BOOT_MODE=bios` を強制し、`uefi` や `hybrid` は拒否します。生成 AMI は `legacy-bios` として登録されます。これは今日時点で **唯一動作する組み合わせ** です — 発見経緯は SPEC §D.4 を参照。AMI はすべての Nitro インスタンスタイプで起動可能。トレードオフとして、NitroTPM と UEFI Secure Boot は有効化できません。
 
 ### 9.4 cloud-init / ec2-user
 

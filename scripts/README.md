@@ -111,6 +111,69 @@ scripts/<language>/<project-name>/
 
 ---
 
+## Required README Sections / README 必須セクション
+
+**EN:** Every project-level `README.md` (and its `README.ja.md` mirror) MUST include the following sections near the top, immediately after the one-line summary and language switcher:
+
+**JA:** プロジェクト単位の `README.md`（および対となる `README.ja.md`）には、冒頭の 1 行サマリと言語スイッチャー直後に、以下のセクションを必ず配置します。
+
+| Section / セクション | English heading | Japanese heading | Required content / 必須内容 |
+|:---|:---|:---|:---|
+| Disclaimer / 免責事項 | `## ⚠️ Disclaimer` | `## ⚠️ 免責事項` | "AS IS" / no-warranty statement; limitation of liability; user-responsibility checklist (ToS compliance, IP rights respect, source-code review before execution); link back to the [root README](../README.md) for the full self-responsibility terms |
+| License / ライセンス | `## License` | `## ライセンス` | License name (MIT by default for this repository); link to [`LICENSE`](../../LICENSE) at the repo root; one-paragraph summary of permitted use and required attribution |
+
+**EN:** Trivial single-file scripts (no project directory of their own) may omit a separate README and instead rely on the script header comment plus the parent-directory `README.md`.
+
+**JA:** 単一スクリプトでプロジェクトディレクトリを持たない軽量スクリプトの場合は、専用 README を省略し、スクリプトヘッダーコメントと上位ディレクトリの `README.md` で代替できます。
+
+---
+
+## Standard SPEC Structure / SPEC 標準構造
+
+**EN:** When a `SPEC.md` is provided in a project directory, it SHOULD follow the **Part A / B / C / D** structure below. This convention is shared across script SPECs in this repository so that contributors and LLM agents can navigate them with a predictable mental model.
+
+**JA:** プロジェクトディレクトリに `SPEC.md` を配置する場合、以下の **Part A / B / C / D** 構造に従うことを推奨します。この規約は本リポジトリ内のスクリプト SPEC で共通化されており、人間の貢献者および LLM エージェントが一貫したメンタルモデルで参照できることを目的としています。
+
+| Part | Purpose | 目的 |
+|:---:|:---|:---|
+| **Part A** — Common Specification | Cross-project conventions inherited by every script in this style: source-file format, phase / pipeline architecture, log markers, parameter conventions, error & diagnostic format, bilingual-doc rules, development workflow | 全スクリプトで継承する共通規約: ソースファイル形式、フェーズ／パイプライン構成、ログマーカー、パラメーター規約、エラー・診断フォーマット、バイリンガル文書規約、開発ワークフロー |
+| **Part B** — Script-Specific Specification | This particular script's unique processing logic: identification, inputs / outputs, phase map, script-specific algorithms, project-specific architecture | 当該スクリプト固有の処理ロジック: 識別情報、入出力、フェーズマップ、固有アルゴリズム、プロジェクト固有のアーキテクチャ |
+| **Part C** — Quality Gates & Validation Checklist | Pre-commit checklist: static checks, functional checks, documentation checks, cross-file / cross-template checks | コミット前チェックリスト: 静的チェック、機能チェック、ドキュメントチェック、ファイル間・テンプレート間チェック |
+| **Part D** — Known Pitfalls & Lessons Learned | Documented bugs from past revisions, root causes, and the fix that future revisions must inherit. Each entry uses a stable `D.NN` identifier so it can be cross-referenced from code comments or other docs | 過去リビジョンで実際に発生したバグ、根本原因、将来リビジョンが継承すべき修正の記録。各エントリは `D.NN` の安定 ID を持ち、コードコメントや他文書から相互参照可能 |
+
+**EN:** Formal API specifications for tools (e.g., the `psa.py` SPEC) may instead use a numbered-section structure (`§1 Scope`, `§2 Architecture`, …) appropriate to API documentation. In that case, an `Appendix C — Quality Gates` and `Appendix D — Known Pitfalls` SHOULD be added to provide the same conceptual coverage.
+
+**JA:** ツールの公式 API 仕様書（例:`psa.py` の SPEC）は、API ドキュメントとして適切な番号付きセクション構成（`§1 スコープ`、`§2 アーキテクチャ` …）を採用しても構いません。この場合は、Part C / D と同等の概念をカバーする `付録 C — 品質ゲート` と `付録 D — 既知の落とし穴` を追加することを推奨します。
+
+---
+
+## Static Analysis for PowerShell Scripts / PowerShell スクリプトの静的解析
+
+**EN:** Every PowerShell script in this repository (`scripts/powershell/<project>/`, `scripts/aws/<project>/` containing `.ps1` files, etc.) MUST be verified with the **`psa.py`** static analyzer, whose canonical location in this repository is:
+
+**JA:** 本リポジトリの PowerShell スクリプト（`scripts/powershell/<project>/`、`.ps1` を含む `scripts/aws/<project>/` 等）はすべて、本リポジトリでの正規配置場所にある **`psa.py`** 静的解析ツールで検証する必要があります。
+
+```
+scripts/python/powershell-static-analyzer/psa.py
+```
+
+**EN:** Do not fork or duplicate `psa.py` into per-script `tools/` directories. Project-local rule suppressions belong in a project-level `.psa.config.json` (see the analyzer's [README](./python/powershell-static-analyzer/README.md) ([日本語](./python/powershell-static-analyzer/README.ja.md))).
+
+**JA:** スクリプト個別の `tools/` ディレクトリに `psa.py` をフォークまたは複製しないでください。プロジェクト固有のルール抑制は、各プロジェクト直下の `.psa.config.json` に記述します（アナライザの [README](./python/powershell-static-analyzer/README.md)（[日本語](./python/powershell-static-analyzer/README.ja.md)）を参照）。
+
+**Standard invocation / 標準的な呼び出し方:**
+
+```bash
+# From the project directory containing the .ps1 (auto-discovers .psa.config.json)
+python3 ../../python/powershell-static-analyzer/psa.py <script>.ps1
+```
+
+**EN:** The required gate is **0 errors / 0 warnings / 0 info** before any commit to the script.
+
+**JA:** スクリプトへのコミット前に必ず **0 errors / 0 warnings / 0 info** を満たすことを必須ゲートとします。
+
+---
+
 ## Required Header Convention / 必須ヘッダー規約
 
 Each script must include a header comment describing:
