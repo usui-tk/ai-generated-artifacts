@@ -193,8 +193,8 @@ aws ec2 describe-instance-types \
 ### 5.1 Obtain the repository
 
 ```bash
-git clone <your repository hosting these scripts> ol10-aws-ami-builder
-cd ol10-aws-ami-builder
+git clone <your repository hosting these scripts> ol-aws-ami-builder
+cd ol-aws-ami-builder
 chmod +x build-ol-aws-ami.sh setup-vmimport-role.sh
 ```
 

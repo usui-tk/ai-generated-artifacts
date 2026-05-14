@@ -193,8 +193,8 @@ aws ec2 describe-instance-types \
 ### 5.1 リポジトリ取得
 
 ```bash
-git clone <この一式を置いたリポジトリ> ol10-aws-ami-builder
-cd ol10-aws-ami-builder
+git clone <この一式を置いたリポジトリ> ol-aws-ami-builder
+cd ol-aws-ami-builder
 chmod +x build-ol-aws-ami.sh setup-vmimport-role.sh
 ```
 

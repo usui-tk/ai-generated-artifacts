@@ -30,7 +30,7 @@ ai-generated-artifacts/
 └── study-notes/              # Certification and learning notes
 ```
 
-Each directory has its own bilingual `README.md` documenting:
+Each top-level directory has its own `README.md` (with both English and Japanese in a single file) documenting:
 
 - Purpose and scope (what to include / what NOT to include)
 - Routing rules versus adjacent directories
@@ -74,13 +74,17 @@ For composite artifacts (e.g., a template paired with explanatory commentary), s
 ### Files
 
 - Lowercase, hyphen-separated slug
-- Bilingual files use language suffix: `<slug>.en.md` / `<slug>.ja.md`
+- Two bilingual filename patterns are accepted:
+  - **Pattern A — paired language suffix** (`<slug>.en.md` / `<slug>.ja.md`)
+    Used for ordinary content files such as research articles or study notes.
+  - **Pattern B — primary-and-translation** (`<NAME>.md` is the English primary, `<NAME>.ja.md` is the Japanese translation)
+    Used for repository-convention files whose English filename is itself canonical: `README.md` / `README.ja.md`, `SPEC.md` / `SPEC.ja.md`, `TESTING.md` / `TESTING.ja.md`, etc.
 - Single-language files: `<slug>.md`
-- Code files follow the idiomatic naming convention of their language (e.g., `Verb-Noun.ps1` for PowerShell)
+- Code files follow the idiomatic naming convention of their language (e.g., `Verb-Noun.ps1` for PowerShell, `kebab-case.sh` for Bash, `snake_case.py` for Python)
 
 ### Forbidden in Filenames
 
-- Uppercase letters (except in language-mandated names like `LICENSE`, `README.md`)
+- Uppercase letters (except in language-mandated names or repository-convention names — `LICENSE`, `README.md`, `SPEC.md`, `TESTING.md`, and PowerShell `Verb-Noun.ps1` files)
 - Spaces
 - Japanese or other non-ASCII characters
 - Special symbols beyond `-`, `_`, and `.`
@@ -90,9 +94,9 @@ For composite artifacts (e.g., a template paired with explanatory commentary), s
 
 ## Language Policy
 
-- **Default: Bilingual** — when feasible, artifacts are published in both English (`*.en.md`) and Japanese (`*.ja.md`)
+- **Default: Bilingual** — when feasible, artifacts are published in both English and Japanese using one of the two patterns documented under "Files" above
 - **Acceptable: Single language** — when bilingual versioning is impractical (e.g., language-specific examples), use a single file in the most appropriate language
-- READMEs within subdirectories may interleave English and Japanese in a single file to avoid duplication, as long as both languages remain equally complete
+- READMEs within top-level subdirectories may interleave English and Japanese in a single file to avoid duplication, as long as both languages remain equally complete; deeper script/project directories typically use the paired-file pattern (`README.md` + `README.ja.md`)
 
 ---
 

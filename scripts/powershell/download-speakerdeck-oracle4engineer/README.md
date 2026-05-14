@@ -97,7 +97,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 | `-MinConcurrency`    | `1`              | Floor for parallel downloads (used during throttling)             |
 | `-MaxRetries`        | `3`              | Max retries per download                                          |
 | `-Force`             | (off)            | Overwrite existing files (otherwise files > 1 KB are skipped)     |
-| `-DryRun`            | (off)            | Run Phase 1-5 fully; Phase 6/7 are explicitly marked SKIPPED; Phase 9 still reports |
+| `-DryRun`            | (off)            | Run Phase 1-5 fully; Phase 6/7/8 are explicitly marked SKIPPED; Phase 9 still reports |
 | `-SkipEnvCheck`      | (off)            | Skip Phase 1 and use safe-default thresholds                      |
 | `-Clean`             | (off)            | Delete OutputDir + WorkDir before running (full fresh restart)    |
 | `-CleanOnly`         | (off)            | Same wipe as `-Clean`, then exit without running phases           |
@@ -404,7 +404,7 @@ headers (Accept, Accept-Language, Sec-Fetch-*, Sec-Ch-Ua, etc.) to mitigate
 this; if you still hit the issue, inspect the saved HTML in a browser to
 compare with what a real Chrome would receive.
 
-### Phase 5 (downloads) had failures
+### Phase 6 (downloads) had failures
 
 Open the failure breakdown table printed at the end of the run:
 
@@ -595,12 +595,15 @@ A timing summary is printed at the end of every run:
 ========================================================================
  Phase Timing Summary
 ========================================================================
-  P-1   DONE     elapsed: 0.42s
-  P00   DONE     elapsed: 0.55s
-  P01   DONE     elapsed: 1m12.3s
-  P02   DONE     elapsed: 4m18.0s
-  P03   DONE     elapsed: 6m02.5s
-  P04   DONE     elapsed: 0.05s
+  P01   DONE     elapsed: 0.55s
+  P02   DONE     elapsed: 0.42s
+  P03   DONE     elapsed: 1m12.3s
+  P04   DONE     elapsed: 4m18.0s
+  P05   DONE     elapsed: 0.05s
+  P06   DONE     elapsed: 6m02.5s
+  P07   DONE     elapsed: 1.20s
+  P08   SKIPPED  elapsed: 0.00s
+  P09   DONE     elapsed: 0.08s
   ----------------------------------------
   Total elapsed: 11m33.8s
 ========================================================================

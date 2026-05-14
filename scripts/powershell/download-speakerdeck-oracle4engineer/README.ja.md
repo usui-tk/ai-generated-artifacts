@@ -355,7 +355,7 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 `/<アカウント名>/<slug>` のカウントが `0` の場合、サーバーが簡略化された HTML を返しています — User-Agent やボット検知が原因の可能性が高いです。このスクリプトは既に Chrome 相当のヘッダー（`Accept`、`Accept-Language`、`Sec-Fetch-*`、`Sec-Ch-Ua` 等）を送信していますが、それでも問題が解消しない場合は、保存された HTML を実際のブラウザで開き、Chrome が受信する内容と比較してください。
 
-### Phase 5（ダウンロード）で失敗が発生した場合
+### Phase 6（ダウンロード）で失敗が発生した場合
 
 実行終了時に表示される **Failure breakdown** テーブルで失敗の傾向を確認します：
 
@@ -524,12 +524,15 @@ Issues : 0 errors, 0 warnings, 0 info
 ========================================================================
  Phase Timing Summary
 ========================================================================
-  P-1   DONE     elapsed: 0.42s
-  P00   DONE     elapsed: 0.55s
-  P01   DONE     elapsed: 1m12.3s
-  P02   DONE     elapsed: 4m18.0s
-  P03   DONE     elapsed: 6m02.5s
-  P04   DONE     elapsed: 0.05s
+  P01   DONE     elapsed: 0.55s
+  P02   DONE     elapsed: 0.42s
+  P03   DONE     elapsed: 1m12.3s
+  P04   DONE     elapsed: 4m18.0s
+  P05   DONE     elapsed: 0.05s
+  P06   DONE     elapsed: 6m02.5s
+  P07   DONE     elapsed: 1.20s
+  P08   SKIPPED  elapsed: 0.00s
+  P09   DONE     elapsed: 0.08s
   ----------------------------------------
   Total elapsed: 11m33.8s
 ========================================================================

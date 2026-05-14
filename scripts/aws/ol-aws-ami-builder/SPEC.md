@@ -329,6 +329,30 @@ bash. Avoid command substitutions in env files (security and reproducibility).
 | `OS_VARIANT` | Auto-detected via `detect_os_variant` |
 | `ISO_CHECKSUM` | Auto-resolved via `derive_oracle_checksum_url` |
 
+### Pass-through keys (consumed by `oracle-linux-image-tools`)
+
+These keys are not interpreted by `build-ol-aws-ami.sh` itself; they are
+written through to the upstream `env.properties.local` that the
+`oracle-linux-image-tools` `bin/build-image.sh` reads. They appear in
+the shipped `env.properties.aws-ol{8,9,10}` templates with sane defaults
+and should usually be left alone.
+
+| Key | Typical value | Purpose |
+|-----|--------------|---------|
+| `BUILD_NUMBER` | `0` | Suffix in upstream output filenames |
+| `SETUP_SWAP` | `No` | Skip swap configuration on cloud VMs |
+| `SELINUX` | `enforcing` | SELinux mode of the resulting AMI |
+| `ROOT_FS` | `xfs` | Root filesystem of the resulting AMI |
+| `DISK_SIZE_GB` | `10` | Root volume size of the AMI |
+| `SERIAL_CONSOLE_RUNTIME` | `Yes` | Required for EC2 Serial Console |
+| `CLOUD_INIT` | `Yes` | Enable cloud-init in the AMI |
+| `CLOUD_USER` | `ec2-user` | AWS-convention first-login user |
+| `S3_KEY_PREFIX` | `ol${MAJOR}-ami-import` | Key prefix inside `S3_BUCKET` |
+| `VMIMPORT_ROLE_NAME` | `vmimport` | Must match `setup-vmimport-role.sh` |
+
+If `oracle-linux-image-tools` adds, renames, or drops keys upstream,
+update the templates and this table in lockstep.
+
 ### File naming convention
 
 ```

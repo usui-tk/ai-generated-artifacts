@@ -73,9 +73,41 @@ Subdirectories are created on demand as scripts are added.
 - Follow the language's idiomatic naming convention / 言語の慣習に従う
   - PowerShell: `Verb-Noun.ps1` (e.g., `Download-SpeakerDeck.ps1`)
   - Bash: `kebab-case.sh` (e.g., `setup-ec2-bootstrap.sh`)
-  - Python: `snake_case.py` (e.g., `inventory_collector.py`)
+  - Python: `snake_case.py` (e.g., `inventory_collector.py` — short forms like `psa.py` are also acceptable as long as they remain lowercase / アンダースコア区切り)
+- Configuration / environment files: `kebab-case` or dotted-prefix form. Examples / 設定・環境ファイル：
+  - `env.properties.aws-ol10` (per-target environment file, dotted prefix + kebab target suffix)
+  - `.psa.config.json` (tool-local configuration with a leading dot)
 - Each script should be paired with a README in the same subdirectory if non-trivial / 重要なスクリプトはサブディレクトリの README で説明
 - Bilingual READMEs use the bilingual file pattern (`README.md` + `README.ja.md`) when separate files are warranted; otherwise, use a single `README.md` with both languages interleaved / READMEは2ファイル分割もしくは併記の双方を許容
+
+---
+
+## Standard Project Layout / プロジェクトの標準構成
+
+**EN:** When a script is non-trivial (several hundred lines or more, multi-phase logic, or operator-facing output), wrap it in a project directory under the language subdirectory and include the following companion files. The English `<NAME>.md` is canonical; `<NAME>.ja.md` is the synchronized Japanese translation.
+
+**JA:** スクリプトが非自明な規模（数百行以上、多段階処理、運用者向けの出力を伴う等）になる場合は、言語サブディレクトリ配下にプロジェクト用ディレクトリを切り、以下の付随ファイルを同梱します。英語版 `<NAME>.md` がプライマリ、`<NAME>.ja.md` が同期された日本語翻訳版です。
+
+```
+scripts/<language>/<project-name>/
+  ├── <script>.<ext>             # the main script (Verb-Noun.ps1, kebab.sh, snake.py)
+  ├── README.md / README.ja.md   # end-user documentation (required)
+  ├── SPEC.md / SPEC.ja.md       # developer specification (recommended for non-trivial scripts)
+  ├── TESTING.md / TESTING.ja.md # verification procedure / real-run evidence (optional)
+  ├── <config files>             # e.g., env.properties.*, .psa.config.json
+  └── <auxiliary scripts>        # related helpers (Test-*.ps1, setup-*.sh, etc.)
+```
+
+| File | Role | Required? |
+|:---|:---|:---|
+| `<script>.<ext>` | The main executable artifact / メインの実行スクリプト | ✓ |
+| `README.md` / `README.ja.md` | End-user documentation (installation, quick start, parameters, troubleshooting) / 利用者向けドキュメント | ✓ for non-trivial scripts |
+| `SPEC.md` / `SPEC.ja.md` | Developer / LLM specification (phase contract, log conventions, design decisions, known pitfalls) / 開発者・LLM 向け仕様書 | Recommended / 推奨 |
+| `TESTING.md` / `TESTING.ja.md` | Verification procedure and recorded real-run results / 検証手順と実機実行記録 | Optional / 任意 |
+
+**EN:** Repository-level files (`LICENSE`, the root `README.md` / `README.ja.md`) live at the repository root and are shared across all script projects — do not duplicate them inside individual project directories.
+
+**JA:** リポジトリ全体に係るファイル（`LICENSE`、ルートの `README.md` / `README.ja.md`）はリポジトリのルートに配置し、全スクリプトプロジェクトで共有します。各プロジェクトディレクトリ内に重複配置しません。
 
 ---
 

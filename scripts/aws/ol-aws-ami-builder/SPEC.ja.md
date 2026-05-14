@@ -283,6 +283,25 @@ KEY="value"     # bash 代入。空白を許容するためクォート
 | `OS_VARIANT` | `detect_os_variant` で自動検出 |
 | `ISO_CHECKSUM` | `derive_oracle_checksum_url` で自動解決 |
 
+### パススルーキー(`oracle-linux-image-tools` が消費)
+
+以下のキーは `build-ol-aws-ami.sh` 自身は解釈せず、上位ツール `oracle-linux-image-tools` の `bin/build-image.sh` が読み込む `env.properties.local` にそのまま書き込まれる。同梱されている `env.properties.aws-ol{8,9,10}` テンプレートに妥当なデフォルト値が設定されており、通常は変更不要。
+
+| キー | 標準値 | 用途 |
+|------|--------|------|
+| `BUILD_NUMBER` | `0` | 上位ツール出力ファイル名のサフィックス |
+| `SETUP_SWAP` | `No` | クラウド VM ではスワップ設定をスキップ |
+| `SELINUX` | `enforcing` | 生成 AMI の SELinux モード |
+| `ROOT_FS` | `xfs` | 生成 AMI のルートファイルシステム |
+| `DISK_SIZE_GB` | `10` | AMI のルートボリュームサイズ |
+| `SERIAL_CONSOLE_RUNTIME` | `Yes` | EC2 Serial Console を利用する場合に必須 |
+| `CLOUD_INIT` | `Yes` | AMI で cloud-init を有効化 |
+| `CLOUD_USER` | `ec2-user` | AWS 慣習の初回ログインユーザー |
+| `S3_KEY_PREFIX` | `ol${MAJOR}-ami-import` | `S3_BUCKET` 内のキープレフィックス |
+| `VMIMPORT_ROLE_NAME` | `vmimport` | `setup-vmimport-role.sh` と一致させること |
+
+`oracle-linux-image-tools` で上流側のキーが追加・改名・削除された場合は、テンプレートと本表を同期して更新する。
+
 ### ファイル命名規則
 
 ```

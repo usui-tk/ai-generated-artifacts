@@ -1042,7 +1042,7 @@ it directly in the source.
 
 When asked to create a new PowerShell script in this style:
 
-1. Read this this SPEC end to end.
+1. Read this SPEC end to end.
 2. Identify the closest existing in-house script (A.1.3).
 3. Copy:
    - The script's banner / version block
