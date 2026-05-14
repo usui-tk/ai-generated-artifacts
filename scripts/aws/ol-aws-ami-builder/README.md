@@ -10,6 +10,8 @@ A set of wrapper scripts that build AWS AMIs for **Oracle Linux 8, 9, or 10** (x
 
 Experimental support is also provided for **Oracle Linux 7** (x86_64) — see the OL7 note at the end of [section 1](#1-repository-layout) and the dedicated warnings in [section 10](#10-known-limitations-and-caveats).
 
+Even more experimental support is provided for **Oracle Linux 6** (x86_64). The upstream tooling does not ship a `distr/ol6-slim/` directory at all, so this wrapper synthesizes one at runtime in addition to applying two `sed` patches. See [section 9.7](#97-oracle-linux-6-support-experimental) for the mechanism and [section 10](#10-known-limitations-and-caveats) item 8 for the caveats.
+
 Created in response to the discontinuation of Oracle's official AMI offerings (owner ID `131827586825`) on the AWS Marketplace, with the goal of establishing an independent build and operations workflow for Oracle Linux AMIs.
 
 > **Aligned with the AWS feature released in February 2026**
@@ -43,6 +45,7 @@ Operate these tools considerately. **Always prefer official Oracle-distributed A
 | `env.properties.aws-ol9` | Build parameters for **Oracle Linux 9 Update 7** (x86_64). |
 | `env.properties.aws-ol8` | Build parameters for **Oracle Linux 8 Update 10** (x86_64). |
 | `env.properties.aws-ol7` | Build parameters for **Oracle Linux 7 Update 9** (x86_64) — **experimental / deprecated upstream**. See sections 9.6 and 10 for important caveats. |
+| `env.properties.aws-ol6` | Build parameters for **Oracle Linux 6 Update 10** (x86_64) — **experimental / not shipped upstream**. See sections 9.7 and 10 for important caveats. |
 | `setup-vmimport-role.sh` | One-time setup script that creates the `vmimport` IAM service role for AWS VM Import/Export. |
 | `README.md` | End-user documentation (English, baseline). |
 | `README.ja.md` | End-user documentation (Japanese). |
@@ -239,6 +242,9 @@ cp env.properties.aws-ol8 env.properties.local
 # Oracle Linux 7 Update 9 (experimental — see 9.6 and section 10)
 cp env.properties.aws-ol7 env.properties.local
 
+# Oracle Linux 6 Update 10 (experimental — see 9.7 and section 10)
+cp env.properties.aws-ol6 env.properties.local
+
 vi env.properties.local
 ```
 
@@ -414,6 +420,21 @@ OL7 is supported on a best-effort basis with the following key behaviors:
 
 See [section 10](#10-known-limitations-and-caveats) item 7 for the full list of OL7 caveats.
 
+### 9.7 Oracle Linux 6 support (experimental)
+
+OL6 is supported as a deeper workaround than OL7. The upstream tooling does **not** ship a `distr/ol6-slim/` directory at all, so this wrapper synthesizes it at runtime from embedded templates. In addition, a second runtime patch is required against `cloud/aws/provision.sh`.
+
+- **Runtime patch #1 (shared with OL7).** `cloud/aws/image-scripts.sh` rejects any release below OL8 with `AWS images builder only supports OL8 and above`. Phase 3 of `build-ol-aws-ami.sh` rewrites that line to a no-op when `OL_MAJOR_VERSION <= 7`. A backup `image-scripts.sh.ol6-patch.bak` is left in place.
+- **Runtime patch #2 (OL6-specific).** `cloud/aws/provision.sh` unconditionally runs `yum install -y "${YUM_VERBOSE}" kernel-uek-modules` for `KERNEL=uek`. This package **does not exist** in the OL6 UEKR4 repository (all ENA/NVMe/virtio modules are bundled directly inside the `kernel-uek` RPM). Phase 3 gates that install behind `ORACLE_RELEASE >= 7`. A backup `provision.sh.ol6-patch-uek-modules.bak` is left in place. The patch is idempotent (a marker grep skips a second application).
+- **Runtime-generated `distr/ol6-slim/`.** Four files (`env.properties`, `image-scripts.sh`, `ol6-ks.cfg`, `provision.sh`) are written under `${WORKSPACE}/oracle-linux/oracle-linux-image-tools/distr/ol6-slim/` from heredocs embedded in `build-ol-aws-ami.sh`. They mirror `distr/ol7-slim/`'s structure with OL6-specific adjustments: Upstart instead of systemd (`service`/`chkconfig` calls), GRUB Legacy instead of GRUB2 (`/boot/grub/grub.conf` edits), Anaconda 13.x kickstart syntax (no `inst.` prefix), and ext4/xfs only (no lvm/btrfs at this layer).
+- **No upstream commits.** All three artifacts (two patches plus the synthesized `distr/ol6-slim/`) are local to `${WORKSPACE}/oracle-linux/`. Nothing is pushed back to `oracle/oracle-linux`.
+- **Forced settings.** `BOOT_MODE_BUILD=bios` is mandatory on three independent grounds: the AWS target enforces it, the upstream OL7 path enforces it (and the OL6 templates inherit that constraint), and OL6 anaconda 13.x predates UEFI entirely.
+- **Kernel constraint.** `KERNEL=uek` with `UEK_RELEASE=4` is the only valid combination for OL6+AWS. UEK2/3 lack the ENA driver. UEK5/6/7 are not available for OL6. RHCK 2.6.32 also lacks ENA. The OL6 `image-scripts.sh` `distr::validate` enforces `UEK_RELEASE=4`.
+- **`linux-firmware` is sticky.** `kernel-uek` on OL6 declares a hard install dependency on `linux-firmware`. Setting `LINUX_FIRMWARE="No"` removes it, but any subsequent `yum install kernel-uek` will pull it back in.
+- **Boot startup banner.** When `OL_MAJOR_VERSION == 6` is detected at `load_env` time, the script emits a prominent multi-line warning summarizing EOL status, the two runtime patches, the runtime-generated `distr/ol6-slim/`, and the production-use prohibition.
+
+See [section 10](#10-known-limitations-and-caveats) item 8 for the full list of OL6 caveats.
+
 ---
 
 ## 10. Known Limitations and Caveats
@@ -444,6 +465,19 @@ See [section 10](#10-known-limitations-and-caveats) item 7 for the full list of 
    - **UEK kernel mandatory in practice.** Although `KERNEL=rhck` is theoretically accepted, the upstream AWS provisioning step requires the `kernel-modules` package which OL7's RHCK does not split out. Stay with `KERNEL=uek` (the default in the OL7 env template).
    - **No `lvm` root filesystem.** OL7 supports only `xfs` and `btrfs` at this layer; the `lvm` option (added in OL8) is not available.
    - **Production prohibited.** Use the resulting AMI strictly for verification, learning, or legacy-migration scenarios.
+
+8. **Oracle Linux 6 specific limitations.**
+   - **EOL.** Premier Support ended on 2021-03-31. Extended Life Support (ELS) ended in 2024. Oracle has shipped no security updates for OL6 since then.
+   - **Not shipped upstream at all.** The upstream `oracle-linux-image-tools` repo has no `distr/ol6-slim/` directory. This wrapper synthesizes the four required files (`env.properties`, `image-scripts.sh`, `ol6-ks.cfg`, `provision.sh`) at runtime in Phase 3 (see [9.7](#97-oracle-linux-6-support-experimental)). The AWS `image-scripts.sh` guard is patched the same way as for OL7.
+   - **Extra runtime patch.** `cloud/aws/provision.sh` is patched at runtime to skip `yum install kernel-uek-modules` on OL6 — this package does not exist in OL6/UEKR4 (modules are bundled inside `kernel-uek` itself).
+   - **x86_64 only.** OL6 has no aarch64 release on any media; there is no aarch64 AMI path.
+   - **BIOS only.** OL6 anaconda 13.x predates UEFI install support entirely. NitroTPM and UEFI Secure Boot cannot be enabled.
+   - **UEK4 mandatory.** `KERNEL=uek` with `UEK_RELEASE=4` is the only valid combination. UEK2/3 lack the ENA driver; UEK5/6/7 do not have OL6 builds; RHCK 2.6.32 also lacks ENA.
+   - **Filesystem: ext4 or xfs only.** No lvm/btrfs at this layer.
+   - **`linux-firmware` cannot be removed permanently.** `kernel-uek` declares a hard install dependency on it; any `yum install kernel-uek` reinstall will pull it back in.
+   - **AWS VM Import/Export marks OL6 as EOL.** This wrapper bypasses the policy by using `import-snapshot` + `register-image`. AWS may tighten this policy in the future.
+   - **Phase A/B verified, Phase C not yet validated.** Static checks (osinfo-db entries, ISO checksum, repo HTTPS, dracut flags, cloud-init availability, upstream OL-version branches) and the OL6 ISO boot test (virt-install + isolinux + Anaconda 13.21.263 TUI) have been verified. End-to-end kickstart completion, provision.sh execution on OL6, cloud-init `ec2-user` creation, and AMI launch on AWS Nitro have **not** been verified by the author.
+   - **Production prohibited.** Even more strongly than OL7: use the resulting AMI only for verification, learning, or legacy-migration scenarios.
 
 ---
 
@@ -499,7 +533,7 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 
 ### AI generation
 
-This wrapper was **iteratively developed with Anthropic Claude (Sonnet 4.5)** in 2026-05, then refined based on real build runs against Oracle Linux 8 / 9 / 10 on AWS until all three versions completed end-to-end successfully. Oracle Linux 7 experimental support was added in a subsequent 2026-05 revision using Anthropic Claude (Opus 4.7); the OL7 patch mechanism has been verified (sed substitution, syntax integrity, idempotency) but **end-to-end OL7 AMI builds have not been validated by the author**.
+This wrapper was **iteratively developed with Anthropic Claude (Sonnet 4.5)** in 2026-05, then refined based on real build runs against Oracle Linux 8 / 9 / 10 on AWS until all three versions completed end-to-end successfully. Oracle Linux 7 experimental support was added in a subsequent 2026-05 revision using Anthropic Claude (Opus 4.7); the OL7 patch mechanism has been verified (sed substitution, syntax integrity, idempotency) but **end-to-end OL7 AMI builds have not been validated by the author**. Oracle Linux 6 experimental support was added in a further 2026-05 revision using Anthropic Claude (Opus 4.7) after a two-phase verification session (Phase A: 9 static checks against osinfo-db, ISO/checksum, repo HTTPS, dracut, cloud-init; Phase B: virt-install + Anaconda 13.21.263 TUI boot test on libvirt 11.5 / qemu 10.0). The two OL6 runtime patches and the runtime-generated `distr/ol6-slim/` have been syntactically validated, but **end-to-end OL6 AMI builds (kickstart completion through AWS Nitro launch) have not been validated by the author**.
 
 The upstream `oracle-linux-image-tools` project that this wrapper drives is independent and produced by Oracle.
 

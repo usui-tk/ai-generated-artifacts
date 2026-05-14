@@ -29,8 +29,10 @@
 - [Part B — スクリプト個別仕様](#part-b--スクリプト個別仕様)
   - [B.1 build-ol-aws-ami.sh](#b1-build-ol-aws-amish)
   - [B.2 setup-vmimport-role.sh](#b2-setup-vmimport-rolesh)
-  - [B.3 env.properties.aws-ol{7,8,9,10}](#b3-envpropertiesaws-ol78910)
+  - [B.3 env.properties.aws-ol{6,7,8,9,10}](#b3-envpropertiesaws-ol6789-10)
+  - [B.4 OL6 ランタイム合成(distr/ol6-slim/ + cloud/aws/ パッチ)](#b4-ol6-ランタイム合成distrol6-slim--cloudaws-パッチ)
 - [Part C — 既知の落とし穴と教訓](#part-c--既知の落とし穴と教訓)
+- [Part D — OL6 全体アーキテクチャ](#part-d--ol6-全体アーキテクチャ)
 
 ---
 
@@ -556,26 +558,30 @@ AWS VM Import/Export に必要な `vmimport` IAM サービスロールを作成�
 
 ---
 
-## B.3 `env.properties.aws-ol{7,8,9,10}`
+## B.3 `env.properties.aws-ol{6,7,8,9,10}`
 
 ### 識別情報
 
-サポートする OL メジャーリリースごとに 1 つずつ、計 4 つの付随テンプレート。本ディレクトリにコミットされており、編集前に `env.properties.local` にコピーすべきもの。
+サポートする OL メジャーリリースごとに 1 つずつ、計 5 つの付随テンプレート。本ディレクトリにコミットされており、編集前に `env.properties.local` にコピーすべきもの。
 
 OL7 テンプレートは実験的扱い — 上流の AWS クラウドターゲットに対して OL7 が動作するようにするランタイムパッチの根拠は C.10 を参照のこと。
 
+OL6 テンプレートはさらに実験的扱い: アップストリームには `distr/ol6-slim/` ディレクトリ自体が存在しないため、本ラッパーは 2 種類のランタイム `sed` パッチに加えて、このディレクトリを実行時に動的生成します。設計根拠は B.4 と C.11〜C.15、OL6 全体アーキテクチャは Part D を参照のこと。
+
 ### テンプレート間の差異
 
-| キー | OL10 テンプレート | OL9 テンプレート | OL8 テンプレート | OL7 テンプレート |
-|------|-----------------|----------------|----------------|----------------|
-| `WORKSPACE` | `/tmp/ol10-build-ws` | `/tmp/ol9-build-ws` | `/tmp/ol8-build-ws` | `/tmp/ol7-build-ws` |
-| `DISTR` | `ol10-slim` | `ol9-slim` | `ol8-slim` | `ol7-slim` |
-| `ISO_URL` | OL10 U1 | OL9 U7 | OL8 U10 | OL7 U9(`Server-` 接中辞付き) |
-| `# OS_VARIANT` 例示 | `rhel10.1` | `rhel9.7` | `rhel8.10` | `rhel7.9` |
-| `# AMI_NAME` 例示 | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` |
-| `KERNEL` | 未設定(distr デフォルト) | 未設定 | 未設定 | `uek`(必須 — C.10 参照) |
-| `UEK_RELEASE` | 未設定 | 未設定 | 未設定 | `6`(OL7 で唯一現実的な UEK) |
-| ファイル冒頭警告バナー | なし | なし | なし | EOL / パッチ / 本番禁止の旨を記載 |
+| キー | OL10 | OL9 | OL8 | OL7 | OL6 |
+|------|------|-----|-----|-----|-----|
+| `WORKSPACE` | `/tmp/ol10-build-ws` | `/tmp/ol9-build-ws` | `/tmp/ol8-build-ws` | `/tmp/ol7-build-ws` | `/tmp/ol6-build-ws` |
+| `DISTR` | `ol10-slim` | `ol9-slim` | `ol8-slim` | `ol7-slim` | `ol6-slim`(動的合成) |
+| `ISO_URL` | OL10 U1 | OL9 U7 | OL8 U10 | OL7 U9(`Server-` 接中辞付き) | OL6 U10(`Server-` 接中辞付き) |
+| `# OS_VARIANT` 例示 | `rhel10.1` | `rhel9.7` | `rhel8.10` | `rhel7.9` | `ol6.10` |
+| `# AMI_NAME` 例示 | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` | `OracleLinux-6-U10-...` |
+| `KERNEL` | 未設定(distr デフォルト) | 未設定 | 未設定 | `uek`(必須 — C.10 参照) | `uek`(必須 — C.12 参照) |
+| `UEK_RELEASE` | 未設定 | 未設定 | 未設定 | `6`(OL7 で唯一現実的な UEK) | `4`(OL6 で唯一現実的な UEK) |
+| `ROOT_FS` | 未設定(xfs デフォルト) | 未設定 | 未設定 | 未設定 | `ext4`(xfs も可。lvm/btrfs 不可) |
+| `BOOT_MODE_BUILD` | 未設定 | 未設定 | 未設定 | `bios` | `bios` |
+| ファイル冒頭警告バナー | なし | なし | なし | EOL / パッチ / 本番禁止の旨を記載 | EOL / **パッチ 2 種** / `distr/` ランタイム合成 / 本番禁止の旨を記載 |
 
 ### 保守規則
 
@@ -596,6 +602,67 @@ OL7 テンプレートは実験的扱い — 上流の AWS クラウドターゲ
 1. `phase3_clone_repository` の `sed` パターンを再評価する。現在のパターンは `AWS images builder only supports OL8 and above` という厳密な文字列でアンカーされている
 2. 上流が OL7 ブロックを完全に削除した場合、`grep -Fq` ガードによりパッチは no-op になり、`log_warn` で運用者に通知される。強制的な動作変更は発生しない
 3. 上流がチェックを意味論的に異なる形(例: 許可リスト方式)に置き換えた場合、OL7 パッチは再設計が必要。本セクションと `phase3_clone_repository` のコメントを一緒に更新すること
+
+---
+
+## B.4 OL6 ランタイム合成(`distr/ol6-slim/` + `cloud/aws/` パッチ)
+
+### 識別情報
+
+OL6 のサポートは OL7 とは異なる仕組みで実現しています。OL7 が「すでに完全な OL7 配布物に対して 1 種類のランタイム `sed` パッチを当てる」だけで済むのに対し、OL6 では **2 種類のランタイム `sed` パッチに加えて、アップストリームに存在しない `distr/ol6-slim/` ディレクトリ全体をランタイムで合成**する必要があります。これらすべては `build-ol-aws-ami.sh` の `phase3_clone_repository` 内で `OL_MAJOR_VERSION == 6` でガードされて適用されます(パッチ #1 のみ OL7 と共用、`-le 7` でガード)。
+
+### ラッパーパッチマーカー規約
+
+本ラッパーが上流の作業ツリーに加えるすべての改変は、`grep -r '\[ol-aws-ami-builder' "${WORK_REPO_DIR}"` で発見可能でなければなりません。正規のマーカー形式:
+
+```
+[ol-aws-ami-builder OL{N} PATCH {short-tag}]
+```
+
+`{N}` は OL メジャーバージョン(6, 7, ...)、`{short-tag}` は識別子(各 OL メジャーに 1 種類しかない場合は省略)。現在のマーカー一覧:
+
+| マーカー | パッチ対象ファイル | 目的 |
+|----------|------------------|------|
+| `[ol-aws-ami-builder OL6 PATCH]` | `cloud/aws/image-scripts.sh` | OL8+ ガードの除去(OL6 モード) |
+| `[ol-aws-ami-builder OL7 PATCH]` | `cloud/aws/image-scripts.sh` | OL8+ ガードの除去(OL7 モード) |
+| `[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]` | `cloud/aws/provision.sh` | OL6 で `kernel-uek-modules` インストールをスキップ |
+
+各パッチはパッチ済みファイルの隣に `.bak` バックアップを残し、適用前に `grep -Fq` で冪等性ガードを行うため、既存 clone への再適用が二重に行われることはありません。
+
+### `sed` 実行規約
+
+1. **デリミタ**: シェルのパス区切り `/` やコメント `#` と衝突しないよう、`|`(パイプ)を優先する。
+2. **アンカー**: 該当行を一意に識別できる固定文字列をアンカーに使う(パッチ #1 は `AWS images builder only supports OL8 and above`、パッチ #2 は `yum install -y "${YUM_VERBOSE}" kernel-uek-modules`)。
+3. **冪等性**: 置換前に `grep -Fq '[ol-aws-ami-builder OL{N} PATCH ...]'` を行い、適用済みなら info ログを出してスキップする。
+4. **検証**: 置換後に再度マーカー grep を行い、見つからなければ `die` する(Phase 5 で不明瞭なエラーになるのを避ける)。
+5. **インデント保存のためのキャプチャグループ**: 上流の行頭に空白がある場合(例: `    yum install ...`)、`\(\s*\)` でキャプチャし `\1` で参照することでインデントを保持する。
+6. **GNU sed 拡張は使用可**: 本ラッパーは GNU sed を持つビルダー(Amazon Linux 2/2023、Oracle Linux 8/9/10、RHEL 9/10)で動作することを前提とするため、置換テキスト中の `\n` は使用可。BSD/macOS sed は非サポート。
+
+### `distr/ol6-slim/` のランタイム生成
+
+4 つのファイルは `cat > {path} <<'EOF_OL6_*'` ヒアドキュメントブロックを連続して実行することで書き出します。シングルクォート版のデリミタが**必須**です:
+
+```bash
+cat > "${ol6_slim_dir}/provision.sh" <<'EOF_OL6_PROV'
+...
+EOF_OL6_PROV
+```
+
+シングルクォートで囲むことにより**ラッパー実行時の変数展開を抑止**し、`${YUM_VERBOSE}`、`${ROOT_FS,,}`、`${KERNEL^^}` などの参照を文字どおりに保存します。これらは後段の `oracle-linux-image-tools` 実行時に展開されます(意図したとおりの動作)。
+
+埋め込みの内側ヒアドキュメント(例: `cat > /etc/dracut.conf.d/... <<EOF`)については、タブを strip する `<<-EOF` 形式ではなく**先頭空白なしの `<<EOF` を使用**します。これによりエディタやツールがラッパーを再処理した際のタブ/スペース変換に依存しなくなります。
+
+### `distr/ol7-slim/` との同期
+
+`distr/ol7-slim/` がアップストリーム側で構造的に変化した場合(`image-scripts.sh` の関数シグネチャ、kickstart セクションの順序、provision フェーズの契約など)、OL6 のヒアドキュメントテンプレートも併せて見直し更新が必要です。本ラッパーは `distr/ol7-slim/` からランタイムで何も継承しません — トレーサビリティ確保のため、OL6 用テンプレートは完全に自己完結としています。
+
+### 保守規則(OL6)
+
+`oracle-linux-image-tools` がリファクタされた場合:
+
+1. `cloud/aws/image-scripts.sh` の `cloud::validate()` から OL8+ ガードが消えた場合、パッチ #1 は静かに no-op になります(`grep -Fq` ガードが `log_warn` を出します)。ビルド失敗が後段で発生しない限り強制的な対応は不要です。
+2. `cloud/aws/provision.sh` の `kernel-uek-modules` インストール行が削除または改名された場合、パッチ #2 も静かに no-op になります。OL6 はそれでも動作する想定です(存在しないパッケージのインストールが行われなくなるため)。
+3. `distr/ol7-slim/` の構造変更(関数シグネチャ、`common::distr_cleanup` / `common::latest_kernel` などの共通ヘルパー名)が発生した場合、`phase3_clone_repository` 内の OL6 用ヒアドキュメントテンプレートを手で更新する必要があります。これがアップストリームドリフトに対して最もリスクの高い領域です。
 
 ---
 
@@ -727,6 +794,156 @@ ERROR: AWS images builder only supports OL8 and above
 - aarch64 は対応しない: OL7 の `distr/` には `_aarch64` バリアントが無く、上流の AWS バリデータも `*_aarch64` を拒否する。両方のブロッカーが OL7 ではそのまま残る
 
 **将来への対応**: 将来の上流コミットで OL7 チェックが別の場所(例: `bin/build-image.sh` 内)に移動した場合、既存パッチは no-op となり、新しいパッチ箇所の追加が必要になる。書き換え後の行に含まれる `[ol-aws-ami-builder OL7 PATCH]` マーカーは意図的に独特な文字列にしてあり、clone ツリー内で `grep -r` してラッパーが適用したパッチを全て発見できる。
+
+---
+
+## C.11 OL6/UEKR4 には `kernel-uek-modules` パッケージが存在しない
+
+**症状**: 上流の `cloud/aws/provision.sh` の `cloud::install_aws_packages()` を OL6 で実行すると、`yum install -y "${YUM_VERBOSE}" kernel-uek-modules` の行が `No package kernel-uek-modules available` で失敗する。
+
+**根本原因**: `kernel-uek-modules` は OL7 / UEK6 で導入された**カーネルモジュール分割パッケージ**で、本体の `kernel-uek` RPM を小さく保つために設けられたもの。OL6 の UEKR4(`4.1.12-124.x`)にはこの分割が存在せず、ENA / NVMe / virtio / xen / Hyper-V を含むすべてのドライバ `.ko` ファイルは本体 `kernel-uek` RPM に同梱されている。`https://yum.oracle.com/repo/OracleLinux/OL6/UEKR4/x86_64/repodata/primary.xml.gz` を検証して `kernel-uek-modules-*` エントリが存在しないことを確認済み。
+
+**対処**: `phase3_clone_repository` は OL7 と共用の `image-scripts.sh` パッチに加えて、`provision.sh` 用の二つめのランタイムパッチを適用し、該当行を `ORACLE_RELEASE >= 7` でガードする:
+
+```bash
+# [ol-aws-ami-builder OL6 PATCH kernel-uek-modules] OL6/UEKR4 has no separate kernel-uek-modules package (modules bundled in kernel-uek)
+[[ "${ORACLE_RELEASE}" -ge 7 ]] && yum install -y "${YUM_VERBOSE}" kernel-uek-modules
+```
+
+`&&` のショートサーキットにより、OL6 では行が no-op に、OL7+ では従来通りの挙動を保持する。
+
+**ガードレール**:
+
+1. 置換前の冪等性チェック: `grep -Fq '[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]'`
+2. 元の行の存在チェック: `grep -Fq 'yum install -y "${YUM_VERBOSE}" kernel-uek-modules'`(上流で削除されていた場合、パッチをスキップして `log_warn`)
+3. 置換後のマーカー grep が見つからない場合は `die`(パッチ適用失敗を明示的に検出)
+
+**検証**: AMI 起動後に `lsmod | grep -E '^(ena|nvme)'` と `modinfo ena nvme nvme_core` でドライバの読み込み確認。これは Phase C-4 で行うが、作者によりまだ実行されていない。
+
+---
+
+## C.12 OL6 + UEK4 のみが AWS Nitro 互換の唯一の組み合わせ
+
+**症状**: `KERNEL=uek` かつ `UEK_RELEASE=2` または `UEK_RELEASE=3` で OL6 AMI をビルドすると、Nitro インスタンスで `kernel panic: no driver for 0000:00:05.0`(ENA デバイス)で起動失敗する。
+
+**根本原因**: Amazon ENA ドライバが UEK に追加されたのは UEK4(OL6 では 4.1.12-124.x、OL7 では 4.14.35-1818.x)から。UEK2(2.6.39)と UEK3(3.8.13)は AWS Nitro よりも先行している。OL6 の RHCK(2.6.32-754.x)も ENA を含まない — Red Hat による ENA バックポートは RHEL 7.4 までしか行われていない。UEK5(4.14)以降は OL6 用にビルドされていない。
+
+**対処**: OL6 env テンプレートは `KERNEL=uek` と `UEK_RELEASE=4` をハードコード。動的合成される `distr/ol6-slim/image-scripts.sh` の `distr::validate()` で `UEK_RELEASE=4` を明示的に強制:
+
+```bash
+[[ "${UEK_RELEASE}" =~ ^4$ ]] || common::error "UEK_RELEASE must be 4 (OL6 + AWS Nitro requires UEK4; UEK2/3 lack ENA, UEK5+ not available)"
+```
+
+OL7 の `^(6)$` パターンより厳しいが、テンプレート自体は同じ構造に従う。
+
+**注意点**: Oracle が将来 OL6 に対する新しい UEK リリースをバックポートした場合(UEK は glibc とツールチェインに強く結合するため極めて起こりにくい)、本バリデータの緩和が必要となる。
+
+---
+
+## C.13 OL6 の `kernel-uek` は `linux-firmware` を強い依存関係として持つ
+
+**症状**: env ファイルで `LINUX_FIRMWARE="No"` を指定するとプロビジョニング中の削除自体は成功するが、後段の `yum install kernel-uek`(カーネルアップデートなど)で再インストールされる。
+
+**根本原因**: OL6 の `kernel-uek` RPM は `Requires: linux-firmware` を宣言している。OL7+ ではこの依存関係が `Recommends:` に緩和された(またはファームウェアがカーネルパッケージに同梱されて削除された)。OL6 では強い依存関係であるため、`yum` は依存関係解決のために常に `linux-firmware` を引き戻す。
+
+**対処**: なし — 既知の制約として記録。OL6 env テンプレートの `LINUX_FIRMWARE` コメントでこの粘着性を明記。動的合成される `distr/ol6-slim/provision.sh` は `LINUX_FIRMWARE="No"` を尊重して `yum remove -y linux-firmware` を発行するが、コメント経由で「後続のカーネル操作が元に戻す」ことをユーザーに伝える。
+
+**将来への対応**: AMI からファームウェアを省いてサイズを縮小することが重要な場合、すべての `kernel-uek` 関連操作完了後(プロビジョニング最終段階)に `rpm -e --nodeps linux-firmware` を発行し、AMI 化以降に `yum update` を実行しないことが推奨。これは現在の本ラッパーのスコープ外。
+
+---
+
+## C.14 OL6 ISO の `.treeinfo` に `images/boot.iso` が宣言されていない
+
+**症状**: libvirt 11.5 / qemu 10.0 上で OL6 U10 ISO に対し `virt-install --location ${ISO}` を実行すると成功する(TUI テキストインストーラが表示される)が、古い `virt-install`(libvirt ≤ 8.x)では `Error: cannot find boot.iso in installation tree` で中断する。
+
+**根本原因**: Anaconda の `.treeinfo` スキーマが OL メジャーバージョン間で変化している。OL6 の `/.treeinfo` は `[images-x86_64]` セクションを `kernel = images/pxeboot/vmlinuz` と `initrd = images/pxeboot/initrd.img` のみで宣言しており、一部の `virt-install` バージョンが期待する `boot.iso` キーを持たない。
+
+**対処**: 本ラッパーは libvirt 11.5+ の `.treeinfo` 緩和処理(kernel/initrd で十分、`boot.iso` 不要)に依存する。Phase A.4 で正規ビルダー RHEL 10(libvirt 11.5.0-2.el10、qemu-kvm 10.0.0-13.el10)上での挙動を確認済み。OL6 env テンプレートのコメントでこの挙動をフラグ。ビルダーホストの libvirt がそれより古い場合は別途対応(`--location ${ISO},kernel=images/pxeboot/vmlinuz,initrd=images/pxeboot/initrd.img` の明示的指定)が必要になるが、本ラッパーはそのつまみを現状公開していない。
+
+**検証**: Phase B-1 でブートテスト実施 — OL6 U10 ISO から libvirt ドメインを起動し、ISO のマウント、isolinux のロード、kickstart プロンプトでの Anaconda 13.21.263 TUI 出現を確認。それ以降のフェーズは作者により未実行。
+
+---
+
+## C.15 OL6 における `detect_os_variant()` のフォールバック挙動(osinfo-db `ol6.X` 命名)
+
+**症状**: `osinfo-db-20250606+` を持つビルダー(RHEL 10 デフォルト)では `virt-install --os-variant oraclelinux6.10` が成功するが、古いビルダー(`osinfo-db-20230101`)では `Unknown OS variant 'oraclelinux6.10'` で失敗する。
+
+**根本原因**: osinfo-db は OL エントリの命名規約を変更した経緯がある。古いビルドは `oraclelinux{N}.{U}` short-id を提供し、新しいビルドは `ol{N}.{U}`(例: `ol6.10`, `ol7.9`)を提供する。両方を持つビルダーもあれば片方しか持たないビルダーもある。
+
+**対処**: `detect_os_variant()` を拡張し、現代の `ol{N}.{U}` ファミリを候補チェーンの先頭に挿入:
+
+```bash
+# 0. Modern osinfo-db 'ol{N}.{U}' short-id
+candidates+=("ol${major}.${update}")
+for ((u = update - 1; u >= 0; u--)); do
+  candidates+=("ol${major}.${u}")
+done
+candidates+=("ol${major}-unknown" "ol${major}")
+```
+
+レガシーの `oraclelinux{N}.{U}` ファミリは直下に残置。両方とも持たない OL6 ビルダーの場合、チェーンは `rhel6.{U}` へフォールスルーする(OL6 とバイナリ互換であり、ほぼ常時存在)。
+
+**注意点**: 本ラッパーが行う `osinfo-query` 呼び出しはすべて読み取り専用で副作用は無い。`osinfo-query` 自体が利用不可な場合(2026 時点ではまれだが、絞り込み済みのビルダーイメージでは起こり得る)、`detect_os_variant()` は 1 を返し、運用者は env ファイルで `OS_VARIANT` を手動設定する必要がある。
+
+---
+
+# Part D — OL6 全体アーキテクチャ
+
+## D.1 なぜ OL6 は OL7 と異なるアーキテクチャが必要か
+
+本ラッパーにおける OL7 サポートは、アップストリームの既存 OL7 配布物(`distr/ol7-slim/` が完全に揃っている)を**書き換える**ことで実現しています — 1 種類の `sed` パッチが AWS 固有のガードを除去し、それ以外のアップストリームパイプラインは無修正で動作します。
+
+OL6 サポートは**アップストリームが提供していないものを合成する**必要があります。`distr/ol6-slim/` そのものが存在せず、加えて `cloud/aws/provision.sh` の中には OL6 固有のパッケージ構成のため OL6 では直接失敗する行が含まれます。したがって 3 種類のランタイム改変が必要です:
+
+| # | 種別 | 対象 | 目的 |
+|---|------|------|------|
+| 1 | `sed` パッチ | `cloud/aws/image-scripts.sh` | OL8+ ガードの除去(OL7 と共用) |
+| 2 | `sed` パッチ | `cloud/aws/provision.sh` | OL6 で `kernel-uek-modules` インストールをスキップ(C.11) |
+| 3 | ディレクトリ合成 | `distr/ol6-slim/`(4 ファイル) | kickstart + image-scripts + provision の OL6 用ロジックを提供 |
+
+3 つすべては `phase3_clone_repository` に置かれており、clone のたびに再確立されます。ラッパー自身が 4 つの `distr/ol6-slim/` ファイルの正規テンプレートをクォート版ヒアドキュメントとして保持します。
+
+## D.2 Phase A + B 検証サマリ
+
+OL6 サポートは構造化された 2 フェーズ事前検証を経て追加されました。下記すべての検証は 2026-05 時点の `oracle-linux` main ブランチに対し、RHEL 10.0(libvirt 11.5.0-2.el10、qemu-kvm 10.0.0-13.el10)+ `osinfo-db-20250606-1.el10` の環境で実施。
+
+**Phase A — 静的検証(9 項目、全 PASS):**
+
+1. osinfo-db に `ol6.0` 〜 `ol6.10`(11 エントリ)および `rhel6.0` 〜 `rhel6.10`(11 エントリ)が存在 — `detect_os_variant()` はいずれかのファミリで解決可能。
+2. アップストリーム `oracle-linux-image-tools` には `distr/ol7-slim/`、`distr/ol8-slim/`、`distr/ol8-aarch64/`、`distr/ol9-slim/`、`distr/ol9-aarch64/`、`distr/ol10-slim/`、`distr/ol10-aarch64/` は存在するが `distr/ol6-slim/` は無い。合成アプローチが必要。
+3. `bin/build-image.sh` の有効 `DISTR_NAME` 正規表現は `^OL(6|7|8|9|(10))U` — アップストリームのエントリポイント自体は OL6 を受け入れる。
+4. `cloud/aws/image-scripts.sh` 行 33 に OL8+ ガードがそのまま存在 — OL7 と同一構造。パッチ #1 は OL7 と同じ sed パターンで再利用可。
+5. `cloud/aws/provision.sh` 行 58 に `yum install -y "${YUM_VERBOSE}" kernel-uek-modules` が存在 — パッチ #2 の sed パターンがマッチする。
+6. ISO URL `https://yum.oracle.com/ISOS/OracleLinux/OL6/u10/x86_64/OracleLinux-R6-U10-Server-x86_64-dvd.iso` が解決する(HTTP 200、4,072,669,184 バイト、Last-Modified 2018-06-25)。
+7. チェックサム URL `https://linux.oracle.com/security/gpg/checksum/OracleLinux-R6-U10-Server-x86_64.checksum` が解決し、ISO の SHA256 `625044388ee60a031965a42a32f4c1de0c029268975edcd542fd14160e0dadcb` と一致する。
+8. OL6 UEKR4 リポジトリ(`https://yum.oracle.com/repo/OracleLinux/OL6/UEKR4/x86_64/`)が HTTP 200 を返す。`primary.xml.gz` を確認し `kernel-uek-4.1.12-*` の存在と `kernel-uek-modules-*` の不在を確認。
+9. OL6 における cloud-init の入手可否: `cloud-init-18.4-2.0.9.el6.x86_64` および `cloud-utils-growpart-0.27-9.el6.x86_64` が `ol6_addons` リポジトリに存在することを確認。
+
+**Phase B — 動的検証(2 項目、全 PASS):**
+
+1. ISO ブートテスト: `virt-install --name=ol6-boot-test --memory=2048 --vcpus=2 --disk size=20 --location=${ISO_PATH} --os-variant=ol6.10 --network=default --graphics=none --console pty,target_type=serial` が成功し、isolinux がロード、kickstart プロンプトで Anaconda 13.21.263 TUI が表示されテキスト入力を受け付けることを確認。直後にドメインを破棄(実インストールは行わない)。
+2. `osinfo-query os | grep ^ol6` がビルダー上で 11 行返す — `ol6.10` short-id は `virt-install --os-variant` で選択可能。
+
+**Phase C(未実行):** kickstart 完走、OL6 環境での provision.sh、Nitro 上での cloud-init による ec2-user 作成、end-to-end での AMI 起動。これらは実ビルダーホストで OL6 ビルドを実施する次回イテレーションで実施予定。
+
+## D.3 OL7 サポートとの比較
+
+| 観点 | OL7 | OL6 |
+|------|-----|-----|
+| アップストリーム `distr/` | 存在(`ol7-slim`) | **存在しない** — ランタイム合成 |
+| 必要な `sed` パッチ | 1 種類(`image-scripts.sh` ガード) | 2 種類(`image-scripts.sh` + `provision.sh`) |
+| カーネル | UEK6(4.14) | UEK4(4.1.12) — OL6 で唯一 ENA 対応 |
+| ファイルシステム選択肢 | xfs、btrfs | ext4、xfs(lvm / btrfs はこのレイヤーで非対応) |
+| init システム | systemd | Upstart(`service` / `chkconfig`) |
+| ブートローダ | GRUB2 | GRUB Legacy |
+| kickstart 構文 | Anaconda 19.x(`inst.` プレフィックス) | Anaconda 13.x(`inst.` プレフィックスなし) |
+| NTP デーモン | chronyd | ntpd |
+| `linux-firmware` | 任意 | `kernel-uek` の強い依存 |
+| `kernel-uek-modules` パッケージ | 存在(UEK6) | 存在しない(UEK4) |
+| AWS VM Import サポート | EOL(2024-12-31) | EOL(ELS は 2024 末で終了) |
+| End-to-end 検証 | 未実施(パッチ検証済み、ビルド未実行) | 未実施(Phase A+B 完了、Phase C 未実行) |
+
+この表の非対称性こそが、OL6 には Part D が必要で OL7 には不要だった理由です。OL7 は元々機能するアップストリームパイプラインに薄いパッチを当てるだけで済みますが、OL6 は OL 固有のグルーレイヤをラッパー内でゼロから組み直すことになります。
 
 ---
 

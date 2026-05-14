@@ -226,6 +226,36 @@ load_env() {
     log_warn "============================================================================"
   fi
 
+  # Emit a prominent advisory when the user targets OL6. OL6 is even more
+  # severely deprecated than OL7: upstream oracle-linux-image-tools does
+  # NOT ship a distr/ol6-slim/ directory at all (the AWS cloud target's
+  # OL8+ guard also rejects it), and Oracle's ELS for OL6 ended in 2024.
+  # build-ol-aws-ami.sh works around both gaps in Phase 3 (generating
+  # distr/ol6-slim/ at runtime and applying an extra patch to
+  # cloud/aws/provision.sh).
+  if [[ "${OL_MAJOR_VERSION}" -eq 6 ]]; then
+    log_warn "============================================================================"
+    log_warn " Oracle Linux 6 target selected (OL${OL_MAJOR_VERSION}U${OL_UPDATE_VERSION})."
+    log_warn ""
+    log_warn "  * OL6 Premier Support ended on 2021-03-31."
+    log_warn "  * OL6 Extended Life Support (ELS) ended in 2024."
+    log_warn "  * NO security updates have been published for OL6 since 2024."
+    log_warn "  * Upstream oracle-linux-image-tools does NOT ship distr/ol6-slim/;"
+    log_warn "    build-ol-aws-ami.sh generates this directory at runtime in Phase 3."
+    log_warn "  * In addition to the OL7 image-scripts.sh patch, an extra patch"
+    log_warn "    is applied to cloud/aws/provision.sh to skip kernel-uek-modules"
+    log_warn "    installation (this package does not exist in OL6/UEKR4)."
+    log_warn "  * OL6 only supports x86_64 (no aarch64), bios boot (no UEFI),"
+    log_warn "    and UEK Release 4 (the only kernel with ENA/NVMe drivers)."
+    log_warn "  * AWS VM Import/Export marks OL6 as EOL; this wrapper uses"
+    log_warn "    import-snapshot + register-image to bypass that policy."
+    log_warn ""
+    log_warn "  This target is intended ONLY for verification, learning, or"
+    log_warn "  legacy migration scenarios. NEVER use the resulting AMI for"
+    log_warn "  production workloads."
+    log_warn "============================================================================"
+  fi
+
   # DISTR slug used by oracle-linux-image-tools.
   # Convention: ol{major}-slim (e.g. ol10-slim, ol9-slim, ol8-slim, ol7-slim).
   : "${DISTR:=ol${OL_MAJOR_VERSION}-slim}"
@@ -709,19 +739,27 @@ phase3_clone_repository() {
   [[ -d "${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}" ]] \
     || die "Directory ${OL_TOOLS_SUBDIR} not found in the clone"
 
-  # Apply the OL7 compatibility patch when targeting Oracle Linux 7.
+  # Apply the OL6/OL7 compatibility patch when targeting Oracle Linux 6 or 7.
   #
   # Background:
   #   The upstream cloud/aws/image-scripts.sh contains a hard validation
-  #   that rejects OL7 outright:
+  #   that rejects any release below OL8:
   #     [[ ${ORACLE_RELEASE} -lt 8 ]] && common::error "AWS images builder only supports OL8 and above"
   #
   # Justification:
-  #   OL7 is otherwise still a valid distribution in the upstream tooling
-  #   (distr/ol7-slim/ remains present, and cloud/aws/provision.sh's logic
-  #   for installing the ENA driver works on OL7's UEK6 kernel without
-  #   modification). Removing only the AWS-specific validation guard
-  #   lets the existing pipeline run end-to-end against OL7.
+  #   OL7 is otherwise still a complete distribution in the upstream
+  #   tooling (distr/ol7-slim/ remains present, and cloud/aws/provision.sh's
+  #   logic for installing the ENA driver works on OL7's UEK6 kernel
+  #   without modification).
+  #
+  #   OL6 is more severely unsupported upstream: distr/ol6-slim/ does NOT
+  #   exist at all, so build-ol-aws-ami.sh generates it at runtime (see the
+  #   "OL6 distr/ol6-slim/ runtime generation" block further below). The
+  #   AWS image-scripts.sh guard removal here is shared with OL7 because
+  #   the rejection mechanism is identical.
+  #
+  #   Removing only the AWS-specific validation guard lets the existing
+  #   pipeline run end-to-end against OL6 and OL7.
   #
   # Caveat:
   #   The patch is intentionally local to the cloned working copy and
@@ -730,31 +768,613 @@ phase3_clone_repository() {
   #   If the upstream check is refactored, this patch will silently
   #   no-op (see the grep guard below) and the build will rely on
   #   whatever the new upstream validation does.
-  if [[ "${OL_MAJOR_VERSION}" -eq 7 ]]; then
+  if [[ "${OL_MAJOR_VERSION}" -le 7 ]]; then
     local aws_image_scripts="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/image-scripts.sh"
-    log_info "Applying OL7 compatibility patch to upstream cloud/aws/image-scripts.sh"
+    log_info "Applying OL${OL_MAJOR_VERSION} compatibility patch to upstream cloud/aws/image-scripts.sh"
 
     if [[ ! -f "${aws_image_scripts}" ]]; then
-      die "Cannot apply OL7 patch: ${aws_image_scripts} not found"
+      die "Cannot apply OL${OL_MAJOR_VERSION} patch: ${aws_image_scripts} not found"
     fi
 
     if grep -Fq 'AWS images builder only supports OL8 and above' "${aws_image_scripts}"; then
-      # Replace the entire OL7-blocking line with a clearly-marked no-op,
+      # Replace the entire OL8+-blocking line with a clearly-marked no-op,
       # using '|' as the sed delimiter to avoid clashing with '#' (which
       # is significant in the replacement text as a shell comment marker).
-      sed -i.ol7-patch.bak \
-        -e 's|^.*ORACLE_RELEASE.*-lt 8.*AWS images builder only supports OL8 and above.*$|  : # [ol-aws-ami-builder OL7 PATCH] upstream OL7 block removed (see build-ol-aws-ami.sh phase3)|' \
+      sed -i".ol${OL_MAJOR_VERSION}-patch.bak" \
+        -e "s|^.*ORACLE_RELEASE.*-lt 8.*AWS images builder only supports OL8 and above.*\$|  : # [ol-aws-ami-builder OL${OL_MAJOR_VERSION} PATCH] upstream OL6/7 block removed (see build-ol-aws-ami.sh phase3)|" \
         "${aws_image_scripts}"
 
-      if grep -Fq '[ol-aws-ami-builder OL7 PATCH]' "${aws_image_scripts}"; then
-        log_info "  -> OL7 patch applied (backup at ${aws_image_scripts}.ol7-patch.bak)"
+      if grep -Fq "[ol-aws-ami-builder OL${OL_MAJOR_VERSION} PATCH]" "${aws_image_scripts}"; then
+        log_info "  -> OL${OL_MAJOR_VERSION} patch applied (backup at ${aws_image_scripts}.ol${OL_MAJOR_VERSION}-patch.bak)"
       else
-        die "Failed to apply OL7 patch to ${aws_image_scripts}"
+        die "Failed to apply OL${OL_MAJOR_VERSION} patch to ${aws_image_scripts}"
       fi
     else
-      log_warn "  Upstream OL7 restriction line not found in ${aws_image_scripts}."
+      log_warn "  Upstream OL8+ restriction line not found in ${aws_image_scripts}."
       log_warn "  Assuming the upstream check has been removed/refactored; proceeding."
     fi
+  fi
+
+  # OL6-specific patch #2: cloud/aws/provision.sh kernel-uek-modules guard.
+  #
+  # Background:
+  #   The upstream cloud/aws/provision.sh contains:
+  #     if [[ "${KERNEL,,}" = "uek" ]]; then
+  #       yum install -y "${YUM_VERBOSE}" kernel-uek-modules
+  #     else
+  #       yum install -y "${YUM_VERBOSE}" kernel-modules
+  #     fi
+  #
+  #   On OL6/UEKR4, the 'kernel-uek-modules' package does NOT exist
+  #   (verified against ol6_UEKR4 primary.xml). All ENA/NVMe/virtio
+  #   driver .ko files are bundled directly inside the main 'kernel-uek'
+  #   RPM, so no separate modules package install is needed.
+  #
+  # Fix:
+  #   Rewrite the install line to gate it behind ORACLE_RELEASE >= 7.
+  #   On OL7+ the original behavior is preserved; on OL6 the line
+  #   becomes a no-op.
+  #
+  # Idempotency:
+  #   A grep for the wrapper marker is performed before substitution to
+  #   avoid double-patching when Phase 3 re-runs against an existing
+  #   clone.
+  if [[ "${OL_MAJOR_VERSION}" -eq 6 ]]; then
+    local aws_provision="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
+    log_info "Applying OL6 compatibility patch to upstream cloud/aws/provision.sh"
+
+    if [[ ! -f "${aws_provision}" ]]; then
+      die "Cannot apply OL6 patch: ${aws_provision} not found"
+    fi
+
+    # In the grep and sed lines below, ${YUM_VERBOSE} and ${ORACLE_RELEASE}
+    # are deliberately left literal: they match (grep) and produce (sed)
+    # upstream shell code that expands them at runtime inside
+    # cloud/aws/provision.sh, not in this wrapper.
+    # shellcheck disable=SC2016
+    if grep -Fq '[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]' "${aws_provision}"; then
+      log_info "  -> OL6 provision.sh patch already applied (idempotent skip)"
+    elif grep -Fq 'yum install -y "${YUM_VERBOSE}" kernel-uek-modules' "${aws_provision}"; then
+      sed -i.ol6-patch-uek-modules.bak \
+        -e 's|^\(\s*\)yum install -y "${YUM_VERBOSE}" kernel-uek-modules$|\1# [ol-aws-ami-builder OL6 PATCH kernel-uek-modules] OL6/UEKR4 has no separate kernel-uek-modules package (modules bundled in kernel-uek)\n\1[[ "${ORACLE_RELEASE}" -ge 7 ]] \&\& yum install -y "${YUM_VERBOSE}" kernel-uek-modules|' \
+        "${aws_provision}"
+
+      if grep -Fq '[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]' "${aws_provision}"; then
+        log_info "  -> OL6 provision.sh patch applied (backup at ${aws_provision}.ol6-patch-uek-modules.bak)"
+      else
+        die "Failed to apply OL6 patch to ${aws_provision}"
+      fi
+    else
+      log_warn "  kernel-uek-modules install line not found in ${aws_provision}."
+      log_warn "  Assuming the upstream provision logic has been refactored; proceeding."
+    fi
+  fi
+
+  # OL6 distr/ol6-slim/ runtime generation.
+  #
+  # Background:
+  #   Unlike OL7+ which has a distr/ol7-slim/ (etc.) directory shipped
+  #   in the upstream oracle-linux-image-tools repo, OL6 has NO such
+  #   directory upstream. Without it, bin/build-image.sh has nothing to
+  #   source for kickstart, image-scripts, and provision logic.
+  #
+  # Approach:
+  #   Generate the four required files from heredoc templates embedded
+  #   in this wrapper. The templates mirror distr/ol7-slim/'s structure
+  #   with OL6-specific adjustments:
+  #     - Upstart (service / chkconfig) instead of systemd
+  #     - GRUB Legacy (/boot/grub/grub.conf) instead of GRUB2
+  #     - Anaconda 13.x kickstart syntax (no 'inst.' prefix)
+  #     - UEKR4 only (kernel-uek RPM contains all ENA/NVMe/virtio modules)
+  #     - No 'kernel-uek-modules' install (does not exist on OL6/UEKR4)
+  #     - ext4/xfs only (no lvm/btrfs at this layer)
+  #
+  # Idempotency:
+  #   The files are always (re-)written, so a re-run of Phase 3 will
+  #   refresh them to the canonical templates.
+  if [[ "${OL_MAJOR_VERSION}" -eq 6 ]]; then
+    local ol6_slim_dir="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/distr/ol6-slim"
+    log_info "Generating distr/ol6-slim/ at runtime (upstream does not ship this directory)"
+    mkdir -p "${ol6_slim_dir}"
+
+    # ----- distr/ol6-slim/env.properties -----
+    cat > "${ol6_slim_dir}/env.properties" <<'EOF_OL6_ENV'
+# Default parameters for OL6 distribution.
+# Do NOT change anything in this file; customisation must be done in a
+# separate env file (e.g. env.properties.aws-ol6).
+#
+# This file is created at build time by ol-aws-ami-builder because the
+# upstream oracle-linux-image-tools project does not ship a distr/ol6-slim/
+# directory. See SPEC.md (Part D) for the rationale.
+
+# Distribution name (auto-derived from ISO_URL by build-image.sh; this is fallback)
+DISTR_NAME="OL6U10_x86_64"
+
+# Distribution release
+readonly ORACLE_RELEASE=6
+
+# Setup swap? (Cloud images: no)
+SETUP_SWAP="no"
+
+# Root filesystem: ext4 or xfs
+# Note: OL6 default is ext4. xfs is a tech preview in OL6.4+ and stable
+# in OL6.6+. ext4 is the safer choice for AWS cloud images.
+ROOT_FS="ext4"
+
+# Location of kernel/initrd on the distribution image (relative to ISO root)
+BOOT_LOCATION="isolinux"
+
+# Boot mode - Must be "bios" for OL6 (no UEFI support in OL6 anaconda)
+BOOT_MODE="bios"
+
+# Boot command for OL6 anaconda (NOTE: NO 'inst.' prefix, unlike OL7+).
+# Variables MUST be escaped as they are evaluated at build time.
+BOOT_COMMAND=(
+  'text'
+  'ks=file:/${KS_FILE}'
+  'stage2=hd:LABEL=${ISO_LABEL}'
+  'net.ifnames=0'
+)
+# Additional parameters to enable serial console
+BOOT_COMMAND_SERIAL_CONSOLE=(
+  'console=tty0'
+  'console=ttyS0'
+)
+
+# Kernel: uek or rhck
+# For OL6 + AWS, UEK4 is required for Nitro compatibility (ENA/NVMe drivers).
+# RHCK 2.6.32 does NOT have ENA driver.
+KERNEL="uek"
+
+# UEK release: 4 (only valid choice for OL6 + AWS Nitro)
+# UEK2/3 do not have ENA driver. UEK5+ is not available for OL6.
+UEK_RELEASE=4
+
+# Update: yes, security, no
+UPDATE_TO_LATEST="yes"
+
+# Keep linux-firmware package? yes, no
+# Note: kernel-uek has a hard install dependency on linux-firmware on OL6.
+LINUX_FIRMWARE="yes"
+
+# Strip locales to only keep en_US? yes, no
+STRIP_LOCALES="no"
+
+# Exclude documentation? yes, no, minimal
+EXCLUDE_DOCS="no"
+
+# Directory used to save build information
+readonly BUILD_INFO="/.build-info"
+EOF_OL6_ENV
+
+    # ----- distr/ol6-slim/image-scripts.sh -----
+    cat > "${ol6_slim_dir}/image-scripts.sh" <<'EOF_OL6_IMG'
+#!/usr/bin/env bash
+#
+# image scripts for OL6
+#
+# Created by ol-aws-ami-builder (not part of upstream oracle-linux-image-tools).
+# Mirrors the structure of distr/ol7-slim/image-scripts.sh with OL6-specific
+# adjustments:
+#   - UEK_RELEASE accepts only 4 (UEK2/3/5/6/7 not supported on OL6 for AWS)
+#   - ROOT_FS accepts ext4 or xfs (lvm and btrfs not supported on OL6)
+#
+
+#######################################
+# Validate distribution parameters
+#######################################
+distr::validate() {
+  [[ "${ROOT_FS,,}" =~ ^((ext4)|(xfs))$ ]] || common::error "ROOT_FS must be ext4 or xfs (OL6 does not support lvm/btrfs at this layer)"
+  [[ "${TMP_IN_TMPFS,,}" =~ ^((yes)|(no))$ ]] || common::error "TMP_IN_TMPFS must be yes or no"
+  [[ "${UEK_RELEASE}" =~ ^4$ ]] || common::error "UEK_RELEASE must be 4 (OL6 + AWS Nitro requires UEK4; UEK2/3 lack ENA, UEK5+ not available)"
+  [[ "${LINUX_FIRMWARE,,}" =~ ^((yes)|(no))$ ]] || common::error "LINUX_FIRMWARE must be yes or no"
+  [[ "${STRIP_LOCALES,,}" =~ ^((yes)|(no))$ ]] || common::error "STRIP_LOCALES must be yes or no"
+  [[ "${EXCLUDE_DOCS,,}" =~ ^((yes)|(no)|(minimal))$ ]] || common::error "EXCLUDE_DOCS must be yes, no or minimal"
+  readonly ROOT_FS TMP_IN_TMPFS UEK_RELEASE LINUX_FIRMWARE STRIP_LOCALES EXCLUDE_DOCS
+}
+
+#######################################
+# Kickstart fixup
+#######################################
+distr::kickstart() {
+  local ks_file="$1"
+
+  # For OL6, ROOT_FS can be ext4 or xfs. Kickstart is populated for ext4; switch to xfs if requested.
+  if [[ "${ROOT_FS,,}" = "xfs" ]]; then
+    sed -i -e 's!--fstype="ext4"!--fstype="xfs"!g' "${ks_file}"
+  fi
+
+  # Pass kernel selection (always uek for OL6+AWS, but propagate for completeness)
+  sed -i -e 's!^KERNEL=.*$!KERNEL='"${KERNEL}"'!' "${ks_file}"
+  sed -i -e 's!^UEK_RELEASE=.*$!UEK_RELEASE='"${UEK_RELEASE}"'!' "${ks_file}"
+
+  # Locale
+  sed -i -e 's!^STRIP_LOCALES=.*$!STRIP_LOCALES='"${STRIP_LOCALES}"'!' "${ks_file}"
+
+  # Docs
+  sed -i -e 's!^EXCLUDE_DOCS=.*$!EXCLUDE_DOCS='"${EXCLUDE_DOCS}"'!' "${ks_file}"
+  if [[ "${EXCLUDE_DOCS,,}" = "yes" ]]; then
+    sed -i -e 's!^%packages !%packages --excludedocs !' "${ks_file}"
+  fi
+
+  # /tmp in tmpfs - OL6 anaconda does not natively support this; handled in %post via /etc/fstab edit
+  sed -i -e "s!^TMP_IN_TMPFS=no!TMP_IN_TMPFS=${TMP_IN_TMPFS}!" "${ks_file}"
+}
+EOF_OL6_IMG
+
+    # ----- distr/ol6-slim/ol6-ks.cfg -----
+    cat > "${ol6_slim_dir}/ol6-ks.cfg" <<'EOF_OL6_KS'
+# OL6 kickstart file (mirrors OL7's ol7-ks.cfg with OL6-specific differences)
+
+# System authorization information
+auth --enableshadow --passalgo=sha512
+
+# Command line install
+cmdline
+text
+
+firstboot --disable
+ignoredisk --only-use=sda
+keyboard us
+lang en_US.UTF-8
+reboot
+timezone UTC --isUtc
+network  --bootproto=dhcp --device=eth0 --onboot=yes --hostname=localhost.localdomain
+
+# Root password -- will be overridden by the builder
+rootpw --lock
+
+# System services (OL6: no firewalld, no chronyd)
+services --disabled="ip6tables,kdump,rhsmcertd" --enabled="iptables,network,sshd,rsyslog,ntpd"
+selinux --enforcing
+firewall --service=ssh
+
+# Bootloader (OL6: GRUB Legacy, not GRUB2)
+bootloader --append="console=tty0" --location=mbr --timeout=10  --boot-drive=sda
+
+# Partitioning
+zerombr
+clearpart --all --initlabel
+
+part /boot    --fstype="ext4" --ondisk=sda --size=500  --label=/boot
+part swap     --fstype="swap" --ondisk=sda --size=4096 --label=swap
+part /        --fstype="ext4" --ondisk=sda --size=4096 --label=root  --grow
+
+%packages --nobase
+yum
+initscripts
+passwd
+rsyslog
+vim-minimal
+openssh-server
+openssh-clients
+dhclient
+chkconfig
+rootfiles
+policycoreutils
+checkpolicy
+selinux-policy
+selinux-policy-targeted
+libselinux
+oraclelinux-release
+oraclelinux-release-notes
+yum-rhn-plugin
+yum-plugin-security
+yum-utils
+device-mapper-libs
+device-mapper
+kpartx
+net-tools
+iptables
+iptables-services
+ntp
+acpid
+cronie
+cronie-anacron
+crontabs
+grub
+
+## Packages to remove
+-NetworkManager
+-aic94xx-firmware
+-alsa-firmware
+-alsa-tools-firmware
+-iprutils
+-ivtv-firmware
+-iwl*-firmware
+-libertas-*-firmware
+-plymouth
+-biosdevname
+-b43-openfwwf
+-wireless-tools
+-system-config-securitylevel-tui
+-cyrus-sasl
+-postfix
+-lzo
+-mysql-libs
+-kexec-tools
+-efibootmgr
+-bc
+-busybox
+-elfutils-libs
+-mdadm
+-pciutils-libs
+-snappy
+-acl
+-attr
+-audit
+
+%end
+
+%post --interpreter /bin/bash --log=/root/ks-post.log
+
+echo "Network fixes"
+cat > /etc/sysconfig/network << EOF
+NETWORKING=yes
+NOZEROCONF=yes
+EOF
+
+# eth0 predictable naming
+rm -f /etc/udev/rules.d/70*
+
+cat > /etc/sysconfig/network-scripts/ifcfg-eth0 << EOF
+DEVICE="eth0"
+BOOTPROTO="dhcp"
+ONBOOT="yes"
+TYPE="Ethernet"
+USERCTL="yes"
+PEERDNS="yes"
+IPV6INIT="no"
+PERSISTENT_DHCLIENT="1"
+NM_CONTROLLED="no"
+EOF
+
+cat > /etc/hosts << EOF
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+EOF
+
+echo "RUN_FIRSTBOOT=NO" > /etc/sysconfig/firstboot
+
+# Remove serial console from default boot (re-enabled at runtime by builder)
+# OL6: edit /boot/grub/grub.conf (GRUB Legacy)
+sed -i -e 's/ console=ttyS0//' /boot/grub/grub.conf
+
+EXCLUDE_DOCS="no"
+echo "Exclude documentation: ${EXCLUDE_DOCS^^}"
+if [[ "${EXCLUDE_DOCS,,}" = "yes" ]]; then
+  echo "tsflags=nodocs" >> /etc/yum.conf
+fi
+
+STRIP_LOCALES="no"
+echo "Strip locales: ${STRIP_LOCALES^^}"
+if [[ "${STRIP_LOCALES,,}" = "yes" ]]; then
+  localedef --list-archive | grep -E -v '^C|^en_US' | xargs localedef --delete-from-archive
+  mv -f /usr/lib/locale/locale-archive /usr/lib/locale/locale-archive.tmpl
+  build-locale-archive
+  echo '%_install_langs C:en_US' >> /etc/rpm/macros.image-language-conf
+fi
+
+# Install UEK4 kernel as default (the install boots with RHCK; switch to UEK4 here)
+KERNEL=uek
+UEK_RELEASE=4
+echo "Kernel update (${KERNEL^^})"
+
+echo "Running kernel: $(uname -r)"
+echo "Kernel(s) installed:"
+rpm -qa | grep '^kernel' | sort
+
+# OL6 repo config: ensure UEKR4 is enabled (yum-config-manager from yum-utils)
+yum-config-manager --disable 'ol6_UEKR*' >/dev/null 2>&1 || true
+yum-config-manager --enable ol6_UEKR4 >/dev/null 2>&1
+
+yum upgrade -y oraclelinux-release-el6 2>/dev/null || true
+
+if [[ "${KERNEL,,}" = "uek" ]]; then
+  kernel="kernel-uek"
+else
+  kernel="kernel"
+fi
+
+sed -i -e 's/^DEFAULTKERNEL=.*/DEFAULTKERNEL='"${kernel}"'/' /etc/sysconfig/kernel
+yum install -y ${kernel}
+
+# /tmp in tmpfs - OL6: edit /etc/fstab
+TMP_IN_TMPFS=no
+if [[ "${TMP_IN_TMPFS,,}" == "yes" ]]; then
+  echo "tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0" >> /etc/fstab
+fi
+
+%end
+EOF_OL6_KS
+
+    # ----- distr/ol6-slim/provision.sh -----
+    cat > "${ol6_slim_dir}/provision.sh" <<'EOF_OL6_PROV'
+#!/usr/bin/env bash
+#
+# Provisioning script for OL6
+#
+# Created by ol-aws-ami-builder (not part of upstream oracle-linux-image-tools).
+# Mirrors distr/ol7-slim/provision.sh with OL6-specific adjustments.
+#
+
+# Constants
+readonly DRACUT_CMD="dracut --no-early-microcode --force"
+
+#######################################
+# Remove packages via yum
+#######################################
+distr::remove_rpms() {
+  yum -C -y "${YUM_VERBOSE}" remove "$@" --setopt="clean_requirements_on_remove=1"
+}
+
+#######################################
+# Kernel configuration
+#######################################
+distr::kernel_config() {
+  local target_kernel
+
+  common::echo_message "Configure kernel: ${KERNEL^^}"
+
+  # OL6 repo names: ol6_UEKR*
+  yum-config-manager --disable 'ol6_UEKR*' >/dev/null 2>&1 || true
+
+  if [[ "${KERNEL,,}" = "uek" ]]; then
+    yum-config-manager --enable "ol6_UEKR${UEK_RELEASE}" >/dev/null 2>&1
+    target_kernel=$(common::latest_kernel kernel-uek)
+    common::echo_message "Target kernel: ${target_kernel}"
+    # OL6: no kernel-transition; install kernel-uek directly
+    yum install -y "${YUM_VERBOSE}" kernel-uek
+    common::remove_kernels kernel
+    common::remove_kernels kernel-uek "${target_kernel}"
+  else
+    target_kernel=$(common::latest_kernel kernel)
+    common::echo_message "Target kernel: ${target_kernel}"
+    common::remove_kernels kernel-uek
+    common::remove_kernels kernel "${target_kernel}"
+  fi
+
+  # Add virtual drivers to initrd
+  local virtio modules
+  modules=$(find "/lib/modules/${target_kernel}" -name "virtio*.ko*" -printf '%f\n')
+  while read -r module; do
+    virtio="${virtio} ${module%.ko*}"
+  done <<<"${modules}"
+
+  cat > /etc/dracut.conf.d/01-dracut-vm.conf <<EOF
+add_drivers+=" xen_netfront xen_blkfront "
+add_drivers+=" ${virtio} "
+add_drivers+=" hyperv_keyboard hv_netvsc hid_hyperv hv_utils hv_storvsc hyperv_fb "
+add_drivers+=" ahci libahci "
+EOF
+
+  # Regenerate initrd
+  ${DRACUT_CMD} -f "/boot/initramfs-${target_kernel}.img" "${target_kernel}"
+
+  # OL6: GRUB Legacy (no grub2-mkconfig); grubby works for default-kernel
+  grubby --set-default="/boot/vmlinuz-${target_kernel}" || true
+
+  common::echo_message "Linux firmware: ${LINUX_FIRMWARE^^}"
+  if [[ "${LINUX_FIRMWARE,,}" = "no" ]]; then
+    # Note: kernel-uek has a hard dependency on linux-firmware on OL6
+    yum remove -y linux-firmware || true
+  fi
+}
+
+#######################################
+# Common configuration
+#######################################
+distr::common_cfg() {
+  local service tty
+
+  mkdir -p "${BUILD_INFO}"
+
+  yum-config-manager --disable ol6_ociyum_config >/dev/null 2>&1 || true
+
+  common::echo_message "Update image: ${UPDATE_TO_LATEST^^}"
+  if [[ "${UPDATE_TO_LATEST,,}" = "yes" ]]; then
+    yum update -y "${YUM_VERBOSE}"
+  elif [[ "${UPDATE_TO_LATEST,,}" = "security" ]]; then
+    yum install -y "${YUM_VERBOSE}" yum-plugin-security
+    yum update --security -y "${YUM_VERBOSE}"
+  fi
+
+  common::echo_message "sshd root login policy: ${PERMIT_ROOT_LOGIN}"
+  ex -s /etc/ssh/sshd_config <<EOF
+:%substitute/^#\?\(PermitRootLogin\) .*$/\1 ${PERMIT_ROOT_LOGIN,,}/
+:update
+:quit
+EOF
+
+  # OL6 uses /etc/ntp.conf, not chrony
+  if [[ -f /etc/ntp.conf ]]; then
+    sed -i -e '/^server .*/d' /etc/ntp.conf
+    cat >> /etc/ntp.conf <<EOF
+server 0.rhel.pool.ntp.org iburst
+server 1.rhel.pool.ntp.org iburst
+server 2.rhel.pool.ntp.org iburst
+server 3.rhel.pool.ntp.org iburst
+EOF
+  fi
+
+  common::echo_message "Setting default runlevel to 3 (multi-user text mode)"
+  sed -i -e 's/^id:.*:initdefault:/id:3:initdefault:/' /etc/inittab
+
+  # OL6: chkconfig, not systemctl
+  common::echo_message "Disable services (chkconfig)"
+  for service in kdump rhnsd sendmail NetworkManager
+  do
+    common::echo_message "    ${service}"
+    chkconfig --del "${service}" 2>/dev/null || true
+    service "${service}" stop 2>/dev/null || true
+  done
+
+  common::echo_message "Set rp_filter to loose mode"
+  echo "net.ipv4.conf.default.rp_filter = 2" >> /etc/sysctl.conf
+
+  common::echo_message "Set SELinux to ${SELINUX^^}"
+  sed -i -e "s/^SELINUX[  ]*=.*/SELINUX=${SELINUX,,}/" /etc/selinux/config
+  if [[ ${SELINUX,,} != "enforcing" ]]; then
+    setenforce Permissive || true
+  fi
+
+  common::echo_message "Clear network persistent data"
+  rm -f /etc/udev/rules.d/70-persistent-net.rules
+
+  common::echo_message "Configure yum"
+  echo "exclude=kernel-uek-headers" >> /etc/yum.conf
+  echo "http_caching=none" >> /etc/yum.conf
+
+  common::echo_message "Enable login on serial console ports"
+  for tty in "hvc0" "ttyS0"
+  do
+    grep -q "${tty}" /etc/securetty ||  echo "${tty}" >>/etc/securetty
+  done
+
+  common::echo_message "Remove unneeded RPMs"
+  distr::remove_rpms \
+    NetworkManager \
+    NetworkManager-glib \
+    NetworkManager-gnome 2>/dev/null || true
+
+  distr::remove_rpms \
+    mozjs17 \
+    polkit \
+    polkit-pkla-compat \
+    microcode_ctl 2>/dev/null || true
+}
+
+#######################################
+# Provisioning
+#######################################
+distr::provision() {
+  common::ks_log
+  distr::kernel_config
+  distr::common_cfg
+}
+
+#######################################
+# Cleanup
+#######################################
+distr::cleanup() {
+  # OL6-specific: stop services using SysV init before common cleanup
+  # (common::distr_cleanup uses systemctl which fails silently on OL6)
+  service rsyslog stop 2>/dev/null || true
+  service auditd stop 2>/dev/null || true
+
+  common::distr_cleanup
+
+  common::echo_message "Strip locales: ${STRIP_LOCALES^^}"
+  if [[ "${STRIP_LOCALES,,}" = "yes" ]]; then
+    find /usr/share/locale -mindepth  1 -maxdepth 1 -type d \
+      -not -name en_US -a -not -name C \
+      -exec rm -rf {} +
+  fi
+}
+EOF_OL6_PROV
+
+    chmod +x "${ol6_slim_dir}/image-scripts.sh" "${ol6_slim_dir}/provision.sh"
+    log_info "  -> Generated 4 files in ${ol6_slim_dir}/"
   fi
 
   log_info "Repository ready"
@@ -820,8 +1440,18 @@ detect_os_variant() {
 
   local -a candidates=()
 
-  # 1. Exact OL match for this major + update, then walk backwards over updates
+  # 0. Modern osinfo-db 'ol{N}.{U}' short-id (introduced in libosinfo 1.x).
+  #    e.g. osinfo-db-20250606 uses 'ol6.10', 'ol7.9', 'ol8.10', 'ol9.7', 'ol10.1'.
+  #    The legacy 'oraclelinux{N}.{U}' short-id is still present in older
+  #    osinfo-db builds, so it remains in the chain below.
   local u
+  candidates+=("ol${major}.${update}")
+  for ((u = update - 1; u >= 0; u--)); do
+    candidates+=("ol${major}.${u}")
+  done
+  candidates+=("ol${major}-unknown" "ol${major}")
+
+  # 1. Exact OL match for this major + update, then walk backwards over updates
   candidates+=("oraclelinux${major}.${update}")
   for ((u = update - 1; u >= 0; u--)); do
     candidates+=("oraclelinux${major}.${u}")

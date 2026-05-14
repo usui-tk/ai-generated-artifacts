@@ -10,6 +10,8 @@ Oracle 公式の [`oracle-linux-image-tools`](https://github.com/oracle/oracle-l
 
 **Oracle Linux 7** (x86_64) も実験的にサポートしています — 詳細は [セクション 1](#1-構成ファイル) 末尾の注記、[セクション 9.6](#96-oracle-linux-7-サポート実験的) および [セクション 10](#10-既知の制約注意事項) の警告を参照してください。
 
+**Oracle Linux 6** (x86_64) はさらに実験的なサポートです。アップストリームには `distr/ol6-slim/` ディレクトリそのものが存在しないため、本ラッパーは sed パッチ 2 種に加えて、必要な 4 ファイルを実行時に動的生成します。仕組みは [セクション 9.7](#97-oracle-linux-6-サポート実験的)、制約は [セクション 10](#10-既知の制約注意事項) 項目 8 を参照してください。
+
 Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が終了したため、独自の AMI 構築・運用フローを確立する目的で作成しています。
 
 > **2026 年 2 月以降の AWS 新機能対応**
@@ -43,6 +45,7 @@ Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が�
 | `env.properties.aws-ol9` | **Oracle Linux 9 Update 7**(x86_64)用パラメータ |
 | `env.properties.aws-ol8` | **Oracle Linux 8 Update 10**(x86_64)用パラメータ |
 | `env.properties.aws-ol7` | **Oracle Linux 7 Update 9**(x86_64)用パラメータ — **実験的・アップストリーム非推奨**。重要な注意事項はセクション 9.6 および 10 を参照 |
+| `env.properties.aws-ol6` | **Oracle Linux 6 Update 10**(x86_64)用パラメータ — **実験的・アップストリームに `distr/ol6-slim/` 自体が無い**。重要な注意事項はセクション 9.7 および 10 を参照 |
 | `setup-vmimport-role.sh` | AWS VM Import/Export 用の `vmimport` IAM サービスロールを初回のみ作成 |
 | `README.md` | エンドユーザ向けドキュメント(英語、ベースライン) |
 | `README.ja.md` | エンドユーザ向けドキュメント(日本語) |
@@ -239,6 +242,9 @@ cp env.properties.aws-ol8 env.properties.local
 # Oracle Linux 7 Update 9 (実験的 — セクション 9.6 および 10 を必ず参照)
 cp env.properties.aws-ol7 env.properties.local
 
+# Oracle Linux 6 Update 10 (実験的 — セクション 9.7 および 10 を必ず参照)
+cp env.properties.aws-ol6 env.properties.local
+
 vi env.properties.local
 ```
 
@@ -414,6 +420,21 @@ OL7 はベストエフォートでサポートされており、以下の挙動�
 
 OL7 関連の制約の全容は [セクション 10](#10-既知の制約注意事項) の項目 7 を参照してください。
 
+### 9.7 Oracle Linux 6 サポート(実験的)
+
+OL6 は OL7 よりさらに深い回避が必要なサポート対象です。アップストリームのツーリングには **`distr/ol6-slim/` ディレクトリ自体が存在しない**ため、本ラッパーは実行時に埋め込みテンプレートからそれを動的生成します。加えて、`cloud/aws/provision.sh` に対する 2 つめのランタイムパッチも必要です。
+
+- **ランタイムパッチ #1(OL7 と共用)**: `cloud/aws/image-scripts.sh` には `AWS images builder only supports OL8 and above` という OL8 未満を拒否するチェックがあります。`build-ol-aws-ami.sh` の Phase 3 は `OL_MAJOR_VERSION <= 7` を検出し、該当行を no-op に書き換えます。パッチ済みファイルの隣に `image-scripts.sh.ol6-patch.bak` を残します。
+- **ランタイムパッチ #2(OL6 専用)**: `cloud/aws/provision.sh` は `KERNEL=uek` のとき無条件に `yum install -y "${YUM_VERBOSE}" kernel-uek-modules` を実行しますが、このパッケージは **OL6 UEKR4 リポジトリに存在しません**(ENA/NVMe/virtio ドライバの `.ko` ファイルはすべて本体 `kernel-uek` RPM に同梱されています)。Phase 3 はこのインストール行を `ORACLE_RELEASE >= 7` でガードし、OL6 では no-op にします。パッチ済みファイルの隣に `provision.sh.ol6-patch-uek-modules.bak` を残します。冪等性のため、マーカー grep でパッチ済みなら再適用をスキップします。
+- **動的生成される `distr/ol6-slim/`**: 4 ファイル(`env.properties`, `image-scripts.sh`, `ol6-ks.cfg`, `provision.sh`)が `${WORKSPACE}/oracle-linux/oracle-linux-image-tools/distr/ol6-slim/` 配下に `build-ol-aws-ami.sh` 内のヒアドキュメントから書き出されます。`distr/ol7-slim/` の構造をベースに、OL6 固有の置換を反映:systemd の代わりに Upstart(`service` / `chkconfig` 呼び出し)、GRUB2 の代わりに GRUB Legacy(`/boot/grub/grub.conf` 直接編集)、Anaconda 13.x kickstart 構文(`inst.` プレフィックス無し)、ext4 / xfs のみ(lvm / btrfs はこのレイヤーで非対応)。
+- **アップストリームへは何もコミットしません**: 3 つのアーティファクト(パッチ 2 種 + 動的生成 `distr/ol6-slim/`)は `${WORKSPACE}/oracle-linux/` 配下のローカル作業ツリーのみに適用されます。`oracle/oracle-linux` への変更は行いません。
+- **強制される設定**: `BOOT_MODE_BUILD=bios` は三重の理由で必須です。AWS ターゲットが強制し、アップストリーム OL7 経路が強制し(OL6 もこれを継承)、そもそも OL6 anaconda 13.x が UEFI インストール非対応です。
+- **カーネル制約**: OL6+AWS では `KERNEL=uek` かつ `UEK_RELEASE=4` のみが有効です。UEK2/3 は ENA ドライバを持ちません。UEK5/6/7 は OL6 ビルドがありません。RHCK 2.6.32 も ENA を持ちません。OL6 用 `image-scripts.sh` の `distr::validate` は `UEK_RELEASE=4` を強制します。
+- **`linux-firmware` は粘着的**: OL6 の `kernel-uek` は `linux-firmware` を強い依存関係として持ちます。`LINUX_FIRMWARE="No"` でいったん削除しても、後続の `yum install kernel-uek` で再インストールされます。
+- **起動時の警告バナー**: `load_env` で `OL_MAJOR_VERSION == 6` が検出されると、EOL ステータス、2 つのランタイムパッチ、動的生成 `distr/ol6-slim/`、本番利用禁止について複数行の警告が prominent に出力されます。
+
+OL6 関連の制約の全容は [セクション 10](#10-既知の制約注意事項) の項目 8 を参照してください。
+
 ---
 
 ## 10. 既知の制約・注意事項
@@ -444,6 +465,19 @@ OL7 関連の制約の全容は [セクション 10](#10-既知の制約注意�
    - **UEK カーネル事実上必須**: 理屈上は `KERNEL=rhck` を指定できますが、アップストリームの AWS プロビジョニング処理が要求する `kernel-modules` パッケージを OL7 の RHCK は分割していないため、`KERNEL=uek`(OL7 env テンプレートのデフォルト)のまま使ってください。
    - **`lvm` ルートファイルシステム非対応**: OL7 はこのレイヤーでは `xfs` と `btrfs` のみサポートします(`lvm` は OL8 で追加)。
    - **本番利用禁止**: 検証・学習・レガシーマイグレーション以外には使用しないでください。
+
+8. **Oracle Linux 6 固有の制約**
+   - **EOL**: Premier Support は 2021-03-31 で終了しました。Extended Life Support(ELS)も 2024 年で終了し、それ以降 Oracle は OL6 へのセキュリティアップデートを提供していません。
+   - **アップストリームにそもそも存在しない**: アップストリームの `oracle-linux-image-tools` リポジトリには `distr/ol6-slim/` ディレクトリ自体がありません。本ラッパーは必要な 4 ファイル(`env.properties`, `image-scripts.sh`, `ol6-ks.cfg`, `provision.sh`)を Phase 3 で動的生成します([9.7](#97-oracle-linux-6-サポート実験的) 参照)。AWS 用 `image-scripts.sh` のガードは OL7 と同じ方式でパッチします。
+   - **追加ランタイムパッチ**: `cloud/aws/provision.sh` には OL6 専用の追加パッチを当て、OL6 では `yum install kernel-uek-modules` をスキップします。このパッケージは OL6/UEKR4 に存在しません(モジュールは `kernel-uek` 本体に同梱)。
+   - **x86_64 のみ**: OL6 には aarch64 リリースがそもそも存在せず、aarch64 AMI 経路はありません。
+   - **BIOS のみ**: OL6 anaconda 13.x は UEFI インストール非対応です。NitroTPM や UEFI Secure Boot は有効化できません。
+   - **UEK4 必須**: `KERNEL=uek` かつ `UEK_RELEASE=4` のみが有効です。UEK2/3 は ENA ドライバを持ちません。UEK5/6/7 は OL6 ビルドが存在しません。RHCK 2.6.32 も ENA を持ちません。
+   - **ファイルシステムは ext4 または xfs のみ**: lvm / btrfs はこのレイヤーでサポートされません。
+   - **`linux-firmware` は恒久削除できない**: `kernel-uek` が依存関係として強く要求するため、`yum install kernel-uek` のたびに再インストールされます。
+   - **AWS VM Import/Export 公式サポート外**: 本ラッパーは `import-snapshot` + `register-image` を使ってポリシーを迂回しますが、将来 AWS がポリシーを厳格化すると動作不能になる可能性があります。
+   - **Phase A/B 検証済み、Phase C 未検証**: 静的検証 9 項目(osinfo-db エントリ、ISO checksum、リポジトリ HTTPS、dracut フラグ、cloud-init 提供状況、アップストリーム OL バージョン分岐)および OL6 ISO ブートテスト(virt-install + isolinux + Anaconda 13.21.263 TUI)は検証済みです。kickstart 完走、provision.sh の OL6 環境完走、cloud-init による `ec2-user` 作成、AWS Nitro 起動は **作者により未検証** です。
+   - **本番利用禁止**: OL7 よりさらに強い制約です。検証・学習・レガシーマイグレーション以外には絶対に使用しないでください。
 
 ---
 
@@ -500,7 +534,7 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 
 ### AI 生成について
 
-本ラッパースクリプトは、**Anthropic 社の Claude (Sonnet 4.5)** との対話を通じて 2026 年 5 月に反復的に開発・改善されたものです。Oracle Linux 8 / 9 / 10 の AWS 上での実ビルドで end-to-end の動作確認まで完了しています。Oracle Linux 7 の実験的サポートは、その後 2026 年 5 月に **Anthropic 社の Claude (Opus 4.7)** を用いて追加されました。OL7 パッチ機構自体は検証済み(sed 置換動作、構文整合性、冪等性)ですが、**OL7 の end-to-end AMI ビルドは作者により検証されていません**。
+本ラッパースクリプトは、**Anthropic 社の Claude (Sonnet 4.5)** との対話を通じて 2026 年 5 月に反復的に開発・改善されたものです。Oracle Linux 8 / 9 / 10 の AWS 上での実ビルドで end-to-end の動作確認まで完了しています。Oracle Linux 7 の実験的サポートは、その後 2026 年 5 月に **Anthropic 社の Claude (Opus 4.7)** を用いて追加されました。OL7 パッチ機構自体は検証済み(sed 置換動作、構文整合性、冪等性)ですが、**OL7 の end-to-end AMI ビルドは作者により検証されていません**。さらに 2026 年 5 月、**Anthropic 社の Claude (Opus 4.7)** を用いて Oracle Linux 6 の実験的サポートを追加しました。事前の 2 フェーズ検証(Phase A:静的検証 9 項目 — osinfo-db、ISO チェックサム、リポジトリ HTTPS、dracut フラグ、cloud-init 等。Phase B:libvirt 11.5 / qemu 10.0 環境で virt-install + Anaconda 13.21.263 TUI ブートテスト)を経て、2 つのランタイムパッチおよび動的生成 `distr/ol6-slim/` の構文検証は完了していますが、**OL6 の end-to-end AMI ビルド(kickstart 完走から AWS Nitro 起動まで)は作者により検証されていません**。
 
 本ラッパーから呼び出される上位の `oracle-linux-image-tools` プロジェクトは Oracle 社が独自に開発・公開しているもので、本リポジトリとは独立しています。
 

@@ -41,8 +41,10 @@
 - [Part B — Script-specific Specifications](#part-b--script-specific-specifications)
   - [B.1 build-ol-aws-ami.sh](#b1-build-ol-aws-amish)
   - [B.2 setup-vmimport-role.sh](#b2-setup-vmimport-rolesh)
-  - [B.3 env.properties.aws-ol{7,8,9,10}](#b3-envpropertiesaws-ol78910)
+  - [B.3 env.properties.aws-ol{6,7,8,9,10}](#b3-envpropertiesaws-ol6789-10)
+  - [B.4 OL6 runtime synthesis (distr/ol6-slim/ + cloud/aws/ patches)](#b4-ol6-runtime-synthesis-distrol6-slim--cloudaws-patches)
 - [Part C — Known Pitfalls & Lessons Learned](#part-c--known-pitfalls--lessons-learned)
+- [Part D — OL6 Overall Architecture](#part-d--ol6-overall-architecture)
 
 ---
 
@@ -656,29 +658,36 @@ attached policy.
 
 ---
 
-## B.3 `env.properties.aws-ol{7,8,9,10}`
+## B.3 `env.properties.aws-ol{6,7,8,9,10}`
 
 ### Identification
 
-Four companion templates, one per major Oracle Linux release supported.
+Five companion templates, one per major Oracle Linux release supported.
 They are committed in this directory and should be copied to
 `env.properties.local` before editing.
 
 The OL7 template is experimental — see C.10 for the rationale behind the
 runtime patch that makes it work against the upstream AWS cloud target.
 
+The OL6 template is even more experimental: the upstream does not ship a
+`distr/ol6-slim/` directory at all, so the wrapper synthesizes it at
+runtime in addition to two runtime `sed` patches. See B.4 and C.11–C.15
+for design rationale, and Part D for the overall OL6 architecture.
+
 ### Per-template differences
 
-| Key | OL10 template | OL9 template | OL8 template | OL7 template |
-|-----|--------------|--------------|--------------|--------------|
-| `WORKSPACE` | `/tmp/ol10-build-ws` | `/tmp/ol9-build-ws` | `/tmp/ol8-build-ws` | `/tmp/ol7-build-ws` |
-| `DISTR` | `ol10-slim` | `ol9-slim` | `ol8-slim` | `ol7-slim` |
-| `ISO_URL` | OL10 U1 | OL9 U7 | OL8 U10 | OL7 U9 (with `Server-` infix) |
-| `# OS_VARIANT` example | `rhel10.1` | `rhel9.7` | `rhel8.10` | `rhel7.9` |
-| `# AMI_NAME` example | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` |
-| `KERNEL` | unset (use distr default) | unset | unset | `uek` (required — see C.10) |
-| `UEK_RELEASE` | unset | unset | unset | `6` (the only viable UEK for OL7) |
-| Top-of-file warning banner | none | none | none | EOL / patch / production-prohibited notice |
+| Key | OL10 | OL9 | OL8 | OL7 | OL6 |
+|-----|------|-----|-----|-----|-----|
+| `WORKSPACE` | `/tmp/ol10-build-ws` | `/tmp/ol9-build-ws` | `/tmp/ol8-build-ws` | `/tmp/ol7-build-ws` | `/tmp/ol6-build-ws` |
+| `DISTR` | `ol10-slim` | `ol9-slim` | `ol8-slim` | `ol7-slim` | `ol6-slim` (synthesized) |
+| `ISO_URL` | OL10 U1 | OL9 U7 | OL8 U10 | OL7 U9 (with `Server-` infix) | OL6 U10 (with `Server-` infix) |
+| `# OS_VARIANT` example | `rhel10.1` | `rhel9.7` | `rhel8.10` | `rhel7.9` | `ol6.10` |
+| `# AMI_NAME` example | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` | `OracleLinux-6-U10-...` |
+| `KERNEL` | unset (use distr default) | unset | unset | `uek` (required — see C.10) | `uek` (required — see C.12) |
+| `UEK_RELEASE` | unset | unset | unset | `6` (the only viable UEK for OL7) | `4` (the only viable UEK for OL6) |
+| `ROOT_FS` | unset (xfs default) | unset | unset | unset | `ext4` (xfs also valid; no lvm/btrfs) |
+| `BOOT_MODE_BUILD` | unset | unset | unset | `bios` | `bios` |
+| Top-of-file warning banner | none | none | none | EOL / patch / production-prohibited notice | EOL / **2 patches** / runtime-synthesized `distr/` / production-prohibited notice |
 
 ### Maintenance rule
 
@@ -707,6 +716,115 @@ When the upstream rewrites the OL7 cloud=aws check:
    different (e.g. allowlist-style validation), the OL7 patch may need
    to be redesigned — update the section here and the comments in
    `phase3_clone_repository` together.
+
+---
+
+## B.4 OL6 runtime synthesis (`distr/ol6-slim/` + `cloud/aws/` patches)
+
+### Identification
+
+OL6 is supported through a different mechanism than OL7. Where OL7
+requires one runtime `sed` patch against an otherwise-complete
+distribution, OL6 requires **two** runtime `sed` patches **plus** the
+runtime synthesis of an entire `distr/ol6-slim/` directory that does not
+exist upstream. All four artifacts live inside `phase3_clone_repository`
+in `build-ol-aws-ami.sh` and are gated behind `OL_MAJOR_VERSION == 6`
+(except for patch #1, which is shared with OL7 via `-le 7`).
+
+### Wrapper-patch marker convention
+
+All wrapper-applied modifications to the upstream working copy must be
+discoverable by `grep -r '\[ol-aws-ami-builder' "${WORK_REPO_DIR}"`. The
+canonical marker format is:
+
+```
+[ol-aws-ami-builder OL{N} PATCH {short-tag}]
+```
+
+where `{N}` is the OL major version (6, 7, ...) and `{short-tag}` is a
+descriptive identifier (omitted when only one patch exists per OL major).
+Current markers:
+
+| Marker | File patched | Purpose |
+|--------|--------------|---------|
+| `[ol-aws-ami-builder OL6 PATCH]` | `cloud/aws/image-scripts.sh` | Remove OL8+ guard (OL6 mode) |
+| `[ol-aws-ami-builder OL7 PATCH]` | `cloud/aws/image-scripts.sh` | Remove OL8+ guard (OL7 mode) |
+| `[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]` | `cloud/aws/provision.sh` | Skip `kernel-uek-modules` install on OL6 |
+
+Each patch leaves a `.bak` backup file next to the modified one and
+includes a `grep -Fq` idempotency guard so re-runs against an existing
+clone do not double-apply.
+
+### `sed` invocation conventions
+
+1. **Delimiter**: prefer `|` (pipe) over `/` to avoid clashing with shell
+   path separators or comment `#` characters in the replacement text.
+2. **Anchor**: use a literal-string anchor that uniquely identifies the
+   line (`AWS images builder only supports OL8 and above` for patch #1,
+   `yum install -y "${YUM_VERBOSE}" kernel-uek-modules` for patch #2).
+3. **Idempotency**: precede the substitution with
+   `grep -Fq '[ol-aws-ami-builder OL{N} PATCH ...]'`; skip with an info
+   log when already applied.
+4. **Verification**: follow the substitution with a second `grep -Fq`
+   on the marker. `die` if missing (rather than letting Phase 5 fail
+   with an obscure error later).
+5. **Capture-group preservation for indentation**: when the upstream
+   line is whitespace-prefixed (e.g. `    yum install ...`), use
+   `\(\s*\)` and reference `\1` so the patched output retains the
+   original indentation.
+6. **GNU sed extensions are permitted**: the wrapper expects to run on
+   builder hosts with GNU sed (Amazon Linux 2/2023, Oracle Linux 8/9/10,
+   RHEL 9/10), so `\n` in the replacement is fine. BSD/macOS sed is not
+   supported.
+
+### `distr/ol6-slim/` runtime generation
+
+The four files are written by a sequence of `cat > {path} <<'EOF_OL6_*'`
+heredoc blocks. The single-quoted delimiter is mandatory:
+
+```bash
+cat > "${ol6_slim_dir}/provision.sh" <<'EOF_OL6_PROV'
+...
+EOF_OL6_PROV
+```
+
+Single-quoting prevents `${VARIABLE}` expansion **at wrapper time**, so
+references like `${YUM_VERBOSE}`, `${ROOT_FS,,}`, and `${KERNEL^^}` are
+preserved literally and expand later at `oracle-linux-image-tools`
+runtime (which is the intent).
+
+For embedded inner heredocs (e.g. `cat > /etc/dracut.conf.d/...
+<<EOF`), the wrapper uses **plain `<<EOF` without leading whitespace**
+rather than the tab-stripped `<<-EOF` form. This avoids any dependency
+on tab-vs-space handling in editors or tooling that might process the
+wrapper later.
+
+### Synchronization with `distr/ol7-slim/`
+
+If `distr/ol7-slim/` upstream changes structurally (function signatures
+in `image-scripts.sh`, kickstart section ordering, provision phase
+contracts), the OL6 heredoc templates must be reviewed and updated to
+match. The wrapper does NOT attempt to inherit anything from
+`distr/ol7-slim/` at runtime — the OL6 templates are completely
+self-contained for traceability.
+
+### Maintenance rule (OL6)
+
+When `oracle-linux-image-tools` is refactored:
+
+1. If `cloud::validate()` in `cloud/aws/image-scripts.sh` no longer
+   contains the OL8+ guard, patch #1 silently no-ops (the `grep -Fq`
+   guard reports a `log_warn`); no action forced unless the build
+   subsequently fails.
+2. If the `kernel-uek-modules` install line in
+   `cloud/aws/provision.sh` is removed or renamed, patch #2 silently
+   no-ops; OL6 is then expected to still work because the absent
+   package would no longer be installed.
+3. If `distr/ol7-slim/` structure changes (function signatures, common
+   helper names like `common::distr_cleanup`, `common::latest_kernel`,
+   etc.), the OL6 heredoc templates in `phase3_clone_repository` must
+   be updated by hand. This is the highest-risk surface for upstream
+   drift.
 
 ---
 
@@ -933,6 +1051,278 @@ becomes a no-op and a new patch site must be added. The marker
 `[ol-aws-ami-builder OL7 PATCH]` in the rewritten line is intentionally
 distinctive so that `grep -r` can find all wrapper-applied patches in
 the cloned tree.
+
+---
+
+## C.11 OL6/UEKR4 has no `kernel-uek-modules` package
+
+**Symptom**: When the upstream `cloud/aws/provision.sh`'s
+`cloud::install_aws_packages()` is executed on OL6, the line
+`yum install -y "${YUM_VERBOSE}" kernel-uek-modules` fails with
+`No package kernel-uek-modules available`.
+
+**Root cause**: The `kernel-uek-modules` package is a *split-out modules
+package* introduced in OL7 / UEK6 to keep the main `kernel-uek` RPM
+smaller. On OL6's UEKR4 (`4.1.12-124.x`), no such split exists — all
+driver `.ko` files (including `ena.ko`, `nvme.ko`, `nvme-core.ko`,
+`virtio*.ko`, `xen-*.ko`, `hv_*.ko`) are bundled directly inside the
+`kernel-uek` RPM itself. Verified against
+`https://yum.oracle.com/repo/OracleLinux/OL6/UEKR4/x86_64/repodata/primary.xml.gz`:
+no `kernel-uek-modules-*` entries exist.
+
+**Fix**: `phase3_clone_repository` applies a second runtime patch on top
+of the OL7-shared `image-scripts.sh` patch, rewriting the offending line
+to be conditional on `ORACLE_RELEASE >= 7`:
+
+```bash
+# [ol-aws-ami-builder OL6 PATCH kernel-uek-modules] OL6/UEKR4 has no separate kernel-uek-modules package (modules bundled in kernel-uek)
+[[ "${ORACLE_RELEASE}" -ge 7 ]] && yum install -y "${YUM_VERBOSE}" kernel-uek-modules
+```
+
+The `&&` short-circuit makes the line a no-op on OL6 while preserving
+the original semantics for OL7+.
+
+**Guard rails**:
+
+1. A `grep -Fq '[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]'`
+   precedes the substitution for idempotency.
+2. A `grep -Fq 'yum install -y "${YUM_VERBOSE}" kernel-uek-modules'`
+   verifies the original line is still present (if upstream removes it,
+   the patch is skipped with a `log_warn`).
+3. Post-substitution, the marker grep `die`s the script if the patch
+   silently failed to apply.
+
+**Verification**: ENA / NVMe driver availability on the produced AMI is
+confirmed by `lsmod | grep -E '^(ena|nvme)'` after first boot, plus
+`modinfo ena nvme nvme_core` to inspect the kernel module metadata. This
+check is in Phase C-4 of the verification plan (not yet executed by the
+author).
+
+---
+
+## C.12 OL6 + UEK4 is the only viable combination for AWS Nitro
+
+**Symptom**: Building an OL6 AMI with `KERNEL=uek` and `UEK_RELEASE=2`
+or `UEK_RELEASE=3` produces an AMI that fails to boot on Nitro
+instances with `kernel panic: no driver for 0000:00:05.0` (the ENA
+device).
+
+**Root cause**: The Amazon ENA driver was added to UEK starting with
+UEK4 (4.1.12-124.x for OL6, 4.14.35-1818.x for OL7). UEK2 (2.6.39) and
+UEK3 (3.8.13) predate AWS Nitro entirely. RHCK on OL6 (2.6.32-754.x)
+also lacks the ENA driver — Red Hat backported ENA only as far as
+RHEL 7.4. UEK5 (4.14) and later are not built for OL6.
+
+**Fix**: The OL6 env template hard-codes `KERNEL=uek` and
+`UEK_RELEASE=4`. The synthesized `distr/ol6-slim/image-scripts.sh`'s
+`distr::validate()` enforces `UEK_RELEASE=4` explicitly:
+
+```bash
+[[ "${UEK_RELEASE}" =~ ^4$ ]] || common::error "UEK_RELEASE must be 4 (OL6 + AWS Nitro requires UEK4; UEK2/3 lack ENA, UEK5+ not available)"
+```
+
+This is more restrictive than OL7's `^(6)$` pattern but follows the
+same template.
+
+**Caveat**: If Oracle ever publishes a new UEK release backported to
+OL6 (extremely unlikely — UEK is tightly coupled to glibc and
+toolchain versions), this validator would need to be relaxed.
+
+---
+
+## C.13 OL6 `kernel-uek` has a hard install dependency on `linux-firmware`
+
+**Symptom**: Setting `LINUX_FIRMWARE="No"` in the env file successfully
+removes `linux-firmware` during provisioning, but a later
+`yum install kernel-uek` (or any kernel update) re-installs it.
+
+**Root cause**: The OL6 `kernel-uek` RPM declares
+`Requires: linux-firmware`. On OL7+, this requirement was relaxed to
+`Recommends:` (or removed entirely as the firmware was vendored into
+the kernel package). The OL6 dependency is a hard one, so `yum` will
+always pull `linux-firmware` back in to satisfy it.
+
+**Fix**: None — this is documented as a known limitation. The OL6 env
+template's `LINUX_FIRMWARE` comment notes the stickiness. The
+synthesized `distr/ol6-slim/provision.sh` still honors
+`LINUX_FIRMWARE="No"` by issuing `yum remove -y linux-firmware`, but
+the user is informed via the comment that any subsequent kernel
+operation will undo it.
+
+**Future-proofing**: If shrinking the AMI to omit firmware is critical,
+the recommended approach is to use `rpm -e --nodeps linux-firmware`
+after all `kernel-uek` operations complete (e.g. very late in the
+provisioning), and to avoid running `yum update` post-image-build.
+This is out of scope for the current wrapper.
+
+---
+
+## C.14 OL6 ISO's `.treeinfo` does not declare `images/boot.iso`
+
+**Symptom**: `virt-install --location ${ISO}` against the OL6 U10 ISO
+on libvirt 11.5 / qemu 10.0 succeeds (TUI text installer appears), but
+older `virt-install` versions (libvirt ≤ 8.x) abort with
+`Error: cannot find boot.iso in installation tree`.
+
+**Root cause**: Anaconda's `.treeinfo` schema changed across major OL
+versions. OL6's `/.treeinfo` declares only `[images-x86_64]` with
+`kernel = images/pxeboot/vmlinuz` and `initrd = images/pxeboot/initrd.img`,
+without the `boot.iso` key that some `virt-install` versions expect.
+
+**Fix**: The wrapper relies on libvirt 11.5+'s relaxed handling of
+`.treeinfo` (kernel/initrd suffice; `boot.iso` is no longer required).
+Phase A.4 verified this on the canonical RHEL 10 builder (libvirt
+11.5.0-2.el10, qemu-kvm 10.0.0-13.el10). The OL6 env template's comment
+flags this behavior. No code change is needed unless the builder host
+is on an older libvirt; in that case, the operator would need to pass
+`--location ${ISO},kernel=images/pxeboot/vmlinuz,initrd=images/pxeboot/initrd.img`
+explicitly. The wrapper does not currently expose that knob.
+
+**Verification**: Phase B-1 boot test launched a libvirt domain from
+the OL6 U10 ISO and confirmed: ISO mounts, isolinux loads, Anaconda
+13.21.263 TUI appears at the kickstart prompt. No further phase has
+been executed by the author.
+
+---
+
+## C.15 `detect_os_variant()` fallback for OL6 (osinfo-db `ol6.X` naming)
+
+**Symptom**: On builders with `osinfo-db-20250606+` (RHEL 10 default),
+`virt-install --os-variant oraclelinux6.10` succeeds, but on older
+builders (`osinfo-db-20230101`), the same call fails with
+`Unknown OS variant 'oraclelinux6.10'`.
+
+**Root cause**: osinfo-db went through a naming transition for OL
+entries: older builds shipped `oraclelinux{N}.{U}` short-ids; newer
+builds ship `ol{N}.{U}` (e.g. `ol6.10`, `ol7.9`). Some builders have
+both, some have only one.
+
+**Fix**: `detect_os_variant()` was extended to prepend the modern
+`ol{N}.{U}` family at the top of its candidate chain:
+
+```bash
+# 0. Modern osinfo-db 'ol{N}.{U}' short-id
+candidates+=("ol${major}.${update}")
+for ((u = update - 1; u >= 0; u--)); do
+  candidates+=("ol${major}.${u}")
+done
+candidates+=("ol${major}-unknown" "ol${major}")
+```
+
+The legacy `oraclelinux{N}.{U}` family remains in the chain
+immediately below. On OL6 builders that have neither, the chain
+continues to `rhel6.{U}` which is binary-compatible with OL6 and is
+universally present.
+
+**Caveat**: Both `osinfo-query` invocations the wrapper performs are
+read-only and have no side effects. If `osinfo-query` itself is
+unavailable (uncommon in 2026 but possible on stripped-down builder
+images), `detect_os_variant()` returns 1 and the operator must set
+`OS_VARIANT` manually in the env file.
+
+---
+
+# Part D — OL6 Overall Architecture
+
+## D.1 Why OL6 needs a different architecture than OL7
+
+OL7 support in this wrapper is achieved by **modifying** the upstream's
+existing OL7 distribution (`distr/ol7-slim/` is complete) — a single
+`sed` patch removes the AWS-specific guard, and the rest of the
+upstream pipeline runs untouched.
+
+OL6 support requires **synthesizing** what upstream omits. There is no
+`distr/ol6-slim/` at all, and `cloud/aws/provision.sh` contains a line
+that fails outright on OL6 because of an OL6-specific package layout.
+Three runtime modifications are therefore needed:
+
+| # | Type | Target | Purpose |
+|---|------|--------|---------|
+| 1 | `sed` patch | `cloud/aws/image-scripts.sh` | Remove OL8+ guard (shared with OL7) |
+| 2 | `sed` patch | `cloud/aws/provision.sh` | Skip `kernel-uek-modules` install on OL6 (C.11) |
+| 3 | Directory synthesis | `distr/ol6-slim/` (4 files) | Provide kickstart + image-scripts + provision logic |
+
+All three live inside `phase3_clone_repository` so they are
+re-established on every clone. The wrapper itself contains the
+authoritative templates for the four `distr/ol6-slim/` files as quoted
+heredocs.
+
+## D.2 Phase A + B verification summary
+
+OL6 support was added after a structured two-phase pre-implementation
+verification. All checks below were performed against `oracle-linux`
+main branch as of 2026-05 and against `osinfo-db-20250606-1.el10` on
+RHEL 10.0 with libvirt 11.5.0-2.el10, qemu-kvm 10.0.0-13.el10.
+
+**Phase A — Static checks (9 items, all PASS):**
+
+1. osinfo-db has `ol6.0` ... `ol6.10` (11 entries) and `rhel6.0` ...
+   `rhel6.10` (11 entries) — `detect_os_variant()` will resolve to
+   either family.
+2. Upstream `oracle-linux-image-tools` has `distr/ol7-slim/`,
+   `distr/ol8-slim/`, `distr/ol8-aarch64/`, `distr/ol9-slim/`,
+   `distr/ol9-aarch64/`, `distr/ol10-slim/`, `distr/ol10-aarch64/` —
+   but NO `distr/ol6-slim/`. The synthesis approach is required.
+3. `bin/build-image.sh` regex for valid `DISTR_NAME` is
+   `^OL(6|7|8|9|(10))U` — OL6 is accepted by the upstream entry point.
+4. `cloud/aws/image-scripts.sh` line 33 contains the OL8+ guard
+   verbatim, identical to the OL7 case. Patch #1 reuses the OL7
+   sed pattern.
+5. `cloud/aws/provision.sh` contains
+   `yum install -y "${YUM_VERBOSE}" kernel-uek-modules` at line 58.
+   Patch #2's sed pattern matches.
+6. ISO URL
+   `https://yum.oracle.com/ISOS/OracleLinux/OL6/u10/x86_64/OracleLinux-R6-U10-Server-x86_64-dvd.iso`
+   resolves (HTTP 200, 4,072,669,184 bytes, Last-Modified 2018-06-25).
+7. Checksum URL
+   `https://linux.oracle.com/security/gpg/checksum/OracleLinux-R6-U10-Server-x86_64.checksum`
+   resolves and matches the ISO SHA256
+   `625044388ee60a031965a42a32f4c1de0c029268975edcd542fd14160e0dadcb`.
+8. OL6 UEKR4 repo (`https://yum.oracle.com/repo/OracleLinux/OL6/UEKR4/x86_64/`)
+   responds HTTP 200; `primary.xml.gz` confirms `kernel-uek-4.1.12-*`
+   present and `kernel-uek-modules-*` absent.
+9. OL6 cloud-init availability:
+   `cloud-init-18.4-2.0.9.el6.x86_64` and
+   `cloud-utils-growpart-0.27-9.el6.x86_64` confirmed in the
+   `ol6_addons` repo.
+
+**Phase B — Dynamic checks (2 items, all PASS):**
+
+1. ISO boot test: `virt-install --name=ol6-boot-test --memory=2048
+   --vcpus=2 --disk size=20 --location=${ISO_PATH} --os-variant=ol6.10
+   --network=default --graphics=none --console pty,target_type=serial`
+   succeeds; isolinux loads; Anaconda 13.21.263 TUI appears at the
+   kickstart prompt and accepts text input. Domain was destroyed
+   immediately afterwards (no actual install).
+2. `osinfo-query os | grep ^ol6` returns 11 rows on the builder; the
+   `ol6.10` short-id is selectable by `virt-install --os-variant`.
+
+**Phase C (NOT executed):** kickstart completion, provision.sh on OL6,
+cloud-init ec2-user on a Nitro instance, end-to-end AMI launch. These
+are reserved for the next iteration when an OL6 build is attempted on
+a real builder host.
+
+## D.3 Comparison to OL7 support
+
+| Aspect | OL7 | OL6 |
+|--------|-----|-----|
+| Upstream `distr/` | Present (`ol7-slim`) | **Absent** — synthesized at runtime |
+| `sed` patches needed | 1 (`image-scripts.sh` guard) | 2 (`image-scripts.sh` + `provision.sh`) |
+| Kernel | UEK6 (4.14) | UEK4 (4.1.12) — only ENA-capable kernel for OL6 |
+| Filesystem options | xfs, btrfs | ext4, xfs (no lvm/btrfs at this layer) |
+| Init system | systemd | Upstart (`service` / `chkconfig`) |
+| Bootloader | GRUB2 | GRUB Legacy |
+| Kickstart syntax | Anaconda 19.x (`inst.` prefix) | Anaconda 13.x (no `inst.` prefix) |
+| NTP daemon | chronyd | ntpd |
+| `linux-firmware` | optional | hard dependency of `kernel-uek` |
+| `kernel-uek-modules` package | present (UEK6) | absent (UEK4) |
+| AWS VM Import support | EOL (2024-12-31) | EOL (with ELS ended 2024) |
+| End-to-end validated | No (patch verified, build not run) | No (Phase A+B done, Phase C not run) |
+
+The asymmetry in the table is the rationale for why OL6 needed Part D
+and OL7 did not: OL7 is a thin patch on top of an otherwise-functional
+upstream pipeline, whereas OL6 essentially rebuilds the OL-specific
+glue layer from scratch inside the wrapper.
 
 ---
 
