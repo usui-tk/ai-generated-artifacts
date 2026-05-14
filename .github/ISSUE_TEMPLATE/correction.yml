@@ -1,0 +1,46 @@
+name: 📝 Factual correction
+description: Report an error, broken link, outdated information, or typo in an artifact
+title: "[correction] <area>: <one-line summary>"
+labels: ["correction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a correction. This repository is a personal AI-assisted knowledge base; corrections are reviewed on a best-effort basis with no SLA.
+
+        Before filing, please skim [CONTRIBUTING.md](https://github.com/usui-tk/ai-generated-artifacts/blob/main/CONTRIBUTING.md) for the issue conventions.
+
+  - type: input
+    id: artifact_path
+    attributes:
+      label: Affected artifact path
+      description: Full path within the repository. Include a section anchor or line range if known.
+      placeholder: scripts/aws/ol-aws-ami-builder/SPEC.md §B.3.2
+    validations:
+      required: true
+
+  - type: textarea
+    id: incorrect
+    attributes:
+      label: What the artifact currently says (incorrect)
+      description: Quote the text or describe the behaviour. Short snippets only — please respect copyright.
+      placeholder: |
+        > Quoted text from the artifact, or a brief description.
+    validations:
+      required: true
+
+  - type: textarea
+    id: correct
+    attributes:
+      label: What it should say (correct)
+      description: The proposed correction. Cite a source if the change is non-obvious (e.g., a vendor doc URL).
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Optional — version of the upstream tool, date the original was correct, AWS region, etc.
+    validations:
+      required: false

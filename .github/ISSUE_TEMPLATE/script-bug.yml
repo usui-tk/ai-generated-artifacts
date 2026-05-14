@@ -1,0 +1,79 @@
+name: 🐞 Script bug report
+description: Report unexpected behaviour or a failure while running one of the scripts in this repository
+title: "[bug] <script>: <one-line summary>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template only for **scripts in this repository** (PowerShell, Bash, Python under `scripts/`). For documentation errors, use the "Factual correction" template instead.
+
+        Please read the affected project's README and SPEC before filing — many common failures are documented in the project's `Part D — Known Pitfalls` section.
+
+  - type: input
+    id: script_path
+    attributes:
+      label: Script path
+      description: Full path within the repository.
+      placeholder: scripts/aws/ol-aws-ami-builder/build-ol-aws-ami.sh
+    validations:
+      required: true
+
+  - type: input
+    id: invocation
+    attributes:
+      label: Exact command you ran
+      placeholder: ./build-ol-aws-ami.sh --env env.properties.aws-ol10 --build-only
+    validations:
+      required: true
+
+  - type: input
+    id: phase
+    attributes:
+      label: Phase / step at which the failure occurred
+      description: The phase ID (e.g. "Phase 5", "P06", "Phase 8 PDF reclassification") makes triage substantially faster.
+      placeholder: Phase 5 (build VMDK)
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log excerpt (10–50 lines)
+      description: |
+        Paste the 10–50 lines around the failure. **Please do NOT paste the entire log** — extract the relevant window.
+        Redact any account IDs, ARNs, or secrets before submitting.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        OS / version, PowerShell version (`$PSVersionTable`), AWS region, instance type, target Oracle Linux version, etc. — whatever applies.
+      placeholder: |
+        - OS: RHEL 10.0 on m8i.xlarge (Tokyo, nested-virt enabled)
+        - PowerShell: 5.1.26100.4652 (where applicable)
+        - Target: env.properties.aws-ol10
+    validations:
+      required: true
+
+  - type: textarea
+    id: workarounds
+    attributes:
+      label: What you already tried
+      description: e.g., cleaned `${WORKSPACE}`, switched filesystem, re-ran with `-Clean`, etc.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: pitfalls
+    attributes:
+      label: Pre-filing checks
+      options:
+        - label: I have read the relevant project's `Part D — Known Pitfalls & Lessons Learned` and confirmed this is not a documented pitfall (or, if it is, I'm reporting because the documented mitigation did not work).
+          required: true
+        - label: My log excerpt does NOT contain real secrets, account IDs, or ARNs I want to keep private.
+          required: true

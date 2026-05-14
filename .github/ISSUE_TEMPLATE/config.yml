@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Read the contribution guide first
+    url: https://github.com/usui-tk/ai-generated-artifacts/blob/main/CONTRIBUTING.md
+    about: Scope, expectations, and what is / isn't accepted in this repository.
+  - name: 🔒 Report a security concern (private)
+    url: https://github.com/usui-tk/ai-generated-artifacts/security/advisories/new
+    about: Do NOT open a public issue for security-impacting reports. Use a private advisory.
