@@ -45,6 +45,9 @@ Best-practice (PSA6xxx):
   PSA6005  Default value on Mandatory parameter .. Warning
   PSA6006  Switch parameter defaults to $true .... Warning
 
+File format / encoding (PSA7xxx):
+  PSA7001  PowerShell script lacks UTF-8 BOM ..... Warning
+
 Usage
 -----
   psa.py <file.ps1>                       Analyze a single file
@@ -129,7 +132,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.0.0'
+__version__ = '3.1.0'
 
 # ---------------------------------------------------------------------------
 # Severity and rule registry
@@ -198,6 +201,10 @@ RULES = [
      'Mandatory parameter must not have a default value'),
     ('PSA6006', 'warning', True,
      'Switch parameter must not default to $true'),
+
+    # File format / encoding (PSA7xxx)
+    ('PSA7001', 'warning', True,
+     'PowerShell script lacks UTF-8 BOM'),
 ]
 
 CODE_TO_RULE = {r[0]: r for r in RULES}
@@ -1081,6 +1088,49 @@ def check_switch_default_true(clean):
 
 
 # ---------------------------------------------------------------------------
+# File format / encoding checks (PSA7xxx)
+# ---------------------------------------------------------------------------
+# These rules operate on file-level metadata rather than on the decoded text
+# body, because some checks (BOM presence, byte-encoding sniffing, etc.) need
+# information that is lost once Python has decoded the file to a str.
+# Such metadata is computed in main() before decoding and passed to
+# analyze_text() via the optional file_meta dict.
+
+
+def check_utf8_bom_missing(file_meta):
+    """PSA7001: PowerShell script lacks UTF-8 BOM.
+
+    Windows PowerShell 5.1 falls back to the system Active Code Page
+    (Shift-JIS / cp932 on ja-JP locales) when a script has no BOM and
+    contains non-ASCII bytes, causing mojibake in the script's log
+    output. Including the UTF-8 BOM forces correct interpretation
+    regardless of console code page.
+
+    Parameters
+    ----------
+    file_meta : dict | None
+        Optional metadata dict. Must contain 'has_bom' (bool) when this
+        rule is to fire meaningfully. When None or missing, the rule
+        emits nothing (preserves backward compatibility for callers
+        that only pass text).
+    """
+    if not file_meta:
+        return []
+    # Default True: when 'has_bom' is unknown (e.g. legacy callers that
+    # pass an empty dict), assume a BOM is present and stay silent rather
+    # than producing a false positive.
+    if file_meta.get('has_bom', True):
+        return []
+    return [{
+        'severity': 'warning', 'code': 'PSA7001',
+        'line': 0, 'col': 0,
+        'message': ('PowerShell script lacks UTF-8 BOM '
+                    '(Windows PowerShell 5.1 may misinterpret non-ASCII '
+                    'as Shift-JIS without BOM)'),
+    }]
+
+
+# ---------------------------------------------------------------------------
 # Inline suppression
 # ---------------------------------------------------------------------------
 
@@ -1454,8 +1504,22 @@ class Config:
 # Analyzer driver
 # ---------------------------------------------------------------------------
 
-def analyze_text(text, cfg):
-    """Run every enabled rule over *text*; return a sorted list of issues."""
+def analyze_text(text, cfg, file_meta=None):
+    """Run every enabled rule over *text*; return a sorted list of issues.
+
+    Parameters
+    ----------
+    text : str
+        The decoded PowerShell source text. The UTF-8 BOM (if any) is
+        expected to have already been stripped by the caller.
+    cfg : Config
+        Resolved analyzer configuration.
+    file_meta : dict | None
+        Optional file-level metadata (e.g., {'has_bom': True}). Used by
+        file-format rules (PSA7xxx). When None, file-format rules emit
+        nothing -- preserves backward compatibility for callers that pass
+        only ``(text, cfg)``.
+    """
     clean = strip_strings_and_comments(text)
 
     raw = []  # list of issue dicts
@@ -1519,6 +1583,10 @@ def analyze_text(text, cfg):
         raw += check_mandatory_default(clean)
     if cfg.enabled['PSA6006']:
         raw += check_switch_default_true(clean)
+
+    # File format / encoding (PSA7xxx) -- operate on file metadata, not text
+    if cfg.enabled['PSA7001']:
+        raw += check_utf8_bom_missing(file_meta)
 
     # Inline suppression
     file_supp, line_supp = collect_suppressions(text)
@@ -2001,11 +2069,19 @@ def main(argv=None):
     total_err = total_warn = 0
     for path in files:
         try:
-            text = path.read_text(encoding='utf-8', errors='replace')
+            raw_bytes = path.read_bytes()
         except OSError as e:
             print(f'psa.py: cannot read {path}: {e}', file=sys.stderr)
             continue
-        issues = analyze_text(text, cfg)
+        # Detect BOM before decoding. Python's bytes.decode('utf-8') keeps
+        # the BOM as U+FEFF in the resulting str, but our analyzer expects
+        # a BOM-free text body. Strip the BOM bytes here and remember the
+        # presence flag for the PSA7xxx (file format) rule family.
+        has_bom = raw_bytes.startswith(b'\xef\xbb\xbf')
+        body = raw_bytes[3:] if has_bom else raw_bytes
+        text = body.decode('utf-8', errors='replace')
+        file_meta = {'has_bom': has_bom}
+        issues = analyze_text(text, cfg, file_meta=file_meta)
         per_file.append((path, text, issues))
         total_err += sum(1 for i in issues if i['severity'] == 'error')
         total_warn += sum(1 for i in issues if i['severity'] == 'warning')

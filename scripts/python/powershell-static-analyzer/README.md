@@ -22,6 +22,23 @@ schemas, environment detection contract), see [`SPEC.md`](./SPEC.md).
 
 ## What's new
 
+### 3.1.0 — UTF-8 BOM enforcement (PSA7xxx category)
+
+- **New rule category `PSA7xxx`** (file format / encoding) introduced
+  for file-level checks that operate on raw bytes before UTF-8 decoding.
+- **New rule `PSA7001` (warning, default on)**: PowerShell script
+  lacks UTF-8 BOM. Windows PowerShell 5.1 falls back to the system
+  Active Code Page (Shift-JIS / cp932 on ja-JP) when a `.ps1` file has
+  no BOM and contains non-ASCII bytes, causing mojibake. Adding the
+  three-byte UTF-8 BOM (`0xEF 0xBB 0xBF`) at the start of the file
+  forces correct interpretation regardless of console code page.
+- **`analyze_text()` signature** extended with optional `file_meta`
+  parameter (backward compatible — existing callers passing only
+  `(text, cfg)` are unaffected; PSA7xxx rules become no-ops).
+- **`main()` file reader** switched from `path.read_text()` to
+  `path.read_bytes()` so the BOM can be inspected before decoding
+  (`read_text` silently strips BOM, defeating any in-text inspection).
+
 ### 2.3.0 — Hardened remote-config fetch
 
 The `--config <URL>` code path is now production-grade:
@@ -100,7 +117,7 @@ zero-dependency design.
 
 | Area | v2.0 |
 |:---|:---|
-| Rule codes | `PSA1001`–`PSA6006` (27 rules) |
+| Rule codes | `PSA1001`–`PSA7001` (28 rules) |
 | Output formats | Text / JSON / SARIF 2.1.0 |
 | Suppression | `# psa-disable-line`, `next-line`, `file` |
 | Configuration | `.psa.config.json` + CLI |
@@ -309,6 +326,12 @@ optional column, and a short message.
 | **PSA6004** | ✅ on | Avoid `$global:` variable definition |
 | **PSA6005** | ✅ on | Mandatory parameter must not have a default value |
 | **PSA6006** | ✅ on | Switch parameter must not default to `$true` |
+
+`PSA7xxx` — file format / encoding (Warning)
+
+| Code | Sev | Default | Description |
+|:---|:---:|:---:|:---|
+| **PSA7001** | Warning | ✅ on | PowerShell script lacks UTF-8 BOM (Windows PowerShell 5.1 may misinterpret non-ASCII as Shift-JIS without BOM) |
 
 ### Why some rules are disabled by default
 

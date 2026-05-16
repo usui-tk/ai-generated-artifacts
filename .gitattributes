@@ -17,11 +17,17 @@
 # Line-ending discipline by language
 # -----------------------------------------------------------------------------
 
-# PowerShell scripts: CRLF on disk (Windows PowerShell 5.1 reads UTF-8-BOM+CRLF
-# unambiguously; LF on Windows can interact badly with cp932 fallback).
-*.ps1     text eol=crlf
-*.psm1    text eol=crlf
-*.psd1    text eol=crlf
+# PowerShell scripts: UTF-8 working-tree encoding, CRLF on disk.
+# Windows PowerShell 5.1 reads UTF-8-BOM+CRLF unambiguously; LF on Windows
+# can interact badly with cp932 fallback. The working-tree-encoding=UTF-8
+# attribute documents the intent and protects against accidental Shift-JIS
+# or UTF-16 re-encoding by third-party editors on ja-JP Windows hosts.
+# Note: this attribute does NOT enforce the UTF-8 BOM byte sequence itself.
+# BOM enforcement is performed at lint time by psa.py rule PSA7001
+# (see scripts/python/powershell-static-analyzer/).
+*.ps1     text working-tree-encoding=UTF-8 eol=crlf
+*.psm1    text working-tree-encoding=UTF-8 eol=crlf
+*.psd1    text working-tree-encoding=UTF-8 eol=crlf
 
 # Shell / Bash / Python: LF only (Unix tooling, including Linux runtimes).
 *.sh      text eol=lf

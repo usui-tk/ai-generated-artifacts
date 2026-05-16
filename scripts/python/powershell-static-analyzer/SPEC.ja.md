@@ -143,7 +143,12 @@ API には**含まれず**、いつでも変更されえます。
 
 `psa.py` はバッチプロセッサです。各入力ファイルについて:
 
-1. UTF-8 で**読み込む**（不正バイトは置換）
+1. ファイルを**生バイト**で読み込み、オフセット 0 の UTF-8 BOM
+   (`0xEF 0xBB 0xBF`) を検出する。BOM があれば取り除き、残りのバイト列を
+   UTF-8 としてデコードする（不正シーケンスは置換）。BOM 有無のフラグは
+   `file_meta` dict に保持し、デコード済みテキストと共に
+   `analyze_text()` に渡すことで、ファイル形式系ルール (PSA7xxx) が
+   参照できるようにする。
 2. **トークン化**：文字列とコメントの内容を同じ長さの空白に置換
    （行・列位置を保持）
 3. 有効化された各ルールを生テキストまたはトークン化テキストに対して
@@ -484,6 +489,68 @@ Mandatory パラメータは決してデフォルトを使用しないため、�
 
 **検出**: `[switch]$Name = $true` パターン。switch は常に `$false`
 デフォルトであり、`$true` 設定は呼び出し側を混乱させます。
+
+### 4.28 PSA7001 — UTF-8 BOM の欠落
+
+- **重大度**: Warning
+- **デフォルト**: 有効
+- **カテゴリ**: PSA7xxx (file format / encoding)
+
+#### 動機
+
+Windows PowerShell 5.1 は、BOM が無い `.ps1` ファイルを、システムの
+Active Code Page (`chcp`) を使って読み込みます。ja-JP ホストでは
+既定で Shift-JIS / cp932 となるため、 UTF-8 で書かれているが BOM 付き
+でコミットされていない `.ps1` は、ログ文字列、パラメータヘルプテキスト、
+`Write-Host` 呼び出しなどに含まれる非 ASCII バイト列がすべて文字化け
+します。PowerShell 7.x は既定で UTF-8 (BOM 無し) を解釈するため
+影響を受けませんが、サポート対象の実行環境から PS 5.1 が完全に
+退役するまで (Windows Server 2019/2022/2025 は既定で PS 5.1 を同梱)、
+BOM は堅牢な可搬性のあるエンコーディングマーカーであり続けます。
+
+#### 検出
+
+入力ファイルの先頭 3 バイトが `0xEF 0xBB 0xBF` で**ない**場合に発火します。
+判定は UTF-8 デコード前の生バイトに対して行います。これは
+`pathlib.Path.read_text()` が BOM を黙って取り除いてしまうため、
+デコード後の文字列上で BOM 有無を判定できないからです。
+
+#### 報告位置
+
+ファイル単位の検出: `line: 0, col: 0` (§2.3 の規約通り)。
+
+#### 抑制方法
+
+ファイル先頭の `# psa-disable-file PSA7001` によるインライン抑制が
+可能です。注意点として、本ルールは BOM が無いときのみ発火し、
+BOM が無いということは PS 5.1 でファイルが Shift-JIS と解釈される
+可能性があるということですが、抑制コメント自身は ASCII のみで
+構成されているため PS / Python のいずれでも問題なく解析できます。
+設定ファイルでの抑制 (`.psa.config.json` 内の
+`"disable": ["PSA7001"]`) もサポートしています。
+
+#### 修正方法
+
+ファイルを UTF-8 BOM 付きで保存し直します。例:
+
+- **PowerShell 5.1**:
+  ```powershell
+  $content = Get-Content -Raw -Path .\script.ps1
+  $utf8Bom = New-Object System.Text.UTF8Encoding $true
+  [System.IO.File]::WriteAllText('.\script.ps1', $content, $utf8Bom)
+  ```
+- **PowerShell 7.x**: `Set-Content -Encoding utf8BOM`
+- **VS Code**: ステータスバー → 「UTF-8」 → 「Save with Encoding」 → 「UTF-8 with BOM」
+
+#### 限界
+
+- 先頭 3 バイトのみを判定します。マルチバイト BOM 派生
+  (UTF-16 LE/BE、UTF-32) は対象外であり、将来の PSA7002 で
+  対応する想定です。
+- BOM の有無のみを確認します。ファイル全体の UTF-8 妥当性は
+  別ルール (将来の PSA7003 を想定) で扱います。
+- PowerShell 7.x のみを対象とする環境では、設定ファイル経由で
+  本ルールを抑制可能です。
 
 ---
 
@@ -1054,6 +1121,7 @@ Info:
 | PSA6004 | warning | ✅ |
 | PSA6005 | warning | ✅ |
 | PSA6006 | warning | ✅ |
+| PSA7001 | warning | ✅ |
 
 ---
 
@@ -1061,6 +1129,7 @@ Info:
 
 | バージョン | 日付 | 変更 |
 |:---|:---|:---|
+| 3.1.0 | 2026 | 新カテゴリ PSA7xxx (file format / encoding) を導入。PSA7001 を追加: PowerShell スクリプトに UTF-8 BOM が無い (warning、デフォルト有効)。`analyze_text()` のシグネチャに optional `file_meta` パラメータを追加（後方互換）。`main()` のファイル読み込みを `path.read_text()` から `path.read_bytes()` に変更し、デコード前に BOM を検出可能とした。§2.2 処理モデルを併せて更新。§4.28 参照 |
 | 2.3.0 | 2026 | リモート設定取得を堅牢化: 明示的な TLS 1.2 最小バージョン設定（最大は TLS 1.3 まで自動ネゴシエート）、ブラウザライク User-Agent（Chrome 131）+ Sec-Ch-Ua クライアントヒント、5xx およびネットワークエラーに対する指数バックオフリトライ（4xx はリトライしない）、環境変数によるチューニング（`PSA_CONFIG_TIMEOUT`, `PSA_CONFIG_MAX_RETRIES`, `PSA_CONFIG_QUIET`）。§5.4 参照 |
 | 2.2.0 | 2026 | 設定ファイルを JSONC 形式に拡張（行 `//` ・ブロック `/* */` コメント対応）。`--config` がローカルパスに加え http(s) URL を受け付け（§5.4）。テンプレートファイル `.psa.config.json.template` を同梱し、全オプションをビルトインデフォルト付きで記載 |
 | 2.1.0 | 2026 | 初版。`psa.py` 2.1.0 向けに §8（環境検出）を追加。既存挙動（ルール、フォーマット、CLI）は `psa.py` 2.0.0 から継承 |

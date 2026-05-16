@@ -147,7 +147,12 @@ Internal Python module boundaries (function and class names within
 
 `psa.py` is a batch processor. For each input file:
 
-1. **Read** the file as UTF-8, replacing malformed bytes
+1. **Read** the file as raw bytes; detect the UTF-8 BOM
+   (`0xEF 0xBB 0xBF`) at offset 0; strip the BOM if present; decode the
+   remaining bytes as UTF-8, replacing malformed sequences. The BOM
+   presence flag is preserved in a `file_meta` dict and passed alongside
+   the decoded text to `analyze_text()` so file-format rules
+   (PSA7xxx) can act on it.
 2. **Tokenize** by replacing string and comment content with spaces of
    the same length (preserving line and column positions)
 3. **Run** every enabled rule against either the raw text or the
@@ -489,6 +494,68 @@ parameter can never use its default; declaring one is misleading.
 
 **Detection**: Pattern `[switch]$Name = $true`. A switch always
 defaults to `$false`; setting it to `$true` confuses callers.
+
+### 4.28 PSA7001 — Missing UTF-8 BOM
+
+- **Severity**: Warning
+- **Default**: Enabled
+- **Category**: PSA7xxx (file format / encoding)
+
+#### Rationale
+
+Windows PowerShell 5.1 reads `.ps1` files using the system Active Code
+Page (`chcp`) when no BOM is present. On a ja-JP host that defaults to
+Shift-JIS / cp932, a `.ps1` file authored as UTF-8 but committed without
+BOM gets mis-decoded — every non-ASCII byte sequence in log strings,
+parameter help text, or `Write-Host` calls becomes mojibake. PowerShell
+7.x defaults to UTF-8 without BOM and is unaffected, but until 5.1 is
+fully retired across the supported execution surface (Windows Server
+2019/2022/2025 ships with PS 5.1 by default), the BOM remains the
+robust portable encoding marker.
+
+#### Detection
+
+The rule fires when the first three bytes of the input file are NOT
+`0xEF 0xBB 0xBF`. The check is performed on raw bytes before UTF-8
+decoding because `pathlib.Path.read_text()` silently strips the BOM
+from the returned string, making in-string inspection impossible.
+
+#### Reported location
+
+Whole-file issue: `line: 0, col: 0` per §2.3.
+
+#### Suppression
+
+Inline suppression via `# psa-disable-file PSA7001` at the top of the
+file. Note that since the rule fires only when BOM is absent, and an
+absent BOM means the file might be Shift-JIS interpreted by PS 5.1,
+the suppression comment itself relies on PS / Python being able to
+parse the line — which they can, since the comment is ASCII-only.
+Configuration-file suppression (`"disable": ["PSA7001"]` in
+`.psa.config.json`) is also supported.
+
+#### Remediation
+
+Re-save the file with UTF-8 BOM. Examples:
+
+- **PowerShell 5.1**:
+  ```powershell
+  $content = Get-Content -Raw -Path .\script.ps1
+  $utf8Bom = New-Object System.Text.UTF8Encoding $true
+  [System.IO.File]::WriteAllText('.\script.ps1', $content, $utf8Bom)
+  ```
+- **PowerShell 7.x**: `Set-Content -Encoding utf8BOM`
+- **VS Code**: status bar → "UTF-8" → "Save with Encoding" → "UTF-8 with BOM"
+
+#### Limitations
+
+- Only the first 3 bytes are inspected. Multi-byte BOM variants
+  (UTF-16 LE/BE, UTF-32) are out of scope; a future PSA7002 rule
+  may cover them.
+- BOM presence alone is checked; full-file UTF-8 validity is a
+  separate concern (potential future PSA7003).
+- Environments targeting PowerShell 7.x exclusively may suppress this
+  rule via configuration.
 
 ---
 
@@ -1067,6 +1134,7 @@ To add `PSA7001`:
 | PSA6004 | warning | ✅ |
 | PSA6005 | warning | ✅ |
 | PSA6006 | warning | ✅ |
+| PSA7001 | warning | ✅ |
 
 ---
 
@@ -1074,6 +1142,7 @@ To add `PSA7001`:
 
 | Version | Date | Changes |
 |:---|:---|:---|
+| 3.1.0 | 2026 | New PSA7xxx category (file format / encoding). PSA7001 added: PowerShell script lacks UTF-8 BOM (warning, default on). `analyze_text()` signature extended with optional `file_meta` parameter (backward compatible). `main()` switched from `path.read_text()` to `path.read_bytes()` so the BOM can be inspected before decoding. §2.2 Processing model updated accordingly. See §4.28. |
 | 2.3.0 | 2026 | Remote-config fetch hardened: explicit TLS 1.2 minimum (max auto-negotiated to TLS 1.3); browser-like User-Agent (Chrome 131) + Sec-Ch-Ua client hints; exponential-backoff retries on 5xx and network errors (4xx not retried); env-var tuning (`PSA_CONFIG_TIMEOUT`, `PSA_CONFIG_MAX_RETRIES`, `PSA_CONFIG_QUIET`). See §5.4. |
 | 2.2.0 | 2026 | Configuration file becomes JSONC (line `//` and block `/* */` comments). `--config` accepts http(s) URLs in addition to local paths (§5.4). New companion file `.psa.config.json.template` documents every option with built-in defaults. |
 | 2.1.0 | 2026 | Initial SPEC document. Adds §8 (environment detection) for `psa.py` 2.1.0. Existing behaviour (rules, formats, CLI) inherited from `psa.py` 2.0.0. |

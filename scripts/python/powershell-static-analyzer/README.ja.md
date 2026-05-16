@@ -20,6 +20,24 @@ PowerShell スクリプト用の単一 Python 3 ファイル静的解析ツー�
 
 ## 更新履歴
 
+### 3.1.0 — UTF-8 BOM 強制チェック (PSA7xxx カテゴリ)
+
+- **新ルールカテゴリ `PSA7xxx`** (file format / encoding) を導入。
+  UTF-8 デコード前の生バイト列に対するファイル単位の検査を扱う。
+- **新ルール `PSA7001` (warning、 デフォルト有効)**: `.ps1` に
+  UTF-8 BOM が無い。 Windows PowerShell 5.1 は BOM 無し UTF-8 で
+  非 ASCII 文字を含む `.ps1` を読み込むとき、 システム Active Code Page
+  (ja-JP では Shift-JIS / cp932) に fallback して文字化けする。
+  ファイル先頭に UTF-8 BOM (`0xEF 0xBB 0xBF` の 3 バイト) を付与すれば、
+  コンソールコードページに関わらず常に UTF-8 として解釈される。
+- **`analyze_text()` のシグネチャ** に optional `file_meta` を追加
+  (後方互換 — `(text, cfg)` のみで呼び出している既存利用箇所には影響なし。
+  PSA7xxx ルールは何も検出しないが、 他のルールは従来通り動作)。
+- **`main()` のファイル読み込み** を `path.read_text()` から
+  `path.read_bytes()` に変更。 これは `read_text` が BOM を黙って
+  取り除いてしまい、 テキスト解析以降では BOM 有無を判定できないため
+  (生バイトでの判定が必須)。
+
 ### 2.3.0 — リモート設定取得の堅牢化
 
 `--config <URL>` のコードパスを実運用品質に引き上げ:
@@ -91,7 +109,7 @@ PowerShell の利用可否が実行ごとに変わりうる場合に特に有用
 
 | 項目 | v2.0 |
 |:---|:---|
-| ルール番号 | `PSA1001`〜`PSA6006` (27 ルール) |
+| ルール番号 | `PSA1001`〜`PSA7001` (28 ルール) |
 | 出力形式 | テキスト / JSON / SARIF 2.1.0 |
 | 抑制機能 | `# psa-disable-line` / `next-line` / `file` |
 | 設定 | `.psa.config.json` + CLI |
@@ -300,6 +318,12 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA6004** | ✅ 有効 | `$global:` 変数の定義を避ける |
 | **PSA6005** | ✅ 有効 | Mandatory パラメータにデフォルト値を持たせない |
 | **PSA6006** | ✅ 有効 | switch パラメータのデフォルト値を `$true` にしない |
+
+`PSA7xxx` — ファイル形式・エンコーディング（Warning / Error）
+
+| コード | Sev | デフォルト | 内容 |
+|:---|:---:|:---:|:---|
+| **PSA7001** | Warning | ✅ 有効 | PowerShell スクリプトが UTF-8 BOM を持たない（Windows PowerShell 5.1 が BOM 無し UTF-8 を Shift-JIS と誤認する可能性あり） |
 
 ### 一部ルールがデフォルト無効である理由
 

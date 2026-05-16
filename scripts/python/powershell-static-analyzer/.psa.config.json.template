@@ -5,7 +5,7 @@
 // File format : JSONC  (JSON with C-style line `//` and block `/* */` comments)
 // Encoding    : UTF-8
 // Schema      : SPEC.md §5  /  SPEC.ja.md §5
-// Applies to  : psa.py 3.0.0 and later 3.x releases
+// Applies to  : psa.py 3.1.0 and later 3.x releases
 //
 // -----------------------------------------------------------------------------
 // How to use this template
@@ -96,6 +96,23 @@
   // Example — silence the TODO marker check and the plural-noun check:
   //
   //   "disable": ["PSA4001", "PSA6003"],
+
+
+  // ===========================================================================
+  // PSA7001: PowerShell UTF-8 BOM enforcement
+  // ===========================================================================
+  //
+  // PSA7001 is a file-level rule (severity: warning, default ON) that fires
+  // when a .ps1 file lacks the UTF-8 BOM at byte offset 0. Required reading
+  // for ja-JP Windows PowerShell 5.1 environments: see SPEC.md §4.28.
+  //
+  // Disable per project if you ship .ps1 files intended for PowerShell 7.x
+  // only AND you have a separate enforcement of UTF-8 (no-BOM) via lint
+  // tooling. For most projects, leave it on.
+  //
+  // Example — turn PSA7001 off for a PS 7.x-only project:
+  //
+  //   "disable": ["PSA7001"],
 
 
   // ===========================================================================
