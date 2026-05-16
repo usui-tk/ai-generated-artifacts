@@ -81,8 +81,8 @@ scripts/python/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` is a **pure Python** static analyzer (no PowerShell installation
-required), version **3.0.0** at the time of this writing, with a 27-rule
-check set spanning `PSA1001`..`PSA6006`. It was originally developed for the
+required), version **3.1.0** at the time of this writing, with a 28-rule
+check set spanning `PSA1001`..`PSA7001`. It was originally developed for the
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
 repository. Within this repository it must be:
 
@@ -621,7 +621,7 @@ Based on the longest successful path length, classify into:
         .psa.config.json     # project-local config (disables PSA6003)
     python/
       powershell-static-analyzer/
-        psa.py               # canonical location, v3.0.0
+        psa.py               # canonical location, v3.1.0
         SPEC.md / SPEC.ja.md # authoritative analyzer specification
 ```
 
@@ -638,10 +638,12 @@ python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 
 Both must pass with **0 errors / 0 warnings / 0 info**.
 
-### Rule coverage (psa.py v3.0.0)
+### Rule coverage (psa.py v3.1.0)
 
-`psa.py` v3.0.0 ships with a 27-rule check set `PSA1001`..`PSA6006`, grouped
-into six categories. A condensed table is reproduced in
+`psa.py` v3.1.0 ships with a 28-rule check set `PSA1001`..`PSA7001`, grouped
+into seven categories (the seventh, `PSA7xxx`, is the file-format /
+encoding family added in 3.1.0 — currently `PSA7001` for missing UTF-8 BOM).
+A condensed table is reproduced in
 [`README.md`](./README.md) and [`README.ja.md`](./README.ja.md). For the
 authoritative specification of every rule (severity, examples, suppression
 guidance), see

@@ -5,8 +5,8 @@
 本ディレクトリで保守されている PowerShell 静的解析ツール `psa.py` の
 正式仕様書です。
 
-**ドキュメントバージョン**: 3.0.0
-**適用範囲**: `psa.py` 3.0.0 以降の 3.x 系
+**ドキュメントバージョン**: 3.1.0
+**適用範囲**: `psa.py` 3.1.0 以降の 3.x 系
 **ステータス**: 規範的（normative）
 
 利用者向けの概要は [`README.ja.md`](./README.ja.md) を参照してください。
@@ -796,9 +796,9 @@ JSON 出力は常に 2 スペースインデントの整形出力で、ASCII エ
       "tool": {
         "driver": {
           "name": "psa.py",
-          "version": "2.1.0",
+          "version": "3.1.0",
           "informationUri": "...",
-          "rules": [ /* 27 個のルール記述子 */ ]
+          "rules": [ /* 28 個のルール記述子 */ ]
         }
       },
       "results": [ /* issue 1 件につき 1 エントリ */ ],
@@ -950,7 +950,7 @@ Info:
   "python_version": "3.12.3",
   "python_executable": "/usr/bin/python3",
   "platform": "Linux 6.18.5",
-  "psa_version": "2.1.0",
+  "psa_version": "3.1.0",
   "powershell": {
     "command": "pwsh",
     "path": "/usr/bin/pwsh",

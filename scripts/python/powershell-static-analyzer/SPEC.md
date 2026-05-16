@@ -5,8 +5,8 @@
 This is the formal specification for `psa.py`, the PowerShell static
 analyzer maintained in this directory.
 
-**Document version**: 3.0.0
-**Applies to**: `psa.py` 3.0.0 and later 3.x releases
+**Document version**: 3.1.0
+**Applies to**: `psa.py` 3.1.0 and later 3.x releases
 **Status**: Normative
 
 For a user-facing overview, see [`README.md`](./README.md). This
@@ -802,9 +802,9 @@ top-level structure:
       "tool": {
         "driver": {
           "name": "psa.py",
-          "version": "2.1.0",
+          "version": "3.1.0",
           "informationUri": "...",
-          "rules": [ /* 27 rule descriptors */ ]
+          "rules": [ /* 28 rule descriptors */ ]
         }
       },
       "results": [ /* one entry per issue */ ],
@@ -960,7 +960,7 @@ Returned data structure (used for `--check-env --format json`,
   "python_version": "3.12.3",
   "python_executable": "/usr/bin/python3",
   "platform": "Linux 6.18.5",
-  "psa_version": "2.1.0",
+  "psa_version": "3.1.0",
   "powershell": {
     "command": "pwsh",
     "path": "/usr/bin/pwsh",

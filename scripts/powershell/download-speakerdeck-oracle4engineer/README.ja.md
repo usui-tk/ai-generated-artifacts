@@ -420,7 +420,7 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 実際の検証結果（DryRun、本番実行出力、冪等性チェック、r17 のリグレッション修正証跡）については **[TESTING.ja.md](TESTING.ja.md)**（英語版は [TESTING.md](TESTING.md)）を参照してください。直近の本番実行成功結果（`804/804 デッキ、失敗ゼロ、合計 10 分 4.4 秒、5.7 GB`）が記録されています。
 
-`psa.py` 静的解析ツールの詳細（v3.0.0、27 ルール体系 `PSA1001`〜`PSA6006` + CI 連携）は
+`psa.py` 静的解析ツールの詳細（v3.1.0、28 ルール体系 `PSA1001`〜`PSA7001` + CI 連携）は
 [`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md)
 （英語版は [SPEC.md](../../python/powershell-static-analyzer/SPEC.md)）、
 または同ディレクトリの
@@ -448,9 +448,9 @@ cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### ルールカバレッジ（psa.py v3.0.0 — 27 ルール）
+### ルールカバレッジ（psa.py v3.1.0 — 28 ルール）
 
-`psa.py` v3.0.0 は 27 ルールを 6 カテゴリに分類しています：
+`psa.py` v3.1.0 は 28 ルールを 7 カテゴリに分類しています：
 
 | カテゴリ | コード範囲 | 例 |
 | -------- | ---------- | -- |
@@ -460,6 +460,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 | 衛生          | `PSA4001`〜`PSA4004` | 未完了マーカー、行末空白、長い行、行末セミコロン |
 | セキュリティ  | `PSA5001`〜`PSA5004` | 平文パスワードパラメーター、`Invoke-Expression`、壊れたハッシュアルゴリズム、`ComputerName` ハードコード |
 | ベストプラクティス | `PSA6001`〜`PSA6006` | 非承認動詞、コマンドレットエイリアス、複数形名詞の関数名、`$global:` 定義、必須パラメーターのデフォルト値、`$true` がデフォルトのスイッチパラメーター |
+| ファイル形式  | `PSA7001`            | PowerShell スクリプトに UTF-8 BOM がない（BOM がないと Windows PowerShell 5.1 が非 ASCII バイトを Shift-JIS と誤認する可能性あり） |
 
 各ルールの完全仕様は
 [`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md) §4 を参照。

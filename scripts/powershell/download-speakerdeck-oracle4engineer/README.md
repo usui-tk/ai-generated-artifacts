@@ -489,8 +489,8 @@ check, regression-fix evidence for r17), see **[TESTING.md](TESTING.md)**
 ([日本語](TESTING.ja.md)). It documents the most recent successful
 real-run (`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
 
-For details on the `psa.py` static analyzer (v3.0.0, 27-rule check set
-`PSA1001`..`PSA6006` plus CI integration), see
+For details on the `psa.py` static analyzer (v3.1.0, 28-rule check set
+`PSA1001`..`PSA7001` plus CI integration), see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
 ([日本語](../../python/powershell-static-analyzer/SPEC.ja.md))
 or the analyzer's
@@ -518,9 +518,9 @@ cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### Rule coverage (psa.py v3.0.0 — 27 rules)
+### Rule coverage (psa.py v3.1.0 — 28 rules)
 
-`psa.py` v3.0.0 groups its 27 rules into six categories:
+`psa.py` v3.1.0 groups its 28 rules into seven categories:
 
 | Category | Code range | Examples |
 | -------- | ---------- | -------- |
@@ -530,6 +530,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 | Hygiene             | `PSA4001`..`PSA4004` | unfinished markers, trailing whitespace, long line, trailing semicolon |
 | Security            | `PSA5001`..`PSA5004` | plain-text password parameter, `Invoke-Expression`, broken hash algorithm, hardcoded `ComputerName` |
 | Best practice       | `PSA6001`..`PSA6006` | non-approved verb, cmdlet alias, plural function noun, `$global:` definition, mandatory parameter with default, switch defaulting to `$true` |
+| File format         | `PSA7001`            | PowerShell script lacks UTF-8 BOM (Windows PowerShell 5.1 may misinterpret non-ASCII bytes as Shift-JIS without a BOM) |
 
 For the full specification of each rule, see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4.

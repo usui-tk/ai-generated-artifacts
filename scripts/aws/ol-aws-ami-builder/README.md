@@ -381,7 +381,7 @@ cloud-init deploys your public key under the `ec2-user` account on first boot.
 
 ## 9. Key Design Decisions (summary)
 
-> **Full rationale** for every design choice — phase numbering, log conventions, env property auto-detection, AWS quirks — lives in [SPEC.md](./SPEC.md) ([日本語](./SPEC.ja.md)). The summary below highlights the points most relevant to operators; refer to SPEC for the historical context (Part C) behind each.
+> **Full rationale** for every design choice — phase numbering, log conventions, env property auto-detection, AWS quirks — lives in [SPEC.md](./SPEC.md) ([日本語](./SPEC.ja.md)). The summary below highlights the points most relevant to operators; refer to SPEC for the historical context (Part D) behind each.
 
 ### 9.1 `import-snapshot` + `register-image` over `import-image`
 
@@ -578,4 +578,4 @@ When filing a bug, please include:
 - **Log excerpt**: 10–50 lines around the failure (not the whole 1000+ line log)
 - **What you already tried**: e.g. cleaned `${WORKSPACE}`, switched WORKSPACE filesystem, etc.
 
-For code-level changes, please consult [SPEC.md](./SPEC.md) first — Part C ("Known Pitfalls & Lessons Learned") documents bugs the current implementation already handles, and Part A defines the conventions any new code must follow.
+For code-level changes, please consult [SPEC.md](./SPEC.md) first — Part D ("Known Pitfalls & Lessons Learned") documents bugs the current implementation already handles, and Part A defines the conventions any new code must follow.

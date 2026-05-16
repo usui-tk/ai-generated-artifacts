@@ -70,7 +70,7 @@ scripts/python/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` は **純粋な Python**(PowerShell インストール不要)の静的解析ツールで、
-現時点でのバージョンは **3.0.0**、`PSA1001`〜`PSA6006` の 27 ルール体系を実装
+現時点でのバージョンは **3.1.0**、`PSA1001`〜`PSA7001` の 28 ルール体系を実装
 しています。元々
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
 リポジトリで開発されました。本レポジトリ内では以下のように使用すること:
@@ -567,7 +567,7 @@ work/logs/url_cache.csv
         .psa.config.json     # プロジェクトローカル config (PSA6003 を disable)
     python/
       powershell-static-analyzer/
-        psa.py               # 正規配置場所、v3.0.0
+        psa.py               # 正規配置場所、v3.1.0
         SPEC.md / SPEC.ja.md # 解析ツールの正規仕様
 ```
 
@@ -584,10 +584,12 @@ python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 
 両スクリプトとも **0 errors / 0 warnings / 0 info** で合格すること。
 
-### ルールカバレッジ (psa.py v3.0.0)
+### ルールカバレッジ (psa.py v3.1.0)
 
-`psa.py` v3.0.0 は `PSA1001`〜`PSA6006` の 27 ルール体系を 6 カテゴリに分けて
-実装しています。簡略表は [`README.md`](./README.md) /
+`psa.py` v3.1.0 は `PSA1001`〜`PSA7001` の 28 ルール体系を 7 カテゴリに
+分けて実装しています(7 番目のカテゴリ `PSA7xxx` はファイル形式・
+エンコーディング系で、3.1.0 で追加 — 現状は `PSA7001`: UTF-8 BOM の
+欠落のみ)。簡略表は [`README.md`](./README.md) /
 [`README.ja.md`](./README.ja.md) に再掲しています。各ルールの正規仕様
 (深刻度、例、抑制ガイドライン)については
 [`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md)

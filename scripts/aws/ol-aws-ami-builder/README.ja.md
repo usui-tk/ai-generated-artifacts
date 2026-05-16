@@ -381,7 +381,7 @@ ssh -i your-keypair.pem ec2-user@<public-ip>
 
 ## 9. 主な設計判断(サマリ)
 
-> **すべての設計判断の詳細**(phase 番号付け、ログ規約、env プロパティ自動検出、AWS 固有の癖)は [SPEC.ja.md](./SPEC.ja.md)([English](./SPEC.md))にあります。以下は運用者にとって特に重要なポイントのみ抜粋しています。各項目の歴史的経緯は SPEC の Part C を参照してください。
+> **すべての設計判断の詳細**(phase 番号付け、ログ規約、env プロパティ自動検出、AWS 固有の癖)は [SPEC.ja.md](./SPEC.ja.md)([English](./SPEC.md))にあります。以下は運用者にとって特に重要なポイントのみ抜粋しています。各項目の歴史的経緯は SPEC の Part D を参照してください。
 
 ### 9.1 import-image ではなく import-snapshot + register-image
 
@@ -579,4 +579,4 @@ https://github.com/usui-tk/ai-generated-artifacts/issues
 - **ログ抜粋**:失敗周辺の 10〜50 行(1000 行以上のログ全体ではなく)
 - **すでに試したこと**:例: `${WORKSPACE}` のクリーン、WORKSPACE のファイルシステム切り替えなど
 
-コードレベルの変更については、まず [SPEC.ja.md](./SPEC.ja.md) を参照してください。Part C(「既知の落とし穴と教訓」)は現実装ですでに対処済みのバグを記録しており、Part A は新コードが従うべき規約を定義しています。
+コードレベルの変更については、まず [SPEC.ja.md](./SPEC.ja.md) を参照してください。Part D(「既知の落とし穴と教訓」)は現実装ですでに対処済みのバグを記録しており、Part A は新コードが従うべき規約を定義しています。

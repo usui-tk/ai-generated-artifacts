@@ -16,7 +16,7 @@ For the formal specification (CLI contract, rule semantics, output
 schemas, environment detection contract), see [`SPEC.md`](./SPEC.md).
 日本語版は [`SPEC.ja.md`](./SPEC.ja.md) を参照してください。
 
-**Current version: 3.0.0**
+**Current version: 3.1.0**
 
 ---
 
@@ -115,7 +115,7 @@ and added JSON / SARIF output, inline suppression, configuration files,
 and multi-file scanning — while preserving the single-file,
 zero-dependency design.
 
-| Area | v2.0 |
+| Area | Current |
 |:---|:---|
 | Rule codes | `PSA1001`–`PSA7001` (28 rules) |
 | Output formats | Text / JSON / SARIF 2.1.0 |
