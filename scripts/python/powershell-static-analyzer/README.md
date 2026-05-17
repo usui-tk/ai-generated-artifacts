@@ -16,11 +16,46 @@ For the formal specification (CLI contract, rule semantics, output
 schemas, environment detection contract), see [`SPEC.md`](./SPEC.md).
 日本語版は [`SPEC.ja.md`](./SPEC.ja.md) を参照してください。
 
-**Current version: 3.1.0**
+**Current version: 3.2.0**
 
 ---
 
 ## What's new
+
+### 3.2.0 — Cross-file consistency (PSA8xxx), complexity (PSA9xxx), project conventions (PSAPxxxx)
+
+3.2.0 expands the analyzer in three orthogonal directions: **cross-file consistency checks**, **complexity metrics**, and a new **project / pipeline convention rule family**. It also rebuilds the string / comment tokenizer to fix a class of long-standing false positives.
+
+**New rule families and rules:**
+
+- **`PSA8xxx` — Cross-file consistency (new category)**
+  - **`PSA8001`** (warning, default on, cross-file): function body hash drift across files in the same scan. When two or more files in the same `psa.py` invocation define a function with the same NAME but with different normalized bodies, every occurrence is flagged. The rule is silent on single-file invocations (no peers to compare against). New tunable: `psa8001_ignore_functions` (list of exact names and/or `regex:` patterns) to suppress drift reports for functions that are intentionally per-script.
+
+- **`PSA9xxx` — Complexity metrics (new category)**
+  - **`PSA9001`** (info, default OFF): function body exceeds `max_function_lines` (default 200). Opt-in; threshold is project-dependent.
+  - **`PSA9002`** (warning, default OFF): external-process invocation (the `&` operator, `msiexec`, `signtool`, `inf2cat`, `pnputil`, `bcdedit`, `sc.exe`, `regsvr32`, `wevtutil`, `dism`, `gpupdate`, `certutil`, `reg.exe`, `cmd.exe`, `powershell`) without a `$LASTEXITCODE` / `$?` / `.ExitCode` / `-PassThru` reference within 5 lines after. Opt-in.
+
+- **`PSAPxxxx` — Project / pipeline convention rules (new family)**
+  - **All PSAPxxxx rules are disabled by default**; opt in via `.psa.config.json`. The PSAPxxxx family holds opinionated conventions tied to a specific pipeline style. The conventions shipped in 3.2.0 originated in the Deploy-Drivers-For-WindowsServer repository; other repositories can adopt them via the same opt-in mechanism.
+  - **`PSAP0001`** (warning, default OFF): phase function naming convention `Invoke-(Prep|Verify|Inst)PhaseNN_DescriptiveName`.
+  - **`PSAP0002`** (warning, default OFF): required script-identifier variables `$Script:ScriptVersion` / `$Script:ScriptHash` / `$Script:ScriptShortTag`.
+
+**New generic rule in an existing category:**
+
+- **`PSA3005`** (warning, default on): `Start-Transcript -Path` should be `-LiteralPath`. `Start-Transcript -Path` performs wildcard expansion on its argument; paths containing PowerShell metacharacters (`[`, `]`, backtick) are misinterpreted. `-LiteralPath` disables expansion and is the safer default.
+
+**Tokenizer false-positive fixes (silent — no script-side change required):**
+
+- **`PSA1001` (brace balance)**: the string tokenizer now correctly handles PowerShell's `""` (double-quote-doubling) escape AND the `` `` `` (double-backtick) escape. The previous implementation could mis-parse strings of the form `` "...`""..." `` or `` "...``\"..." ``, leaving the parser stuck in double-quoted-string state and consequently miscounting braces for the rest of the file.
+
+- **`PSA2001` (undefined variable)**: the scope-qualifier set is extended to include `script`, `global`, `local`, and `private`. References of the form `$Script:Foo` are now treated as runtime-deferred (the author has explicitly declared a scope, so the analyzer respects that intent) and never produce false-positive "undefined variable" reports.
+
+- **`PSA4001` (TODO/FIXME marker)**: the marker-matching now requires a colon or whitespace-then-letter after the marker, and ignores embedded string literals like `"XXX"` inside comments. Previously, comments mentioning marker words inside quoted strings produced spurious reports.
+
+**New configuration tunables:**
+
+- `max_function_lines` (int, default 200): threshold for PSA9001.
+- `psa8001_ignore_functions` (list, default `[]`): suppress PSA8001 for the listed function names. Each entry is either an exact case-insensitive name match or a regex pattern prefixed with `regex:`.
 
 ### 3.1.0 — UTF-8 BOM enforcement (PSA7xxx category)
 
@@ -117,7 +152,7 @@ zero-dependency design.
 
 | Area | Current |
 |:---|:---|
-| Rule codes | `PSA1001`–`PSA7001` (28 rules) |
+| Rule codes | `PSA1001`–`PSA9002` plus `PSAP0001`–`PSAP0002` (34 rules total) |
 | Output formats | Text / JSON / SARIF 2.1.0 |
 | Suppression | `# psa-disable-line`, `next-line`, `file` |
 | Configuration | `.psa.config.json` + CLI |
@@ -297,6 +332,7 @@ optional column, and a short message.
 | **PSA3002** | ✅ on | Backtick continuation followed by an empty line |
 | **PSA3003** | ✅ on | `-match` against literal empty string |
 | **PSA3004** | ✅ on | Empty `catch { }` block |
+| **PSA3005** | ✅ on | `Start-Transcript -Path`; prefer `-LiteralPath` for paths containing `[`, `]`, or other wildcard metacharacters (new in 3.2.0) |
 
 `PSA4xxx` — style / informational (Info)
 
@@ -333,9 +369,29 @@ optional column, and a short message.
 |:---|:---:|:---:|:---|
 | **PSA7001** | Warning | ✅ on | PowerShell script lacks UTF-8 BOM (Windows PowerShell 5.1 may misinterpret non-ASCII as Shift-JIS without BOM) |
 
+`PSA8xxx` — cross-file consistency (Warning) — new in 3.2.0, cross-file
+
+| Code | Default | Description |
+|:---|:---:|:---|
+| **PSA8001** | ✅ on (silent on single-file invocations) | Function body hash drift across files: when the same function name appears in two or more files in the same scan with different normalized bodies, every occurrence is flagged. Suppress per-function via `psa8001_ignore_functions` (exact names and/or `regex:` patterns). |
+
+`PSA9xxx` — complexity metrics — new in 3.2.0
+
+| Code | Sev | Default | Description |
+|:---|:---:|:---:|:---|
+| **PSA9001** | Info | ⛔ off | Function body exceeds `max_function_lines` (default 200) |
+| **PSA9002** | Warning | ⛔ off | External-process invocation (`&` op or `msiexec` / `signtool` / `inf2cat` / `pnputil` / `bcdedit` / etc.) without a `$LASTEXITCODE` / `$?` / `.ExitCode` / `-PassThru` check within 5 lines |
+
+`PSAPxxxx` — project / pipeline convention rules — new family in 3.2.0, **all default OFF**
+
+| Code | Sev | Default | Description |
+|:---|:---:|:---:|:---|
+| **PSAP0001** | Warning | ⛔ off (opt-in) | Phase function naming convention: `Invoke-(Prep\|Verify\|Inst)PhaseNN_DescriptiveName`. Fires only on functions whose names start with `Invoke-(Prep\|Verify\|Inst\|Phase\|Pipeline)` but do not match the canonical regex. |
+| **PSAP0002** | Warning | ⛔ off (opt-in) | Required script-identifier variables: `$Script:ScriptVersion`, `$Script:ScriptHash`, `$Script:ScriptShortTag`. One PSAP0002 emitted per missing identifier. |
+
 ### Why some rules are disabled by default
 
-Two rules are off by default to keep the signal-to-noise ratio high on
+Two generic rules are off by default to keep the signal-to-noise ratio high on
 real-world scripts:
 
 - **PSA4003 (long line)** — line-length is mostly stylistic and very

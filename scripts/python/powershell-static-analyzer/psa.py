@@ -132,7 +132,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.1.0'
+__version__ = '3.2.0'
 
 # ---------------------------------------------------------------------------
 # Severity and rule registry
@@ -141,7 +141,25 @@ __version__ = '3.1.0'
 SEVERITY_ORDER = {'error': 3, 'warning': 2, 'info': 1}
 
 # (new_code, severity, default_enabled, short_message)
+#
+# Rule ID convention
+# ------------------
+# PSA1xxx-PSA9xxx  : Generic, project-agnostic rules. Apply to any
+#                    PowerShell script. Many are enabled by default.
+# PSAP0xxx (new in : Project / pipeline convention rules. Opinionated;
+#  v3.2.0)           opt-in only. Designed for repositories that follow
+#                    a specific multi-phase pipeline pattern (e.g. the
+#                    21-phase Invoke-(Prep|Verify|Inst)Phase\\d{2}_Name
+#                    convention used by Deploy-Drivers-For-WindowsServer).
+#                    All PSAPxxxx rules are disabled by default; opt in
+#                    via .psa.config.json `enable: ["PSAP0001", ...]`
+#                    or `--enable PSAP0001` on the command line.
 RULES = [
+    # -----------------------------------------------------------------
+    # Generic rules (PSA1xxx-PSA9xxx)
+    # -----------------------------------------------------------------
+
+    # Parse / structural (PSA1xxx)
     ('PSA1001', 'error',   True,
      'Brace balance'),
     ('PSA1002', 'error',   True,
@@ -149,6 +167,7 @@ RULES = [
     ('PSA1003', 'error',   True,
      'Bracket balance'),
 
+    # Variable / scope (PSA2xxx)
     ('PSA2001', 'error',   True,
      'Undefined variable reference'),
     ('PSA2002', 'warning', True,
@@ -162,6 +181,7 @@ RULES = [
     ('PSA2006', 'warning', True,
      'Redirection operator (>, <) inside conditional'),
 
+    # Coding-pattern (PSA3xxx)
     ('PSA3001', 'warning', True,
      'Start-Process -ArgumentList; prefer ProcessStartInfo'),
     ('PSA3002', 'warning', True,
@@ -170,7 +190,10 @@ RULES = [
      '-match against literal empty string'),
     ('PSA3004', 'warning', True,
      'Empty catch block'),
+    ('PSA3005', 'warning', True,
+     'Start-Transcript -Path; prefer -LiteralPath for special characters'),
 
+    # Style / info (PSA4xxx)
     ('PSA4001', 'info',    True,
      'Unfinished marker (TODO/FIXME/XXX/HACK)'),
     ('PSA4002', 'info',    True,
@@ -180,6 +203,7 @@ RULES = [
     ('PSA4004', 'info',    True,
      'Trailing semicolon at end of line'),
 
+    # Security (PSA5xxx)
     ('PSA5001', 'error',   True,
      'Plain-text password parameter ([string]$Password)'),
     ('PSA5002', 'warning', True,
@@ -189,6 +213,7 @@ RULES = [
     ('PSA5004', 'warning', True,
      'Hardcoded ComputerName'),
 
+    # Best-practice (PSA6xxx)
     ('PSA6001', 'warning', True,
      'Function uses non-approved verb'),
     ('PSA6002', 'warning', False,
@@ -205,6 +230,26 @@ RULES = [
     # File format / encoding (PSA7xxx)
     ('PSA7001', 'warning', True,
      'PowerShell script lacks UTF-8 BOM'),
+
+    # Cross-file / multi-script consistency (PSA8xxx, new in v3.2.0)
+    ('PSA8001', 'warning', True,
+     'Function body hash drift across files in the same scan'),
+
+    # Complexity / metrics (PSA9xxx, new in v3.2.0)
+    ('PSA9001', 'info',    False,
+     'Function body exceeds max_function_lines'),
+    ('PSA9002', 'warning', False,
+     'External-process invocation without $LASTEXITCODE check'),
+
+    # -----------------------------------------------------------------
+    # Project / pipeline convention rules (PSAPxxxx, new in v3.2.0)
+    # All disabled by default; opt in via configuration when your
+    # repository follows the relevant convention.
+    # -----------------------------------------------------------------
+    ('PSAP0001', 'warning', False,
+     'Phase function naming convention (Invoke-(Prep|Verify|Inst)PhaseNN_Name)'),
+    ('PSAP0002', 'warning', False,
+     'Required script identifier variables ($Script:ScriptVersion / Hash / ShortTag)'),
 ]
 
 CODE_TO_RULE = {r[0]: r for r in RULES}
@@ -273,7 +318,22 @@ AUTO_VARS = {
     'sender', 'shellid', 'stacktrace', 'switch', 'this', 'true',
 }
 
-EXTERNAL_SCOPES = {'env', 'using'}
+EXTERNAL_SCOPES = {
+    # Truly external, set by the runtime / environment / caller
+    'env',         # $env:PATH etc., set by the OS
+    'using',       # $using:var, captured from caller scope (Invoke-Command)
+    # Explicit scope qualifiers. When the script author writes
+    # `$Script:foo` or `$global:foo`, they are signalling "I expect this
+    # to be a script-level / global-level variable, possibly set by a
+    # top-level param block or by an outer script". Treating these as
+    # always-defined avoids a large class of false positives where a
+    # top-level `param([switch]$Foo)` declaration is referenced from
+    # within a function as `$Script:Foo`. Added in v3.2.0.
+    'script',
+    'global',
+    'local',       # explicit local scope qualifier
+    'private',     # explicit private scope qualifier
+}
 
 # Auto-variables that are particularly risky to shadow
 RISKY_SHADOW_VARS = {
@@ -388,12 +448,39 @@ def strip_strings_and_comments(text):
             continue
 
         if in_dq:
-            if c == '"':
-                # backtick-escaped quote inside double-quoted string
-                if i > 0 and text[i - 1] == '`':
+            # PowerShell's backtick (`) is the escape character inside
+            # double-quoted strings. It consumes the next character (which
+            # becomes a literal in the string). This handles:
+            #   `"  -> literal "      (so the " does NOT close the string)
+            #   `$  -> literal $      (so the $ does NOT start a variable)
+            #   ``  -> literal `      (so the second ` is NOT an escape)
+            #   `n / `t / etc -> control chars
+            # Doing this BEFORE the `"`/`$` checks below avoids two classes
+            # of mis-parses: (a) thinking a backtick-escaped `"` ended the
+            # string, (b) thinking the SECOND backtick of a `` pair was an
+            # escape target. Without this, lines like
+            #   "...-CleanWorkRoot ``"
+            # (where `` is a literal backtick followed by a closing ") used
+            # to leak the dq state to the next line.
+            if c == '`':
+                # Consume the backtick AND the next character (whatever
+                # it is) as a single escape sequence. Output two spaces
+                # to preserve column alignment for line/col reporting.
+                if i + 1 < n:
+                    out.append('  ')
+                    i += 2
+                else:
                     out.append(' ')
                     i += 1
-                    continue
+                continue
+            if c == '"':
+                # PowerShell escape: "" inside "..." represents a literal "
+                # (analogous to '' inside '...'). Skip both characters and
+                # remain in double-quoted state. This is essential for
+                # strings like "she said ""hello""" which would otherwise
+                # be miscounted as having unbalanced quotes.
+                if nxt == '"':
+                    out.append('  '); i += 2; continue
                 in_dq = False
                 out.append(' ')
                 i += 1
@@ -807,22 +894,92 @@ def check_empty_catch(clean):
     return out
 
 
-def check_todo(text):
-    """PSA4001: TODO/FIXME markers (in comments only)."""
+def check_start_transcript_literalpath(clean):
+    """PSA3005: Start-Transcript with -Path should prefer -LiteralPath.
+
+    Rationale: Start-Transcript -Path performs wildcard expansion on its
+    argument. Paths containing PowerShell metacharacters such as [, ],
+    or backtick will be misinterpreted. -LiteralPath disables expansion
+    and is the safer default for log-file capture.
+
+    The rule fires when a Start-Transcript invocation either:
+      - explicitly uses -Path, or
+      - uses positional binding (which also binds to -Path).
+    Invocations already using -LiteralPath are silent.
+    """
     out = []
-    # We scan the RAW text because we want markers inside # comments.
+    lines = clean.split('\n')
+    for ln_no, raw in enumerate(lines, start=1):
+        if 'Start-Transcript' not in raw:
+            continue
+        # Build the logical line by joining backtick-continuations to
+        # avoid splitting an invocation across the LiteralPath check.
+        idx = ln_no - 1
+        logical = raw
+        peek = idx
+        while logical.rstrip().endswith('`') and peek + 1 < len(lines):
+            peek += 1
+            logical = logical.rstrip().rstrip('`') + ' ' + lines[peek]
+        # Skip if already using -LiteralPath
+        if re.search(r'-LiteralPath\b', logical, re.IGNORECASE):
+            continue
+        # Match the invocation. Either:
+        #   Start-Transcript ... -Path  (explicit)
+        #   Start-Transcript <non-switch token>  (positional)
+        if re.search(
+                r'\bStart-Transcript\b\s+(?:-[A-Za-z][\w-]*\s+\S+\s+)*'
+                r'(?:-Path\b|[^\s\-][^\s]*)',
+                logical):
+            col = raw.find('Start-Transcript') + 1
+            out.append({
+                'severity': 'warning', 'code': 'PSA3005',
+                'line': ln_no, 'col': max(1, col),
+                'message': (
+                    'Start-Transcript without -LiteralPath; -Path is '
+                    'wildcard-expanded and unsafe for paths containing '
+                    '[ ] or other PowerShell metacharacters'),
+            })
+    return out
+
+
+def check_todo(text):
+    """PSA4001: TODO/FIXME markers (in comments only).
+
+    v3.2.0 refinement: require the marker to be a real "actionable"
+    marker, not just an English word that happens to be capitalized.
+    Real markers follow these forms:
+      - TODO:  / FIXME: / XXX: / HACK:   (colon-terminated)
+      - "TODO " at the very start of the comment body (after '#')
+      - Inline form  '# TODO foo' / '# FIXME bar'
+    Excluded (treated as plain prose, not markers):
+      - The marker appears inside a quoted string literal embedded
+        in the comment, e.g.  # bare `Write-Host "    XXX"` calls
+      - The marker is part of a larger identifier (already handled by
+        the \b word boundary)
+    """
+    out = []
     for ln, line in enumerate(text.split('\n'), 1):
-        # Markers only count when they appear in a comment context.  We
-        # look for '#' followed by the keyword somewhere on the line, OR
-        # the keyword anywhere if the line starts with '#' (block-comment
-        # support is simplified).
         if '#' not in line:
             continue
-        m = re.search(r'#[^\n]*\b(TODO|FIXME|XXX|HACK)\b', line)
+        hash_pos = line.find('#')
+        # Skip lines where '#' is inside a string literal. Simple heuristic:
+        # count unescaped quotes before the '#'; if odd, we're inside a string.
+        before = line[:hash_pos]
+        # Drop backtick-escaped quotes
+        before_clean = re.sub(r'`.', '', before)
+        if before_clean.count('"') % 2 == 1 or before_clean.count("'") % 2 == 1:
+            continue
+        comment = line[hash_pos + 1:]
+        # Strip away any embedded string literals so that markers inside
+        # examples like  Write-Host "    XXX"  are ignored.
+        comment_stripped = re.sub(r'"[^"]*"', '', comment)
+        comment_stripped = re.sub(r"'[^']*'", '', comment_stripped)
+        comment_stripped = re.sub(r'`[^`]*`', '', comment_stripped)  # backtick spans
+        m = re.search(r'\b(TODO|FIXME|XXX|HACK)\b(\s*:|\s+[A-Za-z])', comment_stripped)
         if m:
             out.append({
                 'severity': 'info', 'code': 'PSA4001',
-                'line': ln, 'col': m.start(1) + 1,
+                'line': ln, 'col': line.find(m.group(1), hash_pos) + 1,
                 'message': f'unfinished marker: {m.group(1)}',
             })
     return out
@@ -1131,6 +1288,314 @@ def check_utf8_bom_missing(file_meta):
 
 
 # ---------------------------------------------------------------------------
+# Cross-file / multi-script consistency (PSA8xxx)  - new in v3.2.0
+# ---------------------------------------------------------------------------
+# These rules examine relationships across multiple files in the same scan.
+# Single-file invocations of psa.py cannot meaningfully fire any PSA8xxx
+# rule; the multi-file analyze() driver in main() collects per-file data
+# and runs cross-file checks after the per-file pass.
+
+
+def collect_function_bodies(clean):
+    """Return [(name, start_line, end_line, body_str, body_hash), ...] for
+    every top-level `function Name { ... }` block in *clean* (the
+    comment- and string-stripped text). Used by PSA8001 to compare
+    bodies across files.
+
+    Normalization is aggressive on purpose: differences in comment
+    density, blank-line padding, and trailing whitespace MUST NOT
+    register as drift, because the rule's intent is to flag CODE
+    changes. After strip_strings_and_comments(), comments and strings
+    are already whitespace-only; we then collapse all runs of
+    whitespace (including newlines) into single spaces before hashing.
+    """
+    import hashlib
+    out = []
+    for name, start, end, body in find_function_blocks(clean):
+        # body comes from `clean`, so comments and strings are already
+        # rendered as whitespace runs. Collapse ALL whitespace into
+        # single spaces so that purely-cosmetic differences (extra
+        # comment lines, blank lines between code blocks, etc.) cancel.
+        normalized = re.sub(r'\s+', ' ', body).strip()
+        h = hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:12]
+        out.append((name, start, end, body, h))
+    return out
+
+
+def check_function_sync(per_file_function_data, ignore_functions=None):
+    """PSA8001: detect function-body hash drift across files.
+
+    *per_file_function_data* is a dict mapping file path -> list of
+    (name, start_line, end_line, body, body_hash) tuples as produced by
+    collect_function_bodies().
+
+    *ignore_functions* is an optional iterable of function-name patterns
+    to skip. Each entry can be either:
+      - an exact case-insensitive name match, e.g.
+        "Invoke-PrepPhase00_Initialize"
+      - a regex pattern prefixed with "regex:", e.g.
+        "regex:^Invoke-(Prep|Verify|Inst)Phase\\d{2}_"
+    Both forms are matched case-insensitively.
+
+    For each function name that appears in two or more files, all bodies
+    must share the same hash. When hashes differ, every occurrence is
+    flagged with a PSA8001 entry pointing to the function header line.
+    """
+    # Compile ignore-list into a fast predicate
+    ignore_exact = set()
+    ignore_re = []
+    for entry in (ignore_functions or []):
+        s = entry.strip()
+        if not s:
+            continue
+        if s.lower().startswith('regex:'):
+            try:
+                ignore_re.append(re.compile(s[6:], re.IGNORECASE))
+            except re.error as e:
+                print(f'psa.py: invalid PSA8001 ignore regex {s!r}: {e}',
+                      file=sys.stderr)
+                continue
+        else:
+            ignore_exact.add(s.lower())
+
+    def is_ignored(name):
+        if name.lower() in ignore_exact:
+            return True
+        for r in ignore_re:
+            if r.search(name):
+                return True
+        return False
+
+    # Build name -> {hash: [(path, start_line), ...]}
+    name_index = {}
+    for path, fns in per_file_function_data.items():
+        for name, start, _end, _body, h in fns:
+            if is_ignored(name):
+                continue
+            name_index.setdefault(name, {}).setdefault(h, []).append(
+                (path, start))
+    # Emit per-file issues
+    issues_by_file = {p: [] for p in per_file_function_data}
+    for name, by_hash in name_index.items():
+        if len(by_hash) <= 1:
+            continue   # only one variant; perfectly synced
+        # Drift detected. Build a short summary that names the divergent
+        # files so the developer can diff them.
+        variants = [(h, locs) for h, locs in by_hash.items()]
+        # Sort by number of occurrences descending, so the "majority"
+        # variant comes first.
+        variants.sort(key=lambda v: -len(v[1]))
+        majority_hash = variants[0][0]
+        summary_files = []
+        for h, locs in variants:
+            label = 'canonical' if h == majority_hash else 'drifted'
+            summary_files.append(
+                f'{label}={h}@{len(locs)} files')
+        for h, locs in by_hash.items():
+            for path, start in locs:
+                msg = (
+                    f'function {name} body hash drift across files; '
+                    f'this file has hash {h}; '
+                    f'observed variants: {", ".join(summary_files)}')
+                issues_by_file.setdefault(path, []).append({
+                    'severity': 'warning', 'code': 'PSA8001',
+                    'line': start, 'col': 0, 'message': msg,
+                })
+    return issues_by_file
+
+
+# ---------------------------------------------------------------------------
+# Complexity metrics (PSA9xxx) - new in v3.2.0
+# ---------------------------------------------------------------------------
+
+
+def check_long_function(clean, max_lines):
+    """PSA9001: function body exceeds *max_lines* (default: 200).
+
+    Counts physical lines from the `function NAME {` header through the
+    matching closing brace, inclusive. Comments and blank lines count.
+    Disabled by default; opt in via configuration when desired.
+    """
+    out = []
+    for name, start, end, _body in find_function_blocks(clean):
+        body_len = end - start + 1
+        if body_len > max_lines:
+            out.append({
+                'severity': 'info', 'code': 'PSA9001',
+                'line': start, 'col': 0,
+                'message': (
+                    f'function {name} is {body_len} lines long '
+                    f'(threshold: {max_lines}); consider extracting '
+                    f'helpers to keep individual functions reviewable'),
+            })
+    return out
+
+
+def check_lastexitcode_unchecked(clean):
+    """PSA9002: external-process invocation without a $LASTEXITCODE check.
+
+    PowerShell's `&` operator and native-command invocations do NOT throw
+    on non-zero exit. Scripts that drop the exit code silently can mask
+    real failures. This rule fires on any line that contains an `& exe`
+    or known native-command invocation (msiexec / signtool / inf2cat /
+    pnputil / bcdedit / sc.exe / regsvr32 / wevtutil / dism / gpupdate)
+    when the next 5 lines do NOT include either:
+      - a `$LASTEXITCODE` reference, or
+      - an `if (-not $?)` / `$?` reference, or
+      - a `-PassThru` capture pattern with subsequent `.ExitCode` access.
+
+    Disabled by default; opt in for scripts that wrap many external
+    tools (e.g. driver-deployment / system-administration pipelines).
+    """
+    out = []
+    invocation_pat = re.compile(
+        r'(?:\B&\s+[A-Za-z_][\w.\-]*'        # & some-exe
+        r'|\b(?:msiexec|signtool|inf2cat|pnputil|bcdedit|sc\.exe|'
+        r'regsvr32|wevtutil|dism|gpupdate|certutil|reg\.exe|'
+        r'cmd\.exe|cmd|powershell)\b)',
+        re.IGNORECASE)
+    check_pat = re.compile(
+        r'\$LASTEXITCODE\b|\$\?|\.ExitCode\b|-PassThru\b',
+        re.IGNORECASE)
+    lines = clean.split('\n')
+    for ln_no, line in enumerate(lines, start=1):
+        if not invocation_pat.search(line):
+            continue
+        # Skip Start-Process (PowerShell cmdlet, throws on -ErrorAction Stop)
+        if re.search(r'\bStart-Process\b', line):
+            continue
+        window = '\n'.join(lines[ln_no - 1: ln_no + 5])
+        if check_pat.search(window):
+            continue
+        out.append({
+            'severity': 'warning', 'code': 'PSA9002',
+            'line': ln_no, 'col': 0,
+            'message': (
+                'external-process invocation without a $LASTEXITCODE / '
+                '$? / .ExitCode check within 5 lines; non-zero exits '
+                'will be silently ignored'),
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Project / pipeline convention rules (PSAPxxxx) - new in v3.2.0
+# ---------------------------------------------------------------------------
+# These rules encode OPINIONATED conventions specific to a particular
+# repository or pipeline style. All PSAPxxxx rules are disabled by default
+# and must be explicitly enabled via .psa.config.json or --enable on the
+# command line.
+#
+# Currently shipped conventions:
+#   PSAP0001 - 21-phase pipeline naming convention
+#              (Invoke-(Prep|Verify|Inst)PhaseNN_Name)
+#   PSAP0002 - Required script-identifier variables
+#              ($Script:ScriptVersion, $Script:ScriptHash,
+#               $Script:ScriptShortTag)
+#
+# These conventions originated in the Deploy-Drivers-For-WindowsServer
+# repository. Adopting repositories should commit a .psa.config.json that
+# enables the relevant PSAPxxxx rule(s); see the template in this
+# directory.
+
+
+PHASE_FUNCTION_PAT = re.compile(
+    r'^\s*function\s+(Invoke-(?:Prep|Verify|Inst)Phase\d{2}_[A-Za-z][\w]*)\b',
+    re.IGNORECASE)
+# Anything that LOOKS like a pipeline phase function but doesn't match
+# the canonical form. Generous: catches Invoke-Phase00, Invoke-Phase00X,
+# Invoke-PrepPhase0_, Invoke-Verify1, etc.
+SUSPECTED_PHASE_PAT = re.compile(
+    r'^\s*function\s+(Invoke-(?:Prep|Verify|Inst|Phase|Pipeline)\w*)\b',
+    re.IGNORECASE)
+
+
+def check_phase_naming(clean):
+    """PSAP0001: phase function naming convention.
+
+    Enforces the 21-phase pipeline naming pattern
+    `Invoke-(Prep|Verify|Inst)PhaseNN_DescriptiveName`, used by the
+    Deploy-Drivers-For-WindowsServer driver-deployment pipeline. Examples:
+
+        function Invoke-PrepPhase00_Initialize          OK
+        function Invoke-VerifyPhase06_HardwareImpact    OK
+        function Invoke-InstPhase04_PostInstallVerify   OK
+
+        function Invoke-Phase00                         FAIL
+        function Invoke-PrepPhase0_Init                 FAIL
+        function Invoke-VerifyHardware                  FAIL
+
+    The rule is intentionally permissive: it only fires on functions
+    whose NAMES start with `Invoke-(Prep|Verify|Inst|Phase|Pipeline)`
+    but do not match the canonical regex. Other function names are left
+    alone.
+
+    Disabled by default. Enable via `enable: ["PSAP0001"]` in your
+    .psa.config.json when your repository follows this convention.
+    """
+    out = []
+    for ln_no, line in enumerate(clean.split('\n'), start=1):
+        if PHASE_FUNCTION_PAT.match(line):
+            continue   # canonical name; OK
+        m = SUSPECTED_PHASE_PAT.match(line)
+        if not m:
+            continue   # not a suspected phase function
+        out.append({
+            'severity': 'warning', 'code': 'PSAP0001',
+            'line': ln_no, 'col': 0,
+            'message': (
+                f'function {m.group(1)} looks like a pipeline phase '
+                f'but does not match the canonical pattern '
+                f'Invoke-(Prep|Verify|Inst)PhaseNN_DescriptiveName'),
+        })
+    return out
+
+
+REQUIRED_SCRIPT_IDENTIFIERS = [
+    'ScriptVersion',
+    'ScriptHash',
+    'ScriptShortTag',
+]
+
+
+def check_required_script_identifiers(clean):
+    """PSAP0002: required script-identifier variables.
+
+    Enforces presence of the script-identification trio used by the
+    Deploy-Drivers-For-WindowsServer pipeline scripts:
+        $Script:ScriptVersion   = '<family>-<date>-rNN'
+        $Script:ScriptHash      = '<git-sha-12>'
+        $Script:ScriptShortTag  = ('{0}/{1}' -f $Script:ScriptVersion,
+                                   $Script:ScriptHash)
+    Reported once per missing identifier at the top of the file. The
+    intent is to ensure that PHASE banner output and DebugTrace JSONL
+    files contain a stable script-identity field.
+
+    Disabled by default; opt in for repositories that follow this
+    convention.
+    """
+    out = []
+    # Assignment patterns: $Script:Name = ...  or  ${Script:Name} = ...
+    found = set()
+    pat = re.compile(
+        r'\$(?:\{)?[Ss]cript:(?P<name>[A-Za-z_][\w]*)(?:\})?\s*=',
+        re.MULTILINE)
+    for m in pat.finditer(clean):
+        found.add(m.group('name'))
+    for required in REQUIRED_SCRIPT_IDENTIFIERS:
+        if required not in found:
+            out.append({
+                'severity': 'warning', 'code': 'PSAP0002',
+                'line': 1, 'col': 0,
+                'message': (
+                    f'required script-identifier variable '
+                    f'$Script:{required} is not assigned anywhere in '
+                    f'this file (pipeline convention; see PSAP0002)'),
+            })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Inline suppression
 # ---------------------------------------------------------------------------
 
@@ -1430,6 +1895,23 @@ class Config:
         # rule_id -> bool (enabled)
         self.enabled = {r[0]: r[2] for r in RULES}
         self.max_line_length = 120
+        # PSA9001 threshold. Default 200 reflects the convention that
+        # functions longer than ~200 lines are difficult to review or
+        # test as a unit. Override via .psa.config.json.
+        self.max_function_lines = 200
+        # PSA8001 (function-sync) ignore list. When the analyzer is run
+        # over multiple files and a function with the same NAME exists
+        # in several of them, PSA8001 fires if the bodies disagree.
+        # Repositories where many functions are intentionally script-
+        # specific (e.g. pipeline phase functions named identically
+        # but implementing different driver families) can list those
+        # function names here to suppress the drift report.
+        # Two forms are supported:
+        #   - exact names: ["Invoke-PrepPhase00_Initialize", ...]
+        #   - regex patterns starting with "regex:":
+        #       ["regex:^Invoke-(Prep|Verify|Inst)Phase\\d{2}_"]
+        # All forms are case-insensitive.
+        self.psa8001_ignore_functions = []
         self.min_severity = 'info'
         self.format = 'text'
         self.no_color = False
@@ -1473,6 +1955,17 @@ class Config:
                 c.min_severity = data['severity']
             if 'max_line_length' in data:
                 c.max_line_length = int(data['max_line_length'])
+            if 'max_function_lines' in data:
+                c.max_function_lines = int(data['max_function_lines'])
+            if 'psa8001_ignore_functions' in data:
+                v = data['psa8001_ignore_functions']
+                if isinstance(v, list):
+                    c.psa8001_ignore_functions = [str(x) for x in v]
+                else:
+                    print(f'psa.py: psa8001_ignore_functions must be a '
+                          f'list (got {type(v).__name__})',
+                          file=sys.stderr)
+                    raise SystemExit(2)
         # 2) CLI args (highest priority)
         for code in (args.enable or []):
             code = code.upper()
@@ -1552,6 +2045,8 @@ def analyze_text(text, cfg, file_meta=None):
         raw += _check_empty_match_raw_marker(text)
     if cfg.enabled['PSA3004']:
         raw += check_empty_catch(clean)
+    if cfg.enabled['PSA3005']:
+        raw += check_start_transcript_literalpath(clean)
 
     if cfg.enabled['PSA4001']:
         raw += check_todo(text)
@@ -1587,6 +2082,21 @@ def analyze_text(text, cfg, file_meta=None):
     # File format / encoding (PSA7xxx) -- operate on file metadata, not text
     if cfg.enabled['PSA7001']:
         raw += check_utf8_bom_missing(file_meta)
+
+    # Complexity metrics (PSA9xxx) - generic, opt-in
+    # PSA8xxx (cross-file consistency) is dispatched from the multi-file
+    # driver in main(), AFTER all per-file analyses complete. It cannot
+    # fire from analyze_text() because it requires sibling-file context.
+    if cfg.enabled['PSA9001']:
+        raw += check_long_function(clean, cfg.max_function_lines)
+    if cfg.enabled['PSA9002']:
+        raw += check_lastexitcode_unchecked(clean)
+
+    # Project / pipeline convention rules (PSAPxxxx) - opt-in
+    if cfg.enabled['PSAP0001']:
+        raw += check_phase_naming(clean)
+    if cfg.enabled['PSAP0002']:
+        raw += check_required_script_identifiers(clean)
 
     # Inline suppression
     file_supp, line_supp = collect_suppressions(text)
@@ -2067,6 +2577,9 @@ def main(argv=None):
 
     per_file = []
     total_err = total_warn = 0
+    # For PSA8001 cross-file consistency: collect per-file function bodies
+    # so they can be compared after all files have been parsed.
+    per_file_fns = {}
     for path in files:
         try:
             raw_bytes = path.read_bytes()
@@ -2083,8 +2596,40 @@ def main(argv=None):
         file_meta = {'has_bom': has_bom}
         issues = analyze_text(text, cfg, file_meta=file_meta)
         per_file.append((path, text, issues))
+        # Collect function bodies for cross-file PSA8001 analysis.
+        if cfg.enabled.get('PSA8001'):
+            clean = strip_strings_and_comments(text)
+            per_file_fns[path] = collect_function_bodies(clean)
         total_err += sum(1 for i in issues if i['severity'] == 'error')
         total_warn += sum(1 for i in issues if i['severity'] == 'warning')
+
+    # PSA8001 (cross-file function sync). Only meaningful when 2+ files
+    # are in scope; with a single file there are no peers to compare.
+    if cfg.enabled.get('PSA8001') and len(per_file_fns) >= 2:
+        cross_issues_by_path = check_function_sync(
+            per_file_fns, cfg.psa8001_ignore_functions)
+        # Merge cross-file issues into per_file results.
+        # PSA8001 issues are subject to the same inline-suppression and
+        # severity-floor filters that analyze_text() applies; reapply
+        # those here for consistency.
+        min_rank = SEVERITY_ORDER.get(cfg.min_severity, 1)
+        for idx, (path, text, existing) in enumerate(per_file):
+            new = cross_issues_by_path.get(path, [])
+            if not new:
+                continue
+            file_supp, line_supp = collect_suppressions(text)
+            new = [
+                i for i in new
+                if i['code'] not in file_supp
+                and i['code'] not in line_supp.get(i['line'], set())
+            ]
+            new = [i for i in new
+                   if SEVERITY_ORDER[i['severity']] >= min_rank]
+            merged = existing + new
+            merged.sort(key=lambda x: (x['line'], x['col'], x['code']))
+            per_file[idx] = (path, text, merged)
+            total_err += sum(1 for i in new if i['severity'] == 'error')
+            total_warn += sum(1 for i in new if i['severity'] == 'warning')
 
     if cfg.format == 'sarif':
         print(format_sarif(per_file, env_info))

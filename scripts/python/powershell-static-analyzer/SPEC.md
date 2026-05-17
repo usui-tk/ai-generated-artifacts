@@ -368,6 +368,43 @@ form) because trailing whitespace after the backtick is significant.
 **Detection**: `catch [Type]? { }` with no content between the braces.
 A 4-line look-ahead window allows `catch {\n}` to be detected.
 
+### 4.13b PSA3005 — `Start-Transcript -Path` should be `-LiteralPath`
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: 3.2.0
+
+**Rationale**: `Start-Transcript -Path` performs wildcard expansion on
+its argument. Paths containing PowerShell metacharacters such as `[`,
+`]`, or backtick will be misinterpreted, causing transcript creation
+to silently fail or write to the wrong file. `-LiteralPath` disables
+expansion and is the safer default for log-file capture.
+
+**Detection**: A `Start-Transcript` invocation that EITHER explicitly
+uses `-Path` OR uses positional binding (which binds to `-Path` by
+default) AND does NOT use `-LiteralPath` anywhere on the logical line
+(backtick-continued lines are joined before the check).
+
+**Examples**:
+
+```powershell
+# FAIL - -Path may expand wildcards
+Start-Transcript -Path "C:\Temp\Logs\foo[1].log"
+
+# FAIL - positional binding goes to -Path
+Start-Transcript $logPath
+
+# OK
+Start-Transcript -LiteralPath $logPath
+```
+
+**Suppression**: When intentionally testing both `-Path` and
+`-LiteralPath` forms (e.g., a fallback cascade), suppress per-line:
+
+```powershell
+Start-Transcript -Path $p -Force -ErrorAction Stop  # psa-disable-line PSA3005 -- deliberate cascade
+```
+
 ### 4.14 PSA4001 — Unfinished marker
 
 - **Severity**: Info
@@ -556,6 +593,170 @@ Re-save the file with UTF-8 BOM. Examples:
   separate concern (potential future PSA7003).
 - Environments targeting PowerShell 7.x exclusively may suppress this
   rule via configuration.
+
+---
+
+### 4.29 PSA8001 — Function body hash drift across files
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: 3.2.0
+- **Scope**: cross-file (requires 2+ files in the same invocation)
+
+**Rationale**: Repositories that ship a family of related scripts (the
+canonical example being the Deploy-Drivers-For-WindowsServer pipeline:
+four `Deploy-*` scripts sharing a 21-phase architecture) often have
+many helper functions — `Format-Elapsed`, `Write-Detail`, the entire
+`Start-DebugTrace` family — that are intended to remain byte-for-byte
+identical across the family. Without active enforcement, these
+gradually drift apart as fixes land in one script but not the others.
+PSA8001 catches the drift at lint time.
+
+**Detection**: For each function name that appears in two or more of
+the files in the same scan, compute a hash of the function body
+(comments and strings already stripped to whitespace by the standard
+preprocessing; remaining whitespace runs collapsed to single spaces).
+When the same function name produces two or more distinct hashes,
+emit one PSA8001 entry per occurrence, pointing to the function
+header line. The message identifies the file's own hash and lists
+all observed variants with their occurrence counts.
+
+**Single-file invocations emit nothing** — there are no peers to
+compare. PSA8001 only fires from the multi-file analyze() driver
+that runs AFTER the per-file pass completes.
+
+**Tuning**: `psa8001_ignore_functions` (list, default `[]`) suppresses
+the rule for function names that are intentionally per-file. Each
+entry is either:
+
+- an exact case-insensitive function name match, or
+- a regex pattern prefixed with `regex:`, e.g.
+  `"regex:^Invoke-(Prep|Verify|Inst)Phase\\d{2}_"`
+
+**Suppression**: Inline `# psa-disable-line PSA8001` at the function
+declaration line works for individual exceptions. For a stable set of
+"this function is intentionally per-script" exceptions, prefer the
+`psa8001_ignore_functions` config option to keep the script body
+clean.
+
+### 4.30 PSA9001 — Function body exceeds `max_function_lines`
+
+- **Severity**: Info
+- **Default**: **disabled**
+- **Added in**: 3.2.0
+
+**Rationale**: Functions longer than ~200 lines are difficult to
+review or test as a unit. This rule is opt-in because the
+appropriate threshold is project-dependent.
+
+**Detection**: A function whose physical body (header through matching
+closing brace, inclusive) exceeds `max_function_lines` (default 200).
+
+**Tuning**: `max_function_lines` (int, default 200) sets the
+threshold. Configure via `--max-line-length`-style CLI is NOT
+supported for this option; use `.psa.config.json`:
+
+```jsonc
+{
+  "enable": ["PSA9001"],
+  "max_function_lines": 300
+}
+```
+
+### 4.31 PSA9002 — External-process invocation without `$LASTEXITCODE` check
+
+- **Severity**: Warning
+- **Default**: **disabled**
+- **Added in**: 3.2.0
+
+**Rationale**: PowerShell's `&` call operator and native-command
+invocations do NOT throw on non-zero exit. Scripts that drop the exit
+code silently can mask real failures from external tools.
+
+**Detection**: A line matching either:
+
+- `& <executable>` (the call operator), or
+- A bare invocation of one of the recognised native commands
+  (`msiexec`, `signtool`, `inf2cat`, `pnputil`, `bcdedit`, `sc.exe`,
+  `regsvr32`, `wevtutil`, `dism`, `gpupdate`, `certutil`, `reg.exe`,
+  `cmd.exe`, `cmd`, `powershell`)
+
+WITHIN 5 lines after which there is no `$LASTEXITCODE`, `$?`,
+`.ExitCode`, or `-PassThru` reference. `Start-Process` lines are
+excluded because `Start-Process -ErrorAction Stop` does throw.
+
+**Note**: This rule is heuristic; the 5-line window is a deliberate
+trade-off between recall and false-positive rate. For scripts with
+many `try { & exe; if ($LASTEXITCODE -ne 0) { throw } } catch { ... }`
+patterns, the rule is well-behaved. For scripts that capture exit
+codes far from the invocation (e.g., into a hashtable for batch
+reporting), inline suppression at the invocation site is the
+recommended response.
+
+### 4.32 PSAPxxxx — Project / pipeline convention rules
+
+The PSAPxxxx family is a new rule space introduced in 3.2.0 for
+**opinionated, project-specific conventions**. Every PSAPxxxx rule:
+
+- Is disabled by default
+- Must be enabled per repository via `.psa.config.json` `enable`
+- Has a clearly documented "what convention does this enforce"
+  rationale tied to a specific style of repository
+
+Currently shipped PSAPxxxx rules are listed below.
+
+### 4.33 PSAP0001 — Phase function naming convention
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 3.2.0
+- **Convention origin**: Deploy-Drivers-For-WindowsServer 21-phase
+  pipeline (Chipset / Graphics / NPU / MSBthPan family)
+
+**Convention**: Functions that implement a pipeline phase MUST follow
+the canonical pattern:
+
+```
+Invoke-(Prep|Verify|Inst)Phase<NN>_<DescriptiveName>
+```
+
+Examples:
+
+- `Invoke-PrepPhase00_Initialize` — OK
+- `Invoke-VerifyPhase06_HardwareImpactAnalysis` — OK
+- `Invoke-InstPhase04_PostInstallVerification` — OK
+- `Invoke-Phase00` — FAIL (missing Prep/Verify/Inst)
+- `Invoke-PrepPhase0_Initialize` — FAIL (NN must be 2 digits)
+- `Invoke-VerifyHardware` — FAIL (no PhaseNN_)
+
+**Detection**: The rule is permissive: it ONLY fires on functions
+whose names start with `Invoke-(Prep|Verify|Inst|Phase|Pipeline)` but
+do not match the canonical regex. Other function names are left
+alone (so general-purpose `Invoke-RestMethod` wrappers etc. are not
+mistakenly flagged).
+
+### 4.34 PSAP0002 — Required script-identifier variables
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 3.2.0
+- **Convention origin**: Deploy-Drivers-For-WindowsServer phase-banner
+  and DebugTrace JSONL output (script identity required for log
+  correlation across runs)
+
+**Convention**: Every pipeline script MUST assign the following three
+identifier variables at script-load time:
+
+- `$Script:ScriptVersion` — e.g., `'chipset-2026.05.18-r60'`
+- `$Script:ScriptHash` — e.g., the first 12 hex chars of the git SHA
+- `$Script:ScriptShortTag` — composed of the above two
+
+The variables are consumed by phase-banner output, DebugTrace JSONL
+file headers, and log-correlation tooling.
+
+**Detection**: The rule scans for `$Script:NAME =` or
+`${Script:NAME} =` assignments. For each missing required identifier,
+emits one PSAP0002 entry at line 1 of the file.
 
 ---
 

@@ -14,11 +14,44 @@ PowerShell スクリプト用の単一 Python 3 ファイル静的解析ツー�
 ついては [`SPEC.ja.md`](./SPEC.ja.md) を参照してください。
 英語版は [`SPEC.md`](./SPEC.md) を参照してください。
 
-**現在のバージョン: 3.1.0**
+**現在のバージョン: 3.2.0**
 
 ---
 
 ## 更新履歴
+
+### 3.2.0 — ファイル間整合性 (PSA8xxx)、 複雑度 (PSA9xxx)、 プロジェクト規約 (PSAPxxxx)
+
+3.2.0 では、 **ファイル間整合性チェック**、 **複雑度メトリクス**、 そして新たな **プロジェクト・パイプライン規約ルールファミリ** の 3 方向にアナライザを拡張しました。 加えて、 文字列・コメントの字句解析器を再構築し、 長年残っていた偽陽性のクラスを解消しています。
+
+**新ルールファミリと新ルール:**
+
+- **`PSA8xxx` — ファイル間整合性 (新カテゴリ)**
+  - **`PSA8001`** (warning、 デフォルト ON、 ファイル間): 同一スキャン対象のファイル群における function body のハッシュ drift。 2 つ以上のファイルが同じ名前の関数を持ち、 正規化された body が異なる場合、 すべての出現箇所が flag されます。 単一ファイル呼出しでは無音 (比較ピアが存在しない)。 新規 tunable: `psa8001_ignore_functions` (exact 名 + `regex:` パターンのリスト) で意図的にスクリプト固有な関数を除外可能。
+
+- **`PSA9xxx` — 複雑度メトリクス (新カテゴリ)**
+  - **`PSA9001`** (info、 デフォルト OFF): 関数 body が `max_function_lines` (デフォルト 200) を超過。 opt-in。 適切な閾値はプロジェクト依存。
+  - **`PSA9002`** (warning、 デフォルト OFF): 外部プロセス呼出し (`&` 演算子、 `msiexec` / `signtool` / `inf2cat` / `pnputil` / `bcdedit` / `sc.exe` / `regsvr32` / `wevtutil` / `dism` / `gpupdate` / `certutil` / `reg.exe` / `cmd.exe` / `powershell`) のあとに 5 行以内で `$LASTEXITCODE` / `$?` / `.ExitCode` / `-PassThru` 参照がない。 opt-in。
+
+- **`PSAPxxxx` — プロジェクト・パイプライン規約ルール (新ファミリ)**
+  - **PSAPxxxx ルールはすべてデフォルト OFF**。 `.psa.config.json` で opt-in する。 PSAPxxxx ファミリは特定のパイプラインスタイルに紐付いたオピニオネイテッドな規約を保持。 3.2.0 同梱の規約は Deploy-Drivers-For-WindowsServer レポジトリ由来。 他レポジトリも同じ opt-in 機構で採用可能。
+  - **`PSAP0001`** (warning、 デフォルト OFF): phase 関数命名規約 `Invoke-(Prep|Verify|Inst)PhaseNN_DescriptiveName`。
+  - **`PSAP0002`** (warning、 デフォルト OFF): 必須スクリプト識別子変数 `$Script:ScriptVersion` / `$Script:ScriptHash` / `$Script:ScriptShortTag`。
+
+**既存カテゴリ内の新規ルール:**
+
+- **`PSA3005`** (warning、 デフォルト ON): `Start-Transcript -Path` ではなく `-LiteralPath` を使うべき。 `-Path` は wildcard 展開を行うため、 `[`、 `]`、 バックチック等のメタ文字を含むパスでは誤動作する。 `-LiteralPath` は展開を無効化するため、 ログファイル取得の安全なデフォルト。
+
+**字句解析器の偽陽性修正 (スクリプト側修正不要):**
+
+- **`PSA1001` (ブレース整合性)**: PowerShell の `""` (ダブルクォート二重化) エスケープ AND `` `` `` (バックチック二重化) エスケープを字句解析器が正しく扱うように修正。 旧実装では `` "...`""..." `` や `` "...``\"..." `` 形式の文字列を誤解析し、 ダブルクォート状態に居続けてしまうことで以降のブレース計数を全部狂わせていた。
+- **`PSA2001` (未定義変数)**: スコープ修飾子セットに `script`、 `global`、 `local`、 `private` を追加。 `$Script:Foo` 形式の参照は runtime 評価対象として扱われ (作者が明示的にスコープを宣言しているため、 アナライザはその意図を尊重)、 未定義変数として誤検出されなくなった。
+- **`PSA4001` (TODO / FIXME マーカー)**: マーカー後にコロンか「空白+英字」が必要となり、 コメント内に埋め込まれた `"XXX"` 等の文字列リテラルは無視。 旧来は引用符内にマーカー語が含まれるコメントが偽陽性を生成していた。
+
+**新規 configuration tunable:**
+
+- `max_function_lines` (int、 デフォルト 200): PSA9001 の閾値。
+- `psa8001_ignore_functions` (list、 デフォルト `[]`): リストされた関数名について PSA8001 を抑制。 各エントリは exact 大文字小文字無視名マッチ、 または `regex:` プレフィックス付きの正規表現パターン。
 
 ### 3.1.0 — UTF-8 BOM 強制チェック (PSA7xxx カテゴリ)
 
@@ -109,7 +142,7 @@ PowerShell の利用可否が実行ごとに変わりうる場合に特に有用
 
 | 項目 | 現状 |
 |:---|:---|
-| ルール番号 | `PSA1001`〜`PSA7001` (28 ルール) |
+| ルール番号 | `PSA1001`〜`PSA9002` および `PSAP0001`〜`PSAP0002` (合計 34 ルール) |
 | 出力形式 | テキスト / JSON / SARIF 2.1.0 |
 | 抑制機能 | `# psa-disable-line` / `next-line` / `file` |
 | 設定 | `.psa.config.json` + CLI |
@@ -289,6 +322,7 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA3002** | ✅ 有効 | 行末バッククォートの直後が空行 |
 | **PSA3003** | ✅ 有効 | `-match` を空文字列リテラルに対して使用 |
 | **PSA3004** | ✅ 有効 | 空の `catch { }` ブロック |
+| **PSA3005** | ✅ 有効 | `Start-Transcript -Path` の代わりに `-LiteralPath` を使うべき。 `[`、 `]`、 その他 wildcard メタ文字を含むパスで誤動作 (3.2.0 新規) |
 
 `PSA4xxx` — スタイル・情報（Info）
 
@@ -325,9 +359,29 @@ Issues : 1 errors, 42 warnings, 31 info
 |:---|:---:|:---:|:---|
 | **PSA7001** | Warning | ✅ 有効 | PowerShell スクリプトが UTF-8 BOM を持たない（Windows PowerShell 5.1 が BOM 無し UTF-8 を Shift-JIS と誤認する可能性あり） |
 
+`PSA8xxx` — ファイル間整合性 (Warning) — 3.2.0 新規、 ファイル間
+
+| コード | デフォルト | 内容 |
+|:---|:---:|:---|
+| **PSA8001** | ✅ 有効 (単一ファイル呼出しでは無音) | function body のハッシュ drift。 同じ関数名が 2 つ以上のファイルで異なる正規化済み body を持つ場合、 すべての出現箇所が flag される。 `psa8001_ignore_functions` で関数ごとに抑制可能 (exact 名 + `regex:` パターン)。 |
+
+`PSA9xxx` — 複雑度メトリクス — 3.2.0 新規
+
+| コード | 重大度 | デフォルト | 内容 |
+|:---|:---:|:---:|:---|
+| **PSA9001** | Info | ⛔ 無効 | 関数 body が `max_function_lines` (デフォルト 200) を超過 |
+| **PSA9002** | Warning | ⛔ 無効 | 外部プロセス呼出し (`&` 演算子 / `msiexec` / `signtool` / `inf2cat` / `pnputil` / `bcdedit` 等) の後 5 行以内に `$LASTEXITCODE` / `$?` / `.ExitCode` / `-PassThru` チェックがない |
+
+`PSAPxxxx` — プロジェクト・パイプライン規約ルール — 3.2.0 新規ファミリ、 **すべてデフォルト OFF**
+
+| コード | 重大度 | デフォルト | 内容 |
+|:---|:---:|:---:|:---|
+| **PSAP0001** | Warning | ⛔ 無効 (opt-in) | phase 関数命名規約: `Invoke-(Prep\|Verify\|Inst)PhaseNN_DescriptiveName`。 名前が `Invoke-(Prep\|Verify\|Inst\|Phase\|Pipeline)` で始まるがカノニカル regex にマッチしない関数のみ flag。 |
+| **PSAP0002** | Warning | ⛔ 無効 (opt-in) | 必須スクリプト識別子変数: `$Script:ScriptVersion`、 `$Script:ScriptHash`、 `$Script:ScriptShortTag`。 欠落している識別子ごとに 1 件 PSAP0002 が emit される。 |
+
 ### 一部ルールがデフォルト無効である理由
 
-シグナル対ノイズ比を高く保つため、2 つのルールはデフォルト無効に
+シグナル対ノイズ比を高く保つため、 汎用ルール 2 つはデフォルト無効に
 しています。
 
 - **PSA4003（長すぎる行）** — 行長はスタイル的要素が強く、コメント

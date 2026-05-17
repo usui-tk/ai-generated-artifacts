@@ -363,6 +363,35 @@ PowerShell では `>` `<` はファイルリダイレクションで、比較演
 **検出**: `catch [型]? { }` で中括弧の間に内容なし。`catch {\n}`
 形式も 4 行ウィンドウで検出可能。
 
+### 4.13b PSA3005 — `Start-Transcript -Path` の代わりに `-LiteralPath` を使うべき
+
+- **重大度**: Warning
+- **デフォルト**: 有効
+- **3.2.0 で追加**
+
+**根拠**: `Start-Transcript -Path` は引数に対して wildcard 展開を行います。 `[`、 `]`、 バックチック等の PowerShell メタ文字を含むパスは誤解釈され、 transcript 作成が silent に失敗するか、 想定外のファイルに書き込まれます。 `-LiteralPath` は展開を無効化するため、 ログファイル取得の安全なデフォルトです。
+
+**検出**: `Start-Transcript` の呼出しで、 (a) 明示的に `-Path` を使用、 または (b) positional binding (デフォルトで `-Path` にバインドされる) を使用しており、 かつ論理行のどこにも `-LiteralPath` が出現しない場合 (バックチック継続行はチェック前に結合される)。
+
+**例**:
+
+```powershell
+# FAIL — -Path は wildcard 展開対象
+Start-Transcript -Path "C:\Temp\Logs\foo[1].log"
+
+# FAIL — positional binding は -Path に飛ぶ
+Start-Transcript $logPath
+
+# OK
+Start-Transcript -LiteralPath $logPath
+```
+
+**抑制**: `-Path` と `-LiteralPath` の両形式を意図的にテストする場合 (e.g., fallback カスケード) は行単位抑制:
+
+```powershell
+Start-Transcript -Path $p -Force -ErrorAction Stop  # psa-disable-line PSA3005 -- deliberate cascade
+```
+
 ### 4.14 PSA4001 — 未完了マーカー
 
 - **重大度**: Info
@@ -551,6 +580,115 @@ BOM が無いということは PS 5.1 でファイルが Shift-JIS と解釈さ
   別ルール (将来の PSA7003 を想定) で扱います。
 - PowerShell 7.x のみを対象とする環境では、設定ファイル経由で
   本ルールを抑制可能です。
+
+---
+
+### 4.29 PSA8001 — ファイル間における function body のハッシュ drift
+
+- **重大度**: Warning
+- **デフォルト**: 有効
+- **3.2.0 で追加**
+- **スコープ**: ファイル間 (同一呼出しに 2 ファイル以上必要)
+
+**根拠**: 関連する複数スクリプトを同梱するレポジトリ (典型例: Deploy-Drivers-For-WindowsServer パイプライン — 21 phase アーキテクチャを共有する 4 つの `Deploy-*` スクリプト) は、 `Format-Elapsed`、 `Write-Detail`、 `Start-DebugTrace` ファミリ全体など、 4 スクリプト間で byte レベルで同期したい多数のヘルパー関数を持つ。 能動的に enforce しない限り、 これらは時間とともに drift する (1 つのスクリプトに修正が入っても他には伝播しない)。 PSA8001 は lint 時に drift を捕捉する。
+
+**検出**: 同一スキャン対象のファイル群に、 同じ名前の関数が 2 つ以上存在する場合、 各 function body のハッシュを計算 (コメント・文字列は標準前処理で空白化済み; 残った空白の連続はシングルスペースに collapse)。 同じ関数名で 2 つ以上の異なるハッシュが観測された場合、 出現箇所ごとに PSA8001 を 1 件 emit、 function header 行を line として報告。 メッセージにはそのファイル自身のハッシュと、 観測されたすべてのバリアント (出現数付き) が含まれる。
+
+**単一ファイル呼出しでは何も emit されない** — 比較対象のピアが存在しない。 PSA8001 はファイルごとのパス完了後、 多ファイル analyze() ドライバからのみ発火。
+
+**チューニング**: `psa8001_ignore_functions` (list、 デフォルト `[]`) で意図的にファイル固有な関数名を抑制可能。 各エントリは以下のいずれか:
+
+- exact 大文字小文字無視関数名マッチ
+- `regex:` プレフィックス付きの正規表現パターン (例: `"regex:^Invoke-(Prep|Verify|Inst)Phase\\d{2}_"`)
+
+**抑制**: function 宣言行に `# psa-disable-line PSA8001` を inline で付与する形式は個別例外向け。 「この関数は意図的にスクリプト固有」 という安定した例外集合は、 スクリプト本体をクリーンに保つため `psa8001_ignore_functions` config option を推奨。
+
+### 4.30 PSA9001 — 関数 body が `max_function_lines` を超過
+
+- **重大度**: Info
+- **デフォルト**: **無効**
+- **3.2.0 で追加**
+
+**根拠**: ~200 行を超える関数は単一ユニットとしてレビュー・テストが困難。 適切な閾値はプロジェクト依存のため opt-in 形式。
+
+**検出**: 関数の物理 body (header 行から閉括弧まで、 inclusive) が `max_function_lines` (デフォルト 200) を超過。
+
+**チューニング**: `max_function_lines` (int、 デフォルト 200) で閾値設定。 CLI フラグでは指定不可。 `.psa.config.json` 経由のみ:
+
+```jsonc
+{
+  "enable": ["PSA9001"],
+  "max_function_lines": 300
+}
+```
+
+### 4.31 PSA9002 — 外部プロセス呼出しの `$LASTEXITCODE` チェック欠落
+
+- **重大度**: Warning
+- **デフォルト**: **無効**
+- **3.2.0 で追加**
+
+**根拠**: PowerShell の `&` 呼出し演算子およびネイティブコマンド呼出しは、 非ゼロ終了でも throw しない。 終了コードを silent に dropping するスクリプトは、 外部ツールからの本当の失敗を隠蔽してしまう。
+
+**検出**: 以下のいずれかにマッチする行:
+
+- `& <executable>` (呼出し演算子)
+- 既知のネイティブコマンドの bare 呼出し (`msiexec`、 `signtool`、 `inf2cat`、 `pnputil`、 `bcdedit`、 `sc.exe`、 `regsvr32`、 `wevtutil`、 `dism`、 `gpupdate`、 `certutil`、 `reg.exe`、 `cmd.exe`、 `cmd`、 `powershell`)
+
+の **後 5 行以内に** `$LASTEXITCODE` / `$?` / `.ExitCode` / `-PassThru` 参照がない場合。 `Start-Process` 行は除外 (`Start-Process -ErrorAction Stop` は throw するため)。
+
+**注記**: 本ルールはヒューリスティック; 5 行ウィンドウは recall と false-positive rate の意図的なトレードオフ。 `try { & exe; if ($LASTEXITCODE -ne 0) { throw } } catch { ... }` パターンが多いスクリプトでは well-behaved。 終了コードを呼出しから遠い場所 (e.g., 一括レポート用に hashtable に格納) でキャプチャするスクリプトでは、 呼出し箇所での inline 抑制が推奨。
+
+### 4.32 PSAPxxxx — プロジェクト・パイプライン規約ルール
+
+PSAPxxxx ファミリは 3.2.0 で導入された、 **オピニオネイテッドなプロジェクト固有規約** のための新ルール空間。 すべての PSAPxxxx ルールは:
+
+- デフォルト無効
+- レポジトリごとに `.psa.config.json` の `enable` で明示的に有効化が必要
+- 「何の規約を enforce するか」 の根拠が、 特定のレポジトリスタイルに紐付いた形で明示的に文書化されている
+
+3.2.0 同梱の PSAPxxxx ルールを以下にリスト。
+
+### 4.33 PSAP0001 — phase 関数命名規約
+
+- **重大度**: Warning
+- **デフォルト**: **無効** (opt-in)
+- **3.2.0 で追加**
+- **規約の出自**: Deploy-Drivers-For-WindowsServer の 21 phase パイプライン (Chipset / Graphics / NPU / MSBthPan ファミリ)
+
+**規約**: パイプライン phase を実装する関数は、 カノニカルパターンに従う必要がある:
+
+```
+Invoke-(Prep|Verify|Inst)Phase<NN>_<DescriptiveName>
+```
+
+例:
+
+- `Invoke-PrepPhase00_Initialize` — OK
+- `Invoke-VerifyPhase06_HardwareImpactAnalysis` — OK
+- `Invoke-InstPhase04_PostInstallVerification` — OK
+- `Invoke-Phase00` — FAIL (Prep/Verify/Inst 欠落)
+- `Invoke-PrepPhase0_Initialize` — FAIL (NN は 2 桁必須)
+- `Invoke-VerifyHardware` — FAIL (PhaseNN_ 欠落)
+
+**検出**: 寛容なルール: 名前が `Invoke-(Prep|Verify|Inst|Phase|Pipeline)` で始まるがカノニカル regex にマッチしない関数 **のみ** flag する。 他の関数名は影響なし (汎用 `Invoke-RestMethod` ラッパー等は誤って flag されない)。
+
+### 4.34 PSAP0002 — 必須スクリプト識別子変数
+
+- **重大度**: Warning
+- **デフォルト**: **無効** (opt-in)
+- **3.2.0 で追加**
+- **規約の出自**: Deploy-Drivers-For-WindowsServer の phase-banner および DebugTrace JSONL 出力 (実行間での log 相関のためスクリプト identity 必須)
+
+**規約**: すべてのパイプラインスクリプトはスクリプトロード時に以下 3 つの識別子変数を代入する必要がある:
+
+- `$Script:ScriptVersion` — 例: `'chipset-2026.05.18-r60'`
+- `$Script:ScriptHash` — 例: git SHA の先頭 12 桁
+- `$Script:ScriptShortTag` — 上記 2 つから合成
+
+これらの変数は phase-banner 出力、 DebugTrace JSONL ファイルヘッダー、 log-correlation tooling から消費される。
+
+**検出**: `$Script:NAME =` または `${Script:NAME} =` 形式の代入をスキャン。 欠落した必須識別子ごとに、 ファイル冒頭 (line 1) で PSAP0002 を 1 件 emit。
 
 ---
 

@@ -5,7 +5,26 @@
 // File format : JSONC  (JSON with C-style line `//` and block `/* */` comments)
 // Encoding    : UTF-8
 // Schema      : SPEC.md §5  /  SPEC.ja.md §5
-// Applies to  : psa.py 3.1.0 and later 3.x releases
+// Applies to  : psa.py 3.2.0 and later 3.x releases
+//
+// -----------------------------------------------------------------------------
+// What's new in 3.2.0 (compared to 3.1.x templates)
+// -----------------------------------------------------------------------------
+//
+//   - New generic rule  : PSA3005  Start-Transcript -Path -> -LiteralPath
+//   - New generic rule  : PSA8001  Function body hash drift across files
+//                                  (cross-file consistency, default ON)
+//   - New generic rule  : PSA9001  Long function (default OFF, opt-in)
+//   - New generic rule  : PSA9002  Unchecked $LASTEXITCODE (default OFF)
+//   - New project rules : PSAP0001 / PSAP0002 (pipeline-convention rules,
+//                                              ALL default OFF, opt-in)
+//   - New tunable       : max_function_lines             (PSA9001 threshold)
+//   - New tunable       : psa8001_ignore_functions       (PSA8001 ignore list)
+//
+// PSAPxxxx is a NEW rule family in 3.2.0 that holds opinionated,
+// project-specific conventions (e.g. phase-function naming). All PSAPxxxx
+// rules are disabled by default and must be explicitly enabled per
+// project. See the "PSAPxxxx" section below.
 //
 // -----------------------------------------------------------------------------
 // How to use this template
@@ -16,7 +35,7 @@
 //        cp .psa.config.json.template .psa.config.json
 //
 // 2) Uncomment and edit only the fields you want to override.
-//    Every field is OPTIONAL — an empty {} is a perfectly valid config.
+//    Every field is OPTIONAL - an empty {} is a perfectly valid config.
 //    Any field you leave commented out falls back to the built-in default
 //    documented next to it.
 //
@@ -33,7 +52,7 @@
 //
 //   psa.py --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json <script>.ps1
 //
-// NOT the regular blob URL (https://github.com/<owner>/<repo>/blob/...) —
+// NOT the regular blob URL (https://github.com/<owner>/<repo>/blob/...) -
 // that one returns HTML and will not parse as JSON.
 //
 // Robustness of the remote fetch:
@@ -42,7 +61,7 @@
 //                   defaults do not block the request as a bot.
 //   - TLS         : minimum TLS 1.2; maximum auto-negotiated up to TLS 1.3.
 //                   Certificate verification is ALWAYS on.
-//   - Retries     : exponential backoff on 5xx (2^n × 3 s) and on network
+//   - Retries     : exponential backoff on 5xx (2^n x 3 s) and on network
 //                   errors (2^n s). 4xx failures are NOT retried.
 //   - Tuning      : env vars PSA_CONFIG_TIMEOUT (default 30s),
 //                   PSA_CONFIG_MAX_RETRIES (default 3 attempts),
@@ -52,7 +71,7 @@
 // fetched once per invocation; psa.py does not cache them on disk.
 //
 // -----------------------------------------------------------------------------
-// Precedence (low → high)
+// Precedence (low -> high)
 // -----------------------------------------------------------------------------
 //
 //   1. Built-in defaults baked into psa.py
@@ -68,19 +87,34 @@
   // enable: rules to force-ENABLE
   // ===========================================================================
   //
-  // Turn ON rules that are disabled by default. Accepts `PSAxxxx` codes.
-  // Unknown codes are silently ignored. Order does not matter.
+  // Turn ON rules that are disabled by default. Accepts `PSAxxxx` and
+  // `PSAPxxxx` codes. Unknown codes are silently ignored. Order does
+  // not matter.
   //
-  // Default-disabled rules in this psa.py version:
+  // Default-disabled rules in psa.py 3.2.0:
   //
-  //   PSA4003  Long line exceeds max_line_length
-  //   PSA6002  Cmdlet alias used  (ls, cd, dir, where, ...)
+  //   Generic rules (PSAxxxx):
+  //     PSA4003   Long line exceeds max_line_length
+  //     PSA6002   Cmdlet alias used  (ls, cd, dir, where, ...)
+  //     PSA9001   Function body exceeds max_function_lines
+  //     PSA9002   External process invocation without $LASTEXITCODE check
+  //
+  //   Project / pipeline convention rules (PSAPxxxx) - ALL OFF by default:
+  //     PSAP0001  Phase function naming convention
+  //               (Invoke-(Prep|Verify|Inst)PhaseNN_Name)
+  //     PSAP0002  Required script identifier variables
+  //               ($Script:ScriptVersion / ScriptHash / ScriptShortTag)
   //
   // Built-in default: []
   //
-  // Example — enable both default-off rules:
+  // Example - enable PSAPxxxx rules for a pipeline repository:
   //
-  //   "enable": ["PSA6002", "PSA4003"],
+  //   "enable": ["PSAP0001", "PSAP0002"],
+  //
+  // Example - enable complexity metrics with a generous threshold:
+  //
+  //   "enable": ["PSA9001"],
+  //   "max_function_lines": 300,
 
 
   // ===========================================================================
@@ -93,7 +127,7 @@
   //
   // Built-in default: []
   //
-  // Example — silence the TODO marker check and the plural-noun check:
+  // Example - silence the TODO marker check and the plural-noun check:
   //
   //   "disable": ["PSA4001", "PSA6003"],
 
@@ -104,15 +138,83 @@
   //
   // PSA7001 is a file-level rule (severity: warning, default ON) that fires
   // when a .ps1 file lacks the UTF-8 BOM at byte offset 0. Required reading
-  // for ja-JP Windows PowerShell 5.1 environments: see SPEC.md §4.28.
+  // for ja-JP Windows PowerShell 5.1 environments: see SPEC.md section 4.28.
   //
   // Disable per project if you ship .ps1 files intended for PowerShell 7.x
   // only AND you have a separate enforcement of UTF-8 (no-BOM) via lint
   // tooling. For most projects, leave it on.
   //
-  // Example — turn PSA7001 off for a PS 7.x-only project:
+  // Example - turn PSA7001 off for a PS 7.x-only project:
   //
   //   "disable": ["PSA7001"],
+
+
+  // ===========================================================================
+  // PSA8001: Function body hash drift across files (NEW in 3.2.0)
+  // ===========================================================================
+  //
+  // PSA8001 fires when psa.py is run over multiple files and a function
+  // with the same NAME exists in two or more of them with DIFFERENT
+  // normalized bodies. Use it to enforce that shared helper functions
+  // (Format-Elapsed, Write-Detail, Start-DebugTrace, ...) stay in sync
+  // across a family of related scripts.
+  //
+  // To silence false positives for functions that are INTENTIONALLY
+  // different per file (e.g. pipeline phase functions named identically
+  // but implementing different driver families), list them in
+  // psa8001_ignore_functions:
+  //
+  //   "psa8001_ignore_functions": [
+  //     // Exact match (case-insensitive):
+  //     "Invoke-PrepPhase00_Initialize",
+  //     "Show-Help",
+  //     // Regex pattern (prefix with "regex:"):
+  //     "regex:^Invoke-(Prep|Verify|Inst)Phase\\d{2}_"
+  //   ],
+  //
+  // Built-in default: [] (no functions ignored)
+
+
+  // ===========================================================================
+  // PSA9001: Function body exceeds max_function_lines (NEW in 3.2.0)
+  // ===========================================================================
+  //
+  // Default OFF. Add "PSA9001" to "enable" above to opt in.
+  //
+  // Threshold (lines per function, inclusive of header and closing brace):
+  //
+  //   "max_function_lines": 200,
+  //
+  // Built-in default: 200
+
+
+  // ===========================================================================
+  // PSAPxxxx: Project / pipeline convention rules (NEW family in 3.2.0)
+  // ===========================================================================
+  //
+  // PSAPxxxx rules encode OPINIONATED conventions tied to a specific
+  // pipeline style. They are ALL disabled by default and must be
+  // enabled explicitly via "enable" when your repository follows that
+  // convention.
+  //
+  // Currently shipped PSAPxxxx rules:
+  //
+  //   PSAP0001  Phase function naming convention
+  //             Pattern: Invoke-(Prep|Verify|Inst)PhaseNN_DescriptiveName
+  //             Fires on:    Invoke-Phase00, Invoke-VerifyHardware, etc.
+  //             OK examples: Invoke-PrepPhase00_Initialize
+  //                          Invoke-VerifyPhase06_HardwareImpactAnalysis
+  //                          Invoke-InstPhase04_PostInstallVerification
+  //
+  //   PSAP0002  Required script identifier variables
+  //             Demands all three of:
+  //               $Script:ScriptVersion   (e.g., 'chipset-2026.05.17-r60')
+  //               $Script:ScriptHash      (e.g., 'a1b2c3d4e5f6')
+  //               $Script:ScriptShortTag  (composed of the above two)
+  //
+  // Example - Deploy-Drivers-style pipeline repository:
+  //
+  //   "enable": ["PSAP0001", "PSAP0002"],
 
 
   // ===========================================================================
@@ -122,12 +224,12 @@
   // Issues whose severity is BELOW this threshold are filtered out before
   // output. This affects what is printed; it does NOT change the exit code
   // (the exit code is still 2 if any error was found, 1 if any warning was
-  // found, 0 otherwise — see SPEC §9).
+  // found, 0 otherwise - see SPEC section 9).
   //
   // Allowed values  : "error" | "warning" | "info"
   // Built-in default: "info"  (i.e., everything is reported)
   //
-  // Example — only show warnings and errors:
+  // Example - only show warnings and errors:
   //
   //   "severity": "warning",
 
@@ -144,7 +246,7 @@
   //
   // Built-in default: 120
   //
-  // Example — stricter 100-character limit:
+  // Example - stricter 100-character limit:
   //
   //   "max_line_length": 100
 
