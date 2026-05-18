@@ -447,19 +447,22 @@ cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### ルールカバレッジ（psa.py v3.1.0 — 28 ルール）
+### ルールカバレッジ（psa.py v3.3.0 — 36 ルール）
 
-`psa.py` v3.1.0 は 28 ルールを 7 カテゴリに分類しています：
+`psa.py` v3.3.0 は 36 ルールを 9 カテゴリに分類しています。 `PSA1xxx`〜`PSA7xxx` は PowerShell スクリプト全般に適用される汎用ルール、 `PSA8xxx` (ファイル間整合性) と `PSA9xxx` (複雑度メトリクス) は 3.2.0 で追加、 `PSAPxxxx` (プロジェクト/パイプライン規約) は 3.2.0 (PSAP0001 / PSAP0002) と 3.3.0 (PSAP0003 / PSAP0004) で追加された opt-in 規約ルールです。
 
 | カテゴリ | コード範囲 | 例 |
 | -------- | ---------- | -- |
 | 構文の整合性  | `PSA1001`〜`PSA1003` | 波括弧 / 丸括弧 / 角括弧の整合性 |
-| 意味解析      | `PSA2001`〜`PSA2006` | 未定義変数、自動変数のシャドウイング、`-match $変数` の罠、`$null` を `-eq`/`-ne` の右辺に置く問題 |
-| スタイル      | `PSA3001`〜`PSA3004` | `Start-Process -ArgumentList`、バックティック行継続後の空行、空の `catch` ブロック |
-| 衛生          | `PSA4001`〜`PSA4004` | 未完了マーカー、行末空白、長い行、行末セミコロン |
-| セキュリティ  | `PSA5001`〜`PSA5004` | 平文パスワードパラメーター、`Invoke-Expression`、壊れたハッシュアルゴリズム、`ComputerName` ハードコード |
-| ベストプラクティス | `PSA6001`〜`PSA6006` | 非承認動詞、コマンドレットエイリアス、複数形名詞の関数名、`$global:` 定義、必須パラメーターのデフォルト値、`$true` がデフォルトのスイッチパラメーター |
-| ファイル形式  | `PSA7001`            | PowerShell スクリプトに UTF-8 BOM がない（BOM がないと Windows PowerShell 5.1 が非 ASCII バイトを Shift-JIS と誤認する可能性あり） |
+| 意味解析      | `PSA2001`〜`PSA2006` | 未定義変数、 自動変数のシャドウイング、 `-match $変数` の罠、 `$null` を `-eq`/`-ne` の右辺に置く問題 |
+| スタイル      | `PSA3001`〜`PSA3005` | `Start-Process -ArgumentList`、 バックティック行継続後の空行、 空の `catch` ブロック、 `Start-Transcript -Path` は `-LiteralPath` を使うべき |
+| 衛生          | `PSA4001`〜`PSA4004` | 未完了マーカー、 行末空白、 長い行、 行末セミコロン |
+| セキュリティ  | `PSA5001`〜`PSA5004` | 平文パスワードパラメーター、 `Invoke-Expression`、 壊れたハッシュアルゴリズム、 `ComputerName` ハードコード |
+| ベストプラクティス | `PSA6001`〜`PSA6006` | 非承認動詞、 コマンドレットエイリアス、 複数形名詞の関数名、 `$global:` 定義、 必須パラメーターのデフォルト値、 `$true` がデフォルトのスイッチパラメーター |
+| ファイル形式  | `PSA7001`            | PowerShell スクリプトに UTF-8 BOM がない (BOM がないと Windows PowerShell 5.1 が非 ASCII バイトを Shift-JIS と誤認する可能性あり) |
+| ファイル間整合性 | `PSA8001`         | 同一スキャン対象ファイル群における function body のハッシュ drift |
+| 複雑度メトリクス | `PSA9001`〜`PSA9002` | function 本体の長さ閾値 (opt-in)、 外部プロセス呼び出し後の `$LASTEXITCODE` チェック漏れ (opt-in) |
+| プロジェクト規約 | `PSAP0001`〜`PSAP0004` | phase 関数命名規約、 必須のスクリプト識別子変数、 インラインリビジョンタグコメント (`PSAP0003`、 3.3.0 新規)、 EOF の `REVISION HISTORY` ブロック (`PSAP0004`、 3.3.0 新規)。 **PSAPxxxx は全て default OFF**。 本プロジェクトは `PSAP0003` / `PSAP0004` に opt-in しています |
 
 各ルールの完全仕様は
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4 を参照。

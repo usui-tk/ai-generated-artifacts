@@ -105,7 +105,7 @@
   // `PSAPxxxx` codes. Unknown codes are silently ignored. Order does
   // not matter.
   //
-  // Default-disabled rules in psa.py 3.2.0:
+  // Default-disabled rules in psa.py 3.3.0:
   //
   //   Generic rules (PSAxxxx):
   //     PSA4003   Long line exceeds max_line_length

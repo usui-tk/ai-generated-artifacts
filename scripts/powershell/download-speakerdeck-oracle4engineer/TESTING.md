@@ -35,9 +35,9 @@ This document consolidates everything needed to verify and evaluate
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` v3.1.0 on `Download-SpeakerDeck.ps1` (with project `.psa.config.json`) | **0 errors / 0 warnings / 0 info** ✓ | psa-baseline-sync |
-| `psa.py` v3.1.0 on `Test-PdfMetadata.ps1` (with project `.psa.config.json`)     | **0 errors / 0 warnings / 0 info** ✓ | psa-baseline-sync |
-| File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ both `.ps1` files | r20 build |
+| `psa.py` v3.3.0 on `Download-SpeakerDeck.ps1` (with project `.psa.config.json`) | **0 errors / 0 warnings / 0 info** ✓ | r21 build |
+| `psa.py` v3.3.0 on `Test-PdfMetadata.ps1` (with project `.psa.config.json`)     | **0 errors / 0 warnings / 0 info** ✓ | r21 build |
+| File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ both `.ps1` files | r21 build |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ pass | 2026-05-11 |
 | Phase 2–5 (Scan / Plan) — DryRun mode | ✓ 804 decks evaluated | 2026-05-11 |
 | Phase 6 (Download) — real run | ✓ **804/804 success** (zero failures) | 2026-05-11 (r17) |
@@ -50,8 +50,10 @@ This document consolidates everything needed to verify and evaluate
 
 ## 1. Static analysis gate
 
-`psa.py` v3.1.0 (28-rule check set `PSA1001`..`PSA7001`) must pass before
-every commit (see Part C of [SPEC.md](./SPEC.md)).
+`psa.py` v3.3.0 (36-rule check set: `PSA1001`..`PSA9002` plus opt-in
+`PSAP0001`..`PSAP0004`) must pass before every commit (see Part C of
+[SPEC.md](./SPEC.md)). This project opts in to `PSAP0003` and
+`PSAP0004` (the revision-discipline rules added in 3.3.0).
 
 `psa.py` auto-discovers `.psa.config.json` in the current working directory,
 so the canonical invocation is from this script directory:
@@ -82,10 +84,11 @@ Issues : 0 errors, 0 warnings, 0 info
 
 Any deviation from `0 / 0 / 0` blocks the commit. See
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-§4 for the full specification of the 28 rules
+§4 for the full specification of the 36 rules
 (`PSA1xxx` syntax / `PSA2xxx` semantics / `PSA3xxx` style / `PSA4xxx`
 hygiene / `PSA5xxx` security / `PSA6xxx` best practice / `PSA7xxx`
-file format).
+file format / `PSA8xxx` cross-file consistency / `PSA9xxx` complexity
+metrics / `PSAPxxxx` opt-in pipeline conventions).
 
 ### 1.1 Suppression policy
 

@@ -518,19 +518,27 @@ cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### Rule coverage (psa.py v3.1.0 — 28 rules)
+### Rule coverage (psa.py v3.3.0 — 36 rules)
 
-`psa.py` v3.1.0 groups its 28 rules into seven categories:
+`psa.py` v3.3.0 groups its 36 rules into nine categories. Categories
+`PSA1xxx`..`PSA7xxx` are generic and apply to any PowerShell script;
+`PSA8xxx` (cross-file consistency) and `PSA9xxx` (complexity metrics)
+were added in 3.2.0; `PSAPxxxx` (project / pipeline conventions) are
+opt-in opinionated rules added across 3.2.0 (PSAP0001 / PSAP0002) and
+3.3.0 (PSAP0003 / PSAP0004).
 
 | Category | Code range | Examples |
 | -------- | ---------- | -------- |
 | Syntax balance      | `PSA1001`..`PSA1003` | brace / paren / bracket balance |
 | Semantics           | `PSA2001`..`PSA2006` | undefined variable, auto-variable shadowing, `-match` against bare variable, `$null` on the right of `-eq`/`-ne` |
-| Style               | `PSA3001`..`PSA3004` | `Start-Process -ArgumentList`, trailing backtick before empty line, empty `catch` block |
+| Style               | `PSA3001`..`PSA3005` | `Start-Process -ArgumentList`, trailing backtick before empty line, empty `catch` block, `Start-Transcript -Path` should be `-LiteralPath` |
 | Hygiene             | `PSA4001`..`PSA4004` | unfinished markers, trailing whitespace, long line, trailing semicolon |
 | Security            | `PSA5001`..`PSA5004` | plain-text password parameter, `Invoke-Expression`, broken hash algorithm, hardcoded `ComputerName` |
 | Best practice       | `PSA6001`..`PSA6006` | non-approved verb, cmdlet alias, plural function noun, `$global:` definition, mandatory parameter with default, switch defaulting to `$true` |
 | File format         | `PSA7001`            | PowerShell script lacks UTF-8 BOM (Windows PowerShell 5.1 may misinterpret non-ASCII bytes as Shift-JIS without a BOM) |
+| Cross-file consistency | `PSA8001`         | function-body hash drift across files in the same scan |
+| Complexity metrics  | `PSA9001`..`PSA9002` | function body length threshold (opt-in), external process invocation without `$LASTEXITCODE` check (opt-in) |
+| Project / pipeline conventions | `PSAP0001`..`PSAP0004` | phase function naming, required script-identifier variables, inline revision-tag comments (`PSAP0003`, new in 3.3.0), end-of-file `REVISION HISTORY` blocks (`PSAP0004`, new in 3.3.0). **All PSAPxxxx rules are off by default**; this project opts in to `PSAP0003` and `PSAP0004` |
 
 For the full specification of each rule, see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4.

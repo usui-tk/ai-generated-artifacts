@@ -81,8 +81,9 @@ scripts/python/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` is a **pure Python** static analyzer (no PowerShell installation
-required), version **3.1.0** at the time of this writing, with a 28-rule
-check set spanning `PSA1001`..`PSA7001`. It was originally developed for the
+required), version **3.3.0** at the time of this writing, with a 36-rule
+check set spanning `PSA1001`..`PSA9002` plus `PSAP0001`..`PSAP0004`
+(opt-in pipeline-convention rules). It was originally developed for the
 [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
 repository. Within this repository it must be:
 
@@ -621,8 +622,9 @@ Based on the longest successful path length, classify into:
         .psa.config.json     # project-local config (disables PSA6003)
     python/
       powershell-static-analyzer/
-        psa.py               # canonical location, v3.1.0
-        SPEC.md (English only) # authoritative analyzer specification
+        psa.py               # canonical location, v3.3.0
+        SPEC.md              # authoritative analyzer specification (English only)
+        CHANGELOG.md         # per-release change log (English only)
 ```
 
 ### Required gate
@@ -638,17 +640,18 @@ python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 
 Both must pass with **0 errors / 0 warnings / 0 info**.
 
-### Rule coverage (psa.py v3.1.0)
+### Rule coverage (psa.py v3.3.0)
 
-`psa.py` v3.1.0 ships with a 28-rule check set `PSA1001`..`PSA7001`, grouped
-into seven categories (the seventh, `PSA7xxx`, is the file-format /
-encoding family added in 3.1.0 — currently `PSA7001` for missing UTF-8 BOM).
-A condensed table is reproduced in
+`psa.py` v3.3.0 ships with a 36-rule check set: generic rules
+`PSA1001`..`PSA9002` grouped into nine categories, plus the opt-in
+pipeline-convention family `PSAP0001`..`PSAP0004`. The newest additions
+are `PSAP0003` (inline revision-tag comments) and `PSAP0004`
+(end-of-file `REVISION HISTORY` blocks), both new in 3.3.0 and disabled
+by default. A condensed table is reproduced in
 [`README.md`](./README.md) and [`README.ja.md`](./README.ja.md). For the
 authoritative specification of every rule (severity, examples, suppression
 guidance), see
-[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-([日本語](../../python/powershell-static-analyzer/SPEC.md)) §4.
+[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4.
 
 ### Project-local suppression policy
 
