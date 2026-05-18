@@ -93,6 +93,12 @@ public API surface — for versioning purposes — comprises:
 Internal Python module boundaries (function and class names within
 `psa.py`) are NOT part of the public API and may change at any time.
 
+**Release history**: The per-version change log for `psa.py` lives in
+[`CHANGELOG.md`](./CHANGELOG.md) ([Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
+format, covering every release from 2.0.0 onward). This SPEC describes
+the *current* behaviour; for the chronological evolution of each rule
+and CLI contract, see `CHANGELOG.md`.
+
 ---
 
 ## 2. Architecture
@@ -1401,12 +1407,38 @@ To add `PSA7001`:
 
 ## Appendix B — Document history
 
-| Version | Date | Changes |
-|:---|:---|:---|
-| 3.1.0 | 2026 | New PSA7xxx category (file format / encoding). PSA7001 added: PowerShell script lacks UTF-8 BOM (warning, default on). `analyze_text()` signature extended with optional `file_meta` parameter (backward compatible). `main()` switched from `path.read_text()` to `path.read_bytes()` so the BOM can be inspected before decoding. §2.2 Processing model updated accordingly. See §4.28. |
-| 2.3.0 | 2026 | Remote-config fetch hardened: explicit TLS 1.2 minimum (max auto-negotiated to TLS 1.3); browser-like User-Agent (Chrome 131) + Sec-Ch-Ua client hints; exponential-backoff retries on 5xx and network errors (4xx not retried); env-var tuning (`PSA_CONFIG_TIMEOUT`, `PSA_CONFIG_MAX_RETRIES`, `PSA_CONFIG_QUIET`). See §5.4. |
-| 2.2.0 | 2026 | Configuration file becomes JSONC (line `//` and block `/* */` comments). `--config` accepts http(s) URLs in addition to local paths (§5.4). New companion file `.psa.config.json.template` documents every option with built-in defaults. |
-| 2.1.0 | 2026 | Initial SPEC document. Adds §8 (environment detection) for `psa.py` 2.1.0. Existing behaviour (rules, formats, CLI) inherited from `psa.py` 2.0.0. |
+The chronological per-version change log for `psa.py` (and for this
+SPEC document, which tracks `psa.py` releases) lives in
+[`CHANGELOG.md`](./CHANGELOG.md) in
+[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format.
+
+### Revision discipline (where revision history lives)
+
+This project follows the repository-wide
+[Revision History Policy](../../../README.md#revision-history-policy)
+documented at the root of `ai-generated-artifacts`. The summary:
+
+- **Per-version release notes belong in [`CHANGELOG.md`](./CHANGELOG.md).**
+  They do NOT belong in:
+  - `psa.py` source comments (no `# r42:`, no end-of-file
+    `# REVISION HISTORY` block; the `PSAP0003` / `PSAP0004` rules
+    detect these patterns when opted in)
+  - `README.md` (other than a brief pointer to `CHANGELOG.md`)
+  - `SPEC.md` (this document — it describes *current* behaviour;
+    chronological history lives in `CHANGELOG.md`)
+- **This SPEC describes the current behaviour of `psa.py`.** When a
+  rule's semantics change, this SPEC is updated to describe the *new*
+  semantics, and a `CHANGELOG.md` entry is added under a new version
+  section describing what changed and why.
+- **Architectural rationale** (root-cause analyses of past pitfalls)
+  belongs in [Appendix D — Known Pitfalls & Lessons Learned](#appendix-d--known-pitfalls--lessons-learned)
+  below. `CHANGELOG.md` cross-references back to Appendix D where
+  applicable.
+
+This three-way split — `psa.py` source for current code,
+`CHANGELOG.md` for chronological release log, this SPEC for the
+authoritative current-behaviour reference — keeps each document
+focused on a single responsibility.
 
 ---
 

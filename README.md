@@ -112,6 +112,32 @@ When older artifacts contain `SPEC.ja.md` or `TESTING.ja.md` files, they should 
 
 ---
 
+## Revision History Policy
+
+This repository uses a **repository-wide common policy** for managing per-version change history, applied uniformly across all sub-projects (scripts, tools, prompts) maintained here:
+
+- **Per-version release notes live in `CHANGELOG.md`**, not in script bodies, not in `README.md`, not in `SPEC.md`.
+- Each sub-project that has a meaningful release cadence ships its own `CHANGELOG.md` next to its other files (e.g., [`scripts/python/powershell-static-analyzer/CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md)).
+- `CHANGELOG.md` follows the [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format and adheres to [Semantic Versioning 2.0.0](https://semver.org/).
+- `CHANGELOG.md` is **English only**, per the [Language Policy](#language-policy) above.
+
+**What goes where:**
+
+| Information type                                  | Location                                                |
+| ------------------------------------------------- | ------------------------------------------------------- |
+| *What does this code do today?*                   | Script body comments + `README.md`                      |
+| *Why is it designed this way?*                    | `SPEC.md` (especially "Part D — Known Pitfalls" or equivalent) |
+| *What changed in each release, and when?*         | `CHANGELOG.md`                                          |
+| *What is the public API contract for SemVer?*     | `SPEC.md` Versioning section                            |
+
+**Why this matters**: LLM-assisted code maintenance is especially prone to accumulating stale per-revision comments inside script bodies (`# r42: fixed X`, `# r56+: now does Y`). Such comments rapidly become untraceable noise — readers cannot resolve `r42` without consulting Git history anyway. Centralizing release notes in `CHANGELOG.md` and keeping scripts focused on current behaviour avoids this failure mode.
+
+**Static-analyzer enforcement**: For PowerShell scripts, `psa.py` 3.3.0 ships two opt-in rules — `PSAP0003` (inline `# rNN:` revision tags) and `PSAP0004` (end-of-file `REVISION HISTORY` blocks) — that detect violations of this policy. Sub-projects enforce them via their `.psa.config.json` `enable` list.
+
+For per-sub-project deeper guidance, see the **Revision discipline** subsection of each sub-project's `SPEC.md`.
+
+---
+
 ## ⚠️ Use at Your Own Risk (Self-Responsibility)
 
 **All content in this repository is provided "AS IS", without warranty of any kind. Use it entirely at your own risk.**

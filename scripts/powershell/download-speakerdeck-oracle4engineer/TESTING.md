@@ -10,7 +10,11 @@ This document consolidates everything needed to verify and evaluate
    the `oracle4engineer` account, including the historical r16 → r17 regression
    fix evidence
 
-🇯🇵 **Japanese version: see [`TESTING.md`](./TESTING.md) (English only).**
+> **Documentation language policy**: This document is maintained in
+> English only per the repository-wide policy. See `README.md` and
+> `README.ja.md` for the bilingual entry-point documentation; for the
+> repository-wide language policy see the root `README.md` "Language
+> Policy" section.
 
 ---
 

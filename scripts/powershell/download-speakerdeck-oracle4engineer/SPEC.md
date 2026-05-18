@@ -689,18 +689,24 @@ Common cases and their resolutions:
 If `psa.py` systematically misclassifies a pattern, raise an issue upstream
 in the analyzer's own repository rather than suppressing locally.
 
-## A.12 Bilingual Documentation
+## A.12 Documentation Language Policy
+
+This project follows the repository-wide documentation language policy
+documented in the `ai-generated-artifacts` root [`README.md`](../../../README.md)
+"Language Policy" section. Summary:
 
 ### File set
 
 Every script (or script project, when placed inside a multi-script
 repository) carries:
 
-| File | Role |
-|---|---|
-| `README.md` | English, primary documentation |
-| `README.ja.md` | Japanese mirror, kept in sync with `README.md` |
-| `SPEC.md` | Developer / LLM specification (this file's pattern) |
+| File | Role | Languages maintained |
+|---|---|---|
+| `README.md` | English, primary documentation (master) | English **and** Japanese (`README.ja.md`) |
+| `README.ja.md` | Japanese translation of `README.md`, kept in sync | (paired with `README.md`) |
+| `SPEC.md` | Developer / LLM specification | **English only** |
+| `TESTING.md` | Test procedures and verification results | **English only** |
+| `CHANGELOG.md` (when one exists) | Per-version release notes | **English only** |
 
 When the script lives inside a larger multi-script repository (e.g.,
 `usui-tk/ai-generated-artifacts/scripts/powershell/<name>/`), the
@@ -708,14 +714,22 @@ When the script lives inside a larger multi-script repository (e.g.,
 scripts. When the script is its own standalone repo, place a `LICENSE`
 file in the same directory.
 
-### Synchronization rule
+### Synchronization rule (README only)
 
 **Every script change that touches `README.md` must update `README.ja.md`
 in the same commit.** The `Lines : NNNN` field in both files must match.
 Don't translate machine-readable fields (paths, parameter names, version
 strings) — only translate prose, headers, and explanatory text.
 
-### Style for Japanese mirror
+Other documents (`SPEC.md`, `TESTING.md`, `CHANGELOG.md`) are English
+only and have no Japanese counterparts to synchronize.
+
+**Every script change that touches `README.md` must update `README.ja.md`
+in the same commit.** The `Lines : NNNN` field in both files must match.
+Don't translate machine-readable fields (paths, parameter names, version
+strings) — only translate prose, headers, and explanatory text.
+
+### Style for `README.ja.md`
 
 - Use 「全角コロン (：)」 in headers and table column descriptions
 - Keep code blocks and parameter names in ASCII
@@ -772,10 +786,38 @@ update the license name and one-paragraph summary to match.
 
 ### Revision discipline
 
-- Each meaningful change bumps the `-rNN` suffix
-- The `ScriptTag` describes the change in 3-5 kebab-case words
-- Major refactors (e.g., phase renumbering) get their own revision
-- Keep an internal CHANGELOG comment block at the top of the script
+This project follows the repository-wide
+[Revision History Policy](../../../README.md#revision-history-policy)
+documented at the root of `ai-generated-artifacts`.
+
+#### Version identifier
+
+- Each meaningful change bumps the `-rNN` suffix in
+  `$Script:ScriptVersion` / `$Script:ScriptTag`.
+- The `ScriptTag` describes the change in 3-5 kebab-case words.
+- Major refactors (e.g., phase renumbering) get their own revision.
+
+#### Where revision history lives
+
+Per-version release notes belong **exclusively** in a `CHANGELOG.md`
+file alongside `Download-SpeakerDeck.ps1` in this directory (not yet
+created; will be added when the first formal release is cut after this
+SPEC change). Release notes do NOT belong in:
+
+- `Download-SpeakerDeck.ps1` source comments — neither inline
+  revision-tag comments (`# rNN:`) nor end-of-file `REVISION HISTORY`
+  blocks. The `psa.py` rules `PSAP0003` and `PSAP0004` (opt-in via
+  `.psa.config.json`) detect this anti-pattern.
+- `README.md` (other than a brief pointer to `CHANGELOG.md` when one
+  exists).
+- This `SPEC.md` (which describes *current* behaviour; historical
+  context, when essential, goes in a dedicated section such as a
+  Pitfalls / Lessons Learned appendix).
+
+When `CHANGELOG.md` is added, it follows the
+[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format
+and is maintained in **English only** per the repository-wide
+documentation language policy.
 
 ### Reuse before invention
 

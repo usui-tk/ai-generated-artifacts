@@ -24,7 +24,7 @@ e.g.
 
 ## Checklist
 
-- [ ] If a bilingual file is touched (`<NAME>.md` + `<NAME>.ja.md`), **both** files are updated in this PR.
+- [ ] **README sync**: if `README.md` is touched, `README.ja.md` is updated in the same PR (English is the master). Per the repository-wide documentation language policy (root `README.md` "Language Policy"), only `README.md` has a Japanese counterpart; `SPEC.md`, `TESTING.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` are English only.
 - [ ] If a project-level `SPEC.md` is touched, the corresponding `Part C — Quality Gates & Validation Checklist` has been re-checked.
 - [ ] If a PowerShell script is touched, `python3 scripts/python/powershell-static-analyzer/psa.py <script>.ps1` reports `0 errors / 0 warnings / 0 info`.
 - [ ] No real secrets, internal hostnames, account IDs, ARNs, or other private data are included in this PR (including in commit messages and log excerpts).

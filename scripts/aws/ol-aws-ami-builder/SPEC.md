@@ -93,7 +93,7 @@ env.properties.aws-ol8      Oracle Linux 8  Update 10 template
 env.properties.aws-ol7      Oracle Linux 7  Update 9 template (experimental — see B.3, D.10)
 env.properties.aws-ol6      Oracle Linux 6  Update 10 template (experimental — see B.4, B.5, D.11–D.16)
 README.md / README.ja.md    end-user documentation (bilingual)
-SPEC.md  / SPEC.md       this developer specification (bilingual)
+SPEC.md                     this developer specification (English only)
 ```
 
 ### A.1.4 Workspace path convention
@@ -473,27 +473,34 @@ Example (bad):
 
 ---
 
-## A.10 Bilingual Documentation
+## A.10 Documentation Language Policy
+
+This project follows the repository-wide documentation language policy
+documented in the `ai-generated-artifacts` root [`README.md`](../../../README.md)
+"Language Policy" section.
 
 ### File set
 
-| English | Japanese | Content |
-|---------|----------|---------|
-| `README.md` | `README.ja.md` | End-user documentation |
-| `SPEC.md` | `SPEC.md` | Developer specification (this document) |
+| File | Languages maintained | Notes |
+|------|----------------------|-------|
+| `README.md` | English **and** Japanese (`README.ja.md`) | English is the master. `README.ja.md` is its translation, kept in sync. |
+| `SPEC.md` (this document) | **English only** | |
+| Other repository-policy files (CONTRIBUTING.md, etc.) | **English only** | Maintained at the repository root, not per-project. |
 
-### Synchronization rule
+**Policy rationale**: Only `README.md` is duplicated into Japanese because it is the primary entry point for new readers. Specifications are maintained in English only to avoid drift — a problem that LLM-assisted maintenance is especially vulnerable to. Japanese readers should use `README.ja.md` for orientation and then refer to the English source-of-truth documents for technical detail.
 
-Whenever the English version is updated, the Japanese version must be
-updated in the same commit (or in an immediate follow-up commit
-referencing the English commit hash). Maintain parity of:
+### Synchronization rule (README only)
+
+Whenever `README.md` is updated, `README.ja.md` must be updated in the
+same commit (or in an immediate follow-up commit referencing the
+English commit hash). Maintain parity of:
 
 - Section structure (same H2 / H3 headings)
 - Tables (same columns)
 - Code blocks (same content; Japanese files may use bilingual comments)
 - Examples (same commands; localize the prose around them)
 
-### Style for Japanese files
+### Style for `README.ja.md`
 
 - Technical terms in English are preserved in their English form (do not
   translate "phase", "qemu user", "libvirt", "WORKSPACE", "BOOT_MODE",
@@ -505,14 +512,14 @@ referencing the English commit hash). Maintain parity of:
 
 Each README must include:
 
-1. Top-of-file banner: language switcher, repository link, AI-content warning.
+1. Top-of-file banner: language switcher (`README.md` ↔ `README.ja.md`), repository link, AI-content warning.
 2. Bottom-of-file "Provenance and License" section: AI tool, generation
    date, AS-IS disclaimer, issue tracker link.
 
-Each SPEC must include:
+This SPEC must include:
 
 1. Top-of-file purpose block referencing the "single most important rule".
-2. Cross-link to the other-language SPEC file.
+2. Documentation language policy notice (this section).
 
 ---
 
@@ -533,12 +540,19 @@ Each SPEC must include:
 
 ### Revision discipline
 
-Unlike (\*2)'s `r47`-style numbering, this script does not embed a
-revision number in the source. Instead, the commit hash in the
-`ai-generated-artifacts` repository is the canonical revision identifier.
+This project follows the repository-wide
+[Revision History Policy](../../../README.md#revision-history-policy)
+documented at the root of `ai-generated-artifacts`.
 
-Bump the AI-generation date stamp in the script header on any commit that
-changes:
+#### Version identifier
+
+Unlike `Deploy-Drivers-For-WindowsServer`'s `r47`-style numbering, this
+script does not embed a revision number in the source. Instead, the
+commit hash in the `ai-generated-artifacts` repository is the canonical
+revision identifier.
+
+Bump the AI-generation date stamp in the script header on any commit
+that changes:
 
 - Phase semantics (any of the 9 phases)
 - Output format (log markers, banner layout)
@@ -546,6 +560,24 @@ changes:
 
 Cosmetic-only changes (typo fixes in messages, README rewording) do not
 require a header date bump.
+
+#### Where revision history lives
+
+Per-version release notes for this script — when this project starts
+producing numbered releases — belong **exclusively** in a `CHANGELOG.md`
+file alongside `build-ol-aws-ami.sh` in this directory (not yet
+created; will be added when the first formal release is cut). Such
+release notes do NOT belong in:
+
+- `build-ol-aws-ami.sh` source comments (no inline revision tags, no
+  end-of-file `# REVISION HISTORY` block)
+- `README.md` (other than a brief pointer to `CHANGELOG.md` when one
+  exists)
+- This `SPEC.md` (which describes *current* behaviour)
+
+Architectural rationale (root-cause analyses of past pitfalls) belongs
+in **Part D — Known Pitfalls** of this SPEC. When a `CHANGELOG.md`
+exists, it cross-references back to Part D where applicable.
 
 ### Reuse before invention
 
@@ -1069,7 +1101,7 @@ Before any commit to this directory, all of the following must pass.
 - [ ] `README.md` carries the **Disclaimer** section near the top (per A.10)
 - [ ] `README.md` carries the **License** section near the top (per A.10)
 - [ ] `README.ja.md` carries equivalent **免責事項** and **ライセンス** sections
-- [ ] `SPEC.md` and `SPEC.md` reflect the change in the relevant Part A / Part B section
+- [ ] `SPEC.md` reflects the change in the relevant Part A / Part B section
 - [ ] If a new pitfall was discovered during development, it is added as a new `D.NN` entry in Part D
 - [ ] A `LICENSE` file exists at the repository root and the script header banner names the AI tool used in the generation (per A.2)
 
