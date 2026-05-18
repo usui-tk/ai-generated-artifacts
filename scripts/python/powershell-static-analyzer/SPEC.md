@@ -4,8 +4,8 @@
 This is the formal specification for `psa.py`, the PowerShell static
 analyzer maintained in this directory.
 
-**Document version**: 3.3.0
-**Applies to**: `psa.py` 3.3.0 and later 3.x releases
+**Document version**: see [`VERSION`](./VERSION) (the canonical source of truth, kept in sync with `psa.py`'s `__version__`)
+**Applies to**: `psa.py` (latest mainline; see [README.md](./README.md) "psa.py Versioning Policy" for consumer obligations)
 **Status**: Normative
 
 For a user-facing overview, see [`README.md`](./README.md). This
@@ -98,6 +98,75 @@ Internal Python module boundaries (function and class names within
 format, covering every release from 2.0.0 onward). This SPEC describes
 the *current* behaviour; for the chronological evolution of each rule
 and CLI contract, see `CHANGELOG.md`.
+
+#### 1.4.1 Canonical version metadata
+
+Three artifacts MUST agree on the current version string at all times:
+
+| Artifact                     | Form                          | Audience                                  |
+| ---------------------------- | ----------------------------- | ----------------------------------------- |
+| `psa.py`'s `__version__`     | Python string literal         | The analyzer itself (used by `--version`) |
+| `VERSION` file (this dir)    | One ASCII line, no leading `v`, trailing newline | CI / AI / LLM / `curl` consumers — read **without** invoking Python |
+| Top-level `CHANGELOG.md` entry | `## [X.Y.Z] — YYYY-MM-DD` heading | Human readers and release auditors |
+
+The `VERSION` file is the **canonical bytes-only carrier**. It exists
+to let consumers (especially AI / LLM-driven workflows and CI systems)
+discover the current mainline version of `psa.py` with a single HTTP
+GET against the raw URL of the file, with no `git clone` and no Python
+interpreter required:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION
+```
+
+`psa.py`'s `__version__` MUST be updated in lockstep with the
+`VERSION` file in every release commit. The relationship is intentional
+redundancy: `__version__` is what `psa.py --version` and the JSON/SARIF
+output reports; `VERSION` is what cheap remote probes read.
+
+#### 1.4.2 Startup self-check
+
+At analysis time (i.e., when running `psa.py` against one or more
+PowerShell files), `psa.py` MUST verify that its own `__version__`
+matches the contents of the sibling `VERSION` file. The exact
+semantics are:
+
+- **VERSION file present and matching `__version__`**: no output,
+  analysis proceeds normally.
+- **VERSION file present but mismatching**: a multi-line warning is
+  written to stderr containing (1) both observed values and the path,
+  (2) the diagnosis (release-process desync), and (3) an explicit
+  numbered action list addressed to AI / LLM maintainers — refetch
+  both files, re-run the full PowerShell test suite, re-evaluate the
+  `.psa.config.json` `enable` list against the current `SPEC.md`,
+  and treat the present run's results as provisional. Analysis still
+  proceeds and the exit code is unchanged; the warning is informative,
+  not fatal, so that a transient mismatch does not block downstream
+  tooling. (Rationale: hard-failing on mismatch would create a
+  reliability cliff where a single bad release commit upstream
+  breaks every consumer's CI globally.)
+- **VERSION file absent**: silent no-op. This preserves the supported
+  single-file consumer pattern documented in §1.3, where `psa.py` is
+  copied into a consumer repository on its own without its sibling
+  metadata files.
+
+The self-check is suppressed for `--list-rules` and `--check-env`
+because those modes are purely informational (no PowerShell file is
+analyzed, no results are produced that could be misinterpreted). It
+is also not reached for `--version` and `--help`, which short-circuit
+inside argparse before `main()` runs.
+
+#### 1.4.3 Consumer obligations (latest-mainline policy)
+
+`ai-generated-artifacts` consumers (including sister repositories that
+adopt `psa.py` for their PowerShell pipelines) MUST treat the latest
+`main` of `psa.py` + `VERSION` as the canonical version to validate
+against. Pinning to an older SemVer in consumer code / consumer docs
+is no longer supported — the canonical workflow is "re-fetch on each
+development cycle, re-evaluate the `enable` list against the latest
+`SPEC.md`, re-run tests". The full workflow is documented in the
+repository root [`README.md`](../../../README.md) section
+"psa.py Versioning Policy".
 
 ---
 
@@ -1069,7 +1138,7 @@ top-level structure:
       "tool": {
         "driver": {
           "name": "psa.py",
-          "version": "3.3.0",
+          "version": "<X.Y.Z>",
           "informationUri": "...",
           "rules": [ /* 36 rule descriptors */ ]
         }

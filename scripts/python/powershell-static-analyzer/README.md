@@ -18,19 +18,26 @@ This SPEC is maintained in English only per the repository-wide
 documentation language policy; Japanese readers may use the Japanese
 overview in [`README.ja.md`](./README.ja.md).
 
-**Current version: 3.3.0**
+**Current version**: see [`VERSION`](./VERSION) (canonical bytes-only carrier; the same string is mirrored in `psa.py`'s `__version__` and is what `psa.py --version` prints).
+
+You can read the current mainline version cheaply, without cloning or running Python:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION
+```
+
+This is the **canonical way** for AI / LLM-driven workflows and CI to discover whether a locally-cached copy of `psa.py` is current. See [SPEC.md §1.4](./SPEC.md#14-versioning) and the repository-root [`README.md`](../../../README.md) "psa.py Versioning Policy" for the full latest-mainline workflow that consumers are expected to follow.
 
 ---
 
 ## What's new
 
 See [`CHANGELOG.md`](./CHANGELOG.md) for the chronological per-release
-change log (every version from 2.0.0 onward, in
-[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format).
+change log ([Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format).
 
-The current release is **3.3.0** (added the opt-in `PSAP0003` and
-`PSAP0004` rules that enforce the *"revision history belongs in
-`CHANGELOG.md`, not in the script body"* discipline).
+The most recent release entry at the top of `CHANGELOG.md` documents
+the latest changes; consumers should refresh against the mainline
+when the `VERSION` file advances.
 
 ## Origin & maintenance policy
 

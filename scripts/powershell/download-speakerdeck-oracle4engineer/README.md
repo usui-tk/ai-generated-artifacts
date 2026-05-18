@@ -574,10 +574,12 @@ check, regression-fix evidence), see **[TESTING.md](TESTING.md)**. It
 documents the most recent successful real-run
 (`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
 
-For details on the `psa.py` static analyzer (v3.3.0, with `PSA1001..PSA9002`
-plus `PSAP0001..PSAP0004` opt-in rules), see
+For details on the `psa.py` static analyzer (latest mainline; with
+`PSA1001..PSA9002` plus `PSAP0001..PSAP0004` opt-in rules), see
 [`../../python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
 and the full [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md).
+The canonical analyzer version is recorded in
+[`../../python/powershell-static-analyzer/VERSION`](../../python/powershell-static-analyzer/VERSION).
 
 The **single most important rule** for new development: do not re-derive
 phase headers, log markers, or psa.py — copy them from the existing
@@ -598,14 +600,15 @@ cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### Rule coverage (psa.py v3.3.0 — 36 rules)
+### Rule coverage (psa.py — generic + opt-in conventions)
 
-`psa.py` v3.3.0 groups its 36 rules into nine categories. Categories
+`psa.py` groups its rules into nine categories. Categories
 `PSA1xxx`..`PSA7xxx` are generic and apply to any PowerShell script;
 `PSA8xxx` (cross-file consistency) and `PSA9xxx` (complexity metrics)
-were added in 3.2.0; `PSAPxxxx` (project / pipeline conventions) are
-opt-in opinionated rules added across 3.2.0 (PSAP0001 / PSAP0002) and
-3.3.0 (PSAP0003 / PSAP0004).
+are higher-level; `PSAPxxxx` (project / pipeline conventions) are
+opt-in opinionated rules. For per-version evolution of the rule set,
+see the analyzer's own
+[CHANGELOG.md](../../python/powershell-static-analyzer/CHANGELOG.md).
 
 | Category | Code range | Examples |
 | -------- | ---------- | -------- |
@@ -618,7 +621,7 @@ opt-in opinionated rules added across 3.2.0 (PSAP0001 / PSAP0002) and
 | File format         | `PSA7001`            | PowerShell script lacks UTF-8 BOM (Windows PowerShell 5.1 may misinterpret non-ASCII bytes as Shift-JIS without a BOM) |
 | Cross-file consistency | `PSA8001`         | function-body hash drift across files in the same scan |
 | Complexity metrics  | `PSA9001`..`PSA9002` | function body length threshold (opt-in), external process invocation without `$LASTEXITCODE` check (opt-in) |
-| Project / pipeline conventions | `PSAP0001`..`PSAP0004` | phase function naming, required script-identifier variables, inline revision-tag comments (`PSAP0003`, new in 3.3.0), end-of-file `REVISION HISTORY` blocks (`PSAP0004`, new in 3.3.0). **All PSAPxxxx rules are off by default**; this project opts in to `PSAP0003` and `PSAP0004` |
+| Project / pipeline conventions | `PSAP0001`..`PSAP0004` | phase function naming, required script-identifier variables, inline revision-tag comments (`PSAP0003`), end-of-file `REVISION HISTORY` blocks (`PSAP0004`). **All PSAPxxxx rules are off by default**; this project opts in to `PSAP0003` and `PSAP0004` |
 
 For the full specification of each rule, see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4.

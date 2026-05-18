@@ -14,15 +14,22 @@ PowerShell スクリプト用の単一 Python 3 ファイル静的解析ツー�
 ついては [`SPEC.md`](./SPEC.md) を参照してください (リポジトリ共通の
 ドキュメント言語ポリシーにより英語のみで維持されています)。
 
-**現在のバージョン: 3.3.0**
+**現在のバージョン**: [`VERSION`](./VERSION) ファイルを参照してください (バイト列のみの正典キャリア。同じ文字列が `psa.py` の `__version__` および `psa.py --version` 出力にミラーされます)。
+
+clone も Python 実行も不要で、 最新の mainline バージョンを軽量に取得できます:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION
+```
+
+これは AI / LLM 駆動のワークフローや CI が、 ローカルにキャッシュした `psa.py` が最新かどうかを判定するための **正規手段** です。 consumer 側に期待される latest-mainline ワークフローの詳細は [SPEC.md §1.4](./SPEC.md#14-versioning) およびリポジトリルートの [`README.md`](../../../README.md) "psa.py Versioning Policy" を参照してください。
 
 ---
 
 ## 更新履歴
 
 リリースノートは [`CHANGELOG.md`](./CHANGELOG.md)
-([Keep a Changelog 1.1.0](https://keepachangelog.com/ja/1.1.0/) 形式、
-2.0.0 以降のすべてのバージョンを記載) を参照してください。
+([Keep a Changelog 1.1.0](https://keepachangelog.com/ja/1.1.0/) 形式) を参照してください。
 
 なお、 リポジトリ共通のドキュメント言語ポリシーにより、
 `CHANGELOG.md` は **英語のみ** で維持されています。

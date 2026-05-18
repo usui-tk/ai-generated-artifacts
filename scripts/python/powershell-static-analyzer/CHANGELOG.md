@@ -17,6 +17,59 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 _No unreleased changes at this time._
 
+## [3.4.0] — 2026-05-19
+
+### Added
+
+- **`VERSION` file** alongside `psa.py` in the same directory. Contains
+  a single ASCII line with the current SemVer (no leading `v`, no
+  trailing whitespace beyond the terminating newline). This file is
+  the **canonical bytes-only carrier** of the analyzer version,
+  consumable without invoking Python:
+
+  ```bash
+  curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION
+  # → 3.4.0
+  ```
+
+  This enables AI / LLM-driven and CI workflows to discover the
+  current mainline version of `psa.py` cheaply (one HTTP GET,
+  no git clone, no Python interpreter required) before deciding
+  whether to refresh a locally-cached copy.
+
+- **Startup self-check**: when `psa.py` runs and the `VERSION` file
+  is present in the same directory, the analyzer verifies that the
+  string in `VERSION` matches `__version__` inside `psa.py`. On
+  mismatch it writes a structured warning to stderr containing
+  explicit AI / LLM-facing action items (re-fetch the latest
+  `psa.py` + `VERSION` pair, re-run the affected PowerShell test
+  suites, re-evaluate `.psa.config.json` `enable` lists against
+  the latest `SPEC.md`). Analysis still proceeds — results are
+  flagged provisional in the warning text but the exit code is
+  unchanged. The check is suppressed for `--list-rules` and
+  `--check-env` (purely informational modes) and is a silent
+  no-op when `VERSION` is absent (the supported single-file
+  consumer pattern remains fully compatible).
+
+### Changed
+
+- Documentation throughout the `ai-generated-artifacts` repository
+  no longer references a fixed `psa.py` version (e.g. "psa.py
+  3.3.0"). Consumers are directed to fetch the latest mainline
+  via the `VERSION` file and to re-evaluate their `.psa.config.json`
+  whenever the version changes. See repository-root `README.md`
+  "psa.py Versioning Policy" for the canonical workflow.
+
+### Notes
+
+- This is a **non-breaking** minor bump. All `3.3.0` rules,
+  CLI flags, output formats, and configuration schemas are
+  preserved unchanged. The `VERSION` file is additive; the
+  startup self-check is additive and produces no behaviour
+  change in the matching-version case. Existing consumers that
+  copied `psa.py` as a single file without sibling metadata
+  continue to work unchanged (no `VERSION` file → no warning).
+
 ## [3.3.0] — 2026-05-18
 
 ### Added
@@ -270,6 +323,7 @@ single-author exploratory work without numbered releases.
 ---
 
 [Unreleased]: https://github.com/usui-tk/ai-generated-artifacts/compare/main...HEAD
+[3.4.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
 [3.3.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
 [3.2.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
 [3.1.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer

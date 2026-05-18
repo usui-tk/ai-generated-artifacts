@@ -60,6 +60,7 @@ Pull requests are accepted but reviewed on a best-effort basis with no guarantee
   python3 scripts/python/powershell-static-analyzer/psa.py <script>.ps1
   ```
   See [`scripts/README.md`](./scripts/README.md) → "Static Analysis for PowerShell Scripts".
+- [ ] **For PowerShell changes: verify `psa.py` is at the latest mainline version before validating.** Compare the mainline `VERSION` against your local copy and refresh both `psa.py` + `VERSION` together if they differ. See [`README.md`](./README.md) → "psa.py Versioning Policy" for the full workflow.
 - [ ] If you touch a project under `scripts/<lang>/<project>/` that ships a `SPEC.md`, verify the corresponding **Part C — Quality Gates & Validation Checklist** before committing.
 - [ ] Never commit real secrets (API keys, account IDs you wish to keep private, passwords, tokens). See [`README.md`](./README.md) → "No credentials in artifacts".
 
@@ -164,6 +165,7 @@ PR はベストエフォートで受け付けます(レビュー期限は保証�
   python3 scripts/python/powershell-static-analyzer/psa.py <script>.ps1
   ```
   詳細は [`scripts/README.md`](./scripts/README.md) の「PowerShell スクリプトの静的解析」を参照
+- [ ] **PowerShell 変更時: 検証前に `psa.py` が latest mainline バージョンであることを確認する。** mainline の `VERSION` をローカルコピーと比較し、 異なる場合は `psa.py` と `VERSION` の両方を一緒に更新する。 詳細ワークフローは [`README.ja.md`](./README.ja.md) の「psa.py のバージョニングポリシー」セクションを参照
 - [ ] `scripts/<lang>/<project>/` 配下で `SPEC.md` を持つプロジェクトを変更する場合、コミット前に対応する **Part C — 品質ゲートと検証チェックリスト** を確認する
 - [ ] 実在の機密情報(API キー、非公開アカウント ID、パスワード、トークン)を **絶対にコミットしない**。[`README.ja.md`](./README.ja.md) の「アーティファクトに認証情報を埋め込まないでください」を参照
 

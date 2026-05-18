@@ -132,9 +132,77 @@ This repository uses a **repository-wide common policy** for managing per-versio
 
 **Why this matters**: LLM-assisted code maintenance is especially prone to accumulating stale per-revision comments inside script bodies (`# r42: fixed X`, `# r56+: now does Y`). Such comments rapidly become untraceable noise — readers cannot resolve `r42` without consulting Git history anyway. Centralizing release notes in `CHANGELOG.md` and keeping scripts focused on current behaviour avoids this failure mode.
 
-**Static-analyzer enforcement**: For PowerShell scripts, `psa.py` 3.3.0 ships two opt-in rules — `PSAP0003` (inline `# rNN:` revision tags) and `PSAP0004` (end-of-file `REVISION HISTORY` blocks) — that detect violations of this policy. Sub-projects enforce them via their `.psa.config.json` `enable` list.
+**Static-analyzer enforcement**: For PowerShell scripts, `psa.py` ships two opt-in rules — `PSAP0003` (inline `# rNN:` revision tags) and `PSAP0004` (end-of-file `REVISION HISTORY` blocks) — that detect violations of this policy. Sub-projects enforce them via their `.psa.config.json` `enable` list. (Consumers should always validate against the latest mainline `psa.py`; see the "psa.py Versioning Policy" section below.)
 
 For per-sub-project deeper guidance, see the **Revision discipline** subsection of each sub-project's `SPEC.md`.
+
+---
+
+## psa.py Versioning Policy
+
+This repository hosts [`psa.py`](./scripts/python/powershell-static-analyzer/), the canonical PowerShell static analyzer used by every PowerShell sub-project in this repository **and** by sister repositories (notably [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)). This section defines the repository-wide rule for what version of `psa.py` consumers must validate against, and the canonical workflow for discovering and adopting new versions.
+
+### Core rule: latest mainline is the only supported version
+
+Consumers — including LLM / AI-assisted maintainers, CI pipelines, and human developers — MUST validate their PowerShell code against the **latest mainline** `psa.py` from this repository. Pinning to a fixed SemVer (e.g. "I tested with `psa.py` 3.3.0") is **not supported**:
+
+- New `psa.py` versions may add opt-in rules (the `PSAPxxxx` family) that surface previously-hidden discipline violations.
+- New `psa.py` versions may tighten heuristics for existing rules.
+- A previously-clean codebase under an older `psa.py` is **not** evidence of correctness under the current `psa.py`. It must be re-validated.
+
+Sub-project documentation (`README.md`, `SPEC.md`, `TESTING.md`, etc.) MUST NOT pin `psa.py` to a specific version number. References to a specific version are acceptable only in `CHANGELOG.md` (which is rNN/version-by-design) and in `psa.py`'s own `CHANGELOG.md`.
+
+### How to discover the current mainline version
+
+The canonical source of truth for "what is the current `psa.py` version on mainline" is the `VERSION` file sitting next to `psa.py`:
+
+```
+scripts/python/powershell-static-analyzer/
+├── psa.py        ← __version__ string inside
+├── VERSION       ← single ASCII line, no leading 'v', terminating LF
+├── SPEC.md
+├── CHANGELOG.md
+└── README.md
+```
+
+Three equivalent retrieval methods (any of them works; pick the one that fits your environment):
+
+```bash
+# Method 1 — remote HTTP GET, no clone, no Python (recommended for CI / one-off checks).
+LATEST=$(curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION)
+echo "Latest psa.py on mainline: $LATEST"
+
+# Method 2 — already cloned (e.g., sister repository checkout next to this one).
+LATEST=$(cat /path/to/ai-generated-artifacts/scripts/python/powershell-static-analyzer/VERSION)
+
+# Method 3 — invoke a local copy of psa.py (requires Python).
+LATEST=$(python3 /path/to/psa.py --version | awk '{print $2}')
+```
+
+The three methods MUST agree: `psa.py` runs a startup self-check that compares its `__version__` against the sibling `VERSION` file and warns to stderr if they differ. See [`SPEC.md` §1.4](./scripts/python/powershell-static-analyzer/SPEC.md#14-versioning) for the contract.
+
+### LLM / AI workflow for adopting a new version
+
+When an LLM / AI maintainer (or a human) is about to make changes to **any** PowerShell script that is validated by `psa.py` (in this repository or in a sister repository), the very first step of the development cycle MUST be:
+
+1. **Fetch the current mainline version**: run Method 1 above to get `LATEST`.
+2. **Compare with the local copy actually being used**: read `__version__` from the local `psa.py`, or run `python3 /path/to/local/psa.py --version`. Call this `LOCAL`.
+3. **If `LATEST != LOCAL`**:
+   1. Replace `psa.py` AND its sibling `VERSION` file from mainline (both files MUST move together):
+      ```bash
+      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/psa.py -o psa.py
+      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION -o VERSION
+      ```
+   2. Read the new entries in [`CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md) and the current [`SPEC.md`](./scripts/python/powershell-static-analyzer/SPEC.md) to understand what changed (new rules, tightened heuristics, schema changes).
+   3. Re-evaluate the project's `.psa.config.json` `enable` list against the latest `SPEC.md`. Newly-added opt-in rules that match the project's discipline goals SHOULD be enabled.
+   4. Re-run the full test suite for every PowerShell script in the project under the new `psa.py`. Treat any new findings as regressions to be addressed in the same change set, not as findings to be deferred.
+4. **If `LATEST == LOCAL`**: proceed with the planned change, but still re-run the analyzer on the modified scripts before declaring done.
+
+This workflow makes the "latest mainline" rule machine-actionable: an LLM that has read this section can derive a deterministic sequence of `curl`, comparison, fetch, and re-test steps for any task that touches PowerShell code in this repository or its sister repositories.
+
+### What about released SemVer versions in `CHANGELOG.md`?
+
+The version numbers in [`psa.py`'s `CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md) (e.g. `## [3.4.0] — 2026-05-19`) remain the canonical historical record of when each behaviour change shipped. They are written for human auditors and for diffing the API contract between two points in time. They are NOT a pinning target: consumers do not pick "version 3.4.0" as their reference; they pick "mainline today" and consult the CHANGELOG to understand how that differs from "mainline last time I synced".
 
 ---
 

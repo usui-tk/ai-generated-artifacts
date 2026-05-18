@@ -132,9 +132,77 @@ ai-generated-artifacts/
 
 **この区分が重要な理由**: LLM 支援によるコードメンテナンスでは、 過去のリビジョン情報がスクリプト本体に溜まりがちです (`# r42: X を修正`、 `# r56+: 今は Y する` など)。 こうしたコメントはすぐに追跡不能な雑音になります — 読者は `r42` の指す内容を Git 履歴を辿らない限り解決できません。 リリースノートを `CHANGELOG.md` に集約し、 スクリプト本体は現在の挙動だけに集中させることで、 この失敗モードを回避します。
 
-**静的解析による強制**: PowerShell スクリプトについては、 `psa.py` 3.3.0 が 2 つの opt-in ルール — `PSAP0003` (インラインの `# rNN:` リビジョンタグ) と `PSAP0004` (EOF の `REVISION HISTORY` ブロック) — を提供し、 本ポリシー違反を検出します。 各サブプロジェクトは `.psa.config.json` の `enable` リストで opt-in します。
+**静的解析による強制**: PowerShell スクリプトについては、 `psa.py` が 2 つの opt-in ルール — `PSAP0003` (インラインの `# rNN:` リビジョンタグ) と `PSAP0004` (EOF の `REVISION HISTORY` ブロック) — を提供し、 本ポリシー違反を検出します。 各サブプロジェクトは `.psa.config.json` の `enable` リストで opt-in します。 (consumer は常に最新の mainline `psa.py` で検証してください。 下の「psa.py のバージョニングポリシー」セクションを参照。)
 
 各サブプロジェクト固有のガイダンスは、 サブプロジェクトの `SPEC.md` の **Revision discipline** サブセクションを参照してください。
+
+---
+
+## psa.py のバージョニングポリシー
+
+本レポジトリは [`psa.py`](./scripts/python/powershell-static-analyzer/) を保持しています。 これは本レポジトリ内のすべての PowerShell サブプロジェクト **および** 姉妹レポジトリ (特に [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)) が使用する正典の PowerShell 静的解析ツールです。 本セクションは、 consumer が検証対象とすべき `psa.py` のバージョンに関するレポジトリ横断ルール、 および新バージョンの発見・採用に関する正典ワークフローを定義します。
+
+### 中核ルール: latest mainline 以外はサポートしない
+
+consumer (LLM / AI 補助のメンテナ、 CI パイプライン、 人間開発者を含む) は **必ず** 本レポジトリの **latest mainline** の `psa.py` で PowerShell コードを検証してください。 固定 SemVer (例: 「`psa.py` 3.3.0 でテスト済み」) への pin は **サポートされません**:
+
+- 新しい `psa.py` バージョンは、 opt-in ルール (`PSAPxxxx` ファミリー) を追加して、 これまで見えていなかった規律違反を検出する可能性があります。
+- 新しい `psa.py` バージョンは、 既存ルールのヒューリスティクスを強化する可能性があります。
+- 古い `psa.py` で clean だった codebase は、 **現在の** `psa.py` で正しいことの根拠にはなりません。 再検証が必要です。
+
+サブプロジェクトのドキュメント (`README.md`, `SPEC.md`, `TESTING.md` 等) では、 `psa.py` を特定バージョン番号に pin して **はいけません**。 特定バージョン番号の参照が許容されるのは `CHANGELOG.md` (バージョン毎の歴史記録) と `psa.py` 自身の `CHANGELOG.md` のみです。
+
+### 現在の mainline バージョンの取得方法
+
+「mainline の `psa.py` の現在バージョンは何か」 の正典情報源は、 `psa.py` の隣にある `VERSION` ファイルです:
+
+```
+scripts/python/powershell-static-analyzer/
+├── psa.py        ← 内部に __version__ 文字列
+├── VERSION       ← 単一 ASCII 行、 先頭 'v' なし、 末尾 LF
+├── SPEC.md
+├── CHANGELOG.md
+└── README.md
+```
+
+3 つの等価な取得方法 (どれを使っても OK。 環境に合わせて選択):
+
+```bash
+# 方法 1 — リモート HTTP GET、 clone 不要、 Python 不要 (CI / 単発チェックに推奨)
+LATEST=$(curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION)
+echo "Latest psa.py on mainline: $LATEST"
+
+# 方法 2 — 既に clone 済み (例: 姉妹レポジトリのチェックアウトと同階層)
+LATEST=$(cat /path/to/ai-generated-artifacts/scripts/python/powershell-static-analyzer/VERSION)
+
+# 方法 3 — ローカルの psa.py を起動 (Python 必要)
+LATEST=$(python3 /path/to/psa.py --version | awk '{print $2}')
+```
+
+3 つの方法は必ず一致します: `psa.py` は起動時に `__version__` と隣接 `VERSION` ファイルを比較する self-check を実行し、 不一致を stderr に警告します。 契約の詳細は [`SPEC.md` §1.4](./scripts/python/powershell-static-analyzer/SPEC.md#14-versioning) を参照。
+
+### 新バージョン採用のための LLM / AI ワークフロー
+
+LLM / AI メンテナ (あるいは人間) が、 `psa.py` で検証される **任意の** PowerShell スクリプト (本レポジトリでも姉妹レポジトリでも) に変更を加えようとするとき、 開発サイクルの **最初のステップ** として以下を **必ず** 実施してください:
+
+1. **mainline の現在バージョンを取得**: 上の方法 1 を実行して `LATEST` を得る。
+2. **実際に使用中のローカルコピーと比較**: ローカルの `psa.py` から `__version__` を読むか、 `python3 /path/to/local/psa.py --version` を実行。 これを `LOCAL` と呼ぶ。
+3. **`LATEST != LOCAL` の場合**:
+   1. mainline から `psa.py` と隣接の `VERSION` ファイルの **両方** を置き換える (両ファイルは必ず一緒に動かす):
+      ```bash
+      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/psa.py -o psa.py
+      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION -o VERSION
+      ```
+   2. [`CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md) の新エントリと現在の [`SPEC.md`](./scripts/python/powershell-static-analyzer/SPEC.md) を読み、 何が変わったか (新ルール、 強化されたヒューリスティクス、 スキーマ変更) を理解する。
+   3. プロジェクトの `.psa.config.json` の `enable` リストを、 最新の `SPEC.md` と照らして再評価する。 プロジェクトの規律目標に合う新規 opt-in ルールがあれば、 有効化を検討する。
+   4. 新しい `psa.py` で、 プロジェクト内のすべての PowerShell スクリプトに対してフルテストスイートを再実行する。 新たに検出された findings は、 同じ変更セット内で対処すべき regression として扱う (先送りしない)。
+4. **`LATEST == LOCAL` の場合**: 予定の変更を進めて構いません。 ただし変更後のスクリプトに対しては必ず再度 analyzer を回してから完了宣言してください。
+
+このワークフローにより、 「latest mainline」 ルールは機械的に実行可能になります: 本セクションを読んだ LLM は、 本レポジトリや姉妹レポジトリの PowerShell コードに触れる任意のタスクに対して、 `curl`・比較・取得・再テストの決定論的な手順列を導出できます。
+
+### `CHANGELOG.md` 内の released SemVer バージョンの位置づけ
+
+[`psa.py` の `CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md) 内のバージョン番号 (例: `## [3.4.0] — 2026-05-19`) は、 各挙動変更がいつリリースされたかの正典的な歴史記録です。 これは人間の監査者向け、 および API 契約を 2 時点間で diff するための記述です。 これは **pin の対象ではありません**: consumer は「バージョン 3.4.0」を参照ポイントとして選ぶのではなく、 「今日の mainline」を選び、 「前回 sync した時の mainline」 との差分を理解するために CHANGELOG を参照します。
 
 ---
 

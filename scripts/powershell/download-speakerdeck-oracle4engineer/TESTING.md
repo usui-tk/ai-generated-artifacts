@@ -36,7 +36,7 @@ This document consolidates everything needed to verify and evaluate
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` v3.3.0 on `Download-SpeakerDeck.ps1` (with project `.psa.config.json`) | **0 errors / 0 warnings / 0 info** ✓ | r25 build |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r25 build |
 | File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ for the script | r25 build |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ pass | 2026-05-11 |
 | Phase 2–5 (Scan / Plan) — DryRun mode | ✓ 804 decks evaluated | 2026-05-11 |
@@ -52,10 +52,12 @@ This document consolidates everything needed to verify and evaluate
 
 ## 1. Static analysis gate
 
-`psa.py` v3.3.0 (36-rule check set: `PSA1001`..`PSA9002` plus opt-in
+`psa.py` (latest mainline; rule families `PSA1001`..`PSA9002` plus opt-in
 `PSAP0001`..`PSAP0004`) must pass before every commit (see Part C of
 [SPEC.md](./SPEC.md)). This project opts in to `PSAP0003` and
-`PSAP0004` (the revision-discipline rules added in 3.3.0).
+`PSAP0004` (the revision-discipline rules). For the canonical
+version-discovery and refresh workflow, see repository root
+[`README.md`](../../../README.md) "psa.py Versioning Policy".
 
 `psa.py` auto-discovers `.psa.config.json` in the current working directory,
 so the canonical invocation is from this script directory:
@@ -339,7 +341,7 @@ before running.
 | r19 | Single account folder couldn't host multiple targets | Cosmetic | Add `-<account>` suffix to folder name |
 | r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md (psa.py later promoted to `scripts/python/powershell-static-analyzer/` as the repository-wide canonical location) |
 | r21 | Inline `# rNN:` / "before r13" prose references accumulated in the source, conflicting with the repo-wide revision-history policy | Cosmetic | Strip all per-revision inline comments; centralise per-release history in `CHANGELOG.md`; enable `PSAP0003` / `PSAP0004` to fail any future regression |
-| r22 | Script header comment still referred to `psa.py v3.1.0 (28-rule check set)` after upstream had moved to v3.3.0 (36-rule) | Cosmetic | Sync the in-script reference to v3.3.0 (`PSA1001..PSA9002` plus opt-in `PSAP0001..PSAP0004`) |
+| r22 | Script header comment still referred to an earlier upstream `psa.py` revision after upstream had moved to a later rule set | Cosmetic | Sync the in-script reference to the then-current mainline (`PSA1001..PSA9002` plus opt-in `PSAP0001..PSAP0004`) |
 | **r23** | **No operation-level diagnostic existed for failures that are NOT per-deck** (e.g. structural exceptions in Phase 5 filename planning, CSV writes); per-deck `P06_errors.jsonl` could not localise such failures to a step inside the function body | **Medium** | **Implement the Debug Trace Facility (Section 1b, ~700 lines); instrument every phase function with `Start-DebugTrace -PhaseId 'PNN'` / `Set-DebugStep` / `Stop-DebugTrace`; activate `Enable-DebugTraceFileOutput` + `Enable-AutoExportOnPhaseFailure` from the main try-block. See SPEC.md A.14** |
 | r23 | The standalone PDF-metadata PoC (`Test-PdfMetadata.ps1`) outlived its purpose — the same logic now runs in every real Phase 8 invocation | Cosmetic | Delete the PoC; remove all documentation references in the same revision |
 | r24 | In-script comments and the SPEC / CHANGELOG / TESTING docs still pointed at the upstream `usui-tk/Deploy-Drivers-For-WindowsServer` repo even though all referenced helpers (logging, env dump, TLS/UTF-8, Debug Trace Facility) were already embedded in `Download-SpeakerDeck.ps1` after r23. Cross-repo dependency in the docs was now misleading. | Cosmetic | Remove every reference to the upstream repo from the script comments and the four docs; reorganise SPEC.md A.1 so `A.1.3 Companion in-house script` becomes the single canonical reference; simplify A.13 Reuse-before-invention to a two-step procedure |

@@ -486,10 +486,11 @@ Phase が例外を投げたとき、 トップレベルの catch ハンドラが
 
 実際の検証結果（DryRun、 本番実行出力、 冪等性チェック、 リグレッション修正証跡）については **[`TESTING.md`](TESTING.md)** を参照してください。 直近の本番実行成功結果（`804/804 デッキ、 失敗ゼロ、 合計 10 分 4.4 秒、 5.7 GB`）が記録されています。
 
-`psa.py` 静的解析ツール（v3.3.0、 `PSA1001`〜`PSA9002` + opt-in 規約ルール `PSAP0001`〜`PSAP0004`）の詳細は
+`psa.py` 静的解析ツール (latest mainline; `PSA1001`〜`PSA9002` + opt-in 規約ルール `PSAP0001`〜`PSAP0004`) の詳細は
 [`../../python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
-（英語版は [README.md](../../python/powershell-static-analyzer/README.md)）、
-または完全な仕様書 [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) を参照してください。
+(英語版は [README.md](../../python/powershell-static-analyzer/README.md)) 、
+または完全な仕様書 [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) を参照してください。 正典の analyzer バージョンは
+[`../../python/powershell-static-analyzer/VERSION`](../../python/powershell-static-analyzer/VERSION) ファイルに記録されています。 consumer 側のワークフロー詳細はリポジトリルート [`README.ja.md`](../../../README.ja.md) の「psa.py のバージョニングポリシー」を参照してください。
 
 **新規開発における最重要ルール**：フェーズヘッダー、 ログマーカー、 psa.py を一から再導出しないこと。 既存実装からコピーすること。 **発明より再利用**。
 
@@ -509,9 +510,9 @@ cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-### ルールカバレッジ（psa.py v3.3.0 — 36 ルール）
+### ルールカバレッジ (psa.py — latest mainline)
 
-`psa.py` v3.3.0 は 36 ルールを 9 カテゴリに分類しています。 `PSA1xxx`〜`PSA7xxx` は PowerShell スクリプト全般に適用される汎用ルール、 `PSA8xxx` (ファイル間整合性) と `PSA9xxx` (複雑度メトリクス) は 3.2.0 で追加、 `PSAPxxxx` (プロジェクト/パイプライン規約) は 3.2.0 (PSAP0001 / PSAP0002) と 3.3.0 (PSAP0003 / PSAP0004) で追加された opt-in 規約ルールです。
+`psa.py` はルールを 9 カテゴリに分類しています。 `PSA1xxx`〜`PSA7xxx` は PowerShell スクリプト全般に適用される汎用ルール、 `PSA8xxx` (ファイル間整合性) と `PSA9xxx` (複雑度メトリクス) はより高レベルのルール、 `PSAPxxxx` (プロジェクト/パイプライン規約) は opt-in 規約ルールです。 ルールセットのバージョン別変遷については analyzer 自身の [CHANGELOG.md](../../python/powershell-static-analyzer/CHANGELOG.md) を参照してください。
 
 | カテゴリ | コード範囲 | 例 |
 | -------- | ---------- | -- |
@@ -524,7 +525,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 | ファイル形式  | `PSA7001`            | PowerShell スクリプトに UTF-8 BOM がない (BOM がないと Windows PowerShell 5.1 が非 ASCII バイトを Shift-JIS と誤認する可能性あり) |
 | ファイル間整合性 | `PSA8001`         | 同一スキャン対象ファイル群における function body のハッシュ drift |
 | 複雑度メトリクス | `PSA9001`〜`PSA9002` | function 本体の長さ閾値 (opt-in)、 外部プロセス呼び出し後の `$LASTEXITCODE` チェック漏れ (opt-in) |
-| プロジェクト規約 | `PSAP0001`〜`PSAP0004` | phase 関数命名規約、 必須のスクリプト識別子変数、 インラインリビジョンタグコメント (`PSAP0003`、 3.3.0 新規)、 EOF の `REVISION HISTORY` ブロック (`PSAP0004`、 3.3.0 新規)。 **PSAPxxxx は全て default OFF**。 本プロジェクトは `PSAP0003` / `PSAP0004` に opt-in しています |
+| プロジェクト規約 | `PSAP0001`〜`PSAP0004` | phase 関数命名規約、 必須のスクリプト識別子変数、 インラインリビジョンタグコメント (`PSAP0003`)、 EOF の `REVISION HISTORY` ブロック (`PSAP0004`)。 **PSAPxxxx は全て default OFF**。 本プロジェクトは `PSAP0003` / `PSAP0004` に opt-in しています |
 
 各ルールの完全仕様は
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4 を参照。

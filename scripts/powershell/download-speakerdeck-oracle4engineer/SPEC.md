@@ -56,9 +56,12 @@ scripts/python/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` is a **pure Python** static analyzer (no PowerShell installation
-required), version **3.3.0** at the time of this writing, with a 36-rule
-check set spanning `PSA1001`..`PSA9002` plus `PSAP0001`..`PSAP0004`
-(opt-in pipeline-convention rules). Within this repository it must be:
+required), with a rule set spanning `PSA1001`..`PSA9002` plus
+`PSAP0001`..`PSAP0004` (opt-in pipeline-convention rules). Consumers
+MUST validate against the latest mainline version; see the repository
+root [`README.md`](../../../README.md) "psa.py Versioning Policy" for
+the canonical workflow and version discovery. Within this repository
+it must be:
 
 - Reused as-is from the canonical location
   `scripts/python/powershell-static-analyzer/psa.py`
@@ -632,7 +635,8 @@ Based on the longest successful path length, classify into:
         .psa.config.json     # project-local config (disables PSA6003)
     python/
       powershell-static-analyzer/
-        psa.py               # canonical location, v3.3.0
+        psa.py               # canonical location, latest mainline
+        VERSION              # canonical version string (read with curl/cat)
         SPEC.md              # authoritative analyzer specification (English only)
         CHANGELOG.md         # per-release change log (English only)
 ```
@@ -649,13 +653,12 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 
 Must pass with **0 errors / 0 warnings / 0 info**.
 
-### Rule coverage (psa.py v3.3.0)
+### Rule coverage (psa.py — latest mainline)
 
-`psa.py` v3.3.0 ships with a 36-rule check set: generic rules
-`PSA1001`..`PSA9002` grouped into nine categories, plus the opt-in
-pipeline-convention family `PSAP0001`..`PSAP0004`. The newest additions
-are `PSAP0003` (inline revision-tag comments) and `PSAP0004`
-(end-of-file `REVISION HISTORY` blocks), both new in 3.3.0 and disabled
+`psa.py` ships with a rule set spanning `PSA1001`..`PSA9002` (generic
+rules grouped into nine categories) plus the opt-in pipeline-convention
+family `PSAP0001`..`PSAP0004`. `PSAP0003` (inline revision-tag comments)
+and `PSAP0004` (end-of-file `REVISION HISTORY` blocks) are disabled
 by default. A condensed table is reproduced in
 [`README.md`](./README.md) and [`README.ja.md`](./README.ja.md). For the
 authoritative specification of every rule (severity, examples, suppression
