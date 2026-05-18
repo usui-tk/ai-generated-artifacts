@@ -132,7 +132,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.2.0'
+__version__ = '3.3.0'
 
 # ---------------------------------------------------------------------------
 # Severity and rule registry

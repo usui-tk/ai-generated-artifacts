@@ -56,8 +56,8 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
   Download-SpeakerDeck.ps1     # Main script (this README documents it)
   Test-PdfMetadata.ps1         # Read-only PoC for the Phase 8 PDF metadata path
   README.md / README.ja.md     # End-user documentation (you are reading these)
-  SPEC.md / SPEC.ja.md         # Developer / LLM specification (see "Developer specification" below)
-  TESTING.md / TESTING.ja.md   # Verification procedure and real-run results
+  SPEC.md (English only)         # Developer / LLM specification (see "Developer specification" below)
+  TESTING.md (English only)   # Verification procedure and real-run results
 ```
 
 The PowerShell static analyzer (`psa.py`) used to verify this script lives at
@@ -470,7 +470,7 @@ directory, equals a drive root, or contains the script.
 
 If you want to extend this script, change its phase structure, or build a
 similar script in this repo's style, read **[SPEC.md](SPEC.md)**
-([日本語](SPEC.ja.md)) first. That document captures:
+([日本語](SPEC.md)) first. That document captures:
 
 - **Part A (Common Spec)** — conventions inherited by every script in this
   family: source file format (UTF-8 BOM + ASCII-only), phase architecture,
@@ -486,13 +486,13 @@ similar script in this repo's style, read **[SPEC.md](SPEC.md)**
 
 For the actual verification results (DryRun, real-run output, idempotency
 check, regression-fix evidence for r17), see **[TESTING.md](TESTING.md)**
-([日本語](TESTING.ja.md)). It documents the most recent successful
+([日本語](TESTING.md)). It documents the most recent successful
 real-run (`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
 
 For details on the `psa.py` static analyzer (v3.1.0, 28-rule check set
 `PSA1001`..`PSA7001` plus CI integration), see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-([日本語](../../python/powershell-static-analyzer/SPEC.ja.md))
+([日本語](../../python/powershell-static-analyzer/SPEC.md))
 or the analyzer's
 [`README.md`](../../python/powershell-static-analyzer/README.md)
 ([日本語](../../python/powershell-static-analyzer/README.ja.md)).

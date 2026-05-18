@@ -92,8 +92,8 @@ Subdirectories are created on demand as scripts are added.
 scripts/<language>/<project-name>/
   ├── <script>.<ext>             # the main script (Verb-Noun.ps1, kebab.sh, snake.py)
   ├── README.md / README.ja.md   # end-user documentation (required)
-  ├── SPEC.md / SPEC.ja.md       # developer specification (recommended for non-trivial scripts)
-  ├── TESTING.md / TESTING.ja.md # verification procedure / real-run evidence (optional)
+  ├── SPEC.md (English only)       # developer specification (recommended for non-trivial scripts)
+  ├── TESTING.md (English only) # verification procedure / real-run evidence (optional)
   ├── <config files>             # e.g., env.properties.*, .psa.config.json
   └── <auxiliary scripts>        # related helpers (Test-*.ps1, setup-*.sh, etc.)
 ```
@@ -102,8 +102,8 @@ scripts/<language>/<project-name>/
 |:---|:---|:---|
 | `<script>.<ext>` | The main executable artifact / メインの実行スクリプト | ✓ |
 | `README.md` / `README.ja.md` | End-user documentation (installation, quick start, parameters, troubleshooting) / 利用者向けドキュメント | ✓ for non-trivial scripts |
-| `SPEC.md` / `SPEC.ja.md` | Developer / LLM specification (phase contract, log conventions, design decisions, known pitfalls) / 開発者・LLM 向け仕様書 | Recommended / 推奨 |
-| `TESTING.md` / `TESTING.ja.md` | Verification procedure and recorded real-run results / 検証手順と実機実行記録 | Optional / 任意 |
+| `SPEC.md` (English only) | Developer / LLM specification (phase contract, log conventions, design decisions, known pitfalls) / 開発者・LLM 向け仕様書 | Recommended / 推奨 |
+| `TESTING.md` (English only) | Verification procedure and recorded real-run results / 検証手順と実機実行記録 | Optional / 任意 |
 
 **EN:** Repository-level files (`LICENSE`, the root `README.md` / `README.ja.md`) live at the repository root and are shared across all script projects — do not duplicate them inside individual project directories.
 

@@ -4,7 +4,7 @@ English | [日本語](./README.ja.md)
 
 > 📂 Part of [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) → [`scripts/aws/ol-aws-ami-builder/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/aws/ol-aws-ami-builder)
 > ⚠️ **AI-generated content** — review the source before executing. See the [scripts directory policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) for the full disclaimer.
-> 📐 **Developer specification**: [SPEC.md](./SPEC.md) ([日本語](./SPEC.ja.md)) — phase contract, log conventions, env property keys, and the historical pitfalls already accounted for in the current implementation.
+> 📐 **Developer specification**: [SPEC.md](./SPEC.md) (English only) — phase contract, log conventions, env property keys, and the historical pitfalls already accounted for in the current implementation.
 
 A set of wrapper scripts that build AWS AMIs for **Oracle Linux 8, 9, or 10** (x86_64) using the official Oracle [`oracle-linux-image-tools`](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) project.
 
@@ -50,7 +50,6 @@ Operate these tools considerately. **Always prefer official Oracle-distributed A
 | `README.md` | End-user documentation (English, baseline). |
 | `README.ja.md` | End-user documentation (Japanese). |
 | `SPEC.md` | Developer specification (English) — phase contract, log conventions, design decisions. |
-| `SPEC.ja.md` | Developer specification (Japanese). |
 
 ---
 
@@ -381,7 +380,7 @@ cloud-init deploys your public key under the `ec2-user` account on first boot.
 
 ## 9. Key Design Decisions (summary)
 
-> **Full rationale** for every design choice — phase numbering, log conventions, env property auto-detection, AWS quirks — lives in [SPEC.md](./SPEC.md) ([日本語](./SPEC.ja.md)). The summary below highlights the points most relevant to operators; refer to SPEC for the historical context (Part D) behind each.
+> **Full rationale** for every design choice — phase numbering, log conventions, env property auto-detection, AWS quirks — lives in [SPEC.md](./SPEC.md) (English only). The summary below highlights the points most relevant to operators; refer to SPEC for the historical context (Part D) behind each.
 
 ### 9.1 `import-snapshot` + `register-image` over `import-image`
 

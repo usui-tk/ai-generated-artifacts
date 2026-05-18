@@ -1,12 +1,11 @@
 # psa.py Specification
 
-> 🇺🇸 English / 🇯🇵 [日本語](./SPEC.ja.md)
-
+> _Maintained in English only per the repository-wide documentation language policy. Japanese readers should refer to the English source-of-truth together with `README.ja.md` where available._
 This is the formal specification for `psa.py`, the PowerShell static
 analyzer maintained in this directory.
 
-**Document version**: 3.1.0
-**Applies to**: `psa.py` 3.1.0 and later 3.x releases
+**Document version**: 3.3.0
+**Applies to**: `psa.py` 3.3.0 and later 3.x releases
 **Status**: Normative
 
 For a user-facing overview, see [`README.md`](./README.md). This
@@ -757,6 +756,67 @@ file headers, and log-correlation tooling.
 **Detection**: The rule scans for `$Script:NAME =` or
 `${Script:NAME} =` assignments. For each missing required identifier,
 emits one PSAP0002 entry at line 1 of the file.
+
+### 4.35 PSAP0003 — Inline revision-tag comments
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 3.3.0
+- **Convention origin**: Deploy-Drivers-For-WindowsServer
+  revision-discipline policy (SPEC.md §A.13 "Where revision history
+  lives") — revision history belongs in `CHANGELOG.md`, not in the
+  script body.
+
+**Convention**: Inline comments must NOT carry per-revision history
+tags such as `# r42:`, `# r56+:`, or `# r9-update:`. Such tags
+accumulate over time as untraceable "where did this come from"
+markers; readers cannot meaningfully resolve them without consulting
+Git history anyway. The single source of truth for chronological
+history is `CHANGELOG.md` at the repository root.
+
+**Detected patterns** (case-sensitive):
+
+- `# r42:` — bare inline revision tag
+- `# r42+:` — inclusive-onwards tag
+- `# r42-update3:` — composite revision-with-sub-tag form
+- `# ---- r42: ---- some text` — dash-decorated section header
+- `# (r42) some text` — parenthesised inline tag
+
+**Detection**: A line-level scan over comments. Tags inside string
+literals are not matched. The rule treats `$Script:ScriptVersion =
+'chipset-2026.05.18-r60'` and similar **non-comment** uses of `rNN`
+as legitimate (these are tested via PSAP0002).
+
+**Remediation**: When porting a legacy script, move revision-tagged
+prose into `CHANGELOG.md` under the appropriate version section. If
+the design rationale is what mattered (not the revision), move it to
+`SPEC.md` Part D as a "Known Pitfalls and Lessons Learned" entry.
+
+### 4.36 PSAP0004 — End-of-file REVISION HISTORY blocks
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 3.3.0
+- **Convention origin**: same as PSAP0003 (see above).
+
+**Convention**: Script bodies must NOT contain end-of-file
+`REVISION HISTORY` or `CHANGELOG` comment blocks. Such blocks
+duplicate `CHANGELOG.md` and drift out of sync over time.
+
+**Detected patterns** (case-sensitive):
+
+- A comment line matching `^\s*#\s*(REVISION HISTORY|CHANGELOG|VERSION HISTORY)\s*:?\s*$`
+- The same pattern surrounded by `# ===` / `# ---` decoration lines
+
+**Detection**: A line-level scan. The rule fires once per matching
+header line; it does NOT attempt to detect the end of the block (an
+operator just needs the lead pointer to know there is something to
+remove).
+
+**Remediation**: Move the content of the block into `CHANGELOG.md`
+under the appropriate version sections. Verify nothing references the
+in-script block (search for "REVISION HISTORY" in other docs); update
+those references to point to `CHANGELOG.md`.
 
 ---
 

@@ -78,7 +78,7 @@ For composite artifacts (e.g., a template paired with explanatory commentary), s
   - **Pattern A — paired language suffix** (`<slug>.en.md` / `<slug>.ja.md`)
     Used for ordinary content files such as research articles or study notes.
   - **Pattern B — primary-and-translation** (`<NAME>.md` is the English primary, `<NAME>.ja.md` is the Japanese translation)
-    Used for repository-convention files whose English filename is itself canonical: `README.md` / `README.ja.md`, `SPEC.md` / `SPEC.ja.md`, `TESTING.md` / `TESTING.ja.md`, etc.
+    Used for `README.md` / `README.ja.md`. (Other repository-convention files — `SPEC.md`, `TESTING.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` — are English-only per the Language Policy below.)
 - Single-language files: `<slug>.md`
 - Code files follow the idiomatic naming convention of their language (e.g., `Verb-Noun.ps1` for PowerShell, `kebab-case.sh` for Bash, `snake_case.py` for Python)
 
@@ -94,9 +94,21 @@ For composite artifacts (e.g., a template paired with explanatory commentary), s
 
 ## Language Policy
 
-- **Default: Bilingual** — when feasible, artifacts are published in both English and Japanese using one of the two patterns documented under "Files" above
-- **Acceptable: Single language** — when bilingual versioning is impractical (e.g., language-specific examples), use a single file in the most appropriate language
-- READMEs within top-level subdirectories may interleave English and Japanese in a single file to avoid duplication, as long as both languages remain equally complete; deeper script/project directories typically use the paired-file pattern (`README.md` + `README.ja.md`)
+This repository uses a **repository-wide common policy** for documentation languages, applied uniformly across all sub-directories and sister repositories:
+
+| File type | Languages maintained | Master | Notes |
+| --- | --- | --- | --- |
+| `README.md` | English **and** Japanese (`README.ja.md`) | `README.md` (English) | English is the master; `README.ja.md` is its translation, kept in sync in the same PR. |
+| `SPEC.md` | **English only** | — | Specifications are maintained in English only to avoid drift. |
+| `TESTING.md` | **English only** | — | Test procedures and validation results, English only. |
+| `CHANGELOG.md` | **English only** | — | Chronological per-release change log, English only. |
+| `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` | **English only** | — | Repository-policy files, English only. |
+| Research articles, study notes (Pattern A `<slug>.en.md` / `<slug>.ja.md`) | English and / or Japanese as feasible | — | Content files; bilingual where practical. |
+| Top-level subdirectory READMEs | Interleaved EN / JA in a single file | — | An exception for very short overview READMEs that would suffer from duplication; both languages must remain equally complete. |
+
+**Policy rationale**: Only `README.md` is duplicated into Japanese because it is the primary entry point for new readers. Specifications, testing procedures, and release logs are maintained in English only to avoid synchronization drift — a problem that LLM-assisted maintenance is especially vulnerable to. Japanese readers should use `README.ja.md` for orientation and then refer to the English source-of-truth documents for technical detail.
+
+When older artifacts contain `SPEC.ja.md` or `TESTING.ja.md` files, they should be removed in the next maintenance pass and their references in other documents updated to point to the English originals.
 
 ---
 

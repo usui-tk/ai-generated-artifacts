@@ -20,7 +20,7 @@
 > still applies; this SPEC supplements it with implementation-level detail
 > specific to the Oracle Linux AWS AMI builder.
 
-🇯🇵 **日本語版仕様書は [SPEC.ja.md](./SPEC.ja.md) を参照してください。**
+> **Documentation language policy**: This SPEC is maintained in English only. Japanese readers should refer to the English SPEC together with `README.ja.md` for an orientation. See the repository root `README.md` "Language Policy" section for the repository-wide policy.
 
 ---
 
@@ -93,7 +93,7 @@ env.properties.aws-ol8      Oracle Linux 8  Update 10 template
 env.properties.aws-ol7      Oracle Linux 7  Update 9 template (experimental — see B.3, D.10)
 env.properties.aws-ol6      Oracle Linux 6  Update 10 template (experimental — see B.4, B.5, D.11–D.16)
 README.md / README.ja.md    end-user documentation (bilingual)
-SPEC.md  / SPEC.ja.md       this developer specification (bilingual)
+SPEC.md  / SPEC.md       this developer specification (bilingual)
 ```
 
 ### A.1.4 Workspace path convention
@@ -480,7 +480,7 @@ Example (bad):
 | English | Japanese | Content |
 |---------|----------|---------|
 | `README.md` | `README.ja.md` | End-user documentation |
-| `SPEC.md` | `SPEC.ja.md` | Developer specification (this document) |
+| `SPEC.md` | `SPEC.md` | Developer specification (this document) |
 
 ### Synchronization rule
 
@@ -1069,7 +1069,7 @@ Before any commit to this directory, all of the following must pass.
 - [ ] `README.md` carries the **Disclaimer** section near the top (per A.10)
 - [ ] `README.md` carries the **License** section near the top (per A.10)
 - [ ] `README.ja.md` carries equivalent **免責事項** and **ライセンス** sections
-- [ ] `SPEC.md` and `SPEC.ja.md` reflect the change in the relevant Part A / Part B section
+- [ ] `SPEC.md` and `SPEC.md` reflect the change in the relevant Part A / Part B section
 - [ ] If a new pitfall was discovered during development, it is added as a new `D.NN` entry in Part D
 - [ ] A `LICENSE` file exists at the repository root and the script header banner names the AI tool used in the generation (per A.2)
 

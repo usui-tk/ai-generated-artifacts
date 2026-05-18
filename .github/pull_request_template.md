@@ -14,7 +14,7 @@ for the full guidelines.
 <!--
 e.g.
 - scripts/aws/ol-aws-ami-builder/SPEC.md §A.7
-- scripts/aws/ol-aws-ami-builder/SPEC.ja.md §A.7
+- scripts/aws/ol-aws-ami-builder/SPEC.md §A.7
 - scripts/aws/ol-aws-ami-builder/README.md  (cross-reference update)
 -->
 

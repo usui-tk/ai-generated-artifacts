@@ -14,13 +14,28 @@ maintaining their own copy.
 
 For the formal specification (CLI contract, rule semantics, output
 schemas, environment detection contract), see [`SPEC.md`](./SPEC.md).
-日本語版は [`SPEC.ja.md`](./SPEC.ja.md) を参照してください。
+This SPEC is maintained in English only per the repository-wide
+documentation language policy; Japanese readers may use the Japanese
+overview in [`README.ja.md`](./README.ja.md).
 
-**Current version: 3.2.0**
+**Current version: 3.3.0**
 
 ---
 
 ## What's new
+
+### 3.3.0 — Revision-discipline rules (PSAP0003, PSAP0004)
+
+3.3.0 adds two opt-in PSAPxxxx rules that enforce the **"revision history lives in CHANGELOG.md, not in the script body"** discipline. Both are disabled by default and must be enabled per repository via `.psa.config.json`.
+
+**New rules:**
+
+- **`PSAP0003`** (warning, default OFF): inline revision-tag comments. Fires on `# rNN:`, `# rNN+:`, `# rNN-update:`, `# ---- rNN: ----` and `# (rNN) ...` patterns inside comments. Tags inside string literals and uses of `rNN` inside legitimate variables (e.g. `$Script:ScriptVersion = '...-r60'`) are left alone.
+- **`PSAP0004`** (warning, default OFF): end-of-file `REVISION HISTORY` / `CHANGELOG` / `VERSION HISTORY` comment blocks. Fires once per matching header line; the operator's task is to relocate the content to the repository's `CHANGELOG.md`.
+
+Both rules complement the existing PSAP0001 / PSAP0002 family and codify the discipline described in Deploy-Drivers-For-WindowsServer `SPEC.md` §A.13 ("Where revision history lives").
+
+**No other rule semantics changed in 3.3.0.** Repositories that do not enable PSAP0003 / PSAP0004 see no behaviour difference vs 3.2.0.
 
 ### 3.2.0 — Cross-file consistency (PSA8xxx), complexity (PSA9xxx), project conventions (PSAPxxxx)
 
@@ -152,7 +167,7 @@ zero-dependency design.
 
 | Area | Current |
 |:---|:---|
-| Rule codes | `PSA1001`–`PSA9002` plus `PSAP0001`–`PSAP0002` (34 rules total) |
+| Rule codes | `PSA1001`–`PSA9002` plus `PSAP0001`–`PSAP0004` (36 rules total) |
 | Output formats | Text / JSON / SARIF 2.1.0 |
 | Suppression | `# psa-disable-line`, `next-line`, `file` |
 | Configuration | `.psa.config.json` + CLI |

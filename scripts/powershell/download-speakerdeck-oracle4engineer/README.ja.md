@@ -41,8 +41,8 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
   Download-SpeakerDeck.ps1     # 本体スクリプト（この README が説明する対象）
   Test-PdfMetadata.ps1         # Phase 8 の PDF メタデータパスの読み取り専用 PoC
   README.md / README.ja.md     # エンドユーザー向けドキュメント（このファイル群）
-  SPEC.md / SPEC.ja.md         # 開発者 / LLM 向け仕様書（下記「開発者向け仕様」参照）
-  TESTING.md / TESTING.ja.md   # 検証手順と実行結果
+  SPEC.md (English only)         # 開発者 / LLM 向け仕様書（下記「開発者向け仕様」参照）
+  TESTING.md (English only)   # 検証手順と実行結果
 ```
 
 本スクリプトの検証に用いる PowerShell 静的解析ツール `psa.py` は、
@@ -50,7 +50,7 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
 [`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
 に格納されています。
 
-スクリプトを **実行するだけ** であれば、この README を読めば十分です。**拡張や類似スクリプト作成** の場合は `SPEC.ja.md` も併せてご確認ください。
+スクリプトを **実行するだけ** であれば、この README を読めば十分です。**拡張や類似スクリプト作成** の場合は `SPEC.md` も併せてご確認ください。
 
 ## クイックスタート
 
@@ -411,17 +411,17 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 ## 開発者向け仕様
 
-このスクリプトを拡張したい、フェーズ構成を変更したい、または同系統のスクリプトを新規に作成したい場合は、まず **[SPEC.ja.md](SPEC.ja.md)**（英語版は [SPEC.md](SPEC.md)）を読んでください。SPEC では以下を体系化しています：
+このスクリプトを拡張したい、フェーズ構成を変更したい、または同系統のスクリプトを新規に作成したい場合は、まず **[`SPEC.md`](SPEC.md) (English only)**（英語版は [SPEC.md](SPEC.md)）を読んでください。SPEC では以下を体系化しています：
 
 - **Part A（共通仕様）** — このファミリーのすべてのスクリプトが継承する規約：ソースファイル形式（UTF-8 BOM + ASCII のみ）、フェーズアーキテクチャ、ログマーカー、`-LiteralPath` ルール、CSV カラム規約、環境診断、静的解析ゲート、バイリンガルドキュメント要件
 - **Part B（スクリプト固有仕様）** — このスクリプト固有のフェーズマップ、年フォルダ規則、PDF メタデータ事後分類の詳細（Phase 8）、適応的ダウンロード設定、失敗回復
 - **Part C（品質ゲート）** — すべてのコミット前に満たすべきチェックリスト
 - **Part D（既知の落とし穴）** — 過去のリビジョンで文書化したバグ：PowerShell のパスにおける `[ ]` ワイルドカード問題（r10, r17）、フェーズ番号振り直しの安全性（r16）など
 
-実際の検証結果（DryRun、本番実行出力、冪等性チェック、r17 のリグレッション修正証跡）については **[TESTING.ja.md](TESTING.ja.md)**（英語版は [TESTING.md](TESTING.md)）を参照してください。直近の本番実行成功結果（`804/804 デッキ、失敗ゼロ、合計 10 分 4.4 秒、5.7 GB`）が記録されています。
+実際の検証結果（DryRun、本番実行出力、冪等性チェック、r17 のリグレッション修正証跡）については **[`TESTING.md`](TESTING.md) (English only)**（英語版は [TESTING.md](TESTING.md)）を参照してください。直近の本番実行成功結果（`804/804 デッキ、失敗ゼロ、合計 10 分 4.4 秒、5.7 GB`）が記録されています。
 
 `psa.py` 静的解析ツールの詳細（v3.1.0、28 ルール体系 `PSA1001`〜`PSA7001` + CI 連携）は
-[`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md)
+[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
 （英語版は [SPEC.md](../../python/powershell-static-analyzer/SPEC.md)）、
 または同ディレクトリの
 [`README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
@@ -463,7 +463,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 | ファイル形式  | `PSA7001`            | PowerShell スクリプトに UTF-8 BOM がない（BOM がないと Windows PowerShell 5.1 が非 ASCII バイトを Shift-JIS と誤認する可能性あり） |
 
 各ルールの完全仕様は
-[`../../python/powershell-static-analyzer/SPEC.ja.md`](../../python/powershell-static-analyzer/SPEC.ja.md) §4 を参照。
+[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4 を参照。
 
 ### プロジェクト固有設定
 
@@ -485,7 +485,7 @@ Issues : 0 errors, 0 warnings, 0 info
 ```
 
 スクリプトに変更を加える際は、コミット前に上記コマンドで検証することを推奨します。
-これは SPEC.ja.md の Part C「品質ゲート」でも必須項目として定義されています。
+これは SPEC.md の Part C「品質ゲート」でも必須項目として定義されています。
 
 ## コンソール出力フォーマット
 

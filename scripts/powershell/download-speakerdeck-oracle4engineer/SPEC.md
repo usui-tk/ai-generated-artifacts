@@ -95,7 +95,7 @@ repository. Within this repository it must be:
 
 See A.11 for project-local conventions and
 [`scripts/python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-([日本語](../../python/powershell-static-analyzer/SPEC.ja.md))
+([日本語](../../python/powershell-static-analyzer/SPEC.md))
 for the authoritative rule specification.
 
 ### A.1.3 Companion specifications (this folder)
@@ -105,8 +105,8 @@ mirroring the pattern of [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https:
 
 - `README.md` / `README.ja.md` — end-user documentation
   (installation, quick start, parameters, troubleshooting)
-- `SPEC.md` / `SPEC.ja.md` — developer / LLM specification (this file)
-- `TESTING.md` / `TESTING.ja.md` — verification procedure and recorded
+- `SPEC.md` (English only) — developer / LLM specification (this file)
+- `TESTING.md` (English only) — verification procedure and recorded
   real-run results
 
 The `psa.py` static analyzer used by these scripts lives at the
@@ -622,7 +622,7 @@ Based on the longest successful path length, classify into:
     python/
       powershell-static-analyzer/
         psa.py               # canonical location, v3.1.0
-        SPEC.md / SPEC.ja.md # authoritative analyzer specification
+        SPEC.md (English only) # authoritative analyzer specification
 ```
 
 ### Required gate
@@ -648,7 +648,7 @@ A condensed table is reproduced in
 authoritative specification of every rule (severity, examples, suppression
 guidance), see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-([日本語](../../python/powershell-static-analyzer/SPEC.ja.md)) §4.
+([日本語](../../python/powershell-static-analyzer/SPEC.md)) §4.
 
 ### Project-local suppression policy
 
@@ -701,7 +701,6 @@ repository) carries:
 | `README.md` | English, primary documentation |
 | `README.ja.md` | Japanese mirror, kept in sync with `README.md` |
 | `SPEC.md` | Developer / LLM specification (this file's pattern) |
-| `SPEC.ja.md` | Japanese mirror of the specification |
 
 When the script lives inside a larger multi-script repository (e.g.,
 `usui-tk/ai-generated-artifacts/scripts/powershell/<name>/`), the

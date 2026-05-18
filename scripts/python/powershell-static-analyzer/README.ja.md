@@ -11,14 +11,27 @@ PowerShell スクリプト用の単一 Python 3 ファイル静的解析ツー�
 コピーを保持するのではなく、このファイルを参照します。
 
 正式な仕様書（CLI 契約、ルール意味論、出力スキーマ、環境検出契約）に
-ついては [`SPEC.ja.md`](./SPEC.ja.md) を参照してください。
-英語版は [`SPEC.md`](./SPEC.md) を参照してください。
+ついては [`SPEC.md`](./SPEC.md) を参照してください (リポジトリ共通の
+ドキュメント言語ポリシーにより英語のみで維持されています)。
 
-**現在のバージョン: 3.2.0**
+**現在のバージョン: 3.3.0**
 
 ---
 
 ## 更新履歴
+
+### 3.3.0 — リビジョン規律ルール (PSAP0003、 PSAP0004)
+
+3.3.0 では、 **「リビジョン履歴は CHANGELOG.md に置く。 スクリプト本体には置かない」** という規律を強制する 2 つの opt-in PSAPxxxx ルールを追加しました。 両方ともデフォルト OFF で、 `.psa.config.json` で repository 単位に opt-in する形式です。
+
+**新規ルール:**
+
+- **`PSAP0003`** (warning、 デフォルト OFF): インラインのリビジョンタグコメント。 コメント内の `# rNN:`、 `# rNN+:`、 `# rNN-update:`、 `# ---- rNN: ----`、 `# (rNN) ...` パターンに該当した場合に検出。 文字列リテラル内のタグや、 正当な変数 (例: `$Script:ScriptVersion = '...-r60'`) 内の `rNN` 使用には反応しません。
+- **`PSAP0004`** (warning、 デフォルト OFF): EOF (end-of-file) の `REVISION HISTORY` / `CHANGELOG` / `VERSION HISTORY` コメントブロック。 マッチするヘッダ行ごとに 1 回検出 — operator の作業はリポジトリの `CHANGELOG.md` への内容移行です。
+
+両ルールは既存の PSAP0001 / PSAP0002 ファミリを補完し、 Deploy-Drivers-For-WindowsServer `SPEC.md` §A.13 (「Where revision history lives」) に記載の規律を成文化します。
+
+**3.3.0 でその他のルール意味論は変更されていません。** PSAP0003 / PSAP0004 を opt-in しないレポジトリは 3.2.0 との挙動差はありません。
 
 ### 3.2.0 — ファイル間整合性 (PSA8xxx)、 複雑度 (PSA9xxx)、 プロジェクト規約 (PSAPxxxx)
 
@@ -91,7 +104,7 @@ PowerShell スクリプト用の単一 Python 3 ファイル静的解析ツー�
   - `PSA_CONFIG_MAX_RETRIES` — 総試行回数（既定 3）
   - `PSA_CONFIG_QUIET` — stderr へのリトライ進捗メッセージを抑制
 
-詳細は [SPEC.ja.md §5.4](./SPEC.ja.md#54-リモート設定http--https) を参照。
+詳細は [SPEC.md §5.4](./SPEC.md#54-リモート設定http--https) を参照。
 
 ### 2.2.0 — JSONC 設定とリモート設定 URL
 
@@ -493,7 +506,7 @@ psa.py --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.c
 （`github.com/.../blob/...`）は HTML を返すためパース不能。
 
 取得内容は `psa.py` 側ではキャッシュされず、毎回 URL にアクセスします。
-詳細な契約は [SPEC.ja.md §5.4](./SPEC.ja.md#54-リモート設定http--https)
+詳細な契約は [SPEC.md §5.4](./SPEC.md#54-リモート設定http--https)
 を参照。
 
 ### 優先順位（低 → 高）

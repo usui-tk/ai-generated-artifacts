@@ -10,7 +10,7 @@ This document consolidates everything needed to verify and evaluate
    the `oracle4engineer` account, including the historical r16 → r17 regression
    fix evidence
 
-🇯🇵 **Japanese version: see [TESTING.ja.md](./TESTING.ja.md).**
+🇯🇵 **Japanese version: see [`TESTING.md`](./TESTING.md) (English only).**
 
 ---
 
@@ -329,7 +329,7 @@ before running.
 | **r17** | **`Invoke-WebRequest -OutFile` wildcard interpretation breaks `[ ]` paths** | **High** | **Safe-temp GUID file + `Move-Item -LiteralPath`** |
 | r18 | Folder layout integration with `ai-generated-artifacts` repo | Cosmetic | Update README + SPEC for repo placement |
 | r19 | Single account folder couldn't host multiple targets | Cosmetic | Add `-<account>` suffix to folder name |
-| r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.ja.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md (psa.py later promoted to `scripts/python/powershell-static-analyzer/` as the repository-wide canonical location) |
+| r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md (psa.py later promoted to `scripts/python/powershell-static-analyzer/` as the repository-wide canonical location) |
 
 See [SPEC.md](./SPEC.md) Part D for the formalized "Known Pitfalls" entries
 that bake each of these fixes into the project's institutional memory.

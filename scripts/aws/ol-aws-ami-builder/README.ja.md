@@ -4,7 +4,7 @@
 
 > 📂 [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) リポジトリの [`scripts/aws/ol-aws-ami-builder/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/aws/ol-aws-ami-builder) 配下のアーティファクトです
 > ⚠️ **AI 生成コンテンツ** — 実行前にソースコードを確認してください。[`scripts/` ディレクトリ規約](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md)で完全な免責事項を確認できます。
-> 📐 **開発者向け仕様書**:[SPEC.ja.md](./SPEC.ja.md)([English](./SPEC.md)) — phase contract、ログ規約、env プロパティキー、現実装ですでに対処済みの過去の落とし穴を記録
+> 📐 **開発者向け仕様書**:[`SPEC.md`](./SPEC.md) (English only)([English](./SPEC.md)) — phase contract、ログ規約、env プロパティキー、現実装ですでに対処済みの過去の落とし穴を記録
 
 Oracle 公式の [`oracle-linux-image-tools`](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) を活用し、Oracle Linux 8 / 9 / 10 (x86_64) の AWS AMI を自前で構築するためのラッパースクリプト一式です。
 
@@ -29,7 +29,7 @@ Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が�
 * スクリプトはビルドホスト上で **`sudo` を実行**し、KVM/libvirt のインストールや `${WORKSPACE}` 配下ディレクトリの ACL 変更を行うこと(Phase 1 で導入される内容を確認し、これらの変更に同意したものとみなします)
 * スクリプトは **AWS の課金を発生**させます:ビルダーの EC2 インスタンス時間、インポートされたイメージの EBS スナップショットストレージ、ステージング VMDK の S3 ストレージ。**これらのリソースの監視とクリーンアップは利用者の責任**です
 * `import-snapshot` と `register-image` の呼び出しは **永続的な AWS リソース**(EBS スナップショットと AMI)を作成します。削除は利用者の責任で行ってください。孤立したスナップショットは予期せぬ AWS 課金の典型的な原因です
-* 任意の環境で実行する前に、スクリプトのソースコード(または [SPEC.ja.md](./SPEC.ja.md) 仕様書)をレビューすること
+* 任意の環境で実行する前に、スクリプトのソースコード(または [`SPEC.md`](./SPEC.md) (English only) 仕様書)をレビューすること
 * ビルドプロセスは **一時的な内部 VM のみ**でカーネルレベル機能の変更を行います。ビルドホスト自体は Phase 1 のパッケージ導入と Phase 2 の ACL 調整以外には変更されません。とはいえ、ビルドホストは **使い捨て**(専用 EC2 インスタンスが理想)として扱うことを強く推奨します
 
 これらのツールは慎重に運用してください。**Oracle が公式に配布する AMI が存在する場合はそちらを優先**してください。本リポジトリは、Oracle が AWS Marketplace に対象リリースの AMI を公開していない、かつ利用者が自前ビルド AMI を自身の AWS アカウントで運用する意思がある、というニッチなケースを対象としています。
@@ -50,7 +50,6 @@ Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が�
 | `README.md` | エンドユーザ向けドキュメント(英語、ベースライン) |
 | `README.ja.md` | エンドユーザ向けドキュメント(日本語) |
 | `SPEC.md` | 開発者向け仕様書(英語)— phase contract、ログ規約、設計判断の詳細 |
-| `SPEC.ja.md` | 開発者向け仕様書(日本語) |
 
 ---
 
@@ -381,7 +380,7 @@ ssh -i your-keypair.pem ec2-user@<public-ip>
 
 ## 9. 主な設計判断(サマリ)
 
-> **すべての設計判断の詳細**(phase 番号付け、ログ規約、env プロパティ自動検出、AWS 固有の癖)は [SPEC.ja.md](./SPEC.ja.md)([English](./SPEC.md))にあります。以下は運用者にとって特に重要なポイントのみ抜粋しています。各項目の歴史的経緯は SPEC の Part D を参照してください。
+> **すべての設計判断の詳細**(phase 番号付け、ログ規約、env プロパティ自動検出、AWS 固有の癖)は [`SPEC.md`](./SPEC.md) (English only)([English](./SPEC.md))にあります。以下は運用者にとって特に重要なポイントのみ抜粋しています。各項目の歴史的経緯は SPEC の Part D を参照してください。
 
 ### 9.1 import-image ではなく import-snapshot + register-image
 
@@ -579,4 +578,4 @@ https://github.com/usui-tk/ai-generated-artifacts/issues
 - **ログ抜粋**:失敗周辺の 10〜50 行(1000 行以上のログ全体ではなく)
 - **すでに試したこと**:例: `${WORKSPACE}` のクリーン、WORKSPACE のファイルシステム切り替えなど
 
-コードレベルの変更については、まず [SPEC.ja.md](./SPEC.ja.md) を参照してください。Part D(「既知の落とし穴と教訓」)は現実装ですでに対処済みのバグを記録しており、Part A は新コードが従うべき規約を定義しています。
+コードレベルの変更については、まず [`SPEC.md`](./SPEC.md) (English only) を参照してください。Part D(「既知の落とし穴と教訓」)は現実装ですでに対処済みのバグを記録しており、Part A は新コードが従うべき規約を定義しています。
