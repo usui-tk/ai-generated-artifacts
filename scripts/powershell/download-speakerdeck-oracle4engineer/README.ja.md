@@ -39,7 +39,6 @@ Windows 11 + Windows PowerShell 5.1 を想定（PowerShell 7+ でも動作しま
 ```
 scripts/powershell/download-speakerdeck-oracle4engineer/
   Download-SpeakerDeck.ps1     # 本体スクリプト（この README が説明する対象）
-  Test-PdfMetadata.ps1         # Phase 8 の PDF メタデータパスの読み取り専用 PoC
   README.md / README.ja.md     # エンドユーザー向けドキュメント（このファイル群）
   SPEC.md (English only)         # 開発者 / LLM 向け仕様書（下記「開発者向け仕様」参照）
   TESTING.md (English only)   # 検証手順と実行結果
@@ -285,8 +284,10 @@ Windows で禁止される文字は、ASCII 互換文字へ置換します：
 * `<WorkDir>\logs\P06_errors.jsonl`                     — Phase 6 の構造化エラーログ（JSONL、失敗 1 件 = 1 行、失敗発生時のみ）
 * `<WorkDir>\logs\P07_final_state.csv`                  — Phase 7 の突合結果（Plan + Download Log + ディスク実体を統合、行ごとに Discrepancy フラグ付き、本番実行時のみ）
 * `<WorkDir>\logs\year_overrides.csv`                   — Phase 8 の PDF メタデータ救済履歴。次回実行時の Phase 5 が優先順位 0 で参照する（初回救済成功時に遅延作成）
+* `<WorkDir>\logs\debugtrace.jsonl`                     — **Debug Trace Facility**：各 Phase の frame.open / step / frame.close イベントを記録するリアルタイム JSONL ストリーム（常に生成。下記「デバッグトレース」セクション参照）
 * `<WorkDir>\diag\speakerdeck_diag_<account>_*.html`    — Phase 2 が 0 件検知時の生 HTML ダンプ
 * `<WorkDir>\diag\failed\<index>_<slug>.txt`            — Phase 6 失敗 1 件ごとの詳細診断（HTTP ステータス、ヘッダー、レスポンスボディ先頭、スタックトレース、リトライ履歴）
+* `<WorkDir>\diag\debugtrace_export_<phaseId>_<ts>.json` — **Debug Trace Facility**：Phase が例外を投げた瞬間の自動エクスポート JSON スナップショット（未捕捉例外が発生した場合のみ。下記「デバッグトレース」セクション参照）
 
 ### CSV カラム共通規約
 
@@ -407,6 +408,69 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 両スイッチとも `<OutputDir>` と `<WorkDir>` を再帰的に削除します。安全チェックにより、削除対象パスがスクリプト自身のディレクトリと一致する、ドライブルートに該当する、またはスクリプトを含む親ディレクトリの場合は **実行を拒否** します。
 
+## デバッグトレース
+
+本スクリプトには **Debug Trace Facility** が組み込まれており、 各 Phase の名前付きステップを逐次記録します。 出力は 2 種類です：
+
+| 出力先 | 出力タイミング | 用途 |
+|---|---|---|
+| `work\logs\debugtrace.jsonl` | 常に生成（本番実行ごと） | 全 Phase の entry / step / exit イベントをリアルタイムに JSONL 形式で追記。 UTF-8 with BOM、 追記専用 |
+| `work\diag\debugtrace_export_<phaseId>_<timestamp>.json` | Phase が例外を投げた時のみ | 失敗時点のスナップショットを自動エクスポート。 アクティブスタック、 完了済みフレーム、 Phase 別結果、 ホスト情報を含む単一ファイル |
+
+ワークディレクトリ作成直後に自動的に有効化され、 標準出力に以下のような 1 行確認メッセージが表示されます：
+
+```
+[*] Debug trace -> D:\OC\work\logs\debugtrace.jsonl
+```
+
+### この機能が役立つ場面
+
+Phase 6 のデッキ別失敗ログ（`P06_errors.jsonl`）は「どのデッキが失敗したか」を記録します。 Debug Trace Facility はそれとは別の問いに答えます：「関数内のどの名前付きステップで例外が発生したか」。 デッキ単位ではない失敗、 たとえば Phase 5 の filename 計画中の `PathTooLongException`、 CSV 書き込み中の予期せぬ `System.IO.IOException`、 Phase 4 の正規表現パース失敗などの診断に最も有用です。
+
+### `debugtrace.jsonl` の調査方法
+
+1 行 1 つの JSON オブジェクトとして格納されています。 便利な one-liner：
+
+```powershell
+# kind 別にイベント数を集計
+Get-Content .\work\logs\debugtrace.jsonl |
+    ForEach-Object { $_ | ConvertFrom-Json } |
+    Group-Object kind | Sort-Object Count -Descending
+
+# Phase 5 内で実行された全ステップを表示
+Get-Content .\work\logs\debugtrace.jsonl |
+    ForEach-Object { $_ | ConvertFrom-Json } |
+    Where-Object { $_.kind -eq 'step' -and $_.ctx -eq 'Invoke-Phase5FilenamePlan' } |
+    Select-Object ts, step
+
+# 全 failure イベントをスタックトレース付きで表示
+Get-Content .\work\logs\debugtrace.jsonl |
+    ForEach-Object { $_ | ConvertFrom-Json } |
+    Where-Object { $_.kind -eq 'failure' } |
+    Format-List ts, ctx, step, exType, msg, stack
+```
+
+### 自動エクスポートされたスナップショットの調査方法
+
+Phase が例外を投げたとき、 トップレベルの catch ハンドラが `work\diag\` に 1 つの自己完結型 JSON ファイルを書き出します。 ファイル名は `debugtrace_export_<phaseId>_<YYYYMMDD-HHmmss>.json` で、 以下を含みます：
+
+| キー | 意味 |
+|---|---|
+| `script.version` / `script.tag` / `script.sha256` | 実行されていたビルドの識別子 |
+| `hostInfo` | PS バージョン、 edition、 CLR、 OS、 culture、 ホスト名 |
+| `phases[]` | Phase 別の outcome と失敗参照 |
+| `activeFrames[]` | 失敗時点でトレーススタックに残っていた関数 |
+| `completedFrames[]` | 完了済みフレームの履歴 (ステップ毎の所要時間付き) |
+| `events[]` | デフォルトで空。 `Export-DebugTraceJson -IncludeEvents` で手動エクスポート時に格納される |
+
+バグレポートに添付するのはこの 1 ファイルだけで充分です。 数 MB 級の `debugtrace.jsonl` を共有しなくても、 メンテナは失敗のフルコンテキストを得られます。
+
+### 無効化について
+
+コマンドラインからは無効化できません (オーバーヘッドが極めて小さいため：800 デッキの実行で約 150 KB の JSONL、 ネットワーク I/O ゼロ)。 ベストエフォート設計のため、 ファイルアクティベーションに失敗した場合 (ディスク満杯、 権限不足など) は警告を出して機能なしで継続します。 トレースイベントはメモリにバッファされ続け、 デバッガから `Export-DebugTraceJson` を呼び出せばエクスポート可能です。
+
+完全な仕様 (イベントスキーマ、 module-level state、 public API) は [SPEC.md A.14](SPEC.md#a14-debug-trace-facility) を参照してください。
+
 ---
 
 ## 開発者向け仕様
@@ -480,7 +544,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 4107
+Lines  : 5156
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
@@ -511,13 +575,13 @@ Issues : 0 errors, 0 warnings, 0 info
 
 ```
 ========================================================================
- PHASE P01  - ListCollection         (Scan   ) start: 13:04:15
- script: vspeakerdeck-2026.05.10-r05/abc123def456
+ PHASE P03  - ListCollection         (Scan   ) start: 13:04:15
+ script: vspeakerdeck-2026.05.18-r23/abc123def456
 ========================================================================
 [13:04:15] [+0.00s]      [*] Fetching page 1: https://speakerdeck.com/...
 [13:04:16] [+0.85s]      [*] page 1: +18 decks (cumulative 18)
 ...
- PHASE P01  -> DONE     elapsed: 1m12.3s
+ PHASE P03  -> DONE     elapsed: 1m12.3s
 ```
 
 実行終了時には、すべてのフェーズの所要時間サマリが表示されます：

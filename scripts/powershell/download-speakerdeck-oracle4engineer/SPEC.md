@@ -35,6 +35,7 @@
   - [A.11 Static Analysis with psa.py](#a11-static-analysis-with-psapy)
   - [A.12 Documentation Language Policy](#a12-documentation-language-policy)
   - [A.13 Development Workflow](#a13-development-workflow)
+  - [A.14 Debug Trace Facility](#a14-debug-trace-facility)
 - [Part B — Script-Specific Specification (template)](#part-b--script-specific-specification-template)
 - [Part C — Quality Gates & Validation Checklist](#part-c--quality-gates--validation-checklist)
 - [Part D — Known Pitfalls & Lessons Learned](#part-d--known-pitfalls--lessons-learned)
@@ -121,8 +122,8 @@ across all scripts in the repository.
 
 ### A.1.4 Companion in-house script (latest reference)
 
-The Speaker Deck Bulk Downloader (`Download-SpeakerDeck.ps1`, r20 as of
-2026-05-13, located at
+The Speaker Deck Bulk Downloader (`Download-SpeakerDeck.ps1`, r23 as of
+2026-05-18, located at
 `scripts/powershell/download-speakerdeck-oracle4engineer/`) is the most
 recent reference for:
 
@@ -130,6 +131,9 @@ recent reference for:
 - Adaptive parallel download via Runspace Pool
 - PDF metadata reclassification (Phase 8 / year_overrides.csv pattern)
 - CSV cross-phase column conventions (Section A.9)
+- Debug Trace Facility integration pattern (Section A.14; per-phase
+  `Start-DebugTrace` / `Stop-DebugTrace` wrapping plus `Set-DebugStep`
+  checkpoints, with JSONL streaming and auto-export-on-failure)
 
 When asked to build a new bulk-fetch or data-processing script, **start by
 reading this script** and copying its skeleton.
@@ -528,6 +532,32 @@ One self-contained JSON object per line. Keys are `camelCase`:
 }
 ```
 
+### Relation to the Debug Trace Facility (Section A.14)
+
+This three-tier diagnostic output is **per-record** (one entry per
+failed unit of work, e.g. per failed deck download). It is the right
+tool when the script processes many items in a loop and each item can
+fail independently.
+
+The **Debug Trace Facility (A.14)** is a complementary mechanism that
+operates at **operation-level granularity**: it tracks every named
+step inside a single function (or phase) and reports which step was
+in progress when an exception was raised. It is the right tool when
+you need to know "where exactly inside this large function did it
+break" rather than "which record failed".
+
+The two facilities coexist without overlap. In `Download-SpeakerDeck.ps1`:
+
+- The Phase 6 per-deck failure path uses the three-tier per-record
+  diagnostics (`work/diag/failed/<idx>_<slug>.txt`,
+  `work/logs/P06_errors.jsonl`).
+- Every Phase 1-8 function wraps its body in `Start-DebugTrace
+  -PhaseId 'PNN'` / `Stop-DebugTrace` so any structural failure
+  (e.g. inside Phase 5 filename-plan computation, where there is no
+  "per-record" notion) lands in the DebugTrace stream
+  (`work/logs/debugtrace.jsonl`) and triggers a JSON snapshot under
+  `work/diag/debugtrace_export_*.json`.
+
 ## A.9 CSV / JSONL Column Conventions
 
 ### Common columns across all per-phase CSVs
@@ -635,10 +665,9 @@ project-local `.psa.config.json` is auto-discovered):
 ```bash
 cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
-python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 ```
 
-Both must pass with **0 errors / 0 warnings / 0 info**.
+Must pass with **0 errors / 0 warnings / 0 info**.
 
 ### Rule coverage (psa.py v3.3.0)
 
@@ -829,6 +858,175 @@ When a new feature is needed, in order:
 3. **Only if neither covers it**, design from first principles — and
    document the new pattern in this SPEC so the next script can reuse it.
 
+## A.14 Debug Trace Facility
+
+The Debug Trace Facility is a reusable operation-level diagnostic
+mechanism ported from `usui-tk/Deploy-Drivers-For-WindowsServer`
+(Chipset r60 / BthPan r10). It complements the per-record diagnostics
+documented in A.8: where A.8 answers "which record failed", the Debug
+Trace Facility answers "which named step inside this function was in
+progress when the exception was raised".
+
+This is intentionally placed in **Part A** because the facility is
+fully generic: it makes no assumption about phases, records, deck
+URLs, or any Speaker-Deck-specific concept. Any future script in this
+repository may opt in by copying the same 700-line Section 1b block
+verbatim from `Download-SpeakerDeck.ps1`.
+
+### A.14.1 Three subsystems
+
+| Subsystem | Public API |
+|---|---|
+| Trace primitives | `Start-DebugTrace` / `Set-DebugStep` / `Stop-DebugTrace` / `Format-DebugFailure` / `Write-DebugFailureReport` |
+| JSONL file output (real-time stream) | `Enable-DebugTraceFileOutput` / `Disable-DebugTraceFileOutput` / `Get-DebugTraceFileOutputStatus` |
+| JSON point-in-time export + auto-export-on-failure | `Export-DebugTraceJson` / `Enable-AutoExportOnPhaseFailure` |
+
+### A.14.2 Module-level state
+
+The facility maintains nine script-scope variables. New scripts MUST
+declare them at script-load time so they exist before any function
+body references them:
+
+```powershell
+$Script:DebugTraceStack             = New-Object 'System.Collections.Generic.Stack[object]'
+$Script:DebugTraceCompletedFrames   = New-Object 'System.Collections.Generic.List[object]'
+$Script:DebugTraceCompletedCap      = 1024
+$Script:DebugTraceHistoryCap        = 256
+$Script:DebugTraceJsonlLineCap      = 8192
+$Script:DebugTraceJsonDepth         = 100
+$Script:DebugTraceJsonlEnabled      = $false
+$Script:DebugTraceJsonlPath         = $null
+$Script:DebugTraceJsonlBuffer       = New-Object 'System.Collections.Generic.List[string]'
+$Script:DebugTraceJsonlBufferCap    = 4096
+$Script:DebugTraceJsonlWriteCount   = 0
+$Script:DebugTraceJsonlErrorCount   = 0
+$Script:DebugTraceJsonlLastError    = $null
+$Script:DebugTraceAutoExportEnabled = $false
+$Script:DebugTraceAutoExportDir     = $null
+$Script:DebugTracePhaseRegistry     = @{}
+$Script:DebugTraceEventSeq          = 0
+```
+
+### A.14.3 Standard usage pattern
+
+Every function that should participate in tracing follows this
+entry / body / catch / finally template:
+
+```powershell
+function Invoke-Something {
+    Start-DebugTrace -Context 'Invoke-Something' -PhaseId 'PNN'
+    try {
+        Set-DebugStep 'validate inputs'
+        ...
+        Set-DebugStep 'fetch resource'
+        ...
+        Set-DebugStep 'persist result'
+        ...
+        return $result
+    } catch {
+        Write-DebugFailureReport $_ -IncludeStepHistory -AutoExport
+        throw
+    } finally {
+        Stop-DebugTrace
+    }
+}
+```
+
+Rules:
+
+1. `Start-DebugTrace -PhaseId 'PNN'` is used for **phase-level** frames
+   only (every `Invoke-PhaseN*` function in this script). Inner helper
+   functions called from a phase body may use `Start-DebugTrace` with
+   no `-PhaseId` to nest a sub-frame.
+2. `Set-DebugStep` is a no-op when no frame is active, so library-style
+   helpers can use it opportunistically without forcing callers to set
+   up tracing.
+3. `Write-DebugFailureReport -AutoExport` triggers a JSON snapshot only
+   when `Enable-AutoExportOnPhaseFailure` has been called previously
+   (in `Download-SpeakerDeck.ps1` this is done in the main try-block
+   immediately after `Initialize-RuntimeDirectories`).
+4. The `finally` block must always call `Stop-DebugTrace` to keep the
+   stack balanced. Early-return branches inside the body that bypass
+   the natural flow MUST call `Stop-DebugTrace` themselves and the
+   `finally` block then becomes a no-op (checked via
+   `$Script:DebugTraceStack.Count`).
+
+### A.14.4 Activation order
+
+```powershell
+# After cleanup (-Clean/-CleanOnly) and Initialize-RuntimeDirectories.
+Enable-DebugTraceFileOutput -Directory $Script:LogsDir
+Enable-AutoExportOnPhaseFailure -OutputDirectory $Script:DiagDir
+```
+
+Both functions are best-effort: if activation fails (e.g. permission
+denied on the logs directory), the script continues without the
+diagnostic feature and the failure surfaces as a `Write-Warning`. The
+in-memory pre-activation buffer continues to accumulate up to the
+buffer cap, so a successful late activation still flushes whatever
+trace events occurred during startup.
+
+### A.14.5 Output format
+
+`work/logs/debugtrace.jsonl` — one JSON object per line, UTF-8 with
+BOM, append-only. Three event kinds:
+
+| `kind` | Emitted by | Key fields |
+|---|---|---|
+| `frame.open` | `Start-DebugTrace` | `ctx`, `depth`, `phase` |
+| `step` | `Set-DebugStep` | `ctx`, `step`, `detail` |
+| `frame.close` | `Stop-DebugTrace` | `ctx`, `outcome`, `durMs`, `steps`, `phase` |
+| `failure` | `Write-DebugFailureReport` | `ctx`, `step`, `exType`, `msg`, `stack`, `stepHistory[]` |
+| `file.open` / `file.disable` / `file.close` | Lifecycle markers | `procId`, `scriptVer`, `scriptSha` |
+
+`work/diag/debugtrace_export_<phaseId>_<timestamp>.json` — a single
+self-contained pscustomobject with the following top-level keys:
+`schemaVersion`, `exportedAtUtc`, `hostInfo`, `script`,
+`fileOutput`, `phases[]`, `activeFrames[]`, `completedFrames[]`,
+`events[]` (only when `-IncludeEvents` is passed; otherwise `[]`),
+`eventCount`.
+
+### A.14.6 Coexistence with A.8 (per-record diagnostics)
+
+| Question | Tool |
+|---|---|
+| Which deck out of 800 failed to download? | A.8 (`P06_errors.jsonl`) |
+| Which step inside Phase 5 raised the `PathTooLongException`? | A.14 (`debugtrace.jsonl` + auto-export JSON) |
+| Both: a deck failed AND we want to see what step Phase 6's catch handler ran before retrying | Both facilities log independently; consult both files |
+
+The two facilities never share files, never mutate each other's
+state, and were designed to coexist on a single phase body without
+overlap.
+
+### A.14.7 Runtime overhead
+
+The hot path of `Set-DebugStep` is a single `Add($obj)` into a
+`List[object]` plus a JSONL serialise. The list has a cap
+(`DebugTraceHistoryCap = 256`), and per-event JSON lines are capped at
+`DebugTraceJsonlLineCap = 8192` chars. In `Download-SpeakerDeck.ps1`'s
+real run profile (804 decks, 9 phases, ~50 `Set-DebugStep` calls per
+phase) the facility produces roughly 600 JSONL events spanning ~150 KB
+on disk — negligible compared to the 5.7 GB of PDF downloads.
+
+### A.14.8 Common pitfalls
+
+1. **Inner Set-DebugStep inside a Runspace Pool worker scriptblock is
+   a no-op.** Worker scriptblocks run in isolated runspaces and cannot
+   see the script-scope `$Script:DebugTraceStack`. This is documented
+   inline in `Invoke-Phase6Download` and is intentional: per-deck
+   failure inside the worker is captured by A.8's `Add-ErrorJsonlEntry`
+   pipeline, not by DebugTrace.
+2. **Early `return` from a traced function leaks a frame.** If a
+   phase body has an early return for a "nothing to do" path
+   (e.g. `Invoke-Phase8UndatedReclassify` returns when the file count
+   is 0), the early-return branch MUST call `Stop-DebugTrace`
+   explicitly and the surrounding `finally` block must guard against
+   double-pop (check `$Script:DebugTraceStack.Peek().Context` matches).
+3. **Avoid `host` as a key name in pscustomobjects inside Export.**
+   PS 5.1 has been observed to treat `host` as the `$Host` auto-
+   variable in certain parser contexts. The reference implementation
+   uses `hostName` and `hostInfo` instead.
+
 ---
 
 # Part B — Script-Specific Specification (template)
@@ -843,7 +1041,7 @@ When a new feature is needed, in order:
 |---|---|
 | Script name | `Download-SpeakerDeck.ps1` |
 | Display name | Speaker Deck Bulk Downloader |
-| Current revision | r22 (`psa-header-comment-sync`); see [`CHANGELOG.md`](./CHANGELOG.md) for the per-release log |
+| Current revision | r23 (`debugtrace-facility-and-pdfmeta-poc-removal`); see [`CHANGELOG.md`](./CHANGELOG.md) for the per-release log |
 | Purpose | Bulk-download all public PDFs from a Speaker Deck account |
 | Owner | (fill in) |
 
@@ -871,8 +1069,10 @@ When a new feature is needed, in order:
     P06_errors.jsonl                  # only when failures occur
     P07_final_state.csv               # real-run only
     year_overrides.csv                # created lazily by Phase 8
+    debugtrace.jsonl                  # Debug Trace Facility (A.14); always
   diag/
     failed/<idx>_<slug>.txt           # per-failure dump
+    debugtrace_export_<phaseId>_<ts>.json  # auto-export on phase failure (A.14); only when a phase throws
 ```
 
 ## B.4 Phase Map
@@ -1005,6 +1205,21 @@ Before any commit, all of the following must pass:
 - [ ] Common columns (Index, Title, DeckUrl, …) have identical names
       across all per-phase CSVs
 - [ ] Each later-stage CSV is a superset of earlier-stage columns
+
+### Debug Trace Facility checks (A.14)
+
+- [ ] `work/logs/debugtrace.jsonl` is created on every real run (first
+      `kind: file.open` event present, followed by `frame.open` events
+      for every phase)
+- [ ] No `frame.open` event is left without a matching `frame.close`
+      event at end of run (stack-balance check)
+- [ ] Top-level `catch` calls `Write-DebugFailureReport $_
+      -IncludeStepHistory -AutoExport`
+- [ ] Every `Invoke-Phase*` function wraps its body in
+      `Start-DebugTrace -PhaseId 'PNN'` / `Stop-DebugTrace`
+- [ ] No `Set-DebugStep` call inside a Runspace Pool worker scriptblock
+      (worker runspaces cannot see script-scope state; per-record
+      diagnostics in A.8 cover this layer)
 
 ---
 

@@ -28,6 +28,7 @@ This document consolidates everything needed to verify and evaluate
 - [5. Idempotency check (re-run behavior)](#5-idempotency-check-re-run-behavior)
 - [6. Discovered bugs and fix history](#6-discovered-bugs-and-fix-history)
 - [7. Outlook on CI/CD automation](#7-outlook-on-cicd-automation)
+- [8. Debug Trace Facility verification (r23+)](#8-debug-trace-facility-verification-r23)
 
 ---
 
@@ -35,9 +36,8 @@ This document consolidates everything needed to verify and evaluate
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` v3.3.0 on `Download-SpeakerDeck.ps1` (with project `.psa.config.json`) | **0 errors / 0 warnings / 0 info** ✓ | r21 build |
-| `psa.py` v3.3.0 on `Test-PdfMetadata.ps1` (with project `.psa.config.json`)     | **0 errors / 0 warnings / 0 info** ✓ | r21 build |
-| File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ both `.ps1` files | r21 build |
+| `psa.py` v3.3.0 on `Download-SpeakerDeck.ps1` (with project `.psa.config.json`) | **0 errors / 0 warnings / 0 info** ✓ | r23 build |
+| File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ for the script | r23 build |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ pass | 2026-05-11 |
 | Phase 2–5 (Scan / Plan) — DryRun mode | ✓ 804 decks evaluated | 2026-05-11 |
 | Phase 6 (Download) — real run | ✓ **804/804 success** (zero failures) | 2026-05-11 (r17) |
@@ -45,6 +45,8 @@ This document consolidates everything needed to verify and evaluate
 | Phase 8 (UndatedReclassify) — steady state on re-run | ✓ examined: 0 | 2026-05-11 (r17) |
 | Phase 9 (FinalReport) — output validated | ✓ year distribution + log files listed | 2026-05-11 (r17) |
 | Total elapsed (real run, ~5.7 GB, 804 files) | 10 min 4 s | 2026-05-11 (r17) |
+| Debug Trace Facility (A.14) — `debugtrace.jsonl` created on every run | _pending operator confirmation_ | r23 build (static checks only) |
+| Debug Trace Facility (A.14) — stack-balance: every `frame.open` has a matching `frame.close` | _pending operator confirmation_ | r23 build (static checks only) |
 
 ---
 
@@ -61,7 +63,6 @@ so the canonical invocation is from this script directory:
 ```bash
 cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
-python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 ```
 
 The local `.psa.config.json` disables `PSA6003` (plural function noun) for
@@ -71,12 +72,12 @@ this directory only. Rationale: three functions in `Download-SpeakerDeck.ps1`
 collections of resources. The exemption is documented inline in the config
 file. New code should still prefer singular nouns.
 
-Expected output (both scripts):
+Expected output:
 
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 4107
+Lines  : 5156
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
@@ -337,6 +338,10 @@ before running.
 | r18 | Folder layout integration with `ai-generated-artifacts` repo | Cosmetic | Update README + SPEC for repo placement |
 | r19 | Single account folder couldn't host multiple targets | Cosmetic | Add `-<account>` suffix to folder name |
 | r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md (psa.py later promoted to `scripts/python/powershell-static-analyzer/` as the repository-wide canonical location) |
+| r21 | Inline `# rNN:` / "before r13" prose references accumulated in the source, conflicting with the repo-wide revision-history policy | Cosmetic | Strip all per-revision inline comments; centralise per-release history in `CHANGELOG.md`; enable `PSAP0003` / `PSAP0004` to fail any future regression |
+| r22 | Script header comment still referred to `psa.py v3.1.0 (28-rule check set)` after upstream had moved to v3.3.0 (36-rule) | Cosmetic | Sync the in-script reference to v3.3.0 (`PSA1001..PSA9002` plus opt-in `PSAP0001..PSAP0004`) |
+| **r23** | **No operation-level diagnostic existed for failures that are NOT per-deck** (e.g. structural exceptions in Phase 5 filename planning, CSV writes); per-deck `P06_errors.jsonl` could not localise such failures to a step inside the function body | **Medium** | **Port the Debug Trace Facility (Section 1b, ~700 lines) from `usui-tk/Deploy-Drivers-For-WindowsServer` Chipset r60 / BthPan r10; instrument every phase function with `Start-DebugTrace -PhaseId 'PNN'` / `Set-DebugStep` / `Stop-DebugTrace`; activate `Enable-DebugTraceFileOutput` + `Enable-AutoExportOnPhaseFailure` from the main try-block. See SPEC.md A.14** |
+| r23 | The standalone PDF-metadata PoC (`Test-PdfMetadata.ps1`) outlived its purpose — the same logic now runs in every real Phase 8 invocation | Cosmetic | Delete the PoC; remove all documentation references in the same revision |
 
 See [SPEC.md](./SPEC.md) Part D for the formalized "Known Pitfalls" entries
 that bake each of these fixes into the project's institutional memory.
@@ -364,10 +369,6 @@ jobs:
         run: |
           cd scripts/powershell/download-speakerdeck-oracle4engineer
           python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
-      - name: Static-analyze PoC script
-        run: |
-          cd scripts/powershell/download-speakerdeck-oracle4engineer
-          python3 ../../python/powershell-static-analyzer/psa.py Test-PdfMetadata.ps1
 ```
 
 A Windows-side functional CI job is **not** currently planned because:
@@ -383,6 +384,113 @@ For local verification, the recommended cadence is:
 2. **Every PR** — `-DryRun` on the operator's workstation (~9 minutes)
 3. **Before tagging a release** — full real run on a clean environment
    (`-Clean`) and capture the Phase Timing Summary into TESTING.md (this file)
+
+---
+
+## 8. Debug Trace Facility verification (r23+)
+
+This section describes the recommended verification procedure for the
+Debug Trace Facility introduced in r23 (see [SPEC.md A.14](./SPEC.md#a14-debug-trace-facility)
+for the authoritative specification).
+
+The DebugTrace facility is **best-effort by design**: a failure to
+activate it must not break the script. The verification checks below
+distinguish (a) "the facility works as designed" from (b) "the script
+keeps running even when the facility is degraded".
+
+### 8.1 Smoke test — happy path
+
+After any real run (e.g. the `-DryRun` cadence in §2 or the full run
+in §3), confirm:
+
+```powershell
+# 1. The JSONL file exists.
+Test-Path .\work\logs\debugtrace.jsonl
+# Expected: True
+
+# 2. The first event is 'file.open'.
+Get-Content .\work\logs\debugtrace.jsonl -First 1 | ConvertFrom-Json |
+    Select-Object kind, scriptVer
+# Expected: kind=file.open, scriptVer=speakerdeck-2026.05.18-r23 (or later)
+
+# 3. Stack balance: open count == close count.
+$events = Get-Content .\work\logs\debugtrace.jsonl |
+    ForEach-Object { $_ | ConvertFrom-Json }
+$open  = ($events | Where-Object { $_.kind -eq 'frame.open'  }).Count
+$close = ($events | Where-Object { $_.kind -eq 'frame.close' }).Count
+"Open: $open / Close: $close (delta=$($open - $close))"
+# Expected: delta=0 (perfect balance) for a successful run
+
+# 4. Every phase produced at least one frame.
+$events | Where-Object { $_.kind -eq 'frame.open' -and $_.phase } |
+    Group-Object phase | Sort-Object Name | Select-Object Name, Count
+# Expected: one entry for each of P01..P08 (P09 is a banner, not a
+# traced phase). The counts depend on whether DryRun / -SkipEnvCheck
+# are in effect.
+```
+
+### 8.2 Auto-export verification — failure path
+
+To verify the auto-export-on-failure path WITHOUT inducing a real
+failure on the production target:
+
+```powershell
+# Run with an intentionally invalid account name to force a Phase 2
+# failure (Speaker Deck returns 0 decks).
+.\Download-SpeakerDeck.ps1 -Account 'this-account-does-not-exist-xyz' -DryRun
+```
+
+Expected outcome:
+
+1. The console shows a `[X]` failure marker inside Phase 2.
+2. The top-level catch handler emits the
+   `<context>: FAILED at step '...'` block.
+3. A new JSON file appears under `.\work\diag\` named
+   `debugtrace_export_P02_<timestamp>.json`.
+4. The JSON file is valid and contains a `phases[]` array with an
+   entry whose `outcome` field is `failure`.
+
+```powershell
+$snap = Get-Content .\work\diag\debugtrace_export_P02_*.json -Raw |
+    ConvertFrom-Json
+$snap.phases | Where-Object outcome -eq 'failure'
+# Expected: phaseId=P02 (or whichever phase failed first)
+```
+
+### 8.3 Stack-balance check (always required for releases)
+
+Before tagging any release, run the smoke test in §8.1 against a real
+run and confirm `delta=0`. A nonzero delta indicates either:
+
+- An early-return branch leaks a frame (matches the pitfall in
+  SPEC.md A.14.8 point 2), OR
+- A `finally` block was skipped due to a process crash (host
+  termination, not a normal exception).
+
+Both cases warrant investigation before the release.
+
+### 8.4 Coexistence check (A.8 / A.14)
+
+After a run where at least one Phase 6 download failed (induce with a
+network outage, or use a known-stale account), confirm:
+
+```powershell
+# A.8 produced its per-deck records
+Test-Path .\work\logs\P06_errors.jsonl       # Expected: True
+Test-Path .\work\diag\failed                 # Expected: True (folder)
+
+# A.14 produced its operation-level stream
+Test-Path .\work\logs\debugtrace.jsonl       # Expected: True
+
+# No auto-export should appear unless the OUTER phase function itself
+# threw. Per-deck worker failures alone do NOT trigger auto-export.
+Get-ChildItem .\work\diag\debugtrace_export_*.json -ErrorAction SilentlyContinue
+# Expected: nothing, unless a phase-level exception escaped
+```
+
+This confirms the two facilities are functioning independently without
+overlap, which is the design contract documented in SPEC.md A.8 and
+A.14.6.
 
 ---
 

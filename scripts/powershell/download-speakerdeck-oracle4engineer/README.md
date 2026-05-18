@@ -54,7 +54,6 @@ the Disclaimer above and in the LICENSE file.
 ```
 scripts/powershell/download-speakerdeck-oracle4engineer/
   Download-SpeakerDeck.ps1     # Main script (this README documents it)
-  Test-PdfMetadata.ps1         # Read-only PoC for the Phase 8 PDF metadata path
   README.md / README.ja.md     # End-user documentation (you are reading these)
   SPEC.md (English only)         # Developer / LLM specification (see "Developer specification" below)
   TESTING.md (English only)   # Verification procedure and real-run results
@@ -319,8 +318,10 @@ etc.) so that alphabetical sorting matches pipeline execution order.
 * `<WorkDir>\logs\P06_errors.jsonl`                     - Phase 6 structured (JSONL) failure log, one line per failed download
 * `<WorkDir>\logs\P07_final_state.csv`                  - Phase 7 reconciliation: plan vs download log vs disk inventory, with Discrepancy flag per row (real-run only)
 * `<WorkDir>\logs\year_overrides.csv`                   - Phase 8 PDF-metadata rescue history; consulted at priority 0 by next run's Phase 5 (created lazily on first successful rescue)
+* `<WorkDir>\logs\debugtrace.jsonl`                     - **Debug Trace Facility**: real-time JSONL stream of frame.open / step / frame.close events (always; see "Debug tracing" section below)
 * `<WorkDir>\diag\speakerdeck_diag_<account>_*.html`    - raw HTML dump when Phase 2 detects 0 decks
 * `<WorkDir>\diag\failed\<index>_<slug>.txt`            - detailed per-failure diagnostic dump (HTTP status, headers, body preview, stack trace, attempt history)
+* `<WorkDir>\diag\debugtrace_export_<phaseId>_<ts>.json` - **Debug Trace Facility**: auto-exported JSON snapshot when a phase throws (only when an unhandled exception escapes; see "Debug tracing" section below)
 
 ### CSV column conventions
 
@@ -464,6 +465,87 @@ Both switches delete `<OutputDir>` and `<WorkDir>` recursively. Safety
 checks refuse to operate if either path equals the script's own
 directory, equals a drive root, or contains the script.
 
+## Debug tracing
+
+The script ships with a **Debug Trace Facility** that records per-step
+checkpoints inside every phase. Two products are emitted:
+
+| Output | When | Purpose |
+|---|---|---|
+| `work\logs\debugtrace.jsonl` | Always (every real run) | Real-time JSONL stream of every phase entry, named step, and phase exit. Append-only, UTF-8 with BOM. |
+| `work\diag\debugtrace_export_<phaseId>_<timestamp>.json` | Only when a phase throws | Auto-exported point-in-time snapshot. Self-contained: includes active stack, completed frames, per-phase outcomes, and host metadata. |
+
+Activation is automatic at script startup right after the work
+directory is created. You should see a one-line confirmation on stdout:
+
+```
+[*] Debug trace -> D:\OC\work\logs\debugtrace.jsonl
+```
+
+### When this helps
+
+The per-deck Phase 6 failure log (`P06_errors.jsonl`) answers "which
+deck failed". The Debug Trace Facility answers a different question:
+"which named step inside this function was running when the exception
+was raised". It is most useful for diagnosing failures that are NOT
+per-deck — e.g. a `PathTooLongException` during filename planning, an
+unexpected `System.IO.IOException` while writing a CSV, or a regex
+parse failure in Phase 4 evaluation.
+
+### Inspecting `debugtrace.jsonl`
+
+Each line is a self-contained JSON object. Useful one-liners:
+
+```powershell
+# Count events by kind
+Get-Content .\work\logs\debugtrace.jsonl |
+    ForEach-Object { $_ | ConvertFrom-Json } |
+    Group-Object kind | Sort-Object Count -Descending
+
+# Show every step that ran inside Phase 5
+Get-Content .\work\logs\debugtrace.jsonl |
+    ForEach-Object { $_ | ConvertFrom-Json } |
+    Where-Object { $_.kind -eq 'step' -and $_.ctx -eq 'Invoke-Phase5FilenamePlan' } |
+    Select-Object ts, step
+
+# Show every failure event with stack
+Get-Content .\work\logs\debugtrace.jsonl |
+    ForEach-Object { $_ | ConvertFrom-Json } |
+    Where-Object { $_.kind -eq 'failure' } |
+    Format-List ts, ctx, step, exType, msg, stack
+```
+
+### Inspecting an auto-exported snapshot
+
+When a phase throws, the script's top-level catch handler writes a
+single self-contained JSON file under `work\diag\`. The file is named
+`debugtrace_export_<phaseId>_<YYYYMMDD-HHmmss>.json` and contains:
+
+| Key | Meaning |
+|---|---|
+| `script.version` / `script.tag` / `script.sha256` | Which build was running |
+| `hostInfo` | PS version, edition, CLR, OS, culture, host name |
+| `phases[]` | Per-phase outcome + failure ref if any |
+| `activeFrames[]` | Functions still on the trace stack at the moment of failure |
+| `completedFrames[]` | History of finished frames, with per-step timing |
+| `events[]` | Empty by default; populated when `-IncludeEvents` is passed to `Export-DebugTraceJson` manually |
+
+Attach this single file to a bug report and the maintainer has the full
+context for the failure without needing the much larger
+`debugtrace.jsonl`.
+
+### Disabling the facility
+
+The facility cannot be disabled from the command line because its
+overhead is negligible (~150 KB of JSONL for an 800-deck run, no
+network traffic). It is best-effort: if file activation fails (e.g.
+disk full, permission denied), the script warns and continues without
+the trace file. Trace events stay buffered in memory and remain
+exportable via `Export-DebugTraceJson` from a debugger if needed.
+
+For the full specification (event schemas, module-level state, public
+API), see [SPEC.md A.14](SPEC.md#a14-debug-trace-facility).
+
 ---
 
 ## Developer specification
@@ -556,7 +638,7 @@ are intentional carry `# psa-disable-line PSA3004 -- <reason>` directives.
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 4107
+Lines  : 5156
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
@@ -588,13 +670,13 @@ Phase boundaries are marked with magenta banners:
 
 ```
 ========================================================================
- PHASE P01  - ListCollection         (Scan   ) start: 13:04:15
- script: vspeakerdeck-2026.05.10-r05/abc123def456
+ PHASE P03  - ListCollection         (Scan   ) start: 13:04:15
+ script: vspeakerdeck-2026.05.18-r23/abc123def456
 ========================================================================
 [13:04:15] [+0.00s]      [*] Fetching page 1: https://speakerdeck.com/...
 [13:04:16] [+0.85s]      [*] page 1: +18 decks (cumulative 18)
 ...
- PHASE P01  -> DONE     elapsed: 1m12.3s
+ PHASE P03  -> DONE     elapsed: 1m12.3s
 ```
 
 A timing summary is printed at the end of every run:
