@@ -1069,9 +1069,9 @@ top-level structure:
       "tool": {
         "driver": {
           "name": "psa.py",
-          "version": "3.1.0",
+          "version": "3.3.0",
           "informationUri": "...",
-          "rules": [ /* 28 rule descriptors */ ]
+          "rules": [ /* 36 rule descriptors */ ]
         }
       },
       "results": [ /* one entry per issue */ ],
