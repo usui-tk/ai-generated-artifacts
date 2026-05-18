@@ -132,7 +132,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.5.0'
+__version__ = '3.5.1'
 
 
 def _verify_version_file_consistency():
@@ -1138,21 +1138,58 @@ def check_broken_hash(clean):
     return out
 
 
-def check_hardcoded_computername(clean):
-    """PSA5004: -ComputerName "literal string" (not $var)."""
+def check_hardcoded_computername(text, clean):
+    """PSA5004: -ComputerName "literal string" (not $var).
+
+    This rule is unusual in that it must inspect the VALUE inside a
+    string literal — and `strip_strings_and_comments()` collapses
+    every string literal to whitespace. We therefore take BOTH the
+    raw *text* (so the literal value is visible to the regex) and the
+    *clean* form (so we can confirm the `-ComputerName` keyword
+    itself is appearing as actual code, not inside a comment or an
+    outer string literal that happened to contain the substring
+    `-ComputerName "server01"`).
+
+    The position-based check is reliable because
+    `strip_strings_and_comments()` preserves character positions
+    one-to-one — code-position bareword tokens like `-ComputerName`
+    survive the stripper intact, while the same characters inside a
+    comment or string are replaced by spaces. Comparing the same
+    span in *clean* is therefore a sound "is this in code?" test.
+
+    Two-argument signature follows the existing pattern used by
+    `check_balance(text, clean, ...)` and `check_undefined_vars(
+    text, clean)`.
+    """
     pat = re.compile(
         r'-ComputerName\s+(?:"([^"]+)"|\'([^\']+)\')',
         re.IGNORECASE)
     out = []
-    for ln, line in enumerate(clean.split('\n'), 1):
+    text_lines = text.split('\n')
+    clean_lines = clean.split('\n')
+    n_clean = len(clean_lines)
+    for ln_no, line in enumerate(text_lines, start=1):
+        clean_line = clean_lines[ln_no - 1] if ln_no - 1 < n_clean else ''
         for m in pat.finditer(line):
+            # The match spans both the `-ComputerName` keyword and the
+            # quoted literal. The keyword itself sits at the start of
+            # the match. Confirm that the SAME span in *clean* still
+            # contains `-ComputerName` (case-insensitively) — if the
+            # stripper has blanked it, the whole match was inside a
+            # comment or an outer string literal and must be ignored.
+            kw_len = len('-ComputerName')
+            kw_start = m.start()
+            kw_end = kw_start + kw_len
+            kw_in_clean = clean_line[kw_start:kw_end]
+            if kw_in_clean.strip().lower() != '-computername':
+                continue
             host = m.group(1) or m.group(2)
-            # localhost / . are common legitimate uses
+            # localhost / . / 127.0.0.1 are common legitimate uses
             if host.lower() in ('localhost', '.', '127.0.0.1'):
                 continue
             out.append({
                 'severity': 'warning', 'code': 'PSA5004',
-                'line': ln, 'col': m.start() + 1,
+                'line': ln_no, 'col': m.start() + 1,
                 'message': (f'hardcoded ComputerName "{host}"; '
                             'pass via parameter'),
             })
@@ -2787,7 +2824,7 @@ def analyze_text(text, cfg, file_meta=None):
     if cfg.enabled['PSA5003']:
         raw += check_broken_hash(clean)
     if cfg.enabled['PSA5004']:
-        raw += check_hardcoded_computername(clean)
+        raw += check_hardcoded_computername(text, clean)
 
     if cfg.enabled['PSA6001']:
         raw += check_approved_verb(clean)

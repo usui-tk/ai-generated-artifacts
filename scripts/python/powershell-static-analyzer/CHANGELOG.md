@@ -17,6 +17,67 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 _No unreleased changes at this time._
 
+## [3.5.1] — 2026-05-19
+
+### Fixed
+
+- **`PSA5004` (Hardcoded `ComputerName`) now actually fires.** The
+  rule's regular expression matches the pattern `-ComputerName
+  "literal"` (or single-quoted), but `analyze_text()` was passing
+  it the output of `strip_strings_and_comments()` — where every
+  string literal is collapsed to whitespace — so the rule could
+  never observe its intended trigger. The function was changed to
+  accept BOTH the raw `text` and the stripped `clean` form
+  (matching the existing two-argument pattern used by
+  `check_balance(text, clean, ...)` and other rules):
+
+   - The regex now scans the raw `text`, so the string literal is
+     visible and its host value can be reported.
+   - The matched span is then validated against the same range in
+     `clean`: the bareword `-ComputerName` survives the stripper
+     when it appears as actual code, but is blanked when it
+     appears inside a comment or another string literal. This
+     position-based cross-check (sound because
+     `strip_strings_and_comments()` preserves character positions
+     one-to-one) correctly suppresses three classes of false
+     positives:
+
+      - `# Invoke-Command -ComputerName "server01"` (in comments)
+      - `$cmd = "Invoke-Command -ComputerName \"server01\""` (in
+        outer string literals)
+      - `$msg = "Use -ComputerName 'foo' carefully"` (in any other
+        string literal that happens to contain the keyword)
+
+  The whitelisted hosts (`localhost`, `.`, `127.0.0.1`) and the
+  variable-argument negative case (`-ComputerName $target`)
+  continue to be silent. SPEC.md §4.21 already specified this
+  behaviour; the implementation was lagging.
+
+- `test_psa_rules.py` PSA5004 coverage was expanded from the
+  3.5.0 baseline-locking pair (which pinned the buggy
+  non-firing behaviour) to 10 cases that exercise positive
+  detection, the three whitelist values, both quote styles,
+  case-insensitive matching, and the three false-positive
+  defences listed above.
+
+### Notes — verification
+
+- All four `Deploy-Drivers-For-WindowsServer` pipeline scripts
+  (Chipset / Graphics / NPU / MSBthPan) remain at the 0 / 0 / 0
+  baseline under `psa.py 3.5.1`, both with the
+  repository-shipped `.psa.config.json` and under `--include
+  PSA5004` (which forces PSA5004 even though it is on by
+  default). Manually re-verified: none of the four scripts
+  contains a hardcoded `-ComputerName` literal in code paths.
+
+- The three self-quality gates (`test_psa_rules.py`,
+  `--self-check`, `--config-check`) all exit `0` on the 3.5.1
+  mainline tree. The Pillar 1 suite runs 104 test cases at this
+  baseline (96 per-rule + 3 PSA8001 cross-file + 5 CLI
+  self-quality, an increase of 8 from the 3.5.0 baseline of 96
+  total — entirely the new PSA5004 positive / whitelist / edge
+  fixtures).
+
 ## [3.5.0] — 2026-05-19
 
 ### Added
@@ -97,7 +158,8 @@ _No unreleased changes at this time._
   `Deploy-Drivers-For-WindowsServer` sister-repository scripts:
   none of the four pipeline scripts contains a hardcoded
   `-ComputerName` literal. Fixing the rule is tracked separately
-  and will land in a future release.
+  and will land in a future release. **(Update: fixed in 3.5.1 —
+  see the entry above.)**
 
 ## [3.4.0] — 2026-05-19
 

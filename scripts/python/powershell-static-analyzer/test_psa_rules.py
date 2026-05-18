@@ -377,21 +377,39 @@ t('PSA5003 negative: -Algorithm SHA256',
 # PSA5004 — Hardcoded ComputerName (warning, default ON)
 # ---------------------------------------------------------------------------
 
-t('PSA5004 baseline: string-literal -ComputerName is currently NOT '
-  'flagged by analyze_text (regex sees post-strip text)',
-  'PSA5004', 'Invoke-Command -ComputerName "server01"\n', 0)
-# Note: check_hardcoded_computername has a regex that expects to see
-# a quoted string literal, but analyze_text passes it the
-# strip_strings_and_comments() output where every string is collapsed
-# to whitespace. The rule therefore cannot fire on the most common
-# pattern. This test pins the current behaviour so a future fix to
-# psa.py will be flagged as a behaviour change rather than a silent
-# regression. The four pipeline scripts in the sister repository do
-# not contain hardcoded -ComputerName literals, so this gap has not
-# affected the 0/0/0 baseline.
+t('PSA5004 positive: hardcoded -ComputerName "literal"',
+  'PSA5004', 'Invoke-Command -ComputerName "server01"\n', 1)
+
+t('PSA5004 positive: hardcoded -ComputerName \'literal\' (single-quoted)',
+  'PSA5004', "Invoke-Command -ComputerName 'server01'\n", 1)
+
+t('PSA5004 positive: case-insensitive (-computername)',
+  'PSA5004', 'Invoke-Command -computername "server01"\n', 1)
 
 t('PSA5004 negative: -ComputerName from variable',
   'PSA5004', 'Invoke-Command -ComputerName $target\n', 0)
+
+t('PSA5004 whitelist: localhost is allowed',
+  'PSA5004', 'Invoke-Command -ComputerName "localhost"\n', 0)
+
+t('PSA5004 whitelist: . (current host) is allowed',
+  'PSA5004', 'Invoke-Command -ComputerName "."\n', 0)
+
+t('PSA5004 whitelist: 127.0.0.1 is allowed',
+  'PSA5004', 'Invoke-Command -ComputerName "127.0.0.1"\n', 0)
+
+t('PSA5004 edge: -ComputerName inside a comment is not flagged',
+  'PSA5004', '# Invoke-Command -ComputerName "server01"\n', 0)
+
+t('PSA5004 edge: -ComputerName inside an outer string literal',
+  'PSA5004',
+  '$cmd = "Invoke-Command -ComputerName \\"server01\\""\n',
+  0)
+
+t('PSA5004 edge: trailing comment after a hardcoded value',
+  'PSA5004',
+  'Invoke-Command -ComputerName "server01"  # legitimate fix-it\n',
+  1)
 
 
 # ---------------------------------------------------------------------------
