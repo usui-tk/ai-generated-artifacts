@@ -534,7 +534,8 @@ This SPEC must include:
 3. bash -n build-ol-aws-ami.sh                  ← syntax gate: must pass
 4. shellcheck --severity=warning ...            ← lint gate: must have 0 warnings
 5. Re-run the affected phase against AWS        ← functional gate
-6. Update README (en + ja) and SPEC (en + ja) if behavior or contract changed
+6. Update README.md + README.ja.md if behavior or contract changed
+   (per A.10, only the README is bilingual; SPEC.md is English only).
 7. Commit
 ```
 
