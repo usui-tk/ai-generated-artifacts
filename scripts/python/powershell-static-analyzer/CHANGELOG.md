@@ -244,7 +244,7 @@ The capability snapshot at the 2.0.0 release time covered:
 
 | Area               | At 2.0.0                                     |
 |:-------------------|:---------------------------------------------|
-| Rule codes         | `PSA1001`–`PSA9002` (27 rules total)         |
+| Rule codes         | `PSA1001`–`PSA6006` (27 rules total)         |
 | Output formats     | Text / JSON / SARIF 2.1.0                    |
 | Suppression        | `# psa-disable-line`, `next-line`, `file`    |
 | Configuration      | `.psa.config.json` + CLI                     |
@@ -254,11 +254,12 @@ The capability snapshot at the 2.0.0 release time covered:
 
 The rule taxonomy established here (PSA1xxx for structural,
 PSA2xxx for variable, PSA3xxx for command, PSA4xxx for comment,
-PSA5xxx for security, PSA6xxx for style, PSA9xxx for complexity) has
-remained stable since 2.0.0. The `PSA7xxx` (file format / encoding)
-and `PSA8xxx` (cross-file consistency) categories, and the `PSAPxxxx`
-family (project / pipeline convention), were added in later 3.x
-releases.
+PSA5xxx for security, PSA6xxx for style) has remained stable since
+2.0.0. The `PSA7xxx` (file format / encoding) category was added in
+3.1.0, `PSA8xxx` (cross-file consistency) and `PSA9xxx` (complexity
+metrics) in 3.2.0, and the `PSAPxxxx` family (project / pipeline
+convention) was started in 3.2.0 (PSAP0001 / PSAP0002) and extended
+in 3.3.0 (PSAP0003 / PSAP0004).
 
 ## [Pre-2.0.0]
 

@@ -33,7 +33,7 @@
   - [A.9 CSV / JSONL Column Conventions](#a9-csv--jsonl-column-conventions)
   - [A.10 Environment Evaluation (Phase 1)](#a10-environment-evaluation-phase-1)
   - [A.11 Static Analysis with psa.py](#a11-static-analysis-with-psapy)
-  - [A.12 Bilingual Documentation](#a12-bilingual-documentation)
+  - [A.12 Documentation Language Policy](#a12-documentation-language-policy)
   - [A.13 Development Workflow](#a13-development-workflow)
 - [Part B — Script-Specific Specification (template)](#part-b--script-specific-specification-template)
 - [Part C — Quality Gates & Validation Checklist](#part-c--quality-gates--validation-checklist)
@@ -843,7 +843,7 @@ When a new feature is needed, in order:
 |---|---|
 | Script name | `Download-SpeakerDeck.ps1` |
 | Display name | Speaker Deck Bulk Downloader |
-| Current revision | r21 (`changelog-md-policy-cleanup`); see [`CHANGELOG.md`](./CHANGELOG.md) for the per-release log |
+| Current revision | r22 (`psa-header-comment-sync`); see [`CHANGELOG.md`](./CHANGELOG.md) for the per-release log |
 | Purpose | Bulk-download all public PDFs from a Speaker Deck account |
 | Owner | (fill in) |
 

@@ -136,7 +136,7 @@ scripts/<language>/<project-name>/
 
 | Part | Purpose | 目的 |
 |:---:|:---|:---|
-| **Part A** — Common Specification | Cross-project conventions inherited by every script in this style: source-file format, phase / pipeline architecture, log markers, parameter conventions, error & diagnostic format, bilingual-doc rules, development workflow | 全スクリプトで継承する共通規約: ソースファイル形式、フェーズ／パイプライン構成、ログマーカー、パラメーター規約、エラー・診断フォーマット、バイリンガル文書規約、開発ワークフロー |
+| **Part A** — Common Specification | Cross-project conventions inherited by every script in this style: source-file format, phase / pipeline architecture, log markers, parameter conventions, error & diagnostic format, documentation language policy, development workflow | 全スクリプトで継承する共通規約: ソースファイル形式、フェーズ／パイプライン構成、ログマーカー、パラメーター規約、エラー・診断フォーマット、ドキュメント言語ポリシー、開発ワークフロー |
 | **Part B** — Script-Specific Specification | This particular script's unique processing logic: identification, inputs / outputs, phase map, script-specific algorithms, project-specific architecture | 当該スクリプト固有の処理ロジック: 識別情報、入出力、フェーズマップ、固有アルゴリズム、プロジェクト固有のアーキテクチャ |
 | **Part C** — Quality Gates & Validation Checklist | Pre-commit checklist: static checks, functional checks, documentation checks, cross-file / cross-template checks | コミット前チェックリスト: 静的チェック、機能チェック、ドキュメントチェック、ファイル間・テンプレート間チェック |
 | **Part D** — Known Pitfalls & Lessons Learned | Documented bugs from past revisions, root causes, and the fix that future revisions must inherit. Each entry uses a stable `D.NN` identifier so it can be cross-referenced from code comments or other docs | 過去リビジョンで実際に発生したバグ、根本原因、将来リビジョンが継承すべき修正の記録。各エントリは `D.NN` の安定 ID を持ち、コードコメントや他文書から相互参照可能 |

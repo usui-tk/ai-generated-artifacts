@@ -18,7 +18,8 @@
       - TLS 1.2 capable runtime (the script forces TLS 1.2)
       - Optional: registry "LongPathsEnabled" = 1 for paths > 260 chars
       - Optional: python3 + scripts/python/powershell-static-analyzer/psa.py
-        (v3.1.0, 28-rule check set PSA1001..PSA7001) for static analysis
+        (v3.3.0, 36-rule check set PSA1001..PSA9002 plus opt-in
+        PSAP0001..PSAP0004) for static analysis
 
     Known limitations:
       - Speaker Deck only (not designed for SlideShare or other sites)
@@ -325,8 +326,8 @@ function Initialize-RuntimeDirectories {
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'speakerdeck-2026.05.18-r21'
-$Script:ScriptTag     = 'changelog-md-policy-cleanup'
+$Script:ScriptVersion = 'speakerdeck-2026.05.18-r22'
+$Script:ScriptTag     = 'psa-header-comment-sync'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath

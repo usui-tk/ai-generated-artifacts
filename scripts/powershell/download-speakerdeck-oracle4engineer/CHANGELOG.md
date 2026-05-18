@@ -16,6 +16,23 @@ This CHANGELOG is **English only** per the
 
 _No unreleased changes at this time._
 
+## [r22] — 2026-05-18 — `psa-header-comment-sync`
+
+### Changed
+
+- Script header comment block updated to reflect current static-analysis
+  toolchain: `psa.py` v3.3.0 (36-rule check set `PSA1001..PSA9002` plus
+  opt-in `PSAP0001..PSAP0004`), replacing the previous stale reference
+  to `v3.1.0 (28-rule check set PSA1001..PSA7001)`.
+- `$Script:ScriptVersion` bumped to `speakerdeck-2026.05.18-r22`,
+  `$Script:ScriptTag` set to `psa-header-comment-sync`.
+
+### Notes
+
+- This release contains no functional changes; behaviour is identical
+  to r21. It is a pure documentation cleanup release synchronising the
+  in-script reference to the current `psa.py` toolchain.
+
 ## [r21] — 2026-05-18 — `changelog-md-policy-cleanup`
 
 ### Changed
@@ -66,5 +83,6 @@ repository.
 ---
 
 [Unreleased]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
+[r22]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
 [r21]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
 [r20]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer

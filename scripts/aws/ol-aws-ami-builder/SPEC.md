@@ -36,7 +36,7 @@
   - [A.7 Env Property File Conventions](#a7-env-property-file-conventions)
   - [A.8 Oracle Linux Version Auto-detection](#a8-oracle-linux-version-auto-detection)
   - [A.9 Error & Diagnostic Conventions](#a9-error--diagnostic-conventions)
-  - [A.10 Bilingual Documentation](#a10-bilingual-documentation)
+  - [A.10 Documentation Language Policy](#a10-documentation-language-policy)
   - [A.11 Development Workflow](#a11-development-workflow)
 - [Part B — Script-specific Specifications](#part-b--script-specific-specifications)
   - [B.1 build-ol-aws-ami.sh](#b1-build-ol-aws-amish)
