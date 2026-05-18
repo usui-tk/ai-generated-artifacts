@@ -411,24 +411,23 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 ## 開発者向け仕様
 
-このスクリプトを拡張したい、フェーズ構成を変更したい、または同系統のスクリプトを新規に作成したい場合は、まず **[`SPEC.md`](SPEC.md) (English only)**（英語版は [SPEC.md](SPEC.md)）を読んでください。SPEC では以下を体系化しています：
+このスクリプトを拡張したい、 フェーズ構成を変更したい、 または同系統のスクリプトを新規に作成したい場合は、 まず **[`SPEC.md`](SPEC.md)** を読んでください。 リポジトリ共通のドキュメント言語ポリシーにより、 SPEC は英語のみで維持されています。 SPEC では以下を体系化しています：
 
-- **Part A（共通仕様）** — このファミリーのすべてのスクリプトが継承する規約：ソースファイル形式（UTF-8 BOM + ASCII のみ）、フェーズアーキテクチャ、ログマーカー、`-LiteralPath` ルール、CSV カラム規約、環境診断、静的解析ゲート、バイリンガルドキュメント要件
-- **Part B（スクリプト固有仕様）** — このスクリプト固有のフェーズマップ、年フォルダ規則、PDF メタデータ事後分類の詳細（Phase 8）、適応的ダウンロード設定、失敗回復
+- **Part A（共通仕様）** — このファミリーのすべてのスクリプトが継承する規約：ソースファイル形式（UTF-8 BOM + ASCII のみ）、 フェーズアーキテクチャ、 ログマーカー、 `-LiteralPath` ルール、 CSV カラム規約、 環境診断、 静的解析ゲート、 ドキュメント言語ポリシー
+- **Part B（スクリプト固有仕様）** — このスクリプト固有のフェーズマップ、 年フォルダ規則、 PDF メタデータ事後分類の詳細（Phase 8）、 適応的ダウンロード設定、 失敗回復
 - **Part C（品質ゲート）** — すべてのコミット前に満たすべきチェックリスト
-- **Part D（既知の落とし穴）** — 過去のリビジョンで文書化したバグ：PowerShell のパスにおける `[ ]` ワイルドカード問題（r10, r17）、フェーズ番号振り直しの安全性（r16）など
+- **Part D（既知の落とし穴）** — 文書化された過去のバグとその修正：PowerShell パスでの `[ ]` ワイルドカード問題、 フェーズ番号振り直しの安全性など
 
-実際の検証結果（DryRun、本番実行出力、冪等性チェック、r17 のリグレッション修正証跡）については **[`TESTING.md`](TESTING.md) (English only)**（英語版は [TESTING.md](TESTING.md)）を参照してください。直近の本番実行成功結果（`804/804 デッキ、失敗ゼロ、合計 10 分 4.4 秒、5.7 GB`）が記録されています。
+リリース毎の変更履歴は **[`CHANGELOG.md`](CHANGELOG.md)** ([Keep a Changelog 1.1.0](https://keepachangelog.com/ja/1.1.0/) 形式) を参照してください。 リポジトリ共通のドキュメント言語ポリシーにより英語のみで維持されています。
 
-`psa.py` 静的解析ツールの詳細（v3.1.0、28 ルール体系 `PSA1001`〜`PSA7001` + CI 連携）は
-[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-（英語版は [SPEC.md](../../python/powershell-static-analyzer/SPEC.md)）、
-または同ディレクトリの
-[`README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
-（英語版は [README.md](../../python/powershell-static-analyzer/README.md)）
-を参照してください。
+実際の検証結果（DryRun、 本番実行出力、 冪等性チェック、 リグレッション修正証跡）については **[`TESTING.md`](TESTING.md)** を参照してください。 直近の本番実行成功結果（`804/804 デッキ、 失敗ゼロ、 合計 10 分 4.4 秒、 5.7 GB`）が記録されています。
 
-**新規開発における最重要ルール**：フェーズヘッダー、ログマーカー、psa.py を一から再導出しないこと。既存実装からコピーすること。**発明より再利用**。
+`psa.py` 静的解析ツール（v3.3.0、 `PSA1001`〜`PSA9002` + opt-in 規約ルール `PSAP0001`〜`PSAP0004`）の詳細は
+[`../../python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
+（英語版は [README.md](../../python/powershell-static-analyzer/README.md)）、
+または完全な仕様書 [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) を参照してください。
+
+**新規開発における最重要ルール**：フェーズヘッダー、 ログマーカー、 psa.py を一から再導出しないこと。 既存実装からコピーすること。 **発明より再利用**。
 
 ---
 

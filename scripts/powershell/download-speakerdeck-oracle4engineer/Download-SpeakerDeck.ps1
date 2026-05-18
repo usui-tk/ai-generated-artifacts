@@ -325,8 +325,8 @@ function Initialize-RuntimeDirectories {
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'speakerdeck-2026.05.13-r20'
-$Script:ScriptTag     = 'upstream-spec-style-alignment'
+$Script:ScriptVersion = 'speakerdeck-2026.05.18-r21'
+$Script:ScriptTag     = 'changelog-md-policy-cleanup'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -1683,7 +1683,7 @@ function Test-Environment {
     # ----- Step 0 : PowerShell execution environment -----
     # Diagnostic dump of the runtime so any future bug report can be
     # reproduced. This replaces the legacy 2-line "OS / PSVersion"
-    # header that was here before r13. See Show-PowerShellEnvironment.
+    # header that this section originally carried. See Show-PowerShellEnvironment.
     Write-SubSection "[Step 0] PowerShell execution environment"
     Show-PowerShellEnvironment
 
@@ -2323,7 +2323,7 @@ function Invoke-Phase4Evaluation {
 # ============================================================
 #
 # Why this phase exists:
-#   In r06 and earlier, output filenames were computed inside the
+#   Earlier versions of this script computed output filenames inside the
 #   download phase (Phase 6). That meant DryRun could not show what
 #   files WOULD be created on disk, and real runs could not validate
 #   the plan (e.g. detect duplicate target paths) before spending
@@ -2564,8 +2564,10 @@ function Invoke-Phase5FilenamePlan {
 # ============================================================
 
 function Invoke-Phase6Download {
-    # Renamed from Invoke-Phase4Download (r06). Now takes the pre-computed
-    # filename plan from Phase 5 instead of recomputing names internally.
+    # Takes the pre-computed filename plan from Phase 5 rather than
+    # recomputing names internally. This keeps Phase 6 strictly focused
+    # on download execution and decouples the naming policy from the
+    # download mechanism.
     param(
         [Parameter(Mandatory)] $FilenamePlan,
         [int]$MaxConcurrency     = 5,
@@ -3712,7 +3714,7 @@ function Show-FinalReport {
             Write-Host ("    Total size              : {0,8:N1} MB" -f ($totalBytes / 1MB))
         }
 
-        # Failure breakdown table (added in r06 per feedback #2):
+        # Failure breakdown table:
         # Group failed downloads by error category so the user can see
         # at a glance what KIND of failure dominated (rate-limit, server
         # error, path-too-long, etc.) and decide whether to re-run with
@@ -3822,7 +3824,7 @@ function Show-FinalReport {
         }
     }
 
-    # Generated log files (r08): enumerate ALL CSV / JSONL artifacts
+    # Generated log files: enumerate ALL CSV / JSONL artifacts
     # produced by the pipeline so the user is not left wondering which
     # files actually exist. Each entry is shown only if its source file
     # is on disk - this naturally handles DryRun (no P06/P07 files) and
@@ -4045,19 +4047,20 @@ try {
         # Save evaluation results in DryRun mode too. Like the real-run
         # CSV, this goes into the logs/ folder, NOT into downloads/.
         #
-        # As of r08: this file is intentionally scoped to *just* the
-        # evaluation outcome (downloadability per deck). Filename plan
-        # information lives in P05_filename_plan.csv, and download /
-        # execution outcomes live in P06_download_log.csv and
-        # P07_final_state.csv. Keeping P04 strictly evaluation-only
-        # avoids the previous problem of "OutputFilename / OutputType
-        # columns are always empty here" confusion.
+        # This file is intentionally scoped to *just* the evaluation
+        # outcome (downloadability per deck). Filename plan information
+        # lives in P05_filename_plan.csv, and download / execution
+        # outcomes live in P06_download_log.csv and P07_final_state.csv.
+        # Keeping P04 strictly evaluation-only avoids the previous
+        # problem of "OutputFilename / OutputType columns are always
+        # empty here" confusion.
         #
-        # r14: also compute YearFolder / YearSource here so this CSV has
-        # the same year-derivation columns as P05 / P06 / P07. This makes
-        # cross-CSV grep / join queries (e.g. "find all 2024 decks across
-        # every log") work uniformly. The computation is cheap because
-        # Get-DeckYear is pure string parsing; no extra HTTP fetches.
+        # YearFolder / YearSource columns are computed here as well so
+        # this CSV has the same year-derivation columns as P05 / P06 /
+        # P07. This makes cross-CSV grep / join queries (e.g.
+        # "find all 2024 decks across every log") work uniformly. The
+        # computation is cheap because Get-DeckYear is pure string
+        # parsing; no extra HTTP fetches.
         $records = $evalResults | ForEach-Object {
             $yearInfo = Get-DeckYear -Title $_.Title `
                                      -OriginalFilename $_.OriginalFilename `

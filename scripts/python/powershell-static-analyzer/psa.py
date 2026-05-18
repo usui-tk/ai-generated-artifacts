@@ -250,6 +250,10 @@ RULES = [
      'Phase function naming convention (Invoke-(Prep|Verify|Inst)PhaseNN_Name)'),
     ('PSAP0002', 'warning', False,
      'Required script identifier variables ($Script:ScriptVersion / Hash / ShortTag)'),
+    ('PSAP0003', 'warning', False,
+     'Inline revision-tag comment (# rNN: ... / # rNN+: ... / # (rNN) ...)'),
+    ('PSAP0004', 'warning', False,
+     'End-of-file REVISION HISTORY / CHANGELOG comment block in script body'),
 ]
 
 CODE_TO_RULE = {r[0]: r for r in RULES}
@@ -1492,6 +1496,11 @@ def check_lastexitcode_unchecked(clean):
 #   PSAP0002 - Required script-identifier variables
 #              ($Script:ScriptVersion, $Script:ScriptHash,
 #               $Script:ScriptShortTag)
+#   PSAP0003 - Inline revision-tag comments (# rNN:, # (rNN), ...)
+#              Discourages revision history in script source; the
+#              repository's CHANGELOG.md is the source of truth.
+#   PSAP0004 - End-of-file REVISION HISTORY / CHANGELOG comment blocks
+#              Same intent as PSAP0003: history belongs in CHANGELOG.md.
 #
 # These conventions originated in the Deploy-Drivers-For-WindowsServer
 # repository. Adopting repositories should commit a .psa.config.json that
@@ -1592,6 +1601,320 @@ def check_required_script_identifiers(clean):
                     f'$Script:{required} is not assigned anywhere in '
                     f'this file (pipeline convention; see PSAP0002)'),
             })
+    return out
+
+
+def _comment_start_positions(text):
+    """Return a set of absolute character positions where a `#` starts a
+    PowerShell line-comment (NOT inside a string, NOT inside a block
+    comment, NOT a `#>` block-comment closer).
+
+    Block comments `<# ... #>` are NOT returned — PSAP0003/0004 are
+    about line-comment patterns, and block comments rarely host
+    inline revision tags. (Block-comment detection would require a
+    separate scanner; out of scope for these two rules.)
+
+    The scanner handles:
+      - single-quoted strings `'...'` (no escaping; `''` is literal `'`)
+      - double-quoted strings `"..."` (with `""` doubling and `` ` ``
+        as the escape char in PowerShell)
+      - here-strings `@'...'@` and `@"..."@`
+      - existing block comments `<# ... #>` (so `#` inside them is
+        not reported)
+
+    The PowerShell tokenizer in strip_strings_and_comments() is the
+    canonical implementation; we re-implement a stripped-down version
+    here that records comment-start positions instead of stripping.
+    """
+    positions = set()
+    i, n = 0, len(text)
+    in_sq = False         # single-quoted string
+    in_dq = False         # double-quoted string
+    in_bc = False         # block comment <# ... #>
+    in_here_sq = False
+    in_here_dq = False
+    at_line_start = True  # for here-string close detection
+
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ''
+        nxt2 = text[i + 2] if i + 2 < n else ''
+
+        if c == '\n':
+            at_line_start = True
+            i += 1
+            continue
+
+        # in block comment: look for `#>`
+        if in_bc:
+            if c == '#' and nxt == '>':
+                in_bc = False
+                i += 2
+                continue
+            i += 1
+            continue
+
+        # in here-strings
+        if in_here_sq:
+            # close on `'@` at line start (whitespace allowed before it)
+            if at_line_start:
+                # skip leading whitespace then check
+                j = i
+                while j < n and text[j] in ' \t':
+                    j += 1
+                if j < n - 1 and text[j] == "'" and text[j + 1] == '@':
+                    in_here_sq = False
+                    i = j + 2
+                    continue
+            at_line_start = False
+            i += 1
+            continue
+
+        if in_here_dq:
+            if at_line_start:
+                j = i
+                while j < n and text[j] in ' \t':
+                    j += 1
+                if j < n - 1 and text[j] == '"' and text[j + 1] == '@':
+                    in_here_dq = False
+                    i = j + 2
+                    continue
+            at_line_start = False
+            i += 1
+            continue
+
+        # in single-quoted string
+        if in_sq:
+            if c == "'":
+                # `''` is literal single-quote, stays in string
+                if nxt == "'":
+                    i += 2
+                    continue
+                in_sq = False
+                i += 1
+                continue
+            i += 1
+            continue
+
+        # in double-quoted string
+        if in_dq:
+            if c == '`':
+                # PowerShell escape: skip next char
+                i += 2
+                continue
+            if c == '"':
+                if nxt == '"':
+                    # "" doubling = literal "
+                    i += 2
+                    continue
+                in_dq = False
+                i += 1
+                continue
+            i += 1
+            continue
+
+        # not in any string or comment state — look for openings
+        if c == '@' and nxt == "'" and nxt2 == '\n':
+            in_here_sq = True
+            i += 3
+            at_line_start = True
+            continue
+        if c == '@' and nxt == '"' and nxt2 == '\n':
+            in_here_dq = True
+            i += 3
+            at_line_start = True
+            continue
+        if c == "'":
+            in_sq = True
+            i += 1
+            continue
+        if c == '"':
+            in_dq = True
+            i += 1
+            continue
+        if c == '<' and nxt == '#':
+            in_bc = True
+            i += 2
+            continue
+        if c == '#':
+            # Line comment starts here — record position then skip to EOL.
+            positions.add(i)
+            while i < n and text[i] != '\n':
+                i += 1
+            continue
+
+        if c not in ' \t':
+            at_line_start = False
+        i += 1
+
+    return positions
+
+
+def _line_starts(text):
+    """Return a list of absolute positions where each line begins.
+
+    line_starts[k] is the index of the first character of line k+1
+    (1-indexed). line_starts[0] is always 0.
+    """
+    starts = [0]
+    for i, c in enumerate(text):
+        if c == '\n':
+            starts.append(i + 1)
+    return starts
+
+
+def check_inline_revision_tag(text, clean):
+    """PSAP0003: inline revision-tag comments.
+
+    Detects comments carrying per-revision history tags such as:
+
+        # r42:    Fixed the timezone bug.
+        # r56+:   New behaviour for chipset r56 onwards.
+        # r8-update3: refined the heuristic
+        # ---- r42: PHASE NAME ---- (section header)
+        # (r42) some explanation in mid-prose
+
+    Such tags accumulate over time as untraceable "where did this come
+    from" markers. The single source of truth for chronological history
+    should be CHANGELOG.md at the repository root. Move tagged content
+    into CHANGELOG.md under the appropriate version section.
+
+    Pattern caveats:
+      - Tags inside STRING LITERALS are not matched (the rule scans
+        comments only, using a dedicated comment-start scanner).
+      - Prose MENTIONS of revisions ("in r06 and earlier we did X") are
+        NOT matched. The rule requires `rNN` to be the first non-
+        whitespace token AFTER the `#` comment marker, followed by a
+        colon, plus-onwards form, dash-form, or parens — i.e. an
+        unambiguous tag, not casual mention.
+      - Legitimate non-comment uses of rNN-like sequences are not
+        matched (e.g. `$Script:ScriptVersion = 'chipset-2026-r60'`,
+        `'radeon-ai-pro-r9000-series'`).
+
+    Disabled by default. Enable via `enable: ["PSAP0003"]` in your
+    .psa.config.json when your repository centralises revision history
+    in CHANGELOG.md.
+    """
+    out = []
+    seen_lines = set()  # de-dupe: one report per line max
+
+    comment_starts = _comment_start_positions(text)
+    lines = text.split('\n')
+
+    for hash_pos in comment_starts:
+        # Find which line this comment is on and the comment body
+        # (substring from hash_pos to next newline).
+        nl = text.find('\n', hash_pos)
+        if nl == -1:
+            comment_text = text[hash_pos:]
+        else:
+            comment_text = text[hash_pos:nl]
+        ln_no = text.count('\n', 0, hash_pos) + 1
+
+        # Test against each pattern. Anchor at start of comment, not the
+        # whole line (the comment may have leading code: `$x=1  # rNN: ...`).
+        # Strip the leading `#` so patterns can match from there.
+        for pat, label in _INLINE_REVISION_TAG_BODY_PATS:
+            if pat.search(comment_text):
+                if ln_no not in seen_lines:
+                    seen_lines.add(ln_no)
+                    out.append({
+                        'severity': 'warning', 'code': 'PSAP0003',
+                        'line': ln_no, 'col': 0,
+                        'message': (
+                            f'{label} detected; revision history belongs in '
+                            f'CHANGELOG.md, not in script source comments '
+                            f'(see PSAP0003)'),
+                    })
+                break
+    return sorted(out, key=lambda i: i['line'])
+
+
+# Patterns applied to COMMENT BODIES only (the leading `#` is already
+# stripped by check_inline_revision_tag before matching).
+_INLINE_REVISION_TAG_BODY_PATS = [
+    # Form 4: dash-decorated section header
+    #   # ---- r42: PHASE NAME ----
+    # Match: dashes + rNN + (+/-suffix)? + colon
+    (re.compile(
+        r'^#\s*-{2,}\s*r\d+(?:[+-][\w-]*)?\s*:',
+        re.IGNORECASE),
+     'dash-decorated section header'),
+
+    # Form 5: parenthesised tag anywhere in comment
+    #   # This was added (r42) for ...
+    (re.compile(
+        r'\(\s*r\d+\s*\)',
+        re.IGNORECASE),
+     'parenthesised inline tag'),
+
+    # Forms 1-3: bare colon, +-form, composite
+    #   # r42: ...
+    #   # r56+: ...
+    #   # r8-update3: ...
+    # Require rNN at the very start of the comment (after `#` + ws).
+    (re.compile(
+        r'^#\s+r\d+(?:[+-][\w-]*)?\s*:',
+        re.IGNORECASE),
+     'inline revision tag'),
+]
+
+
+def check_revision_history_block(text, clean):
+    """PSAP0004: end-of-file REVISION HISTORY / CHANGELOG comment block.
+
+    Detects in-script comment blocks that accumulate per-revision change
+    descriptions, typically at the top or bottom of a long-running
+    script. The single source of truth for chronological release notes
+    is CHANGELOG.md at the repository root.
+
+    Fires once per matching HEADER line. The rule deliberately does not
+    try to detect the END of the block — its job is to point the
+    operator at the section start so they can relocate the contents
+    into CHANGELOG.md.
+
+    Detected header forms (case-insensitive, with optional decoration):
+        # REVISION HISTORY
+        # ======== REVISION HISTORY ========
+        # CHANGELOG
+        # ---- CHANGELOG ----
+        # VERSION HISTORY:
+        # ###### VERSION HISTORY ######
+
+    Headers inside string literals are not matched (uses the
+    comment-start scanner shared with PSAP0003).
+
+    Disabled by default. Enable via `enable: ["PSAP0004"]` in your
+    .psa.config.json when your repository centralises revision history
+    in CHANGELOG.md.
+    """
+    out = []
+    comment_starts = _comment_start_positions(text)
+    body_pat = re.compile(
+        r'^#[\s=#\-*]*'
+        r'(REVISION\s+HISTORY|CHANGELOG|VERSION\s+HISTORY)'
+        r'[\s=#\-*:]*$',
+        re.IGNORECASE)
+
+    for hash_pos in comment_starts:
+        nl = text.find('\n', hash_pos)
+        if nl == -1:
+            comment_text = text[hash_pos:]
+        else:
+            comment_text = text[hash_pos:nl]
+        m = body_pat.match(comment_text)
+        if not m:
+            continue
+        ln_no = text.count('\n', 0, hash_pos) + 1
+        kind = m.group(1).strip().upper()
+        out.append({
+            'severity': 'warning', 'code': 'PSAP0004',
+            'line': ln_no, 'col': 0,
+            'message': (
+                f'in-script "{kind}" block detected; per-revision change '
+                f'history belongs in CHANGELOG.md, not in the script body '
+                f'(see PSAP0004)'),
+        })
     return out
 
 
@@ -2097,6 +2420,10 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_phase_naming(clean)
     if cfg.enabled['PSAP0002']:
         raw += check_required_script_identifiers(clean)
+    if cfg.enabled['PSAP0003']:
+        raw += check_inline_revision_tag(text, clean)
+    if cfg.enabled['PSAP0004']:
+        raw += check_revision_history_block(text, clean)
 
     # Inline suppression
     file_supp, line_supp = collect_suppressions(text)

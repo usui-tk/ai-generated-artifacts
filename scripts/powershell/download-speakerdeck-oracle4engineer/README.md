@@ -469,33 +469,33 @@ directory, equals a drive root, or contains the script.
 ## Developer specification
 
 If you want to extend this script, change its phase structure, or build a
-similar script in this repo's style, read **[SPEC.md](SPEC.md)**
-([日本語](SPEC.md)) first. That document captures:
+similar script in this repo's style, read **[SPEC.md](SPEC.md)** first.
+That document captures:
 
 - **Part A (Common Spec)** — conventions inherited by every script in this
   family: source file format (UTF-8 BOM + ASCII-only), phase architecture,
   log markers, `-LiteralPath` rules, CSV column conventions, environment
-  diagnostic, static analysis gate, bilingual docs requirement
+  diagnostic, static analysis gate, documentation language policy
 - **Part B (Script-Specific Spec)** — this script's own phase map, year-folder
   rules, PDF-metadata reclassification details (Phase 8), adaptive download
   settings, failure recovery
 - **Part C (Quality Gates)** — the checklist that must pass before every commit
-- **Part D (Known Pitfalls)** — documented bugs from past revisions including
-  the `[ ]` wildcard issue in PowerShell paths (r10, r17) and phase
-  renumbering safety (r16)
+- **Part D (Known Pitfalls)** — documented bugs and their fixes, such as the
+  `[ ]` wildcard issue in PowerShell paths and phase-renumbering safety
+
+For the per-release change history, see **[CHANGELOG.md](CHANGELOG.md)**
+([Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format;
+English only per the repository-wide documentation language policy).
 
 For the actual verification results (DryRun, real-run output, idempotency
-check, regression-fix evidence for r17), see **[TESTING.md](TESTING.md)**
-([日本語](TESTING.md)). It documents the most recent successful
-real-run (`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
+check, regression-fix evidence), see **[TESTING.md](TESTING.md)**. It
+documents the most recent successful real-run
+(`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
 
-For details on the `psa.py` static analyzer (v3.1.0, 28-rule check set
-`PSA1001`..`PSA7001` plus CI integration), see
-[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-([日本語](../../python/powershell-static-analyzer/SPEC.md))
-or the analyzer's
-[`README.md`](../../python/powershell-static-analyzer/README.md)
-([日本語](../../python/powershell-static-analyzer/README.ja.md)).
+For details on the `psa.py` static analyzer (v3.3.0, with `PSA1001..PSA9002`
+plus `PSAP0001..PSAP0004` opt-in rules), see
+[`../../python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
+and the full [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md).
 
 The **single most important rule** for new development: do not re-derive
 phase headers, log markers, or psa.py — copy them from the existing

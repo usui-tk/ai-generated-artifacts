@@ -30,6 +30,18 @@ _No unreleased changes at this time._
 - **`PSAP0004`** (warning, default OFF, opt-in via `.psa.config.json`):
   end-of-file `REVISION HISTORY` / `CHANGELOG` / `VERSION HISTORY`
   comment blocks. Fires once per matching header line.
+- New `test_psap_3_4.py` self-test fixture (18 cases) verifying both
+  rules against positive matches, negative cases (prose mentions,
+  string-literal contents, here-strings), and edge combinations.
+
+### Implementation
+
+Both rules share a dedicated PowerShell tokeniser
+(`_comment_start_positions`) that classifies every `#` in the input
+as comment-start vs in-string vs in-here-string vs in-block-comment.
+This is more precise than relying on `strip_strings_and_comments()`
+alone because string contents and comment contents are both stripped
+to spaces in the latter, making them indistinguishable by position.
 
 ### Rationale
 

@@ -799,24 +799,21 @@ documented at the root of `ai-generated-artifacts`.
 
 #### Where revision history lives
 
-Per-version release notes belong **exclusively** in a `CHANGELOG.md`
-file alongside `Download-SpeakerDeck.ps1` in this directory (not yet
-created; will be added when the first formal release is cut after this
-SPEC change). Release notes do NOT belong in:
+Per-version release notes belong **exclusively** in [`CHANGELOG.md`](./CHANGELOG.md)
+alongside `Download-SpeakerDeck.ps1` in this directory. Release notes
+do NOT belong in:
 
 - `Download-SpeakerDeck.ps1` source comments — neither inline
   revision-tag comments (`# rNN:`) nor end-of-file `REVISION HISTORY`
   blocks. The `psa.py` rules `PSAP0003` and `PSAP0004` (opt-in via
   `.psa.config.json`) detect this anti-pattern.
-- `README.md` (other than a brief pointer to `CHANGELOG.md` when one
-  exists).
+- `README.md` (other than a brief pointer to `CHANGELOG.md`).
 - This `SPEC.md` (which describes *current* behaviour; historical
   context, when essential, goes in a dedicated section such as a
   Pitfalls / Lessons Learned appendix).
 
-When `CHANGELOG.md` is added, it follows the
-[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format
-and is maintained in **English only** per the repository-wide
+`CHANGELOG.md` follows the [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
+format and is maintained in **English only** per the repository-wide
 documentation language policy.
 
 ### Reuse before invention
@@ -843,7 +840,7 @@ When a new feature is needed, in order:
 |---|---|
 | Script name | `Download-SpeakerDeck.ps1` |
 | Display name | Speaker Deck Bulk Downloader |
-| Current revision | r20 (`upstream-spec-style-alignment`) |
+| Current revision | r21 (`changelog-md-policy-cleanup`); see [`CHANGELOG.md`](./CHANGELOG.md) for the per-release log |
 | Purpose | Bulk-download all public PDFs from a Speaker Deck account |
 | Owner | (fill in) |
 
