@@ -15,7 +15,37 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
-_No unreleased changes at this time._
+### Changed
+
+- **Documentation: cross-link to consumer-side adoption of the
+  self-quality gates.** Following the verified consumer
+  [`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
+  publishing its own SPEC §A.11.6 *Self-quality gates for `psa.py`
+  (consumer-side usage)*, the upstream documentation in this
+  directory gained the reciprocal cross-references:
+   - `SPEC.md` §12 gained a new (informative, non-normative)
+     subsection §12.5 *Consumer-side adoption* that records how
+     `--config-check` (§12.2) and `--self-check` (§12.3) are wired
+     into a downstream repository's workflow, with a direct link
+     to the verified consumer's §A.11.6. The four normative
+     subsections §12.1–§12.4 are unchanged; §12.5 is purely a
+     pointer to where to read the downstream half of the story.
+   - `README.md` and `README.ja.md` *Verified consumers* table
+     entry for `Deploy-Drivers-For-WindowsServer` now lists all
+     four pipeline scripts (`Deploy-AMDChipsetDriverOnWindowsServer.ps1`,
+     `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`,
+     `Deploy-AMDNpuDriverOnWindowsServer.ps1`,
+     `Deploy-MSBthPanInboxOnWindowsServer.ps1`) — the BthPan script
+     was previously omitted — and the Reference column now links
+     both to SPEC §A.11 (analyzer setup, version policy, baseline)
+     and to SPEC §A.11.6 (consumer-side `--config-check` /
+     `--self-check` adoption), giving readers a single hop from
+     the upstream consumer list to the downstream usage docs.
+- `psa.py` itself, `test_psa_rules.py`, `VERSION`, and the
+  `.psa.config.json.template` are unchanged. The three
+  self-quality gates remain at the 3.5.1 baseline (104 test cases
+  pass, `--self-check` green, `--config-check` clean against the
+  shipped template).
 
 ## [3.5.1] — 2026-05-19
 

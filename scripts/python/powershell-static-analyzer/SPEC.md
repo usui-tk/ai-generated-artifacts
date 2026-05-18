@@ -1578,6 +1578,50 @@ green and ensures the rule's behaviour is locked against future
 regressions. Step 4 is the single combined gate; if any of the
 three fails, the release is not ready.
 
+### 12.5 Consumer-side adoption (informative)
+
+This subsection is **informative** (non-normative): it records how
+consumer repositories that depend on `psa.py` typically wire the
+self-quality gates from §12.2 and §12.3 into their own workflows.
+Nothing in this subsection imposes any obligation on `psa.py`
+itself; the gates as specified above are complete without consumer
+adoption.
+
+`--config-check` and `--self-check` are designed to be useful from
+the *consumer* side, not just the upstream side: a downstream
+repository that pulls `psa.py` from mainline (per the workflow in
+SPEC.md §1.4.3 *Consumer obligations*) can run the same gates
+against its own checked-in `.psa.config.json` and against its own
+locally-cached copy of `psa.py`. The verified consumer listed in
+[`README.md`](./README.md#verified-consumers) "Verified consumers"
+documents its consumer-side usage of these gates in its own SPEC —
+specifically:
+
+- [`usui-tk/Deploy-Drivers-For-WindowsServer` — SPEC §A.11.6
+  *Self-quality gates for `psa.py` (consumer-side
+  usage)*](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a116-self-quality-gates-for-psapy-consumer-side-usage)
+  describes (a) when each gate is run on the consumer side (PR
+  edits `.psa.config.json` → run `--config-check`; PR refreshes a
+  locally-cached `psa.py` → run `--self-check`), (b) the expected
+  output on a clean tree, and (c) the activation matrix that maps
+  PR triggers to gate invocations.
+
+When the upstream and downstream documents are read together, the
+overall lifecycle is fully covered: the upstream §12.1–§12.4 above
+specify how the gates are *implemented* and *released*, and the
+linked downstream §A.11.6 specifies how the gates are *consumed*
+in practice. New consumers adopting `psa.py` are encouraged to
+mirror the pattern (its own SPEC subsection, with cross-links in
+both directions); future entries to the Verified consumers table
+will be added here as they emerge.
+
+Pillar 1 (`test_psa_rules.py`, §12.1) is intentionally not part of
+the consumer-side adoption story: a passing upstream test suite is
+a precondition of every release, and `--self-check` will detect
+any drift the consumer cares about. Consumers MAY run the test
+suite directly when investigating a suspected analyzer bug, but
+they are not expected to wire it into their CI.
+
 ---
 
 ## Appendix A — Rule severity matrix

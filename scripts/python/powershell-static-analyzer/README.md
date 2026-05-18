@@ -509,7 +509,7 @@ The following repositories and PowerShell scripts are verified with
 
 | Repository | Scripts | Reference |
 |:---|:---|:---|
-| [`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`, `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`, `Deploy-AMDNpuDriverOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy) |
+| [`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`, `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`, `Deploy-AMDNpuDriverOnWindowsServer.ps1`, `Deploy-MSBthPanInboxOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy) (analyzer setup, version policy, baseline) · [SPEC §A.11.6](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a116-self-quality-gates-for-psapy-consumer-side-usage) (`--config-check` / `--self-check` consumer-side adoption) |
 
 (Update this list when new PowerShell scripts — internal or external —
 adopt `psa.py` for verification.)
