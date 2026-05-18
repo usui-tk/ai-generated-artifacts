@@ -4,8 +4,21 @@
 //
 // File format : JSONC  (JSON with C-style line `//` and block `/* */` comments)
 // Encoding    : UTF-8
-// Schema      : SPEC.md §5  /  SPEC.md §5
-// Applies to  : psa.py 3.2.0 and later 3.x releases
+// Schema      : SPEC.md §5
+// Applies to  : psa.py 3.3.0 and later 3.x releases
+//
+// -----------------------------------------------------------------------------
+// What's new in 3.3.0 (compared to 3.2.0 templates)
+// -----------------------------------------------------------------------------
+//
+//   - New project rules : PSAP0003 / PSAP0004 (revision-discipline rules,
+//                                              default OFF, opt-in)
+//     PSAP0003 detects inline `# rNN:` revision-tag comments inside
+//     PowerShell sources; PSAP0004 detects in-script REVISION HISTORY /
+//     CHANGELOG comment blocks. Both rules enforce the "per-version
+//     release notes live in CHANGELOG.md, not in script bodies" policy.
+//
+// No other rule semantics changed in 3.3.0.
 //
 // -----------------------------------------------------------------------------
 // What's new in 3.2.0 (compared to 3.1.x templates)
@@ -21,10 +34,11 @@
 //   - New tunable       : max_function_lines             (PSA9001 threshold)
 //   - New tunable       : psa8001_ignore_functions       (PSA8001 ignore list)
 //
-// PSAPxxxx is a NEW rule family in 3.2.0 that holds opinionated,
-// project-specific conventions (e.g. phase-function naming). All PSAPxxxx
-// rules are disabled by default and must be explicitly enabled per
-// project. See the "PSAPxxxx" section below.
+// PSAPxxxx is a rule family introduced in 3.2.0 that holds opinionated,
+// project-specific conventions (e.g. phase-function naming, required
+// script-identity variables, revision discipline). All PSAPxxxx rules
+// are disabled by default and must be explicitly enabled per project.
+// See the "PSAPxxxx" section below.
 //
 // -----------------------------------------------------------------------------
 // How to use this template
@@ -104,12 +118,15 @@
   //               (Invoke-(Prep|Verify|Inst)PhaseNN_Name)
   //     PSAP0002  Required script identifier variables
   //               ($Script:ScriptVersion / ScriptHash / ScriptShortTag)
+  //     PSAP0003  Inline revision-tag comments
+  //               (# rNN:, # rNN+:, # ---- rNN: ----, # (rNN), ...)
+  //     PSAP0004  End-of-file REVISION HISTORY / CHANGELOG comment blocks
   //
   // Built-in default: []
   //
   // Example - enable PSAPxxxx rules for a pipeline repository:
   //
-  //   "enable": ["PSAP0001", "PSAP0002"],
+  //   "enable": ["PSAP0001", "PSAP0002", "PSAP0003", "PSAP0004"],
   //
   // Example - enable complexity metrics with a generous threshold:
   //
@@ -212,9 +229,24 @@
   //               $Script:ScriptHash      (e.g., 'a1b2c3d4e5f6')
   //               $Script:ScriptShortTag  (composed of the above two)
   //
+  //   PSAP0003  Inline revision-tag comments (new in 3.3.0)
+  //             Detects per-revision history embedded in source comments
+  //             such as `# r42: fixed timezone bug`, `# r56+: ...`,
+  //             `# ---- r42: SECTION NAME ----`, or `# (r42) note`.
+  //             Such tags accumulate as untraceable noise; the canonical
+  //             source of release history is `CHANGELOG.md`.
+  //             Prose mentions ("# in r06 and earlier we did X") are NOT
+  //             matched -- only unambiguous tag forms.
+  //
+  //   PSAP0004  End-of-file REVISION HISTORY / CHANGELOG / VERSION HISTORY
+  //             comment blocks (new in 3.3.0)
+  //             Detects in-script blocks that duplicate `CHANGELOG.md`
+  //             content. Fires once per matching header line; operator
+  //             should relocate the contents to `CHANGELOG.md`.
+  //
   // Example - Deploy-Drivers-style pipeline repository:
   //
-  //   "enable": ["PSAP0001", "PSAP0002"],
+  //   "enable": ["PSAP0001", "PSAP0002", "PSAP0003", "PSAP0004"],
 
 
   // ===========================================================================
