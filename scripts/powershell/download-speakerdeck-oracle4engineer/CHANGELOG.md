@@ -17,6 +17,37 @@ This CHANGELOG is **English only** per the
 
 _No unreleased changes at this time._
 
+## [r25] — 2026-05-18 — `strip-v-prefix-from-shorttag`
+
+### Changed
+
+- `$Script:ScriptShortTag` no longer prepends a literal `v` to the
+  version string. The previous format `'v{0}/{1}' -f $Script:ScriptVersion, $Script:ScriptHash`
+  produced strings such as `vspeakerdeck-2026.05.18-r24/<hash>` in every
+  phase header, banner, DebugTrace event, and run summary. Because
+  `$Script:ScriptVersion` already starts with `speakerdeck-`, the `v`
+  glued to it read as the meaningless token `vspeakerdeck` to a human
+  eye. The format string is now `'{0}/{1}'`, producing
+  `speakerdeck-2026.05.18-r25/<hash>`.
+- `SPEC.md` A.3 (Banner & Version Identification) updated: the
+  pseudo-code example for `$Script:ScriptShortTag` and the Banner block
+  layout example no longer show the `v` literal.
+- `README.md`, `README.ja.md`, `SPEC.md`, and `TESTING.md` phase-header
+  examples updated to match the new format.
+- `$Script:ScriptVersion` bumped to `speakerdeck-2026.05.18-r25`,
+  `$Script:ScriptTag` set to `strip-v-prefix-from-shorttag`.
+
+### Verified
+
+- `psa.py` v3.3.0 with `PSAP0003` / `PSAP0004` opt-ins:
+  **0 errors / 0 warnings / 0 info** against the updated script.
+
+### Notes
+
+- This is a presentation-only fix; the only runtime difference is a
+  one-character-shorter string emitted at every banner / phase header
+  / debug trace event. No CSV / JSONL / output-file format changes.
+
 ## [r24] — 2026-05-18 — `remove-upstream-repo-references`
 
 ### Changed
@@ -203,6 +234,7 @@ repository.
 ---
 
 [Unreleased]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
+[r25]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
 [r24]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
 [r23]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
 [r22]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer

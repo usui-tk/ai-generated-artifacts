@@ -574,7 +574,7 @@ Issues : 0 errors, 0 warnings, 0 info
 ```
 ========================================================================
  PHASE P03  - ListCollection         (Scan   ) start: 13:04:15
- script: vspeakerdeck-2026.05.18-r24/abc123def456
+ script: speakerdeck-2026.05.18-r25/abc123def456
 ========================================================================
 [13:04:15] [+0.00s]      [*] Fetching page 1: https://speakerdeck.com/...
 [13:04:16] [+0.85s]      [*] page 1: +18 decks (cumulative 18)

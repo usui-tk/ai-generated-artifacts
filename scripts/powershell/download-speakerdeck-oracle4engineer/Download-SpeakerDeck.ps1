@@ -369,8 +369,8 @@ function Initialize-RuntimeDirectories {
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'speakerdeck-2026.05.18-r24'
-$Script:ScriptTag     = 'remove-upstream-repo-references'
+$Script:ScriptVersion = 'speakerdeck-2026.05.18-r25'
+$Script:ScriptTag     = 'strip-v-prefix-from-shorttag'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -384,7 +384,7 @@ try {
 } catch {
     $Script:ScriptHash = '(hash-error)'
 }
-$Script:ScriptShortTag = ('v{0}/{1}' -f $Script:ScriptVersion, $Script:ScriptHash)
+$Script:ScriptShortTag = ('{0}/{1}' -f $Script:ScriptVersion, $Script:ScriptHash)
 
 # ============================================================
 # Timing state

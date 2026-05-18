@@ -200,7 +200,7 @@ chars. This appears in every phase header so logs are reproducible:
 
 ```powershell
 $Script:ScriptHash = (Get-FileHash -LiteralPath $PSCommandPath -Algorithm SHA256).Hash.Substring(0,12).ToLower()
-$Script:ScriptShortTag = "v$Script:ScriptVersion/$Script:ScriptHash"
+$Script:ScriptShortTag = "$Script:ScriptVersion/$Script:ScriptHash"
 ```
 
 ### Banner block
@@ -211,7 +211,7 @@ Format:
 ```
 ========================================================================
   <Script Display Name>
-  v<ScriptVersion>/<ScriptHash>
+  <ScriptVersion>/<ScriptHash>
 ========================================================================
   <Key parameter 1> : <value>
   <Key parameter 2> : <value>
@@ -258,7 +258,7 @@ Reuse the reference implementation. The on-screen output looks like:
 ```
 ========================================================================
  PHASE P03  - ListCollection         (Scan   ) start: 14:04:38
- script: vspeakerdeck-2026.05.11-r17/b7a478b625b8
+ script: speakerdeck-2026.05.11-r17/b7a478b625b8
 ========================================================================
 ...
  PHASE P03  -> DONE     elapsed: 1m3.5s
@@ -1020,7 +1020,7 @@ on disk — negligible compared to the 5.7 GB of PDF downloads.
 |---|---|
 | Script name | `Download-SpeakerDeck.ps1` |
 | Display name | Speaker Deck Bulk Downloader |
-| Current revision | r24 (`remove-upstream-repo-references`); see [`CHANGELOG.md`](./CHANGELOG.md) for the per-release log |
+| Current revision | r25 (`strip-v-prefix-from-shorttag`); see [`CHANGELOG.md`](./CHANGELOG.md) for the per-release log |
 | Purpose | Bulk-download all public PDFs from a Speaker Deck account |
 | Owner | (fill in) |
 
