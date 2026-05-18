@@ -437,7 +437,7 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 このツールはレポジトリ全体での正規配置場所
 [`scripts/python/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py)
 に格納されており、別プロジェクト
-[Deploy-AMD-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+[Deploy-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
 で生まれたものです。Pure Python（標準ライブラリのみ）で実装されており、
 外部依存はありません。
 

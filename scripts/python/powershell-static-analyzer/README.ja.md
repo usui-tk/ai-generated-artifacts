@@ -32,12 +32,12 @@ PowerShell スクリプト用の単一 Python 3 ファイル静的解析ツー�
 ## 由来と保守ポリシー
 
 `psa.py` はもともと
-[`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+[`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
 の `tools/psa.py` として誕生しました。その後、本 `ai-generated-artifacts`
 リポジトリに**唯一の正典ソース**として集約され、
-`Deploy-AMD-Drivers-For-WindowsServer` リポジトリ側の `tools/psa.py`
+`Deploy-Drivers-For-WindowsServer` リポジトリ側の `tools/psa.py`
 は削除されました。同リポジトリは現在、`psa.py` をこちらの外部依存として
-参照しています（同リポジトリの [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy)
+参照しています（同リポジトリの [SPEC §A.11](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy)
 を参照）。
 
 **バグ修正・新規チェックの追加・auto-variable 一覧の更新は、すべて
@@ -449,7 +449,7 @@ Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
 3. `analyze_text()` から `if cfg.enabled['PSA7001']:` でガードして呼ぶ。
 4. 上記のルールカタログと `README.md` にも新コードを記載する。
 5. 下流の利用側リポジトリ（例:
-   [`Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)）
+   [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)）
    に通知し、SPEC / README のチェック表を更新してもらう。
 
 `strip_strings_and_comments(text)` ヘルパーは、`''`, `""`, `@'…'@`,
@@ -477,7 +477,7 @@ Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
 
 | リポジトリ | スクリプト | 参照 |
 |:---|:---|:---|
-| [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`, `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`, `Deploy-AMDNpuDriverOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy) |
+| [`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`, `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`, `Deploy-AMDNpuDriverOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy) |
 
 （新しい PowerShell スクリプト — 内部または外部 — が `psa.py` を
 採用したら、このリストを更新してください。）

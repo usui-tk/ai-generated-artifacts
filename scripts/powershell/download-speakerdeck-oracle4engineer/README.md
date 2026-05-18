@@ -509,7 +509,7 @@ This script is verified with `psa.py` (PowerShell Static Analyzer), which
 lives at the repository-wide canonical location
 [`scripts/python/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py).
 It originated in the
-[Deploy-AMD-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+[Deploy-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
 project and is a pure-Python tool with no external dependencies.
 
 ```bash

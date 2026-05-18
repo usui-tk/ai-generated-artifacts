@@ -51,7 +51,7 @@ do not re-implement.**
 ### A.1.1 Reference PowerShell scripts (phase / banner / log patterns)
 
 ```
-https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer
+https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer
   ├── Deploy-AMDChipsetDriverOnWindowsServer.ps1   (21-phase canonical, r47)
   ├── Deploy-AMDGraphicsDriverOnWindowsServer.ps1  (r16, graphics-specific)
   └── Deploy-AMDNpuDriverOnWindowsServer.ps1       (r2/r3, NPU-specific)
@@ -84,7 +84,7 @@ scripts/python/powershell-static-analyzer/psa.py
 required), version **3.3.0** at the time of this writing, with a 36-rule
 check set spanning `PSA1001`..`PSA9002` plus `PSAP0001`..`PSAP0004`
 (opt-in pipeline-convention rules). It was originally developed for the
-[`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+[`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
 repository. Within this repository it must be:
 
 - Reused as-is from the canonical location
@@ -102,7 +102,7 @@ for the authoritative rule specification.
 ### A.1.3 Companion specifications (this folder)
 
 Each script folder in this style carries the following set of documentation,
-mirroring the pattern of [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer):
+mirroring the pattern of [`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer):
 
 - `README.md` / `README.ja.md` — end-user documentation
   (installation, quick start, parameters, troubleshooting)

@@ -1471,7 +1471,7 @@ Before any commit to `psa.py`, all of the following must pass.
 
 - [ ] `python3 psa.py ../../powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1` reports 0 errors / 0 warnings / 0 info (steady-state for the in-repo consumer)
 - [ ] `python3 psa.py ../../powershell/download-speakerdeck-oracle4engineer/Test-PdfMetadata.ps1` reports 0 / 0 / 0
-- [ ] External consumers (`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`) are notified of any rule change that could newly flag previously-clean scripts (per "Adding a new check" in README.md)
+- [ ] External consumers (`usui-tk/Deploy-Drivers-For-WindowsServer`) are notified of any rule change that could newly flag previously-clean scripts (per "Adding a new check" in README.md)
 
 ### Documentation checks
 

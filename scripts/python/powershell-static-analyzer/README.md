@@ -35,13 +35,13 @@ The current release is **3.3.0** (added the opt-in `PSAP0003` and
 ## Origin & maintenance policy
 
 `psa.py` originated in
-[`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer)
+[`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
 under `tools/psa.py`. It was subsequently consolidated into this
 `ai-generated-artifacts` repository as the **single canonical source**,
 and the original copy under `tools/psa.py` in the
-`Deploy-AMD-Drivers-For-WindowsServer` repository was removed. That
+`Deploy-Drivers-For-WindowsServer` repository was removed. That
 repository now references `psa.py` here as an external dependency (see
-its [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy)).
+its [SPEC §A.11](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy)).
 
 **All bug fixes, new checks, and auto-variable list updates must be made
 here.** Consumer repositories pull `psa.py` either by `git clone` of
@@ -453,7 +453,7 @@ The structure of `psa.py` is intentionally minimal. To add a new check
 4. Document the new code in the rule catalog above and in
    `README.ja.md`.
 5. Notify downstream consumer repositories (e.g.,
-   [`Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer))
+   [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer))
    so they can update their own SPEC / README check tables to match.
 
 The `strip_strings_and_comments(text)` helper is the standard preamble
@@ -482,7 +482,7 @@ The following repositories and PowerShell scripts are verified with
 
 | Repository | Scripts | Reference |
 |:---|:---|:---|
-| [`usui-tk/Deploy-AMD-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`, `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`, `Deploy-AMDNpuDriverOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-AMD-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy) |
+| [`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer) | `Deploy-AMDChipsetDriverOnWindowsServer.ps1`, `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`, `Deploy-AMDNpuDriverOnWindowsServer.ps1` | [SPEC §A.11](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a11-static-analysis-with-psapy) |
 
 (Update this list when new PowerShell scripts — internal or external —
 adopt `psa.py` for verification.)
