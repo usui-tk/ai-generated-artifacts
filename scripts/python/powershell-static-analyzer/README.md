@@ -130,6 +130,12 @@ python3 scripts/python/powershell-static-analyzer/psa.py --check-env
 
 # Prepend environment summary to normal analysis output (informational)
 python3 scripts/python/powershell-static-analyzer/psa.py --show-env script.ps1
+
+# Validate a .psa.config.json schema (no file is analyzed)
+python3 scripts/python/powershell-static-analyzer/psa.py --config-check .psa.config.json
+
+# Verify SPEC.md ↔ RULES are in sync (release-process gate)
+python3 scripts/python/powershell-static-analyzer/psa.py --self-check
 ```
 
 ### Exit codes
@@ -138,7 +144,7 @@ python3 scripts/python/powershell-static-analyzer/psa.py --show-env script.ps1
 |:---:|:---|
 | `0` | Clean (no errors, no warnings) |
 | `1` | Warnings only (CI may treat as soft-fail) |
-| `2` | Errors found (CI must fail) |
+| `2` | Errors found (CI must fail), or a self-quality check (`--config-check` / `--self-check`) reported a violation |
 
 ---
 
@@ -457,11 +463,25 @@ The structure of `psa.py` is intentionally minimal. To add a new check
    dicts with keys `severity`, `code`, `line`, `col`, `message`.
 3. Call it from `analyze_text()` guarded by
    `if cfg.enabled['PSA7001']:`.
-4. Document the new code in the rule catalog above and in
+4. Add a `### 4.N — PSA7001 — Title` heading and detection spec to
+   `SPEC.md` §4 (keeps `--self-check` green).
+5. Add positive / negative / edge-case fixtures for the new rule to
+   `test_psa_rules.py` (keeps the rule-catalog suite complete).
+6. Document the new code in the rule catalog above and in
    `README.ja.md`.
-5. Notify downstream consumer repositories (e.g.,
+7. Notify downstream consumer repositories (e.g.,
    [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer))
    so they can update their own SPEC / README check tables to match.
+
+Before tagging a release, the three self-quality gates documented in
+[SPEC.md §12](./SPEC.md#12-self-quality-gates) must all exit `0` on the
+mainline tree:
+
+```bash
+python3 test_psa_rules.py
+python3 psa.py --self-check
+python3 psa.py --config-check .psa.config.json.template
+```
 
 The `strip_strings_and_comments(text)` helper is the standard preamble
 for any check that wants to ignore content inside `''`, `""`,

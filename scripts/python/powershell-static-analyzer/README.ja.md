@@ -127,6 +127,12 @@ python3 scripts/python/powershell-static-analyzer/psa.py --check-env
 
 # 通常解析出力に環境サマリを前置（情報提供のみ）
 python3 scripts/python/powershell-static-analyzer/psa.py --show-env script.ps1
+
+# .psa.config.json のスキーマを検証 (ファイル解析は行わない)
+python3 scripts/python/powershell-static-analyzer/psa.py --config-check .psa.config.json
+
+# SPEC.md と RULES が同期しているかを検証 (リリースプロセスのゲート)
+python3 scripts/python/powershell-static-analyzer/psa.py --self-check
 ```
 
 ### 終了コード
@@ -135,7 +141,7 @@ python3 scripts/python/powershell-static-analyzer/psa.py --show-env script.ps1
 |:---:|:---|
 | `0` | クリーン（error も warning もなし） |
 | `1` | warning のみ（CI ではソフトフェイル扱いも可） |
-| `2` | error あり（CI は必ず失敗扱い） |
+| `2` | error あり（CI は必ず失敗扱い）、 もしくは self-quality チェック (`--config-check` / `--self-check`) で違反検出 |
 
 ---
 
@@ -454,10 +460,23 @@ Invoke-ScriptAnalyzer -Path path/to/script.ps1 -Severity Warning,Error
    `severity` / `code` / `line` / `col` / `message` をキーとする dict の
    リストを返す形にする。
 3. `analyze_text()` から `if cfg.enabled['PSA7001']:` でガードして呼ぶ。
-4. 上記のルールカタログと `README.md` にも新コードを記載する。
-5. 下流の利用側リポジトリ（例:
+4. `SPEC.md` §4 に `### 4.N — PSA7001 — タイトル` 見出しと検出仕様を追記
+   （`--self-check` を green に保つため）。
+5. `test_psa_rules.py` に新ルールの positive / negative / edge ケースを
+   追加（ルールカタログテストスイートを完全な状態に保つため）。
+6. 上記のルールカタログと `README.md` にも新コードを記載する。
+7. 下流の利用側リポジトリ（例:
    [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)）
    に通知し、SPEC / README のチェック表を更新してもらう。
+
+リリースタグを打つ前に、 [SPEC.md §12](./SPEC.md#12-self-quality-gates)
+で定められた self-quality 3 本柱がすべて exit `0` で通る必要があります:
+
+```bash
+python3 test_psa_rules.py
+python3 psa.py --self-check
+python3 psa.py --config-check .psa.config.json.template
+```
 
 `strip_strings_and_comments(text)` ヘルパーは、`''`, `""`, `@'…'@`,
 `@"…"@`, `# …`, `<# … #>` 内のコンテンツを無視したいチェックの標準

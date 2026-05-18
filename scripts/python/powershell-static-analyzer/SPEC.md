@@ -261,6 +261,8 @@ Internally, every rule produces dicts with these keys:
 psa.py [OPTIONS] [PATH ...]
 psa.py --list-rules
 psa.py --check-env
+psa.py --config-check PATH_OR_URL
+psa.py --self-check
 psa.py --version
 ```
 
@@ -286,6 +288,8 @@ psa.py --version
 | `--list-rules` | — | — | Print rule catalog to stdout and exit `0`. |
 | `--check-env` | — | — | Run environment detection (§8) and exit `0`. |
 | `--show-env` | — | off | Prepend an environment summary to the normal analysis output. Does not affect exit code. |
+| `--config-check` | `PATH_OR_URL` | — | Validate the schema of a `.psa.config.json` (JSONC) file or URL and exit. See §3.6 / §12. Exits `0` on a clean config, `2` on any error. |
+| `--self-check` | — | — | Verify that the sibling `SPEC.md`'s rule catalog (§4 headings) matches the `RULES` list compiled into this `psa.py`, and exit. See §3.7 / §12. Exits `0` on agreement, `2` on drift. |
 | `--version` | — | — | Print version and exit `0`. |
 
 ### 3.4 Argument forms
@@ -306,6 +310,53 @@ Configuration is layered from lowest to highest priority:
 Higher-priority settings override lower-priority ones for each rule
 independently. There is no "all-or-nothing" cascade; disabling one rule
 in `--disable` leaves all other rules at their previous state.
+
+### 3.6 `--config-check`: configuration schema validation
+
+`--config-check PATH_OR_URL` loads the same `.psa.config.json` source as
+`--config` (local path **or** http(s) URL, JSONC-aware) and walks every
+field in the parsed document against the schema documented in §5.
+Unlike a normal run, `--config-check`:
+
+- does not analyze any PowerShell file,
+- does not read the implicit `./.psa.config.json`,
+- short-circuits before `Config.load()` so a broken config can still
+  be diagnosed (rather than dying inside `Config.load()` on the first
+  problem encountered).
+
+The checker reports one issue per problem and continues to the end
+rather than stopping at the first violation; this lets a CI pipeline
+see all schema problems in a single run. After printing the report it
+exits `2` if any error was found, `0` otherwise.
+
+Categories reported:
+
+| Class | Examples |
+|:---|:---|
+| Unknown top-level key | `"unknown_key": ...` (only the six keys in §5.2 are accepted) |
+| Wrong value type | `"enable": "PSA1001"` (must be a list), `"max_line_length": "120"` (must be int) |
+| Unknown rule ID | `"enable": ["PSAP9999"]` (not in `RULES`) |
+| enable/disable conflict | The same rule listed in BOTH `enable` and `disable` |
+| Bad severity value | `"severity": "warninz"` (must be `error`/`warning`/`info`) |
+| Non-positive integer | `"max_line_length": -10` |
+| Bad regex | `"psa8001_ignore_functions": ["regex:[unterminated"]` |
+
+### 3.7 `--self-check`: SPEC.md ↔ RULES drift detection
+
+`--self-check` reads the sibling `SPEC.md` (same directory as `psa.py`),
+extracts every `### 4.N PSAxxxx — Title` heading from §4, and diffs the
+resulting set against the rule IDs compiled into the `RULES` table of
+the running `psa.py`. The check is symmetric: rules documented in
+`SPEC.md` but missing from `RULES`, and rules in `RULES` but missing
+from `SPEC.md`, are both reported.
+
+The `### 4.32 PSAPxxxx — Project / pipeline convention rules` overview
+heading (which has no concrete rule ID and serves only as a grouping
+heading for §4.33–§4.36) is explicitly skipped by the parser.
+
+Exit codes: `0` on full agreement, `2` on any drift detected (or if
+`SPEC.md` cannot be read at all). The release process MUST keep this
+check green on the mainline branch.
 
 ---
 
@@ -1436,6 +1487,96 @@ To add `PSA7001`:
 3. Use it where needed in the rule implementations.
 
 4. Document in §5.2 of this SPEC.
+
+---
+
+## 12. Self-quality gates
+
+`psa.py` includes three built-in self-quality mechanisms that work
+together to keep the analyzer's own correctness verifiable from the
+command line. The design follows a single principle: **the
+implementation lives inside `psa.py`, and the test suite drives it
+via the CLI** so that consumers and CI pipelines exercise the same
+code paths. There is no separate "test-only" implementation that
+could drift from the production behaviour.
+
+### 12.1 Pillar 1 — Rule self-tests (`test_psa_rules.py`)
+
+The sibling file `test_psa_rules.py` (no third-party dependencies;
+just `python3 test_psa_rules.py`) ships fixtures for every rule in
+the `RULES` catalog. Each rule has, at minimum, one positive case
+(rule must fire) and one negative case (rule must NOT fire), and
+where applicable an edge case that pins false-positive defences
+(e.g., a rule that scans for a keyword must NOT fire when the
+keyword appears inside a string literal, here-string, or comment).
+
+The suite is organised into three sections:
+
+| Section | Coverage |
+|:---|:---|
+| 1 | Per-rule `analyze_text()` calls. Each test enables ONLY the rule under inspection so cross-rule interaction cannot pollute the count. PSA7001 (file-meta-driven) is exercised by passing the same `file_meta` dict that `main()` constructs. |
+| 2 | PSA8001 (cross-file body-hash drift). Drives `collect_function_bodies()` + `check_function_sync()` directly with synthetic multi-file inputs, including the regex-based `psa8001_ignore_functions` ignore list. |
+| 3 | CLI self-checks. Drives `psa.py --config-check` and `psa.py --self-check` via `subprocess` against (a) the shipped tree (must pass), (b) hand-crafted broken configs (must fail with exit 2), and (c) a hand-crafted minimal good config (must pass). |
+
+Adding a new rule to `RULES` without simultaneously extending
+`test_psa_rules.py` is a release-blocking gap; see §12.4 below.
+
+### 12.2 Pillar 2 — Config schema validation (`--config-check`)
+
+`--config-check PATH_OR_URL` validates a `.psa.config.json` against
+the schema documented in §5, without analyzing any PowerShell file.
+See §3.6 for the CLI contract; this subsection covers the design
+rationale.
+
+**Why this rather than failing inside `Config.load()`?**
+`Config.load()` exists to load *whatever the user wrote* into a
+runnable `Config` object. It silently ignores unknown rule IDs in
+`enable`/`disable`, silently coerces some types, and exits the
+process on the first hard error it encounters. None of those
+behaviours are wrong for the analyzer's main path, but they are
+exactly wrong for a config-quality check: a CI pipeline wants to
+see *every* problem in *one* run.
+
+`_validate_config_data()` therefore re-walks the parsed JSON with a
+strict schema and *enumerates* problems. It is independent of
+`Config.load()`; the two functions can be evolved separately.
+
+### 12.3 Pillar 3 — SPEC drift detection (`--self-check`)
+
+`--self-check` reads the sibling `SPEC.md`, extracts every
+`### 4.N PSAxxxx — Title` heading from §4, and diffs that set
+against the `RULES` table compiled into the running `psa.py`. The
+`### 4.32 PSAPxxxx — Project / pipeline convention rules` overview
+heading (no concrete rule ID, serves only as a grouping heading
+for §4.33–§4.36) is intentionally skipped by the parser's regex
+(`PSA[A-Z]?\d{4}` — literal `xxxx` does not match).
+
+The check is symmetric: both directions of drift are reported.
+Exit codes: `0` on full agreement, `2` on any drift detected (or
+if `SPEC.md` cannot be read at all). See §3.7 for the CLI contract.
+
+### 12.4 Release process implications
+
+When preparing a `psa.py` release, the following commands MUST all
+exit `0` on the mainline tree before the version is tagged:
+
+```bash
+python3 test_psa_rules.py
+python3 psa.py --self-check
+python3 psa.py --config-check .psa.config.json.template
+```
+
+When adding a new rule:
+
+1. Add the entry to `RULES`.
+2. Add `### 4.N — PSAxxxx — Title` to `SPEC.md` §4.
+3. Add positive / negative (/ edge) fixtures to `test_psa_rules.py`.
+4. Re-run the three commands above. All three must remain green.
+
+Step 2 keeps `--self-check` green; step 3 keeps the test suite
+green and ensures the rule's behaviour is locked against future
+regressions. Step 4 is the single combined gate; if any of the
+three fails, the release is not ready.
 
 ---
 

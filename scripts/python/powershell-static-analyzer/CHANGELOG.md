@@ -17,6 +17,88 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 _No unreleased changes at this time._
 
+## [3.5.0] — 2026-05-19
+
+### Added
+
+- **`--config-check PATH_OR_URL`**: validate the schema of a
+  `.psa.config.json` (JSONC) file or http(s) URL and exit. The check
+  reports unknown top-level keys, unknown rule IDs in `enable` /
+  `disable`, `enable` ↔ `disable` conflicts, bad `severity` values,
+  non-positive integers for `max_line_length` / `max_function_lines`,
+  type errors throughout, and uncompilable regex patterns in
+  `psa8001_ignore_functions`. Every problem is enumerated; the
+  checker continues to the end rather than stopping at the first
+  violation, so a single CI run sees the full picture. Exits `0` on
+  a clean config, `2` on any error. (Pillar 2 of the self-quality
+  gate design — see SPEC.md §12.2.)
+
+- **`--self-check`**: verify that the sibling `SPEC.md`'s rule
+  catalog (every `### 4.N PSAxxxx — Title` heading in §4) matches
+  the `RULES` table compiled into the running `psa.py`. The check
+  is symmetric — both "documented in SPEC.md but missing from
+  RULES" and "in RULES but missing from SPEC.md" are reported. The
+  `### 4.32 PSAPxxxx — Project / pipeline convention rules` overview
+  heading (an ID-less grouping heading covering §4.33–§4.36) is
+  explicitly skipped by the parser. Exits `0` on agreement, `2` on
+  drift detected, or `2` if `SPEC.md` cannot be read. (Pillar 3 of
+  the self-quality gate design — see SPEC.md §12.3.)
+
+- **`test_psa_rules.py`**: full-catalog regression suite replacing
+  `test_psap_3_4.py`. Ships fixtures for every rule in the `RULES`
+  table (positive + negative + edge cases per rule), plus PSA8001
+  cross-file fixtures driven through `collect_function_bodies()` /
+  `check_function_sync()`, plus subprocess-driven CLI assertions
+  for `--config-check` and `--self-check` (including dynamically
+  created broken configs in a tempdir). 96 test cases at the 3.5.0
+  baseline, no third-party dependencies (`python3
+  test_psa_rules.py`). (Pillar 1 of the self-quality gate design —
+  see SPEC.md §12.1.)
+
+- **SPEC.md §12 "Self-quality gates"**: new normative section
+  describing the three pillars (Pillar 1 / Pillar 2 / Pillar 3),
+  the design principle that the implementation lives inside `psa.py`
+  (not in the test suite) so consumers and CI exercise identical
+  code paths, and the release-process checklist that all three
+  commands (`test_psa_rules.py`, `--self-check`, `--config-check`)
+  must exit `0` on the mainline before a version is tagged.
+
+### Changed
+
+- **`SPEC.md` §3 (Command-line interface)** updated:
+   - §3.1 synopsis adds the two new short-form invocations.
+   - §3.3 options table adds rows for `--config-check` and
+     `--self-check`.
+   - New §3.6 documents `--config-check` (categories reported,
+     short-circuit semantics: it does NOT read the implicit
+     `./.psa.config.json` and runs before `Config.load()` so a
+     broken config can still be diagnosed).
+   - New §3.7 documents `--self-check` (which §4 headings are
+     scanned, which is skipped, and the exit-code contract).
+
+- **`ANSI_GRN`** colour constant added to the small ANSI palette
+  used by terminal output, so `--config-check` and `--self-check`
+  can show a green "all good" line in addition to the existing red
+  / yellow severity colours.
+
+### Notes — known limitation not addressed in this release
+
+- **`PSA5004` (Hardcoded `ComputerName`) is currently a no-op in
+  the standard pipeline.** While auditing rule coverage for the
+  new test suite, the maintainer observed that
+  `check_hardcoded_computername()` matches against a quoted string
+  literal, but `analyze_text()` passes it the output of
+  `strip_strings_and_comments()` (where every string literal is
+  collapsed to whitespace). The rule therefore never fires on its
+  intended pattern. `test_psa_rules.py` pins the current (silent)
+  behaviour with a baseline test so any future fix is flagged as
+  an intentional behaviour change rather than a silent regression.
+  This pre-existing gap has not affected the
+  `Deploy-Drivers-For-WindowsServer` sister-repository scripts:
+  none of the four pipeline scripts contains a hardcoded
+  `-ComputerName` literal. Fixing the rule is tracked separately
+  and will land in a future release.
+
 ## [3.4.0] — 2026-05-19
 
 ### Added

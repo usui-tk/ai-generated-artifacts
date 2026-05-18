@@ -132,7 +132,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.4.0'
+__version__ = '3.5.0'
 
 
 def _verify_version_file_consistency():
@@ -2267,6 +2267,350 @@ def _load_config_source(path_or_url):
         return fh.read()
 
 
+# ---------------------------------------------------------------------------
+# Self-quality-gate facilities (--config-check / --self-check)
+# ---------------------------------------------------------------------------
+#
+# These functions implement psa.py's three pillars of self-quality:
+#
+#   Pillar 1 (rule self-tests):
+#       External: test_psa_rules.py covers all 36 rules with
+#       positive / negative / edge cases. It imports psa as a module
+#       and invokes the analyzer pipeline directly.
+#
+#   Pillar 2 (config schema validation):
+#       Internal: validate_config() below. Reports every problem with
+#       a user-supplied .psa.config.json (unknown top-level keys, wrong
+#       value types, unknown rule IDs in enable/disable, bad severity
+#       value, bad regex patterns in psa8001_ignore_functions, etc.).
+#       CLI surface: psa.py --config-check <path-or-url>.
+#
+#   Pillar 3 (SPEC.md ↔ RULES drift detection):
+#       Internal: check_spec_drift() below. Parses sibling SPEC.md §4
+#       headings, extracts every documented rule ID, and reports any
+#       drift between the documented set and the runtime RULES list.
+#       CLI surface: psa.py --self-check.
+#
+# Both --config-check and --self-check exit non-zero on the first
+# violation found (hard-error policy), making them suitable as CI gates.
+
+# Top-level configuration keys accepted by Config.load(). Anything else
+# in a .psa.config.json is reported by --config-check.
+_CONFIG_ALLOWED_KEYS = frozenset({
+    'enable',
+    'disable',
+    'severity',
+    'max_line_length',
+    'max_function_lines',
+    'psa8001_ignore_functions',
+})
+
+_CONFIG_LIST_OF_STR_KEYS = frozenset({
+    'enable',
+    'disable',
+    'psa8001_ignore_functions',
+})
+
+_CONFIG_INT_KEYS = frozenset({
+    'max_line_length',
+    'max_function_lines',
+})
+
+
+def _validate_config_data(cfg_path, data):
+    """Inspect parsed JSON data; return list of issue dicts.
+
+    Each issue dict has the shape:
+        {'severity': 'error'|'warning', 'message': str}
+    Caller decides exit code from severity counts.
+    """
+    issues = []
+    add = issues.append
+
+    if not isinstance(data, dict):
+        add({
+            'severity': 'error',
+            'message': (
+                f'top-level value must be a JSON object '
+                f'(got {type(data).__name__})'),
+        })
+        return issues
+
+    known_rule_codes = {r[0] for r in RULES}
+
+    # 1. Unknown top-level keys
+    for k in data.keys():
+        if k not in _CONFIG_ALLOWED_KEYS:
+            add({
+                'severity': 'error',
+                'message': (
+                    f'unknown top-level key "{k}"; allowed keys are: '
+                    f'{", ".join(sorted(_CONFIG_ALLOWED_KEYS))}'),
+            })
+
+    # 2. List-of-str keys
+    for k in _CONFIG_LIST_OF_STR_KEYS:
+        if k not in data:
+            continue
+        v = data[k]
+        if not isinstance(v, list):
+            add({
+                'severity': 'error',
+                'message': (
+                    f'"{k}" must be a list (got {type(v).__name__})'),
+            })
+            continue
+        for i, item in enumerate(v):
+            if not isinstance(item, str):
+                add({
+                    'severity': 'error',
+                    'message': (
+                        f'"{k}"[{i}] must be a string '
+                        f'(got {type(item).__name__})'),
+                })
+
+    # 3. enable / disable: rule IDs must exist
+    for k in ('enable', 'disable'):
+        if k not in data or not isinstance(data[k], list):
+            continue
+        for item in data[k]:
+            if not isinstance(item, str):
+                continue  # already reported above
+            code = item.upper()
+            if code not in known_rule_codes:
+                add({
+                    'severity': 'error',
+                    'message': (
+                        f'"{k}" lists unknown rule ID "{item}"; '
+                        f'see --list-rules for the current catalog'),
+                })
+
+    # 4. enable + disable conflict (same rule listed in both)
+    if isinstance(data.get('enable'), list) \
+            and isinstance(data.get('disable'), list):
+        en = {x.upper() for x in data['enable'] if isinstance(x, str)}
+        di = {x.upper() for x in data['disable'] if isinstance(x, str)}
+        for code in sorted(en & di):
+            add({
+                'severity': 'error',
+                'message': (
+                    f'rule "{code}" is listed in BOTH "enable" and '
+                    f'"disable" (ambiguous; remove one)'),
+            })
+
+    # 5. severity
+    if 'severity' in data:
+        v = data['severity']
+        if not isinstance(v, str):
+            add({
+                'severity': 'error',
+                'message': (
+                    f'"severity" must be a string '
+                    f'(got {type(v).__name__})'),
+            })
+        elif v not in ('error', 'warning', 'info'):
+            add({
+                'severity': 'error',
+                'message': (
+                    f'"severity" must be one of error/warning/info '
+                    f'(got "{v}")'),
+            })
+
+    # 6. integer keys
+    for k in _CONFIG_INT_KEYS:
+        if k not in data:
+            continue
+        v = data[k]
+        # JSON numbers without fractional part are still floats if written
+        # like "120.0"; require true integer (bool is a subclass of int
+        # in Python — explicitly reject it).
+        if isinstance(v, bool) or not isinstance(v, int):
+            add({
+                'severity': 'error',
+                'message': (
+                    f'"{k}" must be a positive integer '
+                    f'(got {type(v).__name__})'),
+            })
+        elif v <= 0:
+            add({
+                'severity': 'error',
+                'message': (
+                    f'"{k}" must be > 0 (got {v})'),
+            })
+
+    # 7. psa8001_ignore_functions: regex: entries must compile
+    pf = data.get('psa8001_ignore_functions')
+    if isinstance(pf, list):
+        for i, item in enumerate(pf):
+            if not isinstance(item, str):
+                continue
+            if item.lower().startswith('regex:'):
+                pattern = item[len('regex:'):]
+                try:
+                    re.compile(pattern, re.IGNORECASE)
+                except re.error as e:
+                    add({
+                        'severity': 'error',
+                        'message': (
+                            f'"psa8001_ignore_functions"[{i}] regex '
+                            f'pattern "{pattern}" failed to compile: {e}'),
+                    })
+
+    return issues
+
+
+def validate_config(cfg_path, no_color=False):
+    """Validate a .psa.config.json file; print results; return exit code.
+
+    This is the implementation behind ``psa.py --config-check <path>``.
+    It loads the config exactly the way Config.load() does (JSONC-aware,
+    accepts a local path OR an http(s):// URL), then runs every check in
+    _validate_config_data() over the parsed data.
+
+    Exit codes:
+        0 — config is well-formed and references only known constructs.
+        2 — at least one error was found, or the config could not be
+            loaded / parsed at all. (Strict / hard-error policy:
+            see Q3=A in the Phase 2 design notes.)
+    """
+    if not cfg_path:
+        print('psa.py: --config-check requires a path or URL argument.',
+              file=sys.stderr)
+        return 2
+
+    try:
+        raw_text = _load_config_source(cfg_path)
+    except (OSError, urllib.error.URLError, ssl.SSLError,
+            UnicodeDecodeError) as e:
+        print(f'psa.py: cannot load config {cfg_path}: {e}',
+              file=sys.stderr)
+        return 2
+
+    clean_text = _strip_jsonc_comments(raw_text)
+    try:
+        data = json.loads(clean_text)
+    except json.JSONDecodeError as e:
+        print(f'psa.py: config {cfg_path} is not valid JSONC: {e}',
+              file=sys.stderr)
+        return 2
+
+    issues = _validate_config_data(cfg_path, data)
+
+    print(_color('psa.py config-check report', ANSI_BLD, no_color))
+    print(f'  target : {cfg_path}')
+    print(f'  issues : {len(issues)}')
+    print()
+    if not issues:
+        print(_color('  config is valid (0 issues found)',
+                     ANSI_GRN, no_color))
+        return 0
+    for i, iss in enumerate(issues, 1):
+        sev = iss['severity']
+        color = ANSI_RED if sev == 'error' else ANSI_YEL
+        print(f'  [{i:>2}] {_color(sev.upper(), color, no_color):<7} '
+              f'{iss["message"]}')
+    print()
+    err_count = sum(1 for i in issues if i['severity'] == 'error')
+    if err_count:
+        print(_color(
+            f'  FAILED: {err_count} error(s) found in {cfg_path}',
+            ANSI_RED, no_color))
+        return 2
+    return 0
+
+
+# Match SPEC.md §4 rule headings. Two forms accepted, both shown in
+# repo2's SPEC.md today:
+#   ### 4.1 PSA1001 — Brace balance
+#   ### 4.13b PSA3005 — Start-Transcript -Path ...
+# (Note: SPEC.md §4.32 — "PSAPxxxx — Project / pipeline convention
+# rules" — is an overview/grouping heading with no concrete rule ID;
+# it must be skipped by the parser, hence the explicit PSA-prefix
+# regex below — "PSAPxxxx" with literal "xxxx" does not match.)
+_SPEC_RULE_HEADING_RE = re.compile(
+    r'^###\s+4\.\d+[a-z]?\s+(PSA[A-Z]?\d{4})\b',
+    re.MULTILINE,
+)
+
+
+def _extract_spec_rule_ids(spec_text):
+    """Return ordered, de-duplicated list of rule IDs found in SPEC.md §4."""
+    seen = []
+    seen_set = set()
+    for m in _SPEC_RULE_HEADING_RE.finditer(spec_text):
+        code = m.group(1).upper()
+        if code not in seen_set:
+            seen.append(code)
+            seen_set.add(code)
+    return seen
+
+
+def check_spec_drift(no_color=False):
+    """Compare SPEC.md §4 rule list against runtime RULES; print + exit code.
+
+    This is the implementation behind ``psa.py --self-check``. Walks
+    the sibling SPEC.md (same directory as psa.py), extracts every
+    "### 4.N PSAxxxx — Title" heading, and diffs that set against the
+    RULES list compiled into this psa.py.
+
+    Exit codes:
+        0 — SPEC.md and RULES are in agreement.
+        2 — drift detected, or SPEC.md could not be read at all.
+    """
+    spec_path = Path(__file__).parent / 'SPEC.md'
+    if not spec_path.exists():
+        print(f'psa.py: cannot find sibling SPEC.md at {spec_path}; '
+              f'--self-check requires the canonical psa.py layout '
+              f'(psa.py + SPEC.md + VERSION in the same directory).',
+              file=sys.stderr)
+        return 2
+
+    try:
+        spec_text = spec_path.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError) as e:
+        print(f'psa.py: cannot read {spec_path}: {e}', file=sys.stderr)
+        return 2
+
+    spec_ids = _extract_spec_rule_ids(spec_text)
+    rules_ids = [r[0] for r in RULES]
+
+    in_spec_only = [c for c in spec_ids if c not in set(rules_ids)]
+    in_rules_only = [c for c in rules_ids if c not in set(spec_ids)]
+
+    print(_color('psa.py self-check report (SPEC.md ↔ RULES)',
+                 ANSI_BLD, no_color))
+    print(f'  SPEC.md  : {spec_path}')
+    print(f'  rules    : {len(rules_ids)} in RULES, '
+          f'{len(spec_ids)} in SPEC.md §4')
+    print()
+
+    drift = bool(in_spec_only or in_rules_only)
+    if not drift:
+        print(_color('  SPEC.md and RULES are in sync '
+                     '(no drift detected)', ANSI_GRN, no_color))
+        return 0
+
+    if in_spec_only:
+        print(_color('  Rules documented in SPEC.md but missing from '
+                     'RULES (RULES needs to add them):',
+                     ANSI_RED, no_color))
+        for c in in_spec_only:
+            print(f'    - {c}')
+        print()
+    if in_rules_only:
+        print(_color('  Rules in RULES but missing from SPEC.md '
+                     '(SPEC.md needs documentation):',
+                     ANSI_RED, no_color))
+        for c in in_rules_only:
+            print(f'    - {c}')
+        print()
+    print(_color(
+        f'  FAILED: SPEC.md ↔ RULES drift detected '
+        f'({len(in_spec_only) + len(in_rules_only)} discrepancy/ies)',
+        ANSI_RED, no_color))
+    return 2
+
+
 class Config:
     """Resolved configuration for a single analyzer run."""
 
@@ -2694,6 +3038,7 @@ def format_environment_text(env, no_color):
 ANSI_RED = '\x1b[31m'
 ANSI_YEL = '\x1b[33m'
 ANSI_CYA = '\x1b[36m'
+ANSI_GRN = '\x1b[32m'
 ANSI_BLD = '\x1b[1m'
 ANSI_RST = '\x1b[0m'
 
@@ -2907,6 +3252,18 @@ def parse_args(argv=None):
     p.add_argument('--show-env', action='store_true',
                    help=('Prepend an environment summary to the normal '
                          'analysis output (informational only)'))
+    p.add_argument('--config-check', metavar='PATH_OR_URL',
+                   help=('Validate the schema of a .psa.config.json '
+                         '(JSONC) file or URL and exit. Reports unknown '
+                         'top-level keys, unknown rule IDs in enable/'
+                         'disable, type errors, bad regex in '
+                         'psa8001_ignore_functions, etc. Exits 0 on a '
+                         'clean config, 2 on any error.'))
+    p.add_argument('--self-check', action='store_true',
+                   help=('Verify that the sibling SPEC.md\'s rule '
+                         'catalog (§4 headings) matches the RULES list '
+                         'compiled into this psa.py, and exit. Exits 0 '
+                         'on agreement, 2 on drift.'))
     p.add_argument('--version', action='version',
                    version=f'psa.py {__version__}')
 
@@ -2925,6 +3282,25 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+
+    # --config-check and --self-check are pure self-quality checks: they
+    # do NOT read the user's config or analyze any PowerShell file, and
+    # they do not depend on Config.load() succeeding. We therefore
+    # short-circuit BEFORE Config.load() so that, for example, running
+    # --config-check against a deliberately-broken config can still
+    # report what's wrong (instead of dying inside Config.load() with
+    # a SystemExit). Color and version-file checks are skipped to keep
+    # output predictable for CI capture.
+    if args.config_check:
+        no_color_flag = (args.no_color
+                         or not sys.stdout.isatty()
+                         or bool(os.environ.get('NO_COLOR')))
+        return validate_config(args.config_check, no_color=no_color_flag)
+    if args.self_check:
+        no_color_flag = (args.no_color
+                         or not sys.stdout.isatty()
+                         or bool(os.environ.get('NO_COLOR')))
+        return check_spec_drift(no_color=no_color_flag)
 
     cfg = Config.load(args)
 
