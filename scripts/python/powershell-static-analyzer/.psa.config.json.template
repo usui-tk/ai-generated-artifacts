@@ -5,7 +5,7 @@
 // File format : JSONC  (JSON with C-style line `//` and block `/* */` comments)
 // Encoding    : UTF-8
 // Schema      : SPEC.md §5
-// Applies to  : psa.py 3.3.0 and later 3.x releases
+// Applies to  : psa.py latest mainline (see sibling VERSION file)
 //
 // -----------------------------------------------------------------------------
 // What's new in 3.3.0 (compared to 3.2.0 templates)
