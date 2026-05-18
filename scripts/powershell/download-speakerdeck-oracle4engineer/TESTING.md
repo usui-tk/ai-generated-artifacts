@@ -36,8 +36,8 @@ This document consolidates everything needed to verify and evaluate
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` v3.3.0 on `Download-SpeakerDeck.ps1` (with project `.psa.config.json`) | **0 errors / 0 warnings / 0 info** ✓ | r23 build |
-| File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ for the script | r23 build |
+| `psa.py` v3.3.0 on `Download-SpeakerDeck.ps1` (with project `.psa.config.json`) | **0 errors / 0 warnings / 0 info** ✓ | r24 build |
+| File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ for the script | r24 build |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ pass | 2026-05-11 |
 | Phase 2–5 (Scan / Plan) — DryRun mode | ✓ 804 decks evaluated | 2026-05-11 |
 | Phase 6 (Download) — real run | ✓ **804/804 success** (zero failures) | 2026-05-11 (r17) |
@@ -45,8 +45,8 @@ This document consolidates everything needed to verify and evaluate
 | Phase 8 (UndatedReclassify) — steady state on re-run | ✓ examined: 0 | 2026-05-11 (r17) |
 | Phase 9 (FinalReport) — output validated | ✓ year distribution + log files listed | 2026-05-11 (r17) |
 | Total elapsed (real run, ~5.7 GB, 804 files) | 10 min 4 s | 2026-05-11 (r17) |
-| Debug Trace Facility (A.14) — `debugtrace.jsonl` created on every run | _pending operator confirmation_ | r23 build (static checks only) |
-| Debug Trace Facility (A.14) — stack-balance: every `frame.open` has a matching `frame.close` | _pending operator confirmation_ | r23 build (static checks only) |
+| Debug Trace Facility (A.14) — `debugtrace.jsonl` created on every run | _pending operator confirmation_ | r24 build (static checks only) |
+| Debug Trace Facility (A.14) — stack-balance: every `frame.open` has a matching `frame.close` | _pending operator confirmation_ | r24 build (static checks only) |
 
 ---
 
@@ -77,7 +77,7 @@ Expected output:
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 5156
+Lines  : 5152
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
@@ -340,8 +340,9 @@ before running.
 | r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md (psa.py later promoted to `scripts/python/powershell-static-analyzer/` as the repository-wide canonical location) |
 | r21 | Inline `# rNN:` / "before r13" prose references accumulated in the source, conflicting with the repo-wide revision-history policy | Cosmetic | Strip all per-revision inline comments; centralise per-release history in `CHANGELOG.md`; enable `PSAP0003` / `PSAP0004` to fail any future regression |
 | r22 | Script header comment still referred to `psa.py v3.1.0 (28-rule check set)` after upstream had moved to v3.3.0 (36-rule) | Cosmetic | Sync the in-script reference to v3.3.0 (`PSA1001..PSA9002` plus opt-in `PSAP0001..PSAP0004`) |
-| **r23** | **No operation-level diagnostic existed for failures that are NOT per-deck** (e.g. structural exceptions in Phase 5 filename planning, CSV writes); per-deck `P06_errors.jsonl` could not localise such failures to a step inside the function body | **Medium** | **Port the Debug Trace Facility (Section 1b, ~700 lines) from `usui-tk/Deploy-Drivers-For-WindowsServer` Chipset r60 / BthPan r10; instrument every phase function with `Start-DebugTrace -PhaseId 'PNN'` / `Set-DebugStep` / `Stop-DebugTrace`; activate `Enable-DebugTraceFileOutput` + `Enable-AutoExportOnPhaseFailure` from the main try-block. See SPEC.md A.14** |
+| **r23** | **No operation-level diagnostic existed for failures that are NOT per-deck** (e.g. structural exceptions in Phase 5 filename planning, CSV writes); per-deck `P06_errors.jsonl` could not localise such failures to a step inside the function body | **Medium** | **Implement the Debug Trace Facility (Section 1b, ~700 lines); instrument every phase function with `Start-DebugTrace -PhaseId 'PNN'` / `Set-DebugStep` / `Stop-DebugTrace`; activate `Enable-DebugTraceFileOutput` + `Enable-AutoExportOnPhaseFailure` from the main try-block. See SPEC.md A.14** |
 | r23 | The standalone PDF-metadata PoC (`Test-PdfMetadata.ps1`) outlived its purpose — the same logic now runs in every real Phase 8 invocation | Cosmetic | Delete the PoC; remove all documentation references in the same revision |
+| r24 | In-script comments and the SPEC / CHANGELOG / TESTING docs still pointed at the upstream `usui-tk/Deploy-Drivers-For-WindowsServer` repo even though all referenced helpers (logging, env dump, TLS/UTF-8, Debug Trace Facility) were already embedded in `Download-SpeakerDeck.ps1` after r23. Cross-repo dependency in the docs was now misleading. | Cosmetic | Remove every reference to the upstream repo from the script comments and the four docs; reorganise SPEC.md A.1 so `A.1.3 Companion in-house script` becomes the single canonical reference; simplify A.13 Reuse-before-invention to a two-step procedure |
 
 See [SPEC.md](./SPEC.md) Part D for the formalized "Known Pitfalls" entries
 that bake each of these fixes into the project's institutional memory.
@@ -411,7 +412,7 @@ Test-Path .\work\logs\debugtrace.jsonl
 # 2. The first event is 'file.open'.
 Get-Content .\work\logs\debugtrace.jsonl -First 1 | ConvertFrom-Json |
     Select-Object kind, scriptVer
-# Expected: kind=file.open, scriptVer=speakerdeck-2026.05.18-r23 (or later)
+# Expected: kind=file.open, scriptVer=speakerdeck-2026.05.18-r24 (or later)
 
 # 3. Stack balance: open count == close count.
 $events = Get-Content .\work\logs\debugtrace.jsonl |

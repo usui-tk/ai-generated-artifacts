@@ -147,10 +147,10 @@ This means:
 * Both the download tree and the working tree live under one root, making the
   script's footprint easy to clean up.
 
-If the script lives at `D:\OC\Download-SpeakerDeck.ps1`, the defaults produce:
+If the script lives at `C:\Temp\download-speakerdeck-oracle4engineer\Download-SpeakerDeck.ps1`, the defaults produce:
 
 ```
-D:\OC\
+C:\Temp\download-speakerdeck-oracle4engineer\
   +-- Download-SpeakerDeck.ps1
   +-- downloads\          <- -OutputDir default (content only - PDFs)
   |   +-- <title>__<filename>.<ext>
@@ -418,8 +418,8 @@ Open the failure breakdown table printed at the end of the run:
     Other                                  :   3
 
   Detailed errors saved to:
-    D:\OC\work\logs\P06_errors.jsonl
-    D:\OC\work\diag\failed\
+    C:\Temp\download-speakerdeck-oracle4engineer\work\logs\P06_errors.jsonl
+    C:\Temp\download-speakerdeck-oracle4engineer\work\diag\failed\
 ```
 
 Two artifacts give you the detail you need to investigate:
@@ -479,7 +479,7 @@ Activation is automatic at script startup right after the work
 directory is created. You should see a one-line confirmation on stdout:
 
 ```
-[*] Debug trace -> D:\OC\work\logs\debugtrace.jsonl
+[*] Debug trace -> C:\Temp\download-speakerdeck-oracle4engineer\work\logs\debugtrace.jsonl
 ```
 
 ### When this helps
@@ -590,9 +590,7 @@ implementation. Reuse before invention.
 This script is verified with `psa.py` (PowerShell Static Analyzer), which
 lives at the repository-wide canonical location
 [`scripts/python/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py).
-It originated in the
-[Deploy-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
-project and is a pure-Python tool with no external dependencies.
+It is a pure-Python tool with no external dependencies.
 
 ```bash
 # Run static analysis (psa.py auto-discovers the local .psa.config.json)
@@ -638,7 +636,7 @@ are intentional carry `# psa-disable-line PSA3004 -- <reason>` directives.
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 5156
+Lines  : 5152
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
@@ -671,7 +669,7 @@ Phase boundaries are marked with magenta banners:
 ```
 ========================================================================
  PHASE P03  - ListCollection         (Scan   ) start: 13:04:15
- script: vspeakerdeck-2026.05.18-r23/abc123def456
+ script: vspeakerdeck-2026.05.18-r24/abc123def456
 ========================================================================
 [13:04:15] [+0.00s]      [*] Fetching page 1: https://speakerdeck.com/...
 [13:04:16] [+0.85s]      [*] page 1: +18 decks (cumulative 18)

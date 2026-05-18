@@ -128,10 +128,10 @@ downloads/
 * どのフォルダから `.\Download-SpeakerDeck.ps1` を実行しても、出力先は常に同じ場所（スクリプトの隣）になります。
 * ダウンロード結果と作業ファイルの両方が一箇所にまとまり、後片付けが容易です。
 
-スクリプトが `D:\OC\Download-SpeakerDeck.ps1` にある場合、デフォルトでは以下のような構造になります：
+スクリプトが `C:\Temp\download-speakerdeck-oracle4engineer\Download-SpeakerDeck.ps1` にある場合、デフォルトでは以下のような構造になります：
 
 ```
-D:\OC\
+C:\Temp\download-speakerdeck-oracle4engineer\
   ├─ Download-SpeakerDeck.ps1
   ├─ downloads\          ← -OutputDir デフォルト（コンテンツのみ・PDF）
   │   └─ <title>__<filename>.<ext>
@@ -369,8 +369,8 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
     Other                                  :   3
 
   Detailed errors saved to:
-    D:\OC\work\logs\P06_errors.jsonl
-    D:\OC\work\diag\failed\
+    C:\Temp\download-speakerdeck-oracle4engineer\work\logs\P06_errors.jsonl
+    C:\Temp\download-speakerdeck-oracle4engineer\work\diag\failed\
 ```
 
 詳細な調査には以下の 2 種類の成果物を使います：
@@ -420,7 +420,7 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 ワークディレクトリ作成直後に自動的に有効化され、 標準出力に以下のような 1 行確認メッセージが表示されます：
 
 ```
-[*] Debug trace -> D:\OC\work\logs\debugtrace.jsonl
+[*] Debug trace -> C:\Temp\download-speakerdeck-oracle4engineer\work\logs\debugtrace.jsonl
 ```
 
 ### この機能が役立つ場面
@@ -500,9 +500,7 @@ Phase が例外を投げたとき、 トップレベルの catch ハンドラが
 このスクリプトは `psa.py`（PowerShell Static Analyzer）で検証済みです。
 このツールはレポジトリ全体での正規配置場所
 [`scripts/python/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py)
-に格納されており、別プロジェクト
-[Deploy-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
-で生まれたものです。Pure Python（標準ライブラリのみ）で実装されており、
+に格納されており、Pure Python（標準ライブラリのみ）で実装されており、
 外部依存はありません。
 
 ```bash
@@ -544,7 +542,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 5156
+Lines  : 5152
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
@@ -576,7 +574,7 @@ Issues : 0 errors, 0 warnings, 0 info
 ```
 ========================================================================
  PHASE P03  - ListCollection         (Scan   ) start: 13:04:15
- script: vspeakerdeck-2026.05.18-r23/abc123def456
+ script: vspeakerdeck-2026.05.18-r24/abc123def456
 ========================================================================
 [13:04:15] [+0.00s]      [*] Fetching page 1: https://speakerdeck.com/...
 [13:04:16] [+0.85s]      [*] page 1: +18 decks (cumulative 18)

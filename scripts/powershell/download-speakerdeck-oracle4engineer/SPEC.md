@@ -46,36 +46,10 @@
 
 ## A.1 Reference Assets
 
-These are the canonical sources for shared logic. **Pull from these directly;
-do not re-implement.**
+These are the canonical sources for shared logic in this repository.
+**Pull from these directly; do not re-implement.**
 
-### A.1.1 Reference PowerShell scripts (phase / banner / log patterns)
-
-```
-https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer
-  ├── Deploy-AMDChipsetDriverOnWindowsServer.ps1   (21-phase canonical, r47)
-  ├── Deploy-AMDGraphicsDriverOnWindowsServer.ps1  (r16, graphics-specific)
-  └── Deploy-AMDNpuDriverOnWindowsServer.ps1       (r2/r3, NPU-specific)
-```
-
-These 21-phase deployment scripts are the canonical source for:
-
-- `Write-PhaseHeader` / `Write-PhaseFooter` / `Format-Elapsed`
-- `Write-Step` / `Write-Ok` / `Write-Warn2` / `Write-Fail` / `Write-Skip`
-- `Write-SubHeader` / `Write-SubHeader2` (Level-1 / Level-2 in-phase banners)
-- Banner block layout (Magenta `=` × 72, script-tag line, phase entry / exit)
-- `Show-PowerShellEnvironment` (P00 environment dump)
-- `Show-OperatingSystemDetail` (OS profile / build resolution)
-- `Test-AdminPrivilege` (hard-fail check on non-elevated session, if needed)
-- `Set-NetworkProtocol` (TLS hardening)
-- `Show-RunSummary` (per-action summary with PhaseTimings + ScriptHash)
-
-When starting a new script, **copy these helpers verbatim** from the most
-recent in-house implementation (typically the latest revision of an existing
-production script in the same repo or sister repo) rather than from the
-reference URL, because the in-house copy may carry already-applied fixes.
-
-### A.1.2 Static analyzer
+### A.1.1 Static analyzer
 
 ```
 scripts/python/powershell-static-analyzer/psa.py
@@ -84,9 +58,7 @@ scripts/python/powershell-static-analyzer/psa.py
 `psa.py` is a **pure Python** static analyzer (no PowerShell installation
 required), version **3.3.0** at the time of this writing, with a 36-rule
 check set spanning `PSA1001`..`PSA9002` plus `PSAP0001`..`PSAP0004`
-(opt-in pipeline-convention rules). It was originally developed for the
-[`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
-repository. Within this repository it must be:
+(opt-in pipeline-convention rules). Within this repository it must be:
 
 - Reused as-is from the canonical location
   `scripts/python/powershell-static-analyzer/psa.py`
@@ -97,13 +69,11 @@ repository. Within this repository it must be:
 
 See A.11 for project-local conventions and
 [`scripts/python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-([日本語](../../python/powershell-static-analyzer/SPEC.md))
 for the authoritative rule specification.
 
-### A.1.3 Companion specifications (this folder)
+### A.1.2 Companion specifications (this folder)
 
-Each script folder in this style carries the following set of documentation,
-mirroring the pattern of [`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer):
+Each script folder in this style carries the following set of documentation:
 
 - `README.md` / `README.ja.md` — end-user documentation
   (installation, quick start, parameters, troubleshooting)
@@ -120,14 +90,24 @@ Repository-level files like `LICENSE`, `CONTRIBUTING.md`, and the top-level
 `README.md` / `README.ja.md` live at the repository root and are shared
 across all scripts in the repository.
 
-### A.1.4 Companion in-house script (latest reference)
+### A.1.3 Companion in-house script (latest reference)
 
-The Speaker Deck Bulk Downloader (`Download-SpeakerDeck.ps1`, r23 as of
+The Speaker Deck Bulk Downloader (`Download-SpeakerDeck.ps1`, r24 as of
 2026-05-18, located at
-`scripts/powershell/download-speakerdeck-oracle4engineer/`) is the most
-recent reference for:
+`scripts/powershell/download-speakerdeck-oracle4engineer/`) is the
+canonical in-house reference and the **single source of truth** for the
+following reusable assets:
 
-- 9-phase architecture with year-folder output organization
+- 9-phase architecture (`Setup` / `Scan` / `Plan` / `Fetch` / `Verify` /
+  `Report` groups) with year-folder output organization
+- Logging helpers: `Write-PhaseHeader` / `Write-PhaseFooter` /
+  `Format-Elapsed` / `Write-Step` / `Write-Ok` / `Write-Warn` /
+  `Write-Fail` / `Write-Skip` / `Write-SubSection`
+- Banner block layout (Magenta `=` × 72, script-tag line, phase entry /
+  exit)
+- Environment dump: `Show-PowerShellEnvironment` /
+  `Assert-PowerShellCompatibility`
+- Host-configuration helpers: `Set-ConsoleUtf8` / `Set-Tls12`
 - Adaptive parallel download via Runspace Pool
 - PDF metadata reclassification (Phase 8 / year_overrides.csv pattern)
 - CSV cross-phase column conventions (Section A.9)
@@ -135,10 +115,10 @@ recent reference for:
   `Start-DebugTrace` / `Stop-DebugTrace` wrapping plus `Set-DebugStep`
   checkpoints, with JSONL streaming and auto-export-on-failure)
 
-When asked to build a new bulk-fetch or data-processing script, **start by
-reading this script** and copying its skeleton.
+When asked to build a new bulk-fetch or data-processing script in this
+repo, **start by reading this script** and copying its skeleton verbatim.
 
-### A.1.5 Folder naming convention for target-specific scripts
+### A.1.4 Folder naming convention for target-specific scripts
 
 When a single script is generic enough to be reused against multiple
 target accounts, services, or tenants, the script body itself stays
@@ -852,20 +832,19 @@ documentation language policy.
 
 When a new feature is needed, in order:
 
-1. **Check the in-house reference scripts** for the closest existing
-   implementation. Copy and adapt.
-2. **Check the reference URL** in A.1.1 for canonical patterns.
-3. **Only if neither covers it**, design from first principles — and
-   document the new pattern in this SPEC so the next script can reuse it.
+1. **Check the in-house reference script** (A.1.3) for the closest
+   existing implementation. Copy and adapt.
+2. **Only if it does not cover the case**, design from first principles
+   — and document the new pattern in this SPEC so the next script can
+   reuse it.
 
 ## A.14 Debug Trace Facility
 
 The Debug Trace Facility is a reusable operation-level diagnostic
-mechanism ported from `usui-tk/Deploy-Drivers-For-WindowsServer`
-(Chipset r60 / BthPan r10). It complements the per-record diagnostics
-documented in A.8: where A.8 answers "which record failed", the Debug
-Trace Facility answers "which named step inside this function was in
-progress when the exception was raised".
+mechanism implemented inside `Download-SpeakerDeck.ps1`. It complements
+the per-record diagnostics documented in A.8: where A.8 answers "which
+record failed", the Debug Trace Facility answers "which named step
+inside this function was in progress when the exception was raised".
 
 This is intentionally placed in **Part A** because the facility is
 fully generic: it makes no assumption about phases, records, deck
@@ -1041,7 +1020,7 @@ on disk — negligible compared to the 5.7 GB of PDF downloads.
 |---|---|
 | Script name | `Download-SpeakerDeck.ps1` |
 | Display name | Speaker Deck Bulk Downloader |
-| Current revision | r23 (`debugtrace-facility-and-pdfmeta-poc-removal`); see [`CHANGELOG.md`](./CHANGELOG.md) for the per-release log |
+| Current revision | r24 (`remove-upstream-repo-references`); see [`CHANGELOG.md`](./CHANGELOG.md) for the per-release log |
 | Purpose | Bulk-download all public PDFs from a Speaker Deck account |
 | Owner | (fill in) |
 

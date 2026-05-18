@@ -17,14 +17,51 @@ This CHANGELOG is **English only** per the
 
 _No unreleased changes at this time._
 
+## [r24] — 2026-05-18 — `remove-upstream-repo-references`
+
+### Changed
+
+- All references to the upstream repository
+  `usui-tk/Deploy-Drivers-For-WindowsServer` have been removed from the
+  in-script comments, `README.md`, `README.ja.md`, `SPEC.md`,
+  `CHANGELOG.md` (this file), and `TESTING.md`. The Debug Trace Facility
+  and the host-configuration helpers introduced in r23 are now
+  documented as self-contained features of `Download-SpeakerDeck.ps1`;
+  the script is the single source of truth in this repo.
+- `SPEC.md` Part A.1 reorganised: the former `A.1.1 Reference PowerShell
+  scripts` section (which pointed at the upstream repo) has been
+  removed, and the remaining sub-sections renumbered:
+  - `A.1.2 Static analyzer` -> `A.1.1`
+  - `A.1.3 Companion specifications (this folder)` -> `A.1.2`
+  - `A.1.4 Companion in-house script (latest reference)` -> `A.1.3`
+    (and updated to list all reusable assets exposed by the in-house
+    script, including the logging helpers and `Set-ConsoleUtf8` /
+    `Set-Tls12`, so it stands alone without the upstream cross-reference)
+  - `A.1.5 Folder naming convention for target-specific scripts` -> `A.1.4`
+- `A.13 Reuse before invention` simplified from a three-step procedure
+  (in-house -> upstream URL -> first principles) to a two-step procedure
+  (in-house -> first principles).
+- `$Script:ScriptVersion` bumped to `speakerdeck-2026.05.18-r24`,
+  `$Script:ScriptTag` set to `remove-upstream-repo-references`.
+
+### Verified
+
+- `psa.py` v3.3.0 with `PSAP0003` / `PSAP0004` opt-ins:
+  **0 errors / 0 warnings / 0 info** against the updated script.
+
+### Notes
+
+- This release contains no functional changes; behaviour is identical
+  to r23. It is a documentation-cleanup release that consolidates the
+  story around the in-house implementation as the sole canonical
+  reference within this repo.
+
 ## [r23] — 2026-05-18 — `debugtrace-facility-and-pdfmeta-poc-removal`
 
 ### Added
 
-- **Debug Trace Facility** (Section 1b, ~700 lines) ported from the
-  `usui-tk/Deploy-Drivers-For-WindowsServer` reference scripts
-  (Chipset r60 / BthPan r10). Three integrated subsystems share one
-  set of trace primitives:
+- **Debug Trace Facility** (Section 1b, ~700 lines). Three integrated
+  subsystems share one set of trace primitives:
   - **Trace primitives** (`Start-DebugTrace` / `Set-DebugStep` /
     `Stop-DebugTrace` / `Format-DebugFailure` /
     `Write-DebugFailureReport`) record per-step checkpoints inside
@@ -51,10 +88,11 @@ _No unreleased changes at this time._
   `Start-DebugTrace -PhaseId 'PNN'` / `Stop-DebugTrace`, with
   `Set-DebugStep` checkpoints at the major operational boundaries
   (HTTP fetches, CSV writes, parallel pool start/stop, etc.).
-- Helper functions `Set-ConsoleUtf8` (sets all three encoding sources
-  per the repo2 convention) and `Set-Tls12` (TLS 1.2/1.1/1.0
-  fallback bitmask) extracted from the original inline `try { }`
-  blocks for reuse and clearer call-site intent.
+- Helper functions `Set-ConsoleUtf8` (sets all three encoding sources:
+  `Console.OutputEncoding`, `Console.InputEncoding`, `$OutputEncoding`)
+  and `Set-Tls12` (TLS 1.2/1.1/1.0 fallback bitmask) extracted from the
+  original inline `try { }` blocks for reuse and clearer call-site
+  intent.
 
 ### Changed
 
@@ -165,6 +203,7 @@ repository.
 ---
 
 [Unreleased]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
+[r24]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
 [r23]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
 [r22]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
 [r21]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer

@@ -199,9 +199,8 @@ $ErrorActionPreference = 'Stop'
 # ------------------------------------------------------------
 # Reusable host-configuration helpers (Set-ConsoleUtf8 / Set-Tls12)
 # ------------------------------------------------------------
-# These helpers were extracted from the original inline try-blocks to
-# match the convention used by the sister scripts in
-# usui-tk/Deploy-Drivers-For-WindowsServer. Each helper is best-effort:
+# These helpers were extracted from the original inline try-blocks for
+# reuse and clearer call-site intent. Each helper is best-effort:
 # any failure is swallowed (the empty catch carries an inline
 # psa-disable-line comment with a justification) because non-elevated /
 # restricted hosts may not allow the assignment, and the script body
@@ -370,8 +369,8 @@ function Initialize-RuntimeDirectories {
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'speakerdeck-2026.05.18-r23'
-$Script:ScriptTag     = 'debugtrace-facility-and-pdfmeta-poc-removal'
+$Script:ScriptVersion = 'speakerdeck-2026.05.18-r24'
+$Script:ScriptTag     = 'remove-upstream-repo-references'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -410,12 +409,9 @@ $Script:YearOverrides = @{}
 # ============================================================
 # SECTION 1b: Debug Trace Facility
 # ============================================================
-# A reusable diagnostic helper, ported from the
-# usui-tk/Deploy-Drivers-For-WindowsServer reference scripts
-# (Deploy-AMDChipsetDriverOnWindowsServer.ps1 r60 and
-# Deploy-MSBthPanInboxOnWindowsServer.ps1 r10), used to pinpoint the
-# exact failing operation inside a complex function body. Three
-# integrated subsystems:
+# A reusable diagnostic helper used to pinpoint the exact failing
+# operation inside a complex function body. Three integrated
+# subsystems:
 #
 #   (1) Trace primitives: Start-DebugTrace / Set-DebugStep /
 #                         Stop-DebugTrace / Format-DebugFailure /
