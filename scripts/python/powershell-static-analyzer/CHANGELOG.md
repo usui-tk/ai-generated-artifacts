@@ -15,6 +15,31 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub Actions CI workflow enforcing the three self-quality gates
+  on every push and pull request.** New workflow:
+  `.github/workflows/scripts__python__powershell-static-analyzer.yml`.
+  - Pillar 1 (`pytest test_psa_rules.py`) — runs the full rule
+    self-test suite that ships in this directory.
+  - Pillar 2 (`python3 psa.py --config-check .psa.config.json.template`)
+    — validates the shipped configuration template against the
+    documented schema.
+  - Pillar 3 (`python3 psa.py --self-check`) — verifies that
+    `SPEC.md` §4 rule headings agree with the runtime RULES table.
+  - Triggers: push / pull_request on `main` when `psa.py`, `VERSION`,
+    `test_psa_rules.py`, `SPEC.md`, `.psa.config.json.template`, or
+    the workflow file itself changes; plus `workflow_dispatch`.
+  - Timeout tier: T1 (30 minutes) per repository-root `/SPEC.md`
+    §4.1. Fork-PR `if`-guard per `/SPEC.md` §5.
+- **`SPEC.md` §12.6 *Continuous Integration in this repository*.**
+  A new subsection that records where the CI workflow lives and
+  points to repository-root `/SPEC.md` for governance. The four
+  normative subsections §12.1–§12.4 and the informative §12.5 are
+  unchanged.
+- **CI status badge** in `README.md` and `README.ja.md` immediately
+  after the title.
+
 ### Changed
 
 - **Documentation: cross-link to consumer-side adoption of the

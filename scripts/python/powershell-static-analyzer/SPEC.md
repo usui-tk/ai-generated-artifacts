@@ -1622,6 +1622,25 @@ any drift the consumer cares about. Consumers MAY run the test
 suite directly when investigating a suspected analyzer bug, but
 they are not expected to wire it into their CI.
 
+### 12.6 Continuous Integration in this repository
+
+The three pillars defined in §12.1, §12.2, and §12.3 are enforced
+automatically on every push and pull request that touches `psa.py`,
+its sibling `VERSION` file, `test_psa_rules.py`, this `SPEC.md`, or
+`.psa.config.json.template`. The workflow lives at:
+
+```
+.github/workflows/scripts__python__powershell-static-analyzer.yml
+```
+
+CI governance — design principles, naming conventions, timeout
+tiers, fork-PR handling, and the rule that CI change history is
+recorded in this directory's own `CHANGELOG.md` — is documented in
+the repository-root `SPEC.md` at the top of the `ai-generated-artifacts`
+repository. This sub-project's CI does **not** maintain its own
+governance file; updates to the workflow are recorded in
+[`CHANGELOG.md`](./CHANGELOG.md) here.
+
 ---
 
 ## Appendix A — Rule severity matrix

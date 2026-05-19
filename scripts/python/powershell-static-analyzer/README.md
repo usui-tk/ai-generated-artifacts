@@ -1,5 +1,7 @@
 # powershell-static-analyzer
 
+[![psa.py CI](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml)
+
 > 🇺🇸 English / 🇯🇵 [日本語](./README.ja.md)
 
 A single-file Python 3 static analyzer for PowerShell scripts (`psa.py`).
