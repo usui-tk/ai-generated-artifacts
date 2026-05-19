@@ -62,6 +62,7 @@ Pull requests are accepted but reviewed on a best-effort basis with no guarantee
   See [`scripts/README.md`](./scripts/README.md) → "Static Analysis for PowerShell Scripts".
 - [ ] **For PowerShell changes: verify `psa.py` is at the latest mainline version before validating.** Compare the mainline `VERSION` against your local copy and refresh both `psa.py` + `VERSION` together if they differ. See [`README.md`](./README.md) → "psa.py Versioning Policy" for the full workflow.
 - [ ] If you touch a project under `scripts/<lang>/<project>/` that ships a `SPEC.md`, verify the corresponding **Part C — Quality Gates & Validation Checklist** before committing.
+- [ ] **For CI workflow changes (anything under `.github/workflows/`, the `PSScriptAnalyzerSettings.psd1` files, or the root [`SPEC.md`](./SPEC.md)): read [`SPEC.md`](./SPEC.md) first, then record the change in the CI-target script's `CHANGELOG.md` — never in a separate location ([`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9 forbids `.github/workflows/CHANGELOG.md` and similar).**
 - [ ] Never commit real secrets (API keys, account IDs you wish to keep private, passwords, tokens). See [`README.md`](./README.md) → "No credentials in artifacts".
 
 ### PR description should include
@@ -167,6 +168,7 @@ PR はベストエフォートで受け付けます(レビュー期限は保証�
   詳細は [`scripts/README.md`](./scripts/README.md) の「PowerShell スクリプトの静的解析」を参照
 - [ ] **PowerShell 変更時: 検証前に `psa.py` が latest mainline バージョンであることを確認する。** mainline の `VERSION` をローカルコピーと比較し、 異なる場合は `psa.py` と `VERSION` の両方を一緒に更新する。 詳細ワークフローは [`README.ja.md`](./README.ja.md) の「psa.py のバージョニングポリシー」セクションを参照
 - [ ] `scripts/<lang>/<project>/` 配下で `SPEC.md` を持つプロジェクトを変更する場合、コミット前に対応する **Part C — 品質ゲートと検証チェックリスト** を確認する
+- [ ] **CI ワークフローの変更 (`.github/workflows/` 配下、 `PSScriptAnalyzerSettings.psd1` ファイル、 ルート [`SPEC.md`](./SPEC.md) のいずれか) を行う場合: まず [`SPEC.md`](./SPEC.md) を読み、 変更内容を CI 対象スクリプトの `CHANGELOG.md` に記録する — 別の場所に記録してはならない ([`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9 が `.github/workflows/CHANGELOG.md` 等の作成を禁止している)。**
 - [ ] 実在の機密情報(API キー、非公開アカウント ID、パスワード、トークン)を **絶対にコミットしない**。[`README.ja.md`](./README.ja.md) の「アーティファクトに認証情報を埋め込まないでください」を参照
 
 ### PR 説明に含めるべき内容

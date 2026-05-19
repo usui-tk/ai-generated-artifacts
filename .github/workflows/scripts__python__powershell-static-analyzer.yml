@@ -1,0 +1,130 @@
+# ============================================================================
+# CI workflow for scripts/python/powershell-static-analyzer/
+# psa.py self-quality gates (Pillar 1, 2, 3).
+#
+# Pillar definitions are authoritative in psa.py SPEC.md §12 and in the
+# psa.py source comment block around lines 2308-2329:
+#   Pillar 1 (Rule self-tests):       pytest test_psa_rules.py
+#   Pillar 2 (Config schema check):   psa.py --config-check <path>
+#   Pillar 3 (SPEC drift detection):  psa.py --self-check
+#
+# Governance policies (design principles, naming, timeout tiers, Fork PR
+# handling, etc.) are defined in the repository-level specification:
+#   /SPEC.md
+#
+# Change history for this workflow is recorded in:
+#   scripts/python/powershell-static-analyzer/CHANGELOG.md
+#
+# Do NOT add per-workflow CHANGELOG.md, README.md, or governance docs under
+# .github/workflows/. See /SPEC.md §9 [SPEC-CI-070].
+# ============================================================================
+name: 'scripts/python/powershell-static-analyzer — psa.py CI'
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/python/powershell-static-analyzer/psa.py'
+      - 'scripts/python/powershell-static-analyzer/VERSION'
+      - 'scripts/python/powershell-static-analyzer/test_psa_rules.py'
+      - 'scripts/python/powershell-static-analyzer/SPEC.md'
+      - 'scripts/python/powershell-static-analyzer/.psa.config.json.template'
+      - '.github/workflows/scripts__python__powershell-static-analyzer.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/python/powershell-static-analyzer/psa.py'
+      - 'scripts/python/powershell-static-analyzer/VERSION'
+      - 'scripts/python/powershell-static-analyzer/test_psa_rules.py'
+      - 'scripts/python/powershell-static-analyzer/SPEC.md'
+      - 'scripts/python/powershell-static-analyzer/.psa.config.json.template'
+      - '.github/workflows/scripts__python__powershell-static-analyzer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: psa-py-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  psa-py-self-check:
+    # Fork PR guard: see /SPEC.md §5 [SPEC-CI-030]. Same-repo PRs and
+    # push/dispatch always proceed; fork-origin PRs are skipped.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # T1 — Light (see /SPEC.md §4 [SPEC-CI-020])
+    defaults:
+      run:
+        working-directory: scripts/python/powershell-static-analyzer
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: '[setup] Install pytest'
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest
+
+      - name: '[sanity] Python syntax check'
+        # Quick fail-fast before running heavier gates. py_compile catches
+        # parse-level errors that would otherwise surface as confusing
+        # tracebacks deep in pytest or in the analyzer pipeline.
+        run: python3 -m py_compile psa.py test_psa_rules.py
+
+      - name: '[Pillar 1] Rule self-tests (pytest test_psa_rules.py)'
+        # Exercises all 36 rules with positive / negative / edge fixtures.
+        # See psa.py SPEC.md §12.1.
+        run: python3 -m pytest test_psa_rules.py -v --tb=short | tee pillar1.log
+
+      - name: '[Pillar 2] Config schema validation (psa.py --config-check)'
+        # Validates the shipped .psa.config.json.template against the
+        # documented schema (psa.py SPEC.md §5 / §12.2).
+        run: python3 psa.py --config-check .psa.config.json.template | tee pillar2.log
+
+      - name: '[Pillar 3] SPEC drift detection (psa.py --self-check)'
+        # Compares SPEC.md §4 rule headings against the runtime RULES table
+        # (psa.py SPEC.md §12.3). Exits non-zero on any drift.
+        run: python3 psa.py --self-check | tee pillar3.log
+
+      - name: '[Summary] Write Step Summary'
+        if: always()
+        run: |
+          {
+            echo "## psa.py — Self-quality gates"
+            echo ""
+            echo "Three pillars (per psa.py SPEC.md §12) were exercised on the working tree."
+            echo ""
+            echo "### Pillar 1 — Rule self-tests (\`pytest test_psa_rules.py\`)"
+            if [ -f pillar1.log ]; then
+              tail -20 pillar1.log
+            fi
+            echo ""
+            echo "### Pillar 2 — Config schema validation (\`psa.py --config-check\`)"
+            if [ -f pillar2.log ]; then
+              cat pillar2.log
+            fi
+            echo ""
+            echo "### Pillar 3 — SPEC drift detection (\`psa.py --self-check\`)"
+            if [ -f pillar3.log ]; then
+              cat pillar3.log
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: '[Artifacts] Upload logs'
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: psa-py-${{ github.run_id }}
+          path: |
+            scripts/python/powershell-static-analyzer/pillar1.log
+            scripts/python/powershell-static-analyzer/pillar2.log
+            scripts/python/powershell-static-analyzer/pillar3.log
+          if-no-files-found: warn
+          retention-days: 14

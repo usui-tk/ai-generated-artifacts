@@ -19,6 +19,7 @@ ai-generated-artifacts/
 ├── LICENSE
 ├── README.md                 # 英語版（プライマリ）
 ├── README.ja.md              # 日本語版
+├── SPEC.md                   # レポジトリレベルの CI / 横断的ポリシー（英語のみ）
 ├── .gitignore
 │
 ├── research/                 # リサーチ記事、調査、分析
@@ -37,6 +38,48 @@ ai-generated-artifacts/
 - サブカテゴリ方針と命名規則
 - 必須メタデータまたはヘッダー規約
 - ディレクトリ固有の免責事項
+
+---
+
+## 横断的仕様
+
+複数のサブプロジェクトにまたがるポリシー（たとえば、すべてのワークフロー
+共通の継続的インテグレーション設計とタイムアウト規律）は、レポジトリ
+直下の [`SPEC.md`](./SPEC.md) に集約しています。サブプロジェクト固有の
+仕様は、各サブプロジェクトの `SPEC.md` を参照してください。
+
+[`SPEC.md`](./SPEC.md) を最初に参照するべきケースは以下のとおりです。
+
+- `.github/workflows/` 配下に新規ワークフローを追加するとき
+- 既存ワークフローのタイムアウト、命名、または `if` ガードを変更するとき
+- フォーク PR のレビュー時に、公開されたレビュープロトコルを参照するとき
+
+---
+
+## 継続的インテグレーション
+
+本レポジトリは `.github/workflows/` に 4 本の GitHub Actions ワークフローを
+備えています。各バッジは下表のとおりです。サブプロジェクトの README には、
+そのサブプロジェクトに該当するバッジのみを掲載しています。
+
+| ワークフロー | 対象 | バッジ |
+|:---|:---|:---|
+| psa.py セルフ品質ゲート | `scripts/python/powershell-static-analyzer/` | [![psa.py CI](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml) |
+| Download-SpeakerDeck STAGE 1（Linux） | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 1](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml) |
+| Download-SpeakerDeck STAGE 2（Windows） | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 2](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml) |
+| Download-SpeakerDeck STAGE 3（リリース検証） | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 3](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml) |
+
+ガバナンス、命名規則、タイムアウト階層、フォーク PR レビュープロトコルは
+すべて [`SPEC.md`](./SPEC.md)（§2 〜 §9）で定義しています。CI ごとの変更
+履歴は対象スクリプトの `CHANGELOG.md` に記録されます。`.github/workflows/CHANGELOG.md`
+のような中央集約ファイルは存在せず、[`SPEC.md`](./SPEC.md) §9 で作成が
+禁止されています。
+
+レポジトリレベルのセキュリティベースライン（Dependabot、 シークレット
+スキャン、 push protection、 CodeQL、 Actions allowlist、 `GITHUB_TOKEN`
+スコープポリシー等）については [`SPEC.md` §11 (SPEC-CI-080)](./SPEC.md#11-spec-ci-080-repository-security-baseline) を参照してください。 各ワークフローの
+`[Artifacts] Upload logs` ステップでアップロード可能なファイルを制限する
+アーティファクト最小化ポリシーは [`SPEC.md` §12 (SPEC-CI-081)](./SPEC.md#12-spec-ci-081-artifact-content-minimization) に記載しています。
 
 ---
 
@@ -135,6 +178,8 @@ ai-generated-artifacts/
 **静的解析による強制**: PowerShell スクリプトについては、 `psa.py` が 2 つの opt-in ルール — `PSAP0003` (インラインの `# rNN:` リビジョンタグ) と `PSAP0004` (EOF の `REVISION HISTORY` ブロック) — を提供し、 本ポリシー違反を検出します。 各サブプロジェクトは `.psa.config.json` の `enable` リストで opt-in します。 (consumer は常に最新の mainline `psa.py` で検証してください。 下の「psa.py のバージョニングポリシー」セクションを参照。)
 
 各サブプロジェクト固有のガイダンスは、 サブプロジェクトの `SPEC.md` の **Revision discipline** サブセクションを参照してください。
+
+**CI の変更は CI 対象スクリプトの `CHANGELOG.md` に記録します** (`.github/workflows/CHANGELOG.md` のような別個の中央集約ファイルは存在せず、 [`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9 で作成が禁止されています)。 ワークフロー YAML への変更は、 そのワークフローが検証するスクリプトの `CHANGELOG.md` に記録します。
 
 ---
 

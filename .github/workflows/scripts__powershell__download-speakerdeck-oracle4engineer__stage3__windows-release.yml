@@ -1,0 +1,86 @@
+# ============================================================================
+# CI workflow for scripts/powershell/download-speakerdeck-oracle4engineer/
+# STAGE 3 — Windows release verification (full -DryRun execution).
+#
+# Runs on release publication (release/published event) or manual dispatch.
+# Independent of the STAGE 1 → 2 workflow_run chain.
+#
+# Performs a full Phase 1-5 dry-run including Speaker Deck network access
+# but writes no files; verifies that the script can perform the entire
+# evaluate-and-plan pipeline end-to-end against the live target on
+# Windows PowerShell 5.1.
+#
+# Governance: /SPEC.md
+# Change history: scripts/powershell/download-speakerdeck-oracle4engineer/CHANGELOG.md
+# ============================================================================
+name: 'scripts/powershell/download-speakerdeck-oracle4engineer — STAGE 3: Windows release verification'
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual run (e.g., "Re-validate after dependency change")'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsd-stage3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-release:
+    # Fork PR guard: kept for consistency (release/dispatch events do not
+    # come from fork PRs, so this is formally always true here).
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-latest
+    # T3 — Heavy: 240 minutes (policy maximum, see /SPEC.md §4 [SPEC-CI-020])
+    # Rationale: full Phase 1-5 dry-run including Speaker Deck network
+    # access. Network round-trip time for ~100 decks at the
+    # configured delay/jitter dominates wall-clock; rate-limit
+    # back-off can extend any single run substantially.
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: '[Release-verify] Full DryRun execution (Phase 1-5)'
+        shell: powershell
+        timeout-minutes: 230
+        working-directory: scripts/powershell/download-speakerdeck-oracle4engineer
+        run: |
+          # Full Phase 1-5 dry-run including Speaker Deck access.
+          # No actual file writes happen because -DryRun explicitly marks
+          # Phase 6 (Download) and Phase 7 (Reconciliation) as SKIPPED.
+          # This verifies network reachability, HTML structure parsing,
+          # and the full filename-plan pipeline.
+          .\Download-SpeakerDeck.ps1 -DryRun
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Release verification failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: '[Summary] Write Step Summary'
+        if: always()
+        shell: powershell
+        run: |
+          "## STAGE 3 — Release verification results" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "Full -DryRun execution (Phase 1 through Phase 5)." >> $env:GITHUB_STEP_SUMMARY
+          "See the job log for the complete phase-by-phase output." >> $env:GITHUB_STEP_SUMMARY
+
+      - name: '[Artifacts] Upload logs'
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsd-stage3-${{ github.run_id }}
+          path: |
+            scripts/powershell/download-speakerdeck-oracle4engineer/work/logs/**
+            scripts/powershell/download-speakerdeck-oracle4engineer/*.log
+          if-no-files-found: warn
+          retention-days: 30

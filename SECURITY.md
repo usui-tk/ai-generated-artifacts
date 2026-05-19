@@ -49,6 +49,17 @@ For completeness, the following are already enforced by the repository:
 - Artifacts must **never** contain real secrets (`API keys`, `passwords`, `tokens`, sensitive account IDs). See [`README.md`](./README.md) → "No credentials in artifacts".
 - PowerShell scripts in this repository are verified with [`psa.py`](./scripts/python/powershell-static-analyzer/) which includes security-class rules (`PSA5xxx`) for plain-text password parameters, `Invoke-Expression` usage, broken hash algorithms, and hardcoded `ComputerName`.
 - All scripts ship with a `## ⚠️ Disclaimer` section near the top of their README per repo convention (see [`scripts/README.md`](./scripts/README.md) → "Required README Sections").
+- CI workflows under `.github/workflows/` carry a fork-PR `if`-guard that prevents fork-origin pull requests from running CI automatically (see [`SPEC.md`](./SPEC.md#5-spec-ci-030-fork-pr-handling) §5). Reviews of fork PRs follow the human + AI-assisted protocol documented in the same section.
+
+## Future security considerations
+
+Five candidate hardening measures for the CI surface (maintainer
+approval gate for fork-PR runs, SHA-pinning of third-party actions,
+`CODEOWNERS`-based pre-merge enforcement, delayed-execution window
+for `workflow_run` on fork-origin events, and an automated diff-review
+workflow via the Anthropic API) are documented in [`SPEC.md`](./SPEC.md#8-spec-ci-060-future-security-considerations) §8. None are
+implemented at the time of writing; the section also lists the trigger
+conditions that would prompt the maintainer to revisit them.
 
 ---
 
@@ -103,3 +114,8 @@ For completeness, the following are already enforced by the repository:
 - アーティファクトに実在の機密情報(API キー、パスワード、トークン、機微なアカウント ID)を **絶対に含めない**。[`README.ja.md`](./README.ja.md) の「アーティファクトに認証情報を埋め込まないでください」参照
 - 本リポジトリの PowerShell スクリプトは [`psa.py`](./scripts/python/powershell-static-analyzer/) で検証され、プレーンテキストパスワードパラメータ・`Invoke-Expression` 使用・脆弱なハッシュアルゴリズム・ハードコード `ComputerName` をカバーするセキュリティクラスルール(`PSA5xxx`)が適用されます
 - 全スクリプトは README 冒頭付近に `## ⚠️ Disclaimer` セクションを必須化(リポジトリ規約 — [`scripts/README.md`](./scripts/README.md) の「README 必須セクション」参照)
+- `.github/workflows/` 配下の CI ワークフローには Fork PR 用 `if` ガードが設定されており、フォーク発信の PR では CI が自動起動しません([`SPEC.md`](./SPEC.md#5-spec-ci-030-fork-pr-handling) §5 参照)。 フォーク PR のレビューは、 同セクションに記載した「人間 + AI 補助」の 2 段階プロトコルに従います。
+
+## 今後のセキュリティ検討事項
+
+CI 面のハードニング候補 5 項目 — Fork PR ワークフローのメンテナ承認ゲート、 サードパーティ Action の SHA ピン、 `CODEOWNERS` ベースのマージ前レビュー強制、 Fork 発信の `workflow_run` に対する遅延実行、 Anthropic API を用いた自動 diff レビューワークフロー — は [`SPEC.md`](./SPEC.md#8-spec-ci-060-future-security-considerations) §8 に記載しています。 いずれも現時点では未実装で、 同セクションには本ポリシーを再検討するきっかけとなる条件も併記しています。

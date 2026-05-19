@@ -174,6 +174,18 @@ python3 ../../python/powershell-static-analyzer/psa.py <script>.ps1
 
 ---
 
+## Continuous Integration / 継続的インテグレーション
+
+**EN:** Selected sub-projects in this directory carry GitHub Actions workflows that enforce the static-analysis gate (and, for PowerShell, additional Windows-side checks) automatically on every push and pull request. Governance of those workflows — design principles, naming, timeout tiers, fork-PR handling — lives in the repository-root [`SPEC.md`](../SPEC.md), not in `.github/workflows/` itself (`.github/workflows/CHANGELOG.md` does not exist and MUST NOT be created — see [`SPEC.md`](../SPEC.md#9-spec-ci-070-ci-change-history-location) §9).
+
+**JA:** 本ディレクトリ配下の一部サブプロジェクトには GitHub Actions ワークフローが配置されており、 静的解析ゲート (PowerShell では加えて Windows 側チェック) を push と pull request のたびに自動実行します。 これらワークフローのガバナンス — 設計原則、 命名、 タイムアウト階層、 Fork PR の扱い — はレポジトリ直下の [`SPEC.md`](../SPEC.md) に集約しています。 `.github/workflows/` 自体には集約しません ([`SPEC.md`](../SPEC.md#9-spec-ci-070-ci-change-history-location) §9 が `.github/workflows/CHANGELOG.md` 等の作成を禁止しています)。
+
+**EN:** Per-workflow change history lives in the CI-target script's own `CHANGELOG.md` (e.g., a change to `.github/workflows/scripts__python__powershell-static-analyzer.yml` is recorded in `scripts/python/powershell-static-analyzer/CHANGELOG.md`). Sub-project READMEs surface the relevant CI status badges.
+
+**JA:** ワークフローごとの変更履歴は、 そのワークフローが検証する対象スクリプトの `CHANGELOG.md` に記録します (例: `.github/workflows/scripts__python__powershell-static-analyzer.yml` への変更は `scripts/python/powershell-static-analyzer/CHANGELOG.md` に記録)。 関連する CI ステータスバッジはサブプロジェクトの README で表示しています。
+
+---
+
 ## Required Header Convention / 必須ヘッダー規約
 
 Each script must include a header comment describing:

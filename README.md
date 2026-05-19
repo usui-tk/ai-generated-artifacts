@@ -19,6 +19,7 @@ ai-generated-artifacts/
 ├── LICENSE
 ├── README.md                 # English (primary)
 ├── README.ja.md              # Japanese
+├── SPEC.md                   # Repository-level CI / cross-cutting policy (English)
 ├── .gitignore
 │
 ├── research/                 # Research articles, surveys, analyses
@@ -37,6 +38,51 @@ Each top-level directory has its own `README.md` (with both English and Japanese
 - Subcategory policy and naming conventions
 - Required metadata or header conventions
 - Directory-specific disclaimer
+
+---
+
+## Cross-cutting Specifications
+
+Policies that span more than one sub-project (for example, the
+continuous-integration design and the timeout discipline applied to
+every workflow) are documented at the repository root in
+[`SPEC.md`](./SPEC.md). Sub-project-specific specifications live in
+each sub-project's own `SPEC.md`.
+
+Start with the repository-level [`SPEC.md`](./SPEC.md) when:
+
+- You are adding a new CI workflow under `.github/workflows/`.
+- You are modifying an existing workflow's timeout, naming, or
+  `if`-guard.
+- You are reviewing a fork PR and need the published review protocol.
+
+---
+
+## Continuous Integration
+
+The repository ships four GitHub Actions workflows under
+`.github/workflows/`. Their status is summarised below; the
+sub-project READMEs carry only the badges relevant to that sub-project.
+
+| Workflow | Target | Badge |
+|:---|:---|:---|
+| psa.py self-quality gates | `scripts/python/powershell-static-analyzer/` | [![psa.py CI](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml) |
+| Download-SpeakerDeck STAGE 1 (Linux) | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 1](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml) |
+| Download-SpeakerDeck STAGE 2 (Windows) | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 2](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml) |
+| Download-SpeakerDeck STAGE 3 (Release verification) | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 3](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml) |
+
+Governance, naming conventions, timeout tiers, and the fork-PR review
+protocol are defined in [`SPEC.md`](./SPEC.md) (§2 through §9). Per-CI
+change history lives in each sub-project's own `CHANGELOG.md`, never in
+a separate `.github/workflows/CHANGELOG.md` (none exists, and creating
+one is forbidden by [`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9).
+
+For the repository-level security baseline (Dependabot, secret
+scanning, push protection, CodeQL, Actions allowlist, and the
+`GITHUB_TOKEN` scope policy), see [`SPEC.md` §11 (SPEC-CI-080)](./SPEC.md#11-spec-ci-080-repository-security-baseline). The artifact
+content minimization policy that constrains what each workflow's
+`[Artifacts] Upload logs` step may upload is documented in [`SPEC.md`
+§12 (SPEC-CI-081)](./SPEC.md#12-spec-ci-081-artifact-content-minimization).
 
 ---
 
@@ -135,6 +181,8 @@ This repository uses a **repository-wide common policy** for managing per-versio
 **Static-analyzer enforcement**: For PowerShell scripts, `psa.py` ships two opt-in rules — `PSAP0003` (inline `# rNN:` revision tags) and `PSAP0004` (end-of-file `REVISION HISTORY` blocks) — that detect violations of this policy. Sub-projects enforce them via their `.psa.config.json` `enable` list. (Consumers should always validate against the latest mainline `psa.py`; see the "psa.py Versioning Policy" section below.)
 
 For per-sub-project deeper guidance, see the **Revision discipline** subsection of each sub-project's `SPEC.md`.
+
+**CI changes are recorded in the CI-target script's `CHANGELOG.md`, NOT in any separate location** (`.github/workflows/CHANGELOG.md` does not exist and MUST NOT be created — see [`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9). A change to a workflow YAML is recorded in the same `CHANGELOG.md` as the script that the workflow validates.
 
 ---
 

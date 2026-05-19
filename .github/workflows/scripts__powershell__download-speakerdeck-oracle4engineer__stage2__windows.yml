@@ -1,0 +1,131 @@
+# ============================================================================
+# CI workflow for scripts/powershell/download-speakerdeck-oracle4engineer/
+# STAGE 2 — Windows checks (PSScriptAnalyzer on Windows PowerShell 5.1 +
+# Phase 1 Step 0 smoke test via -EnvironmentInfoOnly).
+#
+# Triggered by STAGE 1 success (workflow_run chain, 1 hop).
+# PSScriptAnalyzer is run via microsoft/psscriptanalyzer-action on
+# Windows PowerShell 5.1 (the action supports both pwsh 7 and Windows PS 5.1).
+#
+# Governance: /SPEC.md
+# Change history: scripts/powershell/download-speakerdeck-oracle4engineer/CHANGELOG.md
+# ============================================================================
+name: 'scripts/powershell/download-speakerdeck-oracle4engineer — STAGE 2: Windows checks'
+
+on:
+  workflow_run:
+    workflows: ['scripts/powershell/download-speakerdeck-oracle4engineer — STAGE 1: Linux checks']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read  # to read upstream workflow_run status
+
+concurrency:
+  group: dsd-stage2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-checks:
+    # Run only on STAGE 1 success; Fork PR guard kept for consistency
+    # (workflow_run does not fire on fork PR HEAD by default, but we keep
+    # the guard to enforce the project-wide invariant from /SPEC.md §5).
+    if: >-
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success') &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: windows-latest
+    # T2 — Medium (extended): 120 minutes (see /SPEC.md §4 [SPEC-CI-020])
+    # Rationale: Windows runner cold-start is slower (~2 min); PSScriptAnalyzer
+    # install on Windows PowerShell 5.1 is slower than on pwsh 7 Linux
+    # (~5-8 min); -EnvironmentInfoOnly smoke test (~30 sec) plus buffer
+    # for transient PSGallery latency and runner warm-up.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Tool group: PSScriptAnalyzer (Windows PowerShell 5.1) ---
+      # The Marketplace action runs PSScriptAnalyzer; the analyzed script
+      # ('Download-SpeakerDeck.ps1') targets Windows PS 5.1 — so the smoke
+      # test below explicitly uses 'powershell' shell.
+      - name: '[PSSA-pwsh51] Run microsoft/psscriptanalyzer-action'
+        id: pssa-windows
+        uses: microsoft/psscriptanalyzer-action@v1.1
+        with:
+          path: ./scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+          settings: ./scripts/powershell/download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1
+          recurse: false
+          output: pssa.sarif
+
+      - name: '[PSSA-pwsh51] Upload SARIF to Code Scanning'
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: pssa.sarif
+          category: pssa-pwsh51
+
+      - name: '[PSSA-pwsh51] Generate text log from SARIF (for artifact)'
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path pssa.sarif) {
+            $sarif = Get-Content pssa.sarif -Raw | ConvertFrom-Json
+            $results = $sarif.runs[0].results
+            "PSScriptAnalyzer (Windows PS 5.1) results: $($results.Count) finding(s)" | Out-File pssa.log
+            foreach ($r in $results) {
+              "[$($r.level)] $($r.ruleId) : $($r.message.text) @ $($r.locations[0].physicalLocation.region.startLine)" | Out-File pssa.log -Append
+            }
+            Get-Content pssa.log
+          } else {
+            "pssa.sarif not produced — see action log for failure." | Out-File pssa.log
+          }
+
+      # --- Phase 1 smoke test via -EnvironmentInfoOnly switch ---
+      # This is the Q-A agreed method III+α (see /SPEC.md §A.7 of the
+      # sub-project SPEC.md and the CI Implementation Plan v4 §5-4):
+      # reuse existing Phase 1 Step 0 logic. The switch causes
+      # Test-Environment to dump PowerShell runtime info via
+      # Show-PowerShellEnvironment and then exit 0, skipping
+      # Step A (registry) and Step B (long-path filesystem tests).
+      - name: '[Phase1-smoke] Run Download-SpeakerDeck.ps1 with -EnvironmentInfoOnly'
+        shell: powershell
+        timeout-minutes: 5
+        working-directory: scripts/powershell/download-speakerdeck-oracle4engineer
+        run: |
+          .\Download-SpeakerDeck.ps1 -EnvironmentInfoOnly
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Phase 1 smoke test failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: '[Summary] Write Step Summary'
+        if: always()
+        shell: pwsh
+        run: |
+          "## STAGE 2 — Windows checks results" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "### PSScriptAnalyzer (Windows PS 5.1)" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          if (Test-Path pssa.log) { Get-Content pssa.log | Out-File $env:GITHUB_STEP_SUMMARY -Append }
+          "" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "### -EnvironmentInfoOnly smoke test" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          "See the Phase1-smoke step's job log for the full environment dump." | Out-File $env:GITHUB_STEP_SUMMARY -Append
+
+      # Artifact content minimization: see /SPEC.md §12 [SPEC-CI-081].
+      # The path list below MUST be an explicit file enumeration drawn
+      # from the allowlist in /SPEC.md §12.2 (pssa.log, pssa.sarif).
+      # Wildcard paths (e.g., 'path: .', 'path: ./**') are forbidden —
+      # they would upload the entire checkout including hidden files
+      # and potentially secrets.
+      - name: '[Artifacts] Upload logs'
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsd-stage2-${{ github.run_id }}
+          path: |
+            pssa.log
+            pssa.sarif
+          if-no-files-found: warn
+          retention-days: 14
