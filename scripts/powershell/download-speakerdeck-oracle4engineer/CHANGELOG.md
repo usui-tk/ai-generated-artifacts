@@ -15,7 +15,108 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
-_No unreleased changes at this time._
+### Fixed
+
+- **CI: Updated `microsoft/psscriptanalyzer-action` reference from
+  `@v1` (which does not exist as a tag) to `@v1.1` (latest stable
+  release).** The `@v1` floating major tag never existed in the
+  upstream repository; only `@v1.0` and `@v1.1` are real release
+  tags. CI runs would have failed at the
+  `[PSSA-pwsh7] Run microsoft/psscriptanalyzer-action` and
+  `[PSSA-pwsh51] Run microsoft/psscriptanalyzer-action` steps with
+  `Unable to resolve action ... unable to find version 'v1'`.
+  Affected workflows:
+  - `.github/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml`
+    (STAGE 1 — Linux checks)
+  - `.github/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml`
+    (STAGE 2 — Windows checks)
+
+  The repository-level Actions allowlist accepts
+  `microsoft/psscriptanalyzer-action@*`, so the `@v1.1` tag is
+  authorized without further configuration.
+
+### Changed
+
+- **CI: Added inline rationale comments to the `[Artifacts] Upload
+  logs` steps in STAGE 1 and STAGE 2 workflows, referencing the new
+  artifact content minimization policy in repository-root
+  `/SPEC.md` §12 [SPEC-CI-081].** No functional change; the
+  workflows already used explicit file enumeration. The comments
+  ensure future maintainers and AI agents encounter the policy at
+  the point of edit. No `[r27]` revision tag is created because
+  `Download-SpeakerDeck.ps1` itself is unchanged.
+
+## [r26] — 2026-05-20 — `add-environmentinfoonly-switch`
+
+### Added
+
+- **`-EnvironmentInfoOnly` switch parameter** for CI smoke testing.
+  When specified, the script runs only Phase 1 Step 0
+  (`Show-PowerShellEnvironment`) and exits with status 0. Skips
+  Step A (registry check for `LongPathsEnabled`), Step B (real-world
+  filesystem long-path tests), and Phases 2 through 8. Intended for
+  fast, side-effect-free verification that the script loads and the
+  PowerShell runtime can be inspected on the target host. Cannot be
+  combined with `-SkipEnvCheck` (mutually exclusive — rejected at
+  startup with a clear error message). Can be combined safely with
+  `-DryRun`. See [`SPEC.md`](./SPEC.md) §A.7 for the parameter contract
+  and the early-exit semantics.
+- **`PSScriptAnalyzerSettings.psd1`** (sibling file) — project-local
+  PSScriptAnalyzer configuration documenting six rules excluded
+  project-wide with rationale for each (`PSAvoidUsingWriteHost`,
+  `PSUseSingularNouns`, `PSProvideCommentHelp`,
+  `PSUseShouldProcessForStateChangingFunctions`,
+  `PSAvoidUsingEmptyCatchBlock`, `PSAvoidUsingPositionalParameters`).
+  Per-occurrence exemptions are inline via
+  `[Diagnostics.CodeAnalysis.SuppressMessageAttribute(...)]` with a
+  Justification string.
+- **Three GitHub Actions CI workflows** under `.github/workflows/`
+  at the repository root:
+  - STAGE 1 — Linux checks (psa.py + PSScriptAnalyzer on PowerShell 7.x).
+  - STAGE 2 — Windows checks (PSScriptAnalyzer on Windows PS 5.1 +
+    `-EnvironmentInfoOnly` smoke). Triggered by STAGE 1 success.
+  - STAGE 3 — Windows release verification (full `-DryRun` execution).
+    Triggered by `release/published`.
+
+  Both stages 1 and 2 upload SARIF output to GitHub Code Scanning.
+  CI governance (timeout tiers, naming, fork-PR handling) is documented
+  in the repository-root `/SPEC.md`. See [`SPEC.md`](./SPEC.md) §A.11
+  *Continuous Integration* and [`TESTING.md`](./TESTING.md) §7 for the
+  consumer-facing description.
+- **`SPEC.md` updates**: §A.7 now lists `-EnvironmentInfoOnly` in the
+  standard-switch table and adds its mutual-exclusion rule against
+  `-SkipEnvCheck`; §A.11 gains a new *Continuous Integration*
+  subsection; Part C — Quality Gates gains a new *CI gates* checklist.
+- **`TESTING.md` §7** rewritten from *Outlook on CI/CD automation* to
+  *Implemented CI*, documenting each STAGE, the `-EnvironmentInfoOnly`
+  contract, how to read workflow output (badges / Actions tab / Code
+  Scanning), and what CI does not cover.
+- **CI status badges** (STAGE 1 / STAGE 2 / STAGE 3) in `README.md`
+  and `README.ja.md` immediately after the title.
+
+### Changed
+
+- **Internal: `_DebugTrace_WriteJsonlLine` parameter renamed from
+  `$Event` to `$EventObject`.** `$Event` is a PowerShell automatic
+  variable populated inside event-subscriber action blocks
+  (`Register-ObjectEvent`, etc.); reusing the name shadowed the
+  built-in and would have silently misbehaved if the function were
+  ever called from inside such a block. Five usage sites inside the
+  function updated; callers are unaffected because every call site
+  passes the argument positionally. Flagged by PSScriptAnalyzer rule
+  `PSAvoidAssignmentToAutomaticVariable`.
+- **Internal: `Export-DebugTraceJson`** gains `[OutputType([string])]`
+  to document the return type (the function returns the output file
+  path) and satisfy PSScriptAnalyzer's `PSUseOutputTypeCorrectly`.
+- **Internal: `Show-PowerShellEnvironment`** carries a
+  `SuppressMessageAttribute` for `PSAvoidUsingWMICmdlet` against the
+  intentional `Get-WmiObject` fallback path used when CIM is
+  constrained on the target host. The fallback is required for PS 5.1
+  parity on some Server Core / container images.
+- **Internal: `Show-FinalReport`** carries a `SuppressMessageAttribute`
+  for `PSReviewUnusedParameter` against the `-LogPath` parameter,
+  which is preserved as part of the function's stable signature
+  even though the current body does not yet emit it.
 
 ## [r25] — 2026-05-18 — `strip-v-prefix-from-shorttag`
 

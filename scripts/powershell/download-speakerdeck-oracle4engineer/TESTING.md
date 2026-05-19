@@ -352,42 +352,142 @@ that bake each of these fixes into the project's institutional memory.
 
 ---
 
-## 7. Outlook on CI/CD automation
+## 7. Implemented CI
 
-GitHub Actions workflow (Linux runner — Python only, no PowerShell required):
+As of r26, this sub-project ships **three GitHub Actions workflows**
+under `.github/workflows/` at the repository root. They are listed
+below in run order. The badges shown in [`README.md`](./README.md) link
+directly to the corresponding workflow page.
 
-```yaml
-name: Static analysis
-on: [push, pull_request]
+### 7.1 STAGE 1 — Linux checks
 
-jobs:
-  psa:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-      - name: Static-analyze main script
-        run: |
-          cd scripts/powershell/download-speakerdeck-oracle4engineer
-          python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
-```
+**File**: `scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml`
+**Runner**: `ubuntu-latest`
+**Triggers**: `push` / `pull_request` on `main` (paths-filtered to
+this script, the project `.psa.config.json`, the project
+`PSScriptAnalyzerSettings.psd1`, the central `psa.py`, its `VERSION`,
+and the workflow file itself), plus `workflow_dispatch` with an
+optional `scope` input (`all` / `psa-only` / `pssa-only`).
 
-A Windows-side functional CI job is **not** currently planned because:
+**Steps**:
 
-- Phase 6 (Download) consumes ~5 GB of bandwidth per run
-- Speaker Deck rate limits would penalize repeated CI runs
-- The functional verification is intentionally a human-operated procedure
-  with the operator reviewing the output
+1. Checkout + set up Python 3.x.
+2. `[psa.py] Run text analysis` — runs the canonical analyzer from the
+   project directory (so `.psa.config.json` auto-loads via implicit
+   discovery) and writes `psa.log`.
+3. `[psa.py] Generate SARIF` — re-runs with `--format sarif` and
+   writes `psa.sarif`.
+4. `[psa.py] Upload SARIF to Code Scanning` — posts the SARIF to the
+   repository's Code Scanning surface so findings appear in the
+   Security tab and inline on pull requests.
+5. `[PSSA-pwsh7] Run microsoft/psscriptanalyzer-action` — invokes the
+   official Marketplace action against `Download-SpeakerDeck.ps1`
+   under PowerShell 7.x, using the project-local
+   `PSScriptAnalyzerSettings.psd1`. Emits `pssa.sarif`.
+6. `[PSSA-pwsh7] Upload SARIF to Code Scanning` — same as for psa.py.
+7. `[PSSA-pwsh7] Generate text log from SARIF` — produces a
+   human-readable `pssa.log` artifact for grep-based inspection
+   alongside the SARIF.
+8. `[Summary]` — writes a job-step summary to the Actions UI.
+9. `[Artifacts]` — uploads `psa.log`, `psa.sarif`, `pssa.log`, and
+   `pssa.sarif` with 14-day retention.
+
+**Timeout**: 90 minutes (T2-extended, see repository-root `/SPEC.md` §4).
+**Expected output on a clean tree**: 0 findings at all severities.
+
+### 7.2 STAGE 2 — Windows checks (PowerShell 5.1 + Phase 1 smoke)
+
+**File**: `scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml`
+**Runner**: `windows-latest`
+**Triggers**: `workflow_run` on STAGE 1 completion (only fires when
+the upstream conclusion is `success`), plus `workflow_dispatch`.
+
+**Steps**:
+
+1. Checkout.
+2. `[PSSA-pwsh51] Run microsoft/psscriptanalyzer-action` — same action,
+   same settings, but running on Windows PowerShell 5.1 — the targeted
+   baseline of `Download-SpeakerDeck.ps1`.
+3. `[PSSA-pwsh51] Upload SARIF to Code Scanning`.
+4. `[PSSA-pwsh51] Generate text log from SARIF`.
+5. `[Phase1-smoke] Run Download-SpeakerDeck.ps1 with -EnvironmentInfoOnly`
+   — this exercises script loading, parameter binding, and Phase 1
+   Step 0 (`Show-PowerShellEnvironment`) on Windows PowerShell 5.1.
+   The early-exit added in r26 means Step A (registry), Step B
+   (filesystem tests), and Phases 2–8 do not run. Expected: exit 0.
+6. `[Summary]` + `[Artifacts]` as in STAGE 1.
+
+**Timeout**: 120 minutes (T2-extended, see repository-root `/SPEC.md` §4).
+**Expected output**: 0 PSScriptAnalyzer findings; smoke step exits 0.
+
+### 7.3 STAGE 3 — Windows release verification
+
+**File**: `scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml`
+**Runner**: `windows-latest`
+**Triggers**: `release/published`, plus manual `workflow_dispatch`
+(with an optional free-text `reason` input).
+
+**Steps**:
+
+1. Checkout.
+2. `[Release-verify] Full DryRun execution` — runs
+   `.\Download-SpeakerDeck.ps1 -DryRun` on Windows PowerShell 5.1.
+   This exercises Phase 1–5 end to end (including Speaker Deck network
+   access) but writes no files because `-DryRun` marks Phases 6 and 7
+   as SKIPPED.
+3. `[Summary]` + `[Artifacts]`. Artifacts cover any `*.log` and
+   `work/logs/**` produced by the dry run, with 30-day retention.
+
+**Timeout**: 240 minutes (T3, repository-root `/SPEC.md` §4.3).
+This is the policy maximum and is appropriate here because the wall
+clock is dominated by Speaker Deck network round-trips with
+configured delay/jitter, which can vary widely.
+
+### 7.4 The `-EnvironmentInfoOnly` switch
+
+Added in r26 specifically to give STAGE 2 a fast, side-effect-free
+smoke test. Behaviour:
+
+- When specified, `Test-Environment` calls `Show-PowerShellEnvironment`
+  to print the runtime environment summary (Phase 1 Step 0), then
+  exits with status 0.
+- Skips Step A (registry check for `LongPathsEnabled`), Step B
+  (filesystem long-path tests), and Phases 2 through 8.
+- Mutually exclusive with `-SkipEnvCheck`; the validation block
+  rejects the combination at startup with a clear error message.
+- Safe to combine with `-DryRun` (both are side-effect-free).
+- See [`SPEC.md`](./SPEC.md) §A.7 for the parameter contract.
+
+### 7.5 Reading workflow output
+
+Three surfaces show CI results:
+
+1. **Status badges** in [`README.md`](./README.md) — at-a-glance pass/fail.
+2. **GitHub Actions tab** — full per-step logs, Step Summaries (the
+   compact Markdown rendered above the raw log), and downloadable
+   artifacts (`*.log`, `*.sarif`).
+3. **GitHub Code Scanning tab** — every `*.sarif` uploaded via
+   `github/codeql-action/upload-sarif@v3` (psa.py, PSSA-pwsh7,
+   PSSA-pwsh51) lands in the Security → Code Scanning surface,
+   complete with inline PR annotations when findings exist.
+
+### 7.6 What CI does NOT cover
+
+A Windows-side functional CI job is **not** part of the chain because:
+
+- Phase 6 (Download) consumes ~5 GB of bandwidth per run.
+- Speaker Deck's rate-limit policy would penalize repeated CI runs.
+- The functional verification is intentionally a human-operated
+  procedure with the operator reviewing the output. STAGE 3 covers
+  the closest CI-friendly approximation (full `-DryRun`).
 
 For local verification, the recommended cadence is:
 
-1. **Every commit** — `psa.py` (above)
-2. **Every PR** — `-DryRun` on the operator's workstation (~9 minutes)
+1. **Every commit** — `psa.py` + `Invoke-ScriptAnalyzer` (settings
+   `./PSScriptAnalyzerSettings.psd1`) on the developer workstation.
+2. **Every PR** — `-DryRun` on the operator's workstation (~9 minutes).
 3. **Before tagging a release** — full real run on a clean environment
-   (`-Clean`) and capture the Phase Timing Summary into TESTING.md (this file)
+   (`-Clean`) and capture the Phase Timing Summary into this file (§3).
 
 ---
 

@@ -136,6 +136,18 @@
 
     Year is considered valid only when in range [2010, currentYear + 1].
 
+.PARAMETER EnvironmentInfoOnly
+    Switch. When specified, the script executes only the environment
+    information dump (Phase 1 Step 0 via Show-PowerShellEnvironment) and
+    exits with status 0. Intended for CI smoke testing to verify that the
+    script can be loaded and that the PowerShell runtime environment can
+    be inspected on the target host, without executing the full Phase 1
+    evaluation (registry check, long-path test) and without proceeding to
+    Phases 2 through 8.
+
+    Cannot be combined with -SkipEnvCheck (mutually exclusive). Can be
+    combined with -DryRun safely (no operational side effects either way).
+
 .EXAMPLE
     .\Download-SpeakerDeck.ps1
     Download all public decks of oracle4engineer to .\downloads, organized
@@ -179,7 +191,8 @@ param(
     [switch]$Clean,
     [switch]$CleanOnly,
     [switch]$FlatLayout,
-    [switch]$SkipPdfReclassification
+    [switch]$SkipPdfReclassification,
+    [switch]$EnvironmentInfoOnly
 )
 
 # Parameter validation: Clean and CleanOnly are mutually exclusive.
@@ -188,6 +201,15 @@ param(
 # the combination early with a clear message.
 if ($Clean -and $CleanOnly) {
     throw "-Clean and -CleanOnly cannot be used together. Pick one."
+}
+
+# Parameter validation: EnvironmentInfoOnly and SkipEnvCheck are mutually
+# exclusive. -SkipEnvCheck bypasses Phase 1 entirely, so Step 0 (which
+# Show-PowerShellEnvironment populates and which -EnvironmentInfoOnly
+# exits from) would never run. Combining the two switches produces no
+# output and is meaningless; reject early with a clear message.
+if ($EnvironmentInfoOnly -and $SkipEnvCheck) {
+    throw "-EnvironmentInfoOnly and -SkipEnvCheck cannot be used together. -EnvironmentInfoOnly requires Phase 1 Step 0 to run."
 }
 
 # ============================================================
@@ -369,8 +391,8 @@ function Initialize-RuntimeDirectories {
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'speakerdeck-2026.05.18-r25'
-$Script:ScriptTag     = 'strip-v-prefix-from-shorttag'
+$Script:ScriptVersion = 'speakerdeck-2026.05.20-r26'
+$Script:ScriptTag     = 'add-environmentinfoonly-switch'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -528,21 +550,29 @@ function _DebugTrace_WriteJsonlLine {
     # pre-activation buffer if file output isn't enabled yet). All
     # failures are absorbed so the script body is never disrupted by
     # trace bookkeeping.
-    param([Parameter(Mandatory)] $Event)
+    #
+    # The parameter is named $EventObject (rather than the more natural
+    # $Event) because $Event is a PowerShell automatic variable populated
+    # inside event-subscriber action blocks (Register-ObjectEvent,
+    # Register-WmiEvent, etc.). Reusing the name would shadow that
+    # built-in and silently misbehave if this function were ever called
+    # from inside such a block. See PSScriptAnalyzer rule
+    # PSAvoidAssignmentToAutomaticVariable.
+    param([Parameter(Mandatory)] $EventObject)
 
     # Add monotonic sequence number for stable cross-event ordering.
-    $Event | Add-Member -MemberType NoteProperty -Name 'seq' -Value (_DebugTrace_NextSeq) -Force
+    $EventObject | Add-Member -MemberType NoteProperty -Name 'seq' -Value (_DebugTrace_NextSeq) -Force
 
     try {
-        $json = $Event | ConvertTo-Json -Depth $Script:DebugTraceJsonDepth -Compress
+        $json = $EventObject | ConvertTo-Json -Depth $Script:DebugTraceJsonDepth -Compress
     } catch {
         # If JSON conversion fails (e.g. circular reference somewhere),
         # fall back to a minimal hand-written line so we still record
         # something.
         $Script:DebugTraceJsonlErrorCount++
         $Script:DebugTraceJsonlLastError = $_.Exception.Message
-        $kind = if ($Event.PSObject.Properties['kind']) { $Event.kind } else { 'unknown' }
-        $ctx  = if ($Event.PSObject.Properties['ctx'])  { $Event.ctx  } else { '?' }
+        $kind = if ($EventObject.PSObject.Properties['kind']) { $EventObject.kind } else { 'unknown' }
+        $ctx  = if ($EventObject.PSObject.Properties['ctx'])  { $EventObject.ctx  } else { '?' }
         $json = ('{{"ts":"{0}","seq":{1},"kind":"{2}","ctx":"{3}","err":"json-serialize-failed"}}' `
                     -f (_DebugTrace_Now), $Script:DebugTraceEventSeq, $kind, $ctx)
     }
@@ -1047,6 +1077,7 @@ function Export-DebugTraceJson {
         The output file path (for chaining).
     #>
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory=$true)] [string]$Path,
         [switch]$IncludeEvents,
@@ -2362,6 +2393,9 @@ function Show-PowerShellEnvironment {
         Modelled on Show-PowerShellEnvironment from the AMD chipset
         deployment reference script.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingWMICmdlet', '',
+        Justification = 'Intentional Get-WmiObject fallback path. CIM is the primary path; WMI is the secondary path used only when CIM is constrained (some Server Core / container images). PS 5.1 supports both; PS 7+ exposes Get-WmiObject only when the WMI compatibility module is loaded, which is fine because the script declares PS 5.1+ as its baseline.')]
     param()
 
     # ---- (1) Engine + process ----
@@ -2584,6 +2618,20 @@ function Test-Environment {
     # header that this section originally carried. See Show-PowerShellEnvironment.
     Write-SubSection "[Step 0] PowerShell execution environment"
     Show-PowerShellEnvironment
+
+    # CI smoke-test early exit. Step A (registry) and Step B (filesystem
+    # tests) are skipped intentionally so the smoke test can succeed on
+    # non-Windows CI runners that lack HKLM and on hosts that cannot
+    # write to the working directory. See -EnvironmentInfoOnly help and
+    # SPEC.md A.7 for the contract. The mutual-exclusion check against
+    # -SkipEnvCheck (in the param-validation block near the top of the
+    # script) guarantees Phase 1 is actually entered when this branch is
+    # taken; -SkipEnvCheck would skip Test-Environment entirely.
+    if ($script:EnvironmentInfoOnly) {
+        Write-Host ''
+        Write-Host '[EnvironmentInfoOnly] Environment dump complete. Exiting with status 0 (CI smoke test mode).'
+        exit 0
+    }
 
     # ----- Step A : Registry check -----
     Write-SubSection "[Step A] Registry check (LongPathsEnabled)"
@@ -4688,6 +4736,9 @@ function Save-DownloadLog {
 }
 
 function Show-FinalReport {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSReviewUnusedParameter', 'LogPath',
+        Justification = 'The -LogPath parameter is reserved for the public contract of Show-FinalReport: callers (e.g., the top-level orchestrator) pass the canonical evaluation/download log path through every per-phase reporter so the report identity is uniformly traceable. The current body does not embed the path in the printed report, but the parameter is kept (rather than removed) so callers do not need to be changed when the report is extended to surface the log path; removing it would be a breaking API change for an internal-but-stable signature.')]
     param(
         [int]$TotalDeckCount,
         [int]$ListedCount,

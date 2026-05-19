@@ -422,6 +422,7 @@ strip them. The mitigation is `-LiteralPath`, not character removal.
 | `-Clean` | Delete output / work directories before running |
 | `-CleanOnly` | Same wipe as `-Clean`, then exit without running phases |
 | `-SkipEnvCheck` | Skip Phase 1 and use safe-default thresholds |
+| `-EnvironmentInfoOnly` | Run only Phase 1 Step 0 (PowerShell environment dump via `Show-PowerShellEnvironment`), then exit 0. Intended for CI smoke testing; skips Step A (registry), Step B (filesystem tests), and Phases 2–8 |
 
 ### Mutual exclusion
 
@@ -430,6 +431,12 @@ Add a validation block right after `param(...)`:
 ```powershell
 if ($Clean -and $CleanOnly) {
     throw 'Specify -Clean OR -CleanOnly, not both.'
+}
+
+# -EnvironmentInfoOnly requires Phase 1 to run (it exits inside Step 0).
+# -SkipEnvCheck skips Phase 1 entirely. Combining them is meaningless.
+if ($EnvironmentInfoOnly -and $SkipEnvCheck) {
+    throw '-EnvironmentInfoOnly and -SkipEnvCheck cannot be used together.'
 }
 ```
 
@@ -703,6 +710,43 @@ Common cases and their resolutions:
 
 If `psa.py` systematically misclassifies a pattern, raise an issue upstream
 in the analyzer's own repository rather than suppressing locally.
+
+### Continuous Integration
+
+This sub-project ships three GitHub Actions workflows under
+`.github/workflows/` that automate the static-analysis gate plus
+Windows-side verification. The workflows are:
+
+| File | STAGE | Runner | Purpose |
+|:---|:---|:---|:---|
+| `scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml` | STAGE 1 | `ubuntu-latest` | `psa.py` text + SARIF analysis, plus PSScriptAnalyzer on PowerShell 7.x via `microsoft/psscriptanalyzer-action@v1` |
+| `scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml` | STAGE 2 | `windows-latest` | PSScriptAnalyzer on Windows PowerShell 5.1, plus `-EnvironmentInfoOnly` smoke test |
+| `scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml` | STAGE 3 | `windows-latest` | Full `-DryRun` execution (Phase 1–5 including Speaker Deck network access) on `release/published` or manual dispatch |
+
+STAGE 1 chains to STAGE 2 via `workflow_run` (one hop, well within the
+three-hop limit). STAGE 3 is independent of the chain and runs only on
+release events or manual dispatch.
+
+Both stages 1 and 2 use the project-local
+`PSScriptAnalyzerSettings.psd1` (sibling file). That settings file
+documents the six rules excluded project-wide with rationale for each;
+per-occurrence exemptions are inline via
+`[Diagnostics.CodeAnalysis.SuppressMessageAttribute(...)]` with a
+Justification string. The expected output of either stage on a clean
+tree is **zero findings** at all severities.
+
+CI governance — design principles, naming conventions, timeout tiers,
+fork-PR `if`-guards — is documented in the repository-root `SPEC.md`
+at the top of the `ai-generated-artifacts` repository. Per-workflow
+change history is recorded in this sub-project's
+[`CHANGELOG.md`](./CHANGELOG.md).
+
+The `-EnvironmentInfoOnly` switch (see §A.7 above) was added in r26
+specifically to provide STAGE 2 with a quick, side-effect-free smoke
+test that exercises script loading, parameter binding, and the Phase 1
+Step 0 environment dump without proceeding to the registry / filesystem
+checks (which require a Windows host with HKLM write access and a
+writable working directory).
 
 ## A.12 Documentation Language Policy
 
@@ -1158,10 +1202,19 @@ Before any commit, all of the following must pass:
 ### Static checks
 
 - [ ] `python3 ../../python/powershell-static-analyzer/psa.py <script>.ps1` → 0 errors / 0 warnings / 0 info
+- [ ] `Invoke-ScriptAnalyzer -Path <script>.ps1 -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error,Warning,Information` → 0 findings (the sibling `PSScriptAnalyzerSettings.psd1` is authoritative; any new finding must be addressed either by code change or by a deliberate, documented suppression)
 - [ ] File starts with UTF-8 BOM (`EF BB BF`)
 - [ ] No non-ASCII bytes outside the BOM
 - [ ] Line count in script matches `Lines : NNNN` in README.md AND README.ja.md
 - [ ] `Script:ScriptVersion` and `Script:ScriptTag` updated for the change
+
+### CI gates
+
+- [ ] Workflow YAML files under `.github/workflows/` validate as YAML and pass `actionlint` if available
+- [ ] Every job has an explicit `timeout-minutes` and a fork-PR `if`-guard (see repository-root `/SPEC.md` §4 and §5)
+- [ ] STAGE 1 (Linux checks) is green on the latest commit to `main` — verify via the badge in `README.md`
+- [ ] STAGE 2 (Windows checks) is green on the latest commit to `main` — STAGE 2 fires automatically when STAGE 1 succeeds
+- [ ] When releasing, STAGE 3 (release verification) runs automatically via `release/published`
 
 ### Functional checks
 
