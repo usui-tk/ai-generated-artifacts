@@ -165,12 +165,19 @@ t('PSA2002 negative: assign to ordinary variable',
   '}\n',
   0)
 
-t('PSA2002 edge: non-risky auto-var ($PSItem) is silent',
+t('PSA2002 edge: assign to a non-auto variable named $log is silent',
+  'PSA2002',
+  'function Foo {\n'
+  '    $log = "x"\n'
+  '}\n',
+  0)
+
+t('PSA2002 edge (v3.6.0): assign to $PSItem (added to RISKY_SHADOW_VARS) is flagged',
   'PSA2002',
   'function Foo {\n'
   '    $PSItem = "x"\n'
   '}\n',
-  0)
+  1)
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +222,84 @@ t('PSA2006 positive: $variable > literal inside if-condition',
 
 t('PSA2006 negative: -gt (comparison) inside if-condition',
   'PSA2006', 'if ($x -gt 5) { }\n', 0)
+
+
+# ---------------------------------------------------------------------------
+# PSA2007 — Parameter name shadows a PowerShell automatic variable
+# (warning, default ON, new in 3.6.0)
+# ---------------------------------------------------------------------------
+
+t('PSA2007 positive: $Event parameter shadows automatic variable',
+  'PSA2007',
+  'function _Write { param([Parameter(Mandatory)] $Event)\n  $Event.Foo\n}\n',
+  1)
+
+t('PSA2007 positive: $Args parameter shadows automatic variable',
+  'PSA2007',
+  'function Foo { param([string]$Args)\n  $Args\n}\n',
+  1)
+
+t('PSA2007 positive: $PSCmdlet parameter with type literal',
+  'PSA2007',
+  'function Foo { param([Parameter(Mandatory)] [object]$PSCmdlet)\n}\n',
+  1)
+
+t('PSA2007 positive: top-level script param block with $Event',
+  'PSA2007',
+  'param([string]$Event)\nWrite-Host $Event\n',
+  1)
+
+t('PSA2007 negative: parameter $EventObject (renamed) is fine',
+  'PSA2007',
+  'function _Write { param([Parameter(Mandatory)] $EventObject)\n  $EventObject.Foo\n}\n',
+  0)
+
+t('PSA2007 negative: bare $Event reference inside body (not a param)',
+  'PSA2007',
+  'function Subscriber { param($Source)\n  Write-Host $Event.MessageData\n}\n',
+  0)
+
+t('PSA2007 edge: $null parameter is exempt (discard idiom not relevant for params, '
+  'but null is excluded from RISKY_SHADOW_VARS)',
+  'PSA2007',
+  'function Foo { param($null = $null)\n}\n',
+  0)
+
+
+# ---------------------------------------------------------------------------
+# PSA2008 — $Script:Foo++/+=/-= without prior initialisation
+# (info, default ON, new in 3.6.0)
+# ---------------------------------------------------------------------------
+
+t('PSA2008 positive: $Script:Count++ without initialisation',
+  'PSA2008',
+  'function Foo {\n  $Script:Count++\n}\n',
+  1)
+
+t('PSA2008 positive: $Script:Total += 5 without initialisation',
+  'PSA2008',
+  'function Bar {\n  $Script:Total += 5\n}\n',
+  1)
+
+t('PSA2008 positive: $Script:Errors-- without initialisation',
+  'PSA2008',
+  'function Baz {\n  $Script:Errors--\n}\n',
+  1)
+
+t('PSA2008 negative: $Script:Count is initialised, then incremented',
+  'PSA2008',
+  '$Script:Count = 0\nfunction Foo {\n  $Script:Count++\n}\n',
+  0)
+
+t('PSA2008 negative: $Script:Total has plain = assignment',
+  'PSA2008',
+  '$Script:Total = 0\nfunction Bar {\n  $Script:Total += 5\n}\n',
+  0)
+
+t('PSA2008 negative: plain ++ on a non-Script variable is fine',
+  'PSA2008',
+  'function Foo {\n  $local = 0\n  $local++\n}\n',
+  0)
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +362,51 @@ t('PSA3005 positive: Start-Transcript -Path',
 
 t('PSA3005 negative: Start-Transcript -LiteralPath',
   'PSA3005', 'Start-Transcript -LiteralPath "C:\\Logs\\out.log"\n', 0)
+
+
+# ---------------------------------------------------------------------------
+# PSA3006 — Deprecated WMI cmdlet (warning, default ON, new in 3.6.0)
+# ---------------------------------------------------------------------------
+
+t('PSA3006 positive: Get-WmiObject usage',
+  'PSA3006',
+  '$os = Get-WmiObject -Class Win32_OperatingSystem\n',
+  1)
+
+t('PSA3006 positive: Invoke-WmiMethod usage',
+  'PSA3006',
+  'Invoke-WmiMethod -Class Win32_Process -Name Create -ArgumentList "notepad.exe"\n',
+  1)
+
+t('PSA3006 positive: Set-WmiInstance usage',
+  'PSA3006',
+  'Set-WmiInstance -Class Win32_WMISetting -Argument @{LoggingLevel=2}\n',
+  1)
+
+t('PSA3006 positive: gwmi alias usage',
+  'PSA3006',
+  'gwmi Win32_BIOS\n',
+  1)
+
+t('PSA3006 negative: Get-CimInstance (the recommended replacement)',
+  'PSA3006',
+  '$os = Get-CimInstance -ClassName Win32_OperatingSystem\n',
+  0)
+
+t('PSA3006 negative: Invoke-CimMethod (the recommended replacement)',
+  'PSA3006',
+  'Invoke-CimMethod -ClassName Win32_Process -MethodName Create\n',
+  0)
+
+t('PSA3006 edge: "Get-WmiObject" inside string literal is not flagged',
+  'PSA3006',
+  '$help = "Use Get-WmiObject to query WMI"\n',
+  0)
+
+t('PSA3006 edge: "Get-WmiObject" inside a comment is not flagged',
+  'PSA3006',
+  '# Get-WmiObject is deprecated in PS 7+\n',
+  0)
 
 
 # ---------------------------------------------------------------------------
@@ -492,6 +622,115 @@ t('PSA6006 negative: [switch]$Flag (default $false)',
   '    param([switch]$Flag)\n'
   '}\n',
   0)
+
+
+# ---------------------------------------------------------------------------
+# PSA6007 — Advanced function returns a value but lacks [OutputType()]
+# (info, default ON, new in 3.6.0)
+# ---------------------------------------------------------------------------
+
+t('PSA6007 positive: advanced function returns value but no OutputType',
+  'PSA6007',
+  'function Get-Foo {\n'
+  '    [CmdletBinding()]\n'
+  '    param()\n'
+  '    return [pscustomobject]@{ A = 1 }\n'
+  '}\n',
+  1)
+
+t('PSA6007 positive: returns a string, no OutputType',
+  'PSA6007',
+  'function Get-Bar {\n'
+  '    [CmdletBinding()]\n'
+  '    param()\n'
+  '    return "hello"\n'
+  '}\n',
+  1)
+
+t('PSA6007 negative: OutputType is declared',
+  'PSA6007',
+  'function Get-Baz {\n'
+  '    [CmdletBinding()]\n'
+  '    [OutputType([pscustomobject])]\n'
+  '    param()\n'
+  '    return [pscustomobject]@{ A = 1 }\n'
+  '}\n',
+  0)
+
+t('PSA6007 negative: no CmdletBinding (plain helper, exempt)',
+  'PSA6007',
+  'function Get-Plain {\n'
+  '    param()\n'
+  '    return 42\n'
+  '}\n',
+  0)
+
+t('PSA6007 negative: advanced function with no return statement',
+  'PSA6007',
+  'function Set-Thing {\n'
+  '    [CmdletBinding()]\n'
+  '    param()\n'
+  '    Write-Host "done"\n'
+  '}\n',
+  0)
+
+t('PSA6007 edge: bare "return" with no value does not fire',
+  'PSA6007',
+  'function Test-Guard {\n'
+  '    [CmdletBinding()]\n'
+  '    param()\n'
+  '    if (-not $true) { return }\n'
+  '    Write-Host "ok"\n'
+  '}\n',
+  0)
+
+
+# ---------------------------------------------------------------------------
+# PSA6008 — Function with attributes but no explicit param() block
+# (info, default ON, new in 3.6.0)
+# ---------------------------------------------------------------------------
+
+t('PSA6008 positive: CmdletBinding attribute without param()',
+  'PSA6008',
+  'function Show-Banner {\n'
+  '    [CmdletBinding()]\n'
+  '    Write-Host "banner"\n'
+  '}\n',
+  1)
+
+t('PSA6008 positive: SuppressMessageAttribute without param()',
+  'PSA6008',
+  'function Show-Status {\n'
+  '    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(\n'
+  '        "PSAvoidUsingWMICmdlet", "",\n'
+  '        Justification = "Intentional WMI fallback for Server Core.")]\n'
+  '    Get-WmiObject -Class Win32_BIOS\n'
+  '}\n',
+  1)
+
+t('PSA6008 negative: CmdletBinding + param() (correct pattern)',
+  'PSA6008',
+  'function Show-Banner {\n'
+  '    [CmdletBinding()]\n'
+  '    param()\n'
+  '    Write-Host "banner"\n'
+  '}\n',
+  0)
+
+t('PSA6008 negative: no attributes (plain function, no param required)',
+  'PSA6008',
+  'function Show-Simple {\n'
+  '    Write-Host "simple"\n'
+  '}\n',
+  0)
+
+t('PSA6008 edge: OutputType attribute alone also requires param()',
+  'PSA6008',
+  'function Get-Value {\n'
+  '    [OutputType([int])]\n'
+  '    return 42\n'
+  '}\n',
+  1)
 
 
 # ---------------------------------------------------------------------------

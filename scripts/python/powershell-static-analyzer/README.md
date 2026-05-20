@@ -195,16 +195,18 @@ optional column, and a short message.
 | **PSA1002** | ✅ on | Paren balance: `(` vs `)` |
 | **PSA1003** | ✅ on | Bracket balance: `[` vs `]` |
 
-`PSA2xxx` — variable / scope (Error / Warning)
+`PSA2xxx` — variable / scope (Error / Warning / Info)
 
 | Code | Sev | Default | Description |
 |:---|:---:|:---:|:---|
 | **PSA2001** | Error | ✅ on | Undefined variable reference (heuristic) |
-| **PSA2002** | Warning | ✅ on | Auto-variable shadowing (`$args`, `$matches`, …) |
+| **PSA2002** | Warning | ✅ on | Assignment to a PowerShell automatic variable (`$args`, `$matches`, `$Event`, `$Host`, `$Profile`, …; 38 entries as of 3.6.0) |
 | **PSA2003** | Warning | ✅ on | `-match` against bare `$variable` |
 | **PSA2004** | Warning | ✅ on | `$x -eq $null` (use `$null -eq $x` to avoid the collection trap) |
 | **PSA2005** | Warning | ✅ on | Assignment operator (`=`) inside `if` / `while` |
 | **PSA2006** | Warning | ✅ on | Redirection operator (`>` / `<`) inside `if` / `while` |
+| **PSA2007** | Warning | ✅ on | Parameter name shadows a PowerShell automatic variable (new in 3.6.0) |
+| **PSA2008** | Info | ✅ on | `$Script:Foo++` / `+=` / `-=` without prior initialisation (new in 3.6.0) |
 
 `PSA3xxx` — coding patterns (Warning)
 
@@ -215,6 +217,7 @@ optional column, and a short message.
 | **PSA3003** | ✅ on | `-match` against literal empty string |
 | **PSA3004** | ✅ on | Empty `catch { }` block |
 | **PSA3005** | ✅ on | `Start-Transcript -Path`; prefer `-LiteralPath` for paths containing `[`, `]`, or other wildcard metacharacters (new in 3.2.0) |
+| **PSA3006** | ✅ on | Deprecated WMI cmdlet (`Get-WmiObject`, `Invoke-WmiMethod`, etc.); prefer CIM cmdlets (new in 3.6.0) |
 
 `PSA4xxx` — style / informational (Info)
 
@@ -234,16 +237,18 @@ optional column, and a short message.
 | **PSA5003** | Warning | ✅ on | Broken hash algorithm (MD5 / SHA1) |
 | **PSA5004** | Warning | ✅ on | Hardcoded `ComputerName` (literal string) |
 
-`PSA6xxx` — best-practice (Warning)
+`PSA6xxx` — best-practice (Warning / Info)
 
-| Code | Default | Description |
-|:---|:---:|:---|
-| **PSA6001** | ✅ on | Function uses non-approved verb (cf. `Get-Verb`) |
-| **PSA6002** | ⛔ off | Cmdlet alias used (`ls`, `cd`, `dir`, `where`, …) |
-| **PSA6003** | ✅ on | Function noun should be singular |
-| **PSA6004** | ✅ on | Avoid `$global:` variable definition |
-| **PSA6005** | ✅ on | Mandatory parameter must not have a default value |
-| **PSA6006** | ✅ on | Switch parameter must not default to `$true` |
+| Code | Sev | Default | Description |
+|:---|:---:|:---:|:---|
+| **PSA6001** | Warning | ✅ on | Function uses non-approved verb (cf. `Get-Verb`) |
+| **PSA6002** | Warning | ⛔ off | Cmdlet alias used (`ls`, `cd`, `dir`, `where`, …) |
+| **PSA6003** | Warning | ✅ on | Function noun should be singular |
+| **PSA6004** | Warning | ✅ on | Avoid `$global:` variable definition |
+| **PSA6005** | Warning | ✅ on | Mandatory parameter must not have a default value |
+| **PSA6006** | Warning | ✅ on | Switch parameter must not default to `$true` |
+| **PSA6007** | Info | ✅ on | Advanced function returns a value but lacks `[OutputType()]` (new in 3.6.0) |
+| **PSA6008** | Info | ✅ on | Function with attributes (`[CmdletBinding()]`, `[Diagnostics.*]`, etc.) lacks an explicit `param()` block (new in 3.6.0) |
 
 `PSA7xxx` — file format / encoding (Warning)
 

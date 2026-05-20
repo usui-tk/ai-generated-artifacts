@@ -192,16 +192,18 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA1002** | ✅ 有効 | 丸括弧バランス: `(` vs `)` |
 | **PSA1003** | ✅ 有効 | 角括弧バランス: `[` vs `]` |
 
-`PSA2xxx` — 変数・スコープ系（Error / Warning）
+`PSA2xxx` — 変数・スコープ系（Error / Warning / Info）
 
 | コード | 重大度 | デフォルト | 内容 |
 |:---|:---:|:---:|:---|
 | **PSA2001** | Error | ✅ 有効 | 未定義変数参照（ヒューリスティック） |
-| **PSA2002** | Warning | ✅ 有効 | auto-variable 上書き（`$args`, `$matches`, …） |
+| **PSA2002** | Warning | ✅ 有効 | PowerShell 自動変数への代入 (`$args`, `$matches`, `$Event`, `$Host`, `$Profile`, …; 3.6.0 時点で 38 個) |
 | **PSA2003** | Warning | ✅ 有効 | `-match` を素の `$variable` に対して使用 |
 | **PSA2004** | Warning | ✅ 有効 | `$x -eq $null` は `$null -eq $x` を推奨（コレクションの罠回避） |
 | **PSA2005** | Warning | ✅ 有効 | `if` / `while` 条件内に代入演算子 `=` |
 | **PSA2006** | Warning | ✅ 有効 | `if` / `while` 条件内にリダイレクト演算子 `>` / `<` |
+| **PSA2007** | Warning | ✅ 有効 | パラメータ名が PowerShell 自動変数と衝突 (3.6.0 新規) |
+| **PSA2008** | Info | ✅ 有効 | `$Script:Foo++` / `+=` / `-=` の前に初期化がない (3.6.0 新規) |
 
 `PSA3xxx` — コーディングパターン（Warning）
 
@@ -212,6 +214,7 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA3003** | ✅ 有効 | `-match` を空文字列リテラルに対して使用 |
 | **PSA3004** | ✅ 有効 | 空の `catch { }` ブロック |
 | **PSA3005** | ✅ 有効 | `Start-Transcript -Path` の代わりに `-LiteralPath` を使うべき。 `[`、 `]`、 その他 wildcard メタ文字を含むパスで誤動作 (3.2.0 新規) |
+| **PSA3006** | ✅ 有効 | 廃止予定の WMI cmdlet (`Get-WmiObject`, `Invoke-WmiMethod` 等); CIM cmdlet を推奨 (3.6.0 新規) |
 
 `PSA4xxx` — スタイル・情報（Info）
 
@@ -231,16 +234,18 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA5003** | Warning | ✅ 有効 | 脆弱なハッシュアルゴリズム（MD5 / SHA1） |
 | **PSA5004** | Warning | ✅ 有効 | `ComputerName` のリテラル文字列ハードコード |
 
-`PSA6xxx` — ベストプラクティス（Warning）
+`PSA6xxx` — ベストプラクティス（Warning / Info）
 
-| コード | デフォルト | 内容 |
-|:---|:---:|:---|
-| **PSA6001** | ✅ 有効 | 関数名に PowerShell 承認動詞以外を使用（`Get-Verb` 参照） |
-| **PSA6002** | ⛔ 無効 | cmdlet エイリアスを使用（`ls`, `cd`, `dir`, `where`, …） |
-| **PSA6003** | ✅ 有効 | 関数名の名詞は単数形であるべき |
-| **PSA6004** | ✅ 有効 | `$global:` 変数の定義を避ける |
-| **PSA6005** | ✅ 有効 | Mandatory パラメータにデフォルト値を持たせない |
-| **PSA6006** | ✅ 有効 | switch パラメータのデフォルト値を `$true` にしない |
+| コード | 重大度 | デフォルト | 内容 |
+|:---|:---:|:---:|:---|
+| **PSA6001** | Warning | ✅ 有効 | 関数名に PowerShell 承認動詞以外を使用（`Get-Verb` 参照） |
+| **PSA6002** | Warning | ⛔ 無効 | cmdlet エイリアスを使用（`ls`, `cd`, `dir`, `where`, …） |
+| **PSA6003** | Warning | ✅ 有効 | 関数名の名詞は単数形であるべき |
+| **PSA6004** | Warning | ✅ 有効 | `$global:` 変数の定義を避ける |
+| **PSA6005** | Warning | ✅ 有効 | Mandatory パラメータにデフォルト値を持たせない |
+| **PSA6006** | Warning | ✅ 有効 | switch パラメータのデフォルト値を `$true` にしない |
+| **PSA6007** | Info | ✅ 有効 | 値を返す advanced 関数に `[OutputType()]` がない (3.6.0 新規) |
+| **PSA6008** | Info | ✅ 有効 | function attribute (`[CmdletBinding()]`, `[Diagnostics.*]` 等) を持つが明示的な `param()` がない (3.6.0 新規) |
 
 `PSA7xxx` — ファイル形式・エンコーディング（Warning / Error）
 

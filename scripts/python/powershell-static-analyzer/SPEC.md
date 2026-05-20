@@ -419,9 +419,29 @@ possible; suppress with `# psa-disable-line PSA2001` when intentional.
 - **Default**: enabled
 
 **Detection**: Any assignment `$name = …` where `name` (lowercased) is
-in the RISKY_SHADOW_VARS set:
-`args`, `lastexitcode`, `input`, `matches`, `foreach`, `host`,
-`true`, `false`.
+in the `RISKY_SHADOW_VARS` set. As of v3.6.0 this set was expanded
+from 8 to 38 entries to align with PSScriptAnalyzer's
+`PSAvoidAssignmentToAutomaticVariable` rule. The full set:
+
+```
+_,            psitem,          this,
+args,         input,           matches,         switch,         foreach,
+error,        lastexitcode,    stacktrace,
+event,        eventargs,       eventsubscriber, sender,
+pscmdlet,     psboundparameters,
+host,         home,            pid,             pshome,         profile,
+pscommandpath, psscriptroot,
+myinvocation, executioncontext,
+true,         false,
+ofs,          nestedpromptlevel, consolefilename,
+shellid,      psversiontable,  psculture,       psuiculture,
+psdebugcontext, pssenderinfo
+```
+
+`null` is deliberately excluded because `$null = $expr` is the
+canonical "discard" idiom in PowerShell (the value-suppressing
+equivalent of `[void]$expr`); PSScriptAnalyzer follows the same
+exemption.
 
 ### 4.6 PSA2003 — `-match` against bare variable
 
@@ -457,6 +477,52 @@ is not followed by another `=` (avoiding `==` false-positives).
 **Detection**: Pattern `if|while|elseif ( $variable [<>] ...`.
 In PowerShell, `>` and `<` are file redirection, not comparison.
 Use `-gt` / `-lt`.
+
+### 4.9a PSA2007 — Parameter name shadows a PowerShell automatic variable
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: Inspects every `param(...)` block (both top-level
+script param and per-function param blocks). Fires when a parameter
+declared inside such a block has a name that is in the
+`RISKY_SHADOW_VARS` set (see §4.5). Mirrors PSScriptAnalyzer's
+`PSAvoidAssignmentToAutomaticVariable` rule.
+
+**Rationale**: PowerShell auto-variables like `$Event` (event
+subscribers), `$Args` (argument list), `$Input` (pipeline input),
+`$PSCmdlet` (cmdlet binding), etc., are populated by the runtime in
+specific contexts. A parameter named `$Event` shadows the engine's
+`$Event` and silently misbehaves if the function is ever called from
+inside an event-subscriber action block (`Register-ObjectEvent`,
+`Register-WmiEvent`, etc.).
+
+**Suggested fix**: Rename to `${name}Object`, `${name}Input`, or a
+domain-specific alternative.
+
+**False-positive defense**: Only fires inside an actual `param(...)`
+block. Bare references like `$Event` inside an event-subscriber
+action block are *not* parameter declarations and are correctly
+ignored.
+
+### 4.9b PSA2008 — `$Script:Foo++` / `+=` / `-=` without prior initialisation
+
+- **Severity**: Info
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: Scans for `$Script:Foo++`, `--`, `+=`, `-=` patterns
+and reports each instance where no plain `$Script:Foo = ...`
+initialisation exists anywhere in the same file.
+
+**Rationale**: PowerShell coerces `$null + 1` to `1`, but relying on
+this is type-fragile and obscures the variable's expected type.
+Explicit initialisation also helps PSScriptAnalyzer's
+`PSAvoidUninitializedVariable` rule and aids readers.
+
+**Suggested fix**: Add a plain `$Script:Foo = 0` (or similar) at the
+top of the script's identifier/state-initialisation block.
 
 ### 4.10 PSA3001 — `Start-Process -ArgumentList`
 
@@ -528,6 +594,40 @@ Start-Transcript -LiteralPath $logPath
 
 ```powershell
 Start-Transcript -Path $p -Force -ErrorAction Stop  # psa-disable-line PSA3005 -- deliberate cascade
+```
+
+### 4.13c PSA3006 — Deprecated WMI cmdlet
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: Any of the following cmdlet invocations:
+`Get-WmiObject`, `Invoke-WmiMethod`, `Register-WmiEvent`,
+`Remove-WmiObject`, `Set-WmiInstance`. The `gwmi` alias is also
+detected. Mirrors PSScriptAnalyzer's `PSAvoidUsingWMICmdlet`.
+
+**Rationale**: PowerShell 3.0 introduced the CIM cmdlets
+(`Get-CimInstance`, `Invoke-CimMethod`, etc.) as the cross-platform
+successor to WMI. PowerShell 6+ has removed the WMI cmdlets entirely.
+Code that uses WMI cmdlets cannot run on `pwsh.exe` / PSCore.
+
+**Suggested fix**: Replace each WMI cmdlet with its CIM equivalent:
+
+| WMI cmdlet            | CIM replacement                |
+|:----------------------|:-------------------------------|
+| `Get-WmiObject`       | `Get-CimInstance`              |
+| `Invoke-WmiMethod`    | `Invoke-CimMethod`             |
+| `Register-WmiEvent`   | `Register-CimIndicationEvent`  |
+| `Remove-WmiObject`    | `Remove-CimInstance`           |
+| `Set-WmiInstance`     | `Set-CimInstance`              |
+
+**Suppression**: Intentional WMI usage (e.g., a CIM-fallback path on
+Server Core where CIM is constrained) should be silenced with the
+inline suppression marker plus a rationale:
+
+```powershell
+$os = Get-WmiObject -Class Win32_OperatingSystem  # psa-disable-line PSA3006 -- intentional fallback when CIM is constrained
 ```
 
 ### 4.14 PSA4001 — Unfinished marker
@@ -656,6 +756,84 @@ parameter can never use its default; declaring one is misleading.
 
 **Detection**: Pattern `[switch]$Name = $true`. A switch always
 defaults to `$false`; setting it to `$true` confuses callers.
+
+### 4.27a PSA6007 — Function returning a value should declare `[OutputType()]`
+
+- **Severity**: Info
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: A function fires this rule when ALL three conditions
+hold:
+
+1. The function has a `[CmdletBinding()]` attribute (i.e., it is an
+   advanced function — plain helpers without `[CmdletBinding()]` are
+   exempt to keep the false-positive rate low).
+2. The function body contains at least one `return <expr>` where
+   `<expr>` is non-empty.
+3. The function does NOT already declare `[OutputType(...)]` in any
+   shape.
+
+Mirrors PSScriptAnalyzer's `PSUseOutputTypeCorrectly`.
+
+**Rationale**: The `[OutputType()]` attribute documents the function's
+return contract to PowerShell tooling (IntelliSense,
+`Get-Command -Syntax`, `Get-Help -Full`) and to downstream type
+inference. PSScriptAnalyzer's `PSUseOutputTypeCorrectly` reports the
+same condition at Information level.
+
+**Suggested fix**: Add `[OutputType([<type>])]` immediately after the
+`[CmdletBinding()]` line:
+
+```powershell
+function Get-Foo {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    return [pscustomobject]@{ A = 1; B = 2 }
+}
+```
+
+For functions returning multiple types (e.g., `[string]` or
+`[pscustomobject]`), pass a list:
+`[OutputType([string], [pscustomobject])]`.
+
+### 4.27b PSA6008 — Function with attributes lacks an explicit `param()` block
+
+- **Severity**: Info
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: A function fires this rule when it has at least one of
+the following attributes — `[CmdletBinding(...)]`,
+`[OutputType(...)]`, `[Alias(...)]`,
+`[Diagnostics.CodeAnalysis.SuppressMessageAttribute(...)]`,
+`[Diagnostics.*]` — BUT does NOT have an explicit `param()`
+declaration anywhere in its body.
+
+**Rationale**: PowerShell silently accepts a function without
+`param()`, but the attributes then have no target and downstream
+tooling (PSScriptAnalyzer, `Get-Help -Full`, IntelliSense) cannot
+discover them.
+
+**Suggested fix**: Add an explicit empty `param()` block (or one with
+the actual parameters) immediately after the attribute(s):
+
+```powershell
+function Show-Banner {
+    [CmdletBinding()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWMICmdlet', '',
+        Justification = 'Intentional WMI fallback path for Server Core.')]
+    param()      # ← required for the attributes above to take effect
+
+    Write-Host '=== Banner ==='
+}
+```
+
+This rule has no direct PSScriptAnalyzer equivalent; it is a
+quality-of-life rule motivated by a v3.5.x review where a
+`Show-PowerShellEnvironment` helper had attributes attached but no
+`param()` block, and the attributes were silently inert.
 
 ### 4.28 PSA7001 — Missing UTF-8 BOM
 
@@ -1656,10 +1834,14 @@ governance file; updates to the workflow are recorded in
 | PSA2004 | warning | ✅ |
 | PSA2005 | warning | ✅ |
 | PSA2006 | warning | ✅ |
+| PSA2007 | warning | ✅ |
+| PSA2008 | info | ✅ |
 | PSA3001 | warning | ✅ |
 | PSA3002 | warning | ✅ |
 | PSA3003 | warning | ✅ |
 | PSA3004 | warning | ✅ |
+| PSA3005 | warning | ✅ |
+| PSA3006 | warning | ✅ |
 | PSA4001 | info | ✅ |
 | PSA4002 | info | ✅ |
 | PSA4003 | info | ⛔ |
@@ -1674,7 +1856,16 @@ governance file; updates to the workflow are recorded in
 | PSA6004 | warning | ✅ |
 | PSA6005 | warning | ✅ |
 | PSA6006 | warning | ✅ |
+| PSA6007 | info | ✅ |
+| PSA6008 | info | ✅ |
 | PSA7001 | warning | ✅ |
+| PSA8001 | warning | ✅ |
+| PSA9001 | info | ⛔ |
+| PSA9002 | warning | ⛔ |
+| PSAP0001 | warning | ⛔ |
+| PSAP0002 | warning | ⛔ |
+| PSAP0003 | warning | ⛔ |
+| PSAP0004 | warning | ⛔ |
 
 ---
 

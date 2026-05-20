@@ -15,11 +15,133 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
+_No unreleased changes at this time._
+
+## [3.6.0] — 2026-05-20 — `psscriptanalyzer-rule-parity-uplift`
+
 ### Added
+
+- **PSA2007 (Warning) — Parameter name shadows a PowerShell automatic
+  variable.** New rule that inspects every `param(...)` block
+  (top-level script param and per-function param blocks) and reports
+  any parameter whose name collides with the risky auto-variable list.
+  Mirrors PSScriptAnalyzer's `PSAvoidAssignmentToAutomaticVariable`
+  rule. **This rule would have caught the v3.5.x miss of an `$Event`
+  parameter that silently shadowed the engine's `$Event`
+  auto-variable inside an event-subscriber action block.** Default:
+  enabled.
+- **PSA3006 (Warning) — Deprecated WMI cmdlet usage.** New rule that
+  detects calls to `Get-WmiObject`, `Invoke-WmiMethod`,
+  `Register-WmiEvent`, `Remove-WmiObject`, `Set-WmiInstance`, and the
+  `gwmi` alias. CIM cmdlets (Get-CimInstance et al.) are the
+  supported successors; PowerShell 6+ has removed the WMI cmdlets
+  entirely. Mirrors PSScriptAnalyzer's `PSAvoidUsingWMICmdlet`.
+  Intentional WMI usage in CIM-fallback paths should be silenced with
+  the inline suppression marker
+  `# psa-disable-line PSA3006 -- <rationale>`. Default: enabled.
+- **PSA6007 (Info) — Advanced function returns a value but does not
+  declare `[OutputType()]`.** Mirrors PSScriptAnalyzer's
+  `PSUseOutputTypeCorrectly`. Fires when a function has
+  `[CmdletBinding()]`, contains at least one `return <expr>`
+  statement, and does NOT already declare `[OutputType(...)]`. The
+  `[CmdletBinding()]` gate keeps the false-positive rate low: only
+  advanced functions are checked. Default: enabled.
+- **PSA6008 (Info) — Function with attributes has no explicit
+  `param()` block.** Detects functions that have `[CmdletBinding()]`,
+  `[OutputType(...)]`, `[Alias(...)]`, or
+  `[Diagnostics.CodeAnalysis.SuppressMessageAttribute(...)]` but no
+  explicit `param()` declaration. PowerShell silently accepts the
+  omission, but the attributes then have no scope and tools
+  (PSScriptAnalyzer, Get-Help) cannot find them. No direct
+  PSScriptAnalyzer equivalent. Default: enabled.
+- **PSA2008 (Info) — `$Script:Foo++` / `+=` / `-=` without prior
+  initialization.** Detects in-place mutations of script-scoped
+  variables that lack a preceding plain `$Script:Foo = ...`
+  initialization. Coercion (`$null + 1 = 1`) is type-fragile; the
+  rule encourages an explicit initial value. No direct
+  PSScriptAnalyzer equivalent. Default: enabled.
+
+### Changed
+
+- **PSA2002 — significantly expanded `RISKY_SHADOW_VARS` set.** The
+  v3.5.x list contained only 8 auto-variables; v3.6.0 expands it to
+  match the PowerShell engine's actual automatic-variable inventory
+  (38 entries), including the previously-missed `$Event`,
+  `$EventArgs`, `$EventSubscriber`, `$Sender`, `$Error`,
+  `$PSCmdlet`, `$PSBoundParameters`, `$MyInvocation`, `$Home`,
+  `$Profile`, etc. The `$null` auto-variable is deliberately
+  excluded because `$null = <expr>` is the canonical PowerShell
+  "discard" idiom (`$null = $list.Add(1)` is the value-suppressing
+  equivalent of `[void]$list.Add(1)`); PSScriptAnalyzer follows the
+  same exemption.
+- **Header docstring updated** to list all 8 new / refined rules
+  with the `(new in v3.6.0)` annotation.
+- **`__version__` bumped from `3.5.1` to `3.6.0`.** Per
+  [SemVer 2.0.0](https://semver.org/), this is a **minor** release:
+  new rules are added (additive), and the existing rule set retains
+  its semantics. The `PSA2002` expansion of `RISKY_SHADOW_VARS` is
+  a behavioural broadening — code that was previously silent may now
+  emit PSA2002 warnings — but the rule's documented intent ("flag
+  assignments to risky auto-variables") is unchanged, and the
+  default-on / Warning level is preserved.
+- **`VERSION` file updated to `3.6.0`.**
+
+### Verification
+
+- All 5 in-repository / sibling-repository scripts continue to pass
+  the canonical 0/0/0 baseline:
+  - `Download-SpeakerDeck.ps1` (ai-generated-artifacts): 0/0/0
+    (after inline PSA3006 suppression for an intentional WMI
+    fallback in `Show-PowerShellEnvironment` and the addition of
+    `[OutputType([pscustomobject])]` to two helpers).
+  - `Deploy-AMDChipsetDriverOnWindowsServer.ps1`,
+    `Deploy-AMDGraphicsDriverOnWindowsServer.ps1`,
+    `Deploy-AMDNpuDriverOnWindowsServer.ps1`,
+    `Deploy-MSBthPanInboxOnWindowsServer.ps1`
+    (Deploy-Drivers-For-WindowsServer): all 0/0/0
+    after backporting the same fixes (renamed
+    `$home` → `$winHomeLocation`, `$profile` → `$osProfile`,
+    added `[OutputType([...])]` to all 23 functions that return
+    a value, added PSA3006 inline suppression to 15 intentional
+    WMI fallback lines).
+- PSA8001 (cross-script function-body drift) regression: the 6
+  shared helpers governed by PSA8001 in Deploy-Drivers retain
+  byte-for-byte parity across all four scripts after the v3.6.0
+  uplift. The known per-script helper
+  `Get-OrEnsureSecureBootBaseline` continues to drift by design
+  (already in `.psa.config.json` `psa8001_ignore_functions`).
+
+### Also included in this release (carried over from the previous unreleased pool)
 
 - **GitHub Actions CI workflow enforcing the three self-quality gates
   on every push and pull request.** New workflow:
   `.github/workflows/scripts__python__powershell-static-analyzer.yml`.
+  - Pillar 1 (`pytest test_psa_rules.py`) — runs the full rule
+    self-test suite that ships in this directory.
+  - Pillar 2 (`python3 psa.py --config-check .psa.config.json.template`)
+    — validates the shipped configuration template against the
+    documented schema.
+  - Pillar 3 (`python3 psa.py --self-check`) — verifies that
+    `SPEC.md` §4 rule headings agree with the runtime RULES table.
+  - Triggers: push / pull_request on `main` when `psa.py`, `VERSION`,
+    `test_psa_rules.py`, `SPEC.md`, `.psa.config.json.template`, or
+    the workflow file itself changes; plus `workflow_dispatch`.
+  - Timeout tier: T1 (30 minutes) per repository-root `/SPEC.md`
+    §4.1. Fork-PR `if`-guard per `/SPEC.md` §5.
+- **`SPEC.md` §12.6 *Continuous Integration in this repository*.**
+  A new subsection that records where the CI workflow lives and
+  points to repository-root `/SPEC.md` for governance.
+- **CI status badge** in `README.md` and `README.ja.md` immediately
+  after the title.
+- **Documentation: cross-link to consumer-side adoption.**
+  `SPEC.md` §12 gained a new informative subsection §12.5
+  *Consumer-side adoption* recording how `--config-check` (§12.2)
+  and `--self-check` (§12.3) are wired into a downstream
+  repository's workflow. `README.md` and `README.ja.md` *Verified
+  consumers* table entry for `Deploy-Drivers-For-WindowsServer`
+  now lists all four pipeline scripts.
+
+
   - Pillar 1 (`pytest test_psa_rules.py`) — runs the full rule
     self-test suite that ships in this directory.
   - Pillar 2 (`python3 psa.py --config-check .psa.config.json.template`)

@@ -8,6 +8,33 @@
 // Applies to  : psa.py latest mainline (see sibling VERSION file)
 //
 // -----------------------------------------------------------------------------
+// What's new in 3.6.0 (compared to 3.5.x templates)
+// -----------------------------------------------------------------------------
+//
+//   - New generic rule  : PSA2007  Parameter name shadows a PowerShell
+//                                  automatic variable (default ON, Warning).
+//                                  Mirrors PSScriptAnalyzer
+//                                  PSAvoidAssignmentToAutomaticVariable.
+//   - New generic rule  : PSA2008  $Script:Foo++/+=/-= without prior
+//                                  initialisation (default ON, Info).
+//   - New generic rule  : PSA3006  Deprecated WMI cmdlet usage
+//                                  (Get-WmiObject etc.) (default ON, Warning).
+//                                  Mirrors PSScriptAnalyzer PSAvoidUsingWMICmdlet.
+//   - New generic rule  : PSA6007  Advanced function lacks [OutputType()]
+//                                  (default ON, Info). Mirrors PSScriptAnalyzer
+//                                  PSUseOutputTypeCorrectly.
+//   - New generic rule  : PSA6008  Function with attributes but no explicit
+//                                  param() block (default ON, Info).
+//
+// Behavioural broadening:
+//   - PSA2002 RISKY_SHADOW_VARS expanded from 8 to 38 entries to match the
+//     PowerShell engine's actual automatic-variable inventory ($Event,
+//     $Error, $PSCmdlet, $MyInvocation, $Home, $Profile, etc.). Scripts
+//     that previously passed PSA2002 may emit new warnings if they assign
+//     to any of these auto-variables. The exempt $null = ... discard
+//     idiom is preserved.
+//
+// -----------------------------------------------------------------------------
 // What's new in 3.3.0 (compared to 3.2.0 templates)
 // -----------------------------------------------------------------------------
 //

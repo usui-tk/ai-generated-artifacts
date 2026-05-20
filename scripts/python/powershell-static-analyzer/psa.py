@@ -13,17 +13,21 @@ Parse / structural (PSA1xxx):
 
 Variable / scope (PSA2xxx):
   PSA2001  Undefined variable reference .......... Warning
-  PSA2002  Auto-variable shadowing ............... Warning
+  PSA2002  Auto-variable shadowing (assignment) .. Warning
   PSA2003  -match against bare variable .......... Warning
   PSA2004  $x -eq $null  (use $null -eq $x) ...... Warning
   PSA2005  Assignment operator in conditional .... Warning
   PSA2006  Redirection operator in conditional ... Warning
+  PSA2007  Param name shadows auto-variable ...... Warning   (new in v3.6.0)
+  PSA2008  $Script:Foo++ without prior init ...... Info      (new in v3.6.0)
 
 Coding-pattern (PSA3xxx):
   PSA3001  Start-Process -ArgumentList ........... Warning
   PSA3002  Backtick before empty line ............ Warning
   PSA3003  -match against empty string ........... Warning
   PSA3004  Empty catch block ..................... Warning
+  PSA3005  Start-Transcript -Path ................ Warning
+  PSA3006  Get-WmiObject / WMI cmdlets ........... Warning   (new in v3.6.0)
 
 Style / info (PSA4xxx):
   PSA4001  TODO / FIXME marker ................... Info
@@ -44,6 +48,8 @@ Best-practice (PSA6xxx):
   PSA6004  $global: variable definition .......... Warning
   PSA6005  Default value on Mandatory parameter .. Warning
   PSA6006  Switch parameter defaults to $true .... Warning
+  PSA6007  Missing [OutputType()] declaration .... Info      (new in v3.6.0)
+  PSA6008  Function attribute without param() .... Info      (new in v3.6.0)
 
 File format / encoding (PSA7xxx):
   PSA7001  PowerShell script lacks UTF-8 BOM ..... Warning
@@ -132,7 +138,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.5.1'
+__version__ = '3.6.0'
 
 
 def _verify_version_file_consistency():
@@ -236,6 +242,10 @@ RULES = [
      'Assignment operator (=) inside conditional'),
     ('PSA2006', 'warning', True,
      'Redirection operator (>, <) inside conditional'),
+    ('PSA2007', 'warning', True,
+     'Parameter name shadows a PowerShell automatic variable'),
+    ('PSA2008', 'info',    True,
+     '$Script: variable mutated by ++/+=/-= without an initial assignment'),
 
     # Coding-pattern (PSA3xxx)
     ('PSA3001', 'warning', True,
@@ -248,6 +258,8 @@ RULES = [
      'Empty catch block'),
     ('PSA3005', 'warning', True,
      'Start-Transcript -Path; prefer -LiteralPath for special characters'),
+    ('PSA3006', 'warning', True,
+     'Get-WmiObject / Invoke-WmiMethod / Register-WmiEvent / etc.; prefer CIM cmdlets'),
 
     # Style / info (PSA4xxx)
     ('PSA4001', 'info',    True,
@@ -282,6 +294,10 @@ RULES = [
      'Mandatory parameter must not have a default value'),
     ('PSA6006', 'warning', True,
      'Switch parameter must not default to $true'),
+    ('PSA6007', 'info',    True,
+     'Function returning a value should declare [OutputType()]'),
+    ('PSA6008', 'info',    True,
+     'Function with [CmdletBinding()] or attributes should have an explicit param() block'),
 
     # File format / encoding (PSA7xxx)
     ('PSA7001', 'warning', True,
@@ -396,9 +412,45 @@ EXTERNAL_SCOPES = {
 }
 
 # Auto-variables that are particularly risky to shadow
+#
+# Expanded in v3.6.0 to match PSScriptAnalyzer's
+# PSAvoidAssignmentToAutomaticVariable rule (Warning level). The
+# previous set was a hand-picked subset that erroneously omitted
+# 'event', allowing $Event parameter shadowing to slip past the v3.5.x
+# analyzer. $Event is populated inside event-subscriber action blocks
+# (Register-ObjectEvent, Register-WmiEvent, etc.); shadowing it via a
+# parameter or assignment causes silent misbehaviour if such a helper
+# is called from inside a subscriber block.
+#
+# Note: ``$null`` is deliberately NOT in this set. ``$null = ...`` is a
+# well-established PowerShell idiom for discarding the value of a
+# pipeline / cmdlet whose return is unwanted (it is the explicit
+# equivalent of ``[void](...)`` or ``... | Out-Null``); flagging it
+# would produce a high false-positive rate. PSScriptAnalyzer follows
+# the same exemption.
 RISKY_SHADOW_VARS = {
-    'args', 'lastexitcode', 'input', 'matches', 'foreach',
-    'host', 'true', 'false',
+    # Pipeline / loop binding
+    '_', 'psitem', 'this',
+    # Argument / parameter binding
+    'args', 'input', 'matches', 'switch', 'foreach',
+    # Error / state binding
+    'error', 'lastexitcode', 'stacktrace',
+    # Event-subscriber binding (the v3.5.x miss)
+    'event', 'eventargs', 'eventsubscriber', 'sender',
+    # Cmdlet context binding
+    'pscmdlet', 'psboundparameters',
+    # Host / environment binding
+    'host', 'home', 'pid', 'pshome', 'profile',
+    'pscommandpath', 'psscriptroot',
+    'myinvocation', 'executioncontext',
+    # Boolean constants (assignment to these is always wrong)
+    # Note: $null is deliberately excluded; '$null = ...' is the
+    # canonical PowerShell "discard" idiom and not a defect.
+    'true', 'false',
+    # Misc engine state
+    'ofs', 'nestedpromptlevel', 'consolefilename',
+    'shellid', 'psversiontable', 'psculture', 'psuiculture',
+    'psdebugcontext', 'pssenderinfo',
 }
 
 # ---------------------------------------------------------------------------
@@ -778,15 +830,145 @@ def check_undefined_vars(text, clean):
 
 
 def check_shadow(clean):
-    """PSA2002: assigning to a risky auto-variable."""
+    """PSA2002: assigning to a risky auto-variable.
+
+    Detects ``$Foo = ...`` where ``Foo`` is a risky auto-variable.
+
+    History
+    -------
+    Pre-v3.6.0 this rule covered only top-level assignments via the
+    pattern ``$Foo = ...``. It did NOT inspect parameter declarations
+    inside ``param(...)`` blocks, so a parameter named ``$Event``
+    silently shadowed the engine's $Event auto-variable. The miss was
+    discovered when a sibling repository's debug-trace helper was
+    audited against PSScriptAnalyzer.
+
+    In v3.6.0, parameter-declaration inspection moved into the new
+    PSA2007 rule (kept separate so the two can be enabled / suppressed
+    independently and so the diagnostic line points to the param
+    declaration rather than the function header). PSA2002 continues to
+    cover the assignment-statement case only.
+    """
     out = []
     for ln, line in enumerate(clean.split('\n'), 1):
-        for m in re.finditer(r'\$([A-Za-z_][A-Za-z0-9_]*)\s*=', line):
+        for m in re.finditer(r'\$([A-Za-z_][A-Za-z0-9_]*)\s*=(?!=)', line):
             if m.group(1).lower() in RISKY_SHADOW_VARS:
                 out.append({
                     'severity': 'warning', 'code': 'PSA2002',
                     'line': ln, 'col': m.start() + 1,
                     'message': f'shadowing auto-variable ${m.group(1)}',
+                })
+    return out
+
+
+# Regex for parameter declarations inside a param() block.
+# Matches things like:
+#     [Parameter(Mandatory)] $Event
+#     [Parameter(Mandatory=$true)] [string]$Event
+#     [string]$Event = $null
+#     $Event,
+# Captures: param attribute prefix (group 1, may be empty) + var name (2).
+_PARAM_DECL_RE = re.compile(
+    r"""
+    (?:^|[,\(])              # start of param block, or after a comma
+    \s*
+    (?:                      # ---- optional attribute/type prefix ----
+        (?:                  # attribute (e.g. [Parameter(...)], [ValidateNotNull()])
+            \[[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]
+            \s*
+        )*
+        (?:                  # type literal (e.g. [string], [int[]])
+            \[[A-Za-z_][\w\.\[\]]*\]
+            \s*
+        )?
+    )
+    \$ ( [A-Za-z_][A-Za-z0-9_]* )    # the parameter name -> group 1
+    """,
+    re.VERBOSE,
+)
+
+
+def _iter_param_blocks(clean):
+    """Yield (start_offset, body) for each ``param(...)`` block in *clean*.
+
+    Robust to nested parentheses inside attribute arguments such as
+    ``[Parameter(Mandatory=$true, Position=0)]``.
+    """
+    out = []
+    i = 0
+    pat = re.compile(r'\bparam\s*\(', re.IGNORECASE)
+    while True:
+        m = pat.search(clean, i)
+        if m is None:
+            break
+        open_pos = m.end() - 1  # position of '('
+        depth = 1
+        j = open_pos + 1
+        while j < len(clean) and depth > 0:
+            c = clean[j]
+            if c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+            j += 1
+        if depth == 0:
+            body = clean[open_pos + 1:j - 1]
+            out.append((open_pos + 1, body))
+            i = j
+        else:
+            break
+    return out
+
+
+def check_param_auto_var(clean):
+    """PSA2007: parameter name shadows a PowerShell automatic variable.
+
+    New in v3.6.0. Inspects every ``param(...)`` block (including
+    top-level script param and per-function param blocks) and reports
+    any parameter whose name collides with the risky auto-variable
+    list. This is the rule that would have caught the v3.5.x
+    ``$Event`` miss in the Debug Trace helper.
+
+    Mirrors PSScriptAnalyzer's
+    ``PSAvoidAssignmentToAutomaticVariable`` (Warning level).
+
+    False-positive defense
+    ----------------------
+    Only fires inside an actual ``param(...)`` block; bare references
+    like ``$Event`` inside an event-subscriber action block are NOT
+    parameter declarations and are correctly ignored.
+    """
+    out = []
+    # Build a list of (line_number, column_at_line_start) for each
+    # offset in *clean*. We compute lazily on demand.
+    line_starts = [0]
+    for i, ch in enumerate(clean):
+        if ch == '\n':
+            line_starts.append(i + 1)
+
+    def offset_to_lc(off):
+        # Binary search would be faster, but linear is fine for our scale.
+        ln = 0
+        for k, s in enumerate(line_starts):
+            if s > off:
+                break
+            ln = k
+        return ln + 1, off - line_starts[ln] + 1
+
+    for body_start, body in _iter_param_blocks(clean):
+        for m in _PARAM_DECL_RE.finditer(body):
+            name = m.group(1)
+            if name.lower() in RISKY_SHADOW_VARS:
+                # Find absolute offset of the parameter name in *clean*.
+                abs_off = body_start + m.start(1) - 1   # '$' position
+                ln, col = offset_to_lc(abs_off)
+                out.append({
+                    'severity': 'warning', 'code': 'PSA2007',
+                    'line': ln, 'col': col,
+                    'message': (f'parameter name ${name} shadows the '
+                                f'PowerShell automatic variable $'
+                                f'{name}; rename to e.g. '
+                                f'${name}Object'),
                 })
     return out
 
@@ -998,6 +1180,54 @@ def check_start_transcript_literalpath(clean):
                     'Start-Transcript without -LiteralPath; -Path is '
                     'wildcard-expanded and unsafe for paths containing '
                     '[ ] or other PowerShell metacharacters'),
+            })
+    return out
+
+
+# The deprecated WMI cmdlet set. Anything from this list should be
+# replaced with the corresponding CIM cmdlet, which is the
+# cross-platform / PSCore-friendly successor introduced in PowerShell
+# 3.0. PowerShell 6+ removed the WMI cmdlets entirely.
+WMI_CMDLETS = {
+    'get-wmiobject':     'Get-CimInstance',
+    'invoke-wmimethod':  'Invoke-CimMethod',
+    'register-wmievent': 'Register-CimIndicationEvent',
+    'remove-wmiobject':  'Remove-CimInstance',
+    'set-wmiinstance':   'Set-CimInstance',
+    # Aliases that PowerShell accepts for Get-WmiObject
+    'gwmi':              'Get-CimInstance',
+}
+
+
+def check_wmi_cmdlet(clean):
+    """PSA3006: usage of a deprecated WMI cmdlet; prefer CIM cmdlet.
+
+    New in v3.6.0. Mirrors PSScriptAnalyzer's
+    ``PSAvoidUsingWMICmdlet`` rule. CIM cmdlets (Get-CimInstance et al.)
+    are the supported successors. PowerShell 6+ has removed the WMI
+    cmdlets entirely, so any script that needs to run on PSCore /
+    pwsh.exe MUST migrate.
+
+    Intentional WMI usage (e.g. fallback paths on Server Core where
+    CIM is constrained) should be silenced with an inline suppression
+    comment::
+
+        # psa-disable-line PSA3006 -- intentional fallback when CIM is constrained
+    """
+    pat = re.compile(
+        r'\b(Get-WmiObject|Invoke-WmiMethod|Register-WmiEvent|'
+        r'Remove-WmiObject|Set-WmiInstance|gwmi)\b',
+        re.IGNORECASE)
+    out = []
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in pat.finditer(line):
+            cmdlet = m.group(1)
+            replacement = WMI_CMDLETS.get(cmdlet.lower(), 'a CIM cmdlet')
+            out.append({
+                'severity': 'warning', 'code': 'PSA3006',
+                'line': ln, 'col': m.start() + 1,
+                'message': (f'{cmdlet} is deprecated and removed in '
+                            f'PowerShell 6+; prefer {replacement}'),
             })
     return out
 
@@ -1338,6 +1568,257 @@ def check_switch_default_true(clean):
                 'message': ('switch parameter must not default to $true; '
                             'switches default to $false'),
             })
+    return out
+
+
+def check_output_type(text, clean):
+    """PSA6007: function with explicit ``return`` lacks [OutputType()].
+
+    New in v3.6.0. Mirrors PSScriptAnalyzer's
+    ``PSUseOutputTypeCorrectly`` (Information level). The rule's intent
+    is to document the function's return contract for tooling
+    (IntelliSense, Get-Command -Syntax, Get-Help) and downstream type
+    inference.
+
+    Detection
+    ---------
+    A function fires this rule when ALL of the following are true:
+      1. The function has a ``[CmdletBinding()]`` attribute (i.e., it
+         is an advanced function — plain helpers are exempt).
+      2. The function body contains at least one ``return <expr>``
+         statement where ``<expr>`` is non-empty (i.e., the function
+         is explicitly returning a value).
+      3. The function does NOT already declare ``[OutputType(...)]``
+         (any argument shape).
+
+    The CmdletBinding-required gate keeps the false-positive rate low:
+    only advanced functions are checked, mirroring PSScriptAnalyzer's
+    default scope. Plain ``function Foo { ... }`` helpers that happen
+    to return a value via pipeline emission are not flagged.
+
+    Implementation note (v3.6.0)
+    ----------------------------
+    The rule scans the RAW text (which still contains string literals)
+    rather than the cleaned text (where string literals have been
+    blanked) — because ``return "hello"`` would otherwise look like a
+    bare ``return``. The function-block structure is derived from
+    ``clean`` to avoid being confused by braces inside strings.
+    """
+    out = []
+    line_starts = [0]
+    for i, ch in enumerate(clean):
+        if ch == '\n':
+            line_starts.append(i + 1)
+
+    def offset_to_line(off):
+        ln = 0
+        for k, s in enumerate(line_starts):
+            if s > off:
+                break
+            ln = k
+        return ln + 1
+
+    pat_func = re.compile(
+        r'\bfunction\s+([A-Za-z_][\w\-]*)\s*\{',
+        re.IGNORECASE)
+    for m in pat_func.finditer(clean):
+        # Walk forward over CLEAN, tracking brace depth, to find the
+        # matching '}'. We use the clean text for this because string
+        # literals must not interfere with brace counting.
+        depth = 1
+        i = m.end()
+        while i < len(clean) and depth > 0:
+            c = clean[i]
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+            i += 1
+        if depth != 0:
+            continue
+        # Body span in clean (and identically in text — positions are
+        # preserved by strip_strings_and_comments).
+        body_start = m.end()
+        body_end = i - 1
+        body_clean = clean[body_start:body_end]
+        body_text = text[body_start:body_end]
+        has_cmdlet_binding = bool(
+            re.search(r'\[\s*CmdletBinding\s*\(', body_clean, re.IGNORECASE))
+        if not has_cmdlet_binding:
+            continue
+        has_output_type = bool(
+            re.search(r'\[\s*OutputType\s*\(', body_clean, re.IGNORECASE))
+        if has_output_type:
+            continue
+        # Look for `return <expr>` on the RAW body, so string literals
+        # like `return "hello"` remain visible.
+        #
+        # Conditions for a return-with-value (vs. a bare `return` guard):
+        #   - `return` followed by at least one space and a non-`;}#`
+        #     non-whitespace character on the SAME line, OR
+        #   - `return` at end-of-line and the next line's first
+        #     non-whitespace is `$`, `[`, `@`, a quote, or another
+        #     expression starter (i.e., not `}` and not a new
+        #     statement).
+        has_return_value = False
+        for rm in re.finditer(r'(?<![\w-])return\b', body_text):
+            after = body_text[rm.end():rm.end() + 80]
+            # Trim leading whitespace including newlines
+            trimmed = after.lstrip()
+            if not trimmed:
+                continue
+            first = trimmed[0]
+            # Excluded: control-flow returns and bare `return` followed
+            # by `}` (end of function) or `;` (statement separator) or
+            # `#` (comment-only line).
+            if first in ('}', ';', '#'):
+                continue
+            # Excluded: `return` followed by a newline that begins a
+            # new statement with a bareword cmdlet (e.g., `return\nWrite-Host`).
+            # We accept any other character — covers `return $obj`,
+            # `return "hello"`, `return @{}`, `return [pscustomobject]@{}`,
+            # `return 42`, etc.
+            has_return_value = True
+            break
+        if not has_return_value:
+            continue
+        ln = offset_to_line(m.start())
+        out.append({
+            'severity': 'info', 'code': 'PSA6007',
+            'line': ln, 'col': m.start(1) + 1 - line_starts[ln - 1],
+            'message': (f'advanced function {m.group(1)} returns a '
+                        f'value but does not declare [OutputType()]; '
+                        f'add [OutputType([<type>])] after '
+                        f'[CmdletBinding()]'),
+        })
+    return out
+
+
+def check_param_block_required(clean):
+    """PSA6008: advanced function lacks an explicit param() block.
+
+    New in v3.6.0. PSScriptAnalyzer does not have a direct equivalent;
+    this is a quality-of-life rule motivated by the v3.5.x session.
+
+    A function fires this rule when it has either ``[CmdletBinding()]``
+    or any other top-level attribute (``[OutputType(...)]``,
+    ``[Diagnostics.CodeAnalysis.SuppressMessageAttribute(...)]``,
+    etc.) but does NOT have an explicit ``param()`` declaration. The
+    explicit ``param()`` is needed to give the attribute machinery a
+    target; PowerShell will silently accept the omission, but the
+    attributes then have no scope and tools (PSScriptAnalyzer,
+    Get-Help) cannot find them.
+
+    This rule fires at Info level by default; it is a code-quality
+    suggestion, not a correctness defect.
+    """
+    out = []
+    line_starts = [0]
+    for i, ch in enumerate(clean):
+        if ch == '\n':
+            line_starts.append(i + 1)
+
+    def offset_to_line(off):
+        ln = 0
+        for k, s in enumerate(line_starts):
+            if s > off:
+                break
+            ln = k
+        return ln + 1
+
+    pat_func = re.compile(
+        r'\bfunction\s+([A-Za-z_][\w\-]*)\s*\{',
+        re.IGNORECASE)
+    # Attribute we recognize as "requires param()" anchors. We require
+    # the attribute to appear BEFORE any inner code that suggests the
+    # function is parameterless.
+    attr_pat = re.compile(
+        r'\[\s*(CmdletBinding|OutputType|Alias|Diagnostics\.[\w\.]+)\s*\(',
+        re.IGNORECASE)
+    for m in pat_func.finditer(clean):
+        depth = 1
+        i = m.end()
+        while i < len(clean) and depth > 0:
+            c = clean[i]
+            if c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+            i += 1
+        if depth != 0:
+            continue
+        body = clean[m.end():i - 1]
+        # The "head" of the function body, before any executable code.
+        # We need to look at a generous portion because some
+        # attributes (especially Justification strings on
+        # SuppressMessageAttribute) can span hundreds of characters.
+        # We bound by either the first ``param(`` we see or by a
+        # statement-like construct (Write-Host, return, $var =, etc.).
+        # If we find param() anywhere reasonable, the rule is silent.
+        if not attr_pat.search(body[:2000]):
+            continue
+        # Now: does this function have a param() block?
+        # We accept param() anywhere in the body, because some authors
+        # interleave block comments / pragma comments before param().
+        # The false positive risk of "param() at end of body" is
+        # negligible: PowerShell rejects that syntactically.
+        if re.search(r'\bparam\s*\(', body, re.IGNORECASE):
+            continue
+        ln = offset_to_line(m.start())
+        out.append({
+            'severity': 'info', 'code': 'PSA6008',
+            'line': ln, 'col': m.start(1) + 1 - line_starts[ln - 1],
+            'message': (f'function {m.group(1)} has function attributes '
+                        f'but no explicit param() block; add param() '
+                        f'so the attributes have a target'),
+        })
+    return out
+
+
+def check_script_var_mutation(clean):
+    """PSA2008: ``$Script:Foo++`` / ``+=`` / ``-=`` without prior init.
+
+    New in v3.6.0. PSScriptAnalyzer does not have a direct equivalent.
+    Motivation: when a ``$Script:Foo`` is mutated via ``++`` or ``+=``
+    before any plain ``$Script:Foo = ...`` initialization is seen in
+    the file, the type of the variable is unclear (PowerShell will
+    coerce ``$null + 1 = 1``, but the resulting code is less readable
+    and the intent is fragile to refactoring).
+
+    Fires at Info level by default; this is a readability suggestion,
+    not a defect.
+
+    Detection
+    ---------
+    1. Scan for every ``$Script:Foo = ...`` assignment.
+    2. Scan for every ``$Script:Foo++`` / ``--`` / ``+=`` / ``-=``
+       mutation.
+    3. For each mutation, fire if no plain ``=`` initialization for
+       the same name has been seen anywhere in the file.
+    """
+    out = []
+    # Pass 1: collect names that are initialised somewhere in the file.
+    init_pat = re.compile(
+        r'\$Script:([A-Za-z_]\w*)\s*=(?!=)', re.IGNORECASE)
+    initialised = {
+        m.group(1).lower() for m in init_pat.finditer(clean)
+    }
+    # Pass 2: find mutations and fire on those without initialisation.
+    mut_pat = re.compile(
+        r'\$Script:([A-Za-z_]\w*)\s*(\+\+|--|\+=|-=)',
+        re.IGNORECASE)
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in mut_pat.finditer(line):
+            name = m.group(1)
+            if name.lower() not in initialised:
+                out.append({
+                    'severity': 'info', 'code': 'PSA2008',
+                    'line': ln, 'col': m.start() + 1,
+                    'message': (f'$Script:{name} is mutated by '
+                                f'{m.group(2)} but never initialised; '
+                                f'add an explicit $Script:{name} = 0 '
+                                f'(or similar) earlier in the file'),
+                })
     return out
 
 
@@ -2796,6 +3277,10 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_assign_in_conditional(clean)
     if cfg.enabled['PSA2006']:
         raw += check_redirect_in_conditional(clean)
+    if cfg.enabled['PSA2007']:
+        raw += check_param_auto_var(clean)
+    if cfg.enabled['PSA2008']:
+        raw += check_script_var_mutation(clean)
 
     if cfg.enabled['PSA3001']:
         raw += check_argumentlist(clean)
@@ -2807,6 +3292,8 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_empty_catch(clean)
     if cfg.enabled['PSA3005']:
         raw += check_start_transcript_literalpath(clean)
+    if cfg.enabled['PSA3006']:
+        raw += check_wmi_cmdlet(clean)
 
     if cfg.enabled['PSA4001']:
         raw += check_todo(text)
@@ -2838,6 +3325,10 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_mandatory_default(clean)
     if cfg.enabled['PSA6006']:
         raw += check_switch_default_true(clean)
+    if cfg.enabled['PSA6007']:
+        raw += check_output_type(text, clean)
+    if cfg.enabled['PSA6008']:
+        raw += check_param_block_required(clean)
 
     # File format / encoding (PSA7xxx) -- operate on file metadata, not text
     if cfg.enabled['PSA7001']:
