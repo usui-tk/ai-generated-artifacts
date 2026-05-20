@@ -787,6 +787,7 @@ function Format-DebugFailure {
         FullyQualifiedId, ScriptStackTrace, StepHistory (object[]).
     #>
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param([Parameter(Mandatory)] $ErrorRecord)
     $ex = $ErrorRecord.Exception
     if ($Script:DebugTraceStack.Count -gt 0) {
@@ -1029,6 +1030,7 @@ function Get-DebugTraceFileOutputStatus { # psa-disable-line PSA6003 -- "Status"
         Return the current state of the JSONL writer for diagnostics.
     #>
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
     return [pscustomobject]@{
         Enabled         = $Script:DebugTraceJsonlEnabled
@@ -2428,7 +2430,7 @@ function Show-PowerShellEnvironment {
         try {
             # Fallback for environments where CIM is constrained.
             # Get-WmiObject is deprecated in PS 7+ but available in PS 5.1.
-            $os = Get-WmiObject -Class Win32_OperatingSystem -ErrorAction Stop
+            $os = Get-WmiObject -Class Win32_OperatingSystem -ErrorAction Stop  # psa-disable-line PSA3006 -- intentional fallback for environments where CIM is constrained; PS 5.1 still supports WMI cmdlets
         } catch {
             $os = $null
         }
