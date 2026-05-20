@@ -1,4 +1,4 @@
-// psa.py v3.3.0 project configuration for download-speakerdeck-oracle4engineer
+// psa.py latest mainline — project configuration for download-speakerdeck-oracle4engineer
 //
 // Why PSAP0003 / PSAP0004 are enabled:
 //   This project's revision history is centralised in CHANGELOG.md per
