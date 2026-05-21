@@ -890,12 +890,157 @@ Re-save the file with UTF-8 BOM. Examples:
 #### Limitations
 
 - Only the first 3 bytes are inspected. Multi-byte BOM variants
-  (UTF-16 LE/BE, UTF-32) are out of scope; a future PSA7002 rule
+  (UTF-16 LE/BE, UTF-32) are out of scope; a future PSA7003 rule
   may cover them.
 - BOM presence alone is checked; full-file UTF-8 validity is a
-  separate concern (potential future PSA7003).
+  separate concern (potential future PSA7004).
 - Environments targeting PowerShell 7.x exclusively may suppress this
   rule via configuration.
+
+---
+
+### 4.28a PSA7002 — LF-only or mixed line endings
+
+- **Severity**: Warning
+- **Default**: Enabled
+- **Category**: PSA7xxx (file format / encoding)
+- **Introduced**: v3.7.0
+
+#### Rationale
+
+The canonical form for `.ps1` files in mixed-tooling environments
+(Windows PowerShell 5.1 + PowerShell 7.x + signtool + pnputil + MSI
+authoring tools) is **CRLF**. PowerShell's own AST parser tolerates
+LF-only and mixed line endings silently, but several downstream
+consumers do not: some signtool builds inspecting embedded catalog
+scripts, certain MSI authoring tools, and Windows ISE on older builds
+require strict CRLF. The Git-checkout form on Windows (under the
+common `.gitattributes` rule `*.ps1 text working-tree-encoding=UTF-8
+eol=crlf`) is always BOM + CRLF, so any LF-only line in the working
+tree will produce a confusing "modified file" diff at the next
+`git add` even when no content changed.
+
+The rule's primary value is detecting the **mixed** case (some lines
+CRLF, others LF-only), which is the most insidious defect in this
+category: it is invisible to PowerShell's AST parser, to visual diff
+tools, and to grep-based "line contains CR" counts. It typically
+arises when a programmatic content-generation step inserts an
+LF-only block (Python triple-quoted strings, Node template literals,
+shell heredocs, AI-agent file-write actions) into an otherwise
+CRLF-correct file. The all-LF case is also caught, because a
+`.ps1` checked in as all-LF would otherwise produce a single bulk
+normalisation diff at any consumer's first `git add`.
+
+The motivating real-world occurrence of the mixed case is documented
+in the `Deploy-Drivers-For-WindowsServer` repository's `SPEC.md §D.23`
+("Mixed line endings in programmatically emitted `.ps1` content").
+
+#### Detection
+
+The rule operates on the raw byte buffer of the file (after the
+3-byte UTF-8 BOM is stripped, if present). The detection logic is:
+
+1. Count total CR bytes (`\r`) and total LF bytes (`\n`) in the body.
+2. Split the body on LF and inspect each chunk except the last. For
+   each chunk that does NOT end in CR, the line was terminated by
+   LF only — record its 1-based line number.
+3. If at least one LF-only line was found, the rule fires.
+
+The message text distinguishes two variants for actionability:
+
+- **All-LF variant** (CR byte count is zero): `"PowerShell script
+  has LF-only line endings (N line(s)); canonical form is CRLF
+  (re-save with CRLF, or let .gitattributes normalise)"`. The
+  remediation is a single bulk conversion of the file.
+- **Mixed variant** (some CR present, some lines LF-only): `"PowerShell
+  script has mixed line endings: N of its lines are LF-only while M
+  are CRLF (LF-only lines: ...). This is typically caused by
+  programmatic insertion of LF-only content ... into a CRLF file.
+  Normalise the whole file to CRLF before committing."`. Up to five
+  specific line numbers are included in the message to give the
+  reviewer a starting point for inspecting the inserted block.
+
+Like PSA7001, this check is implemented in `main()`'s raw-bytes pass
+and propagated through `file_meta['line_ending_stats']`. The
+`analyze_text()` rule function `check_line_endings(file_meta)` reads
+the stats dict and emits the issue if `lf_only_count > 0`. Callers
+that pass an empty `file_meta` (or `None`) get silent no-op,
+preserving back-compat for direct `analyze_text()` consumers.
+
+#### Reported location
+
+Whole-file issue: `line: 0, col: 0` per §2.3. The specific LF-only
+line numbers are surfaced in the message text rather than the
+`line` field because PSA7002 is conceptually a whole-file
+classification (the file is or is not LF-canonical) rather than a
+defect attributable to a single line. SARIF and JSON consumers can
+parse the line list from the message if needed; a future revision
+may add a structured `lf_only_lines` field to the JSON output.
+
+#### Suppression
+
+Inline suppression via `# psa-disable-file PSA7002` at the top of
+the file. Configuration-file suppression (`"disable": ["PSA7002"]`
+in `.psa.config.json`) is also supported.
+
+**Note on cross-rule interaction with PSA7001**: BOM-stripping
+happens before line-ending stats are computed, so a file with a
+UTF-8 BOM and LF-only line endings will fire BOTH `PSA7001`-not-
+applicable (BOM is present, no warning) and `PSA7002` (LF-only).
+Conversely, a file without BOM but with all-CRLF endings will fire
+`PSA7001` and not `PSA7002`. The two rules are orthogonal.
+
+#### Remediation
+
+- **PowerShell 5.1 / 7.x**:
+  ```powershell
+  $content = (Get-Content -Raw -Path .\script.ps1) -replace "(?<!\r)\n", "`r`n"
+  $utf8Bom = New-Object System.Text.UTF8Encoding $true
+  [System.IO.File]::WriteAllText('.\script.ps1', $content, $utf8Bom)
+  ```
+  The negative-lookbehind regex `(?<!\r)\n` replaces only LF bytes
+  that are NOT already preceded by CR, leaving existing CRLF
+  sequences intact. This is the safe form for the mixed case.
+
+- **VS Code**: status bar → "LF" or "Mixed" → "CRLF" → save. Note
+  that VS Code's UI sometimes reports "CRLF" even when one or two
+  LF-only lines exist; the byte-level check via psa.py is
+  authoritative.
+
+- **Bash / WSL**:
+  ```bash
+  # Normalise file in place; preserves BOM.
+  python3 -c "
+  import sys
+  data = open(sys.argv[1], 'rb').read()
+  bom = b''
+  if data.startswith(b'\xef\xbb\xbf'):
+      bom, data = data[:3], data[3:]
+  data = data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+  open(sys.argv[1], 'wb').write(bom + data)
+  " script.ps1
+  ```
+
+- **Git-side safety net**: If the destination repository has a
+  `.gitattributes` rule `*.ps1 text eol=crlf`, the next `git add`
+  will normalise the working tree automatically. This is a
+  safety net, NOT a substitute for emitting correct bytes; see
+  the documentation in the consumer repository for why
+  (specifically: ZIP archives bypass this normalisation, and
+  consumer tooling that reads pre-`git add` working-tree bytes
+  will see the defect).
+
+#### Limitations
+
+- The rule operates on raw bytes and is exact. There is no
+  false-positive risk.
+- The "all-LF" remediation hint (`re-save with CRLF, or let
+  .gitattributes normalise`) is informational and not enforced by
+  the rule itself; psa.py does not inspect or modify the file.
+- Up to five LF-only line numbers are listed in the message; for
+  files with hundreds of defective lines, callers needing the full
+  list should use the JSON output format and inspect future
+  structured fields (not yet emitted as of v3.7.0).
 
 ---
 
@@ -1369,7 +1514,7 @@ top-level structure:
           "name": "psa.py",
           "version": "<X.Y.Z>",
           "informationUri": "...",
-          "rules": [ /* 36 rule descriptors */ ]
+          "rules": [ /* 42 rule descriptors */ ]
         }
       },
       "results": [ /* one entry per issue */ ],

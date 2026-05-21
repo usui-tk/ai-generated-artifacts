@@ -887,6 +887,81 @@ _add_file_meta_test(
 
 
 # ---------------------------------------------------------------------------
+# File-meta rule: PSA7002 — LF-only / mixed line endings (warning, default ON)
+# ---------------------------------------------------------------------------
+# PSA7002 fires from analyze_text() ONLY when file_meta carries a
+# 'line_ending_stats' sub-dict with lf_only_count > 0. The check
+# function reads the stats dict; the production driver in main()
+# populates it from raw bytes via compute_line_ending_stats().
+
+def _add_psa7002_test(name, line_ending_stats, expected):
+    TESTS.append(('rule', name, 'PSA7002',
+                  '$x = 1\n', expected,
+                  {'has_bom': True, 'line_ending_stats': line_ending_stats}))
+
+_add_psa7002_test(
+    'PSA7002 positive: all-LF (no CR anywhere)',
+    {'lf_count': 10, 'cr_count': 0,
+     'lf_only_count': 10, 'lf_only_lines': list(range(1, 11))},
+    1)
+_add_psa7002_test(
+    'PSA7002 positive: mixed CRLF + LF (the D.23 case)',
+    {'lf_count': 10, 'cr_count': 8,
+     'lf_only_count': 2, 'lf_only_lines': [3, 7]},
+    1)
+_add_psa7002_test(
+    'PSA7002 negative: all-CRLF (lf_only_count = 0)',
+    {'lf_count': 10, 'cr_count': 10,
+     'lf_only_count': 0, 'lf_only_lines': []},
+    0)
+_add_psa7002_test(
+    'PSA7002 negative: empty file (no newlines at all)',
+    {'lf_count': 0, 'cr_count': 0,
+     'lf_only_count': 0, 'lf_only_lines': []},
+    0)
+
+
+def _add_psa7002_no_stats_test(name, file_meta, expected):
+    TESTS.append(('rule', name, 'PSA7002',
+                  '$x = 1\n', expected, file_meta))
+
+_add_psa7002_no_stats_test(
+    'PSA7002 edge: file_meta with no line_ending_stats is silent',
+    {'has_bom': True}, 0)
+_add_psa7002_no_stats_test(
+    'PSA7002 edge: file_meta=None is silent (back-compat)',
+    None, 0)
+
+
+# Helper test for compute_line_ending_stats() — it is called by main()
+# and must produce the exact dict shape consumed by check_line_endings.
+# We exercise it directly with synthetic byte buffers via a dedicated
+# test driver (Section 2.5 in the runner), separate from TESTS because
+# its tuple shape differs.
+COMPUTE_TESTS = []
+
+def _add_compute_test(name, raw_bytes, expected_lf_only_count, expected_cr_count):
+    COMPUTE_TESTS.append((name, raw_bytes,
+                          expected_lf_only_count, expected_cr_count))
+
+_add_compute_test(
+    'compute: 3 CRLF lines, no LF-only',
+    b'$x = 1\r\n$y = 2\r\n$z = 3\r\n', 0, 3)
+_add_compute_test(
+    'compute: 3 LF-only lines, no CR',
+    b'$x = 1\n$y = 2\n$z = 3\n', 3, 0)
+_add_compute_test(
+    'compute: mixed - 2 CRLF then 1 LF-only',
+    b'$x = 1\r\n$y = 2\r\n$z = 3\n', 1, 2)
+_add_compute_test(
+    'compute: file without trailing newline',
+    b'$x = 1\r\n$y = 2', 0, 1)
+_add_compute_test(
+    'compute: empty bytes',
+    b'', 0, 0)
+
+
+# ---------------------------------------------------------------------------
 # Cross-file rule: PSA8001 — Function body hash drift
 # ---------------------------------------------------------------------------
 # PSA8001 is implemented at the main() driver level (check_function_sync
@@ -1086,6 +1161,31 @@ def run():
                     details.append(f'    {path} L{i["line"]} '
                                    f'[{i["code"]}] {i["message"]}')
             failures.append((name, details))
+
+    # --- Section 2.5: compute_line_ending_stats helper (PSA7002 support) ---
+    print()
+    print('=' * 72)
+    print(f'Section 2.5: compute_line_ending_stats tests '
+          f'({len(COMPUTE_TESTS)} cases)')
+    print('=' * 72)
+    for name, raw_bytes, expected_lf_only, expected_cr in COMPUTE_TESTS:
+        stats = psa.compute_line_ending_stats(raw_bytes)
+        got_lf_only = stats['lf_only_count']
+        got_cr = stats['cr_count']
+        ok = (got_lf_only == expected_lf_only) and (got_cr == expected_cr)
+        status = 'PASS' if ok else 'FAIL'
+        print(f'  [{status}] {name}  '
+              f'(lf_only: {got_lf_only}/{expected_lf_only}, '
+              f'cr: {got_cr}/{expected_cr})')
+        if ok:
+            pass_count += 1
+        else:
+            fail_count += 1
+            failures.append((name, [
+                f'    lf_only_count: got {got_lf_only}, expected {expected_lf_only}',
+                f'    cr_count:      got {got_cr}, expected {expected_cr}',
+                f'    full stats:    {stats!r}',
+            ]))
 
     # --- Section 3: CLI --config-check / --self-check ---
     with tempfile.TemporaryDirectory(prefix='psa_test_') as tmpdir:

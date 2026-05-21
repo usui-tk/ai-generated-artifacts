@@ -53,6 +53,7 @@ Best-practice (PSA6xxx):
 
 File format / encoding (PSA7xxx):
   PSA7001  PowerShell script lacks UTF-8 BOM ..... Warning
+  PSA7002  LF-only / mixed line endings .......... Warning   (new in v3.7.0)
 
 Usage
 -----
@@ -138,7 +139,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.6.0'
+__version__ = '3.7.0'
 
 
 def _verify_version_file_consistency():
@@ -302,6 +303,8 @@ RULES = [
     # File format / encoding (PSA7xxx)
     ('PSA7001', 'warning', True,
      'PowerShell script lacks UTF-8 BOM'),
+    ('PSA7002', 'warning', True,
+     'PowerShell script has LF-only line endings (canonical form is CRLF)'),
 
     # Cross-file / multi-script consistency (PSA8xxx, new in v3.2.0)
     ('PSA8001', 'warning', True,
@@ -1865,6 +1868,121 @@ def check_utf8_bom_missing(file_meta):
     }]
 
 
+def check_line_endings(file_meta):
+    """PSA7002: PowerShell script has LF-only line endings.
+
+    The canonical form for ``.ps1`` files in mixed-tooling environments
+    (Windows PowerShell 5.1 + PowerShell 7.x + signtool + pnputil + MSI
+    authoring tools) is CRLF. PowerShell's AST parser accepts LF-only
+    and mixed line endings silently, but several downstream consumers
+    (some signtool builds when inspecting embedded catalog scripts,
+    certain MSI authoring tools, Windows ISE on older builds) require
+    strict CRLF, and the canonical Git-checkout form on Windows is
+    BOM + CRLF.
+
+    The rule fires in two situations, distinguished by message text:
+
+    1. **All-LF**: every newline in the file is LF without a preceding
+       CR. Indicates the file was authored on Linux/macOS without
+       newline translation and has not yet been normalised.
+    2. **Mixed**: some lines are correctly CRLF-terminated, others are
+       LF-only. Strictly more dangerous than (1) because it usually
+       indicates that a *region* of content was inserted by a tool
+       that emits LF-only output (Python ``open()`` default text mode,
+       a triple-quoted string literal, a shell heredoc, an AI-agent
+       file-write action) into a file whose other regions are correct.
+       Visually identical to a well-formed file; only a byte-level
+       diff reveals the defect.
+
+    Parameters
+    ----------
+    file_meta : dict | None
+        Optional metadata dict. Must contain a 'line_ending_stats' sub-
+        dict with the following keys when this rule is to fire:
+
+        - ``lf_count`` (int)       : total ``\\n`` byte count in raw bytes
+        - ``cr_count`` (int)       : total ``\\r`` byte count in raw bytes
+        - ``lf_only_count`` (int)  : number of lines terminated by LF
+                                     without a preceding CR
+        - ``lf_only_lines`` (list) : 1-based line numbers of LF-only lines
+
+        When ``file_meta`` is None or missing the sub-dict, the rule
+        emits nothing (back-compat for callers that only pass text).
+    """
+    if not file_meta:
+        return []
+    stats = file_meta.get('line_ending_stats')
+    if not stats:
+        return []
+    lf_only_count = stats.get('lf_only_count', 0)
+    if lf_only_count <= 0:
+        return []
+    # Distinguish all-LF (file has no CR at all) from mixed (some lines
+    # have CR, others do not). Both are violations; the message text
+    # differs so callers can act appropriately.
+    cr_count = stats.get('cr_count', 0)
+    if cr_count == 0:
+        msg = ('PowerShell script has LF-only line endings '
+               '({0} line(s)); canonical form is CRLF '
+               '(re-save with CRLF, or let .gitattributes normalise)').format(
+            lf_only_count)
+    else:
+        # Show up to 5 specific line numbers in the message; full list
+        # may be hundreds of entries long.
+        sample = stats.get('lf_only_lines', [])[:5]
+        sample_repr = ', '.join(str(n) for n in sample)
+        if len(stats.get('lf_only_lines', [])) > 5:
+            sample_repr += ', ...'
+        msg = ('PowerShell script has mixed line endings: '
+               '{0} of its lines are LF-only while {1} are CRLF '
+               '(LF-only lines: {2}). This is typically caused by '
+               'programmatic insertion of LF-only content '
+               '(Python triple-quoted strings, shell heredocs, '
+               'AI-agent file writes) into a CRLF file. Normalise '
+               'the whole file to CRLF before committing.').format(
+            lf_only_count, cr_count, sample_repr)
+    return [{
+        'severity': 'warning', 'code': 'PSA7002',
+        'line': 0, 'col': 0,
+        'message': msg,
+    }]
+
+
+def compute_line_ending_stats(raw_bytes):
+    """Compute LF/CR statistics on raw bytes (used to populate file_meta).
+
+    The function operates on the *post-BOM* bytes so the BOM itself
+    does not skew the LF/CR counts; the caller is responsible for
+    stripping the 3-byte UTF-8 BOM (if any) before passing the buffer.
+
+    Returns a dict with the structure documented under
+    ``check_line_endings``. The dict is safe to merge into a
+    ``file_meta`` dict.
+    """
+    # Count CR and LF bytes.
+    cr_count = raw_bytes.count(b'\r')
+    lf_count = raw_bytes.count(b'\n')
+    # Identify lines terminated by LF without a preceding CR. We split
+    # on b'\n' which yields N+1 chunks for N newlines; chunk[i] is the
+    # content of line (i+1) BEFORE its terminating LF (except the last
+    # chunk, which has no terminator). For each chunk except the last,
+    # we look at whether it ends in CR — if not, that line was LF-only.
+    parts = raw_bytes.split(b'\n')
+    lf_only_lines = []
+    # parts has len = lf_count + 1; the last element corresponds to
+    # post-last-newline content, which has no terminator. We examine
+    # parts[0..-2] (the lines that DID have an LF terminator).
+    for idx, line in enumerate(parts[:-1], start=1):
+        if not line.endswith(b'\r'):
+            lf_only_lines.append(idx)
+    return {
+        'lf_count': lf_count,
+        'cr_count': cr_count,
+        'lf_only_count': len(lf_only_lines),
+        'lf_only_lines': lf_only_lines,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Cross-file / multi-script consistency (PSA8xxx)  - new in v3.2.0
 # ---------------------------------------------------------------------------
@@ -3333,6 +3451,8 @@ def analyze_text(text, cfg, file_meta=None):
     # File format / encoding (PSA7xxx) -- operate on file metadata, not text
     if cfg.enabled['PSA7001']:
         raw += check_utf8_bom_missing(file_meta)
+    if cfg.enabled['PSA7002']:
+        raw += check_line_endings(file_meta)
 
     # Complexity metrics (PSA9xxx) - generic, opt-in
     # PSA8xxx (cross-file consistency) is dispatched from the multi-file
@@ -3886,7 +4006,15 @@ def main(argv=None):
         has_bom = raw_bytes.startswith(b'\xef\xbb\xbf')
         body = raw_bytes[3:] if has_bom else raw_bytes
         text = body.decode('utf-8', errors='replace')
-        file_meta = {'has_bom': has_bom}
+        # Compute line-ending statistics on the post-BOM bytes for
+        # PSA7002. This must use the raw byte buffer because Python's
+        # text-mode decoding does not preserve LF-vs-CRLF distinctions
+        # in a way that the rule can later inspect.
+        line_ending_stats = compute_line_ending_stats(body)
+        file_meta = {
+            'has_bom': has_bom,
+            'line_ending_stats': line_ending_stats,
+        }
         issues = analyze_text(text, cfg, file_meta=file_meta)
         per_file.append((path, text, issues))
         # Collect function bodies for cross-file PSA8001 analysis.

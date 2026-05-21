@@ -252,6 +252,7 @@ Issues : 1 errors, 42 warnings, 31 info
 | コード | Sev | デフォルト | 内容 |
 |:---|:---:|:---:|:---|
 | **PSA7001** | Warning | ✅ 有効 | PowerShell スクリプトが UTF-8 BOM を持たない（Windows PowerShell 5.1 が BOM 無し UTF-8 を Shift-JIS と誤認する可能性あり） |
+| **PSA7002** | Warning | ✅ 有効 | PowerShell スクリプトが LF-only または改行コード混在（正本は CRLF。混在は LF-only コンテンツを CRLF ファイルにプログラム的に挿入した結果として発生することが多く、 AST パーサーには検出されない。 3.7.0 新規） |
 
 `PSA8xxx` — ファイル間整合性 (Warning) — 3.2.0 新規、 ファイル間
 

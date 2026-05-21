@@ -194,6 +194,35 @@
 
 
   // ===========================================================================
+  // PSA7002: Line-ending policy (LF-only / mixed) — NEW in 3.7.0
+  // ===========================================================================
+  //
+  // PSA7002 is a file-level rule (severity: warning, default ON) that fires
+  // when a .ps1 file contains at least one line terminated by LF without a
+  // preceding CR. Two message variants:
+  //
+  //   - "all-LF"    : the entire file uses LF-only line endings. Common
+  //                   when a file was authored on Linux/macOS without
+  //                   newline translation. Easy to fix by bulk-converting.
+  //   - "mixed"     : some lines are CRLF, others LF-only. Almost always
+  //                   caused by programmatic insertion (Python triple-
+  //                   quoted strings, shell heredocs, AI-agent file writes)
+  //                   into an otherwise CRLF file. Invisible to PowerShell's
+  //                   AST parser; the byte-count equality check is the only
+  //                   reliable detector. See SPEC.md section 4.28a.
+  //
+  // Disable per project if your .ps1 files are intentionally LF-only
+  // (e.g., PowerShell 7.x cross-platform-only projects on Linux/macOS)
+  // AND your downstream tooling (signtool, MSI authoring, PowerShell ISE)
+  // does NOT require CRLF. For most Windows-targeted projects, leave it
+  // on.
+  //
+  // Example - turn PSA7002 off for an LF-only cross-platform project:
+  //
+  //   "disable": ["PSA7002"],
+
+
+  // ===========================================================================
   // PSA8001: Function body hash drift across files (NEW in 3.2.0)
   // ===========================================================================
   //

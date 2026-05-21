@@ -17,6 +17,104 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 _No unreleased changes at this time._
 
+## [3.7.0] — 2026-05-22 — `ps1-line-ending-detection`
+
+### Added
+
+- **PSA7002 (Warning) — PowerShell script has LF-only or mixed line
+  endings.** New file-level rule in the PSA7xxx (file format / encoding)
+  family. Fires when a `.ps1` file contains at least one line
+  terminated by LF without a preceding CR. The canonical Windows
+  form is BOM + CRLF (per `.gitattributes`
+  `*.ps1 text working-tree-encoding=UTF-8 eol=crlf` in any
+  Windows-targeted repository); LF-only and mixed line endings are
+  silently accepted by the PowerShell AST parser but rejected by
+  some downstream consumers (signtool on certain catalog inspection
+  paths, MSI authoring tools, older Windows ISE) and produce
+  spurious "modified file" diffs at the next `git add` even when
+  no content changed. Default: **enabled**.
+
+  Two message variants distinguish the two ways the defect arises:
+
+  - **All-LF** (`cr_count == 0`): every line in the file is
+    LF-terminated. Usually means the file was authored on
+    Linux / macOS without newline translation. Remediation is a
+    single bulk conversion. Message:
+    `"PowerShell script has LF-only line endings (N line(s));
+    canonical form is CRLF"`.
+
+  - **Mixed** (`cr_count > 0 AND lf_only_count > 0`): some lines
+    are CRLF, others LF-only. Almost always indicates that a
+    *programmatic content-generation step* inserted an LF-only
+    block (Python triple-quoted strings, shell heredocs,
+    AI-agent file-write actions) into a CRLF file. Strictly more
+    dangerous than the all-LF case because the defect is invisible
+    to PowerShell's AST parser, to visual diff tools, and to
+    grep-based "line contains CR" counts. Only a byte-level
+    CR-count vs. LF-count equality check reveals it. Message
+    includes up to five 1-based line numbers of the LF-only lines
+    so a reviewer can start inspection at the specific defective
+    region. Real-world motivating occurrence is the
+    `Deploy-Drivers-For-WindowsServer` repository's `SPEC.md §D.23`
+    write-up (commit `587038e` → `0af5e70`).
+
+  The rule operates on the post-BOM raw byte buffer and is exact
+  (no false positives). Implementation comprises a new module-level
+  helper `compute_line_ending_stats(raw_bytes)` invoked once in
+  `main()` per file, a new rule function
+  `check_line_endings(file_meta)` that reads
+  `file_meta['line_ending_stats']`, and dispatch wiring in
+  `analyze_text()` after the existing `check_utf8_bom_missing()`
+  call. The two rules are orthogonal: BOM presence and line-ending
+  policy are independent file-level properties.
+
+### Tests
+
+- 6 new rule-driver test cases for `PSA7002` (positive cases:
+  all-LF, mixed; negative cases: all-CRLF, empty file; edge cases:
+  `file_meta` without `line_ending_stats`, `file_meta=None`).
+- 5 new helper-function test cases for `compute_line_ending_stats()`
+  in a new Section 2.5 of `test_psa_rules.py` (synthetic byte
+  buffers covering CRLF-only, LF-only, mixed, no-trailing-newline,
+  and empty cases). Section 2.5 has its own dispatcher because the
+  test-tuple shape differs from the Section 1 rule tests.
+- Total test count: 137 → **148** (no existing tests changed).
+- `--self-check` (SPEC ↔ RULES consistency) updated to reflect the
+  new `4.28a PSA7002` section; passes.
+- `--config-check` (against shipped `.psa.config.json.template`)
+  passes.
+
+### Documentation
+
+- **`SPEC.md` §4.28a (PSA7002)** — full rule specification:
+  rationale, detection algorithm, message-text variants, suppression
+  mechanism, remediation in PowerShell / Bash / VS Code, and an
+  explicit cross-reference to the motivating
+  `Deploy-Drivers-For-WindowsServer` `SPEC.md §D.23` lessons-learned
+  entry. The PSA7001 "Limitations" placeholder mentions of
+  "future PSA7002" (UTF-16 BOM variants) and "future PSA7003"
+  (UTF-8 validity) renumbered to PSA7003 and PSA7004 respectively,
+  since PSA7002 is now claimed for line endings.
+- **`.psa.config.json.template`** — new comment block documenting
+  PSA7002 and when to disable it (Linux/macOS-only PowerShell 7.x
+  projects with no Windows tooling in the consumption chain).
+- **Header docstring of `psa.py`** — PSA7002 added to the
+  "File format / encoding (PSA7xxx)" section of the rule list.
+
+### Why this is a minor (not major) version bump
+
+The rule is additive in the PSA7xxx family. Existing PSA7001
+behavior, PSA8001 / PSA9xxx / PSAPxxxx behavior, CLI flags, JSON /
+SARIF schemas, and configuration schema are all unchanged. The
+only observable effect for existing consumers is that `.ps1`
+files with LF-only or mixed line endings will produce one new
+warning per file (suppressed normally via `disable: ["PSA7002"]`).
+Consumers whose `.ps1` files already pass `.gitattributes`
+normalisation see no behavior change. The CLI's `--list-rules`
+output, the rule catalog in `psa.py --version --list-rules`, and
+the SPEC TOC will list one new entry, all of which are documented
+in this entry.
+
 ## [3.6.0] — 2026-05-20 — `psscriptanalyzer-rule-parity-uplift`
 
 ### Added
