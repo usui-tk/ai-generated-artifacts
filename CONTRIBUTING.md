@@ -55,11 +55,12 @@ Pull requests are accepted but reviewed on a best-effort basis with no guarantee
 
 - [ ] Read the relevant directory's `README.md` and any `SPEC.md` to understand the conventions in that area.
 - [ ] Match the **bilingual policy** of the file you are touching: if the original is bilingual (`<NAME>.md` + `<NAME>.ja.md`), update both in the same commit. See [`README.md`](./README.md) → "Naming Conventions" and "Language Policy".
+- [ ] **Match the file-format policy** for every file you create or edit. `.ps1` / `.psm1` / `.psd1` must be UTF-8 with BOM and CRLF line endings; `.md` / `.py` / `.yml` / `.json` / etc. must be UTF-8 without BOM and LF-only line endings. AI-agent file generation and Python helper scripts default to the wrong form on Linux / macOS hosts — always emit canonical bytes at the source and verify before `git add`. See [`README.md`](./README.md) → "File Format Policy" for the per-extension contract, tooling rules, and pre-commit verification commands.
 - [ ] Run any applicable static checks. For PowerShell scripts under this repository, this includes the canonical `psa.py` analyzer:
   ```bash
   python3 scripts/python/powershell-static-analyzer/psa.py <script>.ps1
   ```
-  See [`scripts/README.md`](./scripts/README.md) → "Static Analysis for PowerShell Scripts".
+  See [`scripts/README.md`](./scripts/README.md) → "Static Analysis for PowerShell Scripts". `psa.py` rules `PSA7001` (UTF-8 BOM presence) and `PSA7002` (LF-only / mixed line endings, new in v3.7.0) enforce the file-format policy at lint time.
 - [ ] **For PowerShell changes: verify `psa.py` is at the latest mainline version before validating.** Compare the mainline `VERSION` against your local copy and refresh both `psa.py` + `VERSION` together if they differ. See [`README.md`](./README.md) → "psa.py Versioning Policy" for the full workflow.
 - [ ] If you touch a project under `scripts/<lang>/<project>/` that ships a `SPEC.md`, verify the corresponding **Part C — Quality Gates & Validation Checklist** before committing.
 - [ ] **For CI workflow changes (anything under `.github/workflows/`, the `PSScriptAnalyzerSettings.psd1` files, or the root [`SPEC.md`](./SPEC.md)): read [`SPEC.md`](./SPEC.md) first, then record the change in the CI-target script's `CHANGELOG.md` — never in a separate location ([`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9 forbids `.github/workflows/CHANGELOG.md` and similar).**
@@ -161,11 +162,12 @@ PR はベストエフォートで受け付けます(レビュー期限は保証�
 
 - [ ] 対象ディレクトリの `README.md` と関連する `SPEC.md` を読んで当該エリアの規約を理解する
 - [ ] 変更対象のファイルの **バイリンガル規約** に従う:原版がバイリンガル(`<NAME>.md` + `<NAME>.ja.md`)の場合、同一コミットで両方更新する。詳細は [`README.ja.md`](./README.ja.md) の「命名規則」と「言語ポリシー」を参照
+- [ ] **ファイル形式ポリシー** に従う。 `.ps1` / `.psm1` / `.psd1` は UTF-8 with BOM + CRLF、 `.md` / `.py` / `.yml` / `.json` 等は UTF-8 without BOM + LF-only でなければならない。 AI エージェントによるファイル生成や Python ヘルパースクリプトは Linux / macOS ホスト上ではデフォルトで誤った形式 (LF-only) を生成する — オーサリング時点で正本バイトを書き出し、 `git add` 前に検証すること。 拡張子ごとの規約・ツーリング規則・コミット前検証コマンドは [`README.ja.md`](./README.ja.md) の「ファイル形式ポリシー」を参照
 - [ ] 該当する静的チェックを実行する。本リポジトリの PowerShell スクリプトについては、正規配置の `psa.py` を必ず使用:
   ```bash
   python3 scripts/python/powershell-static-analyzer/psa.py <script>.ps1
   ```
-  詳細は [`scripts/README.md`](./scripts/README.md) の「PowerShell スクリプトの静的解析」を参照
+  詳細は [`scripts/README.md`](./scripts/README.md) の「PowerShell スクリプトの静的解析」を参照。 `psa.py` の `PSA7001`（UTF-8 BOM の存在チェック）と `PSA7002`（LF-only / 改行コード混在、 v3.7.0 新規）がファイル形式ポリシーを lint 時に強制する
 - [ ] **PowerShell 変更時: 検証前に `psa.py` が latest mainline バージョンであることを確認する。** mainline の `VERSION` をローカルコピーと比較し、 異なる場合は `psa.py` と `VERSION` の両方を一緒に更新する。 詳細ワークフローは [`README.ja.md`](./README.ja.md) の「psa.py のバージョニングポリシー」セクションを参照
 - [ ] `scripts/<lang>/<project>/` 配下で `SPEC.md` を持つプロジェクトを変更する場合、コミット前に対応する **Part C — 品質ゲートと検証チェックリスト** を確認する
 - [ ] **CI ワークフローの変更 (`.github/workflows/` 配下、 `PSScriptAnalyzerSettings.psd1` ファイル、 ルート [`SPEC.md`](./SPEC.md) のいずれか) を行う場合: まず [`SPEC.md`](./SPEC.md) を読み、 変更内容を CI 対象スクリプトの `CHANGELOG.md` に記録する — 別の場所に記録してはならない ([`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9 が `.github/workflows/CHANGELOG.md` 等の作成を禁止している)。**

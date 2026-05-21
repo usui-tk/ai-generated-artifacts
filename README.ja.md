@@ -155,6 +155,101 @@ ai-generated-artifacts/
 
 ---
 
+## ファイル形式ポリシー
+
+本リポジトリでは、 文字エンコーディングと改行コードについて、 全サブプロジェクトで統一して適用される **リポジトリ横断の共通ポリシー** を採用しており、 リポジトリルートの `.gitattributes` で強制しています。 コントリビュータ — AI エージェントやコードジェネレータを含む — は、 オーサリング時点でこの規約に適合したバイトを書き出す必要があります。 `git add` 時の自動正規化に頼るワークフローは脆く、 失敗するシナリオがあります（後述「`.gitattributes` はセーフティネットであって規約ではない」を参照）。
+
+### ファイル種別ごとの規約
+
+| 拡張子 | エンコーディング | 改行コード | BOM | 強制機構 |
+| --- | --- | --- | --- | --- |
+| `*.ps1`, `*.psm1`, `*.psd1` | UTF-8 | **CRLF** | **必須** (`EF BB BF`) | `.gitattributes` (`text working-tree-encoding=UTF-8 eol=crlf`) + `psa.py` の `PSA7001` (BOM) と `PSA7002` (CRLF) を lint 時に強制 |
+| `*.md`, `*.markdown` | UTF-8 | LF | 不可 | `.gitattributes` (`text eol=lf`) |
+| `*.py`, `*.pyw` | UTF-8 | LF | 不可 | `.gitattributes` (`text eol=lf`) — PEP 8 / PEP 263 |
+| `*.sh`, `*.bash` | UTF-8 | LF | 不可 | `.gitattributes` (`text eol=lf`) |
+| `*.json`, `*.yaml`, `*.yml`, `*.toml` | UTF-8 | LF | 不可 | `.gitattributes` (`text eol=lf`) |
+| `*.txt`, `*.rst`, `*.html`, `*.css`, `*.ini`, `*.conf`, `*.cfg` | UTF-8 | LF | 不可 | `.gitattributes` (`text eol=lf`) |
+| バイナリ (`*.zip`, `*.png`, `*.pdf`, `*.cer`, `*.pfx`, ...) | binary | n/a | n/a | `.gitattributes` (`binary` または明示的 `-text`) |
+
+### AI エージェント / プログラムによるコンテンツ生成で重要な理由
+
+多くの言語は、 Linux / macOS ホスト上（多くの AI エージェントや CI ランナーが実行される環境）では、 書き込み先のファイルの改行コード規約と無関係に **デフォルトで LF-only を出力します**：
+
+- Python の `open(path, 'w', encoding='utf-8')` は Linux / macOS 上で `\n` を文字どおりに書き込みます — プラットフォーム依存の改行変換は行われません。
+- Python の `"""..."""` トリプルクォート文字列リテラルは、 どのホスト OS 上でも LF で行を終端します。
+- Node のテンプレートリテラル、 Go の raw 文字列、 shell の heredoc も同様の挙動を取ります。
+
+こうしたコードを `.ps1` ファイル（CRLF 規約）の生成や挿入に使用すると、 以下のいずれかの欠陥が発生します：
+
+1. **全 LF ファイル** — ファイル全体が LF-only。 バイトレベル検査で容易に検出できます。 `git add` 時に `.gitattributes` が正規化します。
+2. **改行コード混在** — 一部の行は CRLF、 他の行（プログラム的に挿入されたもの）は LF-only。 (1) よりも **格段に危険** な理由は以下のとおりです：
+   - PowerShell の AST パーサーは無音で受け入れる → `pwsh -ParseFile` を通過する。
+   - 視覚的 diff ツールは LF と CRLF を区別せず表示する → 人間レビューでは見落とす。
+   - `grep` の「CR を含む行」カウントは誤解を招く。
+   - `.gitattributes` は `git add` 時にサイレントに書き換えるため、 「内容変更なしなのに +N byte の diff」という困惑する状況が発生する。
+
+(2) の実例は姉妹レポジトリの
+[`Deploy-Drivers-For-WindowsServer/SPEC.md §D.23`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#d23-mixed-line-endings-in-programmatically-emitted-ps1-content-python-script-defect)
+（「プログラム的に生成された `.ps1` コンテンツでの改行コード混在」）に詳細なフォレンジック記録があります。 ある Python ヘルパスクリプトがトリプルクォート文字列を使って `Get-BthPanNetChildBinding` 関数の 105 行を CRLF ファイルに LF-only で挿入した結果、 コミット後のバイトレベル diff で「+105 byte なのに内容変更なし」という現象が確認されるまで欠陥は不可視でした。
+
+### ツーリング規則（必須）
+
+`.ps1` コンテンツをプログラムで生成する場合、 以下のルールを遵守する必要があります。 詳細な是正パターンは
+[`scripts/python/powershell-static-analyzer/SPEC.md` §4.28a](./scripts/python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings)
+および姉妹レポジトリの
+[`Deploy-Drivers-For-WindowsServer/SPEC.md §A.2`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a2-source-file-format)
+（サブセクション A.2.1 〜 A.2.4）に記載しています。 簡易リファレンス：
+
+```python
+# WRONG — 書き込み先のファイル規約に関係なく LF-only バイトを出力
+with open('script.ps1', 'w', encoding='utf-8') as f:
+    f.write(new_content)
+
+# CORRECT — バイナリモード + 明示的な BOM + LF→CRLF 置換
+with open('script.ps1', 'wb') as f:
+    f.write(b'\xef\xbb\xbf')                                  # UTF-8 BOM
+    f.write(new_content.replace('\n', '\r\n').encode('utf-8'))
+```
+
+Bash の heredoc を `.ps1` への書き込みに使う場合は、 `unix2dos` 等で後処理してください。 `.md` / `.py` / `.yml` / `.json` には逆の規約が適用されます — CRLF も BOM も出力してはいけません。
+
+### 強制機構と検証
+
+リポジトリの強制機構は 3 層構造です：
+
+1. **`psa.py` PSA7001** — `.ps1` に UTF-8 BOM がない場合に発火。 詳細は [`scripts/python/powershell-static-analyzer/SPEC.md` §4.28](./scripts/python/powershell-static-analyzer/SPEC.md#428-psa7001--missing-utf-8-bom)。
+2. **`psa.py` PSA7002**（v3.7.0 で新規追加）— `.ps1` に LF-only 行が 1 行でもあれば発火。 「mixed」バリアントのメッセージには LF-only 行の行番号が最大 5 個含まれるため、 挿入箇所の特定が容易です。 詳細は [`scripts/python/powershell-static-analyzer/SPEC.md` §4.28a](./scripts/python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings)。
+3. **`.gitattributes`** — `git add` / `git checkout` 時に正規化を適用。 これはセーフティネットであって規約ではありません: ZIP 共有・ raw GitHub ダウンロード（`raw.githubusercontent.com`）・チェックアウト形式と異なるバイトを生成する `git archive` 利用者・ `git add` 前の作業ツリー検査では効きません。
+
+コミット前検証（`git add` 前に作業ツリーが正本形式と一致していることを確認）：
+
+```bash
+# .ps1 ファイル: CR バイト数と LF バイト数が等しい必要あり
+file=path/to/script.ps1
+cr=$(tr -cd '\r' < "$file" | wc -c); lf=$(tr -cd '\n' < "$file" | wc -c)
+echo "CR=$cr LF=$lf delta=$((lf-cr))  (delta must be 0)"
+head -c 3 "$file" | od -An -t x1                # 期待: "ef bb bf"
+python3 path/to/psa.py "$file" --include PSA7001,PSA7002
+
+# .md / .py / .yml 等: CR バイト数は 0 でなければならない
+file=path/to/doc.md
+cr=$(tr -cd '\r' < "$file" | wc -c)
+echo "CR=$cr  (must be 0)"
+head -c 3 "$file" | od -An -t x1                # NOT "ef bb bf"
+```
+
+### `.gitattributes` はセーフティネットであって規約ではない
+
+`.gitattributes` のルールは `git add` / `git checkout` 時にのみ適用されます。 以下の状況では救済されません：
+
+- git の外でファイルを共有する場合（メール添付・ `zip -r` で working tree から作成された ZIP アーカイブ・ raw GitHub URL ダウンロード）。
+- `git add` 前にツール（pre-commit 連動の `psa.py` 実行・セッション中にバイトを再読込する IDE 等）が作業ツリーを検査する場合。
+- `git archive` のコンシューマー（一部の CI ワークフロー）が working-tree 形式（`.ps1` で言う `BOM + CRLF`）ではなく blob 形式（`BOM + LF`）を生成する場合。
+
+正しいメンタルモデル：オーサリング時点で正本バイトを書き出し、 `git add` 前に検証し、 `.gitattributes` は最後の防衛線として扱う。
+
+---
+
 ## リビジョン履歴ポリシー
 
 本リポジトリでは、 リリース毎の変更履歴の管理について、 全サブプロジェクト (スクリプト、 ツール、 プロンプト) で統一して適用される **リポジトリ横断の共通ポリシー** を採用しています:
