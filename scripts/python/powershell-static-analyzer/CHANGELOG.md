@@ -15,7 +15,42 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
-_No unreleased changes at this time._
+### Documentation
+
+- **Rule-count text alignment — `36` → `42` in three stale
+  forward-looking references.** The 3.7.0 release added `PSA7002`
+  (line-ending detection), bringing the runtime `RULES` registry
+  to 42 entries (PSA1xxx ×3, PSA2xxx ×8, PSA3xxx ×6,
+  PSA4xxx ×4, PSA5xxx ×4, PSA6xxx ×8, PSA7xxx ×2,
+  PSA8xxx ×1, PSA9xxx ×2, PSAPxxxx ×4). Three documentation
+  strings that hard-code the rule count were missed during the
+  3.7.0 commit and are corrected here:
+
+  - **`psa.py`** L2913 — Pillar 1 comment block above the
+    self-quality gates section:
+    `"External: test_psa_rules.py covers all 36 rules with ..."`
+    → `"... all 42 rules with ..."`.
+  - **`test_psa_rules.py`** L6 — module docstring header:
+    `"psa.py's 36 rules has ..."`
+    → `"psa.py's 42 rules has ..."`.
+  - **`scripts/powershell/download-speakerdeck-oracle4engineer/TESTING.md`**
+    L90 — sibling sub-project documentation referencing
+    `psa.py`'s `SPEC.md` §4:
+    `"§4 for the full specification of the 36 rules"`
+    → `"... of the 42 rules"`.
+
+  Documentation-only revision: no behavioural change, no rule
+  catalog change, no test count change. `__version__` is **not**
+  bumped (the runtime `RULES` array and `psa.py --list-rules`
+  output have been correct since 3.7.0; only the human-readable
+  prose count was stale). The canonical source of truth for the
+  rule count is the runtime `RULES` registry. `psa.py
+  --self-check` validates `SPEC.md` §4 against `RULES` by rule
+  ID rather than by count, which is why this drift was not
+  surfaced by the existing self-quality gates. Future rule-count
+  text references should either be omitted in favour of
+  "see `psa.py --list-rules`" or parameterised against
+  `len(RULES)`.
 
 ## [3.7.0] — 2026-05-22 — `ps1-line-ending-detection`
 

@@ -2910,7 +2910,7 @@ def _load_config_source(path_or_url):
 # These functions implement psa.py's three pillars of self-quality:
 #
 #   Pillar 1 (rule self-tests):
-#       External: test_psa_rules.py covers all 36 rules with
+#       External: test_psa_rules.py covers all 42 rules with
 #       positive / negative / edge cases. It imports psa as a module
 #       and invokes the analyzer pipeline directly.
 #

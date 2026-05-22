@@ -87,7 +87,7 @@ Issues : 0 errors, 0 warnings, 0 info
 
 Any deviation from `0 / 0 / 0` blocks the commit. See
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-§4 for the full specification of the 36 rules
+§4 for the full specification of the 42 rules
 (`PSA1xxx` syntax / `PSA2xxx` semantics / `PSA3xxx` style / `PSA4xxx`
 hygiene / `PSA5xxx` security / `PSA6xxx` best practice / `PSA7xxx`
 file format / `PSA8xxx` cross-file consistency / `PSA9xxx` complexity
