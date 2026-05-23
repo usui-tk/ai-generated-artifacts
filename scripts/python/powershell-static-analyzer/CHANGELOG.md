@@ -52,6 +52,133 @@ changes (documentation policy, sister scripts, etc.), see the root
   "see `psa.py --list-rules`" or parameterised against
   `len(RULES)`.
 
+## [3.8.0] — 2026-05-23 — `pscustomobject-sealed-object-detection`
+
+### Added
+
+- **PSA2009 (Warning) — PSCustomObject property assigned without
+  prior declaration.** New file-level rule in the PSA2xxx (variable /
+  scope) family. Fires when a `.` -style property assignment
+  (`$Var.PropName = value`) targets a property that was not declared
+  in any `$Var = [pscustomobject]@{...}` initialiser in the same file
+  AND was not added later via `Add-Member -MemberType NoteProperty
+  -Name PropName`. The rule models the PowerShell 5.1
+  `[pscustomobject]` sealed-object semantic: such an assignment
+  raises a terminating exception (`"<PropName>" の設定中に例外が
+  発生しました: "このオブジェクトにプロパティ '<PropName>' が
+  見つかりません。"` in Japanese locales) at runtime, on the first
+  phase that attempts the assignment, which is too late for
+  long-lived pipeline scripts where the assignment site can be
+  hundreds or thousands of lines away from the initialiser. PSA2009
+  closes the gap at static-analysis time.
+
+  Detection runs in four passes:
+
+  1. **Initialiser pass** — harvest declared property names from
+     every `$VarName = [pscustomobject]@{...}` initialiser, with
+     proper brace-balanced parsing that respects string literals
+     and nested hashtables. Scope qualifiers (`$Script:`, `$Global:`,
+     `$Local:`, `$Private:`) are stripped so `$Script:Ctx = [pscustomobject]@{...}`
+     and a later `$Ctx.Foo = ...` correlate.
+  2. **`Add-Member` pass** — recognise the two surface forms
+     (`$Var | Add-Member ...` and `Add-Member -InputObject $Var ...`)
+     and extend the declared set for the target variable.
+  3. **Hashtable-form drop pass** — any variable name that is
+     *also* assigned somewhere in the file with a plain hashtable
+     literal (`@{...}` / `[hashtable]@{...}` / `[ordered]@{...}`)
+     is conservatively dropped from tracking. This false-positive
+     prevention is necessary because psa.py analysis is file-level
+     rather than function-scope-aware, and the same local variable
+     name (e.g., `$result`) can legitimately host both pscustomobject
+     and hashtable shapes across different functions of the same
+     file.
+  4. **Assignment pass** — flag every surviving `$VarName.Property
+     = ...` assignment whose target property is not in the declared
+     set. Compound operators (`+=`, `-=`, `*=`, `/=`) and equality
+     comparisons (`-eq`, `-ne`) are excluded. Well-known dynamic
+     property bags (`$_`, `$Matches`, `$PSBoundParameters`, `$Host`,
+     `$Error`, `$PSCmdlet`, `$MyInvocation`, `$args`, `$input`,
+     `$this`) are exempt.
+
+  Inline suppression via `# psa-disable-line PSA2009` works on the
+  assignment line.
+
+  **Motivation**: the rule was developed in response to a
+  reproducible runtime failure on a clean-installed Japanese-locale
+  Windows Server 2019 host where a downstream consumer
+  (`Deploy-AMDChipsetDriverOnWindowsServer.ps1` at the `r72`
+  baseline) hit `PHASE P05 -> FAILED` with the localised
+  property-not-found exception. Both the happy-path assignment
+  (`$Ctx.WhqlCoSignAnalysis = New-WhqlCoSignAnalysis ...`) and the
+  `catch`-block fallback (`$Ctx.WhqlCoSignAnalysis = @()`) targeted
+  a property that the `[pscustomobject]@{...}` `$Ctx` initialiser
+  did not declare. Neither psa.py v3.7.0 nor PSScriptAnalyzer 1.x
+  detected the defect statically. Adding PSA2009 to psa.py v3.8.0
+  reproduces the defect at static-analysis time with two warnings
+  on the affected file (the happy-path and `catch`-block assignment
+  sites) and zero false positives across the four pipeline scripts
+  in the consumer repository (`usui-tk/Deploy-Drivers-For-WindowsServer`).
+
+### Test coverage
+
+- **`test_psa_rules.py`** grows from 148 to 163 active test cases.
+  PSA2009 contributes 15 cases covering: simple undeclared
+  assignment (positive), `catch`-block double-fire (positive),
+  `$Script:`-scoped pscustomobject (positive), declared property
+  (negative), `Add-Member` pipe form (negative), `Add-Member
+  -InputObject` form (negative), hashtable-form drop pass for
+  `@{...}` and `[ordered]@{...}` (negative), `$PSBoundParameters`
+  exemption (negative), compound `+=` non-flagging (negative),
+  equality comparison non-flagging (negative), read-only property
+  access non-flagging (negative), file without any pscustomobject
+  initialiser (negative), inline-declared properties (negative),
+  and inline `# psa-disable-line PSA2009` suppression (negative).
+
+### Changed
+
+- **`SPEC.md` §4.9c (PSA2009)** — new rule specification subsection
+  inserted between §4.9b (PSA2008) and §4.10 (PSA3001). The §4.9c
+  numbering follows the existing convention of alphabetic-letter
+  suffixes for rules added between major numbering anchors (cf.
+  §4.9a PSA2007, §4.9b PSA2008).
+- **`psa.py --self-check`** — the RULES registry grows from 42 to 43
+  entries with the addition of PSA2009. `SPEC.md` §4 grows in
+  lock-step. The self-check report now reads
+  `rules : 43 in RULES, 43 in SPEC.md §4`.
+- **`psa.py --list-rules`** — output gains one row for PSA2009
+  (warning, on by default).
+
+### Notes
+
+- **PSA2009 does NOT subsume PSA2001**. PSA2001 ("undefined variable
+  reference") operates at the variable level: it flags a reference
+  to `$Foo` when `$Foo` was never assigned. PSA2009 operates at the
+  property level: it flags `.NewProp = value` when `NewProp` is not
+  part of the variable's `[pscustomobject]` surface. The two rules
+  are orthogonal — PSA2001 cannot detect the WhqlCoSignAnalysis-class
+  bug because the variable itself is well-defined at every
+  assignment site; only the property is missing.
+- **PSA2009 does NOT subsume PSA8001**. PSA8001 ("function body hash
+  drift") operates at the cross-file function-body level. PSA2009
+  operates inside a single file. A producer-site missing in one
+  script (the Graphics P05 case in
+  `usui-tk/Deploy-Drivers-For-WindowsServer`) is structurally
+  invisible to both PSA2009 (because there is no assignment to
+  flag) and PSA8001 (because the function bodies legitimately
+  diverge per the `psa8001_ignore_functions` exemption list). That
+  class of "silently absent producer block" defect requires a
+  runtime-level test case in the consumer repository's `TESTING.md`,
+  not a new psa.py rule. See `usui-tk/Deploy-Drivers-For-WindowsServer`
+  SPEC §D.31.16.5 for the canonical countermeasure.
+- **Why "warning" severity, not "error"**. PSA2009 is a high-confidence
+  defect indicator but has occasional legitimate exceptions
+  (`Add-Member` patterns the rule cannot fully model, framework
+  objects with opaque surface contracts). Warning severity allows
+  the rule to be suppressed inline where genuinely needed while
+  still failing CI gates that treat warnings as blockers (the
+  default policy in `usui-tk/Deploy-Drivers-For-WindowsServer`'s
+  `.psa.config.json`).
+
 ## [3.7.0] — 2026-05-22 — `ps1-line-ending-detection`
 
 ### Added

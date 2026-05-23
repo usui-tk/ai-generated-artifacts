@@ -8,6 +8,49 @@
 // Applies to  : psa.py latest mainline (see sibling VERSION file)
 //
 // -----------------------------------------------------------------------------
+// What's new in 3.8.0 (compared to 3.7.0 templates)
+// -----------------------------------------------------------------------------
+//
+//   - New generic rule  : PSA2009  PSCustomObject property assigned without
+//                                  prior declaration in the [pscustomobject]@{...}
+//                                  initialiser (default ON, Warning).
+//                                  Models PowerShell 5.1's sealed-object
+//                                  semantic: any `$Var.NewProp = value`
+//                                  assignment where `NewProp` was not in
+//                                  the initialiser AND was not added later
+//                                  via Add-Member raises a runtime
+//                                  terminating exception. The rule catches
+//                                  this defect at static-analysis time.
+//
+// Detection runs in four passes (initialiser, Add-Member, hashtable-form
+// drop, assignment). Variables that are also assigned with a plain hashtable
+// literal (`@{...}` / `[hashtable]@{...}` / `[ordered]@{...}`) anywhere in
+// the file are conservatively dropped from tracking to prevent false
+// positives on accumulator patterns. Well-known dynamic property bags
+// ($_, $Matches, $PSBoundParameters, $Host, $Error, $PSCmdlet, $MyInvocation,
+// $args, $input, $this) are exempt.
+//
+// Inline suppression via `# psa-disable-line PSA2009` works on the
+// assignment line.
+//
+// No other rule semantics changed in 3.8.0.
+//
+// -----------------------------------------------------------------------------
+// What's new in 3.7.0 (compared to 3.6.x templates)
+// -----------------------------------------------------------------------------
+//
+//   - New generic rule  : PSA7002  PowerShell script has LF-only or mixed
+//                                  line endings (default ON, Warning).
+//                                  Canonical form for .ps1 is CRLF; mixed
+//                                  line endings indicate programmatic
+//                                  insertion of LF-only content into a
+//                                  CRLF file. Invisible to the PowerShell
+//                                  AST parser but observable to signtool,
+//                                  diff tooling, and reviewer eyes.
+//
+// No other rule semantics changed in 3.7.0.
+//
+// -----------------------------------------------------------------------------
 // What's new in 3.6.0 (compared to 3.5.x templates)
 // -----------------------------------------------------------------------------
 //

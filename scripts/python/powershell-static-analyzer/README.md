@@ -207,6 +207,7 @@ optional column, and a short message.
 | **PSA2006** | Warning | ✅ on | Redirection operator (`>` / `<`) inside `if` / `while` |
 | **PSA2007** | Warning | ✅ on | Parameter name shadows a PowerShell automatic variable (new in 3.6.0) |
 | **PSA2008** | Info | ✅ on | `$Script:Foo++` / `+=` / `-=` without prior initialisation (new in 3.6.0) |
+| **PSA2009** | Warning | ✅ on | `[pscustomobject]@{...}` property assigned without prior declaration in the initialiser (new in 3.8.0) — guards against the PowerShell 5.1 sealed-object runtime exception |
 
 `PSA3xxx` — coding patterns (Warning)
 

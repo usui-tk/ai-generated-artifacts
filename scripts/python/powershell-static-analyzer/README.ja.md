@@ -204,6 +204,7 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA2006** | Warning | ✅ 有効 | `if` / `while` 条件内にリダイレクト演算子 `>` / `<` |
 | **PSA2007** | Warning | ✅ 有効 | パラメータ名が PowerShell 自動変数と衝突 (3.6.0 新規) |
 | **PSA2008** | Info | ✅ 有効 | `$Script:Foo++` / `+=` / `-=` の前に初期化がない (3.6.0 新規) |
+| **PSA2009** | Warning | ✅ 有効 | `[pscustomobject]@{...}` のイニシャライザで宣言されていないプロパティを `.` 代入している (3.8.0 新規) — PowerShell 5.1 のシール済みオブジェクト実行時例外 (`"<PropName>" の設定中に例外が発生しました: "このオブジェクトにプロパティ '<PropName>' が見つかりません。"`) を静的解析で検出 |
 
 `PSA3xxx` — コーディングパターン（Warning）
 

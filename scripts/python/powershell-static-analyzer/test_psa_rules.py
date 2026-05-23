@@ -303,6 +303,87 @@ t('PSA2008 negative: plain ++ on a non-Script variable is fine',
 
 
 # ---------------------------------------------------------------------------
+# PSA2009 — PSCustomObject property assigned without prior declaration
+# (warning, default ON, new in 3.8.0)
+# ---------------------------------------------------------------------------
+
+t('PSA2009 positive: simple undeclared property assignment',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1 }\n$Ctx.Bar = 2\n',
+  1)
+
+t('PSA2009 positive: catch-block fallback that itself triggers the rule',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1 }\ntry {\n  $Ctx.WhqlCoSignAnalysis = New-Object\n} catch {\n  $Ctx.WhqlCoSignAnalysis = @()\n}\n',
+  2)
+
+t('PSA2009 positive: $Script:-scoped pscustomobject',
+  'PSA2009',
+  '$Script:Ctx = [pscustomobject]@{ Foo = 1 }\n$Ctx.Bar = 2\n',
+  1)
+
+t('PSA2009 negative: declared property assignment',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1; Bar = $null }\n$Ctx.Bar = 2\n',
+  0)
+
+t('PSA2009 negative: Add-Member pipe form extends the declared set',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1 }\n$Ctx | Add-Member -MemberType NoteProperty -Name Bar -Value $null\n$Ctx.Bar = 2\n',
+  0)
+
+t('PSA2009 negative: Add-Member -InputObject form extends the declared set',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1 }\nAdd-Member -InputObject $Ctx -MemberType NoteProperty -Name Bar -Value $null\n$Ctx.Bar = 2\n',
+  0)
+
+t('PSA2009 negative: variable also assigned as plain hashtable is dropped from tracking',
+  'PSA2009',
+  '$result = [pscustomobject]@{ A = 1 }\n$result = @{ B = 2 }\n$result.X = 3\n',
+  0)
+
+t('PSA2009 negative: variable also assigned as [ordered]@{...} is dropped',
+  'PSA2009',
+  '$result = [pscustomobject]@{ A = 1 }\n$result = [ordered]@{ B = 2 }\n$result.X = 3\n',
+  0)
+
+t('PSA2009 negative: well-known dynamic bag $PSBoundParameters is exempt',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1 }\n$PSBoundParameters.Anything = 2\n',
+  0)
+
+t('PSA2009 negative: compound += assignment is not flagged',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Counter = 0 }\n$Ctx.Counter += 1\n',
+  0)
+
+t('PSA2009 negative: equality comparison (==) is not flagged',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1 }\nif ($Ctx.Bar -eq $null) { Write-Host hi }\n',
+  0)
+
+t('PSA2009 negative: read-only property access does not fire',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1 }\nWrite-Host $Ctx.Bar\n',
+  0)
+
+t('PSA2009 negative: no pscustomobject initialiser in the file at all',
+  'PSA2009',
+  '$h = @{ Foo = 1 }\n$h.Bar = 2\n',
+  0)
+
+t('PSA2009 negative: variable in [pscustomobject] but property added via inline same statement',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1; Bar = $null; Baz = @() }\n$Ctx.Bar = 2\n$Ctx.Baz = @(1,2,3)\n',
+  0)
+
+t('PSA2009 inline-suppress: # psa-disable-line PSA2009 on the assignment line',
+  'PSA2009',
+  '$Ctx = [pscustomobject]@{ Foo = 1 }\n$Ctx.Bar = 2  # psa-disable-line PSA2009\n',
+  0)
+
+
+# ---------------------------------------------------------------------------
 # PSA3001 — Start-Process -ArgumentList (warning, default ON)
 # ---------------------------------------------------------------------------
 

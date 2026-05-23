@@ -524,6 +524,76 @@ Explicit initialisation also helps PSScriptAnalyzer's
 **Suggested fix**: Add a plain `$Script:Foo = 0` (or similar) at the
 top of the script's identifier/state-initialisation block.
 
+### 4.9c PSA2009 — PSCustomObject property assigned without prior declaration
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: v3.8.0
+
+**Detection**: The rule walks the file in four passes.
+
+1. **Initialiser pass.** Every top-level `$VarName = [pscustomobject]@{...}`
+   initialiser is parsed brace-balanced (string-literal-aware), and the
+   declared property names are harvested as the "declared" set for that
+   variable name. Scope qualifiers (`$Script:`, `$Global:`, `$Local:`,
+   `$Private:`) are stripped from the variable name so a `$Script:Foo =
+   [pscustomobject]@{...}` initialiser and a later `$Foo.Bar = ...`
+   assignment correlate correctly.
+2. **`Add-Member` pass.** Two surface forms of
+   `Add-Member -MemberType NoteProperty -Name <propname>` are recognised
+   and the named property is *added* to the declared set for the target
+   variable: `$Var | Add-Member ...` and
+   `Add-Member -InputObject $Var ...`. This makes the rule compatible
+   with the runtime-property-bag pattern.
+3. **Hashtable-form drop pass.** Any variable name that is *also* assigned
+   somewhere in the file with a plain hashtable literal
+   (`$result = @{...}`, `$tbl = [ordered]@{...}`, or
+   `$tbl = [hashtable]@{...}`) is conservatively *dropped* from
+   tracking. This false-positive prevention is necessary because
+   `psa.py` analysis is file-level rather than function-scope-aware,
+   and the same local variable name may legitimately host both
+   pscustomobject and hashtable shapes across different functions.
+4. **Assignment pass.** Every `$VarName.Property = ...` assignment site is
+   checked against the declared set for `$VarName`. The rule fires when
+   `$VarName` survived the hashtable-form drop pass, the assignment
+   operator is exactly `=` (not `+=`, `-=`, `*=`, `/=`, or `==`), and
+   `Property` is not in the declared set.
+
+The rule does **not** fire on well-known dynamic property bags: `$_`,
+`$Matches`, `$PSBoundParameters`, `$Host`, `$Error`, `$PSCmdlet`,
+`$MyInvocation`, `$args`, `$input`, `$this`.
+
+**Rationale**: PowerShell 5.1's `[pscustomobject]@{...}` accelerator
+constructs a sealed object whose property surface is fixed at the
+moment the initialiser runs. Any subsequent `$obj.NewProp = value`
+assignment that targets a property NOT in the initialiser raises a
+terminating exception (`"<PropName>" の設定中に例外が発生しました:
+"このオブジェクトにプロパティ '<PropName>' が見つかりません。"` in
+Japanese locales; in English: `Exception setting "<PropName>": "The
+property '<PropName>' cannot be found on this object."`). The defect
+surfaces only at runtime, on the first phase that attempts the
+assignment, which is too late for long-lived pipeline scripts where
+the assignment site can be hundreds or thousands of lines from the
+initialiser block. PSA2009 closes this loop at static-analysis time.
+
+**Suggested fix**: Add the missing `PropName = $null` declaration to
+the `[pscustomobject]@{...}` initialiser. If the assignment is to an
+inherited or extended object that the author cannot easily annotate,
+use inline suppression: `$obj.X = $value  # psa-disable-line PSA2009`.
+
+**Differences from related rules**:
+
+- **PSA2001 (Undefined variable reference)** operates at the
+  *variable* level. PSA2009 operates at the *property* level. The
+  two rules are orthogonal — PSA2001 cannot detect a missing
+  `[pscustomobject]` property because the variable itself is
+  well-defined.
+- **PSA2002 (Auto-variable shadowing)** is unrelated — it concerns
+  PowerShell engine auto-variables, not user `[pscustomobject]`
+  surface contracts.
+- **PSA8001 (Function-body drift)** operates at the cross-file
+  function-body level. PSA2009 operates inside a single file.
+
 ### 4.10 PSA3001 — `Start-Process -ArgumentList`
 
 - **Severity**: Warning
@@ -1040,7 +1110,7 @@ Conversely, a file without BOM but with all-CRLF endings will fire
 - Up to five LF-only line numbers are listed in the message; for
   files with hundreds of defective lines, callers needing the full
   list should use the JSON output format and inspect future
-  structured fields (not yet emitted as of v3.7.0).
+  structured fields (not yet emitted as of v3.8.0).
 
 ---
 

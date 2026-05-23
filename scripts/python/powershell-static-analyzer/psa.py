@@ -20,6 +20,7 @@ Variable / scope (PSA2xxx):
   PSA2006  Redirection operator in conditional ... Warning
   PSA2007  Param name shadows auto-variable ...... Warning   (new in v3.6.0)
   PSA2008  $Script:Foo++ without prior init ...... Info      (new in v3.6.0)
+  PSA2009  PSCustomObject prop assigned w/o decl . Warning   (new in v3.8.0)
 
 Coding-pattern (PSA3xxx):
   PSA3001  Start-Process -ArgumentList ........... Warning
@@ -139,7 +140,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.7.0'
+__version__ = '3.8.0'
 
 
 def _verify_version_file_consistency():
@@ -247,6 +248,8 @@ RULES = [
      'Parameter name shadows a PowerShell automatic variable'),
     ('PSA2008', 'info',    True,
      '$Script: variable mutated by ++/+=/-= without an initial assignment'),
+    ('PSA2009', 'warning', True,
+     'PSCustomObject property assigned without prior declaration'),
 
     # Coding-pattern (PSA3xxx)
     ('PSA3001', 'warning', True,
@@ -1825,6 +1828,221 @@ def check_script_var_mutation(clean):
     return out
 
 
+def check_pscustomobject_undeclared(clean):
+    """PSA2009: PSCustomObject property assigned without prior declaration.
+
+    New in v3.8.0. PSScriptAnalyzer does not have a direct equivalent.
+
+    Motivation
+    ----------
+    When a variable is initialised with the ``[pscustomobject]@{ ... }``
+    accelerator (a frozen, sealed object in PowerShell 5.1 semantics),
+    a subsequent ``.`` -style property assignment can only succeed if
+    the property was already declared inside the initialiser. Attempting
+    to set a property that was not pre-declared raises::
+
+        "<PropName>" の設定中に例外が発生しました: "このオブジェクトに
+        プロパティ '<PropName>' が見つかりません。プロパティが存在し、
+        設定可能であることを確認してください。"
+        (English: "Exception setting <PropName>: ...
+        property '<PropName>' cannot be found on this object;
+        verify that the property exists and can be set.")
+
+    The exception bubbles up and terminates whatever phase / function
+    the assignment lives in. This is one of the most common "I added
+    a new feature in script body but forgot to wire it into the
+    initialiser" defects in long-lived pipeline scripts that pass a
+    single shared ``$Ctx`` / ``$State`` / ``$Context`` object across
+    many phases.
+
+    Detection
+    ---------
+    1. Scan the entire file for top-level ``$VarName = [pscustomobject]@{ ... }``
+       initialisations (the ``$VarName`` may also be qualified with the
+       ``$Script:`` / ``$Global:`` scope prefix).
+    2. Parse the brace-balanced body of each initialiser and collect
+       the set of declared property names. Property names are recognised
+       at line starts (with optional leading whitespace) and after ``;``
+       separators inside the body. Inline comments are ignored.
+    3. Scan the entire file for ``$VarName.Property = ...`` assignment
+       sites. Match the variable name only (not its scope qualifier) so
+       that ``function Foo($Ctx) { $Ctx.NewProp = ... }`` is correctly
+       flagged when the outer file initialised ``$Ctx``.
+    4. Skip assignments whose target property was declared in any
+       initialiser for that variable name. Also skip well-known dynamic
+       targets where the property bag is intentionally open
+       (``$_`` ``$Matches`` ``$PSBoundParameters`` ``$Host`` ``$Error``
+       and PowerShell automatic variables).
+
+    Notes
+    -----
+    - The check is scoped to ``[pscustomobject]@{ ... }`` initialisers.
+      ``New-Object PSObject -Property @{ ... }``, ``Add-Member``-built
+      objects, and ``[ordered]@{ ... }`` hashtables are NOT flagged
+      because they allow free post-construction property addition in
+      PowerShell 5.1.
+    - When the same variable name is re-initialised later in the file
+      (e.g. ``$Ctx = [pscustomobject]@{ ... }`` appears twice), the
+      union of all declarations is treated as the live property set.
+      This is intentionally permissive; over-broad declaration is
+      better than over-strict warnings.
+    - Inline suppression on the assignment line works the usual way:
+      ``$Ctx.OptIn = $value # psa-disable-line PSA2009``.
+    """
+    out = []
+    # ----- Step 1+2: find every [pscustomobject]@{ ... } initialiser
+    # and harvest its declared property names. We walk the cleaned
+    # source character-by-character to honour brace nesting.
+    decl_pat = re.compile(
+        r'\$(?:Script:|Global:|Local:|Private:)?'
+        r'(?P<name>[A-Za-z_]\w*)\s*=\s*\[pscustomobject\]\s*@\{',
+        re.IGNORECASE)
+    declared = {}  # lowered name -> set of declared property names
+    text_len = len(clean)
+    for m in decl_pat.finditer(clean):
+        var_name = m.group('name').lower()
+        # Find the matching closing brace for the @{ that just opened.
+        open_pos = m.end() - 1  # position of '{'
+        depth = 1
+        i = open_pos + 1
+        in_str = None  # active string delimiter, or None
+        while i < text_len and depth > 0:
+            ch = clean[i]
+            if in_str:
+                if ch == in_str:
+                    in_str = None
+            else:
+                if ch in ("'", '"'):
+                    in_str = ch
+                elif ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        break
+            i += 1
+        if depth != 0:
+            # Unbalanced; skip silently (PSA1001 will catch it).
+            continue
+        body = clean[open_pos + 1:i]
+        # Property names appear at "start-of-statement" boundaries:
+        # either the very beginning of the body, after a newline, or
+        # after a ';' separator. Comments are already stripped from
+        # `clean`. Avoid matching the right-hand side of a previous
+        # assignment by anchoring on the boundary.
+        prop_pat = re.compile(
+            r'(?:^|[\n;])\s*([A-Za-z_]\w*)\s*=',
+            re.MULTILINE)
+        props = set()
+        for pm in prop_pat.finditer(body):
+            props.add(pm.group(1).lower())
+        if var_name not in declared:
+            declared[var_name] = set()
+        declared[var_name].update(props)
+    if not declared:
+        return out  # no initialisers found, nothing to check
+
+    # ----- Step 2c: drop any variable name that is ALSO assigned with
+    # a plain hashtable literal (@{...}) somewhere in the file. The
+    # hashtable form supports free runtime key addition (i.e.
+    # $tbl.NewKey = 'v' always succeeds even if NewKey was not in the
+    # initialiser). Because psa.py performs file-level (not
+    # function-scope-aware) tracking, the same variable name can refer
+    # to a [pscustomobject] inside one function and to a hashtable in
+    # another. Conservatively drop such names to avoid false positives.
+    # The same applies to [hashtable]@{...} and [ordered]@{...}.
+    hashtable_pat = re.compile(
+        r'\$(?:Script:|Global:|Local:|Private:)?(?P<name>[A-Za-z_]\w*)'
+        r'\s*=\s*(?:\[(?:hashtable|ordered)\]\s*)?@\{',
+        re.IGNORECASE)
+    hashtable_names = set()
+    pscustom_pat = re.compile(
+        r'\[pscustomobject\]\s*@\{', re.IGNORECASE)
+    for m in hashtable_pat.finditer(clean):
+        # Decide: does this match correspond to a [pscustomobject] or
+        # a plain hashtable? Look at the text in between the '=' and
+        # the '@{' to see if [pscustomobject] is present there.
+        seg = clean[m.start():m.end()]
+        if not pscustom_pat.search(seg):
+            hashtable_names.add(m.group('name').lower())
+    for name in hashtable_names:
+        if name in declared:
+            declared.pop(name, None)
+    if not declared:
+        return out
+
+    # ----- Step 2b: harvest properties that are added at runtime via
+    # Add-Member -MemberType NoteProperty -Name <Foo>. The pattern
+    #     $Var | Add-Member -MemberType NoteProperty -Name Foo ...
+    # explicitly extends the object's surface, so any later
+    # $Var.Foo = ... assignment is safe.
+    # Two surface forms we care about:
+    #   (a) $Var | Add-Member ... -Name Foo
+    #   (b) Add-Member -InputObject $Var ... -Name Foo
+    addmember_pipe_pat = re.compile(
+        r'\$(?P<name>[A-Za-z_]\w*)\s*\|\s*Add-Member\b[^\r\n]*?'
+        r'-Name\s+["\']?(?P<prop>[A-Za-z_]\w*)',
+        re.IGNORECASE)
+    addmember_input_pat = re.compile(
+        r'Add-Member\b[^\r\n]*?-InputObject\s+\$(?P<name>[A-Za-z_]\w*)'
+        r'[^\r\n]*?-Name\s+["\']?(?P<prop>[A-Za-z_]\w*)',
+        re.IGNORECASE)
+    for m in addmember_pipe_pat.finditer(clean):
+        n = m.group('name').lower()
+        if n in declared:
+            declared[n].add(m.group('prop').lower())
+    for m in addmember_input_pat.finditer(clean):
+        n = m.group('name').lower()
+        if n in declared:
+            declared[n].add(m.group('prop').lower())
+
+    # ----- Step 3+4: find every $VarName.Property = ... assignment
+    # and fire when the target property was not pre-declared.
+    # We must NOT match equality comparisons ('-eq', '-ne'), only the
+    # assignment operator '='. We also exclude compound operators like
+    # '+=', '-=', '*=', '/=' which are mutations, not 'add property'.
+    assign_pat = re.compile(
+        r'\$(?P<name>[A-Za-z_]\w*)\.(?P<prop>[A-Za-z_]\w*)\s*=(?!=)',
+        re.IGNORECASE)
+    skip_targets = {
+        '_', 'matches', 'psboundparameters', 'host', 'error',
+        'pscmdlet', 'myinvocation', 'args', 'input', 'true', 'false',
+        'null', 'this',
+    }
+    for ln, line in enumerate(clean.split('\n'), 1):
+        for m in assign_pat.finditer(line):
+            var_name = m.group('name').lower()
+            prop = m.group('prop').lower()
+            # Skip if not a tracked PSCustomObject variable.
+            if var_name not in declared:
+                continue
+            # Skip well-known dynamic bags.
+            if var_name in skip_targets:
+                continue
+            # Skip compound assignments (+=, -=, *=, /=) just in case
+            # the regex matched a wider context. The negative lookahead
+            # for '==' is already in the pattern; explicitly exclude
+            # '<op>=' by looking one char back.
+            col = m.start() + 1
+            eq_pos = m.end() - 1
+            if eq_pos > 0 and line[eq_pos - 1] in '+-*/%':
+                continue
+            if prop in declared[var_name]:
+                continue
+            out.append({
+                'severity': 'warning', 'code': 'PSA2009',
+                'line': ln, 'col': col,
+                'message': (
+                    f'${m.group("name")}.{m.group("prop")} is assigned '
+                    f'but ${m.group("name")} was initialised with '
+                    f'[pscustomobject]@{{...}} that does not declare '
+                    f'{m.group("prop")}; add '
+                    f'"{m.group("prop")} = $null" to the initialiser, '
+                    f'or use Add-Member to add the property explicitly'),
+            })
+    return out
+
+
 # ---------------------------------------------------------------------------
 # File format / encoding checks (PSA7xxx)
 # ---------------------------------------------------------------------------
@@ -3399,6 +3617,8 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_param_auto_var(clean)
     if cfg.enabled['PSA2008']:
         raw += check_script_var_mutation(clean)
+    if cfg.enabled['PSA2009']:
+        raw += check_pscustomobject_undeclared(clean)
 
     if cfg.enabled['PSA3001']:
         raw += check_argumentlist(clean)
