@@ -415,8 +415,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.24-r02.1'
-$Script:ScriptTag     = 'dynamic-baseline-and-wsusscn2-validation-fixup'
+$Script:ScriptVersion = 'update-wsi-2026.05.24-r02.2'
+$Script:ScriptTag     = 'dynamic-baseline-and-wsusscn2-validation-fixup-2'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -3939,7 +3939,7 @@ function Invoke-SetupPhase02_5_RefreshPatchBaseline {
     #>
     [OutputType([bool])]
     param()
-    Start-DebugTrace -PhaseName 'P02.5_RefreshPatchBaseline' -PhaseId 'P02.5'
+    Start-DebugTrace -Context 'Invoke-SetupPhase02_5_RefreshPatchBaseline' -PhaseId 'P02.5'
     try {
         Set-DebugStep -Step 'check-skip-conditions'
 
@@ -4498,7 +4498,7 @@ function Invoke-PlanPhase04_5_ValidatePatchSet {
     #>
     [OutputType([bool])]
     param()
-    Start-DebugTrace -PhaseName 'P04.5_ValidatePatchSet' -PhaseId 'P04.5'
+    Start-DebugTrace -Context 'Invoke-PlanPhase04_5_ValidatePatchSet' -PhaseId 'P04.5'
     try {
         Set-DebugStep -Step 'check-skip-conditions'
 

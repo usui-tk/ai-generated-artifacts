@@ -27,6 +27,47 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.24-r02.2] - 2026-05-24
+
+### Fixed — Stage 2 smoke-test failure introduced by r02
+
+r02.1 cleared the PSScriptAnalyzer findings, but the Stage 2 job still
+exited 1 because Smoke test 3 (`-Action PrepareBuildVerify
+-SyntheticTestMode -DryRun -SkipEnvCheck`) hit a fatal error inside the
+new phase P02.5. Root cause: when `Start-DebugTrace` was called from the
+two new phase workers I introduced in r02, the wrong parameter name
+`-PhaseName` was used. The correct name (used by every other phase in
+this script) is `-Context`. PowerShell 5.1's partial-match logic
+reported the failure as "A parameter cannot be found that matches
+parameter name 'Phase'." because `-PhaseId` and `-PhaseName` collide
+on the same prefix.
+
+- `Invoke-SetupPhase02_5_RefreshPatchBaseline`:
+  `Start-DebugTrace -PhaseName 'P02.5_RefreshPatchBaseline' -PhaseId 'P02.5'`
+  becomes
+  `Start-DebugTrace -Context 'Invoke-SetupPhase02_5_RefreshPatchBaseline' -PhaseId 'P02.5'`
+  (mirrors the call shape used by P01 through P09).
+- `Invoke-PlanPhase04_5_ValidatePatchSet`:
+  `Start-DebugTrace -PhaseName 'P04.5_ValidatePatchSet' -PhaseId 'P04.5'`
+  becomes
+  `Start-DebugTrace -Context 'Invoke-PlanPhase04_5_ValidatePatchSet' -PhaseId 'P04.5'`.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info (5,452 lines).
+- PSScriptAnalyzer 1.25.0: 0 findings at Severity Error / Warning /
+  Information.
+- All 11 `Start-DebugTrace` call sites now use the canonical
+  `-Context <function-name> -PhaseId <PNN>` shape.
+
+### Compatibility
+
+- Pure parameter-name fix in two new functions; no behavioural or
+  schema change. r02.1 callers see no surface-level difference.
+- `ScriptVersion` is bumped from `update-wsi-2026.05.24-r02.1` to
+  `update-wsi-2026.05.24-r02.2`. The `r02.2` suffix communicates a
+  second fix-up release of the r02 line.
+
 ## [update-wsi-2026.05.24-r02.1] - 2026-05-24
 
 ### Fixed — Stage 2 PSScriptAnalyzer (Windows PS 5.1) findings
