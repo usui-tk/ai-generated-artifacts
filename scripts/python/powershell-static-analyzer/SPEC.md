@@ -594,6 +594,160 @@ use inline suppression: `$obj.X = $value  # psa-disable-line PSA2009`.
 - **PSA8001 (Function-body drift)** operates at the cross-file
   function-body level. PSA2009 operates inside a single file.
 
+### 4.9d PSA2010 — Call to undefined function
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v3.9.0
+
+**Detection**: The rule operates at the cross-file (driver) level
+because the full set of function definitions in the scan set is
+needed to decide whether a call site has any backing definition.
+
+1. **Definition pass.** For every file in the scan set, the
+   ``^\s*function\s+([A-Za-z][\w-]*)`` regex on the cleaned text
+   (strings and comments already stripped) collects user-defined
+   function names. The union across all scanned files becomes the
+   ``defined_funcs`` set.
+2. **Cmdlet whitelist.** psa.py ships a comprehensive
+   ``KNOWN_CMDLETS`` set covering Microsoft.PowerShell.Core /
+   Management / Security / Utility / Diagnostics, CimCmdlets, PKI,
+   PnpDevice, Defender, BitLocker, NetTCPIP / NetAdapter,
+   SecureBoot, ScheduledTasks, Storage, Archive, WindowsCapability,
+   ConfigCI (WDAC), International, and WSMan. Consumers extend it
+   via the ``.psa.config.json`` ``psa2010_known_cmdlets`` array (an
+   optional ``Module\Name`` prefix is permitted for documentation
+   and stripped before lookup).
+3. **Call-site pass.** Find every token on the cleaned text that
+   matches ``[A-Z][A-Za-z]+-[A-Z][A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*``
+   and appears in **command position** — at start-of-line, after
+   ``;`` ``|`` ``&`` ``(`` ``{`` ``=`` or a backtick, and followed
+   by whitespace / end-of-line / ``;`` / ``|`` / ``)`` / a backtick.
+   The end boundary prevents matches inside version-like strings
+   (``chipset-2026.05.25-r75``).
+4. **Verb gate.** The verb segment (lowercased) must be in
+   ``APPROVED_VERBS``. This deliberately limits the rule's reach to
+   names that look like real PowerShell function invocations and
+   prevents false positives on hyphenated tokens whose first
+   segment is a domain-specific prefix (``Phantom-OK``,
+   ``Multi-OS``, ``Chipset-Driver-CodeSign``) that survives string
+   stripping.
+5. **Resolution.** If the call name (lowercased) is not in the
+   union of ``defined_funcs`` and the (default + extended)
+   ``KNOWN_CMDLETS`` set, fire PSA2010 with severity ``error``.
+
+**Rationale**: PowerShell's late-binding execution model defers
+``CommandNotFoundException`` to the moment the call is reached, so
+a typo like ``Find-Signtool`` (where the actual helper is
+``Find-KitTool 'signtool.exe'``) can sit dormant in the source for
+many releases until a phase that triggers the call runs on a
+specific host. This was the proximate trigger of the 2026-05-24
+WS2019 + Renoir r74 release: every WHQL co-sign classification
+across the r71–r73 lifetime silently degraded to the conservative
+fallback because the inner ``try/catch`` in ``Test-WhqlCoSignature``
+swallowed the ``CommandNotFoundException``. PSA2010 would have
+surfaced this typo at static-analysis time. A subsequent r75 bench
+cycle revealed that the actual operator-visible error stemmed from
+``Split-Path -LiteralPath -Parent`` (see PSA2011 below), with the
+``Find-Signtool`` typo being a separate latent defect that PSA2010
+would have caught either way.
+
+**Suggested fix**: Define the missing function (if it was supposed
+to exist), import the module that provides it (and add the cmdlet
+to ``psa2010_known_cmdlets`` if the rule still fires), or correct
+the typo at the call site. The recommended remediation for the
+historical case is ``$signtool = Find-KitTool 'signtool.exe'``.
+
+**Notes**:
+
+- External executables invoked via ``& $exe`` or ``pnputil
+  /enum-drivers`` do not follow Verb-Noun syntax and are never
+  flagged.
+- Class method calls such as
+  ``[System.IO.Path]::GetDirectoryName($p)`` do not contain a
+  hyphen between the segments and are never flagged.
+- The rule works on any scan size ≥ 1. With a single-file scan,
+  only that file's definitions populate ``defined_funcs``; sister
+  helpers shared across multiple scripts may require ``--include
+  PSA2010`` and pass all sister files together, or addition to
+  ``psa2010_known_cmdlets``.
+
+**Inline suppression**: ``# psa-disable-line PSA2010 -- <reason>``
+on the call line. Use sparingly — the rule fires on real defects
+and most suppression sites should instead define the missing
+function or extend ``psa2010_known_cmdlets``.
+
+### 4.9e PSA2011 — `Split-Path -LiteralPath ... -Parent`
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v3.9.0
+
+**Detection**: The rule walks the file line by line (with backtick
+continuation joined into a single span) and looks for
+``Split-Path`` invocations that contain BOTH the ``-LiteralPath``
+switch AND the ``-Parent`` switch. Switch order does not matter:
+``Split-Path -LiteralPath $p -Parent`` and
+``Split-Path -Parent -LiteralPath $p`` both fire.
+
+The pattern requires the ``Split-Path`` token to be in command
+position (start of statement, after ``|``, ``;``, ``&``, ``(``,
+``{``, ``=``, or a backtick) to avoid false positives where the
+text appears in a here-string body that the stripper conservatively
+preserved.
+
+**Rationale**: On Windows PowerShell 5.1 ja-JP, the combination of
+``-LiteralPath`` and ``-Parent`` triggers an
+``AmbiguousParameterSet`` runtime exception:
+
+```
+指定された名前のパラメーターを使用してパラメーター セットを解決できません。
+FullyQualifiedErrorId: AmbiguousParameterSet,
+    Microsoft.PowerShell.Commands.SplitPathCommand
+```
+
+The two switches live in incompatible parameter sets in the ja-JP
+help table — ``-LiteralPath`` favours the path-decomposition set,
+while ``-Parent`` favours the qualifier-projection set — and PS 5.1
+cannot resolve which set the operator intended. The bug is
+present on PS 5.1.17763.8755 on Windows Server 2019 (ja-JP) and
+some other build / locale combinations; it is absent on
+PowerShell 7.x. Because the bug surfaces only at runtime and only
+on certain locales, code review and English-locale CI both miss it.
+
+This was the proximate cause of the 2026-05-24 r75 bench cycle's
+WHQL co-sign analysis failure on a clean-installed WS2019 + Renoir
+host. The ``Get-InfDriverFileList`` helper used ``Split-Path
+-LiteralPath $InfPath -Parent`` to derive the directory containing
+the staged ``.sys`` files, which raised the ja-JP
+``ParameterBindingException``, propagated through the outer
+``try/catch`` in ``Test-WhqlCoSignature``, and degraded every WHQL
+classification to the conservative ``'self-only'`` verdict.
+
+**Suggested fix**: Use ``[System.IO.Path]::GetDirectoryName($path)``
+for parent-directory extraction. The .NET method has no PS-binder
+ambiguity and works identically across PS 5.1 / 7.x. Alternatively,
+``Split-Path -Path $path -Parent`` (with positional or explicit
+``-Path``, without ``-LiteralPath``) works around the bug; this
+form is preferred only when the path does not contain wildcard
+metacharacters that ``-Path`` would expand (``*``, ``?``, ``[``,
+``]``).
+
+**Inline suppression**: ``# psa-disable-line PSA2011 -- <reason>``
+on the call line. Use sparingly — the rule fires on a real ja-JP
+runtime defect.
+
+**Differences from related rules**:
+
+- **PSA3005 (Start-Transcript -Path should be -LiteralPath)** is
+  the inverse pattern at the file-creation-time layer: ``-Path``
+  expands wildcards and breaks on special characters, so
+  ``-LiteralPath`` is preferred. PSA2011 is the opposite — for
+  ``Split-Path -Parent``, ``-LiteralPath`` triggers the runtime
+  parameter-binder bug, so ``-Path`` (or the .NET method) is
+  preferred. The two rules are not contradictory; they apply to
+  different cmdlets with different parameter-set ambiguities.
+
 ### 4.10 PSA3001 — `Start-Process -ArgumentList`
 
 - **Severity**: Warning
@@ -1584,7 +1738,7 @@ top-level structure:
           "name": "psa.py",
           "version": "<X.Y.Z>",
           "informationUri": "...",
-          "rules": [ /* 42 rule descriptors */ ]
+          "rules": [ /* 45 rule descriptors */ ]
         }
       },
       "results": [ /* one entry per issue */ ],
@@ -2051,6 +2205,9 @@ governance file; updates to the workflow are recorded in
 | PSA2006 | warning | ✅ |
 | PSA2007 | warning | ✅ |
 | PSA2008 | info | ✅ |
+| PSA2009 | warning | ✅ |
+| PSA2010 | error | ✅ |
+| PSA2011 | error | ✅ |
 | PSA3001 | warning | ✅ |
 | PSA3002 | warning | ✅ |
 | PSA3003 | warning | ✅ |
@@ -2074,6 +2231,7 @@ governance file; updates to the workflow are recorded in
 | PSA6007 | info | ✅ |
 | PSA6008 | info | ✅ |
 | PSA7001 | warning | ✅ |
+| PSA7002 | warning | ✅ |
 | PSA8001 | warning | ✅ |
 | PSA9001 | info | ⛔ |
 | PSA9002 | warning | ⛔ |

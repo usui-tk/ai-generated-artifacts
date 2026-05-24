@@ -384,6 +384,66 @@ t('PSA2009 inline-suppress: # psa-disable-line PSA2009 on the assignment line',
 
 
 # ---------------------------------------------------------------------------
+# PSA2011 — Split-Path -LiteralPath ... -Parent (error, default ON, new in 3.9.0)
+# ---------------------------------------------------------------------------
+# PSA2011 is file-local; it does not require cross-file context, so we can
+# use the standard t() harness via analyze_text. PSA2010 is cross-file and
+# uses a dedicated harness further down (see PSA2010_TESTS section).
+
+t('PSA2011 positive: classic form (the r74 Defect A site)',
+  'PSA2011',
+  '$infDir = Split-Path -LiteralPath $InfPath -Parent\n',
+  1)
+
+t('PSA2011 positive: reversed switch order',
+  'PSA2011',
+  '$infDir = Split-Path -Parent -LiteralPath $InfPath\n',
+  1)
+
+t('PSA2011 positive: multi-line backtick continuation',
+  'PSA2011',
+  '$infDir = Split-Path -LiteralPath $InfPath `\n    -Parent\n',
+  1)
+
+t('PSA2011 negative: -Path with -Parent (no -LiteralPath)',
+  'PSA2011',
+  '$infDir = Split-Path -Path $InfPath -Parent\n',
+  0)
+
+t('PSA2011 negative: -LiteralPath with -Leaf (no -Parent)',
+  'PSA2011',
+  '$leaf = Split-Path -LiteralPath $InfPath -Leaf\n',
+  0)
+
+t('PSA2011 negative: positional path with -Parent',
+  'PSA2011',
+  '$infDir = Split-Path $InfPath -Parent\n',
+  0)
+
+t('PSA2011 negative: GetDirectoryName (the recommended r75 fix)',
+  'PSA2011',
+  '$infDir = [System.IO.Path]::GetDirectoryName($InfPath)\n',
+  0)
+
+t('PSA2011 negative: bare Split-Path in a comment',
+  'PSA2011',
+  '# Reminder: Split-Path -LiteralPath $x -Parent fails on ja-JP\n'
+  '$infDir = Split-Path -Path $InfPath -Parent\n',
+  0)
+
+t('PSA2011 negative: -LiteralPath and -Parent inside a here-string',
+  'PSA2011',
+  '$msg = @"\nDo not call Split-Path -LiteralPath x -Parent here\n"@\n',
+  0)
+
+t('PSA2011 inline-suppress: # psa-disable-line PSA2011 on the call line',
+  'PSA2011',
+  '$infDir = Split-Path -LiteralPath $InfPath -Parent  '
+  '# psa-disable-line PSA2011\n',
+  0)
+
+
+# ---------------------------------------------------------------------------
 # PSA3001 — Start-Process -ArgumentList (warning, default ON)
 # ---------------------------------------------------------------------------
 
@@ -1115,6 +1175,139 @@ t8('PSA8001 edge: phase function pattern ignored via regex',
 
 
 # ---------------------------------------------------------------------------
+# Cross-file rule: PSA2010 — Call to undefined function (new in v3.9.0)
+# ---------------------------------------------------------------------------
+# PSA2010 is implemented at the main() driver level, taking the UNION of
+# function definitions across all scanned files plus a known-cmdlet
+# whitelist. We test the helper directly with controlled inputs.
+
+def _run_psa2010(source, defined_funcs=None, extra_known=None):
+    """Run check_undefined_function_call on synthetic per-file data.
+
+    defined_funcs : iterable of locally-defined function names (lowered),
+                    representing what would be collected across the
+                    cross-file scan set.
+    extra_known   : iterable of cmdlet names beyond the default
+                    KNOWN_CMDLETS set (simulates the psa.config.json
+                    psa2010_known_cmdlets extension).
+    """
+    clean = psa.strip_strings_and_comments(source)
+    defined = {n.lower() for n in (defined_funcs or [])}
+    known = set(psa.KNOWN_CMDLETS_LOWER)
+    for n in (extra_known or []):
+        known.add(n.lower())
+    return psa.check_undefined_function_call(clean, defined, known)
+
+
+PSA2010_TESTS = []
+
+
+def t10(name, source, expected_count, defined_funcs=None, extra_known=None):
+    PSA2010_TESTS.append((name, source, expected_count,
+                          defined_funcs, extra_known))
+
+
+# Positive: the historical r74 defect (Find-Signtool typo). Not in the
+# cmdlet whitelist (it does not exist) and not defined locally.
+t10('PSA2010 positive: Find-Signtool typo (the r74 Defect 1 site)',
+    'function Test-WhqlCoSignature {\n'
+    '    $signtool = Find-Signtool\n'
+    '}\n',
+    1,
+    defined_funcs=['Test-WhqlCoSignature'])
+
+# Positive: undefined helper called from a phase function. The verb
+# MUST be in APPROVED_VERBS for PSA2010 to consider the name (this is
+# a deliberate false-positive defense — names with non-approved verbs
+# are more likely module/repo-specific tokens than user-defined PS
+# function calls).
+t10('PSA2010 positive: undefined helper called from another helper',
+    'function Invoke-Foo { Invoke-NoneSuch }\n',
+    1,
+    defined_funcs=['Invoke-Foo'])
+
+# Negative: the correct call (Find-KitTool IS in defined_funcs)
+t10('PSA2010 negative: Find-KitTool is locally defined',
+    'function Test-WhqlCoSignature {\n'
+    '    $signtool = Find-KitTool \'signtool.exe\'\n'
+    '}\n',
+    0,
+    defined_funcs=['Test-WhqlCoSignature', 'Find-KitTool'])
+
+# Negative: built-in PowerShell cmdlet
+t10('PSA2010 negative: built-in cmdlet Get-Content is in KNOWN_CMDLETS',
+    'function Read-Foo { Get-Content -Path bar }\n',
+    0,
+    defined_funcs=['Read-Foo'])
+
+# Negative: cmdlet from PnpDevice module
+t10('PSA2010 negative: Get-PnpDevice (PnpDevice module) in KNOWN_CMDLETS',
+    'function Get-AmdInventory { Get-PnpDevice -Class Net }\n',
+    0,
+    defined_funcs=['Get-AmdInventory'])
+
+# Negative: name does not follow Verb-Noun (no hyphen) — not flagged
+t10('PSA2010 negative: external binary (no hyphen) is not flagged',
+    'function Invoke-Foo { pnputil /enum-drivers }\n',
+    0,
+    defined_funcs=['Invoke-Foo'])
+
+# Negative: class method call (.NET, not a function call)
+t10('PSA2010 negative: .NET class method call',
+    'function Invoke-Foo {\n'
+    '    [System.IO.Path]::GetDirectoryName($p)\n'
+    '}\n',
+    0,
+    defined_funcs=['Invoke-Foo'])
+
+# Negative: extension via psa2010_known_cmdlets
+t10('PSA2010 negative: third-party cmdlet via psa2010_known_cmdlets',
+    'function Invoke-Foo { Get-ThirdParty-Foo }\n',
+    0,
+    defined_funcs=['Invoke-Foo'],
+    extra_known=['Get-ThirdParty-Foo'])
+
+# Negative: name in a string literal (stripped by strip_strings_and_comments)
+t10('PSA2010 negative: function name appears only in a string literal',
+    'function Invoke-Foo { Write-Host "Find-Signtool is not defined" }\n',
+    0,
+    defined_funcs=['Invoke-Foo'])
+
+# Negative: name in a comment (stripped by strip_strings_and_comments)
+t10('PSA2010 negative: function name appears only in a comment',
+    'function Invoke-Foo {\n'
+    '    # TODO: implement Find-Signtool later\n'
+    '    Get-Content -Path foo\n'
+    '}\n',
+    0,
+    defined_funcs=['Invoke-Foo'])
+
+# Negative: version-like substring (Deploy-AMD-2026.05.25-r75 inside a
+# string is stripped; the surrounding context should not fire even if
+# the stripper missed it). Test that we're not over-matching on
+# arbitrary hyphenated tokens.
+t10('PSA2010 negative: bare verb-only token (no hyphenated noun)',
+    'function Invoke-Foo { $x = "Deploy" }\n',
+    0,
+    defined_funcs=['Invoke-Foo'])
+
+# Negative: parameter-like name (-Verbose) is not a function call
+t10('PSA2010 negative: parameter -Verbose is not a function call',
+    'function Invoke-Foo { Get-Content -Path foo -Verbose }\n',
+    0,
+    defined_funcs=['Invoke-Foo'])
+
+# Edge: function defined in the SAME file via the standard cross-file
+# pass (analyze_text driver builds the union). When defined_funcs
+# contains the call name, it must NOT fire.
+t10('PSA2010 edge: helper defined in same-file is satisfied via cross-file union',
+    'function Find-Signtool { "stub" }\n'
+    'function Test-WhqlCoSignature { Find-Signtool }\n',
+    0,
+    defined_funcs=['Find-Signtool', 'Test-WhqlCoSignature'])
+
+
+# ---------------------------------------------------------------------------
 # CLI tests: --config-check (Pillar 2) and --self-check (Pillar 3)
 # ---------------------------------------------------------------------------
 
@@ -1242,6 +1435,28 @@ def run():
                     details.append(f'    {path} L{i["line"]} '
                                    f'[{i["code"]}] {i["message"]}')
             failures.append((name, details))
+
+    # --- Section 2b: PSA2010 cross-file ---
+    print()
+    print('=' * 72)
+    print(f'Section 2b: PSA2010 cross-file tests ({len(PSA2010_TESTS)} cases)')
+    print('=' * 72)
+    for name, source, expected_count, defined_funcs, extra_known in PSA2010_TESTS:
+        results = _run_psa2010(source,
+                               defined_funcs=defined_funcs,
+                               extra_known=extra_known)
+        got = sum(1 for r in results if r['code'] == 'PSA2010')
+        ok = got == expected_count
+        status = 'PASS' if ok else 'FAIL'
+        print(f'  [{status}] {name}  (PSA2010 hits: {got}/{expected_count})')
+        if ok:
+            pass_count += 1
+        else:
+            fail_count += 1
+            failures.append((name, [
+                f'    L{r["line"]} [{r["code"]}] {r["message"]}'
+                for r in results
+            ]))
 
     # --- Section 2.5: compute_line_ending_stats helper (PSA7002 support) ---
     print()

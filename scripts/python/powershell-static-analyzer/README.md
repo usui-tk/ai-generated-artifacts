@@ -208,6 +208,8 @@ optional column, and a short message.
 | **PSA2007** | Warning | ✅ on | Parameter name shadows a PowerShell automatic variable (new in 3.6.0) |
 | **PSA2008** | Info | ✅ on | `$Script:Foo++` / `+=` / `-=` without prior initialisation (new in 3.6.0) |
 | **PSA2009** | Warning | ✅ on | `[pscustomobject]@{...}` property assigned without prior declaration in the initialiser (new in 3.8.0) — guards against the PowerShell 5.1 sealed-object runtime exception |
+| **PSA2010** | Error | ✅ on | Call to a function not defined in any scanned file and not in the built-in cmdlet whitelist (new in 3.9.0) — catches typos such as `Find-Signtool` where the actual helper is `Find-KitTool 'signtool.exe'`. Extend the whitelist via `.psa.config.json` `psa2010_known_cmdlets`. |
+| **PSA2011** | Error | ✅ on | `Split-Path -LiteralPath ... -Parent` triggers `AmbiguousParameterSet` on Windows PowerShell 5.1 ja-JP (new in 3.9.0) — fix with `[System.IO.Path]::GetDirectoryName($path)` or `Split-Path -Path $path -Parent`. |
 
 `PSA3xxx` — coding patterns (Warning)
 

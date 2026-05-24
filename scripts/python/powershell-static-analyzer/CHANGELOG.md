@@ -52,6 +52,128 @@ changes (documentation policy, sister scripts, etc.), see the root
   "see `psa.py --list-rules`" or parameterised against
   `len(RULES)`.
 
+## [3.9.0] — 2026-05-25
+
+### Added
+
+- **`PSA2010` — Call to undefined function (error, default ON).**
+  Cross-file rule that flags any Verb-Noun-style call whose target
+  is not defined in any scanned file and is not in the
+  `KNOWN_CMDLETS` whitelist (Microsoft.PowerShell.Core /
+  Management / Security / Utility / Diagnostics, CimCmdlets, PKI,
+  PnpDevice, Defender, BitLocker, NetTCPIP / NetAdapter,
+  SecureBoot, ScheduledTasks, Storage, Archive, WindowsCapability,
+  ConfigCI, International, WSMan). Designed to catch typos such as
+  the historical `Find-Signtool` → `Find-KitTool 'signtool.exe'`
+  reference defect documented in the consumer repository's r75
+  release. The rule deliberately limits its reach to names whose
+  verb segment is in `APPROVED_VERBS` (false-positive defense
+  against hyphenated domain-specific tokens like `Phantom-OK`,
+  `Multi-OS`, `Chipset-Driver-CodeSign`).
+
+  Consumers can extend the cmdlet whitelist via the new
+  `.psa.config.json` field:
+
+  ```json
+  {
+    "psa2010_known_cmdlets": [
+      "Get-MyModuleFoo",
+      "Set-MyModuleBar",
+      "MyModule\\Reset-Widget"
+    ]
+  }
+  ```
+
+  An optional `Module\Name` prefix is permitted for documentation
+  and stripped before lookup.
+
+  See SPEC.md §4.9d for the detection algorithm; the rule operates
+  at the cross-file driver level (like `PSA8001`) and is dispatched
+  from `main()` after every per-file analysis completes.
+
+- **`PSA2011` — `Split-Path -LiteralPath ... -Parent` triggers
+  AmbiguousParameterSet (error, default ON).** File-local rule
+  that flags `Split-Path` invocations containing both
+  `-LiteralPath` and `-Parent` (in either order). On Windows
+  PowerShell 5.1 ja-JP this combination raises
+  `AmbiguousParameterSet,
+  Microsoft.PowerShell.Commands.SplitPathCommand` at runtime; the
+  fix is to use `[System.IO.Path]::GetDirectoryName($path)` or
+  `Split-Path -Path $path -Parent` (without `-LiteralPath`).
+  Single-line and backtick-continuation forms are both handled.
+
+  See SPEC.md §4.9e for the detection algorithm. This rule
+  surfaced the proximate cause of the 2026-05-24 r75 release's
+  WHQL co-sign analysis failure on a ja-JP Windows Server 2019
+  bench host: `Get-InfDriverFileList` used this construct in the
+  AmdChipsetDriver / AmdGraphicsDriver / MSBthPanInbox sister
+  scripts, propagating a `ParameterBindingException` through the
+  outer `try/catch` of `Test-WhqlCoSignature` and silently
+  degrading every co-sign verdict to the conservative
+  `'self-only'` fallback.
+
+- **`KNOWN_CMDLETS` set (≈200 entries) and
+  `KNOWN_CMDLETS_LOWER` derived set.** Comprehensive default
+  whitelist for `PSA2010`. The set is module-organised in source
+  comments for maintainability; consumers add to it via the new
+  config field rather than editing the analyzer source.
+
+### Changed
+
+- **Rule registry now contains 45 rules** (was 43 in 3.8.0). The
+  net change is two additions (`PSA2010`, `PSA2011`); no existing
+  rules were removed or renamed. `Get-Command rules` and
+  `--list-rules` both reflect the 45-rule catalog. `--self-check`
+  exits 0 against the matching SPEC.md.
+
+- **`.psa.config.json` schema gains `psa2010_known_cmdlets`** as
+  an optional list-of-strings field. `--config-check` validates
+  the field's type and rejects non-list values with exit 2.
+
+### Documentation
+
+- **`SPEC.md` §4.9d, §4.9e** (new sections): detailed
+  specification for `PSA2010` and `PSA2011` including detection
+  algorithm, motivation, suggested fix, inline suppression syntax,
+  and differences from related rules (`PSA2001`, `PSA3005`,
+  `PSA8001`).
+- **`SPEC.md` Appendix A**: severity matrix extended with three
+  previously-missing rows (`PSA2009`, `PSA7002`) and two new rows
+  (`PSA2010`, `PSA2011`). Total now 45 entries matching the
+  runtime `RULES` registry.
+- **`README.md` / `README.ja.md`**: rule count text bumped from
+  43 → 45 across the rule table and the introductory blurb.
+
+### Testing
+
+- **`test_psa_rules.py`**: new Section 2b adds 13 `PSA2010`
+  cross-file test cases (positive: `Find-Signtool` typo,
+  undefined helper; negative: `Find-KitTool` defined locally,
+  `Get-Content` in cmdlet whitelist, `Get-PnpDevice` from
+  PnpDevice module, external binary without hyphen, .NET class
+  method call, third-party cmdlet via `psa2010_known_cmdlets`,
+  function name appearing only in string literal or comment, bare
+  verb-only token, parameter-like `-Verbose`, cross-file union
+  satisfying same-file definition).
+- **`test_psa_rules.py`**: new in Section 1, 10 `PSA2011`
+  test cases (positive: classic form, reversed switch order,
+  backtick continuation; negative: `-Path` with `-Parent` only,
+  `-LiteralPath` with `-Leaf`, positional path, .NET
+  `GetDirectoryName`, mention in a comment, mention in a
+  here-string; inline suppression).
+
+### Compatibility
+
+- **Backward compatible.** No existing rule behaviour, severity,
+  default-enabled flag, message format, output schema, exit code,
+  or config schema key was changed. Consumers on `psa.py` 3.8.0
+  can upgrade to 3.9.0 without code changes; the new rules will
+  fire on any pre-existing `Find-Signtool`-style typos or
+  `Split-Path -LiteralPath -Parent` calls, both of which are
+  latent defects that should be fixed regardless.
+
+---
+
 ## [3.8.0] — 2026-05-23 — `pscustomobject-sealed-object-detection`
 
 ### Added

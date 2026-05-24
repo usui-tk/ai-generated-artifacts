@@ -205,6 +205,8 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA2007** | Warning | ✅ 有効 | パラメータ名が PowerShell 自動変数と衝突 (3.6.0 新規) |
 | **PSA2008** | Info | ✅ 有効 | `$Script:Foo++` / `+=` / `-=` の前に初期化がない (3.6.0 新規) |
 | **PSA2009** | Warning | ✅ 有効 | `[pscustomobject]@{...}` のイニシャライザで宣言されていないプロパティを `.` 代入している (3.8.0 新規) — PowerShell 5.1 のシール済みオブジェクト実行時例外 (`"<PropName>" の設定中に例外が発生しました: "このオブジェクトにプロパティ '<PropName>' が見つかりません。"`) を静的解析で検出 |
+| **PSA2010** | Error | ✅ 有効 | スキャン対象のいずれのファイルにも定義されていない関数呼び出しを検出 (3.9.0 新規) — `Find-Signtool` (正しくは `Find-KitTool 'signtool.exe'`) のような typo を捕捉。 `.psa.config.json` の `psa2010_known_cmdlets` で組み込み cmdlet 一覧を拡張可能 |
+| **PSA2011** | Error | ✅ 有効 | `Split-Path -LiteralPath ... -Parent` が Windows PowerShell 5.1 ja-JP で `AmbiguousParameterSet` を発生させるパターンを検出 (3.9.0 新規) — `[System.IO.Path]::GetDirectoryName($path)` または `Split-Path -Path $path -Parent` に修正 |
 
 `PSA3xxx` — コーディングパターン（Warning）
 

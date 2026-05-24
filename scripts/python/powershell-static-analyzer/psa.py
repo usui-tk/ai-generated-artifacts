@@ -21,6 +21,8 @@ Variable / scope (PSA2xxx):
   PSA2007  Param name shadows auto-variable ...... Warning   (new in v3.6.0)
   PSA2008  $Script:Foo++ without prior init ...... Info      (new in v3.6.0)
   PSA2009  PSCustomObject prop assigned w/o decl . Warning   (new in v3.8.0)
+  PSA2010  Call to undefined function ............ Error     (new in v3.9.0)
+  PSA2011  Split-Path -LiteralPath ... -Parent ... Error     (new in v3.9.0)
 
 Coding-pattern (PSA3xxx):
   PSA3001  Start-Process -ArgumentList ........... Warning
@@ -140,7 +142,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.8.0'
+__version__ = '3.9.0'
 
 
 def _verify_version_file_consistency():
@@ -250,6 +252,10 @@ RULES = [
      '$Script: variable mutated by ++/+=/-= without an initial assignment'),
     ('PSA2009', 'warning', True,
      'PSCustomObject property assigned without prior declaration'),
+    ('PSA2010', 'error',   True,
+     'Call to function not defined in any scanned file or known cmdlet whitelist'),
+    ('PSA2011', 'error',   True,
+     'Split-Path -LiteralPath ... -Parent triggers AmbiguousParameterSet on PS 5.1 ja-JP'),
 
     # Coding-pattern (PSA3xxx)
     ('PSA3001', 'warning', True,
@@ -366,6 +372,216 @@ APPROVED_VERBS = {
     # Other
     'use',
 }
+
+# ---------------------------------------------------------------------------
+# PowerShell built-in cmdlet whitelist (PSA2010 default known cmdlets)
+# ---------------------------------------------------------------------------
+# Comprehensive list of PowerShell 5.1+ cmdlets from default-shipped modules:
+#   Microsoft.PowerShell.Core / Management / Security / Utility / Diagnostics
+#   CimCmdlets, PKI, PnpDevice, Defender, BitLocker, NetTCPIP, NetAdapter,
+#   ScheduledTasks, SecureBoot, Storage, WindowsCapability, DISM,
+#   ConfigCI (WDAC), International (Get-WinHomeLocation), and Net*.
+#
+# Casing is preserved (PowerShell is case-insensitive but the convention is
+# Pascal-Case). The check_undefined_function_call lookup is case-insensitive
+# so 'get-childitem' matches 'Get-ChildItem'.
+#
+# Consumers can extend this set via .psa.config.json field
+#   "psa2010_known_cmdlets": ["MyModule\\Get-Foo", "Get-Bar"]
+# entries with a backslash prefix indicate the source module (informational).
+KNOWN_CMDLETS = {
+    # Microsoft.PowerShell.Core
+    'Add-History', 'Add-PSSnapin', 'Clear-History', 'Clear-Host',
+    'Connect-PSSession', 'Debug-Job', 'Disable-PSRemoting',
+    'Disable-PSSessionConfiguration', 'Enable-PSRemoting',
+    'Enable-PSSessionConfiguration', 'Enter-PSHostProcess',
+    'Enter-PSSession', 'Exit-PSHostProcess', 'Exit-PSSession',
+    'Export-Console', 'Export-ModuleMember', 'ForEach-Object',
+    'Get-Command', 'Get-Help', 'Get-History', 'Get-Job', 'Get-Module',
+    'Get-PSDrive', 'Get-PSHostProcessInfo', 'Get-PSProvider',
+    'Get-PSSession', 'Get-PSSessionCapability', 'Get-PSSessionConfiguration',
+    'Get-PSSnapin', 'Import-Module', 'Invoke-Command', 'Invoke-History',
+    'New-Module', 'New-ModuleManifest', 'New-PSDrive', 'New-PSRoleCapabilityFile',
+    'New-PSSession', 'New-PSSessionConfigurationFile', 'New-PSSessionOption',
+    'New-PSTransportOption', 'Out-Default', 'Out-Host', 'Out-Null',
+    'Receive-Job', 'Receive-PSSession', 'Register-ArgumentCompleter',
+    'Register-PSSessionConfiguration', 'Remove-Job', 'Remove-Module',
+    'Remove-PSDrive', 'Remove-PSSession', 'Remove-PSSnapin', 'Save-Help',
+    'Set-PSDebug', 'Set-PSSessionConfiguration', 'Set-StrictMode',
+    'Start-Job', 'Stop-Job', 'Test-ModuleManifest',
+    'Test-PSSessionConfigurationFile', 'Unregister-PSSessionConfiguration',
+    'Update-Help', 'Wait-Job', 'Where-Object',
+
+    # Microsoft.PowerShell.Management
+    'Add-Computer', 'Add-Content', 'Checkpoint-Computer', 'Clear-Content',
+    'Clear-EventLog', 'Clear-Item', 'Clear-ItemProperty', 'Clear-RecycleBin',
+    'Complete-Transaction', 'Convert-Path', 'Copy-Item', 'Copy-ItemProperty',
+    'Debug-Process', 'Disable-ComputerRestore', 'Enable-ComputerRestore',
+    'Get-ChildItem', 'Get-Clipboard', 'Get-ComputerInfo',
+    'Get-ComputerRestorePoint', 'Get-Content', 'Get-ControlPanelItem',
+    'Get-EventLog', 'Get-HotFix', 'Get-Item', 'Get-ItemProperty',
+    'Get-ItemPropertyValue', 'Get-Location', 'Get-Process', 'Get-Service',
+    'Get-TimeZone', 'Get-Transaction', 'Get-WmiObject', 'Invoke-Item',
+    'Invoke-WmiMethod', 'Join-Path', 'Limit-EventLog', 'Move-Item',
+    'Move-ItemProperty', 'New-EventLog', 'New-Item', 'New-ItemProperty',
+    'New-Service', 'New-WebServiceProxy', 'Pop-Location', 'Push-Location',
+    'Read-EventLog', 'Register-WmiEvent', 'Remove-Computer',
+    'Remove-EventLog', 'Remove-Item', 'Remove-ItemProperty',
+    'Remove-WmiObject', 'Rename-Computer', 'Rename-Item',
+    'Rename-ItemProperty', 'Reset-ComputerMachinePassword', 'Resolve-Path',
+    'Restart-Computer', 'Restart-Service', 'Restore-Computer',
+    'Resume-Service', 'Set-Clipboard', 'Set-Content', 'Set-Item',
+    'Set-ItemProperty', 'Set-Location', 'Set-Service', 'Set-TimeZone',
+    'Set-WmiInstance', 'Show-ControlPanelItem', 'Show-EventLog',
+    'Split-Path', 'Start-Process', 'Start-Service', 'Start-Transaction',
+    'Stop-Computer', 'Stop-Process', 'Stop-Service', 'Suspend-Service',
+    'Test-ComputerSecureChannel', 'Test-Connection', 'Test-Path',
+    'Undo-Transaction', 'Unregister-Event', 'Update-List', 'Use-Transaction',
+    'Wait-Process', 'Write-EventLog',
+
+    # Microsoft.PowerShell.Security
+    'ConvertFrom-SecureString', 'ConvertTo-SecureString', 'Get-Acl',
+    'Get-AuthenticodeSignature', 'Get-CmsMessage', 'Get-Credential',
+    'Get-ExecutionPolicy', 'Get-PfxCertificate', 'New-FileCatalog',
+    'Protect-CmsMessage', 'Set-Acl', 'Set-AuthenticodeSignature',
+    'Set-ExecutionPolicy', 'Test-FileCatalog', 'Unprotect-CmsMessage',
+
+    # Microsoft.PowerShell.Utility
+    'Add-Member', 'Add-Type', 'Clear-Variable', 'Compare-Object',
+    'ConvertFrom-Csv', 'ConvertFrom-Json', 'ConvertFrom-Markdown',
+    'ConvertFrom-String', 'ConvertFrom-StringData', 'ConvertTo-Csv',
+    'ConvertTo-Html', 'ConvertTo-Json', 'ConvertTo-Xml', 'Debug-Runspace',
+    'Disable-PSBreakpoint', 'Disable-RunspaceDebug', 'Enable-PSBreakpoint',
+    'Enable-RunspaceDebug', 'Export-Alias', 'Export-Clixml', 'Export-Csv',
+    'Export-FormatData', 'Export-PSSession', 'Format-Custom', 'Format-Hex',
+    'Format-List', 'Format-Table', 'Format-Wide', 'Get-Alias', 'Get-Culture',
+    'Get-Date', 'Get-Error', 'Get-Event', 'Get-EventSubscriber',
+    'Get-FileHash', 'Get-FormatData', 'Get-Host', 'Get-Member',
+    'Get-PSBreakpoint', 'Get-PSCallStack', 'Get-Random', 'Get-Runspace',
+    'Get-RunspaceDebug', 'Get-TraceSource', 'Get-TypeData', 'Get-UICulture',
+    'Get-Unique', 'Get-Uptime', 'Get-Variable', 'Group-Object',
+    'Import-Alias', 'Import-Clixml', 'Import-Csv', 'Import-LocalizedData',
+    'Import-PowerShellDataFile', 'Import-PSSession', 'Invoke-Expression',
+    'Invoke-RestMethod', 'Invoke-WebRequest', 'Measure-Command',
+    'Measure-Object', 'New-Alias', 'New-Event', 'New-Guid', 'New-Object',
+    'New-PSBreakpoint', 'New-TemporaryFile', 'New-TimeSpan', 'New-Variable',
+    'Out-File', 'Out-GridView', 'Out-Printer', 'Out-String', 'Read-Host',
+    'Register-EngineEvent', 'Register-ObjectEvent', 'Remove-Alias',
+    'Remove-Event', 'Remove-PSBreakpoint', 'Remove-TypeData',
+    'Remove-Variable', 'Select-Object', 'Select-String', 'Select-Xml',
+    'Send-MailMessage', 'Set-Alias', 'Set-Date', 'Set-PSBreakpoint',
+    'Set-TraceSource', 'Set-Variable', 'Show-Command', 'Show-Markdown',
+    'Sort-Object', 'Start-Sleep', 'Start-Transcript', 'Stop-Transcript',
+    'Tee-Object', 'Test-Json', 'Trace-Command', 'Unblock-File',
+    'Update-FormatData', 'Update-TypeData', 'Wait-Debugger', 'Wait-Event',
+    'Write-Debug', 'Write-Error', 'Write-Host', 'Write-Information',
+    'Write-Output', 'Write-Progress', 'Write-Verbose', 'Write-Warning',
+
+    # Microsoft.PowerShell.Diagnostics
+    'Get-Counter', 'Get-WinEvent', 'Import-Counter', 'New-WinEvent',
+
+    # CimCmdlets
+    'Export-BinaryMiLog', 'Get-CimAssociatedInstance', 'Get-CimClass',
+    'Get-CimInstance', 'Get-CimSession', 'Import-BinaryMiLog',
+    'Invoke-CimMethod', 'New-CimInstance', 'New-CimSession',
+    'New-CimSessionOption', 'Register-CimIndicationEvent',
+    'Remove-CimInstance', 'Remove-CimSession', 'Set-CimInstance',
+
+    # PKI
+    'Add-CertificateEnrollmentPolicyServer', 'Export-Certificate',
+    'Export-PfxCertificate', 'Get-Certificate',
+    'Get-CertificateAutoEnrollmentPolicy',
+    'Get-CertificateEnrollmentPolicyServer',
+    'Get-CertificateNotificationTask', 'Get-PfxData', 'Import-Certificate',
+    'Import-PfxCertificate', 'New-CertificateNotificationTask',
+    'New-SelfSignedCertificate', 'Remove-CertificateEnrollmentPolicyServer',
+    'Remove-CertificateNotificationTask',
+    'Set-CertificateAutoEnrollmentPolicy', 'Switch-Certificate',
+    'Test-Certificate',
+
+    # PnpDevice
+    'Disable-PnpDevice', 'Enable-PnpDevice', 'Get-PnpDevice',
+    'Get-PnpDeviceProperty', 'Restart-PnpDevice',
+
+    # Defender
+    'Add-MpPreference', 'Get-MpComputerStatus', 'Get-MpPreference',
+    'Get-MpThreat', 'Get-MpThreatCatalog', 'Get-MpThreatDetection',
+    'Remove-MpPreference', 'Remove-MpThreat', 'Set-MpPreference',
+    'Start-MpScan', 'Start-MpWDOScan', 'Update-MpSignature',
+
+    # BitLocker
+    'Add-BitLockerKeyProtector', 'Backup-BitLockerKeyProtector',
+    'Clear-BitLockerAutoUnlock', 'Disable-BitLocker',
+    'Disable-BitLockerAutoUnlock', 'Enable-BitLocker',
+    'Enable-BitLockerAutoUnlock', 'Get-BitLockerVolume', 'Lock-BitLocker',
+    'Remove-BitLockerKeyProtector', 'Resume-BitLocker', 'Suspend-BitLocker',
+    'Unlock-BitLocker',
+
+    # NetTCPIP / NetAdapter (subset)
+    'Find-NetIPsecRule', 'Find-NetRoute', 'Get-NetAdapter',
+    'Get-NetAdapterAdvancedProperty', 'Get-NetAdapterBinding',
+    'Get-NetCompartment', 'Get-NetConnectionProfile', 'Get-NetFirewallProfile',
+    'Get-NetFirewallRule', 'Get-NetIPAddress', 'Get-NetIPConfiguration',
+    'Get-NetIPInterface', 'Get-NetNeighbor', 'Get-NetPrefixPolicy',
+    'Get-NetRoute', 'Get-NetTCPConnection', 'Get-NetTCPSetting',
+    'Get-NetTransportFilter', 'Get-NetUDPEndpoint', 'Get-NetUDPSetting',
+    'Disable-NetAdapter', 'Enable-NetAdapter', 'New-NetFirewallRule',
+    'New-NetIPAddress', 'New-NetNeighbor', 'New-NetRoute',
+    'New-NetTransportFilter', 'Remove-NetIPAddress', 'Remove-NetNeighbor',
+    'Remove-NetRoute', 'Remove-NetTransportFilter', 'Set-NetConnectionProfile',
+    'Set-NetIPAddress', 'Set-NetIPInterface', 'Set-NetNeighbor',
+    'Set-NetRoute', 'Set-NetTCPSetting', 'Set-NetUDPSetting',
+    'Test-NetConnection',
+
+    # SecureBoot
+    'Confirm-SecureBootUEFI', 'Format-SecureBootUEFI', 'Get-SecureBootPolicy',
+    'Get-SecureBootUEFI', 'Set-SecureBootUEFI',
+
+    # ScheduledTasks
+    'Disable-ScheduledTask', 'Enable-ScheduledTask', 'Export-ScheduledTask',
+    'Get-ClusteredScheduledTask', 'Get-ScheduledTask',
+    'Get-ScheduledTaskInfo', 'New-ScheduledTask', 'New-ScheduledTaskAction',
+    'New-ScheduledTaskPrincipal', 'New-ScheduledTaskSettingsSet',
+    'New-ScheduledTaskTrigger', 'Register-ClusteredScheduledTask',
+    'Register-ScheduledTask', 'Set-ClusteredScheduledTask',
+    'Set-ScheduledTask', 'Start-ScheduledTask', 'Stop-ScheduledTask',
+    'Unregister-ScheduledTask',
+
+    # Storage (subset)
+    'Get-Disk', 'Get-Partition', 'Get-Volume', 'Get-StorageReliabilityCounter',
+
+    # Archive
+    'Compress-Archive', 'Expand-Archive',
+
+    # WindowsCapability / DISM-related
+    'Add-WindowsCapability', 'Get-WindowsCapability',
+    'Remove-WindowsCapability', 'Add-WindowsPackage',
+    'Get-WindowsOptionalFeature', 'Enable-WindowsOptionalFeature',
+    'Disable-WindowsOptionalFeature',
+
+    # ConfigCI (WDAC)
+    'Add-SignerRule', 'ConvertFrom-CIPolicy', 'Edit-CIPolicyRule',
+    'Get-CIPolicy', 'Get-CIPolicyIdInfo', 'Get-CIPolicyInfo',
+    'Get-SystemDriver', 'Merge-CIPolicy', 'New-CIPolicy', 'New-CIPolicyRule',
+    'Remove-CIPolicyRule', 'Set-CIPolicyIdInfo', 'Set-CIPolicySetting',
+    'Set-CIPolicyVersion', 'Set-HVCIOptions', 'Set-RuleOption',
+
+    # International (Get-WinHomeLocation)
+    'Get-WinAcceptLanguageFromLanguageListOptOut',
+    'Get-WinCultureFromLanguageListOptOut',
+    'Get-WinDefaultInputMethodOverride', 'Get-WinHomeLocation',
+    'Get-WinLanguageBarOption', 'Get-WinSystemLocale',
+    'Get-WinUILanguageOverride', 'Get-WinUserLanguageList',
+    'Set-WinHomeLocation', 'Set-WinSystemLocale', 'Set-WinUserLanguageList',
+
+    # Misc (Microsoft.WSMan.Management, PSReadLine, etc.)
+    'Connect-WSMan', 'Disconnect-WSMan', 'Disable-WSManCredSSP',
+    'Enable-WSManCredSSP', 'Get-WSManCredSSP', 'Get-WSManInstance',
+    'Invoke-WSManAction', 'New-WSManInstance', 'New-WSManSessionOption',
+    'Remove-WSManInstance', 'Set-WSManInstance', 'Set-WSManQuickConfig',
+    'Test-WSMan',
+}
+KNOWN_CMDLETS_LOWER = {n.lower() for n in KNOWN_CMDLETS}
 
 # Common cmdlet aliases (subset of Get-Alias output)
 CMDLET_ALIASES = {
@@ -2044,6 +2260,238 @@ def check_pscustomobject_undeclared(clean):
 
 
 # ---------------------------------------------------------------------------
+# PSA2010 — Call to undefined function (added in v3.9.0)
+# ---------------------------------------------------------------------------
+
+
+def check_undefined_function_call(clean, defined_funcs_lower, known_cmdlets_lower):
+    """PSA2010: Invocation of a function name that has no definition.
+
+    New in v3.9.0. PSScriptAnalyzer does not have a direct equivalent.
+
+    Motivation
+    ----------
+    A typo such as ``Find-Signtool`` (when the correct helper is
+    ``Find-KitTool``) raises ``CommandNotFoundException`` only at the
+    moment the call is executed -- which, in a long-lived pipeline
+    script, can be deep inside a phase that runs only on certain
+    hosts (e.g., ``Test-WhqlCoSignature`` invoked from P05). The
+    failure was the proximate trigger of the 2026-05-24 r74 release
+    cycle's WHQL classification bug (silent degradation to
+    conservative ``'self-only'`` for every ``.sys`` file across r71
+    through r73). A static-analysis rule that walks the AST and
+    flags any function call whose target has no definition in the
+    file would have surfaced that typo at commit time.
+
+    Detection
+    ---------
+    1. Scan the cleaned text (strings and comments already stripped) for
+       call sites that follow the PowerShell Verb-Noun convention:
+       ``<Verb>-<Noun>``. The verb segment must be at least 2 characters
+       starting with an uppercase letter; the noun segment must start
+       with an uppercase letter and may contain alphanumerics,
+       underscores, and additional hyphens (to match compound nouns
+       like ``Get-AuthenticodeSignature`` and namespaced helpers like
+       ``Invoke-PrepPhase00_Initialize``).
+    2. The call site must appear in a command-position context: at the
+       start of a line, after a pipeline ``|``, after a semicolon ``;``,
+       after ``&`` (invocation operator), after an opening ``(`` or
+       ``{``, or after an ``=`` (assignment-then-expression). This
+       avoids false-positives where the same string appears as a
+       parameter argument value or inside a property access.
+    3. The verb segment (lowercased) must be in ``APPROVED_VERBS``.
+       This filters out cosmetic dashes in non-call tokens such as
+       module-version strings or hostnames that happen to contain
+       capital letters and a dash.
+    4. If all of the above hold AND the call name is not in
+       ``defined_funcs_lower`` (functions defined in any scanned file)
+       AND not in ``known_cmdlets_lower`` (the ``KNOWN_CMDLETS`` set
+       union the user's ``psa2010_known_cmdlets`` extension), fire
+       PSA2010 with severity ``error``.
+
+    Notes
+    -----
+    - The check is cross-file. The caller is expected to build
+      ``defined_funcs_lower`` by union-ing the ``function <Name>``
+      declarations across all files in the scan. For a single-file
+      run, only that file's definitions are available; cross-file
+      helpers will be missing and may produce false positives,
+      mitigated by ``psa2010_known_cmdlets`` extensions.
+    - External executables invoked via ``& $exe`` or ``pnputil
+      /enum-drivers`` do not follow Verb-Noun syntax and are never
+      flagged.
+    - Class-method calls such as
+      ``[System.IO.Path]::GetDirectoryName($p)`` do not match the
+      Verb-Noun regex (no hyphen between ``GetDirectoryName``).
+    - The historically defective call ``Find-Signtool`` in
+      ``Test-WhqlCoSignature`` is the canonical positive case for
+      this rule.
+    """
+    if not defined_funcs_lower:
+        defined_funcs_lower = set()
+    if not known_cmdlets_lower:
+        known_cmdlets_lower = set()
+
+    out = []
+
+    # Pattern: optional leading boundary chars, then Verb-Noun call site.
+    # We allow the verb to be ANY mixed-case identifier starting with an
+    # uppercase letter (so 'Convert' and 'ConvertFrom' both match). The
+    # noun part may contain further hyphens, underscores, alphanumerics,
+    # to support compound nouns like 'AuthenticodeSignature' or
+    # 'PrepPhase00_Initialize'. The full match is the dotted name.
+    #
+    # Command-position prefix recognised:
+    #   start-of-line  - implicit via (?:^|...) below
+    #   ;              - statement separator
+    #   |              - pipeline
+    #   &              - invocation operator
+    #   (              - opening paren (expression context)
+    #   {              - opening brace (block context)
+    #   =              - assignment-then-expression
+    #   `              - line continuation (rare)
+    #
+    # Followed by optional whitespace, then the function name. The end
+    # boundary requires either whitespace, end-of-line, semicolon,
+    # pipe, opening paren, or backtick — to avoid matching inside
+    # version-like substrings like 'chipset-2026.05.25-r75'.
+    pat = re.compile(
+        r'(?:(?<=^)|(?<=[\s;|&({=`]))'                # command position
+        r'(?P<name>[A-Z][A-Za-z]+-[A-Z][A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*)'
+        r'(?=$|[\s;|()`])'                            # end boundary
+    , re.MULTILINE)
+
+    lines = clean.split('\n')
+    for line_no, line in enumerate(lines, 1):
+        for m in pat.finditer(line):
+            name = m.group('name')
+            verb = name.split('-', 1)[0].lower()
+            if verb not in APPROVED_VERBS:
+                continue
+            name_lower = name.lower()
+            if name_lower in defined_funcs_lower:
+                continue
+            if name_lower in known_cmdlets_lower:
+                continue
+            out.append({
+                'code': 'PSA2010',
+                'severity': 'error',
+                'line': line_no,
+                'col': m.start() + 1,
+                'message': (
+                    f'Call to undefined function "{name}". '
+                    f'It is not defined in any scanned file and is '
+                    f'not in the known cmdlet list. Possible typo, '
+                    f'missing module import, or missing helper '
+                    f'definition. Add to psa2010_known_cmdlets in '
+                    f'.psa.config.json if this is a third-party '
+                    f'module cmdlet.'),
+            })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# PSA2011 — Split-Path -LiteralPath ... -Parent (added in v3.9.0)
+# ---------------------------------------------------------------------------
+
+
+def check_split_path_literalpath_parent(clean):
+    """PSA2011: Split-Path -LiteralPath ... -Parent on PS 5.1 ja-JP.
+
+    New in v3.9.0. PSScriptAnalyzer does not have a direct equivalent.
+
+    Motivation
+    ----------
+    The combination of ``-LiteralPath`` and ``-Parent`` switches on the
+    ``Split-Path`` cmdlet triggers an ``AmbiguousParameterSet`` runtime
+    exception on Windows PowerShell 5.1 ja-JP. The two switches live
+    in incompatible parameter sets in the ja-JP help table; PS 5.1
+    cannot resolve which set the operator intended and raises:
+
+        指定された名前のパラメーターを使用してパラメーター セットを解決できません。
+        FullyQualifiedErrorId: AmbiguousParameterSet,
+            Microsoft.PowerShell.Commands.SplitPathCommand
+
+    This is the same family of bug as the ``Start-Transcript -Path``
+    vs ``-LiteralPath`` issue tracked by PSA3005, but at runtime
+    rather than at file-creation time. The defect surfaced during
+    the 2026-05-24 r74 bench cycle in
+    ``Get-InfDriverFileList``, silently degrading WHQL co-sign
+    analysis for every patched INF.
+
+    Detection
+    ---------
+    Find every ``Split-Path`` invocation on the cleaned text. Within
+    a command span (one logical statement, possibly continued by a
+    backtick), if BOTH ``-LiteralPath`` and ``-Parent`` switches
+    appear, fire PSA2011 with severity ``error``.
+
+    Single-line statements are the common case and are handled by a
+    simple per-line regex. Multi-line statements joined by
+    backtick-newline are joined before scanning. Backtick
+    continuations are detected via the same heuristic used by
+    PSA3002 (line ending in a single backtick).
+
+    Suggested fix
+    -------------
+    Use ``[System.IO.Path]::GetDirectoryName($path)`` for parent-
+    directory extraction. The .NET method has no PS-binder ambiguity
+    and works identically across PS 5.1 / 7.x. Alternatively,
+    ``Split-Path -Path $path -Parent`` (positional ``-Path`` or
+    explicit) works around the bug.
+
+    Inline suppression
+    ------------------
+    ``# psa-disable-line PSA2011 -- <reason>`` on the offending line.
+    """
+    out = []
+
+    # Join backtick-continued lines so a multi-line Split-Path call is
+    # analysed as a single span. Track the original line number of the
+    # FIRST source line that contributed to the joined span.
+    lines = clean.split('\n')
+    spans = []  # list of (line_no, joined_text)
+    i = 0
+    while i < len(lines):
+        cur_line_no = i + 1
+        buf = lines[i]
+        # Backtick continuation: trailing backtick (no whitespace after) on
+        # the cleaned text means the next line is a continuation.
+        while buf.rstrip().endswith('`') and (i + 1) < len(lines):
+            buf = buf.rstrip()[:-1] + ' ' + lines[i + 1]
+            i += 1
+        spans.append((cur_line_no, buf))
+        i += 1
+
+    # Pattern that matches a Split-Path invocation in command position.
+    # Capture the rest of the line so we can look for both switches.
+    sp_pat = re.compile(
+        r'(?:(?<=^)|(?<=[\s;|&({=`]))\bSplit-Path\b(?P<args>[^\r\n]*)',
+        re.IGNORECASE | re.MULTILINE)
+    lit_pat = re.compile(r'(?<![\w-])-LiteralPath\b', re.IGNORECASE)
+    par_pat = re.compile(r'(?<![\w-])-Parent\b', re.IGNORECASE)
+
+    for line_no, span_text in spans:
+        for m in sp_pat.finditer(span_text):
+            args = m.group('args')
+            if lit_pat.search(args) and par_pat.search(args):
+                out.append({
+                    'code': 'PSA2011',
+                    'severity': 'error',
+                    'line': line_no,
+                    'col': m.start() + 1,
+                    'message': (
+                        'Split-Path -LiteralPath ... -Parent triggers '
+                        'AmbiguousParameterSet on PowerShell 5.1 ja-JP. '
+                        'Use [System.IO.Path]::GetDirectoryName($path) '
+                        'or Split-Path -Path $path -Parent (without '
+                        '-LiteralPath) instead.'),
+                })
+    return out
+
+
+
+# ---------------------------------------------------------------------------
 # File format / encoding checks (PSA7xxx)
 # ---------------------------------------------------------------------------
 # These rules operate on file-level metadata rather than on the decoded text
@@ -3157,12 +3605,14 @@ _CONFIG_ALLOWED_KEYS = frozenset({
     'max_line_length',
     'max_function_lines',
     'psa8001_ignore_functions',
+    'psa2010_known_cmdlets',
 })
 
 _CONFIG_LIST_OF_STR_KEYS = frozenset({
     'enable',
     'disable',
     'psa8001_ignore_functions',
+    'psa2010_known_cmdlets',
 })
 
 _CONFIG_INT_KEYS = frozenset({
@@ -3489,6 +3939,19 @@ class Config:
         #       ["regex:^Invoke-(Prep|Verify|Inst)Phase\\d{2}_"]
         # All forms are case-insensitive.
         self.psa8001_ignore_functions = []
+        # PSA2010 extension list. The default KNOWN_CMDLETS set covers
+        # PowerShell 5.1+ built-in modules; consumers that import third-
+        # party modules (or define helper functions across multiple
+        # repos that are NOT in the scan set) can extend the known
+        # cmdlet list via .psa.config.json:
+        #   "psa2010_known_cmdlets": ["Get-MyModuleFoo", "Set-MyModuleBar"]
+        # Names are matched case-insensitively. The default set already
+        # covers Microsoft.PowerShell.Core / Management / Security /
+        # Utility / Diagnostics, CimCmdlets, PKI, PnpDevice, Defender,
+        # BitLocker, NetTCPIP / NetAdapter, SecureBoot, ScheduledTasks,
+        # Storage, Archive, WindowsCapability, ConfigCI (WDAC),
+        # International, and WSMan.
+        self.psa2010_known_cmdlets = []
         self.min_severity = 'info'
         self.format = 'text'
         self.no_color = False
@@ -3540,6 +4003,15 @@ class Config:
                     c.psa8001_ignore_functions = [str(x) for x in v]
                 else:
                     print(f'psa.py: psa8001_ignore_functions must be a '
+                          f'list (got {type(v).__name__})',
+                          file=sys.stderr)
+                    raise SystemExit(2)
+            if 'psa2010_known_cmdlets' in data:
+                v = data['psa2010_known_cmdlets']
+                if isinstance(v, list):
+                    c.psa2010_known_cmdlets = [str(x) for x in v]
+                else:
+                    print(f'psa.py: psa2010_known_cmdlets must be a '
                           f'list (got {type(v).__name__})',
                           file=sys.stderr)
                     raise SystemExit(2)
@@ -3619,6 +4091,12 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_script_var_mutation(clean)
     if cfg.enabled['PSA2009']:
         raw += check_pscustomobject_undeclared(clean)
+    # PSA2010 (call to undefined function) requires cross-file context
+    # (union of function definitions across the entire scan set) and is
+    # therefore dispatched in main() AFTER per-file analyses complete,
+    # next to PSA8001 (which has the same cross-file requirement).
+    if cfg.enabled['PSA2011']:
+        raw += check_split_path_literalpath_parent(clean)
 
     if cfg.enabled['PSA3001']:
         raw += check_argumentlist(clean)
@@ -4212,7 +4690,11 @@ def main(argv=None):
     total_err = total_warn = 0
     # For PSA8001 cross-file consistency: collect per-file function bodies
     # so they can be compared after all files have been parsed.
+    # For PSA2010 cross-file consistency: collect the UNION of function
+    # definitions across all scanned files so we can decide which call
+    # sites have no definition anywhere.
     per_file_fns = {}
+    all_defined_funcs_lower = set()
     for path in files:
         try:
             raw_bytes = path.read_bytes()
@@ -4241,6 +4723,14 @@ def main(argv=None):
         if cfg.enabled.get('PSA8001'):
             clean = strip_strings_and_comments(text)
             per_file_fns[path] = collect_function_bodies(clean)
+        # Collect function-name definitions for cross-file PSA2010
+        # analysis (regardless of whether PSA8001 is enabled).
+        if cfg.enabled.get('PSA2010'):
+            clean2 = strip_strings_and_comments(text)
+            for m in re.finditer(
+                    r'^\s*function\s+([A-Za-z][\w-]*)',
+                    clean2, re.MULTILINE):
+                all_defined_funcs_lower.add(m.group(1).lower())
         total_err += sum(1 for i in issues if i['severity'] == 'error')
         total_warn += sum(1 for i in issues if i['severity'] == 'warning')
 
@@ -4266,6 +4756,44 @@ def main(argv=None):
             ]
             new = [i for i in new
                    if SEVERITY_ORDER[i['severity']] >= min_rank]
+            merged = existing + new
+            merged.sort(key=lambda x: (x['line'], x['col'], x['code']))
+            per_file[idx] = (path, text, merged)
+            total_err += sum(1 for i in new if i['severity'] == 'error')
+            total_warn += sum(1 for i in new if i['severity'] == 'warning')
+
+    # PSA2010 (cross-file call to undefined function). Works on any
+    # scan size including single-file, since the comparison is
+    # against the KNOWN_CMDLETS whitelist union the user's
+    # psa2010_known_cmdlets extension. With 2+ files the
+    # all_defined_funcs_lower set unions every script's locally
+    # defined helpers so cross-script sister calls do not fire.
+    if cfg.enabled.get('PSA2010'):
+        # Build the known-cmdlet lookup once.
+        known_lower = set(KNOWN_CMDLETS_LOWER)
+        for name in cfg.psa2010_known_cmdlets:
+            # Allow optional 'Module\Name' prefix for documentation;
+            # strip everything up to and including the backslash.
+            if '\\' in name:
+                name = name.rsplit('\\', 1)[-1]
+            known_lower.add(name.lower())
+        min_rank = SEVERITY_ORDER.get(cfg.min_severity, 1)
+        for idx, (path, text, existing) in enumerate(per_file):
+            clean = strip_strings_and_comments(text)
+            new = check_undefined_function_call(
+                clean, all_defined_funcs_lower, known_lower)
+            if not new:
+                continue
+            file_supp, line_supp = collect_suppressions(text)
+            new = [
+                i for i in new
+                if i['code'] not in file_supp
+                and i['code'] not in line_supp.get(i['line'], set())
+            ]
+            new = [i for i in new
+                   if SEVERITY_ORDER[i['severity']] >= min_rank]
+            if not new:
+                continue
             merged = existing + new
             merged.sort(key=lambda x: (x['line'], x['col'], x['code']))
             per_file[idx] = (path, text, merged)
