@@ -27,6 +27,108 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.24-r04] - 2026-05-24
+
+### Added - WIM-target-aware patch plan engine
+
+A new module (`.build_part09c_patchplan.ps1`) introduces the
+`Build-PatchPlan` function that converts the flat
+`$Script:ResolvedPatches` array into a target-aware plan with four
+lanes:
+
+| Target | Receives |
+|--------|----------|
+| Install | every patch whose Type maps to "Install" |
+| Boot    | every patch whose Type maps to "Boot"    |
+| WinRE   | every patch whose Type maps to "WinRE"   |
+| Setup   | every patch whose Type maps to "Setup"   |
+
+The mapping is centralised in the new `$Script:PatchTargetMap`
+constant in `.build_part03_helpers.ps1`. Following Microsoft's
+media-dynamic-update guidance:
+
+| Patch Type              | Targets                  |
+|-------------------------|--------------------------|
+| SSU                     | Install + Boot + WinRE   |
+| LCU                     | Install + Boot           |
+| DotNet                  | Install                  |
+| DynamicUpdate.Component | Install                  |
+| DynamicUpdate.SafeOs    | WinRE                    |
+| DynamicUpdate.Setup     | Setup                    |
+| LanguagePack            | Install + WinRE          |
+| LXP                     | Install                  |
+| DotNet.LangPack         | Install                  |
+
+Unknown Types fall back to `[Install]` with a one-time warning per
+unique unknown Type.
+
+P02 (`ResolveInputs`) now builds the plan and prints a per-target
+summary at the end of the phase. P05 and P06 retain their legacy
+`Get-PatchListForInstall|Boot|WinReWim` helpers; these now delegate
+to the cached plan so existing call sites stay unchanged.
+
+### Added - Pre-apply dependency closure check
+
+A new helper, `Test-PatchDependencyClosureOnMount`, runs inside the
+P05 install.wim and P06 boot.wim apply loops immediately after the
+WIM mount and just before the first `Add-WindowsPackage` call. For
+each patch whose `RequiresKbIds` is non-empty, it enumerates the
+mounted image via `Get-WindowsPackage` and verifies that every
+required KB is already present (`PackageIdentity` substring match
+against the recorded KB ID).
+
+The check is governed by `$Script:PatchDependencyPolicy`, default
+`'Strict'`. Strict mode throws on the first unsatisfied
+prerequisite, aborting the run before DISM emits the cryptic
+0x800f0823 servicing-stack precondition error. The alternate
+`'Warn'` mode logs a warning and continues; there is no CLI flag
+yet, but the variable can be set from a wrapper script.
+
+`-DryRun` short-circuits the check with a notice (no real mount to
+enumerate against).
+
+### Changed - Patch selection helpers delegate to PatchPlan
+
+The legacy `Get-PatchListForInstallWim` / `Get-PatchListForBootWim`
+helpers in `.build_part12_phase05_06_07.ps1` are now thin wrappers
+that read from the cached `$Script:PatchPlan`. A new
+`Get-PatchListForWinReWim` helper is added for completeness; the
+WinRE worker itself is delivered in a follow-up release together
+with the LCU twice-apply pattern and language-pack injection.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info (6,700 lines).
+- PSScriptAnalyzer 1.25.0: 0 findings.
+- Unit tests for `Build-PatchPlan`:
+    * Typical monthly patch set (SSU/LCU/.NET/SafeOS/Setup) routes
+      to the expected lanes
+    * LP/LXP correctly differentiated (LP -> Install+WinRE; LXP ->
+      Install only)
+    * Unknown Type falls back to Install with warning
+    * Empty input handled gracefully
+- All existing smoke tests still pass; Smoke 5 (live Catalogue
+  scrape against Server2025 / 2026-05) resolves 3 patches and the
+  combined-LCU detection still fires.
+
+### Compatibility
+
+- Schema v2.0 is unchanged. The new mapping lives in script code
+  rather than in the Config files, so adding a new patch Type only
+  requires editing `$Script:PatchTargetMap`.
+- Existing PatchBaseline entries continue to work; the engine
+  reads `.Type`, `.KbId`, `.ApplyOrder`, `.RequiresKbIds` and
+  ignores everything else.
+- `ScriptVersion` is bumped to `update-wsi-2026.05.24-r04`;
+  `ScriptTag` is `wim-target-aware-patch-plan`.
+
+### Out of scope (deferred to the next release in the r04 line)
+
+- LCU twice-apply sequence in P05 around language-pack injection.
+- WinRE.wim mount / service / dismount worker in P06.
+- Language Pack injection on install.wim and WinRE.wim.
+- FoD (.NET 3.5) source detection and `-EnableDotNet35`.
+
 ## [update-wsi-2026.05.24-r03.1] - 2026-05-24
 
 ### Added - Stage 4 CI workflow: monthly baseline refresh

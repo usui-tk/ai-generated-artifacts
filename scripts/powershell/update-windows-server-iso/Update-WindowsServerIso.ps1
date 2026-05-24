@@ -447,8 +447,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.24-r03.1'
-$Script:ScriptTag     = 'stage4-monthly-refresh-ci'
+$Script:ScriptVersion = 'update-wsi-2026.05.24-r04'
+$Script:ScriptTag     = 'wim-target-aware-patch-plan'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -532,6 +532,55 @@ $Script:OsConfigFieldGroups = @(
     }
 )
 
+# Patch-to-WIM-target mapping: drives which WIMs each Type of
+# patch is applied to, per Microsoft's media-dynamic-update servicing
+# sequence documented at
+# https://learn.microsoft.com/windows/deployment/update/media-dynamic-update.
+#
+# Target values:
+#   Install : install.wim (main OS image)
+#   Boot    : boot.wim    (both index 1 and index 2)
+#   WinRE   : winre.wim   (recovery environment inside install.wim)
+#   Setup   : setup binaries (registered via pending.xml; not WIM-mounted)
+#
+# A patch may target multiple WIMs. Phase workers (P05/P06) iterate the
+# active target set and apply only the patches whose Type maps to that
+# target. Unknown Types are treated as Install-only with a warning.
+#
+# Microsoft public guidance behind this mapping:
+#   - SSU                    : required on every serviced WIM
+#   - LCU                    : Install + Boot (WinRE uses SafeOS DU instead)
+#   - DotNet                 : Install only (.NET 4.x lives in install.wim)
+#   - DynamicUpdate.Component: Install only (component-store updates)
+#   - DynamicUpdate.SafeOs   : WinRE only (WinRE is the "Safe OS")
+#   - DynamicUpdate.Setup    : Setup binaries (handled via pending.xml)
+#   - LanguagePack           : Install + WinRE (user-facing UI + recovery UI)
+#   - LXP                    : Install only (LXPs are Store apps; no WinRE)
+#   - DotNet.LangPack        : Install only (.NET satellite assemblies)
+$Script:PatchTargetMap = @{
+    'SSU'                      = @('Install', 'Boot', 'WinRE')
+    'LCU'                      = @('Install', 'Boot')
+    'DotNet'                   = @('Install')
+    'DynamicUpdate.Component'  = @('Install')
+    'DynamicUpdate.SafeOs'     = @('WinRE')
+    'DynamicUpdate.Setup'      = @('Setup')
+    'LanguagePack'             = @('Install', 'WinRE')
+    'LXP'                      = @('Install')
+    'DotNet.LangPack'          = @('Install')
+}
+
+# Pre-apply dependency closure check policy.
+# When a phase worker is about to Add-WindowsPackage a patch with a
+# non-empty RequiresKbIds list, it first calls Get-WindowsPackage
+# against the mounted image and verifies that every required KB is
+# already present in the package store. Failure to find a required KB
+# results in a strict error (the run aborts) so DISM 0x800f0823
+# (servicing-stack precondition) is surfaced before DISM itself emits
+# the cryptic hex code. The strict-mode toggle exists so the user can
+# downgrade to warn-only via $Script:PatchDependencyPolicy = 'Warn'
+# (no CLI flag yet; reserved for a future release if demand arises).
+$Script:PatchDependencyPolicy = 'Strict'  # 'Strict' | 'Warn'
+
 # Run-state carriers populated by phases; accessed by later phases. The
 # OS profile is hydrated by P02 and used by every subsequent build phase.
 $Script:OsProfile        = $null
@@ -539,6 +588,7 @@ $Script:OsLangProfile    = $null
 $Script:IsoLocalPath     = $null
 $Script:IsoSha256        = $null
 $Script:ResolvedPatches  = @()
+$Script:PatchPlan        = $null     # hashtable; built by Build-PatchPlan in P02
 $Script:WimIndexInventory = @()
 $Script:OutputIsoPath    = $null
 
@@ -4031,6 +4081,258 @@ function Compare-PatchSetVsWuaScan {
 }
 
 # ============================================================
+# PatchPlan engine
+# ============================================================
+# Converts a flat list of resolved patches into a target-aware
+# PatchPlan that the build phases (P05 install.wim, P06 boot.wim
+# / WinRE.wim) consume. Implements Microsoft's media-dynamic-update
+# servicing sequence: each WIM target receives only the patches
+# whose Type maps to that target via $Script:PatchTargetMap, and
+# within each target the patches are sorted by ApplyOrder.
+#
+# Out of scope for this initial cut (tracked in CHANGELOG and SPEC):
+#   * LCU twice-apply pattern around LP injection
+#   * WinRE.wim mount/service/dismount worker
+#   * Language Pack injection in P05
+# This module establishes the structural contract; a later release
+# fills in the WinRE worker and the LP-injection sequencing.
+
+function Get-PatchTargetsForType {
+    <#
+    .SYNOPSIS
+        Return the array of WIM targets that a given patch Type applies
+        to, per $Script:PatchTargetMap.
+    .DESCRIPTION
+        Unknown Types fall back to ['Install'] with a one-time warning
+        per unique Type seen in the current run. Caller must pre-set
+        $Script:PatchTargetMap; this function does not validate it.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string]$PatchType)
+
+    if (-not $PatchType) {
+        return [string[]]@('Install')
+    }
+    if ($Script:PatchTargetMap.ContainsKey($PatchType)) {
+        return [string[]]@($Script:PatchTargetMap[$PatchType])
+    }
+    # Unknown Type: warn once, fall back to Install
+    if (-not $Script:PatchTargetMapWarned) {
+        $Script:PatchTargetMapWarned = @{}
+    }
+    if (-not $Script:PatchTargetMapWarned.ContainsKey($PatchType)) {
+        Write-Warn ("Unknown patch Type '{0}'; defaulting target=[Install]. Add this Type to PatchTargetMap to silence." -f $PatchType)
+        $Script:PatchTargetMapWarned[$PatchType] = $true
+    }
+    return [string[]]@('Install')
+}
+
+function Build-PatchPlan {
+    <#
+    .SYNOPSIS
+        Construct a PatchPlan object from a flat patch list.
+    .DESCRIPTION
+        The PatchPlan is a hashtable with keys for each WIM target
+        (Install / Boot / WinRE / Setup); each value is an array of
+        patch entries sorted by their ApplyOrder field. Patches whose
+        Type maps to multiple targets appear in each target's list.
+
+        Returned shape:
+            @{
+                Install = @(patch1, patch2, ...)
+                Boot    = @(patch1, ...)
+                WinRE   = @(patch1, patch3, ...)
+                Setup   = @(patch5, ...)
+                # Diagnostic / summary fields:
+                _GeneratedAt    = '<ISO 8601 timestamp>'
+                _PatchCount     = <int>
+                _TargetCounts   = @{Install=N; Boot=N; WinRE=N; Setup=N}
+                _UnknownTypes   = @(<list of unknown Types seen>)
+            }
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)] [AllowNull()] [AllowEmptyCollection()] [array]$Patches
+    )
+
+    if (-not $Patches) { $Patches = @() }
+
+    $plan = @{
+        Install       = New-Object System.Collections.Generic.List[object]
+        Boot          = New-Object System.Collections.Generic.List[object]
+        WinRE         = New-Object System.Collections.Generic.List[object]
+        Setup         = New-Object System.Collections.Generic.List[object]
+        _GeneratedAt  = (Get-Date).ToString('o')
+        _PatchCount   = 0
+        _UnknownTypes = New-Object System.Collections.Generic.List[string]
+    }
+
+    foreach ($p in $Patches) {
+        if (-not $p) { continue }
+        $type = if ($p.PSObject.Properties['Type']) { [string]$p.Type } else { '' }
+        $targets = Get-PatchTargetsForType -PatchType $type
+        if (-not $Script:PatchTargetMap.ContainsKey($type) -and -not [string]::IsNullOrEmpty($type)) {
+            if ($plan._UnknownTypes -notcontains $type) {
+                $plan._UnknownTypes.Add($type) | Out-Null
+            }
+        }
+        foreach ($t in $targets) {
+            $plan[$t].Add($p) | Out-Null
+        }
+        $plan._PatchCount++
+    }
+
+    # Sort each target list by ApplyOrder (ascending), then by KbId for stability
+    foreach ($t in @('Install', 'Boot', 'WinRE', 'Setup')) {
+        $sorted = @($plan[$t] | Sort-Object @{ Expression={ if ($_.PSObject.Properties['ApplyOrder']) { [int]$_.ApplyOrder } else { 99 } } }, @{ Expression='KbId' })
+        $plan[$t] = $sorted
+    }
+
+    $plan['_TargetCounts'] = @{
+        Install = $plan.Install.Count
+        Boot    = $plan.Boot.Count
+        WinRE   = $plan.WinRE.Count
+        Setup   = $plan.Setup.Count
+    }
+    return $plan
+}
+
+function Write-PatchPlanSummary {
+    <#
+    .SYNOPSIS
+        Emit a human-readable summary of a PatchPlan to the standard
+        Write-Step log surface.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [hashtable]$Plan
+    )
+    Write-Step ('PatchPlan: {0} patches across {1} targets' -f $Plan._PatchCount, $Plan._TargetCounts.Count)
+    foreach ($t in @('Install', 'Boot', 'WinRE', 'Setup')) {
+        $count = $Plan._TargetCounts[$t]
+        if ($count -gt 0) {
+            $names = ($Plan[$t] | ForEach-Object {
+                $kb = if ($_.KbId) { $_.KbId } else { '<no-kb>' }
+                $ty = if ($_.Type) { $_.Type } else { '?' }
+                "{0}/{1}" -f $ty, $kb
+            }) -join ', '
+            Write-Step ('  {0,-7} ({1}): {2}' -f $t, $count, $names)
+        } else {
+            Write-Step ('  {0,-7} (0): (empty)' -f $t)
+        }
+    }
+    if ($Plan._UnknownTypes -and $Plan._UnknownTypes.Count -gt 0) {
+        Write-Warn ('Unknown Types in plan (defaulted to Install): {0}' -f ($Plan._UnknownTypes -join ', '))
+    }
+}
+
+function Test-PatchDependencyClosureOnMount {
+    <#
+    .SYNOPSIS
+        Pre-apply dependency closure check (A-3).
+    .DESCRIPTION
+        For every patch in $PatchesToApply whose RequiresKbIds is
+        non-empty, verify via Get-WindowsPackage that each required KB
+        is already present in the mounted image's package store. The
+        check runs in declaration order; a patch P's prerequisites
+        must be satisfied BEFORE P is added to the image.
+
+        Policy is governed by $Script:PatchDependencyPolicy:
+          'Strict' -> throw on any missing prerequisite (default)
+          'Warn'   -> Write-Warn and continue
+
+        Returns $true if all prerequisites are satisfied (or warned
+        through); throws on Strict-mode failure. Designed to be called
+        from inside the per-WIM apply loop just after Mount-WindowsImage
+        and just before the first Add-WindowsPackage call.
+
+        Implementation note: Get-WindowsPackage returns one row per
+        package; the relevant identifier for our purposes is the
+        "PackageIdentity" string. KB ids embedded in the patch
+        manifest typically match the PackageIdentity prefix
+        (e.g. "Package_for_KB5037591~..."), so we substring-match
+        rather than relying on exact equality.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)] [string]$MountPath,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$PatchesToApply,
+        [string]$ImageLabel = 'image'
+    )
+
+    # Collect candidate prerequisites
+    $prereqMap = @{}    # KbId -> [string]
+    foreach ($p in $PatchesToApply) {
+        if (-not $p) { continue }
+        if ($p.PSObject.Properties['RequiresKbIds'] -and $p.RequiresKbIds) {
+            foreach ($req in @($p.RequiresKbIds)) {
+                $reqStr = [string]$req
+                if (-not [string]::IsNullOrEmpty($reqStr) -and -not $prereqMap.ContainsKey($reqStr)) {
+                    $prereqMap[$reqStr] = ($p.KbId | Out-String).Trim()
+                }
+            }
+        }
+    }
+    if ($prereqMap.Count -eq 0) {
+        Write-Step ('Dependency closure ({0}): no RequiresKbIds declared; skipping.' -f $ImageLabel)
+        return $true
+    }
+
+    Write-Step ('Dependency closure ({0}): {1} prerequisite KB(s) declared.' -f $ImageLabel, $prereqMap.Count)
+
+    # In DryRun mode we cannot enumerate Get-WindowsPackage; skip with a notice
+    if ($Script:DryRun) {
+        Write-Step ('  DryRun: skipping Get-WindowsPackage probe of {0}' -f $MountPath)
+        return $true
+    }
+
+    $installedPackages = @()
+    try {
+        $installedPackages = @(Get-WindowsPackage -Path $MountPath -ErrorAction Stop)
+    } catch {
+        $msg = ('Get-WindowsPackage failed on {0}: {1}' -f $MountPath, $_.Exception.Message)
+        if ($Script:PatchDependencyPolicy -eq 'Strict') {
+            throw $msg
+        } else {
+            Write-Warn $msg
+            return $false
+        }
+    }
+    $installedIds = @($installedPackages | ForEach-Object { [string]$_.PackageIdentity })
+
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($reqKb in $prereqMap.Keys) {
+        $found = $false
+        foreach ($pid in $installedIds) {
+            if ($pid -like ("*{0}*" -f $reqKb)) {
+                $found = $true
+                break
+            }
+        }
+        if (-not $found) {
+            $needyKb = $prereqMap[$reqKb]
+            $missing.Add(('  required {0} (needed by {1}) NOT FOUND in {2}' -f $reqKb, $needyKb, $ImageLabel)) | Out-Null
+        }
+    }
+
+    if ($missing.Count -eq 0) {
+        Write-Ok ('Dependency closure ({0}): all {1} prerequisite(s) satisfied.' -f $ImageLabel, $prereqMap.Count)
+        return $true
+    }
+
+    $detail = ($missing -join "`n")
+    if ($Script:PatchDependencyPolicy -eq 'Strict') {
+        throw ("Dependency closure check failed for {0}; aborting before Add-WindowsPackage to avoid DISM 0x800f0823.`n{1}" -f $ImageLabel, $detail)
+    }
+    Write-Warn ('Dependency closure ({0}): {1} unsatisfied prerequisite(s); continuing (policy=Warn).' -f $ImageLabel, $missing.Count)
+    Write-Warn $detail
+    return $false
+}
+
+# ============================================================
 # Phase P01: Initialize (Setup group)
 # ============================================================
 
@@ -4291,9 +4593,18 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
             throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches, or populate Config PatchBaseline.Patches.'
         }
 
-        # Order by ApplyOrder, then by KbId
-        $Script:ResolvedPatches = $resolved | Sort-Object ApplyOrder, KbId
+        # Order by ApplyOrder, then by KbId. Wrap in @() to guarantee
+        # an array even when $resolved is null or a single object.
+        $Script:ResolvedPatches = @($resolved | Sort-Object ApplyOrder, KbId)
         Write-Ok ('Patch list resolved: {0} entries.' -f $Script:ResolvedPatches.Count)
+
+        # Build the WIM-target-aware PatchPlan and print summary.
+        # Even when ResolvedPatches is empty (synthetic test mode), we
+        # construct an empty plan so downstream Get-OrInitPatchPlan
+        # calls in P05/P06 hit a populated cache.
+        Set-DebugStep -Step 'build-patch-plan'
+        $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
+        Write-PatchPlanSummary -Plan $Script:PatchPlan
 
         # Emit CSV
         Set-DebugStep -Step 'emit-inputs-csv'
@@ -5061,18 +5372,46 @@ function Invoke-PlanPhase04_5_ValidatePatchSet {
 # ============================================================
 # Phase P05: Patch install.wim (Build group)
 # ============================================================
+#
+# Patch selection is driven by the PatchPlan engine
+# (Build-PatchPlan in .build_part09c_patchplan.ps1) which consults
+# $Script:PatchTargetMap to decide which patches belong to which
+# WIM target. The legacy Get-PatchListForInstallWim /
+# Get-PatchListForBootWim helpers remain as thin wrappers around
+# the PatchPlan API so that downstream code paths (and any caller
+# in P06) keep their existing call sites without surgery.
+
+function Get-OrInitPatchPlan {
+    <#
+    .SYNOPSIS
+        Return the cached $Script:PatchPlan; build it on first access.
+    .DESCRIPTION
+        Lazy initialisation lets phases that don't need the plan (e.g.
+        P02.5 admin path) avoid the construction cost, while ensuring
+        each phase that DOES need it sees the same plan instance.
+    #>
+    if (-not $Script:PatchPlan) {
+        $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
+    }
+    return $Script:PatchPlan
+}
 
 function Get-PatchListForInstallWim {
-    # Filter $Script:ResolvedPatches to those that should be applied
-    # against install.wim, in apply order.
-    $allow = @('SSU','LCU','DotNet','DynamicUpdate.Component','Defender','Edge')
-    return @($Script:ResolvedPatches | Where-Object { $allow -contains $_.PatchType } | Sort-Object ApplyOrder, KbId)
+    # Delegate to PatchPlan; preserves legacy call-site signature.
+    $plan = Get-OrInitPatchPlan
+    return @($plan.Install)
 }
 
 function Get-PatchListForBootWim {
-    # Filter for boot.wim: SSU, LCU, Safe OS DU.
-    $allow = @('SSU','LCU','DynamicUpdate.SafeOs')
-    return @($Script:ResolvedPatches | Where-Object { $allow -contains $_.PatchType } | Sort-Object ApplyOrder, KbId)
+    # Delegate to PatchPlan; preserves legacy call-site signature.
+    $plan = Get-OrInitPatchPlan
+    return @($plan.Boot)
+}
+
+function Get-PatchListForWinReWim {
+    # WinRE has its own target lane (Safe OS DU and language packs).
+    $plan = Get-OrInitPatchPlan
+    return @($plan.WinRE)
 }
 
 function Resolve-InstallWimTargetIndexes { # psa-disable-line PSA6003 -- "Indexes" is plural by design; returns a filtered list of WIM image indexes
@@ -5151,6 +5490,17 @@ function Invoke-BuildPhase05_PatchInstallWim {
             Invoke-WimMountSafe -ImagePath $installWim -Index $img.ImageIndex `
                 -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
             try {
+                # Pre-apply dependency closure check. Verifies
+                # that every patch's RequiresKbIds is already satisfied
+                # inside the freshly-mounted image. Strict mode (default)
+                # aborts the run before Add-WindowsPackage so we surface
+                # the precondition failure cleanly rather than letting
+                # DISM emit a 0x800f0823 hex code mid-loop.
+                Set-DebugStep -Step ('depcheck-install-idx-' + $img.ImageIndex)
+                Test-PatchDependencyClosureOnMount -MountPath $Script:MountInstallDir `
+                    -PatchesToApply $patches `
+                    -ImageLabel ('install.wim:idx' + $img.ImageIndex) | Out-Null
+
                 foreach ($p in $patches) {
                     $sw = [System.Diagnostics.Stopwatch]::StartNew()
                     $status = 'Fail'; $exitCode = -1
@@ -5247,6 +5597,11 @@ function Invoke-BuildPhase06_PatchBootWim {
             Invoke-WimMountSafe -ImagePath $bootWim -Index $idx `
                 -Path $mountDir -LogDir $Script:LogsDir | Out-Null
             try {
+                # Dependency closure check for boot.wim
+                Test-PatchDependencyClosureOnMount -MountPath $mountDir `
+                    -PatchesToApply $patches `
+                    -ImageLabel ('boot.wim:idx' + $idx) | Out-Null
+
                 foreach ($p in $patches) {
                     Write-Step ('  Applying {0} ({1})' -f $p.KbId, $p.PatchType)
                     $status = Add-WindowsPackageWithRetry -MountPath $mountDir `

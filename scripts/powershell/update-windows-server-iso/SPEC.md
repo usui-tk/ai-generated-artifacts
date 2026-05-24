@@ -484,7 +484,73 @@ The full JSON shape of this constant is exposed via
 `-Action DumpFieldClassification` so external tooling (e.g. a Python
 JSON Schema validator) can consume it without parsing PowerShell.
 
-## B.12 PatchBaseline schema fields (referenced by B.10)
+## B.12 PatchPlan engine and WIM-target mapping (r04+)
+
+The `Build-PatchPlan` function (in `.build_part09c_patchplan.ps1`)
+converts a flat patch list into a target-aware plan with four lanes:
+`Install`, `Boot`, `WinRE`, `Setup`. The mapping from patch Type to
+target lanes is centralised in `$Script:PatchTargetMap` (in
+`.build_part03_helpers.ps1`).
+
+The default mapping follows Microsoft's media-dynamic-update
+guidance:
+
+| Type                    | Targets                  | Microsoft reason |
+|-------------------------|--------------------------|---|
+| SSU                     | Install + Boot + WinRE   | Every serviced WIM needs the latest servicing stack |
+| LCU                     | Install + Boot           | WinRE uses Safe OS DU instead |
+| DotNet                  | Install                  | .NET 4.x lives in install.wim |
+| DynamicUpdate.Component | Install                  | Component-store updates |
+| DynamicUpdate.SafeOs    | WinRE                    | WinRE is the "Safe OS" |
+| DynamicUpdate.Setup     | Setup                    | Setup binaries (pending.xml) |
+| LanguagePack            | Install + WinRE          | User-facing UI + recovery UI |
+| LXP                     | Install                  | LXPs are Store apps; no WinRE |
+| DotNet.LangPack         | Install                  | .NET satellite assemblies |
+
+Within each lane, patches are ordered by ascending `ApplyOrder`
+(secondary key: `KbId`). Phase workers iterate the lane that
+matches the WIM they have mounted; the worker for an Install lane
+also runs the pre-apply dependency closure check before the first
+`Add-WindowsPackage` call.
+
+The plan object also carries diagnostic fields:
+- `_GeneratedAt`  : ISO-8601 timestamp
+- `_PatchCount`   : total distinct patches across all lanes
+- `_TargetCounts` : per-lane counts
+- `_UnknownTypes` : list of patch Types seen that were not in the map
+
+Unknown Types fall back to `[Install]` with a one-time warning per
+unique Type per run.
+
+`Get-OrInitPatchPlan` is a lazy accessor that builds the plan on
+first call and caches it in `$Script:PatchPlan`. P02 forces the
+build at the end of ResolveInputs so the plan is ready when later
+phases ask for it.
+
+## B.13 Pre-apply dependency closure check (r04+)
+
+`Test-PatchDependencyClosureOnMount` runs inside the per-WIM apply
+loop just after `Mount-WindowsImage` and before the first
+`Add-WindowsPackage`. For each patch whose `RequiresKbIds` is
+non-empty, it enumerates installed packages via `Get-WindowsPackage`
+and verifies that every required KB is already present
+(`PackageIdentity` substring match against the recorded KB ID).
+
+The check is governed by `$Script:PatchDependencyPolicy`, a
+script-scope constant with two valid values:
+
+| Value    | Behaviour |
+|----------|-----------|
+| `Strict` | **Default.** Throw on the first unsatisfied prerequisite; the run aborts before DISM emits the cryptic 0x800f0823 hex code |
+| `Warn`   | Write a warning and continue; useful for runs where the operator has accepted some risk |
+
+There is currently no CLI flag for this policy; a wrapper script
+can set `$Script:PatchDependencyPolicy = 'Warn'` before invoking
+the entry point if needed.
+
+`-DryRun` short-circuits the check with a notice (no real mount).
+
+## B.14 PatchBaseline schema fields (referenced by B.10)
 
 ```jsonc
 "PatchBaseline": {
@@ -855,8 +921,8 @@ Server SKU requires.
 | **M3** | P04.5 `ValidatePatchSet` integrating `wsusscn2.cab` + Windows Update Agent COM API for Microsoft-authoritative dependency check; 4-file diagnostic export on failure | **Done (r02)** |
 | M4 | Server 2025 `LCUExpandViaMum=true` real implementation (MUM/CAB expand path) | Placeholder |
 | **M5** | Stage 4 CI workflow (`monthly-refresh`): monthly scheduled run that exercises `-Action RefreshAllBaselines` and opens a PR with the resulting `Config/<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes and Patch Tuesday drift within ~30 days | **Done (r03.1)** |
-| M6 | Microsoft-official media-dynamic-update servicing sequence: WIM-target-aware patch plan (install/boot/winre per-target), LCU twice-apply around language-pack injection, pre-apply `Get-WindowsPackage` dependency closure check, Language Pack injection in P05 | Future (r04) |
-| M7 | Feature on Demand (.NET 3.5) source detection and `-EnableDotNet35` opt-in | Future (r04.1) |
+| **M6** | Microsoft-official media-dynamic-update servicing sequence: WIM-target-aware patch plan + pre-apply dependency closure check delivered in r04; remaining items (LCU twice-apply, WinRE worker, Language Pack injection in P05) deferred to the next release in the r04 line | **Partial (r04)** |
+| M7 | Feature on Demand (.NET 3.5) source detection and `-EnableDotNet35` opt-in | Future |
 | M6 | Client SKUs (Windows 10/11) support — separate Config family | Future |
 | M7 | Driver / FOD / LXP / Appx customisation (OSBuild equivalent) | Future |
 | M8 | Output ISO size minimisation (`Export-WindowsImage` with `/Compress:max`) | Future |
@@ -931,6 +997,11 @@ Server SKU requires.
 | `Resolve-PatchSetFromCatalog` | Two-pass orchestrator: pass 1 runs OS-aware Catalogue searches; combined-LCU detector runs on the aggregate; pass 2 picks the canonical Full file per surviving candidate via `Select-CanonicalPatchFile` |
 | `Get-LanguagePackQueryTemplate` (r03) | Per-language Catalogue search templates (LanguagePack / LXP / DotNet.LangPack) for OsVersion + OsLanguage + PatchMonth |
 | `Resolve-LanguageSpecificPatchesFromCatalog` (r03) | Per-language Catalogue scraper; returns LP / LXP / .NET LP entries; empty result = verified absence |
+| `Get-PatchTargetsForType` (r04) | Returns the WIM target array for a given patch Type (Install / Boot / WinRE / Setup) via `$Script:PatchTargetMap` |
+| `Build-PatchPlan` (r04) | Build a target-aware PatchPlan from the flat ResolvedPatches array, sorted by ApplyOrder within each target lane |
+| `Write-PatchPlanSummary` (r04) | Human-readable per-target summary of a PatchPlan |
+| `Test-PatchDependencyClosureOnMount` (r04) | Pre-apply verification: every patch's RequiresKbIds must already be present in the mounted image (Get-WindowsPackage substring match); Strict mode aborts before DISM 0x800f0823 |
+| `Get-OrInitPatchPlan` (r04) | Lazy accessor for `$Script:PatchPlan`; builds on first access |
 | `Get-RefreshDecision` (r03) | Decide Skip / InitialFill / Monthly / Manual for a field group given Cadence, verification state, and latest Patch Tuesday |
 | `Get-GroupSnapshot` (r03) | Read the verification meta-state for a field group from a raw config JSON object |
 | `Set-GroupVerifiedState` (r03) | Update `_VerifiedDate` / `_VerifiedBy` / `LastVerified*` after a successful Refresher call |
