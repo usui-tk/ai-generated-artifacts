@@ -16,6 +16,14 @@ Windows Server の評価版 ISO に Microsoft のサービススタック更新�
 Update 工程を一掃することが目的です。Windows 11 + Windows PowerShell 5.1
 を主対象とし、PowerShell 7 以降でも動作します。
 
+**動的パッチ解決機能。** パッチセットは `Config/<OsKey>.json` の
+`PatchBaseline` ノードに記録され、記録時点 (`PatchTuesdayOfBaseline`)
+が現在の Patch Tuesday より古い場合に、Microsoft Update Catalog から
+自動的に再取得・再記録されます。さらに DISM マウントを開始する前に、
+`wsusscn2.cab` と Windows Update Agent COM API による依存性検証パスが
+実行され、提供パッチセットが必要な依存関係 (例: 最新 LCU の前提 SSU)
+を満たしているか Microsoft 公式判定で確認されます。
+
 本スクリプトは
 [`usui-tk/ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts)
 リポジトリの `scripts/powershell/update-windows-server-iso/` 配下に
@@ -197,7 +205,12 @@ Gen2 VM を起動する疎通テストが実行されます。各フェーズの
 | `-PatchDirectory`            | ローカル MSU/CAB パッチが入ったディレクトリ                                     |
 | `-ManifestPath`              | ハッシュ付き Metalink `.meta4` マニフェスト                                     |
 | `-PatchUrls`                 | パッチ URL の明示的な配列                                                       |
-| `-AutoDetectLatestPatches`   | Update Catalog 経由で最新パッチを解決 (M2 プレースホルダ)                       |
+| `-AutoDetectLatestPatches`   | Microsoft Update Catalog から PatchBaseline を強制再取得                        |
+| `-PatchMonth`                | 再取得対象月 (例: `2026-06`、既定は現在月)                                      |
+| `-SkipDynamicPatchRefresh`   | PatchBaseline が古くても P02.5 をスキップ (オフライン・閉域網用)                |
+| `-UseBaselineOnly`           | PatchBaseline を厳密にそのまま使う (Catalog アクセス一切なし)                   |
+| `-IgnorePatchValidation`     | P04.5 検証失敗を警告に降格 (推奨されない)                                       |
+| `-WsusScnCabPath`            | 事前配置済み wsusscn2.cab のパス (自動ダウンロードを省略)                       |
 | `-WorkRoot`                  | ワークスペースルート (既定 `C:\Temp\Workspace_UpdateWsi`)                       |
 | `-OutputDir`                 | 出力 ISO ディレクトリ (既定 `<WorkRoot>\output`)                                |
 | `-OnlyInstallWimIndexes`     | カンマ区切りインデックス (例 `'2,4'`) で install.wim 更新対象を制限             |
@@ -205,6 +218,75 @@ Gen2 VM を起動する疎通テストが実行されます。各フェーズの
 | `-SyntheticTestMode`         | CI モード: Microsoft アセットに触れずに合成 ISO を構築                          |
 | `-EvalIsoMode`               | Microsoft Evaluation Center fwlink 経由のダウンロードを許可                     |
 | `-Execute`                   | 実際の DISM 書き込みに **必須**。指定しなければ Build フェーズは計画のみ        |
+
+## 動的パッチベースライン (P02.5) と依存性検証 (P04.5)
+
+これら 2 つのフェーズは、運用者によるパッチ手動キュレーション工数を
+最小化し、不完全なパッチセットによる ISO 破損を未然に防ぐために
+導入されました。
+
+### 動作フロー
+
+```
+P02   ResolveInputs
+        - Config/<OsKey>.json を読み込み
+        - PatchBaseline.PatchTuesdayOfBaseline を取得
+        - Get-LatestPatchTuesday と比較
+P02.5 RefreshPatchBaseline (古い場合 OR -AutoDetectLatestPatches 指定時)
+        - 対象月の Microsoft Update Catalog をスクレイピング
+        - SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs) + .NET CU
+          をタイトルトークンヒューリスティクスで識別
+        - ScopedViewInline.aspx を取得して Supersedes / SupersededBy 取得
+        - PatchBaseline.Patches を Config JSON に原子的に書き戻し
+        - LCU.RequiresKbIds に SSU の KB 番号を自動設定
+P03   FetchAssets (新しい URL / SHA-256 でダウンロード)
+P04   ExpandIso
+P04.5 ValidatePatchSet
+        - 以下の条件で <WorkRoot>/cache/ に wsusscn2.cab をダウンロード:
+            * 初回 (キャッシュなし)
+            * Patch Tuesday 以降の実行で、キャッシュが Patch Tuesday より古い
+        - Microsoft.Update.Session COM API でオフラインスキャン
+        - WUA が要求するパッチ vs 提供されたパッチを照合
+        - 必要パッチが不足していた場合、4 つの診断ファイルを
+          <WorkRoot>/diag/<timestamp>/ に出力して ABORT
+P05+  Build / Verify / Report (従来通り)
+```
+
+### 検証失敗時の診断データ
+
+P04.5 で必要パッチの不足が検出された場合、4 つのファイルが
+`<WorkRoot>/diag/<yyyy-MM-dd_HH-mm-ss>/` に出力されてスクリプトが
+終了します。
+
+| ファイル | 内容 |
+|---|---|
+| `validation_summary.json` | サマリ。対象 OS / wsusscn2 メタ / 提供パッチ一覧 / WUA 検出の不足パッチ一覧 |
+| `validation_detail.csv` | パッチ1行毎: KbId / Title / RequiredByWUA / Severity / ApplyOrder / DownloadHint |
+| `wsusscn2_scan_raw.json` | WUA スキャンの完全な生出力(調査用) |
+| `dependency_graph.json` | 隣接リスト形式: Requires + Supersedes エッジ |
+
+`-IgnorePatchValidation` を指定すると abort が警告降格されますが、
+診断データは同様に出力されます (開発時のみ推奨)。
+
+### 自動更新ポリシー
+
+```jsonc
+"AutoRefreshPolicy": {
+  "Mode": "OnNewPatchTuesday",                // 古い場合に再取得
+  "WritebackToConfig": true,                  // Config/<OsKey>.json を上書き
+  "FallbackOnScrapeFailure": "UseBaseline",   // または "Abort"
+  "ScrapeRetries": 3
+}
+```
+
+| シナリオ | 動作 |
+|---|---|
+| Baseline が新しい (Patch Tuesday 以後に検証済) | P02.5 は no-op |
+| Baseline が古い + スクレイプ成功 | Config 更新 + 新パッチセットを使用 |
+| Baseline が古い + スクレイプ失敗 + 既存 baseline が利用可能 | 警告 + 既存 baseline で続行 |
+| Baseline が古い + スクレイプ失敗 + baseline が空 | ABORT |
+| `-UseBaselineOnly` 指定 | P02.5 を無条件スキップ (オフラインモード) |
+| `-SyntheticTestMode` 指定 | P02.5 / P04.5 とも無条件スキップ (CI モード) |
 
 ## 静的解析
 

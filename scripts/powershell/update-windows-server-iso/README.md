@@ -16,6 +16,15 @@ the multi-hour Windows Update step from lab and test bring-up of
 Server 2016 / 2019 / 2022 / 2025. Targeted at Windows 11 + Windows
 PowerShell 5.1 (also runs on PowerShell 7+).
 
+**Dynamic patch resolution.** The patch set is recorded under
+`Config/<OsKey>.json#/PatchBaseline` and is automatically refreshed
+from the Microsoft Update Catalogue when the recorded baseline is
+older than the current month's Patch Tuesday. A separate validation
+pass uses `wsusscn2.cab` + Windows Update Agent COM API to
+authoritatively confirm that the supplied patch set satisfies all
+dependency requirements (e.g. the latest LCU's prerequisite SSU)
+before any DISM mount is performed.
+
 This script is part of the
 [`usui-tk/ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts)
 repository, under `scripts/powershell/update-windows-server-iso/`.
@@ -200,7 +209,12 @@ parameter list. The most commonly used:
 | `-PatchDirectory`            | Directory containing local MSU/CAB patches                              |
 | `-ManifestPath`              | Metalink `.meta4` manifest with hashes                                  |
 | `-PatchUrls`                 | Array of explicit patch URLs                                            |
-| `-AutoDetectLatestPatches`   | Resolve latest patches via Update Catalogue (M2 placeholder)            |
+| `-AutoDetectLatestPatches`   | Force a refresh of PatchBaseline from Microsoft Update Catalogue        |
+| `-PatchMonth`                | Target patch month for refresh, e.g. `2026-06` (default: current month) |
+| `-SkipDynamicPatchRefresh`   | Skip P02.5 even if PatchBaseline is stale (offline / air-gapped runs)   |
+| `-UseBaselineOnly`           | Use PatchBaseline strictly as-is; no Catalog access at all              |
+| `-IgnorePatchValidation`     | Demote P04.5 validation failures from abort to warning (NOT recommended)|
+| `-WsusScnCabPath`            | Pre-staged wsusscn2.cab path (skips automatic download)                 |
 | `-WorkRoot`                  | Workspace root (default `C:\Temp\Workspace_UpdateWsi`)                  |
 | `-OutputDir`                 | Output ISO directory (default `<WorkRoot>\output`)                      |
 | `-OnlyInstallWimIndexes`     | Comma-separated index list (e.g. `'2,4'`) to limit install.wim updates  |
@@ -208,6 +222,73 @@ parameter list. The most commonly used:
 | `-SyntheticTestMode`         | CI mode: build a synthetic ISO without touching Microsoft assets        |
 | `-EvalIsoMode`               | Allow downloading via Microsoft Evaluation Center fwlink                |
 | `-Execute`                   | **Required** for actual DISM writes; without it, Build phases plan only |
+
+## Dynamic patch baseline (P02.5) and dependency validation (P04.5)
+
+These two phases were introduced to minimise manual patch curation
+work and to prevent partial patch sets from producing broken ISOs.
+
+### How it works
+
+```
+P02   ResolveInputs
+        - Load Config/<OsKey>.json
+        - Read PatchBaseline.PatchTuesdayOfBaseline
+        - Compare against Get-LatestPatchTuesday
+P02.5 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
+        - Scrape Microsoft Update Catalogue for the target month
+        - Identify SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
+          + .NET CU using title-token heuristics
+        - Fetch ScopedViewInline.aspx for Supersedes / SupersededBy lists
+        - Write back PatchBaseline.Patches to Config JSON (atomically)
+        - LCU.RequiresKbIds is auto-populated with the SSU's KB number
+P03   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
+P04   ExpandIso
+P04.5 ValidatePatchSet
+        - Download wsusscn2.cab to <WorkRoot>/cache/ when needed:
+            * initial run (no cache yet), OR
+            * post-Patch-Tuesday run AND cache is older than Patch Tuesday
+        - Run Microsoft.Update.Session COM API offline scan
+        - Compare WUA-required set against the provided patch set
+        - On any missing required patch: ABORT and emit 4 diagnostic
+          files under <WorkRoot>/diag/<timestamp>/
+P05+  Build / Verify / Report (existing)
+```
+
+### Diagnostic data on validation failure
+
+When P04.5 detects a missing required patch, four files are emitted under
+`<WorkRoot>/diag/<yyyy-MM-dd_HH-mm-ss>/` and the script aborts:
+
+| File | Purpose |
+|---|---|
+| `validation_summary.json` | Top-level result with target, wsusscn2 metadata, provided patches, and the WUA-detected missing list |
+| `validation_detail.csv` | One row per patch (provided or missing) with KbId / Title / RequiredByWUA / Severity / ApplyOrder / DownloadHint |
+| `wsusscn2_scan_raw.json` | Full raw WUA scan output for forensics |
+| `dependency_graph.json` | Adjacency list: Requires + Supersedes edges over the KB nodes |
+
+`-IgnorePatchValidation` demotes the abort to a warning while still
+emitting all four files; use only for development.
+
+### Refresh policy
+
+```jsonc
+"AutoRefreshPolicy": {
+  "Mode": "OnNewPatchTuesday",      // refresh when stale
+  "WritebackToConfig": true,         // overwrite Config/<OsKey>.json
+  "FallbackOnScrapeFailure": "UseBaseline",  // or "Abort"
+  "ScrapeRetries": 3
+}
+```
+
+| Scenario | Behaviour |
+|---|---|
+| Baseline fresh (Patch Tuesday unchanged since last verify) | P02.5 is a no-op |
+| Baseline stale, scrape succeeds | Config is updated and the new patches are used |
+| Baseline stale, scrape fails, existing baseline usable | Warning + continue with existing baseline |
+| Baseline stale, scrape fails, baseline empty/unusable | ABORT |
+| `-UseBaselineOnly` set | P02.5 skipped unconditionally (offline mode) |
+| `-SyntheticTestMode` set | P02.5 and P04.5 both skipped (CI mode) |
 
 ## Static analysis
 

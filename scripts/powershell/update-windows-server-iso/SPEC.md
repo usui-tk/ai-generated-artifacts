@@ -75,8 +75,8 @@ below.
 |---|---|
 | Filename | `Update-WindowsServerIso.ps1` |
 | Project folder | `scripts/powershell/update-windows-server-iso/` |
-| Version | `update-wsi-2026.05.24-r01` |
-| Tag | `initial-mvp-all-server-os` |
+| Version | `update-wsi-2026.06.10-r02` |
+| Tag | `dynamic-baseline-and-wsusscn2-validation` |
 | Target OS | Server 2016 / 2019 / 2022 / 2025 |
 | Languages | en-us, ja-jp |
 | Architecture | x64 only |
@@ -197,8 +197,24 @@ marker on success.
 |---|---|
 | 1 | Load `Config/<OsVersion>.json`, attach language node |
 | 2 | Resolve ISO source: `-SyntheticTestMode` < `-IsoPath` < `-IsoUrl` < FwLink < snapshot |
-| 3 | Build patch list from `-PatchUrls` / `-ManifestPath` / `-PatchDirectory` / `-AutoDetectLatestPatches` |
+| 3 | Build patch list from `-PatchUrls` / `-ManifestPath` / `-PatchDirectory` / `-AutoDetectLatestPatches` / PatchBaseline.Patches |
 | Output | `logs/P02_inputs_resolved.csv` |
+
+### P02.5 RefreshPatchBaseline (Setup)
+
+| Step | What |
+|---|---|
+| 0 | Skip if `-SyntheticTestMode`, `-SkipDynamicPatchRefresh`, or `-UseBaselineOnly` |
+| 1 | `Get-LatestPatchTuesday`; compare with `PatchBaseline.PatchTuesdayOfBaseline` |
+| 2 | If `Test-PatchBaselineFresh = $true` AND `-AutoDetectLatestPatches` not set: skip |
+| 3 | Resolve target patch month (`-PatchMonth` or current Patch Tuesday) |
+| 4 | `Resolve-PatchSetFromCatalog`: scrape Microsoft Update Catalogue for SSU + LCU + DynUp Setup + DynUp Component + DynUp SafeOs + .NET CU |
+| 5 | For each candidate, run `Get-DownloadLinkFromCatalog` and `Get-SupersedenceFromCatalog` |
+| 6 | Auto-link LCU.RequiresKbIds to SSU(s) found in the same pass |
+| 7 | Update in-memory `$Script:OsProfile.PatchBaseline`; record `PatchTuesdayOfBaseline`, `LastVerifiedDate`, `LastVerifiedBy = 'auto-scrape'` |
+| 8 | If `AutoRefreshPolicy.WritebackToConfig`: `Save-ConfigWithBaseline` (atomic write to Config JSON) |
+| 9 | Re-derive `$Script:ResolvedPatches` from the refreshed baseline (when user did not provide an explicit source) |
+| Failure | If scrape fails AND `FallbackOnScrapeFailure = 'UseBaseline'` AND baseline usable: warn + continue. Otherwise: throw |
 
 ### P03 FetchAssets (Fetch)
 
@@ -215,6 +231,20 @@ marker on success.
 | 1 | `Mount-DiskImage` the source ISO, copy contents to `extracted/`, `Dismount-DiskImage` |
 | 2 | Enumerate `install.wim` and `boot.wim` indexes via `Get-WindowsImage` |
 | Output | `logs/P04_wim_inventory.csv` |
+
+### P04.5 ValidatePatchSet (Plan)
+
+| Step | What |
+|---|---|
+| 0 | Skip if `-SyntheticTestMode`, `-UseBaselineOnly`, or non-Windows host |
+| 1 | Resolve `wsusscn2.cab`: `-WsusScnCabPath` < `<WorkRoot>/cache/wsusscn2.cab` cache |
+| 2 | Determine download necessity: cache absent, OR cache older than latest Patch Tuesday |
+| 3 | If download needed: `Invoke-WebRequestWithRetry` to `<WorkRoot>/cache/wsusscn2.cab.<guid>.part`, atomic move, record SHA-256 |
+| 4 | If newly downloaded: persist metadata to Config (`PatchBaseline.WsusScnCab.LastDownloadedDate` etc.) |
+| 5 | `Invoke-WuaOfflineScan`: create `Microsoft.Update.Session`, register cab via `AddScanPackageService`, run `IsInstalled=0 and Type='Software' and IsHidden=0` |
+| 6 | `Compare-PatchSetVsWuaScan`: classify WUA-required updates as Provided or Missing (excluding `PatchBaseline.ExcludeKbList`) |
+| 7 | If any Missing: `Export-PatchValidationReport` emits 4 files; throw unless `-IgnorePatchValidation` |
+| Output | `<WorkRoot>/diag/<timestamp>/validation_summary.json`, `validation_detail.csv`, `wsusscn2_scan_raw.json`, `dependency_graph.json` |
 
 ### P05 PatchInstallWim (Build)
 
@@ -275,17 +305,17 @@ Then, if `EnableWinREUpdate`:
 
 ## B.6 Action → Phase Mapping
 
-| `-Action`            | Phases run                                    |
-|----------------------|-----------------------------------------------|
-| `Prepare`            | P01, P02, P03, P04                            |
-| `Build`              | P05, P06, P07                                 |
-| `Verify`             | P08, P09                                      |
-| `PrepareBuildVerify` | P01, P02, P03, P04, P05, P06, P07, P08, P09   |
-| `All`                | Same as `PrepareBuildVerify` plus BootTest    |
-| `BootTest`           | Out-of-band: Hyper-V Gen2 VM smoke test       |
-| `Cleanup`            | (no phases) Remove `<WorkRoot>` after safety check |
-| `ListPhases`         | (no phases) Print the registry and exit       |
-| `GenerateManifest`   | P01, P02 (then placeholder for M2)            |
+| `-Action`            | Phases run                                                              |
+|----------------------|-------------------------------------------------------------------------|
+| `Prepare`            | P01, P02, P02.5, P03, P04, P04.5                                        |
+| `Build`              | P05, P06, P07                                                           |
+| `Verify`             | P08, P09                                                                |
+| `PrepareBuildVerify` | P01, P02, P02.5, P03, P04, P04.5, P05, P06, P07, P08, P09               |
+| `All`                | Same as `PrepareBuildVerify` plus BootTest                              |
+| `BootTest`           | Out-of-band: Hyper-V Gen2 VM smoke test                                 |
+| `Cleanup`            | (no phases) Remove `<WorkRoot>` after safety check                      |
+| `ListPhases`         | (no phases) Print the registry and exit                                 |
+| `GenerateManifest`   | P01, P02, P02.5 (Catalog scrape + writeback only)                       |
 
 ## B.7 ISO Filename Detection Patterns
 
@@ -326,7 +356,99 @@ Enabled by `-SyntheticTestMode`. Used exclusively by Stage 3 CI:
 | ISO is generated via `dism /Capture-Image` on a tiny text payload + oscdimg wrap with stub boot files | Exercises the full DISM-mount + oscdimg pipeline without real binaries |
 | Output ISO is intentionally non-bootable | The stub `etfsboot.com` and `efisys.bin` are 4-byte placeholders |
 | P08 verification is relaxed (size floor 1 KB, KB list optional) | The synthetic image has no real KBs |
+| P02.5 and P04.5 are both skipped | No real patches in play; Catalog scrape and wsusscn2 scan are unnecessary |
 | CI MUST NOT upload the synthetic ISO | Belt-and-braces guard against accidental Microsoft-content leaks |
+
+## B.10 PatchBaseline Schema
+
+The `PatchBaseline` node in `Config/<OsKey>.json` is the canonical
+store of "the latest known-good patch set for this OS". P02.5 reads
+and writes this node; P03 fetches the URLs listed under `Patches`;
+P04.5 validates the resulting set against `wsusscn2.cab` via WUA.
+
+```jsonc
+"PatchBaseline": {
+  "Schema": "1.0",
+  "TargetBuildAfterUpdate": "26100.4061",
+  "PatchTuesdayOfBaseline": "2026-05-12",   // YYYY-MM-DD; empty = uninitialised
+  "LastVerifiedDate": "2026-05-13T14:22:00+09:00",
+  "LastVerifiedBy": "auto-scrape",          // or manual identifier
+  "VerificationMethod": "auto-scrape",      // | manual+wsusscn2 | auto-scrape+wsusscn2
+  "VerifiedOsLanguages": ["en-us", "ja-jp"],
+  "ChecksumAlgorithm": "SHA256",
+  "Patches": [
+    {
+      "Type": "SSU",                          // SSU | LCU | DynamicUpdate.* | DotNet | Defender | Edge | Other
+      "KbId": "KB5055769",
+      "Title": "Servicing Stack Update for Windows Server 2025 (KB5055769)",
+      "UpdateId": "12345678-90ab-cdef-1234-567890abcdef",
+      "DownloadUrl": "https://catalog.s.download.windowsupdate.com/.../ssu-...",
+      "FileName": "ssu-26100.4061-x64.cab",
+      "SizeBytes": 12345678,
+      "Sha256": "abc123...",                  // recorded by P03 first download
+      "ReleaseDate": "2026-05-12",
+      "Supersedes": ["KB5051234"],
+      "RequiresKbIds": [],
+      "ApplyOrder": 1,
+      "ApplicableArchitecture": "x64",
+      "ApplicableLanguages": ["neutral"]
+    }
+  ],
+  "ExcludeKbList": [
+    {
+      "KbId": "KB5043080",
+      "Reason": "Checkpoint Cumulative Update; not required for OS install (per Microsoft Learn)."
+    }
+  ],
+  "WsusScnCab": {
+    "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
+    "LocalCachePath": "C:\\Temp\\Workspace_UpdateWsi\\cache\\wsusscn2.cab",
+    "LastDownloadedDate": "2026-05-13T10:22:00+09:00",
+    "LastDownloadedSha256": "abc123...",
+    "LastDownloadedSizeBytes": 1234567890
+  }
+}
+
+"AutoRefreshPolicy": {
+  "Mode": "OnNewPatchTuesday",
+  "WritebackToConfig": true,
+  "FallbackOnScrapeFailure": "UseBaseline",
+  "ScrapeRetries": 3
+}
+```
+
+### Freshness contract
+
+`Test-PatchBaselineFresh` returns `$true` if and only if all hold:
+
+1. `Baseline` is non-null
+2. `PatchTuesdayOfBaseline` is non-empty and parses as `yyyy-MM-dd`
+3. `parse(PatchTuesdayOfBaseline) >= Get-LatestPatchTuesday()`
+4. `Patches.Count > 0` AND at least one entry has all of
+   `KbId`, `DownloadUrl`, `Sha256` populated
+
+If any check fails, the baseline is "stale" and P02.5 scrapes anew.
+
+### Patch Tuesday calculation
+
+`Get-PatchTuesdayForMonth(Year, Month)` returns the second Tuesday of
+the month. `Get-LatestPatchTuesday` returns the second Tuesday at or
+before "now", with a 1-day buffer to avoid same-day boundary issues
+(see Part D.15).
+
+### Writeback semantics
+
+`Save-ConfigWithBaseline` writes the in-memory `OsProfile` back to
+`Config/<OsKey>.json` with these guarantees:
+
+- LF line endings (matches `.gitattributes` `*.json text eol=lf`)
+- UTF-8 without BOM
+- `ConvertTo-Json -Depth 32` (full PatchBaseline.Patches[] expansion)
+- Atomic write via `[System.IO.File]::WriteAllBytes`
+- A trailing newline (POSIX-friendly)
+
+The diff produced is small and reviewable: only `PatchTuesdayOfBaseline`,
+`LastVerifiedDate`, `Patches[]`, and `WsusScnCab` fields change.
 
 ---
 
@@ -510,21 +632,79 @@ parser on PS 5.1 + some PSSA versions.
 **Fix.** Always assign to an explicit local: `if ($x) { $v = 'a' }
 else { $v = 'b' }; ... -Status $v`.
 
+### D.15 Patch Tuesday boundary buffer
+
+**Symptom.** Microsoft publishes patches on the second Tuesday US
+Pacific time. A user in Tokyo running the script on Wednesday morning
+JST could see the local date as "after Patch Tuesday" while the
+catalogue has not yet been populated on the Microsoft side.
+
+**Fix.** `Get-LatestPatchTuesday` applies a 1-day buffer: the current
+month's Patch Tuesday is only considered "already happened" when
+local date is at least 1 day past it. This trades a one-day delay
+in detecting fresh patches for elimination of empty-catalogue scrape
+failures on Patch Tuesday itself.
+
+### D.16 Microsoft Update Catalogue has no API
+
+**Symptom.** There is no documented REST or SOAP API for
+catalog.update.microsoft.com. Community modules (`MSCatalogLTS`,
+the OSDSUS-driven Recast tooling, and Kazuro Yamauchi's published
+sample) all scrape HTML / DownloadDialog responses.
+
+**Fix.** The scraper functions
+(`Get-UpdateIdFromCatalog`,
+`Get-DownloadLinkFromCatalog`,
+`Get-SupersedenceFromCatalog`)
+each accept `-MaxRetries`, set a polite `User-Agent`, and use
+`-UseBasicParsing` for Windows PowerShell 5.1 compatibility. The
+`AutoRefreshPolicy.FallbackOnScrapeFailure` setting governs what
+happens when the HTML structure changes and the regex extraction
+fails.
+
+### D.17 Auto-variable `$matches` cannot be reassigned
+
+**Symptom.** Code such as `$matches = Get-UpdateIdFromCatalog ...`
+trips `PSA2002 shadowing auto-variable` even though `$matches` is
+read-after-`-match`. The analyser does not distinguish read-only
+from read-write usage.
+
+**Fix.** Use a non-automatic local name (e.g. `$catMatches`) when
+storing collection results, and `[regex]::Match()` (which returns
+an explicit `Match` object with `.Groups[N].Value`) instead of the
+`-match`/`$matches[N]` pattern whenever a captured group is needed.
+
+### D.18 wsusscn2.cab scans the local host's image, not the WIM
+
+**Symptom.** `Invoke-WuaOfflineScan` is sometimes assumed to scan the
+mounted install.wim. It does not. `Microsoft.Update.Session` scans
+the local host's installed OS image against the offline catalog.
+
+**Fix.** The validator must therefore run from a Windows host whose
+OS family matches the target install.wim (Server 2025 host for a
+Server 2025 image). When that match cannot be guaranteed (e.g. CI
+runners can build any of the four supported OS versions), the
+validator's findings are interpreted as a strong signal but not as
+ground truth. P04.5 still aborts on missing patches because the
+WUA-required set is approximately the union of what every supported
+Server SKU requires.
+
 ---
 
 # Part E — Roadmap
 
 | Milestone | Goal | Status |
 |:---:|---|:---:|
-| **M1** | MVP across all 4 OS x en-us/ja-jp, full registry, full phase set, sandbox + execute, synthetic mode, psa.py clean, README + SPEC + CHANGELOG + CI Stage 1/2/3 | **Done (this revision)** |
-| M2 | `-AutoDetectLatestPatches` actually scrapes the Microsoft Update Catalogue and writes a Metalink file | Placeholder |
-| M3 | Server 2025 `LCUExpandViaMum=true` real implementation (MUM/CAB expand path) | Placeholder |
-| M4 | Client SKUs (Windows 10/11) support — separate Config family | Future |
-| M5 | Driver / FOD / LXP / Appx customisation (OSBuild equivalent) | Future |
-| M6 | Output ISO size minimisation (`Export-WindowsImage` with `/Compress:max`) | Future |
-| M7 | Multi-target deployment (Hyper-V auto-import, VMM library push) | Future |
-| M8 | x86 install.wim support (legacy clients only) | Out of scope |
-| M9 | arm64 evaluation ISOs for Server 2025 (once Microsoft publishes them) | Future |
+| **M1** | MVP across all 4 OS x en-us/ja-jp, full registry, full phase set, sandbox + execute, synthetic mode, psa.py clean, README + SPEC + CHANGELOG + CI Stage 1/2/3 | **Done (r01)** |
+| **M2** | `-AutoDetectLatestPatches` actually scrapes the Microsoft Update Catalogue (`Resolve-PatchSetFromCatalog`); writes Patch list back to `Config/<OsKey>.json#/PatchBaseline`; freshness gating via `Test-PatchBaselineFresh` | **Done (r02)** |
+| **M3** | P04.5 `ValidatePatchSet` integrating `wsusscn2.cab` + Windows Update Agent COM API for Microsoft-authoritative dependency check; 4-file diagnostic export on failure | **Done (r02)** |
+| M4 | Server 2025 `LCUExpandViaMum=true` real implementation (MUM/CAB expand path) | Placeholder |
+| M5 | Stage 4 CI workflow (`catalog-health`): monthly scheduled run that exercises `Resolve-PatchSetFromCatalog` and opens a PR with the resulting `Config/<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes within 30 days | Future |
+| M6 | Client SKUs (Windows 10/11) support — separate Config family | Future |
+| M7 | Driver / FOD / LXP / Appx customisation (OSBuild equivalent) | Future |
+| M8 | Output ISO size minimisation (`Export-WindowsImage` with `/Compress:max`) | Future |
+| M9 | Multi-target deployment (Hyper-V auto-import, VMM library push) | Future |
+| M10 | arm64 evaluation ISOs for Server 2025 (once Microsoft publishes them) | Future |
 
 ---
 
@@ -571,6 +751,31 @@ else { $v = 'b' }; ... -Status $v`.
 | `Invoke-CleanupAction` | `-Action Cleanup` |
 | `Invoke-HyperVBootTest` | `-Action BootTest` |
 | `Show-EntryBanner` | Top-level banner |
+
+### Added in r02 (dynamic baseline + wsusscn2 validation)
+
+| Function | Purpose |
+|---|---|
+| `Get-PatchTuesdayForMonth` | Compute second Tuesday of (Year, Month) |
+| `Get-LatestPatchTuesday` | Most recent Patch Tuesday on/before today (D.15 buffer) |
+| `Format-PatchMonthString` | `datetime` → `'yyyy-MM'` for `-PatchMonth` |
+| `Test-PatchBaselineFresh` | True iff baseline is non-stale and usable (B.10) |
+| `Test-PatchBaselineUsable` | Like Fresh but ignores age (fallback-on-scrape-failure path) |
+| `Save-ConfigWithBaseline` | Atomic JSON writeback (LF / UTF-8 / Depth 32) |
+| `Convert-CatalogPatchToBaselineEntry` | Adapter: Catalog DTO → PatchBaseline schema |
+| `Get-OsConfigPath` | Resolve `Config/<OsKey>.json` from `$Script:ScriptRoot` |
+| `Get-UpdateIdFromCatalog` | `Search.aspx?q=<KB>` HTML scrape; returns array of UpdateId + Title |
+| `Get-DownloadLinkFromCatalog` | `DownloadDialog.aspx` POST scrape; returns array of Url + FileName |
+| `Get-SupersedenceFromCatalog` | `ScopedViewInline.aspx` HTML scrape; returns Supersedes + SupersededBy |
+| `Resolve-PatchSetFromCatalog` | Orchestrator: SSU + LCU + DynUp* + .NET for (OsVersion, PatchMonth, x64) |
+| `Get-WsusScnCabSourceUrl` | Microsoft canonical wsusscn2.cab URL |
+| `Test-WsusScnCabFresh` | Cache freshness vs latest Patch Tuesday |
+| `Get-WsusScnCabIfNeeded` | Conditional download with override-path support |
+| `Invoke-WuaOfflineScan` | `Microsoft.Update.Session` COM offline scan against the cab |
+| `Compare-PatchSetVsWuaScan` | Classify WUA-required updates as Provided / Missing |
+| `Export-PatchValidationReport` | Emit 4 diagnostic files on validation failure |
+| `Invoke-SetupPhase02_5_RefreshPatchBaseline` | P02.5 phase worker |
+| `Invoke-PlanPhase04_5_ValidatePatchSet` | P04.5 phase worker |
 
 ---
 

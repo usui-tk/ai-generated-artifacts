@@ -128,9 +128,10 @@ jobs:
               exit $LASTEXITCODE
           }
 
-      # --- Smoke test 3: Synthetic + DryRun (no DISM writes) ---
+      # --- Smoke test 3: Synthetic + DryRun (no DISM writes, no Catalog) ---
       # Exercises the registry-driven dispatcher and the P02/P03/P04
-      # planning paths without mounting any WIM.
+      # planning paths without mounting any WIM. -SyntheticTestMode also
+      # implicitly skips P02.5 (Catalog scrape) and P04.5 (wsusscn2 scan).
       - name: '[Smoke3] Synthetic + DryRun'
         shell: powershell
         timeout-minutes: 5

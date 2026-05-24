@@ -87,8 +87,32 @@
     Path to a Metalink (.meta4) manifest file describing the patch set.
 
 .PARAMETER AutoDetectLatestPatches
-    Resolve the latest patches via Microsoft Update Catalog scraping
-    (local-only, not run in CI). Falls back to Config JSON AutoDetectKnownGood.
+    Force a refresh of the patch baseline by scraping Microsoft Update
+    Catalog regardless of staleness. Result is written back to the
+    Config JSON (PatchBaseline). Requires internet access..
+
+.PARAMETER PatchMonth
+    Target patch month in yyyy-MM format (e.g. '2026-06'). Used by the
+    r02 RefreshPatchBaseline phase to scope the Catalog query. Defaults
+    to the current month's Patch Tuesday..
+
+.PARAMETER SkipDynamicPatchRefresh
+    Skip the P02.5 RefreshPatchBaseline phase even if the baseline is
+    stale. Useful for offline or air-gapped runs..
+
+.PARAMETER UseBaselineOnly
+    Use PatchBaseline.Patches strictly as-is, never scrape, never
+    refresh. Equivalent to -SkipDynamicPatchRefresh plus a guarantee
+    that no Catalog access occurs..
+
+.PARAMETER IgnorePatchValidation
+    Demote P04.5 ValidatePatchSet failures from "abort" to "warning".
+    NOT recommended for production runs; intended for development..
+
+.PARAMETER WsusScnCabPath
+    Path to a pre-staged wsusscn2.cab file. When specified, the P04.5
+    ValidatePatchSet phase will use this file instead of downloading
+    one to <WorkRoot>/cache/..
 
 .PARAMETER WorkRoot
     Workspace root. Default: C:\Temp\Workspace_UpdateWsi.
@@ -182,6 +206,14 @@ param(
     [string]   $ManifestPath,
     [switch]   $AutoDetectLatestPatches,
 
+    # ---- dynamic baseline / validation parameters ----
+    [string]   $PatchMonth,
+    [switch]   $SkipDynamicPatchRefresh,
+    [switch]   $IgnorePatchValidation,
+    [string]   $WsusScnCabPath,
+    [switch]   $UseBaselineOnly,
+    # ------------
+
     [string]   $WorkRoot             = 'C:\Temp\Workspace_UpdateWsi',
     [string]   $OutputDir,
     [string]   $OnlyInstallWimIndexes,
@@ -197,9 +229,9 @@ param(
     [switch]   $Execute
 )
 
-# ------------------------------------------------------------
+# -----------------
 # Parameter validation
-# ------------------------------------------------------------
+# -----------------
 # Mutual exclusivity rules are checked here (rather than via [ValidateScript])
 # so the user gets a single, clear error before any side effects occur.
 if ($IsoUrl -and $IsoPath) {
@@ -217,6 +249,22 @@ if ($SyntheticTestMode -and $EvalIsoMode) {
 if ($PSBoundParameters.ContainsKey('OnlyPhases') -and -not $OnlyPhases) {
     throw '-OnlyPhases was specified but the array is empty.'
 }
+
+# ---- mutual exclusivity / format validation (P02.5 / P04.5 params) ----
+if ($SkipDynamicPatchRefresh -and $AutoDetectLatestPatches) {
+    throw '-SkipDynamicPatchRefresh and -AutoDetectLatestPatches are mutually exclusive.'
+}
+if ($UseBaselineOnly -and $AutoDetectLatestPatches) {
+    throw '-UseBaselineOnly and -AutoDetectLatestPatches are mutually exclusive.'
+}
+if ($PatchMonth -and ($PatchMonth -notmatch '^\d{4}-\d{2}$')) {
+    throw ('-PatchMonth must be in yyyy-MM format (e.g. 2026-06). Got: "' + $PatchMonth + '"')
+}
+if ($WsusScnCabPath -and -not (Test-Path -LiteralPath $WsusScnCabPath)) {
+    # Just a friendly early warning; the validator will retry/error later.
+    Write-Verbose ('Configured -WsusScnCabPath does not yet exist: ' + $WsusScnCabPath)
+}
+# ----------
 
 # Several non-trivial actions require OsVersion. ListPhases and
 # EnvironmentInfoOnly are the only ones that should be allowed without it
@@ -307,9 +355,9 @@ function Resolve-RelativeToScript {
     return [System.IO.Path]::GetFullPath($Path)
 }
 
-# ------------------------------------------------------------
+# -----------------
 # Workspace tree resolution
-# ------------------------------------------------------------
+# -----------------
 # The ISO Updater workspace layout is documented in SPEC.md Part B.2.
 # All sub-directories are derived from $Script:WorkRoot so a single
 # -WorkRoot override re-bases the whole tree (used heavily on CI where
@@ -367,8 +415,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.24-r01'
-$Script:ScriptTag     = 'initial-mvp-all-server-os'
+$Script:ScriptVersion = 'update-wsi-2026.06.10-r02'
+$Script:ScriptTag     = 'dynamic-baseline-and-wsusscn2-validation'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -396,15 +444,17 @@ $Script:PhaseTimings      = New-Object System.Collections.Generic.List[object]
 # without running any phase functions. Func names are bound by
 # convention; Invoke-PhaseRunner resolves them via Get-Command.
 $Script:PhaseRegistry = @(
-    [pscustomobject]@{ Id='P01'; Name='Initialize';      Group='Setup';  Func='Invoke-SetupPhase01_Initialize' }
-    [pscustomobject]@{ Id='P02'; Name='ResolveInputs';   Group='Setup';  Func='Invoke-SetupPhase02_ResolveInputs' }
-    [pscustomobject]@{ Id='P03'; Name='FetchAssets';     Group='Fetch';  Func='Invoke-FetchPhase03_FetchAssets' }
-    [pscustomobject]@{ Id='P04'; Name='ExpandIso';       Group='Plan';   Func='Invoke-PlanPhase04_ExpandIso' }
-    [pscustomobject]@{ Id='P05'; Name='PatchInstallWim'; Group='Build';  Func='Invoke-BuildPhase05_PatchInstallWim' }
-    [pscustomobject]@{ Id='P06'; Name='PatchBootWim';    Group='Build';  Func='Invoke-BuildPhase06_PatchBootWim' }
-    [pscustomobject]@{ Id='P07'; Name='AssembleIso';     Group='Build';  Func='Invoke-BuildPhase07_AssembleIso' }
-    [pscustomobject]@{ Id='P08'; Name='StaticVerify';    Group='Verify'; Func='Invoke-VerifyPhase08_StaticVerify' }
-    [pscustomobject]@{ Id='P09'; Name='FinalReport';     Group='Report'; Func='Invoke-ReportPhase09_FinalReport' }
+    [pscustomobject]@{ Id='P01';   Name='Initialize';            Group='Setup';  Func='Invoke-SetupPhase01_Initialize' }
+    [pscustomobject]@{ Id='P02';   Name='ResolveInputs';         Group='Setup';  Func='Invoke-SetupPhase02_ResolveInputs' }
+    [pscustomobject]@{ Id='P02.5'; Name='RefreshPatchBaseline';  Group='Setup';  Func='Invoke-SetupPhase02_5_RefreshPatchBaseline' }
+    [pscustomobject]@{ Id='P03';   Name='FetchAssets';           Group='Fetch';  Func='Invoke-FetchPhase03_FetchAssets' }
+    [pscustomobject]@{ Id='P04';   Name='ExpandIso';             Group='Plan';   Func='Invoke-PlanPhase04_ExpandIso' }
+    [pscustomobject]@{ Id='P04.5'; Name='ValidatePatchSet';      Group='Plan';   Func='Invoke-PlanPhase04_5_ValidatePatchSet' }
+    [pscustomobject]@{ Id='P05';   Name='PatchInstallWim';       Group='Build';  Func='Invoke-BuildPhase05_PatchInstallWim' }
+    [pscustomobject]@{ Id='P06';   Name='PatchBootWim';          Group='Build';  Func='Invoke-BuildPhase06_PatchBootWim' }
+    [pscustomobject]@{ Id='P07';   Name='AssembleIso';           Group='Build';  Func='Invoke-BuildPhase07_AssembleIso' }
+    [pscustomobject]@{ Id='P08';   Name='StaticVerify';          Group='Verify'; Func='Invoke-VerifyPhase08_StaticVerify' }
+    [pscustomobject]@{ Id='P09';   Name='FinalReport';           Group='Report'; Func='Invoke-ReportPhase09_FinalReport' }
 )
 
 # Run-state carriers populated by phases; accessed by later phases. The
@@ -2362,6 +2412,520 @@ function Get-PatchApplyOrder {
 
 
 # ============================================================
+# ISO Updater specific: Patch Tuesday calculator and
+# PatchBaseline freshness / IO helpers
+# ============================================================
+
+function Get-PatchTuesdayForMonth {
+    <#
+    .SYNOPSIS
+        Compute the date of Patch Tuesday (second Tuesday) for a given month.
+    .DESCRIPTION
+        Microsoft releases Windows monthly quality updates on the second
+        Tuesday of each month (US Pacific time). This helper returns the
+        date object (no time component) for that day. The caller is
+        expected to compare it against the current local date.
+
+        For boundary safety, the comparison logic in callers should add
+        a 24-hour buffer (Microsoft does not push exactly at midnight US
+        Pacific) so a same-day execution is not flagged as "post Patch
+        Tuesday" prematurely.
+    #>
+    [OutputType([datetime])]
+    param(
+        [Parameter(Mandatory)] [int]$Year,
+        [Parameter(Mandatory)] [ValidateRange(1, 12)] [int]$Month
+    )
+    $first = [datetime]::new($Year, $Month, 1)
+    # DayOfWeek: Sunday=0, Monday=1, Tuesday=2, ...
+    $offset = (2 - [int]$first.DayOfWeek + 7) % 7
+    return $first.AddDays($offset + 7)
+}
+
+function Get-LatestPatchTuesday {
+    <#
+    .SYNOPSIS
+        Returns the most recent Patch Tuesday on or before "now".
+    .DESCRIPTION
+        Uses the local system clock. If "now" is before this month's
+        Patch Tuesday, the previous month's value is returned instead.
+        A 1-day buffer is applied (see SPEC D.15) to avoid edge cases
+        where the script runs during the US-Pacific evening of Patch
+        Tuesday while local time has already rolled to Wednesday.
+    #>
+    [OutputType([datetime])]
+    param()
+    $now = (Get-Date).Date
+    $thisMonth = Get-PatchTuesdayForMonth -Year $now.Year -Month $now.Month
+    # Apply 1-day buffer: only treat current-month Patch Tuesday as
+    # "already happened" if local date is at least 1 day past it.
+    if ($now -ge $thisMonth.AddDays(1)) {
+        return $thisMonth
+    }
+    # Otherwise return previous month's Patch Tuesday
+    $prev = $now.AddMonths(-1)
+    return Get-PatchTuesdayForMonth -Year $prev.Year -Month $prev.Month
+}
+
+function Format-PatchMonthString {
+    <#
+    .SYNOPSIS
+        Format a datetime as 'yyyy-MM' for Patch Month identifiers.
+    #>
+    [OutputType([string])]
+    param([Parameter(Mandatory)] [datetime]$Date)
+    return $Date.ToString('yyyy-MM')
+}
+
+function Test-PatchBaselineFresh {
+    <#
+    .SYNOPSIS
+        Returns $true if the supplied PatchBaseline is current enough
+        to skip the dynamic Catalog refresh.
+    .DESCRIPTION
+        Returns $false when either:
+          - PatchTuesdayOfBaseline is empty (uninitialised), or
+          - PatchTuesdayOfBaseline < latest Patch Tuesday, or
+          - PatchBaseline.Patches has zero usable entries
+        Returns $true otherwise.
+    #>
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)] [AllowNull()] $Baseline,
+        [Parameter(Mandatory)] [datetime]$LatestPatchTuesday
+    )
+    if (-not $Baseline) { return $false }
+    $ptStr = $Baseline.PatchTuesdayOfBaseline
+    if ([string]::IsNullOrWhiteSpace($ptStr)) { return $false }
+    if (-not ($ptStr -match '^\d{4}-\d{2}-\d{2}$')) { return $false }
+    $baselineDate = [datetime]::ParseExact($ptStr, 'yyyy-MM-dd', $null)
+    if ($baselineDate -lt $LatestPatchTuesday) { return $false }
+    # Also require at least one usable patch entry
+    if (-not $Baseline.Patches -or $Baseline.Patches.Count -eq 0) { return $false }
+    $usable = @($Baseline.Patches | Where-Object {
+        $_.KbId -and $_.DownloadUrl -and $_.Sha256 -and ($_.Sha256 -ne '')
+    })
+    return ($usable.Count -gt 0)
+}
+
+function Test-PatchBaselineUsable {
+    <#
+    .SYNOPSIS
+        Returns $true if PatchBaseline.Patches has any usable entry.
+        Distinct from Test-PatchBaselineFresh: this one ignores age.
+        Used by the fallback-on-scrape-failure path (SPEC C.3).
+    #>
+    [OutputType([bool])]
+    param([Parameter(Mandatory)] [AllowNull()] $Baseline)
+    if (-not $Baseline -or -not $Baseline.Patches) { return $false }
+    $usable = @($Baseline.Patches | Where-Object {
+        $_.KbId -and $_.DownloadUrl -and $_.Sha256 -and ($_.Sha256 -ne '')
+    })
+    return ($usable.Count -gt 0)
+}
+
+function Save-ConfigWithBaseline {
+    <#
+    .SYNOPSIS
+        Write the in-memory OsProfile (with updated PatchBaseline) back
+        to its Config JSON file, preserving field order where possible.
+    .DESCRIPTION
+        Used by P02.5 when AutoRefreshPolicy.WritebackToConfig = $true.
+        Emits LF line endings (per repo .gitattributes for *.json) and
+        UTF-8 without BOM. Uses Depth 32 to fully serialise patch arrays.
+    #>
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)] [string]$ConfigPath,
+        [Parameter(Mandatory)] $OsProfile
+    )
+    # ConvertTo-Json with -Depth handles nested PatchBaseline.Patches
+    $json = $OsProfile | ConvertTo-Json -Depth 32
+    # Normalise to LF (json files are eol=lf per repo .gitattributes)
+    $json = $json -replace "`r`n", "`n"
+    # Append trailing newline for POSIX-friendliness
+    if (-not $json.EndsWith("`n")) { $json = $json + "`n" }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+    # WriteAllBytes is atomic on the same filesystem
+    [System.IO.File]::WriteAllBytes($ConfigPath, $bytes)
+}
+
+function Convert-CatalogPatchToBaselineEntry {
+    <#
+    .SYNOPSIS
+        Convert a Catalog-scraper result tuple into a PatchBaseline entry
+        (the structure stored under PatchBaseline.Patches in the Config).
+    .DESCRIPTION
+        Bridges the Microsoft Update Catalog DTO (UpdateId/Title/DownloadUrl)
+        and our PatchBaseline schema (KbId/Type/ApplyOrder/Sha256/...).
+        Computes Type and ApplyOrder via the existing classifiers.
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$KbId,
+        [Parameter(Mandatory)] [string]$Title,
+        [Parameter(Mandatory)] [string]$UpdateId,
+        [Parameter(Mandatory)] [string]$DownloadUrl,
+        [string]$FileName,
+        [long]$SizeBytes = 0,
+        [string]$Sha256  = '',
+        [string]$ReleaseDate = '',
+        [string[]]$Supersedes  = @(),
+        [string[]]$RequiresKbIds = @(),
+        [string]$ApplicableArchitecture = 'x64',
+        [string[]]$ApplicableLanguages  = @('neutral')
+    )
+    $fn = $FileName
+    if ([string]::IsNullOrEmpty($fn) -and $DownloadUrl) {
+        # Recover filename from URL leaf
+        try { $fn = [System.IO.Path]::GetFileName(([uri]$DownloadUrl).AbsolutePath) }
+        catch { $fn = '' }
+    }
+    $pType  = Get-PatchType -FileName $fn
+    $pOrder = Get-PatchApplyOrder -PatchType $pType
+    return [pscustomobject][ordered]@{
+        Type                   = $pType
+        KbId                   = $KbId
+        Title                  = $Title
+        UpdateId               = $UpdateId
+        DownloadUrl            = $DownloadUrl
+        FileName               = $fn
+        SizeBytes              = $SizeBytes
+        Sha256                 = $Sha256
+        ReleaseDate            = $ReleaseDate
+        Supersedes             = $Supersedes
+        RequiresKbIds          = $RequiresKbIds
+        ApplyOrder             = $pOrder
+        ApplicableArchitecture = $ApplicableArchitecture
+        ApplicableLanguages    = $ApplicableLanguages
+    }
+}
+
+function Get-OsConfigPath {
+    <#
+    .SYNOPSIS
+        Resolve the on-disk path of the active Config/<OsKey>.json file,
+        so the P02.5 writeback knows where to save.
+    #>
+    [OutputType([string])]
+    param([Parameter(Mandatory)] [string]$OsKey)
+    $here = $Script:ScriptRoot
+    if ([string]::IsNullOrEmpty($here)) { $here = $PSScriptRoot }
+    if ([string]::IsNullOrEmpty($here)) { $here = (Get-Location).Path }
+    return (Join-Path $here ('Config' + [System.IO.Path]::DirectorySeparatorChar + $OsKey + '.json'))
+}
+
+
+# ============================================================
+# ISO Updater specific: Microsoft Update Catalog scraper
+# ============================================================
+#
+# Implementation note: this module's three functions are loosely
+# modelled after the PoC PowerShell sample published by Kazuro Yamauchi
+# (former handle: yamanxworld) at say-tech.co.jp [2025memo54] and the
+# established community module MSCatalogLTS (PowerShell Gallery, owner
+# Marco-online). Both confirm the same pattern:
+#
+#   1. GET  https://www.catalog.update.microsoft.com/Search.aspx?q=<KB>
+#      -> HTML; locate goToDetails("<GUID>") calls to extract UpdateId
+#   2. POST https://www.catalog.update.microsoft.com/DownloadDialog.aspx
+#      with body containing the UpdateID -> JSON-in-text response;
+#      extract downloadInformation[N].files[N].url
+#   3. GET  https://www.catalog.update.microsoft.com/ScopedViewInline.aspx?
+#         updateid=<GUID>
+#      -> HTML; the "This update has been superseded by ..." and
+#      "This update supersedes ..." sections drive the dependency graph
+#
+# Caveats (also explicit in SPEC D.16):
+#   * Microsoft Update Catalog has no public API. Site HTML structure
+#     changes break this code. The caller MUST handle scrape failures
+#     via AutoRefreshPolicy.FallbackOnScrapeFailure.
+#   * Some updates publish multiple files per UpdateId (e.g. .NET
+#     family updates, multi-arch bundles). Caller filters by
+#     architecture / language token in the file name.
+#   * Microsoft Update Catalog requires User-Agent and basic-parsing
+#     mode on Windows PowerShell 5.1; we set both unconditionally.
+
+function Get-UpdateIdFromCatalog {
+    <#
+    .SYNOPSIS
+        Search Microsoft Update Catalog for a KB ID and return an array
+        of (UpdateId, Title) tuples.
+    .DESCRIPTION
+        GETs the Search.aspx page for the given KB number and extracts
+        UpdateID GUIDs from goToDetails(...) calls. Returns all matches.
+        Caller is expected to narrow down by Title (architecture,
+        OS variant) before passing the UpdateId to Get-DownloadLinkFromCatalog.
+    .EXAMPLE
+        Get-UpdateIdFromCatalog -KbId KB5058524 |
+            Where-Object { $_.Title -match 'Server 2025' -and $_.Title -match 'x64' }
+    #>
+    [OutputType([pscustomobject[]])]
+    param(
+        [Parameter(Mandatory)] [string]$KbId,
+        [int]$MaxRetries = 3
+    )
+    $searchUri = 'https://www.catalog.update.microsoft.com/Search.aspx?q=' + [uri]::EscapeDataString($KbId)
+    $headers = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; UpdateWsi/r02)' }
+    $resp = $null
+    $attempt = 0
+    while ($attempt -lt $MaxRetries -and -not $resp) {
+        $attempt++
+        try {
+            # -UseBasicParsing required on Win PS 5.1 (PSA3005 not applicable here)
+            $resp = Invoke-WebRequest -Uri $searchUri -UseBasicParsing -Headers $headers `
+                                      -TimeoutSec 60 -ErrorAction Stop
+        } catch {
+            if ($attempt -ge $MaxRetries) { throw }
+            Wait-WithJitter -BaseSeconds 2 -MaxSeconds 5
+        }
+    }
+    if ($resp.StatusCode -ne 200) {
+        throw ('Microsoft Update Catalog returned HTTP {0} for KB {1}.' -f $resp.StatusCode, $KbId)
+    }
+    $pattern = '(?is)<a[^>]*onclick\s*=\s*(["'']?)goToDetails\(\s*"([0-9A-Fa-f-]{36})"\s*\)\s*;?\s*\1[^>]*>\s*(.*?)\s*</a>'
+    $items = New-Object System.Collections.Generic.List[object]
+    $matchList = [regex]::Matches($resp.Content, $pattern)
+    foreach ($m in $matchList) {
+        $guid = $m.Groups[2].Value
+        $raw  = $m.Groups[3].Value
+        $txt  = ($raw -replace '<[^>]+>', '')
+        $txt  = [System.Net.WebUtility]::HtmlDecode($txt)
+        $title = ($txt -replace '\s+', ' ').Trim()
+        $items.Add([pscustomobject][ordered]@{
+            UpdateId = $guid
+            Title    = $title
+            KbId     = $KbId
+        }) | Out-Null
+    }
+    # Deduplicate by UpdateId
+    return @($items | Sort-Object UpdateId -Unique)
+}
+
+function Get-DownloadLinkFromCatalog {
+    <#
+    .SYNOPSIS
+        For an UpdateId returned by Get-UpdateIdFromCatalog, POST to
+        DownloadDialog.aspx and extract direct download URL(s).
+    .DESCRIPTION
+        Returns an array of (Url, FileName) tuples. Most updates have
+        one file; .NET family updates and bundles may have several.
+    #>
+    [OutputType([pscustomobject[]])]
+    param(
+        [Parameter(Mandatory)] [string]$UpdateId,
+        [int]$MaxRetries = 3
+    )
+    $uri = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
+    $postJson = @{ size = 0; UpdateID = $UpdateId; UpdateIDInfo = $UpdateId } | ConvertTo-Json -Compress
+    $body = @{ UpdateIDs = '[' + $postJson + ']' }
+    $headers = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; UpdateWsi/r02)' }
+    $resp = $null
+    $attempt = 0
+    while ($attempt -lt $MaxRetries -and -not $resp) {
+        $attempt++
+        try {
+            $resp = Invoke-WebRequest -Uri $uri -Method Post -Body $body `
+                                      -ContentType 'application/x-www-form-urlencoded' `
+                                      -UseBasicParsing -Headers $headers `
+                                      -TimeoutSec 60 -ErrorAction Stop
+        } catch {
+            if ($attempt -ge $MaxRetries) { throw }
+            Wait-WithJitter -BaseSeconds 2 -MaxSeconds 5
+        }
+    }
+    if ($resp.StatusCode -ne 200) {
+        throw ('DownloadDialog returned HTTP {0} for UpdateId {1}.' -f $resp.StatusCode, $UpdateId)
+    }
+    # Pattern extracts: downloadInformation[N].files[N].url = '<url>';
+    $pattern = "downloadInformation\[\d+\]\.files\[\d+\]\.url\s*=\s*'([^']+)'"
+    $items = New-Object System.Collections.Generic.List[object]
+    $matchList = [regex]::Matches($resp.Content, $pattern)
+    foreach ($m in $matchList) {
+        $url = $m.Groups[1].Value
+        $fn  = [System.IO.Path]::GetFileName(([uri]$url).AbsolutePath)
+        $items.Add([pscustomobject][ordered]@{
+            Url      = $url
+            FileName = $fn
+        }) | Out-Null
+    }
+    return @($items | Sort-Object Url -Unique)
+}
+
+function Get-SupersedenceFromCatalog {
+    <#
+    .SYNOPSIS
+        For an UpdateId, fetch ScopedViewInline.aspx and extract the
+        "supersedes" and "superseded by" KB lists.
+    .DESCRIPTION
+        These two lists drive PatchBaseline.Patches[].Supersedes and
+        the dependency_graph diagnostic export. They are best-effort:
+        the page layout changes occasionally and missing data is not
+        a hard failure.
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$UpdateId,
+        [int]$MaxRetries = 3
+    )
+    $uri = 'https://www.catalog.update.microsoft.com/ScopedViewInline.aspx?updateid=' + [uri]::EscapeDataString($UpdateId)
+    $headers = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; UpdateWsi/r02)' }
+    $supersedes  = New-Object System.Collections.Generic.List[string]
+    $supersededBy = New-Object System.Collections.Generic.List[string]
+    $resp = $null
+    $attempt = 0
+    while ($attempt -lt $MaxRetries -and -not $resp) {
+        $attempt++
+        try {
+            $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers $headers `
+                                      -TimeoutSec 60 -ErrorAction Stop
+        } catch {
+            if ($attempt -ge $MaxRetries) {
+                # Supersedence info is best-effort
+                return [pscustomobject][ordered]@{
+                    Supersedes   = @()
+                    SupersededBy = @()
+                    Error        = $_.Exception.Message
+                }
+            }
+            Wait-WithJitter -BaseSeconds 2 -MaxSeconds 5
+        }
+    }
+    $kbPattern = 'KB\d{6,7}'
+    # Section pattern: <div id="supersededbyInfo" ...> ... </div>
+    $reSupBy = '(?is)id\s*=\s*["'']supersededbyInfo["''][^>]*>(.*?)</div>'
+    $reSup   = '(?is)id\s*=\s*["'']supersedesInfo["''][^>]*>(.*?)</div>'
+    $mBy = [regex]::Match($resp.Content, $reSupBy)
+    if ($mBy.Success) {
+        foreach ($kb in [regex]::Matches($mBy.Groups[1].Value, $kbPattern)) {
+            if (-not $supersededBy.Contains($kb.Value)) { $supersededBy.Add($kb.Value) | Out-Null }
+        }
+    }
+    $mSup = [regex]::Match($resp.Content, $reSup)
+    if ($mSup.Success) {
+        foreach ($kb in [regex]::Matches($mSup.Groups[1].Value, $kbPattern)) {
+            if (-not $supersedes.Contains($kb.Value)) { $supersedes.Add($kb.Value) | Out-Null }
+        }
+    }
+    return [pscustomobject][ordered]@{
+        Supersedes   = $supersedes.ToArray()
+        SupersededBy = $supersededBy.ToArray()
+        Error        = $null
+    }
+}
+
+function Resolve-PatchSetFromCatalog {
+    <#
+    .SYNOPSIS
+        Orchestrator: for a given OS / month / language, look up the
+        canonical patch set (SSU + LCU + DynUp Setup + DynUp Component
+        + DynUp SafeOs + .NET) in Microsoft Update Catalog and return
+        a list of fully-populated PatchBaseline entries.
+    .DESCRIPTION
+        Search terms are templated per patch type. The returned array
+        is filtered by OS variant (Title contains "Server <year>") and
+        architecture (Title contains "x64"). It does NOT compute SHA-256
+        for the patch file; that is recorded later by P03 when the file
+        is actually downloaded.
+    #>
+    [OutputType([pscustomobject[]])]
+    param(
+        [Parameter(Mandatory)] [string]$OsVersion,
+        [Parameter(Mandatory)] [string]$OsLanguage,
+        [Parameter(Mandatory)] [string]$PatchMonth,
+        [int]$MaxRetries = 3
+    )
+
+    # OsVersion -> human-readable token used in Catalog titles
+    $osTitleMap = @{
+        'Server2016' = @('Windows Server 2016', 'Server 2016')
+        'Server2019' = @('Windows Server 2019', 'Server 2019')
+        'Server2022' = @('Windows Server 2022', 'Server 2022')
+        'Server2025' = @('Windows Server 2025', 'Server 2025', 'Microsoft server operating system version 24H2')
+    }
+    $osTokens = $osTitleMap[$OsVersion]
+    if (-not $osTokens) {
+        throw ('No Catalog title token map for OsVersion ' + $OsVersion)
+    }
+
+    # Search query templates per patch type
+    $queries = New-Object System.Collections.Generic.List[object]
+    $queries.Add([pscustomobject]@{ Type='SSU';                   Query=$PatchMonth + ' servicing stack update ' + $osTokens[0] })
+    $queries.Add([pscustomobject]@{ Type='LCU';                   Query=$PatchMonth + ' cumulative update ' + $osTokens[0] })
+    $queries.Add([pscustomobject]@{ Type='DynamicUpdate.Setup';   Query=$PatchMonth + ' dynamic update setup ' + $osTokens[0] })
+    $queries.Add([pscustomobject]@{ Type='DynamicUpdate.SafeOs';  Query=$PatchMonth + ' safe os dynamic update ' + $osTokens[0] })
+    $queries.Add([pscustomobject]@{ Type='DotNet';                Query=$PatchMonth + ' .net framework cumulative update ' + $osTokens[0] })
+
+    $resolved = New-Object System.Collections.Generic.List[object]
+    foreach ($q in $queries) {
+        Write-Step ('Catalog query: type={0} query="{1}"' -f $q.Type, $q.Query)
+        $catMatches = $null
+        try {
+            $catMatches = Get-UpdateIdFromCatalog -KbId $q.Query -MaxRetries $MaxRetries
+        } catch {
+            Write-Warn ('Catalog search failed for {0}: {1}' -f $q.Type, $_.Exception.Message)
+            continue
+        }
+        if (-not $catMatches -or $catMatches.Count -eq 0) {
+            Write-Warn ('No Catalog matches for {0} / {1}.' -f $q.Type, $q.Query)
+            continue
+        }
+        # Narrow by OS token + architecture x64
+        $best = $catMatches | Where-Object {
+            $title = $_.Title
+            $hit = $false
+            foreach ($t in $osTokens) {
+                if ($title -match [regex]::Escape($t)) { $hit = $true; break }
+            }
+            $hit -and ($title -match 'x64')
+        } | Select-Object -First 1
+        if (-not $best) {
+            Write-Warn ('No Catalog match narrowed by OS/arch for {0}.' -f $q.Type)
+            continue
+        }
+        # Fetch download link and supersedence info
+        $links = $null
+        try {
+            $links = Get-DownloadLinkFromCatalog -UpdateId $best.UpdateId -MaxRetries $MaxRetries
+        } catch {
+            Write-Warn ('DownloadDialog failed for UpdateId {0}: {1}' -f $best.UpdateId, $_.Exception.Message)
+            continue
+        }
+        if (-not $links -or $links.Count -eq 0) {
+            Write-Warn ('No download link returned for UpdateId {0}.' -f $best.UpdateId)
+            continue
+        }
+        # Take the first (most common: single-file updates)
+        $primary = $links[0]
+        $supers  = Get-SupersedenceFromCatalog -UpdateId $best.UpdateId -MaxRetries $MaxRetries
+        $kbFromTitle = ''
+        $kbMatch = [regex]::Match($best.Title, '\((KB\d{6,7})\)')
+        if ($kbMatch.Success) { $kbFromTitle = $kbMatch.Groups[1].Value }
+        $entry = Convert-CatalogPatchToBaselineEntry `
+            -KbId $kbFromTitle `
+            -Title $best.Title `
+            -UpdateId $best.UpdateId `
+            -DownloadUrl $primary.Url `
+            -FileName $primary.FileName `
+            -Sha256 '' `
+            -Supersedes ($supers.Supersedes) `
+            -ApplicableArchitecture 'x64' `
+            -ApplicableLanguages @('neutral')
+        $resolved.Add($entry) | Out-Null
+    }
+
+    # Compute LCU dependency on SSU automatically
+    $ssuKbs = @($resolved | Where-Object { $_.Type -eq 'SSU' } | ForEach-Object { $_.KbId })
+    foreach ($p in $resolved) {
+        if ($p.Type -eq 'LCU' -and $ssuKbs.Count -gt 0) {
+            $p.RequiresKbIds = $ssuKbs
+        }
+    }
+    return $resolved.ToArray()
+}
+
+
+# ============================================================
 # ISO Updater specific: DISM / WIM operations
 # ============================================================
 
@@ -2771,6 +3335,282 @@ function New-SyntheticTestIso {
 
 
 # ============================================================
+# ISO Updater specific: wsusscn2.cab + Windows Update Agent API
+# offline scan
+# ============================================================
+#
+# These helpers let P04.5 ValidatePatchSet ask Microsoft's own Update
+# Agent (the same component Windows Update uses) whether the supplied
+# patch set is sufficient for the target install.wim image. This is the
+# only authoritative way to know "LCU X requires SSU Y" because the
+# dependency metadata is embedded in the wsusscn2 catalog, not exposed
+# via any documented Microsoft API.
+#
+# References:
+#   - https://learn.microsoft.com/windows/win32/wua_sdk/using-the-windows-update-agent-api
+#   - https://learn.microsoft.com/windows/deployment/update/catalog-checkpoint-cumulative-updates
+#   - PoC scripts published by Kazuro Yamauchi (say-tech.co.jp, 2025memo54)
+
+function Get-WsusScnCabSourceUrl {
+    <#
+    .SYNOPSIS
+        Return the canonical wsusscn2.cab download URL (the one
+        Microsoft has used since 2003 for the offline scan tool).
+    #>
+    [OutputType([string])]
+    param()
+    return 'https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab'
+}
+
+function Test-WsusScnCabFresh {
+    <#
+    .SYNOPSIS
+        Decide whether the local wsusscn2.cab is fresh enough to reuse,
+        or must be re-downloaded.
+    .DESCRIPTION
+        Per the contract:
+          (a) If LocalCachePath is empty / non-existent: stale (download)
+          (b) If LastDownloadedDate is empty: stale (download)
+          (c) If now >= latest Patch Tuesday AND
+              LastDownloadedDate < latest Patch Tuesday: stale (download)
+          (d) Otherwise: fresh (reuse)
+    #>
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)] [AllowNull()] $WsusScnCabMeta,
+        [Parameter(Mandatory)] [datetime]$LatestPatchTuesday
+    )
+    if (-not $WsusScnCabMeta) { return $false }
+    $path = $WsusScnCabMeta.LocalCachePath
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    $lastStr = $WsusScnCabMeta.LastDownloadedDate
+    if ([string]::IsNullOrWhiteSpace($lastStr)) { return $false }
+    $lastDate = $null
+    if (-not [datetime]::TryParse($lastStr, [ref]$lastDate)) { return $false }
+    # Require: last download is on/after the latest Patch Tuesday
+    if ($lastDate.Date -lt $LatestPatchTuesday.Date) { return $false }
+    return $true
+}
+
+function Get-WsusScnCabIfNeeded {
+    <#
+    .SYNOPSIS
+        Conditionally download wsusscn2.cab to a cache directory.
+    .DESCRIPTION
+        Behaviour:
+          1. If -OverridePath is supplied AND the file exists, use that.
+          2. Else compute LocalCachePath = <WorkRoot>/cache/wsusscn2.cab
+          3. If Test-WsusScnCabFresh returns $true, reuse.
+          4. Else download from $SourceUrl with retries.
+        Returns a hashtable: @{ Path; SizeBytes; Sha256; DownloadedNow }
+    #>
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)] [AllowNull()] $WsusScnCabMeta,
+        [Parameter(Mandatory)] [string]$WorkRoot,
+        [Parameter(Mandatory)] [datetime]$LatestPatchTuesday,
+        [string]$OverridePath
+    )
+
+    # (1) Caller-supplied override (`-WsusScnCabPath`)
+    if (-not [string]::IsNullOrWhiteSpace($OverridePath)) {
+        if (Test-Path -LiteralPath $OverridePath) {
+            $fi = Get-Item -LiteralPath $OverridePath
+            return @{
+                Path          = $OverridePath
+                SizeBytes     = $fi.Length
+                Sha256        = ''
+                DownloadedNow = $false
+                Source        = 'OverridePath'
+            }
+        }
+        Write-Warn ('-WsusScnCabPath was supplied but does not exist: ' + $OverridePath)
+    }
+
+    # (2) Default cache location
+    $cacheDir  = Join-Path $WorkRoot 'cache'
+    if (-not (Test-Path -LiteralPath $cacheDir)) {
+        New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+    }
+    $cachePath = Join-Path $cacheDir 'wsusscn2.cab'
+
+    # Construct a meta object reflecting the actual cache location for
+    # the freshness check (it may be empty in Config on first run)
+    $meta = $WsusScnCabMeta
+    if ($meta -and -not $meta.LocalCachePath) {
+        $meta = $meta | Select-Object *
+        $meta.LocalCachePath = $cachePath
+    }
+
+    if (Test-WsusScnCabFresh -WsusScnCabMeta $meta -LatestPatchTuesday $LatestPatchTuesday) {
+        $fi = Get-Item -LiteralPath $cachePath
+        Write-Step ('wsusscn2.cab cache fresh; reusing: {0} ({1:N0} bytes)' -f $cachePath, $fi.Length)
+        return @{
+            Path          = $cachePath
+            SizeBytes     = $fi.Length
+            Sha256        = $meta.LastDownloadedSha256
+            DownloadedNow = $false
+            Source        = 'Cache'
+        }
+    }
+
+    # (3) Download
+    $url = Get-WsusScnCabSourceUrl
+    if ($WsusScnCabMeta -and $WsusScnCabMeta.SourceUrl) {
+        $url = $WsusScnCabMeta.SourceUrl
+    }
+    Write-Step ('Downloading wsusscn2.cab from {0} ...' -f $url)
+    $tmp = $cachePath + '.' + ([guid]::NewGuid().ToString('N')) + '.part'
+    $headers = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; UpdateWsi/r02)' }
+    try {
+        Invoke-WebRequestWithRetry -Uri $url -OutFile $tmp -Headers $headers -MaxRetries 3 | Out-Null
+    } catch {
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        throw ('wsusscn2.cab download failed: ' + $_.Exception.Message)
+    }
+    # Atomic move
+    if (Test-Path -LiteralPath $cachePath) { Remove-Item -LiteralPath $cachePath -Force }
+    Move-Item -LiteralPath $tmp -Destination $cachePath -Force
+    $fi  = Get-Item -LiteralPath $cachePath
+    $sha = (Get-FileHash -LiteralPath $cachePath -Algorithm SHA256).Hash.ToLower()
+    Write-Ok ('wsusscn2.cab downloaded: {0:N0} bytes, sha256={1}' -f $fi.Length, $sha.Substring(0, 16) + '...')
+    return @{
+        Path          = $cachePath
+        SizeBytes     = $fi.Length
+        Sha256        = $sha
+        DownloadedNow = $true
+        Source        = 'Download'
+    }
+}
+
+function Invoke-WuaOfflineScan {
+    <#
+    .SYNOPSIS
+        Run a Windows Update Agent COM API offline scan against an
+        install.wim image that is currently mounted at $MountPath.
+    .DESCRIPTION
+        Uses Microsoft.Update.Session + Microsoft.Update.ServiceManager
+        to register the supplied wsusscn2.cab as an offline scan source.
+        Then runs $UpdateSearcher.Search("IsInstalled=0 ...") to obtain
+        the set of updates that the WUA engine judges as APPLICABLE-
+        BUT-NOT-INSTALLED for the current host's OS image.
+
+        IMPORTANT: WUA scans the LOCAL host's OS image, not the mounted
+        WIM directly. The caller must therefore run this function FROM
+        a Windows host whose OS family matches the install.wim target
+        (i.e. Server 2025 host to scan a Server 2025 image). When such
+        a host is not available, P04.5 will skip with a warning rather
+        than fail.
+
+        Returns: array of [pscustomobject] with UpdateId / Title /
+        KbIds / SupersededBy / IsMandatory / Severity / SizeBytes
+    #>
+    [OutputType([pscustomobject[]])]
+    param(
+        [Parameter(Mandatory)] [string]$WsusScnCabPath
+    )
+    if (-not (Test-Path -LiteralPath $WsusScnCabPath)) {
+        throw ('wsusscn2.cab not found at ' + $WsusScnCabPath)
+    }
+    Write-Step 'Creating WUA session for offline scan...'
+    $session = $null
+    $serviceMgr = $null
+    $service = $null
+    try {
+        $session = New-Object -ComObject 'Microsoft.Update.Session'
+        $serviceMgr = New-Object -ComObject 'Microsoft.Update.ServiceManager'
+        $service = $serviceMgr.AddScanPackageService('UpdateWsi Offline Sync', $WsusScnCabPath)
+    } catch {
+        throw ('Failed to register wsusscn2.cab with WUA: ' + $_.Exception.Message)
+    }
+    $searcher = $session.CreateUpdateSearcher()
+    $searcher.ServerSelection = 3 # ssOthers
+    $searcher.ServiceID = [string]$service.ServiceID
+    Write-Step 'Running WUA search (IsInstalled=0 and Type=Software and IsHidden=0)...'
+    $result = $searcher.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
+    $items = New-Object System.Collections.Generic.List[object]
+    for ($i = 0; $i -lt $result.Updates.Count; $i++) {
+        $u = $result.Updates.Item($i)
+        $kbList = New-Object System.Collections.Generic.List[string]
+        if ($u.KBArticleIDs) {
+            for ($k = 0; $k -lt $u.KBArticleIDs.Count; $k++) {
+                $kbList.Add('KB' + $u.KBArticleIDs.Item($k)) | Out-Null
+            }
+        }
+        $sevStr = ''
+        try { $sevStr = [string]$u.MsrcSeverity } catch { $sevStr = '' }
+        $sizeBytes = 0L
+        try { $sizeBytes = [long]$u.MaxDownloadSize } catch { $sizeBytes = 0L }
+        $items.Add([pscustomobject][ordered]@{
+            UpdateId    = [string]$u.Identity.UpdateID
+            Title       = [string]$u.Title
+            KbIds       = $kbList.ToArray()
+            IsMandatory = [bool]$u.IsMandatory
+            Severity    = $sevStr
+            SizeBytes   = $sizeBytes
+            SupportUrl  = [string]$u.SupportUrl
+        }) | Out-Null
+    }
+    Write-Ok ('WUA scan returned {0} applicable update(s).' -f $items.Count)
+    return $items.ToArray()
+}
+
+function Compare-PatchSetVsWuaScan {
+    <#
+    .SYNOPSIS
+        Compare the provided PatchBaseline.Patches (or local patch dir)
+        against the WUA scan result and classify each WUA-required
+        update as Provided / Missing.
+    .DESCRIPTION
+        Matches by KB number. Excludes Checkpoint Cumulative Updates
+        (PatchBaseline.ExcludeKbList) and any patches the user opted
+        out of via -OnlyInstallWimIndexes etc.
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [pscustomobject[]]$ProvidedPatches,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [pscustomobject[]]$WuaRequired,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [pscustomobject[]]$ExcludeKbList
+    )
+    $providedKbSet = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($p in $ProvidedPatches) {
+        if ($p.KbId) { [void]$providedKbSet.Add($p.KbId.ToUpper()) }
+    }
+    $excludeSet = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($e in $ExcludeKbList) {
+        if ($e -and $e.KbId) { [void]$excludeSet.Add($e.KbId.ToUpper()) }
+    }
+
+    $missing = New-Object System.Collections.Generic.List[object]
+    $supplied = New-Object System.Collections.Generic.List[object]
+
+    foreach ($w in $WuaRequired) {
+        $wKbs = @($w.KbIds | ForEach-Object { $_.ToUpper() })
+        $isExcluded = $false
+        foreach ($k in $wKbs) {
+            if ($excludeSet.Contains($k)) { $isExcluded = $true; break }
+        }
+        if ($isExcluded) { continue }
+        $isProvided = $false
+        foreach ($k in $wKbs) {
+            if ($providedKbSet.Contains($k)) { $isProvided = $true; break }
+        }
+        if ($isProvided) {
+            $supplied.Add($w) | Out-Null
+        } else {
+            $missing.Add($w) | Out-Null
+        }
+    }
+    return [pscustomobject][ordered]@{
+        Provided      = $supplied.ToArray()
+        Missing       = $missing.ToArray()
+        ExcludedCount = $excludeSet.Count
+    }
+}
+
+
+# ============================================================
 # Phase P01: Initialize (Setup group)
 # ============================================================
 
@@ -3002,17 +3842,33 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                     ExpectedHashes = $hashes
                 }) | Out-Null
             }
-        } elseif ($Script:AutoDetectLatestPatches) {
-            Write-Warn 'AutoDetectLatestPatches is not yet implemented in this revision.'
-            Write-Warn 'Use -PatchDirectory or -ManifestPath for now. See SPEC Part H.2.'
-            # Fall back to consuming AutoDetectKnownGood from Config (advisory only)
-            if ($Script:OsProfile.AutoDetectKnownGood) {
-                Write-Step ('Config AutoDetectKnownGood AsOfDate: {0}' -f $Script:OsProfile.AutoDetectKnownGood.AsOfDate)
+        } elseif ($Script:AutoDetectLatestPatches -or $Script:UseBaselineOnly -or `
+                  ($Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.Patches -and `
+                   $Script:OsProfile.PatchBaseline.Patches.Count -gt 0)) {
+            # PatchBaseline-driven path. The patch list is derived from
+            # the in-memory $Script:OsProfile.PatchBaseline.Patches. P02.5
+            # may refresh this list from the Microsoft Update Catalog if it
+            # is stale or -AutoDetectLatestPatches was passed.
+            $bl = $Script:OsProfile.PatchBaseline
+            if ($bl -and $bl.Patches) {
+                Write-Step ('Seeding ResolvedPatches from PatchBaseline: {0} entries.' -f $bl.Patches.Count)
+                foreach ($p in $bl.Patches) {
+                    $resolved.Add([pscustomobject]@{
+                        Kind = 'Patch'; Source = $p.DownloadUrl
+                        LocalPath = ''
+                        KbId = $p.KbId
+                        PatchType = $p.Type
+                        ApplyOrder = $p.ApplyOrder
+                        ExpectedHashes = @{ 'sha-256' = $p.Sha256 }
+                    }) | Out-Null
+                }
+            } else {
+                Write-Step 'PatchBaseline.Patches is empty; P02.5 will populate from Microsoft Update Catalog.'
             }
         } elseif ($Script:SyntheticTestMode) {
             Write-Step '-SyntheticTestMode is on; no real patches required.'
         } else {
-            throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches.'
+            throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches, or populate Config PatchBaseline.Patches.'
         }
 
         # Order by ApplyOrder, then by KbId
@@ -3049,6 +3905,207 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
     }
 }
 
+
+
+# ============================================================
+# Phase P02.5: RefreshPatchBaseline
+# ============================================================
+# Conditionally refresh PatchBaseline by scraping the Microsoft Update
+# Catalog when the existing baseline is stale (Patch Tuesday has passed
+# since PatchTuesdayOfBaseline). On success, the in-memory $Script:OsProfile
+# is updated and (per AutoRefreshPolicy.WritebackToConfig) the Config
+# JSON on disk is rewritten.
+#
+# Skip conditions (any of these short-circuits to "no-op"):
+#   - $Script:SyntheticTestMode  (CI synthetic full pipeline)
+#   - $Script:SkipDynamicPatchRefresh
+#   - $Script:UseBaselineOnly
+#   - PatchBaseline is already fresh AND $AutoDetectLatestPatches not set
+#
+# Failure handling (AutoRefreshPolicy.FallbackOnScrapeFailure):
+#   - "UseBaseline" + Test-PatchBaselineUsable = $true  -> warn + continue
+#   - "UseBaseline" + Test-PatchBaselineUsable = $false -> throw
+#   - "Abort"                                           -> throw
+
+function Invoke-SetupPhase02_5_RefreshPatchBaseline {
+    <#
+    .OUTPUTS
+        System.Boolean
+    #>
+    [OutputType([bool])]
+    param()
+    Start-DebugTrace -PhaseName 'P02.5_RefreshPatchBaseline' -PhaseId 'P02.5'
+    try {
+        Set-DebugStep -Step 'check-skip-conditions'
+
+        # ---- Skip conditions ----
+        if ($Script:SyntheticTestMode) {
+            Write-Skip 'P02.5 skipped: -SyntheticTestMode disables Catalog scraping.'
+            return $true
+        }
+        if ($Script:SkipDynamicPatchRefresh) {
+            Write-Skip 'P02.5 skipped: -SkipDynamicPatchRefresh explicitly set.'
+            return $true
+        }
+        if ($Script:UseBaselineOnly) {
+            Write-Skip 'P02.5 skipped: -UseBaselineOnly explicitly set.'
+            return $true
+        }
+
+        # Compute latest Patch Tuesday (used by freshness check)
+        Set-DebugStep -Step 'compute-patch-tuesday'
+        $latestPT = Get-LatestPatchTuesday
+        Write-Step ('Latest Patch Tuesday: {0:yyyy-MM-dd}' -f $latestPT)
+
+        # Decide whether to refresh
+        Set-DebugStep -Step 'evaluate-baseline-freshness'
+        $baseline = $null
+        if ($Script:OsProfile -and (Get-Member -InputObject $Script:OsProfile -Name 'PatchBaseline' -ErrorAction SilentlyContinue)) {
+            $baseline = $Script:OsProfile.PatchBaseline
+        }
+        $isFresh = Test-PatchBaselineFresh -Baseline $baseline -LatestPatchTuesday $latestPT
+        $forced  = [bool]$Script:AutoDetectLatestPatches
+
+        if ($isFresh -and -not $forced) {
+            Write-Skip ('P02.5 skipped: PatchBaseline is fresh (PatchTuesdayOfBaseline={0}).' -f $baseline.PatchTuesdayOfBaseline)
+            return $true
+        }
+        if ($forced) {
+            Write-Step 'P02.5: -AutoDetectLatestPatches set; forcing refresh.'
+        } else {
+            Write-Step 'P02.5: PatchBaseline is stale; refreshing from Catalog.'
+        }
+
+        # Determine target patch month
+        Set-DebugStep -Step 'resolve-patch-month'
+        $patchMonth = $Script:PatchMonth
+        if ([string]::IsNullOrWhiteSpace($patchMonth)) {
+            $patchMonth = Format-PatchMonthString -Date $latestPT
+        }
+        Write-Step ('Target patch month: {0}' -f $patchMonth)
+
+        # Resolve AutoRefreshPolicy
+        $policy = $null
+        if ($Script:OsProfile -and (Get-Member -InputObject $Script:OsProfile -Name 'AutoRefreshPolicy' -ErrorAction SilentlyContinue)) {
+            $policy = $Script:OsProfile.AutoRefreshPolicy
+        }
+        $writeback = $true
+        $fallback  = 'UseBaseline'
+        $retries   = 3
+        if ($policy) {
+            if ($null -ne $policy.WritebackToConfig)        { $writeback = [bool]$policy.WritebackToConfig }
+            if ($policy.FallbackOnScrapeFailure)            { $fallback  = [string]$policy.FallbackOnScrapeFailure }
+            if ($policy.ScrapeRetries -and $policy.ScrapeRetries -gt 0) { $retries = [int]$policy.ScrapeRetries }
+        }
+
+        # ---- Scrape ----
+        Set-DebugStep -Step 'invoke-catalog-scrape'
+        $newPatches = @()
+        $scrapeOk = $true
+        $scrapeErr = $null
+        try {
+            $newPatches = Resolve-PatchSetFromCatalog `
+                            -OsVersion $Script:OsVersion `
+                            -OsLanguage $Script:OsLanguage `
+                            -PatchMonth $patchMonth `
+                            -MaxRetries $retries
+        } catch {
+            $scrapeOk  = $false
+            $scrapeErr = $_.Exception.Message
+            Write-Warn ('Catalog scrape failed: ' + $scrapeErr)
+        }
+        if ($scrapeOk -and (-not $newPatches -or $newPatches.Count -eq 0)) {
+            $scrapeOk  = $false
+            $scrapeErr = 'Catalog scrape returned zero entries.'
+            Write-Warn $scrapeErr
+        }
+
+        # ---- Failure handling ----
+        if (-not $scrapeOk) {
+            if ($fallback -eq 'Abort') {
+                throw ('P02.5 RefreshPatchBaseline failed and AutoRefreshPolicy.FallbackOnScrapeFailure=Abort. Error: ' + $scrapeErr)
+            }
+            # UseBaseline (default)
+            if (Test-PatchBaselineUsable -Baseline $baseline) {
+                Write-Warn 'P02.5: scrape failed but existing PatchBaseline.Patches is usable; continuing.'
+                return $true
+            }
+            throw ('P02.5 RefreshPatchBaseline failed AND existing PatchBaseline has no usable patches. Cannot proceed.')
+        }
+
+        # ---- Update in-memory profile ----
+        Set-DebugStep -Step 'update-in-memory-profile'
+        if (-not $Script:OsProfile.PatchBaseline) {
+            $Script:OsProfile | Add-Member -NotePropertyName 'PatchBaseline' -NotePropertyValue ([pscustomobject][ordered]@{
+                Schema = '1.0'
+                TargetBuildAfterUpdate = ''
+                PatchTuesdayOfBaseline = ''
+                LastVerifiedDate = ''
+                LastVerifiedBy = ''
+                VerificationMethod = ''
+                VerifiedOsLanguages = @($Script:OsLanguage)
+                ChecksumAlgorithm = 'SHA256'
+                Patches = @()
+                ExcludeKbList = @()
+                WsusScnCab = [pscustomobject][ordered]@{
+                    SourceUrl = (Get-WsusScnCabSourceUrl)
+                    LocalCachePath = ''
+                    LastDownloadedDate = ''
+                    LastDownloadedSha256 = ''
+                    LastDownloadedSizeBytes = 0
+                }
+            }) -Force
+        }
+        $Script:OsProfile.PatchBaseline.Patches                = @($newPatches)
+        $Script:OsProfile.PatchBaseline.PatchTuesdayOfBaseline = $latestPT.ToString('yyyy-MM-dd')
+        $Script:OsProfile.PatchBaseline.LastVerifiedDate       = (Get-Date).ToString('o')
+        $Script:OsProfile.PatchBaseline.LastVerifiedBy         = 'auto-scrape'
+        $Script:OsProfile.PatchBaseline.VerificationMethod     = 'auto-scrape'
+        Write-Ok ('PatchBaseline updated in memory: {0} patches.' -f $newPatches.Count)
+
+        # ---- Writeback ----
+        if ($writeback) {
+            Set-DebugStep -Step 'writeback-config'
+            try {
+                $cfgPath = Get-OsConfigPath -OsKey $Script:OsVersion
+                Save-ConfigWithBaseline -ConfigPath $cfgPath -OsProfile $Script:OsProfile
+                Write-Ok ('PatchBaseline written back to: ' + $cfgPath)
+            } catch {
+                Write-Warn ('Writeback to Config JSON failed (in-memory baseline is still updated): ' + $_.Exception.Message)
+            }
+        } else {
+            Write-Step 'AutoRefreshPolicy.WritebackToConfig is false; not persisting changes.'
+        }
+
+        # ---- Re-derive $Script:ResolvedPatches from new baseline ----
+        Set-DebugStep -Step 'derive-resolved-patches'
+        # If the user did not provide an explicit patch source, use the
+        # refreshed baseline as the source of truth for P03.
+        $userProvidedPatches = ($Script:PatchUrls -and $Script:PatchUrls.Count -gt 0) `
+                               -or ($Script:PatchDirectory -and (Test-Path -LiteralPath $Script:PatchDirectory)) `
+                               -or ($Script:ManifestPath -and (Test-Path -LiteralPath $Script:ManifestPath))
+        if (-not $userProvidedPatches) {
+            $derived = New-Object System.Collections.Generic.List[object]
+            foreach ($p in $newPatches) {
+                $derived.Add([pscustomobject][ordered]@{
+                    Kind            = 'Patch'
+                    Source          = $p.DownloadUrl
+                    LocalPath       = ''
+                    KbId            = $p.KbId
+                    PatchType       = $p.Type
+                    ApplyOrder      = $p.ApplyOrder
+                    ExpectedHashes  = @{ 'sha-256' = $p.Sha256 }
+                }) | Out-Null
+            }
+            $Script:ResolvedPatches = $derived | Sort-Object ApplyOrder, KbId
+            Write-Ok ('Derived {0} patch entries from refreshed baseline.' -f $Script:ResolvedPatches.Count)
+        }
+
+        return $true
+    } finally {
+        Stop-DebugTrace
+    }
+}
 
 
 # ============================================================
@@ -3281,6 +4338,303 @@ function Invoke-PlanPhase04_ExpandIso {
     }
 }
 
+
+
+# ============================================================
+# Phase P04.5: ValidatePatchSet
+# ============================================================
+# After P04 has extracted install.wim, this phase verifies that the
+# user-supplied patch set (or the one derived from PatchBaseline) is
+# sufficient by running a Windows Update Agent (WUA) offline scan
+# against wsusscn2.cab.
+#
+# Skip conditions:
+#   - $Script:SyntheticTestMode  (no real Microsoft assets in play)
+#   - $Script:UseBaselineOnly    (caller explicitly opted out of catalog)
+#   - WUA scan cannot run from this host (non-Windows or COM blocked)
+#
+# Failure handling:
+#   - Missing patches detected AND $IgnorePatchValidation = $false -> throw
+#   - Missing patches detected AND $IgnorePatchValidation = $true  -> warn
+#   - Diagnostic data (4 files) is ALWAYS exported on missing-detection,
+#     regardless of $IgnorePatchValidation.
+
+function Export-PatchValidationReport {
+    <#
+    .SYNOPSIS
+        Emit the four diagnostic files (validation_summary.json,
+        validation_detail.csv, wsusscn2_scan_raw.json, dependency_graph.json)
+        documented in SPEC C.4.
+    #>
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [string]$DiagRoot,
+        [Parameter(Mandatory)] [pscustomobject]$Comparison,
+        [Parameter(Mandatory)] [pscustomobject[]]$ProvidedPatches,
+        [Parameter(Mandatory)] [pscustomobject[]]$WuaRaw,
+        [Parameter(Mandatory)] [hashtable]$Target,
+        [Parameter(Mandatory)] [hashtable]$WsusScnCabInfo,
+        [string]$Status = 'Fail',
+        [string]$Reason = 'MissingRequiredPatches'
+    )
+    $ts = (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss')
+    $dir = Join-Path $DiagRoot $ts
+    if (-not (Test-Path -LiteralPath $dir)) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+
+    # validation_summary.json
+    $summary = [pscustomobject][ordered]@{
+        ValidationTimestamp = (Get-Date).ToString('o')
+        Target              = $Target
+        WsusScnCab          = $WsusScnCabInfo
+        Result              = [pscustomobject][ordered]@{
+            Status               = $Status
+            Reason               = $Reason
+            ProvidedPatchCount   = $ProvidedPatches.Count
+            MissingPatchCount    = $Comparison.Missing.Count
+            SupersededPatchCount = 0
+        }
+        ProvidedPatches = $ProvidedPatches
+        MissingPatches  = $Comparison.Missing
+        SupersededPatches = @()
+        Recommendation = @(
+            'Run with -AutoDetectLatestPatches to refresh PatchBaseline from Microsoft Update Catalog.',
+            'Or download the missing KBs from the Catalog manually and add to -PatchDirectory.'
+        )
+    }
+    $summaryJson = $summary | ConvertTo-Json -Depth 32
+    $summaryJson = $summaryJson -replace "`r`n", "`n"
+    [System.IO.File]::WriteAllText((Join-Path $dir 'validation_summary.json'), $summaryJson + "`n", [System.Text.Encoding]::UTF8)
+
+    # validation_detail.csv
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($p in $ProvidedPatches) {
+        $rows.Add([pscustomobject][ordered]@{
+            Type        = $p.Type
+            KbId        = $p.KbId
+            UpdateId    = $p.UpdateId
+            Title       = $p.Title
+            Provided    = 'Yes'
+            RequiredByWUA = 'No'
+            Severity    = ''
+            Supersedes  = ($p.Supersedes -join ';')
+            RequiresKbIds = ($p.RequiresKbIds -join ';')
+            ApplyOrder  = $p.ApplyOrder
+            DownloadHint = $p.DownloadUrl
+        }) | Out-Null
+    }
+    foreach ($m in $Comparison.Missing) {
+        $kbDisp = ($m.KbIds -join ';')
+        $rows.Add([pscustomobject][ordered]@{
+            Type        = ''
+            KbId        = $kbDisp
+            UpdateId    = $m.UpdateId
+            Title       = $m.Title
+            Provided    = 'No'
+            RequiredByWUA = 'Yes'
+            Severity    = $m.Severity
+            Supersedes  = ''
+            RequiresKbIds = ''
+            ApplyOrder  = ''
+            DownloadHint = 'https://catalog.update.microsoft.com/Search.aspx?q=' + $kbDisp
+        }) | Out-Null
+    }
+    $csvPath = Join-Path $dir 'validation_detail.csv'
+    $rows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+
+    # wsusscn2_scan_raw.json
+    $rawJson = $WuaRaw | ConvertTo-Json -Depth 32
+    $rawJson = $rawJson -replace "`r`n", "`n"
+    [System.IO.File]::WriteAllText((Join-Path $dir 'wsusscn2_scan_raw.json'), $rawJson + "`n", [System.Text.Encoding]::UTF8)
+
+    # dependency_graph.json (simple adjacency from PatchBaseline)
+    $nodes = New-Object System.Collections.Generic.List[object]
+    $edges = New-Object System.Collections.Generic.List[object]
+    foreach ($p in $ProvidedPatches) {
+        $nodes.Add([pscustomobject][ordered]@{
+            Id    = $p.KbId
+            Title = $p.Title
+            Type  = $p.Type
+            Provided = $true
+        }) | Out-Null
+        foreach ($req in $p.RequiresKbIds) {
+            $edges.Add([pscustomobject][ordered]@{
+                From = $p.KbId; To = $req; Kind = 'Requires'
+            }) | Out-Null
+        }
+        foreach ($sup in $p.Supersedes) {
+            $edges.Add([pscustomobject][ordered]@{
+                From = $p.KbId; To = $sup; Kind = 'Supersedes'
+            }) | Out-Null
+        }
+    }
+    foreach ($m in $Comparison.Missing) {
+        foreach ($k in $m.KbIds) {
+            $nodes.Add([pscustomobject][ordered]@{
+                Id = $k; Title = $m.Title; Type = ''; Provided = $false
+            }) | Out-Null
+        }
+    }
+    $graph = [pscustomobject][ordered]@{
+        Nodes = $nodes.ToArray()
+        Edges = $edges.ToArray()
+    }
+    $graphJson = $graph | ConvertTo-Json -Depth 32
+    $graphJson = $graphJson -replace "`r`n", "`n"
+    [System.IO.File]::WriteAllText((Join-Path $dir 'dependency_graph.json'), $graphJson + "`n", [System.Text.Encoding]::UTF8)
+    return $dir
+}
+
+function Invoke-PlanPhase04_5_ValidatePatchSet {
+    <#
+    .OUTPUTS
+        System.Boolean
+    #>
+    [OutputType([bool])]
+    param()
+    Start-DebugTrace -PhaseName 'P04.5_ValidatePatchSet' -PhaseId 'P04.5'
+    try {
+        Set-DebugStep -Step 'check-skip-conditions'
+
+        # ---- Skip conditions ----
+        if ($Script:SyntheticTestMode) {
+            Write-Skip 'P04.5 skipped: -SyntheticTestMode disables wsusscn2 validation.'
+            return $true
+        }
+        if ($Script:UseBaselineOnly) {
+            Write-Skip 'P04.5 skipped: -UseBaselineOnly explicitly set.'
+            return $true
+        }
+        # Only run on Windows (COM API unavailable elsewhere)
+        $isWin = $false
+        try { $isWin = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) }
+        catch { $isWin = ($env:OS -eq 'Windows_NT') }
+        if (-not $isWin) {
+            Write-Skip 'P04.5 skipped: non-Windows host; WUA COM API unavailable.'
+            return $true
+        }
+
+        Set-DebugStep -Step 'compute-latest-patch-tuesday'
+        $latestPT = Get-LatestPatchTuesday
+
+        # ---- Resolve wsusscn2.cab ----
+        Set-DebugStep -Step 'resolve-wsusscn2-cab'
+        $wsusMeta = $null
+        if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) {
+            $wsusMeta = $Script:OsProfile.PatchBaseline.WsusScnCab
+        }
+        $wsusInfo = $null
+        try {
+            $wsusInfo = Get-WsusScnCabIfNeeded `
+                            -WsusScnCabMeta $wsusMeta `
+                            -WorkRoot $Script:WorkRoot `
+                            -LatestPatchTuesday $latestPT `
+                            -OverridePath $Script:WsusScnCabPath
+        } catch {
+            $msg = 'P04.5 could not obtain wsusscn2.cab: ' + $_.Exception.Message
+            if ($Script:IgnorePatchValidation) {
+                Write-Warn ($msg + ' (-IgnorePatchValidation set; continuing)')
+                return $true
+            }
+            throw $msg
+        }
+
+        # ---- Persist wsusscn2.cab metadata to Config (if newly downloaded) ----
+        if ($wsusInfo.DownloadedNow -and $Script:OsProfile.PatchBaseline) {
+            $Script:OsProfile.PatchBaseline.WsusScnCab.LocalCachePath          = $wsusInfo.Path
+            $Script:OsProfile.PatchBaseline.WsusScnCab.LastDownloadedDate      = (Get-Date).ToString('o')
+            $Script:OsProfile.PatchBaseline.WsusScnCab.LastDownloadedSha256    = $wsusInfo.Sha256
+            $Script:OsProfile.PatchBaseline.WsusScnCab.LastDownloadedSizeBytes = $wsusInfo.SizeBytes
+            try {
+                $cfgPath = Get-OsConfigPath -OsKey $Script:OsVersion
+                Save-ConfigWithBaseline -ConfigPath $cfgPath -OsProfile $Script:OsProfile
+                Write-Step ('wsusscn2.cab metadata recorded in: ' + $cfgPath)
+            } catch {
+                Write-Warn ('wsusscn2.cab metadata writeback failed: ' + $_.Exception.Message)
+            }
+        }
+
+        # ---- Run WUA offline scan ----
+        Set-DebugStep -Step 'wua-offline-scan'
+        $wuaRaw = $null
+        try {
+            $wuaRaw = Invoke-WuaOfflineScan -WsusScnCabPath $wsusInfo.Path
+        } catch {
+            $msg = 'WUA offline scan failed: ' + $_.Exception.Message
+            if ($Script:IgnorePatchValidation) {
+                Write-Warn ($msg + ' (-IgnorePatchValidation set; continuing)')
+                return $true
+            }
+            throw $msg
+        }
+
+        # ---- Compare patch sets ----
+        Set-DebugStep -Step 'compare-patch-sets'
+        $providedPatches = @()
+        if ($Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.Patches) {
+            $providedPatches = @($Script:OsProfile.PatchBaseline.Patches)
+        }
+        $excludeKbList = @()
+        if ($Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.ExcludeKbList) {
+            $excludeKbList = @($Script:OsProfile.PatchBaseline.ExcludeKbList)
+        }
+        $comparison = Compare-PatchSetVsWuaScan `
+                        -ProvidedPatches $providedPatches `
+                        -WuaRequired $wuaRaw `
+                        -ExcludeKbList $excludeKbList
+
+        Write-Step ('Patch set comparison: {0} provided / {1} missing / {2} excluded.' -f `
+                    $comparison.Provided.Count, $comparison.Missing.Count, $comparison.ExcludedCount)
+
+        # ---- If missing patches: export diagnostics and decide ----
+        if ($comparison.Missing.Count -gt 0) {
+            Set-DebugStep -Step 'export-diagnostics'
+            $diagRoot = Join-Path $Script:WorkRoot 'diag'
+            $target = @{
+                OsVersion = $Script:OsVersion
+                OsLanguage = $Script:OsLanguage
+                BaseBuild = $Script:OsProfile.Build
+                InstallWimIndex = 'multiple'
+                WimEdition = ''
+            }
+            $wsusInfoHash = @{
+                Path = $wsusInfo.Path
+                Sha256 = $wsusInfo.Sha256
+                DownloadedDate = if ($wsusInfo.DownloadedNow) { (Get-Date).ToString('o') } else { '(cached)' }
+                SizeBytes = $wsusInfo.SizeBytes
+                Source = $wsusInfo.Source
+            }
+            $diagDir = Export-PatchValidationReport `
+                            -DiagRoot $diagRoot `
+                            -Comparison $comparison `
+                            -ProvidedPatches $providedPatches `
+                            -WuaRaw $wuaRaw `
+                            -Target $target `
+                            -WsusScnCabInfo $wsusInfoHash `
+                            -Status 'Fail' `
+                            -Reason 'MissingRequiredPatches'
+            Write-Warn '============================================================'
+            Write-Warn '  PATCH VALIDATION DETECTED MISSING REQUIRED UPDATES'
+            Write-Warn '============================================================'
+            foreach ($m in $comparison.Missing) {
+                Write-Warn ('  - {0} ({1})' -f ($m.KbIds -join ','), $m.Title)
+            }
+            Write-Warn ('  Diagnostic data exported to: ' + $diagDir)
+            Write-Warn '============================================================'
+            if ($Script:IgnorePatchValidation) {
+                Write-Warn 'IgnorePatchValidation is set; continuing despite missing patches.'
+                return $true
+            }
+            throw 'P04.5 ValidatePatchSet: required patches missing. See diagnostic data above.'
+        }
+
+        Write-Ok 'P04.5 ValidatePatchSet: all required patches are provided.'
+        return $true
+    } finally {
+        Stop-DebugTrace
+    }
+}
 
 
 # ============================================================
@@ -3791,15 +5145,15 @@ function Get-PhaseListByAction {
     [OutputType([string[]])]
     param([Parameter(Mandatory)] [string]$ActionName)
     switch ($ActionName) {
-        'Prepare'             { return @('P01','P02','P03','P04') }
+        'Prepare'             { return @('P01','P02','P02.5','P03','P04','P04.5') }
         'Build'               { return @('P05','P06','P07') }
         'Verify'              { return @('P08','P09') }
-        'PrepareBuildVerify'  { return @('P01','P02','P03','P04','P05','P06','P07','P08','P09') }
-        'All'                 { return @('P01','P02','P03','P04','P05','P06','P07','P08','P09') }
+        'PrepareBuildVerify'  { return @('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09') }
+        'All'                 { return @('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09') }
         'BootTest'            { return @() }
         'Cleanup'             { return @() }
         'ListPhases'          { return @() }
-        'GenerateManifest'    { return @('P01','P02') }
+        'GenerateManifest'    { return @('P01','P02','P02.5') }
         default               { throw ('Unknown action: {0}' -f $ActionName) }
     }
 }

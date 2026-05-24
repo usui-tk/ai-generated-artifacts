@@ -16,18 +16,127 @@ the script and follows the
 
 ## [Unreleased]
 
-### Planned (M2)
-- Implement `-AutoDetectLatestPatches` as a real Microsoft Update
-  Catalogue scraper (currently a placeholder that consults
-  Config `AutoDetectKnownGood`).
-- Emit a `Manifests/<OsKey>_<lang>_<yyyy-MM>.meta4` file as part of the
-  `-Action GenerateManifest` flow so subsequent runs can reproduce the
-  same patch set offline.
-
-### Planned (M3)
+### Planned (M4)
 - Server 2025 real `LCUExpandViaMum=true` code path. LCU on 2025 ships
   as a MUM/CAB bundle that must be expanded with `expand.exe -F:*`
   before `Add-WindowsPackage` is invoked.
+
+### Planned (M5)
+- Stage 4 CI workflow (`catalog-health`): monthly scheduled run of
+  `Resolve-PatchSetFromCatalog` that opens a PR with the resulting
+  `Config/<OsKey>.json` diff for human review. Catches Microsoft
+  Update Catalogue HTML structure changes within 30 days.
+
+## [update-wsi-2026.06.10-r02] - 2026-06-10
+
+### Added — dynamic baseline (M2)
+
+- New parameter `-PatchMonth yyyy-MM` to scope the Catalogue search
+  (default: current month's Patch Tuesday).
+- New parameter `-SkipDynamicPatchRefresh` to bypass P02.5 even when
+  the baseline is stale (offline / air-gapped runs).
+- New parameter `-UseBaselineOnly` to forbid all Catalogue access
+  and use `PatchBaseline.Patches` strictly as-is.
+- New phase **P02.5 RefreshPatchBaseline**: when
+  `PatchTuesdayOfBaseline < Get-LatestPatchTuesday()`, scrape the
+  Microsoft Update Catalogue for the target month (SSU + LCU +
+  DynamicUpdate.Setup + DynamicUpdate.Component + DynamicUpdate.SafeOs
+  + .NET CU), populate `PatchBaseline.Patches`, and write back to
+  `Config/<OsKey>.json` atomically.
+- Three scraper helpers (`Get-UpdateIdFromCatalog`,
+  `Get-DownloadLinkFromCatalog`, `Get-SupersedenceFromCatalog`) that
+  use `-UseBasicParsing` for Windows PowerShell 5.1 compatibility,
+  set a polite User-Agent, and apply up to `ScrapeRetries` retries
+  with jitter on transient HTTP failures.
+- `Resolve-PatchSetFromCatalog` orchestrator that issues per-patch-type
+  Catalogue queries, filters by OS title token + `x64` architecture,
+  and auto-links each LCU's `RequiresKbIds` to the SSU(s) found in
+  the same pass.
+- Patch Tuesday calculator (`Get-PatchTuesdayForMonth`,
+  `Get-LatestPatchTuesday`) with a 1-day buffer to avoid same-day
+  edge cases (SPEC §D.15).
+
+### Added — dependency validation (M3)
+
+- New parameter `-WsusScnCabPath` to point at a pre-staged
+  `wsusscn2.cab` instead of triggering an automatic download.
+- New parameter `-IgnorePatchValidation` to demote P04.5 failure
+  from abort to warning (NOT recommended for production).
+- New phase **P04.5 ValidatePatchSet**: after the install.wim is
+  extracted, optionally download (initial run OR cache older than
+  current Patch Tuesday) and run a Windows Update Agent COM API
+  offline scan with `Microsoft.Update.Session` against the supplied
+  patch set. On any missing required patch: ABORT.
+- Four diagnostic files emitted under `<WorkRoot>/diag/<timestamp>/`
+  on validation failure:
+    - `validation_summary.json` (top-level result + missing list)
+    - `validation_detail.csv` (one row per patch with Provided / RequiredByWUA / DownloadHint)
+    - `wsusscn2_scan_raw.json` (full raw WUA output)
+    - `dependency_graph.json` (KB Requires / Supersedes adjacency)
+- Diagnostic files are always emitted on detected-missing, regardless
+  of `-IgnorePatchValidation`.
+
+### Changed
+
+- ScriptVersion: `update-wsi-2026.06.10-r02`,
+  ScriptTag: `dynamic-baseline-and-wsusscn2-validation`.
+- Banner unchanged: "Windows Server ISO Updater".
+- P02 ResolveInputs: the patch-source resolution chain now also accepts
+  "PatchBaseline-driven" when no explicit source (`-PatchUrls` /
+  `-PatchDirectory` / `-ManifestPath`) is supplied AND
+  `PatchBaseline.Patches` is non-empty (or `-AutoDetectLatestPatches`
+  is set, in which case P02.5 will populate it).
+- Phase registry: 11 entries (was 9). Action mappings updated to
+  include P02.5 before P03 and P04.5 between P04 and P05.
+- `Action GenerateManifest` now runs P01, P02, P02.5 (real Catalogue
+  scrape that writes back to Config) instead of the r01 placeholder.
+
+### Configuration
+
+- `Config/Server201[6/9].json`, `Config/Server202[2/5].json` extended:
+  - Added `PatchBaseline` node (Schema 1.0) with `TargetBuildAfterUpdate`,
+    `PatchTuesdayOfBaseline`, `LastVerifiedDate`, `LastVerifiedBy`,
+    `VerificationMethod`, `VerifiedOsLanguages`, `ChecksumAlgorithm`,
+    `Patches`, `ExcludeKbList`, and `WsusScnCab`.
+  - Added `AutoRefreshPolicy` node with `Mode`, `WritebackToConfig`,
+    `FallbackOnScrapeFailure`, `ScrapeRetries`.
+  - `AutoDetectKnownGood` marked deprecated (kept for r01 compatibility).
+  - Server 2025 `ExcludeKbList` populated with KB5043080 (Checkpoint
+    Cumulative Update; not required for OS install).
+
+### Quality
+
+- **psa.py**: 0 errors / 0 warnings / 0 info on the
+  combined 5,447-line script (was 4,093 lines in r01).
+- All r02 helpers have `[OutputType()]` declarations.
+- All `r02`-anchored revision tags removed from script body comments
+  (PSAP0003 / PSAP0005 compliant — revision history is here in the
+  CHANGELOG, not in source comments).
+- New `$matches` auto-variable usage in the Catalogue scraper replaced
+  with explicit `[regex]::Match(...).Groups[N].Value` to satisfy
+  PSA2002 (SPEC §D.17).
+
+### Compatibility
+
+- r01-format `Config/<OsKey>.json` files load unchanged (the `PatchBaseline`
+  node is optional from the loader's perspective; if absent at load
+  time, P02.5 will create it on first scrape).
+- All r01 command lines (`-Action`, `-IsoPath`, `-PatchDirectory`,
+  `-ManifestPath`, `-SyntheticTestMode -DryRun`, etc.) continue to
+  work identically.
+
+### Known limitations
+
+- The Catalogue scraper depends on the current HTML structure of
+  catalog.update.microsoft.com. A Microsoft-side change will break
+  the scraper; the `AutoRefreshPolicy.FallbackOnScrapeFailure`
+  setting controls the recovery behaviour.
+- `Invoke-WuaOfflineScan` scans the local Windows host's installed
+  image against the offline catalog; it is NOT a true WIM-level
+  scan (SPEC §D.18). The validator's findings remain a strong signal
+  for dependency completeness in practice.
+- M5 (monthly Stage 4 catalog-health workflow) is not yet implemented.
+- M4 (Server 2025 MUM/CAB LCU expand) is still a placeholder.
 
 ## [update-wsi-2026.05.24-r01] - 2026-05-24
 

@@ -13,7 +13,10 @@
   "DotNetRequired": true,
   "LCUExpandViaMum": false,
   "RequireUefiCa2023Boot": false,
-  "BootWimIndexes": [1, 2],
+  "BootWimIndexes": [
+    1,
+    2
+  ],
   "InstallWimIndexes": "all",
   "ExpectedEditions": [
     "Windows Server 2019 Standard",
@@ -22,11 +25,40 @@
     "Windows Server 2019 Datacenter (Desktop Experience)"
   ],
   "AutoDetectKnownGood": {
+    "_deprecated": "Replaced by PatchBaseline as of r02 (update-wsi-2026.06.10-r02). Kept for r01 compatibility; new code should read PatchBaseline.",
     "AsOfDate": "2026-05-01",
     "Note": "Placeholder; populated by Get-LatestServerUpdates in a future revision.",
     "SsuKbId": "",
     "LcuKbId": "",
     "DotNetKbId": ""
+  },
+  "PatchBaseline": {
+    "Schema": "1.0",
+    "TargetBuildAfterUpdate": "17763.8511",
+    "PatchTuesdayOfBaseline": "",
+    "LastVerifiedDate": "",
+    "LastVerifiedBy": "",
+    "VerificationMethod": "",
+    "VerifiedOsLanguages": [
+      "en-us",
+      "ja-jp"
+    ],
+    "ChecksumAlgorithm": "SHA256",
+    "Patches": [],
+    "ExcludeKbList": [],
+    "WsusScnCab": {
+      "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
+      "LocalCachePath": "",
+      "LastDownloadedDate": "",
+      "LastDownloadedSha256": "",
+      "LastDownloadedSizeBytes": 0
+    }
+  },
+  "AutoRefreshPolicy": {
+    "Mode": "OnNewPatchTuesday",
+    "WritebackToConfig": true,
+    "FallbackOnScrapeFailure": "UseBaseline",
+    "ScrapeRetries": 3
   },
   "Languages": {
     "en-us": {

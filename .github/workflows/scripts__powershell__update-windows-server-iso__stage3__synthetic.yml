@@ -105,6 +105,11 @@ jobs:
           }
 
       # --- Full -SyntheticTestMode pipeline ---
+      # -SyntheticTestMode implicitly skips P02.5 (Catalog scrape) and
+      # P04.5 (wsusscn2 scan). This keeps Stage 3 self-contained: it
+      # does not require Catalog connectivity and does not download
+      # the ~1 GB wsusscn2.cab file. Real-world dependency validation
+      # is exercised in production runs, not in CI.
       - name: '[Synthetic] Run Update-WindowsServerIso.ps1 in -SyntheticTestMode (full)'
         shell: powershell
         timeout-minutes: 60
