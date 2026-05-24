@@ -27,6 +27,131 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.24-r04.1] - 2026-05-24
+
+### Added - Microsoft media-dynamic-update servicing sub-phase engine
+
+The PatchPlan engine introduced in r04 now emits ordered sub-phase
+sequences (per-WIM-target) that reproduce Microsoft's official
+servicing sequence end-to-end:
+
+**install.wim sequence** (with twice-apply when language packs are
+present):
+
+| Sub-phase                    | Patches              | Notes |
+|------------------------------|----------------------|-------|
+| I1.SSU                       | SSU                  | servicing stack first |
+| I2.LanguagePack              | LP / LXP / DotNet LP | must precede LCU |
+| I3.LCU.FirstPass             | LCU                  | after LP per Microsoft |
+| I4.DotNet                    | .NET CU              | |
+| I5.DynamicUpdate.Component   | DU.Component         | |
+| I6.CleanupAndExport          | (marker)             | DISM cleanup hook |
+| I7.LCU.SecondPass            | LCU (re-applied)     | only when LP injected; requires remount |
+
+**boot.wim sequence** (no twice-apply needed):
+
+| Sub-phase | Patches | Notes |
+|---|---|---|
+| B1.SSU              | SSU         | |
+| B2.LanguagePack     | LP          | recovery UI language |
+| B3.LCU              | LCU         | |
+| B4.CleanupAndExport | (marker)    | |
+
+**WinRE.wim sequence** (Safe OS DU replaces LCU per Microsoft):
+
+| Sub-phase | Patches | Notes |
+|---|---|---|
+| W1.SSU              | SSU                  | (combined LCU acts as SSU surrogate) |
+| W2.LanguagePack     | LP                   | recovery UI |
+| W3.SafeOsDU         | DynamicUpdate.SafeOs | WinRE-only LCU substitute |
+| W4.CleanupAndExport | (marker)             | Export /Compress:Recovery |
+
+### Added - LCU twice-apply (I7.LCU.SecondPass)
+
+Per Microsoft's documented rationale: when a language pack is
+injected into install.wim, the LP can shadow files that the LCU
+delivered on its first pass, leaving the LCU partially un-applied.
+The fix is to re-apply the LCU AFTER the WIM has been
+dismounted+committed+exported. The engine emits I7 only when
+language packs are actually present in the plan; otherwise the
+single-pass flow is preserved (no wasted remount).
+
+The P05 worker honours the I7.RequiresRemount = $true flag by
+dismounting after I1-I6, then re-mounting the now-serviced
+install.wim for the I7 sub-phase, then dismounting again.
+
+### Added - Full WinRE servicing worker
+
+P06's WinRE block now reads the WinReSequence (W1.SSU -> W2.LP ->
+W3.SafeOsDU -> W4.CleanupAndExport) from the cached PatchPlan and
+applies each sub-phase against the WinRE.wim it extracted from
+install.wim. The serviced WinRE is then copied back into the
+install.wim mount so the surrounding install.wim dismount commits
+the change. Skips the WinRE mount entirely when the sequence is
+empty.
+
+### Added - Invoke-PatchSubPhase common helper
+
+A single helper drives the per-sub-phase apply loop for all three
+sequences (Install / Boot / WinRE). It handles DryRun, missing
+LocalPath, and Add-WindowsPackage failures uniformly, emits per-
+patch result rows for the CSV inventory, and writes structured
+error records via Add-ErrorJsonlEntry on failure.
+
+### Added - Build-{Install,Boot,WinRe}ApplySequence builders
+
+These three helpers (in .build_part09c_patchplan.ps1) bucket the
+flat patch list per Type and emit the ordered sub-phase array. The
+mapping logic (which Type belongs to which sub-phase, when to emit
+I7, etc.) is centralised here so future tweaks (e.g. adding a new
+SafeOS DU lane to install.wim) only touch one place.
+
+### Changed - P05 / P06 worker control flow
+
+Both phase workers now consume sub-phase sequences instead of a
+flat patch list. The legacy `Get-PatchListForInstall|Boot|WinReWim`
+helpers (introduced in r04) remain in place for backwards
+compatibility with diagnostic consumers; the workers themselves
+no longer iterate them. CSV inventory rows now include the new
+`SubPhase` column.
+
+P05's install.wim block iterates the install sequence in order;
+when a sub-phase has RequiresRemount = $true it is deferred into
+a second-pass buffer that runs after the first dismount completes.
+This produces a 1-mount or 2-mount pattern depending on whether
+language packs are present, matching the Microsoft sequence
+exactly.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info (7,112 lines).
+- PSScriptAnalyzer 1.25.0: 0 findings.
+- Sub-phase engine unit tests (5/5 PASS):
+    * I7 NOT emitted when no LP in plan
+    * I7 emitted with RequiresRemount=$true when LP present
+    * boot.wim sequence: B1.SSU -> B2.LP -> B3.LCU -> B4.cleanup
+    * WinRE sequence: W1.SSU -> W2.LP -> W3.SafeOsDU -> W4.cleanup (LCU is NOT in WinRE)
+    * Empty input -> skeleton sub-phases all present, all empty
+- Smoke 3 (Synthetic+DryRun): PatchPlan summary now shows all three
+  sub-phase sequences end-to-end.
+
+### Compatibility
+
+- No schema change. PatchTargetMap and PatchDependencyPolicy from
+  r04 are unchanged.
+- The PatchPlan hashtable gains three new keys (InstallSequence,
+  BootSequence, WinReSequence) but the legacy lane keys
+  (Install / Boot / WinRE / Setup) are still present and still
+  hold the flat sorted lists.
+- `ScriptVersion` is bumped to `update-wsi-2026.05.24-r04.1`;
+  `ScriptTag` is `lcu-twice-winre-and-lp-injection`.
+
+### Out of scope (deferred to a future release)
+
+- Feature on Demand (.NET 3.5) source detection and `-EnableDotNet35`.
+- Setup binaries servicing via pending.xml (Setup DU).
+- Per-language Optional Components for WinRE.
+
 ## [update-wsi-2026.05.24-r04] - 2026-05-24
 
 ### Added - WIM-target-aware patch plan engine

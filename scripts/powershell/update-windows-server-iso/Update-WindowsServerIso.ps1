@@ -447,8 +447,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.24-r04'
-$Script:ScriptTag     = 'wim-target-aware-patch-plan'
+$Script:ScriptVersion = 'update-wsi-2026.05.24-r04.1'
+$Script:ScriptTag     = 'lcu-twice-winre-and-lp-injection'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -4196,14 +4196,197 @@ function Build-PatchPlan {
         WinRE   = $plan.WinRE.Count
         Setup   = $plan.Setup.Count
     }
+
+    # Build the sub-phase sequences per Microsoft media-dynamic-update.
+    # Each target gets a list of named sub-phases, each carrying its own
+    # patch slice. Phase workers iterate the sub-phases in order.
+    $plan['InstallSequence'] = Build-InstallApplySequence -InstallPatches $plan.Install
+    $plan['BootSequence']    = Build-BootApplySequence    -BootPatches    $plan.Boot
+    $plan['WinReSequence']   = Build-WinReApplySequence   -WinRePatches   $plan.WinRE
+
     return $plan
+}
+
+function Build-InstallApplySequence {
+    <#
+    .SYNOPSIS
+        Convert the install.wim patch slice into Microsoft's official
+        media-dynamic-update servicing sequence (7 sub-phases).
+    .DESCRIPTION
+        Per Microsoft's media-dynamic-update doc, install.wim is
+        serviced in this order (mount once, traverse, dismount):
+
+          I1. SSU                                (servicing stack first)
+          I2. LanguagePack injection             (UI must be in place
+                                                  before LCU)
+          I3. LCU first pass                     (Microsoft requires
+                                                  LCU AFTER LP because
+                                                  LP can shadow files
+                                                  delivered by LCU)
+          I4. .NET CU                            (.NET 4.x updates)
+          I5. DynamicUpdate.Component            (component-store DU)
+          I6. (Cleanup + Export, handled by P05)
+          I7. LCU second pass                    (re-applied because the
+                                                  LP injection in I2
+                                                  shadowed some LCU
+                                                  payload files; only
+                                                  required when LP was
+                                                  actually injected)
+
+        The returned object is an array of sub-phases, each describing
+        its name, the patch slice it owns, and a 'RequiresRemount'
+        flag that the worker uses to decide whether to re-mount the
+        WIM between this sub-phase and the previous one.
+    #>
+    [CmdletBinding()]
+    [OutputType([array])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$InstallPatches
+    )
+    # Bucket by Type
+    $byType = @{}
+    foreach ($p in $InstallPatches) {
+        $t = if ($p.PSObject.Properties['Type']) { [string]$p.Type } else { '' }
+        if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
+        $byType[$t].Add($p) | Out-Null
+    }
+    $ssu        = @(if ($byType.ContainsKey('SSU')) { $byType['SSU'] } else { @() })
+    $lp         = @()
+    if ($byType.ContainsKey('LanguagePack')) { $lp += $byType['LanguagePack'] }
+    if ($byType.ContainsKey('LXP'))          { $lp += $byType['LXP'] }
+    if ($byType.ContainsKey('DotNet.LangPack')) { $lp += $byType['DotNet.LangPack'] }
+    $lcu        = @(if ($byType.ContainsKey('LCU')) { $byType['LCU'] } else { @() })
+    $dotnet     = @(if ($byType.ContainsKey('DotNet')) { $byType['DotNet'] } else { @() })
+    $dynUpComp  = @(if ($byType.ContainsKey('DynamicUpdate.Component')) { $byType['DynamicUpdate.Component'] } else { @() })
+
+    $hasLp = ($lp.Count -gt 0)
+
+    $sequence = New-Object System.Collections.Generic.List[object]
+    $sequence.Add([pscustomobject]@{
+        Name             = 'I1.SSU'
+        Description      = 'Servicing Stack Update (must come first)'
+        Patches          = $ssu
+        RequiresRemount  = $false
+    }) | Out-Null
+    $sequence.Add([pscustomobject]@{
+        Name             = 'I2.LanguagePack'
+        Description      = 'Language Pack injection (UI must be in place before LCU)'
+        Patches          = $lp
+        RequiresRemount  = $false
+    }) | Out-Null
+    $sequence.Add([pscustomobject]@{
+        Name             = 'I3.LCU.FirstPass'
+        Description      = 'Cumulative Update (after LP per Microsoft media-dynamic-update)'
+        Patches          = $lcu
+        RequiresRemount  = $false
+    }) | Out-Null
+    $sequence.Add([pscustomobject]@{
+        Name             = 'I4.DotNet'
+        Description      = '.NET Framework Cumulative Update'
+        Patches          = $dotnet
+        RequiresRemount  = $false
+    }) | Out-Null
+    $sequence.Add([pscustomobject]@{
+        Name             = 'I5.DynamicUpdate.Component'
+        Description      = 'Component-store Dynamic Update'
+        Patches          = $dynUpComp
+        RequiresRemount  = $false
+    }) | Out-Null
+    # I6: Component Cleanup + Export are handled by P05's mount-scope
+    # finalisation, not as a Patches-bearing sub-phase. Modelled here
+    # as a marker entry so the worker can hook in.
+    $sequence.Add([pscustomobject]@{
+        Name             = 'I6.CleanupAndExport'
+        Description      = 'DISM /Cleanup-Image + Export-WindowsImage'
+        Patches          = @()
+        RequiresRemount  = $false
+        IsCleanupMarker  = $true
+    }) | Out-Null
+    # I7: LCU second pass. Only emit when LP was actually injected,
+    # since the official Microsoft rationale for the second pass is
+    # "language-pack injection shadows some LCU files".
+    if ($hasLp -and $lcu.Count -gt 0) {
+        $sequence.Add([pscustomobject]@{
+            Name             = 'I7.LCU.SecondPass'
+            Description      = 'LCU re-applied (LP shadowed first-pass LCU files)'
+            Patches          = $lcu
+            RequiresRemount  = $true
+        }) | Out-Null
+    }
+    return $sequence.ToArray()
+}
+
+function Build-BootApplySequence {
+    <#
+    .SYNOPSIS
+        Convert the boot.wim patch slice into the documented servicing
+        sub-phases (SSU -> LP -> LCU).
+    #>
+    [CmdletBinding()]
+    [OutputType([array])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$BootPatches
+    )
+    $byType = @{}
+    foreach ($p in $BootPatches) {
+        $t = if ($p.PSObject.Properties['Type']) { [string]$p.Type } else { '' }
+        if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
+        $byType[$t].Add($p) | Out-Null
+    }
+    $ssu = @(if ($byType.ContainsKey('SSU')) { $byType['SSU'] } else { @() })
+    $lp  = @()
+    if ($byType.ContainsKey('LanguagePack')) { $lp += $byType['LanguagePack'] }
+    $lcu = @(if ($byType.ContainsKey('LCU')) { $byType['LCU'] } else { @() })
+
+    $seq = New-Object System.Collections.Generic.List[object]
+    $seq.Add([pscustomobject]@{ Name='B1.SSU'; Description='SSU'; Patches=$ssu; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='Language Pack'; Patches=$lp; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B3.LCU'; Description='LCU'; Patches=$lcu; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B4.CleanupAndExport'; Description='Cleanup + Export'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
+    return $seq.ToArray()
+}
+
+function Build-WinReApplySequence {
+    <#
+    .SYNOPSIS
+        Convert the WinRE.wim patch slice into the documented servicing
+        sub-phases (SSU -> LP -> SafeOS DU).
+
+        WinRE is NOT serviced with LCU - the Safe OS DU is the
+        Microsoft-supported equivalent. WinRE also does NOT need a
+        twice-apply pass because there is no LCU in the sequence to
+        be shadowed by the language pack.
+    #>
+    [CmdletBinding()]
+    [OutputType([array])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$WinRePatches
+    )
+    $byType = @{}
+    foreach ($p in $WinRePatches) {
+        $t = if ($p.PSObject.Properties['Type']) { [string]$p.Type } else { '' }
+        if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
+        $byType[$t].Add($p) | Out-Null
+    }
+    $ssu     = @(if ($byType.ContainsKey('SSU')) { $byType['SSU'] } else { @() })
+    $lp      = @()
+    if ($byType.ContainsKey('LanguagePack')) { $lp += $byType['LanguagePack'] }
+    $safeOs  = @(if ($byType.ContainsKey('DynamicUpdate.SafeOs')) { $byType['DynamicUpdate.SafeOs'] } else { @() })
+
+    $seq = New-Object System.Collections.Generic.List[object]
+    $seq.Add([pscustomobject]@{ Name='W1.SSU'; Description='SSU (or combined LCU surrogate)'; Patches=$ssu; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='W2.LanguagePack'; Description='Recovery UI language pack'; Patches=$lp; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='W3.SafeOsDU'; Description='Safe OS Dynamic Update (WinRE-only LCU substitute)'; Patches=$safeOs; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='W4.CleanupAndExport'; Description='Cleanup + Export /Compress:Recovery'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
+    return $seq.ToArray()
 }
 
 function Write-PatchPlanSummary {
     <#
     .SYNOPSIS
         Emit a human-readable summary of a PatchPlan to the standard
-        Write-Step log surface.
+        Write-Step log surface, including the per-target sub-phase
+        sequences if present.
     #>
     [CmdletBinding()]
     param(
@@ -4225,6 +4408,18 @@ function Write-PatchPlanSummary {
     }
     if ($Plan._UnknownTypes -and $Plan._UnknownTypes.Count -gt 0) {
         Write-Warn ('Unknown Types in plan (defaulted to Install): {0}' -f ($Plan._UnknownTypes -join ', '))
+    }
+    # Sub-phase sequences (if any)
+    foreach ($seqName in @('InstallSequence','BootSequence','WinReSequence')) {
+        if ($Plan.ContainsKey($seqName) -and $Plan[$seqName] -and $Plan[$seqName].Count -gt 0) {
+            Write-Step ('  {0}:' -f $seqName)
+            foreach ($sp in $Plan[$seqName]) {
+                $patchCount = if ($sp.Patches) { @($sp.Patches).Count } else { 0 }
+                $marker = if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) { ' [cleanup]' } else { '' }
+                $remount = if ($sp.RequiresRemount) { ' [REMOUNT]' } else { '' }
+                Write-Step ('    {0,-24} ({1} patch(es)){2}{3}' -f $sp.Name, $patchCount, $marker, $remount)
+            }
+        }
     }
 }
 
@@ -4330,6 +4525,135 @@ function Test-PatchDependencyClosureOnMount {
     Write-Warn ('Dependency closure ({0}): {1} unsatisfied prerequisite(s); continuing (policy=Warn).' -f $ImageLabel, $missing.Count)
     Write-Warn $detail
     return $false
+}
+
+function Invoke-PatchSubPhase {
+    <#
+    .SYNOPSIS
+        Apply one sub-phase of an Install / Boot / WinRE servicing
+        sequence against a mounted WIM. Returns the array of per-patch
+        result rows the caller appends to its run log.
+    .DESCRIPTION
+        For each patch in $SubPhase.Patches:
+          1. If $Script:DryRun: log 'Planned' and continue.
+          2. Otherwise call Add-WindowsPackageWithRetry -PackagePath.
+          3. Record outcome (Success / Fail) + elapsed seconds.
+
+        Cleanup-marker sub-phases (IsCleanupMarker = $true) skip the
+        Add-WindowsPackage loop entirely; the caller is expected to
+        run DISM /Cleanup-Image and Export-WindowsImage separately
+        after the marker.
+
+        This helper does NOT mount or dismount the WIM. The caller
+        owns the mount lifetime so the same image can flow through
+        multiple sub-phases without round-tripping the filesystem.
+    #>
+    [CmdletBinding()]
+    [OutputType([array])]
+    param(
+        [Parameter(Mandatory)] [pscustomobject]$SubPhase,
+        [Parameter(Mandatory)] [string]$MountPath,
+        [Parameter(Mandatory)] [string]$ImageLabel
+    )
+    $rows = New-Object System.Collections.Generic.List[object]
+    $isCleanupMarker = $SubPhase.PSObject.Properties['IsCleanupMarker'] -and $SubPhase.IsCleanupMarker
+
+    if ($isCleanupMarker) {
+        Write-Step ('  Sub-phase {0,-24} [cleanup marker; caller will run DISM /Cleanup-Image]' -f $SubPhase.Name)
+        return $rows.ToArray()
+    }
+
+    $patches = @($SubPhase.Patches)
+    if ($patches.Count -eq 0) {
+        Write-Step ('  Sub-phase {0,-24} (no patches; skipping)' -f $SubPhase.Name)
+        return $rows.ToArray()
+    }
+
+    Write-Step ('  Sub-phase {0,-24} ({1} patch(es)) on {2}' -f $SubPhase.Name, $patches.Count, $ImageLabel)
+
+    foreach ($p in $patches) {
+        if (-not $p) { continue }
+        $pkgPath = if ($p.PSObject.Properties['LocalPath']) { [string]$p.LocalPath } else { '' }
+        $kb      = if ($p.PSObject.Properties['KbId'])      { [string]$p.KbId }      else { '?' }
+        $type    = if ($p.PSObject.Properties['Type'])      { [string]$p.Type }      else { '?' }
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $status = 'Planned'
+        $errMsg = ''
+
+        if ($Script:DryRun) {
+            Write-Step ('    [DryRun] would apply {0}/{1} ({2})' -f $type, $kb, (Split-Path -LiteralPath $pkgPath -Leaf -ErrorAction SilentlyContinue))
+            $sw.Stop()
+            $rows.Add([pscustomobject]@{
+                SubPhase     = $SubPhase.Name
+                ImageLabel   = $ImageLabel
+                PatchType    = $type
+                KbId         = $kb
+                FilePath     = $pkgPath
+                ApplyStatus  = 'Planned'
+                ElapsedSec   = $sw.Elapsed.TotalSeconds
+            }) | Out-Null
+            continue
+        }
+
+        if (-not $pkgPath -or -not (Test-Path -LiteralPath $pkgPath)) {
+            $sw.Stop()
+            $errMsg = ('LocalPath missing or empty for {0}/{1}; cannot apply' -f $type, $kb)
+            Write-Warn ('    [skip] ' + $errMsg)
+            $rows.Add([pscustomobject]@{
+                SubPhase     = $SubPhase.Name
+                ImageLabel   = $ImageLabel
+                PatchType    = $type
+                KbId         = $kb
+                FilePath     = $pkgPath
+                ApplyStatus  = 'Skip'
+                ElapsedSec   = $sw.Elapsed.TotalSeconds
+                Error        = $errMsg
+            }) | Out-Null
+            continue
+        }
+
+        Set-DebugStep -Step ('add-pkg:{0}:{1}' -f $SubPhase.Name, $kb)
+        Write-Step ('    Applying {0}/{1} ({2})' -f $type, $kb, (Split-Path -LiteralPath $pkgPath -Leaf))
+        try {
+            $status = Add-WindowsPackageWithRetry -MountPath $MountPath `
+                -PackagePath $pkgPath -LogDir $Script:LogsDir
+            Write-Ok ('      status={0}' -f $status)
+        } catch {
+            $errMsg = $_.Exception.Message
+            $status = 'Fail'
+            Add-ErrorJsonlEntry -Phase 'P05' -Kind 'sub-phase-failure' -Properties @{
+                exType   = $_.Exception.GetType().FullName
+                msg      = $errMsg
+                subPhase = $SubPhase.Name
+                image    = $ImageLabel
+                kb       = $kb
+                type     = $type
+            }
+            $sw.Stop()
+            $rows.Add([pscustomobject]@{
+                SubPhase     = $SubPhase.Name
+                ImageLabel   = $ImageLabel
+                PatchType    = $type
+                KbId         = $kb
+                FilePath     = $pkgPath
+                ApplyStatus  = 'Fail'
+                ElapsedSec   = $sw.Elapsed.TotalSeconds
+                Error        = $errMsg
+            }) | Out-Null
+            throw
+        }
+        $sw.Stop()
+        $rows.Add([pscustomobject]@{
+            SubPhase     = $SubPhase.Name
+            ImageLabel   = $ImageLabel
+            PatchType    = $type
+            KbId         = $kb
+            FilePath     = $pkgPath
+            ApplyStatus  = $status
+            ElapsedSec   = $sw.Elapsed.TotalSeconds
+        }) | Out-Null
+    }
+    return $rows.ToArray()
 }
 
 # ============================================================
@@ -5464,6 +5788,18 @@ function Invoke-BuildPhase05_PatchInstallWim {
         $patches = Get-PatchListForInstallWim
         Write-Step ('install.wim-targeted patches: {0}' -f $patches.Count)
 
+        # Pull the install sub-phase sequence (I1.SSU ... I7.LCU.SecondPass)
+        # from the cached PatchPlan. The plan was built in P02.
+        $plan = Get-OrInitPatchPlan
+        $installSequence = @($plan.InstallSequence)
+        Write-Step ('install.wim apply sequence: {0} sub-phase(s)' -f $installSequence.Count)
+        foreach ($sp in $installSequence) {
+            $patchCount = if ($sp.Patches) { @($sp.Patches).Count } else { 0 }
+            $marker = if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) { ' [cleanup]' } else { '' }
+            $remount = if ($sp.RequiresRemount) { ' [REMOUNT]' } else { '' }
+            Write-Step ('    {0,-24} ({1} patch(es)){2}{3}' -f $sp.Name, $patchCount, $marker, $remount)
+        }
+
         $targets = Resolve-InstallWimTargetIndexes -Inventory $Script:WimIndexInventory
         Write-Step ('install.wim indexes to update: {0}' -f ($targets | Measure-Object).Count)
 
@@ -5471,71 +5807,113 @@ function Invoke-BuildPhase05_PatchInstallWim {
         foreach ($img in $targets) {
             Write-SubSection ('install.wim index {0}: {1}' -f $img.ImageIndex, $img.ImageName)
             Set-DebugStep -Step ('install-idx-' + $img.ImageIndex)
+            $imgLabel = ('install.wim:idx' + $img.ImageIndex)
 
+            # In Plan (non-Execute) mode emit the planned row for every
+            # sub-phase + patch and skip the real DISM work. This is
+            # the mode CI Stage 2 / Stage 3 DryRun runs use.
             if (-not $Script:Execute -and -not $Script:SyntheticTestMode) {
-                foreach ($p in $patches) {
-                    Write-Step ('  [PLAN] {0} ({1}) -> idx {2}' -f $p.KbId, $p.PatchType, $img.ImageIndex)
-                    $rows.Add([pscustomobject]@{
-                        KbId = $p.KbId; PatchType = $p.PatchType
-                        FilePath = $p.LocalPath; ApplyOrder = $p.ApplyOrder
-                        AppliesTo = ('install.wim:idx' + $img.ImageIndex)
-                        ApplyStatus = 'Planned'; ElapsedSeconds = 0
-                        DismExitCode = 0
-                    }) | Out-Null
+                foreach ($sp in $installSequence) {
+                    foreach ($p in @($sp.Patches)) {
+                        if (-not $p) { continue }
+                        Write-Step ('  [PLAN] {0}: {1} ({2}) -> {3}' -f $sp.Name, $p.KbId, $p.Type, $imgLabel)
+                        $rows.Add([pscustomobject]@{
+                            KbId = $p.KbId; PatchType = $p.Type
+                            FilePath = $p.LocalPath; ApplyOrder = $p.ApplyOrder
+                            AppliesTo = $imgLabel; SubPhase = $sp.Name
+                            ApplyStatus = 'Planned'; ElapsedSeconds = 0
+                            DismExitCode = 0
+                        }) | Out-Null
+                    }
                 }
                 continue
             }
 
-            Set-DebugStep -Step ('mount-install-idx-' + $img.ImageIndex)
+            # Microsoft media-dynamic-update sequence requires that the
+            # install.wim be mounted, traversed through I1..I6 in order,
+            # then dismounted+committed+exported, and finally re-mounted
+            # for I7 (LCU second pass) IFF a language pack was injected.
+            # The Build-InstallApplySequence helper marks I7 with
+            # RequiresRemount = $true. We honour that by closing the
+            # first mount on the cleanup marker and opening a fresh one
+            # for any RequiresRemount sub-phase.
+
+            $remountAndContinue = $false
+            $secondPassSubPhases = New-Object System.Collections.Generic.List[object]
+            Set-DebugStep -Step ('mount-install-pass1-idx-' + $img.ImageIndex)
             Invoke-WimMountSafe -ImagePath $installWim -Index $img.ImageIndex `
                 -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
             try {
-                # Pre-apply dependency closure check. Verifies
-                # that every patch's RequiresKbIds is already satisfied
-                # inside the freshly-mounted image. Strict mode (default)
-                # aborts the run before Add-WindowsPackage so we surface
-                # the precondition failure cleanly rather than letting
-                # DISM emit a 0x800f0823 hex code mid-loop.
+                # Pre-apply dependency closure check on the first-pass mount.
+                # Combine all first-pass patches into the check.
+                $firstPassPatches = @($installSequence | Where-Object {
+                    -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker) -and
+                    -not $_.RequiresRemount
+                } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
                 Set-DebugStep -Step ('depcheck-install-idx-' + $img.ImageIndex)
                 Test-PatchDependencyClosureOnMount -MountPath $Script:MountInstallDir `
-                    -PatchesToApply $patches `
-                    -ImageLabel ('install.wim:idx' + $img.ImageIndex) | Out-Null
+                    -PatchesToApply $firstPassPatches `
+                    -ImageLabel $imgLabel | Out-Null
 
-                foreach ($p in $patches) {
-                    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-                    $status = 'Fail'; $exitCode = -1
-                    try {
-                        $status = Add-WindowsPackageWithRetry -MountPath $Script:MountInstallDir `
-                            -PackagePath $p.LocalPath -LogDir $Script:LogsDir
-                        $exitCode = 0
-                    } catch {
-                        Write-Fail ('Add-WindowsPackage failed for {0}: {1}' -f (Split-Path -LiteralPath $p.LocalPath -Leaf), $_.Exception.Message)
-                        Add-ErrorJsonlEntry -Phase 'P05' -Kind 'failure' -Properties @{
-                            exType = $_.Exception.GetType().FullName
-                            msg = $_.Exception.Message
-                            wimIndex = $img.ImageIndex
-                            kb = $p.KbId
-                        }
-                        throw
-                    } finally {
-                        $sw.Stop()
+                # Iterate sub-phases in order; deferred (RequiresRemount=$true)
+                # sub-phases are stashed for execution after dismount + export.
+                foreach ($sp in $installSequence) {
+                    if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) {
+                        Set-DebugStep -Step ('cleanup-install-idx-' + $img.ImageIndex)
+                        Invoke-DismCleanup -MountPath $Script:MountInstallDir
+                        continue
+                    }
+                    if ($sp.RequiresRemount) {
+                        Write-Step ('  Deferring sub-phase {0} until after dismount+export.' -f $sp.Name)
+                        $secondPassSubPhases.Add($sp) | Out-Null
+                        $remountAndContinue = $true
+                        continue
+                    }
+                    $spRows = Invoke-PatchSubPhase -SubPhase $sp -MountPath $Script:MountInstallDir -ImageLabel $imgLabel
+                    foreach ($r in $spRows) {
                         $rows.Add([pscustomobject]@{
-                            KbId = $p.KbId; PatchType = $p.PatchType
-                            FilePath = $p.LocalPath; ApplyOrder = $p.ApplyOrder
-                            AppliesTo = ('install.wim:idx' + $img.ImageIndex)
-                            ApplyStatus = $status
-                            ElapsedSeconds = [Math]::Round($sw.Elapsed.TotalSeconds, 2)
-                            DismExitCode = $exitCode
+                            KbId = $r.KbId; PatchType = $r.PatchType
+                            FilePath = $r.FilePath; ApplyOrder = 0
+                            AppliesTo = $r.ImageLabel; SubPhase = $r.SubPhase
+                            ApplyStatus = $r.ApplyStatus
+                            ElapsedSeconds = [Math]::Round($r.ElapsedSec, 2)
+                            DismExitCode = if ($r.ApplyStatus -eq 'Fail') { -1 } else { 0 }
                         }) | Out-Null
                     }
-                    Write-Ok ('  Applied {0} ({1}) status={2} elapsed={3:F1}s' -f $p.KbId, $p.PatchType, $status, $sw.Elapsed.TotalSeconds)
                 }
-
-                Set-DebugStep -Step ('cleanup-install-idx-' + $img.ImageIndex)
-                Invoke-DismCleanup -MountPath $Script:MountInstallDir
             } finally {
-                Set-DebugStep -Step ('dismount-install-idx-' + $img.ImageIndex)
+                Set-DebugStep -Step ('dismount-install-pass1-idx-' + $img.ImageIndex)
                 Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir
+            }
+
+            # Second-pass: LCU re-apply when LP was actually injected.
+            # Mount the just-exported image fresh, run the deferred
+            # sub-phases, cleanup + export again.
+            if ($remountAndContinue -and $secondPassSubPhases.Count -gt 0) {
+                Write-Step ('  Re-mounting install.wim idx {0} for LCU second pass ({1} sub-phase(s)).' -f $img.ImageIndex, $secondPassSubPhases.Count)
+                Set-DebugStep -Step ('mount-install-pass2-idx-' + $img.ImageIndex)
+                Invoke-WimMountSafe -ImagePath $installWim -Index $img.ImageIndex `
+                    -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
+                try {
+                    foreach ($sp in $secondPassSubPhases) {
+                        $spRows = Invoke-PatchSubPhase -SubPhase $sp -MountPath $Script:MountInstallDir -ImageLabel ($imgLabel + ':pass2')
+                        foreach ($r in $spRows) {
+                            $rows.Add([pscustomobject]@{
+                                KbId = $r.KbId; PatchType = $r.PatchType
+                                FilePath = $r.FilePath; ApplyOrder = 0
+                                AppliesTo = $r.ImageLabel; SubPhase = $r.SubPhase
+                                ApplyStatus = $r.ApplyStatus
+                                ElapsedSeconds = [Math]::Round($r.ElapsedSec, 2)
+                                DismExitCode = if ($r.ApplyStatus -eq 'Fail') { -1 } else { 0 }
+                            }) | Out-Null
+                        }
+                    }
+                    Set-DebugStep -Step ('cleanup-install-pass2-idx-' + $img.ImageIndex)
+                    Invoke-DismCleanup -MountPath $Script:MountInstallDir
+                } finally {
+                    Set-DebugStep -Step ('dismount-install-pass2-idx-' + $img.ImageIndex)
+                    Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir
+                }
             }
         }
 
@@ -5587,9 +5965,15 @@ function Invoke-BuildPhase06_PatchBootWim {
             $bootIndexes = @(1, 2)
         }
 
+        # Pull boot.wim apply sequence (B1.SSU -> B2.LP -> B3.LCU -> B4.cleanup)
+        $plan = Get-OrInitPatchPlan
+        $bootSequence = @($plan.BootSequence)
+        Write-Step ('boot.wim apply sequence: {0} sub-phase(s)' -f $bootSequence.Count)
+
         foreach ($idx in $bootIndexes) {
             Write-SubSection ('boot.wim index {0}' -f $idx)
             Set-DebugStep -Step ('boot-idx-' + $idx)
+            $imgLabel = ('boot.wim:idx' + $idx)
 
             $mountDir = $Script:MountBoot1Dir
             if ($idx -eq 2) { $mountDir = $Script:MountBoot2Dir }
@@ -5597,18 +5981,21 @@ function Invoke-BuildPhase06_PatchBootWim {
             Invoke-WimMountSafe -ImagePath $bootWim -Index $idx `
                 -Path $mountDir -LogDir $Script:LogsDir | Out-Null
             try {
-                # Dependency closure check for boot.wim
+                # Dependency closure check on the union of all sub-phase patches
+                $allBootPatches = @($bootSequence | Where-Object {
+                    -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
+                } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
                 Test-PatchDependencyClosureOnMount -MountPath $mountDir `
-                    -PatchesToApply $patches `
-                    -ImageLabel ('boot.wim:idx' + $idx) | Out-Null
+                    -PatchesToApply $allBootPatches `
+                    -ImageLabel $imgLabel | Out-Null
 
-                foreach ($p in $patches) {
-                    Write-Step ('  Applying {0} ({1})' -f $p.KbId, $p.PatchType)
-                    $status = Add-WindowsPackageWithRetry -MountPath $mountDir `
-                        -PackagePath $p.LocalPath -LogDir $Script:LogsDir
-                    Write-Ok ('   status={0}' -f $status)
+                foreach ($sp in $bootSequence) {
+                    if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) {
+                        Invoke-DismCleanup -MountPath $mountDir
+                        continue
+                    }
+                    Invoke-PatchSubPhase -SubPhase $sp -MountPath $mountDir -ImageLabel $imgLabel | Out-Null
                 }
-                Invoke-DismCleanup -MountPath $mountDir
             } finally {
                 Invoke-WimDismountSafe -Path $mountDir -LogDir $Script:LogsDir
             }
@@ -5630,21 +6017,47 @@ function Invoke-BuildPhase06_PatchBootWim {
                 if (-not (Test-Path -LiteralPath $winReInside)) {
                     Write-Warn 'Winre.wim not found inside install.wim; skipping winre update.'
                 } else {
-                    Copy-Item -LiteralPath $winReInside -Destination $winReWork -Force
-                    # winre.wim is typically a single-index image
-                    Invoke-WimMountSafe -ImagePath $winReWork -Index 1 `
-                        -Path $Script:MountWinReDir -LogDir $Script:LogsDir | Out-Null
-                    try {
-                        foreach ($p in $patches) {
-                            Write-Step ('  Applying {0} to winre' -f $p.KbId)
-                            Add-WindowsPackageWithRetry -MountPath $Script:MountWinReDir `
-                                -PackagePath $p.LocalPath -LogDir $Script:LogsDir | Out-Null
+                    # Pull WinRE apply sequence (W1.SSU -> W2.LP -> W3.SafeOsDU -> W4.cleanup)
+                    $winReSequence = @($plan.WinReSequence)
+                    $winReHasWork = ($winReSequence | Where-Object {
+                        -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker) -and
+                        @($_.Patches).Count -gt 0
+                    } | Measure-Object).Count -gt 0
+                    if (-not $winReHasWork) {
+                        Write-Step 'WinRE sequence has no patches; skipping WinRE mount.'
+                    } else {
+                        Write-Step ('winre.wim apply sequence: {0} sub-phase(s)' -f $winReSequence.Count)
+                        Copy-Item -LiteralPath $winReInside -Destination $winReWork -Force
+                        # winre.wim is typically a single-index image
+                        Invoke-WimMountSafe -ImagePath $winReWork -Index 1 `
+                            -Path $Script:MountWinReDir -LogDir $Script:LogsDir | Out-Null
+                        try {
+                            # Dependency closure for WinRE
+                            $allWinRePatches = @($winReSequence | Where-Object {
+                                -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
+                            } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
+                            Test-PatchDependencyClosureOnMount -MountPath $Script:MountWinReDir `
+                                -PatchesToApply $allWinRePatches `
+                                -ImageLabel 'winre.wim' | Out-Null
+
+                            foreach ($sp in $winReSequence) {
+                                if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) {
+                                    Invoke-DismCleanup -MountPath $Script:MountWinReDir
+                                    continue
+                                }
+                                Invoke-PatchSubPhase -SubPhase $sp `
+                                    -MountPath $Script:MountWinReDir `
+                                    -ImageLabel 'winre.wim' | Out-Null
+                            }
+                        } finally {
+                            Invoke-WimDismountSafe -Path $Script:MountWinReDir -LogDir $Script:LogsDir
                         }
-                        Invoke-DismCleanup -MountPath $Script:MountWinReDir
-                    } finally {
-                        Invoke-WimDismountSafe -Path $Script:MountWinReDir -LogDir $Script:LogsDir
+                        # Copy the freshly-serviced WinRE back into install.wim's
+                        # recovery slot. The outer install.wim mount is still
+                        # open at this point, so the file write commits when
+                        # the install.wim dismount in our finally block runs.
+                        Copy-Item -LiteralPath $winReWork -Destination $winReInside -Force
                     }
-                    Copy-Item -LiteralPath $winReWork -Destination $winReInside -Force
                 }
             } finally {
                 Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir

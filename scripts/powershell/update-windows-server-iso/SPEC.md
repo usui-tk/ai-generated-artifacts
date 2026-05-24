@@ -550,7 +550,48 @@ the entry point if needed.
 
 `-DryRun` short-circuits the check with a notice (no real mount).
 
-## B.14 PatchBaseline schema fields (referenced by B.10)
+## B.14 Microsoft media-dynamic-update sub-phase sequences (r04.1+)
+
+For each WIM target, `Build-PatchPlan` emits an ordered array of
+sub-phase descriptors (named after the Microsoft documentation:
+I = install, B = boot, W = winre). Each sub-phase carries:
+
+- `Name`            : symbolic identifier (e.g. `I3.LCU.FirstPass`)
+- `Description`     : one-line human-readable purpose
+- `Patches`         : array of patches that belong to this sub-phase
+- `RequiresRemount` : if `$true`, the worker must dismount the WIM,
+                      let DISM commit and export it, then re-mount
+                      a fresh copy before running this sub-phase
+- `IsCleanupMarker` : if `$true`, the worker runs DISM /Cleanup-Image
+                      at this point and skips the Add-WindowsPackage
+                      loop
+
+**install.wim (P05)**:
+
+| # | Name                       | Microsoft rationale |
+|---|----------------------------|---|
+| 1 | I1.SSU                     | Servicing stack first |
+| 2 | I2.LanguagePack            | UI must be installed BEFORE the LCU's resource files |
+| 3 | I3.LCU.FirstPass           | LCU after LP per Microsoft doc |
+| 4 | I4.DotNet                  | .NET 4.x cumulative |
+| 5 | I5.DynamicUpdate.Component | Component-store DU |
+| 6 | I6.CleanupAndExport        | (worker hook for DISM /Cleanup + Export) |
+| 7 | I7.LCU.SecondPass          | Emitted ONLY when LP was injected; `RequiresRemount = $true`; the LP injected in I2 can shadow files delivered by the I3 LCU, so the LCU is re-applied on a freshly-exported image |
+
+**boot.wim (P06)**: B1.SSU -> B2.LanguagePack -> B3.LCU ->
+B4.CleanupAndExport. No twice-apply needed.
+
+**WinRE.wim (P06 inner block)**: W1.SSU -> W2.LanguagePack ->
+W3.SafeOsDU -> W4.CleanupAndExport. The WinRE image is NOT
+serviced with LCU; Microsoft delivers a Safe OS Dynamic Update
+that plays the LCU role for the recovery environment.
+
+`Invoke-PatchSubPhase` is the single helper that drives the apply
+loop for any sub-phase. The phase workers iterate the sequence,
+calling `Invoke-PatchSubPhase` for content-bearing sub-phases and
+running `Invoke-DismCleanup` for `IsCleanupMarker` sub-phases.
+
+## B.14b PatchBaseline schema fields (referenced by B.10)
 
 ```jsonc
 "PatchBaseline": {
@@ -921,7 +962,7 @@ Server SKU requires.
 | **M3** | P04.5 `ValidatePatchSet` integrating `wsusscn2.cab` + Windows Update Agent COM API for Microsoft-authoritative dependency check; 4-file diagnostic export on failure | **Done (r02)** |
 | M4 | Server 2025 `LCUExpandViaMum=true` real implementation (MUM/CAB expand path) | Placeholder |
 | **M5** | Stage 4 CI workflow (`monthly-refresh`): monthly scheduled run that exercises `-Action RefreshAllBaselines` and opens a PR with the resulting `Config/<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes and Patch Tuesday drift within ~30 days | **Done (r03.1)** |
-| **M6** | Microsoft-official media-dynamic-update servicing sequence: WIM-target-aware patch plan + pre-apply dependency closure check delivered in r04; remaining items (LCU twice-apply, WinRE worker, Language Pack injection in P05) deferred to the next release in the r04 line | **Partial (r04)** |
+| **M6** | Microsoft-official media-dynamic-update servicing sequence: WIM-target-aware patch plan + pre-apply dependency closure check (r04) + LCU twice-apply + WinRE servicing + Language Pack injection (r04.1) | **Done (r04.1)** |
 | M7 | Feature on Demand (.NET 3.5) source detection and `-EnableDotNet35` opt-in | Future |
 | M6 | Client SKUs (Windows 10/11) support — separate Config family | Future |
 | M7 | Driver / FOD / LXP / Appx customisation (OSBuild equivalent) | Future |
@@ -999,7 +1040,11 @@ Server SKU requires.
 | `Resolve-LanguageSpecificPatchesFromCatalog` (r03) | Per-language Catalogue scraper; returns LP / LXP / .NET LP entries; empty result = verified absence |
 | `Get-PatchTargetsForType` (r04) | Returns the WIM target array for a given patch Type (Install / Boot / WinRE / Setup) via `$Script:PatchTargetMap` |
 | `Build-PatchPlan` (r04) | Build a target-aware PatchPlan from the flat ResolvedPatches array, sorted by ApplyOrder within each target lane |
-| `Write-PatchPlanSummary` (r04) | Human-readable per-target summary of a PatchPlan |
+| `Build-InstallApplySequence` (r04.1) | Convert install.wim patch slice into the I1-I7 Microsoft media-dynamic-update sub-phase sequence; emits I7 (LCU second pass with RequiresRemount=$true) only when language packs are present |
+| `Build-BootApplySequence` (r04.1) | Convert boot.wim patch slice into B1-B4 sub-phase sequence (SSU/LP/LCU/Cleanup); no twice-apply needed |
+| `Build-WinReApplySequence` (r04.1) | Convert WinRE.wim patch slice into W1-W4 sub-phase sequence (SSU/LP/SafeOsDU/Cleanup); LCU is NOT included (Safe OS DU is the Microsoft-supported substitute) |
+| `Invoke-PatchSubPhase` (r04.1) | Apply one sub-phase against a mounted WIM, handling DryRun, missing LocalPath, and Add-WindowsPackage failures; emits per-patch result rows |
+| `Write-PatchPlanSummary` (r04, extended r04.1) | Human-readable per-target summary of a PatchPlan; r04.1 also prints the InstallSequence / BootSequence / WinReSequence breakdown |
 | `Test-PatchDependencyClosureOnMount` (r04) | Pre-apply verification: every patch's RequiresKbIds must already be present in the mounted image (Get-WindowsPackage substring match); Strict mode aborts before DISM 0x800f0823 |
 | `Get-OrInitPatchPlan` (r04) | Lazy accessor for `$Script:PatchPlan`; builds on first access |
 | `Get-RefreshDecision` (r03) | Decide Skip / InitialFill / Monthly / Manual for a field group given Cadence, verification state, and latest Patch Tuesday |
