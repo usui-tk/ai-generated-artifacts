@@ -75,7 +75,7 @@ below.
 |---|---|
 | Filename | `Update-WindowsServerIso.ps1` |
 | Project folder | `scripts/powershell/update-windows-server-iso/` |
-| Version | `update-wsi-2026.05.24-r02.4` |
+| Version | `update-wsi-2026.05.24-r02.5` |
 | Tag | `dynamic-baseline-and-wsusscn2-validation-fixup` |
 | Target OS | Server 2016 / 2019 / 2022 / 2025 |
 | Languages | en-us, ja-jp |
@@ -766,8 +766,12 @@ Server SKU requires.
 | `Get-OsConfigPath` | Resolve `Config/<OsKey>.json` from `$Script:ScriptRoot` |
 | `Get-UpdateIdFromCatalog` | `Search.aspx?q=<KB>` HTML scrape; returns array of UpdateId + Title |
 | `Get-DownloadLinkFromCatalog` | `DownloadDialog.aspx` POST scrape; returns array of Url + FileName |
+| `Get-CatalogQueryTemplate` (r02.5) | OS-specific Catalogue search templates (Server2016/2019/2022/2025) with Title / Product / Description per Microsoft media-dynamic-update guidance |
+| `Get-CatalogQueryUrl` (r02.5) | Build Search.aspx URL with quoted Product / Description filter tokens |
+| `Select-CanonicalPatchFile` (r02.5) | Scoring-based file picker that rejects Express/Delta/PSF differential packages and returns the single Full standalone file |
+| `Test-IsCombinedLcuTitle` (r02.5) | True if an LCU title self-identifies as a combined SSU+LCU package |
 | `Get-SupersedenceFromCatalog` | `ScopedViewInline.aspx` HTML scrape; returns Supersedes + SupersededBy |
-| `Resolve-PatchSetFromCatalog` | Orchestrator: SSU + LCU + DynUp* + .NET for (OsVersion, PatchMonth, x64) |
+| `Resolve-PatchSetFromCatalog` | Two-pass orchestrator: pass 1 runs OS-aware Catalogue searches; combined-LCU detector runs on the aggregate; pass 2 picks the canonical Full file per surviving candidate via `Select-CanonicalPatchFile` |
 | `Get-WsusScnCabSourceUrl` | Microsoft canonical wsusscn2.cab URL |
 | `Test-WsusScnCabFresh` | Cache freshness vs latest Patch Tuesday |
 | `Get-WsusScnCabIfNeeded` | Conditional download with override-path support |

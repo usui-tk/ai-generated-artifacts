@@ -27,6 +27,105 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.24-r02.5] - 2026-05-24
+
+### Fixed - Catalogue search precision + multi-file disambiguation (Option X)
+
+r02 introduced Microsoft Update Catalogue scraping (P02.5) with three
+quality issues that this release fixes. The fixes are based on
+Microsoft's official media-dynamic-update guidance plus a review of
+WIM Witch, WimWizard, and WIM-Tools reference implementations.
+
+**Problem A - OS-version-aware Catalogue query templates.**
+Previously, queries used a loose token like `"servicing stack update
+Windows Server 2022"`. Microsoft's actual Catalogue Title pattern for
+Server 2022 is `"... Servicing Stack Update for Microsoft server
+operating system, version 21H2"` (with a literal comma) and requires
+a `Product` / `Description` disambiguator to separate Setup-DU from
+SafeOS-DU. The previous loose match could conflate multiple OS
+versions in results. Replaced with `Get-CatalogQueryTemplate` which
+returns the exact Title patterns documented in
+https://learn.microsoft.com/windows/deployment/update/media-dynamic-update,
+per OS version (2016 / 2019 / 2022 / 2025).
+
+**Problem B - Combined LCU detection.**
+Since 2021 Microsoft embeds the SSU into the LCU and publishes
+standalone SSUs only "in rare cases of a breaking change"
+(Microsoft Learn quote). The previous code's
+`RequiresKbIds = $ssuKbs` assignment treated SSU as always-present
+and could falsely report "missing SSU" in P04.5 validation. Added
+`Test-IsCombinedLcuTitle` (explicit marker check) and a structural
+detector inside `Resolve-PatchSetFromCatalog` that treats
+"SSU search returned zero AND LCU search returned non-zero" as a
+combined-LCU month. In combined months, the LCU entry is annotated
+with `IsCombined=$true` and its `RequiresKbIds` is left empty.
+
+**Problem C - Multi-file Catalogue selection.**
+The previous code did `$primary = $links[0]`, which for .NET
+Cumulative Updates and other multi-file packages was a coin toss
+between Full, Express, and Delta variants. Picking Express / Delta
+breaks `Add-WindowsPackage` because differential packages require a
+base. Replaced with `Select-CanonicalPatchFile`, a scoring-based
+picker that rejects `express`, `delta`, `psf`, and metadata text
+files outright, and prefers `.msu > .cab`, matching architecture,
+and (for .NET) matching `ndp<version>` markers.
+
+### Added
+
+- `Get-CatalogQueryTemplate` (~150 lines): OS-specific Catalogue
+  Title templates + optional Product / Description filters.
+- `Get-CatalogQueryUrl` (~30 lines): builds a Search.aspx URL with
+  quoted Product / Description filter tokens.
+- `Test-IsCombinedLcuTitle` (~15 lines): title-level combined marker.
+- `Select-CanonicalPatchFile` (~80 lines): scoring-based file picker.
+- LCU entries now carry an `IsCombined` boolean property in
+  PatchBaseline; all patch entries carry a `Variant = 'Full'` string
+  (placeholder for r03's `Variants[]` array).
+
+### Changed
+
+- `Resolve-PatchSetFromCatalog` reworked as a two-pass orchestrator:
+  pass 1 runs all per-type Catalogue searches and records narrowed
+  candidates; the combined-LCU detector runs on the aggregate; pass 2
+  resolves the single canonical download file per surviving candidate
+  via `Select-CanonicalPatchFile`. Eliminates `$primary = $links[0]`.
+- Server 2019 / 2016 queries no longer include `DynamicUpdate.Setup`
+  or `DynamicUpdate.SafeOs` (Microsoft does not publish those monthly
+  for the older Server LTSC SKUs; they only appear during feature-
+  update windows). `Test-PatchBaselineUsable` continues to accept
+  partial sets so this is not a regression.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info (5,611 lines).
+- PSScriptAnalyzer 1.25.0: 0 findings.
+- Unit tests for `Select-CanonicalPatchFile` and
+  `Get-CatalogQueryTemplate` pass:
+    * full + express -> selects full
+    * delta only -> returns null
+    * Server 2022 template contains comma form
+    * .NET CU with ndp48 prefers the ndp48 variant
+
+### Compatibility
+
+- PatchBaseline schema remains at "1.0". The new `IsCombined` and
+  `Variant` fields are added via `Add-Member -Force` so existing
+  `Save-ConfigWithBaseline` rewrites them as ordinary JSON properties.
+- Existing r02.4 Configs are read transparently; missing
+  `IsCombined`/`Variant` fields default to `$false`/`'Full'` when
+  consumed by P03/P04.5/P05.
+- `ScriptVersion` is bumped to `update-wsi-2026.05.24-r02.5`;
+  `ScriptTag` is `catalog-multifile-and-combined-lcu`.
+
+### Out of scope (deferred to r03 Option Y / Z)
+
+- WIM-target-aware patch plan (install/boot/winre per-target
+  patch lists per Microsoft media-dynamic-update sequence).
+- LCU twice-apply pattern around language-pack injection.
+- Language Pack acquisition per `OsLanguage`.
+- Feature on Demand (.NET 3.5) source detection.
+- Pre-apply `Get-WindowsPackage` dependency closure check.
+
 ## [update-wsi-2026.05.24-r02.4] - 2026-05-24
 
 ### Fixed - `-EnvironmentInfoOnly` smoke test failed on Windows runner
