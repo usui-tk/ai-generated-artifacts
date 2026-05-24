@@ -415,8 +415,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.10-r02'
-$Script:ScriptTag     = 'dynamic-baseline-and-wsusscn2-validation'
+$Script:ScriptVersion = 'update-wsi-2026.05.24-r02.1'
+$Script:ScriptTag     = 'dynamic-baseline-and-wsusscn2-validation-fixup'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -2263,6 +2263,10 @@ function Write-MetalinkManifest {
 # ============================================================
 
 function Test-PatchIntegrity {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingBrokenHashAlgorithms', '',
+        Justification = 'Microsoft Update Catalog publishes SHA-1 hashes alongside SHA-256 for every patch. This function sanity-checks both; SHA-256 (L2c) and Authenticode signature (L3) are the actual trust anchors, SHA-1 (L2a/L2b) is only used for integrity verification against upstream-published metadata.'
+    )]
     <#
     .SYNOPSIS
         Three-layer integrity check on a downloaded MSU/CAB patch.
@@ -2847,6 +2851,7 @@ function Resolve-PatchSetFromCatalog {
     if (-not $osTokens) {
         throw ('No Catalog title token map for OsVersion ' + $OsVersion)
     }
+    Write-Step ('Resolving patch set: OS={0} Lang={1} Month={2}' -f $OsVersion, $OsLanguage, $PatchMonth)
 
     # Search query templates per patch type
     $queries = New-Object System.Collections.Generic.List[object]
@@ -5145,15 +5150,15 @@ function Get-PhaseListByAction {
     [OutputType([string[]])]
     param([Parameter(Mandatory)] [string]$ActionName)
     switch ($ActionName) {
-        'Prepare'             { return @('P01','P02','P02.5','P03','P04','P04.5') }
-        'Build'               { return @('P05','P06','P07') }
-        'Verify'              { return @('P08','P09') }
-        'PrepareBuildVerify'  { return @('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09') }
-        'All'                 { return @('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09') }
-        'BootTest'            { return @() }
-        'Cleanup'             { return @() }
-        'ListPhases'          { return @() }
-        'GenerateManifest'    { return @('P01','P02','P02.5') }
+        'Prepare'             { return [string[]]@('P01','P02','P02.5','P03','P04','P04.5') }
+        'Build'               { return [string[]]@('P05','P06','P07') }
+        'Verify'              { return [string[]]@('P08','P09') }
+        'PrepareBuildVerify'  { return [string[]]@('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09') }
+        'All'                 { return [string[]]@('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09') }
+        'BootTest'            { return [string[]]@() }
+        'Cleanup'             { return [string[]]@() }
+        'ListPhases'          { return [string[]]@() }
+        'GenerateManifest'    { return [string[]]@('P01','P02','P02.5') }
         default               { throw ('Unknown action: {0}' -f $ActionName) }
     }
 }
@@ -5299,7 +5304,7 @@ function Invoke-HyperVBootTest {
     New-VHD -Path $vhdPath -SizeBytes 64GB -Dynamic | Out-Null
 
     Set-DebugStep -Step 'create-vm'
-    $vm = New-VM -Name $vmName -Generation 2 -MemoryStartupBytes 4GB -VHDPath $vhdPath -Path $vmDir
+    New-VM -Name $vmName -Generation 2 -MemoryStartupBytes 4GB -VHDPath $vhdPath -Path $vmDir | Out-Null
     Set-VMProcessor -VMName $vmName -Count 2 | Out-Null
     Set-VMMemory -VMName $vmName -DynamicMemoryEnabled $true -MinimumBytes 1GB -MaximumBytes 8GB -StartupBytes 4GB | Out-Null
     Add-VMDvdDrive -VMName $vmName -Path $Script:OutputIsoPath | Out-Null

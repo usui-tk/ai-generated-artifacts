@@ -27,6 +27,60 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.24-r02.1] - 2026-05-24
+
+### Fixed — Stage 2 PSScriptAnalyzer (Windows PS 5.1) findings
+
+r02 (`50fdb0f`) passed Stage 1 (Linux pwsh 7 + psa.py 0/0/0) but
+failed Stage 2 (Windows PS 5.1 + microsoft/psscriptanalyzer-action)
+on three rule categories that psa.py does not enforce. r02.1 addresses
+all of them while keeping psa.py at 0/0/0.
+
+- **`PSAvoidUsingBrokenHashAlgorithms`** (Severity = Error; the actual
+  cause of the Stage 2 exit-code-1 failure) at `Test-PatchIntegrity`'s
+  L2a/L2b SHA-1 checks. The function intentionally uses SHA-1 to
+  sanity-check the SHA-1 hashes Microsoft Update Catalogue publishes
+  alongside its patches, with SHA-256 (L2c) and Authenticode signatures
+  (L3) as the real trust anchors. The previous `# psa-disable-line
+  PSA5003 -- MS Catalog SHA-1` comments are a psa.py-specific
+  suppression and do not affect the upstream `PSAvoidUsing*` rule.
+  Replaced with a function-level
+  `[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+       'PSAvoidUsingBrokenHashAlgorithms', '', Justification = '...')]`
+  which is the canonical PSScriptAnalyzer suppression mechanism.
+- **`PSUseDeclaredVarsMoreThanAssignments`** (Severity = Warning) at
+  `Invoke-HyperVBootTest`'s `$vm = New-VM ...` assignment. The local
+  `$vm` was never read again (subsequent operations use the VM name).
+  Replaced with `New-VM ... | Out-Null` to match the surrounding
+  Hyper-V calls' style.
+- **`PSUseOutputTypeCorrectly`** (Severity = Information; x9 instances)
+  at `Get-PhaseListByAction`'s nine `return @(...)` arms. PSSA
+  cannot infer that an unannotated `@('a','b')` collection literal
+  conforms to the declared `[OutputType([string[]])]`. Each `return`
+  is now cast explicitly: `return [string[]]@('P01', 'P02', ...)`.
+
+### Fixed — preventive (not yet observed on CI)
+
+Local PSScriptAnalyzer 1.25.0 also surfaces one `PSReviewUnusedParameter`
+warning (`$OsLanguage` declared but unused) inside
+`Resolve-PatchSetFromCatalog`. CI's psscriptanalyzer-action@v1.1
+appears to ship an earlier PSSA build that does not include this rule,
+but to avoid future surprises the parameter is now used by an
+informational `Write-Step` call at the head of the function.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info (5,452 lines).
+- PSScriptAnalyzer 1.25.0: 0 findings at Severity Error / Warning / Information.
+
+### Compatibility
+
+- Pure additive / mechanical changes: no behavioural difference from
+  r02 at runtime.
+- `ScriptVersion` is bumped from `update-wsi-2026.06.10-r02` to
+  `update-wsi-2026.05.24-r02.1`; the `r02.1` suffix communicates a
+  fix-up release of the r02 line.
+
 ## [update-wsi-2026.06.10-r02] - 2026-06-10
 
 ### Added — dynamic baseline (M2)
