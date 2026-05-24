@@ -17,40 +17,49 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ### Documentation
 
-- **Rule-count text alignment — `36` → `42` in three stale
-  forward-looking references.** The 3.7.0 release added `PSA7002`
-  (line-ending detection), bringing the runtime `RULES` registry
-  to 42 entries (PSA1xxx ×3, PSA2xxx ×8, PSA3xxx ×6,
-  PSA4xxx ×4, PSA5xxx ×4, PSA6xxx ×8, PSA7xxx ×2,
-  PSA8xxx ×1, PSA9xxx ×2, PSAPxxxx ×4). Three documentation
-  strings that hard-code the rule count were missed during the
-  3.7.0 commit and are corrected here:
+- **Rule-count text alignment — hybrid update across stale
+  forward-looking references.** The 3.8.0 / 3.9.0 / 4.0.0
+  releases added `PSA2009`, `PSA2010`, `PSA2011`, and `PSAP0005`
+  to the runtime `RULES` registry (now 46 entries: PSA1xxx ×3,
+  PSA2xxx ×11, PSA3xxx ×6, PSA4xxx ×4, PSA5xxx ×4,
+  PSA6xxx ×8, PSA7xxx ×2, PSA8xxx ×1, PSA9xxx ×2,
+  PSAPxxxx ×5), but three in-tree text references continued to
+  spell stale counts (`36` originally, partially uplifted to
+  `42` / `45` in earlier passes, never refreshed during the
+  4.0.0 / 4.0.2 cycles). This revision applies a **hybrid
+  policy**: prose comments and test docstrings are parameterised
+  against `RULES` directly (no embedded count), while the SARIF
+  illustrative example — where the digit is informative to
+  readers sizing their tooling — is updated to the current count.
 
-  - **`psa.py`** L2913 — Pillar 1 comment block above the
-    self-quality gates section:
-    `"External: test_psa_rules.py covers all 36 rules with ..."`
-    → `"... all 42 rules with ..."`.
-  - **`test_psa_rules.py`** L6 — module docstring header:
-    `"psa.py's 36 rules has ..."`
-    → `"psa.py's 42 rules has ..."`.
-  - **`scripts/powershell/download-speakerdeck-oracle4engineer/TESTING.md`**
-    L90 — sibling sub-project documentation referencing
-    `psa.py`'s `SPEC.md` §4:
-    `"§4 for the full specification of the 36 rules"`
-    → `"... of the 42 rules"`.
+  - **`psa.py`** — Pillar 1 comment block above the
+    self-quality gates section. Dynamic phrasing:
+    `"External: test_psa_rules.py covers all 42 rules with ..."`
+    → `"External: test_psa_rules.py covers every rule in the
+    RULES registry with ..."`.
+  - **`test_psa_rules.py`** — module docstring header.
+    Dynamic phrasing:
+    `"Each of psa.py's 42 rules has, at minimum, ..."`
+    → `"Each rule in psa.py's runtime RULES registry has, at
+    minimum, ..."`.
+  - **`SPEC.md`** §6.3 (SARIF 2.1.0 format example) — concrete
+    count, kept as a numeric reader hint:
+    `"rules": [ /* 45 rule descriptors */ ]`
+    → `"rules": [ /* 46 rule descriptors */ ]`.
 
   Documentation-only revision: no behavioural change, no rule
   catalog change, no test count change. `__version__` is **not**
   bumped (the runtime `RULES` array and `psa.py --list-rules`
-  output have been correct since 3.7.0; only the human-readable
-  prose count was stale). The canonical source of truth for the
-  rule count is the runtime `RULES` registry. `psa.py
-  --self-check` validates `SPEC.md` §4 against `RULES` by rule
-  ID rather than by count, which is why this drift was not
-  surfaced by the existing self-quality gates. Future rule-count
-  text references should either be omitted in favour of
-  "see `psa.py --list-rules`" or parameterised against
-  `len(RULES)`.
+  output have been correct since each rule was added; only the
+  human-readable prose references were stale). The canonical
+  source of truth for the rule count remains the runtime
+  `RULES` registry. `psa.py --self-check` validates `SPEC.md`
+  §4 against `RULES` by rule ID rather than by count, which is
+  why this drift was not surfaced by the existing self-quality
+  gates. Future rule-count text references should follow the
+  same hybrid rule: omit the digit in prose, keep it only where
+  the example deliberately illustrates a concrete output size
+  (such as SARIF samples).
 
 ## [4.0.2] — 2026-05-24 — `psap0005-relaxed-mode-coverage-uplift`
 

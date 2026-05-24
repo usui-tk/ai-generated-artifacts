@@ -1964,7 +1964,7 @@ top-level structure:
           "name": "psa.py",
           "version": "<X.Y.Z>",
           "informationUri": "...",
-          "rules": [ /* 45 rule descriptors */ ]
+          "rules": [ /* 46 rule descriptors */ ]
         }
       },
       "results": [ /* one entry per issue */ ],

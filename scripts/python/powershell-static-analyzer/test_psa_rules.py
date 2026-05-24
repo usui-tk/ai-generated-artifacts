@@ -2,10 +2,10 @@
 """Self-test fixtures for the psa.py rule catalog.
 
 This file replaces the earlier test_psap_3_4.py — which covered only
-PSAP0003 / PSAP0004 — with a full-catalog regression suite. Each of
-psa.py's 42 rules has, at minimum, one positive case (rule must fire),
-one negative case (rule must NOT fire), and where applicable an edge
-case (e.g. false-positive defenses: rule in string literal, in
+PSAP0003 / PSAP0004 — with a full-catalog regression suite. Each rule in
+psa.py's runtime RULES registry has, at minimum, one positive case (rule
+must fire), one negative case (rule must NOT fire), and where applicable
+an edge case (e.g. false-positive defenses: rule in string literal, in
 here-string, in comment, etc.). See README of repo2 (§ Pillar 1) for
 the design rationale.
 
