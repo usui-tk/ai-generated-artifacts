@@ -52,6 +52,95 @@ changes (documentation policy, sister scripts, etc.), see the root
   "see `psa.py --list-rules`" or parameterised against
   `len(RULES)`.
 
+## [4.0.2] — 2026-05-24 — `psap0005-relaxed-mode-coverage-uplift`
+
+This patch release extends `PSAP0005`'s relaxed-mode exemption set
+to cover established prose patterns observed in real-world consumer
+pipeline scripts (specifically the
+`usui-tk/Deploy-Drivers-For-WindowsServer` r76 baseline). It is
+**backward-compatible** with `4.0.0` / `4.0.1`: no new rule is
+added, no configuration key is introduced, no public-API change.
+Only the **relaxed-mode** behaviour of `PSAP0005` is expanded; strict
+mode (`psap0005_relaxed_mode: false`) is unchanged.
+
+### Motivation
+
+The original 4.0.0 release defined four relaxed-mode exemption
+patterns (A SECTION header, B SPEC cross-reference, C Added-in-
+release phrasing, D Earlier-revisions prose) based on the SPEC §D.31
+conventions in Deploy-Drivers. When `psa.py 4.0.0` was applied to
+the r76 baseline, the consumer reported **64 PSAP0005 detections**
+across the four sister scripts that the original A/B/C/D set did not
+catch. Analysis showed these were also established prose patterns,
+just with surface forms the original regexes had missed.
+
+Notable patterns that 4.0.0 missed but 4.0.2 now exempts in relaxed
+mode:
+
+- Semi-section headers: `# r71 Pre-check: ...`
+- SPEC cross-reference with slash/dash separator: `(r66 / SPEC D.24)`, `(r75 - SPEC D.33)`
+- SPEC cross-reference with reversed parens: `r68 (SPEC §D.26):`
+- SPEC ref + rNN co-occurrence: `See SPEC SS D.31 ... r71 design contract`
+- Added-in-release variants: `r71 adds ...`, `the /all addition in r74`, `documents the r72 follow-on`, `Until r39, Graphics shipped`
+- Earlier-revisions variants: `prior to r65`, `predates r65`, `from an r65 run`
+- Q-Reference patterns: `r69 (QI-6):`, `(Q-X1, r17)`, `QI-9 (r69, 2026-05-23):`
+- Cross-port markers: `r40 (graphics):`, `r22 (bthpan):`
+- Follow-up sentence: `r73: this declaration was missing in r71/r72`
+
+### Added
+
+- **Nine new relaxed-mode exemption patterns (E1-E9)** documented in
+  `SPEC.md` §4.37. Each pattern is a separate compiled regex inside
+  `psa.py` for clarity and individual testability.
+
+- **Comment-block-level exempt heuristic**: In addition to line-level
+  pattern matching, `PSAP0005` now checks the entire contiguous
+  comment block (consecutive lines whose first non-whitespace
+  character is `#`) for an exempt-trigger pattern. If any line of
+  the block matches, the whole block is exempt. This handles the
+  common case where a multi-line narrative comment block opens with
+  an exempt phrase like `# WHQL co-signature analysis (added with the
+  r71 release).` and continues for several lines that mention `rNN`
+  without re-triggering on each line.
+
+- **`test_psa_rules.py`**: 26 new test cases — 21 relaxed-mode
+  exempt patterns (E1-E9 plus block-level exempt) and 5 strict-mode
+  regression tests verifying the new patterns do NOT leak into
+  strict mode. Total test count: `220 → 246` (all passing).
+
+### Changed
+
+- `SPEC.md` §4.37 (`PSAP0005`) expanded with the E1-E9 exemption
+  table and the comment-block-level exempt description. The original
+  A/B/C/D table is preserved verbatim as `4.0.0` baseline.
+
+### Backward compatibility
+
+- **Rules registry**: unchanged at **46 rules**. No new rule code.
+- **Configuration schema**: unchanged. No new keys; no removed keys.
+  `psap0005_relaxed_mode` remains the only PSAP0005 config flag.
+- **CLI surface**: unchanged.
+- **Strict mode**: unchanged. The 4.0.2 extensions affect only
+  relaxed mode; any repository running `psap0005_relaxed_mode:
+  false` (default) sees identical behaviour to 4.0.0 / 4.0.1.
+- **Existing relaxed-mode behaviour**: strictly expanded, never
+  narrowed. Any comment that 4.0.0 / 4.0.1 exempted under relaxed
+  mode continues to be exempt under 4.0.2.
+- **SemVer impact**: PATCH increment per SPEC.md §1.4
+  (false-positive defence widening with no public-API change).
+
+### Migration
+
+No action required for any consumer. Repositories using
+`psap0005_relaxed_mode: true` will see their PSAP0005 detection
+count drop on upgrade from `4.0.0` / `4.0.1` to `4.0.2` if any of
+the new exempt patterns are present in their script bodies. The
+intent of relaxed mode (migration aid toward strict mode) is
+unchanged; the new patterns simply better reflect the established
+prose conventions in real consumer pipelines.
+
+---
+
 ## [4.0.1] — 2026-05-25 — `psa2009-indirect-binding-defence`
 
 This patch release adds a false-positive defence to `PSA2009`

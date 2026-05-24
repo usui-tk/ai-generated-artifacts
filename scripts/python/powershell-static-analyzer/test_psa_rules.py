@@ -1176,7 +1176,87 @@ _RELAXED_TESTS = [
      '# r42: this is a tag\n', 1),
     ('PSAP0005 relaxed: rNN in string literal still does not fire',
      "$x = 'chipset-2026.05.25-r75'\n", 0),
+    # ---- v4.0.2 extension tests (E1-E9) ----
+    ('PSAP0005 relaxed v4.0.2 E1: semi-section header exempt',
+     '# r71 Pre-check: Path B prerequisite check\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E2: SPEC cross-ref with slash separator exempt',
+     '# Orphan catalog cleanup (r66 / SPEC D.24): the original\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E2: SPEC cross-ref with dash separator exempt',
+     '# The set is built in three passes (r75 - SPEC D.33):\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E3: rNN preceding SPEC ref (reversed parens) exempt',
+     '# r68 (SPEC §D.26): LOADED honesty gate\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E4: SPEC ref + rNN co-occurrence exempt',
+     '# See SPEC SS D.31 for the full r71 design contract\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E4: Until rNN + SPEC ref exempt',
+     '# Until r39, Graphics shipped the consumer code (see SPEC SS D.31)\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E5: rNN adds ... exempt',
+     '# r71 adds two operator-protection mechanisms\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E5: the X addition in rNN exempt',
+     '# the /all addition in r74.\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E5: the original rNN release exempt',
+     '# The original r74 release threaded $ourInfSet\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E5: documents the rNN exempt',
+     '# documents the r72 follow-on I02 short-circuit\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E6: prior to rNN exempt',
+     '# CSV is also absent (e.g. very old workspace prior to r65),\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E6: predates rNN exempt',
+     '# the inventory predates r65\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E6: from an rNN run exempt',
+     '# workspace recovered from an r65 run\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E7: rNN (QI-X) Q-reference exempt',
+     '# r69 (QI-6): bypass the CRITICAL acknowledgement\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E7: (Q-X1, rNN) Q-reference exempt',
+     '# Install on legacy Windows Server (Q-X1, r17).\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E7: QI-X (rNN, YYYY-MM-DD) exempt',
+     '# QI-9 (r69, 2026-05-23): System Restore status check.\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E8: cross-port marker (graphics) exempt',
+     '# r40 (graphics): build the OEM-name lookup set\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E8: cross-port marker (bthpan) exempt',
+     '# r22 (bthpan): signal to the phase dispatcher\n', 0),
+    ('PSAP0005 relaxed v4.0.2 E9: follow-up sentence (rNN: this declaration) exempt',
+     '# property cannot be found). r73: this declaration was added\n', 0),
+    # ---- v4.0.2 block-level exempt tests ----
+    ('PSAP0005 relaxed v4.0.2 block-exempt: multi-line block with added-in-release trigger',
+     ('# WHQL co-signature analysis (added with the r71 release).\n'
+      '# Pre-declared as $null so plain .assignment works.\n'
+      '# Populated by P05; consumed by I00 (C6 condition),\n'
+      '# P06 (-SkipNonCosignedDrivers trim), and I02 (r72 short-circuit\n'
+      '# for all-WHQL trimmed install plans).\n'), 0),
+    ('PSAP0005 relaxed v4.0.2 block-exempt: strict mode still fires (no exempt)',
+     # This is tested in strict mode below; here we verify relaxed mode
+     # exempt does NOT leak into unrelated comments.
+     '# This block has no rNN at all\n', 0),
 ]
+
+
+# v4.0.2 strict-mode regression: the block-level exempt must NOT
+# leak into strict mode. Every test case from _RELAXED_TESTS that
+# would fire 1+ in strict mode is verified here.
+_STRICT_NEW_TESTS = [
+    ('PSAP0005 strict v4.0.2: semi-section header NOT exempt in strict',
+     '# r71 Pre-check: Path B prerequisite check\n', 1),
+    ('PSAP0005 strict v4.0.2: SPEC cross-ref slash NOT exempt in strict',
+     '# Orphan catalog cleanup (r66 / SPEC D.24):\n', 1),
+    ('PSAP0005 strict v4.0.2: Q-reference NOT exempt in strict',
+     '# r69 (QI-6): bypass CRITICAL\n', 1),
+    ('PSAP0005 strict v4.0.2: cross-port marker NOT exempt in strict',
+     '# r40 (graphics): build the OEM-name lookup\n', 1),
+    ('PSAP0005 strict v4.0.2: block-level exempt does NOT leak into strict',
+     ('# WHQL co-signature analysis (added with the r71 release).\n'
+      '# Populated by P05 and I02 (r72 short-circuit\n'), 2),
+]
+
+
+def _run_psap0005_strict_v402_tests():
+    failures = []
+    for name, source, expected in _STRICT_NEW_TESTS:
+        got = _run_psap0005(source, relaxed_mode=False)
+        if got != expected:
+            failures.append(
+                f'  FAIL: {name}\n'
+                f'         expected {expected}, got {got}\n'
+                f'         source: {source!r}')
+    return failures
 
 
 def _run_psap0005_relaxed_tests():
@@ -1702,6 +1782,26 @@ def run():
         print('  [FAIL] PSAP0003 + PSAP0005 dedupe')
         fail_count += 1
         failures.append(('PSAP0003 + PSAP0005 dedupe', dedupe_failures))
+
+    # --- Section 2e: v4.0.2 strict-mode regression tests ---
+    print()
+    print('=' * 72)
+    print(f'Section 2e: PSAP0005 strict-mode v4.0.2 regression tests '
+          f'({len(_STRICT_NEW_TESTS)} cases)')
+    print('=' * 72)
+    for name, source, expected in _STRICT_NEW_TESTS:
+        got = _run_psap0005(source, relaxed_mode=False)
+        ok = got == expected
+        status = 'PASS' if ok else 'FAIL'
+        print(f'  [{status}] {name}  (PSAP0005 hits: {got}/{expected})')
+        if ok:
+            pass_count += 1
+        else:
+            fail_count += 1
+            failures.append((name, [
+                f'    expected {expected}, got {got}',
+                f'    source: {source!r}',
+            ]))
 
     # --- Section 2.5: compute_line_ending_stats helper (PSA7002 support) ---
     print()

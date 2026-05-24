@@ -142,7 +142,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '4.0.1'
+__version__ = '4.0.2'
 
 
 def _verify_version_file_consistency():
@@ -3414,16 +3414,161 @@ _EXEMPT_EARLIER_REVISIONS = re.compile(
     re.IGNORECASE,
 )
 
+# ---------------------------------------------------------------------------
+# v4.0.2 — additional exempt patterns harvested from real consumer code
+# ---------------------------------------------------------------------------
+# These supplement the original A/B/C/D exemptions with established
+# prose patterns that surfaced when the LLM-governance baseline was
+# applied to long-lived pipeline scripts. Each pattern below has at
+# least one citation in the
+# `usui-tk/Deploy-Drivers-For-WindowsServer` r76 baseline.
+
+# E1 — Semi-section header (a tighter variant of A where the rNN
+# token is followed by a single capitalised section descriptor word
+# rather than the literal SECTION keyword).
+# Examples:
+#   # r71 Pre-check: Path B prerequisite check
+#   # r72 Hotfix: ...
+_EXEMPT_SEMI_SECTION = re.compile(
+    r'^\s*#\s*r\d+\s+'
+    r'(?:Pre-check|Phase|Section|Step|Cycle|Migration|Update|Hotfix|Patch)'
+    r'\s*[:\-]',
+    re.IGNORECASE,
+)
+
+# E2 — SPEC cross-reference with alternative separators (slash or
+# dash instead of comma).
+# Examples:
+#   (r66 / SPEC D.24):
+#   (r75 - SPEC D.33):
+_EXEMPT_SPEC_CROSS_REF_ALT_SEP = re.compile(
+    r'r\d+\s*[/\-]\s*SPEC\s+§?\s*D\.\d',
+    re.IGNORECASE,
+)
+
+# E3 — rNN preceding the SPEC ref (parens-position reversed from B).
+# Example: r68 (SPEC §D.26): LOADED honesty gate
+_EXEMPT_SPEC_CROSS_REF_REVERSED = re.compile(
+    r'\br\d+\s*\(\s*SPEC\s+§?\s*D\.\d',
+    re.IGNORECASE,
+)
+
+# E4 — SPEC ref + rNN co-occurrence in the same comment body. This
+# is permissive: when a comment mentions both a SPEC §D.YY anchor
+# AND any rNN, treat the rNN as the SPEC ref's narrative subject.
+# Includes 'SS' notation (ASCII rendering of '§§') used in scripts
+# where Unicode § cannot reliably be emitted.
+# Examples:
+#   See SPEC SS D.31 for the full r71 design contract
+#   Until r39, Graphics shipped the consumer code (see SPEC SS D.31)
+_EXEMPT_SPEC_AND_RNN_COOCCUR = re.compile(
+    r'(?:'
+    r'\bSPEC\s+(?:§§|§|SS)\s*D\.\d+\b.*?\br\d+\b'
+    r'|\br\d+\b.*?\bSPEC\s+(?:§§|§|SS)\s*D\.\d+\b'
+    r')',
+    re.IGNORECASE | re.DOTALL,
+)
+
+# E5 — Added-in-release variant phrasings (extension of Exemption C).
+# Examples:
+#   r71 adds two operator-protection mechanisms
+#   the /all addition in r74
+#   The original r74 release threaded $ourInfSet
+#   documents the r72 follow-on
+#   r39: this declaration and the P05 analysis block
+#   Until r39, Graphics shipped
+_EXEMPT_ADDED_IN_PHRASING_VARIANT = re.compile(
+    r'(?:'
+    r'\br\d+\s+(?:adds?|introduces?|extends?|threaded|shipped|deprecates?|removes?|drops?)\b'
+    r'|\bthe\s+\S+?\s+addition\s+in\s+r\d+\b'
+    r'|\b(?:the\s+)?(?:original\s+)?r\d+\s+(?:release|follow-on|hotfix|patch)\b'
+    r'|\bdocuments?\s+the\s+r\d+\b'
+    r'|\b(?:since|after|from|Until)\s+(?:the\s+)?r\d+\b'
+    r'|\b(?:in|at)\s+r\d+\s*[,;]'
+    r')',
+    re.IGNORECASE,
+)
+
+# E6 — Earlier-revisions variant (extension of Exemption D) for
+# narrative anchors that do not literally start with "Earlier" /
+# "Previous" / "Prior".
+# Examples:
+#   very old workspace prior to r65
+#   the inventory predates r65
+#   recovered from an r65 run
+#   workspace from an r65 run
+_EXEMPT_EARLIER_REVISIONS_VARIANT = re.compile(
+    r'(?:'
+    r'\b(?:prior\s+to|predates?|preceded?\s+by|predating)\s+r\d+\b'
+    r'|\bfrom\s+an?\s+r\d+\s+(?:run|workspace|session)\b'
+    r'|\bvery\s+old\s+\w+\s+prior\s+to\s+r\d+'
+    r')',
+    re.IGNORECASE,
+)
+
+# E7 — Q-Reference patterns. Q-references are an internal cross-
+# reference scheme used by some consumer projects (notably the
+# Deploy-Drivers project) to tag operator-question (QI-X) and
+# legacy-script-quirk (Q-X[n]) entries. They commonly co-occur with
+# rNN release tags.
+# Examples:
+#   # r69 (QI-6): bypass the CRITICAL acknowledgement
+#   # Install on legacy Windows Server (Q-X1, r17).
+#   # QI-9 (r69, 2026-05-23): System Restore status check.
+#   # SECTION (r69, QI-6): handlers
+_EXEMPT_Q_REFERENCE = re.compile(
+    r'(?:'
+    r'\br\d+\s*\(\s*QI?-?\d+'                  # r69 (QI-6)
+    r'|\(\s*Q-?X\d+\s*,\s*r\d+'                # (Q-X1, r17)
+    r'|\(\s*r\d+\s*,\s*QI?-?\d+'               # (r69, QI-6) — also in B but kept for clarity
+    r'|\bQI?-?\d+\s*\(\s*r\d+\s*,'             # QI-9 (r69, 2026-...)
+    r'|\(\s*Q-?X\d+\s*,\s*r\d+\s*\)'           # (Q-X1, r17).
+    r')',
+    re.IGNORECASE,
+)
+
+# E8 — Cross-port marker. Sister-script port markers indicating
+# which script revision first adopted a feature for a specific
+# sister script: r40 (graphics), r22 (bthpan), etc. These document
+# cross-script history without being release-anchored to the script
+# they appear in.
+# Examples:
+#   # r40 (graphics): build the OEM-name lookup set
+#   # r22 (bthpan): signal to the phase dispatcher
+_EXEMPT_CROSS_PORT_MARKER = re.compile(
+    r'\br\d+\s*\(\s*'
+    r'(?:chipset|graphics|bthpan|msbthpan|npu|npu_driver)'
+    r'\s*\)\s*:',
+    re.IGNORECASE,
+)
+
+# E9 — Sentence-internal rNN tagged with a colon (e.g. "r73: this
+# declaration"). This is the "follow-up sentence" variant that often
+# appears at the end of a Phase-5/PSCustomObject narrative comment
+# block describing why a property declaration was added in a later
+# release.
+# Examples:
+#   r73: this declaration was missing in r71/r72
+#   r39: this declaration and the P05 analysis block
+#   r21: this declaration was added
+_EXEMPT_FOLLOWUP_SENTENCE = re.compile(
+    r'\br\d+\s*:\s*this\s+declaration\b',
+    re.IGNORECASE,
+)
+
 
 def _comment_is_exempt(comment_text, relaxed_mode):
     """Return True if *comment_text* (a comment body starting with #)
     is exempt from PSAP0005 under the current mode.
 
     In strict mode (relaxed_mode=False) no comment is exempt.
-    In relaxed mode the four exemption patterns A/B/C/D are applied.
+    In relaxed mode the four original exemption patterns A/B/C/D are
+    applied, plus the v4.0.2 extension set E1-E9 covering established
+    prose patterns harvested from consumer pipeline scripts.
     """
     if not relaxed_mode:
         return False
+    # Original A/B/C/D
     if _EXEMPT_SECTION_HEADER.search(comment_text):
         return True
     if _EXEMPT_SPEC_CROSS_REF.search(comment_text):
@@ -3432,7 +3577,75 @@ def _comment_is_exempt(comment_text, relaxed_mode):
         return True
     if _EXEMPT_EARLIER_REVISIONS.search(comment_text):
         return True
+    # v4.0.2 extensions E1-E9
+    if _EXEMPT_SEMI_SECTION.search(comment_text):
+        return True
+    if _EXEMPT_SPEC_CROSS_REF_ALT_SEP.search(comment_text):
+        return True
+    if _EXEMPT_SPEC_CROSS_REF_REVERSED.search(comment_text):
+        return True
+    if _EXEMPT_SPEC_AND_RNN_COOCCUR.search(comment_text):
+        return True
+    if _EXEMPT_ADDED_IN_PHRASING_VARIANT.search(comment_text):
+        return True
+    if _EXEMPT_EARLIER_REVISIONS_VARIANT.search(comment_text):
+        return True
+    if _EXEMPT_Q_REFERENCE.search(comment_text):
+        return True
+    if _EXEMPT_CROSS_PORT_MARKER.search(comment_text):
+        return True
+    if _EXEMPT_FOLLOWUP_SENTENCE.search(comment_text):
+        return True
     return False
+
+
+def _gather_comment_block_text(text, hash_pos):
+    """Return the full text of the contiguous comment block containing
+    *hash_pos*, defined as the maximal run of consecutive lines whose
+    first non-whitespace character is ``#``.
+
+    The block walks both backwards and forwards from the line that
+    starts at ``hash_pos``. This makes block-level exempt decisions
+    independent of which line inside the block first triggered PSAP0005.
+
+    Added in v4.0.2 to support block-level exempt for multi-line
+    comment blocks where the exempt-trigger pattern (e.g., SPEC
+    cross-reference, added-in-release phrasing) appears on a different
+    line than the rNN reference.
+    """
+    # Walk backwards: find the start of the current line, then keep
+    # going line-by-line as long as each previous line is a comment.
+    line_start = text.rfind('\n', 0, hash_pos) + 1
+    block_start = line_start
+    while block_start > 0:
+        prev_line_end = block_start - 1  # the '\n' before block_start
+        if prev_line_end <= 0:
+            break
+        prev_line_start = text.rfind('\n', 0, prev_line_end) + 1
+        prev_line = text[prev_line_start:prev_line_end].lstrip()
+        if prev_line.startswith('#'):
+            block_start = prev_line_start
+        else:
+            break
+    # Walk forwards: keep going as long as each next line is a comment.
+    nl = text.find('\n', hash_pos)
+    if nl == -1:
+        block_end = len(text)
+    else:
+        block_end = nl
+        while True:
+            next_line_start = block_end + 1
+            if next_line_start >= len(text):
+                break
+            next_line_end = text.find('\n', next_line_start)
+            if next_line_end == -1:
+                next_line_end = len(text)
+            next_line = text[next_line_start:next_line_end].lstrip()
+            if next_line.startswith('#'):
+                block_end = next_line_end
+            else:
+                break
+    return text[block_start:block_end]
 
 
 def check_revision_anchor_prose(text, clean, relaxed_mode, psap0003_lines):
@@ -3486,9 +3699,25 @@ def check_revision_anchor_prose(text, clean, relaxed_mode, psap0003_lines):
         if not m:
             continue
 
-        # Apply relaxed-mode exemptions, if any.
+        # Apply relaxed-mode exemptions. Two passes:
+        #   (i)  Line-level: the comment line itself matches an A/B/C/D
+        #        or E1-E9 pattern. Cheap; handled first for backwards
+        #        compatibility with v4.0.0 / v4.0.1.
+        #   (ii) Block-level (added in v4.0.2): if the surrounding
+        #        contiguous comment block contains an exempt-trigger
+        #        pattern on ANY line, treat the entire block as
+        #        exempt. This handles the common case where a
+        #        multi-line narrative starts with the exempt-trigger
+        #        (e.g., "(added with the r71 release)") and continues
+        #        on subsequent lines that reference rNN without
+        #        repeating the trigger phrase.
         if _comment_is_exempt(comment_text, relaxed_mode):
             continue
+        if relaxed_mode:
+            block_text = _gather_comment_block_text(text, hash_pos)
+            if block_text != comment_text and _comment_is_exempt(
+                    block_text, relaxed_mode):
+                continue
 
         if ln_no in seen_lines:
             continue

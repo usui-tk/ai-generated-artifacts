@@ -1586,6 +1586,8 @@ those references to point to `CHANGELOG.md`.
 - **Severity**: Warning
 - **Default**: **disabled** (opt-in)
 - **Added in**: 4.0.0
+- **Extended in**: 4.0.2 (additional relaxed-mode exempt patterns
+  E1-E9 + comment-block-level exempt)
 - **Convention origin**: Deploy-Drivers-For-WindowsServer SPEC.md
   §A.13 "Where revision history lives" — script bodies should
   describe current behaviour with timeless wording; revision-anchored
@@ -1630,9 +1632,11 @@ configuration flag `psap0005_relaxed_mode` (boolean):
   `rNN` reference inside a comment body fires PSAP0005 (subject to
   the scope rules above and PSAP0003 de-duplication).
 
-- **Relaxed mode** (`psap0005_relaxed_mode: true`): Four prose
-  exemption patterns are applied. A comment matching any of them
-  does not fire. The exemptions are:
+- **Relaxed mode** (`psap0005_relaxed_mode: true`): Established
+  prose exemption patterns are applied. A comment matching any of
+  them does not fire.
+
+  **Original four exemption patterns (introduced in 4.0.0)**:
 
   | Exemption                          | Example                                                            |
   | ---------------------------------- | ------------------------------------------------------------------ |
@@ -1640,6 +1644,32 @@ configuration flag `psap0005_relaxed_mode` (boolean):
   | B. SPEC cross-reference            | `# Phantom file reference (r65, SPEC D.24): inspect`               |
   | C. Added-in-release phrasing       | `# Build the WHQL co-sign analysis (added with the r71 release)`   |
   | D. Earlier-revisions prose         | `# Earlier revisions called Find-Signtool, ... before r74.`         |
+
+  **Extended exemption patterns (introduced in 4.0.2)** — added to
+  cover established prose patterns observed in real-world consumer
+  scripts that the original A/B/C/D patterns did not catch:
+
+  | Exemption                                       | Example                                                                  |
+  | ----------------------------------------------- | ------------------------------------------------------------------------ |
+  | E1. Semi-section header                          | `# r71 Pre-check: Path B prerequisite check`                             |
+  | E2. SPEC cross-reference, slash/dash separator  | `# Orphan catalog cleanup (r66 / SPEC D.24):` / `(r75 - SPEC D.33):`     |
+  | E3. SPEC cross-reference, reversed parens       | `# r68 (SPEC §D.26): LOADED honesty gate`                                |
+  | E4. SPEC ref + rNN co-occurrence                | `# See SPEC SS D.31 for the full r71 design contract`                    |
+  | E5. Added-in-release variant phrasings          | `# r71 adds two operator-protection mechanisms` / `# the /all addition in r74` / `# documents the r72 follow-on` / `# Until r39, Graphics shipped` |
+  | E6. Earlier-revisions prose variants             | `# very old workspace prior to r65` / `# the inventory predates r65` / `# recovered from an r65 run` |
+  | E7. Q-Reference patterns                         | `# r69 (QI-6): bypass CRITICAL` / `# (Q-X1, r17).` / `# QI-9 (r69, 2026-05-23):` |
+  | E8. Cross-port marker                            | `# r40 (graphics): build the OEM-name lookup set` / `# r22 (bthpan): ...`    |
+  | E9. Follow-up sentence (this declaration)       | `# r73: this declaration was missing in r71/r72`                         |
+
+  **Comment-block-level exempt (introduced in 4.0.2)**: In addition
+  to line-level pattern matching, the entire contiguous comment block
+  (consecutive lines whose first non-whitespace character is `#`) is
+  checked for an exempt-trigger pattern. If any line of the block
+  matches an exempt pattern, the whole block is exempt. This handles
+  multi-line narrative blocks where the exempt trigger
+  (e.g., `(added with the r71 release)`) appears on the opening line
+  but subsequent lines reference `rNN` without repeating the trigger
+  phrase.
 
   Exemption-C verb set: `added`, `introduced`, `landed`, `ported`,
   followed by `in` or `with`, optionally followed by `the`, optionally
