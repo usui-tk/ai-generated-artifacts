@@ -492,7 +492,7 @@ Phase が例外を投げたとき、 トップレベルの catch ハンドラが
 
 実際の検証結果（DryRun、 本番実行出力、 冪等性チェック、 リグレッション修正証跡）については **[`TESTING.md`](TESTING.md)** を参照してください。 直近の本番実行成功結果（`804/804 デッキ、 失敗ゼロ、 合計 10 分 4.4 秒、 5.7 GB`）が記録されています。
 
-`psa.py` 静的解析ツール (latest mainline; `PSA1001`〜`PSA9002` + opt-in 規約ルール `PSAP0001`〜`PSAP0004`) の詳細は
+`psa.py` 静的解析ツール (latest mainline; `PSA1001`〜`PSA9002` + opt-in 規約ルール `PSAP0001`〜`PSAP0005`) の詳細は
 [`../../python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
 (英語版は [README.md](../../python/powershell-static-analyzer/README.md)) 、
 または完全な仕様書 [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) を参照してください。 正典の analyzer バージョンは
@@ -523,40 +523,40 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 | カテゴリ | コード範囲 | 例 |
 | -------- | ---------- | -- |
 | 構文の整合性  | `PSA1001`〜`PSA1003` | 波括弧 / 丸括弧 / 角括弧の整合性 |
-| 意味解析      | `PSA2001`〜`PSA2006` | 未定義変数、 自動変数のシャドウイング、 `-match $変数` の罠、 `$null` を `-eq`/`-ne` の右辺に置く問題 |
-| スタイル      | `PSA3001`〜`PSA3005` | `Start-Process -ArgumentList`、 バックティック行継続後の空行、 空の `catch` ブロック、 `Start-Transcript -Path` は `-LiteralPath` を使うべき |
+| 意味解析      | `PSA2001`〜`PSA2011` | 未定義変数、 自動変数のシャドウイング、 `-match $変数` の罠、 `$null` を `-eq`/`-ne` の右辺に置く問題、 PSCustomObject の未宣言プロパティ代入 (`PSA2009`)、 未定義関数呼び出し (`PSA2010`)、 PS 5.1 で `Split-Path -LiteralPath ... -Parent` が AmbiguousParameterSet を発生させる検出 (`PSA2011`) |
+| スタイル      | `PSA3001`〜`PSA3006` | `Start-Process -ArgumentList`、 バックティック行継続後の空行、 空の `catch` ブロック、 `Start-Transcript -Path` は `-LiteralPath` を使うべき |
 | 衛生          | `PSA4001`〜`PSA4004` | 未完了マーカー、 行末空白、 長い行、 行末セミコロン |
 | セキュリティ  | `PSA5001`〜`PSA5004` | 平文パスワードパラメーター、 `Invoke-Expression`、 壊れたハッシュアルゴリズム、 `ComputerName` ハードコード |
-| ベストプラクティス | `PSA6001`〜`PSA6006` | 非承認動詞、 コマンドレットエイリアス、 複数形名詞の関数名、 `$global:` 定義、 必須パラメーターのデフォルト値、 `$true` がデフォルトのスイッチパラメーター |
-| ファイル形式  | `PSA7001`            | PowerShell スクリプトに UTF-8 BOM がない (BOM がないと Windows PowerShell 5.1 が非 ASCII バイトを Shift-JIS と誤認する可能性あり) |
+| ベストプラクティス | `PSA6001`〜`PSA6008` | 非承認動詞、 コマンドレットエイリアス、 複数形名詞の関数名、 `$global:` 定義、 必須パラメーターのデフォルト値、 `$true` がデフォルトのスイッチパラメーター、 `[OutputType()]` 属性の規約 |
+| ファイル形式  | `PSA7001`〜`PSA7002` | PowerShell スクリプトに UTF-8 BOM がない、 mixed / 誤った改行コード |
 | ファイル間整合性 | `PSA8001`         | 同一スキャン対象ファイル群における function body のハッシュ drift |
 | 複雑度メトリクス | `PSA9001`〜`PSA9002` | function 本体の長さ閾値 (opt-in)、 外部プロセス呼び出し後の `$LASTEXITCODE` チェック漏れ (opt-in) |
-| プロジェクト規約 | `PSAP0001`〜`PSAP0004` | phase 関数命名規約、 必須のスクリプト識別子変数、 インラインリビジョンタグコメント (`PSAP0003`)、 EOF の `REVISION HISTORY` ブロック (`PSAP0004`)。 **PSAPxxxx は全て default OFF**。 本プロジェクトは `PSAP0003` / `PSAP0004` に opt-in しています |
+| プロジェクト規約 | `PSAP0001`〜`PSAP0005` | phase 関数命名規約、 必須のスクリプト識別子変数、 インラインリビジョンタグコメント (`PSAP0003`)、 EOF の `REVISION HISTORY` ブロック (`PSAP0004`)、 **コメント本体内のリビジョン参照** (`PSAP0005`、 psa.py 4.0.0 で新規追加)。 **PSAPxxxx は全て default OFF**。 本プロジェクトは `PSAP0003` / `PSAP0004` / `PSAP0005` に opt-in しています (PSAP0005 は strict mode — `psap0005_relaxed_mode` は設定しないため、 コメント本体内の任意の `rNN` 参照が報告される)。 総ルール数は **46** です。 |
 
 各ルールの完全仕様は
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4 を参照。
 
 ### プロジェクト固有設定
 
-このスクリプトディレクトリには `.psa.config.json` を同梱しており、`PSA6003`（関数名詞の複数形）
-を disable しています。`Download-SpeakerDeck.ps1` 内の 3 つの関数が意図的に複数形名詞を使用
-しているためで、根拠は config ファイル内にコメントで記録済みです。
-意図的な空 `catch` ブロック（`PSA3004`）には `# psa-disable-line PSA3004 -- <理由>` を付与
-しています。
+このスクリプトディレクトリには `.psa.config.json` を同梱しており、以下を設定しています：
+
+1. **enable**: `PSAP0003`、 `PSAP0004`、 `PSAP0005` (リビジョン規律の opt-in ルール) を有効化。 `PSAP0005` は strict mode — `psap0005_relaxed_mode` は意図的に設定していないため、 コメント本体内の任意の `rNN` 参照が報告されます。 r21 のクリーンアップコミットで全 `rNN` 参照を script body から除去済みのため、 strict baseline は検証済の end-state です。
+2. **disable**: `PSA6003` (関数名詞の複数形) を無効化。 `Download-SpeakerDeck.ps1` 内の 3 つの関数が意図的に複数形名詞を使用しているため。 根拠は config ファイル内にコメントで記録済み。
+
+意図的な空 `catch` ブロック (`PSA3004`) には `# psa-disable-line PSA3004 -- <理由>` を付与しています。 各抑制判断の根拠は `SPEC.md` §A.11「Static Analysis with psa.py」に詳細を記載しています。
 
 ### 現在の検証結果
 
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 5152
+Lines  : 5205
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
 ```
 
-スクリプトに変更を加える際は、コミット前に上記コマンドで検証することを推奨します。
-これは SPEC.md の Part C「品質ゲート」でも必須項目として定義されています。
+r27 / `psa-py-v4-llm-governance-baseline` リリースで `psa.py` 4.0.1 を使用して検証済み。 スクリプトに変更を加える際は、 コミット前に上記コマンドで検証することを推奨します。 これは SPEC.md の Part C「品質ゲート」でも必須項目として定義されています。
 
 ## コンソール出力フォーマット
 

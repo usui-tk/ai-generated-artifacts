@@ -391,8 +391,8 @@ function Initialize-RuntimeDirectories {
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'speakerdeck-2026.05.20-r26'
-$Script:ScriptTag     = 'add-environmentinfoonly-switch'
+$Script:ScriptVersion = 'speakerdeck-2026.05.25-r27'
+$Script:ScriptTag     = 'psa-py-v4-llm-governance-baseline'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -3238,7 +3238,7 @@ function Invoke-Phase4Evaluation {
         [void]$ps.AddArgument($Script:RequestHeaders)
         [void]$ps.AddArgument($Script:DelaySeconds)
         $handle = $ps.BeginInvoke()
-        [void]$jobs.Add(@{ PS = $ps; Handle = $handle; Deck = $deck })
+        [void]$jobs.Add(@{ PS = $ps; Handle = $handle; Deck = $deck; Collected = $false })
     }
 
     # Collect results with progress display

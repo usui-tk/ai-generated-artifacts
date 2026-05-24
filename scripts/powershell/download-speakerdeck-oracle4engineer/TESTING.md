@@ -36,8 +36,9 @@ This document consolidates everything needed to verify and evaluate
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` (latest mainline; with project `.psa.config.json`) on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r25 build |
-| File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ for the script | r25 build |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r27 build (`psa.py 4.0.1`) |
+| File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ for the script | r27 build |
+| `PSAP0005` strict-mode baseline (no `rNN` references in comment bodies) | **0 findings** ✓ | r27 build (`psa.py 4.0.1`) |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ pass | 2026-05-11 |
 | Phase 2–5 (Scan / Plan) — DryRun mode | ✓ 804 decks evaluated | 2026-05-11 |
 | Phase 6 (Download) — real run | ✓ **804/804 success** (zero failures) | 2026-05-11 (r17) |
@@ -45,19 +46,24 @@ This document consolidates everything needed to verify and evaluate
 | Phase 8 (UndatedReclassify) — steady state on re-run | ✓ examined: 0 | 2026-05-11 (r17) |
 | Phase 9 (FinalReport) — output validated | ✓ year distribution + log files listed | 2026-05-11 (r17) |
 | Total elapsed (real run, ~5.7 GB, 804 files) | 10 min 4 s | 2026-05-11 (r17) |
-| Debug Trace Facility (A.14) — `debugtrace.jsonl` created on every run | _pending operator confirmation_ | r25 build (static checks only) |
-| Debug Trace Facility (A.14) — stack-balance: every `frame.open` has a matching `frame.close` | _pending operator confirmation_ | r25 build (static checks only) |
+| Debug Trace Facility (A.14) — `debugtrace.jsonl` created on every run | _pending operator confirmation_ | r27 build (static checks only) |
+| Debug Trace Facility (A.14) — stack-balance: every `frame.open` has a matching `frame.close` | _pending operator confirmation_ | r27 build (static checks only) |
 
 ---
 
 ## 1. Static analysis gate
 
 `psa.py` (latest mainline; rule families `PSA1001`..`PSA9002` plus opt-in
-`PSAP0001`..`PSAP0004`) must pass before every commit (see Part C of
-[SPEC.md](./SPEC.md)). This project opts in to `PSAP0003` and
-`PSAP0004` (the revision-discipline rules). For the canonical
-version-discovery and refresh workflow, see repository root
-[`README.md`](../../../README.md) "psa.py Versioning Policy".
+`PSAP0001`..`PSAP0005`) must pass before every commit (see Part C of
+[SPEC.md](./SPEC.md)). This project opts in to `PSAP0003`, `PSAP0004`,
+and `PSAP0005` (the revision-discipline triad). `PSAP0005` (added in
+`psa.py` 4.0.0) is enabled in **strict** mode — `psap0005_relaxed_mode`
+is intentionally NOT set in `.psa.config.json`, so any `rNN` reference
+inside a comment body is reported. The r21 cleanup commit removed
+every such reference, so the strict baseline is the verified
+end-state. For the canonical version-discovery and refresh workflow,
+see repository root [`README.md`](../../../README.md) "psa.py
+Versioning Policy".
 
 `psa.py` auto-discovers `.psa.config.json` in the current working directory,
 so the canonical invocation is from this script directory:
@@ -79,7 +85,7 @@ Expected output:
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 5152
+Lines  : 5205
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
@@ -87,7 +93,7 @@ Issues : 0 errors, 0 warnings, 0 info
 
 Any deviation from `0 / 0 / 0` blocks the commit. See
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
-§4 for the full specification of the 42 rules
+§4 for the full specification of the 46 rules
 (`PSA1xxx` syntax / `PSA2xxx` semantics / `PSA3xxx` style / `PSA4xxx`
 hygiene / `PSA5xxx` security / `PSA6xxx` best practice / `PSA7xxx`
 file format / `PSA8xxx` cross-file consistency / `PSA9xxx` complexity
@@ -346,6 +352,7 @@ before running.
 | r23 | The standalone PDF-metadata PoC (`Test-PdfMetadata.ps1`) outlived its purpose — the same logic now runs in every real Phase 8 invocation | Cosmetic | Delete the PoC; remove all documentation references in the same revision |
 | r24 | In-script comments and the SPEC / CHANGELOG / TESTING docs still pointed at the upstream `usui-tk/Deploy-Drivers-For-WindowsServer` repo even though all referenced helpers (logging, env dump, TLS/UTF-8, Debug Trace Facility) were already embedded in `Download-SpeakerDeck.ps1` after r23. Cross-repo dependency in the docs was now misleading. | Cosmetic | Remove every reference to the upstream repo from the script comments and the four docs; reorganise SPEC.md A.1 so `A.1.3 Companion in-house script` becomes the single canonical reference; simplify A.13 Reuse-before-invention to a two-step procedure |
 | r25 | `Script:ScriptShortTag` was constructed as `"v{ScriptVersion}/{ScriptHash}"`, producing strings like `"vspeakerdeck-2026.05.18-r24/<hash>"` in every phase header, banner, and DebugTrace event. The `v` prefix glued directly to `speakerdeck` reads as the meaningless token `vspeakerdeck` to a human eye. | Cosmetic | Drop the `v` literal from the format string (`'{0}/{1}'` instead of `'v{0}/{1}'`); update SPEC A.3 examples, README phase-header samples, and TESTING examples to match |
+| **r27** | **Two `psa.py 4.0.0` `PSA2009` warnings on `$job.Collected = $true` in Phase 4 / Phase 6 reaper loops**, although `$job` in those loops is a hashtable element of `$jobs` (not a sealed pscustomobject). PSA2009 used file-level tracking and conflated the foreach loop-variable with an unrelated `$job = [PSCustomObject]@{...}` initialiser in Phase 5. Without a fix, the documented `0 / 0 / 0` quality gate could not be met on `psa.py 4.0.0`. | Cosmetic (false-positive warning, no runtime defect) | **Two-sided fix**: (1) `psa.py 4.0.1` adds Step 2c2 to PSA2009 to recognise `$Coll.Add(@{...})` + `foreach (...) in $Coll` indirect binding (incl. pipeline-derived collections). (2) `Download-SpeakerDeck.ps1` Phase 4 hashtable init is updated to include `Collected = $false` for consistency with Phase 6's init (cosmetic). (3) `.psa.config.json` opts in to `PSAP0005` in strict mode (revision reference in comment body — the `r21` cleanup commit already cleared every site, so strict mode is the verified end-state). The r27 release line is named `psa-py-v4-llm-governance-baseline` to align with the sister `usui-tk/Deploy-Drivers-For-WindowsServer` repository's r76 / r42 / r24 / r20 release. See SPEC.md §A.11 and §D.7 for the full analysis. |
 
 See [SPEC.md](./SPEC.md) Part D for the formalized "Known Pitfalls" entries
 that bake each of these fixes into the project's institutional memory.

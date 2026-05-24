@@ -664,12 +664,17 @@ Must pass with **0 errors / 0 warnings / 0 info**.
 
 `psa.py` ships with a rule set spanning `PSA1001`..`PSA9002` (generic
 rules grouped into nine categories) plus the opt-in pipeline-convention
-family `PSAP0001`..`PSAP0004`. `PSAP0003` (inline revision-tag comments)
-and `PSAP0004` (end-of-file `REVISION HISTORY` blocks) are disabled
-by default. A condensed table is reproduced in
-[`README.md`](./README.md) and [`README.ja.md`](./README.ja.md). For the
-authoritative specification of every rule (severity, examples, suppression
-guidance), see
+family `PSAP0001`..`PSAP0005`. All `PSAPxxxx` rules are off by default.
+This project opts in to `PSAP0003` (inline revision-tag comments),
+`PSAP0004` (end-of-file `REVISION HISTORY` blocks), and **`PSAP0005`
+(revision reference in comment body, added in `psa.py` 4.0.0)** in
+strict mode (`psap0005_relaxed_mode` is not set, default `false`).
+The total rule count is **46** (`PSA1xxx ×3`, `PSA2xxx ×11`,
+`PSA3xxx ×6`, `PSA4xxx ×4`, `PSA5xxx ×4`, `PSA6xxx ×8`, `PSA7xxx ×2`,
+`PSA8xxx ×1`, `PSA9xxx ×2`, `PSAPxxxx ×5`). A condensed table is
+reproduced in [`README.md`](./README.md) and [`README.ja.md`](./README.ja.md).
+For the authoritative specification of every rule (severity,
+examples, suppression guidance), see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4.
 
 ### Project-local suppression policy
@@ -677,6 +682,22 @@ guidance), see
 This project applies suppression at two levels:
 
 1. **Project-level (`.psa.config.json`)**
+   - **`PSAP0003`, `PSAP0004`, and `PSAP0005` are enabled.** The
+     revision-discipline triad enforces the repository-wide
+     CHANGELOG-centralised history policy:
+     - `PSAP0003` catches inline revision-tag comments (`# r24:`,
+       `# (r24)`, `# r24-update:`, etc.).
+     - `PSAP0004` catches end-of-file `REVISION HISTORY` blocks.
+     - `PSAP0005` (added in `psa.py` 4.0.0) catches the broader
+       pattern of ANY `rNN` reference inside a comment body,
+       including descriptive prose anchors that `PSAP0003`'s
+       structured-tag detector misses. This project enables
+       `PSAP0005` in **strict** mode (no `psap0005_relaxed_mode`
+       key) because the r21 cleanup commit already removed every
+       `rNN` reference from the script body; the strict baseline
+       is the verified end-state, and there is no migration
+       backlog requiring the relaxed-mode exemptions used by
+       sister repositories.
    - `PSA6003` (plural function noun) is disabled. The three
      plural-noun functions in `Download-SpeakerDeck.ps1`
      (`Resolve-RuntimeDirectories`, `Invoke-CleanupDirectories`,
@@ -1321,6 +1342,67 @@ engine's `\uXXXX` escape (kept as literal ASCII in source). When you need
 to *emit* a non-ASCII character at runtime (e.g., for a log message),
 read it from an external file or build it via `[char]0xXXXX` — never put
 it directly in the source.
+
+## D.7 r27 — `psa.py` 4.0.0 `PSA2009` false positive on `$Coll.Add(@{...})` + `foreach` pattern
+
+**Symptom:** `psa.py` 4.0.0 reports two `PSA2009` warnings on
+`$job.Collected = $true` lines in Phase 4 and Phase 6 reaper loops,
+even though `$job` in those loops is bound to a hashtable element of
+`$jobs` (not a sealed pscustomobject). The warning incorrectly claims
+that `$job` was initialised with `[pscustomobject]@{...}` that does
+not declare `Collected`.
+
+**Root cause:** Two unrelated variables in the file share the name
+`$job`:
+
+1. **Phase 5 prepare loop** (`Invoke-Phase05_PreparePlan`):
+   `$job = [PSCustomObject]@{ Index = ...; ... }` — a sealed object
+   whose property surface does **not** include `Collected`.
+2. **Phase 4 / Phase 6 reaper loops**: `foreach ($job in $newlyDone)`
+   where `$newlyDone = $jobs | Where-Object {...}`, and `$jobs` is an
+   `ArrayList` of hashtables created by `[void]$jobs.Add(@{...})`.
+
+`psa.py` 4.0.0 performs file-level (not function-scope-aware) tracking
+for `PSA2009`. The Phase 5 sealed-object initialisation puts `$job`
+into the "tracked PSCustomObject" set. The Phase 4 / 6 hashtable
+binding is *indirect* — through `$jobs.Add(@{...})` + foreach — which
+the file-level detector did not yet recognise, so `$job.Collected =
+$true` was flagged.
+
+**Fix (psa.py side):** `psa.py` 4.0.1 adds **Step 2c2** to the
+`PSA2009` walk: any foreach loop-variable bound through
+`$Coll.Add(@{...})` + `foreach (...) in $Coll` is treated as a
+hashtable element, not as a PSCustomObject. Pipeline / method
+derivations (`$X = $Coll | ...`, `$X = $Coll.Where(...)`) are
+followed to a fixed point, so the common
+`$newlyDone = $jobs | Where-Object {...}` idiom is recognised.
+
+**Fix (script side):** As a separate consistency improvement, the
+Phase 4 hashtable init (`[void]$jobs.Add(@{ PS = $ps; Handle = $handle;
+Deck = $deck })`) is updated to include `Collected = $false` to match
+Phase 6's init (`[void]$jobs.Add(@{ ...; Collected = $false })`). The
+two reaper loops now both observe `Collected` declared at construction
+time; the field is then set to `$true` inside the `finally` block. This
+is purely cosmetic — hashtables tolerate dynamic key addition at
+runtime — but the explicit declaration aids reader comprehension.
+
+**Adoption:** This release (r27, `psa-py-v4-llm-governance-baseline`)
+adopts `psa.py` 4.0.1 as the verification gate and adds `PSAP0005`
+to the `.psa.config.json` enable-list in strict mode. The four-script
+sister repository (`usui-tk/Deploy-Drivers-For-WindowsServer`) uses
+`psa.py` 4.0.0's `PSAP0005` in *relaxed* mode with a documented
+migration baseline; this repository is already at the end-state and
+needs no migration aid.
+
+**Lesson learned:** Sealed-object semantics in PowerShell 5.1
+(`[PSCustomObject]@{...}`) and the dynamic-property-bag semantics of
+hashtables (`@{...}`) look very similar at the call site (both use
+`.Property` access syntax) but differ sharply in their property-write
+semantics. When sharing a variable name across both shapes in the same
+file, the static analyser cannot always disambiguate by scope — so
+the explicit declaration of every dynamically-added property at
+construction time (or via `Add-Member`) is both safer and more
+self-documenting than relying on the implicit hashtable add.
 
 ---
 

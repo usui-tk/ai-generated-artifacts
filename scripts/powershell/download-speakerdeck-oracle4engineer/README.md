@@ -581,7 +581,7 @@ documents the most recent successful real-run
 (`804/804 decks, zero failures, 10m4.4s total, 5.7 GB`).
 
 For details on the `psa.py` static analyzer (latest mainline; with
-`PSA1001..PSA9002` plus `PSAP0001..PSAP0004` opt-in rules), see
+`PSA1001..PSA9002` plus `PSAP0001..PSAP0005` opt-in rules), see
 [`../../python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
 and the full [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md).
 The canonical analyzer version is recorded in
@@ -619,40 +619,53 @@ see the analyzer's own
 | Category | Code range | Examples |
 | -------- | ---------- | -------- |
 | Syntax balance      | `PSA1001`..`PSA1003` | brace / paren / bracket balance |
-| Semantics           | `PSA2001`..`PSA2006` | undefined variable, auto-variable shadowing, `-match` against bare variable, `$null` on the right of `-eq`/`-ne` |
-| Style               | `PSA3001`..`PSA3005` | `Start-Process -ArgumentList`, trailing backtick before empty line, empty `catch` block, `Start-Transcript -Path` should be `-LiteralPath` |
+| Semantics           | `PSA2001`..`PSA2011` | undefined variable, auto-variable shadowing, `-match` against bare variable, `$null` on the right of `-eq`/`-ne`, PSCustomObject undeclared property assignment (`PSA2009`), undefined-function call (`PSA2010`), `Split-Path -LiteralPath ... -Parent` ambiguous parameter set on PS 5.1 (`PSA2011`) |
+| Style               | `PSA3001`..`PSA3006` | `Start-Process -ArgumentList`, trailing backtick before empty line, empty `catch` block, `Start-Transcript -Path` should be `-LiteralPath` |
 | Hygiene             | `PSA4001`..`PSA4004` | unfinished markers, trailing whitespace, long line, trailing semicolon |
 | Security            | `PSA5001`..`PSA5004` | plain-text password parameter, `Invoke-Expression`, broken hash algorithm, hardcoded `ComputerName` |
-| Best practice       | `PSA6001`..`PSA6006` | non-approved verb, cmdlet alias, plural function noun, `$global:` definition, mandatory parameter with default, switch defaulting to `$true` |
-| File format         | `PSA7001`            | PowerShell script lacks UTF-8 BOM (Windows PowerShell 5.1 may misinterpret non-ASCII bytes as Shift-JIS without a BOM) |
+| Best practice       | `PSA6001`..`PSA6008` | non-approved verb, cmdlet alias, plural function noun, `$global:` definition, mandatory parameter with default, switch defaulting to `$true`, `[OutputType()]` attribute conventions |
+| File format         | `PSA7001`..`PSA7002` | PowerShell script lacks UTF-8 BOM, mixed / wrong line endings |
 | Cross-file consistency | `PSA8001`         | function-body hash drift across files in the same scan |
 | Complexity metrics  | `PSA9001`..`PSA9002` | function body length threshold (opt-in), external process invocation without `$LASTEXITCODE` check (opt-in) |
-| Project / pipeline conventions | `PSAP0001`..`PSAP0004` | phase function naming, required script-identifier variables, inline revision-tag comments (`PSAP0003`), end-of-file `REVISION HISTORY` blocks (`PSAP0004`). **All PSAPxxxx rules are off by default**; this project opts in to `PSAP0003` and `PSAP0004` |
+| Project / pipeline conventions | `PSAP0001`..`PSAP0005` | phase function naming, required script-identifier variables, inline revision-tag comments (`PSAP0003`), end-of-file `REVISION HISTORY` blocks (`PSAP0004`), **revision reference in comment body** (`PSAP0005`, new in psa.py 4.0.0). **All PSAPxxxx rules are off by default**; this project opts in to `PSAP0003`, `PSAP0004`, and `PSAP0005` (strict mode — `psap0005_relaxed_mode` is not set, so any `rNN` reference in a comment body is reported). The total rule count is **46**. |
 
 For the full specification of each rule, see
 [`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4.
 
 ### Project-local configuration
 
-This script directory ships a `.psa.config.json` that disables `PSA6003`
-(plural function noun). Three intentional plural-noun functions in
-`Download-SpeakerDeck.ps1` motivate this exemption; the rationale is
-recorded inline in the config file. Empty `catch` blocks (`PSA3004`) that
-are intentional carry `# psa-disable-line PSA3004 -- <reason>` directives.
+This script directory ships a `.psa.config.json` that:
+
+1. **Enables** `PSAP0003`, `PSAP0004`, and `PSAP0005` (the
+   revision-discipline opt-in rules). `PSAP0005` is in strict mode —
+   `psap0005_relaxed_mode` is intentionally NOT set so any `rNN`
+   reference in a comment body is reported. This is feasible because
+   the r21 cleanup commit removed every such reference from the
+   script body; the strict baseline is the verified end-state.
+2. **Disables** `PSA6003` (plural function noun). Three intentional
+   plural-noun functions in `Download-SpeakerDeck.ps1` motivate this
+   exemption; the rationale is recorded inline in the config file.
+
+Empty `catch` blocks (`PSA3004`) that are intentional carry
+`# psa-disable-line PSA3004 -- <reason>` directives. The full
+rationale for each suppression decision is documented in `SPEC.md`
+§A.11 "Static Analysis with psa.py".
 
 ### Current verification result
 
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 5152
+Lines  : 5205
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
 ```
 
-Run the analyzer above before committing any change to the script.
-This is also enforced as a quality gate in SPEC.md Part C.
+Verified at the r27 / `psa-py-v4-llm-governance-baseline` release
+with `psa.py` 4.0.1. Run the analyzer above before committing any
+change to the script. This is also enforced as a quality gate in
+SPEC.md Part C.
 
 ## Console output format
 

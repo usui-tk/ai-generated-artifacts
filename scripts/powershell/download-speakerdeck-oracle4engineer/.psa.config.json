@@ -1,6 +1,6 @@
 // psa.py latest mainline — project configuration for download-speakerdeck-oracle4engineer
 //
-// Why PSAP0003 / PSAP0004 are enabled:
+// Why PSAP0003 / PSAP0004 / PSAP0005 are enabled:
 //   This project's revision history is centralised in CHANGELOG.md per
 //   the repository-wide policy documented in the root README.md
 //   "Revision History Policy" section. PSAP0003 (inline revision-tag
@@ -8,6 +8,25 @@
 //   comment blocks) enforce that policy: any future commit that
 //   accumulates per-revision tags or history blocks inside the
 //   PowerShell sources will be flagged by the static-analysis gate.
+//
+//   PSAP0005 (revision reference in comment body — added in psa.py
+//   4.0.0) is the broader LLM-assisted-maintenance guardrail
+//   companion of PSAP0003. Where PSAP0003 catches only the structured
+//   tag forms (# rNN:, # (rNN), etc.), PSAP0005 catches ANY rNN
+//   reference inside a comment body, including descriptive prose
+//   anchors. This project opts in to PSAP0005 in STRICT mode (i.e.,
+//   `psap0005_relaxed_mode` is NOT set, default false) because:
+//
+//     - The r21 cleanup commit ("Strip all per-revision inline
+//       comments; centralise per-release history in CHANGELOG.md")
+//       already removed every rNN reference from the script body.
+//     - Verified at r27 / psa-py-v4-llm-governance-baseline:
+//       `psa.py 4.0.1 --include PSAP0005` reports 0 findings.
+//     - Strict mode is the documented end-state for the
+//       upstream sister repo (`usui-tk/Deploy-Drivers-For-WindowsServer`,
+//       see its SPEC.md §A.13 "Migration roadmap"); this project is
+//       already at the end-state, so the migration-aid relaxed mode
+//       is not needed here.
 //
 // Why PSA6003 is disabled:
 //   This script and its companion intentionally use plural-noun function names
@@ -31,7 +50,8 @@
 {
   "enable": [
     "PSAP0003",
-    "PSAP0004"
+    "PSAP0004",
+    "PSAP0005"
   ],
   "disable": [
     "PSA6003"
