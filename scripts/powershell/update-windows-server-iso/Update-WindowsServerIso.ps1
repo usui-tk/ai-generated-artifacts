@@ -447,8 +447,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.24-r04.1'
-$Script:ScriptTag     = 'lcu-twice-winre-and-lp-injection'
+$Script:ScriptVersion = 'update-wsi-2026.05.24-r04.2'
+$Script:ScriptTag     = 'supersedence-aware-patch-selection'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -590,6 +590,10 @@ $Script:IsoSha256        = $null
 $Script:ResolvedPatches  = @()
 $Script:PatchPlan        = $null     # hashtable; built by Build-PatchPlan in P02
 $Script:WimIndexInventory = @()
+# Most recent supersedence-dedup exclusions emitted by
+# Resolve-PatchSetFromCatalog. The A01 and P02 callers read this to
+# produce a per-run CSV report. Reset to @() on each new Resolve call.
+$Script:LastSupersedenceExclusions = @()
 $Script:OutputIsoPath    = $null
 
 
@@ -3093,7 +3097,8 @@ function Resolve-PatchSetFromCatalog {
     $osTitleTokens = $tmpl.TitleTokens
 
     # ----- PASS 1: per-type Catalogue search -----
-    $searchResults = @{}     # Type -> @{ Best=<title-narrowed best>; RawCount=<total hits> }
+    $searchResults = @{}     # Type -> @{ Best=<title-narrowed best>; RawCount=<total hits>; SupersededOut=@() }
+    $supersedenceExclusions = New-Object System.Collections.Generic.List[object]
     foreach ($q in $tmpl.Queries) {
         Write-Step ('Catalog query: type={0} template="{1}"' -f $q.Type, $q.QueryTemplate)
         $hits = $null
@@ -3121,11 +3126,66 @@ function Resolve-PatchSetFromCatalog {
             $searchResults[$q.Type] = @{ Best=$null; RawCount=$hits.Count }
             continue
         }
-        # Prefer non-Preview entries when multiple narrowed candidates exist
-        $sorted = @($narrowed | Sort-Object @{
-            Expression = { if ($_.Title -match '(?i)preview') { 1 } else { 0 } }
-        }, Title)
-        $searchResults[$q.Type] = @{ Best=$sorted[0]; RawCount=$hits.Count }
+        # Strip Preview entries first; preview KBs are a separate Microsoft
+        # release stream and don't supersede the canonical monthly KBs.
+        $narrowedNoPreview = @($narrowed | Where-Object { $_.Title -notmatch '(?i)preview' })
+        if ($narrowedNoPreview.Count -eq 0) {
+            # All candidates are Preview; fall back to sort-by-title-desc
+            $sorted = @($narrowed | Sort-Object Title -Descending)
+            $searchResults[$q.Type] = @{ Best=$sorted[0]; RawCount=$hits.Count }
+            continue
+        }
+
+        if ($narrowedNoPreview.Count -eq 1) {
+            # Single survivor; no supersedence resolution needed
+            $searchResults[$q.Type] = @{ Best=$narrowedNoPreview[0]; RawCount=$hits.Count }
+            continue
+        }
+
+        # Multiple non-preview candidates: enrich each with Supersedes /
+        # SupersededBy data and pick the latest. This is one HTTP call
+        # per candidate but only fires when the OS-aware query yielded
+        # an ambiguous result (typically 2 candidates).
+        Write-Step ('  Multiple ({0}) {1} candidates after narrowing; resolving supersedence.' -f $narrowedNoPreview.Count, $q.Type)
+        $enriched = New-Object System.Collections.Generic.List[object]
+        foreach ($c in $narrowedNoPreview) {
+            $sup = $null
+            try {
+                $sup = Get-SupersedenceFromCatalog -UpdateId $c.UpdateId -MaxRetries $MaxRetries
+            } catch {
+                Write-Warn ('  Supersedence lookup failed for {0}: {1}' -f $c.UpdateId, $_.Exception.Message)
+            }
+            $kb = Get-KbIdFromUpdateTitle -Title $c.Title
+            $cEnriched = [pscustomobject]@{
+                UpdateId     = $c.UpdateId
+                Title        = $c.Title
+                KbId         = $kb
+                Supersedes   = if ($sup) { @($sup.Supersedes) } else { @() }
+                SupersededBy = if ($sup) { @($sup.SupersededBy) } else { @() }
+            }
+            $enriched.Add($cEnriched) | Out-Null
+        }
+        $selection = Select-LatestPatchBySupersedence -Candidates $enriched.ToArray() -TypeLabel $q.Type
+        $best = $selection.Best
+        foreach ($ex in $selection.Excluded) {
+            $supersedenceExclusions.Add($ex) | Out-Null
+            Write-Step ('  Excluded {0} ({1}): {2}' -f $ex.ExcludedKbId, $ex.ExcludedTitle, $ex.Reason)
+        }
+        # Translate the chosen enriched record back to the original
+        # hit shape for downstream pass 2 (which expects UpdateId / Title).
+        $bestHit = $narrowedNoPreview | Where-Object { $_.UpdateId -eq $best.UpdateId } | Select-Object -First 1
+        if (-not $bestHit) { $bestHit = $narrowedNoPreview[0] }
+        $searchResults[$q.Type] = @{ Best=$bestHit; RawCount=$hits.Count; SupersededOut=$selection.Excluded }
+    }
+
+    # Persist supersedence exclusions for the caller's diagnostic CSV
+    # (e.g. A01_RefreshAllBaselines or P02 inputs); the caller reads
+    # $Script:LastSupersedenceExclusions if set.
+    if ($supersedenceExclusions.Count -gt 0) {
+        $Script:LastSupersedenceExclusions = $supersedenceExclusions.ToArray()
+        Write-Step ('Supersedence dedup excluded {0} candidate(s) in this run.' -f $supersedenceExclusions.Count)
+    } else {
+        $Script:LastSupersedenceExclusions = @()
     }
 
     # ----- Combined LCU detection -----
@@ -4654,6 +4714,202 @@ function Invoke-PatchSubPhase {
         }) | Out-Null
     }
     return $rows.ToArray()
+}
+
+# ============================================================
+# Supersedence-based patch deduplication
+# ============================================================
+# When the Catalogue search for a single patch Type returns multiple
+# narrowed candidates (typically: preview + final for the same month,
+# or carry-over candidates from an earlier month that the OS-aware
+# query partially matched), we use the per-candidate Supersedes /
+# SupersededBy data already gathered via Get-SupersedenceFromCatalog
+# to keep only the newest survivor.
+#
+# Design notes:
+#   * Get-SupersedenceFromCatalog populates Supersedes (this update
+#     replaces these KB IDs) and SupersededBy (this update is replaced
+#     by these KB IDs) for a given UpdateId via the Catalogue's
+#     ScopedViewInline.aspx page.
+#   * We exclude any candidate whose KbId appears in another
+#     candidate's Supersedes list - that candidate is, by definition,
+#     superseded by the other.
+#   * If after the exclusion pass we still have multiple survivors
+#     (Microsoft's Catalogue is occasionally inconsistent), we sort
+#     descending by Title and pick the first - Catalogue titles begin
+#     with the year-month prefix (e.g. "2026-05 Cumulative Update for
+#     ...") so lexicographic descending sort correlates with newest.
+#     The remaining non-winners are emitted with "Ambiguous; chose
+#     newest by title" so the operator sees what happened.
+
+function Get-KbIdFromUpdateTitle {
+    <#
+    .SYNOPSIS
+        Extract the KB id (e.g. "KB5037591") from a Catalogue update
+        title. Returns an empty string if no KB id pattern is found.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string]$Title)
+    if (-not $Title) { return '' }
+    $m = [regex]::Match($Title, '\((KB\d{6,7})\)')
+    if ($m.Success) {
+        return $m.Groups[1].Value
+    }
+    return ''
+}
+
+function Select-LatestPatchBySupersedence {
+    <#
+    .SYNOPSIS
+        Apply supersedence-based deduplication to a list of candidate
+        patches.
+
+    .DESCRIPTION
+        Input: an array of candidate patch entries, each carrying the
+        UpdateId, Title, KbId, Supersedes, and SupersededBy fields
+        populated by Get-SupersedenceFromCatalog.
+
+        Output: a hashtable with two keys:
+            Best     : the single surviving candidate
+            Excluded : array of pscustomobjects, one per excluded
+                       candidate, with Type / Candidate / SupersededBy
+                       / Reason fields suitable for CSV emission.
+
+        When Candidates has 0 entries:
+            Best = $null, Excluded = @()
+        When Candidates has 1 entry:
+            Best = that one, Excluded = @()
+        When Candidates has 2+:
+            Exclusion pass first (drop candidates that appear in
+            another candidate's Supersedes). If exactly one survivor:
+            Best = survivor. If multiple survivors: sort descending
+            by Title and pick first; mark the rest as ambiguous.
+
+        Matching: a candidate C is considered "superseded by" another
+        candidate D if C's KbId OR C's UpdateId is found (as a
+        substring) in D's Supersedes array. We accept substring match
+        because Catalogue Supersedes entries sometimes contain only
+        the KB number, sometimes the full UpdateId, and sometimes a
+        free-form "Package_for_KBnnnn~..." identifier.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$Candidates,
+        [string]$TypeLabel = '<unspecified>'
+    )
+
+    $result = @{
+        Best     = $null
+        Excluded = @()
+    }
+
+    if (-not $Candidates -or $Candidates.Count -eq 0) {
+        return $result
+    }
+    if ($Candidates.Count -eq 1) {
+        $result.Best = $Candidates[0]
+        return $result
+    }
+
+    $excluded = New-Object System.Collections.Generic.List[object]
+    $remaining = New-Object System.Collections.Generic.List[object]
+
+    foreach ($c in $Candidates) {
+        $cKbId   = if ($c.PSObject.Properties['KbId'] -and $c.KbId) {
+            [string]$c.KbId
+        } else {
+            Get-KbIdFromUpdateTitle -Title ([string]$c.Title)
+        }
+        $cUpdateId = if ($c.PSObject.Properties['UpdateId']) { [string]$c.UpdateId } else { '' }
+
+        $isSuperseded  = $false
+        $supersededBy  = $null
+        $matchedToken  = ''
+
+        foreach ($other in $Candidates) {
+            if ([Object]::ReferenceEquals($other, $c)) { continue }
+            $otherSupersedes = @()
+            if ($other.PSObject.Properties['Supersedes'] -and $other.Supersedes) {
+                $otherSupersedes = @($other.Supersedes)
+            }
+            foreach ($supItem in $otherSupersedes) {
+                $supStr = [string]$supItem
+                if ([string]::IsNullOrWhiteSpace($supStr)) { continue }
+                # Match either by KbId or by UpdateId (substring)
+                $hit = $false
+                if (-not [string]::IsNullOrEmpty($cKbId)   -and $supStr.IndexOf($cKbId,   [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true; $matchedToken = $cKbId }
+                if (-not $hit -and -not [string]::IsNullOrEmpty($cUpdateId) -and $supStr.IndexOf($cUpdateId, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true; $matchedToken = $cUpdateId }
+                if ($hit) {
+                    $isSuperseded = $true
+                    $supersededBy = $other
+                    break
+                }
+            }
+            if ($isSuperseded) { break }
+        }
+
+        if ($isSuperseded) {
+            $excluded.Add([pscustomobject]@{
+                Type             = $TypeLabel
+                Candidate        = $c
+                ExcludedKbId     = $cKbId
+                ExcludedTitle    = [string]$c.Title
+                SupersededByKbId = if ($supersededBy.PSObject.Properties['KbId']) { [string]$supersededBy.KbId } else { Get-KbIdFromUpdateTitle -Title ([string]$supersededBy.Title) }
+                SupersededByTitle = [string]$supersededBy.Title
+                MatchedToken     = $matchedToken
+                Reason           = ('Superseded by ' + [string]$supersededBy.Title)
+            }) | Out-Null
+        } else {
+            $remaining.Add($c) | Out-Null
+        }
+    }
+
+    if ($remaining.Count -eq 1) {
+        $result.Best = $remaining[0]
+        $result.Excluded = $excluded.ToArray()
+        return $result
+    }
+    if ($remaining.Count -gt 1) {
+        # Ambiguous: sort by Title desc (Catalogue titles begin with
+        # YYYY-MM so lexicographic desc correlates with newest).
+        $sorted = @($remaining | Sort-Object @{ Expression = { [string]$_.Title } } -Descending)
+        $best = $sorted[0]
+        for ($i = 1; $i -lt $sorted.Count; $i++) {
+            $loser = $sorted[$i]
+            $loserKbId = if ($loser.PSObject.Properties['KbId'] -and $loser.KbId) {
+                [string]$loser.KbId
+            } else {
+                Get-KbIdFromUpdateTitle -Title ([string]$loser.Title)
+            }
+            $bestKbId = if ($best.PSObject.Properties['KbId'] -and $best.KbId) {
+                [string]$best.KbId
+            } else {
+                Get-KbIdFromUpdateTitle -Title ([string]$best.Title)
+            }
+            $excluded.Add([pscustomobject]@{
+                Type             = $TypeLabel
+                Candidate        = $loser
+                ExcludedKbId     = $loserKbId
+                ExcludedTitle    = [string]$loser.Title
+                SupersededByKbId = $bestKbId
+                SupersededByTitle = [string]$best.Title
+                MatchedToken     = ''
+                Reason           = 'Ambiguous; chose newest by title'
+            }) | Out-Null
+        }
+        $result.Best = $best
+        $result.Excluded = $excluded.ToArray()
+        return $result
+    }
+
+    # All candidates excluded each other (shouldn't normally happen).
+    # Fall back to the first input candidate and log a warning.
+    Write-Warn ('Supersedence dedup: all {0} {1} candidates marked superseded; falling back to first input.' -f $Candidates.Count, $TypeLabel)
+    $result.Best = $Candidates[0]
+    $result.Excluded = $excluded.ToArray()
+    return $result
 }
 
 # ============================================================

@@ -27,6 +27,99 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.24-r04.2] - 2026-05-24
+
+### Added - Supersedence-aware Catalogue patch selection
+
+`Resolve-PatchSetFromCatalog` (in `.build_part08c_catalog_scraper.ps1`)
+now resolves the case where the OS-aware Catalogue search returns
+multiple candidates for a single patch Type. Previously this case
+silently picked `narrowed[0]` (sort-stable but with no real-world
+meaning), which could let a wrong KB through when:
+
+- The same monthly slot has both a preview and a final entry
+- A neighbouring KB (e.g. a ".NET Framework 3.5 and 4.8.1 Cumulative
+  Update") matches the OS Title token used in the LCU query
+- Catalogue HTML structure changes confuse the narrowing predicate
+
+The new logic invokes `Get-SupersedenceFromCatalog` for each
+non-Preview narrowed candidate, then calls the new
+`Select-LatestPatchBySupersedence` helper to keep only the latest
+survivor. Excluded candidates are recorded in
+`$Script:LastSupersedenceExclusions` for the caller's diagnostic CSV.
+
+Supersedence lookup is only triggered when the narrowed candidate
+count exceeds 1; the single-candidate case bypasses the extra HTTP
+calls.
+
+### Added - `Select-LatestPatchBySupersedence` helper
+
+New module `.build_part09d_supersedence.ps1` (~200 lines) implements
+the deduplication logic:
+
+| Input cardinality | Behaviour |
+|-------------------|-----------|
+| 0 candidates | Returns `Best=$null`, `Excluded=@()` |
+| 1 candidate  | Returns that candidate as Best |
+| 2+ candidates | Exclusion pass: any candidate whose KbId or UpdateId appears in another candidate's `Supersedes` array is dropped; if exactly one survivor remains, it is the Best; if multiple survivors remain, sort descending by Title (Catalogue titles start with `YYYY-MM` so lexicographic desc = newest) and pick the first, marking the rest as `Ambiguous; chose newest by title` |
+| Edge case (all candidates excluded each other) | Fall back to the first input candidate with a warning |
+
+Each excluded entry carries `Type`, `ExcludedKbId`, `ExcludedTitle`,
+`SupersededByKbId`, `SupersededByTitle`, `MatchedToken`, and a
+human-readable `Reason` suitable for CSV emission.
+
+### Added - `Get-KbIdFromUpdateTitle` helper
+
+Small utility that extracts the `KB######` substring from a
+Catalogue update title using the canonical `(KB\d{6,7})` pattern.
+Returns an empty string when no KB id is present.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info (7,368 lines).
+- PSScriptAnalyzer 1.25.0: 0 findings.
+- Unit tests for `Select-LatestPatchBySupersedence` (5/5 PASS):
+    * Two candidates with cand2 superseding cand1 -> cand1 excluded
+    * Single candidate -> passthrough, no exclusion
+    * Two candidates without supersedence relation -> ambiguous, title-desc tiebreak
+    * Supersedes contains UpdateId (not KbId) -> substring match still works
+    * Empty input -> Best=$null
+- Unit tests for `Get-KbIdFromUpdateTitle`: extracts from canonical titles, returns empty for non-matches.
+- Live Smoke 5 (`-Action RefreshAllBaselines -DryRun -OnlyOs Server2025`)
+  exercises the supersedence path on real Microsoft Update Catalogue
+  data and correctly excludes a stray .NET 3.5+4.8.1 candidate that
+  the LCU OS-aware query had picked up as a false positive.
+
+### Changed - Documentation cleanup
+
+References to the deferred ".NET 3.5 Feature on Demand" item have
+been removed from CHANGELOG and SPEC. The feature is no longer in
+scope: Microsoft's recommended deployment path for .NET 3.5 is to
+enable it after image deployment via `Install-WindowsFeature
+NET-Framework-Core` (or `Add-WindowsCapability -Online`), not to
+embed it in the image.
+
+### Compatibility
+
+- No schema change. Config files (`Config/Server*.json`) and the
+  PatchPlan hashtable shape are unchanged from r04.1.
+- `ScriptVersion` is bumped to `update-wsi-2026.05.24-r04.2`;
+  `ScriptTag` is `supersedence-aware-patch-selection`.
+- Existing single-candidate Catalogue queries see no behaviour
+  change (the extra `Get-SupersedenceFromCatalog` calls only fire
+  when narrowing leaves 2 or more candidates).
+
+### Out of scope (deferred to a future release)
+
+- Setup binaries servicing via pending.xml (Setup DU). Microsoft
+  Server LTSC editions rarely publish Setup DU, and verification
+  requires a Windows host running setup.exe, so this is not
+  high-leverage for our use case.
+- Per-language Optional Components for WinRE.
+- ISO release detection refresher for `LanguageSpecific.<lang>.Iso`.
+- Python JSON Schema validator that consumes the
+  `DumpFieldClassification` output.
+
 ## [update-wsi-2026.05.24-r04.1] - 2026-05-24
 
 ### Added - Microsoft media-dynamic-update servicing sub-phase engine
@@ -148,7 +241,6 @@ exactly.
 
 ### Out of scope (deferred to a future release)
 
-- Feature on Demand (.NET 3.5) source detection and `-EnableDotNet35`.
 - Setup binaries servicing via pending.xml (Setup DU).
 - Per-language Optional Components for WinRE.
 
@@ -252,7 +344,6 @@ with the LCU twice-apply pattern and language-pack injection.
 - LCU twice-apply sequence in P05 around language-pack injection.
 - WinRE.wim mount / service / dismount worker in P06.
 - Language Pack injection on install.wim and WinRE.wim.
-- FoD (.NET 3.5) source detection and `-EnableDotNet35`.
 
 ## [update-wsi-2026.05.24-r03.1] - 2026-05-24
 
@@ -327,7 +418,6 @@ Per the "未実装機能の全体マップ" review, the next deliverables are:
   (WIM-target-aware patch plan; LCU twice-apply; pre-apply
    Get-WindowsPackage dependency closure check; WinRE servicing;
    per-WIM AppliesTo metadata; Language Pack injection in P05).
-- r04.1: FoD (.NET 3.5) source detection and `-EnableDotNet35`.
 - r05: Supersedes-based superseded KB auto-removal; ISO-release
   refresher; Python JSON Schema validator.
 
@@ -461,7 +551,6 @@ non-synthetic runs.
 - WIM-target-aware patch plan (install/boot/winre per-target patch
   lists per Microsoft media-dynamic-update sequence).
 - LCU twice-apply pattern around language-pack injection.
-- Feature on Demand (.NET 3.5) source detection and opt-in flag.
 - Pre-apply Get-WindowsPackage dependency closure check.
 
 ## [update-wsi-2026.05.24-r02.5] - 2026-05-24
@@ -560,7 +649,6 @@ and (for .NET) matching `ndp<version>` markers.
   patch lists per Microsoft media-dynamic-update sequence).
 - LCU twice-apply pattern around language-pack injection.
 - Language Pack acquisition per `OsLanguage`.
-- Feature on Demand (.NET 3.5) source detection.
 - Pre-apply `Get-WindowsPackage` dependency closure check.
 
 ## [update-wsi-2026.05.24-r02.4] - 2026-05-24

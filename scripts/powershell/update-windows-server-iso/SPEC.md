@@ -591,6 +591,45 @@ loop for any sub-phase. The phase workers iterate the sequence,
 calling `Invoke-PatchSubPhase` for content-bearing sub-phases and
 running `Invoke-DismCleanup` for `IsCleanupMarker` sub-phases.
 
+## B.15 Supersedence-aware Catalogue candidate selection (r04.2+)
+
+When the OS-aware Catalogue query for a single patch Type leaves
+2 or more narrowed candidates after the Title-token / x64 filter,
+the resolver enriches each candidate with the `Supersedes` and
+`SupersededBy` arrays from `Get-SupersedenceFromCatalog`, then
+calls `Select-LatestPatchBySupersedence` to keep only the latest.
+
+Match rule: candidate `C` is "superseded by" candidate `D` when
+`C.KbId` OR `C.UpdateId` is found (as a substring,
+case-insensitive) anywhere in `D.Supersedes`. Substring match is
+used because Catalogue Supersedes entries are inconsistent: some
+contain only the KB number, some the full UpdateId GUID, some a
+free-form `Package_for_KBnnnn~...` package identifier.
+
+Selection cases:
+
+| Input | Outcome |
+|---|---|
+| 0 candidates | `Best = $null`, `Excluded = @()` |
+| 1 candidate  | `Best = that one`, `Excluded = @()` |
+| 2+ with clear supersedence | `Best = single survivor`, `Excluded = (the rest)` with `Reason = "Superseded by <title>"` |
+| 2+ with no supersedence relation | `Best = first by `Title` desc`, `Excluded = (the rest)` with `Reason = "Ambiguous; chose newest by title"` |
+| Pathological (all candidates supersede each other) | `Best = first input`, warning logged |
+
+Exclusions are accumulated across all patch Types in a single
+Resolve call and exposed via `$Script:LastSupersedenceExclusions`
+for the caller (A01 RefreshAllBaselines, P02 ResolveInputs) to
+emit a CSV report. Supersedence lookup is a per-candidate HTTP
+call, so it only fires when the narrowed count exceeds 1; the
+single-candidate path keeps the HTTP cost at zero.
+
+This protects the WIM-target-aware sequence (B.14) against
+neighbouring KBs that match the OS Title token by accident, e.g.
+a ".NET Framework 3.5 and 4.8.1 Cumulative Update" appearing in
+a search for the OS LCU. Without supersedence-aware selection,
+the wrong KB could enter the I3.LCU.FirstPass sub-phase and
+produce a botched install.wim.
+
 ## B.14b PatchBaseline schema fields (referenced by B.10)
 
 ```jsonc
@@ -963,7 +1002,6 @@ Server SKU requires.
 | M4 | Server 2025 `LCUExpandViaMum=true` real implementation (MUM/CAB expand path) | Placeholder |
 | **M5** | Stage 4 CI workflow (`monthly-refresh`): monthly scheduled run that exercises `-Action RefreshAllBaselines` and opens a PR with the resulting `Config/<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes and Patch Tuesday drift within ~30 days | **Done (r03.1)** |
 | **M6** | Microsoft-official media-dynamic-update servicing sequence: WIM-target-aware patch plan + pre-apply dependency closure check (r04) + LCU twice-apply + WinRE servicing + Language Pack injection (r04.1) | **Done (r04.1)** |
-| M7 | Feature on Demand (.NET 3.5) source detection and `-EnableDotNet35` opt-in | Future |
 | M6 | Client SKUs (Windows 10/11) support — separate Config family | Future |
 | M7 | Driver / FOD / LXP / Appx customisation (OSBuild equivalent) | Future |
 | M8 | Output ISO size minimisation (`Export-WindowsImage` with `/Compress:max`) | Future |
@@ -1038,6 +1076,8 @@ Server SKU requires.
 | `Resolve-PatchSetFromCatalog` | Two-pass orchestrator: pass 1 runs OS-aware Catalogue searches; combined-LCU detector runs on the aggregate; pass 2 picks the canonical Full file per surviving candidate via `Select-CanonicalPatchFile` |
 | `Get-LanguagePackQueryTemplate` (r03) | Per-language Catalogue search templates (LanguagePack / LXP / DotNet.LangPack) for OsVersion + OsLanguage + PatchMonth |
 | `Resolve-LanguageSpecificPatchesFromCatalog` (r03) | Per-language Catalogue scraper; returns LP / LXP / .NET LP entries; empty result = verified absence |
+| `Select-LatestPatchBySupersedence` (r04.2) | Deduplicate Catalogue candidates via their Supersedes / SupersededBy fields; returns the single newest survivor plus a list of excluded entries for diagnostic CSV |
+| `Get-KbIdFromUpdateTitle` (r04.2) | Extract the `KB######` substring from a Catalogue update title |
 | `Get-PatchTargetsForType` (r04) | Returns the WIM target array for a given patch Type (Install / Boot / WinRE / Setup) via `$Script:PatchTargetMap` |
 | `Build-PatchPlan` (r04) | Build a target-aware PatchPlan from the flat ResolvedPatches array, sorted by ApplyOrder within each target lane |
 | `Build-InstallApplySequence` (r04.1) | Convert install.wim patch slice into the I1-I7 Microsoft media-dynamic-update sub-phase sequence; emits I7 (LCU second pass with RequiresRemount=$true) only when language packs are present |
