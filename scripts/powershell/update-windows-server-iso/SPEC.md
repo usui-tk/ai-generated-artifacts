@@ -75,7 +75,7 @@ below.
 |---|---|
 | Filename | `Update-WindowsServerIso.ps1` |
 | Project folder | `scripts/powershell/update-windows-server-iso/` |
-| Version | `update-wsi-2026.05.24-r02.2` |
+| Version | `update-wsi-2026.05.24-r02.3` |
 | Tag | `dynamic-baseline-and-wsusscn2-validation-fixup` |
 | Target OS | Server 2016 / 2019 / 2022 / 2025 |
 | Languages | en-us, ja-jp |

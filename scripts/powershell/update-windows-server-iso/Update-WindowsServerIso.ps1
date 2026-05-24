@@ -415,8 +415,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.24-r02.2'
-$Script:ScriptTag     = 'dynamic-baseline-and-wsusscn2-validation-fixup-2'
+$Script:ScriptVersion = 'update-wsi-2026.05.24-r02.3'
+$Script:ScriptTag     = 'legacy-error-helper-cleanup'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -485,11 +485,11 @@ $Script:OutputIsoPath    = $null
 #                         used manually and auto-triggered on phase
 #                         failure.
 #
-# This complements the existing per-Phase-6 failure diagnostics
-# (Write-FailureDiagnostic, Add-ErrorJsonlEntry, P06_errors.jsonl):
-# DebugTrace is cross-phase and tracks operation-level steps, while
-# the Phase 6 diagnostics are download-specific and track per-deck
-# failures. Both coexist without overlap.
+# This complements the per-phase errors log emitted by
+# Add-ErrorJsonlEntry into $Script:ErrorsJsonlPath: DebugTrace is
+# cross-phase and tracks operation-level steps, while Add-ErrorJsonlEntry
+# is phase-scoped and records discrete failure events. Both coexist
+# without overlap.
 #
 # Typical usage pattern (function entry/body/catch/finally):
 #
@@ -1561,211 +1561,69 @@ function Invoke-CleanupDirectories { # psa-disable-line PSA6003 -- "Directories"
 }
 
 # ============================================================
-
-function Get-FailureCategory {
-    # Coarse-grained category used in the Phase 6 failure breakdown
-    # table. Maps the rich ErrorDetails captured by the worker into a
-    # short, readable label.
-    param([Parameter(Mandatory)] $Item)
-
-    $ed = $Item.ErrorDetails
-    if (-not $ed) {
-        $msg = if ($Item.ErrorMessage) { $Item.ErrorMessage } else { '' }
-        if ($msg -match 'Timeout|timed out')         { return 'Timeout' }
-        if ($msg -match 'too long|MAX_PATH|path is') { return 'PathTooLong' }
-        if ($msg -match 'HTTP\s*(\d{3})')            { return "HTTP $($Matches[1])" }
-        return 'Other'
-    }
-
-    if ($ed.LastStatusCode) {
-        switch ([int]$ed.LastStatusCode) {
-            429     { return 'HTTP 429 (Too Many Requests)' }
-            503     { return 'HTTP 503 (Service Unavailable)' }
-            500     { return 'HTTP 500 (Internal Server Error)' }
-            502     { return 'HTTP 502 (Bad Gateway)' }
-            504     { return 'HTTP 504 (Gateway Timeout)' }
-            403     { return 'HTTP 403 (Forbidden)' }
-            404     { return 'HTTP 404 (Not Found)' }
-            default { return ('HTTP ' + [int]$ed.LastStatusCode) }
-        }
-    }
-
-    $et = if ($ed.LastErrorType) { $ed.LastErrorType } else { '' }
-    if ($et -match 'TimeoutException')   { return 'Timeout' }
-    if ($et -match 'WebException')       { return 'Network/WebException' }
-    if ($et -match 'IOException')        { return 'IO error' }
-
-    $em = if ($ed.LastErrorMessage) { $ed.LastErrorMessage } else { '' }
-    if ($em -match 'too long|MAX_PATH|path is too long') { return 'PathTooLong' }
-
-    if ($et) { return $et }
-    return 'Other'
-}
-
-function Write-FailureDiagnostic {
-    # Persist a detailed per-failure diagnostic dump under
-    # $Script:FailedDir as a plain-text file. One file per failed deck,
-    # named '<index4>_<safeslug>.txt' for predictable sorting.
-    # Called from the main thread's reaping loop, so concurrent writes
-    # are not a concern.
-    param([Parameter(Mandatory)] $Item)
-
-    if ([string]::IsNullOrEmpty($Script:FailedDir)) { return }
-
-    # Lazy-create the failed/ directory on first failure.
-    if (-not (Test-Path -LiteralPath $Script:FailedDir)) {
-        try {
-            New-Item -ItemType Directory -Path $Script:FailedDir -Force | Out-Null
-        } catch {
-            return
-        }
-    }
-
-    $slug = ($Item.DeckUrl -split '/')[-1]
-    if ([string]::IsNullOrEmpty($slug)) { $slug = 'unknown' }
-    # Sanitize slug for filename use: replace forbidden chars, truncate.
-    $safeSlug = $slug -replace '[<>:"/\\|?*]', '_'
-    if ($safeSlug.Length -gt 80) { $safeSlug = $safeSlug.Substring(0, 80) }
-
-    $idx = if ($null -ne $Item.Index) { [int]$Item.Index } else { 0 }
-    $fname = ('{0:D4}_{1}.txt' -f $idx, $safeSlug)
-    $path  = Join-Path $Script:FailedDir $fname
-
-    $sb = New-Object System.Text.StringBuilder
-
-    [void]$sb.AppendLine('=' * 72)
-    [void]$sb.AppendLine("Failure diagnostic for deck #$idx")
-    [void]$sb.AppendLine('=' * 72)
-    [void]$sb.AppendLine("Generated at        : $((Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz'))")
-    [void]$sb.AppendLine("Script version      : $Script:ScriptShortTag")
-    [void]$sb.AppendLine('')
-
-    [void]$sb.AppendLine('-- Deck info -----------------------------------------------------------')
-    [void]$sb.AppendLine("Index               : $($Item.Index)")
-    [void]$sb.AppendLine("Title               : $($Item.Title)")
-    [void]$sb.AppendLine("Deck URL            : $($Item.DeckUrl)")
-    [void]$sb.AppendLine("Download URL        : $($Item.DownloadUrl)")
-    [void]$sb.AppendLine("Original filename   : $($Item.OriginalFilename)")
-    [void]$sb.AppendLine("Publish date        : $($Item.PublishDate)")
-    [void]$sb.AppendLine('')
-
-    [void]$sb.AppendLine('-- Output path ---------------------------------------------------------')
-    [void]$sb.AppendLine("Output filename     : $($Item.OutputFilename)")
-    [void]$sb.AppendLine("Output full path    : $($Item.OutputFullPath)")
-    [void]$sb.AppendLine("Output type         : $($Item.OutputType)")
-    if ($Item.OutputFullPath) {
-        [void]$sb.AppendLine("Path length         : $($Item.OutputFullPath.Length) chars")
-    }
-    [void]$sb.AppendLine('')
-
-    [void]$sb.AppendLine('-- Failure summary -----------------------------------------------------')
-    [void]$sb.AppendLine("Status              : $($Item.Status)")
-    [void]$sb.AppendLine("Attempts            : $($Item.Attempts)")
-    [void]$sb.AppendLine("Duration (ms)       : $($Item.DurationMs)")
-    [void]$sb.AppendLine("Bytes received      : $($Item.Bytes)")
-    [void]$sb.AppendLine("Category            : $(Get-FailureCategory -Item $Item)")
-    [void]$sb.AppendLine('')
-
-    $ed = $Item.ErrorDetails
-    if ($ed) {
-        [void]$sb.AppendLine('-- Error details -------------------------------------------------------')
-        [void]$sb.AppendLine("HTTP status code    : $($ed.LastStatusCode)")
-        [void]$sb.AppendLine("Exception type      : $($ed.LastErrorType)")
-        [void]$sb.AppendLine("Exception message   : $($ed.LastErrorMessage)")
-        if ($ed.InnerErrorType) {
-            [void]$sb.AppendLine("Inner type          : $($ed.InnerErrorType)")
-            [void]$sb.AppendLine("Inner message       : $($ed.InnerErrorMessage)")
-        }
-        [void]$sb.AppendLine('')
-
-        if ($ed.ResponseHeaders) {
-            [void]$sb.AppendLine('-- Response headers ----------------------------------------------------')
-            [void]$sb.AppendLine($ed.ResponseHeaders)
-            [void]$sb.AppendLine('')
-        }
-
-        if ($ed.ResponseBodyPreview) {
-            [void]$sb.AppendLine('-- Response body preview (first ~2KB) ----------------------------------')
-            [void]$sb.AppendLine($ed.ResponseBodyPreview)
-            [void]$sb.AppendLine('')
-        }
-
-        if ($ed.AttemptHistory -and $ed.AttemptHistory.Count -gt 0) {
-            [void]$sb.AppendLine('-- Attempt history -----------------------------------------------------')
-            foreach ($a in $ed.AttemptHistory) {
-                $sc = if ($a.StatusCode) { "HTTP $($a.StatusCode)" } else { 'no HTTP status' }
-                $em = if ($a.Message) { $a.Message } else { '' }
-                [void]$sb.AppendLine(("  Attempt {0}: {1} ({2}) {3}" -f $a.Attempt, $a.Result, $sc, $em))
-            }
-            [void]$sb.AppendLine('')
-        }
-
-        if ($ed.StackTrace) {
-            [void]$sb.AppendLine('-- Stack trace ---------------------------------------------------------')
-            [void]$sb.AppendLine($ed.StackTrace)
-            [void]$sb.AppendLine('')
-        }
-    } elseif ($Item.ErrorMessage) {
-        [void]$sb.AppendLine('-- Error (legacy) ------------------------------------------------------')
-        [void]$sb.AppendLine($Item.ErrorMessage)
-        [void]$sb.AppendLine('')
-    }
-
-    try {
-        # -LiteralPath defensively, even though $path is built from a
-        # sanitized slug ($safeSlug = $slug -replace '[<>:"/\\|?*]', '_').
-        # Speaker Deck slugs normally lowercase the title and replace
-        # special chars (#99 -> number-99), but we use -LiteralPath so
-        # any future slug with '[' ']' would still work.
-        Set-Content -LiteralPath $path -Value $sb.ToString() -Encoding UTF8 -ErrorAction Stop
-    } catch {
-        # We're already in a failure path; swallow to avoid compounding.
-    }
-}
+# Error handling helpers
+# ============================================================
+# `Add-ErrorJsonlEntry` is the single error-recording API used by the
+# phase workers and the registry-driven dispatcher. When a phase or a
+# sub-step fails, the catch block appends a one-line JSON record to
+# $Script:ErrorsJsonlPath so post-run analysis (jq, grep, log shipping)
+# can consume the stream without parsing prose.
+#
+# Schema (one line per record):
+#   {
+#     "timestamp"     : ISO-8601 with offset,
+#     "scriptVersion" : <ScriptVersion>/<short SHA-256 prefix>,
+#     "phase"         : "<PNN>"             (e.g. P02.5, P05),
+#     "kind"          : "<kind>"            (e.g. failure, warning),
+#     ...properties from -Properties hashtable, merged in...
+#   }
+#
+# Failures inside Add-ErrorJsonlEntry are deliberately swallowed so the
+# main pipeline cannot be derailed by a logging glitch.
 
 function Add-ErrorJsonlEntry {
-    # Append one JSON object (single line) to $Script:ErrorsJsonlPath.
-    # JSONL is a streaming-friendly format: one self-contained JSON
-    # object per line, ideal for jq / grep / structured analysis.
-    param([Parameter(Mandatory)] $Item)
+    <#
+    .SYNOPSIS
+        Append one structured JSON-Lines record to the run-level errors
+        log at $Script:ErrorsJsonlPath.
+    .PARAMETER Phase
+        Phase identifier (e.g. 'P02.5', 'P05'). Required.
+    .PARAMETER Kind
+        Short category label for the entry (e.g. 'failure', 'warning').
+        Required.
+    .PARAMETER Properties
+        Free-form hashtable merged into the JSON object. Keys colliding
+        with the well-known fields (timestamp / scriptVersion / phase /
+        kind) are silently dropped to protect the reserved schema.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Phase,
+        [Parameter(Mandatory)] [string]$Kind,
+        [hashtable]$Properties = @{}
+    )
 
     if ([string]::IsNullOrEmpty($Script:ErrorsJsonlPath)) { return }
 
     try {
         $obj = [ordered]@{
-            timestamp            = (Get-Date).ToString('o')
-            scriptVersion        = $Script:ScriptShortTag
-            index                = $Item.Index
-            title                = $Item.Title
-            deckUrl              = $Item.DeckUrl
-            downloadUrl          = $Item.DownloadUrl
-            originalFilename     = $Item.OriginalFilename
-            outputFilename       = $Item.OutputFilename
-            outputFullPath       = $Item.OutputFullPath
-            outputFullPathLength = if ($Item.OutputFullPath) { $Item.OutputFullPath.Length } else { $null }
-            outputType           = $Item.OutputType
-            publishDate          = $Item.PublishDate
-            status               = $Item.Status
-            attempts             = $Item.Attempts
-            durationMs           = [int]$Item.DurationMs
-            bytes                = $Item.Bytes
-            category             = (Get-FailureCategory -Item $Item)
+            timestamp     = (Get-Date).ToString('o')
+            scriptVersion = $Script:ScriptShortTag
+            phase         = $Phase
+            kind          = $Kind
         }
-        $ed = $Item.ErrorDetails
-        if ($ed) {
-            $obj['httpStatusCode']        = $ed.LastStatusCode
-            $obj['exceptionType']         = $ed.LastErrorType
-            $obj['exceptionMessage']      = $ed.LastErrorMessage
-            $obj['innerExceptionType']    = $ed.InnerErrorType
-            $obj['innerExceptionMessage'] = $ed.InnerErrorMessage
-            $obj['attemptHistory']        = $ed.AttemptHistory
-        } else {
-            $obj['errorMessage'] = $Item.ErrorMessage
+        if ($Properties) {
+            foreach ($key in $Properties.Keys) {
+                # Reserved keys cannot be overridden
+                if ($obj.Contains($key)) { continue }
+                $obj[$key] = $Properties[$key]
+            }
         }
         $json = $obj | ConvertTo-Json -Compress -Depth 8
         Add-Content -Path $Script:ErrorsJsonlPath -Value $json -Encoding UTF8 -ErrorAction Stop
     } catch {
-        # Silently ignore failures here so the main flow is not disrupted.
+        # Logging is best-effort: swallow so the main flow is not disrupted
+        $null = $_
     }
 }
 
@@ -5398,8 +5256,8 @@ Initialize-RuntimeDirectories
 
 # Activate debug trace JSONL file output
 try {
-    Enable-DebugTraceFileOutput -LogsDir $Script:LogsDir | Out-Null
-    Enable-AutoExportOnPhaseFailure -DiagDir $Script:DiagDir | Out-Null
+    Enable-DebugTraceFileOutput -Directory $Script:LogsDir | Out-Null
+    Enable-AutoExportOnPhaseFailure -OutputDirectory $Script:DiagDir | Out-Null
 } catch {
     Write-Warning ('Debug Trace setup warning: {0}' -f $_.Exception.Message)
 }

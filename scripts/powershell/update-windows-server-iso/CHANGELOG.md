@@ -27,6 +27,71 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.24-r02.3] - 2026-05-24
+
+### Fixed - legacy error-helper cleanup (inherited from r01)
+
+`Update-WindowsServerIso.ps1` carried three latent API signature
+mismatches inherited from r01 that did not show up in the smoke tests
+because they only surface on a failure path under specific conditions.
+Fixing them now so the next genuine failure produces a readable error
+message instead of a misleading "parameter not found" secondary error.
+
+- `Add-ErrorJsonlEntry`: the function body was a verbatim copy from
+  the SpeakerDeck downloader project that produced this script's
+  scaffold. It took a single `-Item` parameter and serialised
+  SpeakerDeck-specific fields (`DeckUrl`, `PublishDate`, etc.).
+  Both call sites in this script
+  (`Invoke-BuildPhase05_PatchInstallWim`'s `Add-WindowsPackage` catch,
+  and `Invoke-PhaseRunner`'s top-level phase catch) instead pass
+  `-Phase / -Kind / -Properties` for a generic phase-failure record.
+  The two surfaces had been silently incompatible since r01.
+  Rewrote `Add-ErrorJsonlEntry` to the actual contract the callers
+  use: `-Phase <PNN> -Kind <label> -Properties <hashtable>`, merging
+  the hashtable into a fixed-schema JSON object with reserved-key
+  protection.
+- `Enable-DebugTraceFileOutput`: the function declares `-Directory`
+  but was called with `-LogsDir`. Fixed at the call site in the
+  top-level script body.
+- `Enable-AutoExportOnPhaseFailure`: declares `-OutputDirectory`
+  but was called with `-DiagDir`. Fixed at the call site.
+
+### Removed - SpeakerDeck-downloader dead code
+
+The following functions were inherited verbatim from the SpeakerDeck
+downloader scaffold and were never referenced by any ISO Updater code
+path. Removed to eliminate confusion and reduce surface area:
+
+- `Get-FailureCategory` (HTTP / IO / WebException categorisation
+  tailored for SpeakerDeck failures).
+- `Write-FailureDiagnostic` (per-deck plain-text dump under
+  `$Script:FailedDir`, a variable that this script never sets).
+
+A stale reference to `Write-FailureDiagnostic` in a comment inside
+`.build_part04_debugtrace.ps1` was also cleaned up.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info.
+- PSScriptAnalyzer 1.25.0: 0 findings at Severity Error / Warning /
+  Information.
+- Line count: 5,452 -> 5,310 (-142, all dead-code removal).
+- All 11 `Start-DebugTrace` call sites use `-Context <fn> -PhaseId <PNN>`.
+- All 2 `Add-ErrorJsonlEntry` call sites use `-Phase / -Kind / -Properties`.
+- All `Enable-*` debug-trace setup calls use the correct parameter names.
+
+### Compatibility
+
+- Pure cleanup release: behaviour is identical for the successful
+  pipeline (no `Add-ErrorJsonlEntry` calls occur on the happy path).
+- The first observed change will be in the on-disk format of
+  `<WorkRoot>/logs/<...>_errors.jsonl` when a phase actually fails:
+  it now contains the intended `phase` / `kind` / caller-supplied
+  diagnostic properties instead of the previous (never-reached)
+  SpeakerDeck-shaped record.
+- `ScriptVersion` bumped to `update-wsi-2026.05.24-r02.3`;
+  `ScriptTag` is `legacy-error-helper-cleanup`.
+
 ## [update-wsi-2026.05.24-r02.2] - 2026-05-24
 
 ### Fixed — Stage 2 smoke-test failure introduced by r02
