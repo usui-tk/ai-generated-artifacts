@@ -27,6 +27,50 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.24-r02.4] - 2026-05-24
+
+### Fixed - `-EnvironmentInfoOnly` smoke test failed on Windows runner
+
+The `-EnvironmentInfoOnly` switch is intended to be a CI-friendly
+"dump PowerShell environment info and exit 0" smoke flag. It was
+working in spirit (the Step 0 environment dump did print, with a
+message `EnvironmentInfoOnly requested; exiting after env dump.`)
+but it was NOT actually exiting the script. The reason: P01's check
+issued a bare `return`, which only leaves the phase function. The
+phase runner then proceeded to P02 (`ResolveInputs`), which throws
+`-OsVersion is required for P02 (...)` because the smoke caller
+deliberately omits `-OsVersion`. Stage 2 reported exit code 1.
+
+This was a latent bug present since r01. It was hidden in early
+Stage 2 runs because the run-level summary did not surface P02's
+internal throw clearly; the recent Stage 2 logs in r02.3 made the
+P02 failure visible, which is how it was caught.
+
+Fix: add an `EnvironmentInfoOnly` early branch in the main entry
+point that pins `$phaseList = @('P01')` before dispatching. P02+
+are simply not in the dispatch list, so the post-P01 flow runs the
+normal phase-summary tail and the script exits 0. The pre-existing
+`return` inside `Invoke-SetupPhase01_Initialize` still works as a
+graceful exit point for Step 0; nothing else in P01 fires.
+
+This complements (rather than replaces) the existing
+`Action -eq 'ListPhases'` and `Action -eq 'Cleanup'` early-exit
+branches, matching the same idiom.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info.
+- PSScriptAnalyzer 1.25.0: 0 findings at Severity Error / Warning /
+  Information.
+
+### Compatibility
+
+- Surface behaviour change is localised to `-EnvironmentInfoOnly`:
+  it now exits 0 cleanly after P01 instead of erroring out in P02.
+  No other code path is affected.
+- `ScriptVersion` bumped to `update-wsi-2026.05.24-r02.4`;
+  `ScriptTag` is `environment-info-only-early-exit`.
+
 ## [update-wsi-2026.05.24-r02.3] - 2026-05-24
 
 ### Fixed - legacy error-helper cleanup (inherited from r01)

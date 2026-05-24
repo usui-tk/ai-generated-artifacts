@@ -415,8 +415,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.24-r02.3'
-$Script:ScriptTag     = 'legacy-error-helper-cleanup'
+$Script:ScriptVersion = 'update-wsi-2026.05.24-r02.4'
+$Script:ScriptTag     = 'environment-info-only-early-exit'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5270,7 +5270,13 @@ try {
     }
 
     # Decide phase list
-    if ($OnlyPhases -and $OnlyPhases.Count -gt 0) {
+    if ($EnvironmentInfoOnly) {
+        # -EnvironmentInfoOnly is a smoke-test convenience: run only P01
+        # so Step 0 (PowerShell environment dump) fires, then exit
+        # normally. It must NOT progress to P02+, which would require
+        # -OsVersion and other inputs the smoke caller did not pass.
+        $phaseList = @('P01')
+    } elseif ($OnlyPhases -and $OnlyPhases.Count -gt 0) {
         $phaseList = $OnlyPhases
     } else {
         $phaseList = Get-PhaseListByAction -ActionName $Action
