@@ -1,0 +1,49 @@
+{
+  "$schema": "./schema.json",
+  "_comment": "Windows Server 2016 (build 14393). EvalCenter pattern uses uppercase ISO name for ja-jp and lowercase _refresh form for en-us.",
+  "OsKey": "Server2016",
+  "OsName": "Windows Server 2016 Datacenter",
+  "OsShortName": "WS2016",
+  "Build": 14393,
+  "Architecture": "x64",
+  "RequireSSUFirst": true,
+  "EnableInstallWimUpdate": true,
+  "EnableBootWimUpdate": true,
+  "EnableWinREUpdate": true,
+  "DotNetRequired": true,
+  "LCUExpandViaMum": false,
+  "RequireUefiCa2023Boot": false,
+  "BootWimIndexes": [1, 2],
+  "InstallWimIndexes": "all",
+  "ExpectedEditions": [
+    "Windows Server 2016 Standard",
+    "Windows Server 2016 Standard (Desktop Experience)",
+    "Windows Server 2016 Datacenter",
+    "Windows Server 2016 Datacenter (Desktop Experience)"
+  ],
+  "AutoDetectKnownGood": {
+    "AsOfDate": "2026-05-01",
+    "Note": "Placeholder; populated by Get-LatestServerUpdates in a future revision.",
+    "SsuKbId": "",
+    "LcuKbId": "",
+    "DotNetKbId": ""
+  },
+  "Languages": {
+    "en-us": {
+      "Lang": "en-us",
+      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2195174",
+      "IsoSnapshotUrl": "https://software-download.microsoft.com/download/pr/Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO",
+      "IsoSha256": "(unknown - record on first download)",
+      "IsoExpectedSize": 6500000000,
+      "VolumeLabelPrefix": "WS2016EN"
+    },
+    "ja-jp": {
+      "Lang": "ja-jp",
+      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2195167",
+      "IsoSnapshotUrl": "https://software-download.microsoft.com/download/pr/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO",
+      "IsoSha256": "(unknown - record on first download)",
+      "IsoExpectedSize": 6800000000,
+      "VolumeLabelPrefix": "WS2016JA"
+    }
+  }
+}

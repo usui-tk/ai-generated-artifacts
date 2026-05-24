@@ -1,0 +1,49 @@
+{
+  "$schema": "./schema.json",
+  "_comment": "Windows Server 2019 (build 17763). Service Refresh ISOs follow the svc_refresh naming pattern.",
+  "OsKey": "Server2019",
+  "OsName": "Windows Server 2019 Datacenter",
+  "OsShortName": "WS2019",
+  "Build": 17763,
+  "Architecture": "x64",
+  "RequireSSUFirst": true,
+  "EnableInstallWimUpdate": true,
+  "EnableBootWimUpdate": true,
+  "EnableWinREUpdate": true,
+  "DotNetRequired": true,
+  "LCUExpandViaMum": false,
+  "RequireUefiCa2023Boot": false,
+  "BootWimIndexes": [1, 2],
+  "InstallWimIndexes": "all",
+  "ExpectedEditions": [
+    "Windows Server 2019 Standard",
+    "Windows Server 2019 Standard (Desktop Experience)",
+    "Windows Server 2019 Datacenter",
+    "Windows Server 2019 Datacenter (Desktop Experience)"
+  ],
+  "AutoDetectKnownGood": {
+    "AsOfDate": "2026-05-01",
+    "Note": "Placeholder; populated by Get-LatestServerUpdates in a future revision.",
+    "SsuKbId": "",
+    "LcuKbId": "",
+    "DotNetKbId": ""
+  },
+  "Languages": {
+    "en-us": {
+      "Lang": "en-us",
+      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2195167",
+      "IsoSnapshotUrl": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
+      "IsoSha256": "(unknown - record on first download)",
+      "IsoExpectedSize": 5300000000,
+      "VolumeLabelPrefix": "WS2019EN"
+    },
+    "ja-jp": {
+      "Lang": "ja-jp",
+      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2195438",
+      "IsoSnapshotUrl": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
+      "IsoSha256": "(unknown - record on first download)",
+      "IsoExpectedSize": 5500000000,
+      "VolumeLabelPrefix": "WS2019JA"
+    }
+  }
+}

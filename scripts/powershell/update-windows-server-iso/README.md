@@ -1,0 +1,271 @@
+# Update-WindowsServerIso.ps1
+
+| Stage | Status |
+|:---|:---|
+| STAGE 1 — Linux checks (psa.py + PSScriptAnalyzer on pwsh 7) | [![STAGE 1](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml) |
+| STAGE 2 — Windows checks (PSScriptAnalyzer on Windows PS 5.1 + smoke test) | [![STAGE 2](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage2__windows.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage2__windows.yml) |
+| STAGE 3 — Windows synthetic full pipeline (`-SyntheticTestMode`) | [![STAGE 3](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage3__synthetic.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage3__synthetic.yml) |
+
+**English** | [日本語](README.ja.md)
+
+Integrate the latest Microsoft Servicing Stack Update, Latest Cumulative
+Update, Dynamic Updates, and .NET updates into a Windows Server
+evaluation ISO and re-emit a bootable ISO whose embedded `install.wim`,
+`boot.wim`, and `winre.wim` already contain those updates. Eliminates
+the multi-hour Windows Update step from lab and test bring-up of
+Server 2016 / 2019 / 2022 / 2025. Targeted at Windows 11 + Windows
+PowerShell 5.1 (also runs on PowerShell 7+).
+
+This script is part of the
+[`usui-tk/ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts)
+repository, under `scripts/powershell/update-windows-server-iso/`.
+
+## ⚠️ Disclaimer
+
+**USE AT YOUR OWN RISK.** This script is provided "AS IS" without
+warranty of any kind, express or implied. The authors and contributors
+are not liable for any damages, data loss, account suspension, network
+issues, disk space exhaustion, broken installation media, or any other
+problems — direct or indirect — that may arise from using, modifying,
+or distributing this script.
+
+By running this script, you acknowledge that:
+
+* You are solely responsible for verifying that your use complies with
+  the **Microsoft Software Licence Terms** for the evaluation ISO and
+  the **Microsoft Update Catalogue Terms of Use** for the patch files
+* You are responsible for any consequences of downloading large
+  amounts of data (bandwidth costs, storage costs, rate limits, IP
+  blocks)
+* You will **not redistribute** the output ISO publicly; the
+  evaluation licence forbids redistribution of evaluation Microsoft
+  binaries
+* The output ISO is for internal lab, test, or evaluation use only,
+  for the duration permitted by the evaluation licence
+* You will review the script's source code and understand its
+  behaviour (especially the DISM mount and `oscdimg` write paths)
+  before running it in any environment that holds production data
+* DISM operations require Administrator and may leave WIM mounts
+  behind on abnormal exit; you are responsible for cleaning those up
+  if the script's own cleanup pass cannot
+
+For the full disclaimer and self-responsibility terms that apply to
+all artifacts in this repository, see the
+[root README](../../../README.md)
+([Japanese](../../../README.ja.md)).
+
+## License
+
+This project is part of the `usui-tk/ai-generated-artifacts`
+repository, which is licensed under the **MIT License**. See the
+[`LICENSE`](../../../LICENSE) file at the repository root for the
+full license text.
+
+In short: you are free to use, modify, and distribute this software
+for any purpose, provided that the original copyright and license
+notices are preserved. The software is provided without warranty, as
+detailed in the Disclaimer above and in the LICENSE file.
+
+This MIT licence covers **the script itself**. It does NOT cover the
+Microsoft binaries that the script processes (evaluation ISO,
+Servicing Stack Updates, Latest Cumulative Updates, etc.), which
+remain under the **Microsoft Software Licence Terms** that ship with
+each asset.
+
+## Folder layout
+
+```
+scripts/powershell/update-windows-server-iso/
+  Update-WindowsServerIso.ps1     # Main script (this README documents it)
+  README.md / README.ja.md        # End-user documentation (you are reading these)
+  SPEC.md                          # Developer / LLM specification (English only)
+  CHANGELOG.md                     # Per-revision change history (English only)
+  .psa.config.json                 # psa.py project configuration
+  PSScriptAnalyzerSettings.psd1    # PSScriptAnalyzer project configuration
+  Config/                          # Per-OS configuration profiles
+    Server2016.json
+    Server2019.json
+    Server2022.json
+    Server2025.json
+```
+
+The PowerShell static analyzer (`psa.py`) used to verify this script
+lives at the repository-wide canonical location:
+[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/).
+
+GitHub Actions workflows for this script live at the repository-wide
+canonical location
+[`.github/workflows/`](../../../.github/workflows/), with the
+`scripts__powershell__update-windows-server-iso__stage<N>__<runner>.yml`
+naming pattern.
+
+If you only want to **run** the script, read this README. If you want
+to **extend it or build a similar script**, also read `SPEC.md`.
+
+## Quick start
+
+```powershell
+# 1. Unblock the file (removes the "downloaded from the internet" warning)
+Unblock-File .\Update-WindowsServerIso.ps1
+
+# 2. Allow signed-or-local scripts for the current process
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# 3. Show registered phases (no side effects)
+.\Update-WindowsServerIso.ps1 -Action ListPhases
+
+# 4. Environment-only smoke check
+.\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly
+
+# 5. Sandbox dry run for Server 2019 ja-jp (lists planned actions, no DISM writes)
+.\Update-WindowsServerIso.ps1 `
+    -Action PrepareBuildVerify `
+    -OsVersion Server2019 -OsLanguage ja-jp `
+    -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
+    -PatchDirectory 'D:\Patches\Server2019\2026-05' `
+    -WorkRoot 'D:\UpdateWsi' `
+    -DryRun
+
+# 6. Full local build (requires -Execute; this is the only mode that actually
+#    mounts and modifies WIMs)
+.\Update-WindowsServerIso.ps1 `
+    -Action PrepareBuildVerify `
+    -OsVersion Server2019 -OsLanguage ja-jp `
+    -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
+    -PatchDirectory 'D:\Patches\Server2019\2026-05' `
+    -WorkRoot 'D:\UpdateWsi' `
+    -Execute
+```
+
+## Requirements
+
+| Item | Requirement |
+|---|---|
+| Operating system | Windows 10/11 Pro/Enterprise/Education or Windows Server 2016+ |
+| PowerShell | Windows PowerShell 5.1 (recommended) or PowerShell 7+ |
+| Privileges | Administrator (DISM mount requires elevation) |
+| Tools | Windows ADK Deployment Tools (`oscdimg.exe`) |
+| Free disk space | 60 GB on the `-WorkRoot` drive (30 GB minimum) |
+| Network | Required for ISO and patch downloads; not needed when `-IsoPath` and `-PatchDirectory` cover all inputs |
+| Hyper-V | Optional, required only for `-Action BootTest` |
+
+Optional, only needed for development and CI:
+
+- Python 3.10+ and `psa.py` from
+  [`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
+
+## Supported target OS and languages
+
+| OS key      | Build  | Language tags    | LCU expand mode | UEFI CA 2023 |
+|-------------|:------:|------------------|:---------------:|:------------:|
+| Server2016  | 14393  | en-us, ja-jp     | Direct          | Not required |
+| Server2019  | 17763  | en-us, ja-jp     | Direct          | Not required |
+| Server2022  | 20348  | en-us, ja-jp     | Direct          | Not required |
+| Server2025  | 26100  | en-us, ja-jp     | MUM/CAB expand  | Required     |
+
+Per-OS profile JSON lives under `Config/`. Each profile encodes the
+build number, default `boot.wim` indexes, expected installer editions,
+and per-language ISO download URLs (Eval Center FwLink primary,
+Microsoft download mirror fallback).
+
+## Phase reference
+
+| ID  | Name              | Group  | What it does                                                                  |
+|-----|-------------------|--------|-------------------------------------------------------------------------------|
+| P01 | Initialize        | Setup  | PowerShell env, admin, ADK, disk, Hyper-V                                     |
+| P02 | ResolveInputs     | Setup  | ISO/patch source resolution, Config JSON                                      |
+| P03 | FetchAssets       | Fetch  | ISO + patch downloads with hash verification                                  |
+| P04 | ExpandIso         | Plan   | Mount source ISO, copy to workspace, enumerate WIM indexes                    |
+| P05 | PatchInstallWim   | Build  | For each install.wim index: SSU then LCU then .NET, then DISM cleanup         |
+| P06 | PatchBootWim      | Build  | boot.wim (PE + Setup) and winre.wim                                           |
+| P07 | AssembleIso       | Build  | Dynamic Update Setup overlay, Export-WindowsImage, oscdimg ISO build          |
+| P08 | StaticVerify      | Verify | Mount output ISO, confirm KB packages are present                             |
+| P09 | FinalReport       | Report | End-of-run summary, ISO hash, log paths                                       |
+
+The optional `-Action BootTest` runs a Hyper-V Gen2 smoke test against
+the output ISO. See SPEC.md Part B for the full per-phase contracts.
+
+## Parameters (selected)
+
+See `Get-Help .\Update-WindowsServerIso.ps1 -Full` for the complete
+parameter list. The most commonly used:
+
+| Parameter                    | Purpose                                                                 |
+|------------------------------|-------------------------------------------------------------------------|
+| `-Action`                    | Prepare / Build / Verify / PrepareBuildVerify / BootTest / All / Cleanup / ListPhases / GenerateManifest |
+| `-OsVersion`                 | Server2016 / Server2019 / Server2022 / Server2025                       |
+| `-OsLanguage`                | en-us / ja-jp                                                           |
+| `-IsoPath`                   | Local ISO path (mutually exclusive with `-IsoUrl`)                      |
+| `-IsoUrl`                    | Explicit ISO download URL                                               |
+| `-PatchDirectory`            | Directory containing local MSU/CAB patches                              |
+| `-ManifestPath`              | Metalink `.meta4` manifest with hashes                                  |
+| `-PatchUrls`                 | Array of explicit patch URLs                                            |
+| `-AutoDetectLatestPatches`   | Resolve latest patches via Update Catalogue (M2 placeholder)            |
+| `-WorkRoot`                  | Workspace root (default `C:\Temp\Workspace_UpdateWsi`)                  |
+| `-OutputDir`                 | Output ISO directory (default `<WorkRoot>\output`)                      |
+| `-OnlyInstallWimIndexes`     | Comma-separated index list (e.g. `'2,4'`) to limit install.wim updates  |
+| `-DryRun`                    | Skip Build / Verify phases (Setup / Fetch / Plan only)                  |
+| `-SyntheticTestMode`         | CI mode: build a synthetic ISO without touching Microsoft assets        |
+| `-EvalIsoMode`               | Allow downloading via Microsoft Evaluation Center fwlink                |
+| `-Execute`                   | **Required** for actual DISM writes; without it, Build phases plan only |
+
+## Static analysis
+
+Run from the project directory:
+
+```bash
+python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
+```
+
+The required gate before any commit is **0 errors / 0 warnings /
+0 info**. The current `r01` baseline satisfies this.
+
+## Continuous integration
+
+Three GitHub Actions workflows verify this script on every push and
+pull request:
+
+| Workflow file | Runs | Triggers |
+|---|---|---|
+| `scripts__powershell__update-windows-server-iso__stage1__linux.yml` | psa.py + PSScriptAnalyzer (pwsh 7 on Linux) | push, PR |
+| `scripts__powershell__update-windows-server-iso__stage2__windows.yml` | PSScriptAnalyzer (Windows PS 5.1) + parse + read-only smoke modes | push, PR |
+| `scripts__powershell__update-windows-server-iso__stage3__synthetic.yml` | ADK install + full `-SyntheticTestMode` pipeline | push to `main`, manual |
+
+The workflows live at the repository root under
+[`.github/workflows/`](../../../.github/workflows/). Per-workflow
+change history lives in this project's
+[`CHANGELOG.md`](./CHANGELOG.md) (per the repository policy
+documented in the root [`SPEC.md`](../../../SPEC.md), §9).
+
+CRITICAL: Stage 3 NEVER uploads an ISO artifact. The evaluation
+licence forbids public distribution of Microsoft binaries.
+
+## Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| `Administrator privilege required` | Running as a non-elevated user | Re-launch PowerShell as Administrator |
+| `oscdimg.exe not found` | Windows ADK Deployment Tools not installed | Install the ADK Deployment Tools feature |
+| `Insufficient free space` | `-WorkRoot` drive has < 30 GB free | Move `-WorkRoot` to a larger volume |
+| `0x800f081e` in Warning lines | Patch not applicable to this SKU | Expected for cross-SKU patch sets; safe to ignore |
+| Stale WIM mount | Previous run crashed | Run `dism /Get-MountedImageInfo` and `dism /Cleanup-Mountpoints` |
+| ISO SHA-256 mismatch | Snapshot URL was rotated by Microsoft | Update `Config/<OsKey>.json` `IsoSha256` to the new value |
+
+## Acknowledgements
+
+- The DISM mount + dismount retry pattern (10 s + 30 s) is borrowed
+  from [OSDBuilder](https://github.com/OSDeploy/OSDBuilder) (David
+  Segura), specifically the `Dismount-InstallwimOS` helper.
+- The 0x800f081e suppression heuristic is also from OSDBuilder.
+- The three-tier `etfsboot.com` / `efisys.bin` fallback chain comes
+  from
+  [Win_ISO_Patching_Scripts_zhCN](https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN).
+- The Debug Trace Facility, logging conventions, environment-check
+  cmdlets, and retry primitives are reused verbatim from the
+  companion in-house script
+  [`Download-SpeakerDeck.ps1`](../download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1).
+- The canonical Server 2022 SHA-256 hash was sourced from
+  [rgl/windows-evaluation-isos-scraper](https://github.com/rgl/windows-evaluation-isos-scraper).
+
+This script was generated and iteratively refined with Anthropic
+Claude (Opus 4.7 era; baseline revision r01 on 2026-05-24).

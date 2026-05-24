@@ -1,0 +1,49 @@
+{
+  "$schema": "./schema.json",
+  "_comment": "Windows Server 2022 (build 20348). en-us SHA-256 is the rgl scraper canonical value.",
+  "OsKey": "Server2022",
+  "OsName": "Windows Server 2022 Datacenter",
+  "OsShortName": "WS2022",
+  "Build": 20348,
+  "Architecture": "x64",
+  "RequireSSUFirst": true,
+  "EnableInstallWimUpdate": true,
+  "EnableBootWimUpdate": true,
+  "EnableWinREUpdate": true,
+  "DotNetRequired": true,
+  "LCUExpandViaMum": false,
+  "RequireUefiCa2023Boot": false,
+  "BootWimIndexes": [1, 2],
+  "InstallWimIndexes": "all",
+  "ExpectedEditions": [
+    "Windows Server 2022 Standard",
+    "Windows Server 2022 Standard (Desktop Experience)",
+    "Windows Server 2022 Datacenter",
+    "Windows Server 2022 Datacenter (Desktop Experience)"
+  ],
+  "AutoDetectKnownGood": {
+    "AsOfDate": "2026-05-01",
+    "Note": "Placeholder; populated by Get-LatestServerUpdates in a future revision.",
+    "SsuKbId": "",
+    "LcuKbId": "",
+    "DotNetKbId": ""
+  },
+  "Languages": {
+    "en-us": {
+      "Lang": "en-us",
+      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2195280",
+      "IsoSnapshotUrl": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
+      "IsoSha256": "3e4fa6d8507b554856fc9ca6079cc402df11a8b79344871669f0251535255325",
+      "IsoExpectedSize": 5100000000,
+      "VolumeLabelPrefix": "WS2022EN"
+    },
+    "ja-jp": {
+      "Lang": "ja-jp",
+      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2195443",
+      "IsoSnapshotUrl": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_ja-jp.iso",
+      "IsoSha256": "(unknown - record on first download)",
+      "IsoExpectedSize": 5300000000,
+      "VolumeLabelPrefix": "WS2022JA"
+    }
+  }
+}

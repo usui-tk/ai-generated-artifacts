@@ -1,0 +1,50 @@
+{
+  "$schema": "./schema.json",
+  "_comment": "Windows Server 2025 (build 26100). LCUExpandViaMum is required because the LCU on 2025 ships as a MUM/CAB bundle. RequireUefiCa2023Boot reflects the 2025 Secure Boot CA rotation.",
+  "OsKey": "Server2025",
+  "OsName": "Windows Server 2025 Datacenter",
+  "OsShortName": "WS2025",
+  "Build": 26100,
+  "Architecture": "x64",
+  "RequireSSUFirst": true,
+  "EnableInstallWimUpdate": true,
+  "EnableBootWimUpdate": true,
+  "EnableWinREUpdate": true,
+  "DotNetRequired": true,
+  "LCUExpandViaMum": true,
+  "RequireUefiCa2023Boot": true,
+  "BootWimIndexes": [1, 2],
+  "InstallWimIndexes": "all",
+  "ExpectedEditions": [
+    "Windows Server 2025 Standard",
+    "Windows Server 2025 Standard (Desktop Experience)",
+    "Windows Server 2025 Datacenter",
+    "Windows Server 2025 Datacenter (Desktop Experience)",
+    "Windows Server 2025 Datacenter: Azure Edition"
+  ],
+  "AutoDetectKnownGood": {
+    "AsOfDate": "2026-05-01",
+    "Note": "Placeholder; populated by Get-LatestServerUpdates in a future revision.",
+    "SsuKbId": "",
+    "LcuKbId": "",
+    "DotNetKbId": ""
+  },
+  "Languages": {
+    "en-us": {
+      "Lang": "en-us",
+      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2289555",
+      "IsoSnapshotUrl": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1.240331-1435.ge_release_SERVER_EVAL_x64FRE_en-us.iso",
+      "IsoSha256": "(unknown - record on first download)",
+      "IsoExpectedSize": 6800000000,
+      "VolumeLabelPrefix": "WS2025EN"
+    },
+    "ja-jp": {
+      "Lang": "ja-jp",
+      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2289554",
+      "IsoSnapshotUrl": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1.240331-1435.ge_release_SERVER_EVAL_x64FRE_ja-jp.iso",
+      "IsoSha256": "(unknown - record on first download)",
+      "IsoExpectedSize": 7000000000,
+      "VolumeLabelPrefix": "WS2025JA"
+    }
+  }
+}

@@ -1,0 +1,166 @@
+# ============================================================================
+# CI workflow for scripts/powershell/update-windows-server-iso/
+# STAGE 3 - Windows synthetic full pipeline (ADK install +
+# -SyntheticTestMode -Execute end-to-end).
+#
+# Runs on release publication (release/published event) or manual dispatch.
+# Independent of the STAGE 1 -> 2 workflow_run chain.
+#
+# Performs an end-to-end pipeline run (P01 through P09) in
+# -SyntheticTestMode, exercising DISM mount, Add-WindowsPackage
+# (against a stub WIM), and oscdimg (against a stub bootable layout)
+# without touching any real Microsoft binary. This verifies the
+# integration of the DISM + oscdimg toolchain on a clean ADK install
+# in a way that cannot be done from Linux.
+#
+# CRITICAL: This workflow MUST NOT upload the produced ISO as an
+# artifact. The Microsoft Software Licence Terms for evaluation
+# binaries forbid public distribution. The -SyntheticTestMode pipeline
+# itself produces no Microsoft content, but we keep the no-upload
+# guarantee in place to prevent a future regression from accidentally
+# leaking evaluation content via CI artifacts.
+#
+# Governance: /SPEC.md
+# Change history: scripts/powershell/update-windows-server-iso/CHANGELOG.md
+# ============================================================================
+name: 'scripts/powershell/update-windows-server-iso - STAGE 3: Synthetic full pipeline'
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual run (e.g., "Re-validate after dependency change")'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uwsi-stage3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-synthetic:
+    # Fork PR guard: kept for consistency (release/dispatch events do not
+    # come from fork PRs, so this is formally always true here).
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-latest
+    # T3 - Heavy: 240 minutes (policy maximum, see /SPEC.md §4 [SPEC-CI-020])
+    # Rationale: ADK installer download (~1 GB, ~5 min), ADK install
+    # (~10 min), full -SyntheticTestMode pipeline including DISM
+    # mount + oscdimg (~5 min), plus buffer for transient network
+    # latency on the ADK download.
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Cache the ADK installer to avoid re-downloading ~1 GB ---
+      - name: '[ADK] Cache installer'
+        id: adk-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\AdkCache
+          key: adk-deploy-2024-v1
+
+      - name: '[ADK] Download Windows ADK installer (offline cache miss)'
+        if: steps.adk-cache.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path 'C:\AdkCache' -Force | Out-Null
+          # ADK 10.1.26100.1 (Windows 11 24H2 ADK)
+          $url = 'https://go.microsoft.com/fwlink/?linkid=2271337'
+          Invoke-WebRequest -Uri $url -OutFile 'C:\AdkCache\adksetup.exe' -UseBasicParsing
+
+      - name: '[ADK] Install Deployment Tools (offline)'
+        shell: powershell
+        run: |
+          $proc = Start-Process -FilePath 'C:\AdkCache\adksetup.exe' `
+              -ArgumentList '/quiet','/installpath','C:\ADK','/features','OptionId.DeploymentTools' `
+              -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+              Write-Error ("ADK installer returned exit code $($proc.ExitCode)")
+              exit 1
+          }
+          # Confirm oscdimg.exe is present in one of the documented locations
+          $candidates = @(
+              'C:\ADK\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe',
+              'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe',
+              'C:\Program Files\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
+          )
+          $found = $false
+          foreach ($c in $candidates) {
+              if (Test-Path -LiteralPath $c) {
+                  Write-Host ("oscdimg.exe found: $c")
+                  $found = $true; break
+              }
+          }
+          if (-not $found) {
+              Write-Error 'oscdimg.exe not found after ADK install.'
+              exit 1
+          }
+
+      # --- Full -SyntheticTestMode pipeline ---
+      - name: '[Synthetic] Run Update-WindowsServerIso.ps1 in -SyntheticTestMode (full)'
+        shell: powershell
+        timeout-minutes: 60
+        working-directory: scripts/powershell/update-windows-server-iso
+        run: |
+          # Sandbox + Synthetic: exercises the full path including DISM
+          # mount, Add-WindowsPackage simulation, oscdimg, P08 verify.
+          .\Update-WindowsServerIso.ps1 `
+              -Action PrepareBuildVerify `
+              -OsVersion Server2019 -OsLanguage en-us `
+              -SyntheticTestMode `
+              -SkipEnvCheck `
+              -WorkRoot 'C:\Temp\Workspace_UpdateWsi_CI' `
+              -Execute
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error ("Synthetic full pipeline exited $LASTEXITCODE")
+              exit $LASTEXITCODE
+          }
+
+      - name: '[Synthetic] Sanity-check that an output ISO exists (DO NOT upload)'
+        shell: powershell
+        run: |
+          $outDir = 'C:\Temp\Workspace_UpdateWsi_CI\output'
+          $isos = Get-ChildItem -LiteralPath $outDir -Filter '*.iso' -ErrorAction SilentlyContinue
+          if (-not $isos) {
+              Write-Error ("No output ISO found under $outDir")
+              exit 1
+          }
+          foreach ($i in $isos) {
+              Write-Host ("Output ISO (NOT uploaded): $($i.FullName) ($($i.Length) bytes)")
+          }
+
+      - name: '[Summary] Write Step Summary'
+        if: always()
+        shell: powershell
+        run: |
+          "## STAGE 3 - Synthetic full pipeline results" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "Full P01-P09 execution under -SyntheticTestMode -Execute." >> $env:GITHUB_STEP_SUMMARY
+          "Output ISO produced but NOT uploaded (evaluation licence)." >> $env:GITHUB_STEP_SUMMARY
+          "See the job log for the complete phase-by-phase output." >> $env:GITHUB_STEP_SUMMARY
+
+      # Artifact content minimization: see /SPEC.md §12 [SPEC-CI-081].
+      # Logs and diagnostic data ONLY - never the output ISO itself.
+      # The exclude rule below is belt-and-braces against a future
+      # regression where the path glob accidentally grows to cover
+      # the output/ folder.
+      - name: '[Artifacts] Upload diagnostic logs (NO ISO)'
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uwsi-stage3-${{ github.run_id }}
+          path: |
+            C:\Temp\Workspace_UpdateWsi_CI\logs\**
+            C:\Temp\Workspace_UpdateWsi_CI\diag\**
+            !C:\Temp\Workspace_UpdateWsi_CI\output\**
+            !**/*.iso
+          if-no-files-found: warn
+          retention-days: 14

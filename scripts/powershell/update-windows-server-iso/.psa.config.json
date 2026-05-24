@@ -1,0 +1,76 @@
+// psa.py latest mainline — project configuration for update-windows-server-iso
+//
+// Why PSAP0003 / PSAP0004 / PSAP0005 are enabled:
+//   This project's revision history is centralised in CHANGELOG.md per
+//   the repository-wide policy documented in the root README.md
+//   "Revision History Policy" section. PSAP0003 (inline revision-tag
+//   comments) and PSAP0004 (in-script REVISION HISTORY / CHANGELOG
+//   comment blocks) enforce that policy: any future commit that
+//   accumulates per-revision tags or history blocks inside the
+//   PowerShell sources will be flagged by the static-analysis gate.
+//
+//   PSAP0005 (revision reference in comment body — added in psa.py
+//   4.0.0) is the broader LLM-assisted-maintenance guardrail
+//   companion of PSAP0003. This project opts in to PSAP0005 in
+//   STRICT mode (default; psap0005_relaxed_mode is NOT set) because
+//   it is a new (r01) project with no historical per-revision
+//   comments to migrate.
+//
+// Why psa2010_known_cmdlets is populated:
+//   This script consumes cmdlets from Windows in-box modules that
+//   psa.py does not know about by default. Listing them here keeps
+//   PSA2010 (undefined function call) silent without disabling the
+//   rule globally. Modules covered:
+//
+//     - Dism            : Get/Mount/Dismount/Add-WindowsImage,
+//                         Add/Get/Remove-WindowsPackage,
+//                         Get/Enable/Disable-WindowsOptionalFeature,
+//                         Export-WindowsImage, New-WindowsImage
+//     - Storage         : Mount-DiskImage, Dismount-DiskImage,
+//                         Get-DiskImage
+//     - Hyper-V         : New-VHD, New-VM, Get-VM, Start-VM, Stop-VM,
+//                         Remove-VM, Set-VMProcessor, Set-VMMemory,
+//                         Set-VMFirmware, Add-VMDvdDrive,
+//                         Get-VMDvdDrive, Get-VMNetworkAdapter,
+//                         Remove-VMNetworkAdapter
+//
+// No PSAxxxx rule is disabled at project level. All findings are
+// addressed in the script source via either a fix or a line-local
+// `# psa-disable-line` comment with a justification.
+{
+  "enable": [
+    "PSAP0003",
+    "PSAP0004",
+    "PSAP0005"
+  ],
+  "disable": [],
+  "psa2010_known_cmdlets": [
+    "Get-WindowsImage",
+    "Mount-WindowsImage",
+    "Dismount-WindowsImage",
+    "Add-WindowsPackage",
+    "Get-WindowsPackage",
+    "Remove-WindowsPackage",
+    "Get-WindowsOptionalFeature",
+    "Enable-WindowsOptionalFeature",
+    "Disable-WindowsOptionalFeature",
+    "Export-WindowsImage",
+    "New-WindowsImage",
+    "Mount-DiskImage",
+    "Dismount-DiskImage",
+    "Get-DiskImage",
+    "New-VHD",
+    "New-VM",
+    "Get-VM",
+    "Start-VM",
+    "Stop-VM",
+    "Remove-VM",
+    "Set-VMProcessor",
+    "Set-VMMemory",
+    "Set-VMFirmware",
+    "Add-VMDvdDrive",
+    "Get-VMDvdDrive",
+    "Get-VMNetworkAdapter",
+    "Remove-VMNetworkAdapter"
+  ]
+}
