@@ -27,6 +27,83 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.24-r03.1] - 2026-05-24
+
+### Added - Stage 4 CI workflow: monthly baseline refresh
+
+A new GitHub Actions workflow,
+`.github/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml`,
+runs `-Action RefreshAllBaselines` on a schedule and opens an
+automated pull request whenever the `Config/Server*.json` baselines
+change. This completes the runtime story for r03's admin action:
+baseline maintenance now happens without any human invocation.
+
+Schedule: 02:00 UTC on the 15th of every month. Patch Tuesday is the
+second Tuesday (8th-14th of the month); waiting until the 15th gives
+Microsoft a 1-7 day window for late re-publications and Catalogue
+indexing to settle.
+
+Manual invocation: `workflow_dispatch` with four inputs:
+- `mode`         : Monthly / Initial / Force (default: Monthly)
+- `onlyOs`       : Server2016 / 2019 / 2022 / 2025 or blank for all
+- `onlyLanguage` : en-us / ja-jp or blank for all
+- `dryRun`       : true / false (default: false)
+
+The workflow accepts the PowerShell exit code semantics established
+in r03: 0 (clean) and 2 (some Manual fields remain) are treated as
+success; 1 (orchestrator failure) and anything else fails the run.
+
+PR contents:
+- Title: `chore(uwsi): monthly baseline refresh (run #<id>)`
+- Branch: `auto/uwsi-baseline-refresh-<id>` (deleted after merge)
+- Files: only `scripts/powershell/update-windows-server-iso/Config/*.json`
+- Labels: `automated`, `update-windows-server-iso`, `baseline-refresh`
+- Body includes the run parameters, exit code, modified-file list,
+  and a reviewer checklist for verifying combined-LCU flags and
+  PatchTuesdayOfBaseline correctness.
+
+Artefacts:
+- `A01_RefreshAllBaselines_report.csv` (per-group decision matrix)
+- `debugtrace.jsonl` (script-side trace)
+
+both uploaded to the workflow run with 30-day retention.
+
+A GitHub Actions step summary (`$env:GITHUB_STEP_SUMMARY`) is
+always written, even on failure, so the maintainer can see at a
+glance what happened without diving into logs.
+
+### Notes
+
+- The PowerShell script body itself is unchanged from r03; r03.1 is
+  purely an operations release. `ScriptVersion` is bumped to
+  `update-wsi-2026.05.24-r03.1` so workflow runs and PR commit
+  messages identify the operations level distinctly from r03.
+- `ScriptTag` is `stage4-monthly-refresh-ci`.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info.
+- PSScriptAnalyzer 1.25.0: 0 findings.
+- All existing smoke tests still pass.
+- YAML syntax validated via PyYAML (8 steps).
+
+### Compatibility
+
+- Pure additive change: a new file under `.github/workflows/`. The
+  three existing workflows (Stage 1 Linux / Stage 2 Windows / Stage 3
+  synthetic-pipeline) are untouched.
+
+### Out of scope (deferred to r04 onward)
+
+Per the "未実装機能の全体マップ" review, the next deliverables are:
+- r04: Microsoft-official servicing sequence compliance
+  (WIM-target-aware patch plan; LCU twice-apply; pre-apply
+   Get-WindowsPackage dependency closure check; WinRE servicing;
+   per-WIM AppliesTo metadata; Language Pack injection in P05).
+- r04.1: FoD (.NET 3.5) source detection and `-EnableDotNet35`.
+- r05: Supersedes-based superseded KB auto-removal; ISO-release
+  refresher; Python JSON Schema validator.
+
 ## [update-wsi-2026.05.24-r03] - 2026-05-24
 
 ### BREAKING - Config Schema v2.0 (no migration path)

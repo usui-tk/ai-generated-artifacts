@@ -1,0 +1,267 @@
+# ============================================================================
+# CI workflow for scripts/powershell/update-windows-server-iso/
+# STAGE 4 - Monthly Baseline Refresh.
+#
+# Runs `-Action RefreshAllBaselines` on a schedule (the 15th of every
+# month, three to six days after the second Tuesday "Patch Tuesday"
+# release window) and opens an automated pull request whenever the
+# resulting Config/Server*.json files differ from the committed
+# baseline. Also exposes workflow_dispatch for ad-hoc runs.
+#
+# This is the runtime counterpart of the r03 admin action that lets
+# baseline maintenance happen without any human intervention beyond
+# reviewing and merging the resulting PR. The PowerShell script is
+# unchanged; this workflow only invokes the existing -Action.
+#
+# Trigger summary:
+#   - schedule: 02:00 UTC on the 15th of every month
+#   - workflow_dispatch: ad-hoc with Mode / OnlyOs / OnlyLanguage /
+#                        DryRun inputs
+#
+# Governance: /SPEC.md
+# Change history: scripts/powershell/update-windows-server-iso/CHANGELOG.md
+# ============================================================================
+name: 'scripts/powershell/update-windows-server-iso - STAGE 4: Monthly Baseline Refresh'
+
+on:
+  schedule:
+    # 02:00 UTC on the 15th of every month. Patch Tuesday is the
+    # second Tuesday of the month (8-14 of month); waiting until the
+    # 15th gives Microsoft a 1-7 day window for late re-publications
+    # and Catalogue indexing to settle.
+    - cron: '0 2 15 * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Refresh mode'
+        required: false
+        default: 'Monthly'
+        type: choice
+        options:
+          - Monthly
+          - Initial
+          - Force
+      onlyOs:
+        description: 'Limit to one OS (leave blank for all)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - Server2016
+          - Server2019
+          - Server2022
+          - Server2025
+      onlyLanguage:
+        description: 'Limit to one language (leave blank for all)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - en-us
+          - ja-jp
+      dryRun:
+        description: 'Dry run (do not create a PR)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write          # required to push the auto-PR branch
+  pull-requests: write     # required to open the PR
+  actions: read
+
+concurrency:
+  group: uwsi-stage4-${{ github.ref }}
+  cancel-in-progress: false  # never cancel a baseline refresh midway
+
+jobs:
+  baseline-refresh:
+    # Fork PR guard for consistency with the other stages (workflow_dispatch
+    # from forks is normally not possible, but the guard enforces the
+    # project-wide invariant from /SPEC.md §5).
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # full history so the PR branch diff resolves cleanly
+          persist-credentials: true
+
+      - name: Resolve workflow_dispatch inputs (with cron defaults)
+        id: inputs
+        shell: pwsh
+        run: |
+          $mode         = if ('${{ github.event.inputs.mode }}'         -ne '') { '${{ github.event.inputs.mode }}' }         else { 'Monthly' }
+          $onlyOs       = '${{ github.event.inputs.onlyOs }}'
+          $onlyLanguage = '${{ github.event.inputs.onlyLanguage }}'
+          $dryRun       = if ('${{ github.event.inputs.dryRun }}'       -eq 'true') { 'true' } else { 'false' }
+
+          Write-Host "Mode         = $mode"
+          Write-Host "OnlyOs       = '$onlyOs'"
+          Write-Host "OnlyLanguage = '$onlyLanguage'"
+          Write-Host "DryRun       = $dryRun"
+
+          "mode=$mode"                 | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "onlyOs=$onlyOs"             | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "onlyLanguage=$onlyLanguage" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "dryRun=$dryRun"             | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Run -Action RefreshAllBaselines
+        id: refresh
+        shell: pwsh
+        run: |
+          # Build the argument splat from the resolved inputs.
+          $splat = @{
+            Action       = 'RefreshAllBaselines'
+            Mode         = '${{ steps.inputs.outputs.mode }}'
+            SkipEnvCheck = $true
+            WorkRoot     = 'C:\Temp\Workspace_UpdateWsi_Stage4'
+          }
+          if ('${{ steps.inputs.outputs.onlyOs }}'       -ne '') { $splat['OnlyOs']       = '${{ steps.inputs.outputs.onlyOs }}' }
+          if ('${{ steps.inputs.outputs.onlyLanguage }}' -ne '') { $splat['OnlyLanguage'] = '${{ steps.inputs.outputs.onlyLanguage }}' }
+          if ('${{ steps.inputs.outputs.dryRun }}'       -eq 'true') { $splat['DryRun'] = $true }
+
+          Write-Host '=== Splat passed to Update-WindowsServerIso.ps1 ==='
+          $splat | Format-Table -AutoSize | Out-String | Write-Host
+
+          $script = Join-Path $env:GITHUB_WORKSPACE 'scripts\powershell\update-windows-server-iso\Update-WindowsServerIso.ps1'
+          & $script @splat
+          $exitCode = $LASTEXITCODE
+          Write-Host "Update-WindowsServerIso.ps1 exit code: $exitCode"
+
+          # Allow exit codes 0 (clean) and 2 (some fields require
+          # manual fill, expected for the Iso group when no IsoRelease
+          # Refresher is available). Fail on exit code 1 (orchestrator
+          # error) or anything unexpected.
+          if ($exitCode -eq 0 -or $exitCode -eq 2) {
+            "exit-code=$exitCode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Error "RefreshAllBaselines failed with exit code $exitCode"
+            exit $exitCode
+          }
+
+      - name: Upload refresh artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: refresh-report-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            C:\Temp\Workspace_UpdateWsi_Stage4\logs\A01_RefreshAllBaselines_report.csv
+            C:\Temp\Workspace_UpdateWsi_Stage4\logs\debugtrace.jsonl
+
+      - name: Detect Config diffs
+        id: diff
+        shell: pwsh
+        run: |
+          $configRel = 'scripts/powershell/update-windows-server-iso/Config'
+          # `git diff --name-only` shows tracked-file modifications;
+          # `git ls-files --others --exclude-standard` shows newly
+          # untracked files. We care about either category.
+          $modified  = (& git -C $env:GITHUB_WORKSPACE diff --name-only -- $configRel) | Where-Object { $_ }
+          $untracked = (& git -C $env:GITHUB_WORKSPACE ls-files --others --exclude-standard -- $configRel) | Where-Object { $_ }
+          $allChanges = @($modified) + @($untracked) | Sort-Object -Unique
+
+          if ($allChanges.Count -eq 0) {
+            Write-Host 'No Config diffs detected; nothing to commit.'
+            "has-changes=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Host "Detected $($allChanges.Count) Config file change(s):"
+            $allChanges | ForEach-Object { Write-Host "  $_" }
+            "has-changes=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            # Emit the file list for the PR body
+            $fileList = ($allChanges | ForEach-Object { "- ``$_``" }) -join "`n"
+            $delim = "EOF_FILE_LIST_$([guid]::NewGuid().Guid)"
+            "file-list<<$delim" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            $fileList           | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            $delim              | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      - name: Show full diff (for log archival)
+        if: steps.diff.outputs.has-changes == 'true'
+        shell: pwsh
+        run: |
+          $configRel = 'scripts/powershell/update-windows-server-iso/Config'
+          Write-Host '=== git diff (full) ==='
+          & git -C $env:GITHUB_WORKSPACE diff -- $configRel
+          Write-Host ''
+          Write-Host '=== git status ==='
+          & git -C $env:GITHUB_WORKSPACE status -- $configRel
+
+      - name: Create Pull Request
+        if: >-
+          steps.diff.outputs.has-changes == 'true' &&
+          steps.inputs.outputs.dryRun != 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: auto/uwsi-baseline-refresh-${{ github.run_id }}
+          delete-branch: true
+          add-paths: |
+            scripts/powershell/update-windows-server-iso/Config/*.json
+          title: 'chore(uwsi): monthly baseline refresh (run #${{ github.run_id }})'
+          commit-message: |
+            chore(uwsi): monthly baseline refresh (auto)
+
+            Source: Stage 4 workflow run #${{ github.run_id }}
+            Mode  : ${{ steps.inputs.outputs.mode }}
+            ${{ steps.inputs.outputs.onlyOs && format('OnlyOs: {0}', steps.inputs.outputs.onlyOs) || '' }}
+            ${{ steps.inputs.outputs.onlyLanguage && format('OnlyLanguage: {0}', steps.inputs.outputs.onlyLanguage) || '' }}
+          body: |
+            ## Automated monthly baseline refresh
+
+            This pull request was opened automatically by the
+            [Stage 4 monthly-refresh workflow](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+            **Run parameters**
+            - Mode: `${{ steps.inputs.outputs.mode }}`
+            - OnlyOs: `${{ steps.inputs.outputs.onlyOs || '(all)' }}`
+            - OnlyLanguage: `${{ steps.inputs.outputs.onlyLanguage || '(all)' }}`
+            - DryRun: `${{ steps.inputs.outputs.dryRun }}`
+            - Update-WindowsServerIso.ps1 exit code: `${{ steps.refresh.outputs.exit-code }}` (0 = clean, 2 = unresolved fields remain)
+
+            **Files modified**
+            ${{ steps.diff.outputs.file-list }}
+
+            **Reviewer checklist**
+            - [ ] Confirm that each modified `PatchBaseline.NeutralPatches[]` entry has a populated `DownloadUrl` and a sensible `Title` (Microsoft Update Catalog UI [https://www.catalog.update.microsoft.com](https://www.catalog.update.microsoft.com))
+            - [ ] Confirm that combined-LCU months are correctly flagged (`IsCombined: true`) for Server 2022 / 2025
+            - [ ] Confirm that `PatchTuesdayOfBaseline` matches the second Tuesday of the target month
+            - [ ] Spot-check the `A01_RefreshAllBaselines_report.csv` workflow artifact
+
+            ---
+            *Workflow artefacts (CSV report + debug trace) are attached to the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts).*
+          labels: |
+            automated
+            update-windows-server-iso
+            baseline-refresh
+
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          $hadChanges = '${{ steps.diff.outputs.has-changes }}' -eq 'true'
+          $wasDryRun  = '${{ steps.inputs.outputs.dryRun }}'   -eq 'true'
+
+          $summary = @"
+          # Stage 4 Monthly Baseline Refresh — Run #${{ github.run_id }}
+
+          | Field           | Value |
+          | --------------- | ----- |
+          | Mode            | ``${{ steps.inputs.outputs.mode }}`` |
+          | OnlyOs          | ``${{ steps.inputs.outputs.onlyOs }}`` |
+          | OnlyLanguage    | ``${{ steps.inputs.outputs.onlyLanguage }}`` |
+          | DryRun          | ``${{ steps.inputs.outputs.dryRun }}`` |
+          | Exit code       | ``${{ steps.refresh.outputs.exit-code }}`` |
+          | Detected diffs  | ``$hadChanges`` |
+          | PR created      | ``$(if ($hadChanges -and -not $wasDryRun) { 'yes' } else { 'no' })`` |
+          "@
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append

@@ -344,20 +344,26 @@ The required gate before any commit is **0 errors / 0 warnings /
 
 ## Continuous integration
 
-Three GitHub Actions workflows verify this script on every push and
-pull request:
+Four GitHub Actions workflows verify and maintain this script:
 
 | Workflow file | Runs | Triggers |
 |---|---|---|
 | `scripts__powershell__update-windows-server-iso__stage1__linux.yml` | psa.py + PSScriptAnalyzer (pwsh 7 on Linux) | push, PR |
 | `scripts__powershell__update-windows-server-iso__stage2__windows.yml` | PSScriptAnalyzer (Windows PS 5.1) + parse + read-only smoke modes | push, PR |
 | `scripts__powershell__update-windows-server-iso__stage3__synthetic.yml` | ADK install + full `-SyntheticTestMode` pipeline | push to `main`, manual |
+| `scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml` | `-Action RefreshAllBaselines` then open auto-PR if `Config/Server*.json` changed | cron `0 2 15 * *` (monthly), manual |
 
 The workflows live at the repository root under
 [`.github/workflows/`](../../../.github/workflows/). Per-workflow
 change history lives in this project's
 [`CHANGELOG.md`](./CHANGELOG.md) (per the repository policy
 documented in the root [`SPEC.md`](../../../SPEC.md), §9).
+
+Stage 4 (monthly-refresh) supports `workflow_dispatch` with four
+inputs (`mode`, `onlyOs`, `onlyLanguage`, `dryRun`) so maintainers
+can trigger an ad-hoc refresh or limit the scope without editing the
+workflow. The opened PR is restricted via `add-paths` to
+`Config/*.json`, preventing accidental changes elsewhere.
 
 CRITICAL: Stage 3 NEVER uploads an ISO artifact. The evaluation
 licence forbids public distribution of Microsoft binaries.

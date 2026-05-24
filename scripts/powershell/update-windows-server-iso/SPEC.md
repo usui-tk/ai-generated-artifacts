@@ -608,6 +608,41 @@ The following must all pass before any commit to this project.
 - [ ] An output ISO file is produced under `<WorkRoot>/output/`.
 - [ ] **No ISO artifact is uploaded** by the CI job.
 
+### C.5b Monthly baseline refresh (runs on Windows; CI Stage 4) — r03.1+
+
+Stage 4 is an operations workflow that runs `-Action RefreshAllBaselines`
+on a `cron` schedule (the 15th of each month at 02:00 UTC, roughly
+3-7 days after Patch Tuesday) and on `workflow_dispatch`. Its job
+is to keep `Config/Server*.json` baselines in sync with the latest
+Microsoft Update Catalog state without manual maintainer effort.
+
+- [ ] Workflow file
+      `.github/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml`
+      is present and parses as valid YAML.
+- [ ] `cron: '0 2 15 * *'` is the only schedule entry.
+- [ ] `workflow_dispatch` accepts four inputs: `mode`, `onlyOs`,
+      `onlyLanguage`, `dryRun`. Cron uses the defaults (Monthly, all
+      OS, all languages, no DryRun).
+- [ ] On exit codes 0 (clean) and 2 (Manual fields remain) the
+      workflow proceeds to the diff-detect step.
+- [ ] On exit code 1 (orchestrator failure) the workflow fails the
+      run and does NOT open a PR.
+- [ ] When at least one `Config/Server*.json` file differs from the
+      committed baseline, an automated PR is opened on branch
+      `auto/uwsi-baseline-refresh-<run-id>` with title
+      `chore(uwsi): monthly baseline refresh (run #<run-id>)`.
+- [ ] PR `add-paths` restricts the diff to
+      `scripts/powershell/update-windows-server-iso/Config/*.json`
+      so an accidental change to other files cannot ride the auto-PR.
+- [ ] PR labels: `automated`, `update-windows-server-iso`,
+      `baseline-refresh`.
+- [ ] Artefacts uploaded for every run (success or failure):
+      `A01_RefreshAllBaselines_report.csv` and `debugtrace.jsonl`,
+      retention 30 days.
+- [ ] `$env:GITHUB_STEP_SUMMARY` is always populated so the run
+      page shows the mode / OnlyOs / OnlyLanguage / DryRun / exit
+      code / diff-detected / PR-created status at a glance.
+
 ### C.6 Documentation cross-checks
 
 - [ ] `README.md` and `README.ja.md` reference the same Disclaimer / License URLs.
@@ -819,7 +854,9 @@ Server SKU requires.
 | **M2** | `-AutoDetectLatestPatches` actually scrapes the Microsoft Update Catalogue (`Resolve-PatchSetFromCatalog`); writes Patch list back to `Config/<OsKey>.json#/PatchBaseline`; freshness gating via `Test-PatchBaselineFresh` | **Done (r02)** |
 | **M3** | P04.5 `ValidatePatchSet` integrating `wsusscn2.cab` + Windows Update Agent COM API for Microsoft-authoritative dependency check; 4-file diagnostic export on failure | **Done (r02)** |
 | M4 | Server 2025 `LCUExpandViaMum=true` real implementation (MUM/CAB expand path) | Placeholder |
-| M5 | Stage 4 CI workflow (`catalog-health`): monthly scheduled run that exercises `Resolve-PatchSetFromCatalog` and opens a PR with the resulting `Config/<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes within 30 days | Future |
+| **M5** | Stage 4 CI workflow (`monthly-refresh`): monthly scheduled run that exercises `-Action RefreshAllBaselines` and opens a PR with the resulting `Config/<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes and Patch Tuesday drift within ~30 days | **Done (r03.1)** |
+| M6 | Microsoft-official media-dynamic-update servicing sequence: WIM-target-aware patch plan (install/boot/winre per-target), LCU twice-apply around language-pack injection, pre-apply `Get-WindowsPackage` dependency closure check, Language Pack injection in P05 | Future (r04) |
+| M7 | Feature on Demand (.NET 3.5) source detection and `-EnableDotNet35` opt-in | Future (r04.1) |
 | M6 | Client SKUs (Windows 10/11) support — separate Config family | Future |
 | M7 | Driver / FOD / LXP / Appx customisation (OSBuild equivalent) | Future |
 | M8 | Output ISO size minimisation (`Export-WindowsImage` with `/Compress:max`) | Future |

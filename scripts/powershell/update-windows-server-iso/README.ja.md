@@ -336,20 +336,22 @@ python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.p
 
 ## 継続的インテグレーション
 
-3 つの GitHub Actions ワークフローが、push および pull request の
-たびに本スクリプトを検証します:
+4 つの GitHub Actions ワークフローが、本スクリプトの検証と保守を担当します:
 
 | ワークフローファイル | 実行内容 | トリガー |
 |---|---|---|
 | `scripts__powershell__update-windows-server-iso__stage1__linux.yml` | psa.py + PSScriptAnalyzer (Linux 上の pwsh 7) | push, PR |
 | `scripts__powershell__update-windows-server-iso__stage2__windows.yml` | PSScriptAnalyzer (Windows PS 5.1) + パース + 読み取り専用スモーク | push, PR |
 | `scripts__powershell__update-windows-server-iso__stage3__synthetic.yml` | ADK インストール + `-SyntheticTestMode` フルパイプライン | `main` への push, 手動 |
+| `scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml` | `-Action RefreshAllBaselines` を実行し、`Config/Server*.json` に差分があれば自動 PR を作成 | cron `0 2 15 * *`(毎月)、手動 |
 
 これらのワークフローはリポジトリ直下の
 [`.github/workflows/`](../../../.github/workflows/) にあります。
 ワークフロー単位の変更履歴は本プロジェクトの
 [`CHANGELOG.md`](./CHANGELOG.md) に記録します (ルート
 [`SPEC.md`](../../../SPEC.md) §9 で定められたリポジトリ全体の方針に従う)。
+
+Stage 4 (monthly-refresh) は `workflow_dispatch` で 4 つの入力(`mode`、`onlyOs`、`onlyLanguage`、`dryRun`)を受け付けるため、メンテナはワークフローを編集せずに任意のタイミングでスコープを限定した更新を実行できます。作成される PR は `add-paths` により `Config/*.json` のみに限定されており、他のファイルへの意図しない変更を防ぎます。
 
 **重要**: Stage 3 は ISO アーティファクトをアップロードしません。
 評価版ライセンスは Microsoft バイナリの公的再配布を禁じているためです。
