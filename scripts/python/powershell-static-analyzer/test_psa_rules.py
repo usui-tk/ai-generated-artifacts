@@ -384,6 +384,80 @@ t('PSA2009 inline-suppress: # psa-disable-line PSA2009 on the assignment line',
 
 
 # ---------------------------------------------------------------------------
+# PSA2009 — hashtable-Add + foreach indirect binding (added in 4.0.1)
+# ---------------------------------------------------------------------------
+# These cases exercise the Step 2c2 false-positive defence: when a foreach
+# loop-variable is bound indirectly through $Coll.Add(@{...}) + foreach,
+# it must NOT be flagged for PSA2009 (the element is a hashtable, which
+# supports free property addition).
+
+t('PSA2009 negative (4.0.1): foreach loopvar bound via $Coll.Add(@{...}) is hashtable',
+  'PSA2009',
+  '$pending = [pscustomobject]@{ State = 1 }\n'
+  '$jobs = New-Object System.Collections.ArrayList\n'
+  '[void]$jobs.Add(@{ Handle = $h })\n'
+  'foreach ($job in $jobs) { $job.Collected = $true }\n',
+  0)
+
+t('PSA2009 negative (4.0.1): [void]$Coll.Add(@{...}) with later foreach',
+  'PSA2009',
+  '$ctx = [pscustomobject]@{ Phase = 1 }\n'
+  '$queue = New-Object System.Collections.ArrayList\n'
+  '[void]$queue.Add(@{ Item = $x; Collected = $false })\n'
+  'foreach ($q in $queue) { $q.Collected = $true }\n',
+  0)
+
+t('PSA2009 negative (4.0.1): pipeline-derived collection ($newlyDone = $jobs | Where-Object)',
+  'PSA2009',
+  '$ctx = [pscustomobject]@{ Phase = 1 }\n'
+  '$jobs = New-Object System.Collections.ArrayList\n'
+  '[void]$jobs.Add(@{ Handle = $h; Collected = $false })\n'
+  '$newlyDone = $jobs | Where-Object { $_.Handle.IsCompleted }\n'
+  'foreach ($job in $newlyDone) { $job.Collected = $true }\n',
+  0)
+
+t('PSA2009 negative (4.0.1): .Where() method-derived collection',
+  'PSA2009',
+  '$ctx = [pscustomobject]@{ Phase = 1 }\n'
+  '$jobs = New-Object System.Collections.ArrayList\n'
+  '[void]$jobs.Add(@{ Handle = $h })\n'
+  '$pending = $jobs.Where({ -not $_.Collected })\n'
+  'foreach ($p in $pending) { $p.Collected = $true }\n',
+  0)
+
+t('PSA2009 negative (4.0.1): two-hop derivation ($a = $b | ...; $c = $a | ...)',
+  'PSA2009',
+  '$ctx = [pscustomobject]@{ Phase = 1 }\n'
+  '$jobs = New-Object System.Collections.ArrayList\n'
+  '[void]$jobs.Add(@{ State = 0 })\n'
+  '$filtered = $jobs | Where-Object { $true }\n'
+  '$selected = $filtered | Select-Object -First 1\n'
+  'foreach ($s in $selected) { $s.NewProp = 1 }\n',
+  0)
+
+t('PSA2009 negative (4.0.1): hashtable-Add with explicit [hashtable]@{...} cast',
+  'PSA2009',
+  '$ctx = [pscustomobject]@{ Phase = 1 }\n'
+  '$jobs = New-Object System.Collections.ArrayList\n'
+  '[void]$jobs.Add([hashtable]@{ Handle = $h })\n'
+  'foreach ($job in $jobs) { $job.NewProp = 1 }\n',
+  0)
+
+t('PSA2009 positive (4.0.1): $Coll.Add([pscustomobject]@{...}) does NOT trigger Step 2c2',
+  'PSA2009',
+  # When the collection holds a pscustomobject (not a hashtable), the
+  # element foreach variable should still be tracked. We initialise
+  # $job directly with [pscustomobject]@{...} elsewhere too so it
+  # remains in `declared`. The .Add([pscustomobject]@{...}) form is
+  # NOT a hashtable-Add by design (the @{ is preceded by a cast).
+  '$job = [pscustomobject]@{ Foo = 1 }\n'
+  '$jobs = New-Object System.Collections.ArrayList\n'
+  '[void]$jobs.Add([pscustomobject]@{ Foo = 2 })\n'
+  '$job.Bar = 3\n',
+  1)
+
+
+# ---------------------------------------------------------------------------
 # PSA2011 — Split-Path -LiteralPath ... -Parent (error, default ON, new in 3.9.0)
 # ---------------------------------------------------------------------------
 # PSA2011 is file-local; it does not require cross-file context, so we can

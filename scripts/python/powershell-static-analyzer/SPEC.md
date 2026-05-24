@@ -566,8 +566,9 @@ top of the script's identifier/state-initialisation block.
 - **Severity**: Warning
 - **Default**: enabled
 - **Added in**: v3.8.0
+- **Refined in**: v4.0.1 (Step 2c2 indirect-binding defence)
 
-**Detection**: The rule walks the file in four passes.
+**Detection**: The rule walks the file in five passes.
 
 1. **Initialiser pass.** Every top-level `$VarName = [pscustomobject]@{...}`
    initialiser is parsed brace-balanced (string-literal-aware), and the
@@ -582,17 +583,42 @@ top of the script's identifier/state-initialisation block.
    variable: `$Var | Add-Member ...` and
    `Add-Member -InputObject $Var ...`. This makes the rule compatible
    with the runtime-property-bag pattern.
-3. **Hashtable-form drop pass.** Any variable name that is *also* assigned
-   somewhere in the file with a plain hashtable literal
+3. **Hashtable-form drop pass (direct).** Any variable name that is
+   *also* assigned somewhere in the file with a plain hashtable literal
    (`$result = @{...}`, `$tbl = [ordered]@{...}`, or
    `$tbl = [hashtable]@{...}`) is conservatively *dropped* from
    tracking. This false-positive prevention is necessary because
    `psa.py` analysis is file-level rather than function-scope-aware,
    and the same local variable name may legitimately host both
    pscustomobject and hashtable shapes across different functions.
-4. **Assignment pass.** Every `$VarName.Property = ...` assignment site is
+4. **Hashtable-form drop pass (indirect, added in v4.0.1).** When a
+   variable is bound through the `$Coll.Add(@{...})` + `foreach (...) in $Coll`
+   pattern (common in PowerShell scripts that schedule parallel work
+   via `RunspacePool` / `ArrayList`), the foreach loop-variable is
+   *also* dropped from tracking. The rule traces pipeline and method
+   derivations to a fixed point, so the following idioms are all
+   recognised:
+
+   ```powershell
+   # Direct foreach over the .Add(@{...}) target:
+   [void]$jobs.Add(@{ Handle = $h; Collected = $false })
+   foreach ($job in $jobs) { $job.Collected = $true }       # safe
+
+   # Pipeline derivation:
+   $newlyDone = $jobs | Where-Object { $_.Handle.IsCompleted }
+   foreach ($job in $newlyDone) { $job.Collected = $true }  # safe
+
+   # LINQ-style method derivation (PS 5.1 `.Where()`, `.ForEach()`, `.Clone()`):
+   $pending = $jobs.Where({ -not $_.Collected })
+   foreach ($p in $pending) { $p.Collected = $true }        # safe
+   ```
+
+   The derivation step iterates to a fixed point with a hard cap (16
+   iterations) to handle multi-hop chains while remaining
+   computationally trivial for the typical script.
+5. **Assignment pass.** Every `$VarName.Property = ...` assignment site is
    checked against the declared set for `$VarName`. The rule fires when
-   `$VarName` survived the hashtable-form drop pass, the assignment
+   `$VarName` survived both hashtable-form drop passes, the assignment
    operator is exactly `=` (not `+=`, `-=`, `*=`, `/=`, or `==`), and
    `Property` is not in the declared set.
 
@@ -612,6 +638,16 @@ surfaces only at runtime, on the first phase that attempts the
 assignment, which is too late for long-lived pipeline scripts where
 the assignment site can be hundreds or thousands of lines from the
 initialiser block. PSA2009 closes this loop at static-analysis time.
+
+The Step 2c2 indirect-binding defence (v4.0.1) is motivated by a real
+false-positive observed in the `Download-SpeakerDeck.ps1` script:
+two `$job.Collected = $true` lines on a `foreach ($job in $newlyDone)`
+loop fired PSA2009 because the file *also* declared an unrelated
+`$job = [PSCustomObject]@{...}` sealed object in a different function,
+and the file-level tracking conflated the two `$job` names. The
+indirect-binding detector teaches PSA2009 that "$job" in the foreach
+loop is bound to a hashtable element of `$jobs`, not to the
+pscustomobject, and therefore must not be flagged.
 
 **Suggested fix**: Add the missing `PropName = $null` declaration to
 the `[pscustomobject]@{...}` initialiser. If the assignment is to an

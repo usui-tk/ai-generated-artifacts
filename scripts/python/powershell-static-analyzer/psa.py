@@ -142,7 +142,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '4.0.0'
+__version__ = '4.0.1'
 
 
 def _verify_version_file_consistency():
@@ -2104,6 +2104,13 @@ def check_pscustomobject_undeclared(clean):
       union of all declarations is treated as the live property set.
       This is intentionally permissive; over-broad declaration is
       better than over-strict warnings.
+    - **Indirect hashtable binding via collection-Add + foreach** is
+      recognised since v4.0.1: when a variable is bound through the
+      ``$Coll.Add(@{ ... })`` + ``foreach ($x in $Coll)`` pattern
+      (common in PowerShell scripts that schedule parallel work via
+      RunspacePool / ArrayList), the foreach loop-variable is treated
+      as hashtable-bearing and excluded from PSCustomObject tracking.
+      See Step 2c2 inside this function for the heuristic.
     - Inline suppression on the assignment line works the usual way:
       ``$Ctx.OptIn = $value # psa-disable-line PSA2009``.
     """
@@ -2183,6 +2190,100 @@ def check_pscustomobject_undeclared(clean):
         seg = clean[m.start():m.end()]
         if not pscustom_pat.search(seg):
             hashtable_names.add(m.group('name').lower())
+
+    # ----- Step 2c2 (added in v4.0.1): also drop variable names that
+    # are bound through the indirect "$Coll.Add(@{...}) + foreach"
+    # pattern. PowerShell scripts that schedule parallel work via
+    # RunspacePool / ArrayList commonly write code like:
+    #
+    #     [void]$jobs.Add(@{ PS = $ps; Handle = $h; Collected = $false })
+    #     ...
+    #     foreach ($job in $jobs) {
+    #         $job.Collected = $true   # <-- legal on a hashtable
+    #     }
+    #
+    # Here $job is bound to a hashtable element of $jobs, not to a
+    # [pscustomobject], so $job.NewProp = ... is safe at runtime. The
+    # Step 2c direct-form detector (above) cannot see this because the
+    # binding is indirect (via $jobs.Add(@{...}) + foreach loop-var).
+    # Step 2c2 fills that gap.
+    #
+    # Algorithm:
+    #   1. Find every $Coll.Add(@{...}) site and remember $Coll as a
+    #      "hashtable-bearing collection". The Add can be qualified
+    #      with [void], $null = ..., or stand alone; the regex
+    #      anchors only on $Coll.Add(@{... so all surface forms hit.
+    #   2. Find every foreach ($loopvar in $Coll) construct where
+    #      $Coll is hashtable-bearing, and add $loopvar to
+    #      hashtable_names so it is dropped from PSCustomObject
+    #      tracking.
+    #
+    # We deliberately stay surface-level (no type inference) because
+    # PowerShell is dynamically typed and the heuristic only needs to
+    # be right often enough to clear the common patterns. False
+    # negatives (a [pscustomobject] genuinely added to a collection)
+    # are caught by the regular Step 2 declared-property check on the
+    # original initialiser site; this Step 2c2 only widens the
+    # "considered hashtable" set, never narrows it.
+    indirect_hash_pat = re.compile(
+        r'\$(?P<coll>[A-Za-z_]\w*)\.Add\s*\(\s*'
+        r'(?:\[(?:hashtable|ordered)\]\s*)?@\{',
+        re.IGNORECASE)
+    hashtable_bearing_colls = set()
+    for m in indirect_hash_pat.finditer(clean):
+        # Reject if the @{...} is actually a [pscustomobject] cast.
+        # The indirect form would then be $Coll.Add([pscustomobject]@{...})
+        # and the .Add(@{...) prefix above would not match. So we are
+        # safe; no further check needed.
+        hashtable_bearing_colls.add(m.group('coll').lower())
+
+    # Step 2c2 (derivation): a hashtable-bearing collection that is
+    # filtered or projected through a pipeline / LINQ-style method
+    # still yields hashtable elements:
+    #
+    #     $newlyDone = $jobs | Where-Object { -not $_.Collected }
+    #     $pending   = $jobs.Where({ -not $_.Collected })
+    #     $snapshot  = $jobs.Clone()
+    #
+    # Propagate the hashtable-bearing label across these derivations
+    # to a fixed point. The set is small (typically 1–3 names) so
+    # the inner re-scan is cheap.
+    deriv_pat = re.compile(
+        r'\$(?P<dst>[A-Za-z_]\w*)\s*=\s*\$(?P<src>[A-Za-z_]\w*)'
+        r'(?:\s*\|'                              # pipeline:    $X = $Y | ...
+        r'|\s*\.(?:Where|ForEach|Clone)\s*\('   # LINQ method: $X = $Y.Where(...)
+        r')',
+        re.IGNORECASE)
+    if hashtable_bearing_colls:
+        changed = True
+        # Cap the fixed-point loop to avoid pathological scripts.
+        for _ in range(16):
+            if not changed:
+                break
+            changed = False
+            for m in deriv_pat.finditer(clean):
+                src = m.group('src').lower()
+                dst = m.group('dst').lower()
+                if src in hashtable_bearing_colls and dst not in hashtable_bearing_colls:
+                    hashtable_bearing_colls.add(dst)
+                    changed = True
+
+    if hashtable_bearing_colls:
+        foreach_pat = re.compile(
+            r'foreach\s*\(\s*\$(?P<loopvar>[A-Za-z_]\w*)\s+in\s+'
+            r'\$(?P<coll>[A-Za-z_]\w*)',
+            re.IGNORECASE)
+        for m in foreach_pat.finditer(clean):
+            if m.group('coll').lower() in hashtable_bearing_colls:
+                hashtable_names.add(m.group('loopvar').lower())
+        # We also need to recognise pipeline-bound iteration:
+        #   $jobs | Where-Object { ... -not $_.Collected ... }
+        #   $jobs | ForEach-Object { $_.NewProp = ... }
+        # The loop variable is $_ here, which is already in the
+        # skip_targets set inside Step 3+4, so we do not need to add
+        # it to hashtable_names explicitly. The skip_targets handling
+        # makes this scenario safe by construction.
+
     for name in hashtable_names:
         if name in declared:
             declared.pop(name, None)

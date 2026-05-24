@@ -52,6 +52,107 @@ changes (documentation policy, sister scripts, etc.), see the root
   "see `psa.py --list-rules`" or parameterised against
   `len(RULES)`.
 
+## [4.0.1] — 2026-05-25 — `psa2009-indirect-binding-defence`
+
+This patch release adds a false-positive defence to `PSA2009`
+(PSCustomObject property assigned without prior declaration). It is
+**backward-compatible** with `4.0.0`: no existing behaviour changes,
+no new rule is added, no configuration key is introduced. Only the
+detection logic of `PSA2009` is widened to suppress an additional
+class of false positives that surfaces in PowerShell scripts that
+schedule parallel work via `RunspacePool` + `ArrayList`.
+
+### Motivation
+
+`PSA2009` performs file-level tracking of variables initialised with
+`[pscustomobject]@{...}`. The same variable name can legitimately
+host both a sealed pscustomobject and a hashtable across different
+functions in the same script — Step 2c of the 3.8.0 detector
+recognises this **only** for *direct* initialisations
+(`$var = @{...}`). Indirect initialisations through collection-Add
++ foreach loop binding were not yet recognised, leading to false
+positives like:
+
+```powershell
+$job = [pscustomobject]@{ Foo = 1 }    # unrelated sealed object
+$jobs = New-Object System.Collections.ArrayList
+[void]$jobs.Add(@{ Handle = $h })      # $jobs holds hashtables
+$newlyDone = $jobs | Where-Object { $_.Handle.IsCompleted }
+foreach ($job in $newlyDone) {
+    $job.Collected = $true             # safe (hashtable add), but
+                                       # PSA2009 v4.0.0 flagged this
+                                       # as undeclared on the sealed $job
+}
+```
+
+This pattern fires exactly twice on `Download-SpeakerDeck.ps1` in
+the sister `usui-tk/ai-generated-artifacts` project (Phase 4 and
+Phase 6 reaper loops). With 4.0.1, both warnings clear and the
+script's `0 errors / 0 warnings / 0 info` baseline is restored.
+
+### Changed
+
+- **`PSA2009` Step 2c2 (new)** — recognises foreach loop-variables
+  that are bound indirectly through `$Coll.Add(@{...})` + later
+  `foreach (...) in $Coll` and treats them as hashtable elements,
+  not as pscustomobject elements.
+
+- **Pipeline / method derivation tracking** — when a hashtable-bearing
+  collection is filtered or projected through a pipeline
+  (`$X = $jobs | Where-Object {...}`) or LINQ-style method
+  (`$X = $jobs.Where({...})`, `$X = $jobs.Clone()`), the derived
+  collection is *also* labelled as hashtable-bearing. The
+  propagation runs to a fixed point with a 16-iteration cap.
+
+- **`SPEC.md` §4.9c (`PSA2009`)** — the rule walk now describes
+  five passes instead of four. The new pass 4 ("Hashtable-form drop
+  pass (indirect)") documents the v4.0.1 detector and gives three
+  concrete idioms that are now correctly *not* flagged. The
+  motivation paragraph names the `Download-SpeakerDeck.ps1`
+  false-positive as the trigger for the addition.
+
+### Added
+
+- **`test_psa_rules.py`** — seven new test cases under "PSA2009 —
+  hashtable-Add + foreach indirect binding (added in 4.0.1)":
+
+  - Direct `$Coll.Add(@{...})` + foreach.
+  - `[void]$Coll.Add(@{...})` with later foreach.
+  - Pipeline-derived collection (`$newlyDone = $jobs | Where-Object`).
+  - `.Where()` method-derived collection.
+  - Two-hop derivation chain.
+  - `$Coll.Add([hashtable]@{...})` explicit cast form.
+  - Positive control: `$Coll.Add([pscustomobject]@{...})` does **not**
+    trigger the new defence (the cast signals a sealed object, not a
+    hashtable element).
+
+  Total test count: `213 → 220` (all passing).
+
+### Fixed
+
+- **False positive on `Download-SpeakerDeck.ps1` lines 3267 and 4037**
+  (the original motivating example). Verified manually after the
+  Step 2c2 addition; the upstream consumer's CHANGELOG documents
+  the corresponding script-side adoption as `r27 —
+  psa-py-v4-llm-governance-baseline`.
+
+### Backward compatibility
+
+- **Rules registry**: unchanged at **46 rules**. No new rule code.
+- **Configuration schema**: unchanged. No new keys; no removed keys.
+- **CLI surface**: unchanged. No new flags.
+- **SemVer impact**: PATCH increment per SPEC.md §1.4 (bug-fix /
+  internal-defence-tightening with no public-API change).
+
+### Migration
+
+No action required for any consumer. Repositories that hit the
+PSA2009 false positive will see their `0/0/0` baseline restored
+automatically on upgrade from `4.0.0` to `4.0.1`. Repositories that
+were *not* affected see no change.
+
+---
+
 ## [4.0.0] — 2026-05-25 — `llm-governance-baseline`
 
 This is the first major version since `psa.py` 2.0.0. It is a
