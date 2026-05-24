@@ -279,6 +279,9 @@ optional column, and a short message.
 |:---|:---:|:---:|:---|
 | **PSAP0001** | Warning | ⛔ off (opt-in) | Phase function naming convention: `Invoke-(Prep\|Verify\|Inst)PhaseNN_DescriptiveName`. Fires only on functions whose names start with `Invoke-(Prep\|Verify\|Inst\|Phase\|Pipeline)` but do not match the canonical regex. |
 | **PSAP0002** | Warning | ⛔ off (opt-in) | Required script-identifier variables: `$Script:ScriptVersion`, `$Script:ScriptHash`, `$Script:ScriptShortTag`. One PSAP0002 emitted per missing identifier. |
+| **PSAP0003** | Warning | ⛔ off (opt-in) | Inline revision-tag comment (e.g., `# r42:`, `# r56+:`, `# (r42)`, `# ---- r42: ----`). New in 3.3.0. Per-revision history belongs in CHANGELOG.md. |
+| **PSAP0004** | Warning | ⛔ off (opt-in) | End-of-file `REVISION HISTORY` / `CHANGELOG` comment block in the script body. New in 3.3.0. Such blocks duplicate CHANGELOG.md and drift over time. |
+| **PSAP0005** | Warning | ⛔ off (opt-in) | Revision reference in comment body — any `rNN` mention, beyond PSAP0003's structured tag forms. New in 4.0.0. The broader LLM-assisted-maintenance guardrail. Set `psap0005_relaxed_mode: true` for migration mode with four prose exemptions (SECTION header, SPEC cross-reference, Added-in-release phrasing, Earlier-revisions prose). See SPEC §4.37. |
 
 ### Why some rules are disabled by default
 

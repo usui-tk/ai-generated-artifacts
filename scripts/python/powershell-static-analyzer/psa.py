@@ -142,7 +142,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '3.9.0'
+__version__ = '4.0.0'
 
 
 def _verify_version_file_consistency():
@@ -338,6 +338,8 @@ RULES = [
      'Inline revision-tag comment (# rNN: ... / # rNN+: ... / # (rNN) ...)'),
     ('PSAP0004', 'warning', False,
      'End-of-file REVISION HISTORY / CHANGELOG comment block in script body'),
+    ('PSAP0005', 'warning', False,
+     'Revision reference in comment body (any rNN mention, beyond PSAP0003 inline tags)'),
 ]
 
 CODE_TO_RULE = {r[0]: r for r in RULES}
@@ -3218,6 +3220,192 @@ _INLINE_REVISION_TAG_BODY_PATS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# PSAP0005 — Revision reference in comment body
+# ---------------------------------------------------------------------------
+#
+# Design philosophy (psa.py 4.0.0):
+#
+# PSAP0005 is the LLM-assisted maintenance guardrail. While PSAP0003
+# catches structured tag forms (# r42:, # (r42), # ---- r42: ----),
+# PSAP0005 catches the broader pattern of ANY rNN reference in a
+# comment body — the "Added in the r71 release", "As of r74, ...",
+# "Earlier revisions (before chipset r74)" style of prose that
+# accumulates naturally when LLMs are asked to "explain what changed"
+# at each revision.
+#
+# The single source of truth for revision-anchored prose is:
+#   - CHANGELOG.md for chronological release notes
+#   - SPEC.md Part D for architectural rationale (root cause / fix
+#     design / scope / upgrade impact)
+#
+# Script bodies should describe CURRENT behaviour with timeless
+# language ("Previously / Now / no-anchor wording" per consumer
+# SPEC §A.13).
+#
+# Default behaviour (strict mode):
+#   ANY rNN inside a comment body fires PSAP0005, except:
+#     - rNN inside a string literal (not a comment)
+#     - lines already flagged by PSAP0003 (deduplication)
+#     - rNN inside a block comment <# ... #> (out of scope for the
+#       inline-comment scanner, same as PSAP0003/PSAP0004)
+#
+# Relaxed mode (psap0005_relaxed_mode: true):
+#   Four established prose patterns are exempted, for repositories
+#   migrating from a legacy revision-tagging convention:
+#     A. SECTION header: # SECTION rNN: ... / # === SECTION rNN: ===
+#     B. SPEC cross-reference: (rNN, SPEC §D.YY) / (rNN, SPEC D.YY)
+#     C. Added-in-release phrasing:
+#          (added|introduced|landed|ported) (in|with) (the )? (...) rNN
+#     D. Earlier-revisions prose:
+#          (earlier|previous|prior) (revisions|releases) ... rNN
+#
+# The relaxed mode is intended for migration. Repositories aiming for
+# full revision-discipline compliance should set it to false (the
+# default) and clean up exempted patterns release-by-release.
+#
+
+# Any standalone rNN token (case-insensitive, word-bounded so that
+# 'fr2018' or 'r' alone does not match). Hyphen is included in the
+# boundary set so that compound identifiers like 'radeon-r9000-series'
+# or product names with embedded rNN are not flagged.
+_REVISION_REF_PATTERN = re.compile(
+    r'(?<![A-Za-z0-9_\-])r\d+(?![A-Za-z0-9_\-])',
+    re.IGNORECASE,
+)
+
+# Exemption A: SECTION header
+_EXEMPT_SECTION_HEADER = re.compile(
+    r'^#\s*[=#\-*]*\s*SECTION\s+(?:\(\s*)?r\d+',
+    re.IGNORECASE,
+)
+
+# Exemption B: SPEC cross-reference of the form (rNN, SPEC ...) or
+# (rNN, SPEC §D.YY) or (rNN, SPEC D.YY).
+# Bare-comment form match is intentionally permissive — the cross-
+# reference can sit anywhere inside the comment body.
+_EXEMPT_SPEC_CROSS_REF = re.compile(
+    r'r\d+\s*,\s*SPEC\s+§?\s*D\.\d',
+    re.IGNORECASE,
+)
+
+# Exemption C: Established "added/introduced/landed/ported in/with
+# the rNN release" phrasing (the form codified in consumer SPEC
+# §D.31 and reused throughout the chipset/graphics/bthpan helpers).
+# Allow an optional 'this-script-name' word between the connective
+# and the revision token to permit phrasings like 'landed in chipset
+# r74 / graphics r40 / bthpan r22'.
+_EXEMPT_ADDED_IN_PHRASING = re.compile(
+    r'\b(?:added|introduced|landed|ported)\s+'
+    r'(?:in|with)\s+'
+    r'(?:the\s+)?'
+    r'(?:[A-Za-z]+\s+)?'
+    r'r\d+',
+    re.IGNORECASE,
+)
+
+# Exemption D: "Earlier revisions" / "Previous releases" / "Prior to
+# rNN" prose anchor (descriptive comparison rather than tag).
+_EXEMPT_EARLIER_REVISIONS = re.compile(
+    r'\b(?:earlier|previous|prior(?:\s+to)?)\s+'
+    r'(?:revisions?|releases?)'
+    r'.*?r\d+',
+    re.IGNORECASE,
+)
+
+
+def _comment_is_exempt(comment_text, relaxed_mode):
+    """Return True if *comment_text* (a comment body starting with #)
+    is exempt from PSAP0005 under the current mode.
+
+    In strict mode (relaxed_mode=False) no comment is exempt.
+    In relaxed mode the four exemption patterns A/B/C/D are applied.
+    """
+    if not relaxed_mode:
+        return False
+    if _EXEMPT_SECTION_HEADER.search(comment_text):
+        return True
+    if _EXEMPT_SPEC_CROSS_REF.search(comment_text):
+        return True
+    if _EXEMPT_ADDED_IN_PHRASING.search(comment_text):
+        return True
+    if _EXEMPT_EARLIER_REVISIONS.search(comment_text):
+        return True
+    return False
+
+
+def check_revision_anchor_prose(text, clean, relaxed_mode, psap0003_lines):
+    """PSAP0005: any revision reference in a comment body.
+
+    Walks every inline comment (using the same comment-start scanner
+    as PSAP0003 / PSAP0004) and reports the first ``rNN`` occurrence
+    on each line, except when:
+
+      - the line is already reported by PSAP0003 (de-duplication)
+      - the comment body matches an exemption pattern under
+        relaxed_mode=True
+
+    Parameters
+    ----------
+    text : str
+        Source text (with strings preserved).
+    clean : str
+        Source text with string literals blanked out. Not used here
+        (the comment scanner already excludes strings), but kept for
+        signature consistency with sibling check functions.
+    relaxed_mode : bool
+        When True, apply the four exemption patterns (SECTION header,
+        SPEC cross-reference, Added-in-release phrasing, Earlier-
+        revisions prose). When False, every rNN comment reference
+        fires.
+    psap0003_lines : set[int]
+        Line numbers (1-based) already reported by PSAP0003 on this
+        file. Used to de-duplicate (PSAP0003 owns those lines).
+    """
+    del clean  # signature-only, retained for symmetry
+    out = []
+    seen_lines = set()
+
+    comment_starts = _comment_start_positions(text)
+
+    for hash_pos in comment_starts:
+        nl = text.find('\n', hash_pos)
+        if nl == -1:
+            comment_text = text[hash_pos:]
+        else:
+            comment_text = text[hash_pos:nl]
+        ln_no = text.count('\n', 0, hash_pos) + 1
+
+        # De-duplicate against PSAP0003.
+        if ln_no in psap0003_lines:
+            continue
+
+        # Find the first rNN occurrence in the comment body.
+        m = _REVISION_REF_PATTERN.search(comment_text)
+        if not m:
+            continue
+
+        # Apply relaxed-mode exemptions, if any.
+        if _comment_is_exempt(comment_text, relaxed_mode):
+            continue
+
+        if ln_no in seen_lines:
+            continue
+        seen_lines.add(ln_no)
+
+        out.append({
+            'severity': 'warning', 'code': 'PSAP0005',
+            'line': ln_no, 'col': 0,
+            'message': (
+                f"revision reference '{m.group(0)}' in comment body; "
+                f"script bodies should describe current behaviour with "
+                f"timeless wording. Revision-anchored prose belongs in "
+                f"CHANGELOG.md (chronological log) or SPEC.md Part D "
+                f"(architectural rationale). See PSAP0005."),
+        })
+    return sorted(out, key=lambda i: i['line'])
+
+
 def check_revision_history_block(text, clean):
     """PSAP0004: end-of-file REVISION HISTORY / CHANGELOG comment block.
 
@@ -3606,6 +3794,7 @@ _CONFIG_ALLOWED_KEYS = frozenset({
     'max_function_lines',
     'psa8001_ignore_functions',
     'psa2010_known_cmdlets',
+    'psap0005_relaxed_mode',
 })
 
 _CONFIG_LIST_OF_STR_KEYS = frozenset({
@@ -3618,6 +3807,10 @@ _CONFIG_LIST_OF_STR_KEYS = frozenset({
 _CONFIG_INT_KEYS = frozenset({
     'max_line_length',
     'max_function_lines',
+})
+
+_CONFIG_BOOL_KEYS = frozenset({
+    'psap0005_relaxed_mode',
 })
 
 
@@ -3759,6 +3952,19 @@ def _validate_config_data(cfg_path, data):
                             f'"psa8001_ignore_functions"[{i}] regex '
                             f'pattern "{pattern}" failed to compile: {e}'),
                     })
+
+    # 8. boolean keys
+    for k in _CONFIG_BOOL_KEYS:
+        if k not in data:
+            continue
+        v = data[k]
+        if not isinstance(v, bool):
+            add({
+                'severity': 'error',
+                'message': (
+                    f'"{k}" must be a boolean '
+                    f'(got {type(v).__name__})'),
+            })
 
     return issues
 
@@ -3952,6 +4158,19 @@ class Config:
         # Storage, Archive, WindowsCapability, ConfigCI (WDAC),
         # International, and WSMan.
         self.psa2010_known_cmdlets = []
+        # PSAP0005 relaxed-mode flag. When True, four established
+        # prose patterns are exempted from PSAP0005:
+        #   A. SECTION header   (# SECTION rNN: ...)
+        #   B. SPEC cross-ref   ((rNN, SPEC §D.YY))
+        #   C. Added-in-release ((added|introduced|landed|ported)
+        #                        (in|with) (the )? rNN)
+        #   D. Earlier-revisions ((earlier|previous|prior) (revisions|
+        #                         releases) ... rNN)
+        # Default is False (strict): any rNN reference in a comment
+        # body fires PSAP0005. Repositories migrating from a legacy
+        # revision-tagging convention can set this to True during
+        # migration and clean up exempted patterns release-by-release.
+        self.psap0005_relaxed_mode = False
         self.min_severity = 'info'
         self.format = 'text'
         self.no_color = False
@@ -4013,6 +4232,15 @@ class Config:
                 else:
                     print(f'psa.py: psa2010_known_cmdlets must be a '
                           f'list (got {type(v).__name__})',
+                          file=sys.stderr)
+                    raise SystemExit(2)
+            if 'psap0005_relaxed_mode' in data:
+                v = data['psap0005_relaxed_mode']
+                if isinstance(v, bool):
+                    c.psap0005_relaxed_mode = v
+                else:
+                    print(f'psa.py: psap0005_relaxed_mode must be a '
+                          f'boolean (got {type(v).__name__})',
                           file=sys.stderr)
                     raise SystemExit(2)
         # 2) CLI args (highest priority)
@@ -4166,10 +4394,16 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_phase_naming(clean)
     if cfg.enabled['PSAP0002']:
         raw += check_required_script_identifiers(clean)
+    psap0003_lines = set()
     if cfg.enabled['PSAP0003']:
-        raw += check_inline_revision_tag(text, clean)
+        psap0003_issues = check_inline_revision_tag(text, clean)
+        raw += psap0003_issues
+        psap0003_lines = {i['line'] for i in psap0003_issues}
     if cfg.enabled['PSAP0004']:
         raw += check_revision_history_block(text, clean)
+    if cfg.enabled['PSAP0005']:
+        raw += check_revision_anchor_prose(
+            text, clean, cfg.psap0005_relaxed_mode, psap0003_lines)
 
     # Inline suppression
     file_supp, line_supp = collect_suppressions(text)

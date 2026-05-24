@@ -168,6 +168,43 @@ development cycle, re-evaluate the `enable` list against the latest
 repository root [`README.md`](../../../README.md) section
 "psa.py Versioning Policy".
 
+### 1.5 Design philosophy — psa.py as an LLM-assisted maintenance guardrail
+
+Beyond the formal definition above, `psa.py` exists for a specific
+operational reason: to enforce invariants that human authors uphold
+naturally but that LLM-assisted code generation systematically erodes.
+The rule families are organised around the failure modes most common
+in LLM-assisted maintenance of long-running PowerShell repositories.
+
+The mapping between failure mode and enforcement rule is:
+
+| Failure mode (LLM tendency)                              | Rule family enforcing it |
+| -------------------------------------------------------- | ------------------------ |
+| "Helpfully" adds historical context (`# r74: ...`)       | PSAP0003                 |
+| "Helpfully" adds EOF revision history blocks             | PSAP0004                 |
+| **Adds revision-anchored prose in comments (any rNN)**   | **PSAP0005 (new in 4.0.0)** |
+| Silently changes shared helper bodies across files       | PSA8001                  |
+| Emits LF-only / no-BOM `.ps1` when generating from py    | PSA7001, PSA7002         |
+| Invents non-existent cmdlets / functions                 | PSA2010                  |
+| Uses locale-dependent constructs (Split-Path ja-JP)      | PSA2011                  |
+| Drops `[pscustomobject]` sealed-object semantics         | PSA2009                  |
+
+Two rule policies follow from this:
+
+- **Language-correctness rules** (PSA1xxx–PSA9xxx, non-project-specific)
+  default to **on** because they encode language-level invariants any
+  PowerShell author should respect.
+- **Project-convention rules** (PSAPxxxx) default to **off** because
+  they encode governance policies that a repository must explicitly
+  adopt. Once opted in via `.psa.config.json`, they become
+  contractual.
+
+For consumers that explicitly position `psa.py` as the LLM-governance
+gate for their repository, the recommended baseline is to enable all
+four `PSAPxxxx` rules, and to commit to `psap0005_relaxed_mode: false`
+as the eventual state (with a documented migration plan if started
+under `true`).
+
 ---
 
 ## 2. Architecture
@@ -1460,6 +1497,23 @@ literals are not matched. The rule treats `$Script:ScriptVersion =
 'chipset-2026.05.18-r60'` and similar **non-comment** uses of `rNN`
 as legitimate (these are tested via PSAP0002).
 
+**Detection scope (clarified in 4.0.0)**:
+
+- Inline comment bodies only.
+- References inside string literals are NOT matched.
+- Block comments `<# ... #>` are NOT scanned. The block-comment
+  scanner is intentionally separate; PSAP0003 / PSAP0004 / PSAP0005
+  all share the inline-comment scanner. Repository policy documents
+  should be explicit about block-comment expectations as a residual
+  human-review responsibility.
+- One report per matching line maximum.
+
+**Relationship with PSAP0005 (4.0.0+)**: PSAP0005 is the broader
+revision-reference rule; PSAP0003 catches a strict subset of the
+same problem (only the five structured tag forms above). When both
+rules are enabled, PSAP0003 owns the line and PSAP0005 does not
+double-fire on the same line.
+
 **Remediation**: When porting a legacy script, move revision-tagged
 prose into `CHANGELOG.md` under the appropriate version section. If
 the design rationale is what mattered (not the revision), move it to
@@ -1490,6 +1544,98 @@ remove).
 under the appropriate version sections. Verify nothing references the
 in-script block (search for "REVISION HISTORY" in other docs); update
 those references to point to `CHANGELOG.md`.
+
+### 4.37 PSAP0005 — Revision reference in comment body
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 4.0.0
+- **Convention origin**: Deploy-Drivers-For-WindowsServer SPEC.md
+  §A.13 "Where revision history lives" — script bodies should
+  describe current behaviour with timeless wording; revision-anchored
+  prose belongs in `CHANGELOG.md` (chronological log) or `SPEC.md`
+  Part D (architectural rationale).
+
+**Convention**: Inline comments must NOT contain any reference to a
+revision identifier of the form `rNN`, regardless of whether the
+reference is a structured tag (caught by PSAP0003) or descriptive
+prose ("Added in the r71 release", "As of r74, ...", "Before r74,
+...", "Earlier revisions (before r74)"). PSAP0005 is the broader
+LLM-assisted-maintenance guardrail; PSAP0003 catches a strict subset
+of the same problem.
+
+**Relationship with PSAP0003**: PSAP0005 and PSAP0003 cover
+overlapping ground intentionally. When both rules are enabled, a
+line already reported by PSAP0003 is **not** double-counted by
+PSAP0005; PSAP0003 owns the line. This makes it safe to enable both
+rules simultaneously, and is what the canonical Deploy-Drivers
+`.psa.config.json` does.
+
+**Detection scope**:
+
+- Scans comment bodies only. References inside string literals (e.g.,
+  `$Script:ScriptVersion = 'chipset-2026.05.25-r75'`) are NOT
+  matched, the same as PSAP0003.
+- Out of scope: block comments `<# ... #>`. PSAP0005, like
+  PSAP0003 / PSAP0004, uses the inline-comment scanner; block-comment
+  detection would require a different scanner. Repository policy
+  documents (e.g., consumer SPEC §A.13) should be explicit about
+  block-comment expectations as a residual human-review
+  responsibility.
+- Token boundary: `rNN` must be word-bounded with `[A-Za-z0-9_-]` on
+  both sides. This means compound identifiers with embedded `rNN`
+  segments (e.g., `radeon-r9000-series`) do not fire the rule.
+- One report per line maximum (the first `rNN` token wins).
+
+**Operating modes**: PSAP0005 has two modes controlled by the
+configuration flag `psap0005_relaxed_mode` (boolean):
+
+- **Strict mode** (`psap0005_relaxed_mode: false`, default): Any
+  `rNN` reference inside a comment body fires PSAP0005 (subject to
+  the scope rules above and PSAP0003 de-duplication).
+
+- **Relaxed mode** (`psap0005_relaxed_mode: true`): Four prose
+  exemption patterns are applied. A comment matching any of them
+  does not fire. The exemptions are:
+
+  | Exemption                          | Example                                                            |
+  | ---------------------------------- | ------------------------------------------------------------------ |
+  | A. SECTION header                  | `# SECTION r71: WHQL co-sign pre-detection`                        |
+  | B. SPEC cross-reference            | `# Phantom file reference (r65, SPEC D.24): inspect`               |
+  | C. Added-in-release phrasing       | `# Build the WHQL co-sign analysis (added with the r71 release)`   |
+  | D. Earlier-revisions prose         | `# Earlier revisions called Find-Signtool, ... before r74.`         |
+
+  Exemption-C verb set: `added`, `introduced`, `landed`, `ported`,
+  followed by `in` or `with`, optionally followed by `the`, optionally
+  followed by a script-identifier word (e.g., `chipset`), followed by
+  `rNN`.
+
+  Notably **NOT** exempt under relaxed mode (these still fire):
+
+  - `# As of r74, ...` (a forward-looking anchor, not a backward
+    descriptive one)
+  - `# r42:` and `# (r42)` (PSAP0003 owns the line; if PSAP0003 is
+    not enabled, PSAP0005 fires)
+  - `# NOTE (r74): ...` (parenthesised tag form; PSAP0003 owns it
+    when enabled, otherwise PSAP0005 fires)
+
+  Relaxed mode is intended as a **migration aid** for repositories
+  with significant pre-existing rNN-anchored prose under SPEC §D.31-
+  style conventions. The recommended steady-state is
+  `psap0005_relaxed_mode: false` (strict), with the migration plan
+  documented in the consumer SPEC.
+
+**Remediation**: Replace revision-anchored prose with timeless
+wording:
+
+- "Previously / Now / no-anchor wording" per consumer SPEC §A.13.
+- "Earlier revisions did X; the current implementation does Y." (no
+  `rNN`).
+- For architectural rationale that mattered for a specific release,
+  cite `SPEC.md` Part D by section number, e.g. `# See SPEC §D.32
+  for the post-incident analysis.` (no `rNN` in the comment).
+- For chronological discovery, point readers at `CHANGELOG.md`
+  rather than embedding the version into the comment.
 
 ---
 
@@ -1542,7 +1688,17 @@ a valid configuration.
   "severity": "warning",
 
   // Line-length threshold used by PSA4003
-  "max_line_length": 120
+  "max_line_length": 120,
+
+  // PSA8001 function-sync ignore list (exact names or "regex:..." patterns)
+  "psa8001_ignore_functions": [],
+
+  // PSA2010 extra known-cmdlets allow-list
+  "psa2010_known_cmdlets": [],
+
+  // PSAP0005 relaxed mode (4.0.0+). When true, apply the four
+  // exemption patterns described in §4.37. Default false (strict).
+  "psap0005_relaxed_mode": false
 }
 ```
 
@@ -1552,6 +1708,10 @@ a valid configuration.
 | `disable` | array of strings | `[]` | Same format as `enable`. |
 | `severity` | string | `"info"` | Floor for the displayed severity. |
 | `max_line_length` | integer | `120` | Must be positive. |
+| `max_function_lines` | integer | `200` | Must be positive. PSA9001 threshold. |
+| `psa8001_ignore_functions` | array of strings | `[]` | Function names (exact, or `regex:...`). |
+| `psa2010_known_cmdlets` | array of strings | `[]` | Additional cmdlets / functions to whitelist for PSA2010. |
+| `psap0005_relaxed_mode` | boolean | `false` | If `true`, apply the four PSAP0005 exemption patterns (§4.37). |
 
 ### 5.4 Remote configuration (HTTP / HTTPS)
 
@@ -2239,6 +2399,7 @@ governance file; updates to the workflow are recorded in
 | PSAP0002 | warning | ⛔ |
 | PSAP0003 | warning | ⛔ |
 | PSAP0004 | warning | ⛔ |
+| PSAP0005 | warning | ⛔ |
 
 ---
 

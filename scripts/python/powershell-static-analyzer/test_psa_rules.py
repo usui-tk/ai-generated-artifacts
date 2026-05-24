@@ -1007,6 +1007,141 @@ t('PSAP0004 negative: ordinary comment',
 
 
 # ---------------------------------------------------------------------------
+# PSAP0005 — Revision reference in comment body (warning, default OFF,
+#            new in 4.0.0)
+# ---------------------------------------------------------------------------
+#
+# PSAP0005 has two operational modes selected via the
+# ``psap0005_relaxed_mode`` config flag. The TESTS table only drives
+# the default (strict) mode via _make_cfg(); the relaxed-mode tests
+# are dispatched through a dedicated harness below this section.
+
+# --- Strict mode (default): every rNN in a comment fires ---
+
+t('PSAP0005 strict positive: bare rNN colon (also caught by '
+  'PSAP0003, but PSAP0005-only run still fires)',
+  'PSAP0005', '# r42: this is a tag\n', 1)
+
+t('PSAP0005 strict positive: SECTION header',
+  'PSAP0005', '# SECTION r71: WHQL co-sign pre-detection\n', 1)
+
+t('PSAP0005 strict positive: SPEC cross-reference',
+  'PSAP0005',
+  '# Phantom file reference detection (r65, SPEC D.24): inspect\n', 1)
+
+t('PSAP0005 strict positive: Added in the rNN release phrasing',
+  'PSAP0005',
+  '# Build the WHQL co-sign analysis (added with the r71 release)\n', 1)
+
+t('PSAP0005 strict positive: Earlier revisions prose',
+  'PSAP0005',
+  '# Earlier revisions called Find-Signtool, which was undefined '
+  'before r74.\n', 1)
+
+t('PSAP0005 strict positive: As of rNN prose',
+  'PSAP0005', '# As of r74, the function builds the set once.\n', 1)
+
+t('PSAP0005 strict positive: parenthesised tag',
+  'PSAP0005', '# NOTE (r74): the find-kit fix.\n', 1)
+
+t('PSAP0005 strict negative: rNN inside string literal',
+  'PSAP0005', "$x = 'chipset-2026.05.25-r75'\n", 0)
+
+t('PSAP0005 strict negative: comment without rNN',
+  'PSAP0005', '# This is the canonical implementation.\n', 0)
+
+t('PSAP0005 strict negative: rNN-like sequence in identifier',
+  'PSAP0005', '# Process the radeon-r9000-series binding.\n', 0)
+
+t('PSAP0005 strict negative: rNN-like sequence as variable name',
+  'PSAP0005', '$radeonR9000 = 1\n', 0)
+
+
+# Relaxed-mode tests run through a dedicated harness because TESTS
+# uses _make_cfg() which always builds a strict-mode Config.
+
+def _run_psap0005(source, relaxed_mode):
+    cfg = _make_cfg('PSAP0005')
+    cfg.psap0005_relaxed_mode = relaxed_mode
+    results = psa.analyze_text(source, cfg, file_meta=None)
+    return _count(results, 'PSAP0005')
+
+
+_RELAXED_TESTS = [
+    # (name, source, expected_count_in_relaxed_mode)
+    ('PSAP0005 relaxed: SECTION header exempt',
+     '# SECTION r71: WHQL co-sign pre-detection\n', 0),
+    ('PSAP0005 relaxed: SECTION header with decoration exempt',
+     '# === SECTION r71: WHQL co-sign pre-detection ===\n', 0),
+    ('PSAP0005 relaxed: SPEC cross-reference exempt',
+     '# Phantom file reference (r65, SPEC D.24): inspect\n', 0),
+    ('PSAP0005 relaxed: SPEC §D cross-reference exempt',
+     '# Honest correction (r74, SPEC §D.32): no-op\n', 0),
+    ('PSAP0005 relaxed: added in the rNN release exempt',
+     '# Build the WHQL co-sign analysis (added with the r71 release)\n',
+     0),
+    ('PSAP0005 relaxed: added in rNN release no article exempt',
+     '# Filter added in r71 release.\n', 0),
+    ('PSAP0005 relaxed: introduced in rNN release exempt',
+     '# Helper introduced in the r68 release.\n', 0),
+    ('PSAP0005 relaxed: landed in chipset rNN exempt',
+     '# Find-KitTool fix landed in chipset r74 / graphics r40.\n', 0),
+    ('PSAP0005 relaxed: ported in rNN exempt',
+     '# WHQL helper ported in the r39 release.\n', 0),
+    ('PSAP0005 relaxed: earlier revisions prose exempt',
+     '# Earlier revisions called Find-Signtool, which was undefined '
+     'before r74.\n', 0),
+    ('PSAP0005 relaxed: previous releases prose exempt',
+     '# Previous releases relied on r71 only.\n', 0),
+    # Things NOT in the exemption list still fire in relaxed mode:
+    ('PSAP0005 relaxed: As of rNN still fires',
+     '# As of r74, the function builds the set once.\n', 1),
+    ('PSAP0005 relaxed: parenthesised tag still fires',
+     '# NOTE (r74): the find-kit fix.\n', 1),
+    ('PSAP0005 relaxed: bare rNN colon still fires',
+     '# r42: this is a tag\n', 1),
+    ('PSAP0005 relaxed: rNN in string literal still does not fire',
+     "$x = 'chipset-2026.05.25-r75'\n", 0),
+]
+
+
+def _run_psap0005_relaxed_tests():
+    failures = []
+    for name, source, expected in _RELAXED_TESTS:
+        got = _run_psap0005(source, relaxed_mode=True)
+        if got != expected:
+            failures.append(
+                f'  FAIL: {name}\n'
+                f'         expected {expected}, got {got}\n'
+                f'         source: {source!r}')
+    return failures
+
+
+# Cross-rule dedupe: when both PSAP0003 and PSAP0005 are enabled, the
+# same line should not produce TWO warnings (PSAP0003 owns the line).
+
+def _run_psap0003_0005_dedupe():
+    cfg = psa.Config()
+    cfg.enabled = {k: False for k in cfg.enabled}
+    cfg.enabled['PSAP0003'] = True
+    cfg.enabled['PSAP0005'] = True
+    cfg.min_severity = 'info'
+
+    source = '# r42: a tag with text\n'
+    results = psa.analyze_text(source, cfg, file_meta=None)
+
+    failures = []
+    n3 = _count(results, 'PSAP0003')
+    n5 = _count(results, 'PSAP0005')
+    if not (n3 == 1 and n5 == 0):
+        failures.append(
+            f'  FAIL: PSAP0003 + PSAP0005 dedupe\n'
+            f'         expected PSAP0003=1, PSAP0005=0\n'
+            f'         got      PSAP0003={n3}, PSAP0005={n5}')
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # File-meta rule: PSA7001 — Missing UTF-8 BOM (warning, default ON)
 # ---------------------------------------------------------------------------
 # PSA7001 fires from analyze_text() ONLY when file_meta carries
@@ -1457,6 +1592,42 @@ def run():
                 f'    L{r["line"]} [{r["code"]}] {r["message"]}'
                 for r in results
             ]))
+
+    # --- Section 2c: PSAP0005 relaxed-mode tests ---
+    print()
+    print('=' * 72)
+    print(f'Section 2c: PSAP0005 relaxed-mode tests '
+          f'({len(_RELAXED_TESTS)} cases)')
+    print('=' * 72)
+    relaxed_failures = _run_psap0005_relaxed_tests()
+    for name, source, expected in _RELAXED_TESTS:
+        got = _run_psap0005(source, relaxed_mode=True)
+        ok = got == expected
+        status = 'PASS' if ok else 'FAIL'
+        print(f'  [{status}] {name}  '
+              f'(PSAP0005 hits: {got}/{expected})')
+        if ok:
+            pass_count += 1
+        else:
+            fail_count += 1
+            failures.append((name, [
+                f'    expected {expected}, got {got}',
+                f'    source: {source!r}',
+            ]))
+
+    # --- Section 2d: PSAP0003 + PSAP0005 dedupe ---
+    print()
+    print('=' * 72)
+    print('Section 2d: PSAP0003 + PSAP0005 dedupe tests (1 case)')
+    print('=' * 72)
+    dedupe_failures = _run_psap0003_0005_dedupe()
+    if not dedupe_failures:
+        print('  [PASS] PSAP0003 owns line, PSAP0005 does not double-fire')
+        pass_count += 1
+    else:
+        print('  [FAIL] PSAP0003 + PSAP0005 dedupe')
+        fail_count += 1
+        failures.append(('PSAP0003 + PSAP0005 dedupe', dedupe_failures))
 
     # --- Section 2.5: compute_line_ending_stats helper (PSA7002 support) ---
     print()

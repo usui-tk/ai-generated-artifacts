@@ -276,6 +276,9 @@ Issues : 1 errors, 42 warnings, 31 info
 |:---|:---:|:---:|:---|
 | **PSAP0001** | Warning | ⛔ 無効 (opt-in) | phase 関数命名規約: `Invoke-(Prep\|Verify\|Inst)PhaseNN_DescriptiveName`。 名前が `Invoke-(Prep\|Verify\|Inst\|Phase\|Pipeline)` で始まるがカノニカル regex にマッチしない関数のみ flag。 |
 | **PSAP0002** | Warning | ⛔ 無効 (opt-in) | 必須スクリプト識別子変数: `$Script:ScriptVersion`、 `$Script:ScriptHash`、 `$Script:ScriptShortTag`。 欠落している識別子ごとに 1 件 PSAP0002 が emit される。 |
+| **PSAP0003** | Warning | ⛔ 無効 (opt-in) | インラインリビジョンタグコメント (例: `# r42:`、 `# r56+:`、 `# (r42)`、 `# ---- r42: ----`)。 3.3.0 で新規追加。 リビジョン履歴は CHANGELOG.md に集約すべき。 |
+| **PSAP0004** | Warning | ⛔ 無効 (opt-in) | スクリプト本体内の `REVISION HISTORY` / `CHANGELOG` コメントブロック (主に EOF 付近)。 3.3.0 で新規追加。 こうしたブロックは CHANGELOG.md を二重化し、 時間とともにずれていく。 |
+| **PSAP0005** | Warning | ⛔ 無効 (opt-in) | コメント本体内のリビジョン参照 — PSAP0003 の構造化タグ形式に加えて、 任意の `rNN` 言及を検出。 4.0.0 で新規追加。 LLM 支援によるメンテナンスを対象とした、より広いガードレール。 `psap0005_relaxed_mode: true` を設定すると、 4 つの prose 例外 (SECTION ヘッダ、 SPEC 相互参照、 "Added in the rNN release" 表現、 "Earlier revisions" prose) で移行モードに切り替わる。 詳細は SPEC §4.37。 |
 
 ### 一部ルールがデフォルト無効である理由
 

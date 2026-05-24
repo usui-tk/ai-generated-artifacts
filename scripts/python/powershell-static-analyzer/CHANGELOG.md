@@ -52,6 +52,138 @@ changes (documentation policy, sister scripts, etc.), see the root
   "see `psa.py --list-rules`" or parameterised against
   `len(RULES)`.
 
+## [4.0.0] — 2026-05-25 — `llm-governance-baseline`
+
+This is the first major version since `psa.py` 2.0.0. It is a
+**breaking** release: a new opt-in rule (`PSAP0005`) is added, the
+configuration schema gains a new boolean key (`psap0005_relaxed_mode`),
+and the `SPEC.md` introduces a new §1.5 ("Design philosophy — psa.py
+as an LLM-assisted maintenance guardrail") that re-frames the role
+of the project-convention rule family (`PSAPxxxx`) explicitly as the
+LLM-governance gate for consumer repositories.
+
+### Why MAJOR rather than MINOR
+
+- The new rule `PSAP0005`, even though default-off, expands the
+  detection surface materially. Repositories that adopt the rule on
+  their previously-clean baseline may surface previously-tolerated
+  revision-anchored prose at a much higher rate than PSAP0003 (which
+  caught only structured tag forms).
+- The `SPEC.md` formally codifies the LLM-governance philosophy in a
+  new §1.5 and rewrites portions of §4.35 / §4.36 / §4.37 to make
+  the scope of the inline-comment scanner explicit. This is a
+  documentation-level breaking change for consumers that depended
+  on the older (looser) interpretation.
+- The `.psa.config.json` schema gains `psap0005_relaxed_mode` and its
+  validator. Older configs without the key continue to work
+  unchanged (the key defaults to `false`), so this is
+  backward-compatible at the config-file level — but consumer SPECs
+  that document their config now have a new field to surface.
+
+### Added
+
+- **`PSAP0005` — Revision reference in comment body (warning,
+  default OFF, new).** The broader companion of `PSAP0003`. Where
+  `PSAP0003` catches only the five structured tag forms (`# r42:`,
+  `# r42+:`, `# r42-update3:`, `# ---- r42: ----`, `# (r42)`),
+  `PSAP0005` catches ANY `rNN` reference inside a comment body. This
+  closes the gap that allowed descriptive-prose anchors like "Added
+  in the r71 release", "As of r74, …", "Before r74, …", and
+  "Earlier revisions (before r74)" to evade `PSAP0003` while still
+  encoding moving frame-of-reference into the script body. See
+  `SPEC.md` §4.37 for the full specification.
+
+- **`psap0005_relaxed_mode` configuration flag (boolean, default
+  `false`).** When set to `true` in `.psa.config.json`, four prose
+  exemption patterns are applied:
+  - **A. SECTION header**: `# SECTION rNN: …`
+  - **B. SPEC cross-reference**: `(rNN, SPEC §D.YY)` /
+    `(rNN, SPEC D.YY)`
+  - **C. Added-in-release phrasing**: `(added|introduced|landed|
+    ported) (in|with) (the )? (<script_name> )? rNN`
+  - **D. Earlier-revisions prose**: `(earlier|previous|prior)
+    (revisions|releases) … rNN`
+
+  Relaxed mode is the migration aid for repositories with significant
+  pre-existing rNN-anchored prose under SPEC §D.31-style conventions
+  (e.g., Deploy-Drivers-For-WindowsServer). The recommended steady-
+  state is `false` (strict), with the migration plan documented in
+  the consumer SPEC.
+
+- **`SPEC.md` §1.5 — Design philosophy: psa.py as an LLM-assisted
+  maintenance guardrail.** New normative section that codifies why
+  the rule families exist, mapping each LLM failure-mode pattern
+  (revision-anchored prose, EOF revision history blocks, silent
+  cross-file helper drift, LF-only emission from Python script
+  generators, invented cmdlets, locale-dependent constructs,
+  PSCustomObject sealed-object semantics) to the rule that enforces
+  it. Two policy corollaries follow: language-correctness rules
+  (PSA1xxx–PSA9xxx) default on; project-convention rules (PSAPxxxx)
+  default off but become contractual when opted in.
+
+- **`SPEC.md` §4.35 / §4.37 — Detection scope clarification.** Both
+  PSAP0003 and PSAP0005 now have explicit "Detection scope"
+  subsections that document: (1) inline comments only, (2) string
+  literals excluded, (3) block comments `<# ... #>` out of scope by
+  design (a residual human-review responsibility), (4) word boundary
+  including hyphen so that compound identifiers like
+  `radeon-r9000-series` do not fire, (5) at most one report per
+  matching line.
+
+- **`SPEC.md` §5.3 Schema — full configuration field table.** The
+  schema table now lists `psa8001_ignore_functions`,
+  `psa2010_known_cmdlets`, and `psap0005_relaxed_mode` alongside the
+  pre-existing four fields.
+
+### Changed
+
+- **Rule catalog count: 45 → 46.** The new `PSAP0005` brings the
+  total to 46 (PSA1xxx ×3, PSA2xxx ×11, PSA3xxx ×6, PSA4xxx ×4,
+  PSA5xxx ×4, PSA6xxx ×8, PSA7xxx ×2, PSA8xxx ×1, PSA9xxx ×2,
+  PSAPxxxx ×5). `psa.py --list-rules` and `--self-check` reflect
+  the new catalog.
+
+- **Configuration validator (`--config-check`) gains a boolean-key
+  registry.** A new `_CONFIG_BOOL_KEYS` frozenset enumerates all
+  configuration keys that must be JSON booleans;
+  `psap0005_relaxed_mode` is its first member. The validator emits
+  an error if the key is present with a non-boolean value.
+
+### Testing
+
+- **`test_psa_rules.py` gains Section 2c (PSAP0005 relaxed-mode
+  tests, 15 cases) and Section 2d (PSAP0003 + PSAP0005 dedupe, 1
+  case).** Total test count: 212 → 213. The relaxed-mode harness
+  drives `analyze_text` directly with `cfg.psap0005_relaxed_mode =
+  True` to exercise each of the four exemption patterns plus the
+  three negative cases (As of rNN, parenthesised tag, bare colon
+  tag still fire) and the string-literal escape.
+
+### Migration guide for existing consumers
+
+Consumers can adopt 4.0.0 in three steps:
+
+1. **No-op upgrade** (zero-effort): Bump the local `psa.py` to
+   4.0.0. `PSAP0005` is off by default; no behavioural change.
+
+2. **Opt-in relaxed**: Add `"PSAP0005"` to the `enable` list AND
+   `"psap0005_relaxed_mode": true` to `.psa.config.json`. The
+   rule fires for all `rNN` references in comments EXCEPT the four
+   exemption patterns above. This is the recommended adoption path
+   for repositories with significant SPEC §D.31-style prose
+   (Deploy-Drivers-For-WindowsServer is the canonical example).
+
+3. **Opt-in strict**: Add `"PSAP0005"` to the `enable` list with
+   either `"psap0005_relaxed_mode": false` (explicit) or the field
+   omitted (which defaults to `false`). The rule fires for every
+   `rNN` reference in comments. This is the recommended steady-
+   state once the legacy prose has been cleaned up.
+
+The Deploy-Drivers-For-WindowsServer repository adopts option (2)
+at its 4.0.0 baseline release (chipset r76 / graphics r42 / bthpan
+r24 / npu r20), with a migration roadmap to option (3) documented
+in its SPEC §A.13.
+
 ## [3.9.0] — 2026-05-25
 
 ### Added

@@ -381,4 +381,43 @@
   //
   //   "max_line_length": 100
 
+
+  // ===========================================================================
+  // psap0005_relaxed_mode: PSAP0005 migration-mode flag (boolean, new in 4.0.0)
+  // ===========================================================================
+  //
+  // PSAP0005 is the broader LLM-assisted-maintenance guardrail; it
+  // detects ANY rNN reference inside a comment body (beyond the structured
+  // tag forms caught by PSAP0003). The default (strict) mode fires for
+  // every such occurrence.
+  //
+  // When this flag is set to true, four prose exemption patterns are
+  // applied during PSAP0005 analysis. A comment matching any of them is
+  // not reported:
+  //
+  //   A. SECTION header               (# SECTION rNN: ...)
+  //   B. SPEC cross-reference         ((rNN, SPEC §D.YY) / (rNN, SPEC D.YY))
+  //   C. Added-in-release phrasing    ((added|introduced|landed|ported)
+  //                                    (in|with) (the )? (<script>)? rNN)
+  //   D. Earlier-revisions prose      ((earlier|previous|prior)
+  //                                    (revisions|releases) ... rNN)
+  //
+  // Patterns NOT exempt (still fire in relaxed mode):
+  //   - "As of rNN, ..." (forward-looking anchor)
+  //   - "# rNN: ..." and "# (rNN)" (PSAP0003 already owns these lines
+  //     when PSAP0003 is enabled; otherwise PSAP0005 fires)
+  //
+  // This flag is intended as a MIGRATION AID for repositories with
+  // significant pre-existing rNN-anchored prose. The recommended steady-
+  // state is false (strict), with a migration plan documented in the
+  // consumer SPEC.
+  //
+  // Default: false (strict mode). Repositories migrating from a legacy
+  // revision-tagging convention typically start with true and ratchet
+  // it down to false as they clean up.
+  //
+  // Example - migration mode:
+  //
+  //   "psap0005_relaxed_mode": true
+
 }
