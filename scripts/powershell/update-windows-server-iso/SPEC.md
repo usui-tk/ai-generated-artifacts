@@ -359,12 +359,132 @@ Enabled by `-SyntheticTestMode`. Used exclusively by Stage 3 CI:
 | P02.5 and P04.5 are both skipped | No real patches in play; Catalog scrape and wsusscn2 scan are unnecessary |
 | CI MUST NOT upload the synthetic ISO | Belt-and-braces guard against accidental Microsoft-content leaks |
 
-## B.10 PatchBaseline Schema
+## B.10 Config Schema v2.0 (r03+)
 
-The `PatchBaseline` node in `Config/<OsKey>.json` is the canonical
-store of "the latest known-good patch set for this OS". P02.5 reads
-and writes this node; P03 fetches the URLs listed under `Patches`;
-P04.5 validates the resulting set against `wsusscn2.cab` via WUA.
+The `Config/<OsKey>.json` schema is a 3-tier hierarchy. Each field
+group carries a verification marker (`_VerifiedDate` / `_VerifiedBy`
+for value-only groups, or `LastVerifiedDate` / `LastVerifiedBy` for
+groups that also need to record their Patch Tuesday baseline).
+
+```jsonc
+{
+  "Schema":  "2.0",
+  "OsKey":   "Server2025",
+
+  // (A) OS-wide constants: unchanging once verified
+  "Common": {
+    "Build":              26100,
+    "OsShortName":        "WS2025",
+    "Edition":            "Datacenter",
+    "Architecture":       "x64",
+    "WimEdition":         "Windows Server 2025 Datacenter (Desktop Experience)",
+    "InstallWimIndex":    4,
+    "BootWimIndexes":     [1, 2],
+    "WinReWimPath":       "Windows\\System32\\Recovery\\Winre.wim",
+    "SupportedLanguages": ["en-us", "ja-jp"],
+    "DefaultLanguage":    "en-us",
+    "LCUExpandViaMum":    true,
+    "_VerifiedDate":      "2026-05-24T00:00:00+09:00",
+    "_VerifiedBy":        "manual:initial-r03"
+  },
+
+  // (B) Patch baseline: language-neutral patches (Patch Tuesday cadence)
+  "PatchBaseline": {
+    "Schema":                  "2.0",
+    "TargetBuildAfterUpdate":  "26100.32522",
+    "PatchTuesdayOfBaseline":  "",                  // YYYY-MM-DD; empty = uninitialised
+    "LastVerifiedDate":        "",
+    "LastVerifiedBy":          "",
+    "VerificationMethod":      "",                  // auto-scrape | manual | auto-scrape+wsusscn2
+    "ChecksumAlgorithm":       "SHA256",
+    "NeutralPatches": [
+      { "Type": "SSU",                  "KbId": "...", "IsCombined": false, ... },
+      { "Type": "LCU",                  "KbId": "...", "IsCombined": true,  ... },
+      { "Type": "DotNet",               "KbId": "...", ... },
+      { "Type": "DynamicUpdate.Setup",  "KbId": "...", ... },
+      { "Type": "DynamicUpdate.SafeOs", "KbId": "...", ... }
+    ],
+    "ExcludeKbList": [...],
+    "WsusScnCab": { "SourceUrl": "...", "LocalCachePath": "", ... }
+  },
+
+  // (C) Auto-refresh policy
+  "AutoRefreshPolicy": {
+    "Mode":                    "OnNewPatchTuesday",
+    "WritebackToConfig":       true,
+    "FallbackOnScrapeFailure": "UseBaseline",
+    "ScrapeRetries":           3
+  },
+
+  // (D) Per-language: ISO source and language-specific patches
+  "LanguageSpecific": {
+    "en-us": {
+      "DisplayName": "English (United States)",
+      "Iso": {
+        "FileName":      "...iso",
+        "Url":           "https://...",
+        "Sha256":        "",
+        "SizeBytes":     0,
+        "ReleaseDate":   "",
+        "_VerifiedDate": "",
+        "_VerifiedBy":   ""
+      },
+      "VolumeLabelPrefix": "WS2025EN",
+      "LanguageSpecificPatches": {
+        "PatchTuesdayOfBaseline": "",
+        "LastVerifiedDate":       "",
+        "LastVerifiedBy":         "",
+        "LanguagePacks":          [],
+        "LxpUpdates":             [],
+        "DotNetLanguagePacks":    []
+      }
+    },
+    "ja-jp": { ... }
+  }
+}
+```
+
+Adding a new language is a one-node addition under `LanguageSpecific`
+plus an entry in `Common.SupportedLanguages`. No changes are required
+in `PatchBaseline` (its `NeutralPatches` are shared across languages).
+
+## B.11 Field Cadence and RefreshAllBaselines decision matrix (r03+)
+
+The `$Script:OsConfigFieldGroups` constant (in
+`.build_part03_helpers.ps1`) maps each logical field group to a
+Cadence and an optional Refresher function. The constant drives the
+`-Action RefreshAllBaselines` decision matrix.
+
+| Group Path                                            | Cadence       | Refresher |
+|-------------------------------------------------------|---------------|-----------|
+| `Common`                                              | Stable        | (none)    |
+| `PatchBaseline`                                       | PatchTuesday  | `Resolve-PatchSetFromCatalog` |
+| `LanguageSpecific.<lang>.Iso`                         | IsoRelease    | (none)    |
+| `LanguageSpecific.<lang>.LanguageSpecificPatches`     | PatchTuesday  | `Resolve-LanguageSpecificPatchesFromCatalog` |
+
+Cadence semantics:
+- **Stable**: once verified, never auto-refresh.
+- **PatchTuesday**: refresh when recorded `PatchTuesdayOfBaseline`
+  is older than the latest Patch Tuesday.
+- **IsoRelease**: only refresh when Microsoft re-releases the ISO;
+  not auto-refreshed in the current implementation (manual).
+
+Decision matrix (returned by `Get-RefreshDecision`):
+
+| Cadence \\ State      | `_VerifiedDate` empty      | recorded < latest PT | up-to-date |
+|----------------------|---------------------------|----------------------|------------|
+| Stable               | InitialFill or Manual     | (N/A)                | Skip       |
+| PatchTuesday         | Monthly (or Manual if no Refresher) | Monthly  | Skip       |
+| IsoRelease           | InitialFill or Manual     | (N/A)                | Skip       |
+
+`-Mode Force` overrides: never returns Skip; collapses to Monthly /
+InitialFill / Manual depending on Refresher availability.
+
+The full JSON shape of this constant is exposed via
+`-Action DumpFieldClassification` so external tooling (e.g. a Python
+JSON Schema validator) can consume it without parsing PowerShell.
+
+## B.12 PatchBaseline schema fields (referenced by B.10)
 
 ```jsonc
 "PatchBaseline": {
@@ -772,6 +892,13 @@ Server SKU requires.
 | `Test-IsCombinedLcuTitle` (r02.5) | True if an LCU title self-identifies as a combined SSU+LCU package |
 | `Get-SupersedenceFromCatalog` | `ScopedViewInline.aspx` HTML scrape; returns Supersedes + SupersededBy |
 | `Resolve-PatchSetFromCatalog` | Two-pass orchestrator: pass 1 runs OS-aware Catalogue searches; combined-LCU detector runs on the aggregate; pass 2 picks the canonical Full file per surviving candidate via `Select-CanonicalPatchFile` |
+| `Get-LanguagePackQueryTemplate` (r03) | Per-language Catalogue search templates (LanguagePack / LXP / DotNet.LangPack) for OsVersion + OsLanguage + PatchMonth |
+| `Resolve-LanguageSpecificPatchesFromCatalog` (r03) | Per-language Catalogue scraper; returns LP / LXP / .NET LP entries; empty result = verified absence |
+| `Get-RefreshDecision` (r03) | Decide Skip / InitialFill / Monthly / Manual for a field group given Cadence, verification state, and latest Patch Tuesday |
+| `Get-GroupSnapshot` (r03) | Read the verification meta-state for a field group from a raw config JSON object |
+| `Set-GroupVerifiedState` (r03) | Update `_VerifiedDate` / `_VerifiedBy` / `LastVerified*` after a successful Refresher call |
+| `Invoke-AdminPhaseA01_RefreshAllBaselines` (r03) | A01 admin phase: orchestrate field-group refresh across OS Configs |
+| `Invoke-AdminPhaseA02_DumpFieldClassification` (r03) | A02 admin phase: dump `$Script:OsConfigFieldGroups` as JSON |
 | `Get-WsusScnCabSourceUrl` | Microsoft canonical wsusscn2.cab URL |
 | `Test-WsusScnCabFresh` | Cache freshness vs latest Patch Tuesday |
 | `Get-WsusScnCabIfNeeded` | Conditional download with override-path support |

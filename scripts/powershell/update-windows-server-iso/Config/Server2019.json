@@ -1,50 +1,36 @@
 {
-  "$schema": "./schema.json",
-  "_comment": "Windows Server 2019 (build 17763). Service Refresh ISOs follow the svc_refresh naming pattern.",
+  "Schema": "2.0",
   "OsKey": "Server2019",
-  "OsName": "Windows Server 2019 Datacenter",
-  "OsShortName": "WS2019",
-  "Build": 17763,
-  "Architecture": "x64",
-  "RequireSSUFirst": true,
-  "EnableInstallWimUpdate": true,
-  "EnableBootWimUpdate": true,
-  "EnableWinREUpdate": true,
-  "DotNetRequired": true,
-  "LCUExpandViaMum": false,
-  "RequireUefiCa2023Boot": false,
-  "BootWimIndexes": [
-    1,
-    2
-  ],
-  "InstallWimIndexes": "all",
-  "ExpectedEditions": [
-    "Windows Server 2019 Standard",
-    "Windows Server 2019 Standard (Desktop Experience)",
-    "Windows Server 2019 Datacenter",
-    "Windows Server 2019 Datacenter (Desktop Experience)"
-  ],
-  "AutoDetectKnownGood": {
-    "_deprecated": "Replaced by PatchBaseline as of r02 (update-wsi-2026.06.10-r02). Kept for r01 compatibility; new code should read PatchBaseline.",
-    "AsOfDate": "2026-05-01",
-    "Note": "Placeholder; populated by Get-LatestServerUpdates in a future revision.",
-    "SsuKbId": "",
-    "LcuKbId": "",
-    "DotNetKbId": ""
+  "Common": {
+    "Build": 17763,
+    "OsShortName": "WS2019",
+    "Edition": "Datacenter",
+    "Architecture": "x64",
+    "WimEdition": "Windows Server 2019 Datacenter (Desktop Experience)",
+    "InstallWimIndex": 4,
+    "BootWimIndexes": [
+      1,
+      2
+    ],
+    "WinReWimPath": "Windows\\System32\\Recovery\\Winre.wim",
+    "SupportedLanguages": [
+      "en-us",
+      "ja-jp"
+    ],
+    "DefaultLanguage": "en-us",
+    "LCUExpandViaMum": false,
+    "_VerifiedDate": "2026-05-24T00:00:00+09:00",
+    "_VerifiedBy": "manual:initial-r03"
   },
   "PatchBaseline": {
-    "Schema": "1.0",
+    "Schema": "2.0",
     "TargetBuildAfterUpdate": "17763.8511",
     "PatchTuesdayOfBaseline": "",
     "LastVerifiedDate": "",
     "LastVerifiedBy": "",
     "VerificationMethod": "",
-    "VerifiedOsLanguages": [
-      "en-us",
-      "ja-jp"
-    ],
     "ChecksumAlgorithm": "SHA256",
-    "Patches": [],
+    "NeutralPatches": [],
     "ExcludeKbList": [],
     "WsusScnCab": {
       "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
@@ -60,22 +46,48 @@
     "FallbackOnScrapeFailure": "UseBaseline",
     "ScrapeRetries": 3
   },
-  "Languages": {
+  "LanguageSpecific": {
     "en-us": {
-      "Lang": "en-us",
-      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2195167",
-      "IsoSnapshotUrl": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
-      "IsoSha256": "(unknown - record on first download)",
-      "IsoExpectedSize": 5300000000,
-      "VolumeLabelPrefix": "WS2019EN"
+      "DisplayName": "English (United States)",
+      "Iso": {
+        "FileName": "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
+        "Url": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
+        "Sha256": "",
+        "SizeBytes": 0,
+        "ReleaseDate": "",
+        "_VerifiedDate": "",
+        "_VerifiedBy": ""
+      },
+      "VolumeLabelPrefix": "WS2019EN",
+      "LanguageSpecificPatches": {
+        "PatchTuesdayOfBaseline": "",
+        "LastVerifiedDate": "",
+        "LastVerifiedBy": "",
+        "LanguagePacks": [],
+        "LxpUpdates": [],
+        "DotNetLanguagePacks": []
+      }
     },
     "ja-jp": {
-      "Lang": "ja-jp",
-      "IsoFwLink": "https://go.microsoft.com/fwlink/p/?LinkID=2195438",
-      "IsoSnapshotUrl": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
-      "IsoSha256": "(unknown - record on first download)",
-      "IsoExpectedSize": 5500000000,
-      "VolumeLabelPrefix": "WS2019JA"
+      "DisplayName": "Japanese",
+      "Iso": {
+        "FileName": "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
+        "Url": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
+        "Sha256": "",
+        "SizeBytes": 0,
+        "ReleaseDate": "",
+        "_VerifiedDate": "",
+        "_VerifiedBy": ""
+      },
+      "VolumeLabelPrefix": "WS2019JA",
+      "LanguageSpecificPatches": {
+        "PatchTuesdayOfBaseline": "",
+        "LastVerifiedDate": "",
+        "LastVerifiedBy": "",
+        "LanguagePacks": [],
+        "LxpUpdates": [],
+        "DotNetLanguagePacks": []
+      }
     }
   }
 }

@@ -114,6 +114,26 @@
     ValidatePatchSet phase will use this file instead of downloading
     one to <WorkRoot>/cache/..
 
+.PARAMETER Mode
+    Only meaningful with -Action RefreshAllBaselines. One of:
+      - Initial: refresh all fields whose _VerifiedDate is empty.
+      - Monthly: refresh only fields whose Cadence is "PatchTuesday"
+                 AND whose recorded PatchTuesdayOfBaseline is older
+                 than the latest Patch Tuesday. (default)
+      - Force  : refresh every field group regardless of state.
+    Configs are refreshed via -Action RefreshAllBaselines.
+
+.PARAMETER OnlyOs
+    Only meaningful with -Action RefreshAllBaselines. Limits the
+    refresh to a single OS Config (Server2016 / 2019 / 2022 / 2025).
+    Without this, all four Configs are processed.
+
+.PARAMETER OnlyLanguage
+    Only meaningful with -Action RefreshAllBaselines. Limits the
+    LanguageSpecific refresh to a single language (en-us / ja-jp).
+    Without this, all SupportedLanguages of each Config are processed.
+    Configs are refreshed via -Action RefreshAllBaselines.
+
 .PARAMETER WorkRoot
     Workspace root. Default: C:\Temp\Workspace_UpdateWsi.
     Strong recommendation: -WorkRoot D:\UpdateWsi on data-drive hosts.
@@ -184,10 +204,9 @@
     latest patches, run the full pipeline.
 #>
 
-
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest')]
+    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshAllBaselines','DumpFieldClassification')]
     [string]   $Action               = 'PrepareBuildVerify',
 
     [string[]] $OnlyPhases,
@@ -212,6 +231,15 @@ param(
     [switch]   $IgnorePatchValidation,
     [string]   $WsusScnCabPath,
     [switch]   $UseBaselineOnly,
+
+    # RefreshAllBaselines parameters: control which OS / language /
+    # patch month is targeted when running -Action RefreshAllBaselines.
+    [ValidateSet('Initial','Monthly','Force')]
+    [string]   $Mode                 = 'Monthly',
+    [ValidateSet('Server2016','Server2019','Server2022','Server2025')]
+    [string]   $OnlyOs,
+    [ValidateSet('en-us','ja-jp')]
+    [string]   $OnlyLanguage,
     # ------------
 
     [string]   $WorkRoot             = 'C:\Temp\Workspace_UpdateWsi',
@@ -269,7 +297,12 @@ if ($WsusScnCabPath -and -not (Test-Path -LiteralPath $WsusScnCabPath)) {
 # Several non-trivial actions require OsVersion. ListPhases and
 # EnvironmentInfoOnly are the only ones that should be allowed without it
 # so a CI smoke run can succeed without picking a target OS.
-$needsOsVersion = ($Action -ne 'ListPhases') -and (-not $EnvironmentInfoOnly)
+# Some actions don't operate on a single OS instance and therefore
+# don't need -OsVersion. ListPhases, EnvironmentInfoOnly, Cleanup,
+# and the Admin actions (RefreshAllBaselines, DumpFieldClassification)
+# operate on the on-disk Config files or the script itself.
+$osLessActions = @('ListPhases','Cleanup','RefreshAllBaselines','DumpFieldClassification')
+$needsOsVersion = ($Action -notin $osLessActions) -and (-not $EnvironmentInfoOnly)
 if ($needsOsVersion -and [string]::IsNullOrEmpty($OsVersion)) {
     throw '-OsVersion is required for action "' + $Action + '". Specify Server2016 / Server2019 / Server2022 / Server2025.'
 }
@@ -279,7 +312,6 @@ if ($needsOsVersion -and [string]::IsNullOrEmpty($OsVersion)) {
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
-
 function Set-ConsoleUtf8 {
     <#
     .SYNOPSIS
@@ -415,8 +447,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.24-r02.5'
-$Script:ScriptTag     = 'catalog-multifile-and-combined-lcu'
+$Script:ScriptVersion = 'update-wsi-2026.05.24-r03'
+$Script:ScriptTag     = 'schema-v2-and-refresh-all-baselines'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -444,17 +476,60 @@ $Script:PhaseTimings      = New-Object System.Collections.Generic.List[object]
 # without running any phase functions. Func names are bound by
 # convention; Invoke-PhaseRunner resolves them via Get-Command.
 $Script:PhaseRegistry = @(
-    [pscustomobject]@{ Id='P01';   Name='Initialize';            Group='Setup';  Func='Invoke-SetupPhase01_Initialize' }
-    [pscustomobject]@{ Id='P02';   Name='ResolveInputs';         Group='Setup';  Func='Invoke-SetupPhase02_ResolveInputs' }
-    [pscustomobject]@{ Id='P02.5'; Name='RefreshPatchBaseline';  Group='Setup';  Func='Invoke-SetupPhase02_5_RefreshPatchBaseline' }
-    [pscustomobject]@{ Id='P03';   Name='FetchAssets';           Group='Fetch';  Func='Invoke-FetchPhase03_FetchAssets' }
-    [pscustomobject]@{ Id='P04';   Name='ExpandIso';             Group='Plan';   Func='Invoke-PlanPhase04_ExpandIso' }
-    [pscustomobject]@{ Id='P04.5'; Name='ValidatePatchSet';      Group='Plan';   Func='Invoke-PlanPhase04_5_ValidatePatchSet' }
-    [pscustomobject]@{ Id='P05';   Name='PatchInstallWim';       Group='Build';  Func='Invoke-BuildPhase05_PatchInstallWim' }
-    [pscustomobject]@{ Id='P06';   Name='PatchBootWim';          Group='Build';  Func='Invoke-BuildPhase06_PatchBootWim' }
-    [pscustomobject]@{ Id='P07';   Name='AssembleIso';           Group='Build';  Func='Invoke-BuildPhase07_AssembleIso' }
-    [pscustomobject]@{ Id='P08';   Name='StaticVerify';          Group='Verify'; Func='Invoke-VerifyPhase08_StaticVerify' }
-    [pscustomobject]@{ Id='P09';   Name='FinalReport';           Group='Report'; Func='Invoke-ReportPhase09_FinalReport' }
+    [pscustomobject]@{ Id='P01';   Name='Initialize';                Group='Setup';  Func='Invoke-SetupPhase01_Initialize' }
+    [pscustomobject]@{ Id='P02';   Name='ResolveInputs';             Group='Setup';  Func='Invoke-SetupPhase02_ResolveInputs' }
+    [pscustomobject]@{ Id='P02.5'; Name='RefreshPatchBaseline';      Group='Setup';  Func='Invoke-SetupPhase02_5_RefreshPatchBaseline' }
+    [pscustomobject]@{ Id='P03';   Name='FetchAssets';               Group='Fetch';  Func='Invoke-FetchPhase03_FetchAssets' }
+    [pscustomobject]@{ Id='P04';   Name='ExpandIso';                 Group='Plan';   Func='Invoke-PlanPhase04_ExpandIso' }
+    [pscustomobject]@{ Id='P04.5'; Name='ValidatePatchSet';          Group='Plan';   Func='Invoke-PlanPhase04_5_ValidatePatchSet' }
+    [pscustomobject]@{ Id='P05';   Name='PatchInstallWim';           Group='Build';  Func='Invoke-BuildPhase05_PatchInstallWim' }
+    [pscustomobject]@{ Id='P06';   Name='PatchBootWim';              Group='Build';  Func='Invoke-BuildPhase06_PatchBootWim' }
+    [pscustomobject]@{ Id='P07';   Name='AssembleIso';               Group='Build';  Func='Invoke-BuildPhase07_AssembleIso' }
+    [pscustomobject]@{ Id='P08';   Name='StaticVerify';              Group='Verify'; Func='Invoke-VerifyPhase08_StaticVerify' }
+    [pscustomobject]@{ Id='P09';   Name='FinalReport';               Group='Report'; Func='Invoke-ReportPhase09_FinalReport' }
+    [pscustomobject]@{ Id='A01';   Name='RefreshAllBaselines';       Group='Admin';  Func='Invoke-AdminPhaseA01_RefreshAllBaselines' }
+    [pscustomobject]@{ Id='A02';   Name='DumpFieldClassification';   Group='Admin';  Func='Invoke-AdminPhaseA02_DumpFieldClassification' }
+)
+
+# OS Config field classification: drives the RefreshAllBaselines
+# decision matrix. Each entry maps a logical field group to a refresh
+# cadence and an optional Refresher function. The Path uses "<lang>" as
+# a placeholder substituted at runtime for each SupportedLanguages entry.
+#
+# Cadence semantics:
+#   Stable       - Field is OS-wide constant; once verified, never auto-refresh
+#   PatchTuesday - Field is monthly cumulative; refresh when recorded
+#                  PatchTuesdayOfBaseline < latest Patch Tuesday
+#   IsoRelease   - Field changes only on Microsoft media re-release;
+#                  not auto-refreshed currently (manual confirmation)
+#
+# Refresher: PowerShell function to call when refresh is needed.
+# $null means no automated refresh; values must be populated manually.
+$Script:OsConfigFieldGroups = @(
+    [pscustomobject]@{
+        Path        = 'Common'
+        Cadence     = 'Stable'
+        Refresher   = $null
+        Description = 'OS-wide constants: build number, edition, WIM index, etc.'
+    }
+    [pscustomobject]@{
+        Path        = 'PatchBaseline'
+        Cadence     = 'PatchTuesday'
+        Refresher   = 'Resolve-PatchSetFromCatalog'
+        Description = 'Neutral patches (SSU/LCU/.NET CU/DU.*) shared across all languages.'
+    }
+    [pscustomobject]@{
+        Path        = 'LanguageSpecific.<lang>.Iso'
+        Cadence     = 'IsoRelease'
+        Refresher   = $null
+        Description = 'Per-language ISO source URL and checksums.'
+    }
+    [pscustomobject]@{
+        Path        = 'LanguageSpecific.<lang>.LanguageSpecificPatches'
+        Cadence     = 'PatchTuesday'
+        Refresher   = 'Resolve-LanguageSpecificPatchesFromCatalog'
+        Description = 'Per-language LP / LXP / .NET satellite updates.'
+    }
 )
 
 # Run-state carriers populated by phases; accessed by later phases. The
@@ -466,7 +541,6 @@ $Script:IsoSha256        = $null
 $Script:ResolvedPatches  = @()
 $Script:WimIndexInventory = @()
 $Script:OutputIsoPath    = $null
-
 
 
 # ============================================================
@@ -1328,7 +1402,6 @@ function Export-DebugTraceJson {
     }
 }
 
-
 # ============================================================
 # Display utilities
 # ============================================================
@@ -1559,7 +1632,6 @@ function Invoke-CleanupDirectories { # psa-disable-line PSA6003 -- "Directories"
     }
     Write-Ok "cleanup completed"
 }
-
 # ============================================================
 # Error handling helpers
 # ============================================================
@@ -1678,7 +1750,6 @@ function Invoke-WebRequestWithRetry {
     }
     throw $lastError
 }
-
 
 # ============================================================
 # Phase 1: Environment evaluation
@@ -1899,7 +1970,6 @@ validated under 64-bit PowerShell.
     }
 }
 
-
 # ============================================================
 # ISO Updater specific: configuration profile
 # ============================================================
@@ -1907,18 +1977,22 @@ validated under 64-bit PowerShell.
 function Get-ConfigProfile {
     <#
     .SYNOPSIS
-        Load the OS profile JSON for the given OsKey and resolve the
-        language sub-profile for OsLang.
+        Load the OS profile JSON (Schema v2.0) for the given OsKey and
+        resolve the language sub-profile for OsLang.
     .DESCRIPTION
-        Returns a pscustomobject merging the top-level config fields
-        with the selected language entry. The returned object has the
-        following well-known properties:
-            OsKey, OsName, OsShortName, Build, Architecture,
-            RequireSSUFirst, EnableInstallWimUpdate, EnableBootWimUpdate,
-            EnableWinREUpdate, DotNetRequired, LCUExpandViaMum,
-            RequireUefiCa2023Boot, BootWimIndexes, InstallWimIndexes,
-            ExpectedEditions, AutoDetectKnownGood,
-            Language (the resolved language sub-profile)
+        v2.0 layout: top-level keys are Schema, OsKey, Common,
+        PatchBaseline, AutoRefreshPolicy, LanguageSpecific.<lang>.
+        This loader validates Schema == "2.0" and returns a flat
+        pscustomobject for backward-compatible access patterns used by
+        downstream phases: properties from Common are promoted to the
+        top level of the returned object, PatchBaseline / AutoRefreshPolicy
+        are passed through verbatim, the resolved language sub-profile
+        is attached as 'Language', and the entire LanguageSpecific
+        dictionary is attached as 'LanguageSpecific' for Action workers
+        (RefreshAllBaselines) that need cross-language access.
+
+        Legacy v1.0 configs are NOT supported; the loader throws
+        immediately if the Schema field is missing or wrong.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -1939,23 +2013,50 @@ function Get-ConfigProfile {
     $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8
     $json = $raw | ConvertFrom-Json
 
-    if (-not $json.Languages) {
-        throw ('Config {0} has no Languages section.' -f $cfgFile)
+    # Schema validation (v2.0 strict)
+    if (-not $json.Schema -or $json.Schema -ne '2.0') {
+        throw ('Config {0} has Schema="{1}"; expected "2.0". Legacy schemas are not supported.' -f $cfgFile, $json.Schema)
     }
-    $langNode = $json.Languages.$OsLang
+    if (-not $json.Common) {
+        throw ('Config {0} has no Common section.' -f $cfgFile)
+    }
+    if (-not $json.LanguageSpecific) {
+        throw ('Config {0} has no LanguageSpecific section.' -f $cfgFile)
+    }
+    $langNode = $json.LanguageSpecific.$OsLang
     if ($null -eq $langNode) {
-        throw ('Config {0} has no Languages entry for {1}.' -f $cfgFile, $OsLang)
+        throw ('Config {0} has no LanguageSpecific entry for "{1}".' -f $cfgFile, $OsLang)
     }
 
-    # Build a flat object with the resolved language entry attached.
-    # Using Select-Object * preserves the JSON property order, which
-    # keeps diagnostic dumps readable.
-    $merged = $json | Select-Object *
-    Add-Member -InputObject $merged -MemberType NoteProperty `
-        -Name 'Language' -Value $langNode -Force
-    Add-Member -InputObject $merged -MemberType NoteProperty `
-        -Name 'LanguageKey' -Value $OsLang -Force
-
+    # Build a flat profile object: promote Common fields to top-level
+    # so legacy access patterns like $profile.Build still work, then
+    # attach the resolved language sub-profile as 'Language' and the
+    # full LanguageSpecific dictionary for cross-lang admin access.
+    $merged = [pscustomobject]@{
+        Schema             = $json.Schema
+        OsKey              = $json.OsKey
+        Build              = $json.Common.Build
+        OsShortName        = $json.Common.OsShortName
+        Edition            = $json.Common.Edition
+        Architecture       = $json.Common.Architecture
+        WimEdition         = $json.Common.WimEdition
+        InstallWimIndex    = $json.Common.InstallWimIndex
+        BootWimIndexes     = $json.Common.BootWimIndexes
+        WinReWimPath       = $json.Common.WinReWimPath
+        SupportedLanguages = $json.Common.SupportedLanguages
+        DefaultLanguage    = $json.Common.DefaultLanguage
+        LCUExpandViaMum    = $json.Common.LCUExpandViaMum
+        Common             = $json.Common
+        PatchBaseline      = $json.PatchBaseline
+        AutoRefreshPolicy  = $json.AutoRefreshPolicy
+        LanguageSpecific   = $json.LanguageSpecific
+        Language           = $langNode
+        LanguageKey        = $OsLang
+        # Raw is exposed for admin actions (RefreshAllBaselines) which
+        # need to mutate-and-persist the on-disk JSON shape.
+        Raw                = $json
+        ConfigFilePath     = $cfgFile
+    }
     return $merged
 }
 
@@ -2017,8 +2118,8 @@ function Resolve-IsoSourceUrl {
     <#
     .SYNOPSIS
         Pick the final ISO download URL according to the priority
-        described in SPEC Part B.4 (explicit -IsoUrl, then FwLink,
-        then SnapshotUrl).
+        described in SPEC Part B.4 (explicit -IsoUrl, then Iso.Url
+        from the per-language v2.0 config).
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -2029,13 +2130,11 @@ function Resolve-IsoSourceUrl {
     if (-not [string]::IsNullOrEmpty($ExplicitUrl)) {
         return $ExplicitUrl
     }
-    if (-not [string]::IsNullOrEmpty($LanguageProfile.IsoFwLink)) {
-        return $LanguageProfile.IsoFwLink
+    # v2.0: per-language ISO source is at .Iso.Url; legacy keys removed.
+    if ($LanguageProfile.Iso -and -not [string]::IsNullOrEmpty($LanguageProfile.Iso.Url)) {
+        return $LanguageProfile.Iso.Url
     }
-    if (-not [string]::IsNullOrEmpty($LanguageProfile.IsoSnapshotUrl)) {
-        return $LanguageProfile.IsoSnapshotUrl
-    }
-    throw 'No ISO URL could be resolved from explicit args or config.'
+    throw 'No ISO URL could be resolved from explicit args or config (LanguageSpecific.<lang>.Iso.Url is empty).'
 }
 
 # ============================================================
@@ -2272,7 +2371,6 @@ function Get-PatchApplyOrder {
 }
 
 
-
 # ============================================================
 # ISO Updater specific: Patch Tuesday calculator and
 # PatchBaseline freshness / IO helpers
@@ -2476,7 +2574,6 @@ function Get-OsConfigPath {
     if ([string]::IsNullOrEmpty($here)) { $here = (Get-Location).Path }
     return (Join-Path $here ('Config' + [System.IO.Path]::DirectorySeparatorChar + $OsKey + '.json'))
 }
-
 
 # ============================================================
 # ISO Updater specific: Microsoft Update Catalog scraper
@@ -3082,6 +3179,173 @@ function Resolve-PatchSetFromCatalog {
     return $resolved.ToArray()
 }
 
+# ============================================================
+# Language-specific patch scraper
+# ============================================================
+# Locates per-language artifacts (Language Pack, LXP, .NET LP)
+# in the Microsoft Update Catalogue. Returns an array of patch
+# entries with shape compatible with PatchBaseline.NeutralPatches
+# but additionally annotated with .Type in
+# { LanguagePack, LXP, DotNet.LangPack }.
+#
+# Design note: this function provides a best-effort stub
+# for OS versions where LP/LXP are not normally published monthly
+# (Server 2016 / 2019 LTSC). For Server 2022 / 2025 it issues the
+# documented queries; if nothing comes back, returns an empty array
+# rather than throwing - downstream RefreshAllBaselines records
+# this as "no Refresher result" and keeps the previous baseline.
+
+function Get-LanguagePackQueryTemplate {
+    <#
+    .SYNOPSIS
+        Returns the Catalogue query templates for language-specific
+        artifacts of a given OsVersion + OsLanguage + PatchMonth.
+    #>
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)] [string]$OsVersion,
+        [Parameter(Mandatory)] [string]$OsLanguage,
+        [Parameter(Mandatory)] [string]$PatchMonth
+    )
+    $m = $PatchMonth
+
+    # Language tokens that appear in Catalogue file names
+    $langTokens = @{
+        'en-us' = @('en-us', 'en_us', 'english')
+        'ja-jp' = @('ja-jp', 'ja_jp', 'japanese')
+    }
+    $tokens = if ($langTokens.ContainsKey($OsLanguage)) { $langTokens[$OsLanguage] } else { @($OsLanguage) }
+
+    # OS-specific Catalogue title fragments
+    $osTitleTokens = @{
+        'Server2025' = @('Microsoft server operating system version 24H2', 'Windows Server 2025')
+        'Server2022' = @('Microsoft server operating system, version 21H2', 'Windows Server 2022')
+        'Server2019' = @('Windows Server 2019')
+        'Server2016' = @('Windows Server 2016')
+    }
+    $osTokensList = if ($osTitleTokens.ContainsKey($OsVersion)) { $osTitleTokens[$OsVersion] } else { @() }
+
+    $queries = New-Object System.Collections.Generic.List[object]
+    # LP and LXP are mostly published only for newer OS versions; we
+    # issue the queries regardless and let the empty-result path mark
+    # "no patch found" for the older LTSC SKUs.
+    $queries.Add([pscustomobject]@{
+        Type          = 'LanguagePack'
+        QueryTemplate = ($m + ' Language Pack ' + $OsLanguage + ' ' + $osTokensList[0])
+    }) | Out-Null
+    $queries.Add([pscustomobject]@{
+        Type          = 'LXP'
+        QueryTemplate = ($m + ' Local Experience Pack ' + $OsLanguage + ' ' + $osTokensList[0])
+    }) | Out-Null
+    $queries.Add([pscustomobject]@{
+        Type          = 'DotNet.LangPack'
+        QueryTemplate = ($m + ' .NET Framework Language Pack ' + $OsLanguage + ' ' + $osTokensList[0])
+    }) | Out-Null
+
+    return @{
+        OsTitleTokens   = $osTokensList
+        LanguageTokens  = $tokens
+        OsLanguage      = $OsLanguage
+        Queries         = $queries
+    }
+}
+
+function Resolve-LanguageSpecificPatchesFromCatalog {
+    <#
+    .SYNOPSIS
+        Per-language Catalogue scraper for Language Pack / LXP /
+        .NET Language Pack. Returns an array of entries with .Type
+        in {LanguagePack, LXP, DotNet.LangPack}.
+    .DESCRIPTION
+        Best-effort: any per-type Catalogue search that returns zero
+        narrowed results is silently skipped (no warning) because
+        Microsoft does not publish LP/LXP for every OS x month combo.
+        The caller (RefreshAllBaselines) treats an empty array as
+        "verified absence", not as a failure.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject[]])]
+    param(
+        [Parameter(Mandatory)] [string]$OsVersion,
+        [Parameter(Mandatory)] [string]$OsLanguage,
+        [Parameter(Mandatory)] [string]$PatchMonth,
+        [int]$MaxRetries = 3
+    )
+    Write-Step ('Language-specific patches: OS={0} Lang={1} Month={2}' -f $OsVersion, $OsLanguage, $PatchMonth)
+    $tmpl = Get-LanguagePackQueryTemplate -OsVersion $OsVersion -OsLanguage $OsLanguage -PatchMonth $PatchMonth
+
+    $resolved = New-Object System.Collections.Generic.List[object]
+    foreach ($q in $tmpl.Queries) {
+        Write-Step ('  query: type={0} template="{1}"' -f $q.Type, $q.QueryTemplate)
+        $hits = $null
+        try {
+            $hits = Get-UpdateIdFromCatalog -KbId $q.QueryTemplate -MaxRetries $MaxRetries
+        } catch {
+            Write-Warn ('  Catalogue search failed: {0}' -f $_.Exception.Message)
+            continue
+        }
+        if (-not $hits -or $hits.Count -eq 0) {
+            continue
+        }
+
+        # Filter by OS title token + language token in file name
+        $narrowed = @($hits | Where-Object {
+            $title = $_.Title.ToLower()
+            $osMatch = $false
+            foreach ($t in $tmpl.OsTitleTokens) {
+                if ($title -match [regex]::Escape($t.ToLower())) { $osMatch = $true; break }
+            }
+            $langMatch = $false
+            foreach ($lt in $tmpl.LanguageTokens) {
+                if ($title -match [regex]::Escape($lt.ToLower())) { $langMatch = $true; break }
+            }
+            $osMatch -and $langMatch
+        })
+        if ($narrowed.Count -eq 0) {
+            continue
+        }
+        $best = $narrowed[0]
+
+        # DownloadDialog -> Select-CanonicalPatchFile to pick the proper file
+        try {
+            $links = Get-DownloadLinkFromCatalog -UpdateId $best.UpdateId -MaxRetries $MaxRetries
+        } catch {
+            continue
+        }
+        if (-not $links -or $links.Count -eq 0) { continue }
+        $primary = Select-CanonicalPatchFile -Links $links -PatchType $q.Type -Architecture 'x64'
+        if (-not $primary) { continue }
+
+        $kbFromTitle = ''
+        $kbMatch = [regex]::Match($best.Title, '\((KB\d{6,7})\)')
+        if ($kbMatch.Success) { $kbFromTitle = $kbMatch.Groups[1].Value }
+
+        $resolved.Add([pscustomobject]@{
+            Type                   = $q.Type
+            KbId                   = $kbFromTitle
+            Title                  = $best.Title
+            UpdateId               = $best.UpdateId
+            DownloadUrl            = $primary.Url
+            FileName               = $primary.FileName
+            SizeBytes              = 0
+            Sha256                 = ''
+            ReleaseDate            = ''
+            Supersedes             = @()
+            RequiresKbIds          = @()
+            ApplyOrder             = 50
+            ApplicableArchitecture = 'x64'
+            ApplicableLanguage     = $OsLanguage
+            Variant                = 'Full'
+        }) | Out-Null
+    }
+
+    if ($resolved.Count -eq 0) {
+        Write-Step ('  No language-specific patches found for {0} / {1} / {2}.' -f $OsVersion, $OsLanguage, $PatchMonth)
+    } else {
+        Write-Ok ('  Resolved {0} language-specific patches.' -f $resolved.Count)
+    }
+    return $resolved.ToArray()
+}
 
 # ============================================================
 # ISO Updater specific: DISM / WIM operations
@@ -3491,7 +3755,6 @@ function New-SyntheticTestIso {
 }
 
 
-
 # ============================================================
 # ISO Updater specific: wsusscn2.cab + Windows Update Agent API
 # offline scan
@@ -3767,7 +4030,6 @@ function Compare-PatchSetVsWuaScan {
     }
 }
 
-
 # ============================================================
 # Phase P01: Initialize (Setup group)
 # ============================================================
@@ -3914,7 +4176,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         Write-SubSection 'Step 1: Load OS profile'
         $Script:OsProfile = Get-ConfigProfile -OsKey $Script:OsVersion -OsLang $Script:OsLanguage
         $Script:OsLangProfile = $Script:OsProfile.Language
-        Write-Ok ('Profile loaded: {0} / {1} (build {2})' -f $Script:OsProfile.OsName, $Script:OsLanguage, $Script:OsProfile.Build)
+        Write-Ok ('Profile loaded: {0} / {1} (build {2})' -f $Script:OsProfile.WimEdition, $Script:OsLanguage, $Script:OsProfile.Build)
         Write-Step ('Volume label prefix: {0}' -f $Script:OsLangProfile.VolumeLabelPrefix)
 
         # Step 2: Resolve ISO source
@@ -4062,7 +4324,6 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         Stop-DebugTrace
     }
 }
-
 
 
 # ============================================================
@@ -4265,7 +4526,6 @@ function Invoke-SetupPhase02_5_RefreshPatchBaseline {
     }
 }
 
-
 # ============================================================
 # Phase P03: Fetch assets (Fetch group)
 # ============================================================
@@ -4315,10 +4575,15 @@ function Invoke-FetchPhase03_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             }
         }
 
-        # Optional integrity check against config-recorded SHA256
-        if ($Script:OsLangProfile.IsoSha256 -and $Script:OsLangProfile.IsoSha256 -notmatch '\(.*\)') {
+        # Optional integrity check against config-recorded SHA-256
+        # (v2.0: per-language Iso.Sha256 from LanguageSpecific.<lang>.Iso)
+        $configSha = $null
+        if ($Script:OsLangProfile.Iso -and $Script:OsLangProfile.Iso.Sha256) {
+            $configSha = $Script:OsLangProfile.Iso.Sha256
+        }
+        if ($configSha -and $configSha -notmatch '\(.*\)') {
             Set-DebugStep -Step 'iso-sha256-verify'
-            $expected = $Script:OsLangProfile.IsoSha256.ToLower()
+            $expected = $configSha.ToLower()
             Write-Step ('Verifying ISO SHA-256 against config (expected {0}...)' -f $expected.Substring(0, 16))
             $actual = (Get-FileHash -LiteralPath $Script:IsoLocalPath -Algorithm SHA256).Hash.ToLower()
             $Script:IsoSha256 = $actual
@@ -4327,7 +4592,7 @@ function Invoke-FetchPhase03_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             }
             Write-Ok 'ISO SHA-256 matches.'
         } else {
-            # Record the hash for first-time use; user can copy into iso_known_good.json
+            # Record the hash for first-time use; user can copy into Config/<OsKey>.json
             $Script:IsoSha256 = (Get-FileHash -LiteralPath $Script:IsoLocalPath -Algorithm SHA256).Hash.ToLower()
             Write-Step ('Recorded ISO SHA-256: {0}' -f $Script:IsoSha256)
         }
@@ -4495,7 +4760,6 @@ function Invoke-PlanPhase04_ExpandIso {
         Stop-DebugTrace
     }
 }
-
 
 
 # ============================================================
@@ -4793,7 +5057,6 @@ function Invoke-PlanPhase04_5_ValidatePatchSet {
         Stop-DebugTrace
     }
 }
-
 
 # ============================================================
 # Phase P05: Patch install.wim (Build group)
@@ -5111,7 +5374,6 @@ function Invoke-BuildPhase07_AssembleIso {
 }
 
 
-
 # ============================================================
 # Phase P08: Static verification (Verify group)
 # ============================================================
@@ -5289,6 +5551,451 @@ function Invoke-ReportPhase09_FinalReport {
 }
 
 
+# ============================================================
+# Admin phases: RefreshAllBaselines (A01),
+#                      DumpFieldClassification (A02)
+# ============================================================
+# These are "admin" phases in the sense that they don't take an
+# OS image as input; they operate on the on-disk Config/*.json
+# files. They are dispatched the same way as regular build phases
+# via Invoke-PhaseRunner, but the Action mapping routes them
+# through dedicated entry points (-Action RefreshAllBaselines and
+# -Action DumpFieldClassification respectively).
+
+function Get-RefreshDecision {
+    <#
+    .SYNOPSIS
+        Decide whether a given field group needs refreshing given the
+        current Config state, the chosen Mode, and the latest Patch
+        Tuesday. Returns one of: Skip / InitialFill / Monthly / Manual.
+    .DESCRIPTION
+        Decision matrix (see CHANGELOG and SPEC):
+
+                          | _VerifiedDate empty   | recorded < latest PT  | up-to-date
+          ----------------+----------------------+----------------------+-----------
+          Stable          | InitialFill / Manual  | (not applicable)      | Skip
+          PatchTuesday    | Monthly               | Monthly               | Skip
+          IsoRelease      | InitialFill / Manual  | (not applicable)      | Skip
+
+        For Cadence=Stable / IsoRelease, if Refresher is $null the
+        decision is reported as "Manual" (script cannot auto-fill).
+
+        With -Mode Force, the decision is always one of Monthly /
+        InitialFill / Manual (Skip is never returned).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [pscustomobject]$Group,
+        [Parameter(Mandatory)] [pscustomobject]$Snapshot,
+        [Parameter(Mandatory)] [ValidateSet('Initial','Monthly','Force')] [string]$Mode,
+        [Parameter(Mandatory)] [string]$LatestPatchTuesday
+    )
+    # Verified flag check (group-scoped meta field _VerifiedDate, or
+    # LastVerifiedDate for PatchBaseline / LanguageSpecificPatches).
+    $isVerified = [bool]$Snapshot.IsVerified
+    $isAutoRefreshable = -not [string]::IsNullOrEmpty($Group.Refresher)
+
+    if ($Mode -eq 'Force') {
+        if ($Group.Cadence -eq 'PatchTuesday' -or $isAutoRefreshable) { return 'Monthly' }
+        if ($isAutoRefreshable) { return 'InitialFill' }
+        return 'Manual'
+    }
+
+    switch ($Group.Cadence) {
+        'Stable' {
+            if ($isVerified) { return 'Skip' }
+            if ($isAutoRefreshable) { return 'InitialFill' }
+            return 'Manual'
+        }
+        'IsoRelease' {
+            if ($isVerified) { return 'Skip' }
+            if ($isAutoRefreshable) { return 'InitialFill' }
+            return 'Manual'
+        }
+        'PatchTuesday' {
+            # Initial fill if never verified; Monthly if older than latest PT.
+            if (-not $isVerified) {
+                if ($Mode -eq 'Initial' -or $Mode -eq 'Monthly') {
+                    if ($isAutoRefreshable) { return 'Monthly' }
+                    return 'Manual'
+                }
+                return 'Manual'
+            }
+            # Verified; compare PatchTuesdayOfBaseline.
+            $recorded = $Snapshot.PatchTuesdayOfBaseline
+            if ([string]::IsNullOrEmpty($recorded)) {
+                if ($isAutoRefreshable) { return 'Monthly' }
+                return 'Manual'
+            }
+            if ([string]::Compare($recorded, $LatestPatchTuesday) -lt 0) {
+                if ($isAutoRefreshable) { return 'Monthly' }
+                return 'Manual'
+            }
+            return 'Skip'
+        }
+        default {
+            return 'Manual'
+        }
+    }
+}
+
+function Get-GroupSnapshot {
+    <#
+    .SYNOPSIS
+        Read the verification state and PatchTuesdayOfBaseline for
+        the given field group out of a config raw JSON object.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [pscustomobject]$ConfigRaw,
+        [Parameter(Mandatory)] [string]$GroupPath,
+        [string]$Lang
+    )
+    $resolvedPath = $GroupPath
+    if ($Lang) { $resolvedPath = $resolvedPath -replace '<lang>', $Lang }
+
+    $verifiedDate = ''
+    $verifiedBy   = ''
+    $ptOfBaseline = ''
+
+    switch -Regex ($resolvedPath) {
+        '^Common$' {
+            $verifiedDate = if ($ConfigRaw.Common.PSObject.Properties['_VerifiedDate']) { [string]$ConfigRaw.Common._VerifiedDate } else { '' }
+            $verifiedBy   = if ($ConfigRaw.Common.PSObject.Properties['_VerifiedBy'])   { [string]$ConfigRaw.Common._VerifiedBy   } else { '' }
+            break
+        }
+        '^PatchBaseline$' {
+            $verifiedDate = if ($ConfigRaw.PatchBaseline.PSObject.Properties['LastVerifiedDate']) { [string]$ConfigRaw.PatchBaseline.LastVerifiedDate } else { '' }
+            $verifiedBy   = if ($ConfigRaw.PatchBaseline.PSObject.Properties['LastVerifiedBy'])   { [string]$ConfigRaw.PatchBaseline.LastVerifiedBy   } else { '' }
+            $ptOfBaseline = if ($ConfigRaw.PatchBaseline.PSObject.Properties['PatchTuesdayOfBaseline']) { [string]$ConfigRaw.PatchBaseline.PatchTuesdayOfBaseline } else { '' }
+            break
+        }
+        '^LanguageSpecific\.(?<lang>[^.]+)\.Iso$' {
+            $node = $ConfigRaw.LanguageSpecific.$Lang.Iso
+            if ($node) {
+                $verifiedDate = if ($node.PSObject.Properties['_VerifiedDate']) { [string]$node._VerifiedDate } else { '' }
+                $verifiedBy   = if ($node.PSObject.Properties['_VerifiedBy'])   { [string]$node._VerifiedBy   } else { '' }
+            }
+            break
+        }
+        '^LanguageSpecific\.(?<lang>[^.]+)\.LanguageSpecificPatches$' {
+            $node = $ConfigRaw.LanguageSpecific.$Lang.LanguageSpecificPatches
+            if ($node) {
+                $verifiedDate = if ($node.PSObject.Properties['LastVerifiedDate'])       { [string]$node.LastVerifiedDate       } else { '' }
+                $verifiedBy   = if ($node.PSObject.Properties['LastVerifiedBy'])         { [string]$node.LastVerifiedBy         } else { '' }
+                $ptOfBaseline = if ($node.PSObject.Properties['PatchTuesdayOfBaseline']) { [string]$node.PatchTuesdayOfBaseline } else { '' }
+            }
+            break
+        }
+    }
+    return [pscustomobject]@{
+        ResolvedPath           = $resolvedPath
+        IsVerified             = -not [string]::IsNullOrEmpty($verifiedDate)
+        VerifiedDate           = $verifiedDate
+        VerifiedBy             = $verifiedBy
+        PatchTuesdayOfBaseline = $ptOfBaseline
+    }
+}
+
+function Set-GroupVerifiedState {
+    <#
+    .SYNOPSIS
+        Update the _VerifiedDate / _VerifiedBy / LastVerified* fields
+        for a given field group inside a config raw object (in memory).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [pscustomobject]$ConfigRaw,
+        [Parameter(Mandatory)] [string]$GroupPath,
+        [string]$Lang,
+        [string]$PatchTuesday,
+        [string]$VerifierTag
+    )
+    $now = (Get-Date).ToString('o')
+    $by = $VerifierTag
+    if ([string]::IsNullOrEmpty($by)) { $by = 'auto:RefreshAllBaselines' }
+
+    $resolvedPath = $GroupPath
+    if ($Lang) { $resolvedPath = $resolvedPath -replace '<lang>', $Lang }
+
+    switch -Regex ($resolvedPath) {
+        '^Common$' {
+            $ConfigRaw.Common | Add-Member -NotePropertyName '_VerifiedDate' -NotePropertyValue $now -Force
+            $ConfigRaw.Common | Add-Member -NotePropertyName '_VerifiedBy'   -NotePropertyValue $by  -Force
+            break
+        }
+        '^PatchBaseline$' {
+            $ConfigRaw.PatchBaseline | Add-Member -NotePropertyName 'LastVerifiedDate'        -NotePropertyValue $now           -Force
+            $ConfigRaw.PatchBaseline | Add-Member -NotePropertyName 'LastVerifiedBy'          -NotePropertyValue $by            -Force
+            if ($PatchTuesday) {
+                $ConfigRaw.PatchBaseline | Add-Member -NotePropertyName 'PatchTuesdayOfBaseline' -NotePropertyValue $PatchTuesday -Force
+            }
+            break
+        }
+        '^LanguageSpecific\.(?<lang>[^.]+)\.Iso$' {
+            $ConfigRaw.LanguageSpecific.$Lang.Iso | Add-Member -NotePropertyName '_VerifiedDate' -NotePropertyValue $now -Force
+            $ConfigRaw.LanguageSpecific.$Lang.Iso | Add-Member -NotePropertyName '_VerifiedBy'   -NotePropertyValue $by  -Force
+            break
+        }
+        '^LanguageSpecific\.(?<lang>[^.]+)\.LanguageSpecificPatches$' {
+            $node = $ConfigRaw.LanguageSpecific.$Lang.LanguageSpecificPatches
+            $node | Add-Member -NotePropertyName 'LastVerifiedDate' -NotePropertyValue $now -Force
+            $node | Add-Member -NotePropertyName 'LastVerifiedBy'   -NotePropertyValue $by  -Force
+            if ($PatchTuesday) {
+                $node | Add-Member -NotePropertyName 'PatchTuesdayOfBaseline' -NotePropertyValue $PatchTuesday -Force
+            }
+            break
+        }
+    }
+}
+
+    # psa-disable-next-line PSA6003 -- intentional plural: function refreshes ALL baselines across multiple OS x language combinations
+function Invoke-AdminPhaseA01_RefreshAllBaselines {
+    <#
+    .SYNOPSIS
+        Refresh Config/<OsKey>.json baselines for one or more OS / language
+        combinations. Applies the field-group decision matrix and calls
+        the appropriate Refresher function per group.
+    #>
+    [CmdletBinding()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Action name intentionally plural: refreshes ALL baselines across multiple OS x language combinations.')]
+    [OutputType([bool])]
+    param()
+
+    Start-DebugTrace -Context 'Invoke-AdminPhaseA01_RefreshAllBaselines' -PhaseId 'A01'
+    $okOverall = $true
+    $hasUnresolved = $false
+    try {
+        Set-DebugStep -Step 'discover-configs'
+        $configRoot = Join-Path $Script:ScriptRoot 'Config'
+        if (-not (Test-Path -LiteralPath $configRoot)) {
+            throw ('Config root not found: {0}' -f $configRoot)
+        }
+
+        # Determine which OS configs to process
+        $allOsKeys = @('Server2016','Server2019','Server2022','Server2025')
+        $targetOsKeys = $allOsKeys
+        if ($Script:OnlyOs) { $targetOsKeys = @($Script:OnlyOs) }
+
+        # Resolve Patch Month (used as PatchTuesday baseline marker)
+        Set-DebugStep -Step 'resolve-patch-tuesday'
+        $latestPt = Get-LatestPatchTuesday | ForEach-Object { $_.ToString('yyyy-MM-dd') }
+        $patchMonth = $latestPt.Substring(0,7)        # 'yyyy-MM'
+        if (-not [string]::IsNullOrEmpty($Script:PatchMonth)) {
+            $patchMonth = $Script:PatchMonth
+            Write-Step ('Override patch month: {0}' -f $patchMonth)
+        }
+
+        Write-SubSection 'Refresh plan'
+        Write-Step ('Mode               : {0}' -f $Script:Mode)
+        Write-Step ('Latest Patch Tuesday: {0}' -f $latestPt)
+        Write-Step ('Patch Month        : {0}' -f $patchMonth)
+        Write-Step ('Target OS configs  : {0}' -f ($targetOsKeys -join ', '))
+        if ($Script:OnlyLanguage) {
+            Write-Step ('Only language      : {0}' -f $Script:OnlyLanguage)
+        }
+        if ($Script:DryRun) {
+            Write-Warn 'DryRun is ON: changes will NOT be written back to disk.'
+        }
+
+        $reportRows = New-Object System.Collections.Generic.List[object]
+
+        foreach ($osKey in $targetOsKeys) {
+            Set-DebugStep -Step ('os:' + $osKey)
+            $cfgFile = Join-Path $configRoot ($osKey + '.json')
+            if (-not (Test-Path -LiteralPath $cfgFile)) {
+                Write-Warn ('Config not found: {0}' -f $cfgFile)
+                continue
+            }
+            Write-SubSection ('Refreshing {0}' -f $osKey)
+            $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($raw.Schema -ne '2.0') {
+                Write-Warn ('Skipping {0}: Schema is "{1}", expected "2.0".' -f $osKey, $raw.Schema)
+                continue
+            }
+
+            $supportedLangs = @($raw.Common.SupportedLanguages)
+            if ($Script:OnlyLanguage) {
+                $supportedLangs = @($supportedLangs | Where-Object { $_ -eq $Script:OnlyLanguage })
+            }
+            $changed = $false
+
+            # ----- Iterate field groups (per FieldGroups constant) -----
+            foreach ($g in $Script:OsConfigFieldGroups) {
+                # Identify if this group is per-language (path contains <lang>) or global.
+                # NOTE: PowerShell 7's `if (...) { ... } else { @($null) }` collapses
+                # to a bare $null instead of a single-element array. Use the comma
+                # operator (,$null) to force a true 1-element array so the foreach
+                # below always executes the body at least once for global groups.
+                $isPerLang = ($g.Path -match '<lang>')
+                if ($isPerLang) {
+                    $iterLangs = @($supportedLangs)
+                } else {
+                    $iterLangs = ,$null
+                }
+                foreach ($lang in $iterLangs) {
+                    $snap = Get-GroupSnapshot -ConfigRaw $raw -GroupPath $g.Path -Lang $lang
+                    $decision = Get-RefreshDecision -Group $g -Snapshot $snap `
+                                                    -Mode $Script:Mode -LatestPatchTuesday $latestPt
+                    $resolvedPath = $g.Path
+                    if ($lang) { $resolvedPath = $resolvedPath -replace '<lang>', $lang }
+                    Write-Step ('  Group {0,-55} cadence={1,-12} decision={2}' -f $resolvedPath, $g.Cadence, $decision)
+
+                    $patchCount = 0
+                    $errorMsg = ''
+                    switch ($decision) {
+                        'Skip' {
+                            # Nothing to do
+                        }
+                        'Manual' {
+                            $hasUnresolved = $true
+                            Write-Warn ('    -> Manual fill required (no auto Refresher for this group).')
+                        }
+                        { $_ -in @('InitialFill','Monthly') } {
+                            # Invoke the Refresher
+                            $refresher = $g.Refresher
+                            if ([string]::IsNullOrEmpty($refresher)) {
+                                $hasUnresolved = $true
+                                Write-Warn ('    -> No Refresher; field requires manual fill.')
+                                break
+                            }
+                            try {
+                                if ($refresher -eq 'Resolve-PatchSetFromCatalog') {
+                                    $patches = @(Resolve-PatchSetFromCatalog -OsVersion $osKey `
+                                                                              -OsLanguage 'neutral' `
+                                                                              -PatchMonth $patchMonth `
+                                                                              -MaxRetries 3)
+                                    $patchCount = $patches.Count
+                                    if (-not $Script:DryRun -and $patchCount -gt 0) {
+                                        $raw.PatchBaseline.NeutralPatches = $patches
+                                    }
+                                    Set-GroupVerifiedState -ConfigRaw $raw -GroupPath $g.Path -Lang $lang `
+                                                           -PatchTuesday $latestPt -VerifierTag 'auto:RefreshAllBaselines'
+                                    $changed = $true
+                                } elseif ($refresher -eq 'Resolve-LanguageSpecificPatchesFromCatalog') {
+                                    $langPatches = @(Resolve-LanguageSpecificPatchesFromCatalog -OsVersion $osKey `
+                                                                                                 -OsLanguage $lang `
+                                                                                                 -PatchMonth $patchMonth `
+                                                                                                 -MaxRetries 3)
+                                    $patchCount = $langPatches.Count
+                                    if (-not $Script:DryRun) {
+                                        $node = $raw.LanguageSpecific.$lang.LanguageSpecificPatches
+                                        $lps   = @($langPatches | Where-Object { $_.Type -eq 'LanguagePack' })
+                                        $lxps  = @($langPatches | Where-Object { $_.Type -eq 'LXP' })
+                                        $dotnetLps = @($langPatches | Where-Object { $_.Type -eq 'DotNet.LangPack' })
+                                        $node | Add-Member -NotePropertyName 'LanguagePacks'       -NotePropertyValue $lps       -Force
+                                        $node | Add-Member -NotePropertyName 'LxpUpdates'          -NotePropertyValue $lxps      -Force
+                                        $node | Add-Member -NotePropertyName 'DotNetLanguagePacks' -NotePropertyValue $dotnetLps -Force
+                                    }
+                                    Set-GroupVerifiedState -ConfigRaw $raw -GroupPath $g.Path -Lang $lang `
+                                                           -PatchTuesday $latestPt -VerifierTag 'auto:RefreshAllBaselines'
+                                    $changed = $true
+                                } else {
+                                    $hasUnresolved = $true
+                                    Write-Warn ('    -> Unknown Refresher "{0}"' -f $refresher)
+                                }
+                            } catch {
+                                $okOverall = $false
+                                $errorMsg = $_.Exception.Message
+                                Write-Fail ('    -> Refresher failed: {0}' -f $errorMsg)
+                            }
+                        }
+                    }
+                    $reportRows.Add([pscustomobject]@{
+                        OsKey      = $osKey
+                        Lang       = if ($lang) { $lang } else { '-' }
+                        Group      = $resolvedPath
+                        Cadence    = $g.Cadence
+                        Decision   = $decision
+                        PatchCount = $patchCount
+                        Error      = $errorMsg
+                    }) | Out-Null
+                }
+            }
+
+            # Writeback if anything changed and not DryRun
+            if ($changed -and -not $Script:DryRun) {
+                Set-DebugStep -Step ('writeback:' + $osKey)
+                # Use Save-ConfigWithBaseline for atomic LF/UTF-8 write
+                Save-ConfigWithBaseline -ConfigPath $cfgFile -OsProfile $raw
+                Write-Ok ('  Wrote: {0}' -f $cfgFile)
+            } elseif ($changed -and $Script:DryRun) {
+                Write-Warn ('  DryRun: would have written {0}' -f $cfgFile)
+            } else {
+                Write-Step ('  No changes for {0}' -f $osKey)
+            }
+        }
+
+        # Emit aggregate report
+        Set-DebugStep -Step 'emit-report'
+        $reportPath = Join-Path $Script:LogsDir 'A01_RefreshAllBaselines_report.csv'
+        $reportRows | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
+        Write-Ok ('Report: {0}' -f $reportPath)
+
+        Write-Host ''
+        Write-Host '============================== Summary ==============================' -ForegroundColor Cyan
+        $byDecision = $reportRows | Group-Object Decision | Sort-Object Name
+        foreach ($g in $byDecision) {
+            Write-Host ('  {0,-15} : {1}' -f $g.Name, $g.Count) -ForegroundColor White
+        }
+        Write-Host ''
+
+        if (-not $okOverall) {
+            $Script:ExitCode = 1
+            return $false
+        }
+        if ($hasUnresolved) {
+            $Script:ExitCode = 2
+            Write-Warn 'Some fields require manual fill; exit code 2.'
+        }
+        return $true
+    } finally {
+        Stop-DebugTrace
+    }
+}
+
+function Invoke-AdminPhaseA02_DumpFieldClassification {
+    <#
+    .SYNOPSIS
+        Dump $Script:OsConfigFieldGroups as JSON for downstream tooling
+        (e.g. a future Python schema validator).
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    Start-DebugTrace -Context 'Invoke-AdminPhaseA02_DumpFieldClassification' -PhaseId 'A02'
+    try {
+        Set-DebugStep -Step 'serialize-field-groups'
+        $outDir = $Script:LogsDir
+        if (-not (Test-Path -LiteralPath $outDir)) {
+            New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+        }
+        $outPath = Join-Path $outDir 'A02_FieldClassification.json'
+        $payload = [ordered]@{
+            Schema       = '2.0'
+            GeneratedAt  = (Get-Date).ToString('o')
+            ScriptVersion = $Script:ScriptVersion
+            FieldGroups  = @($Script:OsConfigFieldGroups | ForEach-Object {
+                [ordered]@{
+                    Path        = $_.Path
+                    Cadence     = $_.Cadence
+                    Refresher   = if ($_.Refresher) { $_.Refresher } else { $null }
+                    Description = $_.Description
+                }
+            })
+        }
+        $json = $payload | ConvertTo-Json -Depth 8
+        Set-Content -LiteralPath $outPath -Value $json -Encoding UTF8 -NoNewline
+        Add-Content -LiteralPath $outPath -Value "`n" -Encoding UTF8 -NoNewline
+        Write-Ok ('Field classification written: {0}' -f $outPath)
+        return $true
+    } finally {
+        Stop-DebugTrace
+    }
+}
 
 # ============================================================
 # Phase dispatcher and Action resolver
@@ -5298,21 +6005,47 @@ function Get-PhaseListByAction {
     <#
     .SYNOPSIS
         Map -Action to a sequence of phase IDs.
+    .DESCRIPTION
+        Admin-group actions (RefreshAllBaselines,
+        DumpFieldClassification) and applies a SyntheticTestMode
+        skip to P04 / P04.5. The synthetic ISO produced by P03 is
+        not a structurally valid ISO9660 image; Mount-DiskImage in
+        P04 therefore fails with "file or directory is corrupted"
+        on Windows runners. Stage 3 (Synthetic+Execute) already
+        bypasses P04 by going straight to P05; this aligns Stage 2
+        Smoke 3 (Synthetic+DryRun) with the same flow.
     #>
     [CmdletBinding()]
     [OutputType([string[]])]
     param([Parameter(Mandatory)] [string]$ActionName)
+
+    # Phases used by the standard build pipeline. When SyntheticTestMode
+    # is set, the P04 / P04.5 pair is removed - synthetic ISOs cannot
+    # round-trip through Mount-DiskImage.
+    $standardFull = if ($Script:SyntheticTestMode) {
+        [string[]]@('P01','P02','P02.5','P03','P05','P06','P07','P08','P09')
+    } else {
+        [string[]]@('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09')
+    }
+    $standardPrepare = if ($Script:SyntheticTestMode) {
+        [string[]]@('P01','P02','P02.5','P03')
+    } else {
+        [string[]]@('P01','P02','P02.5','P03','P04','P04.5')
+    }
+
     switch ($ActionName) {
-        'Prepare'             { return [string[]]@('P01','P02','P02.5','P03','P04','P04.5') }
-        'Build'               { return [string[]]@('P05','P06','P07') }
-        'Verify'              { return [string[]]@('P08','P09') }
-        'PrepareBuildVerify'  { return [string[]]@('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09') }
-        'All'                 { return [string[]]@('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09') }
-        'BootTest'            { return [string[]]@() }
-        'Cleanup'             { return [string[]]@() }
-        'ListPhases'          { return [string[]]@() }
-        'GenerateManifest'    { return [string[]]@('P01','P02','P02.5') }
-        default               { throw ('Unknown action: {0}' -f $ActionName) }
+        'Prepare'                 { return $standardPrepare }
+        'Build'                   { return [string[]]@('P05','P06','P07') }
+        'Verify'                  { return [string[]]@('P08','P09') }
+        'PrepareBuildVerify'      { return $standardFull }
+        'All'                     { return $standardFull }
+        'BootTest'                { return [string[]]@() }
+        'Cleanup'                 { return [string[]]@() }
+        'ListPhases'              { return [string[]]@() }
+        'GenerateManifest'        { return [string[]]@('P01','P02','P02.5') }
+        'RefreshAllBaselines'     { return [string[]]@('A01') }
+        'DumpFieldClassification' { return [string[]]@('A02') }
+        default                   { throw ('Unknown action: {0}' -f $ActionName) }
     }
 }
 
@@ -5330,7 +6063,7 @@ function Show-PhaseList {
     }
     Write-Host ''
     Write-Host ' Actions:' -ForegroundColor Cyan
-    foreach ($a in @('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest')) {
+    foreach ($a in @('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshAllBaselines','DumpFieldClassification')) {
         $list = Get-PhaseListByAction -ActionName $a
         if ($list.Count -gt 0) {
             Write-Host ('  {0,-22} : {1}' -f $a, ($list -join ',')) -ForegroundColor DarkCyan

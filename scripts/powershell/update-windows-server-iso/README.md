@@ -146,6 +146,47 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
     -Execute
 ```
 
+## Admin actions: Config baseline management
+
+The `Config/<OsKey>.json` files hold the baseline data the script
+uses. Two admin actions let you refresh and inspect that data
+without touching any ISO:
+
+```powershell
+# Monthly refresh (default Mode): refresh only the field groups whose
+# recorded Patch Tuesday is older than the latest one. Walks every
+# OS Config in Config/Server*.json, scrapes Microsoft Update Catalog
+# where applicable, writes results back to the corresponding JSON.
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines
+
+# Initial fill: also fill in any never-verified field group with an
+# auto Refresher available (PatchBaseline, LanguageSpecificPatches).
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Initial
+
+# Force: refresh every group regardless of state.
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Force
+
+# Dry run: show what would change without writing back.
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -DryRun
+
+# Limit scope to one OS / one language.
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -OnlyOs Server2025
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -OnlyLanguage ja-jp
+
+# Dump the field classification metadata as JSON (used by external
+# Schema validators or by humans inspecting the data model).
+.\Update-WindowsServerIso.ps1 -Action DumpFieldClassification
+# -> <WorkRoot>/logs/A02_FieldClassification.json
+```
+
+`RefreshAllBaselines` exit codes: `0` = all OK, `1` = at least one
+Refresher failed, `2` = some fields require manual fill (no auto
+Refresher available, typically the `LanguageSpecific.<lang>.Iso`
+groups for newly-added languages).
+
+A per-group CSV report is emitted to
+`<WorkRoot>/logs/A01_RefreshAllBaselines_report.csv`.
+
 ## Requirements
 
 | Item | Requirement |

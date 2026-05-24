@@ -140,6 +140,41 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
     -Execute
 ```
 
+## 管理用 Action: Config ベースラインの保守
+
+`Config/<OsKey>.json` はスクリプトが使うベースラインデータの保管場所です。次の 2 つの管理用 Action で、ISO に触れずにこれらのデータを更新・参照できます。
+
+```powershell
+# 月次更新(デフォルト Mode): 記録されている Patch Tuesday が
+# 最新のものより古いフィールドグループだけを更新する。
+# Config/Server*.json をすべて巡回し、Microsoft Update Catalog を
+# スクレイプして該当 JSON に書き戻す。
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines
+
+# 初回確定: 自動 Refresher がある未確定フィールドグループ
+# (PatchBaseline、LanguageSpecificPatches) も併せて埋める。
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Initial
+
+# 強制更新: 状態に関係なく全グループを更新する。
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Force
+
+# 確認のみ: 書き戻しを行わずに何が変わるかだけを表示する。
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -DryRun
+
+# 範囲を OS / 言語で限定する。
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -OnlyOs Server2025
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -OnlyLanguage ja-jp
+
+# フィールド分類メタ情報を JSON でダンプする
+# (外部の Schema validator や、データモデルを確認したい人間が使う)。
+.\Update-WindowsServerIso.ps1 -Action DumpFieldClassification
+# -> <WorkRoot>/logs/A02_FieldClassification.json
+```
+
+`RefreshAllBaselines` の終了コード: `0` = すべて成功、`1` = Refresher のいずれかが失敗、`2` = 手動入力が必要なフィールドが残っている(自動 Refresher が無い、典型的には新言語追加時の `LanguageSpecific.<lang>.Iso` グループなど)。
+
+グループ別 CSV レポートが `<WorkRoot>/logs/A01_RefreshAllBaselines_report.csv` に出力されます。
+
 ## 動作要件
 
 | 項目 | 要件 |
