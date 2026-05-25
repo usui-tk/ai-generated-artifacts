@@ -6,7 +6,7 @@
 # Runs on release publication (release/published event) or manual dispatch.
 # Independent of the STAGE 1 -> 2 workflow_run chain.
 #
-# Performs an end-to-end pipeline run (P01 through P09) in
+# Performs an end-to-end pipeline run (P01 through P13) in
 # -SyntheticTestMode, exercising DISM mount, Add-WindowsPackage
 # (against a stub WIM), and oscdimg (against a stub bootable layout)
 # without touching any real Microsoft binary. This verifies the
@@ -57,7 +57,7 @@ jobs:
     # latency on the ADK download.
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # --- Cache the ADK installer to avoid re-downloading ~1 GB ---
       - name: '[ADK] Cache installer'
@@ -105,8 +105,9 @@ jobs:
           }
 
       # --- Full -SyntheticTestMode pipeline ---
-      # -SyntheticTestMode implicitly skips P02.5 (Catalog scrape) and
-      # P04.5 (wsusscn2 scan). This keeps Stage 3 self-contained: it
+      # -SyntheticTestMode implicitly skips P03 (Catalog scrape) and
+      # P06 (wsusscn2 scan) in r05.0+ phase numbering (was P02.5/P04.5
+      # in r04.x). This keeps Stage 3 self-contained: it
       # does not require Catalog connectivity and does not download
       # the ~1 GB wsusscn2.cab file. Real-world dependency validation
       # is exercised in production runs, not in CI.
@@ -116,7 +117,7 @@ jobs:
         working-directory: scripts/powershell/update-windows-server-iso
         run: |
           # Sandbox + Synthetic: exercises the full path including DISM
-          # mount, Add-WindowsPackage simulation, oscdimg, P08 verify.
+          # mount, Add-WindowsPackage simulation, oscdimg, P11 verify, P12 PCA2023 readiness.
           .\Update-WindowsServerIso.ps1 `
               -Action PrepareBuildVerify `
               -OsVersion Server2019 -OsLanguage en-us `
@@ -148,7 +149,7 @@ jobs:
         run: |
           "## STAGE 3 - Synthetic full pipeline results" >> $env:GITHUB_STEP_SUMMARY
           "" >> $env:GITHUB_STEP_SUMMARY
-          "Full P01-P09 execution under -SyntheticTestMode -Execute." >> $env:GITHUB_STEP_SUMMARY
+          "Full P01-P13 execution under -SyntheticTestMode -Execute." >> $env:GITHUB_STEP_SUMMARY
           "Output ISO produced but NOT uploaded (evaluation licence)." >> $env:GITHUB_STEP_SUMMARY
           "See the job log for the complete phase-by-phase output." >> $env:GITHUB_STEP_SUMMARY
 
@@ -159,7 +160,7 @@ jobs:
       # the output/ folder.
       - name: '[Artifacts] Upload diagnostic logs (NO ISO)'
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: uwsi-stage3-${{ github.run_id }}
           path: |

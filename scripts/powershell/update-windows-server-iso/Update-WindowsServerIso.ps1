@@ -2192,7 +2192,7 @@ function Assert-WorkspacePreflight {
     #
     # Skipped under -DryRun (no actual WIM mounts will happen) and on
     # non-Windows hosts (where Get-Volume is unavailable). For non-Windows
-    # the check is silent — Linux-side validation already happens via
+    # the check is silent -- Linux-side validation already happens via
     # the PSScriptAnalyzer / synthetic-test pathway.
     if ($Script:DryRun) {
         Write-Skip 'DryRun: skipping filesystem-type check.'

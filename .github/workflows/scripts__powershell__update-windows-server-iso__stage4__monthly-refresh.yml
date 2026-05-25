@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0       # full history so the PR branch diff resolves cleanly
           persist-credentials: true
@@ -149,7 +149,7 @@ jobs:
 
       - name: Upload refresh artefacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: refresh-report-${{ github.run_id }}
           if-no-files-found: warn
@@ -200,7 +200,7 @@ jobs:
         if: >-
           steps.diff.outputs.has-changes == 'true' &&
           steps.inputs.outputs.dryRun != 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: auto/uwsi-baseline-refresh-${{ github.run_id }}

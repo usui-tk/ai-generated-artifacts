@@ -287,6 +287,62 @@ they are quality / documentation upgrades surfaced by the audit.
   conventions. The file is opt-in for contributors who run
   markdownlint locally; CI is not yet wired to enforce it.
 
+### Fixed (CI workflow remediation, r04.x carryover)
+
+Audit of the most recent CI run on `main` (`1aa96df`, STAGE 1
+Linux checks #12) surfaced two pre-existing problems that were
+about to make the next push fail; both are fixed in r05.0:
+
+- **STAGE 1 Config JSON validator was still using Schema v1 keys**
+  (`OsName`, `OsShortName`, `Build`, `Architecture`, `Languages`
+  at top level). Schema v2.0 (introduced in r03) restructured these
+  under `Common/PatchBaseline/LanguageSpecific`, and Schema v2.1
+  (r05.0) added the `Pca2023` block. The validator therefore failed
+  with `FAIL: Server2016.json missing top-level "OsName"` and
+  exited 1, which cascaded into "psa.sarif not produced" and
+  "pssa.sarif not produced" errors in downstream steps. The
+  validator has been rewritten to accept Schema 2.0 (warned) and
+  2.1 (required), to verify the `Common.*` fields, and to enforce
+  the `Pca2023` block presence when `Schema == 2.1`.
+
+- **Embedded em dash (U+2014) in `Assert-WorkspacePreflight`** broke
+  the BOM + CRLF + ASCII-only validator at line 2195. The character
+  was introduced during Stage B Step 3 (NTFS check) and is now
+  replaced with two ASCII hyphens. The validator now passes again
+  (416,708 bytes, ASCII-only).
+
+### Changed (CI infrastructure modernisation, r05.0)
+
+Coordinated bump of all GitHub Actions to Node 24-compatible
+versions ahead of the 2026-09-16 Node 20 removal deadline and the
+December 2026 CodeQL Action v3 deprecation. Affects all 8 workflow
+files (update-windows-server-iso STAGE 1-4, download-speakerdeck
+STAGE 1-3, psa.py CI):
+
+| Action | Was | Now |
+|---|:---:|:---:|
+| `actions/checkout` | `@v4` | `@v5` |
+| `actions/setup-python` | `@v5` | `@v6` |
+| `actions/upload-artifact` | `@v4` | `@v5` |
+| `github/codeql-action/upload-sarif` | `@v3` | `@v4` |
+| `peter-evans/create-pull-request` | `@v7` | `@v8` |
+| `actions/cache` | `@v4` | `@v4` (unchanged - current) |
+| `microsoft/psscriptanalyzer-action` | `@v1.1` | `@v1.1` (no v2 released) |
+
+Additionally, `setup-python` now pins to **`python-version: '3.12'`**
+instead of the previous `'3.x'`. The latter was resolving to
+CPython 3.14.x on the GitHub-hosted Ubuntu 24.04 runner, which
+has not been validated against psa.py + the T1-T5 self-
+verification tool suite. Pinning to 3.12 (the version the project
+has run its full test matrix on) restores deterministic behaviour
+and forms an explicit upgrade point — bumping it requires running
+the test matrix locally on the target Python version first.
+
+Workflow comments referencing old phase IDs (`P02.5`, `P04.5`,
+`P02/P03/P04`, `P08 verify`, "P01 through P09") are also updated
+to the r05.0 phase numbering (`P03`, `P06`, `P02/P04/P05`,
+`P11 verify`, "P01 through P13").
+
 ## [update-wsi-2026.05.25-r04.4] - 2026-05-25
 
 ### Added - Self-verification tool suite (`tests/`)

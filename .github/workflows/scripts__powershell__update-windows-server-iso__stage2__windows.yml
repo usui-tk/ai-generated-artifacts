@@ -45,7 +45,7 @@ jobs:
     # (~1 min combined) plus buffer for transient PSGallery latency.
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # --- Tool group: PSScriptAnalyzer (Windows PowerShell 5.1) ---
       # The Marketplace action runs PSScriptAnalyzer; the analyzed script
@@ -62,7 +62,7 @@ jobs:
 
       - name: '[PSSA-pwsh51] Upload SARIF to Code Scanning'
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: pssa.sarif
           category: pssa-pwsh51
@@ -129,9 +129,10 @@ jobs:
           }
 
       # --- Smoke test 3: Synthetic + DryRun (no DISM writes, no Catalog) ---
-      # Exercises the registry-driven dispatcher and the P02/P03/P04
+      # Exercises the registry-driven dispatcher and the P02/P04/P05
       # planning paths without mounting any WIM. -SyntheticTestMode also
-      # implicitly skips P02.5 (Catalog scrape) and P04.5 (wsusscn2 scan).
+      # implicitly skips P03 (Catalog scrape) and P06 (wsusscn2 scan)
+      # in r05.0+ phase numbering (was P02.5/P04.5 in r04.x).
       - name: '[Smoke3] Synthetic + DryRun'
         shell: powershell
         timeout-minutes: 5
@@ -169,7 +170,7 @@ jobs:
       # and potentially secrets.
       - name: '[Artifacts] Upload logs'
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: uwsi-stage2-${{ github.run_id }}
           path: |
