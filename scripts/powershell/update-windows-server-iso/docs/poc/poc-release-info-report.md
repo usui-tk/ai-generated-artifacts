@@ -218,6 +218,100 @@ These are the kinds of edge cases that argue for keeping the parser
 strict and review-driven rather than tolerant of arbitrary
 structural drift.
 
+### Question B (revisited via step 04): KB -> UpdateId / DownloadUrl
+
+**Answer: Yes, with one important caveat about OS naming.**
+
+The original Phase 2 plan asked: *"Can the KB numbers harvested
+from release-info be turned into actual .msu / .cab download URLs
+via Microsoft Update Catalog, using only the KB as input (no
+Title-string heuristics)?"* The first version of this report
+deferred the question to Phase 3. The follow-up step 04 script
+(`poc_release_info_04_resolve.py`) now answers it definitively
+against 8 representative (OS, KB) pairs from the parsed data:
+
+| Sample                                       | Search hits | Download URLs | Verdict |
+| -------------------------------------------- | ----------: | ------------: | :-----: |
+| Server 2025 2026-04 B LCU (current)          |           1 |             2 |   OK    |
+| Server 2022 2026-04 B LCU (current)          |           1 |             1 |   OK    |
+| Server 2019 2026-04 B LCU (current)          |           3 |             1 |   OK    |
+| Server 2016 2026-04 B LCU (current)          |           3 |             1 |   OK    |
+| Server 2025 2026-04 OOB                      |           1 |             2 |   OK    |
+| Server 2025 2026-01 B (Hotpatch baseline)    |           1 |             2 |   OK    |
+| Server 2025 2024-11 B (early life)           |           3 |             2 |   OK    |
+| Server 2019 2026-03 B                        |           3 |             1 |   OK    |
+
+**Verdict: 8 / 8 succeeded.**
+
+The resolver script is small (~200 lines) and uses only the
+existing `tests/common/catalog_client.py` and
+`tests/common/html_parsers.py` modules. The KB number is the
+only input it needs from release-info; Title is used only as a
+disambiguator (when the same KB has multiple Catalog entries),
+not as a discovery field.
+
+**Empirical caveat -- OS naming on the Catalog**. The script's
+first iteration failed for Server 2022 and Server 2025 because
+their Titles do not say "Windows Server 2025" -- they say
+"Microsoft server operating system version 24H2" (and "...version
+21H2" for Server 2022). Server 2019 and Server 2016 still use the
+familiar "Windows Server 2019" / "Windows Server 2016" naming.
+The Phase 3 resolver MUST handle both naming conventions.
+Production code already does (see `Get-CatalogQueryTemplate` for
+the canonical token list).
+
+**Empirical caveat -- Server 2025 returns 2 download URLs**. Every
+Server 2025 LCU sample resolved to two download URLs: the LCU
+itself plus `KB5043080` (the Servicing Stack baseline). This is
+the same Servicing Stack package every time, regardless of which
+LCU month is being resolved. This empirically validates SPEC.md
+§B.21.1's claim that Server 2025 has no standalone SSU --
+Microsoft serves the SSU dependency alongside every LCU as a
+two-file bundle through DownloadDialog.aspx. The Refresher must
+download both .msu files and let Add-WindowsPackage figure out
+the dependency order (Add-WindowsPackage handles SSU ordering
+automatically).
+
+**Impact on Phase 3**. The original Phase 3 recommendation
+("Catalog becomes URL resolver only; release-info becomes KB
+discoverer") is empirically validated. The KB-only resolver path
+works for every (OS, KB) pair tested, including Hotpatch baseline
+LCUs and OOB releases. The Phase 3 implementation should however
+preserve the OS-specific naming token list, which is already
+canonical in `Get-CatalogQueryTemplate`.
+
+The full resolver sample data is in
+[`tests/fixtures/poc_release_info/resolve-sample.json`](../../tests/fixtures/poc_release_info/resolve-sample.json).
+
+### Question E (revisited): .NET CU release-notes page
+
+The original report concluded "Phase 3 should investigate whether
+the .NET release-notes pages provide a stable Markdown table".
+That investigation was completed in r06.0 Phase 2 as the
+`dotnet_cu` PoC; results are in
+[`poc-dotnet-cu-report.md`](./poc-dotnet-cu-report.md). Short
+version: **yes**, the `.NET Framework cumulative update`
+release-notes pages are served as Markdown via the same
+`?accept=text/markdown` mechanism, the per-OS x per-.NET-version
+KB table is parseable, and the data validates (with one
+discrepancy on Server 2016) the file-count rules in SPEC.md
+§B.21.2.
+
+### Question F (revisited): Dynamic Update via Catalog
+
+The original report concluded that Dynamic Update.Setup /
+Dynamic Update.SafeOs must stay on the Catalog scrape path. That
+claim was tested in r06.0 Phase 2 as the `dynamic_update` PoC;
+results are in
+[`poc-dynamic-update-report.md`](./poc-dynamic-update-report.md).
+Short version: **yes for Server 2022 SafeOs / Server 2025
+SafeOs**, **partial for Server 2025 Setup** (Microsoft has not
+published a Setup DU for the 24H2 server line since 2025-11),
+**not applicable for Server 2019 / 2016** (no monthly DU
+cadence). The Phase 3 Refresher must tolerate "DU.Setup is
+missing for this month" without treating it as an error for
+Server 2025 going forward.
+
 ## Recommendations for Phase 3
 
 These are recommendations, not commitments. Phase 3 design decisions

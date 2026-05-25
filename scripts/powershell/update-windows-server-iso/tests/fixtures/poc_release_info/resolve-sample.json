@@ -1,0 +1,264 @@
+{
+  "sample_count": 8,
+  "success_count": 8,
+  "failure_count": 0,
+  "verdict": "works",
+  "results": [
+    {
+      "sample": {
+        "label": "Server2025 2026-04 B LCU (current)",
+        "os_short_name": "Server2025",
+        "os_title_match": "Server 2025",
+        "kb_id": "KB5082063",
+        "arch_token": "x64"
+      },
+      "search_hit_count": 1,
+      "search_hits": [
+        {
+          "title": "2026-04 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5082063) (26100.32690)",
+          "update_id": "61c8b602-816a-4fff-9708-522494a18d4c"
+        }
+      ],
+      "chosen_update_id": "61c8b602-816a-4fff-9708-522494a18d4c",
+      "chosen_title": "2026-04 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5082063) (26100.32690)",
+      "download_url_count": 2,
+      "download_urls": [
+        "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/f8f0420a-0875-4e1e-a904-9a7acfcfbe46/public/windows11.0-kb5082063-x64_2fb0b6b3988432626f68c231d154c35362ff58ea.msu"
+      ],
+      "file_names": [
+        "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "windows11.0-kb5082063-x64_2fb0b6b3988432626f68c231d154c35362ff58ea.msu"
+      ],
+      "success": true,
+      "notes": ""
+    },
+    {
+      "sample": {
+        "label": "Server2022 2026-04 B LCU (current)",
+        "os_short_name": "Server2022",
+        "os_title_match": "Server 2022",
+        "kb_id": "KB5082142",
+        "arch_token": "x64"
+      },
+      "search_hit_count": 1,
+      "search_hits": [
+        {
+          "title": "2026-04 Cumulative Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5082142)",
+          "update_id": "fd522b7b-4adf-4335-a6fe-2ae3327e54cb"
+        }
+      ],
+      "chosen_update_id": "fd522b7b-4adf-4335-a6fe-2ae3327e54cb",
+      "chosen_title": "2026-04 Cumulative Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5082142)",
+      "download_url_count": 1,
+      "download_urls": [
+        "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5082142-x64_0d2677e2b8f6550a978bd89e8991c4d3813ccf1f.msu"
+      ],
+      "file_names": [
+        "windows10.0-kb5082142-x64_0d2677e2b8f6550a978bd89e8991c4d3813ccf1f.msu"
+      ],
+      "success": true,
+      "notes": ""
+    },
+    {
+      "sample": {
+        "label": "Server2019 2026-04 B LCU (current)",
+        "os_short_name": "Server2019",
+        "os_title_match": "Server 2019",
+        "kb_id": "KB5082123",
+        "arch_token": "x64"
+      },
+      "search_hit_count": 3,
+      "search_hits": [
+        {
+          "title": "2026-04 Cumulative Update for Windows 10 Version 1809 for x64-based Systems (KB5082123)",
+          "update_id": "b8801528-eeb4-4903-aa78-81d59bc478dd"
+        },
+        {
+          "title": "2026-04 Cumulative Update for Windows Server 2019 for x64-based Systems (KB5082123)",
+          "update_id": "6b3d0f8d-b508-4737-8ec5-19c89cd049ed"
+        },
+        {
+          "title": "2026-04 Cumulative Update for Windows 10 Version 1809 for x86-based Systems (KB5082123)",
+          "update_id": "909a7011-f7b9-4968-a605-2d1ce08ff776"
+        }
+      ],
+      "chosen_update_id": "6b3d0f8d-b508-4737-8ec5-19c89cd049ed",
+      "chosen_title": "2026-04 Cumulative Update for Windows Server 2019 for x64-based Systems (KB5082123)",
+      "download_url_count": 1,
+      "download_urls": [
+        "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5082123-x64_3c1a2626005bdced0829822c5329ca30519d083c.msu"
+      ],
+      "file_names": [
+        "windows10.0-kb5082123-x64_3c1a2626005bdced0829822c5329ca30519d083c.msu"
+      ],
+      "success": true,
+      "notes": ""
+    },
+    {
+      "sample": {
+        "label": "Server2016 2026-04 B LCU (current)",
+        "os_short_name": "Server2016",
+        "os_title_match": "Server 2016",
+        "kb_id": "KB5082198",
+        "arch_token": "x64"
+      },
+      "search_hit_count": 3,
+      "search_hits": [
+        {
+          "title": "2026-04 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5082198)",
+          "update_id": "de3678f4-1681-4c0d-a1ca-ff7babd61e43"
+        },
+        {
+          "title": "2026-04 Cumulative Update for Windows 10 Version 1607 for x86-based Systems (KB5082198)",
+          "update_id": "63b03746-5bd5-458f-b9c7-8388baf75b22"
+        },
+        {
+          "title": "2026-04 Cumulative Update for Windows 10 Version 1607 for x64-based Systems (KB5082198)",
+          "update_id": "560722f8-d53e-4999-adef-301507ad1e5a"
+        }
+      ],
+      "chosen_update_id": "de3678f4-1681-4c0d-a1ca-ff7babd61e43",
+      "chosen_title": "2026-04 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5082198)",
+      "download_url_count": 1,
+      "download_urls": [
+        "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5082198-x64_2f64ef5389462c14d458858ba6a098d9b4e2a63a.msu"
+      ],
+      "file_names": [
+        "windows10.0-kb5082198-x64_2f64ef5389462c14d458858ba6a098d9b4e2a63a.msu"
+      ],
+      "success": true,
+      "notes": ""
+    },
+    {
+      "sample": {
+        "label": "Server2025 2026-04 OOB",
+        "os_short_name": "Server2025",
+        "os_title_match": "Server 2025",
+        "kb_id": "KB5091157",
+        "arch_token": "x64"
+      },
+      "search_hit_count": 1,
+      "search_hits": [
+        {
+          "title": "2026-04 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5091157) (26100.32698)",
+          "update_id": "566d6421-6e43-431b-be56-7d27d5679237"
+        }
+      ],
+      "chosen_update_id": "566d6421-6e43-431b-be56-7d27d5679237",
+      "chosen_title": "2026-04 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5091157) (26100.32698)",
+      "download_url_count": 2,
+      "download_urls": [
+        "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/65d8cc0f-c25e-450a-a70e-dba103715bf2/public/windows11.0-kb5091157-x64_7b236751a35d946ee9934e5419b9898a9bd2a7e0.msu"
+      ],
+      "file_names": [
+        "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "windows11.0-kb5091157-x64_7b236751a35d946ee9934e5419b9898a9bd2a7e0.msu"
+      ],
+      "success": true,
+      "notes": ""
+    },
+    {
+      "sample": {
+        "label": "Server2025 2026-01 B (Hotpatch baseline)",
+        "os_short_name": "Server2025",
+        "os_title_match": "Server 2025",
+        "kb_id": "KB5073379",
+        "arch_token": "x64"
+      },
+      "search_hit_count": 1,
+      "search_hits": [
+        {
+          "title": "2026-01 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5073379) (26100.32230)",
+          "update_id": "a651360d-1771-4e68-8ddb-44c3dd447d08"
+        }
+      ],
+      "chosen_update_id": "a651360d-1771-4e68-8ddb-44c3dd447d08",
+      "chosen_title": "2026-01 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5073379) (26100.32230)",
+      "download_url_count": 2,
+      "download_urls": [
+        "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/0d978f5d-65ac-4905-9e9c-39e85a4a2b15/public/windows11.0-kb5073379-x64_7ba99163baad454955b9f76b1a59bef54208d9e9.msu"
+      ],
+      "file_names": [
+        "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "windows11.0-kb5073379-x64_7ba99163baad454955b9f76b1a59bef54208d9e9.msu"
+      ],
+      "success": true,
+      "notes": ""
+    },
+    {
+      "sample": {
+        "label": "Server2025 2024-11 B (early life)",
+        "os_short_name": "Server2025",
+        "os_title_match": "Server 2025",
+        "kb_id": "KB5046617",
+        "arch_token": "x64"
+      },
+      "search_hit_count": 3,
+      "search_hits": [
+        {
+          "title": "2024-11 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5046617)",
+          "update_id": "626ff7c5-ed48-416e-afd4-8a18e388f654"
+        },
+        {
+          "title": "2024-11 Cumulative Update for Windows 11 Version 24H2 for arm64-based Systems (KB5046617)",
+          "update_id": "65507317-7144-4b66-b4de-02535c6c7a38"
+        },
+        {
+          "title": "2024-11 Cumulative Update for Windows 11 Version 24H2 for x64-based Systems (KB5046617)",
+          "update_id": "e59933ce-6913-4beb-9563-15665679ec92"
+        }
+      ],
+      "chosen_update_id": "626ff7c5-ed48-416e-afd4-8a18e388f654",
+      "chosen_title": "2024-11 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5046617)",
+      "download_url_count": 2,
+      "download_urls": [
+        "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/2b6cbd69-2d74-4f43-ad64-12f7fd0a9ce6/public/windows11.0-kb5046617-x64_1e5d7b716c0747592ae80c218f1d81bbb7b0c7ab.msu"
+      ],
+      "file_names": [
+        "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "windows11.0-kb5046617-x64_1e5d7b716c0747592ae80c218f1d81bbb7b0c7ab.msu"
+      ],
+      "success": true,
+      "notes": ""
+    },
+    {
+      "sample": {
+        "label": "Server2019 2026-03 B",
+        "os_short_name": "Server2019",
+        "os_title_match": "Server 2019",
+        "kb_id": "KB5078752",
+        "arch_token": "x64"
+      },
+      "search_hit_count": 3,
+      "search_hits": [
+        {
+          "title": "2026-03 Cumulative Update for Windows 10 Version 1809 for x86-based Systems (KB5078752)",
+          "update_id": "558cd028-045d-4622-9823-d4a04b555d4c"
+        },
+        {
+          "title": "2026-03 Cumulative Update for Windows Server 2019 for x64-based Systems (KB5078752)",
+          "update_id": "6bebab55-81e6-4350-95d2-632d562c929a"
+        },
+        {
+          "title": "2026-03 Cumulative Update for Windows 10 Version 1809 for x64-based Systems (KB5078752)",
+          "update_id": "bc9b6656-a59a-4e3f-bd8c-adea16a7034a"
+        }
+      ],
+      "chosen_update_id": "6bebab55-81e6-4350-95d2-632d562c929a",
+      "chosen_title": "2026-03 Cumulative Update for Windows Server 2019 for x64-based Systems (KB5078752)",
+      "download_url_count": 1,
+      "download_urls": [
+        "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/03/windows10.0-kb5078752-x64_d19dce98bd2132ac8dcf4ae644ff36ec1ac7a734.msu"
+      ],
+      "file_names": [
+        "windows10.0-kb5078752-x64_d19dce98bd2132ac8dcf4ae644ff36ec1ac7a734.msu"
+      ],
+      "success": true,
+      "notes": ""
+    }
+  ]
+}

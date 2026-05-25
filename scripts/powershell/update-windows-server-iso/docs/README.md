@@ -15,8 +15,10 @@ rules.
 docs/
 ├── README.md     this file -- describes the directory itself
 └── poc/          Proof-of-Concept reports and operational docs
-    ├── poc-<topic>-readme.md   how to run a given PoC's scripts
-    └── poc-<topic>-report.md   findings, conclusions, recommendations
+    ├── poc-release-info-readme.md      how to run release_info PoC scripts
+    ├── poc-release-info-report.md      findings: release-info Markdown source
+    ├── poc-dotnet-cu-report.md         findings: .NET CU release-notes source
+    └── poc-dynamic-update-report.md    findings: Dynamic Update via Catalog
 ```
 
 ## What lives here vs. elsewhere

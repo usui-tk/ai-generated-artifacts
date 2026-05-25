@@ -108,6 +108,176 @@ open questions is in
 - No Phase 3 code or design. Phase 3 is driven by the report's
   recommendations and is a separate work item.
 
+#### r06.0 Phase 2 Part 2 — full Phase 2 coverage (this release)
+
+The first cut of Phase 2 above shipped the `release_info` PoC
+with three scripts but deferred three of the original PoC
+questions (B, E, F) to Phase 3 as "open questions". Part 2
+closes those gaps within Phase 2 so that the deliverable matches
+the original Phase 2 scope.
+
+**New PoC artefacts**:
+
+- `tests/poc_release_info_04_resolve.py` — answers PoC-B by
+  resolving 8 representative (OS, KB) pairs from the parsed
+  release-info data through the Microsoft Update Catalog
+  (Search.aspx → DownloadDialog.aspx). Verdict: 8/8 succeed
+  with KB-only input; OS-naming requires both the
+  `Windows Server NNNN` and `Microsoft server operating system
+  version NNHN` tokens to disambiguate hits.
+- `tests/poc_dotnet_cu_*.py` (new topic) — answers PoC-E by
+  fetching and parsing the Microsoft Learn
+  `.NET Framework cumulative update` release-notes pages.
+  Verdict: the pages are served as Markdown via
+  `?accept=text/markdown` and provide an authoritative per-OS x
+  per-.NET-version KB table.
+- `tests/poc_dynamic_update_01_probe.py` (new topic) — answers
+  PoC-F by probing the Catalog with the same query templates as
+  `Get-CatalogQueryTemplate`. Verdict: Server 2022 DU.SafeOs and
+  Server 2025 DU.SafeOs are reliably discoverable; Server 2025
+  DU.Setup has been absent from the Catalog for 5+ consecutive
+  months (2025-12 through 2026-04), which the Phase 3 Refresher
+  must treat as a soft signal rather than an error.
+
+**New PoC documentation**:
+
+- `docs/poc/poc-dotnet-cu-report.md` (full findings for PoC-E)
+- `docs/poc/poc-dynamic-update-report.md` (full findings for PoC-F)
+- `docs/poc/poc-release-info-report.md` updated with three
+  `(revisited)` subsections that close PoC-B / E / F by linking
+  to the new reports.
+
+**SPEC changes**:
+
+- `SPEC.md` §B.21.2 (.NET CU multiplicity by OS) amended to
+  record the upstream-source per-OS file counts alongside the
+  existing production-telemetry counts, and to explain the
+  Server 2016 discrepancy (production sees 1 file; upstream
+  release-notes lists 2 KBs).
+- `SPEC.md` Part G adjunct updated to reflect the three current
+  PoC topics (`release_info`, `dotnet_cu`, `dynamic_update`)
+  instead of just one.
+
+**Key empirical findings beyond the original Phase 2 questions**:
+
+- Microsoft Update Catalog publishes Server 2022/2025 LCUs under
+  the name "Microsoft server operating system version NNHN"
+  (not "Windows Server NNNN"); the Phase 3 resolver must accept
+  both token forms.
+- Every Server 2025 LCU resolution returns 2 download URLs: the
+  LCU itself plus `KB5043080` (the Servicing Stack baseline).
+  This empirically validates the "no standalone SSU" claim in
+  SPEC.md §B.21.1 for the Server 2025 row.
+- SPEC.md §B.21.2 had a Server 2016 .NET CU file count of 1
+  derived from r05.1 telemetry; the upstream
+  `.NET Framework cumulative update` release-notes table for
+  2026-04 lists 2 distinct KBs for Server 2016. The Phase 3
+  Refresher should consume from release-notes (not the umbrella
+  KB scrape) to surface the missing sibling.
+
+**Still not in this Phase 2**:
+
+- No `Update-WindowsServerIso.ps1` changes (still r05.1).
+- No `Config/<OsKey>.json` schema changes.
+- No T1-T5 changes.
+
+### r06.0 Phase 3 Architecture — SPEC-only: r07.0 design baseline (this release)
+
+This Phase 3 deliverable is the **SPEC consolidation** of the
+eleven architecture decisions taken during a 2026-05-25 design
+session, building on the Phase 2 PoC findings. As with Phase 1
+and Phase 2 Part 2, this release contains **no script (`.ps1`)
+changes and no on-disk Config schema changes**.
+
+**Driver**. Phase 2 (especially Part 2's PoC-B/E/F follow-up)
+turned up enough hard data to answer the open questions that
+§B.21.5 "Future work" had deliberately deferred. Rather than
+go straight to implementation, this phase records *what r07.0
+will look like* as a normative SPEC section so the implementation
+PR can be reviewed against a written design, not against the
+chat history of a design call.
+
+**New SPEC section**: **§B.23 Phase 3 Architecture (r07.0+,
+normative)** documents the eleven decisions as MADR-style
+Decision Records:
+
+| Subsection | Topic                                          | Decision                                                |
+| ---------- | ---------------------------------------------- | ------------------------------------------------------- |
+| §B.23.1    | Refresher architecture                         | Complete migration to release-info / .NET release-notes |
+| §B.23.2    | Catalog Title token matching                   | Config-driven via `CatalogTitleTokens` field            |
+| §B.23.3    | Data directory layout                          | `data/` flat with `config-` / `cache-` / `raw-` prefix  |
+| §B.23.4    | Schema versioning                              | Stay at 2.1; no Schema 2.2                              |
+| §B.23.5    | SSU separation and .NET CU multiplicity        | Filename-based SSU detection; both .NET siblings always |
+| §B.23.6    | DU lookback                                    | 36-month rolling cache; latest publish wins             |
+| §B.23.7    | Update lifecycle                               | Patch-Tuesday-triggered; Git-tracked                    |
+| §B.23.8    | PatchBaseline Type subdivision                 | `DotNet` → `DotNet.Runtime` + new `DotNet.OsLevel`; breaking |
+| §B.23.9    | release-info vs Catalog conflicts              | release-info is the absolute truth source               |
+| §B.23.10   | r07.0 release granularity                      | Single r07.0 release; r06.x is docs-only                |
+| §B.23.11   | `-PreferBaselineMonthLcu`                      | Deferred to Phase 4+                                    |
+
+**Existing SPEC sections amended for cross-reference**:
+
+- §B.21.5 (Future work) now states that the Schema 2.2 sketch is
+  **NOT adopted**; per-OS knowledge moves into Config-driven or
+  cache-driven mechanisms instead. Cross-references §B.23.
+- §B.22.1 (Directory layout) adds an r07.0 migration note: the
+  `Config/` directory will be renamed to `data/` per §B.23.3.
+- §B.22.2 (Filename prefix rules) adds three new rows for the
+  r07.0+ `config-` / `cache-` / `raw-` prefixes.
+
+**Headline architecture points**:
+
+1. **Catalog becomes a URL resolver, not a discovery source.**
+   KB numbers harvested from release-info are passed to the
+   Catalog to obtain `.msu` URLs; Title-string heuristics for
+   discovery are deleted.
+2. **`Config/` directory becomes `data/` with three filename
+   prefixes** (`config-`, `cache-`, `raw-`). All upstream snapshot
+   data is committed to the repository alongside the human-edited
+   configs, with Git as the history mechanism (no date in
+   filenames).
+3. **Schema 2.1 is preserved.** The optional `CatalogTitleTokens`
+   field is an additive Schema 2.1 extension; no Schema 2.2 is
+   cut.
+4. **`Type=DotNet` is deprecated and removed** in favour of
+   `DotNet.Runtime` (per-runtime KB, applied to WIM) and
+   `DotNet.OsLevel` (OS-offering KB, recorded only). r07.0 is a
+   breaking change for any baseline carrying the legacy value;
+   no migration shim ships.
+5. **DU sources from a 36-month rolling Catalog probe cache.**
+   The latest publish within the window wins; absence is logged
+   as a warning, not an error. This absorbs PoC-F's finding
+   that Server 2025 DU.Setup has been suspended since 2025-12.
+6. **release-info is the absolute truth source.** Catalog
+   contradictions either (a) stop the build (release-info has a
+   KB the Catalog can't resolve) or (b) are ignored (Catalog has
+   a KB release-info doesn't list).
+
+**Release plan**:
+
+- r06.0 (this release): SPEC-only documentation, no code changes.
+- r07.0 (future release): full Phase 3 implementation per §B.23.
+  Breaking change for any baseline carrying `Type=DotNet`.
+
+**Open questions deferred to a third design round** (operations
+specifics, not architecture):
+
+- Automated Patch-Tuesday-triggered snapshot refresh in CI
+- `-PatchMonth` argument for past-month refresh
+- Server 2022 dynamic baseline-month detection (CY2024 August
+  anomaly)
+- PoC scripts CI promotion to T6-T8
+
+These do not affect the §B.23 architecture and will be resolved
+before the r07.0 implementation PR is opened.
+
+**Still not in this Phase 3**:
+
+- No `Update-WindowsServerIso.ps1` changes (still r05.1).
+- No `Config/<OsKey>.json` schema changes.
+- No T1-T5 changes.
+- No `data/` directory yet (rename happens in r07.0).
+
 ### r06.0 Phase 1 - Spec-only: OS Update Type Matrix
 
 This Phase 1 deliverable is SPEC-only and intentionally contains

@@ -193,9 +193,11 @@ deleted as a single atomic step.
 
 Current PoC inventory:
 
-| Topic          | Scripts                                                                | Operational docs                                                   |
-|----------------|------------------------------------------------------------------------|--------------------------------------------------------------------|
-| `release_info` | `poc_release_info_01_fetch.py`<br>`poc_release_info_02_parse.py`<br>`poc_release_info_03_analyse.py` | [`docs/poc/poc-release-info-readme.md`](../docs/poc/poc-release-info-readme.md) |
+| Topic            | Scripts                                                                | Operational docs                                                   |
+|------------------|------------------------------------------------------------------------|--------------------------------------------------------------------|
+| `release_info`   | `poc_release_info_01_fetch.py`<br>`poc_release_info_02_parse.py`<br>`poc_release_info_03_analyse.py`<br>`poc_release_info_04_resolve.py` | [`docs/poc/poc-release-info-readme.md`](../docs/poc/poc-release-info-readme.md) |
+| `dotnet_cu`      | `poc_dotnet_cu_01_fetch.py`<br>`poc_dotnet_cu_02_parse.py`             | [`docs/poc/poc-dotnet-cu-report.md`](../docs/poc/poc-dotnet-cu-report.md)       |
+| `dynamic_update` | `poc_dynamic_update_01_probe.py`                                       | [`docs/poc/poc-dynamic-update-report.md`](../docs/poc/poc-dynamic-update-report.md) |
 
 PoC scripts do not participate in the T-numbered regression suite,
 do not run in CI by default, and do not block PRs. Their snapshots

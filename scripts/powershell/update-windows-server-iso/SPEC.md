@@ -30,6 +30,9 @@
   - [B.7 ISO Filename Detection Patterns](#b7-iso-filename-detection-patterns)
   - [B.8 Patch Integrity Check (Three-Layer)](#b8-patch-integrity-check-three-layer)
   - [B.9 Synthetic Test Mode](#b9-synthetic-test-mode)
+  - [B.21 Update Type Matrix per OS generation (r06.0+, normative)](#b21-update-type-matrix-per-os-generation-r060-normative)
+  - [B.22 File organisation and naming conventions (r06.0+, normative)](#b22-file-organisation-and-naming-conventions-r060-normative)
+  - [B.23 Phase 3 Architecture (r07.0+, normative)](#b23-phase-3-architecture-r070-normative)
 - [Part C — Quality Gates & Validation Checklist](#part-c--quality-gates--validation-checklist)
 - [Part D — Known Pitfalls & Lessons Learned](#part-d--known-pitfalls--lessons-learned)
 - [Part E — Roadmap](#part-e--roadmap)
@@ -977,6 +980,32 @@ change worth flagging. Tracking the expected count per OS
 under `Common.UpdateTypePolicy` is a candidate r06.x schema
 extension (see B.21.5 "Future work").
 
+**r06.0 Phase 2 PoC follow-up (PoC-E)**. The Phase 2 PoC
+under `tests/poc_dotnet_cu_*.py` and
+[`docs/poc/poc-dotnet-cu-report.md`](./docs/poc/poc-dotnet-cu-report.md)
+cross-checked the table above against the Microsoft Learn
+`.NET Framework cumulative update` release-notes pages
+(authoritative upstream source) for 2026-04. The upstream
+source actually lists the following per-OS row counts:
+
+| OS           | .NET CU rows in upstream release-notes table (2026-04) |
+|--------------|--------------------------------------------------------|
+| Server 2016  | **2** (.NET 3.5+4.6.2+4.7.x+4.7.2 → KB5082198, .NET 4.8 → KB5082411) |
+| Server 2019  | 2 (.NET 3.5+4.7.2 → KB5082413, .NET 3.5+4.8 → KB5082414)            |
+| Server 2022  | 2 (.NET 3.5+4.8 → KB5082427, .NET 3.5+4.8.1 → KB5082425)            |
+| Server 2025  | 1 (.NET 3.5+4.8.1 → KB5082417)                                       |
+
+The Server 2016 discrepancy (production telemetry sees 1
+file via the Catalog umbrella KB; upstream release-notes
+list 2 distinct KBs) means the umbrella scrape path
+historically only surfaced the .NET 4.8 sibling and missed
+the .NET 3.5/4.6.2/4.7.x rollup. This was not noticed in
+production because Server 2016 baseline images that the ISO
+Factory ships ship .NET 4.8 by default; the .NET 4.6.2-4.7.x
+rollup applies only to images that haven't been upgraded to
+4.8. A Phase 3 refresh sourced from release-notes (rather
+than Catalog scraping) would correctly surface both KBs.
+
 ### B.21.3 Combined LCU package detection
 
 For Server 2022 / 2025 ("N/A standalone SSU" cells in B.21.1),
@@ -1080,6 +1109,20 @@ behaviour or the on-disk Config schema; it only makes the
 implicit Type matrix normative so that a future schema
 extension is grounded in a stated contract.
 
+**r06.0 Phase 3 resolution.** The PoC questions enumerated above
+were answered by the r06.0 Phase 2 PoC reports
+(`docs/poc/poc-release-info-report.md`,
+`docs/poc/poc-dotnet-cu-report.md`,
+`docs/poc/poc-dynamic-update-report.md`), and the architecture
+decisions that follow from those answers are codified normatively
+in **§B.23 "Phase 3 Architecture (r07.0+, normative)"**. The
+`Common.UpdateTypePolicy` schema sketch above is **NOT adopted**:
+§B.23.4 (Schema versioning) explicitly keeps Schema at 2.1, and
+the per-OS differences captured by `UpdateTypePolicy` are
+instead encoded as Config-driven (`CatalogTitleTokens` field in
+each `config-Server*.json`, see §B.23.2) or as cache-driven
+logic (per-OS DU lookback in `cache-du-*.json`, see §B.23.6).
+
 ## B.22 File organisation and naming conventions (r06.0+, normative)
 
 This section is the **governance model** for everything that lives
@@ -1122,10 +1165,20 @@ scripts/powershell/update-windows-server-iso/
         └── poc-<topic>-<purpose>.md
 ```
 
+**r06.0 Phase 3 migration note (r07.0+).** §B.23.3 specifies that
+the `Config/` directory will be renamed to `data/` in r07.0, with
+new `cache-*` and `raw-*` files joining the existing `config-*`
+files under a flat, three-prefix naming scheme. The directory
+layout above describes the **r06.x state** (Config/ + tests/ +
+docs/); the r07.0 layout is documented in §B.23.3. Until r07.0
+ships, `Config/` remains authoritative.
+
 Key points:
 
 - **`Config/`, `tests/`, and `docs/` are the only first-class child
-  directories.** No new top-level directories are added without a
+  directories** (r06.x). r07.0 replaces `Config/` with `data/`
+  per §B.23.3 but does not add any other top-level directory.
+  No additional top-level directories are added without a
   SPEC update; future "PoC ディレクトリ" or "experiments/" would
   violate this rule. PoC code lives under `tests/`, PoC reports
   live under `docs/poc/`, and that is sufficient.
@@ -1147,7 +1200,10 @@ Key points:
 | Class                         | Where it lives                   | Filename pattern                                      | Disposable? |
 | ----------------------------- | -------------------------------- | ----------------------------------------------------- | :---------: |
 | Production PowerShell         | top level                        | `Update-WindowsServerIso.ps1` (exactly one file)      | No          |
-| Production config             | `Config/`                        | `Server<NNNN>.json`                                   | No          |
+| Production config (r06.x)     | `Config/`                        | `Server<NNNN>.json`                                   | No          |
+| Production config (r07.0+)    | `data/`                          | `config-Server<NNNN>.json` (see §B.23.3)              | No          |
+| Production cache (r07.0+)     | `data/`                          | `cache-<source>[-<scope>].json` (see §B.23.3)         | No          |
+| Production raw (r07.0+)       | `data/`                          | `raw-<source>.<ext>` (see §B.23.3)                    | No          |
 | Regression test (T1-T5)       | `tests/`                         | `<topic>_<role>.py` (no prefix; existing convention)  | No          |
 | Regression test (shared)      | `tests/common/`                  | `<topic>_<role>.py`                                   | No          |
 | Regression fixture            | `tests/fixtures/<patch-month>/`  | (per existing convention, see Part G)                 | No          |
@@ -1296,6 +1352,512 @@ before "now", with a 1-day buffer to avoid same-day boundary issues
 
 The diff produced is small and reviewable: only `PatchTuesdayOfBaseline`,
 `LastVerifiedDate`, `Patches[]`, and `WsusScnCab` fields change.
+
+---
+
+## B.23 Phase 3 Architecture (r07.0+, normative)
+
+This section codifies the eleven architectural decisions taken
+during r06.0 Phase 3 SPEC consolidation. These decisions answer
+the open questions left by r06.0 Phase 1 (`B.21.5 Future work`)
+and the r06.0 Phase 2 PoC reports, and define the shape of the
+r07.0 implementation.
+
+**Provenance**. Each subsection that follows is a Decision Record
+in the spirit of MADR (Markdown Any Decision Records). The
+"Context" and "Decision" lines summarise an interactive design
+session held on 2026-05-25; the "Consequences" lines name the
+SPEC sections, code paths, or files affected. Where the decision
+overturns or refines an earlier section, the cross-reference is
+explicit.
+
+**Normative scope**. The decisions in §B.23 apply to r07.0 onward.
+r06.x retains the pre-Phase-3 architecture (Catalog-as-source,
+no `data/` directory, no 3-prefix file scheme). The r07.0
+implementation in `Update-WindowsServerIso.ps1` will diverge from
+r05.1 in many of the ways enumerated here; r06.0 ships only this
+SPEC update (and the Phase 2 PoC artefacts) without any
+`.ps1` change.
+
+### B.23.1 Refresher architecture: complete migration to release-info
+
+**Context**. r05.1's KB discovery relies on Microsoft Update
+Catalog Title-string heuristics (`Get-CatalogQueryTemplate`,
+`Resolve-PatchSetFromCatalog`). r06.0 Phase 2 PoC-A demonstrated
+that the Microsoft Learn `windows-server-release-info` page
+provides a parseable, authentication-free Markdown source for
+every OS-month-letter combination in scope, going back to
+2016-08 for Server 2016. PoC-B further proved that KB numbers
+harvested from release-info can be resolved to download URLs via
+the Catalog using KB-only input (no Title heuristics needed for
+discovery).
+
+**Decision**. r07.0 performs a **complete migration**: KB
+discovery moves entirely to release-info (LCU, Hotpatch baseline)
+and to the `.NET Framework cumulative update` release-notes pages
+(.NET CU per-OS x per-runtime). The Microsoft Update Catalog
+becomes a **URL resolver only**: given a KB, return the download
+URLs. Title-string heuristics for *discovery* are removed.
+
+DU (DynamicUpdate.Setup / .SafeOs) cannot be discovered from
+release-info -- they have no Markdown source -- so DU continues
+to be discovered via the Catalog, but with a cache-driven lookback
+strategy (see §B.23.6) rather than monthly Title-matching.
+
+**Consequences**.
+- The bulk of `Resolve-PatchSetFromCatalog` is deleted in r07.0.
+- A new function `Resolve-PatchSetFromReleaseInfo` consumes the
+  parsed release-info cache and returns the (OS, month, type, KB)
+  tuples that previously came from Title scraping.
+- `Get-CatalogQueryTemplate`'s per-OS `QueryTemplate` strings for
+  LCU / SSU / .NET CU are deleted. The OS-specific Catalog
+  `TitleTokens` field remains as a *disambiguator* for the URL
+  resolver (see §B.23.2).
+- §D.19 ("Catalogue title prefix accidentally matches sibling")
+  and §D.20 ("Wrong KB picked from the Catalogue umbrella") are
+  no longer reachable on the new path; they remain documented as
+  historical lessons but are marked "superseded by §B.23".
+
+### B.23.2 Catalog Title token matching: Config-driven
+
+**Context**. PoC-B exposed a previously implicit non-uniformity in
+how Microsoft names Server LCUs on the Catalog. Server 2025 LCUs
+are published under `"Microsoft server operating system version
+24H2"` (no "Windows Server" string). Server 2022 LCUs use the
+analogous `"Microsoft server operating system version 21H2"`
+naming. Server 2019 and Server 2016 still use the familiar
+`"Windows Server NNNN"` naming. When the URL resolver issues a
+KB-only Search.aspx query, multiple hits may come back (e.g.
+KB5046617 returns one server hit and two Windows 11 client
+hits); the right hit is selected by matching the Title against an
+OS-specific token list.
+
+**Decision**. The token list is **Config-driven**, not hardcoded
+in PowerShell. Each `data/config-Server<NNNN>.json` carries a
+new field `CatalogTitleTokens` whose value is an array of strings.
+For example:
+
+```jsonc
+// data/config-Server2025.json (r07.0+ excerpt)
+"CatalogTitleTokens": [
+  "Microsoft server operating system version 24H2",
+  "Windows Server 2025"
+]
+```
+
+The URL resolver narrows multi-hit Catalog responses by accepting
+only hits whose Title contains *any* of the tokens (case-insensitive
+substring match). A negative exclusion list ("Windows 11", "arm64")
+is hardcoded in PowerShell because it is uniform across OS
+versions, not OS-specific.
+
+**Consequences**.
+- Each `data/config-Server*.json` gets a new optional field
+  `CatalogTitleTokens`. The field defaults to an empty array if
+  absent (in which case the URL resolver accepts the first
+  matching hit, or errors if multiple ambiguous hits remain).
+- Schema number remains 2.1 (§B.23.4); the new field is an
+  additive optional extension.
+- Future Microsoft naming changes (e.g. dropping the "version"
+  prefix) are absorbed by editing the Config file, not by
+  shipping a new PowerShell release.
+- The hardcoded `TitleTokens` in `Get-CatalogQueryTemplate` is
+  deleted in r07.0; the function itself either disappears
+  entirely or shrinks to a thin URL-resolver wrapper.
+
+### B.23.3 Data directory layout: `data/` flat with 3-prefix naming
+
+**Context**. r06.x stores OS-specific configuration in `Config/`.
+The Phase 3 architecture introduces three additional data sources
+that the Refresher must persist between runs:
+
+1. *Parsed Markdown caches* (release-info parsed to JSON, .NET CU
+   parsed to JSON, DU 36-month publish history per OS).
+2. *Raw source data* (the original Markdown for release-info and
+   the aggregated month-by-month Markdown for .NET CU). These
+   are debugging aids that allow a maintainer to re-run the
+   parser against the exact bytes a previous run saw.
+3. *Existing Config* (the four `Server<NNNN>.json` files).
+
+These are all "data the script consults", with a unified
+Patch-Tuesday-triggered update lifecycle (see §B.23.7).
+
+**Decision**. r07.0 introduces a top-level `data/` directory that
+replaces `Config/`. All files inside `data/` are flat (no
+sub-directories) and identify their class by a filename **prefix**:
+
+| Prefix    | Meaning             | Update model                          |
+| --------- | ------------------- | ------------------------------------- |
+| `config-` | Human-edited config | Hand-edited; Refresher may amend `PatchBaseline.Patches[]` only |
+| `cache-`  | Parsed structured data | Refresher regenerates wholesale on every refresh |
+| `raw-`    | Pre-parse source data  | Refresher overwrites on fetch         |
+
+The full r07.0 layout:
+
+```
+scripts/powershell/update-windows-server-iso/
+├── Update-WindowsServerIso.ps1
+├── SPEC.md
+├── CHANGELOG.md
+├── data/
+│   ├── config-Server2016.json
+│   ├── config-Server2019.json
+│   ├── config-Server2022.json
+│   ├── config-Server2025.json
+│   ├── cache-release-info.json
+│   ├── cache-dotnet-cu.json
+│   ├── cache-du-Server2016.json
+│   ├── cache-du-Server2019.json
+│   ├── cache-du-Server2022.json
+│   ├── cache-du-Server2025.json
+│   ├── raw-release-info.md
+│   ├── raw-release-info.meta.json
+│   └── raw-dotnet-cu.json
+├── tests/
+└── docs/
+```
+
+**Filename rules**:
+
+- **No date in filenames.** Git provides the history; date in the
+  filename is redundant and creates churn.
+- **No subdirectories under `data/`.** Flat is friendlier to
+  diff-and-review workflows than nested.
+- **`cache-` files are JSON**, even when the upstream is Markdown
+  (the cache is the parsed form). `cache-du-*.json` per-OS files
+  store the 36-month Catalog probe history (§B.23.6).
+- **`raw-` files preserve the upstream format**: Markdown for
+  release-info, JSON for .NET CU (because .NET CU has many monthly
+  pages that are aggregated into one container JSON for
+  manageability — see §B.23.5).
+- `.meta.json` files (HTTP headers, fetch timestamp) sit next to
+  the corresponding `raw-` file and inherit the `raw-` prefix.
+
+**Consequences**.
+- Rename `Config/Server<NNNN>.json` → `data/config-Server<NNNN>.json`
+  is a mechanical change touching all path references in
+  `Update-WindowsServerIso.ps1`, `tests/`, the CI workflows, and
+  the SPEC.
+- B.22.1's directory layout table and B.22.2's prefix table are
+  amended (the `r07.0+` rows reference §B.23).
+- The `data/` migration is part of the r07.0 release as a single
+  atomic step; r06.x retains `Config/`.
+
+### B.23.4 Schema versioning: stay at 2.1
+
+**Context**. Phase 1's `B.21.5 Future work` sketched a Schema 2.2
+candidate (`Common.UpdateTypePolicy`). The Phase 3 decisions
+above either (a) move per-OS knowledge into Config fields (e.g.
+`CatalogTitleTokens` in §B.23.2) without bumping the schema
+number, (b) avoid Config-side encoding entirely (e.g. SSU
+detection from filename in §B.23.5), or (c) defer to Phase 4+
+(`-PreferBaselineMonthLcu`, §B.23.11).
+
+**Decision**. r07.0 keeps `Schema = "2.1"` on every
+`config-Server*.json`. No `Common.UpdateTypePolicy` is introduced.
+The optional `CatalogTitleTokens` field is an additive extension
+of Schema 2.1; consumers that don't recognise it simply ignore
+it (Schema 2.1's `Test-PatchBaselineSchema` is unchanged).
+
+**Consequences**.
+- The migration trauma of r04.x → r05.0 (Schema 2.0 → 2.1, see
+  §D.21 Pca2023 mandatory issue) is not repeated.
+- T2 and T3 tests touching Schema validation need no changes.
+- Future Schema 2.2 can still be cut later if a hard requirement
+  emerges; nothing in §B.23 forecloses that path.
+
+### B.23.5 SSU separation and .NET CU multiplicity
+
+**Context (B-1 / SSU)**. PoC-B confirmed §B.21.1's claim that
+Server 2025 LCUs are bundled with a Servicing Stack package
+(`KB5043080`) by the Catalog: every Server 2025 LCU resolution
+returns *two* `.msu` URLs, and the second is always the SSU. The
+PatchBaseline schema (§B.14b) already has a `Type=SSU` value;
+the question is how to represent the bundled-SSU case.
+
+**Decision (B-1)**. r07.0 takes the Catalog response **as is**
+(two URLs are accepted, both downloaded). At PatchBaseline
+record-construction time, the Refresher inspects the filename;
+if it matches a known SSU pattern (`*kb<id>*ssu*` or
+`*kb5043080*` for Server 2025), it is recorded as a separate
+`Type=SSU` entry alongside the `Type=LCU` entry derived from the
+same Catalog hit. No schema change is required.
+
+**Context (B-2 / .NET CU multiplicity)**. PoC-E exposed a
+discrepancy: r05.1 telemetry sees Server 2016 with **1** .NET CU
+file (the .NET 4.8 sibling), but the upstream `.NET Framework
+cumulative update` release-notes table lists **2** distinct KBs
+for Server 2016 (the .NET 3.5/4.6.2/4.7.x rollup and the .NET 4.8
+sibling). r05.1 missed the first sibling because the umbrella-KB
+scrape path matched only "for Microsoft .NET Framework" titles
+and the missing sibling carries a different umbrella title.
+
+**Decision (B-2)**. r07.0 applies **both** siblings on Server 2016
+(and on every other OS whose release-notes table shows multiple
+rows). The decision rests on Microsoft's documented applicability
+logic: "the operating system KB is offered, the applicability
+logic determines the specific .NET Framework updates that will
+be installed." Therefore applying a sibling that the device
+already has at a newer version is a no-op via DISM's own
+component-store logic; applying both is safe and ensures coverage
+for devices that have older .NET 4.x branches.
+
+**Consequences (B-1, B-2)**.
+- The `.NET CU multiplicity by OS` discrepancy table in §B.21.2
+  is left in place as a historical record. r07.0 sources from
+  release-notes, so the "production telemetry" column becomes
+  obsolete on the new path.
+- The two-URL Server 2025 LCU case is documented in §B.21.3
+  ("Combined LCU package detection") for cross-reference.
+
+### B.23.6 DU lookback: 36-month cache, latest publish wins
+
+**Context**. PoC-F established that Microsoft does not publish DU
+in a strict monthly cadence. Server 2025 DU.Setup was published
+2025-09 / 2025-10 / 2025-11 and then absent for *five
+consecutive months* (2025-12 through 2026-04). Server 2019 and
+Server 2016 do not publish DU monthly at all (only on
+feature-update windows). The r05.1 approach -- "search Catalog
+for the current month, error if zero hits" -- is incompatible
+with both observations.
+
+**Decision**. r07.0 maintains, for each OS, a **36-month rolling
+Catalog probe history** in `data/cache-du-Server<NNNN>.json`. At
+ISO-build time the Refresher consults the cache and selects, for
+each DU type (Setup / SafeOs), **the most recent publish** within
+the 36-month window. If the 36-month window contains zero
+entries, the Refresher logs a warning and proceeds without that
+DU type; if it contains at least one entry, the latest is used.
+
+The cache is updated as part of the Patch-Tuesday-triggered
+snapshot refresh (§B.23.7), not on every ISO build. ISO-build
+runs read the cache; they do not hit the Catalog for DU
+discovery.
+
+**Per-OS observations** (informative, derived from PoC-F data):
+
+| OS          | DU.Setup cadence (observed)           | DU.SafeOs cadence (observed)          |
+| ----------- | ------------------------------------- | ------------------------------------- |
+| Server 2016 | Not published                         | Not published                         |
+| Server 2019 | Feature-update windows only           | Feature-update windows only           |
+| Server 2022 | Approximately monthly                 | Approximately monthly                 |
+| Server 2025 | Suspended since 2025-12 (5+ months)   | Approximately monthly                 |
+
+These observations inform the "warning, not error" stance: the
+Refresher cannot tell whether absence is permanent or temporary,
+so it falls back to the latest known good and lets the human
+operator review.
+
+**Consequences**.
+- `cache-du-Server<NNNN>.json` is a new artefact; format is
+  decided at implementation time (one JSON per OS, with monthly
+  probe records inside).
+- No per-OS "DU is required" or "DU is N/A" flag exists; the
+  cache content alone drives behaviour.
+- §B.21.1's "Optional" vs "N/A" cell distinctions for DU rows
+  remain accurate as a description of *typical* publishing
+  cadence but are no longer Refresher-side decision criteria.
+
+### B.23.7 Update lifecycle: Patch-Tuesday-triggered, Git-tracked
+
+**Context**. With release-info, .NET release-notes, and DU all
+sourced from Microsoft Learn / Catalog, the Refresher needs a
+clear rule for *when* to fetch from the upstream and *how* to
+persist the result. r06.x had no equivalent of this question
+because the only persistent input was the human-edited
+`Config/`.
+
+**Decision**. r07.0 unifies the lifecycle of `config-`, `cache-`,
+and `raw-` files under a single Patch-Tuesday-triggered model.
+A dedicated Refresher action (`-Action RefreshSnapshots` or an
+equivalent name decided at implementation time) is invoked
+manually by the operator on or after each Patch Tuesday. The
+action:
+
+1. Fetches the latest `windows-server-release-info` Markdown
+   and writes `data/raw-release-info.md` + `.meta.json`.
+2. Parses the Markdown and writes `data/cache-release-info.json`.
+3. Fetches all new monthly `.NET Framework cumulative update`
+   release-notes pages, aggregating them into
+   `data/raw-dotnet-cu.json`, and updates
+   `data/cache-dotnet-cu.json` with the parsed (OS x version x
+   KB) rows.
+4. Probes the Catalog for the current month's DU.Setup /
+   DU.SafeOs per OS and appends to each
+   `data/cache-du-Server<NNNN>.json`, trimming entries older
+   than 36 months.
+5. Optionally regenerates `PatchBaseline` sections of each
+   `data/config-Server*.json` using the freshly populated
+   caches (equivalent to today's
+   `-Action RefreshAllBaselines`).
+
+The operator then `git diff`-reviews and commits as a single
+Patch-Tuesday changeset. Build-time runs of the Refresher
+(`-Action Build`) consume the committed cache; they never reach
+out to Microsoft Learn.
+
+**Consequences**.
+- Microsoft-side outages on Patch Tuesday day do not block ISO
+  builds: the committed cache remains the source of truth.
+- The Git log doubles as a "what changed in this Patch Tuesday"
+  audit trail.
+- The CI workflow that automates Patch-Tuesday refresh is out of
+  scope for r07.0 (deferred to F-1 in the third round of
+  Phase 3 design).
+
+### B.23.8 PatchBaseline.Patches[].Type: subdivide DotNet
+
+**Context**. PoC-E surfaced two distinct kinds of .NET KB on the
+release-notes pages:
+
+- **Per-runtime KBs** (e.g. `KB5082427` for "Windows Server 2022 -
+  .NET Framework 3.5, 4.8"). These are the actual `.msu` files
+  applied to the WIM.
+- **OS-offering KBs** (e.g. `KB5084071` for "Windows Server 2022"
+  on the umbrella row). Microsoft explicitly documents these as
+  "not expected to be listed as an installed update on the
+  device" -- they exist only for WSUS / Windows Update
+  applicability calculations.
+
+r05.1's `Type=DotNet` value conflates the two. r07.0's release-
+notes-driven discovery sees both kinds and must record them
+distinctly for traceability.
+
+**Decision**. r07.0 renames `Type=DotNet` to `Type=DotNet.Runtime`
+and introduces a new value `Type=DotNet.OsLevel` for the OS-offering
+KB. `Type=DotNet.LangPack` is unchanged. The four valid
+`DotNet.*` values are:
+
+| Type                | Applied to WIM? | Source                                              |
+| ------------------- | :-------------: | --------------------------------------------------- |
+| `DotNet.Runtime`    | Yes             | Per-runtime KB from `.NET CU` release-notes table   |
+| `DotNet.OsLevel`    | No              | OS-offering KB from `.NET CU` release-notes table   |
+| `DotNet.LangPack`   | Yes             | Language-pack handling per Part F (unchanged)       |
+
+**Decision (migration)**. r07.0 is a **breaking change**, by intent
+and without an automatic migration shim. A
+`config-Server*.json` carrying the legacy `Type=DotNet` value will
+fail `Test-PatchBaselineSchema` with a clear message directing
+the operator to re-run `-Action RefreshAllBaselines` after
+upgrading. There is no in-place upgrade path; r05.1 baselines
+must be regenerated under r07.0.
+
+**Consequences**.
+- §B.14b's Type-value enumeration is updated.
+- All in-tree code paths that compare `Type -eq 'DotNet'` are
+  updated to `Type -eq 'DotNet.Runtime'` (or to the union when
+  appropriate). The Refresher's WIM-application loop skips
+  `Type=DotNet.OsLevel` rows.
+- Existing repo-managed `Config/Server*.json` files have empty
+  `PatchBaseline.Patches[]` arrays at the time of writing, so
+  there is no in-tree data to migrate; the breaking change
+  affects customer-side baselines only.
+
+### B.23.9 release-info vs Catalog: release-info is the truth source
+
+**Context**. With §B.23.1's complete-migration decision,
+release-info becomes the authoritative discovery source. The
+remaining design question is what to do when the Catalog
+contradicts release-info -- e.g. a KB present in release-info
+that the Catalog cannot find, or a KB visible in the Catalog
+that release-info has not yet recorded.
+
+**Decision**. **release-info is absolute**. Refresher behaviour
+in conflict scenarios:
+
+- **release-info has KB; Catalog cannot resolve it**: hard error,
+  ISO build stops, human investigates. Possible causes include
+  Catalog publication lag, KB renumbering, or a Microsoft-side
+  release-info typo.
+- **Catalog has a KB; release-info does not mention it**: the KB
+  is ignored. The Refresher never discovers KBs through Catalog
+  search alone.
+- **release-info update lag** (typical on Patch Tuesday day): the
+  human operator runs the snapshot refresh later, when release-
+  info has been updated. No automatic fallback to Catalog
+  discovery.
+
+This stance is consistent with §B.23.1 (complete migration) and
+§B.23.7 (committed cache is the truth source for builds).
+
+**Consequences**.
+- No "Catalog fallback" code path in r07.0.
+- `Get-CatalogQueryTemplate`'s discovery-side templates are not
+  preserved as a backup; they are deleted.
+- The `cache-release-info.json` artefact is the single point of
+  truth for which KBs exist for which OS-month combinations.
+
+### B.23.10 r07.0 release granularity
+
+**Context**. The scope of changes implied by §B.23.1 through
+§B.23.9 -- directory rename, schema breaking change, complete
+refresher path rewrite, three new cache types, two new artefact
+classes -- is large. The choice of release granularity affects
+both PR diff size and SemVer signalling.
+
+**Decision**. The full Phase 3 implementation ships as a single
+release, **r07.0**. Specifically:
+
+- r05.1 (current) → r06.0 (SPEC + PoC, no `.ps1` change) →
+  **r07.0** (Phase 3 implementation, breaking change).
+- The minor version jump from r05 → r07 (skipping r06 as a code
+  release) reflects the SemVer convention that a breaking change
+  warrants a major bump. r06.0 stays exclusively a documentation
+  release.
+- The CI-side automation for Patch-Tuesday-driven snapshot
+  refresh (§B.23.7 step 1-4 automated) is deferred to a later
+  r07.x if it is implemented at all; r07.0 ships manual-trigger
+  only.
+
+**Consequences**.
+- The r07.0 PR is large by design. Reviewers should treat it as
+  one atomic change since the directory rename, schema bump, and
+  refresher rewrite are mutually dependent.
+- The next minor release (r07.1+) can carry the CI snapshot
+  automation independently.
+
+### B.23.11 Deferred to Phase 4+: `-PreferBaselineMonthLcu`
+
+**Context**. PoC-D demonstrated that the Hotpatch baseline-month
+calendar embedded in release-info is machine-readable and
+identifies, for Server 2025 and Server 2022, which months are
+baseline months (Jan/Apr/Jul/Oct for Server 2025). A
+`-PreferBaselineMonthLcu` switch would enable ISO images that
+are "Hotpatch ready" out of the box, so a customer who later
+enrolls the host in Azure Arc Hotpatch enjoys zero-reboot patch
+operations from day one without a baseline-application reboot.
+
+**Decision**. r07.0 does **not** implement
+`-PreferBaselineMonthLcu`. The switch is deferred to a Phase 4+
+release, contingent on demonstrated customer demand for Hotpatch.
+The release-info parser does extract the baseline-month
+calendar (since it is part of the same Markdown), but the
+extracted data is not consumed by any code path in r07.0.
+
+**Consequences**.
+- §B.21.4 ("Hotpatch is out of scope for the offline image") is
+  unchanged. The Hotpatch enrollment / baseline distinction
+  remains an *online runtime* concern, not an ISO Factory
+  concern, until Phase 4+.
+- The Hotpatch-calendar data in `cache-release-info.json` is
+  recorded but unused; a future Phase 4 implementation can
+  consume it without re-parsing.
+
+### B.23 Cross-reference matrix
+
+| §B.23 subsection | Supersedes / amends                | Implementation impact                              |
+| ---------------- | ---------------------------------- | -------------------------------------------------- |
+| B.23.1           | §B.21.5, §D.19, §D.20              | Delete most of `Resolve-PatchSetFromCatalog`       |
+| B.23.2           | (new) — refines §B.21.1            | New `CatalogTitleTokens` field in config-Server*.json |
+| B.23.3           | Amends §B.22.1, §B.22.2            | Rename `Config/` → `data/`; introduce 3-prefix scheme |
+| B.23.4           | Closes §B.21.5 Schema 2.2 proposal | None (Schema stays 2.1)                            |
+| B.23.5           | Refines §B.21.2, §B.21.3           | Filename-based SSU detection in record stage       |
+| B.23.6           | Refines §B.21.1 (DU rows)          | New `cache-du-Server*.json`; 36-month cache logic  |
+| B.23.7           | (new)                              | New `-Action RefreshSnapshots` (or equivalent)     |
+| B.23.8           | Amends §B.14b (Type enum)          | Breaking change to `Type=DotNet`; no shim          |
+| B.23.9           | Closes §D.19, §D.20 follow-up      | No Catalog-discovery fallback                      |
+| B.23.10          | (new)                              | Single r07.0 release; r06.x is docs-only           |
+| B.23.11          | Defers §B.21.4 work                | None in r07.0; Hotpatch-ready ISO postponed        |
 
 ---
 
@@ -2089,9 +2651,11 @@ suite, but are **distinct from it**:
 
 The current PoC tracked under this scheme:
 
-| PoC topic        | Scripts                                              | Documents                                      |
-|------------------|------------------------------------------------------|------------------------------------------------|
-| `release_info`   | `tests/poc_release_info_01_fetch.py`<br>`tests/poc_release_info_02_parse.py`<br>`tests/poc_release_info_03_analyse.py` | `docs/poc/poc-release-info-readme.md`<br>`docs/poc/poc-release-info-report.md` |
+| PoC topic          | Scripts                                                                                                  | Documents                                                                       |
+|--------------------|----------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
+| `release_info`     | `tests/poc_release_info_01_fetch.py`<br>`tests/poc_release_info_02_parse.py`<br>`tests/poc_release_info_03_analyse.py`<br>`tests/poc_release_info_04_resolve.py` | `docs/poc/poc-release-info-readme.md`<br>`docs/poc/poc-release-info-report.md` |
+| `dotnet_cu`        | `tests/poc_dotnet_cu_01_fetch.py`<br>`tests/poc_dotnet_cu_02_parse.py`                                   | `docs/poc/poc-dotnet-cu-report.md`                                              |
+| `dynamic_update`   | `tests/poc_dynamic_update_01_probe.py`                                                                   | `docs/poc/poc-dynamic-update-report.md`                                         |
 
 ---
 

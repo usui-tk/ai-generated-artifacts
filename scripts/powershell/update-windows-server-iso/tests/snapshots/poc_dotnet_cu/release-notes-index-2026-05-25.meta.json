@@ -1,0 +1,13 @@
+{
+  "fetched_at": "2026-05-25T15:52:51.168423+00:00",
+  "url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/release-notes?accept=text/markdown",
+  "user_agent": "ai-generated-artifacts/poc-dotnet-cu (+https://github.com/usui-tk/ai-generated-artifacts)",
+  "byte_count": 5158,
+  "response_headers": {
+    "content-type": "text/markdown; charset=utf-8",
+    "content-length": "5158",
+    "etag": "\"V8dhaCPOd8/82IsvTZ5DgIrrDM0=\"",
+    "last-modified": "Thu, 21 May 2026 20:28:06 GMT",
+    "cache-control": "public, max-age=600"
+  }
+}
