@@ -262,14 +262,31 @@ Decision Records:
 **Open questions deferred to a third design round** (operations
 specifics, not architecture):
 
-- Automated Patch-Tuesday-triggered snapshot refresh in CI
-- `-PatchMonth` argument for past-month refresh
-- Server 2022 dynamic baseline-month detection (CY2024 August
-  anomaly)
-- PoC scripts CI promotion to T6-T8
+- ~~Automated Patch-Tuesday-triggered snapshot refresh in CI~~
+  → Resolved: stage5 + stage4 two-stage automation per §B.23.14
+- ~~`-PatchMonth` argument for past-month refresh~~
+  → Resolved: read-only `-Action InspectBaseline -PatchMonth`
+  per §B.23.13
+- ~~Server 2022 dynamic baseline-month detection (CY2024 August
+  anomaly)~~ → Resolved: parser records baseline-months verbatim
+  including anomalies per §B.23.12
+- ~~PoC scripts CI promotion to T6-T8~~ → Resolved: PoCs promoted
+  to T6-T8 as part of §B.23.14
 
-These do not affect the §B.23 architecture and will be resolved
-before the r07.0 implementation PR is opened.
+All third-round questions resolved in this release. The Phase 3
+SPEC is now complete; r07.0 implementation work can proceed.
+
+**Third-round additions to §B.23** (this release adds):
+
+| Subsection | Topic                                              | Decision                                                |
+| ---------- | -------------------------------------------------- | ------------------------------------------------------- |
+| §B.23.12   | Server 2022 baseline-month detection                | Strictly data-driven; authoritative source wins        |
+| §B.23.13   | Past-month inspection                               | Read-only `-Action InspectBaseline -PatchMonth YYYY-MM` |
+| §B.23.14   | CI structure                                        | Two-stage automation; stage5 (snapshot) + stage4 (baseline regenerate); PoC → T6-T8 |
+
+Additionally, §B.6 (Action → Phase Mapping) gains a new
+`InspectBaseline` row, and §B.23.7's "out of scope" disclaimer
+on CI automation is upgraded to "in scope per §B.23.14".
 
 **Still not in this Phase 3**:
 
@@ -277,6 +294,7 @@ before the r07.0 implementation PR is opened.
 - No `Config/<OsKey>.json` schema changes.
 - No T1-T5 changes.
 - No `data/` directory yet (rename happens in r07.0).
+- No `stage5__data-snapshot.yml` yet (added in r07.0).
 
 ### r06.0 Phase 1 - Spec-only: OS Update Type Matrix
 

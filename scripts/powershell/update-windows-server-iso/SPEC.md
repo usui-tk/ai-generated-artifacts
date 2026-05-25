@@ -354,6 +354,7 @@ regardless of whether `-EnablePca2023BootManager` was set for P10.
 | `Cleanup`            | (no phases) Remove `<WorkRoot>` after safety check                      |
 | `ListPhases`         | (no phases) Print the registry and exit                                 |
 | `GenerateManifest`   | P01, P02, P03 (Catalog scrape + writeback only)                         |
+| `InspectBaseline`    | (no phases) Read-only past-month baseline derivation; r07.0+ (see §B.23.13) |
 
 **Note on `Build` mapping**: P10 is INCLUDED in the `Build` Action
 mapping AND in `standardFull` even though it is default-skip.
@@ -362,6 +363,13 @@ skip gate lives inside the phase function, not at the Action
 layer, so operators running `-PhaseIds P10` still get the
 explicit "skipped because no opt-in flag" log line rather than
 an obscure "P10 not part of Build".
+
+**Note on `InspectBaseline`** (r07.0+): unlike all the other
+Actions, `InspectBaseline` has no Phase mapping because it is a
+pure derivation from the on-disk cache files. The action takes
+`-PatchMonth YYYY-MM -OsKey ServerNNNN` and prints the
+reconstructed `PatchBaseline.Patches[]` JSON to stdout without
+touching any file on disk. See §B.23.13 for design rationale.
 
 ## B.7 ISO Filename Detection Patterns
 
@@ -1701,9 +1709,9 @@ out to Microsoft Learn.
   builds: the committed cache remains the source of truth.
 - The Git log doubles as a "what changed in this Patch Tuesday"
   audit trail.
-- The CI workflow that automates Patch-Tuesday refresh is out of
-  scope for r07.0 (deferred to F-1 in the third round of
-  Phase 3 design).
+- The CI workflow that automates Patch-Tuesday refresh **is in
+  scope for r07.0**; the two-stage CI design is normative under
+  §B.23.14 (third-round decision F-1 + D-1).
 
 ### B.23.8 PatchBaseline.Patches[].Type: subdivide DotNet
 
@@ -1843,6 +1851,198 @@ extracted data is not consumed by any code path in r07.0.
   recorded but unused; a future Phase 4 implementation can
   consume it without re-parsing.
 
+### B.23.12 Server 2022 baseline-month detection: authoritative source wins
+
+**Context**. PoC-D found that for Server 2022, the Hotpatch
+calendar in release-info marks five distinct calendar months as
+baseline months in CY2024 -- `[1, 4, 7, 8, 10]` -- rather than
+the theoretical four-month-cycle pattern of `[1, 4, 7, 10]`
+followed by Server 2025. The August 2024 entry is an anomaly with
+no public Microsoft explanation. The Phase 3 SPEC must decide
+whether the parser trusts the authoritative source or applies a
+theoretical rule.
+
+**Decision**. The release-info parser is **strictly data-driven**:
+the Hotpatch calendar table is parsed verbatim, and each (year,
+month, OS) triple it lists is recorded in
+`cache-release-info.json` exactly as published. The CY2024
+Server 2022 August row is recorded as a baseline month.
+
+No heuristic, no theoretical `[1, 4, 7, 10]` fallback, no
+"discrepancy detection" warning. This is the same philosophy as
+§B.23.9 (release-info is the absolute truth source) applied to
+the Hotpatch calendar instead of the monthly LCU list.
+
+**Consequences**.
+- The PoC-D logic that handles this row already
+  (`poc_release_info_03_analyse.py`) is promoted into the
+  production parser without modification beyond porting it to
+  PowerShell / the production Refresher path.
+- Phase 4+ implementations of `-PreferBaselineMonthLcu`
+  automatically benefit: when CY2024 August baselines are
+  queried, the cache returns `is_baseline=true` for that month,
+  and the LCU selected is the August 2024 Server 2022 baseline
+  LCU as Microsoft intended.
+- If Microsoft introduces another anomaly in any future month
+  (e.g. an unscheduled baseline in CY2027 March), no code or
+  SPEC change is required; the parser absorbs it automatically.
+
+### B.23.13 Past-month inspection: read-only `-PatchMonth`
+
+**Context**. With release-info covering 117 months of history for
+Server 2016 (and proportionally less for the other OS lines),
+the Refresher gains the *capability* to reconstruct a past
+month's baseline from the cache. The remaining question is
+whether r07.0 should expose this capability, and if so, with
+what semantics.
+
+The use cases that motivate exposure include:
+
+- **Audit**: "Reconstruct the patch set the ISO Factory would
+  have produced for the 2026-03 Patch Tuesday baseline."
+- **Comparative analysis**: "Diff the baselines for
+  2026-03 / 2026-04 / 2026-05 and characterise the month-on-month
+  patch churn."
+- **Regression testing**: "Verify that r07.x produces the same
+  past-month baseline as the previous version for a fixed
+  release-info snapshot."
+
+Use cases that would seem to motivate exposure but are explicitly
+out of scope:
+
+- **Rollback** ("recover the 2026-04 baseline because the
+  2026-05 baseline had a bad KB"): handled by `git revert` on
+  the affected `config-Server*.json` commit, not by Refresher
+  side functionality.
+- **Past-month ISO build** ("build a 2026-03 ISO today"): a
+  build-side concern (`-Action Build`), not a Refresher concern.
+
+**Decision**. r07.0 introduces a new Action,
+`-Action InspectBaseline`, with a mandatory `-PatchMonth YYYY-MM`
+argument and a mandatory `-OsKey ServerNNNN` argument. The
+action:
+
+1. Reads `data/cache-release-info.json`,
+   `data/cache-dotnet-cu.json`, and the matching
+   `data/cache-du-Server<NNNN>.json`.
+2. Reconstructs the `PatchBaseline.Patches[]` array exactly as
+   if `-Action RefreshAllBaselines` had been invoked in the
+   target month with the current caches.
+3. Writes the reconstructed JSON object **to stdout only**. No
+   `config-Server*.json` is touched. No `cache-*.json` is
+   touched. No `raw-*` files are touched. No on-disk side
+   effects whatsoever.
+
+The action is purely a derivation: identical inputs produce an
+identical stdout payload, and re-running it any number of times
+is harmless. Operators redirect to a file when audit retention
+is needed (`> audit-2026-03.json`).
+
+**Consequences**.
+- §B.6 (Action → Phase Mapping) gets a new row for
+  `InspectBaseline` mapping to a single derivation phase with
+  no I/O side effects.
+- `-Action InspectBaseline` is read-only by construction: the
+  Refresher does not need to acquire any of the file-locking or
+  workspace-preflight protections that the I/O-mutating actions
+  use.
+- Months earlier than the 36-month DU cache window (B.23.6)
+  will return baselines with no DU entries. This is a known
+  limitation, not a bug; the action documents it in its help
+  text.
+- Months earlier than the .NET CU 36-month cache window
+  (B.23.5) will return baselines with no .NET CU entries, with
+  the same caveat.
+- A future enhancement (Phase 4+) could expand the cache window
+  to cover the full release-info history (117 months for Server
+  2016, etc.), at which point `-Action InspectBaseline` would
+  work for the entire OS-lifetime range. Not in r07.0 scope.
+
+### B.23.14 CI structure: stage5 + stage4 two-stage automation
+
+**Context**. r05.x ships a single monthly-refresh CI workflow
+(`stage4__monthly-refresh.yml`) that runs `-Action
+RefreshAllBaselines` on the 15th of every month and opens a PR
+if `Config/Server*.json` diffs from main. With Phase 3's
+introduction of cache files (`data/cache-*`) as an intermediate
+artefact between Microsoft Learn and the baseline, the
+single-stage workflow no longer matches the layered architecture:
+"fetch upstream" and "regenerate baseline" become two distinct
+responsibilities deserving separate review surfaces.
+
+**Decision**. r07.0 ships a **two-stage Patch-Tuesday automation**:
+
+```
+stage5__data-snapshot.yml  (new)
+  Trigger : cron '0 2 15 * *' + workflow_dispatch
+  Purpose : Fetch raw-/cache- data from Microsoft Learn/Catalog
+  Output  : PR containing data/raw-*, data/cache-* updates
+  Title   : "chore(data): Patch Tuesday YYYY-MM snapshot refresh"
+
+stage4__monthly-refresh.yml  (existing, narrowed)
+  Trigger : workflow_run after stage5 success
+            + push on data/cache-*.json
+            + workflow_dispatch
+  Purpose : Regenerate baselines from current caches
+  Output  : PR containing data/config-Server*.json updates
+  Title   : "chore(baseline): regenerate Server*.json from
+             YYYY-MM snapshot"
+```
+
+The flow at runtime:
+
+1. **2026-05-15 02:00 UTC**: stage5 cron fires. The job runs
+   `-Action RefreshSnapshots` (or the eventual implementation
+   name), produces a snapshot PR, and exits.
+2. **Operator**: reviews the snapshot PR, merges to main.
+3. **Within seconds of merge**: stage4 fires via `workflow_run`
+   completion of stage5. The job runs `-Action
+   RefreshAllBaselines`, produces a baseline PR, and exits.
+4. **Operator**: reviews the baseline PR, merges to main.
+5. **ISO build**: subsequent `-Action Build` reads the current
+   main caches and produces ISOs without any upstream traffic.
+
+Both PRs are reviewable as Patch-Tuesday-aligned changesets.
+Either can be held (not merged) without breaking the other; if
+the snapshot PR is held because of a suspected Microsoft-side
+data drift, stage4 is never triggered. If the snapshot is fine
+but the operator wants to verify the baseline manually, the
+operator can dispatch stage4 with `dryRun=true`.
+
+**PoC promotion to T6-T8**. r07.0 also promotes the PoC scripts
+to first-class regression tests:
+
+- `tests/poc_release_info_*.py` → `tests/T6_release_info_*.py`
+  (or equivalent). The `poc_` prefix is dropped, the scripts
+  graduate from `docs/poc/` ownership into the production
+  regression suite.
+- Similarly for `poc_dotnet_cu_*.py` (→ T7) and
+  `poc_dynamic_update_01_probe.py` (→ T8). Exact numbering is an
+  implementation detail; the SPEC commits only to "promote
+  PoCs to T6-T8 numbering range".
+- `stage1__linux.yml` is extended to run T6-T8 on every PR,
+  same as the existing T1-T5. The PoC fixtures and snapshots
+  under `tests/fixtures/poc_*/` and `tests/snapshots/poc_*/` are
+  renamed to drop the `poc_` prefix (becoming permanent
+  regression assets).
+
+**Consequences**.
+- The existing `Config/Server*.json` references in stage4 are
+  updated to `data/config-Server*.json` (per §B.23.3).
+- The existing stage4 monthly-cron trigger (`cron '0 2 15 * *'`)
+  is removed; only `workflow_run` + `workflow_dispatch` remain.
+- §B.22.2 (Filename prefix rules) is amended: the "PoC script"
+  row is marked as "until r07.0 stage5 promotion"; the
+  graduated `T6-T8` files land in the regular regression-test
+  row.
+- The PoC report Markdown files in `docs/poc/` are kept as
+  historical record of how the Phase 2 investigation arrived at
+  these designs. They are not promoted to production status.
+- A future `-PreferBaselineMonthLcu` (Phase 4+) reuses the same
+  CI infrastructure: stage5 already produces the baseline-month
+  calendar in `cache-release-info.json`; stage4 only needs an
+  additional `-Action` to select baseline-month LCUs.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -1853,11 +2053,14 @@ extracted data is not consumed by any code path in r07.0.
 | B.23.4           | Closes §B.21.5 Schema 2.2 proposal | None (Schema stays 2.1)                            |
 | B.23.5           | Refines §B.21.2, §B.21.3           | Filename-based SSU detection in record stage       |
 | B.23.6           | Refines §B.21.1 (DU rows)          | New `cache-du-Server*.json`; 36-month cache logic  |
-| B.23.7           | (new)                              | New `-Action RefreshSnapshots` (or equivalent)     |
+| B.23.7           | (new) — see also §B.23.14          | New `-Action RefreshSnapshots` (or equivalent)     |
 | B.23.8           | Amends §B.14b (Type enum)          | Breaking change to `Type=DotNet`; no shim          |
 | B.23.9           | Closes §D.19, §D.20 follow-up      | No Catalog-discovery fallback                      |
 | B.23.10          | (new)                              | Single r07.0 release; r06.x is docs-only           |
 | B.23.11          | Defers §B.21.4 work                | None in r07.0; Hotpatch-ready ISO postponed        |
+| B.23.12          | Refines §B.21.4 / PoC-D            | Parser records baseline-months verbatim, including anomalies |
+| B.23.13          | Amends §B.6 (Action mapping)       | New `-Action InspectBaseline -PatchMonth YYYY-MM` (read-only) |
+| B.23.14          | Amends §B.22.2; supersedes part of §B.23.7 | New `stage5__data-snapshot.yml`; stage4 narrowed; PoC → T6-T8 |
 
 ---
 
