@@ -1,12 +1,12 @@
 {
   "Schema": "2.1",
-  "OsKey": "Server2019",
+  "OsKey": "Server2016",
   "Common": {
-    "Build": 17763,
-    "OsShortName": "WS2019",
+    "Build": 14393,
+    "OsShortName": "WS2016",
     "Edition": "Datacenter",
     "Architecture": "x64",
-    "WimEdition": "Windows Server 2019 Datacenter (Desktop Experience)",
+    "WimEdition": "Windows Server 2016 Datacenter (Desktop Experience)",
     "InstallWimIndex": 4,
     "BootWimIndexes": [
       1,
@@ -20,11 +20,14 @@
     "DefaultLanguage": "en-us",
     "LCUExpandViaMum": false,
     "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy": "manual:initial-r03"
+    "_VerifiedBy": "manual:initial-r03",
+    "CatalogTitleTokens": [
+      "Windows Server 2016"
+    ]
   },
   "PatchBaseline": {
     "Schema": "2.0",
-    "TargetBuildAfterUpdate": "17763.8511",
+    "TargetBuildAfterUpdate": "14393.8957",
     "PatchTuesdayOfBaseline": "",
     "LastVerifiedDate": "",
     "LastVerifiedBy": "",
@@ -45,9 +48,10 @@
     "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
     "RequiredUpdateLevelMinDate": "2024-04-09",
     "NotesSource": [
-      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f"
+      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
+      "https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1"
     ],
-    "Notes": "Make2023BootableMedia.ps1 is officially supported for Server 2019. Required source media must include 2024-4B LCU."
+    "Notes": "Server 2016 GA media (Build 14393) is known to fail to boot on modern hardware with PCA2023-only Secure Boot firmware. Applying the LCU pipeline through P09 AssembleIso + P10 ConvertPca2023BootManager is the documented mitigation."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",
@@ -59,15 +63,15 @@
     "en-us": {
       "DisplayName": "English (United States)",
       "Iso": {
-        "FileName": "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
-        "Url": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
+        "FileName": "14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_EN-US.ISO",
+        "Url": "https://software-download.microsoft.com/download/sg/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_EN-US.ISO",
         "Sha256": "",
         "SizeBytes": 0,
         "ReleaseDate": "",
         "_VerifiedDate": "",
         "_VerifiedBy": ""
       },
-      "VolumeLabelPrefix": "WS2019EN",
+      "VolumeLabelPrefix": "WS2016EN",
       "LanguageSpecificPatches": {
         "PatchTuesdayOfBaseline": "",
         "LastVerifiedDate": "",
@@ -80,15 +84,15 @@
     "ja-jp": {
       "DisplayName": "Japanese",
       "Iso": {
-        "FileName": "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
-        "Url": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
+        "FileName": "14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO",
+        "Url": "https://software-download.microsoft.com/download/sg/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO",
         "Sha256": "",
         "SizeBytes": 0,
         "ReleaseDate": "",
         "_VerifiedDate": "",
         "_VerifiedBy": ""
       },
-      "VolumeLabelPrefix": "WS2019JA",
+      "VolumeLabelPrefix": "WS2016JA",
       "LanguageSpecificPatches": {
         "PatchTuesdayOfBaseline": "",
         "LastVerifiedDate": "",

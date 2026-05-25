@@ -16,7 +16,7 @@ Windows Server の評価版 ISO に Microsoft のサービススタック更新�
 Update 工程を一掃することが目的です。Windows 11 + Windows PowerShell 5.1
 を主対象とし、PowerShell 7 以降でも動作します。
 
-**動的パッチ解決機能。** パッチセットは `Config/<OsKey>.json` の
+**動的パッチ解決機能。** パッチセットは `data/config-<OsKey>.json` の
 `PatchBaseline` ノードに記録され、記録時点 (`PatchTuesdayOfBaseline`)
 が現在の Patch Tuesday より古い場合に、Microsoft Update Catalog から
 自動的に再取得・再記録されます。さらに DISM マウントを開始する前に、
@@ -86,7 +86,7 @@ scripts/powershell/update-windows-server-iso/
   CHANGELOG.md                     # リビジョン変更履歴 (英語のみ)
   .psa.config.json                 # psa.py プロジェクト設定
   PSScriptAnalyzerSettings.psd1    # PSScriptAnalyzer プロジェクト設定
-  Config/                          # OS 別プロファイル
+  data/                           # OS 別プロファイル
     Server2016.json
     Server2019.json
     Server2022.json
@@ -154,12 +154,12 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## 管理用 Action: Config ベースラインの保守
 
-`Config/<OsKey>.json` はスクリプトが使うベースラインデータの保管場所です。次の 2 つの管理用 Action で、ISO に触れずにこれらのデータを更新・参照できます。
+`data/config-<OsKey>.json` はスクリプトが使うベースラインデータの保管場所です。次の 2 つの管理用 Action で、ISO に触れずにこれらのデータを更新・参照できます。
 
 ```powershell
 # 月次更新(デフォルト Mode): 記録されている Patch Tuesday が
 # 最新のものより古いフィールドグループだけを更新する。
-# Config/Server*.json をすべて巡回し、Microsoft Update Catalog を
+# data/config-Server*.json をすべて巡回し、Microsoft Update Catalog を
 # スクレイプして該当 JSON に書き戻す。
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines
 
@@ -214,7 +214,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 | Server2022  | 20348  | en-us, ja-jp      | 直接適用         | 不要         |
 | Server2025  | 26100  | en-us, ja-jp      | MUM/CAB 展開     | 必要         |
 
-OS 別プロファイル JSON は `Config/` 配下にあります。各プロファイルは
+OS 別プロファイル JSON は `data/` 配下にあります。各プロファイルは
 ビルド番号、既定の `boot.wim` インデックス、想定インストーラ エディション、
 言語別の ISO ダウンロード URL (Eval Center FwLink プライマリ、Microsoft
 ダウンロードミラーのフォールバック) を保持します。
@@ -225,7 +225,7 @@ OS 別プロファイル JSON は `Config/` 配下にあります。各プロフ
 |-----|----------------------------|----------|-----------------------------------------------------------------------------------|
 | P01 | Initialize                 | Setup    | PowerShell 環境、管理者、ADK、ディスク空き、Hyper-V を確認                        |
 | P02 | ResolveInputs              | Setup    | ISO / パッチ入力の解決、Config JSON の読み込み                                    |
-| P03 | RefreshPatchBaseline       | Setup    | Microsoft Update Catalog をスクレイプし `Config/<OsKey>.json` へ書き戻し          |
+| P03 | RefreshPatchBaseline       | Setup    | Microsoft Update Catalog をスクレイプし `data/config-<OsKey>.json` へ書き戻し          |
 | P04 | FetchAssets                | Fetch    | ISO とパッチをダウンロードしハッシュ検証                                          |
 | P05 | ExpandIso                  | Plan     | ソース ISO をマウントしてワークスペースへ展開、WIM インデックスを列挙             |
 | P06 | ValidatePatchSet           | Plan     | wsusscn2.cab オフライン WUA スキャン。パッチセットが必要 KB を網羅するか検証      |
@@ -332,7 +332,7 @@ UEFI セキュアブートのテンプレートプロファイル(ターゲッ�
 
 ```
 P02   ResolveInputs
-        - Config/<OsKey>.json を読み込み
+        - data/config-<OsKey>.json を読み込み
         - PatchBaseline.PatchTuesdayOfBaseline を取得
         - Get-LatestPatchTuesday と比較
 P03 RefreshPatchBaseline (古い場合 OR -AutoDetectLatestPatches 指定時)
@@ -376,7 +376,7 @@ P06 で必要パッチの不足が検出された場合、4 つのファイル�
 ```jsonc
 "AutoRefreshPolicy": {
   "Mode": "OnNewPatchTuesday",                // 古い場合に再取得
-  "WritebackToConfig": true,                  // Config/<OsKey>.json を上書き
+  "WritebackToConfig": true,                  // data/config-<OsKey>.json を上書き
   "FallbackOnScrapeFailure": "UseBaseline",   // または "Abort"
   "ScrapeRetries": 3
 }
@@ -436,7 +436,7 @@ r04.4 で追加されました。
 | `scripts__powershell__update-windows-server-iso__stage1__linux.yml` | psa.py + PSScriptAnalyzer (Linux 上の pwsh 7) | push, PR |
 | `scripts__powershell__update-windows-server-iso__stage2__windows.yml` | PSScriptAnalyzer (Windows PS 5.1) + パース + 読み取り専用スモーク | push, PR |
 | `scripts__powershell__update-windows-server-iso__stage3__synthetic.yml` | ADK インストール + `-SyntheticTestMode` フルパイプライン | `main` への push, 手動 |
-| `scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml` | `-Action RefreshAllBaselines` を実行し、`Config/Server*.json` に差分があれば自動 PR を作成 | cron `0 2 15 * *`(毎月)、手動 |
+| `scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml` | `-Action RefreshAllBaselines` を実行し、`data/config-Server*.json` に差分があれば自動 PR を作成 | cron `0 2 15 * *`(毎月)、手動 |
 
 これらのワークフローはリポジトリ直下の
 [`.github/workflows/`](../../../.github/workflows/) にあります。
@@ -444,7 +444,7 @@ r04.4 で追加されました。
 [`CHANGELOG.md`](./CHANGELOG.md) に記録します (ルート
 [`SPEC.md`](../../../SPEC.md) §9 で定められたリポジトリ全体の方針に従う)。
 
-Stage 4 (monthly-refresh) は `workflow_dispatch` で 4 つの入力(`mode`、`onlyOs`、`onlyLanguage`、`dryRun`)を受け付けるため、メンテナはワークフローを編集せずに任意のタイミングでスコープを限定した更新を実行できます。作成される PR は `add-paths` により `Config/*.json` のみに限定されており、他のファイルへの意図しない変更を防ぎます。
+Stage 4 (monthly-refresh) は `workflow_dispatch` で 4 つの入力(`mode`、`onlyOs`、`onlyLanguage`、`dryRun`)を受け付けるため、メンテナはワークフローを編集せずに任意のタイミングでスコープを限定した更新を実行できます。作成される PR は `add-paths` により `data/config-*.json` のみに限定されており、他のファイルへの意図しない変更を防ぎます。
 
 **重要**: Stage 3 は ISO アーティファクトをアップロードしません。
 評価版ライセンスは Microsoft バイナリの公的再配布を禁じているためです。
@@ -456,13 +456,13 @@ Stage 4 (monthly-refresh) は `workflow_dispatch` で 4 つの入力(`mode`、`o
 | `Administrator privilege required` | 非昇格セッションでの実行 | PowerShell を管理者として再起動 |
 | `oscdimg.exe not found` | Windows ADK Deployment Tools が未インストール | ADK の Deployment Tools 機能をインストール |
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` ドライブの空きが 100 GB 未満 | より大きなボリュームに `-WorkRoot` を変更、または不要ファイルを削除して空きを確保。100 GB は 1 OS 分の PrepareBuildVerify を最後まで実行できる最小値 |
-| `Workspace preflight failed: ... required Config file(s) missing` | `Config/Server<N>.json` が欠落・改名されている、またはスクリプト移動時に `Config/` がコピーされなかった | `Update-WindowsServerIso.ps1` の隣に `Config/` ディレクトリを復元。`Server2016.json` / `Server2019.json` / `Server2022.json` / `Server2025.json` の 4 ファイルすべてが必須 |
+| `Workspace preflight failed: ... required Config file(s) missing` | `data/config-Server<N>.json` が欠落・改名されている、またはスクリプト移動時に `data/` がコピーされなかった | `Update-WindowsServerIso.ps1` の隣に `data/` ディレクトリを復元。`Server2016.json` / `Server2019.json` / `Server2022.json` / `Server2025.json` の 4 ファイルすべてが必須 |
 | `Catalogue: no narrowed result for ... / Server2022`(他 OS でも発生し得る)、`Resolved 0 patch entries` | Microsoft Update Catalog のタイトル表記が変わった(カンマ削除など句読点ドリフト) | `Get-CatalogQueryTemplate` と `Get-LanguagePackQueryTemplate.osTitleTokens` の該当 `TitleTokens` 配列に新表記を追加。SPEC §D.19 参照 |
 | RefreshAllBaselines 後の `NeutralPatches[]` の `Type` が誤っている | `Convert-CatalogPatchToBaselineEntry` の新規呼び出し元が `-KnownType` を渡していない | Catalog 検索コンテキストから `-KnownType $q.Type` を渡す。SPEC §D.20 参照 |
 | .NET CU ベースラインエントリのサブファイルが欠落しているように見える | 複数 .msu を持つアンブレラ KB で 1 つしか保持されていない | `Resolve-PatchSetFromCatalog` で `Type='DotNet'` を `Select-AllCanonicalPatchFiles` 経由にしているか確認。SPEC §D.21 参照 |
 | `0x800f081e` の Warning 行 | 該当 SKU に適用できないパッチ | クロス SKU パッチセットでは想定内、無視で OK |
 | 古い WIM マウントが残存 | 前回実行が異常終了 | `dism /Get-MountedImageInfo` 確認後、`dism /Cleanup-Mountpoints` |
-| ISO SHA-256 不一致 | Microsoft がスナップショット URL を更新 | `Config/<OsKey>.json` の `IsoSha256` を新しい値に更新 |
+| ISO SHA-256 不一致 | Microsoft がスナップショット URL を更新 | `data/config-<OsKey>.json` の `IsoSha256` を新しい値に更新 |
 
 ## 謝辞
 

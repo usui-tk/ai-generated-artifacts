@@ -29,7 +29,7 @@ production, this directory ships five tools, summarised below.
 | `catalog_probe.py`        (T1) | Live Microsoft Update Catalog probe; asserts each known scrape pattern still yields > 0 hits, diffs against snapshot | Before / after editing any Catalogue-related helper; in CI monthly | Yes |
 | `catalog_fixture_test.py` (T2) | Offline regression test against saved HTML fixtures under `fixtures/<patch-month>/`; deterministic | After every parser or TitleToken change; on every CI run | No  |
 | `powershell_harness.py`   (T3) | Drives `Update-WindowsServerIso.ps1 -Action TestHarness` to unit-test PowerShell functions from Python | After every PS function change in the catalog / patch-selection layers | No  |
-| `eval_iso_probe.py`       (T4) | HTTP Range-GET against each `Config/Server<N>.json` Iso URL; reports size + Last-Modified | When the Microsoft Evaluation Center publishes a new snapshot; before release | Yes |
+| `eval_iso_probe.py`       (T4) | HTTP Range-GET against each `data/config-Server<N>.json` Iso URL; reports size + Last-Modified | When the Microsoft Evaluation Center publishes a new snapshot; before release | Yes |
 | `wsusscn2_probe.py`       (T5) | HTTP probe of `wsusscn2.cab`; warns when the cab is older than 60 days | Before running P06 ValidatePatchSet; on every CI monthly refresh | Yes |
 
 ## Quick start
@@ -79,7 +79,7 @@ python3 eval_iso_probe.py --os Server2025
 
 The probe reports each URL's HTTP status, total size in MB, and
 `Last-Modified`. If the size drops dramatically (~< 100 MB), the CDN
-likely de-listed the snapshot and `Config/Server2025.json#/.../Iso/Url`
+likely de-listed the snapshot and `data/config-Server2025.json#/.../Iso/Url`
 needs to be refreshed by hand against the Microsoft Evaluation Center
 [https://www.microsoft.com/evalcenter/](https://www.microsoft.com/evalcenter/).
 

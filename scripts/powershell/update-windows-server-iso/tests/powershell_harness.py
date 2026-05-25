@@ -75,17 +75,17 @@ def test_query_template_server2022_has_both_comma_forms(ps: PSSession) -> TestOu
 
 
 def test_query_template_each_os_has_required_types(ps: PSSession) -> TestOutcome:
-    """Every OS template must define SSU, LCU, and DotNet at minimum."""
+    """Every OS template must define SSU, LCU, and DotNet.Runtime at minimum."""
     name = 'Get-CatalogQueryTemplate per-OS Type coverage'
     missing: List[str] = []
     for os_key in ('Server2016', 'Server2019', 'Server2022', 'Server2025'):
         t = ps.invoke('Get-CatalogQueryTemplate', OsVersion=os_key, PatchMonth='2026-05')
         types = {q.get('Type') for q in t.get('Queries', [])}
-        for required in ('SSU', 'LCU', 'DotNet'):
+        for required in ('SSU', 'LCU', 'DotNet.Runtime'):
             if required not in types:
                 missing.append(f'{os_key}/{required}')
     if not missing:
-        return TestOutcome(name, True, 'all 4 OSes define SSU+LCU+DotNet')
+        return TestOutcome(name, True, 'all 4 OSes define SSU+LCU+DotNet.Runtime')
     return TestOutcome(name, False, f'missing: {missing}')
 
 
@@ -131,7 +131,7 @@ def test_select_all_canonical_patch_files_returns_array(ps: PSSession) -> TestOu
         {'Url': 'https://example.com/a/windows10.0-kb5087061-x64_yyyy.msu',
          'FileName': 'windows10.0-kb5087061-x64_yyyy.msu'},
     ]
-    got = ps.invoke('Select-AllCanonicalPatchFiles', Links=links, PatchType='DotNet', Architecture='x64')
+    got = ps.invoke('Select-AllCanonicalPatchFiles', Links=links, PatchType='DotNet.Runtime', Architecture='x64')
     # PS may return a single object if 1 result, or array if multiple.
     if isinstance(got, dict):
         got_list = [got]

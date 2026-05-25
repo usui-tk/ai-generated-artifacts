@@ -16,6 +16,129 @@ the script and follows the
 
 ## [Unreleased]
 
+### r07.0 Step 1 - data/ migration and DotNet type breaking change (this release)
+
+This is the **first commit of the r07.0 implementation** of the
+Phase 3 architecture decisions captured in SPEC.md §B.23. Two
+mechanical changes ship in this step; the production code paths
+(release-info parser, .NET CU parser, DU cache, URL resolver, new
+Actions) come in the following r07.0 commits.
+
+**Changes**
+
+- **Directory rename: `Config/` → `data/` with `config-` filename
+  prefix.** All four `Config/Server<N>.json` files are moved to
+  `data/config-Server<N>.json`. This is the layout codified in
+  SPEC.md §B.23.3 and is the foundation for the upcoming
+  `cache-*` and `raw-*` sibling files. The `Config/` directory
+  itself is removed.
+
+- **New optional config field: `Common.CatalogTitleTokens`.** Each
+  `data/config-Server<N>.json` gains an array of strings used by
+  the future Catalog URL resolver to disambiguate KB-only Search.aspx
+  responses. Values are sourced from PoC-B evidence in r06.0:
+
+  | OS          | Tokens                                                                                              |
+  | ----------- | --------------------------------------------------------------------------------------------------- |
+  | Server 2016 | `["Windows Server 2016"]`                                                                           |
+  | Server 2019 | `["Windows Server 2019"]`                                                                           |
+  | Server 2022 | `["Microsoft server operating system version 21H2", "Microsoft server operating system, version 21H2", "Windows Server 2022"]` |
+  | Server 2025 | `["Microsoft server operating system version 24H2", "Windows Server 2025"]`                         |
+
+  The field is additive within Schema 2.1; consumers that do not
+  recognise it ignore it (no Schema bump). See SPEC.md §B.23.2
+  for the rationale and §B.23.4 for the schema-version stance.
+
+- **Breaking change: `Type=DotNet` split into `DotNet.Runtime`
+  + `DotNet.OsLevel`.** The PatchBaseline `Type` enumeration now
+  distinguishes the per-runtime KB (applied to install.wim) from
+  the OS-offering KB (recorded for traceability but not applied
+  to any WIM). All in-tree code paths that referenced `'DotNet'`
+  now reference `'DotNet.Runtime'`. The `Get-PatchType` classifier
+  routes `.NET`-bearing filenames to `DotNet.Runtime` because the
+  OS-offering KB never has an on-disk payload. The `PatchTargetMap`
+  declares `DotNet.OsLevel` with an empty target array, so an
+  OS-offering KB recorded in a future baseline cleanly skips
+  WIM application. See SPEC.md §B.23.8 for the design rationale
+  and §B.14b for the updated Type enumeration.
+
+- **`Get-ConfigProfile` rejects legacy baselines.** A config-load
+  attempt that finds `Type='DotNet'` entries in `PatchBaseline.Patches[]`
+  now fails fast with a precise error pointing at SPEC.md §B.23.8
+  and instructing the operator to re-run `-Action RefreshAllBaselines`.
+  No automatic migration shim ships; r07.0 is a breaking change
+  by design.
+
+**Documentation updates**
+
+- `SPEC.md §B.22.1` directory layout: rewritten in current-state
+  voice with a historical note for the pre-r07.0 `Config/`
+  layout.
+- `SPEC.md §B.22.2` filename prefix rules: collapsed the r06.x /
+  r07.0+ split rows into the post-r07.0 layout; the historical
+  Phase 3 design narrative remains in §B.23.3.
+- `SPEC.md §B.10` JSON example: example `Type` values updated
+  to show both `DotNet.Runtime` and `DotNet.OsLevel` rows.
+- `SPEC.md §B.14b` Type enumeration: the comment that lists all
+  legal Type values now reads `... | DotNet.Runtime | DotNet.OsLevel
+  | DotNet.LangPack | ...`.
+- `SPEC.md §B.12` (P07 Install target table): added a row for
+  `DotNet.OsLevel` showing `(none)` targets.
+- `README.md` / `README.ja.md` / `TESTING.md` / `tests/README.md`
+  / `tests/eval_iso_probe.py`: all references to `Config/...`
+  paths updated to `data/config-...` paths.
+- `.github/workflows/stage1__linux.yml` /
+  `stage4__monthly-refresh.yml`: path-filter and PR-creation
+  patterns updated to `data/**` and `data/config-*.json`.
+
+**Tests**
+
+- `tests/powershell_harness.py` (T3): the
+  `Get-CatalogQueryTemplate per-OS Type coverage` and
+  `Select-AllCanonicalPatchFiles dual-link case` tests are
+  updated to expect `'DotNet.Runtime'` rather than `'DotNet'`.
+
+**Baseline lint cleanup (PSScriptAnalyzer)**
+
+Three pre-existing PSScriptAnalyzer findings were carried over
+from earlier commits and resolved as part of Step 1 so the
+project's stated "0 errors / 0 warnings / 0 information findings"
+quality gate is actually enforced going forward:
+
+- `PSAvoidAssignmentToAutomaticVariable`:
+  `foreach ($pid in $installedIds)` renamed to
+  `foreach ($packageId in $installedIds)` to avoid shadowing
+  the read-only `$pid` automatic variable.
+- `PSReviewUnusedParameter`: `Select-AllCanonicalPatchFiles`
+  now honours its `$PatchType` parameter by mirroring the
+  `DotNet.Runtime`-specific ndp scoring boost that
+  `Select-CanonicalPatchFile` already had, making the
+  multi-file picker behave consistently with the single-file
+  picker when umbrella .NET CU KBs return multiple siblings.
+- `PSUseDeclaredVarsMoreThanAssignments`: the unused
+  `$regOut` capture from `reg.exe load` was changed to
+  `$null = & reg.exe load ...` since success is determined
+  by `$LASTEXITCODE` alone.
+
+**Quality gates verified for this commit**
+
+- `psa.py Update-WindowsServerIso.ps1`: 0 errors / 0 warnings / 0 info
+- T2 `catalog_fixture_test.py`: 13/13 PASS
+- T3 `powershell_harness.py`: 13/13 PASS
+- `.ps1`: UTF-8 BOM + CRLF + ASCII-only (verified)
+- `.md`: UTF-8 + LF + no-BOM (verified)
+- `.json`: UTF-8 + LF + no-BOM (verified)
+
+**Not in this Step 1**
+
+- Script version is still `update-wsi-2026.05.25-r05.1`. The
+  `r07.0` version bump happens in the final r07.0 commit.
+- `Resolve-PatchSetFromReleaseInfo`, `Get-DownloadUrlForKb`, the
+  release-info / .NET CU / DU caches, the `RefreshSnapshots` and
+  `InspectBaseline` Actions, and the `stage5__data-snapshot.yml`
+  workflow all arrive in subsequent r07.0 commits per the §B.23
+  design.
+
 ### r06.0 Phase 2 - PoC: online patch metadata acquisition (this release)
 
 This Phase 2 deliverable is **PoC scripts and a written report**,

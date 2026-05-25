@@ -50,7 +50,7 @@ This document consolidates everything needed to verify and evaluate
 | Smoke 7 — `-Mode Initial` | ✓ same decisions as Monthly for the baseline state | r04 build |
 | Live Catalogue scrape (Server2025 / `2026-05`) | ✓ 3 patches resolved; Combined-LCU detection fires; supersedence dedup excludes 1 false-positive | r04.3 build |
 | Live Catalogue scrape (Server2022 / `2026-05`) | ✓ 5 patch entries resolved after comma-form fix; supersedence dedup excludes 3 stale .NET candidates; umbrella .NET CU keeps both ndp48 and ndp481 MSUs | r04.3 build |
-| Workspace preflight — Config presence (all 4 files present) | ✓ all four `Config/Server<N>.json` listed with byte sizes | r04.3 build |
+| Workspace preflight — Config presence (all 4 files present) | ✓ all four `data/config-Server<N>.json` listed with byte sizes | r04.3 build |
 | Workspace preflight — placement before dispatcher | ✓ runs for `RefreshAllBaselines` / `DumpFieldClassification` (which never run P01); skipped for `ListPhases` / `Cleanup` / `-EnvironmentInfoOnly` / `-SkipEnvCheck` | r04.3 build |
 | T1 — `catalog_probe.py` live Catalog probe | ✓ 7 checks pass (search reachable + 4 OS title-format + supersedence panel); snapshot saved | r04.4 build |
 | T2 — `catalog_fixture_test.py` offline fixture regression | ✓ 13 assertions pass on the 2026-05 fixtures, including bug-2 and bug-3 regressions | r04.4 build |
@@ -317,7 +317,7 @@ and consists of, in order:
 4. Boot the resulting ISO in a Hyper-V VM and confirm Windows Setup
    completes; confirm `winver` reports the expected post-update build
    number (`PatchBaseline.TargetBuildAfterUpdate` from the
-   `Config/<OsKey>.json`).
+   `data/config-<OsKey>.json`).
 
 The results table for §5 is intentionally empty until an operator
 runs the procedure end-to-end. Submitting results back to this file
@@ -356,7 +356,7 @@ Stage 3 uses a synthetic ISO produced by `New-SyntheticTestIso`.
 The Stage 4 (monthly-refresh) workflow is the operational complement
 to §4 live Catalogue verification: it runs `-Action
 RefreshAllBaselines` on the 15th of every month and opens an
-automated PR when `Config/<OsKey>.json` baselines diverge from the
+automated PR when `data/config-<OsKey>.json` baselines diverge from the
 committed state. Successful Stage 4 runs are themselves a form of
 continuous verification that the Catalogue scrape paths still work.
 

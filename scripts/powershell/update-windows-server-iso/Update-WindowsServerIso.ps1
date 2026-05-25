@@ -599,7 +599,8 @@ $Script:OsConfigFieldGroups = @(
 # Microsoft public guidance behind this mapping:
 #   - SSU                    : required on every serviced WIM
 #   - LCU                    : Install + Boot (WinRE uses SafeOS DU instead)
-#   - DotNet                 : Install only (.NET 4.x lives in install.wim)
+#   - DotNet.Runtime         : Install only (.NET 4.x runtime KB lives in install.wim)
+#   - DotNet.OsLevel         : recorded only; OS-offering KB not applied to any WIM
 #   - DynamicUpdate.Component: Install only (component-store updates)
 #   - DynamicUpdate.SafeOs   : WinRE only (WinRE is the "Safe OS")
 #   - DynamicUpdate.Setup    : Setup binaries (handled via pending.xml)
@@ -609,7 +610,8 @@ $Script:OsConfigFieldGroups = @(
 $Script:PatchTargetMap = @{
     'SSU'                      = @('Install', 'Boot', 'WinRE')
     'LCU'                      = @('Install', 'Boot')
-    'DotNet'                   = @('Install')
+    'DotNet.Runtime'           = @('Install')
+    'DotNet.OsLevel'           = @()
     'DynamicUpdate.Component'  = @('Install')
     'DynamicUpdate.SafeOs'     = @('WinRE')
     'DynamicUpdate.Setup'      = @('Setup')
@@ -2082,14 +2084,16 @@ function Assert-WorkspacePreflight {
     .DESCRIPTION
         Two checks, both fatal:
 
-        1. Config presence. The script ships with four canonical
-           Config/Server<N>.json files (Server2016, Server2019,
-           Server2022, Server2025) alongside the script. They must
-           exist before any Phase runs because Get-ConfigProfile is
-           called from P02 (load) and A01 (RefreshAllBaselines)
-           and would throw a less helpful error if the file is
-           missing. We check up-front, in a single place, with a
-           clear "which files are missing" message.
+        1. Data directory and config files. The script ships with
+           four canonical data/config-Server<N>.json files
+           (Server2016, Server2019, Server2022, Server2025) alongside
+           the script under the data/ directory. They must exist
+           before any Phase runs because Get-ConfigProfile is called
+           from P02 (load) and A01 (RefreshAllBaselines) and would
+           throw a less helpful error if the file is missing. We
+           check up-front, in a single place, with a clear "which
+           files are missing" message. See SPEC.md section B.23.3 for the
+           directory layout.
 
         2. Drive free space. The default workspace ('Workspace_UpdateWsi',
            relative to the script root) sits on whichever drive hosts
@@ -2114,32 +2118,32 @@ function Assert-WorkspacePreflight {
     [CmdletBinding()]
     param()
 
-    # ---- Check 1: Config files ----
-    $configDir = Join-Path $Script:ScriptRoot 'Config'
-    if (-not (Test-Path -LiteralPath $configDir -PathType Container)) {
-        throw ('Workspace preflight failed: Config directory not found at "{0}". The script ships Config/Server<N>.json alongside Update-WindowsServerIso.ps1; ensure the project tree is intact.' -f $configDir)
+    # ---- Check 1: data/ directory and config files ----
+    $dataDir = Join-Path $Script:ScriptRoot 'data'
+    if (-not (Test-Path -LiteralPath $dataDir -PathType Container)) {
+        throw ('Workspace preflight failed: data directory not found at "{0}". The script ships data/config-Server<N>.json alongside Update-WindowsServerIso.ps1; ensure the project tree is intact.' -f $dataDir)
     }
-    Write-Step ('Config directory: {0}' -f $configDir)
+    Write-Step ('Data directory: {0}' -f $dataDir)
 
-    $requiredConfigs = @('Server2016.json','Server2019.json','Server2022.json','Server2025.json')
+    $requiredConfigs = @('config-Server2016.json','config-Server2019.json','config-Server2022.json','config-Server2025.json')
     $missingConfigs  = New-Object System.Collections.Generic.List[string]
     foreach ($cfg in $requiredConfigs) {
-        $cfgPath = Join-Path $configDir $cfg
+        $cfgPath = Join-Path $dataDir $cfg
         if (Test-Path -LiteralPath $cfgPath -PathType Leaf) {
             $sz = (Get-Item -LiteralPath $cfgPath).Length
-            Write-Ok ('  Found Config/{0} ({1} bytes)' -f $cfg, $sz)
+            Write-Ok ('  Found data/{0} ({1} bytes)' -f $cfg, $sz)
         } else {
             $missingConfigs.Add($cfg) | Out-Null
-            Write-Fail ('  Missing Config/{0}' -f $cfg)
+            Write-Fail ('  Missing data/{0}' -f $cfg)
         }
     }
     if ($missingConfigs.Count -gt 0) {
         Add-ErrorJsonlEntry -Phase 'P01' -Kind 'workspace-preflight' -Properties @{
             check          = 'config-files'
             missingFiles   = $missingConfigs.ToArray()
-            configDirectory = $configDir
+            configDirectory = $dataDir
         }
-        throw ('Workspace preflight failed: {0} required Config file(s) missing under {1}: {2}. All four Server<N>.json baselines must be present before the script can run any phase.' -f $missingConfigs.Count, $configDir, ($missingConfigs -join ', '))
+        throw ('Workspace preflight failed: {0} required config file(s) missing under {1}: {2}. All four data/config-Server<N>.json baselines must be present before the script can run any phase.' -f $missingConfigs.Count, $dataDir, ($missingConfigs -join ', '))
     }
 
     # ---- Check 2: Drive free space (100 GB minimum) ----
@@ -2263,9 +2267,9 @@ function Get-ConfigProfile {
     )
 
     if ([string]::IsNullOrEmpty($ConfigRoot)) {
-        $ConfigRoot = Join-Path $Script:ScriptRoot 'Config'
+        $ConfigRoot = Join-Path $Script:ScriptRoot 'data'
     }
-    $cfgFile = Join-Path $ConfigRoot ($OsKey + '.json')
+    $cfgFile = Join-Path $ConfigRoot ('config-' + $OsKey + '.json')
     if (-not (Test-Path -LiteralPath $cfgFile)) {
         throw ('Config profile not found: {0}' -f $cfgFile)
     }
@@ -2294,6 +2298,22 @@ function Get-ConfigProfile {
     $langNode = $json.LanguageSpecific.$OsLang
     if ($null -eq $langNode) {
         throw ('Config {0} has no LanguageSpecific entry for "{1}".' -f $cfgFile, $OsLang)
+    }
+
+    # PatchBaseline Type-value sanity check: the legacy value 'DotNet'
+    # was split into 'DotNet.Runtime' (per-runtime KB applied to the WIM)
+    # and 'DotNet.OsLevel' (OS-offering KB recorded but not applied).
+    # A config still carrying Type='DotNet' is from an older baseline
+    # and must be regenerated via -Action RefreshAllBaselines under
+    # the current code path. See SPEC.md section B.23.8.
+    if ($json.PatchBaseline -and $json.PatchBaseline.Patches) {
+        $legacyDotNet = @($json.PatchBaseline.Patches | Where-Object {
+            $_.Type -eq 'DotNet'
+        })
+        if ($legacyDotNet.Count -gt 0) {
+            $legacyKbs = ($legacyDotNet | ForEach-Object { $_.KbId }) -join ', '
+            throw ('Config {0} carries {1} legacy Type="DotNet" entry/entries (KBs: {2}). The DotNet type was replaced by DotNet.Runtime + DotNet.OsLevel; re-run -Action RefreshAllBaselines to regenerate the baseline. See SPEC.md section B.23.8.' -f $cfgFile, $legacyDotNet.Count, $legacyKbs)
+        }
     }
 
     # Build a flat profile object: promote Common fields to top-level
@@ -2601,18 +2621,21 @@ function Get-PatchKbId {
 function Get-PatchType {
     <#
     .SYNOPSIS
-        Heuristic classification of a patch file as SSU / LCU / DotNet /
-        DynamicUpdate.* / Defender / Edge / Other.
+        Heuristic classification of a patch file as SSU / LCU /
+        DotNet.Runtime / DynamicUpdate.* / Defender / Edge / Other.
     .DESCRIPTION
         Microsoft does not embed the patch type in the filename in a
         machine-readable way, so the classifier matches against
         well-known token patterns documented in the Update History
-        pages.
+        pages. A .NET-bearing filename always classifies as
+        DotNet.Runtime because the OS-offering KB (DotNet.OsLevel)
+        has no on-disk payload -- it is recorded in the PatchBaseline
+        for traceability only and never reaches this function.
     #>
     param([Parameter(Mandatory)] [string]$FileName)
     $n = $FileName.ToLower()
     if ($n -match 'servicingstack' -or $n -match 'ssu')         { return 'SSU' }
-    if ($n -match 'ndp[0-9]+'      -or $n -match '\.net')       { return 'DotNet' }
+    if ($n -match 'ndp[0-9]+'      -or $n -match '\.net')       { return 'DotNet.Runtime' }
     if ($n -match 'safeos')                                     { return 'DynamicUpdate.SafeOs' }
     if ($n -match 'setupdynamic'   -or $n -match 'setup.*dynamic') { return 'DynamicUpdate.Setup' }
     if ($n -match 'dynamicupdate')                              { return 'DynamicUpdate.Component' }
@@ -2631,7 +2654,8 @@ function Get-PatchApplyOrder {
         'LCU'                       { return 3 }
         'DynamicUpdate.Component'   { return 4 }
         'DynamicUpdate.SafeOs'      { return 5 }
-        'DotNet'                    { return 6 }
+        'DotNet.Runtime'            { return 6 }
+        'DotNet.OsLevel'            { return 99 }
         'Defender'                  { return 7 }
         'Edge'                      { return 8 }
         default                     { return 99 }
@@ -2848,15 +2872,19 @@ function Convert-CatalogPatchToBaselineEntry {
 function Get-OsConfigPath {
     <#
     .SYNOPSIS
-        Resolve the on-disk path of the active Config/<OsKey>.json file,
+        Resolve the on-disk path of the active data/config-<OsKey>.json file,
         so the P03 writeback knows where to save.
+    .DESCRIPTION
+        OS configuration is stored under data/config-<OsKey>.json. See
+        SPEC.md section B.23.3 for the three-prefix naming scheme
+        (config-/cache-/raw-).
     #>
     [OutputType([string])]
     param([Parameter(Mandatory)] [string]$OsKey)
     $here = $Script:ScriptRoot
     if ([string]::IsNullOrEmpty($here)) { $here = $PSScriptRoot }
     if ([string]::IsNullOrEmpty($here)) { $here = (Get-Location).Path }
-    return (Join-Path $here ('Config' + [System.IO.Path]::DirectorySeparatorChar + $OsKey + '.json'))
+    return (Join-Path $here ('data' + [System.IO.Path]::DirectorySeparatorChar + 'config-' + $OsKey + '.json'))
 }
 
 # ============================================================
@@ -2927,7 +2955,7 @@ function Get-CatalogQueryTemplate {
                 @{ Type='LCU';                  QueryTemplate=($m + ' Cumulative Update for Microsoft server operating system version 24H2');     ProductFilter=@(); DescriptionFilter='' }
                 @{ Type='DynamicUpdate.Setup';  QueryTemplate=($m + ' Setup Dynamic Update for Microsoft server operating system version 24H2');  ProductFilter=@(); DescriptionFilter='' }
                 @{ Type='DynamicUpdate.SafeOs'; QueryTemplate=($m + ' Safe OS Dynamic Update for Microsoft server operating system version 24H2'); ProductFilter=@(); DescriptionFilter='' }
-                @{ Type='DotNet';               QueryTemplate=($m + ' Cumulative Update for .NET Framework');                                     ProductFilter=@('.NET Framework'); DescriptionFilter='' }
+                @{ Type='DotNet.Runtime';               QueryTemplate=($m + ' Cumulative Update for .NET Framework');                                     ProductFilter=@('.NET Framework'); DescriptionFilter='' }
             )
         }
         'Server2022' = @{
@@ -2950,7 +2978,7 @@ function Get-CatalogQueryTemplate {
                 # 2022 uses "Dynamic Update" without "Setup/Safe OS" prefix in title; Product/Description disambiguates
                 @{ Type='DynamicUpdate.Setup';  QueryTemplate=($m + ' Dynamic Update for Microsoft server operating system version 21H2'); ProductFilter=@('Windows 10 and later Dynamic Update'); DescriptionFilter='SetupUpdate' }
                 @{ Type='DynamicUpdate.SafeOs'; QueryTemplate=($m + ' Dynamic Update for Microsoft server operating system version 21H2'); ProductFilter=@('Windows Safe OS Dynamic Update'); DescriptionFilter='ComponentUpdate' }
-                @{ Type='DotNet';               QueryTemplate=($m + ' Cumulative Update for .NET Framework');                              ProductFilter=@('.NET Framework'); DescriptionFilter='' }
+                @{ Type='DotNet.Runtime';               QueryTemplate=($m + ' Cumulative Update for .NET Framework');                              ProductFilter=@('.NET Framework'); DescriptionFilter='' }
             )
         }
         'Server2019' = @{
@@ -2959,7 +2987,7 @@ function Get-CatalogQueryTemplate {
                 @{ Type='SSU';                  QueryTemplate=($m + ' Servicing Stack Update for Windows Server 2019 for x64-based Systems'); ProductFilter=@(); DescriptionFilter='' }
                 @{ Type='LCU';                  QueryTemplate=($m + ' Cumulative Update for Windows Server 2019 for x64-based Systems');      ProductFilter=@(); DescriptionFilter='' }
                 # Server 2019 does not ship Setup/SafeOs DU monthly; only on feature-update windows
-                @{ Type='DotNet';               QueryTemplate=($m + ' Cumulative Update for .NET Framework');                                  ProductFilter=@('.NET Framework'); DescriptionFilter='' }
+                @{ Type='DotNet.Runtime';               QueryTemplate=($m + ' Cumulative Update for .NET Framework');                                  ProductFilter=@('.NET Framework'); DescriptionFilter='' }
             )
         }
         'Server2016' = @{
@@ -2967,7 +2995,7 @@ function Get-CatalogQueryTemplate {
             Queries = @(
                 @{ Type='SSU';                  QueryTemplate=($m + ' Servicing Stack Update for Windows Server 2016 for x64-based Systems'); ProductFilter=@(); DescriptionFilter='' }
                 @{ Type='LCU';                  QueryTemplate=($m + ' Cumulative Update for Windows Server 2016 for x64-based Systems');      ProductFilter=@(); DescriptionFilter='' }
-                @{ Type='DotNet';               QueryTemplate=($m + ' Cumulative Update for .NET Framework');                                  ProductFilter=@('.NET Framework'); DescriptionFilter='' }
+                @{ Type='DotNet.Runtime';               QueryTemplate=($m + ' Cumulative Update for .NET Framework');                                  ProductFilter=@('.NET Framework'); DescriptionFilter='' }
             )
         }
     }
@@ -3160,7 +3188,7 @@ function Select-CanonicalPatchFile {
         if ($fn -match 'full') { $score += 30 }
 
         # .NET CU: prefer ndp<version> variant (e.g. ndp48 for .NET 4.8)
-        if ($PatchType -eq 'DotNet' -and $DotNetVersion) {
+        if ($PatchType -eq 'DotNet.Runtime' -and $DotNetVersion) {
             $ndpTok = 'ndp' + ($DotNetVersion -replace '\.', '')
             if ($fn -match [regex]::Escape($ndpTok)) { $score += 100 }
         }
@@ -3240,6 +3268,15 @@ function Select-AllCanonicalPatchFiles {
         }
 
         if ($fn -match 'full') { $score += 30 }
+
+        # .NET CU: prefer ndp<version> variant (e.g. ndp48 for .NET 4.8).
+        # Mirrors the same scoring used by Select-CanonicalPatchFile so
+        # the multi-file picker preserves the per-runtime preference
+        # when multiple .NET CU siblings are present under one umbrella
+        # KB.
+        if ($PatchType -eq 'DotNet.Runtime') {
+            if ($fn -match 'ndp\d+') { $score += 100 }
+        }
 
         $scored.Add([pscustomobject]@{
             Link  = $lnk
@@ -3586,7 +3623,7 @@ function Resolve-PatchSetFromCatalog {
         # PatchBaseline entry. For SSU / LCU / SafeOS / Setup DU,
         # Microsoft publishes a single canonical file per UpdateId so
         # the single-file picker is sufficient.
-        if ($q.Type -eq 'DotNet') {
+        if ($q.Type -eq 'DotNet.Runtime') {
             $primaries = @(Select-AllCanonicalPatchFiles -Links $links -PatchType $q.Type -Architecture 'x64')
         } else {
             $singleBest = Select-CanonicalPatchFile -Links $links -PatchType $q.Type -Architecture 'x64'
@@ -4766,7 +4803,7 @@ function Build-InstallApplySequence {
     if ($byType.ContainsKey('LXP'))          { $lp += $byType['LXP'] }
     if ($byType.ContainsKey('DotNet.LangPack')) { $lp += $byType['DotNet.LangPack'] }
     $lcu        = @(if ($byType.ContainsKey('LCU')) { $byType['LCU'] } else { @() })
-    $dotnet     = @(if ($byType.ContainsKey('DotNet')) { $byType['DotNet'] } else { @() })
+    $dotnet     = @(if ($byType.ContainsKey('DotNet.Runtime')) { $byType['DotNet.Runtime'] } else { @() })
     $dynUpComp  = @(if ($byType.ContainsKey('DynamicUpdate.Component')) { $byType['DynamicUpdate.Component'] } else { @() })
 
     $hasLp = ($lp.Count -gt 0)
@@ -5011,8 +5048,8 @@ function Test-PatchDependencyClosureOnMount {
     $missing = New-Object System.Collections.Generic.List[string]
     foreach ($reqKb in $prereqMap.Keys) {
         $found = $false
-        foreach ($pid in $installedIds) {
-            if ($pid -like ("*{0}*" -f $reqKb)) {
+        foreach ($packageId in $installedIds) {
+            if ($packageId -like ("*{0}*" -f $reqKb)) {
                 $found = $true
                 break
             }
@@ -5541,8 +5578,10 @@ function Get-WimSystemHiveValue {
 
     $loaded = $false
     try {
-        # reg.exe writes to stderr on success too, hence 2>&1
-        $regOut = & reg.exe load $mountKey $hivePath 2>&1
+        # reg.exe writes to stderr on success too, hence 2>&1. The
+        # captured output is discarded; success is determined by
+        # $LASTEXITCODE alone.
+        $null = & reg.exe load $mountKey $hivePath 2>&1
         if ($LASTEXITCODE -ne 0) {
             return $null
         }
@@ -6804,7 +6843,7 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             }
             Write-Ok 'ISO SHA-256 matches.'
         } else {
-            # Record the hash for first-time use; user can copy into Config/<OsKey>.json
+            # Record the hash for first-time use; user can copy into data/config-<OsKey>.json
             $Script:IsoSha256 = (Get-FileHash -LiteralPath $Script:IsoLocalPath -Algorithm SHA256).Hash.ToLower()
             Write-Step ('Recorded ISO SHA-256: {0}' -f $Script:IsoSha256)
         }
@@ -8187,7 +8226,7 @@ function Invoke-ReportPhase13_FinalReport {
 #                      DumpFieldClassification (A02)
 # ============================================================
 # These are "admin" phases in the sense that they don't take an
-# OS image as input; they operate on the on-disk Config/*.json
+# OS image as input; they operate on the on-disk data/config-*.json
 # files. They are dispatched the same way as regular build phases
 # via Invoke-PhaseRunner, but the Action mapping routes them
 # through dedicated entry points (-Action RefreshAllBaselines and
@@ -8550,7 +8589,7 @@ function Set-GroupVerifiedState {
 function Invoke-AdminPhaseA01_RefreshAllBaselines {
     <#
     .SYNOPSIS
-        Refresh Config/<OsKey>.json baselines for one or more OS / language
+        Refresh data/config-<OsKey>.json baselines for one or more OS / language
         combinations. Applies the field-group decision matrix and calls
         the appropriate Refresher function per group.
     #>
@@ -8564,9 +8603,9 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
     $hasUnresolved = $false
     try {
         Set-DebugStep -Step 'discover-configs'
-        $configRoot = Join-Path $Script:ScriptRoot 'Config'
+        $configRoot = Join-Path $Script:ScriptRoot 'data'
         if (-not (Test-Path -LiteralPath $configRoot)) {
-            throw ('Config root not found: {0}' -f $configRoot)
+            throw ('Data root not found: {0}' -f $configRoot)
         }
 
         # Determine which OS configs to process
@@ -8614,7 +8653,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
 
         foreach ($osKey in $targetOsKeys) {
             Set-DebugStep -Step ('os:' + $osKey)
-            $cfgFile = Join-Path $configRoot ($osKey + '.json')
+            $cfgFile = Join-Path $configRoot ('config-' + $osKey + '.json')
             if (-not (Test-Path -LiteralPath $cfgFile)) {
                 Write-Warn ('Config not found: {0}' -f $cfgFile)
                 continue
@@ -9247,8 +9286,8 @@ if ($Pca2023OnlyMode) {
 }
 
 # Workspace preflight.
-# Verifies that (1) the Config directory and all four canonical
-# Config/Server<N>.json files exist alongside the script, and (2) the
+# Verifies that (1) the data directory and all four canonical
+# data/config-Server<N>.json files exist alongside the script, and (2) the
 # drive backing -WorkRoot has at least 100 GB free space (the minimum
 # required to host an end-to-end PrepareBuildVerify run for one OS:
 # input ISO ~7 GB + extracted ~7 GB + mounted WIM ~15 GB + patches

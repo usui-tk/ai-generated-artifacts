@@ -17,7 +17,7 @@ Server 2016 / 2019 / 2022 / 2025. Targeted at Windows 11 + Windows
 PowerShell 5.1 (also runs on PowerShell 7+).
 
 **Dynamic patch resolution.** The patch set is recorded under
-`Config/<OsKey>.json#/PatchBaseline` and is automatically refreshed
+`data/config-<OsKey>.json#/PatchBaseline` and is automatically refreshed
 from the Microsoft Update Catalogue when the recorded baseline is
 older than the current month's Patch Tuesday. A separate validation
 pass uses `wsusscn2.cab` + Windows Update Agent COM API to
@@ -92,7 +92,7 @@ scripts/powershell/update-windows-server-iso/
   CHANGELOG.md                     # Per-revision change history (English only)
   .psa.config.json                 # psa.py project configuration
   PSScriptAnalyzerSettings.psd1    # PSScriptAnalyzer project configuration
-  Config/                          # Per-OS configuration profiles
+  data/                           # Per-OS configuration profiles
     Server2016.json
     Server2019.json
     Server2022.json
@@ -161,14 +161,14 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## Admin actions: Config baseline management
 
-The `Config/<OsKey>.json` files hold the baseline data the script
+The `data/config-<OsKey>.json` files hold the baseline data the script
 uses. Two admin actions let you refresh and inspect that data
 without touching any ISO:
 
 ```powershell
 # Monthly refresh (default Mode): refresh only the field groups whose
 # recorded Patch Tuesday is older than the latest one. Walks every
-# OS Config in Config/Server*.json, scrapes Microsoft Update Catalog
+# OS Config in data/config-Server*.json, scrapes Microsoft Update Catalog
 # where applicable, writes results back to the corresponding JSON.
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines
 
@@ -226,7 +226,7 @@ Optional, only needed for development and CI:
 | Server2022  | 20348  | en-us, ja-jp     | Direct          | Not required |
 | Server2025  | 26100  | en-us, ja-jp     | MUM/CAB expand  | Required     |
 
-Per-OS profile JSON lives under `Config/`. Each profile encodes the
+Per-OS profile JSON lives under `data/`. Each profile encodes the
 build number, default `boot.wim` indexes, expected installer editions,
 and per-language ISO download URLs (Eval Center FwLink primary,
 Microsoft download mirror fallback).
@@ -237,7 +237,7 @@ Microsoft download mirror fallback).
 |-----|----------------------------|--------|-------------------------------------------------------------------------------|
 | P01 | Initialize                 | Setup  | PowerShell env, admin, ADK, disk, Hyper-V                                     |
 | P02 | ResolveInputs              | Setup  | ISO/patch source resolution, Config JSON                                      |
-| P03 | RefreshPatchBaseline       | Setup  | Microsoft Update Catalogue scrape, writeback to `Config/<OsKey>.json`         |
+| P03 | RefreshPatchBaseline       | Setup  | Microsoft Update Catalogue scrape, writeback to `data/config-<OsKey>.json`         |
 | P04 | FetchAssets                | Fetch  | ISO + patch downloads with hash verification                                  |
 | P05 | ExpandIso                  | Plan   | Mount source ISO, copy to workspace, enumerate WIM indexes                    |
 | P06 | ValidatePatchSet           | Plan   | wsusscn2.cab offline WUA scan; verify patch set covers all required KBs       |
@@ -342,7 +342,7 @@ work and to prevent partial patch sets from producing broken ISOs.
 
 ```
 P02   ResolveInputs
-        - Load Config/<OsKey>.json
+        - Load data/config-<OsKey>.json
         - Read PatchBaseline.PatchTuesdayOfBaseline
         - Compare against Get-LatestPatchTuesday
 P03 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
@@ -385,7 +385,7 @@ emitting all four files; use only for development.
 ```jsonc
 "AutoRefreshPolicy": {
   "Mode": "OnNewPatchTuesday",      // refresh when stale
-  "WritebackToConfig": true,         // overwrite Config/<OsKey>.json
+  "WritebackToConfig": true,         // overwrite data/config-<OsKey>.json
   "FallbackOnScrapeFailure": "UseBaseline",  // or "Abort"
   "ScrapeRetries": 3
 }
@@ -445,7 +445,7 @@ Four GitHub Actions workflows verify and maintain this script:
 | `scripts__powershell__update-windows-server-iso__stage1__linux.yml` | psa.py + PSScriptAnalyzer (pwsh 7 on Linux) | push, PR |
 | `scripts__powershell__update-windows-server-iso__stage2__windows.yml` | PSScriptAnalyzer (Windows PS 5.1) + parse + read-only smoke modes | push, PR |
 | `scripts__powershell__update-windows-server-iso__stage3__synthetic.yml` | ADK install + full `-SyntheticTestMode` pipeline | push to `main`, manual |
-| `scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml` | `-Action RefreshAllBaselines` then open auto-PR if `Config/Server*.json` changed | cron `0 2 15 * *` (monthly), manual |
+| `scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml` | `-Action RefreshAllBaselines` then open auto-PR if `data/config-Server*.json` changed | cron `0 2 15 * *` (monthly), manual |
 
 The workflows live at the repository root under
 [`.github/workflows/`](../../../.github/workflows/). Per-workflow
@@ -457,7 +457,7 @@ Stage 4 (monthly-refresh) supports `workflow_dispatch` with four
 inputs (`mode`, `onlyOs`, `onlyLanguage`, `dryRun`) so maintainers
 can trigger an ad-hoc refresh or limit the scope without editing the
 workflow. The opened PR is restricted via `add-paths` to
-`Config/*.json`, preventing accidental changes elsewhere.
+`data/config-*.json`, preventing accidental changes elsewhere.
 
 CRITICAL: Stage 3 NEVER uploads an ISO artifact. The evaluation
 licence forbids public distribution of Microsoft binaries.
@@ -469,13 +469,13 @@ licence forbids public distribution of Microsoft binaries.
 | `Administrator privilege required` | Running as a non-elevated user | Re-launch PowerShell as Administrator |
 | `oscdimg.exe not found` | Windows ADK Deployment Tools not installed | Install the ADK Deployment Tools feature |
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` drive has less than 100 GB free | Move `-WorkRoot` to a larger volume, or free up space; the 100 GB minimum covers an end-to-end PrepareBuildVerify run for one OS |
-| `Workspace preflight failed: ... required Config file(s) missing` | The `Config/Server<N>.json` files were deleted, renamed, or not copied when the script was relocated | Restore the `Config/` directory alongside `Update-WindowsServerIso.ps1`; all four `Server2016.json` / `Server2019.json` / `Server2022.json` / `Server2025.json` must be present |
+| `Workspace preflight failed: ... required Config file(s) missing` | The `data/config-Server<N>.json` files were deleted, renamed, or not copied when the script was relocated | Restore the `data/` directory alongside `Update-WindowsServerIso.ps1`; all four `Server2016.json` / `Server2019.json` / `Server2022.json` / `Server2025.json` must be present |
 | `Catalogue: no narrowed result for ... / Server2022` (or any OS), `Resolved 0 patch entries` | Microsoft changed the Catalogue title format (punctuation drift, e.g. comma removal) | Inspect `Get-CatalogQueryTemplate` and `Get-LanguagePackQueryTemplate.osTitleTokens`; add the new title form to the relevant `TitleTokens` array. See SPEC §D.19 |
 | Wrong `Type` on `NeutralPatches[]` entries after RefreshAllBaselines | A new caller of `Convert-CatalogPatchToBaselineEntry` did not pass `-KnownType` | Pass `-KnownType $q.Type` from the Catalogue search context. See SPEC §D.20 |
 | .NET CU baseline entry seems to be missing a sub-file | Umbrella KB with multiple .msu files; only one was kept | Confirm `Resolve-PatchSetFromCatalog` routes `Type='DotNet'` through `Select-AllCanonicalPatchFiles`. See SPEC §D.21 |
 | `0x800f081e` in Warning lines | Patch not applicable to this SKU | Expected for cross-SKU patch sets; safe to ignore |
 | Stale WIM mount | Previous run crashed | Run `dism /Get-MountedImageInfo` and `dism /Cleanup-Mountpoints` |
-| ISO SHA-256 mismatch | Snapshot URL was rotated by Microsoft | Update `Config/<OsKey>.json` `IsoSha256` to the new value |
+| ISO SHA-256 mismatch | Snapshot URL was rotated by Microsoft | Update `data/config-<OsKey>.json` `IsoSha256` to the new value |
 
 ## Acknowledgements
 

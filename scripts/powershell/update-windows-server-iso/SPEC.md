@@ -92,8 +92,8 @@ below.
 |---|---|---|
 | Source ISO | Microsoft Evaluation Center, VLSC, or local file | `-IsoPath` or `-IsoUrl` |
 | Patches | Microsoft Update Catalogue (MSU/CAB) | `-PatchUrls`, `-PatchDirectory`, or `-ManifestPath` |
-| Per-OS profile | `Config/<OsKey>.json` | Auto-selected by `-OsVersion` |
-| Language profile | `Config/<OsKey>.json/Languages/<lang>` | Auto-selected by `-OsLanguage` |
+| Per-OS profile | `data/config-<OsKey>.json` | Auto-selected by `-OsVersion` |
+| Language profile | `data/config-<OsKey>.json/Languages/<lang>` | Auto-selected by `-OsLanguage` |
 | Optional manifest | Metalink 4 (`.meta4`) | Carries SHA-1 and SHA-256 expected hashes |
 
 ### B.1.2 Outputs
@@ -152,7 +152,7 @@ Examples:
 
 ## B.4 OS Profile Schema
 
-See `Config/Server2025.json` for the most complete example. Fields:
+See `data/config-Server2025.json` for the most complete example. Fields:
 
 | Field | Type | Notes |
 |---|---|---|
@@ -199,7 +199,7 @@ marker on success.
 
 | Step | What |
 |---|---|
-| 1 | Load `Config/<OsVersion>.json`, attach language node |
+| 1 | Load `data/config-<OsVersion>.json`, attach language node |
 | 2 | Resolve ISO source: `-SyntheticTestMode` < `-IsoPath` < `-IsoUrl` < FwLink < snapshot |
 | 3 | Build patch list from `-PatchUrls` / `-ManifestPath` / `-PatchDirectory` / `-AutoDetectLatestPatches` / PatchBaseline.Patches |
 | Output | `logs/P02_inputs_resolved.csv` |
@@ -415,7 +415,7 @@ Enabled by `-SyntheticTestMode`. Used exclusively by Stage 3 CI:
 
 ## B.10 Config Schema v2.1 (r05.0+)
 
-The `Config/<OsKey>.json` schema is a 3-tier hierarchy. Each field
+The `data/config-<OsKey>.json` schema is a 3-tier hierarchy. Each field
 group carries a verification marker (`_VerifiedDate` / `_VerifiedBy`
 for value-only groups, or `LastVerifiedDate` / `LastVerifiedBy` for
 groups that also need to record their Patch Tuesday baseline).
@@ -459,7 +459,8 @@ P10 / P12.
     "NeutralPatches": [
       { "Type": "SSU",                  "KbId": "...", "IsCombined": false, ... },
       { "Type": "LCU",                  "KbId": "...", "IsCombined": true,  ... },
-      { "Type": "DotNet",               "KbId": "...", ... },
+      { "Type": "DotNet.Runtime",       "KbId": "...", ... },
+      { "Type": "DotNet.OsLevel",       "KbId": "...", ... },
       { "Type": "DynamicUpdate.Setup",  "KbId": "...", ... },
       { "Type": "DynamicUpdate.SafeOs", "KbId": "...", ... }
     ],
@@ -552,7 +553,8 @@ guidance:
 |-------------------------|--------------------------|---|
 | SSU                     | Install + Boot + WinRE   | Every serviced WIM needs the latest servicing stack |
 | LCU                     | Install + Boot           | WinRE uses Safe OS DU instead |
-| DotNet                  | Install                  | .NET 4.x lives in install.wim |
+| DotNet.Runtime          | Install                  | .NET 4.x runtime KB lives in install.wim |
+| DotNet.OsLevel          | (none)                   | OS-offering KB; recorded for traceability, not applied to WIM |
 | DynamicUpdate.Component | Install                  | Component-store updates |
 | DynamicUpdate.SafeOs    | WinRE                    | WinRE is the "Safe OS" |
 | DynamicUpdate.Setup     | Setup                    | Setup binaries (pending.xml) |
@@ -626,7 +628,7 @@ I = install, B = boot, W = winre). Each sub-phase carries:
 | 1 | I1.SSU                     | Servicing stack first |
 | 2 | I2.LanguagePack            | UI must be installed BEFORE the LCU's resource files |
 | 3 | I3.LCU.FirstPass           | LCU after LP per Microsoft doc |
-| 4 | I4.DotNet                  | .NET 4.x cumulative |
+| 4 | I4.DotNet                  | .NET 4.x cumulative (Type=DotNet.Runtime only; DotNet.OsLevel rows are recorded but never applied) |
 | 5 | I5.DynamicUpdate.Component | Component-store DU |
 | 6 | I6.CleanupAndExport        | (worker hook for DISM /Cleanup + Export) |
 | 7 | I7.LCU.SecondPass          | Emitted ONLY when LP was injected; `RequiresRemount = $true`; the LP injected in I2 can shadow files delivered by the I3 LCU, so the LCU is re-applied on a freshly-exported image |
@@ -690,9 +692,9 @@ that every Action (not just Build/Verify which run P01) is
 protected. Implemented in `Assert-WorkspacePreflight`. Two checks,
 both fatal:
 
-1. **Config presence**. The four canonical `Config/Server<N>.json`
+1. **Config presence**. The four canonical `data/config-Server<N>.json`
    files (Server2016, Server2019, Server2022, Server2025) must
-   exist in the `Config/` directory alongside the script. A
+   exist in the `data/` directory alongside the script. A
    missing file aborts before any Catalogue scrape or DISM mount,
    with a precise list of which files are missing under which
    path. This protects RefreshAllBaselines and DumpFieldClassification
@@ -806,7 +808,7 @@ P13 FinalReport additionally renders a Compact summary inline so
 operators do not have to chase a second file (3-c output mode).
 
 **Per-OS readiness defaults.** Carried in
-`Config/<OsKey>.json#/Pca2023`:
+`data/config-<OsKey>.json#/Pca2023`:
 
 ```jsonc
 "Pca2023": {
@@ -1159,64 +1161,70 @@ scripts/powershell/update-windows-server-iso/
 ├── PSScriptAnalyzerSettings.psd1   PSScriptAnalyzer config.
 ├── .psa.config.json                psa.py config.
 ├── .markdownlint.yaml              Markdownlint config.
-├── Config/                         OS-specific JSON configs.
-│   └── Server2016.json, Server2019.json, Server2022.json, Server2025.json
+├── data/                           OS configs + parsed/raw upstream data.
+│   ├── config-Server2016.json, config-Server2019.json,
+│   │   config-Server2022.json, config-Server2025.json
+│   ├── cache-<source>[-<scope>].json   Parsed structured data (Refresher-managed).
+│   └── raw-<source>.<ext>              Pre-parse source data (Refresher-managed).
 ├── tests/                          Self-verification tools (see Part G).
 │   ├── README.md                   Operational guide for tests/.
 │   ├── common/                     Shared modules (HTTP client, parsers).
 │   ├── fixtures/                   Saved HTML / JSON inputs for offline regression.
 │   ├── snapshots/                  Probe-output snapshots used for drift diffing.
-│   ├── <existing T1-T5>.py         Production-grade regression tools.
-│   └── poc_<topic>_*.py            Time-bounded PoC scripts (r06+).
-└── docs/                           Long-form documentation (r06.0+).
-    └── poc/                        PoC reports and findings.
+│   ├── <existing T1-T8>.py         Production-grade regression tools.
+│   └── (PoC scripts have been promoted to T6-T8; no `poc_` prefix files in r07.0+)
+└── docs/                           Long-form documentation.
+    └── poc/                        Historical PoC reports (kept for reference).
         └── poc-<topic>-<purpose>.md
 ```
 
-**r06.0 Phase 3 migration note (r07.0+).** §B.23.3 specifies that
-the `Config/` directory will be renamed to `data/` in r07.0, with
-new `cache-*` and `raw-*` files joining the existing `config-*`
-files under a flat, three-prefix naming scheme. The directory
-layout above describes the **r06.x state** (Config/ + tests/ +
-docs/); the r07.0 layout is documented in §B.23.3. Until r07.0
-ships, `Config/` remains authoritative.
+**Historical note (r06.x).** Earlier releases stored OS
+configuration directly under `Config/Server<NNNN>.json`. The
+r07.0 release renamed `Config/` to `data/`, added the `config-`
+filename prefix, and introduced the sibling `cache-*` and
+`raw-*` files described in §B.23.3. The directory layout above
+reflects the post-r07.0 state. See §B.23.3 for the migration
+rationale and the three-prefix naming scheme.
 
 Key points:
 
-- **`Config/`, `tests/`, and `docs/` are the only first-class child
-  directories** (r06.x). r07.0 replaces `Config/` with `data/`
-  per §B.23.3 but does not add any other top-level directory.
-  No additional top-level directories are added without a
-  SPEC update; future "PoC ディレクトリ" or "experiments/" would
-  violate this rule. PoC code lives under `tests/`, PoC reports
-  live under `docs/poc/`, and that is sufficient.
-- **PoC artefacts coexist with production artefacts** by filename
-  prefix, not by directory. A PoC Python script under `tests/`
-  uses the `poc_<topic>_` prefix to distinguish it from a T1-T5
-  regression tool that has no such prefix.
-- **The `docs/` directory is new in r06.0** and is the canonical
-  home for *anything longer than a CHANGELOG entry that is not
-  the SPEC itself*. PoC reports, post-mortems, design memos,
-  architecture-decision-record-style write-ups all belong here.
+- **`data/`, `tests/`, and `docs/` are the only first-class child
+  directories.** No additional top-level directories are added
+  without a SPEC update; future "PoC ディレクトリ" or
+  "experiments/" would violate this rule. PoC code lives under
+  `tests/`, PoC reports live under `docs/poc/`, and that is
+  sufficient.
+- **Production data and PoC artefacts coexist via filename
+  prefix, not by directory.** Files under `data/` use the
+  `config-` / `cache-` / `raw-` prefixes per §B.23.3. Files
+  under `tests/` use either the `T1`-`T8` numbered prefix (or
+  no prefix for shared/common modules) for production
+  regression tests; historical `poc_*.py` PoC scripts were
+  promoted into the numbered set during r07.0.
+- **The `docs/` directory** is the canonical home for *anything
+  longer than a CHANGELOG entry that is not the SPEC itself*.
+  PoC reports, post-mortems, design memos, architecture-decision-
+  record-style write-ups all belong here.
 - **Snapshot and fixture data follow the same prefix rule under
   `tests/`**: a PoC snapshot goes under
   `tests/snapshots/poc_<topic>/`, not in a sibling top-level
-  directory.
+  directory. (Note: r07.0 promoted the PoC snapshots that
+  graduated into T6-T8 into `tests/snapshots/<topic>/` without
+  the `poc_` prefix; see §B.23.14.)
 
 ### B.22.2 Filename prefix rules
 
 | Class                         | Where it lives                   | Filename pattern                                      | Disposable? |
 | ----------------------------- | -------------------------------- | ----------------------------------------------------- | :---------: |
 | Production PowerShell         | top level                        | `Update-WindowsServerIso.ps1` (exactly one file)      | No          |
-| Production config (r06.x)     | `Config/`                        | `Server<NNNN>.json`                                   | No          |
-| Production config (r07.0+)    | `data/`                          | `config-Server<NNNN>.json` (see §B.23.3)              | No          |
-| Production cache (r07.0+)     | `data/`                          | `cache-<source>[-<scope>].json` (see §B.23.3)         | No          |
-| Production raw (r07.0+)       | `data/`                          | `raw-<source>.<ext>` (see §B.23.3)                    | No          |
-| Regression test (T1-T5)       | `tests/`                         | `<topic>_<role>.py` (no prefix; existing convention)  | No          |
+| Production config             | `data/`                          | `config-Server<NNNN>.json` (see §B.23.3)              | No          |
+| Production cache              | `data/`                          | `cache-<source>[-<scope>].json` (see §B.23.3)         | No          |
+| Production raw                | `data/`                          | `raw-<source>.<ext>` (see §B.23.3)                    | No          |
+| Regression test (T1-T8)       | `tests/`                         | `<topic>_<role>.py` (no prefix; existing convention)  | No          |
 | Regression test (shared)      | `tests/common/`                  | `<topic>_<role>.py`                                   | No          |
 | Regression fixture            | `tests/fixtures/<patch-month>/`  | (per existing convention, see Part G)                 | No          |
 | Regression snapshot           | `tests/snapshots/`               | `last_<topic>.json`                                   | No          |
-| **PoC script**                | `tests/`                         | `poc_<topic>_<step>_<verb>.py`                        | **Yes**     |
+| **PoC script** (new only)     | `tests/`                         | `poc_<topic>_<step>_<verb>.py`                        | **Yes**     |
 | **PoC fixture / snapshot**    | `tests/fixtures/poc_<topic>/`<br>`tests/snapshots/poc_<topic>/` | (any reasonable filename inside)                      | **Yes**     |
 | Production documentation      | `docs/`                          | `<topic>-<purpose>.md`                                | No          |
 | **PoC documentation**         | `docs/poc/`                      | `poc-<topic>-<purpose>.md`                            | **Yes**     |
@@ -1289,7 +1297,7 @@ record), `runbook` (operator procedure).
   "ChecksumAlgorithm": "SHA256",
   "Patches": [
     {
-      "Type": "SSU",                          // SSU | LCU | DynamicUpdate.* | DotNet | Defender | Edge | Other
+      "Type": "SSU",                          // SSU | LCU | DynamicUpdate.* | DotNet.Runtime | DotNet.OsLevel | DotNet.LangPack | Defender | Edge | Other
       "KbId": "KB5055769",
       "Title": "Servicing Stack Update for Windows Server 2025 (KB5055769)",
       "UpdateId": "12345678-90ab-cdef-1234-567890abcdef",
@@ -1350,7 +1358,7 @@ before "now", with a 1-day buffer to avoid same-day boundary issues
 ### Writeback semantics
 
 `Save-ConfigWithBaseline` writes the in-memory `OsProfile` back to
-`Config/<OsKey>.json` with these guarantees:
+`data/config-<OsKey>.json` with these guarantees:
 
 - LF line endings (matches `.gitattributes` `*.json text eol=lf`)
 - UTF-8 without BOM
@@ -2083,7 +2091,7 @@ The following must all pass before any commit to this project.
 
 ### C.3 Configuration files
 
-- [ ] All four `Config/Server*.json` parse with `json.load(...)` in Python.
+- [ ] All four `data/config-Server*.json` parse with `json.load(...)` in Python.
 - [ ] Every language entry has `IsoFwLink`, `IsoSnapshotUrl`, `IsoSha256`, `VolumeLabelPrefix`.
 - [ ] `LCUExpandViaMum` is `true` only for `Server2025.json`.
 - [ ] `RequireUefiCa2023Boot` is `true` only for `Server2025.json`.
@@ -2105,7 +2113,7 @@ The following must all pass before any commit to this project.
 Stage 4 is an operations workflow that runs `-Action RefreshAllBaselines`
 on a `cron` schedule (the 15th of each month at 02:00 UTC, roughly
 3-7 days after Patch Tuesday) and on `workflow_dispatch`. Its job
-is to keep `Config/Server*.json` baselines in sync with the latest
+is to keep `data/config-Server*.json` baselines in sync with the latest
 Microsoft Update Catalog state without manual maintainer effort.
 
 - [ ] Workflow file
@@ -2119,12 +2127,12 @@ Microsoft Update Catalog state without manual maintainer effort.
       workflow proceeds to the diff-detect step.
 - [ ] On exit code 1 (orchestrator failure) the workflow fails the
       run and does NOT open a PR.
-- [ ] When at least one `Config/Server*.json` file differs from the
+- [ ] When at least one `data/config-Server*.json` file differs from the
       committed baseline, an automated PR is opened on branch
       `auto/uwsi-baseline-refresh-<run-id>` with title
       `chore(uwsi): monthly baseline refresh (run #<run-id>)`.
 - [ ] PR `add-paths` restricts the diff to
-      `scripts/powershell/update-windows-server-iso/Config/*.json`
+      `scripts/powershell/update-windows-server-iso/data/config-*.json`
       so an accidental change to other files cannot ride the auto-PR.
 - [ ] PR labels: `automated`, `update-windows-server-iso`,
       `baseline-refresh`.
@@ -2303,12 +2311,12 @@ sleep. If the retry succeeds, the status is recorded as `'OkAfterRetry'`.
 
 ### D.11 Microsoft Eval ISO snapshot URLs rotate
 
-**Symptom.** Direct snapshot URLs in `Config/<OsKey>.json` can return
+**Symptom.** Direct snapshot URLs in `data/config-<OsKey>.json` can return
 404 after Microsoft rotates them.
 
 **Fix.** Try `IsoFwLink` (which redirects to whatever the current
 snapshot is) before falling back to `IsoSnapshotUrl`. Record the
-download's actual SHA-256 in `Config/<OsKey>.json/Languages/<lang>/IsoSha256`
+download's actual SHA-256 in `data/config-<OsKey>.json/Languages/<lang>/IsoSha256`
 the first time a build succeeds, so the next run can verify.
 
 ### D.12 Sandbox-by-default
@@ -2487,7 +2495,7 @@ via `-KnownType`; never rely on file-name reverse-engineering.
 ### D.21 Umbrella KBs attach multiple files to one UpdateId
 
 **Symptom.** A `.NET Cumulative Update` is recorded in
-`Config/<OsKey>.json` with only one `NeutralPatches` entry, but a
+`data/config-<OsKey>.json` with only one `NeutralPatches` entry, but a
 later P07 build on an install.wim that contains the *other*
 .NET runtime no-ops the .NET CU because the relevant sub-file
 was dropped during baseline resolution.
@@ -2674,7 +2682,7 @@ The `microsoft/secureboot_objects` repository ships five reference UEFI Secure B
 - Target firmware is **MostCompatible** → either signing works. Running P10 is forward-compatible but not required today.
 - Target firmware is **MicrosoftAndThirdParty** / **MicrosoftAndOptionRoms** / **MicrosoftOnly** → PCA2023 signing is REQUIRED for new builds, P10 must run.
 
-This project does not auto-detect target firmware (the target is by definition not the host running the build). The operator is expected to know which template their target hardware fleet uses. The defaults documented in `Config/<OsKey>.json#/Pca2023` reflect the **most common case for new hardware in 2026**, which is `MicrosoftAndThirdParty` for Server 2025 firmware and the transitional / legacy templates for older Server SKUs.
+This project does not auto-detect target firmware (the target is by definition not the host running the build). The operator is expected to know which template their target hardware fleet uses. The defaults documented in `data/config-<OsKey>.json#/Pca2023` reflect the **most common case for new hardware in 2026**, which is `MicrosoftAndThirdParty` for Server 2025 firmware and the transitional / legacy templates for older Server SKUs.
 
 **References:**
 
@@ -2689,10 +2697,10 @@ This project does not auto-detect target firmware (the target is by definition n
 | Milestone | Goal | Status |
 |:---:|---|:---:|
 | **M1** | MVP across all 4 OS x en-us/ja-jp, full registry, full phase set, sandbox + execute, synthetic mode, psa.py clean, README + SPEC + CHANGELOG + CI Stage 1/2/3 | **Done (r01)** |
-| **M2** | `-AutoDetectLatestPatches` actually scrapes the Microsoft Update Catalogue (`Resolve-PatchSetFromCatalog`); writes Patch list back to `Config/<OsKey>.json#/PatchBaseline`; freshness gating via `Test-PatchBaselineFresh` | **Done (r02)** |
+| **M2** | `-AutoDetectLatestPatches` actually scrapes the Microsoft Update Catalogue (`Resolve-PatchSetFromCatalog`); writes Patch list back to `data/config-<OsKey>.json#/PatchBaseline`; freshness gating via `Test-PatchBaselineFresh` | **Done (r02)** |
 | **M3** | P06 `ValidatePatchSet` integrating `wsusscn2.cab` + Windows Update Agent COM API for Microsoft-authoritative dependency check; 4-file diagnostic export on failure | **Done (r02)** |
 | M4 | Server 2025 `LCUExpandViaMum=true` real implementation (MUM/CAB expand path) | Placeholder |
-| **M5** | Stage 4 CI workflow (`monthly-refresh`): monthly scheduled run that exercises `-Action RefreshAllBaselines` and opens a PR with the resulting `Config/<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes and Patch Tuesday drift within ~30 days | **Done (r03.1)** |
+| **M5** | Stage 4 CI workflow (`monthly-refresh`): monthly scheduled run that exercises `-Action RefreshAllBaselines` and opens a PR with the resulting `data/config-<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes and Patch Tuesday drift within ~30 days | **Done (r03.1)** |
 | **M6** | Microsoft-official media-dynamic-update servicing sequence: WIM-target-aware patch plan + pre-apply dependency closure check (r04) + LCU twice-apply + WinRE servicing + Language Pack injection (r04.1) | **Done (r04.1)** |
 | M6 | Client SKUs (Windows 10/11) support — separate Config family | Future |
 | M7 | Driver / FOD / LXP / Appx customisation (OSBuild equivalent) | Future |
@@ -2722,7 +2730,7 @@ This project does not auto-detect target firmware (the target is by definition n
 
 | Function | Purpose |
 |---|---|
-| `Get-ConfigProfile` | Load `Config/<OsKey>.json` and attach the language node |
+| `Get-ConfigProfile` | Load `data/config-<OsKey>.json` and attach the language node |
 | `Get-IsoMetadata` | Detect OS/lang from an ISO filename (four patterns) |
 | `Resolve-IsoSourceUrl` | Pick the source URL (explicit > FwLink > snapshot) |
 | `Read-MetalinkManifest`, `Write-MetalinkManifest` | Metalink 4 (`.meta4`) IO |
@@ -2757,7 +2765,7 @@ This project does not auto-detect target firmware (the target is by definition n
 | `Test-PatchBaselineUsable` | Like Fresh but ignores age (fallback-on-scrape-failure path) |
 | `Save-ConfigWithBaseline` | Atomic JSON writeback (LF / UTF-8 / Depth 32) |
 | `Convert-CatalogPatchToBaselineEntry` | Adapter: Catalog DTO → PatchBaseline schema |
-| `Get-OsConfigPath` | Resolve `Config/<OsKey>.json` from `$Script:ScriptRoot` |
+| `Get-OsConfigPath` | Resolve `data/config-<OsKey>.json` from `$Script:ScriptRoot` |
 | `Get-UpdateIdFromCatalog` | `Search.aspx?q=<KB>` HTML scrape; returns array of UpdateId + Title |
 | `Get-DownloadLinkFromCatalog` | `DownloadDialog.aspx` POST scrape; returns array of Url + FileName |
 | `Get-CatalogQueryTemplate` (r02.5) | OS-specific Catalogue search templates (Server2016/2019/2022/2025) with Title / Product / Description per Microsoft media-dynamic-update guidance |
@@ -2771,7 +2779,7 @@ This project does not auto-detect target firmware (the target is by definition n
 | `Select-LatestPatchBySupersedence` (r04.2) | Deduplicate Catalogue candidates via their Supersedes / SupersededBy fields; returns the single newest survivor plus a list of excluded entries for diagnostic CSV |
 | `Get-KbIdFromUpdateTitle` (r04.2) | Extract the `KB######` substring from a Catalogue update title |
 | `Select-AllCanonicalPatchFiles` (r04.3) | Companion to `Select-CanonicalPatchFile`; returns ALL files that survive the scoring filter (Express / Delta / PSF / metadata still rejected) rather than just the highest-scoring one. Used by `Resolve-PatchSetFromCatalog` for `Type='DotNet'` umbrella KBs that attach multiple ndp-runtime MSUs to a single UpdateId |
-| `Assert-WorkspacePreflight` (r04.3) | Mandatory preflight that runs before the Action dispatcher; throws if any of the four `Config/Server<N>.json` files are missing OR if the `-WorkRoot` drive has less than 100 GB free. Skipped for `ListPhases` / `Cleanup` / `-EnvironmentInfoOnly` / `-SkipEnvCheck` |
+| `Assert-WorkspacePreflight` (r04.3) | Mandatory preflight that runs before the Action dispatcher; throws if any of the four `data/config-Server<N>.json` files are missing OR if the `-WorkRoot` drive has less than 100 GB free. Skipped for `ListPhases` / `Cleanup` / `-EnvironmentInfoOnly` / `-SkipEnvCheck` |
 | `Get-PatchTargetsForType` (r04) | Returns the WIM target array for a given patch Type (Install / Boot / WinRE / Setup) via `$Script:PatchTargetMap` |
 | `Build-PatchPlan` (r04) | Build a target-aware PatchPlan from the flat ResolvedPatches array, sorted by ApplyOrder within each target lane |
 | `Build-InstallApplySequence` (r04.1) | Convert install.wim patch slice into the I1-I7 Microsoft media-dynamic-update sub-phase sequence; emits I7 (LCU second pass with RequiresRemount=$true) only when language packs are present |
@@ -2816,7 +2824,7 @@ PowerShell 7+. No `pip install` is required.
 | `tests/catalog_probe.py`        (T1) | Live Microsoft Update Catalog: Search.aspx reachable + GUID regex still matches + per-OS title format + ScopedViewInline supersedence panel structure. Diffs results against `tests/snapshots/last_probe.json`. | Yes |
 | `tests/catalog_fixture_test.py` (T2) | Offline regression test against saved Catalog HTML in `tests/fixtures/<patch-month>/`. Includes bug-2 (comma-less title) and bug-3 (umbrella .NET CU) regression tests. | No  |
 | `tests/powershell_harness.py`   (T3) | Python-side unit tests of `Update-WindowsServerIso.ps1` functions via the `-Action TestHarness` REPL hook (see §B.17). Asserts `Get-CatalogQueryTemplate`, `Select-AllCanonicalPatchFiles`, `Select-CanonicalPatchFile`, `Get-KbIdFromUpdateTitle`, `Test-IsCombinedLcuTitle`. | No  |
-| `tests/eval_iso_probe.py`       (T4) | HTTP Range-GET against every `LanguageSpecific.<lang>.Iso.Url` in each `Config/Server<N>.json`; reports total size and `Last-Modified`. Detects snapshot rotation (see §D.11). | Yes |
+| `tests/eval_iso_probe.py`       (T4) | HTTP Range-GET against every `LanguageSpecific.<lang>.Iso.Url` in each `data/config-Server<N>.json`; reports total size and `Last-Modified`. Detects snapshot rotation (see §D.11). | Yes |
 | `tests/wsusscn2_probe.py`       (T5) | HTTP Range-GET against `wsusscn2.cab`; warns when the cab is older than 60 days. Detects egress-proxy `host_not_allowed` and reports it separately from real Microsoft outages. | Yes |
 
 `tests/common/` holds:
@@ -2867,5 +2875,5 @@ The current PoC tracked under this scheme:
 - **[OSDBuilder](https://github.com/OSDeploy/OSDBuilder)** (David Segura) v24.10.8.1 — source of the DISM mount/dismount retry pattern (D.1), 0x800f081e suppression (D.8), and the boot file 3-tier idea (D.4). The most production-hardened reference.
 - **[WIM Witch](https://github.com/MOOREDOMAIN/WIM-Witch)** — WIM update GUI; informed the boot.wim and winre.wim handling.
 - **[Win_ISO_Patching_Scripts_zhCN](https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN)** — direct source for the 3-tier `etfsboot.com` / `efisys.bin` fallback chain.
-- **[rgl/windows-evaluation-isos-scraper](https://github.com/rgl/windows-evaluation-isos-scraper)** — canonical Windows Server 2022 SHA-256 hashes (en-us); used to seed `Config/Server2022.json`.
+- **[rgl/windows-evaluation-isos-scraper](https://github.com/rgl/windows-evaluation-isos-scraper)** — canonical Windows Server 2022 SHA-256 hashes (en-us); used to seed `data/config-Server2022.json`.
 - **[`Download-SpeakerDeck.ps1`](../download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1)** — sibling in-house script; the canonical source of the Part A common conventions inherited here.

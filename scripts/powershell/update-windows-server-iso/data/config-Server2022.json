@@ -1,12 +1,12 @@
 {
   "Schema": "2.1",
-  "OsKey": "Server2016",
+  "OsKey": "Server2022",
   "Common": {
-    "Build": 14393,
-    "OsShortName": "WS2016",
+    "Build": 20348,
+    "OsShortName": "WS2022",
     "Edition": "Datacenter",
     "Architecture": "x64",
-    "WimEdition": "Windows Server 2016 Datacenter (Desktop Experience)",
+    "WimEdition": "Windows Server 2022 Datacenter (Desktop Experience)",
     "InstallWimIndex": 4,
     "BootWimIndexes": [
       1,
@@ -20,11 +20,16 @@
     "DefaultLanguage": "en-us",
     "LCUExpandViaMum": false,
     "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy": "manual:initial-r03"
+    "_VerifiedBy": "manual:initial-r03",
+    "CatalogTitleTokens": [
+      "Microsoft server operating system version 21H2",
+      "Microsoft server operating system, version 21H2",
+      "Windows Server 2022"
+    ]
   },
   "PatchBaseline": {
     "Schema": "2.0",
-    "TargetBuildAfterUpdate": "14393.8957",
+    "TargetBuildAfterUpdate": "20348.4893",
     "PatchTuesdayOfBaseline": "",
     "LastVerifiedDate": "",
     "LastVerifiedBy": "",
@@ -42,13 +47,13 @@
   },
   "Pca2023": {
     "RequiredByDefault": true,
-    "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
-    "RequiredUpdateLevelMinDate": "2024-04-09",
+    "RequiredUpdateLevelKb": "2025-2B (February 2025 LCU, 20348.2227 baseline) or later",
+    "RequiredUpdateLevelMinDate": "2025-02-11",
     "NotesSource": [
       "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
-      "https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1"
+      "https://lenovopress.lenovo.com/lp2353.pdf"
     ],
-    "Notes": "Server 2016 GA media (Build 14393) is known to fail to boot on modern hardware with PCA2023-only Secure Boot firmware. Applying the LCU pipeline through P09 AssembleIso + P10 ConvertPca2023BootManager is the documented mitigation."
+    "Notes": "Per Lenovo lp2353.pdf, Server 2022 build 20348.2227 or earlier requires 2025-2B LCU before Make2023BootableMedia.ps1 succeeds. Newer builds (post 2025-02) generally already include the required EFI_EX binaries."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",
@@ -60,15 +65,15 @@
     "en-us": {
       "DisplayName": "English (United States)",
       "Iso": {
-        "FileName": "14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_EN-US.ISO",
-        "Url": "https://software-download.microsoft.com/download/sg/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_EN-US.ISO",
+        "FileName": "SERVER_EVAL_x64FRE_en-us.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
         "Sha256": "",
         "SizeBytes": 0,
         "ReleaseDate": "",
         "_VerifiedDate": "",
         "_VerifiedBy": ""
       },
-      "VolumeLabelPrefix": "WS2016EN",
+      "VolumeLabelPrefix": "WS2022EN",
       "LanguageSpecificPatches": {
         "PatchTuesdayOfBaseline": "",
         "LastVerifiedDate": "",
@@ -81,15 +86,15 @@
     "ja-jp": {
       "DisplayName": "Japanese",
       "Iso": {
-        "FileName": "14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO",
-        "Url": "https://software-download.microsoft.com/download/sg/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO",
+        "FileName": "SERVER_EVAL_x64FRE_ja-jp.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_ja-jp.iso",
         "Sha256": "",
         "SizeBytes": 0,
         "ReleaseDate": "",
         "_VerifiedDate": "",
         "_VerifiedBy": ""
       },
-      "VolumeLabelPrefix": "WS2016JA",
+      "VolumeLabelPrefix": "WS2022JA",
       "LanguageSpecificPatches": {
         "PatchTuesdayOfBaseline": "",
         "LastVerifiedDate": "",

@@ -5,7 +5,7 @@
 # Runs `-Action RefreshAllBaselines` on a schedule (the 15th of every
 # month, three to six days after the second Tuesday "Patch Tuesday"
 # release window) and opens an automated pull request whenever the
-# resulting Config/Server*.json files differ from the committed
+# resulting data/config-Server*.json files differ from the committed
 # baseline. Also exposes workflow_dispatch for ad-hoc runs.
 #
 # This is the runtime counterpart of the r03 admin action that lets
@@ -239,7 +239,7 @@ jobs:
           branch: auto/uwsi-baseline-refresh-${{ github.run_id }}
           delete-branch: true
           add-paths: |
-            scripts/powershell/update-windows-server-iso/Config/*.json
+            scripts/powershell/update-windows-server-iso/data/config-*.json
           title: 'chore(uwsi): monthly baseline refresh (run #${{ github.run_id }})'
           commit-message: |
             chore(uwsi): monthly baseline refresh (auto)

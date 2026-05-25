@@ -1,12 +1,12 @@
 {
   "Schema": "2.1",
-  "OsKey": "Server2025",
+  "OsKey": "Server2019",
   "Common": {
-    "Build": 26100,
-    "OsShortName": "WS2025",
+    "Build": 17763,
+    "OsShortName": "WS2019",
     "Edition": "Datacenter",
     "Architecture": "x64",
-    "WimEdition": "Windows Server 2025 Datacenter (Desktop Experience)",
+    "WimEdition": "Windows Server 2019 Datacenter (Desktop Experience)",
     "InstallWimIndex": 4,
     "BootWimIndexes": [
       1,
@@ -18,25 +18,23 @@
       "ja-jp"
     ],
     "DefaultLanguage": "en-us",
-    "LCUExpandViaMum": true,
+    "LCUExpandViaMum": false,
     "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy": "manual:initial-r03"
+    "_VerifiedBy": "manual:initial-r03",
+    "CatalogTitleTokens": [
+      "Windows Server 2019"
+    ]
   },
   "PatchBaseline": {
     "Schema": "2.0",
-    "TargetBuildAfterUpdate": "26100.32522",
+    "TargetBuildAfterUpdate": "17763.8511",
     "PatchTuesdayOfBaseline": "",
     "LastVerifiedDate": "",
     "LastVerifiedBy": "",
     "VerificationMethod": "",
     "ChecksumAlgorithm": "SHA256",
     "NeutralPatches": [],
-    "ExcludeKbList": [
-      {
-        "KbId": "KB5043080",
-        "Reason": "Checkpoint Cumulative Update for Win11 24H2 / Server 2025; not required for OS install (per Microsoft Learn)."
-      }
-    ],
+    "ExcludeKbList": [],
     "WsusScnCab": {
       "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
       "LocalCachePath": "",
@@ -46,13 +44,13 @@
     }
   },
   "Pca2023": {
-    "RequiredByDefault": false,
-    "RequiredUpdateLevelKb": "n/a (firmware-provided 2023 certs)",
-    "RequiredUpdateLevelMinDate": "",
+    "RequiredByDefault": true,
+    "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
+    "RequiredUpdateLevelMinDate": "2024-04-09",
     "NotesSource": [
-      "https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789"
+      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f"
     ],
-    "Notes": "Microsoft-certified Server 2025 server platforms include the 2023 certificates in firmware. Make2023BootableMedia.ps1 is NOT in the official supported-OS list for KB5053484. P10 ConvertPca2023BootManager is skipped by default for Server 2025; pass -EnablePca2023BootManager -ForcePca2023OnServer2025 to override (advanced operator only)."
+    "Notes": "Make2023BootableMedia.ps1 is officially supported for Server 2019. Required source media must include 2024-4B LCU."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",
@@ -64,15 +62,15 @@
     "en-us": {
       "DisplayName": "English (United States)",
       "Iso": {
-        "FileName": "26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
-        "Url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "FileName": "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
+        "Url": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
         "Sha256": "",
         "SizeBytes": 0,
         "ReleaseDate": "",
         "_VerifiedDate": "",
         "_VerifiedBy": ""
       },
-      "VolumeLabelPrefix": "WS2025EN",
+      "VolumeLabelPrefix": "WS2019EN",
       "LanguageSpecificPatches": {
         "PatchTuesdayOfBaseline": "",
         "LastVerifiedDate": "",
@@ -85,15 +83,15 @@
     "ja-jp": {
       "DisplayName": "Japanese",
       "Iso": {
-        "FileName": "26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
-        "Url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
+        "FileName": "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
+        "Url": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
         "Sha256": "",
         "SizeBytes": 0,
         "ReleaseDate": "",
         "_VerifiedDate": "",
         "_VerifiedBy": ""
       },
-      "VolumeLabelPrefix": "WS2025JA",
+      "VolumeLabelPrefix": "WS2019JA",
       "LanguageSpecificPatches": {
         "PatchTuesdayOfBaseline": "",
         "LastVerifiedDate": "",

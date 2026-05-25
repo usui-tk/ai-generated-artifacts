@@ -1,12 +1,12 @@
 {
   "Schema": "2.1",
-  "OsKey": "Server2022",
+  "OsKey": "Server2025",
   "Common": {
-    "Build": 20348,
-    "OsShortName": "WS2022",
+    "Build": 26100,
+    "OsShortName": "WS2025",
     "Edition": "Datacenter",
     "Architecture": "x64",
-    "WimEdition": "Windows Server 2022 Datacenter (Desktop Experience)",
+    "WimEdition": "Windows Server 2025 Datacenter (Desktop Experience)",
     "InstallWimIndex": 4,
     "BootWimIndexes": [
       1,
@@ -18,20 +18,29 @@
       "ja-jp"
     ],
     "DefaultLanguage": "en-us",
-    "LCUExpandViaMum": false,
+    "LCUExpandViaMum": true,
     "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy": "manual:initial-r03"
+    "_VerifiedBy": "manual:initial-r03",
+    "CatalogTitleTokens": [
+      "Microsoft server operating system version 24H2",
+      "Windows Server 2025"
+    ]
   },
   "PatchBaseline": {
     "Schema": "2.0",
-    "TargetBuildAfterUpdate": "20348.4893",
+    "TargetBuildAfterUpdate": "26100.32522",
     "PatchTuesdayOfBaseline": "",
     "LastVerifiedDate": "",
     "LastVerifiedBy": "",
     "VerificationMethod": "",
     "ChecksumAlgorithm": "SHA256",
     "NeutralPatches": [],
-    "ExcludeKbList": [],
+    "ExcludeKbList": [
+      {
+        "KbId": "KB5043080",
+        "Reason": "Checkpoint Cumulative Update for Win11 24H2 / Server 2025; not required for OS install (per Microsoft Learn)."
+      }
+    ],
     "WsusScnCab": {
       "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
       "LocalCachePath": "",
@@ -41,14 +50,13 @@
     }
   },
   "Pca2023": {
-    "RequiredByDefault": true,
-    "RequiredUpdateLevelKb": "2025-2B (February 2025 LCU, 20348.2227 baseline) or later",
-    "RequiredUpdateLevelMinDate": "2025-02-11",
+    "RequiredByDefault": false,
+    "RequiredUpdateLevelKb": "n/a (firmware-provided 2023 certs)",
+    "RequiredUpdateLevelMinDate": "",
     "NotesSource": [
-      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
-      "https://lenovopress.lenovo.com/lp2353.pdf"
+      "https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789"
     ],
-    "Notes": "Per Lenovo lp2353.pdf, Server 2022 build 20348.2227 or earlier requires 2025-2B LCU before Make2023BootableMedia.ps1 succeeds. Newer builds (post 2025-02) generally already include the required EFI_EX binaries."
+    "Notes": "Microsoft-certified Server 2025 server platforms include the 2023 certificates in firmware. Make2023BootableMedia.ps1 is NOT in the official supported-OS list for KB5053484. P10 ConvertPca2023BootManager is skipped by default for Server 2025; pass -EnablePca2023BootManager -ForcePca2023OnServer2025 to override (advanced operator only)."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",
@@ -60,15 +68,15 @@
     "en-us": {
       "DisplayName": "English (United States)",
       "Iso": {
-        "FileName": "SERVER_EVAL_x64FRE_en-us.iso",
-        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
+        "FileName": "26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
         "Sha256": "",
         "SizeBytes": 0,
         "ReleaseDate": "",
         "_VerifiedDate": "",
         "_VerifiedBy": ""
       },
-      "VolumeLabelPrefix": "WS2022EN",
+      "VolumeLabelPrefix": "WS2025EN",
       "LanguageSpecificPatches": {
         "PatchTuesdayOfBaseline": "",
         "LastVerifiedDate": "",
@@ -81,15 +89,15 @@
     "ja-jp": {
       "DisplayName": "Japanese",
       "Iso": {
-        "FileName": "SERVER_EVAL_x64FRE_ja-jp.iso",
-        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_ja-jp.iso",
+        "FileName": "26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
         "Sha256": "",
         "SizeBytes": 0,
         "ReleaseDate": "",
         "_VerifiedDate": "",
         "_VerifiedBy": ""
       },
-      "VolumeLabelPrefix": "WS2022JA",
+      "VolumeLabelPrefix": "WS2025JA",
       "LanguageSpecificPatches": {
         "PatchTuesdayOfBaseline": "",
         "LastVerifiedDate": "",

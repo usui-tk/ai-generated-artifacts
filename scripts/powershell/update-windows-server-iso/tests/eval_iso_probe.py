@@ -7,7 +7,7 @@ relies on these URLs to be:
 
 1. Still alive (HTTP 200 on HEAD after the redirect).
 2. Pointing at a binary roughly the right size (~5-8 GB).
-3. Stable enough to record the SHA-256 in ``Config/Server<N>.json``
+3. Stable enough to record the SHA-256 in ``data/config-Server<N>.json``
    for content verification.
 
 This probe issues HEAD requests against the known fwlink URLs and
@@ -55,7 +55,7 @@ class ProbeResult:
 
 
 def _load_iso_endpoints() -> Dict[str, List[str]]:
-    """Return {os_key: [fwlink-urls]} extracted from Config/<OsKey>.json.
+    """Return {os_key: [fwlink-urls]} extracted from data/config-<OsKey>.json.
 
     Schema v2.0 stores per-language Iso URL under
     ``LanguageSpecific.<lang>.Iso.Url``. We collect all unique URLs
