@@ -494,8 +494,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.25-r05.0'
-$Script:ScriptTag     = 'phase-renumber-and-secureboot-pca2023-support'
+$Script:ScriptVersion = 'update-wsi-2026.05.25-r05.1'
+$Script:ScriptTag     = 'kbid-from-filename-and-rich-refresh-summary'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -3443,6 +3443,36 @@ function Resolve-PatchSetFromCatalog {
             $searchResults[$q.Type] = @{ Best=$null; RawCount=$hits.Count }
             continue
         }
+        # Type-specific post-filter for the Dynamic Update family.
+        # Server 2022 (and older 21H2-based families) ships Setup DU and
+        # Safe OS DU under titles that both reduce to "Dynamic Update
+        # for Microsoft server operating system version 21H2 ... x64".
+        # The OS-title narrowing above keeps both, so the Setup query
+        # and the SafeOs query end up resolving to the SAME UpdateId
+        # (whichever the Catalogue happens to return first), producing
+        # duplicate PatchBaseline entries that point at one file.
+        # Disambiguate by keyword on the Title here.
+        if ($q.Type -eq 'DynamicUpdate.Setup') {
+            $narrowed = @($narrowed | Where-Object {
+                ($_.Title -match '(?i)setup\s*dynamic\s*update') -or
+                ($_.Title -match '(?i)setup\s+du\b') -or
+                # 21H2-era titles do not carry the "Setup" word in the
+                # title itself; fall back to excluding Safe-OS-style
+                # titles so the remaining survivor is the Setup DU.
+                (($_.Title -notmatch '(?i)safe\s*os') -and ($_.Title -notmatch '(?i)safeos'))
+            })
+        }
+        elseif ($q.Type -eq 'DynamicUpdate.SafeOs') {
+            $narrowed = @($narrowed | Where-Object {
+                ($_.Title -match '(?i)safe\s*os\s*dynamic\s*update') -or
+                ($_.Title -match '(?i)safeos') -or
+                ($_.Title -match '(?i)safe\s*os')
+            })
+        }
+        if ($narrowed.Count -eq 0) {
+            $searchResults[$q.Type] = @{ Best=$null; RawCount=$hits.Count }
+            continue
+        }
         # Strip Preview entries first; preview KBs are a separate Microsoft
         # release stream and don't supersede the canonical monthly KBs.
         $narrowedNoPreview = @($narrowed | Where-Object { $_.Title -notmatch '(?i)preview' })
@@ -3573,13 +3603,23 @@ function Resolve-PatchSetFromCatalog {
         }
         # Supersedence (best-effort) - shared across all files of this UpdateId
         $supers = Get-SupersedenceFromCatalog -UpdateId $best.UpdateId -MaxRetries $MaxRetries
-        $kbFromTitle = ''
-        $kbMatch = [regex]::Match($best.Title, '\((KB\d{6,7})\)')
-        if ($kbMatch.Success) { $kbFromTitle = $kbMatch.Groups[1].Value }
+        $kbFromTitle = Get-KbIdFromUpdateTitle -Title $best.Title
 
         foreach ($primary in $primaries) {
+            # KbId derivation: when Microsoft publishes an "umbrella" CU
+            # that attaches multiple .msu files (e.g. .NET umbrella KB
+            # attaching individual KBs for .NET 4.8 and 4.8.1, or LCU
+            # whose payload file is named for a checkpoint CU's KB rather
+            # than the published Title KB), the file name carries the
+            # actual KB id of the attached payload. Use that as the
+            # entry's KbId so PatchBaseline reflects what the file
+            # really is. Fall back to the Title KB if the file name has
+            # no kb token.
+            $kbFromFile = Get-KbIdFromPatchFileName -FileName $primary.FileName
+            $entryKbId  = if (-not [string]::IsNullOrEmpty($kbFromFile)) { $kbFromFile } else { $kbFromTitle }
+
             $entry = Convert-CatalogPatchToBaselineEntry `
-                -KbId $kbFromTitle `
+                -KbId $entryKbId `
                 -Title $best.Title `
                 -UpdateId $best.UpdateId `
                 -DownloadUrl $primary.Url `
@@ -5165,6 +5205,47 @@ function Get-KbIdFromUpdateTitle {
     $m = [regex]::Match($Title, '\((KB\d{6,7})\)')
     if ($m.Success) {
         return $m.Groups[1].Value
+    }
+    return ''
+}
+
+function Get-KbIdFromPatchFileName {
+    <#
+    .SYNOPSIS
+        Extract the KB id from a Microsoft patch file name
+        (e.g. "windows10.0-kb5087066-x64-ndp48_086eed6e...msu"
+              -> "KB5087066").
+    .DESCRIPTION
+        Microsoft Update Catalogue often wraps multiple individual KBs
+        under a single "umbrella" Title KB. Example: the May 2026 .NET
+        Framework cumulative update for Server 2019 is exposed as
+        "KB5088864 (umbrella)" with two attached .msu files for
+        .NET 4.8 (KB5087066) and .NET 4.8.1 (KB5087061).
+
+        For the PatchBaseline entry to reflect the actual file content,
+        each entry's KbId must come from the file name, not from the
+        umbrella Title. This helper does exactly that: it scans the
+        file name for the standard "kb#######" token (case-insensitive)
+        and returns it in upper-case canonical form. Returns an empty
+        string if no kb token is present.
+
+        Standard Microsoft file-name patterns this helper recognises:
+          - windows10.0-kb5087537-x64_...msu
+          - windows10.0-kb5087066-x64-ndp48_...msu
+          - windows11.0-kb5043080-x64_...msu
+          - windows11.0-kb5087588-x64_...cab    (SafeOS DU)
+
+        If the file name does not contain a kb token (rare, but
+        possible for some Dynamic Update payloads), the caller should
+        fall back to the umbrella Title KB.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string]$FileName)
+    if (-not $FileName) { return '' }
+    $m = [regex]::Match($FileName, '(?i)kb(\d{6,7})')
+    if ($m.Success) {
+        return 'KB' + $m.Groups[1].Value
     }
     return ''
 }
@@ -8249,6 +8330,170 @@ function Get-GroupSnapshot {
     }
 }
 
+function Show-RefreshAllBaselinesSummary {
+    <#
+    .SYNOPSIS
+        Render the rich end-of-run summary for Invoke-AdminPhaseA01_RefreshAllBaselines.
+    .DESCRIPTION
+        Writes a multi-section console-only summary block:
+
+          1. Decision counts (Skip / Manual / Monthly / InitialFill).
+          2. Per-OS patch composition: a one-line-per-OS table showing
+             the patch count, the breakdown by Type, the file count,
+             and the previous LastVerifiedDate.
+          3. KB diff per OS: which KBs were added, which were dropped,
+             which stayed. The comparison is between BeforePatches
+             (loaded from disk) and AfterPatches (after Refresher).
+          4. Manual-fill list: every group path that requires manual
+             attention, grouped by OS for easy follow-up.
+          5. Pca2023 status table: per-OS RequiredByDefault flag and
+             the documented minimum update level KB, so operators can
+             see at a glance which OSes still need the PCA2023 boot
+             manager pipeline (P10 ConvertPca2023BootManager).
+          6. Patch Tuesday timeline: "this run" baseline and the next
+             two upcoming Patch Tuesdays so operators can schedule the
+             next refresh.
+          7. Exit-code outlook: explicit message about what exit code
+             this run will produce and why.
+
+        All output goes to Write-Host (the regular console stream).
+        Nothing is written to disk by this function: that is by design
+        (the user explicitly asked for console-only output suitable
+        for CI log capture).
+    #>
+    [CmdletBinding()]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)] [System.Collections.IEnumerable]$ReportRows,
+        [Parameter(Mandatory)] [hashtable]$OsSummaries,
+        [Parameter(Mandatory)] [string]$LatestPatchTuesday,
+        [Parameter(Mandatory)] [string]$PatchMonth,
+        [Parameter(Mandatory)] [bool]$HasUnresolved,
+        [Parameter(Mandatory)] [bool]$OkOverall
+    )
+
+    $bar = '======================================================================'
+
+    Write-Host ''
+    Write-Host $bar -ForegroundColor Cyan
+    Write-Host ' Summary  (RefreshAllBaselines)' -ForegroundColor Cyan
+    Write-Host $bar -ForegroundColor Cyan
+
+    # ---- 1. Decision counts ------------------------------------------
+    Write-Host ''
+    Write-Host '  [1] Field-group decisions' -ForegroundColor Yellow
+    $byDecision = $ReportRows | Group-Object Decision | Sort-Object Name
+    foreach ($g in $byDecision) {
+        Write-Host ('        {0,-15} : {1}' -f $g.Name, $g.Count) -ForegroundColor White
+    }
+
+    # ---- 2. Per-OS patch composition ---------------------------------
+    Write-Host ''
+    Write-Host '  [2] Per-OS patch composition (NeutralPatches after refresh)' -ForegroundColor Yellow
+    Write-Host ('        {0,-12} {1,-8} {2,-7} {3,-50}' -f 'OS', 'Patches', 'Files', 'Types (count)') -ForegroundColor DarkGray
+    Write-Host ('        ' + ('-' * 80)) -ForegroundColor DarkGray
+    foreach ($osKey in ($OsSummaries.Keys | Sort-Object)) {
+        $sum = $OsSummaries[$osKey]
+        $after = @($sum.AfterPatches)
+        $byType = $after | Group-Object Type | Sort-Object Name
+        $typeStr = ($byType | ForEach-Object { ('{0}={1}' -f $_.Name, $_.Count) }) -join ', '
+        $fileCount = ($after | Where-Object { $_.FileName }).Count
+        Write-Host ('        {0,-12} {1,-8} {2,-7} {3}' -f $osKey, $after.Count, $fileCount, $typeStr) -ForegroundColor White
+    }
+
+    # ---- 3. KB diff per OS -------------------------------------------
+    Write-Host ''
+    Write-Host '  [3] KB delta vs previous PatchBaseline' -ForegroundColor Yellow
+    foreach ($osKey in ($OsSummaries.Keys | Sort-Object)) {
+        $sum = $OsSummaries[$osKey]
+        $beforeKbs = @($sum.BeforePatches | Where-Object { $_.KbId } | ForEach-Object { $_.KbId } | Sort-Object -Unique)
+        $afterKbs  = @($sum.AfterPatches  | Where-Object { $_.KbId } | ForEach-Object { $_.KbId } | Sort-Object -Unique)
+        $added   = @($afterKbs  | Where-Object { $beforeKbs -notcontains $_ })
+        $removed = @($beforeKbs | Where-Object { $afterKbs  -notcontains $_ })
+        $stayed  = @($afterKbs  | Where-Object { $beforeKbs -contains $_ })
+        Write-Host ('        {0}' -f $osKey) -ForegroundColor White
+        if ($added.Count -eq 0 -and $removed.Count -eq 0) {
+            Write-Host '          (no KB-level changes)' -ForegroundColor DarkGray
+        }
+        if ($added.Count -gt 0) {
+            Write-Host ('          + added   ({0}): {1}' -f $added.Count,   ($added -join ', ')) -ForegroundColor Green
+        }
+        if ($removed.Count -gt 0) {
+            Write-Host ('          - removed ({0}): {1}' -f $removed.Count, ($removed -join ', ')) -ForegroundColor Red
+        }
+        if ($stayed.Count -gt 0) {
+            Write-Host ('          = unchanged ({0}): {1}' -f $stayed.Count, ($stayed -join ', ')) -ForegroundColor DarkGray
+        }
+    }
+
+    # ---- 4. Manual-fill list -----------------------------------------
+    Write-Host ''
+    Write-Host '  [4] Manual fill required (operator follow-up)' -ForegroundColor Yellow
+    $totalManual = 0
+    foreach ($osKey in ($OsSummaries.Keys | Sort-Object)) {
+        $manual = @($OsSummaries[$osKey].ManualGroups)
+        if ($manual.Count -gt 0) {
+            Write-Host ('        {0}:' -f $osKey) -ForegroundColor White
+            foreach ($m in $manual) {
+                Write-Host ('          - {0}' -f $m) -ForegroundColor DarkYellow
+                $totalManual += 1
+            }
+        }
+    }
+    if ($totalManual -eq 0) {
+        Write-Host '        (no manual fill required)' -ForegroundColor Green
+    } else {
+        Write-Host ('        Total manual items: {0}' -f $totalManual) -ForegroundColor DarkYellow
+    }
+
+    # ---- 5. Pca2023 status -------------------------------------------
+    Write-Host ''
+    Write-Host '  [5] Pca2023 readiness (Secure Boot 2026 expiry)' -ForegroundColor Yellow
+    Write-Host ('        {0,-12} {1,-20} {2}' -f 'OS', 'RequiredByDefault', 'RequiredUpdateLevelKb') -ForegroundColor DarkGray
+    Write-Host ('        ' + ('-' * 80)) -ForegroundColor DarkGray
+    foreach ($osKey in ($OsSummaries.Keys | Sort-Object)) {
+        $pca = $OsSummaries[$osKey].Pca2023
+        if ($null -eq $pca) {
+            Write-Host ('        {0,-12} {1,-20} {2}' -f $osKey, '(Schema 2.0)', '(no Pca2023 block)') -ForegroundColor DarkGray
+            continue
+        }
+        $req = [string]$pca.RequiredByDefault
+        $ulk = [string]$pca.RequiredUpdateLevelKb
+        if ([string]::IsNullOrEmpty($ulk)) { $ulk = '(empty)' }
+        $color = if ($req -eq 'True') { 'Yellow' } else { 'White' }
+        Write-Host ('        {0,-12} {1,-20} {2}' -f $osKey, $req, $ulk) -ForegroundColor $color
+    }
+
+    # ---- 6. Patch Tuesday timeline -----------------------------------
+    Write-Host ''
+    Write-Host '  [6] Patch Tuesday timeline' -ForegroundColor Yellow
+    Write-Host ('        This run baseline   : {0}  (Patch Month = {1})' -f $LatestPatchTuesday, $PatchMonth) -ForegroundColor White
+    $baseline = [datetime]::ParseExact($LatestPatchTuesday, 'yyyy-MM-dd', $null)
+    $next1 = $baseline.AddMonths(1)
+    $next1Pt = Get-PatchTuesdayForMonth -Year $next1.Year -Month $next1.Month
+    $next2 = $baseline.AddMonths(2)
+    $next2Pt = Get-PatchTuesdayForMonth -Year $next2.Year -Month $next2.Month
+    Write-Host ('        Next Patch Tuesday  : {0}' -f $next1Pt.ToString('yyyy-MM-dd')) -ForegroundColor White
+    Write-Host ('        Month after next    : {0}' -f $next2Pt.ToString('yyyy-MM-dd')) -ForegroundColor DarkGray
+
+    # ---- 7. Exit-code outlook ----------------------------------------
+    Write-Host ''
+    Write-Host '  [7] Run outcome' -ForegroundColor Yellow
+    if (-not $OkOverall) {
+        Write-Host '        Status: FAILED (at least one Refresher raised an error).' -ForegroundColor Red
+        Write-Host '        Exit code: 1' -ForegroundColor Red
+    } elseif ($HasUnresolved) {
+        Write-Host '        Status: PARTIAL (Refreshers ran, manual fill still needed).' -ForegroundColor DarkYellow
+        Write-Host '        Exit code: 2' -ForegroundColor DarkYellow
+    } else {
+        Write-Host '        Status: OK (all groups resolved).' -ForegroundColor Green
+        Write-Host '        Exit code: 0' -ForegroundColor Green
+    }
+
+    Write-Host $bar -ForegroundColor Cyan
+    Write-Host ''
+}
+
 function Set-GroupVerifiedState {
     <#
     .SYNOPSIS
@@ -8351,6 +8596,21 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
         }
 
         $reportRows = New-Object System.Collections.Generic.List[object]
+        # Per-OS summary collector for the rich end-of-run summary.
+        # Key   : OsKey (string)
+        # Value : pscustomobject containing:
+        #           BeforePatches    - NeutralPatches list as it was loaded
+        #           AfterPatches     - NeutralPatches list after Refresher runs
+        #                              (or BeforePatches if nothing changed)
+        #           Changed          - $true when at least one writeback would occur
+        #           ErrorCount       - count of Refresher failures for this OS
+        #           ManualGroups     - list of group paths flagged Manual fill
+        #           Pca2023          - pass-through reference to the Pca2023 block
+        #                              (or $null when running against a Schema 2.0 Config)
+        #           PreviousVerified - $raw.PatchBaseline.LastVerifiedDate as
+        #                              read before refresh, so the summary can
+        #                              show "last refresh" vs "this refresh".
+        $osSummaries = @{}
 
         foreach ($osKey in $targetOsKeys) {
             Set-DebugStep -Step ('os:' + $osKey)
@@ -8365,6 +8625,35 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
             if ($acceptedSchemas -notcontains $raw.Schema) {
                 Write-Warn ('Skipping {0}: Schema is "{1}", expected one of: {2}.' -f $osKey, $raw.Schema, ($acceptedSchemas -join ', '))
                 continue
+            }
+
+            # Per-OS summary collector entry. Capture the "before"
+            # state of NeutralPatches (deep clone via JSON round-trip
+            # so subsequent in-place mutations to $raw don't pollute
+            # the snapshot) plus the previous LastVerifiedDate and a
+            # reference to the Pca2023 block (if any).
+            $beforeJson = ($raw.PatchBaseline.NeutralPatches | ConvertTo-Json -Depth 10 -Compress)
+            if ([string]::IsNullOrEmpty($beforeJson) -or $beforeJson -eq 'null') {
+                $beforePatches = @()
+            } else {
+                $beforePatches = @($beforeJson | ConvertFrom-Json)
+            }
+            $previousVerified = ''
+            if ($raw.PatchBaseline.PSObject.Properties.Name -contains 'LastVerifiedDate') {
+                $previousVerified = [string]$raw.PatchBaseline.LastVerifiedDate
+            }
+            $pca2023Ref = $null
+            if ($raw.PSObject.Properties.Name -contains 'Pca2023') {
+                $pca2023Ref = $raw.Pca2023
+            }
+            $osSummaries[$osKey] = [pscustomobject]@{
+                BeforePatches    = $beforePatches
+                AfterPatches     = $beforePatches    # updated below if Refresher changes anything
+                Changed          = $false
+                ErrorCount       = 0
+                ManualGroups     = New-Object System.Collections.Generic.List[string]
+                Pca2023          = $pca2023Ref
+                PreviousVerified = $previousVerified
             }
 
             $supportedLangs = @($raw.Common.SupportedLanguages)
@@ -8403,6 +8692,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                         'Manual' {
                             $hasUnresolved = $true
                             Write-Warn ('    -> Manual fill required (no auto Refresher for this group).')
+                            $osSummaries[$osKey].ManualGroups.Add($resolvedPath) | Out-Null
                         }
                         { $_ -in @('InitialFill','Monthly') } {
                             # Invoke the Refresher
@@ -8410,6 +8700,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                             if ([string]::IsNullOrEmpty($refresher)) {
                                 $hasUnresolved = $true
                                 Write-Warn ('    -> No Refresher; field requires manual fill.')
+                                $osSummaries[$osKey].ManualGroups.Add($resolvedPath) | Out-Null
                                 break
                             }
                             try {
@@ -8421,10 +8712,12 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                                     $patchCount = $patches.Count
                                     if (-not $Script:DryRun -and $patchCount -gt 0) {
                                         $raw.PatchBaseline.NeutralPatches = $patches
+                                        $osSummaries[$osKey].AfterPatches = @($patches)
                                     }
                                     Set-GroupVerifiedState -ConfigRaw $raw -GroupPath $g.Path -Lang $lang `
                                                            -PatchTuesday $latestPt -VerifierTag 'auto:RefreshAllBaselines'
                                     $changed = $true
+                                    $osSummaries[$osKey].Changed = $true
                                 } elseif ($refresher -eq 'Resolve-LanguageSpecificPatchesFromCatalog') {
                                     $langPatches = @(Resolve-LanguageSpecificPatchesFromCatalog -OsVersion $osKey `
                                                                                                  -OsLanguage $lang `
@@ -8443,14 +8736,17 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                                     Set-GroupVerifiedState -ConfigRaw $raw -GroupPath $g.Path -Lang $lang `
                                                            -PatchTuesday $latestPt -VerifierTag 'auto:RefreshAllBaselines'
                                     $changed = $true
+                                    $osSummaries[$osKey].Changed = $true
                                 } else {
                                     $hasUnresolved = $true
                                     Write-Warn ('    -> Unknown Refresher "{0}"' -f $refresher)
+                                    $osSummaries[$osKey].ManualGroups.Add($resolvedPath) | Out-Null
                                 }
                             } catch {
                                 $okOverall = $false
                                 $errorMsg = $_.Exception.Message
                                 Write-Fail ('    -> Refresher failed: {0}' -f $errorMsg)
+                                $osSummaries[$osKey].ErrorCount += 1
                             }
                         }
                     }
@@ -8485,13 +8781,15 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
         $reportRows | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
         Write-Ok ('Report: {0}' -f $reportPath)
 
-        Write-Host ''
-        Write-Host '============================== Summary ==============================' -ForegroundColor Cyan
-        $byDecision = $reportRows | Group-Object Decision | Sort-Object Name
-        foreach ($g in $byDecision) {
-            Write-Host ('  {0,-15} : {1}' -f $g.Name, $g.Count) -ForegroundColor White
-        }
-        Write-Host ''
+        # Rich console summary (CI-friendly: console only, no extra files).
+        # See Show-RefreshAllBaselinesSummary for the section layout.
+        Show-RefreshAllBaselinesSummary `
+            -ReportRows $reportRows `
+            -OsSummaries $osSummaries `
+            -LatestPatchTuesday $latestPt `
+            -PatchMonth $patchMonth `
+            -HasUnresolved ([bool]$hasUnresolved) `
+            -OkOverall ([bool]$okOverall)
 
         if (-not $okOverall) {
             $Script:ExitCode = 1

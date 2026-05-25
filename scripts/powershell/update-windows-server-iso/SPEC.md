@@ -1322,6 +1322,23 @@ OS pre-Manual count drops to 0; operators should monitor the
 Stage 4 PR diff for any OS whose `NeutralPatches` array suddenly
 empties.
 
+**Setup vs SafeOs collision on Server 2022 (r05.1 fix).** A
+related pitfall: for Server 2022 / 21H2-era Dynamic Updates,
+Microsoft publishes Setup DU and Safe OS DU under titles that both
+reduce to `"... Dynamic Update for Microsoft server operating
+system version 21H2 ... x64"` after OS-title narrowing. The two
+queries therefore collide on the same UpdateId, producing two
+PatchBaseline entries (`Type=DynamicUpdate.Setup`,
+`Type=DynamicUpdate.SafeOs`) that point at the *same* `.cab`
+file. `Resolve-PatchSetFromCatalog` now applies a title-keyword
+post-filter immediately after OS-title narrowing: Setup queries
+keep titles matching `"Setup Dynamic Update"` (or anything that
+is not Safe-OS-flavoured); SafeOs queries keep titles matching
+`"Safe OS Dynamic Update"` / `"SafeOS"`. Server 2025's 24H2 titles
+already include `Setup` and `Safe OS` distinctively, so no
+post-filter is required for that OS — but the same logic is
+applied uniformly because the cost is negligible.
+
 ### D.20 `Get-PatchType` filename heuristic is not authoritative
 
 **Symptom.** A patch is silently routed to the wrong WIM-target
@@ -1385,11 +1402,24 @@ risk.
 legitimately have multiple sub-files. `Resolve-PatchSetFromCatalog`
 gates this by Type: `DotNet` queries go through the multi-file
 picker and emit one PatchBaseline entry per surviving file
-(sharing `KbId` / `Title` / `UpdateId` / `Supersedes` from the
-umbrella KB; only `FileName` and `DownloadUrl` differ). Other
-Types (SSU / LCU / SafeOS / Setup DU) stay on the single-file
+(sharing `Title` / `UpdateId` / `Supersedes` from the umbrella KB;
+only `FileName`, `DownloadUrl`, and **`KbId`** differ per entry).
+Other Types (SSU / LCU / SafeOS / Setup DU) stay on the single-file
 picker because Microsoft publishes a single canonical file per
 UpdateId for them.
+
+**Per-file KbId (r05.1).** Initially each multi-file entry stored
+the umbrella Title's KbId, but production telemetry from
+`-Action RefreshAllBaselines` showed that the umbrella label did
+not match the actual payload file name (e.g.
+`KbId=KB5088864` with `FileName=windows10.0-kb5087066-x64-ndp48_...msu`).
+The helper `Get-KbIdFromPatchFileName` now extracts the `kb#######`
+token directly from the file name, and `Resolve-PatchSetFromCatalog`
+populates each entry's `KbId` from the file name, with the
+umbrella Title KB as a fallback for file names that have no kb
+token. This also fixes some LCU rows where the Title KB
+(`KB5087539` umbrella) and the payload file (`kb5043080` checkpoint)
+differed.
 
 **Downstream safety.** `Build-PatchPlan` and the I4.DotNet sub-
 phase already loop over multiple DotNet entries (SPEC §B.14), and

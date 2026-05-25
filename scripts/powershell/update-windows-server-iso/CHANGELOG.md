@@ -27,6 +27,114 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.25-r05.1] - 2026-05-25
+
+Two production-fix changes surfaced by the first real r05.0
+`-Action RefreshAllBaselines` run against the 2026-05 Patch Tuesday
+release:
+
+### Fixed - KbId/FileName mismatch in PatchBaseline.NeutralPatches
+
+When Microsoft publishes a single "umbrella" CU whose `UpdateId`
+attaches multiple `.msu` files (typical for .NET cumulative updates
+and for some LCUs that bundle a checkpoint CU's payload), the
+previous patch-resolution loop reused the umbrella Title-derived
+KbId for every attached file. That produced PatchBaseline entries
+where the recorded `KbId` did not match the actual `FileName`:
+
+```json
+// Server2019.json, May 2026 baseline (BEFORE this fix)
+{ "KbId": "KB5088864", "FileName": "windows10.0-kb5087066-x64-ndp48_...msu" },
+{ "KbId": "KB5088864", "FileName": "windows10.0-kb5087061-x64_...msu" }
+//        ^^^^^^^^^^                              ^^^^^^^^^^
+//        umbrella Title KB     actual payload KB encoded in file name
+```
+
+Three symptoms were observed in the 2026-05 production output:
+
+- **Server2019 / Server2022 .NET CU**: two identical-KbId entries
+  attached to two distinct .msu files (4.8 + 4.8.1 runtimes).
+- **Server2025 LCU**: `KbId=KB5087539` (umbrella Title) with
+  `FileName=windows11.0-kb5043080-x64_...msu` (checkpoint CU payload).
+- **Server2022 Dynamic Update**: `Setup` and `SafeOs` queries
+  resolved to the same `UpdateId` because the OS-title narrowing
+  step did not separate them by intent.
+
+This release adds two fixes:
+
+1. **New helper `Get-KbIdFromPatchFileName`** that parses
+   `kb#######` out of the standard Microsoft file-name patterns
+   (`windows10.0-kb5087537-x64_...`, `windows11.0-kb5087588-x64_...`,
+   `...-ndp48_...`, `...-ndp481_...`, etc.). Returns the KB id in
+   canonical upper-case form; returns `''` for file names that do
+   not contain a `kb` token so the caller can fall back to the
+   umbrella Title.
+2. **`Resolve-PatchSetFromCatalog` per-file KbId**: the
+   `foreach ($primary in $primaries)` loop now derives the
+   per-file KbId via `Get-KbIdFromPatchFileName` (falling back to
+   the Title-derived KbId if the file name has no kb token). Each
+   entry now reflects its actual payload KB.
+3. **Setup/SafeOs disambiguation post-filter**: for the 21H2/24H2
+   Dynamic Update queries whose `QueryTemplate` is shared, an
+   additional title-keyword filter ("Setup Dynamic Update" vs
+   "Safe OS Dynamic Update" / "SafeOS") is applied after the
+   OS-title narrowing so the two queries no longer collide on
+   the same UpdateId.
+
+The fix is fully backward compatible: existing PatchBaseline.json
+files keep loading, and the FileName + DownloadUrl fields (which
+P04 FetchAssets actually uses for download) were already correct;
+only the KbId label is updated.
+
+### Added - Rich `-Action RefreshAllBaselines` console summary
+
+`Show-RefreshAllBaselinesSummary` now renders a seven-section
+end-of-run summary block that consolidates everything an operator
+needs to file a baseline-refresh ticket without re-reading the full
+progress log. The block is console-only (no extra files written),
+which keeps CI log capture trivial. Sections:
+
+  1. **Field-group decisions** - same counts as before
+     (Skip / Manual / Monthly / InitialFill).
+  2. **Per-OS patch composition** - one row per OS showing the
+     final NeutralPatches count, file count, and a `Type=N` map
+     across SSU/LCU/DotNet/DynamicUpdate.* buckets.
+  3. **KB delta vs previous PatchBaseline** - per-OS
+     `+ added (n)`, `- removed (n)`, `= unchanged (n)` lines with
+     the actual KB ids, computed against the BeforePatches
+     snapshot captured at the start of the OS loop.
+  4. **Manual fill required** - the operator follow-up list,
+     grouped by OS so each ticket / diff can be scoped per-OS.
+  5. **Pca2023 readiness** - per-OS RequiredByDefault flag and
+     RequiredUpdateLevelKb (Schema 2.1 only; Schema 2.0 configs
+     are flagged with "(no Pca2023 block)").
+  6. **Patch Tuesday timeline** - this run's baseline plus the
+     next two upcoming Patch Tuesdays so the next refresh window
+     is visible at a glance.
+  7. **Run outcome** - explicit Status + Exit code statement
+     (`OK` / exit 0, `PARTIAL` / exit 2, `FAILED` / exit 1) so
+     CI dashboards do not need to parse return values to know
+     whether a run was clean.
+
+Implementation notes:
+
+- The OS loop now captures a deep-clone `BeforePatches` snapshot
+  via `ConvertTo-Json -Depth 10 -Compress | ConvertFrom-Json` so
+  later in-place mutations to `$raw` cannot retroactively poison
+  the "before" set.
+- The new collector hashtable (`$osSummaries`) is keyed by OsKey
+  and aggregates BeforePatches / AfterPatches / Changed /
+  ErrorCount / ManualGroups / Pca2023 reference / PreviousVerified
+  for every OS processed in the run, even those skipped due to
+  Schema mismatch (skipped OSes appear with `(Schema 2.0)` in
+  section 5).
+- `Manual` decisions add the affected group path to
+  `osSummaries[$osKey].ManualGroups`, which section 4 then walks.
+- `Refresher failed` exceptions increment
+  `osSummaries[$osKey].ErrorCount`. Section 7 inspects the
+  overall `$okOverall` aggregate to decide between PARTIAL and
+  FAILED status.
+
 ## [update-wsi-2026.05.25-r05.0] - 2026-05-25
 
 Major version bump for two distinct (but coordinated) changes:
