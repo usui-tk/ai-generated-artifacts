@@ -876,6 +876,210 @@ runs?" column in the B.5 table is `Conditional`, not the usual
 status; future Build additions should preserve this distinction
 or change it deliberately.
 
+## B.21 Update Type Matrix per OS generation (r06.0+, normative)
+
+This section makes the until-now implicit assumption -- that
+Server 2016/2019/2022/2025 all draw from the same enumerated
+set of patch Types -- *explicit*. The matrix below is the
+normative reference for which patch Types each supported OS
+actually has on Microsoft Update Catalog, how they ship
+(standalone vs. combined), and whether the ISO Factory must
+inject them into the offline image.
+
+The matrix was compiled from Microsoft Support KB pages, the
+Windows Server release-info dashboard, the Microsoft Update
+Catalog, the Microsoft Servicing Stack Update FAQ, and the
+hotpatch enablement documentation. It is fixed for r06.0 and
+will only be re-baselined when Microsoft publishes a new
+servicing model change (e.g. a future OS generation that
+unifies SSU into the LCU package for an even older Server
+family).
+
+### B.21.1 The matrix
+
+| Patch Type                | Server 2016 (1607)    | Server 2019 (1809)            | Server 2022 (21H2)        | Server 2025 (24H2)        |
+|---------------------------|-----------------------|-------------------------------|---------------------------|---------------------------|
+| **SSU (standalone)**      | Required, monthly     | Required when Microsoft publishes one (varies) | N/A -- folded into LCU    | N/A -- folded into LCU    |
+| **LCU (standalone)**      | Required, monthly     | Required, monthly             | -- (combined only)        | -- (combined only)        |
+| **SSU+LCU combined**      | N/A                   | N/A                           | Required, monthly         | Required, monthly         |
+| **.NET CU**               | 1 .msu (4.8 only)     | 1 umbrella, 2 files           | 1 umbrella, 2 files       | 1 umbrella, 1 file        |
+| **Dynamic Update.Setup**  | Optional, monthly     | Optional, monthly             | Optional, monthly         | Optional, monthly         |
+| **Dynamic Update.SafeOs** | Optional, monthly     | Optional, monthly             | Optional, monthly         | Optional, monthly         |
+| **Hotpatch**              | N/A                   | N/A                           | Azure Edition only        | All editions (online only)|
+| **Out-of-band (OOB)**     | Possible              | Possible                      | Possible                  | Possible                  |
+
+Cell meanings:
+
+- **Required**: must be present in the PatchBaseline.NeutralPatches
+  array for a complete ISO build. The Refresher MUST find and
+  record this Type each Patch Tuesday; absence indicates an
+  upstream regression that warrants investigation.
+- **Required when Microsoft publishes one (varies)**: Microsoft
+  publishes the standalone SSU only in months where the servicing
+  stack itself has changed. For Server 2019 specifically, an
+  empty SSU result is not necessarily a Refresher bug -- Microsoft
+  may simply have rolled the SSU forward into the LCU for that
+  particular month, or skipped publishing a new SSU. Server 2019
+  is in this category because the 2021-02 "SSU folded into LCU"
+  consolidation Microsoft announced for "Windows 10 version 2004
+  and later" does not technically apply to 1809, but in practice
+  empty SSU months still occur. The Refresher's behaviour is:
+  emit an info-level log, leave the previous SSU entry in place
+  (it remains effective because LCUs are cumulative on the SSU
+  side too), and do not treat the empty result as a failure.
+  Operators should review whether the most-recent SSU on
+  Catalogue is still being superseded by a recent LCU.
+- **Optional**: included when Microsoft publishes it for that
+  month (DU is not published every month for every OS); absence
+  is normal and not a failure.
+- **N/A**: this Type does not exist as a distinct payload for
+  the OS in question. The Refresher MUST NOT try to fabricate
+  an entry. Catalogue queries for an N/A Type SHOULD be skipped
+  to save HTTP round-trips, but if a query is sent and returns
+  zero results, that is the correct outcome and not a regression.
+- **Possible**: present in some months and not others (OOB is
+  by definition reactive to specific issues). The Refresher
+  records OOB entries the same way as B-release entries; they
+  participate in normal supersedence chains.
+
+**Note on the 2026-05 production sample.** The PatchBaseline
+files captured during the first r05.1 RefreshAllBaselines run
+showed Server 2019 with zero SSU entries while Server 2016 had
+a fresh SSU (KB5088064). This is consistent with "Required
+when Microsoft publishes one (varies)" rather than a Refresher
+defect; KB5088064 is a Server 2016 / Windows 10 1607 SSU
+specifically and does not apply to 1809. Whether Microsoft
+actually published a new Server 2019 SSU in 2026-05 is a
+data-quality question that the Phase 2 PoC should answer
+authoritatively by cross-referencing release-info against
+Catalogue.
+
+### B.21.2 .NET CU multiplicity by OS
+
+The ".NET CU" row of B.21.1 captures the umbrella-vs-multifile
+behaviour that motivated the r05.1 KbId fix (see CHANGELOG
+[update-wsi-2026.05.25-r05.1]). The exact file counts
+observed in production telemetry for 2026-05 are:
+
+| OS           | Umbrella KbId (Title) | Attached .msu files | Per-file KbIds                        |
+|--------------|-----------------------|---------------------|---------------------------------------|
+| Server 2016  | KB5087065             | 1 (.NET 4.8)        | KB5087065                             |
+| Server 2019  | KB5088864             | 2 (.NET 4.7.2, 4.8) | KB5087066, KB5087061                  |
+| Server 2022  | KB5088862             | 2 (.NET 4.8, 4.8.1) | KB5087068, KB5087059                  |
+| Server 2025  | KB5087051             | 1 (.NET 4.8.1)      | KB5087051                             |
+
+The Refresher uses `Select-AllCanonicalPatchFiles` for any
+".NET CU" candidate UpdateId, regardless of OS. The OS-specific
+behaviour above is therefore the *expected* count, not a
+configuration knob -- if Server 2016 ever shows 2 files or
+Server 2019 ever shows 1, that is a Microsoft-side packaging
+change worth flagging. Tracking the expected count per OS
+under `Common.UpdateTypePolicy` is a candidate r06.x schema
+extension (see B.21.5 "Future work").
+
+### B.21.3 Combined LCU package detection
+
+For Server 2022 / 2025 ("N/A standalone SSU" cells in B.21.1),
+the LCU package ships with the SSU folded inside. The Refresher
+needs to recognise this so that `Build-PatchPlan` does not
+demand a non-existent standalone SSU before the LCU.
+
+The detection logic in `Resolve-PatchSetFromCatalog` looks for
+two independent signals and treats either as sufficient:
+
+1. **Catalogue-side**: the SSU-typed query returns zero results
+   for the requested OS / month, but the LCU-typed query
+   returns a result. This is the *implicit* signal.
+2. **Title-side**: the LCU's Catalogue Title contains a
+   "combined SSU and LCU" phrase. Microsoft's KB pages
+   consistently use this wording for combined packages (see,
+   e.g., KB5068787 for Server 2022 November 2025).
+
+When either signal fires, the Refresher annotates the LCU
+entry with `"IsCombined": true`. `Build-PatchPlan` then skips
+the SSU pre-step and applies the LCU directly. This matches
+what `wusa.exe /quiet /norestart Windows10.0-KB<LCU>.msu`
+does on a live system: SSU is unpacked and applied as part
+of LCU installation.
+
+For Server 2016 / 2019 (standalone SSU still exists), the
+Refresher MUST find a separate SSU entry; LCU's `IsCombined`
+is set to `false` and `Build-PatchPlan` enforces the SSU-then-
+LCU ordering. If the SSU query unexpectedly returns zero
+results for these OSes, the Refresher emits a warning -- it
+is more likely a Catalogue query regression than a genuine
+Microsoft-side packaging change.
+
+### B.21.4 Hotpatch is out of scope for the offline image
+
+Hotpatch is an *online-runtime* servicing mechanism delivered
+via Windows Update / Azure Arc to a running OS, with the
+servicing stack patching kernel-mode code in memory without
+a reboot. The hotpatch packages cannot be applied to a mounted
+WIM via `Add-WindowsPackage`; they have no equivalent in the
+offline image servicing surface that DISM exposes.
+
+This script therefore treats Hotpatch as outside the Patch
+Manifest scope. However, Hotpatch *enrollment* imposes a
+constraint that the offline ISO can satisfy: a Server 2025
+machine wanting to enrol must be on a baseline-month LCU
+(January / April / July / October). An ISO built from a
+B-release LCU outside those months will still be eligible
+to enrol, but the first applied online update will be a
+baseline LCU that requires a reboot; an ISO built from a
+baseline-month LCU can begin its hotpatch quarter immediately.
+
+This is informational only in r06.0. A future r06.x might
+add an opt-in `-PreferBaselineMonthLcu` switch that, when
+set for Server 2025, prefers the most recent
+January/April/July/October Patch Tuesday LCU even if a
+newer B-release exists. Today the user can achieve the same
+effect with `-PatchMonth 2026-04` etc.
+
+### B.21.5 Future work (PoC-driven, no schema commitment yet)
+
+The above matrix is the *spec*. The PoC -- to be run separately
+before any schema change is committed -- will validate:
+
+- Whether the Microsoft Learn `windows-server-release-info`
+  page (markdown rendering: append `?accept=text/markdown` to
+  the URL) covers all rows of the matrix above with sufficient
+  fidelity that we can drop Catalogue Title-string heuristics.
+- Whether Dynamic Update.Setup / Dynamic Update.SafeOs entries
+  appear on a sibling release-info page or only on the Catalogue.
+- Whether .NET CU per-OS multiplicity can be queried from a
+  non-Catalogue source.
+- Whether Hotpatch baseline-month detection (which Patch Tuesday
+  KBs are baseline vs hotpatch) is queryable without scraping
+  the techcommunity blog.
+
+If the PoC succeeds, r06.x may add a `Common.UpdateTypePolicy`
+sub-block to Schema 2.2 that codifies B.21.1 per-OS:
+
+```jsonc
+// Schema 2.2 candidate (NOT YET ADOPTED -- contingent on PoC)
+"Common": {
+  ...
+  "UpdateTypePolicy": {
+    "SSU":                  "standalone",        // or "combined" for 2022/2025
+    "LCU":                  "standalone",        // or "combined-with-ssu"
+    "DotNetCU": {
+      "Required": true,
+      "ExpectedFileCount": 1                     // 2 for 2019/2022
+    },
+    "DynamicUpdateSetup":   "optional",
+    "DynamicUpdateSafeOs":  "optional",
+    "Hotpatch":             "not-applicable"     // or "online-runtime-only"
+  }
+}
+```
+
+The schema decision is intentionally deferred to PoC outcomes.
+This SPEC change (r06.0 Phase 1) does not modify the script
+behaviour or the on-disk Config schema; it only makes the
+implicit Type matrix normative so that a future schema
+extension is grounded in a stated contract.
+
 ## B.14b PatchBaseline schema fields (referenced by B.10)
 
 ```jsonc
@@ -1115,6 +1319,16 @@ LCU first fails with `0x800f0922` ("CBS_E_INSTALLERS_FAILED_TO_LOAD").
 
 **Fix.** `Get-PatchApplyOrder` returns 1 for `SSU` and 3 for `LCU`. The
 P07 loop sorts by `ApplyOrder` before applying.
+
+**OS-generation note (r06.0+).** This pitfall applies only to
+Server 2016 / 2019, where SSU and LCU are still distinct
+packages. For Server 2022 / 2025 the LCU package already
+contains the SSU (combined SSU+LCU); there is no standalone
+SSU on Catalogue, so `Get-PatchApplyOrder` simply never
+encounters a Type=SSU entry for those OSes. SPEC §B.21.1
+("Update Type Matrix per OS generation") and §B.21.3
+("Combined LCU package detection") are normative on this
+distinction.
 
 ### D.3 winre.wim is inside install.wim
 
@@ -1427,6 +1641,13 @@ phase already loop over multiple DotNet entries (SPEC §B.14), and
 treats a "not applicable" return from DISM as benign — so if the
 install.wim contains only one of the runtimes, the other entry's
 DISM call no-ops safely.
+
+**Normative spec (r06.0+).** SPEC §B.21.2 lists the expected
+.NET CU file count for each OS generation (Server 2016 = 1 file,
+Server 2019 / 2022 = 2 files, Server 2025 = 1 file). If the
+Refresher ever produces a count that disagrees with that row,
+it is a Microsoft-side packaging change worth investigating
+rather than a bug in this script.
 
 
 ### D.22 Secure Boot baseline considerations (r05.0+)

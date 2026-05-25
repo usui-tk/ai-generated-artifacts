@@ -16,12 +16,94 @@ the script and follows the
 
 ## [Unreleased]
 
-### Planned (M4)
+### r06.0 Phase 1 - Spec-only: OS Update Type Matrix (this release)
+
+This Phase 1 deliverable is SPEC-only and intentionally contains
+**no script (.ps1) changes and no on-disk Config schema changes**.
+It exists to make the until-now implicit per-OS update Type
+assumptions normative, which is a prerequisite for the upcoming
+PoC that will validate whether Microsoft's online metadata
+sources can replace the Catalogue Title-string heuristics.
+
+**Driver**. Production telemetry from the 2026-05 Patch Tuesday
+refresh (r05.1) and a design review highlighted that Server
+2016/2019/2022/2025 do not actually share a uniform set of
+patch Types: SSU is standalone for 2016/2019 but folded into
+the LCU for 2022/2025; .NET CU file multiplicity varies per
+OS; Hotpatch exists only as an online-runtime mechanism on
+Server 2025 and has no offline-image equivalent. None of this
+was written down anywhere normative; the Refresher's behaviour
+was a side effect of "Catalogue happened to return zero results
+for SSU on Server 2025".
+
+**Changes**:
+
+- `SPEC.md` §B.21 ("Update Type Matrix per OS generation") added
+  with five subsections:
+  - **B.21.1** The matrix itself: a 4-OS x 8-Type table with
+    cell values of `Required` / `Optional` / `N/A` / `Possible`.
+  - **B.21.2** .NET CU multiplicity per OS, with the exact
+    file counts observed in 2026-05 telemetry (1, 2, 2, 1 for
+    Server 2016/2019/2022/2025 respectively).
+  - **B.21.3** Combined LCU package detection: the two
+    independent signals (Catalogue-side: SSU query returns 0
+    hits; Title-side: "combined SSU and LCU" wording) and how
+    `IsCombined` is annotated on PatchBaseline entries.
+  - **B.21.4** Hotpatch declared out of scope for offline
+    image servicing (it is an online-runtime mechanism via
+    Azure Arc; no `Add-WindowsPackage` equivalent exists).
+    Includes informational note that a future
+    `-PreferBaselineMonthLcu` switch could help Server 2025
+    machines that want to enroll in Hotpatch.
+  - **B.21.5** Future work: candidate `Common.UpdateTypePolicy`
+    sub-block for a hypothetical Schema 2.2, explicitly marked
+    "NOT YET ADOPTED -- contingent on PoC".
+- `SPEC.md` §D.2 ("SSU before LCU") amended with an
+  OS-generation note pointing to §B.21.
+- `SPEC.md` §D.21 ("Umbrella KBs") amended with a reference to
+  §B.21.2 for the expected per-OS file count.
+
+**Not in this Phase 1**:
+
+- No `Update-WindowsServerIso.ps1` changes. `$Script:ScriptVersion`
+  stays at `update-wsi-2026.05.25-r05.1`. The script's runtime
+  behaviour is unchanged; only the documentation now states
+  explicitly what the script was already doing implicitly.
+- No `Config/<OsKey>.json` schema changes. Schema stays at
+  v2.0 / v2.1 as accepted by r05.0.
+- No PoC code yet. Phase 2 will introduce a separate PoC
+  directory to validate the online-metadata sources
+  (release-info Markdown, Hotpatch baseline-month detection,
+  alternative sources for .NET / Dynamic Update).
+
+### Planned (r06 Phase 2)
+
+- PoC for online patch metadata acquisition without
+  authentication. Targets: Microsoft Learn
+  `windows-server-release-info` (Markdown rendering),
+  Hotpatch baseline-month detection, alternative sources for
+  .NET / Dynamic Update.
+- Outcome: a written report (under `scripts/poc/` or a similar
+  location) recommending which sources can replace which parts
+  of `Resolve-PatchSetFromCatalog`'s Title-string heuristics.
+
+### Planned (r06 Phase 3, PoC-driven)
+
+- Config Schema v2.2 design (only if Phase 2 demonstrates
+  feasibility): a `Common.UpdateTypePolicy` sub-block that
+  codifies §B.21.1 per-OS, plus per-Type metadata such as
+  `ExpectedFileCount`.
+- Patch Manifest Engine: an interface that lets the Refresher
+  prefer online-metadata sources for KB-number resolution and
+  fall back to Catalogue scraping only for MSU/CAB URL
+  resolution.
+
+### Planned (M4 - carryover from earlier roadmap)
 - Server 2025 real `LCUExpandViaMum=true` code path. LCU on 2025 ships
   as a MUM/CAB bundle that must be expanded with `expand.exe -F:*`
   before `Add-WindowsPackage` is invoked.
 
-### Planned (M5)
+### Planned (M5 - carryover from earlier roadmap)
 - Stage 4 CI workflow (`catalog-health`): monthly scheduled run of
   `Resolve-PatchSetFromCatalog` that opens a PR with the resulting
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
