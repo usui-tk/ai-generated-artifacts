@@ -1,5 +1,5 @@
 {
-  "Schema": "2.0",
+  "Schema": "2.1",
   "OsKey": "Server2022",
   "Common": {
     "Build": 20348,
@@ -39,6 +39,16 @@
       "LastDownloadedSha256": "",
       "LastDownloadedSizeBytes": 0
     }
+  },
+  "Pca2023": {
+    "RequiredByDefault": true,
+    "RequiredUpdateLevelKb": "2025-2B (February 2025 LCU, 20348.2227 baseline) or later",
+    "RequiredUpdateLevelMinDate": "2025-02-11",
+    "NotesSource": [
+      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
+      "https://lenovopress.lenovo.com/lp2353.pdf"
+    ],
+    "Notes": "Per Lenovo lp2353.pdf, Server 2022 build 20348.2227 or earlier requires 2025-2B LCU before Make2023BootableMedia.ps1 succeeds. Newer builds (post 2025-02) generally already include the required EFI_EX binaries."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",

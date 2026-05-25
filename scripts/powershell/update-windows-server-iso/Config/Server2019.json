@@ -1,5 +1,5 @@
 {
-  "Schema": "2.0",
+  "Schema": "2.1",
   "OsKey": "Server2019",
   "Common": {
     "Build": 17763,
@@ -39,6 +39,15 @@
       "LastDownloadedSha256": "",
       "LastDownloadedSizeBytes": 0
     }
+  },
+  "Pca2023": {
+    "RequiredByDefault": true,
+    "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
+    "RequiredUpdateLevelMinDate": "2024-04-09",
+    "NotesSource": [
+      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f"
+    ],
+    "Notes": "Make2023BootableMedia.ps1 is officially supported for Server 2019. Required source media must include 2024-4B LCU."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",

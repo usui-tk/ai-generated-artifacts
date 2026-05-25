@@ -233,20 +233,60 @@ Microsoft download mirror fallback).
 
 ## Phase reference
 
-| ID  | Name              | Group  | What it does                                                                  |
-|-----|-------------------|--------|-------------------------------------------------------------------------------|
-| P01 | Initialize        | Setup  | PowerShell env, admin, ADK, disk, Hyper-V                                     |
-| P02 | ResolveInputs     | Setup  | ISO/patch source resolution, Config JSON                                      |
-| P04 | FetchAssets       | Fetch  | ISO + patch downloads with hash verification                                  |
-| P05 | ExpandIso         | Plan   | Mount source ISO, copy to workspace, enumerate WIM indexes                    |
-| P07 | PatchInstallWim   | Build  | For each install.wim index: SSU then LCU then .NET, then DISM cleanup         |
-| P08 | PatchBootWim      | Build  | boot.wim (PE + Setup) and winre.wim                                           |
-| P09 | AssembleIso       | Build  | Dynamic Update Setup overlay, Export-WindowsImage, oscdimg ISO build          |
-| P11 | StaticVerify      | Verify | Mount output ISO, confirm KB packages are present                             |
-| P13 | FinalReport       | Report | End-of-run summary, ISO hash, log paths                                       |
+| ID  | Name                       | Group  | What it does                                                                  |
+|-----|----------------------------|--------|-------------------------------------------------------------------------------|
+| P01 | Initialize                 | Setup  | PowerShell env, admin, ADK, disk, Hyper-V                                     |
+| P02 | ResolveInputs              | Setup  | ISO/patch source resolution, Config JSON                                      |
+| P03 | RefreshPatchBaseline       | Setup  | Microsoft Update Catalogue scrape, writeback to `Config/<OsKey>.json`         |
+| P04 | FetchAssets                | Fetch  | ISO + patch downloads with hash verification                                  |
+| P05 | ExpandIso                  | Plan   | Mount source ISO, copy to workspace, enumerate WIM indexes                    |
+| P06 | ValidatePatchSet           | Plan   | wsusscn2.cab offline WUA scan; verify patch set covers all required KBs       |
+| P07 | PatchInstallWim            | Build  | For each install.wim index: SSU then LCU then .NET, then DISM cleanup         |
+| P08 | PatchBootWim               | Build  | boot.wim (PE + Setup) and winre.wim                                           |
+| P09 | AssembleIso                | Build  | Dynamic Update Setup overlay, Export-WindowsImage, oscdimg ISO build          |
+| P10 | ConvertPca2023BootManager  | Build  | **OPTIONAL** PCA2023 Secure Boot conversion (`-EnablePca2023BootManager`)     |
+| P11 | StaticVerify               | Verify | Mount output ISO, confirm KB packages are present                             |
+| P12 | VerifyPca2023Readiness     | Verify | **ALWAYS-RUNS** PCA2023 readiness inspection; emits JSON + Markdown reports   |
+| P13 | FinalReport                | Report | End-of-run summary, ISO hash, log paths, PCA2023 summary integration          |
 
 The optional `-Action BootTest` runs a Hyper-V Gen2 smoke test against
 the output ISO. See SPEC.md Part B for the full per-phase contracts.
+
+### Secure Boot / PCA2023 boot manager (r05.0+)
+
+The Microsoft "Windows Production PCA 2011" Secure Boot signing
+certificate expires in **2026-06**. Firmware that has been updated
+to revoke the 2011 cert (per the BlackLotus CVE-2023-24932
+mitigation rollout) will refuse to boot ISOs whose boot manager is
+still signed via the 2011 chain. P10 / P12 address this:
+
+- **P12 always runs** as part of the Verify group. It reports
+  whether the produced ISO is PCA2023-ready (Healthy / Warning /
+  Critical / Unknown) and emits `pca2023_readiness.json` +
+  `pca2023_readiness.md` under `<WorkRoot>/pca2023/`.
+
+- **P10 is opt-in** via `-EnablePca2023BootManager`. It re-signs
+  the boot manager chain by running this script's internal
+  `Convert-WimBootToPca2023Signed` (a PSA-clean re-implementation
+  of Microsoft's `Make2023BootableMedia.ps1#Copy-2023BootBins`).
+  Server 2025 additionally requires `-ForcePca2023OnServer2025`
+  because Microsoft's certified Server 2025 platforms ship with
+  the 2023 certificates already in firmware (KB 5053484 does not
+  list Server 2025 as supported).
+
+- **Source media prerequisite**: the LCU month integrated in the
+  source ISO's `install.wim` must be **2024-4B (April 2024) or
+  later** for Server 2016/2019/2022 (Server 2022 specifically
+  needs 2025-2B per Lenovo lp2353.pdf). P10 pre-flight aborts
+  with `Health=Critical` if this prerequisite is not met.
+
+- **Standalone forensic inspection**: pass `-Pca2023OnlyMode
+  -IsoPath <existing.iso>` to skip the entire build pipeline and
+  run ONLY P12 against an existing ISO. No download, no DISM
+  mount of install.wim, no ISO re-assembly.
+
+See `SPEC.md` Part D.22 for the design lessons learned, and
+`SPEC.md` B.18 for the operational model.
 
 ## Parameters (selected)
 
@@ -275,7 +315,11 @@ parameter list. The most commonly used:
 | `-DryRun`                    | Skip Build / Verify phases (Setup / Fetch / Plan only)                  |
 | `-SyntheticTestMode`         | CI mode: build a synthetic ISO without touching Microsoft assets        |
 | `-EvalIsoMode`               | Allow downloading via Microsoft Evaluation Center fwlink                |
-| `-Execute`                   | **Required** for actual DISM writes; without it, Build phases plan only |
+| `-Execute`                    | **Required** for actual DISM writes; without it, Build phases plan only |
+| `-EnablePca2023BootManager`   | Opt-in for P10 PCA2023 boot manager conversion (default OFF; see Phase reference) |
+| `-ForcePca2023OnServer2025`   | Override Server 2025 default-skip for P10 (advanced use only)           |
+| `-Pca2023OnlyMode`            | Standalone P12 inspection of an existing ISO (`-IsoPath` required)      |
+| `-Pca2023ScriptPath`          | Use an external `Make2023BootableMedia.ps1` instead of the internal helper |
 
 ## Dynamic patch baseline (P03) and dependency validation (P06)
 

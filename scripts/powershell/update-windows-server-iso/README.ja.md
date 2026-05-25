@@ -221,50 +221,94 @@ OS 別プロファイル JSON は `Config/` 配下にあります。各プロフ
 
 ## フェーズ一覧
 
-| ID  | 名称              | グループ | 主な処理                                                                          |
-|-----|-------------------|----------|-----------------------------------------------------------------------------------|
-| P01 | Initialize        | Setup    | PowerShell 環境、管理者、ADK、ディスク空き、Hyper-V を確認                        |
-| P02 | ResolveInputs     | Setup    | ISO / パッチ入力の解決、Config JSON の読み込み                                    |
-| P04 | FetchAssets       | Fetch    | ISO とパッチをダウンロードしハッシュ検証                                          |
-| P05 | ExpandIso         | Plan     | ソース ISO をマウントしてワークスペースへ展開、WIM インデックスを列挙             |
-| P07 | PatchInstallWim   | Build    | 各 install.wim インデックスへ SSU → LCU → .NET の順で適用し、DISM クリーンアップ |
-| P08 | PatchBootWim      | Build    | boot.wim (PE + Setup) と winre.wim へパッチ適用                                   |
-| P09 | AssembleIso       | Build    | Dynamic Update Setup のオーバーレイ、Export-WindowsImage、oscdimg で ISO 生成     |
-| P11 | StaticVerify      | Verify   | 出力 ISO をマウントし、KB パッケージが入っていることを確認                        |
-| P13 | FinalReport       | Report   | 終端サマリー、ISO ハッシュ、ログのパスを表示                                      |
+| ID  | 名称                       | グループ | 主な処理                                                                          |
+|-----|----------------------------|----------|-----------------------------------------------------------------------------------|
+| P01 | Initialize                 | Setup    | PowerShell 環境、管理者、ADK、ディスク空き、Hyper-V を確認                        |
+| P02 | ResolveInputs              | Setup    | ISO / パッチ入力の解決、Config JSON の読み込み                                    |
+| P03 | RefreshPatchBaseline       | Setup    | Microsoft Update Catalog をスクレイプし `Config/<OsKey>.json` へ書き戻し          |
+| P04 | FetchAssets                | Fetch    | ISO とパッチをダウンロードしハッシュ検証                                          |
+| P05 | ExpandIso                  | Plan     | ソース ISO をマウントしてワークスペースへ展開、WIM インデックスを列挙             |
+| P06 | ValidatePatchSet           | Plan     | wsusscn2.cab オフライン WUA スキャン。パッチセットが必要 KB を網羅するか検証      |
+| P07 | PatchInstallWim            | Build    | 各 install.wim インデックスへ SSU → LCU → .NET の順で適用し、DISM クリーンアップ  |
+| P08 | PatchBootWim               | Build    | boot.wim (PE + Setup) と winre.wim へパッチ適用                                   |
+| P09 | AssembleIso                | Build    | Dynamic Update Setup のオーバーレイ、Export-WindowsImage、oscdimg で ISO 生成     |
+| P10 | ConvertPca2023BootManager  | Build    | **オプション** PCA2023 セキュアブート変換 (`-EnablePca2023BootManager` が必要)    |
+| P11 | StaticVerify               | Verify   | 出力 ISO をマウントし、KB パッケージが入っていることを確認                        |
+| P12 | VerifyPca2023Readiness     | Verify   | **常時実行** PCA2023 対応状況の検査。JSON + Markdown レポートを出力               |
+| P13 | FinalReport                | Report   | 終端サマリー、ISO ハッシュ、ログのパス、PCA2023 サマリ統合                        |
 
 オプションで `-Action BootTest` を指定すると、出力 ISO に対して Hyper-V
 Gen2 VM を起動する疎通テストが実行されます。各フェーズの完全な契約は
 `SPEC.md` Part B を参照してください。
+
+### セキュアブート / PCA2023 ブートマネージャ (r05.0+)
+
+Microsoft「Windows Production PCA 2011」セキュアブート署名証明書は
+**2026 年 6 月** に有効期限を迎えます。BlackLotus CVE-2023-24932 緩和
+策のロールアウトとして PCA2011 証明書を失効させたファームウェアは、
+2011 チェーンで署名されたブートマネージャを持つ ISO の起動を拒否
+します。P10 / P12 はこれに対処します:
+
+- **P12 は常時実行**(Verify グループ)。生成された ISO が
+  PCA2023 対応か(Healthy / Warning / Critical / Unknown)を判定
+  し、`<WorkRoot>/pca2023/` 配下に `pca2023_readiness.json` と
+  `pca2023_readiness.md` を出力します。
+
+- **P10 はオプトイン**(`-EnablePca2023BootManager`)。スクリプト
+  内部の `Convert-WimBootToPca2023Signed`(Microsoft 提供
+  `Make2023BootableMedia.ps1#Copy-2023BootBins` を PSA 適合品質で
+  再実装したもの)を実行し、ブートマネージャの署名チェーンを
+  PCA2023 へ書き換えます。Server 2025 は更に
+  `-ForcePca2023OnServer2025` が必要です(認定 Server 2025
+  プラットフォームのファームウェアには 2023 証明書が既に含まれて
+  おり、KB 5053484 のサポート対象 OS にも含まれていないため)。
+
+- **ソースメディアの前提条件**: ソース ISO の `install.wim` に
+  統合済みの LCU 月は Server 2016/2019/2022 で **2024-4B (2024
+  年 4 月)以降** が必要です(Server 2022 は Lenovo lp2353.pdf
+  により 2025-2B 以降が必要)。P10 のプリフライトはこの前提を
+  満たさない場合 `Health=Critical` で中止します。
+
+- **スタンドアロン検証モード**: `-Pca2023OnlyMode -IsoPath
+  <existing.iso>` を指定すると、ビルドパイプラインを一切実行せず
+  P12 のみを既存 ISO に対して実行します。ダウンロード・DISM
+  マウント・ISO 再アセンブルはありません。
+
+設計上の知見は `SPEC.md` Part D.22、運用モデルは `SPEC.md` B.18
+を参照してください。
 
 ## 主要パラメータ
 
 完全なパラメータ一覧は `Get-Help .\Update-WindowsServerIso.ps1 -Full`
 で参照できます。代表的なもの:
 
-| パラメータ                   | 用途                                                                            |
-|------------------------------|---------------------------------------------------------------------------------|
-| `-Action`                    | Prepare / Build / Verify / PrepareBuildVerify / BootTest / All / Cleanup / ListPhases / GenerateManifest |
-| `-OsVersion`                 | Server2016 / Server2019 / Server2022 / Server2025                               |
-| `-OsLanguage`                | en-us / ja-jp                                                                   |
-| `-IsoPath`                   | ローカル ISO のパス (`-IsoUrl` と相互排他)                                      |
-| `-IsoUrl`                    | ISO の明示的ダウンロード URL                                                    |
-| `-PatchDirectory`            | ローカル MSU/CAB パッチが入ったディレクトリ                                     |
-| `-ManifestPath`              | ハッシュ付き Metalink `.meta4` マニフェスト                                     |
-| `-PatchUrls`                 | パッチ URL の明示的な配列                                                       |
-| `-AutoDetectLatestPatches`   | Microsoft Update Catalog から PatchBaseline を強制再取得                        |
-| `-PatchMonth`                | 再取得対象月 (例: `2026-06`、既定は現在月)                                      |
-| `-SkipDynamicPatchRefresh`   | PatchBaseline が古くても P03 をスキップ (オフライン・閉域網用)                |
-| `-UseBaselineOnly`           | PatchBaseline を厳密にそのまま使う (Catalog アクセス一切なし)                   |
-| `-IgnorePatchValidation`     | P06 検証失敗を警告に降格 (推奨されない)                                       |
-| `-WsusScnCabPath`            | 事前配置済み wsusscn2.cab のパス (自動ダウンロードを省略)                       |
-| `-WorkRoot`                  | ワークスペースルート。既定はスクリプトディレクトリからの相対パス `Workspace_UpdateWsi`(スクリプトの隣にワークスペースが作成される)。別ドライブに置きたい場合は絶対パスを指定(例 `D:\UpdateWsi`)。このパスのドライブに 100 GB 以上の空き容量が必要(プリフライトで強制) |
-| `-OutputDir`                 | 出力 ISO ディレクトリ (既定 `<WorkRoot>\output`)                                |
-| `-OnlyInstallWimIndexes`     | カンマ区切りインデックス (例 `'2,4'`) で install.wim 更新対象を制限             |
-| `-DryRun`                    | Build / Verify をスキップ (Setup / Fetch / Plan のみ)                           |
-| `-SyntheticTestMode`         | CI モード: Microsoft アセットに触れずに合成 ISO を構築                          |
-| `-EvalIsoMode`               | Microsoft Evaluation Center fwlink 経由のダウンロードを許可                     |
-| `-Execute`                   | 実際の DISM 書き込みに **必須**。指定しなければ Build フェーズは計画のみ        |
+| パラメータ                    | 用途                                                                            |
+|-------------------------------|---------------------------------------------------------------------------------|
+| `-Action`                     | Prepare / Build / Verify / PrepareBuildVerify / BootTest / All / Cleanup / ListPhases / GenerateManifest |
+| `-OsVersion`                  | Server2016 / Server2019 / Server2022 / Server2025                               |
+| `-OsLanguage`                 | en-us / ja-jp                                                                   |
+| `-IsoPath`                    | ローカル ISO のパス (`-IsoUrl` と相互排他)                                      |
+| `-IsoUrl`                     | ISO の明示的ダウンロード URL                                                    |
+| `-PatchDirectory`             | ローカル MSU/CAB パッチが入ったディレクトリ                                     |
+| `-ManifestPath`               | ハッシュ付き Metalink `.meta4` マニフェスト                                     |
+| `-PatchUrls`                  | パッチ URL の明示的な配列                                                       |
+| `-AutoDetectLatestPatches`    | Microsoft Update Catalog から PatchBaseline を強制再取得                        |
+| `-PatchMonth`                 | 再取得対象月 (例: `2026-06`、既定は現在月)                                      |
+| `-SkipDynamicPatchRefresh`    | PatchBaseline が古くても P03 をスキップ (オフライン・閉域網用)                  |
+| `-UseBaselineOnly`            | PatchBaseline を厳密にそのまま使う (Catalog アクセス一切なし)                   |
+| `-IgnorePatchValidation`      | P06 検証失敗を警告に降格 (推奨されない)                                         |
+| `-WsusScnCabPath`             | 事前配置済み wsusscn2.cab のパス (自動ダウンロードを省略)                       |
+| `-WorkRoot`                   | ワークスペースルート。既定はスクリプトディレクトリからの相対パス `Workspace_UpdateWsi`(スクリプトの隣にワークスペースが作成される)。別ドライブに置きたい場合は絶対パスを指定(例 `D:\UpdateWsi`)。このパスのドライブに 100 GB 以上の空き容量が必要(プリフライトで強制) |
+| `-OutputDir`                  | 出力 ISO ディレクトリ (既定 `<WorkRoot>\output`)                                |
+| `-OnlyInstallWimIndexes`      | カンマ区切りインデックス (例 `'2,4'`) で install.wim 更新対象を制限             |
+| `-DryRun`                     | Build / Verify をスキップ (Setup / Fetch / Plan のみ)                           |
+| `-SyntheticTestMode`          | CI モード: Microsoft アセットに触れずに合成 ISO を構築                          |
+| `-EvalIsoMode`                | Microsoft Evaluation Center fwlink 経由のダウンロードを許可                     |
+| `-Execute`                    | 実際の DISM 書き込みに **必須**。指定しなければ Build フェーズは計画のみ        |
+| `-EnablePca2023BootManager`   | P10 PCA2023 ブートマネージャ変換のオプトイン(既定 OFF。上記フェーズ参照)      |
+| `-ForcePca2023OnServer2025`   | Server 2025 の P10 既定スキップを上書き(上級者向け)                            |
+| `-Pca2023OnlyMode`            | 既存 ISO に対する P12 スタンドアロン検証(`-IsoPath` が必要)                   |
+| `-Pca2023ScriptPath`          | スクリプト内蔵ヘルパの代わりに外部 `Make2023BootableMedia.ps1` を使用           |
 
 ## 動的パッチベースライン (P03) と依存性検証 (P06)
 

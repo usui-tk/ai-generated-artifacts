@@ -1,5 +1,5 @@
 {
-  "Schema": "2.0",
+  "Schema": "2.1",
   "OsKey": "Server2025",
   "Common": {
     "Build": 26100,
@@ -44,6 +44,15 @@
       "LastDownloadedSha256": "",
       "LastDownloadedSizeBytes": 0
     }
+  },
+  "Pca2023": {
+    "RequiredByDefault": false,
+    "RequiredUpdateLevelKb": "n/a (firmware-provided 2023 certs)",
+    "RequiredUpdateLevelMinDate": "",
+    "NotesSource": [
+      "https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789"
+    ],
+    "Notes": "Microsoft-certified Server 2025 server platforms include the 2023 certificates in firmware. Make2023BootableMedia.ps1 is NOT in the official supported-OS list for KB5053484. P10 ConvertPca2023BootManager is skipped by default for Server 2025; pass -EnablePca2023BootManager -ForcePca2023OnServer2025 to override (advanced operator only)."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",

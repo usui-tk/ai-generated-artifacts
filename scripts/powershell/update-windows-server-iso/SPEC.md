@@ -123,6 +123,7 @@ $WorkRoot/                       (default: C:\Temp\Workspace_UpdateWsi)
   output/                        final ISO output
   logs/                          per-phase CSV + JSONL
   diag/                          debug-trace JSON exports on failure
+  pca2023/                       P12 PCA2023 readiness JSON + Markdown (r05.0+)
   .markers/                      P0<N>.ok marker files
 ```
 
@@ -285,6 +286,24 @@ Then, if `EnableWinREUpdate`:
 | 2 | `New-BootableIso` invokes oscdimg with the 3-tier `etfsboot.com` / `efisys.bin` fallback chain |
 | 3 | Verify the output ISO file exists and is non-empty |
 
+### P10 ConvertPca2023BootManager (Build, OPTIONAL)
+
+This phase is the **only** Build-group phase that is conditional
+on operator opt-in (see B.20 for the rationale). It rewrites the
+output ISO's boot manager to be signed via the 'Windows UEFI CA
+2023' chain instead of the legacy 'Windows Production PCA 2011'.
+
+| Step | What |
+|---|---|
+| 0a | If `-EnablePca2023BootManager` is NOT set: silent skip, write `P10.skipped` marker |
+| 0b | If `OsKey = Server2025` AND `-ForcePca2023OnServer2025` is NOT set: silent skip |
+| 0c | Pre-flight `Get-OrEnsurePca2023Snapshot`; if Health = 'Critical' (LCU < 2024-4B): throw |
+| 0d | If Health = 'Healthy' (already PCA2023): silent skip |
+| 1 | Call `Convert-WimBootToPca2023Signed` (internal, default) OR invoke external `-Pca2023ScriptPath` |
+| 2 | Re-assemble output ISO via `New-BootableIso` to embed the updated boot manager |
+| 3 | Force-refresh `$Script:Pca2023Snapshot` so downstream phases see new state |
+| Output | Updated `extracted/efi/boot/bootx64.efi` + `extracted/bootmgr.efi` + `extracted/efi/microsoft/boot/efisys_ex.bin` + fonts; updated output ISO |
+
 ### P11 StaticVerify (Verify)
 
 | Step | What |
@@ -293,7 +312,22 @@ Then, if `EnableWinREUpdate`:
 | 2 | `Mount-DiskImage` the output ISO; confirm `install.wim`, `boot.wim`, `setup.exe` exist |
 | 3 | Enumerate WIM indexes; for the primary install.wim index, run `Get-WindowsPackage` and check each expected KB |
 | 4 | `Dismount-DiskImage` |
-| Output | `logs/P08_verification.csv` |
+| Output | `logs/P11_verification.csv` |
+
+### P12 VerifyPca2023Readiness (Verify, ALWAYS-RUNS)
+
+Strictly read-only inspection of the produced ISO's PCA2023
+readiness state. Always runs as part of the Verify group,
+regardless of whether `-EnablePca2023BootManager` was set for P10.
+
+| Step | What |
+|---|---|
+| 0 | Skip ONLY if no extracted media is available (P05 did not run, or workspace was cleaned) |
+| 1 | `Get-OrEnsurePca2023Snapshot -Force` against `<WorkRoot>/extracted/` |
+| 2 | Render snapshot to console via `Show-Pca2023ReadinessSnapshot` |
+| 3 | Emit `<WorkRoot>/pca2023/pca2023_readiness.json` (machine-readable) |
+| 4 | Emit `<WorkRoot>/pca2023/pca2023_readiness.md` (human-readable detail) |
+| Output | JSON + Markdown under `<WorkRoot>/pca2023/`. Snapshot is also cached in `$Script:Pca2023Snapshot` for P13 |
 
 ### P13 FinalReport (Report)
 
@@ -302,20 +336,29 @@ Then, if `EnableWinREUpdate`:
 | 1 | `Show-PhaseSummary` (timing + status per phase) |
 | 2 | Output ISO SHA-256 + size + path |
 | 3 | Log / diag directory hints |
+| 4 | Inline PCA2023 readiness summary (Compact form) + cross-link to P12's JSON/MD detail files |
 
 ## B.6 Action → Phase Mapping
 
 | `-Action`            | Phases run                                                              |
 |----------------------|-------------------------------------------------------------------------|
 | `Prepare`            | P01, P02, P03, P04, P05, P06                                        |
-| `Build`              | P07, P08, P09                                                           |
-| `Verify`             | P11, P13                                                                |
-| `PrepareBuildVerify` | P01, P02, P03, P04, P05, P06, P07, P08, P09, P11, P13               |
+| `Build`              | P07, P08, P09, P10                                                      |
+| `Verify`             | P11, P12, P13                                                           |
+| `PrepareBuildVerify` | P01, P02, P03, P04, P05, P06, P07, P08, P09, P10, P11, P12, P13         |
 | `All`                | Same as `PrepareBuildVerify` plus BootTest                              |
 | `BootTest`           | Out-of-band: Hyper-V Gen2 VM smoke test                                 |
 | `Cleanup`            | (no phases) Remove `<WorkRoot>` after safety check                      |
 | `ListPhases`         | (no phases) Print the registry and exit                                 |
-| `GenerateManifest`   | P01, P02, P03 (Catalog scrape + writeback only)                       |
+| `GenerateManifest`   | P01, P02, P03 (Catalog scrape + writeback only)                         |
+
+**Note on `Build` mapping**: P10 is INCLUDED in the `Build` Action
+mapping AND in `standardFull` even though it is default-skip.
+This is intentional - see B.20 for the design rationale. The
+skip gate lives inside the phase function, not at the Action
+layer, so operators running `-PhaseIds P10` still get the
+explicit "skipped because no opt-in flag" log line rather than
+an obscure "P10 not part of Build".
 
 ## B.7 ISO Filename Detection Patterns
 
@@ -359,16 +402,21 @@ Enabled by `-SyntheticTestMode`. Used exclusively by Stage 3 CI:
 | P03 and P06 are both skipped | No real patches in play; Catalog scrape and wsusscn2 scan are unnecessary |
 | CI MUST NOT upload the synthetic ISO | Belt-and-braces guard against accidental Microsoft-content leaks |
 
-## B.10 Config Schema v2.0 (r03+)
+## B.10 Config Schema v2.1 (r05.0+)
 
 The `Config/<OsKey>.json` schema is a 3-tier hierarchy. Each field
 group carries a verification marker (`_VerifiedDate` / `_VerifiedBy`
 for value-only groups, or `LastVerifiedDate` / `LastVerifiedBy` for
 groups that also need to record their Patch Tuesday baseline).
 
+**Schema 2.1 introduced in r05.0**: adds the top-level `Pca2023`
+block (between `PatchBaseline` and `AutoRefreshPolicy`) that
+captures per-OS Secure Boot conversion defaults consumed by
+P10 / P12.
+
 ```jsonc
 {
-  "Schema":  "2.0",
+  "Schema":  "2.1",
   "OsKey":   "Server2025",
 
   // (A) OS-wide constants: unchanging once verified
@@ -408,45 +456,39 @@ groups that also need to record their Patch Tuesday baseline).
     "WsusScnCab": { "SourceUrl": "...", "LocalCachePath": "", ... }
   },
 
-  // (C) Auto-refresh policy
-  "AutoRefreshPolicy": {
-    "Mode":                    "OnNewPatchTuesday",
-    "WritebackToConfig":       true,
-    "FallbackOnScrapeFailure": "UseBaseline",
-    "ScrapeRetries":           3
+  // (B') PCA2023 / Secure Boot conversion defaults (Schema 2.1+)
+  "Pca2023": {
+    "RequiredByDefault":          true,   // Server 2016/2019/2022 = true; Server 2025 = false
+    "RequiredUpdateLevelKb":      "2024-4B (April 2024 LCU) or later",
+    "RequiredUpdateLevelMinDate": "2024-04-09",
+    "NotesSource":                [<Microsoft documentation URLs>],
+    "Notes":                      "<plain-text operational note>"
   },
 
+  // (C) Auto-refresh policy
+  "AutoRefreshPolicy": { ... },
+
   // (D) Per-language: ISO source and language-specific patches
-  "LanguageSpecific": {
-    "en-us": {
-      "DisplayName": "English (United States)",
-      "Iso": {
-        "FileName":      "...iso",
-        "Url":           "https://...",
-        "Sha256":        "",
-        "SizeBytes":     0,
-        "ReleaseDate":   "",
-        "_VerifiedDate": "",
-        "_VerifiedBy":   ""
-      },
-      "VolumeLabelPrefix": "WS2025EN",
-      "LanguageSpecificPatches": {
-        "PatchTuesdayOfBaseline": "",
-        "LastVerifiedDate":       "",
-        "LastVerifiedBy":         "",
-        "LanguagePacks":          [],
-        "LxpUpdates":             [],
-        "DotNetLanguagePacks":    []
-      }
-    },
-    "ja-jp": { ... }
-  }
+  "LanguageSpecific": { ... }
 }
 ```
 
+**Per-OS Pca2023 values:**
+
+| OsKey | RequiredByDefault | MinDate | KbLabel |
+|---|:---:|:---:|---|
+| Server2016 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
+| Server2019 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
+| Server2022 | `true`  | `2025-02-11` | "2025-2B (February 2025 LCU, 20348.2227 baseline) or later" |
+| Server2025 | `false` | `""`         | "n/a (firmware-provided 2023 certs)" |
+
+Server 2022 has a later baseline date because the EFI_EX staging
+directories appeared in cumulative updates only from the 2025-2B
+LCU forward, per Lenovo lp2353.pdf.
+
 Adding a new language is a one-node addition under `LanguageSpecific`
 plus an entry in `Common.SupportedLanguages`. No changes are required
-in `PatchBaseline` (its `NeutralPatches` are shared across languages).
+in `PatchBaseline` or `Pca2023` (both are language-neutral).
 
 ## B.11 Field Cadence and RefreshAllBaselines decision matrix (r03+)
 
@@ -710,6 +752,129 @@ function output rely on this REPL contract. If the contract
 ever has to change (e.g. JSON envelope schema bump), the change
 must be co-ordinated between this section, the dispatcher branch
 in the script, and `ps_invoke.py`.
+
+## B.18 PCA2023 boot manager support (r05.0+)
+
+This subsystem adds two phases (P10, P12) that address the 2026-06
+expiry of the Microsoft "Windows Production PCA 2011" Secure Boot
+certificate. Without intervention, ISOs built before 2026-06 will
+boot only on firmware that has the 2011 cert in db; firmware that
+has been updated to revoke 2011 (BlackLotus CVE-2023-24932
+mitigation rollout) will refuse them.
+
+**Operational model.** P12 ALWAYS runs in the Verify group:
+operators always see whether their ISO is PCA2023-ready, even
+when they are not converting it. P10 runs ONLY when
+`-EnablePca2023BootManager` is set, and is silent-skipped for
+Server 2025 unless `-ForcePca2023OnServer2025` is also set
+(see D.22 for the rationale).
+
+**Three-tier diagnostic.** P12 produces a snapshot composed of
+three independent signals:
+
+| Tier | Source | What it tells us |
+|---|---|---|
+| **1** | `Test-Path` on `boot.wim:\Windows\Boot\EFI_EX\bootmgfw_EX.efi` etc. | The 2024-4B staging directories are physically present in the boot environment WIM |
+| **2** | `Get-WindowsPackage` on the mounted install.wim/boot.wim | Specific KB integration level - is the source media itself 2024-4B or later? |
+| **3** | `Get-AuthenticodeSignature` chain walk on `efi\boot\bootx64.efi` | What the firmware will actually see - is the boot manager signed via 'Windows UEFI CA 2023' or still 'Windows Production PCA 2011'? |
+
+A `Health` 4-value classification (`Healthy` / `Warning` /
+`Critical` / `Unknown`) combines all three signals. The
+classification logic is in `Get-Pca2023ReadinessSnapshot`.
+
+**Outputs.** P12 produces two files under
+`<WorkRoot>\pca2023\`:
+
+- `pca2023_readiness.json` — machine-readable snapshot for
+  downstream tools / dashboards
+- `pca2023_readiness.md` — human-readable detail page with
+  Reasons[] array unrolled into bullets and a code-block of the
+  full inventory
+
+P13 FinalReport additionally renders a Compact summary inline so
+operators do not have to chase a second file (3-c output mode).
+
+**Per-OS readiness defaults.** Carried in
+`Config/<OsKey>.json#/Pca2023`:
+
+```jsonc
+"Pca2023": {
+  "RequiredByDefault": true,                              // Server 2016/2019/2022
+  "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
+  "RequiredUpdateLevelMinDate": "2024-04-09",
+  "NotesSource": [<URLs>],
+  "Notes": "<plain text>"
+}
+```
+
+For Server 2025 specifically: `RequiredByDefault = false`,
+`RequiredUpdateLevelKb = "n/a (firmware-provided 2023 certs)"`.
+
+## B.19 `-Pca2023OnlyMode` standalone inspection (r05.0+)
+
+A side-channel entry point that takes an existing ISO file
+(`-IsoPath <path>`) and runs ONLY P12 VerifyPca2023Readiness
+against it. Skips all the patching machinery:
+
+- No Microsoft Update Catalog scrape
+- No `wsusscn2.cab` download
+- No DISM patch integration
+- No ISO re-assembly
+
+Use cases:
+
+1. Forensic inspection of an ISO produced by a non-`Update-WindowsServerIso.ps1` pipeline
+2. CI smoke-test "would this published ISO still boot on PCA2023-only firmware?"
+3. Auditing a media bundle before an air-gapped deployment
+
+The mode short-circuits `Main()` after parameter validation; it
+does not write to `<WorkRoot>` (mounts the ISO into a temp
+directory under `$env:TEMP` and unmounts on exit). Output JSON
+goes to `$env:TEMP\updwsi_pca2023only_<pid>\pca2023_readiness.json`.
+
+## B.20 Build-group optional phase exception (r05.0+)
+
+The Build group historically contains ONLY always-on phases:
+P07 PatchInstallWim, P08 PatchBootWim, P09 AssembleIso. Each of
+these is essential to producing a valid ISO; running `-Action
+Build` without any of them produces undefined behaviour.
+
+P10 ConvertPca2023BootManager is the **first** Build-group phase
+that is opt-in. The reasoning is:
+
+1. **P10 mutates an already-finished artifact.** P09 has already
+   produced a usable ISO at this point. P10's role is to upgrade
+   that ISO's boot manager signer chain, which is genuinely
+   optional for operators whose target firmware still trusts
+   PCA2011.
+
+2. **Operator choice belongs at the CLI surface, not at runtime.**
+   Hiding P10 behind a runtime "do you want to convert?" prompt
+   would break the script's non-interactive contract (see B.0,
+   "Script Identity"). A flag at script invocation time is the
+   only acceptable opt-in mechanism.
+
+3. **Server 2025 introduces a secondary opt-in layer.** Even with
+   `-EnablePca2023BootManager`, Server 2025 specifically also
+   requires `-ForcePca2023OnServer2025`. This layered gating is
+   only possible because P10 has explicit pre-flight gates inside
+   the phase function rather than relying on the Action-mapping
+   layer for inclusion/exclusion.
+
+**Consequence for `Resolve-PhasesForAction`.** P10 IS in the
+`Build` Action's phase list AND in `standardFull`. The default
+skip behaviour lives INSIDE the phase function, not in the
+mapping. This is intentional: a future operator running
+`-PhaseIds P10` should still trigger the skip gate, getting a
+clear log line ("Skipped: -EnablePca2023BootManager not
+specified") rather than an obscure "P10 was excluded from the
+Action mapping".
+
+**Consequence for SPEC.md B.5 phase contracts.** P10's "Always
+runs?" column in the B.5 table is `Conditional`, not the usual
+`Yes`. P10 is the only Build-group phase with `Conditional`
+status; future Build additions should preserve this distinction
+or change it deliberately.
 
 ## B.14b PatchBaseline schema fields (referenced by B.10)
 
@@ -1183,6 +1348,101 @@ phase already loop over multiple DotNet entries (SPEC §B.14), and
 treats a "not applicable" return from DISM as benign — so if the
 install.wim contains only one of the runtimes, the other entry's
 DISM call no-ops safely.
+
+
+### D.22 Secure Boot baseline considerations (r05.0+)
+
+The PCA2023 boot manager support (P10 / P12) integrates lessons
+learned from `microsoft/secureboot_objects`'s upstream
+`Make2023BootableMedia.ps1` and from the
+`Deploy-Drivers-For-WindowsServer` reference repository's Secure
+Boot baseline machinery. These notes capture the non-obvious
+design constraints that shape the implementation.
+
+**Why we re-implement `Copy-2023BootBins` rather than bundle MS's
+script verbatim.** Microsoft's `Make2023BootableMedia.ps1` (Version
+1.4, 2026-03-13) is a 1,141-line script with several non-portable
+patterns that conflict with this project's quality gates:
+
+- It uses `$global:WIM_Mount_Path` / `$global:WIM_File_Path` style
+  globals that leak across phases. We adopt a Context-bag pattern
+  via `$Script:Pca2023Snapshot` instead.
+- It does NOT declare `#Requires -RunAsAdministrator`. Our
+  re-implementation relies on `Assert-WorkspacePreflight` having
+  already validated elevation before P10 dispatch.
+- Verbose `[Parameter(Mandatory=$true)]` shorthand. Our project
+  standard is the bare `[Parameter(Mandatory)]` form.
+- A validator-bypass bug in `-OutputPath`: MS's `[ValidateScript]`
+  regex `[<>:"|?*]` rejects every absolute Windows path because
+  `:` follows the drive letter. We avoid invoking it directly; the
+  `-Pca2023ScriptPath` escape hatch sets `-ISOPath` differently.
+- `Write-Host` everywhere instead of structured logging. Our wrapper
+  routes through `Write-Step` so the standard transcript / log
+  collation works uniformly.
+- `exit` statements rather than `throw`. Our phase wrappers cannot
+  rely on `exit` because they need to leave DISM mounts cleanly
+  unwound; the re-implementation uses `throw` with `try/finally`.
+
+The functional logic (file copies between `EFI_EX` / `FONTS_EX` /
+`DVD_EX` and the corresponding boot manager target paths) is
+preserved verbatim. See `Convert-WimBootToPca2023Signed` in
+the source for the side-by-side mapping.
+
+**Why we read SYSTEM hive offline rather than query live UEFI
+variables.** The reference Deploy-Drivers script's
+`Get-SecureBootCertificateInventory` queries
+`Get-SecureBootUEFI db / KEK / dbx` and reads
+`HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing` of
+the live host. ISO Factory has neither: there is no UEFI
+environment on a Linux/macOS dev host, and `HKLM:` reflects the
+build host, not the produced ISO. Our equivalent reads the
+**WIM-internal** `SYSTEM` hive via `reg.exe load HKLM\TempHive
+<install_wim>\Windows\System32\config\SYSTEM`. This is the only
+way to inspect what the ISO would expose at first boot.
+
+**Why locale-independence matters even for offline analysis.** The
+Deploy-Drivers Secure Boot machinery had a hard-won lesson: it
+originally used `schtasks.exe /Query /TN ... /FO CSV` to detect
+the `Secure-Boot-Update` scheduled task state, but the CSV columns
+are localized (Japanese: "ステータス" instead of "Status"), so
+the parser broke on ja-JP Windows. The fix was to switch to
+`Get-ScheduledTask`, which returns CIM objects with English
+property names. While our ISO Factory does not parse scheduled
+tasks, the broader lesson applies: **all SecureBoot servicing
+values we read are checked as English tokens** (`'Updated'`,
+`'NotStarted'`, `'Pending'`) because those registry values are
+locale-independent by Microsoft design. Do NOT introduce
+locale-dependent parsing into the SecureBoot helpers under any
+circumstances.
+
+**Why Server 2025 is default-skip for P10.** Per Microsoft's
+techcommunity.microsoft.com guidance (2025), certified Server
+2025 server platforms include the 2023 certificates in firmware
+out of the box. Running `Copy-2023BootBins` against such media
+is documented as not required and not officially supported (KB
+5053484's supported-OS list does not include Server 2025). P10
+gates this via `$Script:OsProfile.OsKey -eq 'Server2025'` and
+requires `-ForcePca2023OnServer2025` to override; this matches
+the Config schema's `Pca2023.RequiredByDefault = false` for
+Server 2025.
+
+**Why P12 reports Health = 'Critical' when LCU < 2024-04-09.**
+Microsoft's `Make2023BootableMedia.ps1` halts with the message
+"Make sure all required updates (2024-4B or later) have been
+applied" if the source media's boot.wim does not include the
+EFI_EX staging tree. We pre-flight this same condition: if
+`Get-LcuVersionFromInstallWim` reports `MeetsPca2023Prereq =
+$false`, we surface Health = `'Critical'` and refuse to run P10
+(rather than letting the conversion produce a half-written ISO
+that fails verification). The operator can correct the situation
+by running `-Action RefreshAllBaselines` or by passing a newer
+`-PatchMonth` and rebuilding.
+
+**Reference URLs:**
+
+- Microsoft KB / Support: [Updating Windows bootable media to use the PCA2023-signed boot manager](https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f) (the official end-to-end procedure documentation)
+- GitHub: [microsoft/secureboot_objects Make2023BootableMedia.ps1](https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1) (Version 1.4 was the snapshot analyzed; future versions may diverge)
+- TechCommunity: [Windows Server Secure Boot playbook for certificates expiring in 2026](https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789) (Server 2025 firmware status)
 
 ---
 

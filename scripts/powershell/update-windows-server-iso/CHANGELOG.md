@@ -27,6 +27,197 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.25-r05.0] - 2026-05-25
+
+Major version bump for two distinct (but coordinated) changes:
+**(1)** complete integer renumbering of all phase IDs (removing the
+historical 0.5-step inserts), **(2)** Secure Boot / PCA2023 boot
+manager support per Microsoft KB 5053484 (`Make2023BootableMedia.ps1`).
+Both are breaking changes for operators who reference Phase IDs by
+name or who have wired specific Phase-IDs into their own runbooks.
+
+### Breaking changes
+
+- **Phase ID renumbering** (no aliases, no deprecation warnings).
+  Old IDs (`P02.5`, `P04.5`, `P03`, `P04`, `P05`, `P06`, `P07`, `P08`,
+  `P09`) are now invalid - the dispatcher will reject `-PhaseIds
+  'P02.5'` style invocations. The new mapping:
+
+  | Old ID | New ID | Phase name |
+  |:---:|:---:|---|
+  | P01    | **P01** | Initialize (unchanged) |
+  | P02    | **P02** | ResolveInputs (unchanged) |
+  | P02.5  | **P03** | RefreshPatchBaseline |
+  | P03    | **P04** | FetchAssets |
+  | P04    | **P05** | ExpandIso |
+  | P04.5  | **P06** | ValidatePatchSet |
+  | P05    | **P07** | PatchInstallWim |
+  | P06    | **P08** | PatchBootWim |
+  | P07    | **P09** | AssembleIso |
+  | (new)  | **P10** | ConvertPca2023BootManager (Build, default-skip) |
+  | P08    | **P11** | StaticVerify |
+  | (new)  | **P12** | VerifyPca2023Readiness (Verify, always-runs) |
+  | P09    | **P13** | FinalReport |
+  | A01    | **A01** | RefreshAllBaselines (unchanged) |
+  | A02    | **A02** | DumpFieldClassification (unchanged) |
+
+- **Action mapping internal updates** (Action names unchanged):
+  - `Prepare` -> `P01, P02, P03, P04, P05, P06`
+  - `Build`   -> `P07, P08, P09, P10`
+  - `Verify`  -> `P11, P12, P13`
+  - `All` / `PrepareBuildVerify` -> all phases above
+  - `GenerateManifest` -> `P01, P02, P03`
+
+- **Function name renames** (script-internal; affects any caller
+  that referenced these by reflection or `Get-Command`):
+  - `Invoke-SetupPhase02_5_RefreshPatchBaseline` -> `Invoke-SetupPhase03_RefreshPatchBaseline`
+  - `Invoke-FetchPhase03_FetchAssets` -> `Invoke-FetchPhase04_FetchAssets`
+  - `Invoke-PlanPhase04_ExpandIso` -> `Invoke-PlanPhase05_ExpandIso`
+  - `Invoke-PlanPhase04_5_ValidatePatchSet` -> `Invoke-PlanPhase06_ValidatePatchSet`
+  - `Invoke-BuildPhase05_PatchInstallWim` -> `Invoke-BuildPhase07_PatchInstallWim`
+  - `Invoke-BuildPhase06_PatchBootWim` -> `Invoke-BuildPhase08_PatchBootWim`
+  - `Invoke-BuildPhase07_AssembleIso` -> `Invoke-BuildPhase09_AssembleIso`
+  - `Invoke-VerifyPhase08_StaticVerify` -> `Invoke-VerifyPhase11_StaticVerify`
+  - `Invoke-ReportPhase09_FinalReport` -> `Invoke-ReportPhase13_FinalReport`
+
+- **Config schema bump 2.0 -> 2.1**. All four `Config/<OsKey>.json`
+  files gain a new top-level `Pca2023` block. Existing readers that
+  hard-code the field set will need a one-line tolerance update.
+
+- **CSV filename change**: P11 StaticVerify now writes
+  `logs/P11_verification.csv` instead of the legacy
+  `logs/P08_verification.csv`.
+
+### Added
+
+- **P10 ConvertPca2023BootManager phase** (Build group, optional).
+  Rewrites the output ISO's boot manager to be signed via the
+  "Windows UEFI CA 2023" certificate chain instead of the legacy
+  "Windows Production PCA 2011" chain. Required for booting under
+  Secure Boot firmware that has revoked PCA2011 trust (post 2026-06
+  expiry, BlackLotus CVE-2023-24932 mitigation rollout).
+
+  - **Internal implementation**: `Convert-WimBootToPca2023Signed`
+    is a PSA-clean re-implementation of Microsoft's
+    `Make2023BootableMedia.ps1#Copy-2023BootBins` logic from
+    `microsoft/secureboot_objects` (Version 1.4, 2026-03-13).
+    Differences from upstream: Context-bag state instead of
+    `$global:WIM_*`, structured logging via `Write-Step`, `throw`
+    instead of `exit`, `[Parameter(Mandatory)]` shorthand,
+    Verb-Noun PSA compliance.
+
+  - **External script option**: `-Pca2023ScriptPath <path>` invokes
+    a user-supplied `Make2023BootableMedia.ps1` instead of the
+    internal helper, for operators who need to track Microsoft's
+    upstream script version directly.
+
+  - **Multi-layered opt-in**: requires `-EnablePca2023BootManager`
+    at minimum; Server 2025 additionally requires
+    `-ForcePca2023OnServer2025` because certified Server 2025
+    server platforms include the 2023 certificates in firmware
+    (KB 5053484 does not list Server 2025 in its supported-OS
+    set).
+
+  - **Pre-flight gates**:
+    - silent skip if `-EnablePca2023BootManager` not set
+    - silent skip if OsKey=Server2025 without `-ForcePca2023OnServer2025`
+    - silent skip if pre-flight readiness Health = 'Healthy' (already PCA2023)
+    - throw if Health = 'Critical' (source media < 2024-04-09 LCU)
+
+- **P12 VerifyPca2023Readiness phase** (Verify group, always-runs).
+  Read-only inspection of the produced ISO; emits JSON + Markdown
+  reports under `<WorkRoot>/pca2023/`. Three-tier diagnostic:
+  - Tier 1: File-existence checks on `boot.wim:\Windows\Boot\EFI_EX\`
+    staging directories (the 2024-4B presence signal)
+  - Tier 2: `Get-WindowsPackage` LCU month detection on install.wim
+    and boot.wim (the 2024-4B integration level)
+  - Tier 3: `Get-AuthenticodeSignature` chain walk on
+    `efi\boot\bootx64.efi` (the actual firmware-visible signer
+    identity)
+
+- **9 new SecureBoot helper functions** in the script:
+  - `Get-LcuVersionFromInstallWim` (DISM `Get-WindowsPackage` wrapper)
+  - `Get-WimSystemHiveValue` (offline SYSTEM hive read via `reg.exe load`)
+  - `Test-Pca2023AuthenticodeChain` (X509Chain walk for cert classification)
+  - `Get-IsoBootCertReadiness` (per-ISO inventory assembler)
+  - `Get-Pca2023ReadinessSnapshot` (top-level snapshot with Health 4-value)
+  - `Show-Pca2023ReadinessSnapshot` (`-Compact` + full console renderer)
+  - `Format-Pca2023ReadinessForReport` (StringBuilder text formatter)
+  - `Get-OrEnsurePca2023Snapshot` (idempotent cache accessor)
+  - `Convert-WimBootToPca2023Signed` (Microsoft `Copy-2023BootBins` reimpl)
+
+- **`-Pca2023OnlyMode` short-circuit**: takes an existing ISO via
+  `-IsoPath` and runs ONLY P12 against it. No download, no patching,
+  no ISO re-assembly. For forensic inspection of pre-built ISOs.
+  Output JSON goes to `$env:TEMP\updwsi_pca2023only_<pid>\`.
+
+- **3 new T3 smoke tests** in `tests/powershell_harness.py` covering
+  the SecureBoot helpers' error paths
+  (`Test-Pca2023AuthenticodeChain` missing-file,
+  `Get-LcuVersionFromInstallWim` missing-mount,
+  `Format-Pca2023ReadinessForReport` null-snapshot safety).
+
+- **SPEC.md sections**:
+  - B.18 (PCA2023 boot manager support)
+  - B.19 (`-Pca2023OnlyMode` standalone inspection)
+  - B.20 (Build-group optional phase exception)
+  - D.22 (Secure Boot baseline considerations / lessons learned)
+
+### Changed
+
+- **All 9 phase function definitions renumbered** to integer Phase
+  IDs (the renumbering side of this major bump). Function bodies
+  unchanged; only the names + the `Start-DebugTrace -PhaseId 'PNN'`
+  arguments + the `$Script:PhaseRegistry` rows update.
+
+- **381 Phase ID literals renamed** across the script body (215),
+  CHANGELOG/README/SPEC/TESTING (163), and tests/ (3). All `'P02.5'`,
+  `'P04.5'`, `'P03'`...`'P09'` quote-wrapped string literals are
+  rewritten to their new integer IDs. Markdown body text mentions
+  of `P02.5`, `P04.5`, `P03`...`P09` are also rewritten.
+
+- **`$Script:PhaseRegistry`** gains P10 (`ConvertPca2023BootManager`,
+  Build) and P12 (`VerifyPca2023Readiness`, Verify) entries.
+
+- **`Resolve-PhasesForAction`** internal mapping updated to reflect
+  new integer phase IDs and added P10 / P12 placement (Build / Verify
+  groups respectively).
+
+- **P13 FinalReport** now includes a Compact-form PCA2023 readiness
+  summary inline (after Log locations, before the `.markers/P13.ok`
+  marker write). The detail JSON + Markdown remain in
+  `<WorkRoot>/pca2023/` for machine consumers.
+
+- **Per-OS PCA2023 defaults** baked into
+  `Config/<OsKey>.json#/Pca2023`:
+  - Server2016/2019: `RequiredByDefault=true`, MinDate=`2024-04-09`
+  - Server2022: `RequiredByDefault=true`, MinDate=`2025-02-11`
+    (per Lenovo lp2353.pdf 20348.2227 baseline requirement)
+  - Server2025: `RequiredByDefault=false` (firmware-provided 2023 certs)
+
+### Internal
+
+- Stage A / Stage B internal work organisation:
+  - Stage A = pure phase ID renumbering. The script was renamed in
+    bulk and ran clean (psa.py 0/0/0, PSScriptAnalyzer 0, T2
+    13/13 PASS, T3 7/7 PASS) before any new code was written.
+  - Stage B = SecureBoot feature implementation on top of the
+    renumbered Stage A baseline.
+  - The final r05.0 release ZIP is a single artifact even though
+    the internal work was two-staged.
+
+- Custom Python tool `stage_a_renumber_v2.py` for the bulk Phase ID
+  rewrite. Uses an opaque-token two-pass strategy to safely handle
+  chained renames (where old `'P03'` -> new `'P04'` and old `'P04'`
+  -> new `'P05'` would otherwise collide). The token form is
+  `XOPAQUEXX<two-digit>XX` which by construction never matches a
+  `\bP\d\d\b` regex.
+
+- `read_bytes` / `write_bytes` are used throughout the rewrite tool
+  to preserve CRLF line endings on `.ps1` files (Python's `read_text`
+  / `write_text` normalise CR/LF, which would have violated the
+  `.gitattributes` `*.ps1 text eol=crlf` policy).
+
 ## [update-wsi-2026.05.25-r04.4] - 2026-05-25
 
 ### Added - Self-verification tool suite (`tests/`)

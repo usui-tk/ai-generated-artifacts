@@ -1,5 +1,5 @@
 {
-  "Schema": "2.0",
+  "Schema": "2.1",
   "OsKey": "Server2016",
   "Common": {
     "Build": 14393,
@@ -39,6 +39,16 @@
       "LastDownloadedSha256": "",
       "LastDownloadedSizeBytes": 0
     }
+  },
+  "Pca2023": {
+    "RequiredByDefault": true,
+    "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
+    "RequiredUpdateLevelMinDate": "2024-04-09",
+    "NotesSource": [
+      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
+      "https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1"
+    ],
+    "Notes": "Server 2016 GA media (Build 14393) is known to fail to boot on modern hardware with PCA2023-only Secure Boot firmware. Applying the LCU pipeline through P09 AssembleIso + P10 ConvertPca2023BootManager is the documented mitigation."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",

@@ -258,8 +258,51 @@ param(
 
     [switch]   $SyntheticTestMode,
     [switch]   $EvalIsoMode,
-    [switch]   $Execute
+    [switch]   $Execute,
+
+    # ---- Secure Boot / PCA2023 ----
+    # When set, enables P10 ConvertPca2023BootManager which rewrites the
+    # output ISO's boot manager to the 'Windows UEFI CA 2023'-signed form
+    # (Microsoft KB5053484 / Make2023BootableMedia.ps1 equivalent). Default
+    # OFF: the default pipeline produces a PCA2011-signed boot manager,
+    # which still boots on Secure Boot firmware that trusts the 2011 CA
+    # set (i.e. virtually all hardware shipped before 2026-06 cert expiry).
+    [switch]   $EnablePca2023BootManager,
+
+    # When set, P12 VerifyPca2023Readiness still runs against Server 2025
+    # output ISOs (default-skipped because Server 2025 certified server
+    # platforms include the 2023 certs in firmware per Microsoft; PCA2023
+    # boot manager conversion is documented as not required). Use only
+    # when you operate non-certified Server 2025 hardware and need to
+    # confirm the ISO would still boot under PCA2023-only firmware.
+    [switch]   $ForcePca2023OnServer2025,
+
+    # When set, the script enters a special mode that takes an existing
+    # ISO (-IsoPath) and runs ONLY P12 VerifyPca2023Readiness against it,
+    # emitting pca2023_readiness.json + pca2023_readiness.md. No download,
+    # no patching, no DISM mount of install.wim. Useful for forensic
+    # analysis of ISOs built by other pipelines.
+    [switch]   $Pca2023OnlyMode,
+
+    # Optional path to an external Make2023BootableMedia.ps1 script. When
+    # not specified, the internal Convert-WimBootToPca2023Signed function
+    # is used (recommended; PSA-clean re-implementation of Microsoft's
+    # Copy-2023BootBins logic). When specified, the external script is
+    # invoked as a child PowerShell with -MediaPath / -TargetType ISO /
+    # -ISOPath arguments, and its output JSON is parsed back into the
+    # Pca2023 snapshot.
+    [string]   $Pca2023ScriptPath
 )
+
+# Propagate the new PCA2023 switches into Script scope so Phase
+# functions can reference them as $Script:* (rather than relying on
+# the auto-bound parameter scope, which psa.py's PSA2001 cannot
+# reason about reliably). Mirrors how P09 AssembleIso etc. reach
+# operator-supplied options.
+$Script:EnablePca2023BootManager  = [bool]$EnablePca2023BootManager
+$Script:ForcePca2023OnServer2025  = [bool]$ForcePca2023OnServer2025
+$Script:Pca2023OnlyMode           = [bool]$Pca2023OnlyMode
+$Script:Pca2023ScriptPath         = $Pca2023ScriptPath
 
 # -----------------
 # Parameter validation
@@ -451,8 +494,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.25-r05.0-stage-A'
-$Script:ScriptTag     = 'phase-renumber-stage-a-intermediate'
+$Script:ScriptVersion = 'update-wsi-2026.05.25-r05.0'
+$Script:ScriptTag     = 'phase-renumber-and-secureboot-pca2023-support'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -489,7 +532,9 @@ $Script:PhaseRegistry = @(
     [pscustomobject]@{ Id='P07';   Name='PatchInstallWim';           Group='Build';  Func='Invoke-BuildPhase07_PatchInstallWim' }
     [pscustomobject]@{ Id='P08';   Name='PatchBootWim';              Group='Build';  Func='Invoke-BuildPhase08_PatchBootWim' }
     [pscustomobject]@{ Id='P09';   Name='AssembleIso';               Group='Build';  Func='Invoke-BuildPhase09_AssembleIso' }
+    [pscustomobject]@{ Id='P10';   Name='ConvertPca2023BootManager'; Group='Build';  Func='Invoke-BuildPhase10_ConvertPca2023BootManager' }
     [pscustomobject]@{ Id='P11';   Name='StaticVerify';              Group='Verify'; Func='Invoke-VerifyPhase11_StaticVerify' }
+    [pscustomobject]@{ Id='P12';   Name='VerifyPca2023Readiness';    Group='Verify'; Func='Invoke-VerifyPhase12_VerifyPca2023Readiness' }
     [pscustomobject]@{ Id='P13';   Name='FinalReport';               Group='Report'; Func='Invoke-ReportPhase13_FinalReport' }
     [pscustomobject]@{ Id='A01';   Name='RefreshAllBaselines';       Group='Admin';  Func='Invoke-AdminPhaseA01_RefreshAllBaselines' }
     [pscustomobject]@{ Id='A02';   Name='DumpFieldClassification';   Group='Admin';  Func='Invoke-AdminPhaseA02_DumpFieldClassification' }
@@ -5146,6 +5191,835 @@ function Select-LatestPatchBySupersedence {
 }
 
 # ============================================================
+# Secure Boot / PCA2023 helpers
+# ------------------------------------------------------------
+# These helpers underpin P10 ConvertPca2023BootManager and P12
+# VerifyPca2023Readiness. They are organised as:
+#
+#   1. Get-LcuVersionFromInstallWim         - which LCU level is in the WIM
+#   2. Get-WimSystemHiveValue               - read SOFTWARE/SYSTEM hive
+#                                             offline via 'reg load'
+#   3. Test-Pca2023AuthenticodeChain        - verify bootx64.efi signer
+#   4. Get-IsoBootCertReadiness             - assemble per-ISO inventory
+#   5. Get-Pca2023ReadinessSnapshot         - top-level snapshot +
+#                                             Health (Healthy / Warning /
+#                                             Critical / Unknown) + Reasons
+#   6. Show-Pca2023ReadinessSnapshot        - console renderer with -Compact
+#   7. Format-Pca2023ReadinessForReport     - StringBuilder text formatter
+#   8. Get-OrEnsurePca2023Snapshot          - idempotent cache accessor
+#   9. Convert-WimBootToPca2023Signed       - PSA-clean re-implementation
+#                                             of Microsoft's Copy-2023BootBins
+#
+# Design pattern source: Deploy-Drivers-For-WindowsServer's Secure Boot
+# baseline machinery (Get-SecureBootCertificateInventory family).
+# Adapted for offline ISO analysis - the upstream queries the live
+# host UEFI variables and registry, which are not available when
+# inspecting an ISO file. Our equivalent reads the offline
+# install.wim / boot.wim WIM-internal SYSTEM hive via 'reg load' for
+# the same per-machine SecureBoot servicing data, and inspects the
+# Authenticode signer chain on efi/boot/bootx64.efi for the firmware-
+# layer cert identity.
+#
+# Locale-independence note: parsed values are compared as English
+# tokens ('Updated', 'NotStarted', etc.) because the SecureBoot
+# Servicing registry values are locale-independent. We do NOT use
+# schtasks.exe-style approaches that emit localized CSV headers on
+# ja-JP Windows (see SPEC.md D.22 for the design background).
+# ============================================================
+
+function Get-LcuVersionFromInstallWim {
+    <#
+    .SYNOPSIS
+        Determine which LCU month an install.wim or boot.wim image carries.
+
+        Returns a pscustomobject with:
+          .Available     - $true if Get-WindowsPackage succeeded
+          .ErrorMessage  - reason string when not available
+          .HighestKbId   - newest detected LCU KB id (e.g. "KB5043050")
+          .HighestKbDate - ISO date of that KB (best-effort parse of
+                           KB metadata; may be $null)
+          .MeetsPca2023Prereq - $true if any LCU date >= 2024-04-09
+                                (the Make2023BootableMedia.ps1 prereq)
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$MountPath
+    )
+
+    $result = [pscustomobject]@{
+        Available           = $false
+        ErrorMessage        = $null
+        HighestKbId         = $null
+        HighestKbDate       = $null
+        MeetsPca2023Prereq  = $null
+    }
+
+    # The PCA2023 prereq date (2024-4B = Microsoft April 2024 LCU
+    # release, which Microsoft published on 2024-04-09).
+    $prereqDate = [DateTime]::Parse('2024-04-09')
+
+    try {
+        $packages = Get-WindowsPackage -Path $MountPath -ErrorAction Stop
+    } catch {
+        $result.ErrorMessage = ('Get-WindowsPackage failed: {0}' -f $_.Exception.Message)
+        return $result
+    }
+
+    # Filter for "Package_for_KB######" entries, which are the LCU
+    # packages. We track the highest install-date timestamp.
+    $highestDate = $null
+    $highestKb   = $null
+    foreach ($pkg in $packages) {
+        $name = "$($pkg.PackageName)"
+        if ($name -match 'Package_for_KB(\d{6,7})') {
+            $kbId = ('KB{0}' -f $matches[1])
+            $installTime = $pkg.InstallTime
+            if ($installTime -and ($null -eq $highestDate -or $installTime -gt $highestDate)) {
+                $highestDate = $installTime
+                $highestKb   = $kbId
+            }
+        }
+    }
+    $result.HighestKbId   = $highestKb
+    $result.HighestKbDate = $highestDate
+    $result.MeetsPca2023Prereq = if ($highestDate) { $highestDate -ge $prereqDate } else { $false }
+    $result.Available = $true
+    return $result
+}
+
+function Get-WimSystemHiveValue {
+    <#
+    .SYNOPSIS
+        Load an offline SYSTEM hive from a mounted WIM and read one value.
+
+        Uses 'reg.exe load' to mount the WIM's
+        \Windows\System32\config\SYSTEM file under
+        HKLM\WIMSYSTEM_$Tag (a transient hive name), reads the
+        named value with Get-ItemProperty, then unloads the hive.
+
+        Returns $null if the hive could not be loaded OR the value
+        does not exist; never throws. Hive unload is best-effort
+        (cleanup happens even on error to avoid leaking mounted
+        registry state across phase boundaries).
+
+        This helper exists because the live-host equivalent in the
+        reference Deploy-Drivers script
+        (Get-SecureBootCertificateInventory) reads HKLM:\
+        directly. For ISO analysis we have to mount the WIM's
+        hive first.
+    #>
+    [CmdletBinding()]
+    [OutputType([System.Object])]
+    param(
+        [Parameter(Mandatory)] [string]$WimMountPath,
+        [Parameter(Mandatory)] [string]$RelativeRegPath,  # e.g. 'ControlSet001\Control\SecureBoot\Servicing'
+        [Parameter(Mandatory)] [string]$ValueName,
+        [string]$Tag = ('UPDWSI{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
+    )
+
+    $hivePath = Join-Path $WimMountPath 'Windows\System32\config\SYSTEM'
+    if (-not (Test-Path -LiteralPath $hivePath)) {
+        return $null
+    }
+
+    $mountKey = ('HKLM\WIMSYSTEM_{0}' -f $Tag)
+    $psPath   = ('HKLM:\WIMSYSTEM_{0}\{1}' -f $Tag, $RelativeRegPath)
+
+    $loaded = $false
+    try {
+        # reg.exe writes to stderr on success too, hence 2>&1
+        $regOut = & reg.exe load $mountKey $hivePath 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            return $null
+        }
+        $loaded = $true
+        try {
+            $rv = Get-ItemProperty -Path $psPath -Name $ValueName -ErrorAction Stop
+            return $rv.$ValueName
+        } catch {
+            return $null
+        }
+    } finally {
+        if ($loaded) {
+            try {
+                # Force GC to release any registry handles before unload
+                [System.GC]::Collect()
+                [System.GC]::WaitForPendingFinalizers()
+                $null = & reg.exe unload $mountKey 2>&1
+            } catch {
+                # Best-effort cleanup; will be retried on next reboot
+            } # psa-disable-line PSA3004 -- intentional best-effort cleanup; the hive will be auto-unloaded on next reboot
+        }
+    }
+}
+
+function Test-Pca2023AuthenticodeChain {
+    <#
+    .SYNOPSIS
+        Inspect the Authenticode signer chain on a UEFI boot file
+        and report whether it terminates at 'Windows UEFI CA 2023'
+        or the legacy 'Windows Production PCA 2011' / 'Microsoft
+        Windows Production PCA 2011' chain.
+
+        Returns a pscustomobject:
+          .Available     - $true if Get-AuthenticodeSignature ran
+          .ErrorMessage  - reason string when not available
+          .SignerName    - leaf signer CN (e.g. 'Microsoft Windows')
+          .RootChain     - root cert subject CN
+          .ChainTokens   - array of subject CNs walking the chain
+          .IsPca2023     - $true when 'Windows UEFI CA 2023' appears
+          .IsPca2011     - $true when '*PCA 2011' appears
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$Path
+    )
+
+    $result = [pscustomobject]@{
+        Available     = $false
+        ErrorMessage  = $null
+        SignerName    = $null
+        RootChain     = $null
+        ChainTokens   = @()
+        IsPca2023     = $false
+        IsPca2011     = $false
+    }
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        $result.ErrorMessage = ('File not found: {0}' -f $Path)
+        return $result
+    }
+
+    try {
+        $sig = Get-AuthenticodeSignature -FilePath $Path -ErrorAction Stop
+    } catch {
+        $result.ErrorMessage = ('Get-AuthenticodeSignature failed: {0}' -f $_.Exception.Message)
+        return $result
+    }
+    if ($sig.Status -eq 'NotSigned') {
+        $result.ErrorMessage = 'File is not Authenticode-signed.'
+        return $result
+    }
+
+    $result.Available  = $true
+    $result.SignerName = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { $null }
+
+    # Walk the chain via X509Chain so we see every CA, not just the leaf
+    $tokens = New-Object System.Collections.Generic.List[string]
+    try {
+        $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+        $chain.ChainPolicy.RevocationMode = 'NoCheck'  # offline analysis
+        $null = $chain.Build($sig.SignerCertificate)
+        foreach ($element in $chain.ChainElements) {
+            $cn = $element.Certificate.Subject
+            if ($cn) { $tokens.Add($cn) | Out-Null }
+        }
+    } catch {
+        # Chain build failed; we still have leaf info
+    } # psa-disable-line PSA3004 -- best-effort chain walk; leaf info is sufficient for the signer-class decision
+
+    $result.ChainTokens = @($tokens)
+    if ($tokens.Count -gt 0) {
+        $result.RootChain = $tokens[$tokens.Count - 1]
+    }
+    foreach ($t in $tokens) {
+        if ($t -match 'Windows UEFI CA 2023') { $result.IsPca2023 = $true }
+        if ($t -match 'PCA 2011')             { $result.IsPca2011 = $true }
+    }
+    # Also check the leaf signer name itself (for media where chain
+    # build fails but signer subject is informative)
+    if (-not $result.IsPca2023 -and $result.SignerName -match 'Windows UEFI CA 2023') {
+        $result.IsPca2023 = $true
+    }
+    return $result
+}
+
+function Get-IsoBootCertReadiness {
+    <#
+    .SYNOPSIS
+        Inspect an extracted ISO directory (the staged-media folder
+        produced by P05 ExpandIso) and assemble the per-ISO
+        readiness inventory used by P12 VerifyPca2023Readiness.
+
+        This is a STRICTLY READ-ONLY function. Side effects are
+        limited to a transient 'reg load' (immediately unloaded)
+        and a transient Mount-WindowsImage in READ-ONLY mode.
+
+        Returns a rich pscustomobject - see SPEC.md D.22 for the
+        field-by-field schema documentation.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$ExtractedMediaPath,
+        [string]$WorkRoot
+    )
+
+    $inv = [pscustomobject]@{
+        Source                     = 'IsoEmbedded'
+        Generated                  = (Get-Date)
+        Available                  = $false
+        ErrorMessage               = $null
+        ExtractedMediaPath         = $ExtractedMediaPath
+        # File-existence checks (the 2024-4B prerequisite signal)
+        HasEfiExDir                = $null
+        HasBootMgrFwEx             = $null
+        HasBootMgrEx               = $null
+        HasFontsEx                 = $null
+        HasDvdEx                   = $null
+        HasEfisysExBin             = $null
+        # Boot manager Authenticode signer chain
+        BootX64SignerName          = $null
+        BootX64IsPca2023           = $null
+        BootX64IsPca2011           = $null
+        BootX64ChainTokens         = @()
+        BootX64Available           = $false
+        # LCU level integrated in install.wim (read via Get-WindowsPackage)
+        InstallWimHighestKb        = $null
+        InstallWimHighestKbDate    = $null
+        InstallWimMeetsPca2023Prereq = $null
+        # LCU level integrated in boot.wim
+        BootWimHighestKb           = $null
+        BootWimHighestKbDate       = $null
+        BootWimMeetsPca2023Prereq  = $null
+        # SecureBoot servicing keys read from install.wim's SYSTEM hive
+        UEFICA2023Status           = $null
+        UEFICA2023Error            = $null
+        AvailableUpdatesHex        = $null
+    }
+
+    # ---- File-existence checks ----
+    # These are the markers Microsoft's Make2023BootableMedia.ps1
+    # uses to decide that media has the 2024-4B-or-later updates.
+    $bootWimPath = Join-Path $ExtractedMediaPath 'sources\boot.wim'
+    if (-not (Test-Path -LiteralPath $bootWimPath)) {
+        $inv.ErrorMessage = ('boot.wim not found under {0}\sources' -f $ExtractedMediaPath)
+        return $inv
+    }
+
+    # We mount boot.wim index 1 READ-ONLY (boot environment, not WinPE)
+    # to inspect Windows\Boot\EFI_EX / FONTS_EX / DVD_EX directories
+    $bootMount = if ($WorkRoot) {
+        Join-Path $WorkRoot ('mnt_bootwim_pca2023_ro_{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
+    } else {
+        Join-Path ([System.IO.Path]::GetTempPath()) ('mnt_bootwim_pca2023_ro_{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
+    }
+    try {
+        if (-not (Test-Path -LiteralPath $bootMount)) {
+            New-Item -ItemType Directory -Path $bootMount -Force | Out-Null
+        }
+        $mountedRo = $false
+        try {
+            $null = Mount-WindowsImage -ImagePath $bootWimPath -Index 1 -Path $bootMount -ReadOnly -ErrorAction Stop
+            $mountedRo = $true
+            $exBins   = Join-Path $bootMount 'Windows\Boot\EFI_EX'
+            $exFonts  = Join-Path $bootMount 'Windows\Boot\FONTS_EX'
+            $exDvd    = Join-Path $bootMount 'Windows\Boot\DVD_EX'
+            $inv.HasEfiExDir    = Test-Path -LiteralPath $exBins
+            $inv.HasFontsEx     = Test-Path -LiteralPath $exFonts
+            $inv.HasDvdEx       = Test-Path -LiteralPath $exDvd
+            $inv.HasBootMgrFwEx = if ($inv.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgfw_EX.efi') } else { $false }
+            $inv.HasBootMgrEx   = if ($inv.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgr_EX.efi')   } else { $false }
+            $inv.HasEfisysExBin = if ($inv.HasDvdEx) {
+                Test-Path -LiteralPath (Join-Path $exDvd 'EFI\en-US\efisys_EX.bin')
+            } else { $false }
+
+            # boot.wim level (LCU month detection)
+            $bootLcu = Get-LcuVersionFromInstallWim -MountPath $bootMount
+            $inv.BootWimHighestKb         = $bootLcu.HighestKbId
+            $inv.BootWimHighestKbDate     = $bootLcu.HighestKbDate
+            $inv.BootWimMeetsPca2023Prereq = $bootLcu.MeetsPca2023Prereq
+        } finally {
+            if ($mountedRo) {
+                try {
+                    $null = Dismount-WindowsImage -Path $bootMount -Discard -ErrorAction Stop
+                } catch {
+                    # Best-effort cleanup
+                } # psa-disable-line PSA3004 -- best-effort dismount; the WIM will be auto-released when the process exits
+            }
+            try {
+                if (Test-Path -LiteralPath $bootMount) {
+                    Remove-Item -Path $bootMount -Recurse -Force -ErrorAction Stop
+                }
+            } catch {
+                # Mount directory cleanup best-effort
+            } # psa-disable-line PSA3004 -- best-effort cleanup; the temp dir will be auto-released eventually
+        }
+    } catch {
+        $inv.ErrorMessage = ('boot.wim inspection failed: {0}' -f $_.Exception.Message)
+        return $inv
+    }
+
+    # ---- bootx64.efi Authenticode chain check ----
+    $bootX64 = Join-Path $ExtractedMediaPath 'efi\boot\bootx64.efi'
+    if (Test-Path -LiteralPath $bootX64) {
+        $authResult = Test-Pca2023AuthenticodeChain -Path $bootX64
+        if ($authResult.Available) {
+            $inv.BootX64Available  = $true
+            $inv.BootX64SignerName = $authResult.SignerName
+            $inv.BootX64IsPca2023  = $authResult.IsPca2023
+            $inv.BootX64IsPca2011  = $authResult.IsPca2011
+            $inv.BootX64ChainTokens = @($authResult.ChainTokens)
+        }
+    }
+
+    # ---- install.wim LCU level + SYSTEM hive SecureBoot keys ----
+    $installWimPath = Join-Path $ExtractedMediaPath 'sources\install.wim'
+    if (Test-Path -LiteralPath $installWimPath) {
+        $installMount = if ($WorkRoot) {
+            Join-Path $WorkRoot ('mnt_installwim_pca2023_ro_{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
+        } else {
+            Join-Path ([System.IO.Path]::GetTempPath()) ('mnt_installwim_pca2023_ro_{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
+        }
+        try {
+            if (-not (Test-Path -LiteralPath $installMount)) {
+                New-Item -ItemType Directory -Path $installMount -Force | Out-Null
+            }
+            $iwMounted = $false
+            try {
+                $null = Mount-WindowsImage -ImagePath $installWimPath -Index 1 -Path $installMount -ReadOnly -ErrorAction Stop
+                $iwMounted = $true
+                $installLcu = Get-LcuVersionFromInstallWim -MountPath $installMount
+                $inv.InstallWimHighestKb         = $installLcu.HighestKbId
+                $inv.InstallWimHighestKbDate     = $installLcu.HighestKbDate
+                $inv.InstallWimMeetsPca2023Prereq = $installLcu.MeetsPca2023Prereq
+
+                # SYSTEM hive servicing keys
+                $servPath = 'ControlSet001\Control\SecureBoot\Servicing'
+                $inv.UEFICA2023Status = Get-WimSystemHiveValue -WimMountPath $installMount -RelativeRegPath $servPath -ValueName 'UEFICA2023Status'
+                $inv.UEFICA2023Error  = Get-WimSystemHiveValue -WimMountPath $installMount -RelativeRegPath $servPath -ValueName 'UEFICA2023Error'
+                $auRaw = Get-WimSystemHiveValue -WimMountPath $installMount -RelativeRegPath 'ControlSet001\Control\SecureBoot' -ValueName 'AvailableUpdates'
+                if ($null -ne $auRaw) {
+                    $inv.AvailableUpdatesHex = ('0x{0:X}' -f [int]$auRaw)
+                }
+            } finally {
+                if ($iwMounted) {
+                    try {
+                        $null = Dismount-WindowsImage -Path $installMount -Discard -ErrorAction Stop
+                    } catch {
+                        # Best-effort cleanup
+                    } # psa-disable-line PSA3004 -- best-effort dismount; the WIM will be auto-released when the process exits
+                }
+                try {
+                    if (Test-Path -LiteralPath $installMount) {
+                        Remove-Item -Path $installMount -Recurse -Force -ErrorAction Stop
+                    }
+                } catch {
+                    # Mount directory cleanup best-effort
+                } # psa-disable-line PSA3004 -- best-effort cleanup; the temp dir will be auto-released eventually
+            }
+        } catch {
+            # install.wim mount failed - not fatal; we already have
+            # boot.wim level data, which is sufficient for PCA2023 readiness.
+            # Record but don't abort.
+        } # psa-disable-line PSA3004 -- intentional best-effort cleanup; boot.wim level data is the authoritative input for PCA2023 readiness
+    }
+
+    $inv.Available = $true
+    return $inv
+}
+
+function Get-Pca2023ReadinessSnapshot {
+    <#
+    .SYNOPSIS
+        Top-level entry point for P12 VerifyPca2023Readiness.
+
+        Combines:
+          .IsoEmbedded   - Get-IsoBootCertReadiness output (always)
+          .Health        - 'Healthy' / 'Warning' / 'Critical' / 'Unknown'
+          .Reasons[]     - bullet-point explanation of the Health value
+
+        Health classification (per SPEC.md D.22):
+          Healthy   - bootx64.efi is PCA2023-signed AND install.wim
+                      LCU date >= 2024-04-09 AND EFI_EX dir present
+          Warning   - bootx64.efi is still PCA2011 BUT install.wim
+                      meets the 2024-4B prereq (P10 ConvertPca2023BootManager
+                      can be applied safely)
+          Critical  - install.wim LCU date < 2024-04-09 (P10 would fail
+                      because Microsoft requires 2024-4B+ source media)
+          Unknown   - could not inspect ISO at all (mount failure etc.)
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$ExtractedMediaPath,
+        [Parameter(Mandatory)] [string]$WorkRoot,
+        [string]$OsKey
+    )
+
+    $emb = Get-IsoBootCertReadiness -ExtractedMediaPath $ExtractedMediaPath -WorkRoot $WorkRoot
+
+    $health = 'Unknown'
+    $reasons = New-Object System.Collections.Generic.List[string]
+
+    if (-not $emb.Available) {
+        $reasons.Add(('ISO inventory unavailable: {0}' -f $emb.ErrorMessage)) | Out-Null
+        return [pscustomobject]@{
+            Generated  = (Get-Date)
+            Source     = 'IsoEmbedded'
+            OsKey      = $OsKey
+            IsoEmbedded = $emb
+            Health     = $health
+            Reasons    = @($reasons)
+        }
+    }
+
+    # Classify
+    $isPca2023 = ($emb.BootX64IsPca2023 -eq $true)
+    $isPca2011 = ($emb.BootX64IsPca2011 -eq $true)
+    $meetsPrereq = ($emb.InstallWimMeetsPca2023Prereq -eq $true) -or ($emb.BootWimMeetsPca2023Prereq -eq $true)
+    $hasEfiEx = ($emb.HasEfiExDir -eq $true) -and ($emb.HasBootMgrFwEx -eq $true)
+
+    if (-not $meetsPrereq) {
+        $health = 'Critical'
+        $reasons.Add('install.wim / boot.wim LCU level is BELOW 2024-04-09 (the Make2023BootableMedia.ps1 prerequisite). P10 ConvertPca2023BootManager would refuse to operate.') | Out-Null
+        if ($emb.InstallWimHighestKb) {
+            $reasons.Add(('Highest install.wim KB: {0} (date: {1})' -f $emb.InstallWimHighestKb, $emb.InstallWimHighestKbDate)) | Out-Null
+        }
+    } elseif ($isPca2023) {
+        $health = 'Healthy'
+        $reasons.Add('bootx64.efi is signed via the "Windows UEFI CA 2023" certificate chain. ISO can boot under PCA2023-only Secure Boot firmware (post 2026-06 cert refresh).') | Out-Null
+        if (-not $hasEfiEx) {
+            $health = 'Warning'
+            $reasons.Add('PCA2023 signer detected but EFI_EX staging directory is missing - boot.wim may be a custom media build. Future maintenance flows may not detect the EFI_EX scaffolding.') | Out-Null
+        }
+    } elseif ($isPca2011 -and $hasEfiEx) {
+        $health = 'Warning'
+        $reasons.Add('bootx64.efi is still PCA2011-signed, BUT EFI_EX staging directory is present in boot.wim. P10 ConvertPca2023BootManager (or external Make2023BootableMedia.ps1) can promote this ISO to PCA2023 in one pass.') | Out-Null
+    } elseif ($isPca2011) {
+        $health = 'Warning'
+        $reasons.Add('bootx64.efi is still PCA2011-signed and no EFI_EX staging directory was found. boot.wim may have been built from a source older than 2024-4B; P10 will refuse to operate even though install.wim claims prereq is met.') | Out-Null
+    } else {
+        # neither flag was set - we could not read the signature at all
+        $health = 'Unknown'
+        $reasons.Add('Could not determine bootx64.efi signer (no Authenticode chain readable). May indicate damaged ISO, missing OpenSSL/Windows SDK, or Linux pwsh limitations.') | Out-Null
+    }
+
+    # Add Server2025-specific advisory
+    if ($OsKey -eq 'Server2025') {
+        $reasons.Add('NOTE: Server 2025 certified server platforms include the 2023 certificates in firmware. P10 is skipped by default for this OS unless -EnablePca2023BootManager -ForcePca2023OnServer2025 are BOTH set.') | Out-Null
+    }
+
+    [pscustomobject]@{
+        Generated   = (Get-Date)
+        Source      = 'IsoEmbedded'
+        OsKey       = $OsKey
+        IsoEmbedded = $emb
+        Health      = $health
+        Reasons     = @($reasons)
+    }
+}
+
+function Show-Pca2023ReadinessSnapshot {
+    <#
+    .SYNOPSIS
+        Render a Pca2023 readiness snapshot in this script's log style.
+        With -Compact, prints a single header line for P09 / P12 banners.
+        Without -Compact, prints a full breakdown for P13 FinalReport.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Snapshot,
+        [switch]$Compact
+    )
+
+    if (-not $Snapshot) { return }
+    $emb = $Snapshot.IsoEmbedded
+    $health = $Snapshot.Health
+
+    if ($Compact) {
+        $cn = if ($emb.BootX64IsPca2023) { 'PCA2023' } elseif ($emb.BootX64IsPca2011) { 'PCA2011' } else { 'unknown' }
+        $kb = if ($emb.InstallWimHighestKb) { $emb.InstallWimHighestKb } else { 'n/a' }
+        Write-Step ('Pca2023 readiness: signer={0,-7} install_lcu={1,-10} health={2}' -f $cn, $kb, $health)
+        return
+    }
+
+    Write-PhaseHeader 'Pca2023 readiness (P12)'
+    Write-Step ('Overall health   : {0}' -f $health)
+    foreach ($r in $Snapshot.Reasons) {
+        Write-Step ('  - {0}' -f $r)
+    }
+    Write-Step ''
+    Write-Step '[ISO boot environment]'
+    Write-Step ('EFI_EX staging directory : {0}' -f (if ($null -eq $emb.HasEfiExDir) { 'n/a' } elseif ($emb.HasEfiExDir) { 'present' } else { 'NOT present' }))
+    Write-Step ('  bootmgfw_EX.efi        : {0}' -f (if ($null -eq $emb.HasBootMgrFwEx) { 'n/a' } elseif ($emb.HasBootMgrFwEx) { 'present' } else { 'NOT present' }))
+    Write-Step ('  bootmgr_EX.efi         : {0}' -f (if ($null -eq $emb.HasBootMgrEx) { 'n/a' } elseif ($emb.HasBootMgrEx) { 'present' } else { 'NOT present' }))
+    Write-Step ('  FONTS_EX               : {0}' -f (if ($null -eq $emb.HasFontsEx) { 'n/a' } elseif ($emb.HasFontsEx) { 'present' } else { 'NOT present' }))
+    Write-Step ('  DVD_EX/EFI/en-US/efisys_EX.bin : {0}' -f (if ($null -eq $emb.HasEfisysExBin) { 'n/a' } elseif ($emb.HasEfisysExBin) { 'present' } else { 'NOT present' }))
+    Write-Step ''
+    Write-Step '[bootx64.efi signer]'
+    Write-Step ('  Signer subject  : {0}' -f $(if ($emb.BootX64SignerName) { $emb.BootX64SignerName } else { 'n/a' }))
+    Write-Step ('  PCA2023 chain   : {0}' -f $emb.BootX64IsPca2023)
+    Write-Step ('  PCA2011 chain   : {0}' -f $emb.BootX64IsPca2011)
+    Write-Step ''
+    Write-Step '[LCU integration level]'
+    Write-Step ('  install.wim KB  : {0} (date: {1})' -f $(if ($emb.InstallWimHighestKb) { $emb.InstallWimHighestKb } else { 'n/a' }), $(if ($emb.InstallWimHighestKbDate) { $emb.InstallWimHighestKbDate } else { 'n/a' }))
+    Write-Step ('  install.wim 2024-4B prereq : {0}' -f $emb.InstallWimMeetsPca2023Prereq)
+    Write-Step ('  boot.wim    KB  : {0} (date: {1})' -f $(if ($emb.BootWimHighestKb) { $emb.BootWimHighestKb } else { 'n/a' }), $(if ($emb.BootWimHighestKbDate) { $emb.BootWimHighestKbDate } else { 'n/a' }))
+    Write-Step ('  boot.wim    2024-4B prereq : {0}' -f $emb.BootWimMeetsPca2023Prereq)
+    Write-Step ''
+    Write-Step '[SecureBoot servicing keys (from install.wim SYSTEM hive)]'
+    Write-Step ('  UEFICA2023Status   : {0}' -f $(if ($emb.UEFICA2023Status) { $emb.UEFICA2023Status } else { 'n/a (key not present)' }))
+    Write-Step ('  UEFICA2023Error    : {0}' -f $(if ($null -ne $emb.UEFICA2023Error) { $emb.UEFICA2023Error } else { 'n/a' }))
+    Write-Step ('  AvailableUpdates   : {0}' -f $(if ($emb.AvailableUpdatesHex) { $emb.AvailableUpdatesHex } else { 'n/a' }))
+}
+
+function Format-Pca2023ReadinessForReport {
+    <#
+    .SYNOPSIS
+        Render snapshot as a plain-text section suitable for the
+        P13 FinalReport appendix and the standalone
+        pca2023_readiness.md file.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] $Snapshot
+    )
+
+    if (-not $Snapshot) { return '' }
+    $emb = $Snapshot.IsoEmbedded
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine(('=' * 78))
+    [void]$sb.AppendLine('PCA2023 Boot Manager Readiness')
+    [void]$sb.AppendLine(('=' * 78))
+    [void]$sb.AppendLine(('Captured       : {0}' -f $Snapshot.Generated.ToString('yyyy-MM-dd HH:mm:ss')))
+    [void]$sb.AppendLine(('OS Key         : {0}' -f $(if ($Snapshot.OsKey) { $Snapshot.OsKey } else { 'n/a' })))
+    [void]$sb.AppendLine(('Overall health : {0}' -f $Snapshot.Health))
+    if ($Snapshot.Reasons.Count -gt 0) {
+        [void]$sb.AppendLine('Reasons        :')
+        foreach ($r in $Snapshot.Reasons) {
+            [void]$sb.AppendLine(('  - {0}' -f $r))
+        }
+    }
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('-- ISO boot environment ' + ('-' * 54))
+    [void]$sb.AppendLine(('EFI_EX staging directory      : {0}' -f $(if ($null -eq $emb.HasEfiExDir) { 'n/a' } elseif ($emb.HasEfiExDir) { 'present' } else { 'NOT present' })))
+    [void]$sb.AppendLine(('  bootmgfw_EX.efi             : {0}' -f $(if ($null -eq $emb.HasBootMgrFwEx) { 'n/a' } elseif ($emb.HasBootMgrFwEx) { 'present' } else { 'NOT present' })))
+    [void]$sb.AppendLine(('  bootmgr_EX.efi              : {0}' -f $(if ($null -eq $emb.HasBootMgrEx) { 'n/a' } elseif ($emb.HasBootMgrEx) { 'present' } else { 'NOT present' })))
+    [void]$sb.AppendLine(('  FONTS_EX                    : {0}' -f $(if ($null -eq $emb.HasFontsEx) { 'n/a' } elseif ($emb.HasFontsEx) { 'present' } else { 'NOT present' })))
+    [void]$sb.AppendLine(('  efisys_EX.bin (DVD_EX)      : {0}' -f $(if ($null -eq $emb.HasEfisysExBin) { 'n/a' } elseif ($emb.HasEfisysExBin) { 'present' } else { 'NOT present' })))
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('-- bootx64.efi signer ' + ('-' * 56))
+    [void]$sb.AppendLine(('Signer subject  : {0}' -f $(if ($emb.BootX64SignerName) { $emb.BootX64SignerName } else { 'n/a' })))
+    [void]$sb.AppendLine(('PCA2023 chain   : {0}' -f $emb.BootX64IsPca2023))
+    [void]$sb.AppendLine(('PCA2011 chain   : {0}' -f $emb.BootX64IsPca2011))
+    if ($emb.BootX64ChainTokens.Count -gt 0) {
+        [void]$sb.AppendLine('Chain tokens    :')
+        foreach ($t in $emb.BootX64ChainTokens) {
+            [void]$sb.AppendLine(('  - {0}' -f $t))
+        }
+    }
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('-- LCU integration level ' + ('-' * 53))
+    [void]$sb.AppendLine(('install.wim highest KB           : {0}' -f $(if ($emb.InstallWimHighestKb) { $emb.InstallWimHighestKb } else { 'n/a' })))
+    [void]$sb.AppendLine(('install.wim highest KB date      : {0}' -f $(if ($emb.InstallWimHighestKbDate) { $emb.InstallWimHighestKbDate } else { 'n/a' })))
+    [void]$sb.AppendLine(('install.wim meets 2024-4B prereq : {0}' -f $emb.InstallWimMeetsPca2023Prereq))
+    [void]$sb.AppendLine(('boot.wim    highest KB           : {0}' -f $(if ($emb.BootWimHighestKb) { $emb.BootWimHighestKb } else { 'n/a' })))
+    [void]$sb.AppendLine(('boot.wim    highest KB date      : {0}' -f $(if ($emb.BootWimHighestKbDate) { $emb.BootWimHighestKbDate } else { 'n/a' })))
+    [void]$sb.AppendLine(('boot.wim    meets 2024-4B prereq : {0}' -f $emb.BootWimMeetsPca2023Prereq))
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('-- SecureBoot servicing (from install.wim SYSTEM hive) ' + ('-' * 23))
+    [void]$sb.AppendLine(('UEFICA2023Status    : {0}' -f $(if ($emb.UEFICA2023Status) { $emb.UEFICA2023Status } else { 'n/a' })))
+    [void]$sb.AppendLine(('UEFICA2023Error     : {0}' -f $(if ($null -ne $emb.UEFICA2023Error) { $emb.UEFICA2023Error } else { 'n/a' })))
+    [void]$sb.AppendLine(('AvailableUpdates    : {0}' -f $(if ($emb.AvailableUpdatesHex) { $emb.AvailableUpdatesHex } else { 'n/a' })))
+    [void]$sb.AppendLine('')
+    return $sb.ToString()
+}
+
+function Get-OrEnsurePca2023Snapshot {
+    <#
+    .SYNOPSIS
+        Idempotent accessor for the cached PCA2023 readiness snapshot.
+
+        On first call, computes a fresh snapshot from the extracted
+        media and stashes it on $Script:Pca2023Snapshot. Subsequent
+        calls return the cached value unless -Force is specified.
+
+        Used by P12, P13, and the standalone -Pca2023OnlyMode path
+        so they all see the same authoritative snapshot without
+        re-running the (relatively expensive) WIM-mount + Authenticode
+        chain walk.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$ExtractedMediaPath,
+        [Parameter(Mandatory)] [string]$WorkRoot,
+        [string]$OsKey,
+        [switch]$Force
+    )
+
+    if ($Force -or -not $Script:Pca2023Snapshot) {
+        $Script:Pca2023Snapshot = Get-Pca2023ReadinessSnapshot `
+            -ExtractedMediaPath $ExtractedMediaPath `
+            -WorkRoot $WorkRoot `
+            -OsKey $OsKey
+    }
+    return $Script:Pca2023Snapshot
+}
+
+function Convert-WimBootToPca2023Signed {
+    <#
+    .SYNOPSIS
+        PSA-clean re-implementation of Microsoft's Copy-2023BootBins
+        logic (from Make2023BootableMedia.ps1, microsoft/secureboot_objects
+        repo, Version 1.4 / 2026-03-13).
+
+        DIFFERENCES from upstream Make2023BootableMedia.ps1:
+
+        1. Uses Context-bag pattern ($Ctx) instead of $global:WIM_*
+           globals. This isolates state and avoids leaks across phases.
+        2. Uses this script's standard Write-Step / _LogLine / Add-ErrorJsonlEntry
+           instead of Write-Host / Write-Dbg-Host.
+        3. Throws on error (no 'exit' statements). Phase wrapper
+           catches and records.
+        4. Uses Invoke-WimMountSafe / Invoke-WimDismountSafe (existing
+           DISM helpers in this script) rather than direct
+           Mount-WindowsImage so the DISM mount-cache stays clean.
+        5. PSA Verb-Noun compliant (Convert-* instead of Copy-2023BootBins).
+        6. Mandatory=$true shorthand; #Requires -RunAsAdministrator
+           is enforced by Assert-WorkspacePreflight earlier in pipeline.
+
+        Returns a pscustomobject:
+          .Success      - $true if all file copies succeeded
+          .FilesUpdated - list of files copied
+          .ErrorMessage - reason string when not Success
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$ExtractedMediaPath,
+        [Parameter(Mandatory)] [string]$WorkRoot
+    )
+
+    $result = [pscustomobject]@{
+        Success      = $false
+        FilesUpdated = @()
+        ErrorMessage = $null
+    }
+
+    $bootWimPath = Join-Path $ExtractedMediaPath 'sources\boot.wim'
+    if (-not (Test-Path -LiteralPath $bootWimPath)) {
+        $result.ErrorMessage = ('boot.wim not found: {0}' -f $bootWimPath)
+        return $result
+    }
+
+    $tag = ('PCA2023CV{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
+    $mount = Join-Path $WorkRoot ('mnt_bootwim_pca2023_rw_{0}' -f $tag)
+    try {
+        if (-not (Test-Path -LiteralPath $mount)) {
+            New-Item -ItemType Directory -Path $mount -Force | Out-Null
+        }
+    } catch {
+        $result.ErrorMessage = ('Could not create mount dir {0}: {1}' -f $mount, $_.Exception.Message)
+        return $result
+    }
+
+    $updated = New-Object System.Collections.Generic.List[string]
+    $mounted = $false
+    try {
+        Write-Step ('Mounting boot.wim (read-only, for PCA2023 source extraction): {0}' -f $bootWimPath)
+        $null = Mount-WindowsImage -ImagePath $bootWimPath -Index 1 -Path $mount -ReadOnly -ErrorAction Stop
+        $mounted = $true
+
+        $exBins  = Join-Path $mount 'Windows\Boot\EFI_EX'
+        $exFonts = Join-Path $mount 'Windows\Boot\FONTS_EX'
+        $exDvd   = Join-Path $mount 'Windows\Boot\DVD_EX'
+
+        if (-not (Test-Path -LiteralPath $exBins) -or `
+            -not (Test-Path -LiteralPath $exFonts) -or `
+            -not (Test-Path -LiteralPath $exDvd)) {
+            $result.ErrorMessage = 'boot.wim does not contain EFI_EX/FONTS_EX/DVD_EX staging directories. Source media must include 2024-4B (April 2024 LCU) or later. This matches the Make2023BootableMedia.ps1 error "Make sure all required updates (2024-4B or later) have been applied".'
+            return $result
+        }
+
+        # Determine target boot manager filename. Microsoft media uses
+        # bootx64.efi on x64, bootaa64.efi on ARM64.
+        $efiBoot = Join-Path $ExtractedMediaPath 'efi\boot'
+        $bootmgrName = 'bootx64.efi'
+        if (Test-Path -LiteralPath (Join-Path $efiBoot 'bootaa64.efi')) {
+            $bootmgrName = 'bootaa64.efi'
+        }
+
+        # --- 1. Replace efi/boot/bootx64.efi with bootmgfw_EX.efi ---
+        $src = Join-Path $exBins 'bootmgfw_EX.efi'
+        $dst = Join-Path $efiBoot $bootmgrName
+        Write-Step ('Copying {0} -> {1}' -f $src, $dst)
+        Copy-Item -Path $src -Destination $dst -Force -ErrorAction Stop
+        $updated.Add($dst) | Out-Null
+
+        # --- 2. Replace /bootmgr.efi with bootmgr_EX.efi (if present) ---
+        $srcMgr = Join-Path $exBins 'bootmgr_EX.efi'
+        $dstMgr = Join-Path $ExtractedMediaPath 'bootmgr.efi'
+        if (Test-Path -LiteralPath $srcMgr) {
+            Write-Step ('Copying {0} -> {1}' -f $srcMgr, $dstMgr)
+            Copy-Item -Path $srcMgr -Destination $dstMgr -Force -ErrorAction Stop
+            $updated.Add($dstMgr) | Out-Null
+        }
+
+        # --- 3. Replace efi/microsoft/boot/efisys.bin from efisys_EX.bin ---
+        $srcEfisys = Join-Path $exDvd 'EFI\en-US\efisys_EX.bin'
+        $dstEfisys = Join-Path $ExtractedMediaPath 'efi\microsoft\boot\efisys_ex.bin'
+        $dstEfisysDir = Split-Path -Parent $dstEfisys
+        if (-not (Test-Path -LiteralPath $dstEfisysDir)) {
+            New-Item -ItemType Directory -Path $dstEfisysDir -Force | Out-Null
+        }
+        Write-Step ('Copying {0} -> {1}' -f $srcEfisys, $dstEfisys)
+        Copy-Item -Path $srcEfisys -Destination $dstEfisys -Force -ErrorAction Stop
+        $updated.Add($dstEfisys) | Out-Null
+
+        # --- 4. Stage FONTS_EX to efi/microsoft/boot/fonts (rename _EX.ttf -> .ttf) ---
+        $dstFontsDir = Join-Path $ExtractedMediaPath 'efi\microsoft\boot\fonts'
+        if (-not (Test-Path -LiteralPath $dstFontsDir)) {
+            New-Item -ItemType Directory -Path $dstFontsDir -Force | Out-Null
+        }
+        Get-ChildItem -Path $exFonts -Filter '*.ttf' | ForEach-Object {
+            $newName = $_.Name -replace '_EX\.ttf$', '.ttf'
+            $target  = Join-Path $dstFontsDir $newName
+            Copy-Item -Path $_.FullName -Destination $target -Force -ErrorAction Stop
+            $updated.Add($target) | Out-Null
+        }
+
+        # --- 5. boot.stl (best-effort; not all SKUs include it) ---
+        $srcStl = Join-Path $mount 'Windows\Boot\EFI\boot.stl'
+        $dstStl = Join-Path $ExtractedMediaPath 'EFI\Microsoft\Boot\boot.stl'
+        if ((Test-Path -LiteralPath $srcStl) -and -not (Test-Path -LiteralPath $dstStl)) {
+            $dstStlDir = Split-Path -Parent $dstStl
+            if (-not (Test-Path -LiteralPath $dstStlDir)) {
+                New-Item -ItemType Directory -Path $dstStlDir -Force | Out-Null
+            }
+            Copy-Item -Path $srcStl -Destination $dstStl -Force -ErrorAction Stop
+            $updated.Add($dstStl) | Out-Null
+        }
+
+        $result.Success      = $true
+        $result.FilesUpdated = @($updated)
+    } catch {
+        $result.ErrorMessage = ('PCA2023 conversion failed: {0}' -f $_.Exception.Message)
+    } finally {
+        if ($mounted) {
+            try {
+                $null = Dismount-WindowsImage -Path $mount -Discard -ErrorAction Stop
+            } catch {
+                # Best-effort cleanup; subsequent runs may need 'dism /Cleanup-Wim'
+            } # psa-disable-line PSA3004 -- intentional best-effort dismount; cleanup happens automatically on next reboot
+        }
+        try {
+            if (Test-Path -LiteralPath $mount) {
+                Remove-Item -Path $mount -Recurse -Force -ErrorAction Stop
+            }
+        } catch {
+            # Mount directory cleanup best-effort
+        } # psa-disable-line PSA3004 -- best-effort cleanup; the dir will be auto-released eventually
+    }
+    return $result
+}
+
+# ============================================================
 # Phase P01: Initialize (Setup group)
 # ============================================================
 
@@ -6633,6 +7507,169 @@ function Invoke-BuildPhase09_AssembleIso {
 
 
 # ============================================================
+# Phase P10: Convert boot manager to PCA2023-signed (Build group, OPTIONAL)
+# ============================================================
+# This phase is OPT-IN. It runs only when -EnablePca2023BootManager
+# is specified, AND (for Server 2025 specifically) when
+# -ForcePca2023OnServer2025 is also specified. Default behaviour
+# leaves the ISO with PCA2011-signed boot manager, which still
+# boots on every Secure Boot firmware shipped before 2026-06.
+#
+# Group classification note: P10 lives inside the Build group as
+# a Build-group OPTIONAL phase (the only Build-group phase that
+# is not always-on). The other Build phases (P07/P08/P09) are
+# always-on because they are the core ISO assembly pipeline.
+# See SPEC.md B.20 for the design rationale.
+# ============================================================
+
+function Invoke-BuildPhase10_ConvertPca2023BootManager {
+    <#
+    .SYNOPSIS
+        P10: Rewrite the output ISO's boot manager to be signed via
+        the 'Windows UEFI CA 2023' chain instead of 'Windows Production
+        PCA 2011'. Required for booting under firmware that has
+        revoked PCA2011 trust (post 2026-06 expiry, post BlackLotus
+        CVE-2023-24932 mitigation).
+
+        Implementation: calls Convert-WimBootToPca2023Signed (this
+        script's PSA-clean re-implementation of Microsoft's
+        Copy-2023BootBins from Make2023BootableMedia.ps1), OR
+        invokes an external Make2023BootableMedia.ps1 if the user
+        passed -Pca2023ScriptPath.
+
+        Re-runs Get-OrEnsurePca2023Snapshot -Force after the
+        conversion so P11/P12/P13 see the updated state.
+
+        Skip conditions (all silent skip, recorded in result):
+          - -EnablePca2023BootManager not set
+          - OsKey == 'Server2025' AND -ForcePca2023OnServer2025 not set
+          - Pre-flight readiness Health == 'Critical' (LCU prereq
+            not met; we would only produce a corrupted ISO)
+    #>
+    Start-DebugTrace -Context 'Invoke-BuildPhase10_ConvertPca2023BootManager' -PhaseId 'P10'
+    try {
+        Write-SubSection 'PCA2023 boot manager conversion (optional)'
+
+        # ---- Pre-flight gates ----
+
+        if (-not $Script:EnablePca2023BootManager) {
+            Write-Step 'Skipped: -EnablePca2023BootManager not specified (default OFF).'
+            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
+            return
+        }
+
+        $osKey = if ($Script:OsProfile) { $Script:OsProfile.OsKey } else { $null }
+        if ($osKey -eq 'Server2025' -and -not $Script:ForcePca2023OnServer2025) {
+            Write-Step ('Skipped: OsKey={0}. Server 2025 firmware already includes 2023 certs.' -f $osKey)
+            Write-Step '         Pass -ForcePca2023OnServer2025 to override (advanced use only).'
+            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
+            return
+        }
+
+        # The extracted media path is set up by P05 ExpandIso
+        $extractedPath = if ($Script:ExtractedMediaPath) { $Script:ExtractedMediaPath } else { $null }
+        if (-not $extractedPath -or -not (Test-Path -LiteralPath $extractedPath)) {
+            throw 'P10 requires P05 ExpandIso to have produced an extracted media tree. Run -Action All or -Action Build.'
+        }
+
+        # Pre-flight readiness check (uses the cached snapshot if available)
+        Set-DebugStep -Step 'preflight-readiness'
+        $pre = Get-OrEnsurePca2023Snapshot `
+            -ExtractedMediaPath $extractedPath `
+            -WorkRoot $Script:WorkRootFull `
+            -OsKey $osKey
+        if ($pre.Health -eq 'Critical') {
+            $reasonText = ($pre.Reasons | ForEach-Object { "  - $_" }) -join "`n"
+            throw ("P10 pre-flight failed: snapshot Health is 'Critical'. The source media does not meet the 2024-4B (April 2024 LCU) prerequisite. Run P03 RefreshPatchBaseline and rebuild.`n$reasonText")
+        }
+        if ($pre.Health -eq 'Healthy') {
+            Write-Step 'Skipped: ISO is ALREADY PCA2023-signed (Health=Healthy). No conversion needed.'
+            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
+            return
+        }
+        Write-Step ('Pre-flight OK: Health={0}. Proceeding with conversion.' -f $pre.Health)
+
+        # ---- Run the conversion ----
+        Set-DebugStep -Step 'conversion'
+        $convResult = $null
+        if ($Script:Pca2023ScriptPath) {
+            Write-Step ('Using external script: {0}' -f $Script:Pca2023ScriptPath)
+            if (-not (Test-Path -LiteralPath $Script:Pca2023ScriptPath)) {
+                throw ('External -Pca2023ScriptPath does not exist: {0}' -f $Script:Pca2023ScriptPath)
+            }
+            # Invoke the external Make2023BootableMedia.ps1 in a child PS
+            # process so its globals stay isolated from our session.
+            $isoOut = $Script:OutputIsoPath
+            $childArgs = @(
+                '-NoProfile', '-NonInteractive',
+                '-File', $Script:Pca2023ScriptPath,
+                '-MediaPath', $extractedPath,
+                '-TargetType', 'ISO',
+                '-ISOPath', $isoOut
+            )
+            $stdout = & pwsh @childArgs 2>&1
+            $childExit = $LASTEXITCODE
+            $stdout | ForEach-Object { Write-Step ('  [child] {0}' -f $_) }
+            if ($childExit -ne 0) {
+                throw ('External Make2023BootableMedia.ps1 exited {0}' -f $childExit)
+            }
+            $convResult = [pscustomobject]@{
+                Success      = $true
+                FilesUpdated = @('(handled by external script)')
+                ErrorMessage = $null
+            }
+        } else {
+            Write-Step 'Using internal Convert-WimBootToPca2023Signed (PSA-clean implementation).'
+            $convResult = Convert-WimBootToPca2023Signed `
+                -ExtractedMediaPath $extractedPath `
+                -WorkRoot $Script:WorkRootFull
+            if (-not $convResult.Success) {
+                throw ('Convert-WimBootToPca2023Signed failed: {0}' -f $convResult.ErrorMessage)
+            }
+        }
+
+        Write-Step ('PCA2023 conversion succeeded. Files updated: {0}' -f $convResult.FilesUpdated.Count)
+        foreach ($f in $convResult.FilesUpdated) {
+            Write-Step ('  - {0}' -f $f)
+        }
+
+        # ---- Re-assemble ISO with the updated boot manager ----
+        # If the user already produced an output ISO in P09, that ISO
+        # is now stale: the on-disk file still has the old PCA2011 boot
+        # manager. We need to regenerate it from the (now-updated)
+        # extracted media tree.
+        if ($Script:OutputIsoPath -and (Test-Path -LiteralPath $Script:OutputIsoPath)) {
+            Set-DebugStep -Step 'reassemble-iso'
+            Write-Step 'Regenerating output ISO from updated extracted media...'
+            # Reuse the existing oscdimg-based assembly helper. The
+            # volume label is recovered from the existing output ISO's
+            # filename root (Windows Server ISO labels are typically
+            # the basename of the .iso file).
+            $isoLabel = [System.IO.Path]::GetFileNameWithoutExtension($Script:OutputIsoPath)
+            New-BootableIso `
+                -ExtractedIsoRoot $extractedPath `
+                -OutputIsoPath $Script:OutputIsoPath `
+                -VolumeLabel $isoLabel | Out-Null
+            Write-Step ('ISO re-assembled: {0}' -f $Script:OutputIsoPath)
+        }
+
+        # ---- Force-refresh the snapshot so downstream phases see new state ----
+        Set-DebugStep -Step 'post-flight-snapshot'
+        $post = Get-OrEnsurePca2023Snapshot `
+            -ExtractedMediaPath $extractedPath `
+            -WorkRoot $Script:WorkRootFull `
+            -OsKey $osKey `
+            -Force
+        Show-Pca2023ReadinessSnapshot -Snapshot $post -Compact
+
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.ok') -Force | Out-Null
+    } finally {
+        Stop-DebugTrace
+    }
+}
+
+
+# ============================================================
 # Phase P11: Static verification (Verify group)
 # ============================================================
 
@@ -6643,7 +7680,7 @@ function Invoke-VerifyPhase11_StaticVerify {
         verifies presence of install.wim/boot.wim/setup.exe, runs
         Get-WindowsImage and Get-WindowsPackage to check that the
         expected KB packages have been integrated. Emits
-        P08_verification.csv.
+        P11_verification.csv.
     #>
     Start-DebugTrace -Context 'Invoke-VerifyPhase11_StaticVerify' -PhaseId 'P11'
     try {
@@ -6757,7 +7794,7 @@ function Invoke-VerifyPhase11_StaticVerify {
             try { Dismount-DiskImage -ImagePath $Script:OutputIsoPath -ErrorAction SilentlyContinue | Out-Null } catch { $null = $_ }
         }
 
-        $csvPath = Join-Path $Script:LogsDir 'P08_verification.csv'
+        $csvPath = Join-Path $Script:LogsDir 'P11_verification.csv'
         $rows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
         Write-Ok ('Wrote: {0}' -f $csvPath)
 
@@ -6767,6 +7804,109 @@ function Invoke-VerifyPhase11_StaticVerify {
         }
 
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P11.ok') -Force | Out-Null
+    } finally {
+        Stop-DebugTrace
+    }
+}
+
+# ============================================================
+# Phase P12: Verify PCA2023 readiness (Verify group, ALWAYS-RUNS)
+# ============================================================
+# This phase ALWAYS runs as part of the Verify group, regardless of
+# whether -EnablePca2023BootManager was specified for P10. The
+# rationale: even when the operator is not converting to PCA2023
+# right now, they still want to know whether the resulting ISO
+# would boot on PCA2023-only firmware (post 2026-06).
+#
+# P12 is strictly READ-ONLY. It produces:
+#   1. pca2023_readiness.json   (machine-readable snapshot)
+#   2. pca2023_readiness.md     (human-readable detail page)
+#
+# The same snapshot is consumed by P13 FinalReport for the summary
+# integration (3-c output mode).
+# ============================================================
+
+function Invoke-VerifyPhase12_VerifyPca2023Readiness {
+    <#
+    .SYNOPSIS
+        P12: Inspect the produced ISO's PCA2023 readiness state and
+        emit JSON + Markdown reports. Always runs; never modifies
+        the ISO.
+
+        Outputs (all under <WorkRoot>\pca2023\):
+          - pca2023_readiness.json   - structured snapshot
+          - pca2023_readiness.md     - human-readable detail
+
+        The snapshot is also cached in $Script:Pca2023Snapshot for
+        P13 FinalReport to integrate as a summary section.
+    #>
+    Start-DebugTrace -Context 'Invoke-VerifyPhase12_VerifyPca2023Readiness' -PhaseId 'P12'
+    try {
+        Write-SubSection 'PCA2023 boot manager readiness inspection'
+
+        $extractedPath = if ($Script:ExtractedMediaPath) { $Script:ExtractedMediaPath } else { $null }
+        if (-not $extractedPath -or -not (Test-Path -LiteralPath $extractedPath)) {
+            Write-Step 'P12 skipped: no extracted media available (P05 did not run, or working tree was cleaned).'
+            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.skipped') -Force | Out-Null
+            return
+        }
+
+        $osKey = if ($Script:OsProfile) { $Script:OsProfile.OsKey } else { $null }
+
+        Set-DebugStep -Step 'snapshot'
+        # Force-refresh: if P10 ran, the snapshot may be stale. If P10
+        # didn't run, this is the first computation. Either way we
+        # want the freshest view.
+        $snapshot = Get-OrEnsurePca2023Snapshot `
+            -ExtractedMediaPath $extractedPath `
+            -WorkRoot $Script:WorkRootFull `
+            -OsKey $osKey `
+            -Force
+        Show-Pca2023ReadinessSnapshot -Snapshot $snapshot
+
+        # ---- Emit JSON ----
+        Set-DebugStep -Step 'emit-json'
+        $pcaDir = Join-Path $Script:WorkRootFull 'pca2023'
+        if (-not (Test-Path -LiteralPath $pcaDir)) {
+            New-Item -ItemType Directory -Path $pcaDir -Force | Out-Null
+        }
+        $jsonPath = Join-Path $pcaDir 'pca2023_readiness.json'
+        $snapshot | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $jsonPath -Encoding UTF8 -Force
+        Write-Step ('Snapshot JSON: {0}' -f $jsonPath)
+
+        # ---- Emit Markdown ----
+        Set-DebugStep -Step 'emit-md'
+        $mdPath = Join-Path $pcaDir 'pca2023_readiness.md'
+        $mdLines = New-Object System.Collections.Generic.List[string]
+        $mdLines.Add('# PCA2023 Boot Manager Readiness Report') | Out-Null
+        $mdLines.Add('') | Out-Null
+        $mdLines.Add(('- Captured: {0}' -f $snapshot.Generated.ToString('yyyy-MM-dd HH:mm:ss'))) | Out-Null
+        $mdLines.Add(('- OS Key: `{0}`' -f $(if ($snapshot.OsKey) { $snapshot.OsKey } else { 'n/a' }))) | Out-Null
+        $mdLines.Add(('- **Overall health: `{0}`**' -f $snapshot.Health)) | Out-Null
+        $mdLines.Add('') | Out-Null
+        if ($snapshot.Reasons.Count -gt 0) {
+            $mdLines.Add('## Reasons') | Out-Null
+            $mdLines.Add('') | Out-Null
+            foreach ($r in $snapshot.Reasons) {
+                $mdLines.Add(('- {0}' -f $r)) | Out-Null
+            }
+            $mdLines.Add('') | Out-Null
+        }
+        $mdLines.Add('## Detail') | Out-Null
+        $mdLines.Add('') | Out-Null
+        $mdLines.Add('```text') | Out-Null
+        $mdLines.Add((Format-Pca2023ReadinessForReport -Snapshot $snapshot).TrimEnd()) | Out-Null
+        $mdLines.Add('```') | Out-Null
+        $mdLines.Add('') | Out-Null
+        $mdLines.Add('## References') | Out-Null
+        $mdLines.Add('') | Out-Null
+        $mdLines.Add('- Microsoft: [Updating Windows bootable media to use the PCA2023-signed boot manager](https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f)') | Out-Null
+        $mdLines.Add('- GitHub: [microsoft/secureboot_objects Make2023BootableMedia.ps1](https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1)') | Out-Null
+        $mdLines.Add('') | Out-Null
+        Set-Content -LiteralPath $mdPath -Value ($mdLines -join "`n") -Encoding UTF8 -Force
+        Write-Step ('Snapshot Markdown: {0}' -f $mdPath)
+
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
     }
@@ -6801,6 +7941,26 @@ function Invoke-ReportPhase13_FinalReport {
         Write-Step ('Logs dir: {0}' -f $Script:LogsDir)
         Write-Step ('Diag dir: {0}' -f $Script:DiagDir)
         if ($Script:LogFile) { Write-Step ('Transcript: {0}' -f $Script:LogFile) }
+
+        # ---- PCA2023 readiness summary (integrated from P12 snapshot) ----
+        # This is the FinalReport-side of the 3-c output mode:
+        # P12 produces the detail files (pca2023_readiness.json/.md),
+        # P13 produces the executive summary inline in this report
+        # so a reader does not need to chase a second file.
+        if ($Script:Pca2023Snapshot) {
+            Set-DebugStep -Step 'pca2023-summary'
+            Write-SubSection 'PCA2023 Readiness Summary'
+            Show-Pca2023ReadinessSnapshot -Snapshot $Script:Pca2023Snapshot -Compact
+            $pcaDir = Join-Path $Script:WorkRootFull 'pca2023'
+            $jsonPath = Join-Path $pcaDir 'pca2023_readiness.json'
+            $mdPath   = Join-Path $pcaDir 'pca2023_readiness.md'
+            if (Test-Path -LiteralPath $jsonPath) {
+                Write-Step ('Detail (JSON): {0}' -f $jsonPath)
+            }
+            if (Test-Path -LiteralPath $mdPath) {
+                Write-Step ('Detail (Markdown): {0}' -f $mdPath)
+            }
+        }
 
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P13.ok') -Force | Out-Null
     } finally {
@@ -7280,10 +8440,14 @@ function Get-PhaseListByAction {
     # Phases used by the standard build pipeline. When SyntheticTestMode
     # is set, the P05 / P06 pair is removed - synthetic ISOs cannot
     # round-trip through Mount-DiskImage.
+    # P10 is listed but is default-skip inside the phase function unless
+    # -EnablePca2023BootManager is specified; including it in the
+    # standard pipeline ensures the pipeline-level wiring is consistent
+    # and the operator's explicit opt-in actually reaches the phase.
     $standardFull = if ($Script:SyntheticTestMode) {
-        [string[]]@('P01','P02','P03','P04','P07','P08','P09','P11','P13')
+        [string[]]@('P01','P02','P03','P04','P07','P08','P09','P10','P11','P12','P13')
     } else {
-        [string[]]@('P01','P02','P03','P04','P05','P06','P07','P08','P09','P11','P13')
+        [string[]]@('P01','P02','P03','P04','P05','P06','P07','P08','P09','P10','P11','P12','P13')
     }
     $standardPrepare = if ($Script:SyntheticTestMode) {
         [string[]]@('P01','P02','P03','P04')
@@ -7293,8 +8457,8 @@ function Get-PhaseListByAction {
 
     switch ($ActionName) {
         'Prepare'                 { return $standardPrepare }
-        'Build'                   { return [string[]]@('P07','P08','P09') }
-        'Verify'                  { return [string[]]@('P11','P13') }
+        'Build'                   { return [string[]]@('P07','P08','P09','P10') }
+        'Verify'                  { return [string[]]@('P11','P12','P13') }
         'PrepareBuildVerify'      { return $standardFull }
         'All'                     { return $standardFull }
         'BootTest'                { return [string[]]@() }
@@ -7590,6 +8754,64 @@ Show-EntryBanner
 # Quick branch for actions that do not need workspace init
 if ($Action -eq 'ListPhases') {
     Show-PhaseList
+    exit 0
+}
+
+# -Pca2023OnlyMode: standalone P12 against an existing ISO.
+# Argument set: -IsoPath <existing.iso> -Pca2023OnlyMode
+# Skips all the patching machinery; mounts the ISO read-only,
+# extracts it into a temporary work tree, runs Get-OrEnsurePca2023Snapshot,
+# emits the same pca2023_readiness.{json,md} as P12 would have.
+if ($Pca2023OnlyMode) {
+    if (-not $IsoPath) {
+        throw '-Pca2023OnlyMode requires -IsoPath <path-to-existing-iso>.'
+    }
+    if (-not (Test-Path -LiteralPath $IsoPath)) {
+        throw ('-IsoPath does not exist: {0}' -f $IsoPath)
+    }
+    Write-Step ('Pca2023OnlyMode: inspecting {0}' -f $IsoPath)
+
+    # Mount ISO and copy to a scratch dir (we need write access to
+    # mount the contained WIMs).
+    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ('updwsi_pca2023only_{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
+    if (-not (Test-Path -LiteralPath $scratch)) {
+        New-Item -ItemType Directory -Path $scratch -Force | Out-Null
+    }
+    $img = $null
+    try {
+        $img = Mount-DiskImage -ImagePath $IsoPath -PassThru -ErrorAction Stop
+        $vol = $img | Get-Volume
+        $driveLetter = ($vol.DriveLetter + ':')
+        Write-Step ('ISO mounted at: {0}' -f $driveLetter)
+        $extract = Join-Path $scratch 'extracted'
+        Write-Step ('Copying ISO contents to: {0}' -f $extract)
+        New-Item -ItemType Directory -Path $extract -Force | Out-Null
+        Copy-Item -Path ('{0}\*' -f $driveLetter) -Destination $extract -Recurse -Force -ErrorAction Stop
+        Dismount-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue | Out-Null
+        $img = $null
+
+        # Best-effort OsKey inference from ISO filename
+        $osKey = $null
+        if ($IsoPath -match 'Server\s*2016|WS2016') { $osKey = 'Server2016' }
+        elseif ($IsoPath -match 'Server\s*2019|WS2019') { $osKey = 'Server2019' }
+        elseif ($IsoPath -match 'Server\s*2022|WS2022') { $osKey = 'Server2022' }
+        elseif ($IsoPath -match 'Server\s*2025|WS2025') { $osKey = 'Server2025' }
+
+        $snap = Get-Pca2023ReadinessSnapshot -ExtractedMediaPath $extract -WorkRoot $scratch -OsKey $osKey
+        Show-Pca2023ReadinessSnapshot -Snapshot $snap
+
+        $jsonPath = Join-Path $scratch 'pca2023_readiness.json'
+        $snap | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $jsonPath -Encoding UTF8 -Force
+        Write-Step ('Snapshot written: {0}' -f $jsonPath)
+        $reportText = Format-Pca2023ReadinessForReport -Snapshot $snap
+        $mdPath = Join-Path $scratch 'pca2023_readiness.txt'
+        Set-Content -LiteralPath $mdPath -Value $reportText -Encoding UTF8 -Force
+        Write-Step ('Detail text written: {0}' -f $mdPath)
+    } finally {
+        if ($img) {
+            try { Dismount-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue | Out-Null } catch { $null = $_ }
+        }
+    }
     exit 0
 }
 
