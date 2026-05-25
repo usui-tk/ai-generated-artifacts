@@ -31,6 +31,7 @@ production, this directory ships five tools, summarised below.
 | `powershell_harness.py`   (T3) | Drives `Update-WindowsServerIso.ps1 -Action TestHarness` to unit-test PowerShell functions from Python | After every PS function change in the catalog / patch-selection layers | No  |
 | `eval_iso_probe.py`       (T4) | HTTP Range-GET against each `data/config-Server<N>.json` Iso URL; reports size + Last-Modified | When the Microsoft Evaluation Center publishes a new snapshot; before release | Yes |
 | `wsusscn2_probe.py`       (T5) | HTTP probe of `wsusscn2.cab`; warns when the cab is older than 60 days | Before running P06 ValidatePatchSet; on every CI monthly refresh | Yes |
+| `release_info_parser_test.py` (T6) | Offline regression test for the PowerShell `ConvertFrom-ReleaseInfoMarkdown` parser against the PoC fixture; asserts row counts and per-OS coverage | After every change to the release-info parser or its helpers; on every CI run | No  |
 
 ## Quick start
 

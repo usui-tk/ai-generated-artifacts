@@ -2888,6 +2888,540 @@ function Get-OsConfigPath {
 }
 
 # ============================================================
+# ISO Updater specific: Microsoft Learn release-info support
+# ============================================================
+#
+# The Microsoft Learn rendering pipeline supports a `?accept=text/markdown`
+# content-negotiation switch on every documentation URL. Appending it to
+# the Windows Server release-info URL returns the source Markdown table
+# verbatim, which is much more stable than scraping the rendered HTML.
+# The Refresher consumes that Markdown as the authoritative source for
+# monthly LCU KBs and the Server 2022 / Server 2025 Hotpatch calendar.
+#
+# Files this section reads or writes:
+#   data/raw-release-info.md         The Markdown body as fetched.
+#   data/raw-release-info.meta.json  HTTP headers + fetch timestamp.
+#   data/cache-release-info.json     Parsed structured data for fast access.
+#
+# See SPEC.md section B.23.1 (release-info as the truth source) and
+# section B.23.3 (three-prefix data/ layout).
+
+$Script:ReleaseInfoUrl = (
+    'https://learn.microsoft.com/en-us/windows/release-health/' +
+    'windows-server-release-info?accept=text/markdown'
+)
+
+$Script:ReleaseInfoUserAgent = (
+    'ai-generated-artifacts/release-info ' +
+    '(+https://github.com/usui-tk/ai-generated-artifacts)'
+)
+
+$Script:ReleaseInfoLongToShort = @{
+    'Windows Server 2025'                    = 'Server2025'
+    'Windows Server 2022'                    = 'Server2022'
+    'Windows Server 2019 (version 1809)'     = 'Server2019'
+    'Windows Server 2019'                    = 'Server2019'
+    'Windows Server 2016 (version 1607)'     = 'Server2016'
+    'Windows Server 2016'                    = 'Server2016'
+}
+
+$Script:ReleaseInfoMonthNameToNumber = @{
+    'January'   = 1;  'February' = 2;  'March'     = 3;  'April'    = 4
+    'May'       = 5;  'June'     = 6;  'July'      = 7;  'August'   = 8
+    'September' = 9;  'October'  = 10; 'November'  = 11; 'December' = 12
+}
+
+$Script:ReleaseInfoMonthlyHeaders = @(
+    'Servicing option',
+    'Update type',
+    'Availability date',
+    'Build',
+    'KB article'
+)
+
+$Script:ReleaseInfoHotpatchHeaders = @(
+    'Month',
+    'Update type',
+    'Type',
+    'Availability date',
+    'Build',
+    'KB article'
+)
+
+function Get-DataDirectoryPath {
+    <#
+    .SYNOPSIS
+        Resolve the on-disk path of the data/ directory next to
+        Update-WindowsServerIso.ps1.
+    .DESCRIPTION
+        Used by every cache- and raw- accessor in this section.
+        See SPEC.md section B.23.3 for the directory layout.
+    #>
+    [OutputType([string])]
+    param()
+    $here = $Script:ScriptRoot
+    if ([string]::IsNullOrEmpty($here)) { $here = $PSScriptRoot }
+    if ([string]::IsNullOrEmpty($here)) { $here = (Get-Location).Path }
+    return (Join-Path $here 'data')
+}
+
+function Get-ReleaseInfoRawPath {
+    <#
+    .SYNOPSIS
+        Resolve the on-disk path of data/raw-release-info.md.
+    #>
+    [OutputType([string])]
+    param()
+    return (Join-Path (Get-DataDirectoryPath) 'raw-release-info.md')
+}
+
+function Get-ReleaseInfoRawMetaPath {
+    <#
+    .SYNOPSIS
+        Resolve the on-disk path of data/raw-release-info.meta.json,
+        which carries the HTTP headers and fetch timestamp.
+    #>
+    [OutputType([string])]
+    param()
+    return (Join-Path (Get-DataDirectoryPath) 'raw-release-info.meta.json')
+}
+
+function Get-ReleaseInfoCachePath {
+    <#
+    .SYNOPSIS
+        Resolve the on-disk path of data/cache-release-info.json,
+        the parsed structured cache that the Refresher consumes.
+    #>
+    [OutputType([string])]
+    param()
+    return (Join-Path (Get-DataDirectoryPath) 'cache-release-info.json')
+}
+
+function Invoke-ReleaseInfoFetch {
+    <#
+    .SYNOPSIS
+        Fetch the Microsoft Learn Windows Server release-info page
+        (Markdown form) and persist both the body and the response
+        metadata under the data/ directory.
+    .DESCRIPTION
+        Writes:
+          data/raw-release-info.md         Markdown body, UTF-8 + LF + no-BOM.
+          data/raw-release-info.meta.json  HTTP headers + fetch timestamp.
+
+        Returns the path of the Markdown body file. Throws on any
+        non-200 HTTP response.
+    #>
+    [OutputType([string])]
+    param(
+        [string]$Url       = $Script:ReleaseInfoUrl,
+        [int]   $TimeoutSec = 30
+    )
+
+    $rawPath  = Get-ReleaseInfoRawPath
+    $metaPath = Get-ReleaseInfoRawMetaPath
+    $dataDir  = Split-Path -Parent $rawPath
+    if (-not (Test-Path -LiteralPath $dataDir -PathType Container)) {
+        New-Item -Path $dataDir -ItemType Directory -Force | Out-Null
+    }
+
+    Write-Step ('Fetching release-info: {0}' -f $Url)
+
+    $resp = Invoke-WebRequest `
+        -Uri $Url `
+        -Method Get `
+        -UserAgent $Script:ReleaseInfoUserAgent `
+        -TimeoutSec $TimeoutSec `
+        -UseBasicParsing
+    if ($resp.StatusCode -ne 200) {
+        throw ('release-info fetch failed: HTTP {0} from {1}' -f $resp.StatusCode, $Url)
+    }
+
+    # Normalise body to UTF-8 + LF + no-BOM
+    $body = $resp.Content
+    if ($null -eq $body) {
+        throw ('release-info fetch returned empty body from {0}' -f $Url)
+    }
+    $body = ($body -replace "`r`n", "`n")
+    if (-not $body.EndsWith("`n")) { $body = $body + "`n" }
+    $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($body)
+    [System.IO.File]::WriteAllBytes($rawPath, $bodyBytes)
+
+    # Build a meta record
+    $headersFlat = New-Object 'System.Collections.Specialized.OrderedDictionary'
+    foreach ($k in $resp.Headers.Keys) {
+        $headersFlat[$k.ToLower()] = [string]($resp.Headers[$k])
+    }
+    $rawMeta = [pscustomobject]@{
+        Schema       = '1.0'
+        SourceUrl    = $Url
+        FetchedAt    = (Get-Date).ToUniversalTime().ToString('o')
+        StatusCode   = [int]$resp.StatusCode
+        BodyBytes    = $bodyBytes.Length
+        UserAgent    = $Script:ReleaseInfoUserAgent
+        Headers      = $headersFlat
+    }
+    $rawMetaJson = ($rawMeta | ConvertTo-Json -Depth 8) -replace "`r`n", "`n"
+    if (-not $rawMetaJson.EndsWith("`n")) { $rawMetaJson = $rawMetaJson + "`n" }
+    [System.IO.File]::WriteAllBytes($metaPath, [System.Text.Encoding]::UTF8.GetBytes($rawMetaJson))
+
+    Write-Ok ('  raw-release-info.md         : {0} bytes' -f $bodyBytes.Length)
+    Write-Ok ('  raw-release-info.meta.json  : {0} bytes' -f ([System.Text.Encoding]::UTF8.GetByteCount($rawMetaJson)))
+    return $rawPath
+}
+
+function Split-ReleaseInfoTableRow {
+    <#
+    .SYNOPSIS
+        Split a Markdown table row "| a | b | c |" into ['a','b','c'].
+        Strips the leading/trailing empty cells that result from the
+        outer pipes.
+    #>
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)] [string]$Line)
+    $parts = $Line -split '\|'
+    $parts = $parts | ForEach-Object { $_.Trim() }
+    if ($parts.Count -gt 0 -and $parts[0] -eq '') {
+        $parts = $parts[1..($parts.Count - 1)]
+    }
+    if ($parts.Count -gt 0 -and $parts[-1] -eq '') {
+        $parts = $parts[0..($parts.Count - 2)]
+    }
+    return ,([string[]]$parts)
+}
+
+function Test-ReleaseInfoTableSeparator {
+    <#
+    .SYNOPSIS
+        Return $true if the line is a Markdown table separator row
+        (e.g. '|---|:---|---:|'). False for everything else.
+    #>
+    [OutputType([bool])]
+    param([Parameter(Mandatory)] [string]$Line)
+    $stripped = $Line.Trim()
+    if (-not $stripped.StartsWith('|')) { return $false }
+    $cells = Split-ReleaseInfoTableRow -Line $stripped
+    if ($cells.Count -eq 0) { return $false }
+    foreach ($c in $cells) {
+        if ($c -notmatch '^:?-+:?$') { return $false }
+    }
+    return $true
+}
+
+function ConvertFrom-ReleaseInfoUpdateType {
+    <#
+    .SYNOPSIS
+        Decompose an Update type label like '2026-04 OOB' or '2026-04 B'
+        into (Year, Month, Letter). Unparseable input returns (0, 0, '?').
+    #>
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [string]$Label)
+    $m = [regex]::Match($Label.Trim(), '^(\d{4})-(\d{2})\s+(OOB|[A-E])$')
+    if (-not $m.Success) {
+        return [pscustomobject]@{ Year = 0; Month = 0; Letter = '?' }
+    }
+    return [pscustomobject]@{
+        Year   = [int]$m.Groups[1].Value
+        Month  = [int]$m.Groups[2].Value
+        Letter = [string]$m.Groups[3].Value
+    }
+}
+
+function ConvertFrom-ReleaseInfoKbCell {
+    <#
+    .SYNOPSIS
+        Extract (KbId, KbUrl) from a Markdown table cell like
+        '[KB5091122](https://...)' or bare 'KB5091122'.
+        An empty cell returns ('', '').
+    #>
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string]$Cell)
+    $trim = $Cell.Trim()
+    if ([string]::IsNullOrEmpty($trim)) {
+        return [pscustomobject]@{ KbId = ''; KbUrl = '' }
+    }
+    $m = [regex]::Match($trim, '\[?KB(\d{4,7})\]?\(?([^)]*)\)?')
+    if (-not $m.Success) {
+        return [pscustomobject]@{ KbId = ''; KbUrl = '' }
+    }
+    return [pscustomobject]@{
+        KbId  = ('KB' + $m.Groups[1].Value)
+        KbUrl = ($m.Groups[2].Value.Trim())
+    }
+}
+
+function ConvertFrom-ReleaseInfoMarkdown {
+    <#
+    .SYNOPSIS
+        Parse a release-info Markdown body into structured monthly
+        release rows and Hotpatch calendar rows.
+    .DESCRIPTION
+        Returns a pscustomobject with two array properties:
+
+          MonthlyReleases  : per-OS monthly release rows
+          HotpatchCalendar : per-OS / per-year hotpatch calendar rows
+
+        The parser is deliberately strict about header text and column
+        count; any drift in Microsoft's table format yields a warning
+        in stderr (the row is skipped) so the operator can review.
+        Returns empty arrays for sections the document does not contain.
+    #>
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [string]$Markdown)
+
+    $lines = $Markdown -split "`n"
+    $monthlyReleases  = New-Object System.Collections.Generic.List[object]
+    $hotpatchEntries  = New-Object System.Collections.Generic.List[object]
+
+    $section      = ''
+    $currentOsKey = ''
+    $currentBuild = ''
+    $currentYear  = 0
+    $osHeaderPattern = '\*\*Windows Server (\d{4})\s*\(OS build (\d+)\)\*\*'
+
+    $i = 0
+    while ($i -lt $lines.Count) {
+        $line     = $lines[$i]
+        $stripped = $line.Trim()
+
+        if ($stripped.StartsWith('## Windows Server release history')) {
+            $section = 'release-history'
+            $currentOsKey = ''
+            $i += 1
+            continue
+        }
+        if ($stripped.StartsWith('## Windows Server hotpatch calendar')) {
+            $section = 'hotpatch-calendar'
+            $currentOsKey = ''
+            $i += 1
+            continue
+        }
+        if ($stripped.StartsWith('## ') -and ($section -eq 'release-history' -or $section -eq 'hotpatch-calendar')) {
+            $section = ''
+            $currentOsKey = ''
+        }
+
+        $mOs = [regex]::Match($stripped, $osHeaderPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($mOs.Success -and ($section -eq 'release-history' -or $section -eq 'hotpatch-calendar')) {
+            $osYear  = $mOs.Groups[1].Value
+            $osBuild = $mOs.Groups[2].Value
+            $longName = ('Windows Server ' + $osYear)
+            $osShort = $null
+            if ($Script:ReleaseInfoLongToShort.ContainsKey($longName)) {
+                $osShort = $Script:ReleaseInfoLongToShort[$longName]
+            }
+            if ($osShort) {
+                $currentOsKey = $osShort
+                $currentBuild = $osBuild
+            } else {
+                $currentOsKey = ''
+            }
+            $i += 1
+            continue
+        }
+
+        $mYr = [regex]::Match($stripped, '^\*\*Calendar year (\d{4})\*\*$')
+        if ($mYr.Success -and $section -eq 'hotpatch-calendar') {
+            $currentYear = [int]$mYr.Groups[1].Value
+            $i += 1
+            continue
+        }
+
+        if ($stripped.StartsWith('|') -and -not [string]::IsNullOrEmpty($currentOsKey)) {
+            $headerCells = Split-ReleaseInfoTableRow -Line $stripped
+            $sepIdx = $i + 1
+            if ($sepIdx -ge $lines.Count -or -not (Test-ReleaseInfoTableSeparator -Line $lines[$sepIdx])) {
+                $i += 1
+                continue
+            }
+
+            $headerStr = ($headerCells -join '|')
+            $monthlyHdr  = ($Script:ReleaseInfoMonthlyHeaders  -join '|')
+            $hotpatchHdr = ($Script:ReleaseInfoHotpatchHeaders -join '|')
+
+            $kind = ''
+            if ($section -eq 'release-history'  -and $headerStr -eq $monthlyHdr)  { $kind = 'monthly' }
+            elseif ($section -eq 'hotpatch-calendar' -and $headerStr -eq $hotpatchHdr) { $kind = 'hotpatch' }
+
+            if ($kind -eq '') {
+                Write-Warn ('  release-info parser: unrecognised table header in section {0!s} for {1}: {2!s}' -f $section, $currentOsKey, $headerCells)
+                $i = $sepIdx
+                continue
+            }
+
+            # Collect rows
+            $k = $sepIdx + 1
+            while ($k -lt $lines.Count) {
+                $rl = $lines[$k]
+                if (-not $rl.TrimStart().StartsWith('|')) { break }
+                $rowCells = Split-ReleaseInfoTableRow -Line $rl
+
+                if ($kind -eq 'monthly') {
+                    if ($rowCells.Count -ne $Script:ReleaseInfoMonthlyHeaders.Count) {
+                        Write-Warn ('  release-info parser: skipping monthly row with {0} columns for {1}' -f $rowCells.Count, $currentOsKey)
+                        $k += 1
+                        continue
+                    }
+                    $servicing = $rowCells[0]
+                    $updateType = $rowCells[1]
+                    $availDate = $rowCells[2]
+                    $buildAfter = $rowCells[3]
+                    $kbCell    = $rowCells[4]
+                    $ut = ConvertFrom-ReleaseInfoUpdateType -Label $updateType
+                    $kb = ConvertFrom-ReleaseInfoKbCell      -Cell  $kbCell
+                    $monthlyReleases.Add([pscustomobject]@{
+                        OsShortName      = $currentOsKey
+                        OsBuild          = $currentBuild
+                        ServicingOption  = $servicing
+                        UpdateType       = $updateType
+                        UpdateTypeYear   = $ut.Year
+                        UpdateTypeMonth  = $ut.Month
+                        UpdateTypeLetter = $ut.Letter
+                        AvailabilityDate = $availDate
+                        BuildAfterUpdate = $buildAfter
+                        KbId             = $kb.KbId
+                        KbUrl            = $kb.KbUrl
+                    }) | Out-Null
+                } elseif ($kind -eq 'hotpatch') {
+                    while ($rowCells.Count -gt $Script:ReleaseInfoHotpatchHeaders.Count -and $rowCells[-1] -eq '') {
+                        $rowCells = $rowCells[0..($rowCells.Count - 2)]
+                    }
+                    if ($rowCells.Count -ne $Script:ReleaseInfoHotpatchHeaders.Count) {
+                        Write-Warn ('  release-info parser: skipping hotpatch row with {0} columns for {1}' -f $rowCells.Count, $currentOsKey)
+                        $k += 1
+                        continue
+                    }
+                    $monthName    = $rowCells[0]
+                    $updateType   = $rowCells[1]
+                    $hotpatchType = $rowCells[2]
+                    $availDate    = $rowCells[3]
+                    $buildAfter   = $rowCells[4]
+                    $kbCell       = $rowCells[5]
+                    $monthNumber = 0
+                    if ($Script:ReleaseInfoMonthNameToNumber.ContainsKey($monthName)) {
+                        $monthNumber = [int]$Script:ReleaseInfoMonthNameToNumber[$monthName]
+                    }
+                    $kb = ConvertFrom-ReleaseInfoKbCell -Cell $kbCell
+                    $isBaseline = ($hotpatchType.ToLower().Contains('baseline'))
+                    $hotpatchEntries.Add([pscustomobject]@{
+                        OsShortName      = $currentOsKey
+                        OsBuild          = $currentBuild
+                        CalendarYear     = $currentYear
+                        MonthName        = $monthName
+                        MonthNumber      = $monthNumber
+                        UpdateType       = $updateType
+                        HotpatchType     = $hotpatchType
+                        IsBaseline       = $isBaseline
+                        AvailabilityDate = $availDate
+                        BuildAfterUpdate = $buildAfter
+                        KbId             = $kb.KbId
+                        KbUrl            = $kb.KbUrl
+                    }) | Out-Null
+                }
+                $k += 1
+            }
+            $i = $k
+            continue
+        }
+
+        $i += 1
+    }
+
+    return [pscustomobject]@{
+        MonthlyReleases  = @($monthlyReleases.ToArray())
+        HotpatchCalendar = @($hotpatchEntries.ToArray())
+    }
+}
+
+function Update-ReleaseInfoCache {
+    <#
+    .SYNOPSIS
+        Read data/raw-release-info.md, parse it, and write the result to
+        data/cache-release-info.json (UTF-8 + LF + no-BOM).
+    .DESCRIPTION
+        Throws if the raw file is missing. The caller is expected to
+        have invoked Invoke-ReleaseInfoFetch (or an equivalent CI step)
+        beforehand.
+
+        Returns a summary pscustomobject with row counts so callers can
+        log the outcome without re-reading the cache file.
+    #>
+    [OutputType([pscustomobject])]
+    param()
+    $rawPath   = Get-ReleaseInfoRawPath
+    $cachePath = Get-ReleaseInfoCachePath
+    if (-not (Test-Path -LiteralPath $rawPath -PathType Leaf)) {
+        throw ('release-info raw file not found at "{0}". Run Invoke-ReleaseInfoFetch first.' -f $rawPath)
+    }
+    Write-Step ('Parsing release-info: {0}' -f $rawPath)
+
+    $bytes = [System.IO.File]::ReadAllBytes($rawPath)
+    $markdown = [System.Text.Encoding]::UTF8.GetString($bytes)
+    $parsed = ConvertFrom-ReleaseInfoMarkdown -Markdown $markdown
+
+    # Per-OS counts
+    $perOsMonthly  = @{}
+    foreach ($r in $parsed.MonthlyReleases)  {
+        $k = [string]$r.OsShortName
+        if (-not $perOsMonthly.ContainsKey($k))  { $perOsMonthly[$k]  = 0 }
+        $perOsMonthly[$k]  = [int]$perOsMonthly[$k]  + 1
+    }
+    $perOsHotpatch = @{}
+    foreach ($h in $parsed.HotpatchCalendar) {
+        $k = [string]$h.OsShortName
+        if (-not $perOsHotpatch.ContainsKey($k)) { $perOsHotpatch[$k] = 0 }
+        $perOsHotpatch[$k] = [int]$perOsHotpatch[$k] + 1
+    }
+
+    $cache = [pscustomobject]@{
+        Schema             = '1.0'
+        GeneratedAt        = (Get-Date).ToUniversalTime().ToString('o')
+        SourceUrl          = $Script:ReleaseInfoUrl
+        RawMarkdownPath    = (Split-Path -Leaf $rawPath)
+        MonthlyRowCount    = [int]$parsed.MonthlyReleases.Count
+        HotpatchRowCount   = [int]$parsed.HotpatchCalendar.Count
+        PerOsMonthlyCounts = $perOsMonthly
+        PerOsHotpatchCounts = $perOsHotpatch
+        MonthlyReleases    = $parsed.MonthlyReleases
+        HotpatchCalendar   = $parsed.HotpatchCalendar
+    }
+
+    $json = ($cache | ConvertTo-Json -Depth 32) -replace "`r`n", "`n"
+    if (-not $json.EndsWith("`n")) { $json = $json + "`n" }
+    $jsonBytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+    [System.IO.File]::WriteAllBytes($cachePath, $jsonBytes)
+
+    Write-Ok ('  cache-release-info.json     : {0} monthly rows, {1} hotpatch rows ({2} bytes)' -f $cache.MonthlyRowCount, $cache.HotpatchRowCount, $jsonBytes.Length)
+
+    return [pscustomobject]@{
+        MonthlyRowCount    = $cache.MonthlyRowCount
+        HotpatchRowCount   = $cache.HotpatchRowCount
+        PerOsMonthlyCounts = $perOsMonthly
+        PerOsHotpatchCounts = $perOsHotpatch
+    }
+}
+
+function Get-ReleaseInfoCache {
+    <#
+    .SYNOPSIS
+        Read data/cache-release-info.json and return the deserialised
+        object. Throws if the file is missing.
+    .DESCRIPTION
+        Refresher consumers (Resolve-PatchSetFromReleaseInfo and its
+        peers, added in a later commit) call this to read the cache
+        without re-parsing the raw Markdown on every build.
+    #>
+    [OutputType([pscustomobject])]
+    param()
+    $cachePath = Get-ReleaseInfoCachePath
+    if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
+        throw ('release-info cache not found at "{0}". Run Update-ReleaseInfoCache first.' -f $cachePath)
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($cachePath)
+    $json  = [System.Text.Encoding]::UTF8.GetString($bytes)
+    return ($json | ConvertFrom-Json)
+}
+
+# ============================================================
 # ISO Updater specific: Microsoft Update Catalog scraper
 # ============================================================
 #

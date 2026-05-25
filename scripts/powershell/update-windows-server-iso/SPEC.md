@@ -2802,6 +2802,19 @@ This project does not auto-detect target firmware (the target is by definition n
 | `Export-PatchValidationReport` | Emit 4 diagnostic files on validation failure |
 | `Invoke-SetupPhase03_RefreshPatchBaseline` | P03 phase worker |
 | `Invoke-PlanPhase06_ValidatePatchSet` | P06 phase worker |
+| **release-info support (r07.0 Step 2a)** ||
+| `Get-DataDirectoryPath` (r07.0) | Resolve `data/` next to the script for every cache- and raw- accessor |
+| `Get-ReleaseInfoRawPath` (r07.0) | Resolve `data/raw-release-info.md` |
+| `Get-ReleaseInfoRawMetaPath` (r07.0) | Resolve `data/raw-release-info.meta.json` |
+| `Get-ReleaseInfoCachePath` (r07.0) | Resolve `data/cache-release-info.json` |
+| `Invoke-ReleaseInfoFetch` (r07.0) | Fetch the Microsoft Learn release-info Markdown via `?accept=text/markdown`; write raw + meta to `data/` |
+| `Split-ReleaseInfoTableRow` (r07.0) | Split a Markdown table row into trimmed cell array |
+| `Test-ReleaseInfoTableSeparator` (r07.0) | True if a line is a Markdown table separator (`|---|---|`) |
+| `ConvertFrom-ReleaseInfoUpdateType` (r07.0) | Decompose '2026-04 B' / '2026-04 OOB' into (Year, Month, Letter) |
+| `ConvertFrom-ReleaseInfoKbCell` (r07.0) | Extract (KbId, KbUrl) from a Markdown KB-link cell |
+| `ConvertFrom-ReleaseInfoMarkdown` (r07.0) | Strict parser; returns MonthlyReleases + HotpatchCalendar arrays |
+| `Update-ReleaseInfoCache` (r07.0) | Read `raw-release-info.md`, parse, write `cache-release-info.json` |
+| `Get-ReleaseInfoCache` (r07.0) | Read deserialised `cache-release-info.json` for Refresher consumers |
 
 ---
 
@@ -2826,6 +2839,7 @@ PowerShell 7+. No `pip install` is required.
 | `tests/powershell_harness.py`   (T3) | Python-side unit tests of `Update-WindowsServerIso.ps1` functions via the `-Action TestHarness` REPL hook (see §B.17). Asserts `Get-CatalogQueryTemplate`, `Select-AllCanonicalPatchFiles`, `Select-CanonicalPatchFile`, `Get-KbIdFromUpdateTitle`, `Test-IsCombinedLcuTitle`. | No  |
 | `tests/eval_iso_probe.py`       (T4) | HTTP Range-GET against every `LanguageSpecific.<lang>.Iso.Url` in each `data/config-Server<N>.json`; reports total size and `Last-Modified`. Detects snapshot rotation (see §D.11). | Yes |
 | `tests/wsusscn2_probe.py`       (T5) | HTTP Range-GET against `wsusscn2.cab`; warns when the cab is older than 60 days. Detects egress-proxy `host_not_allowed` and reports it separately from real Microsoft outages. | Yes |
+| `tests/release_info_parser_test.py` (T6) | Offline regression test for `ConvertFrom-ReleaseInfoMarkdown`. Parses `tests/snapshots/poc_release_info/release-info-<date>.md` via the TestHarness and asserts row counts (total + per-OS), KbId-parse coverage, and IsBaseline detection against the PoC reference fixture `tests/fixtures/poc_release_info/release-info.json`. Added in r07.0 Step 2a as the regression gate for the PowerShell port of `poc_release_info_02_parse.py`. | No  |
 
 `tests/common/` holds:
 
