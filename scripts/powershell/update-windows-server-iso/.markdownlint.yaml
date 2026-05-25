@@ -1,0 +1,44 @@
+## @file .markdownlint.yaml
+## Markdownlint configuration for update-windows-server-iso project.
+##
+## Rules and rationale (deviations from default documented below):
+##
+## - MD013 (line length): we use line_length=120 (matches Microsoft
+##   secureboot_objects). code_blocks=false because PSAxxxx rule
+##   references and oscdimg command lines often legitimately exceed
+##   120 chars. tables=false for the same reason — Phase reference
+##   tables in README.md / SPEC.md have descriptive Notes columns
+##   that read more naturally without forced wrapping.
+##
+## - MD033 (inline HTML): we only allow <br> (used inside Markdown
+##   tables to introduce hard line breaks where the table grammar
+##   cannot accept a backslash-n or a blank line).
+##
+## - MD041 (first line in file must be a top-level heading): disabled.
+##   CHANGELOG.md and tests/README.md open with informational notes
+##   above the H1 by convention (Keep a Changelog format etc.).
+##
+## - MD024 (no duplicate heading text): disabled. CHANGELOG.md
+##   intentionally repeats "Added", "Changed", "Breaking changes"
+##   across release entries; this is Keep a Changelog convention,
+##   not a documentation defect.
+##
+## Source pattern: microsoft/secureboot_objects/.markdownlint.yaml
+## (auto-synced from Mu DevOps). Adapted for this project's conventions.
+##
+## Reference: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+default: true
+
+MD013:
+  line_length: 120
+  code_blocks: false
+  tables: false
+  headings: false
+
+MD033:
+  allowed_elements:
+    - br
+
+MD041: false   # first line is not always a heading (CHANGELOG / tests/README)
+MD024: false   # duplicate "Added"/"Changed" headings are intentional per Keep a Changelog

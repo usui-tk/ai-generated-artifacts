@@ -1440,9 +1440,51 @@ by running `-Action RefreshAllBaselines` or by passing a newer
 
 **Reference URLs:**
 
-- Microsoft KB / Support: [Updating Windows bootable media to use the PCA2023-signed boot manager](https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f) (the official end-to-end procedure documentation)
-- GitHub: [microsoft/secureboot_objects Make2023BootableMedia.ps1](https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1) (Version 1.4 was the snapshot analyzed; future versions may diverge)
-- TechCommunity: [Windows Server Secure Boot playbook for certificates expiring in 2026](https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789) (Server 2025 firmware status)
+- Microsoft KB / Support: [Updating Windows bootable media to use the PCA2023-signed boot manager](https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f) — **KB ID 5053484**, original publish date 2025-02-04. Authoritative end-to-end procedure documentation.
+- GitHub: [microsoft/secureboot_objects Make2023BootableMedia.ps1](https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1) — Version 1.4 (2026-03-13) was the snapshot analyzed for r05.0; future versions may diverge.
+- TechCommunity: [Windows Server Secure Boot playbook for certificates expiring in 2026](https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789) (Server 2025 firmware status).
+- Microsoft KB 5025885: [How to manage the Windows Boot Manager revocations for Secure Boot changes associated with CVE-2023-24932](https://support.microsoft.com/kb/5025885) — BlackLotus mitigation programme that drives the PCA2011 revocation timeline.
+
+**KB 5053484 official "Applies To" set.** Per the support article header, the procedure officially covers Windows Server 2012, 2012 R2, 2016, 2019, 2022 plus the Windows 10 / 11 client SKUs back to version 1607. **Server 2025 is NOT listed** — its firmware-provided 2023 certificates make the procedure unnecessary. This project mirrors the official scope:
+
+- P10 ConvertPca2023BootManager defaults to enabled for Server 2016/2019/2022.
+- For Server 2025, P10 requires both `-EnablePca2023BootManager` and `-ForcePca2023OnServer2025` (operator-acknowledged override).
+- Client SKUs (Windows 10/11) and Server 2012/R2 are out of scope for this project, but the underlying technique applies to them per the KB.
+
+**Make2023BootableMedia.ps1 `-MediaPath` accepts three forms.** Upstream supports:
+
+1. An ISO file path (`.iso`)
+2. A local directory containing the expanded media tree
+3. A network share path (`\\server\share\Media\`)
+
+This project's wrapper currently operates on only one form — the local extracted media tree under `<WorkRoot>/source/extracted/` produced by P05 ExpandIso. The narrowing is intentional: the surrounding pipeline (patching, oscdimg re-assembly, hash verification) requires the directory form for repeatability and auditability. Operators who only need to flip an existing ISO without re-patching it should use `-Pca2023OnlyMode` (read-only inspection) or invoke `Make2023BootableMedia.ps1` directly out of band.
+
+
+### D.23 UEFI Secure Boot defaults templates (informational, r05.0+)
+
+The `microsoft/secureboot_objects` repository ships five reference UEFI Secure Boot configurations under `Templates/` (each as a TOML file describing PK/KEK/db/dbx contents). These are NOT consumed directly by this project — they describe **firmware-layer** Secure Boot variables, not the OS-layer boot manager signing that P10 / P12 operate on. But operators provisioning Server 2026+ hardware need to understand which template their target firmware is based on, because that determines whether PCA2023-signed media will actually boot.
+
+| Template | db contains | KEK | When firmware uses this |
+|---|---|---|---|
+| **MicrosoftOnly** | Windows UEFI CA 2023 only | MS Corporation KEK 2K CA 2023 | Windows-only, most restrictive. Firmware revokes PCA2011. PCA2023-signed media REQUIRED. |
+| **MicrosoftAndOptionRoms** | 2023 db + Option ROM 2023 CA | MS Corporation KEK 2K CA 2023 | Windows + Option ROM (e.g., RAID controllers, GPU firmware). PCA2023-signed media REQUIRED. |
+| **MicrosoftAndThirdParty** | 2023 db + 3P UEFI 2023 CA | MS Corporation KEK 2K CA 2023 | Default for current Server 2025 certified platforms. 3P boot loaders (Linux distros etc.) also work. |
+| **MostCompatible** | 2011 + 2023 db + 3P 2011 + 3P 2023 | MS Corporation KEK CA 2011 + KEK 2K CA 2023 | Transitional. PCA2011-signed and PCA2023-signed media BOTH boot. Most current shipping hardware. |
+| **LegacyFirmwareDefaults** | 2011 db + 3P 2011 | MS Corporation KEK CA 2011 | Legacy. PCA2011-signed media REQUIRED. Pre-2026-06 hardware that has NOT received the BlackLotus mitigation revocations. |
+
+**Why this matters operationally.** When an operator runs P12 against an ISO and gets `Health = Warning` ("PCA2011 boot manager, but EFI_EX staging present, P10 can promote"), the decision of whether to actually run P10 depends on the **target firmware's template**:
+
+- Target firmware is **LegacyFirmwareDefaults** → PCA2023 media may FAIL to boot. Do NOT run P10. The existing PCA2011 media is correct for this hardware.
+- Target firmware is **MostCompatible** → either signing works. Running P10 is forward-compatible but not required today.
+- Target firmware is **MicrosoftAndThirdParty** / **MicrosoftAndOptionRoms** / **MicrosoftOnly** → PCA2023 signing is REQUIRED for new builds, P10 must run.
+
+This project does not auto-detect target firmware (the target is by definition not the host running the build). The operator is expected to know which template their target hardware fleet uses. The defaults documented in `Config/<OsKey>.json#/Pca2023` reflect the **most common case for new hardware in 2026**, which is `MicrosoftAndThirdParty` for Server 2025 firmware and the transitional / legacy templates for older Server SKUs.
+
+**References:**
+
+- [microsoft/secureboot_objects/Templates/Readme.md](https://github.com/microsoft/secureboot_objects/blob/main/Templates/Readme.md) — EFI Signature List structure walkthrough.
+- [microsoft/secureboot_objects/scripts/information/imaging_binaries_information.md](https://github.com/microsoft/secureboot_objects/blob/main/scripts/information/imaging_binaries_information.md) — PKCS7 / EFI_VARIABLE_AUTHENTICATION_2 descriptor layout for tools provisioning firmware variables (out of scope for this project, but relevant context for tools like WinPE `SetFirmwareVariableEx`).
+- [UEFI Specification §32: Secure Boot and Driver Signing](https://uefi.org/specs/UEFI/2.10/32_Secure_Boot_and_Driver_Signing.html) — the underlying specification.
 
 ---
 

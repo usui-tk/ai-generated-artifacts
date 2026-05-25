@@ -242,6 +242,93 @@ def test_format_pca2023_readiness_for_report_empty_snapshot(ps: PSSession) -> Te
 
 
 # -----------------
+# r05.0 post-Stage-B: Pca2023 readiness schema validation
+# -----------------
+# Modelled on microsoft/secureboot_objects test_validate_dbx_references.py
+# (7-axis pattern: absent / empty / invalid JSON / missing field / etc.).
+# Each test exercises one axis of input-space corruption and asserts the
+# error path is exercised correctly.
+
+
+def test_get_iso_boot_cert_readiness_nonexistent_media(ps: PSSession) -> TestOutcome:
+    """Axis 1: ExtractedMediaPath does not exist. Should return an
+    inventory object with .Available=$false and a descriptive
+    ErrorMessage mentioning boot.wim absence."""
+    name = 'Get-IsoBootCertReadiness nonexistent-media axis'
+    bogus = '/tmp/nonexistent_extracted_media_for_t3_test'
+    try:
+        result = ps.invoke('Get-IsoBootCertReadiness', ExtractedMediaPath=bogus)
+    except PSHarnessError as exc:
+        return TestOutcome(name, False, f'invoke raised: {exc}')
+    if not isinstance(result, dict):
+        return TestOutcome(name, False, f'expected dict, got {type(result).__name__}')
+    available = result.get('Available')
+    err = result.get('ErrorMessage') or ''
+    if available is False and 'boot.wim' in err.lower():
+        return TestOutcome(name, True, f'.Available=False, ErrorMessage mentions boot.wim')
+    return TestOutcome(name, False,
+                       f'unexpected shape: Available={available!r} ErrorMessage={err!r}')
+
+
+def test_get_iso_boot_cert_readiness_schema_completeness(ps: PSSession) -> TestOutcome:
+    """Axis 2: schema field completeness. The error-path inventory must
+    still carry every documented Pca2023Snapshot field so downstream
+    consumers (P12 JSON serialization, P13 summary) never AttributeError.
+    Mirrors the DBX validator's "missing field" test."""
+    name = 'Get-IsoBootCertReadiness schema-completeness axis'
+    expected_fields = {
+        'Source', 'Generated', 'Available', 'ErrorMessage',
+        'ExtractedMediaPath',
+        'HasEfiExDir', 'HasBootMgrFwEx', 'HasBootMgrEx',
+        'HasFontsEx', 'HasDvdEx', 'HasEfisysExBin',
+        'BootX64SignerName', 'BootX64IsPca2023', 'BootX64IsPca2011',
+        'BootX64ChainTokens', 'BootX64Available',
+        'InstallWimHighestKb', 'InstallWimHighestKbDate',
+        'InstallWimMeetsPca2023Prereq',
+        'BootWimHighestKb', 'BootWimHighestKbDate',
+        'BootWimMeetsPca2023Prereq',
+        'UEFICA2023Status', 'UEFICA2023Error', 'AvailableUpdatesHex',
+    }
+    bogus = '/tmp/nonexistent_extracted_media_for_t3_test'
+    try:
+        result = ps.invoke('Get-IsoBootCertReadiness', ExtractedMediaPath=bogus)
+    except PSHarnessError as exc:
+        return TestOutcome(name, False, f'invoke raised: {exc}')
+    if not isinstance(result, dict):
+        return TestOutcome(name, False, f'expected dict, got {type(result).__name__}')
+    got_fields = set(result.keys())
+    missing = expected_fields - got_fields
+    if not missing:
+        return TestOutcome(name, True,
+                           f'all {len(expected_fields)} schema fields present in error-path inventory')
+    return TestOutcome(name, False, f'missing fields: {sorted(missing)}')
+
+
+def test_get_pca2023_readiness_snapshot_health_enum(ps: PSSession) -> TestOutcome:
+    """Axis 3: Health field constrained-value contract. P12 / P13
+    callers rely on Health being one of a fixed enum. Verify the
+    error-path snapshot uses one of {'Healthy', 'Warning', 'Critical',
+    'Unknown'} - never $null, never an empty string, never a free-form
+    string."""
+    name = 'Get-Pca2023ReadinessSnapshot Health-enum axis'
+    valid_health = {'Healthy', 'Warning', 'Critical', 'Unknown'}
+    bogus = '/tmp/nonexistent_extracted_media_for_t3_test'
+    workroot = '/tmp/nonexistent_workroot_for_t3_test'
+    try:
+        result = ps.invoke('Get-Pca2023ReadinessSnapshot',
+                           ExtractedMediaPath=bogus, WorkRoot=workroot)
+    except PSHarnessError as exc:
+        return TestOutcome(name, False, f'invoke raised: {exc}')
+    if not isinstance(result, dict):
+        return TestOutcome(name, False, f'expected dict, got {type(result).__name__}')
+    health = result.get('Health')
+    if health in valid_health:
+        return TestOutcome(name, True, f'Health="{health}" (in valid enum)')
+    return TestOutcome(name, False,
+                       f'Health="{health}" is NOT one of {sorted(valid_health)}')
+
+
+# -----------------
 # Orchestrator
 # -----------------
 
@@ -257,6 +344,10 @@ ALL_TESTS: List[Callable[[PSSession], TestOutcome]] = [
     test_test_pca2023_authenticode_chain_missing_file,
     test_get_lcu_version_missing_mount,
     test_format_pca2023_readiness_for_report_empty_snapshot,
+    # r05.0 post-Stage-B - schema validation (Microsoft DBX validator pattern)
+    test_get_iso_boot_cert_readiness_nonexistent_media,
+    test_get_iso_boot_cert_readiness_schema_completeness,
+    test_get_pca2023_readiness_snapshot_health_enum,
 ]
 
 

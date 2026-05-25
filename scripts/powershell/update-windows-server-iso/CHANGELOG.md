@@ -218,6 +218,75 @@ name or who have wired specific Phase-IDs into their own runbooks.
   / `write_text` normalise CR/LF, which would have violated the
   `.gitattributes` `*.ps1 text eol=crlf` policy).
 
+### Added (post-Stage-B integration from microsoft/secureboot_objects)
+
+The following six improvements were folded into the r05.0 release
+after a second-pass audit of the upstream Microsoft repository
+(microsoft/secureboot_objects @ main). They are NOT bug fixes;
+they are quality / documentation upgrades surfaced by the audit.
+
+- **oscdimg.exe SHA-256 supply-chain integrity check** (`Resolve-OscdimgExe`).
+  After locating `oscdimg.exe`, the function now compares the binary's
+  SHA-256 against Microsoft's reference hash for the current
+  architecture (AMD64 / ARM64 / x86), lifted verbatim from
+  `Make2023BootableMedia.ps1#$global:oscdimg_known_hashes` Version 1.4.
+  Mismatch is ADVISORY (warning only), because ADK-installed binaries
+  may legitimately differ across ADK versions. The check still detects
+  the high-impact failure mode: a malicious binary swap on the host
+  running the script.
+
+- **NTFS filesystem check in workspace preflight** (`Assert-WorkspacePreflight`).
+  Adds a "Check 3" after the disk-space check: confirms the drive
+  hosting `-WorkRoot` is formatted as NTFS. WIM mount and DISM
+  operations rely on NTFS-only reparse-point / per-stream-metadata
+  semantics; ReFS or FAT32 produce silent corruption. Mirrors
+  Microsoft's own
+  `Make2023BootableMedia.ps1#Initialize-StagingDirectory` enforcement.
+  Skipped under `-DryRun` and on non-Windows pwsh hosts (synthetic CI).
+
+- **SPEC.md D.23 — UEFI Secure Boot defaults templates (informational)**.
+  New section documenting the five reference templates from
+  `microsoft/secureboot_objects/Templates/` (`MicrosoftOnly`,
+  `MicrosoftAndOptionRoms`, `MicrosoftAndThirdParty`,
+  `MostCompatible`, `LegacyFirmwareDefaults`) and how target firmware
+  template choice affects whether to run P10. These templates describe
+  firmware-layer Secure Boot variables and are out of scope for direct
+  consumption, but operators need to understand them to interpret P12
+  output correctly. Includes a per-template "PCA2023 media required?"
+  decision matrix.
+
+- **SPEC.md D.22 — KB 5053484 official scope + `-MediaPath` form
+  details**. Promoted from a fuzzy "Microsoft KB documentation" link
+  to an explicit "Applies To" enumeration (Server 2012/R2/2016/2019/2022
+  + Windows 10/11 client SKUs; Server 2025 deliberately not listed)
+  and a documented narrowing rationale (upstream `-MediaPath` accepts
+  ISO / directory / network share; this project's pipeline operates on
+  the extracted-tree form only for repeatability and auditability).
+  README.md and README.ja.md gain a one-paragraph summary of the same.
+
+- **T3 schema-validation tests** (`tests/powershell_harness.py`).
+  Three new tests modelled on
+  `microsoft/secureboot_objects/scripts/test_validate_dbx_references.py`
+  7-axis pattern (absent / empty / invalid JSON / missing field /
+  ...). Coverage added:
+  1. `Get-IsoBootCertReadiness` non-existent media → `.Available=$false`
+     + `.ErrorMessage` mentions boot.wim
+  2. `Get-IsoBootCertReadiness` schema completeness — the error-path
+     inventory must still carry every documented snapshot field so
+     P12 JSON serialization / P13 summary never AttributeError
+  3. `Get-Pca2023ReadinessSnapshot` Health enum constraint — must be
+     one of `{Healthy, Warning, Critical, Unknown}` even on the
+     error path; never `$null` or free-form string
+
+- **`.markdownlint.yaml` configuration file**. New project-root
+  markdown lint config adapted from
+  `microsoft/secureboot_objects/.markdownlint.yaml`. Adjusted for
+  this project's conventions: line_length=120, code_blocks=false,
+  tables=false; MD024 (duplicate headings) and MD041 (must-open-
+  with-heading) disabled per Keep a Changelog and tests/README
+  conventions. The file is opt-in for contributors who run
+  markdownlint locally; CI is not yet wired to enforce it.
+
 ## [update-wsi-2026.05.25-r04.4] - 2026-05-25
 
 ### Added - Self-verification tool suite (`tests/`)

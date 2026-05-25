@@ -285,8 +285,20 @@ still signed via the 2011 chain. P10 / P12 address this:
   run ONLY P12 against an existing ISO. No download, no DISM
   mount of install.wim, no ISO re-assembly.
 
-See `SPEC.md` Part D.22 for the design lessons learned, and
-`SPEC.md` B.18 for the operational model.
+**Official scope (Microsoft KB 5053484).** The upstream procedure
+officially applies to Windows Server 2012/R2/2016/2019/2022 plus
+Windows 10/11 client SKUs back to version 1607. **Server 2025 is
+deliberately NOT listed** in the official "Applies To" set — its
+firmware-provided 2023 certificates make the procedure unnecessary.
+This project mirrors the official scope: Server 2016/2019/2022 are
+default-targeted by P10, while Server 2025 requires explicit
+`-ForcePca2023OnServer2025` opt-in. Client SKUs are out of scope
+for this project entirely.
+
+See `SPEC.md` Part D.22 (design lessons learned), `SPEC.md` B.18
+(operational model), and `SPEC.md` D.23 (UEFI Secure Boot template
+profiles and how to choose the right setting for your target
+hardware firmware).
 
 ## Parameters (selected)
 

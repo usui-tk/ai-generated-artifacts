@@ -2177,6 +2177,53 @@ function Assert-WorkspacePreflight {
         throw ('Workspace preflight failed: drive {0}: has only {1} GB free; {2} GB minimum required to host an end-to-end PrepareBuildVerify run. Free up space or pass -WorkRoot on a larger drive.' -f $driveLetter, $freeGB, $minFreeGB)
     }
     Write-Ok ('Drive {0}: OK ({1} GB free, {2} GB required).' -f $driveLetter, $freeGB, $minFreeGB)
+
+    # ---- Check 3: NTFS filesystem on WorkRoot ----
+    # WIM mount + DISM operations rely on NTFS-only features:
+    #   - Reparse points (used by Mount-WindowsImage to anchor mount targets)
+    #   - Per-stream metadata (DISM /Cleanup-Image relies on this)
+    #   - Hard-link semantics (Export-WindowsImage)
+    # ReFS lacks some of these in earlier versions; FAT32/exFAT lacks all.
+    # Microsoft's own Make2023BootableMedia.ps1 (Initialize-StagingDirectory,
+    # secureboot_objects repo) enforces the same constraint with an
+    # explicit "must target an NTFS formatted file system" check. We
+    # mirror that here so a misconfigured -WorkRoot fails the preflight
+    # rather than producing silently corrupt WIM mounts later.
+    #
+    # Skipped under -DryRun (no actual WIM mounts will happen) and on
+    # non-Windows hosts (where Get-Volume is unavailable). For non-Windows
+    # the check is silent — Linux-side validation already happens via
+    # the PSScriptAnalyzer / synthetic-test pathway.
+    if ($Script:DryRun) {
+        Write-Skip 'DryRun: skipping filesystem-type check.'
+        return
+    }
+    if (-not $IsWindows -and (Get-Variable -Name 'IsWindows' -ErrorAction SilentlyContinue)) { # psa-disable-line PSA2001 -- $IsWindows is a PowerShell 6+ automatic variable; psa.py's AUTO_VARS list predates Core
+        # Non-Windows pwsh - synthetic CI path; skip silently.
+        return
+    }
+    try {
+        $vol = Get-Volume -DriveLetter $driveLetter -ErrorAction Stop
+        $fs  = $vol.FileSystem
+        if ($fs -ieq 'NTFS') {
+            Write-Ok ('Drive {0}: filesystem OK (NTFS).' -f $driveLetter)
+        } else {
+            Add-ErrorJsonlEntry -Phase 'P01' -Kind 'workspace-preflight' -Properties @{
+                check        = 'filesystem-type'
+                driveLetter  = $driveLetter
+                fileSystem   = $fs
+                required     = 'NTFS'
+            }
+            throw ('Workspace preflight failed: drive {0}: is formatted as "{1}" but WIM mount + DISM operations require NTFS. Reformat the drive as NTFS or pass -WorkRoot on an NTFS-backed path. (This requirement mirrors Microsoft Make2023BootableMedia.ps1 / Initialize-StagingDirectory, which enforces the same constraint for the same reason.)' -f $driveLetter, $fs)
+        }
+    } catch [System.Management.Automation.CommandNotFoundException] {
+        # Get-Volume not available on older PowerShell or non-Windows
+        Write-Warn ('Get-Volume not available; skipping filesystem-type check on drive {0}.' -f $driveLetter)
+    } catch {
+        # Re-throw the original throw if it was ours
+        if ($_.Exception.Message -like 'Workspace preflight failed:*') { throw }
+        Write-Warn ('Filesystem-type check could not be completed: {0}' -f $_.Exception.Message)
+    } # psa-disable-line PSA3004 -- intentional best-effort filesystem type detection; CommandNotFoundException is expected on non-Windows
 }
 
 # ============================================================
@@ -3998,19 +4045,92 @@ function Resolve-EfisysBin {
 function Resolve-OscdimgExe {
     <#
     .SYNOPSIS
-        Locate oscdimg.exe under the ADK Deployment Tools.
+        Locate oscdimg.exe under the ADK Deployment Tools and verify
+        the binary against Microsoft's official Make2023BootableMedia.ps1
+        symbol-server-distributed reference hashes.
+
+    .DESCRIPTION
+        Returns the absolute path to a usable oscdimg.exe. Also emits an
+        advisory message indicating whether the located binary matches
+        Microsoft's "ground-truth" SHA-256 for the current architecture.
+
+        The reference hash table is lifted verbatim from Microsoft's
+        secureboot_objects repository
+        (scripts/windows/Make2023BootableMedia.ps1 Version 1.4,
+        $global:oscdimg_known_hashes). These hashes correspond to the
+        oscdimg.exe binaries distributed via Microsoft's public symbol
+        server (https://msdl.microsoft.com/download/symbols/).
+
+        IMPORTANT: ADK-installed oscdimg.exe binaries may legitimately
+        have DIFFERENT hashes per ADK version. A hash mismatch is therefore
+        treated as ADVISORY (warning), NOT a hard failure. The check still
+        serves a critical purpose: detecting supply-chain attacks where
+        the oscdimg.exe binary has been swapped for a malicious version
+        on the host running this script.
+
+    .OUTPUTS
+        [string] - absolute path to oscdimg.exe
     #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    # Microsoft official oscdimg.exe SHA-256 hashes (from secureboot_objects
+    # Make2023BootableMedia.ps1 Version 1.4 / 2026-03-13). These are the
+    # hashes of binaries downloaded from the Microsoft public symbol server.
+    $knownHashes = @{
+        'AMD64' = 'ABCD07318EBD8CDBE274B46C9DE78820DCA9709D558CDBC1F5D1730924264D07'
+        'ARM64' = 'CDAE3649F6A6DE45F50A0B5FB5E2BBC098503B9EEFB1AE6A398FC955B434F579'
+        'x86'   = '85AC2DDD96239D037560E5336727F9A8BE2B902734B9DD88264DD7DB5612EFB9'
+    }
+
     $candidates = @(
         'C:\Program Files\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
         'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
     )
+    $found = $null
     foreach ($c in $candidates) {
-        if (Test-Path -LiteralPath $c) { return $c }
+        if (Test-Path -LiteralPath $c) {
+            $found = $c
+            break
+        }
     }
-    # Try PATH lookup
-    $cmd = Get-Command -Name 'oscdimg.exe' -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-    throw 'oscdimg.exe not found. Install the Windows ADK Deployment Tools.'
+    if (-not $found) {
+        # Try PATH lookup
+        $cmd = Get-Command -Name 'oscdimg.exe' -ErrorAction SilentlyContinue
+        if ($cmd) { $found = $cmd.Source }
+    }
+    if (-not $found) {
+        throw 'oscdimg.exe not found. Install the Windows ADK Deployment Tools.'
+    }
+
+    # Integrity check (advisory only)
+    try {
+        $arch = $env:PROCESSOR_ARCHITECTURE
+        if (-not $arch) { $arch = 'AMD64' }   # sensible default for x64 hosts
+        $expectedHash = $knownHashes[$arch]
+        if ($expectedHash) {
+            $actualHash = (Get-FileHash -LiteralPath $found -Algorithm SHA256 -ErrorAction Stop).Hash
+            if ($actualHash -ieq $expectedHash) {
+                Write-Step ('oscdimg.exe integrity verified (Microsoft reference hash for {0})' -f $arch)
+            } else {
+                Write-Warn ('oscdimg.exe SHA-256 differs from the Microsoft reference value for {0}.' -f $arch)
+                Write-Warn ('  Found    : {0}' -f $actualHash)
+                Write-Warn ('  Reference: {0}' -f $expectedHash)
+                Write-Warn '  This is ADVISORY: ADK-installed binaries may legitimately differ per ADK version.'
+                Write-Warn '  If you did NOT install oscdimg.exe via the Windows ADK or Microsoft symbol server,'
+                Write-Warn '  investigate the origin of this binary before proceeding (supply-chain integrity check).'
+            }
+        } else {
+            Write-Step ('oscdimg.exe integrity check skipped: no reference hash for architecture "{0}".' -f $arch)
+        }
+    } catch {
+        # Best-effort: if hash computation itself fails, that's surprising
+        # but not fatal; surface as a debug step rather than aborting.
+        Write-Warn ('oscdimg.exe integrity check could not be completed: {0}' -f $_.Exception.Message)
+    } # psa-disable-line PSA3004 -- intentional best-effort integrity-check warning; hash mismatch is advisory only
+
+    return $found
 }
 
 function New-BootableIso {
