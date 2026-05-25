@@ -60,7 +60,11 @@
 
 .PARAMETER Action
     One of: Prepare / Build / Verify / PrepareBuildVerify / BootTest / All /
-    Cleanup / ListPhases / GenerateManifest. Default: PrepareBuildVerify.
+    Cleanup / ListPhases / GenerateManifest / RefreshAllBaselines /
+    DumpFieldClassification / TestHarness. Default: PrepareBuildVerify.
+    The TestHarness action loads all functions and enters a JSON-over-stdin
+    REPL used by the Python-side self-verification tools in `tests/`; it
+    is not meant for human invocation.
 
 .PARAMETER OnlyPhases
     Array of phase IDs (e.g. 'P03','P05') to run. Overrides -Action.
@@ -206,7 +210,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshAllBaselines','DumpFieldClassification')]
+    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshAllBaselines','DumpFieldClassification','TestHarness')]
     [string]   $Action               = 'PrepareBuildVerify',
 
     [string[]] $OnlyPhases,
@@ -301,7 +305,7 @@ if ($WsusScnCabPath -and -not (Test-Path -LiteralPath $WsusScnCabPath)) {
 # don't need -OsVersion. ListPhases, EnvironmentInfoOnly, Cleanup,
 # and the Admin actions (RefreshAllBaselines, DumpFieldClassification)
 # operate on the on-disk Config files or the script itself.
-$osLessActions = @('ListPhases','Cleanup','RefreshAllBaselines','DumpFieldClassification')
+$osLessActions = @('ListPhases','Cleanup','RefreshAllBaselines','DumpFieldClassification','TestHarness')
 $needsOsVersion = ($Action -notin $osLessActions) -and (-not $EnvironmentInfoOnly)
 if ($needsOsVersion -and [string]::IsNullOrEmpty($OsVersion)) {
     throw '-OsVersion is required for action "' + $Action + '". Specify Server2016 / Server2019 / Server2022 / Server2025.'
@@ -447,8 +451,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.25-r04.3'
-$Script:ScriptTag     = 'live-test-fixes-and-preflight-checks'
+$Script:ScriptVersion = 'update-wsi-2026.05.25-r04.4'
+$Script:ScriptTag     = 'self-verification-tools-and-test-harness'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -7517,6 +7521,70 @@ if ($Script:LogFile) {
     }
 }
 
+# TestHarness short-circuit.
+# Loads all function definitions into the current PowerShell session and
+# enters a JSON-over-stdin REPL: each input line is parsed as JSON
+# `{ "fn": "<function-name>", "args": { ... } }`, the named function is
+# invoked with the splatted args, and the result is emitted as a single
+# JSON line on stdout (`{ "ok": true, "result": ... }` or
+# `{ "ok": false, "error": "<message>" }`).
+#
+# This is the entry point for the Python-side test harness in
+# `tests/powershell_harness.py`, which uses it to assert PowerShell-level
+# invariants (e.g. that `Get-CatalogQueryTemplate -OsVersion Server2022`
+# returns TitleTokens with both comma forms). It is intentionally a
+# separate Action rather than a side effect of -EnvironmentInfoOnly or
+# -DryRun, because the harness must NOT emit the entry banner or any
+# Phase activity: every byte on stdout must be machine-readable JSON.
+#
+# Lifecycle: enter REPL, exit on EOF (closed stdin). No workspace
+# preflight runs because there is no workspace contact; no DISM, no
+# Catalogue scrape, no file writes outside what the invoked function
+# itself does.
+if ($Action -eq 'TestHarness') {
+    # Suppress entry banner: we already skipped it above.
+    # Now drain stdin one JSON line at a time.
+    $ErrorActionPreference = 'Stop'
+    while (-not [Console]::In.EndOfStream) {
+        $line = [Console]::In.ReadLine()
+        if ($null -eq $line) { break }
+        $line = $line.Trim()
+        if ($line -eq '') { continue }
+        try {
+            $req = $line | ConvertFrom-Json -ErrorAction Stop
+            $fnName = [string]$req.fn
+            if ([string]::IsNullOrEmpty($fnName)) {
+                throw 'Missing "fn" field in request.'
+            }
+            $cmd = Get-Command -Name $fnName -ErrorAction SilentlyContinue
+            if (-not $cmd) {
+                throw ('Function not found in session: ' + $fnName)
+            }
+            $splat = @{}
+            if ($req.PSObject.Properties['args'] -and $req.args) {
+                foreach ($prop in $req.args.PSObject.Properties) {
+                    $splat[$prop.Name] = $prop.Value
+                }
+            }
+            $result = & $cmd @splat
+            $payload = [pscustomobject]@{
+                ok     = $true
+                fn     = $fnName
+                result = $result
+            }
+            $payload | ConvertTo-Json -Depth 12 -Compress
+        } catch {
+            $errPayload = [pscustomobject]@{
+                ok    = $false
+                error = $_.Exception.Message
+                fn    = if ($null -ne $req -and $req.PSObject.Properties['fn']) { [string]$req.fn } else { '' }
+            }
+            $errPayload | ConvertTo-Json -Depth 4 -Compress
+        }
+    }
+    exit 0
+}
+
 Show-EntryBanner
 
 # Quick branch for actions that do not need workspace init
@@ -7550,7 +7618,7 @@ if ($Action -eq 'ListPhases') {
 # The disk-space half of the check is also skipped under -DryRun
 # (Assert-WorkspacePreflight handles this internally) because dry
 # runs do not actually write large files.
-if (-not ($Action -eq 'Cleanup' -or $EnvironmentInfoOnly -or $SkipEnvCheck)) {
+if (-not ($Action -eq 'Cleanup' -or $Action -eq 'TestHarness' -or $EnvironmentInfoOnly -or $SkipEnvCheck)) {
     Assert-WorkspacePreflight
 }
 

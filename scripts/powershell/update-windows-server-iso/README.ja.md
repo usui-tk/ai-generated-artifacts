@@ -91,6 +91,16 @@ scripts/powershell/update-windows-server-iso/
     Server2019.json
     Server2022.json
     Server2025.json
+  tests/                           # Python 製 自己検証ツール (r04.4+)
+    README.md                      # 各ツールの使い方ガイド
+    catalog_probe.py               # T1: Microsoft Update Catalog ライブプローブ
+    catalog_fixture_test.py        # T2: HTML フィクスチャによるオフライン回帰テスト
+    powershell_harness.py          # T3: -Action TestHarness 経由の PS 関数単体テスト
+    eval_iso_probe.py              # T4: 評価版 ISO エンドポイント検査
+    wsusscn2_probe.py              # T5: wsusscn2.cab 鮮度検査
+    common/                        # 共通モジュール (HTTP / パーサー / PS 呼出)
+    fixtures/                      # Catalog HTML キャプチャ (オフライン回帰用)
+    snapshots/                     # T1 の出力 (last_probe.json)
 ```
 
 本スクリプトの検証に使う PowerShell 静的解析ツール (`psa.py`) は、本
@@ -335,6 +345,31 @@ python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.p
 
 コミット前の必須ゲートは **0 errors / 0 warnings / 0 info** です。
 現在の `r01` ベースラインはこれを満たしています。
+
+## 自己検証ツール
+
+`tests/` サブディレクトリには、本スクリプト専用の 5 つの Python
+ベース自己検証ツール(T1〜T5)を同梱しています。Microsoft 側
+コンテンツの仕様変化を検出し、PowerShell 関数を Python から単体
+テストすることが目的です。**本サブプロジェクト専用**であり、汎用
+ツールではありません。依存関係は Python 標準ライブラリのみ
+(`pip install` 不要)。
+
+```bash
+# オフラインテスト - どの環境でも実行可能
+python3 tests/catalog_fixture_test.py    # T2: 13 件のフィクスチャ検証
+python3 tests/powershell_harness.py      # T3: 7 件の PS 関数検証
+
+# ライブテスト - ネットワーク egress が必要
+python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog
+python3 tests/eval_iso_probe.py              # T4: Server<N> 評価版 ISO CDN
+python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab 鮮度
+```
+
+詳細な使い方は [`tests/README.md`](./tests/README.md) を参照。
+r04.3 で発覚した 3 件のライブ実機テストバグ(いずれも Microsoft 側
+の暗黙の仕様変化が原因で、純粋な静的解析では検出不可能)を受けて
+r04.4 で追加されました。
 
 ## 継続的インテグレーション
 

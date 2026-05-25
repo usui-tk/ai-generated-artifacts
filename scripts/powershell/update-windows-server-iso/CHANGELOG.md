@@ -27,6 +27,95 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.25-r04.4] - 2026-05-25
+
+### Added - Self-verification tool suite (`tests/`)
+
+A new `tests/` subdirectory ships alongside `Update-WindowsServerIso.ps1`
+holding five Python-based self-verification tools. They exist because
+the three live-test bugs fixed in r04.3 had a common root cause -
+silent Microsoft-side change in the Catalog HTML / data that no
+purely-static analysis could catch - and the project needed a way
+for both Claude and human operators to confirm the script's
+Microsoft-side assumptions still hold before AND after any change.
+
+The tool suite:
+
+| Tool | Purpose | Network? |
+|---|---|:---:|
+| `catalog_probe.py`        (T1) | Live Microsoft Update Catalog probe (search, supersedence panel, title-format per OS); diffs vs `snapshots/last_probe.json` | Yes |
+| `catalog_fixture_test.py` (T2) | Offline regression test against saved HTML fixtures (`fixtures/2026-05/`); 13 assertions including bug-2 and bug-3 regressions | No |
+| `powershell_harness.py`   (T3) | Python-side driver that invokes PowerShell functions via the new `-Action TestHarness` REPL; 7 assertions on Get-CatalogQueryTemplate, Select-AllCanonicalPatchFiles, etc. | No |
+| `eval_iso_probe.py`       (T4) | HTTP Range-GET against each `Config/Server<N>.json#/.../Iso/Url`; reports MB + Last-Modified per OS | Yes |
+| `wsusscn2_probe.py`       (T5) | HTTP probe of `wsusscn2.cab`; warns when the cab is older than 60 days | Yes |
+
+All tools use **standard-library Python only** (no `pip install`
+required), matching the dependency policy already set by
+`scripts/python/powershell-static-analyzer/psa.py`.
+
+The directory layout:
+
+```
+tests/
+  README.md                    -- per-tool usage + when-to-run guide
+  catalog_probe.py             -- T1
+  catalog_fixture_test.py      -- T2
+  powershell_harness.py        -- T3
+  eval_iso_probe.py            -- T4
+  wsusscn2_probe.py            -- T5
+  common/
+    catalog_client.py          -- urllib HTTP fetcher with retry-with-jitter
+    html_parsers.py            -- Catalog HTML extractors (intentionally
+                                  mirrors the PS regexes)
+    ps_invoke.py               -- PSSession context manager driving the
+                                  -Action TestHarness REPL
+    snapshot.py                -- JSON snapshot read/write + diff_dict()
+  fixtures/2026-05/            -- 6 HTML files (~331 KB) + expected.json
+  snapshots/                   -- T1 output (last_probe.json) lives here
+```
+
+### Added - `-Action TestHarness` (script REPL hook)
+
+The PowerShell script gains a new dispatcher branch `-Action TestHarness`,
+placed before `Show-EntryBanner` so no banner contaminates stdout.
+It loads all function definitions in the current session, then drains
+stdin one JSON line at a time, parsing requests of the form
+`{"fn":"<FunctionName>","args":{ ... }}` and emitting JSON responses
+of the form `{"ok":true,"fn":"...","result": ...}` or
+`{"ok":false,"error":"<message>","fn":"..."}`. The REPL exits on
+EOF.
+
+This is the entry point for T3 (`tests/powershell_harness.py`).
+It is not intended for human invocation; the `-Action` help text
+explicitly says so.
+
+`-Action TestHarness` is added to the `osLessActions` set
+(no `-OsVersion` required) and to the workspace-preflight skip list
+(no Config / 100 GB requirement).
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info (7,695 lines).
+- PSScriptAnalyzer 1.25.0: 0 findings.
+- All 5 self-verification tools pass live + offline runs:
+  - T1: 7/7 checks, snapshot persisted
+  - T2: 13/13 fixture assertions
+  - T3: 7/7 PowerShell function assertions
+  - T4: 8/8 Iso endpoints (Server2016 endpoint host rejects Range/HEAD;
+    treated as "unprobable, not broken")
+  - T5: detects `host_not_allowed` egress in restricted environments
+    and reports exit 3 (NOT 2), so the operator can tell apart
+    "Microsoft outage" from "execution environment blocks the host"
+
+### Compatibility
+
+- `ScriptVersion` bumped to `update-wsi-2026.05.25-r04.4`;
+  `ScriptTag` is `self-verification-tools-and-test-harness`.
+- No behaviour change for any production Action (Prepare / Build /
+  Verify / PrepareBuildVerify / RefreshAllBaselines / Cleanup etc.).
+  The TestHarness branch is reached only by an explicit
+  `-Action TestHarness` invocation.
+
 ## [update-wsi-2026.05.25-r04.3] - 2026-05-25
 
 ### Fixed - `NeutralPatches[].Type` mis-classification

@@ -674,6 +674,43 @@ This complements the runtime disk-space readout still emitted by
 P01 Step 4 (informational only since r04.3; the authoritative
 100 GB enforcement is in `Assert-WorkspacePreflight`).
 
+## B.17 TestHarness REPL hook (r04.4+)
+
+A new `-Action TestHarness` branch placed before
+`Show-EntryBanner` allows the Python-side self-verification tools
+in `tests/` to drive PowerShell functions without launching a fresh
+`pwsh` per assertion. The harness:
+
+1. Loads all function definitions in the current PowerShell
+   session (because the dispatcher branch runs after the function
+   declarations but before any Phase invocation).
+2. Reads stdin one line at a time, parsing each line as JSON of
+   the form `{"fn":"<FunctionName>","args":{ ... }}`.
+3. Invokes the named function with `args` splatted and emits
+   a single-line JSON response: `{"ok":true,"fn":"...","result": ...}`
+   on success, `{"ok":false,"fn":"...","error":"<message>"}` on
+   failure.
+4. Exits on EOF.
+
+Output contract: every byte on stdout must be machine-readable
+JSON. The entry banner is suppressed by branching before
+`Show-EntryBanner`; no Phase logs fire; no workspace contact is
+made. The hook is added to the `osLessActions` set and to the
+Preflight skip list because no Config / disk-space requirement
+applies to in-memory function invocation.
+
+The branch is invisible to human operators by design: it is not
+listed in `Show-PhaseList`'s phase summary, has no documented
+example invocation outside this section, and the `-Action` help
+text explicitly directs operators to ignore it.
+
+The Python driver lives in `tests/common/ps_invoke.py`
+(`PSSession` class). All five `tests/*.py` tools that need PS
+function output rely on this REPL contract. If the contract
+ever has to change (e.g. JSON envelope schema bump), the change
+must be co-ordinated between this section, the dispatcher branch
+in the script, and `ps_invoke.py`.
+
 ## B.14b PatchBaseline schema fields (referenced by B.10)
 
 ```jsonc
@@ -1259,6 +1296,43 @@ DISM call no-ops safely.
 | `Export-PatchValidationReport` | Emit 4 diagnostic files on validation failure |
 | `Invoke-SetupPhase02_5_RefreshPatchBaseline` | P02.5 phase worker |
 | `Invoke-PlanPhase04_5_ValidatePatchSet` | P04.5 phase worker |
+
+---
+
+# Part G — Self-verification tools (`tests/`)
+
+The `tests/` subdirectory ships a Python-based self-verification
+suite that exercises the script's external dependencies and the
+PowerShell helpers themselves. It exists because three of the four
+r04.3 live-test bugs were caused by silent Microsoft-side change
+(comma-form drift in Catalog titles, multi-file `UpdateId` for
+umbrella .NET CUs, file-name heuristic vs Catalogue Type bucket)
+and no purely-static analysis could have caught any of them.
+
+All tools use standard-library Python only (`urllib`, `re`, `json`,
+`subprocess`) so the suite runs on any host with Python 3.10+ and
+PowerShell 7+. No `pip install` is required.
+
+| Tool | Verifies | Network |
+|---|---|:---:|
+| `tests/catalog_probe.py`        (T1) | Live Microsoft Update Catalog: Search.aspx reachable + GUID regex still matches + per-OS title format + ScopedViewInline supersedence panel structure. Diffs results against `tests/snapshots/last_probe.json`. | Yes |
+| `tests/catalog_fixture_test.py` (T2) | Offline regression test against saved Catalog HTML in `tests/fixtures/<patch-month>/`. Includes bug-2 (comma-less title) and bug-3 (umbrella .NET CU) regression tests. | No  |
+| `tests/powershell_harness.py`   (T3) | Python-side unit tests of `Update-WindowsServerIso.ps1` functions via the `-Action TestHarness` REPL hook (see §B.17). Asserts `Get-CatalogQueryTemplate`, `Select-AllCanonicalPatchFiles`, `Select-CanonicalPatchFile`, `Get-KbIdFromUpdateTitle`, `Test-IsCombinedLcuTitle`. | No  |
+| `tests/eval_iso_probe.py`       (T4) | HTTP Range-GET against every `LanguageSpecific.<lang>.Iso.Url` in each `Config/Server<N>.json`; reports total size and `Last-Modified`. Detects snapshot rotation (see §D.11). | Yes |
+| `tests/wsusscn2_probe.py`       (T5) | HTTP Range-GET against `wsusscn2.cab`; warns when the cab is older than 60 days. Detects egress-proxy `host_not_allowed` and reports it separately from real Microsoft outages. | Yes |
+
+`tests/common/` holds:
+
+| Module | Role |
+|---|---|
+| `catalog_client.py` | `urllib` HTTP client with retry-with-jitter; mirrors the PS scraper's User-Agent so probes are indistinguishable from production traffic |
+| `html_parsers.py`   | Catalog HTML extractors (UpdateId GUIDs, search-hit titles, DownloadDialog file URLs, supersedence panel). Intentionally duplicates the PS regexes so any drift breaks BOTH sides loudly |
+| `ps_invoke.py`      | `PSSession` context manager driving the `-Action TestHarness` REPL (§B.17) |
+| `snapshot.py`       | JSON snapshot read/write + `diff_dict()` for surfaceable drift reports |
+
+The suite is documented operationally in
+[`tests/README.md`](./tests/README.md), which includes a
+"what to run, when" guide for both Claude and human operators.
 
 ---
 

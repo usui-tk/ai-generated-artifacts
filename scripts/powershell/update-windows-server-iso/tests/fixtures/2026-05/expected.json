@@ -1,0 +1,171 @@
+{
+  "generated_for_patch_month": "2026-05",
+  "description": "Expected parse results for the 2026-05 Catalog fixtures. Regenerate by re-running tests/catalog_probe.py + the fixture-collection script.",
+  "fixtures": {
+    "server2016_lcu_search.html": {
+      "total_hits": 1,
+      "titles": [
+        {
+          "update_id": "276ca876-09d3-4ef8-9266-22859826b952",
+          "title": "2026-05 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5087537)"
+        }
+      ]
+    },
+    "server2019_lcu_search.html": {
+      "total_hits": 1,
+      "titles": [
+        {
+          "update_id": "5e7fd3ab-6410-4e19-9595-16d623ac4fab",
+          "title": "2026-05 Cumulative Update for Windows Server 2019 for x64-based Systems (KB5087538)"
+        }
+      ]
+    },
+    "server2022_lcu_search.html": {
+      "total_hits": 4,
+      "titles": [
+        {
+          "update_id": "b3d07c95-0b06-4bb4-92ec-26e257355c37",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 21H2 for x64 (KB5087059)"
+        },
+        {
+          "update_id": "0ae6f8d8-5a5a-4551-a0cc-ca97524fc415",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Microsoft server operating system version 21H2 for x64 (KB5088862)"
+        },
+        {
+          "update_id": "7653fdd8-c8e1-42f6-b51d-9fed6f84f189",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Microsoft server operating system version 21H2 for x64 (KB5087068)"
+        },
+        {
+          "update_id": "bbe51346-3515-45c9-a1d9-d9a823019127",
+          "title": "2026-05 Cumulative Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087545)"
+        }
+      ]
+    },
+    "server2025_lcu_search.html": {
+      "total_hits": 3,
+      "titles": [
+        {
+          "update_id": "b6423fd4-fb02-48d8-ab33-f4a368666e7f",
+          "title": "2026-05 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5087539) (26100.32860)"
+        },
+        {
+          "update_id": "45a191b6-d531-4866-b5ae-94f978891735",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 24H2 for arm64 (KB5087051)"
+        },
+        {
+          "update_id": "d30126cf-e709-45b8-be5c-c102057423ad",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 24H2 for x64 (KB5087051)"
+        }
+      ]
+    },
+    "server2019_dotnet_search.html": {
+      "total_hits": 25,
+      "titles": [
+        {
+          "update_id": "89588eaa-c6bf-4a3d-881b-69e5efe4d532",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version 21H2 for x64 (KB5088859)"
+        },
+        {
+          "update_id": "f0367edd-233b-4b6d-8adb-570a71bf1946",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version 25H2 for x64 (KB5087051)"
+        },
+        {
+          "update_id": "b1fafef8-bd52-4962-8ed0-b382167fe120",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows Server 2019 for x64 (KB5087066)"
+        },
+        {
+          "update_id": "29b901f2-e4a5-4c0e-b406-c2ea58983fe4",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows 10 Version 21H2 for ARM64 (KB5087064)"
+        },
+        {
+          "update_id": "a57cf2ba-286e-46dc-b15a-a0fc3ec5dbe2",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5, 4.7.2 and 4.8 for Windows Server 2019 for x64 (KB5088864)"
+        },
+        {
+          "update_id": "61af6dcd-f663-44df-af34-1175a020c99c",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 10 Version 21H2 (KB5087053)"
+        },
+        {
+          "update_id": "874a503a-a553-479d-8ee1-82c0501034fa",
+          "title": "2026-05 Cumulative Update for .NET Framework 4.8 for Windows 10 Version 1607 for x64 (KB5087065)"
+        },
+        {
+          "update_id": "d30126cf-e709-45b8-be5c-c102057423ad",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 24H2 for x64 (KB5087051)"
+        },
+        {
+          "update_id": "c6e5d2c2-5962-446a-a7fe-0710e72cef0e",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version 26H1 for arm64 (KB5087055)"
+        },
+        {
+          "update_id": "91b1e893-8b8b-4dcd-a2bf-fe7535c82fbb",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 10 Version 22H2 (KB5087053)"
+        },
+        {
+          "update_id": "db81041b-086c-4b3b-a206-60326146c81e",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows 10 Version 21H2 (KB5087064)"
+        },
+        {
+          "update_id": "f26eef43-a2bd-42d0-ac18-23c0ca7a8a82",
+          "title": "2026-05 Cumulative Update for .NET Framework 4.8 for Windows Server 2016 for x64 (KB5087065)"
+        },
+        {
+          "update_id": "2c527c88-527c-4839-895b-4cb85816770f",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Windows 10 Version 22H2 for x64 (KB5088863)"
+        },
+        {
+          "update_id": "0ae6f8d8-5a5a-4551-a0cc-ca97524fc415",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Microsoft server operating system version 21H2 for x64 (KB5088862)"
+        },
+        {
+          "update_id": "45a191b6-d531-4866-b5ae-94f978891735",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 24H2 for arm64 (KB5087051)"
+        },
+        {
+          "update_id": "9abffe7f-29a2-48f5-9cdb-5e2d91a9d065",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version 23H2 for x64 (KB5087058)"
+        },
+        {
+          "update_id": "cb817527-dbab-4db8-b988-b704825ae01b",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version 23H2 for arm64 (KB5087058)"
+        },
+        {
+          "update_id": "8ea35894-9bd5-4f7a-b814-aa84e565e4a2",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.7.2 for Windows 10 Version 1809 for ARM64 (KB5087061)"
+        },
+        {
+          "update_id": "1b7ca726-3226-4b4a-8eb1-8b4e747ce6b5",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 10 Version 22H2 for x64 (KB5087053)"
+        },
+        {
+          "update_id": "b3d07c95-0b06-4bb4-92ec-26e257355c37",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 21H2 for x64 (KB5087059)"
+        },
+        {
+          "update_id": "75863a91-cf5c-44e5-b426-04e0afe95302",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5, 4.7.2 and 4.8 for Windows 10 Version 1809 for x64 (KB5088864)"
+        },
+        {
+          "update_id": "aa1f2046-47cf-4280-9280-4d64c4ad43b8",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows 10 Version 21H2 for x64 (KB5087064)"
+        },
+        {
+          "update_id": "7f791c50-3ed3-465e-a5b2-22b3de143184",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version 24H2 for arm64 (KB5087054)"
+        },
+        {
+          "update_id": "c25abdde-05ee-4a6f-8f55-62cc31298c49",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows 10 Version 22H2 (KB5087064)"
+        },
+        {
+          "update_id": "4aadbeb4-d322-4049-9850-05730de9bc00",
+          "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Windows 11, version 25H2 for arm64 (KB5087051)"
+        }
+      ]
+    },
+    "sample_scopedview.html": {
+      "supersedes": [],
+      "description": "Server2022 LCU 2026-05 (KB5087059); empty supersedes is expected (n/a in HTML)"
+    }
+  }
+}

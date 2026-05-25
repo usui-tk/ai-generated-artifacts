@@ -52,6 +52,11 @@ This document consolidates everything needed to verify and evaluate
 | Live Catalogue scrape (Server2022 / `2026-05`) | ✓ 5 patch entries resolved after comma-form fix; supersedence dedup excludes 3 stale .NET candidates; umbrella .NET CU keeps both ndp48 and ndp481 MSUs | r04.3 build |
 | Workspace preflight — Config presence (all 4 files present) | ✓ all four `Config/Server<N>.json` listed with byte sizes | r04.3 build |
 | Workspace preflight — placement before dispatcher | ✓ runs for `RefreshAllBaselines` / `DumpFieldClassification` (which never run P01); skipped for `ListPhases` / `Cleanup` / `-EnvironmentInfoOnly` / `-SkipEnvCheck` | r04.3 build |
+| T1 — `catalog_probe.py` live Catalog probe | ✓ 7 checks pass (search reachable + 4 OS title-format + supersedence panel); snapshot saved | r04.4 build |
+| T2 — `catalog_fixture_test.py` offline fixture regression | ✓ 13 assertions pass on the 2026-05 fixtures, including bug-2 and bug-3 regressions | r04.4 build |
+| T3 — `powershell_harness.py` via `-Action TestHarness` | ✓ 7 PowerShell function assertions pass (`Get-CatalogQueryTemplate`, `Select-AllCanonicalPatchFiles`, `Select-CanonicalPatchFile`, `Get-KbIdFromUpdateTitle`, `Test-IsCombinedLcuTitle`) | r04.4 build |
+| T4 — `eval_iso_probe.py` Iso CDN size probe | ✓ 8 endpoints checked (Server2016 host rejects Range and is reported as "unprobable"; the other 3 OSes return HTTP 206 with size + Last-Modified) | r04.4 build |
+| T5 — `wsusscn2_probe.py` offline-scan cab freshness | ✓ correctly reports `host_not_allowed` (egress proxy denies the destination host) with exit code 3, separating that from real Microsoft outages | r04.4 build |
 | **Real ISO integration on Windows host (full DISM)** | _Operator-pending_ | — |
 | **CI Stage 1 (Linux) workflow run** | _Operator-pending; logic identical to local Linux smoke_ | — |
 | **CI Stage 2 (Windows) workflow run** | _Operator-pending_ | — |
@@ -354,6 +359,49 @@ RefreshAllBaselines` on the 15th of every month and opens an
 automated PR when `Config/<OsKey>.json` baselines diverge from the
 committed state. Successful Stage 4 runs are themselves a form of
 continuous verification that the Catalogue scrape paths still work.
+
+---
+
+## 6.5 Self-verification tools (`tests/`)
+
+Independent of the PowerShell-side gates above, the `tests/`
+subdirectory ships a Python-based self-verification suite that
+both Claude and human operators can run to confirm the script's
+external dependencies still behave as documented. The suite was
+added in r04.4 in response to the three live-test bugs found in
+r04.3 — all of which were caused by silent Microsoft-side
+change that no static analysis could have caught.
+
+The full inventory is documented in
+[`./tests/README.md`](./tests/README.md) and in
+[`SPEC.md` Part G](./SPEC.md#part-g--self-verification-tools-tests).
+Quick orientation:
+
+| Tool | Run when | Network |
+|---|---|:---:|
+| `tests/catalog_probe.py`        (T1) | Before/after any Catalogue-related code change; monthly | Yes |
+| `tests/catalog_fixture_test.py` (T2) | Every commit that touches parsers or TitleTokens | No  |
+| `tests/powershell_harness.py`   (T3) | Every commit that touches a PS scrape helper | No  |
+| `tests/eval_iso_probe.py`       (T4) | Before release; when Microsoft Evaluation Center publishes a new snapshot | Yes |
+| `tests/wsusscn2_probe.py`       (T5) | Before running P04.5; monthly | Yes |
+
+T2 and T3 are deterministic and should be part of every PR check.
+T1, T4, T5 are environment-sensitive (they need real network access)
+and belong in the monthly CI workflow.
+
+### Refreshing fixtures
+
+The `tests/fixtures/2026-05/` HTML files were captured during r04.4
+implementation. To refresh them for a new patch month, see
+[`tests/README.md`](./tests/README.md). The fixture-collection
+helper is documented there; in short:
+
+1. Run `python3 catalog_probe.py --check all --patch-month 2026-06`
+   to confirm Catalog is queryable for the new month.
+2. Re-collect the 6 HTML files and regenerate `expected.json` via
+   the documented script in `tests/README.md`.
+3. Commit both the HTML and the `expected.json` together so T2 has
+   a deterministic regression baseline for that month.
 
 ---
 

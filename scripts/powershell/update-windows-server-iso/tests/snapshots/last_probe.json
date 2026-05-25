@@ -1,0 +1,66 @@
+{
+  "checks": {
+    "S1+S2 search reachable": {
+      "data": {
+        "guids_found": 25
+      },
+      "message": "HTTP 200, 25 GUIDs found",
+      "ok": true
+    },
+    "S3 supersedence panel": {
+      "data": {
+        "first_items": [],
+        "item_count": 0,
+        "sample_update_id": "b3d07c95-0b06-4bb4-92ec-26e257355c37"
+      },
+      "message": "panel found, 0 item(s)",
+      "ok": true
+    },
+    "S5 title-format Server2016": {
+      "data": {
+        "hits": 1,
+        "query": "2026-05 Cumulative Update for Windows Server 2016 for x64-based Systems",
+        "tokens_seen": [
+          "Windows Server 2016"
+        ]
+      },
+      "message": "1 hit(s), all match at least one TitleToken",
+      "ok": true
+    },
+    "S5 title-format Server2019": {
+      "data": {
+        "hits": 1,
+        "query": "2026-05 Cumulative Update for Windows Server 2019 for x64-based Systems",
+        "tokens_seen": [
+          "Windows Server 2019"
+        ]
+      },
+      "message": "1 hit(s), all match at least one TitleToken",
+      "ok": true
+    },
+    "S5 title-format Server2022": {
+      "data": {
+        "hits": 4,
+        "query": "2026-05 Cumulative Update for Microsoft server operating system version 21H2",
+        "tokens_seen": [
+          "Microsoft server operating system version 21H2"
+        ]
+      },
+      "message": "4 hit(s), all match at least one TitleToken",
+      "ok": true
+    },
+    "S5 title-format Server2025": {
+      "data": {
+        "hits": 3,
+        "query": "2026-05 Cumulative Update for Microsoft server operating system version 24H2",
+        "tokens_seen": [
+          "Microsoft server operating system version 24H2"
+        ]
+      },
+      "message": "3 hit(s), all match at least one TitleToken",
+      "ok": true
+    }
+  },
+  "generated_at": "2026-05-25T03:29:59+00:00",
+  "patch_month": "2026-05"
+}

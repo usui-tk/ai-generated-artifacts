@@ -97,6 +97,16 @@ scripts/powershell/update-windows-server-iso/
     Server2019.json
     Server2022.json
     Server2025.json
+  tests/                           # Python self-verification tools (r04.4+)
+    README.md                      # per-tool usage guide
+    catalog_probe.py               # T1: live Microsoft Update Catalog probe
+    catalog_fixture_test.py        # T2: offline HTML fixture regression
+    powershell_harness.py          # T3: PS function unit tests via -Action TestHarness
+    eval_iso_probe.py              # T4: evaluation ISO endpoint check
+    wsusscn2_probe.py              # T5: wsusscn2.cab freshness check
+    common/                        # shared HTTP / parser / PS-invoke modules
+    fixtures/                      # captured Catalog HTML for offline regression
+    snapshots/                     # T1 output (last_probe.json)
 ```
 
 The PowerShell static analyzer (`psa.py`) used to verify this script
@@ -344,6 +354,31 @@ python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.p
 
 The required gate before any commit is **0 errors / 0 warnings /
 0 info**. The current `r01` baseline satisfies this.
+
+## Self-verification tools
+
+The `tests/` subdirectory ships five Python-based self-verification
+tools (T1 - T5) that probe the script's external dependencies and
+unit-test its PowerShell functions. They are **specific to this
+sub-project**, not general-purpose, and use only the Python
+standard library (no `pip install` required).
+
+```bash
+# Offline tests - safe to run anywhere
+python3 tests/catalog_fixture_test.py    # T2: 13 fixture assertions
+python3 tests/powershell_harness.py      # T3: 7 PS function assertions
+
+# Live tests - require unrestricted network egress
+python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog
+python3 tests/eval_iso_probe.py              # T4: Server<N> Iso CDN
+python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
+```
+
+See [`tests/README.md`](./tests/README.md) for the full
+"what to run, when" guide. The suite was added in r04.4 in
+response to the three live-test bugs in r04.3 (all caused by
+silent Microsoft-side change that no static analysis could have
+caught).
 
 ## Continuous integration
 
