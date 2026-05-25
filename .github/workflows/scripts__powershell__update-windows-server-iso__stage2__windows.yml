@@ -44,8 +44,71 @@ jobs:
     # (~5-8 min); -EnvironmentInfoOnly + -Action ListPhases smoke tests
     # (~1 min combined) plus buffer for transient PSGallery latency.
     timeout-minutes: 120
+    # Defaults follow the github-actions Windows PowerShell guidance:
+    # explicit working-directory anchored at the checkout root prevents
+    # surprises from runner-side CWD differences (Linux vs Windows, hosted
+    # runner image updates, etc.) and explicit shell selection makes the
+    # PS 5.1 vs pwsh 7 distinction obvious at the step level.
+    defaults:
+      run:
+        shell: powershell
+        working-directory: ${{ github.workspace }}
+    env:
+      CI: true
     steps:
       - uses: actions/checkout@v5
+
+      # --- Pre-flight: runner environment diagnostics ---
+      # The GitHub-hosted windows-latest image is rolled weekly and is not
+      # a fixed environment. Recording the PS version, encoding, execution
+      # policy, identity, and CWD up front means every failed run carries
+      # the data needed to triage runner-side drift without having to
+      # re-run the job for diagnosis. Per the github-actions Windows
+      # PowerShell guidance (and standard Windows-runner triage practice).
+      - name: '[Diag] Runner environment snapshot'
+        run: |
+          $ErrorActionPreference = 'Continue'
+          # Force UTF-8 console output - PS 5.1's default is the legacy ANSI
+          # code page (cp1252 on en-US hosts), which mangles non-ASCII text
+          # in $GITHUB_OUTPUT / $GITHUB_ENV / log capture. UTF-8 is what every
+          # consumer of these streams expects.
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding             = [System.Text.Encoding]::UTF8
+
+          Write-Host '===== PSVersionTable ====='
+          $PSVersionTable | Format-List | Out-String | Write-Host
+
+          Write-Host '===== Current location ====='
+          Get-Location | Write-Host
+
+          Write-Host '===== ExecutionPolicy (all scopes) ====='
+          Get-ExecutionPolicy -List | Format-Table -AutoSize | Out-String | Write-Host
+
+          Write-Host '===== Console encoding ====='
+          Write-Host ("Console.OutputEncoding : {0}" -f [Console]::OutputEncoding.WebName)
+          Write-Host ("`$OutputEncoding         : {0}" -f $OutputEncoding.WebName)
+
+          Write-Host '===== Identity ====='
+          whoami
+          Write-Host ("IsAdmin: {0}" -f ([Security.Principal.WindowsPrincipal] `
+              [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+              [Security.Principal.WindowsBuiltInRole]::Administrator))
+
+          Write-Host '===== Key environment variables ====='
+          'GITHUB_WORKSPACE','RUNNER_TEMP','RUNNER_OS','RUNNER_ARCH','TEMP','TMP' | ForEach-Object {
+              $val = [Environment]::GetEnvironmentVariable($_)
+              Write-Host ("  {0,-20} = {1}" -f $_, $val)
+          }
+
+          Write-Host '===== ADK / oscdimg presence (informational) ====='
+          $oscdimgCandidates = @(
+              'C:\Program Files\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe',
+              'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
+          )
+          foreach ($c in $oscdimgCandidates) {
+              $exists = Test-Path -LiteralPath $c
+              Write-Host ("  {0} : {1}" -f $(if ($exists) { 'FOUND   ' } else { 'NOT FOUND' }), $c)
+          }
 
       # --- Tool group: PSScriptAnalyzer (Windows PowerShell 5.1) ---
       # The Marketplace action runs PSScriptAnalyzer; the analyzed script
@@ -108,6 +171,8 @@ jobs:
         timeout-minutes: 2
         working-directory: scripts/powershell/update-windows-server-iso
         run: |
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           .\Update-WindowsServerIso.ps1 -Action ListPhases
           if ($LASTEXITCODE -ne 0) {
               Write-Error "ListPhases smoke test failed with exit code $LASTEXITCODE"
@@ -122,6 +187,8 @@ jobs:
         timeout-minutes: 5
         working-directory: scripts/powershell/update-windows-server-iso
         run: |
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           .\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly -WorkRoot 'C:\Temp\Workspace_UpdateWsi_CI'
           if ($LASTEXITCODE -ne 0) {
               Write-Error "EnvironmentInfoOnly smoke test failed with exit code $LASTEXITCODE"
@@ -138,6 +205,8 @@ jobs:
         timeout-minutes: 5
         working-directory: scripts/powershell/update-windows-server-iso
         run: |
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           .\Update-WindowsServerIso.ps1 `
               -Action PrepareBuildVerify `
               -OsVersion Server2019 -OsLanguage en-us `

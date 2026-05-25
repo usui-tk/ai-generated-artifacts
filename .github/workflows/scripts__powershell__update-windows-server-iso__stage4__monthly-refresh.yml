@@ -86,6 +86,15 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
     timeout-minutes: 30
+    # Defaults per the github-actions Windows PowerShell guidance:
+    # the outer dispatcher uses pwsh (cross-platform JSON parsing); the
+    # core script invocation switches to 'powershell' (PS 5.1) inline.
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+    env:
+      CI: true
 
     steps:
       - name: Check out repository
@@ -93,6 +102,30 @@ jobs:
         with:
           fetch-depth: 0       # full history so the PR branch diff resolves cleanly
           persist-credentials: true
+
+      # --- Pre-flight: runner environment diagnostics ---
+      # Recording the runner state up-front means scheduled cron failures
+      # (where re-running for diagnosis is awkward) still carry the
+      # information needed to triage runner-side drift.
+      - name: '[Diag] Runner environment snapshot'
+        run: |
+          $ErrorActionPreference = 'Continue'
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+          Write-Host '===== PSVersionTable ====='
+          $PSVersionTable | Format-List | Out-String | Write-Host
+
+          Write-Host '===== ExecutionPolicy (all scopes) ====='
+          Get-ExecutionPolicy -List | Format-Table -AutoSize | Out-String | Write-Host
+
+          Write-Host '===== Identity ====='
+          whoami
+
+          Write-Host '===== Key environment variables ====='
+          'GITHUB_WORKSPACE','RUNNER_TEMP','RUNNER_OS','RUNNER_ARCH' | ForEach-Object {
+              $val = [Environment]::GetEnvironmentVariable($_)
+              Write-Host ("  {0,-20} = {1}" -f $_, $val)
+          }
 
       - name: Resolve workflow_dispatch inputs (with cron defaults)
         id: inputs

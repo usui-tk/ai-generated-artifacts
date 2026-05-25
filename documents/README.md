@@ -71,6 +71,7 @@
 | `security/` | Security designs, configuration guides for specific scenarios / セキュリティ設計、特定シナリオの設定ガイド |
 | `sre-and-ops/` | SRE and operations strategies, runbooks / SRE・運用戦略、ランブック |
 | `ai-strategy/` | AI adoption strategies, MSP offerings / AI 導入戦略、MSP オファリング |
+| `ci-engineering/` | CI/CD engineering guides, runner-platform reference notes / CI/CD エンジニアリングガイド、ランナープラットフォーム参考資料 |
 
 Subdirectories are created on demand.
 

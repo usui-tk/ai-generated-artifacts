@@ -77,6 +77,41 @@ jobs:
           # Python version.
           python-version: '3.12'
 
+      # --- Pre-flight: runner environment diagnostics ---
+      # The ubuntu-latest image is rolled weekly. Recording the Python
+      # version, pwsh availability, CWD, and key env vars up front means
+      # every failed run carries the data needed to triage runner-side
+      # drift without having to re-run the job for diagnosis. Mirrors
+      # the Windows-side diagnostic step in STAGE 2.
+      - name: '[Diag] Runner environment snapshot'
+        run: |
+          set +e   # don't let a single missing tool tank the diagnostic step
+          echo "===== uname ====="
+          uname -a
+          echo
+          echo "===== Python ====="
+          python3 --version
+          which python3
+          echo
+          echo "===== pwsh (PowerShell 7) ====="
+          if command -v pwsh > /dev/null 2>&1; then
+            pwsh --version
+            which pwsh
+          else
+            echo "pwsh NOT FOUND on this runner"
+          fi
+          echo
+          echo "===== Current working directory ====="
+          pwd
+          echo
+          echo "===== Key environment variables ====="
+          for v in GITHUB_WORKSPACE RUNNER_TEMP RUNNER_OS RUNNER_ARCH HOME TMPDIR; do
+            echo "  $v = ${!v}"
+          done
+          echo
+          echo "===== Repository top-level layout ====="
+          ls -la "$GITHUB_WORKSPACE" | head -20
+
       # --- Source-file format guard: BOM + CRLF + ASCII only ---
       # See SPEC §A.2 and Part C.2 for the contract. This catches
       # encoding regressions before any analyzer is invoked.

@@ -343,6 +343,45 @@ Workflow comments referencing old phase IDs (`P02.5`, `P04.5`,
 to the r05.0 phase numbering (`P03`, `P06`, `P02/P04/P05`,
 `P11 verify`, "P01 through P13").
 
+### Added (CI runner diagnostic pre-flight, r05.0)
+
+Following review of the failed Stage 1 run from commit `1aa96df`,
+each CI workflow gains a `[Diag] Runner environment snapshot` step
+at the start of the job. The goal is to make triage tractable when
+scheduled (Stage 4 cron) or flaky failures occur — every failed run
+should carry enough information to diagnose runner-side drift
+without re-running the job.
+
+The diagnostic step captures (per stage):
+
+| Stage | Diagnostic information |
+|---|---|
+| **Stage 1 / psa.py CI (Linux)** | `uname -a`, Python version, `pwsh` presence, CWD, key env vars, repo layout |
+| **Stage 2 (Windows)** | `$PSVersionTable`, `Get-ExecutionPolicy -List`, console encoding, identity + admin check, env vars, oscdimg.exe presence at canonical ADK paths |
+| **Stage 3 (Windows)** | Same as Stage 2 + free disk space on `C:` |
+| **Stage 4 (Windows)** | PSVersion, ExecutionPolicy, identity, env vars |
+
+Each diagnostic step uses `$ErrorActionPreference = 'Continue'`
+(or `set +e` for bash) so a missing tool does not tank the
+diagnostic step — the goal is to record what IS available.
+
+Additionally, **all** non-diagnostic Windows PowerShell steps
+across Stages 2, 3, and 4 are uniformly hardened with:
+
+- `$ErrorActionPreference = 'Stop'` — prevents silent error
+  swallowing (PS 5.1's default is `Continue`).
+- `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` —
+  prevents PS 5.1's legacy ANSI code-page default from mangling
+  non-ASCII characters in log streams or `$GITHUB_*` files.
+- `defaults.run.working-directory: ${{ github.workspace }}` at the
+  job level — anchors relative paths to the checkout root rather
+  than to a surprising platform-default location.
+
+Background reference material is captured in
+`documents/ci-engineering/github-actions-windows-powershell-guide.md`
+(new file in this release). SPEC.md gains a new §C.5c documenting
+the diagnostic-step contract.
+
 ## [update-wsi-2026.05.25-r04.4] - 2026-05-25
 
 ### Added - Self-verification tool suite (`tests/`)

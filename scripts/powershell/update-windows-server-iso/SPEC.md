@@ -1035,6 +1035,55 @@ Microsoft Update Catalog state without manual maintainer effort.
       page shows the mode / OnlyOs / OnlyLanguage / DryRun / exit
       code / diff-detected / PR-created status at a glance.
 
+### C.5c CI runner diagnostic pre-flight (r05.0+, all stages)
+
+Each CI stage starts with a `[Diag] Runner environment snapshot` step
+that records the runner state up front. This makes triage tractable
+when scheduled (Stage 4 cron) or flaky failures occur: every failed
+run carries the data needed to diagnose runner-side drift without
+re-running the job. The information captured is platform-specific:
+
+| Stage | Diagnostic information captured |
+|---|---|
+| **Stage 1 (Linux)** | `uname -a`, Python version, `pwsh` presence, CWD, `GITHUB_WORKSPACE` / `RUNNER_TEMP` / `RUNNER_OS` / `RUNNER_ARCH`, repo top-level listing |
+| **Stage 2 (Windows)** | `$PSVersionTable`, `Get-Location`, `Get-ExecutionPolicy -List`, console encoding (`Console.OutputEncoding` + `$OutputEncoding`), `whoami` + admin check, env vars, oscdimg.exe presence at canonical ADK paths |
+| **Stage 3 (Windows)** | Same as Stage 2 + free disk space on `C:` (Synthetic pipeline needs ~50 GB) |
+| **Stage 4 (Windows)** | `$PSVersionTable`, ExecutionPolicy, `whoami`, key env vars |
+| **psa.py CI (Linux)** | `uname -a`, Python version, CWD, repo top-level listing |
+
+Each diagnostic step has `$ErrorActionPreference = 'Continue'`
+(or `set +e` for bash) so a missing tool does not tank the whole
+diagnostic step — the goal is to record what IS available, not to
+fail-fast on what is not.
+
+All non-diagnostic Windows PowerShell steps additionally set:
+
+- `$ErrorActionPreference = 'Stop'` — prevents silent error
+  swallowing (PS 5.1's default is `Continue`, which can mask
+  `Get-ChildItem` / `Remove-Item` failures and produce confusing
+  downstream errors).
+- `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` —
+  PS 5.1's default console encoding is the legacy ANSI code page
+  (cp1252 on en-US hosts, cp932 on ja-JP), which mangles non-ASCII
+  text written to `$GITHUB_ENV` / `$GITHUB_OUTPUT` / log streams.
+
+The Windows-specific workflows also declare:
+
+```yaml
+defaults:
+  run:
+    shell: powershell
+    working-directory: ${{ github.workspace }}
+```
+
+so step-level `working-directory` overrides remain visible and
+relative paths resolve predictably against the checkout root, not
+against `runner.temp` or some other surprising location.
+
+Reference: `documents/ci-engineering/github-actions-windows-powershell-guide.md`
+in this repository captures the broader github-actions Windows
+runner reference material these conventions are derived from.
+
 ### C.6 Documentation cross-checks
 
 - [ ] `README.md` and `README.ja.md` reference the same Disclaimer / License URLs.

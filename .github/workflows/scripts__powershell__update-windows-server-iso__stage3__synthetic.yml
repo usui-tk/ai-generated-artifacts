@@ -56,8 +56,53 @@ jobs:
     # mount + oscdimg (~5 min), plus buffer for transient network
     # latency on the ADK download.
     timeout-minutes: 240
+    # Defaults follow the github-actions Windows PowerShell guidance:
+    # explicit working-directory anchored at the checkout root prevents
+    # surprises from runner-side CWD differences.
+    defaults:
+      run:
+        shell: powershell
+        working-directory: ${{ github.workspace }}
+    env:
+      CI: true
     steps:
       - uses: actions/checkout@v5
+
+      # --- Pre-flight: runner environment diagnostics ---
+      # The windows-latest image is rolled weekly. Recording PS version,
+      # encoding, execution policy, identity, and CWD up front means every
+      # failed run carries the data needed to triage runner-side drift.
+      - name: '[Diag] Runner environment snapshot'
+        run: |
+          $ErrorActionPreference = 'Continue'
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding             = [System.Text.Encoding]::UTF8
+
+          Write-Host '===== PSVersionTable ====='
+          $PSVersionTable | Format-List | Out-String | Write-Host
+
+          Write-Host '===== ExecutionPolicy (all scopes) ====='
+          Get-ExecutionPolicy -List | Format-Table -AutoSize | Out-String | Write-Host
+
+          Write-Host '===== Console encoding ====='
+          Write-Host ("Console.OutputEncoding : {0}" -f [Console]::OutputEncoding.WebName)
+
+          Write-Host '===== Identity ====='
+          whoami
+          Write-Host ("IsAdmin: {0}" -f ([Security.Principal.WindowsPrincipal] `
+              [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+              [Security.Principal.WindowsBuiltInRole]::Administrator))
+
+          Write-Host '===== Disk space (free GB on C:) ====='
+          $vol = Get-Volume -DriveLetter C
+          Write-Host ("  C: free = {0:N1} GB / total = {1:N1} GB ({2})" -f `
+              ($vol.SizeRemaining / 1GB), ($vol.Size / 1GB), $vol.FileSystem)
+
+          Write-Host '===== Key environment variables ====='
+          'GITHUB_WORKSPACE','RUNNER_TEMP','RUNNER_OS','RUNNER_ARCH','TEMP','TMP' | ForEach-Object {
+              $val = [Environment]::GetEnvironmentVariable($_)
+              Write-Host ("  {0,-20} = {1}" -f $_, $val)
+          }
 
       # --- Cache the ADK installer to avoid re-downloading ~1 GB ---
       - name: '[ADK] Cache installer'
@@ -71,6 +116,8 @@ jobs:
         if: steps.adk-cache.outputs.cache-hit != 'true'
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           New-Item -ItemType Directory -Path 'C:\AdkCache' -Force | Out-Null
           # ADK 10.1.26100.1 (Windows 11 24H2 ADK)
           $url = 'https://go.microsoft.com/fwlink/?linkid=2271337'
@@ -116,6 +163,8 @@ jobs:
         timeout-minutes: 60
         working-directory: scripts/powershell/update-windows-server-iso
         run: |
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           # Sandbox + Synthetic: exercises the full path including DISM
           # mount, Add-WindowsPackage simulation, oscdimg, P11 verify, P12 PCA2023 readiness.
           .\Update-WindowsServerIso.ps1 `
@@ -133,6 +182,8 @@ jobs:
       - name: '[Synthetic] Sanity-check that an output ISO exists (DO NOT upload)'
         shell: powershell
         run: |
+          $ErrorActionPreference = 'Stop'
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
           $outDir = 'C:\Temp\Workspace_UpdateWsi_CI\output'
           $isos = Get-ChildItem -LiteralPath $outDir -Filter '*.iso' -ErrorAction SilentlyContinue
           if (-not $isos) {

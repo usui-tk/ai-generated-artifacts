@@ -70,6 +70,27 @@ jobs:
           # CPython 3.14 series that '3.x' currently resolves to.
           python-version: '3.12'
 
+      # --- Pre-flight: runner environment diagnostics ---
+      # Mirrors the diagnostic step in the update-windows-server-iso
+      # workflows; records runner version, Python version, CWD up front
+      # so failed runs carry the data needed to triage runner-side drift.
+      - name: '[Diag] Runner environment snapshot'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set +e
+          echo "===== uname ====="
+          uname -a
+          echo
+          echo "===== Python ====="
+          python3 --version
+          which python3
+          echo
+          echo "===== Current working directory (default per `defaults.run`) ====="
+          pwd
+          echo
+          echo "===== Repository top-level layout ====="
+          ls -la "$GITHUB_WORKSPACE" | head -10
+
       - name: '[setup] Install pytest'
         run: |
           python3 -m pip install --upgrade pip
