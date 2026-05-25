@@ -27,6 +27,85 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## Documentation maintenance - 2026-05-24
+
+### Added - `TESTING.md`
+
+Created `TESTING.md` for this sub-project to align with the
+repository-wide governance documented in the root [`README.md`](../../../README.md)
+"Language Policy" section, which lists `TESTING.md` among the
+sub-project documents that are maintained in English only. The
+sister project `download-speakerdeck-oracle4engineer/` has carried
+a `TESTING.md` from the start; adding one here brings this project
+to parity.
+
+Contents:
+
+- **Section 0** — Verification status summary table
+- **Section 1** — Static analysis gate (psa.py + PSScriptAnalyzer
+  invocation and expected output)
+- **Section 2** — Unit tests for the deterministic helpers
+  (PatchPlan engine, sub-phase sequence builders,
+  supersedence-aware deduplication; 14 test cases total)
+- **Section 3** — Synthetic smoke tests 1 through 7 with command
+  lines and acceptance criteria
+- **Section 4** — Live Microsoft Update Catalogue verification
+  (read-only network calls)
+- **Section 5** — Operator-pending: real ISO integration. This
+  section is intentionally a placeholder because the maintainer
+  has no suitable Windows host with DISM access. The acceptance
+  criteria are documented; the results table is empty until an
+  operator runs the procedure end-to-end and submits results via PR.
+- **Section 6** — Continuous integration coverage including the
+  Stage 4 monthly-refresh workflow's role as a continuous
+  verification of the Catalogue scrape paths
+- **Section 7** — Discovered bugs and fix history (cross-references
+  to the per-release CHANGELOG entries)
+
+### Changed - sub-project `README.md` and `README.ja.md`
+
+Both READMEs now list `TESTING.md` in the "Folder layout" /
+「フォルダ構成」block and end with a paragraph pointing readers
+to it ("If you want to know what has been verified and what is
+still operator-pending, read TESTING.md").
+
+### Changed - root `README.md` and `README.ja.md` (CI section)
+
+The Continuous Integration section in both root READMEs was
+updated to reflect the four `update-windows-server-iso` workflows
+introduced in r03 and r03.1:
+
+- The intro line changed from "four GitHub Actions workflows" to
+  "eight GitHub Actions workflows" (the Japanese equivalent
+  changed from "4 本" to "8 本").
+- Four new rows were added to the badge table:
+  Update-WindowsServerIso STAGE 1 (Linux), STAGE 2 (Windows),
+  STAGE 3 (Synthetic full pipeline), STAGE 4 (Monthly baseline
+  refresh).
+- A new paragraph immediately after the badge table explains the
+  Stage 4 workflow's distinctive `cron`-on-the-15th schedule, its
+  PR-creation behaviour when `Config/Server*.json` baselines drift
+  from the live Microsoft Update Catalogue state, and its
+  classification as an operations workflow (not a quality gate;
+  failures do not block other workflows).
+
+These updates close a documentation gap that opened when the
+Update-WindowsServerIso project was first added to the repository:
+the per-sub-project STAGE 4 workflow existed in `.github/workflows/`
+and was already documented in this project's CHANGELOG, but the
+root READMEs had not been refreshed to reflect the new total
+workflow count.
+
+### Quality
+
+- `psa.py` and PSScriptAnalyzer baselines are unchanged from
+  r04.2 because no source code was modified. This is a
+  documentation-only maintenance pass.
+- `ScriptVersion` is **not** bumped; this entry follows the
+  same precedent as the sister project's r21 cleanup commit
+  (documentation-only changes do not require a script version
+  change).
+
 ## [update-wsi-2026.05.24-r04.2] - 2026-05-24
 
 ### Added - Supersedence-aware Catalogue patch selection

@@ -88,6 +88,7 @@ scripts/powershell/update-windows-server-iso/
   Update-WindowsServerIso.ps1     # Main script (this README documents it)
   README.md / README.ja.md        # End-user documentation (you are reading these)
   SPEC.md                          # Developer / LLM specification (English only)
+  TESTING.md                       # Verification procedure and verified findings (English only)
   CHANGELOG.md                     # Per-revision change history (English only)
   .psa.config.json                 # psa.py project configuration
   PSScriptAnalyzerSettings.psd1    # PSScriptAnalyzer project configuration
@@ -109,7 +110,9 @@ canonical location
 naming pattern.
 
 If you only want to **run** the script, read this README. If you want
-to **extend it or build a similar script**, also read `SPEC.md`.
+to **extend it or build a similar script**, also read [`SPEC.md`](./SPEC.md).
+If you want to know **what has been verified and what is still
+operator-pending**, read [`TESTING.md`](./TESTING.md).
 
 ## Quick start
 

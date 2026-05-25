@@ -60,7 +60,7 @@ Start with the repository-level [`SPEC.md`](./SPEC.md) when:
 
 ## Continuous Integration
 
-The repository ships four GitHub Actions workflows under
+The repository ships eight GitHub Actions workflows under
 `.github/workflows/`. Their status is summarised below; the
 sub-project READMEs carry only the badges relevant to that sub-project.
 
@@ -70,6 +70,20 @@ sub-project READMEs carry only the badges relevant to that sub-project.
 | Download-SpeakerDeck STAGE 1 (Linux) | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 1](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml) |
 | Download-SpeakerDeck STAGE 2 (Windows) | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 2](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml) |
 | Download-SpeakerDeck STAGE 3 (Release verification) | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 3](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml) |
+| Update-WindowsServerIso STAGE 1 (Linux) | `scripts/powershell/update-windows-server-iso/` | [![UWSI STAGE 1](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml) |
+| Update-WindowsServerIso STAGE 2 (Windows) | `scripts/powershell/update-windows-server-iso/` | [![UWSI STAGE 2](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage2__windows.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage2__windows.yml) |
+| Update-WindowsServerIso STAGE 3 (Synthetic full pipeline) | `scripts/powershell/update-windows-server-iso/` | [![UWSI STAGE 3](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage3__synthetic.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage3__synthetic.yml) |
+| Update-WindowsServerIso STAGE 4 (Monthly baseline refresh) | `scripts/powershell/update-windows-server-iso/` | [![UWSI STAGE 4](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml) |
+
+The Update-WindowsServerIso STAGE 4 workflow is unusual among CI
+workflows in this repository: in addition to the `push` and
+`workflow_dispatch` triggers, it runs on a monthly `cron` schedule
+(02:00 UTC on the 15th of each month, a few days after the second-
+Tuesday Patch Tuesday). When it detects that
+`Config/Server*.json` baselines diverge from the live Microsoft
+Update Catalogue state, it opens an automated pull request with
+the updated baselines. This is an operations workflow, not a
+quality gate; failed runs do not block other workflows.
 
 Governance, naming conventions, timeout tiers, and the fork-PR review
 protocol are defined in [`SPEC.md`](./SPEC.md) (§2 through §9). Per-CI

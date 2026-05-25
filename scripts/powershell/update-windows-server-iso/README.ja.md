@@ -82,6 +82,7 @@ scripts/powershell/update-windows-server-iso/
   Update-WindowsServerIso.ps1     # 本体スクリプト (この README が説明対象)
   README.md / README.ja.md        # エンドユーザー向け文書 (本ファイル群)
   SPEC.md                          # 開発者・LLM 向け仕様書 (英語のみ)
+  TESTING.md                       # 検証手順と検証済み事項 (英語のみ)
   CHANGELOG.md                     # リビジョン変更履歴 (英語のみ)
   .psa.config.json                 # psa.py プロジェクト設定
   PSScriptAnalyzerSettings.psd1    # PSScriptAnalyzer プロジェクト設定
@@ -103,8 +104,9 @@ scripts/powershell/update-windows-server-iso/
 という命名規則で配置されています。
 
 **実行**したいだけならこの README を読んでください。**スクリプトを拡張
-したい、または同種スクリプトを新規に作成したい**場合は `SPEC.md` も
-読んでください。
+したい、または同種スクリプトを新規に作成したい**場合は [`SPEC.md`](./SPEC.md) も
+読んでください。**何が検証済みで何が未検証(オペレーター待ち)か**を
+知りたい場合は [`TESTING.md`](./TESTING.md) を参照してください。
 
 ## クイックスタート
 

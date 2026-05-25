@@ -58,7 +58,7 @@ ai-generated-artifacts/
 
 ## 継続的インテグレーション
 
-本レポジトリは `.github/workflows/` に 4 本の GitHub Actions ワークフローを
+本レポジトリは `.github/workflows/` に 8 本の GitHub Actions ワークフローを
 備えています。各バッジは下表のとおりです。サブプロジェクトの README には、
 そのサブプロジェクトに該当するバッジのみを掲載しています。
 
@@ -68,6 +68,18 @@ ai-generated-artifacts/
 | Download-SpeakerDeck STAGE 1（Linux） | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 1](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml) |
 | Download-SpeakerDeck STAGE 2（Windows） | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 2](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml) |
 | Download-SpeakerDeck STAGE 3（リリース検証） | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 3](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml) |
+| Update-WindowsServerIso STAGE 1(Linux) | `scripts/powershell/update-windows-server-iso/` | [![UWSI STAGE 1](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml) |
+| Update-WindowsServerIso STAGE 2(Windows) | `scripts/powershell/update-windows-server-iso/` | [![UWSI STAGE 2](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage2__windows.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage2__windows.yml) |
+| Update-WindowsServerIso STAGE 3(Synthetic フルパイプライン) | `scripts/powershell/update-windows-server-iso/` | [![UWSI STAGE 3](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage3__synthetic.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage3__synthetic.yml) |
+| Update-WindowsServerIso STAGE 4(月次ベースラインリフレッシュ) | `scripts/powershell/update-windows-server-iso/` | [![UWSI STAGE 4](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml) |
+
+Update-WindowsServerIso STAGE 4 は本リポジトリの CI ワークフローの中で
+特殊な存在です。`push` および `workflow_dispatch` トリガーに加え、毎月
+`cron` スケジュール(UTC で毎月 15 日 02:00、 第二火曜の Patch Tuesday の
+数日後)で実行されます。`Config/Server*.json` のベースラインが Microsoft
+Update Catalogue の現在状態と乖離している場合、 更新されたベースラインを
+反映する自動 PR を作成します。これは品質ゲートではなく運用ワークフローで
+あり、 失敗しても他のワークフローをブロックしません。
 
 ガバナンス、命名規則、タイムアウト階層、フォーク PR レビュープロトコルは
 すべて [`SPEC.md`](./SPEC.md)（§2 〜 §9）で定義しています。CI ごとの変更
