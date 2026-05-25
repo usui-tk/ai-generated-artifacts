@@ -287,7 +287,7 @@ This repository uses a **repository-wide common policy** for managing per-versio
 
 **Why this matters**: LLM-assisted code maintenance is especially prone to accumulating stale per-revision comments inside script bodies (`# r42: fixed X`, `# r56+: now does Y`). Such comments rapidly become untraceable noise — readers cannot resolve `r42` without consulting Git history anyway. Centralizing release notes in `CHANGELOG.md` and keeping scripts focused on current behaviour avoids this failure mode.
 
-**Static-analyzer enforcement**: For PowerShell scripts, `psa.py` ships two opt-in rules — `PSAP0003` (inline `# rNN:` revision tags) and `PSAP0004` (end-of-file `REVISION HISTORY` blocks) — that detect violations of this policy. Sub-projects enforce them via their `.psa.config.json` `enable` list. (Consumers should always validate against the latest mainline `psa.py`; see the "psa.py Versioning Policy" section below.)
+**Static-analyzer enforcement**: For PowerShell scripts, `psa.py` ships three opt-in rules dedicated to this policy — `PSAP0003` (inline `# rNN:` revision tags), `PSAP0004` (end-of-file `REVISION HISTORY` blocks), and `PSAP0005` (any `rNN` reference in a comment body, broader than `PSAP0003`'s structured tag forms; run in strict mode by participating sub-projects) — that detect violations of this policy. Sub-projects enforce them via their `.psa.config.json` `enable` list. (Consumers should always validate against the latest mainline `psa.py`; see the "psa.py Versioning Policy" section below.)
 
 For per-sub-project deeper guidance, see the **Revision discipline** subsection of each sub-project's `SPEC.md`.
 

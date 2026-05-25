@@ -630,6 +630,50 @@ a search for the OS LCU. Without supersedence-aware selection,
 the wrong KB could enter the I3.LCU.FirstPass sub-phase and
 produce a botched install.wim.
 
+## B.16 Workspace preflight (r04.3+)
+
+A mandatory check that runs **before the Action dispatcher**, so
+that every Action (not just Build/Verify which run P01) is
+protected. Implemented in `Assert-WorkspacePreflight`. Two checks,
+both fatal:
+
+1. **Config presence**. The four canonical `Config/Server<N>.json`
+   files (Server2016, Server2019, Server2022, Server2025) must
+   exist in the `Config/` directory alongside the script. A
+   missing file aborts before any Catalogue scrape or DISM mount,
+   with a precise list of which files are missing under which
+   path. This protects RefreshAllBaselines and DumpFieldClassification
+   from a half-populated workspace.
+
+2. **Drive free space**. The drive backing `-WorkRoot` must have
+   at least 100 GB free. This is the documented strict minimum
+   for an end-to-end `PrepareBuildVerify` run for a single OS:
+
+       ~7 GB  input ISO
+       ~7 GB  extracted source tree
+       ~15 GB mounted install.wim scratch
+       ~10 GB patch downloads
+       ~7 GB  output ISO
+       ~5 GB  DISM temp + logs headroom
+
+   The check uses `Get-PSDrive` on the drive letter of `-WorkRoot`.
+   For UNC or unrooted paths, the script-root drive is checked as
+   a best-effort fallback.
+
+Preflight is skipped for:
+
+| Condition | Rationale |
+|---|---|
+| `-Action ListPhases` | Quick branch that exits without touching the workspace |
+| `-Action Cleanup` | The whole point is to remove a partially-built workspace; requiring 100 GB free would be circular |
+| `-EnvironmentInfoOnly` | Operator explicitly asked for the env dump and wants to inspect the host first |
+| `-SkipEnvCheck` | Operator override |
+| `-DryRun` (disk-check half only) | Dry runs do not write large files; Config-presence check still runs |
+
+This complements the runtime disk-space readout still emitted by
+P01 Step 4 (informational only since r04.3; the authoritative
+100 GB enforcement is in `Assert-WorkspacePreflight`).
+
 ## B.14b PatchBaseline schema fields (referenced by B.10)
 
 ```jsonc
@@ -990,6 +1034,119 @@ ground truth. P04.5 still aborts on missing patches because the
 WUA-required set is approximately the union of what every supported
 Server SKU requires.
 
+### D.19 Catalogue Title comma-form drift (Server 2022)
+
+**Symptom.** A previously-working OS query template suddenly returns
+"no narrowed result" for every Type, even though the Catalogue
+`Search.aspx` page itself still returns hits for the same query
+string. The narrow filter — which compares each hit's `Title`
+against an OS TitleToken via `[regex]::Escape(...)` — fails
+because the live Title now omits a comma (or other punctuation)
+that the template still encodes.
+
+**Concrete case.** Server 2022 update titles historically read
+"Microsoft server operating system, version 21H2"
+(with a comma). As of 2026-05, Microsoft has dropped the comma to
+match the Server 2025 (24H2) format:
+"Microsoft server operating system version 21H2". The previous
+TitleToken `'Microsoft server operating system, version 21H2'`
+matched zero of the live hits.
+
+**Fix.** TitleTokens must be **arrays** of acceptable forms, not
+single strings. The narrow filter already iterates and uses
+`-match` with `[regex]::Escape`, so accepting both the comma and
+comma-less forms is purely a config change. The actual
+`Search.aspx` query strings should track the live (current) form,
+since that is what the Catalogue index uses for fuzzy ranking.
+See `Get-CatalogQueryTemplate` and
+`Get-LanguagePackQueryTemplate.osTitleTokens` for the canonical
+multi-form pattern.
+
+**Tell-tale log signature.** When this happens, every
+`Catalog query: type=...` line for the affected OS is followed by
+`Catalogue: no narrowed result for <Type> / <OsVersion>` and
+the final `Resolved 0 patch entries from Catalogue` line. CI Stage 4
+monthly-refresh runs catch this within ~30 days because the per-
+OS pre-Manual count drops to 0; operators should monitor the
+Stage 4 PR diff for any OS whose `NeutralPatches` array suddenly
+empties.
+
+### D.20 `Get-PatchType` filename heuristic is not authoritative
+
+**Symptom.** A patch is silently routed to the wrong WIM-target
+sub-phase (e.g. an SSU gets applied as if it were the LCU; a
+Safe OS DU is offered to install.wim instead of WinRE; a .NET CU
+sub-file is treated as an LCU). The on-disk Type field looks
+plausible (always one of the registered values, never `'Other'`)
+but is consistently wrong for certain KBs.
+
+**Root cause.** `Get-PatchType -FileName <fn>` infers Type from
+file-name tokens. Microsoft does not encode patch type into file
+names consistently. Examples that defeat the heuristic:
+
+- SSU file names like `windows10.0-kb5088064-x64_<sha>.msu`
+  contain neither `servicingstack` nor `ssu`; the
+  fallback `kb\d+` branch then labels them `LCU`.
+- Safe OS DU file names like `windows11.0-kb5087588-x64_<sha>.cab`
+  contain `kb\d+` but no `safeos`; same fall-through.
+- Umbrella .NET CU sub-files like
+  `windows10.0-kb5087061-x64_<sha>.msu` (the 4.7.2 sub-package
+  of KB5088864) contain no `ndp<N>` and no `.net`; same fall-
+  through.
+
+**Fix.** Callers that already know the patch Type from context
+MUST pass it explicitly. `Convert-CatalogPatchToBaselineEntry`
+takes a `-KnownType` parameter for exactly this purpose;
+`Resolve-PatchSetFromCatalog` populates it from the Catalogue
+query bucket (`$q.Type`). The file-name heuristic is retained as
+the last-resort fallback for ad-hoc invocations.
+
+**General rule.** Any new caller that constructs a baseline entry
+from Catalogue data must pipe the Catalogue's authoritative Type
+information through to `Convert-CatalogPatchToBaselineEntry`
+via `-KnownType`; never rely on file-name reverse-engineering.
+
+### D.21 Umbrella KBs attach multiple files to one UpdateId
+
+**Symptom.** A `.NET Cumulative Update` is recorded in
+`Config/<OsKey>.json` with only one `NeutralPatches` entry, but a
+later P05 build on an install.wim that contains the *other*
+.NET runtime no-ops the .NET CU because the relevant sub-file
+was dropped during baseline resolution.
+
+**Root cause.** Microsoft occasionally publishes a single
+Catalogue `UpdateId` that bundles multiple independently-applicable
+MSUs — typically one per supported .NET runtime (e.g. 4.7.2 +
+4.8 for Server 2019, 3.5 + 4.8 + 4.8.1 for Server 2022).
+`Get-DownloadLinkFromCatalog` returns all of them, but
+`Select-CanonicalPatchFile` is designed to return a single best
+file. Without an explicit `-DotNetVersion` hint, both sub-files
+score equally, the stable sort picks the first, and the rest are
+silently dropped.
+
+**Tell-tale log signature.** Look for
+`<Type>: 2 candidate files; chose <fn>` lines from
+`Resolve-PatchSetFromCatalog`'s pass-2 loop. If `<Type>` is
+`DotNet` and the count is greater than 1, the dropped file is at
+risk.
+
+**Fix.** Use `Select-AllCanonicalPatchFiles` for any Type that can
+legitimately have multiple sub-files. `Resolve-PatchSetFromCatalog`
+gates this by Type: `DotNet` queries go through the multi-file
+picker and emit one PatchBaseline entry per surviving file
+(sharing `KbId` / `Title` / `UpdateId` / `Supersedes` from the
+umbrella KB; only `FileName` and `DownloadUrl` differ). Other
+Types (SSU / LCU / SafeOS / Setup DU) stay on the single-file
+picker because Microsoft publishes a single canonical file per
+UpdateId for them.
+
+**Downstream safety.** `Build-PatchPlan` and the I4.DotNet sub-
+phase already loop over multiple DotNet entries (SPEC §B.14), and
+`Add-WindowsPackageWithRetry`'s 0x800f081e handling (Part D.8)
+treats a "not applicable" return from DISM as benign — so if the
+install.wim contains only one of the runtimes, the other entry's
+DISM call no-ops safely.
+
 ---
 
 # Part E — Roadmap
@@ -1078,6 +1235,8 @@ Server SKU requires.
 | `Resolve-LanguageSpecificPatchesFromCatalog` (r03) | Per-language Catalogue scraper; returns LP / LXP / .NET LP entries; empty result = verified absence |
 | `Select-LatestPatchBySupersedence` (r04.2) | Deduplicate Catalogue candidates via their Supersedes / SupersededBy fields; returns the single newest survivor plus a list of excluded entries for diagnostic CSV |
 | `Get-KbIdFromUpdateTitle` (r04.2) | Extract the `KB######` substring from a Catalogue update title |
+| `Select-AllCanonicalPatchFiles` (r04.3) | Companion to `Select-CanonicalPatchFile`; returns ALL files that survive the scoring filter (Express / Delta / PSF / metadata still rejected) rather than just the highest-scoring one. Used by `Resolve-PatchSetFromCatalog` for `Type='DotNet'` umbrella KBs that attach multiple ndp-runtime MSUs to a single UpdateId |
+| `Assert-WorkspacePreflight` (r04.3) | Mandatory preflight that runs before the Action dispatcher; throws if any of the four `Config/Server<N>.json` files are missing OR if the `-WorkRoot` drive has less than 100 GB free. Skipped for `ListPhases` / `Cleanup` / `-EnvironmentInfoOnly` / `-SkipEnvCheck` |
 | `Get-PatchTargetsForType` (r04) | Returns the WIM target array for a given patch Type (Install / Boot / WinRE / Setup) via `$Script:PatchTargetMap` |
 | `Build-PatchPlan` (r04) | Build a target-aware PatchPlan from the flat ResolvedPatches array, sorted by ApplyOrder within each target lane |
 | `Build-InstallApplySequence` (r04.1) | Convert install.wim patch slice into the I1-I7 Microsoft media-dynamic-update sub-phase sequence; emits I7 (LCU second pass with RequiresRemount=$true) only when language packs are present |

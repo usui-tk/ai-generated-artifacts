@@ -185,7 +185,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 | PowerShell | Windows PowerShell 5.1 推奨、または PowerShell 7 以降 |
 | 権限 | 管理者 (DISM マウントには昇格が必須) |
 | ツール | Windows ADK Deployment Tools (`oscdimg.exe` のため) |
-| ディスク空き | `-WorkRoot` ドライブに 60 GB (最低 30 GB) |
+| ディスク空き | **`-WorkRoot` ドライブに 100 GB**(ワークスペース プリフライト チェックがすべての Action 開始前に強制。`-SkipEnvCheck` で運用者責任のもと回避可) |
 | ネットワーク | ISO とパッチをダウンロードする場合に必要。`-IsoPath` + `-PatchDirectory` ですべてが揃う場合は不要 |
 | Hyper-V | `-Action BootTest` を使う場合のみ必要 |
 
@@ -248,7 +248,7 @@ Gen2 VM を起動する疎通テストが実行されます。各フェーズの
 | `-UseBaselineOnly`           | PatchBaseline を厳密にそのまま使う (Catalog アクセス一切なし)                   |
 | `-IgnorePatchValidation`     | P04.5 検証失敗を警告に降格 (推奨されない)                                       |
 | `-WsusScnCabPath`            | 事前配置済み wsusscn2.cab のパス (自動ダウンロードを省略)                       |
-| `-WorkRoot`                  | ワークスペースルート (既定 `C:\Temp\Workspace_UpdateWsi`)                       |
+| `-WorkRoot`                  | ワークスペースルート。既定はスクリプトディレクトリからの相対パス `Workspace_UpdateWsi`(スクリプトの隣にワークスペースが作成される)。別ドライブに置きたい場合は絶対パスを指定(例 `D:\UpdateWsi`)。このパスのドライブに 100 GB 以上の空き容量が必要(プリフライトで強制) |
 | `-OutputDir`                 | 出力 ISO ディレクトリ (既定 `<WorkRoot>\output`)                                |
 | `-OnlyInstallWimIndexes`     | カンマ区切りインデックス (例 `'2,4'`) で install.wim 更新対象を制限             |
 | `-DryRun`                    | Build / Verify をスキップ (Setup / Fetch / Plan のみ)                           |
@@ -364,7 +364,11 @@ Stage 4 (monthly-refresh) は `workflow_dispatch` で 4 つの入力(`mode`、`o
 |---|---|---|
 | `Administrator privilege required` | 非昇格セッションでの実行 | PowerShell を管理者として再起動 |
 | `oscdimg.exe not found` | Windows ADK Deployment Tools が未インストール | ADK の Deployment Tools 機能をインストール |
-| `Insufficient free space` | `-WorkRoot` ドライブの空きが 30 GB 未満 | より大きなボリュームに `-WorkRoot` を変更 |
+| `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` ドライブの空きが 100 GB 未満 | より大きなボリュームに `-WorkRoot` を変更、または不要ファイルを削除して空きを確保。100 GB は 1 OS 分の PrepareBuildVerify を最後まで実行できる最小値 |
+| `Workspace preflight failed: ... required Config file(s) missing` | `Config/Server<N>.json` が欠落・改名されている、またはスクリプト移動時に `Config/` がコピーされなかった | `Update-WindowsServerIso.ps1` の隣に `Config/` ディレクトリを復元。`Server2016.json` / `Server2019.json` / `Server2022.json` / `Server2025.json` の 4 ファイルすべてが必須 |
+| `Catalogue: no narrowed result for ... / Server2022`(他 OS でも発生し得る)、`Resolved 0 patch entries` | Microsoft Update Catalog のタイトル表記が変わった(カンマ削除など句読点ドリフト) | `Get-CatalogQueryTemplate` と `Get-LanguagePackQueryTemplate.osTitleTokens` の該当 `TitleTokens` 配列に新表記を追加。SPEC §D.19 参照 |
+| RefreshAllBaselines 後の `NeutralPatches[]` の `Type` が誤っている | `Convert-CatalogPatchToBaselineEntry` の新規呼び出し元が `-KnownType` を渡していない | Catalog 検索コンテキストから `-KnownType $q.Type` を渡す。SPEC §D.20 参照 |
+| .NET CU ベースラインエントリのサブファイルが欠落しているように見える | 複数 .msu を持つアンブレラ KB で 1 つしか保持されていない | `Resolve-PatchSetFromCatalog` で `Type='DotNet'` を `Select-AllCanonicalPatchFiles` 経由にしているか確認。SPEC §D.21 参照 |
 | `0x800f081e` の Warning 行 | 該当 SKU に適用できないパッチ | クロス SKU パッチセットでは想定内、無視で OK |
 | 古い WIM マウントが残存 | 前回実行が異常終了 | `dism /Get-MountedImageInfo` 確認後、`dism /Cleanup-Mountpoints` |
 | ISO SHA-256 不一致 | Microsoft がスナップショット URL を更新 | `Config/<OsKey>.json` の `IsoSha256` を新しい値に更新 |

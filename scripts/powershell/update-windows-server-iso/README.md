@@ -198,7 +198,7 @@ A per-group CSV report is emitted to
 | PowerShell | Windows PowerShell 5.1 (recommended) or PowerShell 7+ |
 | Privileges | Administrator (DISM mount requires elevation) |
 | Tools | Windows ADK Deployment Tools (`oscdimg.exe`) |
-| Free disk space | 60 GB on the `-WorkRoot` drive (30 GB minimum) |
+| Free disk space | **100 GB on the `-WorkRoot` drive** (enforced by the workspace preflight before any Action runs; can be bypassed with `-SkipEnvCheck` at the operator's risk) |
 | Network | Required for ISO and patch downloads; not needed when `-IsoPath` and `-PatchDirectory` cover all inputs |
 | Hyper-V | Optional, required only for `-Action BootTest` |
 
@@ -259,7 +259,7 @@ parameter list. The most commonly used:
 | `-UseBaselineOnly`           | Use PatchBaseline strictly as-is; no Catalog access at all              |
 | `-IgnorePatchValidation`     | Demote P04.5 validation failures from abort to warning (NOT recommended)|
 | `-WsusScnCabPath`            | Pre-staged wsusscn2.cab path (skips automatic download)                 |
-| `-WorkRoot`                  | Workspace root (default `C:\Temp\Workspace_UpdateWsi`)                  |
+| `-WorkRoot`                  | Workspace root. Default is `Workspace_UpdateWsi` resolved relative to the script directory (so the workspace lives next to `Update-WindowsServerIso.ps1`). Pass an absolute path to put it on a different drive (e.g. `D:\UpdateWsi`). The drive backing this path must have at least 100 GB free; the preflight aborts otherwise. |
 | `-OutputDir`                 | Output ISO directory (default `<WorkRoot>\output`)                      |
 | `-OnlyInstallWimIndexes`     | Comma-separated index list (e.g. `'2,4'`) to limit install.wim updates  |
 | `-DryRun`                    | Skip Build / Verify phases (Setup / Fetch / Plan only)                  |
@@ -377,7 +377,11 @@ licence forbids public distribution of Microsoft binaries.
 |---|---|---|
 | `Administrator privilege required` | Running as a non-elevated user | Re-launch PowerShell as Administrator |
 | `oscdimg.exe not found` | Windows ADK Deployment Tools not installed | Install the ADK Deployment Tools feature |
-| `Insufficient free space` | `-WorkRoot` drive has < 30 GB free | Move `-WorkRoot` to a larger volume |
+| `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` drive has less than 100 GB free | Move `-WorkRoot` to a larger volume, or free up space; the 100 GB minimum covers an end-to-end PrepareBuildVerify run for one OS |
+| `Workspace preflight failed: ... required Config file(s) missing` | The `Config/Server<N>.json` files were deleted, renamed, or not copied when the script was relocated | Restore the `Config/` directory alongside `Update-WindowsServerIso.ps1`; all four `Server2016.json` / `Server2019.json` / `Server2022.json` / `Server2025.json` must be present |
+| `Catalogue: no narrowed result for ... / Server2022` (or any OS), `Resolved 0 patch entries` | Microsoft changed the Catalogue title format (punctuation drift, e.g. comma removal) | Inspect `Get-CatalogQueryTemplate` and `Get-LanguagePackQueryTemplate.osTitleTokens`; add the new title form to the relevant `TitleTokens` array. See SPEC §D.19 |
+| Wrong `Type` on `NeutralPatches[]` entries after RefreshAllBaselines | A new caller of `Convert-CatalogPatchToBaselineEntry` did not pass `-KnownType` | Pass `-KnownType $q.Type` from the Catalogue search context. See SPEC §D.20 |
+| .NET CU baseline entry seems to be missing a sub-file | Umbrella KB with multiple .msu files; only one was kept | Confirm `Resolve-PatchSetFromCatalog` routes `Type='DotNet'` through `Select-AllCanonicalPatchFiles`. See SPEC §D.21 |
 | `0x800f081e` in Warning lines | Patch not applicable to this SKU | Expected for cross-SKU patch sets; safe to ignore |
 | Stale WIM mount | Previous run crashed | Run `dism /Get-MountedImageInfo` and `dism /Cleanup-Mountpoints` |
 | ISO SHA-256 mismatch | Snapshot URL was rotated by Microsoft | Update `Config/<OsKey>.json` `IsoSha256` to the new value |

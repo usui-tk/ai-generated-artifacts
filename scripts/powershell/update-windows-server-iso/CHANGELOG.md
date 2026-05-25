@@ -27,6 +27,178 @@ the script and follows the
   `Config/<OsKey>.json` diff for human review. Catches Microsoft
   Update Catalogue HTML structure changes within 30 days.
 
+## [update-wsi-2026.05.25-r04.3] - 2026-05-25
+
+### Fixed - `NeutralPatches[].Type` mis-classification
+
+Live first-pass test of `-Action RefreshAllBaselines` (2026-05 cycle)
+exposed that the `Type` field on every Catalogue-derived
+`NeutralPatches` entry was being computed by file-name heuristics in
+`Get-PatchType`, even though the calling code in
+`Resolve-PatchSetFromCatalog` already knew the authoritative Type
+from the Catalogue search query (`SSU` / `LCU` / `DotNet` /
+`DynamicUpdate.SafeOs` / `DynamicUpdate.Setup`). The heuristic
+broke whenever the file name lacked the expected token (e.g. SSU
+file names containing only `kb<N>` with no `servicingstack`
+substring; SafeOS DU file names with `kb<N>` but no `safeos`;
+.NET CU sub-files without `ndp<N>` or `.net`). Affected real
+2026-05 entries were:
+
+| OS | KbId | Title type | Wrong `Type` | Correct `Type` |
+|---|---|---|---|---|
+| Server2016 | KB5088064 | Servicing Stack Update | `LCU` | `SSU` |
+| Server2019 | KB5088864 | Cumulative Update for .NET Framework | `LCU` | `DotNet` |
+| Server2025 | KB5087588 | Safe OS Dynamic Update | `LCU` | `DynamicUpdate.SafeOs` |
+
+The Type-routing in `$Script:PatchTargetMap` (SPEC §B.12) depends on
+this field to send each patch to the right WIM-target sub-phase
+(SPEC §B.14), so the mis-classification would have made install.wim
+patching ineffective on a live ISO build.
+
+**Fix**: added `-KnownType` parameter to
+`Convert-CatalogPatchToBaselineEntry`. When the caller passes a
+non-empty string (which `Resolve-PatchSetFromCatalog` now does
+unconditionally via `-KnownType $q.Type`), the function uses that
+value verbatim instead of running the file-name heuristic. The
+heuristic remains as the fallback path for the empty-`KnownType`
+case (preserving backwards compatibility for ad-hoc or test
+callers). `Resolve-LanguageSpecificPatchesFromCatalog` was reviewed
+and already constructed its entries with `Type = $q.Type` directly,
+so no change was needed on the LSP side.
+
+### Fixed - Server2022 Catalogue narrow filter returned zero results
+
+Live first-pass test also exposed that **every** Server 2022 query
+fell through `Resolve-PatchSetFromCatalog`'s narrow filter with
+zero hits, producing an empty `PatchBaseline.NeutralPatches`
+array for `Config/Server2022.json`. Microsoft Update Catalogue has
+since dropped the comma in Server 2022 update titles
+("Microsoft server operating system, version 21H2" →
+"Microsoft server operating system version 21H2", matching the
+Server 2025 / 24H2 format). The hard-coded TitleToken used
+`[regex]::Escape($titleToken)` (literal match including the
+comma), so the new comma-less titles failed to narrow.
+
+**Fix**: `Get-CatalogQueryTemplate` Server2022 branch and
+`Get-LanguagePackQueryTemplate` `osTitleTokens` now accept BOTH the
+comma-less and the historical comma form via an OR-matched
+`TitleTokens` array. The actual `Search.aspx` query strings were
+also updated to the current (comma-less) form because that is
+what the live Catalogue listings display. The new structure is
+robust against any future Microsoft re-edit that flips the format
+back.
+
+Verification: live `-Action RefreshAllBaselines -DryRun -OnlyOs
+Server2022` now resolves 5 patch entries (LCU + 2 .NET files +
+supersedence-dedup of 3 stale .NET candidates), versus 0 before
+the fix.
+
+### Fixed - umbrella .NET CU lost N-1 sub-files
+
+Live first-pass test exposed that umbrella .NET Cumulative Update
+KBs (e.g. Server 2019 KB5088864 which bundles 4.7.2 and 4.8) lost
+all but one MSU when `Select-CanonicalPatchFile` was called: the
+function is designed to return a single best file, and there is no
+genuine ranking between two ndp-runtime variants of the same
+umbrella KB, so the second .msu was silently dropped. Effect: on
+an install.wim that contains the dropped runtime, the .NET CU
+would have been a no-op and the corresponding CVEs would have
+remained unpatched.
+
+**Fix**: added `Select-AllCanonicalPatchFiles` (companion to the
+existing single-file picker). It applies the same scoring rules
+(so Express / Delta / PSF / metadata are still rejected) but
+returns every link that scored > 0. `Resolve-PatchSetFromCatalog`
+now routes `Type='DotNet'` queries through the multi-file picker
+and emits one `NeutralPatches` entry per surviving file, all
+keyed off the same umbrella KB / UpdateId / Title. SSU / LCU /
+SafeOS / Setup DU queries continue to use the single-file picker
+since Microsoft publishes a single canonical file per UpdateId
+for those types.
+
+Verification: live `-Action RefreshAllBaselines -DryRun -OnlyOs
+Server2022` for 2026-05 now keeps two .NET .msu files
+(`...-x64-ndp481_...msu` and `...-x64-ndp48_...msu`) on the
+KB5088862 umbrella entry, where r04.2 would have kept only one.
+
+### Added - `Assert-WorkspacePreflight` (preflight check)
+
+New mandatory preflight that runs before the Action dispatcher.
+Two checks, both fatal:
+
+1. **Config presence**. The four canonical
+   `Config/Server<N>.json` files (Server2016, Server2019,
+   Server2022, Server2025) must exist alongside the script. The
+   check fails fast with a list of any missing files, so the run
+   does not proceed into the Catalogue scrape only to throw a
+   less-helpful "config not found" error in P02 / A01.
+2. **Drive free space**. The drive backing `-WorkRoot` must have
+   at least **100 GB** free. This is the documented minimum for
+   an end-to-end `PrepareBuildVerify` run for one OS (input ISO
+   ~7 GB + extracted source ~7 GB + mounted WIM scratch ~15 GB +
+   patches ~10 GB + output ISO ~7 GB + DISM headroom). The disk
+   check is skipped under `-DryRun` because dry runs do not
+   actually write large files.
+
+Preflight is placed **before** the Action dispatcher (rather than
+inside P01) so that Admin actions like `-Action RefreshAllBaselines`
+and `-Action DumpFieldClassification` (which never run P01) are
+also protected. It is intentionally skipped for `-Action ListPhases`
+(quick branch that exits without any workspace contact),
+`-Action Cleanup` (whose entire purpose is to remove a
+partially-built workspace), `-EnvironmentInfoOnly` (the user
+explicitly asked for the env dump only), and `-SkipEnvCheck`
+(operator override).
+
+The existing P01 Step 4 disk-space check is retained as
+informational only; the authoritative 100 GB enforcement happens
+in the preflight, and Step 4 now only emits a warning when free
+space is below 100 GB (which can only occur if `-SkipEnvCheck`
+bypassed the preflight).
+
+### Changed - `-WorkRoot` default is now script-relative
+
+The default value of `-WorkRoot` has changed from the absolute
+`C:\Temp\Workspace_UpdateWsi` to the script-relative
+`Workspace_UpdateWsi`. The existing `Resolve-RelativeToScript`
+helper resolves the relative path against `$Script:ScriptRoot`
+(i.e. the directory containing `Update-WindowsServerIso.ps1`),
+producing a workspace that lives next to the script tree by
+default. Operators who relied on the old `C:\Temp\...` default
+should pass `-WorkRoot 'C:\Temp\Workspace_UpdateWsi'` explicitly
+or update their automation; the absolute-path override is
+unchanged and still works.
+
+The new default plays well with the preflight Config-presence
+check above: when the workspace is script-relative, the
+`Config/` directory checked by preflight is the same `Config/`
+directory shipped with the script.
+
+### Quality
+
+- psa.py: 0 errors / 0 warnings / 0 info (7,627 lines).
+- PSScriptAnalyzer 1.25.0: 0 findings.
+- Live smoke `RefreshAllBaselines -DryRun -OnlyOs Server2025`:
+  exit 2 (Manual fill expected), preflight passes, all 5 patch
+  Types resolve correctly, supersedence dedup excludes one
+  .NET 3.5+4.8.1 false-positive (unchanged from r04.2 behaviour).
+- Live smoke `RefreshAllBaselines -DryRun -OnlyOs Server2022`:
+  preflight passes, **5 patch entries resolve** (vs 0 in r04.2
+  due to bug 2), the umbrella .NET CU keeps both ndp-runtime
+  MSUs (vs 1 in r04.2 due to bug 3).
+
+### Compatibility
+
+- Existing `Config/Server<N>.json` files are unchanged in
+  structure (Schema v2.0). r04.3 just produces correct `Type`
+  fields and an extra .NET entry for umbrella KBs on the next
+  `-Action RefreshAllBaselines` run.
+- Operators who depended on the old `-WorkRoot` default need to
+  either accept the new script-relative location or pass
+  `-WorkRoot` explicitly.
+- `ScriptVersion` is bumped to `update-wsi-2026.05.25-r04.3`;
+  `ScriptTag` is `live-test-fixes-and-preflight-checks`.
+
 ## Documentation maintenance - 2026-05-24
 
 ### Added - `TESTING.md`

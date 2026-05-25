@@ -242,7 +242,7 @@ param(
     [string]   $OnlyLanguage,
     # ------------
 
-    [string]   $WorkRoot             = 'C:\Temp\Workspace_UpdateWsi',
+    [string]   $WorkRoot             = 'Workspace_UpdateWsi',
     [string]   $OutputDir,
     [string]   $OnlyInstallWimIndexes,
 
@@ -447,8 +447,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.24-r04.2'
-$Script:ScriptTag     = 'supersedence-aware-patch-selection'
+$Script:ScriptVersion = 'update-wsi-2026.05.25-r04.3'
+$Script:ScriptTag     = 'live-test-fixes-and-preflight-checks'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -2024,6 +2024,112 @@ validated under 64-bit PowerShell.
     }
 }
 
+function Assert-WorkspacePreflight {
+    <#
+    .SYNOPSIS
+        Phase 1 preflight check: verifies that the on-disk workspace
+        is laid out correctly and has enough free space to host an
+        end-to-end build.
+    .DESCRIPTION
+        Two checks, both fatal:
+
+        1. Config presence. The script ships with four canonical
+           Config/Server<N>.json files (Server2016, Server2019,
+           Server2022, Server2025) alongside the script. They must
+           exist before any Phase runs because Get-ConfigProfile is
+           called from P02 (load) and A01 (RefreshAllBaselines)
+           and would throw a less helpful error if the file is
+           missing. We check up-front, in a single place, with a
+           clear "which files are missing" message.
+
+        2. Drive free space. The default workspace ('Workspace_UpdateWsi',
+           relative to the script root) sits on whichever drive hosts
+           the script. A full PrepareBuildVerify run consumes:
+
+              ~7 GB  input ISO (one OS)
+              ~7 GB  extracted source tree
+              ~15 GB mounted install.wim scratch (DISM /Cleanup-Image)
+              ~10 GB pulled patches
+              ~7 GB  output ISO
+              ~5 GB  DISM temp + logs headroom
+
+           ~50 GB strict minimum per OS; we require 100 GB free as a
+           safety margin to cover concurrent operations, multiple OS
+           iterations, and DISM's component-store growth during /ResetBase.
+
+        Honours -DryRun (the disk check is skipped for dry runs since
+        no real bytes will be written). Does NOT honour -SyntheticTestMode
+        for the Config check because RefreshAllBaselines still needs
+        the JSON files to know which targets to refresh.
+    #>
+    [CmdletBinding()]
+    param()
+
+    # ---- Check 1: Config files ----
+    $configDir = Join-Path $Script:ScriptRoot 'Config'
+    if (-not (Test-Path -LiteralPath $configDir -PathType Container)) {
+        throw ('Workspace preflight failed: Config directory not found at "{0}". The script ships Config/Server<N>.json alongside Update-WindowsServerIso.ps1; ensure the project tree is intact.' -f $configDir)
+    }
+    Write-Step ('Config directory: {0}' -f $configDir)
+
+    $requiredConfigs = @('Server2016.json','Server2019.json','Server2022.json','Server2025.json')
+    $missingConfigs  = New-Object System.Collections.Generic.List[string]
+    foreach ($cfg in $requiredConfigs) {
+        $cfgPath = Join-Path $configDir $cfg
+        if (Test-Path -LiteralPath $cfgPath -PathType Leaf) {
+            $sz = (Get-Item -LiteralPath $cfgPath).Length
+            Write-Ok ('  Found Config/{0} ({1} bytes)' -f $cfg, $sz)
+        } else {
+            $missingConfigs.Add($cfg) | Out-Null
+            Write-Fail ('  Missing Config/{0}' -f $cfg)
+        }
+    }
+    if ($missingConfigs.Count -gt 0) {
+        Add-ErrorJsonlEntry -Phase 'P01' -Kind 'workspace-preflight' -Properties @{
+            check          = 'config-files'
+            missingFiles   = $missingConfigs.ToArray()
+            configDirectory = $configDir
+        }
+        throw ('Workspace preflight failed: {0} required Config file(s) missing under {1}: {2}. All four Server<N>.json baselines must be present before the script can run any phase.' -f $missingConfigs.Count, $configDir, ($missingConfigs -join ', '))
+    }
+
+    # ---- Check 2: Drive free space (100 GB minimum) ----
+    if ($Script:DryRun) {
+        Write-Skip 'DryRun: skipping drive free-space check.'
+        return
+    }
+    $minFreeGB = 100
+    $rootSlice = $Script:WorkRoot
+    if ($rootSlice.Length -ge 2 -and $rootSlice.Substring(1,1) -eq ':') {
+        $driveLetter = $rootSlice.Substring(0, 1)
+    } else {
+        # UNC or unrooted path; fall back to the script root drive
+        $driveLetter = $Script:ScriptRoot.Substring(0, 1)
+        Write-Warn ('WorkRoot "{0}" is not on a lettered drive; checking script-root drive {1}: instead.' -f $rootSlice, $driveLetter)
+    }
+    $psDrive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
+    if (-not $psDrive) {
+        Add-ErrorJsonlEntry -Phase 'P01' -Kind 'workspace-preflight' -Properties @{
+            check        = 'drive-free-space'
+            driveLetter  = $driveLetter
+            error        = 'PSDrive lookup returned null'
+        }
+        throw ('Workspace preflight failed: could not resolve drive {0}: for free-space check. This usually means the drive is missing or not a fixed disk.' -f $driveLetter)
+    }
+    $freeGB = [Math]::Round($psDrive.Free / 1GB, 1)
+    Write-Step ('Drive {0}: free space: {1} GB (minimum required: {2} GB)' -f $driveLetter, $freeGB, $minFreeGB)
+    if ($freeGB -lt $minFreeGB) {
+        Add-ErrorJsonlEntry -Phase 'P01' -Kind 'workspace-preflight' -Properties @{
+            check        = 'drive-free-space'
+            driveLetter  = $driveLetter
+            freeGB       = $freeGB
+            requiredGB   = $minFreeGB
+        }
+        throw ('Workspace preflight failed: drive {0}: has only {1} GB free; {2} GB minimum required to host an end-to-end PrepareBuildVerify run. Free up space or pass -WorkRoot on a larger drive.' -f $driveLetter, $freeGB, $minFreeGB)
+    }
+    Write-Ok ('Drive {0}: OK ({1} GB free, {2} GB required).' -f $driveLetter, $freeGB, $minFreeGB)
+}
+
 # ============================================================
 # ISO Updater specific: configuration profile
 # ============================================================
@@ -2573,6 +2679,17 @@ function Convert-CatalogPatchToBaselineEntry {
         Bridges the Microsoft Update Catalog DTO (UpdateId/Title/DownloadUrl)
         and our PatchBaseline schema (KbId/Type/ApplyOrder/Sha256/...).
         Computes Type and ApplyOrder via the existing classifiers.
+
+        Type resolution priority:
+          1. If the caller passes -KnownType (a non-empty string), that
+             value is used verbatim. Callers like Resolve-PatchSetFromCatalog
+             already know the Catalog query's Type bucket
+             (SSU / LCU / DotNet / DynamicUpdate.SafeOs / DynamicUpdate.Setup)
+             and should pass it through to avoid the unreliable filename
+             heuristic in Get-PatchType.
+          2. Otherwise fall back to Get-PatchType -FileName <fn>. This
+             remains the path for older callers that have no contextual
+             Type info (e.g. tests, ad-hoc invocations).
     #>
     [OutputType([pscustomobject])]
     param(
@@ -2587,7 +2704,8 @@ function Convert-CatalogPatchToBaselineEntry {
         [string[]]$Supersedes  = @(),
         [string[]]$RequiresKbIds = @(),
         [string]$ApplicableArchitecture = 'x64',
-        [string[]]$ApplicableLanguages  = @('neutral')
+        [string[]]$ApplicableLanguages  = @('neutral'),
+        [string]$KnownType = ''
     )
     $fn = $FileName
     if ([string]::IsNullOrEmpty($fn) -and $DownloadUrl) {
@@ -2595,7 +2713,11 @@ function Convert-CatalogPatchToBaselineEntry {
         try { $fn = [System.IO.Path]::GetFileName(([uri]$DownloadUrl).AbsolutePath) }
         catch { $fn = '' }
     }
-    $pType  = Get-PatchType -FileName $fn
+    if (-not [string]::IsNullOrEmpty($KnownType)) {
+        $pType = $KnownType
+    } else {
+        $pType = Get-PatchType -FileName $fn
+    }
     $pOrder = Get-PatchApplyOrder -PatchType $pType
     return [pscustomobject][ordered]@{
         Type                   = $pType
@@ -2701,14 +2823,25 @@ function Get-CatalogQueryTemplate {
             )
         }
         'Server2022' = @{
-            # 2022 uses comma form "...server operating system, version 21H2"
-            TitleTokens = @('Microsoft server operating system, version 21H2')
+            # Server 2022 historically used the comma form ("...server
+            # operating system, version 21H2") but as of 2026-05
+            # Microsoft has dropped the comma so titles now read
+            # "...server operating system version 21H2", matching the
+            # Server 2025 (24H2) format. We accept BOTH forms in the
+            # narrow filter (OR-matched) to remain robust against any
+            # future re-edit; the actual Search.aspx query strings use
+            # the current (no-comma) form because that is what live
+            # Catalogue listings display.
+            TitleTokens = @(
+                'Microsoft server operating system version 21H2',
+                'Microsoft server operating system, version 21H2'
+            )
             Queries = @(
-                @{ Type='SSU';                  QueryTemplate=($m + ' Servicing Stack Update for Microsoft server operating system, version 21H2'); ProductFilter=@(); DescriptionFilter='' }
-                @{ Type='LCU';                  QueryTemplate=($m + ' Cumulative Update for Microsoft server operating system, version 21H2');     ProductFilter=@(); DescriptionFilter='' }
+                @{ Type='SSU';                  QueryTemplate=($m + ' Servicing Stack Update for Microsoft server operating system version 21H2'); ProductFilter=@(); DescriptionFilter='' }
+                @{ Type='LCU';                  QueryTemplate=($m + ' Cumulative Update for Microsoft server operating system version 21H2');     ProductFilter=@(); DescriptionFilter='' }
                 # 2022 uses "Dynamic Update" without "Setup/Safe OS" prefix in title; Product/Description disambiguates
-                @{ Type='DynamicUpdate.Setup';  QueryTemplate=($m + ' Dynamic Update for Microsoft server operating system, version 21H2'); ProductFilter=@('Windows 10 and later Dynamic Update'); DescriptionFilter='SetupUpdate' }
-                @{ Type='DynamicUpdate.SafeOs'; QueryTemplate=($m + ' Dynamic Update for Microsoft server operating system, version 21H2'); ProductFilter=@('Windows Safe OS Dynamic Update'); DescriptionFilter='ComponentUpdate' }
+                @{ Type='DynamicUpdate.Setup';  QueryTemplate=($m + ' Dynamic Update for Microsoft server operating system version 21H2'); ProductFilter=@('Windows 10 and later Dynamic Update'); DescriptionFilter='SetupUpdate' }
+                @{ Type='DynamicUpdate.SafeOs'; QueryTemplate=($m + ' Dynamic Update for Microsoft server operating system version 21H2'); ProductFilter=@('Windows Safe OS Dynamic Update'); DescriptionFilter='ComponentUpdate' }
                 @{ Type='DotNet';               QueryTemplate=($m + ' Cumulative Update for .NET Framework');                              ProductFilter=@('.NET Framework'); DescriptionFilter='' }
             )
         }
@@ -2933,6 +3066,82 @@ function Select-CanonicalPatchFile {
     $best = $scored | Where-Object { $_.Score -gt 0 } | Sort-Object Score -Descending | Select-Object -First 1
     if (-not $best) { return $null }
     return $best.Link
+}
+
+# psa-disable-next-line PSA6003 -- function intentionally returns multiple files (companion to the singular Select-CanonicalPatchFile); plural noun accurately describes the return contract
+function Select-AllCanonicalPatchFiles {
+    <#
+    .SYNOPSIS
+        From a list of download links returned by
+        Get-DownloadLinkFromCatalog, return ALL files that are full
+        standalone packages suitable for offline image servicing.
+    .DESCRIPTION
+        Companion to Select-CanonicalPatchFile. The single-file picker
+        is appropriate for SSU / LCU / SafeOS DU / Setup DU, which
+        Microsoft publishes as a single .msu or .cab per UpdateId.
+
+        Umbrella .NET CU updates (e.g. Server 2019 KB5088864 which
+        bundles .NET 4.7.2 and 4.8 servicing) attach MULTIPLE files
+        to a single UpdateId. Calling Select-CanonicalPatchFile on
+        such an UpdateId silently drops all but one .msu, leaving
+        whichever runtime corresponds to the dropped file unpatched
+        in install.wim.
+
+        This function applies the same scoring rules (so Express /
+        Delta / PSF / metadata are still rejected) but returns every
+        link that scored > 0, sorted descending by Score for
+        determinism. Callers should iterate the returned array and
+        emit one PatchBaseline entry per file, all keyed off the
+        umbrella KB / UpdateId.
+
+        Returns an empty array when no link survives filtering.
+    #>
+    [OutputType([pscustomobject[]])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [pscustomobject[]]$Links,
+        [Parameter(Mandatory)] [string]$PatchType,
+        [string]$Architecture  = 'x64'
+    )
+    if (-not $Links -or $Links.Count -eq 0) { return @() }
+
+    $scored = New-Object System.Collections.Generic.List[object]
+    foreach ($lnk in $Links) {
+        if (-not $lnk -or -not $lnk.FileName) { continue }
+        $fn = $lnk.FileName.ToLower()
+        $score = 0
+
+        # Disqualifiers (any one of these makes the file unusable standalone)
+        if ($fn -match 'express') { $score -= 10000 }
+        if ($fn -match 'delta')   { $score -= 10000 }
+        if ($fn -match '\.psf$' -or $fn -match '-psf-') { $score -= 10000 }
+        if ($fn -match 'pkgproperties' -or $fn -match '\.txt$') { $score -= 10000 }
+
+        # Extension preference
+        if ($fn -match '\.msu$') { $score += 200 }
+        elseif ($fn -match '\.cab$') { $score += 100 }
+        elseif ($fn -match '\.wim$' -or $fn -match '\.esd$') { $score -= 200 }
+
+        # Architecture match
+        if ($Architecture) {
+            $archLower = $Architecture.ToLower()
+            if ($fn -match [regex]::Escape($archLower)) { $score += 50 }
+        }
+        if ($Architecture -eq 'x64') {
+            if ($fn -match 'arm64') { $score -= 50 }
+            if ($fn -match 'x86' -and $fn -notmatch 'x86_64') { $score -= 50 }
+        }
+
+        if ($fn -match 'full') { $score += 30 }
+
+        $scored.Add([pscustomobject]@{
+            Link  = $lnk
+            Score = $score
+        }) | Out-Null
+    }
+
+    $survivors = @($scored | Where-Object { $_.Score -gt 0 } | Sort-Object Score -Descending)
+    if ($survivors.Count -eq 0) { return @() }
+    return @($survivors | ForEach-Object { $_.Link })
 }
 
 function Test-IsCombinedLcuTitle {
@@ -3231,43 +3440,59 @@ function Resolve-PatchSetFromCatalog {
             Write-Warn ('No download link returned for {0} UpdateId {1}.' -f $q.Type, $best.UpdateId)
             continue
         }
-        # Pick the canonical (full standalone) file
-        $primary = Select-CanonicalPatchFile -Links $links -PatchType $q.Type -Architecture 'x64'
-        if (-not $primary) {
+        # Pick the canonical (full standalone) file(s).
+        # Use Select-AllCanonicalPatchFiles when the patch Type is
+        # DotNet, because umbrella .NET CU UpdateIds (e.g. Server 2019
+        # KB5088864) attach multiple .msu files for different .NET
+        # runtimes (4.7.2, 4.8, etc.) and each must become its own
+        # PatchBaseline entry. For SSU / LCU / SafeOS / Setup DU,
+        # Microsoft publishes a single canonical file per UpdateId so
+        # the single-file picker is sufficient.
+        if ($q.Type -eq 'DotNet') {
+            $primaries = @(Select-AllCanonicalPatchFiles -Links $links -PatchType $q.Type -Architecture 'x64')
+        } else {
+            $singleBest = Select-CanonicalPatchFile -Links $links -PatchType $q.Type -Architecture 'x64'
+            if ($singleBest) { $primaries = @($singleBest) } else { $primaries = @() }
+        }
+        if ($primaries.Count -eq 0) {
             $names = ($links | ForEach-Object { $_.FileName }) -join ', '
             Write-Warn ('No canonical full file for {0} UpdateId {1} (only Express/Delta/PSF available?). Files were: {2}' -f $q.Type, $best.UpdateId, $names)
             continue
         }
         if ($links.Count -gt 1) {
-            Write-Step ('  {0}: {1} candidate files; chose {2}' -f $q.Type, $links.Count, $primary.FileName)
+            $chosenNames = ($primaries | ForEach-Object { $_.FileName }) -join ', '
+            Write-Step ('  {0}: {1} candidate file(s); chose {2} file(s): {3}' -f $q.Type, $links.Count, $primaries.Count, $chosenNames)
         }
-        # Supersedence (best-effort)
+        # Supersedence (best-effort) - shared across all files of this UpdateId
         $supers = Get-SupersedenceFromCatalog -UpdateId $best.UpdateId -MaxRetries $MaxRetries
         $kbFromTitle = ''
         $kbMatch = [regex]::Match($best.Title, '\((KB\d{6,7})\)')
         if ($kbMatch.Success) { $kbFromTitle = $kbMatch.Groups[1].Value }
 
-        $entry = Convert-CatalogPatchToBaselineEntry `
-            -KbId $kbFromTitle `
-            -Title $best.Title `
-            -UpdateId $best.UpdateId `
-            -DownloadUrl $primary.Url `
-            -FileName $primary.FileName `
-            -Sha256 '' `
-            -Supersedes ($supers.Supersedes) `
-            -ApplicableArchitecture 'x64' `
-            -ApplicableLanguages @('neutral')
+        foreach ($primary in $primaries) {
+            $entry = Convert-CatalogPatchToBaselineEntry `
+                -KbId $kbFromTitle `
+                -Title $best.Title `
+                -UpdateId $best.UpdateId `
+                -DownloadUrl $primary.Url `
+                -FileName $primary.FileName `
+                -Sha256 '' `
+                -Supersedes ($supers.Supersedes) `
+                -ApplicableArchitecture 'x64' `
+                -ApplicableLanguages @('neutral') `
+                -KnownType $q.Type
 
-        # Annotate IsCombined / Variant fields
-        if ($q.Type -eq 'LCU') {
-            $combinedFlag = $isCombinedMonth -or $lcuTitleSaysCombined
-            $entry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue ([bool]$combinedFlag) -Force
-        } else {
-            $entry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $false -Force
+            # Annotate IsCombined / Variant fields
+            if ($q.Type -eq 'LCU') {
+                $combinedFlag = $isCombinedMonth -or $lcuTitleSaysCombined
+                $entry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue ([bool]$combinedFlag) -Force
+            } else {
+                $entry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $false -Force
+            }
+            $entry | Add-Member -NotePropertyName 'Variant' -NotePropertyValue 'Full' -Force
+
+            $resolved.Add($entry) | Out-Null
         }
-        $entry | Add-Member -NotePropertyName 'Variant' -NotePropertyValue 'Full' -Force
-
-        $resolved.Add($entry) | Out-Null
     }
 
     # ----- LCU RequiresKbIds dependency annotation -----
@@ -3329,7 +3554,11 @@ function Get-LanguagePackQueryTemplate {
     # OS-specific Catalogue title fragments
     $osTitleTokens = @{
         'Server2025' = @('Microsoft server operating system version 24H2', 'Windows Server 2025')
-        'Server2022' = @('Microsoft server operating system, version 21H2', 'Windows Server 2022')
+        'Server2022' = @(
+            'Microsoft server operating system version 21H2',
+            'Microsoft server operating system, version 21H2',
+            'Windows Server 2022'
+        )
         'Server2019' = @('Windows Server 2019')
         'Server2016' = @('Windows Server 2016')
     }
@@ -4990,24 +5219,25 @@ function Invoke-SetupPhase01_Initialize {
             throw 'Get-WindowsImage cmdlet not available. The Dism PowerShell module is required.'
         }
 
-        # Step 4: Disk space
-        Set-DebugStep -Step 'disk-space-check'
-        Write-SubSection 'Step 4: Disk space'
+        # Step 4: Disk space (informational; the authoritative check
+        # is Step 0.5 'Workspace preflight' which enforces the 100 GB
+        # minimum. This step is kept for backwards-compatible log
+        # output and to surface the per-drive free-space value when
+        # -SkipEnvCheck bypassed Step 0.5).
+        Set-DebugStep -Step 'disk-space-info'
+        Write-SubSection 'Step 4: Disk space (informational)'
         $rootDrive = $Script:WorkRoot.Substring(0, 2).TrimEnd(':')
         $psDrive = Get-PSDrive -Name $rootDrive -ErrorAction SilentlyContinue
         if ($psDrive) {
             $freeGB = [Math]::Round($psDrive.Free / 1GB, 1)
             Write-Step ('Free space on {0}: {1} GB' -f $rootDrive, $freeGB)
-            if ($freeGB -lt 30 -and -not $Script:DryRun -and -not $Script:EnvironmentInfoOnly -and -not $Script:SkipEnvCheck) {
-                throw ('Insufficient free space on {0}: {1} GB free; 30 GB minimum required.' -f $rootDrive, $freeGB)
-            }
-            if ($freeGB -lt 60) {
-                Write-Warn ('Tight free space on {0}: {1} GB free; 60 GB recommended for full builds.' -f $rootDrive, $freeGB)
+            if ($freeGB -lt 100) {
+                Write-Warn ('Free space below the documented 100 GB minimum; if -SkipEnvCheck was used and a real build is attempted, expect DISM to fail.')
             } else {
                 Write-Ok ('Disk space OK ({0} GB free).' -f $freeGB)
             }
         } else {
-            Write-Warn ('Could not get PSDrive for {0}: skipping disk space check.' -f $rootDrive)
+            Write-Warn ('Could not get PSDrive for {0}: skipping informational disk space readout.' -f $rootDrive)
         }
 
         # Step 5: Hyper-V (BootTest only)
@@ -7293,6 +7523,35 @@ Show-EntryBanner
 if ($Action -eq 'ListPhases') {
     Show-PhaseList
     exit 0
+}
+
+# Workspace preflight.
+# Verifies that (1) the Config directory and all four canonical
+# Config/Server<N>.json files exist alongside the script, and (2) the
+# drive backing -WorkRoot has at least 100 GB free space (the minimum
+# required to host an end-to-end PrepareBuildVerify run for one OS:
+# input ISO ~7 GB + extracted ~7 GB + mounted WIM ~15 GB + patches
+# ~10 GB + output ISO ~7 GB + DISM scratch + headroom).
+#
+# Preflight runs BEFORE the Action dispatcher (rather than inside P01)
+# so that Admin actions like -Action RefreshAllBaselines and
+# -Action DumpFieldClassification (which never run P01) are also
+# protected. The check is fatal: missing Config files or a too-small
+# drive short-circuit the run before any Catalogue scrape or DISM
+# mount is attempted.
+#
+# Skipped for:
+#   - 'Cleanup' (the point of Cleanup is to remove a partially-built
+#     workspace; requiring 100 GB free would be circular)
+#   - -EnvironmentInfoOnly (the user explicitly asked for the env
+#     dump only and wants to inspect the host first)
+#   - -SkipEnvCheck (operator override)
+#
+# The disk-space half of the check is also skipped under -DryRun
+# (Assert-WorkspacePreflight handles this internally) because dry
+# runs do not actually write large files.
+if (-not ($Action -eq 'Cleanup' -or $EnvironmentInfoOnly -or $SkipEnvCheck)) {
+    Assert-WorkspacePreflight
 }
 
 # Optional clean

@@ -34,21 +34,24 @@ This document consolidates everything needed to verify and evaluate
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r04.2 build |
-| File encoding (UTF-8 BOM, CRLF line endings) | ✓ for the script | r04.2 build |
-| `PSAP0003` / `PSAP0004` / `PSAP0005` strict-mode baseline (no inline rNN tags, no in-script REVISION HISTORY block, no rNN references in comment bodies) | **0 findings** ✓ | r04.2 build |
-| PSScriptAnalyzer 1.25.0 with project `PSScriptAnalyzerSettings.psd1` | **0 findings** ✓ | r04.2 build |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r04.3 build |
+| File encoding (UTF-8 BOM, CRLF line endings) | ✓ for the script | r04.3 build |
+| `PSAP0003` / `PSAP0004` / `PSAP0005` strict-mode baseline (no inline rNN tags, no in-script REVISION HISTORY block, no rNN references in comment bodies) | **0 findings** ✓ | r04.3 build |
+| PSScriptAnalyzer 1.25.0 with project `PSScriptAnalyzerSettings.psd1` | **0 findings** ✓ | r04.3 build |
 | Unit tests — PatchPlan engine (4 cases) | ✓ all pass | r04 build |
 | Unit tests — Sub-phase sequence builders (5 cases) | ✓ all pass | r04.1 build |
-| Unit tests — `Select-LatestPatchBySupersedence` (5 cases) | ✓ all pass | r04.2 build |
-| Smoke 1 — `-Action ListPhases` registry dump | ✓ exit 0, 13 phases + 11 actions | r04.2 build |
-| Smoke 2 — `-EnvironmentInfoOnly` (P01 only) | ✓ exit 0 on Linux pwsh 7.4.6 | r04.2 build |
-| Smoke 3 — `-SyntheticTestMode -DryRun` on Server2019 | ✓ P01–P02.5 complete; P03 reaches `New-SyntheticTestIso` (DISM unavailable on Linux pwsh is expected) | r04.2 build |
-| Smoke 4 — `-Action DumpFieldClassification` | ✓ exit 0, JSON written | r04.2 build |
-| Smoke 5 — `-Action RefreshAllBaselines -DryRun -OnlyOs Server2025` | ✓ exit 2 (Manual fields remain by design); supersedence dedup exercised on real data | r04.2 build |
+| Unit tests — `Select-LatestPatchBySupersedence` (5 cases) | ✓ all pass | r04.3 build |
+| Smoke 1 — `-Action ListPhases` registry dump | ✓ exit 0, 13 phases + 11 actions | r04.3 build |
+| Smoke 2 — `-EnvironmentInfoOnly` (P01 only) | ✓ exit 0 on Linux pwsh 7.4.6 | r04.3 build |
+| Smoke 3 — `-SyntheticTestMode -DryRun` on Server2019 | ✓ P01–P02.5 complete; P03 reaches `New-SyntheticTestIso` (DISM unavailable on Linux pwsh is expected) | r04.3 build |
+| Smoke 4 — `-Action DumpFieldClassification` | ✓ exit 0, JSON written | r04.3 build |
+| Smoke 5 — `-Action RefreshAllBaselines -DryRun -OnlyOs Server2025` | ✓ exit 2 (Manual fields remain by design); supersedence dedup exercised on real data | r04.3 build |
 | Smoke 6 — `-Mode Force -OnlyLanguage ja-jp` | ✓ Force overrides Skip; OnlyLanguage filter applied | r04 build |
 | Smoke 7 — `-Mode Initial` | ✓ same decisions as Monthly for the baseline state | r04 build |
-| Live Catalogue scrape (Server2025 / `2026-05`) | ✓ 3 patches resolved; Combined-LCU detection fires; supersedence dedup excludes 1 false-positive | r04.2 build |
+| Live Catalogue scrape (Server2025 / `2026-05`) | ✓ 3 patches resolved; Combined-LCU detection fires; supersedence dedup excludes 1 false-positive | r04.3 build |
+| Live Catalogue scrape (Server2022 / `2026-05`) | ✓ 5 patch entries resolved after comma-form fix; supersedence dedup excludes 3 stale .NET candidates; umbrella .NET CU keeps both ndp48 and ndp481 MSUs | r04.3 build |
+| Workspace preflight — Config presence (all 4 files present) | ✓ all four `Config/Server<N>.json` listed with byte sizes | r04.3 build |
+| Workspace preflight — placement before dispatcher | ✓ runs for `RefreshAllBaselines` / `DumpFieldClassification` (which never run P01); skipped for `ListPhases` / `Cleanup` / `-EnvironmentInfoOnly` / `-SkipEnvCheck` | r04.3 build |
 | **Real ISO integration on Windows host (full DISM)** | _Operator-pending_ | — |
 | **CI Stage 1 (Linux) workflow run** | _Operator-pending; logic identical to local Linux smoke_ | — |
 | **CI Stage 2 (Windows) workflow run** | _Operator-pending_ | — |
@@ -362,5 +365,8 @@ continuous verification that the Catalogue scrape paths still work.
 | r03 | `Common` and `PatchBaseline` field groups were never iterated in `A01.RefreshAllBaselines` when `-Mode Force` was used | PowerShell 7 quirk: `if ($cond) { $arr } else { @($null) }` collapses to a bare `$null` instead of a single-element array, so the outer `foreach ($lang in $iterLangs)` body never ran for non-per-language groups | r03 fix: replace with explicit `if ($cond) { $iterLangs = @($supported) } else { $iterLangs = ,$null }` using the comma operator to force a 1-element array |
 | r02.2 | Phase functions called `Start-DebugTrace -PhaseName` but the implementation only accepted `-Context / -PhaseId` | API renamed during r02 split-out but not all callers updated | r02.2 cleanup pass; PSScriptAnalyzer would have caught this if PSAvoidUsingUndeclaredParameterNames had been enabled |
 | r02.3 | Legacy error helpers used positional arguments inconsistent with newer call sites | Mid-refactor state | r02.3 standardised on `Add-ErrorJsonlEntry -Phase / -Kind / -Properties` |
+| r04.2 | Every `Type` field on Catalogue-derived `NeutralPatches` entries was computed by file-name heuristics in `Get-PatchType`, mis-classifying SSU / Safe OS DU / umbrella .NET CU sub-files as `LCU` because their file names lack the expected distinguishing token | The classifier ignored the Catalogue search context (`$q.Type`), which already knew the authoritative Type | r04.3 added `-KnownType` parameter to `Convert-CatalogPatchToBaselineEntry`; `Resolve-PatchSetFromCatalog` now passes `$q.Type` so the heuristic is bypassed when the caller has context. See SPEC §D.20 |
+| r04.2 | Server 2022 baseline refresh returned **zero** patch entries; every narrow filter dropped all hits | Microsoft Update Catalogue dropped the comma in Server 2022 update titles ("...operating system, version 21H2" → "...operating system version 21H2"); the hard-coded TitleToken did a `[regex]::Escape` literal match and the comma-bearing template no longer matched anything live | r04.3 changed `TitleTokens` to a multi-form array that accepts both the comma and comma-less variants; the live `Search.aspx` query strings were also updated to the current form. See SPEC §D.19 |
+| r04.2 | Umbrella .NET CU UpdateIds (e.g. Server 2019 KB5088864 bundling 4.7.2 and 4.8) lost N-1 sub-files; `Resolve-PatchSetFromCatalog` only kept the highest-scoring single MSU | `Select-CanonicalPatchFile` returns only one result; without an explicit `-DotNetVersion` hint it cannot break the tie between two ndp-runtime variants of the same umbrella KB | r04.3 added `Select-AllCanonicalPatchFiles` and routed `Type='DotNet'` queries through it. Each surviving MSU now gets its own `NeutralPatches` entry sharing `KbId` / `Title` / `UpdateId` / `Supersedes` from the umbrella KB. See SPEC §D.21 |
 
 For per-release detail see [`CHANGELOG.md`](./CHANGELOG.md).
