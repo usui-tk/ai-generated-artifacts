@@ -2233,22 +2233,26 @@ function Assert-WorkspacePreflight {
 function Get-ConfigProfile {
     <#
     .SYNOPSIS
-        Load the OS profile JSON (Schema v2.0) for the given OsKey and
-        resolve the language sub-profile for OsLang.
+        Load the OS profile JSON (Schema v2.0 or v2.1) for the given OsKey
+        and resolve the language sub-profile for OsLang.
     .DESCRIPTION
         v2.0 layout: top-level keys are Schema, OsKey, Common,
         PatchBaseline, AutoRefreshPolicy, LanguageSpecific.<lang>.
-        This loader validates Schema == "2.0" and returns a flat
+        v2.1 (r05.0+) adds an optional top-level Pca2023 block
+        between PatchBaseline and AutoRefreshPolicy.
+
+        This loader accepts Schema "2.0" or "2.1" and returns a flat
         pscustomobject for backward-compatible access patterns used by
         downstream phases: properties from Common are promoted to the
-        top level of the returned object, PatchBaseline / AutoRefreshPolicy
-        are passed through verbatim, the resolved language sub-profile
-        is attached as 'Language', and the entire LanguageSpecific
-        dictionary is attached as 'LanguageSpecific' for Action workers
-        (RefreshAllBaselines) that need cross-language access.
+        top level of the returned object, PatchBaseline / Pca2023 (if
+        present) / AutoRefreshPolicy are passed through verbatim, the
+        resolved language sub-profile is attached as 'Language', and
+        the entire LanguageSpecific dictionary is attached as
+        'LanguageSpecific' for Action workers (RefreshAllBaselines)
+        that need cross-language access.
 
         Legacy v1.0 configs are NOT supported; the loader throws
-        immediately if the Schema field is missing or wrong.
+        immediately if the Schema field is missing or unrecognised.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -2269,15 +2273,23 @@ function Get-ConfigProfile {
     $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8
     $json = $raw | ConvertFrom-Json
 
-    # Schema validation (v2.0 strict)
-    if (-not $json.Schema -or $json.Schema -ne '2.0') {
-        throw ('Config {0} has Schema="{1}"; expected "2.0". Legacy schemas are not supported.' -f $cfgFile, $json.Schema)
+    # Schema validation (v2.0 and v2.1 both accepted)
+    $acceptedSchemas = @('2.0','2.1')
+    if (-not $json.Schema -or ($acceptedSchemas -notcontains $json.Schema)) {
+        throw ('Config {0} has Schema="{1}"; expected one of: {2}. Legacy schemas are not supported.' -f $cfgFile, $json.Schema, ($acceptedSchemas -join ', '))
     }
     if (-not $json.Common) {
         throw ('Config {0} has no Common section.' -f $cfgFile)
     }
     if (-not $json.LanguageSpecific) {
         throw ('Config {0} has no LanguageSpecific section.' -f $cfgFile)
+    }
+    # v2.1 specifically requires the Pca2023 block (the SecureBoot
+    # feature documented in SPEC.md B.18). v2.0 configs without
+    # Pca2023 are accepted with a soft warning so older installations
+    # can still load while migration to v2.1 is in flight.
+    if ($json.Schema -eq '2.1' -and -not $json.Pca2023) {
+        throw ('Config {0} declares Schema="2.1" but has no Pca2023 block. v2.1 requires Pca2023; see SPEC.md B.10.' -f $cfgFile)
     }
     $langNode = $json.LanguageSpecific.$OsLang
     if ($null -eq $langNode) {
@@ -8349,8 +8361,9 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
             }
             Write-SubSection ('Refreshing {0}' -f $osKey)
             $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8 | ConvertFrom-Json
-            if ($raw.Schema -ne '2.0') {
-                Write-Warn ('Skipping {0}: Schema is "{1}", expected "2.0".' -f $osKey, $raw.Schema)
+            $acceptedSchemas = @('2.0','2.1')
+            if ($acceptedSchemas -notcontains $raw.Schema) {
+                Write-Warn ('Skipping {0}: Schema is "{1}", expected one of: {2}.' -f $osKey, $raw.Schema, ($acceptedSchemas -join ', '))
                 continue
             }
 

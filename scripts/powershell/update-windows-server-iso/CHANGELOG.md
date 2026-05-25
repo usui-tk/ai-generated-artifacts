@@ -287,6 +287,41 @@ they are quality / documentation upgrades surfaced by the audit.
   conventions. The file is opt-in for contributors who run
   markdownlint locally; CI is not yet wired to enforce it.
 
+### Fixed (Schema v2.1 loader, post-publication regression)
+
+The Stage A renumber and Stage B Pca2023 feature work bumped the
+Config schema from v2.0 to v2.1 in all four `Config/Server*.json`
+files, but **did not** update the `Get-ConfigProfile` loader's
+schema-acceptance check, which remained `-eq '2.0'` and rejected
+all four r05.0 Configs at runtime. The first `-Action
+PrepareBuildVerify` smoke test (Stage 2 Smoke3) failed at P02
+ResolveInputs with:
+
+```
+[X] Phase P02 (ResolveInputs) failed: Config Server2019.json has
+    Schema="2.1"; expected "2.0". Legacy schemas are not supported.
+```
+
+Two loaders are now updated to accept both schemas:
+
+- **`Get-ConfigProfile`** (the main per-OS loader called from P02
+  ResolveInputs and from every Action that needs OS data) now
+  accepts `Schema ∈ {'2.0', '2.1'}`. When `Schema == '2.1'`, the
+  `Pca2023` block is also required (per SPEC.md B.10); when
+  `Schema == '2.0'`, no Pca2023 block is required — preserving
+  full backward compatibility with Configs predating r05.0.
+
+- **`Invoke-AdminAction_RefreshAllBaselines`'s loader** (used by
+  Action A01 to walk all four Configs for baseline refresh) is
+  updated symmetrically. It also accepts both schemas but does
+  not require `Pca2023` (the action only touches `PatchBaseline`
+  fields, so the Pca2023 block is orthogonal).
+
+The error message now lists all accepted schemas explicitly
+(`expected one of: 2.0, 2.1`), so future schema bumps will produce
+a self-documenting error indicating exactly which versions the
+running script supports.
+
 ### Fixed (CI workflow remediation, r04.x carryover)
 
 Audit of the most recent CI run on `main` (`1aa96df`, STAGE 1
