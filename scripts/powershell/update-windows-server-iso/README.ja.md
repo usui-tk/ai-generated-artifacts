@@ -225,13 +225,13 @@ OS 別プロファイル JSON は `Config/` 配下にあります。各プロフ
 |-----|-------------------|----------|-----------------------------------------------------------------------------------|
 | P01 | Initialize        | Setup    | PowerShell 環境、管理者、ADK、ディスク空き、Hyper-V を確認                        |
 | P02 | ResolveInputs     | Setup    | ISO / パッチ入力の解決、Config JSON の読み込み                                    |
-| P03 | FetchAssets       | Fetch    | ISO とパッチをダウンロードしハッシュ検証                                          |
-| P04 | ExpandIso         | Plan     | ソース ISO をマウントしてワークスペースへ展開、WIM インデックスを列挙             |
-| P05 | PatchInstallWim   | Build    | 各 install.wim インデックスへ SSU → LCU → .NET の順で適用し、DISM クリーンアップ |
-| P06 | PatchBootWim      | Build    | boot.wim (PE + Setup) と winre.wim へパッチ適用                                   |
-| P07 | AssembleIso       | Build    | Dynamic Update Setup のオーバーレイ、Export-WindowsImage、oscdimg で ISO 生成     |
-| P08 | StaticVerify      | Verify   | 出力 ISO をマウントし、KB パッケージが入っていることを確認                        |
-| P09 | FinalReport       | Report   | 終端サマリー、ISO ハッシュ、ログのパスを表示                                      |
+| P04 | FetchAssets       | Fetch    | ISO とパッチをダウンロードしハッシュ検証                                          |
+| P05 | ExpandIso         | Plan     | ソース ISO をマウントしてワークスペースへ展開、WIM インデックスを列挙             |
+| P07 | PatchInstallWim   | Build    | 各 install.wim インデックスへ SSU → LCU → .NET の順で適用し、DISM クリーンアップ |
+| P08 | PatchBootWim      | Build    | boot.wim (PE + Setup) と winre.wim へパッチ適用                                   |
+| P09 | AssembleIso       | Build    | Dynamic Update Setup のオーバーレイ、Export-WindowsImage、oscdimg で ISO 生成     |
+| P11 | StaticVerify      | Verify   | 出力 ISO をマウントし、KB パッケージが入っていることを確認                        |
+| P13 | FinalReport       | Report   | 終端サマリー、ISO ハッシュ、ログのパスを表示                                      |
 
 オプションで `-Action BootTest` を指定すると、出力 ISO に対して Hyper-V
 Gen2 VM を起動する疎通テストが実行されます。各フェーズの完全な契約は
@@ -254,9 +254,9 @@ Gen2 VM を起動する疎通テストが実行されます。各フェーズの
 | `-PatchUrls`                 | パッチ URL の明示的な配列                                                       |
 | `-AutoDetectLatestPatches`   | Microsoft Update Catalog から PatchBaseline を強制再取得                        |
 | `-PatchMonth`                | 再取得対象月 (例: `2026-06`、既定は現在月)                                      |
-| `-SkipDynamicPatchRefresh`   | PatchBaseline が古くても P02.5 をスキップ (オフライン・閉域網用)                |
+| `-SkipDynamicPatchRefresh`   | PatchBaseline が古くても P03 をスキップ (オフライン・閉域網用)                |
 | `-UseBaselineOnly`           | PatchBaseline を厳密にそのまま使う (Catalog アクセス一切なし)                   |
-| `-IgnorePatchValidation`     | P04.5 検証失敗を警告に降格 (推奨されない)                                       |
+| `-IgnorePatchValidation`     | P06 検証失敗を警告に降格 (推奨されない)                                       |
 | `-WsusScnCabPath`            | 事前配置済み wsusscn2.cab のパス (自動ダウンロードを省略)                       |
 | `-WorkRoot`                  | ワークスペースルート。既定はスクリプトディレクトリからの相対パス `Workspace_UpdateWsi`(スクリプトの隣にワークスペースが作成される)。別ドライブに置きたい場合は絶対パスを指定(例 `D:\UpdateWsi`)。このパスのドライブに 100 GB 以上の空き容量が必要(プリフライトで強制) |
 | `-OutputDir`                 | 出力 ISO ディレクトリ (既定 `<WorkRoot>\output`)                                |
@@ -266,7 +266,7 @@ Gen2 VM を起動する疎通テストが実行されます。各フェーズの
 | `-EvalIsoMode`               | Microsoft Evaluation Center fwlink 経由のダウンロードを許可                     |
 | `-Execute`                   | 実際の DISM 書き込みに **必須**。指定しなければ Build フェーズは計画のみ        |
 
-## 動的パッチベースライン (P02.5) と依存性検証 (P04.5)
+## 動的パッチベースライン (P03) と依存性検証 (P06)
 
 これら 2 つのフェーズは、運用者によるパッチ手動キュレーション工数を
 最小化し、不完全なパッチセットによる ISO 破損を未然に防ぐために
@@ -279,16 +279,16 @@ P02   ResolveInputs
         - Config/<OsKey>.json を読み込み
         - PatchBaseline.PatchTuesdayOfBaseline を取得
         - Get-LatestPatchTuesday と比較
-P02.5 RefreshPatchBaseline (古い場合 OR -AutoDetectLatestPatches 指定時)
+P03 RefreshPatchBaseline (古い場合 OR -AutoDetectLatestPatches 指定時)
         - 対象月の Microsoft Update Catalog をスクレイピング
         - SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs) + .NET CU
           をタイトルトークンヒューリスティクスで識別
         - ScopedViewInline.aspx を取得して Supersedes / SupersededBy 取得
         - PatchBaseline.Patches を Config JSON に原子的に書き戻し
         - LCU.RequiresKbIds に SSU の KB 番号を自動設定
-P03   FetchAssets (新しい URL / SHA-256 でダウンロード)
-P04   ExpandIso
-P04.5 ValidatePatchSet
+P04   FetchAssets (新しい URL / SHA-256 でダウンロード)
+P05   ExpandIso
+P06 ValidatePatchSet
         - 以下の条件で <WorkRoot>/cache/ に wsusscn2.cab をダウンロード:
             * 初回 (キャッシュなし)
             * Patch Tuesday 以降の実行で、キャッシュが Patch Tuesday より古い
@@ -296,12 +296,12 @@ P04.5 ValidatePatchSet
         - WUA が要求するパッチ vs 提供されたパッチを照合
         - 必要パッチが不足していた場合、4 つの診断ファイルを
           <WorkRoot>/diag/<timestamp>/ に出力して ABORT
-P05+  Build / Verify / Report (従来通り)
+P07+  Build / Verify / Report (従来通り)
 ```
 
 ### 検証失敗時の診断データ
 
-P04.5 で必要パッチの不足が検出された場合、4 つのファイルが
+P06 で必要パッチの不足が検出された場合、4 つのファイルが
 `<WorkRoot>/diag/<yyyy-MM-dd_HH-mm-ss>/` に出力されてスクリプトが
 終了します。
 
@@ -328,12 +328,12 @@ P04.5 で必要パッチの不足が検出された場合、4 つのファイル
 
 | シナリオ | 動作 |
 |---|---|
-| Baseline が新しい (Patch Tuesday 以後に検証済) | P02.5 は no-op |
+| Baseline が新しい (Patch Tuesday 以後に検証済) | P03 は no-op |
 | Baseline が古い + スクレイプ成功 | Config 更新 + 新パッチセットを使用 |
 | Baseline が古い + スクレイプ失敗 + 既存 baseline が利用可能 | 警告 + 既存 baseline で続行 |
 | Baseline が古い + スクレイプ失敗 + baseline が空 | ABORT |
-| `-UseBaselineOnly` 指定 | P02.5 を無条件スキップ (オフラインモード) |
-| `-SyntheticTestMode` 指定 | P02.5 / P04.5 とも無条件スキップ (CI モード) |
+| `-UseBaselineOnly` 指定 | P03 を無条件スキップ (オフラインモード) |
+| `-SyntheticTestMode` 指定 | P03 / P06 とも無条件スキップ (CI モード) |
 
 ## 静的解析
 

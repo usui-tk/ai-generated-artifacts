@@ -237,13 +237,13 @@ Microsoft download mirror fallback).
 |-----|-------------------|--------|-------------------------------------------------------------------------------|
 | P01 | Initialize        | Setup  | PowerShell env, admin, ADK, disk, Hyper-V                                     |
 | P02 | ResolveInputs     | Setup  | ISO/patch source resolution, Config JSON                                      |
-| P03 | FetchAssets       | Fetch  | ISO + patch downloads with hash verification                                  |
-| P04 | ExpandIso         | Plan   | Mount source ISO, copy to workspace, enumerate WIM indexes                    |
-| P05 | PatchInstallWim   | Build  | For each install.wim index: SSU then LCU then .NET, then DISM cleanup         |
-| P06 | PatchBootWim      | Build  | boot.wim (PE + Setup) and winre.wim                                           |
-| P07 | AssembleIso       | Build  | Dynamic Update Setup overlay, Export-WindowsImage, oscdimg ISO build          |
-| P08 | StaticVerify      | Verify | Mount output ISO, confirm KB packages are present                             |
-| P09 | FinalReport       | Report | End-of-run summary, ISO hash, log paths                                       |
+| P04 | FetchAssets       | Fetch  | ISO + patch downloads with hash verification                                  |
+| P05 | ExpandIso         | Plan   | Mount source ISO, copy to workspace, enumerate WIM indexes                    |
+| P07 | PatchInstallWim   | Build  | For each install.wim index: SSU then LCU then .NET, then DISM cleanup         |
+| P08 | PatchBootWim      | Build  | boot.wim (PE + Setup) and winre.wim                                           |
+| P09 | AssembleIso       | Build  | Dynamic Update Setup overlay, Export-WindowsImage, oscdimg ISO build          |
+| P11 | StaticVerify      | Verify | Mount output ISO, confirm KB packages are present                             |
+| P13 | FinalReport       | Report | End-of-run summary, ISO hash, log paths                                       |
 
 The optional `-Action BootTest` runs a Hyper-V Gen2 smoke test against
 the output ISO. See SPEC.md Part B for the full per-phase contracts.
@@ -265,9 +265,9 @@ parameter list. The most commonly used:
 | `-PatchUrls`                 | Array of explicit patch URLs                                            |
 | `-AutoDetectLatestPatches`   | Force a refresh of PatchBaseline from Microsoft Update Catalogue        |
 | `-PatchMonth`                | Target patch month for refresh, e.g. `2026-06` (default: current month) |
-| `-SkipDynamicPatchRefresh`   | Skip P02.5 even if PatchBaseline is stale (offline / air-gapped runs)   |
+| `-SkipDynamicPatchRefresh`   | Skip P03 even if PatchBaseline is stale (offline / air-gapped runs)   |
 | `-UseBaselineOnly`           | Use PatchBaseline strictly as-is; no Catalog access at all              |
-| `-IgnorePatchValidation`     | Demote P04.5 validation failures from abort to warning (NOT recommended)|
+| `-IgnorePatchValidation`     | Demote P06 validation failures from abort to warning (NOT recommended)|
 | `-WsusScnCabPath`            | Pre-staged wsusscn2.cab path (skips automatic download)                 |
 | `-WorkRoot`                  | Workspace root. Default is `Workspace_UpdateWsi` resolved relative to the script directory (so the workspace lives next to `Update-WindowsServerIso.ps1`). Pass an absolute path to put it on a different drive (e.g. `D:\UpdateWsi`). The drive backing this path must have at least 100 GB free; the preflight aborts otherwise. |
 | `-OutputDir`                 | Output ISO directory (default `<WorkRoot>\output`)                      |
@@ -277,7 +277,7 @@ parameter list. The most commonly used:
 | `-EvalIsoMode`               | Allow downloading via Microsoft Evaluation Center fwlink                |
 | `-Execute`                   | **Required** for actual DISM writes; without it, Build phases plan only |
 
-## Dynamic patch baseline (P02.5) and dependency validation (P04.5)
+## Dynamic patch baseline (P03) and dependency validation (P06)
 
 These two phases were introduced to minimise manual patch curation
 work and to prevent partial patch sets from producing broken ISOs.
@@ -289,16 +289,16 @@ P02   ResolveInputs
         - Load Config/<OsKey>.json
         - Read PatchBaseline.PatchTuesdayOfBaseline
         - Compare against Get-LatestPatchTuesday
-P02.5 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
+P03 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
         - Scrape Microsoft Update Catalogue for the target month
         - Identify SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
           + .NET CU using title-token heuristics
         - Fetch ScopedViewInline.aspx for Supersedes / SupersededBy lists
         - Write back PatchBaseline.Patches to Config JSON (atomically)
         - LCU.RequiresKbIds is auto-populated with the SSU's KB number
-P03   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
-P04   ExpandIso
-P04.5 ValidatePatchSet
+P04   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
+P05   ExpandIso
+P06 ValidatePatchSet
         - Download wsusscn2.cab to <WorkRoot>/cache/ when needed:
             * initial run (no cache yet), OR
             * post-Patch-Tuesday run AND cache is older than Patch Tuesday
@@ -306,12 +306,12 @@ P04.5 ValidatePatchSet
         - Compare WUA-required set against the provided patch set
         - On any missing required patch: ABORT and emit 4 diagnostic
           files under <WorkRoot>/diag/<timestamp>/
-P05+  Build / Verify / Report (existing)
+P07+  Build / Verify / Report (existing)
 ```
 
 ### Diagnostic data on validation failure
 
-When P04.5 detects a missing required patch, four files are emitted under
+When P06 detects a missing required patch, four files are emitted under
 `<WorkRoot>/diag/<yyyy-MM-dd_HH-mm-ss>/` and the script aborts:
 
 | File | Purpose |
@@ -337,12 +337,12 @@ emitting all four files; use only for development.
 
 | Scenario | Behaviour |
 |---|---|
-| Baseline fresh (Patch Tuesday unchanged since last verify) | P02.5 is a no-op |
+| Baseline fresh (Patch Tuesday unchanged since last verify) | P03 is a no-op |
 | Baseline stale, scrape succeeds | Config is updated and the new patches are used |
 | Baseline stale, scrape fails, existing baseline usable | Warning + continue with existing baseline |
 | Baseline stale, scrape fails, baseline empty/unusable | ABORT |
-| `-UseBaselineOnly` set | P02.5 skipped unconditionally (offline mode) |
-| `-SyntheticTestMode` set | P02.5 and P04.5 both skipped (CI mode) |
+| `-UseBaselineOnly` set | P03 skipped unconditionally (offline mode) |
+| `-SyntheticTestMode` set | P03 and P06 both skipped (CI mode) |
 
 ## Static analysis
 

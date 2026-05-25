@@ -25,7 +25,7 @@
   - [B.2 Workspace Layout](#b2-workspace-layout)
   - [B.3 Output ISO Naming](#b3-output-iso-naming)
   - [B.4 OS Profile Schema](#b4-os-profile-schema)
-  - [B.5 Phase Contracts (P01–P09)](#b5-phase-contracts-p01p09)
+  - [B.5 Phase Contracts (P01–P13)](#b5-phase-contracts-p01p09)
   - [B.6 Action → Phase Mapping](#b6-action--phase-mapping)
   - [B.7 ISO Filename Detection Patterns](#b7-iso-filename-detection-patterns)
   - [B.8 Patch Integrity Check (Three-Layer)](#b8-patch-integrity-check-three-layer)
@@ -158,15 +158,15 @@ See `Config/Server2025.json` for the most complete example. Fields:
 | `Build` | int | OS build number (e.g. 26100 for 2025) |
 | `Architecture` | string | `x64` |
 | `RequireSSUFirst` | bool | Always `true` for current targets |
-| `EnableInstallWimUpdate` | bool | Run P05 against install.wim |
-| `EnableBootWimUpdate` | bool | Run P06 against boot.wim |
-| `EnableWinREUpdate` | bool | Run P06 against winre.wim too |
+| `EnableInstallWimUpdate` | bool | Run P07 against install.wim |
+| `EnableBootWimUpdate` | bool | Run P08 against boot.wim |
+| `EnableWinREUpdate` | bool | Run P08 against winre.wim too |
 | `DotNetRequired` | bool | Apply .NET cumulative if present |
 | `LCUExpandViaMum` | bool | `true` only for Server 2025; LCU ships as MUM/CAB bundle |
 | `RequireUefiCa2023Boot` | bool | `true` only for Server 2025 (Secure Boot CA rotation) |
 | `BootWimIndexes` | int[] | Typically `[1, 2]` |
 | `InstallWimIndexes` | `"all"` or int[] | Filter for which install.wim indexes to patch |
-| `ExpectedEditions` | string[] | For the P08 verification banner |
+| `ExpectedEditions` | string[] | For the P11 verification banner |
 | `AutoDetectKnownGood` | object | KB IDs frozen as the latest known-good set (M2) |
 | `Languages.<lang>.IsoFwLink` | string | Eval Center FwLink URL |
 | `Languages.<lang>.IsoSnapshotUrl` | string | Direct snapshot URL (fallback) |
@@ -174,7 +174,7 @@ See `Config/Server2025.json` for the most complete example. Fields:
 | `Languages.<lang>.IsoExpectedSize` | int | Approximate size in bytes |
 | `Languages.<lang>.VolumeLabelPrefix` | string | Used in output volume label |
 
-## B.5 Phase Contracts (P01–P09)
+## B.5 Phase Contracts (P01–P13)
 
 Each phase function is `Invoke-<Group>Phase<NN>_<Name>` and is wrapped
 in `Start-DebugTrace` / `Stop-DebugTrace`. Phases write a `P0<N>.ok`
@@ -200,7 +200,7 @@ marker on success.
 | 3 | Build patch list from `-PatchUrls` / `-ManifestPath` / `-PatchDirectory` / `-AutoDetectLatestPatches` / PatchBaseline.Patches |
 | Output | `logs/P02_inputs_resolved.csv` |
 
-### P02.5 RefreshPatchBaseline (Setup)
+### P03 RefreshPatchBaseline (Setup)
 
 | Step | What |
 |---|---|
@@ -216,7 +216,7 @@ marker on success.
 | 9 | Re-derive `$Script:ResolvedPatches` from the refreshed baseline (when user did not provide an explicit source) |
 | Failure | If scrape fails AND `FallbackOnScrapeFailure = 'UseBaseline'` AND baseline usable: warn + continue. Otherwise: throw |
 
-### P03 FetchAssets (Fetch)
+### P04 FetchAssets (Fetch)
 
 | Step | What |
 |---|---|
@@ -224,7 +224,7 @@ marker on success.
 | 2 | Download / use existing patches; `Test-PatchIntegrity` per patch |
 | Tactics | GUID-suffixed temp paths, atomic move on success, retry via `Invoke-WebRequestWithRetry` |
 
-### P04 ExpandIso (Plan)
+### P05 ExpandIso (Plan)
 
 | Step | What |
 |---|---|
@@ -232,7 +232,7 @@ marker on success.
 | 2 | Enumerate `install.wim` and `boot.wim` indexes via `Get-WindowsImage` |
 | Output | `logs/P04_wim_inventory.csv` |
 
-### P04.5 ValidatePatchSet (Plan)
+### P06 ValidatePatchSet (Plan)
 
 | Step | What |
 |---|---|
@@ -246,7 +246,7 @@ marker on success.
 | 7 | If any Missing: `Export-PatchValidationReport` emits 4 files; throw unless `-IgnorePatchValidation` |
 | Output | `<WorkRoot>/diag/<timestamp>/validation_summary.json`, `validation_detail.csv`, `wsusscn2_scan_raw.json`, `dependency_graph.json` |
 
-### P05 PatchInstallWim (Build)
+### P07 PatchInstallWim (Build)
 
 For each install.wim index filtered by `-OnlyInstallWimIndexes` AND
 Config `InstallWimIndexes`:
@@ -260,13 +260,13 @@ Config `InstallWimIndexes`:
 | Sandbox | Without `-Execute`, the loop emits a `[PLAN]` row per (index, patch) pair and does NOT mount |
 | Output | `logs/P05_patch_inventory.csv` |
 
-### P06 PatchBootWim (Build)
+### P08 PatchBootWim (Build)
 
 For each boot.wim index in Config `BootWimIndexes` (typically `[1, 2]`):
 
 | Step | What |
 |---|---|
-| Mount, apply, cleanup, dismount | Same lifecycle as P05, but with the boot-wim patch subset (SSU, LCU, SafeOs DU only) |
+| Mount, apply, cleanup, dismount | Same lifecycle as P07, but with the boot-wim patch subset (SSU, LCU, SafeOs DU only) |
 
 Then, if `EnableWinREUpdate`:
 
@@ -277,7 +277,7 @@ Then, if `EnableWinREUpdate`:
 | Re-embed | Copy the updated winre.wim back into the mounted install.wim |
 | Dismount install.wim | Save + integrity-check |
 
-### P07 AssembleIso (Build)
+### P09 AssembleIso (Build)
 
 | Step | What |
 |---|---|
@@ -285,7 +285,7 @@ Then, if `EnableWinREUpdate`:
 | 2 | `New-BootableIso` invokes oscdimg with the 3-tier `etfsboot.com` / `efisys.bin` fallback chain |
 | 3 | Verify the output ISO file exists and is non-empty |
 
-### P08 StaticVerify (Verify)
+### P11 StaticVerify (Verify)
 
 | Step | What |
 |---|---|
@@ -295,7 +295,7 @@ Then, if `EnableWinREUpdate`:
 | 4 | `Dismount-DiskImage` |
 | Output | `logs/P08_verification.csv` |
 
-### P09 FinalReport (Report)
+### P13 FinalReport (Report)
 
 | Step | What |
 |---|---|
@@ -307,15 +307,15 @@ Then, if `EnableWinREUpdate`:
 
 | `-Action`            | Phases run                                                              |
 |----------------------|-------------------------------------------------------------------------|
-| `Prepare`            | P01, P02, P02.5, P03, P04, P04.5                                        |
-| `Build`              | P05, P06, P07                                                           |
-| `Verify`             | P08, P09                                                                |
-| `PrepareBuildVerify` | P01, P02, P02.5, P03, P04, P04.5, P05, P06, P07, P08, P09               |
+| `Prepare`            | P01, P02, P03, P04, P05, P06                                        |
+| `Build`              | P07, P08, P09                                                           |
+| `Verify`             | P11, P13                                                                |
+| `PrepareBuildVerify` | P01, P02, P03, P04, P05, P06, P07, P08, P09, P11, P13               |
 | `All`                | Same as `PrepareBuildVerify` plus BootTest                              |
 | `BootTest`           | Out-of-band: Hyper-V Gen2 VM smoke test                                 |
 | `Cleanup`            | (no phases) Remove `<WorkRoot>` after safety check                      |
 | `ListPhases`         | (no phases) Print the registry and exit                                 |
-| `GenerateManifest`   | P01, P02, P02.5 (Catalog scrape + writeback only)                       |
+| `GenerateManifest`   | P01, P02, P03 (Catalog scrape + writeback only)                       |
 
 ## B.7 ISO Filename Detection Patterns
 
@@ -355,8 +355,8 @@ Enabled by `-SyntheticTestMode`. Used exclusively by Stage 3 CI:
 | No Microsoft asset is downloaded | Stays within evaluation licence boundaries for CI |
 | ISO is generated via `dism /Capture-Image` on a tiny text payload + oscdimg wrap with stub boot files | Exercises the full DISM-mount + oscdimg pipeline without real binaries |
 | Output ISO is intentionally non-bootable | The stub `etfsboot.com` and `efisys.bin` are 4-byte placeholders |
-| P08 verification is relaxed (size floor 1 KB, KB list optional) | The synthetic image has no real KBs |
-| P02.5 and P04.5 are both skipped | No real patches in play; Catalog scrape and wsusscn2 scan are unnecessary |
+| P11 verification is relaxed (size floor 1 KB, KB list optional) | The synthetic image has no real KBs |
+| P03 and P06 are both skipped | No real patches in play; Catalog scrape and wsusscn2 scan are unnecessary |
 | CI MUST NOT upload the synthetic ISO | Belt-and-braces guard against accidental Microsoft-content leaks |
 
 ## B.10 Config Schema v2.0 (r03+)
@@ -566,7 +566,7 @@ I = install, B = boot, W = winre). Each sub-phase carries:
                       at this point and skips the Add-WindowsPackage
                       loop
 
-**install.wim (P05)**:
+**install.wim (P07)**:
 
 | # | Name                       | Microsoft rationale |
 |---|----------------------------|---|
@@ -578,10 +578,10 @@ I = install, B = boot, W = winre). Each sub-phase carries:
 | 6 | I6.CleanupAndExport        | (worker hook for DISM /Cleanup + Export) |
 | 7 | I7.LCU.SecondPass          | Emitted ONLY when LP was injected; `RequiresRemount = $true`; the LP injected in I2 can shadow files delivered by the I3 LCU, so the LCU is re-applied on a freshly-exported image |
 
-**boot.wim (P06)**: B1.SSU -> B2.LanguagePack -> B3.LCU ->
+**boot.wim (P08)**: B1.SSU -> B2.LanguagePack -> B3.LCU ->
 B4.CleanupAndExport. No twice-apply needed.
 
-**WinRE.wim (P06 inner block)**: W1.SSU -> W2.LanguagePack ->
+**WinRE.wim (P08 inner block)**: W1.SSU -> W2.LanguagePack ->
 W3.SafeOsDU -> W4.CleanupAndExport. The WinRE image is NOT
 serviced with LCU; Microsoft delivers a Safe OS Dynamic Update
 that plays the LCU role for the recovery environment.
@@ -732,7 +732,7 @@ in the script, and `ps_invoke.py`.
       "DownloadUrl": "https://catalog.s.download.windowsupdate.com/.../ssu-...",
       "FileName": "ssu-26100.4061-x64.cab",
       "SizeBytes": 12345678,
-      "Sha256": "abc123...",                  // recorded by P03 first download
+      "Sha256": "abc123...",                  // recorded by P04 first download
       "ReleaseDate": "2026-05-12",
       "Supersedes": ["KB5051234"],
       "RequiresKbIds": [],
@@ -774,7 +774,7 @@ in the script, and `ps_invoke.py`.
 4. `Patches.Count > 0` AND at least one entry has all of
    `KbId`, `DownloadUrl`, `Sha256` populated
 
-If any check fails, the baseline is "stale" and P02.5 scrapes anew.
+If any check fails, the baseline is "stale" and P03 scrapes anew.
 
 ### Patch Tuesday calculation
 
@@ -900,14 +900,14 @@ Indexer locks), attempt dismount silently; on failure, sleep another
 LCU first fails with `0x800f0922` ("CBS_E_INSTALLERS_FAILED_TO_LOAD").
 
 **Fix.** `Get-PatchApplyOrder` returns 1 for `SSU` and 3 for `LCU`. The
-P05 loop sorts by `ApplyOrder` before applying.
+P07 loop sorts by `ApplyOrder` before applying.
 
 ### D.3 winre.wim is inside install.wim
 
 **Symptom.** Patching boot.wim leaves the WinRE image stale; users see
 old WinRE behaviour after recovery.
 
-**Fix.** P06 includes a dedicated winre.wim sub-phase: mount install.wim
+**Fix.** P08 includes a dedicated winre.wim sub-phase: mount install.wim
 primary index, copy out `Windows\System32\Recovery\Winre.wim` to a
 work file, mount the work file, apply patches, cleanup, dismount, copy
 the result back into the mounted install.wim, dismount install.wim
@@ -992,7 +992,7 @@ the first time a build succeeds, so the next run can verify.
 **Symptom.** Running the script interactively from an REPL once mounted
 WIMs would commit irreversible changes.
 
-**Fix.** Build phases (P05/P06/P07) default to Sandbox mode and emit
+**Fix.** Build phases (P07/P08/P09) default to Sandbox mode and emit
 `[PLAN]` rows. The user must add `-Execute` to actually perform DISM
 writes. Setup / Fetch / Plan / Verify / Report phases run
 unconditionally.
@@ -1067,7 +1067,7 @@ OS family matches the target install.wim (Server 2025 host for a
 Server 2025 image). When that match cannot be guaranteed (e.g. CI
 runners can build any of the four supported OS versions), the
 validator's findings are interpreted as a strong signal but not as
-ground truth. P04.5 still aborts on missing patches because the
+ground truth. P06 still aborts on missing patches because the
 WUA-required set is approximately the union of what every supported
 Server SKU requires.
 
@@ -1147,7 +1147,7 @@ via `-KnownType`; never rely on file-name reverse-engineering.
 
 **Symptom.** A `.NET Cumulative Update` is recorded in
 `Config/<OsKey>.json` with only one `NeutralPatches` entry, but a
-later P05 build on an install.wim that contains the *other*
+later P07 build on an install.wim that contains the *other*
 .NET runtime no-ops the .NET CU because the relevant sub-file
 was dropped during baseline resolution.
 
@@ -1192,7 +1192,7 @@ DISM call no-ops safely.
 |:---:|---|:---:|
 | **M1** | MVP across all 4 OS x en-us/ja-jp, full registry, full phase set, sandbox + execute, synthetic mode, psa.py clean, README + SPEC + CHANGELOG + CI Stage 1/2/3 | **Done (r01)** |
 | **M2** | `-AutoDetectLatestPatches` actually scrapes the Microsoft Update Catalogue (`Resolve-PatchSetFromCatalog`); writes Patch list back to `Config/<OsKey>.json#/PatchBaseline`; freshness gating via `Test-PatchBaselineFresh` | **Done (r02)** |
-| **M3** | P04.5 `ValidatePatchSet` integrating `wsusscn2.cab` + Windows Update Agent COM API for Microsoft-authoritative dependency check; 4-file diagnostic export on failure | **Done (r02)** |
+| **M3** | P06 `ValidatePatchSet` integrating `wsusscn2.cab` + Windows Update Agent COM API for Microsoft-authoritative dependency check; 4-file diagnostic export on failure | **Done (r02)** |
 | M4 | Server 2025 `LCUExpandViaMum=true` real implementation (MUM/CAB expand path) | Placeholder |
 | **M5** | Stage 4 CI workflow (`monthly-refresh`): monthly scheduled run that exercises `-Action RefreshAllBaselines` and opens a PR with the resulting `Config/<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes and Patch Tuesday drift within ~30 days | **Done (r03.1)** |
 | **M6** | Microsoft-official media-dynamic-update servicing sequence: WIM-target-aware patch plan + pre-apply dependency closure check (r04) + LCU twice-apply + WinRE servicing + Language Pack injection (r04.1) | **Done (r04.1)** |
@@ -1238,7 +1238,7 @@ DISM call no-ops safely.
 | `New-BootableIso` | `oscdimg.exe` wrapper |
 | `New-SyntheticTestIso` | CI mode S synthetic ISO (B.9) |
 | `Test-AdminPrivilege` | Used by P01 |
-| `Invoke-SetupPhase01_Initialize`..`Invoke-ReportPhase09_FinalReport` | The 9 phase workers |
+| `Invoke-SetupPhase01_Initialize`..`Invoke-ReportPhase13_FinalReport` | The 9 phase workers |
 | `Get-PatchListForInstallWim`, `Get-PatchListForBootWim` | Patch filtering per WIM |
 | `Resolve-InstallWimTargetIndexes` | `-OnlyInstallWimIndexes` resolution |
 | `Get-PhaseListByAction` | `-Action` → `string[]` mapping |
@@ -1294,8 +1294,8 @@ DISM call no-ops safely.
 | `Invoke-WuaOfflineScan` | `Microsoft.Update.Session` COM offline scan against the cab |
 | `Compare-PatchSetVsWuaScan` | Classify WUA-required updates as Provided / Missing |
 | `Export-PatchValidationReport` | Emit 4 diagnostic files on validation failure |
-| `Invoke-SetupPhase02_5_RefreshPatchBaseline` | P02.5 phase worker |
-| `Invoke-PlanPhase04_5_ValidatePatchSet` | P04.5 phase worker |
+| `Invoke-SetupPhase03_RefreshPatchBaseline` | P03 phase worker |
+| `Invoke-PlanPhase06_ValidatePatchSet` | P06 phase worker |
 
 ---
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """T5: wsusscn2.cab freshness probe.
 
-``Update-WindowsServerIso.ps1`` P04.5 ``ValidatePatchSet`` relies on
+``Update-WindowsServerIso.ps1`` P06 ``ValidatePatchSet`` relies on
 Microsoft's offline-scan catalog ``wsusscn2.cab``. Microsoft refreshes
 this cab roughly monthly with the latest Windows Update Agent metadata
 for every product they still service. If the cab on disk is more than
@@ -142,7 +142,7 @@ def main() -> int:
         if age >= 0 and age > args.stale_days:
             any_stale = True
             print(f'    WARN  cab is {age:.0f} days old (> {args.stale_days} day threshold); '
-                  f'P04.5 may misclassify recent KBs as "missing dependency"')
+                  f'P06 may misclassify recent KBs as "missing dependency"')
 
     print()
     if not any_ok:

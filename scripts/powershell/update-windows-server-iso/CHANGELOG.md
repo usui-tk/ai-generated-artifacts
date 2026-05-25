@@ -509,13 +509,13 @@ dismounted+committed+exported. The engine emits I7 only when
 language packs are actually present in the plan; otherwise the
 single-pass flow is preserved (no wasted remount).
 
-The P05 worker honours the I7.RequiresRemount = $true flag by
+The P07 worker honours the I7.RequiresRemount = $true flag by
 dismounting after I1-I6, then re-mounting the now-serviced
 install.wim for the I7 sub-phase, then dismounting again.
 
 ### Added - Full WinRE servicing worker
 
-P06's WinRE block now reads the WinReSequence (W1.SSU -> W2.LP ->
+P08's WinRE block now reads the WinReSequence (W1.SSU -> W2.LP ->
 W3.SafeOsDU -> W4.CleanupAndExport) from the cached PatchPlan and
 applies each sub-phase against the WinRE.wim it extracted from
 install.wim. The serviced WinRE is then copied back into the
@@ -539,7 +539,7 @@ mapping logic (which Type belongs to which sub-phase, when to emit
 I7, etc.) is centralised here so future tweaks (e.g. adding a new
 SafeOS DU lane to install.wim) only touch one place.
 
-### Changed - P05 / P06 worker control flow
+### Changed - P07 / P08 worker control flow
 
 Both phase workers now consume sub-phase sequences instead of a
 flat patch list. The legacy `Get-PatchListForInstall|Boot|WinReWim`
@@ -548,7 +548,7 @@ compatibility with diagnostic consumers; the workers themselves
 no longer iterate them. CSV inventory rows now include the new
 `SubPhase` column.
 
-P05's install.wim block iterates the install sequence in order;
+P07's install.wim block iterates the install sequence in order;
 when a sub-phase has RequiresRemount = $true it is deferred into
 a second-pass buffer that runs after the first dismount completes.
 This produces a 1-mount or 2-mount pattern depending on whether
@@ -620,14 +620,14 @@ Unknown Types fall back to `[Install]` with a one-time warning per
 unique unknown Type.
 
 P02 (`ResolveInputs`) now builds the plan and prints a per-target
-summary at the end of the phase. P05 and P06 retain their legacy
+summary at the end of the phase. P07 and P08 retain their legacy
 `Get-PatchListForInstall|Boot|WinReWim` helpers; these now delegate
 to the cached plan so existing call sites stay unchanged.
 
 ### Added - Pre-apply dependency closure check
 
 A new helper, `Test-PatchDependencyClosureOnMount`, runs inside the
-P05 install.wim and P06 boot.wim apply loops immediately after the
+P07 install.wim and P08 boot.wim apply loops immediately after the
 WIM mount and just before the first `Add-WindowsPackage` call. For
 each patch whose `RequiresKbIds` is non-empty, it enumerates the
 mounted image via `Get-WindowsPackage` and verifies that every
@@ -681,8 +681,8 @@ with the LCU twice-apply pattern and language-pack injection.
 
 ### Out of scope (deferred to the next release in the r04 line)
 
-- LCU twice-apply sequence in P05 around language-pack injection.
-- WinRE.wim mount / service / dismount worker in P06.
+- LCU twice-apply sequence in P07 around language-pack injection.
+- WinRE.wim mount / service / dismount worker in P08.
 - Language Pack injection on install.wim and WinRE.wim.
 
 ## [update-wsi-2026.05.24-r03.1] - 2026-05-24
@@ -757,7 +757,7 @@ Per the "未実装機能の全体マップ" review, the next deliverables are:
 - r04: Microsoft-official servicing sequence compliance
   (WIM-target-aware patch plan; LCU twice-apply; pre-apply
    Get-WindowsPackage dependency closure check; WinRE servicing;
-   per-WIM AppliesTo metadata; Language Pack injection in P05).
+   per-WIM AppliesTo metadata; Language Pack injection in P07).
 - r05: Supersedes-based superseded KB auto-removal; ISO-release
   refresher; Python JSON Schema validator.
 
@@ -845,14 +845,14 @@ than failures, because Microsoft does not publish LP / LXP for every
 OS x month combo. Reuses `Select-CanonicalPatchFile` from r02.5 for
 file picking.
 
-### Fixed - Stage 2 Smoke 3 (Synthetic+DryRun) failed at P04
+### Fixed - Stage 2 Smoke 3 (Synthetic+DryRun) failed at P05
 
 `New-SyntheticTestIso` produces a structurally-degenerate ISO9660
 image (4-byte placeholder boot files wrapped by oscdimg.exe) that
-`Mount-DiskImage` in P04 rejects as "file or directory is corrupted".
-Stage 3 (Synthetic+Execute) already bypassed P04 by going straight
-to P05; this aligns Stage 2 Smoke 3 with that flow by removing
-`P04` and `P04.5` from `PrepareBuildVerify` / `All` when
+`Mount-DiskImage` in P05 rejects as "file or directory is corrupted".
+Stage 3 (Synthetic+Execute) already bypassed P05 by going straight
+to P07; this aligns Stage 2 Smoke 3 with that flow by removing
+`P05` and `P06` from `PrepareBuildVerify` / `All` when
 `$Script:SyntheticTestMode -eq $true`. No behaviour change for
 non-synthetic runs.
 
@@ -865,8 +865,8 @@ non-synthetic runs.
   `DumpFieldClassification : A02`.
 - Smoke 2 (`-EnvironmentInfoOnly`): exit 0; P01 only.
 - Smoke 3 (`-SyntheticTestMode -DryRun`): P01 SKIPPED -> P02 DONE ->
-  P02.5 DONE (skip) -> P03 DONE (synthetic ISO) -> P05 ... (P04 /
-  P04.5 are correctly absent from the phase list on Windows).
+  P03 DONE (skip) -> P04 DONE (synthetic ISO) -> P07 ... (P05 /
+  P06 are correctly absent from the phase list on Windows).
 - Smoke 4 (`-Action DumpFieldClassification`): exit 0; JSON written.
 - Smoke 5 (`-Action RefreshAllBaselines -DryRun -OnlyOs Server2025`):
   exit 2 (DryRun + unresolved Iso fields); all 4 field groups
@@ -897,7 +897,7 @@ non-synthetic runs.
 
 ### Fixed - Catalogue search precision + multi-file disambiguation (Option X)
 
-r02 introduced Microsoft Update Catalogue scraping (P02.5) with three
+r02 introduced Microsoft Update Catalogue scraping (P03) with three
 quality issues that this release fixes. The fixes are based on
 Microsoft's official media-dynamic-update guidance plus a review of
 WIM Witch, WimWizard, and WIM-Tools reference implementations.
@@ -919,7 +919,7 @@ Since 2021 Microsoft embeds the SSU into the LCU and publishes
 standalone SSUs only "in rare cases of a breaking change"
 (Microsoft Learn quote). The previous code's
 `RequiresKbIds = $ssuKbs` assignment treated SSU as always-present
-and could falsely report "missing SSU" in P04.5 validation. Added
+and could falsely report "missing SSU" in P06 validation. Added
 `Test-IsCombinedLcuTitle` (explicit marker check) and a structural
 detector inside `Resolve-PatchSetFromCatalog` that treats
 "SSU search returned zero AND LCU search returned non-zero" as a
@@ -979,7 +979,7 @@ and (for .NET) matching `ndp<version>` markers.
   `Save-ConfigWithBaseline` rewrites them as ordinary JSON properties.
 - Existing r02.4 Configs are read transparently; missing
   `IsCombined`/`Variant` fields default to `$false`/`'Full'` when
-  consumed by P03/P04.5/P05.
+  consumed by P04/P06/P07.
 - `ScriptVersion` is bumped to `update-wsi-2026.05.24-r02.5`;
   `ScriptTag` is `catalog-multifile-and-combined-lcu`.
 
@@ -1050,7 +1050,7 @@ message instead of a misleading "parameter not found" secondary error.
   scaffold. It took a single `-Item` parameter and serialised
   SpeakerDeck-specific fields (`DeckUrl`, `PublishDate`, etc.).
   Both call sites in this script
-  (`Invoke-BuildPhase05_PatchInstallWim`'s `Add-WindowsPackage` catch,
+  (`Invoke-BuildPhase07_PatchInstallWim`'s `Add-WindowsPackage` catch,
   and `Invoke-PhaseRunner`'s top-level phase catch) instead pass
   `-Phase / -Kind / -Properties` for a generic phase-failure record.
   The two surfaces had been silently incompatible since r01.
@@ -1107,7 +1107,7 @@ A stale reference to `Write-FailureDiagnostic` in a comment inside
 r02.1 cleared the PSScriptAnalyzer findings, but the Stage 2 job still
 exited 1 because Smoke test 3 (`-Action PrepareBuildVerify
 -SyntheticTestMode -DryRun -SkipEnvCheck`) hit a fatal error inside the
-new phase P02.5. Root cause: when `Start-DebugTrace` was called from the
+new phase P03. Root cause: when `Start-DebugTrace` was called from the
 two new phase workers I introduced in r02, the wrong parameter name
 `-PhaseName` was used. The correct name (used by every other phase in
 this script) is `-Context`. PowerShell 5.1's partial-match logic
@@ -1115,15 +1115,15 @@ reported the failure as "A parameter cannot be found that matches
 parameter name 'Phase'." because `-PhaseId` and `-PhaseName` collide
 on the same prefix.
 
-- `Invoke-SetupPhase02_5_RefreshPatchBaseline`:
-  `Start-DebugTrace -PhaseName 'P02.5_RefreshPatchBaseline' -PhaseId 'P02.5'`
+- `Invoke-SetupPhase03_RefreshPatchBaseline`:
+  `Start-DebugTrace -PhaseName 'P02.5_RefreshPatchBaseline' -PhaseId 'P03'`
   becomes
-  `Start-DebugTrace -Context 'Invoke-SetupPhase02_5_RefreshPatchBaseline' -PhaseId 'P02.5'`
-  (mirrors the call shape used by P01 through P09).
-- `Invoke-PlanPhase04_5_ValidatePatchSet`:
-  `Start-DebugTrace -PhaseName 'P04.5_ValidatePatchSet' -PhaseId 'P04.5'`
+  `Start-DebugTrace -Context 'Invoke-SetupPhase03_RefreshPatchBaseline' -PhaseId 'P03'`
+  (mirrors the call shape used by P01 through P13).
+- `Invoke-PlanPhase06_ValidatePatchSet`:
+  `Start-DebugTrace -PhaseName 'P04.5_ValidatePatchSet' -PhaseId 'P06'`
   becomes
-  `Start-DebugTrace -Context 'Invoke-PlanPhase04_5_ValidatePatchSet' -PhaseId 'P04.5'`.
+  `Start-DebugTrace -Context 'Invoke-PlanPhase06_ValidatePatchSet' -PhaseId 'P06'`.
 
 ### Quality
 
@@ -1201,11 +1201,11 @@ informational `Write-Step` call at the head of the function.
 
 - New parameter `-PatchMonth yyyy-MM` to scope the Catalogue search
   (default: current month's Patch Tuesday).
-- New parameter `-SkipDynamicPatchRefresh` to bypass P02.5 even when
+- New parameter `-SkipDynamicPatchRefresh` to bypass P03 even when
   the baseline is stale (offline / air-gapped runs).
 - New parameter `-UseBaselineOnly` to forbid all Catalogue access
   and use `PatchBaseline.Patches` strictly as-is.
-- New phase **P02.5 RefreshPatchBaseline**: when
+- New phase **P03 RefreshPatchBaseline**: when
   `PatchTuesdayOfBaseline < Get-LatestPatchTuesday()`, scrape the
   Microsoft Update Catalogue for the target month (SSU + LCU +
   DynamicUpdate.Setup + DynamicUpdate.Component + DynamicUpdate.SafeOs
@@ -1228,9 +1228,9 @@ informational `Write-Step` call at the head of the function.
 
 - New parameter `-WsusScnCabPath` to point at a pre-staged
   `wsusscn2.cab` instead of triggering an automatic download.
-- New parameter `-IgnorePatchValidation` to demote P04.5 failure
+- New parameter `-IgnorePatchValidation` to demote P06 failure
   from abort to warning (NOT recommended for production).
-- New phase **P04.5 ValidatePatchSet**: after the install.wim is
+- New phase **P06 ValidatePatchSet**: after the install.wim is
   extracted, optionally download (initial run OR cache older than
   current Patch Tuesday) and run a Windows Update Agent COM API
   offline scan with `Microsoft.Update.Session` against the supplied
@@ -1253,10 +1253,10 @@ informational `Write-Step` call at the head of the function.
   "PatchBaseline-driven" when no explicit source (`-PatchUrls` /
   `-PatchDirectory` / `-ManifestPath`) is supplied AND
   `PatchBaseline.Patches` is non-empty (or `-AutoDetectLatestPatches`
-  is set, in which case P02.5 will populate it).
+  is set, in which case P03 will populate it).
 - Phase registry: 11 entries (was 9). Action mappings updated to
-  include P02.5 before P03 and P04.5 between P04 and P05.
-- `Action GenerateManifest` now runs P01, P02, P02.5 (real Catalogue
+  include P03 before P04 and P06 between P05 and P07.
+- `Action GenerateManifest` now runs P01, P02, P03 (real Catalogue
   scrape that writes back to Config) instead of the r01 placeholder.
 
 ### Configuration
@@ -1288,7 +1288,7 @@ informational `Write-Step` call at the head of the function.
 
 - r01-format `Config/<OsKey>.json` files load unchanged (the `PatchBaseline`
   node is optional from the loader's perspective; if absent at load
-  time, P02.5 will create it on first scrape).
+  time, P03 will create it on first scrape).
 - All r01 command lines (`-Action`, `-IsoPath`, `-PatchDirectory`,
   `-ManifestPath`, `-SyntheticTestMode -DryRun`, etc.) continue to
   work identically.
@@ -1313,7 +1313,7 @@ informational `Write-Step` call at the head of the function.
 - Initial MVP (M1 milestone) of `Update-WindowsServerIso.ps1`.
 - 4,093-line single-file PowerShell script. UTF-8 with BOM, CRLF
   line endings, ASCII-only source bytes.
-- Nine-phase pipeline (P01..P09) driven by a registry of
+- Nine-phase pipeline (P01..P13) driven by a registry of
   `pscustomobject` entries and dispatched by `Invoke-PhaseRunner`.
 - Sandbox-by-default semantics; destructive operations require
   `-Execute`.

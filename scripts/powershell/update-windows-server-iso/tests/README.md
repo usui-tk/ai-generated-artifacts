@@ -30,7 +30,7 @@ production, this directory ships five tools, summarised below.
 | `catalog_fixture_test.py` (T2) | Offline regression test against saved HTML fixtures under `fixtures/<patch-month>/`; deterministic | After every parser or TitleToken change; on every CI run | No  |
 | `powershell_harness.py`   (T3) | Drives `Update-WindowsServerIso.ps1 -Action TestHarness` to unit-test PowerShell functions from Python | After every PS function change in the catalog / patch-selection layers | No  |
 | `eval_iso_probe.py`       (T4) | HTTP Range-GET against each `Config/Server<N>.json` Iso URL; reports size + Last-Modified | When the Microsoft Evaluation Center publishes a new snapshot; before release | Yes |
-| `wsusscn2_probe.py`       (T5) | HTTP probe of `wsusscn2.cab`; warns when the cab is older than 60 days | Before running P04.5 ValidatePatchSet; on every CI monthly refresh | Yes |
+| `wsusscn2_probe.py`       (T5) | HTTP probe of `wsusscn2.cab`; warns when the cab is older than 60 days | Before running P06 ValidatePatchSet; on every CI monthly refresh | Yes |
 
 ## Quick start
 

@@ -40,20 +40,20 @@
             (Opus 4.7 era; baseline revision r01 on 2026-05-24).
 
 .DESCRIPTION_PHASES
-    Phases (P01..P09):
+    Phases (P01..P13):
       P01 : Initialize        (Setup ) PowerShell env, admin, ADK, disk, Hyper-V
       P02 : ResolveInputs     (Setup ) ISO/patch source resolution, Config JSON
-      P03 : FetchAssets       (Fetch ) ISO + patch downloads with hash verify
-      P04 : ExpandIso         (Plan  ) Mount source ISO, copy to workspace,
+      P04 : FetchAssets       (Fetch ) ISO + patch downloads with hash verify
+      P05 : ExpandIso         (Plan  ) Mount source ISO, copy to workspace,
                                        enumerate WIM indexes
-      P05 : PatchInstallWim   (Build ) For each install.wim index: SSU then LCU
+      P07 : PatchInstallWim   (Build ) For each install.wim index: SSU then LCU
                                        then .NET, then DISM cleanup
-      P06 : PatchBootWim      (Build ) boot.wim (PE + Setup) and winre.wim
-      P07 : AssembleIso       (Build ) Dynamic Update Setup overlay,
+      P08 : PatchBootWim      (Build ) boot.wim (PE + Setup) and winre.wim
+      P09 : AssembleIso       (Build ) Dynamic Update Setup overlay,
                                        Export-WindowsImage, oscdimg ISO build
-      P08 : StaticVerify      (Verify) Mount output ISO, confirm KB packages
+      P11 : StaticVerify      (Verify) Mount output ISO, confirm KB packages
                                        are present
-      P09 : FinalReport       (Report) End-of-run summary + ISO hash + log
+      P13 : FinalReport       (Report) End-of-run summary + ISO hash + log
                                        paths
 
     Optional out-of-band action: BootTest (Hyper-V VM smoke test, P10 equiv).
@@ -67,7 +67,7 @@
     is not meant for human invocation.
 
 .PARAMETER OnlyPhases
-    Array of phase IDs (e.g. 'P03','P05') to run. Overrides -Action.
+    Array of phase IDs (e.g. 'P04','P07') to run. Overrides -Action.
 
 .PARAMETER OsVersion
     One of: Server2016 / Server2019 / Server2022 / Server2025.
@@ -101,7 +101,7 @@
     to the current month's Patch Tuesday..
 
 .PARAMETER SkipDynamicPatchRefresh
-    Skip the P02.5 RefreshPatchBaseline phase even if the baseline is
+    Skip the P03 RefreshPatchBaseline phase even if the baseline is
     stale. Useful for offline or air-gapped runs..
 
 .PARAMETER UseBaselineOnly
@@ -110,11 +110,11 @@
     that no Catalog access occurs..
 
 .PARAMETER IgnorePatchValidation
-    Demote P04.5 ValidatePatchSet failures from "abort" to "warning".
+    Demote P06 ValidatePatchSet failures from "abort" to "warning".
     NOT recommended for production runs; intended for development..
 
 .PARAMETER WsusScnCabPath
-    Path to a pre-staged wsusscn2.cab file. When specified, the P04.5
+    Path to a pre-staged wsusscn2.cab file. When specified, the P06
     ValidatePatchSet phase will use this file instead of downloading
     one to <WorkRoot>/cache/..
 
@@ -282,7 +282,7 @@ if ($PSBoundParameters.ContainsKey('OnlyPhases') -and -not $OnlyPhases) {
     throw '-OnlyPhases was specified but the array is empty.'
 }
 
-# ---- mutual exclusivity / format validation (P02.5 / P04.5 params) ----
+# ---- mutual exclusivity / format validation (P03 / P06 params) ----
 if ($SkipDynamicPatchRefresh -and $AutoDetectLatestPatches) {
     throw '-SkipDynamicPatchRefresh and -AutoDetectLatestPatches are mutually exclusive.'
 }
@@ -424,7 +424,7 @@ $Script:MarkersDir        = Join-Path $Script:WorkRoot '.markers'
 function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Directories" is plural by design; multiple workspace dirs are created in a single call
     # Idempotently (re-)create the directory tree the script needs.
     # Called once during startup, after any optional -CleanWorkRoot wipe.
-    # Mount directories are recreated on demand by P05/P06; only the
+    # Mount directories are recreated on demand by P07/P08; only the
     # parent and stable working dirs are touched here.
     foreach ($d in @(
         $Script:WorkRoot, $Script:OutputDir,
@@ -451,8 +451,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.25-r04.4'
-$Script:ScriptTag     = 'self-verification-tools-and-test-harness'
+$Script:ScriptVersion = 'update-wsi-2026.05.25-r05.0-stage-A'
+$Script:ScriptTag     = 'phase-renumber-stage-a-intermediate'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -482,15 +482,15 @@ $Script:PhaseTimings      = New-Object System.Collections.Generic.List[object]
 $Script:PhaseRegistry = @(
     [pscustomobject]@{ Id='P01';   Name='Initialize';                Group='Setup';  Func='Invoke-SetupPhase01_Initialize' }
     [pscustomobject]@{ Id='P02';   Name='ResolveInputs';             Group='Setup';  Func='Invoke-SetupPhase02_ResolveInputs' }
-    [pscustomobject]@{ Id='P02.5'; Name='RefreshPatchBaseline';      Group='Setup';  Func='Invoke-SetupPhase02_5_RefreshPatchBaseline' }
-    [pscustomobject]@{ Id='P03';   Name='FetchAssets';               Group='Fetch';  Func='Invoke-FetchPhase03_FetchAssets' }
-    [pscustomobject]@{ Id='P04';   Name='ExpandIso';                 Group='Plan';   Func='Invoke-PlanPhase04_ExpandIso' }
-    [pscustomobject]@{ Id='P04.5'; Name='ValidatePatchSet';          Group='Plan';   Func='Invoke-PlanPhase04_5_ValidatePatchSet' }
-    [pscustomobject]@{ Id='P05';   Name='PatchInstallWim';           Group='Build';  Func='Invoke-BuildPhase05_PatchInstallWim' }
-    [pscustomobject]@{ Id='P06';   Name='PatchBootWim';              Group='Build';  Func='Invoke-BuildPhase06_PatchBootWim' }
-    [pscustomobject]@{ Id='P07';   Name='AssembleIso';               Group='Build';  Func='Invoke-BuildPhase07_AssembleIso' }
-    [pscustomobject]@{ Id='P08';   Name='StaticVerify';              Group='Verify'; Func='Invoke-VerifyPhase08_StaticVerify' }
-    [pscustomobject]@{ Id='P09';   Name='FinalReport';               Group='Report'; Func='Invoke-ReportPhase09_FinalReport' }
+    [pscustomobject]@{ Id='P03';   Name='RefreshPatchBaseline';    Group='Setup';  Func='Invoke-SetupPhase03_RefreshPatchBaseline' }
+    [pscustomobject]@{ Id='P04';   Name='FetchAssets';               Group='Fetch';  Func='Invoke-FetchPhase04_FetchAssets' }
+    [pscustomobject]@{ Id='P05';   Name='ExpandIso';                 Group='Plan';   Func='Invoke-PlanPhase05_ExpandIso' }
+    [pscustomobject]@{ Id='P06';   Name='ValidatePatchSet';        Group='Plan';   Func='Invoke-PlanPhase06_ValidatePatchSet' }
+    [pscustomobject]@{ Id='P07';   Name='PatchInstallWim';           Group='Build';  Func='Invoke-BuildPhase07_PatchInstallWim' }
+    [pscustomobject]@{ Id='P08';   Name='PatchBootWim';              Group='Build';  Func='Invoke-BuildPhase08_PatchBootWim' }
+    [pscustomobject]@{ Id='P09';   Name='AssembleIso';               Group='Build';  Func='Invoke-BuildPhase09_AssembleIso' }
+    [pscustomobject]@{ Id='P11';   Name='StaticVerify';              Group='Verify'; Func='Invoke-VerifyPhase11_StaticVerify' }
+    [pscustomobject]@{ Id='P13';   Name='FinalReport';               Group='Report'; Func='Invoke-ReportPhase13_FinalReport' }
     [pscustomobject]@{ Id='A01';   Name='RefreshAllBaselines';       Group='Admin';  Func='Invoke-AdminPhaseA01_RefreshAllBaselines' }
     [pscustomobject]@{ Id='A02';   Name='DumpFieldClassification';   Group='Admin';  Func='Invoke-AdminPhaseA02_DumpFieldClassification' }
 )
@@ -547,7 +547,7 @@ $Script:OsConfigFieldGroups = @(
 #   WinRE   : winre.wim   (recovery environment inside install.wim)
 #   Setup   : setup binaries (registered via pending.xml; not WIM-mounted)
 #
-# A patch may target multiple WIMs. Phase workers (P05/P06) iterate the
+# A patch may target multiple WIMs. Phase workers (P07/P08) iterate the
 # active target set and apply only the patches whose Type maps to that
 # target. Unknown Types are treated as Install-only with a warning.
 #
@@ -822,7 +822,7 @@ function Start-DebugTrace {
         If set, every Set-DebugStep call also writes a live [trace] line
         to the console. Default off.
     .PARAMETER PhaseId
-        Optional phase identifier (e.g. 'P05'). When set, the frame is
+        Optional phase identifier (e.g. 'P07'). When set, the frame is
         registered in the per-phase trace registry so Export-DebugTraceJson
         can build a per-phase summary.
     #>
@@ -1533,7 +1533,7 @@ function Write-PhaseHeader {
     # Prints a magenta banner that opens a phase. Records phase start
     # time so subsequent log lines can show '[+elapsed]'.
     #
-        #   Id    : short identifier (e.g. 'P01', 'P06', etc; always two digits)
+        #   Id    : short identifier (e.g. 'P01', 'P08', etc; always two digits)
     #   Name  : human-readable phase name (e.g. 'Listing-Collection')
     #   Group : phase group (e.g. 'Setup', 'Scan', 'Fetch', 'Report')
     param(
@@ -1703,7 +1703,7 @@ function Invoke-CleanupDirectories { # psa-disable-line PSA6003 -- "Directories"
 #   {
 #     "timestamp"     : ISO-8601 with offset,
 #     "scriptVersion" : <ScriptVersion>/<short SHA-256 prefix>,
-#     "phase"         : "<PNN>"             (e.g. P02.5, P05),
+#     "phase"         : "<PNN>"             (e.g. P03, P07),
 #     "kind"          : "<kind>"            (e.g. failure, warning),
 #     ...properties from -Properties hashtable, merged in...
 #   }
@@ -1717,7 +1717,7 @@ function Add-ErrorJsonlEntry {
         Append one structured JSON-Lines record to the run-level errors
         log at $Script:ErrorsJsonlPath.
     .PARAMETER Phase
-        Phase identifier (e.g. 'P02.5', 'P05'). Required.
+        Phase identifier (e.g. 'P03', 'P07'). Required.
     .PARAMETER Kind
         Short category label for the entry (e.g. 'failure', 'warning').
         Required.
@@ -2654,7 +2654,7 @@ function Save-ConfigWithBaseline {
         Write the in-memory OsProfile (with updated PatchBaseline) back
         to its Config JSON file, preserving field order where possible.
     .DESCRIPTION
-        Used by P02.5 when AutoRefreshPolicy.WritebackToConfig = $true.
+        Used by P03 when AutoRefreshPolicy.WritebackToConfig = $true.
         Emits LF line endings (per repo .gitattributes for *.json) and
         UTF-8 without BOM. Uses Depth 32 to fully serialise patch arrays.
     #>
@@ -2745,7 +2745,7 @@ function Get-OsConfigPath {
     <#
     .SYNOPSIS
         Resolve the on-disk path of the active Config/<OsKey>.json file,
-        so the P02.5 writeback knows where to save.
+        so the P03 writeback knows where to save.
     #>
     [OutputType([string])]
     param([Parameter(Mandatory)] [string]$OsKey)
@@ -3908,7 +3908,7 @@ function Resolve-EtfsbootCom {
     <#
     .SYNOPSIS
         Locate etfsboot.com using the three-tier fallback chain
-        documented in SPEC Part B.5 P07.
+        documented in SPEC Part B.5 P09.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -3931,7 +3931,7 @@ function Resolve-EfisysBin {
     <#
     .SYNOPSIS
         Locate efisys.bin using the three-tier fallback chain
-        documented in SPEC Part B.5 P07.
+        documented in SPEC Part B.5 P09.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -4089,7 +4089,7 @@ function New-SyntheticTestIso {
             Copy-Item -LiteralPath $installWim -Destination $OutputIsoPath -Force
         }
     } else {
-        # ADK missing - copy the WIM as if it were the ISO. P08 verification
+        # ADK missing - copy the WIM as if it were the ISO. P11 verification
         # in -SyntheticTestMode tolerates this fallback shape.
         Copy-Item -LiteralPath $installWim -Destination $OutputIsoPath -Force
     }
@@ -4103,7 +4103,7 @@ function New-SyntheticTestIso {
 # offline scan
 # ============================================================
 #
-# These helpers let P04.5 ValidatePatchSet ask Microsoft's own Update
+# These helpers let P06 ValidatePatchSet ask Microsoft's own Update
 # Agent (the same component Windows Update uses) whether the supplied
 # patch set is sufficient for the target install.wim image. This is the
 # only authoritative way to know "LCU X requires SSU Y" because the
@@ -4264,7 +4264,7 @@ function Invoke-WuaOfflineScan {
         WIM directly. The caller must therefore run this function FROM
         a Windows host whose OS family matches the install.wim target
         (i.e. Server 2025 host to scan a Server 2025 image). When such
-        a host is not available, P04.5 will skip with a warning rather
+        a host is not available, P06 will skip with a warning rather
         than fail.
 
         Returns: array of [pscustomobject] with UpdateId / Title /
@@ -4377,7 +4377,7 @@ function Compare-PatchSetVsWuaScan {
 # PatchPlan engine
 # ============================================================
 # Converts a flat list of resolved patches into a target-aware
-# PatchPlan that the build phases (P05 install.wim, P06 boot.wim
+# PatchPlan that the build phases (P07 install.wim, P08 boot.wim
 # / WinRE.wim) consume. Implements Microsoft's media-dynamic-update
 # servicing sequence: each WIM target receives only the patches
 # whose Type maps to that target via $Script:PatchTargetMap, and
@@ -4386,7 +4386,7 @@ function Compare-PatchSetVsWuaScan {
 # Out of scope for this initial cut (tracked in CHANGELOG and SPEC):
 #   * LCU twice-apply pattern around LP injection
 #   * WinRE.wim mount/service/dismount worker
-#   * Language Pack injection in P05
+#   * Language Pack injection in P07
 # This module establishes the structural contract; a later release
 # fills in the WinRE worker and the LP-injection sequencing.
 
@@ -4518,7 +4518,7 @@ function Build-InstallApplySequence {
                                                   delivered by LCU)
           I4. .NET CU                            (.NET 4.x updates)
           I5. DynamicUpdate.Component            (component-store DU)
-          I6. (Cleanup + Export, handled by P05)
+          I6. (Cleanup + Export, handled by P07)
           I7. LCU second pass                    (re-applied because the
                                                   LP injection in I2
                                                   shadowed some LCU
@@ -4585,7 +4585,7 @@ function Build-InstallApplySequence {
         Patches          = $dynUpComp
         RequiresRemount  = $false
     }) | Out-Null
-    # I6: Component Cleanup + Export are handled by P05's mount-scope
+    # I6: Component Cleanup + Export are handled by P07's mount-scope
     # finalisation, not as a Patches-bearing sub-phase. Modelled here
     # as a marker entry so the worker can hook in.
     $sequence.Add([pscustomobject]@{
@@ -4914,7 +4914,7 @@ function Invoke-PatchSubPhase {
         } catch {
             $errMsg = $_.Exception.Message
             $status = 'Fail'
-            Add-ErrorJsonlEntry -Phase 'P05' -Kind 'sub-phase-failure' -Properties @{
+            Add-ErrorJsonlEntry -Phase 'P07' -Kind 'sub-phase-failure' -Properties @{
                 exType   = $_.Exception.GetType().FullName
                 msg      = $errMsg
                 subPhase = $SubPhase.Name
@@ -5300,7 +5300,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         Write-SubSection 'Step 2: Resolve ISO source'
         $isoSourceDesc = ''
         if ($Script:SyntheticTestMode) {
-            Write-Step '-SyntheticTestMode is on; ISO will be generated in P03.'
+            Write-Step '-SyntheticTestMode is on; ISO will be generated in P04.'
             $Script:IsoLocalPath = Join-Path $Script:IsoSourceDir 'synthetic.iso'
             $isoSourceDesc = '(synthetic, generated in-script)'
         } elseif ($Script:IsoPath) {
@@ -5382,7 +5382,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                   ($Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.Patches -and `
                    $Script:OsProfile.PatchBaseline.Patches.Count -gt 0)) {
             # PatchBaseline-driven path. The patch list is derived from
-            # the in-memory $Script:OsProfile.PatchBaseline.Patches. P02.5
+            # the in-memory $Script:OsProfile.PatchBaseline.Patches. P03
             # may refresh this list from the Microsoft Update Catalog if it
             # is stale or -AutoDetectLatestPatches was passed.
             $bl = $Script:OsProfile.PatchBaseline
@@ -5399,7 +5399,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                     }) | Out-Null
                 }
             } else {
-                Write-Step 'PatchBaseline.Patches is empty; P02.5 will populate from Microsoft Update Catalog.'
+                Write-Step 'PatchBaseline.Patches is empty; P03 will populate from Microsoft Update Catalog.'
             }
         } elseif ($Script:SyntheticTestMode) {
             Write-Step '-SyntheticTestMode is on; no real patches required.'
@@ -5415,7 +5415,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         # Build the WIM-target-aware PatchPlan and print summary.
         # Even when ResolvedPatches is empty (synthetic test mode), we
         # construct an empty plan so downstream Get-OrInitPatchPlan
-        # calls in P05/P06 hit a populated cache.
+        # calls in P07/P08 hit a populated cache.
         Set-DebugStep -Step 'build-patch-plan'
         $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
         Write-PatchPlanSummary -Plan $Script:PatchPlan
@@ -5452,7 +5452,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
 
 
 # ============================================================
-# Phase P02.5: RefreshPatchBaseline
+# Phase P03: RefreshPatchBaseline
 # ============================================================
 # Conditionally refresh PatchBaseline by scraping the Microsoft Update
 # Catalog when the existing baseline is stale (Patch Tuesday has passed
@@ -5471,28 +5471,28 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
 #   - "UseBaseline" + Test-PatchBaselineUsable = $false -> throw
 #   - "Abort"                                           -> throw
 
-function Invoke-SetupPhase02_5_RefreshPatchBaseline {
+function Invoke-SetupPhase03_RefreshPatchBaseline {
     <#
     .OUTPUTS
         System.Boolean
     #>
     [OutputType([bool])]
     param()
-    Start-DebugTrace -Context 'Invoke-SetupPhase02_5_RefreshPatchBaseline' -PhaseId 'P02.5'
+    Start-DebugTrace -Context 'Invoke-SetupPhase03_RefreshPatchBaseline' -PhaseId 'P03'
     try {
         Set-DebugStep -Step 'check-skip-conditions'
 
         # ---- Skip conditions ----
         if ($Script:SyntheticTestMode) {
-            Write-Skip 'P02.5 skipped: -SyntheticTestMode disables Catalog scraping.'
+            Write-Skip 'P03 skipped: -SyntheticTestMode disables Catalog scraping.'
             return $true
         }
         if ($Script:SkipDynamicPatchRefresh) {
-            Write-Skip 'P02.5 skipped: -SkipDynamicPatchRefresh explicitly set.'
+            Write-Skip 'P03 skipped: -SkipDynamicPatchRefresh explicitly set.'
             return $true
         }
         if ($Script:UseBaselineOnly) {
-            Write-Skip 'P02.5 skipped: -UseBaselineOnly explicitly set.'
+            Write-Skip 'P03 skipped: -UseBaselineOnly explicitly set.'
             return $true
         }
 
@@ -5511,13 +5511,13 @@ function Invoke-SetupPhase02_5_RefreshPatchBaseline {
         $forced  = [bool]$Script:AutoDetectLatestPatches
 
         if ($isFresh -and -not $forced) {
-            Write-Skip ('P02.5 skipped: PatchBaseline is fresh (PatchTuesdayOfBaseline={0}).' -f $baseline.PatchTuesdayOfBaseline)
+            Write-Skip ('P03 skipped: PatchBaseline is fresh (PatchTuesdayOfBaseline={0}).' -f $baseline.PatchTuesdayOfBaseline)
             return $true
         }
         if ($forced) {
-            Write-Step 'P02.5: -AutoDetectLatestPatches set; forcing refresh.'
+            Write-Step 'P03: -AutoDetectLatestPatches set; forcing refresh.'
         } else {
-            Write-Step 'P02.5: PatchBaseline is stale; refreshing from Catalog.'
+            Write-Step 'P03: PatchBaseline is stale; refreshing from Catalog.'
         }
 
         # Determine target patch month
@@ -5567,14 +5567,14 @@ function Invoke-SetupPhase02_5_RefreshPatchBaseline {
         # ---- Failure handling ----
         if (-not $scrapeOk) {
             if ($fallback -eq 'Abort') {
-                throw ('P02.5 RefreshPatchBaseline failed and AutoRefreshPolicy.FallbackOnScrapeFailure=Abort. Error: ' + $scrapeErr)
+                throw ('P03 RefreshPatchBaseline failed and AutoRefreshPolicy.FallbackOnScrapeFailure=Abort. Error: ' + $scrapeErr)
             }
             # UseBaseline (default)
             if (Test-PatchBaselineUsable -Baseline $baseline) {
-                Write-Warn 'P02.5: scrape failed but existing PatchBaseline.Patches is usable; continuing.'
+                Write-Warn 'P03: scrape failed but existing PatchBaseline.Patches is usable; continuing.'
                 return $true
             }
-            throw ('P02.5 RefreshPatchBaseline failed AND existing PatchBaseline has no usable patches. Cannot proceed.')
+            throw ('P03 RefreshPatchBaseline failed AND existing PatchBaseline has no usable patches. Cannot proceed.')
         }
 
         # ---- Update in-memory profile ----
@@ -5624,7 +5624,7 @@ function Invoke-SetupPhase02_5_RefreshPatchBaseline {
         # ---- Re-derive $Script:ResolvedPatches from new baseline ----
         Set-DebugStep -Step 'derive-resolved-patches'
         # If the user did not provide an explicit patch source, use the
-        # refreshed baseline as the source of truth for P03.
+        # refreshed baseline as the source of truth for P04.
         $userProvidedPatches = ($Script:PatchUrls -and $Script:PatchUrls.Count -gt 0) `
                                -or ($Script:PatchDirectory -and (Test-Path -LiteralPath $Script:PatchDirectory)) `
                                -or ($Script:ManifestPath -and (Test-Path -LiteralPath $Script:ManifestPath))
@@ -5652,16 +5652,16 @@ function Invoke-SetupPhase02_5_RefreshPatchBaseline {
 }
 
 # ============================================================
-# Phase P03: Fetch assets (Fetch group)
+# Phase P04: Fetch assets (Fetch group)
 # ============================================================
 
-function Invoke-FetchPhase03_FetchAssets { # psa-disable-line PSA6003 -- "Assets" is a phase noun; renaming would break the registry-driven dispatcher
+function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets" is a phase noun; renaming would break the registry-driven dispatcher
     <#
     .SYNOPSIS
-        P03: Download the source ISO (if URL-based) and any patch files
+        P04: Download the source ISO (if URL-based) and any patch files
         that don't exist locally yet. Honours -SyntheticTestMode.
     #>
-    Start-DebugTrace -Context 'Invoke-FetchPhase03_FetchAssets' -PhaseId 'P03'
+    Start-DebugTrace -Context 'Invoke-FetchPhase04_FetchAssets' -PhaseId 'P04'
     try {
         # Synthetic mode: build a tiny synthetic ISO instead of downloading
         if ($Script:SyntheticTestMode) {
@@ -5669,7 +5669,7 @@ function Invoke-FetchPhase03_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             Set-DebugStep -Step 'synthetic-iso-build'
             New-SyntheticTestIso -WorkRoot $Script:WorkRoot -OutputIsoPath $Script:IsoLocalPath | Out-Null
             Write-Ok ('Synthetic ISO created: {0}' -f $Script:IsoLocalPath)
-            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P03.ok') -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P04.ok') -Force | Out-Null
             return
         }
 
@@ -5774,14 +5774,14 @@ function Invoke-FetchPhase03_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             }
         }
 
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P03.ok') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P04.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
     }
 }
 
 # ============================================================
-# Phase P04: Expand source ISO (Plan group)
+# Phase P05: Expand source ISO (Plan group)
 # ============================================================
 
 function Expand-SourceIso {
@@ -5825,13 +5825,13 @@ function Expand-SourceIso {
     }
 }
 
-function Invoke-PlanPhase04_ExpandIso {
+function Invoke-PlanPhase05_ExpandIso {
     <#
     .SYNOPSIS
-        P04: Mount and extract the source ISO; enumerate install.wim
+        P05: Mount and extract the source ISO; enumerate install.wim
         and boot.wim indexes; emit P04_wim_inventory.csv.
     #>
-    Start-DebugTrace -Context 'Invoke-PlanPhase04_ExpandIso' -PhaseId 'P04'
+    Start-DebugTrace -Context 'Invoke-PlanPhase05_ExpandIso' -PhaseId 'P05'
     try {
         Write-SubSection 'Step 1: Expand source ISO'
         Expand-SourceIso -IsoFile $Script:IsoLocalPath -DestRoot $Script:ExtractedDir
@@ -5880,7 +5880,7 @@ function Invoke-PlanPhase04_ExpandIso {
         $rows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
         Write-Ok ('Wrote: {0}' -f $csvPath)
 
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P04.ok') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P05.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
     }
@@ -5888,9 +5888,9 @@ function Invoke-PlanPhase04_ExpandIso {
 
 
 # ============================================================
-# Phase P04.5: ValidatePatchSet
+# Phase P06: ValidatePatchSet
 # ============================================================
-# After P04 has extracted install.wim, this phase verifies that the
+# After P05 has extracted install.wim, this phase verifies that the
 # user-supplied patch set (or the one derived from PatchBaseline) is
 # sufficient by running a Windows Update Agent (WUA) offline scan
 # against wsusscn2.cab.
@@ -6033,24 +6033,24 @@ function Export-PatchValidationReport {
     return $dir
 }
 
-function Invoke-PlanPhase04_5_ValidatePatchSet {
+function Invoke-PlanPhase06_ValidatePatchSet {
     <#
     .OUTPUTS
         System.Boolean
     #>
     [OutputType([bool])]
     param()
-    Start-DebugTrace -Context 'Invoke-PlanPhase04_5_ValidatePatchSet' -PhaseId 'P04.5'
+    Start-DebugTrace -Context 'Invoke-PlanPhase06_ValidatePatchSet' -PhaseId 'P06'
     try {
         Set-DebugStep -Step 'check-skip-conditions'
 
         # ---- Skip conditions ----
         if ($Script:SyntheticTestMode) {
-            Write-Skip 'P04.5 skipped: -SyntheticTestMode disables wsusscn2 validation.'
+            Write-Skip 'P06 skipped: -SyntheticTestMode disables wsusscn2 validation.'
             return $true
         }
         if ($Script:UseBaselineOnly) {
-            Write-Skip 'P04.5 skipped: -UseBaselineOnly explicitly set.'
+            Write-Skip 'P06 skipped: -UseBaselineOnly explicitly set.'
             return $true
         }
         # Only run on Windows (COM API unavailable elsewhere)
@@ -6058,7 +6058,7 @@ function Invoke-PlanPhase04_5_ValidatePatchSet {
         try { $isWin = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) }
         catch { $isWin = ($env:OS -eq 'Windows_NT') }
         if (-not $isWin) {
-            Write-Skip 'P04.5 skipped: non-Windows host; WUA COM API unavailable.'
+            Write-Skip 'P06 skipped: non-Windows host; WUA COM API unavailable.'
             return $true
         }
 
@@ -6079,7 +6079,7 @@ function Invoke-PlanPhase04_5_ValidatePatchSet {
                             -LatestPatchTuesday $latestPT `
                             -OverridePath $Script:WsusScnCabPath
         } catch {
-            $msg = 'P04.5 could not obtain wsusscn2.cab: ' + $_.Exception.Message
+            $msg = 'P06 could not obtain wsusscn2.cab: ' + $_.Exception.Message
             if ($Script:IgnorePatchValidation) {
                 Write-Warn ($msg + ' (-IgnorePatchValidation set; continuing)')
                 return $true
@@ -6173,10 +6173,10 @@ function Invoke-PlanPhase04_5_ValidatePatchSet {
                 Write-Warn 'IgnorePatchValidation is set; continuing despite missing patches.'
                 return $true
             }
-            throw 'P04.5 ValidatePatchSet: required patches missing. See diagnostic data above.'
+            throw 'P06 ValidatePatchSet: required patches missing. See diagnostic data above.'
         }
 
-        Write-Ok 'P04.5 ValidatePatchSet: all required patches are provided.'
+        Write-Ok 'P06 ValidatePatchSet: all required patches are provided.'
         return $true
     } finally {
         Stop-DebugTrace
@@ -6184,7 +6184,7 @@ function Invoke-PlanPhase04_5_ValidatePatchSet {
 }
 
 # ============================================================
-# Phase P05: Patch install.wim (Build group)
+# Phase P07: Patch install.wim (Build group)
 # ============================================================
 #
 # Patch selection is driven by the PatchPlan engine
@@ -6193,7 +6193,7 @@ function Invoke-PlanPhase04_5_ValidatePatchSet {
 # WIM target. The legacy Get-PatchListForInstallWim /
 # Get-PatchListForBootWim helpers remain as thin wrappers around
 # the PatchPlan API so that downstream code paths (and any caller
-# in P06) keep their existing call sites without surgery.
+# in P08) keep their existing call sites without surgery.
 
 function Get-OrInitPatchPlan {
     <#
@@ -6201,7 +6201,7 @@ function Get-OrInitPatchPlan {
         Return the cached $Script:PatchPlan; build it on first access.
     .DESCRIPTION
         Lazy initialisation lets phases that don't need the plan (e.g.
-        P02.5 admin path) avoid the construction cost, while ensuring
+        P03 admin path) avoid the construction cost, while ensuring
         each phase that DOES need it sees the same plan instance.
     #>
     if (-not $Script:PatchPlan) {
@@ -6248,23 +6248,23 @@ function Resolve-InstallWimTargetIndexes { # psa-disable-line PSA6003 -- "Indexe
     return @($Inventory)
 }
 
-function Invoke-BuildPhase05_PatchInstallWim {
+function Invoke-BuildPhase07_PatchInstallWim {
     <#
     .SYNOPSIS
-        P05: For every install.wim image index, mount, apply SSU/LCU/
+        P07: For every install.wim image index, mount, apply SSU/LCU/
         .NET/Dynamic Update Component, run DISM cleanup, dismount.
         Emits P05_patch_inventory.csv.
     #>
-    Start-DebugTrace -Context 'Invoke-BuildPhase05_PatchInstallWim' -PhaseId 'P05'
+    Start-DebugTrace -Context 'Invoke-BuildPhase07_PatchInstallWim' -PhaseId 'P07'
     try {
         if (-not $Script:OsProfile.EnableInstallWimUpdate) {
-            Write-Skip 'EnableInstallWimUpdate is false in profile; skipping P05.'
+            Write-Skip 'EnableInstallWimUpdate is false in profile; skipping P07.'
             return
         }
         $installWim = Join-Path $Script:ExtractedDir 'sources\install.wim'
         if (-not (Test-Path -LiteralPath $installWim)) {
             if ($Script:SyntheticTestMode) {
-                Write-Skip 'install.wim absent in -SyntheticTestMode; skipping P05.'
+                Write-Skip 'install.wim absent in -SyntheticTestMode; skipping P07.'
                 return
             }
             throw ('install.wim missing: {0}' -f $installWim)
@@ -6411,32 +6411,32 @@ function Invoke-BuildPhase05_PatchInstallWim {
         $rows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
         Write-Ok ('Wrote: {0}' -f $csvPath)
 
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P05.ok') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P07.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
     }
 }
 
 # ============================================================
-# Phase P06: Patch boot.wim + winre.wim (Build group)
+# Phase P08: Patch boot.wim + winre.wim (Build group)
 # ============================================================
 
-function Invoke-BuildPhase06_PatchBootWim {
+function Invoke-BuildPhase08_PatchBootWim {
     <#
     .SYNOPSIS
-        P06: Apply SSU/LCU/SafeOs DU to boot.wim indexes (PE + Setup)
+        P08: Apply SSU/LCU/SafeOs DU to boot.wim indexes (PE + Setup)
         and to winre.wim (extracted from install.wim).
     #>
-    Start-DebugTrace -Context 'Invoke-BuildPhase06_PatchBootWim' -PhaseId 'P06'
+    Start-DebugTrace -Context 'Invoke-BuildPhase08_PatchBootWim' -PhaseId 'P08'
     try {
         if (-not $Script:OsProfile.EnableBootWimUpdate) {
-            Write-Skip 'EnableBootWimUpdate is false in profile; skipping P06.'
+            Write-Skip 'EnableBootWimUpdate is false in profile; skipping P08.'
             return
         }
         $bootWim = Join-Path $Script:ExtractedDir 'sources\boot.wim'
         if (-not (Test-Path -LiteralPath $bootWim)) {
             if ($Script:SyntheticTestMode) {
-                Write-Skip 'boot.wim absent in -SyntheticTestMode; skipping P06.'
+                Write-Skip 'boot.wim absent in -SyntheticTestMode; skipping P08.'
                 return
             }
             throw ('boot.wim missing: {0}' -f $bootWim)
@@ -6554,23 +6554,23 @@ function Invoke-BuildPhase06_PatchBootWim {
             }
         }
 
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P06.ok') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P08.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
     }
 }
 
 # ============================================================
-# Phase P07: Assemble updated ISO (Build group)
+# Phase P09: Assemble updated ISO (Build group)
 # ============================================================
 
-function Invoke-BuildPhase07_AssembleIso {
+function Invoke-BuildPhase09_AssembleIso {
     <#
     .SYNOPSIS
-        P07: Apply Dynamic Update Setup overlay onto sources\, run
+        P09: Apply Dynamic Update Setup overlay onto sources\, run
         New-BootableIso (oscdimg) to produce the final ISO.
     #>
-    Start-DebugTrace -Context 'Invoke-BuildPhase07_AssembleIso' -PhaseId 'P07'
+    Start-DebugTrace -Context 'Invoke-BuildPhase09_AssembleIso' -PhaseId 'P09'
     try {
         Write-SubSection 'Step 1: Dynamic Update Setup overlay'
         Set-DebugStep -Step 'dynup-setup-overlay'
@@ -6625,7 +6625,7 @@ function Invoke-BuildPhase07_AssembleIso {
             }
         }
 
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P07.ok') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P09.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
     }
@@ -6633,19 +6633,19 @@ function Invoke-BuildPhase07_AssembleIso {
 
 
 # ============================================================
-# Phase P08: Static verification (Verify group)
+# Phase P11: Static verification (Verify group)
 # ============================================================
 
-function Invoke-VerifyPhase08_StaticVerify {
+function Invoke-VerifyPhase11_StaticVerify {
     <#
     .SYNOPSIS
-        P08: Verify the output ISO without booting it. Mounts the ISO,
+        P11: Verify the output ISO without booting it. Mounts the ISO,
         verifies presence of install.wim/boot.wim/setup.exe, runs
         Get-WindowsImage and Get-WindowsPackage to check that the
         expected KB packages have been integrated. Emits
         P08_verification.csv.
     #>
-    Start-DebugTrace -Context 'Invoke-VerifyPhase08_StaticVerify' -PhaseId 'P08'
+    Start-DebugTrace -Context 'Invoke-VerifyPhase11_StaticVerify' -PhaseId 'P11'
     try {
         if ([string]::IsNullOrEmpty($Script:OutputIsoPath)) {
             # Recover from a Verify-only run
@@ -6763,26 +6763,26 @@ function Invoke-VerifyPhase08_StaticVerify {
 
         $failed = $rows | Where-Object { $_.Status -eq 'Fail' }
         if ($failed.Count -gt 0) {
-            throw ('P08 verification failed: {0} hard failures.' -f $failed.Count)
+            throw ('P11 verification failed: {0} hard failures.' -f $failed.Count)
         }
 
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P08.ok') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P11.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
     }
 }
 
 # ============================================================
-# Phase P09: Final report (Report group)
+# Phase P13: Final report (Report group)
 # ============================================================
 
-function Invoke-ReportPhase09_FinalReport {
+function Invoke-ReportPhase13_FinalReport {
     <#
     .SYNOPSIS
-        P09: End-of-run summary. Phase timing table, output ISO hash
+        P13: End-of-run summary. Phase timing table, output ISO hash
         and path, log/diag locations.
     #>
-    Start-DebugTrace -Context 'Invoke-ReportPhase09_FinalReport' -PhaseId 'P09'
+    Start-DebugTrace -Context 'Invoke-ReportPhase13_FinalReport' -PhaseId 'P13'
     try {
         Write-SubSection 'Phase Timing Summary'
         Show-PhaseSummary
@@ -6802,7 +6802,7 @@ function Invoke-ReportPhase09_FinalReport {
         Write-Step ('Diag dir: {0}' -f $Script:DiagDir)
         if ($Script:LogFile) { Write-Step ('Transcript: {0}' -f $Script:LogFile) }
 
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P09.ok') -Force | Out-Null
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P13.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
     }
@@ -7266,11 +7266,11 @@ function Get-PhaseListByAction {
     .DESCRIPTION
         Admin-group actions (RefreshAllBaselines,
         DumpFieldClassification) and applies a SyntheticTestMode
-        skip to P04 / P04.5. The synthetic ISO produced by P03 is
+        skip to P05 / P06. The synthetic ISO produced by P04 is
         not a structurally valid ISO9660 image; Mount-DiskImage in
-        P04 therefore fails with "file or directory is corrupted"
+        P05 therefore fails with "file or directory is corrupted"
         on Windows runners. Stage 3 (Synthetic+Execute) already
-        bypasses P04 by going straight to P05; this aligns Stage 2
+        bypasses P05 by going straight to P07; this aligns Stage 2
         Smoke 3 (Synthetic+DryRun) with the same flow.
     #>
     [CmdletBinding()]
@@ -7278,29 +7278,29 @@ function Get-PhaseListByAction {
     param([Parameter(Mandatory)] [string]$ActionName)
 
     # Phases used by the standard build pipeline. When SyntheticTestMode
-    # is set, the P04 / P04.5 pair is removed - synthetic ISOs cannot
+    # is set, the P05 / P06 pair is removed - synthetic ISOs cannot
     # round-trip through Mount-DiskImage.
     $standardFull = if ($Script:SyntheticTestMode) {
-        [string[]]@('P01','P02','P02.5','P03','P05','P06','P07','P08','P09')
+        [string[]]@('P01','P02','P03','P04','P07','P08','P09','P11','P13')
     } else {
-        [string[]]@('P01','P02','P02.5','P03','P04','P04.5','P05','P06','P07','P08','P09')
+        [string[]]@('P01','P02','P03','P04','P05','P06','P07','P08','P09','P11','P13')
     }
     $standardPrepare = if ($Script:SyntheticTestMode) {
-        [string[]]@('P01','P02','P02.5','P03')
+        [string[]]@('P01','P02','P03','P04')
     } else {
-        [string[]]@('P01','P02','P02.5','P03','P04','P04.5')
+        [string[]]@('P01','P02','P03','P04','P05','P06')
     }
 
     switch ($ActionName) {
         'Prepare'                 { return $standardPrepare }
-        'Build'                   { return [string[]]@('P05','P06','P07') }
-        'Verify'                  { return [string[]]@('P08','P09') }
+        'Build'                   { return [string[]]@('P07','P08','P09') }
+        'Verify'                  { return [string[]]@('P11','P13') }
         'PrepareBuildVerify'      { return $standardFull }
         'All'                     { return $standardFull }
         'BootTest'                { return [string[]]@() }
         'Cleanup'                 { return [string[]]@() }
         'ListPhases'              { return [string[]]@() }
-        'GenerateManifest'        { return [string[]]@('P01','P02','P02.5') }
+        'GenerateManifest'        { return [string[]]@('P01','P02','P03') }
         'RefreshAllBaselines'     { return [string[]]@('A01') }
         'DumpFieldClassification' { return [string[]]@('A02') }
         default                   { throw ('Unknown action: {0}' -f $ActionName) }

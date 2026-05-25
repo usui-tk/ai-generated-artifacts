@@ -43,7 +43,7 @@ This document consolidates everything needed to verify and evaluate
 | Unit tests — `Select-LatestPatchBySupersedence` (5 cases) | ✓ all pass | r04.3 build |
 | Smoke 1 — `-Action ListPhases` registry dump | ✓ exit 0, 13 phases + 11 actions | r04.3 build |
 | Smoke 2 — `-EnvironmentInfoOnly` (P01 only) | ✓ exit 0 on Linux pwsh 7.4.6 | r04.3 build |
-| Smoke 3 — `-SyntheticTestMode -DryRun` on Server2019 | ✓ P01–P02.5 complete; P03 reaches `New-SyntheticTestIso` (DISM unavailable on Linux pwsh is expected) | r04.3 build |
+| Smoke 3 — `-SyntheticTestMode -DryRun` on Server2019 | ✓ P01–P03 complete; P04 reaches `New-SyntheticTestIso` (DISM unavailable on Linux pwsh is expected) | r04.3 build |
 | Smoke 4 — `-Action DumpFieldClassification` | ✓ exit 0, JSON written | r04.3 build |
 | Smoke 5 — `-Action RefreshAllBaselines -DryRun -OnlyOs Server2025` | ✓ exit 2 (Manual fields remain by design); supersedence dedup exercised on real data | r04.3 build |
 | Smoke 6 — `-Mode Force -OnlyLanguage ja-jp` | ✓ Force overrides Skip; OnlyLanguage filter applied | r04 build |
@@ -179,7 +179,7 @@ Windows PowerShell 5.1 on a Windows host).
 ```
 
 Acceptance: exit code 0; the registry table prints 13 phases
-(P01..P09 plus P02.5, P04.5, A01, A02) and the Action table lists 11
+(P01..P13 plus P03, P06, A01, A02) and the Action table lists 11
 actions (Prepare, Build, Verify, PrepareBuildVerify, BootTest, All,
 Cleanup, ListPhases, GenerateManifest, RefreshAllBaselines,
 DumpFieldClassification).
@@ -203,14 +203,14 @@ dump) and exits cleanly. Subsequent phases are not invoked.
   -WorkRoot 'C:\Temp\uwsi-smoke3'
 ```
 
-Acceptance on Windows: phases P01..P09 all reach DONE / SKIPPED
-(P04 and P04.5 are deliberately removed from the phase list when
+Acceptance on Windows: phases P01..P13 all reach DONE / SKIPPED
+(P05 and P06 are deliberately removed from the phase list when
 `-SyntheticTestMode` is on; the synthetic ISO is not a valid ISO9660
 image and `Mount-DiskImage` would reject it). The PatchPlan summary
 prints all three sub-phase sequences (InstallSequence,
 BootSequence, WinReSequence) with zero patches in each lane.
 
-Acceptance on Linux pwsh: phases P01..P02.5 complete; P03 fails at
+Acceptance on Linux pwsh: phases P01..P03 complete; P04 fails at
 `New-SyntheticTestIso` because `dism.exe` is not available on Linux.
 This is expected and not a regression.
 
@@ -334,7 +334,7 @@ result is:
 | `boot.wim` index count | 2 |
 | `winre.wim` build number after patching | 26100.NNNN matching `PatchBaseline.TargetBuildAfterUpdate` |
 | Output ISO size | Within ~30% of the input ISO size |
-| DISM exit codes during P05/P06 | All zero (no 0x800f0823 servicing-stack mismatch; the pre-apply dependency closure check should have surfaced any mismatch before DISM) |
+| DISM exit codes during P07/P08 | All zero (no 0x800f0823 servicing-stack mismatch; the pre-apply dependency closure check should have surfaced any mismatch before DISM) |
 
 ---
 
@@ -383,7 +383,7 @@ Quick orientation:
 | `tests/catalog_fixture_test.py` (T2) | Every commit that touches parsers or TitleTokens | No  |
 | `tests/powershell_harness.py`   (T3) | Every commit that touches a PS scrape helper | No  |
 | `tests/eval_iso_probe.py`       (T4) | Before release; when Microsoft Evaluation Center publishes a new snapshot | Yes |
-| `tests/wsusscn2_probe.py`       (T5) | Before running P04.5; monthly | Yes |
+| `tests/wsusscn2_probe.py`       (T5) | Before running P06; monthly | Yes |
 
 T2 and T3 are deterministic and should be part of every PR check.
 T1, T4, T5 are environment-sensitive (they need real network access)
