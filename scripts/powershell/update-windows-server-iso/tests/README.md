@@ -177,3 +177,28 @@ T5 are appropriate for the monthly CI workflow
 (`stage4__monthly-refresh.yml`) where they catch Microsoft-side
 drift early. T3 requires a `pwsh`-capable runner, which CI Stage 1
 already has, so T3 also belongs in that workflow.
+
+## PoC scripts (r06.0+, time-bounded)
+
+In addition to the T1-T5 regression suite documented above, this
+directory hosts PoC scripts that share the `tests/` location but
+are operationally distinct. They follow the file-organisation rules
+defined normatively in SPEC.md §B.22.
+
+PoC scripts use the filename prefix `poc_<topic>_<step>_<verb>.py`
+so they sort together and never collide with T-numbered names.
+They are **disposable**: once the corresponding PoC concludes
+(landed in production or shelved), every matching file can be
+deleted as a single atomic step.
+
+Current PoC inventory:
+
+| Topic          | Scripts                                                                | Operational docs                                                   |
+|----------------|------------------------------------------------------------------------|--------------------------------------------------------------------|
+| `release_info` | `poc_release_info_01_fetch.py`<br>`poc_release_info_02_parse.py`<br>`poc_release_info_03_analyse.py` | [`docs/poc/poc-release-info-readme.md`](../docs/poc/poc-release-info-readme.md) |
+
+PoC scripts do not participate in the T-numbered regression suite,
+do not run in CI by default, and do not block PRs. Their snapshots
+live under `tests/snapshots/poc_<topic>/` and their fixtures /
+generated artefacts live under `tests/fixtures/poc_<topic>/`.
+

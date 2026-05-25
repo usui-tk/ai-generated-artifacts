@@ -16,7 +16,99 @@ the script and follows the
 
 ## [Unreleased]
 
-### r06.0 Phase 1 - Spec-only: OS Update Type Matrix (this release)
+### r06.0 Phase 2 - PoC: online patch metadata acquisition (this release)
+
+This Phase 2 deliverable is **PoC scripts and a written report**,
+plus a new normative SPEC.md §B.22 ("File organisation and naming
+conventions") that codifies how PoC artefacts coexist with the
+production code and the T1-T5 regression suite under the subproject
+directory. As with Phase 1, this release contains **no script
+(`.ps1`) changes and no on-disk Config schema changes**.
+
+**Driver**. r06.0 Phase 1 left open the empirical question:
+*does the Microsoft Learn Windows Server release-info page provide
+enough authentication-free metadata to drive the Refresher,
+replacing the brittle Microsoft Update Catalog title-string
+heuristics catalogued in SPEC.md §D.19 / §D.20 / §D.21?* Phase 2's
+PoC answers that question with measured data from 471 monthly
+release rows and 62 hotpatch calendar entries.
+
+**SPEC changes**:
+
+- `SPEC.md` §B.22 ("File organisation and naming conventions")
+  added. Five subsections:
+  - **B.22.1** Directory layout (`Config/`, `tests/`, `docs/` as
+    the only first-class children).
+  - **B.22.2** Filename prefix rules (`poc_<topic>_<step>_<verb>.py`
+    for PoC Python; `poc-<topic>-<purpose>.md` for PoC Markdown).
+  - **B.22.3** Worked examples mapping filenames to classes.
+  - **B.22.4** Out-of-scope clarifications.
+- `SPEC.md` Part G adjunct ("PoC scripts under `tests/`") added,
+  cross-referencing the new conventions and listing the current
+  PoC inventory.
+
+**PoC artefacts added** (all disposable per B.22):
+
+```
+tests/
+├── poc_release_info_01_fetch.py    fetch the Markdown
+├── poc_release_info_02_parse.py    parse into JSON
+├── poc_release_info_03_analyse.py  write CSV + JSON analyses
+├── snapshots/poc_release_info/
+│   ├── .gitattributes
+│   ├── release-info-2026-05-25.md       (68 KB raw Markdown)
+│   └── release-info-2026-05-25.meta.json
+└── fixtures/poc_release_info/
+    ├── release-info.json                (parsed structured form)
+    ├── update-type-summary.csv          (YYYY-MM x OS x letter pivot)
+    ├── baseline-month-detection.json    (Server 2025/2022 hotpatch calendar)
+    ├── letter-frequency.json
+    └── coverage-summary.json
+docs/
+├── README.md                            (docs/ directory guide)
+└── poc/
+    ├── poc-release-info-readme.md       (how to run the PoC)
+    └── poc-release-info-report.md       (findings + Phase 3 recommendations)
+```
+
+**PoC findings (summary)**:
+
+- The `?accept=text/markdown` content-negotiation switch returns
+  the source Markdown verbatim, 68 KB, no authentication. The page
+  is GitHub-backed (`MicrosoftDocs/windows-release-pr`), so its
+  format stability is reviewable.
+- Monthly release coverage is comprehensive: 117 months for
+  Server 2016, 92 for Server 2019, 58 for Server 2022, 20 for
+  Server 2025, with zero gaps for the latter three.
+- The previously-uncatalogued **"Windows Server hotpatch calendar"**
+  section provides authoritative Baseline-vs-Hotpatch month
+  labelling for Server 2022 and Server 2025, including
+  forward-looking unreleased months. This single discovery answers
+  the "how do we know which Server 2025 LCUs are baseline months"
+  question without scraping technical blogs.
+- The release-info page does NOT cover .NET Framework CU,
+  Dynamic Update.Setup, Dynamic Update.SafeOs, or language packs.
+  Those Types stay on the Catalog scrape path for Phase 3, but the
+  Catalog query can be keyed by KB number (from release-info)
+  rather than by Title-string heuristics, removing most of
+  SPEC.md §D.19 / §D.20 from the surface area.
+
+The full report including five Phase 3 recommendations and four
+open questions is in
+[`docs/poc/poc-release-info-report.md`](./docs/poc/poc-release-info-report.md).
+
+**Not in this Phase 2**:
+
+- No `Update-WindowsServerIso.ps1` changes. `$Script:ScriptVersion`
+  stays at `update-wsi-2026.05.25-r05.1`.
+- No `Config/<OsKey>.json` schema changes.
+- No T1-T5 changes. The PoC scripts share the `tests/` directory
+  by file-organisation convention but do not participate in the
+  T-numbered regression suite.
+- No Phase 3 code or design. Phase 3 is driven by the report's
+  recommendations and is a separate work item.
+
+### r06.0 Phase 1 - Spec-only: OS Update Type Matrix
 
 This Phase 1 deliverable is SPEC-only and intentionally contains
 **no script (.ps1) changes and no on-disk Config schema changes**.

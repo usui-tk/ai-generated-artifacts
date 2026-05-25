@@ -1,0 +1,32 @@
+{
+  "Server2025": {
+    "earliest_published_month": "2024-10",
+    "latest_published_month": "2026-05",
+    "months_covered": 20,
+    "gap_count": 0,
+    "gaps": []
+  },
+  "Server2022": {
+    "earliest_published_month": "2021-08",
+    "latest_published_month": "2026-05",
+    "months_covered": 58,
+    "gap_count": 0,
+    "gaps": []
+  },
+  "Server2019": {
+    "earliest_published_month": "2018-10",
+    "latest_published_month": "2026-05",
+    "months_covered": 92,
+    "gap_count": 0,
+    "gaps": []
+  },
+  "Server2016": {
+    "earliest_published_month": "2016-08",
+    "latest_published_month": "2026-05",
+    "months_covered": 117,
+    "gap_count": 1,
+    "gaps": [
+      "2017-02"
+    ]
+  }
+}

@@ -1080,6 +1080,137 @@ behaviour or the on-disk Config schema; it only makes the
 implicit Type matrix normative so that a future schema
 extension is grounded in a stated contract.
 
+## B.22 File organisation and naming conventions (r06.0+, normative)
+
+This section is the **governance model** for everything that lives
+under the `scripts/powershell/update-windows-server-iso/` subproject
+directory. It exists because r06 added a Proof-of-Concept stream
+alongside the existing production code and the existing
+`tests/` regression harness, and without explicit rules those three
+classes of artefacts would start sharing directories and filenames
+in confusing ways.
+
+The rules below are normative: any new file added to this subproject
+MUST land in the right directory and MUST use the right filename
+prefix. The intent is that an outsider reading a filename should
+know, without opening the file, **(a)** which artefact class it
+belongs to, **(b)** whether it is permanent or disposable, and
+**(c)** what role it plays in its class.
+
+### B.22.1 Directory layout
+
+```
+scripts/powershell/update-windows-server-iso/
+├── Update-WindowsServerIso.ps1     The production script. One file.
+├── SPEC.md                         This document.
+├── CHANGELOG.md                    Per-release notes.
+├── README.md / README.ja.md        Bilingual user-facing readme.
+├── PSScriptAnalyzerSettings.psd1   PSScriptAnalyzer config.
+├── .psa.config.json                psa.py config.
+├── .markdownlint.yaml              Markdownlint config.
+├── Config/                         OS-specific JSON configs.
+│   └── Server2016.json, Server2019.json, Server2022.json, Server2025.json
+├── tests/                          Self-verification tools (see Part G).
+│   ├── README.md                   Operational guide for tests/.
+│   ├── common/                     Shared modules (HTTP client, parsers).
+│   ├── fixtures/                   Saved HTML / JSON inputs for offline regression.
+│   ├── snapshots/                  Probe-output snapshots used for drift diffing.
+│   ├── <existing T1-T5>.py         Production-grade regression tools.
+│   └── poc_<topic>_*.py            Time-bounded PoC scripts (r06+).
+└── docs/                           Long-form documentation (r06.0+).
+    └── poc/                        PoC reports and findings.
+        └── poc-<topic>-<purpose>.md
+```
+
+Key points:
+
+- **`Config/`, `tests/`, and `docs/` are the only first-class child
+  directories.** No new top-level directories are added without a
+  SPEC update; future "PoC ディレクトリ" or "experiments/" would
+  violate this rule. PoC code lives under `tests/`, PoC reports
+  live under `docs/poc/`, and that is sufficient.
+- **PoC artefacts coexist with production artefacts** by filename
+  prefix, not by directory. A PoC Python script under `tests/`
+  uses the `poc_<topic>_` prefix to distinguish it from a T1-T5
+  regression tool that has no such prefix.
+- **The `docs/` directory is new in r06.0** and is the canonical
+  home for *anything longer than a CHANGELOG entry that is not
+  the SPEC itself*. PoC reports, post-mortems, design memos,
+  architecture-decision-record-style write-ups all belong here.
+- **Snapshot and fixture data follow the same prefix rule under
+  `tests/`**: a PoC snapshot goes under
+  `tests/snapshots/poc_<topic>/`, not in a sibling top-level
+  directory.
+
+### B.22.2 Filename prefix rules
+
+| Class                         | Where it lives                   | Filename pattern                                      | Disposable? |
+| ----------------------------- | -------------------------------- | ----------------------------------------------------- | :---------: |
+| Production PowerShell         | top level                        | `Update-WindowsServerIso.ps1` (exactly one file)      | No          |
+| Production config             | `Config/`                        | `Server<NNNN>.json`                                   | No          |
+| Regression test (T1-T5)       | `tests/`                         | `<topic>_<role>.py` (no prefix; existing convention)  | No          |
+| Regression test (shared)      | `tests/common/`                  | `<topic>_<role>.py`                                   | No          |
+| Regression fixture            | `tests/fixtures/<patch-month>/`  | (per existing convention, see Part G)                 | No          |
+| Regression snapshot           | `tests/snapshots/`               | `last_<topic>.json`                                   | No          |
+| **PoC script**                | `tests/`                         | `poc_<topic>_<step>_<verb>.py`                        | **Yes**     |
+| **PoC fixture / snapshot**    | `tests/fixtures/poc_<topic>/`<br>`tests/snapshots/poc_<topic>/` | (any reasonable filename inside)                      | **Yes**     |
+| Production documentation      | `docs/`                          | `<topic>-<purpose>.md`                                | No          |
+| **PoC documentation**         | `docs/poc/`                      | `poc-<topic>-<purpose>.md`                            | **Yes**     |
+| Top-level docs                | top level                        | `SPEC.md`, `CHANGELOG.md`, `README*.md`               | No          |
+
+"Disposable" means: when the corresponding feature lands in
+production (or is decided not to), every file in that class can be
+deleted as a single atomic step. PoC artefacts are time-bounded by
+design; production artefacts are not.
+
+`<topic>` is a short kebab-case (Markdown) or snake_case (Python)
+identifier for the investigation subject. Pick one and use it
+consistently across all files in a single PoC. For example, the
+r06 Phase 2 PoC uses `release_info` (Python) / `release-info`
+(Markdown) throughout.
+
+`<step>` for a multi-step PoC script is a two-digit zero-padded
+sequence number (`01`, `02`, ...). It establishes the execution
+order so an outsider can run the PoC by sorting the matching
+filenames alphabetically.
+
+`<verb>` is a short imperative describing what the step does
+(`fetch`, `parse`, `analyse`, `diff`, `validate`, `report`).
+Plain past-tense or noun forms are discouraged (`fetched`,
+`fetcher`); the imperative form makes the script feel like a
+command, which is what it is.
+
+`<purpose>` for a Markdown file is the document's role:
+`report` (PoC findings), `readme` (operational guide), `design`
+(forward-looking design memo), `decision` (architecture decision
+record), `runbook` (operator procedure).
+
+### B.22.3 Worked examples
+
+| File                                              | Class                    | Reading the name                                                              |
+| ------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------- |
+| `tests/catalog_fixture_test.py`                   | Regression test (T2)     | "Catalog fixture test" -- no `poc_` prefix means it is permanent.             |
+| `tests/poc_release_info_01_fetch.py`              | PoC script step 1        | r06 PoC; release-info topic; step 1; fetches data.                            |
+| `tests/poc_release_info_02_parse.py`              | PoC script step 2        | r06 PoC; same topic; step 2; parses the fetched data.                         |
+| `tests/poc_release_info_03_analyse.py`            | PoC script step 3        | r06 PoC; same topic; step 3; analyses the parsed data.                        |
+| `tests/snapshots/poc_release_info/2026-05-25.md`  | PoC snapshot             | Snapshot for the release_info PoC, dated 2026-05-25.                          |
+| `docs/poc/poc-release-info-readme.md`             | PoC documentation        | r06 PoC; release-info topic; "readme" purpose (how to run the scripts).       |
+| `docs/poc/poc-release-info-report.md`             | PoC documentation        | r06 PoC; release-info topic; "report" purpose (findings + recommendations).   |
+
+### B.22.4 What this section does NOT cover
+
+- The conventions in `Part A — Inherited Common Specification`
+  for end-of-line, BOM, ASCII-only-in-`.ps1`, line-ending in
+  Markdown still apply unchanged.
+- The conventions in `Part G — Self-verification tools` for the
+  T1-T5 regression suite still apply unchanged.
+- This section does not retroactively rename any existing file.
+  T1-T5 keep their current filenames; they pre-date this rule.
+  Only new files added from r06.0 onward must comply.
+- Subproject-internal subdirectories under `docs/` other than
+  `poc/` (e.g. a hypothetical `docs/architecture/`) are allowed
+  when added with a SPEC update that describes them.
+
 ## B.14b PatchBaseline schema fields (referenced by B.10)
 
 ```jsonc
@@ -1935,6 +2066,32 @@ PowerShell 7+. No `pip install` is required.
 The suite is documented operationally in
 [`tests/README.md`](./tests/README.md), which includes a
 "what to run, when" guide for both Claude and human operators.
+
+### Adjunct: PoC scripts under `tests/` (r06.0+)
+
+The PoC scripts described in `B.22 File organisation and naming
+conventions` share the `tests/` directory with the T1-T5 regression
+suite, but are **distinct from it**:
+
+- They are prefixed `poc_<topic>_<step>_<verb>.py` so they sort
+  together and never collide with T1-T5 names.
+- They are **time-bounded**: when the corresponding PoC concludes,
+  the `poc_<topic>_*.py` files, the `tests/fixtures/poc_<topic>/`,
+  the `tests/snapshots/poc_<topic>/`, and any matching
+  `docs/poc/poc-<topic>-*.md` documents can all be deleted as a
+  single atomic step.
+- They do **not** participate in the T-numbered regression suite
+  and are not required to be invoked by CI workflows.
+- Operational docs (how to run them, what they output, the
+  resulting findings) live under `docs/poc/`, not in `README.md`
+  here. The PoC's own `docs/poc/poc-<topic>-readme.md` is the
+  canonical entry point.
+
+The current PoC tracked under this scheme:
+
+| PoC topic        | Scripts                                              | Documents                                      |
+|------------------|------------------------------------------------------|------------------------------------------------|
+| `release_info`   | `tests/poc_release_info_01_fetch.py`<br>`tests/poc_release_info_02_parse.py`<br>`tests/poc_release_info_03_analyse.py` | `docs/poc/poc-release-info-readme.md`<br>`docs/poc/poc-release-info-report.md` |
 
 ---
 

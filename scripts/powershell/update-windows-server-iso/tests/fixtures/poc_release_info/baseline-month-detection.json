@@ -1,0 +1,1476 @@
+{
+  "hotpatch_baseline_months_documented": [
+    1,
+    4,
+    7,
+    10
+  ],
+  "authoritative_source": "release-info hotpatch_calendar table",
+  "calendar": {
+    "Server2025": {
+      "row_count": 26,
+      "baseline_count": 8,
+      "hotpatch_count": 18,
+      "earliest_calendar_year": 2024,
+      "latest_calendar_year": 2026,
+      "baseline_months_observed": [
+        1,
+        4,
+        7,
+        10
+      ],
+      "hotpatch_months_observed": [
+        2,
+        3,
+        5,
+        6,
+        8,
+        9,
+        11,
+        12
+      ],
+      "entries": [
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2024,
+          "month_name": "November",
+          "month_number": 11,
+          "update_type": "2024.11 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2024-11-12",
+          "build_after_update": "26100.2240",
+          "kb_id": "KB5046696",
+          "kb_url": "https://support.microsoft.com/topic/november-12-2024-hotpatch-kb5046696-os-build-26100-2240-8807348d-14d6-4d28-9c4b-c006ff748d44"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2024,
+          "month_name": "December",
+          "month_number": 12,
+          "update_type": "2024.12 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2024-12-10",
+          "build_after_update": "26100.2528",
+          "kb_id": "KB5048794",
+          "kb_url": "https://support.microsoft.com/topic/december-10-2024-hotpatch-kb5048794-os-build-26100-2528-b03075b9-0573-43c4-9d16-73822ce6cefa"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "January",
+          "month_number": 1,
+          "update_type": "2025.01 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2025-01-14",
+          "build_after_update": "26100.2894",
+          "kb_id": "KB5050009",
+          "kb_url": "https://support.microsoft.com/topic/january-14-2025-baseline-cf62e135-183f-4e03-8f3f-1965484f767d"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "February",
+          "month_number": 2,
+          "update_type": "2025.02 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-02-11",
+          "build_after_update": "26100.3107",
+          "kb_id": "KB5052105",
+          "kb_url": "https://support.microsoft.com/topic/february-11-2025-hotpatch-kb5052105-os-build-26100-3107-6dda7015-f0c5-40d9-8de2-941ff9b7e3fc"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "March",
+          "month_number": 3,
+          "update_type": "2025.03 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-03-11",
+          "build_after_update": "26100.3403",
+          "kb_id": "KB5053636",
+          "kb_url": "https://support.microsoft.com/topic/march-11-2025-hotpatch-kb5053636-os-build-26100-3403-d3053ceb-88e9-41a3-b6a5-040f8f9935e4"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "April",
+          "month_number": 4,
+          "update_type": "2025.04 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2025-04-08",
+          "build_after_update": "26100.3775",
+          "kb_id": "KB5055523",
+          "kb_url": "https://support.microsoft.com/topic/april-8-2025-baseline-ae7a2b2e-3048-4e53-b18f-9b5225592eae"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "May",
+          "month_number": 5,
+          "update_type": "2025.05 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-05-13",
+          "build_after_update": "26100.3981",
+          "kb_id": "KB5058497",
+          "kb_url": "https://support.microsoft.com/topic/may-13-2025-hotpatch-kb5058497-os-build-26100-3981-23bc4731-d39a-4478-8b4f-b64737fc2371"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "June",
+          "month_number": 6,
+          "update_type": "2025.06 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-06-10",
+          "build_after_update": "26100.4270",
+          "kb_id": "KB5060841",
+          "kb_url": "https://support.microsoft.com/topic/june-10-2025-hotpatch-kb5060841-os-build-26100-4270-b0911159-9564-44bf-80ae-a5d03013715d"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "July",
+          "month_number": 7,
+          "update_type": "2025.07 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2025-07-08",
+          "build_after_update": "26100.4652",
+          "kb_id": "KB5062553",
+          "kb_url": "https://support.microsoft.com/topic/july-8-2025-baseline-a4881a11-02c5-424a-a26b-a14d4201e405"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "August",
+          "month_number": 8,
+          "update_type": "2025.08 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-08-12",
+          "build_after_update": "26100.4851",
+          "kb_id": "KB5064010",
+          "kb_url": "https://support.microsoft.com/help/5064010"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "September",
+          "month_number": 9,
+          "update_type": "2025.09 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-09-09",
+          "build_after_update": "26100.6508",
+          "kb_id": "KB5065474",
+          "kb_url": "https://support.microsoft.com/help/5065474"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "October",
+          "month_number": 10,
+          "update_type": "2025.10 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2025-10-14",
+          "build_after_update": "26100.6899",
+          "kb_id": "KB5066835",
+          "kb_url": "https://support.microsoft.com/topic/october-14-2025-baseline-58e80013-ba94-46ad-a56c-b6691d2405ad"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "November",
+          "month_number": 11,
+          "update_type": "2025.11 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-11-11",
+          "build_after_update": "26100.7092",
+          "kb_id": "KB5068966",
+          "kb_url": "https://support.microsoft.com/topic/november-11-2025-hotpatch-kb5068966-os-build-26100-7092-e923cc54-3b4c-4df1-be42-92ae06d12984"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2025,
+          "month_name": "December",
+          "month_number": 12,
+          "update_type": "2025.12 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-12-09",
+          "build_after_update": "26100.7392",
+          "kb_id": "KB5072014",
+          "kb_url": "https://support.microsoft.com/help/5072014"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "January",
+          "month_number": 1,
+          "update_type": "2026.01 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2026-01-13",
+          "build_after_update": "26100.32230",
+          "kb_id": "KB5073379",
+          "kb_url": "https://support.microsoft.com/topic/january-13-2026-baseline-07d1ed4c-f570-492e-a8e0-ab807a5bc296"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "February",
+          "month_number": 2,
+          "update_type": "2026.02 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2026-02-10",
+          "build_after_update": "26100.32313",
+          "kb_id": "KB5075942",
+          "kb_url": "https://support.microsoft.com/topic/february-10-2026-hotpatch-kb5075942-os-build-26100-32313-8c766fc4-ff6a-4ab5-be2f-0c57888bf8dc"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "March",
+          "month_number": 3,
+          "update_type": "2026.03 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2026-03-10",
+          "build_after_update": "26100.32463",
+          "kb_id": "KB5078736",
+          "kb_url": "https://support.microsoft.com/topic/march-10-2026-hotpatch-kb5078736-os-build-26100-32463-d62230e0-d4fb-4597-8df4-81410e827f79"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "April",
+          "month_number": 4,
+          "update_type": "2026.04 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2026-04-14",
+          "build_after_update": "26100.32690",
+          "kb_id": "KB5082063",
+          "kb_url": "https://support.microsoft.com/topic/april-14-2026-baseline-3ed94012-763a-4ebe-86f4-32b01390a11a"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "May",
+          "month_number": 5,
+          "update_type": "2026.05 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2026-05-12",
+          "build_after_update": "26100.32772",
+          "kb_id": "KB5087423",
+          "kb_url": "https://support.microsoft.com/topic/may-12-2026-hotpatch-kb5087423-os-build-26100-32772-6a3275dd-3206-42b4-ab09-515421b3f142"
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "June",
+          "month_number": 6,
+          "update_type": "2026.06 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "July",
+          "month_number": 7,
+          "update_type": "2026.07 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "August",
+          "month_number": 8,
+          "update_type": "2026.08 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "September",
+          "month_number": 9,
+          "update_type": "2026.09 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "October",
+          "month_number": 10,
+          "update_type": "2026.10 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "November",
+          "month_number": 11,
+          "update_type": "2026.11 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2025",
+          "os_build": "26100",
+          "calendar_year": 2026,
+          "month_name": "December",
+          "month_number": 12,
+          "update_type": "2026.12 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        }
+      ]
+    },
+    "Server2022": {
+      "row_count": 36,
+      "baseline_count": 13,
+      "hotpatch_count": 23,
+      "earliest_calendar_year": 2024,
+      "latest_calendar_year": 2026,
+      "baseline_months_observed": [
+        1,
+        4,
+        7,
+        8,
+        10
+      ],
+      "hotpatch_months_observed": [
+        2,
+        3,
+        5,
+        6,
+        8,
+        9,
+        11,
+        12
+      ],
+      "entries": [
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "January",
+          "month_number": 1,
+          "update_type": "2024.01 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2024-01-09",
+          "build_after_update": "20348.2227",
+          "kb_id": "KB5034129",
+          "kb_url": "https://support.microsoft.com/help/5034129"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "February",
+          "month_number": 2,
+          "update_type": "2024.02 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2024-02-13",
+          "build_after_update": "20348.2277",
+          "kb_id": "KB5034860",
+          "kb_url": "https://support.microsoft.com/help/5034860"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "March",
+          "month_number": 3,
+          "update_type": "2024.03 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2024-03-12",
+          "build_after_update": "20348.2333",
+          "kb_id": "KB5035959",
+          "kb_url": "https://support.microsoft.com/help/5035959"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "April",
+          "month_number": 4,
+          "update_type": "2024.04 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2024-04-09",
+          "build_after_update": "20348.2402",
+          "kb_id": "KB5036909",
+          "kb_url": "https://support.microsoft.com/help/5036909"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "May",
+          "month_number": 5,
+          "update_type": "2024.05 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2024-05-14",
+          "build_after_update": "20348.2458",
+          "kb_id": "KB5037848",
+          "kb_url": "https://support.microsoft.com/help/5037848"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "June",
+          "month_number": 6,
+          "update_type": "2024.06 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2024-06-11",
+          "build_after_update": "20348.2522",
+          "kb_id": "KB5039330",
+          "kb_url": "https://support.microsoft.com/help/5039330"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "July",
+          "month_number": 7,
+          "update_type": "2024.07 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2024-07-09",
+          "build_after_update": "20348.2582",
+          "kb_id": "KB5040437",
+          "kb_url": "https://support.microsoft.com/help/5040437"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "August",
+          "month_number": 8,
+          "update_type": "2024.08 B^\\*^",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2024-08-13",
+          "build_after_update": "20348.2655",
+          "kb_id": "KB5041160",
+          "kb_url": "https://support.microsoft.com/help/5041160"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "September",
+          "month_number": 9,
+          "update_type": "2024.09 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2024-09-10",
+          "build_after_update": "20348.2695",
+          "kb_id": "KB5042880",
+          "kb_url": "https://support.microsoft.com/help/5042880"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "October",
+          "month_number": 10,
+          "update_type": "2024.10 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2024-10-08",
+          "build_after_update": "20348.2762",
+          "kb_id": "KB5044281",
+          "kb_url": "https://support.microsoft.com/help/5044281"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "November",
+          "month_number": 11,
+          "update_type": "2024.11 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2024-11-12",
+          "build_after_update": "20348.2819",
+          "kb_id": "KB5046698",
+          "kb_url": "https://support.microsoft.com/help/5046698"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2024,
+          "month_name": "December",
+          "month_number": 12,
+          "update_type": "2024.12 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2024-12-10",
+          "build_after_update": "20348.2908",
+          "kb_id": "KB5048800",
+          "kb_url": "https://support.microsoft.com/help/5048800"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "January",
+          "month_number": 1,
+          "update_type": "2025.01 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2025-01-14",
+          "build_after_update": "20348.3091",
+          "kb_id": "KB5049983",
+          "kb_url": "https://support.microsoft.com/help/5049983"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "February",
+          "month_number": 2,
+          "update_type": "2025.02 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-02-11",
+          "build_after_update": "20348.3148",
+          "kb_id": "KB5052106",
+          "kb_url": "https://support.microsoft.com/help/5052106"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "March",
+          "month_number": 3,
+          "update_type": "2025.03 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-03-11",
+          "build_after_update": "20348.3270",
+          "kb_id": "KB5053638",
+          "kb_url": "https://support.microsoft.com/help/5053638"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "April",
+          "month_number": 4,
+          "update_type": "2025.04 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2025-04-08",
+          "build_after_update": "20348.3453",
+          "kb_id": "KB5055526",
+          "kb_url": "https://support.microsoft.com/help/5055526"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "May",
+          "month_number": 5,
+          "update_type": "2025.05 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-05-13",
+          "build_after_update": "20348.3630",
+          "kb_id": "KB5058500",
+          "kb_url": "https://support.microsoft.com/help/5058500"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "June",
+          "month_number": 6,
+          "update_type": "2025.06 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-06-10",
+          "build_after_update": "20348.3745",
+          "kb_id": "KB5060525",
+          "kb_url": "https://support.microsoft.com/help/5060525"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "July",
+          "month_number": 7,
+          "update_type": "2025.07 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2025-07-08",
+          "build_after_update": "20348.3932",
+          "kb_id": "KB5062572",
+          "kb_url": "https://support.microsoft.com/help/5062572"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "August",
+          "month_number": 8,
+          "update_type": "2025.08 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-08-12",
+          "build_after_update": "20348.3989",
+          "kb_id": "KB5063812",
+          "kb_url": "https://support.microsoft.com/help/5063812"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "September",
+          "month_number": 9,
+          "update_type": "2025.09 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-09-09",
+          "build_after_update": "20348.4106",
+          "kb_id": "KB5065306",
+          "kb_url": "https://support.microsoft.com/help/5065306"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "October",
+          "month_number": 10,
+          "update_type": "2025.10 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2025-10-14",
+          "build_after_update": "20348.4294",
+          "kb_id": "KB5066782",
+          "kb_url": "https://support.microsoft.com/help/5066782"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "November",
+          "month_number": 11,
+          "update_type": "2025.11 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-11-11",
+          "build_after_update": "20348.4346",
+          "kb_id": "KB5068840",
+          "kb_url": "https://support.microsoft.com/help/5068840"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2025,
+          "month_name": "December",
+          "month_number": 12,
+          "update_type": "2025.12 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2025-12-09",
+          "build_after_update": "20348.4467",
+          "kb_id": "KB5071413",
+          "kb_url": "https://support.microsoft.com/help/5071413"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "January",
+          "month_number": 1,
+          "update_type": "2026.01 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2026-01-13",
+          "build_after_update": "20348.4648",
+          "kb_id": "KB5073457",
+          "kb_url": "https://support.microsoft.com/topic/january-13-2026-baseline-1be577b2-9a83-4eb7-9840-289ce599f40e"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "February",
+          "month_number": 2,
+          "update_type": "2026.02 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2026-02-10",
+          "build_after_update": "20348.4711",
+          "kb_id": "KB5075943",
+          "kb_url": "https://support.microsoft.com/topic/february-10-2026-hotpatch-kb5075943-os-build-20348-4711-88a3a172-3ef2-4027-b978-83861df746e7"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "March",
+          "month_number": 3,
+          "update_type": "2026.03 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2026-03-10",
+          "build_after_update": "20348.4830",
+          "kb_id": "KB5078737",
+          "kb_url": "https://support.microsoft.com/topic/march-10-2026-hotpatch-kb5078737-os-build-20348-4830-c3e0f4b0-62ac-4f92-9a7c-1831d02dc155"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "April",
+          "month_number": 4,
+          "update_type": "2026.04 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "2026-04-14",
+          "build_after_update": "20348.5020",
+          "kb_id": "KB5082142",
+          "kb_url": "https://support.microsoft.com/topic/april-14-2026-baseline-5d0db586-d5a5-4ba2-b3c8-a4536db17225"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "May",
+          "month_number": 5,
+          "update_type": "2026.05 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "2026-05-12",
+          "build_after_update": "20348.5074",
+          "kb_id": "KB5087424",
+          "kb_url": "https://support.microsoft.com/topic/may-12-2026-hotpatch-kb5087424-os-build-20348-5074-2984f4af-5751-411c-9a0b-78f05dc8d5d0"
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "June",
+          "month_number": 6,
+          "update_type": "2026.06 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "July",
+          "month_number": 7,
+          "update_type": "2026.07 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "August",
+          "month_number": 8,
+          "update_type": "2026.08 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "September",
+          "month_number": 9,
+          "update_type": "2026.09 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "October",
+          "month_number": 10,
+          "update_type": "2026.10 B",
+          "hotpatch_type": "Baseline (Restart)",
+          "is_baseline": true,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "November",
+          "month_number": 11,
+          "update_type": "2026.11 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        },
+        {
+          "os_short_name": "Server2022",
+          "os_build": "20348",
+          "calendar_year": 2026,
+          "month_name": "December",
+          "month_number": 12,
+          "update_type": "2026.12 B",
+          "hotpatch_type": "Hotpatch",
+          "is_baseline": false,
+          "availability_date": "",
+          "build_after_update": "",
+          "kb_id": "",
+          "kb_url": ""
+        }
+      ]
+    }
+  },
+  "inferred_from_monthly_b_releases": {
+    "Server2025": {
+      "row_count": 19,
+      "baseline_month_count": 6,
+      "rows": [
+        {
+          "year_month": "2024-11",
+          "availability_date": "2024-11-12",
+          "kb_id": "KB5046617",
+          "build_after_update": "26100.2314",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2024-12",
+          "availability_date": "2024-12-10",
+          "kb_id": "KB5048667",
+          "build_after_update": "26100.2605",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-01",
+          "availability_date": "2025-01-14",
+          "kb_id": "KB5050009",
+          "build_after_update": "26100.2894",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2025-02",
+          "availability_date": "2025-02-11",
+          "kb_id": "KB5051987",
+          "build_after_update": "26100.3194",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-03",
+          "availability_date": "2025-03-11",
+          "kb_id": "KB5053598",
+          "build_after_update": "26100.3476",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-04",
+          "availability_date": "2025-04-08",
+          "kb_id": "KB5055523",
+          "build_after_update": "26100.3775",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2025-05",
+          "availability_date": "2025-05-13",
+          "kb_id": "KB5058411",
+          "build_after_update": "26100.4061",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-06",
+          "availability_date": "2025-06-10",
+          "kb_id": "KB5060842",
+          "build_after_update": "26100.4349",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-07",
+          "availability_date": "2025-07-08",
+          "kb_id": "KB5062553",
+          "build_after_update": "26100.4652",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2025-08",
+          "availability_date": "2025-08-12",
+          "kb_id": "KB5063878",
+          "build_after_update": "26100.4946",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-09",
+          "availability_date": "2025-09-09",
+          "kb_id": "KB5065426",
+          "build_after_update": "26100.6584",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-10",
+          "availability_date": "2025-10-14",
+          "kb_id": "KB5066835",
+          "build_after_update": "26100.6899",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2025-11",
+          "availability_date": "2025-11-11",
+          "kb_id": "KB5068861",
+          "build_after_update": "26100.7171",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-12",
+          "availability_date": "2025-12-09",
+          "kb_id": "KB5072033",
+          "build_after_update": "26100.7462",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2026-01",
+          "availability_date": "2026-01-13",
+          "kb_id": "KB5073379",
+          "build_after_update": "26100.32230",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2026-02",
+          "availability_date": "2026-02-10",
+          "kb_id": "KB5075899",
+          "build_after_update": "26100.32370",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2026-03",
+          "availability_date": "2026-03-10",
+          "kb_id": "KB5078740",
+          "build_after_update": "26100.32522",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2026-04",
+          "availability_date": "2026-04-14",
+          "kb_id": "KB5082063",
+          "build_after_update": "26100.32690",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2026-05",
+          "availability_date": "2026-05-12",
+          "kb_id": "KB5087539",
+          "build_after_update": "26100.32860",
+          "is_hotpatch_baseline_month": false
+        }
+      ]
+    },
+    "Server2022": {
+      "row_count": 57,
+      "baseline_month_count": 19,
+      "rows": [
+        {
+          "year_month": "2021-09",
+          "availability_date": "2021-09-14",
+          "kb_id": "KB5005575",
+          "build_after_update": "20348.230",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2021-10",
+          "availability_date": "2021-10-12",
+          "kb_id": "KB5006699",
+          "build_after_update": "20348.288",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2021-11",
+          "availability_date": "2021-11-09",
+          "kb_id": "KB5007205",
+          "build_after_update": "20348.350",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2021-12",
+          "availability_date": "2021-12-14",
+          "kb_id": "KB5008223",
+          "build_after_update": "20348.405",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2022-01",
+          "availability_date": "2022-01-11",
+          "kb_id": "KB5009555",
+          "build_after_update": "20348.469",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2022-02",
+          "availability_date": "2022-02-08",
+          "kb_id": "KB5010354",
+          "build_after_update": "20348.524",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2022-03",
+          "availability_date": "2022-03-08",
+          "kb_id": "KB5011497",
+          "build_after_update": "20348.587",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2022-04",
+          "availability_date": "2022-04-12",
+          "kb_id": "KB5012604",
+          "build_after_update": "20348.643",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2022-05",
+          "availability_date": "2022-05-10",
+          "kb_id": "KB5013944",
+          "build_after_update": "20348.707",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2022-06",
+          "availability_date": "2022-06-14",
+          "kb_id": "KB5014678",
+          "build_after_update": "20348.768",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2022-07",
+          "availability_date": "2022-07-12",
+          "kb_id": "KB5015827",
+          "build_after_update": "20348.825",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2022-08",
+          "availability_date": "2022-08-09",
+          "kb_id": "KB5016627",
+          "build_after_update": "20348.887",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2022-09",
+          "availability_date": "2022-09-13",
+          "kb_id": "KB5017316",
+          "build_after_update": "20348.1006",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2022-10",
+          "availability_date": "2022-10-11",
+          "kb_id": "KB5018421",
+          "build_after_update": "20348.1129",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2022-11",
+          "availability_date": "2022-11-08",
+          "kb_id": "KB5019081",
+          "build_after_update": "20348.1249",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2022-12",
+          "availability_date": "2022-12-13",
+          "kb_id": "KB5021249",
+          "build_after_update": "20348.1366",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2023-01",
+          "availability_date": "2023-01-10",
+          "kb_id": "KB5022291",
+          "build_after_update": "20348.1487",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2023-02",
+          "availability_date": "2023-02-14",
+          "kb_id": "KB5022842",
+          "build_after_update": "20348.1547",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2023-03",
+          "availability_date": "2023-03-14",
+          "kb_id": "KB5023705",
+          "build_after_update": "20348.1607",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2023-04",
+          "availability_date": "2023-04-11",
+          "kb_id": "KB5025230",
+          "build_after_update": "20348.1668",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2023-05",
+          "availability_date": "2023-05-09",
+          "kb_id": "KB5026370",
+          "build_after_update": "20348.1726",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2023-06",
+          "availability_date": "2023-06-13",
+          "kb_id": "KB5027225",
+          "build_after_update": "20348.1787",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2023-07",
+          "availability_date": "2023-07-11",
+          "kb_id": "KB5028171",
+          "build_after_update": "20348.1850",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2023-08",
+          "availability_date": "2023-08-08",
+          "kb_id": "KB5029250",
+          "build_after_update": "20348.1906",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2023-09",
+          "availability_date": "2023-09-12",
+          "kb_id": "KB5030216",
+          "build_after_update": "20348.1970",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2023-10",
+          "availability_date": "2023-10-10",
+          "kb_id": "KB5031364",
+          "build_after_update": "20348.2031",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2023-11",
+          "availability_date": "2023-11-14",
+          "kb_id": "KB5032198",
+          "build_after_update": "20348.2113",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2023-12",
+          "availability_date": "2023-12-12",
+          "kb_id": "KB5033118",
+          "build_after_update": "20348.2159",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2024-01",
+          "availability_date": "2024-01-09",
+          "kb_id": "KB5034129",
+          "build_after_update": "20348.2227",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2024-02",
+          "availability_date": "2024-02-13",
+          "kb_id": "KB5034770",
+          "build_after_update": "20348.2322",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2024-03",
+          "availability_date": "2024-03-12",
+          "kb_id": "KB5035857",
+          "build_after_update": "20348.2340",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2024-04",
+          "availability_date": "2024-04-09",
+          "kb_id": "KB5036909",
+          "build_after_update": "20348.2402",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2024-05",
+          "availability_date": "2024-05-14",
+          "kb_id": "KB5037782",
+          "build_after_update": "20348.2461",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2024-06",
+          "availability_date": "2024-06-11",
+          "kb_id": "KB5039227",
+          "build_after_update": "20348.2527",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2024-07",
+          "availability_date": "2024-07-09",
+          "kb_id": "KB5040437",
+          "build_after_update": "20348.2582",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2024-08",
+          "availability_date": "2024-08-13",
+          "kb_id": "KB5041160",
+          "build_after_update": "20348.2655",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2024-09",
+          "availability_date": "2024-09-10",
+          "kb_id": "KB5042881",
+          "build_after_update": "20348.2700",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2024-10",
+          "availability_date": "2024-10-08",
+          "kb_id": "KB5044281",
+          "build_after_update": "20348.2762",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2024-11",
+          "availability_date": "2024-11-12",
+          "kb_id": "KB5046616",
+          "build_after_update": "20348.2849",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2024-12",
+          "availability_date": "2024-12-10",
+          "kb_id": "KB5048654",
+          "build_after_update": "20348.2966",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-01",
+          "availability_date": "2025-01-14",
+          "kb_id": "KB5049983",
+          "build_after_update": "20348.3091",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2025-02",
+          "availability_date": "2025-02-11",
+          "kb_id": "KB5051979",
+          "build_after_update": "20348.3207",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-03",
+          "availability_date": "2025-03-11",
+          "kb_id": "KB5053603",
+          "build_after_update": "20348.3328",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-04",
+          "availability_date": "2025-04-08",
+          "kb_id": "KB5055526",
+          "build_after_update": "20348.3453",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2025-05",
+          "availability_date": "2025-05-13",
+          "kb_id": "KB5058385",
+          "build_after_update": "20348.3692",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-06",
+          "availability_date": "2025-06-10",
+          "kb_id": "KB5060526",
+          "build_after_update": "20348.3807",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-07",
+          "availability_date": "2025-07-08",
+          "kb_id": "KB5062572",
+          "build_after_update": "20348.3932",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2025-08",
+          "availability_date": "2025-08-12",
+          "kb_id": "KB5063880",
+          "build_after_update": "20348.4052",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-09",
+          "availability_date": "2025-09-09",
+          "kb_id": "KB5065432",
+          "build_after_update": "20348.4171",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-10",
+          "availability_date": "2025-10-14",
+          "kb_id": "KB5066782",
+          "build_after_update": "20348.4294",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2025-11",
+          "availability_date": "2025-11-11",
+          "kb_id": "KB5068787",
+          "build_after_update": "20348.4405",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2025-12",
+          "availability_date": "2025-12-09",
+          "kb_id": "KB5071547",
+          "build_after_update": "20348.4529",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2026-01",
+          "availability_date": "2026-01-13",
+          "kb_id": "KB5073457",
+          "build_after_update": "20348.4648",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2026-02",
+          "availability_date": "2026-02-10",
+          "kb_id": "KB5075906",
+          "build_after_update": "20348.4773",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2026-03",
+          "availability_date": "2026-03-10",
+          "kb_id": "KB5078766",
+          "build_after_update": "20348.4893",
+          "is_hotpatch_baseline_month": false
+        },
+        {
+          "year_month": "2026-04",
+          "availability_date": "2026-04-14",
+          "kb_id": "KB5082142",
+          "build_after_update": "20348.5020",
+          "is_hotpatch_baseline_month": true
+        },
+        {
+          "year_month": "2026-05",
+          "availability_date": "2026-05-12",
+          "kb_id": "KB5087545",
+          "build_after_update": "20348.5139",
+          "is_hotpatch_baseline_month": false
+        }
+      ]
+    }
+  }
+}

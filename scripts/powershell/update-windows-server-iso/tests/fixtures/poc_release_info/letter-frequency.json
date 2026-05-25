@@ -1,0 +1,64 @@
+{
+  "Server2025": {
+    "total_rows": 30,
+    "letters": {
+      "B": 19,
+      "OOB": 10,
+      "A": 1
+    },
+    "letter_share_pct": {
+      "B": 63.3,
+      "OOB": 33.3,
+      "A": 3.3
+    }
+  },
+  "Server2022": {
+    "total_rows": 89,
+    "letters": {
+      "B": 57,
+      "OOB": 17,
+      "C": 15
+    },
+    "letter_share_pct": {
+      "B": 64.0,
+      "OOB": 19.1,
+      "C": 16.9
+    }
+  },
+  "Server2019": {
+    "total_rows": 165,
+    "letters": {
+      "B": 92,
+      "C": 36,
+      "OOB": 31,
+      "D": 5,
+      "A": 1
+    },
+    "letter_share_pct": {
+      "B": 55.8,
+      "OOB": 18.8,
+      "C": 21.8,
+      "D": 3.0,
+      "A": 0.6
+    }
+  },
+  "Server2016": {
+    "total_rows": 187,
+    "letters": {
+      "B": 118,
+      "OOB": 32,
+      "C": 32,
+      "D": 3,
+      "E": 1,
+      "A": 1
+    },
+    "letter_share_pct": {
+      "B": 63.1,
+      "OOB": 17.1,
+      "C": 17.1,
+      "D": 1.6,
+      "E": 0.5,
+      "A": 0.5
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "fetched_at": "2026-05-25T15:21:53.533509+00:00",
+  "url": "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info?accept=text/markdown",
+  "user_agent": "ai-generated-artifacts/poc-online-patch-metadata (+https://github.com/usui-tk/ai-generated-artifacts)",
+  "byte_count": 68360,
+  "response_headers": {
+    "content-type": "text/markdown; charset=utf-8",
+    "content-length": "68360",
+    "etag": "\"A1iFzEM7DCftMo99jLkb0IHlCOM=\"",
+    "last-modified": "Wed, 13 May 2026 02:33:48 GMT",
+    "cache-control": "public, max-age=600"
+  }
+}

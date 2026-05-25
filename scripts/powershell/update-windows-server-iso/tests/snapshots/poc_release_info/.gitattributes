@@ -1,0 +1,7 @@
+# Snapshots are bit-perfect copies of Microsoft Learn responses.
+# Preserve the original CRLF line endings as returned by the server;
+# do not normalise them. This is intentional -- it lets us diff
+# snapshots from different fetch dates to detect Microsoft-side
+# format changes (whitespace-only diffs included).
+*.md  -text
+*.html -text
