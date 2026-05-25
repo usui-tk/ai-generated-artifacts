@@ -61,11 +61,14 @@ jobs:
       run:
         working-directory: scripts/python/powershell-static-analyzer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.x'
+          # Pin to 3.12 (matches Stage 1 rationale). The psa.py self-test
+          # suite (test_psa_rules.py) has not been validated against the
+          # CPython 3.14 series that '3.x' currently resolves to.
+          python-version: '3.12'
 
       - name: '[setup] Install pytest'
         run: |
@@ -119,7 +122,7 @@ jobs:
 
       - name: '[Artifacts] Upload logs'
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: psa-py-${{ github.run_id }}
           path: |
