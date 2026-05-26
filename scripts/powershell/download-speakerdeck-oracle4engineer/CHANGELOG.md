@@ -15,8 +15,100 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
-(No changes pending; all CI-only updates listed below have been
-released as part of `[r27]`.)
+(No changes pending.)
+
+## [r28] — 2026-05-27 — `cross-repo-shared-utility-canon-write-caution`
+
+This release adopts the **5-way cross-repo shared utility canon** that
+spans this script and the four AMD-family scripts in the sibling
+repository [`usui-tk/Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer).
+28 helper functions are now byte-identical between the SpeakerDeck
+script and all four AMD scripts (up from 5 prior to the release). The
+bidirectional best-of-both pass also renamed `Write-Warn` (this script)
+and `Write-Warn2` (AMD canon) to a unified `Write-Caution`.
+
+### Cross-repo coordination
+
+The matching AMD release is **Chipset r86 / Graphics r52 / BthPan r34 /
+NPU r30** (same `cross-repo-shared-utility-canon-write-caution` tag),
+committed to the sibling repo separately.
+
+### Function changes
+
+**Function rename: `Write-Warn` → `Write-Caution`** (47 callsites + 1
+definition rewritten). The new name avoids the visual / autocomplete
+collision with the PowerShell built-in `Write-Warning` cmdlet that the
+old name had, matches the noun-form convention of the other one-line
+helpers (`Write-Ok` / `Write-Fail` / `Write-Skip` / `Write-Step`), and
+semantically matches the `[!]` marker's "operator must take notice,
+processing continues" intent.
+
+**`Write-Detail` added** (1 definition, 0 callsites at this release).
+The 5-way canon includes `Write-Detail` as a no-marker continuation-line
+helper that the AMD scripts use heavily for the multi-row
+`Show-PowerShellEnvironment` / `Show-OperatingSystemDetail` /
+`Show-SecureBootBaselineSnapshot` tables. The SpeakerDeck script does
+not currently emit table-style output, but the helper is added as a
+5-way byte-identical placeholder so a future SpeakerDeck change that
+adopts table-style output can immediately use it without re-importing.
+
+**Best-of-both function uplifts** — 18 functions changed:
+
+- **SpeakerDeck-canon retained / promoted to the AMD repo** (where the
+  SpeakerDeck implementation was the better one): `Get-PhaseElapsedTag`
+  (single-quote comment convention), `_LogLine` (column-12 width with
+  format reused on the empty-tag branch), `Format-Elapsed` (zero-padded
+  `'{0}h{1:D2}m{2:D2}s'` form with usage-example comment),
+  `Write-PhaseHeader` (Mandatory + typed param block + format width),
+  `Assert-PowerShellCompatibility` (richer `.SYNOPSIS` / `.DESCRIPTION`
+  docstring), `Start-DebugTrace` (extended Context example),
+  `Format-DebugFailure` (added `ElapsedMs` + `PhaseId` fields).
+- **AMD-canon adopted into this script**: `Set-ConsoleUtf8` (richer
+  SPEC cross-reference comments), `Enable-AutoExportOnPhaseFailure`
+  (multi-line param block per SPEC §A.x convention),
+  `Enable-DebugTraceFileOutput` (minor comment polish),
+  `Export-DebugTraceJson` (richer error handling),
+  `Stop-DebugTrace`, `_DebugTrace_RetireFrame`,
+  `_DebugTrace_WriteJsonlLine`, `Write-DebugFailureReport`.
+- **Hybrid (best-of-both merged)**:
+  - `Set-Tls12` — TLS 1.2 baseline + best-effort TLS 1.3 / 1.1 / 1.0
+    additions wrapped in individual `try/catch` blocks. Combines the
+    SpeakerDeck canon's "tolerate legacy hosts" posture with the AMD
+    canon's "prefer modern TLS" posture.
+  - `Write-PhaseFooter` — adopts the AMD canon's four-state status
+    ValidateSet (`'done','cached','skipped','failed'`) while keeping
+    the SpeakerDeck-side Mandatory + typed param block + format-width
+    specifier. The four-state set adds the `'cached'` status (used by
+    the AMD scripts for phases that are no-ops because the target state
+    is already met); this script does not currently emit `'cached'`
+    but the ValidateSet now accepts it.
+- **One-line helpers (`Write-Ok` / `Write-Fail` / `Write-Skip` /
+  `Write-Step` / `Write-Caution`)** — `[string]$m` param replaced
+  with `$Msg` for AMD-convention alignment.
+
+### Per-repo carve-out (NOT 5-way)
+
+**`Show-PowerShellEnvironment` is intentionally NOT 5-way byte-identical.**
+The AMD canon implementation references AMD-driver-specific helpers
+(`Get-BootSigningEnvironment`, `Show-BootSigningEnvironment`,
+`Show-DriverInstallationOrderNotice`) that do not exist in this script.
+This script keeps its own simpler `Show-PowerShellEnvironment`
+implementation that omits the driver-specific sections; the two
+implementations are semantically equivalent for the parts they share.
+This decision is documented in the sibling repo's SPEC §A.11.7
+"Per-repo differences explicitly carved out".
+
+### Release-wide changes
+
+- `$Script:ScriptVersion`: `speakerdeck-2026.05.25-r27` → `speakerdeck-2026.05.27-r28`.
+- `$Script:ScriptTag`: `psa-py-v4-llm-governance-baseline` → `cross-repo-shared-utility-canon-write-caution`.
+
+### Verification
+
+The script passes `psa.py 4.1.0` with `0 errors / 0 warnings / 0 info`
+using the project `.psa.config.json` (PSAP0003 / PSAP0004 / PSAP0005
+strict mode enabled, PSA6003 disabled per the documented plural-noun
+exception).
 
 ## [r27] — 2026-05-25 — `psa-py-v4-llm-governance-baseline`
 

@@ -229,49 +229,55 @@ $ErrorActionPreference = 'Stop'
 # can continue without the optimisation.
 
 function Set-ConsoleUtf8 {
-    <#
-    .SYNOPSIS
-        Force UTF-8 for console input, output, and pipeline encoding.
-    .DESCRIPTION
-        On a ja-JP Windows PowerShell 5.1 host, the default console code
-        page is cp932 (Shift-JIS). When external tools that write UTF-8
-        to stdout are captured via "& tool | Out-String", PS decodes the
-        bytes using [Console]::OutputEncoding; if that is cp932 and the
-        tool wrote UTF-8, every multibyte character is mojibaked. Set
-        all three encodings (Console.OutputEncoding, Console.InputEncoding,
-        $OutputEncoding) to UTF-8 for consistent round-trip behaviour.
-
-        Wrapped in try/catch because some pinned-redirected console
-        hosts (e.g. CI runners writing to a file with no real console)
-        may throw on the assignment; in that case the original encoding
-        is preserved and we continue without UTF-8 enforcement.
-    #>
-    try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { } # psa-disable-line PSA3004 -- best-effort host config; no real console may exist
-    try { [Console]::InputEncoding  = [System.Text.Encoding]::UTF8 } catch { } # psa-disable-line PSA3004 -- best-effort host config; no real console may exist
+    # ====================================================================
+    # SPEC A.5 / D.5: enforce UTF-8 console encoding so ja-JP Japanese
+    # log strings (and external tool output such as CiTool.exe) render
+    # correctly instead of mojibake in cp932 (Shift-JIS). See SPEC D.16
+    # for the root-cause analysis (CiTool.exe writes UTF-8 stdout).
+    # ====================================================================
+    # On ja-JP Windows, the console defaults to cp932 (Shift-JIS). When
+    # external programs that write UTF-8 to stdout (CiTool.exe, modern
+    # signtool, etc.) are captured via "& tool... | Out-String", PS
+    # decodes the bytes using [Console]::OutputEncoding. If that is
+    # cp932 and the tool wrote UTF-8, every multibyte character becomes
+    # mojibake (e.g. "処理が成功しました" -> "蜃ｦ逅・・謌仙粥縺励∪縺励◆").
+    #
+    # The fix is to set ALL three encodings:
+    #   - [Console]::OutputEncoding: how PS decodes external tool stdout
+    #                                  AND how Write-Host writes to console
+    #   - [Console]::InputEncoding: how external tools see piped stdin
+    #   - $OutputEncoding: how PS writes piped data to external
+    #                                  tools (e.g. "$json | tool.exe")
+    # All three must be UTF-8 for consistent round-trip behaviour.
+    #
+    # This is wrapped in try/catch because some pinned-redirected
+    # console hosts (e.g. CI runners writing to a file with no real
+    # console) may throw on the assignment; in that case the original
+    # encoding is preserved and we continue without UTF-8 enforcement.
+    try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { } # psa-disable-line PSA3004 -- intentional best-effort cleanup; no error to surface
+    try { [Console]::InputEncoding  = [System.Text.Encoding]::UTF8 } catch { } # psa-disable-line PSA3004 -- intentional best-effort cleanup; no error to surface
     try { Set-Variable -Name OutputEncoding -Scope Global -Value ([System.Text.Encoding]::UTF8) -ErrorAction SilentlyContinue } catch { } # psa-disable-line PSA3004 -- intentional best-effort cleanup; no error to surface
 }
 
 function Set-Tls12 {
-    <#
-    .SYNOPSIS
-        Enable TLS 1.2 (and weaker fallbacks) for outbound HTTPS calls.
-    .DESCRIPTION
-        Required on some Windows PowerShell 5.1 hosts where the default
-        SecurityProtocol is still Ssl3 + Tls (1.0). Speaker Deck and
-        files.speakerdeck.com both negotiate TLS 1.2+, so the default
-        on older hosts results in a handshake failure unless this is
-        set. Tls11 and Tls (1.0) are kept in the bitmask as a
-        defensive fallback for very old environments; modern hosts
-        will negotiate Tls12.
-    #>
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = `
-            [Net.SecurityProtocolType]::Tls12 -bor `
-            [Net.SecurityProtocolType]::Tls11 -bor `
-            [Net.SecurityProtocolType]::Tls
-    } catch { } # psa-disable-line PSA3004 -- older PS hosts may lack newer enum values; ignore silently
+    # ====================================================================
+    # Enable TLS for outbound HTTPS calls with best-effort multi-version
+    # fallback. Tls12 is the baseline (required by most modern endpoints
+    # including AMD/Microsoft download servers and Speaker Deck CDN).
+    # Tls13 is added when the running .NET supports it (Framework 4.8+,
+    # PowerShell 7+, WS2022 / WS2025). Tls11 and Tls (1.0) are added as
+    # a defensive fallback for very old environments (WS2016 / WS2019
+    # with stock .NET); modern hosts will negotiate Tls13/Tls12 and the
+    # legacy bits are ignored by the server. Each enum lookup is wrapped
+    # in try/catch because older .NET runtimes raise an enum-value error
+    # for protocols they don't recognise.
+    # ====================================================================
+    $protos = [Net.SecurityProtocolType]::Tls12
+    try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls13 } catch { } # psa-disable-line PSA3004 -- Tls13 enum may not exist on older .NET
+    try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls11 } catch { } # psa-disable-line PSA3004 -- defensive legacy fallback for very old environments
+    try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls   } catch { } # psa-disable-line PSA3004 -- defensive legacy fallback for very old environments
+    [Net.ServicePointManager]::SecurityProtocol = $protos
 }
-
 # Apply host configuration immediately so every subsequent write goes
 # through the right encoding and every HTTPS call uses TLS 1.2.
 Set-ConsoleUtf8
@@ -391,8 +397,8 @@ function Initialize-RuntimeDirectories {
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'speakerdeck-2026.05.25-r27'
-$Script:ScriptTag     = 'psa-py-v4-llm-governance-baseline'
+$Script:ScriptVersion = 'speakerdeck-2026.05.27-r28'
+$Script:ScriptTag     = 'cross-repo-shared-utility-canon-write-caution'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -568,7 +574,7 @@ function _DebugTrace_WriteJsonlLine {
     } catch {
         # If JSON conversion fails (e.g. circular reference somewhere),
         # fall back to a minimal hand-written line so we still record
-        # something.
+        # something. Increment error counter and stash last error.
         $Script:DebugTraceJsonlErrorCount++
         $Script:DebugTraceJsonlLastError = $_.Exception.Message
         $kind = if ($EventObject.PSObject.Properties['kind']) { $EventObject.kind } else { 'unknown' }
@@ -623,8 +629,8 @@ function _DebugTrace_RetireFrame {
     param([Parameter(Mandatory)] $Frame, [Parameter(Mandatory)] [string]$Outcome)
 
     if (-not $Frame.PSObject.Properties['Outcome'] -or -not $Frame.Outcome) {
-        $Frame | Add-Member -MemberType NoteProperty -Name 'Outcome'    -Value $Outcome -Force
-        $Frame | Add-Member -MemberType NoteProperty -Name 'EndedAt'    -Value (Get-Date) -Force
+        $Frame | Add-Member -MemberType NoteProperty -Name 'Outcome'   -Value $Outcome -Force
+        $Frame | Add-Member -MemberType NoteProperty -Name 'EndedAt'   -Value (Get-Date) -Force
         $durationMs = [int]((Get-Date) - $Frame.StartTime).TotalMilliseconds
         $Frame | Add-Member -MemberType NoteProperty -Name 'DurationMs' -Value $durationMs -Force
     }
@@ -753,8 +759,8 @@ function Stop-DebugTrace {
     if ($frame.PhaseId -and $Script:DebugTracePhaseRegistry.ContainsKey($frame.PhaseId)) {
         $reg = $Script:DebugTracePhaseRegistry[$frame.PhaseId]
         $reg.EndedAt = Get-Date
-        # Don't overwrite an already-set outcome (e.g. 'failure' set by
-        # Write-DebugFailureReport).
+        # Don't overwrite an already-set outcome (e.g. 'failure' set
+        # by Write-DebugFailureReport).
         if ($reg.Outcome -eq 'in-progress') {
             $reg.Outcome = $Outcome
         }
@@ -763,13 +769,13 @@ function Stop-DebugTrace {
     _DebugTrace_RetireFrame -Frame $frame -Outcome $Outcome
 
     _DebugTrace_WriteJsonlLine ([pscustomobject]@{
-        ts      = _DebugTrace_Now
-        kind    = 'frame.close'
-        ctx     = $frame.Context
-        outcome = $frame.Outcome
-        durMs   = $frame.DurationMs
-        steps   = $frame.Steps.Count
-        phase   = $frame.PhaseId
+        ts       = _DebugTrace_Now
+        kind     = 'frame.close'
+        ctx      = $frame.Context
+        outcome  = $frame.Outcome
+        durMs    = $frame.DurationMs
+        steps    = $frame.Steps.Count
+        phase    = $frame.PhaseId
     })
 }
 
@@ -824,7 +830,7 @@ function Format-DebugFailure {
 function Write-DebugFailureReport {
     <#
     .SYNOPSIS
-        Emit a formatted failure report via Write-Warn + log the
+        Emit a formatted failure report via Write-Caution + log the
         failure event to JSONL. Call from a catch block. Also marks
         the active phase's registry entry as 'failure' if applicable.
     .PARAMETER ErrorRecord
@@ -850,29 +856,29 @@ function Write-DebugFailureReport {
         $reg.FailureRef = $r
     }
 
-    Write-Warn ("{0}: FAILED at step '{1}' (elapsed {2:F2}s)" -f $r.Context, $r.FailedStep, $r.Elapsed.TotalSeconds)
-    Write-Warn ("  ExType   : {0}" -f $r.ExType)
-    Write-Warn ("  Message  : {0}" -f $r.ExMessage)
+    Write-Caution ("{0}: FAILED at step '{1}' (elapsed {2:F2}s)" -f $r.Context, $r.FailedStep, $r.Elapsed.TotalSeconds)
+    Write-Caution ("  ExType   : {0}" -f $r.ExType)
+    Write-Caution ("  Message  : {0}" -f $r.ExMessage)
     if ($r.InnerType) {
-        Write-Warn ("  Inner    : {0} - {1}" -f $r.InnerType, $r.InnerMessage)
+        Write-Caution ("  Inner    : {0} - {1}" -f $r.InnerType, $r.InnerMessage)
     }
     if ($r.FullyQualifiedId) {
-        Write-Warn ("  FQErrId  : {0}" -f $r.FullyQualifiedId)
+        Write-Caution ("  FQErrId  : {0}" -f $r.FullyQualifiedId)
     }
     if ($r.ScriptStackTrace) {
         $stackLines = $r.ScriptStackTrace -split "`r?`n"
-        Write-Warn ("  Stack    : {0}" -f $stackLines[0])
+        Write-Caution ("  Stack    : {0}" -f $stackLines[0])
         $maxStack = [Math]::Min(3, $stackLines.Count)
         for ($i = 1; $i -lt $maxStack; $i++) {
-            Write-Warn ("             {0}" -f $stackLines[$i])
+            Write-Caution ("             {0}" -f $stackLines[$i])
         }
     }
     if ($IncludeStepHistory -and $r.StepHistory.Count -gt 0) {
-        Write-Warn ("  Steps    : {0} recorded" -f $r.StepHistory.Count)
+        Write-Caution ("  Steps    : {0} recorded" -f $r.StepHistory.Count)
         $firstAt = $r.StepHistory[0].At
         foreach ($h in $r.StepHistory) {
             $rel = ($h.At - $firstAt).TotalMilliseconds
-            Write-Warn ('    +{0,7:F0}ms  {1}' -f $rel, $h.Step)
+            Write-Caution ('    +{0,7:F0}ms  {1}' -f $rel, $h.Step)
         }
     }
 
@@ -898,10 +904,10 @@ function Write-DebugFailureReport {
             $tag = if ($r.PhaseId) { $r.PhaseId } else { 'top' }
             $exportPath = Join-Path $Script:DebugTraceAutoExportDir ("debugtrace_export_{0}_{1}.json" -f $tag, $ts)
             Export-DebugTraceJson -Path $exportPath -IncludeEvents:$false | Out-Null
-            Write-Warn ("  TraceJson: {0}" -f $exportPath)
+            Write-Caution ("  TraceJson: {0}" -f $exportPath)
         } catch {
             # Don't let auto-export failures hide the original error.
-            Write-Warn ("  TraceJson: auto-export failed: {0}" -f $_.Exception.Message)
+            Write-Caution ("  TraceJson: auto-export failed: {0}" -f $_.Exception.Message)
         }
     }
 }
@@ -911,9 +917,9 @@ function Write-DebugFailureReport {
 function Enable-DebugTraceFileOutput {
     <#
     .SYNOPSIS
-        Activate the JSONL writer. Typically called from the main
-        try-block once the logs directory exists. Flushes the pre-
-        activation buffer into the file in one go.
+        Activate the JSONL writer. Typically called by P01 once the
+        workspace logs directory exists. Flushes the pre-activation
+        buffer into the file in one go.
     .PARAMETER Directory
         Target directory. The file is named 'debugtrace.jsonl' inside
         this dir. If a same-named file exists, it is appended.
@@ -936,15 +942,13 @@ function Enable-DebugTraceFileOutput {
 
         # Probe write a header line so the file exists and is writable.
         # If a same-name lock collision occurs, fall back to per-pid filename.
-        # Renamed 'host' to 'hostName' defensively to avoid collision with
-        # the $Host auto-variable on certain PS 5.1 parser contexts.
         $headerObj = [pscustomobject]@{
             ts        = _DebugTrace_Now
             kind      = 'file.open'
             scriptVer = $Script:ScriptVersion
             scriptSha = $Script:ScriptHash
-            procId    = $PID
-            hostName  = $Host.Name
+            pid       = $PID
+            host      = $Host.Name
             psVer     = $PSVersionTable.PSVersion.ToString()
             culture   = (Get-Culture).Name
         }
@@ -967,6 +971,7 @@ function Enable-DebugTraceFileOutput {
             $Script:DebugTraceJsonlBuffer.Clear()
             try {
                 $blob = ($bufferedLines -join "`r`n") + "`r`n"
+                # UTF-8 with BOM (see _DebugTrace_WriteJsonlLine comment).
                 [System.IO.File]::AppendAllText($path, $blob, [System.Text.UTF8Encoding]::new($true))
                 $Script:DebugTraceJsonlWriteCount += $bufferedLines.Count
             } catch {
@@ -984,7 +989,7 @@ function Enable-DebugTraceFileOutput {
         Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action {
             try {
                 if ($Script:DebugTraceJsonlEnabled -and $Script:DebugTraceJsonlPath) {
-                    $closeEvent = '{{"ts":"{0}","kind":"file.close","procId":{1}}}' -f `
+                    $closeEvent = '{{"ts":"{0}","kind":"file.close","pid":{1}}}' -f `
                         (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ'), $PID
                     [System.IO.File]::AppendAllText(
                         $Script:DebugTraceJsonlPath,
@@ -1056,7 +1061,9 @@ function Enable-AutoExportOnPhaseFailure {
         Where to write debugtrace_export_<phaseId>_<timestamp>.json files.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string]$OutputDirectory)
+    param(
+        [Parameter(Mandatory)] [string]$OutputDirectory
+    )
     $Script:DebugTraceAutoExportEnabled = $true
     $Script:DebugTraceAutoExportDir     = $OutputDirectory
 }
@@ -1086,13 +1093,24 @@ function Export-DebugTraceJson {
         [switch]$Compress
     )
 
-    # NOTE: Pre-compute every hashtable value into a local variable so
-    # no `if/else` expression appears inside [pscustomobject]@{...}; this
-    # avoids an AmbiguousParameterSet failure observed on certain PS 5.1
-    # ja-JP hosts. Also: instrumented with this section's own
-    # Start-DebugTrace / Set-DebugStep so any future failure here
-    # surfaces the failing step in the JSONL stream even if the JSON
-    # export itself can't be written.
+    # Refactor for robustness on PS 5.1 ja-JP. The previous
+    # implementation used inline `if/else` expressions as hashtable values
+    # and a property named `host` (which collides with the PS auto-
+    # variable name in some parser contexts). User report on
+    # 2026-05-17 showed AmbiguousParameterSet failure when
+    # -ExportTraceOnExit triggered this function from the finally block.
+    # This refactor:
+    #   1. Pre-computes every hashtable value into a local variable so
+    #      no `if/else` expression appears inside [pscustomobject]@{...}.
+    #   2. Renames the `host` key to `hostInfo` defensively.
+    #   3. Uses [Parameter(Mandatory=$true)] (explicit boolean) instead
+    #      of bare [Parameter(Mandatory)] which is normally equivalent
+    #      but has been observed to fail parameter-set resolution on
+    #      some PS 5.1 builds.
+    #   4. Adds Section 1b's Start-DebugTrace / Set-DebugStep instrumen-
+    #      tation so any future failure surfaces the failing step name
+    #      in the JSONL stream even if the JSON export itself can't be
+    #      written.
     Start-DebugTrace -Context 'Export-DebugTraceJson'
     try {
         # ------ Section A: active frames (in-progress at snapshot time) -----
@@ -1198,9 +1216,13 @@ function Export-DebugTraceJson {
                     if ([string]::IsNullOrWhiteSpace($l)) { continue }
                     try {
                         $events += (ConvertFrom-Json -InputObject $l -ErrorAction Stop)
-                    } catch { } # psa-disable-line PSA3004 -- skip lines that don't parse (malformed truncation)
+                    } catch {
+                        # Skip lines that don't parse (malformed truncation).
+                    }
                 }
-            } catch { } # psa-disable-line PSA3004 -- ignore file-read errors; events stays empty
+            } catch {
+                # Ignore file-read errors; events stays empty.
+            }
         }
         $eventsToSerialize = @()
         $eventCount = -1
@@ -1212,7 +1234,9 @@ function Export-DebugTraceJson {
         # ------ Section E: host + script metadata (pre-computed) ------------
         Set-DebugStep 'compose host + script metadata'
         # Pre-compute the host metadata as a standalone variable so no
-        # inline expression appears in the outer hashtable.
+        # inline expression appears in the outer hashtable. Renamed key
+        # from 'host' to 'hostInfo' to avoid any chance of collision
+        # with the $Host auto-variable on PS 5.1.
         $hostInfo = [pscustomobject]@{
             psVersion   = $PSVersionTable.PSVersion.ToString()
             psEdition   = $PSVersionTable.PSEdition
@@ -1257,7 +1281,8 @@ function Export-DebugTraceJson {
         # `Split-Path -LiteralPath $Path -Parent`. On PS 5.1, those two
         # parameters belong to mutually-exclusive parameter sets
         # (LiteralPathSet vs ParentSet), which causes
-        # AmbiguousParameterSet at runtime.
+        # AmbiguousParameterSet at runtime. The.NET method has no such
+        # constraint and behaves identically.
         $parentDir = [System.IO.Path]::GetDirectoryName($Path)
         if ($parentDir -and -not (Test-Path -LiteralPath $parentDir)) {
             New-Item -ItemType Directory -Path $parentDir -Force -ErrorAction SilentlyContinue | Out-Null
@@ -1265,12 +1290,15 @@ function Export-DebugTraceJson {
 
         # ------ Section H: serialize and write to disk ---------------------
         Set-DebugStep 'ConvertTo-Json + write to disk'
+        # Render with the configured max depth so deeply nested objects
+        # (especially ExInner chains and step details) never get clipped.
         if ($Compress) {
             $json = $snapshot | ConvertTo-Json -Depth $Script:DebugTraceJsonDepth -Compress
         } else {
             $json = $snapshot | ConvertTo-Json -Depth $Script:DebugTraceJsonDepth
         }
-        # UTF-8 with BOM so the file is correctly read on PS 5.1 ja-JP.
+        # UTF-8 with BOM so the file is correctly read on PS 5.1 ja-JP
+        # via `Get-Content` (default) without `-Encoding UTF8`.
         [System.IO.File]::WriteAllText($Path, $json, [System.Text.UTF8Encoding]::new($true))
 
         Set-DebugStep 'return result path'
@@ -1309,14 +1337,12 @@ function Format-Elapsed {
         return ('{0}h{1:D2}m{2:D2}s' -f $h, $m, $s)
     }
 }
-
 function Get-PhaseElapsedTag {
     # Returns elapsed-since-current-phase-start as '[+X.XXs]' or empty.
     if ($null -eq $Script:CurrentPhaseStart) { return '' }
     $span = (Get-Date) - $Script:CurrentPhaseStart
     return ('[+{0}]' -f (Format-Elapsed $span))
 }
-
 function _LogLine {
     # Internal: emits '[HH:mm:ss] [+X.XXs]   [marker] message'
     param([string]$Marker, [string]$Msg, [string]$Color)
@@ -1328,7 +1354,6 @@ function _LogLine {
         Write-Host ("[{0}] {1,-12} {2} {3}" -f $ts, '', $Marker, $Msg) -ForegroundColor $Color
     }
 }
-
 # Public log helpers. Names are kept compatible with the prior code so
 # all existing callsites continue to work; only the rendering changed.
 #
@@ -1341,12 +1366,46 @@ function _LogLine {
 #
 # Canonical names (no duplicates, no trailing-digit suffixes). None of
 # these collide with built-in cmdlets - PowerShell has Write-Warning
-# and Write-Information but not Write-Warn / Write-Skip / Write-Step.
-function Write-Step  { param([string]$m) _LogLine '[*]' $m 'Cyan'     }
-function Write-Ok    { param([string]$m) _LogLine '[+]' $m 'Green'    }
-function Write-Warn  { param([string]$m) _LogLine '[!]' $m 'Yellow'   }
-function Write-Fail  { param([string]$m) _LogLine '[X]' $m 'Red'      }
-function Write-Skip  { param([string]$m) _LogLine '[~]' $m 'DarkGray' }
+# and Write-Information but not Write-Caution / Write-Skip / Write-Step.
+function Write-Step  { param($Msg) _LogLine '[*]' $Msg 'Cyan'     }
+function Write-Ok    { param($Msg) _LogLine '[+]' $Msg 'Green'    }
+function Write-Caution { param($Msg) _LogLine '[!]' $Msg 'Yellow'   }
+function Write-Fail  { param($Msg) _LogLine '[X]' $Msg 'Red'      }
+function Write-Skip  { param($Msg) _LogLine '[~]' $Msg 'DarkGray' }
+
+function Write-Detail {
+    # ====================================================================
+    # Continuation / detail line for a preceding marker line, or a row
+    # inside a section banner block (Show-PowerShellEnvironment,
+    # Show-OperatingSystemDetail, Show-SecureBootBaselineSnapshot, etc.).
+    # Renders 4-space-indented plain text with NO timestamp or marker
+    # prefix, so it visually attaches to the preceding context.
+    #
+    # ---- Introduced to replace bare `Write-Host " XXX"` calls ----
+    # Previously the scripts emitted ~100 bare Write-Host calls with a
+    # hard-coded 4-space indent. Routing those through a single helper
+    # makes future column-layout tweaks possible without touching every
+    # call site, and gives the SPEC-mandated marker pattern a single
+    # documented exception ("continuation row of a marker line").
+    #
+    # The 4-space indent is intentional and matches the historical
+    # column convention used inside section-banner tables.
+    #
+    # -NoNewline mirrors Write-Host's switch and is used by two-part
+    # lines that compose a label-then-value pair (e.g. P08's
+    # "-> Selected /os:" + colored value).
+    # ====================================================================
+    param(
+        [Parameter(Position=0)][string]$Msg,
+        [ConsoleColor]$Color = [ConsoleColor]::Gray,
+        [switch]$NoNewline
+    )
+    if ($NoNewline) {
+        Write-Host ("    {0}" -f $Msg) -ForegroundColor $Color -NoNewline
+    } else {
+        Write-Host ("    {0}" -f $Msg) -ForegroundColor $Color
+    }
+}
 
 function Write-SubSection {
     # Lightweight section break inside a phase (e.g. [Step A]/[Step B]).
@@ -1360,7 +1419,8 @@ function Write-PhaseHeader {
     # Prints a magenta banner that opens a phase. Records phase start
     # time so subsequent log lines can show '[+elapsed]'.
     #
-        #   Id    : short identifier (e.g. 'P01', 'P06', etc; always two digits)
+    # Params:
+    #   Id    : short identifier (e.g. 'P01', 'P06', etc; always two digits)
     #   Name  : human-readable phase name (e.g. 'Listing-Collection')
     #   Group : phase group (e.g. 'Setup', 'Scan', 'Fetch', 'Report')
     param(
@@ -1378,22 +1438,28 @@ function Write-PhaseHeader {
     Write-Host (' script: {0}' -f $Script:ScriptShortTag) -ForegroundColor DarkGray
     Write-Host $line -ForegroundColor Magenta
 }
-
 function Write-PhaseFooter {
     # Closes a phase started by Write-PhaseHeader. Records the elapsed
-    # duration in $Script:PhaseTimings (used by Show-PhaseSummary).
+    # duration in $Script:PhaseTimings (used by run-summary helpers).
     #
     # Idempotent: a second call with the same Id is ignored, so wrapping
     # try/finally blocks do not double-count.
+    #
+    # Status values:
+    #   done    - phase completed successfully
+    #   cached  - phase was a no-op because the target state was already met
+    #   skipped - phase was intentionally skipped (e.g. -OnlyPhases filter)
+    #   failed  - phase threw an exception
     param(
         [Parameter(Mandatory)] [string]$Id,
-        [Parameter(Mandatory)] [ValidateSet('done','skipped','failed')] [string]$Status
+        [Parameter(Mandatory)] [ValidateSet('done','cached','skipped','failed')] [string]$Status
     )
     foreach ($t in $Script:PhaseTimings) {
         if ($t.Id -eq $Id) { return }
     }
     $color = switch ($Status) {
         'done'    { 'Green' }
+        'cached'  { 'DarkGray' }
         'skipped' { 'DarkGray' }
         'failed'  { 'Red' }
     }
@@ -1409,10 +1475,11 @@ function Write-PhaseFooter {
 
     Write-Host (' PHASE {0,-4} -> {1,-7}  elapsed: {2}' -f $Id, $Status.ToUpper(), $elapsedStr) -ForegroundColor $color
 
+    # Reset so any stray Write-Step/Ok between phases doesn't show a
+    # misleading [+X.XXs] tag inherited from the previous phase.
     $Script:CurrentPhaseStart = $null
     $Script:CurrentPhaseId    = $null
 }
-
 function Show-PhaseSummary {
     # End-of-run summary table, one row per executed phase.
     Write-Host ''
@@ -1794,12 +1861,12 @@ function Invoke-WebRequestWithRetry {
 
             if ($statusCode -eq 429 -or $statusCode -eq 503) {
                 $wait = [Math]::Pow(2, $attempt) * 3
-                Write-Warn "HTTP $statusCode received. Waiting $wait sec then retry ($attempt/$MaxRetries)"
+                Write-Caution "HTTP $statusCode received. Waiting $wait sec then retry ($attempt/$MaxRetries)"
                 Start-Sleep -Seconds $wait
             }
             elseif ($attempt -lt $MaxRetries) {
                 $wait = [Math]::Pow(2, $attempt)
-                Write-Warn "Network error: $($_.Exception.Message). Retrying in $wait sec ($attempt/$MaxRetries)"
+                Write-Caution "Network error: $($_.Exception.Message). Retrying in $wait sec ($attempt/$MaxRetries)"
                 Start-Sleep -Seconds $wait
             }
         }
@@ -2084,7 +2151,7 @@ function Initialize-YearOverrides {
         }
         Write-Ok ("Loaded {0} year override(s) from {1}" -f $Script:YearOverrides.Count, $OverridesPath)
     } catch {
-        Write-Warn ("Failed to read overrides CSV (will treat as empty): {0}" -f $_.Exception.Message)
+        Write-Caution ("Failed to read overrides CSV (will treat as empty): {0}" -f $_.Exception.Message)
         $Script:YearOverrides = @{}
     }
 }
@@ -2646,11 +2713,11 @@ function Test-Environment {
             Write-Ok "LongPathsEnabled = 1 (enabled)"
         } else {
             $result.LongPathsRegistry = "$($regVal.LongPathsEnabled) (disabled)"
-            Write-Warn "LongPathsEnabled = $($regVal.LongPathsEnabled) (disabled)"
+            Write-Caution "LongPathsEnabled = $($regVal.LongPathsEnabled) (disabled)"
         }
     } catch {
         $result.LongPathsRegistry = "not set (default: disabled)"
-        Write-Warn "LongPathsEnabled registry value not set (default: disabled)"
+        Write-Caution "LongPathsEnabled registry value not set (default: disabled)"
     }
 
     # ----- Step B : Real dummy file test -----
@@ -2828,7 +2895,7 @@ function Get-TotalDeckCount {
             }
 
             if (-not $found) {
-                Write-Warn "Could not extract deck count (HTML structure may have changed)"
+                Write-Caution "Could not extract deck count (HTML structure may have changed)"
             }
         }
         catch {
@@ -2962,25 +3029,25 @@ function Get-AllDeckList {
                 try {
                     $diagFile = Join-Path $Script:DiagDir ("speakerdeck_diag_" + $AccountName + "_" + (Get-Date -Format 'yyyyMMddHHmmss') + ".html")
                     Set-Content -Path $diagFile -Value $content -Encoding UTF8
-                    Write-Warn "Page 1 returned 0 decks. HTML structure may have changed."
-                    Write-Warn "Raw HTML saved to: $diagFile"
+                    Write-Caution "Page 1 returned 0 decks. HTML structure may have changed."
+                    Write-Caution "Raw HTML saved to: $diagFile"
 
                     $contentSize  = $content.Length
                     $accountRefs  = ([regex]::Matches($content, [regex]::Escape($AccountName))).Count
                     $accountSlugs = ([regex]::Matches($content, '/' + $accountEsc + '/[a-zA-Z0-9_-]+')).Count
                     $allATags     = ([regex]::Matches($content, '<a\b')).Count
                     $titleAttrs   = ([regex]::Matches($content, '\btitle="')).Count
-                    Write-Warn "  HTML size           : $contentSize chars"
-                    Write-Warn "  '$AccountName' refs : $accountRefs"
-                    Write-Warn "  '/$AccountName/...' : $accountSlugs (potential deck links)"
-                    Write-Warn "  total <a tags       : $allATags"
-                    Write-Warn "  total title= attrs  : $titleAttrs"
+                    Write-Caution "  HTML size           : $contentSize chars"
+                    Write-Caution "  '$AccountName' refs : $accountRefs"
+                    Write-Caution "  '/$AccountName/...' : $accountSlugs (potential deck links)"
+                    Write-Caution "  total <a tags       : $allATags"
+                    Write-Caution "  total title= attrs  : $titleAttrs"
                     if ($accountSlugs -eq 0) {
-                        Write-Warn "  -> Server returned HTML without deck slugs."
-                        Write-Warn "     Likely a bot-detection / UA issue."
+                        Write-Caution "  -> Server returned HTML without deck slugs."
+                        Write-Caution "     Likely a bot-detection / UA issue."
                     } else {
-                        Write-Warn "  -> Deck slugs exist but regex did not match."
-                        Write-Warn "     Inspect the saved HTML to see the new structure."
+                        Write-Caution "  -> Deck slugs exist but regex did not match."
+                        Write-Caution "     Inspect the saved HTML to see the new structure."
                     }
                 } catch { } # psa-disable-line PSA3004 -- diagnostic stats block; failure here must not mask the original parse-failure path
             }
@@ -2988,7 +3055,7 @@ function Get-AllDeckList {
             if ($pageDecks.Count -eq 0) {
                 $consecutiveEmptyPages++
                 if ($consecutiveEmptyPages -ge 2) {
-                    Write-Warn "Two consecutive empty pages -> stopping"
+                    Write-Caution "Two consecutive empty pages -> stopping"
                     $hasNext = $false
                     break
                 }
@@ -3016,7 +3083,7 @@ function Get-AllDeckList {
 
         # Safety guard: more than 100 pages is abnormal
         if ($page -gt 100) {
-            Write-Warn "Page count exceeded 100 - aborting"
+            Write-Caution "Page count exceeded 100 - aborting"
             break
         }
     }
@@ -3542,23 +3609,23 @@ function Invoke-Phase5FilenamePlan {
     # Detail listings only when anomalies exist (keeps normal runs quiet).
     if ($duplicates.Count -gt 0) {
         Write-Host ""
-        Write-Warn ("{0} output paths collide (duplicate filename plan):" -f $duplicates.Count)
+        Write-Caution ("{0} output paths collide (duplicate filename plan):" -f $duplicates.Count)
         # Group by path to show pairs/groups together
         $grouped = $duplicates | Group-Object OutputFullPath
         foreach ($g in $grouped) {
-            Write-Warn ("  {0}" -f $g.Name)
+            Write-Caution ("  {0}" -f $g.Name)
             foreach ($r in $g.Group) {
-                Write-Warn ("    [#{0,4}] {1}" -f $r.Index, $r.Title)
+                Write-Caution ("    [#{0,4}] {1}" -f $r.Index, $r.Title)
             }
         }
     }
     if ($overLimit.Count -gt 0) {
         Write-Host ""
-        Write-Warn ("{0} output paths exceed MAX_PATH ({1}):" -f $overLimit.Count, $MaxFullPathLength)
+        Write-Caution ("{0} output paths exceed MAX_PATH ({1}):" -f $overLimit.Count, $MaxFullPathLength)
         foreach ($r in $overLimit) {
-            Write-Warn ("  [#{0,4}] FullPathLength = {1}  type={2}" -f $r.Index, $r.FullPathLength, $r.OutputType)
+            Write-Caution ("  [#{0,4}] FullPathLength = {1}  type={2}" -f $r.Index, $r.FullPathLength, $r.OutputType)
         }
-        Write-Warn "These items may fail at download time"
+        Write-Caution "These items may fail at download time"
     }
 
     Write-PhaseFooter -Id 'P05' -Status 'done'
@@ -3614,7 +3681,7 @@ function Invoke-Phase6Download {
     Write-Step "Targets: $($downloadable.Count) - initial $InitialConcurrency / max $MaxConcurrency"
 
     if ($downloadable.Count -eq 0) {
-        Write-Warn "No items to download"
+        Write-Caution "No items to download"
         Write-PhaseFooter -Id 'P06' -Status 'skipped'
         return @()
     }
@@ -4188,7 +4255,7 @@ function Invoke-Phase7Reconciliation {
         try {
             $diskFiles = @(Get-ChildItem -LiteralPath $OutputDir -Recurse -File -Force -ErrorAction SilentlyContinue)
         } catch {
-            Write-Warn "Disk scan failed: $($_.Exception.Message)"
+            Write-Caution "Disk scan failed: $($_.Exception.Message)"
         }
     }
     $diskByPath = @{}
@@ -4420,7 +4487,7 @@ function Invoke-Phase7Reconciliation {
     Write-Host ""
     Write-Host "    (* = anomalies requiring investigation if non-zero)"
     if ($anomalyCount -gt 0) {
-        Write-Warn ("Anomalies detected: {0} item(s). Inspect {1} for details." -f $anomalyCount, $finalPath)
+        Write-Caution ("Anomalies detected: {0} item(s). Inspect {1} for details." -f $anomalyCount, $finalPath)
     }
 
     Write-PhaseFooter -Id 'P07' -Status 'done'
@@ -4568,7 +4635,7 @@ function Invoke-Phase8UndatedReclassify {
 
         # Defensive: if the file mysteriously isn't there, skip.
         if (-not (Test-Path -LiteralPath $oldPath)) {
-            Write-Warn ("[{0}] file not on disk, skipping: {1}" -f $p.Index, $oldPath)
+            Write-Caution ("[{0}] file not on disk, skipping: {1}" -f $p.Index, $oldPath)
             continue
         }
 
@@ -4604,7 +4671,7 @@ function Invoke-Phase8UndatedReclassify {
         # rescue or manual user action), refuse to overwrite. Better to
         # leave both files and let the user reconcile, than to lose data.
         if (Test-Path -LiteralPath $newPath) {
-            Write-Warn ("[{0}] destination already exists, skipping move: {1}" -f $p.Index, $newPath)
+            Write-Caution ("[{0}] destination already exists, skipping move: {1}" -f $p.Index, $newPath)
             $stats.FailedToMove++
             continue
         }
@@ -4766,7 +4833,7 @@ function Show-FinalReport {
         $ngCount, (($ngCount / [Math]::Max(1, $EvalResults.Count)) * 100)) -ForegroundColor Yellow
 
     if ($TotalDeckCount -gt 0 -and $TotalDeckCount -ne $ListedCount) {
-        Write-Warn "Profile total ($TotalDeckCount) does not match listed count ($ListedCount)"
+        Write-Caution "Profile total ($TotalDeckCount) does not match listed count ($ListedCount)"
     }
 
     if (-not $IsDryRun -and $DownloadResults) {
@@ -4961,7 +5028,7 @@ try {
     # fresh trees.
     if ($Clean -or $CleanOnly) {
         Write-Host ''
-        Write-Warn "-Clean specified: removing existing directories"
+        Write-Caution "-Clean specified: removing existing directories"
         Invoke-CleanupDirectories -OutputDir $OutputDir -WorkDir $WorkDir
 
         if ($CleanOnly) {
@@ -4993,7 +5060,7 @@ try {
             MaxFullPathLength = 240
         }
         Write-PhaseHeader -Id 'P01' -Name 'EnvCheck' -Group 'Setup'
-        Write-Warn "Skipped because -SkipEnvCheck was specified"
+        Write-Caution "Skipped because -SkipEnvCheck was specified"
         Write-Host "  Using defaults : filename 200 / full path 240"
         Write-PhaseFooter -Id 'P01' -Status 'skipped'
     } else {
@@ -5039,7 +5106,7 @@ try {
     } else {
         $downloadablePlanned = @($filenamePlan | Where-Object { $_.Downloadable })
         if ($downloadablePlanned.Count -eq 0) {
-            Write-Warn "No downloadable items - skipping Phase 6"
+            Write-Caution "No downloadable items - skipping Phase 6"
             Write-PhaseHeader -Id 'P06' -Name 'Download'       -Group 'Fetch'
             Write-PhaseFooter -Id 'P06' -Status 'skipped'
         } else {
