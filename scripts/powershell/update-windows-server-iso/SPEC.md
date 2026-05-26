@@ -2331,6 +2331,89 @@ carries two URL fields:
   metadata in `data/raw-*.meta.json` and in operator-facing log
   output during P02 ResolveInputs.
 
+### B.23.17 P02/P03 patch seeding: derive LocalPath from FileName
+
+The NeutralPatches-baseline-to-ResolvedPatches conversion path
+introduced in Step 9 (see B.23.5 / B.23.8 for the source of
+truth migration) seeded `Source`, `KbId`, `PatchType`, and
+`ApplyOrder` correctly but left `LocalPath = ''`. With
+`-UseBaselineOnly` (the only mode that actually exercises this
+seeding path verbatim - the `-PatchUrls`, `-PatchDirectory`,
+`-ManifestPath` paths each compute LocalPath themselves), the
+empty value flowed straight into P04 Step 2 'Patches', where
+the very first line of the per-patch loop calls
+
+```powershell
+$leaf = Split-Path -LiteralPath $p.LocalPath -Leaf
+```
+
+and PowerShell rejects the empty string with
+`Cannot bind argument to parameter 'LiteralPath' because it is
+an empty string.` (`'引数が空の文字列であるため、パラメーター
+'LiteralPath' にバインドできません。'` in the ja-JP runtime).
+P04 therefore fails before any patch download starts, after
+the 5-6 GB Eval ISO has already been fetched and SHA-256-
+recorded - which makes the failure both expensive (a 12-13
+minute roundtrip wasted on every re-run) and easy to miss in
+review (the failed call site is deep inside the patch loop,
+not in the seeding block where the bug actually lives).
+
+**Design decisions**.
+
+- D-1: *Derive LocalPath from `$p.FileName` with URL-basename
+  fallback*. NeutralPatches entries in the v3.x baselines all
+  carry a `FileName` field directly (e.g.
+  `windows10.0-kb5087537-x64_1a68955...msu` for LCU,
+  `windows10.0-kb5087065-x64-ndp48_631ce425...msu` for the
+  .NET CU). The fixed seeding reads `$p.FileName` first, falls
+  back to `[System.IO.Path]::GetFileName(([Uri]
+  $p.DownloadUrl).AbsolutePath)` when FileName is absent
+  (defensive for legacy `Patches[]` entries that may predate
+  the FileName addition), and finally falls back to
+  `'<KbId>.msu'` if both are missing.
+  This matches the LocalPath construction in the
+  `-PatchUrls` (uses `$fn`) and `-ManifestPath` (uses
+  `$e.FileName`) seeding paths in the same function.
+
+- D-2: *Empty `Sha256` should not populate `ExpectedHashes`*.
+  The previous code wrote `@{ 'sha-256' = $p.Sha256 }`
+  unconditionally, so even when the baseline has no hash on
+  file (`Sha256 = ''`), the resulting hashtable contained one
+  key with an empty value. P04's cache-validation branch
+  (around L8789) checks `.ExpectedHashes.Count -gt 0` to
+  decide whether to call Test-PatchIntegrity, so the empty-
+  string hash would force the integrity check on cached
+  files and compare a real SHA-256 against `''` - a silent
+  cache-poisoning failure on the second run after a baseline
+  refresh. The fix builds `$expectedHashes = @{}` first and
+  only inserts the key when `$p.Sha256` is non-empty, so the
+  cache branch correctly takes the 'no hash to verify;
+  skipping download' path.
+
+- D-3: *Apply the fix to both P02 seeding and P03 re-derive*.
+  The P03 RefreshPatchBaseline action re-derives
+  `$Script:ResolvedPatches` from the freshly-scraped baseline
+  using the same shape as P02. The L8710 site there had the
+  same `LocalPath = ''` and same unconditional `ExpectedHashes`
+  bugs. With the user's current command (`-UseBaselineOnly`
+  on) P03 is skipped and the bug was latent, but it would
+  fire the moment the user removes `-UseBaselineOnly` to
+  pick up newer patches from the Microsoft Update Catalog.
+  Both sites get the same surrounding helper logic
+  (FileName resolution + ExpectedHashes guard) to keep them
+  in lockstep.
+
+- D-4: *Defer the deeper question of where LocalPath belongs*
+  to a future step. Today three different seeding paths each
+  compute LocalPath independently; a single
+  `Resolve-PatchLocalPath` helper would deduplicate the
+  Join-Path call across all of them. That refactoring is
+  worth doing once the seeding shape is fully stable, but it
+  is out of scope here - the immediate bug fix needs to be
+  small and reviewable, and the helper extraction is best
+  done after the next baseline schema cycle so we know which
+  fields are truly invariant across the seeding entry points.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2351,6 +2434,7 @@ carries two URL fields:
 | B.23.14          | Amends §B.22.2; supersedes part of §B.23.7 | New `stage5__data-snapshot.yml`; stage4 narrowed; PoC → T6-T8 |
 | B.23.15          | (new) — refines §A.4 P01 prerequisites | New `-AutoInstallAdk` switch; `Install-WindowsAdkFallback` (r07.0 Step 8) |
 | B.23.16          | (new) — refines §B.2 (config schema)   | New `Iso.FwlinkUrl` field; refreshed `Iso.Url`/`FileName` for all 8 OS×language entries (r07.0 Step 10) |
+| B.23.17          | (new) — refines §A.4 P02 ResolveInputs | P02 + P03 patch seeding: derive `LocalPath` from `FileName` and guard empty `Sha256` from `ExpectedHashes` (r07.0 Step 12) |
 
 ---
 

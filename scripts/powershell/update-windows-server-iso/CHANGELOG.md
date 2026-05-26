@@ -16,7 +16,91 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 11 - Replace flaky `microsoft/psscriptanalyzer-action` with inline PSScriptAnalyzer+ConvertToSARIF (CI hardening) (this release)
+### r07.0 Step 12 - Fix P02/P03 baseline seeding `LocalPath = ''` regression (this release)
+
+Triggered by a failure observed on the freshly-pushed Step 11
+commit, immediately after the ~13-minute Server 2016 ja-jp
+Eval ISO download succeeded:
+
+```
+[+] ISO downloaded: D:\UpdateWsi\source\iso\WS2016_ja-jp.iso
+[*] Recorded ISO SHA-256: ceb4e1f786148782bd684853bda9c6177891da231eb0ca2b5a17130ec938b142
+ -- Step 2: Patches ---------------------------------------------
+ PHASE P04  -> FAILED   elapsed: 13m5.9s
+ [X] Phase P04 (FetchAssets) failed:
+     引数が空の文字列であるため、パラメーター 'LiteralPath'
+     にバインドできません。
+ [~]     Invoke-FetchPhase04_FetchAssets, Update-WindowsServerIso.ps1: line 8782
+```
+
+Line 8782 of P04 reads `$leaf = Split-Path -LiteralPath
+$p.LocalPath -Leaf`, and the `$p.LocalPath` field of the first
+patch entry was an empty string. The regression was introduced
+in Step 9 when this CHANGELOG noted that P02's NeutralPatches
+lookup had been fixed - the lookup itself was fixed, but the
+*seeding* loop that converts `PatchBaseline.NeutralPatches[]`
+into `$Script:ResolvedPatches` was carried over with
+`LocalPath = ''` hard-coded, the very bug it should have
+replaced. The empty value propagated through the baseline
+into the first iteration of the P04 download loop, where the
+`Split-Path -LiteralPath` call rejected it.
+
+The bug only surfaces with `-UseBaselineOnly` because the
+other patch-source paths (`-PatchUrls`, `-PatchDirectory`,
+`-ManifestPath`) each compute LocalPath inline before adding
+the entry to `$resolved`. With `-UseBaselineOnly` on, the
+NeutralPatches-seeding path is the *only* place LocalPath
+gets set, and the bug had no escape valve.
+
+Two seeding sites carried the same defect: the P02 baseline
+seeding at L8438-8447 and the P03 RefreshPatchBaseline
+re-derive at L8704-8716. Step 12 fixes both with the same
+helper shape so they stay in lockstep through any future
+refactoring:
+
+- `LocalPath` is derived from `$p.FileName` when present
+  (the NeutralPatches schema since v3.x always emits
+  FileName), falls back to
+  `[System.IO.Path]::GetFileName(([Uri]$p.DownloadUrl).AbsolutePath)`
+  for legacy entries that omit FileName, and finally falls
+  back to `'<KbId>.msu'` if both are missing. The full path
+  becomes `Join-Path $Script:PatchesDir (Join-Path
+  $Script:OsVersion $pFileName)`, matching the other seeding
+  paths in the same function (L8362 and L8375 see the same
+  Join-Path shape).
+- `ExpectedHashes` is built incrementally - it starts as
+  `@{}` and only gets a `sha-256` key when `$p.Sha256` is
+  non-empty. The previous code wrote
+  `@{ 'sha-256' = $p.Sha256 }` unconditionally, so an empty
+  baseline hash produced a hashtable with `.Count = 1` that
+  forced P04's cache-validation branch to call
+  `Test-PatchIntegrity` against the empty string instead of
+  taking the 'no hash to verify; skipping download' fast
+  path. That dormant bug would have surfaced on the second
+  invocation after a cache existed.
+
+Live verification awaits the operator's re-run of the same
+PrepareBuildVerify command. P04 Step 1 (ISO download) is
+already cached from the previous 13-minute fetch, so the
+next run should reach Step 2 (Patches) within seconds. The
+expected behaviour: `[1/2] windows10.0-kb5087537-x64_...msu`
+shown by Write-Step, then a ~1.5 GB LCU download for KB5087537
+followed by a ~70 MB .NET CU download for KB5087065, after
+which P05 ExpandIso takes over and starts unpacking the ISO.
+
+Files changed:
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  - Two patch-seeding sites updated to compute LocalPath
+    from FileName and to build ExpectedHashes only when
+    Sha256 is non-empty. Surrounding code unchanged.
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  - Added section B.23.17 (P02/P03 LocalPath derivation +
+    ExpectedHashes guard) and the matching matrix row.
+
+No data files, workflows, or tests are touched.
+
+### r07.0 Step 11 - Replace flaky `microsoft/psscriptanalyzer-action` with inline PSScriptAnalyzer+ConvertToSARIF (CI hardening)
 
 Triggered by a stage2 Windows-checks workflow failure observed on
 the freshly-pushed Step 10 commit:

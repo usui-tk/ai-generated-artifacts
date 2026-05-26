@@ -8436,13 +8436,39 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
             if ($baselineSource) {
                 Write-Step ('Seeding ResolvedPatches from PatchBaseline.{0}: {1} entries.' -f $baselineField, $baselineSource.Count)
                 foreach ($p in $baselineSource) {
+                    # Derive LocalPath from FileName when available; fall
+                    # back to the URL basename for legacy entries that may
+                    # omit FileName. An empty LocalPath would crash
+                    # P04 Step 2 'Patches' at 'Split-Path -LiteralPath'
+                    # ('cannot bind argument to LiteralPath because it
+                    # is an empty string').
+                    $pFileName = $p.FileName
+                    if (-not $pFileName -and $p.DownloadUrl) {
+                        try {
+                            $pFileName = [System.IO.Path]::GetFileName(([Uri]$p.DownloadUrl).AbsolutePath)
+                        } catch {
+                            $pFileName = $null
+                        }
+                    }
+                    if (-not $pFileName) {
+                        $pFileName = ('{0}.msu' -f $p.KbId)
+                    }
+                    # Only declare a sha-256 expected-hash when the
+                    # baseline actually has one. Inserting an empty
+                    # string would let .ExpectedHashes.Count -gt 0
+                    # evaluate true and force Test-PatchIntegrity into
+                    # comparing against ''.
+                    $expectedHashes = @{}
+                    if ($p.Sha256) {
+                        $expectedHashes['sha-256'] = $p.Sha256
+                    }
                     $resolved.Add([pscustomobject]@{
                         Kind = 'Patch'; Source = $p.DownloadUrl
-                        LocalPath = ''
+                        LocalPath = Join-Path $Script:PatchesDir (Join-Path $Script:OsVersion $pFileName)
                         KbId = $p.KbId
                         PatchType = $p.Type
                         ApplyOrder = $p.ApplyOrder
-                        ExpectedHashes = @{ 'sha-256' = $p.Sha256 }
+                        ExpectedHashes = $expectedHashes
                     }) | Out-Null
                 }
             } else {
@@ -8678,14 +8704,33 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         if (-not $userProvidedPatches) {
             $derived = New-Object System.Collections.Generic.List[object]
             foreach ($p in $newPatches) {
+                # Same LocalPath / ExpectedHashes derivation as the P02
+                # baseline-seeding path; see SPEC B.23.17 for the empty-
+                # LocalPath bug this guards against (would crash P04
+                # Step 2 'Patches' at 'Split-Path -LiteralPath').
+                $pFileName = $p.FileName
+                if (-not $pFileName -and $p.DownloadUrl) {
+                    try {
+                        $pFileName = [System.IO.Path]::GetFileName(([Uri]$p.DownloadUrl).AbsolutePath)
+                    } catch {
+                        $pFileName = $null
+                    }
+                }
+                if (-not $pFileName) {
+                    $pFileName = ('{0}.msu' -f $p.KbId)
+                }
+                $expectedHashes = @{}
+                if ($p.Sha256) {
+                    $expectedHashes['sha-256'] = $p.Sha256
+                }
                 $derived.Add([pscustomobject][ordered]@{
                     Kind            = 'Patch'
                     Source          = $p.DownloadUrl
-                    LocalPath       = ''
+                    LocalPath       = Join-Path $Script:PatchesDir (Join-Path $Script:OsVersion $pFileName)
                     KbId            = $p.KbId
                     PatchType       = $p.Type
                     ApplyOrder      = $p.ApplyOrder
-                    ExpectedHashes  = @{ 'sha-256' = $p.Sha256 }
+                    ExpectedHashes  = $expectedHashes
                 }) | Out-Null
             }
             $Script:ResolvedPatches = $derived | Sort-Object ApplyOrder, KbId
