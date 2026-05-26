@@ -2479,6 +2479,90 @@ not been triggered in the regression suite.
   ensures any future regression on the input value
   becomes visible.
 
+### B.23.19 P05 ExpandIso drive-root copy: switch to robocopy; Dynamic Update overlay wildcard must use `-Path`
+
+Two `Copy-Item` sites required correction in this revision.
+
+**Site 1: P05 ExpandIso drive-root copy (`Expand-SourceIso`).**
+The mounted ISO appears as a drive (e.g. `E:\`) and the
+script copies its full content tree to `$Script:ExtractedDir`
+for downstream WIM inspection. The previous implementation
+called
+
+```powershell
+Copy-Item -LiteralPath $src -Destination $DestRoot -Recurse -Force
+```
+
+with `$src` = `'E:\'`. PowerShell's `Copy-Item` rejected this
+at runtime with `'the second path fragment must not be a
+drive name or UNC name. Parameter name: path2'` (`'2 番目の
+パス フラグメントを ドライブ名または UNC 名にすることはできません。
+パラメーター名:path2'` in the ja-JP runtime). The failure
+comes from `Copy-Item`'s internal use of
+`System.IO.Path.Combine`, which refuses to accept a rooted
+path as the second argument - it cannot decide whether to
+copy "the drive itself" into `$DestRoot` or "the drive's
+contents" into `$DestRoot`, and rejects the combination
+rather than guess. This behaviour is identical on PowerShell
+5.1 and 7.
+
+**Site 2: P09 AssembleIso Dynamic Update overlay
+(`Invoke-BuildPhase09_AssembleIso`).** When applying a
+Dynamic Update setup package extracted by `expand.exe`, the
+previous implementation called
+
+```powershell
+Copy-Item -LiteralPath (Join-Path $tmpExtract '*') `
+    -Destination (Join-Path $Script:ExtractedDir 'sources') -Recurse -Force
+```
+
+`-LiteralPath` disables wildcard expansion by definition.
+With `'*'` joined onto the source path, the cmdlet would
+search for a file literally named `*` in `$tmpExtract` and
+fail with `'Cannot find path'` the first time a Dynamic
+Update overlay was applied. This code path had not yet been
+exercised in regression so the bug was latent.
+
+**Design decisions**.
+
+- D-1: *Switch P05 to `robocopy.exe`*. The earlier in-source
+  comment ('Robocopy is faster on large trees, but Copy-Item
+  works without external tools') framed robocopy as an
+  unwanted dependency. That framing is wrong for this
+  context: robocopy ships with Windows since Vista,
+  every Windows Server target this script supports
+  (Server 2016 through Server 2025) has it at
+  `%SystemRoot%\System32\robocopy.exe`, and ISO content
+  trees (~6 GB across thousands of small files) are exactly
+  the workload it is designed for. The robocopy invocation
+  uses `/COPY:DAT` (data, attributes, timestamps - NTFS
+  ACLs are not meaningful for an ISO copy where the
+  destination grants `Authenticated Users : Read` by
+  default), `/E` for subdirectories including empty ones,
+  `/R:1 /W:1` for a single quick retry on transient failure,
+  and `/NP /NDL /NFL /NJH /NJS` to keep the console output
+  short. Exit codes 0-7 are treated as success per Microsoft's
+  documented convention; 8+ raises an exception with the
+  `/LOG:` path for triage.
+- D-2: *Fix P09 overlay with `-Path` (not `-LiteralPath`)*.
+  The overlay always uses a wildcard glob to copy the
+  expanded Dynamic Update tree, so `-Path` is the correct
+  parameter. The intent of the original code was likely
+  defensive ('I want a literal path' is a frequent
+  PowerShell newcomer instinct), but `-LiteralPath` and
+  `'*'` are contradictory: `-LiteralPath` defeats wildcards
+  by definition. The other `Copy-Item -LiteralPath ...`
+  sites in this script (L6220, L6225, L8857, L9642, L9671,
+  L9740 after the Step 14 edits) all copy single file paths
+  with no wildcards and are correct as-is.
+- D-3: *Defer broader `Copy-Item` audit*. A future refactor
+  could extract a `Copy-DirectoryContents` helper that
+  always uses robocopy on Windows and Get-ChildItem +
+  Copy-Item piping on PowerShell 7 cross-platform. The
+  immediate priority here is unblocking P05, which the
+  surgical robocopy swap accomplishes without changing
+  any other Copy-Item call sites.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2501,6 +2585,7 @@ not been triggered in the regression suite.
 | B.23.16          | (new) — refines §B.2 (config schema)   | New `Iso.FwlinkUrl` field; refreshed `Iso.Url`/`FileName` for all 8 OS×language entries (r07.0 Step 10) |
 | B.23.17          | (new) — refines §A.4 P02 ResolveInputs | P02 + P03 patch seeding: derive `LocalPath` from `FileName` and guard empty `Sha256` from `ExpectedHashes` (r07.0 Step 12) |
 | B.23.18          | (new) — refines §A.4 P04 FetchAssets    | Replace 7 `Split-Path -LiteralPath ... -Leaf` / `-LeafBase` sites with `[System.IO.Path]::GetFileName` / `GetFileNameWithoutExtension`; documents the latent parameter-set bug (r07.0 Step 13) |
+| B.23.19          | (new) — refines §A.4 P05 ExpandIso       | Switch P05 drive-root copy to robocopy; fix P09 Dynamic Update overlay wildcard to use `-Path` (r07.0 Step 14) |
 
 ---
 

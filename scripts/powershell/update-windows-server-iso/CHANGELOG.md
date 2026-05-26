@@ -16,7 +16,135 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 13 - Fix latent `Split-Path -LiteralPath -Leaf` parameter-set conflict at 7 sites (this release)
+### r07.0 Step 14 - Switch P05 ExpandIso to robocopy; fix P09 overlay `-LiteralPath` + wildcard contradiction (this release)
+
+Triggered by a failure observed on the freshly-pushed Step 13
+commit. With the `Split-Path -LiteralPath -Leaf` parameter-set
+bugs fixed, P04 finally completed both patch downloads in just
+over 3 minutes, and the script reached P05 ExpandIso for the
+first time in this verification cycle. P05 then hit a
+different `Copy-Item` failure inside `Expand-SourceIso`:
+
+```
+P04   DONE     elapsed: 3m16.1s
+PHASE P05  - ExpandIso  (Plan) start: 18:00:31
+ -- Step 1: Expand source ISO ---
+ [*] Copying from E:\ to D:\UpdateWsi\source\extracted ...
+PHASE P05  -> FAILED   elapsed: 2.10s
+ [X] Phase P05 (ExpandIso) failed:
+     2 番目のパス フラグメントを ドライブ名または UNC 名にすることは
+     できません。パラメーター名:path2
+ [~]    Expand-SourceIso, line 8909
+```
+
+The failing statement was
+
+```powershell
+Copy-Item -LiteralPath $src -Destination $DestRoot -Recurse -Force
+```
+
+with `$src = 'E:\'` (the mounted ISO's drive root). PowerShell's
+`Copy-Item` rejects a drive root as `-LiteralPath` when
+combined with `-Recurse -Destination` because internally it
+calls `System.IO.Path.Combine` to construct the destination
+subpath, and Path.Combine refuses to accept a rooted path
+('E:\') as its second argument - it cannot decide whether the
+user wants the drive's contents copied INTO `$DestRoot` or the
+drive itself created AS `$DestRoot\E:\`, and chooses to raise
+rather than guess. The behaviour is identical on PowerShell
+5.1 and 7.
+
+While investigating, a second latent `Copy-Item` defect was
+discovered at the Dynamic Update overlay site in
+`Invoke-BuildPhase09_AssembleIso`:
+
+```powershell
+Copy-Item -LiteralPath (Join-Path $tmpExtract '*') ...
+```
+
+`-LiteralPath` defeats wildcard expansion by definition, so
+the cmdlet would search for a file literally named `*` in
+`$tmpExtract` and fail with 'Cannot find path' the first time
+a Dynamic Update overlay was actually applied. This site has
+not been hit in regression yet because the verification
+ladder has been blocked upstream of P09, but it is the same
+class of bug and is cheaper to fix now alongside the P05
+correction.
+
+**Fixes applied**.
+
+Site 1: P05 `Expand-SourceIso` drive-root copy
+(now at the same line, behaviour changed). Replaced the
+single `Copy-Item -LiteralPath $src -Destination $DestRoot
+-Recurse -Force` with a `robocopy.exe` invocation:
+
+```powershell
+$rcArgs = @(
+    $src, $DestRoot,
+    '/E',           # Subdirectories including empty
+    '/COPY:DAT',    # Data, Attributes, Timestamps (no NTFS ACLs)
+    '/R:1', '/W:1', # 1 retry, 1-sec wait
+    '/NP', '/NDL', '/NFL', '/NJH', '/NJS',  # quiet console
+    ('/LOG:' + $rcLog)
+)
+& robocopy.exe @rcArgs | Out-Null
+if ($LASTEXITCODE -ge 8) {
+    throw ('robocopy failed (exit {0}): see {1}' -f $LASTEXITCODE, $rcLog)
+}
+Write-Ok ('robocopy exit={0} (0-7 = success), log: {1}' -f $LASTEXITCODE, $rcLog)
+```
+
+`robocopy.exe` ships with Windows since Vista, handles drive
+roots as sources correctly, and is 5-10x faster than
+`Copy-Item -Recurse` for ISO content (typically ~6 GB across
+thousands of small files). The earlier in-source comment that
+preferred Copy-Item to 'avoid external tools' was reverted -
+robocopy is a Windows built-in, not an external dependency on
+this target. Robocopy exit codes 0-7 are documented as success
+or informational (0 = no changes, 1 = files copied, etc.); 8
+or higher signals at least one fatal error and is converted
+to a thrown exception with the log path attached for triage.
+
+Site 2: P09 overlay `Copy-Item -LiteralPath ... '*'`
+contradiction. Changed `-LiteralPath` to `-Path` so the
+wildcard actually expands:
+
+```powershell
+Copy-Item -Path (Join-Path $tmpExtract '*') `
+    -Destination (Join-Path $Script:ExtractedDir 'sources') -Recurse -Force
+```
+
+The other six `Copy-Item -LiteralPath ...` sites in the
+script all copy single-file paths with no wildcards and are
+correct as written.
+
+Live verification awaits the operator's re-run. With ISO,
+patches, and the seeding fix all known-good from previous
+Step 12 / Step 13 runs, the next iteration is expected to
+reach the patches as before in ~10 seconds (cached ISO) plus
+patch DL (~3 min on a warm cache - likely much faster since
+patches are now also on disk), then enter P05 with robocopy
+moving ~6 GB from `E:\` to `D:\UpdateWsi\source\extracted` in
+roughly 1-3 minutes depending on the host's I/O. After P05
+the WIM enumeration runs (`install.wim` and `boot.wim`), then
+P06 ValidatePatchSet, then the P07-P13 plan/sandbox phases.
+
+Files changed:
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  - `Expand-SourceIso`: replaced `Copy-Item -LiteralPath
+    $src -Destination $DestRoot -Recurse -Force` with a
+    `robocopy.exe` invocation that handles drive-root
+    sources and emits a log file under `$Script:LogsDir`.
+  - `Invoke-BuildPhase09_AssembleIso`: changed
+    `Copy-Item -LiteralPath (Join-Path $tmpExtract '*') ...`
+    to `Copy-Item -Path ...` so the wildcard expands.
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  - Added section B.23.19 and the matching matrix row.
+
+No data files, workflows, or tests are touched.
+
+### r07.0 Step 13 - Fix latent `Split-Path -LiteralPath -Leaf` parameter-set conflict at 7 sites
 
 Triggered by a failure observed on the freshly-pushed Step 12
 commit. With the empty-LocalPath bug fixed, P04 finally

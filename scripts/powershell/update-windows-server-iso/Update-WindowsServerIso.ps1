@@ -8905,8 +8905,38 @@ function Expand-SourceIso {
         $src = ($driveLetter + ':\')
         Set-DebugStep -Step 'copy-from-iso'
         Write-Step ('Copying from {0} to {1} ...' -f $src, $DestRoot)
-        # Robocopy is faster on large trees, but Copy-Item works without external tools
-        Copy-Item -LiteralPath $src -Destination $DestRoot -Recurse -Force
+        # Use robocopy.exe (ships with Windows since Vista) rather
+        # than Copy-Item. Copy-Item -LiteralPath on a drive root
+        # fails with 'the second path fragment must not be a drive
+        # name' because PowerShell's Copy-Item invokes
+        # System.IO.Path.Combine internally with the drive name
+        # ('E:\') as path2, and Path.Combine rejects rooted paths
+        # in that position. robocopy handles the drive-root-as-
+        # source case correctly and is 5-10x faster for ISO content
+        # (typically ~6 GB across thousands of small files).
+        $rcLog = Join-Path $Script:LogsDir 'P05_robocopy.log'
+        $rcArgs = @(
+            $src, $DestRoot,
+            '/E',           # Subdirectories including empty ones
+            '/COPY:DAT',    # Data, Attributes, Timestamps only - NTFS ACLs are not meaningful for an ISO copy
+            '/R:1',         # Retry once on transient failure
+            '/W:1',         # Wait 1 second between retries
+            '/NP',          # No per-file progress percentage (console clutter)
+            '/NDL',         # No directory list (console clutter)
+            '/NFL',         # No file list (console clutter)
+            '/NJH',         # No job header
+            '/NJS',         # No job summary
+            ('/LOG:' + $rcLog)
+        )
+        & robocopy.exe @rcArgs | Out-Null
+        $rcExit = $LASTEXITCODE
+        # Robocopy exit codes: 0-7 = success / informational,
+        # 8+ = failure (some files not copied / fatal error).
+        # See https://learn.microsoft.com/windows-server/administration/windows-commands/robocopy
+        if ($rcExit -ge 8) {
+            throw ('robocopy failed (exit {0}): see {1}' -f $rcExit, $rcLog)
+        }
+        Write-Ok ('robocopy exit={0} (0-7 = success), log: {1}' -f $rcExit, $rcLog)
     } finally {
         Set-DebugStep -Step 'dismount-iso'
         try {
@@ -9679,7 +9709,11 @@ function Invoke-BuildPhase09_AssembleIso {
                 New-Item -ItemType Directory -Path $tmpExtract -Force | Out-Null
                 & expand.exe -F:* $p.LocalPath $tmpExtract | Out-Null
                 if ($LASTEXITCODE -eq 0) {
-                    Copy-Item -LiteralPath (Join-Path $tmpExtract '*') `
+                    # -Path (not -LiteralPath) is required when the
+                    # source contains a wildcard. -LiteralPath would
+                    # look for a file literally named '*' and fail
+                    # with 'Cannot find path'.
+                    Copy-Item -Path (Join-Path $tmpExtract '*') `
                         -Destination (Join-Path $Script:ExtractedDir 'sources') -Recurse -Force
                     Write-Ok ('Overlay applied: {0}' -f $p.KbId)
                 } else {
