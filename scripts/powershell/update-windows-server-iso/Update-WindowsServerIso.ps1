@@ -3422,6 +3422,571 @@ function Get-ReleaseInfoCache {
 }
 
 # ============================================================
+# ISO Updater specific: .NET Framework CU release-notes support
+# ============================================================
+#
+# The Microsoft Learn ".NET Framework release information" page is the
+# authoritative index of monthly cumulative-update release-notes pages.
+# Like the Windows Server release-info page, each URL supports the
+# `?accept=text/markdown` content-negotiation switch and returns the
+# source Markdown verbatim. The index lists every monthly CU page back
+# to early 2024; each per-month page contains a "Summary tables"
+# section that maps OS labels to per-.NET-Framework-version KB IDs.
+#
+# Files this section reads or writes:
+#   data/raw-dotnet-cu.json   Aggregated container holding the index
+#                             Markdown plus each monthly page's
+#                             Markdown body, plus per-fetch metadata.
+#   data/cache-dotnet-cu.json Parsed structured form ready for the
+#                             Refresher to consume.
+#
+# Note that .NET CU uses a single aggregated JSON for the raw layer,
+# unlike release-info which uses raw-release-info.md as a single
+# Markdown body. The aggregated container exists because .NET CU has
+# many monthly pages and one container is easier to review in a
+# Patch-Tuesday diff than dozens of per-month files. See SPEC.md
+# section B.23.3 for the raw-/cache- prefix convention and section
+# B.23.5 for the .NET CU multiplicity background.
+
+$Script:DotNetCuIndexUrl = (
+    'https://learn.microsoft.com/en-us/dotnet/framework/release-notes/' +
+    'release-notes?accept=text/markdown'
+)
+
+$Script:DotNetCuUrlBase = (
+    'https://learn.microsoft.com/en-us/dotnet/framework/release-notes/'
+)
+
+$Script:DotNetCuUserAgent = (
+    'ai-generated-artifacts/dotnet-cu ' +
+    '(+https://github.com/usui-tk/ai-generated-artifacts)'
+)
+
+# OS-label substring to short-name mapping. Order matters: longer or
+# more-specific patterns must precede shorter ones that they contain
+# (e.g. "Windows 10 1607 and Windows Server 2016" must precede
+# "Windows Server 2016" so the longer joint label wins). The mapping
+# covers more OS labels than the production scope on purpose, so the
+# parser produces a complete picture; downstream consumers filter to
+# the four production OSes (Server2016/2019/2022/2025).
+$Script:DotNetCuOsLongToShort = [ordered]@{
+    'Microsoft server operating system, version 24H2' = 'Server2025'
+    'Microsoft server operating system version 24H2'  = 'Server2025'
+    'Microsoft server operating system, version 23H2' = 'Server23H2'
+    'Microsoft server operating system version 23H2'  = 'Server23H2'
+    'Windows Server 2022'                             = 'Server2022'
+    'Windows 10 1809 and Windows Server 2019'         = 'Server2019'
+    'Windows Server 2019'                             = 'Server2019'
+    'Windows 10 1607 and Windows Server 2016'         = 'Server2016'
+    'Windows Server 2016'                             = 'Server2016'
+    'Windows Server 2012 R2'                          = 'Server2012R2'
+    'Windows Server 2012'                             = 'Server2012'
+}
+
+function Get-DotNetCuRawPath {
+    <#
+    .SYNOPSIS
+        Resolve the on-disk path of data/raw-dotnet-cu.json.
+    #>
+    [OutputType([string])]
+    param()
+    return (Join-Path (Get-DataDirectoryPath) 'raw-dotnet-cu.json')
+}
+
+function Get-DotNetCuCachePath {
+    <#
+    .SYNOPSIS
+        Resolve the on-disk path of data/cache-dotnet-cu.json.
+    #>
+    [OutputType([string])]
+    param()
+    return (Join-Path (Get-DataDirectoryPath) 'cache-dotnet-cu.json')
+}
+
+function ConvertFrom-DotNetCuOsLabel {
+    <#
+    .SYNOPSIS
+        Map a raw OS label as printed in the release-notes table to a
+        normalised short name (e.g. "Server2025"). Returns empty string
+        if the label does not match any known pattern.
+    .EXAMPLE
+        ConvertFrom-DotNetCuOsLabel -Label 'Windows Server 2022'
+        # -> 'Server2022'
+    #>
+    [OutputType([string])]
+    param([Parameter(Mandatory)] [string]$Label)
+    foreach ($needle in $Script:DotNetCuOsLongToShort.Keys) {
+        if ($Label.Contains($needle)) {
+            return [string]$Script:DotNetCuOsLongToShort[$needle]
+        }
+    }
+    return ''
+}
+
+function Split-DotNetCuMarkdownFrontMatter {
+    <#
+    .SYNOPSIS
+        Return the body of a Markdown document with the optional leading
+        YAML front matter block stripped. If no front matter is present
+        the input is returned unchanged.
+    .DESCRIPTION
+        Microsoft Learn pages, when requested with ?accept=text/markdown,
+        begin with a YAML block delimited by lines containing exactly
+        three dashes ("---"). This helper trims that block so that the
+        body line parsers see only the content.
+    #>
+    [OutputType([string])]
+    param([Parameter(Mandatory)] [string]$Markdown)
+    if (-not $Markdown.StartsWith('---')) {
+        return $Markdown
+    }
+    # Walk forward looking for a line that is exactly "---" (after any \r).
+    # Use a regex against the body starting at offset 3 (past the leading dashes).
+    $rest = $Markdown.Substring(3)
+    $closer = [regex]'(?m)^---\s*$'
+    $m = $closer.Match($rest)
+    if (-not $m.Success) {
+        return $Markdown
+    }
+    $afterIdx = $m.Index + $m.Length
+    $body = $rest.Substring($afterIdx)
+    # Trim a single leading CR/LF so the body's first real line is at offset 0.
+    return ($body -replace '^[\r\n]+', '')
+}
+
+function ConvertFrom-DotNetCuIndexMarkdown {
+    <#
+    .SYNOPSIS
+        Parse the .NET Framework release-notes index page (Markdown form)
+        and return a structured object listing every monthly cumulative
+        update entry.
+    .DESCRIPTION
+        The index page lists entries in the form
+            "- April 14, 2026 - [cumulative update](2026/04-14-april-cumulative-update)"
+        with the date sitting outside the link bracket and only the kind
+        text being linked. The most recent entry may carry a trailing
+        bolded "**New Release**" suffix which the parser tolerates and
+        discards. Date typos that prevent strict %B parsing (the index
+        contains at least one such typo in the 2024 history) do not
+        drop the entry: the entry is preserved with an empty parsed
+        Date but the original DateText is kept.
+    .EXAMPLE
+        ConvertFrom-DotNetCuIndexMarkdown -Markdown $indexBody
+    #>
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [string]$Markdown)
+
+    $body = Split-DotNetCuMarkdownFrontMatter -Markdown $Markdown
+    $entryRegex = [regex]'^- ([A-Za-z]+ \d{1,2}, \d{4}) - \[([^\]]+)\]\(([^)]+)\)\s*(?:\*\*[^*]+\*\*)?\s*$'
+
+    $entryList = New-Object 'System.Collections.Generic.List[pscustomobject]'
+    $invariant = [System.Globalization.CultureInfo]::InvariantCulture
+
+    foreach ($rawLine in ($body -split "`n")) {
+        $line = $rawLine.TrimEnd("`r")
+        $regexHit = $entryRegex.Match($line)
+        if (-not $regexHit.Success) { continue }
+        $dateText = $regexHit.Groups[1].Value
+        $kindText = $regexHit.Groups[2].Value.Trim()
+        $relUrl   = $regexHit.Groups[3].Value.Trim()
+
+        $isoDate = ''
+        try {
+            $dt = [datetime]::ParseExact($dateText, 'MMMM d, yyyy', $invariant)
+            $isoDate = $dt.ToString('yyyy-MM-dd')
+        }
+        catch {
+            $isoDate = ''
+        }
+
+        $absUrl = $Script:DotNetCuUrlBase + $relUrl
+        $entryList.Add([pscustomobject]@{
+            DateText    = $dateText
+            Date        = $isoDate
+            Kind        = $kindText
+            RelativeUrl = $relUrl
+            AbsoluteUrl = $absUrl
+        })
+    }
+
+    # Compute summary fields. Use only entries with a non-empty parsed date
+    # for the date range; that excludes the typo case.
+    $datedEntries  = @($entryList | Where-Object { $_.Date -ne '' })
+    $sortedDates   = @($datedEntries | ForEach-Object { $_.Date } | Sort-Object)
+    $earliestDate  = if ($sortedDates.Count -gt 0) { $sortedDates[0] } else { '' }
+    $latestDate    = if ($sortedDates.Count -gt 0) { $sortedDates[$sortedDates.Count - 1] } else { '' }
+    $distinctKinds = @($entryList | ForEach-Object { $_.Kind } | Sort-Object -Unique)
+
+    return [pscustomobject]@{
+        EntryCount   = $entryList.Count
+        Kinds        = $distinctKinds
+        EarliestDate = $earliestDate
+        LatestDate   = $latestDate
+        Entries      = @($entryList.ToArray())
+    }
+}
+
+function ConvertFrom-DotNetCuMarkdown {
+    <#
+    .SYNOPSIS
+        Parse a single monthly .NET CU release-notes page (Markdown form)
+        and return a structured object describing the per-OS table
+        blocks under the "Summary tables" heading.
+    .DESCRIPTION
+        The "Summary tables" section on a monthly page lists, for each
+        OS, the per-.NET-Framework-version KB IDs published that month.
+        On current pages this section appears AFTER "## Known issues in
+        this release", so the parser walks from "## Summary tables" up
+        to the next "## " heading or end of document, accepting
+        multiple sequential Markdown tables along the way.
+
+        Returns an object with:
+          EntryCountTotal       - total OS blocks parsed
+          EntryCountRecognised  - OS blocks whose label matched the
+                                  Server* / Server23H2 mapping
+          RowsPerOs             - hashtable from short OS name to count
+                                  of .NET version rows in that block
+          Entries               - the OS blocks themselves, each with
+                                  OsLabel, OsNormalised, OsOfferingKb
+                                  and Rows[].
+    .EXAMPLE
+        ConvertFrom-DotNetCuMarkdown -Markdown $monthBody
+    #>
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [string]$Markdown)
+
+    $body = Split-DotNetCuMarkdownFrontMatter -Markdown $Markdown
+
+    $headingRegex   = [regex]'^## Summary tables\s*$'
+    $otherHeading2  = [regex]'^## (?!Summary tables\b).+$'
+    $headerRowRegex = [regex]'^\|\s*Product version\s*\|'
+    $sepRowRegex    = [regex]'^\|\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|\s*$'
+    $osRowRegex     = [regex]'^\|\s*\*\*([^|*]+?)\*\*\s*\|\s*(.*?)\s*\|\s*$'
+    $netRowRegex    = [regex]'^\|\s*\.NET Framework\s+([^|]+?)\s*\|\s*(.*?)\s*\|\s*$'
+    $kbDigitsRegex  = [regex]'(\d{4,7})'
+
+    $inSection = $false
+    $blockList = New-Object 'System.Collections.Generic.List[pscustomobject]'
+    $currentOs = $null
+
+    foreach ($rawLine in ($body -split "`n")) {
+        $line = $rawLine.TrimEnd("`r")
+
+        if (-not $inSection) {
+            if ($headingRegex.IsMatch($line)) {
+                $inSection = $true
+            }
+            continue
+        }
+
+        # If a new "## " heading other than the one we entered appears,
+        # the tables region is closed.
+        if ($otherHeading2.IsMatch($line)) {
+            break
+        }
+
+        # Skip the standard table chrome.
+        if ($headerRowRegex.IsMatch($line)) {
+            # A new sub-table boundary. Flush the current OS block so
+            # the next OS row in the new sub-table starts cleanly.
+            if ($null -ne $currentOs) {
+                $blockList.Add($currentOs)
+                $currentOs = $null
+            }
+            continue
+        }
+        if ($sepRowRegex.IsMatch($line)) {
+            continue
+        }
+
+        # OS row: bolded label, optional bolded KB link in the second cell.
+        $osMatch = $osRowRegex.Match($line)
+        if ($osMatch.Success) {
+            if ($null -ne $currentOs) {
+                $blockList.Add($currentOs)
+            }
+            $osLabel       = $osMatch.Groups[1].Value.Trim()
+            $offeringCell  = $osMatch.Groups[2].Value.Trim()
+            $offeringKb    = ''
+            $kbDigitsHit   = $kbDigitsRegex.Match($offeringCell)
+            if ($kbDigitsHit.Success) {
+                $offeringKb = 'KB' + $kbDigitsHit.Groups[1].Value
+            }
+            $currentOs = [pscustomobject]@{
+                OsLabel       = $osLabel
+                OsNormalised  = (ConvertFrom-DotNetCuOsLabel -Label $osLabel)
+                OsOfferingKb  = $offeringKb
+                Rows          = New-Object 'System.Collections.Generic.List[pscustomobject]'
+            }
+            continue
+        }
+
+        # .NET version row: unbolded ".NET Framework <versions>" + KB.
+        $netMatch = $netRowRegex.Match($line)
+        if ($netMatch.Success -and $null -ne $currentOs) {
+            $versions = $netMatch.Groups[1].Value.Trim()
+            $kbCell   = $netMatch.Groups[2].Value.Trim()
+            $kbId     = ''
+            $kbDigitsHit2 = $kbDigitsRegex.Match($kbCell)
+            if ($kbDigitsHit2.Success) {
+                $kbId = 'KB' + $kbDigitsHit2.Groups[1].Value
+            }
+            $currentOs.Rows.Add([pscustomobject]@{
+                DotNetVersions = $versions
+                KbId           = $kbId
+            })
+            continue
+        }
+        # Any other "| ... |" row (unrecognised pattern) is ignored.
+    }
+
+    if ($null -ne $currentOs) {
+        $blockList.Add($currentOs)
+    }
+
+    # Convert each block's Rows list to an array, and compute summaries.
+    $entryArray = @()
+    $rowsPerOs  = [ordered]@{}
+    $totalCount = 0
+    $recogCount = 0
+    foreach ($block in $blockList) {
+        $totalCount++
+        $rowArray = @($block.Rows.ToArray())
+        $blockOut = [pscustomobject]@{
+            OsLabel       = $block.OsLabel
+            OsNormalised  = $block.OsNormalised
+            OsOfferingKb  = $block.OsOfferingKb
+            Rows          = $rowArray
+        }
+        $entryArray += $blockOut
+        if (-not [string]::IsNullOrEmpty($block.OsNormalised)) {
+            $recogCount++
+            $rowsPerOs[$block.OsNormalised] = $rowArray.Count
+        }
+    }
+
+    return [pscustomobject]@{
+        EntryCountTotal      = $totalCount
+        EntryCountRecognised = $recogCount
+        RowsPerOs            = $rowsPerOs
+        Entries              = $entryArray
+    }
+}
+
+function Invoke-DotNetCuFetch {
+    <#
+    .SYNOPSIS
+        Fetch the .NET Framework release-notes index plus every monthly
+        cumulative-update page referenced by the index, and write the
+        aggregated bodies plus per-fetch metadata to
+        data/raw-dotnet-cu.json.
+    .DESCRIPTION
+        Returns the path of the raw JSON file. Throws on any non-200
+        HTTP response from the index fetch (a per-month fetch that
+        fails is recorded as a Failed entry in the aggregate so the
+        rest of the months are still captured).
+
+        The caller (typically a refresh action) is expected to invoke
+        Update-DotNetCuCache afterwards to derive the parsed cache.
+    #>
+    [OutputType([string])]
+    param(
+        [string]$IndexUrl   = $Script:DotNetCuIndexUrl,
+        [int]   $TimeoutSec = 30
+    )
+
+    $rawPath = Get-DotNetCuRawPath
+    $dataDir = Split-Path -Parent $rawPath
+    if (-not (Test-Path -LiteralPath $dataDir -PathType Container)) {
+        New-Item -Path $dataDir -ItemType Directory -Force | Out-Null
+    }
+
+    Write-Step ('Fetching .NET CU index: {0}' -f $IndexUrl)
+
+    $indexResp = Invoke-WebRequest `
+        -Uri $IndexUrl `
+        -Method Get `
+        -UserAgent $Script:DotNetCuUserAgent `
+        -TimeoutSec $TimeoutSec `
+        -UseBasicParsing
+    if ($indexResp.StatusCode -ne 200) {
+        throw ('.NET CU index fetch failed: HTTP {0} from {1}' -f $indexResp.StatusCode, $IndexUrl)
+    }
+
+    $indexBody = $indexResp.Content
+    if ($null -eq $indexBody) {
+        throw ('.NET CU index fetch returned empty body from {0}' -f $IndexUrl)
+    }
+    $indexBody = ($indexBody -replace "`r`n", "`n")
+    if (-not $indexBody.EndsWith("`n")) { $indexBody = $indexBody + "`n" }
+
+    $indexHeaders = New-Object 'System.Collections.Specialized.OrderedDictionary'
+    foreach ($k in $indexResp.Headers.Keys) {
+        $indexHeaders[$k.ToLower()] = [string]($indexResp.Headers[$k])
+    }
+
+    # Parse the index inline so we know which month URLs to fetch.
+    $indexParsed = ConvertFrom-DotNetCuIndexMarkdown -Markdown $indexBody
+
+    Write-Step ('  Index entries: {0}' -f $indexParsed.EntryCount)
+
+    $monthList = New-Object 'System.Collections.Generic.List[pscustomobject]'
+    foreach ($entry in $indexParsed.Entries) {
+        $monthUrl = $entry.AbsoluteUrl + '?accept=text/markdown'
+        $monthBody    = ''
+        $monthOk      = $false
+        $monthStatus  = 0
+        $monthError   = ''
+        $monthHeaders = New-Object 'System.Collections.Specialized.OrderedDictionary'
+        try {
+            $monthResp = Invoke-WebRequest `
+                -Uri $monthUrl `
+                -Method Get `
+                -UserAgent $Script:DotNetCuUserAgent `
+                -TimeoutSec $TimeoutSec `
+                -UseBasicParsing
+            $monthStatus = [int]$monthResp.StatusCode
+            if ($monthStatus -eq 200) {
+                $monthBody = $monthResp.Content
+                $monthBody = ($monthBody -replace "`r`n", "`n")
+                if (-not $monthBody.EndsWith("`n")) { $monthBody = $monthBody + "`n" }
+                foreach ($k in $monthResp.Headers.Keys) {
+                    $monthHeaders[$k.ToLower()] = [string]($monthResp.Headers[$k])
+                }
+                $monthOk = $true
+            }
+            else {
+                $monthError = ('HTTP {0}' -f $monthStatus)
+            }
+        }
+        catch {
+            $monthError = $_.Exception.Message
+        }
+        $monthList.Add([pscustomobject]@{
+            Date        = $entry.Date
+            DateText    = $entry.DateText
+            Kind        = $entry.Kind
+            RelativeUrl = $entry.RelativeUrl
+            AbsoluteUrl = $entry.AbsoluteUrl
+            FetchUrl    = $monthUrl
+            Ok          = $monthOk
+            StatusCode  = $monthStatus
+            ErrorText   = $monthError
+            Headers     = $monthHeaders
+            Markdown    = $monthBody
+        })
+    }
+
+    $okCount = @($monthList | Where-Object { $_.Ok }).Count
+    Write-Ok ('  monthly pages fetched ok: {0} of {1}' -f $okCount, $monthList.Count)
+
+    $rawAggregate = [pscustomobject]@{
+        Schema      = '1.0'
+        SourceUrl   = $IndexUrl
+        FetchedAt   = (Get-Date).ToUniversalTime().ToString('o')
+        UserAgent   = $Script:DotNetCuUserAgent
+        IndexBody   = $indexBody
+        IndexBytes  = [System.Text.Encoding]::UTF8.GetByteCount($indexBody)
+        IndexHeaders = $indexHeaders
+        Months      = @($monthList.ToArray())
+    }
+
+    $rawJson = ($rawAggregate | ConvertTo-Json -Depth 12) -replace "`r`n", "`n"
+    if (-not $rawJson.EndsWith("`n")) { $rawJson = $rawJson + "`n" }
+    [System.IO.File]::WriteAllBytes($rawPath, [System.Text.Encoding]::UTF8.GetBytes($rawJson))
+
+    Write-Ok ('  raw-dotnet-cu.json    : {0} bytes' -f ([System.Text.Encoding]::UTF8.GetByteCount($rawJson)))
+    return $rawPath
+}
+
+function Update-DotNetCuCache {
+    <#
+    .SYNOPSIS
+        Read data/raw-dotnet-cu.json, parse the index plus every
+        captured monthly page, and write the parsed structured form to
+        data/cache-dotnet-cu.json.
+    .DESCRIPTION
+        Returns the cache path. Throws if the raw file is missing
+        (caller must run Invoke-DotNetCuFetch first).
+    #>
+    [OutputType([string])]
+    param()
+
+    $rawPath = Get-DotNetCuRawPath
+    if (-not (Test-Path -LiteralPath $rawPath -PathType Leaf)) {
+        throw ('.NET CU raw file not found at "{0}". Run Invoke-DotNetCuFetch first.' -f $rawPath)
+    }
+
+    $rawBytes = [System.IO.File]::ReadAllBytes($rawPath)
+    $rawJson  = [System.Text.Encoding]::UTF8.GetString($rawBytes)
+    $rawAggr  = $rawJson | ConvertFrom-Json
+
+    $indexParsed = ConvertFrom-DotNetCuIndexMarkdown -Markdown $rawAggr.IndexBody
+
+    $monthParsedList = New-Object 'System.Collections.Generic.List[pscustomobject]'
+    foreach ($monthRaw in $rawAggr.Months) {
+        $monthEntries = @()
+        $monthSummary = $null
+        if ($monthRaw.Ok -and -not [string]::IsNullOrEmpty($monthRaw.Markdown)) {
+            $monthSummary = ConvertFrom-DotNetCuMarkdown -Markdown $monthRaw.Markdown
+            $monthEntries = $monthSummary.Entries
+        }
+        $monthParsedList.Add([pscustomobject]@{
+            Date        = $monthRaw.Date
+            DateText    = $monthRaw.DateText
+            Kind        = $monthRaw.Kind
+            RelativeUrl = $monthRaw.RelativeUrl
+            AbsoluteUrl = $monthRaw.AbsoluteUrl
+            Ok          = $monthRaw.Ok
+            StatusCode  = $monthRaw.StatusCode
+            ErrorText   = $monthRaw.ErrorText
+            Entries     = @($monthEntries)
+        })
+    }
+
+    $cacheOut = [pscustomobject]@{
+        Schema             = '1.0'
+        GeneratedAt        = (Get-Date).ToUniversalTime().ToString('o')
+        SourceFetchedAt    = $rawAggr.FetchedAt
+        IndexSummary       = [pscustomobject]@{
+            EntryCount   = $indexParsed.EntryCount
+            Kinds        = $indexParsed.Kinds
+            EarliestDate = $indexParsed.EarliestDate
+            LatestDate   = $indexParsed.LatestDate
+        }
+        Months             = @($monthParsedList.ToArray())
+    }
+
+    $cachePath = Get-DotNetCuCachePath
+    $cacheJson = ($cacheOut | ConvertTo-Json -Depth 32) -replace "`r`n", "`n"
+    if (-not $cacheJson.EndsWith("`n")) { $cacheJson = $cacheJson + "`n" }
+    [System.IO.File]::WriteAllBytes($cachePath, [System.Text.Encoding]::UTF8.GetBytes($cacheJson))
+
+    Write-Ok ('  cache-dotnet-cu.json : {0} months, {1} bytes' -f $monthParsedList.Count, ([System.Text.Encoding]::UTF8.GetByteCount($cacheJson)))
+    return $cachePath
+}
+
+function Get-DotNetCuCache {
+    <#
+    .SYNOPSIS
+        Read data/cache-dotnet-cu.json and return the deserialised
+        object. Throws if the file is missing.
+    .DESCRIPTION
+        Refresher consumers call this to read the cache without
+        re-parsing the raw aggregate on every build.
+    #>
+    [OutputType([pscustomobject])]
+    param()
+    $cachePath = Get-DotNetCuCachePath
+    if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
+        throw ('.NET CU cache not found at "{0}". Run Update-DotNetCuCache first.' -f $cachePath)
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($cachePath)
+    $json  = [System.Text.Encoding]::UTF8.GetString($bytes)
+    return ($json | ConvertFrom-Json)
+}
+
+# ============================================================
 # ISO Updater specific: Microsoft Update Catalog scraper
 # ============================================================
 #

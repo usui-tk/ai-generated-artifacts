@@ -1,0 +1,200 @@
+{
+  "entry_count_total": 14,
+  "entry_count_recognised": 7,
+  "rows_per_os": {
+    "Server2025": 1,
+    "Server23H2": 1,
+    "Server2022": 2,
+    "Server2019": 2,
+    "Server2016": 2,
+    "Server2012R2": 3,
+    "Server2012": 3
+  },
+  "entries": [
+    {
+      "os_label": "Windows 11, version 26H1",
+      "os_normalised": "",
+      "os_offering_kb": "",
+      "rows": [
+        {
+          "dotnet_versions": "4.8.1",
+          "kb_id": "KB5082421"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows 11, version 25H2",
+      "os_normalised": "",
+      "os_offering_kb": "",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.8.1",
+          "kb_id": "KB5082417"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows 11, version 24H2",
+      "os_normalised": "",
+      "os_offering_kb": "",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.8.1",
+          "kb_id": "KB5082420"
+        }
+      ]
+    },
+    {
+      "os_label": "Microsoft server operating system, version 24H2",
+      "os_normalised": "Server2025",
+      "os_offering_kb": "",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.8.1",
+          "kb_id": "KB5082417"
+        }
+      ]
+    },
+    {
+      "os_label": "Microsoft server operating system, version 23H2",
+      "os_normalised": "Server23H2",
+      "os_offering_kb": "",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.8.1",
+          "kb_id": "KB5082418"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows 11, version 22H2 and Windows 11, version 23H2",
+      "os_normalised": "",
+      "os_offering_kb": "",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.8.1",
+          "kb_id": "KB5082424"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows Server 2022",
+      "os_normalised": "Server2022",
+      "os_offering_kb": "KB5084071",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.8",
+          "kb_id": "KB5082427"
+        },
+        {
+          "dotnet_versions": "3.5, 4.8.1",
+          "kb_id": "KB5082425"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows 10, version 22H2",
+      "os_normalised": "",
+      "os_offering_kb": "KB5084068",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.8",
+          "kb_id": "KB5082426"
+        },
+        {
+          "dotnet_versions": "3.5, 4.8.1",
+          "kb_id": "KB5082419"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows 10, version 21H2",
+      "os_normalised": "",
+      "os_offering_kb": "KB5084067",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.8",
+          "kb_id": "KB5082426"
+        },
+        {
+          "dotnet_versions": "3.5, 4.8.1",
+          "kb_id": "KB5082419"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows 10 1809 and Windows Server 2019",
+      "os_normalised": "Server2019",
+      "os_offering_kb": "KB5084066",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.7.2",
+          "kb_id": "KB5082413"
+        },
+        {
+          "dotnet_versions": "3.5, 4.8",
+          "kb_id": "KB5082414"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows 10 1607 and Windows Server 2016",
+      "os_normalised": "Server2016",
+      "os_offering_kb": "",
+      "rows": [
+        {
+          "dotnet_versions": "3.5, 4.6.2, 4.7, 4.7.1, 4.7.2",
+          "kb_id": "KB5082198"
+        },
+        {
+          "dotnet_versions": "4.8",
+          "kb_id": "KB5082411"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows Server 2012 R2",
+      "os_normalised": "Server2012R2",
+      "os_offering_kb": "KB5084070",
+      "rows": [
+        {
+          "dotnet_versions": "3.5",
+          "kb_id": "KB5082406"
+        },
+        {
+          "dotnet_versions": "4.6.2, 4.7, 4.7.1, 4.7.2",
+          "kb_id": "KB5082402"
+        },
+        {
+          "dotnet_versions": "4.8",
+          "kb_id": "KB5082404"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows Server 2012",
+      "os_normalised": "Server2012",
+      "os_offering_kb": "KB5084069",
+      "rows": [
+        {
+          "dotnet_versions": "3.5",
+          "kb_id": "KB5082398"
+        },
+        {
+          "dotnet_versions": "4.6.2, 4.7, 4.7.1, 4.7.2",
+          "kb_id": "KB5082400"
+        },
+        {
+          "dotnet_versions": "4.8",
+          "kb_id": "KB5082403"
+        }
+      ]
+    },
+    {
+      "os_label": "Windows 11, version 26H1",
+      "os_normalised": "",
+      "os_offering_kb": "KB5084165",
+      "rows": []
+    }
+  ]
+}

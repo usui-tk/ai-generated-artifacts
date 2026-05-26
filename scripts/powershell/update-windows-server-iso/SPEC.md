@@ -2815,6 +2815,16 @@ This project does not auto-detect target firmware (the target is by definition n
 | `ConvertFrom-ReleaseInfoMarkdown` (r07.0) | Strict parser; returns MonthlyReleases + HotpatchCalendar arrays |
 | `Update-ReleaseInfoCache` (r07.0) | Read `raw-release-info.md`, parse, write `cache-release-info.json` |
 | `Get-ReleaseInfoCache` (r07.0) | Read deserialised `cache-release-info.json` for Refresher consumers |
+| **.NET CU support (r07.0 Step 2a)** ||
+| `Get-DotNetCuRawPath` (r07.0) | Resolve `data/raw-dotnet-cu.json` |
+| `Get-DotNetCuCachePath` (r07.0) | Resolve `data/cache-dotnet-cu.json` |
+| `ConvertFrom-DotNetCuOsLabel` (r07.0) | Map raw OS label as printed in the release-notes table to a normalised short name (e.g. `Server2025`); empty string when unrecognised |
+| `Split-DotNetCuMarkdownFrontMatter` (r07.0) | Strip the YAML front matter block from a Microsoft Learn Markdown body |
+| `ConvertFrom-DotNetCuIndexMarkdown` (r07.0) | Parse the index page; returns EntryCount/Kinds/EarliestDate/LatestDate/Entries[]; tolerates the `**New Release**` trailing badge and date typos |
+| `ConvertFrom-DotNetCuMarkdown` (r07.0) | Parse a monthly page; walks from `## Summary tables` to next `## ` heading or EOF; emits per-OS table blocks with OsLabel/OsNormalised/OsOfferingKb/Rows[] |
+| `Invoke-DotNetCuFetch` (r07.0) | Fetch the release-notes index plus every monthly page it references; write the aggregated body and per-fetch metadata to `data/raw-dotnet-cu.json` |
+| `Update-DotNetCuCache` (r07.0) | Read `raw-dotnet-cu.json`, parse every captured month, write `cache-dotnet-cu.json` |
+| `Get-DotNetCuCache` (r07.0) | Read deserialised `cache-dotnet-cu.json` for Refresher consumers |
 
 ---
 
@@ -2840,6 +2850,7 @@ PowerShell 7+. No `pip install` is required.
 | `tests/eval_iso_probe.py`       (T4) | HTTP Range-GET against every `LanguageSpecific.<lang>.Iso.Url` in each `data/config-Server<N>.json`; reports total size and `Last-Modified`. Detects snapshot rotation (see §D.11). | Yes |
 | `tests/wsusscn2_probe.py`       (T5) | HTTP Range-GET against `wsusscn2.cab`; warns when the cab is older than 60 days. Detects egress-proxy `host_not_allowed` and reports it separately from real Microsoft outages. | Yes |
 | `tests/release_info_parser_test.py` (T6) | Offline regression test for `ConvertFrom-ReleaseInfoMarkdown`. Parses `tests/snapshots/poc_release_info/release-info-<date>.md` via the TestHarness and asserts row counts (total + per-OS), KbId-parse coverage, and IsBaseline detection against the PoC reference fixture `tests/fixtures/poc_release_info/release-info.json`. Added in r07.0 Step 2a as the regression gate for the PowerShell port of `poc_release_info_02_parse.py`. | No  |
+| `tests/dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown`. Parses the live-captured snapshots under `tests/snapshots/dotnet_cu/` (index plus two monthly pages) via the TestHarness and asserts EntryCount / EarliestDate / LatestDate / Kinds / per-OS row counts / per-entry deep equality against the Python reference fixtures under `tests/fixtures/dotnet_cu/`. Reference data was captured live from learn.microsoft.com on 2026-05-26 and intentionally does not depend on the PoC fixtures under `tests/snapshots/poc_dotnet_cu/`, which reflect an older page structure. | No  |
 
 `tests/common/` holds:
 

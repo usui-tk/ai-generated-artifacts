@@ -1,0 +1,215 @@
+{
+  "entry_count": 29,
+  "kinds": [
+    "cumulative update",
+    "cumulative update preview",
+    "security and quality rollup"
+  ],
+  "earliest_date": "2024-01-09",
+  "latest_date": "2026-05-12",
+  "entries": [
+    {
+      "date_text": "May 12, 2026",
+      "date": "2026-05-12",
+      "kind": "cumulative update",
+      "relative_url": "2026/05-12-may-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update"
+    },
+    {
+      "date_text": "April 14, 2026",
+      "date": "2026-04-14",
+      "kind": "cumulative update",
+      "relative_url": "2026/04-14-april-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/04-14-april-cumulative-update"
+    },
+    {
+      "date_text": "February 10, 2026",
+      "date": "2026-02-10",
+      "kind": "cumulative update",
+      "relative_url": "2026/02-10-february-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/02-10-february-cumulative-update"
+    },
+    {
+      "date_text": "January 29, 2026",
+      "date": "2026-01-29",
+      "kind": "cumulative update preview",
+      "relative_url": "2026/01-29-january-cumulative-update-preview",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/01-29-january-cumulative-update-preview"
+    },
+    {
+      "date_text": "October 28, 2025",
+      "date": "2025-10-28",
+      "kind": "cumulative update preview",
+      "relative_url": "2025/10-28-october-cumulative-update-preview",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/10-28-october-cumulative-update-preview"
+    },
+    {
+      "date_text": "October 14, 2025",
+      "date": "2025-10-14",
+      "kind": "cumulative update",
+      "relative_url": "2025/10-14-october-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/10-14-october-cumulative-update"
+    },
+    {
+      "date_text": "September 9, 2025",
+      "date": "2025-09-09",
+      "kind": "cumulative update",
+      "relative_url": "2025/09-09-september-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/09-09-september-cumulative-update"
+    },
+    {
+      "date_text": "August 26, 2025",
+      "date": "2025-08-26",
+      "kind": "cumulative update preview",
+      "relative_url": "2025/08-26-august-cumulative-update-preview",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/08-26-august-cumulative-update-preview"
+    },
+    {
+      "date_text": "July 8, 2025",
+      "date": "2025-07-08",
+      "kind": "cumulative update",
+      "relative_url": "2025/07-08-july-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/07-08-july-cumulative-update"
+    },
+    {
+      "date_text": "April 22, 2025",
+      "date": "2025-04-22",
+      "kind": "cumulative update preview",
+      "relative_url": "2025/04-22-april-cumulative-update-preview",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/04-22-april-cumulative-update-preview"
+    },
+    {
+      "date_text": "April 8, 2025",
+      "date": "2025-04-08",
+      "kind": "cumulative update",
+      "relative_url": "2025/04-08-april-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/04-08-april-cumulative-update"
+    },
+    {
+      "date_text": "March 25, 2025",
+      "date": "2025-03-25",
+      "kind": "cumulative update preview",
+      "relative_url": "2025/03-25-march-cumulative-update-preview",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/03-25-march-cumulative-update-preview"
+    },
+    {
+      "date_text": "January 28, 2025",
+      "date": "2025-01-28",
+      "kind": "cumulative update preview",
+      "relative_url": "2025/01-28-january-cumulative-update-preview",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/01-28-january-cumulative-update-preview"
+    },
+    {
+      "date_text": "January 14, 2025",
+      "date": "2025-01-14",
+      "kind": "cumulative update",
+      "relative_url": "2025/01-14-january-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2025/01-14-january-cumulative-update"
+    },
+    {
+      "date_text": "November 21, 2024",
+      "date": "2024-11-21",
+      "kind": "cumulative update preview",
+      "relative_url": "2024/11-21-november-preview-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/11-21-november-preview-cumulative-update"
+    },
+    {
+      "date_text": "November 12, 2024",
+      "date": "2024-11-12",
+      "kind": "security and quality rollup",
+      "relative_url": "2024/11-12-november-security-and-quality-rollup",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/11-12-november-security-and-quality-rollup"
+    },
+    {
+      "date_text": "Octber 22, 2024",
+      "date": "",
+      "kind": "cumulative update preview",
+      "relative_url": "2024/10-22-october-preview-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/10-22-october-preview-cumulative-update"
+    },
+    {
+      "date_text": "October 8, 2024",
+      "date": "2024-10-08",
+      "kind": "security and quality rollup",
+      "relative_url": "2024/10-08-october-security-and-quality-rollup",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/10-08-october-security-and-quality-rollup"
+    },
+    {
+      "date_text": "August 13, 2024",
+      "date": "2024-08-13",
+      "kind": "security and quality rollup",
+      "relative_url": "2024/08-13-august-security-and-quality-rollup",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/08-13-august-security-and-quality-rollup"
+    },
+    {
+      "date_text": "July 25, 2024",
+      "date": "2024-07-25",
+      "kind": "cumulative update preview",
+      "relative_url": "2024/07-25-july-preview-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/07-25-july-preview-cumulative-update"
+    },
+    {
+      "date_text": "July 9, 2024",
+      "date": "2024-07-09",
+      "kind": "security and quality rollup",
+      "relative_url": "2024/07-09-july-security-and-quality-rollup",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/07-09-july-security-and-quality-rollup"
+    },
+    {
+      "date_text": "June 25, 2024",
+      "date": "2024-06-25",
+      "kind": "cumulative update preview",
+      "relative_url": "2024/06-25-june-preview-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/06-25-june-preview-cumulative-update"
+    },
+    {
+      "date_text": "May 14, 2024",
+      "date": "2024-05-14",
+      "kind": "security and quality rollup",
+      "relative_url": "2024/05-14-may-security-and-quality-rollup",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/05-14-may-security-and-quality-rollup"
+    },
+    {
+      "date_text": "April 23, 2024",
+      "date": "2024-04-23",
+      "kind": "cumulative update preview",
+      "relative_url": "2024/04-23-april-preview-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/04-23-april-preview-cumulative-update"
+    },
+    {
+      "date_text": "April 9, 2024",
+      "date": "2024-04-09",
+      "kind": "security and quality rollup",
+      "relative_url": "2024/04-09-april-security-and-quality-rollup",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/04-09-april-security-and-quality-rollup"
+    },
+    {
+      "date_text": "March 26, 2024",
+      "date": "2024-03-26",
+      "kind": "cumulative update preview",
+      "relative_url": "2024/03-26-march-preview-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/03-26-march-preview-cumulative-update"
+    },
+    {
+      "date_text": "February 14, 2024",
+      "date": "2024-02-14",
+      "kind": "security and quality rollup",
+      "relative_url": "2024/02-14-february-security-and-quality-rollup",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/02-14-february-security-and-quality-rollup"
+    },
+    {
+      "date_text": "January 23, 2024",
+      "date": "2024-01-23",
+      "kind": "cumulative update preview",
+      "relative_url": "2024/01-23-january-preview-cumulative-update",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/01-23-january-preview-cumulative-update"
+    },
+    {
+      "date_text": "January 9, 2024",
+      "date": "2024-01-09",
+      "kind": "security and quality rollup",
+      "relative_url": "2024/01-09-january-security-and-quality-rollup",
+      "absolute_url": "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2024/01-09-january-security-and-quality-rollup"
+    }
+  ]
+}

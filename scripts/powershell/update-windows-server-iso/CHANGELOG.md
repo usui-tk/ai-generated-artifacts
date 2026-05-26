@@ -16,7 +16,139 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 2a (release-info part) - PowerShell port of the release-info parser (this release)
+### r07.0 Step 2a (.NET CU part) - PowerShell parser and aggregated raw/cache for the .NET Framework release-notes (this release)
+
+This commit lands the **second half** of the Step 2a work
+scheduled in SPEC.md section B.23.1. New PowerShell functions
+fetch and parse the Microsoft Learn `.NET Framework release
+information` index plus every monthly cumulative-update
+release-notes page it references, writing an aggregated raw JSON
+and a parsed cache JSON under `data/`. The existing Refresher
+main path (`Resolve-PatchSetFromCatalog`) is **untouched** and
+continues to drive `-Action RefreshAllBaselines`. The Dynamic
+Update 36-month cache (per-OS `cache-du-Server<NNNN>.json`) and
+the Catalog URL-resolver narrowing are scheduled for subsequent
+r07.0 commits.
+
+**Important: the data captured for the new parser was fetched
+live from learn.microsoft.com on 2026-05-26**, not lifted from
+the PoC snapshots under `tests/snapshots/poc_dotnet_cu/`. Doing
+so surfaced two PoC-era assumptions that no longer hold against
+current Microsoft Learn pages:
+
+1. The index page now formats each entry as
+   `- <DATE> - [<KIND>](<URL>)` (the date is **outside** the
+   bracket pair and only the kind text is linked). The original
+   PoC regex expected `- [<DATE> - <KIND>](<URL>)` and would
+   match zero entries on the current page.
+2. The monthly pages now place `## Summary tables` AFTER
+   `## Known issues in this release`. The original PoC parser
+   used `## Known issues` as the stop-marker for the
+   tables-region walk, which on the current page would close the
+   region before it ever opened. The new parser starts at
+   `## Summary tables` and walks to the next `## ` heading or
+   end-of-document.
+
+The parser also tolerates the `**New Release**` badge that the
+most-recent entry on the index carries, and preserves entries
+whose strict %B date parse fails (the live index contains a
+2024-10 entry typed "Octber 22, 2024" upstream).
+
+**New PowerShell functions** (added to `Update-WindowsServerIso.ps1`
+between `Get-ReleaseInfoCache` and the Microsoft Update Catalog
+scraper section):
+
+- `Get-DotNetCuRawPath` / `Get-DotNetCuCachePath` — path resolvers
+  for the two new files under `data/`.
+- `ConvertFrom-DotNetCuOsLabel` — maps the raw OS label printed
+  in the release-notes table to a normalised short name (e.g.
+  "Microsoft server operating system, version 24H2" -> `Server2025`).
+  Order-sensitive substring matching: longer joint labels
+  ("Windows 10 1607 and Windows Server 2016") win against the
+  shorter pattern they contain.
+- `Split-DotNetCuMarkdownFrontMatter` — strips the leading YAML
+  block from a `?accept=text/markdown` response.
+- `ConvertFrom-DotNetCuIndexMarkdown` — parses the index page;
+  returns `EntryCount` / `Kinds` / `EarliestDate` / `LatestDate`
+  / `Entries[]` with per-entry `DateText` / `Date` / `Kind` /
+  `RelativeUrl` / `AbsoluteUrl`.
+- `ConvertFrom-DotNetCuMarkdown` — parses a monthly page; emits
+  `EntryCountTotal` / `EntryCountRecognised` / `RowsPerOs`
+  (ordered hashtable) / `Entries[]` with per-OS-block `OsLabel`
+  / `OsNormalised` / `OsOfferingKb` / `Rows[]`. Multiple
+  sub-tables under the same `## Summary tables` heading are
+  handled (current 2026-05 pages list three: Cumulative update,
+  Security and quality rollup, .NET Framework 3.5 product
+  update).
+- `Invoke-DotNetCuFetch` — HTTPS fetch of the index URL plus
+  every monthly URL it lists. Aggregates the bodies + HTTP
+  headers + fetch timestamps into `data/raw-dotnet-cu.json`
+  (UTF-8, LF, no-BOM). Per-month fetch failures are recorded as
+  `Ok=false` entries with the error message so a single broken
+  month does not lose the whole refresh.
+- `Update-DotNetCuCache` — reads `raw-dotnet-cu.json`, runs both
+  parsers, writes `data/cache-dotnet-cu.json`. Returns the cache
+  path.
+- `Get-DotNetCuCache` — reads `cache-dotnet-cu.json` for
+  Refresher consumers. Throws if the file is missing.
+
+**New Script-level variables**:
+
+- `$Script:DotNetCuIndexUrl` — the index URL with the
+  `?accept=text/markdown` query.
+- `$Script:DotNetCuUrlBase` — used by the index parser to
+  reconstruct absolute URLs from relative paths.
+- `$Script:DotNetCuUserAgent` — a descriptive User-Agent string
+  identifying this subproject.
+- `$Script:DotNetCuOsLongToShort` — an ordered hashtable mapping
+  the long OS label substrings to the short names.
+
+**Refresher main path NOT changed**. The existing path
+(`Resolve-PatchSetFromCatalog`, `Get-CatalogQueryTemplate`,
+`Get-UpdateIdFromCatalog`, the Refresher action workers) is
+unaffected by this commit. Switching the Refresher to consume
+`cache-dotnet-cu.json` instead of live-scraping is scheduled for
+a later r07.0 commit (Step 2b).
+
+**New files committed to the repo**:
+
+- `data/` — no production cache file is committed in this
+  commit; production runs that invoke `Invoke-DotNetCuFetch` will
+  write `raw-dotnet-cu.json` and `cache-dotnet-cu.json` on demand
+  under the Patch-Tuesday-triggered model (SPEC.md §B.23.7).
+- `tests/snapshots/dotnet_cu/index.md` — live capture of the
+  Microsoft Learn `.NET Framework release information` index
+  page (`?accept=text/markdown`) on 2026-05-26.
+- `tests/snapshots/dotnet_cu/2026-05-12-may-cumulative-update.md`
+  — live capture of the May 2026 monthly CU page.
+- `tests/snapshots/dotnet_cu/2026-04-14-april-cumulative-update.md`
+  — live capture of the April 2026 monthly CU page.
+- The three `.meta.json` siblings carrying `captured_at`,
+  `source_url`, `user_agent`, and `byte_count`.
+- `tests/fixtures/dotnet_cu/index.json`,
+  `tests/fixtures/dotnet_cu/month-2026-05.json`,
+  `tests/fixtures/dotnet_cu/month-2026-04.json` — the Python
+  reference parser output that defines what the PowerShell
+  parsers must reproduce.
+
+**New regression test**: `tests/dotnet_cu_parser_test.py` (T7).
+Covers 16 assertions across the index parser (EntryCount,
+EarliestDate, LatestDate, Kinds, per-entry deep equality across
+all 29 entries, typo-entry preservation), the monthly parser
+(EntryCountTotal, EntryCountRecognised, RowsPerOs, Server2022
+block deep check, cross-month regression on 2026-04), and the
+OS-label mapper (two production-scope labels plus an
+unrecognised one). Runs against the fresh snapshots/fixtures
+described above and is intentionally independent of the PoC
+fixtures under `tests/snapshots/poc_dotnet_cu/`. **All 16
+assertions pass** under PowerShell 7.4 on Ubuntu 24.
+
+**Quality-gate status**: psa.py 0 / 0 / 0, PSScriptAnalyzer 0
+findings, PowerShell parse OK, T2 13/13, T3 13/13, T6 13/13, T7
+16/16. The PoC scripts and PoC snapshot/fixture directories are
+unchanged.
+
+### r07.0 Step 2a (release-info part) - PowerShell port of the release-info parser (previous release)
 
 This commit lands the **first half** of the Step 2 work scheduled
 in SPEC.md section B.23.1. New PowerShell functions parse the
