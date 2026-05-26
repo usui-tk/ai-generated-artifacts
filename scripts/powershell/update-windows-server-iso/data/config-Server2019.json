@@ -1,105 +1,188 @@
 {
-  "Schema": "2.1",
-  "OsKey": "Server2019",
-  "Common": {
-    "Build": 17763,
-    "OsShortName": "WS2019",
-    "Edition": "Datacenter",
-    "Architecture": "x64",
-    "WimEdition": "Windows Server 2019 Datacenter (Desktop Experience)",
-    "InstallWimIndex": 4,
-    "BootWimIndexes": [
-      1,
-      2
-    ],
-    "WinReWimPath": "Windows\\System32\\Recovery\\Winre.wim",
-    "SupportedLanguages": [
-      "en-us",
-      "ja-jp"
-    ],
-    "DefaultLanguage": "en-us",
-    "LCUExpandViaMum": false,
-    "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy": "manual:initial-r03",
-    "CatalogTitleTokens": [
-      "Windows Server 2019"
-    ]
-  },
-  "PatchBaseline": {
-    "Schema": "2.0",
-    "TargetBuildAfterUpdate": "17763.8511",
-    "PatchTuesdayOfBaseline": "",
-    "LastVerifiedDate": "",
-    "LastVerifiedBy": "",
-    "VerificationMethod": "",
-    "ChecksumAlgorithm": "SHA256",
-    "NeutralPatches": [],
-    "ExcludeKbList": [],
-    "WsusScnCab": {
-      "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
-      "LocalCachePath": "",
-      "LastDownloadedDate": "",
-      "LastDownloadedSha256": "",
-      "LastDownloadedSizeBytes": 0
-    }
-  },
-  "Pca2023": {
-    "RequiredByDefault": true,
-    "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
-    "RequiredUpdateLevelMinDate": "2024-04-09",
-    "NotesSource": [
-      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f"
-    ],
-    "Notes": "Make2023BootableMedia.ps1 is officially supported for Server 2019. Required source media must include 2024-4B LCU."
-  },
-  "AutoRefreshPolicy": {
-    "Mode": "OnNewPatchTuesday",
-    "WritebackToConfig": true,
-    "FallbackOnScrapeFailure": "UseBaseline",
-    "ScrapeRetries": 3
-  },
-  "LanguageSpecific": {
-    "en-us": {
-      "DisplayName": "English (United States)",
-      "Iso": {
-        "FileName": "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
-        "Url": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
-        "Sha256": "",
-        "SizeBytes": 0,
-        "ReleaseDate": "",
-        "_VerifiedDate": "",
-        "_VerifiedBy": ""
-      },
-      "VolumeLabelPrefix": "WS2019EN",
-      "LanguageSpecificPatches": {
-        "PatchTuesdayOfBaseline": "",
-        "LastVerifiedDate": "",
-        "LastVerifiedBy": "",
-        "LanguagePacks": [],
-        "LxpUpdates": [],
-        "DotNetLanguagePacks": []
-      }
-    },
-    "ja-jp": {
-      "DisplayName": "Japanese",
-      "Iso": {
-        "FileName": "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
-        "Url": "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
-        "Sha256": "",
-        "SizeBytes": 0,
-        "ReleaseDate": "",
-        "_VerifiedDate": "",
-        "_VerifiedBy": ""
-      },
-      "VolumeLabelPrefix": "WS2019JA",
-      "LanguageSpecificPatches": {
-        "PatchTuesdayOfBaseline": "",
-        "LastVerifiedDate": "",
-        "LastVerifiedBy": "",
-        "LanguagePacks": [],
-        "LxpUpdates": [],
-        "DotNetLanguagePacks": []
-      }
-    }
-  }
+    "Schema":  "2.1",
+    "OsKey":  "Server2019",
+    "Common":  {
+                   "Build":  17763,
+                   "OsShortName":  "WS2019",
+                   "Edition":  "Datacenter",
+                   "Architecture":  "x64",
+                   "WimEdition":  "Windows Server 2019 Datacenter (Desktop Experience)",
+                   "InstallWimIndex":  4,
+                   "BootWimIndexes":  [
+                                          1,
+                                          2
+                                      ],
+                   "WinReWimPath":  "Windows\\System32\\Recovery\\Winre.wim",
+                   "SupportedLanguages":  [
+                                              "en-us",
+                                              "ja-jp"
+                                          ],
+                   "DefaultLanguage":  "en-us",
+                   "LCUExpandViaMum":  false,
+                   "_VerifiedDate":  "2026-05-24T00:00:00+09:00",
+                   "_VerifiedBy":  "manual:initial-r03",
+                   "CatalogTitleTokens":  [
+                                              "Windows Server 2019"
+                                          ]
+               },
+    "PatchBaseline":  {
+                          "Schema":  "2.0",
+                          "TargetBuildAfterUpdate":  "17763.8511",
+                          "VerificationMethod":  "",
+                          "ChecksumAlgorithm":  "SHA256",
+                          "NeutralPatches":  [
+                                                 {
+                                                     "Type":  "LCU",
+                                                     "KbId":  "KB5087538",
+                                                     "Title":  "2026-05 Cumulative Update for Windows Server 2019 for x64-based Systems (KB5087538)",
+                                                     "UpdateId":  "5e7fd3ab-6410-4e19-9595-16d623ac4fab",
+                                                     "DownloadUrl":  "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/05/windows10.0-kb5087538-x64_86844c656b842c1c8bf11e6153e4edfb4e914853.msu",
+                                                     "FileName":  "windows10.0-kb5087538-x64_86844c656b842c1c8bf11e6153e4edfb4e914853.msu",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "",
+                                                     "Supersedes":  [
+                                                                        "KB5070883"
+                                                                    ],
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  3,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                                 "neutral"
+                                                                             ],
+                                                     "IsCombined":  true,
+                                                     "Variant":  "Full"
+                                                 },
+                                                 {
+                                                     "Type":  "DotNet.Runtime",
+                                                     "KbId":  "KB5087061",
+                                                     "Title":  "2026-05 Cumulative Update for .NET Framework 3.5 and 4.7.2 for Windows Server 2019 for x64 (KB5087061)",
+                                                     "UpdateId":  "8892678e-d841-4425-ac57-5cce8bdb116c",
+                                                     "DownloadUrl":  "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5087061-x64_25b4ce6e32862a6288609b4471ff1cd8e07d8e3f.msu",
+                                                     "FileName":  "windows10.0-kb5087061-x64_25b4ce6e32862a6288609b4471ff1cd8e07d8e3f.msu",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "",
+                                                     "Supersedes":  null,
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  6,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                                 "neutral"
+                                                                             ],
+                                                     "IsCombined":  false,
+                                                     "Variant":  "Full"
+                                                 },
+                                                 {
+                                                     "Type":  "DotNet.Runtime",
+                                                     "KbId":  "KB5087066",
+                                                     "Title":  "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows Server 2019 for x64 (KB5087066)",
+                                                     "UpdateId":  "b1fafef8-bd52-4962-8ed0-b382167fe120",
+                                                     "DownloadUrl":  "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5087066-x64-ndp48_086eed6e068d65a3e098311b5c742d745048d5fd.msu",
+                                                     "FileName":  "windows10.0-kb5087066-x64-ndp48_086eed6e068d65a3e098311b5c742d745048d5fd.msu",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "",
+                                                     "Supersedes":  null,
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  6,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                                 "neutral"
+                                                                             ],
+                                                     "IsCombined":  false,
+                                                     "Variant":  "Full"
+                                                 }
+                                             ],
+                          "ExcludeKbList":  [
+
+                                            ],
+                          "WsusScnCab":  {
+                                             "SourceUrl":  "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
+                                             "LocalCachePath":  "",
+                                             "LastDownloadedDate":  "",
+                                             "LastDownloadedSha256":  "",
+                                             "LastDownloadedSizeBytes":  0
+                                         },
+                          "LastVerifiedDate":  "2026-05-26T15:32:26.8691817+09:00",
+                          "LastVerifiedBy":  "auto:RefreshAllBaselines",
+                          "PatchTuesdayOfBaseline":  "2026-05-12"
+                      },
+    "Pca2023":  {
+                    "RequiredByDefault":  true,
+                    "RequiredUpdateLevelKb":  "2024-4B (April 2024 LCU) or later",
+                    "RequiredUpdateLevelMinDate":  "2024-04-09",
+                    "NotesSource":  [
+                                        "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f"
+                                    ],
+                    "Notes":  "Make2023BootableMedia.ps1 is officially supported for Server 2019. Required source media must include 2024-4B LCU."
+                },
+    "AutoRefreshPolicy":  {
+                              "Mode":  "OnNewPatchTuesday",
+                              "WritebackToConfig":  true,
+                              "FallbackOnScrapeFailure":  "UseBaseline",
+                              "ScrapeRetries":  3
+                          },
+    "LanguageSpecific":  {
+                             "en-us":  {
+                                           "DisplayName":  "English (United States)",
+                                           "Iso":  {
+                                                       "FileName":  "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
+                                                       "Url":  "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us_1.iso",
+                                                       "Sha256":  "",
+                                                       "SizeBytes":  0,
+                                                       "ReleaseDate":  "",
+                                                       "_VerifiedDate":  "",
+                                                       "_VerifiedBy":  ""
+                                                   },
+                                           "VolumeLabelPrefix":  "WS2019EN",
+                                           "LanguageSpecificPatches":  {
+                                                                           "LanguagePacks":  [
+
+                                                                                             ],
+                                                                           "LxpUpdates":  [
+
+                                                                                          ],
+                                                                           "DotNetLanguagePacks":  [
+
+                                                                                                   ],
+                                                                           "LastVerifiedDate":  "2026-05-26T15:32:28.3474886+09:00",
+                                                                           "LastVerifiedBy":  "auto:RefreshAllBaselines",
+                                                                           "PatchTuesdayOfBaseline":  "2026-05-12"
+                                                                       }
+                                       },
+                             "ja-jp":  {
+                                           "DisplayName":  "Japanese",
+                                           "Iso":  {
+                                                       "FileName":  "17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
+                                                       "Url":  "https://software-download.microsoft.com/download/pr/17763.737.190906-2324.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp_1.iso",
+                                                       "Sha256":  "",
+                                                       "SizeBytes":  0,
+                                                       "ReleaseDate":  "",
+                                                       "_VerifiedDate":  "",
+                                                       "_VerifiedBy":  ""
+                                                   },
+                                           "VolumeLabelPrefix":  "WS2019JA",
+                                           "LanguageSpecificPatches":  {
+                                                                           "LanguagePacks":  [
+
+                                                                                             ],
+                                                                           "LxpUpdates":  [
+
+                                                                                          ],
+                                                                           "DotNetLanguagePacks":  [
+
+                                                                                                   ],
+                                                                           "LastVerifiedDate":  "2026-05-26T15:32:29.6185231+09:00",
+                                                                           "LastVerifiedBy":  "auto:RefreshAllBaselines",
+                                                                           "PatchTuesdayOfBaseline":  "2026-05-12"
+                                                                       }
+                                       }
+                         }
 }

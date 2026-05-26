@@ -1,108 +1,215 @@
 {
-  "Schema": "2.1",
-  "OsKey": "Server2022",
-  "Common": {
-    "Build": 20348,
-    "OsShortName": "WS2022",
-    "Edition": "Datacenter",
-    "Architecture": "x64",
-    "WimEdition": "Windows Server 2022 Datacenter (Desktop Experience)",
-    "InstallWimIndex": 4,
-    "BootWimIndexes": [
-      1,
-      2
-    ],
-    "WinReWimPath": "Windows\\System32\\Recovery\\Winre.wim",
-    "SupportedLanguages": [
-      "en-us",
-      "ja-jp"
-    ],
-    "DefaultLanguage": "en-us",
-    "LCUExpandViaMum": false,
-    "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy": "manual:initial-r03",
-    "CatalogTitleTokens": [
-      "Microsoft server operating system version 21H2",
-      "Microsoft server operating system, version 21H2",
-      "Windows Server 2022"
-    ]
-  },
-  "PatchBaseline": {
-    "Schema": "2.0",
-    "TargetBuildAfterUpdate": "20348.4893",
-    "PatchTuesdayOfBaseline": "",
-    "LastVerifiedDate": "",
-    "LastVerifiedBy": "",
-    "VerificationMethod": "",
-    "ChecksumAlgorithm": "SHA256",
-    "NeutralPatches": [],
-    "ExcludeKbList": [],
-    "WsusScnCab": {
-      "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
-      "LocalCachePath": "",
-      "LastDownloadedDate": "",
-      "LastDownloadedSha256": "",
-      "LastDownloadedSizeBytes": 0
-    }
-  },
-  "Pca2023": {
-    "RequiredByDefault": true,
-    "RequiredUpdateLevelKb": "2025-2B (February 2025 LCU, 20348.2227 baseline) or later",
-    "RequiredUpdateLevelMinDate": "2025-02-11",
-    "NotesSource": [
-      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
-      "https://lenovopress.lenovo.com/lp2353.pdf"
-    ],
-    "Notes": "Per Lenovo lp2353.pdf, Server 2022 build 20348.2227 or earlier requires 2025-2B LCU before Make2023BootableMedia.ps1 succeeds. Newer builds (post 2025-02) generally already include the required EFI_EX binaries."
-  },
-  "AutoRefreshPolicy": {
-    "Mode": "OnNewPatchTuesday",
-    "WritebackToConfig": true,
-    "FallbackOnScrapeFailure": "UseBaseline",
-    "ScrapeRetries": 3
-  },
-  "LanguageSpecific": {
-    "en-us": {
-      "DisplayName": "English (United States)",
-      "Iso": {
-        "FileName": "SERVER_EVAL_x64FRE_en-us.iso",
-        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
-        "Sha256": "",
-        "SizeBytes": 0,
-        "ReleaseDate": "",
-        "_VerifiedDate": "",
-        "_VerifiedBy": ""
-      },
-      "VolumeLabelPrefix": "WS2022EN",
-      "LanguageSpecificPatches": {
-        "PatchTuesdayOfBaseline": "",
-        "LastVerifiedDate": "",
-        "LastVerifiedBy": "",
-        "LanguagePacks": [],
-        "LxpUpdates": [],
-        "DotNetLanguagePacks": []
-      }
-    },
-    "ja-jp": {
-      "DisplayName": "Japanese",
-      "Iso": {
-        "FileName": "SERVER_EVAL_x64FRE_ja-jp.iso",
-        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_ja-jp.iso",
-        "Sha256": "",
-        "SizeBytes": 0,
-        "ReleaseDate": "",
-        "_VerifiedDate": "",
-        "_VerifiedBy": ""
-      },
-      "VolumeLabelPrefix": "WS2022JA",
-      "LanguageSpecificPatches": {
-        "PatchTuesdayOfBaseline": "",
-        "LastVerifiedDate": "",
-        "LastVerifiedBy": "",
-        "LanguagePacks": [],
-        "LxpUpdates": [],
-        "DotNetLanguagePacks": []
-      }
-    }
-  }
+    "Schema":  "2.1",
+    "OsKey":  "Server2022",
+    "Common":  {
+                   "Build":  20348,
+                   "OsShortName":  "WS2022",
+                   "Edition":  "Datacenter",
+                   "Architecture":  "x64",
+                   "WimEdition":  "Windows Server 2022 Datacenter (Desktop Experience)",
+                   "InstallWimIndex":  4,
+                   "BootWimIndexes":  [
+                                          1,
+                                          2
+                                      ],
+                   "WinReWimPath":  "Windows\\System32\\Recovery\\Winre.wim",
+                   "SupportedLanguages":  [
+                                              "en-us",
+                                              "ja-jp"
+                                          ],
+                   "DefaultLanguage":  "en-us",
+                   "LCUExpandViaMum":  false,
+                   "_VerifiedDate":  "2026-05-24T00:00:00+09:00",
+                   "_VerifiedBy":  "manual:initial-r03",
+                   "CatalogTitleTokens":  [
+                                              "Microsoft server operating system version 21H2",
+                                              "Microsoft server operating system, version 21H2",
+                                              "Windows Server 2022"
+                                          ]
+               },
+    "PatchBaseline":  {
+                          "Schema":  "2.0",
+                          "TargetBuildAfterUpdate":  "20348.4893",
+                          "VerificationMethod":  "",
+                          "ChecksumAlgorithm":  "SHA256",
+                          "NeutralPatches":  [
+                                                 {
+                                                     "Type":  "LCU",
+                                                     "KbId":  "KB5087545",
+                                                     "Title":  "2026-05 Cumulative Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087545)",
+                                                     "UpdateId":  "bbe51346-3515-45c9-a1d9-d9a823019127",
+                                                     "DownloadUrl":  "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/05/windows10.0-kb5087545-x64_2f3249fef5fecd0dd18dc47b79123ccf765c7133.msu",
+                                                     "FileName":  "windows10.0-kb5087545-x64_2f3249fef5fecd0dd18dc47b79123ccf765c7133.msu",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "",
+                                                     "Supersedes":  [
+                                                                        "KB5078766"
+                                                                    ],
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  3,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                                 "neutral"
+                                                                             ],
+                                                     "IsCombined":  true,
+                                                     "Variant":  "Full"
+                                                 },
+                                                 {
+                                                     "Type":  "DotNet.Runtime",
+                                                     "KbId":  "KB5087068",
+                                                     "Title":  "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Microsoft server operating system version 21H2 for x64 (KB5087068)",
+                                                     "UpdateId":  "7653fdd8-c8e1-42f6-b51d-9fed6f84f189",
+                                                     "DownloadUrl":  "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
+                                                     "FileName":  "windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "",
+                                                     "Supersedes":  null,
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  6,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                                 "neutral"
+                                                                             ],
+                                                     "IsCombined":  false,
+                                                     "Variant":  "Full"
+                                                 },
+                                                 {
+                                                     "Type":  "DotNet.Runtime",
+                                                     "KbId":  "KB5087059",
+                                                     "Title":  "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 21H2 for x64 (KB5087059)",
+                                                     "UpdateId":  "b3d07c95-0b06-4bb4-92ec-26e257355c37",
+                                                     "DownloadUrl":  "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5087059-x64-ndp481_429d8898a3beb6753b62ab9570ab5a06c1ada069.msu",
+                                                     "FileName":  "windows10.0-kb5087059-x64-ndp481_429d8898a3beb6753b62ab9570ab5a06c1ada069.msu",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "",
+                                                     "Supersedes":  null,
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  6,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                                 "neutral"
+                                                                             ],
+                                                     "IsCombined":  false,
+                                                     "Variant":  "Full"
+                                                 },
+                                                 {
+                                                     "Type":  "DynamicUpdate.SafeOs",
+                                                     "KbId":  "KB5087595",
+                                                     "Title":  "2026-05 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087595)",
+                                                     "UpdateId":  "f7ad10df-1aef-4ecb-889f-3976c45fac6e",
+                                                     "DownloadUrl":  "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/crup/2026/05/windows10.0-kb5087595-x64_ee5a89f5a1acc5a6a92ff9254d589726da9adbcb.cab",
+                                                     "FileName":  "windows10.0-kb5087595-x64_ee5a89f5a1acc5a6a92ff9254d589726da9adbcb.cab",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "",
+                                                     "Supersedes":  [
+                                                                        "KB5065846"
+                                                                    ],
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  5,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                                 "neutral"
+                                                                             ],
+                                                     "IsCombined":  false,
+                                                     "Variant":  "Full"
+                                                 }
+                                             ],
+                          "ExcludeKbList":  [
+
+                                            ],
+                          "WsusScnCab":  {
+                                             "SourceUrl":  "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
+                                             "LocalCachePath":  "",
+                                             "LastDownloadedDate":  "",
+                                             "LastDownloadedSha256":  "",
+                                             "LastDownloadedSizeBytes":  0
+                                         },
+                          "LastVerifiedDate":  "2026-05-26T15:32:50.8475877+09:00",
+                          "LastVerifiedBy":  "auto:RefreshAllBaselines",
+                          "PatchTuesdayOfBaseline":  "2026-05-12"
+                      },
+    "Pca2023":  {
+                    "RequiredByDefault":  true,
+                    "RequiredUpdateLevelKb":  "2025-2B (February 2025 LCU, 20348.2227 baseline) or later",
+                    "RequiredUpdateLevelMinDate":  "2025-02-11",
+                    "NotesSource":  [
+                                        "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
+                                        "https://lenovopress.lenovo.com/lp2353.pdf"
+                                    ],
+                    "Notes":  "Per Lenovo lp2353.pdf, Server 2022 build 20348.2227 or earlier requires 2025-2B LCU before Make2023BootableMedia.ps1 succeeds. Newer builds (post 2025-02) generally already include the required EFI_EX binaries."
+                },
+    "AutoRefreshPolicy":  {
+                              "Mode":  "OnNewPatchTuesday",
+                              "WritebackToConfig":  true,
+                              "FallbackOnScrapeFailure":  "UseBaseline",
+                              "ScrapeRetries":  3
+                          },
+    "LanguageSpecific":  {
+                             "en-us":  {
+                                           "DisplayName":  "English (United States)",
+                                           "Iso":  {
+                                                       "FileName":  "SERVER_EVAL_x64FRE_en-us.iso",
+                                                       "Url":  "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
+                                                       "Sha256":  "",
+                                                       "SizeBytes":  0,
+                                                       "ReleaseDate":  "",
+                                                       "_VerifiedDate":  "",
+                                                       "_VerifiedBy":  ""
+                                                   },
+                                           "VolumeLabelPrefix":  "WS2022EN",
+                                           "LanguageSpecificPatches":  {
+                                                                           "LanguagePacks":  [
+
+                                                                                             ],
+                                                                           "LxpUpdates":  [
+
+                                                                                          ],
+                                                                           "DotNetLanguagePacks":  [
+
+                                                                                                   ],
+                                                                           "LastVerifiedDate":  "2026-05-26T15:32:52.7816053+09:00",
+                                                                           "LastVerifiedBy":  "auto:RefreshAllBaselines",
+                                                                           "PatchTuesdayOfBaseline":  "2026-05-12"
+                                                                       }
+                                       },
+                             "ja-jp":  {
+                                           "DisplayName":  "Japanese",
+                                           "Iso":  {
+                                                       "FileName":  "SERVER_EVAL_x64FRE_ja-jp.iso",
+                                                       "Url":  "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_ja-jp.iso",
+                                                       "Sha256":  "",
+                                                       "SizeBytes":  0,
+                                                       "ReleaseDate":  "",
+                                                       "_VerifiedDate":  "",
+                                                       "_VerifiedBy":  ""
+                                                   },
+                                           "VolumeLabelPrefix":  "WS2022JA",
+                                           "LanguageSpecificPatches":  {
+                                                                           "LanguagePacks":  [
+
+                                                                                             ],
+                                                                           "LxpUpdates":  [
+
+                                                                                          ],
+                                                                           "DotNetLanguagePacks":  [
+
+                                                                                                   ],
+                                                                           "LastVerifiedDate":  "2026-05-26T15:32:54.7859248+09:00",
+                                                                           "LastVerifiedBy":  "auto:RefreshAllBaselines",
+                                                                           "PatchTuesdayOfBaseline":  "2026-05-12"
+                                                                       }
+                                       }
+                         }
 }

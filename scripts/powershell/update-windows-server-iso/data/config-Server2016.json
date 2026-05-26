@@ -1,106 +1,169 @@
 {
-  "Schema": "2.1",
-  "OsKey": "Server2016",
-  "Common": {
-    "Build": 14393,
-    "OsShortName": "WS2016",
-    "Edition": "Datacenter",
-    "Architecture": "x64",
-    "WimEdition": "Windows Server 2016 Datacenter (Desktop Experience)",
-    "InstallWimIndex": 4,
-    "BootWimIndexes": [
-      1,
-      2
-    ],
-    "WinReWimPath": "Windows\\System32\\Recovery\\Winre.wim",
-    "SupportedLanguages": [
-      "en-us",
-      "ja-jp"
-    ],
-    "DefaultLanguage": "en-us",
-    "LCUExpandViaMum": false,
-    "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy": "manual:initial-r03",
-    "CatalogTitleTokens": [
-      "Windows Server 2016"
-    ]
-  },
-  "PatchBaseline": {
-    "Schema": "2.0",
-    "TargetBuildAfterUpdate": "14393.8957",
-    "PatchTuesdayOfBaseline": "",
-    "LastVerifiedDate": "",
-    "LastVerifiedBy": "",
-    "VerificationMethod": "",
-    "ChecksumAlgorithm": "SHA256",
-    "NeutralPatches": [],
-    "ExcludeKbList": [],
-    "WsusScnCab": {
-      "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
-      "LocalCachePath": "",
-      "LastDownloadedDate": "",
-      "LastDownloadedSha256": "",
-      "LastDownloadedSizeBytes": 0
-    }
-  },
-  "Pca2023": {
-    "RequiredByDefault": true,
-    "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
-    "RequiredUpdateLevelMinDate": "2024-04-09",
-    "NotesSource": [
-      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
-      "https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1"
-    ],
-    "Notes": "Server 2016 GA media (Build 14393) is known to fail to boot on modern hardware with PCA2023-only Secure Boot firmware. Applying the LCU pipeline through P09 AssembleIso + P10 ConvertPca2023BootManager is the documented mitigation."
-  },
-  "AutoRefreshPolicy": {
-    "Mode": "OnNewPatchTuesday",
-    "WritebackToConfig": true,
-    "FallbackOnScrapeFailure": "UseBaseline",
-    "ScrapeRetries": 3
-  },
-  "LanguageSpecific": {
-    "en-us": {
-      "DisplayName": "English (United States)",
-      "Iso": {
-        "FileName": "14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_EN-US.ISO",
-        "Url": "https://software-download.microsoft.com/download/sg/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_EN-US.ISO",
-        "Sha256": "",
-        "SizeBytes": 0,
-        "ReleaseDate": "",
-        "_VerifiedDate": "",
-        "_VerifiedBy": ""
-      },
-      "VolumeLabelPrefix": "WS2016EN",
-      "LanguageSpecificPatches": {
-        "PatchTuesdayOfBaseline": "",
-        "LastVerifiedDate": "",
-        "LastVerifiedBy": "",
-        "LanguagePacks": [],
-        "LxpUpdates": [],
-        "DotNetLanguagePacks": []
-      }
-    },
-    "ja-jp": {
-      "DisplayName": "Japanese",
-      "Iso": {
-        "FileName": "14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO",
-        "Url": "https://software-download.microsoft.com/download/sg/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO",
-        "Sha256": "",
-        "SizeBytes": 0,
-        "ReleaseDate": "",
-        "_VerifiedDate": "",
-        "_VerifiedBy": ""
-      },
-      "VolumeLabelPrefix": "WS2016JA",
-      "LanguageSpecificPatches": {
-        "PatchTuesdayOfBaseline": "",
-        "LastVerifiedDate": "",
-        "LastVerifiedBy": "",
-        "LanguagePacks": [],
-        "LxpUpdates": [],
-        "DotNetLanguagePacks": []
-      }
-    }
-  }
+    "Schema":  "2.1",
+    "OsKey":  "Server2016",
+    "Common":  {
+                   "Build":  14393,
+                   "OsShortName":  "WS2016",
+                   "Edition":  "Datacenter",
+                   "Architecture":  "x64",
+                   "WimEdition":  "Windows Server 2016 Datacenter (Desktop Experience)",
+                   "InstallWimIndex":  4,
+                   "BootWimIndexes":  [
+                                          1,
+                                          2
+                                      ],
+                   "WinReWimPath":  "Windows\\System32\\Recovery\\Winre.wim",
+                   "SupportedLanguages":  [
+                                              "en-us",
+                                              "ja-jp"
+                                          ],
+                   "DefaultLanguage":  "en-us",
+                   "LCUExpandViaMum":  false,
+                   "_VerifiedDate":  "2026-05-24T00:00:00+09:00",
+                   "_VerifiedBy":  "manual:initial-r03",
+                   "CatalogTitleTokens":  [
+                                              "Windows Server 2016"
+                                          ]
+               },
+    "PatchBaseline":  {
+                          "Schema":  "2.0",
+                          "TargetBuildAfterUpdate":  "14393.8957",
+                          "VerificationMethod":  "",
+                          "ChecksumAlgorithm":  "SHA256",
+                          "NeutralPatches":  [
+                                                 {
+                                                     "Type":  "LCU",
+                                                     "KbId":  "KB5087537",
+                                                     "Title":  "2026-05 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5087537)",
+                                                     "UpdateId":  "276ca876-09d3-4ef8-9266-22859826b952",
+                                                     "DownloadUrl":  "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/05/windows10.0-kb5087537-x64_1a68955ee2525f63b2b6ab4a5f212eb0547a58e3.msu",
+                                                     "FileName":  "windows10.0-kb5087537-x64_1a68955ee2525f63b2b6ab4a5f212eb0547a58e3.msu",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "",
+                                                     "Supersedes":  [
+                                                                        "KB5071543"
+                                                                    ],
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  3,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                                 "neutral"
+                                                                             ],
+                                                     "IsCombined":  true,
+                                                     "Variant":  "Full"
+                                                 },
+                                                 {
+                                                     "Type":  "DotNet.Runtime",
+                                                     "KbId":  "KB5087065",
+                                                     "Title":  "2026-05 Cumulative Update for .NET Framework 4.8 for Windows Server 2016 for x64 (KB5087065)",
+                                                     "UpdateId":  "f26eef43-a2bd-42d0-ac18-23c0ca7a8a82",
+                                                     "DownloadUrl":  "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/05/windows10.0-kb5087065-x64-ndp48_631ce425f7c69cbd26a9345ad20b2deab4c5b049.msu",
+                                                     "FileName":  "windows10.0-kb5087065-x64-ndp48_631ce425f7c69cbd26a9345ad20b2deab4c5b049.msu",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "",
+                                                     "Supersedes":  [
+                                                                        "KB5066136"
+                                                                    ],
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  6,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                                 "neutral"
+                                                                             ],
+                                                     "IsCombined":  false,
+                                                     "Variant":  "Full"
+                                                 }
+                                             ],
+                          "ExcludeKbList":  [
+
+                                            ],
+                          "WsusScnCab":  {
+                                             "SourceUrl":  "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
+                                             "LocalCachePath":  "",
+                                             "LastDownloadedDate":  "",
+                                             "LastDownloadedSha256":  "",
+                                             "LastDownloadedSizeBytes":  0
+                                         },
+                          "LastVerifiedDate":  "2026-05-26T15:32:06.4499371+09:00",
+                          "LastVerifiedBy":  "auto:RefreshAllBaselines",
+                          "PatchTuesdayOfBaseline":  "2026-05-12"
+                      },
+    "Pca2023":  {
+                    "RequiredByDefault":  true,
+                    "RequiredUpdateLevelKb":  "2024-4B (April 2024 LCU) or later",
+                    "RequiredUpdateLevelMinDate":  "2024-04-09",
+                    "NotesSource":  [
+                                        "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
+                                        "https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1"
+                                    ],
+                    "Notes":  "Server 2016 GA media (Build 14393) is known to fail to boot on modern hardware with PCA2023-only Secure Boot firmware. Applying the LCU pipeline through P09 AssembleIso + P10 ConvertPca2023BootManager is the documented mitigation."
+                },
+    "AutoRefreshPolicy":  {
+                              "Mode":  "OnNewPatchTuesday",
+                              "WritebackToConfig":  true,
+                              "FallbackOnScrapeFailure":  "UseBaseline",
+                              "ScrapeRetries":  3
+                          },
+    "LanguageSpecific":  {
+                             "en-us":  {
+                                           "DisplayName":  "English (United States)",
+                                           "Iso":  {
+                                                       "FileName":  "14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_EN-US.ISO",
+                                                       "Url":  "https://software-download.microsoft.com/download/sg/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_EN-US.ISO",
+                                                       "Sha256":  "",
+                                                       "SizeBytes":  0,
+                                                       "ReleaseDate":  "",
+                                                       "_VerifiedDate":  "",
+                                                       "_VerifiedBy":  ""
+                                                   },
+                                           "VolumeLabelPrefix":  "WS2016EN",
+                                           "LanguageSpecificPatches":  {
+                                                                           "LanguagePacks":  [
+
+                                                                                             ],
+                                                                           "LxpUpdates":  [
+
+                                                                                          ],
+                                                                           "DotNetLanguagePacks":  [
+
+                                                                                                   ],
+                                                                           "LastVerifiedDate":  "2026-05-26T15:32:08.1185526+09:00",
+                                                                           "LastVerifiedBy":  "auto:RefreshAllBaselines",
+                                                                           "PatchTuesdayOfBaseline":  "2026-05-12"
+                                                                       }
+                                       },
+                             "ja-jp":  {
+                                           "DisplayName":  "Japanese",
+                                           "Iso":  {
+                                                       "FileName":  "14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO",
+                                                       "Url":  "https://software-download.microsoft.com/download/sg/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO",
+                                                       "Sha256":  "",
+                                                       "SizeBytes":  0,
+                                                       "ReleaseDate":  "",
+                                                       "_VerifiedDate":  "",
+                                                       "_VerifiedBy":  ""
+                                                   },
+                                           "VolumeLabelPrefix":  "WS2016JA",
+                                           "LanguageSpecificPatches":  {
+                                                                           "LanguagePacks":  [
+
+                                                                                             ],
+                                                                           "LxpUpdates":  [
+
+                                                                                          ],
+                                                                           "DotNetLanguagePacks":  [
+
+                                                                                                   ],
+                                                                           "LastVerifiedDate":  "2026-05-26T15:32:09.8778993+09:00",
+                                                                           "LastVerifiedBy":  "auto:RefreshAllBaselines",
+                                                                           "PatchTuesdayOfBaseline":  "2026-05-12"
+                                                                       }
+                                       }
+                         }
 }

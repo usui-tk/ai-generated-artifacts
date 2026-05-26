@@ -1,0 +1,41 @@
+{
+    "Schema":  "1.0",
+    "OsVersion":  "Server2025",
+    "WindowMonths":  36,
+    "Entries":  [
+                    {
+                        "Query":  "2026-05 Setup Dynamic Update for Microsoft server operating system version 24H2",
+                        "ProbedAt":  "2026-05-26T06:31:22.8179451Z",
+                        "SearchHitCount":  0,
+                        "Notes":  "No Catalog hits survived title-narrow filter.",
+                        "MatchingHits":  [
+
+                                         ],
+                        "Success":  false,
+                        "PatchMonth":  "2026-05",
+                        "DuType":  "DynamicUpdate.Setup",
+                        "IsEmptyMarker":  true,
+                        "MatchingHitCount":  0
+                    },
+                    {
+                        "Query":  "2026-05 Safe OS Dynamic Update for Microsoft server operating system version 24H2",
+                        "KbId":  "KB5087588",
+                        "ProbedAt":  "2026-05-26T06:31:23.5111752Z",
+                        "SearchHitCount":  1,
+                        "Success":  true,
+                        "ChosenUpdateId":  "3d3a4626-8f15-4f7d-8588-a5431398059a",
+                        "MatchingHits":  [
+                                             {
+                                                 "UpdateId":  "3d3a4626-8f15-4f7d-8588-a5431398059a",
+                                                 "Title":  "2026-05 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5087588)"
+                                             }
+                                         ],
+                        "ChosenTitle":  "2026-05 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5087588)",
+                        "PatchMonth":  "2026-05",
+                        "DuType":  "DynamicUpdate.SafeOs",
+                        "IsEmptyMarker":  false,
+                        "MatchingHitCount":  1
+                    }
+                ],
+    "LastRefreshedAt":  "2026-05-26T06:31:23.5111752Z"
+}
