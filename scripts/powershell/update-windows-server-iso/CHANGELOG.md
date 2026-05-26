@@ -16,7 +16,136 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 16 - P10 progress logging, Critical-Health skip-with-warn, and `Invoke-DownloadWithProgress` utility (this release)
+### r07.0 Step 17 - Fix Write-PhaseHeader positional call that hung P12 in non-compact rendering mode (this release)
+
+The Step 16 live verification got further than ever before:
+
+- P01 - P09 ran cleanly (0.1 - 35 seconds each).
+- P10 entered its new step-by-step progress logging path,
+  ran the boot.wim + install.wim readiness snapshot in 1m55s
+  with all 14 progress lines visible, classified the health
+  as 'Critical' (Server 2016 EVAL install.wim still at
+  KB3211320), wrote the new `Write-Warn` block explaining
+  the prereq, dropped the `P10.skipped` marker, and DONE.
+- P11 StaticVerify ran in 40 ms and correctly recorded
+  "Output ISO missing" (expected in PrepareBuildVerify
+  dry-run mode).
+- P12 VerifyPca2023Readiness ran the snapshot computation
+  in 1m55s with the same progress lines, then ...
+
+... PowerShell prompted for interactive input:
+
+```
+コマンド パイプライン位置 1 のコマンドレット Write-PhaseHeader
+次のパラメーターに値を指定してください:
+Name:
+```
+
+The user had to Ctrl-C. P13 never ran.
+
+Root cause: `Show-Pca2023ReadinessSnapshot` (the function that
+P12 calls at the very end to render the readiness snapshot to
+the console) has two rendering modes - compact (a single
+one-line summary) and non-compact (a full multi-section dump).
+The non-compact branch began with this line:
+
+```powershell
+Write-PhaseHeader 'Pca2023 readiness (P12)'
+```
+
+`Write-PhaseHeader`'s signature is:
+
+```powershell
+param(
+    [Parameter(Mandatory)] [string]$Id,
+    [Parameter(Mandatory)] [string]$Name,
+    [Parameter(Mandatory)] [string]$Group
+)
+```
+
+Positional binding fills only `-Id`. PowerShell then prompts
+the user for `-Name`. The four `Show-Pca2023ReadinessSnapshot`
+call sites are:
+
+- P10 post-flight: passes `-Compact` -> compact branch -> safe
+- **P12 verify body: no `-Compact` flag -> hit the broken line**
+- P13 summary: passes `-Compact` -> compact branch -> safe
+- Standalone analysis helper: no `-Compact` -> would also hit
+  the broken line, but this code path is not normally exercised
+
+The fix is one line: replace `Write-PhaseHeader` with
+`Write-SubSection`. Semantically this was the right idiom
+all along - the function is called *during* a phase (P12 has
+already emitted its own phase banner at entry), so a second
+phase banner inside the body would be visual noise even if
+the call had worked.
+
+A defensive audit was added to confirm no other Mandatory-param
+function in the script is called positionally elsewhere. A
+small Python pass found 28 functions with >=2 Mandatory
+parameters and zero positional-call sites among them, so this
+was the only such trap remaining.
+
+**Files changed**.
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  - `Show-Pca2023ReadinessSnapshot` non-compact branch:
+    `Write-PhaseHeader 'Pca2023 readiness (P12)'` -> `Write-SubSection 'PCA2023 readiness detail'`
+    plus a 10-line comment explaining why
+    `Write-SubSection` is the right choice here.
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  - Added section B.23.22 and the matching matrix row.
+
+**Additional observation - mojibake no longer reproduces**.
+
+The Step 16 run had reported a console-rendering artifact:
+install.wim idx 2's Japanese edition name appeared with each
+character doubled (`デデススククトトッッププ` instead of
+`デスクトップ`). The Step 17 run had **identical mojibake-side
+conditions** (same PS 5.1.26100.32860, same ja-JP culture,
+same `Console OutputEnc utf-8 (cp65001)`, same source ISO),
+but the only externally-visible difference - the `-WorkRoot`
+path was changed from `D:\UpdateWsi` to `D:\UpdateWsi_2016` -
+caused the mojibake to disappear entirely. idx 2 now renders
+correctly.
+
+The investigation note at
+`docs/history/mojibake-investigation-note.md` has been updated
+with this new finding. The working hypothesis has shifted from
+"PS 5.1 console UTF-16 surrogate handling" to "DISM mount-cache
+state corruption from prior aborted P10 runs". The original
+WorkRoot had been used through Steps 11-16 with several
+aborted P10 mount/dismount cycles; the new tree was fresh.
+This remains a deferred low-priority investigation; the
+working workaround in the meantime is "use a fresh WorkRoot
+per OS family", which is what Takayuki's run was already
+doing.
+
+**Quality gates**. All five pass: BOM + CRLF + ASCII OK
+(12,164 lines), PS Parse OK, `psa.py` 0/0/0, PSScriptAnalyzer
+0 issues, T2-T10 all 6 tests PASS.
+
+**Expected next run**.
+
+With both Step 16 (P10 skip-with-warn + progress logging,
+Invoke-DownloadWithProgress utility) and Step 17 (P12
+non-compact rendering fix) applied, the next
+`PrepareBuildVerify` run is expected to:
+
+1. P01-P09: run quickly with cached assets (P05 robocopy
+   re-runs against the existing extracted tree - robocopy
+   skip-already-copied makes this near-instant).
+2. P10: skip-with-warn cleanly (`Health = Critical`,
+   `P10.skipped` marker, no throw).
+3. P11: record "Output ISO missing".
+4. P12: complete the second snapshot run (~115 seconds for
+   the WIM mount/enum/dismount cycle), then render the
+   full readiness detail via the now-fixed `Write-SubSection`
+   path and continue to P13.
+5. P13: emit the FinalReport with all collected state.
+6. Script exits 0 cleanly. No interactive prompt.
+
+### r07.0 Step 16 - P10 progress logging, Critical-Health skip-with-warn, and `Invoke-DownloadWithProgress` utility
 
 Three UX improvements bundled under one release because they
 share the same theme - making long-running phases emit visible

@@ -2793,6 +2793,70 @@ magnitude larger than the reference's payloads (50-150 MB
 chipset installers), and the lack of progress output is much
 more painful at that scale.
 
+### B.23.22 P12 fix: `Write-PhaseHeader` positional call hung Show-Pca2023ReadinessSnapshot in non-compact mode
+
+A late-discovery latent bug in `Show-Pca2023ReadinessSnapshot`
+hit during Step 16 live verification: the non-compact rendering
+branch called `Write-PhaseHeader 'Pca2023 readiness (P12)'`
+positionally, but `Write-PhaseHeader` declares all three of its
+parameters (`-Id`, `-Name`, `-Group`) as `[Parameter(Mandatory)]`.
+Positional binding fills only `-Id`, leaving `-Name` and
+`-Group` unset, which triggers PowerShell's interactive prompt:
+
+```
+PS> # ... P12 readiness inspection completes normally ...
+コマンド パイプライン位置 1 のコマンドレット Write-PhaseHeader
+次のパラメーターに値を指定してください:
+Name:
+```
+
+The user has to Ctrl-C to recover. P13 FinalReport never runs.
+
+The Step 16 verification reached this line because:
+
+1. P10 was successfully reworked to skip-with-warn on Critical
+   health (rather than throw), so the run proceeded to P11.
+2. P11 ran cleanly and emitted "Output ISO missing" (expected
+   in PrepareBuildVerify dry-run mode).
+3. P12 `Invoke-VerifyPhase12_VerifyPca2023Readiness` ran the
+   snapshot computation (~115 seconds, with the new progress
+   logging visible throughout), then called
+   `Show-Pca2023ReadinessSnapshot -Snapshot $snapshot` **without
+   the `-Compact` flag** (line 10468).
+4. The non-compact branch took the broken
+   `Write-PhaseHeader` path and hung.
+
+The compact-mode callers (P10 post-flight, P13 summary) had
+worked in every prior run because the compact branch returns
+before reaching the broken line.
+
+**Design decisions**.
+
+- D-1: *Replace `Write-PhaseHeader 'Pca2023 readiness (P12)'`
+  with `Write-SubSection 'PCA2023 readiness detail'`*. The
+  fix is one line. `Write-SubSection` takes a single optional
+  `[string]$Title` parameter so positional calls are safe.
+  Semantically, `Write-PhaseHeader` was the wrong choice in
+  the first place: the function is called *during* a phase
+  (P12 has already emitted its own phase banner at entry),
+  so emitting a second phase banner inside the body would
+  be visual noise even if the call had worked. A
+  `Write-SubSection` is the documented idiom for in-phase
+  section breaks.
+- D-2: *Add a clarifying in-source comment* explaining why
+  the function uses `Write-SubSection` rather than
+  `Write-PhaseHeader` and listing the two call sites that
+  trigger this path (P12 VerifyPca2023Readiness without
+  `-Compact`, plus the standalone analysis helper at the
+  bottom of the script). The comment is the cheapest way
+  to defend against the same trap recurring on a future
+  refactor.
+- D-3: *Skip a broader audit*. A defensive grep through the
+  whole script for "positional call to a function with >=2
+  Mandatory parameters" returned zero other hits, so the
+  L8167 site was the only one. No further code change is
+  required.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2818,6 +2882,7 @@ more painful at that scale.
 | B.23.19          | (new) — refines §A.4 P05 ExpandIso       | Switch P05 drive-root copy to robocopy; fix P09 Dynamic Update overlay wildcard to use `-Path` (r07.0 Step 14) |
 | B.23.20          | (new) — refines §A.4 P10/P12 PCA2023     | Fix `$Script:ExtractedMediaPath` and `$Script:WorkRootFull` typos in P10/P12; 8 sites total (r07.0 Step 15) |
 | B.23.21          | (new) — refines §A.4 P10 + §C.1 download | P10 step-by-step progress logging + Critical-Health skip-with-warn; new `Invoke-DownloadWithProgress` utility (r07.0 Step 16) |
+| B.23.22          | (new) — refines §A.4 P12 / Show-Pca2023ReadinessSnapshot | Fix Write-PhaseHeader positional call that hung Show-Pca2023ReadinessSnapshot in non-compact mode (r07.0 Step 17) |
 
 ---
 

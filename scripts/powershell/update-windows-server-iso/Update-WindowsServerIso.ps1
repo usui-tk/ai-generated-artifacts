@@ -8164,7 +8164,17 @@ function Show-Pca2023ReadinessSnapshot {
         return
     }
 
-    Write-PhaseHeader 'Pca2023 readiness (P12)'
+    # NOTE: This is the non-compact / detailed rendering of the
+    # snapshot. It is called from two sites with no -Compact flag:
+    # P12 VerifyPca2023Readiness (after the snapshot is already
+    # computed) and the standalone analysis helper at the bottom
+    # of the script. In both cases the caller has already emitted
+    # a phase or section header, so this function uses
+    # Write-SubSection (not Write-PhaseHeader) to avoid both the
+    # missing-Mandatory-parameter trap that hits Write-PhaseHeader
+    # when called positionally and the duplicate phase-banner
+    # visual noise.
+    Write-SubSection 'PCA2023 readiness detail'
     Write-Step ('Overall health   : {0}' -f $health)
     foreach ($r in $Snapshot.Reasons) {
         Write-Step ('  - {0}' -f $r)
