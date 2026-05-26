@@ -16,6 +16,163 @@ the script and follows the
 
 ## [Unreleased]
 
+### r07.0 Step 6 - Implement `-Action RefreshSnapshots` (A03) and document the two-stage refresh workflow (this release)
+
+Implementation gap closure for SPEC §B.23.7 / §B.23.14. The
+previous r07.0 commits ported the parser / resolver logic into
+the PowerShell main script and migrated the discovery layer to
+cache-driven (`Get-PatchSetFromReleaseInfoDiscovery`,
+`Resolve-PatchSetFromReleaseInfo`), but never wired the
+cache-populating helpers (`Invoke-ReleaseInfoFetch`,
+`Update-ReleaseInfoCache`, `Invoke-DotNetCuFetch`,
+`Update-DotNetCuCache`, `Add-DynamicUpdateCacheEntry`) into a
+user-facing Action. Live verification on a clean Windows host
+exposed the gap: running `-Action RefreshAllBaselines` with no
+caches present emitted "Discovery returned zero records" for
+every OS, and the resulting `data/config-Server*.json` files
+had empty `PatchBaseline.NeutralPatches[]`. This commit closes
+the gap with the SPEC-blessed name (`RefreshSnapshots`).
+
+**New functions in `Update-WindowsServerIso.ps1` (3)**:
+
+- `Get-DynamicUpdateProbePlan` (helper) -- returns the per-OS
+  DU probe target table. Restricted to Server 2022 + Server
+  2025 (each with Setup + SafeOs) per SPEC §B.23.6; Server 2019
+  has no DU rows in release-info and Server 2016 predates the
+  modern "Dynamic Update" naming.
+- `Invoke-AdminPhaseA03_RefreshSnapshots` (~290 lines) -- the
+  A03 phase body. Three fault-tolerant sub-steps:
+  1. release-info: `Invoke-ReleaseInfoFetch` ->
+     `Update-ReleaseInfoCache`. Writes
+     `data/raw-release-info.md` (+ `.meta.json`) and
+     `data/cache-release-info.json`.
+  2. .NET CU: `Invoke-DotNetCuFetch` ->
+     `Update-DotNetCuCache`. Writes `data/raw-dotnet-cu.json`
+     and `data/cache-dotnet-cu.json`.
+  3. Dynamic Update probes: iterates the
+     `Get-DynamicUpdateProbePlan` table; for each (OS, DuType),
+     builds a Catalog Search.aspx query of the form
+     `"<patchMonth> <DuLabel> for <OsToken>"`, calls
+     `Get-UpdateIdFromCatalog`, narrows results via
+     `Test-CatalogTitleMatch`, deduplicates with
+     `Select-LatestPatchBySupersedence` when multiple hits
+     survive, and persists each result (success or
+     `IsEmptyMarker`) via `Add-DynamicUpdateCacheEntry`.
+  Honours `-DryRun` (skips all HTTP fetches), honours
+  `-PatchMonth` override for parity with A01. Emits an
+  A01-style end-of-run summary with per-cache status, per-probe
+  result, and a "next step" hint pointing at
+  `RefreshAllBaselines`. Failure of one sub-step is logged but
+  does not abort the remaining sub-steps. Returns `$true` iff
+  every sub-step reported OK or Skipped.
+- `Show-RefreshSnapshotsSummary` (helper) -- renders the rich
+  end-of-run summary table block for A03, modelled on
+  `Show-RefreshAllBaselinesSummary`.
+
+**Wiring changes (5 single-line edits)**:
+
+- Parameter `[ValidateSet]` on `$Action` -- added
+  `'RefreshSnapshots'` between `'GenerateManifest'` and
+  `'RefreshAllBaselines'`.
+- `$osLessActions` array -- added `'RefreshSnapshots'` (A03
+  operates on `data/` files, not on a specific OS x language
+  ISO).
+- `$Script:PhaseRegistry` -- added the A03 row mapping
+  `Id='A03' / Name='RefreshSnapshots' / Group='Admin' /
+  Func='Invoke-AdminPhaseA03_RefreshSnapshots'` immediately
+  after A02.
+- `Get-PhaseListByAction` switch -- added the
+  `'RefreshSnapshots' -> [string[]]@('A03')` case.
+- `Show-PhaseList` hardcoded action enumeration -- inserted
+  `'RefreshSnapshots'` between `'GenerateManifest'` and
+  `'RefreshAllBaselines'` so the `-Action ListPhases` output
+  shows it.
+
+**Pre-existing bug fix (drive-by, 3 occurrences)**:
+
+- `Get-UpdateIdFromCatalog`,
+  `Get-DownloadLinkFromCatalog`,
+  `Get-SupersedenceFromCatalog` each had a retry path that
+  called `Wait-WithJitter -BaseSeconds 2 -MaxSeconds 5`. The
+  helper's actual parameter is `-JitterRange`, not
+  `-MaxSeconds`; the typo silently bound `-MaxSeconds 5` to no
+  parameter, leaving `$JitterRange` at its `[double]` default
+  of 0, which made `Get-Random -Minimum 0 -Maximum 0` throw
+  "The Minimum value (0) cannot be greater than or equal to
+  the Maximum value (0)". The bug only fired on a retry path,
+  so live operation seldom hit it; A03's DU probe loop
+  reliably reproduced it because successive rapid Catalog hits
+  triggered rate-limit retries. Fixed by replacing
+  `-MaxSeconds 5` with `-JitterRange 1` (about 2s +/- 1s of
+  jitter) at all three call sites.
+
+**SPEC.md updates (3 sections)**:
+
+- §B.23.7 -- the tentative "(`-Action RefreshSnapshots` or an
+  equivalent name decided at implementation time)" phrasing
+  has been replaced with the implemented form
+  "(`-Action RefreshSnapshots`, implemented as the A03 Admin
+  phase)".
+- §B.23.14 -- the cross-reference matrix row for B.23.7 now
+  reads `-Action RefreshSnapshots (A03, implemented r07.0
+  Step 6)`. A new "A03 RefreshSnapshots implementation
+  (completed in r07.0 Step 6)" subsection was added
+  immediately before the existing PoC retirement subsection,
+  summarising the sub-step composition, the DU probe target
+  table rationale (Server 2022 + 2025 only per §B.23.6), and
+  noting that the companion `stage5__data-snapshot.yml`
+  workflow remains a small follow-up (modelled on
+  `stage4__monthly-refresh.yml` with `RefreshAllBaselines`
+  swapped for `RefreshSnapshots`) that requires no further
+  PowerShell change.
+- The runtime-flow numbered list in §B.23.14 step 1 now points
+  at the implemented A03 phase rather than at a placeholder
+  implementation name.
+
+**README.md / README.ja.md updates**:
+
+- The "Admin actions" section in both README files was
+  rewritten to document the two-stage refresh as the canonical
+  workflow: Stage 1 = `RefreshSnapshots`, Stage 2 =
+  `RefreshAllBaselines`. The list of cache files Stage 1
+  produces is enumerated, the new exit-code semantics for A03
+  are explained, and a troubleshooting note tells operators
+  who see "Discovery returned zero records" to run Stage 1
+  first. The new CSV report path
+  (`<WorkRoot>/logs/A03_RefreshSnapshots_report.csv`) is added
+  alongside the existing A01 report path.
+
+**Live verification on a clean working tree reproduced what
+should now be the canonical workflow**:
+
+1. `-Action RefreshSnapshots` populated all three cache
+   families. release-info captured 471 monthly + 62 hotpatch
+   rows (~68 KB raw, ~216 KB cache); .NET CU captured 29
+   monthly pages with 254 entries total (~294 KB raw, ~110 KB
+   cache); DU probes for 2026-05 returned KB5087595 (Server
+   2022 / SafeOs) and KB5087588 (Server 2025 / SafeOs), with
+   the (Server2022, Server2025) x Setup probes correctly
+   recorded as `IsEmptyMarker` because Microsoft has not
+   published Setup DU for 2026-05.
+2. The subsequent `-Action RefreshAllBaselines` then produced
+   non-empty `PatchBaseline.NeutralPatches[]` for every OS:
+   Server2016 = 2 KBs, Server2019 = 3 KBs, Server2022 = 4 KBs
+   (including the SafeOs DU), Server2025 = 4 KBs (including
+   the SafeOs DU). This matches the per-OS expected count
+   table in SPEC §B.21.2.
+
+**No schema change. No breaking-config change**. Schema
+versions are unchanged. `$Script:ScriptVersion` stays at
+`update-wsi-2026.05.26-r07.0`; this is a Step 6 follow-on
+under the same release rather than a new release. The
+existing `data/config-Server*.json` files committed at HEAD
+are not modified by this commit.
+
+**Quality-gate status**: psa.py 0/0/0, PSScriptAnalyzer 0
+findings, PowerShell parse OK, T2 13/13, T3 10/10, T6 13/13,
+T7 16/16, T8 20/20, T9 18/18, T10 18/18. Cumulative 108/108
+PASS, unchanged from r07.0 Step 5.
+
 ### r07.0 Step 5 - CI workflow: catch-up rename from `Config/` to `data/` (this release)
 
 Mechanical follow-up to r07.0 Step 1 (commit `b34241f`,

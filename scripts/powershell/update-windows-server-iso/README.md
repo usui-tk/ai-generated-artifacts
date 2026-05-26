@@ -163,13 +163,32 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 The `data/config-<OsKey>.json` files hold the baseline data the script
 uses. Two admin actions let you refresh and inspect that data
-without touching any ISO:
+without touching any ISO. **The refresh path is two-stage**:
+`RefreshSnapshots` populates the upstream `data/raw-*` /
+`data/cache-*` files from Microsoft Learn + Microsoft Update
+Catalog, then `RefreshAllBaselines` regenerates each
+`data/config-Server*.json` `PatchBaseline.NeutralPatches[]` from
+those caches. This split matches the SPEC §B.23.14 design.
 
 ```powershell
-# Monthly refresh (default Mode): refresh only the field groups whose
-# recorded Patch Tuesday is older than the latest one. Walks every
-# OS Config in data/config-Server*.json, scrapes Microsoft Update Catalog
-# where applicable, writes results back to the corresponding JSON.
+# ---- Stage 1: populate the upstream caches ----
+# Fetches the Microsoft Learn release-info page (Markdown form),
+# the .NET Framework release-notes index plus every monthly page,
+# and probes Microsoft Update Catalog for (Server2022, Server2025) x
+# (Setup, SafeOs) Dynamic Updates for the current Patch Tuesday.
+# Writes:
+#   data/raw-release-info.md           (and .meta.json)
+#   data/cache-release-info.json
+#   data/raw-dotnet-cu.json
+#   data/cache-dotnet-cu.json
+#   data/cache-du-Server2022.json
+#   data/cache-du-Server2025.json
+.\Update-WindowsServerIso.ps1 -Action RefreshSnapshots
+
+# ---- Stage 2: regenerate the baselines from the caches ----
+# Walks every OS Config in data/config-Server*.json, reads the three
+# caches produced by Stage 1, resolves each KB / UpdateId via
+# Microsoft Update Catalog, and writes results back to the JSON.
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines
 
 # Initial fill: also fill in any never-verified field group with an
@@ -179,10 +198,12 @@ without touching any ISO:
 # Force: refresh every group regardless of state.
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Force
 
-# Dry run: show what would change without writing back.
+# Dry run: show what would change without writing back. Honoured by
+# both RefreshSnapshots and RefreshAllBaselines.
+.\Update-WindowsServerIso.ps1 -Action RefreshSnapshots    -DryRun
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -DryRun
 
-# Limit scope to one OS / one language.
+# Limit scope to one OS / one language (Stage 2 only).
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -OnlyOs Server2025
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -OnlyLanguage ja-jp
 
@@ -192,13 +213,27 @@ without touching any ISO:
 # -> <WorkRoot>/logs/A02_FieldClassification.json
 ```
 
+`RefreshSnapshots` exit codes: `0` = every sub-step OK (or skipped
+under `-DryRun`); non-zero = at least one sub-step failed. Re-running
+is idempotent: successful sub-steps overwrite the cache with the
+latest snapshot, so retrying after a transient Microsoft-side
+outage is safe.
+
 `RefreshAllBaselines` exit codes: `0` = all OK, `1` = at least one
 Refresher failed, `2` = some fields require manual fill (no auto
 Refresher available, typically the `LanguageSpecific.<lang>.Iso`
 groups for newly-added languages).
 
-A per-group CSV report is emitted to
-`<WorkRoot>/logs/A01_RefreshAllBaselines_report.csv`.
+**If `RefreshAllBaselines` reports "Discovery returned zero records"
+for every OS**, the upstream caches are missing or stale. Run
+`-Action RefreshSnapshots` first; the warning explicitly names the
+three cache files it expects (`data/cache-release-info.json`,
+`data/cache-dotnet-cu.json`, `data/cache-du-Server<N>.json`).
+
+Per-action CSV reports are emitted to:
+
+- `<WorkRoot>/logs/A03_RefreshSnapshots_report.csv`
+- `<WorkRoot>/logs/A01_RefreshAllBaselines_report.csv`
 
 ## Requirements
 

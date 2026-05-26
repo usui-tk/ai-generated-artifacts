@@ -1701,10 +1701,9 @@ because the only persistent input was the human-edited
 
 **Decision**. r07.0 unifies the lifecycle of `config-`, `cache-`,
 and `raw-` files under a single Patch-Tuesday-triggered model.
-A dedicated Refresher action (`-Action RefreshSnapshots` or an
-equivalent name decided at implementation time) is invoked
-manually by the operator on or after each Patch Tuesday. The
-action:
+A dedicated Refresher action (`-Action RefreshSnapshots`,
+implemented as the A03 Admin phase) is invoked manually by the
+operator on or after each Patch Tuesday. The action:
 
 1. Fetches the latest `windows-server-release-info` Markdown
    and writes `data/raw-release-info.md` + `.meta.json`.
@@ -2017,8 +2016,8 @@ stage4__monthly-refresh.yml  (existing, narrowed)
 The flow at runtime:
 
 1. **2026-05-15 02:00 UTC**: stage5 cron fires. The job runs
-   `-Action RefreshSnapshots` (or the eventual implementation
-   name), produces a snapshot PR, and exits.
+   `-Action RefreshSnapshots` (A03 Admin phase), produces a
+   snapshot PR, and exits.
 2. **Operator**: reviews the snapshot PR, merges to main.
 3. **Within seconds of merge**: stage4 fires via `workflow_run`
    completion of stage5. The job runs `-Action
@@ -2033,6 +2032,36 @@ the snapshot PR is held because of a suspected Microsoft-side
 data drift, stage4 is never triggered. If the snapshot is fine
 but the operator wants to verify the baseline manually, the
 operator can dispatch stage4 with `dryRun=true`.
+
+**A03 RefreshSnapshots implementation (completed in r07.0 Step 6)**.
+The `-Action RefreshSnapshots` entry point above is implemented as
+the A03 Admin phase (`Invoke-AdminPhaseA03_RefreshSnapshots`),
+which orchestrates the previously-dead helper functions
+`Invoke-ReleaseInfoFetch` + `Update-ReleaseInfoCache`,
+`Invoke-DotNetCuFetch` + `Update-DotNetCuCache`, and a per-OS
+Dynamic Update probe loop that issues Catalog Search.aspx queries
+and persists each result via `Add-DynamicUpdateCacheEntry`. Three
+fault-tolerant sub-steps run in sequence; failure of one
+sub-step is logged and recorded but does not abort the remaining
+sub-steps, so a transient Microsoft-side outage of (say) the .NET
+release-notes index does not block release-info + DU refresh. The
+phase emits an A01-style summary table plus
+`A03_RefreshSnapshots_report.csv` under `<WorkRoot>/logs/` for
+audit and CI artefact upload. The Dynamic Update probe targets
+are restricted to (Server2022, Server2025) x (Setup, SafeOs) per
+SPEC §B.23.6: Server 2019 has no DU rows in release-info, and
+Server 2016 predates the modern "Dynamic Update" naming
+convention.
+
+The companion stage5 GitHub Actions workflow
+(`stage5__data-snapshot.yml`) referenced in the runtime flow
+above is **not yet committed**. Operators currently run A03
+manually (or via `workflow_dispatch` on a future stage5) and
+then merge the resulting `data/raw-*` + `data/cache-*` diff PR
+before stage4 fires. Authoring stage5 is a small follow-up
+(modelled on `stage4__monthly-refresh.yml` with `RefreshAllBaselines`
+swapped for `RefreshSnapshots`) and does not require any further
+PowerShell change.
 
 **PoC retirement (completed in r07.0)**. As part of the same
 release, the r06 Phase 2 PoC scripts and assets were removed from
@@ -2091,7 +2120,7 @@ the working repository:
 | B.23.4           | Closes §B.21.5 Schema 2.2 proposal | None (Schema stays 2.1)                            |
 | B.23.5           | Refines §B.21.2, §B.21.3           | Filename-based SSU detection in record stage       |
 | B.23.6           | Refines §B.21.1 (DU rows)          | New `cache-du-Server*.json`; 36-month cache logic  |
-| B.23.7           | (new) — see also §B.23.14          | New `-Action RefreshSnapshots` (or equivalent)     |
+| B.23.7           | (new) — see also §B.23.14          | `-Action RefreshSnapshots` (A03, implemented r07.0 Step 6) |
 | B.23.8           | Amends §B.14b (Type enum)          | Breaking change to `Type=DotNet`; no shim          |
 | B.23.9           | Closes §D.19, §D.20 follow-up      | No Catalog-discovery fallback                      |
 | B.23.10          | (new)                              | Single r07.0 release; r06.x is docs-only           |

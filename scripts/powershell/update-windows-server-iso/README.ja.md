@@ -154,13 +154,27 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ## 管理用 Action: Config ベースラインの保守
 
-`data/config-<OsKey>.json` はスクリプトが使うベースラインデータの保管場所です。次の 2 つの管理用 Action で、ISO に触れずにこれらのデータを更新・参照できます。
+`data/config-<OsKey>.json` はスクリプトが使うベースラインデータの保管場所です。次の 2 つの管理用 Action で、ISO に触れずにこれらのデータを更新・参照できます。**更新パスは 2 段階構成**になっており、`RefreshSnapshots` が Microsoft Learn と Microsoft Update Catalog から `data/raw-*` / `data/cache-*` を取得し、続いて `RefreshAllBaselines` がそれらのキャッシュから各 `data/config-Server*.json` の `PatchBaseline.NeutralPatches[]` を再生成します。SPEC §B.23.14 の設計に沿った構成です。
 
 ```powershell
-# 月次更新(デフォルト Mode): 記録されている Patch Tuesday が
-# 最新のものより古いフィールドグループだけを更新する。
-# data/config-Server*.json をすべて巡回し、Microsoft Update Catalog を
-# スクレイプして該当 JSON に書き戻す。
+# ---- Stage 1: 上流キャッシュを取得・更新する ----
+# Microsoft Learn の release-info(Markdown 形式)と
+# .NET Framework release-notes インデックス + 各月次ページを取得し、
+# 続いて (Server2022, Server2025) x (Setup, SafeOs) の Dynamic Update を
+# 最新の Patch Tuesday 向けに Microsoft Update Catalog に問い合わせる。
+# 出力ファイル:
+#   data/raw-release-info.md           (および .meta.json)
+#   data/cache-release-info.json
+#   data/raw-dotnet-cu.json
+#   data/cache-dotnet-cu.json
+#   data/cache-du-Server2022.json
+#   data/cache-du-Server2025.json
+.\Update-WindowsServerIso.ps1 -Action RefreshSnapshots
+
+# ---- Stage 2: キャッシュからベースラインを再生成する ----
+# data/config-Server*.json をすべて巡回し、Stage 1 で取得した 3 つの
+# キャッシュを参照しつつ、各 KB / UpdateId を Microsoft Update Catalog で
+# 解決して JSON に書き戻す。
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines
 
 # 初回確定: 自動 Refresher がある未確定フィールドグループ
@@ -171,9 +185,11 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Force
 
 # 確認のみ: 書き戻しを行わずに何が変わるかだけを表示する。
+# RefreshSnapshots / RefreshAllBaselines の両方で有効。
+.\Update-WindowsServerIso.ps1 -Action RefreshSnapshots    -DryRun
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -DryRun
 
-# 範囲を OS / 言語で限定する。
+# 範囲を OS / 言語で限定する(Stage 2 のみ)。
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -OnlyOs Server2025
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -OnlyLanguage ja-jp
 
@@ -183,9 +199,16 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 # -> <WorkRoot>/logs/A02_FieldClassification.json
 ```
 
+`RefreshSnapshots` の終了コード: `0` = すべてのサブステップが成功(または `-DryRun` でスキップ)、非ゼロ = 少なくとも 1 つのサブステップが失敗。再実行は冪等です。成功済みサブステップは最新スナップショットで上書きされるため、Microsoft 側の一時的な障害後にリトライしても安全です。
+
 `RefreshAllBaselines` の終了コード: `0` = すべて成功、`1` = Refresher のいずれかが失敗、`2` = 手動入力が必要なフィールドが残っている(自動 Refresher が無い、典型的には新言語追加時の `LanguageSpecific.<lang>.Iso` グループなど)。
 
-グループ別 CSV レポートが `<WorkRoot>/logs/A01_RefreshAllBaselines_report.csv` に出力されます。
+**`RefreshAllBaselines` がすべての OS で「Discovery returned zero records」を報告する場合**、上流キャッシュが存在しないか古い状態です。先に `-Action RefreshSnapshots` を実行してください。警告メッセージには想定するキャッシュファイル名(`data/cache-release-info.json`、`data/cache-dotnet-cu.json`、`data/cache-du-Server<N>.json`)が明示されます。
+
+Action ごとの CSV レポートは次の場所に出力されます:
+
+- `<WorkRoot>/logs/A03_RefreshSnapshots_report.csv`
+- `<WorkRoot>/logs/A01_RefreshAllBaselines_report.csv`
 
 ## 動作要件
 

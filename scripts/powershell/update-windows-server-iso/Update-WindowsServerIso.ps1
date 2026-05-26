@@ -210,7 +210,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshAllBaselines','DumpFieldClassification','TestHarness')]
+    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','DumpFieldClassification','TestHarness')]
     [string]   $Action               = 'PrepareBuildVerify',
 
     [string[]] $OnlyPhases,
@@ -346,9 +346,10 @@ if ($WsusScnCabPath -and -not (Test-Path -LiteralPath $WsusScnCabPath)) {
 # so a CI smoke run can succeed without picking a target OS.
 # Some actions don't operate on a single OS instance and therefore
 # don't need -OsVersion. ListPhases, EnvironmentInfoOnly, Cleanup,
-# and the Admin actions (RefreshAllBaselines, DumpFieldClassification)
-# operate on the on-disk Config files or the script itself.
-$osLessActions = @('ListPhases','Cleanup','RefreshAllBaselines','DumpFieldClassification','TestHarness')
+# and the Admin actions (RefreshSnapshots, RefreshAllBaselines,
+# DumpFieldClassification) operate on the on-disk Config files or
+# the script itself.
+$osLessActions = @('ListPhases','Cleanup','RefreshSnapshots','RefreshAllBaselines','DumpFieldClassification','TestHarness')
 $needsOsVersion = ($Action -notin $osLessActions) -and (-not $EnvironmentInfoOnly)
 if ($needsOsVersion -and [string]::IsNullOrEmpty($OsVersion)) {
     throw '-OsVersion is required for action "' + $Action + '". Specify Server2016 / Server2019 / Server2022 / Server2025.'
@@ -538,6 +539,7 @@ $Script:PhaseRegistry = @(
     [pscustomobject]@{ Id='P13';   Name='FinalReport';               Group='Report'; Func='Invoke-ReportPhase13_FinalReport' }
     [pscustomobject]@{ Id='A01';   Name='RefreshAllBaselines';       Group='Admin';  Func='Invoke-AdminPhaseA01_RefreshAllBaselines' }
     [pscustomobject]@{ Id='A02';   Name='DumpFieldClassification';   Group='Admin';  Func='Invoke-AdminPhaseA02_DumpFieldClassification' }
+    [pscustomobject]@{ Id='A03';   Name='RefreshSnapshots';          Group='Admin';  Func='Invoke-AdminPhaseA03_RefreshSnapshots' }
 )
 
 # OS Config field classification: drives the RefreshAllBaselines
@@ -4516,7 +4518,7 @@ function Get-UpdateIdFromCatalog {
                                       -TimeoutSec 60 -ErrorAction Stop
         } catch {
             if ($attempt -ge $MaxRetries) { throw }
-            Wait-WithJitter -BaseSeconds 2 -MaxSeconds 5
+            Wait-WithJitter -BaseSeconds 2 -JitterRange 1
         }
     }
     if ($resp.StatusCode -ne 200) {
@@ -4570,7 +4572,7 @@ function Get-DownloadLinkFromCatalog {
                                       -TimeoutSec 60 -ErrorAction Stop
         } catch {
             if ($attempt -ge $MaxRetries) { throw }
-            Wait-WithJitter -BaseSeconds 2 -MaxSeconds 5
+            Wait-WithJitter -BaseSeconds 2 -JitterRange 1
         }
     }
     if ($resp.StatusCode -ne 200) {
@@ -4858,7 +4860,7 @@ function Get-SupersedenceFromCatalog {
                     Error        = $_.Exception.Message
                 }
             }
-            Wait-WithJitter -BaseSeconds 2 -MaxSeconds 5
+            Wait-WithJitter -BaseSeconds 2 -JitterRange 1
         }
     }
     $kbPattern = 'KB\d{6,7}'
@@ -10464,6 +10466,421 @@ function Invoke-AdminPhaseA02_DumpFieldClassification {
     }
 }
 
+function Get-DynamicUpdateProbePlan {
+    <#
+    .SYNOPSIS
+        Return the per-OS Dynamic Update probe plan used by
+        Invoke-AdminPhaseA03_RefreshSnapshots. Each entry describes one
+        (OsVersion, DuType, QueryTemplate) probe to issue against the
+        Microsoft Update Catalog Search.aspx endpoint.
+    .DESCRIPTION
+        Server 2019 is intentionally absent: per SPEC B.23.6, Microsoft
+        does not publish Setup / Safe OS Dynamic Update packages for the
+        Server 2019 (1809) baseline, and T10's resolver test asserts
+        this absence. Server 2016 (1607) is likewise absent because the
+        modern "Dynamic Update" naming convention starts with the 21H2
+        generation; any 2016-era servicing media is delivered through
+        the standard LCU channel and is already covered by the
+        release-info cache.
+
+        The query template uses Microsoft Learn's media-dynamic-update
+        guidance: month + DU label + OS descriptor. The OS descriptor
+        deliberately matches the long-form "Microsoft server operating
+        system version <NNH>" name that Microsoft has standardised on
+        since the 21H2 era; tests/catalog_title_tokens_test.py (T9)
+        covers the title narrowing applied to the resulting search
+        hits.
+    #>
+    [OutputType([pscustomobject[]])]
+    param()
+
+    return @(
+        [pscustomobject]@{
+            OsVersion = 'Server2022'
+            DuType    = 'DynamicUpdate.Setup'
+            Label     = 'Setup Dynamic Update'
+            OsToken   = 'Microsoft server operating system version 21H2'
+        }
+        [pscustomobject]@{
+            OsVersion = 'Server2022'
+            DuType    = 'DynamicUpdate.SafeOs'
+            Label     = 'Safe OS Dynamic Update'
+            OsToken   = 'Microsoft server operating system version 21H2'
+        }
+        [pscustomobject]@{
+            OsVersion = 'Server2025'
+            DuType    = 'DynamicUpdate.Setup'
+            Label     = 'Setup Dynamic Update'
+            OsToken   = 'Microsoft server operating system version 24H2'
+        }
+        [pscustomobject]@{
+            OsVersion = 'Server2025'
+            DuType    = 'DynamicUpdate.SafeOs'
+            Label     = 'Safe OS Dynamic Update'
+            OsToken   = 'Microsoft server operating system version 24H2'
+        }
+    )
+}
+
+# psa-disable-next-line PSA6003 -- intentional plural: function refreshes multiple snapshot caches (release-info, dotnet-cu, dynamic-update) in one phase
+function Invoke-AdminPhaseA03_RefreshSnapshots {
+    <#
+    .SYNOPSIS
+        Populate data/raw-*.json + data/cache-*.json snapshots from
+        Microsoft Learn (release-info, .NET CU release-notes) and
+        Microsoft Update Catalog (Dynamic Update probes). This is the
+        first stage of the SPEC B.23.14 two-stage refresh; the
+        complementary second stage (-Action RefreshAllBaselines)
+        consumes the populated caches to regenerate
+        data/config-Server*.json NeutralPatches[].
+    .DESCRIPTION
+        Three sub-steps, each independently fault-tolerant:
+
+        1. release-info: fetch
+           learn.microsoft.com/.../windows-server-release-info as
+           Markdown via the ?accept=text/markdown query, persist as
+           data/raw-release-info.md, then parse into
+           data/cache-release-info.json. This is the LCU + Hotpatch
+           calendar source used by the discovery layer.
+
+        2. .NET CU: fetch the dotnet/release-notes index plus every
+           monthly cumulative-update page it references; persist the
+           aggregate into data/raw-dotnet-cu.json and the parsed form
+           into data/cache-dotnet-cu.json. This is the .NET Framework
+           CU source used by the discovery layer.
+
+        3. Dynamic Update: probe Microsoft Update Catalog for the
+           current Patch Tuesday's Setup DU and Safe OS DU per
+           supported OS (Server 2022 and Server 2025 only; Server 2019
+           per SPEC B.23.6 and Server 2016 per the modern-DU naming
+           convention have no DU and are skipped). Each probe is
+           recorded into data/cache-du-Server<N>.json via
+           Add-DynamicUpdateCacheEntry, including the "empty-marker"
+           case so the resolver can distinguish "Microsoft has not
+           published a DU for this month" from "we have not yet
+           probed for this month".
+
+        On step failure the function logs the error, marks the
+        sub-step Failed, and continues to the next sub-step. The
+        overall return value is $true iff every sub-step reported OK.
+
+        Honours -DryRun: when set, no HTTP fetches are issued and no
+        cache files are written. The function reports the plan and
+        returns success.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    Start-DebugTrace -Context 'Invoke-AdminPhaseA03_RefreshSnapshots' -PhaseId 'A03'
+    $okOverall = $true
+
+    # Result trackers (used by the summary block + the CSV report)
+    $releaseInfoResult = [pscustomobject]@{
+        Status   = 'Pending'
+        Monthly  = 0
+        Hotpatch = 0
+        Bytes    = 0
+        Error    = ''
+    }
+    $dotnetResult = [pscustomobject]@{
+        Status     = 'Pending'
+        MonthCount = 0
+        EntryCount = 0
+        Error      = ''
+    }
+    $duResults = New-Object 'System.Collections.Generic.List[pscustomobject]'
+
+    try {
+        # Resolve the Patch Month under refresh. -PatchMonth override is
+        # honoured for parity with A01; otherwise we anchor on the latest
+        # Patch Tuesday available now.
+        Set-DebugStep -Step 'resolve-patch-month'
+        $latestPt   = Get-LatestPatchTuesday | ForEach-Object { $_.ToString('yyyy-MM-dd') }
+        $patchMonth = $latestPt.Substring(0,7)        # 'yyyy-MM'
+        if (-not [string]::IsNullOrEmpty($Script:PatchMonth)) {
+            $patchMonth = $Script:PatchMonth
+        }
+
+        Write-SubSection 'Snapshot refresh plan'
+        Write-Step ('Latest Patch Tuesday : {0}' -f $latestPt)
+        Write-Step ('Patch Month          : {0}' -f $patchMonth)
+        Write-Step ('Output data dir      : {0}' -f (Get-DataDirectoryPath))
+        if ($Script:DryRun) {
+            Write-Warn 'DryRun is ON: no HTTP fetches will be issued; no cache files will be written.'
+        }
+
+        # ============================================================
+        # Sub-step 1: release-info
+        # ============================================================
+        Write-SubSection '[1/3] release-info (Microsoft Learn)'
+        Set-DebugStep -Step 'release-info'
+        if ($Script:DryRun) {
+            Write-Skip 'release-info refresh skipped (-DryRun).'
+            $releaseInfoResult.Status = 'Skipped'
+        } else {
+            try {
+                $rawPath  = Invoke-ReleaseInfoFetch
+                $summary  = Update-ReleaseInfoCache
+                $rawBytes = (Get-Item -LiteralPath $rawPath).Length
+                $releaseInfoResult.Status   = 'OK'
+                $releaseInfoResult.Monthly  = [int]$summary.MonthlyRowCount
+                $releaseInfoResult.Hotpatch = [int]$summary.HotpatchRowCount
+                $releaseInfoResult.Bytes    = [int]$rawBytes
+                Write-Ok ('release-info refreshed: {0} monthly rows, {1} hotpatch rows ({2} raw bytes).' -f
+                    $releaseInfoResult.Monthly, $releaseInfoResult.Hotpatch, $releaseInfoResult.Bytes)
+            } catch {
+                $okOverall = $false
+                $releaseInfoResult.Status = 'FAIL'
+                $releaseInfoResult.Error  = [string]$_.Exception.Message
+                Write-Fail ('release-info refresh failed: {0}' -f $_.Exception.Message)
+            }
+        }
+
+        # ============================================================
+        # Sub-step 2: .NET CU release-notes
+        # ============================================================
+        Write-SubSection '[2/3] .NET Framework CU (Microsoft Learn)'
+        Set-DebugStep -Step 'dotnet-cu'
+        if ($Script:DryRun) {
+            Write-Skip '.NET CU refresh skipped (-DryRun).'
+            $dotnetResult.Status = 'Skipped'
+        } else {
+            try {
+                $null      = Invoke-DotNetCuFetch
+                $null      = Update-DotNetCuCache
+                $dotnetCache = Get-DotNetCuCache
+                $totalEntries = 0
+                $monthCount   = 0
+                if ($null -ne $dotnetCache -and $dotnetCache.PSObject.Properties.Name -contains 'Months') {
+                    foreach ($m in @($dotnetCache.Months)) {
+                        $monthCount++
+                        if ($m -and ($m.PSObject.Properties.Name -contains 'Entries')) {
+                            $totalEntries += @($m.Entries).Count
+                        }
+                    }
+                }
+                $dotnetResult.Status     = 'OK'
+                $dotnetResult.MonthCount = $monthCount
+                $dotnetResult.EntryCount = $totalEntries
+                Write-Ok ('.NET CU refreshed: {0} months captured, {1} entries total.' -f $monthCount, $totalEntries)
+            } catch {
+                $okOverall = $false
+                $dotnetResult.Status = 'FAIL'
+                $dotnetResult.Error  = [string]$_.Exception.Message
+                Write-Fail ('.NET CU refresh failed: {0}' -f $_.Exception.Message)
+            }
+        }
+
+        # ============================================================
+        # Sub-step 3: Dynamic Update probes (per OS x DuType)
+        # ============================================================
+        Write-SubSection '[3/3] Dynamic Update probes (Microsoft Update Catalog)'
+        Set-DebugStep -Step 'dynamic-update'
+        $plan = Get-DynamicUpdateProbePlan
+        Write-Step ('Probe targets: {0} (OS x DuType combinations)' -f $plan.Count)
+
+        foreach ($p in $plan) {
+            $probeKey = ('{0} / {1}' -f $p.OsVersion, $p.DuType)
+            $probeRes = [pscustomobject]@{
+                OsVersion        = $p.OsVersion
+                DuType           = $p.DuType
+                Query            = ''
+                SearchHitCount   = 0
+                MatchingHitCount = 0
+                ChosenUpdateId   = ''
+                ChosenTitle      = ''
+                KbId             = ''
+                Status           = 'Pending'
+                Note             = ''
+            }
+            if ($Script:DryRun) {
+                Write-Skip ('  {0,-40} -> skipped (-DryRun).' -f $probeKey)
+                $probeRes.Status = 'Skipped'
+                $duResults.Add($probeRes) | Out-Null
+                continue
+            }
+            try {
+                # Build the Catalog query string per Microsoft Learn's
+                # media-dynamic-update guidance: month + DU label + OS
+                # descriptor.
+                $query = ('{0} {1} for {2}' -f $patchMonth, $p.Label, $p.OsToken)
+                $probeRes.Query = $query
+                Write-Step ('  Probe: {0,-40} q="{1}"' -f $probeKey, $query)
+
+                # Get-UpdateIdFromCatalog's -KbId param accepts any query
+                # text; internally it URL-encodes it into Search.aspx's
+                # 'q=' parameter, which Catalog interprets as a free-text
+                # search. The parameter name reflects the function's
+                # primary KB-ID use case, but is not narrowed to that.
+                $hits = @(Get-UpdateIdFromCatalog -KbId $query)
+                $probeRes.SearchHitCount = $hits.Count
+
+                # Title-narrow with the per-OS positive token list + the
+                # hardcoded negative list (Windows 11 / arm64).
+                $matching = @($hits | Where-Object {
+                    Test-CatalogTitleMatch -Title ([string]$_.Title) -OsVersion $p.OsVersion
+                })
+                $probeRes.MatchingHitCount = $matching.Count
+
+                $entry = @{
+                    PatchMonth       = $patchMonth
+                    DuType           = $p.DuType
+                    ProbedAt         = (Get-Date).ToUniversalTime().ToString('o')
+                    Query            = $query
+                    SearchHitCount   = $hits.Count
+                    MatchingHitCount = $matching.Count
+                    MatchingHits     = @($matching | ForEach-Object {
+                        @{ UpdateId = [string]$_.UpdateId; Title = [string]$_.Title }
+                    })
+                }
+                if ($matching.Count -eq 0) {
+                    $entry.Success       = $false
+                    $entry.IsEmptyMarker = $true
+                    $entry.Notes         = 'No Catalog hits survived title-narrow filter.'
+                    $probeRes.Status     = 'Empty'
+                    $probeRes.Note       = $entry.Notes
+                    Write-Warn ('    -> Empty: no hits after title-narrow (recorded as IsEmptyMarker).')
+                } else {
+                    # Deduplicate via Supersedes/SupersededBy when >1 hit.
+                    $chosen = $null
+                    if ($matching.Count -gt 1) {
+                        $sup = Select-LatestPatchBySupersedence -Entries @($matching | ForEach-Object {
+                            [pscustomobject]@{ Title=[string]$_.Title; UpdateId=[string]$_.UpdateId }
+                        })
+                        if ($sup -and $sup.Survivor) {
+                            $chosen = $sup.Survivor
+                        }
+                    }
+                    if (-not $chosen) {
+                        $chosen = $matching | Select-Object -First 1
+                    }
+                    $kbId = [string](Get-KbIdFromUpdateTitle -Title ([string]$chosen.Title))
+                    $entry.ChosenUpdateId = [string]$chosen.UpdateId
+                    $entry.ChosenTitle    = [string]$chosen.Title
+                    $entry.KbId           = $kbId
+                    $entry.Success        = $true
+                    $entry.IsEmptyMarker  = $false
+                    $probeRes.ChosenUpdateId = $entry.ChosenUpdateId
+                    $probeRes.ChosenTitle    = $entry.ChosenTitle
+                    $probeRes.KbId           = $kbId
+                    $probeRes.Status         = 'OK'
+                    Write-Ok ('    -> {0}  UpdateId={1}  Title="{2}"' -f $kbId, $entry.ChosenUpdateId, $entry.ChosenTitle)
+                }
+
+                # Persist to per-OS cache (Add-DynamicUpdateCacheEntry
+                # upserts by (PatchMonth, DuType) so re-probing the same
+                # month replaces in place rather than duplicating).
+                $null = Add-DynamicUpdateCacheEntry -OsVersion $p.OsVersion -Entry $entry
+            } catch {
+                $okOverall = $false
+                $probeRes.Status = 'FAIL'
+                $probeRes.Note   = [string]$_.Exception.Message
+                Write-Fail ('    -> FAIL: {0}' -f $_.Exception.Message)
+            }
+            $duResults.Add($probeRes) | Out-Null
+        }
+
+        # ============================================================
+        # Summary block (mirrors A01's "Summary" rendering for parity)
+        # ============================================================
+        Show-RefreshSnapshotsSummary `
+            -ReleaseInfo $releaseInfoResult `
+            -DotNetCu    $dotnetResult `
+            -DuResults   @($duResults.ToArray()) `
+            -PatchMonth  $patchMonth `
+            -LatestPt    $latestPt `
+            -OkOverall   $okOverall
+
+        # CSV report (parity with A01_RefreshAllBaselines_report.csv)
+        try {
+            $reportPath = Join-Path $Script:LogsDir 'A03_RefreshSnapshots_report.csv'
+            $reportRows = New-Object System.Collections.Generic.List[object]
+            $reportRows.Add([pscustomobject]@{
+                Section='release-info'; OsVersion=''; DuType=''
+                Status=$releaseInfoResult.Status; Detail=('monthly={0};hotpatch={1};bytes={2}' -f $releaseInfoResult.Monthly,$releaseInfoResult.Hotpatch,$releaseInfoResult.Bytes)
+                Error=$releaseInfoResult.Error
+            }) | Out-Null
+            $reportRows.Add([pscustomobject]@{
+                Section='dotnet-cu'; OsVersion=''; DuType=''
+                Status=$dotnetResult.Status; Detail=('months={0};entries={1}' -f $dotnetResult.MonthCount,$dotnetResult.EntryCount)
+                Error=$dotnetResult.Error
+            }) | Out-Null
+            foreach ($r in $duResults) {
+                $reportRows.Add([pscustomobject]@{
+                    Section='dynamic-update'; OsVersion=$r.OsVersion; DuType=$r.DuType
+                    Status=$r.Status
+                    Detail=('search={0};matching={1};kb={2};updateid={3}' -f $r.SearchHitCount,$r.MatchingHitCount,$r.KbId,$r.ChosenUpdateId)
+                    Error=$r.Note
+                }) | Out-Null
+            }
+            $reportRows | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
+            Write-Ok ('Report: {0}' -f $reportPath)
+        } catch {
+            Write-Warn ('Failed to write A03 report CSV: {0}' -f $_.Exception.Message)
+        }
+
+        if (-not $okOverall) {
+            Write-Warn 'One or more sub-steps reported failures; check the summary above and rerun.'
+        }
+        return $okOverall
+    } finally {
+        Stop-DebugTrace
+    }
+}
+
+function Show-RefreshSnapshotsSummary {
+    <#
+    .SYNOPSIS
+        Render the rich end-of-run summary for
+        Invoke-AdminPhaseA03_RefreshSnapshots, mirroring the table
+        layout used by A01_RefreshAllBaselines's summary block.
+    #>
+    [CmdletBinding()]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)] $ReleaseInfo,
+        [Parameter(Mandatory)] $DotNetCu,
+        [Parameter(Mandatory)] [pscustomobject[]] $DuResults,
+        [Parameter(Mandatory)] [string] $PatchMonth,
+        [Parameter(Mandatory)] [string] $LatestPt,
+        [Parameter(Mandatory)] [bool]   $OkOverall
+    )
+    Write-Host ''
+    Write-Host '======================================================================'
+    Write-Host ' Summary  (RefreshSnapshots)'
+    Write-Host '======================================================================'
+    Write-Host ''
+    Write-Host '  [1] Cache files refreshed'
+    Write-Host ('        release-info     : {0,-8} (monthly={1}, hotpatch={2}, raw {3} bytes)' -f $ReleaseInfo.Status, $ReleaseInfo.Monthly, $ReleaseInfo.Hotpatch, $ReleaseInfo.Bytes)
+    Write-Host ('        dotnet-cu        : {0,-8} (months={1}, entries={2})' -f $DotNetCu.Status, $DotNetCu.MonthCount, $DotNetCu.EntryCount)
+    Write-Host ''
+    Write-Host '  [2] Dynamic Update probes (Catalog search.aspx)'
+    Write-Host '        OS           DuType                   Status   KbId            UpdateId'
+    Write-Host '        --------------------------------------------------------------------------------'
+    foreach ($r in $DuResults) {
+        $uid = if ($r.ChosenUpdateId) { ($r.ChosenUpdateId.Substring(0,[math]::Min(12,$r.ChosenUpdateId.Length))) + '...' } else { '' }
+        Write-Host ('        {0,-12} {1,-23}  {2,-7}  {3,-14}  {4}' -f $r.OsVersion, $r.DuType, $r.Status, $r.KbId, $uid)
+    }
+    Write-Host ''
+    Write-Host '  [3] Patch Tuesday timeline'
+    Write-Host ('        This run baseline   : {0}  (Patch Month = {1})' -f $LatestPt, $PatchMonth)
+    Write-Host ''
+    Write-Host '  [4] Run outcome'
+    if ($OkOverall) {
+        Write-Host '        Status: OK (every sub-step reported OK or Skipped).'
+        Write-Host '        Next step: run `-Action RefreshAllBaselines` to regenerate'
+        Write-Host '                   data/config-Server*.json NeutralPatches[].'
+    } else {
+        Write-Host '        Status: PARTIAL (one or more sub-steps failed). Check the'
+        Write-Host '                error messages above and rerun. Re-running is'
+        Write-Host '                idempotent: successful sub-steps will overwrite'
+        Write-Host '                the cache with the latest snapshot.'
+    }
+    Write-Host '======================================================================'
+    Write-Host ''
+}
+
 # ============================================================
 # Phase dispatcher and Action resolver
 # ============================================================
@@ -10473,7 +10890,7 @@ function Get-PhaseListByAction {
     .SYNOPSIS
         Map -Action to a sequence of phase IDs.
     .DESCRIPTION
-        Admin-group actions (RefreshAllBaselines,
+        Admin-group actions (RefreshSnapshots, RefreshAllBaselines,
         DumpFieldClassification) and applies a SyntheticTestMode
         skip to P05 / P06. The synthetic ISO produced by P04 is
         not a structurally valid ISO9660 image; Mount-DiskImage in
@@ -10516,6 +10933,7 @@ function Get-PhaseListByAction {
         'GenerateManifest'        { return [string[]]@('P01','P02','P03') }
         'RefreshAllBaselines'     { return [string[]]@('A01') }
         'DumpFieldClassification' { return [string[]]@('A02') }
+        'RefreshSnapshots'        { return [string[]]@('A03') }
         default                   { throw ('Unknown action: {0}' -f $ActionName) }
     }
 }
@@ -10534,7 +10952,7 @@ function Show-PhaseList {
     }
     Write-Host ''
     Write-Host ' Actions:' -ForegroundColor Cyan
-    foreach ($a in @('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshAllBaselines','DumpFieldClassification')) {
+    foreach ($a in @('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','DumpFieldClassification')) {
         $list = Get-PhaseListByAction -ActionName $a
         if ($list.Count -gt 0) {
             Write-Host ('  {0,-22} : {1}' -f $a, ($list -join ',')) -ForegroundColor DarkCyan
