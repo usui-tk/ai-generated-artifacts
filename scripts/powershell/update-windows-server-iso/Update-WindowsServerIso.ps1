@@ -3987,6 +3987,371 @@ function Get-DotNetCuCache {
 }
 
 # ============================================================
+# ISO Updater specific: Dynamic Update 36-month per-OS cache
+# ============================================================
+#
+# Microsoft does not publish Setup and Safe OS Dynamic Update packages
+# in a strict monthly cadence. Server 2025 Setup DU was published in
+# 2025-09, -10 and -11 and has been absent every month since (live
+# Catalog probes on 2026-05-26 confirmed 0 hits for 2026-05, -04 and
+# -03). Server 2019 and Server 2016 do not publish DU monthly at all.
+# An ISO-build run that searches the Catalog for "the current month"
+# and errors when zero hits come back is incompatible with both
+# observations.
+#
+# This section maintains, for each in-scope OS, a 36-month rolling
+# Catalog probe history in data/cache-du-Server<NNNN>.json. At
+# ISO-build time the Refresher consults the cache and selects, for
+# each DU type, the most recent publish within the 36-month window. If
+# the window contains zero entries, the Refresher logs a warning and
+# proceeds without that DU type; if it contains at least one entry,
+# the latest is used.
+#
+# The cache is populated by an out-of-band, Patch-Tuesday-triggered
+# refresh action (scheduled for a later commit); ISO-build runs read
+# the cache and never hit the Catalog for DU discovery.
+#
+# Files this section reads or writes:
+#   data/cache-du-Server2016.json
+#   data/cache-du-Server2019.json
+#   data/cache-du-Server2022.json
+#   data/cache-du-Server2025.json
+#
+# See SPEC.md section B.23.6 for the design rationale and the cadence
+# table that grounded these observations.
+
+$Script:DynamicUpdateCacheWindowMonths = 36
+$Script:DynamicUpdateCacheSchema       = '1.0'
+
+function Get-DynamicUpdateCachePath {
+    <#
+    .SYNOPSIS
+        Resolve the on-disk path of data/cache-du-Server<NNNN>.json for
+        the given OS.
+    .DESCRIPTION
+        Tests can override the directory by passing -DataDir; production
+        callers omit it and let the default Get-DataDirectoryPath apply.
+    .EXAMPLE
+        Get-DynamicUpdateCachePath -OsVersion Server2025
+        # -> /.../data/cache-du-Server2025.json
+    #>
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [string]$OsVersion,
+        [string]$DataDir = ''
+    )
+    if ([string]::IsNullOrEmpty($DataDir)) {
+        $DataDir = Get-DataDirectoryPath
+    }
+    return (Join-Path $DataDir ('cache-du-' + $OsVersion + '.json'))
+}
+
+function New-EmptyDynamicUpdateCache {
+    <#
+    .SYNOPSIS
+        Return a fresh, empty cache object for an OS that has no
+        persisted cache file yet.
+    #>
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [string]$OsVersion)
+    return [pscustomobject]@{
+        Schema          = $Script:DynamicUpdateCacheSchema
+        OsVersion       = $OsVersion
+        LastRefreshedAt = ''
+        WindowMonths    = $Script:DynamicUpdateCacheWindowMonths
+        Entries         = @()
+    }
+}
+
+function Get-DynamicUpdateCache {
+    <#
+    .SYNOPSIS
+        Read data/cache-du-Server<NNNN>.json and return the deserialised
+        object. Returns a fresh empty cache when the file does not
+        exist; never throws on missing-file (matches the "latest known
+        good" stance documented in SPEC B.23.6).
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$OsVersion,
+        [string]$DataDir = ''
+    )
+    $cachePath = Get-DynamicUpdateCachePath -OsVersion $OsVersion -DataDir $DataDir
+    if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
+        return (New-EmptyDynamicUpdateCache -OsVersion $OsVersion)
+    }
+    $bytes = [System.IO.File]::ReadAllBytes($cachePath)
+    $json  = [System.Text.Encoding]::UTF8.GetString($bytes)
+    $obj   = ($json | ConvertFrom-Json)
+    # Defensive: ensure Entries serialises back as an array even if the
+    # file recorded a single object due to old ConvertTo-Json behaviour.
+    if ($null -eq $obj.Entries) {
+        $obj | Add-Member -NotePropertyName 'Entries' -NotePropertyValue @() -Force
+    }
+    elseif ($obj.Entries -isnot [System.Collections.IEnumerable] -or $obj.Entries -is [string]) {
+        $obj.Entries = @($obj.Entries)
+    }
+    else {
+        $obj.Entries = @($obj.Entries)
+    }
+    return $obj
+}
+
+function Save-DynamicUpdateCache {
+    <#
+    .SYNOPSIS
+        Persist a cache object to data/cache-du-Server<NNNN>.json with
+        UTF-8 + LF + no-BOM, matching the project-wide cache file
+        conventions.
+    #>
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [pscustomobject]$Cache,
+        [string]$DataDir = ''
+    )
+    $cachePath = Get-DynamicUpdateCachePath -OsVersion $Cache.OsVersion -DataDir $DataDir
+    $dir = Split-Path -Parent $cachePath
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+        New-Item -Path $dir -ItemType Directory -Force | Out-Null
+    }
+    $json = ($Cache | ConvertTo-Json -Depth 12) -replace "`r`n", "`n"
+    if (-not $json.EndsWith("`n")) { $json = $json + "`n" }
+    [System.IO.File]::WriteAllBytes($cachePath, [System.Text.Encoding]::UTF8.GetBytes($json))
+    return $cachePath
+}
+
+function Test-DynamicUpdatePatchMonth {
+    <#
+    .SYNOPSIS
+        Validate that a PatchMonth string matches the YYYY-MM convention
+        used throughout this subproject. Returns $true / $false.
+    #>
+    [OutputType([bool])]
+    param([Parameter(Mandatory)] [string]$PatchMonth)
+    return ($PatchMonth -match '^\d{4}-(0[1-9]|1[0-2])$')
+}
+
+function Add-DynamicUpdateCacheEntry {
+    <#
+    .SYNOPSIS
+        Append (or upsert) one Catalog-probe result into the per-OS
+        cache file. If an entry with the same (PatchMonth, DuType)
+        already exists, it is replaced in place. The file is persisted
+        before the function returns.
+    .DESCRIPTION
+        The Entry parameter accepts a hashtable / PSCustomObject with
+        the following recognised properties (extra properties are
+        preserved verbatim, so the cache can carry forensic data
+        without schema bumps):
+
+          PatchMonth        string  YYYY-MM (mandatory)
+          DuType            string  e.g. DynamicUpdate.Setup (mandatory)
+          ProbedAt          string  ISO 8601 UTC timestamp
+          Query             string  Search.aspx query the probe used
+          SearchHitCount    int     total Search.aspx hits
+          MatchingHitCount  int     hits that survived Title filtering
+          MatchingHits      array   [{UpdateId,Title},...]
+          ChosenUpdateId    string  the selected UpdateId
+          ChosenTitle       string  the selected Title
+          KbId              string  "KB<digits>" extracted from Title
+          Success           bool    publish present (true) or absent (false)
+          IsEmptyMarker     bool    Catalog 'noResultText' marker present
+          Notes             string  free-form annotation
+
+        The cache's LastRefreshedAt is updated to the entry's ProbedAt
+        (or the current UTC time if ProbedAt was not supplied).
+    .EXAMPLE
+        Add-DynamicUpdateCacheEntry -OsVersion Server2025 -Entry @{
+            PatchMonth='2026-05'; DuType='DynamicUpdate.SafeOs';
+            ChosenUpdateId='3d3a4626-...'; KbId='KB5087588'; Success=$true
+        }
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$OsVersion,
+        [Parameter(Mandatory)]            $Entry,
+        [string]$DataDir = ''
+    )
+
+    # Normalise Entry to a PSCustomObject so we can access its props uniformly.
+    $entryObj = $null
+    if ($Entry -is [hashtable]) {
+        $entryObj = [pscustomobject]$Entry
+    }
+    elseif ($Entry -is [pscustomobject]) {
+        $entryObj = $Entry
+    }
+    else {
+        # ConvertFrom-Json result (from the TestHarness path) is also
+        # PSCustomObject, but bare values are not. Re-roundtrip to normalise.
+        $entryObj = ($Entry | ConvertTo-Json -Depth 12 | ConvertFrom-Json)
+    }
+
+    # Validate the two mandatory fields.
+    $patchMonth = [string]$entryObj.PatchMonth
+    $duType     = [string]$entryObj.DuType
+    if ([string]::IsNullOrEmpty($patchMonth)) {
+        throw 'Add-DynamicUpdateCacheEntry: Entry.PatchMonth is required.'
+    }
+    if (-not (Test-DynamicUpdatePatchMonth -PatchMonth $patchMonth)) {
+        throw ('Add-DynamicUpdateCacheEntry: invalid PatchMonth "{0}"; expected YYYY-MM.' -f $patchMonth)
+    }
+    if ([string]::IsNullOrEmpty($duType)) {
+        throw 'Add-DynamicUpdateCacheEntry: Entry.DuType is required.'
+    }
+
+    # If ProbedAt is missing, stamp it now.
+    $probedAt = [string]$entryObj.ProbedAt
+    if ([string]::IsNullOrEmpty($probedAt)) {
+        $probedAt = (Get-Date).ToUniversalTime().ToString('o')
+        $entryObj | Add-Member -NotePropertyName 'ProbedAt' -NotePropertyValue $probedAt -Force
+    }
+
+    $cache = Get-DynamicUpdateCache -OsVersion $OsVersion -DataDir $DataDir
+
+    # Upsert: drop any existing entry with the same (PatchMonth, DuType).
+    $kept = @($cache.Entries | Where-Object {
+        -not ($_.PatchMonth -eq $patchMonth -and $_.DuType -eq $duType)
+    })
+    $kept = $kept + $entryObj
+    $cache | Add-Member -NotePropertyName 'Entries'         -NotePropertyValue @($kept)  -Force
+    $cache | Add-Member -NotePropertyName 'LastRefreshedAt' -NotePropertyValue $probedAt -Force
+
+    $null = Save-DynamicUpdateCache -Cache $cache -DataDir $DataDir
+    return $cache
+}
+
+function ConvertTo-DynamicUpdatePatchMonthSortKey {
+    <#
+    .SYNOPSIS
+        Convert a YYYY-MM PatchMonth string into an integer (yyyy*100 +
+        month) for fast Compare-Object and Sort-Object operations.
+    #>
+    [OutputType([int])]
+    param([Parameter(Mandatory)] [string]$PatchMonth)
+    if (-not (Test-DynamicUpdatePatchMonth -PatchMonth $PatchMonth)) {
+        return -1
+    }
+    $parts = $PatchMonth -split '-'
+    return ([int]$parts[0] * 100 + [int]$parts[1])
+}
+
+function Get-DynamicUpdateWindowEarliestPatchMonth {
+    <#
+    .SYNOPSIS
+        Compute the earliest PatchMonth that still falls inside the
+        36-month window relative to a reference date (defaults to now,
+        UTC). Returns YYYY-MM.
+    .DESCRIPTION
+        Tests pass a fixed -Now to make assertions reproducible. The
+        window includes the reference month; i.e. for Now=2026-05 the
+        earliest in-window month is 2023-06 (35 months earlier),
+        yielding a 36-month inclusive range 2023-06..2026-05.
+    #>
+    [OutputType([string])]
+    param(
+        [datetime]$Now    = [datetime]::UtcNow,
+        [int]     $Months = $Script:DynamicUpdateCacheWindowMonths
+    )
+    # The reference month inclusive plus the prior (Months-1) months.
+    $first = New-Object 'System.DateTime' -ArgumentList $Now.Year, $Now.Month, 1
+    $earliest = $first.AddMonths(-($Months - 1))
+    return ($earliest.ToString('yyyy-MM'))
+}
+
+function Get-LatestDynamicUpdate {
+    <#
+    .SYNOPSIS
+        Return the most-recent successful cache entry for the given
+        (OS, DuType) within the 36-month window. Returns $null when no
+        in-window entry has Success=true.
+    .DESCRIPTION
+        Tests can pass a fixed -Now to anchor the window. By default
+        the window is anchored on the current UTC clock.
+
+        "Most recent" is decided by PatchMonth, not ProbedAt: the
+        cache may have been probed multiple times for the same month,
+        but the publishing month is what matters for ISO-build
+        applicability. Within the same PatchMonth the upsert in
+        Add-DynamicUpdateCacheEntry already keeps only the most
+        recent probe.
+    .EXAMPLE
+        Get-LatestDynamicUpdate -OsVersion Server2025 -DuType DynamicUpdate.SafeOs
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$OsVersion,
+        [Parameter(Mandatory)] [string]$DuType,
+        [datetime]$Now    = [datetime]::UtcNow,
+        [string]  $DataDir = ''
+    )
+    $cache = Get-DynamicUpdateCache -OsVersion $OsVersion -DataDir $DataDir
+    if ($cache.Entries.Count -eq 0) {
+        return $null
+    }
+    $earliestMonth = Get-DynamicUpdateWindowEarliestPatchMonth -Now $Now
+    $earliestKey   = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth $earliestMonth
+    $nowKey        = [int]$Now.Year * 100 + [int]$Now.Month
+
+    $candidates = @($cache.Entries | Where-Object {
+        $_.DuType  -eq $DuType -and
+        $_.Success -eq $true
+    } | Where-Object {
+        $k = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth ([string]$_.PatchMonth)
+        $k -ge $earliestKey -and $k -le $nowKey
+    })
+    if ($candidates.Count -eq 0) {
+        return $null
+    }
+    # Pick the entry with the highest PatchMonth key.
+    $top = $candidates | Sort-Object -Property @{
+        Expression = { ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth ([string]$_.PatchMonth) }
+        Descending = $true
+    } | Select-Object -First 1
+    return $top
+}
+
+function Remove-DynamicUpdateOutsideWindow {
+    <#
+    .SYNOPSIS
+        Drop cache entries whose PatchMonth is earlier than the 36-month
+        window relative to a reference date (defaults to now, UTC).
+        Persists the trimmed cache. Returns the trimmed cache object.
+    .DESCRIPTION
+        Tests anchor the window with -Now. Production callers should
+        omit -Now and let the current UTC clock apply.
+
+        The function name is singular ("Window") rather than carrying
+        the literal month count ("OlderThan36Months") so the verb-noun
+        convention is respected; the 36-month size is baked into the
+        Get-DynamicUpdateWindowEarliestPatchMonth helper.
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$OsVersion,
+        [datetime]$Now    = [datetime]::UtcNow,
+        [string]  $DataDir = ''
+    )
+    $cache = Get-DynamicUpdateCache -OsVersion $OsVersion -DataDir $DataDir
+    if ($cache.Entries.Count -eq 0) {
+        return $cache
+    }
+    $earliestMonth = Get-DynamicUpdateWindowEarliestPatchMonth -Now $Now
+    $earliestKey   = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth $earliestMonth
+
+    $kept = @($cache.Entries | Where-Object {
+        (ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth ([string]$_.PatchMonth)) -ge $earliestKey
+    })
+    if ($kept.Count -eq $cache.Entries.Count) {
+        # Nothing to drop; avoid a no-op write.
+        return $cache
+    }
+    $cache | Add-Member -NotePropertyName 'Entries' -NotePropertyValue @($kept) -Force
+    $null = Save-DynamicUpdateCache -Cache $cache -DataDir $DataDir
+    return $cache
+}
+
+# ============================================================
 # ISO Updater specific: Microsoft Update Catalog scraper
 # ============================================================
 #

@@ -1,0 +1,272 @@
+{
+  "frozen_now": "2026-05-26T00:00:00Z",
+  "window_months": 36,
+  "scenarios": [
+    {
+      "name": "server2025_live_then_setup_empty",
+      "os": "Server2025",
+      "add_entries": [
+        {
+          "PatchMonth": "2026-03",
+          "DuType": "DynamicUpdate.SafeOs",
+          "ProbedAt": "2026-05-26T01:00:00Z",
+          "Query": "2026-03 Safe OS Dynamic Update for Microsoft server operating system version 24H2",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [
+            {
+              "UpdateId": "7a9bbb67-4315-499c-889a-44d2381c9246",
+              "Title": "2026-03 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5078794)"
+            }
+          ],
+          "ChosenUpdateId": "7a9bbb67-4315-499c-889a-44d2381c9246",
+          "ChosenTitle": "2026-03 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5078794)",
+          "KbId": "KB5078794",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": ""
+        },
+        {
+          "PatchMonth": "2026-04",
+          "DuType": "DynamicUpdate.SafeOs",
+          "ProbedAt": "2026-05-26T01:00:00Z",
+          "Query": "2026-04 Safe OS Dynamic Update for Microsoft server operating system version 24H2",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [
+            {
+              "UpdateId": "9ed8098f-6bcc-4006-b835-d53c6a7a772a",
+              "Title": "2026-04 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5082237)"
+            }
+          ],
+          "ChosenUpdateId": "9ed8098f-6bcc-4006-b835-d53c6a7a772a",
+          "ChosenTitle": "2026-04 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5082237)",
+          "KbId": "KB5082237",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": ""
+        },
+        {
+          "PatchMonth": "2026-05",
+          "DuType": "DynamicUpdate.SafeOs",
+          "ProbedAt": "2026-05-26T01:00:00Z",
+          "Query": "2026-05 Safe OS Dynamic Update for Microsoft server operating system version 24H2",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [
+            {
+              "UpdateId": "3d3a4626-8f15-4f7d-8588-a5431398059a",
+              "Title": "2026-05 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5087588)"
+            }
+          ],
+          "ChosenUpdateId": "3d3a4626-8f15-4f7d-8588-a5431398059a",
+          "ChosenTitle": "2026-05 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5087588)",
+          "KbId": "KB5087588",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": ""
+        },
+        {
+          "PatchMonth": "2026-05",
+          "DuType": "DynamicUpdate.Setup",
+          "ProbedAt": "2026-05-26T01:00:00Z",
+          "Query": "2026-05 Setup Dynamic Update for Microsoft server operating system version 24H2",
+          "SearchHitCount": 0,
+          "MatchingHitCount": 0,
+          "MatchingHits": [],
+          "ChosenUpdateId": "",
+          "ChosenTitle": "",
+          "KbId": "",
+          "Success": false,
+          "IsEmptyMarker": true,
+          "Notes": ""
+        }
+      ],
+      "queries": [
+        {
+          "du_type": "DynamicUpdate.SafeOs",
+          "expected_latest_patch_month": "2026-05",
+          "expected_latest_kb_id": "KB5087588",
+          "expected_latest_success": true
+        },
+        {
+          "du_type": "DynamicUpdate.Setup",
+          "expected_latest_patch_month": null,
+          "expected_latest_kb_id": null,
+          "expected_latest_success": null
+        }
+      ],
+      "trim_keeps": [
+        "2026-03",
+        "2026-04",
+        "2026-05"
+      ]
+    },
+    {
+      "name": "server2022_with_old_synthetic",
+      "os": "Server2022",
+      "add_entries": [
+        {
+          "PatchMonth": "2026-04",
+          "DuType": "DynamicUpdate.Bare",
+          "ProbedAt": "2026-05-26T01:00:00Z",
+          "Query": "2026-04 Dynamic Update for Microsoft server operating system version 21H2",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [
+            {
+              "UpdateId": "bb051a0d-444c-4395-8dc3-106961d2450a",
+              "Title": "2026-04 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5082243)"
+            }
+          ],
+          "ChosenUpdateId": "bb051a0d-444c-4395-8dc3-106961d2450a",
+          "ChosenTitle": "2026-04 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5082243)",
+          "KbId": "KB5082243",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": ""
+        },
+        {
+          "PatchMonth": "2026-05",
+          "DuType": "DynamicUpdate.Bare",
+          "ProbedAt": "2026-05-26T01:00:00Z",
+          "Query": "2026-05 Dynamic Update for Microsoft server operating system version 21H2",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [
+            {
+              "UpdateId": "f7ad10df-1aef-4ecb-889f-3976c45fac6e",
+              "Title": "2026-05 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087595)"
+            }
+          ],
+          "ChosenUpdateId": "f7ad10df-1aef-4ecb-889f-3976c45fac6e",
+          "ChosenTitle": "2026-05 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087595)",
+          "KbId": "KB5087595",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": ""
+        },
+        {
+          "PatchMonth": "2022-12",
+          "DuType": "DynamicUpdate.Bare",
+          "ProbedAt": "2022-12-15T00:00:00Z",
+          "Query": "synthetic",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [
+            {
+              "UpdateId": "aaa-2022-12",
+              "Title": "synthetic 2022-12 (KB5022222)"
+            }
+          ],
+          "ChosenUpdateId": "aaa-2022-12",
+          "ChosenTitle": "synthetic 2022-12 (KB5022222)",
+          "KbId": "KB5022222",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": "synthetic"
+        },
+        {
+          "PatchMonth": "2022-06",
+          "DuType": "DynamicUpdate.Bare",
+          "ProbedAt": "2022-06-15T00:00:00Z",
+          "Query": "synthetic",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [
+            {
+              "UpdateId": "aaa-2022-06",
+              "Title": "synthetic 2022-06 (KB5011111)"
+            }
+          ],
+          "ChosenUpdateId": "aaa-2022-06",
+          "ChosenTitle": "synthetic 2022-06 (KB5011111)",
+          "KbId": "KB5011111",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": "synthetic"
+        },
+        {
+          "PatchMonth": "2021-04",
+          "DuType": "DynamicUpdate.Bare",
+          "ProbedAt": "2021-04-15T00:00:00Z",
+          "Query": "synthetic",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [
+            {
+              "UpdateId": "aaa-2021-04",
+              "Title": "synthetic 2021-04 (KB5000000)"
+            }
+          ],
+          "ChosenUpdateId": "aaa-2021-04",
+          "ChosenTitle": "synthetic 2021-04 (KB5000000)",
+          "KbId": "KB5000000",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": "synthetic"
+        }
+      ],
+      "queries": [
+        {
+          "du_type": "DynamicUpdate.Bare",
+          "expected_latest_patch_month": "2026-05",
+          "expected_latest_kb_id": "KB5087595",
+          "expected_latest_success": true
+        }
+      ],
+      "trim_keeps": [
+        "2026-04",
+        "2026-05"
+      ]
+    },
+    {
+      "name": "upsert_same_key_latest_wins",
+      "os": "Server2025",
+      "add_entries": [
+        {
+          "PatchMonth": "2026-04",
+          "DuType": "DynamicUpdate.SafeOs",
+          "ProbedAt": "2026-04-15T00:00:00Z",
+          "Query": "synthetic v1",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [],
+          "ChosenUpdateId": "first-id",
+          "ChosenTitle": "first-title (KB5099991)",
+          "KbId": "KB5099991",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": "v1"
+        },
+        {
+          "PatchMonth": "2026-04",
+          "DuType": "DynamicUpdate.SafeOs",
+          "ProbedAt": "2026-04-30T00:00:00Z",
+          "Query": "synthetic v2",
+          "SearchHitCount": 1,
+          "MatchingHitCount": 1,
+          "MatchingHits": [],
+          "ChosenUpdateId": "second-id",
+          "ChosenTitle": "second-title (KB5099999)",
+          "KbId": "KB5099999",
+          "Success": true,
+          "IsEmptyMarker": false,
+          "Notes": "v2"
+        }
+      ],
+      "queries": [
+        {
+          "du_type": "DynamicUpdate.SafeOs",
+          "expected_latest_patch_month": "2026-04",
+          "expected_latest_kb_id": "KB5099999",
+          "expected_latest_success": true
+        }
+      ],
+      "trim_keeps": [
+        "2026-04"
+      ],
+      "expected_entry_count_after_adds": 1
+    }
+  ]
+}

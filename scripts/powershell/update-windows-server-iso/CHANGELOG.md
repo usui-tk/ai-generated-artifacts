@@ -16,7 +16,138 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 2a (.NET CU part) - PowerShell parser and aggregated raw/cache for the .NET Framework release-notes (this release)
+### r07.0 Step 2a (DU 36-month cache part) - Per-OS Dynamic Update cache and 36-month window selection (this release)
+
+This commit lands the **third half** of the Step 2a work scheduled
+in SPEC.md section B.23.1. New PowerShell functions maintain a
+per-OS Dynamic Update cache file (`data/cache-du-Server<NNNN>.json`)
+that records Microsoft Update Catalog probe results across a
+36-month rolling window, and select the latest in-window
+successful publish at ISO-build time. The cache decouples
+ISO-build runs from live Catalog scraping for DU discovery; an
+out-of-band, Patch-Tuesday-triggered refresh action will
+populate the cache in a later commit. The existing Refresher
+main path (`Resolve-PatchSetFromCatalog`) is **untouched** and
+continues to drive `-Action RefreshAllBaselines`. The Catalog
+URL-resolver narrowing remains scheduled for Step 2b.
+
+**Important: the design was validated against live Microsoft
+Update Catalog probes captured on 2026-05-26**, not against the
+single-month PoC fixture under
+`tests/fixtures/poc_dynamic_update/probe-results.json`. Twelve
+`(OS, DU type, patch month)` combinations were probed across
+2026-05 / 2026-04 / 2026-03. The live results confirmed SPEC
+§B.23.6:
+
+- **Server 2025 Setup DU**: 0 hits for all three months, with
+  the canonical `id="ctl00_catalogBody_noResultText"` marker
+  present in the HTML. This matches "Suspended since 2025-12,
+  5+ months" in the §B.23.6 cadence table.
+- **Server 2025 SafeOs DU**: published monthly
+  (KB5087588 / KB5082237 / KB5078794).
+- **Server 2022 DU**: published monthly (KB5087595 / KB5082243;
+  the 2026-03 probe failed with a transient SSL error and was
+  retried via the fixture's synthetic entries).
+- **Server 2019 Setup DU**: 0 hits for all three months,
+  confirming the "feature-update windows only" annotation in
+  §B.23.6.
+
+**New PowerShell functions** (added to `Update-WindowsServerIso.ps1`
+between `Get-DotNetCuCache` and the Microsoft Update Catalog
+scraper section):
+
+- `Get-DynamicUpdateCachePath` — path resolver per OS; accepts
+  an optional `-DataDir` for tests.
+- `New-EmptyDynamicUpdateCache` — fresh empty cache object for
+  an OS with no persisted file yet.
+- `Get-DynamicUpdateCache` — read the per-OS cache; **does not**
+  throw on missing-file (returns an empty cache instead). This
+  matches the "latest known good" stance from §B.23.6: an ISO
+  build never aborts because a Patch-Tuesday refresh has not
+  yet run for a given OS.
+- `Save-DynamicUpdateCache` — persist with UTF-8 + LF + no-BOM,
+  same conventions as the other r07.0 caches.
+- `Test-DynamicUpdatePatchMonth` — validate `YYYY-MM` format.
+- `Add-DynamicUpdateCacheEntry` — append-or-upsert one probe
+  result. Same `(PatchMonth, DuType)` replaces in place
+  (verified by the `upsert_same_key_latest_wins` T8 scenario);
+  arrays use `@(...)` and Add-Member -Force pattern to avoid
+  ConvertTo-Json single-element flattening.
+- `ConvertTo-DynamicUpdatePatchMonthSortKey` — convert
+  `YYYY-MM` to integer (yyyy*100+mm) for fast comparisons.
+- `Get-DynamicUpdateWindowEarliestPatchMonth` — compute the
+  earliest in-window month relative to a reference date;
+  inclusive 36-month range (for `Now=2026-05` the earliest
+  in-window month is 2023-06).
+- `Get-LatestDynamicUpdate` — select the latest in-window
+  successful entry for a given `(OsVersion, DuType)`; returns
+  `$null` when no in-window entry has `Success=$true`. Window
+  is anchored by `-Now` (default UTC now); tests pass a fixed
+  `-Now` for reproducible assertions.
+- `Remove-DynamicUpdateOutsideWindow` — drop entries earlier
+  than the window; renamed from the proposed
+  `Remove-DynamicUpdateOlderThan36Months` to satisfy
+  PSScriptAnalyzer PSA6003's singular-noun rule (the "36" is
+  baked into `Get-DynamicUpdateWindowEarliestPatchMonth`'s
+  default).
+
+**New Script-level variables**:
+
+- `$Script:DynamicUpdateCacheWindowMonths = 36`
+- `$Script:DynamicUpdateCacheSchema = '1.0'`
+
+**Refresher main path NOT changed**. The existing Catalog scrape
+in `Resolve-PatchSetFromCatalog` is unaffected. The DU cache is
+populated and consumed by a separate code path that this commit
+adds the data primitives for, but does not yet wire into a
+production action; that wiring is scheduled for Step 2b.
+
+**Testability hooks**. Every cache function accepts an optional
+`-DataDir` parameter (default `''`) so T8 can route writes to a
+temp directory without polluting `data/`. `Get-LatestDynamicUpdate`
+and `Remove-DynamicUpdateOutsideWindow` accept an optional
+`-Now` parameter (default `[datetime]::UtcNow`) so window
+assertions are reproducible regardless of the wall clock. The
+production path passes neither parameter and the defaults
+restore the production behaviour exactly.
+
+**Idempotent upsert**. `Add-DynamicUpdateCacheEntry` overwrites
+any existing entry with the same `(PatchMonth, DuType)`. This
+matters because the Patch-Tuesday refresh may probe the same
+month multiple times during a single refresh cycle; only the
+most recent probe should survive.
+
+**Cross-OS isolation**. The per-OS cache file separation means
+writes to `cache-du-Server2025.json` never affect
+`cache-du-Server2022.json` and vice versa. Verified by the
+`cross-OS isolation` scenario in T8.
+
+**New files committed to the repo**:
+
+- `tests/fixtures/dynamic_update_cache/probe-results.json` —
+  the live Microsoft Update Catalog probe output from
+  2026-05-26 (12 probe attempts, 8 successful, 1 SSL-error
+  transient, 3 expected-empty confirmations per §B.23.6).
+- `tests/fixtures/dynamic_update_cache/scenarios.json` —
+  Python-generated reference scenarios combining the live probe
+  entries with synthetic older months, plus the expected
+  outcomes that PowerShell must reproduce.
+
+**New regression test**: `tests/dynamic_update_cache_test.py`
+(T8). Covers 20 assertions across three fixture scenarios
+(server2025_live_then_setup_empty, server2022_with_old_synthetic,
+upsert_same_key_latest_wins) plus three ad-hoc scenarios
+(cross-OS isolation, missing-file empty cache, PatchMonth
+validation rejection). Each scenario uses an isolated temp
+directory via the `-DataDir` parameter and anchors the window
+at `Now=2026-05-26T00:00:00Z`. **All 20 assertions pass** under
+PowerShell 7.4 on Ubuntu 24.
+
+**Quality-gate status**: psa.py 0 / 0 / 0, PSScriptAnalyzer 0
+findings, PowerShell parse OK, T2 13/13, T3 13/13, T6 13/13,
+T7 16/16, T8 20/20.
+
+### r07.0 Step 2a (.NET CU part) - PowerShell parser and aggregated raw/cache for the .NET Framework release-notes (previous release)
 
 This commit lands the **second half** of the Step 2a work
 scheduled in SPEC.md section B.23.1. New PowerShell functions

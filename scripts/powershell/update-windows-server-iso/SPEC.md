@@ -2825,6 +2825,17 @@ This project does not auto-detect target firmware (the target is by definition n
 | `Invoke-DotNetCuFetch` (r07.0) | Fetch the release-notes index plus every monthly page it references; write the aggregated body and per-fetch metadata to `data/raw-dotnet-cu.json` |
 | `Update-DotNetCuCache` (r07.0) | Read `raw-dotnet-cu.json`, parse every captured month, write `cache-dotnet-cu.json` |
 | `Get-DotNetCuCache` (r07.0) | Read deserialised `cache-dotnet-cu.json` for Refresher consumers |
+| **Dynamic Update 36-month cache support (r07.0 Step 2a)** ||
+| `Get-DynamicUpdateCachePath` (r07.0) | Resolve `data/cache-du-Server<NNNN>.json` for the given OS; tests can override the data directory with `-DataDir` |
+| `New-EmptyDynamicUpdateCache` (r07.0) | Build a fresh empty cache object (Schema/OsVersion/LastRefreshedAt/WindowMonths/Entries) for an OS with no persisted cache file |
+| `Get-DynamicUpdateCache` (r07.0) | Read the per-OS cache file; returns a fresh empty cache when the file is missing (never throws on missing-file, per §B.23.6 "latest known good" stance) |
+| `Save-DynamicUpdateCache` (r07.0) | Persist a cache object to disk with UTF-8 + LF + no-BOM, matching project-wide cache file conventions |
+| `Test-DynamicUpdatePatchMonth` (r07.0) | Validate that a PatchMonth string matches the `YYYY-MM` convention |
+| `Add-DynamicUpdateCacheEntry` (r07.0) | Append-or-upsert a Catalog-probe result into the cache file; same (PatchMonth, DuType) replaces in place; updates `LastRefreshedAt`; persists before returning |
+| `ConvertTo-DynamicUpdatePatchMonthSortKey` (r07.0) | Convert a `YYYY-MM` PatchMonth into an integer (`yyyy*100+mm`) for fast comparison |
+| `Get-DynamicUpdateWindowEarliestPatchMonth` (r07.0) | Compute the earliest in-window `YYYY-MM` relative to a reference date (default UTC now); inclusive 36-month range |
+| `Get-LatestDynamicUpdate` (r07.0) | Return the most-recent successful entry for `(OsVersion, DuType)` within the 36-month window; returns `$null` when the window has no successful entries; tests anchor the window via `-Now` |
+| `Remove-DynamicUpdateOutsideWindow` (r07.0) | Drop entries whose PatchMonth falls outside the 36-month window; persists the trimmed cache; no-op when nothing to drop |
 
 ---
 
@@ -2851,6 +2862,7 @@ PowerShell 7+. No `pip install` is required.
 | `tests/wsusscn2_probe.py`       (T5) | HTTP Range-GET against `wsusscn2.cab`; warns when the cab is older than 60 days. Detects egress-proxy `host_not_allowed` and reports it separately from real Microsoft outages. | Yes |
 | `tests/release_info_parser_test.py` (T6) | Offline regression test for `ConvertFrom-ReleaseInfoMarkdown`. Parses `tests/snapshots/poc_release_info/release-info-<date>.md` via the TestHarness and asserts row counts (total + per-OS), KbId-parse coverage, and IsBaseline detection against the PoC reference fixture `tests/fixtures/poc_release_info/release-info.json`. Added in r07.0 Step 2a as the regression gate for the PowerShell port of `poc_release_info_02_parse.py`. | No  |
 | `tests/dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown`. Parses the live-captured snapshots under `tests/snapshots/dotnet_cu/` (index plus two monthly pages) via the TestHarness and asserts EntryCount / EarliestDate / LatestDate / Kinds / per-OS row counts / per-entry deep equality against the Python reference fixtures under `tests/fixtures/dotnet_cu/`. Reference data was captured live from learn.microsoft.com on 2026-05-26 and intentionally does not depend on the PoC fixtures under `tests/snapshots/poc_dotnet_cu/`, which reflect an older page structure. | No  |
+| `tests/dynamic_update_cache_test.py` (T8) | Offline regression test for the Dynamic Update 36-month cache subsystem. Drives `Add-DynamicUpdateCacheEntry`, `Get-DynamicUpdateCache`, `Get-LatestDynamicUpdate`, and `Remove-DynamicUpdateOutsideWindow` through three scenarios defined in `tests/fixtures/dynamic_update_cache/scenarios.json` (which combines fresh live Microsoft Update Catalog probe results captured on 2026-05-26 with synthetic older months to exercise the 36-month window trim) plus three ad-hoc scenarios (cross-OS isolation, missing-file empty cache, PatchMonth validation rejection). Each scenario uses an isolated temp directory via the `-DataDir` parameter, anchors the window via `-Now=2026-05-26T00:00:00Z`, and asserts 20 invariants total. | No  |
 
 `tests/common/` holds:
 
