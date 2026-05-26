@@ -148,12 +148,12 @@ jobs:
           import sys
           from pathlib import Path
 
-          d = Path('scripts/powershell/update-windows-server-iso/Config')
-          required = {'Server2016.json', 'Server2019.json', 'Server2022.json', 'Server2025.json'}
-          present = {p.name for p in d.glob('*.json')}
+          d = Path('scripts/powershell/update-windows-server-iso/data')
+          required = {'config-Server2016.json', 'config-Server2019.json', 'config-Server2022.json', 'config-Server2025.json'}
+          present = {p.name for p in d.glob('config-Server*.json')}
           missing = required - present
           if missing:
-              print(f'FAIL: missing Config files: {sorted(missing)}', file=sys.stderr)
+              print(f'FAIL: missing OS config files under data/: {sorted(missing)}', file=sys.stderr)
               sys.exit(1)
 
           # Schema 2.x top-level required keys
@@ -165,7 +165,7 @@ jobs:
           # Languages we expect every Config to support (both)
           required_langs = ('en-us', 'ja-jp')
           # Schema 2.1+ adds a top-level Pca2023 block (optional in 2.0)
-          for f in sorted(d.glob('*.json')):
+          for f in sorted(d.glob('config-Server*.json')):
               with open(f) as fp:
                   data = json.load(fp)
               schema = str(data.get('Schema', ''))

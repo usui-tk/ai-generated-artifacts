@@ -195,7 +195,7 @@ jobs:
         id: diff
         shell: pwsh
         run: |
-          $configRel = 'scripts/powershell/update-windows-server-iso/Config'
+          $configRel = 'scripts/powershell/update-windows-server-iso/data'
           # `git diff --name-only` shows tracked-file modifications;
           # `git ls-files --others --exclude-standard` shows newly
           # untracked files. We care about either category.
@@ -222,7 +222,7 @@ jobs:
         if: steps.diff.outputs.has-changes == 'true'
         shell: pwsh
         run: |
-          $configRel = 'scripts/powershell/update-windows-server-iso/Config'
+          $configRel = 'scripts/powershell/update-windows-server-iso/data'
           Write-Host '=== git diff (full) ==='
           & git -C $env:GITHUB_WORKSPACE diff -- $configRel
           Write-Host ''

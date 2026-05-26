@@ -16,7 +16,81 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 4 - Retire r06 Phase 2 PoC scripts and assets (this release)
+### r07.0 Step 5 - CI workflow: catch-up rename from `Config/` to `data/` (this release)
+
+Mechanical follow-up to r07.0 Step 1 (commit `b34241f`,
+"Rename Config/ -> data/ and update references"). The Step 1
+commit updated `Update-WindowsServerIso.ps1`,
+`data/config-Server*.json`, SPEC.md, and several Markdown docs to
+the new `data/` + three-prefix naming scheme, but missed three
+stale path references inside two CI workflow files. The
+`Validate Config JSON files` check in stage1 has been failing on
+every PR since b34241f as a result; the failure surfaced visibly
+on the workflow run for commit `7f7d400` ("Bump script to
+r07.0"). This commit closes the gap.
+
+**Files modified (2)**:
+
+- `.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml`
+  - `[Format] Validate Config JSON files` step:
+    - `Path('.../update-windows-server-iso/Config')` ->
+      `Path('.../update-windows-server-iso/data')`
+    - required set `{'Server2016.json', ..., 'Server2025.json'}`
+      -> `{'config-Server2016.json', ..., 'config-Server2025.json'}`
+    - both `glob('*.json')` calls narrowed to
+      `glob('config-Server*.json')` (so non-config JSON files
+      under `data/` such as future `cache-*.json` or `raw-*.json`
+      do not get force-validated as OS configs)
+    - error message text updated from "missing Config files"
+      to "missing OS config files under data/"
+- `.github/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml`
+  - `Detect Config diffs` step (line 198):
+    `$configRel = '.../Config'` -> `$configRel = '.../data'`
+  - `Show full diff (for log archival)` step (line 225): same
+    one-line update
+  - The existing `add-paths: scripts/.../data/config-*.json`
+    argument to `peter-evans/create-pull-request@v8` was already
+    on the new path and is unchanged
+
+**Downstream consequences resolved**. The same workflow run that
+hit the Config-JSON validation failure also reported two
+`Path does not exist` errors when the `[psa.py] Upload SARIF to
+Code Scanning` and `[PSSA-pwsh7] Upload SARIF to Code Scanning`
+steps tried to upload `psa.sarif` and `pssa.sarif`. These were
+not independent failures: the `Validate Config JSON files`
+failure short-circuited the SARIF generation steps (which run
+under a `success()`-implying conditional), and the upload steps
+(which carry `if: always()`) then ran against absent paths. With
+the validation step passing again, both SARIF generation steps
+run and produce their files, and the uploads succeed.
+
+**Local verification**.
+
+- `python3` extraction of the updated `Validate Config JSON
+  files` block executed against
+  `scripts/powershell/update-windows-server-iso/data/` returns
+  `OK` for all four `config-Server*.json` files (Schema=2.1,
+  Build values 14393 / 17763 / 20348 / 26100, both `en-us` and
+  `ja-jp` language nodes present).
+- `python3 -c "import yaml; yaml.safe_load(open('<file>'))"`
+  passes for both modified workflow files.
+- Repository-wide grep for stale `Config/` or `/Config[^a-z]`
+  references inside `.github/workflows/*.yml` returns zero hits
+  after the change.
+
+**No production-code change**. `Update-WindowsServerIso.ps1` is
+not modified by this commit; it has had zero references to the
+old `Config/` path since r07.0 Step 1. Schema versions are
+unchanged. `$Script:ScriptVersion` stays at
+`update-wsi-2026.05.26-r07.0` (this is a CI hygiene fix, not a
+functional change, so SemVer is not affected).
+
+**Quality-gate status**: psa.py 0/0/0, PSScriptAnalyzer 0
+findings, PowerShell parse OK, T2 13/13, T3 10/10, T6 13/13,
+T7 16/16, T8 20/20, T9 18/18, T10 18/18. Cumulative 108/108
+PASS, unchanged from r07.0 Step 4.
+
+
 
 Mechanical cleanup commit scheduled by SPEC §B.23.14. With the
 parser / resolver logic now living in `Update-WindowsServerIso.ps1`
