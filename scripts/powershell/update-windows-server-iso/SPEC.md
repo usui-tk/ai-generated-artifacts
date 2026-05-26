@@ -1634,7 +1634,63 @@ already has at a newer version is a no-op via DISM's own
 component-store logic; applying both is safe and ensures coverage
 for devices that have older .NET 4.x branches.
 
-**Consequences (B-1, B-2)**.
+**Context (B-3 / LCU vs .NET CU same-KB dedup)**. Live verification
+on 2026-05-26 exposed a third edge case unique to the Windows 10
+1607 / Server 2016 family. The Microsoft Learn .NET Framework
+release-notes page for 2026-05 contains the row pair:
+
+```
+| **Windows 10 1607 and Windows Server 2016** |  |
+| .NET Framework 3.5, 4.6.2, 4.7, 4.7.1, 4.7.2 | [5087537](.../kb/5087537) |
+| .NET Framework 4.8 | [5087065](.../kb/5087065) |
+```
+
+`KB5087537` is **the same KB** as the Server 2016 monthly LCU
+recorded in `windows-server-release-info` (2026-05 B,
+AvailabilityDate 2026-05-12). Microsoft's own Update Catalog
+labels this KB "2026-05 Cumulative Update for Windows Server 2016
+for x64-based Systems" -- it is the LCU. The .NET release-notes
+re-listing is a faithful description of the Windows 10 1607 era
+"sliced cumulative update" design: the LCU literally embeds the
+.NET 3.5 / 4.6.2 / 4.7.x cumulative-update payload as OS
+components (only .NET 4.8 ships as a separate `KB5087065` .msu).
+Server 2019 / 2022 / 2025 split the .NET CU into independent
+KBs and do not exhibit this overlap.
+
+A naive discovery layer that emits one record per release-notes
+row produces three records for Server 2016 / 2026-05
+(LCU=KB5087537 from release-info, DotNet.Runtime=KB5087537 from
+release-notes, DotNet.Runtime=KB5087065 from release-notes),
+which then resolves to three PatchBaseline entries pointing at
+**two distinct .msu files** -- KB5087537's .msu is referenced
+twice, once tagged `Type=LCU` and once tagged
+`Type=DotNet.Runtime`. The duplicate entry serves no purpose:
+both records resolve to the same FileName, DownloadUrl, SHA256,
+SizeBytes, UpdateId, and Supersedes list.
+
+**Decision (B-3)**. The discovery layer
+(`Get-PatchSetFromReleaseInfoDiscovery`) deduplicates the .NET CU
+pass against the LCU pass that runs first. Concretely: after the
+LCU records are appended, the function builds a
+case-insensitive `HashSet[string]` of LCU `KbId` values, then
+skips any `.NET CU` row whose `KbId` matches a value in that
+set, logging the skip via `Write-Verbose` for forensic visibility.
+The skipped row's information is **not lost**: it remains
+verbatim in `data/cache-dotnet-cu.json`, so a future SPEC
+revision can revisit the policy without re-fetching from
+upstream. LCU is the **authoritative source** for any KB it
+carries because (a) the LCU's Catalog row exposes the canonical
+two-`.msu` resolution (SSU + LCU payload) that the resolver
+relies on for SPEC B.23.5 B-1 combined-LCU detection, and (b)
+the .NET re-listing carries no information that the LCU does
+not already provide.
+
+T10 (`tests/release_info_resolver_test.py`) covers this with
+a Server 2016 / 2026-05 scenario asserting `record count = 2`
+and the exact `{LCU=KB5087537, DotNet.Runtime=KB5087065}` pair
+(KB5087537 must appear **once**, as LCU).
+
+**Consequences (B-1, B-2, B-3)**.
 - The `.NET CU multiplicity by OS` discrepancy table in §B.21.2
   is left in place as a historical record. r07.0 sources from
   release-notes, so the "production telemetry" column becomes
@@ -2929,7 +2985,7 @@ PowerShell 7+. No `pip install` is required.
 | `tests/dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown`. Parses the live-captured snapshots under `tests/snapshots/dotnet_cu/` (index plus two monthly pages) via the TestHarness and asserts EntryCount / EarliestDate / LatestDate / Kinds / per-OS row counts / per-entry deep equality against the Python reference fixtures under `tests/fixtures/dotnet_cu/`. Reference data was captured live from learn.microsoft.com on 2026-05-26 (the earlier r06 PoC snapshots reflected an older page structure and were retired together with the rest of the PoC assets in r07.0; see `docs/history/dotnet-cu-report.md`). | No  |
 | `tests/dynamic_update_cache_test.py` (T8) | Offline regression test for the Dynamic Update 36-month cache subsystem. Drives `Add-DynamicUpdateCacheEntry`, `Get-DynamicUpdateCache`, `Get-LatestDynamicUpdate`, and `Remove-DynamicUpdateOutsideWindow` through three scenarios defined in `tests/fixtures/dynamic_update_cache/scenarios.json` (which combines fresh live Microsoft Update Catalog probe results captured on 2026-05-26 with synthetic older months to exercise the 36-month window trim) plus three ad-hoc scenarios (cross-OS isolation, missing-file empty cache, PatchMonth validation rejection). Each scenario uses an isolated temp directory via the `-DataDir` parameter, anchors the window via `-Now=2026-05-26T00:00:00Z`, and asserts 20 invariants total. | No  |
 | `tests/catalog_title_tokens_test.py` (T9) | Offline regression test for the URL-resolver Config-driven narrowing added in r07.0 Step 2b. Drives `Get-CatalogTitleTokenList` against all four `data/config-Server*.json` files (verifies `Common.CatalogTitleTokens` is read correctly and a missing-Config OS returns an empty list), then drives `Test-CatalogTitleMatch` through 13 narrow-filter cases captured live from Microsoft Update Catalog on 2026-05-26. Cases cover: positive title matches for all four production OSes, same-KB client-variant rejection (Windows 10 1607 / 1809 for Server 2016 / 2019), negative-token exclusion (`arm64`, `Windows 11`), and Server 2022's both comma forms. 18 assertions total. | No  |
-| `tests/release_info_resolver_test.py` (T10) | Offline regression test for the Refresher main-path migration added in r07.0 Step 2b. Drives `Get-PatchSetFromReleaseInfoDiscovery` (the pure-cache half of `Resolve-PatchSetFromReleaseInfo`) through four scenarios defined in `tests/fixtures/release_info_resolver/scenarios.json`: Server 2025 / Server 2022 / Server 2019 full-set discovery for 2026-05 (asserting the SPEC B.23.5 B-2 multi-row .NET CU behaviour and the SPEC B.23.6 "no DU for Server 2019" absence), and a no-match month returning zero records. Plus two ad-hoc checks: missing-cache defensive default returns zero records, and an invalid PatchMonth ("2026/05") is rejected. All fixtures are synthetic but lifted shape-for-shape from the live 2026-05-26 captures used by T6/T7/T8. 18 assertions total. The orchestrator's Catalog URL-resolution layer is intentionally out of T10's scope (network-dependent); the URL-resolver narrowing layer is covered by T9. | No  |
+| `tests/release_info_resolver_test.py` (T10) | Offline regression test for the Refresher main-path migration added in r07.0 Step 2b. Drives `Get-PatchSetFromReleaseInfoDiscovery` (the pure-cache half of `Resolve-PatchSetFromReleaseInfo`) through five scenarios defined in `tests/fixtures/release_info_resolver/scenarios.json`: Server 2025 / Server 2022 / Server 2019 / Server 2016 full-set discovery for 2026-05 (asserting the SPEC B.23.5 B-2 multi-row .NET CU behaviour, the SPEC B.23.5 B-3 LCU-priority dedup for Server 2016 where the .NET CU release-notes re-lists the LCU KB, and the SPEC B.23.6 "no DU for Server 2019" absence), and a no-match month returning zero records. Plus two ad-hoc checks: missing-cache defensive default returns zero records, and an invalid PatchMonth (`"2026/05"`) is rejected. All fixtures are synthetic but lifted shape-for-shape from the live 2026-05-26 captures used by T6/T7/T8. 22 assertions total. The orchestrator's Catalog URL-resolution layer is intentionally out of T10's scope (network-dependent); the URL-resolver narrowing layer is covered by T9. | No  |
 
 `tests/common/` holds:
 

@@ -16,7 +16,124 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 6 - Implement `-Action RefreshSnapshots` (A03) and document the two-stage refresh workflow (this release)
+### r07.0 Step 7 - Server 2016 LCU vs .NET CU same-KB dedup in the discovery layer (this release)
+
+Bug-fix and SPEC-formalisation commit triggered by live verification
+of Step 6's RefreshSnapshots -> RefreshAllBaselines pipeline against
+the 2026-05 Patch Tuesday data on a clean Windows host. The pipeline
+populated `data/cache-release-info.json` + `data/cache-dotnet-cu.json`
+correctly and produced the expected per-OS NeutralPatches[] counts
+for Server 2019 / 2022 / 2025, but Server 2016 emitted three entries
+where SPEC §B.23.5 expects two: a Type=LCU record for KB5087537 plus
+two Type=DotNet.Runtime records (KB5087537 again, KB5087065). Forensic
+inspection showed the duplicate KB5087537 .NET CU record pointed at
+the **same .msu file** as the LCU record -- same FileName, same
+DownloadUrl, same SHA256, same UpdateId, same Supersedes list -- with
+only the `Type` value differing.
+
+**Root cause**. Microsoft Learn's `.NET Framework release-notes`
+page for 2026-05 contains the row pair
+
+```
+| **Windows 10 1607 and Windows Server 2016** |  |
+| .NET Framework 3.5, 4.6.2, 4.7, 4.7.1, 4.7.2 | [5087537](.../kb/5087537) |
+| .NET Framework 4.8 | [5087065](.../kb/5087065) |
+```
+
+where `KB5087537` is the same KB as the Server 2016 monthly LCU in
+`windows-server-release-info`. This is not a Microsoft-side mistake:
+the Windows 10 1607 / Server 2016 era LCU follows a "sliced
+cumulative update" design where the LCU literally embeds the
+.NET 3.5 / 4.6.2 / 4.7.x cumulative-update payload as OS components,
+and only .NET 4.8 is shipped as a separate `KB5087065` .msu. The .NET
+release-notes faithfully reflects this design. Server 2019 / 2022 /
+2025 split the .NET CU into independent KBs and do not exhibit this
+overlap (verified live: zero KB overlap across LCU + .NET CU rows for
+those three OSes in 2026-05).
+
+**Fix**. Single insertion in
+`Get-PatchSetFromReleaseInfoDiscovery` (the pure-cache discovery
+half of `Resolve-PatchSetFromReleaseInfo`): immediately before the
+`.NET CU from dotnet-cu cache` section, build a
+case-insensitive `HashSet[string]` of the LCU `KbId` values already
+appended to the discovery record list; inside the per-row .NET CU
+loop, skip any row whose `KbId` is present in that set, emitting a
+`Write-Verbose` log line citing SPEC §B.23.5 B-3 for forensic
+visibility. The skipped row remains verbatim in
+`data/cache-dotnet-cu.json` -- the cache is the authoritative
+Microsoft snapshot; the dedup is a policy decision applied at
+read time, not a destructive cache filter, so a future SPEC
+revision can revisit the policy without re-fetching.
+
+Total PS1 change: ~30 lines (1 HashSet construction block + 1
+per-row guard + verbose log). No new function. No schema change.
+
+**Resulting behaviour, live verified against the 2026-05 cache**:
+
+```
+Server2016   Discovery before fix : 3 records  (LCU + 2 DotNet.Runtime)
+Server2016   Discovery after fix  : 2 records  (LCU + 1 DotNet.Runtime)
+             KB5087537 appears once (Type=LCU); KB5087065 appears once (Type=DotNet.Runtime)
+Server2019   Discovery (unchanged): 3 records  (LCU + 2 DotNet.Runtime)
+Server2022   Discovery (unchanged): 4 records  (LCU + 2 DotNet.Runtime + DU.SafeOs)
+Server2025   Discovery (unchanged): 3 records  (LCU + 1 DotNet.Runtime + DU.SafeOs)
+```
+
+The Server 2016 NeutralPatches[] count now matches the SPEC §B.21.2
+per-OS expected count table: 2 entries (1 LCU + 1 .NET CU), not 3.
+
+**SPEC update**. A new sub-decision **B-3 (LCU vs .NET CU same-KB
+dedup)** has been added to SPEC §B.23.5 between B-2 and the
+existing Consequences block. The new sub-decision documents:
+
+- Context: the Microsoft Learn release-notes row pair that triggers
+  the overlap, with the canonical 2026-05 Server 2016 example
+  inline.
+- Decision: LCU is the authoritative source for any KB it carries,
+  with the rationale that (a) LCU's Catalog row exposes the canonical
+  two-.msu resolution that the resolver relies on for SPEC B.23.5
+  B-1 combined-LCU detection, and (b) the .NET re-listing carries
+  no information the LCU does not already provide.
+- Implementation: location, mechanism, forensic visibility via
+  `Write-Verbose`, and the non-destructive cache property.
+
+The "Consequences" heading at the end of §B.23.5 has been updated
+to reference B-1, B-2, and B-3 together.
+
+**T10 regression coverage**. `tests/release_info_resolver_test.py`
+gains a new scenario in `tests/fixtures/release_info_resolver/
+scenarios.json`:
+
+- `release_info_cache.MonthlyReleases[]` gets a Server 2016 row
+  (KB5087537, 2026-05 B).
+- `dotnet_cu_cache.Months[2026-05].Entries[]` gets the
+  `OsNormalised=Server2016` block with the duplicate-KB row pair
+  exactly as captured live (KB5087537 for .NET 3.5/4.6.2/4.7.x,
+  KB5087065 for .NET 4.8).
+- `du_entries_by_os.Server2016 = []` for symmetry with Server 2019.
+- A new `queries[]` entry expects `record count = 2`,
+  `Types = [LCU, DotNet.Runtime]` (KB5087537 once as LCU,
+  KB5087065 once as DotNet.Runtime).
+
+T10 assertion total: 18 -> 22 (+4 from the new scenario). The
+T10 inventory row in SPEC's "Part G test inventory" has been
+updated accordingly.
+
+**No breaking change**. The existing `data/config-Server2016.json`
+committed at HEAD is not modified by this commit (the Refresher
+writes it on next run). `$Script:ScriptVersion` stays at
+`update-wsi-2026.05.26-r07.0`; this is a Step 7 follow-on under
+the same release rather than a new release. `data/raw-*.*` and
+`data/cache-*.json` are unaffected -- the dedup is applied at
+read time, not at cache-write time, so re-running A03
+RefreshSnapshots is **not required** to take advantage of the fix.
+
+**Quality-gate status**: psa.py 0/0/0, PSScriptAnalyzer 0
+findings, PowerShell parse OK, T2 13/13, T3 10/10, T6 13/13,
+T7 16/16, T8 20/20, T9 18/18, **T10 22/22 (+4)**. Cumulative
+112/112 PASS (up from 108/108 in r07.0 Step 6).
+
+### r07.0 Step 6 - Implement `-Action RefreshSnapshots` (A03) and document the two-stage refresh workflow
 
 Implementation gap closure for SPEC §B.23.7 / §B.23.14. The
 previous r07.0 commits ported the parser / resolver logic into

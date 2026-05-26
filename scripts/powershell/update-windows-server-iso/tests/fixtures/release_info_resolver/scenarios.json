@@ -42,6 +42,19 @@
         "BuildAfterUpdate": "17763.9999",
         "KbId": "KB5087538",
         "KbUrl": "https://support.microsoft.com/kb/5087538"
+      },
+      {
+        "OsShortName": "Server2016",
+        "OsBuild": "14393",
+        "ServicingOption": "LTSC",
+        "UpdateType": "2026-05 B",
+        "UpdateTypeYear": 2026,
+        "UpdateTypeMonth": 5,
+        "UpdateTypeLetter": "B",
+        "AvailabilityDate": "2026-05-13",
+        "BuildAfterUpdate": "14393.8957",
+        "KbId": "KB5087537",
+        "KbUrl": "https://support.microsoft.com/kb/5087537"
       }
     ],
     "HotpatchCalendar": []
@@ -80,6 +93,15 @@
               { "DotNetVersions": "3.5, 4.7.2", "KbId": "KB5087061" },
               { "DotNetVersions": "3.5, 4.8",   "KbId": "KB5087066" }
             ]
+          },
+          {
+            "OsLabel": "Windows 10 1607 and Windows Server 2016",
+            "OsNormalised": "Server2016",
+            "OsOfferingKb": "",
+            "Rows": [
+              { "DotNetVersions": "3.5, 4.6.2, 4.7, 4.7.1, 4.7.2", "KbId": "KB5087537" },
+              { "DotNetVersions": "4.8",                            "KbId": "KB5087065" }
+            ]
           }
         ]
       }
@@ -106,7 +128,8 @@
         "ChosenTitle": "2026-05 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087595)"
       }
     ],
-    "Server2019": []
+    "Server2019": [],
+    "Server2016": []
   },
   "queries": [
     {
@@ -129,6 +152,13 @@
       "expected_types": ["LCU", "DotNet.Runtime", "DotNet.Runtime"],
       "expected_kbs":   ["KB5087538", "KB5087061", "KB5087066"],
       "description": "Server 2019 (no DU expected: feature-update only per SPEC B.23.6)"
+    },
+    {
+      "os": "Server2016",
+      "patch_month": "2026-05",
+      "expected_types": ["LCU", "DotNet.Runtime"],
+      "expected_kbs":   ["KB5087537", "KB5087065"],
+      "description": "Server 2016 SPEC B.23.5 B-3 LCU-priority dedup: dotnet-cu cache lists KB5087537 (the LCU) under the Server 2016 .NET 3.5/4.6.2/4.7.x row -- discovery must drop that .NET CU row because LCU is authoritative for any KB it carries. Net result: 1 LCU + 1 .NET CU (KB5087065 for .NET 4.8), NOT 1 LCU + 2 .NET CU."
     },
     {
       "os": "Server2025",

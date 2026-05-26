@@ -5004,6 +5004,32 @@ function Get-PatchSetFromReleaseInfoDiscovery {
     }
 
     # ----- .NET CU from dotnet-cu cache -----
+    #
+    # Build a case-insensitive set of LCU KbIds already discovered above
+    # so the .NET CU loop can dedup against them. Per SPEC §B.23.5 B-3,
+    # the Windows 10 1607 / Server 2016 era LCU literally embeds the
+    # .NET 3.5 / 4.6.2 / 4.7.x cumulative-update payload as OS components
+    # ("sliced cumulative update" design): Microsoft's
+    # learn.microsoft.com .NET Framework release-notes consequently
+    # re-lists the LCU KB under the Server 2016 .NET CU section
+    # (e.g. KB5087537 = LCU of 2026-05 appears both in
+    # `windows-server-release-info` and in the .NET release-notes table
+    # row "Windows 10 1607 and Windows Server 2016 / .NET Framework
+    # 3.5, 4.6.2, 4.7, 4.7.1, 4.7.2"). Emitting both records would
+    # cause the resolver to write two NeutralPatches entries pointing
+    # at the same .msu file with different Type values. LCU is the
+    # authoritative source, so any .NET CU row whose KbId matches an
+    # already-discovered LCU KbId is skipped here. Server 2019 / 2022
+    # / 2025 split the .NET CU into separate KBs and are unaffected.
+    $lcuKbSet = New-Object 'System.Collections.Generic.HashSet[string]' (
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    foreach ($r in $records) {
+        if ([string]$r.Type -eq 'LCU' -and -not [string]::IsNullOrEmpty([string]$r.KbId)) {
+            [void]$lcuKbSet.Add([string]$r.KbId)
+        }
+    }
+
     $dotnetCachePath = if ([string]::IsNullOrEmpty($DataDir)) {
         Get-DotNetCuCachePath
     } else {
@@ -5033,6 +5059,15 @@ function Get-PatchSetFromReleaseInfoDiscovery {
                 foreach ($row in $rows) {
                     $rowKb = [string]$row.KbId
                     if ([string]::IsNullOrEmpty($rowKb)) { continue }
+                    # SPEC §B.23.5 B-3 LCU-priority dedup: drop any .NET CU
+                    # row whose KbId duplicates an LCU KbId already in
+                    # $records. See the long comment above the
+                    # $lcuKbSet construction for the Microsoft-side
+                    # rationale (Server 2016 sliced cumulative update).
+                    if ($lcuKbSet.Contains($rowKb)) {
+                        Write-Verbose ('Get-PatchSetFromReleaseInfoDiscovery: skipping .NET CU row {0} for OS={1} Month={2}; duplicates an LCU KbId already discovered (SPEC B.23.5 B-3, LCU is authoritative).' -f $rowKb, $OsVersion, $PatchMonth)
+                        continue
+                    }
                     $records.Add([pscustomobject]@{
                         Type          = 'DotNet.Runtime'
                         KbId          = $rowKb
