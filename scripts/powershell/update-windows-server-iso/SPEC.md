@@ -2166,6 +2166,87 @@ the working repository:
   calendar in `cache-release-info.json`; stage4 only needs an
   additional `-Action` to select baseline-month LCUs.
 
+### B.23.15 Windows ADK auto-install: opt-in P01 prerequisite
+
+`Update-WindowsServerIso.ps1` requires `oscdimg.exe` (a component
+of Windows ADK Deployment Tools) for the final P09 AssembleIso phase.
+On a freshly-provisioned Windows Server host the binary is absent
+and P01 Step 3 fails fast with a clear "install the Windows ADK"
+error, before the 5-6 GB Evaluation ISO download in P04.
+
+**r07.0 Step 8** introduces an opt-in `-AutoInstallAdk` switch that
+mirrors the SDK/WDK fallback pattern in
+`Deploy-AMDChipsetDriverOnWindowsServer.ps1` from the sibling
+`usui-tk/Deploy-Drivers-For-WindowsServer` repository
+(`Install-WindowsSdkFallback` / `Install-WindowsWdkFallback` at
+~L5408-5449 of that script). When set, P01 Step 3 downloads
+Microsoft's `adksetup.exe` and runs it silently with feature
+selection so only Deployment Tools is installed:
+
+```
+adksetup.exe /features OptionId.DeploymentTools /quiet /norestart /ceip off /log <log>
+```
+
+**Design decisions**.
+
+- D-1: *Pin to the December-2024 ADK*. Microsoft Learn's ADK page
+  publishes two current builds: `10.1.26100.2454` (December 2024,
+  supports Server 2025 / 2022 / earlier OS releases) and
+  `10.1.28000.1` (November 2025, Windows 11 26H1 Arm64 only). The
+  former is the correct version for any x64 Server build host; the
+  latter would break Server work. Hence the pinned constants
+  `$Script:AdkInstallerUrl` and `$Script:AdkInstallerVersion`
+  encode the December-2024 fwlink and version string respectively.
+  Forward-compatibility is documented by Microsoft: oscdimg from
+  the pinned ADK assembles ISOs targeting Server 2016 / 2019 /
+  2022 / 2025 without per-target-OS ADK variants.
+
+- D-2: *Default OFF*. The switch is opt-in. The default behaviour
+  remains the previous "throw an actionable error" pattern, which
+  is correct for locked-down environments where automatic installs
+  are disallowed by policy. The thrown error message now includes
+  the canonical download URL and silent-install incantation, so
+  operators without `-AutoInstallAdk` still have everything they
+  need on screen.
+
+- D-3: *Install only `OptionId.DeploymentTools`*. The full Windows
+  ADK is a 3+ GB install. Restricting to the Deployment Tools
+  feature drops the install footprint to ~50-80 MB. WinPE add-on
+  (`linkid=2289981`) is NOT needed by this script and is therefore
+  not auto-installed.
+
+- D-4: *Verify by tool presence, not exit code*. `adksetup.exe`,
+  like the WDK and SDK installers, returns non-zero exit codes
+  when the kit is already present (commonly 2008 = "already
+  installed"). `Install-WindowsAdkFallback` therefore calls
+  `Resolve-OscdimgExe` after the installer returns and treats
+  "tool present, non-zero exit" as a warn-only "already
+  installed" condition. Only "tool still absent after install"
+  is a hard failure. This matches the
+  `Install-WindowsSdkFallback`/`Install-WindowsWdkFallback`
+  defensive idiom in the reference repo.
+
+- D-5: *Cache the installer at `<WorkRoot>/cache/adk/`*. Re-runs
+  on the same WorkRoot reuse `adksetup.exe` to avoid re-downloading
+  during iterative testing. The installer log lands at
+  `<WorkRoot>/logs/adksetup.log` for post-mortem diagnostics, in
+  line with the existing P01 log placement convention.
+
+**Reference**.
+
+- Microsoft Learn ADK install page:
+  `https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install`
+- Reference implementation (SDK/WDK):
+  `https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/Deploy-AMDChipsetDriverOnWindowsServer.ps1`
+  Functions `Find-KitTool`, `Install-WindowsSdkFallback`,
+  `Install-WindowsWdkFallback`, and the per-build matrix in
+  `Get-OsContext`.
+- The hash-verification block inside `Resolve-OscdimgExe` (lifted
+  from Microsoft's `Make2023BootableMedia.ps1` v1.4) continues to
+  apply to the auto-installed binary. A hash mismatch remains
+  advisory because ADK servicing patches may legitimately change
+  the SHA-256 of the shipped `oscdimg.exe` over time.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2184,6 +2265,7 @@ the working repository:
 | B.23.12          | Refines §B.21.4 / PoC-D            | Parser records baseline-months verbatim, including anomalies |
 | B.23.13          | Amends §B.6 (Action mapping)       | New `-Action InspectBaseline -PatchMonth YYYY-MM` (read-only) |
 | B.23.14          | Amends §B.22.2; supersedes part of §B.23.7 | New `stage5__data-snapshot.yml`; stage4 narrowed; PoC → T6-T8 |
+| B.23.15          | (new) — refines §A.4 P01 prerequisites | New `-AutoInstallAdk` switch; `Install-WindowsAdkFallback` (r07.0 Step 8) |
 
 ---
 

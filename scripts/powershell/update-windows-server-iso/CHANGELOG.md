@@ -16,7 +16,83 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 7 - Server 2016 LCU vs .NET CU same-KB dedup in the discovery layer (this release)
+### r07.0 Step 8 - `-AutoInstallAdk` switch for hands-free Windows ADK Deployment Tools install (this release)
+
+Pure environment-provisioning addition triggered by a live P01 abort
+on a freshly-provisioned Windows Server 2025 host that lacked the
+Windows ADK Deployment Tools (`oscdimg.exe`). The previous P01 Step 3
+behaviour was correct (fail fast before the 5-6 GB Evaluation ISO
+download in P04) but required an out-of-band install before any
+real ISO build attempt. Step 8 makes the install optional and
+automatic via a new opt-in switch.
+
+The implementation mirrors the SDK/WDK fallback pattern in the
+sibling [`Deploy-AMDChipsetDriverOnWindowsServer.ps1`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/Deploy-AMDChipsetDriverOnWindowsServer.ps1)
+script — `Install-WindowsSdkFallback` /
+`Install-WindowsWdkFallback` at ~L5408-5449 of that script.
+Specifically:
+
+1. Download a pinned `adksetup.exe` (Microsoft Learn fwlink
+   `linkid=2289980`, ADK `10.1.26100.2454` December 2024) to a
+   cache directory.
+2. Run with `/features OptionId.DeploymentTools /quiet /norestart
+   /ceip off /log <log>` to install only the Deployment Tools
+   feature (~50-80 MB) — never the full ADK (~3+ GB).
+3. Verify by tool presence rather than trusting the exit code,
+   because installer EXEs in this family return non-zero when the
+   kit is already on the machine. "Tool present + non-zero exit"
+   is logged as warn-only "already installed"; only "tool still
+   absent" is a hard failure.
+
+The Decemnber-2024 ADK is the right pin for any Server x64 build
+host: Microsoft Learn documents it as supporting Server 2025,
+Server 2022, and every earlier supported Windows 10/11 release,
+and the Deployment Tools binary is forward-compatible — oscdimg
+from this ADK assembles ISOs targeting Server 2016 / 2019 / 2022 /
+2025 without per-target-OS variants. The newer ADK
+`10.1.28000.1` (November 2025) is Windows 11 26H1 Arm64 only and
+explicitly NOT appropriate for Server work.
+
+**Default off, opt-in only**. Without `-AutoInstallAdk`, P01 still
+throws — but the error message now includes the canonical download
+URL, the silent-install command line, and the expected oscdimg.exe
+path, so operators in locked-down or air-gapped environments have
+everything they need on screen to install the ADK out-of-band.
+
+The existing `Resolve-OscdimgExe` (with its
+`Make2023BootableMedia.ps1` v1.4 hash-verification block) is
+unchanged and continues to apply to the auto-installed binary.
+A hash mismatch remains advisory because ADK servicing patches
+can legitimately change the SHA-256 of `oscdimg.exe`.
+
+Files changed:
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  — Added `$Script:AdkInstallerUrl`/`Version`/`OptionId` constants,
+  the `-AutoInstallAdk` switch + Script-scope propagation, the new
+  `Install-WindowsAdkFallback` function (~120 LOC), and P01 Step 3
+  catch-block branching to honour the switch + emit the improved
+  error message when not set.
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  — Added §B.23.15 (design notes: pinning rationale, opt-in by
+  default, feature-restricted install, verify-by-tool-presence,
+  cache placement) and a matching row in the §B.23 cross-reference
+  matrix.
+- `scripts/powershell/update-windows-server-iso/README.md`
+  and `README.ja.md` — Added a Troubleshooting subsection
+  documenting the `-AutoInstallAdk` switch alongside the existing
+  PowerShell 5.1 / Administrator / DISM prerequisites.
+
+Existing T2-T10 regression tests are unchanged: all 6 test files
+(`catalog_fixture_test.py`, `catalog_title_tokens_test.py`,
+`dotnet_cu_parser_test.py`, `dynamic_update_cache_test.py`,
+`release_info_parser_test.py`, `release_info_resolver_test.py`)
+still pass, because Step 8 lives entirely in the P01 prerequisite
+layer and does not touch any release-info / dotnet-cu / DU code
+paths. psa.py reports 0/0/0; PSScriptAnalyzer reports 0 errors
+and 0 warnings.
+
+### r07.0 Step 7 - Server 2016 LCU vs .NET CU same-KB dedup in the discovery layer
 
 Bug-fix and SPEC-formalisation commit triggered by live verification
 of Step 6's RefreshSnapshots -> RefreshAllBaselines pipeline against

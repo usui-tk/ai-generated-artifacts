@@ -217,7 +217,7 @@ Action ごとの CSV レポートは次の場所に出力されます:
 | OS | Windows 10/11 Pro/Enterprise/Education または Windows Server 2016 以降 |
 | PowerShell | Windows PowerShell 5.1 推奨、または PowerShell 7 以降 |
 | 権限 | 管理者 (DISM マウントには昇格が必須) |
-| ツール | Windows ADK Deployment Tools (`oscdimg.exe` のため) |
+| ツール | Windows ADK Deployment Tools (`oscdimg.exe` のため) — 手動インストール、または `-AutoInstallAdk` を指定すれば P01 が初回起動時に Deployment Tools 機能をダウンロード+サイレントインストールします |
 | ディスク空き | **`-WorkRoot` ドライブに 100 GB**(ワークスペース プリフライト チェックがすべての Action 開始前に強制。`-SkipEnvCheck` で運用者責任のもと回避可) |
 | ネットワーク | ISO とパッチをダウンロードする場合に必要。`-IsoPath` + `-PatchDirectory` ですべてが揃う場合は不要 |
 | Hyper-V | `-Action BootTest` を使う場合のみ必要 |
@@ -477,7 +477,7 @@ Stage 4 (monthly-refresh) は `workflow_dispatch` で 4 つの入力(`mode`、`o
 | 現象 | 原因 | 対処 |
 |---|---|---|
 | `Administrator privilege required` | 非昇格セッションでの実行 | PowerShell を管理者として再起動 |
-| `oscdimg.exe not found` | Windows ADK Deployment Tools が未インストール | ADK の Deployment Tools 機能をインストール |
+| `oscdimg.exe not found` | Windows ADK Deployment Tools が未インストール | 2 通りの選択肢: (a) `-AutoInstallAdk` を付けて再実行すると Deployment Tools 機能のみ (~50-80 MB) を自動でダウンロード + サイレントインストール、(b) `https://go.microsoft.com/fwlink/?linkid=2289980` から ADK インストーラを取得し、「Deployment Tools」機能だけを選択して手動インストール。SPEC §B.23.15 を参照 |
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` ドライブの空きが 100 GB 未満 | より大きなボリュームに `-WorkRoot` を変更、または不要ファイルを削除して空きを確保。100 GB は 1 OS 分の PrepareBuildVerify を最後まで実行できる最小値 |
 | `Workspace preflight failed: ... required Config file(s) missing` | `data/config-Server<N>.json` が欠落・改名されている、またはスクリプト移動時に `data/` がコピーされなかった | `Update-WindowsServerIso.ps1` の隣に `data/` ディレクトリを復元。`Server2016.json` / `Server2019.json` / `Server2022.json` / `Server2025.json` の 4 ファイルすべてが必須 |
 | `Catalogue: no narrowed result for ... / Server2022`(他 OS でも発生し得る)、`Resolved 0 patch entries` | Microsoft Update Catalog のタイトル表記が変わった(カンマ削除など句読点ドリフト) | `Get-CatalogQueryTemplate` と `Get-LanguagePackQueryTemplate.osTitleTokens` の該当 `TitleTokens` 配列に新表記を追加。SPEC §D.19 参照 |

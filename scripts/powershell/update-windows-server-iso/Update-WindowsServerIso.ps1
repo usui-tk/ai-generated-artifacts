@@ -178,6 +178,24 @@
     Required for Build phases to actually mount and modify WIMs. Without it,
     Build phases run in Sandbox mode (plan only, no DISM writes).
 
+.PARAMETER AutoInstallAdk
+    When set, P01 Initialize will download and silently install the Windows
+    ADK Deployment Tools feature if oscdimg.exe is not found on the host.
+    Without this switch, P01 throws a clear "install Windows ADK" error and
+    aborts (the previous default behaviour, preserved for environments where
+    automatic installs are not permitted).
+
+    The installer is downloaded from Microsoft Learn's published fwlink
+    (linkid=2289980, ADK 10.1.26100.2454 Dec 2024), cached to
+    <WorkRoot>\cache\adk\adksetup.exe, and run with
+      /features OptionId.DeploymentTools /quiet /norestart /ceip off
+    so only Deployment Tools (~50-80 MB) is installed, never the full ADK.
+
+    Tool-presence verification is used after install (matching the
+    SDK/WDK fallback pattern in Deploy-AMDChipsetDriverOnWindowsServer.ps1):
+    a non-zero installer exit code with oscdimg.exe present is treated as
+    "already installed" and not a hard failure.
+
 .EXAMPLE
     .\Update-WindowsServerIso.ps1 -Action ListPhases
     Show the registered phase list and exit.
@@ -206,6 +224,18 @@
         -Execute
     Eval mode: download Microsoft Eval Center ISO via fwlink, auto-detect
     latest patches, run the full pipeline.
+
+.EXAMPLE
+    .\Update-WindowsServerIso.ps1 `
+        -Action PrepareBuildVerify `
+        -OsVersion Server2016 -OsLanguage ja-jp `
+        -EvalIsoMode -UseBaselineOnly -EnablePca2023BootManager `
+        -AutoInstallAdk `
+        -WorkRoot 'D:\UpdateWsi'
+    Server 2016 ja-jp eval ISO build, dry-run mode (no -Execute). On hosts
+    that do not yet have Windows ADK Deployment Tools installed, P01 will
+    download and silently install OptionId.DeploymentTools before continuing.
+    Add -Execute on a subsequent run to perform the real ISO assembly.
 #>
 
 [CmdletBinding()]
@@ -260,6 +290,15 @@ param(
     [switch]   $EvalIsoMode,
     [switch]   $Execute,
 
+    # ---- Environment provisioning ----
+    # When set, P01 Step 3 auto-installs Windows ADK Deployment Tools if
+    # oscdimg.exe is missing. Modeled on the SDK/WDK fallback pattern in
+    # Deploy-AMDChipsetDriverOnWindowsServer.ps1 (Install-WindowsSdkFallback /
+    # Install-WindowsWdkFallback). Default OFF: P01 throws an actionable
+    # error so the operator can install the ADK out-of-band, which is the
+    # right behaviour for locked-down or air-gapped environments.
+    [switch]   $AutoInstallAdk,
+
     # ---- Secure Boot / PCA2023 ----
     # When set, enables P10 ConvertPca2023BootManager which rewrites the
     # output ISO's boot manager to the 'Windows UEFI CA 2023'-signed form
@@ -303,6 +342,7 @@ $Script:EnablePca2023BootManager  = [bool]$EnablePca2023BootManager
 $Script:ForcePca2023OnServer2025  = [bool]$ForcePca2023OnServer2025
 $Script:Pca2023OnlyMode           = [bool]$Pca2023OnlyMode
 $Script:Pca2023ScriptPath         = $Pca2023ScriptPath
+$Script:AutoInstallAdk            = [bool]$AutoInstallAdk
 
 # -----------------
 # Parameter validation
@@ -2888,6 +2928,37 @@ function Get-OsConfigPath {
     if ([string]::IsNullOrEmpty($here)) { $here = (Get-Location).Path }
     return (Join-Path $here ('data' + [System.IO.Path]::DirectorySeparatorChar + 'config-' + $OsKey + '.json'))
 }
+
+# ============================================================
+# Windows ADK Deployment Tools installer (P01 auto-install path)
+# ============================================================
+#
+# When -AutoInstallAdk is set and P01 Step 3 finds oscdimg.exe missing,
+# the script downloads adksetup.exe from the Microsoft Learn published
+# fwlink and runs it with /features OptionId.DeploymentTools to install
+# only the Deployment Tools feature (~50-80 MB), never the full ADK.
+#
+# Version pinning rationale:
+#   ADK 10.1.26100.2454 (December 2024) is the version Microsoft Learn
+#   documents as supporting Windows Server 2025, Server 2022, and every
+#   earlier supported Windows 10/11 release. Newer Deployment Tools are
+#   forward-compatible: oscdimg.exe from this ADK build can assemble
+#   ISO images targeting Server 2016 / 2019 / 2022 / 2025 without
+#   needing per-OS ADK variants. The later ADK 10.1.28000.1 (November
+#   2025) is Windows 11 26H1 Arm64 only and is NOT appropriate for
+#   Server x64 work on the host.
+#
+# The fwlink URL is stable; Microsoft Learn republishes the same linkid
+# whenever it serves a new ADK servicing build. If Microsoft retires
+# this linkid, bump the constants below in one place.
+#
+# Reference:
+#   https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install
+#   "Download the ADK 10.1.26100.2454 (December 2024)"
+
+$Script:AdkInstallerUrl      = 'https://go.microsoft.com/fwlink/?linkid=2289980'
+$Script:AdkInstallerVersion  = '10.1.26100.2454'
+$Script:AdkInstallerOptionId = 'OptionId.DeploymentTools'
 
 # ============================================================
 # ISO Updater specific: Microsoft Learn release-info support
@@ -5747,6 +5818,119 @@ function Resolve-EfisysBin {
     throw 'efisys.bin not found in any of the expected locations.'
 }
 
+function Install-WindowsAdkFallback {
+    <#
+    .SYNOPSIS
+        Download Microsoft's adksetup.exe and silently install the
+        Windows ADK Deployment Tools feature (oscdimg.exe).
+
+    .DESCRIPTION
+        Called from P01 Step 3 when -AutoInstallAdk is set and the
+        existing Resolve-OscdimgExe search failed. Mirrors the
+        Install-WindowsSdkFallback / Install-WindowsWdkFallback pattern
+        in Deploy-AMDChipsetDriverOnWindowsServer.ps1:
+
+          1) Download $Script:AdkInstallerUrl (fwlink, pinned in the
+             global-constants block) to <WorkRoot>\cache\adk\adksetup.exe.
+             Reuse cache if already present.
+          2) Run adksetup.exe with $Script:AdkInstallerOptionId
+             (OptionId.DeploymentTools), /quiet /norestart /ceip off,
+             and /log <WorkRoot>\logs\adksetup.log.
+          3) Defensive verify: a non-zero installer exit code with
+             oscdimg.exe present afterwards is treated as
+             "already installed" (warn-only). Only a missing oscdimg.exe
+             after install is a hard failure.
+
+        Returns nothing; the caller must re-invoke Resolve-OscdimgExe
+        to obtain the discovered path.
+
+    .NOTES
+        Network access is required. The Microsoft Learn page for the
+        ADK lists the canonical download URL; see the comment block
+        next to $Script:AdkInstallerUrl above.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $cacheDir = Join-Path $Script:WorkRoot 'cache\adk'
+    if (-not (Test-Path -LiteralPath $cacheDir)) {
+        New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+    }
+    $exePath = Join-Path $cacheDir 'adksetup.exe'
+    $logPath = Join-Path $Script:LogsDir 'adksetup.log'
+
+    Write-Step ('ADK installer version : {0} (pinned)' -f $Script:AdkInstallerVersion)
+    Write-Step ('ADK installer URL     : {0}' -f $Script:AdkInstallerUrl)
+    Write-Step ('Cache path            : {0}' -f $exePath)
+    Write-Step ('Install log           : {0}' -f $logPath)
+    Write-Step ('Feature               : {0}' -f $Script:AdkInstallerOptionId)
+
+    if (Test-Path -LiteralPath $exePath) {
+        $fi = Get-Item -LiteralPath $exePath
+        Write-Step ('Reusing cached adksetup.exe ({0:N0} bytes)' -f $fi.Length)
+    } else {
+        Write-Step 'Downloading adksetup.exe from Microsoft Learn fwlink...'
+        try {
+            # Force TLS 1.2 for compatibility with older Server hosts
+            $oldSp = [System.Net.ServicePointManager]::SecurityProtocol
+            [System.Net.ServicePointManager]::SecurityProtocol =
+                [System.Net.SecurityProtocolType]::Tls12
+            try {
+                Invoke-WebRequest -Uri $Script:AdkInstallerUrl `
+                                  -OutFile $exePath `
+                                  -UseBasicParsing
+            } finally {
+                [System.Net.ServicePointManager]::SecurityProtocol = $oldSp
+            }
+        } catch {
+            throw ('ADK installer download failed: {0}' -f $_.Exception.Message)
+        }
+        if (-not (Test-Path -LiteralPath $exePath)) {
+            throw 'ADK installer download appeared to succeed but adksetup.exe is not present.'
+        }
+        $fi = Get-Item -LiteralPath $exePath
+        Write-Ok ('adksetup.exe downloaded ({0:N0} bytes)' -f $fi.Length)
+    }
+
+    $installArgs = @(
+        '/features', $Script:AdkInstallerOptionId,
+        '/quiet',
+        '/norestart',
+        '/ceip', 'off',
+        '/log',   $logPath
+    )
+    Write-Step ('Running: adksetup.exe {0}' -f ($installArgs -join ' '))
+
+    # psa-disable-next-line PSA3001 -- Start-Process -ArgumentList is the
+    # canonical pattern for invoking installer EXEs with explicit args;
+    # matches Install-WindowsSdkFallback / Install-WindowsWdkFallback in
+    # the SDK/WDK reference implementation.
+    $proc = Start-Process -FilePath $exePath `
+                          -ArgumentList $installArgs `
+                          -Wait -PassThru
+
+    # Defensive verify by tool presence rather than trusting the exit
+    # code (matches the SDK/WDK reference behaviour for installer EXEs
+    # that exit non-zero when the kit is already on the machine).
+    $oscdimgPath = $null
+    try {
+        $oscdimgPath = Resolve-OscdimgExe
+    } catch {
+        # Resolve-OscdimgExe throws when no oscdimg.exe is found anywhere.
+        # We translate that to a hard failure below.
+        $oscdimgPath = $null
+    }
+
+    if ($oscdimgPath) {
+        if ($proc.ExitCode -ne 0) {
+            Write-Warn ('ADK installer exit code {0}; oscdimg.exe is present, treating as already installed.' -f $proc.ExitCode)
+        }
+        Write-Ok ('Windows ADK Deployment Tools installed: {0}' -f $oscdimgPath)
+        return
+    }
+    throw ('Windows ADK install failed (exit {0}); oscdimg.exe still not found. See {1} for installer diagnostics.' -f $proc.ExitCode, $logPath)
+}
+
 function Resolve-OscdimgExe {
     <#
     .SYNOPSIS
@@ -7954,8 +8138,33 @@ function Invoke-SetupPhase01_Initialize {
                 Write-Warn ('oscdimg.exe not found, but -Action {0} does not need it; continuing.' -f $Action)
             } elseif ($Script:SyntheticTestMode) {
                 Write-Warn 'oscdimg.exe not found; -SyntheticTestMode will use a raw-copy fallback.'
+            } elseif ($Script:AutoInstallAdk) {
+                Write-Step 'oscdimg.exe not found; -AutoInstallAdk is set, invoking Install-WindowsAdkFallback...'
+                Install-WindowsAdkFallback
+                # Re-resolve after install. Install-WindowsAdkFallback already
+                # verified tool presence by calling Resolve-OscdimgExe once,
+                # so this second call is for the canonical Write-Ok line
+                # operators expect in the P01 log.
+                $oscdimgPath = Resolve-OscdimgExe
+                Write-Ok ('oscdimg.exe found after ADK install: {0}' -f $oscdimgPath)
             } else {
-                throw 'oscdimg.exe not found. Install the Windows ADK Deployment Tools.'
+                $adkMsg = @"
+oscdimg.exe not found. Install the Windows ADK Deployment Tools.
+
+Options:
+  (1) Re-run with -AutoInstallAdk to download and silently install
+      OptionId.DeploymentTools (~50-80 MB, no full ADK).
+  (2) Manual install:
+      Download: $($Script:AdkInstallerUrl)
+                (ADK $($Script:AdkInstallerVersion))
+      Run    : adksetup.exe and select "Deployment Tools" feature only.
+      Silent : adksetup.exe /features OptionId.DeploymentTools /quiet /norestart
+
+Expected path after install:
+  C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\
+    Deployment Tools\amd64\Oscdimg\oscdimg.exe
+"@
+                throw $adkMsg
             }
         }
         $gwi = Get-Command -Name 'Get-WindowsImage' -ErrorAction SilentlyContinue

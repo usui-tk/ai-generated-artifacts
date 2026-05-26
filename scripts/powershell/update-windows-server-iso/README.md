@@ -242,7 +242,7 @@ Per-action CSV reports are emitted to:
 | Operating system | Windows 10/11 Pro/Enterprise/Education or Windows Server 2016+ |
 | PowerShell | Windows PowerShell 5.1 (recommended) or PowerShell 7+ |
 | Privileges | Administrator (DISM mount requires elevation) |
-| Tools | Windows ADK Deployment Tools (`oscdimg.exe`) |
+| Tools | Windows ADK Deployment Tools (`oscdimg.exe`) — install manually, or use `-AutoInstallAdk` to have P01 download and silently install the Deployment Tools feature on first run |
 | Free disk space | **100 GB on the `-WorkRoot` drive** (enforced by the workspace preflight before any Action runs; can be bypassed with `-SkipEnvCheck` at the operator's risk) |
 | Network | Required for ISO and patch downloads; not needed when `-IsoPath` and `-PatchDirectory` cover all inputs |
 | Hyper-V | Optional, required only for `-Action BootTest` |
@@ -502,7 +502,7 @@ licence forbids public distribution of Microsoft binaries.
 | Symptom | Cause | Action |
 |---|---|---|
 | `Administrator privilege required` | Running as a non-elevated user | Re-launch PowerShell as Administrator |
-| `oscdimg.exe not found` | Windows ADK Deployment Tools not installed | Install the ADK Deployment Tools feature |
+| `oscdimg.exe not found` | Windows ADK Deployment Tools not installed | Either: (a) re-run with `-AutoInstallAdk` to download + silently install only the Deployment Tools feature (~50-80 MB), or (b) install manually from the ADK installer at `https://go.microsoft.com/fwlink/?linkid=2289980` selecting "Deployment Tools" only. See SPEC §B.23.15 |
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` drive has less than 100 GB free | Move `-WorkRoot` to a larger volume, or free up space; the 100 GB minimum covers an end-to-end PrepareBuildVerify run for one OS |
 | `Workspace preflight failed: ... required Config file(s) missing` | The `data/config-Server<N>.json` files were deleted, renamed, or not copied when the script was relocated | Restore the `data/` directory alongside `Update-WindowsServerIso.ps1`; all four `Server2016.json` / `Server2019.json` / `Server2022.json` / `Server2025.json` must be present |
 | `Catalogue: no narrowed result for ... / Server2022` (or any OS), `Resolved 0 patch entries` | Microsoft changed the Catalogue title format (punctuation drift, e.g. comma removal) | Inspect `Get-CatalogQueryTemplate` and `Get-LanguagePackQueryTemplate.osTitleTokens`; add the new title form to the relevant `TitleTokens` array. See SPEC §D.19 |
