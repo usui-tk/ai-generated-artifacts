@@ -16,7 +16,132 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 2a (DU 36-month cache part) - Per-OS Dynamic Update cache and 36-month window selection (this release)
+### r07.0 Step 2b (URL-resolver narrowing part) - Config-driven Catalog title token disambiguation (this release)
+
+This commit lands the **first half** of the Step 2b work scheduled
+in SPEC.md section B.23.1. New PowerShell helpers move the per-OS
+Microsoft Update Catalog `TitleTokens` list out of hardcoded
+PowerShell tables and into the OS Config (`data/config-Server*.json`,
+field `Common.CatalogTitleTokens`), and add a single narrow-filter
+predicate that combines those positive tokens with a hardcoded
+negative exclusion list. The next commit (Step 2b part 2) will
+replace `Resolve-PatchSetFromCatalog` with
+`Resolve-PatchSetFromReleaseInfo` and delete the bulk of the
+Catalog Title-string discovery code; this commit prepares the
+ground by formalising the URL-resolver narrowing surface that
+the new caller will consume.
+
+**Important: the design and the tokens themselves were validated
+against fresh live Microsoft Update Catalog data captured on
+2026-05-26**, not lifted from any PoC fixture. Two specific live
+observations grounded the implementation:
+
+1. **Same-KB client-variant fan-out for Server 2016 / 2019**. A
+   bare KB query for Server 2019's .NET CU (KB5087066) returns
+   three hits: one for `Windows Server 2019` and two for
+   `Windows 10 Version 1809` (the matching client-OS kernel).
+   Server 2016 / Windows 10 1607 shows the same fan-out. The
+   `Common.CatalogTitleTokens = ["Windows Server 2019"]` for
+   Server 2019 (and the analogous Server 2016 entry) correctly
+   rejects the Windows 10 client variants without needing a
+   negative token.
+2. **ARM64 contamination on Server 2025 .NET CU**. The live
+   Catalog returns both `for x64` and `for arm64` variants of
+   the same KB; the hardcoded
+   `$Script:CatalogTitleNegativeTokens = @('Windows 11', 'arm64')`
+   list rejects the ARM64 variant case-insensitively.
+
+**New PowerShell functions** (added to
+`Update-WindowsServerIso.ps1` immediately before the existing
+`Get-CatalogQueryTemplate`, inside the Microsoft Update Catalog
+scraper section):
+
+- `Get-CatalogTitleTokenList -OsVersion <name>` -- reads the OS
+  Config and returns the `Common.CatalogTitleTokens` array.
+  Returns an empty array when the field is absent (the SPEC
+  default; the URL resolver then accepts the first matching hit).
+  Tolerant of missing Config files (returns empty rather than
+  throwing) so the function is safe to call from defensive paths.
+- `Test-CatalogTitleMatch -OsVersion <name> -Title <title>` --
+  predicate. Returns `$true` when the title matches the OS, i.e.
+  contains ANY of the OS's positive tokens AND contains NONE of
+  the `$Script:CatalogTitleNegativeTokens` negative tokens.
+  Case-insensitive substring matching throughout. When the
+  positive list is empty the predicate is permissive (still
+  honours the negative list).
+
+**New Script-level variable**:
+
+- `$Script:CatalogTitleNegativeTokens = @('Windows 11', 'arm64')`
+  -- the OS-uniform negative exclusion list. Hardcoded
+  intentionally per SPEC B.23.2 because these exclusions are
+  uniform across all in-scope OSes (every Server build rejects
+  the Windows 11 client OS and the ARM64 architecture variant).
+
+**Refactor of `Get-CatalogQueryTemplate`**: the per-OS
+`TitleTokens` array literals were replaced with
+`@(Get-CatalogTitleTokenList -OsVersion '<name>')` calls. The
+function's return shape is unchanged -- `TitleTokens` is still a
+`[string[]]` -- so all existing callers (Resolve-PatchSetFromCatalog
+in particular) continue to work without changes. The Server2022
+in-line comment was updated to point at SPEC B.23.2 and the
+Config field as the source of truth.
+
+**Behavioural delta from hardcoded -> Config-driven**:
+
+- Server 2025: hardcoded list had 1 token; Config has 2.
+  Permissive expansion -- old matches still match.
+- Server 2022: hardcoded list had 2 tokens (both comma forms);
+  Config has 3 (adds `Windows Server 2022`). Permissive expansion.
+- Server 2019 / 2016: identical content in hardcoded and Config
+  (single-token lists). No behavioural change.
+
+In every case the refactor STRICTLY EXPANDS coverage and never
+narrows it, so no existing successful Catalog scrape can become
+a failure on the new path. (Future Microsoft naming changes can
+now be absorbed by editing the Config file, not by shipping a
+new PowerShell release.)
+
+**Refresher main path NOT changed**. `Resolve-PatchSetFromCatalog`
+and its callers (P03 RefreshPatchBaseline phase and A01
+RefreshAllBaselines admin phase) continue to drive
+-Action RefreshAllBaselines unchanged. Step 2b part 2 will
+introduce `Resolve-PatchSetFromReleaseInfo` and delete the
+Catalog Title-string discovery code in a single atomic commit.
+
+**OS Configs NOT changed by this commit**. The
+`Common.CatalogTitleTokens` field was already present in all
+four `data/config-Server*.json` files (apparently pre-populated
+during SPEC B.23.2 authoring). The values match what live data
+2026-05-26 validates as correct, so no Config edits were needed.
+T9 protects the values against future drift.
+
+**New regression test**: `tests/catalog_title_tokens_test.py`
+(T9). Covers 18 assertions across: per-OS token sourcing from
+all four `data/config-Server*.json` (4 assertions), missing-Config
+defensive empty-list default (1 assertion), and 13 live-captured
+narrow-filter cases including positive matches for all four
+OSes, same-KB client-variant rejection (Windows 10 1607 / 1809),
+negative-token exclusion (arm64, Windows 11), and Server 2022's
+both comma forms. **All 18 assertions pass** under PowerShell
+7.4 on Ubuntu 24.
+
+**New files committed to the repo**:
+
+- `tests/fixtures/catalog_title_tokens/expected-tokens.json` --
+  the per-OS expected token lists (the assertion ground truth
+  for `Get-CatalogTitleTokenList`).
+- `tests/fixtures/catalog_title_tokens/narrow-filter-cases.json`
+  -- 13 live-captured Catalog hit titles with the expected
+  match decision per OS. Each case is annotated with a
+  description explaining which token or negative exclusion
+  drives the decision.
+
+**Quality-gate status**: psa.py 0 / 0 / 0, PSScriptAnalyzer 0
+findings, PowerShell parse OK, T2 13/13, T3 13/13, T6 13/13,
+T7 16/16, T8 20/20, T9 18/18. Cumulative: 93/93 assertions.
+
+### r07.0 Step 2a (DU 36-month cache part) - Per-OS Dynamic Update cache and 36-month window selection (previous release)
 
 This commit lands the **third half** of the Step 2a work scheduled
 in SPEC.md section B.23.1. New PowerShell functions maintain a

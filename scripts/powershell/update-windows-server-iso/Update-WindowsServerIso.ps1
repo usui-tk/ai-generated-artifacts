@@ -4381,6 +4381,110 @@ function Remove-DynamicUpdateOutsideWindow {
 #   * Microsoft Update Catalog requires User-Agent and basic-parsing
 #     mode on Windows PowerShell 5.1; we set both unconditionally.
 
+$Script:CatalogTitleNegativeTokens = @(
+    'Windows 11',
+    'arm64'
+)
+
+function Get-CatalogTitleTokenList {
+    <#
+    .SYNOPSIS
+        Return the per-OS positive title-token list from
+        data/config-<OsVersion>.json that is used to narrow Microsoft
+        Update Catalog responses to the right OS variant.
+    .DESCRIPTION
+        SPEC.md section B.23.2 specifies that the disambiguating token
+        list is Config-driven, not hardcoded in PowerShell. This helper
+        is the single read path: it parses the OS Config and returns
+        the `Common.CatalogTitleTokens` array. When the field is
+        absent the function returns an empty array (callers then
+        accept the first matching hit, per the SPEC default).
+
+        Companion script-level variable
+        `$Script:CatalogTitleNegativeTokens` carries the OS-uniform
+        negative exclusion list (e.g. 'Windows 11', 'arm64'). The
+        positive and negative lists together form the narrow filter.
+    .EXAMPLE
+        Get-CatalogTitleTokenList -OsVersion Server2025
+        # -> @('Microsoft server operating system version 24H2', 'Windows Server 2025')
+    #>
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)] [string]$OsVersion)
+
+    $configPath = Get-OsConfigPath -OsKey $OsVersion
+    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        return @()
+    }
+    $bytes  = [System.IO.File]::ReadAllBytes($configPath)
+    $json   = [System.Text.Encoding]::UTF8.GetString($bytes)
+    $config = $json | ConvertFrom-Json
+    if ($null -eq $config -or $null -eq $config.Common) {
+        return @()
+    }
+    $common = $config.Common
+    if (-not ($common.PSObject.Properties.Name -contains 'CatalogTitleTokens')) {
+        return @()
+    }
+    $value = $common.CatalogTitleTokens
+    if ($null -eq $value) {
+        return @()
+    }
+    return @($value | ForEach-Object { [string]$_ })
+}
+
+function Test-CatalogTitleMatch {
+    <#
+    .SYNOPSIS
+        Decide whether a Microsoft Update Catalog hit title belongs to
+        the given OS, based on the Config-driven positive tokens and
+        the hardcoded negative exclusion list.
+    .DESCRIPTION
+        Matching is case-insensitive substring. A title passes when it
+        contains ANY positive token AND contains NONE of the negative
+        tokens. Empty positive list is permissive (the function then
+        returns $true unless the title contains a negative token), to
+        match the SPEC default of "accept the first matching hit when
+        no per-OS tokens are configured".
+    .EXAMPLE
+        Test-CatalogTitleMatch -OsVersion Server2019 `
+            -Title '2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows Server 2019 for x64 (KB5087066)'
+        # -> True
+
+        Test-CatalogTitleMatch -OsVersion Server2019 `
+            -Title '2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows 10 Version 1809 for x64 (KB5087066)'
+        # -> False (no positive token match)
+    #>
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)] [string]$OsVersion,
+        [Parameter(Mandatory)] [string]$Title
+    )
+
+    if ([string]::IsNullOrEmpty($Title)) { return $false }
+    $titleLower = $Title.ToLowerInvariant()
+
+    # Negative exclusion first: a single negative hit disqualifies regardless of positive matches.
+    foreach ($neg in $Script:CatalogTitleNegativeTokens) {
+        if ([string]::IsNullOrEmpty($neg)) { continue }
+        if ($titleLower.Contains($neg.ToLowerInvariant())) {
+            return $false
+        }
+    }
+
+    $positives = @(Get-CatalogTitleTokenList -OsVersion $OsVersion)
+    if ($positives.Count -eq 0) {
+        # SPEC default: no Config-side narrowing -> permissive accept.
+        return $true
+    }
+    foreach ($pos in $positives) {
+        if ([string]::IsNullOrEmpty($pos)) { continue }
+        if ($titleLower.Contains($pos.ToLowerInvariant())) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Get-CatalogQueryTemplate {
     <#
     .SYNOPSIS
@@ -4413,7 +4517,7 @@ function Get-CatalogQueryTemplate {
     $m = $PatchMonth
     $templates = @{
         'Server2025' = @{
-            TitleTokens = @('Microsoft server operating system version 24H2')
+            TitleTokens = @(Get-CatalogTitleTokenList -OsVersion 'Server2025')
             Queries = @(
                 @{ Type='SSU';                  QueryTemplate=($m + ' Servicing Stack Update for Microsoft server operating system version 24H2'); ProductFilter=@(); DescriptionFilter='' }
                 @{ Type='LCU';                  QueryTemplate=($m + ' Cumulative Update for Microsoft server operating system version 24H2');     ProductFilter=@(); DescriptionFilter='' }
@@ -4427,15 +4531,12 @@ function Get-CatalogQueryTemplate {
             # operating system, version 21H2") but as of 2026-05
             # Microsoft has dropped the comma so titles now read
             # "...server operating system version 21H2", matching the
-            # Server 2025 (24H2) format. We accept BOTH forms in the
-            # narrow filter (OR-matched) to remain robust against any
-            # future re-edit; the actual Search.aspx query strings use
-            # the current (no-comma) form because that is what live
-            # Catalogue listings display.
-            TitleTokens = @(
-                'Microsoft server operating system version 21H2',
-                'Microsoft server operating system, version 21H2'
-            )
+            # Server 2025 (24H2) format. The TitleTokens list is
+            # sourced from data/config-Server2022.json (Common.CatalogTitleTokens)
+            # per SPEC B.23.2 so we accept both forms (plus the
+            # "Windows Server 2022" fallback) via Config-driven editing
+            # without a PowerShell change.
+            TitleTokens = @(Get-CatalogTitleTokenList -OsVersion 'Server2022')
             Queries = @(
                 @{ Type='SSU';                  QueryTemplate=($m + ' Servicing Stack Update for Microsoft server operating system version 21H2'); ProductFilter=@(); DescriptionFilter='' }
                 @{ Type='LCU';                  QueryTemplate=($m + ' Cumulative Update for Microsoft server operating system version 21H2');     ProductFilter=@(); DescriptionFilter='' }
@@ -4446,7 +4547,7 @@ function Get-CatalogQueryTemplate {
             )
         }
         'Server2019' = @{
-            TitleTokens = @('Windows Server 2019')
+            TitleTokens = @(Get-CatalogTitleTokenList -OsVersion 'Server2019')
             Queries = @(
                 @{ Type='SSU';                  QueryTemplate=($m + ' Servicing Stack Update for Windows Server 2019 for x64-based Systems'); ProductFilter=@(); DescriptionFilter='' }
                 @{ Type='LCU';                  QueryTemplate=($m + ' Cumulative Update for Windows Server 2019 for x64-based Systems');      ProductFilter=@(); DescriptionFilter='' }
@@ -4455,7 +4556,7 @@ function Get-CatalogQueryTemplate {
             )
         }
         'Server2016' = @{
-            TitleTokens = @('Windows Server 2016')
+            TitleTokens = @(Get-CatalogTitleTokenList -OsVersion 'Server2016')
             Queries = @(
                 @{ Type='SSU';                  QueryTemplate=($m + ' Servicing Stack Update for Windows Server 2016 for x64-based Systems'); ProductFilter=@(); DescriptionFilter='' }
                 @{ Type='LCU';                  QueryTemplate=($m + ' Cumulative Update for Windows Server 2016 for x64-based Systems');      ProductFilter=@(); DescriptionFilter='' }
