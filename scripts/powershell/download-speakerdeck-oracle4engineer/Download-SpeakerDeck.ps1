@@ -219,7 +219,7 @@ if ($EnvironmentInfoOnly -and $SkipEnvCheck) {
 $ErrorActionPreference = 'Stop'
 
 # ------------------------------------------------------------
-# Reusable host-configuration helpers (Set-ConsoleUtf8 / Set-Tls12)
+# Reusable host-configuration helpers (Set-Utf8PipelineEncoding / Set-TlsSecurityProtocol)
 # ------------------------------------------------------------
 # These helpers were extracted from the original inline try-blocks for
 # reuse and clearer call-site intent. Each helper is best-effort:
@@ -228,7 +228,7 @@ $ErrorActionPreference = 'Stop'
 # restricted hosts may not allow the assignment, and the script body
 # can continue without the optimisation.
 
-function Set-ConsoleUtf8 {
+function Set-Utf8PipelineEncoding {
     # ====================================================================
     # SPEC A.5 / D.5: enforce UTF-8 console encoding so ja-JP Japanese
     # log strings (and external tool output such as CiTool.exe) render
@@ -259,7 +259,7 @@ function Set-ConsoleUtf8 {
     try { Set-Variable -Name OutputEncoding -Scope Global -Value ([System.Text.Encoding]::UTF8) -ErrorAction SilentlyContinue } catch { } # psa-disable-line PSA3004 -- intentional best-effort cleanup; no error to surface
 }
 
-function Set-Tls12 {
+function Set-TlsSecurityProtocol {
     # ====================================================================
     # Enable TLS for outbound HTTPS calls with best-effort multi-version
     # fallback. Tls12 is the baseline (required by most modern endpoints
@@ -280,8 +280,8 @@ function Set-Tls12 {
 }
 # Apply host configuration immediately so every subsequent write goes
 # through the right encoding and every HTTPS call uses TLS 1.2.
-Set-ConsoleUtf8
-Set-Tls12
+Set-Utf8PipelineEncoding
+Set-TlsSecurityProtocol
 
 # Load System.Web for HtmlDecode
 try { Add-Type -AssemblyName System.Web -ErrorAction SilentlyContinue } catch { } # psa-disable-line PSA3004 -- already uses -ErrorAction SilentlyContinue; catch is a defensive net
@@ -397,8 +397,8 @@ function Initialize-RuntimeDirectories {
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'speakerdeck-2026.05.27-r28'
-$Script:ScriptTag     = 'cross-repo-shared-utility-canon-write-caution'
+$Script:ScriptVersion = 'speakerdeck-2026.05.27-r29'
+$Script:ScriptTag     = 'cross-repo-canon-rename-misleading-helpers'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath

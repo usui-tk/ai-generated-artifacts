@@ -17,6 +17,72 @@ This CHANGELOG is **English only** per the
 
 (No changes pending.)
 
+## [r29] — 2026-05-27 — `cross-repo-canon-rename-misleading-helpers`
+
+This is a **focused naming-cleanup release** matching the corresponding
+release in the sibling repo. It renames two helpers in the 5-way
+cross-repo shared utility canon where the function names had drifted
+from what the implementations actually do. Both renames are mechanical
+(function bodies unchanged); the entire release is a callsite-only
+rewrite plus the script-identity bump.
+
+### Cross-repo coordination
+
+The matching AMD release is **Chipset r87 / Graphics r53 / BthPan r35 /
+NPU r31** (same `cross-repo-canon-rename-misleading-helpers` tag),
+committed to the sibling repo separately.
+
+### Function renames
+
+- **`Set-Tls12` → `Set-TlsSecurityProtocol`**
+  The pre-rename name suggested "set TLS 1.2", but since the r28
+  hybrid uplift the implementation has been negotiating TLS 1.3 +
+  1.2 + best-effort 1.1 + 1.0 fallback. The new name reflects what
+  the function actually does: it assigns the
+  `[Net.ServicePointManager]::SecurityProtocol` bitmask for outbound
+  HTTPS calls.
+
+- **`Set-ConsoleUtf8` → `Set-Utf8PipelineEncoding`**
+  The pre-rename name suggested "set Console to UTF-8", but the
+  implementation sets three distinct things: `[Console]::OutputEncoding`,
+  `[Console]::InputEncoding`, AND the PowerShell-internal
+  `$OutputEncoding` global variable. The third is **not** a Console
+  property — it controls how PowerShell writes piped data to external
+  tools (such as the curl invocation this script uses for retries when
+  `Invoke-WebRequest` is rate-limited). The new name captures the
+  broader pipeline-encoding scope.
+
+### Callsite rewrites
+
+Both renames are precise `\bName\b` word-boundary replacements:
+
+| Script                   | Set-Tls12 → Set-TlsSecurityProtocol | Set-ConsoleUtf8 → Set-Utf8PipelineEncoding |
+|--------------------------|-------------------------------------|--------------------------------------------|
+| Download-SpeakerDeck.ps1 | 3 (def + 2 calls)                   | 3 (def + 2 calls)                          |
+
+### Release-wide changes
+
+- `$Script:ScriptVersion`: `speakerdeck-2026.05.27-r28` → `speakerdeck-2026.05.27-r29`.
+- `$Script:ScriptTag`: `cross-repo-shared-utility-canon-write-caution` → `cross-repo-canon-rename-misleading-helpers`.
+
+### Verification
+
+5-way byte-identity across the 28 canon functions is preserved (the
+two renamed function bodies are unchanged; only the function name and
+callsites changed). The script passes `psa.py 4.1.0` with `0 errors /
+0 warnings / 0 info` using the project `.psa.config.json`.
+
+### Why this is a separate release from r28
+
+The r28 release established the hybrid `Set-Tls12` body (TLS 1.3 +
+1.2 + 1.1 + 1.0) and the hybrid `Set-ConsoleUtf8` body (Console +
+pipeline encoding both). The name-vs-implementation drift this release
+addresses was introduced by r28's hybrid uplift. r28 was correct to
+focus on the **implementation** of the cross-repo canon (best-of-both
+selection per function); r29 corrects the **naming** that should have
+been updated alongside. Splitting these into two commits keeps each
+release's "what changed" reviewable independently.
+
 ## [r28] — 2026-05-27 — `cross-repo-shared-utility-canon-write-caution`
 
 This release adopts the **5-way cross-repo shared utility canon** that
