@@ -183,29 +183,17 @@ T5 are appropriate for the monthly CI workflow
 drift early. T3 requires a `pwsh`-capable runner, which CI Stage 1
 already has, so T3 also belongs in that workflow.
 
-## PoC scripts (r06.0+, time-bounded)
+## Retired r06 Phase 2 PoC (r07.0)
 
-In addition to the T1-T5 regression suite documented above, this
-directory hosts PoC scripts that share the `tests/` location but
-are operationally distinct. They follow the file-organisation rules
-defined normatively in SPEC.md §B.22.
-
-PoC scripts use the filename prefix `poc_<topic>_<step>_<verb>.py`
-so they sort together and never collide with T-numbered names.
-They are **disposable**: once the corresponding PoC concludes
-(landed in production or shelved), every matching file can be
-deleted as a single atomic step.
-
-Current PoC inventory:
-
-| Topic            | Scripts                                                                | Operational docs                                                   |
-|------------------|------------------------------------------------------------------------|--------------------------------------------------------------------|
-| `release_info`   | `poc_release_info_01_fetch.py`<br>`poc_release_info_02_parse.py`<br>`poc_release_info_03_analyse.py`<br>`poc_release_info_04_resolve.py` | [`docs/poc/poc-release-info-readme.md`](../docs/poc/poc-release-info-readme.md) |
-| `dotnet_cu`      | `poc_dotnet_cu_01_fetch.py`<br>`poc_dotnet_cu_02_parse.py`             | [`docs/poc/poc-dotnet-cu-report.md`](../docs/poc/poc-dotnet-cu-report.md)       |
-| `dynamic_update` | `poc_dynamic_update_01_probe.py`                                       | [`docs/poc/poc-dynamic-update-report.md`](../docs/poc/poc-dynamic-update-report.md) |
-
-PoC scripts do not participate in the T-numbered regression suite,
-do not run in CI by default, and do not block PRs. Their snapshots
-live under `tests/snapshots/poc_<topic>/` and their fixtures /
-generated artefacts live under `tests/fixtures/poc_<topic>/`.
+Earlier releases hosted a `poc_<topic>_<step>_<verb>.py` family
+here that drove the Phase 2 investigation behind the §B.23
+architecture. As of r07.0 those scripts have been retired: their
+parser / resolver logic was promoted into
+`Update-WindowsServerIso.ps1` (`Get-PatchSetFromReleaseInfoDiscovery`,
+`ConvertFrom-ReleaseInfoMarkdown`, `ConvertFrom-DotNetCuMarkdown`,
+`Resolve-PatchSetFromReleaseInfo`), regression coverage moved to
+T6-T10 above, and the historical reports were moved to
+`docs/history/`. The `poc_<topic>_*` naming convention itself is
+preserved in SPEC.md §B.22.2 as a reserved pattern for any future
+PoC investigation.
 

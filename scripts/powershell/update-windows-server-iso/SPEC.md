@@ -991,8 +991,8 @@ under `Common.UpdateTypePolicy` is a candidate r06.x schema
 extension (see B.21.5 "Future work").
 
 **r06.0 Phase 2 PoC follow-up (PoC-E)**. The Phase 2 PoC
-under `tests/poc_dotnet_cu_*.py` and
-[`docs/poc/poc-dotnet-cu-report.md`](./docs/poc/poc-dotnet-cu-report.md)
+investigation
+(historical record at [`docs/history/dotnet-cu-report.md`](./docs/history/dotnet-cu-report.md))
 cross-checked the table above against the Microsoft Learn
 `.NET Framework cumulative update` release-notes pages
 (authoritative upstream source) for 2026-04. The upstream
@@ -1121,9 +1121,10 @@ extension is grounded in a stated contract.
 
 **r06.0 Phase 3 resolution.** The PoC questions enumerated above
 were answered by the r06.0 Phase 2 PoC reports
-(`docs/poc/poc-release-info-report.md`,
-`docs/poc/poc-dotnet-cu-report.md`,
-`docs/poc/poc-dynamic-update-report.md`), and the architecture
+(historical record at
+`docs/history/release-info-report.md`,
+`docs/history/dotnet-cu-report.md`,
+`docs/history/dynamic-update-report.md`), and the architecture
 decisions that follow from those answers are codified normatively
 in **§B.23 "Phase 3 Architecture (r07.0+, normative)"**. The
 `Common.UpdateTypePolicy` schema sketch above is **NOT adopted**:
@@ -1171,11 +1172,10 @@ scripts/powershell/update-windows-server-iso/
 │   ├── common/                     Shared modules (HTTP client, parsers).
 │   ├── fixtures/                   Saved HTML / JSON inputs for offline regression.
 │   ├── snapshots/                  Probe-output snapshots used for drift diffing.
-│   ├── <existing T1-T8>.py         Production-grade regression tools.
-│   └── (PoC scripts have been promoted to T6-T8; no `poc_` prefix files in r07.0+)
+│   └── <existing T1-T10>.py        Production-grade regression tools (no `poc_` prefix in r07.0+).
 └── docs/                           Long-form documentation.
-    └── poc/                        Historical PoC reports (kept for reference).
-        └── poc-<topic>-<purpose>.md
+    └── history/                    Historical record of past PoC investigations
+        └── <topic>-<purpose>.md    (carried forward as design rationale; see §B.23.14).
 ```
 
 **Historical note (r06.x).** Earlier releases stored OS
@@ -1191,26 +1191,32 @@ Key points:
 - **`data/`, `tests/`, and `docs/` are the only first-class child
   directories.** No additional top-level directories are added
   without a SPEC update; future "PoC ディレクトリ" or
-  "experiments/" would violate this rule. PoC code lives under
-  `tests/`, PoC reports live under `docs/poc/`, and that is
-  sufficient.
+  "experiments/" would violate this rule. Any future PoC code
+  lives temporarily under `tests/` with the `poc_` prefix and is
+  promoted (or deleted) at the end of the investigation, just as
+  the r06 Phase 2 PoC was promoted into T6-T10 and removed in
+  r07.0 (see §B.23.14).
 - **Production data and PoC artefacts coexist via filename
   prefix, not by directory.** Files under `data/` use the
   `config-` / `cache-` / `raw-` prefixes per §B.23.3. Files
-  under `tests/` use either the `T1`-`T8` numbered prefix (or
+  under `tests/` use either the `T<N>` numbered prefix (or
   no prefix for shared/common modules) for production
-  regression tests; historical `poc_*.py` PoC scripts were
-  promoted into the numbered set during r07.0.
+  regression tests. As of r07.0+, there are no `poc_*.py` files
+  in the repository -- the r06 PoC scripts were retired once
+  their parser logic landed in `Update-WindowsServerIso.ps1`
+  and the regression suite T6-T10 took over coverage.
 - **The `docs/` directory** is the canonical home for *anything
   longer than a CHANGELOG entry that is not the SPEC itself*.
-  PoC reports, post-mortems, design memos, architecture-decision-
-  record-style write-ups all belong here.
-- **Snapshot and fixture data follow the same prefix rule under
-  `tests/`**: a PoC snapshot goes under
-  `tests/snapshots/poc_<topic>/`, not in a sibling top-level
-  directory. (Note: r07.0 promoted the PoC snapshots that
-  graduated into T6-T8 into `tests/snapshots/<topic>/` without
-  the `poc_` prefix; see §B.23.14.)
+  Historical PoC reports live under `docs/history/`; design
+  memos, post-mortems, and architecture-decision-record-style
+  write-ups all belong under `docs/` proper.
+- **Snapshot and fixture data under `tests/` mirror the topic
+  taxonomy without the `poc_` prefix.** A production snapshot
+  lives at `tests/snapshots/<topic>/`; a production fixture at
+  `tests/fixtures/<topic>/`. A future PoC would temporarily use
+  `tests/snapshots/poc_<topic>/` and `tests/fixtures/poc_<topic>/`,
+  to be renamed (drop `poc_`) on promotion or deleted on
+  retirement.
 
 ### B.22.2 Filename prefix rules
 
@@ -1220,20 +1226,31 @@ Key points:
 | Production config             | `data/`                          | `config-Server<NNNN>.json` (see §B.23.3)              | No          |
 | Production cache              | `data/`                          | `cache-<source>[-<scope>].json` (see §B.23.3)         | No          |
 | Production raw                | `data/`                          | `raw-<source>.<ext>` (see §B.23.3)                    | No          |
-| Regression test (T1-T8)       | `tests/`                         | `<topic>_<role>.py` (no prefix; existing convention)  | No          |
+| Regression test (T1-T10)      | `tests/`                         | `<topic>_<role>.py` (no prefix; existing convention)  | No          |
 | Regression test (shared)      | `tests/common/`                  | `<topic>_<role>.py`                                   | No          |
-| Regression fixture            | `tests/fixtures/<patch-month>/`  | (per existing convention, see Part G)                 | No          |
-| Regression snapshot           | `tests/snapshots/`               | `last_<topic>.json`                                   | No          |
-| **PoC script** (new only)     | `tests/`                         | `poc_<topic>_<step>_<verb>.py`                        | **Yes**     |
+| Regression fixture            | `tests/fixtures/<topic>/`        | (per existing convention, see Part G)                 | No          |
+| Regression snapshot           | `tests/snapshots/<topic>/`       | (per existing convention, see Part G)                 | No          |
+| **PoC script** (future use)   | `tests/`                         | `poc_<topic>_<step>_<verb>.py`                        | **Yes**     |
 | **PoC fixture / snapshot**    | `tests/fixtures/poc_<topic>/`<br>`tests/snapshots/poc_<topic>/` | (any reasonable filename inside)                      | **Yes**     |
 | Production documentation      | `docs/`                          | `<topic>-<purpose>.md`                                | No          |
-| **PoC documentation**         | `docs/poc/`                      | `poc-<topic>-<purpose>.md`                            | **Yes**     |
+| Historical documentation      | `docs/history/`                  | `<topic>-<purpose>.md`                                | No          |
 | Top-level docs                | top level                        | `SPEC.md`, `CHANGELOG.md`, `README*.md`               | No          |
 
 "Disposable" means: when the corresponding feature lands in
 production (or is decided not to), every file in that class can be
 deleted as a single atomic step. PoC artefacts are time-bounded by
-design; production artefacts are not.
+design; production artefacts are not. The r06 Phase 2 PoC went
+through exactly this lifecycle: the `poc_release_info_*.py` /
+`poc_dotnet_cu_*.py` / `poc_dynamic_update_01_probe.py` scripts
+and their `tests/fixtures/poc_*/` + `tests/snapshots/poc_*/`
+companions existed during r06.0, drove the §B.23 design
+decisions, and were deleted as a single atomic step in r07.0
+once the parser logic had been promoted into
+`Update-WindowsServerIso.ps1` and the regression coverage moved
+to T6-T10. The PoC report Markdown files survived the cleanup
+because they record design rationale; they were moved into
+`docs/history/` (with the `poc-` filename prefix dropped) to
+make the history-vs-current distinction explicit.
 
 `<topic>` is a short kebab-case (Markdown) or snake_case (Python)
 identifier for the investigation subject. Pick one and use it
@@ -1259,15 +1276,14 @@ record), `runbook` (operator procedure).
 
 ### B.22.3 Worked examples
 
-| File                                              | Class                    | Reading the name                                                              |
-| ------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------- |
-| `tests/catalog_fixture_test.py`                   | Regression test (T2)     | "Catalog fixture test" -- no `poc_` prefix means it is permanent.             |
-| `tests/poc_release_info_01_fetch.py`              | PoC script step 1        | r06 PoC; release-info topic; step 1; fetches data.                            |
-| `tests/poc_release_info_02_parse.py`              | PoC script step 2        | r06 PoC; same topic; step 2; parses the fetched data.                         |
-| `tests/poc_release_info_03_analyse.py`            | PoC script step 3        | r06 PoC; same topic; step 3; analyses the parsed data.                        |
-| `tests/snapshots/poc_release_info/2026-05-25.md`  | PoC snapshot             | Snapshot for the release_info PoC, dated 2026-05-25.                          |
-| `docs/poc/poc-release-info-readme.md`             | PoC documentation        | r06 PoC; release-info topic; "readme" purpose (how to run the scripts).       |
-| `docs/poc/poc-release-info-report.md`             | PoC documentation        | r06 PoC; release-info topic; "report" purpose (findings + recommendations).   |
+| File                                                | Class                    | Reading the name                                                              |
+| --------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------- |
+| `tests/catalog_fixture_test.py`                     | Regression test (T2)     | "Catalog fixture test" -- no `poc_` prefix means it is permanent.             |
+| `tests/release_info_parser_test.py`                 | Regression test (T6)     | Production successor to the r06 PoC; consumes `tests/fixtures/release_info/`. |
+| `tests/release_info_resolver_test.py`               | Regression test (T10)    | Production regression for the r07.0 cache-driven refresher main path.         |
+| `tests/snapshots/release_info/release-info-<date>.md` | Regression snapshot    | Live capture used by T6; mirrors the topic name without `poc_` prefix.        |
+| `docs/history/release-info-report.md`               | Historical documentation | r06 Phase 2 PoC findings on release-info; kept as design rationale.           |
+| `tests/poc_<topic>_<step>_<verb>.py` *(none today)* | PoC script               | Reserved pattern for any future PoC investigation; no such files in r07.0+.   |
 
 ### B.22.4 What this section does NOT cover
 
@@ -1882,10 +1898,11 @@ No heuristic, no theoretical `[1, 4, 7, 10]` fallback, no
 the Hotpatch calendar instead of the monthly LCU list.
 
 **Consequences**.
-- The PoC-D logic that handles this row already
-  (`poc_release_info_03_analyse.py`) is promoted into the
-  production parser without modification beyond porting it to
-  PowerShell / the production Refresher path.
+- The PoC-D logic that handles this row (originally prototyped
+  in `poc_release_info_03_analyse.py`, retired in r07.0; see
+  `docs/history/release-info-report.md`) was ported into
+  PowerShell during r07.0 Step 2a and now lives as part of the
+  production Refresher path.
 - Phase 4+ implementations of `-PreferBaselineMonthLcu`
   automatically benefit: when CY2024 August baselines are
   queried, the cache returns `is_baseline=true` for that month,
@@ -2017,35 +2034,48 @@ data drift, stage4 is never triggered. If the snapshot is fine
 but the operator wants to verify the baseline manually, the
 operator can dispatch stage4 with `dryRun=true`.
 
-**PoC promotion to T6-T8**. r07.0 also promotes the PoC scripts
-to first-class regression tests:
+**PoC retirement (completed in r07.0)**. As part of the same
+release, the r06 Phase 2 PoC scripts and assets were removed from
+the working repository:
 
-- `tests/poc_release_info_*.py` → `tests/T6_release_info_*.py`
-  (or equivalent). The `poc_` prefix is dropped, the scripts
-  graduate from `docs/poc/` ownership into the production
-  regression suite.
-- Similarly for `poc_dotnet_cu_*.py` (→ T7) and
-  `poc_dynamic_update_01_probe.py` (→ T8). Exact numbering is an
-  implementation detail; the SPEC commits only to "promote
-  PoCs to T6-T8 numbering range".
-- `stage1__linux.yml` is extended to run T6-T8 on every PR,
-  same as the existing T1-T5. The PoC fixtures and snapshots
-  under `tests/fixtures/poc_*/` and `tests/snapshots/poc_*/` are
-  renamed to drop the `poc_` prefix (becoming permanent
-  regression assets).
+- `tests/poc_release_info_*.py`, `tests/poc_dotnet_cu_*.py` and
+  `tests/poc_dynamic_update_01_probe.py` were deleted outright.
+  Their parser / resolver logic had already been ported into
+  `Update-WindowsServerIso.ps1` during r07.0 Step 2a / Step 2b
+  (see `ConvertFrom-ReleaseInfoMarkdown`,
+  `ConvertFrom-DotNetCuMarkdown`,
+  `Resolve-PatchSetFromReleaseInfo`); the live fetch / probe
+  steps are now covered by the production functions
+  `Invoke-ReleaseInfoFetch`, `Invoke-DotNetCuFetch` and the
+  Dynamic Update cache add path (`Add-DynamicUpdateCacheEntry`).
+- Regression coverage moved into the T6-T10 numbered regression
+  suite: T6 (`release_info_parser_test.py`), T7
+  (`dotnet_cu_parser_test.py`), T8 (`dynamic_update_cache_test.py`),
+  T9 (`catalog_title_tokens_test.py`), T10
+  (`release_info_resolver_test.py`). Each owns offline fixtures
+  under `tests/fixtures/<topic>/` and (where applicable) live
+  snapshots under `tests/snapshots/<topic>/`. The fixtures /
+  snapshots originally written under the `poc_<topic>` prefix
+  were either renamed to drop the prefix (when T6 / live data
+  still needed them) or deleted (when subsequent fresh captures
+  superseded them, as for T7 / T8).
+- `stage1__linux.yml` already runs every `tests/*_test.py` on
+  PR; the promoted T6-T10 tests are picked up automatically by
+  that glob.
 
 **Consequences**.
 - The existing `Config/Server*.json` references in stage4 are
   updated to `data/config-Server*.json` (per §B.23.3).
 - The existing stage4 monthly-cron trigger (`cron '0 2 15 * *'`)
   is removed; only `workflow_run` + `workflow_dispatch` remain.
-- §B.22.2 (Filename prefix rules) is amended: the "PoC script"
-  row is marked as "until r07.0 stage5 promotion"; the
-  graduated `T6-T8` files land in the regular regression-test
-  row.
-- The PoC report Markdown files in `docs/poc/` are kept as
-  historical record of how the Phase 2 investigation arrived at
-  these designs. They are not promoted to production status.
+- §B.22.2 (Filename prefix rules) treats `poc_*` as a reserved
+  pattern for future PoC investigations; no `poc_` prefix files
+  exist in r07.0+ but the convention remains documented so the
+  next PoC need not re-invent it.
+- The PoC report Markdown files were preserved as historical
+  record of how the Phase 2 investigation arrived at these
+  designs. They now live under `docs/history/` (without the
+  `poc-` filename prefix) rather than `docs/poc/`.
 - A future `-PreferBaselineMonthLcu` (Phase 4+) reuses the same
   CI infrastructure: stage5 already produces the baseline-month
   calendar in `cache-release-info.json`; stage4 only needs an
@@ -2866,8 +2896,8 @@ PowerShell 7+. No `pip install` is required.
 | `tests/powershell_harness.py`   (T3) | Python-side unit tests of `Update-WindowsServerIso.ps1` functions via the `-Action TestHarness` REPL hook (see §B.17). Asserts `Get-CatalogQueryTemplate`, `Select-AllCanonicalPatchFiles`, `Select-CanonicalPatchFile`, `Get-KbIdFromUpdateTitle`, `Test-IsCombinedLcuTitle`. | No  |
 | `tests/eval_iso_probe.py`       (T4) | HTTP Range-GET against every `LanguageSpecific.<lang>.Iso.Url` in each `data/config-Server<N>.json`; reports total size and `Last-Modified`. Detects snapshot rotation (see §D.11). | Yes |
 | `tests/wsusscn2_probe.py`       (T5) | HTTP Range-GET against `wsusscn2.cab`; warns when the cab is older than 60 days. Detects egress-proxy `host_not_allowed` and reports it separately from real Microsoft outages. | Yes |
-| `tests/release_info_parser_test.py` (T6) | Offline regression test for `ConvertFrom-ReleaseInfoMarkdown`. Parses `tests/snapshots/poc_release_info/release-info-<date>.md` via the TestHarness and asserts row counts (total + per-OS), KbId-parse coverage, and IsBaseline detection against the PoC reference fixture `tests/fixtures/poc_release_info/release-info.json`. Added in r07.0 Step 2a as the regression gate for the PowerShell port of `poc_release_info_02_parse.py`. | No  |
-| `tests/dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown`. Parses the live-captured snapshots under `tests/snapshots/dotnet_cu/` (index plus two monthly pages) via the TestHarness and asserts EntryCount / EarliestDate / LatestDate / Kinds / per-OS row counts / per-entry deep equality against the Python reference fixtures under `tests/fixtures/dotnet_cu/`. Reference data was captured live from learn.microsoft.com on 2026-05-26 and intentionally does not depend on the PoC fixtures under `tests/snapshots/poc_dotnet_cu/`, which reflect an older page structure. | No  |
+| `tests/release_info_parser_test.py` (T6) | Offline regression test for `ConvertFrom-ReleaseInfoMarkdown`. Parses `tests/snapshots/release_info/release-info-<date>.md` via the TestHarness and asserts row counts (total + per-OS), KbId-parse coverage, and IsBaseline detection against the reference fixture `tests/fixtures/release_info/release-info.json`. Added in r07.0 Step 2a as the regression gate for the PowerShell port of the r06 Phase 2 release-info parser (now retired; see `docs/history/release-info-report.md`). | No  |
+| `tests/dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown`. Parses the live-captured snapshots under `tests/snapshots/dotnet_cu/` (index plus two monthly pages) via the TestHarness and asserts EntryCount / EarliestDate / LatestDate / Kinds / per-OS row counts / per-entry deep equality against the Python reference fixtures under `tests/fixtures/dotnet_cu/`. Reference data was captured live from learn.microsoft.com on 2026-05-26 (the earlier r06 PoC snapshots reflected an older page structure and were retired together with the rest of the PoC assets in r07.0; see `docs/history/dotnet-cu-report.md`). | No  |
 | `tests/dynamic_update_cache_test.py` (T8) | Offline regression test for the Dynamic Update 36-month cache subsystem. Drives `Add-DynamicUpdateCacheEntry`, `Get-DynamicUpdateCache`, `Get-LatestDynamicUpdate`, and `Remove-DynamicUpdateOutsideWindow` through three scenarios defined in `tests/fixtures/dynamic_update_cache/scenarios.json` (which combines fresh live Microsoft Update Catalog probe results captured on 2026-05-26 with synthetic older months to exercise the 36-month window trim) plus three ad-hoc scenarios (cross-OS isolation, missing-file empty cache, PatchMonth validation rejection). Each scenario uses an isolated temp directory via the `-DataDir` parameter, anchors the window via `-Now=2026-05-26T00:00:00Z`, and asserts 20 invariants total. | No  |
 | `tests/catalog_title_tokens_test.py` (T9) | Offline regression test for the URL-resolver Config-driven narrowing added in r07.0 Step 2b. Drives `Get-CatalogTitleTokenList` against all four `data/config-Server*.json` files (verifies `Common.CatalogTitleTokens` is read correctly and a missing-Config OS returns an empty list), then drives `Test-CatalogTitleMatch` through 13 narrow-filter cases captured live from Microsoft Update Catalog on 2026-05-26. Cases cover: positive title matches for all four production OSes, same-KB client-variant rejection (Windows 10 1607 / 1809 for Server 2016 / 2019), negative-token exclusion (`arm64`, `Windows 11`), and Server 2022's both comma forms. 18 assertions total. | No  |
 | `tests/release_info_resolver_test.py` (T10) | Offline regression test for the Refresher main-path migration added in r07.0 Step 2b. Drives `Get-PatchSetFromReleaseInfoDiscovery` (the pure-cache half of `Resolve-PatchSetFromReleaseInfo`) through four scenarios defined in `tests/fixtures/release_info_resolver/scenarios.json`: Server 2025 / Server 2022 / Server 2019 full-set discovery for 2026-05 (asserting the SPEC B.23.5 B-2 multi-row .NET CU behaviour and the SPEC B.23.6 "no DU for Server 2019" absence), and a no-match month returning zero records. Plus two ad-hoc checks: missing-cache defensive default returns zero records, and an invalid PatchMonth ("2026/05") is rejected. All fixtures are synthetic but lifted shape-for-shape from the live 2026-05-26 captures used by T6/T7/T8. 18 assertions total. The orchestrator's Catalog URL-resolution layer is intentionally out of T10's scope (network-dependent); the URL-resolver narrowing layer is covered by T9. | No  |
@@ -2885,33 +2915,38 @@ The suite is documented operationally in
 [`tests/README.md`](./tests/README.md), which includes a
 "what to run, when" guide for both Claude and human operators.
 
-### Adjunct: PoC scripts under `tests/` (r06.0+)
+### Adjunct: retired r06 Phase 2 PoC
 
-The PoC scripts described in `B.22 File organisation and naming
-conventions` share the `tests/` directory with the T1-T5 regression
-suite, but are **distinct from it**:
+Earlier releases (r06.x) shipped a separate `poc_<topic>_<step>_<verb>.py`
+family under `tests/` that drove the Phase 2 investigation behind the
+§B.23 architecture. As of r07.0 those scripts are retired:
 
-- They are prefixed `poc_<topic>_<step>_<verb>.py` so they sort
-  together and never collide with T1-T5 names.
-- They are **time-bounded**: when the corresponding PoC concludes,
-  the `poc_<topic>_*.py` files, the `tests/fixtures/poc_<topic>/`,
-  the `tests/snapshots/poc_<topic>/`, and any matching
-  `docs/poc/poc-<topic>-*.md` documents can all be deleted as a
-  single atomic step.
-- They do **not** participate in the T-numbered regression suite
-  and are not required to be invoked by CI workflows.
-- Operational docs (how to run them, what they output, the
-  resulting findings) live under `docs/poc/`, not in `README.md`
-  here. The PoC's own `docs/poc/poc-<topic>-readme.md` is the
-  canonical entry point.
+- `poc_release_info_*.py`, `poc_dotnet_cu_*.py` and
+  `poc_dynamic_update_01_probe.py` have all been deleted. Their
+  parser / resolver logic was promoted into
+  `Update-WindowsServerIso.ps1` during r07.0 Step 2a / Step 2b
+  (see `Get-PatchSetFromReleaseInfoDiscovery`,
+  `ConvertFrom-ReleaseInfoMarkdown`,
+  `ConvertFrom-DotNetCuMarkdown`,
+  `Resolve-PatchSetFromReleaseInfo`); live fetch / probe is
+  covered by the production `Invoke-ReleaseInfoFetch`,
+  `Invoke-DotNetCuFetch` and `Add-DynamicUpdateCacheEntry`.
+- Regression coverage moved into the T6-T10 numbered suite
+  enumerated above.
+- The PoC report Markdown files were preserved as design
+  rationale and live under `docs/history/` (without the `poc-`
+  filename prefix). See `docs/history/release-info-report.md`,
+  `docs/history/dotnet-cu-report.md` and
+  `docs/history/dynamic-update-report.md`.
 
-The current PoC tracked under this scheme:
+| Original PoC topic | Retired scripts                                       | Historical record                     |
+|--------------------|-------------------------------------------------------|---------------------------------------|
+| `release_info`     | `poc_release_info_01_fetch.py` ... `04_resolve.py`    | `docs/history/release-info-report.md` |
+| `dotnet_cu`        | `poc_dotnet_cu_01_fetch.py`, `02_parse.py`            | `docs/history/dotnet-cu-report.md`    |
+| `dynamic_update`   | `poc_dynamic_update_01_probe.py`                      | `docs/history/dynamic-update-report.md` |
 
-| PoC topic          | Scripts                                                                                                  | Documents                                                                       |
-|--------------------|----------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------|
-| `release_info`     | `tests/poc_release_info_01_fetch.py`<br>`tests/poc_release_info_02_parse.py`<br>`tests/poc_release_info_03_analyse.py`<br>`tests/poc_release_info_04_resolve.py` | `docs/poc/poc-release-info-readme.md`<br>`docs/poc/poc-release-info-report.md` |
-| `dotnet_cu`        | `tests/poc_dotnet_cu_01_fetch.py`<br>`tests/poc_dotnet_cu_02_parse.py`                                   | `docs/poc/poc-dotnet-cu-report.md`                                              |
-| `dynamic_update`   | `tests/poc_dynamic_update_01_probe.py`                                                                   | `docs/poc/poc-dynamic-update-report.md`                                         |
+The `poc_<topic>_*` naming pattern remains documented in §B.22.2
+as a reserved convention for any future PoC investigation.
 
 ---
 

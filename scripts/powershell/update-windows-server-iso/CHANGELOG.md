@@ -16,6 +16,128 @@ the script and follows the
 
 ## [Unreleased]
 
+### r07.0 Step 4 - Retire r06 Phase 2 PoC scripts and assets (this release)
+
+Mechanical cleanup commit scheduled by SPEC §B.23.14. With the
+parser / resolver logic now living in `Update-WindowsServerIso.ps1`
+and regression coverage owned by T6-T10, the `poc_<topic>_*`
+scripts and their disposable fixtures / snapshots have served
+their purpose. This commit removes them as a single atomic step.
+
+**Deleted from the repository**:
+
+- `tests/poc_release_info_01_fetch.py`,
+  `tests/poc_release_info_02_parse.py`,
+  `tests/poc_release_info_03_analyse.py`,
+  `tests/poc_release_info_04_resolve.py`
+- `tests/poc_dotnet_cu_01_fetch.py`,
+  `tests/poc_dotnet_cu_02_parse.py`
+- `tests/poc_dynamic_update_01_probe.py`
+- `tests/fixtures/poc_release_info/` (5 disposable derived
+  files: `baseline-month-detection.json`,
+  `coverage-summary.json`, `letter-frequency.json`,
+  `resolve-sample.json`, `update-type-summary.csv`)
+- `tests/fixtures/poc_dotnet_cu/` (2 files:
+  `release-notes-index.json`, `sample-month.json`)
+- `tests/fixtures/poc_dynamic_update/` (1 file:
+  `probe-results.json`; T8 already owns its own
+  `tests/fixtures/dynamic_update_cache/probe-results.json`
+  derived from the 2026-05-26 live captures)
+- `tests/snapshots/poc_dotnet_cu/` (4 files; T7 already owns
+  `tests/snapshots/dotnet_cu/` with the same shape sourced from
+  fresh live captures)
+- `docs/poc/` (the entire directory; contents survive under
+  `docs/history/` after the rename described below)
+
+**Moved (kept under a new permanent name)**:
+
+- `tests/fixtures/poc_release_info/release-info.json`
+  -> `tests/fixtures/release_info/release-info.json`
+- `tests/snapshots/poc_release_info/release-info-2026-05-25.md`
+  -> `tests/snapshots/release_info/release-info-2026-05-25.md`
+- `tests/snapshots/poc_release_info/release-info-2026-05-25.meta.json`
+  -> `tests/snapshots/release_info/release-info-2026-05-25.meta.json`
+- `tests/snapshots/poc_release_info/.gitattributes`
+  -> `tests/snapshots/release_info/.gitattributes` (preserves
+  the `*.md -text` rule that keeps Microsoft Learn snapshots
+  bit-perfect)
+- `docs/poc/poc-release-info-readme.md`
+  -> `docs/history/release-info-readme.md`
+- `docs/poc/poc-release-info-report.md`
+  -> `docs/history/release-info-report.md`
+- `docs/poc/poc-dotnet-cu-report.md`
+  -> `docs/history/dotnet-cu-report.md`
+- `docs/poc/poc-dynamic-update-report.md`
+  -> `docs/history/dynamic-update-report.md`
+
+**Code updates**:
+
+- `tests/release_info_parser_test.py` (T6): two path constants
+  retargeted from `tests/{fixtures,snapshots}/poc_release_info/`
+  to `tests/{fixtures,snapshots}/release_info/`; docstring
+  updated to point at the new permanent location and the
+  historical record under `docs/history/`. No behavioural
+  change; T6 still asserts the same 13 invariants.
+- `tests/dotnet_cu_parser_test.py` (T7): docstring comment that
+  referenced the now-deleted `tests/snapshots/poc_dotnet_cu/`
+  was rewritten to point at `docs/history/dotnet-cu-report.md`
+  instead.
+
+**Documentation updates** (SPEC.md / tests/README.md):
+
+- SPEC.md §B.22 (file organisation): directory tree updated to
+  show `docs/history/` instead of `docs/poc/`; key-points list
+  rewritten to describe the post-cleanup state; §B.22.2 prefix
+  table marks `poc_` as a reserved pattern for future PoC use
+  (not currently present in the repo) and adds a row for
+  `docs/history/`; §B.22.3 worked-examples table replaces the
+  deleted PoC files with current production examples
+  (`release_info_parser_test.py`,
+  `release_info_resolver_test.py`,
+  `docs/history/release-info-report.md`).
+- SPEC.md §B.23.12: stale reference to
+  `poc_release_info_03_analyse.py` rewritten as a historical
+  note pointing at `docs/history/release-info-report.md`.
+- SPEC.md §B.23.14: "PoC promotion to T6-T8" section rewritten
+  as "PoC retirement (completed in r07.0)" describing the
+  achieved state (scripts deleted, fixtures/snapshots renamed
+  or deleted as appropriate, reports moved to `docs/history/`).
+- SPEC.md Part G: T6 and T7 row descriptions updated to point
+  at the new paths and at `docs/history/` for the historical
+  record. The "Adjunct: PoC scripts under `tests/`" section was
+  rewritten as "Adjunct: retired r06 Phase 2 PoC" summarising
+  the migration.
+- SPEC.md §B.21.2 / §B.21.5 / others: scattered
+  `docs/poc/poc-*-report.md` URLs updated to the new
+  `docs/history/*-report.md` paths.
+- `tests/README.md`: the "PoC scripts (r06.0+, time-bounded)"
+  section was replaced by a short "Retired r06 Phase 2 PoC"
+  paragraph that records the migration outcome.
+
+**No production-code change**. `Update-WindowsServerIso.ps1` is
+not modified by this commit; it has had zero references to the
+PoC paths since r07.0 Step 2b. Schema versions are unchanged.
+`$Script:ScriptVersion` stays at `update-wsi-2026.05.26-r07.0`
+(this is a documentation / repository-hygiene commit, not a
+functional change, so SemVer is not affected).
+
+**Sanity guarantees**:
+
+- Zero `poc_` or `poc-` prefixed file or directory remains
+  anywhere under `tests/` or `docs/`.
+- `tests/snapshots/release_info/.gitattributes` was carried
+  forward, so the snapshot's bit-perfect CRLF endings remain
+  protected against Git's default end-of-line normalisation.
+- T6 still finds its snapshot under the new
+  `tests/snapshots/release_info/` location and still asserts
+  the same 13 invariants from the same `release-info.json`
+  reference fixture.
+
+**Quality-gate status**: psa.py 0 / 0 / 0, PSScriptAnalyzer 0
+findings, PowerShell parse OK, T2 13/13, T3 10/10, T6 13/13,
+T7 16/16, T8 20/20, T9 18/18, T10 18/18. Cumulative 108/108
+PASS unchanged from r07.0 Step 3.
+
 ## [update-wsi-2026.05.26-r07.0] - 2026-05-26
 
 **r07.0 — Phase 3 implementation (release-info-driven refresher; breaking change).**

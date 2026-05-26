@@ -7,12 +7,12 @@ produces the same parsed output as the Python reference parser when
 fed the snapshots under tests/snapshots/dotnet_cu/.
 
 The reference data was captured live from learn.microsoft.com on
-2026-05-26 and defines the EXPECTED behavior. The PoC fixtures under
-tests/snapshots/poc_dotnet_cu/ are intentionally NOT used here: the
-fresh snapshots reflect the current page structure, which differs
-from the original PoC era (index entries now have the date outside
-the link brackets; the "Summary tables" section now appears after
-"Known issues" rather than before).
+2026-05-26 and defines the EXPECTED behavior. (Earlier r06 Phase 2
+PoC snapshots reflected an older page structure -- index entries
+had the date inside the link brackets; the "Summary tables" section
+appeared before "Known issues" rather than after -- and were
+superseded once the live captures landed. The historical PoC
+investigation is recorded in docs/history/dotnet-cu-report.md.)
 
 Run from the project root:
 
