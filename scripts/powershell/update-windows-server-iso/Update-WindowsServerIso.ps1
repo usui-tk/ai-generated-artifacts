@@ -5006,7 +5006,7 @@ function Get-PatchSetFromReleaseInfoDiscovery {
     # ----- .NET CU from dotnet-cu cache -----
     #
     # Build a case-insensitive set of LCU KbIds already discovered above
-    # so the .NET CU loop can dedup against them. Per SPEC §B.23.5 B-3,
+    # so the .NET CU loop can dedup against them. Per SPEC B.23.5 B-3,
     # the Windows 10 1607 / Server 2016 era LCU literally embeds the
     # .NET 3.5 / 4.6.2 / 4.7.x cumulative-update payload as OS components
     # ("sliced cumulative update" design): Microsoft's
@@ -5059,7 +5059,7 @@ function Get-PatchSetFromReleaseInfoDiscovery {
                 foreach ($row in $rows) {
                     $rowKb = [string]$row.KbId
                     if ([string]::IsNullOrEmpty($rowKb)) { continue }
-                    # SPEC §B.23.5 B-3 LCU-priority dedup: drop any .NET CU
+                    # SPEC B.23.5 B-3 LCU-priority dedup: drop any .NET CU
                     # row whose KbId duplicates an LCU KbId already in
                     # $records. See the long comment above the
                     # $lcuKbSet construction for the Microsoft-side
