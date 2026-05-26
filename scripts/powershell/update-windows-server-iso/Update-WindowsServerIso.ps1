@@ -8181,11 +8181,18 @@ function Show-Pca2023ReadinessSnapshot {
     }
     Write-Step ''
     Write-Step '[ISO boot environment]'
-    Write-Step ('EFI_EX staging directory : {0}' -f (if ($null -eq $emb.HasEfiExDir) { 'n/a' } elseif ($emb.HasEfiExDir) { 'present' } else { 'NOT present' }))
-    Write-Step ('  bootmgfw_EX.efi        : {0}' -f (if ($null -eq $emb.HasBootMgrFwEx) { 'n/a' } elseif ($emb.HasBootMgrFwEx) { 'present' } else { 'NOT present' }))
-    Write-Step ('  bootmgr_EX.efi         : {0}' -f (if ($null -eq $emb.HasBootMgrEx) { 'n/a' } elseif ($emb.HasBootMgrEx) { 'present' } else { 'NOT present' }))
-    Write-Step ('  FONTS_EX               : {0}' -f (if ($null -eq $emb.HasFontsEx) { 'n/a' } elseif ($emb.HasFontsEx) { 'present' } else { 'NOT present' }))
-    Write-Step ('  DVD_EX/EFI/en-US/efisys_EX.bin : {0}' -f (if ($null -eq $emb.HasEfisysExBin) { 'n/a' } elseif ($emb.HasEfisysExBin) { 'present' } else { 'NOT present' }))
+    # NOTE: PowerShell requires $(...) for `if`-as-expression syntax. Bare
+    # `(if ...)` is parsed as a *command* invocation named 'if', which fails
+    # at runtime with the localised "term 'if' is not recognized as a name
+    # of a cmdlet, function, script file..." error. The $(...) subexpression
+    # operator is mandatory. See the SecureBoot/LCU blocks below for the
+    # correct pattern. Note that @(if ...) (array subexpression) is also
+    # valid PowerShell - only the bare (if ...) form is broken.
+    Write-Step ('EFI_EX staging directory : {0}' -f $(if ($null -eq $emb.HasEfiExDir) { 'n/a' } elseif ($emb.HasEfiExDir) { 'present' } else { 'NOT present' }))
+    Write-Step ('  bootmgfw_EX.efi        : {0}' -f $(if ($null -eq $emb.HasBootMgrFwEx) { 'n/a' } elseif ($emb.HasBootMgrFwEx) { 'present' } else { 'NOT present' }))
+    Write-Step ('  bootmgr_EX.efi         : {0}' -f $(if ($null -eq $emb.HasBootMgrEx) { 'n/a' } elseif ($emb.HasBootMgrEx) { 'present' } else { 'NOT present' }))
+    Write-Step ('  FONTS_EX               : {0}' -f $(if ($null -eq $emb.HasFontsEx) { 'n/a' } elseif ($emb.HasFontsEx) { 'present' } else { 'NOT present' }))
+    Write-Step ('  DVD_EX/EFI/en-US/efisys_EX.bin : {0}' -f $(if ($null -eq $emb.HasEfisysExBin) { 'n/a' } elseif ($emb.HasEfisysExBin) { 'present' } else { 'NOT present' }))
     Write-Step ''
     Write-Step '[bootx64.efi signer]'
     Write-Step ('  Signer subject  : {0}' -f $(if ($emb.BootX64SignerName) { $emb.BootX64SignerName } else { 'n/a' }))

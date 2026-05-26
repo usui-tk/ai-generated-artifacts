@@ -2857,6 +2857,74 @@ before reaching the broken line.
   L8167 site was the only one. No further code change is
   required.
 
+### B.23.23 P12 fix part 2: `(if ...)` mis-spelled subexpressions in Show-Pca2023ReadinessSnapshot
+
+Step 17's `Write-PhaseHeader -> Write-SubSection` fix unblocked
+the non-compact rendering path in `Show-Pca2023ReadinessSnapshot`,
+which immediately exposed a second latent bug in the same
+function: five lines (L8184-8188 in r07.0) used the syntax
+
+```powershell
+'... : {0}' -f (if ($null -eq $emb.HasEfiExDir) { 'n/a' } elseif ... )
+```
+
+This is invalid PowerShell. The bare `(if ...)` form is parsed
+as a **command invocation** named `if`, which fails at runtime
+with the localised error:
+
+```
+The term 'if' is not recognized as a name of a cmdlet, function,
+script file, or executable program.
+```
+
+For an `if` statement to be used as an expression (so its branch
+value can be consumed by `-f` or assigned to a variable), it
+must be wrapped in the subexpression operator: `$(if ...)`. The
+array subexpression `@(if ...)` is also valid and forces array
+context.
+
+The same function had this idiom correctly written six lines
+below (`$(if $emb.BootX64SignerName ...)`) and at four other
+sites within the same block, so the bug was a local
+copy-paste mistake on the five EFI_EX-family lines, not a
+systemic misunderstanding.
+
+This bug was **invisible to static analysis** because
+`(if ...)` is a syntactically valid command-invocation form in
+PowerShell's grammar. PS Parse passed, psa.py passed,
+PSScriptAnalyzer passed - but the cmdlet `if` does not exist.
+Only a runtime invocation surfaced the problem, and the
+function was only reachable through a code path that the
+prior Write-PhaseHeader bug had blocked.
+
+**Design decisions**.
+
+- D-1: *Replace all five `(if ...)` with `$(if ...)`*. The
+  fix is mechanical and the existing correct sites in the
+  same function are the model.
+- D-2: *Add an in-source comment* describing the trap so
+  future contributors do not regress this. The comment is
+  placed immediately before the first formerly-broken line
+  and explicitly notes that `$(if ...)` is the correct form,
+  `@(if ...)` is also valid (array subexpression), and bare
+  `(if ...)` is not.
+- D-3: *Run a defensive grep over the entire script* for any
+  other bare `(if ...)` / `(switch ...)` / `(foreach ...)` /
+  `(while ...)` patterns. Zero further hits remained after
+  the L8184-8188 fix. The grep is documented in the test
+  notes as an ad-hoc check until a stable static-analyzer
+  rule for this pattern is added.
+- D-4: *Add a runtime smoke test* to the local verification
+  loop. Static analysis cannot catch this class of bug, so
+  the regression-safety net needs to be either a runtime
+  test that exercises the function or a custom analyzer
+  rule. A short pwsh-script that builds a fake snapshot
+  pscustomobject and calls
+  `Show-Pca2023ReadinessSnapshot -Snapshot $fake` (no
+  `-Compact`) was added to the local verification workflow
+  in `tests/`. The test passes only if the non-compact
+  branch returns without throwing.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2883,6 +2951,7 @@ before reaching the broken line.
 | B.23.20          | (new) — refines §A.4 P10/P12 PCA2023     | Fix `$Script:ExtractedMediaPath` and `$Script:WorkRootFull` typos in P10/P12; 8 sites total (r07.0 Step 15) |
 | B.23.21          | (new) — refines §A.4 P10 + §C.1 download | P10 step-by-step progress logging + Critical-Health skip-with-warn; new `Invoke-DownloadWithProgress` utility (r07.0 Step 16) |
 | B.23.22          | (new) — refines §A.4 P12 / Show-Pca2023ReadinessSnapshot | Fix Write-PhaseHeader positional call that hung Show-Pca2023ReadinessSnapshot in non-compact mode (r07.0 Step 17) |
+| B.23.23          | (new) — refines §A.4 P12 / Show-Pca2023ReadinessSnapshot | Fix `(if ...)` mis-spelled subexpressions; should be `$(if ...)` at 5 sites (r07.0 Step 18) |
 
 ---
 

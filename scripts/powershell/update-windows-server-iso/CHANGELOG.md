@@ -16,7 +16,111 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 17 - Fix Write-PhaseHeader positional call that hung P12 in non-compact rendering mode (this release)
+### r07.0 Step 18 - Fix `(if ...)` mis-spelled subexpressions in Show-Pca2023ReadinessSnapshot (this release)
+
+Step 17's `Write-PhaseHeader -> Write-SubSection` fix unblocked
+the non-compact rendering branch in `Show-Pca2023ReadinessSnapshot`,
+and the Step 17 verification run reached and ran it cleanly
+all the way through P10 + P11 + P12 snapshot computation +
+the new `-- PCA2023 readiness detail --` sub-section header
+... at which point it failed with:
+
+```
+[X] Phase P12 (VerifyPca2023Readiness) failed: 用語 'if' は、コマンドレット、
+    関数、スクリプト ファイル、または操作可能なプログラムの名前として
+    認識されません。
+[~]     Show-Pca2023ReadinessSnapshot, line 8184
+[~]     Invoke-VerifyPhase12_VerifyPca2023Readiness, line 10478
+```
+
+Root cause: a second latent bug in the same
+`Show-Pca2023ReadinessSnapshot` function. Five lines (L8184-8188)
+used the wrong subexpression syntax:
+
+```powershell
+# BROKEN - PowerShell parses (if ...) as a command invocation named 'if'
+'EFI_EX staging directory : {0}' -f (if ($null -eq $emb.HasEfiExDir) { 'n/a' } elseif ... )
+
+# CORRECT - $(...) is the subexpression operator that wraps a statement as a value
+'EFI_EX staging directory : {0}' -f $(if ($null -eq $emb.HasEfiExDir) { 'n/a' } elseif ... )
+```
+
+The same function had this idiom written **correctly** six lines
+below ($Signer subject line) and at four other sites
+in the SecureBoot/LCU blocks. The bug was a local copy-paste
+mistake on the five EFI_EX/FONTS_EX/DVD_EX-family lines,
+not a systemic misunderstanding.
+
+**Why this slipped through static analysis**. `(if ...)` is a
+syntactically valid command-invocation form in PowerShell's
+grammar - the parser accepts it and treats `if` as a command
+name to be resolved at runtime. PS Parse passed, psa.py
+passed (0/0/0), PSScriptAnalyzer passed (0 issues). The
+function was unreachable in earlier verification runs (the
+Write-PhaseHeader bug blocked it), and the compact branch -
+which is what every other call site uses - skips the broken
+lines entirely.
+
+The first runtime invocation through the unblocked non-compact
+path immediately surfaced the bug.
+
+**Fixes applied**.
+
+1. Five `(if ...)` -> `$(if ...)` replacements at L8184-L8188.
+2. An 8-line in-source comment explaining the trap, the
+   correct `$(if ...)` form, and the fact that `@(if ...)`
+   (array subexpression) is also valid. Placed immediately
+   before the first formerly-broken line.
+3. Defensive Python grep over the entire script for any
+   other bare `(if ...)`, `(switch ...)`, `(foreach ...)`,
+   or `(while ...)` patterns. Zero further hits.
+4. Smoke-test runtime verification: a short pwsh script that
+   AST-extracts `Show-Pca2023ReadinessSnapshot` and its
+   `Write-Step` / `Write-SubSection` / `_LogLine`
+   dependencies, builds a fake snapshot pscustomobject,
+   and calls the function in non-compact mode. The test
+   now passes; before the fix it threw the same "term 'if'
+   is not recognized" error.
+
+**Discipline note**. The B.23.22 ASCII-only rule was very
+nearly violated in the first iteration of this fix - I had
+quoted the localised Japanese error message in the in-source
+comment for diagnostic clarity. The quality-gate ASCII check
+caught it before commit. The final comment uses an English
+paraphrase ("term 'if' is not recognized as a name of a
+cmdlet, function, script file...") and keeps the file
+ASCII-only.
+
+**Quality gates**. All five pass: BOM + CRLF + ASCII OK
+(12,171 lines), PS Parse OK, `psa.py` 0/0/0, PSScriptAnalyzer
+0 issues, T2-T10 all 6 tests PASS, runtime smoke-test of
+`Show-Pca2023ReadinessSnapshot` in non-compact mode RUNS OK
+with all expected output lines.
+
+**Files changed**.
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  - `Show-Pca2023ReadinessSnapshot` ISO-boot-environment block:
+    five `(if ...)` -> `$(if ...)` rewrites, plus an
+    8-line explanatory comment.
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  - Added section B.23.23 and the matching matrix row.
+
+**Expected next run**.
+
+With Steps 16-18 stacked, the PrepareBuildVerify command should
+now reach P13 FinalReport for the first time and exit cleanly:
+
+1. P01-P09: cached / skipped quickly (P05 robocopy re-runs
+   against the existing extracted tree).
+2. P10: skip-with-warn (Critical health), DONE.
+3. P11: "Output ISO missing", DONE.
+4. P12: snapshot computation + full non-compact rendering
+   (now working), then DONE.
+5. P13: FinalReport with all collected state.
+6. Total elapsed ~5 minutes, exit 0, no interactive prompts.
+
+### r07.0 Step 17 - Fix Write-PhaseHeader positional call that hung P12 in non-compact rendering mode
 
 The Step 16 live verification got further than ever before:
 
