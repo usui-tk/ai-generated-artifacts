@@ -16,7 +16,112 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 14 - Switch P05 ExpandIso to robocopy; fix P09 overlay `-LiteralPath` + wildcard contradiction (this release)
+### r07.0 Step 15 - Fix `$Script:ExtractedMediaPath` and `$Script:WorkRootFull` typos in P10/P12 (this release)
+
+Triggered by a failure observed on the freshly-pushed Step 14
+commit. With the P05 ExpandIso robocopy fix, the script
+finally reached and completed P05 through P09, then hit a
+guard at the entry to P10:
+
+```
+PHASE P05  - ExpandIso  (Plan) start: 18:11:52
+ [+] robocopy exit=1 (0-7 = success)
+ [+] Extracted ISO contents to: D:\UpdateWsi\source\extracted
+ [*]   install.wim idx 1-4: Server 2016 Standard / Datacenter, Core / Desktop
+ [*]   boot.wim idx 1-2: Windows PE / Windows Setup
+P05  DONE     elapsed: 33.24s
+P06  DONE (skipped, -UseBaselineOnly)
+P07  DONE (skipped, EnableInstallWimUpdate=false)
+P08  DONE (skipped, EnableBootWimUpdate=false)
+P09  DONE (sandbox mode, oscdimg run skipped)
+PHASE P10  - ConvertPca2023BootManager (Build) start: 18:12:26
+P10  FAILED   elapsed: 0.01s
+ [X] P10 requires P05 ExpandIso to have produced an extracted
+     media tree. Run -Action All or -Action Build.
+```
+
+The error message was misleading: P05 had in fact run and
+produced the extracted tree at `D:\UpdateWsi\source\extracted`
+(P05 spent 33 seconds copying ~6 GB via robocopy and then
+~1 second enumerating the four install.wim editions and two
+boot.wim indexes). The guard at line 9822 was reading
+`$Script:ExtractedMediaPath`, which is a variable that is
+never assigned anywhere in the script. The actual script-
+scope global that holds the extracted-ISO directory is
+`$Script:ExtractedDir`, initialised at L496 alongside the
+other working-directory globals. Because `$Script:
+ExtractedMediaPath` evaluated to `$null`, the
+`-not $extractedPath` branch in the guard fired
+unconditionally and threw the misleading 'P05 did not run'
+exception.
+
+A defensive audit of the surrounding code surfaced a second
+typo of the same family: `$Script:WorkRootFull` was being
+read at six sites under P10 and P12 but is also never set.
+The correct global is `$Script:WorkRoot`, initialised at
+L486 via `Resolve-RelativeToScript $WorkRoot` (which
+already returns an absolute path, so the `Full` suffix
+that the consumer sites expected was always redundant).
+Both typos likely originate from the same earlier rename
+that updated the definition sites but missed the consumer
+sites.
+
+**Fixes applied**.
+
+Site set 1: `$Script:ExtractedMediaPath` -> `$Script:ExtractedDir`
+at the two reader sites in P10 (`Invoke-BuildPhase10_ConvertPca2023BootManager`)
+and P12 (`Invoke-VerifyPhase12_VerifyPca2023Readiness`). A
+clarifying comment was added above the P10 site noting that
+the script-scope global keeps the `ExtractedDir` name while
+the PCA2023 helper API surface uses `$ExtractedMediaPath`
+as a function-parameter name (the two are not the same
+scope).
+
+Site set 2: `$Script:WorkRootFull` -> `$Script:WorkRoot` at
+all six reader sites (L9836, L9882, L9917, L10121, L10128,
+L10213) under P10 and P12. No assignment site existed for
+`WorkRootFull`, so the rename is purely consumer-side and
+has no behavioural side effect beyond the fix itself.
+
+The broader global-variable audit also surfaced 24 other
+"read but never defined" globals; on inspection these are
+all PowerShell `param()` bindings (script parameters
+auto-populate `$Script:`-scoped variables), one
+defensively-guarded read with a `IsNullOrEmpty` check and
+`$PSCommandPath` fallback (`$Script:ScriptPath`), and one
+comment-only reference (`$Script:ErrorsJsonlPath`). No
+further code change was required for those.
+
+Live verification awaits the operator's re-run. With the
+extracted media tree still on disk from the previous run,
+P05 will re-run robocopy against the same destination
+(robocopy mirroring keeps re-runs incremental and fast),
+then P06-P09 skip or run quickly, and P10 should now
+proceed past the guard. P10 then calls
+`Get-OrEnsurePca2023Snapshot` against the extracted tree
+to compute the PCA2023 readiness snapshot; the outcome
+depends on the source ISO's boot manager signer chain
+(Server 2016 ja-jp EVAL is signed under the PCA2011
+root, so the snapshot Health is expected to be
+something other than Healthy, which is what makes
+the PCA2023 conversion necessary on Server 2016/2019/
+2022 in the first place).
+
+Files changed:
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  - `Invoke-BuildPhase10_ConvertPca2023BootManager`:
+    replaced one `$Script:ExtractedMediaPath` read and three
+    `$Script:WorkRootFull` reads with the correct globals.
+  - `Invoke-VerifyPhase12_VerifyPca2023Readiness`: replaced
+    one `$Script:ExtractedMediaPath` read and three
+    `$Script:WorkRootFull` reads with the correct globals.
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  - Added section B.23.20 and the matching matrix row.
+
+No data files, workflows, or tests are touched.
+
+### r07.0 Step 14 - Switch P05 ExpandIso to robocopy; fix P09 overlay `-LiteralPath` + wildcard contradiction
 
 Triggered by a failure observed on the freshly-pushed Step 13
 commit. With the `Split-Path -LiteralPath -Leaf` parameter-set

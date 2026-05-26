@@ -2563,6 +2563,83 @@ exercised in regression so the bug was latent.
   surgical robocopy swap accomplishes without changing
   any other Copy-Item call sites.
 
+### B.23.20 P10/P12 + PCA2023 path globals: fix `$Script:ExtractedMediaPath` / `$Script:WorkRootFull` typos
+
+Two script-scope globals were referenced in the PCA2023 phases
+(P10 ConvertPca2023BootManager and P12 VerifyPca2023Readiness)
+but never assigned anywhere in the script:
+
+- `$Script:ExtractedMediaPath` - read at the P10 guard (L9822)
+  and the P12 entry (L10099). The script-scope global that
+  actually holds the extracted-ISO root directory is
+  `$Script:ExtractedDir`, initialised at L496 as
+  `Join-Path $Script:SourceDir 'extracted'`. The `MediaPath`
+  spelling came from the PCA2023 helper-API parameter name
+  `$ExtractedMediaPath` (without `Script:`), which is the
+  function-local parameter used inside
+  `Get-IsoBootCertReadiness`, `Build-Pca2023Snapshot`,
+  `Get-OrEnsurePca2023Snapshot`, and
+  `Convert-WimBootToPca2023Signed`. The helper API correctly
+  passes that parameter between functions, but the two outer
+  phase functions were trying to read it from the wrong scope.
+
+- `$Script:WorkRootFull` - read at six sites under P10 (L9836,
+  L9882, L9917) and P12 (L10121, L10128, L10213). The
+  script-scope global is `$Script:WorkRoot`, initialised at
+  L486 via `Resolve-RelativeToScript $WorkRoot` which already
+  produces an absolute path. The `Full` suffix was probably
+  left over from an earlier rename that abandoned the
+  `WorkRootFull` spelling but missed the consumer sites.
+
+Symptom: P10 threw
+`P10 requires P05 ExpandIso to have produced an extracted media
+tree. Run -Action All or -Action Build.` immediately on entry,
+even when P05 ExpandIso had completed successfully and the
+`D:\UpdateWsi\source\extracted` tree existed on disk. The
+guard at L9822-L9824 dereferenced `$Script:ExtractedMediaPath`,
+which evaluates to `$null` because the variable was never
+assigned, so the `-not $extractedPath` branch fired
+unconditionally. The error message was misleading - it blamed
+P05 ("Run -Action All or -Action Build") when P05 had in fact
+run.
+
+**Design decisions**.
+
+- D-1: *Replace `$Script:ExtractedMediaPath` with
+  `$Script:ExtractedDir` at the two consumer sites*. The
+  global has been `$Script:ExtractedDir` since the script-
+  parameter / working-directory initialiser block at L482-L520
+  was added; consistency across P05/P07/P08/P09/P10/P12 is
+  preserved by using the same name everywhere. The local
+  variable name inside the function (`$extractedPath`) and
+  the parameter passed downstream into the helper API
+  (`-ExtractedMediaPath $extractedPath`) both stay as written.
+- D-2: *Rename `$Script:WorkRootFull` to `$Script:WorkRoot`
+  at all six sites*. `$Script:WorkRoot` is the absolute-path
+  global produced by `Resolve-RelativeToScript`, so it
+  already carries the "Full" semantic that the `Full` suffix
+  was meant to advertise. Keeping a single name eliminates
+  the temptation to introduce future divergence (a separate
+  `$Script:WorkRootFull` later "for clarity" would just
+  recreate the same drift).
+- D-3: *Add a clarifying in-source comment at L9822*
+  describing the scope rename (`Script:ExtractedDir` global
+  vs. `$ExtractedMediaPath` helper-API parameter) and a
+  cross-reference at L10099 pointing back to it. The comment
+  is the cheapest defence against the same typo recurring on
+  a future cleanup pass.
+- D-4: *Skip a broader cleanup of the global-variable
+  surface*. A global audit of `$Script:` reads vs. assignments
+  surfaced 26 "read but never defined" globals, of which 24
+  are PowerShell `param()` bindings (script parameters
+  auto-populate `$Script:`-scoped variables when the .ps1
+  is invoked as a script), one (`$Script:ScriptPath`) is
+  defensively read with an `IsNullOrEmpty` guard and a
+  fallback to `$PSCommandPath`, and one
+  (`$Script:ErrorsJsonlPath`) appears only in a comment.
+  Only the two typo families documented above represent
+  real bugs.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2586,6 +2663,7 @@ exercised in regression so the bug was latent.
 | B.23.17          | (new) — refines §A.4 P02 ResolveInputs | P02 + P03 patch seeding: derive `LocalPath` from `FileName` and guard empty `Sha256` from `ExpectedHashes` (r07.0 Step 12) |
 | B.23.18          | (new) — refines §A.4 P04 FetchAssets    | Replace 7 `Split-Path -LiteralPath ... -Leaf` / `-LeafBase` sites with `[System.IO.Path]::GetFileName` / `GetFileNameWithoutExtension`; documents the latent parameter-set bug (r07.0 Step 13) |
 | B.23.19          | (new) — refines §A.4 P05 ExpandIso       | Switch P05 drive-root copy to robocopy; fix P09 Dynamic Update overlay wildcard to use `-Path` (r07.0 Step 14) |
+| B.23.20          | (new) — refines §A.4 P10/P12 PCA2023     | Fix `$Script:ExtractedMediaPath` and `$Script:WorkRootFull` typos in P10/P12; 8 sites total (r07.0 Step 15) |
 
 ---
 

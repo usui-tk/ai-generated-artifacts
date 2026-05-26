@@ -9818,8 +9818,13 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             return
         }
 
-        # The extracted media path is set up by P05 ExpandIso
-        $extractedPath = if ($Script:ExtractedMediaPath) { $Script:ExtractedMediaPath } else { $null }
+        # The extracted media path is set up by P05 ExpandIso into
+        # $Script:ExtractedDir (initialised at script-scope, around
+        # L496: Join-Path $Script:SourceDir 'extracted'). The variable
+        # rename to $ExtractedMediaPath is only inside the PCA2023
+        # helper API surface; the script-scope global keeps the
+        # original "ExtractedDir" name.
+        $extractedPath = if ($Script:ExtractedDir) { $Script:ExtractedDir } else { $null }
         if (-not $extractedPath -or -not (Test-Path -LiteralPath $extractedPath)) {
             throw 'P10 requires P05 ExpandIso to have produced an extracted media tree. Run -Action All or -Action Build.'
         }
@@ -9828,7 +9833,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         Set-DebugStep -Step 'preflight-readiness'
         $pre = Get-OrEnsurePca2023Snapshot `
             -ExtractedMediaPath $extractedPath `
-            -WorkRoot $Script:WorkRootFull `
+            -WorkRoot $Script:WorkRoot `
             -OsKey $osKey
         if ($pre.Health -eq 'Critical') {
             $reasonText = ($pre.Reasons | ForEach-Object { "  - $_" }) -join "`n"
@@ -9874,7 +9879,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             Write-Step 'Using internal Convert-WimBootToPca2023Signed (PSA-clean implementation).'
             $convResult = Convert-WimBootToPca2023Signed `
                 -ExtractedMediaPath $extractedPath `
-                -WorkRoot $Script:WorkRootFull
+                -WorkRoot $Script:WorkRoot
             if (-not $convResult.Success) {
                 throw ('Convert-WimBootToPca2023Signed failed: {0}' -f $convResult.ErrorMessage)
             }
@@ -9909,7 +9914,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         Set-DebugStep -Step 'post-flight-snapshot'
         $post = Get-OrEnsurePca2023Snapshot `
             -ExtractedMediaPath $extractedPath `
-            -WorkRoot $Script:WorkRootFull `
+            -WorkRoot $Script:WorkRoot `
             -OsKey $osKey `
             -Force
         Show-Pca2023ReadinessSnapshot -Snapshot $post -Compact
@@ -10096,7 +10101,9 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
     try {
         Write-SubSection 'PCA2023 boot manager readiness inspection'
 
-        $extractedPath = if ($Script:ExtractedMediaPath) { $Script:ExtractedMediaPath } else { $null }
+        # See note at L9822 (P10): the script-scope global is
+        # $Script:ExtractedDir; the helper API uses $ExtractedMediaPath.
+        $extractedPath = if ($Script:ExtractedDir) { $Script:ExtractedDir } else { $null }
         if (-not $extractedPath -or -not (Test-Path -LiteralPath $extractedPath)) {
             Write-Step 'P12 skipped: no extracted media available (P05 did not run, or working tree was cleaned).'
             New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.skipped') -Force | Out-Null
@@ -10111,14 +10118,14 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         # want the freshest view.
         $snapshot = Get-OrEnsurePca2023Snapshot `
             -ExtractedMediaPath $extractedPath `
-            -WorkRoot $Script:WorkRootFull `
+            -WorkRoot $Script:WorkRoot `
             -OsKey $osKey `
             -Force
         Show-Pca2023ReadinessSnapshot -Snapshot $snapshot
 
         # ---- Emit JSON ----
         Set-DebugStep -Step 'emit-json'
-        $pcaDir = Join-Path $Script:WorkRootFull 'pca2023'
+        $pcaDir = Join-Path $Script:WorkRoot 'pca2023'
         if (-not (Test-Path -LiteralPath $pcaDir)) {
             New-Item -ItemType Directory -Path $pcaDir -Force | Out-Null
         }
@@ -10203,7 +10210,7 @@ function Invoke-ReportPhase13_FinalReport {
             Set-DebugStep -Step 'pca2023-summary'
             Write-SubSection 'PCA2023 Readiness Summary'
             Show-Pca2023ReadinessSnapshot -Snapshot $Script:Pca2023Snapshot -Compact
-            $pcaDir = Join-Path $Script:WorkRootFull 'pca2023'
+            $pcaDir = Join-Path $Script:WorkRoot 'pca2023'
             $jsonPath = Join-Path $pcaDir 'pca2023_readiness.json'
             $mdPath   = Join-Path $pcaDir 'pca2023_readiness.md'
             if (Test-Path -LiteralPath $jsonPath) {
