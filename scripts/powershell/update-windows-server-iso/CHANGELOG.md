@@ -16,7 +16,91 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 10 - Refresh Eval ISO URLs for all 4 supported Server OSes; record fwlink (metalink) alongside direct CDN URL (this release)
+### r07.0 Step 11 - Replace flaky `microsoft/psscriptanalyzer-action` with inline PSScriptAnalyzer+ConvertToSARIF (CI hardening) (this release)
+
+Triggered by a stage2 Windows-checks workflow failure observed on
+the freshly-pushed Step 10 commit:
+
+```
+[PSSA-pwsh51] Run microsoft/psscriptanalyzer-action
+  Install-Package: No match was found for the specified search criteria
+                   and module name 'ConvertToSARIF'.
+                   Try Get-PSRepository to see all available registered
+                   module repositories.
+Error: Process completed with exit code 1.
+```
+
+The PowerShell script under analysis was untouched in Step 10 (the
+commit was a data-only refresh of `Iso.Url` + `Iso.FwlinkUrl`), so
+the failure was unrelated to the Step 10 content. Investigation
+showed the failure mode is in the `microsoft/psscriptanalyzer-action`
+Marketplace action itself, which has been observed failing
+intermittently against PowerShell Gallery, including on Microsoft's
+own CI of that action (workflow run 21604137629 on 2026-02-02).
+The repository's README is also unmodified from the GitHub
+template, which is a strong signal that the action is in a
+semi-maintained state.
+
+The root cause of the install failure is well-understood:
+`Install-Module -Name ConvertToSARIF -Force` on a windows-latest
+runner sometimes hits a NuGet provider or PSGallery registration
+state that returns "no match" rather than a clear connectivity
+error. Re-running the same workflow shortly after typically
+succeeds, but that fragility is not acceptable for a release-
+gating CI step.
+
+This step replaces the action call in BOTH the stage1 (Linux
+pwsh 7) and stage2 (Windows PS 5.1) workflows with an inline
+two-step pipeline:
+
+1. **Install step** - explicit TLS 1.2 enforcement, NuGet provider
+   preflight (install `2.8.5.201+` if missing), PSGallery registration
+   + trust, and a small `Install-ModuleWithRetry` helper that
+   retries each `Install-Module` up to 3 times with exponential
+   backoff. The helper skips installation entirely when
+   `Get-Module -ListAvailable` already finds the module, which
+   keeps re-runs fast.
+
+2. **Run step** - `Import-Module ConvertToSARIF -Force`, then
+   `Invoke-ScriptAnalyzer -Path ... -Settings ... | ConvertTo-SARIF
+   -FilePath pssa.sarif`. Identical output shape to what the
+   removed action produced, so the downstream
+   `github/codeql-action/upload-sarif@v4` step and the SARIF text
+   log generator both continue to work without changes.
+
+Why inline instead of pinning to a maintained alternative
+(`PSModule/Invoke-ScriptAnalyzer@v4` etc.): the analysis is four
+real PowerShell commands (install + import + analyze + convert).
+Inlining them is cheaper than depending on any third-party action
+for that surface area, and lets us add the TLS / NuGet / retry
+guards that the original action lacked. The Linux stage1 was not
+yet exhibiting the failure but is updated to the same pattern for
+defense in depth - the same PSGallery flake could hit any runner
+at any time.
+
+Files changed:
+
+- `.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml`
+  - Replaced the `microsoft/psscriptanalyzer-action@v1.1` step
+    with two inline steps (install with retry, then analyze).
+    The `if:` scope guard
+    (`scope == 'all' || scope == 'pssa-only' || ...`)
+    is preserved on both new steps.
+- `.github/workflows/scripts__powershell__update-windows-server-iso__stage2__windows.yml`
+  - Same replacement applied to the Windows-checks stage.
+
+No PowerShell script, SPEC, README, data, or test files are
+touched in this step. CI workflow changes are policy-recorded
+here in CHANGELOG.md per the repository-wide invariant noted at
+the top of this file (CI changes do not get their own commit
+message in `.github/workflows/*` history alone).
+
+Live verification awaits the operator's commit + push: the
+stage1 run should complete with the new inline install logs
+visible, and the chained stage2 should run to completion
+without the `ConvertToSARIF not found` failure.
+
+### r07.0 Step 10 - Refresh Eval ISO URLs for all 4 supported Server OSes; record fwlink (metalink) alongside direct CDN URL
 
 Pure data refresh triggered by an HTTP 400 Bad Request from
 P04 FetchAssets when downloading the Server 2016 ja-jp ISO:
