@@ -15,6 +15,127 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-05-26
+
+### Added — Three new rules catching the latent-bug classes that escaped
+gate enforcement during the r07.0 cycle of the `update-windows-server-iso`
+PowerShell pipeline
+
+The r07.0 cycle of the sister script
+[`scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`](../../powershell/update-windows-server-iso/Update-WindowsServerIso.ps1)
+took 10 sequential bug-fix iterations (Steps 10-19) to reach
+dry-run completion. Six of those iterations addressed bugs that
+**passed every existing static-analysis gate** (`PS Parse`,
+`psa.py`, `PSScriptAnalyzer`) but failed at runtime — and in
+three of those cases the underlying defect class was sharp
+enough that a dedicated static rule could have caught it before
+the bug ever shipped. v4.1.0 productionises those three checks
+as built-in rules.
+
+**`PSA1004` — Bare `(if/switch/foreach/while/...)` used as
+expression (error, default ON).** PowerShell distinguishes
+statements from expressions. A bare `(if ($x) { 'a' } else
+{ 'b' })` is parsed as a *command invocation* named `if` —
+which fails at runtime with "The term 'if' is not recognized
+as a name of a cmdlet, function, script file...". The parser
+accepts it as valid syntax, so neither
+`[System.Management.Automation.Language.Parser]::ParseFile`
+nor PSScriptAnalyzer flagged it. The correct form is `$(if ...)`
+(subexpression) or `@(if ...)` (array subexpression). This
+was the proximate cause of the r07.0 Step 18 defect in
+`Show-Pca2023ReadinessSnapshot`, where 5 lines used the bare
+form and the function hung the script with a runtime "term
+'if' not recognized" exception once the code path became
+reachable.
+
+**`PSA2012` — Positional call provides fewer args than the
+target function has `[Parameter(Mandatory)]` parameters
+(error, default ON).** A function declared with multiple
+`[Parameter(Mandatory)]` parameters, called positionally with
+fewer arguments, does not fail — PowerShell prompts the user
+interactively for each missing value. In CI pipelines or
+unattended sessions, the script hangs forever on stdin. The
+trap is that the call site looks fine: `Write-PhaseHeader 'P12'`
+is syntactically valid. This was the proximate cause of the
+r07.0 Step 17 defect: `Show-Pca2023ReadinessSnapshot` called
+`Write-PhaseHeader 'Pca2023 readiness (P12)'` with one
+positional argument; the target function declared three
+Mandatory parameters; the script hung on `Name:` prompt; the
+user had to Ctrl-C.
+
+Heuristic: build a function table of `{name: [mandatory_params, ...]}`
+from in-file `function ... { param(...) }` blocks (>=2
+Mandatory required to enter the candidate set), then for each
+call site count `positional + named_matching_mandatory` and
+fire when the count is below `len(mandatory)`. Argument
+counting uses the original text (string literals occupy
+positional slots) rather than the strings-stripped clean.
+Excludes bare-name references, pipeline-arg calls, and LHS of
+assignments.
+
+**`PSA2013` — `$Script:Foo` is read but never assigned
+anywhere in the file (error, default ON).** PowerShell
+silently evaluates an unassigned `$Script:Foo` to `$null`,
+hiding typo bugs in script-scope variable names. PSA2001
+(generic undefined-variable) only checks within function
+scopes; it does not see the cross-function flow of
+`$Script:` globals. The defect manifests downstream as
+bizarre null-related errors, usually far from the typo.
+This was the proximate cause of the r07.0 Step 15 defect:
+two typo'd globals (`$Script:ExtractedMediaPath`,
+`$Script:WorkRootFull`) hid in plain sight across 8 call
+sites; the correct names (`$Script:ExtractedDir`,
+`$Script:WorkRoot`) existed; the reads silently returned
+`$null` and downstream defensive checks misdiagnosed the
+state as "P05 did not run".
+
+Algorithm: two-pass on the cleaned text. Pass 1 collects every
+`$Script:Name = ...` assignment site. Pass 2 walks every
+`$Script:Name` read site and reports unless the name is
+assigned somewhere in the file, OR appears as a top-level
+script parameter (auto-populated by PowerShell from
+`param(...)` declarations), OR is in the well-known auto-vars
+allowlist (`MyInvocation`, `PSScriptRoot`, etc.). Reports cap
+at 5 hits per distinct name to avoid flooding output on a
+typo with many call sites.
+
+### Test suite
+
+- Added 21 new test cases (9 positive, 9 negative, 3 edge) in
+  `test_psa_rules.py` covering all three new rules. The Step 15 / 17 / 18
+  failure sites from the `update-windows-server-iso` pipeline are
+  included verbatim as positive cases, so any future regression of
+  these rule definitions will be caught immediately.
+- Full suite: 245 → 266 tests, all passing. The `--self-check`
+  guard (SPEC.md ↔ RULES synchronisation) is satisfied by the
+  parallel SPEC.md update in this release.
+
+### Specification
+
+- Added `SPEC.md §4.3a` (PSA1004), `§4.9f` (PSA2012), `§4.9g`
+  (PSA2013) with detection algorithm, rationale, real-world
+  defect citation, suggested-fix examples, false-positive
+  defenses, limitations, and inline-suppression syntax.
+- Updated `SPEC.md` Appendix A rule severity matrix.
+
+### Rule count
+
+`RULES` registry: 46 → 49 entries (PSA1xxx ×4, PSA2xxx ×13,
+PSA3xxx ×6, PSA4xxx ×4, PSA5xxx ×4, PSA6xxx ×8, PSA7xxx ×2,
+PSA8xxx ×1, PSA9xxx ×2, PSAPxxxx ×5).
+
+### Version policy
+
+This is a **minor** version bump per SemVer: three new rules are
+added as **default-on**, which is a behavioural change for
+existing scans. Consumers who pin to v4.0.x will see no
+behavioural shift; consumers who track the latest version will
+see new error-severity findings on previously-passing files
+that contain any of the three defect classes. If the new
+findings are not actionable, individual rules can be disabled
+via `.psa.config.json` (`{"disabled": ["PSA1004"]}`) or
+inline suppression (`# psa-disable-line PSA2012 -- <reason>`).
+
 ### Documentation
 
 - **Rule-count text alignment — hybrid update across stale

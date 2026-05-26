@@ -427,6 +427,82 @@ of `{` and `}` in the cleaned text. Report if counts differ.
 
 **Detection**: Same as PSA1001 but for `[` / `]`.
 
+### 4.3a PSA1004 — Bare statement-as-expression
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v4.1.0
+
+**Detection**: After string/comment stripping (§11), the rule walks
+the cleaned text line by line and looks for the pattern
+``(<keyword> (`` where the leading ``(`` is **not** preceded by
+``$`` (subexpression operator), ``@`` (array subexpression operator),
+or backtick (escape). The keywords matched are ``if``, ``switch``,
+``foreach``, ``while``, ``for``, ``do``, ``try`` — PowerShell's
+statement-introducing keywords that legally begin with ``(``.
+
+**Rationale**: PowerShell distinguishes between *statements* and
+*expressions*. The statement ``if (...) { ... }`` produces a value,
+but that value can only be captured if the statement is wrapped in
+the subexpression operator ``$(...)`` or its array form ``@(...)``.
+A bare parenthesised ``(if ($x) { 'a' } else { 'b' })`` is parsed
+as a *command invocation* named ``if`` — which then fails at runtime
+with the localised error:
+
+```
+The term 'if' is not recognized as a name of a cmdlet, function,
+script file, or executable program.
+```
+
+The trap is that the parser accepts both forms as syntactically
+valid. ``if`` is not a reserved word in command-name position, so
+neither ``[System.Management.Automation.Language.Parser]::ParseFile``
+nor PSScriptAnalyzer flags it. The error only surfaces at runtime
+when the call site actually executes, which can be months after the
+offending edit if the code path is conditional.
+
+This was the proximate cause of the r07.0 Step 18 defect in
+``Show-Pca2023ReadinessSnapshot`` (update-windows-server-iso
+pipeline). Five lines used the bare form:
+
+```powershell
+'EFI_EX staging directory : {0}' -f (if ($null -eq $emb.HasEfiExDir) { 'n/a' }
+                                     elseif ($emb.HasEfiExDir)      { 'present' }
+                                     else                           { 'NOT present' })
+```
+
+The bug was unreachable through earlier P12 runs because the
+non-compact rendering path was blocked by an unrelated defect (the
+Write-PhaseHeader Mandatory-parameter trap covered by PSA2012). Once
+Step 17 unblocked the path, the first runtime execution of P12
+immediately surfaced the failure.
+
+**Suggested fix**: Wrap the statement in ``$(...)``:
+
+```powershell
+'EFI_EX staging directory : {0}' -f $(if ($null -eq $emb.HasEfiExDir) { 'n/a' }
+                                      elseif ($emb.HasEfiExDir)      { 'present' }
+                                      else                           { 'NOT present' })
+```
+
+For statements whose result is naturally an array, use ``@(...)``:
+
+```powershell
+$paths = @(if ($includeWorkRoot) { $Script:WorkRoot } else { @() })
+```
+
+**False-positive defenses**:
+
+- ``$(if ...)`` — the leading ``$`` excludes the look-behind.
+- ``@(if ...)`` — the leading ``@`` excludes the look-behind.
+- Identifier-like spellings (``$myiffy``, ``$switching``) — the
+  ``\b`` boundary after the keyword guards against this.
+- Strings and comments — already stripped by the analyzer prelude.
+
+**Inline suppression**: ``# psa-disable-line PSA1004 -- <reason>``
+on the offending line. The rule fires on a real runtime defect; use
+sparingly.
+
 ### 4.4 PSA2001 — Undefined variable reference
 
 - **Severity**: Error
@@ -820,6 +896,195 @@ runtime defect.
   parameter-binder bug, so ``-Path`` (or the .NET method) is
   preferred. The two rules are not contradictory; they apply to
   different cmdlets with different parameter-set ambiguities.
+
+### 4.9f PSA2012 — Positional call with insufficient args to a Mandatory-param function
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v4.1.0
+
+**Detection**: Two-pass analysis on the cleaned text:
+
+1. **Function-table build.** For each ``function Name { ... }`` block
+   in the file, extract the body's first ``param(...)`` declaration,
+   then enumerate ``[Parameter(Mandatory)] [type] $Name`` occurrences.
+   Build a mapping ``{function_name_lower: [mandatory_param_names_lower, ...]}``.
+   Only functions with ``len(mandatory_params) >= 2`` enter the
+   candidate set; single-Mandatory functions are tolerated because
+   their positional-call ergonomics are familiar.
+2. **Call-site scan.** Walk every non-definition line. For each
+   candidate function name found at a word boundary that is **not**
+   preceded by ``-`` (parameter prefix), ``.`` (member access), or
+   ``:`` (scope qualifier), count the remaining tokens on the line
+   as positional arguments and named-parameter pairs. Argument
+   counting uses the ORIGINAL text (string literals occupy positional
+   slots) rather than the strings-stripped text. If the call's
+   ``positional + named_matching_mandatory < len(mandatory)``, fire.
+
+The rule explicitly excludes:
+
+- Bare-name references (``$ref = Get-Command Foo``).
+- Pipeline-arg calls (``$x | Foo``); the count is intentionally on
+  stdin.
+- Calls on the LHS of an assignment (uncommon in PS but defensive).
+
+**Rationale**: A PowerShell function declared with multiple
+``[Parameter(Mandatory)]`` parameters, when called positionally with
+fewer arguments, does not fail immediately. Instead PowerShell
+prompts the user interactively for each missing value:
+
+```
+cmdlet Write-PhaseHeader at command pipeline position 1
+Supply values for the following parameters:
+Name:
+_
+```
+
+In interactive shells this is just annoying. In CI pipelines, batch
+scripts, or unattended sessions, the script **hangs forever**
+waiting on stdin. The trap is that the call site looks fine at a
+glance — ``Write-PhaseHeader 'P12'`` is syntactically valid, and no
+static analyzer flagged it.
+
+This was the proximate cause of the r07.0 Step 17 defect in
+``Show-Pca2023ReadinessSnapshot`` (update-windows-server-iso
+pipeline). The function called:
+
+```powershell
+Write-PhaseHeader 'Pca2023 readiness (P12)'
+```
+
+with one positional argument; the target function had three
+``[Parameter(Mandatory)]`` parameters (``-Id``, ``-Name``,
+``-Group``). PowerShell prompted for ``-Name`` and the user had to
+Ctrl-C to recover. The fix in the original PS1 was to switch to
+``Write-SubSection 'PCA2023 readiness detail'`` — semantically the
+correct idiom (the function was being called *during* a phase, not
+as the start of one) — but the analyzer rule documented here
+catches the underlying mistake before it ships.
+
+**Suggested fix**: Use named arguments for every Mandatory
+parameter:
+
+```powershell
+Write-PhaseHeader -Id 'P12' -Name 'Verify' -Group 'Verify'
+```
+
+If the function is overloaded for positional callers as a
+convenience, prefer providing **all** positional arguments rather
+than relying on PowerShell's prompt behaviour to fill in the rest:
+
+```powershell
+Write-PhaseHeader 'P12' 'Verify' 'Verify'
+```
+
+**Limitations**:
+
+- Cross-file: PSA2012 is currently file-local. A call site that
+  invokes a function defined in another file is invisible to the
+  rule. (This is consistent with PSA2011's file-local design.)
+- Splatting: ``@params``-style splatting is not analyzed.
+- Dynamic parameter sets: ``[Parameter(ParameterSetName='X', Mandatory)]``
+  introduces conditional Mandatory semantics; the rule treats every
+  Mandatory annotation as global, which can over-fire on
+  multi-parameter-set functions. Use inline suppression in that case.
+
+**Inline suppression**: ``# psa-disable-line PSA2012 -- <reason>``
+on the call line.
+
+### 4.9g PSA2013 — `$Script:Foo` read but never assigned
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v4.1.0
+
+**Detection**: Two-pass analysis on the cleaned text:
+
+1. **Assignment pass.** Collect every ``$Script:Name = ...``
+   occurrence in the file (where ``=`` is followed by something
+   other than ``=``). Stores names as a case-insensitive set.
+2. **Read pass.** Walk every line. For each ``$Script:Name``
+   reference (case-insensitive) where the following token is **not**
+   ``=`` (assignment LHS), report unless the name appears in the
+   assignment set, OR matches a top-level script parameter (auto-
+   populated by PowerShell), OR is in the well-known auto-vars
+   allowlist (``$Script:MyInvocation``, ``$Script:PSScriptRoot``,
+   ``$Script:PSCommandPath``, ``$Script:PSCmdlet``,
+   ``$Script:PSBoundParameters``, ``$Script:args``,
+   ``$Script:input``, ``$Script:LASTEXITCODE``, ``$Script:true``,
+   ``$Script:false``, ``$Script:null``, plus the script-identifier
+   convention vars covered by PSAP0002).
+
+To avoid flooding output on a global typo with many call sites, the
+rule emits at most 5 hits per distinct typo'd name.
+
+**Rationale**: PowerShell silently evaluates an unassigned
+``$Script:Foo`` to ``$null``. This often hides typo bugs in
+script-scope variable names because:
+
+- There is no "undefined variable" error at runtime — PowerShell
+  treats the read as a deliberate query for "any script-scope global
+  named ``Foo``", and ``$null`` is the documented answer when none
+  exists.
+- PSA2001 (the generic undefined-variable rule) only checks within
+  function scopes; it cannot see the cross-function flow of
+  ``$Script:`` globals.
+- The defect manifests downstream as bizarre null-related errors,
+  usually far from the typo. A common symptom is a defensive check
+  ``if (-not $extractedPath) { throw 'P05 did not run' }`` firing
+  even though P05 ran fine — because ``$extractedPath`` was assigned
+  from a typo'd ``$Script:`` read that silently returned ``$null``.
+
+This was the proximate cause of the r07.0 Step 15 defect in
+``Invoke-BuildPhase10_ConvertPca2023BootManager`` and
+``Invoke-VerifyPhase12_VerifyPca2023Readiness``
+(update-windows-server-iso pipeline). Two typo'd globals had
+hidden in plain sight across 8 call sites:
+
+- ``$Script:ExtractedMediaPath`` (correct: ``$Script:ExtractedDir``)
+- ``$Script:WorkRootFull`` (correct: ``$Script:WorkRoot``)
+
+A defensive ``check_undefined_globals.py`` one-off was authored
+to find the bugs. PSA2013 productionises that check as a built-in
+rule, so the same class of defect is caught at gate time on every
+file.
+
+**Suggested fix**: Either correct the typo to match the actual
+assignment, or add the missing initialisation. The error message
+includes the offending name to make grep-driven correction easy.
+
+**False-positive defenses**:
+
+- Script parameters: a top-level ``param([string]$OsVersion)``
+  auto-populates ``$Script:OsVersion``. The rule detects this from
+  the first ``param(...)`` block before any ``function`` keyword.
+- Well-known auto-vars: the allowlist above prevents flagging on
+  ``$Script:MyInvocation`` and friends. The list is conservative;
+  add to ``_PSA2013_KNOWN_AUTO_SCRIPT_VARS`` if you find a missing
+  PowerShell-built-in that fires here.
+- Cross-function assignments: an assignment in *any* function body
+  satisfies the rule for reads in *any other* function body. The
+  pass scans the entire file before any read is evaluated.
+- Defensively-read globals with ``IsNullOrEmpty`` guards (e.g.
+  ``if (-not [string]::IsNullOrEmpty($Script:ScriptPath)) { ... }``):
+  these are intentional null-tolerant reads; the allowlist includes
+  ``scriptpath`` and ``errorsjsonlpath`` for this reason. Extend the
+  allowlist as new defensive patterns emerge.
+
+**Limitations**:
+
+- Cross-file: PSA2013 is file-local. A ``$Script:Foo`` assigned in
+  ``init.ps1`` and read in ``other.ps1`` will fire if both are not
+  scanned together. (This is correct from a PowerShell semantics
+  perspective: each ``.ps1`` is a separate script scope when
+  invoked individually.)
+- Module exports: ``Import-Module`` does not propagate ``$Script:``
+  globals to importers, so the file-local model is sound here.
+
+**Inline suppression**: ``# psa-disable-line PSA2013 -- <reason>``
+on the read line.
+
+
 
 ### 4.10 PSA3001 — `Start-Process -ArgumentList`
 
@@ -2423,6 +2688,7 @@ governance file; updates to the workflow are recorded in
 | PSA1001 | error | ✅ |
 | PSA1002 | error | ✅ |
 | PSA1003 | error | ✅ |
+| PSA1004 | error | ✅ |
 | PSA2001 | error | ✅ |
 | PSA2002 | warning | ✅ |
 | PSA2003 | warning | ✅ |
@@ -2434,6 +2700,8 @@ governance file; updates to the workflow are recorded in
 | PSA2009 | warning | ✅ |
 | PSA2010 | error | ✅ |
 | PSA2011 | error | ✅ |
+| PSA2012 | error | ✅ |
+| PSA2013 | error | ✅ |
 | PSA3001 | warning | ✅ |
 | PSA3002 | warning | ✅ |
 | PSA3003 | warning | ✅ |

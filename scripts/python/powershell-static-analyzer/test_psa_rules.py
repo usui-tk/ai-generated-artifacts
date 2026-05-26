@@ -518,6 +518,187 @@ t('PSA2011 inline-suppress: # psa-disable-line PSA2011 on the call line',
 
 
 # ---------------------------------------------------------------------------
+# PSA1004 — Bare (if/switch/...) used as expression (error, default ON, new in 4.1.0)
+# ---------------------------------------------------------------------------
+# Real-world origin: r07.0 Step 18 of the update-windows-server-iso pipeline.
+# Five lines in Show-Pca2023ReadinessSnapshot used the bare `(if ...)` form
+# which PowerShell parses as a command call to 'if' (no such command). The
+# parser accepts it as syntactically valid, so PS Parse / PSScriptAnalyzer
+# do not flag it; only runtime execution surfaces the failure.
+
+t('PSA1004 positive: bare (if ...) inside -f operand',
+  'PSA1004',
+  "Write-Host ('Value: {0}' -f (if ($x) { 'a' } else { 'b' }))\n",
+  1)
+
+t('PSA1004 positive: bare (switch ...) used as expression',
+  'PSA1004',
+  "$result = (switch ($x) { 1 { 'one' } 2 { 'two' } })\n",
+  1)
+
+t('PSA1004 positive: bare (foreach ...) used as expression',
+  'PSA1004',
+  "$results = (foreach ($i in 1..10) { $i * 2 })\n",
+  1)
+
+t('PSA1004 negative: $(if ...) subexpression form is correct',
+  'PSA1004',
+  "Write-Host ('Value: {0}' -f $(if ($x) { 'a' } else { 'b' }))\n",
+  0)
+
+t('PSA1004 negative: @(if ...) array subexpression is also correct',
+  'PSA1004',
+  "$arr = @(if ($x) { 1, 2, 3 } else { @() })\n",
+  0)
+
+t('PSA1004 negative: top-level if statement (not a parenthesised expression)',
+  'PSA1004',
+  "if ($x) { 'yes' } else { 'no' }\n",
+  0)
+
+t('PSA1004 edge: false-positive defense for bare (if ...) inside a string literal',
+  'PSA1004',
+  '$msg = "this string contains (if no problem here) inside it"\n',
+  0)
+
+t('PSA1004 edge: false-positive defense for `if in identifier-like spelling',
+  'PSA1004',
+  '$myiffy = 1\n',
+  0)
+
+
+# ---------------------------------------------------------------------------
+# PSA2012 — Positional call to function with insufficient args (error, default ON, new in 4.1.0)
+# ---------------------------------------------------------------------------
+# Real-world origin: r07.0 Step 17 of the update-windows-server-iso pipeline.
+# Show-Pca2023ReadinessSnapshot called Write-PhaseHeader 'name' (one positional
+# arg) when the target function had three [Parameter(Mandatory)] declarations.
+# PowerShell prompted interactively for the missing -Name, hanging the run.
+
+_PSA2012_WPH_DEF = (
+    "function Write-PhaseHeader {\n"
+    "    param(\n"
+    "        [Parameter(Mandatory)] [string]$Id,\n"
+    "        [Parameter(Mandatory)] [string]$Name,\n"
+    "        [Parameter(Mandatory)] [string]$Group\n"
+    "    )\n"
+    "    Write-Host \"$Id\"\n"
+    "}\n"
+)
+
+t('PSA2012 positive: 1 positional arg, 3-Mandatory target (the Step 17 site)',
+  'PSA2012',
+  _PSA2012_WPH_DEF + "Write-PhaseHeader 'P12'\n",
+  1)
+
+t('PSA2012 positive: 2 positional args, 3-Mandatory target',
+  'PSA2012',
+  _PSA2012_WPH_DEF + "Write-PhaseHeader 'P12' 'Verify'\n",
+  1)
+
+t('PSA2012 negative: all 3 positional args provided',
+  'PSA2012',
+  _PSA2012_WPH_DEF + "Write-PhaseHeader 'P12' 'Verify' 'Report'\n",
+  0)
+
+t('PSA2012 negative: all 3 named args provided',
+  'PSA2012',
+  _PSA2012_WPH_DEF
+  + "Write-PhaseHeader -Id 'P12' -Name 'Verify' -Group 'Report'\n",
+  0)
+
+t('PSA2012 negative: function has only 1 Mandatory (single-mandatory tolerated)',
+  'PSA2012',
+  "function Foo {\n"
+  "    param(\n"
+  "        [Parameter(Mandatory)] [string]$X\n"
+  "    )\n"
+  "}\n"
+  "Foo  # bare-name reference\n",
+  0)
+
+t('PSA2012 edge: bare-name reference (function pointer / doc mention)',
+  'PSA2012',
+  _PSA2012_WPH_DEF + "$ref = Get-Command Write-PhaseHeader\n",
+  0)
+
+t('PSA2012 edge: pipeline-arg call (count is intentionally on stdin)',
+  'PSA2012',
+  _PSA2012_WPH_DEF + "$x | Write-PhaseHeader\n",
+  0)
+
+t('PSA2012 edge: backtick-continued multiline call (all 3 named args)',
+  'PSA2012',
+  _PSA2012_WPH_DEF
+  + "Write-PhaseHeader `\n"
+  + "    -Id 'P12' `\n"
+  + "    -Name 'Verify' `\n"
+  + "    -Group 'Report'\n",
+  0)
+
+t('PSA2012 edge: splatting @hashtable satisfies Mandatory params',
+  'PSA2012',
+  _PSA2012_WPH_DEF
+  + "$params = @{ Id = 'P12'; Name = 'Verify'; Group = 'Report' }\n"
+  + "Write-PhaseHeader @params\n",
+  0)
+
+t('PSA2012 edge: splatting + one positional (still safe via splat)',
+  'PSA2012',
+  _PSA2012_WPH_DEF
+  + "$rest = @{ Name = 'Verify'; Group = 'Report' }\n"
+  + "Write-PhaseHeader 'P12' @rest\n",
+  0)
+
+
+# ---------------------------------------------------------------------------
+# PSA2013 — $Script: read but never assigned (error, default ON, new in 4.1.0)
+# ---------------------------------------------------------------------------
+# Real-world origin: r07.0 Step 15 of the update-windows-server-iso pipeline.
+# Two $Script: typo variants were silently evaluating to $null: the symptom
+# was a misleading throw in P10. The correct names existed; the typos did not.
+
+t('PSA2013 positive: $Script:WorkRootFull read but never assigned',
+  'PSA2013',
+  "$Script:WorkRoot = 'C:\\Work'\n"
+  "function Foo {\n"
+  "    $a = $Script:WorkRootFull\n"
+  "}\n",
+  1)
+
+t('PSA2013 positive: $Script:ExtractedMediaPath typo (the Step 15 site)',
+  'PSA2013',
+  "$Script:ExtractedDir = Join-Path 'C:' 'extracted'\n"
+  "function Bar {\n"
+  "    $a = $Script:ExtractedMediaPath\n"
+  "}\n",
+  1)
+
+t('PSA2013 negative: $Script:Foo correctly assigned at top level',
+  'PSA2013',
+  "$Script:Foo = 1\n"
+  "function Foo { $a = $Script:Foo }\n",
+  0)
+
+t('PSA2013 negative: $Script:Bar assigned inside another function',
+  'PSA2013',
+  "function Init { $Script:Bar = 42 }\n"
+  "function Use { $b = $Script:Bar }\n",
+  0)
+
+t('PSA2013 negative: well-known auto-vars are allowlisted',
+  'PSA2013',
+  "function Foo { $a = $Script:MyInvocation }\n",
+  0)
+
+t('PSA2013 edge: top-level script parameter (auto-populated $Script:)',
+  'PSA2013',
+  "param([string]$OsVersion = 'Server2016')\n"
+  "function Foo { $a = $Script:OsVersion }\n",
+  0)
+
+
+# ---------------------------------------------------------------------------
 # PSA3001 — Start-Process -ArgumentList (warning, default ON)
 # ---------------------------------------------------------------------------
 

@@ -10,6 +10,7 @@ Parse / structural (PSA1xxx):
   PSA1001  Brace balance ......................... Error
   PSA1002  Paren balance ......................... Error
   PSA1003  Bracket balance ....................... Error
+  PSA1004  (if/switch/...) used as expression .... Error     (new in v4.1.0)
 
 Variable / scope (PSA2xxx):
   PSA2001  Undefined variable reference .......... Warning
@@ -23,6 +24,8 @@ Variable / scope (PSA2xxx):
   PSA2009  PSCustomObject prop assigned w/o decl . Warning   (new in v3.8.0)
   PSA2010  Call to undefined function ............ Error     (new in v3.9.0)
   PSA2011  Split-Path -LiteralPath ... -Parent ... Error     (new in v3.9.0)
+  PSA2012  Positional call w/ insufficient args .. Error     (new in v4.1.0)
+  PSA2013  $Script:Foo read but never assigned ... Error     (new in v4.1.0)
 
 Coding-pattern (PSA3xxx):
   PSA3001  Start-Process -ArgumentList ........... Warning
@@ -142,7 +145,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '4.0.2'
+__version__ = '4.1.0'
 
 
 def _verify_version_file_consistency():
@@ -232,6 +235,8 @@ RULES = [
      'Paren balance'),
     ('PSA1003', 'error',   True,
      'Bracket balance'),
+    ('PSA1004', 'error',   True,
+     'Bare (if/switch/foreach/while/...) used as expression; must be $(...) or @(...)'),
 
     # Variable / scope (PSA2xxx)
     ('PSA2001', 'error',   True,
@@ -256,6 +261,10 @@ RULES = [
      'Call to function not defined in any scanned file or known cmdlet whitelist'),
     ('PSA2011', 'error',   True,
      'Split-Path -LiteralPath ... -Parent triggers AmbiguousParameterSet on PS 5.1 ja-JP'),
+    ('PSA2012', 'error',   True,
+     'Positional call provides fewer args than the target function has [Parameter(Mandatory)] parameters'),
+    ('PSA2013', 'error',   True,
+     '$Script: variable is read but never assigned anywhere in the file (typo or missing init)'),
 
     # Coding-pattern (PSA3xxx)
     ('PSA3001', 'warning', True,
@@ -900,6 +909,90 @@ def check_balance(text, clean, open_ch, close_ch, code):
             'message': f'{open_ch}{close_ch} mismatch: {o} {open_ch} vs {c} {close_ch}',
         }]
     return []
+
+
+# ---------------------------------------------------------------------------
+# PSA1004 — Bare (if/switch/foreach/while/...) used as expression
+# ---------------------------------------------------------------------------
+#
+# Motivation: PowerShell distinguishes between *statements* and *expressions*.
+# A statement like ``if (...) { ... } else { ... }`` produces a value, but
+# that value can only be captured if the statement is wrapped in the
+# subexpression operator ``$(...)`` (or its array form ``@(...)``). A bare
+# parenthesised statement ``(if ($x) { 'a' } else { 'b' })`` is parsed as
+# a *command invocation* named ``if`` -- which then fails at runtime with
+# the localised error
+#   "The term 'if' is not recognized as a name of a cmdlet, function,
+#    script file, or executable program."
+#
+# The trap is that the parser accepts both forms as syntactically valid:
+# ``if`` could legitimately be a command name in PowerShell's grammar, so
+# neither PS Parse nor PSScriptAnalyzer flags it. The error only surfaces
+# at runtime when the call site actually executes, which can be months
+# after the offending edit if the code path is conditional.
+#
+# This rule catches the bare form by looking for an opening ``(`` followed
+# immediately by one of the keywords ``if``, ``switch``, ``foreach``,
+# ``while``, ``for``, ``do``, ``try``, where the ``(`` is preceded by
+# something other than ``$`` (subexpression), ``@`` (array subexpression),
+# or backtick (escape). Comments and string literals are excluded via the
+# pre-stripped ``clean`` text.
+#
+# Real-world example that motivated this rule (r07.0 Step 18 of the
+# update-windows-server-iso pipeline):
+#
+#     '... : {0}' -f (if ($null -eq $emb.HasEfiExDir) { 'n/a' }
+#                     elseif ($emb.HasEfiExDir)      { 'present' }
+#                     else                           { 'NOT present' })
+#
+# The correct form is:
+#
+#     '... : {0}' -f $(if ($null -eq $emb.HasEfiExDir) { 'n/a' }
+#                      elseif ($emb.HasEfiExDir)      { 'present' }
+#                      else                           { 'NOT present' })
+
+_STATEMENT_AS_EXPR_KEYWORDS = ('if', 'switch', 'foreach', 'while', 'for', 'do', 'try')
+
+# Pre-compile one pattern per keyword. The look-behind `(?<![\$@`a-zA-Z0-9_])`
+# excludes the safe forms `$(if ...)` and `@(if ...)`, and also excludes
+# identifier-suffix matches like `$myif` (defensive — `if` should not be
+# part of an identifier here, but the look-behind costs nothing). The
+# look-ahead `(?=\s*\()` requires the keyword to be followed by `(`,
+# which is how PowerShell statement headers begin. The `\b` boundary
+# guards against `iffy` etc.
+_STATEMENT_AS_EXPR_PATTERN = re.compile(
+    r'(?<![\$@`a-zA-Z0-9_])\(\s*(' +
+    '|'.join(_STATEMENT_AS_EXPR_KEYWORDS) +
+    r')\b\s*\(',
+    re.IGNORECASE
+)
+
+
+def check_statement_as_expression(clean):
+    """PSA1004: bare (if/switch/foreach/while/...) used as expression.
+
+    Scans the comment-and-string-stripped text for bare ``(<keyword> (``
+    patterns where the leading ``(`` is not part of a ``$(...)`` or
+    ``@(...)`` subexpression. Each hit corresponds to a runtime failure
+    of the form "The term '<keyword>' is not recognized as a name of a
+    cmdlet, function, script file...".
+    """
+    issues = []
+    for ln_no, line in enumerate(clean.split('\n'), start=1):
+        for m in _STATEMENT_AS_EXPR_PATTERN.finditer(line):
+            keyword = m.group(1).lower()
+            issues.append({
+                'severity': 'error', 'code': 'PSA1004',
+                'line': ln_no, 'col': m.start() + 1,
+                'message': (
+                    f'bare ({keyword} ...) used as expression; '
+                    f'PowerShell parses this as a command call to '
+                    f'"{keyword}", which fails at runtime. Use '
+                    f'$(... ) for subexpression or @(... ) for array '
+                    f'subexpression.'
+                ),
+            })
+    return issues
 
 
 # ---------------------------------------------------------------------------
@@ -2595,8 +2688,482 @@ def check_split_path_literalpath_parent(clean):
 
 
 # ---------------------------------------------------------------------------
-# File format / encoding checks (PSA7xxx)
+# PSA2012 — Positional call provides fewer args than the target's Mandatory count
 # ---------------------------------------------------------------------------
+#
+# Motivation: a PowerShell function declared with multiple
+# ``[Parameter(Mandatory)]`` parameters, when called *positionally*
+# with fewer arguments than there are Mandatory parameters, will not
+# fail immediately. Instead, PowerShell prompts the user interactively
+# for the missing values:
+#
+#     PS> function Write-PhaseHeader {
+#     >>     param(
+#     >>         [Parameter(Mandatory)] [string]$Id,
+#     >>         [Parameter(Mandatory)] [string]$Name,
+#     >>         [Parameter(Mandatory)] [string]$Group
+#     >>     )
+#     >>     ... }
+#     PS> Write-PhaseHeader 'P12'       # only fills $Id; Name+Group are unset
+#     cmdlet Write-PhaseHeader at command pipeline position 1
+#     Supply values for the following parameters:
+#     Name:
+#     _
+#
+# In interactive shells this is just annoying. In CI pipelines, batch
+# scripts, or unattended sessions, the script hangs forever waiting on
+# stdin. The trap is that the call site looks fine at a glance --
+# ``Write-PhaseHeader 'P12'`` is syntactically valid -- and no static
+# analyzer flagged it.
+#
+# Real-world example that motivated this rule (r07.0 Step 17 of the
+# update-windows-server-iso pipeline): ``Show-Pca2023ReadinessSnapshot``
+# called ``Write-PhaseHeader 'Pca2023 readiness (P12)'`` with one
+# positional argument; the function has three Mandatory parameters,
+# so PS prompted for ``-Name`` and the user had to Ctrl-C to recover.
+#
+# Detection: parse every function defined in the file, count its
+# ``[Parameter(Mandatory)]`` parameters, then scan every call site
+# of that function for the *positional* arg count. If the positional
+# arg count is less than the Mandatory count AND none of the missing
+# Mandatory parameters appear as named args (``-Name x``), fire.
+
+_FUNCTION_DEF_PATTERN = re.compile(
+    r'^\s*function\s+([A-Za-z_][A-Za-z0-9_-]*)\s*\{?',
+    re.IGNORECASE
+)
+# Matches a Mandatory parameter declaration; captures the param name.
+_MANDATORY_PARAM_PATTERN = re.compile(
+    r'\[Parameter\([^)]*Mandatory[^)]*\)\][^,)]*?\$([A-Za-z_]\w*)',
+    re.IGNORECASE | re.DOTALL
+)
+
+
+def _extract_function_param_blocks(clean):
+    """Return {function_name_lower: [mandatory_param_names_lower, ...]}.
+
+    For every function found in *clean*, find the block enclosed by the
+    next opening ``param(`` and matching ``)``, then enumerate Mandatory
+    parameters within it.
+    """
+    funcs = {}
+    blocks = find_function_blocks(clean)
+    for fname, _start, _end, body in blocks:
+        # Find the param() block within the function body. It must
+        # appear before any code statements (PowerShell convention).
+        m = re.search(r'\bparam\s*\(', body, re.IGNORECASE)
+        if not m:
+            continue
+        # Find the matching closing paren via depth counting.
+        depth = 1
+        idx = m.end()
+        while idx < len(body) and depth > 0:
+            ch = body[idx]
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            idx += 1
+        param_block = body[m.end():idx - 1]
+        mandatory_names = [
+            mm.group(1).lower()
+            for mm in _MANDATORY_PARAM_PATTERN.finditer(param_block)
+        ]
+        funcs[fname.lower()] = mandatory_names
+    return funcs
+
+
+def _count_positional_and_named_args(call_text):
+    """Given the text after a function name up to the end-of-command,
+    return ``(positional_count, set_of_named_args_lower, has_splat)``.
+
+    *call_text* is a single logical line of arguments. Each token starting
+    with ``-`` (followed by a letter) is a named arg; the next token is
+    its value. Each token starting with ``@`` (followed by a letter) is
+    a *splat* argument (e.g. ``@progressParams``) -- this expands a
+    hashtable into named arguments at runtime, satisfying any Mandatory
+    parameter the table contains. When a splat is present, the caller
+    must assume all Mandatory parameters are satisfied because the
+    contents of the hashtable are not statically analyzable.
+
+    All other tokens are positional. Quoted strings count as one token
+    regardless of internal spaces.
+    """
+    # Tokenize: simple state machine that handles single + double quotes
+    # and ignores whitespace as a separator. We do NOT need to handle
+    # PowerShell's full quoting semantics -- counts only matter.
+    tokens = []
+    i = 0
+    cur = []
+    in_quote = None
+    while i < len(call_text):
+        ch = call_text[i]
+        if in_quote:
+            cur.append(ch)
+            if ch == in_quote and (i == 0 or call_text[i - 1] != '`'):
+                in_quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            in_quote = ch
+            cur.append(ch)
+            i += 1
+            continue
+        if ch.isspace():
+            if cur:
+                tokens.append(''.join(cur))
+                cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    if cur:
+        tokens.append(''.join(cur))
+
+    positional = 0
+    named = set()
+    has_splat = False
+    skip_next = False
+    for tok in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        # Splatting: @varname expands a hashtable inline. We cannot
+        # statically inspect its contents, so we conservatively assume
+        # all Mandatory parameters are satisfied.
+        if (tok.startswith('@') and len(tok) > 1
+                and (tok[1].isalpha() or tok[1] == '_')):
+            has_splat = True
+            continue
+        if (tok.startswith('-') and len(tok) > 1
+                and tok[1].isalpha()):
+            # Named parameter. The following token is its value
+            # unless this is a switch (no value follows). We treat
+            # all named-arg occurrences as consuming the next
+            # token; switches without value will be slightly over-
+            # counted but this only affects positional counting
+            # in our favor (more conservative).
+            named.add(tok[1:].lower())
+            skip_next = True
+            continue
+        positional += 1
+    return positional, named, has_splat
+
+
+def check_positional_mandatory_call(text, clean):
+    """PSA2012: positional call provides fewer args than the target
+    function has Mandatory parameters.
+
+    Heuristic:
+      1. Collect all function definitions in this file and the count
+         of their Mandatory parameters (uses *clean* for parsing).
+      2. For each function with >= 2 Mandatory parameters, scan the
+         file for non-definition calls to it. A "call" is the
+         function name followed by whitespace and at least one
+         argument on the same logical line (or continued via
+         backtick).
+      3. If the call's (positional count + named args matching a
+         Mandatory parameter) is less than the Mandatory count,
+         fire PSA2012.
+
+    Important behaviours:
+
+    - Argument counting is done on the *original text* (not the
+      strings-stripped *clean*) because string literals occupy
+      positional argument slots. ``Write-PhaseHeader 'P12'`` has
+      exactly one positional argument, but ``clean`` would show
+      ``Write-PhaseHeader      `` (string removed) which is
+      indistinguishable from a bare-name reference.
+
+    - Backtick-continued multiline calls (the common case for
+      readability in this codebase) are joined into a single logical
+      span before arg counting. Without this, a call written as
+
+          Get-OrEnsurePca2023Snapshot `
+              -ExtractedMediaPath $extractedPath `
+              -WorkRoot $Script:WorkRoot
+
+      would appear (on the line where the function name lives) to
+      have zero arguments, producing a false positive. The join uses
+      the same heuristic as PSA3002: a trailing single backtick is a
+      continuation marker.
+    """
+    issues = []
+    funcs = _extract_function_param_blocks(clean)
+    candidates = {n: m for n, m in funcs.items() if len(m) >= 2}
+    if not candidates:
+        return issues
+
+    # Find function-definition lines so we skip them during call scan.
+    def_lines = set()
+    for ln_no, line in enumerate(clean.split('\n'), start=1):
+        if _FUNCTION_DEF_PATTERN.match(line):
+            def_lines.add(ln_no)
+
+    text_lines = text.split('\n')
+    clean_lines = clean.split('\n')
+
+    # Build a "joined" view: for each line, if it ends with a single
+    # backtick (and the next line is not empty), concatenate up to N
+    # following lines into a single logical span. Track the original
+    # line number of the first line for reporting.
+    def _join_continuation(line_idx):
+        """Return (joined_text, lines_consumed) starting at *line_idx*
+        (0-based into text_lines)."""
+        out = []
+        cur = line_idx
+        consumed = 0
+        max_join = 20  # safety bound for runaway joins
+        while cur < len(text_lines) and consumed < max_join:
+            ln = text_lines[cur]
+            # Strip trailing whitespace to detect a lone backtick at EOL.
+            stripped = ln.rstrip()
+            if stripped.endswith('`') and not stripped.endswith('``'):
+                # Drop the trailing backtick and continue.
+                out.append(stripped[:-1])
+                cur += 1
+                consumed += 1
+                continue
+            out.append(ln)
+            consumed += 1
+            break
+        return (' '.join(out), consumed)
+
+    line_idx = 0
+    while line_idx < len(text_lines):
+        ln_no = line_idx + 1  # 1-based
+        if ln_no > len(clean_lines):
+            break
+        if ln_no in def_lines:
+            line_idx += 1
+            continue
+
+        clean_line = clean_lines[ln_no - 1]
+        # Get the joined text view for arg counting.
+        joined_text, lines_used = _join_continuation(line_idx)
+
+        # For each candidate function name found in the *clean* line,
+        # locate the same position in the joined text and analyze
+        # everything after it.
+        fired_on_this_line = False
+        for fname in candidates:
+            pat = re.compile(
+                r'(?<![\w\-.:])' + re.escape(fname) + r'\b',
+                re.IGNORECASE
+            )
+            for m in pat.finditer(clean_line):
+                # The same offset in joined_text corresponds to the
+                # first line of the joined span (the joined text starts
+                # with text_lines[line_idx], so col within the first
+                # line maps directly).
+                rest_text = joined_text[m.end():].rstrip('`\\')
+                rest_text_stripped = rest_text.strip()
+                if not rest_text_stripped:
+                    continue
+                if rest_text_stripped.startswith('|') or rest_text_stripped.startswith(';'):
+                    continue
+                if rest_text_stripped.startswith('='):
+                    continue
+                pos, named, has_splat = _count_positional_and_named_args(rest_text)
+                mandatory = candidates[fname]
+                satisfied_named = sum(
+                    1 for mp in mandatory if mp in named
+                )
+                # Splatting (@hashtable) opaquely expands into named
+                # arguments at runtime; assume Mandatory params are
+                # satisfied to avoid false positives.
+                if has_splat:
+                    continue
+                if pos + satisfied_named >= len(mandatory):
+                    continue
+                if pos == 0 and satisfied_named == 0:
+                    continue
+                issues.append({
+                    'severity': 'error', 'code': 'PSA2012',
+                    'line': ln_no, 'col': m.start() + 1,
+                    'message': (
+                        f'positional call to {fname}: {pos} positional '
+                        f'arg(s) + {satisfied_named} named Mandatory '
+                        f'arg(s), but function has {len(mandatory)} '
+                        f'[Parameter(Mandatory)] parameter(s). '
+                        f'PowerShell will prompt interactively for the '
+                        f'missing values, hanging unattended sessions. '
+                        f'Use named arguments: {fname} ' +
+                        ' '.join(f'-{p} <value>' for p in mandatory)
+                    ),
+                })
+                fired_on_this_line = True
+                break
+            if fired_on_this_line:
+                break
+
+        # Advance by the number of physical lines we consumed (so we
+        # don't re-flag the continuation lines).
+        line_idx += max(1, lines_used)
+    return issues
+
+
+# ---------------------------------------------------------------------------
+# PSA2013 — $Script:Foo read but never assigned anywhere in the file
+# ---------------------------------------------------------------------------
+#
+# Motivation: PowerShell silently evaluates an unassigned ``$Script:Foo``
+# to ``$null``. This often hides typo bugs in script-scope variable
+# names, because:
+#   - There is no "undefined variable" error at runtime.
+#   - PSA2001 only checks within function scopes; it cannot see the
+#     cross-function flow of ``$Script:`` globals.
+#   - The defect manifests downstream as bizarre null-related errors,
+#     usually far from the typo.
+#
+# Real-world example that motivated this rule (r07.0 Step 15 of the
+# update-windows-server-iso pipeline):
+#
+#     # In P10 phase function:
+#     $extractedPath = if ($Script:ExtractedMediaPath) { ... } else { $null }
+#     if (-not $extractedPath) {
+#         throw 'P10 requires P05 ExpandIso ...'
+#     }
+#
+# The actual global is ``$Script:ExtractedDir`` (initialised at script
+# top). ``$Script:ExtractedMediaPath`` is a helper-API *parameter* name,
+# not a script-scope global, so the read silently returned $null and
+# the throw fired on every run despite P05 having completed
+# successfully. Six other references to a typo'd ``$Script:WorkRootFull``
+# (correct name: ``$Script:WorkRoot``) were found by the same defensive
+# audit.
+#
+# Detection: scan the entire file (not just function bodies) for every
+# ``$Script:Name = ...`` assignment, then scan for every
+# ``$Script:Name`` read reference. Names read but never assigned are
+# either typo bugs or external-scope expectations -- in either case
+# they deserve attention.
+#
+# Exclusions:
+#   - Names that match a script-level param() declaration ($Script:Foo
+#     is auto-populated for every script parameter when the .ps1 is
+#     invoked as a script). We detect these from the top-level
+#     ``param(...)`` block.
+#   - Names referenced only inside comment / string literals (the
+#     stripped *clean* text already handles this).
+#   - The names listed in PSA2013_KNOWN_AUTO_SCRIPT_VARS (e.g.
+#     ``$Script:MyInvocation``, ``$Script:PSScriptRoot``).
+
+# Auto-populated $Script: globals on script load. Not exhaustive; covers
+# the cases observed in the wild. Names lowercased for comparison.
+_PSA2013_KNOWN_AUTO_SCRIPT_VARS = frozenset([
+    'myinvocation', 'psscriptroot', 'psscriptpath', 'pscommandpath',
+    'pscmdlet', 'psboundparameters', 'args', 'input', 'lastexitcode',
+    'true', 'false', 'null',
+    # Script identifier convention vars (covered by PSAP0002 separately
+    # but allowlisted here for cross-rule consistency).
+    'scriptversion', 'scripthash', 'scriptshorttag',
+    # Common defensively-read globals with their own IsNullOrEmpty guards.
+    'scriptpath', 'errorsjsonlpath',
+])
+
+
+_SCRIPT_ASSIGN_PATTERN = re.compile(
+    r'\$Script:([A-Za-z_]\w*)\s*=(?!=)',
+    re.IGNORECASE
+)
+_SCRIPT_READ_PATTERN = re.compile(
+    r'\$Script:([A-Za-z_]\w*)\b',
+    re.IGNORECASE
+)
+_TOP_LEVEL_PARAM_PATTERN = re.compile(
+    r'^\s*\[(?:[\w\[\]]+)\]\s*\$([A-Za-z_]\w*)',
+    re.MULTILINE
+)
+
+
+def check_script_var_read_never_assigned(clean):
+    """PSA2013: $Script:Foo read with no $Script:Foo = ... in file.
+
+    For every distinct $Script:Foo name referenced in the file, verify
+    that some assignment $Script:Foo = ... appears. If not, fire once
+    per read site (capped to the first 5 sites per name to avoid
+    flooding output on a global typo with many call sites).
+    """
+    issues = []
+
+    # Pass 1: collect every script-scope assignment.
+    assigned = set()
+    for m in _SCRIPT_ASSIGN_PATTERN.finditer(clean):
+        assigned.add(m.group(1).lower())
+
+    # Pass 2: identify top-level script parameters. PowerShell auto-
+    # populates $Script:ParamName for each one. We approximate the
+    # top-level param() block as the first param( ... ) before any
+    # function definition.
+    top_level_params = set()
+    first_func_match = re.search(
+        r'^\s*function\s+',
+        clean,
+        re.MULTILINE | re.IGNORECASE
+    )
+    head = clean[:first_func_match.start()] if first_func_match else clean
+    param_m = re.search(r'\bparam\s*\(', head, re.IGNORECASE)
+    if param_m:
+        # Find matching close paren.
+        depth = 1
+        idx = param_m.end()
+        while idx < len(head) and depth > 0:
+            ch = head[idx]
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            idx += 1
+        param_block = head[param_m.end():idx - 1]
+        for pm in _TOP_LEVEL_PARAM_PATTERN.finditer(param_block):
+            top_level_params.add(pm.group(1).lower())
+        # Also catch simple [string] $X and untyped $X = default within
+        # the param block.
+        for pm in re.finditer(
+            r'\$([A-Za-z_]\w*)',
+            param_block
+        ):
+            top_level_params.add(pm.group(1).lower())
+
+    # Pass 3: walk every read and flag if unmatched.
+    seen_per_name = {}
+    for ln_no, line in enumerate(clean.split('\n'), start=1):
+        for m in _SCRIPT_READ_PATTERN.finditer(line):
+            name = m.group(1).lower()
+            # Skip if this is the assignment side (left-hand side).
+            tail = line[m.end():].lstrip()
+            if tail.startswith('=') and not tail.startswith('=='):
+                continue
+            # Skip if assigned somewhere in the file.
+            if name in assigned:
+                continue
+            # Skip auto-populated script params.
+            if name in top_level_params:
+                continue
+            # Skip well-known auto vars.
+            if name in _PSA2013_KNOWN_AUTO_SCRIPT_VARS:
+                continue
+            # Per-name cap.
+            seen_per_name.setdefault(name, 0)
+            if seen_per_name[name] >= 5:
+                continue
+            seen_per_name[name] += 1
+            issues.append({
+                'severity': 'error', 'code': 'PSA2013',
+                'line': ln_no, 'col': m.start() + 1,
+                'message': (
+                    f'$Script:{m.group(1)} is read here but never '
+                    f'assigned anywhere in the file. Possible typo of '
+                    f'an existing $Script: variable, or a missing '
+                    f'initialisation. PowerShell silently evaluates '
+                    f'this to $null, hiding the defect.'
+                ),
+            })
+    return issues
+
+
+
 # These rules operate on file-level metadata rather than on the decoded text
 # body, because some checks (BOM presence, byte-encoding sniffing, etc.) need
 # information that is lost once Python has decoded the file to a str.
@@ -4630,6 +5197,8 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_balance(text, clean, '(', ')', 'PSA1002')
     if cfg.enabled['PSA1003']:
         raw += check_balance(text, clean, '[', ']', 'PSA1003')
+    if cfg.enabled['PSA1004']:
+        raw += check_statement_as_expression(clean)
 
     if cfg.enabled['PSA2001']:
         raw += check_undefined_vars(text, clean)
@@ -4655,6 +5224,10 @@ def analyze_text(text, cfg, file_meta=None):
     # next to PSA8001 (which has the same cross-file requirement).
     if cfg.enabled['PSA2011']:
         raw += check_split_path_literalpath_parent(clean)
+    if cfg.enabled['PSA2012']:
+        raw += check_positional_mandatory_call(text, clean)
+    if cfg.enabled['PSA2013']:
+        raw += check_script_var_read_never_assigned(clean)
 
     if cfg.enabled['PSA3001']:
         raw += check_argumentlist(clean)

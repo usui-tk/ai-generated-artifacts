@@ -191,6 +191,7 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA1001** | ✅ 有効 | 中括弧バランス: `{` の数 vs `}` の数 |
 | **PSA1002** | ✅ 有効 | 丸括弧バランス: `(` vs `)` |
 | **PSA1003** | ✅ 有効 | 角括弧バランス: `[` vs `]` |
+| **PSA1004** | ✅ 有効 | `(if/switch/foreach/while/...)` を式として使用するパターンを検出 (4.1.0 新規) — PowerShell はこれを `if` というコマンドの呼び出しとしてパースしてしまい、実行時に `用語 'if' は、コマンドレット、関数、スクリプト ファイル、または操作可能なプログラムの名前として認識されません` で失敗する。`$(...)` (サブ式演算子) または `@(...)` (配列サブ式演算子) で囲む必要がある。 |
 
 `PSA2xxx` — 変数・スコープ系（Error / Warning / Info）
 
@@ -207,6 +208,8 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA2009** | Warning | ✅ 有効 | `[pscustomobject]@{...}` のイニシャライザで宣言されていないプロパティを `.` 代入している (3.8.0 新規) — PowerShell 5.1 のシール済みオブジェクト実行時例外 (`"<PropName>" の設定中に例外が発生しました: "このオブジェクトにプロパティ '<PropName>' が見つかりません。"`) を静的解析で検出 |
 | **PSA2010** | Error | ✅ 有効 | スキャン対象のいずれのファイルにも定義されていない関数呼び出しを検出 (3.9.0 新規) — `Find-Signtool` (正しくは `Find-KitTool 'signtool.exe'`) のような typo を捕捉。 `.psa.config.json` の `psa2010_known_cmdlets` で組み込み cmdlet 一覧を拡張可能 |
 | **PSA2011** | Error | ✅ 有効 | `Split-Path -LiteralPath ... -Parent` が Windows PowerShell 5.1 ja-JP で `AmbiguousParameterSet` を発生させるパターンを検出 (3.9.0 新規) — `[System.IO.Path]::GetDirectoryName($path)` または `Split-Path -Path $path -Parent` に修正 |
+| **PSA2012** | Error | ✅ 有効 | `[Parameter(Mandatory)]` パラメータが N 個ある関数を、引数 N 個未満で positional 呼び出しした場合に検出 (4.1.0 新規) — PowerShell が対話的に不足値を要求するため、非対話実行 (CI/バッチ) ではスクリプトが stdin 待ちでハングする。名前付き引数 (`-Name value`) の使用を推奨 |
+| **PSA2013** | Error | ✅ 有効 | `$Script:Foo` を読んでいるが、スクリプト全体で `$Script:Foo = ...` の代入が存在しないケースを検出 (4.1.0 新規) — PowerShell は未代入の `$Script:` 変数を sucessfully `$null` として評価するため、typo バグが下流のヌル絡みエラーとして遠方で表面化することが多い |
 
 `PSA3xxx` — コーディングパターン（Warning）
 

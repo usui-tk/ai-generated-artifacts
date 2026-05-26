@@ -194,6 +194,7 @@ optional column, and a short message.
 | **PSA1001** | ✅ on | Brace balance: `{` count vs `}` count |
 | **PSA1002** | ✅ on | Paren balance: `(` vs `)` |
 | **PSA1003** | ✅ on | Bracket balance: `[` vs `]` |
+| **PSA1004** | ✅ on | Bare `(if/switch/foreach/while/...)` used as expression (new in 4.1.0) — PowerShell parses this as a command call to `if`, which fails at runtime. Use `$(...)` for subexpression or `@(...)` for array subexpression. |
 
 `PSA2xxx` — variable / scope (Error / Warning / Info)
 
@@ -210,6 +211,8 @@ optional column, and a short message.
 | **PSA2009** | Warning | ✅ on | `[pscustomobject]@{...}` property assigned without prior declaration in the initialiser (new in 3.8.0) — guards against the PowerShell 5.1 sealed-object runtime exception |
 | **PSA2010** | Error | ✅ on | Call to a function not defined in any scanned file and not in the built-in cmdlet whitelist (new in 3.9.0) — catches typos such as `Find-Signtool` where the actual helper is `Find-KitTool 'signtool.exe'`. Extend the whitelist via `.psa.config.json` `psa2010_known_cmdlets`. |
 | **PSA2011** | Error | ✅ on | `Split-Path -LiteralPath ... -Parent` triggers `AmbiguousParameterSet` on Windows PowerShell 5.1 ja-JP (new in 3.9.0) — fix with `[System.IO.Path]::GetDirectoryName($path)` or `Split-Path -Path $path -Parent`. |
+| **PSA2012** | Error | ✅ on | Positional call provides fewer args than the target function has `[Parameter(Mandatory)]` parameters (new in 4.1.0) — PowerShell prompts interactively for the missing values, hanging unattended sessions. Use named arguments. |
+| **PSA2013** | Error | ✅ on | `$Script:Foo` is read but never assigned anywhere in the file (new in 4.1.0) — PowerShell silently evaluates this to `$null`, hiding typo bugs. |
 
 `PSA3xxx` — coding patterns (Warning)
 
