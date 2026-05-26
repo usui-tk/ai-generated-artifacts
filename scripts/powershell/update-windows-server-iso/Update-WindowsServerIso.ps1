@@ -1861,8 +1861,57 @@ function Wait-WithJitter {
 }
 
 function Invoke-WebRequestWithRetry {
+    <#
+    .SYNOPSIS
+        Wrapper around Invoke-WebRequest with exponential-backoff retry.
+
+    .DESCRIPTION
+        Two modes:
+
+          1) In-memory fetch (no -OutFile)
+             Returns the BasicHtmlWebResponseObject. Used for HTML/JSON
+             scraping (Microsoft Learn release-info, .NET CU index, etc).
+
+          2) File download (-OutFile <path>)
+             Streams the response body directly to the given path. Used
+             for large binaries (ISOs, MSU patches, wsusscn2.cab). The
+             progress bar is silenced before the call because PS 5.1
+             Invoke-WebRequest's progress reporting causes O(N^2)
+             slowdown on multi-GB downloads.
+
+        Retries on transient errors (network + HTTP 429/503) with
+        exponential backoff; bails on the final attempt with the
+        captured exception. The -MaxAttempts alias is preserved for
+        backward compatibility with existing call sites.
+
+    .PARAMETER Uri
+        Source URL. Mandatory.
+
+    .PARAMETER OutFile
+        When provided, the response body is saved to this path instead
+        of being returned in memory. The caller is responsible for any
+        post-download verification (SHA-256, atomic move, etc).
+
+    .PARAMETER Headers
+        Optional hashtable of HTTP request headers (e.g. custom
+        User-Agent). When not provided, Invoke-WebRequest's default
+        headers are used.
+
+    .PARAMETER MaxRetries
+        Maximum number of attempts before giving up. Default 3. The
+        -MaxAttempts alias is honoured for callers that used the
+        original parameter name.
+
+    .PARAMETER TimeoutSec
+        Per-attempt HTTP timeout. Default 60.
+    #>
+    [CmdletBinding()]
+    [OutputType([Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject])]
     param(
         [Parameter(Mandatory)] [string]$Uri,
+        [string]$OutFile,
+        [hashtable]$Headers,
+        [Alias('MaxAttempts')]
         [int]$MaxRetries = 3,
         [int]$TimeoutSec = 60
     )
@@ -1870,12 +1919,35 @@ function Invoke-WebRequestWithRetry {
     $lastError = $null
     for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
         try {
-            $response = Invoke-WebRequest -Uri $Uri `
-                -UserAgent $Script:UserAgent `
-                -Headers $Script:RequestHeaders `
-                -TimeoutSec $TimeoutSec `
-                -UseBasicParsing `
-                -ErrorAction Stop
+            $params = @{
+                Uri             = $Uri
+                TimeoutSec      = $TimeoutSec
+                UseBasicParsing = $true
+                ErrorAction     = 'Stop'
+            }
+            if ($PSBoundParameters.ContainsKey('Headers') -and $Headers) {
+                $params['Headers'] = $Headers
+            }
+            if ($PSBoundParameters.ContainsKey('OutFile') -and $OutFile) {
+                $params['OutFile'] = $OutFile
+                # Silence the progress bar for the duration of the call.
+                # PS 5.1's Invoke-WebRequest progress reporting causes
+                # severe slowdown on multi-GB downloads; the canonical
+                # workaround is to set $ProgressPreference temporarily.
+                # We mutate the function-local copy only -- PowerShell's
+                # dynamic-scoped lookup means Invoke-WebRequest still
+                # observes 'SilentlyContinue' without polluting the
+                # caller's scope.
+                $oldPp = $ProgressPreference
+                $ProgressPreference = 'SilentlyContinue'
+                try {
+                    Invoke-WebRequest @params | Out-Null
+                } finally {
+                    $ProgressPreference = $oldPp
+                }
+                return
+            }
+            $response = Invoke-WebRequest @params
             return $response
         }
         catch {
@@ -5841,8 +5913,12 @@ function Install-WindowsAdkFallback {
              "already installed" (warn-only). Only a missing oscdimg.exe
              after install is a hard failure.
 
-        Returns nothing; the caller must re-invoke Resolve-OscdimgExe
-        to obtain the discovered path.
+        Returns the absolute path to the discovered oscdimg.exe so the
+        caller does not need to re-invoke Resolve-OscdimgExe (which
+        would emit the SHA-256 advisory line a second time).
+
+    .OUTPUTS
+        [string] - absolute path to oscdimg.exe
 
     .NOTES
         Network access is required. The Microsoft Learn page for the
@@ -5850,6 +5926,7 @@ function Install-WindowsAdkFallback {
         next to $Script:AdkInstallerUrl above.
     #>
     [CmdletBinding()]
+    [OutputType([string])]
     param()
 
     $cacheDir = Join-Path $Script:WorkRoot 'cache\adk'
@@ -5926,7 +6003,7 @@ function Install-WindowsAdkFallback {
             Write-Warn ('ADK installer exit code {0}; oscdimg.exe is present, treating as already installed.' -f $proc.ExitCode)
         }
         Write-Ok ('Windows ADK Deployment Tools installed: {0}' -f $oscdimgPath)
-        return
+        return $oscdimgPath
     }
     throw ('Windows ADK install failed (exit {0}); oscdimg.exe still not found. See {1} for installer diagnostics.' -f $proc.ExitCode, $logPath)
 }
@@ -8140,13 +8217,14 @@ function Invoke-SetupPhase01_Initialize {
                 Write-Warn 'oscdimg.exe not found; -SyntheticTestMode will use a raw-copy fallback.'
             } elseif ($Script:AutoInstallAdk) {
                 Write-Step 'oscdimg.exe not found; -AutoInstallAdk is set, invoking Install-WindowsAdkFallback...'
-                Install-WindowsAdkFallback
-                # Re-resolve after install. Install-WindowsAdkFallback already
-                # verified tool presence by calling Resolve-OscdimgExe once,
-                # so this second call is for the canonical Write-Ok line
-                # operators expect in the P01 log.
-                $oscdimgPath = Resolve-OscdimgExe
-                Write-Ok ('oscdimg.exe found after ADK install: {0}' -f $oscdimgPath)
+                # Install-WindowsAdkFallback returns the discovered
+                # oscdimg.exe path and emits its own Write-Ok line
+                # ('Windows ADK Deployment Tools installed: ...'). Using
+                # the return value here avoids a second Resolve-OscdimgExe
+                # call, which would re-emit the SHA-256 advisory block
+                # for the same binary.
+                $oscdimgPath = Install-WindowsAdkFallback
+                Write-Ok ('oscdimg.exe available: {0}' -f $oscdimgPath)
             } else {
                 $adkMsg = @"
 oscdimg.exe not found. Install the Windows ADK Deployment Tools.
@@ -8330,16 +8408,34 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                 }) | Out-Null
             }
         } elseif ($Script:AutoDetectLatestPatches -or $Script:UseBaselineOnly -or `
-                  ($Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.Patches -and `
-                   $Script:OsProfile.PatchBaseline.Patches.Count -gt 0)) {
-            # PatchBaseline-driven path. The patch list is derived from
-            # the in-memory $Script:OsProfile.PatchBaseline.Patches. P03
-            # may refresh this list from the Microsoft Update Catalog if it
-            # is stale or -AutoDetectLatestPatches was passed.
+                  ($Script:OsProfile.PatchBaseline -and `
+                   (($Script:OsProfile.PatchBaseline.NeutralPatches -and `
+                     $Script:OsProfile.PatchBaseline.NeutralPatches.Count -gt 0) -or `
+                    ($Script:OsProfile.PatchBaseline.Patches -and `
+                     $Script:OsProfile.PatchBaseline.Patches.Count -gt 0)))) {
+            # PatchBaseline-driven path. The OS-neutral baseline is
+            # stored under PatchBaseline.NeutralPatches[] (committed
+            # via stage5 / -Action RefreshAllBaselines, see SPEC B.23.5
+            # and B.23.8). Legacy schemas used PatchBaseline.Patches[]
+            # for the same data; both are honoured here for backward
+            # compatibility, preferring NeutralPatches[] which is the
+            # current source of truth. P03 (when not skipped via
+            # -UseBaselineOnly) may refresh this list from the Microsoft
+            # Update Catalog if it is stale or -AutoDetectLatestPatches
+            # was passed.
             $bl = $Script:OsProfile.PatchBaseline
-            if ($bl -and $bl.Patches) {
-                Write-Step ('Seeding ResolvedPatches from PatchBaseline: {0} entries.' -f $bl.Patches.Count)
-                foreach ($p in $bl.Patches) {
+            $baselineSource = $null
+            $baselineField  = $null
+            if ($bl.NeutralPatches -and $bl.NeutralPatches.Count -gt 0) {
+                $baselineSource = $bl.NeutralPatches
+                $baselineField  = 'NeutralPatches'
+            } elseif ($bl.Patches -and $bl.Patches.Count -gt 0) {
+                $baselineSource = $bl.Patches
+                $baselineField  = 'Patches (legacy)'
+            }
+            if ($baselineSource) {
+                Write-Step ('Seeding ResolvedPatches from PatchBaseline.{0}: {1} entries.' -f $baselineField, $baselineSource.Count)
+                foreach ($p in $baselineSource) {
                     $resolved.Add([pscustomobject]@{
                         Kind = 'Patch'; Source = $p.DownloadUrl
                         LocalPath = ''
@@ -8350,12 +8446,12 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                     }) | Out-Null
                 }
             } else {
-                Write-Step 'PatchBaseline.Patches is empty; P03 will populate from Microsoft Update Catalog.'
+                Write-Step 'PatchBaseline.NeutralPatches and .Patches both empty; P03 will populate from Microsoft Update Catalog.'
             }
         } elseif ($Script:SyntheticTestMode) {
             Write-Step '-SyntheticTestMode is on; no real patches required.'
         } else {
-            throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches, or populate Config PatchBaseline.Patches.'
+            throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches, or populate Config PatchBaseline.NeutralPatches (or legacy .Patches).'
         }
 
         # Order by ApplyOrder, then by KbId. Wrap in @() to guarantee

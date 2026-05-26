@@ -16,7 +16,97 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 8 - `-AutoInstallAdk` switch for hands-free Windows ADK Deployment Tools install (this release)
+### r07.0 Step 9 - Fix P02 NeutralPatches lookup, fix P04 ISO/patch download path, polish ADK auto-install (this release)
+
+Live regression-test of `-Action PrepareBuildVerify -EvalIsoMode
+-UseBaselineOnly -AutoInstallAdk` against a freshly-provisioned
+Windows Server 2025 host surfaced three issues. Step 8's
+`-AutoInstallAdk` switch worked perfectly (oscdimg.exe was
+downloaded + installed in ~30 seconds and P01 / P02 / P03 all ran
+to completion). But the test then exposed two pre-existing latent
+bugs in the script + one cosmetic redundancy that Step 8
+introduced. All three are fixed together in this step.
+
+**Fix 1 - P02 reads `PatchBaseline.NeutralPatches[]` (was `.Patches`)**.
+
+`Invoke-SetupPhase02_ResolveInputs` was still looking at
+`$Script:OsProfile.PatchBaseline.Patches` for the
+`-UseBaselineOnly` code path, but the field name was migrated to
+`NeutralPatches` as part of the r07.0 data layout (committed via
+`-Action RefreshAllBaselines` / stage5). The result was that
+`-UseBaselineOnly` consistently produced `Patch list resolved: 0
+entries` on every config that had ever been refreshed, silently
+forcing P02 into an empty patch plan and making the eventual
+ISO build skip every patch entirely. The fix prefers
+`.NeutralPatches[]` (the SPEC B.23.5 source of truth) and falls
+back to legacy `.Patches[]` for backward compatibility with any
+config not yet migrated.
+
+**Fix 2 - `Invoke-WebRequestWithRetry` now accepts `-OutFile`,
+`-Headers`, and the `-MaxAttempts` alias**.
+
+The wrapper function declared only `-Uri / -MaxRetries /
+-TimeoutSec`, but every one of its three call sites (P04 source
+ISO download, P04 patch download, P06 wsusscn2.cab download)
+called it with `-OutFile`, and two of them with the alias
+`-MaxAttempts`. The mismatch had been latent because none of those
+download paths had ever been taken to completion against a real
+host with a populated baseline. Step 7's `-UseBaselineOnly` plus
+Step 8's `-AutoInstallAdk` together made it the first real
+end-to-end run, and `Invoke-WebRequestWithRetry` threw immediately
+on first use:
+
+```
+PHASE P04 (FetchAssets) failed: パラメーター名 'OutFile' に一致するパラメーターが見つかりません。
+```
+
+The fix extends `Invoke-WebRequestWithRetry` with proper
+`-OutFile` support (streaming to disk with the canonical
+`$ProgressPreference = 'SilentlyContinue'` workaround for PS 5.1's
+multi-GB Invoke-WebRequest progress-bar slowdown), `-Headers`
+support (used by the wsusscn2.cab path for a custom User-Agent),
+and a `-MaxAttempts` alias for `-MaxRetries`. The function also
+no longer references undefined `$Script:UserAgent` and
+`$Script:RequestHeaders`, which would have caused an Invoke-
+WebRequest argument-binding error in the in-memory mode if it had
+ever been called.
+
+**Fix 3 - polish `Install-WindowsAdkFallback` to avoid double
+SHA-256 advisory**.
+
+The Step 8 implementation called `Resolve-OscdimgExe` twice in
+the auto-install path: once inside `Install-WindowsAdkFallback`
+for the tool-presence verify, and once again in the P01 Step 3
+`catch` block for the canonical Write-Ok log line. Each call
+emits the Microsoft reference-hash SHA-256 advisory when the
+local oscdimg.exe doesn't match the v1.4 reference value, so the
+warning block was logged twice for the same binary. The fix:
+`Install-WindowsAdkFallback` now returns the discovered
+`oscdimg.exe` path, and P01 Step 3 uses the returned value
+directly with a single Write-Ok rather than re-resolving.
+
+Files changed:
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  - P02 patch-resolution block: read `NeutralPatches[]` (preferred)
+    or `Patches[]` (legacy fallback); update log message and
+    error message accordingly.
+  - `Invoke-WebRequestWithRetry`: add `-OutFile`, `-Headers`,
+    `-MaxAttempts` alias; drop dead `$Script:UserAgent /
+    $Script:RequestHeaders` references; declare `[OutputType()]`.
+  - `Install-WindowsAdkFallback`: return `[string]` (resolved
+    path) instead of `[void]`; declare `[OutputType([string])]`.
+  - P01 Step 3 auto-install branch: consume the return value;
+    remove the now-redundant second `Resolve-OscdimgExe` call.
+
+Regression coverage. T2-T10 all pass (their PowerShell-from-Python
+harness does not exercise P02 / P04 / Install-WindowsAdkFallback,
+so the data-format and PoC-replacement assertions are unaffected).
+psa.py reports 0/0/0; PSScriptAnalyzer reports 0 errors and 0
+warnings. End-to-end verification awaits the operator's re-run on
+the Windows Server 2025 host.
+
+### r07.0 Step 8 - `-AutoInstallAdk` switch for hands-free Windows ADK Deployment Tools install
 
 Pure environment-provisioning addition triggered by a live P01 abort
 on a freshly-provisioned Windows Server 2025 host that lacked the
