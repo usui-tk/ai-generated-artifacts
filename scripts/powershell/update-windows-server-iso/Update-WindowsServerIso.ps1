@@ -1860,6 +1860,271 @@ function Wait-WithJitter {
     Start-Sleep -Milliseconds ([int]($actualSleep * 1000))
 }
 
+function Format-MegabyteCount {
+    <#
+    .SYNOPSIS
+        Render a byte count as an "X.X MB" string with one decimal.
+        Used by Invoke-DownloadWithProgress and a few other call
+        sites that want consistent MB formatting.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [long]$Bytes
+    )
+    if ($Bytes -lt 0) { return '0.0 MB' }
+    return ('{0:N1} MB' -f ($Bytes / 1MB))
+}
+
+function Invoke-DownloadWithProgress {
+    <#
+    .SYNOPSIS
+        Download a URL to disk while emitting periodic progress
+        messages to the script's log channel (Write-Step / Write-Detail).
+
+    .DESCRIPTION
+        PS 5.1's Invoke-WebRequest has a notorious O(N^2) progress-bar
+        slowdown on multi-GB downloads, so the existing
+        Invoke-WebRequestWithRetry wrapper silences ProgressPreference
+        for performance. The trade-off is that long downloads (a 6 GB
+        ISO can take 10-15 minutes) produce no on-screen feedback for
+        the full duration, which is a poor user experience.
+
+        This function recovers visibility WITHOUT re-enabling the
+        slow built-in progress bar:
+
+          1. HEAD request first (cheap, ~1 second) to learn the
+             expected Content-Length when the server reports it.
+          2. Spawn a background Start-Job that runs the actual
+             Invoke-WebRequest with ProgressPreference suppressed,
+             so the worker still gets the fast-path streaming.
+          3. From the main thread, poll the destination file size
+             every -ProgressIntervalSec seconds and print:
+               "  ... 1,234.5 MB / 6,852.3 MB (18.0%) at 12.3 MB/s ETA 8m 12s"
+          4. On completion, print a final summary line with total
+             MB, elapsed time, and average MB/s.
+
+        Inspired by the Write-Step / Write-Detail / Set-DebugStep
+        idiom in Deploy-AMDChipsetDriverOnWindowsServer.ps1
+        (https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
+        but extended with the background-job + polling pattern to
+        give real-time feedback rather than only start/end markers.
+
+        Returns nothing; the file is at $OutFile on success and the
+        function throws on failure (network error, HTTP error, job
+        failure, or empty file).
+
+    .PARAMETER Uri
+        Source URL. Mandatory.
+
+    .PARAMETER OutFile
+        Destination file path. Mandatory. Parent directory must
+        already exist; the caller is responsible for any post-
+        download verification (SHA-256, atomic move, etc).
+
+    .PARAMETER Headers
+        Optional hashtable of HTTP request headers (e.g. User-Agent
+        override for CDNs that reject the default PowerShell UA).
+
+    .PARAMETER TimeoutSec
+        Per-attempt HTTP timeout passed to Invoke-WebRequest.
+        Default 600 (10 minutes), matching the upper bound the
+        Deploy-AMDChipsetDriver reference uses.
+
+    .PARAMETER ProgressIntervalSec
+        How often to print a "still going" progress line.
+        Default 5. Set to 0 to suppress progress lines and only
+        emit start/end markers.
+
+    .PARAMETER MinSizeBytes
+        If set (> 0) and the downloaded file is smaller than this,
+        the function deletes the file and throws. Defends against
+        the CDN-returns-error-page scenario the Deploy-AMD
+        reference also guards against (it expects >5 MB; ISO
+        downloads should expect >100 MB or >1 GB).
+
+    .NOTES
+        Threading model: PowerShell's Start-Job creates a separate
+        runspace; the worker has its own $ProgressPreference scope
+        and cannot pollute the caller's. The polling loop on the
+        main thread reads the *file system* (Get-Item .Length),
+        not any shared state with the worker - so there is no race.
+    #>
+    [CmdletBinding()]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)] [string]$Uri,
+        [Parameter(Mandatory)] [string]$OutFile,
+        [hashtable]$Headers,
+        [int]$TimeoutSec = 600,
+        [int]$ProgressIntervalSec = 5,
+        [long]$MinSizeBytes = 0
+    )
+
+    # ---- Phase 1: probe expected size via HEAD ----
+    Set-DebugStep -Step 'download-head-probe'
+    $expectedBytes = $null
+    $expectedMB = $null
+    try {
+        $headParams = @{
+            Uri             = $Uri
+            Method          = 'Head'
+            UseBasicParsing = $true
+            TimeoutSec      = 30
+            ErrorAction     = 'Stop'
+        }
+        if ($PSBoundParameters.ContainsKey('Headers') -and $Headers) {
+            $headParams['Headers'] = $Headers
+        }
+        $oldPp = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        try {
+            $headResp = Invoke-WebRequest @headParams
+        } finally {
+            $ProgressPreference = $oldPp
+        }
+        $clen = $null
+        if ($headResp.Headers.ContainsKey('Content-Length')) {
+            $clen = $headResp.Headers['Content-Length']
+        }
+        if ($clen) {
+            # Headers can be returned as string or string[] depending
+            # on the PowerShell version; coerce to the first element.
+            if ($clen -is [array]) { $clen = $clen[0] }
+            $expectedBytes = [long]$clen
+            $expectedMB = [math]::Round($expectedBytes / 1MB, 1)
+        }
+    } catch {
+        # HEAD not supported, or server rejects HEAD (some CDNs do).
+        # Continue without an expected-size estimate.
+    }
+
+    $fileName = [System.IO.Path]::GetFileName($Uri)
+    if ([string]::IsNullOrEmpty($fileName)) { $fileName = '(file)' }
+
+    Write-Step ('Downloading: {0}' -f $fileName)
+    Write-Step ('  URL    : {0}' -f $Uri)
+    Write-Step ('  Dest   : {0}' -f $OutFile)
+    if ($expectedBytes) {
+        Write-Step ('  Size   : {0:N1} MB (from Content-Length header)' -f $expectedMB)
+    } else {
+        Write-Step '  Size   : (unknown; server did not return Content-Length)'
+    }
+    Write-Step ('  Start  : {0:HH:mm:ss}' -f (Get-Date))
+
+    # ---- Phase 2: spawn background job for the actual download ----
+    Set-DebugStep -Step 'download-start-job'
+    $startTime = Get-Date
+    $workerScript = {
+        param($u, $o, $h, $t)
+        $oldPp = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        try {
+            $p = @{
+                Uri             = $u
+                OutFile         = $o
+                UseBasicParsing = $true
+                TimeoutSec      = $t
+                ErrorAction     = 'Stop'
+            }
+            if ($h) { $p['Headers'] = $h }
+            Invoke-WebRequest @p | Out-Null
+        } finally {
+            $ProgressPreference = $oldPp
+        }
+    }
+    $headersArg = if ($Headers) { $Headers } else { $null }
+    $job = Start-Job -ScriptBlock $workerScript -ArgumentList $Uri, $OutFile, $headersArg, $TimeoutSec
+
+    # ---- Phase 3: poll job state + file size, emit progress lines ----
+    Set-DebugStep -Step 'download-progress-poll'
+    $lastReportSec = 0
+    $progressLines = 0
+    try {
+        while ($job.State -eq 'Running') {
+            Start-Sleep -Milliseconds 500
+            if ($ProgressIntervalSec -le 0) { continue }
+            $elapsedSec = [int](New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds
+            if (($elapsedSec - $lastReportSec) -lt $ProgressIntervalSec) { continue }
+            $lastReportSec = $elapsedSec
+
+            if (-not (Test-Path -LiteralPath $OutFile)) { continue }
+            $curBytes = (Get-Item -LiteralPath $OutFile -ErrorAction SilentlyContinue).Length
+            if (-not $curBytes) { $curBytes = 0 }
+            $curMB = [math]::Round($curBytes / 1MB, 1)
+            $speedMBs = if ($elapsedSec -gt 0) { [math]::Round(($curBytes / 1MB) / $elapsedSec, 1) } else { 0.0 }
+
+            if ($expectedBytes -and $expectedBytes -gt 0) {
+                $pct = [math]::Round((100.0 * $curBytes) / $expectedBytes, 1)
+                $remainBytes = $expectedBytes - $curBytes
+                if ($speedMBs -gt 0 -and $remainBytes -gt 0) {
+                    $etaSec = [int](($remainBytes / 1MB) / $speedMBs)
+                    if ($etaSec -ge 60) {
+                        $etaStr = ('ETA {0}m {1:00}s' -f [int]($etaSec / 60), ($etaSec % 60))
+                    } else {
+                        $etaStr = ('ETA {0}s' -f $etaSec)
+                    }
+                } else {
+                    $etaStr = 'ETA --'
+                }
+                Write-Step ('  ... {0:N1} MB / {1:N1} MB ({2}%) at {3} MB/s {4}' -f $curMB, $expectedMB, $pct, $speedMBs, $etaStr)
+            } else {
+                # No expected size: print bytes downloaded + speed only
+                if ($elapsedSec -ge 60) {
+                    $elapsedStr = ('{0}m {1:00}s' -f [int]($elapsedSec / 60), ($elapsedSec % 60))
+                } else {
+                    $elapsedStr = ('{0}s' -f $elapsedSec)
+                }
+                Write-Step ('  ... {0:N1} MB at {1} MB/s ({2} elapsed)' -f $curMB, $speedMBs, $elapsedStr)
+            }
+            $progressLines++
+        }
+
+        # ---- Phase 4: receive worker result, propagate errors ----
+        Set-DebugStep -Step 'download-job-finalize'
+        if ($job.State -eq 'Failed') {
+            $jobErr = $null
+            try {
+                $null = Receive-Job -Job $job -ErrorAction Stop
+            } catch {
+                $jobErr = $_.Exception.Message
+            }
+            throw ('Download job failed for {0}: {1}' -f $Uri, $(if ($jobErr) { $jobErr } else { '(no error message)' }))
+        }
+        # Drain any output from the worker (should be empty -- we Out-Null'd it)
+        $null = Receive-Job -Job $job -ErrorAction SilentlyContinue
+    } finally {
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
+
+    # ---- Phase 5: post-download validation + summary line ----
+    Set-DebugStep -Step 'download-postcheck'
+    if (-not (Test-Path -LiteralPath $OutFile)) {
+        throw ('Download appeared to succeed but {0} does not exist' -f $OutFile)
+    }
+    $finalBytes = (Get-Item -LiteralPath $OutFile).Length
+    $finalMB = [math]::Round($finalBytes / 1MB, 1)
+    $totalSec = [int](New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds
+    if ($totalSec -lt 1) { $totalSec = 1 } # avoid div-by-zero on cached/very small DLs
+    $avgSpeed = [math]::Round(($finalBytes / 1MB) / $totalSec, 1)
+    if ($totalSec -ge 60) {
+        $totalStr = ('{0}m {1:00}s' -f [int]($totalSec / 60), ($totalSec % 60))
+    } else {
+        $totalStr = ('{0}s' -f $totalSec)
+    }
+
+    if ($MinSizeBytes -gt 0 -and $finalBytes -lt $MinSizeBytes) {
+        $minMB = [math]::Round($MinSizeBytes / 1MB, 1)
+        try { Remove-Item -LiteralPath $OutFile -Force -ErrorAction Stop } catch {
+            # best-effort cleanup; the next call to this function
+            # will overwrite the truncated file anyway
+        } # psa-disable-line PSA3004 -- best-effort cleanup of a truncated download
+        throw ('Downloaded file is only {0:N1} MB (expected >= {1:N1} MB). The CDN likely returned an error page or the connection was truncated. Try -IsoUrl with a known-good direct URL.' -f $finalMB, $minMB)
+    }
+
+    Write-Ok ('Downloaded: {0:N1} MB in {1} ({2} MB/s avg)' -f $finalMB, $totalStr, $avgSpeed)
+}
+
 function Invoke-WebRequestWithRetry {
     <#
     .SYNOPSIS
@@ -1873,11 +2138,13 @@ function Invoke-WebRequestWithRetry {
              scraping (Microsoft Learn release-info, .NET CU index, etc).
 
           2) File download (-OutFile <path>)
-             Streams the response body directly to the given path. Used
-             for large binaries (ISOs, MSU patches, wsusscn2.cab). The
-             progress bar is silenced before the call because PS 5.1
-             Invoke-WebRequest's progress reporting causes O(N^2)
-             slowdown on multi-GB downloads.
+             Delegates to Invoke-DownloadWithProgress, which uses a
+             background Start-Job + main-thread file-size polling to
+             give the user "X MB / Y MB at Z MB/s ETA Ns" progress
+             lines every few seconds. The underlying Invoke-WebRequest
+             still runs with ProgressPreference='SilentlyContinue' to
+             avoid PS 5.1's O(N^2) progress-bar slowdown on multi-GB
+             downloads.
 
         Retries on transient errors (network + HTTP 429/503) with
         exponential backoff; bails on the final attempt with the
@@ -1888,9 +2155,9 @@ function Invoke-WebRequestWithRetry {
         Source URL. Mandatory.
 
     .PARAMETER OutFile
-        When provided, the response body is saved to this path instead
-        of being returned in memory. The caller is responsible for any
-        post-download verification (SHA-256, atomic move, etc).
+        When provided, the response body is saved to this path via
+        Invoke-DownloadWithProgress. The caller is responsible for
+        any post-download verification (SHA-256, atomic move, etc).
 
     .PARAMETER Headers
         Optional hashtable of HTTP request headers (e.g. custom
@@ -1903,7 +2170,10 @@ function Invoke-WebRequestWithRetry {
         original parameter name.
 
     .PARAMETER TimeoutSec
-        Per-attempt HTTP timeout. Default 60.
+        Per-attempt HTTP timeout. Default 60 for in-memory fetches.
+        For -OutFile downloads, this is passed through to
+        Invoke-DownloadWithProgress (which uses 600 by default
+        internally; the explicit value here wins).
     #>
     [CmdletBinding()]
     [OutputType([Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject])]
@@ -1919,6 +2189,28 @@ function Invoke-WebRequestWithRetry {
     $lastError = $null
     for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
         try {
+            if ($PSBoundParameters.ContainsKey('OutFile') -and $OutFile) {
+                # Delegate to the progress-aware helper. We give it
+                # the larger of TimeoutSec (the caller's value) and
+                # 600 seconds, because in-memory fetch timeouts are
+                # typically small (60s) but a multi-GB ISO can take
+                # 15+ minutes - whichever the caller specified, we
+                # honour it but never go below 600 for large DLs.
+                $effectiveTimeout = [Math]::Max($TimeoutSec, 600)
+                $progressParams = @{
+                    Uri        = $Uri
+                    OutFile    = $OutFile
+                    TimeoutSec = $effectiveTimeout
+                }
+                if ($PSBoundParameters.ContainsKey('Headers') -and $Headers) {
+                    $progressParams['Headers'] = $Headers
+                }
+                Invoke-DownloadWithProgress @progressParams
+                return
+            }
+
+            # In-memory fetch path: keep using Invoke-WebRequest directly.
+            # No progress bar concerns since the payload is small (HTML/JSON).
             $params = @{
                 Uri             = $Uri
                 TimeoutSec      = $TimeoutSec
@@ -1927,25 +2219,6 @@ function Invoke-WebRequestWithRetry {
             }
             if ($PSBoundParameters.ContainsKey('Headers') -and $Headers) {
                 $params['Headers'] = $Headers
-            }
-            if ($PSBoundParameters.ContainsKey('OutFile') -and $OutFile) {
-                $params['OutFile'] = $OutFile
-                # Silence the progress bar for the duration of the call.
-                # PS 5.1's Invoke-WebRequest progress reporting causes
-                # severe slowdown on multi-GB downloads; the canonical
-                # workaround is to set $ProgressPreference temporarily.
-                # We mutate the function-local copy only -- PowerShell's
-                # dynamic-scoped lookup means Invoke-WebRequest still
-                # observes 'SilentlyContinue' without polluting the
-                # caller's scope.
-                $oldPp = $ProgressPreference
-                $ProgressPreference = 'SilentlyContinue'
-                try {
-                    Invoke-WebRequest @params | Out-Null
-                } finally {
-                    $ProgressPreference = $oldPp
-                }
-                return
             }
             $response = Invoke-WebRequest @params
             return $response
@@ -7627,6 +7900,7 @@ function Get-IsoBootCertReadiness {
         $inv.ErrorMessage = ('boot.wim not found under {0}\sources' -f $ExtractedMediaPath)
         return $inv
     }
+    Write-Step ('  [1/4] Mounting boot.wim idx 1 read-only ...')
 
     # We mount boot.wim index 1 READ-ONLY (boot environment, not WinPE)
     # to inspect Windows\Boot\EFI_EX / FONTS_EX / DVD_EX directories
@@ -7640,9 +7914,12 @@ function Get-IsoBootCertReadiness {
             New-Item -ItemType Directory -Path $bootMount -Force | Out-Null
         }
         $mountedRo = $false
+        $stepStart = Get-Date
         try {
             $null = Mount-WindowsImage -ImagePath $bootWimPath -Index 1 -Path $bootMount -ReadOnly -ErrorAction Stop
             $mountedRo = $true
+            $stepElapsed = [int](New-TimeSpan -Start $stepStart -End (Get-Date)).TotalSeconds
+            Write-Step ('         boot.wim mounted ({0}s); inspecting EFI_EX / FONTS_EX / DVD_EX ...' -f $stepElapsed)
             $exBins   = Join-Path $bootMount 'Windows\Boot\EFI_EX'
             $exFonts  = Join-Path $bootMount 'Windows\Boot\FONTS_EX'
             $exDvd    = Join-Path $bootMount 'Windows\Boot\DVD_EX'
@@ -7656,14 +7933,22 @@ function Get-IsoBootCertReadiness {
             } else { $false }
 
             # boot.wim level (LCU month detection)
+            Write-Step '         enumerating boot.wim installed packages (Get-WindowsPackage) ...'
+            $pkgStart = Get-Date
             $bootLcu = Get-LcuVersionFromInstallWim -MountPath $bootMount
+            $pkgElapsed = [int](New-TimeSpan -Start $pkgStart -End (Get-Date)).TotalSeconds
+            Write-Step ('         boot.wim LCU level resolved ({0}s): highest KB = {1}' -f $pkgElapsed, $(if ($bootLcu.HighestKbId) { $bootLcu.HighestKbId } else { '(none)' }))
             $inv.BootWimHighestKb         = $bootLcu.HighestKbId
             $inv.BootWimHighestKbDate     = $bootLcu.HighestKbDate
             $inv.BootWimMeetsPca2023Prereq = $bootLcu.MeetsPca2023Prereq
         } finally {
             if ($mountedRo) {
+                Write-Step '  [2/4] Dismounting boot.wim (discard) ...'
+                $dismountStart = Get-Date
                 try {
                     $null = Dismount-WindowsImage -Path $bootMount -Discard -ErrorAction Stop
+                    $dismountElapsed = [int](New-TimeSpan -Start $dismountStart -End (Get-Date)).TotalSeconds
+                    Write-Step ('         boot.wim dismounted ({0}s)' -f $dismountElapsed)
                 } catch {
                     # Best-effort cleanup
                 } # psa-disable-line PSA3004 -- best-effort dismount; the WIM will be auto-released when the process exits
@@ -7682,6 +7967,7 @@ function Get-IsoBootCertReadiness {
     }
 
     # ---- bootx64.efi Authenticode chain check ----
+    Write-Step '         Inspecting bootx64.efi Authenticode signer chain ...'
     $bootX64 = Join-Path $ExtractedMediaPath 'efi\boot\bootx64.efi'
     if (Test-Path -LiteralPath $bootX64) {
         $authResult = Test-Pca2023AuthenticodeChain -Path $bootX64
@@ -7691,12 +7977,14 @@ function Get-IsoBootCertReadiness {
             $inv.BootX64IsPca2023  = $authResult.IsPca2023
             $inv.BootX64IsPca2011  = $authResult.IsPca2011
             $inv.BootX64ChainTokens = @($authResult.ChainTokens)
+            Write-Step ('         bootx64.efi signer: {0}' -f $authResult.SignerName)
         }
     }
 
     # ---- install.wim LCU level + SYSTEM hive SecureBoot keys ----
     $installWimPath = Join-Path $ExtractedMediaPath 'sources\install.wim'
     if (Test-Path -LiteralPath $installWimPath) {
+        Write-Step ('  [3/4] Mounting install.wim idx 1 read-only ...')
         $installMount = if ($WorkRoot) {
             Join-Path $WorkRoot ('mnt_installwim_pca2023_ro_{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
         } else {
@@ -7707,15 +7995,22 @@ function Get-IsoBootCertReadiness {
                 New-Item -ItemType Directory -Path $installMount -Force | Out-Null
             }
             $iwMounted = $false
+            $iwMountStart = Get-Date
             try {
                 $null = Mount-WindowsImage -ImagePath $installWimPath -Index 1 -Path $installMount -ReadOnly -ErrorAction Stop
                 $iwMounted = $true
+                $iwMountElapsed = [int](New-TimeSpan -Start $iwMountStart -End (Get-Date)).TotalSeconds
+                Write-Step ('         install.wim mounted ({0}s); enumerating installed packages ...' -f $iwMountElapsed)
+                $iwPkgStart = Get-Date
                 $installLcu = Get-LcuVersionFromInstallWim -MountPath $installMount
+                $iwPkgElapsed = [int](New-TimeSpan -Start $iwPkgStart -End (Get-Date)).TotalSeconds
+                Write-Step ('         install.wim LCU level resolved ({0}s): highest KB = {1}' -f $iwPkgElapsed, $(if ($installLcu.HighestKbId) { $installLcu.HighestKbId } else { '(none)' }))
                 $inv.InstallWimHighestKb         = $installLcu.HighestKbId
                 $inv.InstallWimHighestKbDate     = $installLcu.HighestKbDate
                 $inv.InstallWimMeetsPca2023Prereq = $installLcu.MeetsPca2023Prereq
 
                 # SYSTEM hive servicing keys
+                Write-Step '         reading SYSTEM hive SecureBoot servicing keys ...'
                 $servPath = 'ControlSet001\Control\SecureBoot\Servicing'
                 $inv.UEFICA2023Status = Get-WimSystemHiveValue -WimMountPath $installMount -RelativeRegPath $servPath -ValueName 'UEFICA2023Status'
                 $inv.UEFICA2023Error  = Get-WimSystemHiveValue -WimMountPath $installMount -RelativeRegPath $servPath -ValueName 'UEFICA2023Error'
@@ -7725,8 +8020,12 @@ function Get-IsoBootCertReadiness {
                 }
             } finally {
                 if ($iwMounted) {
+                    Write-Step '  [4/4] Dismounting install.wim (discard) ...'
+                    $iwDismountStart = Get-Date
                     try {
                         $null = Dismount-WindowsImage -Path $installMount -Discard -ErrorAction Stop
+                        $iwDismountElapsed = [int](New-TimeSpan -Start $iwDismountStart -End (Get-Date)).TotalSeconds
+                        Write-Step ('         install.wim dismounted ({0}s)' -f $iwDismountElapsed)
                     } catch {
                         # Best-effort cleanup
                     } # psa-disable-line PSA3004 -- best-effort dismount; the WIM will be auto-released when the process exits
@@ -9796,13 +10095,16 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
           - -EnablePca2023BootManager not set
           - OsKey == 'Server2025' AND -ForcePca2023OnServer2025 not set
           - Pre-flight readiness Health == 'Critical' (LCU prereq
-            not met; we would only produce a corrupted ISO)
+            not met; we would only produce a corrupted ISO -- this
+            is a SKIP, not a throw, so dry-run inspection can
+            proceed to P11+)
+          - Pre-flight readiness Health == 'Healthy' (already signed,
+            nothing to do)
     #>
     Start-DebugTrace -Context 'Invoke-BuildPhase10_ConvertPca2023BootManager' -PhaseId 'P10'
     try {
-        Write-SubSection 'PCA2023 boot manager conversion (optional)'
-
-        # ---- Pre-flight gates ----
+        Write-SubSection 'Step 1: Pre-flight gates'
+        Set-DebugStep -Step 'gate-EnablePca2023BootManager'
 
         if (-not $Script:EnablePca2023BootManager) {
             Write-Step 'Skipped: -EnablePca2023BootManager not specified (default OFF).'
@@ -9810,7 +10112,9 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             return
         }
 
+        Set-DebugStep -Step 'gate-Server2025'
         $osKey = if ($Script:OsProfile) { $Script:OsProfile.OsKey } else { $null }
+        Write-Step ('OsKey: {0}' -f $osKey)
         if ($osKey -eq 'Server2025' -and -not $Script:ForcePca2023OnServer2025) {
             Write-Step ('Skipped: OsKey={0}. Server 2025 firmware already includes 2023 certs.' -f $osKey)
             Write-Step '         Pass -ForcePca2023OnServer2025 to override (advanced use only).'
@@ -9818,6 +10122,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             return
         }
 
+        Set-DebugStep -Step 'gate-ExtractedDir'
         # The extracted media path is set up by P05 ExpandIso into
         # $Script:ExtractedDir (initialised at script-scope, around
         # L496: Join-Path $Script:SourceDir 'extracted'). The variable
@@ -9828,16 +10133,41 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         if (-not $extractedPath -or -not (Test-Path -LiteralPath $extractedPath)) {
             throw 'P10 requires P05 ExpandIso to have produced an extracted media tree. Run -Action All or -Action Build.'
         }
+        Write-Step ('Extracted media path: {0}' -f $extractedPath)
+        Write-Step 'Pre-flight gates: all passed.'
 
-        # Pre-flight readiness check (uses the cached snapshot if available)
+        # ---- Step 2: Pre-flight readiness snapshot ----
+        Write-SubSection 'Step 2: Boot manager readiness snapshot (pre-conversion)'
         Set-DebugStep -Step 'preflight-readiness'
+        Write-Step 'Inspecting boot.wim + install.wim for PCA2023 readiness...'
+        Write-Step '  (this mounts each WIM read-only and enumerates installed packages;'
+        Write-Step '   typical runtime 1-3 minutes for Server 2016/2019/2022 media)'
+        $snapshotStart = Get-Date
         $pre = Get-OrEnsurePca2023Snapshot `
             -ExtractedMediaPath $extractedPath `
             -WorkRoot $Script:WorkRoot `
             -OsKey $osKey
+        $snapshotElapsed = [int](New-TimeSpan -Start $snapshotStart -End (Get-Date)).TotalSeconds
+        Write-Step ('Snapshot Health = {0} (computed in {1}s)' -f $pre.Health, $snapshotElapsed)
         if ($pre.Health -eq 'Critical') {
-            $reasonText = ($pre.Reasons | ForEach-Object { "  - $_" }) -join "`n"
-            throw ("P10 pre-flight failed: snapshot Health is 'Critical'. The source media does not meet the 2024-4B (April 2024 LCU) prerequisite. Run P03 RefreshPatchBaseline and rebuild.`n$reasonText")
+            # SKIP, not throw: the prereq mismatch is informational
+            # for dry-run inspection (PrepareBuildVerify). The
+            # downstream phases (P11 StaticVerify, P12 VerifyPca2023Readiness,
+            # P13 FinalReport) can still run and surface this state
+            # in the final report. A hard throw here would abort
+            # PrepareBuildVerify prematurely, hiding the rest of the
+            # inspection from the user.
+            Write-Warn ('P10 SKIPPED: snapshot Health is ''Critical''. The source media does not meet the 2024-4B (April 2024 LCU) prerequisite for PCA2023 boot manager conversion.')
+            foreach ($r in $pre.Reasons) {
+                Write-Warn ('  - {0}' -f $r)
+            }
+            Write-Warn 'To enable PCA2023 conversion on this OS, two conditions must be met:'
+            Write-Warn '  1. Profile EnableInstallWimUpdate=true (so P07 applies LCUs to install.wim)'
+            Write-Warn '  2. Patch baseline must include the 2024-4B LCU (KB5036899) or a later LCU'
+            Write-Warn '     Server 2016/2019/2022 EVAL ISOs ship with 2016/2019/2022-era builds and need years of LCUs first.'
+            Write-Warn 'P11 StaticVerify, P12 VerifyPca2023Readiness, and P13 FinalReport will still run and record this state.'
+            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
+            return
         }
         if ($pre.Health -eq 'Healthy') {
             Write-Step 'Skipped: ISO is ALREADY PCA2023-signed (Health=Healthy). No conversion needed.'
@@ -9846,7 +10176,8 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         }
         Write-Step ('Pre-flight OK: Health={0}. Proceeding with conversion.' -f $pre.Health)
 
-        # ---- Run the conversion ----
+        # ---- Step 3: Run the conversion ----
+        Write-SubSection 'Step 3: Convert boot manager to PCA2023 signing'
         Set-DebugStep -Step 'conversion'
         $convResult = $null
         if ($Script:Pca2023ScriptPath) {
@@ -9864,6 +10195,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
                 '-TargetType', 'ISO',
                 '-ISOPath', $isoOut
             )
+            Write-Step ('Invoking child pwsh with -MediaPath {0} -TargetType ISO -ISOPath {1}' -f $extractedPath, $isoOut)
             $stdout = & pwsh @childArgs 2>&1
             $childExit = $LASTEXITCODE
             $stdout | ForEach-Object { Write-Step ('  [child] {0}' -f $_) }
@@ -9877,9 +10209,12 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             }
         } else {
             Write-Step 'Using internal Convert-WimBootToPca2023Signed (PSA-clean implementation).'
+            $convStart = Get-Date
             $convResult = Convert-WimBootToPca2023Signed `
                 -ExtractedMediaPath $extractedPath `
                 -WorkRoot $Script:WorkRoot
+            $convElapsed = [int](New-TimeSpan -Start $convStart -End (Get-Date)).TotalSeconds
+            Write-Step ('Convert-WimBootToPca2023Signed completed in {0}s' -f $convElapsed)
             if (-not $convResult.Success) {
                 throw ('Convert-WimBootToPca2023Signed failed: {0}' -f $convResult.ErrorMessage)
             }
@@ -9890,33 +10225,42 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             Write-Step ('  - {0}' -f $f)
         }
 
-        # ---- Re-assemble ISO with the updated boot manager ----
+        # ---- Step 4: Re-assemble ISO + post-flight verification ----
+        Write-SubSection 'Step 4: Re-assemble ISO and post-flight verification'
         # If the user already produced an output ISO in P09, that ISO
         # is now stale: the on-disk file still has the old PCA2011 boot
         # manager. We need to regenerate it from the (now-updated)
         # extracted media tree.
         if ($Script:OutputIsoPath -and (Test-Path -LiteralPath $Script:OutputIsoPath)) {
             Set-DebugStep -Step 'reassemble-iso'
-            Write-Step 'Regenerating output ISO from updated extracted media...'
+            Write-Step 'Regenerating output ISO from updated extracted media (oscdimg)...'
             # Reuse the existing oscdimg-based assembly helper. The
             # volume label is recovered from the existing output ISO's
             # filename root (Windows Server ISO labels are typically
             # the basename of the .iso file).
             $isoLabel = [System.IO.Path]::GetFileNameWithoutExtension($Script:OutputIsoPath)
+            $reasmStart = Get-Date
             New-BootableIso `
                 -ExtractedIsoRoot $extractedPath `
                 -OutputIsoPath $Script:OutputIsoPath `
                 -VolumeLabel $isoLabel | Out-Null
-            Write-Step ('ISO re-assembled: {0}' -f $Script:OutputIsoPath)
+            $reasmElapsed = [int](New-TimeSpan -Start $reasmStart -End (Get-Date)).TotalSeconds
+            Write-Step ('ISO re-assembled in {0}s: {1}' -f $reasmElapsed, $Script:OutputIsoPath)
+        } else {
+            Write-Step 'No output ISO file present (Sandbox/PrepareBuildVerify mode); skipping re-assembly.'
         }
 
         # ---- Force-refresh the snapshot so downstream phases see new state ----
         Set-DebugStep -Step 'post-flight-snapshot'
+        Write-Step 'Re-inspecting boot manager state (post-conversion)...'
+        $postStart = Get-Date
         $post = Get-OrEnsurePca2023Snapshot `
             -ExtractedMediaPath $extractedPath `
             -WorkRoot $Script:WorkRoot `
             -OsKey $osKey `
             -Force
+        $postElapsed = [int](New-TimeSpan -Start $postStart -End (Get-Date)).TotalSeconds
+        Write-Step ('Post-flight snapshot Health = {0} (computed in {1}s)' -f $post.Health, $postElapsed)
         Show-Pca2023ReadinessSnapshot -Snapshot $post -Compact
 
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.ok') -Force | Out-Null

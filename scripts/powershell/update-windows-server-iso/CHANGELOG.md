@@ -16,7 +16,169 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 15 - Fix `$Script:ExtractedMediaPath` and `$Script:WorkRootFull` typos in P10/P12 (this release)
+### r07.0 Step 16 - P10 progress logging, Critical-Health skip-with-warn, and `Invoke-DownloadWithProgress` utility (this release)
+
+Three UX improvements bundled under one release because they
+share the same theme - making long-running phases emit visible
+progress instead of silent multi-minute pauses.
+
+**Observed regression that motivated the changes.** The Step 15
+run got all the way through P01 - P09 cleanly, then P10 ran for
+1m54.9s with no on-screen output before throwing
+`P10 pre-flight failed: snapshot Health is 'Critical'`. The user
+correctly observed three problems:
+
+1. The throw was wrong UX for `-Action PrepareBuildVerify` - the
+   action is a dry-run inspection, and the prereq mismatch is
+   *information*, not a hard failure that should abort before
+   P11/P12/P13 even run.
+2. P10 was emitting one `Write-SubSection` header at entry and
+   then nothing for the entire 1m54s. The silent block was two
+   `Mount-WindowsImage` + `Get-WindowsPackage` enumerations
+   inside `Get-IsoBootCertReadiness` - which takes 30-90s per
+   WIM on commodity NVMe.
+3. The original ISO download (when the cache was empty) had the
+   same issue, just on a longer timescale - a 6 GB ISO would
+   download silently for 10-15 minutes with only "Downloading..."
+   and "Downloaded: {path}".
+
+**Fix 1: P10 Critical-Health throw -> skip-with-warn**.
+
+The P10 Critical branch now writes a structured `Write-Warn`
+with the snapshot reasons, prints two follow-up `Write-Warn`
+lines explaining how to enable PCA2023 conversion (profile
+`EnableInstallWimUpdate = true` + patch baseline must include
+2024-4B LCU `KB5036899` or later), drops the `P10.skipped`
+marker file that matches the existing skip-condition pattern,
+and returns cleanly so P11-P13 still run. The throw for missing
+`$Script:ExtractedDir` (workflow ordering violation) is preserved
+because P11-P13 would also fail without the extracted tree.
+
+**Fix 2: P10 step-by-step progress logging**.
+
+P10 is now restructured into four named steps with
+`Write-SubSection` headers matching the pattern P01-P09
+already use:
+
+- `Step 1: Pre-flight gates` (EnablePca2023BootManager check,
+  Server2025 advisory, ExtractedDir presence)
+- `Step 2: Boot manager readiness snapshot (pre-conversion)` -
+  the long block, now with start/end timings
+- `Step 3: Convert boot manager to PCA2023 signing` - external
+  or internal converter, with per-call elapsed-seconds
+- `Step 4: Re-assemble ISO and post-flight verification`
+
+Each step records its start time and prints
+`... completed in {0}s` so the user gets concrete progress
+even before the snapshot itself emits anything.
+
+The bigger win is propagating progress logging *into*
+`Get-IsoBootCertReadiness` - the function that was silent for
+the 1m54s. It now emits seven `Write-Step` lines as it runs:
+
+```
+  [1/4] Mounting boot.wim idx 1 read-only ...
+         boot.wim mounted (12s); inspecting EFI_EX / FONTS_EX / DVD_EX ...
+         enumerating boot.wim installed packages (Get-WindowsPackage) ...
+         boot.wim LCU level resolved (8s): highest KB = KB3211320
+  [2/4] Dismounting boot.wim (discard) ...
+         boot.wim dismounted (5s)
+         Inspecting bootx64.efi Authenticode signer chain ...
+         bootx64.efi signer: Microsoft Windows Production PCA 2011
+  [3/4] Mounting install.wim idx 1 read-only ...
+         install.wim mounted (28s); enumerating installed packages ...
+         install.wim LCU level resolved (35s): highest KB = KB3211320
+         reading SYSTEM hive SecureBoot servicing keys ...
+  [4/4] Dismounting install.wim (discard) ...
+         install.wim dismounted (16s)
+```
+
+Now the user sees exactly where time is going in real time.
+
+**Fix 3: `Invoke-DownloadWithProgress` utility**.
+
+The existing `Invoke-WebRequestWithRetry` correctly sets
+`$ProgressPreference = 'SilentlyContinue'` to dodge PS 5.1's
+O(N^2) progress-bar slowdown on multi-GB downloads, but the
+trade-off is total silence for the duration of the download. A
+new utility function recovers visibility *without* re-enabling
+the slow built-in progress bar.
+
+The technique is borrowed in spirit from
+`Deploy-AMDChipsetDriverOnWindowsServer.ps1` in the
+[usui-tk/Deploy-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
+repository (see its `Invoke-PrepPhase03_FetchInstaller` around
+L7808 - `Write-Step` before, `Write-Ok` after, post-download
+size validation against a minimum threshold), but extended with
+a background-job + main-thread-polling mechanism that the
+reference does not have. The reference can get away with
+just start/end markers because its payloads are 50-150 MB
+chipset installers; this script downloads multi-GB ISOs where
+the lack of mid-stream feedback is much more painful.
+
+Steps performed by the new function:
+
+1. HEAD request to learn expected `Content-Length` (~1 second;
+   optional - some CDNs reject HEAD with 405).
+2. Spawn a `Start-Job` worker that runs the actual
+   `Invoke-WebRequest` with `ProgressPreference = 'SilentlyContinue'`
+   in its own runspace.
+3. From the main thread, poll the destination file's size via
+   `Get-Item -LiteralPath ... | Length` every 5 seconds.
+4. Print one progress line per poll:
+   `  ... 1,234.5 MB / 6,852.3 MB (18.0%) at 12.3 MB/s ETA 8m 12s`
+5. On completion, print a final `Write-Ok` summary:
+   `[+] Downloaded: 6,852.3 MB in 9m 17s (12.3 MB/s avg)`
+6. Optional `-MinSizeBytes` post-download check; if the file is
+   smaller than the threshold, deletes it and throws an
+   actionable error message (the
+   "CDN returned an error page" defense).
+
+`Invoke-WebRequestWithRetry` is refactored so the `-OutFile`
+branch delegates to `Invoke-DownloadWithProgress`. The in-memory
+fetch path (HTML/JSON scraping for Microsoft Learn release-info,
+.NET CU index, MSU Catalog) keeps the original direct call - those
+responses are small and don't benefit from the background-job
+overhead. All existing call sites (the ISO download in P04 Step
+1, the MSU patch downloads in P04 Step 2, the wsusscn2.cab
+download for offline scanning) keep working unchanged; they
+now get progress output automatically.
+
+**Quality gates**. All five gates pass: BOM + CRLF + ASCII OK
+(12,154 lines), PS Parse OK, `psa.py` 0/0/0, PSScriptAnalyzer
+0 issues, T2-T10 all 6 tests PASS. No data files, workflows,
+or tests are touched - this is a pure PS1 + docs change.
+
+**Files changed**.
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  - Added `Format-MegabyteCount` helper (~16 lines).
+  - Added `Invoke-DownloadWithProgress` utility (~240 lines)
+    with `[OutputType([void])]` on its CmdletBinding.
+  - Refactored `Invoke-WebRequestWithRetry` `-OutFile` branch
+    to delegate (~30 lines net change).
+  - Restructured `Invoke-BuildPhase10_ConvertPca2023BootManager`
+    into four named steps with `Write-SubSection` headers,
+    per-step timings, and the Critical-Health skip-with-warn
+    branch (~90 lines net change).
+  - Added 14 progress `Write-Step` calls inside
+    `Get-IsoBootCertReadiness` (boot.wim mount/enum/dismount,
+    install.wim mount/enum/SYSTEM-hive/dismount).
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  - Added section B.23.21 and the matching matrix row.
+
+**Next**. Run the same `PrepareBuildVerify` command again and
+expect:
+
+1. P04 ISO/patches step now logs progress (or "cached" lines
+   if the local cache is hit, which it should be).
+2. P10 prints the four `Step 1-4` sub-section headers, then
+   the seven `Write-Step` lines from inside the snapshot.
+3. P10 ends with `Write-Warn` + skip-with-marker (no throw)
+   because the Server 2016 EVAL install.wim still has the 2017
+   highest KB; P11-P13 then continue normally.
+
+### r07.0 Step 15 - Fix `$Script:ExtractedMediaPath` and `$Script:WorkRootFull` typos in P10/P12
 
 Triggered by a failure observed on the freshly-pushed Step 14
 commit. With the P05 ExpandIso robocopy fix, the script

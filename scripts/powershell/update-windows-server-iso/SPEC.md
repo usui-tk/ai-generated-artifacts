@@ -2640,6 +2640,159 @@ run.
   Only the two typo families documented above represent
   real bugs.
 
+### B.23.21 P10 progress logging, Critical-Health skip-with-warn, and `Invoke-DownloadWithProgress` utility
+
+Three independent UX improvements bundled into one release
+because they share the same theme - making long-running phases
+emit visible progress instead of silent multi-minute pauses.
+
+**1. P10 Critical-Health skip-with-warn**.
+
+P10 `Invoke-BuildPhase10_ConvertPca2023BootManager` originally
+threw a hard exception when the pre-flight readiness snapshot
+reported `Health = 'Critical'` (install.wim LCU level below
+2024-04-09, the Make2023BootableMedia.ps1 prerequisite). On a
+fresh Server 2016/2019/2022 EVAL ISO with `EnableInstallWimUpdate
+= false` in the profile (the default for those OSes), the EVAL
+ISO ships with multi-year-old install.wim/boot.wim builds that
+do not meet the prereq, so the throw fires immediately on every
+PrepareBuildVerify run with `-EnablePca2023BootManager`.
+
+The throw was wrong UX for a dry-run inspection action:
+
+- the prereq mismatch is **informational**, not a script failure
+- the downstream phases (P11 StaticVerify, P12 VerifyPca2023Readiness,
+  P13 FinalReport) can still run usefully and *will record this
+  state in the final report*, which is exactly the diagnostic
+  the user wanted from PrepareBuildVerify
+- aborting at P10 hides the rest of the inspection from the user
+
+D-1: *change the throw to a skip-with-marker pattern*. The
+P10 Critical branch now writes a structured `Write-Warn` with
+the snapshot reasons, prints two follow-up `Write-Warn` lines
+explaining how to enable PCA2023 conversion (profile
+`EnableInstallWimUpdate = true` + patch baseline must include
+2024-4B LCU or later), creates the `P10.skipped` marker file
+that matches the existing skip-condition pattern, and returns
+cleanly so P11-P13 proceed.
+
+D-2: *keep the throw for missing extracted media tree*. The
+"P05 ExpandIso must have run" guard is a different category
+of error (workflow ordering violation) and continues to throw,
+because P11-P13 also need the extracted tree and would all fail
+the same way without it.
+
+**2. P10 step-by-step progress logging**.
+
+P10 was emitting one `Write-SubSection` header at entry and
+then nothing for 1-3 minutes until either the conversion
+completed or the prereq check threw. The silent block was the
+two `Mount-WindowsImage` + `Get-WindowsPackage` enumeration
++ `Dismount-WindowsImage` operations inside
+`Get-IsoBootCertReadiness` (which `Get-OrEnsurePca2023Snapshot`
+calls): mounting and enumerating a multi-GB WIM read-only
+takes 30-90 seconds per WIM on commodity NVMe storage, and
+P10 does it twice (boot.wim + install.wim).
+
+D-3: *restructure P10 into four named steps with sub-section
+headers*, matching the pattern other phases (P01-P09) already
+use:
+
+- `Step 1: Pre-flight gates` (EnablePca2023BootManager,
+  Server2025 advisory, ExtractedDir presence)
+- `Step 2: Boot manager readiness snapshot (pre-conversion)`
+  - the long block, now annotated with start/end timings
+- `Step 3: Convert boot manager to PCA2023 signing`
+  - either external Make2023BootableMedia.ps1 child process
+    or internal Convert-WimBootToPca2023Signed
+- `Step 4: Re-assemble ISO and post-flight verification`
+
+Each step calls `Set-DebugStep` with a stable step name for the
+debug-trace JSONL, and each operation that takes more than a
+few seconds records its own start time so the trailing
+`Write-Step ('... completed in {0}s' -f $elapsed)` line gives
+the user concrete elapsed-seconds feedback.
+
+D-4: *propagate progress logging into `Get-IsoBootCertReadiness`
+itself*. The function now emits seven `Write-Step` lines as it
+runs - one for each mount, package enumeration, dismount, and
+the bootx64.efi signer chain inspection in between. The format
+is `[N/4] action ...` for the top-level boundaries and
+`         sub-action ({elapsed}s)` for inside-step progress.
+This means every long-running operation in P10's silent block
+now self-reports.
+
+**3. `Invoke-DownloadWithProgress` utility**.
+
+The existing `Invoke-WebRequestWithRetry` was correctly setting
+`$ProgressPreference = 'SilentlyContinue'` around the
+`Invoke-WebRequest` call to dodge PS 5.1's O(N^2)
+progress-bar slowdown on multi-GB downloads. The trade-off
+was that a 6 GB ISO would download silently for 10-15 minutes
+with only "Downloading ISO..." at the start and "Downloaded:
+{path}" at the end - no MB-transferred counter, no speed
+estimate, no ETA.
+
+D-5: *add a new `Invoke-DownloadWithProgress` utility function*
+that gives real-time progress without re-enabling the slow
+progress bar. The technique:
+
+a. HEAD request first to learn the expected `Content-Length`
+   (~1 second cost, optional - some CDNs reject HEAD).
+b. Spawn a background `Start-Job` that runs the actual
+   `Invoke-WebRequest` with `ProgressPreference = 'SilentlyContinue'`
+   in its own runspace (so the worker still gets the fast path).
+c. From the main thread, poll the destination file's size
+   via `Get-Item -LiteralPath ... | Length` every
+   `-ProgressIntervalSec` seconds (default 5).
+d. Print one progress line per poll showing current MB /
+   expected MB, percentage, current speed in MB/s, and an
+   ETA computed from `(remaining_bytes / current_speed)`.
+e. On completion, print a final `Write-Ok` line with total
+   MB, formatted elapsed time, and average MB/s.
+f. Optional `-MinSizeBytes` post-download validation deletes
+   truncated downloads and throws an actionable error
+   message (matching the `if ($sizeBytes -lt 5MB) { throw }`
+   defensive pattern in
+   `Deploy-AMDChipsetDriverOnWindowsServer.ps1`'s
+   `Invoke-PrepPhase03_FetchInstaller`).
+
+D-6: *refactor `Invoke-WebRequestWithRetry` to delegate the
+OutFile branch to `Invoke-DownloadWithProgress`*. The in-memory
+fetch path (HTML/JSON scraping for Microsoft Learn release-info
+parsing, .NET CU index, MSU Catalog) keeps the original direct
+`Invoke-WebRequest` call - those responses are small (KBs to
+hundreds of KBs) and don't benefit from the background-job
+overhead. Only the file-download branch is rerouted. All
+existing callers keep working unchanged; they now get progress
+output automatically.
+
+D-7: *threading and correctness*. `Start-Job` creates an
+isolated runspace; the worker's `$ProgressPreference` mutation
+cannot leak into the caller's scope, and the polling loop
+reads file-system state (which is committed to disk by the
+worker as it streams) rather than any shared variable. There
+is no race: stale-read of the file length only reports a
+slightly-low number for that one poll, which is harmless.
+`Receive-Job` after the worker exits propagates any thrown
+exception from the worker; `Remove-Job -Force` in the `finally`
+block ensures the job slot is released even if the caller
+Ctrl-C's during the poll.
+
+**Reference acknowledgement**. The `Write-Step` /
+`Write-Detail` / `Set-DebugStep` idiom and the post-download
+size-validation pattern are borrowed from
+`Deploy-AMDChipsetDriverOnWindowsServer.ps1` in the
+[usui-tk/Deploy-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
+repository (see its `Invoke-PrepPhase03_FetchInstaller`
+function around line 7808). The
+background-job-plus-polling progress mechanism is a new
+addition not present in that reference; this script needs it
+because its file payloads (multi-GB ISOs) are an order of
+magnitude larger than the reference's payloads (50-150 MB
+chipset installers), and the lack of progress output is much
+more painful at that scale.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2664,6 +2817,7 @@ run.
 | B.23.18          | (new) — refines §A.4 P04 FetchAssets    | Replace 7 `Split-Path -LiteralPath ... -Leaf` / `-LeafBase` sites with `[System.IO.Path]::GetFileName` / `GetFileNameWithoutExtension`; documents the latent parameter-set bug (r07.0 Step 13) |
 | B.23.19          | (new) — refines §A.4 P05 ExpandIso       | Switch P05 drive-root copy to robocopy; fix P09 Dynamic Update overlay wildcard to use `-Path` (r07.0 Step 14) |
 | B.23.20          | (new) — refines §A.4 P10/P12 PCA2023     | Fix `$Script:ExtractedMediaPath` and `$Script:WorkRootFull` typos in P10/P12; 8 sites total (r07.0 Step 15) |
+| B.23.21          | (new) — refines §A.4 P10 + §C.1 download | P10 step-by-step progress logging + Critical-Health skip-with-warn; new `Invoke-DownloadWithProgress` utility (r07.0 Step 16) |
 
 ---
 
