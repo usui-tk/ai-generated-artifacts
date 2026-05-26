@@ -2414,6 +2414,71 @@ not in the seeding block where the bug actually lives).
   done after the next baseline schema cycle so we know which
   fields are truly invariant across the seeding entry points.
 
+### B.23.18 Path-leaf extraction: `[System.IO.Path]::GetFileName` over `Split-Path -LiteralPath -Leaf`
+
+The `Split-Path` cmdlet rejects the combination
+`-LiteralPath ... -Leaf` (and `-LiteralPath ... -LeafBase`)
+at runtime because, on PowerShell 5.1 and 7 alike,
+`-LiteralPath` and `-Leaf` belong to mutually exclusive
+parameter sets - `-LiteralPath` only combines with `-Resolve`
+and `-Credential`, while `-Leaf` only combines with the
+positional `-Path` form. The runtime surfaces this as
+`Parameter set cannot be resolved using the specified named
+parameters.` (`'指定された名前のパラメーターを使用してパラメーター
+セットを解決できません。'` in the ja-JP runtime). The
+collision is silent until the offending line actually
+executes; PSScriptAnalyzer does not flag the combination
+because the rules engine treats `-LiteralPath` and `-Leaf`
+as independent named parameters and never re-checks them
+against the cmdlet's parameter-set table.
+
+The script had eight sites using the invalid pair, all
+written before the parameter-set conflict was noticed.
+One earlier site, the `GetDirectoryName` migration around
+L1519 documented in B.13 (commit referenced in the inline
+comment), recognised the same class of error for the
+`-LiteralPath ... -Parent` pair and switched to
+`[System.IO.Path]::GetDirectoryName`. The other seven
+sites kept the broken combination because none of them
+ran in the regression test surface: P04 Step 2 'Patches'
+(L8827) was unreachable until Step 12 fixed the upstream
+empty-LocalPath bug, the DISM apply path (L7008/L7040)
+was only exercised live, the ISO-name helper (L2478) was
+called only on the actually-built path, and the side-car
+LeafBase computation (L8392) was on a code path that has
+not been triggered in the regression suite.
+
+**Design decisions**.
+
+- D-1: *Replace `-LiteralPath -Leaf` with
+  `[System.IO.Path]::GetFileName(...)`*. The .NET API
+  performs the same string-only operation as the cmdlet's
+  `-Leaf` branch (no wildcard expansion, no filesystem
+  access, no parameter-set resolution), is identical on
+  PowerShell 5.1 and 7, and matches the precedent already
+  set by the L1519 `GetDirectoryName` migration. The
+  alternative of switching to `Split-Path -Path` would
+  also work because `-Leaf` mode does not interpret
+  wildcards in the input, but it would introduce a
+  stylistic inconsistency with the surrounding
+  `GetDirectoryName` usage and silently accept paths
+  containing characters that PowerShell elsewhere treats
+  as wildcards (`[`, `]`, `*`, `?`).
+- D-2: *Replace `-LiteralPath -LeafBase` with
+  `[System.IO.Path]::GetFileNameWithoutExtension(...)`*.
+  Same reasoning as D-1; `LeafBase` corresponds exactly
+  to the .NET API name.
+- D-3: *Drop `-ErrorAction SilentlyContinue` from the
+  L7008 DryRun call*. The original site had
+  `Split-Path -LiteralPath $pkgPath -Leaf -ErrorAction
+  SilentlyContinue`, which silently swallowed the
+  parameter-set error and produced an empty `({2})`
+  placeholder in the log. The .NET API does not throw on
+  empty input (it returns an empty string), so the
+  silencing parameter is no longer needed and removing it
+  ensures any future regression on the input value
+  becomes visible.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2435,6 +2500,7 @@ not in the seeding block where the bug actually lives).
 | B.23.15          | (new) — refines §A.4 P01 prerequisites | New `-AutoInstallAdk` switch; `Install-WindowsAdkFallback` (r07.0 Step 8) |
 | B.23.16          | (new) — refines §B.2 (config schema)   | New `Iso.FwlinkUrl` field; refreshed `Iso.Url`/`FileName` for all 8 OS×language entries (r07.0 Step 10) |
 | B.23.17          | (new) — refines §A.4 P02 ResolveInputs | P02 + P03 patch seeding: derive `LocalPath` from `FileName` and guard empty `Sha256` from `ExpectedHashes` (r07.0 Step 12) |
+| B.23.18          | (new) — refines §A.4 P04 FetchAssets    | Replace 7 `Split-Path -LiteralPath ... -Leaf` / `-LeafBase` sites with `[System.IO.Path]::GetFileName` / `GetFileNameWithoutExtension`; documents the latent parameter-set bug (r07.0 Step 13) |
 
 ---
 

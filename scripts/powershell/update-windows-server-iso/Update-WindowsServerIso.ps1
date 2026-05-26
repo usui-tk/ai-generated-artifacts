@@ -2475,7 +2475,7 @@ function Get-IsoMetadata {
     [OutputType([pscustomobject])]
     param([Parameter(Mandatory)] [string]$IsoPath)
 
-    $name = Split-Path -LiteralPath $IsoPath -Leaf
+    $name = [System.IO.Path]::GetFileName($IsoPath)
     # Pattern 1: Server 2019/2022/2025 svc_refresh form
     $p1 = '^(?<build>\d{5})\.(?<rev>\d+)\.(?<date>\d{6}-\d{4})\.(?<branch>\w+)_(SERVER|CLIENT)_EVAL_(?<arch>x64FRE)_(?<lang>[a-z]{2}-[a-z]{2})\.iso$'
     # psa-disable-next-line PSA2003 -- $p1 is a local string variable, not bare null
@@ -5767,7 +5767,7 @@ function Add-WindowsPackageWithRetry {
     if (-not (Test-Path -LiteralPath $PackagePath)) {
         throw ('Package missing: {0}' -f $PackagePath)
     }
-    Set-DebugStep -Step ('add-pkg-' + (Split-Path -LiteralPath $PackagePath -Leaf))
+    Set-DebugStep -Step ('add-pkg-' + [System.IO.Path]::GetFileName($PackagePath))
 
     $logArg = @{}
     if ($LogDir) {
@@ -5780,7 +5780,7 @@ function Add-WindowsPackageWithRetry {
     } catch {
         $m = [string]$_.Exception.Message
         if ($m -match '0x800f081e') {
-            Write-Warn ('0x800f081e: Package not applicable, skipping: {0}' -f (Split-Path -LiteralPath $PackagePath -Leaf))
+            Write-Warn ('0x800f081e: Package not applicable, skipping: {0}' -f [System.IO.Path]::GetFileName($PackagePath))
             return 'NotApplicable'
         }
         if ($m -match '0x800f0a13') {
@@ -7005,7 +7005,7 @@ function Invoke-PatchSubPhase {
         $errMsg = ''
 
         if ($Script:DryRun) {
-            Write-Step ('    [DryRun] would apply {0}/{1} ({2})' -f $type, $kb, (Split-Path -LiteralPath $pkgPath -Leaf -ErrorAction SilentlyContinue))
+            Write-Step ('    [DryRun] would apply {0}/{1} ({2})' -f $type, $kb, [System.IO.Path]::GetFileName($pkgPath))
             $sw.Stop()
             $rows.Add([pscustomobject]@{
                 SubPhase     = $SubPhase.Name
@@ -7037,7 +7037,7 @@ function Invoke-PatchSubPhase {
         }
 
         Set-DebugStep -Step ('add-pkg:{0}:{1}' -f $SubPhase.Name, $kb)
-        Write-Step ('    Applying {0}/{1} ({2})' -f $type, $kb, (Split-Path -LiteralPath $pkgPath -Leaf))
+        Write-Step ('    Applying {0}/{1} ({2})' -f $type, $kb, [System.IO.Path]::GetFileName($pkgPath))
         try {
             $status = Add-WindowsPackageWithRetry -MountPath $MountPath `
                 -PackagePath $pkgPath -LogDir $Script:LogsDir
@@ -8389,7 +8389,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
             foreach ($f in $local) {
                 $hashes = @{}
                 # Look for a side-car .meta4 in the same folder
-                $sideCar = Join-Path $f.DirectoryName ((Split-Path -LiteralPath $f.FullName -LeafBase) + '.meta4')
+                $sideCar = Join-Path $f.DirectoryName ([System.IO.Path]::GetFileNameWithoutExtension($f.FullName) + '.meta4')
                 if (Test-Path -LiteralPath $sideCar) {
                     try {
                         $meta = Read-MetalinkManifest -Path $sideCar
@@ -8824,7 +8824,7 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
         $idx = 0
         foreach ($p in $Script:ResolvedPatches) {
             $idx++
-            $leaf = Split-Path -LiteralPath $p.LocalPath -Leaf
+            $leaf = [System.IO.Path]::GetFileName($p.LocalPath)
             Write-Step ('[{0}/{1}] {2}' -f $idx, $Script:ResolvedPatches.Count, $leaf)
 
             $isUrl = $p.Source -match '^https?://'

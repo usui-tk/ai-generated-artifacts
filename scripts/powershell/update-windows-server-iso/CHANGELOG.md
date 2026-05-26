@@ -16,7 +16,134 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 12 - Fix P02/P03 baseline seeding `LocalPath = ''` regression (this release)
+### r07.0 Step 13 - Fix latent `Split-Path -LiteralPath -Leaf` parameter-set conflict at 7 sites (this release)
+
+Triggered by a failure observed on the freshly-pushed Step 12
+commit. With the empty-LocalPath bug fixed, P04 finally
+reached Step 2 'Patches' and the very first per-patch
+statement hit a different runtime error:
+
+```
+[+] Existing ISO found (6.68 GB); skipping download.
+[*] Recorded ISO SHA-256: ceb4e1f786148782bd684853bda9c6177891da231eb0ca2b5a17130ec938b142
+ -- Step 2: Patches ---------------------------------------------
+ PHASE P04  -> FAILED   elapsed: 10.56s
+ [X] Phase P04 (FetchAssets) failed:
+     指定された名前のパラメーターを使用してパラメーター
+     セットを解決できません。
+ [~]     Invoke-FetchPhase04_FetchAssets, Update-WindowsServerIso.ps1: line 8827
+```
+
+Line 8827 contained
+`$leaf = Split-Path -LiteralPath $p.LocalPath -Leaf`.
+PowerShell rejects this combination at runtime on both
+5.1 and 7: `-LiteralPath` and `-Leaf` belong to mutually
+exclusive parameter sets. `-LiteralPath` only combines
+with `-Resolve` and `-Credential`; `-Leaf` only combines
+with the positional `-Path` form. The cmdlet docs do not
+emphasise this collision, PSScriptAnalyzer does not flag
+it as a static-analysis issue, and the `-LocalPath ...
+-Leaf` shape is so syntactically natural that it has
+slipped past review for multiple revisions of this
+script.
+
+The same parameter-set conflict was actually noticed
+earlier for the `-LiteralPath ... -Parent` pair (see the
+inline comment above the L1519 `[System.IO.Path]::
+GetDirectoryName` call, which already documents the
+`AmbiguousParameterSet at runtime` failure mode). The
+`-Leaf` and `-LeafBase` variants of the same bug
+continued to lurk in seven other places because their
+code paths were unreachable in the regression suite
+(P04 Step 2 only ran after Step 12; the DISM apply
+helpers ran only live; the side-car LeafBase site
+required a specific patch-directory layout).
+
+Step 13 replaces all seven sites with
+`[System.IO.Path]::GetFileName(...)` (or
+`GetFileNameWithoutExtension(...)` for the LeafBase
+case), matching the precedent set by the existing
+`GetDirectoryName` migration:
+
+```
+L2478:  $name = Split-Path -LiteralPath $IsoPath -Leaf
+     -> $name = [System.IO.Path]::GetFileName($IsoPath)
+
+L5770:  Set-DebugStep -Step ('add-pkg-' +
+            (Split-Path -LiteralPath $PackagePath -Leaf))
+     -> Set-DebugStep -Step ('add-pkg-' +
+            [System.IO.Path]::GetFileName($PackagePath))
+
+L5783:  Write-Warn (... -f
+            (Split-Path -LiteralPath $PackagePath -Leaf))
+     -> Write-Warn (... -f
+            [System.IO.Path]::GetFileName($PackagePath))
+
+L7008:  ... -f $type, $kb,
+            (Split-Path -LiteralPath $pkgPath -Leaf
+                                  -ErrorAction SilentlyContinue)
+     -> ... -f $type, $kb,
+            [System.IO.Path]::GetFileName($pkgPath)
+
+L7040:  ... -f $type, $kb,
+            (Split-Path -LiteralPath $pkgPath -Leaf)
+     -> ... -f $type, $kb,
+            [System.IO.Path]::GetFileName($pkgPath)
+
+L8392:  $sideCar = Join-Path $f.DirectoryName
+            ((Split-Path -LiteralPath $f.FullName -LeafBase)
+             + '.meta4')
+     -> $sideCar = Join-Path $f.DirectoryName
+            ([System.IO.Path]::GetFileNameWithoutExtension(
+             $f.FullName) + '.meta4')
+
+L8827:  $leaf = Split-Path -LiteralPath $p.LocalPath -Leaf
+     -> $leaf = [System.IO.Path]::GetFileName($p.LocalPath)
+```
+
+The L7008 call dropped its
+`-ErrorAction SilentlyContinue` parameter; that
+suppression was silently swallowing the parameter-set
+error all this time, leaving an empty `({2})` placeholder
+in the DryRun log without surfacing the bug. The .NET
+API does not throw on empty input (it returns an empty
+string), so future regressions on the input value will
+now become visible rather than hidden.
+
+Live verification awaits the operator's re-run. With the
+ISO cached at `D:\UpdateWsi\source\iso\WS2016_ja-jp.iso`
+and the SHA-256 already recorded, P04 Step 1 will skip
+the download within ~10 seconds and Step 2 should reach
+the actual patch downloads:
+
+```
+[1/2] windows10.0-kb5087537-x64_1a68955...msu
+    [~1.5 GB LCU download from catalog.s.download.windowsupdate.com]
+[2/2] windows10.0-kb5087065-x64-ndp48_631ce425...msu
+    [~70 MB .NET CU download]
+```
+
+Files changed:
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  - Seven `Split-Path -LiteralPath ... -Leaf` /
+    `-LeafBase` sites replaced with `[System.IO.Path]
+    ::GetFileName` / `::GetFileNameWithoutExtension`.
+  - One `-ErrorAction SilentlyContinue` dropped (L7008)
+    because the underlying call no longer throws.
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  - Added section B.23.18 documenting the parameter-set
+    collision and the migration policy. Added the
+    matching matrix row.
+
+No data files, workflows, or tests are touched. Three
+in-source comments still mention `Split-Path
+-LiteralPath` (one is the original L1519 documentation
+that motivated this migration; the other two are
+`Step 12` rationale strings added in the previous
+revision and intentionally kept as historical context).
+
+### r07.0 Step 12 - Fix P02/P03 baseline seeding `LocalPath = ''` regression
 
 Triggered by a failure observed on the freshly-pushed Step 11
 commit, immediately after the ~13-minute Server 2016 ja-jp
