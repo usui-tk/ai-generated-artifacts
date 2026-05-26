@@ -2247,6 +2247,90 @@ adksetup.exe /features OptionId.DeploymentTools /quiet /norestart /ceip off /log
   advisory because ADK servicing patches may legitimately change
   the SHA-256 of the shipped `oscdimg.exe` over time.
 
+### B.23.16 Eval ISO URL: record both fwlink (metalink) and direct CDN URL
+
+Microsoft's Evaluation Center publishes each ISO via two URL forms:
+
+1. A **fwlink metalink** under `https://go.microsoft.com/fwlink/p/?LinkID=<id>&clcid=<lcid>`.
+   The linkid (with the optional clcid query parameter) is the
+   stable, Microsoft-maintained identifier; redirection through
+   this URL always lands on the current canonical ISO for the
+   selected OS and locale.
+2. A **direct CDN URL** under `https://software-static.download.prss.microsoft.com/...`
+   or `https://download.microsoft.com/download/...`. This is what
+   the fwlink redirects to. It is faster (one fewer round trip)
+   but its host and path rotate periodically as Microsoft
+   refreshes the ISO build (for example, when an OS's monthly
+   service refresh is republished as a new evaluation ISO).
+   Historical direct-URL hosts seen across this script's lifetime
+   include `software-download.microsoft.com/download/sg/`,
+   `software-download.microsoft.com/download/pr/`,
+   `software-static.download.prss.microsoft.com/sg/download/`,
+   `software-static.download.prss.microsoft.com/dbazure/`, and
+   `software-static.download.prss.microsoft.com/pr/download/`.
+
+To capture both forms without losing either, every
+`LanguageSpecific.<lang>.Iso` block in `data/config-Server*.json`
+carries two URL fields:
+
+```
+"Iso": {
+    "FileName":   "<canonical basename of the ISO>",
+    "Url":        "<direct CDN URL>",
+    "FwlinkUrl":  "<fwlink metalink>",
+    "Sha256":     "",
+    ...
+}
+```
+
+**Design decisions**.
+
+- D-1: *Direct URL is the runtime source*. The script's
+  `Resolve-IsoSourceUrl` reads `Iso.Url` and uses it verbatim for
+  `Invoke-WebRequestWithRetry -Uri ... -OutFile ...`. This is the
+  fastest path: one DNS lookup + one HTTPS GET, no redirect
+  chase. The trade-off is that when Microsoft rotates the direct
+  URL we get an HTTP 4xx (typically 400 Bad Request as observed
+  in the field for `software-download.microsoft.com` retirements)
+  and the operator must refresh the URL in the config.
+
+- D-2: *Fwlink is recorded but not consumed by default*. The new
+  `Iso.FwlinkUrl` field serves three purposes:
+  (a) documentation for human reviewers of the config,
+  (b) a recoverable starting point when the direct URL rotates -
+      the operator can paste the fwlink into a browser to
+      observe the new direct URL via the 302 redirect, then
+      patch the config,
+  (c) a future opt-in code path: a `-PreferFwlinkUrl` switch (not
+      implemented in this revision) could let
+      `Resolve-IsoSourceUrl` try the fwlink first and fall back
+      to `Url` on failure, trading one extra HTTPS round trip
+      for resilience against direct-URL rotation. The switch is
+      reserved for a future step but the data shape already
+      supports it.
+
+- D-3: *Locale-mismatched clcid is benign for fwlink*. For
+  Server 2025 the fwlink uses *separate* linkids per language
+  (linkid=2345730 for en-us, linkid=2345828 for ja-jp); the clcid
+  parameter is therefore ornamental for that OS. For Server
+  2016 / 2019 / 2022 a *single* linkid is shared across both
+  languages (e.g. 2195174 for Server 2016) and the `clcid` query
+  string selects the language: `clcid=0x409` for en-us,
+  `clcid=0x411` for ja-jp. Recorded URLs use the
+  locale-consistent clcid value for each language so reviewers
+  are not confused by mismatched query strings, even when the
+  underlying server treats the parameter as redundant.
+
+- D-4: *FileName tracks the direct URL's basename*. When
+  Microsoft refreshes the ISO build the filename component of
+  the direct URL changes (e.g. Server 2019 has been republished
+  as `17763.737.190906-2324...` → `17763.3650.221105-1748...`,
+  and Server 2025 as `26100.1742.240906-0331.ge_release_...` →
+  `26100.32230.260111-0550.lt_release_...`). Keeping
+  `Iso.FileName` synchronised with the live URL avoids stale
+  metadata in `data/raw-*.meta.json` and in operator-facing log
+  output during P02 ResolveInputs.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2266,6 +2350,7 @@ adksetup.exe /features OptionId.DeploymentTools /quiet /norestart /ceip off /log
 | B.23.13          | Amends §B.6 (Action mapping)       | New `-Action InspectBaseline -PatchMonth YYYY-MM` (read-only) |
 | B.23.14          | Amends §B.22.2; supersedes part of §B.23.7 | New `stage5__data-snapshot.yml`; stage4 narrowed; PoC → T6-T8 |
 | B.23.15          | (new) — refines §A.4 P01 prerequisites | New `-AutoInstallAdk` switch; `Install-WindowsAdkFallback` (r07.0 Step 8) |
+| B.23.16          | (new) — refines §B.2 (config schema)   | New `Iso.FwlinkUrl` field; refreshed `Iso.Url`/`FileName` for all 8 OS×language entries (r07.0 Step 10) |
 
 ---
 

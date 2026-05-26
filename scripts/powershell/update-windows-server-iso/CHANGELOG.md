@@ -16,7 +16,92 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 9 - Fix P02 NeutralPatches lookup, fix P04 ISO/patch download path, polish ADK auto-install (this release)
+### r07.0 Step 10 - Refresh Eval ISO URLs for all 4 supported Server OSes; record fwlink (metalink) alongside direct CDN URL (this release)
+
+Pure data refresh triggered by an HTTP 400 Bad Request from
+P04 FetchAssets when downloading the Server 2016 ja-jp ISO:
+
+```
+PHASE P04 (FetchAssets) failed:
+  リモート サーバーがエラーを返しました: (400) 要求が不適切です
+  at Invoke-WebRequestWithRetry, line 1944
+  Source URL: https://software-download.microsoft.com/download/sg/14393.0.161119-1705.RS1_REFRESH_SERVER_EVAL_X64FRE_JA-JP.ISO
+```
+
+The Microsoft Evaluation Center had retired the
+`software-download.microsoft.com/download/sg/` host; live
+verification with `software-static.download.prss.microsoft.com`
+and `download.microsoft.com/download/E/0/9/...` (Server 2016
+ja-jp specifically uses the legacy Download Center GUID path)
+confirmed the new canonical URLs. Step 9's fixes to
+`Invoke-WebRequestWithRetry` and the P02 NeutralPatches lookup
+both proven correct - the function reached Microsoft and got a
+clean HTTP 400 with three retry attempts in the expected
+backoff cadence (2 s, 4 s, then bail), which is exactly the
+behaviour intended by the retry wrapper.
+
+This step refreshes the URL pool. For each of the 4 OSes
+(Server2016, 2019, 2022, 2025) and 2 languages (en-us, ja-jp),
+the `LanguageSpecific.<lang>.Iso` block now carries:
+
+- `Url` - the **current** direct CDN URL (what the script
+  actually downloads). Hosts vary per OS:
+  - Server 2016 en-us:  `software-static.download.prss.microsoft.com/pr/download/`
+  - Server 2016 ja-jp:  `download.microsoft.com/download/E/0/9/`
+  - Server 2019 (both): `software-static.download.prss.microsoft.com/dbazure/988969d5-.../17763.3650.221105-1748...`
+  - Server 2022 (both): `software-static.download.prss.microsoft.com/sg/download/888969d5-...`
+  - Server 2025 (both): `software-static.download.prss.microsoft.com/dbazure/998969d5-.../26100.32230.260111-0550...`
+- `FwlinkUrl` (NEW) - the canonical Microsoft fwlink metalink.
+  For Server 2016 / 2019 / 2022, a single linkid serves both
+  languages and the `clcid` query parameter selects the locale.
+  For Server 2025 each language has its own linkid (2345730 for
+  en-us, 2345828 for ja-jp). Recorded for documentation and as
+  a recoverable starting point when the direct URL rotates
+  again.
+- `FileName` - updated to match the direct URL's basename. Two
+  OSes saw a build refresh: Server 2019 from
+  `17763.737.190906-2324.rs5_release_svc_refresh` to
+  `17763.3650.221105-1748.rs5_release_svc_refresh`, and Server
+  2025 from `26100.1742.240906-0331.ge_release_svc_refresh` to
+  `26100.32230.260111-0550.lt_release_svc_refresh`. The codename
+  suffix change for Server 2025 (`ge_release` to `lt_release`)
+  reflects the underlying Windows codename rotation.
+- `_VerifiedDate` and `_VerifiedBy` - set to `2026-05-26` and
+  `manual:r07.0-Step10-IsoUrl-refresh` respectively, so the
+  next stage5 / RefreshAllBaselines audit knows when and by
+  whom each URL was last sighted live.
+
+No script logic changes in this step. `Resolve-IsoSourceUrl`
+still reads `Iso.Url` verbatim. A future opt-in
+`-PreferFwlinkUrl` switch could let the script try the fwlink
+first and fall back to `Url` on failure - the data shape
+already supports it - but that path is deferred until live
+URL rotations make it worth the extra HTTPS round trip per
+download. The recorded fwlink remains useful immediately: when
+a direct URL rotates, the operator can paste the fwlink into a
+browser, follow the 302 redirect to the new direct URL, and
+patch the config in one paste.
+
+Files changed:
+
+- `scripts/powershell/update-windows-server-iso/data/config-Server2016.json`
+- `scripts/powershell/update-windows-server-iso/data/config-Server2019.json`
+- `scripts/powershell/update-windows-server-iso/data/config-Server2022.json`
+- `scripts/powershell/update-windows-server-iso/data/config-Server2025.json`
+  - Updated `LanguageSpecific.{en-us,ja-jp}.Iso.{FileName,Url}`;
+    inserted new `Iso.FwlinkUrl` field; bumped
+    `_VerifiedDate` / `_VerifiedBy`.
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  - Added section B.23.16 (dual-URL design + locale-mismatched
+    clcid analysis + build-refresh notes) plus a matching row
+    in the §B.23 cross-reference matrix.
+
+Live verification awaits the operator's re-run of the same
+PrepareBuildVerify command that hit the HTTP 400 - it should
+now reach the ISO download successfully and continue through
+P04 to P05 ExpandIso.
+
+### r07.0 Step 9 - Fix P02 NeutralPatches lookup, fix P04 ISO/patch download path, polish ADK auto-install
 
 Live regression-test of `-Action PrepareBuildVerify -EvalIsoMode
 -UseBaselineOnly -AutoInstallAdk` against a freshly-provisioned
