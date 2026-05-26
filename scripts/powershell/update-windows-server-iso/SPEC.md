@@ -1814,8 +1814,8 @@ both PR diff size and SemVer signalling.
 **Decision**. The full Phase 3 implementation ships as a single
 release, **r07.0**. Specifically:
 
-- r05.1 (current) → r06.0 (SPEC + PoC, no `.ps1` change) →
-  **r07.0** (Phase 3 implementation, breaking change).
+- r05.1 → r06.0 (SPEC + PoC, no `.ps1` change) →
+  **r07.0** (current; Phase 3 implementation, breaking change).
 - The minor version jump from r05 → r07 (skipping r06 as a code
   release) reflects the SemVer convention that a breaking change
   warrants a major bump. r06.0 stays exclusively a documentation

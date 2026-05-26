@@ -16,6 +16,56 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.05.26-r07.0] - 2026-05-26
+
+**r07.0 — Phase 3 implementation (release-info-driven refresher; breaking change).**
+
+This is the consolidated r07.0 release that ships the SPEC.md Phase 3
+architecture defined in section B.23. Per SPEC B.23.10 the directory
+rename, schema bump and refresher rewrite are mutually dependent and
+ship as one atomic release; reviewers should treat the whole r07.0
+section below as a single coherent change. The release was assembled
+incrementally across six commits, each individually quality-gated;
+those commits are listed top-down below for traceability.
+
+The minor-version jump from r05 to r07 (skipping r06 as a code release)
+follows SemVer for breaking changes: `Resolve-PatchSetFromCatalog` and
+`Get-CatalogQueryTemplate` have been deleted, three new cache file
+types under `data/` have appeared, and the Config schema field set has
+gained the `Common.CatalogTitleTokens` extension. r06.0 stays
+exclusively a documentation release (the SPEC + PoC effort committed in
+`2935dbd` and `36f4d65`).
+
+The Patch-Tuesday-driven cache refresh automation (SPEC B.23.7 step 1-4
+automated) is **NOT** included in r07.0 per SPEC B.23.10; r07.0 ships
+manual-trigger only and the automation is deferred to r07.x.
+
+Cumulative quality-gate status at release: psa.py 0 / 0 / 0,
+PSScriptAnalyzer 0 findings, PowerShell parse OK, T2 13 / T3 10 /
+T6 13 / T7 16 / T8 20 / T9 18 / T10 18 = **108 / 108 assertions pass**.
+
+### r07.0 Step 3 - Version bump and r07.0 finalisation (this release)
+
+Mechanical release-finalisation commit. No behavioural change; the
+preceding Step 1 + 2a + 2b set is what r07.0 actually ships.
+
+- `$Script:ScriptVersion` bumped from `update-wsi-2026.05.25-r05.1`
+  to `update-wsi-2026.05.26-r07.0`. The script's identity string
+  now reflects the SemVer minor-jump documented in SPEC B.23.10.
+- `SPEC.md` section B.23.10's "(current)" marker moved from r05.1
+  to r07.0. Other r05.1 references in SPEC remain because they
+  document historical behaviour or comparisons that motivate the
+  r07.0 design; they are not "current version" claims.
+- `CHANGELOG.md` `[Unreleased]` block sealed into
+  `[update-wsi-2026.05.26-r07.0] - 2026-05-26` with this release
+  header. A fresh empty `[Unreleased]` block is added on top for
+  future r07.x work.
+
+Quality-gate status: psa.py 0 / 0 / 0, PSScriptAnalyzer 0 findings,
+PowerShell parse OK, T2 13/13, T3 10/10, T6 13/13, T7 16/16,
+T8 20/20, T9 18/18, T10 18/18. Cumulative 108/108 PASS unchanged
+from Step 2b Commit 4.
+
 ### r07.0 Step 2b (Refresher main-path migration part) - Cache-driven Resolve-PatchSetFromReleaseInfo replaces Title-scrape discovery (this release)
 
 This commit lands the **second half** of the Step 2b work scheduled

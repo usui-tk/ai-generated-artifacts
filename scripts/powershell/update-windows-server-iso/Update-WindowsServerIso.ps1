@@ -494,7 +494,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.25-r05.1'
+$Script:ScriptVersion = 'update-wsi-2026.05.26-r07.0'
 $Script:ScriptTag     = 'kbid-from-filename-and-rich-refresh-summary'
 $Script:ScriptHash    = '(unknown)'
 try {
