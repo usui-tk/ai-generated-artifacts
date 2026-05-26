@@ -2229,7 +2229,7 @@ top-level structure:
           "name": "psa.py",
           "version": "<X.Y.Z>",
           "informationUri": "...",
-          "rules": [ /* 46 rule descriptors */ ]
+          "rules": [ /* 49 rule descriptors */ ]
         }
       },
       "results": [ /* one entry per issue */ ],
