@@ -2925,6 +2925,63 @@ prior Write-PhaseHeader bug had blocked.
   in `tests/`. The test passes only if the non-compact
   branch returns without throwing.
 
+### B.23.24 P13 + script-tail finally: duplicate `Phase Timing Summary` cleanup via idempotent Show-PhaseSummary
+
+The Step 18 verification produced the first **fully-clean
+PrepareBuildVerify run** (P01-P13 all DONE, total 4m44s, exit
+0, no interactive prompts). One cosmetic defect surfaced in
+that successful output: the "Phase Timing Summary" table
+appeared **twice**.
+
+The two call sites are by design:
+
+- `Invoke-ReportPhase13_FinalReport` (around L10548) calls
+  `Show-PhaseSummary` as part of its body. This is specified
+  in Part B.5 P13 Step 1: "Show-PhaseSummary (timing + status
+  per phase)". The first instance of the table is part of
+  P13's body and prints between the P13 phase header and the
+  P13 phase footer.
+- The script-tail `finally` block (around L12167) also calls
+  `Show-PhaseSummary` as a safety net for runs that abort
+  before P13 (or hit the outer `catch`). Without this, an
+  early failure would leave the user with no timing
+  information at all.
+
+On a happy-path run both callers fire, producing the same
+table twice. The second print includes P13's own DONE row
+(P13 has just printed its footer), the first does not, so
+the two prints are not literally identical, but the visual
+"timing table twice" is jarring.
+
+**Design decisions**.
+
+- D-1: *Make `Show-PhaseSummary` idempotent at the function
+  level rather than coordinating between callers*. The
+  alternatives - removing the `finally` call (breaks the
+  safety net), removing the P13 call (violates SPEC.md Part
+  B.5), or threading a "P13 ran" flag through the script -
+  are all worse. A single boolean
+  `$Script:PhaseSummaryShown` initialised to `$false` at the
+  same site as `$Script:PhaseTimings` gives the cleanest
+  contract: the first caller prints, all subsequent callers
+  short-circuit.
+- D-2: *Preserve the safety-net guarantee*. If P13 does NOT
+  run (early failure, or `-Action` selection that excludes
+  P13), `$Script:PhaseSummaryShown` is still `$false` when
+  the `finally` block fires, so the table is printed as
+  before. The idempotency only affects the case where P13
+  ran first.
+- D-3: *Add a `-Force` switch for ad-hoc inspection / tests*.
+  Callers that want to re-print the table (regression tests
+  for the function itself, debug invocations) can pass
+  `-Force` to bypass the guard. Production callers never
+  use it.
+- D-4: *Promote `Show-PhaseSummary` to a documented advanced
+  function* with `[OutputType([void])]` and a multi-paragraph
+  `.SYNOPSIS` / `.DESCRIPTION`. The function used to be a
+  one-line wrapper; the additional design constraints
+  warrant proper documentation.
+
 ### B.23 Cross-reference matrix
 
 | §B.23 subsection | Supersedes / amends                | Implementation impact                              |
@@ -2952,6 +3009,7 @@ prior Write-PhaseHeader bug had blocked.
 | B.23.21          | (new) — refines §A.4 P10 + §C.1 download | P10 step-by-step progress logging + Critical-Health skip-with-warn; new `Invoke-DownloadWithProgress` utility (r07.0 Step 16) |
 | B.23.22          | (new) — refines §A.4 P12 / Show-Pca2023ReadinessSnapshot | Fix Write-PhaseHeader positional call that hung Show-Pca2023ReadinessSnapshot in non-compact mode (r07.0 Step 17) |
 | B.23.23          | (new) — refines §A.4 P12 / Show-Pca2023ReadinessSnapshot | Fix `(if ...)` mis-spelled subexpressions; should be `$(if ...)` at 5 sites (r07.0 Step 18) |
+| B.23.24          | (new) — refines Part B.5 P13 / Show-PhaseSummary | Make Show-PhaseSummary idempotent so the safety-net finally call does not duplicate P13's table (r07.0 Step 19) |
 
 ---
 

@@ -16,7 +16,131 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 18 - Fix `(if ...)` mis-spelled subexpressions in Show-Pca2023ReadinessSnapshot (this release)
+### r07.0 Step 19 - Eliminate duplicate Phase Timing Summary via idempotent Show-PhaseSummary (this release)
+
+The Step 18 verification produced the first **fully-clean
+end-to-end PrepareBuildVerify run** in r07.0 - and arguably
+in this script's lifetime to date - against a real Server 2016
+EVAL ja-jp source media. The 13-phase pipeline ran in 4m44s
+with exit 0 and no interactive prompts:
+
+```
+P01   DONE     elapsed: 0.14s
+P02   DONE     elapsed: 0.11s
+P03   DONE     elapsed: 0.02s  (skipped, -UseBaselineOnly)
+P04   DONE     elapsed: 17.43s (ISO + 2 patches all cached)
+P05   DONE     elapsed: 35.82s (robocopy 6.68 GB + WIM enum)
+P06   DONE     elapsed: 0.02s  (skipped, -UseBaselineOnly)
+P07   DONE     elapsed: 0.02s  (EnableInstallWimUpdate=false)
+P08   DONE     elapsed: 0.02s  (EnableBootWimUpdate=false)
+P09   DONE     elapsed: 0.02s  (Sandbox mode)
+P10   DONE     elapsed: 1m54s  (Critical health -> skip-with-warn)
+P11   DONE     elapsed: 0.03s  ("Output ISO missing" recorded)
+P12   DONE     elapsed: 1m56s  (full non-compact rendering OK)
+P13   DONE     elapsed: 0.05s  (FinalReport with PCA2023 summary)
+```
+
+All 14 progress lines in P10 and P12 rendered cleanly,
+including the EFI_EX / FONTS_EX / DVD_EX detail lines that
+the Step 18 `$(if ...)` fix unblocked. The Step 17 fix kept
+the non-compact rendering path from hanging on the broken
+Write-PhaseHeader call. The Step 16 progress logging made
+the WIM mount/dismount cycles visible in real time. The
+mojibake from Step 16 did not recur (fresh WorkRoot).
+
+This is the **dry-run completion milestone**.
+
+**Remaining cosmetic defect surfaced by the milestone run.**
+The "Phase Timing Summary" table appeared twice in the
+console output - once as part of P13's body (per SPEC.md
+Part B.5 P13 Step 1), and once again from the script-tail
+`finally` block. Both call sites are by design: P13 prints
+the table because SPEC says it does; the `finally` block
+prints it as a safety net so an aborted run still gets the
+timing table. The duplication on a happy-path run was a
+coordination gap.
+
+**Fix**. Make `Show-PhaseSummary` itself idempotent rather
+than coordinate between callers. A new
+`$Script:PhaseSummaryShown` flag (initialised to `$false`
+alongside `$Script:PhaseTimings`) is flipped to `$true` on
+the first invocation. The `finally` call after P13 sees the
+flag is already true and short-circuits without printing.
+The safety-net behaviour is preserved: if P13 does NOT run
+(early failure, or an `-Action` that excludes P13), the
+flag is still `$false` when the `finally` block fires and
+the table prints as before.
+
+A new `-Force` switch on `Show-PhaseSummary` bypasses the
+guard for ad-hoc / test scenarios. Production callers never
+use it.
+
+`Show-PhaseSummary` is also promoted from a one-line
+wrapper to a properly-documented advanced function with
+`[CmdletBinding()]`, `[OutputType([void])]`, and a
+multi-paragraph `.SYNOPSIS` / `.DESCRIPTION` block
+explaining the two callers and the idempotency contract.
+
+**Verification**. A short pwsh smoke-test AST-extracted
+`Show-PhaseSummary` and `Format-Elapsed` from the script,
+built a fake `$Script:PhaseTimings` list, and called the
+function three times:
+
+```
+Call #1 (no -Force):  prints table   - OK
+Call #2 (no -Force):  silent         - OK (idempotency works)
+Call #3 (with -Force): prints again  - OK
+```
+
+**Quality gates**. All five gates pass: BOM + CRLF + ASCII
+OK (12,213 lines, no LF-only lines), PS Parse OK, `psa.py`
+0/0/0, PSScriptAnalyzer 0 issues, T2-T10 all 6 tests PASS,
+runtime idempotency smoke-test passes.
+
+A meta-defect was caught and fixed during this release: the
+initial `str_replace` insertion of the new
+`$Script:PhaseSummaryShown` initialiser produced six
+LF-only lines (the editing tool's default newline) into a
+CRLF file. psa.py's PSA7002 rule caught it at gate time;
+the lines were normalised to CRLF before the second gate
+run.
+
+**Files changed**.
+
+- `scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1`
+  - `Show-PhaseSummary` rewritten with idempotency guard,
+    `-Force` switch, full doc comment, and `[OutputType([void])]`.
+  - `$Script:PhaseSummaryShown = $false` initialiser added
+    immediately after `$Script:PhaseTimings = ...`.
+- `scripts/powershell/update-windows-server-iso/SPEC.md`
+  - Added section B.23.24 and the matching matrix row.
+
+**What comes next.**
+
+PrepareBuildVerify is now production-ready as a dry-run
+inspection tool. The remaining work falls into three
+categories:
+
+1. **Server 2019 / 2022 / 2025 verification**. Repeat the
+   end-to-end PrepareBuildVerify run on the other three
+   OS families to confirm no OS-specific surprises.
+   Server 2025 in particular should skip P10 cleanly
+   (per the existing Server2025 gate) and Server 2022's
+   PCA2023 path will exercise the conversion code that
+   Server 2016 cannot reach.
+2. **`-Execute` mode**. Switch from `PrepareBuildVerify`
+   (dry-run) to `Build` or `All` with `-Execute` to
+   actually call `oscdimg` and produce the output ISO.
+   For Server 2016 EVAL with `EnableInstallWimUpdate=false`,
+   the output ISO will be byte-identical to the source
+   (no patching done) which is mostly useful as a smoke
+   test for the assembly pipeline.
+3. **Mojibake DISM-cache investigation** (deferred).
+   The notes are in `docs/history/mojibake-investigation-note.md`.
+   Pick up when there is time; the workaround (fresh
+   WorkRoot per OS family) is already known.
+
+### r07.0 Step 18 - Fix `(if ...)` mis-spelled subexpressions in Show-Pca2023ReadinessSnapshot
 
 Step 17's `Write-PhaseHeader -> Write-SubSection` fix unblocked
 the non-compact rendering branch in `Show-Pca2023ReadinessSnapshot`,

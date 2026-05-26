@@ -559,6 +559,12 @@ $Script:ScriptStartTime   = Get-Date
 $Script:CurrentPhaseStart = $null
 $Script:CurrentPhaseId    = $null
 $Script:PhaseTimings      = New-Object System.Collections.Generic.List[object]
+# Idempotency guard for Show-PhaseSummary. P13 FinalReport prints
+# the timing table as part of its body (per SPEC.md Part B.5 Step 1);
+# the script-tail `finally` block also calls Show-PhaseSummary as a
+# safety net for runs that abort before P13. This flag stops the
+# safety-net call from printing a duplicate table on a happy-path run.
+$Script:PhaseSummaryShown = $false
 
 # Phase Registry: declared up front so -Action ListPhases can work
 # without running any phase functions. Func names are bound by
@@ -1676,7 +1682,43 @@ function Write-PhaseFooter {
 }
 
 function Show-PhaseSummary {
-    # End-of-run summary table, one row per executed phase.
+    <#
+    .SYNOPSIS
+        End-of-run summary table, one row per executed phase.
+
+    .DESCRIPTION
+        Two callers exist by design:
+          1. P13 FinalReport (`Invoke-ReportPhase13_FinalReport`),
+             which calls this as documented in SPEC.md Part B.5
+             Step 1 -- the timing table is part of the FinalReport.
+          2. The script-tail `finally` block, which calls this as
+             a safety net so that a run aborted before P13 (or in
+             the outer catch block) still produces a timing table.
+
+        Without coordination, a happy-path run prints the same
+        table twice -- once from P13, once from the finally. To
+        avoid that visual duplication while keeping the
+        safety-net behaviour intact, this function is idempotent:
+        the first call prints the table and records the fact via
+        `$Script:PhaseSummaryShown`; subsequent calls return
+        without printing. Callers that want to force a re-print
+        (rare, for testing) can clear the flag first.
+
+    .PARAMETER Force
+        If set, prints the table even if it has already been
+        printed in this run. Used for ad-hoc inspection; the
+        production callers never set this.
+    #>
+    [CmdletBinding()]
+    [OutputType([void])]
+    param(
+        [switch]$Force
+    )
+    if ($Script:PhaseSummaryShown -and -not $Force) {
+        return
+    }
+    $Script:PhaseSummaryShown = $true
+
     Write-Host ''
     Write-Host ('=' * 72) -ForegroundColor Cyan
     Write-Host ' Phase Timing Summary' -ForegroundColor Cyan
