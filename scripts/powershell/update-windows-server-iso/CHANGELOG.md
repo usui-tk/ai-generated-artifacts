@@ -16,7 +16,89 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 19 - Eliminate duplicate Phase Timing Summary via idempotent Show-PhaseSummary (this release)
+### r08.0 Step 1 - Server 2016/2019/2022/2025 PCA2023 readiness investigation (this release)
+
+This is a **documentation / investigation** release with no
+code changes to `Update-WindowsServerIso.ps1`. The r08.0 cycle
+opens with a P0 investigation task carried over from
+`docs/history/r07.0-followups.md#P0`: determine the correct
+workflow for producing a PCA2023-bootable Server 2016 EVAL
+ISO, given that the r07.0 dry-run completion left this question
+unanswered.
+
+**Outcome**: the prior "Server 2016 EVAL is not viable for the
+PCA2023 use case" interpretation was **incorrect**. All four
+supported OS families (Server 2016 / 2019 / 2022 / 2025) can
+produce a Healthy PCA2023 ISO via the **Option A** route from
+`r07.0-followups.md#P0`:
+
+1. Enable `EnableInstallWimUpdate=true` in
+   `config-Server<2016|2019|2022>.json`.
+2. Include a 2024-4B-or-later LCU in `PatchBaseline.NeutralPatches`.
+3. P10 `ConvertPca2023BootManager` then converts the boot manager
+   from PCA2011 to PCA2023 using the EFI_EX staging assets that
+   the LCU shipped into install.wim.
+
+Server 2025 is a special case: Microsoft ships the EFI_EX staging
+directories pre-populated inside the **out-of-the-box** install.wim,
+so the LCU does not (and need not) carry `*_EX.efi` binaries. The
+P10 conversion still applies; it just does not depend on LCU
+application as a prerequisite.
+
+**Evidence base**. The conclusion is supported by three independent
+sources verified during this session:
+
+| Source | Evidence |
+|---|---|
+| **Microsoft official code** | `microsoft/secureboot_objects` `Make2023BootableMedia.ps1` v1.4 / 2026-03-13: 1141 lines, zero OS-version literals, OS-agnostic by design |
+| **Microsoft Support KB5053484** | "Applies To" section explicitly enumerates Server 2016, 2019, 2022 (Server 2025 was not yet released when the KB was published 2025-02-04) |
+| **Physical MSU expansion (4 OS)** | Server 2016 KB5087537, Server 2019 KB5087538, Server 2022 KB5087545 all carry the identical 6-binary `*_EX.efi` composition (`bootmgfw_ex.efi`×3 + `wdsmgfw_ex.efi`×2 + `bootmgr_ex.efi`×1) plus matching `bootmgfw_EX*` MUI tree. Server 2025 KB5087539 has none of these, but Server 2025 EVAL install.wim's `\Windows\Boot\` already contains `EFI_EX\` (72 files), `Fonts_EX\` (16 files), `DVD_EX\` (2 files) |
+
+**Methodological side-finding**. Server 2025 MSU packaging crossed
+a generational boundary: starting with Server 2025 / Windows 11 24H2,
+MSU files are `MSWIM` (Windows Imaging Format) wrappers carrying a
+`*.wim` manifests file plus a `*.psf` Patch Storage Stream v2
+(`PSTREAM` magic) binary-delta file, instead of the legacy `MSCF`
+(CAB) structure used by Server 2016/2019/2022. Future operator-side
+manual MSU inspection on Server 2025 requires `DISM /Apply-Image`
+instead of `expand.exe`. The pipeline itself is unaffected because
+DISM handles both formats transparently when applying packages to a
+mounted image.
+
+**Files added**:
+
+- `docs/history/r08.0-step1-server2016-pca2023-finding.md`
+  (24,949 bytes) — full investigation report including 4-OS MSU
+  structure maps, EFI_EX assessment per OS, install.wim direct
+  inspection results, certificate-chain analysis, and the §9
+  open-question list for r08.0 Step 2.
+
+**Files updated**:
+
+- `SPEC.md` — new `B.24 LCU package format generation matrix and
+  EFI_EX provenance (r08.0+, informative)` summarising the
+  investigation results for future readers (e.g. what packaging
+  format each OS uses, where EFI_EX comes from per OS, what
+  config-Server*.json values follow from this).
+- `docs/history/r07.0-followups.md` — `P0 Server 2016 EVAL secure
+  boot and PCA2023 readiness` moved to **Closed items** with a
+  pointer to the finding; new follow-up items added for the
+  r08.0 Step 2 implementation work.
+
+**Files NOT changed** (intentional):
+
+- `Update-WindowsServerIso.ps1` — no behavioural changes are
+  required. The existing P10 design (skip-with-warn on Critical
+  health, run on Healthy) is correct for all four OS families.
+- `data/config-Server*.json` — the config updates are tracked as
+  r08.0 Step 2 tasks (see `r07.0-followups.md` § new P0
+  entry), not part of this Step 1 documentation-only release.
+
+**Static analysis**: not re-run for Step 1 because no `.ps1` file
+was touched. The r07.0 Step 19 clean scan (0/0/0) remains
+valid as of this release.
+
+### r07.0 Step 19 - Eliminate duplicate Phase Timing Summary via idempotent Show-PhaseSummary
 
 The Step 18 verification produced the first **fully-clean
 end-to-end PrepareBuildVerify run** in r07.0 - and arguably

@@ -33,6 +33,7 @@
   - [B.21 Update Type Matrix per OS generation (r06.0+, normative)](#b21-update-type-matrix-per-os-generation-r060-normative)
   - [B.22 File organisation and naming conventions (r06.0+, normative)](#b22-file-organisation-and-naming-conventions-r060-normative)
   - [B.23 Phase 3 Architecture (r07.0+, normative)](#b23-phase-3-architecture-r070-normative)
+  - [B.24 LCU package format generation matrix and EFI_EX provenance (r08.0+, informative)](#b24-lcu-package-format-generation-matrix-and-efi_ex-provenance-r080-informative)
 - [Part C — Quality Gates & Validation Checklist](#part-c--quality-gates--validation-checklist)
 - [Part D — Known Pitfalls & Lessons Learned](#part-d--known-pitfalls--lessons-learned)
 - [Part E — Roadmap](#part-e--roadmap)
@@ -3010,6 +3011,131 @@ the two prints are not literally identical, but the visual
 | B.23.22          | (new) — refines §A.4 P12 / Show-Pca2023ReadinessSnapshot | Fix Write-PhaseHeader positional call that hung Show-Pca2023ReadinessSnapshot in non-compact mode (r07.0 Step 17) |
 | B.23.23          | (new) — refines §A.4 P12 / Show-Pca2023ReadinessSnapshot | Fix `(if ...)` mis-spelled subexpressions; should be `$(if ...)` at 5 sites (r07.0 Step 18) |
 | B.23.24          | (new) — refines Part B.5 P13 / Show-PhaseSummary | Make Show-PhaseSummary idempotent so the safety-net finally call does not duplicate P13's table (r07.0 Step 19) |
+
+---
+
+## B.24 LCU package format generation matrix and EFI_EX provenance (r08.0+, informative)
+
+This section records the **empirical findings** from the r08.0 Step 1
+investigation (documented in full in
+`docs/history/r08.0-step1-server2016-pca2023-finding.md`). It is
+informative rather than normative: nothing in this section changes
+the pipeline's contract. It exists so that future readers do not have
+to re-derive the same conclusions from physical artefacts.
+
+### B.24.1 Investigation summary
+
+The r07.0 cycle left an unresolved P0 issue: can Server 2016 EVAL
+media be used as a source for producing a PCA2023-bootable ISO, or
+is the EVAL ISO permanently locked out by its 2017-vintage
+install.wim? The r08.0 Step 1 investigation verified the answer
+against three independent sources (Microsoft official code,
+Microsoft Support KB5053484, and physical MSU expansion of all four
+supported OS families), plus a direct inspection of Server 2025 EVAL
+install.wim contents.
+
+**Conclusion**: the existing pipeline design (P07/P09/P10) is correct
+for all four OS families. Server 2016 EVAL **is** viable for the
+PCA2023 use case via the Option A route (enable
+`EnableInstallWimUpdate=true`, add a 2024-4B-or-later LCU to the
+patch baseline). The prior "Server 2016 EVAL not viable" finding
+recorded in `r07.0-followups.md#P0` was incorrect.
+
+### B.24.2 LCU package format per OS family
+
+The MSU file format and expansion procedure differ significantly
+across the four OS generations. The pipeline currently relies on
+DISM and on Microsoft's own integration logic, so these differences
+are transparent to the pipeline itself — but they matter when
+investigating LCU contents manually:
+
+| OS family | MSU magic | Packaging | Expansion stages | Required tool |
+|---|---|---|:---:|---|
+| Server 2016 | `MSCF` (CAB) | Legacy standalone LCU | 3 | `expand.exe` |
+| Server 2019 | `MSCF` (CAB) | UUP + PSFX v1 (SSU+LCU combined) | 4 | `expand.exe` |
+| Server 2022 | `MSCF` (CAB) | UUP + PSFX v1 / `ForwardOnly` | 4 | `expand.exe` |
+| Server 2025 | **`MSWIM`** (WIM) | **WIM + PSF v2 (`PSTREAM`)** | 2 (WIM nested) | **`DISM /Apply-Image`** |
+
+Server 2019+ MSUs carry an internal `toc.xml` that declares the
+SSU-then-LCU application order to DISM, and an `update.mum` that
+enumerates all supported SKUs (including `*EvalEdition` variants,
+confirming EVAL coverage). Server 2025 LCUs split their payload into
+a `*.wim` (manifests only — 265,893 manifest files for KB5087539,
+representing ~106,572 component manifests + their MUMs and CATs) and
+a `*.psf` Patch Storage Stream v2 file (~1.7 GB for KB5087539) that
+holds the actual binary delta content.
+
+### B.24.3 EFI_EX provenance — LCU-delivered vs. install.wim-resident
+
+The PCA2023 boot manager conversion relies on the
+`EFI_EX`/`Fonts_EX`/`DVD_EX` staging directories inside `boot.wim`'s
+`\Windows\Boot\` path. These staging assets reach the media via two
+different paths depending on the OS generation:
+
+| OS | LCU ships `*_EX.efi` binaries? | install.wim ships EFI_EX out of the box? |
+|---|:---:|:---:|
+| Server 2016 | **Yes** — `bootmgfw_ex.efi`×3 + `wdsmgfw_ex.efi`×2 + `bootmgr_ex.efi`×1 (unique paths in WinSxS); 112 `bootmgfw_EX*` MUI variants total | **Not verified in r08.0** (likely no; LCU is the delivery vehicle) |
+| Server 2019 | **Yes** — identical 6-binary `*_EX.efi` composition; 113 `bootmgfw_EX*` MUI variants | **Not verified in r08.0** (likely no) |
+| Server 2022 | **Yes** — identical 6-binary `*_EX.efi` composition; 108 `bootmgfw_EX*` MUI variants | **Not verified in r08.0** (likely no) |
+| Server 2025 | **No** — LCU update.mum and all 106,572 component manifests contain zero `_EX`/PCA2023 references | **Yes** — `\Windows\Boot\EFI_EX\` ships pre-populated with 72 files in the out-of-box EVAL install.wim |
+
+The Server 2016/2019/2022 LCUs share an **identical six-binary
+`*_EX.efi` composition** (verified by file-name de-duplication across
+all three OS families). This is consistent with Microsoft using a
+single PCA2023 staging asset bundle and back-porting it via LCU to
+the three legacy OS families.
+
+Server 2025 takes a different approach: Microsoft ships the EFI_EX
+staging assets directly inside the install.wim at GA, so subsequent
+LCUs do not need to carry them. The bootmgfw.efi inside Server 2025
+EVAL install.wim is **still PCA2011-signed** (verified by Authenticode
+chain inspection); the PCA2023-signed variant lives alongside it in
+the EFI_EX directory (the actual signature on Server 2025
+`EFI_EX\bootmgfw_ex.efi` was not exhaustively verified in r08.0 Step 1
+and is listed as a Step-2 task in
+`r08.0-step1-server2016-pca2023-finding.md` §9.2).
+
+### B.24.4 Pipeline implications
+
+Because EFI_EX content reaches `boot.wim` differently per OS, the
+correct config-Server*.json profile values differ slightly:
+
+| Profile | `EnableInstallWimUpdate` | `PatchBaseline.NeutralPatches` must include | P10 effect |
+|---|:---:|---|---|
+| `config-Server2016.json` | **must be `true`** | a 2024-4B-or-later LCU (e.g. KB5087537 = 2026-05B) | will convert; produces Healthy ISO |
+| `config-Server2019.json` | **must be `true`** | a 2024-4B-or-later LCU (e.g. KB5087538 = 2026-05B) | will convert; produces Healthy ISO |
+| `config-Server2022.json` | **must be `true`** | a 2024-4B-or-later LCU (e.g. KB5087545 = 2026-05B) | will convert; produces Healthy ISO |
+| `config-Server2025.json` | can stay `false` for the PCA2023 use case | n/a for PCA2023 purposes; LCU still useful for ordinary security updates | will convert without LCU dependency (EFI_EX already in install.wim) |
+
+The current B.18 statement "`RequiredByDefault = false` for
+Server 2025" remains correct in spirit but the rationale needs
+refinement: Server 2025 still requires P10 to **physically copy** the
+EFI_EX content from install.wim to boot.wim's working layout (and
+update the resulting boot manager hash chain). What it does NOT
+require is the LCU-application prerequisite. The B.18 wording will
+be revisited in the r08.0 implementation phase once the config
+changes are in place and the end-to-end Server 2016 `-Execute Build`
+run has produced a Healthy ISO.
+
+### B.24.5 Out-of-scope for r08.0 Step 1
+
+The following questions remain open and are listed in
+`docs/history/r08.0-step1-server2016-pca2023-finding.md` §9 for
+follow-up sessions:
+
+- **Server 2016/2019/2022 install.wim EFI_EX presence** — symmetry
+  check against the Server 2025 inspection. The expectation is that
+  these three OS families do NOT ship EFI_EX in the out-of-box
+  install.wim, but this has not been directly verified.
+- **Server 2025 `EFI_EX\bootmgfw_ex.efi` signature** — the
+  signature is expected to be PCA2023, but only the directory's
+  existence and file count (72 files) were observed in r08.0 Step 1.
+- **End-to-end `-Execute Build` on Server 2016 EVAL** — the
+  Option A route is empirically supported by the LCU contents
+  but no Healthy output ISO has been produced from a real Build
+  run yet.
+
+These are tracked as r08.0 Step 2-onward tasks.
 
 ---
 
