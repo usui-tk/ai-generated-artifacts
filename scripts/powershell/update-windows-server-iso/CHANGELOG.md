@@ -16,7 +16,153 @@ the script and follows the
 
 ## [Unreleased]
 
-### r07.0 Step 2b (URL-resolver narrowing part) - Config-driven Catalog title token disambiguation (this release)
+### r07.0 Step 2b (Refresher main-path migration part) - Cache-driven Resolve-PatchSetFromReleaseInfo replaces Title-scrape discovery (this release)
+
+This commit lands the **second half** of the Step 2b work scheduled
+in SPEC.md section B.23.1. The r05.1-era `Resolve-PatchSetFromCatalog`
+function and its `Get-CatalogQueryTemplate` helper are **deleted**;
+a new cache-driven `Resolve-PatchSetFromReleaseInfo` takes over,
+backed by an offline-testable `Get-PatchSetFromReleaseInfoDiscovery`
+helper. This is the atomic completion of SPEC B.23.1's "complete
+migration" decision: KB discovery is no longer a Title-string
+heuristic against the Microsoft Update Catalog; the Catalog now
+serves as a **URL resolver only** (KB → download URL plus
+supersedence). DU discovery continues via the Step 2a 36-month
+cache (now consumed by the new function); LCU discovery comes from
+the Step 2a release-info parser; .NET CU discovery comes from the
+Step 2a .NET CU parser. URL-resolver narrowing uses the Step 2b
+Commit 3 Config-driven `Test-CatalogTitleMatch` helper.
+
+**Important: the discovery layer was validated against synthetic
+caches whose shapes were lifted verbatim from the fresh
+2026-05-26 captures** under `tests/snapshots/dotnet_cu/` and
+`tests/fixtures/dynamic_update_cache/probe-results.json`. No PoC
+fixture was consulted. Live observations grounded three
+implementation choices:
+
+1. **Server 2022 / Server 2019 .NET CU multi-row** per SPEC B.23.5
+   B-2: the live monthly pages list two `.NET Framework` rows
+   under "Windows Server 2022" (one for 4.8, one for 4.8.1) and
+   under "Windows 10 1809 and Windows Server 2019" (one for 4.7.2,
+   one for 4.8). `Get-PatchSetFromReleaseInfoDiscovery` emits ONE
+   discovery record per row, so each becomes its own PatchBaseline
+   entry. T10 asserts this against a synthetic cache that mirrors
+   the live shape.
+2. **Server 2025 Setup DU suspended since 2025-12** per SPEC
+   B.23.6: the discovery function does NOT emit a DynamicUpdate.Setup
+   record when the per-OS DU cache has no in-window entry. The
+   test scenario for 2025-12 (no matching caches) returns zero
+   records, confirming the defensive path.
+3. **Combined LCU + bundled SSU** per SPEC B.23.5 B-1: the new
+   orchestrator passes the LCU's full Catalog file list through
+   `Select-AllCanonicalPatchFiles` rather than the
+   single-file picker, so an LCU UpdateId carrying both an
+   LCU.msu and an SSU.msu emits two PatchBaseline entries (one
+   with Type=LCU and IsCombined=$true, one with Type=SSU as
+   classified by filename heuristic in
+   `Convert-CatalogPatchToBaselineEntry`).
+
+**Deleted PowerShell functions**:
+
+- `Resolve-PatchSetFromCatalog` -- 311 lines. The r05.1 Title-string
+  scraper. Its responsibility moves to
+  `Resolve-PatchSetFromReleaseInfo`.
+- `Get-CatalogQueryTemplate` -- 84 lines. The hardcoded per-OS
+  query-template + title-token table. SSU/LCU/DU/.NET query
+  templates are no longer needed (discovery moved to caches); the
+  TitleTokens portion was already moved to Config + helpers in
+  Step 2b Commit 3, so the entire function is now dead code.
+
+**New PowerShell functions** (added before
+`Resolve-LanguageSpecificPatchesFromCatalog` to keep the catalog
+scrapers grouped, with the new release-info path immediately
+above):
+
+- `Get-PatchSetFromReleaseInfoDiscovery` -- pure-cache lookup,
+  reads `data/cache-release-info.json` (LCU),
+  `data/cache-dotnet-cu.json` (.NET CU), and
+  `data/cache-du-<OsVersion>.json` (DU) via the existing
+  Step 2a path helpers. Performs no network I/O. Accepts
+  `-DataDir` for tests so T10 can exercise it against a temp
+  directory. Validates `-PatchMonth` against
+  `Test-DynamicUpdatePatchMonth` (the YYYY-MM regex helper from
+  Step 2a). Returns `pscustomobject[]` with fields
+  `Type` / `KbId` / `UpdateId` / `SourceCache` / `SourceRow` /
+  `DiscoveryNote`.
+- `Resolve-PatchSetFromReleaseInfo` -- orchestrator. Same signature
+  as the deleted `Resolve-PatchSetFromCatalog` (OsVersion,
+  OsLanguage, PatchMonth, MaxRetries), plus the new optional
+  `-DataDir` for test isolation. Returns the same PatchBaseline
+  entry shape as the deleted function. SSU emerges from the
+  LCU's Catalog bundle via filename heuristic; standalone-SSU
+  discovery is intentionally omitted (Microsoft has embedded
+  SSU in LCU for current monthly releases per SPEC B.23.5 B-1).
+
+**Caller migration** (three sites, single-line rename each):
+
+- Refresher dispatch table (the
+  `PatchBaseline.NeutralPatches.Refresher` registry near the top
+  of the script): `'Resolve-PatchSetFromCatalog'` ->
+  `'Resolve-PatchSetFromReleaseInfo'`.
+- P03 RefreshPatchBaseline phase: the
+  `Invoke-SetupPhase03_RefreshPatchBaseline` worker that runs
+  during `-Action PrepareSet` now calls
+  `Resolve-PatchSetFromReleaseInfo`.
+- A01 RefreshAllBaselines admin phase: the
+  `Invoke-AdminPhaseA01_RefreshAllBaselines` worker that runs
+  during `-Action RefreshAllBaselines` now dispatches to
+  `Resolve-PatchSetFromReleaseInfo` for OSes whose field-group
+  Refresher matches.
+
+The new function's parameter list is a strict superset of the old
+(adds `-DataDir`); existing call sites need no parameter changes.
+Net effect on the call graph is a single function-name swap.
+
+**Test surface** changes:
+
+- T3 (`tests/powershell_harness.py`) removed three test cases
+  that targeted `Get-CatalogQueryTemplate` (Server2022 dual
+  TitleTokens, per-OS Type coverage, Server2022 QueryTemplate
+  no-comma form). The function no longer exists. TitleTokens
+  coverage is taken over by T9 against the new
+  `Get-CatalogTitleTokenList` helper. T3 now reports 10 assertions
+  (down from 13); no other T3 case changed.
+- T10 (`tests/release_info_resolver_test.py`) new. 18 assertions
+  across four discovery scenarios (Server 2025 / 2022 / 2019 for
+  2026-05, plus Server 2025 for 2025-12 with no matching caches)
+  plus defensive cases (empty data dir, invalid PatchMonth).
+  Fixture file is
+  `tests/fixtures/release_info_resolver/scenarios.json`,
+  shape-matched to the live 2026-05-26 captures.
+
+**No PoC code or fixtures consulted**. T10's fixture KBs, OS
+labels and DU UpdateIds were taken from the live captures used
+by T7 (`tests/snapshots/dotnet_cu/`) and T8
+(`tests/fixtures/dynamic_update_cache/probe-results.json`). The
+historical PoC scripts and `tests/snapshots/poc_*/`,
+`tests/fixtures/poc_*/` directories were not touched.
+
+**Refresher main path NOW switched**. The migration that SPEC
+B.23.1 schedules is complete: KB discovery is cache-driven (LCU
+from release-info, .NET CU from .NET CU parser, DU from per-OS
+36-month cache), and the Microsoft Update Catalog is consulted
+only as a URL resolver. The combined Step 2a + Step 2b set is now
+ready for `-Action RefreshAllBaselines` end-to-end runs against
+the new path; the only remaining r07.0 schedulable item is the
+Patch-Tuesday-triggered cache refresh automation (SPEC B.23.7
+step 1-4), which is deferred to r07.x per SPEC B.23.10.
+
+**Net code delta**: -395 lines (deleted 311 + 84) + 395 lines
+(added 200 for Resolve-PatchSetFromReleaseInfo + 195 for the
+discovery helper). The deletion and addition are intentionally
+proportional so the diff is reviewable as one atomic migration.
+
+**Quality-gate status**: psa.py 0 / 0 / 0, PSScriptAnalyzer 0
+findings, PowerShell parse OK, T2 13/13, T3 **10/10** (down from
+13), T6 13/13, T7 16/16, T8 20/20, T9 18/18, T10 **18/18**.
+Cumulative: 108/108 assertions.
+
+### r07.0 Step 2b (URL-resolver narrowing part) - Config-driven Catalog title token disambiguation (previous release)
 
 This commit lands the **first half** of the Step 2b work scheduled
 in SPEC.md section B.23.1. New PowerShell helpers move the per-OS

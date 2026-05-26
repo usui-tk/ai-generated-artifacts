@@ -1,0 +1,141 @@
+{
+  "captured_at": "2026-05-26",
+  "source_note": "KBs and OS labels lifted from the live 2026-05 Microsoft Update Catalog and learn.microsoft.com .NET CU release-notes captures; the Dynamic Update entries reuse the verified UpdateIds and titles from tests/fixtures/dynamic_update_cache/probe-results.json.",
+  "release_info_cache": {
+    "Schema": "1.0",
+    "MonthlyReleases": [
+      {
+        "OsShortName": "Server2025",
+        "OsBuild": "26100",
+        "ServicingOption": "LTSC",
+        "UpdateType": "2026-05 B",
+        "UpdateTypeYear": 2026,
+        "UpdateTypeMonth": 5,
+        "UpdateTypeLetter": "B",
+        "AvailabilityDate": "2026-05-13",
+        "BuildAfterUpdate": "26100.32860",
+        "KbId": "KB5087539",
+        "KbUrl": "https://support.microsoft.com/kb/5087539"
+      },
+      {
+        "OsShortName": "Server2022",
+        "OsBuild": "20348",
+        "ServicingOption": "LTSC",
+        "UpdateType": "2026-05 B",
+        "UpdateTypeYear": 2026,
+        "UpdateTypeMonth": 5,
+        "UpdateTypeLetter": "B",
+        "AvailabilityDate": "2026-05-13",
+        "BuildAfterUpdate": "20348.9999",
+        "KbId": "KB5087545",
+        "KbUrl": "https://support.microsoft.com/kb/5087545"
+      },
+      {
+        "OsShortName": "Server2019",
+        "OsBuild": "17763",
+        "ServicingOption": "LTSC",
+        "UpdateType": "2026-05 B",
+        "UpdateTypeYear": 2026,
+        "UpdateTypeMonth": 5,
+        "UpdateTypeLetter": "B",
+        "AvailabilityDate": "2026-05-13",
+        "BuildAfterUpdate": "17763.9999",
+        "KbId": "KB5087538",
+        "KbUrl": "https://support.microsoft.com/kb/5087538"
+      }
+    ],
+    "HotpatchCalendar": []
+  },
+  "dotnet_cu_cache": {
+    "Schema": "1.0",
+    "Months": [
+      {
+        "Date": "2026-05-12",
+        "DateText": "May 12, 2026",
+        "Kind": "cumulative update",
+        "Ok": true,
+        "Entries": [
+          {
+            "OsLabel": "Microsoft server operating system, version 24H2",
+            "OsNormalised": "Server2025",
+            "OsOfferingKb": "",
+            "Rows": [
+              { "DotNetVersions": "3.5, 4.8.1", "KbId": "KB5087051" }
+            ]
+          },
+          {
+            "OsLabel": "Windows Server 2022",
+            "OsNormalised": "Server2022",
+            "OsOfferingKb": "KB5088862",
+            "Rows": [
+              { "DotNetVersions": "3.5, 4.8",   "KbId": "KB5087068" },
+              { "DotNetVersions": "3.5, 4.8.1", "KbId": "KB5087059" }
+            ]
+          },
+          {
+            "OsLabel": "Windows 10 1809 and Windows Server 2019",
+            "OsNormalised": "Server2019",
+            "OsOfferingKb": "KB5088864",
+            "Rows": [
+              { "DotNetVersions": "3.5, 4.7.2", "KbId": "KB5087061" },
+              { "DotNetVersions": "3.5, 4.8",   "KbId": "KB5087066" }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "du_entries_by_os": {
+    "Server2025": [
+      {
+        "PatchMonth": "2026-05",
+        "DuType": "DynamicUpdate.SafeOs",
+        "Success": true,
+        "KbId": "KB5087588",
+        "ChosenUpdateId": "3d3a4626-8f15-4f7d-8588-a5431398059a",
+        "ChosenTitle": "2026-05 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5087588)"
+      }
+    ],
+    "Server2022": [
+      {
+        "PatchMonth": "2026-05",
+        "DuType": "DynamicUpdate.SafeOs",
+        "Success": true,
+        "KbId": "KB5087595",
+        "ChosenUpdateId": "f7ad10df-1aef-4ecb-889f-3976c45fac6e",
+        "ChosenTitle": "2026-05 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087595)"
+      }
+    ],
+    "Server2019": []
+  },
+  "queries": [
+    {
+      "os": "Server2025",
+      "patch_month": "2026-05",
+      "expected_types": ["LCU", "DotNet.Runtime", "DynamicUpdate.SafeOs"],
+      "expected_kbs":   ["KB5087539", "KB5087051", "KB5087588"],
+      "description": "Server 2025 full set: LCU + 1 .NET CU + 1 DU.SafeOs"
+    },
+    {
+      "os": "Server2022",
+      "patch_month": "2026-05",
+      "expected_types": ["LCU", "DotNet.Runtime", "DotNet.Runtime", "DynamicUpdate.SafeOs"],
+      "expected_kbs":   ["KB5087545", "KB5087068", "KB5087059", "KB5087595"],
+      "description": "Server 2022 with 2 .NET CU rows per SPEC B.23.5 B-2"
+    },
+    {
+      "os": "Server2019",
+      "patch_month": "2026-05",
+      "expected_types": ["LCU", "DotNet.Runtime", "DotNet.Runtime"],
+      "expected_kbs":   ["KB5087538", "KB5087061", "KB5087066"],
+      "description": "Server 2019 (no DU expected: feature-update only per SPEC B.23.6)"
+    },
+    {
+      "os": "Server2025",
+      "patch_month": "2025-12",
+      "expected_types": [],
+      "expected_kbs":   [],
+      "description": "Server 2025 in a month with no matching cache entries (suspended Setup DU territory)"
+    }
+  ]
+}

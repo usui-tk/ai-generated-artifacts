@@ -333,9 +333,11 @@ def test_get_pca2023_readiness_snapshot_health_enum(ps: PSSession) -> TestOutcom
 # -----------------
 
 ALL_TESTS: List[Callable[[PSSession], TestOutcome]] = [
-    test_query_template_server2022_has_both_comma_forms,
-    test_query_template_server2022_no_comma_in_query_template,
-    test_query_template_each_os_has_required_types,
+    # Get-CatalogQueryTemplate tests removed in r07.0 Step 2b (function deleted;
+    # the per-OS Catalog QueryTemplate strings are no longer needed because
+    # discovery moved to the cache-driven Resolve-PatchSetFromReleaseInfo path.
+    # TitleTokens coverage is now exercised by T9 (catalog_title_tokens_test.py)
+    # against the new Config-driven Get-CatalogTitleTokenList helper.)
     test_get_kb_id_extraction,
     test_select_all_canonical_patch_files_returns_array,
     test_select_canonical_patch_file_filters_express,
