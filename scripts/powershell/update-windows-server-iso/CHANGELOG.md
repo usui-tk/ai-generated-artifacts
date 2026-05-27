@@ -16,6 +16,145 @@ the script and follows the
 
 ## [Unreleased]
 
+### r09.0 Step 1 (Phase 6, SPEC-only) - SPEC.md restructure to Part A/B/C/D standard form + Servicing Dependency Database normative specification
+
+This Step 1 Phase 6 ships a **SPEC-only** change: a comprehensive
+rewrite of `SPEC.md` that restructures the previous nine-Part layout
+(A through I) into the repository-standard four-Part layout (A, B, C,
+D) with three appendices (E, F, G). **No code is changed in this
+commit**. The implementation work (parser, layer 2 schema, P06
+Stage 2 wiring) follows in subsequent r09.0 Steps per the rollout
+plan in §B.19.19.1.
+
+### Restructure summary
+
+- **Part E (Roadmap) deprecated**: replaced by CHANGELOG +
+  per-cycle followup files; remaining roadmap content moved to
+  Appendix G.2.
+- **Part F (Function Reuse Map) → Appendix E**: same content,
+  Appendix scope.
+- **Part G (Self-verification tools) → Part C.9**: merged into
+  the Quality Gates Part where the suite conceptually belongs.
+- **Part H (Reference Projects) → Appendix F**: slimmed and
+  cross-referenced from README.
+- **Part I (Servicing Dependency Database, r09.0+) → Part B.19**:
+  integrated as a Script-Specific subsection per the Part B/Part I
+  Q2 design decision; the layer-2 schema, parser pipeline, and
+  P06 integration are now in their natural location alongside the
+  other phase-related contracts.
+- **B.14b (out-of-sequence) absorbed into §B.4.3**: the
+  PatchBaseline schema fields are now part of the OS profile
+  schema section.
+- **B.23 (Phase 3 Architecture, 24-subsection narrative)
+  condensed**: replaced by §B.22 in decision-record form
+  (B.22.1–B.22.21). The historical narrative is preserved in
+  CHANGELOG.
+
+### New normative content (Part B.19)
+
+§B.19 (Servicing Dependency Database) is fully rewritten to reflect
+the Phase 5 PoC findings:
+
+- **B.19.4 7-Zip strategy** (Phase 5 D1): explicit choice of 7-Zip
+  over in-box `expand.exe` / `Shell.Application`, with three-helper
+  function trio reused from `Deploy-AMDChipsetDriverOnWindowsServer.ps1`.
+- **B.19.5 Dual-source structure** (Phase 5): explicit
+  acknowledgement that update-relationship metadata is split between
+  the Master XML and individual `package*.cab` fragments; r09.0
+  consumes Master XML only, with the per-cab parse explicitly
+  out of scope.
+- **B.19.6 Master XML schema as observed** (Phase 5 v3/v4): the
+  full observed schema with Bundle / Standalone / SupersededBy
+  shapes, including the empirically-confirmed 14,059 SupersededBy
+  occurrences and zero forward-direction tags.
+- **B.19.7 / B.19.8 Scope filter + Microsoft-prose exclusion**:
+  hard rules that bound layer 2 to ~2–5 MB and keep it free of
+  Microsoft creative content.
+- **B.19.9 Parser pipeline** (4-stage with XmlReader streaming,
+  Phase 5 D3): peak working set < 50 MB vs. +536 MB for
+  XmlDocument.Load.
+- **B.19.10 Layer 2 JSON schema** (Phase 5 final): the canonical
+  shape including `Variants[]` + `RevisionIndex` (for resolving
+  `<SupersededBy>` references that use RevisionId integers, not
+  UpdateId GUIDs).
+- **B.19.13 Verification API**: `Test-PatchDependencyClosureFromGraph`
+  signature and its complementary relationship to the existing
+  mount-time `Test-PatchDependencyClosureOnMount`.
+- **B.19.14 P06 ValidatePatchSet integration**: two-stage P06 with
+  independent skip conditions for catalog freshness (Stage 1) and
+  dependency closure (Stage 2).
+- **B.19.15 Lifecycle**: new Action A04 `RefreshDependencyDatabase`
+  plus a new A01.0 sub-phase inside RefreshAllBaselines.
+- **B.19.16 Air-gapped operation**: `-OfflineCabPath` parameter
+  for environments without CDN access.
+- **B.19.18 Maintainer operations guide**: monthly refresh
+  procedure and PR review checklist.
+
+### New Lessons Learned (Part D.24-D.30)
+
+Seven new entries codify meta-lessons from the r07.0/r08.0/r09.0
+cycles:
+
+- **D.24 Cognitive bias patterns** — Hypothesis lock-in, sampling
+  treated as comprehensive, solution attraction. Four mitigations
+  pre-committed as the Engineering Hygiene Quartet.
+- **D.25 DISM mount-cache poisoning** — Root cause of the
+  r07.0 Step 16/17 mojibake; mitigation is fresh WorkRoot per OS
+  family.
+- **D.26 `List[object]` of pscustomobject argument-type mismatch**
+  — Root cause of the r08.0 Step 2 `Argument types do not match`
+  failure; `.ToArray()` is the safe alternative.
+- **D.27 Microsoft OS tool dependency avoidance** —
+  `expand.exe -F:` brittleness; `Make2023BootableMedia.ps1` precedent
+  for inheriting Microsoft logic without inheriting the
+  implementation; 7-Zip choice for r09.0 wsusscn2 parser.
+- **D.28 Sampling versus comprehensive search** — 2-3 element
+  exemplar walks are not representative for low-base-rate
+  phenomena. Exhaustive `Select-String` on a 108 MB file is
+  always cheaper than being wrong.
+- **D.29 Code bug versus configuration problem triage** — A
+  one-question filter to apply at the top of every failure
+  investigation, prompted by the r08.0 Step 4d near-miss.
+- **D.30 Helper function unification** — `Get-PatchEntryType` as
+  the response to the dual-field-name drift; sweeps are fragile,
+  helpers are forever.
+
+### New stable identifier conventions
+
+- **Policy IDs** of the form `SPEC-WSI-NNN` parallel the
+  `SPEC-CI-NNN` IDs in the repository-level SPEC. The Policy Index
+  table at the top of SPEC.md maps each Policy ID to the section
+  that defines it.
+- **Section IDs** `B.N.M` and `D.NN` are formally declared
+  stable: once assigned, never reused.
+- **Normative / informative tagging**: every section is tagged
+  explicitly so an LLM agent reading the SPEC knows which rules
+  carry contractual obligation and which are background.
+
+### Document scope and language
+
+- This SPEC continues to be English-only per the repository
+  Language Policy (root `README.md` "Language Policy").
+- The file format remains UTF-8 / LF / no BOM per the Markdown
+  contract in the root `README.md` "File Format Policy".
+- File line count: 5,074 (old) → 3,935 (new); a 22% reduction
+  achieved while adding ~1,000 lines of new normative content
+  in §B.19 and ~700 lines of new D.24-D.30 lessons. The net
+  reduction comes from condensing the legacy Part B.23 24-
+  subsection narrative into decision-records and from removing
+  the redundancy between Part F/G/H and other Parts.
+
+### No code change
+
+`Update-WindowsServerIso.ps1` is **unchanged** in this commit.
+`$Script:ScriptVersion` and `$Script:ScriptTag` are unchanged. CI
+quality gates (psa.py / PSScriptAnalyzer / T2/T3/T6) are unaffected
+by this commit because the source file is not touched. The next
+r09.0 Step will begin implementing the §B.19 specification; that
+Step ships with the corresponding code changes and a fresh
+ScriptVersion bump.
+
+
 ### r08.0 Step 4 series - cumulative code bug fixes + SPEC Part I (Servicing Dependency Database) specification
 
 This Step 4 series spans three connected modes:

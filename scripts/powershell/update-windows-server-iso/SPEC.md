@@ -1,590 +1,878 @@
 # Update-WindowsServerIso.ps1 — Developer Specification (SPEC)
 
-> **Purpose of this document**
+> **Status**: r09.0 baseline (rewritten 2026-05-27). This document is the
+> authoritative developer / LLM specification for
+> `Update-WindowsServerIso.ps1`. It is structured so that an LLM agent
+> can be dropped into the project mid-stream without having to re-derive
+> the design from the source code.
 >
-> Authoritative developer / LLM specification for
-> `Update-WindowsServerIso.ps1`. Written so that an LLM (Claude) can be
-> dropped into the project mid-stream without having to re-derive the
-> design from the source code.
+> **Language**: English only, per the repository-wide
+> [Language Policy](../../../README.md#language-policy). Bilingual
+> entry-point documentation lives in
+> [`README.md`](./README.md) / [`README.ja.md`](./README.ja.md).
 >
-> **Important**: this SPEC inherits the **Part A common specification**
-> from the repository-wide canonical reference at
-> [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../download-speakerdeck-oracle4engineer/SPEC.md)
-> (sections A.1 through A.14). Only the **Part B** (script-specific)
-> contract is fully restated here. Parts C and D are this project's
-> own quality gates and lessons learned.
+> **Relationship to the repository-level SPEC**: cross-project rules
+> (CI workflow design, naming conventions, timeout policy, supply-chain
+> security) live in the [repository-level SPEC](../../../SPEC.md). This
+> document inherits those rules and restates only what is specific to
+> this script.
+>
+> **Relationship to other documents**: end-user "how to run" lives in
+> [`README.md`](./README.md); verification procedures and verified
+> findings live in [`TESTING.md`](./TESTING.md); per-revision change
+> history lives in [`CHANGELOG.md`](./CHANGELOG.md); long-form
+> investigation reports live in [`docs/history/`](./docs/history/).
+
+---
+
+## Conventions (RFC 2119)
+
+This document uses the keywords **MUST**, **MUST NOT**, **SHOULD**,
+**SHOULD NOT**, and **MAY** as defined in
+[RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) and
+[RFC 8174](https://www.rfc-editor.org/rfc/rfc8174). When the keywords
+appear in lowercase or in plain English, they carry the same normative
+meaning.
+
+Every section is tagged as either **normative** or **informative**:
+
+- **Normative** sections define behaviour that the script and its
+  callers MUST follow. Any change requires a corresponding code change
+  and a CHANGELOG entry in the same revision.
+- **Informative** sections explain background, rationale, or
+  measurement results. They do not impose contractual obligations and
+  may evolve independently of the code.
+
+## Stable Identifiers
+
+This document uses three classes of stable identifier so that other
+documents, code comments, and finding reports can cite specific points
+without breaking on cosmetic edits:
+
+| Class | Form | Used for |
+|:---|:---|:---|
+| **Section reference** | `B.N`, `B.N.M`, `D.NN` | Cross-references inside this document |
+| **Policy identifier** | `SPEC-WSI-NNN` | Repository-wide policy IDs (parallel to `SPEC-CI-NNN` in the repository-level SPEC) |
+| **Phase identifier** | `P01`–`P13`, `A01`–`A04` | Pipeline phases (see §B.5) and stand-alone actions (see §B.6) |
+
+A section's identifier is stable across revisions. If a section is
+deleted, its identifier is **never reused** for a different purpose;
+it is marked "RESERVED / removed in rNN" so that historical references
+remain unambiguous.
+
+## Policy Index (Quick reference for AI agents)
+
+| Policy ID | Title | Section |
+|:---:|:---|:---|
+| SPEC-WSI-001 | Source file format (UTF-8 BOM, CRLF, ASCII-only body) | §A.1 |
+| SPEC-WSI-002 | Phase / pipeline architecture | §A.2 |
+| SPEC-WSI-003 | Log marker conventions | §A.3 |
+| SPEC-WSI-004 | Parameter naming and validation | §A.4 |
+| SPEC-WSI-005 | Error & diagnostic emission format | §A.5 |
+| SPEC-WSI-006 | Documentation language policy | §A.6 |
+| SPEC-WSI-010 | Synthetic test mode contract | §B.9 |
+| SPEC-WSI-011 | Patch integrity (three-layer) | §B.8 |
+| SPEC-WSI-012 | Pre-apply dependency closure check | §B.13 |
+| SPEC-WSI-013 | PatchPlan engine WIM-target mapping | §B.10 |
+| SPEC-WSI-014 | Media-dynamic-update sub-phase sequences | §B.11 |
+| SPEC-WSI-015 | Catalogue scrape and supersedence selection | §B.12 |
+| SPEC-WSI-016 | Refresh policy decision matrix | §B.14 |
+| SPEC-WSI-017 | Update type matrix per OS generation | §B.15 |
+| SPEC-WSI-018 | PCA2023 boot manager support | §B.17 |
+| SPEC-WSI-019 | Output ISO verification (post-conversion) | §B.18 |
+| SPEC-WSI-020 | Servicing Dependency Database (wsusscn2-derived) | §B.19 |
+| SPEC-WSI-030 | Static analysis gate (psa.py + PSScriptAnalyzer) | §C.1 |
+| SPEC-WSI-031 | Source file format gate | §C.2 |
+| SPEC-WSI-032 | Documentation cross-checks | §C.8 |
+| SPEC-WSI-033 | Self-verification tool suite (T1–T6) | §C.9 |
 
 ---
 
 ## Table of Contents
 
-- [Part A — Inherited Common Specification](#part-a--inherited-common-specification)
-- [Part B — Script-Specific Specification](#part-b--script-specific-specification)
-  - [B.0 Script Identity](#b0-script-identity)
-  - [B.1 Inputs and Outputs](#b1-inputs-and-outputs)
-  - [B.2 Workspace Layout](#b2-workspace-layout)
-  - [B.3 Output ISO Naming](#b3-output-iso-naming)
-  - [B.4 OS Profile Schema](#b4-os-profile-schema)
-  - [B.5 Phase Contracts (P01–P13)](#b5-phase-contracts-p01p09)
-  - [B.6 Action → Phase Mapping](#b6-action--phase-mapping)
-  - [B.7 ISO Filename Detection Patterns](#b7-iso-filename-detection-patterns)
-  - [B.8 Patch Integrity Check (Three-Layer)](#b8-patch-integrity-check-three-layer)
-  - [B.9 Synthetic Test Mode](#b9-synthetic-test-mode)
-  - [B.21 Update Type Matrix per OS generation (r06.0+, normative)](#b21-update-type-matrix-per-os-generation-r060-normative)
-  - [B.22 File organisation and naming conventions (r06.0+, normative)](#b22-file-organisation-and-naming-conventions-r060-normative)
-  - [B.23 Phase 3 Architecture (r07.0+, normative)](#b23-phase-3-architecture-r070-normative)
-  - [B.24 LCU package format generation matrix and EFI_EX provenance (r08.0+, informative)](#b24-lcu-package-format-generation-matrix-and-efi_ex-provenance-r080-informative)
-- [Part C — Quality Gates & Validation Checklist](#part-c--quality-gates--validation-checklist)
-- [Part D — Known Pitfalls & Lessons Learned](#part-d--known-pitfalls--lessons-learned)
-- [Part E — Roadmap](#part-e--roadmap)
-- [Part F — Function Reuse Map](#part-f--function-reuse-map)
-- [Part H — Reference Projects](#part-h--reference-projects)
-- [Part I — Servicing Dependency Database (r09.0+, normative)](#part-i--servicing-dependency-database-r090-normative)
+- [Conventions (RFC 2119)](#conventions-rfc-2119)
+- [Stable Identifiers](#stable-identifiers)
+- [Policy Index](#policy-index-quick-reference-for-ai-agents)
+- [**Part A — Inherited Common Specification**](#part-a--inherited-common-specification)
+  - [A.1 Source file format](#a1-source-file-format)
+  - [A.2 Phase / pipeline architecture](#a2-phase--pipeline-architecture)
+  - [A.3 Log markers and severity prefixes](#a3-log-markers-and-severity-prefixes)
+  - [A.4 Parameter conventions](#a4-parameter-conventions)
+  - [A.5 Error and diagnostic format](#a5-error-and-diagnostic-format)
+  - [A.6 Documentation language policy](#a6-documentation-language-policy)
+  - [A.7 Development workflow](#a7-development-workflow)
+- [**Part B — Script-Specific Specification**](#part-b--script-specific-specification)
+  - [B.1 Script identity and entry point](#b1-script-identity-and-entry-point)
+  - [B.2 Inputs and outputs](#b2-inputs-and-outputs)
+  - [B.3 Workspace layout](#b3-workspace-layout)
+  - [B.4 OS profile (Config Schema v2.1)](#b4-os-profile-config-schema-v21)
+  - [B.5 Phase contracts (P01–P13)](#b5-phase-contracts-p01p13)
+  - [B.6 Action → Phase mapping](#b6-action--phase-mapping)
+  - [B.7 ISO filename detection patterns](#b7-iso-filename-detection-patterns)
+  - [B.8 Patch integrity check (three-layer)](#b8-patch-integrity-check-three-layer)
+  - [B.9 Synthetic test mode](#b9-synthetic-test-mode)
+  - [B.10 PatchPlan engine and WIM-target mapping](#b10-patchplan-engine-and-wim-target-mapping)
+  - [B.11 Media-dynamic-update sub-phase sequences](#b11-media-dynamic-update-sub-phase-sequences)
+  - [B.12 Catalogue scrape and supersedence selection](#b12-catalogue-scrape-and-supersedence-selection)
+  - [B.13 Pre-apply dependency closure check](#b13-pre-apply-dependency-closure-check)
+  - [B.14 Refresh policy and RefreshAllBaselines](#b14-refresh-policy-and-refreshallbaselines)
+  - [B.15 Update type matrix per OS generation](#b15-update-type-matrix-per-os-generation)
+  - [B.16 LCU package format per OS](#b16-lcu-package-format-per-os)
+  - [B.17 PCA2023 boot manager support](#b17-pca2023-boot-manager-support)
+  - [B.18 Output ISO verification](#b18-output-iso-verification)
+  - [**B.19 Servicing Dependency Database** (r09.0+)](#b19-servicing-dependency-database)
+  - [B.20 File organisation and naming conventions](#b20-file-organisation-and-naming-conventions)
+  - [B.21 Workspace preflight](#b21-workspace-preflight)
+  - [B.22 Phase 3 architecture decisions](#b22-phase-3-architecture-decisions)
+- [**Part C — Quality Gates and Validation**](#part-c--quality-gates-and-validation)
+  - [C.1 Static analysis](#c1-static-analysis)
+  - [C.2 Source file format gates](#c2-source-file-format-gates)
+  - [C.3 Configuration files validation](#c3-configuration-files-validation)
+  - [C.4 Functional smoke tests](#c4-functional-smoke-tests)
+  - [C.5 Synthetic full pipeline](#c5-synthetic-full-pipeline)
+  - [C.6 Monthly baseline refresh](#c6-monthly-baseline-refresh)
+  - [C.7 CI runner diagnostic pre-flight](#c7-ci-runner-diagnostic-pre-flight)
+  - [C.8 Documentation cross-checks](#c8-documentation-cross-checks)
+  - [C.9 Self-verification tool suite](#c9-self-verification-tool-suite)
+- [**Part D — Known Pitfalls and Lessons Learned**](#part-d--known-pitfalls-and-lessons-learned)
+  - [D.1–D.23 (inherited from r02–r08.0 cycles)](#d1d23-inherited-from-r02r080-cycles)
+  - [D.24 Cognitive bias patterns](#d24-cognitive-bias-patterns)
+  - [D.25 DISM mount-cache poisoning](#d25-dism-mount-cache-poisoning)
+  - [D.26 `List[object]` of pscustomobject argument-type mismatch](#d26-listobject-of-pscustomobject-argument-type-mismatch)
+  - [D.27 Microsoft OS tool dependency avoidance](#d27-microsoft-os-tool-dependency-avoidance)
+  - [D.28 Sampling versus comprehensive search](#d28-sampling-versus-comprehensive-search)
+  - [D.29 Code bug versus configuration problem triage](#d29-code-bug-versus-configuration-problem-triage)
+  - [D.30 Helper function unification](#d30-helper-function-unification)
+- [**Appendices**](#appendices)
+  - [Appendix E — Function reuse map](#appendix-e--function-reuse-map)
+  - [Appendix F — Reference projects](#appendix-f--reference-projects)
+  - [Appendix G — Historical revision matrix](#appendix-g--historical-revision-matrix)
 
 ---
 
 # Part A — Inherited Common Specification
 
-This script inherits in full from the repository-wide Part A defined
-in
-[`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../download-speakerdeck-oracle4engineer/SPEC.md).
-Specifically:
+> **Scope of this Part**: cross-project conventions that this script
+> shares with every other PowerShell artefact in the repository. The
+> contract is restated here in self-contained form so that a reader of
+> this SPEC alone has everything they need; pointers to the
+> repository-level SPEC and to sister project SPECs are given where
+> the canonical text lives elsewhere.
 
-| Section | Topic | Status here |
-|---|---|---|
-| A.1 | Reference Assets (`psa.py` canonical path; companion specs) | Inherited verbatim |
-| A.2 | Source File Format (UTF-8 BOM, CRLF, ASCII only) | Inherited verbatim |
-| A.3 | Banner & Version Identification | Inherited; this project's `$Script:ScriptVersion = 'update-wsi-2026.05.24-r01'` |
-| A.4 | Phase Architecture (registry-driven dispatcher) | Inherited; phases listed in §B.5 |
-| A.5 | Logging Conventions (`_LogLine`, `Write-Step/Ok/Warn/Fail/Skip`, phase headers) | Inherited verbatim |
-| A.6 | Path Handling (`-LiteralPath` everywhere, no `Split-Path -LiteralPath ... -Parent`) | Inherited verbatim |
-| A.7 | Parameter Conventions (PascalCase, `[switch]` for flags, GUID-temp downloads) | Inherited verbatim |
-| A.8 | Error & Diagnostic Conventions (`Add-ErrorJsonlEntry`, debug trace auto-export) | Inherited verbatim |
-| A.9 | CSV / JSONL Column Conventions | Inherited verbatim |
-| A.10 | Environment Evaluation (Phase 1) | Inherited; specialised in §B.5 P01 |
-| A.11 | Static Analysis with psa.py | Inherited; project config in `.psa.config.json` |
-| A.12 | Documentation Language Policy | Inherited; README.md (en) primary, README.ja.md mirror, SPEC English only |
-| A.13 | Development Workflow | Inherited verbatim |
-| A.14 | Debug Trace Facility | Inherited verbatim (uses the canonical implementation) |
+## A.1 Source file format
 
-The reused helper inventory is in [Part F](#part-f--function-reuse-map)
-below.
+**Status**: normative. **Policy ID**: SPEC-WSI-001.
+
+The script and its companion files MUST conform to the file-format
+contract from the repository-level
+[File Format Policy](../../../README.md#file-format-policy). For this
+project the relevant entries are:
+
+| File extension | Encoding | Line endings | BOM | Enforcement |
+|:---|:---|:---|:---|:---|
+| `*.ps1` | UTF-8 | **CRLF** | **required** (`EF BB BF`) | `.gitattributes` + `psa.py` rules `PSA7001` (BOM) and `PSA7002` (CRLF) |
+| `*.psd1` (PSScriptAnalyzerSettings) | UTF-8 | CRLF | required | same as above |
+| `*.md` | UTF-8 | LF | forbidden | `.gitattributes` |
+| `*.json` (data/, config) | UTF-8 | LF | forbidden | `.gitattributes` |
+| `*.py` (tests/) | UTF-8 | LF | forbidden | `.gitattributes` |
+
+Additionally, every `.ps1` body emitted by this project MUST be
+**ASCII-only** outside string literals (i.e. only bytes
+`0x09`, `0x0A`, `0x0D`, `0x20`–`0x7E` may appear outside `'...'` and
+`"..."`). This is verified by `psa.py` rule `PSA1006`. Japanese
+strings appear only inside string literals (typically `OsLang`
+values and user-facing messages).
+
+**Rationale**. Mixed line endings inserted by Linux-hosted
+generators are invisible to the PowerShell AST and to visual diff
+tools but cause `.gitattributes` to silently rewrite the file at
+`git add` time, producing confusing no-content-change diffs.
+ASCII-only outside strings prevents accidental insertion of
+homoglyphs or smart-quote characters from copy-paste, which break
+PowerShell parsing in subtle ways. Both classes of defect have been
+seen in the sister `Deploy-Drivers-For-WindowsServer` repository
+(see its SPEC §D.23).
+
+## A.2 Phase / pipeline architecture
+
+**Status**: normative. **Policy ID**: SPEC-WSI-002.
+
+The script is organised as a sequence of numbered **phases**
+(`P01` through `P13`) plus standalone **actions** (`A01` through
+`A04`). Each phase is implemented by a function of the form
+`Invoke-{Group}Phase{NN}_{Name}` (for build-group phases) or
+`Invoke-Phase{NN}_{Name}` (for setup / plan / verify / report
+phases). Each action is implemented by a function of the form
+`Invoke-Action{NN}_{Name}`.
+
+Phase functions MUST:
+
+- Emit a phase-header line via `Write-PhaseHeader` at entry.
+- Emit a phase-footer line via `Write-PhaseFooter` at exit.
+- Update `$Script:DebugStep` via `Set-DebugStep` at every
+  internally-meaningful step, so that a failure stack trace can
+  identify the precise sub-operation.
+- Return without throwing whenever the failure is recoverable; throw
+  only for terminal errors. The phase dispatcher catches throws and
+  records them in the per-phase JSON.
+- Honour `-DryRun` semantics defined per-phase (typically: log the
+  planned operation, do not commit the side effect).
+
+Phase **skip semantics** are documented in §B.5 and §B.6. A phase
+MAY skip itself with `Write-Skip` at entry; in that case the phase
+footer reflects "skipped" status and no failure is recorded.
+
+## A.3 Log markers and severity prefixes
+
+**Status**: normative. **Policy ID**: SPEC-WSI-003.
+
+All log output emitted by this script MUST use the five-symbol
+severity prefix system implemented by the `Write-*` helpers near the
+top of the script:
+
+| Helper | Prefix | Colour | Severity |
+|:---|:---|:---|:---|
+| `Write-Step` | `[*]` | Cyan | Informational step |
+| `Write-Ok` | `[+]` | Green | Successful outcome |
+| `Write-Warn` | `[!]` | Yellow | Non-fatal warning |
+| `Write-Fail` | `[X]` | Red | Fatal error |
+| `Write-Skip` | `[~]` | DarkGray | Phase or step skipped |
+
+Each line begins with `[hh:mm:ss] [+xx.xxs]` (wall clock + elapsed
+since script start) followed by the severity prefix and the message
+body. This format is parsed by `tests/powershell_harness.py` so any
+new helper MUST keep the prefix-after-timestamps layout.
+
+Phase headers and footers use `Write-PhaseHeader` / `Write-PhaseFooter`
+which emit a banner with an em-dash separator and the phase identifier
+in brackets.
+
+## A.4 Parameter conventions
+
+**Status**: normative. **Policy ID**: SPEC-WSI-004.
+
+CLI parameter design follows these conventions:
+
+- **Action selection**: `-Action <verb>` accepts a `ValidateSet` of
+  named actions (see §B.6). The default action is `Build` unless
+  documented otherwise per release.
+- **Execution mode**: `-Execute` is required for any action that
+  performs DISM mount or `oscdimg` write. Its absence implies dry-run
+  mode (planned operations are logged but not committed).
+- **Verb prefix**: long-form parameters MUST use camelCase with a
+  verb-noun stem (e.g. `-EnablePca2023BootManager`,
+  `-AutoInstallAdk`, `-WorkRoot`). Single-token flags (e.g. `-Force`,
+  `-Execute`) are reserved for the most common toggles.
+- **Validation**: every `Mandatory` parameter MUST have a
+  `Validate{Set,Pattern,Range,Script}` attribute when the input has a
+  closed value space. Free-form `[string]` is reserved for paths,
+  identifiers, and user-supplied descriptions.
+- **Diagnostic flags**: `-DryRun`, `-Verbose`, `-Debug` follow
+  PowerShell common-parameter semantics. `-IgnorePatchValidation` is
+  this script's escape hatch and is documented in §B.13.
+
+The full parameter inventory is documented in the script header
+comment and rendered automatically by `Get-Help`.
+
+## A.5 Error and diagnostic format
+
+**Status**: normative. **Policy ID**: SPEC-WSI-005.
+
+When a phase fails, the script emits diagnostics to **three** sinks:
+
+1. **Console** via `Write-Fail` — the human-readable failure line.
+2. **Transcript log** under `<WorkRoot>/logs/transcript_<yyyy-MM-dd_HH-mm-ss>.log` —
+   the full `Start-Transcript` capture, including stdout/stderr
+   interleaved with the script's own log lines.
+3. **Structured diagnostic** under
+   `<WorkRoot>/diag/<yyyy-MM-dd_HH-mm-ss>/` — one or more JSON
+   files capturing machine-parseable state for forensic replay.
+
+Structured diagnostic emission is implemented by `Add-ErrorJsonlEntry`
+(per-error JSONL append) and `Export-DebugTraceJson` (full debug
+snapshot). Both accept `-Phase`, `-Kind`, and `-Properties` parameters;
+positional usage is forbidden (this convention was tightened after
+r02.3 saw mid-refactor positional drift). See §D.NN for the historical
+incident.
+
+`Start-Transcript` MUST be stopped via the `Stop-Transcript`
+`finally` block introduced in r08.0 Step 4 (see §D.NN). The earlier
+`Register-EngineEvent PowerShell.Exiting` registration alone is
+insufficient because that event only fires on host shutdown, not on
+normal script exit.
+
+## A.6 Documentation language policy
+
+**Status**: normative. **Policy ID**: SPEC-WSI-006.
+
+This sub-project's documentation languages follow the repository-wide
+[Language Policy](../../../README.md#language-policy):
+
+| File | Language |
+|:---|:---|
+| `README.md` | English (master) |
+| `README.ja.md` | Japanese (translation of `README.md`) |
+| `SPEC.md` (this file) | **English only** |
+| `TESTING.md` | **English only** |
+| `CHANGELOG.md` | **English only** |
+| `docs/history/*.md` | English or Japanese (per-file, not bilingual) |
+| `data/raw-release-info.md` | English (Microsoft-sourced content) |
+
+The English-only constraint on SPEC / TESTING / CHANGELOG avoids the
+synchronisation-drift class of defect that LLM-assisted maintenance
+is especially vulnerable to (the same content in two languages
+drifting silently across revisions). Japanese readers should use
+`README.ja.md` for orientation and then refer to the English
+source-of-truth documents.
+
+If older revisions contained `SPEC.ja.md` / `TESTING.ja.md` files,
+those MUST be removed in the next maintenance pass and any references
+updated to point at the English originals.
+
+## A.7 Development workflow
+
+**Status**: normative. **Policy ID**: inherited from
+[repository-level SPEC](../../../SPEC.md) §11.6.
+
+This sub-project's development workflow is the standard repository
+workflow:
+
+1. **Edit on a feature branch** (or, for single-developer revisions,
+   commit directly to `main` with a descriptive subject).
+2. **Local quality gates** MUST pass before commit (see Part C).
+3. **CI quality gates** (Stage 1 / Stage 2 / Stage 3) MUST pass on
+   the resulting commit.
+4. **CHANGELOG entry** MUST be added in the same commit as any code
+   or config change that operators would notice.
+5. **SPEC update** MUST be added in the same commit as any change
+   that crosses a normative-section boundary (i.e. introduces a new
+   policy, changes an existing policy, or moves a policy to a
+   different section).
+
+For revisions that span multiple commits (a typical "Step Series"
+within a single revision letter), the commits MAY be merged into one
+on push, or kept separate — the choice is per-revision. CHANGELOG
+entries are organised by revision letter, not by individual commit.
+
+The full release process — `$Script:ScriptVersion` bump, ScriptTag
+update, CHANGELOG cross-reference, branch / commit naming — is
+documented in CHANGELOG.md's revision history. The release-tag
+identifier follows the pattern
+`update-wsi-<YYYY.MM.DD>-r<NN>[.<MM>]` where `<NN>` is the major
+revision letter and `<MM>` is the optional minor.
 
 ---
 
+
 # Part B — Script-Specific Specification
 
-## B.0 Script Identity
+> **Scope of this Part**: the specific contract of
+> `Update-WindowsServerIso.ps1`. Sub-sections are organised by concern:
+> identity / I/O / workspace / configuration in B.1–B.4; the phase
+> pipeline contract in B.5–B.6; per-phase algorithms in B.7–B.18; the
+> r09.0+ Servicing Dependency Database in B.19; cross-cutting file
+> organisation, preflight, and architecture decisions in B.20–B.22.
 
-| Field | Value |
-|---|---|
-| Filename | `Update-WindowsServerIso.ps1` |
-| Project folder | `scripts/powershell/update-windows-server-iso/` |
-| Version | `update-wsi-2026.05.24-r02.5` |
-| Tag | `dynamic-baseline-and-wsusscn2-validation-fixup` |
-| Target OS | Server 2016 / 2019 / 2022 / 2025 |
-| Languages | en-us, ja-jp |
-| Architecture | x64 only |
+## B.1 Script identity and entry point
 
-## B.1 Inputs and Outputs
+**Status**: normative.
 
-### B.1.1 Inputs
+The script is a single-file PowerShell artefact named
+`Update-WindowsServerIso.ps1` located at
+`scripts/powershell/update-windows-server-iso/`. It targets
+Windows PowerShell 5.1 as the primary host with PowerShell 7+ as a
+secondary supported host on Linux for static analysis only.
 
-| Kind | Source | Notes |
-|---|---|---|
-| Source ISO | Microsoft Evaluation Center, VLSC, or local file | `-IsoPath` or `-IsoUrl` |
-| Patches | Microsoft Update Catalogue (MSU/CAB) | `-PatchUrls`, `-PatchDirectory`, or `-ManifestPath` |
-| Per-OS profile | `data/config-<OsKey>.json` | Auto-selected by `-OsVersion` |
-| Language profile | `data/config-<OsKey>.json/Languages/<lang>` | Auto-selected by `-OsLanguage` |
-| Optional manifest | Metalink 4 (`.meta4`) | Carries SHA-1 and SHA-256 expected hashes |
+The script header declares:
 
-### B.1.2 Outputs
+```powershell
+[CmdletBinding()]
+param(
+    [ValidateSet('Build', 'Verify', 'Prepare', 'PrepareBuildVerify',
+                 'Cleanup', 'ListPhases', 'TestHarness',
+                 'RefreshAllBaselines', 'RefreshSnapshots',
+                 'DumpFieldClassification',
+                 'RefreshDependencyDatabase')]
+    [string]$Action = 'Build',
 
-| Output | Path |
-|---|---|
-| Final ISO | `<WorkRoot>/output/<OsShortName>_<lang>_Updated_<yyyy-MM>.iso` |
-| Phase CSVs | `<WorkRoot>/logs/P0<N>_<name>.csv` |
-| Debug trace JSONL | `<WorkRoot>/logs/debug_<phase>_<timestamp>.jsonl` (file output) |
-| Failure diag JSON | `<WorkRoot>/diag/<phase>_failure_<timestamp>.json` (on phase failure) |
-| Phase completion markers | `<WorkRoot>/.markers/P0<N>.ok` |
-| Transcript (optional) | `-LogFile <path>` |
-
-## B.2 Workspace Layout
-
-```
-$WorkRoot/                       (default: C:\Temp\Workspace_UpdateWsi)
-  source/
-    iso/                         downloaded ISO files
-    extracted/                   extracted ISO tree (read/write while editing)
-  patches/
-    <OsVersion>/                 downloaded patch files
-    manifests/                   Metalink .meta4 files
-  work/
-    mount_install/               install.wim mount target
-    mount_boot_idx1/             boot.wim idx 1 mount target
-    mount_boot_idx2/             boot.wim idx 2 mount target
-    mount_winre/                 winre.wim mount target
-    temp/                        scratch for Dynamic Update CAB expansion
-  output/                        final ISO output
-  logs/                          per-phase CSV + JSONL
-  diag/                          debug-trace JSON exports on failure
-  pca2023/                       P12 PCA2023 readiness JSON + Markdown (r05.0+)
-  .markers/                      P0<N>.ok marker files
+    [Parameter()] [switch]$Execute,
+    [Parameter()] [string]$WorkRoot,
+    [Parameter()] [string]$WsusScnCabPath,
+    # ... (see script header for the full inventory)
+)
 ```
 
-All paths derive from `$Script:WorkRoot`; overriding `-WorkRoot` re-bases
-the whole tree atomically.
+The complete parameter inventory and its semantics are documented
+inline in the script's comment-based help block. `Get-Help
+.\Update-WindowsServerIso.ps1 -Detailed` renders the same.
 
-## B.3 Output ISO Naming
+`$Script:ScriptVersion` near the script head records the release
+identifier in the form `update-wsi-<YYYY.MM.DD>-r<NN>[.<MM>]`.
+`$Script:ScriptTag` records a one-line semantic tag for the
+release. Both MUST be bumped in the same commit as any operational
+change.
 
-| Element | Format |
-|---|---|
-| Filename | `<OsShortName>_<lang>_Updated_<yyyy-MM>.iso` |
-| Volume label | `<VolumeLabelPrefix>_UP_<yyyyMM>` (max 32 ASCII chars) |
-| Bootdata | `2#p0,e,b<etfsboot.com>#pEF,e,b<efisys.bin>` (UEFI + BIOS) |
-| UDF version | 1.02 (`-udfver102`) |
-| Optimisation | `-m -o` (no media verify, optimise duplicates) |
+## B.2 Inputs and outputs
 
-Examples:
+**Status**: normative.
 
-| OS, lang | Filename | Volume label |
-|---|---|---|
-| Server 2022 en-us, May 2026 | `WS2022_en-us_Updated_2026-05.iso` | `WS2022EN_UP_202605` |
-| Server 2025 ja-jp, May 2026 | `WS2025_ja-jp_Updated_2026-05.iso` | `WS2025JA_UP_202605` |
+### B.2.1 Inputs
 
-## B.4 OS Profile Schema
+| Input | Source | Required for |
+|:---|:---|:---|
+| Microsoft Windows Server evaluation ISO | Microsoft Evaluation Center | Build, Verify |
+| Per-OS configuration profile | `data/config-Server{2016,2019,2022,2025}.json` | All actions |
+| Microsoft Update Catalogue | live HTTPS | RefreshAllBaselines, Build (P03/P04) |
+| `wsusscn2.cab` (offline-scan metadata) | Microsoft CDN | P06 dependency validation, RefreshDependencyDatabase |
+| `data/wsusscn2-database.json` (layer 2) | committed in repo | P06 stage 2, when present |
 
-See `data/config-Server2025.json` for the most complete example. Fields:
+### B.2.2 Outputs
 
-| Field | Type | Notes |
-|---|---|---|
-| `OsKey` | string | `Server2016`, `Server2019`, `Server2022`, `Server2025` |
-| `OsName` | string | "Windows Server <year> Datacenter" |
-| `OsShortName` | string | `WS2016`, `WS2019`, `WS2022`, `WS2025` |
-| `Build` | int | OS build number (e.g. 26100 for 2025) |
-| `Architecture` | string | `x64` |
-| `RequireSSUFirst` | bool | Always `true` for current targets |
-| `EnableInstallWimUpdate` | bool | Run P07 against install.wim |
-| `EnableBootWimUpdate` | bool | Run P08 against boot.wim |
-| `EnableWinREUpdate` | bool | Run P08 against winre.wim too |
-| `DotNetRequired` | bool | Apply .NET cumulative if present |
-| `LCUExpandViaMum` | bool | `true` only for Server 2025; LCU ships as MUM/CAB bundle |
-| `RequireUefiCa2023Boot` | bool | `true` only for Server 2025 (Secure Boot CA rotation) |
-| `BootWimIndexes` | int[] | Typically `[1, 2]` |
-| `InstallWimIndexes` | `"all"` or int[] | Filter for which install.wim indexes to patch |
-| `ExpectedEditions` | string[] | For the P11 verification banner |
-| `AutoDetectKnownGood` | object | KB IDs frozen as the latest known-good set (M2) |
-| `Languages.<lang>.IsoFwLink` | string | Eval Center FwLink URL |
-| `Languages.<lang>.IsoSnapshotUrl` | string | Direct snapshot URL (fallback) |
-| `Languages.<lang>.IsoSha256` | string | Known-good ISO hash, populated on first run |
-| `Languages.<lang>.IsoExpectedSize` | int | Approximate size in bytes |
-| `Languages.<lang>.VolumeLabelPrefix` | string | Used in output volume label |
+| Output | Path | Conditions |
+|:---|:---|:---|
+| Updated ISO | `<WorkRoot>/output/<input-basename>_Updated_<yyyy-MM>.iso` | `-Action Build -Execute` |
+| Per-phase log | `<WorkRoot>/logs/P{NN}_<phase>.log` | every phase |
+| Transcript log | `<WorkRoot>/logs/transcript_<yyyy-MM-dd_HH-mm-ss>.log` | every run |
+| Diagnostic JSON | `<WorkRoot>/diag/<yyyy-MM-dd_HH-mm-ss>/*.json` | on failure or `-Verbose` |
+| Final report | `<WorkRoot>/P13_final_report.json` and `.md` | always |
+| PCA2023 readiness | `<WorkRoot>/pca2023_readiness.json` and `.md` | P12 |
 
-## B.5 Phase Contracts (P01–P13)
+The final report's `Health` field is one of `Healthy`, `Warning`,
+`Critical`, `Unknown`. Healthy means every required phase succeeded
+and `Test-OutputIsoPca2023Readiness` (see §B.18) reported
+`OverallStatus` of `Pass` or `PassWithNotes`.
 
-Each phase function is `Invoke-<Group>Phase<NN>_<Name>` and is wrapped
-in `Start-DebugTrace` / `Stop-DebugTrace`. Phases write a `P0<N>.ok`
-marker on success.
+## B.3 Workspace layout
 
-### P01 Initialize (Setup)
+**Status**: normative.
 
-| Step | What |
-|---|---|
-| 0 | `Show-PowerShellEnvironment` (no abort, always runs) |
-| 1 | `Assert-PowerShellCompatibility` (64-bit, 5.1+) |
-| 2 | Administrator check (relaxed for read-only actions) |
-| 3 | Tool detection: `dism.exe`, `oscdimg.exe`, `Get-WindowsImage` |
-| 4 | Disk-space check: 30 GB hard floor, 60 GB recommended |
-| 5 | Hyper-V check (only when `-Action BootTest` or `All`) |
+A "workspace" is a directory tree under a `-WorkRoot` argument
+(defaulting to `<script-dir>/Workspace_UpdateWsi`) that holds all
+per-run state:
 
-### P02 ResolveInputs (Setup)
+```
+<WorkRoot>/
+├── source/
+│   └── iso/<input-iso>.iso        (operator-staged input)
+├── extracted/                      (P05 robocopy expansion target)
+├── work/
+│   ├── install-wim-mount/          (P07 mount target)
+│   ├── boot-wim-mount/             (P08 mount target)
+│   └── winre-wim-mount/            (P08 inner mount target)
+├── patches/Server<N>/              (P04 download cache)
+├── cache/
+│   ├── catalog/                    (HTML / JSON Catalogue cache)
+│   └── wsusscn2/                   (layer 3 raw cab + extracts, NEW r09.0)
+│       ├── wsusscn2.cab
+│       ├── wsusscn2.cab.meta.json
+│       ├── package.xml             (extracted from cab, may be deleted)
+│       └── audit/                  (rolling 6-month archive)
+├── output/<final-iso>.iso          (P09/P10 destination)
+├── logs/                           (per-phase + transcript)
+└── diag/<timestamp>/               (forensic JSON on failure / verbose)
+```
 
-| Step | What |
-|---|---|
-| 1 | Load `data/config-<OsVersion>.json`, attach language node |
-| 2 | Resolve ISO source: `-SyntheticTestMode` < `-IsoPath` < `-IsoUrl` < FwLink < snapshot |
-| 3 | Build patch list from `-PatchUrls` / `-ManifestPath` / `-PatchDirectory` / `-AutoDetectLatestPatches` / PatchBaseline.Patches |
-| Output | `logs/P02_inputs_resolved.csv` |
+The recommended pattern for multi-OS use is **one WorkRoot per OS
+family** (e.g. `D:\UpdateWsi_2016`, `D:\UpdateWsi_2019`, …). This
+side-steps the DISM mount-cache poisoning class of failure
+documented in §D.25.
 
-### P03 RefreshPatchBaseline (Setup)
+## B.4 OS profile (Config Schema v2.1)
 
-| Step | What |
-|---|---|
-| 0 | Skip if `-SyntheticTestMode`, `-SkipDynamicPatchRefresh`, or `-UseBaselineOnly` |
-| 1 | `Get-LatestPatchTuesday`; compare with `PatchBaseline.PatchTuesdayOfBaseline` |
-| 2 | If `Test-PatchBaselineFresh = $true` AND `-AutoDetectLatestPatches` not set: skip |
-| 3 | Resolve target patch month (`-PatchMonth` or current Patch Tuesday) |
-| 4 | `Resolve-PatchSetFromCatalog`: scrape Microsoft Update Catalogue for SSU + LCU + DynUp Setup + DynUp Component + DynUp SafeOs + .NET CU |
-| 5 | For each candidate, run `Get-DownloadLinkFromCatalog` and `Get-SupersedenceFromCatalog` |
-| 6 | Auto-link LCU.RequiresKbIds to SSU(s) found in the same pass |
-| 7 | Update in-memory `$Script:OsProfile.PatchBaseline`; record `PatchTuesdayOfBaseline`, `LastVerifiedDate`, `LastVerifiedBy = 'auto-scrape'` |
-| 8 | If `AutoRefreshPolicy.WritebackToConfig`: `Save-ConfigWithBaseline` (atomic write to Config JSON) |
-| 9 | Re-derive `$Script:ResolvedPatches` from the refreshed baseline (when user did not provide an explicit source) |
-| Failure | If scrape fails AND `FallbackOnScrapeFailure = 'UseBaseline'` AND baseline usable: warn + continue. Otherwise: throw |
+**Status**: normative. **Policy ID**: SPEC-WSI-011 (Patch integrity
+three-layer is built on this schema).
 
-### P04 FetchAssets (Fetch)
+Each `data/config-Server<OsKey>.json` file is a per-OS configuration
+profile that the script reads at P02 (ResolveInputs). Schema 2.1 is
+the current shape; older revisions are documented in §B.22 for
+historical reference.
 
-| Step | What |
-|---|---|
-| 1 | Download / use existing ISO; SHA-256 verify if config has one |
-| 2 | Download / use existing patches; `Test-PatchIntegrity` per patch |
-| Tactics | GUID-suffixed temp paths, atomic move on success, retry via `Invoke-WebRequestWithRetry` |
-
-### P05 ExpandIso (Plan)
-
-| Step | What |
-|---|---|
-| 1 | `Mount-DiskImage` the source ISO, copy contents to `extracted/`, `Dismount-DiskImage` |
-| 2 | Enumerate `install.wim` and `boot.wim` indexes via `Get-WindowsImage` |
-| Output | `logs/P04_wim_inventory.csv` |
-
-### P06 ValidatePatchSet (Plan)
-
-| Step | What |
-|---|---|
-| 0 | Skip if `-SyntheticTestMode`, `-UseBaselineOnly`, or non-Windows host |
-| 1 | Resolve `wsusscn2.cab`: `-WsusScnCabPath` < `<WorkRoot>/cache/wsusscn2.cab` cache |
-| 2 | Determine download necessity: cache absent, OR cache older than latest Patch Tuesday |
-| 3 | If download needed: `Invoke-WebRequestWithRetry` to `<WorkRoot>/cache/wsusscn2.cab.<guid>.part`, atomic move, record SHA-256 |
-| 4 | If newly downloaded: persist metadata to Config (`PatchBaseline.WsusScnCab.LastDownloadedDate` etc.) |
-| 5 | `Invoke-WuaOfflineScan`: create `Microsoft.Update.Session`, register cab via `AddScanPackageService`, run `IsInstalled=0 and Type='Software' and IsHidden=0` |
-| 6 | `Compare-PatchSetVsWuaScan`: classify WUA-required updates as Provided or Missing (excluding `PatchBaseline.ExcludeKbList`) |
-| 7 | If any Missing: `Export-PatchValidationReport` emits 4 files; throw unless `-IgnorePatchValidation` |
-| Output | `<WorkRoot>/diag/<timestamp>/validation_summary.json`, `validation_detail.csv`, `wsusscn2_scan_raw.json`, `dependency_graph.json` |
-
-### P07 PatchInstallWim (Build)
-
-For each install.wim index filtered by `-OnlyInstallWimIndexes` AND
-Config `InstallWimIndexes`:
-
-| Step | What |
-|---|---|
-| Mount | `Invoke-WimMountSafe` (cleans up stale mount first) |
-| Apply | Patches in `Get-PatchApplyOrder` order: SSU → DynUp Setup → LCU → DynUp Component → DynUp SafeOs → .NET → Defender → Edge → Other |
-| Cleanup | `Invoke-DismCleanup` (`/StartComponentCleanup /ResetBase`) |
-| Dismount | `Invoke-WimDismountSafe` (10 s pre-sleep, 30 s retry on failure) |
-| Sandbox | Without `-Execute`, the loop emits a `[PLAN]` row per (index, patch) pair and does NOT mount |
-| Output | `logs/P05_patch_inventory.csv` |
-
-### P08 PatchBootWim (Build)
-
-For each boot.wim index in Config `BootWimIndexes` (typically `[1, 2]`):
-
-| Step | What |
-|---|---|
-| Mount, apply, cleanup, dismount | Same lifecycle as P07, but with the boot-wim patch subset (SSU, LCU, SafeOs DU only) |
-
-Then, if `EnableWinREUpdate`:
-
-| Step | What |
-|---|---|
-| Extract | Mount install.wim primary index, copy embedded `Windows\System32\Recovery\Winre.wim` to `work/temp/` |
-| Patch winre | Mount the copy, apply patches, cleanup, dismount |
-| Re-embed | Copy the updated winre.wim back into the mounted install.wim |
-| Dismount install.wim | Save + integrity-check |
-
-### P09 AssembleIso (Build)
-
-| Step | What |
-|---|---|
-| 1 | For each Dynamic Update Setup CAB: `expand.exe -F:*` into temp, overlay onto `extracted/sources/` |
-| 2 | `New-BootableIso` invokes oscdimg with the 3-tier `etfsboot.com` / `efisys.bin` fallback chain |
-| 3 | Verify the output ISO file exists and is non-empty |
-
-### P10 ConvertPca2023BootManager (Build, OPTIONAL)
-
-This phase is the **only** Build-group phase that is conditional
-on operator opt-in (see B.20 for the rationale). It rewrites the
-output ISO's boot manager to be signed via the 'Windows UEFI CA
-2023' chain instead of the legacy 'Windows Production PCA 2011'.
-
-| Step | What |
-|---|---|
-| 0a | If `-EnablePca2023BootManager` is NOT set: silent skip, write `P10.skipped` marker |
-| 0b | If `OsKey = Server2025` AND `-ForcePca2023OnServer2025` is NOT set: silent skip |
-| 0c | Pre-flight `Get-OrEnsurePca2023Snapshot`; if Health = 'Critical' (LCU < 2024-4B): throw |
-| 0d | If Health = 'Healthy' (already PCA2023): silent skip |
-| 1 | Call `Convert-WimBootToPca2023Signed` (internal, default) OR invoke external `-Pca2023ScriptPath` |
-| 2 | Re-assemble output ISO via `New-BootableIso` to embed the updated boot manager |
-| 3 | Force-refresh `$Script:Pca2023Snapshot` so downstream phases see new state |
-| Output | Updated `extracted/efi/boot/bootx64.efi` + `extracted/bootmgr.efi` + `extracted/efi/microsoft/boot/efisys_ex.bin` + fonts; updated output ISO |
-
-### P11 StaticVerify (Verify)
-
-| Step | What |
-|---|---|
-| 1 | Output ISO existence + minimum size check |
-| 2 | `Mount-DiskImage` the output ISO; confirm `install.wim`, `boot.wim`, `setup.exe` exist |
-| 3 | Enumerate WIM indexes; for the primary install.wim index, run `Get-WindowsPackage` and check each expected KB |
-| 4 | `Dismount-DiskImage` |
-| Output | `logs/P11_verification.csv` |
-
-### P12 VerifyPca2023Readiness (Verify, ALWAYS-RUNS)
-
-Strictly read-only inspection of the produced ISO's PCA2023
-readiness state. Always runs as part of the Verify group,
-regardless of whether `-EnablePca2023BootManager` was set for P10.
-
-| Step | What |
-|---|---|
-| 0 | Skip ONLY if no extracted media is available (P05 did not run, or workspace was cleaned) |
-| 1 | `Get-OrEnsurePca2023Snapshot -Force` against `<WorkRoot>/extracted/` |
-| 2 | Render snapshot to console via `Show-Pca2023ReadinessSnapshot` |
-| 3 | Emit `<WorkRoot>/pca2023/pca2023_readiness.json` (machine-readable) |
-| 4 | Emit `<WorkRoot>/pca2023/pca2023_readiness.md` (human-readable detail) |
-| Output | JSON + Markdown under `<WorkRoot>/pca2023/`. Snapshot is also cached in `$Script:Pca2023Snapshot` for P13 |
-
-### P13 FinalReport (Report)
-
-| Step | What |
-|---|---|
-| 1 | `Show-PhaseSummary` (timing + status per phase) |
-| 2 | Output ISO SHA-256 + size + path |
-| 3 | Log / diag directory hints |
-| 4 | Inline PCA2023 readiness summary (Compact form) + cross-link to P12's JSON/MD detail files |
-
-## B.6 Action → Phase Mapping
-
-| `-Action`            | Phases run                                                              |
-|----------------------|-------------------------------------------------------------------------|
-| `Prepare`            | P01, P02, P03, P04, P05, P06                                        |
-| `Build`              | P07, P08, P09, P10                                                      |
-| `Verify`             | P11, P12, P13                                                           |
-| `PrepareBuildVerify` | P01, P02, P03, P04, P05, P06, P07, P08, P09, P10, P11, P12, P13         |
-| `All`                | Same as `PrepareBuildVerify` plus BootTest                              |
-| `BootTest`           | Out-of-band: Hyper-V Gen2 VM smoke test                                 |
-| `Cleanup`            | (no phases) Remove `<WorkRoot>` after safety check                      |
-| `ListPhases`         | (no phases) Print the registry and exit                                 |
-| `GenerateManifest`   | P01, P02, P03 (Catalog scrape + writeback only)                         |
-| `InspectBaseline`    | (no phases) Read-only past-month baseline derivation; r07.0+ (see §B.23.13) |
-
-**Note on `Build` mapping**: P10 is INCLUDED in the `Build` Action
-mapping AND in `standardFull` even though it is default-skip.
-This is intentional - see B.20 for the design rationale. The
-skip gate lives inside the phase function, not at the Action
-layer, so operators running `-PhaseIds P10` still get the
-explicit "skipped because no opt-in flag" log line rather than
-an obscure "P10 not part of Build".
-
-**Note on `InspectBaseline`** (r07.0+): unlike all the other
-Actions, `InspectBaseline` has no Phase mapping because it is a
-pure derivation from the on-disk cache files. The action takes
-`-PatchMonth YYYY-MM -OsKey ServerNNNN` and prints the
-reconstructed `PatchBaseline.Patches[]` JSON to stdout without
-touching any file on disk. See §B.23.13 for design rationale.
-
-## B.7 ISO Filename Detection Patterns
-
-`Get-IsoMetadata` recognises four shapes:
-
-| # | Pattern (regex) | Examples |
-|---|---|---|
-| 1 | `^(?<build>\d{5})\.(?<rev>\d+)\.(?<date>\d{6}-\d{4})\.(?<branch>\w+)_(SERVER|CLIENT)_EVAL_(?<arch>x64FRE)_(?<lang>[a-z]{2}-[a-z]{2})\.iso$` | Server 2019/2022/2025 svc_refresh |
-| 2 | `^SERVER_EVAL_(?<arch>x64FRE)_(?<lang>[a-z]{2}-[a-z]{2})\.iso$` | Server 2022 initial release |
-| 3 | `^Windows_Server_2016_Datacenter_EVAL_(?<lang>[a-z]{2}-[a-z]{2})_(?<build>\d+)_refresh\.iso$` | Server 2016 en-us refresh |
-| 4 | `^(?<build>\d{5})\.(?<rev>\d+)\.(?<date>\d{6}-\d{4})\.(?<branch>\w+)_SERVER_EVAL_X64FRE_(?<lang>[A-Z]{2}-[A-Z]{2})\.ISO$` | Server 2016 ja-jp UPPERCASE |
-
-If none matches, `Get-IsoMetadata` returns `$null` and the caller falls
-back to the Config-supplied OS/language pair.
-
-## B.8 Patch Integrity Check (Three-Layer)
-
-`Test-PatchIntegrity` runs three layers of checks, in order:
-
-| Layer | Check |
-|---|---|
-| L1 | File exists; size > 0 |
-| L2a | Filename-embedded SHA-1 (last 40 hex chars before `.msu`/`.cab`) matches Metalink SHA-1 (if both present) |
-| L2b | Content SHA-1 matches Metalink SHA-1 (intentional use of SHA-1 — see Part D.5) |
-| L2c | Content SHA-256 matches Metalink SHA-256 (if present in manifest) |
-| L3 | `Get-AuthenticodeSignature -LiteralPath` is `Valid` AND signer is `*Microsoft*` |
-
-Any hard failure throws; L3 is best-effort (some hosts may not have the
-cert store) and records "Unverifiable" without throwing.
-
-## B.9 Synthetic Test Mode
-
-Enabled by `-SyntheticTestMode`. Used exclusively by Stage 3 CI:
-
-| Behaviour | Why |
-|---|---|
-| No Microsoft asset is downloaded | Stays within evaluation licence boundaries for CI |
-| ISO is generated via `dism /Capture-Image` on a tiny text payload + oscdimg wrap with stub boot files | Exercises the full DISM-mount + oscdimg pipeline without real binaries |
-| Output ISO is intentionally non-bootable | The stub `etfsboot.com` and `efisys.bin` are 4-byte placeholders |
-| P11 verification is relaxed (size floor 1 KB, KB list optional) | The synthetic image has no real KBs |
-| P03 and P06 are both skipped | No real patches in play; Catalog scrape and wsusscn2 scan are unnecessary |
-| CI MUST NOT upload the synthetic ISO | Belt-and-braces guard against accidental Microsoft-content leaks |
-
-## B.10 Config Schema v2.1 (r05.0+)
-
-The `data/config-<OsKey>.json` schema is a 3-tier hierarchy. Each field
-group carries a verification marker (`_VerifiedDate` / `_VerifiedBy`
-for value-only groups, or `LastVerifiedDate` / `LastVerifiedBy` for
-groups that also need to record their Patch Tuesday baseline).
-
-**Schema 2.1 introduced in r05.0**: adds the top-level `Pca2023`
-block (between `PatchBaseline` and `AutoRefreshPolicy`) that
-captures per-OS Secure Boot conversion defaults consumed by
-P10 / P12.
+### B.4.1 Top-level structure
 
 ```jsonc
 {
   "Schema":  "2.1",
   "OsKey":   "Server2025",
 
-  // (A) OS-wide constants: unchanging once verified
-  "Common": {
-    "Build":              26100,
-    "OsShortName":        "WS2025",
-    "Edition":            "Datacenter",
-    "Architecture":       "x64",
-    "WimEdition":         "Windows Server 2025 Datacenter (Desktop Experience)",
-    "InstallWimIndex":    4,
-    "BootWimIndexes":     [1, 2],
-    "WinReWimPath":       "Windows\\System32\\Recovery\\Winre.wim",
-    "SupportedLanguages": ["en-us", "ja-jp"],
-    "DefaultLanguage":    "en-us",
-    "LCUExpandViaMum":    true,
-    "_VerifiedDate":      "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy":        "manual:initial-r03"
-  },
-
-  // (B) Patch baseline: language-neutral patches (Patch Tuesday cadence)
-  "PatchBaseline": {
-    "Schema":                  "2.0",
-    "TargetBuildAfterUpdate":  "26100.32522",
-    "PatchTuesdayOfBaseline":  "",                  // YYYY-MM-DD; empty = uninitialised
-    "LastVerifiedDate":        "",
-    "LastVerifiedBy":          "",
-    "VerificationMethod":      "",                  // auto-scrape | manual | auto-scrape+wsusscn2
-    "ChecksumAlgorithm":       "SHA256",
-    "NeutralPatches": [
-      { "Type": "SSU",                  "KbId": "...", "IsCombined": false, ... },
-      { "Type": "LCU",                  "KbId": "...", "IsCombined": true,  ... },
-      { "Type": "DotNet.Runtime",       "KbId": "...", ... },
-      { "Type": "DotNet.OsLevel",       "KbId": "...", ... },
-      { "Type": "DynamicUpdate.Setup",  "KbId": "...", ... },
-      { "Type": "DynamicUpdate.SafeOs", "KbId": "...", ... }
-    ],
-    "ExcludeKbList": [...],
-    "WsusScnCab": { "SourceUrl": "...", "LocalCachePath": "", ... }
-  },
-
-  // (B') PCA2023 / Secure Boot conversion defaults (Schema 2.1+)
-  "Pca2023": {
-    "RequiredByDefault":          true,   // Server 2016/2019/2022 = true; Server 2025 = false
-    "RequiredUpdateLevelKb":      "2024-4B (April 2024 LCU) or later",
-    "RequiredUpdateLevelMinDate": "2024-04-09",
-    "NotesSource":                [<Microsoft documentation URLs>],
-    "Notes":                      "<plain-text operational note>"
-  },
-
-  // (C) Auto-refresh policy
-  "AutoRefreshPolicy": { ... },
-
-  // (D) Per-language: ISO source and language-specific patches
-  "LanguageSpecific": { ... }
+  "Common":  { /* OS-wide constants, see B.4.2 */ },
+  "PatchBaseline": { /* Patch Tuesday cadence, see B.4.3 */ },
+  "Pca2023":  { /* Secure Boot conversion defaults, see B.4.4 */ },
+  "AutoRefreshPolicy": { /* see B.14 */ },
+  "LanguageSpecific": { /* per-language ISO + lang-specific patches */ }
 }
 ```
 
-**Per-OS Pca2023 values:**
+### B.4.2 `Common` block
 
-| OsKey | RequiredByDefault | MinDate | KbLabel |
-|---|:---:|:---:|---|
+OS-wide constants that change only when Microsoft re-releases the
+base ISO:
+
+| Field | Example | Meaning |
+|:---|:---|:---|
+| `Build` | `26100` | Base OS build (pre-LCU) |
+| `OsShortName` | `WS2025` | Filename token |
+| `Edition` | `Datacenter` | Default edition for output ISO |
+| `Architecture` | `x64` | Always x64 today; reserved for future arm64 |
+| `WimEdition` | `Windows Server 2025 Datacenter (Desktop Experience)` | DISM target name |
+| `InstallWimIndex` | `4` | Index inside install.wim |
+| `BootWimIndexes` | `[1, 2]` | Indexes inside boot.wim |
+| `WinReWimPath` | `Windows\System32\Recovery\Winre.wim` | Path inside install.wim |
+| `SupportedLanguages` | `["en-us", "ja-jp"]` | Languages configured for this OS |
+| `DefaultLanguage` | `en-us` | Used when `-OsLang` is not specified |
+| `LCUExpandViaMum` | `true` | Use `update.mum`-based LCU expansion (true for r02+) |
+| `EnableInstallWimUpdate` | `true` (2016/2019/2022) / `false` (2025) | Whether P07 applies LCU to install.wim |
+| `EnableBootWimUpdate` | `true` | Whether P08 applies LCU to boot.wim |
+| `EnableWinREUpdate` | `true` | Whether P08 applies Safe OS DU to WinRE.wim |
+| `_VerifiedDate` / `_VerifiedBy` | `2026-05-24T00:00:00+09:00` / `manual:initial-r03` | Human verification record |
+
+The three `Enable*Update` flags MUST be promoted from `Common` to
+top-level by `Get-ConfigProfile`. The r08.0 Step 2 dead-code path
+defect (flags read but not promoted) is documented in §D.NN.
+
+### B.4.3 `PatchBaseline` block
+
+Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
+
+```jsonc
+"PatchBaseline": {
+  "Schema":                  "2.0",
+  "TargetBuildAfterUpdate":  "26100.32522",
+  "PatchTuesdayOfBaseline":  "2026-05-13",
+  "LastVerifiedDate":        "2026-05-24T00:00:00+09:00",
+  "LastVerifiedBy":          "auto-scrape:Catalog",
+  "VerificationMethod":      "auto-scrape+wsusscn2",
+  "ChecksumAlgorithm":       "SHA256",
+  "NeutralPatches": [
+    {
+      "Type":                "LCU",
+      "KbId":                "KB5087539",
+      "UpdateId":            "...",
+      "Title":               "...",
+      "ApplyOrder":          2,
+      "IsCombined":          false,
+      "FileName":            "...",
+      "DownloadUrl":         "...",
+      "LocalPath":           "patches/Server2025/...",
+      "Sha256":              "...",
+      "RequiresKbIds":       ["KB5088064"],         // populated by RefreshAllBaselines
+      "Supersedes":          ["KB5082077"],          // populated by RefreshAllBaselines
+      "RequiresMinimumOsBuild": "26100.32000",       // populated by RefreshAllBaselines (r09.0+)
+      "_DependencyVerifiedDate":   "2026-05-27T10:30:00+09:00",
+      "_DependencyVerifiedSource": "wsusscn2.cab@sha256:abc123..."
+    },
+    /* ... SSU, .NET CU, DynamicUpdate.Setup, DynamicUpdate.SafeOs ... */
+  ],
+  "ExcludeKbList": [],
+  "WsusScnCab": {
+    "SourceUrl":                "https://catalog.s.download.windowsupdate.com/.../wsusscn2.cab",
+    "LocalCachePath":           "Workspace_UpdateWsi/cache/wsusscn2/wsusscn2.cab",
+    "LastDownloadedDate":       "2026-05-27T10:25:00+09:00",
+    "LastDownloadedSha256":     "...",
+    "LastDownloadedSizeBytes":  1073741824,
+    "DependencyDatabasePath":   "data/wsusscn2-database.json",
+    "DependencyDatabaseSha256": "..."
+  }
+}
+```
+
+Patch `Type` values follow the inventory in §B.15. Field cadence and
+who is allowed to mutate each field is the §B.14 decision matrix.
+
+### B.4.4 `Pca2023` block (Schema 2.1+)
+
+Per-OS Secure Boot conversion defaults consumed by P10 / P12:
+
+| OsKey | RequiredByDefault | RequiredUpdateLevelMinDate | KbLabel |
+|:---|:---:|:---:|:---|
 | Server2016 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
 | Server2019 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
 | Server2022 | `true`  | `2025-02-11` | "2025-2B (February 2025 LCU, 20348.2227 baseline) or later" |
 | Server2025 | `false` | `""`         | "n/a (firmware-provided 2023 certs)" |
 
-Server 2022 has a later baseline date because the EFI_EX staging
-directories appeared in cumulative updates only from the 2025-2B
-LCU forward, per Lenovo lp2353.pdf.
+Server 2022 has a later baseline date because the `EFI_EX` staging
+directories appeared in cumulative updates only from the 2025-2B LCU
+forward. Server 2025 ships PCA2023 staging assets pre-populated in
+its install.wim (see r08.0 Step 1 / Step 2 finding documents) and
+therefore does not require a P10 conversion to reach PCA2023
+readiness.
 
-Adding a new language is a one-node addition under `LanguageSpecific`
-plus an entry in `Common.SupportedLanguages`. No changes are required
-in `PatchBaseline` or `Pca2023` (both are language-neutral).
+### B.4.5 `LanguageSpecific` block
 
-## B.11 Field Cadence and RefreshAllBaselines decision matrix (r03+)
+Per-language ISO snapshot URLs, SHA-256 hashes, and language-specific
+patches (LXPs, Language Packs, .NET Language Packs). Adding a new
+language is a one-node addition under `LanguageSpecific` plus an
+entry in `Common.SupportedLanguages`; no changes are required in
+`PatchBaseline` or `Pca2023` (both are language-neutral).
 
-The `$Script:OsConfigFieldGroups` constant (in
-`.build_part03_helpers.ps1`) maps each logical field group to a
-Cadence and an optional Refresher function. The constant drives the
-`-Action RefreshAllBaselines` decision matrix.
+## B.5 Phase contracts (P01–P13)
 
-| Group Path                                            | Cadence       | Refresher |
-|-------------------------------------------------------|---------------|-----------|
-| `Common`                                              | Stable        | (none)    |
-| `PatchBaseline`                                       | PatchTuesday  | `Resolve-PatchSetFromCatalog` |
-| `LanguageSpecific.<lang>.Iso`                         | IsoRelease    | (none)    |
-| `LanguageSpecific.<lang>.LanguageSpecificPatches`     | PatchTuesday  | `Resolve-LanguageSpecificPatchesFromCatalog` |
+**Status**: normative.
 
-Cadence semantics:
-- **Stable**: once verified, never auto-refresh.
-- **PatchTuesday**: refresh when recorded `PatchTuesdayOfBaseline`
-  is older than the latest Patch Tuesday.
-- **IsoRelease**: only refresh when Microsoft re-releases the ISO;
-  not auto-refreshed in the current implementation (manual).
+The pipeline consists of 13 phases organised into 5 groups:
 
-Decision matrix (returned by `Get-RefreshDecision`):
+| Phase | Group | Purpose |
+|:---:|:---:|:---|
+| P01 | Setup | Initialize: env check, ADK, transcript start |
+| P02 | Setup | ResolveInputs: load config, plan patch set |
+| P03 | Setup | RefreshPatchBaseline: catalogue scrape (skippable) |
+| P04 | Fetch | FetchAssets: download ISO + patches |
+| P05 | Plan | ExpandIso: robocopy expand into workspace |
+| P06 | Plan | ValidatePatchSet: dependency closure check (r09.0: two stages) |
+| P07 | Build | PatchInstallWim: apply LCU / .NET / DU to install.wim |
+| P08 | Build | PatchBootWim: apply SSU / LP / LCU to boot.wim + WinRE.wim |
+| P09 | Build | AssembleIso: oscdimg re-emit |
+| P10 | Build | ConvertPca2023BootManager (optional, see §B.17) |
+| P11 | Verify | StaticVerify: hash, size, structure |
+| P12 | Verify | VerifyPca2023Readiness: input + output snapshot |
+| P13 | Report | FinalReport: aggregate Health verdict |
 
-| Cadence \\ State      | `_VerifiedDate` empty      | recorded < latest PT | up-to-date |
-|----------------------|---------------------------|----------------------|------------|
-| Stable               | InitialFill or Manual     | (N/A)                | Skip       |
-| PatchTuesday         | Monthly (or Manual if no Refresher) | Monthly  | Skip       |
-| IsoRelease           | InitialFill or Manual     | (N/A)                | Skip       |
+Each phase function carries one of the following skip conditions
+which MUST be checked at the top of the function before any side
+effect:
 
-`-Mode Force` overrides: never returns Skip; collapses to Monthly /
-InitialFill / Manual depending on Refresher availability.
+```
+P03:  -UseBaselineOnly        OR  -SyntheticTestMode
+P04:  -SyntheticTestMode      (uses New-SyntheticTestIso)
+P06:  Stage 1: -UseBaselineOnly OR Action ∉ Setup
+      Stage 2: -SkipDependencyCheck  (r09.0+, see §B.19)
+P07:  -not Common.EnableInstallWimUpdate
+P08:  -not Common.EnableBootWimUpdate (per-target sub-checks)
+P10:  Critical health OR Pca2023.RequiredByDefault=false OR -DisablePca2023BootManager
+P12:  none (always runs)
+P13:  none (always runs)
+```
 
-The full JSON shape of this constant is exposed via
-`-Action DumpFieldClassification` so external tooling (e.g. a Python
-JSON Schema validator) can consume it without parsing PowerShell.
+Phase **outputs** are persisted as JSON under `<WorkRoot>/diag/`
+when `-Verbose` is set or on failure. Each phase reports an
+elapsed-time tuple to the `$Script:PhaseTimingSummary` collection
+that `Show-PhaseSummary` (idempotent since r07.0 Step 19) renders at
+script exit.
 
-## B.12 PatchPlan engine and WIM-target mapping (r04+)
+## B.6 Action → Phase mapping
 
-The `Build-PatchPlan` function (in `.build_part09c_patchplan.ps1`)
-converts a flat patch list into a target-aware plan with four lanes:
-`Install`, `Boot`, `WinRE`, `Setup`. The mapping from patch Type to
-target lanes is centralised in `$Script:PatchTargetMap` (in
-`.build_part03_helpers.ps1`).
+**Status**: normative.
+
+| Action | Phases run | Description |
+|:---|:---|:---|
+| `Build` | P01–P10 | Full build (default) |
+| `Verify` | P01, P02, P11, P12, P13 | Verify an existing output ISO |
+| `Prepare` | P01–P05 | Stage only, no patching |
+| `PrepareBuildVerify` | P01–P13 | Combined full run |
+| `Cleanup` | (custom) | Clean up workspace and DISM mounts |
+| `ListPhases` | (none) | Dump phase + action registry as JSON |
+| `TestHarness` | (REPL hook) | Eval PS function for `tests/powershell_harness.py` |
+| `RefreshAllBaselines` (A01) | (custom) | Refresh `data/config-Server*.json` baselines + (r09.0+) layer 2 |
+| `RefreshSnapshots` (A03) | (custom) | Refresh release-info snapshot + dotnet-cu cache |
+| `DumpFieldClassification` (A02) | (custom) | Emit field-cadence decision matrix as JSON |
+| `RefreshDependencyDatabase` (A04) | (custom, r09.0+) | Refresh wsusscn2.cab layer 3 only (see §B.19) |
+
+Action `Verify` running standalone presumes the output ISO was
+produced by a prior `Build -Execute`; if missing, P11 reports
+`Critical`. Action `Prepare` produces a workspace ready for a later
+`Build` invocation; it MAY be used as a dry-run for staging
+correctness without the cost of DISM mount.
+
+## B.7 ISO filename detection patterns
+
+**Status**: normative.
+
+P02 ResolveInputs picks the input ISO from `<WorkRoot>/source/iso/`
+by trying the following filename patterns in order:
+
+| Order | Pattern | Origin |
+|:---:|:---|:---|
+| 1 | `WS<OS>_<lang>.iso` | This script's recommended name |
+| 2 | `<EvalIsoBaseName from config>.iso` | Per-config explicit name |
+| 3 | `*server*evaluation*<lang>*.iso` (case-insensitive) | Microsoft Evaluation Center default |
+| 4 | first `*.iso` in the directory | Last-resort fallback |
+
+For multilingual workspaces, the per-language sub-pattern uses the
+config's `LanguageSpecific.<lang>.Iso.FileName` value directly. The
+fallback path emits a warning so the operator can tell whether
+auto-detect succeeded.
+
+## B.8 Patch integrity check (three-layer)
+
+**Status**: normative. **Policy ID**: SPEC-WSI-011.
+
+P04 verifies each patch download against **three independent
+sources of truth**:
+
+| Layer | Source | Field |
+|:---:|:---|:---|
+| 1 | The Microsoft Update Catalogue download link | server-reported `Content-Length` |
+| 2 | The config-Server*.json `NeutralPatches[]` entry | recorded `Sha256` |
+| 3 | The downloaded file on disk | freshly-computed SHA-256 |
+
+A patch passes integrity check when all three layers agree. Layer 2's
+hash MUST have been recorded by a prior `RefreshAllBaselines` (or by
+manual entry that survived `_VerifiedBy` review).
+
+`Test-PatchIntegrity` uses SHA-1 for the legacy `MetaLink` source
+where Microsoft has not migrated to SHA-256; this is intentional and
+documented in §D.5.
+
+## B.9 Synthetic test mode
+
+**Status**: normative. **Policy ID**: SPEC-WSI-010.
+
+`-SyntheticTestMode` causes the script to run the orchestration
+without contacting Microsoft endpoints or executing DISM mount
+operations. Specifically:
+
+- P03 (RefreshPatchBaseline) is skipped.
+- P04 (FetchAssets) calls `New-SyntheticTestIso` to fabricate a
+  synthetic ISO file with the correct shape but minimal contents.
+- P06 (ValidatePatchSet) is skipped (no real patches to validate).
+- P07, P08, P10 are guarded by `if (-not $SyntheticTestMode) { ... }`
+  blocks that emit `Write-Skip` lines.
+- P11, P12, P13 run on the synthetic output and produce reports.
+
+CI Stage 3 (`...__stage3__synthetic.yml`) exercises this mode end to
+end. It MUST NOT upload any artefact containing Microsoft binary
+content; this is enforced by the workflow file's explicit
+`actions/upload-artifact` `path:` enumeration per the repository
+[Artifact Content Minimization](../../../SPEC.md#12-spec-ci-081-artifact-content-minimization)
+policy.
+
+---
+
+
+## B.10 PatchPlan engine and WIM-target mapping
+
+**Status**: normative. **Policy ID**: SPEC-WSI-013.
+
+`Build-PatchPlan` converts a flat patch list into a target-aware plan
+with four lanes: `Install`, `Boot`, `WinRE`, `Setup`. The mapping
+from patch `Type` to target lanes lives in `$Script:PatchTargetMap`.
 
 The default mapping follows Microsoft's media-dynamic-update
 guidance:
 
-| Type                    | Targets                  | Microsoft reason |
-|-------------------------|--------------------------|---|
-| SSU                     | Install + Boot + WinRE   | Every serviced WIM needs the latest servicing stack |
-| LCU                     | Install + Boot           | WinRE uses Safe OS DU instead |
-| DotNet.Runtime          | Install                  | .NET 4.x runtime KB lives in install.wim |
-| DotNet.OsLevel          | (none)                   | OS-offering KB; recorded for traceability, not applied to WIM |
-| DynamicUpdate.Component | Install                  | Component-store updates |
-| DynamicUpdate.SafeOs    | WinRE                    | WinRE is the "Safe OS" |
-| DynamicUpdate.Setup     | Setup                    | Setup binaries (pending.xml) |
-| LanguagePack            | Install + WinRE          | User-facing UI + recovery UI |
-| LXP                     | Install                  | LXPs are Store apps; no WinRE |
-| DotNet.LangPack         | Install                  | .NET satellite assemblies |
+| Patch Type | Target lanes | Microsoft rationale |
+|:---|:---|:---|
+| `SSU`                     | Install + Boot + WinRE   | Every serviced WIM needs the latest servicing stack |
+| `LCU`                     | Install + Boot           | WinRE uses Safe OS DU instead |
+| `DotNet.Runtime`          | Install                  | .NET 4.x runtime KB lives in install.wim |
+| `DotNet.OsLevel`          | (none)                   | OS-offering KB; recorded for traceability, not applied to WIM |
+| `DynamicUpdate.Component` | Install                  | Component-store updates |
+| `DynamicUpdate.SafeOs`    | WinRE                    | WinRE is the "Safe OS" |
+| `DynamicUpdate.Setup`     | Setup                    | Setup binaries (pending.xml) |
+| `LanguagePack`            | Install + WinRE          | User-facing UI + recovery UI |
+| `LXP`                     | Install                  | LXPs are Store apps; no WinRE |
+| `DotNet.LangPack`         | Install                  | .NET satellite assemblies |
 
 Within each lane, patches are ordered by ascending `ApplyOrder`
-(secondary key: `KbId`). Phase workers iterate the lane that
-matches the WIM they have mounted; the worker for an Install lane
-also runs the pre-apply dependency closure check before the first
+(secondary key: `KbId`). Phase workers iterate the lane that matches
+the WIM they have mounted; the Install lane worker also runs the
+pre-apply dependency closure check (§B.13) before the first
 `Add-WindowsPackage` call.
 
-The plan object also carries diagnostic fields:
-- `_GeneratedAt`  : ISO-8601 timestamp
-- `_PatchCount`   : total distinct patches across all lanes
-- `_TargetCounts` : per-lane counts
-- `_UnknownTypes` : list of patch Types seen that were not in the map
+The plan object carries diagnostic fields: `_GeneratedAt`,
+`_PatchCount`, `_TargetCounts`, `_UnknownTypes`. Unknown Types fall
+back to `[Install]` with a one-time warning per unique Type per run.
 
-Unknown Types fall back to `[Install]` with a one-time warning per
-unique Type per run.
+**Resolved patch entry shape**. Build-PatchPlan reads
+`$Script:ResolvedPatches`, each entry of which carries (in
+addition to the fields in §B.4.3):
 
-`Get-OrInitPatchPlan` is a lazy accessor that builds the plan on
-first call and caches it in `$Script:PatchPlan`. P02 forces the
-build at the end of ResolveInputs so the plan is ready when later
-phases ask for it.
+```
+PatchType : 'SSU' | 'LCU' | 'DotNet.Runtime' | ...   ← authoritative
+ApplyOrder: 1..N
+KbId      : 'KB...'
+```
 
-## B.13 Pre-apply dependency closure check (r04+)
+The field name `PatchType` (NOT `Type`) is normative; a
+`Get-PatchEntryType` helper exists to read it back through a
+dual-field fallback path. The historical incident where six
+functions read `$_.Type` instead of `$_.PatchType` is documented in
+§D.30.
+
+## B.11 Media-dynamic-update sub-phase sequences
+
+**Status**: normative. **Policy ID**: SPEC-WSI-014.
+
+For each WIM target, `Build-PatchPlan` emits an ordered array of
+sub-phase descriptors (named after Microsoft documentation: I =
+install, B = boot, W = winre). Each sub-phase carries:
+
+| Field | Meaning |
+|:---|:---|
+| `Name` | symbolic identifier (e.g. `I3.LCU.FirstPass`) |
+| `Description` | one-line human-readable purpose |
+| `Patches` | array of patches that belong to this sub-phase |
+| `RequiresRemount` | if `$true`, the worker dismounts the WIM, lets DISM commit and export, then re-mounts a fresh copy |
+| `IsCleanupMarker` | if `$true`, the worker runs DISM /Cleanup-Image and skips Add-WindowsPackage |
+
+### B.11.1 install.wim (P07)
+
+| # | Name | Microsoft rationale |
+|:-:|:---|:---|
+| 1 | `I1.SSU`                     | Servicing stack first |
+| 2 | `I2.LanguagePack`            | UI before LCU's resource files |
+| 3 | `I3.LCU.FirstPass`           | LCU after LP per Microsoft doc |
+| 4 | `I4.DotNet`                  | .NET 4.x cumulative (DotNet.Runtime only) |
+| 5 | `I5.DynamicUpdate.Component` | Component-store DU |
+| 6 | `I6.CleanupAndExport`        | DISM /Cleanup + Export |
+| 7 | `I7.LCU.SecondPass`          | Emitted ONLY when LP was injected; `RequiresRemount = $true`; the LP injected in I2 can shadow files delivered by the I3 LCU, so the LCU is re-applied on a freshly-exported image |
+
+### B.11.2 boot.wim (P08)
+
+`B1.SSU` → `B2.LanguagePack` → `B3.LCU` → `B4.CleanupAndExport`. No
+twice-apply needed.
+
+### B.11.3 WinRE.wim (P08 inner block)
+
+`W1.SSU` → `W2.LanguagePack` → `W3.SafeOsDU` →
+`W4.CleanupAndExport`. The WinRE image is NOT serviced with LCU;
+Microsoft delivers a Safe OS Dynamic Update that plays the LCU role
+for the recovery environment.
+
+`Invoke-PatchSubPhase` is the single helper that drives the apply
+loop for any sub-phase. Phase workers iterate the sequence, calling
+`Invoke-PatchSubPhase` for content-bearing sub-phases and running
+`Invoke-DismCleanup` for `IsCleanupMarker` sub-phases.
+
+## B.12 Catalogue scrape and supersedence selection
+
+**Status**: normative. **Policy ID**: SPEC-WSI-015.
+
+When the OS-aware Catalogue query for a single patch Type leaves
+2 or more narrowed candidates after the Title-token / x64 filter,
+the resolver enriches each candidate with the `Supersedes` and
+`SupersededBy` arrays from `Get-SupersedenceFromCatalog`, then calls
+`Select-LatestPatchBySupersedence` to keep only the latest.
+
+**Match rule**: candidate `C` is "superseded by" candidate `D` when
+`C.KbId` OR `C.UpdateId` is found (as a substring, case-insensitive)
+anywhere in `D.Supersedes`. Substring match is used because
+Catalogue Supersedes entries are inconsistent: some contain only the
+KB number, some the full UpdateId GUID, some a free-form
+`Package_for_KBnnnn~...` package identifier.
+
+| Input | Outcome |
+|:---|:---|
+| 0 candidates | `Best = $null`, `Excluded = @()` |
+| 1 candidate  | `Best = that one`, `Excluded = @()` |
+| 2+ with clear supersedence | `Best = single survivor`, `Excluded = (the rest)` with `Reason = "Superseded by <title>"` |
+| 2+ with no supersedence relation | `Best = first by Title desc`, `Excluded = (the rest)` with `Reason = "Ambiguous; chose newest by title"` |
+| Pathological (all candidates supersede each other) | `Best = first input`, warning logged |
+
+Supersedence lookup is a per-candidate HTTP call, so it only fires
+when the narrowed count exceeds 1; the single-candidate path keeps
+the HTTP cost at zero.
+
+This protects the WIM-target-aware sequence against neighbouring KBs
+that match the OS Title token by accident, e.g. a ".NET Framework
+3.5 and 4.8.1 Cumulative Update" appearing in a search for the OS
+LCU. Without supersedence-aware selection, the wrong KB could enter
+the I3.LCU.FirstPass sub-phase and produce a botched install.wim.
+The original r04.2 incident that motivated this section is
+documented in §D.NN (umbrella KBs and supersedence drift).
+
+## B.13 Pre-apply dependency closure check
+
+**Status**: normative. **Policy ID**: SPEC-WSI-012.
 
 `Test-PatchDependencyClosureOnMount` runs inside the per-WIM apply
 loop just after `Mount-WindowsImage` and before the first
@@ -594,3624 +882,475 @@ and verifies that every required KB is already present
 (`PackageIdentity` substring match against the recorded KB ID).
 
 The check is governed by `$Script:PatchDependencyPolicy`, a
-script-scope constant with two valid values:
+script-scope constant:
 
-| Value    | Behaviour |
-|----------|-----------|
-| `Strict` | **Default.** Throw on the first unsatisfied prerequisite; the run aborts before DISM emits the cryptic 0x800f0823 hex code |
-| `Warn`   | Write a warning and continue; useful for runs where the operator has accepted some risk |
+| Value | Behaviour |
+|:---|:---|
+| `Strict` | **Default.** Throw on the first unsatisfied prerequisite; the run aborts before DISM emits the cryptic `0x800f0823` hex code |
+| `Warn`   | Write a warning and continue |
 
-There is currently no CLI flag for this policy; a wrapper script
-can set `$Script:PatchDependencyPolicy = 'Warn'` before invoking
-the entry point if needed.
+There is currently no CLI flag for this policy; a wrapper script can
+set `$Script:PatchDependencyPolicy = 'Warn'` before invocation if
+needed.
 
 `-DryRun` short-circuits the check with a notice (no real mount).
 
-## B.14 Microsoft media-dynamic-update sub-phase sequences (r04.1+)
-
-For each WIM target, `Build-PatchPlan` emits an ordered array of
-sub-phase descriptors (named after the Microsoft documentation:
-I = install, B = boot, W = winre). Each sub-phase carries:
-
-- `Name`            : symbolic identifier (e.g. `I3.LCU.FirstPass`)
-- `Description`     : one-line human-readable purpose
-- `Patches`         : array of patches that belong to this sub-phase
-- `RequiresRemount` : if `$true`, the worker must dismount the WIM,
-                      let DISM commit and export it, then re-mount
-                      a fresh copy before running this sub-phase
-- `IsCleanupMarker` : if `$true`, the worker runs DISM /Cleanup-Image
-                      at this point and skips the Add-WindowsPackage
-                      loop
-
-**install.wim (P07)**:
-
-| # | Name                       | Microsoft rationale |
-|---|----------------------------|---|
-| 1 | I1.SSU                     | Servicing stack first |
-| 2 | I2.LanguagePack            | UI must be installed BEFORE the LCU's resource files |
-| 3 | I3.LCU.FirstPass           | LCU after LP per Microsoft doc |
-| 4 | I4.DotNet                  | .NET 4.x cumulative (Type=DotNet.Runtime only; DotNet.OsLevel rows are recorded but never applied) |
-| 5 | I5.DynamicUpdate.Component | Component-store DU |
-| 6 | I6.CleanupAndExport        | (worker hook for DISM /Cleanup + Export) |
-| 7 | I7.LCU.SecondPass          | Emitted ONLY when LP was injected; `RequiresRemount = $true`; the LP injected in I2 can shadow files delivered by the I3 LCU, so the LCU is re-applied on a freshly-exported image |
-
-**boot.wim (P08)**: B1.SSU -> B2.LanguagePack -> B3.LCU ->
-B4.CleanupAndExport. No twice-apply needed.
-
-**WinRE.wim (P08 inner block)**: W1.SSU -> W2.LanguagePack ->
-W3.SafeOsDU -> W4.CleanupAndExport. The WinRE image is NOT
-serviced with LCU; Microsoft delivers a Safe OS Dynamic Update
-that plays the LCU role for the recovery environment.
-
-`Invoke-PatchSubPhase` is the single helper that drives the apply
-loop for any sub-phase. The phase workers iterate the sequence,
-calling `Invoke-PatchSubPhase` for content-bearing sub-phases and
-running `Invoke-DismCleanup` for `IsCleanupMarker` sub-phases.
-
-## B.15 Supersedence-aware Catalogue candidate selection (r04.2+)
-
-When the OS-aware Catalogue query for a single patch Type leaves
-2 or more narrowed candidates after the Title-token / x64 filter,
-the resolver enriches each candidate with the `Supersedes` and
-`SupersededBy` arrays from `Get-SupersedenceFromCatalog`, then
-calls `Select-LatestPatchBySupersedence` to keep only the latest.
-
-Match rule: candidate `C` is "superseded by" candidate `D` when
-`C.KbId` OR `C.UpdateId` is found (as a substring,
-case-insensitive) anywhere in `D.Supersedes`. Substring match is
-used because Catalogue Supersedes entries are inconsistent: some
-contain only the KB number, some the full UpdateId GUID, some a
-free-form `Package_for_KBnnnn~...` package identifier.
-
-Selection cases:
-
-| Input | Outcome |
-|---|---|
-| 0 candidates | `Best = $null`, `Excluded = @()` |
-| 1 candidate  | `Best = that one`, `Excluded = @()` |
-| 2+ with clear supersedence | `Best = single survivor`, `Excluded = (the rest)` with `Reason = "Superseded by <title>"` |
-| 2+ with no supersedence relation | `Best = first by `Title` desc`, `Excluded = (the rest)` with `Reason = "Ambiguous; chose newest by title"` |
-| Pathological (all candidates supersede each other) | `Best = first input`, warning logged |
-
-Exclusions are accumulated across all patch Types in a single
-Resolve call and exposed via `$Script:LastSupersedenceExclusions`
-for the caller (A01 RefreshAllBaselines, P02 ResolveInputs) to
-emit a CSV report. Supersedence lookup is a per-candidate HTTP
-call, so it only fires when the narrowed count exceeds 1; the
-single-candidate path keeps the HTTP cost at zero.
-
-This protects the WIM-target-aware sequence (B.14) against
-neighbouring KBs that match the OS Title token by accident, e.g.
-a ".NET Framework 3.5 and 4.8.1 Cumulative Update" appearing in
-a search for the OS LCU. Without supersedence-aware selection,
-the wrong KB could enter the I3.LCU.FirstPass sub-phase and
-produce a botched install.wim.
-
-## B.16 Workspace preflight (r04.3+)
-
-A mandatory check that runs **before the Action dispatcher**, so
-that every Action (not just Build/Verify which run P01) is
-protected. Implemented in `Assert-WorkspacePreflight`. Two checks,
-both fatal:
-
-1. **Config presence**. The four canonical `data/config-Server<N>.json`
-   files (Server2016, Server2019, Server2022, Server2025) must
-   exist in the `data/` directory alongside the script. A
-   missing file aborts before any Catalogue scrape or DISM mount,
-   with a precise list of which files are missing under which
-   path. This protects RefreshAllBaselines and DumpFieldClassification
-   from a half-populated workspace.
-
-2. **Drive free space**. The drive backing `-WorkRoot` must have
-   at least 100 GB free. This is the documented strict minimum
-   for an end-to-end `PrepareBuildVerify` run for a single OS:
-
-       ~7 GB  input ISO
-       ~7 GB  extracted source tree
-       ~15 GB mounted install.wim scratch
-       ~10 GB patch downloads
-       ~7 GB  output ISO
-       ~5 GB  DISM temp + logs headroom
-
-   The check uses `Get-PSDrive` on the drive letter of `-WorkRoot`.
-   For UNC or unrooted paths, the script-root drive is checked as
-   a best-effort fallback.
-
-Preflight is skipped for:
-
-| Condition | Rationale |
-|---|---|
-| `-Action ListPhases` | Quick branch that exits without touching the workspace |
-| `-Action Cleanup` | The whole point is to remove a partially-built workspace; requiring 100 GB free would be circular |
-| `-EnvironmentInfoOnly` | Operator explicitly asked for the env dump and wants to inspect the host first |
-| `-SkipEnvCheck` | Operator override |
-| `-DryRun` (disk-check half only) | Dry runs do not write large files; Config-presence check still runs |
-
-This complements the runtime disk-space readout still emitted by
-P01 Step 4 (informational only since r04.3; the authoritative
-100 GB enforcement is in `Assert-WorkspacePreflight`).
-
-## B.17 TestHarness REPL hook (r04.4+)
-
-A new `-Action TestHarness` branch placed before
-`Show-EntryBanner` allows the Python-side self-verification tools
-in `tests/` to drive PowerShell functions without launching a fresh
-`pwsh` per assertion. The harness:
-
-1. Loads all function definitions in the current PowerShell
-   session (because the dispatcher branch runs after the function
-   declarations but before any Phase invocation).
-2. Reads stdin one line at a time, parsing each line as JSON of
-   the form `{"fn":"<FunctionName>","args":{ ... }}`.
-3. Invokes the named function with `args` splatted and emits
-   a single-line JSON response: `{"ok":true,"fn":"...","result": ...}`
-   on success, `{"ok":false,"fn":"...","error":"<message>"}` on
-   failure.
-4. Exits on EOF.
-
-Output contract: every byte on stdout must be machine-readable
-JSON. The entry banner is suppressed by branching before
-`Show-EntryBanner`; no Phase logs fire; no workspace contact is
-made. The hook is added to the `osLessActions` set and to the
-Preflight skip list because no Config / disk-space requirement
-applies to in-memory function invocation.
-
-The branch is invisible to human operators by design: it is not
-listed in `Show-PhaseList`'s phase summary, has no documented
-example invocation outside this section, and the `-Action` help
-text explicitly directs operators to ignore it.
-
-The Python driver lives in `tests/common/ps_invoke.py`
-(`PSSession` class). All five `tests/*.py` tools that need PS
-function output rely on this REPL contract. If the contract
-ever has to change (e.g. JSON envelope schema bump), the change
-must be co-ordinated between this section, the dispatcher branch
-in the script, and `ps_invoke.py`.
-
-## B.18 PCA2023 boot manager support (r05.0+)
-
-This subsystem adds two phases (P10, P12) that address the 2026-06
-expiry of the Microsoft "Windows Production PCA 2011" Secure Boot
-certificate. Without intervention, ISOs built before 2026-06 will
-boot only on firmware that has the 2011 cert in db; firmware that
-has been updated to revoke 2011 (BlackLotus CVE-2023-24932
-mitigation rollout) will refuse them.
-
-**Operational model.** P12 ALWAYS runs in the Verify group:
-operators always see whether their ISO is PCA2023-ready, even
-when they are not converting it. P10 runs ONLY when
-`-EnablePca2023BootManager` is set, and is silent-skipped for
-Server 2025 unless `-ForcePca2023OnServer2025` is also set
-(see D.22 for the rationale).
-
-**Three-tier diagnostic.** P12 produces a snapshot composed of
-three independent signals:
-
-| Tier | Source | What it tells us |
-|---|---|---|
-| **1** | `Test-Path` on `boot.wim:\Windows\Boot\EFI_EX\bootmgfw_EX.efi` etc. | The 2024-4B staging directories are physically present in the boot environment WIM |
-| **2** | `Get-WindowsPackage` on the mounted install.wim/boot.wim | Specific KB integration level - is the source media itself 2024-4B or later? |
-| **3** | `Get-AuthenticodeSignature` chain walk on `efi\boot\bootx64.efi` | What the firmware will actually see - is the boot manager signed via 'Windows UEFI CA 2023' or still 'Windows Production PCA 2011'? |
-
-A `Health` 4-value classification (`Healthy` / `Warning` /
-`Critical` / `Unknown`) combines all three signals. The
-classification logic is in `Get-Pca2023ReadinessSnapshot`.
-
-**Outputs.** P12 produces two files under
-`<WorkRoot>\pca2023\`:
-
-- `pca2023_readiness.json` — machine-readable snapshot for
-  downstream tools / dashboards
-- `pca2023_readiness.md` — human-readable detail page with
-  Reasons[] array unrolled into bullets and a code-block of the
-  full inventory
-
-P13 FinalReport additionally renders a Compact summary inline so
-operators do not have to chase a second file (3-c output mode).
-
-**Per-OS readiness defaults.** Carried in
-`data/config-<OsKey>.json#/Pca2023`:
-
-```jsonc
-"Pca2023": {
-  "RequiredByDefault": true,                              // Server 2016/2019/2022
-  "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
-  "RequiredUpdateLevelMinDate": "2024-04-09",
-  "NotesSource": [<URLs>],
-  "Notes": "<plain text>"
-}
-```
-
-For Server 2025 specifically: `RequiredByDefault = false`,
-`RequiredUpdateLevelKb = "n/a (firmware-provided 2023 certs)"`.
-
-**Authoritative Microsoft source for the conversion target set.** The
-PCA2023 boot manager conversion is documented in
-[KB5053484 Updating Windows bootable media to use the PCA2023 signed
-boot manager](https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f),
-which references `microsoft/secureboot_objects` `Make2023BootableMedia.ps1`
-v1.4 (`scripts/windows/Make2023BootableMedia.ps1`, dated 2026-03-13).
-The `Copy-2023BootBins` function (L829-L941) writes the following five
-target locations onto the extracted media tree:
-
-| # | Source (mounted boot.wim) | Destination (extracted media root) | Required? | Expected signer |
-|:-:|---|---|:-:|---|
-| 1 | `\Windows\Boot\EFI_EX\bootmgfw_EX.efi` | `\efi\boot\bootx64.efi` (or `bootaa64.efi` on ARM64) | required | **PCA2023** — UEFI Secure Boot critical path |
-| 2 | `\Windows\Boot\EFI_EX\bootmgr_EX.efi` | `\bootmgr.efi` (ISO root) | optional | **PCA2011 by Microsoft design** (Make2023BootableMedia.ps1 v1.4 L876-L884) |
-| 3 | `\Windows\Boot\DVD_EX\EFI\en-US\efisys_EX.bin` | `\efi\microsoft\boot\efisys_ex.bin` | required | n/a (binary) |
-| 4 | `\Windows\Boot\FONTS_EX\*_EX.ttf` (renamed) | `\efi\microsoft\boot\fonts\*.ttf` | required | n/a (fonts) |
-| 5 | `\Windows\Boot\EFI\boot.stl` | `\EFI\Microsoft\Boot\boot.stl` | optional | n/a (cert trust list) |
-
-The Microsoft upstream `Copy-2023BootBins` carries an explicit comment
-(L876-L884) acknowledging that target #2 (`bootmgr.efi`) is **not**
-PCA2023-signed even after conversion:
-
-> "Note that this file technically is not signed with the 'Windows UEFI
-> CA 2023' certificate, but if present in the update, it should be
-> copied."
-
-This is by design. `bootmgr.efi` at the ISO root is consumed by the
-BIOS/MBR boot path, not the UEFI Secure Boot critical path; the UEFI
-firmware verifies `\efi\boot\bootx64.efi` (target #1, PCA2023) instead.
-Any in-tree post-build verification logic must therefore treat PCA2011
-on `\bootmgr.efi` as **PassWithNotes**, not Fail. Empirical confirmation
-of this design — Server 2025 EVAL install.wim ships
-`EFI_EX\bootmgr_EX.efi` signed via PCA2011, while sibling
-`EFI_EX\bootmgfw_EX.efi` is signed via PCA2023 — was recorded in
-`docs/history/r08.0-step2-installwim-symmetry-check.md` step 5h.
-
-**Scope and limits of in-tree verification.** Both Microsoft's
-`Make2023BootableMedia.ps1` v1.4 and this script's
-`Convert-WimBootToPca2023Signed` perform **file copy only**. Microsoft's
-upstream script contains no `Get-AuthenticodeSignature` or `signtool`
-invocations; signature verification is by design left to the caller.
-This script extends Microsoft's design by adding file-based
-post-build verification through the `Test-OutputIsoPca2023Readiness`
-function, which inspects the extracted media against the five
-conversion targets above and reports per-target Pass / PassWithNotes /
-Warning / Fail plus an aggregate `OverallStatus`. The function is
-invoked by P10 post-flight (when the conversion phase runs) and by
-P12 (always, regardless of whether P10 ran). The result is integrated
-into `pca2023_readiness.json` as the `OutputCheck` field and into
-`pca2023_readiness.md` as a Markdown table; the P13 FinalReport
-Compact summary surfaces a one-line indicator. The verification scope
-is:
-
-- VERIFIED in-tree: file presence on the extracted media tree, primary
-  Authenticode signer chain on `*.efi` files via X509Chain build, the
-  Microsoft-design PCA2011 status of `\bootmgr.efi`.
-- NOT VERIFIED in-tree: actual boot behaviour on firmware with PCA2011
-  revoked in DBX (post 2026-06 cert expiry or post CVE-2023-24932
-  mitigation). Microsoft's upstream provides no built-in verification
-  for this either; the only authoritative test is a real boot on
-  target hardware or a Hyper-V Gen2 VM configured with a custom Secure
-  Boot template that revokes PCA2011 in DBX.
-
-Operators deploying to production fleets where PCA2011 trust has been
-revoked must perform manual boot validation. The pipeline's
-`Health = Healthy` verdict means "the PCA2023-signed boot manager is
-in the right place on the output media", not "this ISO has been
-proven to boot under PCA2011-revoked firmware". The
-`Test-OutputIsoPca2023Readiness` result includes an explicit SCOPE
-clarifier string in its `Reasons[]` array to surface this limit at
-the data layer (not only in the prose documentation).
-
-## B.19 `-Pca2023OnlyMode` standalone inspection (r05.0+)
-
-A side-channel entry point that takes an existing ISO file
-(`-IsoPath <path>`) and runs ONLY P12 VerifyPca2023Readiness
-against it. Skips all the patching machinery:
-
-- No Microsoft Update Catalog scrape
-- No `wsusscn2.cab` download
-- No DISM patch integration
-- No ISO re-assembly
-
-Use cases:
-
-1. Forensic inspection of an ISO produced by a non-`Update-WindowsServerIso.ps1` pipeline
-2. CI smoke-test "would this published ISO still boot on PCA2023-only firmware?"
-3. Auditing a media bundle before an air-gapped deployment
-
-The mode short-circuits `Main()` after parameter validation; it
-does not write to `<WorkRoot>` (mounts the ISO into a temp
-directory under `$env:TEMP` and unmounts on exit). Output JSON
-goes to `$env:TEMP\updwsi_pca2023only_<pid>\pca2023_readiness.json`.
-
-## B.20 Build-group optional phase exception (r05.0+)
-
-The Build group historically contains ONLY always-on phases:
-P07 PatchInstallWim, P08 PatchBootWim, P09 AssembleIso. Each of
-these is essential to producing a valid ISO; running `-Action
-Build` without any of them produces undefined behaviour.
-
-P10 ConvertPca2023BootManager is the **first** Build-group phase
-that is opt-in. The reasoning is:
-
-1. **P10 mutates an already-finished artifact.** P09 has already
-   produced a usable ISO at this point. P10's role is to upgrade
-   that ISO's boot manager signer chain, which is genuinely
-   optional for operators whose target firmware still trusts
-   PCA2011.
-
-2. **Operator choice belongs at the CLI surface, not at runtime.**
-   Hiding P10 behind a runtime "do you want to convert?" prompt
-   would break the script's non-interactive contract (see B.0,
-   "Script Identity"). A flag at script invocation time is the
-   only acceptable opt-in mechanism.
-
-3. **Server 2025 introduces a secondary opt-in layer.** Even with
-   `-EnablePca2023BootManager`, Server 2025 specifically also
-   requires `-ForcePca2023OnServer2025`. This layered gating is
-   only possible because P10 has explicit pre-flight gates inside
-   the phase function rather than relying on the Action-mapping
-   layer for inclusion/exclusion.
-
-**Consequence for `Resolve-PhasesForAction`.** P10 IS in the
-`Build` Action's phase list AND in `standardFull`. The default
-skip behaviour lives INSIDE the phase function, not in the
-mapping. This is intentional: a future operator running
-`-PhaseIds P10` should still trigger the skip gate, getting a
-clear log line ("Skipped: -EnablePca2023BootManager not
-specified") rather than an obscure "P10 was excluded from the
-Action mapping".
-
-**Consequence for SPEC.md B.5 phase contracts.** P10's "Always
-runs?" column in the B.5 table is `Conditional`, not the usual
-`Yes`. P10 is the only Build-group phase with `Conditional`
-status; future Build additions should preserve this distinction
-or change it deliberately.
-
-## B.21 Update Type Matrix per OS generation (r06.0+, normative)
-
-This section makes the until-now implicit assumption -- that
-Server 2016/2019/2022/2025 all draw from the same enumerated
-set of patch Types -- *explicit*. The matrix below is the
-normative reference for which patch Types each supported OS
-actually has on Microsoft Update Catalog, how they ship
-(standalone vs. combined), and whether the ISO Factory must
-inject them into the offline image.
-
-The matrix was compiled from Microsoft Support KB pages, the
-Windows Server release-info dashboard, the Microsoft Update
-Catalog, the Microsoft Servicing Stack Update FAQ, and the
-hotpatch enablement documentation. It is fixed for r06.0 and
-will only be re-baselined when Microsoft publishes a new
-servicing model change (e.g. a future OS generation that
-unifies SSU into the LCU package for an even older Server
-family).
-
-### B.21.1 The matrix
-
-| Patch Type                | Server 2016 (1607)    | Server 2019 (1809)            | Server 2022 (21H2)        | Server 2025 (24H2)        |
-|---------------------------|-----------------------|-------------------------------|---------------------------|---------------------------|
-| **SSU (standalone)**      | Required, monthly     | Required when Microsoft publishes one (varies) | N/A -- folded into LCU    | N/A -- folded into LCU    |
-| **LCU (standalone)**      | Required, monthly     | Required, monthly             | -- (combined only)        | -- (combined only)        |
-| **SSU+LCU combined**      | N/A                   | N/A                           | Required, monthly         | Required, monthly         |
-| **.NET CU**               | 1 .msu (4.8 only)     | 1 umbrella, 2 files           | 1 umbrella, 2 files       | 1 umbrella, 1 file        |
-| **Dynamic Update.Setup**  | Optional, monthly     | Optional, monthly             | Optional, monthly         | Optional, monthly         |
-| **Dynamic Update.SafeOs** | Optional, monthly     | Optional, monthly             | Optional, monthly         | Optional, monthly         |
-| **Hotpatch**              | N/A                   | N/A                           | Azure Edition only        | All editions (online only)|
-| **Out-of-band (OOB)**     | Possible              | Possible                      | Possible                  | Possible                  |
-
-Cell meanings:
-
-- **Required**: must be present in the PatchBaseline.NeutralPatches
-  array for a complete ISO build. The Refresher MUST find and
-  record this Type each Patch Tuesday; absence indicates an
-  upstream regression that warrants investigation.
-- **Required when Microsoft publishes one (varies)**: Microsoft
-  publishes the standalone SSU only in months where the servicing
-  stack itself has changed. For Server 2019 specifically, an
-  empty SSU result is not necessarily a Refresher bug -- Microsoft
-  may simply have rolled the SSU forward into the LCU for that
-  particular month, or skipped publishing a new SSU. Server 2019
-  is in this category because the 2021-02 "SSU folded into LCU"
-  consolidation Microsoft announced for "Windows 10 version 2004
-  and later" does not technically apply to 1809, but in practice
-  empty SSU months still occur. The Refresher's behaviour is:
-  emit an info-level log, leave the previous SSU entry in place
-  (it remains effective because LCUs are cumulative on the SSU
-  side too), and do not treat the empty result as a failure.
-  Operators should review whether the most-recent SSU on
-  Catalogue is still being superseded by a recent LCU.
-- **Optional**: included when Microsoft publishes it for that
-  month (DU is not published every month for every OS); absence
-  is normal and not a failure.
-- **N/A**: this Type does not exist as a distinct payload for
-  the OS in question. The Refresher MUST NOT try to fabricate
-  an entry. Catalogue queries for an N/A Type SHOULD be skipped
-  to save HTTP round-trips, but if a query is sent and returns
-  zero results, that is the correct outcome and not a regression.
-- **Possible**: present in some months and not others (OOB is
-  by definition reactive to specific issues). The Refresher
-  records OOB entries the same way as B-release entries; they
-  participate in normal supersedence chains.
-
-**Note on the 2026-05 production sample.** The PatchBaseline
-files captured during the first r05.1 RefreshAllBaselines run
-showed Server 2019 with zero SSU entries while Server 2016 had
-a fresh SSU (KB5088064). This is consistent with "Required
-when Microsoft publishes one (varies)" rather than a Refresher
-defect; KB5088064 is a Server 2016 / Windows 10 1607 SSU
-specifically and does not apply to 1809. Whether Microsoft
-actually published a new Server 2019 SSU in 2026-05 is a
-data-quality question that the Phase 2 PoC should answer
-authoritatively by cross-referencing release-info against
-Catalogue.
-
-### B.21.2 .NET CU multiplicity by OS
-
-The ".NET CU" row of B.21.1 captures the umbrella-vs-multifile
-behaviour that motivated the r05.1 KbId fix (see CHANGELOG
-[update-wsi-2026.05.25-r05.1]). The exact file counts
-observed in production telemetry for 2026-05 are:
-
-| OS           | Umbrella KbId (Title) | Attached .msu files | Per-file KbIds                        |
-|--------------|-----------------------|---------------------|---------------------------------------|
-| Server 2016  | KB5087065             | 1 (.NET 4.8)        | KB5087065                             |
-| Server 2019  | KB5088864             | 2 (.NET 4.7.2, 4.8) | KB5087066, KB5087061                  |
-| Server 2022  | KB5088862             | 2 (.NET 4.8, 4.8.1) | KB5087068, KB5087059                  |
-| Server 2025  | KB5087051             | 1 (.NET 4.8.1)      | KB5087051                             |
-
-The Refresher uses `Select-AllCanonicalPatchFiles` for any
-".NET CU" candidate UpdateId, regardless of OS. The OS-specific
-behaviour above is therefore the *expected* count, not a
-configuration knob -- if Server 2016 ever shows 2 files or
-Server 2019 ever shows 1, that is a Microsoft-side packaging
-change worth flagging. Tracking the expected count per OS
-under `Common.UpdateTypePolicy` is a candidate r06.x schema
-extension (see B.21.5 "Future work").
-
-**r06.0 Phase 2 PoC follow-up (PoC-E)**. The Phase 2 PoC
-investigation
-(historical record at [`docs/history/dotnet-cu-report.md`](./docs/history/dotnet-cu-report.md))
-cross-checked the table above against the Microsoft Learn
-`.NET Framework cumulative update` release-notes pages
-(authoritative upstream source) for 2026-04. The upstream
-source actually lists the following per-OS row counts:
-
-| OS           | .NET CU rows in upstream release-notes table (2026-04) |
-|--------------|--------------------------------------------------------|
-| Server 2016  | **2** (.NET 3.5+4.6.2+4.7.x+4.7.2 → KB5082198, .NET 4.8 → KB5082411) |
-| Server 2019  | 2 (.NET 3.5+4.7.2 → KB5082413, .NET 3.5+4.8 → KB5082414)            |
-| Server 2022  | 2 (.NET 3.5+4.8 → KB5082427, .NET 3.5+4.8.1 → KB5082425)            |
-| Server 2025  | 1 (.NET 3.5+4.8.1 → KB5082417)                                       |
-
-The Server 2016 discrepancy (production telemetry sees 1
-file via the Catalog umbrella KB; upstream release-notes
-list 2 distinct KBs) means the umbrella scrape path
-historically only surfaced the .NET 4.8 sibling and missed
-the .NET 3.5/4.6.2/4.7.x rollup. This was not noticed in
-production because Server 2016 baseline images that the ISO
-Factory ships ship .NET 4.8 by default; the .NET 4.6.2-4.7.x
-rollup applies only to images that haven't been upgraded to
-4.8. A Phase 3 refresh sourced from release-notes (rather
-than Catalog scraping) would correctly surface both KBs.
-
-### B.21.3 Combined LCU package detection
-
-For Server 2022 / 2025 ("N/A standalone SSU" cells in B.21.1),
-the LCU package ships with the SSU folded inside. The Refresher
-needs to recognise this so that `Build-PatchPlan` does not
-demand a non-existent standalone SSU before the LCU.
-
-The detection logic in `Resolve-PatchSetFromCatalog` looks for
-two independent signals and treats either as sufficient:
-
-1. **Catalogue-side**: the SSU-typed query returns zero results
-   for the requested OS / month, but the LCU-typed query
-   returns a result. This is the *implicit* signal.
-2. **Title-side**: the LCU's Catalogue Title contains a
-   "combined SSU and LCU" phrase. Microsoft's KB pages
-   consistently use this wording for combined packages (see,
-   e.g., KB5068787 for Server 2022 November 2025).
-
-When either signal fires, the Refresher annotates the LCU
-entry with `"IsCombined": true`. `Build-PatchPlan` then skips
-the SSU pre-step and applies the LCU directly. This matches
-what `wusa.exe /quiet /norestart Windows10.0-KB<LCU>.msu`
-does on a live system: SSU is unpacked and applied as part
-of LCU installation.
-
-For Server 2016 / 2019 (standalone SSU still exists), the
-Refresher MUST find a separate SSU entry; LCU's `IsCombined`
-is set to `false` and `Build-PatchPlan` enforces the SSU-then-
-LCU ordering. If the SSU query unexpectedly returns zero
-results for these OSes, the Refresher emits a warning -- it
-is more likely a Catalogue query regression than a genuine
-Microsoft-side packaging change.
-
-### B.21.4 Hotpatch is out of scope for the offline image
-
-Hotpatch is an *online-runtime* servicing mechanism delivered
-via Windows Update / Azure Arc to a running OS, with the
-servicing stack patching kernel-mode code in memory without
-a reboot. The hotpatch packages cannot be applied to a mounted
-WIM via `Add-WindowsPackage`; they have no equivalent in the
-offline image servicing surface that DISM exposes.
-
-This script therefore treats Hotpatch as outside the Patch
-Manifest scope. However, Hotpatch *enrollment* imposes a
-constraint that the offline ISO can satisfy: a Server 2025
-machine wanting to enrol must be on a baseline-month LCU
-(January / April / July / October). An ISO built from a
-B-release LCU outside those months will still be eligible
-to enrol, but the first applied online update will be a
-baseline LCU that requires a reboot; an ISO built from a
-baseline-month LCU can begin its hotpatch quarter immediately.
-
-This is informational only in r06.0. A future r06.x might
-add an opt-in `-PreferBaselineMonthLcu` switch that, when
-set for Server 2025, prefers the most recent
-January/April/July/October Patch Tuesday LCU even if a
-newer B-release exists. Today the user can achieve the same
-effect with `-PatchMonth 2026-04` etc.
-
-### B.21.5 Future work (PoC-driven, no schema commitment yet)
-
-The above matrix is the *spec*. The PoC -- to be run separately
-before any schema change is committed -- will validate:
-
-- Whether the Microsoft Learn `windows-server-release-info`
-  page (markdown rendering: append `?accept=text/markdown` to
-  the URL) covers all rows of the matrix above with sufficient
-  fidelity that we can drop Catalogue Title-string heuristics.
-- Whether Dynamic Update.Setup / Dynamic Update.SafeOs entries
-  appear on a sibling release-info page or only on the Catalogue.
-- Whether .NET CU per-OS multiplicity can be queried from a
-  non-Catalogue source.
-- Whether Hotpatch baseline-month detection (which Patch Tuesday
-  KBs are baseline vs hotpatch) is queryable without scraping
-  the techcommunity blog.
-
-If the PoC succeeds, r06.x may add a `Common.UpdateTypePolicy`
-sub-block to Schema 2.2 that codifies B.21.1 per-OS:
-
-```jsonc
-// Schema 2.2 candidate (NOT YET ADOPTED -- contingent on PoC)
-"Common": {
-  ...
-  "UpdateTypePolicy": {
-    "SSU":                  "standalone",        // or "combined" for 2022/2025
-    "LCU":                  "standalone",        // or "combined-with-ssu"
-    "DotNetCU": {
-      "Required": true,
-      "ExpectedFileCount": 1                     // 2 for 2019/2022
-    },
-    "DynamicUpdateSetup":   "optional",
-    "DynamicUpdateSafeOs":  "optional",
-    "Hotpatch":             "not-applicable"     // or "online-runtime-only"
-  }
-}
-```
-
-The schema decision is intentionally deferred to PoC outcomes.
-This SPEC change (r06.0 Phase 1) does not modify the script
-behaviour or the on-disk Config schema; it only makes the
-implicit Type matrix normative so that a future schema
-extension is grounded in a stated contract.
-
-**r06.0 Phase 3 resolution.** The PoC questions enumerated above
-were answered by the r06.0 Phase 2 PoC reports
-(historical record at
-`docs/history/release-info-report.md`,
-`docs/history/dotnet-cu-report.md`,
-`docs/history/dynamic-update-report.md`), and the architecture
-decisions that follow from those answers are codified normatively
-in **§B.23 "Phase 3 Architecture (r07.0+, normative)"**. The
-`Common.UpdateTypePolicy` schema sketch above is **NOT adopted**:
-§B.23.4 (Schema versioning) explicitly keeps Schema at 2.1, and
-the per-OS differences captured by `UpdateTypePolicy` are
-instead encoded as Config-driven (`CatalogTitleTokens` field in
-each `config-Server*.json`, see §B.23.2) or as cache-driven
-logic (per-OS DU lookback in `cache-du-*.json`, see §B.23.6).
-
-## B.22 File organisation and naming conventions (r06.0+, normative)
-
-This section is the **governance model** for everything that lives
-under the `scripts/powershell/update-windows-server-iso/` subproject
-directory. It exists because r06 added a Proof-of-Concept stream
-alongside the existing production code and the existing
-`tests/` regression harness, and without explicit rules those three
-classes of artefacts would start sharing directories and filenames
-in confusing ways.
-
-The rules below are normative: any new file added to this subproject
-MUST land in the right directory and MUST use the right filename
-prefix. The intent is that an outsider reading a filename should
-know, without opening the file, **(a)** which artefact class it
-belongs to, **(b)** whether it is permanent or disposable, and
-**(c)** what role it plays in its class.
-
-### B.22.1 Directory layout
+**Relationship to §B.19 (Servicing Dependency Database)**: §B.13's
+check operates on a **mounted** WIM and reads the actual installed
+package list. It is runtime-accurate but expensive. The new
+`Test-PatchDependencyClosureFromGraph` (§B.19.10) runs **before**
+the mount in P06 Stage 2, using `Get-WindowsImage` metadata only,
+and uses the layer 2 database as its source of truth. The two are
+complementary; both stay enabled in r09.0+.
+
+## B.14 Refresh policy and RefreshAllBaselines decision matrix
+
+**Status**: normative. **Policy ID**: SPEC-WSI-016.
+
+The `$Script:OsConfigFieldGroups` constant maps each logical field
+group to a Cadence and an optional Refresher function. The constant
+drives the `-Action RefreshAllBaselines` (A01) decision matrix.
+
+| Group Path | Cadence | Refresher |
+|:---|:---|:---|
+| `Common` | Stable | (none) |
+| `PatchBaseline` | PatchTuesday | `Resolve-PatchSetFromCatalog` |
+| `LanguageSpecific.<lang>.Iso` | IsoRelease | (none) |
+| `LanguageSpecific.<lang>.LanguageSpecificPatches` | PatchTuesday | `Resolve-LanguageSpecificPatchesFromCatalog` |
+
+Cadence semantics:
+
+- **Stable**: once verified, never auto-refresh.
+- **PatchTuesday**: refresh when recorded `PatchTuesdayOfBaseline` is
+  older than the latest Patch Tuesday.
+- **IsoRelease**: only refresh when Microsoft re-releases the ISO;
+  not auto-refreshed in the current implementation (manual).
+
+Decision matrix (returned by `Get-RefreshDecision`):
+
+| Cadence \\ State | `_VerifiedDate` empty | recorded < latest PT | up-to-date |
+|:---|:---|:---|:---|
+| Stable | InitialFill or Manual | (N/A) | Skip |
+| PatchTuesday | Monthly (or Manual if no Refresher) | Monthly | Skip |
+| IsoRelease | InitialFill or Manual | (N/A) | Skip |
+
+`-Mode Force` overrides: never returns Skip; collapses to Monthly /
+InitialFill / Manual depending on Refresher availability.
+
+The full JSON shape of `$Script:OsConfigFieldGroups` is exposed via
+`-Action DumpFieldClassification` (A02) so external tooling (e.g. a
+Python JSON Schema validator) can consume it without parsing
+PowerShell.
+
+**Cross-reference**: r09.0+ extends RefreshAllBaselines with the
+layer 2 sub-phase from §B.19.13 (lifecycle step 1). The Decision
+Matrix above is unchanged; the new sub-phase runs before per-OS
+Catalogue scraping.
+
+## B.15 Update type matrix per OS generation
+
+**Status**: normative. **Policy ID**: SPEC-WSI-017.
+
+### B.15.1 The matrix
+
+Microsoft ships different update product mixes across the OS
+generations supported by this script. The matrix below records the
+per-OS / per-Type stance the script enforces during baseline
+resolution.
+
+| Type | Server 2016 | Server 2019 | Server 2022 | Server 2025 |
+|:---|:---:|:---:|:---:|:---:|
+| `SSU`                     | required (standalone) | required (combined LCU+SSU since 2024-4B) | required (combined LCU+SSU) | required (combined LCU+SSU) |
+| `LCU`                     | required (standalone) | required (combined LCU+SSU since 2024-4B) | required (combined LCU+SSU) | required (combined LCU+SSU, WIM-format MSU) |
+| `DotNet.Runtime`          | applicable | applicable | applicable | applicable |
+| `DotNet.OsLevel`          | applicable (recorded only) | applicable (recorded only) | applicable (recorded only) | applicable (recorded only) |
+| `DynamicUpdate.Component` | not shipped | not shipped | applicable | applicable |
+| `DynamicUpdate.SafeOs`    | not shipped | not shipped | applicable | applicable |
+| `DynamicUpdate.Setup`     | not shipped | not shipped | applicable | applicable |
+| `LanguagePack`            | bundled in eval ISO | bundled in eval ISO | bundled in eval ISO | bundled in eval ISO |
+| `LXP`                     | n/a (no LXP for Server SKU) | n/a | n/a | n/a |
+
+The `IsCombined` flag on each LCU entry distinguishes the standalone
+form (KB5087537 for Server 2016, 2026-05) from the combined SSU+LCU
+form. The flag MUST be set by `RefreshAllBaselines` based on
+authoritative metadata; manual entries should default to `false`
+unless explicitly verified. The historical defect on
+`config-Server2016.json` where `IsCombined: true` was mis-recorded
+and later corrected by r08.0 Step 4 is referenced from §D.NN.
+
+### B.15.2 .NET CU multiplicity per OS
+
+The .NET Framework Cumulative Update is delivered as an **umbrella
+KB** that bundles N "ndp" runtime variants (e.g. `ndp48`, `ndp481`)
+in separate `.msu` files but under one Catalogue UpdateId. The
+resolver retains all surviving `.msu` files via
+`Select-AllCanonicalPatchFiles`, so the `NeutralPatches[]` entries
+share `KbId` / `Title` / `UpdateId` / `Supersedes` from the umbrella
+KB but each carries its own `FileName` / `Sha256` / `LocalPath`.
+
+| OS family | Expected .NET CU sub-file count |
+|:---|:---:|
+| Server 2016 | 1 (ndp48 only; older runtimes are out of support) |
+| Server 2019 | 2 (ndp48 + ndp481) |
+| Server 2022 | 2 (ndp48 + ndp481) |
+| Server 2025 | 2 (ndp481 + ndp482, depending on month) |
+
+The Server 2016 entry is intentionally a single MSU because earlier
+.NET versions reached end-of-support before this script's baseline.
+The umbrella-KB pattern, the historical r04.2 regression where
+N-1 sub-files were dropped, and the r04.3 fix via
+`Select-AllCanonicalPatchFiles` are recorded in §D.NN.
+
+### B.15.3 Combined LCU package detection
+
+For Server 2019+, `Test-IsCombinedLcuTitle` identifies a combined
+SSU+LCU MSU by matching the Catalogue Title against:
 
 ```
-scripts/powershell/update-windows-server-iso/
-├── Update-WindowsServerIso.ps1     The production script. One file.
-├── SPEC.md                         This document.
-├── CHANGELOG.md                    Per-release notes.
-├── README.md / README.ja.md        Bilingual user-facing readme.
-├── PSScriptAnalyzerSettings.psd1   PSScriptAnalyzer config.
-├── .psa.config.json                psa.py config.
-├── .markdownlint.yaml              Markdownlint config.
-├── data/                           OS configs + parsed/raw upstream data.
-│   ├── config-Server2016.json, config-Server2019.json,
-│   │   config-Server2022.json, config-Server2025.json
-│   ├── cache-<source>[-<scope>].json   Parsed structured data (Refresher-managed).
-│   └── raw-<source>.<ext>              Pre-parse source data (Refresher-managed).
-├── tests/                          Self-verification tools (see Part G).
-│   ├── README.md                   Operational guide for tests/.
-│   ├── common/                     Shared modules (HTTP client, parsers).
-│   ├── fixtures/                   Saved HTML / JSON inputs for offline regression.
-│   ├── snapshots/                  Probe-output snapshots used for drift diffing.
-│   └── <existing T1-T10>.py        Production-grade regression tools (no `poc_` prefix in r07.0+).
-└── docs/                           Long-form documentation.
-    └── history/                    Historical record of past PoC investigations
-        └── <topic>-<purpose>.md    (carried forward as design rationale; see §B.23.14).
+'cumulative update.*servicing stack'
+'cumulative.*combined'
+'rollup.*servicing stack'
 ```
 
-**Historical note (r06.x).** Earlier releases stored OS
-configuration directly under `Config/Server<NNNN>.json`. The
-r07.0 release renamed `Config/` to `data/`, added the `config-`
-filename prefix, and introduced the sibling `cache-*` and
-`raw-*` files described in §B.23.3. The directory layout above
-reflects the post-r07.0 state. See §B.23.3 for the migration
-rationale and the three-prefix naming scheme.
+A combined package's `IsCombined` field is set to `true`, which
+informs `Build-PatchPlan` to skip the standalone SSU lookup for that
+month.
 
-Key points:
+### B.15.4 Hotpatch is out of scope
 
-- **`data/`, `tests/`, and `docs/` are the only first-class child
-  directories.** No additional top-level directories are added
-  without a SPEC update; future "PoC ディレクトリ" or
-  "experiments/" would violate this rule. Any future PoC code
-  lives temporarily under `tests/` with the `poc_` prefix and is
-  promoted (or deleted) at the end of the investigation, just as
-  the r06 Phase 2 PoC was promoted into T6-T10 and removed in
-  r07.0 (see §B.23.14).
-- **Production data and PoC artefacts coexist via filename
-  prefix, not by directory.** Files under `data/` use the
-  `config-` / `cache-` / `raw-` prefixes per §B.23.3. Files
-  under `tests/` use either the `T<N>` numbered prefix (or
-  no prefix for shared/common modules) for production
-  regression tests. As of r07.0+, there are no `poc_*.py` files
-  in the repository -- the r06 PoC scripts were retired once
-  their parser logic landed in `Update-WindowsServerIso.ps1`
-  and the regression suite T6-T10 took over coverage.
-- **The `docs/` directory** is the canonical home for *anything
-  longer than a CHANGELOG entry that is not the SPEC itself*.
-  Historical PoC reports live under `docs/history/`; design
-  memos, post-mortems, and architecture-decision-record-style
-  write-ups all belong under `docs/` proper.
-- **Snapshot and fixture data under `tests/` mirror the topic
-  taxonomy without the `poc_` prefix.** A production snapshot
-  lives at `tests/snapshots/<topic>/`; a production fixture at
-  `tests/fixtures/<topic>/`. A future PoC would temporarily use
-  `tests/snapshots/poc_<topic>/` and `tests/fixtures/poc_<topic>/`,
-  to be renamed (drop `poc_`) on promotion or deleted on
-  retirement.
+Hotpatch (in-memory binary patching) is shipped only for specific
+Azure Edition SKUs and produces a different patch flow. This script
+targets the standard Datacenter / Standard SKUs and does not
+integrate hotpatch into the offline image.
 
-### B.22.2 Filename prefix rules
+`tests/release_info_parser_test.py` includes assertions that the
+release-info parser correctly classifies hotpatch rows so the
+distinction is enforced at baseline-resolution time.
 
-| Class                         | Where it lives                   | Filename pattern                                      | Disposable? |
-| ----------------------------- | -------------------------------- | ----------------------------------------------------- | :---------: |
-| Production PowerShell         | top level                        | `Update-WindowsServerIso.ps1` (exactly one file)      | No          |
-| Production config             | `data/`                          | `config-Server<NNNN>.json` (see §B.23.3)              | No          |
-| Production cache              | `data/`                          | `cache-<source>[-<scope>].json` (see §B.23.3)         | No          |
-| Production raw                | `data/`                          | `raw-<source>.<ext>` (see §B.23.3)                    | No          |
-| Regression test (T1-T10)      | `tests/`                         | `<topic>_<role>.py` (no prefix; existing convention)  | No          |
-| Regression test (shared)      | `tests/common/`                  | `<topic>_<role>.py`                                   | No          |
-| Regression fixture            | `tests/fixtures/<topic>/`        | (per existing convention, see Part G)                 | No          |
-| Regression snapshot           | `tests/snapshots/<topic>/`       | (per existing convention, see Part G)                 | No          |
-| **PoC script** (future use)   | `tests/`                         | `poc_<topic>_<step>_<verb>.py`                        | **Yes**     |
-| **PoC fixture / snapshot**    | `tests/fixtures/poc_<topic>/`<br>`tests/snapshots/poc_<topic>/` | (any reasonable filename inside)                      | **Yes**     |
-| Production documentation      | `docs/`                          | `<topic>-<purpose>.md`                                | No          |
-| Historical documentation      | `docs/history/`                  | `<topic>-<purpose>.md`                                | No          |
-| Top-level docs                | top level                        | `SPEC.md`, `CHANGELOG.md`, `README*.md`               | No          |
+## B.16 LCU package format per OS
 
-"Disposable" means: when the corresponding feature lands in
-production (or is decided not to), every file in that class can be
-deleted as a single atomic step. PoC artefacts are time-bounded by
-design; production artefacts are not. The r06 Phase 2 PoC went
-through exactly this lifecycle: the `poc_release_info_*.py` /
-`poc_dotnet_cu_*.py` / `poc_dynamic_update_01_probe.py` scripts
-and their `tests/fixtures/poc_*/` + `tests/snapshots/poc_*/`
-companions existed during r06.0, drove the §B.23 design
-decisions, and were deleted as a single atomic step in r07.0
-once the parser logic had been promoted into
-`Update-WindowsServerIso.ps1` and the regression coverage moved
-to T6-T10. The PoC report Markdown files survived the cleanup
-because they record design rationale; they were moved into
-`docs/history/` (with the `poc-` filename prefix dropped) to
-make the history-vs-current distinction explicit.
+**Status**: informative.
 
-`<topic>` is a short kebab-case (Markdown) or snake_case (Python)
-identifier for the investigation subject. Pick one and use it
-consistently across all files in a single PoC. For example, the
-r06 Phase 2 PoC uses `release_info` (Python) / `release-info`
-(Markdown) throughout.
+### B.16.1 MSU format generation
 
-`<step>` for a multi-step PoC script is a two-digit zero-padded
-sequence number (`01`, `02`, ...). It establishes the execution
-order so an outsider can run the PoC by sorting the matching
-filenames alphabetically.
+The MSU file format evolved across the four supported OS families.
+The r08.0 Step 1 investigation enumerated the structures by
+physical expansion of each LCU:
 
-`<verb>` is a short imperative describing what the step does
-(`fetch`, `parse`, `analyse`, `diff`, `validate`, `report`).
-Plain past-tense or noun forms are discouraged (`fetched`,
-`fetcher`); the imperative form makes the script feel like a
-command, which is what it is.
+| OS | LCU KB (2026-05) | MSU size | Magic | Stages to extract | Format generation |
+|:---|:---|:---|:---:|:---:|:---|
+| Server 2016 | KB5087537 | 1,776 MB | MSCF (CAB) | 3 | Legacy standalone LCU |
+| Server 2019 | KB5087538 | 821 MB | MSCF (CAB) | 4 | UUP + PSFX v1 (combined LCU+SSU) |
+| Server 2022 | KB5087545 | 539 MB | MSCF (CAB) | 4 | UUP + PSFX v1 / ForwardOnly |
+| Server 2025 | KB5087539 | 1,929 MB | **MSWIM (WIM)** | 2 (WIM nesting) | **WIM + PSF v2 (PSTREAM)** |
 
-`<purpose>` for a Markdown file is the document's role:
-`report` (PoC findings), `readme` (operational guide), `design`
-(forward-looking design memo), `decision` (architecture decision
-record), `runbook` (operator procedure).
+Server 2025's WIM-format MSU is a genuine generation change:
+expansion requires `DISM /Apply-Image` rather than `expand.exe`. The
+payload is split into a small manifest WIM (~184 MB) and a large PSF
+(PSTREAM) v2 blob containing the actual binaries.
 
-### B.22.3 Worked examples
+### B.16.2 EFI_EX provenance — LCU-delivered vs install.wim-resident
 
-| File                                                | Class                    | Reading the name                                                              |
-| --------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------- |
-| `tests/catalog_fixture_test.py`                     | Regression test (T2)     | "Catalog fixture test" -- no `poc_` prefix means it is permanent.             |
-| `tests/release_info_parser_test.py`                 | Regression test (T6)     | Production successor to the r06 PoC; consumes `tests/fixtures/release_info/`. |
-| `tests/release_info_resolver_test.py`               | Regression test (T10)    | Production regression for the r07.0 cache-driven refresher main path.         |
-| `tests/snapshots/release_info/release-info-<date>.md` | Regression snapshot    | Live capture used by T6; mirrors the topic name without `poc_` prefix.        |
-| `docs/history/release-info-report.md`               | Historical documentation | r06 Phase 2 PoC findings on release-info; kept as design rationale.           |
-| `tests/poc_<topic>_<step>_<verb>.py` *(none today)* | PoC script               | Reserved pattern for any future PoC investigation; no such files in r07.0+.   |
+Where does the `\Windows\Boot\EFI_EX\` staging directory come from?
+The r08.0 Step 1 / Step 2 investigation established this is
+**OS-dependent**:
 
-### B.22.4 What this section does NOT cover
+| OS | install.wim ships EFI_EX? | LCU delivers EFI_EX? | Acquisition path |
+|:---|:---:|:---:|:---|
+| Server 2016 | No (verified via direct mount) | Yes (6 unique binaries) | Apply LCU → WinSxS deposits assets → P10 reads from boot.wim |
+| Server 2019 | No (verified) | Yes (6 unique binaries) | Same as Server 2016 |
+| Server 2022 | No (verified) | Yes (6 unique binaries) | Same |
+| Server 2025 | **Yes** (72 files pre-populated) | No (0 `*_EX.efi` binaries in LCU) | install.wim contains assets natively; P10 can run without LCU |
 
-- The conventions in `Part A — Inherited Common Specification`
-  for end-of-line, BOM, ASCII-only-in-`.ps1`, line-ending in
-  Markdown still apply unchanged.
-- The conventions in `Part G — Self-verification tools` for the
-  T1-T5 regression suite still apply unchanged.
-- This section does not retroactively rename any existing file.
-  T1-T5 keep their current filenames; they pre-date this rule.
-  Only new files added from r06.0 onward must comply.
-- Subproject-internal subdirectories under `docs/` other than
-  `poc/` (e.g. a hypothetical `docs/architecture/`) are allowed
-  when added with a SPEC update that describes them.
+This is the technical justification for §B.4.4's `Pca2023.RequiredByDefault`
+being `false` only for Server 2025.
 
-## B.14b PatchBaseline schema fields (referenced by B.10)
+### B.16.3 EFI_EX file-by-file signature inventory (Server 2025)
 
-```jsonc
-"PatchBaseline": {
-  "Schema": "1.0",
-  "TargetBuildAfterUpdate": "26100.4061",
-  "PatchTuesdayOfBaseline": "2026-05-12",   // YYYY-MM-DD; empty = uninitialised
-  "LastVerifiedDate": "2026-05-13T14:22:00+09:00",
-  "LastVerifiedBy": "auto-scrape",          // or manual identifier
-  "VerificationMethod": "auto-scrape",      // | manual+wsusscn2 | auto-scrape+wsusscn2
-  "VerifiedOsLanguages": ["en-us", "ja-jp"],
-  "ChecksumAlgorithm": "SHA256",
-  "Patches": [
-    {
-      "Type": "SSU",                          // SSU | LCU | DynamicUpdate.* | DotNet.Runtime | DotNet.OsLevel | DotNet.LangPack | Defender | Edge | Other
-      "KbId": "KB5055769",
-      "Title": "Servicing Stack Update for Windows Server 2025 (KB5055769)",
-      "UpdateId": "12345678-90ab-cdef-1234-567890abcdef",
-      "DownloadUrl": "https://catalog.s.download.windowsupdate.com/.../ssu-...",
-      "FileName": "ssu-26100.4061-x64.cab",
-      "SizeBytes": 12345678,
-      "Sha256": "abc123...",                  // recorded by P04 first download
-      "ReleaseDate": "2026-05-12",
-      "Supersedes": ["KB5051234"],
-      "RequiresKbIds": [],
-      "ApplyOrder": 1,
-      "ApplicableArchitecture": "x64",
-      "ApplicableLanguages": ["neutral"]
-    }
-  ],
-  "ExcludeKbList": [
-    {
-      "KbId": "KB5043080",
-      "Reason": "Checkpoint Cumulative Update; not required for OS install (per Microsoft Learn)."
-    }
-  ],
-  "WsusScnCab": {
-    "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
-    "LocalCachePath": "C:\\Temp\\Workspace_UpdateWsi\\cache\\wsusscn2.cab",
-    "LastDownloadedDate": "2026-05-13T10:22:00+09:00",
-    "LastDownloadedSha256": "abc123...",
-    "LastDownloadedSizeBytes": 1234567890
-  }
-}
+Direct inspection of Server 2025 install.wim's `EFI_EX/` showed:
 
-"AutoRefreshPolicy": {
-  "Mode": "OnNewPatchTuesday",
-  "WritebackToConfig": true,
-  "FallbackOnScrapeFailure": "UseBaseline",
-  "ScrapeRetries": 3
-}
+| File | Signer chain | Notes |
+|:---|:---|:---|
+| `EFI_EX\bootmgfw_EX.efi` | **PCA2023** (single-sign) | The critical PCA2023 asset for P10 |
+| `EFI_EX\bootmgr_EX.efi` | **PCA2011** (single-sign) | Intentionally PCA2011 per Microsoft `Make2023BootableMedia.ps1` v1.4 L876-L884 |
+
+Neither file is dual-signed. The "PCA2011 + PCA2023 dual-sign"
+hypothesis briefly entertained during r08.0 Step 2 was disproved by
+`signtool /verify /pa /all /ds 0..3`; only one embedded signature
+exists per file. Both files share PE-body bytes with their EFI/
+counterparts (Authenticode hash matches because Authenticode hash
+excludes the signature region).
+
+### B.16.4 Pipeline implications
+
+- P07 applies the LCU to install.wim before P09 / P10 (when
+  `EnableInstallWimUpdate=true`).
+- P10 reads from boot.wim, which P08 must have patched to bring the
+  Microsoft-shipped EFI_EX staging assets out of install.wim's
+  WinSxS into boot.wim's `\Windows\Boot\`.
+- For Server 2025, P10 can short-circuit via the
+  `RequiredByDefault=false` policy, since the install.wim already
+  contains the assets natively.
+
+## B.17 PCA2023 boot manager support
+
+**Status**: normative. **Policy ID**: SPEC-WSI-018.
+
+### B.17.1 Conversion target inventory (Microsoft 5-target spec)
+
+The Microsoft authoritative reference is
+`scripts/windows/Make2023BootableMedia.ps1` v1.4 (2026-03-13) in the
+`microsoft/secureboot_objects` repository, function
+`Copy-2023BootBins` L829-L941. Five targets are written into the
+output media:
+
+| # | Source (in boot.wim) | Destination (in ISO root) | Required | Expected signer |
+|:-:|:---|:---|:---:|:---|
+| 1 | `Windows\Boot\EFI_EX\bootmgfw_EX.efi` | `\efi\boot\bootx64.efi` (or `bootaa64.efi`) | required | **PCA2023** |
+| 2 | `Windows\Boot\EFI_EX\bootmgr_EX.efi` (if present) | `\bootmgr.efi` | optional | **PCA2011 by Microsoft design** (see L876-L884) |
+| 3 | `Windows\Boot\DVD_EX\EFI\en-US\efisys_EX.bin` | `\efi\microsoft\boot\efisys_ex.bin` | required | n/a (binary) |
+| 4 | `Windows\Boot\FONTS_EX\*_EX.ttf` (rename) | `\efi\microsoft\boot\fonts\*.ttf` | required | n/a (fonts) |
+| 5 | `Windows\Boot\EFI\boot.stl` (best-effort) | `\EFI\Microsoft\Boot\boot.stl` | optional | n/a (cert trust list) |
+
+`Convert-WimBootToPca2023Signed` (this project's `Make2023BootableMedia.ps1`
+re-implementation) follows the same 5-target contract. The function
+is PSA-clean and does not call out to the external script.
+
+### B.17.2 In-tree readiness functions
+
+Two functions cooperate to gate P10:
+
+- `Get-IsoBootCertReadiness` — reads boot.wim's `\Windows\Boot\`
+  contents, classifies the presence of `EFI_EX` / `Fonts_EX` /
+  `DVD_EX`, and emits per-target presence flags. INPUT side.
+- `Get-Pca2023ReadinessSnapshot` — combines `Get-IsoBootCertReadiness`
+  output with the install.wim's `Get-AuthenticodeSignature` chain on
+  `bootmgfw.efi` and emits a four-level health verdict:
+  `Healthy` / `Warning` / `Critical` / `Unknown`.
+
+P10 runs unless `Get-Pca2023ReadinessSnapshot` returns `Critical`
+(skip-with-warn) or `-DisablePca2023BootManager` is set explicitly.
+
+### B.17.3 Per-OS readiness defaults
+
+Per the matrix in §B.4.4:
+
+- Server 2016/2019/2022: `RequiredByDefault=true`. P10 runs whenever
+  `EnableInstallWimUpdate=true` and the LCU is at the configured
+  minimum date.
+- Server 2025: `RequiredByDefault=false`. P10 short-circuits with
+  rationale "firmware already includes 2023 certs" unless
+  `-ForcePca2023OnServer2025` is set.
+
+### B.17.4 Microsoft Support reference
+
+KB5053484 ("Updating Windows bootable media to use the PCA2023-
+signed boot manager", 2025-02-04) lists Server 2012, 2012 R2,
+**2016, 2019, 2022**, Windows 10, and Windows 11 as "Applies To".
+Server 2025 is omitted because the article predates Server 2025
+GA; Server 2025 ships with PCA2023 staging assets in install.wim
+natively (§B.16.2).
+
+## B.18 Output ISO verification
+
+**Status**: normative. **Policy ID**: SPEC-WSI-019.
+
+### B.18.1 Function: `Test-OutputIsoPca2023Readiness`
+
+The function consumes an `ExtractedMediaPath` (the extracted output
+ISO tree, not the boot.wim) and returns a structured verdict that
+the §B.17 five-target contract was actually written to disk after
+P10.
+
+```
+Test-OutputIsoPca2023Readiness
+    -ExtractedMediaPath <string>
+    → returns:
+        @{
+            Generated      = <DateTime>
+            Available      = $true | $false
+            ErrorMessage   = <string when Available=$false>
+            ExtractedMediaPath = <string>
+            OverallStatus  = 'Pass' | 'PassWithNotes' | 'Warning' | 'Fail' | 'Unknown'
+            TargetChecks   = @(<5 items: see B.18.2>)
+            Reasons        = @(<string>...)  # includes SCOPE clarifier
+        }
 ```
 
-### Freshness contract
+### B.18.2 TargetCheck status mapping
 
-`Test-PatchBaselineFresh` returns `$true` if and only if all hold:
+Each of the 5 targets is checked as follows. The
+`OverallStatus` aggregator is `Fail > Warning > PassWithNotes >
+Pass`.
 
-1. `Baseline` is non-null
-2. `PatchTuesdayOfBaseline` is non-empty and parses as `yyyy-MM-dd`
-3. `parse(PatchTuesdayOfBaseline) >= Get-LatestPatchTuesday()`
-4. `Patches.Count > 0` AND at least one entry has all of
-   `KbId`, `DownloadUrl`, `Sha256` populated
+| Target | Pass | PassWithNotes | Warning | Fail |
+|:---|:---|:---|:---|:---|
+| #1 `\efi\boot\bootx64.efi` | PCA2023 | — | — | PCA2011 / unknown / missing |
+| #2 `\bootmgr.efi` | — | any signer or missing (L876-L884) | — | — |
+| #3 `\efi\microsoft\boot\efisys_ex.bin` | present | — | — | missing |
+| #4 `\efi\microsoft\boot\fonts\*.ttf` | present | — | missing or empty | — |
+| #5 `\EFI\Microsoft\Boot\boot.stl` | present | missing (L909-L911) | — | — |
 
-If any check fails, the baseline is "stale" and P03 scrapes anew.
+ARM64 variant: when `bootx64.efi` is absent, Target #1 falls back to
+`bootaa64.efi` on the same path. The Status mapping is otherwise
+identical.
 
-### Patch Tuesday calculation
+### B.18.3 SCOPE clarifier (mandatory in Reasons)
 
-`Get-PatchTuesdayForMonth(Year, Month)` returns the second Tuesday of
-the month. `Get-LatestPatchTuesday` returns the second Tuesday at or
-before "now", with a 1-day buffer to avoid same-day boundary issues
-(see Part D.15).
+Every invocation MUST append the following SCOPE statement to
+`Reasons[]`, regardless of `OverallStatus`:
 
-### Writeback semantics
+> "SCOPE: file presence + signer-chain only. Actual boot behaviour
+> on firmware with PCA2011 revoked from DBX is NOT verified here.
+> Manual boot test on hardware or a Hyper-V Gen2 VM with a PCA2023
+> Secure Boot template is required before production deployment."
 
-`Save-ConfigWithBaseline` writes the in-memory `OsProfile` back to
-`data/config-<OsKey>.json` with these guarantees:
+This makes it impossible for an operator to read a `Pass` verdict
+and infer that the ISO will boot on PCA2011-revoked firmware
+without an external test. Microsoft's own `Make2023BootableMedia.ps1`
+performs zero signature verification; this script adds the
+verification as an upstream-compatible quality extension.
 
-- LF line endings (matches `.gitattributes` `*.json text eol=lf`)
-- UTF-8 without BOM
-- `ConvertTo-Json -Depth 32` (full PatchBaseline.Patches[] expansion)
-- Atomic write via `[System.IO.File]::WriteAllBytes`
-- A trailing newline (POSIX-friendly)
+### B.18.4 Phase integration
 
-The diff produced is small and reviewable: only `PatchTuesdayOfBaseline`,
-`LastVerifiedDate`, `Patches[]`, and `WsusScnCab` fields change.
+P10 post-flight: `Test-OutputIsoPca2023Readiness` runs immediately
+after the file copies and the result is rendered via
+`Show-Pca2023ReadinessSnapshot -OutputCheck $check -Compact`.
+
+P12 (`Invoke-VerifyPhase12_VerifyPca2023Readiness`): always runs the
+check; integrates `OutputCheck` into `pca2023_readiness.json` and
+into `pca2023_readiness.md`'s 5-target Markdown table.
+
+P13 FinalReport: rolls the per-target verdict into the aggregate
+`Health` calculation. Any Target #1 `Fail` propagates to overall
+`Health = Critical`.
+
+### B.18.5 Implementation notes
+
+The function uses `System.Collections.Generic.List[object]` for the
+`TargetChecks` internal accumulator. When converting to the output
+array shape, `.ToArray()` MUST be used; the array sub-expression
+operator `@($list)` fails on `List[object]` of `pscustomobject`
+under PowerShell 7.4.x with `Argument types do not match`. The full
+root-cause analysis is in §D.26.
+
+`Get-Pca2023ReadinessSnapshot` carries the result on a new
+`OutputCheck` field, declared `$null` in both return paths so
+property assignment downstream does not trigger
+`PSA2009` (undeclared property). Inner-function declarations are
+forbidden inside `Test-OutputIsoPca2023Readiness`; helpers MUST be
+hoisted to top level next to `Test-Pca2023AuthenticodeChain`.
 
 ---
 
-## B.23 Phase 3 Architecture (r07.0+, normative)
 
-This section codifies the eleven architectural decisions taken
-during r06.0 Phase 3 SPEC consolidation. These decisions answer
-the open questions left by r06.0 Phase 1 (`B.21.5 Future work`)
-and the r06.0 Phase 2 PoC reports, and define the shape of the
-r07.0 implementation.
-
-**Provenance**. Each subsection that follows is a Decision Record
-in the spirit of MADR (Markdown Any Decision Records). The
-"Context" and "Decision" lines summarise an interactive design
-session held on 2026-05-25; the "Consequences" lines name the
-SPEC sections, code paths, or files affected. Where the decision
-overturns or refines an earlier section, the cross-reference is
-explicit.
-
-**Normative scope**. The decisions in §B.23 apply to r07.0 onward.
-r06.x retains the pre-Phase-3 architecture (Catalog-as-source,
-no `data/` directory, no 3-prefix file scheme). The r07.0
-implementation in `Update-WindowsServerIso.ps1` will diverge from
-r05.1 in many of the ways enumerated here; r06.0 ships only this
-SPEC update (and the Phase 2 PoC artefacts) without any
-`.ps1` change.
-
-### B.23.1 Refresher architecture: complete migration to release-info
-
-**Context**. r05.1's KB discovery relies on Microsoft Update
-Catalog Title-string heuristics (`Get-CatalogQueryTemplate`,
-`Resolve-PatchSetFromCatalog`). r06.0 Phase 2 PoC-A demonstrated
-that the Microsoft Learn `windows-server-release-info` page
-provides a parseable, authentication-free Markdown source for
-every OS-month-letter combination in scope, going back to
-2016-08 for Server 2016. PoC-B further proved that KB numbers
-harvested from release-info can be resolved to download URLs via
-the Catalog using KB-only input (no Title heuristics needed for
-discovery).
-
-**Decision**. r07.0 performs a **complete migration**: KB
-discovery moves entirely to release-info (LCU, Hotpatch baseline)
-and to the `.NET Framework cumulative update` release-notes pages
-(.NET CU per-OS x per-runtime). The Microsoft Update Catalog
-becomes a **URL resolver only**: given a KB, return the download
-URLs. Title-string heuristics for *discovery* are removed.
-
-DU (DynamicUpdate.Setup / .SafeOs) cannot be discovered from
-release-info -- they have no Markdown source -- so DU continues
-to be discovered via the Catalog, but with a cache-driven lookback
-strategy (see §B.23.6) rather than monthly Title-matching.
-
-**Consequences**.
-- The bulk of `Resolve-PatchSetFromCatalog` is deleted in r07.0.
-- A new function `Resolve-PatchSetFromReleaseInfo` consumes the
-  parsed release-info cache and returns the (OS, month, type, KB)
-  tuples that previously came from Title scraping.
-- `Get-CatalogQueryTemplate`'s per-OS `QueryTemplate` strings for
-  LCU / SSU / .NET CU are deleted. The OS-specific Catalog
-  `TitleTokens` field remains as a *disambiguator* for the URL
-  resolver (see §B.23.2).
-- §D.19 ("Catalogue title prefix accidentally matches sibling")
-  and §D.20 ("Wrong KB picked from the Catalogue umbrella") are
-  no longer reachable on the new path; they remain documented as
-  historical lessons but are marked "superseded by §B.23".
-
-### B.23.2 Catalog Title token matching: Config-driven
-
-**Context**. PoC-B exposed a previously implicit non-uniformity in
-how Microsoft names Server LCUs on the Catalog. Server 2025 LCUs
-are published under `"Microsoft server operating system version
-24H2"` (no "Windows Server" string). Server 2022 LCUs use the
-analogous `"Microsoft server operating system version 21H2"`
-naming. Server 2019 and Server 2016 still use the familiar
-`"Windows Server NNNN"` naming. When the URL resolver issues a
-KB-only Search.aspx query, multiple hits may come back (e.g.
-KB5046617 returns one server hit and two Windows 11 client
-hits); the right hit is selected by matching the Title against an
-OS-specific token list.
-
-**Decision**. The token list is **Config-driven**, not hardcoded
-in PowerShell. Each `data/config-Server<NNNN>.json` carries a
-new field `CatalogTitleTokens` whose value is an array of strings.
-For example:
-
-```jsonc
-// data/config-Server2025.json (r07.0+ excerpt)
-"CatalogTitleTokens": [
-  "Microsoft server operating system version 24H2",
-  "Windows Server 2025"
-]
-```
-
-The URL resolver narrows multi-hit Catalog responses by accepting
-only hits whose Title contains *any* of the tokens (case-insensitive
-substring match). A negative exclusion list ("Windows 11", "arm64")
-is hardcoded in PowerShell because it is uniform across OS
-versions, not OS-specific.
-
-**Consequences**.
-- Each `data/config-Server*.json` gets a new optional field
-  `CatalogTitleTokens`. The field defaults to an empty array if
-  absent (in which case the URL resolver accepts the first
-  matching hit, or errors if multiple ambiguous hits remain).
-- Schema number remains 2.1 (§B.23.4); the new field is an
-  additive optional extension.
-- Future Microsoft naming changes (e.g. dropping the "version"
-  prefix) are absorbed by editing the Config file, not by
-  shipping a new PowerShell release.
-- The hardcoded `TitleTokens` in `Get-CatalogQueryTemplate` is
-  deleted in r07.0; the function itself either disappears
-  entirely or shrinks to a thin URL-resolver wrapper.
-
-### B.23.3 Data directory layout: `data/` flat with 3-prefix naming
-
-**Context**. r06.x stores OS-specific configuration in `Config/`.
-The Phase 3 architecture introduces three additional data sources
-that the Refresher must persist between runs:
-
-1. *Parsed Markdown caches* (release-info parsed to JSON, .NET CU
-   parsed to JSON, DU 36-month publish history per OS).
-2. *Raw source data* (the original Markdown for release-info and
-   the aggregated month-by-month Markdown for .NET CU). These
-   are debugging aids that allow a maintainer to re-run the
-   parser against the exact bytes a previous run saw.
-3. *Existing Config* (the four `Server<NNNN>.json` files).
-
-These are all "data the script consults", with a unified
-Patch-Tuesday-triggered update lifecycle (see §B.23.7).
-
-**Decision**. r07.0 introduces a top-level `data/` directory that
-replaces `Config/`. All files inside `data/` are flat (no
-sub-directories) and identify their class by a filename **prefix**:
-
-| Prefix    | Meaning             | Update model                          |
-| --------- | ------------------- | ------------------------------------- |
-| `config-` | Human-edited config | Hand-edited; Refresher may amend `PatchBaseline.Patches[]` only |
-| `cache-`  | Parsed structured data | Refresher regenerates wholesale on every refresh |
-| `raw-`    | Pre-parse source data  | Refresher overwrites on fetch         |
-
-The full r07.0 layout:
-
-```
-scripts/powershell/update-windows-server-iso/
-├── Update-WindowsServerIso.ps1
-├── SPEC.md
-├── CHANGELOG.md
-├── data/
-│   ├── config-Server2016.json
-│   ├── config-Server2019.json
-│   ├── config-Server2022.json
-│   ├── config-Server2025.json
-│   ├── cache-release-info.json
-│   ├── cache-dotnet-cu.json
-│   ├── cache-du-Server2016.json
-│   ├── cache-du-Server2019.json
-│   ├── cache-du-Server2022.json
-│   ├── cache-du-Server2025.json
-│   ├── raw-release-info.md
-│   ├── raw-release-info.meta.json
-│   └── raw-dotnet-cu.json
-├── tests/
-└── docs/
-```
-
-**Filename rules**:
-
-- **No date in filenames.** Git provides the history; date in the
-  filename is redundant and creates churn.
-- **No subdirectories under `data/`.** Flat is friendlier to
-  diff-and-review workflows than nested.
-- **`cache-` files are JSON**, even when the upstream is Markdown
-  (the cache is the parsed form). `cache-du-*.json` per-OS files
-  store the 36-month Catalog probe history (§B.23.6).
-- **`raw-` files preserve the upstream format**: Markdown for
-  release-info, JSON for .NET CU (because .NET CU has many monthly
-  pages that are aggregated into one container JSON for
-  manageability — see §B.23.5).
-- `.meta.json` files (HTTP headers, fetch timestamp) sit next to
-  the corresponding `raw-` file and inherit the `raw-` prefix.
-
-**Consequences**.
-- Rename `Config/Server<NNNN>.json` → `data/config-Server<NNNN>.json`
-  is a mechanical change touching all path references in
-  `Update-WindowsServerIso.ps1`, `tests/`, the CI workflows, and
-  the SPEC.
-- B.22.1's directory layout table and B.22.2's prefix table are
-  amended (the `r07.0+` rows reference §B.23).
-- The `data/` migration is part of the r07.0 release as a single
-  atomic step; r06.x retains `Config/`.
-
-### B.23.4 Schema versioning: stay at 2.1
-
-**Context**. Phase 1's `B.21.5 Future work` sketched a Schema 2.2
-candidate (`Common.UpdateTypePolicy`). The Phase 3 decisions
-above either (a) move per-OS knowledge into Config fields (e.g.
-`CatalogTitleTokens` in §B.23.2) without bumping the schema
-number, (b) avoid Config-side encoding entirely (e.g. SSU
-detection from filename in §B.23.5), or (c) defer to Phase 4+
-(`-PreferBaselineMonthLcu`, §B.23.11).
-
-**Decision**. r07.0 keeps `Schema = "2.1"` on every
-`config-Server*.json`. No `Common.UpdateTypePolicy` is introduced.
-The optional `CatalogTitleTokens` field is an additive extension
-of Schema 2.1; consumers that don't recognise it simply ignore
-it (Schema 2.1's `Test-PatchBaselineSchema` is unchanged).
-
-**Consequences**.
-- The migration trauma of r04.x → r05.0 (Schema 2.0 → 2.1, see
-  §D.21 Pca2023 mandatory issue) is not repeated.
-- T2 and T3 tests touching Schema validation need no changes.
-- Future Schema 2.2 can still be cut later if a hard requirement
-  emerges; nothing in §B.23 forecloses that path.
-
-### B.23.5 SSU separation and .NET CU multiplicity
-
-**Context (B-1 / SSU)**. PoC-B confirmed §B.21.1's claim that
-Server 2025 LCUs are bundled with a Servicing Stack package
-(`KB5043080`) by the Catalog: every Server 2025 LCU resolution
-returns *two* `.msu` URLs, and the second is always the SSU. The
-PatchBaseline schema (§B.14b) already has a `Type=SSU` value;
-the question is how to represent the bundled-SSU case.
-
-**Decision (B-1)**. r07.0 takes the Catalog response **as is**
-(two URLs are accepted, both downloaded). At PatchBaseline
-record-construction time, the Refresher inspects the filename;
-if it matches a known SSU pattern (`*kb<id>*ssu*` or
-`*kb5043080*` for Server 2025), it is recorded as a separate
-`Type=SSU` entry alongside the `Type=LCU` entry derived from the
-same Catalog hit. No schema change is required.
-
-**Context (B-2 / .NET CU multiplicity)**. PoC-E exposed a
-discrepancy: r05.1 telemetry sees Server 2016 with **1** .NET CU
-file (the .NET 4.8 sibling), but the upstream `.NET Framework
-cumulative update` release-notes table lists **2** distinct KBs
-for Server 2016 (the .NET 3.5/4.6.2/4.7.x rollup and the .NET 4.8
-sibling). r05.1 missed the first sibling because the umbrella-KB
-scrape path matched only "for Microsoft .NET Framework" titles
-and the missing sibling carries a different umbrella title.
-
-**Decision (B-2)**. r07.0 applies **both** siblings on Server 2016
-(and on every other OS whose release-notes table shows multiple
-rows). The decision rests on Microsoft's documented applicability
-logic: "the operating system KB is offered, the applicability
-logic determines the specific .NET Framework updates that will
-be installed." Therefore applying a sibling that the device
-already has at a newer version is a no-op via DISM's own
-component-store logic; applying both is safe and ensures coverage
-for devices that have older .NET 4.x branches.
-
-**Context (B-3 / LCU vs .NET CU same-KB dedup)**. Live verification
-on 2026-05-26 exposed a third edge case unique to the Windows 10
-1607 / Server 2016 family. The Microsoft Learn .NET Framework
-release-notes page for 2026-05 contains the row pair:
-
-```
-| **Windows 10 1607 and Windows Server 2016** |  |
-| .NET Framework 3.5, 4.6.2, 4.7, 4.7.1, 4.7.2 | [5087537](.../kb/5087537) |
-| .NET Framework 4.8 | [5087065](.../kb/5087065) |
-```
-
-`KB5087537` is **the same KB** as the Server 2016 monthly LCU
-recorded in `windows-server-release-info` (2026-05 B,
-AvailabilityDate 2026-05-12). Microsoft's own Update Catalog
-labels this KB "2026-05 Cumulative Update for Windows Server 2016
-for x64-based Systems" -- it is the LCU. The .NET release-notes
-re-listing is a faithful description of the Windows 10 1607 era
-"sliced cumulative update" design: the LCU literally embeds the
-.NET 3.5 / 4.6.2 / 4.7.x cumulative-update payload as OS
-components (only .NET 4.8 ships as a separate `KB5087065` .msu).
-Server 2019 / 2022 / 2025 split the .NET CU into independent
-KBs and do not exhibit this overlap.
-
-A naive discovery layer that emits one record per release-notes
-row produces three records for Server 2016 / 2026-05
-(LCU=KB5087537 from release-info, DotNet.Runtime=KB5087537 from
-release-notes, DotNet.Runtime=KB5087065 from release-notes),
-which then resolves to three PatchBaseline entries pointing at
-**two distinct .msu files** -- KB5087537's .msu is referenced
-twice, once tagged `Type=LCU` and once tagged
-`Type=DotNet.Runtime`. The duplicate entry serves no purpose:
-both records resolve to the same FileName, DownloadUrl, SHA256,
-SizeBytes, UpdateId, and Supersedes list.
-
-**Decision (B-3)**. The discovery layer
-(`Get-PatchSetFromReleaseInfoDiscovery`) deduplicates the .NET CU
-pass against the LCU pass that runs first. Concretely: after the
-LCU records are appended, the function builds a
-case-insensitive `HashSet[string]` of LCU `KbId` values, then
-skips any `.NET CU` row whose `KbId` matches a value in that
-set, logging the skip via `Write-Verbose` for forensic visibility.
-The skipped row's information is **not lost**: it remains
-verbatim in `data/cache-dotnet-cu.json`, so a future SPEC
-revision can revisit the policy without re-fetching from
-upstream. LCU is the **authoritative source** for any KB it
-carries because (a) the LCU's Catalog row exposes the canonical
-two-`.msu` resolution (SSU + LCU payload) that the resolver
-relies on for SPEC B.23.5 B-1 combined-LCU detection, and (b)
-the .NET re-listing carries no information that the LCU does
-not already provide.
-
-T10 (`tests/release_info_resolver_test.py`) covers this with
-a Server 2016 / 2026-05 scenario asserting `record count = 2`
-and the exact `{LCU=KB5087537, DotNet.Runtime=KB5087065}` pair
-(KB5087537 must appear **once**, as LCU).
-
-**Consequences (B-1, B-2, B-3)**.
-- The `.NET CU multiplicity by OS` discrepancy table in §B.21.2
-  is left in place as a historical record. r07.0 sources from
-  release-notes, so the "production telemetry" column becomes
-  obsolete on the new path.
-- The two-URL Server 2025 LCU case is documented in §B.21.3
-  ("Combined LCU package detection") for cross-reference.
-
-### B.23.6 DU lookback: 36-month cache, latest publish wins
-
-**Context**. PoC-F established that Microsoft does not publish DU
-in a strict monthly cadence. Server 2025 DU.Setup was published
-2025-09 / 2025-10 / 2025-11 and then absent for *five
-consecutive months* (2025-12 through 2026-04). Server 2019 and
-Server 2016 do not publish DU monthly at all (only on
-feature-update windows). The r05.1 approach -- "search Catalog
-for the current month, error if zero hits" -- is incompatible
-with both observations.
-
-**Decision**. r07.0 maintains, for each OS, a **36-month rolling
-Catalog probe history** in `data/cache-du-Server<NNNN>.json`. At
-ISO-build time the Refresher consults the cache and selects, for
-each DU type (Setup / SafeOs), **the most recent publish** within
-the 36-month window. If the 36-month window contains zero
-entries, the Refresher logs a warning and proceeds without that
-DU type; if it contains at least one entry, the latest is used.
-
-The cache is updated as part of the Patch-Tuesday-triggered
-snapshot refresh (§B.23.7), not on every ISO build. ISO-build
-runs read the cache; they do not hit the Catalog for DU
-discovery.
-
-**Per-OS observations** (informative, derived from PoC-F data):
-
-| OS          | DU.Setup cadence (observed)           | DU.SafeOs cadence (observed)          |
-| ----------- | ------------------------------------- | ------------------------------------- |
-| Server 2016 | Not published                         | Not published                         |
-| Server 2019 | Feature-update windows only           | Feature-update windows only           |
-| Server 2022 | Approximately monthly                 | Approximately monthly                 |
-| Server 2025 | Suspended since 2025-12 (5+ months)   | Approximately monthly                 |
-
-These observations inform the "warning, not error" stance: the
-Refresher cannot tell whether absence is permanent or temporary,
-so it falls back to the latest known good and lets the human
-operator review.
-
-**Consequences**.
-- `cache-du-Server<NNNN>.json` is a new artefact; format is
-  decided at implementation time (one JSON per OS, with monthly
-  probe records inside).
-- No per-OS "DU is required" or "DU is N/A" flag exists; the
-  cache content alone drives behaviour.
-- §B.21.1's "Optional" vs "N/A" cell distinctions for DU rows
-  remain accurate as a description of *typical* publishing
-  cadence but are no longer Refresher-side decision criteria.
-
-### B.23.7 Update lifecycle: Patch-Tuesday-triggered, Git-tracked
-
-**Context**. With release-info, .NET release-notes, and DU all
-sourced from Microsoft Learn / Catalog, the Refresher needs a
-clear rule for *when* to fetch from the upstream and *how* to
-persist the result. r06.x had no equivalent of this question
-because the only persistent input was the human-edited
-`Config/`.
-
-**Decision**. r07.0 unifies the lifecycle of `config-`, `cache-`,
-and `raw-` files under a single Patch-Tuesday-triggered model.
-A dedicated Refresher action (`-Action RefreshSnapshots`,
-implemented as the A03 Admin phase) is invoked manually by the
-operator on or after each Patch Tuesday. The action:
-
-1. Fetches the latest `windows-server-release-info` Markdown
-   and writes `data/raw-release-info.md` + `.meta.json`.
-2. Parses the Markdown and writes `data/cache-release-info.json`.
-3. Fetches all new monthly `.NET Framework cumulative update`
-   release-notes pages, aggregating them into
-   `data/raw-dotnet-cu.json`, and updates
-   `data/cache-dotnet-cu.json` with the parsed (OS x version x
-   KB) rows.
-4. Probes the Catalog for the current month's DU.Setup /
-   DU.SafeOs per OS and appends to each
-   `data/cache-du-Server<NNNN>.json`, trimming entries older
-   than 36 months.
-5. Optionally regenerates `PatchBaseline` sections of each
-   `data/config-Server*.json` using the freshly populated
-   caches (equivalent to today's
-   `-Action RefreshAllBaselines`).
-
-The operator then `git diff`-reviews and commits as a single
-Patch-Tuesday changeset. Build-time runs of the Refresher
-(`-Action Build`) consume the committed cache; they never reach
-out to Microsoft Learn.
-
-**Consequences**.
-- Microsoft-side outages on Patch Tuesday day do not block ISO
-  builds: the committed cache remains the source of truth.
-- The Git log doubles as a "what changed in this Patch Tuesday"
-  audit trail.
-- The CI workflow that automates Patch-Tuesday refresh **is in
-  scope for r07.0**; the two-stage CI design is normative under
-  §B.23.14 (third-round decision F-1 + D-1).
-
-### B.23.8 PatchBaseline.Patches[].Type: subdivide DotNet
-
-**Context**. PoC-E surfaced two distinct kinds of .NET KB on the
-release-notes pages:
-
-- **Per-runtime KBs** (e.g. `KB5082427` for "Windows Server 2022 -
-  .NET Framework 3.5, 4.8"). These are the actual `.msu` files
-  applied to the WIM.
-- **OS-offering KBs** (e.g. `KB5084071` for "Windows Server 2022"
-  on the umbrella row). Microsoft explicitly documents these as
-  "not expected to be listed as an installed update on the
-  device" -- they exist only for WSUS / Windows Update
-  applicability calculations.
-
-r05.1's `Type=DotNet` value conflates the two. r07.0's release-
-notes-driven discovery sees both kinds and must record them
-distinctly for traceability.
-
-**Decision**. r07.0 renames `Type=DotNet` to `Type=DotNet.Runtime`
-and introduces a new value `Type=DotNet.OsLevel` for the OS-offering
-KB. `Type=DotNet.LangPack` is unchanged. The four valid
-`DotNet.*` values are:
-
-| Type                | Applied to WIM? | Source                                              |
-| ------------------- | :-------------: | --------------------------------------------------- |
-| `DotNet.Runtime`    | Yes             | Per-runtime KB from `.NET CU` release-notes table   |
-| `DotNet.OsLevel`    | No              | OS-offering KB from `.NET CU` release-notes table   |
-| `DotNet.LangPack`   | Yes             | Language-pack handling per Part F (unchanged)       |
-
-**Decision (migration)**. r07.0 is a **breaking change**, by intent
-and without an automatic migration shim. A
-`config-Server*.json` carrying the legacy `Type=DotNet` value will
-fail `Test-PatchBaselineSchema` with a clear message directing
-the operator to re-run `-Action RefreshAllBaselines` after
-upgrading. There is no in-place upgrade path; r05.1 baselines
-must be regenerated under r07.0.
-
-**Consequences**.
-- §B.14b's Type-value enumeration is updated.
-- All in-tree code paths that compare `Type -eq 'DotNet'` are
-  updated to `Type -eq 'DotNet.Runtime'` (or to the union when
-  appropriate). The Refresher's WIM-application loop skips
-  `Type=DotNet.OsLevel` rows.
-- Existing repo-managed `Config/Server*.json` files have empty
-  `PatchBaseline.Patches[]` arrays at the time of writing, so
-  there is no in-tree data to migrate; the breaking change
-  affects customer-side baselines only.
-
-### B.23.9 release-info vs Catalog: release-info is the truth source
-
-**Context**. With §B.23.1's complete-migration decision,
-release-info becomes the authoritative discovery source. The
-remaining design question is what to do when the Catalog
-contradicts release-info -- e.g. a KB present in release-info
-that the Catalog cannot find, or a KB visible in the Catalog
-that release-info has not yet recorded.
-
-**Decision**. **release-info is absolute**. Refresher behaviour
-in conflict scenarios:
-
-- **release-info has KB; Catalog cannot resolve it**: hard error,
-  ISO build stops, human investigates. Possible causes include
-  Catalog publication lag, KB renumbering, or a Microsoft-side
-  release-info typo.
-- **Catalog has a KB; release-info does not mention it**: the KB
-  is ignored. The Refresher never discovers KBs through Catalog
-  search alone.
-- **release-info update lag** (typical on Patch Tuesday day): the
-  human operator runs the snapshot refresh later, when release-
-  info has been updated. No automatic fallback to Catalog
-  discovery.
-
-This stance is consistent with §B.23.1 (complete migration) and
-§B.23.7 (committed cache is the truth source for builds).
-
-**Consequences**.
-- No "Catalog fallback" code path in r07.0.
-- `Get-CatalogQueryTemplate`'s discovery-side templates are not
-  preserved as a backup; they are deleted.
-- The `cache-release-info.json` artefact is the single point of
-  truth for which KBs exist for which OS-month combinations.
-
-### B.23.10 r07.0 release granularity
-
-**Context**. The scope of changes implied by §B.23.1 through
-§B.23.9 -- directory rename, schema breaking change, complete
-refresher path rewrite, three new cache types, two new artefact
-classes -- is large. The choice of release granularity affects
-both PR diff size and SemVer signalling.
-
-**Decision**. The full Phase 3 implementation ships as a single
-release, **r07.0**. Specifically:
-
-- r05.1 → r06.0 (SPEC + PoC, no `.ps1` change) →
-  **r07.0** (current; Phase 3 implementation, breaking change).
-- The minor version jump from r05 → r07 (skipping r06 as a code
-  release) reflects the SemVer convention that a breaking change
-  warrants a major bump. r06.0 stays exclusively a documentation
-  release.
-- The CI-side automation for Patch-Tuesday-driven snapshot
-  refresh (§B.23.7 step 1-4 automated) is deferred to a later
-  r07.x if it is implemented at all; r07.0 ships manual-trigger
-  only.
-
-**Consequences**.
-- The r07.0 PR is large by design. Reviewers should treat it as
-  one atomic change since the directory rename, schema bump, and
-  refresher rewrite are mutually dependent.
-- The next minor release (r07.1+) can carry the CI snapshot
-  automation independently.
-
-### B.23.11 Deferred to Phase 4+: `-PreferBaselineMonthLcu`
-
-**Context**. PoC-D demonstrated that the Hotpatch baseline-month
-calendar embedded in release-info is machine-readable and
-identifies, for Server 2025 and Server 2022, which months are
-baseline months (Jan/Apr/Jul/Oct for Server 2025). A
-`-PreferBaselineMonthLcu` switch would enable ISO images that
-are "Hotpatch ready" out of the box, so a customer who later
-enrolls the host in Azure Arc Hotpatch enjoys zero-reboot patch
-operations from day one without a baseline-application reboot.
-
-**Decision**. r07.0 does **not** implement
-`-PreferBaselineMonthLcu`. The switch is deferred to a Phase 4+
-release, contingent on demonstrated customer demand for Hotpatch.
-The release-info parser does extract the baseline-month
-calendar (since it is part of the same Markdown), but the
-extracted data is not consumed by any code path in r07.0.
-
-**Consequences**.
-- §B.21.4 ("Hotpatch is out of scope for the offline image") is
-  unchanged. The Hotpatch enrollment / baseline distinction
-  remains an *online runtime* concern, not an ISO Factory
-  concern, until Phase 4+.
-- The Hotpatch-calendar data in `cache-release-info.json` is
-  recorded but unused; a future Phase 4 implementation can
-  consume it without re-parsing.
-
-### B.23.12 Server 2022 baseline-month detection: authoritative source wins
-
-**Context**. PoC-D found that for Server 2022, the Hotpatch
-calendar in release-info marks five distinct calendar months as
-baseline months in CY2024 -- `[1, 4, 7, 8, 10]` -- rather than
-the theoretical four-month-cycle pattern of `[1, 4, 7, 10]`
-followed by Server 2025. The August 2024 entry is an anomaly with
-no public Microsoft explanation. The Phase 3 SPEC must decide
-whether the parser trusts the authoritative source or applies a
-theoretical rule.
-
-**Decision**. The release-info parser is **strictly data-driven**:
-the Hotpatch calendar table is parsed verbatim, and each (year,
-month, OS) triple it lists is recorded in
-`cache-release-info.json` exactly as published. The CY2024
-Server 2022 August row is recorded as a baseline month.
-
-No heuristic, no theoretical `[1, 4, 7, 10]` fallback, no
-"discrepancy detection" warning. This is the same philosophy as
-§B.23.9 (release-info is the absolute truth source) applied to
-the Hotpatch calendar instead of the monthly LCU list.
-
-**Consequences**.
-- The PoC-D logic that handles this row (originally prototyped
-  in `poc_release_info_03_analyse.py`, retired in r07.0; see
-  `docs/history/release-info-report.md`) was ported into
-  PowerShell during r07.0 Step 2a and now lives as part of the
-  production Refresher path.
-- Phase 4+ implementations of `-PreferBaselineMonthLcu`
-  automatically benefit: when CY2024 August baselines are
-  queried, the cache returns `is_baseline=true` for that month,
-  and the LCU selected is the August 2024 Server 2022 baseline
-  LCU as Microsoft intended.
-- If Microsoft introduces another anomaly in any future month
-  (e.g. an unscheduled baseline in CY2027 March), no code or
-  SPEC change is required; the parser absorbs it automatically.
-
-### B.23.13 Past-month inspection: read-only `-PatchMonth`
-
-**Context**. With release-info covering 117 months of history for
-Server 2016 (and proportionally less for the other OS lines),
-the Refresher gains the *capability* to reconstruct a past
-month's baseline from the cache. The remaining question is
-whether r07.0 should expose this capability, and if so, with
-what semantics.
-
-The use cases that motivate exposure include:
-
-- **Audit**: "Reconstruct the patch set the ISO Factory would
-  have produced for the 2026-03 Patch Tuesday baseline."
-- **Comparative analysis**: "Diff the baselines for
-  2026-03 / 2026-04 / 2026-05 and characterise the month-on-month
-  patch churn."
-- **Regression testing**: "Verify that r07.x produces the same
-  past-month baseline as the previous version for a fixed
-  release-info snapshot."
-
-Use cases that would seem to motivate exposure but are explicitly
-out of scope:
-
-- **Rollback** ("recover the 2026-04 baseline because the
-  2026-05 baseline had a bad KB"): handled by `git revert` on
-  the affected `config-Server*.json` commit, not by Refresher
-  side functionality.
-- **Past-month ISO build** ("build a 2026-03 ISO today"): a
-  build-side concern (`-Action Build`), not a Refresher concern.
-
-**Decision**. r07.0 introduces a new Action,
-`-Action InspectBaseline`, with a mandatory `-PatchMonth YYYY-MM`
-argument and a mandatory `-OsKey ServerNNNN` argument. The
-action:
-
-1. Reads `data/cache-release-info.json`,
-   `data/cache-dotnet-cu.json`, and the matching
-   `data/cache-du-Server<NNNN>.json`.
-2. Reconstructs the `PatchBaseline.Patches[]` array exactly as
-   if `-Action RefreshAllBaselines` had been invoked in the
-   target month with the current caches.
-3. Writes the reconstructed JSON object **to stdout only**. No
-   `config-Server*.json` is touched. No `cache-*.json` is
-   touched. No `raw-*` files are touched. No on-disk side
-   effects whatsoever.
-
-The action is purely a derivation: identical inputs produce an
-identical stdout payload, and re-running it any number of times
-is harmless. Operators redirect to a file when audit retention
-is needed (`> audit-2026-03.json`).
-
-**Consequences**.
-- §B.6 (Action → Phase Mapping) gets a new row for
-  `InspectBaseline` mapping to a single derivation phase with
-  no I/O side effects.
-- `-Action InspectBaseline` is read-only by construction: the
-  Refresher does not need to acquire any of the file-locking or
-  workspace-preflight protections that the I/O-mutating actions
-  use.
-- Months earlier than the 36-month DU cache window (B.23.6)
-  will return baselines with no DU entries. This is a known
-  limitation, not a bug; the action documents it in its help
-  text.
-- Months earlier than the .NET CU 36-month cache window
-  (B.23.5) will return baselines with no .NET CU entries, with
-  the same caveat.
-- A future enhancement (Phase 4+) could expand the cache window
-  to cover the full release-info history (117 months for Server
-  2016, etc.), at which point `-Action InspectBaseline` would
-  work for the entire OS-lifetime range. Not in r07.0 scope.
-
-### B.23.14 CI structure: stage5 + stage4 two-stage automation
-
-**Context**. r05.x ships a single monthly-refresh CI workflow
-(`stage4__monthly-refresh.yml`) that runs `-Action
-RefreshAllBaselines` on the 15th of every month and opens a PR
-if `Config/Server*.json` diffs from main. With Phase 3's
-introduction of cache files (`data/cache-*`) as an intermediate
-artefact between Microsoft Learn and the baseline, the
-single-stage workflow no longer matches the layered architecture:
-"fetch upstream" and "regenerate baseline" become two distinct
-responsibilities deserving separate review surfaces.
-
-**Decision**. r07.0 ships a **two-stage Patch-Tuesday automation**:
-
-```
-stage5__data-snapshot.yml  (new)
-  Trigger : cron '0 2 15 * *' + workflow_dispatch
-  Purpose : Fetch raw-/cache- data from Microsoft Learn/Catalog
-  Output  : PR containing data/raw-*, data/cache-* updates
-  Title   : "chore(data): Patch Tuesday YYYY-MM snapshot refresh"
-
-stage4__monthly-refresh.yml  (existing, narrowed)
-  Trigger : workflow_run after stage5 success
-            + push on data/cache-*.json
-            + workflow_dispatch
-  Purpose : Regenerate baselines from current caches
-  Output  : PR containing data/config-Server*.json updates
-  Title   : "chore(baseline): regenerate Server*.json from
-             YYYY-MM snapshot"
-```
-
-The flow at runtime:
-
-1. **2026-05-15 02:00 UTC**: stage5 cron fires. The job runs
-   `-Action RefreshSnapshots` (A03 Admin phase), produces a
-   snapshot PR, and exits.
-2. **Operator**: reviews the snapshot PR, merges to main.
-3. **Within seconds of merge**: stage4 fires via `workflow_run`
-   completion of stage5. The job runs `-Action
-   RefreshAllBaselines`, produces a baseline PR, and exits.
-4. **Operator**: reviews the baseline PR, merges to main.
-5. **ISO build**: subsequent `-Action Build` reads the current
-   main caches and produces ISOs without any upstream traffic.
-
-Both PRs are reviewable as Patch-Tuesday-aligned changesets.
-Either can be held (not merged) without breaking the other; if
-the snapshot PR is held because of a suspected Microsoft-side
-data drift, stage4 is never triggered. If the snapshot is fine
-but the operator wants to verify the baseline manually, the
-operator can dispatch stage4 with `dryRun=true`.
-
-**A03 RefreshSnapshots implementation (completed in r07.0 Step 6)**.
-The `-Action RefreshSnapshots` entry point above is implemented as
-the A03 Admin phase (`Invoke-AdminPhaseA03_RefreshSnapshots`),
-which orchestrates the previously-dead helper functions
-`Invoke-ReleaseInfoFetch` + `Update-ReleaseInfoCache`,
-`Invoke-DotNetCuFetch` + `Update-DotNetCuCache`, and a per-OS
-Dynamic Update probe loop that issues Catalog Search.aspx queries
-and persists each result via `Add-DynamicUpdateCacheEntry`. Three
-fault-tolerant sub-steps run in sequence; failure of one
-sub-step is logged and recorded but does not abort the remaining
-sub-steps, so a transient Microsoft-side outage of (say) the .NET
-release-notes index does not block release-info + DU refresh. The
-phase emits an A01-style summary table plus
-`A03_RefreshSnapshots_report.csv` under `<WorkRoot>/logs/` for
-audit and CI artefact upload. The Dynamic Update probe targets
-are restricted to (Server2022, Server2025) x (Setup, SafeOs) per
-SPEC §B.23.6: Server 2019 has no DU rows in release-info, and
-Server 2016 predates the modern "Dynamic Update" naming
-convention.
-
-The companion stage5 GitHub Actions workflow
-(`stage5__data-snapshot.yml`) referenced in the runtime flow
-above is **not yet committed**. Operators currently run A03
-manually (or via `workflow_dispatch` on a future stage5) and
-then merge the resulting `data/raw-*` + `data/cache-*` diff PR
-before stage4 fires. Authoring stage5 is a small follow-up
-(modelled on `stage4__monthly-refresh.yml` with `RefreshAllBaselines`
-swapped for `RefreshSnapshots`) and does not require any further
-PowerShell change.
-
-**PoC retirement (completed in r07.0)**. As part of the same
-release, the r06 Phase 2 PoC scripts and assets were removed from
-the working repository:
-
-- `tests/poc_release_info_*.py`, `tests/poc_dotnet_cu_*.py` and
-  `tests/poc_dynamic_update_01_probe.py` were deleted outright.
-  Their parser / resolver logic had already been ported into
-  `Update-WindowsServerIso.ps1` during r07.0 Step 2a / Step 2b
-  (see `ConvertFrom-ReleaseInfoMarkdown`,
-  `ConvertFrom-DotNetCuMarkdown`,
-  `Resolve-PatchSetFromReleaseInfo`); the live fetch / probe
-  steps are now covered by the production functions
-  `Invoke-ReleaseInfoFetch`, `Invoke-DotNetCuFetch` and the
-  Dynamic Update cache add path (`Add-DynamicUpdateCacheEntry`).
-- Regression coverage moved into the T6-T10 numbered regression
-  suite: T6 (`release_info_parser_test.py`), T7
-  (`dotnet_cu_parser_test.py`), T8 (`dynamic_update_cache_test.py`),
-  T9 (`catalog_title_tokens_test.py`), T10
-  (`release_info_resolver_test.py`). Each owns offline fixtures
-  under `tests/fixtures/<topic>/` and (where applicable) live
-  snapshots under `tests/snapshots/<topic>/`. The fixtures /
-  snapshots originally written under the `poc_<topic>` prefix
-  were either renamed to drop the prefix (when T6 / live data
-  still needed them) or deleted (when subsequent fresh captures
-  superseded them, as for T7 / T8).
-- `stage1__linux.yml` already runs every `tests/*_test.py` on
-  PR; the promoted T6-T10 tests are picked up automatically by
-  that glob.
-
-**Consequences**.
-- The existing `Config/Server*.json` references in stage4 are
-  updated to `data/config-Server*.json` (per §B.23.3).
-- The existing stage4 monthly-cron trigger (`cron '0 2 15 * *'`)
-  is removed; only `workflow_run` + `workflow_dispatch` remain.
-- §B.22.2 (Filename prefix rules) treats `poc_*` as a reserved
-  pattern for future PoC investigations; no `poc_` prefix files
-  exist in r07.0+ but the convention remains documented so the
-  next PoC need not re-invent it.
-- The PoC report Markdown files were preserved as historical
-  record of how the Phase 2 investigation arrived at these
-  designs. They now live under `docs/history/` (without the
-  `poc-` filename prefix) rather than `docs/poc/`.
-- A future `-PreferBaselineMonthLcu` (Phase 4+) reuses the same
-  CI infrastructure: stage5 already produces the baseline-month
-  calendar in `cache-release-info.json`; stage4 only needs an
-  additional `-Action` to select baseline-month LCUs.
-
-### B.23.15 Windows ADK auto-install: opt-in P01 prerequisite
-
-`Update-WindowsServerIso.ps1` requires `oscdimg.exe` (a component
-of Windows ADK Deployment Tools) for the final P09 AssembleIso phase.
-On a freshly-provisioned Windows Server host the binary is absent
-and P01 Step 3 fails fast with a clear "install the Windows ADK"
-error, before the 5-6 GB Evaluation ISO download in P04.
-
-**r07.0 Step 8** introduces an opt-in `-AutoInstallAdk` switch that
-mirrors the SDK/WDK fallback pattern in
-`Deploy-AMDChipsetDriverOnWindowsServer.ps1` from the sibling
-`usui-tk/Deploy-Drivers-For-WindowsServer` repository
-(`Install-WindowsSdkFallback` / `Install-WindowsWdkFallback` at
-~L5408-5449 of that script). When set, P01 Step 3 downloads
-Microsoft's `adksetup.exe` and runs it silently with feature
-selection so only Deployment Tools is installed:
-
-```
-adksetup.exe /features OptionId.DeploymentTools /quiet /norestart /ceip off /log <log>
-```
-
-**Design decisions**.
-
-- D-1: *Pin to the December-2024 ADK*. Microsoft Learn's ADK page
-  publishes two current builds: `10.1.26100.2454` (December 2024,
-  supports Server 2025 / 2022 / earlier OS releases) and
-  `10.1.28000.1` (November 2025, Windows 11 26H1 Arm64 only). The
-  former is the correct version for any x64 Server build host; the
-  latter would break Server work. Hence the pinned constants
-  `$Script:AdkInstallerUrl` and `$Script:AdkInstallerVersion`
-  encode the December-2024 fwlink and version string respectively.
-  Forward-compatibility is documented by Microsoft: oscdimg from
-  the pinned ADK assembles ISOs targeting Server 2016 / 2019 /
-  2022 / 2025 without per-target-OS ADK variants.
-
-- D-2: *Default OFF*. The switch is opt-in. The default behaviour
-  remains the previous "throw an actionable error" pattern, which
-  is correct for locked-down environments where automatic installs
-  are disallowed by policy. The thrown error message now includes
-  the canonical download URL and silent-install incantation, so
-  operators without `-AutoInstallAdk` still have everything they
-  need on screen.
-
-- D-3: *Install only `OptionId.DeploymentTools`*. The full Windows
-  ADK is a 3+ GB install. Restricting to the Deployment Tools
-  feature drops the install footprint to ~50-80 MB. WinPE add-on
-  (`linkid=2289981`) is NOT needed by this script and is therefore
-  not auto-installed.
-
-- D-4: *Verify by tool presence, not exit code*. `adksetup.exe`,
-  like the WDK and SDK installers, returns non-zero exit codes
-  when the kit is already present (commonly 2008 = "already
-  installed"). `Install-WindowsAdkFallback` therefore calls
-  `Resolve-OscdimgExe` after the installer returns and treats
-  "tool present, non-zero exit" as a warn-only "already
-  installed" condition. Only "tool still absent after install"
-  is a hard failure. This matches the
-  `Install-WindowsSdkFallback`/`Install-WindowsWdkFallback`
-  defensive idiom in the reference repo.
-
-- D-5: *Cache the installer at `<WorkRoot>/cache/adk/`*. Re-runs
-  on the same WorkRoot reuse `adksetup.exe` to avoid re-downloading
-  during iterative testing. The installer log lands at
-  `<WorkRoot>/logs/adksetup.log` for post-mortem diagnostics, in
-  line with the existing P01 log placement convention.
-
-**Reference**.
-
-- Microsoft Learn ADK install page:
-  `https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install`
-- Reference implementation (SDK/WDK):
-  `https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/Deploy-AMDChipsetDriverOnWindowsServer.ps1`
-  Functions `Find-KitTool`, `Install-WindowsSdkFallback`,
-  `Install-WindowsWdkFallback`, and the per-build matrix in
-  `Get-OsContext`.
-- The hash-verification block inside `Resolve-OscdimgExe` (lifted
-  from Microsoft's `Make2023BootableMedia.ps1` v1.4) continues to
-  apply to the auto-installed binary. A hash mismatch remains
-  advisory because ADK servicing patches may legitimately change
-  the SHA-256 of the shipped `oscdimg.exe` over time.
-
-### B.23.16 Eval ISO URL: record both fwlink (metalink) and direct CDN URL
-
-Microsoft's Evaluation Center publishes each ISO via two URL forms:
-
-1. A **fwlink metalink** under `https://go.microsoft.com/fwlink/p/?LinkID=<id>&clcid=<lcid>`.
-   The linkid (with the optional clcid query parameter) is the
-   stable, Microsoft-maintained identifier; redirection through
-   this URL always lands on the current canonical ISO for the
-   selected OS and locale.
-2. A **direct CDN URL** under `https://software-static.download.prss.microsoft.com/...`
-   or `https://download.microsoft.com/download/...`. This is what
-   the fwlink redirects to. It is faster (one fewer round trip)
-   but its host and path rotate periodically as Microsoft
-   refreshes the ISO build (for example, when an OS's monthly
-   service refresh is republished as a new evaluation ISO).
-   Historical direct-URL hosts seen across this script's lifetime
-   include `software-download.microsoft.com/download/sg/`,
-   `software-download.microsoft.com/download/pr/`,
-   `software-static.download.prss.microsoft.com/sg/download/`,
-   `software-static.download.prss.microsoft.com/dbazure/`, and
-   `software-static.download.prss.microsoft.com/pr/download/`.
-
-To capture both forms without losing either, every
-`LanguageSpecific.<lang>.Iso` block in `data/config-Server*.json`
-carries two URL fields:
-
-```
-"Iso": {
-    "FileName":   "<canonical basename of the ISO>",
-    "Url":        "<direct CDN URL>",
-    "FwlinkUrl":  "<fwlink metalink>",
-    "Sha256":     "",
-    ...
-}
-```
-
-**Design decisions**.
-
-- D-1: *Direct URL is the runtime source*. The script's
-  `Resolve-IsoSourceUrl` reads `Iso.Url` and uses it verbatim for
-  `Invoke-WebRequestWithRetry -Uri ... -OutFile ...`. This is the
-  fastest path: one DNS lookup + one HTTPS GET, no redirect
-  chase. The trade-off is that when Microsoft rotates the direct
-  URL we get an HTTP 4xx (typically 400 Bad Request as observed
-  in the field for `software-download.microsoft.com` retirements)
-  and the operator must refresh the URL in the config.
-
-- D-2: *Fwlink is recorded but not consumed by default*. The new
-  `Iso.FwlinkUrl` field serves three purposes:
-  (a) documentation for human reviewers of the config,
-  (b) a recoverable starting point when the direct URL rotates -
-      the operator can paste the fwlink into a browser to
-      observe the new direct URL via the 302 redirect, then
-      patch the config,
-  (c) a future opt-in code path: a `-PreferFwlinkUrl` switch (not
-      implemented in this revision) could let
-      `Resolve-IsoSourceUrl` try the fwlink first and fall back
-      to `Url` on failure, trading one extra HTTPS round trip
-      for resilience against direct-URL rotation. The switch is
-      reserved for a future step but the data shape already
-      supports it.
-
-- D-3: *Locale-mismatched clcid is benign for fwlink*. For
-  Server 2025 the fwlink uses *separate* linkids per language
-  (linkid=2345730 for en-us, linkid=2345828 for ja-jp); the clcid
-  parameter is therefore ornamental for that OS. For Server
-  2016 / 2019 / 2022 a *single* linkid is shared across both
-  languages (e.g. 2195174 for Server 2016) and the `clcid` query
-  string selects the language: `clcid=0x409` for en-us,
-  `clcid=0x411` for ja-jp. Recorded URLs use the
-  locale-consistent clcid value for each language so reviewers
-  are not confused by mismatched query strings, even when the
-  underlying server treats the parameter as redundant.
-
-- D-4: *FileName tracks the direct URL's basename*. When
-  Microsoft refreshes the ISO build the filename component of
-  the direct URL changes (e.g. Server 2019 has been republished
-  as `17763.737.190906-2324...` → `17763.3650.221105-1748...`,
-  and Server 2025 as `26100.1742.240906-0331.ge_release_...` →
-  `26100.32230.260111-0550.lt_release_...`). Keeping
-  `Iso.FileName` synchronised with the live URL avoids stale
-  metadata in `data/raw-*.meta.json` and in operator-facing log
-  output during P02 ResolveInputs.
-
-### B.23.17 P02/P03 patch seeding: derive LocalPath from FileName
-
-The NeutralPatches-baseline-to-ResolvedPatches conversion path
-introduced in Step 9 (see B.23.5 / B.23.8 for the source of
-truth migration) seeded `Source`, `KbId`, `PatchType`, and
-`ApplyOrder` correctly but left `LocalPath = ''`. With
-`-UseBaselineOnly` (the only mode that actually exercises this
-seeding path verbatim - the `-PatchUrls`, `-PatchDirectory`,
-`-ManifestPath` paths each compute LocalPath themselves), the
-empty value flowed straight into P04 Step 2 'Patches', where
-the very first line of the per-patch loop calls
-
-```powershell
-$leaf = Split-Path -LiteralPath $p.LocalPath -Leaf
-```
-
-and PowerShell rejects the empty string with
-`Cannot bind argument to parameter 'LiteralPath' because it is
-an empty string.` (`'引数が空の文字列であるため、パラメーター
-'LiteralPath' にバインドできません。'` in the ja-JP runtime).
-P04 therefore fails before any patch download starts, after
-the 5-6 GB Eval ISO has already been fetched and SHA-256-
-recorded - which makes the failure both expensive (a 12-13
-minute roundtrip wasted on every re-run) and easy to miss in
-review (the failed call site is deep inside the patch loop,
-not in the seeding block where the bug actually lives).
-
-**Design decisions**.
-
-- D-1: *Derive LocalPath from `$p.FileName` with URL-basename
-  fallback*. NeutralPatches entries in the v3.x baselines all
-  carry a `FileName` field directly (e.g.
-  `windows10.0-kb5087537-x64_1a68955...msu` for LCU,
-  `windows10.0-kb5087065-x64-ndp48_631ce425...msu` for the
-  .NET CU). The fixed seeding reads `$p.FileName` first, falls
-  back to `[System.IO.Path]::GetFileName(([Uri]
-  $p.DownloadUrl).AbsolutePath)` when FileName is absent
-  (defensive for legacy `Patches[]` entries that may predate
-  the FileName addition), and finally falls back to
-  `'<KbId>.msu'` if both are missing.
-  This matches the LocalPath construction in the
-  `-PatchUrls` (uses `$fn`) and `-ManifestPath` (uses
-  `$e.FileName`) seeding paths in the same function.
-
-- D-2: *Empty `Sha256` should not populate `ExpectedHashes`*.
-  The previous code wrote `@{ 'sha-256' = $p.Sha256 }`
-  unconditionally, so even when the baseline has no hash on
-  file (`Sha256 = ''`), the resulting hashtable contained one
-  key with an empty value. P04's cache-validation branch
-  (around L8789) checks `.ExpectedHashes.Count -gt 0` to
-  decide whether to call Test-PatchIntegrity, so the empty-
-  string hash would force the integrity check on cached
-  files and compare a real SHA-256 against `''` - a silent
-  cache-poisoning failure on the second run after a baseline
-  refresh. The fix builds `$expectedHashes = @{}` first and
-  only inserts the key when `$p.Sha256` is non-empty, so the
-  cache branch correctly takes the 'no hash to verify;
-  skipping download' path.
-
-- D-3: *Apply the fix to both P02 seeding and P03 re-derive*.
-  The P03 RefreshPatchBaseline action re-derives
-  `$Script:ResolvedPatches` from the freshly-scraped baseline
-  using the same shape as P02. The L8710 site there had the
-  same `LocalPath = ''` and same unconditional `ExpectedHashes`
-  bugs. With the user's current command (`-UseBaselineOnly`
-  on) P03 is skipped and the bug was latent, but it would
-  fire the moment the user removes `-UseBaselineOnly` to
-  pick up newer patches from the Microsoft Update Catalog.
-  Both sites get the same surrounding helper logic
-  (FileName resolution + ExpectedHashes guard) to keep them
-  in lockstep.
-
-- D-4: *Defer the deeper question of where LocalPath belongs*
-  to a future step. Today three different seeding paths each
-  compute LocalPath independently; a single
-  `Resolve-PatchLocalPath` helper would deduplicate the
-  Join-Path call across all of them. That refactoring is
-  worth doing once the seeding shape is fully stable, but it
-  is out of scope here - the immediate bug fix needs to be
-  small and reviewable, and the helper extraction is best
-  done after the next baseline schema cycle so we know which
-  fields are truly invariant across the seeding entry points.
-
-### B.23.18 Path-leaf extraction: `[System.IO.Path]::GetFileName` over `Split-Path -LiteralPath -Leaf`
-
-The `Split-Path` cmdlet rejects the combination
-`-LiteralPath ... -Leaf` (and `-LiteralPath ... -LeafBase`)
-at runtime because, on PowerShell 5.1 and 7 alike,
-`-LiteralPath` and `-Leaf` belong to mutually exclusive
-parameter sets - `-LiteralPath` only combines with `-Resolve`
-and `-Credential`, while `-Leaf` only combines with the
-positional `-Path` form. The runtime surfaces this as
-`Parameter set cannot be resolved using the specified named
-parameters.` (`'指定された名前のパラメーターを使用してパラメーター
-セットを解決できません。'` in the ja-JP runtime). The
-collision is silent until the offending line actually
-executes; PSScriptAnalyzer does not flag the combination
-because the rules engine treats `-LiteralPath` and `-Leaf`
-as independent named parameters and never re-checks them
-against the cmdlet's parameter-set table.
-
-The script had eight sites using the invalid pair, all
-written before the parameter-set conflict was noticed.
-One earlier site, the `GetDirectoryName` migration around
-L1519 documented in B.13 (commit referenced in the inline
-comment), recognised the same class of error for the
-`-LiteralPath ... -Parent` pair and switched to
-`[System.IO.Path]::GetDirectoryName`. The other seven
-sites kept the broken combination because none of them
-ran in the regression test surface: P04 Step 2 'Patches'
-(L8827) was unreachable until Step 12 fixed the upstream
-empty-LocalPath bug, the DISM apply path (L7008/L7040)
-was only exercised live, the ISO-name helper (L2478) was
-called only on the actually-built path, and the side-car
-LeafBase computation (L8392) was on a code path that has
-not been triggered in the regression suite.
-
-**Design decisions**.
-
-- D-1: *Replace `-LiteralPath -Leaf` with
-  `[System.IO.Path]::GetFileName(...)`*. The .NET API
-  performs the same string-only operation as the cmdlet's
-  `-Leaf` branch (no wildcard expansion, no filesystem
-  access, no parameter-set resolution), is identical on
-  PowerShell 5.1 and 7, and matches the precedent already
-  set by the L1519 `GetDirectoryName` migration. The
-  alternative of switching to `Split-Path -Path` would
-  also work because `-Leaf` mode does not interpret
-  wildcards in the input, but it would introduce a
-  stylistic inconsistency with the surrounding
-  `GetDirectoryName` usage and silently accept paths
-  containing characters that PowerShell elsewhere treats
-  as wildcards (`[`, `]`, `*`, `?`).
-- D-2: *Replace `-LiteralPath -LeafBase` with
-  `[System.IO.Path]::GetFileNameWithoutExtension(...)`*.
-  Same reasoning as D-1; `LeafBase` corresponds exactly
-  to the .NET API name.
-- D-3: *Drop `-ErrorAction SilentlyContinue` from the
-  L7008 DryRun call*. The original site had
-  `Split-Path -LiteralPath $pkgPath -Leaf -ErrorAction
-  SilentlyContinue`, which silently swallowed the
-  parameter-set error and produced an empty `({2})`
-  placeholder in the log. The .NET API does not throw on
-  empty input (it returns an empty string), so the
-  silencing parameter is no longer needed and removing it
-  ensures any future regression on the input value
-  becomes visible.
-
-### B.23.19 P05 ExpandIso drive-root copy: switch to robocopy; Dynamic Update overlay wildcard must use `-Path`
-
-Two `Copy-Item` sites required correction in this revision.
-
-**Site 1: P05 ExpandIso drive-root copy (`Expand-SourceIso`).**
-The mounted ISO appears as a drive (e.g. `E:\`) and the
-script copies its full content tree to `$Script:ExtractedDir`
-for downstream WIM inspection. The previous implementation
-called
-
-```powershell
-Copy-Item -LiteralPath $src -Destination $DestRoot -Recurse -Force
-```
-
-with `$src` = `'E:\'`. PowerShell's `Copy-Item` rejected this
-at runtime with `'the second path fragment must not be a
-drive name or UNC name. Parameter name: path2'` (`'2 番目の
-パス フラグメントを ドライブ名または UNC 名にすることはできません。
-パラメーター名:path2'` in the ja-JP runtime). The failure
-comes from `Copy-Item`'s internal use of
-`System.IO.Path.Combine`, which refuses to accept a rooted
-path as the second argument - it cannot decide whether to
-copy "the drive itself" into `$DestRoot` or "the drive's
-contents" into `$DestRoot`, and rejects the combination
-rather than guess. This behaviour is identical on PowerShell
-5.1 and 7.
-
-**Site 2: P09 AssembleIso Dynamic Update overlay
-(`Invoke-BuildPhase09_AssembleIso`).** When applying a
-Dynamic Update setup package extracted by `expand.exe`, the
-previous implementation called
-
-```powershell
-Copy-Item -LiteralPath (Join-Path $tmpExtract '*') `
-    -Destination (Join-Path $Script:ExtractedDir 'sources') -Recurse -Force
-```
-
-`-LiteralPath` disables wildcard expansion by definition.
-With `'*'` joined onto the source path, the cmdlet would
-search for a file literally named `*` in `$tmpExtract` and
-fail with `'Cannot find path'` the first time a Dynamic
-Update overlay was applied. This code path had not yet been
-exercised in regression so the bug was latent.
-
-**Design decisions**.
-
-- D-1: *Switch P05 to `robocopy.exe`*. The earlier in-source
-  comment ('Robocopy is faster on large trees, but Copy-Item
-  works without external tools') framed robocopy as an
-  unwanted dependency. That framing is wrong for this
-  context: robocopy ships with Windows since Vista,
-  every Windows Server target this script supports
-  (Server 2016 through Server 2025) has it at
-  `%SystemRoot%\System32\robocopy.exe`, and ISO content
-  trees (~6 GB across thousands of small files) are exactly
-  the workload it is designed for. The robocopy invocation
-  uses `/COPY:DAT` (data, attributes, timestamps - NTFS
-  ACLs are not meaningful for an ISO copy where the
-  destination grants `Authenticated Users : Read` by
-  default), `/E` for subdirectories including empty ones,
-  `/R:1 /W:1` for a single quick retry on transient failure,
-  and `/NP /NDL /NFL /NJH /NJS` to keep the console output
-  short. Exit codes 0-7 are treated as success per Microsoft's
-  documented convention; 8+ raises an exception with the
-  `/LOG:` path for triage.
-- D-2: *Fix P09 overlay with `-Path` (not `-LiteralPath`)*.
-  The overlay always uses a wildcard glob to copy the
-  expanded Dynamic Update tree, so `-Path` is the correct
-  parameter. The intent of the original code was likely
-  defensive ('I want a literal path' is a frequent
-  PowerShell newcomer instinct), but `-LiteralPath` and
-  `'*'` are contradictory: `-LiteralPath` defeats wildcards
-  by definition. The other `Copy-Item -LiteralPath ...`
-  sites in this script (L6220, L6225, L8857, L9642, L9671,
-  L9740 after the Step 14 edits) all copy single file paths
-  with no wildcards and are correct as-is.
-- D-3: *Defer broader `Copy-Item` audit*. A future refactor
-  could extract a `Copy-DirectoryContents` helper that
-  always uses robocopy on Windows and Get-ChildItem +
-  Copy-Item piping on PowerShell 7 cross-platform. The
-  immediate priority here is unblocking P05, which the
-  surgical robocopy swap accomplishes without changing
-  any other Copy-Item call sites.
-
-### B.23.20 P10/P12 + PCA2023 path globals: fix `$Script:ExtractedMediaPath` / `$Script:WorkRootFull` typos
-
-Two script-scope globals were referenced in the PCA2023 phases
-(P10 ConvertPca2023BootManager and P12 VerifyPca2023Readiness)
-but never assigned anywhere in the script:
-
-- `$Script:ExtractedMediaPath` - read at the P10 guard (L9822)
-  and the P12 entry (L10099). The script-scope global that
-  actually holds the extracted-ISO root directory is
-  `$Script:ExtractedDir`, initialised at L496 as
-  `Join-Path $Script:SourceDir 'extracted'`. The `MediaPath`
-  spelling came from the PCA2023 helper-API parameter name
-  `$ExtractedMediaPath` (without `Script:`), which is the
-  function-local parameter used inside
-  `Get-IsoBootCertReadiness`, `Build-Pca2023Snapshot`,
-  `Get-OrEnsurePca2023Snapshot`, and
-  `Convert-WimBootToPca2023Signed`. The helper API correctly
-  passes that parameter between functions, but the two outer
-  phase functions were trying to read it from the wrong scope.
-
-- `$Script:WorkRootFull` - read at six sites under P10 (L9836,
-  L9882, L9917) and P12 (L10121, L10128, L10213). The
-  script-scope global is `$Script:WorkRoot`, initialised at
-  L486 via `Resolve-RelativeToScript $WorkRoot` which already
-  produces an absolute path. The `Full` suffix was probably
-  left over from an earlier rename that abandoned the
-  `WorkRootFull` spelling but missed the consumer sites.
-
-Symptom: P10 threw
-`P10 requires P05 ExpandIso to have produced an extracted media
-tree. Run -Action All or -Action Build.` immediately on entry,
-even when P05 ExpandIso had completed successfully and the
-`D:\UpdateWsi\source\extracted` tree existed on disk. The
-guard at L9822-L9824 dereferenced `$Script:ExtractedMediaPath`,
-which evaluates to `$null` because the variable was never
-assigned, so the `-not $extractedPath` branch fired
-unconditionally. The error message was misleading - it blamed
-P05 ("Run -Action All or -Action Build") when P05 had in fact
-run.
-
-**Design decisions**.
-
-- D-1: *Replace `$Script:ExtractedMediaPath` with
-  `$Script:ExtractedDir` at the two consumer sites*. The
-  global has been `$Script:ExtractedDir` since the script-
-  parameter / working-directory initialiser block at L482-L520
-  was added; consistency across P05/P07/P08/P09/P10/P12 is
-  preserved by using the same name everywhere. The local
-  variable name inside the function (`$extractedPath`) and
-  the parameter passed downstream into the helper API
-  (`-ExtractedMediaPath $extractedPath`) both stay as written.
-- D-2: *Rename `$Script:WorkRootFull` to `$Script:WorkRoot`
-  at all six sites*. `$Script:WorkRoot` is the absolute-path
-  global produced by `Resolve-RelativeToScript`, so it
-  already carries the "Full" semantic that the `Full` suffix
-  was meant to advertise. Keeping a single name eliminates
-  the temptation to introduce future divergence (a separate
-  `$Script:WorkRootFull` later "for clarity" would just
-  recreate the same drift).
-- D-3: *Add a clarifying in-source comment at L9822*
-  describing the scope rename (`Script:ExtractedDir` global
-  vs. `$ExtractedMediaPath` helper-API parameter) and a
-  cross-reference at L10099 pointing back to it. The comment
-  is the cheapest defence against the same typo recurring on
-  a future cleanup pass.
-- D-4: *Skip a broader cleanup of the global-variable
-  surface*. A global audit of `$Script:` reads vs. assignments
-  surfaced 26 "read but never defined" globals, of which 24
-  are PowerShell `param()` bindings (script parameters
-  auto-populate `$Script:`-scoped variables when the .ps1
-  is invoked as a script), one (`$Script:ScriptPath`) is
-  defensively read with an `IsNullOrEmpty` guard and a
-  fallback to `$PSCommandPath`, and one
-  (`$Script:ErrorsJsonlPath`) appears only in a comment.
-  Only the two typo families documented above represent
-  real bugs.
-
-### B.23.21 P10 progress logging, Critical-Health skip-with-warn, and `Invoke-DownloadWithProgress` utility
-
-Three independent UX improvements bundled into one release
-because they share the same theme - making long-running phases
-emit visible progress instead of silent multi-minute pauses.
-
-**1. P10 Critical-Health skip-with-warn**.
-
-P10 `Invoke-BuildPhase10_ConvertPca2023BootManager` originally
-threw a hard exception when the pre-flight readiness snapshot
-reported `Health = 'Critical'` (install.wim LCU level below
-2024-04-09, the Make2023BootableMedia.ps1 prerequisite). On a
-fresh Server 2016/2019/2022 EVAL ISO with `EnableInstallWimUpdate
-= false` in the profile (the default for those OSes), the EVAL
-ISO ships with multi-year-old install.wim/boot.wim builds that
-do not meet the prereq, so the throw fires immediately on every
-PrepareBuildVerify run with `-EnablePca2023BootManager`.
-
-The throw was wrong UX for a dry-run inspection action:
-
-- the prereq mismatch is **informational**, not a script failure
-- the downstream phases (P11 StaticVerify, P12 VerifyPca2023Readiness,
-  P13 FinalReport) can still run usefully and *will record this
-  state in the final report*, which is exactly the diagnostic
-  the user wanted from PrepareBuildVerify
-- aborting at P10 hides the rest of the inspection from the user
-
-D-1: *change the throw to a skip-with-marker pattern*. The
-P10 Critical branch now writes a structured `Write-Warn` with
-the snapshot reasons, prints two follow-up `Write-Warn` lines
-explaining how to enable PCA2023 conversion (profile
-`EnableInstallWimUpdate = true` + patch baseline must include
-2024-4B LCU or later), creates the `P10.skipped` marker file
-that matches the existing skip-condition pattern, and returns
-cleanly so P11-P13 proceed.
-
-D-2: *keep the throw for missing extracted media tree*. The
-"P05 ExpandIso must have run" guard is a different category
-of error (workflow ordering violation) and continues to throw,
-because P11-P13 also need the extracted tree and would all fail
-the same way without it.
-
-**2. P10 step-by-step progress logging**.
-
-P10 was emitting one `Write-SubSection` header at entry and
-then nothing for 1-3 minutes until either the conversion
-completed or the prereq check threw. The silent block was the
-two `Mount-WindowsImage` + `Get-WindowsPackage` enumeration
-+ `Dismount-WindowsImage` operations inside
-`Get-IsoBootCertReadiness` (which `Get-OrEnsurePca2023Snapshot`
-calls): mounting and enumerating a multi-GB WIM read-only
-takes 30-90 seconds per WIM on commodity NVMe storage, and
-P10 does it twice (boot.wim + install.wim).
-
-D-3: *restructure P10 into four named steps with sub-section
-headers*, matching the pattern other phases (P01-P09) already
-use:
-
-- `Step 1: Pre-flight gates` (EnablePca2023BootManager,
-  Server2025 advisory, ExtractedDir presence)
-- `Step 2: Boot manager readiness snapshot (pre-conversion)`
-  - the long block, now annotated with start/end timings
-- `Step 3: Convert boot manager to PCA2023 signing`
-  - either external Make2023BootableMedia.ps1 child process
-    or internal Convert-WimBootToPca2023Signed
-- `Step 4: Re-assemble ISO and post-flight verification`
-
-Each step calls `Set-DebugStep` with a stable step name for the
-debug-trace JSONL, and each operation that takes more than a
-few seconds records its own start time so the trailing
-`Write-Step ('... completed in {0}s' -f $elapsed)` line gives
-the user concrete elapsed-seconds feedback.
-
-D-4: *propagate progress logging into `Get-IsoBootCertReadiness`
-itself*. The function now emits seven `Write-Step` lines as it
-runs - one for each mount, package enumeration, dismount, and
-the bootx64.efi signer chain inspection in between. The format
-is `[N/4] action ...` for the top-level boundaries and
-`         sub-action ({elapsed}s)` for inside-step progress.
-This means every long-running operation in P10's silent block
-now self-reports.
-
-**3. `Invoke-DownloadWithProgress` utility**.
-
-The existing `Invoke-WebRequestWithRetry` was correctly setting
-`$ProgressPreference = 'SilentlyContinue'` around the
-`Invoke-WebRequest` call to dodge PS 5.1's O(N^2)
-progress-bar slowdown on multi-GB downloads. The trade-off
-was that a 6 GB ISO would download silently for 10-15 minutes
-with only "Downloading ISO..." at the start and "Downloaded:
-{path}" at the end - no MB-transferred counter, no speed
-estimate, no ETA.
-
-D-5: *add a new `Invoke-DownloadWithProgress` utility function*
-that gives real-time progress without re-enabling the slow
-progress bar. The technique:
-
-a. HEAD request first to learn the expected `Content-Length`
-   (~1 second cost, optional - some CDNs reject HEAD).
-b. Spawn a background `Start-Job` that runs the actual
-   `Invoke-WebRequest` with `ProgressPreference = 'SilentlyContinue'`
-   in its own runspace (so the worker still gets the fast path).
-c. From the main thread, poll the destination file's size
-   via `Get-Item -LiteralPath ... | Length` every
-   `-ProgressIntervalSec` seconds (default 5).
-d. Print one progress line per poll showing current MB /
-   expected MB, percentage, current speed in MB/s, and an
-   ETA computed from `(remaining_bytes / current_speed)`.
-e. On completion, print a final `Write-Ok` line with total
-   MB, formatted elapsed time, and average MB/s.
-f. Optional `-MinSizeBytes` post-download validation deletes
-   truncated downloads and throws an actionable error
-   message (matching the `if ($sizeBytes -lt 5MB) { throw }`
-   defensive pattern in
-   `Deploy-AMDChipsetDriverOnWindowsServer.ps1`'s
-   `Invoke-PrepPhase03_FetchInstaller`).
-
-D-6: *refactor `Invoke-WebRequestWithRetry` to delegate the
-OutFile branch to `Invoke-DownloadWithProgress`*. The in-memory
-fetch path (HTML/JSON scraping for Microsoft Learn release-info
-parsing, .NET CU index, MSU Catalog) keeps the original direct
-`Invoke-WebRequest` call - those responses are small (KBs to
-hundreds of KBs) and don't benefit from the background-job
-overhead. Only the file-download branch is rerouted. All
-existing callers keep working unchanged; they now get progress
-output automatically.
-
-D-7: *threading and correctness*. `Start-Job` creates an
-isolated runspace; the worker's `$ProgressPreference` mutation
-cannot leak into the caller's scope, and the polling loop
-reads file-system state (which is committed to disk by the
-worker as it streams) rather than any shared variable. There
-is no race: stale-read of the file length only reports a
-slightly-low number for that one poll, which is harmless.
-`Receive-Job` after the worker exits propagates any thrown
-exception from the worker; `Remove-Job -Force` in the `finally`
-block ensures the job slot is released even if the caller
-Ctrl-C's during the poll.
-
-**Reference acknowledgement**. The `Write-Step` /
-`Write-Detail` / `Set-DebugStep` idiom and the post-download
-size-validation pattern are borrowed from
-`Deploy-AMDChipsetDriverOnWindowsServer.ps1` in the
-[usui-tk/Deploy-Drivers-For-WindowsServer](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
-repository (see its `Invoke-PrepPhase03_FetchInstaller`
-function around line 7808). The
-background-job-plus-polling progress mechanism is a new
-addition not present in that reference; this script needs it
-because its file payloads (multi-GB ISOs) are an order of
-magnitude larger than the reference's payloads (50-150 MB
-chipset installers), and the lack of progress output is much
-more painful at that scale.
-
-### B.23.22 P12 fix: `Write-PhaseHeader` positional call hung Show-Pca2023ReadinessSnapshot in non-compact mode
-
-A late-discovery latent bug in `Show-Pca2023ReadinessSnapshot`
-hit during Step 16 live verification: the non-compact rendering
-branch called `Write-PhaseHeader 'Pca2023 readiness (P12)'`
-positionally, but `Write-PhaseHeader` declares all three of its
-parameters (`-Id`, `-Name`, `-Group`) as `[Parameter(Mandatory)]`.
-Positional binding fills only `-Id`, leaving `-Name` and
-`-Group` unset, which triggers PowerShell's interactive prompt:
-
-```
-PS> # ... P12 readiness inspection completes normally ...
-コマンド パイプライン位置 1 のコマンドレット Write-PhaseHeader
-次のパラメーターに値を指定してください:
-Name:
-```
-
-The user has to Ctrl-C to recover. P13 FinalReport never runs.
-
-The Step 16 verification reached this line because:
-
-1. P10 was successfully reworked to skip-with-warn on Critical
-   health (rather than throw), so the run proceeded to P11.
-2. P11 ran cleanly and emitted "Output ISO missing" (expected
-   in PrepareBuildVerify dry-run mode).
-3. P12 `Invoke-VerifyPhase12_VerifyPca2023Readiness` ran the
-   snapshot computation (~115 seconds, with the new progress
-   logging visible throughout), then called
-   `Show-Pca2023ReadinessSnapshot -Snapshot $snapshot` **without
-   the `-Compact` flag** (line 10468).
-4. The non-compact branch took the broken
-   `Write-PhaseHeader` path and hung.
-
-The compact-mode callers (P10 post-flight, P13 summary) had
-worked in every prior run because the compact branch returns
-before reaching the broken line.
-
-**Design decisions**.
-
-- D-1: *Replace `Write-PhaseHeader 'Pca2023 readiness (P12)'`
-  with `Write-SubSection 'PCA2023 readiness detail'`*. The
-  fix is one line. `Write-SubSection` takes a single optional
-  `[string]$Title` parameter so positional calls are safe.
-  Semantically, `Write-PhaseHeader` was the wrong choice in
-  the first place: the function is called *during* a phase
-  (P12 has already emitted its own phase banner at entry),
-  so emitting a second phase banner inside the body would
-  be visual noise even if the call had worked. A
-  `Write-SubSection` is the documented idiom for in-phase
-  section breaks.
-- D-2: *Add a clarifying in-source comment* explaining why
-  the function uses `Write-SubSection` rather than
-  `Write-PhaseHeader` and listing the two call sites that
-  trigger this path (P12 VerifyPca2023Readiness without
-  `-Compact`, plus the standalone analysis helper at the
-  bottom of the script). The comment is the cheapest way
-  to defend against the same trap recurring on a future
-  refactor.
-- D-3: *Skip a broader audit*. A defensive grep through the
-  whole script for "positional call to a function with >=2
-  Mandatory parameters" returned zero other hits, so the
-  L8167 site was the only one. No further code change is
-  required.
-
-### B.23.23 P12 fix part 2: `(if ...)` mis-spelled subexpressions in Show-Pca2023ReadinessSnapshot
-
-Step 17's `Write-PhaseHeader -> Write-SubSection` fix unblocked
-the non-compact rendering path in `Show-Pca2023ReadinessSnapshot`,
-which immediately exposed a second latent bug in the same
-function: five lines (L8184-8188 in r07.0) used the syntax
-
-```powershell
-'... : {0}' -f (if ($null -eq $emb.HasEfiExDir) { 'n/a' } elseif ... )
-```
-
-This is invalid PowerShell. The bare `(if ...)` form is parsed
-as a **command invocation** named `if`, which fails at runtime
-with the localised error:
-
-```
-The term 'if' is not recognized as a name of a cmdlet, function,
-script file, or executable program.
-```
-
-For an `if` statement to be used as an expression (so its branch
-value can be consumed by `-f` or assigned to a variable), it
-must be wrapped in the subexpression operator: `$(if ...)`. The
-array subexpression `@(if ...)` is also valid and forces array
-context.
-
-The same function had this idiom correctly written six lines
-below (`$(if $emb.BootX64SignerName ...)`) and at four other
-sites within the same block, so the bug was a local
-copy-paste mistake on the five EFI_EX-family lines, not a
-systemic misunderstanding.
-
-This bug was **invisible to static analysis** because
-`(if ...)` is a syntactically valid command-invocation form in
-PowerShell's grammar. PS Parse passed, psa.py passed,
-PSScriptAnalyzer passed - but the cmdlet `if` does not exist.
-Only a runtime invocation surfaced the problem, and the
-function was only reachable through a code path that the
-prior Write-PhaseHeader bug had blocked.
-
-**Design decisions**.
-
-- D-1: *Replace all five `(if ...)` with `$(if ...)`*. The
-  fix is mechanical and the existing correct sites in the
-  same function are the model.
-- D-2: *Add an in-source comment* describing the trap so
-  future contributors do not regress this. The comment is
-  placed immediately before the first formerly-broken line
-  and explicitly notes that `$(if ...)` is the correct form,
-  `@(if ...)` is also valid (array subexpression), and bare
-  `(if ...)` is not.
-- D-3: *Run a defensive grep over the entire script* for any
-  other bare `(if ...)` / `(switch ...)` / `(foreach ...)` /
-  `(while ...)` patterns. Zero further hits remained after
-  the L8184-8188 fix. The grep is documented in the test
-  notes as an ad-hoc check until a stable static-analyzer
-  rule for this pattern is added.
-- D-4: *Add a runtime smoke test* to the local verification
-  loop. Static analysis cannot catch this class of bug, so
-  the regression-safety net needs to be either a runtime
-  test that exercises the function or a custom analyzer
-  rule. A short pwsh-script that builds a fake snapshot
-  pscustomobject and calls
-  `Show-Pca2023ReadinessSnapshot -Snapshot $fake` (no
-  `-Compact`) was added to the local verification workflow
-  in `tests/`. The test passes only if the non-compact
-  branch returns without throwing.
-
-### B.23.24 P13 + script-tail finally: duplicate `Phase Timing Summary` cleanup via idempotent Show-PhaseSummary
-
-The Step 18 verification produced the first **fully-clean
-PrepareBuildVerify run** (P01-P13 all DONE, total 4m44s, exit
-0, no interactive prompts). One cosmetic defect surfaced in
-that successful output: the "Phase Timing Summary" table
-appeared **twice**.
-
-The two call sites are by design:
-
-- `Invoke-ReportPhase13_FinalReport` (around L10548) calls
-  `Show-PhaseSummary` as part of its body. This is specified
-  in Part B.5 P13 Step 1: "Show-PhaseSummary (timing + status
-  per phase)". The first instance of the table is part of
-  P13's body and prints between the P13 phase header and the
-  P13 phase footer.
-- The script-tail `finally` block (around L12167) also calls
-  `Show-PhaseSummary` as a safety net for runs that abort
-  before P13 (or hit the outer `catch`). Without this, an
-  early failure would leave the user with no timing
-  information at all.
-
-On a happy-path run both callers fire, producing the same
-table twice. The second print includes P13's own DONE row
-(P13 has just printed its footer), the first does not, so
-the two prints are not literally identical, but the visual
-"timing table twice" is jarring.
-
-**Design decisions**.
-
-- D-1: *Make `Show-PhaseSummary` idempotent at the function
-  level rather than coordinating between callers*. The
-  alternatives - removing the `finally` call (breaks the
-  safety net), removing the P13 call (violates SPEC.md Part
-  B.5), or threading a "P13 ran" flag through the script -
-  are all worse. A single boolean
-  `$Script:PhaseSummaryShown` initialised to `$false` at the
-  same site as `$Script:PhaseTimings` gives the cleanest
-  contract: the first caller prints, all subsequent callers
-  short-circuit.
-- D-2: *Preserve the safety-net guarantee*. If P13 does NOT
-  run (early failure, or `-Action` selection that excludes
-  P13), `$Script:PhaseSummaryShown` is still `$false` when
-  the `finally` block fires, so the table is printed as
-  before. The idempotency only affects the case where P13
-  ran first.
-- D-3: *Add a `-Force` switch for ad-hoc inspection / tests*.
-  Callers that want to re-print the table (regression tests
-  for the function itself, debug invocations) can pass
-  `-Force` to bypass the guard. Production callers never
-  use it.
-- D-4: *Promote `Show-PhaseSummary` to a documented advanced
-  function* with `[OutputType([void])]` and a multi-paragraph
-  `.SYNOPSIS` / `.DESCRIPTION`. The function used to be a
-  one-line wrapper; the additional design constraints
-  warrant proper documentation.
-
-### B.23 Cross-reference matrix
-
-| §B.23 subsection | Supersedes / amends                | Implementation impact                              |
-| ---------------- | ---------------------------------- | -------------------------------------------------- |
-| B.23.1           | §B.21.5, §D.19, §D.20              | Delete most of `Resolve-PatchSetFromCatalog`       |
-| B.23.2           | (new) — refines §B.21.1            | New `CatalogTitleTokens` field in config-Server*.json |
-| B.23.3           | Amends §B.22.1, §B.22.2            | Rename `Config/` → `data/`; introduce 3-prefix scheme |
-| B.23.4           | Closes §B.21.5 Schema 2.2 proposal | None (Schema stays 2.1)                            |
-| B.23.5           | Refines §B.21.2, §B.21.3           | Filename-based SSU detection in record stage       |
-| B.23.6           | Refines §B.21.1 (DU rows)          | New `cache-du-Server*.json`; 36-month cache logic  |
-| B.23.7           | (new) — see also §B.23.14          | `-Action RefreshSnapshots` (A03, implemented r07.0 Step 6) |
-| B.23.8           | Amends §B.14b (Type enum)          | Breaking change to `Type=DotNet`; no shim          |
-| B.23.9           | Closes §D.19, §D.20 follow-up      | No Catalog-discovery fallback                      |
-| B.23.10          | (new)                              | Single r07.0 release; r06.x is docs-only           |
-| B.23.11          | Defers §B.21.4 work                | None in r07.0; Hotpatch-ready ISO postponed        |
-| B.23.12          | Refines §B.21.4 / PoC-D            | Parser records baseline-months verbatim, including anomalies |
-| B.23.13          | Amends §B.6 (Action mapping)       | New `-Action InspectBaseline -PatchMonth YYYY-MM` (read-only) |
-| B.23.14          | Amends §B.22.2; supersedes part of §B.23.7 | New `stage5__data-snapshot.yml`; stage4 narrowed; PoC → T6-T8 |
-| B.23.15          | (new) — refines §A.4 P01 prerequisites | New `-AutoInstallAdk` switch; `Install-WindowsAdkFallback` (r07.0 Step 8) |
-| B.23.16          | (new) — refines §B.2 (config schema)   | New `Iso.FwlinkUrl` field; refreshed `Iso.Url`/`FileName` for all 8 OS×language entries (r07.0 Step 10) |
-| B.23.17          | (new) — refines §A.4 P02 ResolveInputs | P02 + P03 patch seeding: derive `LocalPath` from `FileName` and guard empty `Sha256` from `ExpectedHashes` (r07.0 Step 12) |
-| B.23.18          | (new) — refines §A.4 P04 FetchAssets    | Replace 7 `Split-Path -LiteralPath ... -Leaf` / `-LeafBase` sites with `[System.IO.Path]::GetFileName` / `GetFileNameWithoutExtension`; documents the latent parameter-set bug (r07.0 Step 13) |
-| B.23.19          | (new) — refines §A.4 P05 ExpandIso       | Switch P05 drive-root copy to robocopy; fix P09 Dynamic Update overlay wildcard to use `-Path` (r07.0 Step 14) |
-| B.23.20          | (new) — refines §A.4 P10/P12 PCA2023     | Fix `$Script:ExtractedMediaPath` and `$Script:WorkRootFull` typos in P10/P12; 8 sites total (r07.0 Step 15) |
-| B.23.21          | (new) — refines §A.4 P10 + §C.1 download | P10 step-by-step progress logging + Critical-Health skip-with-warn; new `Invoke-DownloadWithProgress` utility (r07.0 Step 16) |
-| B.23.22          | (new) — refines §A.4 P12 / Show-Pca2023ReadinessSnapshot | Fix Write-PhaseHeader positional call that hung Show-Pca2023ReadinessSnapshot in non-compact mode (r07.0 Step 17) |
-| B.23.23          | (new) — refines §A.4 P12 / Show-Pca2023ReadinessSnapshot | Fix `(if ...)` mis-spelled subexpressions; should be `$(if ...)` at 5 sites (r07.0 Step 18) |
-| B.23.24          | (new) — refines Part B.5 P13 / Show-PhaseSummary | Make Show-PhaseSummary idempotent so the safety-net finally call does not duplicate P13's table (r07.0 Step 19) |
-
----
-
-## B.24 LCU package format generation matrix and EFI_EX provenance (r08.0+, informative)
-
-This section records the **empirical findings** from the r08.0 Step 1
-investigation (documented in full in
-`docs/history/r08.0-step1-server2016-pca2023-finding.md`). It is
-informative rather than normative: nothing in this section changes
-the pipeline's contract. It exists so that future readers do not have
-to re-derive the same conclusions from physical artefacts.
-
-### B.24.1 Investigation summary
-
-The r07.0 cycle left an unresolved P0 issue: can Server 2016 EVAL
-media be used as a source for producing a PCA2023-bootable ISO, or
-is the EVAL ISO permanently locked out by its 2017-vintage
-install.wim? The r08.0 Step 1 investigation verified the answer
-against three independent sources (Microsoft official code,
-Microsoft Support KB5053484, and physical MSU expansion of all four
-supported OS families), plus a direct inspection of Server 2025 EVAL
-install.wim contents.
-
-**Conclusion**: the existing pipeline design (P07/P09/P10) is correct
-for all four OS families. Server 2016 EVAL **is** viable for the
-PCA2023 use case via the Option A route (enable
-`EnableInstallWimUpdate=true`, add a 2024-4B-or-later LCU to the
-patch baseline). The prior "Server 2016 EVAL not viable" finding
-recorded in `r07.0-followups.md#P0` was incorrect.
-
-### B.24.2 LCU package format per OS family
-
-The MSU file format and expansion procedure differ significantly
-across the four OS generations. The pipeline currently relies on
-DISM and on Microsoft's own integration logic, so these differences
-are transparent to the pipeline itself — but they matter when
-investigating LCU contents manually:
-
-| OS family | MSU magic | Packaging | Expansion stages | Required tool |
-|---|---|---|:---:|---|
-| Server 2016 | `MSCF` (CAB) | Legacy standalone LCU | 3 | `expand.exe` |
-| Server 2019 | `MSCF` (CAB) | UUP + PSFX v1 (SSU+LCU combined) | 4 | `expand.exe` |
-| Server 2022 | `MSCF` (CAB) | UUP + PSFX v1 / `ForwardOnly` | 4 | `expand.exe` |
-| Server 2025 | **`MSWIM`** (WIM) | **WIM + PSF v2 (`PSTREAM`)** | 2 (WIM nested) | **`DISM /Apply-Image`** |
-
-Server 2019+ MSUs carry an internal `toc.xml` that declares the
-SSU-then-LCU application order to DISM, and an `update.mum` that
-enumerates all supported SKUs (including `*EvalEdition` variants,
-confirming EVAL coverage). Server 2025 LCUs split their payload into
-a `*.wim` (manifests only — 265,893 manifest files for KB5087539,
-representing ~106,572 component manifests + their MUMs and CATs) and
-a `*.psf` Patch Storage Stream v2 file (~1.7 GB for KB5087539) that
-holds the actual binary delta content.
-
-### B.24.3 EFI_EX provenance — LCU-delivered vs. install.wim-resident
-
-The PCA2023 boot manager conversion relies on the
-`EFI_EX`/`Fonts_EX`/`DVD_EX` staging directories inside `boot.wim`'s
-`\Windows\Boot\` path. These staging assets reach the media via two
-different paths depending on the OS generation:
-
-| OS | LCU ships `*_EX.efi` binaries? | install.wim ships EFI_EX out of the box? |
-|---|:---:|:---:|
-| Server 2016 | **Yes** — `bootmgfw_ex.efi`×3 + `wdsmgfw_ex.efi`×2 + `bootmgr_ex.efi`×1 (unique paths in WinSxS); 112 `bootmgfw_EX*` MUI variants total | **Not verified in r08.0** (likely no; LCU is the delivery vehicle) |
-| Server 2019 | **Yes** — identical 6-binary `*_EX.efi` composition; 113 `bootmgfw_EX*` MUI variants | **Not verified in r08.0** (likely no) |
-| Server 2022 | **Yes** — identical 6-binary `*_EX.efi` composition; 108 `bootmgfw_EX*` MUI variants | **Not verified in r08.0** (likely no) |
-| Server 2025 | **No** — LCU update.mum and all 106,572 component manifests contain zero `_EX`/PCA2023 references | **Yes** — `\Windows\Boot\EFI_EX\` ships pre-populated with 72 files in the out-of-box EVAL install.wim |
-
-The Server 2016/2019/2022 LCUs share an **identical six-binary
-`*_EX.efi` composition** (verified by file-name de-duplication across
-all three OS families). This is consistent with Microsoft using a
-single PCA2023 staging asset bundle and back-porting it via LCU to
-the three legacy OS families.
-
-Server 2025 takes a different approach: Microsoft ships the EFI_EX
-staging assets directly inside the install.wim at GA, so subsequent
-LCUs do not need to carry them. The bootmgfw.efi inside Server 2025
-EVAL install.wim is **still PCA2011-signed** (verified by Authenticode
-chain inspection); the PCA2023-signed variant lives alongside it in
-the EFI_EX directory (the actual signature on Server 2025
-`EFI_EX\bootmgfw_ex.efi` was not exhaustively verified in r08.0 Step 1
-and is listed as a Step-2 task in
-`r08.0-step1-server2016-pca2023-finding.md` §9.2).
-
-### B.24.4 Pipeline implications
-
-Because EFI_EX content reaches `boot.wim` differently per OS, the
-correct config-Server*.json profile values differ slightly:
-
-| Profile | `EnableInstallWimUpdate` | `PatchBaseline.NeutralPatches` must include | P10 effect |
-|---|:---:|---|---|
-| `config-Server2016.json` | **must be `true`** | a 2024-4B-or-later LCU (e.g. KB5087537 = 2026-05B) | will convert; produces Healthy ISO |
-| `config-Server2019.json` | **must be `true`** | a 2024-4B-or-later LCU (e.g. KB5087538 = 2026-05B) | will convert; produces Healthy ISO |
-| `config-Server2022.json` | **must be `true`** | a 2024-4B-or-later LCU (e.g. KB5087545 = 2026-05B) | will convert; produces Healthy ISO |
-| `config-Server2025.json` | can stay `false` for the PCA2023 use case | n/a for PCA2023 purposes; LCU still useful for ordinary security updates | will convert without LCU dependency (EFI_EX already in install.wim) |
-
-The current B.18 statement "`RequiredByDefault = false` for
-Server 2025" remains correct in spirit but the rationale needs
-refinement: Server 2025 still requires P10 to **physically copy** the
-EFI_EX content from install.wim to boot.wim's working layout (and
-update the resulting boot manager hash chain). What it does NOT
-require is the LCU-application prerequisite. The B.18 wording will
-be revisited in the r08.0 implementation phase once the config
-changes are in place and the end-to-end Server 2016 `-Execute Build`
-run has produced a Healthy ISO.
-
-### B.24.5 Out-of-scope for r08.0 Step 1 (status updates from Step 2)
-
-The following questions were listed in
-`docs/history/r08.0-step1-server2016-pca2023-finding.md` §9 as
-follow-up items. Their status as of r08.0 Step 2 (2026-05-27):
-
-- ✅ **CLOSED: Server 2016/2019/2022 install.wim EFI_EX presence.** Step 2
-  step 5e symmetry check directly mounted install.wim Index 4 of all
-  three OS families and confirmed `\Windows\Boot\EFI_EX\` is absent in
-  the out-of-box ISO. Bootmgfw.efi in EFI is PCA2011 in all three OS,
-  as expected. See `docs/history/r08.0-step2-installwim-symmetry-check.md`
-  §2.1.
-- ✅ **CLOSED: Server 2025 `EFI_EX\bootmgfw_ex.efi` signature.** Step 2
-  step 5g (signtool `/ds`-based dual-signature probe) and step 5h
-  (4-OS exhaustive `*.efi` survey) confirmed the primary signature is
-  **PCA2023 single-sign** (not dual-signed). Sibling
-  `EFI_EX\bootmgr_EX.efi` is **PCA2011 single-sign by Microsoft design**
-  per `Make2023BootableMedia.ps1` v1.4 L876-L884. See
-  `docs/history/r08.0-step2-installwim-symmetry-check.md` §2.1, §3.2.
-- ⏳ **STILL OPEN: End-to-end `-Action Build -Execute` on Server 2016 EVAL.**
-  The Option A route is empirically supported by the LCU contents and
-  the Microsoft official spec (KB5053484), but no Healthy output ISO
-  has been produced from a real Build run yet. Microsoft Issue #346
-  (2026-02-14) reports that even Windows 11 25H2 + latest LCU can
-  surface missing-file errors (`etfsboot.com`) during
-  `Make2023BootableMedia.ps1` execution; the Server 2016 EVAL Build
-  run may encounter the same class of issue. Tracked in
-  `docs/history/r07.0-followups.md` as a Phase 6 task for r08.0 Step 3.
-
-### B.24.6 New open items raised in r08.0 Step 2
-
-- ✅ **CLOSED in r08.0 Step 3: Output ISO PCA2023 verification function.**
-  The new `Test-OutputIsoPca2023Readiness` function (added in
-  Step 3) inspects the extracted output media against the five
-  conversion targets defined in §B.18 (Make2023BootableMedia.ps1 v1.4
-  L829-L941 Copy-2023BootBins) and emits a pscustomobject with
-  per-target Status (Pass / PassWithNotes / Warning / Fail), an
-  aggregate `OverallStatus`, and a `Reasons[]` array that always
-  includes a SCOPE clarifier ("file presence + signer-chain only; no
-  actual boot test"). The function encodes the Microsoft-design
-  PCA2011 status of `\bootmgr.efi` as PassWithNotes per L876-L884.
-  It is invoked from P10 post-flight (when conversion runs) and
-  P12 (always); results integrate into `pca2023_readiness.json`
-  (`OutputCheck` field), `pca2023_readiness.md` (Markdown table +
-  Reasons), and P13 FinalReport Compact summary. See
-  `docs/history/r08.0-step3-output-verification-and-build.md` for the
-  implementation details, the root-cause analysis of the Step 2
-  `Argument types do not match` exception (fixed via `.ToArray()`),
-  and the local-test results across 4 fake-media tree scenarios.
-- ⏳ **Phase 6 readiness for Microsoft Issue #346-class problems.** Server
-  2016/2019/2022 Build -Execute paths must defensively handle the
-  scenario where applying the latest LCU produces a boot.wim that still
-  lacks one or more conversion-target sources (e.g. `etfsboot.com`).
-  Detection logic and operator-actionable error messages are required
-  in P10. Tracked in `docs/history/r07.0-followups.md`. Disposition
-  pending r08.0 Step 3 P0-B (Phase 6 Build -Execute on Server 2016
-  EVAL ja-jp) execution on a Windows host; if Issue #346-class errors
-  reproduce, defensive handling is added in a follow-up step,
-  otherwise this item is closed as "validated, no reproduction".
-- ℹ️ **Server 2025 `SecureBootRecovery.efi`.** Step 2 step 5h discovered
-  a new file `\Windows\Boot\EFI\SecureBootRecovery.efi` (PCA2011-signed)
-  in Server 2025 install.wim that is absent in Server 2016/2019/2022.
-  Microsoft's public documentation of this file's role and lifecycle is
-  not yet examined. Informational only; no impact on PCA2023 conversion
-  pipeline. Logged for future Microsoft documentation cross-check.
-
----
-
-# Part C — Quality Gates & Validation Checklist
-
-The following must all pass before any commit to this project.
-
-### C.1 Static analysis
-
-- [ ] `python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1` returns **0 errors, 0 warnings, 0 info**.
-- [ ] PSScriptAnalyzer in `pwsh 7` (Linux) returns no Error or Warning findings against `PSScriptAnalyzerSettings.psd1`.
-- [ ] PSScriptAnalyzer in `powershell.exe 5.1` (Windows) returns no Error or Warning findings.
-
-### C.2 Source-file format
-
-- [ ] First 3 bytes of `Update-WindowsServerIso.ps1` are `EF BB BF` (UTF-8 BOM).
-- [ ] All bytes after the BOM are `<= 0x7F` (strict ASCII).
-- [ ] All newlines are CRLF (`0D 0A`); no bare LF.
-- [ ] Indent is 4 spaces; no tabs.
-
-### C.3 Configuration files
-
-- [ ] All four `data/config-Server*.json` parse with `json.load(...)` in Python.
-- [ ] Every language entry has `IsoFwLink`, `IsoSnapshotUrl`, `IsoSha256`, `VolumeLabelPrefix`.
-- [ ] `LCUExpandViaMum` is `true` only for `Server2025.json`.
-- [ ] `RequireUefiCa2023Boot` is `true` only for `Server2025.json`.
-
-### C.4 Functional smoke (runs on Windows; CI Stage 2)
-
-- [ ] `.\Update-WindowsServerIso.ps1 -Action ListPhases` exits 0 and prints 9 phases.
-- [ ] `.\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly` exits 0 after the env dump.
-- [ ] `.\Update-WindowsServerIso.ps1 -Action PrepareBuildVerify -OsVersion Server2019 -OsLanguage en-us -SyntheticTestMode -DryRun -SkipEnvCheck` exits 0.
-
-### C.5 Full synthetic pipeline (runs on Windows; CI Stage 3)
-
-- [ ] `.\Update-WindowsServerIso.ps1 -Action PrepareBuildVerify -OsVersion Server2019 -SyntheticTestMode -SkipEnvCheck -Execute` exits 0.
-- [ ] An output ISO file is produced under `<WorkRoot>/output/`.
-- [ ] **No ISO artifact is uploaded** by the CI job.
-
-### C.5b Monthly baseline refresh (runs on Windows; CI Stage 4) — r03.1+
-
-Stage 4 is an operations workflow that runs `-Action RefreshAllBaselines`
-on a `cron` schedule (the 15th of each month at 02:00 UTC, roughly
-3-7 days after Patch Tuesday) and on `workflow_dispatch`. Its job
-is to keep `data/config-Server*.json` baselines in sync with the latest
-Microsoft Update Catalog state without manual maintainer effort.
-
-- [ ] Workflow file
-      `.github/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml`
-      is present and parses as valid YAML.
-- [ ] `cron: '0 2 15 * *'` is the only schedule entry.
-- [ ] `workflow_dispatch` accepts four inputs: `mode`, `onlyOs`,
-      `onlyLanguage`, `dryRun`. Cron uses the defaults (Monthly, all
-      OS, all languages, no DryRun).
-- [ ] On exit codes 0 (clean) and 2 (Manual fields remain) the
-      workflow proceeds to the diff-detect step.
-- [ ] On exit code 1 (orchestrator failure) the workflow fails the
-      run and does NOT open a PR.
-- [ ] When at least one `data/config-Server*.json` file differs from the
-      committed baseline, an automated PR is opened on branch
-      `auto/uwsi-baseline-refresh-<run-id>` with title
-      `chore(uwsi): monthly baseline refresh (run #<run-id>)`.
-- [ ] PR `add-paths` restricts the diff to
-      `scripts/powershell/update-windows-server-iso/data/config-*.json`
-      so an accidental change to other files cannot ride the auto-PR.
-- [ ] PR labels: `automated`, `update-windows-server-iso`,
-      `baseline-refresh`.
-- [ ] Artefacts uploaded for every run (success or failure):
-      `A01_RefreshAllBaselines_report.csv` and `debugtrace.jsonl`,
-      retention 30 days.
-- [ ] `$env:GITHUB_STEP_SUMMARY` is always populated so the run
-      page shows the mode / OnlyOs / OnlyLanguage / DryRun / exit
-      code / diff-detected / PR-created status at a glance.
-
-### C.5c CI runner diagnostic pre-flight (r05.0+, all stages)
-
-Each CI stage starts with a `[Diag] Runner environment snapshot` step
-that records the runner state up front. This makes triage tractable
-when scheduled (Stage 4 cron) or flaky failures occur: every failed
-run carries the data needed to diagnose runner-side drift without
-re-running the job. The information captured is platform-specific:
-
-| Stage | Diagnostic information captured |
-|---|---|
-| **Stage 1 (Linux)** | `uname -a`, Python version, `pwsh` presence, CWD, `GITHUB_WORKSPACE` / `RUNNER_TEMP` / `RUNNER_OS` / `RUNNER_ARCH`, repo top-level listing |
-| **Stage 2 (Windows)** | `$PSVersionTable`, `Get-Location`, `Get-ExecutionPolicy -List`, console encoding (`Console.OutputEncoding` + `$OutputEncoding`), `whoami` + admin check, env vars, oscdimg.exe presence at canonical ADK paths |
-| **Stage 3 (Windows)** | Same as Stage 2 + free disk space on `C:` (Synthetic pipeline needs ~50 GB) |
-| **Stage 4 (Windows)** | `$PSVersionTable`, ExecutionPolicy, `whoami`, key env vars |
-| **psa.py CI (Linux)** | `uname -a`, Python version, CWD, repo top-level listing |
-
-Each diagnostic step has `$ErrorActionPreference = 'Continue'`
-(or `set +e` for bash) so a missing tool does not tank the whole
-diagnostic step — the goal is to record what IS available, not to
-fail-fast on what is not.
-
-All non-diagnostic Windows PowerShell steps additionally set:
-
-- `$ErrorActionPreference = 'Stop'` — prevents silent error
-  swallowing (PS 5.1's default is `Continue`, which can mask
-  `Get-ChildItem` / `Remove-Item` failures and produce confusing
-  downstream errors).
-- `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` —
-  PS 5.1's default console encoding is the legacy ANSI code page
-  (cp1252 on en-US hosts, cp932 on ja-JP), which mangles non-ASCII
-  text written to `$GITHUB_ENV` / `$GITHUB_OUTPUT` / log streams.
-
-The Windows-specific workflows also declare:
-
-```yaml
-defaults:
-  run:
-    shell: powershell
-    working-directory: ${{ github.workspace }}
-```
-
-so step-level `working-directory` overrides remain visible and
-relative paths resolve predictably against the checkout root, not
-against `runner.temp` or some other surprising location.
-
-Reference: `documents/ci-engineering/github-actions-windows-powershell-guide.md`
-in this repository captures the broader github-actions Windows
-runner reference material these conventions are derived from.
-
-### C.6 Documentation cross-checks
-
-- [ ] `README.md` and `README.ja.md` reference the same Disclaimer / License URLs.
-- [ ] `README.md` parameter table is consistent with the `param()` block.
-- [ ] `SPEC.md` Part B.5 phase contracts match the registered phases in the script.
-- [ ] `CHANGELOG.md` has a new entry under `[Unreleased]` if the change is user-visible.
-
----
-
-# Part D — Known Pitfalls & Lessons Learned
-
-### D.1 DISM mount cleanup (OSDBuilder pattern)
-
-**Symptom.** DISM commonly leaves orphan mounts after abnormal exits.
-Subsequent mounts at the same path then fail with
-`The directory could not be completely unmounted`.
-
-**Fix.** `Invoke-WimMountSafe` runs `Get-WindowsImage -Mounted` and
-discards any entry at the target path before mounting.
-`Invoke-WimDismountSafe` follows the OSDBuilder
-`Dismount-InstallwimOS` pattern: `Start-Sleep 10` (release Defender /
-Indexer locks), attempt dismount silently; on failure, sleep another
-30 seconds and try again with error propagation.
-
-### D.2 SSU before LCU
-
-**Symptom.** LCUs from 2018+ declare the SSU as a dependency. Applying
-LCU first fails with `0x800f0922` ("CBS_E_INSTALLERS_FAILED_TO_LOAD").
-
-**Fix.** `Get-PatchApplyOrder` returns 1 for `SSU` and 3 for `LCU`. The
-P07 loop sorts by `ApplyOrder` before applying.
-
-**OS-generation note (r06.0+).** This pitfall applies only to
-Server 2016 / 2019, where SSU and LCU are still distinct
-packages. For Server 2022 / 2025 the LCU package already
-contains the SSU (combined SSU+LCU); there is no standalone
-SSU on Catalogue, so `Get-PatchApplyOrder` simply never
-encounters a Type=SSU entry for those OSes. SPEC §B.21.1
-("Update Type Matrix per OS generation") and §B.21.3
-("Combined LCU package detection") are normative on this
-distinction.
-
-### D.3 winre.wim is inside install.wim
-
-**Symptom.** Patching boot.wim leaves the WinRE image stale; users see
-old WinRE behaviour after recovery.
-
-**Fix.** P08 includes a dedicated winre.wim sub-phase: mount install.wim
-primary index, copy out `Windows\System32\Recovery\Winre.wim` to a
-work file, mount the work file, apply patches, cleanup, dismount, copy
-the result back into the mounted install.wim, dismount install.wim
-with `-Save`.
-
-### D.4 oscdimg etfsboot/efisys 3-tier fallback
-
-**Symptom.** Some extracted ISO trees lack `boot/etfsboot.com` and/or
-`efi/microsoft/boot/efisys.bin`. Older ADK installs put oscdimg under
-`Program Files (x86)`, newer ones under `Program Files`.
-
-**Fix.** `Resolve-EtfsbootCom`, `Resolve-EfisysBin`, and
-`Resolve-OscdimgExe` all walk a three-tier candidate list (extracted
-ISO → ADK x86 → ADK x64 → `$env:ISOFACTORY_PE_DIR` if set).
-
-### D.5 SHA-1 is intentional in `Test-PatchIntegrity`
-
-**Symptom.** psa.py PSA5003 warns on `Get-FileHash -Algorithm SHA1`.
-
-**Why we keep it.** The Microsoft Update Catalogue **still publishes
-SHA-1 hashes in patch filenames and download UI**. Refusing to verify
-those would forfeit a real integrity check available upstream. The
-script uses SHA-1 ONLY for that upstream-published sanity check; the
-actual trust anchors are SHA-256 (L2c) and Authenticode (L3).
-
-**Fix.** Each SHA-1 line carries an explicit `# psa-disable-line PSA5003`
-with the justification.
-
-### D.6 `Split-Path -LiteralPath ... -Parent` is ambiguous on PS 5.1 ja-JP
-
-**Symptom.** PS 5.1 ja-JP locale rejects the combination as
-`AmbiguousParameterSet`.
-
-**Fix.** Use `[System.IO.Path]::GetDirectoryName($path)` everywhere a
-parent directory is needed.
-
-### D.7 Top-level `param()` variables in nested functions
-
-**Symptom.** psa.py PSA2001 flags any bare `$IsoPath` reference inside
-a function as undefined.
-
-**Fix.** Every reference to a top-level param from inside a function is
-qualified with `$Script:` (e.g. `$Script:IsoPath`). The param block
-itself still uses bare names.
-
-### D.8 0x800f081e is benign per OSDBuilder
-
-**Symptom.** A patch returns `0x800f081e: The required content for this
-update is not available for this OS SKU`. Stopping the loop here would
-mean any cross-SKU patch set kills the entire run.
-
-**Fix.** `Add-WindowsPackageWithRetry` catches this specific error,
-emits a Warning, and returns `'NotApplicable'`. The loop continues.
-
-### D.9 0x800f0a13 is a transient
-
-**Symptom.** Modules Installer occasionally returns 0x800f0a13 under
-heavy concurrent disk pressure.
-
-**Fix.** `Add-WindowsPackageWithRetry` retries once after a 10-second
-sleep. If the retry succeeds, the status is recorded as `'OkAfterRetry'`.
-
-### D.10 `$args` is an automatic variable
-
-**Symptom.** psa.py PSA2002 flags assignment to `$args` in
-`Invoke-DismCleanup`.
-
-**Fix.** Renamed to `$dismArgs`.
-
-### D.11 Microsoft Eval ISO snapshot URLs rotate
-
-**Symptom.** Direct snapshot URLs in `data/config-<OsKey>.json` can return
-404 after Microsoft rotates them.
-
-**Fix.** Try `IsoFwLink` (which redirects to whatever the current
-snapshot is) before falling back to `IsoSnapshotUrl`. Record the
-download's actual SHA-256 in `data/config-<OsKey>.json/Languages/<lang>/IsoSha256`
-the first time a build succeeds, so the next run can verify.
-
-### D.12 Sandbox-by-default
-
-**Symptom.** Running the script interactively from an REPL once mounted
-WIMs would commit irreversible changes.
-
-**Fix.** Build phases (P07/P08/P09) default to Sandbox mode and emit
-`[PLAN]` rows. The user must add `-Execute` to actually perform DISM
-writes. Setup / Fetch / Plan / Verify / Report phases run
-unconditionally.
-
-### D.13 `Start-Transcript` has no `-LiteralPath`
-
-**Symptom.** psa.py PSA3005 wants `-LiteralPath` on `Start-Transcript`.
-The cmdlet does not support that parameter.
-
-**Fix.** Inline `# psa-disable-next-line PSA3005` with a note explaining
-the limitation.
-
-### D.14 PowerShell 5.1 has no ternary operator
-
-**Symptom.** `(if ($x) { 'a' } else { 'b' })` inside a function call's
-parameter slot is technically valid but trips PSScriptAnalyzer's
-parser on PS 5.1 + some PSSA versions.
-
-**Fix.** Always assign to an explicit local: `if ($x) { $v = 'a' }
-else { $v = 'b' }; ... -Status $v`.
-
-### D.15 Patch Tuesday boundary buffer
-
-**Symptom.** Microsoft publishes patches on the second Tuesday US
-Pacific time. A user in Tokyo running the script on Wednesday morning
-JST could see the local date as "after Patch Tuesday" while the
-catalogue has not yet been populated on the Microsoft side.
-
-**Fix.** `Get-LatestPatchTuesday` applies a 1-day buffer: the current
-month's Patch Tuesday is only considered "already happened" when
-local date is at least 1 day past it. This trades a one-day delay
-in detecting fresh patches for elimination of empty-catalogue scrape
-failures on Patch Tuesday itself.
-
-### D.16 Microsoft Update Catalogue has no API
-
-**Symptom.** There is no documented REST or SOAP API for
-catalog.update.microsoft.com. Community modules (`MSCatalogLTS`,
-the OSDSUS-driven Recast tooling, and Kazuro Yamauchi's published
-sample) all scrape HTML / DownloadDialog responses.
-
-**Fix.** The scraper functions
-(`Get-UpdateIdFromCatalog`,
-`Get-DownloadLinkFromCatalog`,
-`Get-SupersedenceFromCatalog`)
-each accept `-MaxRetries`, set a polite `User-Agent`, and use
-`-UseBasicParsing` for Windows PowerShell 5.1 compatibility. The
-`AutoRefreshPolicy.FallbackOnScrapeFailure` setting governs what
-happens when the HTML structure changes and the regex extraction
-fails.
-
-### D.17 Auto-variable `$matches` cannot be reassigned
-
-**Symptom.** Code such as `$matches = Get-UpdateIdFromCatalog ...`
-trips `PSA2002 shadowing auto-variable` even though `$matches` is
-read-after-`-match`. The analyser does not distinguish read-only
-from read-write usage.
-
-**Fix.** Use a non-automatic local name (e.g. `$catMatches`) when
-storing collection results, and `[regex]::Match()` (which returns
-an explicit `Match` object with `.Groups[N].Value`) instead of the
-`-match`/`$matches[N]` pattern whenever a captured group is needed.
-
-### D.18 wsusscn2.cab scans the local host's image, not the WIM
-
-**Symptom.** `Invoke-WuaOfflineScan` is sometimes assumed to scan the
-mounted install.wim. It does not. `Microsoft.Update.Session` scans
-the local host's installed OS image against the offline catalog.
-
-**Fix.** The validator must therefore run from a Windows host whose
-OS family matches the target install.wim (Server 2025 host for a
-Server 2025 image). When that match cannot be guaranteed (e.g. CI
-runners can build any of the four supported OS versions), the
-validator's findings are interpreted as a strong signal but not as
-ground truth. P06 still aborts on missing patches because the
-WUA-required set is approximately the union of what every supported
-Server SKU requires.
-
-### D.19 Catalogue Title comma-form drift (Server 2022)
-
-**Symptom.** A previously-working OS query template suddenly returns
-"no narrowed result" for every Type, even though the Catalogue
-`Search.aspx` page itself still returns hits for the same query
-string. The narrow filter — which compares each hit's `Title`
-against an OS TitleToken via `[regex]::Escape(...)` — fails
-because the live Title now omits a comma (or other punctuation)
-that the template still encodes.
-
-**Concrete case.** Server 2022 update titles historically read
-"Microsoft server operating system, version 21H2"
-(with a comma). As of 2026-05, Microsoft has dropped the comma to
-match the Server 2025 (24H2) format:
-"Microsoft server operating system version 21H2". The previous
-TitleToken `'Microsoft server operating system, version 21H2'`
-matched zero of the live hits.
-
-**Fix.** TitleTokens must be **arrays** of acceptable forms, not
-single strings. The narrow filter already iterates and uses
-`-match` with `[regex]::Escape`, so accepting both the comma and
-comma-less forms is purely a config change. The actual
-`Search.aspx` query strings should track the live (current) form,
-since that is what the Catalogue index uses for fuzzy ranking.
-See `Get-CatalogQueryTemplate` and
-`Get-LanguagePackQueryTemplate.osTitleTokens` for the canonical
-multi-form pattern.
-
-**Tell-tale log signature.** When this happens, every
-`Catalog query: type=...` line for the affected OS is followed by
-`Catalogue: no narrowed result for <Type> / <OsVersion>` and
-the final `Resolved 0 patch entries from Catalogue` line. CI Stage 4
-monthly-refresh runs catch this within ~30 days because the per-
-OS pre-Manual count drops to 0; operators should monitor the
-Stage 4 PR diff for any OS whose `NeutralPatches` array suddenly
-empties.
-
-**Setup vs SafeOs collision on Server 2022 (r05.1 fix).** A
-related pitfall: for Server 2022 / 21H2-era Dynamic Updates,
-Microsoft publishes Setup DU and Safe OS DU under titles that both
-reduce to `"... Dynamic Update for Microsoft server operating
-system version 21H2 ... x64"` after OS-title narrowing. The two
-queries therefore collide on the same UpdateId, producing two
-PatchBaseline entries (`Type=DynamicUpdate.Setup`,
-`Type=DynamicUpdate.SafeOs`) that point at the *same* `.cab`
-file. `Resolve-PatchSetFromCatalog` now applies a title-keyword
-post-filter immediately after OS-title narrowing: Setup queries
-keep titles matching `"Setup Dynamic Update"` (or anything that
-is not Safe-OS-flavoured); SafeOs queries keep titles matching
-`"Safe OS Dynamic Update"` / `"SafeOS"`. Server 2025's 24H2 titles
-already include `Setup` and `Safe OS` distinctively, so no
-post-filter is required for that OS — but the same logic is
-applied uniformly because the cost is negligible.
-
-### D.20 `Get-PatchType` filename heuristic is not authoritative
-
-**Symptom.** A patch is silently routed to the wrong WIM-target
-sub-phase (e.g. an SSU gets applied as if it were the LCU; a
-Safe OS DU is offered to install.wim instead of WinRE; a .NET CU
-sub-file is treated as an LCU). The on-disk Type field looks
-plausible (always one of the registered values, never `'Other'`)
-but is consistently wrong for certain KBs.
-
-**Root cause.** `Get-PatchType -FileName <fn>` infers Type from
-file-name tokens. Microsoft does not encode patch type into file
-names consistently. Examples that defeat the heuristic:
-
-- SSU file names like `windows10.0-kb5088064-x64_<sha>.msu`
-  contain neither `servicingstack` nor `ssu`; the
-  fallback `kb\d+` branch then labels them `LCU`.
-- Safe OS DU file names like `windows11.0-kb5087588-x64_<sha>.cab`
-  contain `kb\d+` but no `safeos`; same fall-through.
-- Umbrella .NET CU sub-files like
-  `windows10.0-kb5087061-x64_<sha>.msu` (the 4.7.2 sub-package
-  of KB5088864) contain no `ndp<N>` and no `.net`; same fall-
-  through.
-
-**Fix.** Callers that already know the patch Type from context
-MUST pass it explicitly. `Convert-CatalogPatchToBaselineEntry`
-takes a `-KnownType` parameter for exactly this purpose;
-`Resolve-PatchSetFromCatalog` populates it from the Catalogue
-query bucket (`$q.Type`). The file-name heuristic is retained as
-the last-resort fallback for ad-hoc invocations.
-
-**General rule.** Any new caller that constructs a baseline entry
-from Catalogue data must pipe the Catalogue's authoritative Type
-information through to `Convert-CatalogPatchToBaselineEntry`
-via `-KnownType`; never rely on file-name reverse-engineering.
-
-### D.21 Umbrella KBs attach multiple files to one UpdateId
-
-**Symptom.** A `.NET Cumulative Update` is recorded in
-`data/config-<OsKey>.json` with only one `NeutralPatches` entry, but a
-later P07 build on an install.wim that contains the *other*
-.NET runtime no-ops the .NET CU because the relevant sub-file
-was dropped during baseline resolution.
-
-**Root cause.** Microsoft occasionally publishes a single
-Catalogue `UpdateId` that bundles multiple independently-applicable
-MSUs — typically one per supported .NET runtime (e.g. 4.7.2 +
-4.8 for Server 2019, 3.5 + 4.8 + 4.8.1 for Server 2022).
-`Get-DownloadLinkFromCatalog` returns all of them, but
-`Select-CanonicalPatchFile` is designed to return a single best
-file. Without an explicit `-DotNetVersion` hint, both sub-files
-score equally, the stable sort picks the first, and the rest are
-silently dropped.
-
-**Tell-tale log signature.** Look for
-`<Type>: 2 candidate files; chose <fn>` lines from
-`Resolve-PatchSetFromCatalog`'s pass-2 loop. If `<Type>` is
-`DotNet` and the count is greater than 1, the dropped file is at
-risk.
-
-**Fix.** Use `Select-AllCanonicalPatchFiles` for any Type that can
-legitimately have multiple sub-files. `Resolve-PatchSetFromCatalog`
-gates this by Type: `DotNet` queries go through the multi-file
-picker and emit one PatchBaseline entry per surviving file
-(sharing `Title` / `UpdateId` / `Supersedes` from the umbrella KB;
-only `FileName`, `DownloadUrl`, and **`KbId`** differ per entry).
-Other Types (SSU / LCU / SafeOS / Setup DU) stay on the single-file
-picker because Microsoft publishes a single canonical file per
-UpdateId for them.
-
-**Per-file KbId (r05.1).** Initially each multi-file entry stored
-the umbrella Title's KbId, but production telemetry from
-`-Action RefreshAllBaselines` showed that the umbrella label did
-not match the actual payload file name (e.g.
-`KbId=KB5088864` with `FileName=windows10.0-kb5087066-x64-ndp48_...msu`).
-The helper `Get-KbIdFromPatchFileName` now extracts the `kb#######`
-token directly from the file name, and `Resolve-PatchSetFromCatalog`
-populates each entry's `KbId` from the file name, with the
-umbrella Title KB as a fallback for file names that have no kb
-token. This also fixes some LCU rows where the Title KB
-(`KB5087539` umbrella) and the payload file (`kb5043080` checkpoint)
-differed.
-
-**Downstream safety.** `Build-PatchPlan` and the I4.DotNet sub-
-phase already loop over multiple DotNet entries (SPEC §B.14), and
-`Add-WindowsPackageWithRetry`'s 0x800f081e handling (Part D.8)
-treats a "not applicable" return from DISM as benign — so if the
-install.wim contains only one of the runtimes, the other entry's
-DISM call no-ops safely.
-
-**Normative spec (r06.0+).** SPEC §B.21.2 lists the expected
-.NET CU file count for each OS generation (Server 2016 = 1 file,
-Server 2019 / 2022 = 2 files, Server 2025 = 1 file). If the
-Refresher ever produces a count that disagrees with that row,
-it is a Microsoft-side packaging change worth investigating
-rather than a bug in this script.
-
-
-### D.22 Secure Boot baseline considerations (r05.0+)
-
-The PCA2023 boot manager support (P10 / P12) integrates lessons
-learned from `microsoft/secureboot_objects`'s upstream
-`Make2023BootableMedia.ps1` and from the
-`Deploy-Drivers-For-WindowsServer` reference repository's Secure
-Boot baseline machinery. These notes capture the non-obvious
-design constraints that shape the implementation.
-
-**Why we re-implement `Copy-2023BootBins` rather than bundle MS's
-script verbatim.** Microsoft's `Make2023BootableMedia.ps1` (Version
-1.4, 2026-03-13) is a 1,141-line script with several non-portable
-patterns that conflict with this project's quality gates:
-
-- It uses `$global:WIM_Mount_Path` / `$global:WIM_File_Path` style
-  globals that leak across phases. We adopt a Context-bag pattern
-  via `$Script:Pca2023Snapshot` instead.
-- It does NOT declare `#Requires -RunAsAdministrator`. Our
-  re-implementation relies on `Assert-WorkspacePreflight` having
-  already validated elevation before P10 dispatch.
-- Verbose `[Parameter(Mandatory=$true)]` shorthand. Our project
-  standard is the bare `[Parameter(Mandatory)]` form.
-- A validator-bypass bug in `-OutputPath`: MS's `[ValidateScript]`
-  regex `[<>:"|?*]` rejects every absolute Windows path because
-  `:` follows the drive letter. We avoid invoking it directly; the
-  `-Pca2023ScriptPath` escape hatch sets `-ISOPath` differently.
-- `Write-Host` everywhere instead of structured logging. Our wrapper
-  routes through `Write-Step` so the standard transcript / log
-  collation works uniformly.
-- `exit` statements rather than `throw`. Our phase wrappers cannot
-  rely on `exit` because they need to leave DISM mounts cleanly
-  unwound; the re-implementation uses `throw` with `try/finally`.
-
-The functional logic (file copies between `EFI_EX` / `FONTS_EX` /
-`DVD_EX` and the corresponding boot manager target paths) is
-preserved verbatim. See `Convert-WimBootToPca2023Signed` in
-the source for the side-by-side mapping.
-
-**Why we read SYSTEM hive offline rather than query live UEFI
-variables.** The reference Deploy-Drivers script's
-`Get-SecureBootCertificateInventory` queries
-`Get-SecureBootUEFI db / KEK / dbx` and reads
-`HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing` of
-the live host. ISO Factory has neither: there is no UEFI
-environment on a Linux/macOS dev host, and `HKLM:` reflects the
-build host, not the produced ISO. Our equivalent reads the
-**WIM-internal** `SYSTEM` hive via `reg.exe load HKLM\TempHive
-<install_wim>\Windows\System32\config\SYSTEM`. This is the only
-way to inspect what the ISO would expose at first boot.
-
-**Why locale-independence matters even for offline analysis.** The
-Deploy-Drivers Secure Boot machinery had a hard-won lesson: it
-originally used `schtasks.exe /Query /TN ... /FO CSV` to detect
-the `Secure-Boot-Update` scheduled task state, but the CSV columns
-are localized (Japanese: "ステータス" instead of "Status"), so
-the parser broke on ja-JP Windows. The fix was to switch to
-`Get-ScheduledTask`, which returns CIM objects with English
-property names. While our ISO Factory does not parse scheduled
-tasks, the broader lesson applies: **all SecureBoot servicing
-values we read are checked as English tokens** (`'Updated'`,
-`'NotStarted'`, `'Pending'`) because those registry values are
-locale-independent by Microsoft design. Do NOT introduce
-locale-dependent parsing into the SecureBoot helpers under any
-circumstances.
-
-**Why Server 2025 is default-skip for P10.** Per Microsoft's
-techcommunity.microsoft.com guidance (2025), certified Server
-2025 server platforms include the 2023 certificates in firmware
-out of the box. Running `Copy-2023BootBins` against such media
-is documented as not required and not officially supported (KB
-5053484's supported-OS list does not include Server 2025). P10
-gates this via `$Script:OsProfile.OsKey -eq 'Server2025'` and
-requires `-ForcePca2023OnServer2025` to override; this matches
-the Config schema's `Pca2023.RequiredByDefault = false` for
-Server 2025.
-
-**Why P12 reports Health = 'Critical' when LCU < 2024-04-09.**
-Microsoft's `Make2023BootableMedia.ps1` halts with the message
-"Make sure all required updates (2024-4B or later) have been
-applied" if the source media's boot.wim does not include the
-EFI_EX staging tree. We pre-flight this same condition: if
-`Get-LcuVersionFromInstallWim` reports `MeetsPca2023Prereq =
-$false`, we surface Health = `'Critical'` and refuse to run P10
-(rather than letting the conversion produce a half-written ISO
-that fails verification). The operator can correct the situation
-by running `-Action RefreshAllBaselines` or by passing a newer
-`-PatchMonth` and rebuilding.
-
-**Reference URLs:**
-
-- Microsoft KB / Support: [Updating Windows bootable media to use the PCA2023-signed boot manager](https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f) — **KB ID 5053484**, original publish date 2025-02-04. Authoritative end-to-end procedure documentation.
-- GitHub: [microsoft/secureboot_objects Make2023BootableMedia.ps1](https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1) — Version 1.4 (2026-03-13) was the snapshot analyzed for r05.0; future versions may diverge.
-- TechCommunity: [Windows Server Secure Boot playbook for certificates expiring in 2026](https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789) (Server 2025 firmware status).
-- Microsoft KB 5025885: [How to manage the Windows Boot Manager revocations for Secure Boot changes associated with CVE-2023-24932](https://support.microsoft.com/kb/5025885) — BlackLotus mitigation programme that drives the PCA2011 revocation timeline.
-
-**KB 5053484 official "Applies To" set.** Per the support article header, the procedure officially covers Windows Server 2012, 2012 R2, 2016, 2019, 2022 plus the Windows 10 / 11 client SKUs back to version 1607. **Server 2025 is NOT listed** — its firmware-provided 2023 certificates make the procedure unnecessary. This project mirrors the official scope:
-
-- P10 ConvertPca2023BootManager defaults to enabled for Server 2016/2019/2022.
-- For Server 2025, P10 requires both `-EnablePca2023BootManager` and `-ForcePca2023OnServer2025` (operator-acknowledged override).
-- Client SKUs (Windows 10/11) and Server 2012/R2 are out of scope for this project, but the underlying technique applies to them per the KB.
-
-**Make2023BootableMedia.ps1 `-MediaPath` accepts three forms.** Upstream supports:
-
-1. An ISO file path (`.iso`)
-2. A local directory containing the expanded media tree
-3. A network share path (`\\server\share\Media\`)
-
-This project's wrapper currently operates on only one form — the local extracted media tree under `<WorkRoot>/source/extracted/` produced by P05 ExpandIso. The narrowing is intentional: the surrounding pipeline (patching, oscdimg re-assembly, hash verification) requires the directory form for repeatability and auditability. Operators who only need to flip an existing ISO without re-patching it should use `-Pca2023OnlyMode` (read-only inspection) or invoke `Make2023BootableMedia.ps1` directly out of band.
-
-
-### D.23 UEFI Secure Boot defaults templates (informational, r05.0+)
-
-The `microsoft/secureboot_objects` repository ships five reference UEFI Secure Boot configurations under `Templates/` (each as a TOML file describing PK/KEK/db/dbx contents). These are NOT consumed directly by this project — they describe **firmware-layer** Secure Boot variables, not the OS-layer boot manager signing that P10 / P12 operate on. But operators provisioning Server 2026+ hardware need to understand which template their target firmware is based on, because that determines whether PCA2023-signed media will actually boot.
-
-| Template | db contains | KEK | When firmware uses this |
-|---|---|---|---|
-| **MicrosoftOnly** | Windows UEFI CA 2023 only | MS Corporation KEK 2K CA 2023 | Windows-only, most restrictive. Firmware revokes PCA2011. PCA2023-signed media REQUIRED. |
-| **MicrosoftAndOptionRoms** | 2023 db + Option ROM 2023 CA | MS Corporation KEK 2K CA 2023 | Windows + Option ROM (e.g., RAID controllers, GPU firmware). PCA2023-signed media REQUIRED. |
-| **MicrosoftAndThirdParty** | 2023 db + 3P UEFI 2023 CA | MS Corporation KEK 2K CA 2023 | Default for current Server 2025 certified platforms. 3P boot loaders (Linux distros etc.) also work. |
-| **MostCompatible** | 2011 + 2023 db + 3P 2011 + 3P 2023 | MS Corporation KEK CA 2011 + KEK 2K CA 2023 | Transitional. PCA2011-signed and PCA2023-signed media BOTH boot. Most current shipping hardware. |
-| **LegacyFirmwareDefaults** | 2011 db + 3P 2011 | MS Corporation KEK CA 2011 | Legacy. PCA2011-signed media REQUIRED. Pre-2026-06 hardware that has NOT received the BlackLotus mitigation revocations. |
-
-**Why this matters operationally.** When an operator runs P12 against an ISO and gets `Health = Warning` ("PCA2011 boot manager, but EFI_EX staging present, P10 can promote"), the decision of whether to actually run P10 depends on the **target firmware's template**:
-
-- Target firmware is **LegacyFirmwareDefaults** → PCA2023 media may FAIL to boot. Do NOT run P10. The existing PCA2011 media is correct for this hardware.
-- Target firmware is **MostCompatible** → either signing works. Running P10 is forward-compatible but not required today.
-- Target firmware is **MicrosoftAndThirdParty** / **MicrosoftAndOptionRoms** / **MicrosoftOnly** → PCA2023 signing is REQUIRED for new builds, P10 must run.
-
-This project does not auto-detect target firmware (the target is by definition not the host running the build). The operator is expected to know which template their target hardware fleet uses. The defaults documented in `data/config-<OsKey>.json#/Pca2023` reflect the **most common case for new hardware in 2026**, which is `MicrosoftAndThirdParty` for Server 2025 firmware and the transitional / legacy templates for older Server SKUs.
-
-**References:**
-
-- [microsoft/secureboot_objects/Templates/Readme.md](https://github.com/microsoft/secureboot_objects/blob/main/Templates/Readme.md) — EFI Signature List structure walkthrough.
-- [microsoft/secureboot_objects/scripts/information/imaging_binaries_information.md](https://github.com/microsoft/secureboot_objects/blob/main/scripts/information/imaging_binaries_information.md) — PKCS7 / EFI_VARIABLE_AUTHENTICATION_2 descriptor layout for tools provisioning firmware variables (out of scope for this project, but relevant context for tools like WinPE `SetFirmwareVariableEx`).
-- [UEFI Specification §32: Secure Boot and Driver Signing](https://uefi.org/specs/UEFI/2.10/32_Secure_Boot_and_Driver_Signing.html) — the underlying specification.
-
----
-
-# Part E — Roadmap
-
-| Milestone | Goal | Status |
-|:---:|---|:---:|
-| **M1** | MVP across all 4 OS x en-us/ja-jp, full registry, full phase set, sandbox + execute, synthetic mode, psa.py clean, README + SPEC + CHANGELOG + CI Stage 1/2/3 | **Done (r01)** |
-| **M2** | `-AutoDetectLatestPatches` actually scrapes the Microsoft Update Catalogue (`Resolve-PatchSetFromCatalog`); writes Patch list back to `data/config-<OsKey>.json#/PatchBaseline`; freshness gating via `Test-PatchBaselineFresh` | **Done (r02)** |
-| **M3** | P06 `ValidatePatchSet` integrating `wsusscn2.cab` + Windows Update Agent COM API for Microsoft-authoritative dependency check; 4-file diagnostic export on failure | **Done (r02)** |
-| M4 | Server 2025 `LCUExpandViaMum=true` real implementation (MUM/CAB expand path) | Placeholder |
-| **M5** | Stage 4 CI workflow (`monthly-refresh`): monthly scheduled run that exercises `-Action RefreshAllBaselines` and opens a PR with the resulting `data/config-<OsKey>.json` diff; catches Microsoft Update Catalogue HTML structure changes and Patch Tuesday drift within ~30 days | **Done (r03.1)** |
-| **M6** | Microsoft-official media-dynamic-update servicing sequence: WIM-target-aware patch plan + pre-apply dependency closure check (r04) + LCU twice-apply + WinRE servicing + Language Pack injection (r04.1) | **Done (r04.1)** |
-| M6 | Client SKUs (Windows 10/11) support — separate Config family | Future |
-| M7 | Driver / FOD / LXP / Appx customisation (OSBuild equivalent) | Future |
-| M8 | Output ISO size minimisation (`Export-WindowsImage` with `/Compress:max`) | Future |
-| M9 | Multi-target deployment (Hyper-V auto-import, VMM library push) | Future |
-| M10 | arm64 evaluation ISOs for Server 2025 (once Microsoft publishes them) | Future |
-
----
-
-# Part F — Function Reuse Map
-
-### Reused from `Download-SpeakerDeck.ps1` (verbatim)
-
-| Function group | Purpose |
-|---|---|
-| `Set-ConsoleUtf8`, `Set-Tls12` | Host configuration |
-| `Resolve-RelativeToScript`, `Initialize-RuntimeDirectories` | Path discipline |
-| `Start-DebugTrace`, `Set-DebugStep`, `Stop-DebugTrace`, `Format-DebugFailure`, `Write-DebugFailureReport`, `Enable-DebugTraceFileOutput`, `Disable-DebugTraceFileOutput`, `Get-DebugTraceFileOutputStatus`, `Enable-AutoExportOnPhaseFailure`, `Export-DebugTraceJson` | Debug Trace Facility |
-| `Format-Elapsed`, `Get-PhaseElapsedTag`, `_LogLine` | Time + log primitives |
-| `Write-Step`, `Write-Ok`, `Write-Warn`, `Write-Fail`, `Write-Skip`, `Write-SubSection`, `Write-PhaseHeader`, `Write-PhaseFooter`, `Show-PhaseSummary` | Logging UX |
-| `Test-DangerousPath`, `Invoke-CleanupDirectories` | Cleanup safety |
-| `Get-FailureCategory`, `Write-FailureDiagnostic`, `Add-ErrorJsonlEntry` | Error reporting |
-| `Wait-WithJitter`, `Invoke-WebRequestWithRetry` | Network retry |
-| `Show-PowerShellEnvironment`, `Assert-PowerShellCompatibility` | Env check (P01) |
-
-### New for `Update-WindowsServerIso.ps1`
-
-| Function | Purpose |
-|---|---|
-| `Get-ConfigProfile` | Load `data/config-<OsKey>.json` and attach the language node |
-| `Get-IsoMetadata` | Detect OS/lang from an ISO filename (four patterns) |
-| `Resolve-IsoSourceUrl` | Pick the source URL (explicit > FwLink > snapshot) |
-| `Read-MetalinkManifest`, `Write-MetalinkManifest` | Metalink 4 (`.meta4`) IO |
-| `Test-PatchIntegrity` | L1 + L2a + L2b + L2c + L3 integrity verification |
-| `Get-PatchKbId`, `Get-PatchType`, `Get-PatchApplyOrder` | Classification + ordering |
-| `Invoke-WimMountSafe`, `Invoke-WimDismountSafe` | DISM mount lifecycle (D.1) |
-| `Add-WindowsPackageWithRetry` | DISM apply with 0x800f081e / 0x800f0a13 handling (D.8, D.9) |
-| `Invoke-DismCleanup` | `StartComponentCleanup /ResetBase` |
-| `Get-WimIndexInventory` | Locale-independent index enumeration |
-| `Resolve-EtfsbootCom`, `Resolve-EfisysBin`, `Resolve-OscdimgExe` | 3-tier boot file fallback (D.4) |
-| `New-BootableIso` | `oscdimg.exe` wrapper |
-| `New-SyntheticTestIso` | CI mode S synthetic ISO (B.9) |
-| `Test-AdminPrivilege` | Used by P01 |
-| `Invoke-SetupPhase01_Initialize`..`Invoke-ReportPhase13_FinalReport` | The 9 phase workers |
-| `Get-PatchListForInstallWim`, `Get-PatchListForBootWim` | Patch filtering per WIM |
-| `Resolve-InstallWimTargetIndexes` | `-OnlyInstallWimIndexes` resolution |
-| `Get-PhaseListByAction` | `-Action` → `string[]` mapping |
-| `Show-PhaseList` | `-Action ListPhases` |
-| `Invoke-PhaseRunner` | Registry-driven dispatcher |
-| `Invoke-CleanupAction` | `-Action Cleanup` |
-| `Invoke-HyperVBootTest` | `-Action BootTest` |
-| `Show-EntryBanner` | Top-level banner |
-
-### Added in r02 (dynamic baseline + wsusscn2 validation)
-
-| Function | Purpose |
-|---|---|
-| `Get-PatchTuesdayForMonth` | Compute second Tuesday of (Year, Month) |
-| `Get-LatestPatchTuesday` | Most recent Patch Tuesday on/before today (D.15 buffer) |
-| `Format-PatchMonthString` | `datetime` → `'yyyy-MM'` for `-PatchMonth` |
-| `Test-PatchBaselineFresh` | True iff baseline is non-stale and usable (B.10) |
-| `Test-PatchBaselineUsable` | Like Fresh but ignores age (fallback-on-scrape-failure path) |
-| `Save-ConfigWithBaseline` | Atomic JSON writeback (LF / UTF-8 / Depth 32) |
-| `Convert-CatalogPatchToBaselineEntry` | Adapter: Catalog DTO → PatchBaseline schema |
-| `Get-OsConfigPath` | Resolve `data/config-<OsKey>.json` from `$Script:ScriptRoot` |
-| `Get-UpdateIdFromCatalog` | `Search.aspx?q=<KB>` HTML scrape; returns array of UpdateId + Title |
-| `Get-DownloadLinkFromCatalog` | `DownloadDialog.aspx` POST scrape; returns array of Url + FileName |
-| `Get-CatalogQueryTemplate` (r02.5) | OS-specific Catalogue search templates (Server2016/2019/2022/2025) with Title / Product / Description per Microsoft media-dynamic-update guidance |
-| `Get-CatalogQueryUrl` (r02.5) | Build Search.aspx URL with quoted Product / Description filter tokens |
-| `Select-CanonicalPatchFile` (r02.5) | Scoring-based file picker that rejects Express/Delta/PSF differential packages and returns the single Full standalone file |
-| `Test-IsCombinedLcuTitle` (r02.5) | True if an LCU title self-identifies as a combined SSU+LCU package |
-| `Get-SupersedenceFromCatalog` | `ScopedViewInline.aspx` HTML scrape; returns Supersedes + SupersededBy |
-| `Resolve-PatchSetFromCatalog` | Two-pass orchestrator: pass 1 runs OS-aware Catalogue searches; combined-LCU detector runs on the aggregate; pass 2 picks the canonical Full file per surviving candidate via `Select-CanonicalPatchFile` |
-| `Get-LanguagePackQueryTemplate` (r03) | Per-language Catalogue search templates (LanguagePack / LXP / DotNet.LangPack) for OsVersion + OsLanguage + PatchMonth |
-| `Resolve-LanguageSpecificPatchesFromCatalog` (r03) | Per-language Catalogue scraper; returns LP / LXP / .NET LP entries; empty result = verified absence |
-| `Select-LatestPatchBySupersedence` (r04.2) | Deduplicate Catalogue candidates via their Supersedes / SupersededBy fields; returns the single newest survivor plus a list of excluded entries for diagnostic CSV |
-| `Get-KbIdFromUpdateTitle` (r04.2) | Extract the `KB######` substring from a Catalogue update title |
-| `Select-AllCanonicalPatchFiles` (r04.3) | Companion to `Select-CanonicalPatchFile`; returns ALL files that survive the scoring filter (Express / Delta / PSF / metadata still rejected) rather than just the highest-scoring one. Used by `Resolve-PatchSetFromCatalog` for `Type='DotNet'` umbrella KBs that attach multiple ndp-runtime MSUs to a single UpdateId |
-| `Assert-WorkspacePreflight` (r04.3) | Mandatory preflight that runs before the Action dispatcher; throws if any of the four `data/config-Server<N>.json` files are missing OR if the `-WorkRoot` drive has less than 100 GB free. Skipped for `ListPhases` / `Cleanup` / `-EnvironmentInfoOnly` / `-SkipEnvCheck` |
-| `Get-PatchTargetsForType` (r04) | Returns the WIM target array for a given patch Type (Install / Boot / WinRE / Setup) via `$Script:PatchTargetMap` |
-| `Build-PatchPlan` (r04) | Build a target-aware PatchPlan from the flat ResolvedPatches array, sorted by ApplyOrder within each target lane |
-| `Build-InstallApplySequence` (r04.1) | Convert install.wim patch slice into the I1-I7 Microsoft media-dynamic-update sub-phase sequence; emits I7 (LCU second pass with RequiresRemount=$true) only when language packs are present |
-| `Build-BootApplySequence` (r04.1) | Convert boot.wim patch slice into B1-B4 sub-phase sequence (SSU/LP/LCU/Cleanup); no twice-apply needed |
-| `Build-WinReApplySequence` (r04.1) | Convert WinRE.wim patch slice into W1-W4 sub-phase sequence (SSU/LP/SafeOsDU/Cleanup); LCU is NOT included (Safe OS DU is the Microsoft-supported substitute) |
-| `Invoke-PatchSubPhase` (r04.1) | Apply one sub-phase against a mounted WIM, handling DryRun, missing LocalPath, and Add-WindowsPackage failures; emits per-patch result rows |
-| `Write-PatchPlanSummary` (r04, extended r04.1) | Human-readable per-target summary of a PatchPlan; r04.1 also prints the InstallSequence / BootSequence / WinReSequence breakdown |
-| `Test-PatchDependencyClosureOnMount` (r04) | Pre-apply verification: every patch's RequiresKbIds must already be present in the mounted image (Get-WindowsPackage substring match); Strict mode aborts before DISM 0x800f0823 |
-| `Get-OrInitPatchPlan` (r04) | Lazy accessor for `$Script:PatchPlan`; builds on first access |
-| `Get-RefreshDecision` (r03) | Decide Skip / InitialFill / Monthly / Manual for a field group given Cadence, verification state, and latest Patch Tuesday |
-| `Get-GroupSnapshot` (r03) | Read the verification meta-state for a field group from a raw config JSON object |
-| `Set-GroupVerifiedState` (r03) | Update `_VerifiedDate` / `_VerifiedBy` / `LastVerified*` after a successful Refresher call |
-| `Invoke-AdminPhaseA01_RefreshAllBaselines` (r03) | A01 admin phase: orchestrate field-group refresh across OS Configs |
-| `Invoke-AdminPhaseA02_DumpFieldClassification` (r03) | A02 admin phase: dump `$Script:OsConfigFieldGroups` as JSON |
-| `Get-WsusScnCabSourceUrl` | Microsoft canonical wsusscn2.cab URL |
-| `Test-WsusScnCabFresh` | Cache freshness vs latest Patch Tuesday |
-| `Get-WsusScnCabIfNeeded` | Conditional download with override-path support |
-| `Invoke-WuaOfflineScan` | `Microsoft.Update.Session` COM offline scan against the cab |
-| `Compare-PatchSetVsWuaScan` | Classify WUA-required updates as Provided / Missing |
-| `Export-PatchValidationReport` | Emit 4 diagnostic files on validation failure |
-| `Invoke-SetupPhase03_RefreshPatchBaseline` | P03 phase worker |
-| `Invoke-PlanPhase06_ValidatePatchSet` | P06 phase worker |
-| **release-info support (r07.0 Step 2a)** ||
-| `Get-DataDirectoryPath` (r07.0) | Resolve `data/` next to the script for every cache- and raw- accessor |
-| `Get-ReleaseInfoRawPath` (r07.0) | Resolve `data/raw-release-info.md` |
-| `Get-ReleaseInfoRawMetaPath` (r07.0) | Resolve `data/raw-release-info.meta.json` |
-| `Get-ReleaseInfoCachePath` (r07.0) | Resolve `data/cache-release-info.json` |
-| `Invoke-ReleaseInfoFetch` (r07.0) | Fetch the Microsoft Learn release-info Markdown via `?accept=text/markdown`; write raw + meta to `data/` |
-| `Split-ReleaseInfoTableRow` (r07.0) | Split a Markdown table row into trimmed cell array |
-| `Test-ReleaseInfoTableSeparator` (r07.0) | True if a line is a Markdown table separator (`|---|---|`) |
-| `ConvertFrom-ReleaseInfoUpdateType` (r07.0) | Decompose '2026-04 B' / '2026-04 OOB' into (Year, Month, Letter) |
-| `ConvertFrom-ReleaseInfoKbCell` (r07.0) | Extract (KbId, KbUrl) from a Markdown KB-link cell |
-| `ConvertFrom-ReleaseInfoMarkdown` (r07.0) | Strict parser; returns MonthlyReleases + HotpatchCalendar arrays |
-| `Update-ReleaseInfoCache` (r07.0) | Read `raw-release-info.md`, parse, write `cache-release-info.json` |
-| `Get-ReleaseInfoCache` (r07.0) | Read deserialised `cache-release-info.json` for Refresher consumers |
-| **.NET CU support (r07.0 Step 2a)** ||
-| `Get-DotNetCuRawPath` (r07.0) | Resolve `data/raw-dotnet-cu.json` |
-| `Get-DotNetCuCachePath` (r07.0) | Resolve `data/cache-dotnet-cu.json` |
-| `ConvertFrom-DotNetCuOsLabel` (r07.0) | Map raw OS label as printed in the release-notes table to a normalised short name (e.g. `Server2025`); empty string when unrecognised |
-| `Split-DotNetCuMarkdownFrontMatter` (r07.0) | Strip the YAML front matter block from a Microsoft Learn Markdown body |
-| `ConvertFrom-DotNetCuIndexMarkdown` (r07.0) | Parse the index page; returns EntryCount/Kinds/EarliestDate/LatestDate/Entries[]; tolerates the `**New Release**` trailing badge and date typos |
-| `ConvertFrom-DotNetCuMarkdown` (r07.0) | Parse a monthly page; walks from `## Summary tables` to next `## ` heading or EOF; emits per-OS table blocks with OsLabel/OsNormalised/OsOfferingKb/Rows[] |
-| `Invoke-DotNetCuFetch` (r07.0) | Fetch the release-notes index plus every monthly page it references; write the aggregated body and per-fetch metadata to `data/raw-dotnet-cu.json` |
-| `Update-DotNetCuCache` (r07.0) | Read `raw-dotnet-cu.json`, parse every captured month, write `cache-dotnet-cu.json` |
-| `Get-DotNetCuCache` (r07.0) | Read deserialised `cache-dotnet-cu.json` for Refresher consumers |
-| **Dynamic Update 36-month cache support (r07.0 Step 2a)** ||
-| `Get-DynamicUpdateCachePath` (r07.0) | Resolve `data/cache-du-Server<NNNN>.json` for the given OS; tests can override the data directory with `-DataDir` |
-| `New-EmptyDynamicUpdateCache` (r07.0) | Build a fresh empty cache object (Schema/OsVersion/LastRefreshedAt/WindowMonths/Entries) for an OS with no persisted cache file |
-| `Get-DynamicUpdateCache` (r07.0) | Read the per-OS cache file; returns a fresh empty cache when the file is missing (never throws on missing-file, per §B.23.6 "latest known good" stance) |
-| `Save-DynamicUpdateCache` (r07.0) | Persist a cache object to disk with UTF-8 + LF + no-BOM, matching project-wide cache file conventions |
-| `Test-DynamicUpdatePatchMonth` (r07.0) | Validate that a PatchMonth string matches the `YYYY-MM` convention |
-| `Add-DynamicUpdateCacheEntry` (r07.0) | Append-or-upsert a Catalog-probe result into the cache file; same (PatchMonth, DuType) replaces in place; updates `LastRefreshedAt`; persists before returning |
-| `ConvertTo-DynamicUpdatePatchMonthSortKey` (r07.0) | Convert a `YYYY-MM` PatchMonth into an integer (`yyyy*100+mm`) for fast comparison |
-| `Get-DynamicUpdateWindowEarliestPatchMonth` (r07.0) | Compute the earliest in-window `YYYY-MM` relative to a reference date (default UTC now); inclusive 36-month range |
-| `Get-LatestDynamicUpdate` (r07.0) | Return the most-recent successful entry for `(OsVersion, DuType)` within the 36-month window; returns `$null` when the window has no successful entries; tests anchor the window via `-Now` |
-| `Remove-DynamicUpdateOutsideWindow` (r07.0) | Drop entries whose PatchMonth falls outside the 36-month window; persists the trimmed cache; no-op when nothing to drop |
-| **URL-resolver Config-driven narrowing (r07.0 Step 2b)** ||
-| `Get-CatalogTitleTokenList` (r07.0) | Return the per-OS positive title-token list from `data/config-<OsVersion>.json` (Common.CatalogTitleTokens) used to narrow Microsoft Update Catalog responses to the right OS variant; returns an empty array when the field is absent (SPEC B.23.2 default) |
-| `Test-CatalogTitleMatch` (r07.0) | Decide whether a Microsoft Update Catalog hit title belongs to the given OS, combining the Config-driven positive token list with the hardcoded `$Script:CatalogTitleNegativeTokens` exclusion list (`Windows 11`, `arm64`); case-insensitive substring matching |
-| **Refresher main path migration (r07.0 Step 2b)** ||
-| `Get-PatchSetFromReleaseInfoDiscovery` (r07.0) | Pure-cache KB discovery for the given OS + patch month; reads `data/cache-release-info.json` for LCU, `data/cache-dotnet-cu.json` for .NET CU rows (multiple per SPEC B.23.5 B-2), and `data/cache-du-<OsVersion>.json` for Dynamic Update entries via `Get-LatestDynamicUpdate`; performs no network I/O; tests can override the data directory with `-DataDir`; returns an array of discovery records each carrying Type / KbId / UpdateId / SourceCache / SourceRow / DiscoveryNote |
-| `Resolve-PatchSetFromReleaseInfo` (r07.0) | Orchestrator that replaces the deleted r05.1 `Resolve-PatchSetFromCatalog`. Calls `Get-PatchSetFromReleaseInfoDiscovery` for KB discovery, then uses the Catalog as URL-resolver only: KB-only `Get-UpdateIdFromCatalog` search, narrow with `Test-CatalogTitleMatch`, fetch files via `Get-DownloadLinkFromCatalog`, and convert each to a PatchBaseline entry via `Convert-CatalogPatchToBaselineEntry`. Honours the combined-LCU convention from SPEC B.23.5 B-1 (LCU entries get `IsCombined=$true`; bundled SSU files are tagged via filename heuristic). Same caller signature as the deleted function so the P03 RefreshPatchBaseline phase and A01 RefreshAllBaselines admin phase migrate by a single rename |
-
----
-
-# Part G — Self-verification tools (`tests/`)
-
-The `tests/` subdirectory ships a Python-based self-verification
-suite that exercises the script's external dependencies and the
-PowerShell helpers themselves. It exists because three of the four
-r04.3 live-test bugs were caused by silent Microsoft-side change
-(comma-form drift in Catalog titles, multi-file `UpdateId` for
-umbrella .NET CUs, file-name heuristic vs Catalogue Type bucket)
-and no purely-static analysis could have caught any of them.
-
-All tools use standard-library Python only (`urllib`, `re`, `json`,
-`subprocess`) so the suite runs on any host with Python 3.10+ and
-PowerShell 7+. No `pip install` is required.
-
-| Tool | Verifies | Network |
-|---|---|:---:|
-| `tests/catalog_probe.py`        (T1) | Live Microsoft Update Catalog: Search.aspx reachable + GUID regex still matches + per-OS title format + ScopedViewInline supersedence panel structure. Diffs results against `tests/snapshots/last_probe.json`. | Yes |
-| `tests/catalog_fixture_test.py` (T2) | Offline regression test against saved Catalog HTML in `tests/fixtures/<patch-month>/`. Includes bug-2 (comma-less title) and bug-3 (umbrella .NET CU) regression tests. | No  |
-| `tests/powershell_harness.py`   (T3) | Python-side unit tests of `Update-WindowsServerIso.ps1` functions via the `-Action TestHarness` REPL hook (see §B.17). Asserts `Get-CatalogQueryTemplate`, `Select-AllCanonicalPatchFiles`, `Select-CanonicalPatchFile`, `Get-KbIdFromUpdateTitle`, `Test-IsCombinedLcuTitle`. | No  |
-| `tests/eval_iso_probe.py`       (T4) | HTTP Range-GET against every `LanguageSpecific.<lang>.Iso.Url` in each `data/config-Server<N>.json`; reports total size and `Last-Modified`. Detects snapshot rotation (see §D.11). | Yes |
-| `tests/wsusscn2_probe.py`       (T5) | HTTP Range-GET against `wsusscn2.cab`; warns when the cab is older than 60 days. Detects egress-proxy `host_not_allowed` and reports it separately from real Microsoft outages. | Yes |
-| `tests/release_info_parser_test.py` (T6) | Offline regression test for `ConvertFrom-ReleaseInfoMarkdown`. Parses `tests/snapshots/release_info/release-info-<date>.md` via the TestHarness and asserts row counts (total + per-OS), KbId-parse coverage, and IsBaseline detection against the reference fixture `tests/fixtures/release_info/release-info.json`. Added in r07.0 Step 2a as the regression gate for the PowerShell port of the r06 Phase 2 release-info parser (now retired; see `docs/history/release-info-report.md`). | No  |
-| `tests/dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown`. Parses the live-captured snapshots under `tests/snapshots/dotnet_cu/` (index plus two monthly pages) via the TestHarness and asserts EntryCount / EarliestDate / LatestDate / Kinds / per-OS row counts / per-entry deep equality against the Python reference fixtures under `tests/fixtures/dotnet_cu/`. Reference data was captured live from learn.microsoft.com on 2026-05-26 (the earlier r06 PoC snapshots reflected an older page structure and were retired together with the rest of the PoC assets in r07.0; see `docs/history/dotnet-cu-report.md`). | No  |
-| `tests/dynamic_update_cache_test.py` (T8) | Offline regression test for the Dynamic Update 36-month cache subsystem. Drives `Add-DynamicUpdateCacheEntry`, `Get-DynamicUpdateCache`, `Get-LatestDynamicUpdate`, and `Remove-DynamicUpdateOutsideWindow` through three scenarios defined in `tests/fixtures/dynamic_update_cache/scenarios.json` (which combines fresh live Microsoft Update Catalog probe results captured on 2026-05-26 with synthetic older months to exercise the 36-month window trim) plus three ad-hoc scenarios (cross-OS isolation, missing-file empty cache, PatchMonth validation rejection). Each scenario uses an isolated temp directory via the `-DataDir` parameter, anchors the window via `-Now=2026-05-26T00:00:00Z`, and asserts 20 invariants total. | No  |
-| `tests/catalog_title_tokens_test.py` (T9) | Offline regression test for the URL-resolver Config-driven narrowing added in r07.0 Step 2b. Drives `Get-CatalogTitleTokenList` against all four `data/config-Server*.json` files (verifies `Common.CatalogTitleTokens` is read correctly and a missing-Config OS returns an empty list), then drives `Test-CatalogTitleMatch` through 13 narrow-filter cases captured live from Microsoft Update Catalog on 2026-05-26. Cases cover: positive title matches for all four production OSes, same-KB client-variant rejection (Windows 10 1607 / 1809 for Server 2016 / 2019), negative-token exclusion (`arm64`, `Windows 11`), and Server 2022's both comma forms. 18 assertions total. | No  |
-| `tests/release_info_resolver_test.py` (T10) | Offline regression test for the Refresher main-path migration added in r07.0 Step 2b. Drives `Get-PatchSetFromReleaseInfoDiscovery` (the pure-cache half of `Resolve-PatchSetFromReleaseInfo`) through five scenarios defined in `tests/fixtures/release_info_resolver/scenarios.json`: Server 2025 / Server 2022 / Server 2019 / Server 2016 full-set discovery for 2026-05 (asserting the SPEC B.23.5 B-2 multi-row .NET CU behaviour, the SPEC B.23.5 B-3 LCU-priority dedup for Server 2016 where the .NET CU release-notes re-lists the LCU KB, and the SPEC B.23.6 "no DU for Server 2019" absence), and a no-match month returning zero records. Plus two ad-hoc checks: missing-cache defensive default returns zero records, and an invalid PatchMonth (`"2026/05"`) is rejected. All fixtures are synthetic but lifted shape-for-shape from the live 2026-05-26 captures used by T6/T7/T8. 22 assertions total. The orchestrator's Catalog URL-resolution layer is intentionally out of T10's scope (network-dependent); the URL-resolver narrowing layer is covered by T9. | No  |
-
-`tests/common/` holds:
-
-| Module | Role |
-|---|---|
-| `catalog_client.py` | `urllib` HTTP client with retry-with-jitter; mirrors the PS scraper's User-Agent so probes are indistinguishable from production traffic |
-| `html_parsers.py`   | Catalog HTML extractors (UpdateId GUIDs, search-hit titles, DownloadDialog file URLs, supersedence panel). Intentionally duplicates the PS regexes so any drift breaks BOTH sides loudly |
-| `ps_invoke.py`      | `PSSession` context manager driving the `-Action TestHarness` REPL (§B.17) |
-| `snapshot.py`       | JSON snapshot read/write + `diff_dict()` for surfaceable drift reports |
-
-The suite is documented operationally in
-[`tests/README.md`](./tests/README.md), which includes a
-"what to run, when" guide for both Claude and human operators.
-
-### Adjunct: retired r06 Phase 2 PoC
-
-Earlier releases (r06.x) shipped a separate `poc_<topic>_<step>_<verb>.py`
-family under `tests/` that drove the Phase 2 investigation behind the
-§B.23 architecture. As of r07.0 those scripts are retired:
-
-- `poc_release_info_*.py`, `poc_dotnet_cu_*.py` and
-  `poc_dynamic_update_01_probe.py` have all been deleted. Their
-  parser / resolver logic was promoted into
-  `Update-WindowsServerIso.ps1` during r07.0 Step 2a / Step 2b
-  (see `Get-PatchSetFromReleaseInfoDiscovery`,
-  `ConvertFrom-ReleaseInfoMarkdown`,
-  `ConvertFrom-DotNetCuMarkdown`,
-  `Resolve-PatchSetFromReleaseInfo`); live fetch / probe is
-  covered by the production `Invoke-ReleaseInfoFetch`,
-  `Invoke-DotNetCuFetch` and `Add-DynamicUpdateCacheEntry`.
-- Regression coverage moved into the T6-T10 numbered suite
-  enumerated above.
-- The PoC report Markdown files were preserved as design
-  rationale and live under `docs/history/` (without the `poc-`
-  filename prefix). See `docs/history/release-info-report.md`,
-  `docs/history/dotnet-cu-report.md` and
-  `docs/history/dynamic-update-report.md`.
-
-| Original PoC topic | Retired scripts                                       | Historical record                     |
-|--------------------|-------------------------------------------------------|---------------------------------------|
-| `release_info`     | `poc_release_info_01_fetch.py` ... `04_resolve.py`    | `docs/history/release-info-report.md` |
-| `dotnet_cu`        | `poc_dotnet_cu_01_fetch.py`, `02_parse.py`            | `docs/history/dotnet-cu-report.md`    |
-| `dynamic_update`   | `poc_dynamic_update_01_probe.py`                      | `docs/history/dynamic-update-report.md` |
-
-The `poc_<topic>_*` naming pattern remains documented in §B.22.2
-as a reserved convention for any future PoC investigation.
-
----
-
-# Part H — Reference Projects
-
-- **[OSDBuilder](https://github.com/OSDeploy/OSDBuilder)** (David Segura) v24.10.8.1 — source of the DISM mount/dismount retry pattern (D.1), 0x800f081e suppression (D.8), and the boot file 3-tier idea (D.4). The most production-hardened reference.
-- **[WIM Witch](https://github.com/MOOREDOMAIN/WIM-Witch)** — WIM update GUI; informed the boot.wim and winre.wim handling.
-- **[Win_ISO_Patching_Scripts_zhCN](https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN)** — direct source for the 3-tier `etfsboot.com` / `efisys.bin` fallback chain.
-- **[rgl/windows-evaluation-isos-scraper](https://github.com/rgl/windows-evaluation-isos-scraper)** — canonical Windows Server 2022 SHA-256 hashes (en-us); used to seed `data/config-Server2022.json`.
-- **[`Download-SpeakerDeck.ps1`](../download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1)** — sibling in-house script; the canonical source of the Part A common conventions inherited here.
-
----
-
-# Part I — Servicing Dependency Database (r09.0+, normative)
-
-> **Status**: Specification. Implementation deferred to r09.0 implementation
-> phase. This Part defines the design contract; no code implementing it is
-> present in the script as of r08.0.
-
-> **Scope**: This Part defines a Microsoft-authoritative pre-apply
-> dependency-resolution facility built on top of `wsusscn2.cab` (the
-> WSUS-style offline scan metadata CAB published by Microsoft on the
-> Windows Update CDN). It supersedes and operationalises the placeholder
-> claim in Part E milestone M3 ("P06 ValidatePatchSet integrating
-> wsusscn2.cab … for Microsoft-authoritative dependency check"), which
-> was previously marked Done but in fact remained un-implemented — only
-> the config schema slot `PatchBaseline.WsusScnCab` existed, with no
-> code reading or writing it.
-
-> **Relationship to existing facilities**:
-> - **B.13 Pre-apply dependency closure check** (r04+) — current
->   implementation uses `Get-WindowsPackage -Mounted` plus the
->   `RequiresKbIds` array declared in `PatchBaseline.NeutralPatches[*]`.
->   That array is currently **populated by hand** (or left empty) and
->   has no Microsoft-authoritative source of truth. Part I makes
->   `RequiresKbIds` automatically derivable from `wsusscn2.cab`.
-> - **B.10 Config Schema v2.1** §`WsusScnCab` — the slot was added in
->   r05.0 but never wired up. Part I defines its semantics and the
->   surrounding lifecycle.
-> - **B.11 Field Cadence and RefreshAllBaselines decision matrix** —
->   Part I adds new fields whose cadence rows are documented in §I.7.
-
-## I.1 Goals and motivation (informative)
-
-### I.1.1 The anti-pattern this Part eliminates
+## B.19 Servicing Dependency Database
+
+**Status**: normative (specification); implementation status: planned
+for r09.0. **Policy ID**: SPEC-WSI-020.
+
+> **Scope of B.19**: this section defines a Microsoft-authoritative,
+> offline, file-based dependency-resolution facility built on top of
+> the `wsusscn2.cab` package that Microsoft publishes on the Windows
+> Update CDN. It supersedes the placeholder dependency-graph claim
+> that appeared in earlier roadmap milestones and provides the
+> mechanism by which Pre-Patch-Tuesday baselines can be authoritatively
+> validated against Microsoft's own metadata before any DISM mount is
+> performed.
+>
+> The contract spans nineteen sub-sections (B.19.1 – B.19.19). It is
+> deliberately long because the design choices that produced it are
+> non-obvious and have all been validated by physical experiments
+> recorded in `docs/history/r09.0-step1-phase5-summary.md`.
+
+### B.19.1 Goals and motivation (informative)
+
+#### B.19.1.1 The anti-pattern this section eliminates
 
 Without `wsusscn2.cab` integration, a missing prerequisite KB (most
-commonly an SSU required by a recent LCU) is discovered only when
-DISM `Add-WindowsPackage` returns `0x800f0823 -
-CBS_E_NEW_SERVICING_STACK_REQUIRED` from inside P07. By that point
-the operator has paid:
+commonly a Servicing Stack Update required by a recent Latest
+Cumulative Update) is discovered only when DISM `Add-WindowsPackage`
+returns `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` from inside
+P07. By that point the operator has paid:
 
-1. Full P04 ISO download (~6 GB)
-2. Full P05 robocopy expand (~30 s)
-3. Full WIM mount (~38 s per index)
-4. Several minutes per `Add-WindowsPackage` attempt before CBS rejects
+1. Full P04 ISO download (~6 GB).
+2. Full P05 robocopy expand (~30 s).
+3. Full WIM mount (~38 s per index).
+4. Several minutes per `Add-WindowsPackage` attempt before CBS
+   rejects.
 
 …only to learn that the patch set was incomplete from the start.
 
-The classic example is **KB5087537** (2026-05 LCU for Server 2016,
+The canonical example is **KB5087537** (2026-05 LCU for Server 2016,
 OS Build 14393.9140.1.19): it requires servicing-stack version
-`v10.0.14393.7692` but install.wim from the Server 2016 GA evaluation
-ISO ships with `v10.0.14393.693`. The fix is to apply **KB5088064**
-(2026-05 SSU) first. This dependency is **not** declared anywhere
-inside the `.msu` file; it lives in `wsusscn2.cab`'s `package.xml`
-under the `<Prerequisites>` and `<ApplicabilityRules>` sections.
+`v10.0.14393.7692` but install.wim from the Server 2016 GA
+evaluation ISO ships with `v10.0.14393.693`. The fix is to apply
+**KB5088064** (2026-05 SSU) first. This dependency is **not**
+declared anywhere inside the `.msu` file; it lives only in
+`wsusscn2.cab`'s embedded `package.xml` under the `<Prerequisites>`
+section. The §B.13 mount-time check can detect the missing
+prerequisite once a WIM is mounted, but it cannot **predict** it
+before the I/O budget is spent.
 
-### I.1.2 What this Part adds
+#### B.19.1.2 What this section adds
 
 A monthly, offline, Microsoft-authoritative dependency-resolution
 layer that:
 
-- Tells the operator **before P07 starts** that the configured patch
-  set is incomplete, and which KB IDs are missing.
-- Auto-populates `RequiresKbIds` / `Supersedes` / `MinimumOsBuild`
-  on each `PatchBaseline.NeutralPatches[*]` entry, with provenance
-  recorded back to a specific `wsusscn2.cab` SHA-256.
+- Tells the operator **before P07 starts** that the configured
+  patch set is incomplete, and which KB IDs are missing.
+- Auto-populates `RequiresKbIds` / `Supersedes` /
+  `RequiresMinimumOsBuild` on each
+  `PatchBaseline.NeutralPatches[*]` entry, with provenance recorded
+  back to a specific `wsusscn2.cab` SHA-256.
 - Keeps working in fully air-gapped environments, given that the
   parsed dependency database is committed to `data/` and travels
   with the repository.
 
-### I.1.3 Cost / benefit assessment
+#### B.19.1.3 Cost / benefit assessment
 
 | Cost | Quantum |
-|---|---|
-| Initial `wsusscn2.cab` download | ~1 GB once, ~100–200 MB monthly diff thereafter |
-| Workspace cache footprint | ~1.1 GB |
-| Implementation effort | ~2–3 weeks (L2c-equivalent scope, see §I.6.1) |
+|:---|:---|
+| Initial `wsusscn2.cab` download | ~600 MB once, ~100–200 MB monthly diff thereafter |
+| Workspace cache footprint | ~1.1 GB peak (cab + extracted files) |
+| Implementation effort | ~2–3 weeks at the L2c tier (B.19.1.4) |
 | Maintainer time per Patch Tuesday | ~10–20 minutes (refresh + commit) |
 | Per-user ongoing cost | 0 (uses committed `wsusscn2-database.json`) |
 
 | Benefit | Quantum |
-|---|---|
+|:---|:---|
 | Failure-detection latency | Move from ~10 min (mid-P07) to <5 s (mid-P06) |
 | Recovery cost per detection | Drop from ~10 min (P05 re-extract + remount) to 0 |
 | Auto-recommendation of missing KBs | None today → fully automated |
 | Air-gapped operability | Currently impossible → fully supported |
-| Audit trail (why was this judgement made?) | Currently DISM logs only → reproducible from a specific `wsusscn2.cab` SHA-256 |
+| Audit trail | DISM logs only → reproducible from a specific `wsusscn2.cab` SHA-256 |
 
 One avoided P07 failure already pays back the maintainer's
-month-on-month effort. The r08.0 Step 4 series itself contains one
-such failure (the KB5087537 SSU-prerequisite incident), so the
-break-even is empirically validated.
+month-on-month effort. The r08.0 Step 4 series contains one such
+failure (the KB5087537 SSU-prerequisite incident); the break-even
+is empirically validated.
 
-## I.2 Three-layer architecture (normative)
+#### B.19.1.4 Implementation tier
 
-The dependency facility is structured into three layers with sharply
-different governance rules. **Confusing the layers — for example
-committing layer 3 to git, or deriving layer 1 directly from layer 3
-at runtime — is a specification violation.**
+This section targets the **L2c** tier: self-parse `wsusscn2.cab`'s
+embedded `package.xml` (the "Master XML") into a fact-only JSON,
+then cross-reference at runtime against the resolved patch set and
+the install.wim's static metadata.
+
+Lower tiers (MSU manifest only) miss the SSU-prerequisite class of
+failure. Higher tiers (calling the Microsoft `IUpdateSession` COM
+API, or full DISM simulation) are not ROI-justified: the COM API
+cannot be aimed at a **mounted offline image** (it operates on the
+currently-running OS or on `wsusscn2.cab` as a data source), and
+full DISM simulation requires mounting the WIM — exactly what this
+check is meant to avoid.
+
+### B.19.2 Three-layer architecture (normative)
+
+The dependency facility is structured into three layers with
+sharply different governance rules. **Confusing the layers — for
+example committing layer 3 to git, or deriving layer 1 directly
+from layer 3 at runtime — is a specification violation.**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -4224,70 +1363,70 @@ at runtime — is a specification violation.**
 │            RequiresMinimumOsBuild, plus _DependencyVerifiedDate  │
 │            and _DependencyVerifiedSource fields                  │
 └─────────────────────────────────────────────────────────────────┘
-                              │
+                              ▲
                               │ summary derived from
-                              ▼
+                              │
 ┌─────────────────────────────────────────────────────────────────┐
 │  Layer 2: WSUS-derived aggregated dependency database           │
 │  Location: data/wsusscn2-database.json                           │
 │  Git:      committed                                             │
 │  Owner:    maintainer-only (regular contributors do not touch)   │
 │  Contents: facts-only extract from wsusscn2.cab — KB IDs,        │
-│            OS build numbers, package relationships. NO           │
-│            Microsoft-authored prose (no KB titles,               │
+│            UpdateIds, RevisionIds, package relationships.        │
+│            NO Microsoft-authored prose (no KB titles,            │
 │            no descriptions). Size target: ~2–5 MB                │
 └─────────────────────────────────────────────────────────────────┘
-                              │
+                              ▲
                               │ parsed and aggregated from
-                              ▼
+                              │
 ┌─────────────────────────────────────────────────────────────────┐
 │  Layer 3: Raw wsusscn2.cab                                       │
 │  Location: <WorkRoot>/cache/wsusscn2/wsusscn2.cab                │
 │  Git:      NOT committed (gitignored)                            │
 │  Owner:    each user fetches their own copy                      │
-│  Contents: Microsoft-published binary, ~1 GB, monthly cadence   │
+│  Contents: Microsoft-published binary, ~600 MB, monthly cadence │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### I.2.1 Why layer 3 is git-excluded (normative rationale)
+#### B.19.2.1 Why layer 3 is git-excluded
 
-Three independent reasons, any one of which is sufficient on its own:
+Three independent reasons, any one of which is sufficient on its
+own:
 
-1. **Licence**: `wsusscn2.cab` is a verbatim Microsoft binary
+1. **Licence**. `wsusscn2.cab` is a verbatim Microsoft binary
    distributed under Microsoft Software Licence Terms. Mirroring it
    on a public GitHub repository constitutes redistribution in a
-   form Microsoft has not authorised. The legal exposure is real
-   even if usually unenforced.
-2. **Size**: 1 GB × monthly cadence = ~24 GB of `.git` history
+   form Microsoft has not authorised.
+2. **Size**. 600 MB × monthly cadence = ~14 GB of `.git` history
    over a 24-month window. This breaks clone times, GitHub upload
    limits, and contributor onboarding.
-3. **Audit-via-hash**: any judgement made by the dependency
-   resolver references the *SHA-256 of the wsusscn2.cab it consumed*.
-   That hash is recorded in layer 1 and layer 2. Anyone wanting to
-   reproduce the judgement can re-download the exact `wsusscn2.cab`
-   from Microsoft using the hash to verify — there is no need for
-   the project to ship the bytes.
+3. **Audit-via-hash**. Any judgement made by the dependency
+   resolver references the SHA-256 of the `wsusscn2.cab` it
+   consumed. That hash is recorded in layer 1 and layer 2. Anyone
+   wanting to reproduce the judgement can re-download the exact
+   `wsusscn2.cab` from Microsoft using the hash to verify; the
+   project does not need to ship the bytes.
 
-### I.2.2 Why layer 2 IS committed (normative rationale)
+#### B.19.2.2 Why layer 2 IS committed
 
-Layer 2 is a structured factual extract — KB IDs, version numbers,
-prerequisite relationships, supersedence relationships, OS-build
-applicability rules. These are facts, not Microsoft's creative
-expression, and are well outside the scope of `wsusscn2.cab`'s
-underlying licence. Committing layer 2 lets the repository:
+Layer 2 is a structured factual extract — KB IDs, UpdateId GUIDs,
+RevisionId numbers, prerequisite relationships, supersedence
+relationships. These are facts, not Microsoft's creative
+expression, and are outside the scope of the wsusscn2.cab licence.
+Committing layer 2 lets the repository:
 
-- Be cloned and used immediately, with no 1 GB download on first
-  use (until the user opts into a fresh layer 3 fetch).
+- Be cloned and used immediately, with no 600 MB download on first
+  use.
 - Function in fully air-gapped environments — only layer 2 needs
   to travel with the repo.
 - Provide a single canonical source of truth that all contributors
   see at the same revision.
 
-The expected layer 2 size after the §I.6.3 text-exclusion rule is
-**2–5 MB per OS family scope**, so committing it is feasible. See
-§I.5.3 for the size-evolution monitoring rule.
+The expected layer 2 size after the §B.19.8 text-exclusion rule is
+**2–5 MB**, so committing it is feasible. See §B.19.11 for the
+size-evolution monitoring rule.
 
-### I.2.3 Why layer 1 contains only a summary (normative rationale)
+#### B.19.2.3 Why layer 1 contains only a summary
 
 Layer 1 (`config-Server*.json`) is the file operators read, edit,
 and review pull requests against. Embedding the full dependency
@@ -4295,299 +1434,468 @@ graph into it would bloat each OS config to tens of MB and obscure
 the operator-visible decisions (which KBs to include in this
 month's baseline).
 
-The summary embedded into layer 1 is just enough that the **runtime
-code path** can answer "does this set of KBs satisfy their declared
-prerequisites?" without needing to open layer 2. Layer 2 exists for
-the **build-time / refresh-time** code path, which has to compute
-the summary in the first place.
+The summary embedded into layer 1 is just enough that the
+**runtime code path** can answer "does this set of KBs satisfy
+their declared prerequisites?" without needing to open layer 2.
+Layer 2 exists for the **build-time / refresh-time** code path,
+which has to compute the summary in the first place.
 
-## I.3 Data source: `wsusscn2.cab` (informative)
+### B.19.3 Data source: `wsusscn2.cab` (informative)
 
-### I.3.1 What it is
+#### B.19.3.1 What it is
 
 `wsusscn2.cab` is the offline-scan metadata package Microsoft
 publishes for the Windows Update Agent (WUA) COM API method
-`IUpdateSession::CreateUpdateSearcher` with `ServerSelection =
-ssOthers`. It contains the full applicability metadata for every
-update Microsoft has ever shipped for currently-supported product
-families.
+`IUpdateSession::CreateUpdateSearcher` with
+`ServerSelection = ssOthers`. It contains the full applicability
+metadata for every update Microsoft has ever shipped for currently-
+supported product families.
 
-### I.3.2 CDN source URL (normative)
+#### B.19.3.2 CDN source URL (normative)
 
 ```
 https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab
 ```
 
-This URL is **already present** in `config-Server*.json` under
+This URL is already present in `config-Server*.json` under
 `PatchBaseline.WsusScnCab.SourceUrl` for all four OS families.
-Part I formalises the lifecycle around it.
+B.19 formalises the lifecycle around it.
 
-### I.3.3 Update cadence
+#### B.19.3.3 Update cadence
 
-`wsusscn2.cab` is refreshed by Microsoft monthly, typically within
-24–48 hours after Patch Tuesday (the second Tuesday of each month).
-The refresh policy defined in §I.4 aligns to that cadence.
+Microsoft refreshes `wsusscn2.cab` monthly, typically within 24–48
+hours after Patch Tuesday (the second Tuesday of each month). The
+refresh policy defined in §B.19.13 aligns to that cadence.
 
-### I.3.4 Internal structure (informative)
+#### B.19.3.4 Cab internal structure (observed, informative)
 
-After CAB expansion, `wsusscn2.cab` contains a single multi-GB
-XML file `package.xml`. The XML schema is **not published by
-Microsoft** as a public specification. The structure has been
-stable for over a decade and is consumed by:
+After CAB expansion, `wsusscn2.cab` contains 75 inner files,
+including a single multi-GB index XML — referred to in this section
+as the **Master XML** — plus 74 individual `package*.cab` fragments
+that contain per-update detailed metadata.
 
-- The official Microsoft WUA COM API (which uses an internal
-  parser).
-- Third-party tools such as `OSDBuilder`, `PSWindowsUpdate`, and
-  `wsusscn2.cab`-based offline patch scanners.
+| Inner file | Size (observed 2026-05) | Role |
+|:---|:---|:---|
+| `package.cab` (outer wrapper) | 14.96 MB | Contains the Master XML |
+| `package.xml` (Master XML) | 108.57 MB | Index of all 136,102 updates |
+| `package2.cab` … `package74.cab` | 1–34 MB each, ~650 MB total | Per-update fragments with `<Relationships>`, `<ApplicabilityRules>`, etc. |
 
-The sections this Part relies on are:
+This section's parser (§B.19.9) consumes the Master XML only.
+Individual `package*.cab` fragments are deliberately out of scope
+for r09.0 (§B.19.5.2).
 
-| XML section | Used for |
-|---|---|
-| `<Packages>` / `<Package>` | KB ID enumeration |
-| `<Prerequisites>` | Constructing the `Requires` relation |
-| `<SupersededBy>` | Constructing the `Supersedes` relation |
-| `<ApplicabilityRules>` (specifically `<IsInstallable>`) | Extracting `MinimumOsBuild` |
-| `<Categories>` | Filtering to Server 2016/2019/2022/2025 + .NET CU + DU |
+### B.19.4 Dependencies: 7-Zip strategy (normative)
 
-§I.6 specifies the exact extraction logic.
+#### B.19.4.1 Why 7-Zip
 
-## I.4 Lifecycle (normative)
+CAB extraction is performed via **7-Zip**, not via the in-box
+`expand.exe` or `Shell.Application` COM. The decision is normative
+and based on three concrete failures of the in-box tools:
 
-### I.4.1 Two trigger paths
+1. **`expand.exe -F:` bug** (Windows 11 build 26100 / PowerShell
+   5.1.26100.32860). When extracting a named file from a CAB and
+   the destination directory contains a file with the same basename
+   as the source CAB, `expand.exe` rejects the operation with
+   "Cannot expand a file onto itself" — even though the *target*
+   file is differently named. Documented experimentally in Phase 5
+   v1 (`docs/history/r09.0-step1-phase5-summary.md`).
+2. **`expand.exe -F:filter` selects the wrong file**. In Phase 5
+   v2, the same flag was observed to write a CAB into the
+   destination under the source CAB's filename instead of the
+   filter-named file. Shell.Application via COM was used as a
+   fallback in v2; both behaviours are evidence of Microsoft in-box
+   tool fragility.
+3. **`Microsoft.Deployment.Compression.Cab.dll`** (the .NET
+   wrapper used by `kbupdate-library`) requires a fully-qualified
+   destination path and is not bundled with PowerShell. Adding the
+   dependency to this script would expand its install surface.
 
-The dependency database is refreshed via **two distinct entry points**
-with different ownership models:
+7-Zip has been continuously maintained since 2000 by an independent
+maintainer (Igor Pavlov, then `ip7z` org). It is downloadable as a
+standalone MSI from `https://www.7-zip.org/` and from
+`https://github.com/ip7z/7zip/releases`. It is also distributable
+via `winget install 7zip.7zip`.
 
-| Entry point | Who runs it | What it touches | When |
-|---|---|---|---|
-| `-Action RefreshAllBaselines` | maintainer | layer 2 (`data/`) AND layer 1 (`data/config-*.json`) AND layer 3 (their workspace cache) | monthly after Patch Tuesday |
-| `-Action RefreshDependencyDatabase` (new) | any user | layer 3 only (their workspace cache) | any time, optional |
+This decision aligns with a project-wide convention recorded in
+§D.27 (Microsoft OS tool dependency avoidance).
 
-Regular contributors who pull the repo get the maintainer's
-committed layer 2 for free; they never need to download
-`wsusscn2.cab` themselves. The new standalone action exists for
-users who want to verify against a fresher `wsusscn2.cab` than the
-one the maintainer last committed.
+#### B.19.4.2 7-Zip discovery and bootstrap
 
-### I.4.2 `RefreshAllBaselines` integration (normative)
+Three helper functions cooperate. They are ported verbatim from the
+sister project `Deploy-AMDChipsetDriverOnWindowsServer.ps1` (which
+established this pattern; see Appendix F):
 
-The existing `RefreshAllBaselines` action gains the following
-sub-phase, executed **before** the existing per-OS catalogue
-scraping:
+| Function | Role |
+|:---|:---|
+| `Get-SevenZipPath` | Probe `%ProgramFiles%\7-Zip\7z.exe`, `%ProgramFiles(x86)%\7-Zip\7z.exe`, then `7z.exe` on `PATH`. Return path or `$null`. |
+| `Get-LatestSevenZipUrl` | Three-tier fallback: (1) scrape `https://www.7-zip.org/download.html`; (2) GitHub Releases API for `ip7z/7zip`; (3) pinned URL `https://github.com/ip7z/7zip/releases/download/26.01/7z2601-x64.msi`. Returns `{Version, MsiUrl, Source}`. |
+| `Install-SevenZipFallback` | Download the MSI and run `msiexec.exe /i <msi> /qn /norestart`. Throws on non-zero exit. |
 
-```
-RefreshAllBaselines order of operations (r09.0+):
-  Step 0:  Refresh wsusscn2.cab (layer 3)
-           - Download from Microsoft CDN if local copy missing or
-             remote-Modified-Since says newer.
-           - Verify SHA-256 against headers if available.
-  Step 1:  Parse wsusscn2.cab → regenerate layer 2
-           - Apply §I.6 scope filter (Server 2016/2019/2022/2025,
-             24-month window).
-           - Apply §I.6.3 text-exclusion rule.
-           - Emit data/wsusscn2-database.json.
-  Step 2:  For each OS in {Server2016, Server2019, Server2022, Server2025}:
-           Step 2a: Existing catalogue-scrape logic (unchanged).
-           Step 2b: NEW: cross-reference each NeutralPatches[*] entry
-                    against layer 2:
-                    - Auto-populate RequiresKbIds, Supersedes,
-                      RequiresMinimumOsBuild fields.
-                    - Auto-populate _DependencyVerifiedDate and
-                      _DependencyVerifiedSource.
-                    - Emit warnings (not errors) for:
-                      · KB present in NeutralPatches but absent from
-                        layer 2 — possible stale baseline
-                      · KB present in layer 2 but absent from
-                        NeutralPatches — possible omission
-                    - DO NOT auto-add or auto-remove
-                      NeutralPatches[*] entries (see §I.7.3).
-  Step 3:  Emit diff summary to the operator (existing behaviour
-           extended with layer 2 changes).
+The functions are wired into a single discovery flow: `Get-SevenZipPath`
+first; if `$null`, run `Install-SevenZipFallback` and retry once.
+
+#### B.19.4.3 7-Zip invocation pattern (normative)
+
+```powershell
+& $sevenZip x $archive ('-o' + $dest) -y -bsp0 -bso0
+# Exit codes: 0=ok, 1=warning (non-fatal), >=2=fatal
 ```
 
-### I.4.3 `-Action RefreshDependencyDatabase` (normative, new)
+- `x` (lowercase) preserves the original path inside the archive.
+- The `-o<dir>` form requires no space between flag and value; using
+  `('-o' + $dest)` keeps the call free of injection edge cases.
+- `-y` answers all prompts with Yes (necessary for non-interactive
+  runs).
+- `-bsp0 -bso0` suppress progress and standard output so the call
+  site can capture stderr cleanly.
 
-A new top-level Action is added (slot it into the `-Action`
-ValidateSet alongside `RefreshAllBaselines`, `RefreshSnapshots`,
-etc.):
+The exit-code mapping (0/1/>=2) matches the official 7-Zip
+documentation. Treat exit 1 as a warning (e.g. file timestamp
+collision), exit ≥2 as fatal.
 
-- Touches **only** layer 3 (`<WorkRoot>/cache/wsusscn2/`).
-- Does **not** touch `data/` — the user running this action does
-  not need maintainer commit permissions.
-- Useful for: verifying a hypothesis against fresher Microsoft data
-  than the committed layer 2; air-gapped environment that ships
-  layer 3 in via sneakernet.
-- Phase mapping: returns a single synthetic phase `A04`
-  (paralleling `A01 = RefreshAllBaselines`, `A02 = DumpField­
-  Classification`, `A03 = RefreshSnapshots`).
+### B.19.5 Data sources: dual-source structure (informative)
 
-### I.4.4 Cache-invalidation conditions
+Phase 5 of the r09.0 Step 1 PoC established that update-relationship
+metadata is split across two distinct file populations inside
+`wsusscn2.cab`. Both are needed for a complete dependency graph in
+principle, but only the Master XML is needed for the §B.19.1.1 use
+case.
 
-The local layer 3 cache is considered stale when **any** of the
-following holds:
+#### B.19.5.1 The dual-source table
 
-1. `wsusscn2.cab` file is absent.
-2. `wsusscn2.cab.meta.json` is absent or unreadable.
-3. The recorded SHA-256 in `meta.json` does not match the file's
-   actual SHA-256.
-4. `meta.json.LastDownloadedDate` is more than 35 days ago
-   (i.e. a full Patch-Tuesday cycle has passed).
+| Information | Master XML | Individual `package*.cab` |
+|:---|:---:|:---:|
+| `<Prerequisites>` (flat GUIDs) | ✓ summary form | ✓ detailed form with `<AtLeastOne>` |
+| `<SupersededUpdates>` (forward direction) | ✗ | ✓ |
+| `<SupersededBy>` (inverse direction) | ✓ (14,059 occurrences) | ✗ |
+| `<BundledUpdates>` (children) | ✗ | ✓ |
+| `<BundledBy>` (parent) | ✓ | ✗ |
+| `<PayloadFiles>` & `<FileLocations>` | ✓ | ✗ |
+| `<KBArticleID>` element | ✗ | ✓ (inside `<Metadata>`) |
+| `<Categories>` (OS family GUID) | ✓ | ✗ |
+| `<ApplicabilityRules>` | ✗ | ✓ |
 
-Conditions 1–3 are integrity failures; condition 4 is a freshness
-warning that the operator may override with a force-refresh flag
-(`-ForceDependencyDatabaseRefresh`).
+The KB ID itself is **never** present as a dedicated element or
+attribute in the Master XML. It is embedded in
+`<FileLocation Url="…">` URLs in the form
+`windows10.0-kb<digits>-<arch>_<hash>.cab` and extracted via the
+regex `kb(\d+)` (case-insensitive). This was confirmed by
+exhaustive case-insensitive search of the 108.57 MB Master XML for
+`<KBArticleID`, `KBArticleID=`, and the literal `kb5087537` /
+`kb5088064` strings; the only hits were inside `<FileLocation Url=…>`.
 
-## I.5 File layout and git policy (normative)
+#### B.19.5.2 Why r09.0 uses Master XML only
 
-### I.5.1 Repository layout (committed)
+The 0x800f0823 problem requires only `<Prerequisites>` and
+(optionally) `<SupersededBy>`, both of which the Master XML
+provides directly. Parsing the 74 individual `package*.cab`
+fragments would yield richer information (the `<AtLeastOne>`
+disjunctive form of prerequisites, full forward-direction
+supersedence, the `<KBArticleID>` element inside `<Metadata>`,
+applicability rules) but the cost is prohibitive:
 
+| Resource | Per-cab cost (observed, package30.cab as exemplar) | All-74 estimate |
+|:---|:---:|:---:|
+| Time | 6.7 s extract + 127.9 s scan | ~2.5 hours |
+| Disk peak | 214 MB extracted | 15–20 GB |
+| Files | 12,500 per cab | ~800,000 total |
+
+For the §B.19.1.1 use case (catch SSU-prereq misconfiguration
+before P07), the Master XML's information is sufficient. The
+richer per-cab parse is reserved for a future revision (r10.x or
+later) and is explicitly **out of scope for r09.0**. The
+out-of-scope items are enumerated in §B.19.5.3.
+
+#### B.19.5.3 Out of scope for r09.0 (kept here for traceability)
+
+The following are deliberately not implemented in r09.0:
+
+| Item | Reason for deferral |
+|:---|:---|
+| `<SupersededUpdates>` forward direction | Requires per-cab parse; not needed for 0x800f0823 detection |
+| `<Prerequisites>` detailed form (`<AtLeastOne>`) | Same |
+| `<ApplicabilityRules>` (`<IsInstallable>` evaluator) | Same; also requires implementing a small expression evaluator |
+| Category GUID → product family name mapping | Same; r09.0 stores raw GUIDs and resolves at use-site |
+| Element-level `<KBArticleID>` from `<Metadata>` | Master XML's URL-based extraction is sufficient |
+
+### B.19.6 Master XML schema as observed (informative)
+
+Phase 5 v3 / v4 of the PoC captured complete `OuterXml` dumps of
+representative `<Update>` elements. The schema is **not publicly
+documented by Microsoft**, but it has been stable for over a decade
+(verified by the parser implementations in `OSDBuilder`,
+`PSWindowsUpdate`, and `kbupdate-library`, all of which agree on
+the shapes below).
+
+#### B.19.6.1 File-level shape
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<OfflineSyncPackage xmlns="http://schemas.microsoft.com/msus/2004/02/OfflineSync"
+                    SourceId="..." PackageId="..." PackageVersion="1.1"
+                    ProtocolVersion="1.0" CreationDate="2026-05-12T08:51:08Z"
+                    MinimumClientVersion="5.8.0.2678">
+  <Updates>
+    <Update ... />
+    <!-- 136,102 occurrences, mixed Bundle / Standalone -->
+  </Updates>
+  <FileLocations>
+    <FileLocation Id="..." Url="..." />
+    <!-- 97,051 occurrences -->
+  </FileLocations>
+</OfflineSyncPackage>
 ```
-scripts/powershell/update-windows-server-iso/
-├── Update-WindowsServerIso.ps1
-├── SPEC.md                          (this file)
-└── data/
-    ├── config-Server2016.json       (layer 1, existing)
-    ├── config-Server2019.json       (layer 1, existing)
-    ├── config-Server2022.json       (layer 1, existing)
-    ├── config-Server2025.json       (layer 1, existing)
-    └── wsusscn2-database.json       (layer 2, NEW)
+
+#### B.19.6.2 Bundle `<Update>` (e.g. an LCU offered to WSUS)
+
+```xml
+<Update CreationDate="2025-05-12T20:45:23Z"
+        DefaultLanguage="en"
+        UpdateId="631fdcea-ff50-4993-bf5c-27c5ce211c9a"
+        RevisionNumber="201"
+        RevisionId="43268251"
+        IsLeaf="true"
+        IsBundle="true">
+  <Prerequisites>
+    <UpdateId Id="13c46d99-e6e6-4b68-b83d-33d73910d025" />
+    <UpdateId Id="8622846b-ec83-489b-af09-6545433c942e" />
+    <!-- … typically 5–10 entries … -->
+  </Prerequisites>
+  <Categories>
+    <Category Type="UpdateClassification" Id="0fa1201d-4330-4fa8-8ae9-b877473b6441" />
+    <Category Type="Company"              Id="56309036-4c77-4dd9-951a-99ee9c246a94" />
+    <Category Type="ProductFamily"        Id="6964aab4-c5b5-43bd-a17d-ffb4346a8e1d" />
+    <Category Type="Product"              Id="ba0ae9cc-5f01-40b4-ac3f-50192b5d6aaf" />
+  </Categories>
+</Update>
 ```
 
-### I.5.2 Workspace layout (git-excluded)
+#### B.19.6.3 Standalone `<Update>` (per-arch `.cab` payload)
 
-```
-<WorkRoot>/
-├── cache/
-│   └── wsusscn2/                    (NEW; layer 3 storage)
-│       ├── wsusscn2.cab             (~1 GB raw binary)
-│       ├── wsusscn2.cab.meta.json   (SHA-256, size, fetched-at, source URL)
-│       ├── package.xml              (extracted, may be deleted post-parse)
-│       └── audit/
-│           ├── 2026-05-12-wsusscn2.cab    (rolling 6-month archive)
-│           ├── 2026-04-08-wsusscn2.cab
-│           └── …
-├── source/                          (existing)
-├── work/                            (existing)
-├── output/                          (existing)
-├── logs/                            (existing)
-└── diag/                            (existing)
-```
-
-### I.5.3 `.gitignore` additions
-
-The repository's `.gitignore` (or the per-script equivalent) gains:
-
-```
-# Servicing dependency database — layer 3 (raw Microsoft binary)
-Workspace_UpdateWsi*/cache/wsusscn2/
-**/cache/wsusscn2/wsusscn2.cab
-**/cache/wsusscn2/package.xml
-**/cache/wsusscn2/audit/
+```xml
+<Update CreationDate="2017-06-27T01:53:00Z"
+        DefaultLanguage="en"
+        UpdateId="f87dda5a-3bc0-47a1-9a13-63dd15c7b06b"
+        RevisionNumber="202"
+        RevisionId="21221682"
+        IsLeaf="true"
+        DeploymentAction="Bundle">
+  <PayloadFiles>
+    <File Id="bl63nhPgDOgxEUi4i9v+eHBtXXA=" />   <!-- @Id only; no @FileName -->
+  </PayloadFiles>
+  <Prerequisites>
+    <UpdateId Id="23b28b6a-2629-424b-92ae-1b0bda447d2f" />
+  </Prerequisites>
+  <BundledBy>
+    <Revision Id="21221683" />   <!-- back-link to the Bundle parent -->
+  </BundledBy>
+</Update>
 ```
 
-### I.5.4 Audit-archive retention
+#### B.19.6.4 `<SupersededBy>` (when present; ~10.3% of `<Update>`s)
 
-The `<WorkRoot>/cache/wsusscn2/audit/` directory keeps **rolling
-6 months** of historical `wsusscn2.cab` files (i.e. roughly the
-previous 6 Patch Tuesdays). Older archive copies are deleted by
-`RefreshDependencyDatabase` after each successful refresh. The
-purpose is forensic replay — "what did Microsoft know about
-KB5087537 in 2026-05 versus 2026-06?". 6 months matches the
-typical interval over which a missed prerequisite would still be
-debugged.
+```xml
+<Update ... RevisionId="43239444" IsLeaf="true" IsBundle="true">
+  <Prerequisites>...</Prerequisites>
+  <SupersededBy>
+    <Revision Id="44174230" />
+    <Revision Id="43527426" />
+    <Revision Id="44008739" />
+    <Revision Id="44337998" />
+  </SupersededBy>
+  <Categories>...</Categories>
+</Update>
+```
 
-### I.5.5 Layer 2 size monitoring (informative target)
+Important characteristics:
 
-The target size for `data/wsusscn2-database.json` after the
-§I.6.3 text-exclusion rule is applied:
+- The reference form is `<Revision Id="<integer>" />`, **not**
+  `<UpdateId Id="<GUID>" />`. The integer is the `RevisionId`
+  attribute of the target `<Update>`, which is also unique within
+  the Master XML.
+- The direction is **inverse only**: "this Update has been replaced
+  by X". The forward form "this Update replaced Y" lives in the
+  individual `package*.cab` fragments, not the Master XML.
 
-| Scope | Target size | Action if exceeded |
-|---|---|---|
-| ≤ 5 MB | OK | None |
-| 5 MB ≤ size ≤ 10 MB | Watch | Investigate scope leakage |
-| > 10 MB | Action | Consider gzip compression (gz suffix), or tighten the 24-month window in §I.6.2 |
+Phase 5 v4 confirmed by exhaustive case-insensitive string search
+that the Master XML contains **14,059 `<SupersededBy>` occurrences**
+(roughly 10.3 % of all `<Update>` entries). It contains **0**
+occurrences of `<SupersededUpdates>`, `<Supersedes>`, `<Replaces>`,
+or any of the other plausible variant tags.
 
-The maintainer measures the actual size on each refresh and
-records it in the commit message.
+### B.19.7 Scope filter (normative)
 
-## I.6 Extraction logic (normative)
+The parser ingests `package.xml` and emits to
+`wsusscn2-database.json` only entries matching **all** of:
 
-### I.6.1 Implementation tier (informative)
-
-Part I targets the **L2c** tier (per the design-discussion
-analysis): self-parse `wsusscn2.cab`'s `package.xml` to a
-fact-only JSON, then cross-reference with `Get-WindowsPackage` at
-runtime. Lower tiers (MSU manifest only) miss the SSU-prerequisite
-class of failures; higher tiers (full DISM simulation) are not
-ROI-justified.
-
-L2c explicitly does **not** call the WUA COM API. The WUA COM API
-operates on the currently-running OS or on `wsusscn2.cab` as a
-data source, but cannot be aimed at a **mounted offline image** —
-which is the case Part I needs to support. The parse-and-cross-
-reference approach is the only available shape.
-
-### I.6.2 Scope filter (normative)
-
-The parser ingests `package.xml` and emits to `wsusscn2-database.json`
-only entries matching **all** of:
-
-1. **OS family**: package targets one of Windows Server 2016,
-   2019, 2022, 2025 (matched via the `<Categories>` block; see
-   §I.6.4 for the exact category-ID list).
-2. **Update type**: SSU, LCU, .NET CU, or Dynamic Update.
-   Client SKUs, Office, Defender, drivers, and FOD are excluded.
+1. **OS family**: package targets one of Windows Server 2016, 2019,
+   2022, or 2025 (matched via the `<Categories>` block's
+   `Product` / `ProductFamily` GUIDs; the working set lives in
+   `$Script:WsusScnOsCategoryGuids`).
+2. **Update type**: SSU, LCU, .NET CU, or Dynamic Update. Client
+   SKUs (Windows 10 / 11 consumer), Office, Defender, drivers,
+   and Features-On-Demand are excluded.
 3. **Recency**: released within the last **24 months** as of the
-   parser invocation date. Older entries are pruned to bound layer
-   2 size. The 24-month window is justified by the longest realistic
-   "old baseline still in use" case — operators occasionally retain
-   a baseline for legal-hold purposes that long.
+   parser invocation date. The `CreationDate` attribute of the
+   `<Update>` element is the cut-off. Older entries are pruned to
+   bound layer 2 size. The 24-month window is justified by the
+   longest realistic "old baseline still in use" case: operators
+   occasionally retain a baseline for legal-hold purposes that
+   long.
 
-### I.6.3 Microsoft-prose exclusion rule (normative)
+### B.19.8 Microsoft-prose exclusion rule (normative)
 
 This is a **hard rule, not a target**. Layer 2 (the
 `wsusscn2-database.json` that ships in the public git repo)
 **MUST NOT** contain any of:
 
-- KB titles (e.g. *"2026-05 Cumulative Update for Windows Server
-  2016 …"*).
-- KB descriptions, severity prose, or release notes excerpts.
+- KB titles (e.g. _"2026-05 Cumulative Update for Windows Server
+  2016 …"_).
+- KB descriptions, severity prose, or release-notes excerpts.
 - Any human-readable text authored by Microsoft.
 
 It **MAY** contain:
 
-- KB IDs (e.g. `"KB5087537"`).
-- OS build numbers (e.g. `"14393.9140"`).
-- Architecture identifiers (e.g. `"x64"`).
-- Release dates (e.g. `"2026-05-12"`).
+- KB IDs (e.g. `"5087537"` — numeric form, no `KB` prefix; see
+  §B.19.10.2 for the key convention).
+- UpdateId GUIDs and RevisionId integers.
+- Architecture identifiers (`"x64"`, `"x86"`, `"arm64"`).
+- Release dates as ISO-8601 strings.
 - Prerequisite / supersedence / applicability **relationships**
-  between KB IDs.
-- Product family identifiers (e.g. `"WindowsServer2016"`).
+  between KB IDs and RevisionIds.
+- Product family GUIDs.
+- The SHA-256 of the source `wsusscn2.cab` (as a provenance
+  anchor).
 
-Rationale: §I.2.2 — facts are not the licensed expression. Stripping
-the prose keeps the legal posture clean and serves the size-control
-goal of §I.5.5 simultaneously.
+The rationale combines two distinct concerns:
 
-### I.6.4 Layer 2 JSON schema (normative)
+1. **Licence posture**. Facts are not the licensed creative
+   expression. Stripping the prose keeps the legal posture clean.
+2. **Size control**. The Microsoft-authored title and description
+   strings would, by themselves, balloon layer 2 from the ~2–5 MB
+   target to 50–100 MB. Stripping them is independently necessary
+   for size containment per §B.19.11.
 
-```json
+Enforcement: the parser MUST whitelist every field it emits. A
+post-parse sanity grep that the committed JSON contains no
+"Cumulative Update" / "Servicing Stack" / "Security Update" /
+"applies to" / similar phrases is part of the §B.19.18 PR review
+checklist.
+
+### B.19.9 Parser pipeline (normative)
+
+The parser is a four-stage pipeline. Each stage has a clearly
+defined input and output so failures can be diagnosed by inspecting
+the boundary artefact.
+
+```
+Stage 1: Acquire wsusscn2.cab
+  Input  : configured CDN URL + cache freshness state
+  Output : <WorkRoot>/cache/wsusscn2/wsusscn2.cab + .meta.json
+  Helper : Get-WsusScnCabIfNeeded (existing)
+
+Stage 2: Extract package.xml from the cab
+  Input  : <WorkRoot>/cache/wsusscn2/wsusscn2.cab
+  Output : <WorkRoot>/cache/wsusscn2/package.xml (~108 MB)
+  Helper : Invoke-WsusScnPackageXmlExtract (new, two-step 7-Zip)
+
+Stage 3: Stream-parse the Master XML into structured form
+  Input  : <WorkRoot>/cache/wsusscn2/package.xml
+  Output : in-memory hashtable of packages (~10,000 entries post-filter)
+  Helper : ConvertFrom-WsusScnPackageXml (new, XmlReader-based)
+
+Stage 4: Render the hashtable to layer 2 JSON
+  Input  : in-memory hashtable + _meta provenance
+  Output : data/wsusscn2-database.json
+  Helper : New-WsusScnDependencyDatabase (new)
+```
+
+#### B.19.9.1 Stage 2 details
+
+The cab contains the Master XML wrapped one level deep: the outer
+`wsusscn2.cab` contains an inner `package.cab` (~15 MB), which in
+turn contains `package.xml`. A single `7z x` invocation extracts
+all 75 inner files, but for performance we extract only the two
+needed:
+
+```powershell
+& $sevenZip x $cab    ('-o' + $stage1) -ir!package.cab -y -bsp0 -bso0
+& $sevenZip x $innerCab ('-o' + $stage2) -ir!package.xml -y -bsp0 -bso0
+```
+
+`-ir!<file>` selects by inclusive regex on the basename. Stage
+separation (stage1 ≠ stage2 directory) avoids the `expand.exe`
+self-overwrite class of failure documented in §B.19.4.1.
+
+#### B.19.9.2 Stage 3 details — XmlReader streaming
+
+The Master XML at 108.57 MB cannot be loaded as
+`[xml]` / `XmlDocument` in low-memory CI environments. Phase 5 v3
+measured **peak memory +536 MB** when using
+`XmlDocument.Load($path)` on this file. `XmlReader` streaming
+keeps peak working set under 50 MB.
+
+The parser performs a two-pass walk:
+
+- **Pass 1**: visit every `<Update>`. For each, decide whether the
+  scope filter (§B.19.7) admits it. If admitted, record:
+  - `UpdateId` (GUID), `RevisionId` (integer), `RevisionNumber`
+  - `IsBundle`, `IsLeaf`, `DeploymentAction`
+  - `Prerequisites/UpdateId` (collect into `Requires`)
+  - `SupersededBy/Revision` (collect into `SupersededByRevisions`)
+  - `BundledBy/Revision` (collect into `BundledIn`)
+  - `Categories/Category` (collect into a hashtable keyed by Type)
+  - `PayloadFiles/File@Id` (collect for the second pass)
+  Build the `RevisionIndex` table (`RevisionId → UpdateId`) along
+  the way.
+- **Pass 2**: visit every `<FileLocation>`. For each:
+  - Extract the file-id (the `Id` attribute, matching the
+    `PayloadFile/File@Id` recorded in pass 1).
+  - Extract `kb(\d+)` from the `Url` attribute (case-insensitive).
+  - Extract architecture token from the URL filename pattern.
+  - Resolve back to the owning `<Update>` via the file-id index
+    built in pass 1 and attach `KbId`, `Arch`, and `Url` to the
+    correct `Variant`.
+
+Pass 2 is necessary because the KB number lives in the
+`<FileLocation>` URL, not on the `<Update>` itself, and several
+`<Update>` rows (different architectures of the same KB) share the
+same KB number. The parser groups by KB number at the end of pass 2
+to form the `Variants[]` array.
+
+#### B.19.9.3 Stage 4 details
+
+Stage 4 walks the in-memory hashtable, applies the whitelist from
+§B.19.8, and emits the JSON with `-Depth 10` so nested arrays
+render correctly. The `_meta` block (B.19.10.1) is computed
+separately from script-scope state and inserted at the top of the
+file.
+
+### B.19.10 Layer 2 JSON schema (normative)
+
+This is the canonical shape of `data/wsusscn2-database.json`. The
+schema is **versioned** via `_meta.ParserVersion`. The parser MUST
+refuse to consume a JSON file whose `ParserVersion` is newer than
+its own; older versions MAY be consumed with a one-time warning.
+
+#### B.19.10.1 Top-level structure
+
+```jsonc
 {
   "_meta": {
     "GeneratedAt": "2026-05-27T10:30:00+09:00",
     "GeneratedBy": "RefreshAllBaselines:r09.0",
     "ParserVersion": "1.0",
     "WsusScnCab": {
-      "SourceUrl": "https://catalog.s.download.windowsupdate.com/.../wsusscn2.cab",
-      "FetchedAt": "2026-05-27T10:25:00+09:00",
-      "LastModifiedHeader": "Tue, 12 May 2026 14:00:00 GMT",
-      "SizeBytes": 1073741824,
-      "Sha256": "abc123def456..."
+      "SourceUrl":              "https://catalog.s.download.windowsupdate.com/.../wsusscn2.cab",
+      "FetchedAt":              "2026-05-27T10:25:00+09:00",
+      "LastModifiedHeader":     "Tue, 12 May 2026 14:00:00 GMT",
+      "SizeBytes":              612345678,
+      "Sha256":                 "abc123def456..."
     },
     "Scope": {
-      "OsFamilies": ["WindowsServer2016", "WindowsServer2019",
-                     "WindowsServer2022", "WindowsServer2025"],
-      "UpdateTypes": ["SSU", "LCU", "DotNetCU", "DynamicUpdate"],
+      "OsFamilies":   ["WindowsServer2016","WindowsServer2019","WindowsServer2022","WindowsServer2025"],
+      "UpdateTypes":  ["SSU","LCU","DotNetCU","DynamicUpdate"],
       "WindowMonths": 24
     },
     "Counts": {
@@ -4596,479 +1904,2032 @@ goal of §I.5.5 simultaneously.
                        "WindowsServer2022": 0, "WindowsServer2025": 0 }
     }
   },
-  "Packages": {
-    "KB5087537": {
-      "KbId": "KB5087537",
-      "UpdateType": "LCU",
-      "Architecture": "x64",
-      "Products": ["WindowsServer2016"],
-      "OsBuild": "14393.9140",
-      "ReleaseDate": "2026-05-12",
-      "Requires": ["KB5088064"],
-      "Supersedes": ["KB5082077", "KB5078661"],
-      "MinimumOsBuild": "14393.7692",
-      "IsCombined": false
-    },
-    "KB5088064": {
-      "KbId": "KB5088064",
-      "UpdateType": "SSU",
-      "Architecture": "x64",
-      "Products": ["WindowsServer2016"],
-      "OsBuild": "14393.7692",
-      "ReleaseDate": "2026-05-12",
-      "Requires": [],
-      "Supersedes": ["KB5082089", "KB5075902"],
-      "MinimumOsBuild": "14393.0",
-      "IsCombined": false
-    }
+  "Packages": { /* see B.19.10.2 */ },
+  "RevisionIndex": { /* see B.19.10.3 */ }
+}
+```
+
+#### B.19.10.2 `Packages` — keyed by KB ID (numeric)
+
+```jsonc
+"Packages": {
+  "5087537": {
+    "Variants": [
+      {
+        "Arch":                  "x64",
+        "UpdateId":              "631fdcea-ff50-4993-bf5c-27c5ce211c9a",
+        "RevisionId":            43268251,
+        "RevisionNumber":        201,
+        "Url":                   "http://download.windowsupdate.com/.../windows10.0-kb5087537-x64.cab",
+        "Requires":              ["5088064"],
+        "RequiresRevisions":     [43268250],
+        "SupersededByRevisions": [44174230, 43527426, 44008739, 44337998],
+        "BundledIn":             21221683,
+        "Categories": {
+          "UpdateClassification": "0fa1201d-4330-4fa8-8ae9-b877473b6441",
+          "Product":              "ba0ae9cc-5f01-40b4-ac3f-50192b5d6aaf"
+        },
+        "IsBundle":              false,
+        "IsLeaf":                true
+      },
+      {
+        "Arch":                  "x86",
+        "UpdateId":              "...",
+        "RevisionId":            43268252,
+        "...":                   "..."
+      }
+    ]
+  },
+  "5088064": {
+    "Variants": [ /* SSU entry for the same month */ ]
   }
 }
 ```
 
-Field semantics:
+Key convention: **numeric KB ID without the `KB` prefix**, as a
+JSON string (so e.g. KB5087537 keys as `"5087537"`). This matches
+how KB IDs appear in the `<FileLocation>` URLs (lower-case `kb`
+followed by digits) and avoids the case-insensitivity ambiguity
+that string-keyed JSON would otherwise introduce.
+
+#### B.19.10.3 `RevisionIndex` — RevisionId → UpdateId GUID
+
+```jsonc
+"RevisionIndex": {
+  "43268251": "631fdcea-ff50-4993-bf5c-27c5ce211c9a",
+  "44174230": "<guid of the successor Update>",
+  /* … */
+}
+```
+
+Why this exists: `<SupersededBy>` references its targets by
+`RevisionId` (integer), not by `UpdateId` (GUID). The runtime
+resolver, given a `SupersededByRevisions: [44174230]` array,
+needs to translate each RevisionId back to a KB ID. The
+`RevisionIndex` provides the first hop (RevisionId → UpdateId);
+the resolver then scans `Packages` to find which KB owns that
+UpdateId.
+
+A naive design without `RevisionIndex` would require scanning
+all `Variants[]` of all `Packages[]` to resolve a single
+`SupersededByRevisions` entry — quadratic in the number of
+variants. The index is small (~10,000 entries × 50 bytes ≈
+500 KB) and makes the lookup O(1) per supersedence edge.
+
+#### B.19.10.4 Field semantics
 
 | Field | Meaning |
-|---|---|
-| `Requires` | KB IDs that **must already be installed** before this KB can apply. Maps to `wsusscn2`'s `<Prerequisites>`. Drives the I1.SSU sub-phase ordering. |
-| `Supersedes` | KB IDs that this KB **replaces**. Maps to `wsusscn2`'s `<SupersededBy>` (read in the inverse direction). |
-| `MinimumOsBuild` | The build number that the image must be at or above, **before** this KB can apply. For SSU-vs-LCU dependencies this is the critical field. |
-| `IsCombined` | `true` if Microsoft's metadata indicates this package internally contains an SSU+LCU bundle. **Authoritative** — supersedes any manual `IsCombined` guess in `config-Server*.json`. |
-| `OsBuild` | The build number this KB **takes the image to** (post-application). |
+|:---|:---|
+| `Variants` | Per-architecture realisations of the same KB. Most KBs have one or two; the .NET umbrella KBs may have 4+. |
+| `Requires` | KB IDs that MUST already be installed before this Variant can apply. Maps to `wsusscn2`'s `<Prerequisites>` after resolving each prereq's `UpdateId` to a KB ID via the file-location pass. |
+| `RequiresRevisions` | The raw `<Prerequisites><UpdateId>` GUIDs from the Master XML. Kept alongside `Requires` for audit and for cases where the prereq is a category GUID rather than a KB. |
+| `SupersededByRevisions` | RevisionId integers from `<SupersededBy><Revision>`. Use `RevisionIndex` to resolve to UpdateId, then `Packages` to resolve to KB. |
+| `BundledIn` | The RevisionId of the Bundle that contains this Standalone. From `<BundledBy><Revision>`. |
+| `Categories` | Per-Type GUID values from `<Categories>`. The GUID values resolve to OS-family / product names through `$Script:WsusScnCategoryGuidNameMap`. |
+| `IsBundle`, `IsLeaf` | Direct copies of the `<Update>` attributes; used by §B.19.13.3 verification. |
 
-### I.6.5 Parser stability and version pinning (informative)
+The `IsCombined` flag from earlier B.4 schema is **not** stored in
+layer 2; it is a derived attribute computed by
+`Test-IsCombinedLcuTitle` against the Catalogue Title (§B.15.3),
+which is not available in layer 2 by §B.19.8.
 
-Because the `package.xml` schema is not publicly specified, the
-parser SHOULD:
+---
 
-- Pin its parser version in `_meta.ParserVersion`.
-- Tolerate unknown elements (forward-compat: ignore tags it
-  doesn't recognise).
-- Reject and abort (not silently empty-output) on **structural**
-  schema deviations — i.e. if `<Packages>` itself is missing, or
-  if `<Prerequisites>` becomes a different shape.
+### B.19.11 Performance targets and measured values (informative)
 
-Microsoft has not changed this schema materially in over a decade,
-but defensive coding is warranted.
+| Metric | Phase 5 measured (PoC) | Target for r09.0 production | Action on regression |
+|:---|:---:|:---:|:---|
+| Stage 1 (cab download, cold) | 30–90 s | < 180 s | Inspect CDN reachability |
+| Stage 2 (7-Zip extract, single core) | 6–8 s | < 15 s | Check workspace disk IOPS |
+| Stage 3 (XmlReader parse, single core) | 8–12 s | < 30 s | Profile with `Measure-Command` |
+| Stage 4 (JSON render + write) | < 1 s | < 3 s | — |
+| **Total wall clock (warm cache)** | **~10 s** | **< 60 s** | Investigate per-stage |
+| Peak working set (Stage 3 path) | < 50 MB | < 100 MB | Verify XmlReader streaming, not `[xml]` |
+| Peak workspace disk use | 1.1 GB | < 2 GB | Audit retained intermediate files |
+| Layer 2 JSON size | 2.6 MB (post-filter) | 2–5 MB | If > 5 MB, audit emitted fields against §B.19.8 |
 
-## I.7 Layer 1 (`config-Server*.json`) integration (normative)
+`Microsoft.Update.Session` COM API (the WUA scanner that drives
+`wsusscn2.cab` for online detection) is approximately **8–12 minutes**
+on the same hardware. The file-based parser is therefore ~50–100× faster
+because it does not perform per-update applicability evaluation.
 
-### I.7.1 Field additions to `PatchBaseline.NeutralPatches[*]`
+If layer 2 JSON size crosses **8 MB**, the parser MUST emit a warning
+at refresh time and the maintainer MUST audit the diff to confirm no
+prose fields slipped through. A 10 MB hard ceiling is enforced by
+`RefreshAllBaselines`: if the new layer 2 would exceed it, the write
+is refused and a diff report is emitted to `<WorkRoot>/diag/`.
 
-The schema additions to each `NeutralPatches[*]` entry:
+### B.19.12 Layer 1 (`config-Server*.json`) integration (normative)
 
-| Field | Source | Cadence | Owner |
-|---|---|---|---|
-| `RequiresKbIds` | layer 2 `Packages[KB].Requires` | auto-overwrite on RefreshAllBaselines | tool |
-| `Supersedes` | layer 2 `Packages[KB].Supersedes` | auto-overwrite | tool |
-| `RequiresMinimumOsBuild` | layer 2 `Packages[KB].MinimumOsBuild` | auto-overwrite | tool |
-| `IsCombined` | layer 2 `Packages[KB].IsCombined` | auto-overwrite, but with a `// Was: <prev>` comment when changed | tool, advisory to operator |
+#### B.19.12.1 New fields on `PatchBaseline.NeutralPatches[*]`
 
-The other existing fields (`Type`, `KbId`, `Title`, `UpdateId`,
-`DownloadUrl`, etc.) are unchanged in ownership; see B.10 and B.11.
+The §B.4.3 entries gain three optional fields, populated by
+RefreshAllBaselines from the layer 2 summary:
 
-### I.7.2 Field additions to `PatchBaseline.WsusScnCab` (object level)
+| Field | Type | Source |
+|:---|:---|:---|
+| `RequiresKbIds` | string[] | Layer 2 `Packages[<this KB>].Variants[<x64>].Requires` |
+| `Supersedes` | string[] | (existing, from Catalogue scrape) |
+| `RequiresMinimumOsBuild` | string | Computed from Layer 2 prereq chain |
+| `_DependencyVerifiedDate` | ISO-8601 | Set by RefreshAllBaselines |
+| `_DependencyVerifiedSource` | string | `wsusscn2.cab@sha256:<hash>` |
 
-The existing `WsusScnCab` slot gets the following sub-fields
-populated by the tool (currently they're all empty strings):
+`RequiresKbIds` was previously present as a manual-entry field; it
+becomes auto-populated and the manual-entry path is reserved for
+emergencies (with `_DependencyVerifiedBy: "manual:<reason>"`).
 
-```json
-"WsusScnCab": {
-  "SourceUrl": "https://catalog.s.download.windowsupdate.com/.../wsusscn2.cab",
-  "LocalCachePath": "Workspace_UpdateWsi/cache/wsusscn2/wsusscn2.cab",
-  "LastDownloadedDate": "2026-05-27T10:25:00+09:00",
-  "LastDownloadedSha256": "abc123def456...",
-  "LastDownloadedSizeBytes": 1073741824,
-  "DependencyDatabasePath": "data/wsusscn2-database.json",
-  "DependencyDatabaseSha256": "fed654cba321..."
+`RequiresMinimumOsBuild` is a new field. It is computed by walking
+the layer 2 `Requires` chain (typically just the immediate SSU
+prerequisite) and recording the OS build number that the SSU's KB
+delivers. The build number itself comes from the Catalogue scrape
+(`Title` parsing), not from layer 2 — layer 2 contains relationships,
+not build numbers (which would be Microsoft prose per §B.19.8).
+
+#### B.19.12.2 New fields on `PatchBaseline.WsusScnCab`
+
+The §B.4.3 `WsusScnCab` block gains two additional fields:
+
+| Field | Type | Source |
+|:---|:---|:---|
+| `DependencyDatabasePath` | string | Always `"data/wsusscn2-database.json"` |
+| `DependencyDatabaseSha256` | string | SHA-256 of the layer 2 file recorded into layer 1 |
+
+`DependencyDatabaseSha256` lets P06 verify that the layer 2 file on
+disk has not been tampered with since the last RefreshAllBaselines.
+A mismatch downgrades P06 Stage 2 to a warning (B.19.14.4).
+
+#### B.19.12.3 Automation level: semi-automatic (normative)
+
+The Layer 1 ↔ Layer 2 cross-reference is **semi-automatic**:
+
+- **Automatic on write**: `RefreshAllBaselines` (A01) and
+  `RefreshDependencyDatabase` (A04) populate the new fields without
+  operator input.
+- **Manual at review time**: any PR that proposes a change to layer
+  1's `RequiresKbIds` or `RequiresMinimumOsBuild` MUST include the
+  corresponding layer 2 change in the same commit. The `_*` fields
+  serve as a paper trail for the reviewer.
+
+The semi-automatic stance is intentional. A fully automatic system
+(layer 2 read at every Build invocation) would couple every operator
+run to network reachability; a fully manual system (operator fills
+in `RequiresKbIds` by hand) was the r07.0 state and is what caused
+the r08.0 Step 4 KB5087537 SSU-prerequisite incident.
+
+### B.19.13 Verification API (normative)
+
+#### B.19.13.1 `Test-PatchDependencyClosureFromGraph`
+
+Signature:
+
+```powershell
+function Test-PatchDependencyClosureFromGraph {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [pscustomobject[]] $ResolvedPatches,
+        [Parameter(Mandatory)] [pscustomobject]   $WimMountState,
+        [Parameter()]          [string]           $DatabasePath = "$PSScriptRoot/data/wsusscn2-database.json",
+        [Parameter()]          [hashtable]        $PolicyOverride
+    )
 }
 ```
 
-`DependencyDatabaseSha256` is the SHA-256 of the committed layer 2
-file, recorded inside each layer 1 config as a tamper-evidence link.
-
-### I.7.3 Automation level (normative): semi-automatic
-
-RefreshAllBaselines applies the following **half-automatic** policy:
-
-| Change class | Tool behaviour |
-|---|---|
-| `RequiresKbIds` value change on an existing KB | Auto-overwrite; emit diff line to operator log |
-| `Supersedes` value change on an existing KB | Auto-overwrite; emit diff line |
-| `RequiresMinimumOsBuild` value change | Auto-overwrite; emit diff line |
-| `IsCombined` value change | Auto-overwrite with **WARNING** in operator log (this is the most error-prone field) |
-| KB present in layer 2 but **absent** from `NeutralPatches` | Emit WARNING only — do **not** auto-add. Operator must explicitly add. |
-| KB present in `NeutralPatches` but **absent** from layer 2 | Emit WARNING only — do **not** auto-remove. KB may be temporarily withdrawn by Microsoft, or scope-filtered out. |
-
-Rationale for not auto-adding/removing KBs: a config baseline is a
-**curated** statement of what an operator wants to ship in the
-output ISO. Auto-adding a KB just because Microsoft published one
-could pull in updates the operator deliberately omitted (e.g.
-preview updates). Auto-removing a KB the operator listed could
-silently drop a deliberate inclusion (e.g. a held-back baseline).
-
-The maintainer reviews the warnings, decides, and commits.
-
-### I.7.4 New `_DependencyVerifiedDate` / `_DependencyVerifiedSource` (normative)
-
-The existing top-level `_VerifiedDate` / `_VerifiedBy` fields are
-**preserved** with their current semantics (manual human
-verification). Two new fields are added, parallel to them:
-
-```json
-{
-  "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-  "_VerifiedBy": "manual:initial-r03",
-  "_DependencyVerifiedDate": "2026-05-27T10:30:00+09:00",
-  "_DependencyVerifiedSource": "wsusscn2.cab@sha256:abc123def456..."
-}
-```
-
-`_DependencyVerifiedSource` follows the form:
+Returns:
 
 ```
-wsusscn2.cab@sha256:<64-hex-char-hash>
-```
-
-This makes provenance unambiguous: any third party can re-fetch
-that exact `wsusscn2.cab` from the Microsoft CDN, compute its
-SHA-256, and confirm whether the config's dependency claims still
-match Microsoft's published data.
-
-A config is in one of four trust states:
-
-| `_VerifiedBy` set? | `_DependencyVerifiedSource` set? | Trust level |
-|:---:|:---:|---|
-| Yes | Yes | **Highest** — human-verified AND tool-verified |
-| Yes | No | Human-verified but no Microsoft cross-check |
-| No | Yes | Tool-verified but not human-reviewed |
-| No | No | **Unverified** — defaults from older revisions |
-
-## I.8 Verification API (normative)
-
-### I.8.1 New function: `Test-PatchDependencyClosureFromGraph`
-
-The function consumes the in-memory hashtable parsed from
-`data/wsusscn2-database.json` plus the currently-resolved
-`$Script:ResolvedPatches` and returns a structured verdict.
-
-```
-Test-PatchDependencyClosureFromGraph
-    -DependencyGraph <hashtable>      # parsed wsusscn2-database.json
-    -ResolvedPatches <array>          # P02 output
-    -WimMountState   <hashtable>      # captured by P06; see §I.8.2
-    [-Policy <string>]                # Strict | Warn ; default Strict
-    → returns:
+@{
+    Available           = $true | $false   # was layer 2 readable?
+    OverallStatus       = 'Pass' | 'Warning' | 'Fail' | 'Unknown'
+    DatabaseSha256      = '<hex>'
+    DatabaseGeneratedAt = '<iso-8601>'
+    PatchVerdicts       = @(
         @{
-            Verdict       = 'Pass' | 'Fail' | 'PassWithWarnings'
-            MissingKbs    = @(...)    # KBs ResolvedPatches needs but does not contain
-            ExtraKbs      = @(...)    # KBs ResolvedPatches contains but layer 2 has no record of
-            BuildGap      = @{ Required = '14393.7692'; Actual = '14393.693' }
-            Suggestions   = @(...)    # human-readable remediation
-        }
-```
-
-### I.8.2 Relationship to existing `Test-PatchDependencyClosureOnMount` (B.13)
-
-The existing B.13 function operates on a **mounted** WIM and reads
-the actual installed package list via `Get-WindowsPackage`. It is
-runtime-accurate but expensive (requires the mount).
-
-The new function `Test-PatchDependencyClosureFromGraph` operates
-**before** the mount, using `Get-WindowsImage -ImagePath ... -Index ...`
-metadata only. It is cheaper and runs in P06.
-
-The two are **complementary**:
-
-| Function | When it runs | Source of truth |
-|---|---|---|
-| `Test-PatchDependencyClosureFromGraph` (new) | P06 ValidatePatchSet — before any mount | layer 2 + WIM metadata |
-| `Test-PatchDependencyClosureOnMount` (existing B.13) | P07 PatchInstallWim — after mount, before each sub-phase | `Get-WindowsPackage` on the live mount |
-
-The P06 check catches the SSU-prerequisite class of failure
-**before** P05 / P07 expend their I/O budget. The P07 check
-remains a defence-in-depth verification immediately before each
-`Add-WindowsPackage` call.
-
-### I.8.3 WimMountState capture (informative)
-
-P06 cannot mount the WIM (that's P07's job), but it CAN extract
-the static metadata it needs via:
-
-```
-Get-WindowsImage -ImagePath <install.wim> -Index <N>
-    → returns ImageName, ImageDescription, ImageSize, Version,
-      EditionId, InstallationType, Languages, Hal, ProductType,
-      ImageType, Architecture, etc.
-```
-
-The `Version` field gives the OS build at the time the WIM was
-captured (e.g. `10.0.14393.0` for Server 2016 GA). That, combined
-with the well-known Servicing Stack version shipped at each GA
-build, is sufficient to compute `MinimumOsBuild` satisfaction for
-the L2c implementation tier.
-
-For *future* tiers that want to read the WIM's WinSxS servicing-
-stack directory directly (rather than inferring from `Version`),
-the function may need a one-time mount; that work is out of scope
-for r09.0.
-
-## I.9 P06 ValidatePatchSet integration (normative)
-
-### I.9.1 Phase-skip condition redesign
-
-The current implementation has a single skip condition at the top
-of `Invoke-PlanPhase06_ValidatePatchSet`:
-
-```
-if ($Script:UseBaselineOnly) {
-    Write-Skip "P06 skipped: -UseBaselineOnly explicitly set."
-    return
+            KbId           = 'KB5087537'
+            UpdateId       = '...'
+            Verdict        = 'Pass' | 'MissingPrereq' | 'NotInDatabase' | 'Skipped'
+            Requires       = @('KB5088064')
+            MissingFromSet = @('KB5088064')
+            ResolvedFrom   = 'graph' | 'manual' | 'wim'
+            Notes          = '...'
+        }, ...
+    )
+    Reasons             = @('...')
 }
 ```
 
-This conflates two concerns:
+The function MUST NOT mount the WIM. It consumes the **static**
+WIM metadata (build number, installed packages list) captured by
+`Get-WindowsImage` and provided via the `$WimMountState` parameter.
 
-- **Catalogue refresh** — re-querying Microsoft Update Catalog to
-  detect baseline drift. This *is* the thing `-UseBaselineOnly`
-  is meant to skip.
-- **Dependency verification** — checking that the configured patch
-  set is internally consistent. This has **nothing** to do with
-  catalogue freshness and should NOT be skipped when
-  `-UseBaselineOnly` is set.
+#### B.19.13.2 Relationship to `Test-PatchDependencyClosureOnMount` (§B.13)
 
-Part I redesigns P06 into two stages with independent skip controls:
+Both functions stay enabled in r09.0+. They are complementary:
 
-```
-P06 ValidatePatchSet (r09.0+):
-  Stage 1: Catalogue freshness re-check
-           Skipped when: -UseBaselineOnly explicitly set
-                         OR -Action ∈ { Build, Verify } (no Setup group)
-  Stage 2: Dependency closure verification
-           Skipped when: -SkipDependencyCheck explicitly set
-                         OR data/wsusscn2-database.json absent (with WARN)
-           Runs EVEN WHEN -UseBaselineOnly is set.
-```
+| Aspect | `…FromGraph` (NEW) | `…OnMount` (EXISTING, §B.13) |
+|:---|:---|:---|
+| Runs at | P06 Stage 2 (before mount) | Inside P07 / P08 (after mount) |
+| Cost | < 5 s | Per `Get-WindowsPackage` call, ~10–20 s |
+| Source of truth | Layer 2 (wsusscn2-derived) + static WIM metadata | Live `Get-WindowsPackage` against mounted WIM |
+| Detects | Configured-set incompleteness (declarative) | Runtime installed-set drift (empirical) |
+| Failure latency | < 5 s from P06 start | Mid-P07, after WIM mount |
 
-The default for the new `-SkipDependencyCheck` flag is `$false`
-— Stage 2 runs by default whenever P06 itself runs.
+The graph-based check is the **predictive** layer; the mount-based
+check is the **runtime safety net**. Removing the mount-based check
+in a future revision is conceivable only after layer 2 has proven
+its accuracy across multiple OS / patch combinations.
 
-### I.9.2 Stage 2 algorithm
+#### B.19.13.3 `WimMountState` capture (informative)
 
-```
-Stage 2 (Dependency closure verification) algorithm:
+`Get-Pca2023ReadinessSnapshot` already captures install.wim metadata
+via `Get-WindowsImage -ImagePath ... -Index <N>`. The same call
+returns `Version` (the post-LCU build number reported by the WIM
+header), `InstalledPackages` (via `Get-WindowsPackage -Path
+<mount>`), and edition names. The new caller path bypasses the
+mount by reading `Version` directly from `Get-WindowsImage`'s
+returned object — which works without mounting — and treats
+`InstalledPackages` as empty when the WIM is unmounted.
 
-  1. Load data/wsusscn2-database.json from the script's data/
-     directory. If absent:
-       - If -SkipDependencyCheck is $false (default): emit WARN
-         "Layer 2 dependency database missing; falling back to
-          layer 1 RequiresKbIds only (less authoritative). Run
-          -Action RefreshDependencyDatabase to populate."
-       - Continue with degraded check using only layer 1 data.
+This is sufficient because the empty `InstalledPackages` case
+collapses the `OnMount` check's value to zero, leaving the graph
+check (which doesn't need installed-packages knowledge) as the
+sole judge at P06 time.
 
-  2. For each WIM target in ResolvedPatches.Targets:
-       a. Call Get-WindowsImage to fetch static metadata.
-       b. Compute presumed Servicing Stack version from
-          the WIM's Version field.
-       c. Invoke Test-PatchDependencyClosureFromGraph with the
-          target-specific patch slice.
+### B.19.14 P06 ValidatePatchSet integration (normative)
 
-  3. Aggregate verdicts:
-       - If any target returns Fail and Policy=Strict, throw.
-       - If any target returns Fail and Policy=Warn, continue
-         with WARN.
-       - Always emit a structured report to
-         <DiagDir>/P06_dependency_verdict.json.
+#### B.19.14.1 Phase-skip condition redesign
 
-  4. Mark P06.ok marker file on success or PassWithWarnings.
-```
-
-### I.9.3 Operator-visible output (informative)
-
-A successful P06 Stage 2 run prints:
+The existing P06 skip condition is `-UseBaselineOnly`. r09.0 splits
+P06 into two stages with independent skip conditions:
 
 ```
- -- Step 2: Dependency closure check (wsusscn2-derived) ---------
-[hh:mm:ss] [+xx.xxs]    [*] Loaded layer 2 database (wsusscn2-database.json):
-                            342 packages, source SHA-256 abc123...
-[hh:mm:ss] [+xx.xxs]    [*] Verifying patch set against install.wim metadata:
-                            Server 2016, install.wim Version 10.0.14393.0
-                            Inferred Servicing Stack: v10.0.14393.693
-[hh:mm:ss] [+xx.xxs]    [+]   KB5088064 (SSU): satisfies MinimumOsBuild=14393.0
-[hh:mm:ss] [+xx.xxs]    [+]   KB5087537 (LCU): requires KB5088064 — present
-[hh:mm:ss] [+xx.xxs]    [+]   KB5087065 (.NET): no prerequisites declared
-[hh:mm:ss] [+xx.xxs]    [+] Dependency closure verified for install.wim.
+P06 ValidatePatchSet
+├── Stage 1: Catalog freshness comparison (existing)
+│   Skip if : -UseBaselineOnly
+└── Stage 2: Dependency closure check (NEW, r09.0+)
+    Skip if : -SkipDependencyCheck OR layer 2 unavailable AND -OfflineCabPath not given
 ```
 
-A failing run (e.g. the r08.0 Step 4 scenario where SSU was missing):
+Stage 1 and Stage 2 are independent: stage 1 may skip while stage 2
+runs (the typical air-gapped case), and vice versa.
+
+#### B.19.14.2 Stage 2 algorithm
 
 ```
-[hh:mm:ss] [+xx.xxs]    [X] Dependency closure FAILED for install.wim:
-[hh:mm:ss] [+xx.xxs]    [X]   KB5087537 (LCU) requires KB5088064 (SSU)
-[hh:mm:ss] [+xx.xxs]    [X]   but KB5088064 is not present in ResolvedPatches.
-[hh:mm:ss] [+xx.xxs]    [X]   Suggested remediation:
-[hh:mm:ss] [+xx.xxs]    [X]     Add KB5088064 (2026-05 SSU) to
-[hh:mm:ss] [+xx.xxs]    [X]     data/config-Server2016.json NeutralPatches[]
-[hh:mm:ss] [+xx.xxs]    [X]     with ApplyOrder=1 and Type=SSU.
-[hh:mm:ss] [+xx.xxs]    [X]   See data/wsusscn2-database.json for full graph.
-[hh:mm:ss] [+xx.xxs]    [X]   Run -Action RefreshAllBaselines to refresh.
+1. Try to load layer 2 from data/wsusscn2-database.json
+   - If absent and -OfflineCabPath given: invoke RefreshDependencyDatabase synchronously
+   - If absent and online: download wsusscn2.cab, parse, write layer 2
+   - If absent and air-gapped: skip stage 2 with warning, set OverallStatus=Unknown
+2. Verify layer 2's _meta.WsusScnCab.Sha256 matches
+   PatchBaseline.WsusScnCab.DependencyDatabaseSha256 (if recorded)
+   - On mismatch: emit warning, continue
+3. Call Test-PatchDependencyClosureFromGraph with $ResolvedPatches
+4. Render verdict via Show-DependencyClosureFromGraph
+5. On OverallStatus = Fail and -IgnorePatchValidation not set: throw
+6. On OverallStatus = Fail and -IgnorePatchValidation set: write
+   the same diag/ JSONL set as the existing P06 stage 1 fail path
+7. Emit one line summary to phase log
 ```
 
-## I.10 Air-gapped environment operation (normative)
+#### B.19.14.3 Operator-visible output (informative)
 
-A fully air-gapped environment (no outbound Internet) can use
-Part I provided that:
+On `Fail`, P06 emits four files under `<WorkRoot>/diag/<timestamp>/`:
 
-1. The repo is cloned in a non-air-gapped network and the cloned
-   tree is transported via sneakernet to the air-gapped side. The
-   layer 2 file (`data/wsusscn2-database.json`) travels with it.
-2. The user runs the script with `-SkipPatchDownload` (existing
-   flag) plus the air-gapped patch set staged into `<WorkRoot>/
-   patches/Server<N>/` ahead of time.
-3. P06 Stage 2 runs against the committed layer 2 — **no network
-   access required**.
+| File | Content |
+|:---|:---|
+| `validation_summary.json` | Top-level result, missing-KB list, recommendations |
+| `validation_detail.csv` | One row per patch with Verdict, Requires, MissingFromSet |
+| `wsusscn2_scan_raw.json` | (Stage 1 only; legacy from r08.0) |
+| `dependency_graph.json` | Adjacency list: Requires + Supersedes edges over the KB nodes in the resolved set |
 
-Layer 3 (the raw `wsusscn2.cab`) is **not** needed in the
-air-gapped environment for verification. It is only needed when
-**regenerating** layer 2 — which is the maintainer's job and
-happens in the non-air-gapped environment.
+`dependency_graph.json` is new in r09.0 and is what an LLM-assisted
+operator can paste into Claude/Copilot to get a recommendation on
+which KB to add to the configuration. The graph format is two
+arrays of edges (`Requires`, `Supersedes`) plus a `nodes` array
+with `KbId`, `Title` (from §B.15.3 helpers), and `IsInBaseline`
+flags.
 
-If the air-gapped environment wants a fresher layer 2 than the
-committed version, the maintainer can:
+#### B.19.14.4 Behaviour when layer 2 is absent
 
-1. In the non-air-gapped environment, run
-   `-Action RefreshDependencyDatabase`.
-2. Copy the resulting `wsusscn2.cab` to the air-gapped side.
-3. Run `-Action RefreshDependencyDatabase -OfflineCabPath <path>`
-   (offline-input flag, see §I.10.1) to regenerate layer 2 against
-   the manually-supplied CAB.
+| Scenario | Behaviour | OverallStatus |
+|:---|:---|:---|
+| Layer 2 absent, online | Auto-download `wsusscn2.cab` → parse → write layer 2; resume | (downstream) |
+| Layer 2 absent, `-OfflineCabPath <path>` given | Synchronously invoke `RefreshDependencyDatabase` on the given cab; resume | (downstream) |
+| Layer 2 absent, air-gapped, no cab | Skip Stage 2 with one warning per run; rely on Stage 1 (catalog) only | `Unknown` |
+| Layer 2 SHA-256 mismatch from layer 1 | Warning; continue with on-disk layer 2 | (continues to verdict) |
+| Layer 2 has `ParserVersion` newer than running parser | Hard refuse; emit operator action | (no verdict) |
+| `-SkipDependencyCheck` set | Skip Stage 2; emit one notice per run | `Skipped` |
 
-### I.10.1 `-OfflineCabPath` parameter (normative)
+### B.19.15 Lifecycle (normative)
 
-`-Action RefreshDependencyDatabase` accepts an optional
-`-OfflineCabPath <string>` parameter. When set:
+#### B.19.15.1 Two trigger paths
 
-- Network access is **not** attempted.
-- The named path is used as the source `wsusscn2.cab`.
-- SHA-256 is recorded in meta.json the same way as a network fetch.
+| Trigger | Action | Frequency | Effect |
+|:---|:---|:---|:---|
+| Monthly maintainer refresh | `RefreshAllBaselines` (A01) | ~monthly | Full refresh of layer 1 + layer 2 |
+| Ad-hoc layer 2 only | `RefreshDependencyDatabase` (A04, NEW) | as needed | Refresh layer 2 only; useful pre-PR or after cab CDN update mid-month |
+| Self-trigger from P06 Stage 2 | (internal) | on demand | When stage 2 detects layer 2 absent and operator is online |
 
-## I.11 Relationship to existing `_VerifiedDate` / `_VerifiedBy` (normative)
+#### B.19.15.2 `RefreshAllBaselines` integration (normative)
 
-See §I.7.4 for the field additions. This sub-section restates the
-governance contract.
-
-| Field | Owner | Set when |
-|---|---|---|
-| `_VerifiedDate` | human | An operator has reviewed the baseline and approved it for a build cycle |
-| `_VerifiedBy` | human | Free-text annotation of who approved (e.g. `manual:r05.0-quarterly-review`) |
-| `_DependencyVerifiedDate` | tool | RefreshAllBaselines successfully cross-checked layer 1 against layer 2 |
-| `_DependencyVerifiedSource` | tool | `wsusscn2.cab@sha256:<hash>` of the layer 2 source used |
-
-Operators are expected to keep `_VerifiedDate` current via a
-quarterly (or per-release) human review. The tool maintains
-`_DependencyVerifiedDate` monthly. **Both** are needed to claim
-maximum trust; neither replaces the other.
-
-## I.12 Maintainer operations guide (informative)
-
-### I.12.1 Monthly Patch-Tuesday refresh procedure
+The existing A01 action gains a new sub-phase **A01.0
+RefreshDependencyDatabase**, executed **before** any per-OS
+catalogue scraping:
 
 ```
-1. On the second Wednesday of the month (or +24h after Patch
-   Tuesday), pull the latest main.
-2. Run:
-       .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines `
-           -WorkRoot D:\Workspace_UpdateWsi
-3. Review the operator log for:
-       - WARNINGs about IsCombined changes — verify manually
-         against Microsoft Update Catalog
-       - WARNINGs about KBs present-in-layer-2-but-absent-from-
-         NeutralPatches — decide whether to include each
-       - WARNINGs about KBs absent-from-layer-2-but-present-in-
-         NeutralPatches — verify Microsoft hasn't withdrawn them
-4. Inspect git diff for:
-       - data/wsusscn2-database.json (expect 100s of KB changed
-         in normal months)
-       - data/config-Server*.json (expect a few RequiresKbIds /
-         Supersedes / RequiresMinimumOsBuild changes per config)
-5. Commit with the message template:
-       monthly refresh: wsusscn2 <yyyy-mm-dd>, sha256 <8-char-prefix>
-       <body listing OS families touched and notable warnings>
-6. Open PR.
+A01 RefreshAllBaselines
+├── A01.0 RefreshDependencyDatabase (NEW, r09.0+, fast-skip when fresh)
+├── A01.1 Refresh per-OS PatchBaseline (existing, calls catalogue)
+└── A01.2 Refresh per-OS LanguageSpecific (existing)
 ```
 
-### I.12.2 PR review checklist
+A01.0 logic:
 
-A reviewer checks:
+1. Compute `expectedSha = ` SHA-256 of the on-disk
+   `data/wsusscn2-database.json`.
+2. If layer 2 absent, force a refresh.
+3. If layer 2 present and `_meta.GeneratedAt` < latest Patch
+   Tuesday: refresh.
+4. If layer 2 present and current: skip with notice.
+5. Refresh = download cab → parse → write layer 2 → cross-update
+   each `PatchBaseline.WsusScnCab.DependencyDatabaseSha256`.
 
-- [ ] `data/wsusscn2-database.json` size is within target (§I.5.5).
-- [ ] `_meta.WsusScnCab.Sha256` is also recorded in each
-      `config-Server*.json#/_DependencyVerifiedSource`.
-- [ ] No Microsoft prose has leaked into layer 2 (`grep -i
-      'cumulative update' data/wsusscn2-database.json` returns
-      nothing).
-- [ ] `IsCombined` warnings in the operator log are accounted for
-      in the PR description.
-- [ ] No layer 1 KBs were silently added or removed (these are
-      operator decisions, not tool decisions; see §I.7.3).
+A01.0 emits its own JSON to `<WorkRoot>/diag/refresh-deps/` on
+both skip and execute paths, for audit.
 
-### I.12.3 Future: GitHub Actions automation (out of scope for r09.0)
+#### B.19.15.3 `RefreshDependencyDatabase` (A04, normative, new)
 
-A future revision MAY automate the monthly refresh via GitHub
-Actions:
+A standalone action for cases where the maintainer wants to refresh
+only layer 2 (e.g. ad-hoc validation before a PR review, or after a
+mid-month cab CDN update). Signature:
 
-```
-Schedule:  cron("0 0 2 * 3")  # Wednesday after Patch Tuesday, 00:00 UTC
-Action:    Spin up a Windows runner, fetch wsusscn2.cab, run
-           RefreshAllBaselines, open a PR.
+```powershell
+.\Update-WindowsServerIso.ps1 -Action RefreshDependencyDatabase [-WorkRoot <path>] [-OfflineCabPath <path>]
 ```
 
-This is **not** part of r09.0 scope. The initial release relies on
-maintainer manual operation per §I.12.1, both because the surface
-area is small (one maintainer can handle it in 20 minutes/month)
-and because we want a few cycles of human review before letting
-the tool open PRs unattended.
+Effects: same as A01.0 in isolation; does NOT touch
+`config-Server*.json`. Layer 1's `DependencyDatabaseSha256`
+fields are cross-updated as a courtesy so the next P06 Stage 2 sees
+consistent state.
 
-## I.13 Rollout and backward compatibility (normative)
+#### B.19.15.4 Cache-invalidation conditions
 
-### I.13.1 Phasing
+`<WorkRoot>/cache/wsusscn2/wsusscn2.cab` is considered stale when
+any of:
 
-| r-revision | Scope | Default behaviour |
-|---|---|---|
-| r09.0 | Implement parser, layer 2 emission, P06 Stage 2, new Action | Dependency check **enabled by default** when layer 2 file is present; falls back gracefully when absent |
-| r09.1 | UX polish, additional fixture coverage in `tests/` | unchanged |
-| r10.0 (provisional) | GitHub Actions automation per §I.12.3 | unchanged |
+- File absent.
+- `wsusscn2.cab.meta.json`'s `FetchedAt` predates the latest
+  Patch Tuesday by more than 2 calendar days.
+- HEAD probe of the configured `SourceUrl` returns a
+  `Last-Modified` newer than the recorded one.
+- `Sha256` mismatches the file.
 
-### I.13.2 Behaviour when layer 2 is absent
+A stale cache triggers re-download. The previous file is moved to
+`audit/<yyyy-MM-dd_HH-mm-ss>/wsusscn2.cab` and retained for the
+window in §B.19.15.5.
 
-A clone of the repo at any commit predating r09.0 will not contain
-`data/wsusscn2-database.json`. P06 Stage 2 in that case:
+#### B.19.15.5 Audit-archive retention
 
-- Emits a WARN: *"Layer 2 dependency database (data/wsusscn2-
-  database.json) is absent. Dependency closure check will fall back
-  to layer 1 RequiresKbIds only. Run -Action
-  RefreshDependencyDatabase to populate, or update the repository
-  to a revision that includes it."*
-- Continues with the **existing B.13** logic on `RequiresKbIds`
-  populated by hand (or empty).
-- Does NOT block the build.
+`<WorkRoot>/cache/wsusscn2/audit/` retains the **previous 6 monthly
+cabs** with their `.meta.json`. Older entries are purged on the
+next download to bound the workspace footprint at ~3.6 GB of
+historical cab. 6 months covers one full quarterly servicing
+window with margin for verification.
 
-This means r09.0 is a **strict superset** of r08.0 behaviour. No
-existing config or workflow breaks.
+### B.19.16 Air-gapped environment operation (normative)
 
-### I.13.3 Behaviour when `-SkipDependencyCheck` is set
+A fully air-gapped build host MUST be able to run P06 Stage 2 with
+no network. Three operating modes are supported:
 
-For operators who explicitly want to suppress the new check (e.g.
-intentionally testing a known-failing patch set in CI):
+| Mode | Setup | Stage 2 behaviour |
+|:---|:---|:---|
+| Online (typical) | `wsusscn2.cab` auto-fetched as needed | Full validation |
+| Air-gapped with cached layer 2 | `data/wsusscn2-database.json` present (committed via git, or copied in) | Full validation using cached layer 2 |
+| Air-gapped with raw cab only | `wsusscn2.cab` placed manually + `-OfflineCabPath <path>` | Parse-and-validate inline |
+| Air-gapped, no cab | (no setup) | Stage 2 skipped with `Unknown`; Stage 1 only |
 
-- `-SkipDependencyCheck` skips P06 Stage 2 entirely.
-- Does not affect P06 Stage 1 (catalogue freshness).
-- Emits an INFO note acknowledging the explicit skip.
+The `-OfflineCabPath <path>` parameter (new in r09.0) is the only
+way to use a manually-staged cab. The script MUST NOT silently
+fall through to "skip stage 2"; the operator's intent must be
+explicit via either `-OfflineCabPath` or `-SkipDependencyCheck`.
 
-### I.13.4 Migration path for existing operators
+### B.19.17 Parser stability and version pinning (informative)
 
-No migration is required. Existing `config-Server*.json` files
-continue to parse (the new fields are additions, not renames).
-Existing `-UseBaselineOnly` workflows continue to work — the only
-behavioural change is that P06 Stage 2 starts running, which is
-informational unless the patch set is genuinely broken.
+The Master XML schema has been stable since at least 2012 (verified
+by `OSDBuilder` and `PSWindowsUpdate` parser histories), but
+Microsoft has not published a formal schema. The risk of silent
+schema drift is non-zero.
+
+Mitigations:
+
+1. `_meta.ParserVersion` in layer 2. Bumped on every breaking
+   change to the parser's emit shape (B.19.10 schema). Consumers
+   refuse newer versions.
+2. T6 (`tests/release_info_parser_test.py`) has 13 assertions that
+   cover the parser's emit shape; a schema-incompatible Master XML
+   change would surface there before merging.
+3. A new test `tests/wsusscn2_parser_test.py` (T7) is planned for
+   r09.0: it consumes a committed `tests/fixtures/wsusscn2/` set of
+   miniature Master XML snippets and asserts the parser's behaviour
+   on representative `<Update>` shapes. T7 is OFFLINE (uses
+   fixtures) so it can run on every PR.
+4. Live `wsusscn2.cab` is probed monthly by T5
+   (`wsusscn2_probe.py`, existing) which probes only the cab's
+   reachability and size; T5 is supplemented by T8 (planned) that
+   does a deep schema probe by parsing the live Master XML and
+   confirming every required attribute is present in at least one
+   `<Update>`.
+
+### B.19.18 Maintainer operations guide (informative)
+
+#### B.19.18.1 Monthly Patch-Tuesday refresh procedure
+
+```powershell
+# 1. Run RefreshAllBaselines as usual (covers layer 2 via A01.0)
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Monthly
+
+# 2. Inspect the layer 2 diff
+git diff data/wsusscn2-database.json | head -80
+
+# 3. Sanity-check layer 2 size
+wc -c data/wsusscn2-database.json
+
+# 4. Run the synthetic CI locally
+python3 tests/wsusscn2_parser_test.py        # T7 (new)
+python3 tests/catalog_fixture_test.py        # T2 (existing)
+
+# 5. Inspect the layer 1 diff
+git diff data/config-Server*.json
+
+# 6. Commit both layer 1 and layer 2 in the same commit
+git add data/config-Server*.json data/wsusscn2-database.json
+git commit -m "data: r09.0 layer-1+2 monthly refresh (2026-MM)"
+```
+
+#### B.19.18.2 PR review checklist
+
+When reviewing a PR that touches `data/wsusscn2-database.json`:
+
+- [ ] `_meta.WsusScnCab.Sha256` is present and is a 64-char hex
+      string.
+- [ ] `_meta.GeneratedAt` is recent (within 7 days of the PR
+      submission).
+- [ ] `_meta.Counts.TotalPackages` is in the 200–600 range
+      (typical post-scope-filter count).
+- [ ] No KB Title strings, descriptions, or release-notes prose are
+      present. Quick grep:
+      `grep -c "Cumulative Update" data/wsusscn2-database.json` →
+      MUST be 0.
+- [ ] Layer 2 file size is between 1 MB and 8 MB. (`wc -c`)
+- [ ] Layer 1 `DependencyDatabaseSha256` in every
+      `config-Server*.json` matches the actual SHA-256 of the
+      committed layer 2 file.
+- [ ] T2, T7 (when implemented) pass locally.
+- [ ] The corresponding `wsusscn2.cab` is downloadable from
+      Microsoft and produces the same SHA-256.
+
+#### B.19.18.3 Future: GitHub Actions automation (out of scope for r09.0)
+
+A monthly scheduled workflow analogous to Stage 4 (monthly baseline
+refresh) could run RefreshAllBaselines + commit the diff
+automatically. This is **not implemented in r09.0** because:
+
+- The 600 MB `wsusscn2.cab` download is on the slow side of what a
+  free GitHub Actions runner has time for; the runner would need
+  to cache aggressively.
+- The diff often crosses the §B.19.8 prose-exclusion line at the
+  margins (a new field type appears that the parser does not yet
+  classify), and a human should triage it.
+
+Reserved as future work.
+
+### B.19.19 Rollout and backward compatibility (normative)
+
+#### B.19.19.1 Phasing
+
+| r09.0 Step | Scope | Outcome |
+|:---|:---|:---|
+| Step 1 | Parser + layer 2 schema | The parser ships; layer 2 is generated on demand but P06 Stage 2 does not yet run |
+| Step 2 | P06 Stage 2 wired (off by default) | `-EnableDependencyCheck` opts in for verification; default OFF until field-tested |
+| Step 3 | P06 Stage 2 ON by default | Existing operators opt out via `-SkipDependencyCheck` if needed |
+| Step 4+ | Cross-OS validation | Server 2019/2022/2025 +Execute Build with stage 2 verifying correctly |
+
+Each Step ships as a separate commit on `main` with its own
+CHANGELOG entry.
+
+#### B.19.19.2 Behaviour when layer 2 is absent at runtime
+
+Already specified in §B.19.14.4. Summary: r09.0 Step 1+2 is fully
+backward-compatible — the absence of `data/wsusscn2-database.json`
+behaves as "Stage 2 unknown, Stage 1 still works". Step 3 retains
+that behaviour for the `-OfflineCabPath` flow but warns louder.
+
+#### B.19.19.3 Behaviour when `-SkipDependencyCheck` is set
+
+Stage 2 is skipped silently after one notice line per run. This is
+the operator's explicit escape hatch and is documented in
+`README.md` troubleshooting. It does NOT suppress §B.13
+mount-time checking, which remains the runtime safety net.
+
+#### B.19.19.4 Migration path for existing operators
+
+Existing operators upgrade as follows:
+
+1. Pull the new `Update-WindowsServerIso.ps1` and the new
+   `data/wsusscn2-database.json` (both ship together).
+2. No config changes needed — existing
+   `config-Server*.json` files are forward-compatible; the new
+   optional fields will be populated on the next
+   RefreshAllBaselines.
+3. On first run after upgrade, P06 Stage 2 reports `Unknown` if
+   `RequiresKbIds` is empty for any `NeutralPatches[*]` entry; the
+   operator either runs `-Action RefreshAllBaselines` or
+   `-Action RefreshDependencyDatabase` once to populate.
+
+Operators on air-gapped hosts who do not pull layer 2 will see
+Stage 2 = `Unknown` indefinitely; this matches the §B.19.16
+expectation and is not a regression.
+
+---
+
+## B.20 File organisation and naming conventions
+
+**Status**: normative (r06.0+).
+
+### B.20.1 Directory layout
+
+```
+scripts/powershell/update-windows-server-iso/
+├── Update-WindowsServerIso.ps1     # Main script
+├── README.md / README.ja.md         # End-user documentation (bilingual)
+├── SPEC.md                           # This file (English only)
+├── TESTING.md                        # Verification procedures (English only)
+├── CHANGELOG.md                      # Per-revision history (English only)
+├── .psa.config.json                  # psa.py project configuration
+├── PSScriptAnalyzerSettings.psd1     # PSScriptAnalyzer project configuration
+├── data/                             # All persistent inputs (committed)
+│   ├── config-Server2016.json
+│   ├── config-Server2019.json
+│   ├── config-Server2022.json
+│   ├── config-Server2025.json
+│   ├── wsusscn2-database.json       # NEW r09.0+; ~2-5 MB
+│   ├── raw-release-info.md          # Microsoft release-info markdown cache
+│   ├── raw-dotnet-cu/                # Per-month .NET CU cache
+│   └── raw-dynamic-update/           # Per-month DU cache
+├── tests/                            # Python self-verification suite
+│   ├── README.md
+│   ├── catalog_probe.py              # T1
+│   ├── catalog_fixture_test.py       # T2
+│   ├── powershell_harness.py         # T3
+│   ├── eval_iso_probe.py             # T4
+│   ├── wsusscn2_probe.py             # T5
+│   ├── release_info_parser_test.py   # T6
+│   ├── wsusscn2_parser_test.py       # T7 (planned, r09.0)
+│   ├── common/                       # Shared utilities
+│   ├── fixtures/                     # Captured HTML / XML for offline regression
+│   └── snapshots/                    # Probe outputs (last_probe.json)
+└── docs/
+    ├── README.md                     # Describes the documentation directory
+    └── history/                      # Long-form investigation reports
+        ├── r07.0-followups.md
+        ├── r08.0-step1-server2016-pca2023-finding.md
+        ├── r08.0-step2-installwim-symmetry-check.md
+        ├── r08.0-step3-output-verification-and-build.md
+        ├── r09.0-step1-phase5-summary.md
+        ├── mojibake-investigation-note.md
+        ├── dotnet-cu-report.md
+        ├── dynamic-update-report.md
+        ├── release-info-report.md
+        ├── release-info-readme.md
+        └── (per-cycle followups, finding reports, investigation notes)
+```
+
+### B.20.2 Filename prefix rules
+
+Three filename prefix patterns are used in this project; each
+carries semantic meaning that operators and reviewers rely on:
+
+| Prefix | Subdirectory | Meaning |
+|:---|:---|:---|
+| `config-` | `data/` | Operator-edited configuration (the `data/config-Server*.json` family). One per OS. |
+| `raw-` | `data/raw-*/` | Mirrored upstream content (Microsoft release-notes markdown, .NET CU pages, etc.). Refresh-only, no operator edit expected. |
+| `r<NN>.<MM>-` | `docs/history/` | Per-revision investigation reports. Filename also carries the topic in kebab-case. |
+
+The `data/raw-release-info.md` file is the single exception that
+does not use the `raw-` prefix on its own filename because it has
+been in place since r06.0; new raw assets follow the `raw-<topic>/`
+directory pattern.
+
+### B.20.3 Worked examples
+
+| Filename | Convention | Comment |
+|:---|:---|:---|
+| `data/config-Server2025.json` | Operator config | One per OS |
+| `data/wsusscn2-database.json` | Tool-generated data | r09.0+, single file |
+| `data/raw-release-info.md` | Mirrored upstream | Refreshed by RefreshSnapshots |
+| `docs/history/r08.0-step2-installwim-symmetry-check.md` | Per-revision investigation | Cycle (r08.0), step (step2), topic kebab-case |
+| `tests/fixtures/2026-05/server2025-lcu.html` | Test fixture | Per-month, per-OS HTML captures |
+
+### B.20.4 What this section does NOT cover
+
+- Naming of internal PowerShell functions inside the .ps1 file. Those
+  follow Pascal-case verb-noun per PowerShell convention and are
+  enforced by PSScriptAnalyzer's `PSUseApprovedVerbs` rule.
+- Naming of CI workflow files. Those follow the repository-wide
+  convention documented in the
+  [repository-level SPEC](../../../SPEC.md) §3.1, which uses
+  double-underscore (`__`) as a path-segment separator.
+
+## B.21 Workspace preflight
+
+**Status**: normative (r04.3+).
+
+### B.21.1 Purpose
+
+`Assert-WorkspacePreflight` runs at the top of the dispatcher
+(before any action / phase logic) and verifies that the workspace
+is structurally ready. The function is placed before action
+dispatch deliberately so misconfigurations are caught with a clear
+"workspace not ready" message rather than a cryptic mid-phase
+failure.
+
+### B.21.2 Checks performed
+
+| Check | Behaviour on failure |
+|:---|:---|
+| `-WorkRoot` resolves to an existing directory or can be created | Throw |
+| The resolved `WorkRoot` is on a volume with at least 100 GB free | Throw |
+| All four `data/config-Server<N>.json` files are readable | Throw |
+| The script's own directory has `tests/` and `data/` subdirectories | Throw (catches script-relocated-without-data) |
+
+The 100 GB free-space requirement was determined empirically: an
+end-to-end `-Action PrepareBuildVerify -Execute` for one OS family
+peaks at ~80 GB of intermediate state. The 100 GB threshold
+provides a 20 % margin and protects against the operator-pending
+class of failure where DISM mount fails halfway through.
+
+### B.21.3 Skip conditions
+
+`Assert-WorkspacePreflight` is skipped for the following actions
+where the checks are not relevant:
+
+- `-Action ListPhases`
+- `-Action Cleanup` (which is what the operator runs to clean up
+  a corrupted workspace)
+- `-EnvironmentInfoOnly` (P01-only smoke test)
+- `-SkipEnvCheck` (operator escape hatch)
+
+For `RefreshAllBaselines` / `DumpFieldClassification` /
+`RefreshDependencyDatabase` (which never run P01), the preflight
+DOES run, because these actions touch `data/config-Server*.json`
+and the config-presence check is exactly what protects against the
+script-relocated-without-data class of misconfiguration.
+
+## B.22 Phase 3 architecture decisions
+
+**Status**: normative (r07.0+). Detailed historical context is
+preserved in the per-revision CHANGELOG; this section records only
+the **decisions that survived into r09.0** and the rationale a
+maintainer needs at the use-site.
+
+### B.22.1 Refresher architecture: release-info as canonical source
+
+The release-info parser
+(`Resolve-PatchSetFromReleaseInfo`) is the canonical source for
+which KBs were offered on a given Patch Tuesday. The Microsoft Update
+Catalogue scrape is retained as a **resolver** for KB ID → UpdateId
+→ DownloadUrl, but no longer as the canonical "which KBs?" source.
+
+**Decision**: release-info Markdown is the single source of truth
+for KB membership in a baseline; Catalogue is the resolver for the
+URL / file metadata of each KB.
+
+**Why**: r06.0 PoC showed the release-info Markdown is parseable,
+versioned, and stable. Title-scrape against the Catalogue is fragile
+(comma-form drift in 2026-04 dropped Server 2022 to zero results;
+see §D.NN).
+
+### B.22.2 Catalog Title token matching: config-driven
+
+`Get-CatalogQueryTemplate` reads OS-specific Title-token arrays
+from `data/config-Server*.json` rather than hard-coding them in
+.ps1. Multi-form arrays accommodate Microsoft's punctuation drift
+(comma vs comma-less).
+
+**Why**: r04.2 dropped Server 2022 to zero results after Microsoft
+removed a comma from one OS title; the hard-coded TitleToken did a
+`[regex]::Escape` literal match and no longer matched. A
+config-driven multi-form array isolates the cosmetic-drift class of
+failure to a config file edit, not a code change.
+
+### B.22.3 Data directory: flat with 3-prefix naming
+
+All persistent inputs go under `data/` (not under sub-directories
+by Type). Files are distinguished by the §B.20.2 three-prefix rule
+(`config-`, `raw-`, `wsusscn2-`). Per-month raw caches live under
+`data/raw-<topic>/<yyyy-MM>/`.
+
+**Why**: A single `data/` directory mirrors operator mental model
+("the data the script reads"). Type-named sub-directories would
+have proliferated as new data classes were added; the flat layout
+absorbs the new wsusscn2-database.json in r09.0 without surprise.
+
+### B.22.4 Schema version: stay at 2.1
+
+`config-Server*.json` Schema field stayed at "2.1" across r07.0 and
+r08.0. r09.0's additions (new optional fields per §B.19.12) do not
+constitute a breaking change.
+
+**Why**: The new fields are optional and the loader treats absent
+fields as `$null`. Forward-compatibility through optional-field
+addition is the lighter migration path.
+
+### B.22.5 SSU separation and .NET CU multiplicity
+
+SSU and LCU are separate `NeutralPatches` entries even when shipped
+combined; the loader treats them as independently-trackable units.
+.NET CU umbrella KBs that bundle multiple `.msu` files keep all
+sub-files via §B.15.2 `Select-AllCanonicalPatchFiles`.
+
+**Why**: Independent tracking of SSU and LCU enables P06 Stage 2
+(§B.19) to surface SSU-prerequisite failures cleanly; without
+separation, the prerequisite chain would not be representable in
+layer 1.
+
+### B.22.6 Dynamic Update lookback: 36-month cache
+
+Per-OS Dynamic Update caches under `data/raw-dynamic-update/` keep a
+36-month lookback window (~3 years of monthly snapshots). Older
+entries are pruned by the next RefreshSnapshots.
+
+**Why**: 36 months covers the longest "operator retains old
+baseline" case (legal-hold scenarios); see §B.19.7 scope-filter
+rationale.
+
+### B.22.7 Update lifecycle: Patch-Tuesday-triggered, Git-tracked
+
+The §B.14 RefreshAllBaselines decision matrix is triggered by
+calendar Patch Tuesday transitions. Resulting `data/config-*.json`
+diffs are committed to git and surface as the maintainer's monthly
+review unit.
+
+**Why**: A monthly cadence aligns with Microsoft's servicing rhythm;
+git tracking gives auditability and rollback at the file boundary.
+
+### B.22.8 `PatchBaseline.NeutralPatches[].Type`: subdivided DotNet
+
+`Type='DotNet'` was subdivided into `DotNet.Runtime`, `DotNet.OsLevel`,
+`DotNet.LangPack` in r07.0 Step 1. The OS-level "offering" KB is
+recorded for traceability but not applied to any WIM target.
+
+**Why**: The original flat `DotNet` lost the OS-level KB through
+the I4.DotNet sub-phase filter. Subdivision keeps the OS-level KB
+visible in the baseline for human review while preventing it from
+entering the apply lane.
+
+### B.22.9 release-info vs Catalog: release-info is the truth source
+
+Codified in §B.22.1. Catalog is the resolver, release-info is the
+truth source. Disagreements between the two are resolved in favour
+of release-info (with a warning logged).
+
+### B.22.10 r07.0 release granularity
+
+Each numbered Step within r07.0 (Step 1 through Step 19) shipped as
+a separate commit on `main` with its own CHANGELOG entry. r08.0 and
+r09.0 continue this granularity. The Step number is the unit at which
+a change is reviewable; the revision letter is the unit at which a
+feature is shipped.
+
+### B.22.11 Past-month inspection: read-only `-PatchMonth`
+
+`-PatchMonth <yyyy-MM>` allows the script to be pointed at a past
+baseline state for inspection. The flag is read-only: it changes how
+Stage 1 catalog comparison works but does not enable mutation of
+`data/config-*.json`.
+
+**Why**: Historical reproducibility — an operator can replay a past
+month's baseline against a current `wsusscn2.cab` without polluting
+the committed state.
+
+### B.22.12 CI structure: stage4 monthly refresh
+
+CI Stage 4 (`...__stage4__monthly-refresh.yml`) runs
+RefreshAllBaselines monthly on the 15th and opens a PR if
+`data/config-Server*.json` changed. r09.0 extends this to also
+include `data/wsusscn2-database.json` in the auto-PR.
+
+### B.22.13 Windows ADK auto-install
+
+`-AutoInstallAdk` downloads and silently installs only the
+Deployment Tools feature of the Windows ADK (~50–80 MB). The flag
+is opt-in to avoid surprise on CI runners.
+
+### B.22.14 Eval ISO URL: record both fwlink and direct CDN URL
+
+`config-Server*.json#/LanguageSpecific/<lang>/Iso/{Fwlink,DirectUrl}`
+records both the Microsoft fwlink metalink URL (which redirects to
+the current CDN) and the resolved direct CDN URL (with embedded
+snapshot id). The fwlink is the stable handle; the direct URL
+shortens the download path.
+
+**Why**: Microsoft rotates snapshot URLs. Recording both lets the
+script try the direct URL first (faster) and fall back to the
+fwlink (durable).
+
+### B.22.15 Path-leaf extraction: prefer `[IO.Path]::GetFileName`
+
+`Split-Path -LiteralPath -Leaf` is documented as ambiguous on
+PowerShell 5.1 with mixed slash styles (§D.6). The script standardised
+on `[System.IO.Path]::GetFileName($p)` after the r07.0 Step 13
+incident at seven sites.
+
+### B.22.16 P05 ExpandIso drive-root copy via robocopy
+
+Switched from `Copy-Item -Recurse` to `robocopy` after r07.0 Step 14.
+robocopy preserves NTFS metadata correctly when copying from a
+read-only ISO mount and handles the long-path edge cases that
+`Copy-Item` mis-handles on PowerShell 5.1.
+
+The Dynamic Update overlay also uses `-Path` (not `-LiteralPath`)
+on the wildcard expansion side, because `-LiteralPath` with
+wildcards is a parameter-set conflict.
+
+### B.22.17 Critical script-global typo prevention: PSA2013
+
+The r07.0 Step 15 incident (`$Script:ExtractedMediaPath` written
+in one site, `$Script:ExtractedMedia` read in another) was the
+motivating example for psa.py rule `PSA2013` (assignment-vs-read
+mismatch for `$Script:`-scoped variables).
+
+### B.22.18 `Write-PhaseHeader` positional Mandatory
+
+The r07.0 Step 17 incident (`Write-PhaseHeader 'P12'` hung on
+Mandatory prompt) motivated psa.py rule `PSA2012` (positional
+call to a `Mandatory` parameter).
+
+### B.22.19 `(if ...)` mis-spelled subexpression
+
+The r07.0 Step 18 incident (`(if $x { 1 } else { 0 })` parses as a
+command invocation named `if`) motivated psa.py rule `PSA1004`.
+The correct form is `$(if (...) { ... } else { ... })`.
+
+### B.22.20 `Show-PhaseSummary` idempotent
+
+The r07.0 Step 19 incident (Phase Timing Summary printed twice)
+was fixed by making `Show-PhaseSummary` idempotent via a
+`$Script:PhaseSummaryShown` flag.
+
+### B.22.21 Cross-reference matrix
+
+| Decision | Section | Captured in psa.py rule? | Surfaced from |
+|:---|:---:|:---:|:---|
+| Type field naming → `PatchType` | §B.10 | — | §D.30 |
+| .NET CU multi-MSU | §B.15.2 | — | §D.21 |
+| Catalogue Title comma-form drift | §B.22.2 | — | §D.19 |
+| `$Script:` typo class | §B.22.17 | PSA2013 | §D.NN |
+| `Write-PhaseHeader` positional | §B.22.18 | PSA2012 | §D.NN |
+| `(if …)` subexpression | §B.22.19 | PSA1004 | §D.NN |
+| Idempotent renderers | §B.22.20 | — | §D.NN |
+| `List[object]` `@()` failure | §B.18.5 | — | §D.26 |
+| DISM mount-cache poisoning | §B.3 (one-WR-per-OS) | — | §D.25 |
+| Sampling-vs-comprehensive search | §B.19.5 / §B.19.6 | — | §D.28 |
+| Microsoft tool dependency avoidance | §B.19.4 | — | §D.27 |
+| Helper function unification | §B.10 | — | §D.30 |
+
+---
+
+# Part C — Quality Gates and Validation
+
+> **Scope of this Part**: the pre-commit / pre-merge / pre-release
+> checklist that every change to this sub-project MUST pass. Each gate
+> has a clear pass criterion and a single owner (the developer who
+> proposes the change). CI mirrors the local gates so that a clean
+> local run is sufficient evidence that CI will pass.
+
+## C.1 Static analysis
+
+**Status**: normative. **Policy ID**: SPEC-WSI-030.
+
+Two static analysers MUST report zero findings before commit:
+
+### C.1.1 psa.py (the project's primary analyser)
+
+```bash
+cd scripts/powershell/update-windows-server-iso
+python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
+```
+
+Expected output:
+
+```
+==== psa.py: PowerShell Static Analyzer ====
+File   : Update-WindowsServerIso.ps1
+Lines  : N
+Issues : 0 errors, 0 warnings, 0 info
+
+  (no issues found)
+```
+
+The local `.psa.config.json` opts the script into the strict-mode
+options `PSAP0003`, `PSAP0004`, `PSAP0005` (with relaxed mode
+intentionally NOT set; this project was authored from scratch under
+the strict discipline and has no migration backlog).
+
+`.psa.config.json` populates `psa2010_known_cmdlets` with the DISM,
+Storage, and Hyper-V cmdlet families used by this script. No
+`PSAxxxx` rule is disabled at project level; all findings are
+addressed at the source via either a fix or a line-local
+`# psa-disable-line` comment with an inline justification.
+
+### C.1.2 PSScriptAnalyzer (the upstream analyser, secondary gate)
+
+```powershell
+Invoke-ScriptAnalyzer `
+  -Path Update-WindowsServerIso.ps1 `
+  -Settings PSScriptAnalyzerSettings.psd1 `
+  -Recurse
+```
+
+Expected: zero findings under the project `PSScriptAnalyzerSettings.psd1`.
+The settings file matches the strict baseline; rule suppressions
+require justification per the §C.1 inline-suppression policy.
+
+Both analysers run in CI Stage 1 (Linux pwsh 7.4.6) and Stage 2
+(Windows PowerShell 5.1). The same source file MUST pass both hosts;
+psa.py is host-agnostic, but PSScriptAnalyzer surfaces a small set
+of host-specific findings that only appear on one of the two hosts.
+
+## C.2 Source file format gates
+
+**Status**: normative. **Policy ID**: SPEC-WSI-031.
+
+The script's source file MUST satisfy the §A.1 format contract.
+The gate is automated by psa.py rules `PSA7001` (BOM) and `PSA7002`
+(CRLF) and by `.gitattributes` enforcement at `git add` time.
+
+A manual byte-level spot check is performed before any commit that
+touches the .ps1 file:
+
+```bash
+xxd Update-WindowsServerIso.ps1 | head -1
+# Expected: 00000000: efbb bfff ... (UTF-8 BOM "EF BB BF" + valid content)
+
+file Update-WindowsServerIso.ps1
+# Expected: "with CRLF line terminators"
+
+# Check no mixed line endings (rare but possible after programmatic edit)
+grep -P '\x0d' Update-WindowsServerIso.ps1 | wc -l
+# Expected: equals the total line count of the file
+```
+
+A file emitted by a Linux-hosted code generator without
+CRLF translation will fail `PSA7002` and is rejected. Mixed
+line endings are forensically documented in the sister repository's
+SPEC §D.23 as a higher-severity class of defect (PowerShell AST
+accepts it silently, visual diff tools miss it). When such a file
+is detected, the fix is to re-emit the entire file via the documented
+patterns in
+[`scripts/python/powershell-static-analyzer/SPEC.md` §4.28a](../../python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings).
+
+## C.3 Configuration files validation
+
+**Status**: normative.
+
+For every `data/config-Server*.json` file, the following gates run
+on every commit that modifies them:
+
+### C.3.1 JSON well-formedness
+
+```bash
+for f in data/config-Server*.json; do
+  python3 -c "import json,sys; json.load(open('$f'))" || echo "FAIL: $f"
+done
+```
+
+### C.3.2 Schema 2.1 conformance
+
+The internal `Test-OsConfigSchema` helper validates that every
+required top-level key (`Schema`, `OsKey`, `Common`, `PatchBaseline`,
+`Pca2023`, `AutoRefreshPolicy`, `LanguageSpecific`) is present and
+has the expected type. Invoked via:
+
+```powershell
+.\Update-WindowsServerIso.ps1 -Action DumpFieldClassification | Out-Null
+# Loads all 4 configs; failure to load any of them surfaces here
+```
+
+### C.3.3 Cross-field consistency
+
+After r09.0 the layer 1 / layer 2 cross-reference (§B.19.12) adds
+two consistency checks:
+
+- `PatchBaseline.WsusScnCab.DependencyDatabaseSha256` MUST equal
+  the SHA-256 of `data/wsusscn2-database.json` (when both are
+  present).
+- Every `NeutralPatches[*].RequiresKbIds` entry MUST be either
+  empty or refer to KB IDs present in the same `NeutralPatches[]`
+  array (i.e. the dependency must be **in the baseline**, not
+  dangling).
+
+`Test-OsConfigConsistency` is the planned implementation; for r09.0
+Step 1 the check is manual at PR review per §B.19.18.
+
+## C.4 Functional smoke tests
+
+**Status**: normative.
+
+Runs on Linux pwsh 7.4.6 (CI Stage 1) and Windows PowerShell 5.1
+(CI Stage 2). The smoke set:
+
+| # | Command | Expected outcome |
+|:---:|:---|:---|
+| 1 | `.\Update-WindowsServerIso.ps1 -Action ListPhases` | exit 0; 13 phases + 11 actions printed |
+| 2 | `.\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly` | exit 0; environment dump |
+| 3 | `.\Update-WindowsServerIso.ps1 -Action PrepareBuildVerify -SyntheticTestMode -DryRun -OsKey Server2019` | exit 0; P01–P03 complete, P04 reaches `New-SyntheticTestIso` |
+| 4 | `.\Update-WindowsServerIso.ps1 -Action DumpFieldClassification` | exit 0; JSON written to stdout |
+| 5 | `.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -DryRun -OnlyOs Server2025` | exit 2 (Manual fields remain by design); supersedence dedup exercised |
+| 6 | `.\Update-WindowsServerIso.ps1 -Mode Force -OnlyLanguage ja-jp -SyntheticTestMode -DryRun` | exit 0; Force overrides Skip; OnlyLanguage filter applied |
+| 7 | `.\Update-WindowsServerIso.ps1 -Mode Initial -SyntheticTestMode -DryRun -OsKey Server2025` | exit 0; same decisions as Monthly for the baseline state |
+
+The Windows Server 2025 / PowerShell 5.1.26100 manual smoke runs
+documented in r07.0 followups all reach exit 0 (see TESTING.md §0).
+Smoke 5 returning exit 2 is by design: in dry-run mode the
+RefreshAllBaselines reports that Manual-cadence fields could not be
+auto-resolved, which is the expected outcome.
+
+## C.5 Synthetic full pipeline
+
+**Status**: normative.
+
+`-SyntheticTestMode` (§B.9) runs the full pipeline against a fabricated
+synthetic ISO. CI Stage 3 runs this end to end on a Windows runner with
+the Windows ADK pre-installed:
+
+```powershell
+.\Update-WindowsServerIso.ps1 `
+    -Action PrepareBuildVerify -Execute `
+    -OsKey Server2019 -OsLang ja-jp `
+    -SyntheticTestMode -AutoInstallAdk `
+    -WorkRoot 'D:\synth-ws'
+```
+
+Expected outcome: exit 0, output ISO at
+`D:\synth-ws\output\WS2019_ja-jp_Updated_2026-MM.iso`, P13 reports
+`Health=Healthy` (or `Warning` because the synthetic patch set has
+no real authenticode signatures).
+
+**Important**: Stage 3 MUST NOT upload any artefact containing
+Microsoft binary content. The output ISO is created and verified
+on the runner, but only logs are uploaded. This is enforced by the
+workflow's explicit `actions/upload-artifact` `path:` enumeration
+per the repository-level
+[Artifact Content Minimization](../../../SPEC.md#12-spec-ci-081-artifact-content-minimization)
+policy.
+
+## C.6 Monthly baseline refresh
+
+**Status**: normative.
+
+CI Stage 4 (`...__stage4__monthly-refresh.yml`) runs on the 15th of
+each month and after manual `workflow_dispatch`. It:
+
+1. Checks out `main`.
+2. Runs `.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines`.
+3. (r09.0+) The action's A01.0 sub-phase (§B.19.15.2) refreshes
+   `data/wsusscn2-database.json` first.
+4. If any `data/config-Server*.json` or
+   `data/wsusscn2-database.json` changed, opens an auto-PR.
+5. The PR is restricted via `add-paths` to `data/config-*.json` and
+   (r09.0+) `data/wsusscn2-database.json`.
+
+Stage 4 supports `workflow_dispatch` with four inputs (`mode`,
+`onlyOs`, `onlyLanguage`, `dryRun`) so a maintainer can trigger an
+ad-hoc refresh or limit scope.
+
+## C.7 CI runner diagnostic pre-flight
+
+**Status**: normative.
+
+Every Windows CI stage (Stage 2, Stage 3, Stage 4) runs a
+diagnostic pre-flight inside the workflow file that captures:
+
+- PowerShell version (`$PSVersionTable | ConvertTo-Json -Compress`)
+- Available drives (`Get-PSDrive -PSProvider FileSystem`)
+- `psa.py` analyser version
+- Effective `OutputEncoding` / `[Console]::OutputEncoding`
+
+The pre-flight output goes to `pillar1.log` (or `pillar2.log`,
+`pillar3.log` for the per-tool subdivision) and is uploaded as a
+workflow artefact. This pre-flight is what lets a maintainer
+distinguish "the script bug surfaces only on a particular runner
+image" from "the script bug is real" when triaging a CI failure.
+
+## C.8 Documentation cross-checks
+
+**Status**: normative.
+
+Before commit, the following cross-document consistency rules MUST
+hold:
+
+| Rule | Owner |
+|:---|:---|
+| Any new section in SPEC.md MUST appear in §Table of Contents | Author |
+| Any new `D.NN` Lessons-Learned entry MUST be cross-referenced from at least one §B.* section | Author |
+| Any new Policy ID `SPEC-WSI-NNN` MUST appear in §Policy Index | Author |
+| CHANGELOG.md entry MUST exist for any change visible to operators | Author |
+| README.md / README.ja.md MUST be kept in lock-step on operator-visible changes | Author |
+
+Mechanical verification of the SPEC TOC ↔ section headings is a
+candidate Future enhancement. Today, the gate is a manual review.
+
+## C.9 Self-verification tool suite
+
+**Status**: normative. **Policy ID**: SPEC-WSI-033.
+
+The `tests/` subdirectory ships a Python-based self-verification
+suite (T1 through T7+). These tools probe the script's external
+dependencies and unit-test its PowerShell functions. They use only
+the Python standard library — no `pip install` required.
+
+### C.9.1 Tool inventory
+
+| Tool | Purpose | Network? | Run when |
+|:---|:---|:---:|:---|
+| **T1** `catalog_probe.py` | Live Microsoft Update Catalog probe (search + per-OS title formats + supersedence panel) | Yes | Before/after Catalog-related code change; monthly |
+| **T2** `catalog_fixture_test.py` | Offline HTML fixture regression (13 assertions on 2026-05 fixtures) | No  | Every commit that touches parsers or TitleTokens |
+| **T3** `powershell_harness.py` | PS function unit tests via `-Action TestHarness` (10 assertions) | No  | Every commit that touches a PS scrape helper |
+| **T4** `eval_iso_probe.py` | Evaluation ISO endpoint check (HEAD with Range; 4 OS × 2 lang) | Yes | Before release; when Microsoft Evaluation Center publishes a new snapshot |
+| **T5** `wsusscn2_probe.py` | `wsusscn2.cab` freshness check (existence + size + Last-Modified) | Yes | Before running P06; monthly |
+| **T6** `release_info_parser_test.py` | Release-info Markdown parser regression (13 assertions) | No | Every commit that touches the release-info parser |
+| **T7** `wsusscn2_parser_test.py` | wsusscn2 Master-XML parser regression (planned r09.0) | No | Every commit that touches the wsusscn2 parser |
+
+T2, T3, T6, T7 are deterministic and SHOULD run on every PR. T1,
+T4, T5 are environment-sensitive (real network access) and belong
+in the monthly CI workflow.
+
+### C.9.2 Adjunct: retired r06 Phase 2 PoCs
+
+The original Phase 2 PoC scripts (`poc_release_info_*.py`,
+`poc_dotnet_cu_*.py`, `poc_dynamic_update_*.py`) shipped with r06.0
+Phase 2 and were retired in r07.0 Step 5 once their findings were
+integrated into the production parsers. Their reports remain under
+`docs/history/` for archaeological reference (see Appendix F).
+
+### C.9.3 Refreshing fixtures
+
+The `tests/fixtures/<patch-month>/` HTML files are captured per
+patch month. To refresh:
+
+```bash
+# 1. Confirm Catalog is queryable for the new month
+python3 catalog_probe.py --check all --patch-month 2026-06
+
+# 2. Re-collect the 6 HTML files via the bundled helper
+#    (see tests/README.md for details)
+
+# 3. Regenerate expected.json
+#    The collector hits Search.aspx for each OS / Type combination
+#    and writes one .html file per query plus an expected.json with
+#    the parsed results that T2 then asserts against.
+
+# 4. Commit both the HTML and expected.json together
+git add tests/fixtures/2026-06/
+git commit -m "tests: refresh fixtures for 2026-06"
+```
+
+### C.9.4 Dependency policy
+
+The Python self-verification suite uses **only the Python standard
+library**. Adding a `requirements.txt` or third-party Python
+dependencies requires SPEC-level justification because:
+
+- Standard-library-only keeps the suite runnable in any CI
+  environment without dependency caching.
+- Third-party dependencies introduce supply-chain attack surface
+  (see repository-level SPEC §8.1.D).
+- Operator-side runs (`python3 tests/catalog_probe.py`) MUST work
+  without `pip install`.
+
+### C.9.5 How these tools relate to CI
+
+| Tool | CI Stage |
+|:---|:---|
+| T1 | Stage 4 monthly (live network) |
+| T2 | Stage 1 (Linux, every commit) |
+| T3 | Stage 1 (Linux, every commit) |
+| T4 | Stage 4 monthly |
+| T5 | Stage 4 monthly + before P06 manually |
+| T6 | Stage 1 (Linux, every commit) |
+| T7 | Stage 1 (Linux, every commit; r09.0+) |
+
+The Stage 4 schedule runs T1, T4, T5 monthly so silent Microsoft-
+side changes surface within 30 days even if no PR touches the
+relevant code.
+
+---
+
+# Part D — Known Pitfalls and Lessons Learned
+
+> **Scope of this Part**: every entry records a defect that was either
+> shipped at one point or that almost shipped, plus the root cause and
+> the inheritable mitigation. Entries are tagged with **stable IDs
+> `D.NN`** so other documents, code comments, and finding reports can
+> cite them without breaking on cosmetic edits. Once assigned, a
+> `D.NN` identifier is never reused for a different purpose.
+>
+> Entries are organised in two layers:
+>
+> - **D.1 – D.23**: inherited from the r02 – r08.0 cycles. Each entry
+>   has a stable ID and a compact recall of root cause + mitigation;
+>   the full forensic record is preserved in CHANGELOG.md and the
+>   relevant `docs/history/` finding reports.
+> - **D.24 – D.30**: added in this r09.0 SPEC rewrite. These entries
+>   distil meta-lessons about engineering and design judgement that the
+>   r07.0 / r08.0 / r09.0 cycles surfaced. They are by nature less
+>   tactical and more about how to think about the next ambiguous
+>   situation.
+
+## D.1 – D.23 (inherited from r02 – r08.0 cycles)
+
+### D.1 DISM mount cleanup (OSDBuilder pattern)
+
+**Symptom**: a previous run's WIM mount blocks the new run's
+`Mount-WindowsImage` with `0xC1420127 — image is already mounted`.
+
+**Root cause**: a crashed or `Ctrl-C`ed previous run leaves a mount
+in the DISM database that the kernel still tracks even after the
+PowerShell process exits.
+
+**Fix / mitigation**: every mount site uses a `finally` block that
+calls `Dismount-InstallwimOS` from the OSDBuilder-derived helper
+with a 10-s retry loop, then a 30-s retry loop after `dism
+/Cleanup-MountPoints`. The helper's logic is replicated verbatim in
+`Dismount-WimSafely`.
+
+### D.2 SSU before LCU
+
+**Symptom**: a 2026-05 LCU rejected with `0x800f0823 —
+CBS_E_NEW_SERVICING_STACK_REQUIRED` from inside P07.
+
+**Root cause**: install.wim's resident servicing-stack version
+predates what the LCU expects. Microsoft requires the SSU to be
+applied first.
+
+**Fix / mitigation**: the `Build-PatchPlan` sequence places SSU at
+`I1.SSU` and `B1.SSU` so it always precedes LCU. The §B.13 mount-time
+check and the §B.19 graph-based check both catch missing SSU
+prerequisites at distinct latencies (mount-time: 30 s; graph: < 5 s).
+
+### D.3 `winre.wim` is inside install.wim
+
+**Symptom**: a search for `winre.wim` next to `boot.wim` came up
+empty.
+
+**Root cause**: `WinRE.wim` is **embedded inside install.wim**, at
+the path `Windows\System32\Recovery\WinRE.wim`. It is extracted at
+P08 inner-mount time and serviced separately.
+
+**Fix / mitigation**: P08 mounts install.wim first, copies out
+WinRE.wim, services it independently, then writes it back. The
+`Common.WinReWimPath` config field records the inner path.
+
+### D.4 oscdimg etfsboot / efisys 3-tier fallback
+
+**Symptom**: `oscdimg` failed on Windows Server 2025 hosts with
+"required boot file not found".
+
+**Root cause**: the locations of `etfsboot.com` and `efisys.bin`
+have moved across ADK versions. The script needs to find them in
+three different layouts.
+
+**Fix / mitigation**: `Get-OscdimgBootFiles` tries the following
+locations in order: (1) ADK installation root, (2) `boot/` inside
+extracted media, (3) deeply embedded `boot.wim`-derived paths.
+Pattern borrowed from `Win_ISO_Patching_Scripts_zhCN`.
+
+### D.5 SHA-1 is intentional in `Test-PatchIntegrity`
+
+**Symptom**: a code review questioned `Test-PatchIntegrity` for
+using `Get-FileHash -Algorithm SHA1`.
+
+**Root cause**: not a bug. Microsoft's MetaLink XML for some
+legacy patches still publishes only SHA-1. The integrity check
+falls back to SHA-1 when SHA-256 is unavailable in the source-of-
+truth.
+
+**Fix / mitigation**: an inline comment at the call site documents
+this. Layer 2 (§B.4.3) uses SHA-256 for the patch entries since
+all Catalogue-resolved entries publish it.
+
+### D.6 `Split-Path -LiteralPath -Parent` ambiguity on PS 5.1 ja-JP
+
+**Symptom**: paths containing both forward and back slashes returned
+unexpected results from `Split-Path` on Japanese-locale PS 5.1
+hosts.
+
+**Root cause**: PowerShell 5.1's `Split-Path` on Japanese culture
+mishandles mixed slash styles in a way that PS 7 does not.
+
+**Fix / mitigation**: standardised on
+`[System.IO.Path]::GetFileName($p)` and
+`[System.IO.Path]::GetDirectoryName($p)`. See §B.22.15.
+
+### D.7 Top-level `param()` variables in nested functions
+
+**Symptom**: a nested helper unexpectedly saw the top-level
+`-WorkRoot` value even when called with no arguments.
+
+**Root cause**: PowerShell's dynamic scoping. `param()` variables
+defined at the script level are visible to all nested functions
+unless explicitly shadowed.
+
+**Fix / mitigation**: nested helpers MUST explicitly receive
+`-WorkRoot` (or other top-level params) as a parameter; reliance
+on dynamic scoping is forbidden.
+
+### D.8 `0x800f081e` is benign per OSDBuilder
+
+**Symptom**: DISM warnings of the form
+`Warning ... 0x800f081e` after applying a cross-SKU LCU.
+
+**Root cause**: the patch was not applicable to the specific edition
+in install.wim. This is expected for cross-SKU patch sets (e.g.
+Server 2016 LCU contains files for multiple editions).
+
+**Fix / mitigation**: `Test-DismWarningIsBenign` filters these out
+of the surfaced warnings list, citing OSDBuilder precedent. P11
+reports the count separately.
+
+### D.9 `0x800f0a13` is a transient
+
+**Symptom**: DISM intermittently returned `0x800f0a13` and a retry
+succeeded.
+
+**Root cause**: a known race condition in CBS package installation
+that the OSDBuilder community classified as transient.
+
+**Fix / mitigation**: `Invoke-DismRetry` performs one retry
+(10-s gap) when this specific code appears.
+
+### D.10 `$args` is an automatic variable
+
+**Symptom**: `Resolve-PatchSetFromCatalog` mis-routed when a caller
+passed an extra positional argument.
+
+**Root cause**: a typo had introduced a function parameter named
+`$args`, which shadows the PowerShell automatic variable.
+
+**Fix / mitigation**: `$args` (and other automatic variables) MUST
+NOT be used as parameter names. The list of forbidden names is in
+the script-comment header. PSScriptAnalyzer rule
+`PSReservedCmdletChar` and psa.py's reserved-name check both fire
+on this.
+
+### D.11 Microsoft Eval ISO snapshot URLs rotate
+
+**Symptom**: a direct CDN URL recorded in `config-Server*.json`
+returned 404 a few weeks after recording.
+
+**Root cause**: Microsoft Evaluation Center rotates snapshot URLs.
+The fwlink redirector points at the current snapshot.
+
+**Fix / mitigation**: per §B.22.14, every ISO entry records both
+the fwlink and the direct CDN URL. P04 tries the direct URL first
+(faster); on 404 it falls back to the fwlink.
+
+### D.12 Sandbox-by-default
+
+**Symptom**: an operator unfamiliar with the script triggered a
+full DISM mount + LCU apply by running with default args.
+
+**Root cause**: previously `Build` was the default and `-DryRun`
+the opt-in.
+
+**Fix / mitigation**: `-Execute` is required for any side effect.
+Default behaviour is dry-run. The change is documented in r04.x
+CHANGELOG and surfaced in README's Quick Start.
+
+### D.13 `Start-Transcript` has no `-LiteralPath`
+
+**Symptom**: a workspace path containing brackets caused the
+transcript file to land in an unexpected location.
+
+**Root cause**: `Start-Transcript` only accepts `-Path` and
+wildcard-interprets the argument.
+
+**Fix / mitigation**: the script computes the transcript path
+ahead of time and validates it contains no wildcard characters
+before passing to `Start-Transcript`.
+
+### D.14 PowerShell 5.1 has no ternary operator
+
+**Symptom**: a port from PS 7 to PS 5.1 broke on `(condition ? a : b)`.
+
+**Root cause**: PowerShell's ternary `? :` operator was added in
+7.0. The script targets 5.1 as primary host.
+
+**Fix / mitigation**: use `if ($cond) { $a } else { $b }` (with
+parenthesisation when the result is assigned). psa.py rule
+`PSA1005` catches the ternary form.
+
+### D.15 Patch Tuesday boundary buffer
+
+**Symptom**: `Get-LatestPatchTuesday` occasionally returned the
+previous month's Patch Tuesday on the morning after.
+
+**Root cause**: time-zone confusion. Microsoft publishes on Pacific
+time; a JST-based date arithmetic saw the new Patch Tuesday a day
+before the patches appeared on Catalogue.
+
+**Fix / mitigation**: a 24-hour buffer is applied — the calculated
+Patch Tuesday is treated as "live" only after PT 06:00.
+
+### D.16 Microsoft Update Catalogue has no API
+
+**Symptom**: an attempt to use a Catalog REST API.
+
+**Root cause**: Microsoft Update Catalog does not expose a stable
+API. The only access is HTML scraping of `Search.aspx`.
+
+**Fix / mitigation**: `Resolve-PatchSetFromCatalog` scrapes HTML
+with explicit fragility budget: T1 (`catalog_probe.py`) runs
+monthly to detect Microsoft-side HTML drift.
+
+### D.17 Auto-variable `$matches` cannot be reassigned
+
+**Symptom**: a helper function reset `$matches = @{}` to clear
+prior state; this raised a runtime error.
+
+**Root cause**: `$matches` is one of PowerShell's automatic
+variables and is read-only outside the engine.
+
+**Fix / mitigation**: use `[System.Collections.Hashtable]::new()`
+or rely on `$matches`'s built-in clearing behaviour after each
+regex operation.
+
+### D.18 `wsusscn2.cab` scans the local host's image, not the WIM
+
+**Symptom**: an early prototype of the wsusscn2-driven scan
+returned the host's installed packages, not the offline WIM's.
+
+**Root cause**: `IUpdateSession.CreateUpdateSearcher` uses the
+**currently-running OS** as its target by default, even when
+`ServerSelection = ssOthers` points at an alternate metadata
+source.
+
+**Fix / mitigation**: the r09.0 graph-based check (§B.19) reads
+the file-based layer 2 directly, avoiding the COM API entirely.
+This is what makes the offline-WIM use case possible.
+
+### D.19 Catalogue Title comma-form drift (Server 2022)
+
+**Symptom**: Server 2022 baseline refresh returned **zero** entries
+in 2026-04. Every narrow filter dropped every hit.
+
+**Root cause**: Microsoft removed a comma from the Server 2022
+update title:
+"...operating system, version 21H2" → "...operating system
+version 21H2". The TitleToken was a `[regex]::Escape` literal
+match.
+
+**Fix / mitigation**: per §B.22.2, `TitleTokens` is a multi-form
+array accommodating both the comma and comma-less variants. The
+live `Search.aspx` query strings were updated to the current form.
+
+### D.20 `Get-PatchType` filename heuristic is not authoritative
+
+**Symptom**: Catalogue-derived `NeutralPatches` entries had wrong
+`Type` fields. SSU / Safe-OS DU / umbrella-.NET-CU sub-files were
+mis-classified as `LCU`.
+
+**Root cause**: `Get-PatchType` derived Type by file-name pattern
+matching. The Catalogue search context already knew the
+authoritative Type via `$q.Type`, but `Convert-CatalogPatchToBaselineEntry`
+did not use it.
+
+**Fix / mitigation**: r04.3 added `-KnownType` to
+`Convert-CatalogPatchToBaselineEntry`; the heuristic is bypassed
+when the caller has context.
+
+### D.21 Umbrella KBs attach multiple files to one UpdateId
+
+**Symptom**: Server 2019 `.NET CU` baseline entries silently lost
+`ndp48` or `ndp481` sub-files.
+
+**Root cause**: `Select-CanonicalPatchFile` returns one result.
+Without a `-DotNetVersion` hint, it cannot break the tie between
+two ndp-runtime variants of the same umbrella KB.
+
+**Fix / mitigation**: r04.3 added `Select-AllCanonicalPatchFiles`
+and routed `Type='DotNet'` queries through it. Each surviving
+MSU gets its own `NeutralPatches` entry sharing
+`KbId / Title / UpdateId / Supersedes` from the umbrella KB. See
+§B.15.2.
+
+### D.22 Secure Boot baseline considerations (r05.0+)
+
+**Symptom**: a "Will this ISO boot on a hardware machine with
+PCA2011 revoked from DBX?" question could not be answered from the
+script's pre-r07.0 output.
+
+**Root cause**: input-side readiness (boot.wim has EFI_EX assets)
+and output-side readiness (the assets were copied into the ISO
+correctly) were not distinguished.
+
+**Fix / mitigation**: §B.17 (PCA2023 boot manager support) and
+§B.18 (Output ISO verification) cover the two perspectives
+explicitly; P12 runs both.
+
+### D.23 UEFI Secure Boot defaults templates (r05.0+, informational)
+
+**Symptom**: an operator's machine with non-default DB / DBX
+contents was misclassified as "Healthy" by an early P12.
+
+**Root cause**: the initial readiness check did not consult the
+Microsoft-published Secure Boot defaults templates (DBs / KEKs /
+DBXs) bundled in `microsoft/secureboot_objects`.
+
+**Fix / mitigation**: r05.0 added a check that cross-references
+the running machine's DBX against the upstream-published "factory
+default" templates. A divergence is reported as informational
+context rather than blocking, since operators legitimately
+customise these.
+
+---
+
+## D.24 – D.30 (new in this r09.0 SPEC rewrite)
+
+### D.24 Cognitive bias patterns
+
+**Symptom (recurring across r07.0 / r08.0 / r09.0 cycles)**: an
+investigator arrives at the wrong conclusion despite having the
+right data in hand. Three specific patterns have surfaced often
+enough to be worth naming.
+
+**Pattern 1 — Hypothesis lock-in**. The investigator forms a
+hypothesis early and continues to interpret subsequent evidence as
+confirming it, even when the evidence is at best neutral and at
+worst falsifying. Example: r08.0 Step 2 saw a brief lock-in on
+"`bootmgr_EX.efi` is dual-signed PCA2011+PCA2023" after misreading
+the `Get-AuthenticodeSignature` Issuer field. The lock-in held even
+after `signtool /verify /pa /all /ds 0..3` returned exactly one
+embedded signature — the result was initially explained away. The
+lock-in broke only on a deliberate re-read of the upstream Microsoft
+comment at `Make2023BootableMedia.ps1` L876-L884.
+
+**Pattern 2 — Sampling treated as comprehensive**. The
+investigator samples 2 to 3 instances of a phenomenon and concludes
+about the whole. Example: r09.0 Step 1 Phase 5 v3 looked at the
+first 2-3 `<Update>` elements in the Master XML, observed no
+`<SupersededBy>` element, and tentatively concluded
+"`<SupersededBy>` is not present in the Master XML". An exhaustive
+case-insensitive search later (Phase 5 v4) found **14,059
+occurrences** — present in ~10.3 % of all `<Update>` elements. The
+sampling-based conclusion was off by 14,059 hits. See §D.28 for
+the engineering response.
+
+**Pattern 3 — Solution attraction**. The investigator commits to
+fixing a problem at the code level when the problem is actually at
+the configuration level (or vice versa). Example: r08.0 Step 4d
+saw a tentative reach for a code patch to handle the
+`0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` failure. The
+failure was a real Microsoft-side requirement (LCU's prerequisite
+SSU was absent from the baseline); the correct fix was a
+configuration change. The code-fix path would have shipped the bug
+as a feature. See §D.29.
+
+**Root cause (shared across patterns)**: the investigator's mental
+model is constructed from incomplete evidence, and adding evidence
+that contradicts the model is cognitively more expensive than
+extending the model to absorb the contradiction. The cost gradient
+favours staying with the existing hypothesis.
+
+**Mitigation**:
+
+1. **Pre-commit a falsifiability test**. Before believing a
+   hypothesis, write down what would have to be true to disprove
+   it. r08.0 Step 2's dual-sign hypothesis was disproved by
+   "exactly 1 embedded signature per `/ds <N>`" — but no falsifier
+   was pre-committed, so when the evidence came in, it was read
+   against rather than disqualifying.
+2. **Re-read upstream sources when surprised**. Microsoft's own
+   comments and READMEs are the ground truth more often than the
+   investigator's intuition. The L876-L884 comment in
+   `Make2023BootableMedia.ps1` is a perfect example of an
+   authoritative one-paragraph answer that, once read, made the
+   dual-sign hypothesis untenable.
+3. **Promote exhaustive search over sampling whenever cheap**.
+   `Select-String` on a 108 MB file is a few seconds; a sample of
+   3 elements out of 136,102 is structurally unsound regardless of
+   how busy the investigator is. See §D.28.
+4. **Distinguish code-bug from config-bug explicitly**. Before
+   reaching for `str_replace`, ask: "is the failure originating in
+   logic this script controls, or in a fact the script reads?" If
+   reading, the fix is a config / data change. See §D.29.
+
+The four mitigations above are also recorded as the **Engineering
+Hygiene Quartet** in the r09.0 Step 1 retrospective.
+
+### D.25 DISM mount-cache poisoning
+
+**Symptom (r07.0 Step 16/17)**: the WIM-index enumeration banner
+of `install.wim Index 2` rendered each Japanese character doubled
+("デデススククトトッッププ"), while `Index 4` of the same WIM rendered
+correctly on the same console host in the same run. Switching the
+`-WorkRoot` from `D:\UpdateWsi` to `D:\UpdateWsi_2016` (no other
+changes) made the mojibake stop reproducing.
+
+**Root cause**: not console-rendering. The original WorkRoot had
+been used for many prior runs with mounted, dismounted, and
+partially-cleaned-up WIMs in nested directories. A stale entry in
+the DISM mount database (or in a per-WIM scratch cache under
+`%TEMP%` / `%WINDIR%\Logs\DISM`) mapped the same WIM-mount path to
+a corrupted state on subsequent enumerations. The byte-identical
+source ISO and the same console host both rule out the originally
+suspected layers.
+
+**Mitigation**: **one fresh WorkRoot per OS family**. This is the
+project-wide recommended pattern (`D:\UpdateWsi_2016`,
+`D:\UpdateWsi_2019`, `D:\UpdateWsi_2022`, `D:\UpdateWsi_2025`) and
+is documented at §B.3. The pattern also helps with disk-space
+isolation per OS and with parallel multi-OS work.
+
+**Forensic notes**: the full investigation log is in
+`docs/history/mojibake-investigation-note.md`. The investigation
+was deliberately deferred to focus on shipping milestones; the
+workaround is empirically sufficient. The root-cause hypothesis is
+"DISM mount-cache state corruption from prior aborted P10 runs" but
+this has not been independently reproduced under controlled
+conditions. The investigation may be resumed when a maintainer has
+the bandwidth.
+
+**Related**: §B.3 (workspace layout) and §B.4.2 records the
+recommendation.
+
+### D.26 `List[object]` of pscustomobject argument-type mismatch
+
+**Symptom (r08.0 Step 2 → Step 3)**: a function that collected
+pscustomobjects into `System.Collections.Generic.List[object]` and
+returned the list via `@($list)` threw `System.ArgumentException:
+Argument types do not match` at function return time. The error
+persisted across multiple attempts and was not root-caused within
+the Step 2 session; the function was reverted.
+
+**Root cause** (identified in Step 3 minimal reproduction): the
+`@(...)` array-subexpression operator fails on
+`System.Collections.Generic.List[object]` when its elements are
+`pscustomobject`. The same operator works fine on `List[string]`.
+The behaviour is specific to PowerShell 7.4.x but is consistent
+across hosts (Linux pwsh 7.4.6 reproduces).
+
+**Minimal reproduction**:
+
+```powershell
+$list = New-Object System.Collections.Generic.List[object]
+$list.Add([pscustomobject]@{Label='test1'}) | Out-Null
+$list.Add([pscustomobject]@{Label='test2'}) | Out-Null
+
+@($list)              # FAILS: Argument types do not match
+[object[]]@($list)    # FAILS: Argument types do not match
+$list.ToArray()       # OK
+foreach ($x in $list) { $arr += $x }  # OK (slow path)
+```
+
+**Mitigation**: convert at function exit via `$list.ToArray()`.
+This is the only "different" line vs the existing
+`Get-IsoBootCertReadiness` pattern (which uses `List[string]` and
+`@(...)`), so the function template is otherwise unchanged. The
+distinction is recorded inline in
+`Test-OutputIsoPca2023Readiness`'s comments at the relevant lines.
+
+**Engineering lesson**: when a known-working template fails in a
+new place, the difference between the templates is the first thing
+to inspect. The Step 2 investigation looked for differences in
+parameter binding, scope, and PSScriptAnalyzer suppression
+attributes before getting to the element-type difference. A
+minimal reproduction (4 lines, two cases) would have identified the
+root cause in 5 minutes; the investigation took most of a session.
+
+**Related**: §B.18.5 records the use-site mitigation.
+
+### D.27 Microsoft OS tool dependency avoidance
+
+**Symptom (r09.0 Step 1 Phase 5 v1 / v2)**: `expand.exe -F:` for
+extracting a named file from a CAB rejected the operation with
+"Cannot expand a file onto itself", even though the destination
+filename differed from the source. A `Shell.Application` COM
+fallback in v2 then placed the wrong content in the destination
+(writing the CAB itself under the requested filter's name). Both
+failures occurred on a current Windows 11 Build 26100 host.
+
+**Root cause**: in-box Microsoft OS tools have brittle edge cases
+that surface specifically when interacting with archive formats
+whose internal name conflicts with the destination basename, or
+that contain a single nested archive. The bugs are not in this
+script.
+
+**Mitigation**: **prefer well-maintained, independent
+third-party tools for archive extraction**. The §B.19.4 7-Zip
+strategy codifies this for the wsusscn2.cab parser. The same
+philosophy underlies:
+
+- `oscdimg` (from Windows ADK Deployment Tools, distinct from
+  in-box `bcdedit`) for ISO assembly.
+- `robocopy` (in-box but stable since Windows 2000) for
+  high-fidelity copy operations, replacing `Copy-Item -Recurse`
+  per §B.22.16.
+- Eventual move toward third-party SHA tools if `Get-FileHash` ever
+  produces inconsistent hashes across hosts (no incident yet).
+
+**Generalisation**: a Microsoft in-box tool that has not been
+substantially maintained since Windows 7 is at higher risk of
+edge-case failure on modern Windows builds than a focused
+third-party tool actively maintained by an upstream community. The
+generalisation is not "avoid Microsoft tools"; it is "evaluate
+maintenance posture per-tool".
+
+**Related**: §B.19.4 (7-Zip dependency strategy); §B.22.16
+(robocopy preference).
+
+### D.28 Sampling versus comprehensive search
+
+**Symptom (r09.0 Step 1 Phase 5 v3)**: the parser PoC ran an
+"exemplar walk" over the first 2-3 `<Update>` elements in the
+108 MB Master XML, observed no `<SupersededBy>` element, and
+recorded the conclusion "Master XML lacks `<SupersededBy>`". Phase
+5 v4 then ran an exhaustive `Select-String -CaseSensitive:$false`
+over the file and found **14,059 occurrences**.
+
+**Root cause**: in a 136,102-element dataset, sampling 2-3 is not
+representative for a phenomenon with ~10 % base rate. The
+investigator implicitly relied on "the first few are typical",
+which holds for homogeneous datasets but not for the bimodal
+"Bundle vs Standalone" mix in the Master XML.
+
+**Mitigation**: when probing a structured file for a feature's
+presence, prefer **exhaustive case-insensitive grep**:
+
+```powershell
+Select-String -Path $masterXml -Pattern '<SupersededBy' `
+              -CaseSensitive:$false | Measure-Object -Line
+```
+
+On a 108 MB file, this completes in seconds. The cost of running
+the exhaustive search is always lower than the cost of being wrong
+about whether the feature is present. The only exception is when
+the exhaustive search would be combinatorial (e.g. checking every
+pair of elements for a relationship); in that case, sampling is
+unavoidable and the conclusion must be stated as a sample with
+confidence bounds.
+
+**Generalisation**: "I looked at a few of them" is acceptable for
+exploratory inspection; it is not acceptable for design decisions.
+The transition from "I looked" to "It is absent" requires
+exhaustive evidence or a statistical statement.
+
+**Related**: §B.19.5.2 cites this lesson explicitly when explaining
+why r09.0 limits scope to the Master XML.
+
+### D.29 Code bug versus configuration problem triage
+
+**Symptom (r08.0 Step 4d, narrowly avoided)**: a P07 `0x800f0823`
+failure on Server 2016 was nearly addressed by patching
+`Invoke-PatchSubPhase` to retry-with-different-args, on the theory
+that DISM was being called incorrectly. Triage revealed the
+prerequisite SSU was absent from the baseline; the code was
+correct, the config was incomplete.
+
+**Root cause**: failures from the runtime layer are easy to
+misread as code defects. The investigator's instinct is to fix the
+caller (closer to home, easier to edit). When the failure originates
+in Microsoft-side requirements that the script reads via config,
+the fix belongs in the data, not the code.
+
+**Mitigation**: a one-question triage at the top of every failure
+investigation:
+
+> **"Is the failure originating in logic this script controls, or
+> in a fact the script reads?"**
+
+If the failure references Microsoft KB IDs, build numbers, file
+formats, or update relationships, the burden is on the config /
+data path until proven otherwise. Reach for code edits only after
+the config / data path has been verified complete.
+
+The §B.19 Servicing Dependency Database is in part the systemic
+mitigation: when the failure is "missing prerequisite KB", layer 2
+makes the config-side gap detectable before the code-side runtime
+failure surfaces.
+
+**Related**: §B.19 (graph-based dependency closure); §D.24 Pattern 3.
+
+### D.30 Helper function unification
+
+**Symptom (r08.0 Step 4c)**: six functions across the script read
+`$_.Type` from a `ResolvedPatch` object, but the authoritative
+field name was `$_.PatchType`. The mismatch was not caught by
+PSScriptAnalyzer (both names are syntactically valid; the
+type-mismatch surfaced only at runtime when `$_.Type` returned
+`$null` and the downstream conditional silently skipped the
+patch).
+
+**Root cause**: parallel evolution. Different cycles introduced
+different conventions in different functions without a unifying
+accessor. The defect was silent because the script's logic treats
+"unrecognised type" as "skip", which produces no error trace.
+
+**Mitigation (new in r09.0 Step 1)**: introduce a single helper
+`Get-PatchEntryType` that:
+
+```powershell
+function Get-PatchEntryType {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)] $PatchEntry)
+    # Read with dual-field fallback to absorb historical field-name drift
+    if ($PatchEntry.PSObject.Properties['PatchType']) { return $PatchEntry.PatchType }
+    if ($PatchEntry.PSObject.Properties['Type'])      { return $PatchEntry.Type      }
+    return $null
+}
+```
+
+All call sites that previously read `$_.Type` or `$_.PatchType`
+directly now route through `Get-PatchEntryType`. The function is
+the **single point of truth** for the field-name question.
+Adding a third name in the future is a one-line change in this
+helper plus a one-line CHANGELOG entry; no call-site sweep is
+needed.
+
+**Generalisation**: when a piece of data is read from N call sites
+and two or more sites disagree about how to read it, the fix is a
+helper that absorbs the disagreement, **not** a sweep that
+"corrects" all sites to one convention. The sweep is fragile
+against future drift; the helper is forever.
+
+**Related**: §B.10 (PatchPlan engine, normative field name);
+§B.22.21 cross-reference matrix.
+
+---
+
+# Appendices
+
+> Appendices carry non-normative material that supports navigation
+> and traceability of this SPEC. They are intentionally separated
+> from Parts A–D so that an LLM agent reading only the normative
+> content has a clean cutoff.
+
+## Appendix E — Function reuse map
+
+> **Status**: informative. **Source**: hand-curated inventory of
+> function provenance as of r09.0.
+
+The script reuses several helpers from sibling repositories. The
+provenance is recorded so a future maintainer knows where to look
+when the original needs an upstream fix.
+
+### E.1 Reused verbatim from `Download-SpeakerDeck.ps1`
+
+| Helper | Role |
+|:---|:---|
+| Debug Trace Facility (`Start-DebugTrace`, `Set-DebugStep`, `Stop-DebugTrace`, `Export-DebugTraceJson`) | Per-phase forensic state capture |
+| `Write-Step`, `Write-Ok`, `Write-Warn`, `Write-Fail`, `Write-Skip`, `Write-PhaseHeader`, `Write-PhaseFooter` | Log helpers with severity prefixes (§A.3) |
+| `Get-EnvironmentInfo` | Five-pillar environment dump (OS, PS, locale, network, ADK) |
+| `Add-ErrorJsonlEntry` | Per-error JSONL append |
+| `Invoke-DownloadWithProgress` | Progress-aware HTTP download with retry |
+| `Assert-IsAdministrator` | Elevation check |
+| `Set-ConsoleUtf8` | Console encoding setup |
+
+### E.2 Reused from `Deploy-AMDChipsetDriverOnWindowsServer.ps1` (Appendix F)
+
+| Helper | Role | Note |
+|:---|:---|:---|
+| `Get-SevenZipPath` | Probe 7-Zip in standard install locations | r09.0+, §B.19.4.2 |
+| `Get-LatestSevenZipUrl` | Three-tier fallback to obtain MSI download URL | r09.0+, §B.19.4.2 |
+| `Install-SevenZipFallback` | Silent MSI install of 7-Zip | r09.0+, §B.19.4.2 |
+
+### E.3 New for `Update-WindowsServerIso.ps1`
+
+| Helper | First shipped | Role |
+|:---|:---|:---|
+| `Build-PatchPlan` | r03 | Target-aware PatchPlan engine (§B.10) |
+| `Resolve-PatchSetFromCatalog` | r03 → rewritten r07.0 Step 2 | Catalogue scrape and supersedence-aware selection |
+| `Resolve-PatchSetFromReleaseInfo` | r07.0 Step 2b | Release-info Markdown-driven baseline membership (§B.22.1) |
+| `Select-LatestPatchBySupersedence` | r04.2 | Multi-candidate supersedence dedup (§B.12) |
+| `Select-AllCanonicalPatchFiles` | r04.3 | Umbrella-KB multi-MSU retention (§B.15.2) |
+| `Test-IsCombinedLcuTitle` | r04.3 | LCU+SSU combined detection (§B.15.3) |
+| `Get-CatalogQueryTemplate` | r04.3 | OS-specific Title-token template loader (§B.22.2) |
+| `Test-PatchDependencyClosureOnMount` | r04 | Mount-time prerequisite check (§B.13) |
+| `Get-Pca2023ReadinessSnapshot`, `Show-Pca2023ReadinessSnapshot`, `Format-Pca2023ReadinessForReport` | r05.0 | Health verdict for PCA2023 readiness (§B.17) |
+| `Convert-WimBootToPca2023Signed` | r05.0 | PSA-clean reimplementation of `Make2023BootableMedia.ps1` (§B.17) |
+| `Get-IsoBootCertReadiness` | r05.0 | INPUT-side boot.wim readiness inspection (§B.17.2) |
+| `Test-OutputIsoPca2023Readiness` | r08.0 Step 3 | OUTPUT-side ISO 5-target check (§B.18) |
+| `Assert-WorkspacePreflight` | r04.3 | Workspace structural readiness (§B.21) |
+| `Test-PatchDependencyClosureFromGraph` | r09.0 (planned) | Pre-mount graph-based dependency check (§B.19.13) |
+| `ConvertFrom-WsusScnPackageXml` | r09.0 (planned) | XmlReader-based Master XML parser (§B.19.9) |
+| `New-WsusScnDependencyDatabase` | r09.0 (planned) | Layer 2 JSON renderer (§B.19.9, §B.19.10) |
+| `Invoke-WsusScnPackageXmlExtract` | r09.0 (planned) | Two-stage 7-Zip extract of package.xml (§B.19.9.1) |
+| `Get-WsusScnCabIfNeeded` | r05.0 → extended r09.0 | Conditional wsusscn2.cab download with cache invalidation (§B.19.15.4) |
+
+### E.4 Helper unification (r09.0)
+
+| Helper | Replaces |
+|:---|:---|
+| `Get-PatchEntryType` (§D.30) | Six direct reads of `$_.Type` / `$_.PatchType` across the script |
+| `Get-OrEnsurePca2023Snapshot` | Repeated snapshot construction blocks in P10 / P12 |
+| `Show-PhaseSummary` (idempotent since r07.0 Step 19) | Duplicated phase-timing renderers |
+
+## Appendix F — Reference projects
+
+> **Status**: informative.
+
+The script depends on or borrows patterns from the following
+projects. Pinned references help a future maintainer follow the
+upstream fix path.
+
+### F.1 Microsoft
+
+| Project | URL | Role |
+|:---|:---|:---|
+| `microsoft/secureboot_objects` | https://github.com/microsoft/secureboot_objects | Source of `Make2023BootableMedia.ps1` v1.4 (the upstream PSA-clean reimplementation target, §B.17) and the EFI_EX asset bundle |
+| Microsoft Support article KB5053484 | https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f | The "Applies To" list that establishes Server 2016/2019/2022 are in scope for PCA2023 boot-manager updates (§B.17.4) |
+| Windows ADK (Deployment Tools) | https://go.microsoft.com/fwlink/?linkid=2289980 | Provides `oscdimg.exe` (§B.21.2 / D.4) |
+
+### F.2 Independent maintainers
+
+| Project | URL | Role |
+|:---|:---|:---|
+| OSDBuilder | https://github.com/OSDeploy/OSDBuilder | DISM mount + dismount retry pattern (D.1); 0x800f081e suppression heuristic (D.8) |
+| Win_ISO_Patching_Scripts_zhCN | https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN | Three-tier `etfsboot.com` / `efisys.bin` fallback chain (D.4) |
+| windows-evaluation-isos-scraper | https://github.com/rgl/windows-evaluation-isos-scraper | Canonical Server 2022 SHA-256 hash sourced from this project |
+| 7-Zip (`ip7z/7zip`) | https://www.7-zip.org/ + https://github.com/ip7z/7zip | The CAB extraction backbone (r09.0+, §B.19.4) |
+
+### F.3 Companion in-house scripts
+
+| Project | Relationship |
+|:---|:---|
+| `Download-SpeakerDeck.ps1` (sister sub-project under `scripts/powershell/download-speakerdeck-oracle4engineer/`) | Source of the §A inherited common spec body (debug trace, log helpers, env probe, retry primitives). Its SPEC.md is the authoritative copy of the inherited rules. |
+| `Deploy-AMDChipsetDriverOnWindowsServer.ps1` | Source of the 7-Zip helper trio (§B.19.4.2 / Appendix E.2) |
+
+## Appendix G — Historical revision matrix
+
+> **Status**: informative. **Source**: derived from
+> [`CHANGELOG.md`](./CHANGELOG.md). See CHANGELOG for the per-cycle
+> detail.
+
+### G.1 Cycle overview
+
+| Cycle | Released | Theme |
+|:---|:---:|:---|
+| r02.x | 2026-05-24 | Initial baseline, debug trace facility, dynamic patch resolution |
+| r03 | 2026-05-24 | PatchPlan engine, RefreshAllBaselines |
+| r04.0 – r04.4 | 2026-05-24 → 2026-05-25 | Sub-phase sequences, supersedence-aware Catalogue, workspace preflight, self-verification suite (T1-T5) |
+| r05.0 – r05.1 | 2026-05-25 | PCA2023 boot manager support; Schema v2.1; KbId/FileName remediation |
+| r06.0 (Phase 1 / 2 / 3) | 2026-05-25 → 2026-05-26 | Update Type Matrix; PoC: release-info, .NET CU, Dynamic Update; Phase 3 architectural baseline |
+| r07.0 Step 1 – Step 19 | 2026-05-25 → 2026-05-26 | Release-info migration; config-driven token matching; data/ flat layout; numerous polish steps and parser hardening |
+| r08.0 Step 1 – Step 4 | 2026-05-27 | Server 2016 EVAL PCA2023 viability confirmed; install.wim symmetry; `Test-OutputIsoPca2023Readiness`; KB5087537 SSU-prerequisite incident |
+| r09.0 Step 1 (this SPEC) | 2026-05-27 (planned implementation) | Servicing Dependency Database (§B.19); new D.24-D.30 lessons; SPEC restructure to Part A/B/C/D standard form |
+
+### G.2 Roadmap (next cycles)
+
+This section deliberately stays short. Per
+[`docs/history/r07.0-followups.md`](./docs/history/r07.0-followups.md)
+and the per-cycle finding documents, the active follow-up tasks are
+tracked there with P0/P1/P2 priority tags. Roadmap-level
+forward-looking content lives in those documents, not in this SPEC.
+
+Open at r09.0 inception:
+
+- r09.0 Step 1: Implement the §B.19 Servicing Dependency Database
+  (parser, layer 2 schema, P06 Stage 2 wiring, `RefreshDependencyDatabase`
+  action). Currently SPEC-only; implementation begins in a subsequent
+  session.
+- r09.0 Step 2: Wire `-EnableDependencyCheck` opt-in; default OFF.
+- r09.0 Step 3: Default-ON for `-EnableDependencyCheck`.
+- r09.0 Step 4+: Fleet roll-out (Server 2019 / 2022 / 2025 `-Action
+  Build -Execute` with stage 2 verifying); deal with the residual
+  KB5087537 SSU-prerequisite incident (currently a config-side
+  pending action).
+
+### G.3 Deprecation list (kept for context)
+
+| Item | Deprecated in | Replacement |
+|:---|:---|:---|
+| Part E "Roadmap" (top-level) | r09.0 SPEC rewrite | CHANGELOG + per-cycle followups (now Appendix G.2) |
+| Part F "Function Reuse Map" (top-level) | r09.0 SPEC rewrite | Appendix E |
+| Part G "Self-verification tools" (top-level) | r09.0 SPEC rewrite | Part C.9 |
+| Part H "Reference Projects" (top-level) | r09.0 SPEC rewrite | Appendix F |
+| Part I "Servicing Dependency Database" (top-level) | r09.0 SPEC rewrite | Part B.19 |
+| `B.14b` (out-of-sequence) | r09.0 SPEC rewrite | Absorbed into §B.4.3 |
+| `B.23` (24-subsection narrative) | r09.0 SPEC rewrite | §B.22 (decision-record form) |
+| `Type` field on resolved patches | r09.0 Step 1 | `PatchType` (canonical); `Get-PatchEntryType` shim at read sites |
+
+---
+
+**End of SPEC.md**
+
+> This SPEC will be updated in lock-step with code changes. The
+> revision letter in `$Script:ScriptVersion` matches the revision
+> letter under which a given normative section was introduced or
+> last revised. See `CHANGELOG.md` for the per-revision detail.
 
