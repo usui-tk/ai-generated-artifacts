@@ -196,6 +196,19 @@ a parameter convention not yet adopted by the sibling), record it as
 propose the change to the sibling SPEC so the convention can be
 inherited rather than forked.
 
+### A.x.0 — Rationale and forensic record (inheritance rule)
+
+The Part A inheritance rule above is normative for this SPEC and for
+every Layer 3 SPEC in this repository style. The rationale, the
+canonical anti-pattern (the bloated 365-line Part A in commit
+`c40755c`, which this SPEC corrected in commit `8df9ff4`), and the
+LLM-agent operating guidance for preserving the rule are recorded
+permanently in the repository-wide [`AGENTS.md` §6 Part A Inheritance
+Rule (ABSOLUTE)](../../../AGENTS.md#6-part-a-inheritance-rule-absolute)
+and in [`AGENTS.md` §9 Anti-Patterns (AP-1)](../../../AGENTS.md#9-anti-patterns-forensically-documented).
+LLM agents extending or revising this SPEC MUST consult both
+references before touching Part A.
+
 ---
 
 # Part B — Script-Specific Specification

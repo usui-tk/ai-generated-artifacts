@@ -2565,6 +2565,54 @@ scope** for this doc-only commit; they will be corrected during the
 r09.0 Step 2+ implementation cycles when the script body is otherwise
 touched.
 
+### r09.0 Step 1 follow-up 2 (governance cross-reference) - subproject docs reference repository-wide AGENTS.md
+
+A small follow-up to the prior `r09.0 Step 1 follow-up (doc-renewal)`
+entry above. The repository-wide [`AGENTS.md`](../../../AGENTS.md) — the
+LLM-assisted contributor operating guide, introduced at the
+repository root in the same Step 6 governance cycle — is now
+referenced from this subproject's documentation:
+
+- `README.md`: the "Reader's roadmap" section gains a bullet pointing
+  to `../../../AGENTS.md` for LLM-agent operating guidance (governance
+  hierarchy, ground-truth extraction, Doc-Touching Matrix, Part A
+  inheritance rule, anti-patterns).
+- `README.ja.md`: the same bullet in lock-step (Japanese mirror).
+- `SPEC.md`: Part A gains a new subsection `A.x.0 — Rationale and
+  forensic record (inheritance rule)` that points to
+  `../../../AGENTS.md` §6 (the Part A Inheritance Rule) and §9 (the
+  Anti-Pattern catalogue, including AP-1 which documents the
+  `c40755c` Part A bloat regression that this SPEC's Part A
+  correction in `8df9ff4` resolved). LLM agents extending or revising
+  Part A MUST consult both references before touching it.
+
+### Files changed
+
+| File | Before | After |
+|:---|--:|--:|
+| `README.md` | 562 | 563 |
+| `README.ja.md` | 551 | 552 |
+| `SPEC.md` | 3855 | 3870 |
+
+### Rationale
+
+The Step 6 cycle introduced `AGENTS.md` at the repository root. Its
+forensic value (in particular the §9 AP-1 / AP-9 entries) is highest
+when LLM agents working in a Layer 3 SPEC can discover it via a
+natural navigation path from the document they are currently editing.
+Adding the references in `README.md` (operator-facing navigation) and
+`SPEC.md` Part A (agent-facing rule rationale) closes that loop
+without restating content (the canonical text lives in `AGENTS.md`,
+not duplicated here).
+
+### Not touched
+
+- `TESTING.md` is unchanged. It already references SPEC.md Part C and
+  Part D; the `AGENTS.md` link is reachable transitively through
+  SPEC.md.
+- The script body (`Update-WindowsServerIso.ps1`) is unchanged; this
+  remains a doc-only commit.
+
 ## [update-wsi-2026.05.26-r07.0] - 2026-05-26
 
 **r07.0 — Phase 3 implementation (release-info-driven refresher; breaking change).**

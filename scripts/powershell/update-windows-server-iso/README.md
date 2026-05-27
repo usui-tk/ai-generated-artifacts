@@ -66,6 +66,7 @@ solve well on its own:
 - For **verification procedures and recorded results**, see
   [`TESTING.md`](./TESTING.md).
 - For **per-revision change history**, see [`CHANGELOG.md`](./CHANGELOG.md).
+- For the **repository-wide LLM-agent operating guide** (governance hierarchy, ground-truth extraction, Doc-Touching Matrix, Part A inheritance rule, anti-patterns), see [`AGENTS.md`](../../../AGENTS.md) at the repository root.
 - The **repository-wide** Language Policy, File Format Policy, Disclaimer, and Contribution rules live at the [root `README.md`](../../../README.md), [`CONTRIBUTING.md`](../../../CONTRIBUTING.md), and [`SECURITY.md`](../../../SECURITY.md).
 
 ## ⚠️ Disclaimer

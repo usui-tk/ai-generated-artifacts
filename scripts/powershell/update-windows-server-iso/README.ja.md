@@ -63,6 +63,7 @@ Windows Update は稼働中サーバーを最新状態に保つ標準的な手�
   [`SPEC.md`](./SPEC.md)（開発者・LLM 向け仕様書）も併読してください。
 - **検証手順と実行結果** は [`TESTING.md`](./TESTING.md) を参照してください。
 - **リビジョン単位の変更履歴** は [`CHANGELOG.md`](./CHANGELOG.md) を参照してください。
+- **リポジトリ全体に共通する LLM エージェント運用ガイド**(ガバナンス階層、ground truth 抽出、Doc-Touching マトリクス、Part A 継承ルール、アンチパターン)は、リポジトリルートの [`AGENTS.md`](../../../AGENTS.md) を参照してください。
 - **リポジトリ全体に共通する** 言語ポリシー、ファイル形式ポリシー、免責事項、
   貢献ルールは、ルートの [`README.md`](../../../README.md)、
   [`CONTRIBUTING.md`](../../../CONTRIBUTING.md)、
