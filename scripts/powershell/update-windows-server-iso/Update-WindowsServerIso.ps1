@@ -536,7 +536,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
 $Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'
-$Script:ScriptTag     = 'promote-enable-flags-for-build-phases'
+$Script:ScriptTag     = 'add-output-iso-pca2023-verification'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -8102,6 +8102,312 @@ function Get-IsoBootCertReadiness {
     return $inv
 }
 
+function Test-OutputIsoPca2023Readiness {
+    <#
+    .SYNOPSIS
+        Verify an extracted OUTPUT-ISO directory against the five
+        conversion targets defined by Microsoft's
+        Make2023BootableMedia.ps1 v1.4 (Copy-2023BootBins, L829-L941).
+
+        This is a STRICTLY READ-ONLY function. No DISM mounts and no
+        registry hive loads; only Test-Path + Get-AuthenticodeSignature
+        on a fixed set of paths under the extracted media tree.
+
+        Complementary to Get-IsoBootCertReadiness:
+          - Get-IsoBootCertReadiness  : inspects the INPUT (pre-P10)
+                                        media state via boot.wim mount.
+          - Test-OutputIsoPca2023Readiness : inspects the OUTPUT
+                                        (post-P10) media state via
+                                        direct file checks on the
+                                        extracted ISO root.
+
+        Microsoft's upstream Make2023BootableMedia.ps1 performs file
+        copy only (zero Get-AuthenticodeSignature / signtool calls in
+        the 1141-line script); signature verification is by design
+        left to the caller. This function is an upstream-compatible
+        quality extension that codifies the five Microsoft conversion
+        targets as a single Pass / PassWithNotes / Warning / Fail
+        verdict.
+
+    .OUTPUTS
+        pscustomobject with fields:
+          .Available     [bool]     - whether the check could be run
+          .ErrorMessage  [string]   - reason string when not available
+          .OverallStatus [string]   - 'Pass' / 'PassWithNotes' /
+                                      'Warning' / 'Fail' / 'Unknown'
+          .TargetChecks  [object[]] - array of per-target pscustomobject:
+              .Label, .Path, .ExpectedSignature, .ActualSignature,
+              .IsPca2023, .IsPca2011, .Status, .Notes
+          .Reasons       [string[]] - human-readable bullets summarising
+                                      the non-Pass findings, always
+                                      ending with a SCOPE clarifier
+
+        Status mapping (per SPEC.md B.18 and r07.0-followups.md):
+          Target #1 (\efi\boot\bootx64.efi or bootaa64.efi)
+              PCA2023 -> Pass; PCA2011 -> Fail; missing -> Fail
+          Target #2 (\bootmgr.efi)
+              any signature or missing -> PassWithNotes
+              (Microsoft design L876-L884)
+          Target #3 (\efi\microsoft\boot\efisys_ex.bin)
+              present -> Pass; missing -> Fail
+          Target #4 (\efi\microsoft\boot\fonts\*.ttf)
+              present -> Pass; missing or empty -> Warning
+          Target #5 (\EFI\Microsoft\Boot\boot.stl)
+              present -> Pass; missing -> PassWithNotes
+
+        OverallStatus aggregation: any Fail -> Fail; else any Warning
+        -> Warning; else any PassWithNotes -> PassWithNotes; else Pass.
+
+    .NOTES
+        SCOPE: file presence + primary signer-chain only. Actual boot
+        behaviour on firmware with PCA2011 revoked from DBX is NOT
+        verified here. Manual boot test on hardware or a Hyper-V Gen2
+        VM with a custom Secure Boot template that revokes PCA2011 in
+        DBX is required before production deployment.
+
+        Implementation note: follows the Get-IsoBootCertReadiness
+        pattern verbatim (declare $result pscustomobject once at entry,
+        mutate properties, convert internal lists to arrays at exit)
+        to avoid PowerShell type-inference traps. List[object] holding
+        pscustomobject items must be materialised with .ToArray() not
+        @(); see the inline comment near the function exit.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$ExtractedMediaPath
+    )
+
+    $result = [pscustomobject]@{
+        Generated     = (Get-Date)
+        Available     = $false
+        ErrorMessage  = $null
+        ExtractedMediaPath = $ExtractedMediaPath
+        OverallStatus = 'Unknown'
+        TargetChecks  = @()
+        Reasons       = @()
+    }
+
+    if (-not (Test-Path -LiteralPath $ExtractedMediaPath)) {
+        $result.ErrorMessage = ('ExtractedMediaPath does not exist: {0}' -f $ExtractedMediaPath)
+        $result.OverallStatus = 'Fail'
+        $result.Reasons = @(('ExtractedMediaPath does not exist: {0}' -f $ExtractedMediaPath))
+        return $result
+    }
+
+    # Resolve UEFI critical path. Per Microsoft's spec the destination
+    # is bootx64.efi on x64 builds or bootaa64.efi on ARM64 builds.
+    # We try x64 first (the Server 2016+ default); fall back to ARM64
+    # only when x64 is absent. The error message references whichever
+    # was probed last, so an x64-only ISO with neither present reports
+    # the x64 path.
+    $bootx64Path   = Join-Path $ExtractedMediaPath 'efi\boot\bootx64.efi'
+    $bootaa64Path  = Join-Path $ExtractedMediaPath 'efi\boot\bootaa64.efi'
+    $criticalPath  = $bootx64Path
+    $criticalLabel = '\efi\boot\bootx64.efi'
+    if (-not (Test-Path -LiteralPath $bootx64Path) -and (Test-Path -LiteralPath $bootaa64Path)) {
+        $criticalPath  = $bootaa64Path
+        $criticalLabel = '\efi\boot\bootaa64.efi'
+    }
+    $bootMgrEfiPath = Join-Path $ExtractedMediaPath 'bootmgr.efi'
+    $efisysExPath   = Join-Path $ExtractedMediaPath 'efi\microsoft\boot\efisys_ex.bin'
+    $fontsDir       = Join-Path $ExtractedMediaPath 'efi\microsoft\boot\fonts'
+    $bootStlPath    = Join-Path $ExtractedMediaPath 'EFI\Microsoft\Boot\boot.stl'
+
+    $checks  = New-Object System.Collections.Generic.List[object]
+    $reasons = New-Object System.Collections.Generic.List[string]
+
+    # ---- Target #1: UEFI critical path (bootx64.efi / bootaa64.efi) ----
+    if (Test-Path -LiteralPath $criticalPath) {
+        $chain1    = Test-Pca2023AuthenticodeChain -Path $criticalPath
+        $actualSig = if ($chain1.IsPca2023) { 'PCA2023' }
+                     elseif ($chain1.IsPca2011) { 'PCA2011' }
+                     else { 'unknown' }
+        $status1 = 'Fail'
+        $notes1  = $null
+        if ($chain1.IsPca2023) {
+            $status1 = 'Pass'
+            $notes1  = 'UEFI Secure Boot critical path is signed via the "Windows UEFI CA 2023" chain.'
+        } elseif ($chain1.IsPca2011) {
+            $notes1  = 'UEFI Secure Boot critical path is still PCA2011-signed. ISO will not boot on firmware where PCA2011 has been revoked from DBX.'
+        } else {
+            $notes1  = ('UEFI critical path signature could not be determined: {0}' -f $(if ($chain1.ErrorMessage) { $chain1.ErrorMessage } else { 'no Authenticode signature found' }))
+        }
+        $checks.Add([pscustomobject]@{
+            Label             = ('Target #1 ({0})' -f $criticalLabel)
+            Path              = $criticalPath
+            ExpectedSignature = 'PCA2023'
+            ActualSignature   = $actualSig
+            IsPca2023         = $chain1.IsPca2023
+            IsPca2011         = $chain1.IsPca2011
+            Status            = $status1
+            Notes             = $notes1
+        }) | Out-Null
+        if ($status1 -ne 'Pass') {
+            $reasons.Add(('Target #1 ({0}): {1}' -f $criticalLabel, $notes1)) | Out-Null
+        }
+    } else {
+        $checks.Add([pscustomobject]@{
+            Label             = ('Target #1 ({0})' -f $criticalLabel)
+            Path              = $criticalPath
+            ExpectedSignature = 'PCA2023'
+            ActualSignature   = 'missing'
+            IsPca2023         = $false
+            IsPca2011         = $false
+            Status            = 'Fail'
+            Notes             = ('UEFI critical path file not present at expected location: {0}' -f $criticalPath)
+        }) | Out-Null
+        $reasons.Add(('Target #1 ({0}): file not present.' -f $criticalLabel)) | Out-Null
+    }
+
+    # ---- Target #2: \bootmgr.efi (PCA2011 by Microsoft design) ----
+    if (Test-Path -LiteralPath $bootMgrEfiPath) {
+        $chain2     = Test-Pca2023AuthenticodeChain -Path $bootMgrEfiPath
+        $actualSig2 = if ($chain2.IsPca2023) { 'PCA2023' }
+                      elseif ($chain2.IsPca2011) { 'PCA2011' }
+                      else { 'unknown' }
+        $checks.Add([pscustomobject]@{
+            Label             = 'Target #2 (\bootmgr.efi)'
+            Path              = $bootMgrEfiPath
+            ExpectedSignature = 'PCA2011 (Microsoft design)'
+            ActualSignature   = $actualSig2
+            IsPca2023         = $chain2.IsPca2023
+            IsPca2011         = $chain2.IsPca2011
+            Status            = 'PassWithNotes'
+            Notes             = 'Per Make2023BootableMedia.ps1 v1.4 L876-L884, bootmgr.efi at ISO root is by-design NOT signed with the 2023 cert. UEFI Secure Boot does not consult this file; BIOS/MBR boot paths do.'
+        }) | Out-Null
+    } else {
+        $checks.Add([pscustomobject]@{
+            Label             = 'Target #2 (\bootmgr.efi)'
+            Path              = $bootMgrEfiPath
+            ExpectedSignature = 'PCA2011 (Microsoft design)'
+            ActualSignature   = 'missing'
+            IsPca2023         = $false
+            IsPca2011         = $false
+            Status            = 'PassWithNotes'
+            Notes             = 'bootmgr.efi at ISO root is missing. Per Microsoft spec (L876-L884) this file is optional ("if present in the update, it should be copied").'
+        }) | Out-Null
+    }
+
+    # ---- Target #3: efisys_ex.bin (required binary) ----
+    if (Test-Path -LiteralPath $efisysExPath) {
+        $checks.Add([pscustomobject]@{
+            Label             = 'Target #3 (\efi\microsoft\boot\efisys_ex.bin)'
+            Path              = $efisysExPath
+            ExpectedSignature = 'n/a (binary)'
+            ActualSignature   = 'present'
+            IsPca2023         = $false
+            IsPca2011         = $false
+            Status            = 'Pass'
+            Notes             = 'efisys_ex.bin is present.'
+        }) | Out-Null
+    } else {
+        $checks.Add([pscustomobject]@{
+            Label             = 'Target #3 (\efi\microsoft\boot\efisys_ex.bin)'
+            Path              = $efisysExPath
+            ExpectedSignature = 'n/a (binary)'
+            ActualSignature   = 'missing'
+            IsPca2023         = $false
+            IsPca2011         = $false
+            Status            = 'Fail'
+            Notes             = 'efisys_ex.bin is required by Make2023BootableMedia.ps1 spec but is not present.'
+        }) | Out-Null
+        $reasons.Add('Target #3 (efisys_ex.bin): required file not present.') | Out-Null
+    }
+
+    # ---- Target #4: fonts/*.ttf (required fonts) ----
+    $ttfCount = 0
+    if (Test-Path -LiteralPath $fontsDir) {
+        try {
+            $ttf = @(Get-ChildItem -LiteralPath $fontsDir -Filter '*.ttf' -File -ErrorAction Stop)
+            $ttfCount = $ttf.Count
+        } catch {
+            $ttfCount = 0
+        } # psa-disable-line PSA3004 -- best-effort enumeration; ttfCount stays 0 on failure
+    }
+    if ($ttfCount -gt 0) {
+        $checks.Add([pscustomobject]@{
+            Label             = 'Target #4 (\efi\microsoft\boot\fonts\*.ttf)'
+            Path              = $fontsDir
+            ExpectedSignature = 'n/a (fonts)'
+            ActualSignature   = ('{0} *.ttf file(s)' -f $ttfCount)
+            IsPca2023         = $false
+            IsPca2011         = $false
+            Status            = 'Pass'
+            Notes             = ('{0} *.ttf font file(s) present under fonts/.' -f $ttfCount)
+        }) | Out-Null
+    } else {
+        $checks.Add([pscustomobject]@{
+            Label             = 'Target #4 (\efi\microsoft\boot\fonts\*.ttf)'
+            Path              = $fontsDir
+            ExpectedSignature = 'n/a (fonts)'
+            ActualSignature   = 'missing or empty'
+            IsPca2023         = $false
+            IsPca2011         = $false
+            Status            = 'Warning'
+            Notes             = 'Fonts directory is missing or contains no *.ttf files. Boot UI may render without proper fonts.'
+        }) | Out-Null
+        $reasons.Add('Target #4 (fonts): directory missing or contains no *.ttf files.') | Out-Null
+    }
+
+    # ---- Target #5: boot.stl (optional cert trust list) ----
+    if (Test-Path -LiteralPath $bootStlPath) {
+        $checks.Add([pscustomobject]@{
+            Label             = 'Target #5 (\EFI\Microsoft\Boot\boot.stl)'
+            Path              = $bootStlPath
+            ExpectedSignature = 'n/a (cert trust list)'
+            ActualSignature   = 'present'
+            IsPca2023         = $false
+            IsPca2011         = $false
+            Status            = 'Pass'
+            Notes             = 'boot.stl (certificate trust list) is present.'
+        }) | Out-Null
+    } else {
+        $checks.Add([pscustomobject]@{
+            Label             = 'Target #5 (\EFI\Microsoft\Boot\boot.stl)'
+            Path              = $bootStlPath
+            ExpectedSignature = 'n/a (cert trust list)'
+            ActualSignature   = 'missing'
+            IsPca2023         = $false
+            IsPca2011         = $false
+            Status            = 'PassWithNotes'
+            Notes             = 'boot.stl is missing. Per Microsoft spec (Make2023BootableMedia.ps1 L909-L911) this file is optional and "Skipping" is acceptable.'
+        }) | Out-Null
+    }
+
+    # ---- Aggregate OverallStatus ----
+    # Priority: Fail > Warning > PassWithNotes > Pass
+    $hasFail          = $false
+    $hasWarning       = $false
+    $hasPassWithNotes = $false
+    foreach ($c in $checks) {
+        switch ($c.Status) {
+            'Fail'          { $hasFail = $true }
+            'Warning'       { $hasWarning = $true }
+            'PassWithNotes' { $hasPassWithNotes = $true }
+        }
+    }
+    if     ($hasFail)            { $result.OverallStatus = 'Fail' }
+    elseif ($hasWarning)         { $result.OverallStatus = 'Warning' }
+    elseif ($hasPassWithNotes)   { $result.OverallStatus = 'PassWithNotes' }
+    else                         { $result.OverallStatus = 'Pass' }
+
+    # SCOPE clarifier - always appended so downstream consumers see the
+    # exact boundary of what this in-tree check can and cannot prove.
+    $reasons.Add('SCOPE: file presence + signer-chain only. Actual boot behaviour on firmware with PCA2011 revoked from DBX is NOT verified here. Manual boot test on hardware or a Hyper-V Gen2 VM with a PCA2023 Secure Boot template is required before production deployment.') | Out-Null
+
+    # IMPORTANT: use $checks.ToArray() rather than @($checks).
+    # PowerShell 7.4's @() operator on a System.Collections.Generic.List[object]
+    # whose elements are pscustomobject triggers a "Argument types do not match"
+    # exception. .ToArray() is the documented safe alternative; see SPEC.md
+    # Part D for the rationale and the cross-reference to the finding doc.
+    # For List[string] (Reasons below) the @() operator works correctly.
+    $result.Available    = $true
+    $result.TargetChecks = $checks.ToArray()
+    $result.Reasons      = @($reasons)
+    return $result
+}
+
 function Get-Pca2023ReadinessSnapshot {
     <#
     .SYNOPSIS
@@ -8111,6 +8417,9 @@ function Get-Pca2023ReadinessSnapshot {
           .IsoEmbedded   - Get-IsoBootCertReadiness output (always)
           .Health        - 'Healthy' / 'Warning' / 'Critical' / 'Unknown'
           .Reasons[]     - bullet-point explanation of the Health value
+          .OutputCheck   - Test-OutputIsoPca2023Readiness output;
+                           starts as $null and is populated by P10
+                           post-flight or P12 when those phases run.
 
         Health classification (per SPEC.md D.22):
           Healthy   - bootx64.efi is PCA2023-signed AND install.wim
@@ -8138,12 +8447,13 @@ function Get-Pca2023ReadinessSnapshot {
     if (-not $emb.Available) {
         $reasons.Add(('ISO inventory unavailable: {0}' -f $emb.ErrorMessage)) | Out-Null
         return [pscustomobject]@{
-            Generated  = (Get-Date)
-            Source     = 'IsoEmbedded'
-            OsKey      = $OsKey
+            Generated   = (Get-Date)
+            Source      = 'IsoEmbedded'
+            OsKey       = $OsKey
             IsoEmbedded = $emb
-            Health     = $health
-            Reasons    = @($reasons)
+            Health      = $health
+            Reasons     = @($reasons)
+            OutputCheck = $null
         }
     }
 
@@ -8190,6 +8500,7 @@ function Get-Pca2023ReadinessSnapshot {
         IsoEmbedded = $emb
         Health      = $health
         Reasons     = @($reasons)
+        OutputCheck = $null
     }
 }
 
@@ -8199,11 +8510,18 @@ function Show-Pca2023ReadinessSnapshot {
         Render a Pca2023 readiness snapshot in this script's log style.
         With -Compact, prints a single header line for P09 / P12 banners.
         Without -Compact, prints a full breakdown for P13 FinalReport.
+
+        With -OutputCheck $check (a Test-OutputIsoPca2023Readiness
+        result), an additional "Output ISO PCA2023 readiness" block is
+        rendered after the SecureBoot servicing keys section. In
+        Compact mode a one-line summary is added instead. Pass $null
+        or omit the parameter to skip this block.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] $Snapshot,
-        [switch]$Compact
+        [switch]$Compact,
+        $OutputCheck
     )
 
     if (-not $Snapshot) { return }
@@ -8214,6 +8532,14 @@ function Show-Pca2023ReadinessSnapshot {
         $cn = if ($emb.BootX64IsPca2023) { 'PCA2023' } elseif ($emb.BootX64IsPca2011) { 'PCA2011' } else { 'unknown' }
         $kb = if ($emb.InstallWimHighestKb) { $emb.InstallWimHighestKb } else { 'n/a' }
         Write-Step ('Pca2023 readiness: signer={0,-7} install_lcu={1,-10} health={2}' -f $cn, $kb, $health)
+        if ($OutputCheck) {
+            $passCount    = @($OutputCheck.TargetChecks | Where-Object { $_.Status -eq 'Pass' }).Count
+            $passNotesCnt = @($OutputCheck.TargetChecks | Where-Object { $_.Status -eq 'PassWithNotes' }).Count
+            $warnCount    = @($OutputCheck.TargetChecks | Where-Object { $_.Status -eq 'Warning' }).Count
+            $failCount    = @($OutputCheck.TargetChecks | Where-Object { $_.Status -eq 'Fail' }).Count
+            Write-Step ('Output ISO check : overall={0,-13} targets={1} (Pass={2} PassWithNotes={3} Warn={4} Fail={5})' -f `
+                $OutputCheck.OverallStatus, $OutputCheck.TargetChecks.Count, $passCount, $passNotesCnt, $warnCount, $failCount)
+        }
         return
     }
 
@@ -8262,6 +8588,26 @@ function Show-Pca2023ReadinessSnapshot {
     Write-Step ('  UEFICA2023Status   : {0}' -f $(if ($emb.UEFICA2023Status) { $emb.UEFICA2023Status } else { 'n/a (key not present)' }))
     Write-Step ('  UEFICA2023Error    : {0}' -f $(if ($null -ne $emb.UEFICA2023Error) { $emb.UEFICA2023Error } else { 'n/a' }))
     Write-Step ('  AvailableUpdates   : {0}' -f $(if ($emb.AvailableUpdatesHex) { $emb.AvailableUpdatesHex } else { 'n/a' }))
+
+    if ($OutputCheck) {
+        Write-Step ''
+        Write-Step '[Output ISO PCA2023 readiness (post-conversion, file-based)]'
+        Write-Step ('  OverallStatus      : {0}' -f $OutputCheck.OverallStatus)
+        if ($OutputCheck.Available) {
+            Write-Step ('  Targets checked    : {0}' -f $OutputCheck.TargetChecks.Count)
+            foreach ($t in $OutputCheck.TargetChecks) {
+                Write-Step ('    - [{0,-13}] {1}' -f $t.Status, $t.Label)
+                if ($t.ActualSignature) {
+                    Write-Step ('        expected = {0,-30} actual = {1}' -f $t.ExpectedSignature, $t.ActualSignature)
+                }
+                if ($t.Notes) {
+                    Write-Step ('        notes    : {0}' -f $t.Notes)
+                }
+            }
+        } elseif ($OutputCheck.ErrorMessage) {
+            Write-Step ('  Error             : {0}' -f $OutputCheck.ErrorMessage)
+        }
+    }
 }
 
 function Format-Pca2023ReadinessForReport {
@@ -8270,11 +8616,16 @@ function Format-Pca2023ReadinessForReport {
         Render snapshot as a plain-text section suitable for the
         P13 FinalReport appendix and the standalone
         pca2023_readiness.md file.
+
+        With -OutputCheck $check (a Test-OutputIsoPca2023Readiness
+        result), an additional "Output ISO PCA2023 readiness" block is
+        appended after the SecureBoot servicing section.
     #>
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory)] $Snapshot
+        [Parameter(Mandatory)] $Snapshot,
+        $OutputCheck
     )
 
     if (-not $Snapshot) { return '' }
@@ -8325,6 +8676,26 @@ function Format-Pca2023ReadinessForReport {
     [void]$sb.AppendLine(('UEFICA2023Error     : {0}' -f $(if ($null -ne $emb.UEFICA2023Error) { $emb.UEFICA2023Error } else { 'n/a' })))
     [void]$sb.AppendLine(('AvailableUpdates    : {0}' -f $(if ($emb.AvailableUpdatesHex) { $emb.AvailableUpdatesHex } else { 'n/a' })))
     [void]$sb.AppendLine('')
+    if ($OutputCheck) {
+        [void]$sb.AppendLine('-- Output ISO PCA2023 readiness (post-conversion, file-based) ' + ('-' * 15))
+        [void]$sb.AppendLine(('OverallStatus       : {0}' -f $OutputCheck.OverallStatus))
+        if ($OutputCheck.Available) {
+            [void]$sb.AppendLine(('Targets checked     : {0}' -f $OutputCheck.TargetChecks.Count))
+            foreach ($t in $OutputCheck.TargetChecks) {
+                [void]$sb.AppendLine('')
+                [void]$sb.AppendLine(('  [{0,-13}] {1}' -f $t.Status, $t.Label))
+                [void]$sb.AppendLine(('      Path     : {0}' -f $t.Path))
+                [void]$sb.AppendLine(('      Expected : {0}' -f $t.ExpectedSignature))
+                [void]$sb.AppendLine(('      Actual   : {0}' -f $t.ActualSignature))
+                if ($t.Notes) {
+                    [void]$sb.AppendLine(('      Notes    : {0}' -f $t.Notes))
+                }
+            }
+        } elseif ($OutputCheck.ErrorMessage) {
+            [void]$sb.AppendLine(('Error               : {0}' -f $OutputCheck.ErrorMessage))
+        }
+        [void]$sb.AppendLine('')
+    }
     return $sb.ToString()
 }
 
@@ -10331,7 +10702,19 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             -Force
         $postElapsed = [int](New-TimeSpan -Start $postStart -End (Get-Date)).TotalSeconds
         Write-Step ('Post-flight snapshot Health = {0} (computed in {1}s)' -f $post.Health, $postElapsed)
-        Show-Pca2023ReadinessSnapshot -Snapshot $post -Compact
+
+        # ---- Test-OutputIsoPca2023Readiness: post-build file-based check ----
+        # Run an output-side verification against the five Microsoft
+        # conversion targets (SPEC.md B.18). The result is stashed on
+        # the snapshot so P12 / P13 see the same authoritative data.
+        Set-DebugStep -Step 'post-flight-output-check'
+        Write-Step 'Running output-ISO PCA2023 readiness check (5-target file inspection)...'
+        $ocStart = Get-Date
+        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath
+        $ocElapsed = [int](New-TimeSpan -Start $ocStart -End (Get-Date)).TotalSeconds
+        $post.OutputCheck = $outputCheck
+        Write-Step ('Output ISO check OverallStatus = {0} (computed in {1}s)' -f $outputCheck.OverallStatus, $ocElapsed)
+        Show-Pca2023ReadinessSnapshot -Snapshot $post -Compact -OutputCheck $outputCheck
 
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.ok') -Force | Out-Null
     } finally {
@@ -10535,7 +10918,22 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
             -WorkRoot $Script:WorkRoot `
             -OsKey $osKey `
             -Force
-        Show-Pca2023ReadinessSnapshot -Snapshot $snapshot
+
+        # ---- Compute Output ISO readiness check (always; idempotent) ----
+        # If P10 already populated $snapshot.OutputCheck during its
+        # post-flight, the Force-refresh above reset OutputCheck to
+        # $null on the new snapshot object, so we recompute here. This
+        # block is idempotent regardless of whether P10 ran.
+        Set-DebugStep -Step 'output-check'
+        Write-Step 'Running output-ISO PCA2023 readiness check (5-target file inspection)...'
+        $ocStart = Get-Date
+        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath
+        $ocElapsed = [int](New-TimeSpan -Start $ocStart -End (Get-Date)).TotalSeconds
+        $snapshot.OutputCheck = $outputCheck  # psa-disable-line PSA2009 -- $snapshot is returned by Get-OrEnsurePca2023Snapshot, which initialises OutputCheck = $null in its [pscustomobject]@{...} return; flow-insensitive analysis cannot trace this.
+        Write-Step ('Output ISO check OverallStatus = {0} (computed in {1}s; {2} targets inspected)' -f `
+            $outputCheck.OverallStatus, $ocElapsed, $outputCheck.TargetChecks.Count)
+
+        Show-Pca2023ReadinessSnapshot -Snapshot $snapshot -OutputCheck $outputCheck
 
         # ---- Emit JSON ----
         Set-DebugStep -Step 'emit-json'
@@ -10568,9 +10966,34 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         $mdLines.Add('## Detail') | Out-Null
         $mdLines.Add('') | Out-Null
         $mdLines.Add('```text') | Out-Null
-        $mdLines.Add((Format-Pca2023ReadinessForReport -Snapshot $snapshot).TrimEnd()) | Out-Null
+        $mdLines.Add((Format-Pca2023ReadinessForReport -Snapshot $snapshot -OutputCheck $outputCheck).TrimEnd()) | Out-Null
         $mdLines.Add('```') | Out-Null
         $mdLines.Add('') | Out-Null
+        if ($outputCheck -and $outputCheck.Available) {
+            $mdLines.Add('## Output ISO PCA2023 Readiness (post-conversion)') | Out-Null
+            $mdLines.Add('') | Out-Null
+            $mdLines.Add(('- **OverallStatus**: `{0}`' -f $outputCheck.OverallStatus)) | Out-Null
+            $mdLines.Add(('- Targets inspected: {0}' -f $outputCheck.TargetChecks.Count)) | Out-Null
+            $mdLines.Add('') | Out-Null
+            $mdLines.Add('| # | Target | Expected | Actual | Status | Notes |') | Out-Null
+            $mdLines.Add('|---|---|---|---|---|---|') | Out-Null
+            $tnum = 0
+            foreach ($t in $outputCheck.TargetChecks) {
+                $tnum++
+                $notesCell = if ($t.Notes) { ($t.Notes -replace '\|', '\\|') } else { '' }
+                $mdLines.Add(('| {0} | `{1}` | {2} | {3} | **{4}** | {5} |' -f `
+                    $tnum, $t.Label, $t.ExpectedSignature, $t.ActualSignature, $t.Status, $notesCell)) | Out-Null
+            }
+            $mdLines.Add('') | Out-Null
+            if ($outputCheck.Reasons.Count -gt 0) {
+                $mdLines.Add('### Reasons') | Out-Null
+                $mdLines.Add('') | Out-Null
+                foreach ($r in $outputCheck.Reasons) {
+                    $mdLines.Add(('- {0}' -f $r)) | Out-Null
+                }
+                $mdLines.Add('') | Out-Null
+            }
+        }
         $mdLines.Add('## References') | Out-Null
         $mdLines.Add('') | Out-Null
         $mdLines.Add('- Microsoft: [Updating Windows bootable media to use the PCA2023-signed boot manager](https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f)') | Out-Null
@@ -10623,7 +11046,11 @@ function Invoke-ReportPhase13_FinalReport {
         if ($Script:Pca2023Snapshot) {
             Set-DebugStep -Step 'pca2023-summary'
             Write-SubSection 'PCA2023 Readiness Summary'
-            Show-Pca2023ReadinessSnapshot -Snapshot $Script:Pca2023Snapshot -Compact
+            $ocForReport = $null
+            if ($Script:Pca2023Snapshot.PSObject.Properties['OutputCheck']) {
+                $ocForReport = $Script:Pca2023Snapshot.OutputCheck
+            }
+            Show-Pca2023ReadinessSnapshot -Snapshot $Script:Pca2023Snapshot -Compact -OutputCheck $ocForReport
             $pcaDir = Join-Path $Script:WorkRoot 'pca2023'
             $jsonPath = Join-Path $pcaDir 'pca2023_readiness.json'
             $mdPath   = Join-Path $pcaDir 'pca2023_readiness.md'

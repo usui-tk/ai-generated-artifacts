@@ -864,10 +864,17 @@ of this design — Server 2025 EVAL install.wim ships
 `Convert-WimBootToPca2023Signed` perform **file copy only**. Microsoft's
 upstream script contains no `Get-AuthenticodeSignature` or `signtool`
 invocations; signature verification is by design left to the caller.
-This script extends Microsoft's design by adding optional file-based
-post-build verification (`Test-OutputIsoPca2023Readiness`, planned for
-addition in a follow-up r08.0 cycle step — see
-`docs/history/r07.0-followups.md`). The verification scope is:
+This script extends Microsoft's design by adding file-based
+post-build verification through the `Test-OutputIsoPca2023Readiness`
+function, which inspects the extracted media against the five
+conversion targets above and reports per-target Pass / PassWithNotes /
+Warning / Fail plus an aggregate `OverallStatus`. The function is
+invoked by P10 post-flight (when the conversion phase runs) and by
+P12 (always, regardless of whether P10 ran). The result is integrated
+into `pca2023_readiness.json` as the `OutputCheck` field and into
+`pca2023_readiness.md` as a Markdown table; the P13 FinalReport
+Compact summary surfaces a one-line indicator. The verification scope
+is:
 
 - VERIFIED in-tree: file presence on the extracted media tree, primary
   Authenticode signer chain on `*.efi` files via X509Chain build, the
@@ -883,7 +890,10 @@ Operators deploying to production fleets where PCA2011 trust has been
 revoked must perform manual boot validation. The pipeline's
 `Health = Healthy` verdict means "the PCA2023-signed boot manager is
 in the right place on the output media", not "this ISO has been
-proven to boot under PCA2011-revoked firmware".
+proven to boot under PCA2011-revoked firmware". The
+`Test-OutputIsoPca2023Readiness` result includes an explicit SCOPE
+clarifier string in its `Reasons[]` array to surface this limit at
+the data layer (not only in the prose documentation).
 
 ## B.19 `-Pca2023OnlyMode` standalone inspection (r05.0+)
 
@@ -3209,22 +3219,34 @@ follow-up items. Their status as of r08.0 Step 2 (2026-05-27):
 
 ### B.24.6 New open items raised in r08.0 Step 2
 
-- ⏳ **Output ISO PCA2023 verification function.** The current
-  `Get-IsoBootCertReadiness` is oriented around the INPUT (pre-conversion)
-  ISO state. A complementary `Test-OutputIsoPca2023Readiness` is
-  required to verify the OUTPUT media against the five conversion
-  targets defined in §B.18 (Make2023BootableMedia.ps1 v1.4 L829-L941
-  Copy-2023BootBins). The new function must encode the Microsoft-design
-  PCA2011 status of `\bootmgr.efi` as PassWithNotes, not Fail. See
-  `docs/history/r07.0-followups.md` r08.0 Step 3 task list for the
-  full implementation scope (P10 post-flight integration, P12
-  enhancement, JSON/Markdown report extensions).
+- ✅ **CLOSED in r08.0 Step 3: Output ISO PCA2023 verification function.**
+  The new `Test-OutputIsoPca2023Readiness` function (added in
+  Step 3) inspects the extracted output media against the five
+  conversion targets defined in §B.18 (Make2023BootableMedia.ps1 v1.4
+  L829-L941 Copy-2023BootBins) and emits a pscustomobject with
+  per-target Status (Pass / PassWithNotes / Warning / Fail), an
+  aggregate `OverallStatus`, and a `Reasons[]` array that always
+  includes a SCOPE clarifier ("file presence + signer-chain only; no
+  actual boot test"). The function encodes the Microsoft-design
+  PCA2011 status of `\bootmgr.efi` as PassWithNotes per L876-L884.
+  It is invoked from P10 post-flight (when conversion runs) and
+  P12 (always); results integrate into `pca2023_readiness.json`
+  (`OutputCheck` field), `pca2023_readiness.md` (Markdown table +
+  Reasons), and P13 FinalReport Compact summary. See
+  `docs/history/r08.0-step3-output-verification-and-build.md` for the
+  implementation details, the root-cause analysis of the Step 2
+  `Argument types do not match` exception (fixed via `.ToArray()`),
+  and the local-test results across 4 fake-media tree scenarios.
 - ⏳ **Phase 6 readiness for Microsoft Issue #346-class problems.** Server
   2016/2019/2022 Build -Execute paths must defensively handle the
   scenario where applying the latest LCU produces a boot.wim that still
   lacks one or more conversion-target sources (e.g. `etfsboot.com`).
   Detection logic and operator-actionable error messages are required
-  in P10. Tracked in `docs/history/r07.0-followups.md`.
+  in P10. Tracked in `docs/history/r07.0-followups.md`. Disposition
+  pending r08.0 Step 3 P0-B (Phase 6 Build -Execute on Server 2016
+  EVAL ja-jp) execution on a Windows host; if Issue #346-class errors
+  reproduce, defensive handling is added in a follow-up step,
+  otherwise this item is closed as "validated, no reproduction".
 - ℹ️ **Server 2025 `SecureBootRecovery.efi`.** Step 2 step 5h discovered
   a new file `\Windows\Boot\EFI\SecureBootRecovery.efi` (PCA2011-signed)
   in Server 2025 install.wim that is absent in Server 2016/2019/2022.

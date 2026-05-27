@@ -16,6 +16,176 @@ the script and follows the
 
 ## [Unreleased]
 
+### r08.0 Step 3 - Test-OutputIsoPca2023Readiness function and P10/P12/P13 integration
+
+This release adds the output-side post-build verification function
+that was designed during r08.0 Step 2 but deferred when a PowerShell
+type-inference issue could not be resolved within the prior session
+budget. Step 3 root-causes the issue (a `List[object]` of
+`pscustomobject` elements cannot be materialised with the `@()`
+operator under PowerShell 7.4.x; `.ToArray()` is the safe
+alternative) and ships the function with full integration into
+the existing PCA2023 readiness phases. This closes the highest
+priority item raised in SPEC.md §B.24.6.
+
+`ScriptVersion`: `update-wsi-2026.05.27-r08.0` (unchanged, same day)
+`ScriptTag`    : `promote-enable-flags-for-build-phases` -> `add-output-iso-pca2023-verification`
+
+**New function**.
+
+- `Test-OutputIsoPca2023Readiness` (~290 lines) verifies an extracted
+  OUTPUT-ISO directory against the five conversion targets documented
+  in §B.18 (the Microsoft `Make2023BootableMedia.ps1` v1.4
+  `Copy-2023BootBins` table):
+    - Target #1 (`\efi\boot\bootx64.efi` or `bootaa64.efi`):
+      PCA2023 -> Pass; PCA2011 or missing -> Fail
+    - Target #2 (`\bootmgr.efi`): any signer or missing -> PassWithNotes
+      (encodes the Microsoft-design PCA2011 status from L876-L884)
+    - Target #3 (`\efi\microsoft\boot\efisys_ex.bin`):
+      present -> Pass; missing -> Fail
+    - Target #4 (`\efi\microsoft\boot\fonts\*.ttf`):
+      present -> Pass; missing or empty -> Warning
+    - Target #5 (`\EFI\Microsoft\Boot\boot.stl`):
+      present -> Pass; missing -> PassWithNotes
+- OverallStatus aggregation: Fail > Warning > PassWithNotes > Pass.
+- The `Reasons[]` array always appends a SCOPE clarifier identifying
+  that the in-tree check verifies file presence + signer chain only,
+  and that an actual boot test on PCA2011-revoked firmware (hardware
+  or Hyper-V Gen2 VM with custom Secure Boot template) is required
+  before production deployment.
+- The function is strictly READ-ONLY: no DISM mounts, no registry
+  hive loads, no signtool invocations. Only `Test-Path` and
+  `Get-AuthenticodeSignature` against the extracted media tree.
+
+**Existing function extensions**.
+
+- `Get-Pca2023ReadinessSnapshot`: added `OutputCheck = $null` to both
+  return-path `[pscustomobject]@{...}` initialisers. Downstream code
+  populates this field via direct assignment after running the new
+  verification function.
+- `Show-Pca2023ReadinessSnapshot`: new optional `-OutputCheck`
+  parameter. In Compact mode adds a single one-line indicator
+  ("Output ISO check : overall=Pass     targets=5 (Pass=3 ...)").
+  In detail mode adds a new block listing each target's Status,
+  expected/actual signer, and Notes.
+- `Format-Pca2023ReadinessForReport`: new optional `-OutputCheck`
+  parameter. Appends a plain-text "Output ISO PCA2023 readiness
+  (post-conversion, file-based)" section consumed by both the P13
+  FinalReport and the standalone `pca2023_readiness.md` file.
+
+**Phase integration**.
+
+- **P10 post-flight** (`Invoke-BuildPhase10_ConvertPca2023BootManager`):
+  after the conversion completes and the snapshot is force-refreshed,
+  invoke `Test-OutputIsoPca2023Readiness` against the extracted media,
+  stash the result on `$post.OutputCheck`, and render a Compact line
+  via `Show-Pca2023ReadinessSnapshot -Compact -OutputCheck $outputCheck`.
+- **P12** (`Invoke-VerifyPhase12_VerifyPca2023Readiness`): always run
+  the verification function regardless of whether P10 executed (the
+  `-Force` snapshot refresh resets `OutputCheck` to `$null`, so the
+  P12 path is idempotent). Render full detail via
+  `Show-Pca2023ReadinessSnapshot -OutputCheck $outputCheck`. Emit the
+  result into `pca2023_readiness.json` (via the standard
+  `ConvertTo-Json -Depth 10` on the snapshot, which now includes
+  `OutputCheck`) and `pca2023_readiness.md` (a new Markdown table
+  with the 5-target results and a Reasons bullet list).
+- **P13 FinalReport** (`Invoke-ReportPhase13_FinalReport`): when the
+  snapshot's `OutputCheck` is populated, pass it through to
+  `Show-Pca2023ReadinessSnapshot -Compact` so the operator sees the
+  output-check status alongside the existing Compact summary. Uses
+  a `PSObject.Properties['OutputCheck']` guard for defensive access
+  in cases where the snapshot was built from a code path that does
+  not populate the field.
+
+**Implementation note: root cause of the Step 2 type-inference issue**.
+
+The earlier r08.0 Step 2 implementation attempt of this function was
+reverted because of a `System.ArgumentException: Argument types do
+not match` exception that could not be resolved within the session
+budget. Step 3 isolated the trigger with a minimal repro:
+
+```powershell
+$list = New-Object System.Collections.Generic.List[object]
+$list.Add([pscustomobject]@{Label='test1'; Status='Pass'}) | Out-Null
+$list.Add([pscustomobject]@{Label='test2'; Status='Fail'}) | Out-Null
+@($list)             # FAILS: Argument types do not match
+[object[]]@($list)   # FAILS: same
+$list.ToArray()      # OK
+```
+
+The `@()` array subexpression operator fails on
+`System.Collections.Generic.List[object]` whose elements are
+`pscustomobject`. `.ToArray()` is the safe materialisation path. The
+existing `Test-Pca2023AuthenticodeChain` and `Get-IsoBootCertReadiness`
+escape this trap because their list is `List[string]` (where `@()`
+works). The new function uses `.ToArray()` for its `TargetChecks`
+(pscustomobject collection) but `@()` for its `Reasons` (string
+collection), and documents the distinction in an inline comment so
+future maintainers do not regress.
+
+**Documentation changes**.
+
+- New: `docs/history/r08.0-step3-output-verification-and-build.md`
+  - Full implementation record including the Step 2 issue root-cause
+    analysis, 4-case local test results on Linux pwsh 7.4.6, and the
+    design rationale for the per-target Status mapping.
+- Updated: `SPEC.md` §B.18 scope-and-limits paragraph
+  - Replaced "(planned for addition in a follow-up step)" with the
+    final description: the function is implemented, invoked from P10
+    post-flight and P12, integrated into JSON / Markdown reports and
+    the P13 FinalReport.
+- Updated: `SPEC.md` §B.24.6
+  - First item (`Test-OutputIsoPca2023Readiness`): CLOSED in Step 3.
+  - Second item (Issue #346 defense): kept STILL OPEN with
+    disposition note that closure depends on Phase 6 Build -Execute
+    real run results.
+  - Third item (Server 2025 `SecureBootRecovery.efi`): unchanged
+    (informational only).
+- Updated: `docs/history/r07.0-followups.md`
+  - r08.0 Step 3 P0 #1 (`Test-OutputIsoPca2023Readiness` function +
+    P10/P12 integration): CLOSED.
+  - r08.0 Step 3 P0 #2 (Phase 6 Build -Execute on Server 2016 EVAL
+    ja-jp): STILL OPEN, requires Windows host.
+  - New P1 entry: Server 2019 / 2022 / 2025 Build -Execute fleet
+    rollout (post-Server-2016 acceptance).
+
+**Out-of-scope for this release (deferred to r08.0 Step 4+)**.
+
+- Phase 6 `-Action Build -Execute` real run on Server 2016 EVAL
+  ja-jp (the operational acceptance test for the entire r07.0+r08.0
+  work). Requires the Windows host with `D:\UpdateWsi_2016\` workspace.
+- Microsoft Issue #346-class defensive handling (`etfsboot.com` and
+  similar boot.wim-content gaps): the P10 defensive logic is only
+  added if Phase 6 reproduces the issue; otherwise no code change.
+- Server 2019/2022/2025 Build -Execute horizontal validation.
+- Physical-hardware Secure-Boot boot test on PCA2011-revoked DBX
+  firmware (the ultimate validation outside the pipeline's scope).
+
+**Quality gates**. All pass: psa.py (0/0/0), psa.py v4.1.0
+PSA1004/2012/2013 (0/0/0), PSScriptAnalyzer (0 findings), PowerShell
+parser (Parse OK), T2 (13/13), T3 (10/10), T6 (13/13). Encoding
+preserved (BOM + CRLF + ASCII). Line count: 12224 -> 12652 (+428).
+
+**Local test verification** (Linux pwsh 7.4.6, synthetic fake-media
+trees under `/tmp/foi-*`):
+
+```
+Case 1: empty tree (all 5 targets missing)
+  Available=True OverallStatus=Fail TargetChecks=5
+    [Fail         ] Target #1  actual=missing
+    [PassWithNotes] Target #2  actual=missing
+    [Fail         ] Target #3  actual=missing
+    [Warning      ] Target #4  actual=missing or empty
+    [PassWithNotes] Target #5  actual=missing
+
+Case 2: bootmgr.efi only -> OverallStatus=Fail (Target #1 still missing)
+Case 3: 5-target full tree (dummy unsigned files) -> Fail (Linux pwsh
+        cannot read Authenticode on dummies; on Windows with real
+        PCA2023 bootx64.efi, expected: PassWithNotes)
+Case 4: nonexistent path -> Available=False, OverallStatus=Fail,
+        ErrorMessage populated
+```
+
 ### r08.0 Step 2 - install.wim symmetry verification, Microsoft official spec cross-check, P07/P08 dead code path fix
 
 This release closes two open follow-up items from r08.0 Step 1
