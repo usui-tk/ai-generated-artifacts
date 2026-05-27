@@ -16,6 +16,73 @@ the script and follows the
 
 ## [Unreleased]
 
+### r09.0 Step 10 (docs-only) - docs/ retirement and knowledge promotion to `research/windows-servicing/`
+
+This Step 10 ships a **docs-only** change: the entire contents of
+`scripts/powershell/update-windows-server-iso/docs/` are promoted out
+of the subproject and into the repository's top-level `research/`
+category as a single bilingual reference article. **No code is
+changed in this or the follow-up commit**. The technical knowledge
+accumulated across r06.0 / r07.0 / r08.0 / r09.0 investigation
+cycles — release-info Markdown source semantics, .NET CU release
+notes, Microsoft Update Catalog naming quirks, `wsusscn2.cab` Master
+XML structure, PCA2023 Secure Boot migration mechanics, install.wim
+cross-version asymmetry, Servicing Stack dependency model, and
+operational hazards (mojibake, expand.exe self-overwrite, signtool
+exit-code-1, `List[object]+@()`) — has been synthesized into a
+single research article suitable for any practitioner building
+similar tooling, independent of this subproject's specific
+implementation.
+
+### Restructure summary
+
+- **New article (this commit)**: `research/windows-servicing/`
+  - `windows-server-iso-update-mechanics.en.md` (675 lines)
+  - `windows-server-iso-update-mechanics.ja.md` (675 lines)
+  - Bilingual lock-step: H2=13, H3=33 in both languages.
+  - Body is fully generic: no references to `Update-WindowsServerIso.ps1`,
+    phase numbers (P05–P13), revision tags (r07.0/r08.0/r09.0), or
+    SPEC section identifiers. Provenance to this subproject is
+    confined to Appendix C.
+- **Follow-up commit will delete** the entire
+  `scripts/powershell/update-windows-server-iso/docs/` directory
+  (12 files, 4561 lines total: `README.md` + `history/` containing
+  `dotnet-cu-report.md`, `dynamic-update-report.md`,
+  `mojibake-investigation-note.md`, `r07.0-followups.md`,
+  `r08.0-step1-server2016-pca2023-finding.md`,
+  `r08.0-step2-installwim-symmetry-check.md`,
+  `r08.0-step3-output-verification-and-build.md`,
+  `r08.0-step4-findings-and-dependency-investigation.md`,
+  `r09.0-step1-phase5-summary.md`, `release-info-readme.md`,
+  `release-info-report.md`).
+
+### Rationale
+
+The `docs/` subdirectory had grown to mix two distinct kinds of
+content: (a) revision-specific work logs ("what did we find in
+r08.0 Step 2?") and (b) durable technical knowledge ("how does
+Microsoft serve patch metadata via release-info Markdown?"). The
+former has decreasing value over time and is better recovered via
+git history; the latter is broadly useful to any Windows servicing
+practitioner and was buried inside this subproject where external
+readers could not find it. The promotion to `research/` makes the
+durable knowledge discoverable to the wider reader base while
+acknowledging that revision-specific debugging notes are not the
+right artifact to maintain forever.
+
+The choice of `research/` over `documents/` follows the top-level
+category policy (`research/README.md`): the article is a "reading
+notes synthesized from multiple sources" investigation, not a
+specific recommendation/plan/design for a particular scenario.
+
+### Cross-references
+
+- New article: `research/windows-servicing/windows-server-iso-update-mechanics.{en,ja}.md`
+- Top-level category guidance: `research/README.md`
+- Subproject retains its own `SPEC.md` and `README.md` as the
+  source-of-truth for tool-specific behaviour; the research article
+  is a cross-cutting concern map, not a user manual.
+
 ### r09.0 Step 1 (Phase 6, SPEC-only) - SPEC.md restructure to Part A/B/C/D standard form + Servicing Dependency Database normative specification
 
 This Step 1 Phase 6 ships a **SPEC-only** change: a comprehensive
