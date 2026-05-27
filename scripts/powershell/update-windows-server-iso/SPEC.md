@@ -824,6 +824,67 @@ operators do not have to chase a second file (3-c output mode).
 For Server 2025 specifically: `RequiredByDefault = false`,
 `RequiredUpdateLevelKb = "n/a (firmware-provided 2023 certs)"`.
 
+**Authoritative Microsoft source for the conversion target set.** The
+PCA2023 boot manager conversion is documented in
+[KB5053484 Updating Windows bootable media to use the PCA2023 signed
+boot manager](https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f),
+which references `microsoft/secureboot_objects` `Make2023BootableMedia.ps1`
+v1.4 (`scripts/windows/Make2023BootableMedia.ps1`, dated 2026-03-13).
+The `Copy-2023BootBins` function (L829-L941) writes the following five
+target locations onto the extracted media tree:
+
+| # | Source (mounted boot.wim) | Destination (extracted media root) | Required? | Expected signer |
+|:-:|---|---|:-:|---|
+| 1 | `\Windows\Boot\EFI_EX\bootmgfw_EX.efi` | `\efi\boot\bootx64.efi` (or `bootaa64.efi` on ARM64) | required | **PCA2023** — UEFI Secure Boot critical path |
+| 2 | `\Windows\Boot\EFI_EX\bootmgr_EX.efi` | `\bootmgr.efi` (ISO root) | optional | **PCA2011 by Microsoft design** (Make2023BootableMedia.ps1 v1.4 L876-L884) |
+| 3 | `\Windows\Boot\DVD_EX\EFI\en-US\efisys_EX.bin` | `\efi\microsoft\boot\efisys_ex.bin` | required | n/a (binary) |
+| 4 | `\Windows\Boot\FONTS_EX\*_EX.ttf` (renamed) | `\efi\microsoft\boot\fonts\*.ttf` | required | n/a (fonts) |
+| 5 | `\Windows\Boot\EFI\boot.stl` | `\EFI\Microsoft\Boot\boot.stl` | optional | n/a (cert trust list) |
+
+The Microsoft upstream `Copy-2023BootBins` carries an explicit comment
+(L876-L884) acknowledging that target #2 (`bootmgr.efi`) is **not**
+PCA2023-signed even after conversion:
+
+> "Note that this file technically is not signed with the 'Windows UEFI
+> CA 2023' certificate, but if present in the update, it should be
+> copied."
+
+This is by design. `bootmgr.efi` at the ISO root is consumed by the
+BIOS/MBR boot path, not the UEFI Secure Boot critical path; the UEFI
+firmware verifies `\efi\boot\bootx64.efi` (target #1, PCA2023) instead.
+Any in-tree post-build verification logic must therefore treat PCA2011
+on `\bootmgr.efi` as **PassWithNotes**, not Fail. Empirical confirmation
+of this design — Server 2025 EVAL install.wim ships
+`EFI_EX\bootmgr_EX.efi` signed via PCA2011, while sibling
+`EFI_EX\bootmgfw_EX.efi` is signed via PCA2023 — was recorded in
+`docs/history/r08.0-step2-installwim-symmetry-check.md` step 5h.
+
+**Scope and limits of in-tree verification.** Both Microsoft's
+`Make2023BootableMedia.ps1` v1.4 and this script's
+`Convert-WimBootToPca2023Signed` perform **file copy only**. Microsoft's
+upstream script contains no `Get-AuthenticodeSignature` or `signtool`
+invocations; signature verification is by design left to the caller.
+This script extends Microsoft's design by adding optional file-based
+post-build verification (`Test-OutputIsoPca2023Readiness`, planned for
+addition in a follow-up r08.0 cycle step — see
+`docs/history/r07.0-followups.md`). The verification scope is:
+
+- VERIFIED in-tree: file presence on the extracted media tree, primary
+  Authenticode signer chain on `*.efi` files via X509Chain build, the
+  Microsoft-design PCA2011 status of `\bootmgr.efi`.
+- NOT VERIFIED in-tree: actual boot behaviour on firmware with PCA2011
+  revoked in DBX (post 2026-06 cert expiry or post CVE-2023-24932
+  mitigation). Microsoft's upstream provides no built-in verification
+  for this either; the only authoritative test is a real boot on
+  target hardware or a Hyper-V Gen2 VM configured with a custom Secure
+  Boot template that revokes PCA2011 in DBX.
+
+Operators deploying to production fleets where PCA2011 trust has been
+revoked must perform manual boot validation. The pipeline's
+`Health = Healthy` verdict means "the PCA2023-signed boot manager is
+in the right place on the output media", not "this ISO has been
+proven to boot under PCA2011-revoked firmware".
+
 ## B.19 `-Pca2023OnlyMode` standalone inspection (r05.0+)
 
 A side-channel entry point that takes an existing ISO file
@@ -3117,25 +3178,59 @@ be revisited in the r08.0 implementation phase once the config
 changes are in place and the end-to-end Server 2016 `-Execute Build`
 run has produced a Healthy ISO.
 
-### B.24.5 Out-of-scope for r08.0 Step 1
+### B.24.5 Out-of-scope for r08.0 Step 1 (status updates from Step 2)
 
-The following questions remain open and are listed in
-`docs/history/r08.0-step1-server2016-pca2023-finding.md` §9 for
-follow-up sessions:
+The following questions were listed in
+`docs/history/r08.0-step1-server2016-pca2023-finding.md` §9 as
+follow-up items. Their status as of r08.0 Step 2 (2026-05-27):
 
-- **Server 2016/2019/2022 install.wim EFI_EX presence** — symmetry
-  check against the Server 2025 inspection. The expectation is that
-  these three OS families do NOT ship EFI_EX in the out-of-box
-  install.wim, but this has not been directly verified.
-- **Server 2025 `EFI_EX\bootmgfw_ex.efi` signature** — the
-  signature is expected to be PCA2023, but only the directory's
-  existence and file count (72 files) were observed in r08.0 Step 1.
-- **End-to-end `-Execute Build` on Server 2016 EVAL** — the
-  Option A route is empirically supported by the LCU contents
-  but no Healthy output ISO has been produced from a real Build
-  run yet.
+- ✅ **CLOSED: Server 2016/2019/2022 install.wim EFI_EX presence.** Step 2
+  step 5e symmetry check directly mounted install.wim Index 4 of all
+  three OS families and confirmed `\Windows\Boot\EFI_EX\` is absent in
+  the out-of-box ISO. Bootmgfw.efi in EFI is PCA2011 in all three OS,
+  as expected. See `docs/history/r08.0-step2-installwim-symmetry-check.md`
+  §2.1.
+- ✅ **CLOSED: Server 2025 `EFI_EX\bootmgfw_ex.efi` signature.** Step 2
+  step 5g (signtool `/ds`-based dual-signature probe) and step 5h
+  (4-OS exhaustive `*.efi` survey) confirmed the primary signature is
+  **PCA2023 single-sign** (not dual-signed). Sibling
+  `EFI_EX\bootmgr_EX.efi` is **PCA2011 single-sign by Microsoft design**
+  per `Make2023BootableMedia.ps1` v1.4 L876-L884. See
+  `docs/history/r08.0-step2-installwim-symmetry-check.md` §2.1, §3.2.
+- ⏳ **STILL OPEN: End-to-end `-Action Build -Execute` on Server 2016 EVAL.**
+  The Option A route is empirically supported by the LCU contents and
+  the Microsoft official spec (KB5053484), but no Healthy output ISO
+  has been produced from a real Build run yet. Microsoft Issue #346
+  (2026-02-14) reports that even Windows 11 25H2 + latest LCU can
+  surface missing-file errors (`etfsboot.com`) during
+  `Make2023BootableMedia.ps1` execution; the Server 2016 EVAL Build
+  run may encounter the same class of issue. Tracked in
+  `docs/history/r07.0-followups.md` as a Phase 6 task for r08.0 Step 3.
 
-These are tracked as r08.0 Step 2-onward tasks.
+### B.24.6 New open items raised in r08.0 Step 2
+
+- ⏳ **Output ISO PCA2023 verification function.** The current
+  `Get-IsoBootCertReadiness` is oriented around the INPUT (pre-conversion)
+  ISO state. A complementary `Test-OutputIsoPca2023Readiness` is
+  required to verify the OUTPUT media against the five conversion
+  targets defined in §B.18 (Make2023BootableMedia.ps1 v1.4 L829-L941
+  Copy-2023BootBins). The new function must encode the Microsoft-design
+  PCA2011 status of `\bootmgr.efi` as PassWithNotes, not Fail. See
+  `docs/history/r07.0-followups.md` r08.0 Step 3 task list for the
+  full implementation scope (P10 post-flight integration, P12
+  enhancement, JSON/Markdown report extensions).
+- ⏳ **Phase 6 readiness for Microsoft Issue #346-class problems.** Server
+  2016/2019/2022 Build -Execute paths must defensively handle the
+  scenario where applying the latest LCU produces a boot.wim that still
+  lacks one or more conversion-target sources (e.g. `etfsboot.com`).
+  Detection logic and operator-actionable error messages are required
+  in P10. Tracked in `docs/history/r07.0-followups.md`.
+- ℹ️ **Server 2025 `SecureBootRecovery.efi`.** Step 2 step 5h discovered
+  a new file `\Windows\Boot\EFI\SecureBootRecovery.efi` (PCA2011-signed)
+  in Server 2025 install.wim that is absent in Server 2016/2019/2022.
+  Microsoft's public documentation of this file's role and lifecycle is
+  not yet examined. Informational only; no impact on PCA2023 conversion
+  pipeline. Logged for future Microsoft documentation cross-check.
 
 ---
 

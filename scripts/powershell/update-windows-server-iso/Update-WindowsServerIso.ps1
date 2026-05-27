@@ -535,8 +535,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.26-r07.0'
-$Script:ScriptTag     = 'kbid-from-filename-and-rich-refresh-summary'
+$Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'
+$Script:ScriptTag     = 'promote-enable-flags-for-build-phases'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -2750,29 +2750,40 @@ function Get-ConfigProfile {
     # attach the resolved language sub-profile as 'Language' and the
     # full LanguageSpecific dictionary for cross-lang admin access.
     $merged = [pscustomobject]@{
-        Schema             = $json.Schema
-        OsKey              = $json.OsKey
-        Build              = $json.Common.Build
-        OsShortName        = $json.Common.OsShortName
-        Edition            = $json.Common.Edition
-        Architecture       = $json.Common.Architecture
-        WimEdition         = $json.Common.WimEdition
-        InstallWimIndex    = $json.Common.InstallWimIndex
-        BootWimIndexes     = $json.Common.BootWimIndexes
-        WinReWimPath       = $json.Common.WinReWimPath
-        SupportedLanguages = $json.Common.SupportedLanguages
-        DefaultLanguage    = $json.Common.DefaultLanguage
-        LCUExpandViaMum    = $json.Common.LCUExpandViaMum
-        Common             = $json.Common
-        PatchBaseline      = $json.PatchBaseline
-        AutoRefreshPolicy  = $json.AutoRefreshPolicy
-        LanguageSpecific   = $json.LanguageSpecific
-        Language           = $langNode
-        LanguageKey        = $OsLang
+        Schema                 = $json.Schema
+        OsKey                  = $json.OsKey
+        Build                  = $json.Common.Build
+        OsShortName            = $json.Common.OsShortName
+        Edition                = $json.Common.Edition
+        Architecture           = $json.Common.Architecture
+        WimEdition             = $json.Common.WimEdition
+        InstallWimIndex        = $json.Common.InstallWimIndex
+        BootWimIndexes         = $json.Common.BootWimIndexes
+        WinReWimPath           = $json.Common.WinReWimPath
+        SupportedLanguages     = $json.Common.SupportedLanguages
+        DefaultLanguage        = $json.Common.DefaultLanguage
+        LCUExpandViaMum        = $json.Common.LCUExpandViaMum
+        # Phase build-enable flags: promoted from Common so the build
+        # phases (P07 install.wim patching, P08 boot.wim patching) can
+        # access them as $Script:OsProfile.<flag> directly. Documented
+        # in SPEC.md B.4. These flags must be promoted explicitly here
+        # because PowerShell does not auto-flatten nested PSCustomObject
+        # properties; without promotion, callers reading the top-level
+        # property receive $null and the corresponding phase becomes
+        # unconditionally skipped regardless of profile content.
+        EnableInstallWimUpdate = $json.Common.EnableInstallWimUpdate
+        EnableBootWimUpdate    = $json.Common.EnableBootWimUpdate
+        EnableWinREUpdate      = $json.Common.EnableWinREUpdate
+        Common                 = $json.Common
+        PatchBaseline          = $json.PatchBaseline
+        AutoRefreshPolicy      = $json.AutoRefreshPolicy
+        LanguageSpecific       = $json.LanguageSpecific
+        Language               = $langNode
+        LanguageKey            = $OsLang
         # Raw is exposed for admin actions (RefreshAllBaselines) which
         # need to mutate-and-persist the on-disk JSON shape.
-        Raw                = $json
-        ConfigFilePath     = $cfgFile
+        Raw                    = $json
+        ConfigFilePath         = $cfgFile
     }
     return $merged
 }

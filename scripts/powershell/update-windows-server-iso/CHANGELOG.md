@@ -16,7 +16,133 @@ the script and follows the
 
 ## [Unreleased]
 
-### r08.0 Step 1 - Server 2016/2019/2022/2025 PCA2023 readiness investigation (this release)
+### r08.0 Step 2 - install.wim symmetry verification, Microsoft official spec cross-check, P07/P08 dead code path fix
+
+This release closes two open follow-up items from r08.0 Step 1
+(install.wim EFI_EX presence symmetry check across the 4 supported
+OS families, Server 2025 `EFI_EX\bootmgfw_EX.efi` signature analysis)
+and uncovers + fixes a long-standing dead code path that was
+silently disabling P07 (install.wim updates) and P08 (boot.wim
+updates) throughout the r07.0 cycle. The release also performs an
+authoritative cross-check against Microsoft's
+`Make2023BootableMedia.ps1` v1.4 to confirm that the in-repository
+PCA2023 conversion design is aligned with Microsoft's upstream
+specification.
+
+`ScriptVersion`: `update-wsi-2026.05.26-r07.0` -> `update-wsi-2026.05.27-r08.0`
+`ScriptTag`    : `kbid-from-filename-and-rich-refresh-summary` -> `promote-enable-flags-for-build-phases`
+
+**Pre-flight investigation (read-only)**.
+
+- **Step 5e — install.wim EFI_EX presence symmetry check.** Direct
+  mount of Server 2016/2019/2022 EVAL `install.wim` Index 4 confirmed
+  that `\Windows\Boot\EFI_EX\` is **absent** in all three out-of-box
+  ISOs, matching the r08.0 Step 1 hypothesis. `bootmgfw.efi` in EFI
+  is PCA2011 in all three. Closes the first item in SPEC.md §B.24.5.
+- **Step 5f / 5g — Server 2025 EFI_EX signature analysis.** Initial
+  `Get-AuthenticodeSignature` read returned `Issuer = Windows UEFI
+  CA 2023` on `EFI_EX\bootmgfw_EX.efi`, which was briefly misread as
+  a possible dual-signature. `signtool /verify /pa /all /v` plus
+  `/ds 0`, `/ds 1`, `/ds 2`, `/ds 3` probe disambiguated the case
+  decisively: there is **exactly one embedded signature** per file,
+  and:
+    - `EFI_EX\bootmgfw_EX.efi` is **PCA2023 single-sign**
+      (leaf signer "Microsoft Windows", chain root via
+      "Windows UEFI CA 2023")
+    - `EFI_EX\bootmgr_EX.efi` is **PCA2011 single-sign**
+      (leaf signer "Microsoft Windows", chain root via
+      "Windows Production PCA 2011")
+- **Step 5h — 4-OS exhaustive `*.efi` survey.** Data-driven
+  cross-survey under `\Windows\Boot\` in all four install.wim Index 4
+  trees. Totals: Server 2016/2019/2022 = 3 `*.efi` each (all PCA2011),
+  Server 2025 = 6 `*.efi` (5 PCA2011, 1 PCA2023). No dual-signed
+  files in any OS. Closes the second item in SPEC.md §B.24.5.
+- **Microsoft official spec cross-check.** `microsoft/secureboot_objects`
+  `scripts/windows/Make2023BootableMedia.ps1` v1.4 (dated 2026-03-13)
+  was `git clone`'d and read in full. The `Copy-2023BootBins` function
+  (L829-L941) writes five target locations onto the extracted media;
+  see SPEC.md §B.18 for the full table. **The Microsoft upstream
+  comment at L876-L884** explicitly states that `bootmgr_EX.efi`
+  remaining PCA2011 is by design ("Note that this file technically
+  is not signed with the 'Windows UEFI CA 2023' certificate, but if
+  present in the update, it should be copied"). This validates the
+  empirical step 5h finding. The Microsoft upstream contains no
+  signature verification logic (zero `Get-AuthenticodeSignature` /
+  `signtool` references in the 1141-line script); in-tree
+  verification by this pipeline is therefore an upstream-compatible
+  quality extension.
+
+**Code changes**.
+
+- **(Fix) `Get-ConfigProfile` now promotes phase-enable flags.**
+  Three flags were referenced by P07, P08, and WinRE phases as
+  `$Script:OsProfile.EnableInstallWimUpdate` /
+  `.EnableBootWimUpdate` / `.EnableWinREUpdate` but were never
+  promoted from `Common` to the top-level merged profile in
+  `Get-ConfigProfile`. As a result, the property access returned
+  `$null` regardless of profile content, and the build phases were
+  silently skipped throughout the r07.0 cycle. This is the root cause
+  of the previously-unexplained "P07/P08 always skip" behaviour.
+  Fix promotes the three flags explicitly with an inline comment
+  documenting the rationale.
+- **(Config) `Common.EnableInstallWimUpdate` set explicitly per OS.**
+    - Server 2016 / 2019 / 2022: `true` (Option A route requires
+      install.wim LCU application to materialise EFI_EX assets)
+    - Server 2025: `false` (out-of-box install.wim ships EFI_EX
+      pre-populated; LCU application is optional for PCA2023)
+- **(Version) `ScriptVersion` bumped** from `update-wsi-2026.05.26-r07.0`
+  to `update-wsi-2026.05.27-r08.0`. `ScriptTag` set to
+  `promote-enable-flags-for-build-phases`.
+
+**Documentation changes**.
+
+- New: `docs/history/r08.0-step2-installwim-symmetry-check.md` (407 lines)
+  — full session record covering the three step 5 investigation runs,
+  the Microsoft official spec cross-check, and the Phase 1-3
+  implementation details. Includes the verbatim Microsoft L876-L884
+  comment for traceability.
+- Updated: `SPEC.md` §B.18 — added the authoritative Microsoft source
+  citation, the 5-target conversion table, the L876-L884 PCA2011
+  design quote, and the scope-and-limits paragraph clarifying what
+  in-tree verification can and cannot establish.
+- Updated: `SPEC.md` §B.24.5 — marked two items CLOSED (install.wim
+  EFI_EX symmetry and Server 2025 `bootmgfw_EX.efi` signature), kept
+  one STILL OPEN (Server 2016 EVAL end-to-end Build -Execute).
+- New: `SPEC.md` §B.24.6 — three new open items raised in Step 2
+  (Test-OutputIsoPca2023Readiness implementation, Phase 6 readiness
+  for Microsoft Issue #346-class problems, Server 2025
+  SecureBootRecovery.efi documentation).
+
+**Out-of-scope for this release (deferred to r08.0 Step 3+)**.
+
+- `Test-OutputIsoPca2023Readiness` function — file-by-file post-build
+  verification against the five Microsoft conversion targets. Designed
+  during this session but implementation deferred after a PowerShell
+  type-inference issue in nested `[pscustomobject]` construction was
+  not resolvable within the session budget. The design is captured
+  in `docs/history/r08.0-step2-installwim-symmetry-check.md` §5.1.
+- P10 / P12 integration of the above verification function.
+- Phase 6 — Server 2016 EVAL ja-jp `-Action Build -Execute` real run
+  on Windows. Microsoft Issue #346 (2026-02-14) reports analogous
+  errors on Windows 11 25H2 + latest LCU, so defensive handling for
+  missing `etfsboot.com` and similar boot.wim-content gaps may be
+  required during the Phase 6 work.
+
+**Quality gates**. All pass: psa.py (0/0/0), psa.py v4.1.0
+PSA1004/2012/2013 (0/0/0), PSScriptAnalyzer (0 findings), PowerShell
+parser (Parse OK), T2 (13/13), T3 (10/10), T6 (13/13). Encoding
+preserved (BOM + CRLF + ASCII).
+
+**Live verification** (Linux pwsh, post-fix profile merge):
+
+```
+Server2016   EnableInstallWimUpdate = True   P07 will skip? False
+Server2019   EnableInstallWimUpdate = True   P07 will skip? False
+Server2022   EnableInstallWimUpdate = True   P07 will skip? False
+Server2025   EnableInstallWimUpdate = False  P07 will skip? True
+```
+
+### r08.0 Step 1 - Server 2016/2019/2022/2025 PCA2023 readiness investigation
 
 This is a **documentation / investigation** release with no
 code changes to `Update-WindowsServerIso.ps1`. The r08.0 cycle
