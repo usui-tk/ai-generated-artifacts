@@ -15,7 +15,59 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
-(No changes pending.)
+### Documentation — Add `Why this script exists` section and repository-wide `AGENTS.md` cross-references
+
+A doc-only update that adds the SHOULD-level `Why this script exists`
+section recommended by [`scripts/README.md`](../../README.md) Recommended
+Additional Section (L125–L135), and surfaces the newly-introduced
+repository-wide [`AGENTS.md`](../../../AGENTS.md) from this subproject's
+documentation. In particular, `SPEC.md` Part A — which is the
+canonical inheritance source for sibling Layer 3 SPECs — now carries
+an explicit Status banner clarifying its role and pointing to
+[`AGENTS.md` §6](../../../AGENTS.md#6-part-a-inheritance-rule-absolute)
+for the inheritance rule and to
+[`AGENTS.md` §9 AP-1](../../../AGENTS.md#9-anti-patterns-forensically-documented)
+for the forensic record of past violations.
+
+#### Changes
+
+- **`README.md`**: New `## Why this script exists` section inserted
+  between the existing `## License` and `## Folder layout` sections.
+  Includes a one-paragraph problem statement, "Suitable for" /
+  "Out of scope" subsections, and a "Reader's roadmap" subsection
+  that points to `SPEC.md`, `TESTING.md`, `CHANGELOG.md`, and the
+  repository-root `AGENTS.md`.
+- **`README.ja.md`**: New `## なぜこのスクリプトが必要か` section in
+  lock-step Japanese (per `AGENTS.md` §5 Bilingual lock-step rule).
+- **`SPEC.md`**: New `> Status: Canonical inheritance source.`
+  blockquote at the top of `Part A`, clarifying that this Part A is
+  the source of truth that sibling Layer 3 SPECs inherit by reference
+  rather than by restating, and pointing to `AGENTS.md` §6 / §9 AP-1.
+- **`CHANGELOG.md`**: This entry.
+
+#### Why this update
+
+The Step 6 governance cycle introduced `AGENTS.md` at the repository
+root and codified the Part A inheritance rule. As the canonical
+inheritance source, this subproject's `SPEC.md` Part A is the most
+important place to surface that role: LLM agents inheriting from it
+need to know (a) that it IS canonical, and (b) where the rule and
+the forensic record of past violations live. Adding the Status
+banner makes those facts discoverable from the SPEC itself rather
+than only from external documents.
+
+#### Not touched
+
+- `Download-SpeakerDeck.ps1` source. No phase logic, parameter
+  contract, or output format is affected. This remains an
+  `Unreleased`-bucket doc-only entry; no `rNN` revision bump.
+- `TESTING.md` is unchanged. It already references `SPEC.md`
+  Part C; the `AGENTS.md` link is reachable transitively through
+  the SPEC.
+- `Part A` body (A.1 through A.14). The Status blockquote is
+  metadata about Part A's role; the inherited contract itself is
+  unchanged. Sibling SPECs that inherit by reference will see no
+  semantic change.
 
 ## [r29] — 2026-05-27 — `cross-repo-canon-rename-misleading-helpers`
 

@@ -55,6 +55,59 @@ any purpose, provided that the original copyright and license notices
 are preserved. The software is provided without warranty, as detailed in
 the Disclaimer above and in the LICENSE file.
 
+## Why this script exists
+
+Speaker Deck's web UI provides only one-deck-at-a-time download
+functionality. For account holders backing up their own published
+content, researchers archiving study materials, or maintainers
+auditing a presenter's archive, the manual workflow becomes painful
+once an account has dozens (let alone hundreds) of decks: each deck
+requires multiple clicks and a separate download dialog, filenames
+need normalisation, and there is no built-in way to detect new
+uploads incrementally.
+
+`Download-SpeakerDeck.ps1` automates the full workflow: account-page
+enumeration, deck metadata extraction (date, title, slug), filename
+normalisation, year-folder organisation, PDF integrity checks, and
+incremental re-download skipping for already-downloaded files. A
+single `-DryRun` invocation produces a complete plan CSV without
+touching the network beyond the listing pages; a subsequent live run
+executes the plan with built-in throttling.
+
+### Suitable for
+
+- Speaker Deck **account holders** backing up their own published decks
+- **Researchers and educators** archiving presenters' public content
+  for offline study (subject to the Disclaimer's TOS / IP-rights
+  obligations above)
+- **CI pipelines** producing a yearly snapshot for compliance archives
+
+### Out of scope
+
+- Acquiring **non-public** decks (Speaker Deck does not expose a
+  general public API; the script scrapes the public account page only)
+- **Authentication-gated** content (the script uses no credentials)
+- **Bulk download from arbitrary slide hosts** (Speaker Deck specific)
+
+### Reader's roadmap
+
+- For a **first-time operator**, read the Disclaimer above and skim
+  the *Quick start* section below; the script's `-Help` flag also
+  produces a usage banner.
+- For **review of internal behaviour** (phases, PDF metadata
+  reclassification, error-resilience strategy), see
+  [`SPEC.md`](./SPEC.md) Part B.
+- For the **complete test matrix and self-verification procedure**,
+  see [`TESTING.md`](./TESTING.md).
+- For **per-revision change history**, see [`CHANGELOG.md`](./CHANGELOG.md).
+- For the **repository-wide LLM-agent operating guide** (governance
+  hierarchy, ground-truth extraction, Doc-Touching Matrix, Part A
+  inheritance rule, anti-patterns), see
+  [`AGENTS.md`](../../../AGENTS.md) at the repository root. Note
+  that this script's `SPEC.md` Part A serves as the **canonical
+  inheritance source** for sibling Layer 3 SPECs in this repository
+  style.
+
 ## Folder layout
 
 ```

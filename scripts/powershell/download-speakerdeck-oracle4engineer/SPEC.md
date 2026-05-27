@@ -44,6 +44,23 @@
 
 # Part A — Common Specification (reusable across all scripts)
 
+> **Status: Canonical inheritance source.** This Part A is the
+> repository's canonical Part A — the source of truth that sibling
+> Layer 3 SPECs (currently
+> [`scripts/powershell/update-windows-server-iso/SPEC.md`](../update-windows-server-iso/SPEC.md)
+> and any future PowerShell script SPEC in this style) inherit by
+> reference rather than by restating. Modifications to this Part A
+> propagate to every sibling SPEC that inherits it; review the
+> cross-script impact before committing changes. The rule, its
+> rationale, and the forensic record of past inheritance violations
+> (notably the `c40755c` Part A bloat regression) are recorded in
+> the repository-wide
+> [`AGENTS.md` §6 Part A Inheritance Rule (ABSOLUTE)](../../../AGENTS.md#6-part-a-inheritance-rule-absolute)
+> and
+> [`AGENTS.md` §9 AP-1](../../../AGENTS.md#9-anti-patterns-forensically-documented).
+> LLM agents authoring or revising any Layer 3 Part A MUST consult
+> both references before touching the inherited surface.
+
 ## A.1 Reference Assets
 
 These are the canonical sources for shared logic in this repository.
