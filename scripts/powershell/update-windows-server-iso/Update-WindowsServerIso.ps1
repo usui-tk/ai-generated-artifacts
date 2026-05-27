@@ -240,7 +240,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','DumpFieldClassification','TestHarness')]
+    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','RefreshDependencyDatabase','DumpFieldClassification','TestHarness')]
     [string]   $Action               = 'PrepareBuildVerify',
 
     [string[]] $OnlyPhases,
@@ -387,9 +387,9 @@ if ($WsusScnCabPath -and -not (Test-Path -LiteralPath $WsusScnCabPath)) {
 # Some actions don't operate on a single OS instance and therefore
 # don't need -OsVersion. ListPhases, EnvironmentInfoOnly, Cleanup,
 # and the Admin actions (RefreshSnapshots, RefreshAllBaselines,
-# DumpFieldClassification) operate on the on-disk Config files or
-# the script itself.
-$osLessActions = @('ListPhases','Cleanup','RefreshSnapshots','RefreshAllBaselines','DumpFieldClassification','TestHarness')
+# RefreshDependencyDatabase, DumpFieldClassification) operate on the
+# on-disk Config files or the script itself.
+$osLessActions = @('ListPhases','Cleanup','RefreshSnapshots','RefreshAllBaselines','RefreshDependencyDatabase','DumpFieldClassification','TestHarness')
 $needsOsVersion = ($Action -notin $osLessActions) -and (-not $EnvironmentInfoOnly)
 if ($needsOsVersion -and [string]::IsNullOrEmpty($OsVersion)) {
     throw '-OsVersion is required for action "' + $Action + '". Specify Server2016 / Server2019 / Server2022 / Server2025.'
@@ -535,8 +535,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'
-$Script:ScriptTag     = 'fix-subphase-patch-classification'
+$Script:ScriptVersion = 'update-wsi-2026.05.28-r09.0'
+$Script:ScriptTag     = 'step2a-sevenzip-port-and-a04-stub'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -586,6 +586,7 @@ $Script:PhaseRegistry = @(
     [pscustomobject]@{ Id='A01';   Name='RefreshAllBaselines';       Group='Admin';  Func='Invoke-AdminPhaseA01_RefreshAllBaselines' }
     [pscustomobject]@{ Id='A02';   Name='DumpFieldClassification';   Group='Admin';  Func='Invoke-AdminPhaseA02_DumpFieldClassification' }
     [pscustomobject]@{ Id='A03';   Name='RefreshSnapshots';          Group='Admin';  Func='Invoke-AdminPhaseA03_RefreshSnapshots' }
+    [pscustomobject]@{ Id='A04';   Name='RefreshDependencyDatabase'; Group='Admin';  Func='Invoke-AdminPhaseA04_RefreshDependencyDatabase' }
 )
 
 # OS Config field classification: drives the RefreshAllBaselines
@@ -6735,6 +6736,84 @@ function Get-WsusScnCabIfNeeded {
     }
 }
 
+# ============================================================
+# 7-Zip helpers (ported from Deploy-AMDChipsetDriverOnWindowsServer.ps1)
+# ============================================================
+#
+# These three helpers cooperate to locate or bootstrap 7-Zip, which is
+# the Servicing Dependency Database parser's required CAB extractor
+# (SPEC Part B.19.4). The function bodies are ported verbatim from the
+# sister project except for two logger renames:
+#   Write-Caution -> Write-Warn    (same role: yellow warning)
+#   Write-Detail  -> Write-Step    (same role: informational output)
+# The HTTP calls intentionally use the raw Invoke-WebRequest rather than
+# this script's local Invoke-WebRequestWithRetry wrapper; the retry
+# semantics are different (Deploy-AMD's pattern is short-circuit on the
+# first tier that returns a parseable response) and aligning them is a
+# task for a future revision (SPEC Part B.19.4 Implementation Notes).
+#
+# The decision to require 7-Zip rather than the in-box expand.exe is
+# normative; see SPEC Part B.19.4.1 and the research article
+# research/windows-servicing/windows-server-iso-update-mechanics.{en,ja}.md
+# section 7.2 for the failure-mode evidence.
+
+function Get-SevenZipPath {
+    foreach ($p in @("${env:ProgramFiles}\7-Zip\7z.exe","${env:ProgramFiles(x86)}\7-Zip\7z.exe")) {
+        if (Test-Path $p) { return $p }
+    }
+    $cmd = Get-Command 7z.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+function Get-LatestSevenZipUrl {
+    # Tier 1: 7-zip.org
+    try {
+        $resp = Invoke-WebRequest -Uri 'https://www.7-zip.org/download.html' -UseBasicParsing -TimeoutSec 30
+        $verMatch = [regex]::Match($resp.Content, 'Download 7-Zip\s+(\d+\.\d+)')
+        $msiHits  = [regex]::Matches($resp.Content, 'https?://[^\s"''<>)]+?/7z\d+-x64\.msi')
+        if ($msiHits.Count -gt 0) {
+            return [pscustomobject]@{
+                Version = if ($verMatch.Success) { $verMatch.Groups[1].Value } else { $null }
+                MsiUrl  = $msiHits[0].Value
+                Source  = '7-zip.org (parsed)'
+            }
+        }
+    } catch { Write-Warn "7-zip.org parse failed: $($_.Exception.Message)" }
+
+    # Tier 2: GitHub API
+    try {
+        $headers = @{ 'User-Agent' = 'PowerShell-Update-WindowsServerIso'; 'Accept' = 'application/vnd.github+json' }
+        $api = Invoke-RestMethod -Uri 'https://api.github.com/repos/ip7z/7zip/releases/latest' -Headers $headers -TimeoutSec 30
+        $msi = $api.assets | Where-Object { $_.name -match '^7z\d+-x64\.msi$' } | Select-Object -First 1
+        if ($msi) {
+            return [pscustomobject]@{ Version=$api.tag_name; MsiUrl=$msi.browser_download_url; Source='GitHub Releases API' }
+        }
+    } catch { Write-Warn "GitHub Releases API failed: $($_.Exception.Message)" }
+
+    # Tier 3: pinned
+    Write-Warn 'Both online lookups failed - using pinned URL.'
+    return [pscustomobject]@{
+        Version='26.01 (pinned)'
+        MsiUrl='https://github.com/ip7z/7zip/releases/download/26.01/7z2601-x64.msi'
+        Source='pinned fallback'
+    }
+}
+
+function Install-SevenZipFallback {
+    param([string]$DownloadDir)
+    $info = Get-LatestSevenZipUrl
+    Write-Step "Version : $($info.Version)"
+    Write-Step "Source  : $($info.Source)"
+    Write-Step "URL     : $($info.MsiUrl)"
+    $msi = Join-Path $DownloadDir (Split-Path $info.MsiUrl -Leaf)
+    if (-not (Test-Path $msi)) {
+        Invoke-WebRequest -Uri $info.MsiUrl -OutFile $msi -UseBasicParsing
+    }
+    $proc = Start-Process msiexec.exe -ArgumentList @('/i',"`"$msi`"",'/qn','/norestart') -Wait -PassThru # psa-disable-line PSA3001 -- Start-Process -ArgumentList is the canonical pattern for invoking msiexec with explicit args
+    if ($proc.ExitCode -ne 0) { throw "7-Zip MSI install failed (exit $($proc.ExitCode))" }
+}
+
 function Invoke-WuaOfflineScan {
     <#
     .SYNOPSIS
@@ -12167,6 +12246,54 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
     }
 }
 
+function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
+    <#
+    .SYNOPSIS
+        [r09.0 Step 2a: STUB] Refresh the Layer 2 Servicing Dependency
+        Database (data/wsusscn2-database.json) from wsusscn2.cab.
+    .DESCRIPTION
+        This is a r09.0 Step 2a wrapper STUB. The full implementation
+        ships in r09.0 Step 2b together with the parser pipeline
+        functions Invoke-WsusScnPackageXmlExtract,
+        ConvertFrom-WsusScnPackageXml, and New-WsusScnDependencyDatabase
+        (SPEC Part B.19.9).
+        The wrapper is registered now so that the PhaseRegistry,
+        Get-PhaseListByAction switch, and param() ValidateSet entries
+        for -Action RefreshDependencyDatabase land in a single
+        atomic-feeling commit. Calling -Action RefreshDependencyDatabase
+        before r09.0 Step 2b raises a clear NotImplementedException-style
+        error directing the operator to the SPEC section that describes
+        the planned behaviour.
+    .OUTPUTS
+        [bool] Always throws in r09.0 Step 2a; the future contract is
+        $true on successful refresh, $false on soft-fail (air-gapped
+        without -OfflineCabPath).
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    Start-DebugTrace -Context 'Invoke-AdminPhaseA04_RefreshDependencyDatabase' -PhaseId 'A04'
+    try {
+        Write-Warn '-Action RefreshDependencyDatabase is registered but not yet implemented.'
+        Write-Warn 'Planned for r09.0 Step 2b per SPEC Part B.19.15.3.'
+        Write-Warn 'Required prerequisites currently in place after r09.0 Step 2a:'
+        Write-Warn '  - 7-Zip helpers (Get-SevenZipPath, Get-LatestSevenZipUrl, Install-SevenZipFallback)'
+        Write-Warn '  - Stage 1 cab acquisition (Get-WsusScnCabIfNeeded, pre-existing)'
+        Write-Warn 'Pending work in Step 2b:'
+        Write-Warn '  - Stage 2: Invoke-WsusScnPackageXmlExtract (two-step 7-Zip extraction)'
+        Write-Warn '  - Stage 3: ConvertFrom-WsusScnPackageXml (XmlReader streaming, two-pass walk)'
+        Write-Warn '  - Stage 4: New-WsusScnDependencyDatabase (Layer 2 JSON emission)'
+        throw [System.NotImplementedException]::new(
+            'Invoke-AdminPhaseA04_RefreshDependencyDatabase is a r09.0 Step 2a stub. ' +
+            'Implementation lands in r09.0 Step 2b. ' +
+            'See SPEC Part B.19.9 / Part B.19.15.3 for the planned behaviour.'
+        )
+    } finally {
+        Stop-DebugTrace
+    }
+}
+
 function Show-RefreshSnapshotsSummary {
     <#
     .SYNOPSIS
@@ -12269,9 +12396,10 @@ function Get-PhaseListByAction {
         'Cleanup'                 { return [string[]]@() }
         'ListPhases'              { return [string[]]@() }
         'GenerateManifest'        { return [string[]]@('P01','P02','P03') }
-        'RefreshAllBaselines'     { return [string[]]@('A01') }
-        'DumpFieldClassification' { return [string[]]@('A02') }
-        'RefreshSnapshots'        { return [string[]]@('A03') }
+        'RefreshAllBaselines'      { return [string[]]@('A01') }
+        'DumpFieldClassification'  { return [string[]]@('A02') }
+        'RefreshSnapshots'         { return [string[]]@('A03') }
+        'RefreshDependencyDatabase' { return [string[]]@('A04') }
         default                   { throw ('Unknown action: {0}' -f $ActionName) }
     }
 }
@@ -12290,7 +12418,7 @@ function Show-PhaseList {
     }
     Write-Host ''
     Write-Host ' Actions:' -ForegroundColor Cyan
-    foreach ($a in @('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','DumpFieldClassification')) {
+    foreach ($a in @('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','RefreshDependencyDatabase','DumpFieldClassification')) {
         $list = Get-PhaseListByAction -ActionName $a
         if ($list.Count -gt 0) {
             Write-Host ('  {0,-22} : {1}' -f $a, ($list -join ',')) -ForegroundColor DarkCyan

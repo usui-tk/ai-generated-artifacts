@@ -1432,6 +1432,29 @@ The exit-code mapping (0/1/>=2) matches the official 7-Zip
 documentation. Treat exit 1 as a warning (e.g. file timestamp
 collision), exit ≥2 as fatal.
 
+#### B.19.4.4 Implementation notes (port from Deploy-AMDChipsetDriverOnWindowsServer.ps1)
+
+The three helpers `Get-SevenZipPath`, `Get-LatestSevenZipUrl`, and
+`Install-SevenZipFallback` are ported verbatim from the sister
+project, with two unavoidable adjustments:
+
+| Aspect | Deploy-AMD source | This script | Reason |
+|:---|:---|:---|:---|
+| Yellow-warning logger | `Write-Caution` | `Write-Warn` | The two scripts have independently-grown logger naming. The role and ANSI colour are identical. |
+| Informational logger | `Write-Detail` | `Write-Step` | Same as above. |
+| HTTP wrapper | raw `Invoke-WebRequest` | raw `Invoke-WebRequest` (unchanged) | This script's local `Invoke-WebRequestWithRetry` wrapper has different retry semantics (exponential backoff, multi-attempt) than the three-tier short-circuit fallback Deploy-AMD uses. Aligning them is deferred to a future revision. |
+
+These adjustments are minimum-viable for the port to compile and
+run in this script's environment. They are explicitly *not* a
+"redesign while porting" — function bodies, parameter signatures,
+and pipeline ordering remain byte-identical to Deploy-AMD modulo
+the four lines that invoke the renamed loggers.
+
+The three helpers are inserted as a single block immediately after
+`Get-WsusScnCabIfNeeded` (the Stage 1 cab acquisition helper).
+The placement keeps all `wsusscn2.cab`-adjacent infrastructure
+co-located within a single section of the script body.
+
 ### B.19.5 Data sources: dual-source structure (informative)
 
 Phase 5 of the r09.0 Step 1 PoC established that update-relationship

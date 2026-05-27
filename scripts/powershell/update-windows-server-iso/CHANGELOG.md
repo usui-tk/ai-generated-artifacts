@@ -16,6 +16,120 @@ the script and follows the
 
 ## [Unreleased]
 
+### r09.0 Step 2a - 7-Zip helper port, A04 stub, and Server 2016 SSU dependency config fix
+
+This Step 2a ships a **scope-limited code change** that lays the
+foundation for the full Servicing Dependency Database parser shipping
+in r09.0 Step 2b. Three concrete deliverables ride in this commit:
+
+1. The three 7-Zip helper functions (`Get-SevenZipPath`,
+   `Get-LatestSevenZipUrl`, `Install-SevenZipFallback`) are ported
+   from the sister project Deploy-AMDChipsetDriverOnWindowsServer.ps1
+   with the two unavoidable logger renames documented in SPEC
+   §B.19.4.4. These are the CAB-extraction prerequisites for the
+   Stage 2 parser function that lands in Step 2b.
+2. A new `-Action RefreshDependencyDatabase` Action is registered:
+   `param()` ValidateSet entry, `$Script:PhaseRegistry` A04 entry,
+   `Get-PhaseListByAction` switch case, `$osLessActions` membership,
+   and a wrapper function `Invoke-AdminPhaseA04_RefreshDependencyDatabase`
+   that throws `NotImplementedException` with an operator-actionable
+   message pointing at SPEC §B.19.15.3. The registration ships in
+   Step 2a so the public API contract (param surface, phase listing)
+   is atomic with respect to the parser implementation; Step 2b
+   replaces the wrapper body without changing any of the public
+   integration points.
+3. `data/config-Server2016.json` is corrected for the r08.0 Step 4d
+   finding (the diagnosis that closes the r08.0 cycle on this OS):
+   - `KB5088064` (2026-05 SSU) added as a new NeutralPatches entry
+     with `ApplyOrder=1` (placed before the LCU's ApplyOrder=3) and
+     the new `_DependencyVerifiedSource: "manual-r09-step2a"` field
+     to mark its provenance per SPEC §B.19.12.1.
+   - `KB5087537` LCU's `IsCombined: true` is corrected to `false`
+     (r08.0 Step 4d evidence: `addpkg.log` confirms standalone LCU,
+     not Combined LCU+SSU as the field had stated).
+   - `KB5087537` LCU's `RequiresKbIds: []` is populated with
+     `["KB5088064"]`, declaring the SSU prerequisite that previously
+     caused the HRESULT `0x800f0823` failure on Server 2016 Build runs.
+
+The change set explicitly does **not** ship the parser pipeline
+(SPEC §B.19.9), the Layer 2 JSON schema (SPEC §B.19.10), the
+`Test-PatchDependencyClosureFromGraph` verifier (SPEC §B.19.13),
+nor the P06 Stage 2 split (SPEC §B.19.14). Those four deliverables
+are intentionally bundled into r09.0 Step 2b so the parser and its
+consumer land together; shipping them piecewise would leave the
+script in an "API present but does nothing" state.
+
+### Rationale
+
+Splitting r09.0 Step 2 into Step 2a (this commit) and Step 2b (next)
+follows the implementation-size guidance derived during planning:
+the full Step 2 scope (~1,300-1,900 lines of additions across parser,
+tests, A04 implementation, P06 Stage 2 split) is too large for one
+revision to land cleanly with the Self-Check Gates AGENTS.md §8
+demands. Step 2a's 78-line + 50-line additions are individually
+small, but each is a fully-tested, atomic deliverable that improves
+the script's behaviour on Server 2016 immediately — even before
+the parser arrives.
+
+The Server 2016 config correction (item 3 above) closes the r08.0
+Step 4d investigation on this OS: an operator running r08.0 had to
+manually understand the 0x800f0823 error, read addpkg.log, and
+hand-edit the config to add KB5088064. After Step 2a, the same
+config arrives shipped-correct, and the LCU's IsCombined / RequiresKbIds
+fields document the dependency for the next operator. The remaining
+gap (auto-discovery of dependencies for newly-released LCUs) is what
+Step 2b's parser closes.
+
+### Changed files
+
+- `Update-WindowsServerIso.ps1` (+128 lines)
+  - L538-539: ScriptVersion `r08.0` → `r09.0`; ScriptTag
+    `fix-subphase-patch-classification` → `step2a-sevenzip-port-and-a04-stub`
+  - L243: `param()` ValidateSet adds `RefreshDependencyDatabase`
+  - L392: `$osLessActions` adds `RefreshDependencyDatabase`
+  - L588 (new): `$Script:PhaseRegistry` adds A04 entry
+  - L6737-6816 (new): 7-Zip helpers section (3 functions + section banner)
+  - L12247-12297 (new): `Invoke-AdminPhaseA04_RefreshDependencyDatabase` stub
+  - L12274 (new): `Get-PhaseListByAction` switch adds `RefreshDependencyDatabase` case
+  - L12293: `Show-PhaseList` Actions list adds `RefreshDependencyDatabase`
+- `data/config-Server2016.json` (+22 lines)
+  - NeutralPatches[0] (new): KB5088064 SSU entry
+  - NeutralPatches[1] (existing, fields updated): KB5087537 IsCombined corrected,
+    RequiresKbIds populated, `_DependencyVerifiedDate` / `_DependencyVerifiedSource`
+    / `_Notes` fields added per SPEC §B.19.12.1
+- `SPEC.md` (+27 lines)
+  - §B.19.4.4 (new): Implementation notes for the Deploy-AMD port
+
+### Quality gate
+
+- `psa.py`: 0 errors / 0 warnings / 0 info (12,879 lines analysed)
+- `psa.py --include PSA1004,PSA2012,PSA2013`: 0 errors / 0 warnings / 0 info
+- `PSScriptAnalyzer` with project settings: 0 findings
+- T2 (catalog_fixture_test): 13 passed / 0 failed
+- T3 (powershell_harness): 10 passed / 0 failed
+- T6 (release_info_parser_test): 13 passed / 0 failed
+- `pwsh -ParseFile`: Parse OK
+- `-Action ListPhases` smoke test: A04 / RefreshDependencyDatabase entry visible in phase registry and Actions list
+- `-Action RefreshDependencyDatabase` smoke test: NotImplementedException raised with operator-actionable message naming SPEC §B.19.15.3 and listing pending Step 2b work
+
+### Cross-references
+
+- SPEC.md §B.19.4 (7-Zip strategy, including new §B.19.4.4 Implementation notes)
+- SPEC.md §B.19.12.1 (NeutralPatches `_DependencyVerified*` fields)
+- SPEC.md §B.19.15.3 (A04 RefreshDependencyDatabase action)
+- AGENTS.md §9 AP-2 (registered-but-not-implemented avoidance: stub raises a
+  clear NotImplementedException rather than silently no-op)
+- AGENTS.md §9 AP-3 (inheritance via copy-paste: the Deploy-AMD port
+  is documented as a verbatim copy with two unavoidable logger renames,
+  not as new code disguised as a sibling pattern)
+- AGENTS.md §9 AP-5 (no inline revision tags: the new function bodies
+  carry no `r09:` / `r09.0+` markers; revision context lives in this
+  CHANGELOG entry only)
+- `research/windows-servicing/windows-server-iso-update-mechanics.{en,ja}.md`
+  §5.3 (SSU-LCU pairing problem, the failure mode this config fix
+  prevents) and §7.2 (expand.exe self-overwrite, the reason 7-Zip
+  is required)
+
 ### r09.0 Step 10 (docs-only) - docs/ retirement and knowledge promotion to `research/windows-servicing/`
 
 This Step 10 ships a **docs-only** change: the entire contents of

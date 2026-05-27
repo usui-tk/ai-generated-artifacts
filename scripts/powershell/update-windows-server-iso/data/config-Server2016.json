@@ -33,6 +33,33 @@
                           "ChecksumAlgorithm":  "SHA256",
                           "NeutralPatches":  [
                                                  {
+                                                     "Type":  "SSU",
+                                                     "KbId":  "KB5088064",
+                                                     "Title":  "",
+                                                     "UpdateId":  "d0f1761f-c762-4764-8443-8c567f6929a2",
+                                                     "DownloadUrl":  "",
+                                                     "FileName":  "windows10.0-kb5088064-x64.msu",
+                                                     "SizeBytes":  0,
+                                                     "Sha256":  "",
+                                                     "ReleaseDate":  "2026-05-12",
+                                                     "Supersedes":  [
+
+                                                                       ],
+                                                     "RequiresKbIds":  [
+
+                                                                       ],
+                                                     "ApplyOrder":  1,
+                                                     "ApplicableArchitecture":  "x64",
+                                                     "ApplicableLanguages":  [
+                                                                 "neutral"
+                                                                 ],
+                                                     "IsCombined":  false,
+                                                     "Variant":  "Full",
+                                                     "_DependencyVerifiedDate":  "2026-05-28",
+                                                     "_DependencyVerifiedSource":  "manual-r09-step2a",
+                                                     "_Notes":  "SSU prerequisite for KB5087537 LCU (HRESULT 0x800f0823 fix per r08.0 Step 4d). Auto-discovery via Layer 2 wsusscn2-database.json pending r09.0 Step 2b parser implementation. Catalogue UpdateID: d0f1761f-c762-4764-8443-8c567f6929a2 (12.2 MB, Never restarts)."
+                                                 },
+                                                 {
                                                      "Type":  "LCU",
                                                      "KbId":  "KB5087537",
                                                      "Title":  "2026-05 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5087537)",
@@ -46,15 +73,18 @@
                                                                         "KB5071543"
                                                                     ],
                                                      "RequiresKbIds":  [
-
+                                                                           "KB5088064"
                                                                        ],
                                                      "ApplyOrder":  3,
                                                      "ApplicableArchitecture":  "x64",
                                                      "ApplicableLanguages":  [
                                                                                  "neutral"
                                                                              ],
-                                                     "IsCombined":  true,
-                                                     "Variant":  "Full"
+                                                     "IsCombined":  false,
+                                                     "Variant":  "Full",
+                                                     "_DependencyVerifiedDate":  "2026-05-28",
+                                                     "_DependencyVerifiedSource":  "manual-r09-step2a",
+                                                     "_Notes":  "IsCombined corrected from true (r08.0 Step 4d finding: standalone LCU per addpkg.log evidence, not Combined LCU+SSU). RequiresKbIds populated with KB5088064 SSU prerequisite (HRESULT 0x800f0823 prevention)."
                                                  },
                                                  {
                                                      "Type":  "DotNet.Runtime",
