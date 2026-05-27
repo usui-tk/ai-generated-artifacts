@@ -122,6 +122,23 @@ scripts/<language>/<project-name>/
 | Disclaimer / 免責事項 | `## ⚠️ Disclaimer` | `## ⚠️ 免責事項` | "AS IS" / no-warranty statement; limitation of liability; user-responsibility checklist (ToS compliance, IP rights respect, source-code review before execution); link back to the [root README](../README.md) for the full self-responsibility terms |
 | License / ライセンス | `## License` | `## ライセンス` | License name (MIT by default for this repository); link to [`LICENSE`](../../LICENSE) at the repo root; one-paragraph summary of permitted use and required attribution |
 
+### Recommended additional section / 推奨追加セクション
+
+**EN:** In addition to the MUST-have sections above, every non-trivial project-level `README.md` SHOULD include a **Purpose / Why this exists** section that explains the operational scenarios the script addresses — *what would be painful without it*. This section is RECOMMENDED, not required, because it preserves backward compatibility with existing subprojects that have not yet been updated. New subprojects SHOULD include it; existing subprojects SHOULD add it during their next significant update cycle.
+
+**JA:** 上記の MUST セクションに加え、非自明なプロジェクト単位の `README.md` には、スクリプトが対応する運用シナリオ — *スクリプトがなかった場合の困難* — を説明する **Purpose / Why this exists**（目的・存在理由）セクションを配置することを推奨します。本セクションは既存サブプロジェクトとの後方互換のため必須ではなく **推奨** とします。新規サブプロジェクトでは配置すること、既存サブプロジェクトでは次の大きな更新サイクルで追加することを推奨します。
+
+| Section / セクション | English heading | Japanese heading | Recommended content / 推奨内容 |
+|:---|:---|:---|:---|
+| Purpose / Why this exists / 目的・存在理由 | `## Why this script exists` | `## なぜこのスクリプトが必要か` | One-paragraph (3-10 lines) explanation of the operational scenarios this script addresses — what would be painful without it. Operator audience definition (suitable for / out of scope) and a brief "Reader's roadmap" (if you want to *run* / *extend* / *verify* / see *history*, read X) are encouraged additions |
+
+The motivation for this Recommended section is documented in
+[`AGENTS.md` §4](../AGENTS.md#4-implementation-ground-truth-extraction)
+(it gives LLM agents a place to anchor their understanding of "why",
+not just "what") and the Anti-Pattern catalogue in `AGENTS.md` §9.
+
+本セクションを推奨する動機は [`AGENTS.md` §4](../AGENTS.md#4-implementation-ground-truth-extraction)（LLM エージェントが「何を」だけでなく「なぜ」を把握できるアンカーとなる）および `AGENTS.md` §9 のアンチパターンカタログに記載されています。
+
 **EN:** Trivial single-file scripts (no project directory of their own) may omit a separate README and instead rely on the script header comment plus the parent-directory `README.md`.
 
 **JA:** 単一スクリプトでプロジェクトディレクトリを持たない軽量スクリプトの場合は、専用 README を省略し、スクリプトヘッダーコメントと上位ディレクトリの `README.md` で代替できます。
@@ -144,6 +161,26 @@ scripts/<language>/<project-name>/
 **EN:** Formal API specifications for tools (e.g., the `psa.py` SPEC) may instead use a numbered-section structure (`§1 Scope`, `§2 Architecture`, …) appropriate to API documentation. In that case, an `Appendix C — Quality Gates` and `Appendix D — Known Pitfalls` SHOULD be added to provide the same conceptual coverage.
 
 **JA:** ツールの公式 API 仕様書（例:`psa.py` の SPEC）は、API ドキュメントとして適切な番号付きセクション構成（`§1 スコープ`、`§2 アーキテクチャ` …）を採用しても構いません。この場合は、Part C / D と同等の概念をカバーする `付録 C — 品質ゲート` と `付録 D — 既知の落とし穴` を追加することを推奨します。
+
+### Part A inheritance rule (LLM agents MUST observe) / Part A 継承ルール（LLM エージェントは必ず遵守）
+
+**EN:** Part A is the **inherited** layer, not a stub to be filled in. The canonical text of Part A lives in the in-house reference SPEC (currently [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./powershell/download-speakerdeck-oracle4engineer/SPEC.md) sections A.1–A.14). A new script's Part A:
+
+- MUST consist of an inheritance declaration (~50 lines)
+- MUST reference the canonical sibling SPEC sections
+- MUST NOT restate the canonical text
+- MAY have a project-specific extensions subsection (`A.x`) recording ONLY deviations or additions
+
+**JA:** Part A は「埋めるべき空欄」ではなく、**継承される**層です。Part A の正典は社内リファレンス SPEC([`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./powershell/download-speakerdeck-oracle4engineer/SPEC.md) の A.1–A.14)にあります。新規スクリプトの Part A は:
+
+- 継承宣言(約 50 行)で構成すること
+- 正典 sibling SPEC の各セクションへの参照を含めること
+- 正典テキストを restate しないこと
+- プロジェクト固有の派生・追加のみ `A.x` 拡張サブセクションに記録してよい
+
+**EN:** Restating Part A inline (the "comprehensive Part A" anti-pattern) creates four problems simultaneously: drift risk between two copies, incomplete coverage of canonical content, authority confusion when copies disagree, and N+1 maintenance burden. This anti-pattern is forensically documented in [`AGENTS.md` §6](../AGENTS.md#6-part-a-inheritance-rule-absolute) (Part A bloat regression `c40755c`). LLM agents working on any Layer 3 SPEC MUST read the canonical sibling Part A in full before touching the local Part A; if "improvement" content is genuinely warranted, classify it (generic → propose to sibling; project-specific → record under `A.x`).
+
+**JA:** Part A をインラインで restate すること(「包括的 Part A」アンチパターン)は同時に 4 つの問題を引き起こします:2 コピー間の drift リスク、正典コンテンツの不完全カバー、コピー不一致時の authority 混乱、N+1 倍の保守負担。本アンチパターンの forensic 記録は [`AGENTS.md` §6](../AGENTS.md#6-part-a-inheritance-rule-absolute)(Part A bloat regression `c40755c`)にあります。Layer 3 SPEC を扱う LLM エージェントは、ローカル Part A に触れる前に正典 sibling Part A を完全に読まなければなりません。改善内容が真に必要であれば、それを分類すること:汎用なら sibling に提案、プロジェクト固有なら `A.x` 拡張に記録。
 
 ---
 

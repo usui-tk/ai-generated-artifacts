@@ -65,12 +65,13 @@ Pull requests are accepted but reviewed on a best-effort basis with no guarantee
 - [ ] If you touch a project under `scripts/<lang>/<project>/` that ships a `SPEC.md`, verify the corresponding **Part C — Quality Gates & Validation Checklist** before committing.
 - [ ] **For CI workflow changes (anything under `.github/workflows/`, the `PSScriptAnalyzerSettings.psd1` files, or the root [`SPEC.md`](./SPEC.md)): read [`SPEC.md`](./SPEC.md) first, then record the change in the CI-target script's `CHANGELOG.md` — never in a separate location ([`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9 forbids `.github/workflows/CHANGELOG.md` and similar).**
 - [ ] Never commit real secrets (API keys, account IDs you wish to keep private, passwords, tokens). See [`README.md`](./README.md) → "No credentials in artifacts".
+- [ ] **For doc changes that describe implementation behaviour (`SPEC.md` / `README.md` / `TESTING.md`):** verify factual claims against the script body, `param()` declarations, function inventory, and `tests/` contents BEFORE authoring. Do not rely on prior documentation as ground truth — prior docs may themselves be stale or drifted. See [`AGENTS.md` §4](./AGENTS.md#4-implementation-ground-truth-extraction) for the canonical extraction procedure.
 
 ### PR description should include
 
 - The **artifact path(s)** touched.
 - A 1–3 sentence summary of the change.
-- For SPEC / convention changes: a note on whether downstream artifacts (scripts, READMEs) need follow-up updates.
+- For SPEC / convention changes: a note on whether downstream artifacts (scripts, `README.md`, `README.ja.md`, `TESTING.md`) need follow-up updates. See [`AGENTS.md` §5](./AGENTS.md#5-spec--readme--testing-doc-touching-matrix) for the canonical matrix mapping SPEC sections to their downstream impact zones.
 - For bilingual files: confirmation that both `<NAME>.md` and `<NAME>.ja.md` are in sync.
 
 ---
@@ -172,12 +173,13 @@ PR はベストエフォートで受け付けます(レビュー期限は保証�
 - [ ] `scripts/<lang>/<project>/` 配下で `SPEC.md` を持つプロジェクトを変更する場合、コミット前に対応する **Part C — 品質ゲートと検証チェックリスト** を確認する
 - [ ] **CI ワークフローの変更 (`.github/workflows/` 配下、 `PSScriptAnalyzerSettings.psd1` ファイル、 ルート [`SPEC.md`](./SPEC.md) のいずれか) を行う場合: まず [`SPEC.md`](./SPEC.md) を読み、 変更内容を CI 対象スクリプトの `CHANGELOG.md` に記録する — 別の場所に記録してはならない ([`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9 が `.github/workflows/CHANGELOG.md` 等の作成を禁止している)。**
 - [ ] 実在の機密情報(API キー、非公開アカウント ID、パスワード、トークン)を **絶対にコミットしない**。[`README.ja.md`](./README.ja.md) の「アーティファクトに認証情報を埋め込まないでください」を参照
+- [ ] **実装挙動を記述するドキュメント変更時(`SPEC.md` / `README.md` / `TESTING.md`):** 執筆 **前** に、スクリプト本体、`param()` 宣言、関数一覧、`tests/` 内容に照らして事実関係を検証する。過去のドキュメントを ground truth として信用しないこと(過去ドキュメント自体が陳腐化・乖離している可能性がある)。 抽出手順の正典は [`AGENTS.md` §4](./AGENTS.md#4-implementation-ground-truth-extraction) を参照
 
 ### PR 説明に含めるべき内容
 
 - 変更対象の **アーティファクトパス**
 - 変更の 1〜3 文サマリ
-- SPEC や規約変更の場合:下流アーティファクト(スクリプト・README)で追従更新が必要かの注記
+- SPEC や規約変更の場合:下流アーティファクト(スクリプト・`README.md`・`README.ja.md`・`TESTING.md`)で追従更新が必要かの注記。SPEC のどの章を変更すると下流のどこに影響するかの正典マトリクスは [`AGENTS.md` §5](./AGENTS.md#5-spec--readme--testing-doc-touching-matrix) を参照
 - バイリンガルファイル:`<NAME>.md` と `<NAME>.ja.md` の両方が同期されていることの確認
 
 ---

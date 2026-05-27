@@ -20,6 +20,10 @@ ai-generated-artifacts/
 ├── README.md                 # 英語版（プライマリ）
 ├── README.ja.md              # 日本語版
 ├── SPEC.md                   # レポジトリレベルの CI / 横断的ポリシー（英語のみ）
+├── CONTRIBUTING.md           # 貢献ルール（英語のみ）
+├── SECURITY.md               # 脆弱性報告ポリシー（英語のみ）
+├── CODE_OF_CONDUCT.md        # 行動規範（英語のみ）
+├── AGENTS.md                 # LLM 支援貢献者向けワークフローガイド（英語のみ）
 ├── .gitignore
 │
 ├── research/                 # リサーチ記事、調査、分析
@@ -133,7 +137,7 @@ Update Catalogue の現在状態と乖離している場合、 更新された�
   - **パターン A — 言語サフィックス対** (`<slug>.en.md` / `<slug>.ja.md`)
     リサーチ記事や学習ノートなど一般的なコンテンツファイルに使用。
   - **パターン B — プライマリ + 翻訳** (`<NAME>.md` が英語プライマリ、`<NAME>.ja.md` が日本語翻訳版)
-    `README.md` / `README.ja.md` に使用。 他のリポジトリ慣例ファイル (`SPEC.md`、 `TESTING.md`、 `CHANGELOG.md`、 `CONTRIBUTING.md`、 `SECURITY.md`、 `CODE_OF_CONDUCT.md`) は下記「言語ポリシー」により **英語のみ** で維持されます。
+    `README.md` / `README.ja.md` に使用。 他のリポジトリ慣例ファイル (`SPEC.md`、 `TESTING.md`、 `CHANGELOG.md`、 `CONTRIBUTING.md`、 `SECURITY.md`、 `CODE_OF_CONDUCT.md`、 `AGENTS.md`) は下記「言語ポリシー」により **英語のみ** で維持されます。
 - 単一言語ファイル: `<slug>.md`
 - コードファイルは言語の慣習に従う（例：PowerShell は `Verb-Noun.ps1`、Bash は `kebab-case.sh`、Python は `snake_case.py`）
 
@@ -157,7 +161,7 @@ Update Catalogue の現在状態と乖離している場合、 更新された�
 | `SPEC.md` | **英語のみ** | — | 仕様書は drift 回避のため英語のみで維持。 |
 | `TESTING.md` | **英語のみ** | — | テスト手順・検証結果、 英語のみ。 |
 | `CHANGELOG.md` | **英語のみ** | — | 時系列のリリースノート、 英語のみ。 |
-| `CONTRIBUTING.md`、 `SECURITY.md`、 `CODE_OF_CONDUCT.md` | **英語のみ** | — | リポジトリポリシーファイル、 英語のみ。 |
+| `CONTRIBUTING.md`、 `SECURITY.md`、 `CODE_OF_CONDUCT.md`、 `AGENTS.md` | **英語のみ** | — | リポジトリポリシーファイル、 英語のみ。 |
 | リサーチ記事・学習ノート (パターン A `<slug>.en.md` / `<slug>.ja.md`) | 可能であれば英語および日本語 | — | コンテンツファイル。 現実的な範囲でバイリンガル化。 |
 | トップレベル直下のサブディレクトリの README | 1 ファイル内に日英を併記 | — | 非常に短い概要 README で重複が無駄になる場合の例外。 両言語が等しく完全であることが条件。 |
 

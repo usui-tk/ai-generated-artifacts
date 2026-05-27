@@ -20,6 +20,10 @@ ai-generated-artifacts/
 ├── README.md                 # English (primary)
 ├── README.ja.md              # Japanese
 ├── SPEC.md                   # Repository-level CI / cross-cutting policy (English)
+├── CONTRIBUTING.md           # Contribution rules (English)
+├── SECURITY.md               # Vulnerability reporting policy (English)
+├── CODE_OF_CONDUCT.md        # Conduct expectations (English)
+├── AGENTS.md                 # LLM-assisted contributor workflow guide (English)
 ├── .gitignore
 │
 ├── research/                 # Research articles, surveys, analyses
@@ -138,7 +142,7 @@ For composite artifacts (e.g., a template paired with explanatory commentary), s
   - **Pattern A — paired language suffix** (`<slug>.en.md` / `<slug>.ja.md`)
     Used for ordinary content files such as research articles or study notes.
   - **Pattern B — primary-and-translation** (`<NAME>.md` is the English primary, `<NAME>.ja.md` is the Japanese translation)
-    Used for `README.md` / `README.ja.md`. (Other repository-convention files — `SPEC.md`, `TESTING.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` — are English-only per the Language Policy below.)
+    Used for `README.md` / `README.ja.md`. (Other repository-convention files — `SPEC.md`, `TESTING.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `AGENTS.md` — are English-only per the Language Policy below.)
 - Single-language files: `<slug>.md`
 - Code files follow the idiomatic naming convention of their language (e.g., `Verb-Noun.ps1` for PowerShell, `kebab-case.sh` for Bash, `snake_case.py` for Python)
 
@@ -162,7 +166,7 @@ This repository uses a **repository-wide common policy** for documentation langu
 | `SPEC.md` | **English only** | — | Specifications are maintained in English only to avoid drift. |
 | `TESTING.md` | **English only** | — | Test procedures and validation results, English only. |
 | `CHANGELOG.md` | **English only** | — | Chronological per-release change log, English only. |
-| `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` | **English only** | — | Repository-policy files, English only. |
+| `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `AGENTS.md` | **English only** | — | Repository-policy files, English only. |
 | Research articles, study notes (Pattern A `<slug>.en.md` / `<slug>.ja.md`) | English and / or Japanese as feasible | — | Content files; bilingual where practical. |
 | Top-level subdirectory READMEs | Interleaved EN / JA in a single file | — | An exception for very short overview READMEs that would suffer from duplication; both languages must remain equally complete. |
 
