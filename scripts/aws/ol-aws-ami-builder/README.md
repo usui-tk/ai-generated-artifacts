@@ -36,6 +36,69 @@ Operate these tools considerately. **Always prefer official Oracle-distributed A
 
 ---
 
+## Why this script exists
+
+AWS Marketplace publishes official AMIs for some Oracle Linux
+releases (notably OL 8.x and 9.x), but coverage is partial: OL 6 /
+7 / 10 are either absent, unmaintained, or behind paid Marketplace
+listings. Operators who need self-built AMIs — for compliance, for
+testing cross-version upgrades, or for early access to a release
+before Oracle publishes the Marketplace AMI — must bridge that gap
+themselves. Oracle's official `oracle-linux-image-tools` (the
+canonical upstream builder) requires a working KVM host plus careful
+glue work to land the resulting raw image as an AMI in your AWS
+account.
+
+`build-ol-aws-ami.sh` automates the entire 9-phase pipeline:
+build-host prerequisites (KVM/libvirt), workspace ACL bootstrap,
+Oracle upstream clone, version-specific runtime patches (OL 6 / OL
+7), `build-image.sh` invocation, post-build conversion to streamable
+VMDK, S3 staging, EC2 `import-snapshot`, and `register-image`. A
+single env-properties file (`env.properties.aws-ol{6,7,8,9,10}`)
+parameterises everything; re-running on a different OL release is a
+one-file change.
+
+### Suitable for
+
+- **Operators who need an OL release not yet on AWS Marketplace**
+  (currently OL 6, OL 7 retirement-window, OL 10 early)
+- **Build-host hosting** on a dedicated EC2 instance with nested
+  virtualization (M8i family) or on an on-premises KVM host
+- **Compliance and audit scenarios** where a self-built AMI is
+  preferred over a Marketplace blob the operator did not produce
+
+### Out of scope
+
+- **Daily-driver AMI production for releases Oracle already
+  publishes** on AWS Marketplace (always prefer the official AMI)
+- **Non-AWS targets** (Azure, GCP, OCI — the import flow is
+  AWS-specific via `import-snapshot` + `register-image`)
+- **Air-gapped builds** (the build host needs internet access for
+  Oracle upstream clone, package repos, and AWS API)
+- **Multi-tenant build hosts** (the wrapper invokes `sudo` and
+  modifies workspace ACLs on the build host)
+
+### Reader's roadmap
+
+- For a **first-time operator**, read the Disclaimer above and start
+  at section 5 (Initial Setup) and section 6 (Running a Build).
+- For **environment selection** (M8i nested virt vs on-prem KVM, OL
+  version coverage matrix), see section 3 (Choosing a Builder
+  Environment).
+- For **review of internal behaviour** (the 9 phases, error-resilience
+  strategy, ACL bootstrap, OL6 runtime synthesis), see
+  [`SPEC.md`](./SPEC.md) Part A and Part B.
+- For the **repository-wide LLM-agent operating guide** (governance
+  hierarchy, ground-truth extraction, Doc-Touching Matrix, Part A
+  inheritance rule, anti-patterns), see
+  [`AGENTS.md`](../../../AGENTS.md) at the repository root. Note
+  that this script's `SPEC.md` Part A serves as the **canonical
+  inheritance source for sibling Bash / AWS scripts** in this
+  repository — the parallel role to the canonical PowerShell SPEC
+  at [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../../powershell/download-speakerdeck-oracle4engineer/SPEC.md).
+
+---
+
 ## 1. Repository Layout
 
 | File | Purpose |
@@ -549,7 +612,7 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 
 ---
 
-## 13. Provenance and License
+## 13. Provenance
 
 ### AI generation
 
@@ -557,11 +620,7 @@ This wrapper was **iteratively developed with Anthropic Claude (Sonnet 4.5)** in
 
 A subsequent 2026-05 cross-version refactor (also using Anthropic Claude Opus 4.7) unified `S3_BUCKET` to `my-oracle-linux-ami-import-bucket` across all five templates, added the `resolve_aws_region()` runtime resolution chain (IMDSv2 → IMDSv1 → `ap-northeast-1` fallback) so every template ships with `AWS_REGION=""`, surfaced the upstream `UPDATE_TO_LATEST="yes"` default explicitly in every env file with wrapper-layer passthrough through Phase 4, switched the OL6 template's `ROOT_FS` default from `ext4` to `xfs` (with a targeted sed pattern that keeps `/boot` on ext4 to preserve GRUB Legacy compatibility), and verified the five `ISO_CHECKSUM` reference values against `linux.oracle.com/security/gpg/checksum/` on a RHEL 10.1 build host. The refactor includes corresponding README and SPEC updates and was statically validated (bash `-n`, shellcheck error-class clean); **the resulting env files have not been re-run end-to-end against AWS in the refactored configuration**.
 
-The upstream `oracle-linux-image-tools` project that this wrapper drives is independent and produced by Oracle.
-
-### License and warranty
-
-Provided **AS IS, without warranty of any kind**. The author and AI tool are not liable for any damages arising from use. See the [repository-level disclaimer](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md) for full terms.
+The upstream `oracle-linux-image-tools` project that this wrapper drives is independent and produced by Oracle. License terms for this wrapper are recorded in the [License](#license) section at the end of this document.
 
 ### Feedback / corrections / contributing
 
@@ -578,3 +637,24 @@ When filing a bug, please include:
 - **What you already tried**: e.g. cleaned `${WORKSPACE}`, switched WORKSPACE filesystem, etc.
 
 For code-level changes, please consult [SPEC.md](./SPEC.md) first — Part D ("Known Pitfalls & Lessons Learned") documents bugs the current implementation already handles, and Part A defines the conventions any new code must follow.
+
+---
+
+## License
+
+`build-ol-aws-ami.sh`, `setup-vmimport-role.sh`, and the related
+`env.properties.aws-ol{6,7,8,9,10}` files in this directory are
+released under the same **MIT License** as the rest of this
+`ai-generated-artifacts` repository. See the
+[`LICENSE`](../../../LICENSE) at the repository root for the full
+license text.
+
+In short: you are free to use, modify, and distribute these scripts
+for any purpose — including embedding them in commercial AMI build
+pipelines or in sister repositories — provided that the original
+copyright and license notices are preserved when redistributed. The
+scripts are provided without warranty as detailed in the Disclaimer
+above and in the `LICENSE` file. The upstream `oracle-linux-image-tools`
+project (which this wrapper drives) is licensed independently by
+Oracle and is **not covered by this License**; consult Oracle's
+upstream repository for its terms.

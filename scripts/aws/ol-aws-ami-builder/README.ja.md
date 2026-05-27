@@ -36,6 +36,71 @@ Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が�
 
 ---
 
+## なぜこのスクリプトが必要か
+
+AWS Marketplace は Oracle Linux の一部のリリース(主に OL 8.x /
+9.x)について公式 AMI を提供していますが、 カバレッジは部分的です:
+OL 6 / 7 / 10 は未公開、 メンテナンスされていない、 または有料
+Marketplace 出品の背後にあります。 コンプライアンス要件、 クロス
+バージョンアップグレードの試験、 Oracle の Marketplace AMI 公開前
+の早期検証など、 自身でビルドした AMI が必要な運用者は、 そのギャップ
+を自分で埋める必要があります。 さらに Oracle 公式の
+`oracle-linux-image-tools`(正典の上流ビルダー)を動かすには、
+KVM ホストの構築と、 ビルド結果の raw image を自身の AWS アカウント
+に AMI として着地させる丁寧なグルー処理が必要です。
+
+`build-ol-aws-ami.sh` は、 全 9 フェーズのパイプライン全体を自動化
+します:ビルドホスト前提条件(KVM/libvirt)、 ワークスペース ACL
+ブートストラップ、 Oracle 上流のクローン、 バージョン固有のランタイム
+パッチ(OL 6 / OL 7)、 `build-image.sh` の起動、 ビルド後の
+streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
+`register-image`。 単一の env properties ファイル
+(`env.properties.aws-ol{6,7,8,9,10}`)で全パラメーターを集中
+管理しており、 別の OL リリースで再実行するには 1 ファイル変更で
+済みます。
+
+### 適している用途
+
+- AWS Marketplace に未公開の OL リリース(現状は OL 6、 OL 7 の
+  EOL 期、 OL 10 の早期)が必要な **運用者**
+- ネスト仮想化に対応した EC2 インスタンス(M8i 系)や
+  オンプレ KVM ホストでの **ビルドホスト構築**
+- 運用者自身がビルドしていない Marketplace ブロブよりも、 自身で
+  ビルドした AMI を必要とする **コンプライアンス・監査シナリオ**
+
+### 対象外
+
+- Oracle が AWS Marketplace に既に公開しているリリースに対する
+  **日常運用 AMI の生成**(常に公式 AMI を優先してください)
+- **AWS 以外のターゲット**(Azure、 GCP、 OCI — インポートフローは
+  AWS 固有で、 `import-snapshot` + `register-image` を使用)
+- **エアギャップ環境でのビルド**(Oracle 上流のクローン、 パッケージ
+  リポジトリ、 AWS API のためにビルドホストはインターネット接続が必須)
+- **マルチテナントなビルドホスト**(ラッパーは `sudo` を呼び出し、
+  ビルドホストのワークスペース ACL を変更します)
+
+### 読者向けナビゲーション
+
+- **初めて運用する方** は、 上記の免責事項を読み、 セクション 5
+  (事前準備)とセクション 6(実行)から始めてください。
+- **環境選択**(M8i のネスト仮想化 vs オンプレ KVM、 OL バージョン
+  のカバレッジマトリクス)については、 セクション 3(ビルダー環境
+  の選択)を参照してください。
+- **内部挙動の確認**(9 フェーズ、 エラー耐性戦略、 ACL ブートストラップ、
+  OL6 ランタイム合成)については、 [`SPEC.md`](./SPEC.md) Part A
+  および Part B を参照してください(SPEC は英語のみで維持されて
+  います)。
+- **リポジトリ全体に共通する LLM エージェント運用ガイド**(ガバナンス
+  階層、 ground truth 抽出、 Doc-Touching マトリクス、 Part A 継承
+  ルール、 アンチパターン)は、 リポジトリルートの
+  [`AGENTS.md`](../../../AGENTS.md) を参照してください(英語のみ)。
+  本スクリプトの `SPEC.md` Part A は、 本リポジトリの sibling
+  **Bash / AWS スクリプト用の正典継承元** として機能します
+  ([`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../../powershell/download-speakerdeck-oracle4engineer/SPEC.md)
+  が PowerShell 系の正典であるのと並列の役割)。
+
+---
+
 ## 1. 構成ファイル
 
 | ファイル | 用途 |
@@ -550,7 +615,7 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 
 ---
 
-## 13. 来歴とライセンス
+## 13. 来歴
 
 ### AI 生成について
 
@@ -558,11 +623,7 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 
 さらにその後の 2026 年 5 月のクロスバージョンリファクタリング(同じく Anthropic Claude Opus 4.7 を使用)では、`S3_BUCKET` を 5 テンプレート全てで `my-oracle-linux-ami-import-bucket` に統一し、ランタイム解決チェーン `resolve_aws_region()`(IMDSv2 → IMDSv1 → `ap-northeast-1` フォールバック)を追加することで全テンプレートが `AWS_REGION=""` をデフォルトとできるようにし、上位の `UPDATE_TO_LATEST="yes"` デフォルトを各 env ファイルで明示宣言し Phase 4 でラッパー層パススルーを実装し、OL6 テンプレートの `ROOT_FS` デフォルトを `ext4` から `xfs` に切り替え(`/boot` を ext4 のまま維持する行アンカー付き sed パターンで GRUB Legacy 互換性を確保)、5 つの `ISO_CHECKSUM` リファレンス値を RHEL 10.1 のビルドホスト上で `linux.oracle.com/security/gpg/checksum/` に対して検証しました。リファクタリングには README と SPEC の対応更新が含まれており、bash `-n` および shellcheck エラークラスでは静的検証済みですが、**リファクタリング後の構成での AWS 実環境 end-to-end 再実行は未実施です**。
 
-本ラッパーから呼び出される上位の `oracle-linux-image-tools` プロジェクトは Oracle 社が独自に開発・公開しているもので、本リポジトリとは独立しています。
-
-### ライセンス・保証
-
-**現状有姿(AS IS)で、いかなる保証もなく**提供されます。本スクリプトの利用によって生じたいかなる損害についても、作者および AI ツールは責任を負いません。完全な免責事項は[リポジトリルートの免責事項](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.ja.md)を参照してください。
+本ラッパーから呼び出される上位の `oracle-linux-image-tools` プロジェクトは Oracle 社が独自に開発・公開しているもので、本リポジトリとは独立しています。 本ラッパーのライセンス条項は本ドキュメント末尾の[ライセンス](#ライセンス)セクションに記載されています。
 
 ### フィードバック / 修正依頼 / コントリビューション
 
@@ -579,3 +640,23 @@ https://github.com/usui-tk/ai-generated-artifacts/issues
 - **すでに試したこと**:例: `${WORKSPACE}` のクリーン、WORKSPACE のファイルシステム切り替えなど
 
 コードレベルの変更については、まず [`SPEC.md`](./SPEC.md) (English only) を参照してください。Part D(「既知の落とし穴と教訓」)は現実装ですでに対処済みのバグを記録しており、Part A は新コードが従うべき規約を定義しています。
+
+---
+
+## ライセンス
+
+`build-ol-aws-ami.sh`、 `setup-vmimport-role.sh`、 および本ディレクトリ
+内の関連 `env.properties.aws-ol{6,7,8,9,10}` ファイルは、 本
+`ai-generated-artifacts` リポジトリの他のコンテンツと同じ
+**MIT ライセンス** で提供されます。 ライセンス全文はリポジトリルート
+の [`LICENSE`](../../../LICENSE) を参照してください。
+
+要約:本スクリプト群は、 商用 AMI ビルドパイプラインへの組み込みや
+姉妹リポジトリへの組み込みを含むあらゆる目的での使用・改変・配布が
+許可されます。 ただし、 再配布時には元の著作権およびライセンス通知
+を保持する必要があります。 本スクリプト群は、 上記の免責事項および
+`LICENSE` ファイルに詳述されているとおり、 無保証で提供されます。
+本ラッパーが駆動する上流の `oracle-linux-image-tools` プロジェクト
+は、 Oracle が独立してライセンスを設定しており、 **本ライセンスの
+対象外** です。 上流の条件については Oracle の上流リポジトリを参照
+してください。

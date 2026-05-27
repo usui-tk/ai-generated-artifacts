@@ -52,6 +52,30 @@
 
 # Part A — Common Specification
 
+> **Status: Canonical inheritance source (Bash / AWS scripts).**
+> This Part A is the repository's canonical Part A for the
+> **Bash / AWS scripting family** — the source of truth for any
+> future Bash / shell-based AWS build pipeline SPEC authored in
+> this style. It is the parallel of the PowerShell canonical SPEC
+> at
+> [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../../powershell/download-speakerdeck-oracle4engineer/SPEC.md);
+> the two canonicals overlap conceptually (reference assets,
+> logging, error handling, dev workflow) but diverge in concrete
+> form (Bash idioms vs PowerShell idioms, `env.properties` files
+> vs `param()` blocks, `shellcheck` vs `psa.py`).
+>
+> Modifications to this Part A propagate to any future sibling
+> Bash / AWS SPEC that inherits it; review cross-script impact
+> before committing changes. The Part A inheritance rule, its
+> rationale, and the forensic record of past inheritance violations
+> (notably the `c40755c` Part A bloat regression in a sibling
+> PowerShell SPEC) are recorded in the repository-wide
+> [`AGENTS.md` §6 Part A Inheritance Rule (ABSOLUTE)](../../../AGENTS.md#6-part-a-inheritance-rule-absolute)
+> and
+> [`AGENTS.md` §9 AP-1](../../../AGENTS.md#9-anti-patterns-forensically-documented).
+> LLM agents authoring or revising any Layer 3 Part A MUST consult
+> both references before touching the inherited surface.
+
 ## A.1 Reference Assets
 
 These are the canonical sources of truth. **Pull from these directly; do not re-implement.**
