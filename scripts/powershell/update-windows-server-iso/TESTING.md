@@ -39,43 +39,46 @@ a build identifier plus a calendar date. Pending items are marked
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r08.0 build (`psa.py` latest mainline) / 2026-05-27 |
-| File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r08.0 build / 2026-05-27 |
-| `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r08.0 build / 2026-05-27 |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r09.0 step2a-followup-canonical-json-migration build (`psa.py` latest mainline) / 2026-05-28 |
+| File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
+| `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
 | PSScriptAnalyzer on Windows PowerShell 5.1 (Stage 2) | ✓ pass | CI Stage 2 (continuous) |
 | P01 Initialize — PowerShell env / admin / ADK / disk / Hyper-V probe | ✓ pass on Windows 11 + PS 5.1 | _pending operator confirmation_ |
-| P02 ResolveInputs — Config JSON load + ISO / patch source resolution | ✓ structurally validated via T3 harness | r08.0 build / 2026-05-27 |
+| P02 ResolveInputs — Config JSON load + ISO / patch source resolution | ✓ structurally validated via T3 harness | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
 | P03 RefreshPatchBaseline — Catalogue scrape (live, monthly) | ✓ scrape paths exercised via T1 | CI Stage 4 monthly |
 | P04 FetchAssets — ISO + patch downloads with SHA-256 verify | _pending operator confirmation_ | not yet exercised on a fresh runner |
-| P05 ExpandIso — source ISO mount + WIM enumeration | _pending operator confirmation_ | r08.0 build (synthetic mode only) |
-| P06 ValidatePatchSet — `wsusscn2.cab` offline scan (Stage 1 catalog-freshness) | ✓ Stage 1 (catalog freshness) exercised | r08.0 build / 2026-05-27 |
-| P06 ValidatePatchSet — Stage 2 (graph-based dependency closure, r09.0+) | not yet implemented | (planned r09.0 — see SPEC.md §B.19) |
+| P05 ExpandIso — source ISO mount + WIM enumeration | _pending operator confirmation_ | r09.0 step2a-followup-canonical-json-migration build (synthetic mode only) |
+| P06 ValidatePatchSet — `wsusscn2.cab` offline scan (Stage 1 catalog-freshness) | ✓ Stage 1 (catalog freshness) exercised | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
+| P06 ValidatePatchSet — Stage 2 (graph-based dependency closure, r09.0+) | not yet implemented | (planned r09.0 Step 2c — see SPEC.md §B.19.14) |
 | P07 PatchInstallWim — SSU → LCU → .NET sequence | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P08 PatchBootWim — boot.wim + winre.wim | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P09 AssembleIso — Dynamic Update overlay + `oscdimg` | _pending operator confirmation_ | (requires `oscdimg.exe` on a Windows runner) |
 | P10 ConvertPca2023BootManager — PCA2023 conversion (opt-in) | _pending operator confirmation_ | (requires LCU 2024-4B+ source ISO) |
 | P11 StaticVerify — output ISO mount + KB-package presence check | _pending operator confirmation_ | (requires P07-P09 success) |
-| P12 VerifyPca2023Readiness — `pca2023_readiness.json` + `.md` emission | ✓ structurally validated; runs unconditionally | r08.0 build / 2026-05-27 |
+| P12 VerifyPca2023Readiness — `pca2023_readiness.json` + `.md` emission | ✓ structurally validated; runs unconditionally | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
 | P13 FinalReport — end-of-run summary + ISO hash | _pending operator confirmation_ | (requires P07-P11 success) |
 | A01 RefreshAllBaselines — Config baseline regeneration from caches | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
-| A02 DumpFieldClassification — field-cadence decision matrix emit | ✓ exercised | r08.0 build / 2026-05-27 |
+| A02 DumpFieldClassification — field-cadence decision matrix emit | ✓ exercised | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
 | A03 RefreshSnapshots — upstream `data/raw-*` + `data/cache-*` refresh | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
+| A04 RefreshDependencyDatabase (r09.0 Step 2a, stub) — registered Action with `NotImplementedException` body pointing at SPEC §B.19.15.3 | ✓ stub raises actionable error; full body lands in Step 2b | r09.0 Step 2a / 2026-05-28 |
 | T1 catalog_probe.py | ✓ live probe passes (~7 checks) | CI Stage 4 / 2026-05-15 |
 | T2 catalog_fixture_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| T3 powershell_harness.py (7 PS function assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| T3 powershell_harness.py (10 PS function assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T4 eval_iso_probe.py (4 OS × 2 lang Range-GET) | ✓ live probe passes | CI Stage 4 / 2026-05-15 |
 | T5 wsusscn2_probe.py (cab freshness, 60-day warn) | ✓ within 60-day window | CI Stage 4 / 2026-05-15 |
 | T6 release_info_parser_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T7 dotnet_cu_parser_test.py (16 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T8 dynamic_update_cache_test.py (20 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T9 catalog_title_tokens_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| T10 release_info_resolver_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T10) | ✓ green | CI continuous |
+| T10 release_info_resolver_test.py (22 assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r09.0 step2a-followup-canonical-json-helpers build / 2026-05-28 |
+| Part C §C.3.4 — `canonical_json_format_check.py` (25 JSON files canonicalised, format gate) | ✓ all pass | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
+| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T11 + format check) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
 
-The seventeen `_pending operator confirmation_` rows reflect that
+The eleven `_pending operator confirmation_` rows reflect that
 `-Execute` pipeline runs against real Microsoft evaluation ISOs are
 not part of the automated CI surface (the evaluation licence forbids
 public binary distribution; see [`SPEC.md`](./SPEC.md) §B.18 and
@@ -165,14 +168,14 @@ Verification checklist:
 python3 tests/powershell_harness.py
 ```
 
-Expected: 7 assertions pass (PowerShell function-level tests for the
+Expected: 10 assertions pass (PowerShell function-level tests for the
 parser / scope / resolver helpers).
 
 Verification checklist:
 
 - [x] Harness launches `.\Update-WindowsServerIso.ps1 -Action TestHarness` in a sub-process
 - [x] JSON-over-stdin REPL accepts each function-call payload
-- [x] Each of the 7 assertions returns a stable shape
+- [x] Each of the 10 assertions returns a stable shape
 
 ### 2.4 DryRun mode — Setup / Fetch / Plan only
 
@@ -320,24 +323,28 @@ procedure is below; results from past real runs are recorded in
 
 ---
 
-## 5. Self-verification tool suite (T1 – T10)
+## 5. Self-verification tool suite (T1 – T11)
 
-The `tests/` directory ships ten Python tools. The authoritative
-inventory lives in [`tests/README.md`](./tests/README.md); §0 above
-mirrors their current status. The full design rationale is in
-[SPEC.md](./SPEC.md) §C.9.
+The `tests/` directory ships eleven Python tools plus the Part C
+format gate. The authoritative inventory lives in
+[`tests/README.md`](./tests/README.md); §0 above mirrors their current
+status. The full design rationale is in [SPEC.md](./SPEC.md) §C.9.
 
 ### Quick run reference
 
 ```bash
 # Offline tests — safe everywhere
 python3 tests/catalog_fixture_test.py        # T2: 13 fixture assertions
-python3 tests/powershell_harness.py          # T3: 7 PS function assertions
+python3 tests/powershell_harness.py          # T3: 10 PS function assertions
 python3 tests/release_info_parser_test.py    # T6: 13 release-info parser assertions
 python3 tests/dotnet_cu_parser_test.py       # T7: 16 .NET CU parser assertions
 python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
-python3 tests/release_info_resolver_test.py  # T10: 18 resolver assertions
+python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
+python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
+
+# Part C quality gate (every commit that touches a JSON file)
+python3 tests/canonical_json_format_check.py # 25 JSON files canonicalised; gate per SPEC §C.3.4
 
 # Live tests — require unrestricted egress
 python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog
@@ -347,15 +354,17 @@ python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
 
 ### Determinism categories
 
-- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6, T7, T8, T9, T10.
+- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6, T7, T8, T9, T10, T11, plus the Part C §C.3.4 format gate.
 - **Live-network** (Stage 4 monthly + ad-hoc): T1, T4, T5.
 
-### Planned T11 (r09.0+)
+### Planned T12 (r09.0 Step 2b)
 
 A new tool — provisionally `wsusscn2_parser_test.py` — is planned to
 provide offline regression coverage for the §B.19 Master XML parser
 (`ConvertFrom-WsusScnPackageXml`, `New-WsusScnDependencyDatabase`).
-It is **not yet implemented**; the current canonical T-set ends at T10.
+It will be paired with `tests/common/wsusscn2_*.py` helpers that
+generate the minimal `package.xml` fixture and analyze schema drift.
+The current canonical T-set ends at T11.
 
 ---
 
@@ -373,8 +382,10 @@ File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage1_
 | 1 | `psa.py` | Static analysis on `Update-WindowsServerIso.ps1` |
 | 2 | `Invoke-ScriptAnalyzer` (pwsh 7) | PSScriptAnalyzer with project `PSScriptAnalyzerSettings.psd1` |
 | 3 | T2 | `catalog_fixture_test.py` (13 assertions) |
-| 4 | T3 | `powershell_harness.py` (7 assertions) |
+| 4 | T3 | `powershell_harness.py` (10 assertions) |
 | 5 | T6 – T10 | Five offline parser / cache / resolver regression tests |
+| 6 | T11 | `canonical_json_test.py` — PS/Python byte-level parity (26 assertions, SPEC §B.23) |
+| 7 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
 
 Triggers: every push, every PR. Required to merge.
 

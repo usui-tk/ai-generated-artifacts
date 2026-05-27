@@ -177,9 +177,9 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 書き込みをコミットしません。これは [SPEC.md](./SPEC.md) §D.12 に
 記述されている **デフォルトでサンドボックス** の姿勢です。
 
-## アクション一覧（13 アクション）
+## アクション一覧（14 アクション）
 
-スクリプトの `param() ValidateSet` は 13 個のアクションを宣言しています。
+スクリプトの `param() ValidateSet` は 14 個のアクションを宣言しています。
 用途別にグループ化すると次のとおりです。デフォルトは `PrepareBuildVerify`。
 
 ### 標準パイプラインアクション
@@ -205,7 +205,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ### Admin アクション（Config ベースライン管理）
 
 `data/config-<OsKey>.json` ファイル群がスクリプトの利用するベースラインデータを
-保持します。3 つの Admin Action により、ISO に触れずにこのデータを更新・点検
+保持します。4 つの Admin Action により、ISO に触れずにこのデータを更新・点検
 できます。**更新は 2 段階** で行います：`RefreshSnapshots` が Microsoft Learn と
 Microsoft Update Catalog から上流の `data/raw-*` / `data/cache-*` を取得し、
 `RefreshAllBaselines` が各 `data/config-Server*.json` の
@@ -217,6 +217,7 @@ SPEC §B.22.12 の設計に対応します。
 | `RefreshSnapshots` | A03 | 上流キャッシュの取得（release-info、.NET CU、Dynamic Update）|
 | `RefreshAllBaselines` | A01 | キャッシュから `data/config-Server*.json` を再生成 |
 | `DumpFieldClassification` | A02 | フィールドのカデンス決定マトリックスを JSON で出力 |
+| `RefreshDependencyDatabase` | A04 | `wsusscn2.cab` から `data/wsusscn2-database.json` を更新（r09.0+、**Step 2a ではスタブ、Step 2b で本体実装**）|
 
 ```powershell
 # ---- 第 1 段：上流キャッシュの populate ----
@@ -237,6 +238,13 @@ SPEC §B.22.12 の設計に対応します。
 
 # フィールド分類メタデータを JSON で出力（外部バリデータが利用）
 .\Update-WindowsServerIso.ps1 -Action DumpFieldClassification
+
+# Servicing Dependency Database（layer 2）を wsusscn2.cab から更新
+#   r09.0 Step 2a: 登録済みだがスタブ（NotImplementedException を発生）
+#   r09.0 Step 2b: 本実装（Stage 1 cab 取得 → Stage 2 7-Zip 抽出 →
+#                   Stage 3 XmlReader ストリームパース →
+#                   Stage 4 data/wsusscn2-database.json 出力）
+.\Update-WindowsServerIso.ps1 -Action RefreshDependencyDatabase
 ```
 
 `RefreshSnapshots` の終了コード：`0` = すべてのサブステップが OK、
@@ -246,13 +254,43 @@ SPEC §B.22.12 の設計に対応します。
 Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自動 Refresher 未定義、
 典型的には新規追加された言語の `LanguageSpecific.<lang>.Iso` グループ）。
 
-### r09.0 で実装予定
+### r09.0 の進捗
 
 4 番目の Admin Action として **`RefreshDependencyDatabase`**（A04）が
-[SPEC.md](./SPEC.md) §B.19.15.3 に仕様化されていますが、現バージョンの
-スクリプトには **未実装** です。Microsoft の `wsusscn2.cab` から
-`data/wsusscn2-database.json`（Servicing Dependency Database layer 2）を
-更新するアクションで、実装は §B.19.19 のロールアウト計画に従います。
+[SPEC.md](./SPEC.md) §B.19.15.3 に仕様化されており、r09.0 Step 2a /
+2b にまたがって段階的に実装中です。`-Action ListPhases` の登録状況
+ベースで、現状は以下のとおりです：
+
+- **A04 スタブ**（r09.0 Step 2a、適用済み）：Action が
+  `param() ValidateSet`、PhaseRegistry、`Get-PhaseListByAction` に
+  登録されています。ラッパーの本体は SPEC §B.19.15.3 を指し示し、
+  Step 2b で実装される作業項目を列挙した
+  `NotImplementedException` を発生させます。
+- **A04 本体**（r09.0 Step 2b、進行中）：4 ステージの parser
+  パイプライン（`Invoke-WsusScnPackageXmlExtract` →
+  `ConvertFrom-WsusScnPackageXml` → `New-WsusScnDependencyDatabase`）
+  により、Microsoft の `wsusscn2.cab` から
+  `data/wsusscn2-database.json`（Servicing Dependency Database
+  layer 2）を更新します。
+- **A01.0 統合**（r09.0 Step 2b）：`RefreshAllBaselines` の冒頭に
+  A01.0 サブフェーズが追加され、OS ごとのカタログスクレイプの
+  前に A04 を自動実行します。
+- **P06 Stage 2**（r09.0 Step 2c、予定）：`data/wsusscn2-database.json`
+  を用いたグラフベース依存性閉包チェック。
+- **Server 2016 の SSU 依存性修正**（r09.0 Step 2a、適用済み）：
+  KB5087537 LCU が `data/config-Server2016.json` で KB5088064 SSU を
+  前提条件として宣言するようになり、r08.0 Step 4d 調査で記録された
+  `HRESULT 0x800f0823` 失敗を防げるようになりました。
+- **JSON Canonical Serialization**（r09.0 Step 2a followup、適用済み）：
+  SPEC Part B.23 が canonical な JSON 形式を規定し、PowerShell 7 と
+  Python 3 がバイト単位で一致する出力を生成できるようになりました。
+  `ConvertTo-CanonicalJson` ヘルパー、Python 側の `canonical_json_dumps`
+  リファレンスモジュール、T11 のバイト単位パリティテスト、および
+  Part C §C.3.4 のフォーマットゲートが、`data/*.json` および
+  `tests/fixtures/*.json` を Linux PowerShell 7.x / Python 3 の
+  いずれの runtime から編集しても最小 diff になることを保証します。
+
+実装は §B.19.19 のロールアウト計画に従います。
 
 ## 動作要件
 
@@ -332,7 +370,7 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 
 | Parameter | 用途 |
 |:---|:---|
-| `-Action` | 上記 13 個のアクションのいずれか（デフォルト：`PrepareBuildVerify`）|
+| `-Action` | 上記 14 個のアクションのいずれか（デフォルト：`PrepareBuildVerify`）|
 | `-OnlyPhases` | フェーズ ID の配列（例 `'P04','P07'`）。Action のデフォルトフェーズセットを上書き |
 | `-OsVersion` | `Server2016` / `Server2019` / `Server2022` / `Server2025` |
 | `-OsLanguage` | `en-us` / `ja-jp`（デフォルト：`en-us`）|
@@ -396,8 +434,8 @@ P04   FetchAssets（新しく解決された URL と SHA-256 を使用）
 P05   ExpandIso
 P06 ValidatePatchSet
         - Stage 1：カタログ鮮度比較（既存）
-        - Stage 2（r09.0+、予定）：data/wsusscn2-database.json を用いた
-          グラフベース依存性閉包チェック（SPEC.md §B.19 参照）
+        - Stage 2（r09.0 Step 2c、予定）：data/wsusscn2-database.json を用いた
+          グラフベース依存性閉包チェック（SPEC.md §B.19.14 参照）
         - 必須プリレキジが欠落しているとき：中断して診断ファイルを生成
 P07+  Build / Verify / Report
 ```
@@ -446,20 +484,25 @@ python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.p
 
 ## 自己検証ツール
 
-`tests/` サブディレクトリには 10 個の Python 自己検証ツール（T1 – T10）が
-同梱されており、スクリプトの外部依存をプローブし、PowerShell 関数を
-ユニットテストします。Python 標準ライブラリのみを利用するため、
-`pip install` は不要です。
+`tests/` サブディレクトリには 11 個の Python 自己検証ツール（T1 – T11）
+に加え、Part C のフォーマットゲートが同梱されています。これらは
+スクリプトの外部依存をプローブし、PowerShell 関数をユニットテストし、
+さらに SPEC §B.23 の JSON canonical 形式を強制します。オフラインツールは
+Python 標準ライブラリのみを利用するため、`pip install` は不要です。
 
 ```bash
 # オフラインテスト — どこでも安全に実行可能
 python3 tests/catalog_fixture_test.py        # T2：13 個の fixture アサーション
-python3 tests/powershell_harness.py          # T3：7 個の PS 関数アサーション
+python3 tests/powershell_harness.py          # T3：10 個の PS 関数アサーション
 python3 tests/release_info_parser_test.py    # T6：13 個の release-info パーサーアサーション
 python3 tests/dotnet_cu_parser_test.py       # T7：16 個の .NET CU パーサーアサーション
 python3 tests/dynamic_update_cache_test.py   # T8：20 個の DU キャッシュアサーション
 python3 tests/catalog_title_tokens_test.py   # T9：18 個の Title-token アサーション
-python3 tests/release_info_resolver_test.py  # T10：18 個の resolver アサーション
+python3 tests/release_info_resolver_test.py  # T10：22 個の resolver アサーション
+python3 tests/canonical_json_test.py         # T11：26 個の PS/Python バイトレベル パリティアサーション
+
+# Part C 品質ゲート（JSON ファイルを触るコミットごとに実行）
+python3 tests/canonical_json_format_check.py # 25 JSON ファイルが canonical 形式（SPEC §C.3.4）
 
 # ライブテスト — 制限のないネットワーク出口が必要
 python3 tests/catalog_probe.py --check all   # T1：Microsoft Update Catalog

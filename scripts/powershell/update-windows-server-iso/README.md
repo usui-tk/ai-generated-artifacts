@@ -183,7 +183,7 @@ Without `-Execute`, the Build phases plan but do not commit any DISM
 write. This is the **sandbox-by-default** posture documented in
 [SPEC.md](./SPEC.md) §D.12.
 
-## Action reference (13 Actions)
+## Action reference (14 Actions)
 
 The script's `param() ValidateSet` declares thirteen Actions, grouped
 by purpose. The default is `PrepareBuildVerify`.
@@ -211,7 +211,7 @@ by purpose. The default is `PrepareBuildVerify`.
 ### Admin Actions (Config baseline management)
 
 The `data/config-<OsKey>.json` files hold the baseline data the script
-uses. Three Admin Actions let you refresh and inspect that data without
+uses. Four Admin Actions let you refresh and inspect that data without
 touching any ISO. **The refresh path is two-stage**: `RefreshSnapshots`
 populates the upstream `data/raw-*` / `data/cache-*` files from
 Microsoft Learn + Microsoft Update Catalog, then `RefreshAllBaselines`
@@ -223,6 +223,7 @@ from those caches. This split matches the SPEC §B.22.12 design.
 | `RefreshSnapshots` | A03 | Fetch upstream caches (release-info, .NET CU, Dynamic Update) |
 | `RefreshAllBaselines` | A01 | Regenerate `data/config-Server*.json` from the caches |
 | `DumpFieldClassification` | A02 | Emit the field-cadence decision matrix as JSON |
+| `RefreshDependencyDatabase` | A04 | Refresh `data/wsusscn2-database.json` from `wsusscn2.cab` (r09.0+; **stub in Step 2a, full body in Step 2b**) |
 
 ```powershell
 # ---- Stage 1: populate the upstream caches ----
@@ -243,6 +244,13 @@ from those caches. This split matches the SPEC §B.22.12 design.
 
 # Dump the field classification metadata as JSON (used by external validators)
 .\Update-WindowsServerIso.ps1 -Action DumpFieldClassification
+
+# Refresh the Servicing Dependency Database (layer 2) from wsusscn2.cab
+#   r09.0 Step 2a: registered but stub (raises NotImplementedException)
+#   r09.0 Step 2b: full pipeline (Stage 1 cab acquire -> Stage 2 7-Zip
+#                   extract -> Stage 3 XmlReader stream-parse ->
+#                   Stage 4 emit data/wsusscn2-database.json)
+.\Update-WindowsServerIso.ps1 -Action RefreshDependencyDatabase
 ```
 
 `RefreshSnapshots` exit codes: `0` = every sub-step OK; non-zero =
@@ -253,13 +261,42 @@ Refresher failed; `2` = some fields require manual fill (no auto
 Refresher available, typically the `LanguageSpecific.<lang>.Iso`
 groups for newly-added languages).
 
-### Planned in r09.0
+### r09.0 progress
 
-A fourth Admin Action — **`RefreshDependencyDatabase`** (A04) — is
-specified in [SPEC.md](./SPEC.md) §B.19.15.3 but **not yet implemented**
-in the current script version. It will refresh `data/wsusscn2-database.json`
-(Servicing Dependency Database layer 2) from Microsoft's
-`wsusscn2.cab`. Implementation tracks the §B.19.19 rollout plan.
+The fourth Admin Action — **`RefreshDependencyDatabase`** (A04) —
+is specified in [SPEC.md](./SPEC.md) §B.19.15.3 and progressively
+landing across r09.0 Step 2a / 2b. Current state per the
+`-Action ListPhases` registry:
+
+- **A04 stub** (r09.0 Step 2a, current): the Action is registered
+  in `param() ValidateSet`, the PhaseRegistry, and
+  `Get-PhaseListByAction`. The wrapper body raises a
+  `NotImplementedException` with an operator-actionable message
+  pointing at SPEC §B.19.15.3 and listing the pending Step 2b work.
+- **A04 full body** (r09.0 Step 2b, in progress): the four-stage
+  parser pipeline (`Invoke-WsusScnPackageXmlExtract` →
+  `ConvertFrom-WsusScnPackageXml` → `New-WsusScnDependencyDatabase`)
+  will refresh `data/wsusscn2-database.json` (Servicing Dependency
+  Database layer 2) from Microsoft's `wsusscn2.cab`.
+- **A01.0 integration** (r09.0 Step 2b): `RefreshAllBaselines`
+  will gain an A01.0 sub-phase that runs A04 automatically before
+  the per-OS catalogue scrape.
+- **P06 Stage 2** (r09.0 Step 2c, planned): graph-based dependency
+  closure check using `data/wsusscn2-database.json`.
+- **Server 2016 SSU dependency fix** (r09.0 Step 2a, shipped): the
+  KB5087537 LCU now declares its KB5088064 SSU prerequisite in
+  `data/config-Server2016.json`, preventing the `HRESULT 0x800f0823`
+  failure documented in the r08.0 Step 4d investigation.
+- **JSON Canonical Serialization** (r09.0 Step 2a followup, shipped):
+  SPEC Part B.23 declares a canonical JSON format that PowerShell 7
+  and Python 3 emit byte-for-byte; the `ConvertTo-CanonicalJson`
+  helper, the Python `canonical_json_dumps` reference module, the T11
+  byte-level parity test, and the Part C §C.3.4 format gate together
+  guarantee that `data/*.json` and `tests/fixtures/*.json` files
+  produce minimal git diffs regardless of which runtime an operator
+  edits them from.
+
+Implementation tracks the §B.19.19 rollout plan.
 
 ## Requirements
 
@@ -344,7 +381,7 @@ parameter list. The most commonly used:
 
 | Parameter | Purpose |
 |:---|:---|
-| `-Action` | One of the 13 Actions listed above (default: `PrepareBuildVerify`) |
+| `-Action` | One of the 14 Actions listed above (default: `PrepareBuildVerify`) |
 | `-OnlyPhases` | Array of phase IDs (e.g. `'P04','P07'`) overriding the Action's default phase set |
 | `-OsVersion` | `Server2016` / `Server2019` / `Server2022` / `Server2025` |
 | `-OsLanguage` | `en-us` / `ja-jp` (default: `en-us`) |
@@ -408,8 +445,8 @@ P04   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
 P05   ExpandIso
 P06 ValidatePatchSet
         - Stage 1: catalog freshness comparison (existing)
-        - Stage 2 (r09.0+, planned): graph-based dependency closure check
-          using data/wsusscn2-database.json (see SPEC.md §B.19)
+        - Stage 2 (r09.0 Step 2c, planned): graph-based dependency closure check
+          using data/wsusscn2-database.json (see SPEC.md §B.19.14)
         - On any missing required prerequisite: ABORT and emit diagnostic files
 P07+  Build / Verify / Report
 ```
@@ -459,20 +496,25 @@ last-verified row.
 
 ## Self-verification tools
 
-The `tests/` subdirectory ships ten Python-based self-verification
-tools (T1 – T10) that probe the script's external dependencies and
-unit-test its PowerShell functions. They use only the Python standard
-library (no `pip install` required).
+The `tests/` subdirectory ships eleven Python-based self-verification
+tools (T1 – T11) plus the Part C format gate. They probe the script's
+external dependencies, unit-test its PowerShell functions, and enforce
+the SPEC §B.23 JSON canonical format. All offline tools use only the
+Python standard library (no `pip install` required).
 
 ```bash
 # Offline tests — safe to run anywhere
 python3 tests/catalog_fixture_test.py        # T2: 13 fixture assertions
-python3 tests/powershell_harness.py          # T3: 7 PS function assertions
+python3 tests/powershell_harness.py          # T3: 10 PS function assertions
 python3 tests/release_info_parser_test.py    # T6: 13 release-info parser assertions
 python3 tests/dotnet_cu_parser_test.py       # T7: 16 .NET CU parser assertions
 python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
-python3 tests/release_info_resolver_test.py  # T10: 18 resolver assertions
+python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
+python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
+
+# Part C quality gate (runs on every commit that touches a JSON file)
+python3 tests/canonical_json_format_check.py # 25 JSON files canonicalised; SPEC §C.3.4
 
 # Live tests — require unrestricted network egress
 python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog
