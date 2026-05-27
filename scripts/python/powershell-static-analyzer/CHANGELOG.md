@@ -15,6 +15,78 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
+### Documentation — Compliance with `scripts/README.md` Required Sections + repository-wide `AGENTS.md` cross-references
+
+A doc-only update that brings this subproject into compliance with
+the repository-wide [`scripts/README.md`](../../README.md) Required
+README Sections (`## ⚠️ Disclaimer` and `## License`, both MUST-level)
+and adds cross-references to the newly-introduced repository-wide
+[`AGENTS.md`](../../../AGENTS.md).
+
+#### Why this update
+
+Two parallel gaps were closed:
+
+1. **Pre-existing Required Sections gap.** `scripts/README.md`
+   L114–L127 mandates that every project-level `README.md` and its
+   `README.ja.md` mirror include a `## ⚠️ Disclaimer` section and a
+   `## License` section with a one-paragraph summary of permitted use
+   and required attribution. This subproject historically carried only
+   a four-line License pointer at the file end and no Disclaimer
+   section at all — a violation that pre-dates the Step 6 governance
+   cycle.
+2. **Step 6 follow-up.** The Step 6 governance cycle introduced
+   `AGENTS.md` at the repository root. This subproject's
+   documentation did not yet reference it.
+
+#### Changes
+
+- **`README.md`**: New `## ⚠️ Disclaimer` and `## License` sections
+  inserted near the top (immediately after the language switcher,
+  one-line summary, and version-discovery block), as required by
+  `scripts/README.md` L114–L127. The Disclaimer is tailored to
+  `psa.py`'s nature as a **heuristic static analyzer**: false
+  positives, false negatives, AI / LLM independent-verification
+  obligation, guardrail-not-substitute principle, rule-judgement
+  drift over versions, and inline-suppression rationale discipline.
+  Cross-references to `AGENTS.md` §3 / §8 and to the root README
+  "psa.py Versioning Policy" are included.
+  The previous minimal `## License` section at the file end is
+  removed (the new canonical License section near the top supersedes
+  it).
+- **`README.ja.md`**: The same Disclaimer and License content in
+  lock-step Japanese (per `AGENTS.md` §5 Bilingual lock-step rule).
+  The pre-existing minimal `## ライセンス` section at the file end
+  is likewise removed.
+- **`SPEC.md`**: New blockquote pointers in **Appendix C —
+  Quality Gates & Validation Checklist** (linking to `AGENTS.md` §8
+  Self-Check Gates) and **Appendix D — Known Pitfalls & Lessons
+  Learned** (linking to `AGENTS.md` §9 Anti-Patterns). These
+  surface that the project-specific entries below are complemented
+  by a repository-wide catalogue that LLM agents must consult.
+- **`CHANGELOG.md`**: This entry.
+
+#### Not touched
+
+- `psa.py` source. No rule behaviour, CLI surface, or output schema
+  is affected. This remains an `Unreleased`-bucket doc-only entry;
+  no version bump is required.
+- `test_psa_rules.py`. No test fixtures or assertions are changed.
+- `SPEC.md` numbered sections §1–§12. The numbered-section structure
+  remains the authoritative API specification; only Appendix C and
+  Appendix D gain repository-wide cross-references.
+
+#### Rationale
+
+The repository-wide governance hierarchy established in the Step 6
+cycle (Layer 0 root files; Layer 1 `scripts/README.md`; Layer 3
+subproject docs) treats `psa.py` as a Layer 3 subproject that must
+honour the Layer 1 Required README Sections contract. This update
+closes the long-standing compliance gap without altering the
+numbered-section primary specification body (which `scripts/README.md`
+L144–L146 explicitly permits for formal API specifications, provided
+Appendix C and Appendix D exist — both already present here).
+
 ## [4.1.0] - 2026-05-26
 
 ### Added — Three new rules catching the latent-bug classes that escaped

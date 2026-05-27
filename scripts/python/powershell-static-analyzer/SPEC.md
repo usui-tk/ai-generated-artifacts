@@ -2781,6 +2781,14 @@ focused on a single responsibility.
 > `download-speakerdeck-oracle4engineer/SPEC.md`). Because `psa.py`'s
 > primary specification body is a formal API spec (numbered sections
 > 1–11), the equivalent material is anchored here as an appendix.
+>
+> For repository-wide LLM-agent operating guidance that complements
+> the pre-commit checklist below — in particular the Pre-flight /
+> Mid-flight / Post-flight self-check gates that apply to every
+> code or documentation change in this repository — see
+> [`AGENTS.md` §8 Self-Check Gates](../../../AGENTS.md#8-self-check-gates).
+> The checklist below is project-specific; the AGENTS.md gates are
+> repository-wide and complementary.
 
 Before any commit to `psa.py`, all of the following must pass.
 
@@ -2826,6 +2834,16 @@ Before any commit to `psa.py`, all of the following must pass.
 > Each entry documents a real bug surfaced in production use of `psa.py`,
 > together with the fix and the design rule that prevents recurrence.
 > Future revisions inherit the fix; never reintroduce the bug.
+>
+> For repository-wide anti-patterns observed in LLM-assisted
+> contributions (which complement the `psa.py`-specific pitfalls
+> recorded here) — including Part A bloat regressions, mixed
+> line-ending defects in programmatically generated `.ps1` content,
+> bilingual divergence, and self-referential governance non-application
+> — see [`AGENTS.md` §9 Anti-Patterns
+> (Forensically Documented)](../../../AGENTS.md#9-anti-patterns-forensically-documented).
+> The entries below are project-specific; the AGENTS.md catalogue is
+> repository-wide and complementary.
 
 ### D.1 Heredoc / sub-expression tokens leaking into rule scans (2.0.0)
 

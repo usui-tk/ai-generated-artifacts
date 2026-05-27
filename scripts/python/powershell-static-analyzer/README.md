@@ -30,6 +30,69 @@ curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/
 
 This is the **canonical way** for AI / LLM-driven workflows and CI to discover whether a locally-cached copy of `psa.py` is current. See [SPEC.md §1.4](./SPEC.md#14-versioning) and the repository-root [`README.md`](../../../README.md) "psa.py Versioning Policy" for the full latest-mainline workflow that consumers are expected to follow.
 
+## ⚠️ Disclaimer
+
+**USE AT YOUR OWN RISK.** `psa.py` is provided "AS IS" without
+warranty of any kind, express or implied. The authors and contributors
+are not liable for any damages, missed defects, blocked legitimate
+code, eroded reviewer trust, or any other consequences — direct or
+indirect — that may arise from using, modifying, or distributing this
+analyzer.
+
+`psa.py` is a **heuristic static analyzer, not a proof tool**.
+By relying on its judgements, you acknowledge that:
+
+- **False positives are possible.** `psa.py` may flag code that is in
+  fact correct. Treating its findings as automatic merge blockers
+  without human review can stall legitimate changes; conversely,
+  silently suppressing findings without understanding them defeats
+  the gate.
+- **False negatives are possible.** `psa.py` cannot detect every bug
+  class. The "What the analyzer does NOT check" section below lists
+  categories explicitly out of scope; many other latent defect classes
+  also exist that no parse-time static analyzer can catch.
+- **AI / LLM consumers MUST independently verify the analyzer's
+  output.** An LLM that treats `psa.py` 0/0/0 as proof of correctness
+  without reviewing the actual code change is misusing the tool. See
+  the repository-wide [`AGENTS.md`](../../../AGENTS.md) for the
+  expected LLM workflow around static-analysis gates (§3 Pre-Flight
+  Checklist, §8 Self-Check Gates).
+- **`psa.py` is a guardrail, not a substitute for review.** Static
+  analysis gates the commit; a human (or carefully-prompted LLM)
+  reviewer gates the design.
+- **Rule judgements may change.** New rule versions may surface
+  previously-hidden discipline violations; existing rules may be
+  tightened. A codebase that was clean under an older version is not
+  guaranteed to be clean under the current mainline. See the
+  repository-root [`README.md`](../../../README.md) "psa.py
+  Versioning Policy" for the canonical fetch / compare / re-test
+  workflow.
+- **You will review `psa.py`'s suggestions before applying them.**
+  Inline suppression directives (`psa-disable-line` / `psa-disable-next-line`
+  / `psa-disable-file`) introduce textual changes to your scripts;
+  each must carry a written rationale that survives later review.
+
+For the full disclaimer and self-responsibility terms that apply to
+all artifacts in this repository, see the root
+[`README.md`](../../../README.md) "Use at Your Own Risk
+(Self-Responsibility)".
+
+## License
+
+`psa.py` is released under the same **MIT License** as the rest of
+this `ai-generated-artifacts` repository. See the
+[`LICENSE`](../../../LICENSE) at the repository root for the full
+license text.
+
+In short: you are free to use, modify, and distribute this analyzer
+for any purpose — including embedding it in commercial PowerShell-
+developing workflows or in sister repositories — provided that the
+original copyright and license notices are preserved when
+redistributed. The analyzer is provided without warranty as detailed
+in the Disclaimer above and in the `LICENSE` file. `psa.py` uses
+only the Python standard library; no third-party dependencies are
+imported, so no third-party licences attach to its runtime.
+
 ---
 
 ## What's new
@@ -545,11 +608,3 @@ adopt `psa.py` for verification.)
   sub-expressions (`$()`, `@()`), and the `$env:` / `$using:` scopes
   are handled correctly so that downstream regex rules see only
   meaningful code.
-
----
-
-## License
-
-`psa.py` is released under the same MIT License as the rest of this
-repository. See the [`LICENSE`](../../../LICENSE) at the repository
-root.
