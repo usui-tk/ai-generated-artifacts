@@ -148,6 +148,51 @@ Master XML のパースはそのスケールに注意が必要です。 コモ�
 
 全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<KBArticleID>`、 `<Prerequisites>`、 `<SupersededBy>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる 2-5 MB の JSON 依存性データベースを生成できます。
 
+#### 2.4.1 Category 階層の package.xml 内表現
+
+§2.4 で Master XML の主要要素(`<Update>`、 `<Prerequisites>`、 `<SupersededBy>`、 `<FileLocation>`)を紹介しました。 もうひとつ重要な観察があります:**WSUS の Product カテゴリ階層そのものが、 Master XML 内に `<Update>` 要素として暗黙的に埋め込まれている** という事実です。
+
+WSUS の Categories(Company、 ProductFamily、 Product、 UpdateClassification)は、 Update が `<Categories>` ブロックで参照する GUID として登場するだけでなく、 **その GUID をそのまま `UpdateId` として持つ `<Update>` 要素** が package.xml 内に独立して存在します。 つまり Category 自身が「Category を表す Update」として記録されているわけです。
+
+Category Update の識別子:
+
+| 属性 | 値 | 意味 |
+|:---|:---|:---|
+| `DeploymentAction` | `"Evaluate"` | このエントリは適用対象ではなく評価対象 |
+| `IsSoftware` | `"false"` | このエントリはソフトウェア(実体パッケージ)ではない |
+| `<Title>` / `<Description>` | (存在しない) | Master XML の Category Update は人間可読プロパティを持たない |
+| `<Prerequisites><UpdateId>` | 親 Category の GUID | 階層を逆引きできる back-link |
+
+具体例として Windows Server 2016 の Category Update:
+
+```xml
+<Update CreationDate="2017-05-31T01:22:24Z"
+        DefaultLanguage="en"
+        UpdateId="569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5"
+        RevisionNumber="204"
+        RevisionId="21923899"
+        DeploymentAction="Evaluate"
+        IsSoftware="false">
+  <Prerequisites>
+    <UpdateId Id="6964aab4-c5b5-43bd-a17d-ffb4346a8e1d" />
+  </Prerequisites>
+</Update>
+```
+
+`UpdateId="569e8e8f-..."` が「Windows Server 2016」という Product の GUID、 `Prerequisites/UpdateId Id="6964aab4-..."` が親 ProductFamily「Windows」の GUID です。
+
+2026-05-12 取得の wsusscn2 で観測されたカウント:
+
+| カテゴリ | 件数 |
+|:---|---:|
+| 全 `<Update>` | 136,102 |
+| Category Update(`DeploymentAction="Evaluate"` AND `IsSoftware="false"`) | 4,199 |
+| Windows ProductFamily(`6964aab4-...`)直下の Category | 154 |
+
+Master XML は Title/Description などの人間可読プロパティを持たないので、 **Category の表示名は package.xml 単独からは取得できません**。 これは §B.19.8 で議論する Microsoft prose exclusion ルールとも整合します。 名前と GUID の対応を取るには外部参照(WSUS の公式 documentation、 kbupdate-library、 OSDBuilder の adjacent OSS、 または実 WSUS 環境での `Get-WsusProduct -TitleIncludes`)が必要です。 ただし scope filter のような自動処理にとっては、 **名前の解決は不要で、 GUID だけあれば十分** です。
+
+Category 階層の逆引きで Server LTSC 系の Product GUID を同定する具体的手法と、 確定された GUID 一覧は §5.7 と §6.4 を参照してください。
+
 ### 2.5 CAB 展開方式の比較
 
 元の調査で実時間のコストを生んだ実用的な注意:CAB 展開ツールの選択は重要です。
@@ -445,6 +490,56 @@ Server 2022 の曖昧性は予防する価値があります:最近の月の Ser
 
 この階層化の利点は再現性です:Layer 2 の Git 履歴は、 各依存性が上流で Microsoft によっていつ導入されたかを示し、 「先月 config を書いた時にこの前提条件はすでに存在していたか、 それともその後 Microsoft が新しい依存性を追加したか?」をオペレータが監査できます。 Layer 3 の生 CAB は Layer 2 が再生成されたら保管価値がないので、 Git の外にあるのは設計通りです。
 
+### 5.7 scope filter の根拠となる Product GUID 一覧
+
+§5.5 と §5.6 で SSU-LCU/CU の依存性検証パイプラインを設計しました。 このパイプラインの最初のフィルタリング段階(scope filter)は、 wsusscn2.cab の Master XML に登場する全 ~136,000 件の `<Update>` から **Server LTSC 系列だけを切り出す** ために、 WSUS の `Categories.Product` GUID と `Categories.UpdateClassification` GUID を判定キーとして使います。
+
+このセクションでは scope filter で使う **確定された GUID 表** を示します。 GUID は WSUS の global identifier として時間と共に変わらないので、 タイトル文字列ヒューリスティック(§6.2 で議論する脆弱性)に依存せず堅牢な判定が可能です。
+
+**Update Classification GUIDs**(WSUS 公式、 12 種類のうち 5 種類が実 wsusscn2 で観測):
+
+| Classification | GUID | 実 wsusscn2 観測件数 | 本タスクとの対応 |
+|:---|:---|---:|:---|
+| SecurityUpdates | `0FA1201D-4330-4FA8-8AE9-B877473B6441` | 19,361 | LCU 系の主分類 |
+| UpdateRollups | `28BC880E-0592-4CBF-8F95-C79B17911D5F` | 1,421 | .NET CU 系の主分類 |
+| ServicePacks | `68C5B0A3-D1A6-4553-AE49-01D3A7827828` | 341 | SSU を含む |
+| CriticalUpdates | `E6CF1350-C01B-414D-A61F-263D14D133B4` | 11 | 一部の Critical patch |
+| Updates | `CD5FFD1E-E932-4E3A-BF74-18BF0B1BBD83` | 1 | Dynamic Update 系を含む |
+
+出典:Microsoft Learn 「WSUS Classification GUIDs」(`learn.microsoft.com/ja-jp/previous-versions/windows/desktop/ff357803`)。 観測件数は 2026-05-12 取得の wsusscn2.cab に対する集計値。
+
+**Server LTSC Product GUIDs**(scope filter の対象、 4 種類):
+
+| Server バージョン | WSUS Catalog 表示名 | Product GUID | 確定根拠 |
+|:---|:---|:---|:---|
+| Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` | Microsoft 公式コードベース(`ansible/ansible` Issue 60785 の Categories ダンプ、 `dsccommunity/UpdateServicesDsc` Issue 65)+ 実 wsusscn2 の Category Update から逆引き一致 |
+| Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` | WSUSOffline forum + 実 wsusscn2 Category Update created 2018-10-13(GA タイミング一致)|
+| Windows Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` | 実 wsusscn2 Category Update created 2021-08-09(LTSC GA 直前)、 payload URL に ndp481(.NET 4.8.1、 Server 2022 デフォルト)を確認 |
+| Windows Server 2025 LTSC | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` | 実 wsusscn2 で payload URL に **build 26100 の SSU**(`ssu-26100.1440-x64`)が登場、 build 26100 = Server 2025 LTSC で同定 |
+
+参考(Server LTSC ではないため scope filter には含めない関連 Product):
+
+| 名称 | Product GUID | 備考 |
+|:---|:---|:---|
+| Microsoft Server Operating System-22H2 | `2c7888b6-f9e9-4ee9-87af-a77705193893` | Azure Stack HCI 22H2 系 SAC |
+| Microsoft Server Operating System-23H2 | `607efb8d-feed-48a0-930e-14d0cf2da71f` | Azure Stack HCI 23H2 系 SAC、 payload URL に build 25398 を確認 |
+
+**SSU / LCU / .NET CU / Dynamic Update と Classification の対応**(SPEC §B.19.7 の Update type 表現):
+
+- **SSU**:Classification = ServicePacks(`68C5B0A3-...`)。 Windows 6.x 世代以前は `Updates` も含んだが、 Windows 10/Server 2016 以降の SSU は ServicePacks に分類される。
+- **LCU**:Classification = SecurityUpdates(`0FA1201D-...`)。 月例セキュリティ更新の Cumulative Update が該当。
+- **.NET CU**:Classification = UpdateRollups(`28BC880E-...`)が主、 一部 SecurityUpdates(セキュリティを含むもの)。 .NET Framework 3.5 / 4.7.x / 4.8 / 4.8.1 の cumulative。
+- **Dynamic Update**:Classification = Updates(`CD5FFD1E-...`)または CriticalUpdates(`E6CF1350-...`)。 Setup DU、 SafeOS DU が該当。 LTSC OS では公開ケイデンスが散発的(§6.3 参照)。
+
+scope filter の正典:
+
+> Update が scope に admit される条件:
+> 1. `Categories.Product` GUID が上記 4 種類の Server LTSC GUID のいずれかと一致する、 AND
+> 2. `Categories.UpdateClassification` GUID が上記 5 種類のいずれかと一致する、 AND
+> 3. `CreationDate` が parser 実行日から過去 24 ヶ月以内である(SPEC §B.19.7 の recency 条件)
+
+上記 3 条件のすべてを満たす Update のみが Layer 2 JSON に出力されます。 これにより 2026-05-12 取得の wsusscn2 では Master XML の ~136,000 件のうち scope に入るのは ~10,000 件程度に絞り込まれ、 Layer 2 JSON は 2-5 MB の目標サイズに収まります。
+
 ---
 
 ## 6. Microsoft Update Catalog の命名上のクセ
@@ -500,6 +595,60 @@ Title: 2026-04 Cumulative Update for Microsoft server operating system, version 
 | Server 2025 | **打ち切りまたは散発的**(2025-12 から 2026-04 のウィンドウで連続多月の公開なし) | 月次 | Microsoft はケイデンス変更を正式にアナウンスしていない |
 
 パイプラインは「Server 2025 で今月 DU.Setup なし」を soft シグナルとして扱い、 エラーとしてではなく扱う必要があります。 Refresher は「No Setup DU published」をログして進む。 これは Server 2016 と 2019 が常に行ってきたことに一致します。
+
+### 6.4 WSUS Product Category GUIDs と Server LTSC 系列の対応
+
+§6.1 で WSUS の Catalog タイトル命名規則が Server 2019 と Server 2022 の間で変わったこと(「Windows Server 2019」 → 「Microsoft server operating system-21H2」 / 「Microsoft Server Operating System-24H2」)を扱いました。 こうした **表示名のリネームは表面的な現象** であり、 内部の GUID 体系は変化しません。 ここでは WSUS の Product Category 階層と、 Server LTSC 系 4 種類の GUID の対応を確定し、 命名揺れの影響を受けない参照表として記録します。
+
+#### Product Category の階層構造
+
+WSUS の Categories は 4 段階の階層を持ち、 wsusscn2.cab の `<Update>` Prerequisites で表現されます(§2.4.1 で観察)。
+
+```
+Microsoft (Company)
+└─ Windows (ProductFamily)
+   ├─ Windows Server 2016                            (Product, LTSC)
+   ├─ Windows Server 2019                            (Product, LTSC)
+   ├─ Windows Server 2022 LTSC                       (Product, LTSC、
+   │     表示名「Microsoft server operating system-21H2」)
+   ├─ Windows Server 2025 LTSC                       (Product, LTSC、
+   │     表示名「Microsoft Server Operating System-24H2」)
+   ├─ Windows 10, version 1903 and later             (Product, Client)
+   ├─ Windows Server, version 1903 and later         (Product, Server SAC)
+   ├─ Microsoft Server Operating System-22H2         (Product, Azure SAC)
+   ├─ Microsoft Server Operating System-23H2         (Product, Azure SAC、
+   │     build 25398 系)
+   └─ ... (Server 2008 / 2008 R2 / 2012 / 2012 R2 等の旧 LTSC 各種)
+```
+
+実 wsusscn2(2026-05-12)では Windows ProductFamily 直下に **154 件** の Product Category が登場します。 Server 系のほか SQL Server / Office / Exchange / Forefront 等の Microsoft 製品ファミリも別 ProductFamily として並存していますが、 本タスクの scope filter は Windows 直下の Server LTSC 4 種類のみを対象とします。
+
+#### 表示名のリネームと GUID 不変性
+
+§6.1 で示したように、 Microsoft は Server 2022 から「Microsoft server operating system-21H2」 / 「Microsoft Server Operating System-24H2」というコードネーム命名規則に切り替えました。 タイトル文字列ヒューリスティック(§6.2)はこの命名変更で破綻しますが、 **GUID は不変** です:
+
+| Server バージョン | 表示名(歴史的) | 表示名(現在) | Product GUID |
+|:---|:---|:---|:---|
+| Server 2016 | Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` |
+| Server 2019 | Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` |
+| Server 2022 LTSC | (新規) | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` |
+| Server 2025 LTSC | (新規) | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` |
+
+この表は §5.7 の scope filter の根拠表と同期しています。
+
+注意点として、 Server 2022 と Server 2025 の Catalog 表示名は **同じ "Microsoft" を含むが、 大文字小文字の慣習が一貫していない**(`Microsoft server operating system-21H2` の `o` は小文字、 `Microsoft Server Operating System-24H2` は title case)。 これは Microsoft 内部の命名揺れであり、 GUID で参照する場合は影響を受けません。
+
+#### 名前 → GUID 解決の正典ソース
+
+実環境で表示名から GUID を解決する手段は以下のとおりです。 確実性の高い順:
+
+1. **実 WSUS 環境**:`Get-WsusServer | Get-WsusProduct -TitleIncludes "21H2"` で取得。 WSUS server が必要だが、 Microsoft 公式 API 経由なので最も信頼性が高い。
+2. **Windows Update Agent API**:対象 OS 上で `Microsoft.Update.Session` COM オブジェクトの `Search` 結果から `update.Categories[].CategoryID` を列挙。 Server 2022 VM / Server 2025 VM などの参照環境が必要。
+3. **実 wsusscn2.cab からの逆引き**:本ドキュメント §2.4.1 で説明した方法。 オフラインで実行可能だが、 名前自体は package.xml から取れないため Category Update created date と payload URL の build 番号(Server 2022 LTSC = 20348、 Server 2025 LTSC = 26100、 Server 23H2 = 25398、 Server 2019 = 17763、 Server 2016 = 14393)で同定する。
+4. **OSS の cross-reference**:[kbupdate-library](https://github.com/potatoqualitee/kbupdate-library)、 [OSDBuilder](https://github.com/OSDeploy/OSD)、 [WSUSOffline](https://forums.wsusoffline.net/) などのコミュニティリポジトリ。 公式ではないが、 観察値の検証用 cross-reference として有用。
+5. **Microsoft Learn の「WSUS Classification GUIDs」 ページ**(`learn.microsoft.com/ja-jp/previous-versions/windows/desktop/ff357803`):Classification 側は完全な公式表が存在する。 Product 側は同等の公式表が公開されていないため、 上記の手段の組合せが必要。
+
+本タスク(`Update-WindowsServerIso.ps1`)の `$Script:WsusScnOsCategoryGuids` テーブルは、 上記 1〜5 の手段で cross-reference された確定値を採用します(§5.7 の表が出典)。
 
 ---
 

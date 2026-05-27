@@ -148,6 +148,51 @@ Parsing the Master XML deserves attention to its scale. A representative timing 
 
 The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<KBArticleID>`, `<Prerequisites>`, `<SupersededBy>`, and `<FileLocation>`, producing a 2-5 MB JSON dependency database that can answer most pre-flight questions.
 
+#### 2.4.1 The Category hierarchy embedded in package.xml
+
+§2.4 introduced the main Master XML elements (`<Update>`, `<Prerequisites>`, `<SupersededBy>`, `<FileLocation>`). One more important observation: **the WSUS Product category hierarchy itself is implicitly embedded in the Master XML as `<Update>` elements**.
+
+WSUS Categories (Company, ProductFamily, Product, UpdateClassification) appear in regular Updates as GUID references inside the `<Categories>` block, but those same GUID values **also appear as `UpdateId` of standalone `<Update>` elements** in package.xml. In other words, each Category is itself recorded as an "Update that represents a Category".
+
+Identifying attributes of a Category Update:
+
+| Attribute | Value | Meaning |
+|:---|:---|:---|
+| `DeploymentAction` | `"Evaluate"` | This entry is for evaluation, not for application |
+| `IsSoftware` | `"false"` | This entry is not a software (real payload) package |
+| `<Title>` / `<Description>` | (absent) | Category Updates in Master XML carry no human-readable property |
+| `<Prerequisites><UpdateId>` | GUID of parent Category | Back-link that lets you reconstruct the hierarchy |
+
+Concrete example — the Category Update for Windows Server 2016:
+
+```xml
+<Update CreationDate="2017-05-31T01:22:24Z"
+        DefaultLanguage="en"
+        UpdateId="569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5"
+        RevisionNumber="204"
+        RevisionId="21923899"
+        DeploymentAction="Evaluate"
+        IsSoftware="false">
+  <Prerequisites>
+    <UpdateId Id="6964aab4-c5b5-43bd-a17d-ffb4346a8e1d" />
+  </Prerequisites>
+</Update>
+```
+
+`UpdateId="569e8e8f-..."` is the GUID of the "Windows Server 2016" Product, and `Prerequisites/UpdateId Id="6964aab4-..."` is the GUID of the parent ProductFamily "Windows".
+
+Counts observed in the wsusscn2 fetched on 2026-05-12:
+
+| Category | Count |
+|:---|---:|
+| All `<Update>` | 136,102 |
+| Category Updates (`DeploymentAction="Evaluate"` AND `IsSoftware="false"`) | 4,199 |
+| Categories directly under Windows ProductFamily (`6964aab4-...`) | 154 |
+
+Because Master XML carries no Title/Description, **the display name of a Category cannot be obtained from package.xml alone**. This is consistent with the Microsoft-prose exclusion rule discussed in §B.19.8. To map names to GUIDs you need an external reference (WSUS official documentation, adjacent OSS such as kbupdate-library or OSDBuilder, or `Get-WsusProduct -TitleIncludes` against a live WSUS server). For automated processing like the scope filter, however, **the GUID alone is sufficient and name resolution is unnecessary**.
+
+The concrete technique for identifying Server LTSC Product GUIDs via Category-hierarchy reverse-lookup, and the finalised GUID inventory, are covered in §5.7 and §6.4.
+
 ### 2.5 CAB extraction methods compared
 
 A practical note that has cost real time in the original investigation: the choice of CAB extraction tool matters.
@@ -445,6 +490,56 @@ Implementing the pre-flight gate above with `wsusscn2.cab` as the source of trut
 
 The advantage of this layering is reproducibility: Git history of Layer 2 shows when each dependency was introduced upstream by Microsoft, which lets an operator audit "did this prerequisite already exist when I authored the config last month, or has Microsoft added a new dependency in the meantime?" The Layer 3 raw CAB has no archival value once Layer 2 is regenerated, so its presence outside Git is by design.
 
+### 5.7 Product GUID inventory backing the scope filter
+
+§5.5 and §5.6 designed the SSU-LCU/CU dependency validation pipeline. The first filtering stage of that pipeline (the scope filter) uses the `Categories.Product` GUID and `Categories.UpdateClassification` GUID as decision keys to **select only the Server LTSC family** from the ~136,000 `<Update>` entries in `wsusscn2.cab`'s Master XML.
+
+This section records the **finalised GUID inventory** used by the scope filter. Because GUIDs are WSUS global identifiers that do not change over time, this approach avoids the brittleness of title-string heuristics (the fragility surface discussed in §6.2).
+
+**Update Classification GUIDs** (WSUS-official, 5 of the 12 are observed in real wsusscn2):
+
+| Classification | GUID | Observed count | Mapping to this task |
+|:---|:---|---:|:---|
+| SecurityUpdates | `0FA1201D-4330-4FA8-8AE9-B877473B6441` | 19,361 | Primary classification for LCUs |
+| UpdateRollups | `28BC880E-0592-4CBF-8F95-C79B17911D5F` | 1,421 | Primary classification for .NET CUs |
+| ServicePacks | `68C5B0A3-D1A6-4553-AE49-01D3A7827828` | 341 | Contains SSUs |
+| CriticalUpdates | `E6CF1350-C01B-414D-A61F-263D14D133B4` | 11 | Some critical patches |
+| Updates | `CD5FFD1E-E932-4E3A-BF74-18BF0B1BBD83` | 1 | Contains Dynamic Updates |
+
+Source: Microsoft Learn "WSUS Classification GUIDs" (`learn.microsoft.com/ja-jp/previous-versions/windows/desktop/ff357803`). Counts are from the wsusscn2.cab fetched on 2026-05-12.
+
+**Server LTSC Product GUIDs** (the targets of the scope filter, 4 entries):
+
+| Server version | WSUS Catalog display name | Product GUID | Evidence basis |
+|:---|:---|:---|:---|
+| Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` | Microsoft-adjacent code (`ansible/ansible` Issue 60785 Categories dump, `dsccommunity/UpdateServicesDsc` Issue 65) + reverse-lookup from real wsusscn2 Category Updates |
+| Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` | WSUSOffline forum + real wsusscn2 Category Update created 2018-10-13 (matches GA timing) |
+| Windows Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` | Real wsusscn2 Category Update created 2021-08-09 (right before LTSC GA), payload URLs include ndp481 (.NET 4.8.1, the Server 2022 default) |
+| Windows Server 2025 LTSC | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` | Real wsusscn2 payload URLs include a **build 26100 SSU** (`ssu-26100.1440-x64`); build 26100 = Server 2025 LTSC |
+
+Reference (not Server LTSC, so excluded from the scope filter):
+
+| Name | Product GUID | Notes |
+|:---|:---|:---|
+| Microsoft Server Operating System-22H2 | `2c7888b6-f9e9-4ee9-87af-a77705193893` | Azure Stack HCI 22H2 family (SAC) |
+| Microsoft Server Operating System-23H2 | `607efb8d-feed-48a0-930e-14d0cf2da71f` | Azure Stack HCI 23H2 family (SAC); payload URLs confirm build 25398 |
+
+**Mapping SSU / LCU / .NET CU / Dynamic Update to Classification** (the Update type expression in SPEC §B.19.7):
+
+- **SSU**: Classification = ServicePacks (`68C5B0A3-...`). On Windows 6.x and earlier, some SSUs were classified as `Updates`, but on Windows 10 / Server 2016 and later they are consistently under ServicePacks.
+- **LCU**: Classification = SecurityUpdates (`0FA1201D-...`). The monthly Cumulative Update with security content.
+- **.NET CU**: Classification = UpdateRollups (`28BC880E-...`) mainly, with a few in SecurityUpdates (when they carry security content). Cumulative Update for .NET Framework 3.5 / 4.7.x / 4.8 / 4.8.1.
+- **Dynamic Update**: Classification = Updates (`CD5FFD1E-...`) or CriticalUpdates (`E6CF1350-...`). Setup DU and SafeOS DU. Publication cadence on LTSC OSes is sporadic (see §6.3).
+
+The canonical scope-filter rule:
+
+> An Update is admitted into scope if and only if:
+> 1. `Categories.Product` GUID matches one of the 4 Server LTSC Product GUIDs above, AND
+> 2. `Categories.UpdateClassification` GUID matches one of the 5 Classification GUIDs above, AND
+> 3. `CreationDate` is within the last 24 months relative to the parser invocation date (the recency clause from SPEC §B.19.7).
+
+Only Updates satisfying all three conditions are emitted into the Layer 2 JSON. For the wsusscn2 fetched on 2026-05-12 this reduces the ~136,000 entries in the Master XML to roughly ~10,000 entries, comfortably fitting the 2-5 MB target size for Layer 2 JSON.
+
 ---
 
 ## 6. Microsoft Update Catalog Naming Quirks
@@ -500,6 +595,60 @@ The empirical Dynamic Update cadence picture:
 | Server 2025 | **Discontinued or sporadic** (no publications observed for many consecutive months in the 2025-12 to 2026-04 window) | Monthly | Microsoft has not formally announced the cadence change |
 
 A pipeline must therefore treat "DU.Setup absent for this month on Server 2025" as a soft signal, not an error. The Refresher logs "no Setup DU published" and proceeds. This matches what Server 2016 and 2019 have always done.
+
+### 6.4 WSUS Product Category GUIDs and the Server LTSC mapping
+
+§6.1 covered how the Catalog title naming convention changed between Server 2019 and Server 2022 ("Windows Server 2019" → "Microsoft server operating system-21H2" / "Microsoft Server Operating System-24H2"). **These display-name renames are a surface phenomenon**; the underlying GUID hierarchy is unchanged. This section records the WSUS Product Category hierarchy and the correspondence to the four Server LTSC GUIDs, so the reference table remains valid across future naming churn.
+
+#### Hierarchical structure of Product Categories
+
+WSUS Categories form a four-level hierarchy, expressed in `wsusscn2.cab` through the `<Update>` Prerequisites (see §2.4.1):
+
+```
+Microsoft (Company)
+└─ Windows (ProductFamily)
+   ├─ Windows Server 2016                            (Product, LTSC)
+   ├─ Windows Server 2019                            (Product, LTSC)
+   ├─ Windows Server 2022 LTSC                       (Product, LTSC;
+   │     display name "Microsoft server operating system-21H2")
+   ├─ Windows Server 2025 LTSC                       (Product, LTSC;
+   │     display name "Microsoft Server Operating System-24H2")
+   ├─ Windows 10, version 1903 and later             (Product, Client)
+   ├─ Windows Server, version 1903 and later         (Product, Server SAC)
+   ├─ Microsoft Server Operating System-22H2         (Product, Azure SAC)
+   ├─ Microsoft Server Operating System-23H2         (Product, Azure SAC;
+   │     build 25398 family)
+   └─ ... (older LTSC variants: Server 2008, 2008 R2, 2012, 2012 R2, etc.)
+```
+
+The wsusscn2 fetched on 2026-05-12 contains **154 Product Categories** directly under the Windows ProductFamily. Other ProductFamilies (SQL Server, Office, Exchange, Forefront, etc.) coexist as siblings, but the scope filter for this task targets only the 4 Server LTSC entries under Windows.
+
+#### Display-name renames and GUID invariance
+
+As shown in §6.1, Microsoft switched to a codename-based naming convention starting with Server 2022 ("Microsoft server operating system-21H2" / "Microsoft Server Operating System-24H2"). Title-string heuristics (§6.2) break under this change; **GUIDs remain invariant**:
+
+| Server version | Historical display name | Current display name | Product GUID |
+|:---|:---|:---|:---|
+| Server 2016 | Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` |
+| Server 2019 | Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` |
+| Server 2022 LTSC | (new) | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` |
+| Server 2025 LTSC | (new) | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` |
+
+This table is kept in sync with the scope-filter reference in §5.7.
+
+A subtle point: the Catalog display names for Server 2022 and Server 2025 both contain "Microsoft" but **with inconsistent letter-casing conventions** (`Microsoft server operating system-21H2` has lowercase `o`, while `Microsoft Server Operating System-24H2` is title-cased). This is a Microsoft-internal naming inconsistency that does not affect GUID-based lookups.
+
+#### Canonical sources for name-to-GUID resolution
+
+The available means to resolve a display name to its GUID, in decreasing order of authoritativeness:
+
+1. **A live WSUS environment**: `Get-WsusServer | Get-WsusProduct -TitleIncludes "21H2"`. Requires a WSUS server but uses the Microsoft-official API, so this is the most reliable path.
+2. **Windows Update Agent API**: on the target OS, enumerate `update.Categories[].CategoryID` from a `Microsoft.Update.Session` COM search result. Requires reference environments such as a Server 2022 VM or Server 2025 VM.
+3. **Reverse lookup from real `wsusscn2.cab`**: the technique described in §2.4.1 of this document. Works offline, but because the name itself is not in package.xml you identify the Product by combining the Category Update's `CreationDate` with the build number in the payload URL (Server 2022 LTSC = 20348, Server 2025 LTSC = 26100, Server 23H2 = 25398, Server 2019 = 17763, Server 2016 = 14393).
+4. **Cross-reference against community OSS**: [kbupdate-library](https://github.com/potatoqualitee/kbupdate-library), [OSDBuilder](https://github.com/OSDeploy/OSD), [WSUSOffline](https://forums.wsusoffline.net/). Not official, but useful as confirmation against observed values.
+5. **Microsoft Learn "WSUS Classification GUIDs"** page (`learn.microsoft.com/ja-jp/previous-versions/windows/desktop/ff357803`): a complete official table exists for the Classification side. An equivalent official table is not published for the Product side, so a combination of the above is required.
+
+The `$Script:WsusScnOsCategoryGuids` table in `Update-WindowsServerIso.ps1` adopts the values cross-referenced via 1–5 above (with §5.7's table as the canonical record).
 
 ---
 

@@ -164,6 +164,8 @@ tests/
     html_parsers.py          Catalog HTML regex extractors (mirror of PS)
     ps_invoke.py             PSSession context manager for TestHarness REPL
     snapshot.py              JSON snapshot read/write + diff
+    canonical_json.py        Python reference for SPEC Part B.23 canonical JSON (used by T11)
+    wsusscn2_analyzer.py     wsusscn2.cab schema-discovery helper (CLI + library; used by the Phase 2b1 investigation, see research/windows-servicing §2.4.1 / §5.7 / §6.4)
   fixtures/
     2026-05/
       server2016_lcu_search.html

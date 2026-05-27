@@ -16,6 +16,109 @@ the script and follows the
 
 ## [Unreleased]
 
+### r09.0 Step 2b1 preparation - WSUS Product Category GUID investigation and research documentation
+
+This change is a **preparation step** for the Phase 2b1 parser pipeline
+implementation. It does not modify `Update-WindowsServerIso.ps1` itself
+(no production code change); instead it finalises the **WSUS Product
+Category GUID inventory** that the upcoming Phase 2b1 scope filter
+(`$Script:WsusScnOsCategoryGuids` and `$Script:WsusScnUpdateClassificationGuids`,
+SPEC §B.19.7) will rely on. The investigation and its findings are
+captured in the `research/` portable-knowledge tree so the GUID
+inventory is auditable independently of the script body.
+
+The motivation: SPEC §B.19.7 declares that the scope filter admits only
+"SSU, LCU, .NET CU, or Dynamic Update" updates targeting Windows Server
+2016 / 2019 / 2022 / 2025, judged by `Categories.Product` and
+`Categories.UpdateClassification` GUID matching. Microsoft does not
+publish a complete official table of Product GUIDs for the Server LTSC
+family (the Classification side does have one). Phase 2b1 cannot be
+authored safely without those values, so this step closes the gap with
+a documented reverse-lookup methodology and a finalised reference table.
+
+### What is in this commit
+
+**Research documentation (bilingual, `research/windows-servicing/`)**:
+
+Three new subsections added to the existing `windows-server-iso-update-mechanics.{ja,en}.md`
+(675 → 824 lines on each side, bilingual lock-step preserved):
+
+| § | Title (ja) | Role |
+|:---|:---|:---|
+| 2.4.1 | Category 階層の package.xml 内表現 | Methodology: how the WSUS Product hierarchy is implicitly embedded in `wsusscn2.cab`'s Master XML as `<Update>` elements with `DeploymentAction="Evaluate"` AND `IsSoftware="false"` markers; observed counts (4,199 Category Updates total, 154 directly under Windows ProductFamily) |
+| 5.7 | scope filter の根拠となる Product GUID 一覧 | Canonical reference table: 4 Server LTSC Product GUIDs + 5 UpdateClassification GUIDs observed in the wsusscn2 fetched 2026-05-12; mapping of SSU / LCU / .NET CU / Dynamic Update to Classification |
+| 6.4 | WSUS Product Category GUIDs と Server LTSC 系列の対応 | The naming-vs-GUID duality: display-name renames (§6.1, "Microsoft server operating system-21H2/24H2") do not affect GUIDs; canonical resolution paths (live WSUS, WUA API, wsusscn2 reverse-lookup, OSS cross-reference, Microsoft Learn) |
+
+The same three subsections are added to the `.en.md` mirror with
+matching structure and line numbers (824 lines, 0% line-count diff
+between the bilingual pair).
+
+**New test-infrastructure helper (`tests/common/`)**:
+
+| File | Lines | Role |
+|:---|---:|:---|
+| `tests/common/wsusscn2_analyzer.py` | ~370 | Schema-discovery helper for `wsusscn2.cab`'s `package.xml`. Provides two-step 7-Zip extraction (subprocess-based, mirrors but does not couple to the production Stage 2 helper), tag-count census (parity with Phase 5 v4 observations), Category GUID frequency by Type, streaming `<Update>` / `<FileLocation>` iterators via `ElementTree.iterparse` (memory-safe on the 108 MB Master XML), Microsoft-prose absence check (SPEC §B.19.8 hard rule), and a CLI for manual exploration (`extract` / `summary` / `guids` / `prose` subcommands). Standard-library-only, pip-install-free, matches the existing `tests/common/` convention. Not yet wired to a test entry point — that lands in Phase 2b1 (T12). |
+
+**Documentation updates (`tests/README.md`)**:
+
+- File layout updated to include `common/canonical_json.py` (which
+  Phase B1 introduced but never recorded in the layout block) and
+  `common/wsusscn2_analyzer.py` (this commit). The Tool inventory
+  table is unchanged because `wsusscn2_analyzer.py` is investigation
+  infrastructure, not a T-numbered self-verification tool.
+
+**Finalised GUID inventory (the central deliverable, recorded in `research/.../windows-server-iso-update-mechanics.ja.md` §5.7 as canonical)**:
+
+Server LTSC Product GUIDs (scope filter targets):
+
+| Server version | WSUS display name | Product GUID |
+|:---|:---|:---|
+| Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` |
+| Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` |
+| Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` |
+| Server 2025 LTSC | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` |
+
+Server 2022 / 2025 GUIDs were finalised in this session via the
+Category-hierarchy reverse-lookup methodology described in §2.4.1
+(Category Update `CreationDate` matched with payload-URL build numbers:
+build 26100 SSU → Server 2025 LTSC, ndp481 marker → Server 2022 LTSC).
+Server 2016 / 2019 GUIDs are additionally cross-referenced against
+`ansible/ansible` Issue 60785, `dsccommunity/UpdateServicesDsc` Issue
+65, and the WSUSOffline forum.
+
+### What is NOT in this commit (preserved for Phase 2b1 proper)
+
+The production code (`Update-WindowsServerIso.ps1`) is **unchanged**:
+
+- `$Script:WsusScnOsCategoryGuids` / `$Script:WsusScnCategoryGuidNameMap` / `$Script:WsusScnUpdateClassificationGuids` script-scope tables: not yet added (Phase 2b1 §1.3)
+- `Invoke-WsusScnPackageXmlExtract` (Stage 2): not yet added (Phase 2b1 §1.4.1)
+- `ConvertFrom-WsusScnPackageXml` (Stage 3): not yet added (Phase 2b1 §1.4.2)
+- `New-WsusScnDependencyDatabase` (Stage 4): not yet added (Phase 2b1 §1.4.3)
+- `tests/common/wsusscn2_fixture_builder.py`: not yet added (Phase 2b1 §1.2.2)
+- `tests/wsusscn2_parser_test.py` (T12): not yet added (Phase 2b1 §1.5)
+- `SPEC.md` §B.19.9.4 Implementation Notes: not yet added (Phase 2b1 §1.6.1)
+- `ScriptVersion` / `ScriptTag`: unchanged (`update-wsi-2026.05.28-r09.0` /
+  `step2a-followup-canonical-json-migration`); the next Phase 2b1
+  commit will bump `ScriptTag` to `step2b1-parser-pipeline-and-fixture-tooling`.
+
+The A04 wrapper (`Invoke-AdminPhaseA04_RefreshDependencyDatabase`)
+keeps its `NotImplementedException` stub from Step 2a — its implementation
+is scope of Phase 2b2, not Phase 2b1.
+
+### Quality gate
+
+This commit does not change PowerShell code, so the post-flight gates
+that apply are:
+
+| Gate | Result |
+|:---|:---|
+| `psa.py` (no PS change → no re-run needed; verified clean at baseline) | 0 / 0 / 0 |
+| `PSScriptAnalyzer` (same as above) | 0 findings |
+| Unit tests T2-T11 (no PS change) | unchanged from baseline (13/10/13/16/20/18/22/26) |
+| Canonical JSON format gate (`tests/canonical_json_format_check.py`) | 25 passed (no new committed JSON files in this commit) |
+| `tests/common/wsusscn2_analyzer.py` import smoke (Python) | PASS (`python3 -c "from tests.common import wsusscn2_analyzer"` clean) |
+| Bilingual lock-step (`research/.../windows-server-iso-update-mechanics.{ja,en}.md`) | H2=13, H3=35, H4=4, 824 lines on each side (0.0% diff) |
+
 ### r09.0 Step 2a followup (Phase B2) - JSON canonical migration and format gate
 
 This change applies the canonical JSON format declared in Phase B1
