@@ -17,20 +17,32 @@ Windows 11 + Windows PowerShell 5.1 を想定（PowerShell 7+ でも動作しま
 
 ## ⚠️ 免責事項
 
-**ご利用は自己責任でお願いします。** 本スクリプトは「現状のまま (AS IS)」提供されており、明示・黙示を問わずいかなる保証もありません。本スクリプトの使用、改変、配布に起因または関連して発生したあらゆる損害（データ損失、アカウント停止、ネットワーク障害、ディスク容量逼迫、その他直接的・間接的な損害を含むが、これらに限定されない）について、作者および貢献者は一切の責任を負いません。
+**ご利用は自己責任でお願いします。** 本スクリプトは「現状のまま (AS IS)」
+提供されており、明示・黙示を問わずいかなる保証もありません。本スクリプトの
+使用、改変、配布に起因または関連して発生したあらゆる損害(データ損失、
+アカウント停止、ネットワーク障害、ディスク容量逼迫、その他直接的・間接的な
+損害を含むが、これらに限定されない)について、作者および貢献者は一切の
+責任を負いません。
 
-本スクリプトを実行することにより、利用者は以下を承諾するものとします：
+本スクリプトを実行することにより、利用者は以下を承諾するものとします:
 
-* 利用が Speaker Deck の利用規約および適用される法令・規制に準拠していることを **利用者自身が確認する責任を負う** こと
-* 多数のファイルをダウンロードすることに伴う結果（通信費用、ストレージ費用、レート制限、IP ブロック等）について **利用者自身が責任を負う** こと
-* ダウンロードした資料の知的財産権は原作者に帰属することを尊重し、原著者の権利を侵害しないこと
-* 実行前にスクリプトのソースコードを確認し、その動作を理解した上で使用すること
+* 利用が Speaker Deck の利用規約および適用される法令・規制に準拠している
+  ことを **利用者自身が確認する責任を負う** こと
+* 多数のファイルをダウンロードすることに伴う結果(通信費用、ストレージ
+  費用、レート制限、IP ブロック等)について **利用者自身が責任を負う** こと
+* ダウンロードした資料の知的財産権は原作者に帰属することを尊重し、原著者
+  の権利を侵害しないこと
+* 実行前にスクリプトのソースコードを確認し、その動作を理解した上で使用
+  すること
 
-本ツールは節度を持ってご利用ください。レート制限を尊重してください（スクリプトには組み込みのスロットリングがありますが、これを回避してはいけません）。必要以上に高速・頻繁にコンテンツをダウンロードしないでください。
+本ツールは節度を持ってご利用ください。レート制限を尊重してください
+(スクリプトには組み込みのスロットリングがありますが、これを回避しては
+いけません)。必要以上に高速・頻繁にコンテンツをダウンロードしないで
+ください。
 
-本リポジトリ内のすべての成果物に適用される完全な免責事項と自己責任条項については、
-[ルート README](../../../README.ja.md)
-（[English](../../../README.md)）を参照してください。
+本リポジトリ内のすべての成果物に適用される完全な免責事項と自己責任条項
+については、[ルート README](../../../README.ja.md)
+([English](../../../README.md))を参照してください。
 
 ## ライセンス
 
@@ -351,7 +363,9 @@ Windows で禁止される文字は、ASCII 互換文字へ置換します：
 
 ### CSV カラム共通規約
 
-4 種類の CSV ログ（`P04_*`, `P05_*`, `P06_*`, `P07_*`）は、Phase をまたいだ突合・grep ができるよう **共通カラム名** を使用しています。同じ意味のデータは必ず同じカラム名で記録されます：
+4 種類の CSV ログ(`P04_*`, `P05_*`, `P06_*`, `P07_*`)は、 Phase を
+またいだ突合・grep ができるよう **共通カラム名** を使用しています。
+同じ意味のデータは必ず同じカラム名で記録されます:
 
 | カラム名 | 意味 | 含まれる CSV |
 |---|---|---|
@@ -359,15 +373,22 @@ Windows で禁止される文字は、ASCII 互換文字へ置換します：
 | `Title` | デッキの og:title | P04, P05, P06, P07 |
 | `DeckUrl` | Speaker Deck のデッキページ URL | P04, P05, P06, P07 |
 | `DownloadUrl` | PDF 本体のダウンロード URL | P04, P05, P06, P07 |
-| `OriginalFilename` | 投稿者がアップロード時に付けた元ファイル名（サニタイズ前）| P04, P05, P06, P07 |
-| `PublishDate` | og:meta 由来の YYYYMMDD（Phase 4 で取得）| P04, P05, P06, P07 |
-| `YearFolder` | 年フォルダ名（`2024`、`2025`、…、または `_undated`）| P04, P05, P06（P07 では `PlanYearFolder` / `DiskYearFolder` に分離）|
-| `YearSource` | YearFolder を導出した規則名（`OverrideCsv` / `OriginalFilename` / `PublishDate` / `TitleJp` / `TitleNum` / `Fallback` / `PdfInfoDict` / `PdfXmp` 他）| P04, P05, P06 |
+| `OriginalFilename` | 投稿者がアップロード時に付けた元ファイル名(サニタイズ前)| P04, P05, P06, P07 |
+| `PublishDate` | og:meta 由来の YYYYMMDD(Phase 4 で取得)| P04, P05, P06, P07 |
+| `YearFolder` | 年フォルダ名(`2024`、 `2025`、 …、 または `_undated`)| P04, P05, P06(P07 では `PlanYearFolder` / `DiskYearFolder` に分離)|
+| `YearSource` | YearFolder を導出した規則名(`OverrideCsv` / `OriginalFilename` / `PublishDate` / `TitleJp` / `TitleNum` / `Fallback` / `PdfInfoDict` / `PdfXmp` 他)| P04, P05, P06 |
 | `OutputFilename` | ディスク上で実際に使用するサニタイズ後のファイル名 | P05, P06, P07 |
 
-各 Phase の CSV は、前 Phase のデータを **スーパーセット** として継承し、その Phase 固有の情報を追加します（例：P06 は `Status` / `Bytes` / `DurationMs` / `Attempts` を、P07 は `Discrepancy` / `PlanYearFolder` / `DiskYearFolder` / `FileExists` / `SizeMatch` を追加）。
+各 Phase の CSV は、 前 Phase のデータを **スーパーセット** として
+継承し、 その Phase 固有の情報を追加します(例:P06 は `Status` /
+`Bytes` / `DurationMs` / `Attempts` を、 P07 は `Discrepancy` /
+`PlanYearFolder` / `DiskYearFolder` / `FileExists` / `SizeMatch` を
+追加)。
 
-`year_overrides.csv` ファイル（Phase 8 で生成）は Phase 単位のログではなく、再実行間で永続化される状態ファイルです。カラム仕様は「PDF メタデータによる事後分類 (Phase 8)」セクションを参照してください。
+`year_overrides.csv` ファイル(Phase 8 で生成)は Phase 単位のログ
+ではなく、 再実行間で永続化される状態ファイルです。 カラム仕様は
+「PDF メタデータによる事後分類 (Phase 8)」セクションを参照して
+ください。
 
 ## トラブルシューティング
 
@@ -397,7 +418,9 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 ### Phase 2 で 0 件しか取得できない
 
-Speaker Deck の HTML 構造が変更された可能性があります。Page 1 で 0 件が返された場合、スクリプトは自動的に取得した HTML を以下にダンプします：
+Speaker Deck の HTML 構造が変更された可能性があります。 Page 1 で
+0 件が返された場合、 スクリプトは自動的に取得した HTML を以下に
+ダンプします:
 
 ```
 <WorkDir>\diag\speakerdeck_diag_<account>_<timestamp>.html
@@ -405,20 +428,27 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 (デフォルト: `<スクリプト配置ディレクトリ>\work\diag\`)
 
-このファイルを開いて現在の HTML 構造を確認し、`Get-AllDeckList` 関数内の正規表現パターンを調整してください。
+このファイルを開いて現在の HTML 構造を確認し、 `Get-AllDeckList`
+関数内の正規表現パターンを調整してください。
 
-診断出力には以下も含まれます：
+診断出力には以下も含まれます:
 
-* HTML のサイズ（文字数）
+* HTML のサイズ(文字数)
 * HTML 内のアカウント名の出現回数
 * `/<アカウント名>/<slug>` 形式の候補パスの数
 * `<a` タグと `title=` 属性の総数
 
-`/<アカウント名>/<slug>` のカウントが `0` の場合、サーバーが簡略化された HTML を返しています — User-Agent やボット検知が原因の可能性が高いです。このスクリプトは既に Chrome 相当のヘッダー（`Accept`、`Accept-Language`、`Sec-Fetch-*`、`Sec-Ch-Ua` 等）を送信していますが、それでも問題が解消しない場合は、保存された HTML を実際のブラウザで開き、Chrome が受信する内容と比較してください。
+`/<アカウント名>/<slug>` のカウントが `0` の場合、 サーバーが簡略化
+された HTML を返しています — User-Agent やボット検知が原因の可能性
+が高いです。 このスクリプトは既に Chrome 相当のヘッダー(`Accept`、
+`Accept-Language`、 `Sec-Fetch-*`、 `Sec-Ch-Ua` 等)を送信していますが、
+それでも問題が解消しない場合は、 保存された HTML を実際のブラウザで
+開き、 Chrome が受信する内容と比較してください。
 
 ### Phase 6（ダウンロード）で失敗が発生した場合
 
-実行終了時に表示される **Failure breakdown** テーブルで失敗の傾向を確認します：
+実行終了時に表示される **Failure breakdown** テーブルで失敗の傾向
+を確認します:
 
 ```
   Failure breakdown:
@@ -433,9 +463,11 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
     C:\Temp\download-speakerdeck-oracle4engineer\work\diag\failed\
 ```
 
-詳細な調査には以下の 2 種類の成果物を使います：
+詳細な調査には以下の 2 種類の成果物を使います:
 
-1. **`work\logs\P06_errors.jsonl`** — JSON オブジェクトを 1 行 1 件で記録した機械可読形式。`jq` や `ConvertFrom-Json` で集計できます：
+1. **`work\logs\P06_errors.jsonl`** — JSON オブジェクトを 1 行 1 件
+   で記録した機械可読形式。 `jq` や `ConvertFrom-Json` で集計でき
+   ます:
 
    ```powershell
    Get-Content .\work\logs\P06_errors.jsonl | ForEach-Object {
@@ -443,18 +475,24 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
    } | Group-Object category | Sort-Object Count -Descending
    ```
 
-2. **`work\diag\failed\<index>_<slug>.txt`** — 失敗 1 件ごとの人間可読な詳細ダンプ。HTTP ステータス、レスポンスヘッダー、レスポンスボディ先頭 2KB（取得できた場合）、リトライ履歴、失敗時のスタックトレースを含みます。
+2. **`work\diag\failed\<index>_<slug>.txt`** — 失敗 1 件ごとの人間
+   可読な詳細ダンプ。 HTTP ステータス、 レスポンスヘッダー、
+   レスポンスボディ先頭 2KB(取得できた場合)、 リトライ履歴、
+   失敗時のスタックトレースを含みます。
 
-実行後の包括的な分析には、**`work\logs\P07_final_state.csv`** も参照してください。これは Plan + Download Log + ディスク実体を統合した突合結果で、Discrepancy 列で異常（サイズ不一致、ダウンロード成功後の消失、部分ダウンロード等）を一覧できます。
+実行後の包括的な分析には、 **`work\logs\P07_final_state.csv`** も
+参照してください。 これは Plan + Download Log + ディスク実体を統合
+した突合結果で、 Discrepancy 列で異常(サイズ不一致、 ダウンロード
+成功後の消失、 部分ダウンロード等)を一覧できます。
 
-代表的なエラーカテゴリと対策：
+代表的なエラーカテゴリと対策:
 
 | カテゴリ                  | 想定原因                       | 対策                                                                                       |
 | ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------ |
 | HTTP 429                  | Speaker Deck のレート制限      | 並列度を下げて再実行: `-MaxConcurrency 2 -InitialConcurrency 1 -DelaySeconds 2.0`          |
-| HTTP 503 / 502 / 504      | 一時的なサーバー / CDN エラー  | 再実行で多くは解消（適応的リトライにより 2 回目で成功するケースが多い）                    |
-| Timeout                   | 低速回線・大容量 PDF           | 再実行、または `-MaxRetries 5` の指定                                                      |
-| PathTooLong               | NTFS パス長制限の超過          | スクリプトをより短いパスに移動、または `-OutputDir` を短縮                                 |
+| HTTP 503 / 502 / 504      | 一時的なサーバー / CDN エラー  | 再実行で多くは解消(適応的リトライにより 2 回目で成功するケースが多い)                  |
+| Timeout                   | 低速回線・大容量 PDF           | 再実行、 または `-MaxRetries 5` の指定                                                     |
+| PathTooLong               | NTFS パス長制限の超過          | スクリプトをより短いパスに移動、 または `-OutputDir` を短縮                                |
 
 ### 完全にクリーンな状態から再実行する
 
@@ -485,7 +523,13 @@ Speaker Deck の HTML 構造が変更された可能性があります。Page 1 
 
 ### この機能が役立つ場面
 
-Phase 6 のデッキ別失敗ログ（`P06_errors.jsonl`）は「どのデッキが失敗したか」を記録します。 Debug Trace Facility はそれとは別の問いに答えます：「関数内のどの名前付きステップで例外が発生したか」。 デッキ単位ではない失敗、 たとえば Phase 5 の filename 計画中の `PathTooLongException`、 CSV 書き込み中の予期せぬ `System.IO.IOException`、 Phase 4 の正規表現パース失敗などの診断に最も有用です。
+Phase 6 のデッキ別失敗ログ(`P06_errors.jsonl`)は「どのデッキが失敗
+したか」を記録します。 Debug Trace Facility はそれとは別の問いに
+答えます:「関数内のどの名前付きステップで例外が発生したか」。 デッキ
+単位ではない失敗、 たとえば Phase 5 の filename 計画中の
+`PathTooLongException`、 CSV 書き込み中の予期せぬ
+`System.IO.IOException`、 Phase 4 の正規表現パース失敗などの診断に
+最も有用です。
 
 ### `debugtrace.jsonl` の調査方法
 
@@ -527,32 +571,62 @@ Phase が例外を投げたとき、 トップレベルの catch ハンドラが
 
 ### 無効化について
 
-コマンドラインからは無効化できません (オーバーヘッドが極めて小さいため：800 デッキの実行で約 150 KB の JSONL、 ネットワーク I/O ゼロ)。 ベストエフォート設計のため、 ファイルアクティベーションに失敗した場合 (ディスク満杯、 権限不足など) は警告を出して機能なしで継続します。 トレースイベントはメモリにバッファされ続け、 デバッガから `Export-DebugTraceJson` を呼び出せばエクスポート可能です。
+コマンドラインからは無効化できません(オーバーヘッドが極めて小さい
+ため:800 デッキの実行で約 150 KB の JSONL、 ネットワーク I/O ゼロ)。
+ベストエフォート設計のため、 ファイルアクティベーションに失敗した
+場合(ディスク満杯、 権限不足など)は警告を出して機能なしで継続し
+ます。 トレースイベントはメモリにバッファされ続け、 デバッガから
+`Export-DebugTraceJson` を呼び出せばエクスポート可能です。
 
-完全な仕様 (イベントスキーマ、 module-level state、 public API) は [SPEC.md A.14](SPEC.md#a14-debug-trace-facility) を参照してください。
+完全な仕様(イベントスキーマ、 module-level state、 public API)は
+[SPEC.md A.14](SPEC.md#a14-debug-trace-facility) を参照してください。
 
 ---
 
 ## 開発者向け仕様
 
-このスクリプトを拡張したい、 フェーズ構成を変更したい、 または同系統のスクリプトを新規に作成したい場合は、 まず **[`SPEC.md`](SPEC.md)** を読んでください。 リポジトリ共通のドキュメント言語ポリシーにより、 SPEC は英語のみで維持されています。 SPEC では以下を体系化しています：
+このスクリプトを拡張したい、 フェーズ構成を変更したい、 または同系統の
+スクリプトを新規に作成したい場合は、 まず **[`SPEC.md`](SPEC.md)** を
+読んでください。 リポジトリ共通のドキュメント言語ポリシーにより、 SPEC
+は英語のみで維持されています。 SPEC では以下を体系化しています:
 
-- **Part A（共通仕様）** — このファミリーのすべてのスクリプトが継承する規約：ソースファイル形式（UTF-8 BOM + ASCII のみ）、 フェーズアーキテクチャ、 ログマーカー、 `-LiteralPath` ルール、 CSV カラム規約、 環境診断、 静的解析ゲート、 ドキュメント言語ポリシー
-- **Part B（スクリプト固有仕様）** — このスクリプト固有のフェーズマップ、 年フォルダ規則、 PDF メタデータ事後分類の詳細（Phase 8）、 適応的ダウンロード設定、 失敗回復
-- **Part C（品質ゲート）** — すべてのコミット前に満たすべきチェックリスト
-- **Part D（既知の落とし穴）** — 文書化された過去のバグとその修正：PowerShell パスでの `[ ]` ワイルドカード問題、 フェーズ番号振り直しの安全性など
+- **Part A(共通仕様)** — このファミリーのすべてのスクリプトが継承する
+  規約:ソースファイル形式(UTF-8 BOM + ASCII のみ)、 フェーズ
+  アーキテクチャ、 ログマーカー、 `-LiteralPath` ルール、 CSV カラム
+  規約、 環境診断、 静的解析ゲート、 ドキュメント言語ポリシー
+- **Part B(スクリプト固有仕様)** — このスクリプト固有のフェーズマップ、
+  年フォルダ規則、 PDF メタデータ事後分類の詳細(Phase 8)、 適応的
+  ダウンロード設定、 失敗回復
+- **Part C(品質ゲート)** — すべてのコミット前に満たすべきチェック
+  リスト
+- **Part D(既知の落とし穴)** — 文書化された過去のバグとその修正:
+  PowerShell パスでの `[ ]` ワイルドカード問題、 フェーズ番号振り直しの
+  安全性など
 
-リリース毎の変更履歴は **[`CHANGELOG.md`](CHANGELOG.md)** ([Keep a Changelog 1.1.0](https://keepachangelog.com/ja/1.1.0/) 形式) を参照してください。 リポジトリ共通のドキュメント言語ポリシーにより英語のみで維持されています。
+リリース毎の変更履歴は **[`CHANGELOG.md`](CHANGELOG.md)**
+([Keep a Changelog 1.1.0](https://keepachangelog.com/ja/1.1.0/) 形式)
+を参照してください。 リポジトリ共通のドキュメント言語ポリシーにより
+英語のみで維持されています。
 
-実際の検証結果（DryRun、 本番実行出力、 冪等性チェック、 リグレッション修正証跡）については **[`TESTING.md`](TESTING.md)** を参照してください。 直近の本番実行成功結果（`804/804 デッキ、 失敗ゼロ、 合計 10 分 4.4 秒、 5.7 GB`）が記録されています。
+実際の検証結果(DryRun、 本番実行出力、 冪等性チェック、 リグレッション
+修正証跡)については **[`TESTING.md`](TESTING.md)** を参照してください。
+直近の本番実行成功結果(`804/804 デッキ、 失敗ゼロ、 合計 10 分 4.4 秒、
+5.7 GB`)が記録されています。
 
-`psa.py` 静的解析ツール (latest mainline; `PSA1001`〜`PSA9002` + opt-in 規約ルール `PSAP0001`〜`PSAP0005`) の詳細は
+`psa.py` 静的解析ツール(latest mainline; `PSA1001`〜`PSA9002` + opt-in
+規約ルール `PSAP0001`〜`PSAP0005`)の詳細は
 [`../../python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
-(英語版は [README.md](../../python/powershell-static-analyzer/README.md)) 、
-または完全な仕様書 [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) を参照してください。 正典の analyzer バージョンは
-[`../../python/powershell-static-analyzer/VERSION`](../../python/powershell-static-analyzer/VERSION) ファイルに記録されています。 consumer 側のワークフロー詳細はリポジトリルート [`README.ja.md`](../../../README.ja.md) の「psa.py のバージョニングポリシー」を参照してください。
+(英語版は [README.md](../../python/powershell-static-analyzer/README.md))、
+または完全な仕様書 [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
+を参照してください。 正典の analyzer バージョンは
+[`../../python/powershell-static-analyzer/VERSION`](../../python/powershell-static-analyzer/VERSION)
+ファイルに記録されています。 consumer 側のワークフロー詳細はリポジトリ
+ルート [`README.ja.md`](../../../README.ja.md) の「psa.py のバージョニング
+ポリシー」を参照してください。
 
-**新規開発における最重要ルール**：フェーズヘッダー、 ログマーカー、 psa.py を一から再導出しないこと。 既存実装からコピーすること。 **発明より再利用**。
+**新規開発における最重要ルール**:フェーズヘッダー、 ログマーカー、
+psa.py を一から再導出しないこと。 既存実装からコピーすること。
+**発明より再利用**。
 
 ---
 
@@ -572,7 +646,14 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 
 ### ルールカバレッジ (psa.py — latest mainline)
 
-`psa.py` はルールを 9 カテゴリに分類しています。 `PSA1xxx`〜`PSA7xxx` は PowerShell スクリプト全般に適用される汎用ルール、 `PSA8xxx` (ファイル間整合性) と `PSA9xxx` (複雑度メトリクス) はより高レベルのルール、 `PSAPxxxx` (プロジェクト/パイプライン規約) は opt-in 規約ルールです。 ルールセットのバージョン別変遷については analyzer 自身の [CHANGELOG.md](../../python/powershell-static-analyzer/CHANGELOG.md) を参照してください。
+`psa.py` はルールを 9 カテゴリに分類しています。 `PSA1xxx`〜`PSA7xxx`
+は PowerShell スクリプト全般に適用される汎用ルール、 `PSA8xxx`
+(ファイル間整合性)と `PSA9xxx`(複雑度メトリクス)はより高レベル
+のルール、 `PSAPxxxx`(プロジェクト/パイプライン規約)は opt-in
+規約ルールです。 ルールセットのバージョン別変遷については analyzer
+自身の
+[CHANGELOG.md](../../python/powershell-static-analyzer/CHANGELOG.md)
+を参照してください。
 
 | カテゴリ | コード範囲 | 例 |
 | -------- | ---------- | -- |
@@ -592,12 +673,23 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 
 ### プロジェクト固有設定
 
-このスクリプトディレクトリには `.psa.config.json` を同梱しており、以下を設定しています：
+このスクリプトディレクトリには `.psa.config.json` を同梱しており、 以下
+を設定しています:
 
-1. **enable**: `PSAP0003`、 `PSAP0004`、 `PSAP0005` (リビジョン規律の opt-in ルール) を有効化。 `PSAP0005` は strict mode — `psap0005_relaxed_mode` は意図的に設定していないため、 コメント本体内の任意の `rNN` 参照が報告されます。 r21 のクリーンアップコミットで全 `rNN` 参照を script body から除去済みのため、 strict baseline は検証済の end-state です。
-2. **disable**: `PSA6003` (関数名詞の複数形) を無効化。 `Download-SpeakerDeck.ps1` 内の 3 つの関数が意図的に複数形名詞を使用しているため。 根拠は config ファイル内にコメントで記録済み。
+1. **enable**: `PSAP0003`、 `PSAP0004`、 `PSAP0005`(リビジョン規律の
+   opt-in ルール)を有効化。 `PSAP0005` は strict mode —
+   `psap0005_relaxed_mode` は意図的に設定していないため、 コメント本体
+   内の任意の `rNN` 参照が報告されます。 r21 のクリーンアップコミット
+   で全 `rNN` 参照を script body から除去済みのため、 strict baseline
+   は検証済の end-state です。
+2. **disable**: `PSA6003`(関数名詞の複数形)を無効化。
+   `Download-SpeakerDeck.ps1` 内の 3 つの関数が意図的に複数形名詞を
+   使用しているため。 根拠は config ファイル内にコメントで記録済み。
 
-意図的な空 `catch` ブロック (`PSA3004`) には `# psa-disable-line PSA3004 -- <理由>` を付与しています。 各抑制判断の根拠は `SPEC.md` §A.11「Static Analysis with psa.py」に詳細を記載しています。
+意図的な空 `catch` ブロック(`PSA3004`)には
+`# psa-disable-line PSA3004 -- <理由>` を付与しています。 各抑制判断
+の根拠は `SPEC.md` §A.11「Static Analysis with psa.py」に詳細を記載
+しています。
 
 ### 現在の検証結果
 

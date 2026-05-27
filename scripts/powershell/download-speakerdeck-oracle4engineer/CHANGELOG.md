@@ -15,6 +15,92 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
+### Documentation — Bilingual lock-step compliance for README
+
+A doc-only update that brings the Japanese `README.ja.md` in line
+with the English `README.md` formatting style. Closes a pre-existing
+bilingual divergence (`AGENTS.md` §9 AP-6) that has been carried for
+several revisions and that was identified during the Step 7 → 8
+governance cycle but deferred for separate handling.
+
+#### Quantitative result
+
+| Metric | Before | After |
+|---|--:|--:|
+| `README.md` line count | 781 | 781 (no change) |
+| `README.ja.md` line count | 669 | 761 |
+| Line-count delta | 112 lines (14.3%) | 20 lines (2.5%) |
+| H2 / H3 heading count match | 19 / 19 (already correct) | 19 / 19 (preserved) |
+
+The new 2.5% line-count delta sits comfortably within the
+~5% guideline recorded in `AGENTS.md` §8 Post-flight gate 10
+for bilingual companion files.
+
+#### What was actually changed
+
+This is a **formatting-only** update. No translated content was
+added, removed, or semantically altered; no new sections were
+introduced; no existing sections were renamed; no English text was
+modified.
+
+The pre-existing divergence root cause was a stylistic mismatch:
+the English `README.md` writes prose paragraphs and bullet items
+with line breaks at sentence / phrase boundaries (one statement per
+line), while the Japanese `README.ja.md` was authored in a long-line
+style (one paragraph or bullet collapsed onto a single line). The
+two styles communicate the same content but produce wildly different
+line counts.
+
+The fix re-flows nine high-delta sections of `README.ja.md` to match
+the English line-break style, preserving every word of the existing
+Japanese translation. Sections re-flowed:
+
+- `## ⚠️ 免責事項` (Disclaimer; was +11 lines short)
+- `## 開発者向け仕様` (Developer specification; was +16 lines short)
+- `### プロジェクト固有設定` (Project-local configuration; was +10 lines short)
+- `### CSV カラム共通規約` (CSV column conventions; was +8 lines short)
+- `### Phase 6（ダウンロード）で失敗が発生した場合` (Phase 6 download failures; was +6 lines short)
+- `### Phase 2 で 0 件しか取得できない` (Phase 2 zero-decks diagnosis; was +6 lines short)
+- `### ルールカバレッジ (psa.py — latest mainline)` (Rule coverage; was +6 lines short)
+- `### 無効化について` (Disabling the facility; was +6 lines short)
+- `### この機能が役立つ場面` (When this helps; was +6 lines short)
+
+Remaining ~20 lines of delta across the other 29 sections are
+natural compression of Japanese vs English prose and are within
+the 5% guideline.
+
+#### Why this was deferred from the Step 7 ③ cycle
+
+When subproject ③ was brought into AGENTS.md compliance in Step 7
+(commit `06c0b14`), the pre-existing 15.5% bilingual divergence was
+identified but explicitly held over: that cycle's scope was to add
+the new AGENTS.md cross-references and `Why this script exists`
+section without expanding into broader doc-quality improvements.
+This entry closes that explicitly-deferred item.
+
+#### Not touched
+
+- `Download-SpeakerDeck.ps1` source. No phase logic, parameter
+  contract, or output format is affected. This remains an
+  `Unreleased`-bucket doc-only entry; no `rNN` revision bump.
+- `README.md` (English). The English source-of-truth was already
+  in its canonical line-break style; no edits were made.
+- `SPEC.md`, `TESTING.md`. Both were already in the English-only
+  single-master style and unaffected by this fix.
+- Heading structure (`## ` / `### `). All 19 + 19 headings on both
+  sides are unchanged; only their bodies were re-flowed.
+
+#### Rationale
+
+The repository-wide bilingual lock-step rule (`AGENTS.md` §5)
+specifies that `README.md` and `README.ja.md` should match in
+structure, with section count and order required to match exactly
+and line-count delta expected to stay within ~5%. The 14.3%
+delta on ③ was a known violation of the line-count expectation
+and a candidate for the `AP-6 Bilingual divergence` catalogue.
+This entry brings ③ into compliance without altering any other
+artifact in this subproject.
+
 ### Documentation — Add `Why this script exists` section and repository-wide `AGENTS.md` cross-references
 
 A doc-only update that adds the SHOULD-level `Why this script exists`
