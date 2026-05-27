@@ -536,7 +536,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
 $Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'
-$Script:ScriptTag     = 'fix-readonly-attribute-on-wim-mount'
+$Script:ScriptTag     = 'fix-subphase-patch-classification'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6951,7 +6951,10 @@ function Build-PatchPlan {
 
     foreach ($p in $Patches) {
         if (-not $p) { continue }
-        $type = if ($p.PSObject.Properties['Type']) { [string]$p.Type } else { '' }
+        # ResolvedPatches entries built by P02 use PatchType; raw
+        # config-* PatchBaseline entries use Type. Get-PatchEntryType
+        # normalises both shapes.
+        $type = Get-PatchEntryType -Patch $p
         $targets = Get-PatchTargetsForType -PatchType $type
         if (-not $Script:PatchTargetMap.ContainsKey($type) -and -not [string]::IsNullOrEmpty($type)) {
             if ($plan._UnknownTypes -notcontains $type) {
@@ -6985,6 +6988,38 @@ function Build-PatchPlan {
     $plan['WinReSequence']   = Build-WinReApplySequence   -WinRePatches   $plan.WinRE
 
     return $plan
+}
+
+function Get-PatchEntryType {
+    <#
+    .SYNOPSIS
+        Read the patch-type string from a patch entry, accepting either
+        the 'PatchType' field (used by P02 ResolvedPatches entries) or
+        the 'Type' field (used by raw config-* PatchBaseline entries).
+
+        Returns an empty string when neither is set. PatchType takes
+        precedence when both are present, mirroring the dual-field
+        handling in Build-PatchPlan and Write-PatchPlanSummary.
+
+        Centralised so that all five call sites (Build-PatchPlan,
+        Write-PatchPlanSummary, Build-InstallApplySequence,
+        Build-BootApplySequence, Build-WinReApplySequence) read the
+        type field through one canonical helper instead of repeating
+        the inline if/elseif chain - which had drifted between call
+        sites in earlier revisions and caused sub-phase classification
+        to silently produce empty buckets.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)] [AllowNull()] $Patch)
+    if (-not $Patch) { return '' }
+    if ($Patch.PSObject.Properties['PatchType'] -and $Patch.PatchType) {
+        return [string]$Patch.PatchType
+    }
+    if ($Patch.PSObject.Properties['Type'] -and $Patch.Type) {
+        return [string]$Patch.Type
+    }
+    return ''
 }
 
 function Build-InstallApplySequence {
@@ -7026,7 +7061,7 @@ function Build-InstallApplySequence {
     # Bucket by Type
     $byType = @{}
     foreach ($p in $InstallPatches) {
-        $t = if ($p.PSObject.Properties['Type']) { [string]$p.Type } else { '' }
+        $t = Get-PatchEntryType -Patch $p
         if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
         $byType[$t].Add($p) | Out-Null
     }
@@ -7109,7 +7144,7 @@ function Build-BootApplySequence {
     )
     $byType = @{}
     foreach ($p in $BootPatches) {
-        $t = if ($p.PSObject.Properties['Type']) { [string]$p.Type } else { '' }
+        $t = Get-PatchEntryType -Patch $p
         if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
         $byType[$t].Add($p) | Out-Null
     }
@@ -7144,7 +7179,7 @@ function Build-WinReApplySequence {
     )
     $byType = @{}
     foreach ($p in $WinRePatches) {
-        $t = if ($p.PSObject.Properties['Type']) { [string]$p.Type } else { '' }
+        $t = Get-PatchEntryType -Patch $p
         if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
         $byType[$t].Add($p) | Out-Null
     }
@@ -7178,7 +7213,10 @@ function Write-PatchPlanSummary {
         if ($count -gt 0) {
             $names = ($Plan[$t] | ForEach-Object {
                 $kb = if ($_.KbId) { $_.KbId } else { '<no-kb>' }
-                $ty = if ($_.Type) { $_.Type } else { '?' }
+                # Get-PatchEntryType returns '' when neither PatchType nor
+                # Type is set; substitute '?' for the human-readable view.
+                $ty = Get-PatchEntryType -Patch $_
+                if ([string]::IsNullOrEmpty($ty)) { $ty = '?' }
                 "{0}/{1}" -f $ty, $kb
             }) -join ', '
             Write-Step ('  {0,-7} ({1}): {2}' -f $t, $count, $names)
@@ -7355,7 +7393,10 @@ function Invoke-PatchSubPhase {
         if (-not $p) { continue }
         $pkgPath = if ($p.PSObject.Properties['LocalPath']) { [string]$p.LocalPath } else { '' }
         $kb      = if ($p.PSObject.Properties['KbId'])      { [string]$p.KbId }      else { '?' }
-        $type    = if ($p.PSObject.Properties['Type'])      { [string]$p.Type }      else { '?' }
+        # Get-PatchEntryType normalises PatchType / Type field naming;
+        # display '?' when neither field is populated.
+        $type    = Get-PatchEntryType -Patch $p
+        if ([string]::IsNullOrEmpty($type)) { $type = '?' }
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $status = 'Planned'
         $errMsg = ''
@@ -12431,7 +12472,12 @@ function Show-EntryBanner {
 # Main entrypoint
 # ============================================================
 
-# Optional -LogFile transcript
+# Optional -LogFile transcript.
+# $Script:TranscriptStarted is set to $true on a successful
+# Start-Transcript call so the script-end finally block can decide
+# whether to call Stop-Transcript. Without this flag we cannot tell
+# whether transcript started successfully vs. failed silently.
+$Script:TranscriptStarted = $false
 if ($Script:LogFile) {
     $Script:LogFile = Resolve-RelativeToScript $Script:LogFile
     $logParent = [System.IO.Path]::GetDirectoryName($Script:LogFile)
@@ -12441,6 +12487,13 @@ if ($Script:LogFile) {
     try {
         # psa-disable-next-line PSA3005 -- Start-Transcript has no -LiteralPath parameter; -Path is the only option in PS 5.1/7
         Start-Transcript -Path $Script:LogFile -Append -Force | Out-Null
+        $Script:TranscriptStarted = $true
+        # Register-EngineEvent PowerShell.Exiting fires only when the
+        # PowerShell host process exits (e.g. .\script.ps1 invoked from
+        # cmd.exe or a non-interactive shell). When the script is run
+        # interactively the host stays alive, so we ALSO call
+        # Stop-Transcript explicitly in the script-end finally block;
+        # see the finally guard near the script tail.
         Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
             try { Stop-Transcript | Out-Null } catch { $null = $_ }
         } | Out-Null
@@ -12666,16 +12719,33 @@ try {
 } catch {
     $Script:ExitCode = 1
     Write-Fail ('Run failed: {0}' -f $_.Exception.Message)
-    # Auto-export any active debug trace (best-effort)
+    # Auto-export any active debug trace (best-effort).
+    # Export-DebugTraceJson takes -Path (a file), not -OutputDir;
+    # synthesise a timestamped filename under DiagDir.
     try {
         if (Get-Command -Name 'Export-DebugTraceJson' -ErrorAction SilentlyContinue) {
-            Export-DebugTraceJson -OutputDir $Script:DiagDir | Out-Null
+            if ($Script:DiagDir) {
+                if (-not (Test-Path -LiteralPath $Script:DiagDir)) {
+                    New-Item -ItemType Directory -Path $Script:DiagDir -Force | Out-Null
+                }
+                $debugTraceFile = Join-Path $Script:DiagDir ('debugtrace-{0:yyyyMMdd-HHmmss}.json' -f (Get-Date))
+                Export-DebugTraceJson -Path $debugTraceFile | Out-Null
+            }
         }
     } catch { $null = $_ }
 } finally {
     try {
         Show-PhaseSummary
     } catch { $null = $_ }
+    # Always stop transcript when we started one. PowerShell.Exiting
+    # only fires on host shutdown, but an interactive .\script.ps1
+    # invocation returns to the prompt while the host keeps running,
+    # leaving the transcript open until the user types `exit`. The
+    # explicit Stop-Transcript here closes that gap.
+    if ($Script:TranscriptStarted) {
+        try { Stop-Transcript | Out-Null } catch { $null = $_ }
+        $Script:TranscriptStarted = $false
+    }
 }
 
 exit $Script:ExitCode
