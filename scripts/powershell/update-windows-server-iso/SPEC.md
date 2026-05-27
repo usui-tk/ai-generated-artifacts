@@ -94,13 +94,8 @@ remain unambiguous.
 - [Stable Identifiers](#stable-identifiers)
 - [Policy Index](#policy-index-quick-reference-for-ai-agents)
 - [**Part A — Inherited Common Specification**](#part-a--inherited-common-specification)
-  - [A.1 Source file format](#a1-source-file-format)
-  - [A.2 Phase / pipeline architecture](#a2-phase--pipeline-architecture)
-  - [A.3 Log markers and severity prefixes](#a3-log-markers-and-severity-prefixes)
-  - [A.4 Parameter conventions](#a4-parameter-conventions)
-  - [A.5 Error and diagnostic format](#a5-error-and-diagnostic-format)
-  - [A.6 Documentation language policy](#a6-documentation-language-policy)
-  - [A.7 Development workflow](#a7-development-workflow)
+  - [A.1 – A.14 — Inherited verbatim from the sibling SPEC](#a1--a14--inherited-verbatim-from-the-sibling-spec)
+  - [A.x — Project-specific extensions](#ax--project-specific-extensions)
 - [**Part B — Script-Specific Specification**](#part-b--script-specific-specification)
   - [B.1 Script identity and entry point](#b1-script-identity-and-entry-point)
   - [B.2 Inputs and outputs](#b2-inputs-and-outputs)
@@ -152,217 +147,56 @@ remain unambiguous.
 
 # Part A — Inherited Common Specification
 
-> **Scope of this Part**: cross-project conventions that this script
-> shares with every other PowerShell artefact in the repository. The
-> contract is restated here in self-contained form so that a reader of
-> this SPEC alone has everything they need; pointers to the
-> repository-level SPEC and to sister project SPECs are given where
-> the canonical text lives elsewhere.
+> **Inheritance declaration**. This Part inherits the
+> **Common Specification (reusable across all scripts)** maintained at
+> the companion in-house reference:
+>
+> [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../download-speakerdeck-oracle4engineer/SPEC.md)
+> sections **A.1 through A.14**.
+>
+> Per the repository-wide governance in
+> [`scripts/README.md`](../../README.md) "Standard SPEC Structure",
+> Part A is the cross-project layer. Restating its text in this file
+> would duplicate the canonical source and create drift risk. Readers
+> should consult the sibling SPEC for the authoritative text of every
+> section listed below.
 
-## A.1 Source file format
+## A.1 – A.14 — Inherited verbatim from the sibling SPEC
 
-**Status**: normative. **Policy ID**: SPEC-WSI-001.
+| Section | Title | Scope |
+|:-:|---|---|
+| A.1 | Reference Assets | `psa.py` canonical location; companion specifications; companion in-house script identification; target-specific folder naming |
+| A.2 | Source File Format | UTF-8 BOM, CRLF, ASCII-only outside literals, `.gitattributes` enforcement |
+| A.3 | Banner & Version Identification | `$Script:ScriptVersion` / `$Script:ScriptTag` conventions; self-fingerprint via SHA256; banner block layout |
+| A.4 | Phase Architecture | numbering rules; phase groups; phase header / footer; Phase Timing Summary |
+| A.5 | Logging Conventions | `Write-Step` / `Write-Ok` / `Write-Warn` / `Write-Fail` / `Write-Skip` markers; color discipline; console encoding; TLS hardening |
+| A.6 | Path Handling (`-LiteralPath` rules) | wildcard-interpretation hazard; canonical safe-temp pattern; sanitization of derived filenames |
+| A.7 | Parameter Conventions | standard switches; mutual exclusion patterns; banner display |
+| A.8 | Error & Diagnostic Conventions | three-tier diagnostic output; failure category classification; diagnostic `.txt` dump; JSONL schema |
+| A.9 | CSV / JSONL Column Conventions | shared columns across per-phase CSVs; filename pattern; persistent state files |
+| A.10 | Environment Evaluation (Phase 1) | PowerShell host check; registry probe; real-world filesystem tests; tier classification |
+| A.11 | Static Analysis with `psa.py` | setup; required gate; rule coverage; project-local suppression policy; CI integration |
+| A.12 | Documentation Language Policy | file set (README bilingual; SPEC / TESTING / CHANGELOG English-only); README synchronization rule (Lines field match); README.ja.md style; mandatory Disclaimer and License sections (A.12.5) |
+| A.13 | Development Workflow | iteration cycle; revision discipline; reuse-before-invention principle |
+| A.14 | Debug Trace Facility | three subsystems; module-level state; standard usage pattern; activation order; output format; coexistence with A.8; runtime overhead; common pitfalls |
 
-The script and its companion files MUST conform to the file-format
-contract from the repository-level
-[File Format Policy](../../../README.md#file-format-policy). For this
-project the relevant entries are:
+## A.x — Project-specific extensions
 
-| File extension | Encoding | Line endings | BOM | Enforcement |
-|:---|:---|:---|:---|:---|
-| `*.ps1` | UTF-8 | **CRLF** | **required** (`EF BB BF`) | `.gitattributes` + `psa.py` rules `PSA7001` (BOM) and `PSA7002` (CRLF) |
-| `*.psd1` (PSScriptAnalyzerSettings) | UTF-8 | CRLF | required | same as above |
-| `*.md` | UTF-8 | LF | forbidden | `.gitattributes` |
-| `*.json` (data/, config) | UTF-8 | LF | forbidden | `.gitattributes` |
-| `*.py` (tests/) | UTF-8 | LF | forbidden | `.gitattributes` |
+Reserved for any extensions or deviations from the inherited Part A
+that are unique to `Update-WindowsServerIso.ps1`. As of this revision
+there are **no project-specific extensions**; the inherited contract
+is followed verbatim. Project-specific elaboration of Phase architecture
+(P01–P13), parameters, error formats, and so on, is recorded in
+**Part B** below.
 
-Additionally, every `.ps1` body emitted by this project MUST be
-**ASCII-only** outside string literals (i.e. only bytes
-`0x09`, `0x0A`, `0x0D`, `0x20`–`0x7E` may appear outside `'...'` and
-`"..."`). This is verified by `psa.py` rule `PSA1006`. Japanese
-strings appear only inside string literals (typically `OsLang`
-values and user-facing messages).
-
-**Rationale**. Mixed line endings inserted by Linux-hosted
-generators are invisible to the PowerShell AST and to visual diff
-tools but cause `.gitattributes` to silently rewrite the file at
-`git add` time, producing confusing no-content-change diffs.
-ASCII-only outside strings prevents accidental insertion of
-homoglyphs or smart-quote characters from copy-paste, which break
-PowerShell parsing in subtle ways. Both classes of defect have been
-seen in the sister `Deploy-Drivers-For-WindowsServer` repository
-(see its SPEC §D.23).
-
-## A.2 Phase / pipeline architecture
-
-**Status**: normative. **Policy ID**: SPEC-WSI-002.
-
-The script is organised as a sequence of numbered **phases**
-(`P01` through `P13`) plus standalone **actions** (`A01` through
-`A04`). Each phase is implemented by a function of the form
-`Invoke-{Group}Phase{NN}_{Name}` (for build-group phases) or
-`Invoke-Phase{NN}_{Name}` (for setup / plan / verify / report
-phases). Each action is implemented by a function of the form
-`Invoke-Action{NN}_{Name}`.
-
-Phase functions MUST:
-
-- Emit a phase-header line via `Write-PhaseHeader` at entry.
-- Emit a phase-footer line via `Write-PhaseFooter` at exit.
-- Update `$Script:DebugStep` via `Set-DebugStep` at every
-  internally-meaningful step, so that a failure stack trace can
-  identify the precise sub-operation.
-- Return without throwing whenever the failure is recoverable; throw
-  only for terminal errors. The phase dispatcher catches throws and
-  records them in the per-phase JSON.
-- Honour `-DryRun` semantics defined per-phase (typically: log the
-  planned operation, do not commit the side effect).
-
-Phase **skip semantics** are documented in §B.5 and §B.6. A phase
-MAY skip itself with `Write-Skip` at entry; in that case the phase
-footer reflects "skipped" status and no failure is recorded.
-
-## A.3 Log markers and severity prefixes
-
-**Status**: normative. **Policy ID**: SPEC-WSI-003.
-
-All log output emitted by this script MUST use the five-symbol
-severity prefix system implemented by the `Write-*` helpers near the
-top of the script:
-
-| Helper | Prefix | Colour | Severity |
-|:---|:---|:---|:---|
-| `Write-Step` | `[*]` | Cyan | Informational step |
-| `Write-Ok` | `[+]` | Green | Successful outcome |
-| `Write-Warn` | `[!]` | Yellow | Non-fatal warning |
-| `Write-Fail` | `[X]` | Red | Fatal error |
-| `Write-Skip` | `[~]` | DarkGray | Phase or step skipped |
-
-Each line begins with `[hh:mm:ss] [+xx.xxs]` (wall clock + elapsed
-since script start) followed by the severity prefix and the message
-body. This format is parsed by `tests/powershell_harness.py` so any
-new helper MUST keep the prefix-after-timestamps layout.
-
-Phase headers and footers use `Write-PhaseHeader` / `Write-PhaseFooter`
-which emit a banner with an em-dash separator and the phase identifier
-in brackets.
-
-## A.4 Parameter conventions
-
-**Status**: normative. **Policy ID**: SPEC-WSI-004.
-
-CLI parameter design follows these conventions:
-
-- **Action selection**: `-Action <verb>` accepts a `ValidateSet` of
-  named actions (see §B.6). The default action is `Build` unless
-  documented otherwise per release.
-- **Execution mode**: `-Execute` is required for any action that
-  performs DISM mount or `oscdimg` write. Its absence implies dry-run
-  mode (planned operations are logged but not committed).
-- **Verb prefix**: long-form parameters MUST use camelCase with a
-  verb-noun stem (e.g. `-EnablePca2023BootManager`,
-  `-AutoInstallAdk`, `-WorkRoot`). Single-token flags (e.g. `-Force`,
-  `-Execute`) are reserved for the most common toggles.
-- **Validation**: every `Mandatory` parameter MUST have a
-  `Validate{Set,Pattern,Range,Script}` attribute when the input has a
-  closed value space. Free-form `[string]` is reserved for paths,
-  identifiers, and user-supplied descriptions.
-- **Diagnostic flags**: `-DryRun`, `-Verbose`, `-Debug` follow
-  PowerShell common-parameter semantics. `-IgnorePatchValidation` is
-  this script's escape hatch and is documented in §B.13.
-
-The full parameter inventory is documented in the script header
-comment and rendered automatically by `Get-Help`.
-
-## A.5 Error and diagnostic format
-
-**Status**: normative. **Policy ID**: SPEC-WSI-005.
-
-When a phase fails, the script emits diagnostics to **three** sinks:
-
-1. **Console** via `Write-Fail` — the human-readable failure line.
-2. **Transcript log** under `<WorkRoot>/logs/transcript_<yyyy-MM-dd_HH-mm-ss>.log` —
-   the full `Start-Transcript` capture, including stdout/stderr
-   interleaved with the script's own log lines.
-3. **Structured diagnostic** under
-   `<WorkRoot>/diag/<yyyy-MM-dd_HH-mm-ss>/` — one or more JSON
-   files capturing machine-parseable state for forensic replay.
-
-Structured diagnostic emission is implemented by `Add-ErrorJsonlEntry`
-(per-error JSONL append) and `Export-DebugTraceJson` (full debug
-snapshot). Both accept `-Phase`, `-Kind`, and `-Properties` parameters;
-positional usage is forbidden (this convention was tightened after
-r02.3 saw mid-refactor positional drift). See §D.NN for the historical
-incident.
-
-`Start-Transcript` MUST be stopped via the `Stop-Transcript`
-`finally` block introduced in r08.0 Step 4 (see §D.NN). The earlier
-`Register-EngineEvent PowerShell.Exiting` registration alone is
-insufficient because that event only fires on host shutdown, not on
-normal script exit.
-
-## A.6 Documentation language policy
-
-**Status**: normative. **Policy ID**: SPEC-WSI-006.
-
-This sub-project's documentation languages follow the repository-wide
-[Language Policy](../../../README.md#language-policy):
-
-| File | Language |
-|:---|:---|
-| `README.md` | English (master) |
-| `README.ja.md` | Japanese (translation of `README.md`) |
-| `SPEC.md` (this file) | **English only** |
-| `TESTING.md` | **English only** |
-| `CHANGELOG.md` | **English only** |
-| `docs/history/*.md` | English or Japanese (per-file, not bilingual) |
-| `data/raw-release-info.md` | English (Microsoft-sourced content) |
-
-The English-only constraint on SPEC / TESTING / CHANGELOG avoids the
-synchronisation-drift class of defect that LLM-assisted maintenance
-is especially vulnerable to (the same content in two languages
-drifting silently across revisions). Japanese readers should use
-`README.ja.md` for orientation and then refer to the English
-source-of-truth documents.
-
-If older revisions contained `SPEC.ja.md` / `TESTING.ja.md` files,
-those MUST be removed in the next maintenance pass and any references
-updated to point at the English originals.
-
-## A.7 Development workflow
-
-**Status**: normative. **Policy ID**: inherited from
-[repository-level SPEC](../../../SPEC.md) §11.6.
-
-This sub-project's development workflow is the standard repository
-workflow:
-
-1. **Edit on a feature branch** (or, for single-developer revisions,
-   commit directly to `main` with a descriptive subject).
-2. **Local quality gates** MUST pass before commit (see Part C).
-3. **CI quality gates** (Stage 1 / Stage 2 / Stage 3) MUST pass on
-   the resulting commit.
-4. **CHANGELOG entry** MUST be added in the same commit as any code
-   or config change that operators would notice.
-5. **SPEC update** MUST be added in the same commit as any change
-   that crosses a normative-section boundary (i.e. introduces a new
-   policy, changes an existing policy, or moves a policy to a
-   different section).
-
-For revisions that span multiple commits (a typical "Step Series"
-within a single revision letter), the commits MAY be merged into one
-on push, or kept separate — the choice is per-revision. CHANGELOG
-entries are organised by revision letter, not by individual commit.
-
-The full release process — `$Script:ScriptVersion` bump, ScriptTag
-update, CHANGELOG cross-reference, branch / commit naming — is
-documented in CHANGELOG.md's revision history. The release-tag
-identifier follows the pattern
-`update-wsi-<YYYY.MM.DD>-r<NN>[.<MM>]` where `<NN>` is the major
-revision letter and `<MM>` is the optional minor.
+If a future revision needs a project-specific deviation (e.g., a
+different console-encoding strategy, an additional logging marker, or
+a parameter convention not yet adopted by the sibling), record it as
+`A.x.N` here with rationale. The default disposition is to first
+propose the change to the sibling SPEC so the convention can be
+inherited rather than forked.
 
 ---
-
 
 # Part B — Script-Specific Specification
 
@@ -652,25 +486,57 @@ script exit.
 
 **Status**: normative.
 
+The `param() ValidateSet` (script L242-L243) declares thirteen Actions.
+The default is `PrepareBuildVerify`. The full list, grouped by purpose:
+
+### B.6.1 Standard pipeline Actions
+
 | Action | Phases run | Description |
 |:---|:---|:---|
-| `Build` | P01–P10 | Full build (default) |
-| `Verify` | P01, P02, P11, P12, P13 | Verify an existing output ISO |
-| `Prepare` | P01–P05 | Stage only, no patching |
-| `PrepareBuildVerify` | P01–P13 | Combined full run |
-| `Cleanup` | (custom) | Clean up workspace and DISM mounts |
-| `ListPhases` | (none) | Dump phase + action registry as JSON |
-| `TestHarness` | (REPL hook) | Eval PS function for `tests/powershell_harness.py` |
-| `RefreshAllBaselines` (A01) | (custom) | Refresh `data/config-Server*.json` baselines + (r09.0+) layer 2 |
-| `RefreshSnapshots` (A03) | (custom) | Refresh release-info snapshot + dotnet-cu cache |
-| `DumpFieldClassification` (A02) | (custom) | Emit field-cadence decision matrix as JSON |
-| `RefreshDependencyDatabase` (A04) | (custom, r09.0+) | Refresh wsusscn2.cab layer 3 only (see §B.19) |
+| `Prepare` | P01-P05 | Stage only (no patching, no DISM mount) |
+| `Build` | P01-P02 + P04-P10 | Patch and assemble; presumes Prepare already happened or runs it in-line |
+| `Verify` | P01-P02 + P11-P13 | Verify an existing output ISO (presumes a prior Build -Execute produced it) |
+| `PrepareBuildVerify` (default) | P01-P13 | Combined full pipeline (the standardFull sequence per script L12262) |
+| `All` | P01-P13 + post-pipeline extras | StandardFull plus the additional steps gated by `if ($Action -in @('BootTest','All'))` (script L9088 / L12707) |
 
-Action `Verify` running standalone presumes the output ISO was
-produced by a prior `Build -Execute`; if missing, P11 reports
-`Critical`. Action `Prepare` produces a workspace ready for a later
-`Build` invocation; it MAY be used as a dry-run for staging
-correctness without the cost of DISM mount.
+### B.6.2 Specialty Actions
+
+| Action | Phases run | Description |
+|:---|:---|:---|
+| `BootTest` | (empty Phase array; Hyper-V smoke test) | Stand-alone Hyper-V Gen2 boot smoke test against the output ISO. Mutually exclusive with `-SyntheticTestMode` (script L358) |
+| `GenerateManifest` | P01-P03 | Compute a manifest of resolved patches without proceeding to Fetch / Build / Verify (script L12271) |
+| `Cleanup` | (custom; `Invoke-CleanupAction` at script L12361) | Clean up workspace and stale DISM mounts |
+| `ListPhases` | (none) | Dump phase + action registry as JSON to stdout |
+| `TestHarness` | (REPL hook at script L12525) | Eval-PS-function mode used by `tests/powershell_harness.py` (T3); not for human invocation |
+
+### B.6.3 Admin Actions (A01 - A03 - A02 - planned A04)
+
+| Action | Admin Phase | Phases run | Description |
+|:---|:-:|:---|:---|
+| `RefreshAllBaselines` | A01 | (`Invoke-AdminPhaseA01_RefreshAllBaselines` at script L586) | Refresh `data/config-Server*.json` baselines from upstream caches |
+| `DumpFieldClassification` | A02 | (`Invoke-AdminPhaseA02_DumpFieldClassification` at script L587) | Emit the field-cadence decision matrix as JSON |
+| `RefreshSnapshots` | A03 | (`Invoke-AdminPhaseA03_RefreshSnapshots` at script L588) | Refresh `data/raw-*` and `data/cache-*` from Microsoft Learn + Catalogue |
+| `RefreshDependencyDatabase` *(planned, r09.0)* | A04 | (not yet implemented; specified in §B.19.15.3) | Refresh `data/wsusscn2-database.json` (layer 2) from `wsusscn2.cab` (layer 3) |
+
+A04 is **specified but not implemented** in the current revision
+(`$Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'`). It is
+listed for forward traceability; the param() ValidateSet does NOT yet
+admit it. See §B.19.19 "Rollout and backward compatibility" for the
+implementation phasing.
+
+### B.6.4 Action semantics
+
+- The `osLessActions` set (script L392) — `ListPhases`, `Cleanup`,
+  `RefreshSnapshots`, `RefreshAllBaselines`, `DumpFieldClassification`,
+  `TestHarness` — does not require `-OsVersion`. All other Actions
+  REQUIRE `-OsVersion` (script L398-L400).
+- `Verify` running standalone presumes the output ISO was produced by
+  a prior `Build -Execute`; if missing, P11 reports `Critical`.
+- `Prepare` produces a workspace ready for a later `Build` invocation;
+  it MAY be used as a dry-run for staging correctness without the cost
+  of DISM mount.
+- `-OnlyPhases <phase[]>` overrides the Action's phase set (script
+  L246) — useful for forensic re-runs of a single phase.
 
 ## B.7 ISO filename detection patterns
 
@@ -2460,49 +2326,75 @@ expectation and is not a regression.
 
 ```
 scripts/powershell/update-windows-server-iso/
-├── Update-WindowsServerIso.ps1     # Main script
-├── README.md / README.ja.md         # End-user documentation (bilingual)
+├── Update-WindowsServerIso.ps1     # Main script (r08.0; r09.0 implementation pending)
+├── README.md / README.ja.md         # End-user documentation (bilingual, lock-step)
 ├── SPEC.md                           # This file (English only)
 ├── TESTING.md                        # Verification procedures (English only)
 ├── CHANGELOG.md                      # Per-revision history (English only)
 ├── .psa.config.json                  # psa.py project configuration
 ├── PSScriptAnalyzerSettings.psd1     # PSScriptAnalyzer project configuration
-├── data/                             # All persistent inputs (committed)
-│   ├── config-Server2016.json
+│
+├── data/                             # All persistent inputs (committed, flat layout)
+│   ├── config-Server2016.json        # Per-OS config (4 files)
 │   ├── config-Server2019.json
 │   ├── config-Server2022.json
 │   ├── config-Server2025.json
-│   ├── wsusscn2-database.json       # NEW r09.0+; ~2-5 MB
-│   ├── raw-release-info.md          # Microsoft release-info markdown cache
-│   ├── raw-dotnet-cu/                # Per-month .NET CU cache
-│   └── raw-dynamic-update/           # Per-month DU cache
-├── tests/                            # Python self-verification suite
-│   ├── README.md
-│   ├── catalog_probe.py              # T1
-│   ├── catalog_fixture_test.py       # T2
-│   ├── powershell_harness.py         # T3
-│   ├── eval_iso_probe.py             # T4
-│   ├── wsusscn2_probe.py             # T5
-│   ├── release_info_parser_test.py   # T6
-│   ├── wsusscn2_parser_test.py       # T7 (planned, r09.0)
-│   ├── common/                       # Shared utilities
-│   ├── fixtures/                     # Captured HTML / XML for offline regression
-│   └── snapshots/                    # Probe outputs (last_probe.json)
+│   ├── raw-release-info.md           # Microsoft Learn release-info Markdown mirror
+│   ├── raw-release-info.meta.json    # Metadata (etag, last-modified) for the above
+│   ├── raw-dotnet-cu.json            # Aggregated .NET CU index mirror
+│   ├── cache-release-info.json       # Parsed release-info cache
+│   ├── cache-dotnet-cu.json          # Parsed .NET CU cache
+│   ├── cache-du-Server2022.json      # Parsed Dynamic Update cache (Server 2022)
+│   └── cache-du-Server2025.json      # Parsed Dynamic Update cache (Server 2025)
+│   # Planned (r09.0 Step 2+):
+│   # └── wsusscn2-database.json     # Layer 2, ~2-5 MB (per §B.19)
+│
+├── tests/                            # Python self-verification suite (T1-T10)
+│   ├── README.md                     # Canonical T-numbering and quick-start
+│   ├── catalog_probe.py              # T1 (live)
+│   ├── catalog_fixture_test.py       # T2 (offline)
+│   ├── powershell_harness.py         # T3 (offline; 7 PS assertions)
+│   ├── eval_iso_probe.py             # T4 (live)
+│   ├── wsusscn2_probe.py             # T5 (live)
+│   ├── release_info_parser_test.py   # T6 (offline; 13 assertions)
+│   ├── dotnet_cu_parser_test.py      # T7 (offline; 16 assertions)
+│   ├── dynamic_update_cache_test.py  # T8 (offline; 20 assertions)
+│   ├── catalog_title_tokens_test.py  # T9 (offline; 18 assertions)
+│   ├── release_info_resolver_test.py # T10 (offline; 18 assertions)
+│   ├── common/                       # Shared Python utilities
+│   │   ├── catalog_client.py
+│   │   ├── html_parsers.py
+│   │   ├── ps_invoke.py
+│   │   └── snapshot.py
+│   ├── fixtures/<patch-month>/       # Captured HTML for T2 offline regression
+│   └── snapshots/                    # Probe outputs (last_probe.json + per-tool snapshots)
+│
 └── docs/
-    ├── README.md                     # Describes the documentation directory
-    └── history/                      # Long-form investigation reports
+    ├── README.md                     # Documentation directory index
+    └── history/                      # Long-form investigation reports (per cycle)
         ├── r07.0-followups.md
         ├── r08.0-step1-server2016-pca2023-finding.md
         ├── r08.0-step2-installwim-symmetry-check.md
         ├── r08.0-step3-output-verification-and-build.md
+        ├── r08.0-step4-findings-and-dependency-investigation.md
         ├── r09.0-step1-phase5-summary.md
         ├── mojibake-investigation-note.md
         ├── dotnet-cu-report.md
         ├── dynamic-update-report.md
         ├── release-info-report.md
-        ├── release-info-readme.md
-        └── (per-cycle followups, finding reports, investigation notes)
+        └── release-info-readme.md
 ```
+
+**Notable layout invariants**:
+
+- `data/` is **flat** (no sub-directories). Per-month or per-OS data
+  is encoded into the filename (`cache-du-Server2025.json`, not
+  `cache-du/Server2025.json`).
+- `tests/common/` is the shared-utility location; it is NOT a tool
+  itself.
+- The `r08.0-step4-findings-and-dependency-investigation.md` cycle
+  report (added 2026-05-27) contains the KB5087537 SSU-prerequisite
+  incident detail that §B.19 codifies as the motivating scenario.
 
 ### B.20.2 Filename prefix rules
 
@@ -2512,13 +2404,15 @@ carries semantic meaning that operators and reviewers rely on:
 | Prefix | Subdirectory | Meaning |
 |:---|:---|:---|
 | `config-` | `data/` | Operator-edited configuration (the `data/config-Server*.json` family). One per OS. |
-| `raw-` | `data/raw-*/` | Mirrored upstream content (Microsoft release-notes markdown, .NET CU pages, etc.). Refresh-only, no operator edit expected. |
+| `raw-` | `data/` | Mirrored upstream content (Microsoft release-notes Markdown, .NET CU index JSON, etc.). Refresh-only via `-Action RefreshSnapshots`; no operator edit expected. |
+| `cache-` | `data/` | Parsed cache derived from the corresponding `raw-` source, in machine-friendly JSON form. Re-generated whenever the `raw-` source is refreshed. |
 | `r<NN>.<MM>-` | `docs/history/` | Per-revision investigation reports. Filename also carries the topic in kebab-case. |
 
-The `data/raw-release-info.md` file is the single exception that
-does not use the `raw-` prefix on its own filename because it has
-been in place since r06.0; new raw assets follow the `raw-<topic>/`
-directory pattern.
+The current `data/` layout uses individual files for each upstream
+source (`raw-release-info.md`, `raw-dotnet-cu.json`) rather than
+sub-directories. The `*.meta.json` companion file (e.g.
+`raw-release-info.meta.json`) records the etag / Last-Modified header
+of the upstream HTTP fetch so re-runs can skip unchanged content.
 
 ### B.20.3 Worked examples
 
@@ -3048,25 +2942,32 @@ candidate Future enhancement. Today, the gate is a manual review.
 **Status**: normative. **Policy ID**: SPEC-WSI-033.
 
 The `tests/` subdirectory ships a Python-based self-verification
-suite (T1 through T7+). These tools probe the script's external
-dependencies and unit-test its PowerShell functions. They use only
-the Python standard library — no `pip install` required.
+suite of **ten tools (T1 through T10)**. They probe the script's
+external dependencies and unit-test its PowerShell functions. They
+use only the Python standard library — no `pip install` required.
+The canonical T-numbering is maintained in
+[`tests/README.md`](./tests/README.md) "Tool inventory"; this section
+mirrors that authoritative table.
 
-### C.9.1 Tool inventory
+### C.9.1 Tool inventory (T1 – T10)
 
-| Tool | Purpose | Network? | Run when |
-|:---|:---|:---:|:---|
-| **T1** `catalog_probe.py` | Live Microsoft Update Catalog probe (search + per-OS title formats + supersedence panel) | Yes | Before/after Catalog-related code change; monthly |
-| **T2** `catalog_fixture_test.py` | Offline HTML fixture regression (13 assertions on 2026-05 fixtures) | No  | Every commit that touches parsers or TitleTokens |
-| **T3** `powershell_harness.py` | PS function unit tests via `-Action TestHarness` (10 assertions) | No  | Every commit that touches a PS scrape helper |
-| **T4** `eval_iso_probe.py` | Evaluation ISO endpoint check (HEAD with Range; 4 OS × 2 lang) | Yes | Before release; when Microsoft Evaluation Center publishes a new snapshot |
-| **T5** `wsusscn2_probe.py` | `wsusscn2.cab` freshness check (existence + size + Last-Modified) | Yes | Before running P06; monthly |
-| **T6** `release_info_parser_test.py` | Release-info Markdown parser regression (13 assertions) | No | Every commit that touches the release-info parser |
-| **T7** `wsusscn2_parser_test.py` | wsusscn2 Master-XML parser regression (planned r09.0) | No | Every commit that touches the wsusscn2 parser |
+| Tool | Type | Assertions | Network | Run when |
+|:---|:---|:---|:---:|:---|
+| **T1** `catalog_probe.py` | Live Microsoft Update Catalog probe (search + per-OS title formats + supersedence panel) | ~7 live checks | Yes | Before/after Catalogue-related code change; monthly CI |
+| **T2** `catalog_fixture_test.py` | Offline HTML fixture regression against `fixtures/<patch-month>/` | 13 | No  | Every commit that touches parsers or TitleTokens |
+| **T3** `powershell_harness.py` | PS function unit tests via `-Action TestHarness` | **7** | No  | Every commit that touches a PS scrape helper |
+| **T4** `eval_iso_probe.py` | Evaluation ISO endpoint check (HTTP Range-GET; 4 OS × 2 lang) | live (4 OS) | Yes | Before release; on Microsoft Evaluation Center snapshot rotation |
+| **T5** `wsusscn2_probe.py` | `wsusscn2.cab` freshness check (existence + size + Last-Modified; 60-day warn threshold) | live | Yes | Before running P06; monthly CI |
+| **T6** `release_info_parser_test.py` | Offline regression for `ConvertFrom-ReleaseInfoMarkdown` against the PoC fixture | 13 | No | Every commit that touches the release-info parser |
+| **T7** `dotnet_cu_parser_test.py` | Offline regression for `ConvertFrom-DotNetCuIndexMarkdown` / `ConvertFrom-DotNetCuMarkdown` against `snapshots/dotnet_cu/` | 16 | No | Every commit touching the .NET CU parsers or the fetch/cache pipeline |
+| **T8** `dynamic_update_cache_test.py` | Offline regression for the Dynamic Update 36-month cache subsystem (`Add-/Get-/Remove-DynamicUpdateCacheEntry`); 3 fixture scenarios + 3 defensive cases | 20 | No | Every commit touching the DU cache functions or the 36-month window logic |
+| **T9** `catalog_title_tokens_test.py` | Offline regression for `Get-CatalogTitleTokenList` against all four OS configs + `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases | 18 | No | Every commit touching `Common.CatalogTitleTokens` in any OS config, or the narrow-filter helpers |
+| **T10** `release_info_resolver_test.py` | Offline regression for `Get-PatchSetFromReleaseInfoDiscovery` (Refresher main-path migration); 4 scenarios + defensive cases | 18 | No | Every commit touching `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or its three caches |
 
-T2, T3, T6, T7 are deterministic and SHOULD run on every PR. T1,
-T4, T5 are environment-sensitive (real network access) and belong
-in the monthly CI workflow.
+**Determinism categories**:
+
+- **Offline-deterministic** (run on every PR): T2, T3, T6, T7, T8, T9, T10.
+- **Live-network** (monthly CI + ad-hoc): T1, T4, T5.
 
 ### C.9.2 Adjunct: retired r06 Phase 2 PoCs
 
@@ -3079,21 +2980,19 @@ integrated into the production parsers. Their reports remain under
 ### C.9.3 Refreshing fixtures
 
 The `tests/fixtures/<patch-month>/` HTML files are captured per
-patch month. To refresh:
+patch month. To refresh for a new month:
 
 ```bash
 # 1. Confirm Catalog is queryable for the new month
 python3 catalog_probe.py --check all --patch-month 2026-06
 
-# 2. Re-collect the 6 HTML files via the bundled helper
-#    (see tests/README.md for details)
-
-# 3. Regenerate expected.json
+# 2. Re-collect the HTML files via the bundled helper
+#    (see tests/README.md "Refreshing fixtures")
 #    The collector hits Search.aspx for each OS / Type combination
 #    and writes one .html file per query plus an expected.json with
 #    the parsed results that T2 then asserts against.
 
-# 4. Commit both the HTML and expected.json together
+# 3. Commit both the HTML and expected.json together
 git add tests/fixtures/2026-06/
 git commit -m "tests: refresh fixtures for 2026-06"
 ```
@@ -3111,21 +3010,42 @@ dependencies requires SPEC-level justification because:
 - Operator-side runs (`python3 tests/catalog_probe.py`) MUST work
   without `pip install`.
 
+Shared utilities used by multiple tools live under
+[`tests/common/`](./tests/common/) (`catalog_client.py`,
+`html_parsers.py`, `ps_invoke.py`, `snapshot.py`); these are
+implementation details of the suite, not tools themselves.
+
 ### C.9.5 How these tools relate to CI
 
-| Tool | CI Stage |
-|:---|:---|
-| T1 | Stage 4 monthly (live network) |
-| T2 | Stage 1 (Linux, every commit) |
-| T3 | Stage 1 (Linux, every commit) |
-| T4 | Stage 4 monthly |
-| T5 | Stage 4 monthly + before P06 manually |
-| T6 | Stage 1 (Linux, every commit) |
-| T7 | Stage 1 (Linux, every commit; r09.0+) |
+| Tool | CI Stage | Cadence |
+|:---|:---|:---|
+| T1 | Stage 4 monthly | monthly (live network) |
+| T2 | Stage 1 (Linux) | every commit |
+| T3 | Stage 1 (Linux) | every commit |
+| T4 | Stage 4 monthly | monthly |
+| T5 | Stage 4 monthly + manual before P06 | monthly + ad-hoc |
+| T6 | Stage 1 (Linux) | every commit |
+| T7 | Stage 1 (Linux) | every commit |
+| T8 | Stage 1 (Linux) | every commit |
+| T9 | Stage 1 (Linux) | every commit |
+| T10 | Stage 1 (Linux) | every commit |
 
-The Stage 4 schedule runs T1, T4, T5 monthly so silent Microsoft-
-side changes surface within 30 days even if no PR touches the
-relevant code.
+The Stage 4 schedule runs T1, T4, T5 monthly so silent Microsoft-side
+changes surface within 30 days even if no PR touches the relevant
+code.
+
+### C.9.6 Planned T11 (r09.0+)
+
+A new tool — provisionally **T11 `wsusscn2_parser_test.py`** — is
+planned for r09.0 Step 2+ to provide offline regression coverage for
+the §B.19 Master XML parser (`ConvertFrom-WsusScnPackageXml`,
+`New-WsusScnDependencyDatabase`). It will assert the parser's emit
+shape against committed mini-XML fixtures under
+`tests/fixtures/wsusscn2/`. Implementation tracks the §B.19.17 parser
+stability guarantees.
+
+T11 is **not yet implemented** and is listed for forward traceability
+only. The current canonical T-set ends at T10.
 
 ---
 

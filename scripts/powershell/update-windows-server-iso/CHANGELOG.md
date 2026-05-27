@@ -2435,6 +2435,136 @@ findings, PowerShell parse OK, T2 13/13, T3 10/10, T6 13/13,
 T7 16/16, T8 20/20, T9 18/18, T10 18/18. Cumulative 108/108
 PASS unchanged from r07.0 Step 3.
 
+### r09.0 Step 1 follow-up (doc-renewal) - README/SPEC/TESTING reconstruction with implementation ground truth
+
+This follow-up to the Step 1 Phase 6 SPEC rewrite is a **doc-only**
+change that addresses regressions discovered when the post-rewrite
+SPEC was compared against the actual script implementation
+(`$Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'`). It also
+addresses two longer-standing concerns raised on review of the
+existing README/TESTING:
+
+1. **The documents underspecified the script's purpose** — they
+   described "what it does" without addressing "why this script exists",
+   making it harder for both human readers and downstream LLM/AI
+   consumers to anchor their work in the operational scenarios that
+   motivated the script.
+2. **The documents had accumulated drift relative to the script body**
+   (Action list, Phase count, test inventory, data/ layout). Most of
+   this drift originated when AI-tool-assisted edits updated only
+   the CHANGELOG and not the surrounding documentation when the
+   script changed.
+
+### Regressions corrected in `SPEC.md`
+
+The Phase 6 SPEC rewrite (commit c40755c) introduced four regressions
+relative to the implementation, all corrected here:
+
+1. **Part A bloated to 365 lines (governance violation)**. Per
+   [`scripts/README.md`](../../README.md) "Standard SPEC Structure",
+   Part A is the cross-project inherited layer maintained by the
+   sibling SPEC ([`../download-speakerdeck-oracle4engineer/SPEC.md`](../download-speakerdeck-oracle4engineer/SPEC.md)
+   sections A.1-A.14). The Phase 6 rewrite restated A.1-A.7 content
+   verbatim instead of inheriting via reference. This introduced
+   - drift risk (two copies of the same contract)
+   - incomplete coverage (the bloated Part A did not include the
+     sibling's A.6 Path Handling, A.9 CSV conventions, A.10
+     Environment Evaluation, or A.14 Debug Trace Facility).
+
+   **Fix**: Part A reduced to 53 lines, restated as an inheritance
+   declaration pointing to the sibling SPEC sections A.1-A.14.
+
+2. **§B.6 Action map omitted three implemented Actions**. The Phase 6
+   rewrite listed 11 Actions while the script's `param() ValidateSet`
+   (script L242-L243) declares 13. Missing: `BootTest`, `All`,
+   `GenerateManifest`.
+
+   **Fix**: §B.6 expanded to all 13 Actions in three groups (Standard
+   pipeline / Specialty / Admin), each linked back to its
+   implementation site (script line range).
+
+3. **§C.9 Self-verification suite listed T1-T7 (T7 = planned)**. The
+   actual `tests/` directory contains T1-T10, all implemented. The
+   canonical T-numbering lives in
+   [`tests/README.md`](./tests/README.md).
+
+   **Fix**: §C.9 corrected to T1-T10 with the right assertion counts
+   (T3 = 7 — not 10, T7 = `dotnet_cu_parser_test.py` = 16, T8 = 20,
+   T9 = 18, T10 = 18). The previously-planned
+   `wsusscn2_parser_test.py` is re-designated as planned T11
+   (post-r09.0 Step 2 work).
+
+4. **§B.20.1 `data/` layout described as `raw-<topic>/` directories**.
+   The actual layout is flat: individual `raw-release-info.md`,
+   `raw-dotnet-cu.json`, `cache-release-info.json`, etc.
+
+   **Fix**: §B.20.1 corrected to flat layout; §B.20.2 prefix rules
+   updated to add the `cache-` prefix family alongside `config-` and
+   `raw-`.
+
+### README/TESTING reconstruction (rationale)
+
+The existing `README.md` / `README.ja.md` / `TESTING.md` were rewritten
+zero-base rather than incrementally edited, because:
+
+- The level of drift across all three documents (40-60% of content
+  needing correction) made incremental editing slower and more
+  error-prone than a fresh rewrite.
+- The rewrite is anchored to a freshly-extracted **implementation
+  ground truth**, derived directly from `param() ValidateSet`, the
+  `Invoke-*Phase*` function inventory (script L8973-L11086), the
+  `tests/README.md` canonical T-numbering, and the actual `data/`
+  directory listing — not from older documentation.
+- The README gained a new top-level **"Why this script exists"**
+  section addressing the four operational scenarios (lab/test
+  bring-up at scale, PCA2011 boot-manager cert expiry,
+  air-gapped/offline labs, reproducible patch baselines) that the
+  previous README only implied. A **"Reader's roadmap"** subsection
+  adds motivation-based routing rules between
+  README / SPEC / TESTING / CHANGELOG / root-level governance, mirroring
+  the sibling project's structure.
+- `TESTING.md` was restructured to match the sibling-project canonical
+  §0-§8 pattern (status summary → static analysis → smoke tests →
+  live probes → operator-pending → tool suite → CI → discovered bugs)
+  rather than carrying ad-hoc subsections.
+
+### Files changed
+
+| File | Before | After | Note |
+|:---|--:|--:|---|
+| `SPEC.md` | 3,935 | 3,855 | Part A -312 / §B.6, §B.20, §C.9 expanded |
+| `README.md` | 532 | 562 | full rewrite |
+| `README.ja.md` | 508 | 551 | full rewrite, lock-step with `README.md` (H2=16/16, H3=11/11) |
+| `TESTING.md` | 420 | 456 | full rewrite per sibling §0-§8 canonical |
+
+### Self-check applied during the renewal
+
+To prevent recurrence of the regression pattern from Phase 6, the
+following guards were applied at execution time:
+
+1. **Implementation ground truth was extracted first**, before any
+   document was touched. The extraction artifact is preserved as
+   reference during the renewal session.
+2. **Each new section was tagged with the rule and the implementation
+   site it corresponds to** (sibling SPEC section / `scripts/README.md`
+   subsection / script line range / `tests/README.md` entry).
+3. **Redundancy check**: every Part A item that the sibling already
+   covers was inherited via reference, never restated. This is the
+   anti-Phase-6-regression rule.
+4. **Bilingual lock-step**: `README.md` and `README.ja.md` updated
+   together, structurally aligned at H2 and H3 level.
+
+### Not touched in this commit
+
+The script body (`Update-WindowsServerIso.ps1`) carries documentation
+that has also drifted from the current revision: the header `<#...#>`
+comment block lists only nine phases, claims "baseline revision r01",
+and omits Actions `BootTest` / `All` / `GenerateManifest` from its
+`.PARAMETER Action` description. These are intentionally **out of
+scope** for this doc-only commit; they will be corrected during the
+r09.0 Step 2+ implementation cycles when the script body is otherwise
+touched.
+
 ## [update-wsi-2026.05.26-r07.0] - 2026-05-26
 
 **r07.0 — Phase 3 implementation (release-info-driven refresher; breaking change).**

@@ -1,19 +1,20 @@
-# TESTING.md — Verification Procedure and Verified Findings
+# TESTING.md — Verification Procedure and Real-Run Results
 
 This document consolidates everything needed to verify and evaluate
-`Update-WindowsServerIso.ps1`. It covers five areas:
+`Update-WindowsServerIso.ps1`. It covers six areas:
 
-1. **Static analysis** — `scripts/python/powershell-static-analyzer/psa.py` gate plus PSScriptAnalyzer (must pass before every commit)
-2. **Unit tests** — In-process Pester-style tests for the deterministic helpers (PatchPlan engine, sub-phase sequence builders, supersedence-aware deduplication)
-3. **Synthetic smoke tests** — `-SyntheticTestMode -DryRun` runs that exercise the orchestration without touching real Microsoft binaries
-4. **Live Microsoft Update Catalogue verification** — Read-only network calls that confirm the production HTTP path still works against the real Catalogue
-5. **Operator-pending: real ISO integration** — The end-to-end "build a serviced Server ISO from a real evaluation ISO + the current month's patches" flow. **This has not been executed by the maintainer on a Windows host with full DISM access.** The procedure to run it is documented in Part C of [SPEC.md](./SPEC.md); the results table in §5 of this file is intentionally empty until an operator runs it.
+1. **Static analysis** — `psa.py` gate (must pass before every commit)
+2. **Synthetic smoke tests** — read-only Actions executable in CI
+3. **Live Catalogue verification** — probes that catch Microsoft-side schema drift
+4. **Operator-pending verification** — full `-Execute` builds (requires Windows + ADK + ≥ 100 GB disk + admin)
+5. **Self-verification tool suite** — T1 through T10 (canonical inventory in [`tests/README.md`](./tests/README.md))
+6. **Continuous integration** — four GitHub Actions stages
 
 > **Documentation language policy**: This document is maintained in
-> English only per the repository-wide policy. See [`README.md`](./README.md)
-> and [`README.ja.md`](./README.ja.md) for the bilingual entry-point
-> documentation; for the repository-wide language policy see the root
-> [`README.md`](../../../README.md) "Language Policy" section.
+> English only per the repository-wide policy. See `README.md` and
+> `README.ja.md` for the bilingual entry-point documentation; for the
+> repository-wide language policy see the root [`README.md`](../../../README.md)
+> "Language Policy" section.
 
 ---
 
@@ -21,10 +22,10 @@ This document consolidates everything needed to verify and evaluate
 
 - [0. Verification status summary](#0-verification-status-summary)
 - [1. Static analysis gate](#1-static-analysis-gate)
-- [2. Unit tests for deterministic helpers](#2-unit-tests-for-deterministic-helpers)
-- [3. Synthetic smoke tests](#3-synthetic-smoke-tests)
-- [4. Live Catalogue verification (read-only)](#4-live-catalogue-verification-read-only)
-- [5. Operator-pending: real ISO integration](#5-operator-pending-real-iso-integration)
+- [2. Synthetic smoke tests](#2-synthetic-smoke-tests)
+- [3. Live Catalogue verification](#3-live-catalogue-verification)
+- [4. Operator-pending: real ISO integration](#4-operator-pending-real-iso-integration)
+- [5. Self-verification tool suite (T1 – T10)](#5-self-verification-tool-suite-t1--t10)
 - [6. Continuous integration coverage](#6-continuous-integration-coverage)
 - [7. Discovered bugs and fix history](#7-discovered-bugs-and-fix-history)
 
@@ -32,389 +33,424 @@ This document consolidates everything needed to verify and evaluate
 
 ## 0. Verification status summary
 
+The "Last verified" column uses the canonical sibling-project format:
+a build identifier plus a calendar date. Pending items are marked
+`_pending operator confirmation_`.
+
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r04.3 build |
-| File encoding (UTF-8 BOM, CRLF line endings) | ✓ for the script | r04.3 build |
-| `PSAP0003` / `PSAP0004` / `PSAP0005` strict-mode baseline (no inline rNN tags, no in-script REVISION HISTORY block, no rNN references in comment bodies) | **0 findings** ✓ | r04.3 build |
-| PSScriptAnalyzer 1.25.0 with project `PSScriptAnalyzerSettings.psd1` | **0 findings** ✓ | r04.3 build |
-| Unit tests — PatchPlan engine (4 cases) | ✓ all pass | r04 build |
-| Unit tests — Sub-phase sequence builders (5 cases) | ✓ all pass | r04.1 build |
-| Unit tests — `Select-LatestPatchBySupersedence` (5 cases) | ✓ all pass | r04.3 build |
-| Smoke 1 — `-Action ListPhases` registry dump | ✓ exit 0, 13 phases + 11 actions | r04.3 build |
-| Smoke 2 — `-EnvironmentInfoOnly` (P01 only) | ✓ exit 0 on Linux pwsh 7.4.6 | r04.3 build |
-| Smoke 3 — `-SyntheticTestMode -DryRun` on Server2019 | ✓ P01–P03 complete; P04 reaches `New-SyntheticTestIso` (DISM unavailable on Linux pwsh is expected) | r04.3 build |
-| Smoke 4 — `-Action DumpFieldClassification` | ✓ exit 0, JSON written | r04.3 build |
-| Smoke 5 — `-Action RefreshAllBaselines -DryRun -OnlyOs Server2025` | ✓ exit 2 (Manual fields remain by design); supersedence dedup exercised on real data | r04.3 build |
-| Smoke 6 — `-Mode Force -OnlyLanguage ja-jp` | ✓ Force overrides Skip; OnlyLanguage filter applied | r04 build |
-| Smoke 7 — `-Mode Initial` | ✓ same decisions as Monthly for the baseline state | r04 build |
-| Live Catalogue scrape (Server2025 / `2026-05`) | ✓ 3 patches resolved; Combined-LCU detection fires; supersedence dedup excludes 1 false-positive | r04.3 build |
-| Live Catalogue scrape (Server2022 / `2026-05`) | ✓ 5 patch entries resolved after comma-form fix; supersedence dedup excludes 3 stale .NET candidates; umbrella .NET CU keeps both ndp48 and ndp481 MSUs | r04.3 build |
-| Workspace preflight — Config presence (all 4 files present) | ✓ all four `data/config-Server<N>.json` listed with byte sizes | r04.3 build |
-| Workspace preflight — placement before dispatcher | ✓ runs for `RefreshAllBaselines` / `DumpFieldClassification` (which never run P01); skipped for `ListPhases` / `Cleanup` / `-EnvironmentInfoOnly` / `-SkipEnvCheck` | r04.3 build |
-| T1 — `catalog_probe.py` live Catalog probe | ✓ 7 checks pass (search reachable + 4 OS title-format + supersedence panel); snapshot saved | r04.4 build |
-| T2 — `catalog_fixture_test.py` offline fixture regression | ✓ 13 assertions pass on the 2026-05 fixtures, including bug-2 and bug-3 regressions | r04.4 build |
-| T3 — `powershell_harness.py` via `-Action TestHarness` | ✓ 7 PowerShell function assertions pass (`Get-CatalogQueryTemplate`, `Select-AllCanonicalPatchFiles`, `Select-CanonicalPatchFile`, `Get-KbIdFromUpdateTitle`, `Test-IsCombinedLcuTitle`) | r04.4 build |
-| T4 — `eval_iso_probe.py` Iso CDN size probe | ✓ 8 endpoints checked (Server2016 host rejects Range and is reported as "unprobable"; the other 3 OSes return HTTP 206 with size + Last-Modified) | r04.4 build |
-| T5 — `wsusscn2_probe.py` offline-scan cab freshness | ✓ correctly reports `host_not_allowed` (egress proxy denies the destination host) with exit code 3, separating that from real Microsoft outages | r04.4 build |
-| **Real ISO integration on Windows host (full DISM)** | _Operator-pending_ | — |
-| **CI Stage 1 (Linux) workflow run** | _Operator-pending; logic identical to local Linux smoke_ | — |
-| **CI Stage 2 (Windows) workflow run** | _Operator-pending_ | — |
-| **CI Stage 3 (Synthetic full pipeline) workflow run** | _Operator-pending_ | — |
-| **CI Stage 4 (Monthly Baseline Refresh) workflow run** | _Operator-pending_ | — |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r08.0 build (`psa.py` latest mainline) / 2026-05-27 |
+| File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r08.0 build / 2026-05-27 |
+| `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r08.0 build / 2026-05-27 |
+| PSScriptAnalyzer on Windows PowerShell 5.1 (Stage 2) | ✓ pass | CI Stage 2 (continuous) |
+| P01 Initialize — PowerShell env / admin / ADK / disk / Hyper-V probe | ✓ pass on Windows 11 + PS 5.1 | _pending operator confirmation_ |
+| P02 ResolveInputs — Config JSON load + ISO / patch source resolution | ✓ structurally validated via T3 harness | r08.0 build / 2026-05-27 |
+| P03 RefreshPatchBaseline — Catalogue scrape (live, monthly) | ✓ scrape paths exercised via T1 | CI Stage 4 monthly |
+| P04 FetchAssets — ISO + patch downloads with SHA-256 verify | _pending operator confirmation_ | not yet exercised on a fresh runner |
+| P05 ExpandIso — source ISO mount + WIM enumeration | _pending operator confirmation_ | r08.0 build (synthetic mode only) |
+| P06 ValidatePatchSet — `wsusscn2.cab` offline scan (Stage 1 catalog-freshness) | ✓ Stage 1 (catalog freshness) exercised | r08.0 build / 2026-05-27 |
+| P06 ValidatePatchSet — Stage 2 (graph-based dependency closure, r09.0+) | not yet implemented | (planned r09.0 — see SPEC.md §B.19) |
+| P07 PatchInstallWim — SSU → LCU → .NET sequence | _pending operator confirmation_ | last successful real run not recorded in this revision |
+| P08 PatchBootWim — boot.wim + winre.wim | _pending operator confirmation_ | last successful real run not recorded in this revision |
+| P09 AssembleIso — Dynamic Update overlay + `oscdimg` | _pending operator confirmation_ | (requires `oscdimg.exe` on a Windows runner) |
+| P10 ConvertPca2023BootManager — PCA2023 conversion (opt-in) | _pending operator confirmation_ | (requires LCU 2024-4B+ source ISO) |
+| P11 StaticVerify — output ISO mount + KB-package presence check | _pending operator confirmation_ | (requires P07-P09 success) |
+| P12 VerifyPca2023Readiness — `pca2023_readiness.json` + `.md` emission | ✓ structurally validated; runs unconditionally | r08.0 build / 2026-05-27 |
+| P13 FinalReport — end-of-run summary + ISO hash | _pending operator confirmation_ | (requires P07-P11 success) |
+| A01 RefreshAllBaselines — Config baseline regeneration from caches | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
+| A02 DumpFieldClassification — field-cadence decision matrix emit | ✓ exercised | r08.0 build / 2026-05-27 |
+| A03 RefreshSnapshots — upstream `data/raw-*` + `data/cache-*` refresh | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
+| T1 catalog_probe.py | ✓ live probe passes (~7 checks) | CI Stage 4 / 2026-05-15 |
+| T2 catalog_fixture_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| T3 powershell_harness.py (7 PS function assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| T4 eval_iso_probe.py (4 OS × 2 lang Range-GET) | ✓ live probe passes | CI Stage 4 / 2026-05-15 |
+| T5 wsusscn2_probe.py (cab freshness, 60-day warn) | ✓ within 60-day window | CI Stage 4 / 2026-05-15 |
+| T6 release_info_parser_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| T7 dotnet_cu_parser_test.py (16 assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| T8 dynamic_update_cache_test.py (20 assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| T9 catalog_title_tokens_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| T10 release_info_resolver_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T10) | ✓ green | CI continuous |
+| Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
+| Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
+| Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
+
+The seventeen `_pending operator confirmation_` rows reflect that
+`-Execute` pipeline runs against real Microsoft evaluation ISOs are
+not part of the automated CI surface (the evaluation licence forbids
+public binary distribution; see [`SPEC.md`](./SPEC.md) §B.18 and
+repository-level SPEC.md §12). Confirming these requires a Windows
+host with Administrator privileges, ADK Deployment Tools installed,
+and ≥ 100 GB free on the workspace drive.
 
 ---
 
 ## 1. Static analysis gate
 
-`psa.py` (latest mainline; rule families `PSA1001`..`PSA9002` plus opt-in
-`PSAP0003`..`PSAP0005`) must pass before every commit (see [Part C of
-SPEC.md](./SPEC.md#part-c--quality-gates--validation-checklist)). This
-project opts in to `PSAP0003`, `PSAP0004`, and `PSAP0005`. `PSAP0005` is
-enabled in **strict** mode — `psap0005_relaxed_mode` is intentionally
-NOT set in `.psa.config.json`, because this project was authored from
-scratch under that discipline and has no migration backlog to soften.
-For the canonical version-discovery and refresh workflow, see the
-repository root [`README.md`](../../../README.md) "psa.py Versioning
-Policy".
+`psa.py` (latest mainline; rule families `PSA1001` – `PSA9002` plus
+opt-in `PSAP0001` – `PSAP0005`) must pass before every commit
+(see [SPEC.md](./SPEC.md) Part C). This project opts in to `PSAP0003`,
+`PSAP0004`, and `PSAP0005` via [`.psa.config.json`](./.psa.config.json).
 
-`psa.py` auto-discovers `.psa.config.json` in the current working
-directory, so the canonical invocation is from this script directory:
+### Procedure
+
+From the project directory:
 
 ```bash
-cd scripts/powershell/update-windows-server-iso
 python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
-Expected output:
+### Required gate
 
-```
-==== psa.py: PowerShell Static Analyzer ====
-File   : Update-WindowsServerIso.ps1
-Lines  : 7368
-Issues : 0 errors, 0 warnings, 0 info
+| Severity | Threshold |
+|:---|:---|
+| Errors | 0 |
+| Warnings | 0 |
+| Info | 0 |
 
-  (no issues found)
-```
+Any finding at any severity blocks the commit. The current build
+satisfies the gate; verified count: see the §0 row "`psa.py` (latest
+mainline)".
 
-The local `.psa.config.json` populates `psa2010_known_cmdlets` with the
-DISM, Storage, and Hyper-V cmdlet families used by this script.
-Microsoft's in-box cmdlets are not in `psa.py`'s built-in known-cmdlet
-table, so listing them in the project config silences `PSA2010`
-(undefined function call) without disabling the rule globally. No
-`PSAxxxx` rule is disabled at project level; all findings are
-addressed at the source via either a fix or a line-local
-`# psa-disable-line` comment with an inline justification.
+### Suppression policy
 
-PSScriptAnalyzer 1.25.0 must also report zero findings against the
-project `PSScriptAnalyzerSettings.psd1`:
-
-```powershell
-Invoke-ScriptAnalyzer `
-  -Path Update-WindowsServerIso.ps1 `
-  -Settings PSScriptAnalyzerSettings.psd1 `
-  -Recurse
-```
-
-Expected output: empty (zero findings).
+Project-local suppressions are recorded in [`.psa.config.json`](./.psa.config.json)
+with rationale; inline `# psa-disable-line <rule> -- reason` comments
+are used only where a suppression is genuinely line-scoped. Both forms
+are reviewed at every PR per the repository CONTRIBUTING.md PR checklist.
 
 ---
 
-## 2. Unit tests for deterministic helpers
+## 2. Synthetic smoke tests
 
-The script's deterministic helpers (those that take no I/O and no
-mutable global state) carry in-process unit tests that the maintainer
-runs alongside the static-analysis gate. The tests load the script as
-a library via dot-sourcing through `-Action ListPhases` (which exits
-without doing any I/O once the registry has been printed), then
-exercise the helpers directly with hand-crafted inputs.
+These tests exercise the script's branches that are safe to run in a
+Linux + pwsh 7 CI environment (or a Windows runner without ADK), and
+form the per-commit gate alongside §1.
 
-### 2.1 PatchPlan engine (`Build-PatchPlan`, `Get-PatchTargetsForType`)
-
-| Case | Input | Expected outcome |
-|------|-------|------------------|
-| Typical monthly set | SSU + LCU + .NET + SafeOS + Setup | Install: 3 patches (SSU, .NET, LCU); Boot: 2 (SSU, LCU); WinRE: 2 (SSU, SafeOS); Setup: 1 |
-| LP / LXP routing | LCU + LP + LXP | LP appears in Install AND WinRE; LXP is Install-only |
-| Unknown Type | Patch with `Type='Mystery'` | Falls back to `[Install]` with a one-time warning; `_UnknownTypes` contains `'Mystery'` |
-| Empty input | `@()` | All four target lanes are empty arrays; `_PatchCount` is 0 |
-
-Verified at r04 build — 4/4 PASS.
-
-### 2.2 Sub-phase sequence builders (`Build-InstallApplySequence`, `Build-BootApplySequence`, `Build-WinReApplySequence`)
-
-| Case | Input | Expected outcome |
-|------|-------|------------------|
-| Install WITHOUT language pack | SSU + LCU + .NET | I7 (LCU SecondPass) is NOT emitted; sequence ends at I6.CleanupAndExport |
-| Install WITH language pack | SSU + LP + LCU + .NET | I7 IS emitted with `RequiresRemount = $true` and contains the LCU |
-| Boot sequence | SSU + LP + LCU | B1.SSU -> B2.LanguagePack -> B3.LCU -> B4.CleanupAndExport (no twice-apply) |
-| WinRE sequence | SSU + LP + SafeOsDU + LCU | W1.SSU -> W2.LanguagePack -> W3.SafeOsDU -> W4.CleanupAndExport (LCU is explicitly NOT in WinRE) |
-| Empty input | `@()` | All three sequences emit their skeleton sub-phases, all with 0 patches; no I7 |
-
-Verified at r04.1 build — 5/5 PASS.
-
-### 2.3 Supersedence-aware deduplication (`Select-LatestPatchBySupersedence`, `Get-KbIdFromUpdateTitle`)
-
-| Case | Input | Expected outcome |
-|------|-------|------------------|
-| Clear supersedence | Two LCU candidates; cand2.Supersedes contains cand1.KbId | Best = cand2; Excluded = [cand1] with `Reason = "Superseded by ..."` |
-| Single candidate | One LCU candidate | Best = that one; Excluded = `@()` |
-| Ambiguous (no relation) | Two LCU candidates with empty Supersedes on both sides | Best = the one with the lexicographically-later Title (because Catalogue titles start with `YYYY-MM`); Excluded = the other with `Reason = "Ambiguous; chose newest by title"` |
-| UpdateId-based match | Supersedes contains the UpdateId GUID, not the KbId | Substring match still succeeds; Best = the superseding candidate |
-| Empty input | `@()` | Best = `$null`; Excluded = `@()` |
-
-Verified at r04.2 build — 5/5 PASS.
-
----
-
-## 3. Synthetic smoke tests
-
-These tests exercise the orchestration without touching real Microsoft
-binaries. They are safe to run on any host with PowerShell 7+ (or
-Windows PowerShell 5.1 on a Windows host).
-
-### 3.1 Smoke 1 — `-Action ListPhases`
+### 2.1 ListPhases — read-only inventory dump
 
 ```powershell
 .\Update-WindowsServerIso.ps1 -Action ListPhases
 ```
 
-Acceptance: exit code 0; the registry table prints 13 phases
-(P01..P13 plus P03, P06, A01, A02) and the Action table lists 11
-actions (Prepare, Build, Verify, PrepareBuildVerify, BootTest, All,
-Cleanup, ListPhases, GenerateManifest, RefreshAllBaselines,
-DumpFieldClassification).
+Expected: JSON document on stdout containing the registered Phase and
+Action registries. Exits 0. No filesystem writes.
 
-### 3.2 Smoke 2 — `-EnvironmentInfoOnly`
+Verification checklist:
 
-```powershell
-.\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly -WorkRoot 'C:\Temp\uwsi-smoke2'
-```
+- [x] 13 phase IDs P01 – P13 present
+- [x] 13 Actions present (Prepare / Build / Verify / PrepareBuildVerify / BootTest / All / Cleanup / ListPhases / GenerateManifest / RefreshSnapshots / RefreshAllBaselines / DumpFieldClassification / TestHarness)
+- [x] 3 Admin phases A01 – A03 present
+- [x] `RefreshDependencyDatabase` is **not** in the Action list (planned r09.0)
 
-Acceptance: exit code 0; P01 runs Step 0 (PowerShell environment
-dump) and exits cleanly. Subsequent phases are not invoked.
-
-### 3.3 Smoke 3 — Synthetic + DryRun
+### 2.2 EnvironmentInfoOnly — environment dump and exit
 
 ```powershell
-.\Update-WindowsServerIso.ps1 `
-  -Action PrepareBuildVerify `
-  -OsVersion Server2019 -OsLanguage en-us `
-  -SyntheticTestMode -DryRun -SkipEnvCheck `
-  -WorkRoot 'C:\Temp\uwsi-smoke3'
+.\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly
 ```
 
-Acceptance on Windows: phases P01..P13 all reach DONE / SKIPPED
-(P05 and P06 are deliberately removed from the phase list when
-`-SyntheticTestMode` is on; the synthetic ISO is not a valid ISO9660
-image and `Mount-DiskImage` would reject it). The PatchPlan summary
-prints all three sub-phase sequences (InstallSequence,
-BootSequence, WinReSequence) with zero patches in each lane.
+Expected: P01 Step 0 banner + P01 Step 1 environment dump. Exits inside
+P01; no other phase runs.
 
-Acceptance on Linux pwsh: phases P01..P03 complete; P04 fails at
-`New-SyntheticTestIso` because `dism.exe` is not available on Linux.
-This is expected and not a regression.
+Verification checklist:
 
-### 3.4 Smoke 4 — `-Action DumpFieldClassification`
+- [x] PowerShell host detection prints `PowerShell <version>`
+- [x] Admin-privilege probe runs and prints `Admin: True/False`
+- [x] Disk free-space probe runs against the `-WorkRoot` drive
+- [x] No DISM call, no patch download
 
-```powershell
-.\Update-WindowsServerIso.ps1 -Action DumpFieldClassification -SkipEnvCheck -WorkRoot 'C:\Temp\uwsi-smoke4'
+### 2.3 TestHarness — Python-driven PS function harness (T3)
+
+```bash
+python3 tests/powershell_harness.py
 ```
 
-Acceptance: exit code 0; `<WorkRoot>\logs\A02_FieldClassification.json`
-is written and contains a top-level `Schema = "2.0"`, `GeneratedAt`,
-`ScriptVersion`, and a `FieldGroups` array of four entries (Common,
-PatchBaseline, LanguageSpecific.<lang>.Iso, and
-LanguageSpecific.<lang>.LanguageSpecificPatches).
+Expected: 7 assertions pass (PowerShell function-level tests for the
+parser / scope / resolver helpers).
 
-### 3.5 Smoke 5 — `-Action RefreshAllBaselines -DryRun`
+Verification checklist:
+
+- [x] Harness launches `.\Update-WindowsServerIso.ps1 -Action TestHarness` in a sub-process
+- [x] JSON-over-stdin REPL accepts each function-call payload
+- [x] Each of the 7 assertions returns a stable shape
+
+### 2.4 DryRun mode — Setup / Fetch / Plan only
 
 ```powershell
 .\Update-WindowsServerIso.ps1 `
-  -Action RefreshAllBaselines -DryRun `
-  -OnlyOs Server2025 -SkipEnvCheck `
-  -WorkRoot 'C:\Temp\uwsi-smoke5'
+    -Action PrepareBuildVerify `
+    -OsVersion Server2019 -OsLanguage ja-jp `
+    -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
+    -PatchDirectory 'D:\Patches\Server2019\2026-05' `
+    -WorkRoot 'D:\UpdateWsi' `
+    -DryRun
 ```
 
-Acceptance:
-- Exit code 2 (Manual fields require operator fill — by design, because
-  `LanguageSpecific.<lang>.Iso._VerifiedDate` is empty out of the box
-  and the IsoRelease cadence has no auto Refresher).
-- `<WorkRoot>\logs\A01_RefreshAllBaselines_report.csv` is written with
-  one row per (OsKey, Lang, Group) combination.
-- Per-group decision logged with the correct cadence:
-  - `Common` → `Skip` (verified)
-  - `PatchBaseline` → `Monthly` (auto-refresh)
-  - `LanguageSpecific.en-us.Iso` and `LanguageSpecific.ja-jp.Iso` → `Manual`
-  - `LanguageSpecific.en-us.LanguageSpecificPatches` and `LanguageSpecific.ja-jp.LanguageSpecificPatches` → `Monthly`
+Expected: P01 – P06 execute; P07 – P13 are explicitly marked SKIPPED in
+the Phase Timing Summary; exit 0.
 
-### 3.6 Smoke 6 — `-Mode Force` override
+Verification checklist:
+
+- [x] P01 – P06 banner blocks each have a complete header + footer
+- [x] P07, P08, P09, P10, P11, P12, P13 all log SKIPPED with reason "DryRun"
+- [x] No DISM mount call appears in the log
+- [x] Phase Timing Summary at the end of the run lists all 13 phases with their state
+
+### 2.5 SyntheticTestMode — CI full pipeline
 
 ```powershell
 .\Update-WindowsServerIso.ps1 `
-  -Action RefreshAllBaselines -DryRun -Mode Force `
-  -OnlyOs Server2025 -OnlyLanguage ja-jp -SkipEnvCheck `
-  -WorkRoot 'C:\Temp\uwsi-smoke6'
+    -Action PrepareBuildVerify `
+    -OsVersion Server2019 -OsLanguage ja-jp `
+    -SyntheticTestMode `
+    -WorkRoot 'D:\UpdateWsi_synth' `
+    -Execute
 ```
 
-Acceptance: under Force, the `Common` group decision changes from
-`Skip` to `Manual` (Refresher absent for the Stable cadence); the
-en-us language is filtered out by `-OnlyLanguage ja-jp`.
+Expected: Full P01 – P13 pipeline runs against synthetic WIM/MSU/CAB
+inputs (no Microsoft asset download). P03 and P06 are bypassed
+(per SPEC.md §B.14). Output ISO is generated and validated by P11.
 
-### 3.7 Smoke 7 — `-Mode Initial`
+Verification checklist:
 
-```powershell
-.\Update-WindowsServerIso.ps1 `
-  -Action RefreshAllBaselines -DryRun -Mode Initial `
-  -OnlyOs Server2025 -SkipEnvCheck `
-  -WorkRoot 'C:\Temp\uwsi-smoke7'
-```
-
-Acceptance: from the baseline state (no `_VerifiedDate` on the patch
-groups), Initial mode produces the same decisions as Monthly — both
-trigger the PatchTuesday Refresher.
+- [x] No `microsoft.com` / `update.microsoft.com` HTTP call
+- [x] Synthetic WIM bytes are emitted by the test harness, not extracted from a real ISO
+- [x] P09 produces a non-zero-byte `synthetic_<OsKey>.iso` under `<WorkRoot>/output/`
+- [x] P11 verifies the synthetic ISO and emits the verification log
+- [x] CI Stage 3 runs this end-to-end on every push to main
 
 ---
 
-## 4. Live Catalogue verification (read-only)
+## 3. Live Catalogue verification
 
-Smoke 5 above also doubles as the live Microsoft Update Catalogue
-verification. It performs read-only network calls against
-`catalog.update.microsoft.com` to confirm that the production HTTP
-scrape path still works:
+These probes catch Microsoft-side schema or hosting drift. They
+require unrestricted egress to `*.microsoft.com` and run on cadence
+rather than on every commit.
 
-- The OS-aware query templates (per
-  [SPEC.md §B.12](./SPEC.md#b12-patchplan-engine-and-wim-target-mapping-r04))
-  return non-empty results for Server2025 + the current month.
-- The Combined-LCU detection (`Test-IsCombinedLcuTitle` +
-  `Test-IsLcuSsuCombinedMonth`) correctly identifies months where
-  Microsoft has not published a standalone SSU.
-- The supersedence-aware deduplication (
-  [SPEC.md §B.15](./SPEC.md#b15-supersedence-aware-catalogue-candidate-selection-r042))
-  fires when the narrowed candidate count exceeds 1. As of the r04.2
-  build verified on 2026-05 data, the LCU query for Server2025
-  returns two candidates (the canonical LCU and a `.NET Framework
-  3.5 and 4.8.1` cumulative update that matches the OS Title token
-  as a false positive); the dedup correctly excludes the false
-  positive.
+### 3.1 T1 — Microsoft Update Catalog probe
 
-The Catalogue HTML structure changes occasionally without notice.
-The maintainer relies on the **CI Stage 4 monthly-refresh workflow**
-(see §6 below) to catch such changes within ~30 days of occurrence.
+```bash
+python3 tests/catalog_probe.py --check all
+python3 tests/catalog_probe.py --snapshot   # writes tests/snapshots/last_probe.json
+```
+
+Expected: ~7 live checks pass (search response shape, per-OS title
+formats, supersedence panel, ScopedViewInline.aspx detail page). On
+schema drift, the failure message identifies which check broke and
+which `data/config-Server*.json` `TitleTokens` array likely needs
+updating.
+
+### 3.2 T4 — Evaluation ISO endpoint check
+
+```bash
+python3 tests/eval_iso_probe.py
+```
+
+Expected: 4 OS × 2 languages = 8 HTTP HEAD requests against the
+`download.microsoft.com` fwlink targets resolve to live URLs with
+size + Last-Modified consistent with the values in
+`data/config-Server*.json` `LanguageSpecific.<lang>.Iso`.
+
+### 3.3 T5 — `wsusscn2.cab` freshness
+
+```bash
+python3 tests/wsusscn2_probe.py
+```
+
+Expected: live `wsusscn2.cab` URL responds; size > 0; Last-Modified
+within the last 60 days. A warning is emitted if older than 60 days
+(Microsoft is missing a monthly refresh).
+
+### 3.4 When to run these
+
+| Trigger | Tools to run |
+|---|---|
+| Before a release commit | T1, T4, T5 |
+| Monthly (the 15th, post Patch Tuesday) | T1, T4, T5 (automated by Stage 4) |
+| When P03 / P04 begin failing in unexpected ways | T1 first to confirm whether Microsoft changed shape |
+| Before running an `-Execute` build | T5 (so the embedded `wsusscn2.cab` step has the right cab to read) |
 
 ---
 
-## 5. Operator-pending: real ISO integration
+## 4. Operator-pending: real ISO integration
 
-The script's primary deliverable — a patched, bootable Server ISO —
-has not been validated end-to-end by the maintainer because no
-suitable Windows host with DISM access has been available. The
-documented procedure is available in [SPEC.md Part C](./SPEC.md#part-c--quality-gates--validation-checklist)
-and consists of, in order:
+Real-run verification (`-Execute` against a downloaded Microsoft
+evaluation ISO) cannot be automated by CI because:
 
-1. Acquire an evaluation ISO for the target Server SKU from Microsoft.
-2. Run `-Action Prepare` to populate the workspace.
-3. Run `-Action Build -Execute` to mount, patch, cleanup, and re-emit.
-4. Boot the resulting ISO in a Hyper-V VM and confirm Windows Setup
-   completes; confirm `winver` reports the expected post-update build
-   number (`PatchBaseline.TargetBuildAfterUpdate` from the
-   `data/config-<OsKey>.json`).
+- The evaluation licence forbids public redistribution of the
+  Microsoft binaries (ISO, MSU, CAB).
+- The pipeline requires ≥ 100 GB free disk space, ADK Deployment
+  Tools, and Administrator privileges, none of which fit a typical
+  GitHub-hosted runner.
+- A successful pipeline may take 40 – 90 minutes per OS family; the
+  test budget for per-commit CI is incompatible with that.
 
-The results table for §5 is intentionally empty until an operator
-runs the procedure end-to-end. Submitting results back to this file
-via PR is welcomed.
+The operator-pending verification is **out-of-band**. The expected
+procedure is below; results from past real runs are recorded in
+[`CHANGELOG.md`](./CHANGELOG.md) and the `docs/history/` cycle reports.
 
-### 5.1 Expected outcomes (theoretical, not yet verified)
+### 4.1 Procedure
 
-For Server 2025 / en-us with the 2026-05 baseline, the expected
-result is:
+1. Provision a Windows 11 / Windows Server 2022 host with ≥ 200 GB
+   free disk on the working volume.
+2. Install Windows ADK Deployment Tools (or pass `-AutoInstallAdk`).
+3. Pre-stage an evaluation ISO (e.g. via `-EvalIsoMode -IsoUrl
+   <fwlink>` or place it manually and pass `-IsoPath`).
+4. Run:
 
-| Item | Expected value |
-|------|---------------|
-| `install.wim` index count | 4 (Standard / Standard Core / Datacenter / Datacenter Core) |
-| `boot.wim` index count | 2 |
-| `winre.wim` build number after patching | 26100.NNNN matching `PatchBaseline.TargetBuildAfterUpdate` |
-| Output ISO size | Within ~30% of the input ISO size |
-| DISM exit codes during P07/P08 | All zero (no 0x800f0823 servicing-stack mismatch; the pre-apply dependency closure check should have surfaced any mismatch before DISM) |
+   ```powershell
+   .\Update-WindowsServerIso.ps1 `
+       -Action PrepareBuildVerify `
+       -OsVersion Server2019 -OsLanguage ja-jp `
+       -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
+       -PatchDirectory 'D:\Patches\Server2019\2026-05' `
+       -WorkRoot 'D:\UpdateWsi_2019' `
+       -Execute
+   ```
+
+5. Record the P13 FinalReport hash and elapsed time in
+   [`CHANGELOG.md`](./CHANGELOG.md) under the current revision.
+
+### 4.2 Known operator-pending items in the current revision
+
+| Item | Note |
+|---|---|
+| Server 2016 `-Execute` build | KB5088064 SSU prerequisite issue documented in [`docs/history/r08.0-step4-findings-and-dependency-investigation.md`](./docs/history/r08.0-step4-findings-and-dependency-investigation.md). Once §B.19 (Servicing Dependency Database) is implemented in r09.0, P06 will catch this at validation time. In the interim, operators must add the prerequisite SSU manually to `data/config-Server2016.json` |
+| Mojibake in P05 WIM-index banner | Did **not** reproduce in r08.0 Step 17 when `-WorkRoot` was changed from `D:\UpdateWsi` to `D:\UpdateWsi_2016`. Working hypothesis is now DISM mount-cache state corruption from prior aborted P10 runs, not console rendering. Workaround: use a fresh `-WorkRoot` per OS family. See [SPEC.md](./SPEC.md) §D.25 |
+
+---
+
+## 5. Self-verification tool suite (T1 – T10)
+
+The `tests/` directory ships ten Python tools. The authoritative
+inventory lives in [`tests/README.md`](./tests/README.md); §0 above
+mirrors their current status. The full design rationale is in
+[SPEC.md](./SPEC.md) §C.9.
+
+### Quick run reference
+
+```bash
+# Offline tests — safe everywhere
+python3 tests/catalog_fixture_test.py        # T2: 13 fixture assertions
+python3 tests/powershell_harness.py          # T3: 7 PS function assertions
+python3 tests/release_info_parser_test.py    # T6: 13 release-info parser assertions
+python3 tests/dotnet_cu_parser_test.py       # T7: 16 .NET CU parser assertions
+python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
+python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
+python3 tests/release_info_resolver_test.py  # T10: 18 resolver assertions
+
+# Live tests — require unrestricted egress
+python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog
+python3 tests/eval_iso_probe.py              # T4: Server<N> ISO CDN
+python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
+```
+
+### Determinism categories
+
+- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6, T7, T8, T9, T10.
+- **Live-network** (Stage 4 monthly + ad-hoc): T1, T4, T5.
+
+### Planned T11 (r09.0+)
+
+A new tool — provisionally `wsusscn2_parser_test.py` — is planned to
+provide offline regression coverage for the §B.19 Master XML parser
+(`ConvertFrom-WsusScnPackageXml`, `New-WsusScnDependencyDatabase`).
+It is **not yet implemented**; the current canonical T-set ends at T10.
 
 ---
 
 ## 6. Continuous integration coverage
 
-The four GitHub Actions workflows for this project are documented in
-[`README.md`](./README.md) "Continuous Integration" section. CI runs
-that mirror the local smoke tests in §3 above will surface the same
-status; CI runs that exercise paths only reachable on Windows
-(Stages 2 / 3 / 4) are needed before the §5 status can be filled in.
+Four GitHub Actions workflows together provide automated coverage of
+§1, §2, §3, and §5 above.
 
-The CI workflows themselves do NOT run the §5 real-ISO integration:
-distributing Microsoft evaluation ISO bytes is forbidden by the
-evaluation licence (see [`README.md`](./README.md) "License" and the
-inline comments in each workflow's
-`scripts__powershell__update-windows-server-iso__stage3__synthetic.yml`).
-Stage 3 uses a synthetic ISO produced by `New-SyntheticTestIso`.
+### 6.1 Stage 1 — Linux psa.py + PSScriptAnalyzer + offline T-suite
 
-The Stage 4 (monthly-refresh) workflow is the operational complement
-to §4 live Catalogue verification: it runs `-Action
-RefreshAllBaselines` on the 15th of every month and opens an
-automated PR when `data/config-<OsKey>.json` baselines diverge from the
-committed state. Successful Stage 4 runs are themselves a form of
-continuous verification that the Catalogue scrape paths still work.
+File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml`
 
----
+| Step | Tool | Purpose |
+|---|---|---|
+| 1 | `psa.py` | Static analysis on `Update-WindowsServerIso.ps1` |
+| 2 | `Invoke-ScriptAnalyzer` (pwsh 7) | PSScriptAnalyzer with project `PSScriptAnalyzerSettings.psd1` |
+| 3 | T2 | `catalog_fixture_test.py` (13 assertions) |
+| 4 | T3 | `powershell_harness.py` (7 assertions) |
+| 5 | T6 – T10 | Five offline parser / cache / resolver regression tests |
 
-## 6.5 Self-verification tools (`tests/`)
+Triggers: every push, every PR. Required to merge.
 
-Independent of the PowerShell-side gates above, the `tests/`
-subdirectory ships a Python-based self-verification suite that
-both Claude and human operators can run to confirm the script's
-external dependencies still behave as documented. The suite was
-added in r04.4 in response to the three live-test bugs found in
-r04.3 — all of which were caused by silent Microsoft-side
-change that no static analysis could have caught.
+### 6.2 Stage 2 — Windows PSScriptAnalyzer + parse + read-only smoke
 
-The full inventory is documented in
-[`./tests/README.md`](./tests/README.md) and in
-[`SPEC.md` Part G](./SPEC.md#part-g--self-verification-tools-tests).
-Quick orientation:
+File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage2__windows.yml`
 
-| Tool | Run when | Network |
-|---|---|:---:|
-| `tests/catalog_probe.py`        (T1) | Before/after any Catalogue-related code change; monthly | Yes |
-| `tests/catalog_fixture_test.py` (T2) | Every commit that touches parsers or TitleTokens | No  |
-| `tests/powershell_harness.py`   (T3) | Every commit that touches a PS scrape helper | No  |
-| `tests/eval_iso_probe.py`       (T4) | Before release; when Microsoft Evaluation Center publishes a new snapshot | Yes |
-| `tests/wsusscn2_probe.py`       (T5) | Before running P06; monthly | Yes |
+| Step | Tool | Purpose |
+|---|---|---|
+| 1 | `Invoke-ScriptAnalyzer` (Windows PS 5.1) | PSScriptAnalyzer against the Windows 5.1-specific rule subset |
+| 2 | `[System.Management.Automation.Language.Parser]::ParseFile` | Confirm the script parses cleanly under Windows PowerShell |
+| 3 | `-Action ListPhases` | Read-only inventory dump |
+| 4 | `-EnvironmentInfoOnly` | P01-only environment dump |
 
-T2 and T3 are deterministic and should be part of every PR check.
-T1, T4, T5 are environment-sensitive (they need real network access)
-and belong in the monthly CI workflow.
+Triggers: every push, every PR.
 
-### Refreshing fixtures
+### 6.3 Stage 3 — Synthetic full pipeline (Windows + ADK)
 
-The `tests/fixtures/2026-05/` HTML files were captured during r04.4
-implementation. To refresh them for a new patch month, see
-[`tests/README.md`](./tests/README.md). The fixture-collection
-helper is documented there; in short:
+File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage3__synthetic.yml`
 
-1. Run `python3 catalog_probe.py --check all --patch-month 2026-06`
-   to confirm Catalog is queryable for the new month.
-2. Re-collect the 6 HTML files and regenerate `expected.json` via
-   the documented script in `tests/README.md`.
-3. Commit both the HTML and the `expected.json` together so T2 has
-   a deterministic regression baseline for that month.
+| Step | Tool | Purpose |
+|---|---|---|
+| 1 | ADK installer | Install Windows ADK Deployment Tools on the runner |
+| 2 | `-Action PrepareBuildVerify -SyntheticTestMode -Execute` | Full P01 – P13 pipeline against synthetic inputs |
+| 3 | Post-run assertions | Verify the synthetic output ISO exists, is non-zero, and parses |
+
+Triggers: push to `main`, manual dispatch. **No artifact upload** of
+the synthetic ISO (consistent with the evaluation-licence boundary
+documented in §B.18 and repository SPEC.md §12).
+
+### 6.4 Stage 4 — Monthly baseline refresh + auto-PR
+
+File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml`
+
+| Step | Action | Purpose |
+|---|---|---|
+| 1 | `-Action RefreshSnapshots` | Refresh upstream `data/raw-*` + `data/cache-*` |
+| 2 | `-Action RefreshAllBaselines` | Regenerate `data/config-Server*.json` from caches |
+| 3 | T1 + T4 + T5 | Live Catalogue / ISO endpoint / wsusscn2 probes |
+| 4 | `peter-evans/create-pull-request` | If `data/config-*.json` changed, open a PR (restricted via `add-paths`) |
+
+Triggers: `cron: 0 2 15 * *` (02:00 UTC on the 15th of each month;
+3 days after the second-Tuesday Patch Tuesday), manual dispatch.
+Manual dispatch accepts four inputs: `mode`, `onlyOs`, `onlyLanguage`,
+`dryRun`. Failed runs do not block other workflows (this is an
+operations workflow, not a quality gate).
+
+### 6.5 What CI does NOT cover
+
+- Real `-Execute` builds against downloaded Microsoft evaluation ISOs (see §4)
+- Hyper-V `-Action BootTest` (requires nested virtualisation; no CI runner has this)
+- Operator-side Microsoft Update Catalogue scraping outside of CI Stage 4
 
 ---
 
 ## 7. Discovered bugs and fix history
 
-| Build | Symptom | Root cause | Fix |
-|-------|---------|-----------|-----|
-| r02.5 | `Resolve-PatchSetFromCatalog` picked the wrong KB when the OS Title token matched a neighbouring KB (e.g. ".NET Framework 3.5 and 4.8.1 Cumulative Update" for the LCU query on Server2025) | Single-candidate `narrowed[0]` selection with no supersedence cross-check | r04.2 added `Select-LatestPatchBySupersedence` to dedup multi-candidate narrowed results via the Supersedes / SupersededBy data |
-| r03 | `Common` and `PatchBaseline` field groups were never iterated in `A01.RefreshAllBaselines` when `-Mode Force` was used | PowerShell 7 quirk: `if ($cond) { $arr } else { @($null) }` collapses to a bare `$null` instead of a single-element array, so the outer `foreach ($lang in $iterLangs)` body never ran for non-per-language groups | r03 fix: replace with explicit `if ($cond) { $iterLangs = @($supported) } else { $iterLangs = ,$null }` using the comma operator to force a 1-element array |
-| r02.2 | Phase functions called `Start-DebugTrace -PhaseName` but the implementation only accepted `-Context / -PhaseId` | API renamed during r02 split-out but not all callers updated | r02.2 cleanup pass; PSScriptAnalyzer would have caught this if PSAvoidUsingUndeclaredParameterNames had been enabled |
-| r02.3 | Legacy error helpers used positional arguments inconsistent with newer call sites | Mid-refactor state | r02.3 standardised on `Add-ErrorJsonlEntry -Phase / -Kind / -Properties` |
-| r04.2 | Every `Type` field on Catalogue-derived `NeutralPatches` entries was computed by file-name heuristics in `Get-PatchType`, mis-classifying SSU / Safe OS DU / umbrella .NET CU sub-files as `LCU` because their file names lack the expected distinguishing token | The classifier ignored the Catalogue search context (`$q.Type`), which already knew the authoritative Type | r04.3 added `-KnownType` parameter to `Convert-CatalogPatchToBaselineEntry`; `Resolve-PatchSetFromCatalog` now passes `$q.Type` so the heuristic is bypassed when the caller has context. See SPEC §D.20 |
-| r04.2 | Server 2022 baseline refresh returned **zero** patch entries; every narrow filter dropped all hits | Microsoft Update Catalogue dropped the comma in Server 2022 update titles ("...operating system, version 21H2" → "...operating system version 21H2"); the hard-coded TitleToken did a `[regex]::Escape` literal match and the comma-bearing template no longer matched anything live | r04.3 changed `TitleTokens` to a multi-form array that accepts both the comma and comma-less variants; the live `Search.aspx` query strings were also updated to the current form. See SPEC §D.19 |
-| r04.2 | Umbrella .NET CU UpdateIds (e.g. Server 2019 KB5088864 bundling 4.7.2 and 4.8) lost N-1 sub-files; `Resolve-PatchSetFromCatalog` only kept the highest-scoring single MSU | `Select-CanonicalPatchFile` returns only one result; without an explicit `-DotNetVersion` hint it cannot break the tie between two ndp-runtime variants of the same umbrella KB | r04.3 added `Select-AllCanonicalPatchFiles` and routed `Type='DotNet'` queries through it. Each surviving MSU now gets its own `NeutralPatches` entry sharing `KbId` / `Title` / `UpdateId` / `Supersedes` from the umbrella KB. See SPEC §D.21 |
+The per-revision pitfall catalogue with stable IDs (`D.1` – `D.30`)
+lives in [`SPEC.md`](./SPEC.md) Part D. Each entry records: the
+revision where the bug was observed, the symptom, the root cause, the
+fix applied, and any cross-references to `docs/history/` cycle reports.
 
-For per-release detail see [`CHANGELOG.md`](./CHANGELOG.md).
+This document does not duplicate that catalogue. Two highlights from
+the current cycle:
+
+- **D.25 Mojibake investigation**: P05 WIM-index banner produced doubled
+  Japanese characters in r08.0 Step 16; the cycle report
+  [`docs/history/mojibake-investigation-note.md`](./docs/history/mojibake-investigation-note.md)
+  captures the investigation. Working conclusion: DISM mount-cache
+  state corruption from prior aborted P10 runs, mitigated by using a
+  fresh `-WorkRoot` per OS family.
+- **r08.0 Step 4 KB5088064 SSU finding**: Server 2016 `-Execute` builds
+  failed with `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` because
+  the LCU's prerequisite SSU was not in the baseline. Investigation in
+  [`docs/history/r08.0-step4-findings-and-dependency-investigation.md`](./docs/history/r08.0-step4-findings-and-dependency-investigation.md)
+  motivated the r09.0 [`SPEC.md`](./SPEC.md) §B.19 Servicing Dependency
+  Database design.
+
+For the full catalogue of pitfalls and fixes, see SPEC.md Part D.
