@@ -16,6 +16,140 @@ the script and follows the
 
 ## [Unreleased]
 
+### r08.0 Step 4 series - cumulative code bug fixes + SPEC Part I (Servicing Dependency Database) specification
+
+This Step 4 series spans three connected modes:
+
+1. **Step 4a/4b/4c — Code bug fixes**: cumulative bug-fix work
+   uncovered while running the first real `Build -Execute` against
+   Server 2016 ja-jp EVAL ISO post r08.0 Step 3. Four distinct bugs
+   were found across the PatchType handling, ReadOnly attribute,
+   Transcript lifecycle, and Export-DebugTraceJson invocation paths.
+   These fixes have been validated on Windows PowerShell 5.1 Desktop
+   on Server 2025 and pass all quality gates, and have been
+   committed separately as `84d840e` (Step 4a) and `df89c6f`
+   (Step 4b/4c combined). Server 2016 Build -Execute itself
+   remains blocked on the SSU prerequisite uncovered in Step 4d
+   (see below).
+
+2. **Step 4d — Servicing Stack dependency investigation**: after
+   Step 4c, `Add-WindowsPackage` failed with
+   `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED`. Investigation
+   established this is a configuration problem (missing KB5088064 SSU
+   entry in `config-Server2016.json`), not a code bug. The investigation
+   record is captured in
+   `docs/history/r08.0-step4-findings-and-dependency-investigation.md`.
+
+3. **SPEC Part I (Servicing Dependency Database)** — the design
+   specification for resolving the class of failures uncovered in
+   Step 4d. This commit ships the Part I spec only; implementation
+   is deferred to r09.0.
+
+`ScriptVersion`: `update-wsi-2026.05.27-r08.0` (unchanged, same day; spec-only revision)
+
+**SPEC.md additions**.
+
+- New **Part I — Servicing Dependency Database (r09.0+, normative)**
+  added at the end of SPEC.md (~960 lines). Defines:
+    - I.1: Goals — eliminate the "discover prerequisite failure at
+      P07 mid-mount" anti-pattern; pull failure detection forward
+      to P06 with Microsoft-authoritative data.
+    - I.2: Three-layer architecture:
+      - Layer 1 = `data/config-Server*.json` (per-OS summary embedded
+        into `PatchBaseline.NeutralPatches[*]`, git-tracked).
+      - Layer 2 = `data/wsusscn2-database.json` (aggregated facts-only
+        extract from wsusscn2.cab, ~2-5 MB, git-tracked, NO Microsoft
+        prose).
+      - Layer 3 = `<WorkRoot>/cache/wsusscn2/` (raw ~1 GB
+        `wsusscn2.cab`, gitignored).
+    - I.3: Data source — CDN URL, monthly cadence, package.xml
+      schema observations.
+    - I.4: Lifecycle — `RefreshAllBaselines` extension + new
+      `-Action RefreshDependencyDatabase` (touches only layer 3).
+    - I.5: File layout, gitignore additions, audit-archive
+      retention policy (rolling 6 months), layer 2 size monitoring
+      target.
+    - I.6: Extraction logic — L2c implementation tier, scope filter
+      (Server 2016/2019/2022/2025 + SSU/LCU/.NET CU/DU, 24-month
+      window), the strict Microsoft-prose exclusion rule, full JSON
+      schema for `wsusscn2-database.json`.
+    - I.7: Layer 1 integration — `RequiresKbIds`, `Supersedes`,
+      `RequiresMinimumOsBuild`, `IsCombined` (auto-overwrite by
+      tool), semi-automatic policy on KB add/remove.
+    - I.8: New `Test-PatchDependencyClosureFromGraph` function spec
+      (the P06-side complement to the existing P07-side
+      `Test-PatchDependencyClosureOnMount` from B.13).
+    - I.9: P06 ValidatePatchSet redesign — split into Stage 1
+      (catalogue freshness, skippable via `-UseBaselineOnly` as
+      today) and Stage 2 (dependency closure verification, runs even
+      under `-UseBaselineOnly`, new `-SkipDependencyCheck` flag for
+      explicit opt-out).
+    - I.10: Air-gapped operation — committed layer 2 enables
+      verification without network access; new `-OfflineCabPath`
+      parameter for manually-supplied wsusscn2.cab regeneration.
+    - I.11: New `_DependencyVerifiedDate` /
+      `_DependencyVerifiedSource` fields (parallel to existing
+      `_VerifiedDate` / `_VerifiedBy`; tool-managed vs human-managed
+      provenance tracked as independent dimensions).
+    - I.12: Maintainer monthly-refresh procedure, PR review
+      checklist.
+    - I.13: Rollout / backward compatibility — strict superset of
+      r08.0 behaviour; missing layer 2 falls back gracefully to
+      existing B.13 logic with WARN.
+- Table of Contents updated to include the new Part I entry.
+- Part E milestone M3's "Done (r02)" claim is now formally
+  superseded by Part I; the Part I header explicitly notes the
+  M3 entry was a placeholder claim that was never implemented
+  beyond the schema slot. Part E itself remains as the roadmap
+  table; M3 status is corrected in spirit by the new Part I,
+  but no edit to the Part E table is made in this commit (Part E
+  is retained as-is for historical traceability).
+
+**Documentation additions**.
+
+- New `docs/history/r08.0-step4-findings-and-dependency-investigation.md`
+  (~435 lines). Captures:
+    - The four code bugs found and fixed in Step 4a-c (ReadOnly
+      attribute, PatchType field-name drift across 6 call sites,
+      Export-DebugTraceJson parameter name, Transcript lifecycle).
+    - The Step 4d investigation: addpkg.log analysis pinpointing
+      `Package_for_RollupFix~31bf3856ad364e35~amd64~~14393.9140.1.19
+      requires Servicing Stack v10.0.14393.7692 but current is
+      v10.0.14393.693`; cross-reference against Microsoft Update
+      Catalog establishing KB5088064 as the canonical SSU
+      prerequisite for KB5087537; identification of the
+      `IsCombined: true` misclaim in `config-Server2016.json` as
+      a manual-config integrity failure.
+    - The Part I design discussion record: all nine design
+      decisions (lifecycle, three-layer structure, scope,
+      placement, phase integration, plus six sub-decisions) and
+      the reasoning behind each.
+    - Lessons-learned section: "code bug vs configuration
+      problem" early triage, helper-function unification to
+      prevent logic drift, spec-first approach for compound
+      problems.
+
+**What this commit does NOT change**.
+
+- `Update-WindowsServerIso.ps1` is unchanged in this specific
+  commit. The Step 4a/4b/4c code fixes were committed
+  independently to `main` as `84d840e` and `df89c6f` prior to
+  this spec-only revision.
+- `config-Server*.json` files are unchanged. The `IsCombined:
+  true` misclaim on KB5087537 is documented in the findings doc
+  but not yet corrected, pending the decision above.
+- No tests changed (Part I is spec-only; tests will be added
+  during r09.0 implementation).
+
+**Quality gates** (SPEC.md / docs only changes).
+
+- Markdown files validate cleanly.
+- No PowerShell file changes in this revision; psa.py / PSScript­
+  Analyzer / T2/T3/T6 status carries forward unchanged from
+  r08.0 Step 3.
+
+---
+
 ### r08.0 Step 3 - Test-OutputIsoPca2023Readiness function and P10/P12/P13 integration
 
 This release adds the output-side post-build verification function

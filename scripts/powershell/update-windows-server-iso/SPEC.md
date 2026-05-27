@@ -39,6 +39,7 @@
 - [Part E — Roadmap](#part-e--roadmap)
 - [Part F — Function Reuse Map](#part-f--function-reuse-map)
 - [Part H — Reference Projects](#part-h--reference-projects)
+- [Part I — Servicing Dependency Database (r09.0+, normative)](#part-i--servicing-dependency-database-r090-normative)
 
 ---
 
@@ -4111,3 +4112,963 @@ as a reserved convention for any future PoC investigation.
 - **[Win_ISO_Patching_Scripts_zhCN](https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN)** — direct source for the 3-tier `etfsboot.com` / `efisys.bin` fallback chain.
 - **[rgl/windows-evaluation-isos-scraper](https://github.com/rgl/windows-evaluation-isos-scraper)** — canonical Windows Server 2022 SHA-256 hashes (en-us); used to seed `data/config-Server2022.json`.
 - **[`Download-SpeakerDeck.ps1`](../download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1)** — sibling in-house script; the canonical source of the Part A common conventions inherited here.
+
+---
+
+# Part I — Servicing Dependency Database (r09.0+, normative)
+
+> **Status**: Specification. Implementation deferred to r09.0 implementation
+> phase. This Part defines the design contract; no code implementing it is
+> present in the script as of r08.0.
+
+> **Scope**: This Part defines a Microsoft-authoritative pre-apply
+> dependency-resolution facility built on top of `wsusscn2.cab` (the
+> WSUS-style offline scan metadata CAB published by Microsoft on the
+> Windows Update CDN). It supersedes and operationalises the placeholder
+> claim in Part E milestone M3 ("P06 ValidatePatchSet integrating
+> wsusscn2.cab … for Microsoft-authoritative dependency check"), which
+> was previously marked Done but in fact remained un-implemented — only
+> the config schema slot `PatchBaseline.WsusScnCab` existed, with no
+> code reading or writing it.
+
+> **Relationship to existing facilities**:
+> - **B.13 Pre-apply dependency closure check** (r04+) — current
+>   implementation uses `Get-WindowsPackage -Mounted` plus the
+>   `RequiresKbIds` array declared in `PatchBaseline.NeutralPatches[*]`.
+>   That array is currently **populated by hand** (or left empty) and
+>   has no Microsoft-authoritative source of truth. Part I makes
+>   `RequiresKbIds` automatically derivable from `wsusscn2.cab`.
+> - **B.10 Config Schema v2.1** §`WsusScnCab` — the slot was added in
+>   r05.0 but never wired up. Part I defines its semantics and the
+>   surrounding lifecycle.
+> - **B.11 Field Cadence and RefreshAllBaselines decision matrix** —
+>   Part I adds new fields whose cadence rows are documented in §I.7.
+
+## I.1 Goals and motivation (informative)
+
+### I.1.1 The anti-pattern this Part eliminates
+
+Without `wsusscn2.cab` integration, a missing prerequisite KB (most
+commonly an SSU required by a recent LCU) is discovered only when
+DISM `Add-WindowsPackage` returns `0x800f0823 -
+CBS_E_NEW_SERVICING_STACK_REQUIRED` from inside P07. By that point
+the operator has paid:
+
+1. Full P04 ISO download (~6 GB)
+2. Full P05 robocopy expand (~30 s)
+3. Full WIM mount (~38 s per index)
+4. Several minutes per `Add-WindowsPackage` attempt before CBS rejects
+
+…only to learn that the patch set was incomplete from the start.
+
+The classic example is **KB5087537** (2026-05 LCU for Server 2016,
+OS Build 14393.9140.1.19): it requires servicing-stack version
+`v10.0.14393.7692` but install.wim from the Server 2016 GA evaluation
+ISO ships with `v10.0.14393.693`. The fix is to apply **KB5088064**
+(2026-05 SSU) first. This dependency is **not** declared anywhere
+inside the `.msu` file; it lives in `wsusscn2.cab`'s `package.xml`
+under the `<Prerequisites>` and `<ApplicabilityRules>` sections.
+
+### I.1.2 What this Part adds
+
+A monthly, offline, Microsoft-authoritative dependency-resolution
+layer that:
+
+- Tells the operator **before P07 starts** that the configured patch
+  set is incomplete, and which KB IDs are missing.
+- Auto-populates `RequiresKbIds` / `Supersedes` / `MinimumOsBuild`
+  on each `PatchBaseline.NeutralPatches[*]` entry, with provenance
+  recorded back to a specific `wsusscn2.cab` SHA-256.
+- Keeps working in fully air-gapped environments, given that the
+  parsed dependency database is committed to `data/` and travels
+  with the repository.
+
+### I.1.3 Cost / benefit assessment
+
+| Cost | Quantum |
+|---|---|
+| Initial `wsusscn2.cab` download | ~1 GB once, ~100–200 MB monthly diff thereafter |
+| Workspace cache footprint | ~1.1 GB |
+| Implementation effort | ~2–3 weeks (L2c-equivalent scope, see §I.6.1) |
+| Maintainer time per Patch Tuesday | ~10–20 minutes (refresh + commit) |
+| Per-user ongoing cost | 0 (uses committed `wsusscn2-database.json`) |
+
+| Benefit | Quantum |
+|---|---|
+| Failure-detection latency | Move from ~10 min (mid-P07) to <5 s (mid-P06) |
+| Recovery cost per detection | Drop from ~10 min (P05 re-extract + remount) to 0 |
+| Auto-recommendation of missing KBs | None today → fully automated |
+| Air-gapped operability | Currently impossible → fully supported |
+| Audit trail (why was this judgement made?) | Currently DISM logs only → reproducible from a specific `wsusscn2.cab` SHA-256 |
+
+One avoided P07 failure already pays back the maintainer's
+month-on-month effort. The r08.0 Step 4 series itself contains one
+such failure (the KB5087537 SSU-prerequisite incident), so the
+break-even is empirically validated.
+
+## I.2 Three-layer architecture (normative)
+
+The dependency facility is structured into three layers with sharply
+different governance rules. **Confusing the layers — for example
+committing layer 3 to git, or deriving layer 1 directly from layer 3
+at runtime — is a specification violation.**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Layer 1: OS-specific dependency attributes                     │
+│  Location: data/config-Server{2016,2019,2022,2025}.json          │
+│  Git:      committed                                             │
+│  Owner:    maintainer-edited, tool-assisted (semi-automatic)     │
+│  Contents: per-KB summary embedded in PatchBaseline.             │
+│            NeutralPatches[*] — RequiresKbIds, Supersedes,        │
+│            RequiresMinimumOsBuild, plus _DependencyVerifiedDate  │
+│            and _DependencyVerifiedSource fields                  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ summary derived from
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Layer 2: WSUS-derived aggregated dependency database           │
+│  Location: data/wsusscn2-database.json                           │
+│  Git:      committed                                             │
+│  Owner:    maintainer-only (regular contributors do not touch)   │
+│  Contents: facts-only extract from wsusscn2.cab — KB IDs,        │
+│            OS build numbers, package relationships. NO           │
+│            Microsoft-authored prose (no KB titles,               │
+│            no descriptions). Size target: ~2–5 MB                │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ parsed and aggregated from
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Layer 3: Raw wsusscn2.cab                                       │
+│  Location: <WorkRoot>/cache/wsusscn2/wsusscn2.cab                │
+│  Git:      NOT committed (gitignored)                            │
+│  Owner:    each user fetches their own copy                      │
+│  Contents: Microsoft-published binary, ~1 GB, monthly cadence   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### I.2.1 Why layer 3 is git-excluded (normative rationale)
+
+Three independent reasons, any one of which is sufficient on its own:
+
+1. **Licence**: `wsusscn2.cab` is a verbatim Microsoft binary
+   distributed under Microsoft Software Licence Terms. Mirroring it
+   on a public GitHub repository constitutes redistribution in a
+   form Microsoft has not authorised. The legal exposure is real
+   even if usually unenforced.
+2. **Size**: 1 GB × monthly cadence = ~24 GB of `.git` history
+   over a 24-month window. This breaks clone times, GitHub upload
+   limits, and contributor onboarding.
+3. **Audit-via-hash**: any judgement made by the dependency
+   resolver references the *SHA-256 of the wsusscn2.cab it consumed*.
+   That hash is recorded in layer 1 and layer 2. Anyone wanting to
+   reproduce the judgement can re-download the exact `wsusscn2.cab`
+   from Microsoft using the hash to verify — there is no need for
+   the project to ship the bytes.
+
+### I.2.2 Why layer 2 IS committed (normative rationale)
+
+Layer 2 is a structured factual extract — KB IDs, version numbers,
+prerequisite relationships, supersedence relationships, OS-build
+applicability rules. These are facts, not Microsoft's creative
+expression, and are well outside the scope of `wsusscn2.cab`'s
+underlying licence. Committing layer 2 lets the repository:
+
+- Be cloned and used immediately, with no 1 GB download on first
+  use (until the user opts into a fresh layer 3 fetch).
+- Function in fully air-gapped environments — only layer 2 needs
+  to travel with the repo.
+- Provide a single canonical source of truth that all contributors
+  see at the same revision.
+
+The expected layer 2 size after the §I.6.3 text-exclusion rule is
+**2–5 MB per OS family scope**, so committing it is feasible. See
+§I.5.3 for the size-evolution monitoring rule.
+
+### I.2.3 Why layer 1 contains only a summary (normative rationale)
+
+Layer 1 (`config-Server*.json`) is the file operators read, edit,
+and review pull requests against. Embedding the full dependency
+graph into it would bloat each OS config to tens of MB and obscure
+the operator-visible decisions (which KBs to include in this
+month's baseline).
+
+The summary embedded into layer 1 is just enough that the **runtime
+code path** can answer "does this set of KBs satisfy their declared
+prerequisites?" without needing to open layer 2. Layer 2 exists for
+the **build-time / refresh-time** code path, which has to compute
+the summary in the first place.
+
+## I.3 Data source: `wsusscn2.cab` (informative)
+
+### I.3.1 What it is
+
+`wsusscn2.cab` is the offline-scan metadata package Microsoft
+publishes for the Windows Update Agent (WUA) COM API method
+`IUpdateSession::CreateUpdateSearcher` with `ServerSelection =
+ssOthers`. It contains the full applicability metadata for every
+update Microsoft has ever shipped for currently-supported product
+families.
+
+### I.3.2 CDN source URL (normative)
+
+```
+https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab
+```
+
+This URL is **already present** in `config-Server*.json` under
+`PatchBaseline.WsusScnCab.SourceUrl` for all four OS families.
+Part I formalises the lifecycle around it.
+
+### I.3.3 Update cadence
+
+`wsusscn2.cab` is refreshed by Microsoft monthly, typically within
+24–48 hours after Patch Tuesday (the second Tuesday of each month).
+The refresh policy defined in §I.4 aligns to that cadence.
+
+### I.3.4 Internal structure (informative)
+
+After CAB expansion, `wsusscn2.cab` contains a single multi-GB
+XML file `package.xml`. The XML schema is **not published by
+Microsoft** as a public specification. The structure has been
+stable for over a decade and is consumed by:
+
+- The official Microsoft WUA COM API (which uses an internal
+  parser).
+- Third-party tools such as `OSDBuilder`, `PSWindowsUpdate`, and
+  `wsusscn2.cab`-based offline patch scanners.
+
+The sections this Part relies on are:
+
+| XML section | Used for |
+|---|---|
+| `<Packages>` / `<Package>` | KB ID enumeration |
+| `<Prerequisites>` | Constructing the `Requires` relation |
+| `<SupersededBy>` | Constructing the `Supersedes` relation |
+| `<ApplicabilityRules>` (specifically `<IsInstallable>`) | Extracting `MinimumOsBuild` |
+| `<Categories>` | Filtering to Server 2016/2019/2022/2025 + .NET CU + DU |
+
+§I.6 specifies the exact extraction logic.
+
+## I.4 Lifecycle (normative)
+
+### I.4.1 Two trigger paths
+
+The dependency database is refreshed via **two distinct entry points**
+with different ownership models:
+
+| Entry point | Who runs it | What it touches | When |
+|---|---|---|---|
+| `-Action RefreshAllBaselines` | maintainer | layer 2 (`data/`) AND layer 1 (`data/config-*.json`) AND layer 3 (their workspace cache) | monthly after Patch Tuesday |
+| `-Action RefreshDependencyDatabase` (new) | any user | layer 3 only (their workspace cache) | any time, optional |
+
+Regular contributors who pull the repo get the maintainer's
+committed layer 2 for free; they never need to download
+`wsusscn2.cab` themselves. The new standalone action exists for
+users who want to verify against a fresher `wsusscn2.cab` than the
+one the maintainer last committed.
+
+### I.4.2 `RefreshAllBaselines` integration (normative)
+
+The existing `RefreshAllBaselines` action gains the following
+sub-phase, executed **before** the existing per-OS catalogue
+scraping:
+
+```
+RefreshAllBaselines order of operations (r09.0+):
+  Step 0:  Refresh wsusscn2.cab (layer 3)
+           - Download from Microsoft CDN if local copy missing or
+             remote-Modified-Since says newer.
+           - Verify SHA-256 against headers if available.
+  Step 1:  Parse wsusscn2.cab → regenerate layer 2
+           - Apply §I.6 scope filter (Server 2016/2019/2022/2025,
+             24-month window).
+           - Apply §I.6.3 text-exclusion rule.
+           - Emit data/wsusscn2-database.json.
+  Step 2:  For each OS in {Server2016, Server2019, Server2022, Server2025}:
+           Step 2a: Existing catalogue-scrape logic (unchanged).
+           Step 2b: NEW: cross-reference each NeutralPatches[*] entry
+                    against layer 2:
+                    - Auto-populate RequiresKbIds, Supersedes,
+                      RequiresMinimumOsBuild fields.
+                    - Auto-populate _DependencyVerifiedDate and
+                      _DependencyVerifiedSource.
+                    - Emit warnings (not errors) for:
+                      · KB present in NeutralPatches but absent from
+                        layer 2 — possible stale baseline
+                      · KB present in layer 2 but absent from
+                        NeutralPatches — possible omission
+                    - DO NOT auto-add or auto-remove
+                      NeutralPatches[*] entries (see §I.7.3).
+  Step 3:  Emit diff summary to the operator (existing behaviour
+           extended with layer 2 changes).
+```
+
+### I.4.3 `-Action RefreshDependencyDatabase` (normative, new)
+
+A new top-level Action is added (slot it into the `-Action`
+ValidateSet alongside `RefreshAllBaselines`, `RefreshSnapshots`,
+etc.):
+
+- Touches **only** layer 3 (`<WorkRoot>/cache/wsusscn2/`).
+- Does **not** touch `data/` — the user running this action does
+  not need maintainer commit permissions.
+- Useful for: verifying a hypothesis against fresher Microsoft data
+  than the committed layer 2; air-gapped environment that ships
+  layer 3 in via sneakernet.
+- Phase mapping: returns a single synthetic phase `A04`
+  (paralleling `A01 = RefreshAllBaselines`, `A02 = DumpField­
+  Classification`, `A03 = RefreshSnapshots`).
+
+### I.4.4 Cache-invalidation conditions
+
+The local layer 3 cache is considered stale when **any** of the
+following holds:
+
+1. `wsusscn2.cab` file is absent.
+2. `wsusscn2.cab.meta.json` is absent or unreadable.
+3. The recorded SHA-256 in `meta.json` does not match the file's
+   actual SHA-256.
+4. `meta.json.LastDownloadedDate` is more than 35 days ago
+   (i.e. a full Patch-Tuesday cycle has passed).
+
+Conditions 1–3 are integrity failures; condition 4 is a freshness
+warning that the operator may override with a force-refresh flag
+(`-ForceDependencyDatabaseRefresh`).
+
+## I.5 File layout and git policy (normative)
+
+### I.5.1 Repository layout (committed)
+
+```
+scripts/powershell/update-windows-server-iso/
+├── Update-WindowsServerIso.ps1
+├── SPEC.md                          (this file)
+└── data/
+    ├── config-Server2016.json       (layer 1, existing)
+    ├── config-Server2019.json       (layer 1, existing)
+    ├── config-Server2022.json       (layer 1, existing)
+    ├── config-Server2025.json       (layer 1, existing)
+    └── wsusscn2-database.json       (layer 2, NEW)
+```
+
+### I.5.2 Workspace layout (git-excluded)
+
+```
+<WorkRoot>/
+├── cache/
+│   └── wsusscn2/                    (NEW; layer 3 storage)
+│       ├── wsusscn2.cab             (~1 GB raw binary)
+│       ├── wsusscn2.cab.meta.json   (SHA-256, size, fetched-at, source URL)
+│       ├── package.xml              (extracted, may be deleted post-parse)
+│       └── audit/
+│           ├── 2026-05-12-wsusscn2.cab    (rolling 6-month archive)
+│           ├── 2026-04-08-wsusscn2.cab
+│           └── …
+├── source/                          (existing)
+├── work/                            (existing)
+├── output/                          (existing)
+├── logs/                            (existing)
+└── diag/                            (existing)
+```
+
+### I.5.3 `.gitignore` additions
+
+The repository's `.gitignore` (or the per-script equivalent) gains:
+
+```
+# Servicing dependency database — layer 3 (raw Microsoft binary)
+Workspace_UpdateWsi*/cache/wsusscn2/
+**/cache/wsusscn2/wsusscn2.cab
+**/cache/wsusscn2/package.xml
+**/cache/wsusscn2/audit/
+```
+
+### I.5.4 Audit-archive retention
+
+The `<WorkRoot>/cache/wsusscn2/audit/` directory keeps **rolling
+6 months** of historical `wsusscn2.cab` files (i.e. roughly the
+previous 6 Patch Tuesdays). Older archive copies are deleted by
+`RefreshDependencyDatabase` after each successful refresh. The
+purpose is forensic replay — "what did Microsoft know about
+KB5087537 in 2026-05 versus 2026-06?". 6 months matches the
+typical interval over which a missed prerequisite would still be
+debugged.
+
+### I.5.5 Layer 2 size monitoring (informative target)
+
+The target size for `data/wsusscn2-database.json` after the
+§I.6.3 text-exclusion rule is applied:
+
+| Scope | Target size | Action if exceeded |
+|---|---|---|
+| ≤ 5 MB | OK | None |
+| 5 MB ≤ size ≤ 10 MB | Watch | Investigate scope leakage |
+| > 10 MB | Action | Consider gzip compression (gz suffix), or tighten the 24-month window in §I.6.2 |
+
+The maintainer measures the actual size on each refresh and
+records it in the commit message.
+
+## I.6 Extraction logic (normative)
+
+### I.6.1 Implementation tier (informative)
+
+Part I targets the **L2c** tier (per the design-discussion
+analysis): self-parse `wsusscn2.cab`'s `package.xml` to a
+fact-only JSON, then cross-reference with `Get-WindowsPackage` at
+runtime. Lower tiers (MSU manifest only) miss the SSU-prerequisite
+class of failures; higher tiers (full DISM simulation) are not
+ROI-justified.
+
+L2c explicitly does **not** call the WUA COM API. The WUA COM API
+operates on the currently-running OS or on `wsusscn2.cab` as a
+data source, but cannot be aimed at a **mounted offline image** —
+which is the case Part I needs to support. The parse-and-cross-
+reference approach is the only available shape.
+
+### I.6.2 Scope filter (normative)
+
+The parser ingests `package.xml` and emits to `wsusscn2-database.json`
+only entries matching **all** of:
+
+1. **OS family**: package targets one of Windows Server 2016,
+   2019, 2022, 2025 (matched via the `<Categories>` block; see
+   §I.6.4 for the exact category-ID list).
+2. **Update type**: SSU, LCU, .NET CU, or Dynamic Update.
+   Client SKUs, Office, Defender, drivers, and FOD are excluded.
+3. **Recency**: released within the last **24 months** as of the
+   parser invocation date. Older entries are pruned to bound layer
+   2 size. The 24-month window is justified by the longest realistic
+   "old baseline still in use" case — operators occasionally retain
+   a baseline for legal-hold purposes that long.
+
+### I.6.3 Microsoft-prose exclusion rule (normative)
+
+This is a **hard rule, not a target**. Layer 2 (the
+`wsusscn2-database.json` that ships in the public git repo)
+**MUST NOT** contain any of:
+
+- KB titles (e.g. *"2026-05 Cumulative Update for Windows Server
+  2016 …"*).
+- KB descriptions, severity prose, or release notes excerpts.
+- Any human-readable text authored by Microsoft.
+
+It **MAY** contain:
+
+- KB IDs (e.g. `"KB5087537"`).
+- OS build numbers (e.g. `"14393.9140"`).
+- Architecture identifiers (e.g. `"x64"`).
+- Release dates (e.g. `"2026-05-12"`).
+- Prerequisite / supersedence / applicability **relationships**
+  between KB IDs.
+- Product family identifiers (e.g. `"WindowsServer2016"`).
+
+Rationale: §I.2.2 — facts are not the licensed expression. Stripping
+the prose keeps the legal posture clean and serves the size-control
+goal of §I.5.5 simultaneously.
+
+### I.6.4 Layer 2 JSON schema (normative)
+
+```json
+{
+  "_meta": {
+    "GeneratedAt": "2026-05-27T10:30:00+09:00",
+    "GeneratedBy": "RefreshAllBaselines:r09.0",
+    "ParserVersion": "1.0",
+    "WsusScnCab": {
+      "SourceUrl": "https://catalog.s.download.windowsupdate.com/.../wsusscn2.cab",
+      "FetchedAt": "2026-05-27T10:25:00+09:00",
+      "LastModifiedHeader": "Tue, 12 May 2026 14:00:00 GMT",
+      "SizeBytes": 1073741824,
+      "Sha256": "abc123def456..."
+    },
+    "Scope": {
+      "OsFamilies": ["WindowsServer2016", "WindowsServer2019",
+                     "WindowsServer2022", "WindowsServer2025"],
+      "UpdateTypes": ["SSU", "LCU", "DotNetCU", "DynamicUpdate"],
+      "WindowMonths": 24
+    },
+    "Counts": {
+      "TotalPackages": 0,
+      "ByOsFamily":  { "WindowsServer2016": 0, "WindowsServer2019": 0,
+                       "WindowsServer2022": 0, "WindowsServer2025": 0 }
+    }
+  },
+  "Packages": {
+    "KB5087537": {
+      "KbId": "KB5087537",
+      "UpdateType": "LCU",
+      "Architecture": "x64",
+      "Products": ["WindowsServer2016"],
+      "OsBuild": "14393.9140",
+      "ReleaseDate": "2026-05-12",
+      "Requires": ["KB5088064"],
+      "Supersedes": ["KB5082077", "KB5078661"],
+      "MinimumOsBuild": "14393.7692",
+      "IsCombined": false
+    },
+    "KB5088064": {
+      "KbId": "KB5088064",
+      "UpdateType": "SSU",
+      "Architecture": "x64",
+      "Products": ["WindowsServer2016"],
+      "OsBuild": "14393.7692",
+      "ReleaseDate": "2026-05-12",
+      "Requires": [],
+      "Supersedes": ["KB5082089", "KB5075902"],
+      "MinimumOsBuild": "14393.0",
+      "IsCombined": false
+    }
+  }
+}
+```
+
+Field semantics:
+
+| Field | Meaning |
+|---|---|
+| `Requires` | KB IDs that **must already be installed** before this KB can apply. Maps to `wsusscn2`'s `<Prerequisites>`. Drives the I1.SSU sub-phase ordering. |
+| `Supersedes` | KB IDs that this KB **replaces**. Maps to `wsusscn2`'s `<SupersededBy>` (read in the inverse direction). |
+| `MinimumOsBuild` | The build number that the image must be at or above, **before** this KB can apply. For SSU-vs-LCU dependencies this is the critical field. |
+| `IsCombined` | `true` if Microsoft's metadata indicates this package internally contains an SSU+LCU bundle. **Authoritative** — supersedes any manual `IsCombined` guess in `config-Server*.json`. |
+| `OsBuild` | The build number this KB **takes the image to** (post-application). |
+
+### I.6.5 Parser stability and version pinning (informative)
+
+Because the `package.xml` schema is not publicly specified, the
+parser SHOULD:
+
+- Pin its parser version in `_meta.ParserVersion`.
+- Tolerate unknown elements (forward-compat: ignore tags it
+  doesn't recognise).
+- Reject and abort (not silently empty-output) on **structural**
+  schema deviations — i.e. if `<Packages>` itself is missing, or
+  if `<Prerequisites>` becomes a different shape.
+
+Microsoft has not changed this schema materially in over a decade,
+but defensive coding is warranted.
+
+## I.7 Layer 1 (`config-Server*.json`) integration (normative)
+
+### I.7.1 Field additions to `PatchBaseline.NeutralPatches[*]`
+
+The schema additions to each `NeutralPatches[*]` entry:
+
+| Field | Source | Cadence | Owner |
+|---|---|---|---|
+| `RequiresKbIds` | layer 2 `Packages[KB].Requires` | auto-overwrite on RefreshAllBaselines | tool |
+| `Supersedes` | layer 2 `Packages[KB].Supersedes` | auto-overwrite | tool |
+| `RequiresMinimumOsBuild` | layer 2 `Packages[KB].MinimumOsBuild` | auto-overwrite | tool |
+| `IsCombined` | layer 2 `Packages[KB].IsCombined` | auto-overwrite, but with a `// Was: <prev>` comment when changed | tool, advisory to operator |
+
+The other existing fields (`Type`, `KbId`, `Title`, `UpdateId`,
+`DownloadUrl`, etc.) are unchanged in ownership; see B.10 and B.11.
+
+### I.7.2 Field additions to `PatchBaseline.WsusScnCab` (object level)
+
+The existing `WsusScnCab` slot gets the following sub-fields
+populated by the tool (currently they're all empty strings):
+
+```json
+"WsusScnCab": {
+  "SourceUrl": "https://catalog.s.download.windowsupdate.com/.../wsusscn2.cab",
+  "LocalCachePath": "Workspace_UpdateWsi/cache/wsusscn2/wsusscn2.cab",
+  "LastDownloadedDate": "2026-05-27T10:25:00+09:00",
+  "LastDownloadedSha256": "abc123def456...",
+  "LastDownloadedSizeBytes": 1073741824,
+  "DependencyDatabasePath": "data/wsusscn2-database.json",
+  "DependencyDatabaseSha256": "fed654cba321..."
+}
+```
+
+`DependencyDatabaseSha256` is the SHA-256 of the committed layer 2
+file, recorded inside each layer 1 config as a tamper-evidence link.
+
+### I.7.3 Automation level (normative): semi-automatic
+
+RefreshAllBaselines applies the following **half-automatic** policy:
+
+| Change class | Tool behaviour |
+|---|---|
+| `RequiresKbIds` value change on an existing KB | Auto-overwrite; emit diff line to operator log |
+| `Supersedes` value change on an existing KB | Auto-overwrite; emit diff line |
+| `RequiresMinimumOsBuild` value change | Auto-overwrite; emit diff line |
+| `IsCombined` value change | Auto-overwrite with **WARNING** in operator log (this is the most error-prone field) |
+| KB present in layer 2 but **absent** from `NeutralPatches` | Emit WARNING only — do **not** auto-add. Operator must explicitly add. |
+| KB present in `NeutralPatches` but **absent** from layer 2 | Emit WARNING only — do **not** auto-remove. KB may be temporarily withdrawn by Microsoft, or scope-filtered out. |
+
+Rationale for not auto-adding/removing KBs: a config baseline is a
+**curated** statement of what an operator wants to ship in the
+output ISO. Auto-adding a KB just because Microsoft published one
+could pull in updates the operator deliberately omitted (e.g.
+preview updates). Auto-removing a KB the operator listed could
+silently drop a deliberate inclusion (e.g. a held-back baseline).
+
+The maintainer reviews the warnings, decides, and commits.
+
+### I.7.4 New `_DependencyVerifiedDate` / `_DependencyVerifiedSource` (normative)
+
+The existing top-level `_VerifiedDate` / `_VerifiedBy` fields are
+**preserved** with their current semantics (manual human
+verification). Two new fields are added, parallel to them:
+
+```json
+{
+  "_VerifiedDate": "2026-05-24T00:00:00+09:00",
+  "_VerifiedBy": "manual:initial-r03",
+  "_DependencyVerifiedDate": "2026-05-27T10:30:00+09:00",
+  "_DependencyVerifiedSource": "wsusscn2.cab@sha256:abc123def456..."
+}
+```
+
+`_DependencyVerifiedSource` follows the form:
+
+```
+wsusscn2.cab@sha256:<64-hex-char-hash>
+```
+
+This makes provenance unambiguous: any third party can re-fetch
+that exact `wsusscn2.cab` from the Microsoft CDN, compute its
+SHA-256, and confirm whether the config's dependency claims still
+match Microsoft's published data.
+
+A config is in one of four trust states:
+
+| `_VerifiedBy` set? | `_DependencyVerifiedSource` set? | Trust level |
+|:---:|:---:|---|
+| Yes | Yes | **Highest** — human-verified AND tool-verified |
+| Yes | No | Human-verified but no Microsoft cross-check |
+| No | Yes | Tool-verified but not human-reviewed |
+| No | No | **Unverified** — defaults from older revisions |
+
+## I.8 Verification API (normative)
+
+### I.8.1 New function: `Test-PatchDependencyClosureFromGraph`
+
+The function consumes the in-memory hashtable parsed from
+`data/wsusscn2-database.json` plus the currently-resolved
+`$Script:ResolvedPatches` and returns a structured verdict.
+
+```
+Test-PatchDependencyClosureFromGraph
+    -DependencyGraph <hashtable>      # parsed wsusscn2-database.json
+    -ResolvedPatches <array>          # P02 output
+    -WimMountState   <hashtable>      # captured by P06; see §I.8.2
+    [-Policy <string>]                # Strict | Warn ; default Strict
+    → returns:
+        @{
+            Verdict       = 'Pass' | 'Fail' | 'PassWithWarnings'
+            MissingKbs    = @(...)    # KBs ResolvedPatches needs but does not contain
+            ExtraKbs      = @(...)    # KBs ResolvedPatches contains but layer 2 has no record of
+            BuildGap      = @{ Required = '14393.7692'; Actual = '14393.693' }
+            Suggestions   = @(...)    # human-readable remediation
+        }
+```
+
+### I.8.2 Relationship to existing `Test-PatchDependencyClosureOnMount` (B.13)
+
+The existing B.13 function operates on a **mounted** WIM and reads
+the actual installed package list via `Get-WindowsPackage`. It is
+runtime-accurate but expensive (requires the mount).
+
+The new function `Test-PatchDependencyClosureFromGraph` operates
+**before** the mount, using `Get-WindowsImage -ImagePath ... -Index ...`
+metadata only. It is cheaper and runs in P06.
+
+The two are **complementary**:
+
+| Function | When it runs | Source of truth |
+|---|---|---|
+| `Test-PatchDependencyClosureFromGraph` (new) | P06 ValidatePatchSet — before any mount | layer 2 + WIM metadata |
+| `Test-PatchDependencyClosureOnMount` (existing B.13) | P07 PatchInstallWim — after mount, before each sub-phase | `Get-WindowsPackage` on the live mount |
+
+The P06 check catches the SSU-prerequisite class of failure
+**before** P05 / P07 expend their I/O budget. The P07 check
+remains a defence-in-depth verification immediately before each
+`Add-WindowsPackage` call.
+
+### I.8.3 WimMountState capture (informative)
+
+P06 cannot mount the WIM (that's P07's job), but it CAN extract
+the static metadata it needs via:
+
+```
+Get-WindowsImage -ImagePath <install.wim> -Index <N>
+    → returns ImageName, ImageDescription, ImageSize, Version,
+      EditionId, InstallationType, Languages, Hal, ProductType,
+      ImageType, Architecture, etc.
+```
+
+The `Version` field gives the OS build at the time the WIM was
+captured (e.g. `10.0.14393.0` for Server 2016 GA). That, combined
+with the well-known Servicing Stack version shipped at each GA
+build, is sufficient to compute `MinimumOsBuild` satisfaction for
+the L2c implementation tier.
+
+For *future* tiers that want to read the WIM's WinSxS servicing-
+stack directory directly (rather than inferring from `Version`),
+the function may need a one-time mount; that work is out of scope
+for r09.0.
+
+## I.9 P06 ValidatePatchSet integration (normative)
+
+### I.9.1 Phase-skip condition redesign
+
+The current implementation has a single skip condition at the top
+of `Invoke-PlanPhase06_ValidatePatchSet`:
+
+```
+if ($Script:UseBaselineOnly) {
+    Write-Skip "P06 skipped: -UseBaselineOnly explicitly set."
+    return
+}
+```
+
+This conflates two concerns:
+
+- **Catalogue refresh** — re-querying Microsoft Update Catalog to
+  detect baseline drift. This *is* the thing `-UseBaselineOnly`
+  is meant to skip.
+- **Dependency verification** — checking that the configured patch
+  set is internally consistent. This has **nothing** to do with
+  catalogue freshness and should NOT be skipped when
+  `-UseBaselineOnly` is set.
+
+Part I redesigns P06 into two stages with independent skip controls:
+
+```
+P06 ValidatePatchSet (r09.0+):
+  Stage 1: Catalogue freshness re-check
+           Skipped when: -UseBaselineOnly explicitly set
+                         OR -Action ∈ { Build, Verify } (no Setup group)
+  Stage 2: Dependency closure verification
+           Skipped when: -SkipDependencyCheck explicitly set
+                         OR data/wsusscn2-database.json absent (with WARN)
+           Runs EVEN WHEN -UseBaselineOnly is set.
+```
+
+The default for the new `-SkipDependencyCheck` flag is `$false`
+— Stage 2 runs by default whenever P06 itself runs.
+
+### I.9.2 Stage 2 algorithm
+
+```
+Stage 2 (Dependency closure verification) algorithm:
+
+  1. Load data/wsusscn2-database.json from the script's data/
+     directory. If absent:
+       - If -SkipDependencyCheck is $false (default): emit WARN
+         "Layer 2 dependency database missing; falling back to
+          layer 1 RequiresKbIds only (less authoritative). Run
+          -Action RefreshDependencyDatabase to populate."
+       - Continue with degraded check using only layer 1 data.
+
+  2. For each WIM target in ResolvedPatches.Targets:
+       a. Call Get-WindowsImage to fetch static metadata.
+       b. Compute presumed Servicing Stack version from
+          the WIM's Version field.
+       c. Invoke Test-PatchDependencyClosureFromGraph with the
+          target-specific patch slice.
+
+  3. Aggregate verdicts:
+       - If any target returns Fail and Policy=Strict, throw.
+       - If any target returns Fail and Policy=Warn, continue
+         with WARN.
+       - Always emit a structured report to
+         <DiagDir>/P06_dependency_verdict.json.
+
+  4. Mark P06.ok marker file on success or PassWithWarnings.
+```
+
+### I.9.3 Operator-visible output (informative)
+
+A successful P06 Stage 2 run prints:
+
+```
+ -- Step 2: Dependency closure check (wsusscn2-derived) ---------
+[hh:mm:ss] [+xx.xxs]    [*] Loaded layer 2 database (wsusscn2-database.json):
+                            342 packages, source SHA-256 abc123...
+[hh:mm:ss] [+xx.xxs]    [*] Verifying patch set against install.wim metadata:
+                            Server 2016, install.wim Version 10.0.14393.0
+                            Inferred Servicing Stack: v10.0.14393.693
+[hh:mm:ss] [+xx.xxs]    [+]   KB5088064 (SSU): satisfies MinimumOsBuild=14393.0
+[hh:mm:ss] [+xx.xxs]    [+]   KB5087537 (LCU): requires KB5088064 — present
+[hh:mm:ss] [+xx.xxs]    [+]   KB5087065 (.NET): no prerequisites declared
+[hh:mm:ss] [+xx.xxs]    [+] Dependency closure verified for install.wim.
+```
+
+A failing run (e.g. the r08.0 Step 4 scenario where SSU was missing):
+
+```
+[hh:mm:ss] [+xx.xxs]    [X] Dependency closure FAILED for install.wim:
+[hh:mm:ss] [+xx.xxs]    [X]   KB5087537 (LCU) requires KB5088064 (SSU)
+[hh:mm:ss] [+xx.xxs]    [X]   but KB5088064 is not present in ResolvedPatches.
+[hh:mm:ss] [+xx.xxs]    [X]   Suggested remediation:
+[hh:mm:ss] [+xx.xxs]    [X]     Add KB5088064 (2026-05 SSU) to
+[hh:mm:ss] [+xx.xxs]    [X]     data/config-Server2016.json NeutralPatches[]
+[hh:mm:ss] [+xx.xxs]    [X]     with ApplyOrder=1 and Type=SSU.
+[hh:mm:ss] [+xx.xxs]    [X]   See data/wsusscn2-database.json for full graph.
+[hh:mm:ss] [+xx.xxs]    [X]   Run -Action RefreshAllBaselines to refresh.
+```
+
+## I.10 Air-gapped environment operation (normative)
+
+A fully air-gapped environment (no outbound Internet) can use
+Part I provided that:
+
+1. The repo is cloned in a non-air-gapped network and the cloned
+   tree is transported via sneakernet to the air-gapped side. The
+   layer 2 file (`data/wsusscn2-database.json`) travels with it.
+2. The user runs the script with `-SkipPatchDownload` (existing
+   flag) plus the air-gapped patch set staged into `<WorkRoot>/
+   patches/Server<N>/` ahead of time.
+3. P06 Stage 2 runs against the committed layer 2 — **no network
+   access required**.
+
+Layer 3 (the raw `wsusscn2.cab`) is **not** needed in the
+air-gapped environment for verification. It is only needed when
+**regenerating** layer 2 — which is the maintainer's job and
+happens in the non-air-gapped environment.
+
+If the air-gapped environment wants a fresher layer 2 than the
+committed version, the maintainer can:
+
+1. In the non-air-gapped environment, run
+   `-Action RefreshDependencyDatabase`.
+2. Copy the resulting `wsusscn2.cab` to the air-gapped side.
+3. Run `-Action RefreshDependencyDatabase -OfflineCabPath <path>`
+   (offline-input flag, see §I.10.1) to regenerate layer 2 against
+   the manually-supplied CAB.
+
+### I.10.1 `-OfflineCabPath` parameter (normative)
+
+`-Action RefreshDependencyDatabase` accepts an optional
+`-OfflineCabPath <string>` parameter. When set:
+
+- Network access is **not** attempted.
+- The named path is used as the source `wsusscn2.cab`.
+- SHA-256 is recorded in meta.json the same way as a network fetch.
+
+## I.11 Relationship to existing `_VerifiedDate` / `_VerifiedBy` (normative)
+
+See §I.7.4 for the field additions. This sub-section restates the
+governance contract.
+
+| Field | Owner | Set when |
+|---|---|---|
+| `_VerifiedDate` | human | An operator has reviewed the baseline and approved it for a build cycle |
+| `_VerifiedBy` | human | Free-text annotation of who approved (e.g. `manual:r05.0-quarterly-review`) |
+| `_DependencyVerifiedDate` | tool | RefreshAllBaselines successfully cross-checked layer 1 against layer 2 |
+| `_DependencyVerifiedSource` | tool | `wsusscn2.cab@sha256:<hash>` of the layer 2 source used |
+
+Operators are expected to keep `_VerifiedDate` current via a
+quarterly (or per-release) human review. The tool maintains
+`_DependencyVerifiedDate` monthly. **Both** are needed to claim
+maximum trust; neither replaces the other.
+
+## I.12 Maintainer operations guide (informative)
+
+### I.12.1 Monthly Patch-Tuesday refresh procedure
+
+```
+1. On the second Wednesday of the month (or +24h after Patch
+   Tuesday), pull the latest main.
+2. Run:
+       .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines `
+           -WorkRoot D:\Workspace_UpdateWsi
+3. Review the operator log for:
+       - WARNINGs about IsCombined changes — verify manually
+         against Microsoft Update Catalog
+       - WARNINGs about KBs present-in-layer-2-but-absent-from-
+         NeutralPatches — decide whether to include each
+       - WARNINGs about KBs absent-from-layer-2-but-present-in-
+         NeutralPatches — verify Microsoft hasn't withdrawn them
+4. Inspect git diff for:
+       - data/wsusscn2-database.json (expect 100s of KB changed
+         in normal months)
+       - data/config-Server*.json (expect a few RequiresKbIds /
+         Supersedes / RequiresMinimumOsBuild changes per config)
+5. Commit with the message template:
+       monthly refresh: wsusscn2 <yyyy-mm-dd>, sha256 <8-char-prefix>
+       <body listing OS families touched and notable warnings>
+6. Open PR.
+```
+
+### I.12.2 PR review checklist
+
+A reviewer checks:
+
+- [ ] `data/wsusscn2-database.json` size is within target (§I.5.5).
+- [ ] `_meta.WsusScnCab.Sha256` is also recorded in each
+      `config-Server*.json#/_DependencyVerifiedSource`.
+- [ ] No Microsoft prose has leaked into layer 2 (`grep -i
+      'cumulative update' data/wsusscn2-database.json` returns
+      nothing).
+- [ ] `IsCombined` warnings in the operator log are accounted for
+      in the PR description.
+- [ ] No layer 1 KBs were silently added or removed (these are
+      operator decisions, not tool decisions; see §I.7.3).
+
+### I.12.3 Future: GitHub Actions automation (out of scope for r09.0)
+
+A future revision MAY automate the monthly refresh via GitHub
+Actions:
+
+```
+Schedule:  cron("0 0 2 * 3")  # Wednesday after Patch Tuesday, 00:00 UTC
+Action:    Spin up a Windows runner, fetch wsusscn2.cab, run
+           RefreshAllBaselines, open a PR.
+```
+
+This is **not** part of r09.0 scope. The initial release relies on
+maintainer manual operation per §I.12.1, both because the surface
+area is small (one maintainer can handle it in 20 minutes/month)
+and because we want a few cycles of human review before letting
+the tool open PRs unattended.
+
+## I.13 Rollout and backward compatibility (normative)
+
+### I.13.1 Phasing
+
+| r-revision | Scope | Default behaviour |
+|---|---|---|
+| r09.0 | Implement parser, layer 2 emission, P06 Stage 2, new Action | Dependency check **enabled by default** when layer 2 file is present; falls back gracefully when absent |
+| r09.1 | UX polish, additional fixture coverage in `tests/` | unchanged |
+| r10.0 (provisional) | GitHub Actions automation per §I.12.3 | unchanged |
+
+### I.13.2 Behaviour when layer 2 is absent
+
+A clone of the repo at any commit predating r09.0 will not contain
+`data/wsusscn2-database.json`. P06 Stage 2 in that case:
+
+- Emits a WARN: *"Layer 2 dependency database (data/wsusscn2-
+  database.json) is absent. Dependency closure check will fall back
+  to layer 1 RequiresKbIds only. Run -Action
+  RefreshDependencyDatabase to populate, or update the repository
+  to a revision that includes it."*
+- Continues with the **existing B.13** logic on `RequiresKbIds`
+  populated by hand (or empty).
+- Does NOT block the build.
+
+This means r09.0 is a **strict superset** of r08.0 behaviour. No
+existing config or workflow breaks.
+
+### I.13.3 Behaviour when `-SkipDependencyCheck` is set
+
+For operators who explicitly want to suppress the new check (e.g.
+intentionally testing a known-failing patch set in CI):
+
+- `-SkipDependencyCheck` skips P06 Stage 2 entirely.
+- Does not affect P06 Stage 1 (catalogue freshness).
+- Emits an INFO note acknowledging the explicit skip.
+
+### I.13.4 Migration path for existing operators
+
+No migration is required. Existing `config-Server*.json` files
+continue to parse (the new fields are additions, not renames).
+Existing `-UseBaselineOnly` workflows continue to work — the only
+behavioural change is that P06 Stage 2 starts running, which is
+informational unless the patch set is genuinely broken.
+
