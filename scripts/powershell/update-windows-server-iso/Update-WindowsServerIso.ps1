@@ -536,7 +536,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
 $Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'
-$Script:ScriptTag     = 'add-output-iso-pca2023-verification'
+$Script:ScriptTag     = 'fix-readonly-attribute-on-wim-mount'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5964,13 +5964,26 @@ function Invoke-WimMountSafe {
     <#
     .SYNOPSIS
         Mount-WindowsImage wrapper. Cleans up any stale mount at the
-        target path, creates the directory if missing, and surfaces
+        target path, creates the directory if missing, clears the
+        ReadOnly attribute on the WIM file when present, and surfaces
         the original DISM error untouched.
     .DESCRIPTION
         DISM frequently leaves orphan mounts behind on abnormal exits.
         Before mounting, we run Get-WindowsImage -Mounted and discard
         any entry pointing at our target path with -Discard. This is
         the OSDBuilder pattern documented in SPEC Part D.1.
+
+        We also clear the ReadOnly attribute on the WIM file before
+        invoking Mount-WindowsImage. WIM files extracted from ISO
+        media via robocopy /COPY:DAT inherit the ReadOnly attribute
+        from the underlying ISO volume (which is by definition a
+        read-only medium), and DISM refuses to mount a ReadOnly file
+        in read-write mode with "You do not have permissions to mount
+        and modify this image" - a misleading message that is not
+        about Administrator privilege but about file attributes.
+        Clearing the attribute is safe because we own the extracted
+        tree under WorkRoot and the WIM is meant to be a writable
+        working copy at this point in the pipeline.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -6000,6 +6013,23 @@ function Invoke-WimMountSafe {
         # Get-WindowsImage may not be available on every host; safe to ignore
         $null = $_
     }
+
+    # Clear ReadOnly attribute on the WIM file before mounting. WIMs
+    # extracted from ISO via robocopy /COPY:DAT inherit the ReadOnly
+    # bit; DISM then refuses the read-write mount with a misleading
+    # "permissions" error. This is a no-op if the attribute is absent.
+    Set-DebugStep -Step ('wim-mount-clear-readonly')
+    try {
+        $wimItem = Get-Item -LiteralPath $ImagePath -Force -ErrorAction Stop
+        if ($wimItem.IsReadOnly) {
+            $wimItem.IsReadOnly = $false
+            Write-Step ('Cleared ReadOnly attribute on WIM: {0}' -f $ImagePath)
+        }
+    } catch {
+        # Best-effort: if attribute manipulation fails for any reason,
+        # let Mount-WindowsImage proceed and surface the real DISM error.
+        Write-Warn ('Could not inspect or clear ReadOnly attribute on {0}: {1}' -f $ImagePath, $_.Exception.Message)
+    } # psa-disable-line PSA3004 -- best-effort attribute clear; the subsequent Mount-WindowsImage will surface the real error if a problem remains
 
     Set-DebugStep -Step ('wim-mount-image-idx{0}' -f $Index)
     $mountArgs = @{
