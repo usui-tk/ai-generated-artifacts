@@ -536,7 +536,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
 $Script:ScriptVersion = 'update-wsi-2026.05.28-r09.0'
-$Script:ScriptTag     = 'step2a-sevenzip-port-and-a04-stub'
+$Script:ScriptTag     = 'step2a-followup-canonical-json-helpers'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6812,6 +6812,136 @@ function Install-SevenZipFallback {
     }
     $proc = Start-Process msiexec.exe -ArgumentList @('/i',"`"$msi`"",'/qn','/norestart') -Wait -PassThru # psa-disable-line PSA3001 -- Start-Process -ArgumentList is the canonical pattern for invoking msiexec with explicit args
     if ($proc.ExitCode -ne 0) { throw "7-Zip MSI install failed (exit $($proc.ExitCode))" }
+}
+
+# ============================================================
+# JSON Canonical Serialization helpers
+# ============================================================
+#
+# Repository-canonical JSON serializer with byte-level parity to the
+# Python reference implementation in tests/common/canonical_json.py.
+# The two implementations together let the data/*.json and
+# tests/fixtures/*.json files be edited from either runtime
+# (Linux Python 3.x, Linux PowerShell 7.x) without producing
+# spurious git diffs from formatter quirks.
+#
+# The canonical format and full rationale are normative in SPEC
+# Part B.23 "JSON Canonical Serialization". The 10 format rules,
+# in brief, are:
+#   1. UTF-8 (no BOM)
+#   2. LF line endings
+#   3. 2-space indentation
+#   4. ": " key/value separator
+#   5. ",\n<indent>" array item separator
+#   6. Literal non-ASCII (no \uXXXX escape)
+#   7. Insertion-order keys (no sort)
+#   8. Exactly one trailing LF
+#   9. Null values emitted as "key": null
+#  10. Depth is caller-controlled
+#
+# Implementation strategy: PowerShell 7's default ConvertTo-Json already
+# matches rules 3, 4, 6, 7, and 9. This wrapper adds two corrections so
+# the output matches Python json.dumps byte-for-byte:
+#   (a) CRLF -> LF normalisation (PS 7 output is platform-dependent)
+#   (b) Scientific notation E -> e (PS uses uppercase; Python lowercase)
+# plus a trailing-newline policy switch.
+
+function ConvertTo-CanonicalJson {
+    <#
+    .SYNOPSIS
+        Serialize an object to canonical JSON text (SPEC Part B.23).
+    .DESCRIPTION
+        Returns a string whose bytes match canonical_json_dumps()
+        in tests/common/canonical_json.py for the same logical input.
+
+        The input MUST be an [ordered] hashtable, a [pscustomobject],
+        or any composition of these with primitives, to preserve key
+        insertion order. Plain [hashtable] (@{ ... }) is enumerated
+        in unspecified order by ConvertTo-Json and MUST NOT be used.
+    .PARAMETER InputObject
+        Object to serialize. Accepts pipeline input.
+    .PARAMETER Depth
+        Maximum nesting depth (default 20). Matches the Python
+        canonical_json_dumps -Depth parameter.
+    .PARAMETER NoTrailingNewline
+        When set, the returned string ends without a final LF.
+        Default is to emit exactly one trailing LF (rule 8).
+    .OUTPUTS
+        [string]
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline, Position=0)]
+        [AllowNull()] $InputObject,
+
+        [Parameter()] [int] $Depth = 20,
+
+        [Parameter()] [switch] $NoTrailingNewline
+    )
+
+    process {
+        # PS 7+ defaults already give 2-space indent, ": " separator,
+        # literal UTF-8, and insertion-order keys (for ordered/pscustomobject).
+        $json = $InputObject | ConvertTo-Json -Depth $Depth
+
+        # Correction (a): CRLF -> LF (PS 7 output is platform-dependent;
+        # canonical format is LF only per rule 2).
+        $json = $json -replace "`r`n", "`n"
+
+        # Correction (b): scientific notation E -> e for Python parity.
+        # Pattern: digit, then literal E, then optional sign, then digit.
+        # The lookbehind/lookahead make this safe inside string values
+        # like "Hello, E3 from the band E +1!" because those contexts
+        # have no surrounding digits in the lookbehind/lookahead.
+        $json = [System.Text.RegularExpressions.Regex]::Replace(
+            $json, '(?<=\d)E(?=[+\-]?\d)', 'e')
+
+        # Trailing newline policy (rule 8): exactly one LF, or none.
+        if ($NoTrailingNewline) {
+            $json = $json.TrimEnd("`n")
+        } else {
+            if (-not $json.EndsWith("`n")) { $json += "`n" }
+        }
+        return $json
+    }
+}
+
+function Save-CanonicalJsonFile {
+    <#
+    .SYNOPSIS
+        Write an object to a file as canonical JSON (SPEC Part B.23).
+    .DESCRIPTION
+        Wraps ConvertTo-CanonicalJson and writes the result to disk as
+        UTF-8 (no BOM) with raw byte semantics (no platform newline
+        translation). Writes to <Path>.tmp first then renames over
+        <Path> for atomic-ish replacement.
+
+        The byte sequence on disk matches what
+        save_canonical_json_file() in tests/common/canonical_json.py
+        produces for the same logical input.
+    .PARAMETER InputObject
+        Object to serialize.
+    .PARAMETER Path
+        Destination file path. Existing files are overwritten.
+    .PARAMETER Depth
+        See ConvertTo-CanonicalJson.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position=0)] $InputObject,
+        [Parameter(Mandatory, Position=1)] [string] $Path,
+        [Parameter()] [int] $Depth = 20
+    )
+
+    $json = ConvertTo-CanonicalJson -InputObject $InputObject -Depth $Depth
+
+    # UTF-8 without BOM (rule 1), raw bytes so the LFs (rule 2) survive
+    # without being translated to CRLF on Windows.
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    $tmpPath = $Path + '.tmp'
+    [System.IO.File]::WriteAllBytes($tmpPath, $utf8NoBom.GetBytes($json))
+    Move-Item -LiteralPath $tmpPath -Destination $Path -Force
 }
 
 function Invoke-WuaOfflineScan {

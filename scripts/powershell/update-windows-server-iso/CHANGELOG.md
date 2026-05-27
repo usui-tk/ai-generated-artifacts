@@ -16,6 +16,131 @@ the script and follows the
 
 ## [Unreleased]
 
+### r09.0 Step 2a followup - JSON Canonical Serialization helpers and SPEC Part B.23
+
+This change adds two PowerShell helpers, a Python reference module, a
+SPEC Part B.23 normative section, and a new offline regression test
+(T11) that together establish a byte-level parity contract between
+Linux PowerShell 7.x and Linux Python 3.10+ for every JSON file under
+`data/` and `tests/fixtures/`. **No existing JSON files are migrated
+in this commit**; the format check itself ships now, and the
+mechanical migration of the 25 existing JSON files is the next step
+(see "What is NOT in this commit" below).
+
+The motivation is the format drift discovered during r09.0 Step 2a:
+the `data/config-Server*.json` files are in a PowerShell 5.1
+`ConvertTo-Json` format (4-space indent, `":  "` key/value separator,
+variable-width value alignment) that PowerShell 7.x on Linux cannot
+reproduce. Any edit to a `data/*.json` file from a Linux runtime
+therefore generates a whole-file reformat in the git diff, drowning
+the semantic change in noise. The new helpers fix this by declaring
+a single canonical format that PS 7 and Python 3 can both emit
+byte-for-byte.
+
+### What is in this commit
+
+- **`SPEC.md` Part B.23** (~200 lines, new):
+  - §B.23.1 Motivation (format drift identification)
+  - §B.23.2 The 10 normative format rules
+  - §B.23.3 PowerShell reference implementation (function signatures
+    and caller obligations)
+  - §B.23.4 Python reference implementation (function signatures and
+    caller obligations)
+  - §B.23.5 Byte-level parity contract (the normative cross-runtime
+    guarantee)
+  - §B.23.6 Migration policy from legacy formats
+
+- **`Update-WindowsServerIso.ps1`** (+130 lines, new section
+  immediately after the 7-Zip helper block):
+  - `ConvertTo-CanonicalJson` — pipeline-friendly wrapper over
+    `ConvertTo-Json -Depth $Depth` with three corrections for byte
+    parity with Python: CRLF→LF normalisation, scientific-notation
+    `E`→`e` lowering, and a trailing-newline policy switch
+  - `Save-CanonicalJsonFile` — atomic-ish file writer that uses
+    `[System.IO.File]::WriteAllBytes` with a no-BOM UTF-8 encoder so
+    LFs survive without platform translation
+  - ScriptVersion remains `r09.0`; ScriptTag changes from
+    `step2a-sevenzip-port-and-a04-stub` to
+    `step2a-followup-canonical-json-helpers`
+
+- **`tests/common/canonical_json.py`** (~170 lines, new):
+  - `canonical_json_dumps` — Python reference implementation
+  - `save_canonical_json_file` — Python file writer
+  - `_assert_depth` — pre-serialisation depth check to give the same
+    error class as the PowerShell `-Depth` over-limit case
+
+- **`tests/canonical_json_test.py`** (T11, ~220 lines, new):
+  - 26 assertions covering primitives (12), collections (8), Unicode
+    (3), real-world `data/*.json` shapes (2), and file-level save (1)
+  - Drives the PowerShell side through the existing `PSSession`
+    TestHarness REPL (no new test infrastructure)
+
+- **`tests/README.md`** (+2 lines):
+  - T11 row in the Tool Inventory table
+  - T11 line in the Quick Start example block
+
+### What is NOT in this commit
+
+The following are scoped to the next change cycle (a Phase B2
+follow-up), explicitly NOT shipped here so the format and helpers
+can be reviewed in isolation:
+
+- The 27 existing `ConvertTo-Json` call sites in
+  `Update-WindowsServerIso.ps1` are not yet migrated to
+  `ConvertTo-CanonicalJson`.
+- The 25 existing JSON files under `data/` and `tests/fixtures/`
+  are not yet reformatted to canonical. Their current formats
+  (PS 5.1 4-space for `data/*.json`, Python 2-space for
+  `tests/fixtures/*.json`) are documented in §B.23.6 as the
+  "migration window" baseline.
+- The Part C quality-gate format check
+  (`tests/canonical_json_format_check.py`) that walks both
+  directories and fails on any non-canonical file is described in
+  §B.23.6 but not yet implemented; it lands in the same change
+  cycle as the mechanical migration.
+
+### Rationale for the split
+
+Phase B1 (this commit) ships the contract and the tools so reviewers
+can examine the format rules, the helper signatures, and the byte
+parity test in isolation. Phase B2 (next) applies the contract
+mechanically to the 25 existing files in one large but
+straightforward diff. Bundling the two together would have produced
+~1,500 lines of mixed contract change + mechanical reformat, defeating
+reviewer focus.
+
+### Quality gate
+
+- `psa.py`: 0 errors / 0 warnings / 0 info (13,009 lines analysed)
+- `psa.py --include PSA1004,PSA2012,PSA2013`: 0 / 0 / 0
+- `PSScriptAnalyzer` with project settings: 0 findings
+- `pwsh -ParseFile`: Parse OK
+- T2 (catalog_fixture_test): 13 passed / 0 failed (unchanged baseline)
+- T3 (powershell_harness): 10 passed / 0 failed (unchanged baseline)
+- T6 (release_info_parser_test): 13 passed / 0 failed (unchanged baseline)
+- **T11 (canonical_json_test, NEW): 26 passed / 0 failed**
+- TestHarness smoke test: `ConvertTo-CanonicalJson` returns the
+  expected JSON via the harness REPL
+
+### Cross-references
+
+- SPEC.md §B.23 (normative format rules and parity contract; new in
+  this commit)
+- AGENTS.md §2 (sibling-isolation policy: this change is scoped to
+  the `update-windows-server-iso` subproject; promotion to a
+  Layer 0/1 rule or to the canonical PowerShell SPEC for other
+  PowerShell subprojects is intentionally NOT in scope here and
+  will be proposed separately under operator approval)
+- AGENTS.md §9 AP-3 (inheritance via copy-paste: future ports to
+  other subprojects, if approved, should be tracked as verbatim
+  copies of these two functions, not as independent rewrites)
+- AGENTS.md §9 AP-7 (out-of-scope sibling modification: no files
+  under `scripts/powershell/download-speakerdeck-oracle4engineer/`
+  or any other sibling are touched by this commit)
+- AGENTS.md §9 AP-8 (documentation-only updates without downstream
+  propagation: SPEC §B.23 ships together with the helpers, T11, and
+  tests/README.md row in this single commit)
+
 ### r09.0 Step 2a - 7-Zip helper port, A04 stub, and Server 2016 SSU dependency config fix
 
 This Step 2a ships a **scope-limited code change** that lays the

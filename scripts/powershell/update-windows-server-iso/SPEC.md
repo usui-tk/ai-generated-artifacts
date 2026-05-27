@@ -2727,6 +2727,186 @@ was fixed by making `Show-PhaseSummary` idempotent via a
 | Microsoft tool dependency avoidance | §B.19.4 | — | §D.27 |
 | Helper function unification | §B.10 | — | §D.30 |
 
+## B.23 JSON Canonical Serialization
+
+**Status**: normative. **Scope**: every `data/*.json` and every
+`tests/fixtures/*.json` file in this subproject.
+
+### B.23.1 Motivation
+
+This subproject's `data/` directory and `tests/fixtures/` directory
+both contain JSON files. Historically the two directories used two
+different formats:
+
+- `data/*.json` was written by PowerShell 5.1 `ConvertTo-Json`, whose
+  output has 4-space indentation, a `":  "` (colon + two spaces)
+  key/value separator, and a peculiar variable-width indentation that
+  visually aligns the values of an object to the same column.
+- `tests/fixtures/*.json` was written by Python `json.dumps(indent=2)`,
+  which has 2-space indentation and a `": "` (colon + one space)
+  key/value separator.
+
+The PowerShell 5.1 format is **not reproducible on a Linux host**
+running PowerShell 7.x: PS 7's `ConvertTo-Json` emits 2-space
+indentation with `": "` separator, matching Python rather than PS 5.1.
+Operators editing a `data/*.json` file from a Linux runtime therefore
+introduced a whole-file reformat with every commit, drowning the
+semantic change in noise and making review impractical.
+
+The fix is to declare a single canonical format that both Linux
+PowerShell 7 and Linux Python 3.10+ can emit byte-for-byte. The
+canonical format chosen is the natural intersection of the two
+runtimes' defaults, with two compatibility tweaks on the PowerShell
+side to close the small remaining gaps (CRLF normalisation and
+scientific-notation case).
+
+### B.23.2 The 10 format rules (normative)
+
+Every JSON file under `data/` and `tests/fixtures/` MUST satisfy all
+ten rules:
+
+| # | Rule | Rationale |
+|:-:|---|---|
+| 1 | **Encoding**: UTF-8 without BOM | Matches root README §File Format Policy for non-`.ps1` files |
+| 2 | **Line endings**: LF only (no CRLF) | Same as rule 1 |
+| 3 | **Indentation**: 2 spaces, no tabs | PS 7 / Python `indent=2` natural default |
+| 4 | **Key-value separator**: `": "` (colon + 1 space) | PS 7 / Python natural default |
+| 5 | **Array item separator**: `",\n<indent>"` (comma + newline + indent) | PS 7 / Python natural default |
+| 6 | **Non-ASCII characters**: literal (no `\uXXXX` escape) | Japanese / emoji readability; round-trippable through Python `ensure_ascii=False` and PS 7's default |
+| 7 | **Key order**: insertion order preserved (no sort) | Operator-meaningful field ordering (e.g. `KbId` before `Title` in `NeutralPatches`) |
+| 8 | **Trailing newline**: exactly one LF at end of file | POSIX convention; `cat`, `git diff`, and most editors expect it |
+| 9 | **Null values**: emitted as `"key": null` (no field omission) | Schema explicitness; absence of a key means "field not declared", not "field is null" |
+| 10 | **Depth limit**: caller-controlled, default 20 | Prevents accidental infinite recursion; 20 is well above the deepest known schema (currently 6) |
+
+A file that violates any of rules 1–10 is **not** in canonical format,
+even if it parses as valid JSON.
+
+### B.23.3 PowerShell reference implementation
+
+Two helpers live in `Update-WindowsServerIso.ps1`, immediately after
+the 7-Zip helper block (§B.19.4):
+
+| Function | Purpose |
+|:---|:---|
+| `ConvertTo-CanonicalJson` | Serialize an object to a canonical JSON string. |
+| `Save-CanonicalJsonFile`  | Serialize and atomically write the result to a file. |
+
+`ConvertTo-CanonicalJson` is a thin wrapper over `ConvertTo-Json
+-Depth $Depth`. PowerShell 7's `ConvertTo-Json` default output already
+satisfies rules 3, 4, 6, 7, and 9. The wrapper adds three corrections:
+
+1. **CRLF → LF normalisation** (rule 2). PowerShell 7's
+   `ConvertTo-Json` line endings are platform-dependent; the wrapper
+   replaces `\r\n` with `\n` unconditionally so output is identical on
+   Windows and Linux.
+2. **Scientific notation E → e** (parity with Python). PowerShell
+   emits `1E+100`; Python emits `1e+100`. JSON RFC 8259 permits both,
+   but byte parity requires one. The canonical choice is lowercase
+   `e`, matching Python's default; the wrapper post-processes the
+   PowerShell output with the regex `(?<=\d)E(?=[+\-]?\d)`.
+3. **Trailing newline policy** (rule 8). PowerShell adds none; the
+   wrapper adds exactly one LF unless `-NoTrailingNewline` is set.
+
+`Save-CanonicalJsonFile` wraps the serializer and writes raw bytes
+through `[System.IO.File]::WriteAllBytes` with a `UTF8Encoding(false)`
+(no-BOM) encoder. The write is staged as `<Path>.tmp` then renamed
+over `<Path>` via `Move-Item -Force`, for atomic-ish replacement.
+
+**Caller obligations**:
+
+- Pass `[ordered]` hashtables or `[pscustomobject]` instances, **not**
+  plain `[hashtable]`. The plain hashtable enumerates in unspecified
+  order, defeating rule 7.
+- Pick an explicit `-Depth` that bounds the deepest expected nesting
+  in the input. The default of 20 is safe for every known schema in
+  this subproject. PowerShell's own default of 2 is **never**
+  acceptable for `data/*.json`.
+- Prefer `Save-CanonicalJsonFile` over a `Set-Content` /
+  `Out-File` pipeline; the latter does platform newline translation
+  and may add a BOM.
+
+### B.23.4 Python reference implementation
+
+Two helpers live in `tests/common/canonical_json.py`:
+
+| Function | Purpose |
+|:---|:---|
+| `canonical_json_dumps`     | Serialize an object to a canonical JSON string. |
+| `save_canonical_json_file` | Serialize and write the result to a file. |
+
+`canonical_json_dumps` is a thin wrapper over `json.dumps` with:
+
+- `indent=2` (rule 3)
+- `ensure_ascii=False` (rule 6)
+- `separators=(',', ': ')` (rules 4, 5)
+- `sort_keys=False` is the default; Python `dict` preserves
+  insertion order since 3.7 (rule 7)
+
+plus an explicit depth check (`_assert_depth`) before serialisation
+because `json.dumps` itself does not enforce one, and an optional
+trailing-newline append (rule 8).
+
+`save_canonical_json_file` opens the file in binary mode, writes the
+UTF-8 bytes, and uses `os.replace` for an atomic rename from the
+`.tmp` staging path.
+
+**Caller obligations**:
+
+- Pass an `OrderedDict` (or equivalent) when the input is constructed
+  from a source that does not naturally preserve order (e.g. a YAML
+  load with the default loader).
+- Pick an explicit `depth` that bounds the deepest expected nesting.
+
+### B.23.5 Byte-level parity contract
+
+The two implementations together provide a normative byte-level
+parity contract:
+
+> For any logical input that round-trips through both runtimes (a
+> Python `dict`/`list`/scalar tree, marshalled through JSON into a
+> PowerShell `PSCustomObject`/`Array`/scalar tree), the byte sequence
+> produced by `canonical_json_dumps` and `ConvertTo-CanonicalJson`
+> for the same logical input MUST be identical.
+
+The parity is verified by the **T11** test
+(`tests/canonical_json_test.py`), which compares the two
+implementations across a matrix of primitives, collections, Unicode
+strings, and real-world `data/*.json` shapes. T11 is in the offline
+quality-gate group and runs on every commit alongside T2 / T3 / T6 /
+T7 / T8 / T9 / T10.
+
+Any future change to either implementation that breaks T11 is a
+contract violation and MUST be reverted or its parity restored
+before the change can land.
+
+### B.23.6 Migration from legacy formats
+
+Existing files in `data/` may still be in the PS 5.1 legacy format
+or a mix of the two; existing files in `tests/fixtures/` may already
+be in the Python 2-space format. Both populations are **not yet**
+guaranteed to be in canonical format; the migration to canonical is
+a separate, scope-controlled effort tracked in the CHANGELOG.
+
+During the migration window, the following invariants apply:
+
+- Any newly created `data/*.json` or `tests/fixtures/*.json` file
+  MUST be written through `ConvertTo-CanonicalJson` /
+  `Save-CanonicalJsonFile` (PowerShell) or `canonical_json_dumps` /
+  `save_canonical_json_file` (Python).
+- Any commit that modifies an existing `data/*.json` file SHOULD
+  convert the file to canonical format in the same commit. The
+  conversion produces a large mechanical diff; it is acceptable to
+  isolate the conversion in a dedicated commit immediately preceding
+  the semantic change so reviewers can read the two diffs separately.
+- A commit that converts a file to canonical format MUST note the
+  conversion in the CHANGELOG entry, including the source format
+  identification (PS 5.1, Python 2-space, hand-written, etc.).
+
+After the migration is complete, the format check becomes a
+Part C quality gate (a `python3 tests/canonical_json_format_check.py`
+script that walks both directories and fails on any file that does
+not match its own canonical re-serialisation).
+
 ---
 
 # Part C — Quality Gates and Validation
