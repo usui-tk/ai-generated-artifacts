@@ -1,41 +1,39 @@
 {
-    "Schema":  "1.0",
-    "OsVersion":  "Server2022",
-    "WindowMonths":  36,
-    "Entries":  [
-                    {
-                        "Query":  "2026-05 Setup Dynamic Update for Microsoft server operating system version 21H2",
-                        "ProbedAt":  "2026-05-26T06:31:21.1701423Z",
-                        "SearchHitCount":  0,
-                        "Notes":  "No Catalog hits survived title-narrow filter.",
-                        "MatchingHits":  [
-
-                                         ],
-                        "Success":  false,
-                        "PatchMonth":  "2026-05",
-                        "DuType":  "DynamicUpdate.Setup",
-                        "IsEmptyMarker":  true,
-                        "MatchingHitCount":  0
-                    },
-                    {
-                        "Query":  "2026-05 Safe OS Dynamic Update for Microsoft server operating system version 21H2",
-                        "KbId":  "KB5087595",
-                        "ProbedAt":  "2026-05-26T06:31:21.8389868Z",
-                        "SearchHitCount":  1,
-                        "Success":  true,
-                        "ChosenUpdateId":  "f7ad10df-1aef-4ecb-889f-3976c45fac6e",
-                        "MatchingHits":  [
-                                             {
-                                                 "UpdateId":  "f7ad10df-1aef-4ecb-889f-3976c45fac6e",
-                                                 "Title":  "2026-05 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087595)"
-                                             }
-                                         ],
-                        "ChosenTitle":  "2026-05 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087595)",
-                        "PatchMonth":  "2026-05",
-                        "DuType":  "DynamicUpdate.SafeOs",
-                        "IsEmptyMarker":  false,
-                        "MatchingHitCount":  1
-                    }
-                ],
-    "LastRefreshedAt":  "2026-05-26T06:31:21.8389868Z"
+  "Schema": "1.0",
+  "OsVersion": "Server2022",
+  "WindowMonths": 36,
+  "Entries": [
+    {
+      "Query": "2026-05 Setup Dynamic Update for Microsoft server operating system version 21H2",
+      "ProbedAt": "2026-05-26T06:31:21.1701423Z",
+      "SearchHitCount": 0,
+      "Notes": "No Catalog hits survived title-narrow filter.",
+      "MatchingHits": [],
+      "Success": false,
+      "PatchMonth": "2026-05",
+      "DuType": "DynamicUpdate.Setup",
+      "IsEmptyMarker": true,
+      "MatchingHitCount": 0
+    },
+    {
+      "Query": "2026-05 Safe OS Dynamic Update for Microsoft server operating system version 21H2",
+      "KbId": "KB5087595",
+      "ProbedAt": "2026-05-26T06:31:21.8389868Z",
+      "SearchHitCount": 1,
+      "Success": true,
+      "ChosenUpdateId": "f7ad10df-1aef-4ecb-889f-3976c45fac6e",
+      "MatchingHits": [
+        {
+          "UpdateId": "f7ad10df-1aef-4ecb-889f-3976c45fac6e",
+          "Title": "2026-05 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087595)"
+        }
+      ],
+      "ChosenTitle": "2026-05 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5087595)",
+      "PatchMonth": "2026-05",
+      "DuType": "DynamicUpdate.SafeOs",
+      "IsEmptyMarker": false,
+      "MatchingHitCount": 1
+    }
+  ],
+  "LastRefreshedAt": "2026-05-26T06:31:21.8389868Z"
 }

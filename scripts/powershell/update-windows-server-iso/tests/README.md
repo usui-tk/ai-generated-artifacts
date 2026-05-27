@@ -37,6 +37,7 @@ production, this directory ships five tools, summarised below.
 | `catalog_title_tokens_test.py` (T9) | Offline regression test for the URL-resolver Config-driven narrowing; drives `Get-CatalogTitleTokenList` against all four OS configs (verifies sourcing + missing-Config defensive default) and `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases (positive matches, same-KB client-variant rejection, `arm64` / `Windows 11` negative exclusion); 18 assertions | After every change to `Common.CatalogTitleTokens` in any OS config, or to the narrow-filter helpers; on every CI run | No  |
 | `release_info_resolver_test.py` (T10) | Offline regression test for the Refresher main-path migration; drives `Get-PatchSetFromReleaseInfoDiscovery` through four scenarios (Server 2025/2022/2019 full set + no-match month) plus defensive cases (empty data dir, invalid PatchMonth). Synthetic fixtures derived from live 2026-05-26 captures cover SPEC B.23.5 B-2 multi-row .NET CU per OS and SPEC B.23.6 absence-of-DU; 18 assertions | After every change to `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or any of the three caches it reads; on every CI run | No  |
 | `canonical_json_test.py` (T11) | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell, in `Update-WindowsServerIso.ps1`) and `canonical_json_dumps` / `save_canonical_json_file` (Python, in `tests/common/canonical_json.py`); 26 assertions covering primitives (12), collections (8), Unicode (3), real-world `data/*.json` shapes (2), and file-level save (1). Verifies the SPEC Part B.23 byte-level parity contract for `data/*.json` and `tests/fixtures/*.json` files. | After every change to `ConvertTo-CanonicalJson`, `Save-CanonicalJsonFile`, or `tests/common/canonical_json.py`; on every CI run | No  |
+| `canonical_json_format_check.py` (Part C gate) | Offline format compliance check for every `*.json` file under `data/`, `tests/fixtures/`, and `tests/snapshots/`. Re-serialises each file through `canonical_json_dumps` and fails if the bytes diverge. Implements SPEC §C.3.4. | On every commit that adds or modifies a JSON file in the three scanned directories; on every CI run | No  |
 
 ## Quick start
 
@@ -46,6 +47,7 @@ cd tests/
 python3 catalog_fixture_test.py            # T2: 13 assertions on saved HTML
 python3 powershell_harness.py              # T3: 7 PS function-level assertions
 python3 canonical_json_test.py             # T11: 26 PS/Python byte-level parity assertions
+python3 canonical_json_format_check.py     # Part C: every JSON file in canonical format
 
 # Live tests - require network access to Microsoft endpoints
 python3 catalog_probe.py --check all       # T1: hits live Catalog (~7 checks)

@@ -16,6 +16,121 @@ the script and follows the
 
 ## [Unreleased]
 
+### r09.0 Step 2a followup (Phase B2) - JSON canonical migration and format gate
+
+This change applies the canonical JSON format declared in Phase B1
+(SPEC Part B.23) to all 25 pre-existing JSON files in this subproject
+and adds the Part C quality gate (§C.3.4) that prevents regression.
+The change is large in line count but mechanical: no semantic content
+is changed, only the formatter.
+
+### What is in this commit
+
+**File reformatting (25 files, byte-level mechanical change)**:
+
+| Directory | File count | Source format | Net size delta |
+|---|---:|---|---:|
+| `data/` | 10 | PS 5.1 4-space, `":  "` separator, variable-width value alignment | **-414 KB** (-49% on average; the wins come from removing 53-space leading whitespace per array element) |
+| `tests/fixtures/` | 10 | Python 2-space already (mostly canonical-compatible) | +537 bytes (one hand-formatted file `release_info_resolver/scenarios.json` had single-line short objects that canonicalise to multi-line) |
+| `tests/snapshots/` | 5 | Python 2-space already | 0 bytes (already canonical-compatible) |
+
+The `data/` size delta is the most visible: `cache-dotnet-cu.json`
+267 KB → 110 KB, `cache-release-info.json` 402 KB → 216 KB. The
+deletion is whitespace, not data; the JSON parse output of each file
+before and after is structurally identical (verified by parse-then-compare
+during the migration run).
+
+**Source code changes (`Update-WindowsServerIso.ps1`, 12 sites)**:
+
+The 12 `ConvertTo-Json` call sites that wrote to disk were replaced
+with `Save-CanonicalJsonFile` (the SPEC §B.23.3 reference writer):
+
+| Site | Previous pattern | Function |
+|---|---|---|
+| L3236 | `($x \| ConvertTo-Json -Depth 32) -replace ... + manual newline + WriteAllBytes` | `Save-OsConfig` |
+| L3535 | same pattern, -Depth 8 | `Invoke-ReleaseInfoFetch` (raw meta) |
+| L3860 | same pattern, -Depth 32 | `Update-ReleaseInfoCache` |
+| L4366 | same pattern, -Depth 12 | `Invoke-DotNetCuFetch` (raw aggregate) |
+| L4433 | same pattern, -Depth 32 | `Update-DotNetCuCache` |
+| L4589 | same pattern, -Depth 12 | `Set-DynamicUpdateCachePersistFunc` |
+| L10095 | `WriteAllText` + `-replace` + manual `+ "\n"` | `Save-ValidationSummary` |
+| L10136 | same | `Save-WsusScnScanRaw` |
+| L10172 | same | `Save-DependencyGraph` |
+| L11225 | `ConvertTo-Json \| Set-Content -Encoding UTF8 -Force` | `Pca2023OnlyMode` (pcaDir) |
+| L12006 | `Set-Content -NoNewline + Add-Content "\n"` | `Invoke-AdminPhaseA02_DumpFieldClassification` |
+| L12879 | `ConvertTo-Json \| Set-Content -Encoding UTF8 -Force` | `Pca2023OnlyMode` (scratch) |
+
+The 8 `-Compress` call sites (debug trace, HTTP body, TestHarness
+protocol, before/after diff logging) and the 1 clone-idiom site
+(`ConvertTo-Json \| ConvertFrom-Json` for deep copy) were left as
+raw `ConvertTo-Json` because they intentionally produce single-line
+or non-canonical output that the SPEC Part B.23 rules do not cover.
+The debug trace Export at L1540 also writes UTF-8 **with BOM** by
+design (so a Japanese ConsoleHost can read it back); this is
+incompatible with canonical (no-BOM) and is correctly left alone.
+
+ScriptVersion stays `update-wsi-2026.05.28-r09.0`; ScriptTag changes
+from `step2a-followup-canonical-json-helpers` to
+`step2a-followup-canonical-json-migration`.
+
+**New Part C quality gate**:
+
+- `tests/canonical_json_format_check.py` (~140 lines, new): walks
+  `data/`, `tests/fixtures/`, and `tests/snapshots/`; re-serialises
+  every `*.json` through `canonical_json_dumps`; fails the gate if any
+  file's bytes diverge. Useful diagnostic on failure: shows first
+  differing byte offset with surrounding context, plus the remediation
+  hint pointing at `Save-CanonicalJsonFile` / `save_canonical_json_file`.
+
+**SPEC.md updates**:
+
+- §B.23.6 rewritten: removed the "migration window" framing; the
+  invariants now read as steady-state rules. The explicit out-of-scope
+  list (`Workspace_UpdateWsi/`, `-Compress` debug traces,
+  `.psa.config.json`) is recorded normatively so future LLM agents and
+  human reviewers do not accidentally widen the scope.
+- §C.3.4 added: format-compliance gate that consumes the new
+  `tests/canonical_json_format_check.py`.
+
+**`tests/README.md`**: T11 entry already present; added a row for the
+new format check script in the Tool inventory table and a line in the
+Quick start block.
+
+### Quality gate
+
+- `psa.py`: 0 errors / 0 warnings / 0 info (12,987 lines analysed)
+- `psa.py --include PSA1004,PSA2012,PSA2013`: 0 / 0 / 0
+- `PSScriptAnalyzer` with project settings: 0 findings
+- `pwsh -ParseFile`: Parse OK
+- T2 (catalog_fixture_test): 13 passed / 0 failed
+- T3 (powershell_harness): 10 passed / 0 failed
+- T6 (release_info_parser_test): 13 passed / 0 failed
+- T7 (dotnet_cu_parser_test): 16 passed / 0 failed
+- T8 (dynamic_update_cache_test): 20 passed / 0 failed
+- T9 (catalog_title_tokens_test): 18 passed / 0 failed
+- T10 (release_info_resolver_test): 22 passed / 0 failed
+- T11 (canonical_json_test): 26 passed / 0 failed
+- **canonical_json_format_check (Part C gate, NEW): 25 passed / 0 failed**
+
+### Verification of the structural equivalence
+
+Each of the 25 reformatted files was parsed before and after the
+conversion and the resulting Python object tree was compared. All 25
+files parsed equal-after-equal-before, confirming the change is
+formatter-only (no semantic shift).
+
+### Cross-references
+
+- SPEC.md §B.23 (the canonical format, declared in Phase B1; no
+  rule changes in this commit, only the §B.23.6 migration text)
+- SPEC.md §C.3.4 (the new format gate)
+- AGENTS.md §2 sibling-isolation policy: this change is still scoped
+  strictly to `scripts/powershell/update-windows-server-iso/`. No file
+  in any other subproject is touched.
+- AGENTS.md §9 AP-8 (downstream propagation): the gate, the SPEC
+  amendments, the test README row, the source code replacements, and
+  the file reformatting all ship in this single commit.
+
 ### r09.0 Step 2a followup - JSON Canonical Serialization helpers and SPEC Part B.23
 
 This change adds two PowerShell helpers, a Python reference module, a

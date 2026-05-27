@@ -536,7 +536,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
 $Script:ScriptVersion = 'update-wsi-2026.05.28-r09.0'
-$Script:ScriptTag     = 'step2a-followup-canonical-json-helpers'
+$Script:ScriptTag     = 'step2a-followup-canonical-json-migration'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -3232,15 +3232,12 @@ function Save-ConfigWithBaseline {
         [Parameter(Mandatory)] [string]$ConfigPath,
         [Parameter(Mandatory)] $OsProfile
     )
-    # ConvertTo-Json with -Depth handles nested PatchBaseline.Patches
-    $json = $OsProfile | ConvertTo-Json -Depth 32
-    # Normalise to LF (json files are eol=lf per repo .gitattributes)
-    $json = $json -replace "`r`n", "`n"
-    # Append trailing newline for POSIX-friendliness
-    if (-not $json.EndsWith("`n")) { $json = $json + "`n" }
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-    # WriteAllBytes is atomic on the same filesystem
-    [System.IO.File]::WriteAllBytes($ConfigPath, $bytes)
+    # Persist the OS profile in canonical JSON format (SPEC Part B.23).
+    # Save-CanonicalJsonFile handles all of: UTF-8 (no BOM), LF line
+    # endings, 2-space indent, ": " separator, trailing newline, and
+    # atomic-ish rename. Depth 32 covers the deepest known nesting in
+    # PatchBaseline.Patches.
+    Save-CanonicalJsonFile -InputObject $OsProfile -Path $ConfigPath -Depth 32
 }
 
 function Convert-CatalogPatchToBaselineEntry {
@@ -3532,12 +3529,10 @@ function Invoke-ReleaseInfoFetch {
         UserAgent    = $Script:ReleaseInfoUserAgent
         Headers      = $headersFlat
     }
-    $rawMetaJson = ($rawMeta | ConvertTo-Json -Depth 8) -replace "`r`n", "`n"
-    if (-not $rawMetaJson.EndsWith("`n")) { $rawMetaJson = $rawMetaJson + "`n" }
-    [System.IO.File]::WriteAllBytes($metaPath, [System.Text.Encoding]::UTF8.GetBytes($rawMetaJson))
+    Save-CanonicalJsonFile -InputObject $rawMeta -Path $metaPath -Depth 8
 
     Write-Ok ('  raw-release-info.md         : {0} bytes' -f $bodyBytes.Length)
-    Write-Ok ('  raw-release-info.meta.json  : {0} bytes' -f ([System.Text.Encoding]::UTF8.GetByteCount($rawMetaJson)))
+    Write-Ok ('  raw-release-info.meta.json  : {0} bytes' -f (Get-Item -LiteralPath $metaPath).Length)
     return $rawPath
 }
 
@@ -3857,12 +3852,9 @@ function Update-ReleaseInfoCache {
         HotpatchCalendar   = $parsed.HotpatchCalendar
     }
 
-    $json = ($cache | ConvertTo-Json -Depth 32) -replace "`r`n", "`n"
-    if (-not $json.EndsWith("`n")) { $json = $json + "`n" }
-    $jsonBytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-    [System.IO.File]::WriteAllBytes($cachePath, $jsonBytes)
+    Save-CanonicalJsonFile -InputObject $cache -Path $cachePath -Depth 32
 
-    Write-Ok ('  cache-release-info.json     : {0} monthly rows, {1} hotpatch rows ({2} bytes)' -f $cache.MonthlyRowCount, $cache.HotpatchRowCount, $jsonBytes.Length)
+    Write-Ok ('  cache-release-info.json     : {0} monthly rows, {1} hotpatch rows ({2} bytes)' -f $cache.MonthlyRowCount, $cache.HotpatchRowCount, (Get-Item -LiteralPath $cachePath).Length)
 
     return [pscustomobject]@{
         MonthlyRowCount    = $cache.MonthlyRowCount
@@ -4363,11 +4355,9 @@ function Invoke-DotNetCuFetch {
         Months      = @($monthList.ToArray())
     }
 
-    $rawJson = ($rawAggregate | ConvertTo-Json -Depth 12) -replace "`r`n", "`n"
-    if (-not $rawJson.EndsWith("`n")) { $rawJson = $rawJson + "`n" }
-    [System.IO.File]::WriteAllBytes($rawPath, [System.Text.Encoding]::UTF8.GetBytes($rawJson))
+    Save-CanonicalJsonFile -InputObject $rawAggregate -Path $rawPath -Depth 12
 
-    Write-Ok ('  raw-dotnet-cu.json    : {0} bytes' -f ([System.Text.Encoding]::UTF8.GetByteCount($rawJson)))
+    Write-Ok ('  raw-dotnet-cu.json    : {0} bytes' -f (Get-Item -LiteralPath $rawPath).Length)
     return $rawPath
 }
 
@@ -4430,11 +4420,9 @@ function Update-DotNetCuCache {
     }
 
     $cachePath = Get-DotNetCuCachePath
-    $cacheJson = ($cacheOut | ConvertTo-Json -Depth 32) -replace "`r`n", "`n"
-    if (-not $cacheJson.EndsWith("`n")) { $cacheJson = $cacheJson + "`n" }
-    [System.IO.File]::WriteAllBytes($cachePath, [System.Text.Encoding]::UTF8.GetBytes($cacheJson))
+    Save-CanonicalJsonFile -InputObject $cacheOut -Path $cachePath -Depth 32
 
-    Write-Ok ('  cache-dotnet-cu.json : {0} months, {1} bytes' -f $monthParsedList.Count, ([System.Text.Encoding]::UTF8.GetByteCount($cacheJson)))
+    Write-Ok ('  cache-dotnet-cu.json : {0} months, {1} bytes' -f $monthParsedList.Count, (Get-Item -LiteralPath $cachePath).Length)
     return $cachePath
 }
 
@@ -4586,9 +4574,7 @@ function Save-DynamicUpdateCache {
     if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
         New-Item -Path $dir -ItemType Directory -Force | Out-Null
     }
-    $json = ($Cache | ConvertTo-Json -Depth 12) -replace "`r`n", "`n"
-    if (-not $json.EndsWith("`n")) { $json = $json + "`n" }
-    [System.IO.File]::WriteAllBytes($cachePath, [System.Text.Encoding]::UTF8.GetBytes($json))
+    Save-CanonicalJsonFile -InputObject $Cache -Path $cachePath -Depth 12
     return $cachePath
 }
 
@@ -10092,9 +10078,7 @@ function Export-PatchValidationReport {
             'Or download the missing KBs from the Catalog manually and add to -PatchDirectory.'
         )
     }
-    $summaryJson = $summary | ConvertTo-Json -Depth 32
-    $summaryJson = $summaryJson -replace "`r`n", "`n"
-    [System.IO.File]::WriteAllText((Join-Path $dir 'validation_summary.json'), $summaryJson + "`n", [System.Text.Encoding]::UTF8)
+    Save-CanonicalJsonFile -InputObject $summary -Path (Join-Path $dir 'validation_summary.json') -Depth 32
 
     # validation_detail.csv
     $rows = New-Object System.Collections.Generic.List[object]
@@ -10133,9 +10117,7 @@ function Export-PatchValidationReport {
     $rows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
 
     # wsusscn2_scan_raw.json
-    $rawJson = $WuaRaw | ConvertTo-Json -Depth 32
-    $rawJson = $rawJson -replace "`r`n", "`n"
-    [System.IO.File]::WriteAllText((Join-Path $dir 'wsusscn2_scan_raw.json'), $rawJson + "`n", [System.Text.Encoding]::UTF8)
+    Save-CanonicalJsonFile -InputObject $WuaRaw -Path (Join-Path $dir 'wsusscn2_scan_raw.json') -Depth 32
 
     # dependency_graph.json (simple adjacency from PatchBaseline)
     $nodes = New-Object System.Collections.Generic.List[object]
@@ -10169,9 +10151,7 @@ function Export-PatchValidationReport {
         Nodes = $nodes.ToArray()
         Edges = $edges.ToArray()
     }
-    $graphJson = $graph | ConvertTo-Json -Depth 32
-    $graphJson = $graphJson -replace "`r`n", "`n"
-    [System.IO.File]::WriteAllText((Join-Path $dir 'dependency_graph.json'), $graphJson + "`n", [System.Text.Encoding]::UTF8)
+    Save-CanonicalJsonFile -InputObject $graph -Path (Join-Path $dir 'dependency_graph.json') -Depth 32
     return $dir
 }
 
@@ -11222,7 +11202,7 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
             New-Item -ItemType Directory -Path $pcaDir -Force | Out-Null
         }
         $jsonPath = Join-Path $pcaDir 'pca2023_readiness.json'
-        $snapshot | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $jsonPath -Encoding UTF8 -Force
+        Save-CanonicalJsonFile -InputObject $snapshot -Path $jsonPath -Depth 10
         Write-Step ('Snapshot JSON: {0}' -f $jsonPath)
 
         # ---- Emit Markdown ----
@@ -12003,9 +11983,7 @@ function Invoke-AdminPhaseA02_DumpFieldClassification {
                 }
             })
         }
-        $json = $payload | ConvertTo-Json -Depth 8
-        Set-Content -LiteralPath $outPath -Value $json -Encoding UTF8 -NoNewline
-        Add-Content -LiteralPath $outPath -Value "`n" -Encoding UTF8 -NoNewline
+        Save-CanonicalJsonFile -InputObject $payload -Path $outPath -Depth 8
         Write-Ok ('Field classification written: {0}' -f $outPath)
         return $true
     } finally {
@@ -12876,7 +12854,7 @@ if ($Pca2023OnlyMode) {
         Show-Pca2023ReadinessSnapshot -Snapshot $snap
 
         $jsonPath = Join-Path $scratch 'pca2023_readiness.json'
-        $snap | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $jsonPath -Encoding UTF8 -Force
+        Save-CanonicalJsonFile -InputObject $snap -Path $jsonPath -Depth 10
         Write-Step ('Snapshot written: {0}' -f $jsonPath)
         $reportText = Format-Pca2023ReadinessForReport -Snapshot $snap
         $mdPath = Join-Path $scratch 'pca2023_readiness.txt'

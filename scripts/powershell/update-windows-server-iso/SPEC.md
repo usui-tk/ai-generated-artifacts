@@ -2881,31 +2881,37 @@ before the change can land.
 
 ### B.23.6 Migration from legacy formats
 
-Existing files in `data/` may still be in the PS 5.1 legacy format
-or a mix of the two; existing files in `tests/fixtures/` may already
-be in the Python 2-space format. Both populations are **not yet**
-guaranteed to be in canonical format; the migration to canonical is
-a separate, scope-controlled effort tracked in the CHANGELOG.
+The initial migration of the 25 pre-existing `*.json` files in this
+subproject from their legacy formats (PowerShell 5.1 4-space format
+under `data/`, Python 2-space format under `tests/fixtures/` and
+`tests/snapshots/`) to canonical was completed in the same change
+cycle that added §C.3.4. After that point the canonical format is
+mandatory for every JSON file in the three scanned directories.
 
-During the migration window, the following invariants apply:
+The post-migration invariants are:
 
-- Any newly created `data/*.json` or `tests/fixtures/*.json` file
-  MUST be written through `ConvertTo-CanonicalJson` /
-  `Save-CanonicalJsonFile` (PowerShell) or `canonical_json_dumps` /
-  `save_canonical_json_file` (Python).
-- Any commit that modifies an existing `data/*.json` file SHOULD
-  convert the file to canonical format in the same commit. The
-  conversion produces a large mechanical diff; it is acceptable to
-  isolate the conversion in a dedicated commit immediately preceding
-  the semantic change so reviewers can read the two diffs separately.
-- A commit that converts a file to canonical format MUST note the
-  conversion in the CHANGELOG entry, including the source format
-  identification (PS 5.1, Python 2-space, hand-written, etc.).
+- Every `*.json` file under `data/`, `tests/fixtures/`, and
+  `tests/snapshots/` MUST be in canonical format. The gate is
+  automated by `tests/canonical_json_format_check.py` (SPEC §C.3.4);
+  any commit that introduces a non-canonical file fails the gate.
+- Any new JSON file in the three scanned directories MUST be written
+  through `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile`
+  (PowerShell) or `canonical_json_dumps` / `save_canonical_json_file`
+  (Python). Using raw `ConvertTo-Json` for a file under these paths
+  is a contract violation.
+- Any commit that modifies an existing canonical JSON file MAY
+  modify only the semantically-meaningful regions; the canonical
+  format makes such diffs minimal and easy to review.
 
-After the migration is complete, the format check becomes a
-Part C quality gate (a `python3 tests/canonical_json_format_check.py`
-script that walks both directories and fails on any file that does
-not match its own canonical re-serialisation).
+Files outside the three scanned directories are not subject to this
+rule. Notable exceptions intentionally left out of scope:
+
+- `Workspace_UpdateWsi/**/*.json` (operator-local workspace; per-run
+  artefact, not version-controlled).
+- Debug trace output that is emitted with `-Compress` for JSON-Lines
+  consumption (one event per line, no human-readable indentation).
+- `.psa.config.json` (psa.py configuration; managed by the
+  cross-script convention rather than this subproject's contract).
 
 ---
 
@@ -3044,6 +3050,37 @@ two consistency checks:
 
 `Test-OsConfigConsistency` is the planned implementation; for r09.0
 Step 1 the check is manual at PR review per §B.19.18.
+
+### C.3.4 JSON canonical format compliance
+
+**Status**: normative. **Scope**: every `*.json` file under `data/`,
+`tests/fixtures/`, and `tests/snapshots/` (the same scope as SPEC
+Part B.23).
+
+The gate is automated by `tests/canonical_json_format_check.py`,
+which walks the three directories and, for each JSON file,
+re-serialises it through `canonical_json_dumps` and compares the
+result byte-for-byte against the on-disk file. Any divergence fails
+the gate.
+
+```bash
+python3 tests/canonical_json_format_check.py
+# Expected exit code: 0
+# Expected last line: "Summary: 25 passed, 0 failed, 25 total"
+# (the file count grows as new JSON files are added; the pass/fail
+#  invariant is "failed == 0")
+```
+
+The check runs on every commit that adds or modifies a JSON file in
+the scope above. A new JSON file that is not byte-for-byte canonical
+fails the gate immediately; the remediation is to re-write the file
+through `Save-CanonicalJsonFile` (PowerShell) or
+`save_canonical_json_file` (Python), both of which produce identical
+output per the SPEC Part B.23 parity contract.
+
+The gate also rejects unparseable JSON, so it doubles as a JSON
+well-formedness check for the same set of files (a superset of the
+narrower §C.3.1 check).
 
 ## C.4 Functional smoke tests
 
