@@ -235,15 +235,31 @@ Structure":
 > by every script in this style.
 
 Part A of a Layer 3 SPEC is the **inherited** layer. The canonical
-text lives in the in-house reference SPEC (currently
-`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`,
-sections A.1–A.14). A new script's Part A:
+text lives in the **in-house reference SPEC for each scripting
+family** — the repository currently maintains **two** canonical
+sibling SPECs, organised by language / target environment:
+
+- **PowerShell scripts**: [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md), sections A.1–A.14
+- **Bash / AWS scripts**: [`scripts/aws/ol-aws-ami-builder/SPEC.md`](./scripts/aws/ol-aws-ami-builder/SPEC.md), sections A.1–A.11
+
+The two canonicals overlap conceptually (reference assets, logging,
+error handling, dev workflow) but diverge in concrete form (Bash
+idioms vs PowerShell idioms, `env.properties` files vs `param()`
+blocks, `shellcheck` vs `psa.py`). A new script's Part A:
 
 - MUST consist of an inheritance declaration (~50 lines)
-- MUST reference the canonical sibling SPEC sections
+- MUST reference the canonical sibling SPEC sections **of the same
+  scripting family** (do NOT inherit a PowerShell canonical from a
+  Bash script, or vice versa)
 - MUST NOT restate the canonical text
 - MAY have a project-specific extensions subsection (`A.x`) recording
   ONLY deviations or additions
+
+If a new scripting family emerges in the future (e.g., Python pure
+scripts beyond `psa.py`, or other shell variants), declare a new
+canonical sibling SPEC for that family and update this section
+accordingly — do NOT shoehorn a new family into one of the existing
+canonicals.
 
 ### The anti-pattern (what the c40755c regression did)
 
@@ -312,7 +328,13 @@ text lives in the files listed.
   Part C quality gate verification, and the ground truth verification
   rule (the latter added in the same cycle as this `AGENTS.md`)
 
-### In sibling SPEC `scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`
+### In canonical sibling SPECs
+
+The repository maintains two canonical sibling SPECs (one per
+scripting family); both are useful references for LLM agents
+working in this repository.
+
+**PowerShell canonical** — [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md):
 
 - §A.13 Development Workflow — iteration cycle, revision discipline,
   and the "reuse before invention" principle
@@ -320,6 +342,17 @@ text lives in the files listed.
   detail with the `Lines : NNNN` match rule
 - §A.14 Debug Trace Facility — operation-level diagnostic facility,
   designed to be reused verbatim across PowerShell scripts in this style
+
+**Bash / AWS canonical** — [`scripts/aws/ol-aws-ami-builder/SPEC.md`](./scripts/aws/ol-aws-ami-builder/SPEC.md):
+
+- §A.5 Shell Options and Defensive Coding — the `set -euo pipefail`
+  discipline and equivalent Bash idioms for safe error propagation
+- §A.7 Env Property File Conventions — `env.properties.<context>-<variant>`
+  schema for variant-based Bash builders (one file per release target)
+- §A.8 Oracle Linux Version Auto-detection — runtime detection pattern
+  that other variant-based Bash builders can reuse
+- §A.11 Development Workflow — Bash-idiom iteration cycle (the
+  parallel of §A.13 in the PowerShell canonical)
 
 ---
 
