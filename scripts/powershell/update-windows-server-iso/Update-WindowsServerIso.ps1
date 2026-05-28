@@ -535,8 +535,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.2'
-$Script:ScriptTag     = 'step2b5-stage3-parse-progress'
+$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.3'
+$Script:ScriptTag     = 'step2b6-p03-patchbaseline-property-guard'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -10712,6 +10712,19 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                     LastDownloadedSizeBytes = 0
                 }
             }) -Force
+        }
+
+        # An existing PatchBaseline (loaded from config-*.json) may predate
+        # some of the properties written below. PowerShell cannot assign to a
+        # NoteProperty that does not yet exist (it throws "property cannot be
+        # found ... verify that the property exists and can be set"), and this
+        # is identical under ConvertFrom-Json and ConvertFrom-CanonicalJson.
+        # Ensure every property assigned below is present before assigning.
+        $pb = $Script:OsProfile.PatchBaseline
+        foreach ($propName in @('Patches','PatchTuesdayOfBaseline','LastVerifiedDate','LastVerifiedBy','VerificationMethod')) {
+            if (-not $pb.PSObject.Properties[$propName]) {
+                $pb | Add-Member -NotePropertyName $propName -NotePropertyValue $null -Force
+            }
         }
         $Script:OsProfile.PatchBaseline.Patches                = @($newPatches)
         $Script:OsProfile.PatchBaseline.PatchTuesdayOfBaseline = $latestPT.ToString('yyyy-MM-dd')
