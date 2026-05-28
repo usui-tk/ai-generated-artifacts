@@ -1,0 +1,427 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/usui-tk/ai-generated-artifacts/scripts/powershell/update-windows-server-iso/schema/config-v2.1.schema.json",
+  "title": "Windows Server ISO Updater - per-OS config profile (Config Schema v2.1)",
+  "description": "Machine-readable contract for data/config-Server<OsKey>.json. This file is the single source of truth that mirrors SPEC section B.4 (OS profile, Config Schema v2.1). It is validated in CI by tests/config_schema_test.py. When SPEC B.4 changes, this schema and the SPEC prose MUST be updated together; tests/config_schema_test.py and the doc cross-check keep them in sync. Rationale: a free-prose spec alone did not prevent code from writing a non-schema 'Patches' property (the P03 r10.3 defect); a machine-checkable schema catches that class of drift before it reaches a real machine.",
+  "type": "object",
+  "required": [
+    "Schema",
+    "OsKey",
+    "Common",
+    "PatchBaseline"
+  ],
+  "properties": {
+    "Schema": {
+      "type": "string",
+      "const": "2.1",
+      "description": "Top-level config schema version. SPEC B.4."
+    },
+    "OsKey": {
+      "type": "string",
+      "enum": [
+        "Server2016",
+        "Server2019",
+        "Server2022",
+        "Server2025"
+      ],
+      "description": "OS identifier; matches the config filename suffix."
+    },
+    "Common": {
+      "$ref": "#/definitions/Common"
+    },
+    "PatchBaseline": {
+      "$ref": "#/definitions/PatchBaseline"
+    },
+    "Pca2023": {
+      "$ref": "#/definitions/Pca2023"
+    },
+    "AutoRefreshPolicy": {
+      "$ref": "#/definitions/AutoRefreshPolicy"
+    },
+    "LanguageSpecific": {
+      "$ref": "#/definitions/LanguageSpecific"
+    }
+  },
+  "patternProperties": {
+    "^_": {
+      "description": "Provenance / verification fields written by the script at runtime (e.g. Layer 1 _DependencyVerified* fields, SPEC B.19). Underscore-prefixed keys are reserved for machine-written metadata and are allowed anywhere."
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Common": {
+      "type": "object",
+      "description": "OS-wide constants. SPEC B.4.2.",
+      "required": [
+        "Build",
+        "OsShortName",
+        "Edition",
+        "Architecture"
+      ],
+      "properties": {
+        "Build": {
+          "type": "integer"
+        },
+        "OsShortName": {
+          "type": "string"
+        },
+        "Edition": {
+          "type": "string"
+        },
+        "Architecture": {
+          "type": "string",
+          "enum": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "WimEdition": {
+          "type": "string"
+        },
+        "InstallWimIndex": {
+          "type": "integer"
+        },
+        "BootWimIndexes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "WinReWimPath": {
+          "type": "string"
+        },
+        "SupportedLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "DefaultLanguage": {
+          "type": "string"
+        },
+        "LCUExpandViaMum": {
+          "type": "boolean"
+        },
+        "EnableInstallWimUpdate": {
+          "type": "boolean"
+        },
+        "EnableBootWimUpdate": {
+          "type": "boolean"
+        },
+        "EnableWinREUpdate": {
+          "type": "boolean"
+        },
+        "CatalogTitleTokens": {
+          "description": "Per-OS title-narrowing tokens for the Catalog URL resolver (r07.0 Step 2b)."
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance (e.g. _VerifiedDate, _VerifiedBy)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "PatchBaseline": {
+      "type": "object",
+      "description": "Patch Tuesday cadence baseline. SPEC B.4.3. Resolved patches live in NeutralPatches[]; the legacy '.Patches' field is forbidden (see the P03 r10.3 defect: code wrote results to a non-schema 'Patches' property).",
+      "required": [
+        "NeutralPatches"
+      ],
+      "properties": {
+        "Schema": {
+          "type": "string",
+          "const": "2.0"
+        },
+        "TargetBuildAfterUpdate": {
+          "type": "string"
+        },
+        "PatchTuesdayOfBaseline": {
+          "type": "string"
+        },
+        "LastVerifiedDate": {
+          "type": "string"
+        },
+        "LastVerifiedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "VerificationMethod": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ChecksumAlgorithm": {
+          "type": "string"
+        },
+        "NeutralPatches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Patch"
+          },
+          "description": "Language-neutral resolved patches (SSU/LCU/.NET CU/DynamicUpdate.*). This is the canonical store for resolved patches under Schema v2.1."
+        },
+        "ExcludeKbList": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "KbId": {
+                "type": "string"
+              },
+              "Reason": {
+                "type": "string"
+              }
+            },
+            "patternProperties": {
+              "^_": {}
+            },
+            "additionalProperties": false
+          },
+          "description": "KBs to exclude, each with a KbId and human Reason."
+        },
+        "WsusScnCab": {
+          "$ref": "#/definitions/WsusScnCab"
+        }
+      },
+      "not": {
+        "required": [
+          "Patches"
+        ],
+        "description": "FORBIDDEN: 'Patches' is a legacy (pre-v2.1) field name. Resolved patches MUST be stored in 'NeutralPatches'. This constraint exists specifically to catch the class of defect fixed in r10.3, where P03 wrote scrape results to a non-schema 'Patches' property."
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Patch": {
+      "type": "object",
+      "description": "A single resolved patch entry. SPEC B.4.3 NeutralPatches[*] and B.15.",
+      "required": [
+        "Type",
+        "KbId"
+      ],
+      "properties": {
+        "Type": {
+          "type": "string",
+          "description": "Patch class per SPEC B.15 (e.g. SSU, LCU, DotNet.Runtime, DotNet.CU, DynamicUpdate.Setup, DynamicUpdate.SafeOs, LanguagePack)."
+        },
+        "KbId": {
+          "type": "string"
+        },
+        "Title": {
+          "type": "string"
+        },
+        "UpdateId": {
+          "type": "string"
+        },
+        "DownloadUrl": {
+          "type": "string"
+        },
+        "FileName": {
+          "type": "string"
+        },
+        "SizeBytes": {
+          "type": "integer"
+        },
+        "Sha256": {
+          "type": "string"
+        },
+        "ReleaseDate": {
+          "type": "string"
+        },
+        "LocalPath": {
+          "type": "string"
+        },
+        "Supersedes": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "RequiresKbIds": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "RequiresMinimumOsBuild": {
+          "type": "string"
+        },
+        "ApplyOrder": {
+          "type": "integer"
+        },
+        "ApplicableArchitecture": {
+          "type": "string"
+        },
+        "ApplicableLanguage": {
+          "type": "string"
+        },
+        "ApplicableLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "IsCombined": {
+          "type": "boolean"
+        },
+        "Variant": {
+          "type": "string"
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance (e.g. _DependencyVerifiedDate, _DependencyVerifiedSource)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "WsusScnCab": {
+      "type": "object",
+      "description": "Offline-scan catalog metadata. SPEC B.4.3.",
+      "properties": {
+        "SourceUrl": {
+          "type": "string"
+        },
+        "LocalCachePath": {
+          "type": "string"
+        },
+        "LastDownloadedDate": {
+          "type": "string"
+        },
+        "LastDownloadedSha256": {
+          "type": "string"
+        },
+        "LastDownloadedSizeBytes": {
+          "type": "integer"
+        },
+        "DependencyDatabasePath": {
+          "type": "string"
+        },
+        "DependencyDatabaseSha256": {
+          "type": "string"
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Pca2023": {
+      "type": "object",
+      "description": "Per-OS Secure Boot (PCA2023) conversion defaults. SPEC B.4.4.",
+      "properties": {
+        "RequiredByDefault": {
+          "type": "boolean"
+        },
+        "RequiredUpdateLevelKb": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "RequiredUpdateLevelMinDate": {
+          "type": "string"
+        },
+        "NotesSource": {
+          "type": [
+            "string",
+            "array"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "Notes": {
+          "type": "string"
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance."
+        }
+      },
+      "additionalProperties": false
+    },
+    "AutoRefreshPolicy": {
+      "type": "object",
+      "description": "Baseline auto-refresh policy. SPEC B.14.",
+      "properties": {
+        "Mode": {
+          "type": "string"
+        },
+        "WritebackToConfig": {
+          "type": "boolean"
+        },
+        "FallbackOnScrapeFailure": {
+          "type": [
+            "string",
+            "boolean"
+          ]
+        },
+        "ScrapeRetries": {
+          "type": "integer"
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance."
+        }
+      },
+      "additionalProperties": false
+    },
+    "LanguageSpecific": {
+      "type": "object",
+      "description": "Per-language ISO snapshot + language-specific patches. SPEC B.4.5. Keys are BCP-47 language tags (e.g. en-us, ja-jp).",
+      "patternProperties": {
+        "^[a-z]{2}-[a-z]{2}$": {
+          "$ref": "#/definitions/LanguageEntry"
+        }
+      },
+      "additionalProperties": false
+    },
+    "LanguageEntry": {
+      "type": "object",
+      "properties": {
+        "DisplayName": {
+          "type": "string"
+        },
+        "Iso": {
+          "type": "object"
+        },
+        "VolumeLabelPrefix": {
+          "type": "string"
+        },
+        "LanguageSpecificPatches": {
+          "type": "object",
+          "description": "Per-language patch groups (LanguagePacks, LxpUpdates, DotNetLanguagePacks) plus verification metadata.",
+          "patternProperties": {
+            "^_": {}
+          },
+          "additionalProperties": true
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

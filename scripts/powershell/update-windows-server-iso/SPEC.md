@@ -425,6 +425,17 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
 Patch `Type` values follow the inventory in §B.15. Field cadence and
 who is allowed to mutate each field is the §B.14 decision matrix.
 
+**Resolved patches live in `NeutralPatches[]`.** The field name 
+`PatchBaseline.Patches` is a **legacy (pre-v2.1) name and is forbidden** 
+in current configs. Code that resolves a patch set (e.g. P03 
+RefreshPatchBaseline) MUST write to `NeutralPatches`, never to `Patches`. 
+This is enforced mechanically by the machine-readable schema 
+`schema/config-v2.1.schema.json` (which declares `not.required: 
+[Patches]` on `PatchBaseline`) and the CI gate in §C.3.2a. Background: 
+the r10.3 P03 defect wrote scrape results to a non-schema `Patches` 
+property; the schema gate exists so that class of drift fails in CI 
+rather than on a real machine.
+
 ### B.4.4 `Pca2023` block (Schema 2.1+)
 
 Per-OS Secure Boot conversion defaults consumed by P10 / P12:
@@ -3421,6 +3432,30 @@ has the expected type. Invoked via:
 .\Update-WindowsServerIso.ps1 -Action DumpFieldClassification | Out-Null
 # Loads all 4 configs; failure to load any of them surfaces here
 ```
+
+### C.3.2a JSON Schema conformance (machine-readable contract)
+
+**Status**: normative. **Tool**: `tests/config_schema_test.py` 
+(standard-library only, run in CI stage1).
+
+`schema/config-v2.1.schema.json` is the machine-readable single source 
+of truth that mirrors this section (B.4). Every 
+`data/config-Server*.json` is validated against it. Unlike the positive 
+key-presence check in C.3.2, the schema gate also rejects:
+
+- **unknown / mistyped properties**, via `additionalProperties: false` 
+  plus an `^_`-prefix allowance for machine-written provenance fields 
+  (Layer 1 `_DependencyVerified*`, `_VerifiedDate`, etc.);
+- the **forbidden legacy `PatchBaseline.Patches` field** (the r10.3 
+  defect), via `not.required: [Patches]`;
+- **wrong value types** for declared fields.
+
+```bash
+python3 tests/config_schema_test.py   # 0 = all configs conform
+```
+
+When SPEC B.4 changes, `schema/config-v2.1.schema.json` MUST be updated 
+in the same commit; the two are a matched pair.
 
 ### C.3.3 Cross-field consistency
 

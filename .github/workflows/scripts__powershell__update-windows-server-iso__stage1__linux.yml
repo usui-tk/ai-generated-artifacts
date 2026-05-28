@@ -203,6 +203,15 @@ jobs:
               print(f'OK: {f.name} Schema={schema} Build={common["Build"]} langs={common["SupportedLanguages"]}')
           PY
 
+      # --- Tool group: config schema conformance ---
+      # Validates data/config-Server*.json against schema/config-v2.1.schema.json
+      # (the machine-readable mirror of SPEC B.4). Complements the positive
+      # key-presence check above with structural / additional-property / forbidden-
+      # field checks (e.g. the legacy PatchBaseline.Patches field, r10.3 defect).
+      - name: '[Schema] Validate config against JSON Schema (SPEC B.4)'
+        working-directory: scripts/powershell/update-windows-server-iso
+        run: python3 tests/config_schema_test.py
+
       # --- Tool group: psa.py ---
       # NOTE: psa.py auto-loads .psa.config.json from CWD (implicit config).
       # Running from the project directory enables the psa2010_known_cmdlets

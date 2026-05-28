@@ -535,8 +535,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.3'
-$Script:ScriptTag     = 'step2b6-p03-patchbaseline-property-guard'
+$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.4'
+$Script:ScriptTag     = 'step2b7-p03-neutralpatches-and-config-schema'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -10694,15 +10694,14 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         Set-DebugStep -Step 'update-in-memory-profile'
         if (-not $Script:OsProfile.PatchBaseline) {
             $Script:OsProfile | Add-Member -NotePropertyName 'PatchBaseline' -NotePropertyValue ([pscustomobject][ordered]@{
-                Schema = '1.0'
+                Schema = '2.0'
                 TargetBuildAfterUpdate = ''
                 PatchTuesdayOfBaseline = ''
                 LastVerifiedDate = ''
                 LastVerifiedBy = ''
                 VerificationMethod = ''
-                VerifiedOsLanguages = @($Script:OsLanguage)
                 ChecksumAlgorithm = 'SHA256'
-                Patches = @()
+                NeutralPatches = @()
                 ExcludeKbList = @()
                 WsusScnCab = [pscustomobject][ordered]@{
                     SourceUrl = (Get-WsusScnCabSourceUrl)
@@ -10720,13 +10719,16 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         # found ... verify that the property exists and can be set"), and this
         # is identical under ConvertFrom-Json and ConvertFrom-CanonicalJson.
         # Ensure every property assigned below is present before assigning.
+        # NOTE: resolved patches are stored under NeutralPatches[] per the
+        # Config Schema v2.1 (SPEC B.4.3); '.Patches' was a legacy field and
+        # MUST NOT be (re)introduced here.
         $pb = $Script:OsProfile.PatchBaseline
-        foreach ($propName in @('Patches','PatchTuesdayOfBaseline','LastVerifiedDate','LastVerifiedBy','VerificationMethod')) {
+        foreach ($propName in @('NeutralPatches','PatchTuesdayOfBaseline','LastVerifiedDate','LastVerifiedBy','VerificationMethod')) {
             if (-not $pb.PSObject.Properties[$propName]) {
                 $pb | Add-Member -NotePropertyName $propName -NotePropertyValue $null -Force
             }
         }
-        $Script:OsProfile.PatchBaseline.Patches                = @($newPatches)
+        $Script:OsProfile.PatchBaseline.NeutralPatches         = @($newPatches)
         $Script:OsProfile.PatchBaseline.PatchTuesdayOfBaseline = $latestPT.ToString('yyyy-MM-dd')
         $Script:OsProfile.PatchBaseline.LastVerifiedDate       = (Get-Date).ToString('o')
         $Script:OsProfile.PatchBaseline.LastVerifiedBy         = 'auto-scrape'
