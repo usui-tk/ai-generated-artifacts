@@ -130,7 +130,7 @@ scripts/powershell/update-windows-server-iso/
 │   ├── cache-release-info.json
 │   ├── cache-dotnet-cu.json
 │   └── cache-du-Server{2022,2025}.json
-├── tests/                            # 自己検証スイート（T1-T10）
+├── tests/                            # 自己検証スイート（T1-T13）
 └── docs/history/                     # サイクル別の調査レポート
 ```
 
@@ -287,6 +287,14 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
   Part C §C.3.4 のフォーマットゲートが、`data/*.json` および
   `tests/fixtures/*.json` を Linux PowerShell 7.x / Python 3 の
   いずれの runtime から編集しても最小 diff になることを保証します。
+- **Config Schema v2.1**（r10.4、適用済み）：`schema/config-v2.1.schema.json`
+  と標準ライブラリのみの `config_schema_test.py` ゲートが、レガシーな
+  `PatchBaseline.Patches` フィールドを禁止し `NeutralPatches` を必須化
+  します。スクリプトの既定値とすべての baseline 代入は `NeutralPatches`
+  を使うようになりました。
+- **PSA7003 非 ASCII ルール**（r10.1、適用済み）：`psa.py` 4.2.0 が
+  `.ps1` 本文中の UTF-8 BOM 以外の非 ASCII 文字を検出します。本スクリプト
+  はこのルールで 0 検出を確認した最初の consumer です。
 
 実装は §B.19.19 のロールアウト計画に従います。
 

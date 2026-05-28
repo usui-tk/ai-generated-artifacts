@@ -84,7 +84,7 @@ remain unambiguous.
 | SPEC-WSI-030 | Static analysis gate (psa.py + PSScriptAnalyzer) | §C.1 |
 | SPEC-WSI-031 | Source file format gate | §C.2 |
 | SPEC-WSI-032 | Documentation cross-checks | §C.8 |
-| SPEC-WSI-033 | Self-verification tool suite (T1–T6) | §C.9 |
+| SPEC-WSI-033 | Self-verification tool suite (T1–T13 + gates) | §C.9 |
 
 ---
 
@@ -2779,7 +2779,7 @@ scripts/powershell/update-windows-server-iso/
 │   # Planned (r09.0 Step 2+):
 │   # └── wsusscn2-database.json     # Layer 2, ~2-5 MB (per §B.19)
 │
-├── tests/                            # Python self-verification suite (T1-T10)
+├── tests/                            # Python self-verification suite (T1-T13 + gates)
 │   ├── README.md                     # Canonical T-numbering and quick-start
 │   ├── catalog_probe.py              # T1 (live)
 │   ├── catalog_fixture_test.py       # T2 (offline)
@@ -3635,14 +3635,16 @@ candidate Future enhancement. Today, the gate is a manual review.
 **Status**: normative. **Policy ID**: SPEC-WSI-033.
 
 The `tests/` subdirectory ships a Python-based self-verification
-suite of **ten tools (T1 through T10)**. They probe the script's
+suite of **thirteen numbered tools (T1 through T13)** plus two
+unnumbered format / schema gates (the canonical JSON format gate and
+the config schema gate). They probe the script's
 external dependencies and unit-test its PowerShell functions. They
 use only the Python standard library — no `pip install` required.
 The canonical T-numbering is maintained in
 [`tests/README.md`](./tests/README.md) "Tool inventory"; this section
 mirrors that authoritative table.
 
-### C.9.1 Tool inventory (T1 – T10)
+### C.9.1 Tool inventory (T1 – T13 + format / schema gates)
 
 | Tool | Type | Assertions | Network | Run when |
 |:---|:---|:---|:---:|:---|
@@ -3656,10 +3658,15 @@ mirrors that authoritative table.
 | **T8** `dynamic_update_cache_test.py` | Offline regression for the Dynamic Update 36-month cache subsystem (`Add-/Get-/Remove-DynamicUpdateCacheEntry`); 3 fixture scenarios + 3 defensive cases | 20 | No | Every commit touching the DU cache functions or the 36-month window logic |
 | **T9** `catalog_title_tokens_test.py` | Offline regression for `Get-CatalogTitleTokenList` against all four OS configs + `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases | 18 | No | Every commit touching `Common.CatalogTitleTokens` in any OS config, or the narrow-filter helpers |
 | **T10** `release_info_resolver_test.py` | Offline regression for `Get-PatchSetFromReleaseInfoDiscovery` (Refresher main-path migration); 4 scenarios + defensive cases | 18 | No | Every commit touching `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or its three caches |
+| **T11** `canonical_json_test.py` | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell) and `canonical_json_dumps` / `save_canonical_json_file` (Python) per SPEC Part B.23 | 26 | No | Every commit touching the canonical JSON helpers (PS or Python) |
+| **T12** `wsusscn2_parser_test.py` | Offline self-verification of wsusscn2 parser pipeline Stages 3 and 4 against the committed fixture `fixtures/wsusscn2/package.xml`; structural compare against `expected-output.json` per SPEC §B.19.9.4 | 22 | No | Every commit touching Stage 3 / Stage 4 of the wsusscn2 parser or the scope-filter GUID tables |
+| **T13** `wsusscn2_layer1_test.py` | Offline self-verification of the Layer 1 writeback helper `Update-Layer1DependencyVerification` (Phase 2b2/2b3) per SPEC §B.19.9.5 | 15 | No | Every commit touching `Update-Layer1DependencyVerification`, the OS-category GUID table, or the A04 Layer 1 callout |
+| **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 27 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
+| **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config-v2.1.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config-v2.1.schema.json` |
 
 **Determinism categories**:
 
-- **Offline-deterministic** (run on every PR): T2, T3, T6, T7, T8, T9, T10.
+- **Offline-deterministic** (run on every PR): T2, T3, T6, T7, T8, T9, T10, T11, T12, T13, plus the canonical JSON format gate and the config schema gate.
 - **Live-network** (monthly CI + ad-hoc): T1, T4, T5.
 
 ### C.9.2 Adjunct: retired r06 Phase 2 PoCs

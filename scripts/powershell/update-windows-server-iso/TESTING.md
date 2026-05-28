@@ -7,7 +7,7 @@ This document consolidates everything needed to verify and evaluate
 2. **Synthetic smoke tests** — read-only Actions executable in CI
 3. **Live Catalogue verification** — probes that catch Microsoft-side schema drift
 4. **Operator-pending verification** — full `-Execute` builds (requires Windows + ADK + ≥ 100 GB disk + admin)
-5. **Self-verification tool suite** — T1 through T10 (canonical inventory in [`tests/README.md`](./tests/README.md))
+5. **Self-verification tool suite** — T1 through T13 (canonical inventory in [`tests/README.md`](./tests/README.md))
 6. **Continuous integration** — four GitHub Actions stages
 
 > **Documentation language policy**: This document is maintained in
@@ -25,7 +25,7 @@ This document consolidates everything needed to verify and evaluate
 - [2. Synthetic smoke tests](#2-synthetic-smoke-tests)
 - [3. Live Catalogue verification](#3-live-catalogue-verification)
 - [4. Operator-pending: real ISO integration](#4-operator-pending-real-iso-integration)
-- [5. Self-verification tool suite (T1 – T10)](#5-self-verification-tool-suite-t1--t10)
+- [5. Self-verification tool suite (T1 – T13)](#5-self-verification-tool-suite-t1--t13)
 - [6. Continuous integration coverage](#6-continuous-integration-coverage)
 - [7. Discovered bugs and fix history](#7-discovered-bugs-and-fix-history)
 
@@ -39,9 +39,9 @@ a build identifier plus a calendar date. Pending items are marked
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r09.0 step2b3-real-data-parser-correction build (`psa.py` latest mainline) / 2026-05-28 |
-| File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
-| `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r11.1 cross-repo-canon-iso-encoding-tls-rename build (`psa.py` 4.2.0; re-verified) / 2026-05-29 |
+| File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r11.1 cross-repo-canon-iso-encoding-tls-rename build / 2026-05-29 |
+| `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r11.1 cross-repo-canon-iso-encoding-tls-rename build / 2026-05-29 |
 | PSScriptAnalyzer on Windows PowerShell 5.1 (Stage 2) | ✓ pass | CI Stage 2 (continuous) |
 | P01 Initialize — PowerShell env / admin / ADK / disk / Hyper-V probe | ✓ pass on Windows 11 + PS 5.1 | _pending operator confirmation_ |
 | P02 ResolveInputs — Config JSON load + ISO / patch source resolution | ✓ structurally validated via T3 harness | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
@@ -71,11 +71,12 @@ a build identifier plus a calendar date. Pending items are marked
 | T8 dynamic_update_cache_test.py (20 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T9 catalog_title_tokens_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T10 release_info_resolver_test.py (22 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r09.0 step2a-followup-canonical-json-helpers build / 2026-05-28 |
-| T12 wsusscn2_parser_test.py (22 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.9.4) | ✓ all pass | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
-| T13 wsusscn2_layer1_test.py (15 assertions, `Update-Layer1DependencyVerification` writeback contract per SPEC §B.19.9.5) | ✓ all pass | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
-| Part C §C.3.4 — `canonical_json_format_check.py` (26 JSON files canonicalised, format gate) | ✓ all pass | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
-| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T13 + format check) | ✓ green | CI continuous |
+| T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| T12 wsusscn2_parser_test.py (22 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.9.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| T13 wsusscn2_layer1_test.py (15 assertions, `Update-Layer1DependencyVerification` writeback contract per SPEC §B.19.9.5) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| Part C §C.3.4 — `canonical_json_format_check.py` (27 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config-v2.1.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T13 + format gate + config schema gate) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
@@ -325,7 +326,7 @@ procedure is below; results from past real runs are recorded in
 
 ---
 
-## 5. Self-verification tool suite (T1 – T11)
+## 5. Self-verification tool suite (T1 – T13)
 
 The `tests/` directory ships eleven Python tools plus the Part C
 format gate. The authoritative inventory lives in
@@ -356,17 +357,20 @@ python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
 
 ### Determinism categories
 
-- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6, T7, T8, T9, T10, T11, plus the Part C §C.3.4 format gate.
+- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6, T7, T8, T9, T10, T11, T12, T13, plus the Part C §C.3.4 canonical JSON format gate and the config schema gate.
 - **Live-network** (Stage 4 monthly + ad-hoc): T1, T4, T5.
 
-### Planned T12 (r09.0 Step 2b)
+### T12 / T13 (r09.0 Step 2b, implemented)
 
-A new tool — provisionally `wsusscn2_parser_test.py` — is planned to
-provide offline regression coverage for the §B.19 Master XML parser
-(`ConvertFrom-WsusScnPackageXml`, `New-WsusScnDependencyDatabase`).
-It will be paired with `tests/common/wsusscn2_*.py` helpers that
-generate the minimal `package.xml` fixture and analyze schema drift.
-The current canonical T-set ends at T11.
+`wsusscn2_parser_test.py` (T12, 22 assertions) provides offline
+regression coverage for the §B.19 Master XML parser
+(`ConvertFrom-WsusScnPackageXml`, `New-WsusScnDependencyDatabase`)
+against the committed fixture `tests/fixtures/wsusscn2/package.xml`,
+paired with the `tests/common/wsusscn2_*.py` fixture helpers.
+`wsusscn2_layer1_test.py` (T13, 15 assertions) covers the Phase
+2b2/2b3 Layer 1 writeback helper `Update-Layer1DependencyVerification`.
+The current canonical T-set ends at T13; the two unnumbered gates
+(canonical JSON format gate, config schema gate) sit alongside it.
 
 ---
 
@@ -387,7 +391,9 @@ File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage1_
 | 4 | T3 | `powershell_harness.py` (10 assertions) |
 | 5 | T6 – T10 | Five offline parser / cache / resolver regression tests |
 | 6 | T11 | `canonical_json_test.py` — PS/Python byte-level parity (26 assertions, SPEC §B.23) |
-| 7 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
+| 7 | T12 – T13 | `wsusscn2_parser_test.py` (22 assertions, Stages 3/4) + `wsusscn2_layer1_test.py` (15 assertions, Layer 1 writeback) |
+| 8 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
+| 9 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against `schema/config-v2.1.schema.json` (14 assertions) |
 
 Triggers: every push, every PR. Required to merge.
 

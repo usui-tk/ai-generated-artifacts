@@ -74,6 +74,112 @@ body-alignment release plus the script-identity bump.
   `cross-repo-canon-iso-port-alignment`.
 - `psa.py` (4.2.0) remains 0 / 0 / 0 on this script.
 
+### r10.4 - Config Schema v2.1 and NeutralPatches enforcement
+
+> **Retroactive entry.** This and the four entries below (r10.0 -
+> r10.3) document commits that were shipped without their own
+> CHANGELOG headings. They are reconstructed here from the commit
+> log and the on-disk artifacts so that the version history between
+> r09.0 Step 2b3 and r11.0 is contiguous, satisfying AGENTS.md §8
+> Self-Check Gate #12. No code is changed by this reconstruction;
+> only the changelog record is completed.
+
+Introduces a machine-readable config schema and a CI gate so the
+legacy `PatchBaseline.Patches` field cannot silently return.
+
+- **`schema/config-v2.1.schema.json` added.** Declares `Schema=2.1`,
+  forbids the legacy `Patches` property, requires `NeutralPatches`
+  in `PatchBaseline`, and applies tight structural / type checks.
+- **`tests/config_schema_test.py` added** - a stdlib-only draft-07
+  subset validator that checks every `data/config-Server*.json`
+  against the new schema and carries a targeted regression guard
+  against the reappearance of `Patches`. 14 assertions.
+- **CI stage 1 runs the new schema conformance test.**
+- **SPEC.md** documents that resolved patches live in
+  `NeutralPatches` and describes the schema / CI gate.
+- **Script side**: `PatchBaseline` defaults switch from `.Patches`
+  to `.NeutralPatches` (and `PatchBaseline.Schema` -> `2.0`); all
+  `.Patches` assignments are replaced with `.NeutralPatches`.
+- `05dd5d1` bumps `psa.py` `__version__` 4.1.0 -> 4.2.0 to match the
+  rule addition recorded under r10.1.
+- `$Script:ScriptVersion`: `update-wsi-2026.05.28-r10.3` ->
+  `update-wsi-2026.05.28-r10.4`. `$Script:ScriptTag`:
+  `step2b7-p03-neutralpatches-and-config-schema`.
+
+### r10.3 - PatchBaseline property guard
+
+Prevents an assignment error when a baseline is loaded from older
+JSON that lacks the expected note properties.
+
+- Pre-creates null `NoteProperty` placeholders on
+  `OsProfile.PatchBaseline` (`Patches`, `PatchTuesdayOfBaseline`,
+  `LastVerifiedDate`, `LastVerifiedBy`, `VerificationMethod`) before
+  any value is assigned, because `ConvertFrom-Json` /
+  `ConvertFrom-CanonicalJson` cannot set a non-existent
+  `NoteProperty`.
+- `$Script:ScriptVersion`: `update-wsi-2026.05.28-r10.2` ->
+  `update-wsi-2026.05.28-r10.3`. `$Script:ScriptTag`:
+  `step2b6-p03-patchbaseline-property-guard`.
+
+### r10.2 - committed wsusscn2 database and Stage 3 progress logging
+
+Re-adds the generated Layer 2 database (it had been removed in
+`4b2ac63`) in line with SPEC §B.19.2.2 ("Layer 2 IS committed") and
+makes the long Stage 3 parse observable.
+
+- **`data/wsusscn2-database.json` re-added** - the parsed wsusscn2
+  results and summary statistics for the four in-scope OS families.
+- **Stage 3 progress reporting** in `ConvertFrom-WsusScnPackageXml`:
+  tracks `$lastProgressMark` / `$progressEvery` (default 20000) and
+  emits periodic `Write-Step` tallies of parsed updates,
+  file-locations, and in-scope bundles during long runs.
+- **`_DependencyVerified*` metadata added** to
+  `config-Server2016/2019/2022/2025.json`.
+- `$Script:ScriptVersion`: `update-wsi-2026.05.28-r10.1` ->
+  `update-wsi-2026.05.28-r10.2`. `$Script:ScriptTag`:
+  `step2b5-stage3-parse-progress`.
+
+### r10.1 - OutputType, PSA7003 non-ASCII rule, docs normalization
+
+Two functional additions plus documentation normalization, shipped
+across `0ebab36` and `76d9e71`.
+
+- **`PSA7003` added to `psa.py`** (warning, enabled by default):
+  flags non-ASCII characters in `.ps1` script bodies outside the
+  UTF-8 BOM. Adds `compute_non_ascii_stats()` /
+  `check_non_ascii_chars()`, registers the rule in `RULES`, hooks it
+  into `analyze_text()` and `main()`, and ships a codepoint-name map
+  for actionable diagnostics. `psa.py` CHANGELOG/VERSION bump to
+  4.2.0; configuration template, SPEC, README (EN/JA), and rule /
+  unit tests updated. `Update-WindowsServerIso.ps1` is the verified
+  first consumer (0 findings under the new rule).
+- **`[OutputType([object])]` added to `ConvertFrom-CanonicalJson`**
+  for better cmdlet metadata (the only functional change in
+  `0ebab36`).
+- **Docs normalization**: `§` references rewritten as "section B.*";
+  several em-dashes / bullets normalized in docblocks and help text.
+- `$Script:ScriptVersion`: `update-wsi-2026.05.28-r10.0` ->
+  `update-wsi-2026.05.28-r10.1`. `$Script:ScriptTag`:
+  `step2b4-version-independent-canonical-json`.
+
+### r10.0 - version-independent canonical JSON
+
+Introduces a hand-rolled canonical JSON serializer and parser so
+that config / cache / Layer 2 files are byte-stable across
+PowerShell 5.1, PowerShell 7.x, and Python.
+
+- **`ConvertTo-CanonicalJson` / `ConvertFrom-CanonicalJson` added**
+  (plus internal writer / reader helpers). These avoid the
+  cross-version differences of the built-in `ConvertTo-Json` /
+  `ConvertFrom-Json` (date handling, formatting, ordering).
+- **All `ConvertFrom-Json` callers replaced** with
+  `ConvertFrom-CanonicalJson` throughout the script.
+- **SPEC.md** documents the new parser, serializer, and the
+  version-independence / date-handling / formatting rationale.
+- `$Script:ScriptVersion`: `update-wsi-2026.05.28-r09.0` ->
+  `update-wsi-2026.05.28-r10.0`. `$Script:ScriptTag`:
+  `step2b4-version-independent-canonical-json`.
+
 ### r09.0 Step 2b3 - real-data-driven parser correction
 
 This change corrects the Phase 2b1 parser and the Phase 2b2 Layer 1

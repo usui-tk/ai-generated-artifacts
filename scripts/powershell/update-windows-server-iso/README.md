@@ -295,6 +295,13 @@ r09.0 Step 2b3. Current state per the
   guarantee that `data/*.json` and `tests/fixtures/*.json` files
   produce minimal git diffs regardless of which runtime an operator
   edits them from.
+- **Config Schema v2.1** (r10.4, shipped): `schema/config-v2.1.schema.json`
+  plus the stdlib-only `config_schema_test.py` gate forbid the legacy
+  `PatchBaseline.Patches` field and require `NeutralPatches`. The
+  script defaults and all baseline assignments now use `NeutralPatches`.
+- **PSA7003 non-ASCII rule** (r10.1, shipped): `psa.py` 4.2.0 flags
+  non-ASCII characters in `.ps1` bodies outside the UTF-8 BOM; this
+  script is its first verified 0-finding consumer.
 
 Implementation tracks the §B.19.19 rollout plan.
 
