@@ -66,7 +66,7 @@ The page **does not** contain:
 - Language packs (Catalog-only)
 - Standalone Servicing Stack Updates as a distinct row (they are bundled with the LCU on the Catalog, not listed separately on release-info)
 
-The Hotpatch calendar deserves a specific note. Calendar years 2024 / 2025 / 2026 are all published. Server 2022's CY2024 has one anomaly — August was labelled "Baseline (Restart)" rather than the expected "Hotpatch" — likely because Microsoft adjusted the Server 2022 baseline cadence between CY2024 and CY2025 to align with the canonical Jan / Apr / Jul / Oct pattern. The lesson: **the authoritative baseline-month list is the per-row `Type` field on the calendar**, not a hard-coded `{1, 4, 7, 10}` rule. An implementer who needs the Jan / Apr / Jul / Oct heuristic will get the right answer for CY2025 and CY2026 but the wrong answer for one cell in CY2024.
+The Hotpatch calendar deserves a specific note. Calendar years 2024 / 2025 / 2026 are all published. Server 2022's CY2024 has one anomaly — August was labelled "Baseline (Restart)" rather than the expected "Hotpatch" — likely because Microsoft adjusted the Server 2022 baseline cadence between CY2024 and CY2025 to align with the canonical Jan / Apr / Jul / Oct pattern. The practical implication is: **the authoritative baseline-month list is the per-row `Type` field on the calendar**, not a hard-coded `{1, 4, 7, 10}` rule. An implementer who needs the Jan / Apr / Jul / Oct heuristic will get the right answer for CY2025 and CY2026 but the wrong answer for one cell in CY2024.
 
 A parser for this page can be small. Two table layouts cover the entire content: the monthly release table with a 5-column header `| Servicing option | Update type | Availability date | Build | KB article |` and the hotpatch calendar with a 6-column header `| Month | Update type | Type | Availability date | Build | KB article |`. A 300-line standard-library Python parser is enough to extract both into JSON; the parser should validate header text exactly and refuse to continue if Microsoft renames a column, so that any structural drift triggers a human review. Implementations should additionally persist the retrieved commit ID, the retrieval timestamp, and the raw markdown SHA-256 alongside the parsed JSON, so that upstream structural drift is detectable and parsing remains reproducible against a known input.
 
@@ -102,7 +102,7 @@ The Catalog interaction has two well-documented gotchas:
 
 **OS naming changed between Server 2019 and Server 2022.** Older OSes use the user-facing brand name in update titles: "Windows Server 2019", "Windows Server 2016". Starting with Server 2022, Microsoft switched to the "Microsoft server operating system, version `<NNHN>`" naming where `<NNHN>` is the codename version: `21H2` for Server 2022 and `24H2` for Server 2025. A Catalog query for "Windows Server 2025 2026-04" returns nothing useful; a query for "Microsoft server operating system version 24H2 2026-04" returns the LCU and its dependencies. Any title-string heuristic must maintain both naming conventions and dispatch by OS version.
 
-**Server 2025 LCUs return a 2-file bundle.** Every Server 2025 LCU resolution returns *two* download URLs: the LCU itself plus a fixed KB (currently `KB5043080`) that is the Servicing Stack baseline. This is the same Servicing Stack package every time, regardless of which LCU month is requested. Operationally, this strongly suggests that Server 2025 has no standalone SSU — Microsoft serves the SSU dependency alongside every LCU as a two-file bundle through the Catalog's `DownloadDialog.aspx`. A pipeline that downloads only the "LCU" URL and ignores the second will produce a WIM that fails to apply the LCU with `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED`. The correct pattern is: download both `.msu` files and let `Add-WindowsPackage` figure out the dependency order — it handles SSU ordering automatically.
+**Server 2025 LCUs currently resolve to a 2-file download set.** Every Server 2025 LCU resolution returns *two* download URLs: the LCU itself plus a fixed KB (currently `KB5043080`) that is the Servicing Stack baseline. This is the same Servicing Stack package every time, regardless of which LCU month is requested. Operationally, this strongly suggests that Server 2025 has no standalone SSU — Microsoft serves the SSU dependency alongside every LCU as a two-file bundle through the Catalog's `DownloadDialog.aspx`. A pipeline that downloads only the "LCU" URL and ignores the second will produce a WIM that fails to apply the LCU with `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED`. The correct pattern is: download both `.msu` files and let `Add-WindowsPackage` figure out the dependency order — it handles SSU ordering automatically.
 
 When a release-info KB can be turned directly into download URLs via the Catalog (KB-only input, no title-string heuristics), the success rate across a representative 8-sample test is 8/8. The Catalog is therefore a viable URL resolver, but a poor discovery surface. The architectural lesson, derived from extensive trial-and-error, is: **release-info / .NET release-notes is the discoverer; the Catalog is the resolver**. This minimises the title-string heuristic surface and the brittleness it introduces.
 
@@ -140,7 +140,7 @@ For offline dependency analysis, the Master XML (`package.xml`, ~108 MB extracte
 > KB number can only be *inferred* from the `kb(\d+)` token that sometimes
 > appears in a `<FileLocation>` URL.
 
-The Master XML and the individual `packageN.cab` fragments record **overlapping dependency metadata from different perspectives** — they are not semantically equivalent. The Master XML is a flattened, globalized summary; each `packageN.cab` preserves richer per-update applicability semantics:
+The Master XML and the individual `packageN.cab` fragments record **overlapping dependency metadata from different perspectives** — they are not semantically equivalent. The Master XML is a flattened, repository-wide summary; each `packageN.cab` preserves richer per-update applicability semantics:
 
 | Information | Master XML | Per-package CAB |
 |:---|:-:|:-:|
@@ -169,7 +169,7 @@ Parsing the Master XML deserves attention to its scale. A representative timing 
 
 The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<Prerequisites>`, `<SupersededBy>`, `<BundledBy>`, `<PayloadFiles>`, and `<FileLocation>`, producing a small JSON dependency database (~0.2 MB at the in-scope-bundle granularity used by this project) that can answer most pre-flight questions. A full offline WUA applicability evaluation is significantly slower than direct Master XML parsing and is therefore better suited for validation workflows than for discovery workflows — which is the reason this pipeline uses Master XML parsing for discovery and reserves WUA for final applicability validation.
 
-> **Note on support status.** Direct parsing of `package.xml` is an implementation technique based on observed metadata structure, not a Microsoft-supported API contract. The schema can change without notice. Final applicability and installability decisions should still be validated through the Windows Update Agent servicing logic (an offline WUA scan against the mounted image), which is the authoritative evaluator.
+> **Note on support status.** Direct parsing of `package.xml` is an implementation technique based on observed metadata structure, not a Microsoft-supported API contract. The schema can change without notice. Final applicability and installability decisions should still be validated through the Windows Update Agent servicing logic (an offline WUA scan against the mounted image), which is the authoritative applicability evaluator. Despite the unsupported nature of the schema, the Master XML remains operationally valuable because it exposes dependency relationships in a repository-wide form that is dramatically faster to query than a full offline WUA applicability scan — which is why it is used for discovery while WUA is reserved for final validation.
 
 #### 2.4.1 The Category hierarchy embedded in package.xml
 
@@ -326,7 +326,7 @@ When comparing `\Windows\Boot\EFI\bootmgfw.efi` and `\Windows\Boot\EFI_EX\bootmg
 \Windows\Boot\EFI_EX\bootmgfw_EX.efi : SHA256 47C12C1F26...    (full file)
 ```
 
-The two binaries are byte-identical at the file-system level. But the Authenticode signatures embedded in the two files differ:
+The two binaries are byte-identical in PE image content excluding the Authenticode signature region (i.e. identical in Authenticode-measured PE content). But the Authenticode signatures embedded in the two files differ:
 
 ```
 \Windows\Boot\EFI\bootmgfw.efi       : signed under PCA2011
@@ -335,7 +335,7 @@ The two binaries are byte-identical at the file-system level. But the Authentico
 
 This is not a contradiction. Authenticode hashing is defined to **exclude** the bytes of the Authenticode signature itself (specifically, the `IMAGE_DIRECTORY_ENTRY_SECURITY` region and the checksum field in the PE header). What signtool reports as "Hash of file (sha256)" is the *Authenticode hash*, not the *file hash*. Both binaries have the same Authenticode hash (their PE body is identical) but different file hashes if you measure with `Get-FileHash` directly — because the signature blobs at the end of each file differ.
 
-Microsoft's approach is therefore: take the existing `bootmgfw.efi` PE body, re-sign it with PCA2023, save the result as `bootmgfw_EX.efi`. The PE code is unchanged; only the signature is new. This is a reasonable interpretation of the goal — the executable behaviour of the boot manager is exactly the same; only the trust anchor changes.
+Microsoft's approach is therefore: take the existing `bootmgfw.efi` PE body, re-sign it with PCA2023, save the result as `bootmgfw_EX.efi`. The PE code is unchanged; only the signature is new. This is a reasonable interpretation of the goal — the PE executable body appears unchanged, with the observable difference limited to the Authenticode signature chain; only the trust anchor changes.
 
 The same is not always true of the other `_EX` files. Server 2025's `bootmgr_EX.efi` is byte-for-byte identical to `bootmgr.efi` *including* its signature — it carries the PCA2011 signature, despite the `_EX` suffix. This was observed in inspected Server 2025 media and is consistent with a comment in Microsoft's `Make2023BootableMedia.ps1` v1.4 indicating bootmgr_EX is a PCA2011-signed copy. Treat this as implementation-observed behavior unless Microsoft publishes a formal servicing specification; whether it is a transitional artifact or a permanent design choice is not yet documented publicly.
 
@@ -359,7 +359,7 @@ A verification function that walks these targets, attempts `Get-AuthenticodeSign
 
 > SCOPE: file presence + signer-chain only. Actual boot behaviour on firmware with PCA2011 revoked from DBX is NOT verified here. Manual boot test on hardware or a Hyper-V Gen2 VM with a PCA2023 Secure Boot template is required before production deployment.
 
-The point of the SCOPE clarifier is that it sets correct operator expectations: a `Pass` from the verification function is necessary but not sufficient. The only thing it actually proves is that the file-system structure and Authenticode chain are correct. Whether the firmware on the deployment target actually accepts the chain depends on whether that target has received Microsoft's PCA2023 DB provisioning update, which is out of scope for any tooling that operates only on the ISO.
+From a pipeline-design perspective, the SCOPE clarifier sets correct operator expectations: a `Pass` from the verification function is necessary but not sufficient. The only thing it actually proves is that the file-system structure and Authenticode chain are correct. Whether the firmware on the deployment target actually accepts the chain depends on whether that target has received Microsoft's PCA2023 DB provisioning update, which is out of scope for any tooling that operates only on the ISO.
 
 ---
 
@@ -402,7 +402,7 @@ A complete recursive `*.efi` enumeration under `\Windows\Boot\` for each Server 
 | Server 2022 | 3 | same 3 files |
 | Server 2025 | 6 | adds `EFI\SecureBootRecovery.efi`, `EFI_EX\bootmgfw_EX.efi`, `EFI_EX\bootmgr_EX.efi` |
 
-All files in this list have valid Authenticode signatures. The trust chain authority (the trust-anchor path that terminates at a root or intermediate CA, as distinct from the immediate signer certificate) of each is the relevant question for PCA2023 work (section 3.7); the file-presence question is answered by the table above.
+All files in this list have valid Authenticode signatures. The trust chain of each — specifically its trust-anchor path, the root/intermediate hierarchy the chain terminates at, as distinct from the immediate signer certificate — is the relevant question for PCA2023 work (section 3.7); the file-presence question is answered by the table above.
 
 ### 4.3 Indexing and edition coverage
 
@@ -419,7 +419,7 @@ Some EVAL ISOs add an "Evaluation" suffix to the edition name (e.g., `Windows Se
 
 ### 4.4 SecureBootRecovery.efi: a Server 2025 novelty
 
-`SecureBootRecovery.efi` first appears in Server 2025's install.wim, PCA2011-signed. It does not appear in Server 2016 / 2019 / 2022. Its role is related to Secure Boot recovery procedures (presumably re-establishing trust when a firmware update has revoked an active signer), but the canonical documentation of its runtime behaviour was not located during the original investigation. Treat it as a Server-2025-only file that should be carried through any boot-binary copy operation; do not attempt to substitute or re-sign it without explicit Microsoft guidance.
+`SecureBootRecovery.efi` first appears in Server 2025's install.wim, PCA2011-signed. It does not appear in Server 2016 / 2019 / 2022. Its role is related to Secure Boot recovery procedures (presumably re-establishing trust when a firmware update has revoked an active signer), but the canonical documentation of its runtime behaviour was not located during the original investigation. Treat it as a Server-2025-only file that should be carried through any boot-binary copy operation; do not attempt to substitute or re-sign it without explicit Microsoft guidance. No conclusion is drawn here about whether `SecureBootRecovery.efi` participates in the normal boot flow during a standard installation.
 
 ---
 
@@ -467,7 +467,7 @@ Detection of the bundle type at config-load time avoids the SSU-required failure
 
 Outside the Combined-MSU world, the practitioner needs to know, for any given LCU, which SSU pairs with it. Microsoft does publish this in plain prose on the LCU's KB page (the "Improvements" section often opens with "This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update"). Third-party sites such as `techepages.com` and `windowslatest.com` routinely repeat the pairing.
 
-For automation, the pairing is more reliably retrieved from `wsusscn2.cab`. Each LCU's Master XML entry includes a `<Prerequisites>` block with the UpdateId of any required SSU. Because the Master XML carries no `<KBArticleID>` (see §2.4 correction), the pairing is expressed in `UpdateId` / `RevisionId` terms; the human-readable KB number of the prerequisite SSU is heuristically inferred from the `kb(\d+)` token embedded in many payload URLs (the SSU update's `<FileLocation>` URL), or — more robustly — by cross-referencing the UpdateId against the Microsoft Update Catalog. The URL structure is not a contractual interface, so the token-based inference should be treated as best-effort. No web scraping of KB prose pages is required.
+For automation, the pairing is more reliably retrieved from `wsusscn2.cab`. Each LCU's Master XML entry includes a `<Prerequisites>` block with the UpdateId of any required SSU. Because the Master XML carries no `<KBArticleID>` (see §2.4 correction), the pairing is expressed in `UpdateId` / `RevisionId` terms; the human-readable KB number of the prerequisite SSU is heuristically inferred from the `kb(\d+)` token embedded in many payload URLs (the SSU update's `<FileLocation>` URL), or — more robustly — by cross-referencing the UpdateId against the Microsoft Update Catalog. The URL structure is not a contractual interface, so the token-based inference should be treated as best-effort. Any parser that consumes `package.xml` should therefore fail closed on unexpected structural changes rather than attempting best-effort interpretation. No web scraping of KB prose pages is required.
 
 A concrete example, from Server 2016 in 2026-05:
 
@@ -795,6 +795,18 @@ This article synthesises the state of knowledge as of mid-2026. Several question
 5. **Server 2025 DU.Setup cadence**: as noted in section 6.3, Microsoft has not formally announced whether Server 2025's Setup Dynamic Update has been discontinued, moved to a quarterly cadence, or merely been absent for an extended period for unrelated reasons.
 
 6. **DISM mount-cache mojibake root cause**: section 7.1's hypothesis (mount-cache state corruption) is consistent with the symptom but has not been definitively isolated. A clean-room reproduction on a fresh Windows install, with controlled mount/unmount sequences and explicit cache inspection, would either confirm the hypothesis or eliminate it.
+
+### Known Unknowns
+
+Distinct from the open questions above (which are concrete investigation gaps), the following are forward-looking uncertainties whose resolution depends on Microsoft's future decisions rather than on further analysis of current data:
+
+- Whether Microsoft will eventually PCA2023-sign `bootmgr.efi` (the BIOS/`_EX` boot file that currently remains PCA2011-signed).
+- Whether the Server 2025 DU.Setup cadence change is an intentional policy shift or an incidental gap.
+- Whether future `wsusscn2.cab` revisions will expose KB identifiers differently (e.g. reintroducing a KB element, or changing the payload-URL naming pattern that KB inference currently depends on).
+- Whether Server vNext continues the `_EX` dual-tree model or replaces it with a different PCA2023 delivery mechanism.
+- Whether the PCA2011 DBX revocation timing will vary across OEM firmware ecosystems rather than following a single Microsoft-announced date.
+
+These are listed not because the article can answer them, but because a long-lived pipeline should budget for the possibility that any of them changes.
 
 ---
 

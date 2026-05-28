@@ -66,7 +66,7 @@ Microsoft は Windows Server を 2 種類のインストール可能な形式で
 - 言語パック(Catalog 経由のみ)
 - スタンドアロンの Servicing Stack Update を独立した行として(これらは Catalog 上では LCU とバンドル配信され、 release-info には独立して列挙されません)
 
-Hotpatch カレンダーには特記事項があります。 暦年 2024 / 2025 / 2026 がすべて公開されています。 Server 2022 の CY2024 には 1 つの例外があります — 8 月が期待される「Hotpatch」ではなく「Baseline (Restart)」とラベル付けされていました — おそらく Microsoft が Server 2022 のベースラインケイデンスを CY2024 と CY2025 の間で調整し、 正典の 1 月 / 4 月 / 7 月 / 10 月パターンに合わせたためです。 教訓:**正典のベースライン月リストはカレンダーの行ごとの `Type` フィールド** であり、 ハードコードされた `{1, 4, 7, 10}` ルールではありません。 1 月 / 4 月 / 7 月 / 10 月ヒューリスティックを使う実装者は、 CY2025 と CY2026 では正解を得ますが、 CY2024 の 1 セルで誤った答えを得ます。
+Hotpatch カレンダーには特記事項があります。 暦年 2024 / 2025 / 2026 がすべて公開されています。 Server 2022 の CY2024 には 1 つの例外があります — 8 月が期待される「Hotpatch」ではなく「Baseline (Restart)」とラベル付けされていました — おそらく Microsoft が Server 2022 のベースラインケイデンスを CY2024 と CY2025 の間で調整し、 正典の 1 月 / 4 月 / 7 月 / 10 月パターンに合わせたためです。 実務上の含意は:**正典のベースライン月リストはカレンダーの行ごとの `Type` フィールド** であり、 ハードコードされた `{1, 4, 7, 10}` ルールではありません。 1 月 / 4 月 / 7 月 / 10 月ヒューリスティックを使う実装者は、 CY2025 と CY2026 では正解を得ますが、 CY2024 の 1 セルで誤った答えを得ます。
 
 このページのパーサーは小さくて済みます。 2 つのテーブルレイアウトでコンテンツ全体をカバーできます:5 カラムヘッダー `| Servicing option | Update type | Availability date | Build | KB article |` を持つ月次リリーステーブルと、 6 カラムヘッダー `| Month | Update type | Type | Availability date | Build | KB article |` を持つ Hotpatch カレンダーです。 標準ライブラリのみの 300 行程度の Python パーサーで両方を JSON に抽出できます。 パーサーはヘッダーテキストを正確に検証し、 Microsoft がカラムをリネームしたら継続を拒否すべきです — これにより構造ドリフトが発生したら人間のレビューがトリガーされます。 加えて実装では、 取得したコミット ID・取得タイムスタンプ・生 markdown の SHA-256 をパース済み JSON とともに永続化すべきです。 これにより上流の構造ドリフトを検知でき、 既知の入力に対する再現可能なパースが保てます。
 
@@ -102,7 +102,7 @@ Catalog インタラクションには 2 つの十分に文書化された落と
 
 **Server 2019 と Server 2022 の間で OS 命名が変わった**。 古い OS は更新タイトルでユーザー向けブランド名を使用します:「Windows Server 2019」「Windows Server 2016」。 Server 2022 から、 Microsoft は「Microsoft server operating system, version `<NNHN>`」という命名に切り替えました。 `<NNHN>` はコードネームバージョン:Server 2022 は `21H2`、 Server 2025 は `24H2` です。 Catalog で「Windows Server 2025 2026-04」を検索しても有用な結果は返りません。 「Microsoft server operating system version 24H2 2026-04」を検索すると LCU と依存性が返ってきます。 タイトル文字列ヒューリスティックは両方の命名規則を維持し、 OS バージョンによって分岐する必要があります。
 
-**Server 2025 LCU は 2 ファイルバンドルを返す**。 すべての Server 2025 LCU 解決は *2 つの* ダウンロード URL を返します:LCU 本体に加えて、 固定 KB(現状は `KB5043080`)— これは Servicing Stack ベースラインです。 これはどの LCU 月をリクエストしても同じ Servicing Stack パッケージです。 運用上、 これは Server 2025 にスタンドアロン SSU が存在しないことを強く示唆します — Microsoft は Catalog の `DownloadDialog.aspx` を介して、 すべての LCU と並んで SSU 依存性を 2 ファイルバンドルとして配信します。 「LCU」URL のみをダウンロードし 2 番目を無視するパイプラインは、 LCU が `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` で適用に失敗する WIM を生成します。 正しいパターンは:2 つの `.msu` ファイルをダウンロードし、 依存性順序の判断は `Add-WindowsPackage` に任せること — これは SSU 順序を自動的に処理します。
+**Server 2025 LCU は現状 2 ファイルのダウンロードセットに解決される**。 すべての Server 2025 LCU 解決は *2 つの* ダウンロード URL を返します:LCU 本体に加えて、 固定 KB(現状は `KB5043080`)— これは Servicing Stack ベースラインです。 これはどの LCU 月をリクエストしても同じ Servicing Stack パッケージです。 運用上、 これは Server 2025 にスタンドアロン SSU が存在しないことを強く示唆します — Microsoft は Catalog の `DownloadDialog.aspx` を介して、 すべての LCU と並んで SSU 依存性を 2 ファイルバンドルとして配信します。 「LCU」URL のみをダウンロードし 2 番目を無視するパイプラインは、 LCU が `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` で適用に失敗する WIM を生成します。 正しいパターンは:2 つの `.msu` ファイルをダウンロードし、 依存性順序の判断は `Add-WindowsPackage` に任せること — これは SSU 順序を自動的に処理します。
 
 release-info から取得した KB を直接(KB のみ入力、 タイトル文字列ヒューリスティックなしで)Catalog 経由でダウンロード URL に変換できるかという検証では、 代表的な 8 サンプルテストの成功率は 8 / 8 です。 したがって Catalog は実用的な URL リゾルバですが、 貧弱なディスカバリ表面です。 元の調査からの広範な試行錯誤から得られた建築的教訓は次の通りです:**release-info / .NET リリースノートが発見者、 Catalog がリゾルバ**。 これによりタイトル文字列ヒューリスティック表面とそれがもたらす脆弱性を最小化できます。
 
@@ -140,7 +140,7 @@ wsusscn2.cab
 > 時折現れる `kb(\d+)` トークンから *推定* するしかなく、Master XML から
 > 直接得ることはできません。
 
-Master XML と個別の `packageN.cab` フラグメントは、 **重複する依存性メタデータを異なる視点から記録** しています — 両者は意味的に等価ではありません。 Master XML はフラット化・グローバル化された要約であり、 各 `packageN.cab` は更新ごとのより豊かな適用可能性セマンティクスを保持しています:
+Master XML と個別の `packageN.cab` フラグメントは、 **重複する依存性メタデータを異なる視点から記録** しています — 両者は意味的に等価ではありません。 Master XML はフラット化されたリポジトリ全体の要約であり、 各 `packageN.cab` は更新ごとのより豊かな適用可能性セマンティクスを保持しています:
 
 | 情報 | Master XML | パッケージ別 CAB |
 |:---|:-:|:-:|
@@ -169,7 +169,7 @@ Master XML のパースはそのスケールに注意が必要です。 コモ�
 
 全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<Prerequisites>`、 `<SupersededBy>`、 `<BundledBy>`、 `<PayloadFiles>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる小さな JSON 依存性データベース（本プロジェクトが用いる in-scope bundle 粒度で約 0.2 MB）を生成できます。 完全なオフライン WUA 適用可能性評価は Master XML の直接パースよりも大幅に低速であり、 したがって発見（discovery）ワークフローよりも検証（validation）ワークフローに適しています — これが、 本パイプラインが発見には Master XML パースを用い、 WUA を最終的な適用可能性検証に留保している理由です。
 
-> **サポート状況に関する注記。** `package.xml` の直接パースは、 観測されたメタデータ構造に基づく実装手法であり、 Microsoft がサポートする API 契約ではありません。 スキーマは予告なく変更され得ます。 最終的な適用可能性・インストール可能性の判断は、 権威ある評価器である Windows Update Agent のサービシングロジック（マウント済みイメージに対するオフライン WUA スキャン）で検証すべきです。
+> **サポート状況に関する注記。** `package.xml` の直接パースは、 観測されたメタデータ構造に基づく実装手法であり、 Microsoft がサポートする API 契約ではありません。 スキーマは予告なく変更され得ます。 最終的な適用可能性・インストール可能性の判断は、 権威ある適用可能性評価器（authoritative applicability evaluator）である Windows Update Agent のサービシングロジック（マウント済みイメージに対するオフライン WUA スキャン）で検証すべきです。 スキーマがサポート外であるにもかかわらず Master XML が運用上有用であり続けるのは、 依存関係をリポジトリ全体の形で露出し、 完全なオフライン WUA 適用可能性スキャンよりも桁違いに高速に照会できるためです — これが、 発見には Master XML を用い、 最終検証には WUA を留保する理由です。
 
 #### 2.4.1 Category 階層の package.xml 内表現
 
@@ -326,7 +326,7 @@ Server 2025 で `\Windows\Boot\EFI\bootmgfw.efi` と `\Windows\Boot\EFI_EX\bootm
 \Windows\Boot\EFI_EX\bootmgfw_EX.efi : SHA256 47C12C1F26...    (ファイル全体)
 ```
 
-2 つのバイナリはファイルシステムレベルでバイト同一です。 しかし 2 つのファイルに埋め込まれた Authenticode 署名は異なります:
+2 つのバイナリは Authenticode 署名領域を除いた PE イメージ内容（すなわち Authenticode が測定する PE 内容）においてバイト同一です。 しかし 2 つのファイルに埋め込まれた Authenticode 署名は異なります:
 
 ```
 \Windows\Boot\EFI\bootmgfw.efi       : PCA2011 で署名
@@ -335,7 +335,7 @@ Server 2025 で `\Windows\Boot\EFI\bootmgfw.efi` と `\Windows\Boot\EFI_EX\bootm
 
 これは矛盾ではありません。 Authenticode ハッシングは、 Authenticode 署名自体のバイト(具体的には PE ヘッダー内の `IMAGE_DIRECTORY_ENTRY_SECURITY` 領域とチェックサムフィールド)を **除外** するように定義されています。 signtool が報告する "Hash of file (sha256)" は *Authenticode ハッシュ* であり、 *ファイルハッシュ* ではありません。 両方のバイナリは同じ Authenticode ハッシュを持ちますが(PE 本体が同一)、 `Get-FileHash` で直接測定するとファイルハッシュは異なります — 各ファイル末尾の署名 blob が異なるからです。
 
-つまり Microsoft のアプローチは:既存の `bootmgfw.efi` の PE 本体を取り、 PCA2023 で再署名し、 結果を `bootmgfw_EX.efi` として保存する、 というものです。 PE コードは変更されず、 署名のみが新しいものです。 これはゴールに対する妥当な解釈です — ブートマネージャーの実行可能な動作は完全に同じで、 信頼アンカーのみが変わります。
+つまり Microsoft のアプローチは:既存の `bootmgfw.efi` の PE 本体を取り、 PCA2023 で再署名し、 結果を `bootmgfw_EX.efi` として保存する、 というものです。 PE コードは変更されず、 署名のみが新しいものです。 これはゴールに対する妥当な解釈です — PE 実行本体は変更されていないように見え、 観測可能な差異は Authenticode 署名チェーンに限られます;信頼アンカーのみが変わります。
 
 他の `_EX` ファイルでは常に同じというわけではありません。 Server 2025 の `bootmgr_EX.efi` は `bootmgr.efi` と *署名を含めて* バイト単位で同一です — `_EX` サフィックスがあるにも関わらず PCA2011 署名を持ちます。 これは検査した Server 2025 メディアで観測され、 bootmgr_EX が PCA2011 署名コピーである旨を示す Microsoft の `Make2023BootableMedia.ps1` v1.4 のコメントと整合します。 Microsoft が正式なサービシング仕様を公開しない限り、 これは実装観測に基づく挙動として扱ってください;遷移期間のアーティファクトか永続的な設計選択かは、 まだ公式に文書化されていません。
 
@@ -359,7 +359,7 @@ Microsoft の `Make2023BootableMedia.ps1` v1.4 自体は **検証を一切行い
 
 > SCOPE: file presence + signer-chain only. Actual boot behaviour on firmware with PCA2011 revoked from DBX is NOT verified here. Manual boot test on hardware or a Hyper-V Gen2 VM with a PCA2023 Secure Boot template is required before production deployment.
 
-SCOPE clarifier の意義は、 オペレータに正しい期待を設定することです:検証関数からの `Pass` は必要ですが十分ではありません。 実際に証明されるのは、 ファイルシステム構造と Authenticode チェーンが正しいことだけです。 デプロイ対象のファームウェアが実際にチェーンを受け入れるかどうかは、 そのターゲットが Microsoft の PCA2023 DB プロビジョニング更新を受信したかどうかに依存し、 これは ISO のみを操作するツーリングの範囲外です。
+パイプライン設計の観点では、 SCOPE clarifier はオペレータに正しい期待を設定します:検証関数からの `Pass` は必要ですが十分ではありません。 実際に証明されるのは、 ファイルシステム構造と Authenticode チェーンが正しいことだけです。 デプロイ対象のファームウェアが実際にチェーンを受け入れるかどうかは、 そのターゲットが Microsoft の PCA2023 DB プロビジョニング更新を受信したかどうかに依存し、 これは ISO のみを操作するツーリングの範囲外です。
 
 ---
 
@@ -402,7 +402,7 @@ Server 2025 上の `EFI_EX` ディレクトリは、 `Get-ChildItem -Recurse -Fi
 | Server 2022 | 3 | 同じ 3 ファイル |
 | Server 2025 | 6 | `EFI\SecureBootRecovery.efi`、 `EFI_EX\bootmgfw_EX.efi`、 `EFI_EX\bootmgr_EX.efi` を追加 |
 
-このリストのすべてのファイルは有効な Authenticode 署名を持っています。 各々の信頼チェーン認証局（直接の署名証明書とは区別される、 ルートまたは中間 CA に至る trust-anchor のパス）は PCA2023 作業(セクション 3.7)の関連する質問です;ファイル存在の質問は上の表で回答されています。
+このリストのすべてのファイルは有効な Authenticode 署名を持っています。 各々の信頼チェーン — 具体的には、 直接の署名証明書とは区別される、 チェーンが終端するルート/中間階層である trust-anchor パス — は PCA2023 作業(セクション 3.7)の関連する質問です;ファイル存在の質問は上の表で回答されています。
 
 ### 4.3 インデックスとエディションのカバレッジ
 
@@ -419,7 +419,7 @@ Server 2025 上の `EFI_EX` ディレクトリは、 `Get-ChildItem -Recurse -Fi
 
 ### 4.4 SecureBootRecovery.efi:Server 2025 の新顔
 
-`SecureBootRecovery.efi` は Server 2025 の install.wim で初めて登場し、 PCA2011 で署名されています。 Server 2016 / 2019 / 2022 には現れません。 セキュアブートリカバリ手順に関連した役割(おそらくファームウェアアップデートがアクティブな署名者を失効させた場合に信頼を再確立する)ですが、 ランタイム動作の正典の文書化は元の調査では見つかりませんでした。 Server 2025 専用ファイルとして扱い、 任意のブートバイナリコピー操作で通過させてください;Microsoft の明示的なガイダンスなしに置換または再署名を試みないでください。
+`SecureBootRecovery.efi` は Server 2025 の install.wim で初めて登場し、 PCA2011 で署名されています。 Server 2016 / 2019 / 2022 には現れません。 セキュアブートリカバリ手順に関連した役割(おそらくファームウェアアップデートがアクティブな署名者を失効させた場合に信頼を再確立する)ですが、 ランタイム動作の正典の文書化は元の調査では見つかりませんでした。 Server 2025 専用ファイルとして扱い、 任意のブートバイナリコピー操作で通過させてください;Microsoft の明示的なガイダンスなしに置換または再署名を試みないでください。 本記事では、 `SecureBootRecovery.efi` が標準インストール時の通常のブートフローに関与するか否かについては結論を下しません。
 
 ---
 
@@ -467,7 +467,7 @@ config ロード時のバンドルタイプ検出は WIM マウント時の SSU-
 
 Combined MSU の世界の外では、 実務者は任意の LCU に対してどの SSU がペアになるかを知る必要があります。 Microsoft は LCU の KB ページのプレーンテキストでこれを公開しています(「Improvements」セクションがしばしば「This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update」で始まります)。 サードパーティサイト `techepages.com` や `windowslatest.com` も日常的にペアリングを繰り返します。
 
-自動化では、 ペアリングは `wsusscn2.cab` からより信頼性高く取得できます。 各 LCU の Master XML エントリには、 必要な SSU の UpdateId を持つ `<Prerequisites>` ブロックが含まれます。 ただし Master XML には `<KBArticleID>` が存在しない（§2.4 の訂正を参照）ため、ペアリングは `UpdateId` / `RevisionId` で表現されます。前提 SSU の人間可読な KB 番号は、多くの payload URL（その SSU 更新の `<FileLocation>` URL）に埋め込まれた `kb(\d+)` トークンからヒューリスティックに推定するか、より堅牢な手段として UpdateId を Microsoft Update Catalog に照合して取得します。URL 構造は契約的なインターフェースではないため、トークンベースの推定はベストエフォートとして扱うべきです。KB の文章ページを Web スクレイピングする必要はありません。
+自動化では、 ペアリングは `wsusscn2.cab` からより信頼性高く取得できます。 各 LCU の Master XML エントリには、 必要な SSU の UpdateId を持つ `<Prerequisites>` ブロックが含まれます。 ただし Master XML には `<KBArticleID>` が存在しない（§2.4 の訂正を参照）ため、ペアリングは `UpdateId` / `RevisionId` で表現されます。前提 SSU の人間可読な KB 番号は、多くの payload URL（その SSU 更新の `<FileLocation>` URL）に埋め込まれた `kb(\d+)` トークンからヒューリスティックに推定するか、より堅牢な手段として UpdateId を Microsoft Update Catalog に照合して取得します。URL 構造は契約的なインターフェースではないため、トークンベースの推定はベストエフォートとして扱うべきです。したがって `package.xml` を消費するパーサーは、 予期しない構造変化に対してはベストエフォートな解釈を試みるのではなく、 fail closed（安全側に停止）すべきです。KB の文章ページを Web スクレイピングする必要はありません。
 
 Server 2016 の 2026-05 からの具体例:
 
@@ -795,6 +795,18 @@ Microsoft リファレンス `Make2023BootableMedia.ps1` v1.4 はこれを一切
 5. **Server 2025 DU.Setup ケイデンス**:セクション 6.3 で述べたように、 Microsoft は Server 2025 の Setup Dynamic Update が打ち切られたのか、 四半期ケイデンスに移ったのか、 単に無関係の理由で長期間欠落しているのか、 を正式にアナウンスしていません。
 
 6. **DISM mount-cache mojibake 根本原因**:セクション 7.1 の仮説(mount-cache 状態破壊)は症状と整合的ですが、 決定的には isolated されていません。 制御されたマウント / アンマウントシーケンスと明示的なキャッシュ検査を伴う、 クリーンな Windows インストールでのクリーンルーム再現は仮説を確証するか否認するかを与えます。
+
+### 既知の未知(Known Unknowns)
+
+上記の Open Questions（具体的な調査ギャップ）とは異なり、 以下は現在のデータをさらに分析するのではなく、 Microsoft の将来の決定に解決が依存する前向きの不確実性です:
+
+- Microsoft が最終的に `bootmgr.efi`（現状 PCA2011 署名のまま残る BIOS/`_EX` ブートファイル）を PCA2023 署名するか否か。
+- Server 2025 の DU.Setup ケイデンス変更が意図的な方針転換なのか、 偶発的な欠落なのか。
+- 将来の `wsusscn2.cab` リビジョンが KB 識別子を異なる形で露出するか否か（例:KB 要素の再導入、 または KB 推定が現在依存している payload-URL 命名パターンの変更）。
+- Server vNext が `_EX` デュアルツリーモデルを継続するか、 別の PCA2023 配信メカニズムに置き換えるか。
+- PCA2011 の DBX 失効タイミングが、 単一の Microsoft 公表日に従うのではなく、 OEM ファームウェアエコシステムごとに異なるか否か。
+
+これらは本記事が回答できるから挙げているのではなく、 長寿命のパイプラインがこれらのいずれかの変化に備えて余裕を持つべきだからです。
 
 ---
 
