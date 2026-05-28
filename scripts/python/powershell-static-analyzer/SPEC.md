@@ -185,6 +185,7 @@ The mapping between failure mode and enforcement rule is:
 | **Adds revision-anchored prose in comments (any rNN)**   | **PSAP0005 (new in 4.0.0)** |
 | Silently changes shared helper bodies across files       | PSA8001                  |
 | Emits LF-only / no-BOM `.ps1` when generating from py    | PSA7001, PSA7002         |
+| Substitutes typographic chars for ASCII (em-dash, smart quotes) | **PSA7003 (new in 4.2.0)** |
 | Invents non-existent cmdlets / functions                 | PSA2010                  |
 | Uses locale-dependent constructs (Split-Path ja-JP)      | PSA2011                  |
 | Drops `[pscustomobject]` sealed-object semantics         | PSA2009                  |
@@ -1605,6 +1606,70 @@ Conversely, a file without BOM but with all-CRLF endings will fire
   structured fields (not yet emitted as of v3.8.0).
 
 ---
+
+### 4.28b PSA7003 — Non-ASCII character in script body
+
+- **Severity**: Warning
+- **Default**: Enabled
+- **Category**: PSA7xxx (file format / encoding)
+- **Introduced**: v4.2.0
+
+#### Rationale
+
+A repository convention — enforced by the CI source-format gate —
+requires `.ps1` bodies to be **ASCII-only** outside the 3-byte UTF-8 BOM.
+Non-ASCII characters in PowerShell sources cause two distinct problems:
+
+1. **Encoding misread.** Windows PowerShell 5.1 may decode a script under
+   a Shift-JIS / cp932 fallback when the BOM is absent or stripped,
+   turning stray non-ASCII bytes into mojibake in log output and string
+   literals (this is the same failure mode PSA7001 guards against).
+2. **CI gate failure.** A separate ASCII-only check in the build pipeline
+   rejects any byte greater than `0x7F` in a `.ps1` body, failing the
+   commit before the static-analysis or test stages even run.
+
+The dominant source of this defect today is **AI/LLM-assisted editing**
+and Markdown-to-code copy/paste, which silently substitute typographic
+characters for their ASCII counterparts: em / en dashes for `-`, the
+section sign `U+00A7` for the word `section`, curly quotes
+(`U+2018`/`U+2019`/`U+201C`/`U+201D`) for straight quotes, the horizontal
+ellipsis `U+2026` for `...`, and the no-break space `U+00A0` for a normal
+space. These glyphs are visually near-identical to their ASCII forms, so
+they survive human review and are caught only by a byte-level check such
+as this rule.
+
+#### Detection
+
+The rule operates on the decoded, BOM-stripped script body. Each
+character whose code point exceeds `0x7F` is reported with its 1-based
+line and column, its `U+XXXX` code point, and — for the most common
+offenders — a human-readable name (em dash, section sign, smart
+quote, ellipsis, no-break space, etc.). `CR` and `LF` are ASCII and are
+never flagged; `CR` does not advance the reported column so positions
+line up with the on-screen text.
+
+Because every ASCII character occupies a single UTF-8 byte in the range
+`0x00`—`0x7F`, flagging characters whose code point exceeds `0x7F`
+is byte-equivalent to the CI gate's "any byte > 0x7F" test, while
+allowing the diagnostic to name the exact character and location.
+
+#### Example
+
+```powershell
+# Flagged (U+2014 em dash, U+00A7 section sign, U+201C/D smart quotes):
+# See SPEC —B.1; the value — when present — is “canonical”.
+
+# Clean (ASCII only):
+# See SPEC section B.1; the value - when present - is "canonical".
+```
+
+#### Suppression / Configuration
+
+Disable per-line with a trailing `# psa-disable PSA7003`, per-file with a
+top-of-file `# psa-disable-file PSA7003`, or globally by setting
+`"PSA7003": false` in the rule map of `.psa.config.json`. Suppression is
+discouraged for shipped scripts: the CI ASCII-only gate is not
+configurable, so a suppressed PSA7003 finding will still fail the build.
 
 ### 4.29 PSA8001 — Function body hash drift across files
 

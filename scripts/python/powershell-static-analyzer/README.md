@@ -325,6 +325,7 @@ optional column, and a short message.
 |:---|:---:|:---:|:---|
 | **PSA7001** | Warning | ✅ on | PowerShell script lacks UTF-8 BOM (Windows PowerShell 5.1 may misinterpret non-ASCII as Shift-JIS without BOM) |
 | **PSA7002** | Warning | ✅ on | PowerShell script has LF-only or mixed line endings (canonical form is CRLF; mixed line endings typically indicate programmatic insertion of LF-only content into a CRLF file — invisible to AST parser; new in 3.7.0) |
+| **PSA7003** | Warning | ✅ on | PowerShell script body contains non-ASCII character(s) outside the BOM (fails the ASCII-only CI gate; common offenders from AI/LLM edits and rich-text paste: em/en dash, section sign, smart quotes, ellipsis, no-break space; reported with line/column/codepoint/name; new in 4.2.0) |
 
 `PSA8xxx` — cross-file consistency (Warning) — new in 3.2.0, cross-file
 

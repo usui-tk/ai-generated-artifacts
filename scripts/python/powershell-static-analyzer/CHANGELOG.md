@@ -87,6 +87,27 @@ numbered-section primary specification body (which `scripts/README.md`
 L144–L146 explicitly permits for formal API specifications, provided
 Appendix C and Appendix D exist — both already present here).
 
+## [4.2.0] - 2026-05-28
+
+### Added
+
+- **PSA7003 - Non-ASCII character in script body** (Warning, default on,
+  category PSA7xxx). Flags any character whose code point exceeds
+  `U+007F` in a `.ps1` body (outside the 3-byte UTF-8 BOM), reporting the
+  1-based line and column, the `U+XXXX` code point, and - for the most
+  common offenders - a human-readable name (em / en dash, section sign,
+  smart quotes, horizontal ellipsis, no-break space, and similar). These
+  characters are a frequent artifact of AI/LLM-assisted editing and
+  Markdown-to-code copy/paste; they are visually near-identical to their
+  ASCII equivalents, survive human review, and fail the repository's
+  ASCII-only CI source-format gate. PSA7003 surfaces them during local
+  static analysis so the defect is caught before the commit reaches CI.
+  Complements PSA7001 (missing UTF-8 BOM) and PSA7002 (LF-only / mixed
+  line endings) to cover the third leg of the source-format gate
+  (BOM + CRLF + ASCII-only). New helper `compute_non_ascii_stats()` and
+  check `check_non_ascii_chars()`; see SPEC.md section 4.28b. Added 5
+  rule-level tests and 5 `compute_non_ascii_stats` unit tests.
+
 ## [4.1.0] - 2026-05-26
 
 ### Added — Three new rules catching the latent-bug classes that escaped

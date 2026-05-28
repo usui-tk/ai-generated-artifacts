@@ -1544,6 +1544,48 @@ _add_psa7002_no_stats_test(
     None, 0)
 
 
+# ---------------------------------------------------------------------------
+# File-meta rule: PSA7003 - non-ASCII character(s) outside the BOM (warning)
+# ---------------------------------------------------------------------------
+# PSA7003 fires from analyze_text() ONLY when file_meta carries a
+# 'non_ascii_stats' sub-dict whose 'occurrences' list is non-empty. The
+# production driver in main() populates it from the decoded body via
+# compute_non_ascii_stats(). Non-ASCII chars are written here as \u escapes
+# so this test file itself stays ASCII-only.
+
+def _add_psa7003_test(name, non_ascii_stats, expected):
+    TESTS.append(('rule', name, 'PSA7003',
+                  '$x = 1\n', expected,
+                  {'has_bom': True, 'non_ascii_stats': non_ascii_stats}))
+
+_add_psa7003_test(
+    'PSA7003 positive: single em dash (U+2014)',
+    {'count': 1, 'occurrences': [(1, 5, '\u2014', 0x2014)]},
+    1)
+_add_psa7003_test(
+    'PSA7003 positive: section sign + em dash + curly quote',
+    {'count': 3, 'occurrences': [(1, 13, '\u00a7', 0x00a7),
+                                 (1, 41, '\u2014', 0x2014),
+                                 (3, 12, '\u201c', 0x201c)]},
+    1)
+_add_psa7003_test(
+    'PSA7003 negative: no non-ASCII (empty occurrences)',
+    {'count': 0, 'occurrences': []},
+    0)
+
+
+def _add_psa7003_no_stats_test(name, file_meta, expected):
+    TESTS.append(('rule', name, 'PSA7003',
+                  '$x = 1\n', expected, file_meta))
+
+_add_psa7003_no_stats_test(
+    'PSA7003 edge: file_meta with no non_ascii_stats is silent',
+    {'has_bom': True}, 0)
+_add_psa7003_no_stats_test(
+    'PSA7003 edge: file_meta=None is silent (back-compat)',
+    None, 0)
+
+
 # Helper test for compute_line_ending_stats() — it is called by main()
 # and must produce the exact dict shape consumed by check_line_endings.
 # We exercise it directly with synthetic byte buffers via a dedicated
@@ -1570,6 +1612,31 @@ _add_compute_test(
 _add_compute_test(
     'compute: empty bytes',
     b'', 0, 0)
+
+
+# Direct tests for compute_non_ascii_stats() (PSA7003 support). Non-ASCII
+# characters are \u escapes so this test file stays ASCII-only.
+NON_ASCII_COMPUTE_TESTS = []
+
+def _add_na_compute_test(name, text, expected_count, expected_first):
+    # expected_first is (line, col, codepoint) of the first occurrence, or None.
+    NON_ASCII_COMPUTE_TESTS.append((name, text, expected_count, expected_first))
+
+_add_na_compute_test(
+    'na compute: pure ASCII -> 0',
+    '$x = 1\n$y = 2\n', 0, None)
+_add_na_compute_test(
+    'na compute: single em dash, col tracking',
+    'a \u2014 b\n', 1, (1, 3, 0x2014))
+_add_na_compute_test(
+    'na compute: char on line 2 (line tracking)',
+    '$x = 1\n# \u00a7B.1\n', 1, (2, 3, 0x00a7))
+_add_na_compute_test(
+    'na compute: CR not counted, col correct across CRLF',
+    'ab\r\n\u2014\r\n', 1, (2, 1, 0x2014))
+_add_na_compute_test(
+    'na compute: two non-ASCII on one line',
+    '\u201ca\u201d\n', 2, (1, 1, 0x201c))
 
 
 # ---------------------------------------------------------------------------
@@ -2007,6 +2074,30 @@ def run():
                 f'    lf_only_count: got {got_lf_only}, expected {expected_lf_only}',
                 f'    cr_count:      got {got_cr}, expected {expected_cr}',
                 f'    full stats:    {stats!r}',
+            ]))
+
+    # --- Section 2.6: compute_non_ascii_stats helper (PSA7003 support) ---
+    print()
+    print('=' * 72)
+    print(f'Section 2.6: compute_non_ascii_stats tests '
+          f'({len(NON_ASCII_COMPUTE_TESTS)} cases)')
+    print('=' * 72)
+    for name, text, expected_count, expected_first in NON_ASCII_COMPUTE_TESTS:
+        stats = psa.compute_non_ascii_stats(text)
+        got_count = stats['count']
+        occ = stats['occurrences']
+        got_first = (occ[0][0], occ[0][1], occ[0][3]) if occ else None
+        ok = (got_count == expected_count) and (got_first == expected_first)
+        status = 'PASS' if ok else 'FAIL'
+        print(f'  [{status}] {name}  (count: {got_count}/{expected_count})')
+        if ok:
+            pass_count += 1
+        else:
+            fail_count += 1
+            failures.append((name, [
+                f'    count: got {got_count}, expected {expected_count}',
+                f'    first: got {got_first}, expected {expected_first}',
+                f'    full stats: {stats!r}',
             ]))
 
     # --- Section 3: CLI --config-check / --self-check ---

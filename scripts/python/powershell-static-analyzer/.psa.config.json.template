@@ -266,6 +266,25 @@
 
 
   // ===========================================================================
+  // PSA7003: Non-ASCII character in script body (NEW in 4.2.0)
+  // ===========================================================================
+  //
+  // PSA7003 is a file-level rule (severity: warning, default ON) that fires
+  // when a .ps1 body contains any character above U+007F outside the UTF-8
+  // BOM. The repository CI source-format gate rejects non-ASCII bytes in
+  // .ps1 files, so this rule catches the defect locally first. The most
+  // common offenders are typographic characters introduced by AI/LLM edits
+  // and Markdown-to-code paste: em/en dashes, the section sign (U+00A7),
+  // smart quotes, the ellipsis (U+2026), and the no-break space (U+00A0).
+  // Findings report line, column, code point, and a friendly name.
+  //
+  // Example - turn PSA7003 off (NOT recommended; the CI ASCII gate is not
+  // configurable and will still fail the build):
+  //
+  //   "disable": ["PSA7003"],
+
+
+  // ===========================================================================
   // PSA8001: Function body hash drift across files (NEW in 3.2.0)
   // ===========================================================================
   //

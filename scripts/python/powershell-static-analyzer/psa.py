@@ -60,6 +60,7 @@ Best-practice (PSA6xxx):
 File format / encoding (PSA7xxx):
   PSA7001  PowerShell script lacks UTF-8 BOM ..... Warning
   PSA7002  LF-only / mixed line endings .......... Warning   (new in v3.7.0)
+  PSA7003  Non-ASCII character in script body .... Warning   (new in v4.2.0)
 
 Usage
 -----
@@ -323,6 +324,8 @@ RULES = [
      'PowerShell script lacks UTF-8 BOM'),
     ('PSA7002', 'warning', True,
      'PowerShell script has LF-only line endings (canonical form is CRLF)'),
+    ('PSA7003', 'warning', True,
+     'PowerShell script contains non-ASCII character(s) outside the BOM'),
 
     # Cross-file / multi-script consistency (PSA8xxx, new in v3.2.0)
     ('PSA8001', 'warning', True,
@@ -3284,6 +3287,139 @@ def check_line_endings(file_meta):
     }]
 
 
+# Friendly names for the non-ASCII code points most frequently introduced
+# by AI/LLM editors, Markdown-to-code copy/paste, and rich-text editors.
+# Naming the offender in the diagnostic makes the fix obvious.
+_PSA7003_COMMON_NAMES = {
+    0x00A0: 'no-break space',
+    0x00A7: 'section sign',
+    0x00B7: 'middle dot',
+    0x00D7: 'multiplication sign',
+    0x2010: 'hyphen',
+    0x2011: 'non-breaking hyphen',
+    0x2012: 'figure dash',
+    0x2013: 'en dash',
+    0x2014: 'em dash',
+    0x2015: 'horizontal bar',
+    0x2018: 'left single quote',
+    0x2019: 'right single quote',
+    0x201C: 'left double quote',
+    0x201D: 'right double quote',
+    0x2022: 'bullet',
+    0x2026: 'horizontal ellipsis',
+    0x2192: 'rightwards arrow',
+    0x2212: 'minus sign',
+    0x2260: 'not equal to',
+    0x2264: 'less-than or equal to',
+    0x2265: 'greater-than or equal to',
+    0x3000: 'ideographic space',
+    0xFEFF: 'zero-width no-break space (stray BOM)',
+}
+
+
+def compute_non_ascii_stats(text):
+    """Locate non-ASCII characters in the (BOM-stripped) script body.
+
+    Parameters
+    ----------
+    text : str
+        The decoded, BOM-stripped script body. The driver decodes the
+        post-BOM bytes with ``errors='replace'`` before calling this.
+
+    Returns
+    -------
+    dict
+        ``{'count': int, 'occurrences': [(line, col, char, codepoint), ...]}``
+        where ``line`` and ``col`` are 1-based and entries appear in
+        document order.
+
+    Notes
+    -----
+    Used by PSA7003. The CI source-format gate rejects any byte > 0x7F in
+    a ``.ps1`` body (outside the UTF-8 BOM). ASCII characters occupy a
+    single UTF-8 byte in 0x00-0x7F, so flagging characters whose code
+    point exceeds 0x7F is byte-equivalent to that gate while letting the
+    diagnostic report a human-readable line/column/character.
+    """
+    occurrences = []
+    line = 1
+    col = 1
+    for ch in text:
+        if ch == '\n':
+            line += 1
+            col = 1
+            continue
+        if ch == '\r':
+            # CR is ASCII and never flagged; it pairs with the following
+            # LF and should not advance the visible column count.
+            continue
+        if ord(ch) > 0x7F:
+            occurrences.append((line, col, ch, ord(ch)))
+        col += 1
+    return {'count': len(occurrences), 'occurrences': occurrences}
+
+
+def check_non_ascii_chars(file_meta):
+    """PSA7003: PowerShell script contains non-ASCII character(s).
+
+    A repository convention (enforced by the CI source-format gate)
+    requires ``.ps1`` bodies to be ASCII-only outside the UTF-8 BOM.
+    Non-ASCII characters in PowerShell sources cause two classes of
+    problem: (1) Windows PowerShell 5.1 may misread them under a
+    Shift-JIS / cp932 fallback when the BOM is absent or stripped, and
+    (2) they slip into commit diffs and break ASCII-only CI gates.
+
+    The single most common source today is AI/LLM-assisted editing and
+    Markdown-to-code copy/paste, which silently substitute typographic
+    characters for ASCII ones: em/en dashes for ``-``, the section sign
+    ``U+00A7`` for ``section``, curly quotes for straight quotes, the
+    ellipsis ``U+2026`` for ``...``, and no-break spaces ``U+00A0`` for
+    regular spaces. These are visually nearly identical to their ASCII
+    counterparts, so they survive human review and are only caught by a
+    byte-level check such as this one.
+
+    Parameters
+    ----------
+    file_meta : dict | None
+        Optional metadata dict. Must contain a ``'non_ascii_stats'``
+        sub-dict (as produced by :func:`compute_non_ascii_stats`) for
+        this rule to fire. When ``file_meta`` is None or the sub-dict is
+        absent, the rule emits nothing (back-compat for callers that
+        only pass text).
+    """
+    if not file_meta:
+        return []
+    stats = file_meta.get('non_ascii_stats')
+    if not stats:
+        return []
+    occ = stats.get('occurrences', [])
+    if not occ:
+        return []
+    first_line, first_col = occ[0][0], occ[0][1]
+    parts = []
+    for ln, cl, ch, cp in occ[:5]:
+        label = 'U+{0:04X}'.format(cp)
+        name = _PSA7003_COMMON_NAMES.get(cp)
+        if name:
+            label += ' ' + name
+        parts.append('{0} at line {1} col {2} ({3})'.format(repr(ch), ln, cl, label))
+    sample = '; '.join(parts)
+    if len(occ) > 5:
+        sample += '; ...'
+    msg = ('PowerShell script contains {0} non-ASCII character(s) outside '
+           'the BOM: {1}. The CI source-format gate requires ASCII-only '
+           '.ps1 bodies; replace these with ASCII equivalents (em/en dash '
+           '-> "-", section sign -> "section ", curly quotes -> straight '
+           'quotes, ellipsis -> "...", no-break space -> space). Non-ASCII '
+           'characters are a frequent artifact of AI/LLM edits and '
+           'rich-text paste.').format(len(occ), sample)
+    return [{
+        'severity': 'warning', 'code': 'PSA7003',
+        'line': first_line, 'col': first_col,
+        'message': msg,
+    }]
+
+
 def compute_line_ending_stats(raw_bytes):
     """Compute LF/CR statistics on raw bytes (used to populate file_meta).
 
@@ -5282,6 +5418,8 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_utf8_bom_missing(file_meta)
     if cfg.enabled['PSA7002']:
         raw += check_line_endings(file_meta)
+    if cfg.enabled['PSA7003']:
+        raw += check_non_ascii_chars(file_meta)
 
     # Complexity metrics (PSA9xxx) - generic, opt-in
     # PSA8xxx (cross-file consistency) is dispatched from the multi-file
@@ -5850,9 +5988,11 @@ def main(argv=None):
         # text-mode decoding does not preserve LF-vs-CRLF distinctions
         # in a way that the rule can later inspect.
         line_ending_stats = compute_line_ending_stats(body)
+        non_ascii_stats = compute_non_ascii_stats(text)
         file_meta = {
             'has_bom': has_bom,
             'line_ending_stats': line_ending_stats,
+            'non_ascii_stats': non_ascii_stats,
         }
         issues = analyze_text(text, cfg, file_meta=file_meta)
         per_file.append((path, text, issues))
