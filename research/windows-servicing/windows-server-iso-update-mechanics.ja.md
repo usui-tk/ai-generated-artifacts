@@ -9,6 +9,8 @@ Microsoft Evaluation ISO と累積更新プログラムの束から完全にパ�
 
 本記事は、 実際の ISO 更新パイプラインで数か月にわたる改訂サイクルを通じて蓄積された技術的な発見の統合です。 これは特定のツールに対する how-to ガイドではありません。 目的は、 言語やフレームワークの選択に関わらず、 今後の実装者(人間あるいは LLM)がナビゲートしなければならないナレッジ表面を記録することにあります。 記事末尾の Provenance(出典)セクションで、 本ドキュメントに統合された投資ログの元のリポジトリを示しています。
 
+**適用範囲（Scope of applicability）。** 本記事は、 Windows Server LTSC インストールメディアのオフラインサービシングおよび再構築ワークフローに特化しています。 クライアント版 Windows、 Windows Update for Business のポリシーオーケストレーション、 および稼働中のインプレースサービシングは意図的にスコープ外としています。 本記事の発見を、 独立した検証なしにこれらの領域へ一般化すべきではありません。
+
 ### 調査手法(Methodology)
 
 本記事の発見はドキュメントのみからではなく、 経験的に導出されたものです。 それらを生み出した調査は、 複数の月例 Patch Tuesday サイクルにわたって以下の手法を組み合わせて繰り返しました:
@@ -26,7 +28,7 @@ Microsoft Evaluation ISO と累積更新プログラムの束から完全にパ�
 
 ## 1. 背景と対象読者
 
-Microsoft は Windows Server を 2 種類のインストール可能な形式で提供しています:**Evaluation ISO**(Microsoft Evaluation Center からダウンロード可能、 180 日の期限付き、 ライセンス契約なしで自由に入手可能)と、 **小売 / ボリュームライセンス ISO**(Microsoft 365 管理センター、 Volume Licensing Service Center、 または Open Value 契約を介して取得)です。 実務者主導の ISO 自動化では Evaluation ISO が最も実用的な入力となることが多いですが、 メディアの再配布・保管は Microsoft のライセンス条項に従う必要があります（例えば CI アーティファクトストアへチェックインする前に、 Evaluation Center の条項がそれを許可しているか確認してください）。
+Microsoft は Windows Server を 2 種類のインストール可能な形式で提供しています:**Evaluation ISO**(Microsoft Evaluation Center からダウンロード可能、 180 日の期限付き、 ライセンス契約なしで自由に入手可能)と、 **小売 / ボリュームライセンス ISO**(Microsoft 365 管理センター、 Volume Licensing Service Center、 または Open Value 契約を介して取得)です。 実装者主導の ISO 自動化では Evaluation ISO が最も実用的な入力となることが多いですが、 メディアの再配布・保管は Microsoft のライセンス条項に従う必要があります（例えば CI アーティファクトストアへチェックインする前に、 Evaluation Center の条項がそれを許可しているか確認してください）。
 
 そのような Evaluation メディアから「完全にパッチ済み」の ISO を構築する作業を行う実務者は、 通常以下のような問いから始めます:*「install.wim に最低限どの MSU および CAB パッケージを適用すれば、 イメージがデプロイされて起動したときに、 最新の Patch Tuesday レベルとなり、 かつ PCA2011 を信頼しなくなったセキュアブート環境で受け入れられるか?」*。 ナイーブな回答 — 「今月の LCU を適用する」 — は不完全です。 完全な回答は少なくとも以下に触れます:
 
@@ -108,7 +110,7 @@ release-info から取得した KB を直接(KB のみ入力、 タイトル文�
 
 ### 2.4 wsusscn2.cab オフラインサービシングデータベース
 
-「更新 KB-A は KB-B が事前にインストールされていることを要求するか?」 という形式の問いに対して、 オフラインで利用できる正典のメタデータソースは **Windows Update Standalone Scan** データベース(`wsusscn2.cab`)です。 これは `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab` で複数 GB の単一 CAB ファイルとして配信されます。 このファイルはおおよそ月 2 回公開され、 最後の公開以降にリリースされた更新を見るには新しいダウンロードが必要です。 なお、 最終的な適用可能性の評価は依然として Windows Update Agent のサービシングロジックが行います。
+「更新 KB-A は KB-B が事前にインストールされていることを要求するか?」 という形式の問いに対して、 最も権威あるオフラインのメタデータソースは **Windows Update Standalone Scan** データベース(`wsusscn2.cab`)です。 これは `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab` で複数 GB の単一 CAB ファイルとして配信されます。 このファイルはおおよそ月 2 回公開され、 最後の公開以降にリリースされた更新を見るには新しいダウンロードが必要です。 なお、 最終的な適用可能性の評価は依然として Windows Update Agent のサービシングロジックが行います。
 
 `wsusscn2.cab` はネストされた CAB で、 以下のような高レベル構造を持ちます:
 
@@ -169,7 +171,7 @@ Master XML のパースはそのスケールに注意が必要です。 コモ�
 
 全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<Prerequisites>`、 `<SupersededBy>`、 `<BundledBy>`、 `<PayloadFiles>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる小さな JSON 依存性データベース（本プロジェクトが用いる in-scope bundle 粒度で約 0.2 MB）を生成できます。 完全なオフライン WUA 適用可能性評価は Master XML の直接パースよりも大幅に低速であり、 したがって発見（discovery）ワークフローよりも検証（validation）ワークフローに適しています — これが、 本パイプラインが発見には Master XML パースを用い、 WUA を最終的な適用可能性検証に留保している理由です。
 
-> **サポート状況に関する注記。** `package.xml` の直接パースは、 観測されたメタデータ構造に基づく実装手法であり、 Microsoft がサポートする API 契約ではありません。 スキーマは予告なく変更され得ます。 最終的な適用可能性・インストール可能性の判断は、 権威ある適用可能性評価器（authoritative applicability evaluator）である Windows Update Agent のサービシングロジック（マウント済みイメージに対するオフライン WUA スキャン）で検証すべきです。 スキーマがサポート外であるにもかかわらず Master XML が運用上有用であり続けるのは、 依存関係をリポジトリ全体の形で露出し、 完全なオフライン WUA 適用可能性スキャンよりも桁違いに高速に照会できるためです — これが、 発見には Master XML を用い、 最終検証には WUA を留保する理由です。
+> **サポート状況に関する注記。** `package.xml` の直接パースは、 観測されたメタデータ構造に基づく実装手法であり、 Microsoft がサポートする API 契約ではありません。 スキーマは予告なく変更され得ます。 最終的な適用可能性・インストール可能性の判断は、 権威ある適用可能性評価器（authoritative applicability evaluator）である Windows Update Agent のサービシングロジック（マウント済みイメージに対するオフライン WUA スキャン）で検証すべきです。 スキーマがサポート外であるにもかかわらず Master XML が運用上有用であり続けるのは、 依存関係をリポジトリ全体の形で露出し、 完全なオフライン WUA 適用可能性スキャンよりも桁違いに高速に照会できるためです — これが、 発見には Master XML を用い、 最終検証には WUA を留保する理由です。 その複雑さにもかかわらず `wsusscn2.cab` が他に代えがたい価値を持つのは、 Windows サービシングエコシステム全体の前提条件・supersedence 関係をリポジトリ規模で露出する、 広くアクセス可能な唯一のオフラインメタデータコーパスだからです。 とはいえ、 将来の wsusscn2 スキーマ改訂をまたいだ互換性は一切保証されないものと考えるべきです。
 
 #### 2.4.1 Category 階層の package.xml 内表現
 
@@ -333,15 +335,15 @@ Server 2025 で `\Windows\Boot\EFI\bootmgfw.efi` と `\Windows\Boot\EFI_EX\bootm
 \Windows\Boot\EFI_EX\bootmgfw_EX.efi : PCA2023 で署名
 ```
 
-これは矛盾ではありません。 Authenticode ハッシングは、 Authenticode 署名自体のバイト(具体的には PE ヘッダー内の `IMAGE_DIRECTORY_ENTRY_SECURITY` 領域とチェックサムフィールド)を **除外** するように定義されています。 signtool が報告する "Hash of file (sha256)" は *Authenticode ハッシュ* であり、 *ファイルハッシュ* ではありません。 両方のバイナリは同じ Authenticode ハッシュを持ちますが(PE 本体が同一)、 `Get-FileHash` で直接測定するとファイルハッシュは異なります — 各ファイル末尾の署名 blob が異なるからです。
+この区別は運用上重要です。 Authenticode ハッシングは、 Authenticode 署名自体のバイト(具体的には PE ヘッダー内の `IMAGE_DIRECTORY_ENTRY_SECURITY` 領域とチェックサムフィールド)を **除外** するように定義されています。 signtool が報告する "Hash of file (sha256)" は *Authenticode ハッシュ* であり、 *ファイルハッシュ* ではありません。 両方のバイナリは同じ Authenticode ハッシュを持ちますが(PE 本体が同一)、 `Get-FileHash` で直接測定するとファイルハッシュは異なります — 各ファイル末尾の署名 blob が異なるからです。
 
-つまり Microsoft のアプローチは:既存の `bootmgfw.efi` の PE 本体を取り、 PCA2023 で再署名し、 結果を `bootmgfw_EX.efi` として保存する、 というものです。 PE コードは変更されず、 署名のみが新しいものです。 これはゴールに対する妥当な解釈です — PE 実行本体は変更されていないように見え、 観測可能な差異は Authenticode 署名チェーンに限られます;信頼アンカーのみが変わります。
+つまり Microsoft のアプローチは:既存の `bootmgfw.efi` の PE 本体を取り、 PCA2023 で再署名し、 結果を `bootmgfw_EX.efi` として保存する、 というものです。 PE コードは変更されず、 署名のみが新しいものです。 これはゴールに対する妥当な解釈です — 実行可能な PE セクションは変更されていないように見え、 観測可能な差異は Authenticode 署名チェーンに限られます;信頼アンカーのみが変わります。
 
 他の `_EX` ファイルでは常に同じというわけではありません。 Server 2025 の `bootmgr_EX.efi` は `bootmgr.efi` と *署名を含めて* バイト単位で同一です — `_EX` サフィックスがあるにも関わらず PCA2011 署名を持ちます。 これは検査した Server 2025 メディアで観測され、 bootmgr_EX が PCA2011 署名コピーである旨を示す Microsoft の `Make2023BootableMedia.ps1` v1.4 のコメントと整合します。 Microsoft が正式なサービシング仕様を公開しない限り、 これは実装観測に基づく挙動として扱ってください;遷移期間のアーティファクトか永続的な設計選択かは、 まだ公式に文書化されていません。
 
 ### 3.7 ビルド済 ISO の PCA2023 readiness を検証する
 
-ISO がブートルートへの `_EX` 置換を適用して構築された後、 実務者には検証問題があります:ハードウェアブートテストなしで、 出力 ISO が DB から PCA2011 を除去したセキュアブート環境で通過することを確認する方法はあるか?
+ISO がブートルートへの `_EX` 置換を適用して構築された後、 ビルドパイプラインの作成者には検証問題があります:ハードウェアブートテストなしで、 出力 ISO が DB から PCA2011 を除去したセキュアブート環境で通過することを確認する方法はあるか?
 
 Microsoft の `Make2023BootableMedia.ps1` v1.4 自体は **検証を一切行いません** — 純粋にファイルコピー操作です。 スクリプトは Authenticode 関連コードを参照しません。 Microsoft の設計上、 出力検証は呼び出し側の責任です。
 
@@ -454,7 +456,7 @@ Microsoft は、 長年の間、 2 つの配信形態を行き来してきまし
 - **スタンドアロン LCU**:LCU MSU には LCU のみが含まれる;SSU は独自の KB 番号を持つ別個の MSU として並列で配信される。 パイプラインは両方を SSU 先に適用しなければならない。 Server 2016、 Server 2019、 Server 2022(ほとんどの場合)はこのパターンに従う。
 - **Combined LCU+SSU**:単一の MSU に LCU と SSU の両方がバンドルパッケージとして含まれる。 `Add-WindowsPackage` が順序を自動的に処理する。 パイプラインは 1 つの MSU だけダウンロードすれば良い。 Server 2025 はこのパターンに従う(SSU はすべての LCU と 2 ファイル Catalog ダウンロードとしてバンドルされる — セクション 2.3 参照)。
 
-Combined MSU の区別する内部シグナルは、 `update.mum` と `.cab` ペイロードに加えて `update.ses` ファイルが存在することです。 スタンドアロン LCU には `update.ses` がありません。 MSU の中を覗くパイプライン(`expand.exe -F:* msu_file destination` 経由)はこれを検出できます:
+Combined MSU を判別する信頼できる実装レベルの指標は、 `update.mum` と `.cab` ペイロードに加えて `update.ses` ファイルが存在することです。 スタンドアロン LCU には `update.ses` がありません。 MSU の中を覗くパイプライン(`expand.exe -F:* msu_file destination` 経由)はこれを検出できます:
 
 ```
 Combined:    update.mum, update.ses, Windows10.0-KBXXXXXXX-x64.CAB
@@ -465,7 +467,7 @@ config ロード時のバンドルタイプ検出は WIM マウント時の SSU-
 
 ### 5.3 SSU-LCU ペアリング問題
 
-Combined MSU の世界の外では、 実務者は任意の LCU に対してどの SSU がペアになるかを知る必要があります。 Microsoft は LCU の KB ページのプレーンテキストでこれを公開しています(「Improvements」セクションがしばしば「This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update」で始まります)。 サードパーティサイト `techepages.com` や `windowslatest.com` も日常的にペアリングを繰り返します。
+Combined MSU の世界の外では、 オペレータは任意の LCU に対してどの SSU がペアになるかを知る必要があります。 Microsoft は LCU の KB ページのプレーンテキストでこれを公開しています(「Improvements」セクションがしばしば「This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update」で始まります)。 サードパーティサイト `techepages.com` や `windowslatest.com` も日常的にペアリングを繰り返します。
 
 自動化では、 ペアリングは `wsusscn2.cab` からより信頼性高く取得できます。 各 LCU の Master XML エントリには、 必要な SSU の UpdateId を持つ `<Prerequisites>` ブロックが含まれます。 ただし Master XML には `<KBArticleID>` が存在しない（§2.4 の訂正を参照）ため、ペアリングは `UpdateId` / `RevisionId` で表現されます。前提 SSU の人間可読な KB 番号は、多くの payload URL（その SSU 更新の `<FileLocation>` URL）に埋め込まれた `kb(\d+)` トークンからヒューリスティックに推定するか、より堅牢な手段として UpdateId を Microsoft Update Catalog に照合して取得します。URL 構造は契約的なインターフェースではないため、トークンベースの推定はベストエフォートとして扱うべきです。したがって `package.xml` を消費するパーサーは、 予期しない構造変化に対してはベストエフォートな解釈を試みるのではなく、 fail closed（安全側に停止）すべきです。KB の文章ページを Web スクレイピングする必要はありません。
 
@@ -805,6 +807,7 @@ Microsoft リファレンス `Make2023BootableMedia.ps1` v1.4 はこれを一切
 - 将来の `wsusscn2.cab` リビジョンが KB 識別子を異なる形で露出するか否か（例:KB 要素の再導入、 または KB 推定が現在依存している payload-URL 命名パターンの変更）。
 - Server vNext が `_EX` デュアルツリーモデルを継続するか、 別の PCA2023 配信メカニズムに置き換えるか。
 - PCA2011 の DBX 失効タイミングが、 単一の Microsoft 公表日に従うのではなく、 OEM ファームウェアエコシステムごとに異なるか否か。
+- Microsoft が将来、 Server LTSC の Product Category GUID マッピングを公式に公開するか否か（現状は wsusscn2 とコミュニティソースからの逆引きに委ねられている。§5.7 参照）。
 
 これらは本記事が回答できるから挙げているのではなく、 長寿命のパイプラインがこれらのいずれかの変化に備えて余裕を持つべきだからです。
 
@@ -849,22 +852,31 @@ Microsoft 自身の公開ドキュメントまたは出荷ツールに基づく�
 
 | 用語 | 定義 |
 |---|---|
+| **Applicability evaluation（適用可能性評価）** | 特定のイメージに特定の更新がインストール可能か否かの判断。 Windows Update Agent のサービシングロジック（WUA 参照）が権威をもって行う。 メタデータレベルの依存性発見とは別概念。 |
+| **Authenticode hash** | 署名領域（`IMAGE_DIRECTORY_ENTRY_SECURITY`）と PE ヘッダのチェックサムを除外して定義される PE イメージハッシュ。 コードが同一で署名が異なる 2 つのバイナリは、 Authenticode hash は一致するがファイルハッシュは異なる。 PE image hash 参照。 |
+| **Bundle** | wsusscn2 において `IsBundle="true"` が付いた更新。 Product と Classification のカテゴリを持つが自身のペイロードは持たず、 `<BundledBy>` で自分を指す leaf 更新からペイロードが集約される。 |
 | **CAB** | Cabinet ファイル(`.cab`)。 Microsoft の圧縮アーカイブ形式。 MSU 内のペイロードアーカイブと、 `wsusscn2.cab` および内部パッケージの形式。 |
 | **CBS** | Component-Based Servicing。 Vista 以降の Windows servicing モデル。 `CBS_E_*` プレフィックスのエラーコードはここに由来。 |
+| **Classification GUID** | 更新の分類（SecurityUpdates、 UpdateRollups、 ServicePacks 等）を表す WSUS 定義の識別子。 GUID 自体は Microsoft 定義だが、 更新 *カテゴリ* と分類 *使用法* の対応はヒューリスティック（§5.7 参照）。 |
 | **DBX** | セキュアブートの失効データベース。 ファームウェアが DB に関わらずロードを拒否する証明書とイメージハッシュのリスト。 |
 | **DB** | セキュアブートの許可署名データベース。 ファームウェアが受け入れる証明書のリスト。 PCA2011 と PCA2023 の両方とも、 関連プロビジョニングを受信したプラットフォーム上では DB エントリ。 |
 | **DISM** | Deployment Image Servicing and Management。 オフライン(マウントされた)Windows イメージを操作するための Windows ツール / API。 |
 | **DU** | Dynamic Update。 Microsoft がインストール中の Windows Setup 環境に注入する更新。 **DU.Setup** は Setup 自体を更新する;**DU.SafeOs** は WinPE / WinRE リカバリ環境を更新する。 |
+| **SafeOS DU** | DU.SafeOs バリアント:主要な Setup バイナリではなく WinPE / WinRE（SafeOS）リカバリ環境を対象とする Dynamic Update。 |
 | **EFI / EFI_EX** | install.wim 内部とインストールメディア上のディレクトリ名。 `EFI` は伝統的な PCA2011 署名ブートバイナリを保持する;`EFI_EX` は同じバイナリを PCA2023 で再署名したものを保持する。 |
 | **HRESULT** | Windows API 全体で使用される 32 ビット戻り値コード。 `0x800f0823` は SSU 必要エラー。 |
 | **LCU** | Latest Cumulative Update。 OS 自体の月次 Patch Tuesday ロールアップ。 |
 | **MSU** | Microsoft Update Standalone Installer ファイル(`.msu`)。 Microsoft がダウンロード可能な更新に使うパッケージ形式。 MSU は構造的には `.cab` ペイロードとメタデータファイルを含む CAB。 |
 | **PCA2011** | `Microsoft Windows Production PCA 2011`。 Windows 8 時代以降 Windows ブートバイナリに署名してきた証明書認証局。 段階的廃止中。 |
 | **PCA2023** | `Windows UEFI CA 2023`。 置換 CA。 |
+| **PE image hash** | オンディスクの PE ファイル全体（`Get-FileHash` が測定するもの）のハッシュ。 署名領域を含む点で、 それを除外する Authenticode hash と対をなす。 |
+| **Product Category** | 製品（例:Server LTSC エディション）を表す WSUS Category。 Product GUID で識別される。 wsusscn2 では `<Category>` 参照としても、 スタンドアロンの Category Update としても現れる（§2.4.1 参照）。 |
 | **SSU** | Servicing Stack Update。 サービサ自体を更新する。 サービサが LCU をインストールする。 スタンドアロン(独立 MSU)または Combined(LCU の MSU にバンドル)。 |
+| **Supersedence（supersede 関係）** | より新しい更新が古い更新を置き換える関係。 wsusscn2 の Master XML は逆方向（`<SupersededBy>`）を露出する;順方向はパッケージ別 CAB にのみ存在する。 |
 | **スリップストリーミング** | インストール済 OS が初回起動時にすでにパッチ済となるよう、 インストールメディアに更新を統合する慣行。 |
 | **WIM** | Windows Imaging Format。 `install.wim` と `boot.wim` のファイル形式。 概念的には重複排除されたマルチイメージアーカイブ。 |
 | **WSUS** | Windows Server Update Services。 Microsoft の企業向け更新管理サーバ。 `wsusscn2.cab` は WSUS クライアントが Microsoft のオンラインサービスに接触せず更新適用性を判断するために使うオフラインスキャンカタログ。 |
+| **WUA** | Windows Update Agent。 更新がインストール可能か否かを判断する適用可能性ロジックが権威ある評価器であるオンマシンのサービシングコンポーネント;オフライン WUA スキャンはマウント済みイメージに対して検証する。 |
 
 ---
 

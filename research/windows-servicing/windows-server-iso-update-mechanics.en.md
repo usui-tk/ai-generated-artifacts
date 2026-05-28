@@ -9,6 +9,8 @@ Building a fully-patched Windows Server installation medium ("a slipstreamed ISO
 
 This article is a synthesis of the technical findings accumulated over several months of revision cycles on a real-world ISO update pipeline. It is **not** a how-to for any specific tool; the goal is to record the knowledge surface that any future implementer (human or LLM) will need to navigate, regardless of the language or framework they choose. The provenance section at the end of the article identifies the original repository whose investigation logs were synthesized into this document.
 
+**Scope of applicability.** This article focuses specifically on offline servicing and rebuild workflows for Windows Server LTSC installation media. Client Windows editions, Windows Update for Business policy orchestration, and live in-place servicing are intentionally out of scope. The findings should not be generalized to those domains without independent verification.
+
 ### Methodology
 
 The findings in this article were derived empirically, not from documentation alone. The investigation that produced them combined the following methods, repeated across multiple monthly Patch Tuesday cycles:
@@ -26,7 +28,7 @@ Where a claim rests on only one of these methods, the Confidence Levels section 
 
 ## 1. Background and Audience
 
-Microsoft ships Windows Server in two install-ready forms: the **Evaluation ISO** (downloadable from the Microsoft Evaluation Center; 180-day timed expiry; freely available without licensing) and the **retail / volume-licensed ISO** (acquired through the Microsoft 365 admin center, Volume Licensing Service Center, or an Open Value agreement). For practitioner-driven ISO automation, the Evaluation ISO is often the most practical input, but redistribution and storage of the media must still comply with Microsoft's licensing terms (for example, before checking media into a CI artifact store, confirm the Evaluation Center terms permit it).
+Microsoft ships Windows Server in two install-ready forms: the **Evaluation ISO** (downloadable from the Microsoft Evaluation Center; 180-day timed expiry; freely available without licensing) and the **retail / volume-licensed ISO** (acquired through the Microsoft 365 admin center, Volume Licensing Service Center, or an Open Value agreement). For implementer-driven ISO automation, the Evaluation ISO is often the most practical input, but redistribution and storage of the media must still comply with Microsoft's licensing terms (for example, before checking media into a CI artifact store, confirm the Evaluation Center terms permit it).
 
 A practitioner approaching the task of building a "fully patched" ISO from such an Evaluation media usually starts from a question like: *what is the minimum set of MSU and CAB packages I need to apply to the install.wim so that, when this image is deployed and booted, it will be at the latest Patch Tuesday level and will be accepted by a Secure Boot environment that no longer trusts PCA2011?* The naive answer — "apply this month's LCU" — is incomplete. The full answer touches at least the following:
 
@@ -108,7 +110,7 @@ When a release-info KB can be turned directly into download URLs via the Catalog
 
 ### 2.4 The wsusscn2.cab offline servicing database
 
-For any question of the form "does update KB-A require KB-B to be installed first?" the authoritative metadata source available offline is the **Windows Update Standalone Scan** database (`wsusscn2.cab`), distributed as a single multi-gigabyte CAB file at `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab`. This file is published roughly twice a month, and a fresh download is required to see updates released since the last publication.
+For any question of the form "does update KB-A require KB-B to be installed first?" the most authoritative offline metadata source is the **Windows Update Standalone Scan** database (`wsusscn2.cab`), distributed as a single multi-gigabyte CAB file at `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab`. This file is published roughly twice a month, and a fresh download is required to see updates released since the last publication.
 
 `wsusscn2.cab` is a nested CAB with the following high-level structure:
 
@@ -169,7 +171,7 @@ Parsing the Master XML deserves attention to its scale. A representative timing 
 
 The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<Prerequisites>`, `<SupersededBy>`, `<BundledBy>`, `<PayloadFiles>`, and `<FileLocation>`, producing a small JSON dependency database (~0.2 MB at the in-scope-bundle granularity used by this project) that can answer most pre-flight questions. A full offline WUA applicability evaluation is significantly slower than direct Master XML parsing and is therefore better suited for validation workflows than for discovery workflows — which is the reason this pipeline uses Master XML parsing for discovery and reserves WUA for final applicability validation.
 
-> **Note on support status.** Direct parsing of `package.xml` is an implementation technique based on observed metadata structure, not a Microsoft-supported API contract. The schema can change without notice. Final applicability and installability decisions should still be validated through the Windows Update Agent servicing logic (an offline WUA scan against the mounted image), which is the authoritative applicability evaluator. Despite the unsupported nature of the schema, the Master XML remains operationally valuable because it exposes dependency relationships in a repository-wide form that is dramatically faster to query than a full offline WUA applicability scan — which is why it is used for discovery while WUA is reserved for final validation.
+> **Note on support status.** Direct parsing of `package.xml` is an implementation technique based on observed metadata structure, not a Microsoft-supported API contract. The schema can change without notice. Final applicability and installability decisions should still be validated through the Windows Update Agent servicing logic (an offline WUA scan against the mounted image), which is the authoritative applicability evaluator. Despite the unsupported nature of the schema, the Master XML remains operationally valuable because it exposes dependency relationships in a repository-wide form that is dramatically faster to query than a full offline WUA applicability scan — which is why it is used for discovery while WUA is reserved for final validation. Despite its complexity, `wsusscn2.cab` remains uniquely valuable because it is the only broadly accessible offline metadata corpus that exposes prerequisite and supersedence relationships across the Windows servicing ecosystem at repository scale. That said, no compatibility guarantee should be assumed across future wsusscn2 schema revisions.
 
 #### 2.4.1 The Category hierarchy embedded in package.xml
 
@@ -333,15 +335,15 @@ The two binaries are byte-identical in PE image content excluding the Authentico
 \Windows\Boot\EFI_EX\bootmgfw_EX.efi : signed under PCA2023
 ```
 
-This is not a contradiction. Authenticode hashing is defined to **exclude** the bytes of the Authenticode signature itself (specifically, the `IMAGE_DIRECTORY_ENTRY_SECURITY` region and the checksum field in the PE header). What signtool reports as "Hash of file (sha256)" is the *Authenticode hash*, not the *file hash*. Both binaries have the same Authenticode hash (their PE body is identical) but different file hashes if you measure with `Get-FileHash` directly — because the signature blobs at the end of each file differ.
+This distinction matters operationally. Authenticode hashing is defined to **exclude** the bytes of the Authenticode signature itself (specifically, the `IMAGE_DIRECTORY_ENTRY_SECURITY` region and the checksum field in the PE header). What signtool reports as "Hash of file (sha256)" is the *Authenticode hash*, not the *file hash*. Both binaries have the same Authenticode hash (their PE body is identical) but different file hashes if you measure with `Get-FileHash` directly — because the signature blobs at the end of each file differ.
 
-Microsoft's approach is therefore: take the existing `bootmgfw.efi` PE body, re-sign it with PCA2023, save the result as `bootmgfw_EX.efi`. The PE code is unchanged; only the signature is new. This is a reasonable interpretation of the goal — the PE executable body appears unchanged, with the observable difference limited to the Authenticode signature chain; only the trust anchor changes.
+Microsoft's approach is therefore: take the existing `bootmgfw.efi` PE body, re-sign it with PCA2023, save the result as `bootmgfw_EX.efi`. The PE code is unchanged; only the signature is new. This is a reasonable interpretation of the goal — the executable PE sections appear unchanged, with the observable difference limited to the Authenticode signature chain; only the trust anchor changes.
 
 The same is not always true of the other `_EX` files. Server 2025's `bootmgr_EX.efi` is byte-for-byte identical to `bootmgr.efi` *including* its signature — it carries the PCA2011 signature, despite the `_EX` suffix. This was observed in inspected Server 2025 media and is consistent with a comment in Microsoft's `Make2023BootableMedia.ps1` v1.4 indicating bootmgr_EX is a PCA2011-signed copy. Treat this as implementation-observed behavior unless Microsoft publishes a formal servicing specification; whether it is a transitional artifact or a permanent design choice is not yet documented publicly.
 
 ### 3.7 Verifying a built ISO's PCA2023 readiness
 
-Once an ISO has been built with the `_EX` substitution applied to the boot root, the practitioner has a verification problem: how to confirm, without a hardware boot test, that the output ISO will pass on a Secure Boot environment with PCA2011 removed from DB.
+Once an ISO has been built with the `_EX` substitution applied to the boot root, the build-pipeline author has a verification problem: how to confirm, without a hardware boot test, that the output ISO will pass on a Secure Boot environment with PCA2011 removed from DB.
 
 Microsoft's `Make2023BootableMedia.ps1` v1.4 itself does **not** perform any verification — it is purely a file-copy operation. The script references no Authenticode-related code. The output verification is, by Microsoft's design, the caller's responsibility.
 
@@ -454,7 +456,7 @@ Microsoft has, over the years, oscillated between two distribution shapes:
 - **Standalone LCU**: the LCU MSU contains only the LCU; the SSU is a separate MSU published in parallel with its own KB number. The pipeline must apply both, SSU first. Server 2016, Server 2019, Server 2022 (mostly) follow this pattern.
 - **Combined LCU+SSU**: a single MSU contains both the LCU and the SSU as bundled packages. `Add-WindowsPackage` handles the ordering automatically. The pipeline only needs to download one MSU. Server 2025 follows this pattern (the SSU is bundled with every LCU as a two-file Catalog download — see section 2.3).
 
-The distinguishing internal signal of a Combined MSU is the presence of an `update.ses` file alongside `update.mum` and the `.cab` payload. A standalone LCU lacks `update.ses`. A pipeline that looks inside the MSU (via `expand.exe -F:* msu_file destination`) can detect this:
+A reliable implementation-level indicator of a Combined MSU is the presence of an `update.ses` file alongside `update.mum` and the `.cab` payload. A standalone LCU lacks `update.ses`. A pipeline that looks inside the MSU (via `expand.exe -F:* msu_file destination`) can detect this:
 
 ```
 Combined:    update.mum, update.ses, Windows10.0-KBXXXXXXX-x64.CAB
@@ -465,7 +467,7 @@ Detection of the bundle type at config-load time avoids the SSU-required failure
 
 ### 5.3 The SSU-LCU pairing problem
 
-Outside the Combined-MSU world, the practitioner needs to know, for any given LCU, which SSU pairs with it. Microsoft does publish this in plain prose on the LCU's KB page (the "Improvements" section often opens with "This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update"). Third-party sites such as `techepages.com` and `windowslatest.com` routinely repeat the pairing.
+Outside the Combined-MSU world, the operator needs to know, for any given LCU, which SSU pairs with it. Microsoft does publish this in plain prose on the LCU's KB page (the "Improvements" section often opens with "This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update"). Third-party sites such as `techepages.com` and `windowslatest.com` routinely repeat the pairing.
 
 For automation, the pairing is more reliably retrieved from `wsusscn2.cab`. Each LCU's Master XML entry includes a `<Prerequisites>` block with the UpdateId of any required SSU. Because the Master XML carries no `<KBArticleID>` (see §2.4 correction), the pairing is expressed in `UpdateId` / `RevisionId` terms; the human-readable KB number of the prerequisite SSU is heuristically inferred from the `kb(\d+)` token embedded in many payload URLs (the SSU update's `<FileLocation>` URL), or — more robustly — by cross-referencing the UpdateId against the Microsoft Update Catalog. The URL structure is not a contractual interface, so the token-based inference should be treated as best-effort. Any parser that consumes `package.xml` should therefore fail closed on unexpected structural changes rather than attempting best-effort interpretation. No web scraping of KB prose pages is required.
 
@@ -805,6 +807,7 @@ Distinct from the open questions above (which are concrete investigation gaps), 
 - Whether future `wsusscn2.cab` revisions will expose KB identifiers differently (e.g. reintroducing a KB element, or changing the payload-URL naming pattern that KB inference currently depends on).
 - Whether Server vNext continues the `_EX` dual-tree model or replaces it with a different PCA2023 delivery mechanism.
 - Whether the PCA2011 DBX revocation timing will vary across OEM firmware ecosystems rather than following a single Microsoft-announced date.
+- Whether Microsoft will eventually publish the Server LTSC Product Category GUID mappings officially, rather than leaving them to be reverse-looked-up from wsusscn2 and community sources (see §5.7).
 
 These are listed not because the article can answer them, but because a long-lived pipeline should budget for the possibility that any of them changes.
 
@@ -849,22 +852,31 @@ When in doubt, the WUA offline scan is the authoritative arbiter for applicabili
 
 | Term | Definition |
 |---|---|
+| **Applicability evaluation** | The decision of whether a given update is installable on a given image, made authoritatively by the Windows Update Agent servicing logic (see WUA). Distinct from metadata-level dependency discovery. |
+| **Authenticode hash** | The PE-image hash defined to exclude the signature region (`IMAGE_DIRECTORY_ENTRY_SECURITY`) and the PE-header checksum. Two binaries with identical code but different signatures share an Authenticode hash but differ by file hash. See PE image hash. |
+| **Bundle** | In wsusscn2 terms, an update marked `IsBundle="true"` that carries Product and Classification categories but no payload of its own; its payload is rolled up from the leaf updates that name it in `<BundledBy>`. |
 | **CAB** | Cabinet file (`.cab`). Microsoft's compressed archive format. The format of payload archives inside an MSU, and of `wsusscn2.cab` and its inner packages. |
 | **CBS** | Component-Based Servicing. The Windows servicing model since Vista. The error codes prefixed `CBS_E_*` originate here. |
+| **Classification GUID** | A WSUS-defined identifier for an update's classification (SecurityUpdates, UpdateRollups, ServicePacks, etc.). The GUIDs are Microsoft-defined; the mapping of update *categories* to classification *usage* is heuristic (see §5.7). |
 | **DBX** | Secure Boot's revocation database. A list of certificates and image hashes that the firmware will refuse to load regardless of DB. |
 | **DB** | Secure Boot's allowed-signatures database. A list of certificates that the firmware accepts. PCA2011 and PCA2023 are both DB entries on platforms that have received the relevant provisioning. |
 | **DISM** | Deployment Image Servicing and Management. The Windows tool/API for operating on offline (mounted) Windows images. |
 | **DU** | Dynamic Update. Updates Microsoft injects into the Windows Setup environment during installation. **DU.Setup** updates the Setup itself; **DU.SafeOs** updates the WinPE / WinRE recovery environment. |
+| **SafeOS DU** | The DU.SafeOs variant: a Dynamic Update targeting the WinPE / WinRE (SafeOS) recovery environment rather than the main Setup binaries. |
 | **EFI / EFI_EX** | Directory names inside `install.wim` and on installation media. `EFI` holds traditional PCA2011-signed boot binaries; `EFI_EX` holds the same binaries re-signed under PCA2023. |
 | **HRESULT** | A 32-bit return code used throughout Windows APIs. `0x800f0823` is the SSU-required error. |
 | **LCU** | Latest Cumulative Update. The monthly Patch Tuesday rollup for the OS itself. |
 | **MSU** | Microsoft Update Standalone Installer file (`.msu`). The package format Microsoft uses for downloadable updates. An MSU is structurally a CAB containing a `.cab` payload and metadata files. |
 | **PCA2011** | `Microsoft Windows Production PCA 2011`. The certificate authority that has signed Windows boot binaries since Windows 8 era. Being phased out. |
 | **PCA2023** | `Windows UEFI CA 2023`. The replacement CA. |
+| **PE image hash** | The hash of the full on-disk PE file (what `Get-FileHash` measures), including the signature region — as opposed to the Authenticode hash, which excludes it. |
+| **Product Category** | A WSUS Category representing a product (e.g. a Server LTSC edition), identified by a Product GUID. In wsusscn2 it appears both as a `<Category>` reference and as a standalone Category Update (see §2.4.1). |
 | **SSU** | Servicing Stack Update. Updates the servicer itself, which is what installs LCUs. May be standalone (separate MSU) or Combined (bundled into the LCU's MSU). |
+| **Supersedence** | The relationship in which a newer update replaces an older one. wsusscn2's Master XML exposes the reverse direction (`<SupersededBy>`); the forward direction lives only in per-package CABs. |
 | **Slipstreaming** | The practice of integrating updates into an installation medium so that the installed OS is already patched at first boot. |
 | **WIM** | Windows Imaging Format. The file format of `install.wim` and `boot.wim`. Conceptually a deduplicated multi-image archive. |
 | **WSUS** | Windows Server Update Services. Microsoft's enterprise update management server. `wsusscn2.cab` is the offline scan catalogue used by WSUS clients to determine update applicability without contacting Microsoft's online services. |
+| **WUA** | Windows Update Agent. The on-machine servicing component whose applicability logic is the authoritative evaluator for whether an update is installable; an offline WUA scan validates against a mounted image. |
 
 ---
 
