@@ -535,8 +535,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.1'
-$Script:ScriptTag     = 'step2b4-version-independent-canonical-json'
+$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.2'
+$Script:ScriptTag     = 'step2b5-stage3-parse-progress'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -7547,6 +7547,8 @@ function ConvertFrom-WsusScnPackageXml {
     $bundleCount        = 0
     $categoryUpdates    = 0
     $totalFileLocations = 0
+    $lastProgressMark   = 0       # element count at last Stage 3 progress line
+    $progressEvery      = 20000   # emit a Stage 3 progress line every N parsed elements
     $leafWithPayload    = 0
 
     $settings = [System.Xml.XmlReaderSettings]::new()
@@ -7751,6 +7753,16 @@ function ConvertFrom-WsusScnPackageXml {
                     if ($digest -and $url) {
                         $fileLocations[$digest] = $url
                     }
+                }
+
+                # ---- Stage 3 progress: emit a line every $progressEvery parsed elements ----
+                # package.xml has no element count in its header, so progress is
+                # reported as a running tally rather than a percentage.
+                $processedElements = $totalUpdates + $totalFileLocations
+                if (($processedElements - $lastProgressMark) -ge $progressEvery) {
+                    $lastProgressMark = $processedElements
+                    Write-Step ('  ... parsed {0:N0} updates, {1:N0} file-locations ({2:N0} in-scope bundles so far)' -f `
+                        $totalUpdates, $totalFileLocations, $inScopeBundles.Count)
                 }
             }
         } finally {
