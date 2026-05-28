@@ -535,7 +535,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.0'
+$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.1'
 $Script:ScriptTag     = 'step2b4-version-independent-canonical-json'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -591,10 +591,10 @@ $Script:PhaseSummaryShown = $false
 # KB5087539, so it silently produced a stale Server 2025 result. The
 # b256987d bundles carry KB5087539 (Server LCU) but NOT KB5089549 (the
 # Windows 11 24H2 *client* LCU), so the GUID is server-specific and does not
-# leak client updates into scope. See SPEC §B.19.9.7.
+# leak client updates into scope. See SPEC section B.19.9.7.
 #
 # Why three separate tables:
-# - Product GUIDs drive the scope-filter Categories.Product test (SPEC §B.19.7)
+# - Product GUIDs drive the scope-filter Categories.Product test (SPEC section B.19.7)
 # - The name map exists for debug/log output only; production code uses GUIDs
 # - Classification GUIDs map SSU/LCU/.NET CU/Dynamic Update to wsusscn2 records
 $Script:WsusScnOsCategoryGuids = [ordered]@{
@@ -606,8 +606,8 @@ $Script:WsusScnOsCategoryGuids = [ordered]@{
 
 # Reverse map: GUID -> human-readable label. Used only for diagnostic output
 # (e.g. write-debug, validation summary). Production logic compares GUIDs,
-# never names, because the names drift (see SPEC §B.19.7 21H2/24H2 rename
-# discussion and research §6.4).
+# never names, because the names drift (see SPEC section B.19.7 21H2/24H2 rename
+# discussion and research section 6.4).
 $Script:WsusScnCategoryGuidNameMap = [ordered]@{
     '569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5' = 'Windows Server 2016'
     'f702a48c-919b-45d6-9aef-ca4248d50397' = 'Windows Server 2019'
@@ -628,7 +628,7 @@ $Script:WsusScnCategoryGuidNameMap = [ordered]@{
 # - LCU (Cumulative Update)         -> SecurityUpdates
 # - .NET Framework CU               -> UpdateRollups (primarily)
 # - Dynamic Update (Setup / SafeOS) -> Updates or CriticalUpdates
-# See research §5.7 for the empirical wsusscn2 counts and SPEC §B.19.7 for the
+# See research section 5.7 for the empirical wsusscn2 counts and SPEC section B.19.7 for the
 # scope-filter rule (Product AND Classification AND 24-month recency window).
 $Script:WsusScnUpdateClassificationGuids = [ordered]@{
     'SecurityUpdates' = '0fa1201d-4330-4fa8-8ae9-b877473b6441'
@@ -6904,7 +6904,7 @@ function Install-SevenZipFallback {
 # of the built-in cmdlets for all canonical data files (config-*.json,
 # wsusscn2-database.json, cache-*.json, etc.).
 #
-# Canonical format (SPEC Part B.23 §B.23.1):
+# Canonical format (SPEC Part B.23 section B.23.1):
 #   1. UTF-8 (no BOM)              6. Literal non-ASCII (no \uXXXX)
 #   2. LF line endings            7. Insertion-order keys (no sort)
 #   3. 2-space indentation        8. Exactly one trailing LF
@@ -7147,6 +7147,7 @@ function ConvertFrom-CanonicalJson {
         JSON text to parse.
     #>
     [CmdletBinding()]
+    [OutputType([object])]
     param(
         [Parameter(Mandatory, Position=0, ValueFromPipeline)]
         [AllowEmptyString()] [string] $Json
@@ -7303,7 +7304,7 @@ function _CanonicalJson_ParseNull {
 #
 # The four-stage pipeline that turns wsusscn2.cab into a JSON
 # dependency database (~2-5 MB) consumed by the SSU/LCU pre-flight
-# gate (SPEC §B.19.5) and by `Invoke-AdminPhaseA04_RefreshDependencyDatabase`.
+# gate (SPEC section B.19.5) and by `Invoke-AdminPhaseA04_RefreshDependencyDatabase`.
 #
 # Pipeline:
 #   Stage 1: Get-WsusScnCabIfNeeded          (defined above)
@@ -7316,10 +7317,10 @@ function _CanonicalJson_ParseNull {
 # independently against a small fixture without ever fetching a real
 # 612 MB wsusscn2.cab over the network.
 #
-# Hard rule (SPEC §B.19.8): Stages 3 and 4 MUST NOT read or emit any
+# Hard rule (SPEC section B.19.8): Stages 3 and 4 MUST NOT read or emit any
 # Microsoft prose tags (<Title>, <Description>, <MoreInfoUrl>, ...).
 # The Master XML in package.xml does not contain these tags anyway
-# (verified empirically in research §2.4.1 against the 2026-05-12 fetch),
+# (verified empirically in research section 2.4.1 against the 2026-05-12 fetch),
 # but the parser is structured around a positive-allowlist of element
 # names so that a future Microsoft schema change cannot accidentally
 # leak prose into the dependency database.
@@ -7337,12 +7338,12 @@ function Invoke-WsusScnPackageXmlExtract {
         Returns the full path to the extracted package.xml. The intermediate
         files (75 top-level + the package.cab itself) are left in the staging
         directory and may be cleaned up by the caller after Stage 3 consumes
-        package.xml. Per SPEC §B.19.6.4, the caller controls the lifetime of
+        package.xml. Per SPEC section B.19.6.4, the caller controls the lifetime of
         the staging directory; this function only writes into it.
 
         Two-step extraction is required because PowerShell's built-in CAB
         expansion (expand.exe -F:) has a self-overwrite bug on nested cabs
-        (research §7.2). 7-Zip avoids this; the wsusscn2 cab itself is also
+        (research section 7.2). 7-Zip avoids this; the wsusscn2 cab itself is also
         too large for the .NET CabInfo APIs in practical use.
     .PARAMETER CabPath
         Full path to wsusscn2.cab (typically obtained from Stage 1
@@ -7435,7 +7436,7 @@ function ConvertFrom-WsusScnPackageXml {
         2026-05-12 fetch) has this structure, which differs materially
         from the original Phase 2b1 assumptions:
           - Updates carry NO KB article number. KB numbers live in the
-            Microsoft Update Catalog, not in wsusscn2 (SPEC §B.19.9.6).
+            Microsoft Update Catalog, not in wsusscn2 (SPEC section B.19.9.6).
           - Payload references are <PayloadFiles><File Id="<sha1-b64>"/>,
             where the Id attribute IS the file digest (not a Digest attr,
             not a <Files> wrapper).
@@ -7460,15 +7461,15 @@ function ConvertFrom-WsusScnPackageXml {
         URLs of the leaf updates bundled under it (the SSU/LCU/.NET CU
         .cab/.msu files an operator actually needs to download).
 
-        Hard rule (SPEC §B.19.8): the parser uses a positive child-element
+        Hard rule (SPEC section B.19.8): the parser uses a positive child-element
         allowlist so Microsoft prose tags (<Title>/<Description>/...) can
         never enter the dependency database, even if a future schema adds
         them.
 
         Returns a [pscustomobject] with three sub-objects:
-          .Updates       — [object[]] in-scope bundles with resolved payloadUrls
-          .FileLocations — [hashtable] digest -> URL (full table)
-          .Stats         — [pscustomobject] observation counts for logs/tests
+          .Updates       - [object[]] in-scope bundles with resolved payloadUrls
+          .FileLocations - [hashtable] digest -> URL (full table)
+          .Stats         - [pscustomobject] observation counts for logs/tests
     .PARAMETER PackageXmlPath
         Full path to package.xml (typically from Stage 2
         Invoke-WsusScnPackageXmlExtract).
@@ -7522,7 +7523,7 @@ function ConvertFrom-WsusScnPackageXml {
     $useRecency = $RecencyMonths -ge 0
     $cutoff = if ($useRecency) { $Now.AddMonths(-$RecencyMonths) } else { [datetime]::MinValue }
 
-    # Positive allowlist of child element names (SPEC §B.19.8 enforcement).
+    # Positive allowlist of child element names (SPEC section B.19.8 enforcement).
     # Real wsusscn2 Update children: Prerequisites/UpdateId, BundledBy/Revision,
     # PayloadFiles/File, Categories/Category, SupersededBy/Revision,
     # Languages/Language (skipped), EulaFiles (skipped).
@@ -7615,7 +7616,7 @@ function ConvertFrom-WsusScnPackageXml {
                                 if ($sub.NodeType -eq [System.Xml.XmlNodeType]::Element) {
                                     $name = $sub.Name
                                     if (-not $allowedChildNames.Contains($name) -and ($name -ne 'Update')) {
-                                        # Allowlist enforcement (SPEC §B.19.8): skip
+                                        # Allowlist enforcement (SPEC section B.19.8): skip
                                         # anything not on the list (e.g. Languages,
                                         # EulaFiles, and any future prose tag).
                                         if (-not $sub.IsEmptyElement) { [void]$sub.Skip() }
@@ -7692,7 +7693,7 @@ function ConvertFrom-WsusScnPackageXml {
                         }
                     }
 
-                    # Scope filter (SPEC §B.19.7): in-scope = IsBundle AND
+                    # Scope filter (SPEC section B.19.7): in-scope = IsBundle AND
                     # Product AND Classification AND recency.
                     if ($isBundle) {
                         $matchProd = $false
@@ -7836,12 +7837,12 @@ function New-WsusScnDependencyDatabase {
         joins payload URLs from the FileLocations table into each Update's
         record, attaches metadata (generator version, source cab provenance,
         scope filter inputs, observation stats), and writes the resulting
-        object to disk via Save-CanonicalJsonFile (SPEC §B.23 byte-canonical
+        object to disk via Save-CanonicalJsonFile (SPEC section B.23 byte-canonical
         JSON, depth=32).
 
         The output file is the Layer 2 database
         (data/wsusscn2-database.json by repository convention) consumed by
-        the SSU/LCU pre-flight gate (SPEC §B.19.5) and by
+        the SSU/LCU pre-flight gate (SPEC section B.19.5) and by
         Invoke-AdminPhaseA04_RefreshDependencyDatabase.
     .PARAMETER ParseResult
         The [pscustomobject] returned by ConvertFrom-WsusScnPackageXml,
@@ -13403,16 +13404,16 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
     .DESCRIPTION
         Executes the four-stage wsusscn2 parser pipeline as a single
         cohesive Action:
-          Stage 1 — Get-WsusScnCabIfNeeded
+          Stage 1 - Get-WsusScnCabIfNeeded
                     (download wsusscn2.cab into <WorkRoot>/cache, or reuse
                      the cached copy when Test-WsusScnCabFresh says it is
                      still fresh; honours -OverridePath for an operator-
                      supplied cab)
-          Stage 2 — Invoke-WsusScnPackageXmlExtract
+          Stage 2 - Invoke-WsusScnPackageXmlExtract
                     (two-step 7-Zip extraction wsusscn2.cab -> package.xml)
-          Stage 3 — ConvertFrom-WsusScnPackageXml
+          Stage 3 - ConvertFrom-WsusScnPackageXml
                     (XmlReader streaming parse + Product/Classification/recency scope filter)
-          Stage 4 — New-WsusScnDependencyDatabase
+          Stage 4 - New-WsusScnDependencyDatabase
                     (canonical-JSON serialization of dependency graph to OutputPath)
 
         After Stage 4 the function optionally invokes
@@ -13590,9 +13591,9 @@ function Update-Layer1DependencyVerification {
 
         IMPORTANT: wsusscn2's Master XML carries no KB article number
         (KB numbers live in the Microsoft Update Catalog, see SPEC
-        §B.19.9.6). The verified identity is therefore the wsusscn2
+        section B.19.9.6). The verified identity is therefore the wsusscn2
         UpdateId/RevisionId, not a KB. A future Phase-2c pre-flight gate
-        (SPEC §B.19.5) can cross-reference the UpdateId against the
+        (SPEC section B.19.5) can cross-reference the UpdateId against the
         Catalog-derived baseline to recover the KB if needed.
 
         Writes are skipped if the existing fields already match the new
