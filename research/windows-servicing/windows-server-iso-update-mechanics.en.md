@@ -41,6 +41,44 @@ This article walks through each of those topics in order, with concrete examples
 
 The article does NOT cover: bootable USB creation, OEM image customisation, Windows Update for Business policy authoring, or the corresponding Linux distribution servicing topics. Those are well-trodden elsewhere.
 
+At a high level, the end-to-end workflow this article maps out has the following shape. Each stage is the subject of one or more later sections; the diagram is included here only to orient the reader before the detail begins:
+
+```text
+ release-info / .NET release notes        (§2.1, §2.2  — discovery)
+            |
+            v
+     KB discovery layer                   (§2.1–§2.3  — what to fetch)
+            |
+            v
+   Microsoft Update Catalog               (§2.3       — authoritative artifacts)
+            |
+            v
+     Artifact retrieval (.msu / .cab)      (§2.3, §5.2 — LCU + SSU)
+            |
+            v
+      wsusscn2 parsing (Master XML)        (§2.4       — offline discovery)
+            |
+            v
+ Dependency / supersedence DB             (§5.5, §5.6 — pre-flight data)
+            |
+            v
+     Pre-flight validation                (§5.5, §8.1 — fail closed)
+            |
+            v
+        WIM servicing (LCU apply)          (§3.3, §4   — patch level)
+            |
+            v
+   PCA2023 media synthesis (_EX)           (§3.2–§3.6  — Secure Boot)
+            |
+            v
+     Verification pipeline                 (§3.7, §8   — signer chain + layout)
+            |
+            v
+  Hyper-V / physical boot testing          (§3.7, §8.4 — firmware trust)
+```
+
+The crucial architectural distinction running through this whole chain is that the upper stages (discovery and dependency analysis) lean on reverse-engineered, offline metadata for speed, while the lower stages (applicability, servicing, and boot acceptance) defer to Microsoft's own authoritative logic. Keeping that boundary in mind makes the rest of the article easier to follow.
+
 ---
 
 ## 2. Microsoft's Patch Metadata Surfaces
@@ -236,7 +274,7 @@ The cleanest pattern is: `7za x -y -bd -bso0 wsusscn2.cab` into a fresh staging 
 
 ## 3. PCA2023 Secure Boot Migration
 
-The 2024 Patch Tuesday cycle marks the most disruptive Secure Boot change since the introduction of Secure Boot itself. Microsoft is rotating the Production Certificate Authority used to sign Windows boot binaries from **PCA2011** (`Microsoft Windows Production PCA 2011`, used since Windows 8) to **PCA2023** (`Windows UEFI CA 2023`). For an ISO-building practitioner, this is not a "the LCU updates a registry key" change; it is a "the boot manager binary on the install medium itself must be re-signed" change.
+The 2024 Patch Tuesday cycle marks the most disruptive Secure Boot change since the introduction of Secure Boot itself. Microsoft is rotating the Production Certificate Authority used to sign Windows boot binaries from **PCA2011** (`Microsoft Windows Production PCA 2011`, used since Windows 8) to **PCA2023** (`Windows UEFI CA 2023`). For an ISO-building practitioner, this is not a "the LCU updates a registry key" change; it is a "the boot manager binary on the install medium itself must be re-signed" change. This matters because Secure Boot trust decisions occur at firmware time, not during Authenticode validation: tooling that operates only on the ISO can confirm the signer chain, but it cannot confirm what the target firmware will accept.
 
 ### 3.1 What PCA2023 is and what it replaces
 
@@ -476,7 +514,7 @@ Combined:    update.mum, update.ses, Windows10.0-KBXXXXXXX-x64.CAB
 Standalone:  update.mum,             Windows10.0-KBXXXXXXX-x64.CAB
 ```
 
-Detection of the bundle type at config-load time avoids the SSU-required failure at WIM-mount time, where the failure is expensive (the WIM mount must be undone and restarted with the SSU applied first).
+Detection of the bundle type at config-load time avoids the SSU-required failure at WIM-mount time, where the failure is expensive (the WIM mount must be undone and restarted with the SSU applied first). Operationally, this distinction determines whether the build fails cheaply before WIM servicing begins or expensively after it is already under way.
 
 ### 5.3 The SSU-LCU pairing problem
 
@@ -924,3 +962,27 @@ What this article is and is not:
 For implementers building on the original repository's PowerShell pipeline, the source-of-truth for tool-specific behaviour is the pipeline's own `SPEC.md` and `README.md`; this article is the cross-cutting concern map, not the user manual.
 
 The article was prepared by Anthropic Claude (Opus 4.7) under the direction of the repository maintainer, by reading and synthesising the original `docs/history/` content. It synthesizes findings from the repository investigation logs and cross-references Microsoft public documentation where noted.
+
+---
+
+## Appendix D: Operational Guarantees vs Observations
+
+This table consolidates the epistemic status of the major claims in the article, so a future maintainer can see at a glance which facts are safe to depend on and which should be re-validated. "Officially announced" means Microsoft has published it; "Operationally stable" means it has held across every observation but carries no formal guarantee; "Observed" means it was seen in specific snapshots/media and may change without notice.
+
+| Topic | Status |
+|:---|:---|
+| PCA2023 rollout (the migration itself) | Officially announced |
+| PCA2011 → DBX revocation *timing* | Announced in principle; exact date NOT guaranteed |
+| WSUS Classification GUIDs (the identifiers) | Officially documented |
+| Server LTSC Product GUID persistence | Operationally stable (not officially published) |
+| Product-category → name resolution | Requires reverse-lookup (no official offline table) |
+| wsusscn2 schema stability | NOT guaranteed |
+| `package.xml` as a parse target | Unsupported implementation detail |
+| KB inference from FileLocation URL | Heuristic (URL structure not contractual) |
+| `_EX` dual-tree directory structure | Observed (Server 2025 media) |
+| Server 2025 dual-file LCU+SSU Catalog behavior | Observed (current Catalog) |
+| `bootmgr_EX.efi` PCA2011 signing | Observed / implementation-consistent |
+| Dynamic Update cadence on LTSC | Observed only |
+| Final applicability / installability | Authoritative only via WUA servicing logic |
+
+When a row says anything other than "Officially announced" or "Officially documented", treat it as advisory: useful for discovery and acceleration, but not a substitute for Microsoft's own servicing validation.
