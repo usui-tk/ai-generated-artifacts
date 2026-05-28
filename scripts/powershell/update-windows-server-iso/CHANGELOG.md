@@ -16,6 +16,54 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.0 - cross-repo canon port alignment
+
+Aligns this script's ported logging / DebugTrace helpers to the
+Deploy-AMD shared-helper canon so that functions performing the same
+work carry the same names across repositories, and registers this
+script in the sibling repository's SPEC §A.11.7 as a *partial port
+participant*. Function behaviour is unchanged; this is a naming and
+body-alignment release plus the script-identity bump.
+
+- **`Write-Warn` renamed to `Write-Caution`** script-wide (120
+  occurrences: 1 definition + 119 call sites), matching the canon name
+  adopted in the sibling repo's
+  `cross-repo-shared-utility-canon-write-caution` release. The
+  word-boundary rename leaves the unrelated built-in `Write-Warning`
+  (5 call sites) untouched.
+- **Canonical `Write-Detail` helper added.** The three info lines in
+  `Install-SevenZipFallback` (`Version` / `Source` / `URL`) that the
+  original port had mapped onto `Write-Step` now call `Write-Detail`,
+  matching the Deploy-AMD source and removing the last logger-naming
+  divergence previously noted as "deferred" in SPEC §B.19.4.4.
+- **Seven helpers aligned to the canon body** (parameter-name and
+  type-annotation differences only): `Write-Caution`, `Write-Step`,
+  `Write-Ok`, `Write-Fail`, `Write-Skip`, `_DebugTrace_RetireFrame`,
+  and `Enable-AutoExportOnPhaseFailure`. As a side effect of the
+  `Write-Caution` rename, `Write-DebugFailureReport` also became
+  byte-identical to canon.
+- **Cross-repo byte-identity grew from 10 to 19** of the tracked canon
+  helpers. The remaining same-name helpers (`Write-PhaseHeader`,
+  `Write-PhaseFooter`, `_DebugTrace_WriteJsonlLine`, `Start-DebugTrace`,
+  `Stop-DebugTrace`, `Enable-DebugTraceFileOutput`,
+  `Show-PowerShellEnvironment`) stay as documented carve-outs because
+  this script's phase / DebugTrace model and the
+  `Show-PowerShellEnvironment` driver-context differ structurally.
+  `Set-TlsSecurityProtocol`, `Set-Utf8PipelineEncoding`, and
+  `Assert-Admin` are not present in this script.
+- **SPEC §B.19.4.4 updated** from the "renamed loggers / deferred"
+  wording to the aligned state; the only residual per-script
+  differences in the ported 7-Zip helpers are the GitHub API
+  `User-Agent` string and a `psa-disable` justification comment, both
+  of which correctly encode this script's own identity.
+- The sibling repository records the reciprocal classification under a
+  new SPEC §A.11.7 *partial port participant* tier under the shared
+  `cross-repo-canon-iso-port-alignment` tag.
+- `$Script:ScriptVersion`: `update-wsi-2026.05.28-r10.4` ->
+  `update-wsi-2026.05.29-r11.0`. `$Script:ScriptTag`:
+  `cross-repo-canon-iso-port-alignment`.
+- `psa.py` (4.2.0) remains 0 / 0 / 0 on this script.
+
 ### r09.0 Step 2b3 - real-data-driven parser correction
 
 This change corrects the Phase 2b1 parser and the Phase 2b2 Layer 1

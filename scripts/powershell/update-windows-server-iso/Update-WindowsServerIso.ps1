@@ -535,8 +535,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.4'
-$Script:ScriptTag     = 'step2b7-p03-neutralpatches-and-config-schema'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.0'
+$Script:ScriptTag     = 'cross-repo-canon-iso-port-alignment'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -964,8 +964,8 @@ function _DebugTrace_RetireFrame {
     param([Parameter(Mandatory)] $Frame, [Parameter(Mandatory)] [string]$Outcome)
 
     if (-not $Frame.PSObject.Properties['Outcome'] -or -not $Frame.Outcome) {
-        $Frame | Add-Member -MemberType NoteProperty -Name 'Outcome'    -Value $Outcome -Force
-        $Frame | Add-Member -MemberType NoteProperty -Name 'EndedAt'    -Value (Get-Date) -Force
+        $Frame | Add-Member -MemberType NoteProperty -Name 'Outcome'   -Value $Outcome -Force
+        $Frame | Add-Member -MemberType NoteProperty -Name 'EndedAt'   -Value (Get-Date) -Force
         $durationMs = [int]((Get-Date) - $Frame.StartTime).TotalMilliseconds
         $Frame | Add-Member -MemberType NoteProperty -Name 'DurationMs' -Value $durationMs -Force
     }
@@ -1165,7 +1165,7 @@ function Format-DebugFailure {
 function Write-DebugFailureReport {
     <#
     .SYNOPSIS
-        Emit a formatted failure report via Write-Warn + log the
+        Emit a formatted failure report via Write-Caution + log the
         failure event to JSONL. Call from a catch block. Also marks
         the active phase's registry entry as 'failure' if applicable.
     .PARAMETER ErrorRecord
@@ -1191,29 +1191,29 @@ function Write-DebugFailureReport {
         $reg.FailureRef = $r
     }
 
-    Write-Warn ("{0}: FAILED at step '{1}' (elapsed {2:F2}s)" -f $r.Context, $r.FailedStep, $r.Elapsed.TotalSeconds)
-    Write-Warn ("  ExType   : {0}" -f $r.ExType)
-    Write-Warn ("  Message  : {0}" -f $r.ExMessage)
+    Write-Caution ("{0}: FAILED at step '{1}' (elapsed {2:F2}s)" -f $r.Context, $r.FailedStep, $r.Elapsed.TotalSeconds)
+    Write-Caution ("  ExType   : {0}" -f $r.ExType)
+    Write-Caution ("  Message  : {0}" -f $r.ExMessage)
     if ($r.InnerType) {
-        Write-Warn ("  Inner    : {0} - {1}" -f $r.InnerType, $r.InnerMessage)
+        Write-Caution ("  Inner    : {0} - {1}" -f $r.InnerType, $r.InnerMessage)
     }
     if ($r.FullyQualifiedId) {
-        Write-Warn ("  FQErrId  : {0}" -f $r.FullyQualifiedId)
+        Write-Caution ("  FQErrId  : {0}" -f $r.FullyQualifiedId)
     }
     if ($r.ScriptStackTrace) {
         $stackLines = $r.ScriptStackTrace -split "`r?`n"
-        Write-Warn ("  Stack    : {0}" -f $stackLines[0])
+        Write-Caution ("  Stack    : {0}" -f $stackLines[0])
         $maxStack = [Math]::Min(3, $stackLines.Count)
         for ($i = 1; $i -lt $maxStack; $i++) {
-            Write-Warn ("             {0}" -f $stackLines[$i])
+            Write-Caution ("             {0}" -f $stackLines[$i])
         }
     }
     if ($IncludeStepHistory -and $r.StepHistory.Count -gt 0) {
-        Write-Warn ("  Steps    : {0} recorded" -f $r.StepHistory.Count)
+        Write-Caution ("  Steps    : {0} recorded" -f $r.StepHistory.Count)
         $firstAt = $r.StepHistory[0].At
         foreach ($h in $r.StepHistory) {
             $rel = ($h.At - $firstAt).TotalMilliseconds
-            Write-Warn ('    +{0,7:F0}ms  {1}' -f $rel, $h.Step)
+            Write-Caution ('    +{0,7:F0}ms  {1}' -f $rel, $h.Step)
         }
     }
 
@@ -1239,10 +1239,10 @@ function Write-DebugFailureReport {
             $tag = if ($r.PhaseId) { $r.PhaseId } else { 'top' }
             $exportPath = Join-Path $Script:DebugTraceAutoExportDir ("debugtrace_export_{0}_{1}.json" -f $tag, $ts)
             Export-DebugTraceJson -Path $exportPath -IncludeEvents:$false | Out-Null
-            Write-Warn ("  TraceJson: {0}" -f $exportPath)
+            Write-Caution ("  TraceJson: {0}" -f $exportPath)
         } catch {
             # Don't let auto-export failures hide the original error.
-            Write-Warn ("  TraceJson: auto-export failed: {0}" -f $_.Exception.Message)
+            Write-Caution ("  TraceJson: auto-export failed: {0}" -f $_.Exception.Message)
         }
     }
 }
@@ -1397,7 +1397,9 @@ function Enable-AutoExportOnPhaseFailure {
         Where to write debugtrace_export_<phaseId>_<timestamp>.json files.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string]$OutputDirectory)
+    param(
+        [Parameter(Mandatory)] [string]$OutputDirectory
+    )
     $Script:DebugTraceAutoExportEnabled = $true
     $Script:DebugTraceAutoExportDir     = $OutputDirectory
 }
@@ -1682,12 +1684,45 @@ function _LogLine {
 #
 # Canonical names (no duplicates, no trailing-digit suffixes). None of
 # these collide with built-in cmdlets - PowerShell has Write-Warning
-# and Write-Information but not Write-Warn / Write-Skip / Write-Step.
-function Write-Step  { param([string]$m) _LogLine '[*]' $m 'Cyan'     }
-function Write-Ok    { param([string]$m) _LogLine '[+]' $m 'Green'    }
-function Write-Warn  { param([string]$m) _LogLine '[!]' $m 'Yellow'   }
-function Write-Fail  { param([string]$m) _LogLine '[X]' $m 'Red'      }
-function Write-Skip  { param([string]$m) _LogLine '[~]' $m 'DarkGray' }
+# and Write-Information but not Write-Caution / Write-Skip / Write-Step.
+function Write-Step  { param($Msg) _LogLine '[*]' $Msg 'Cyan'     }
+function Write-Ok    { param($Msg) _LogLine '[+]' $Msg 'Green'    }
+function Write-Caution  { param($Msg) _LogLine '[!]' $Msg 'Yellow'   }
+function Write-Fail  { param($Msg) _LogLine '[X]' $Msg 'Red'      }
+function Write-Skip  { param($Msg) _LogLine '[~]' $Msg 'DarkGray' }
+function Write-Detail {
+    # ====================================================================
+    # Continuation / detail line for a preceding marker line, or a row
+    # inside a section banner block (Show-PowerShellEnvironment,
+    # Show-OperatingSystemDetail, Show-SecureBootBaselineSnapshot, etc.).
+    # Renders 4-space-indented plain text with NO timestamp or marker
+    # prefix, so it visually attaches to the preceding context.
+    #
+    # ---- Introduced to replace bare `Write-Host " XXX"` calls ----
+    # Previously the scripts emitted ~100 bare Write-Host calls with a
+    # hard-coded 4-space indent. Routing those through a single helper
+    # makes future column-layout tweaks possible without touching every
+    # call site, and gives the SPEC-mandated marker pattern a single
+    # documented exception ("continuation row of a marker line").
+    #
+    # The 4-space indent is intentional and matches the historical
+    # column convention used inside section-banner tables.
+    #
+    # -NoNewline mirrors Write-Host's switch and is used by two-part
+    # lines that compose a label-then-value pair (e.g. P08's
+    # "-> Selected /os:" + colored value).
+    # ====================================================================
+    param(
+        [Parameter(Position=0)][string]$Msg,
+        [ConsoleColor]$Color = [ConsoleColor]::Gray,
+        [switch]$NoNewline
+    )
+    if ($NoNewline) {
+        Write-Host ("    {0}" -f $Msg) -ForegroundColor $Color -NoNewline
+    } else {
+        Write-Host ("    {0}" -f $Msg) -ForegroundColor $Color
+    }
+}
 
 function Write-SubSection {
     # Lightweight section break inside a phase (e.g. [Step A]/[Step B]).
@@ -2345,12 +2380,12 @@ function Invoke-WebRequestWithRetry {
 
             if ($statusCode -eq 429 -or $statusCode -eq 503) {
                 $wait = [Math]::Pow(2, $attempt) * 3
-                Write-Warn "HTTP $statusCode received. Waiting $wait sec then retry ($attempt/$MaxRetries)"
+                Write-Caution "HTTP $statusCode received. Waiting $wait sec then retry ($attempt/$MaxRetries)"
                 Start-Sleep -Seconds $wait
             }
             elseif ($attempt -lt $MaxRetries) {
                 $wait = [Math]::Pow(2, $attempt)
-                Write-Warn "Network error: $($_.Exception.Message). Retrying in $wait sec ($attempt/$MaxRetries)"
+                Write-Caution "Network error: $($_.Exception.Message). Retrying in $wait sec ($attempt/$MaxRetries)"
                 Start-Sleep -Seconds $wait
             }
         }
@@ -2660,7 +2695,7 @@ function Assert-WorkspacePreflight {
     } else {
         # UNC or unrooted path; fall back to the script root drive
         $driveLetter = $Script:ScriptRoot.Substring(0, 1)
-        Write-Warn ('WorkRoot "{0}" is not on a lettered drive; checking script-root drive {1}: instead.' -f $rootSlice, $driveLetter)
+        Write-Caution ('WorkRoot "{0}" is not on a lettered drive; checking script-root drive {1}: instead.' -f $rootSlice, $driveLetter)
     }
     $psDrive = Get-PSDrive -Name $driveLetter -ErrorAction SilentlyContinue
     if (-not $psDrive) {
@@ -2724,11 +2759,11 @@ function Assert-WorkspacePreflight {
         }
     } catch [System.Management.Automation.CommandNotFoundException] {
         # Get-Volume not available on older PowerShell or non-Windows
-        Write-Warn ('Get-Volume not available; skipping filesystem-type check on drive {0}.' -f $driveLetter)
+        Write-Caution ('Get-Volume not available; skipping filesystem-type check on drive {0}.' -f $driveLetter)
     } catch {
         # Re-throw the original throw if it was ours
         if ($_.Exception.Message -like 'Workspace preflight failed:*') { throw }
-        Write-Warn ('Filesystem-type check could not be completed: {0}' -f $_.Exception.Message)
+        Write-Caution ('Filesystem-type check could not be completed: {0}' -f $_.Exception.Message)
     } # psa-disable-line PSA3004 -- intentional best-effort filesystem type detection; CommandNotFoundException is expected on non-Windows
 }
 
@@ -3782,7 +3817,7 @@ function ConvertFrom-ReleaseInfoMarkdown {
             elseif ($section -eq 'hotpatch-calendar' -and $headerStr -eq $hotpatchHdr) { $kind = 'hotpatch' }
 
             if ($kind -eq '') {
-                Write-Warn ('  release-info parser: unrecognised table header in section {0!s} for {1}: {2!s}' -f $section, $currentOsKey, $headerCells)
+                Write-Caution ('  release-info parser: unrecognised table header in section {0!s} for {1}: {2!s}' -f $section, $currentOsKey, $headerCells)
                 $i = $sepIdx
                 continue
             }
@@ -3796,7 +3831,7 @@ function ConvertFrom-ReleaseInfoMarkdown {
 
                 if ($kind -eq 'monthly') {
                     if ($rowCells.Count -ne $Script:ReleaseInfoMonthlyHeaders.Count) {
-                        Write-Warn ('  release-info parser: skipping monthly row with {0} columns for {1}' -f $rowCells.Count, $currentOsKey)
+                        Write-Caution ('  release-info parser: skipping monthly row with {0} columns for {1}' -f $rowCells.Count, $currentOsKey)
                         $k += 1
                         continue
                     }
@@ -3825,7 +3860,7 @@ function ConvertFrom-ReleaseInfoMarkdown {
                         $rowCells = $rowCells[0..($rowCells.Count - 2)]
                     }
                     if ($rowCells.Count -ne $Script:ReleaseInfoHotpatchHeaders.Count) {
-                        Write-Warn ('  release-info parser: skipping hotpatch row with {0} columns for {1}' -f $rowCells.Count, $currentOsKey)
+                        Write-Caution ('  release-info parser: skipping hotpatch row with {0} columns for {1}' -f $rowCells.Count, $currentOsKey)
                         $k += 1
                         continue
                     }
@@ -5688,7 +5723,7 @@ function Resolve-PatchSetFromReleaseInfo {
 
     $discoveries = @(Get-PatchSetFromReleaseInfoDiscovery -OsVersion $OsVersion -PatchMonth $PatchMonth -DataDir $DataDir)
     if ($discoveries.Count -eq 0) {
-        Write-Warn ('Discovery returned zero records for OS={0} Month={1}. Ensure data/cache-release-info.json, data/cache-dotnet-cu.json and data/cache-du-{0}.json have been populated by the refresh action.' -f $OsVersion, $PatchMonth)
+        Write-Caution ('Discovery returned zero records for OS={0} Month={1}. Ensure data/cache-release-info.json, data/cache-dotnet-cu.json and data/cache-du-{0}.json have been populated by the refresh action.' -f $OsVersion, $PatchMonth)
         return @()
     }
     Write-Step ('  Discovered {0} record(s): {1}' -f $discoveries.Count, (($discoveries | ForEach-Object { $_.Type }) -join ', '))
@@ -5711,18 +5746,18 @@ function Resolve-PatchSetFromReleaseInfo {
             try {
                 $hits = Get-UpdateIdFromCatalog -KbId $rec.KbId -MaxRetries $MaxRetries
             } catch {
-                Write-Warn ('Catalog KB search failed for {0} {1}: {2}' -f $rec.Type, $rec.KbId, $_.Exception.Message)
+                Write-Caution ('Catalog KB search failed for {0} {1}: {2}' -f $rec.Type, $rec.KbId, $_.Exception.Message)
                 continue
             }
             if (-not $hits -or $hits.Count -eq 0) {
-                Write-Warn ('Catalog returned zero hits for {0} {1}.' -f $rec.Type, $rec.KbId)
+                Write-Caution ('Catalog returned zero hits for {0} {1}.' -f $rec.Type, $rec.KbId)
                 continue
             }
             $narrowed = @($hits | Where-Object {
                 Test-CatalogTitleMatch -OsVersion $OsVersion -Title ([string]$_.Title)
             })
             if ($narrowed.Count -eq 0) {
-                Write-Warn ('Catalog narrow filter rejected all {0} hit(s) for {1} {2}. Check CatalogTitleTokens in data/config-{3}.json.' -f $hits.Count, $rec.Type, $rec.KbId, $OsVersion)
+                Write-Caution ('Catalog narrow filter rejected all {0} hit(s) for {1} {2}. Check CatalogTitleTokens in data/config-{3}.json.' -f $hits.Count, $rec.Type, $rec.KbId, $OsVersion)
                 continue
             }
             $narrowedNoPreview = @($narrowed | Where-Object { [string]$_.Title -notmatch '(?i)preview' })
@@ -5732,7 +5767,7 @@ function Resolve-PatchSetFromReleaseInfo {
             $bestTitle = [string]$bestHit.Title
         }
         if ([string]::IsNullOrEmpty($bestUid)) {
-            Write-Warn ('No UpdateId resolved for {0} {1}.' -f $rec.Type, $rec.KbId)
+            Write-Caution ('No UpdateId resolved for {0} {1}.' -f $rec.Type, $rec.KbId)
             continue
         }
 
@@ -5741,11 +5776,11 @@ function Resolve-PatchSetFromReleaseInfo {
         try {
             $links = Get-DownloadLinkFromCatalog -UpdateId $bestUid -MaxRetries $MaxRetries
         } catch {
-            Write-Warn ('DownloadDialog failed for {0} UpdateId {1}: {2}' -f $rec.Type, $bestUid, $_.Exception.Message)
+            Write-Caution ('DownloadDialog failed for {0} UpdateId {1}: {2}' -f $rec.Type, $bestUid, $_.Exception.Message)
             continue
         }
         if (-not $links -or $links.Count -eq 0) {
-            Write-Warn ('No download link for {0} UpdateId {1}.' -f $rec.Type, $bestUid)
+            Write-Caution ('No download link for {0} UpdateId {1}.' -f $rec.Type, $bestUid)
             continue
         }
 
@@ -5772,7 +5807,7 @@ function Resolve-PatchSetFromReleaseInfo {
         }
         if ($primaries.Count -eq 0) {
             $names = (($links | ForEach-Object { $_.FileName }) -join ', ')
-            Write-Warn ('No canonical file for {0} UpdateId {1} (only Express/Delta/PSF?). Files: {2}' -f $rec.Type, $bestUid, $names)
+            Write-Caution ('No canonical file for {0} UpdateId {1} (only Express/Delta/PSF?). Files: {2}' -f $rec.Type, $bestUid, $names)
             continue
         }
 
@@ -5836,7 +5871,7 @@ function Resolve-PatchSetFromReleaseInfo {
     $Script:LastSupersedenceExclusions = $supersedenceExclusions.ToArray()
 
     if ($resolved.Count -eq 0) {
-        Write-Warn 'Resolve-PatchSetFromReleaseInfo: zero patches resolved.'
+        Write-Caution 'Resolve-PatchSetFromReleaseInfo: zero patches resolved.'
     } else {
         Write-Ok ('Resolved {0} patch entries via release-info path.' -f $resolved.Count)
     }
@@ -5949,7 +5984,7 @@ function Resolve-LanguageSpecificPatchesFromCatalog {
         try {
             $hits = Get-UpdateIdFromCatalog -KbId $q.QueryTemplate -MaxRetries $MaxRetries
         } catch {
-            Write-Warn ('  Catalogue search failed: {0}' -f $_.Exception.Message)
+            Write-Caution ('  Catalogue search failed: {0}' -f $_.Exception.Message)
             continue
         }
         if (-not $hits -or $hits.Count -eq 0) {
@@ -6064,7 +6099,7 @@ function Invoke-WimMountSafe {
         $existing = Get-WindowsImage -Mounted -ErrorAction SilentlyContinue
         foreach ($m in @($existing)) {
             if ($m.Path -and (($m.Path.TrimEnd('\')) -ieq ($Path.TrimEnd('\')))) {
-                Write-Warn ('Stale mount detected at {0}; discarding before remount.' -f $Path)
+                Write-Caution ('Stale mount detected at {0}; discarding before remount.' -f $Path)
                 Dismount-WindowsImage -Path $Path -Discard -ErrorAction SilentlyContinue | Out-Null
             }
         }
@@ -6087,7 +6122,7 @@ function Invoke-WimMountSafe {
     } catch {
         # Best-effort: if attribute manipulation fails for any reason,
         # let Mount-WindowsImage proceed and surface the real DISM error.
-        Write-Warn ('Could not inspect or clear ReadOnly attribute on {0}: {1}' -f $ImagePath, $_.Exception.Message)
+        Write-Caution ('Could not inspect or clear ReadOnly attribute on {0}: {1}' -f $ImagePath, $_.Exception.Message)
     } # psa-disable-line PSA3004 -- best-effort attribute clear; the subsequent Mount-WindowsImage will surface the real error if a problem remains
 
     Set-DebugStep -Step ('wim-mount-image-idx{0}' -f $Index)
@@ -6137,7 +6172,7 @@ function Invoke-WimDismountSafe {
             Dismount-WindowsImage -Path $Path -Save -CheckIntegrity @extra -ErrorAction SilentlyContinue | Out-Null
         }
     } catch {
-        Write-Warn ('First Dismount failed: {0}; waiting 30s and retrying...' -f $_.Exception.Message)
+        Write-Caution ('First Dismount failed: {0}; waiting 30s and retrying...' -f $_.Exception.Message)
     }
 
     # Verify the mount is gone; if still present, retry the harder way
@@ -6195,11 +6230,11 @@ function Add-WindowsPackageWithRetry {
     } catch {
         $m = [string]$_.Exception.Message
         if ($m -match '0x800f081e') {
-            Write-Warn ('0x800f081e: Package not applicable, skipping: {0}' -f [System.IO.Path]::GetFileName($PackagePath))
+            Write-Caution ('0x800f081e: Package not applicable, skipping: {0}' -f [System.IO.Path]::GetFileName($PackagePath))
             return 'NotApplicable'
         }
         if ($m -match '0x800f0a13') {
-            Write-Warn ('0x800f0a13: Modules Installer transient error; retrying after 10s...')
+            Write-Caution ('0x800f0a13: Modules Installer transient error; retrying after 10s...')
             Start-Sleep -Seconds 10
             Add-WindowsPackage -Path $MountPath -PackagePath $PackagePath @logArg -ErrorAction Stop | Out-Null
             return 'OkAfterRetry'
@@ -6415,7 +6450,7 @@ function Install-WindowsAdkFallback {
 
     if ($oscdimgPath) {
         if ($proc.ExitCode -ne 0) {
-            Write-Warn ('ADK installer exit code {0}; oscdimg.exe is present, treating as already installed.' -f $proc.ExitCode)
+            Write-Caution ('ADK installer exit code {0}; oscdimg.exe is present, treating as already installed.' -f $proc.ExitCode)
         }
         Write-Ok ('Windows ADK Deployment Tools installed: {0}' -f $oscdimgPath)
         return $oscdimgPath
@@ -6495,12 +6530,12 @@ function Resolve-OscdimgExe {
             if ($actualHash -ieq $expectedHash) {
                 Write-Step ('oscdimg.exe integrity verified (Microsoft reference hash for {0})' -f $arch)
             } else {
-                Write-Warn ('oscdimg.exe SHA-256 differs from the Microsoft reference value for {0}.' -f $arch)
-                Write-Warn ('  Found    : {0}' -f $actualHash)
-                Write-Warn ('  Reference: {0}' -f $expectedHash)
-                Write-Warn '  This is ADVISORY: ADK-installed binaries may legitimately differ per ADK version.'
-                Write-Warn '  If you did NOT install oscdimg.exe via the Windows ADK or Microsoft symbol server,'
-                Write-Warn '  investigate the origin of this binary before proceeding (supply-chain integrity check).'
+                Write-Caution ('oscdimg.exe SHA-256 differs from the Microsoft reference value for {0}.' -f $arch)
+                Write-Caution ('  Found    : {0}' -f $actualHash)
+                Write-Caution ('  Reference: {0}' -f $expectedHash)
+                Write-Caution '  This is ADVISORY: ADK-installed binaries may legitimately differ per ADK version.'
+                Write-Caution '  If you did NOT install oscdimg.exe via the Windows ADK or Microsoft symbol server,'
+                Write-Caution '  investigate the origin of this binary before proceeding (supply-chain integrity check).'
             }
         } else {
             Write-Step ('oscdimg.exe integrity check skipped: no reference hash for architecture "{0}".' -f $arch)
@@ -6508,7 +6543,7 @@ function Resolve-OscdimgExe {
     } catch {
         # Best-effort: if hash computation itself fails, that's surprising
         # but not fatal; surface as a debug step rather than aborting.
-        Write-Warn ('oscdimg.exe integrity check could not be completed: {0}' -f $_.Exception.Message)
+        Write-Caution ('oscdimg.exe integrity check could not be completed: {0}' -f $_.Exception.Message)
     } # psa-disable-line PSA3004 -- intentional best-effort integrity-check warning; hash mismatch is advisory only
 
     return $found
@@ -6631,7 +6666,7 @@ function New-SyntheticTestIso {
             New-BootableIso -ExtractedIsoRoot $synthIso `
                 -OutputIsoPath $OutputIsoPath -VolumeLabel 'SYNTH_IF'
         } catch {
-            Write-Warn ('oscdimg failed on synthetic stub: {0}; falling back to raw copy.' -f $_.Exception.Message)
+            Write-Caution ('oscdimg failed on synthetic stub: {0}; falling back to raw copy.' -f $_.Exception.Message)
             Copy-Item -LiteralPath $installWim -Destination $OutputIsoPath -Force
         }
     } else {
@@ -6735,7 +6770,7 @@ function Get-WsusScnCabIfNeeded {
                 Source        = 'OverridePath'
             }
         }
-        Write-Warn ('-WsusScnCabPath was supplied but does not exist: ' + $OverridePath)
+        Write-Caution ('-WsusScnCabPath was supplied but does not exist: ' + $OverridePath)
     }
 
     # (2) Default cache location
@@ -6802,7 +6837,7 @@ function Get-WsusScnCabIfNeeded {
 # the Servicing Dependency Database parser's required CAB extractor
 # (SPEC Part B.19.4). The function bodies are ported verbatim from the
 # sister project except for two logger renames:
-#   Write-Caution -> Write-Warn    (same role: yellow warning)
+#   Write-Caution -> Write-Caution    (same role: yellow warning)
 #   Write-Detail  -> Write-Step    (same role: informational output)
 # The HTTP calls intentionally use the raw Invoke-WebRequest rather than
 # this script's local Invoke-WebRequestWithRetry wrapper; the retry
@@ -6837,7 +6872,7 @@ function Get-LatestSevenZipUrl {
                 Source  = '7-zip.org (parsed)'
             }
         }
-    } catch { Write-Warn "7-zip.org parse failed: $($_.Exception.Message)" }
+    } catch { Write-Caution "7-zip.org parse failed: $($_.Exception.Message)" }
 
     # Tier 2: GitHub API
     try {
@@ -6847,10 +6882,10 @@ function Get-LatestSevenZipUrl {
         if ($msi) {
             return [pscustomobject]@{ Version=$api.tag_name; MsiUrl=$msi.browser_download_url; Source='GitHub Releases API' }
         }
-    } catch { Write-Warn "GitHub Releases API failed: $($_.Exception.Message)" }
+    } catch { Write-Caution "GitHub Releases API failed: $($_.Exception.Message)" }
 
     # Tier 3: pinned
-    Write-Warn 'Both online lookups failed - using pinned URL.'
+    Write-Caution 'Both online lookups failed - using pinned URL.'
     return [pscustomobject]@{
         Version='26.01 (pinned)'
         MsiUrl='https://github.com/ip7z/7zip/releases/download/26.01/7z2601-x64.msi'
@@ -6861,9 +6896,9 @@ function Get-LatestSevenZipUrl {
 function Install-SevenZipFallback {
     param([string]$DownloadDir)
     $info = Get-LatestSevenZipUrl
-    Write-Step "Version : $($info.Version)"
-    Write-Step "Source  : $($info.Source)"
-    Write-Step "URL     : $($info.MsiUrl)"
+    Write-Detail "Version : $($info.Version)"
+    Write-Detail "Source  : $($info.Source)"
+    Write-Detail "URL     : $($info.MsiUrl)"
     $msi = Join-Path $DownloadDir (Split-Path $info.MsiUrl -Leaf)
     if (-not (Test-Path $msi)) {
         Invoke-WebRequest -Uri $info.MsiUrl -OutFile $msi -UseBasicParsing
@@ -8131,7 +8166,7 @@ function Get-PatchTargetsForType {
         $Script:PatchTargetMapWarned = @{}
     }
     if (-not $Script:PatchTargetMapWarned.ContainsKey($PatchType)) {
-        Write-Warn ("Unknown patch Type '{0}'; defaulting target=[Install]. Add this Type to PatchTargetMap to silence." -f $PatchType)
+        Write-Caution ("Unknown patch Type '{0}'; defaulting target=[Install]. Add this Type to PatchTargetMap to silence." -f $PatchType)
         $Script:PatchTargetMapWarned[$PatchType] = $true
     }
     return [string[]]@('Install')
@@ -8454,7 +8489,7 @@ function Write-PatchPlanSummary {
         }
     }
     if ($Plan._UnknownTypes -and $Plan._UnknownTypes.Count -gt 0) {
-        Write-Warn ('Unknown Types in plan (defaulted to Install): {0}' -f ($Plan._UnknownTypes -join ', '))
+        Write-Caution ('Unknown Types in plan (defaulted to Install): {0}' -f ($Plan._UnknownTypes -join ', '))
     }
     # Sub-phase sequences (if any)
     foreach ($seqName in @('InstallSequence','BootSequence','WinReSequence')) {
@@ -8483,7 +8518,7 @@ function Test-PatchDependencyClosureOnMount {
 
         Policy is governed by $Script:PatchDependencyPolicy:
           'Strict' -> throw on any missing prerequisite (default)
-          'Warn'   -> Write-Warn and continue
+          'Warn'   -> Write-Caution and continue
 
         Returns $true if all prerequisites are satisfied (or warned
         through); throws on Strict-mode failure. Designed to be called
@@ -8539,7 +8574,7 @@ function Test-PatchDependencyClosureOnMount {
         if ($Script:PatchDependencyPolicy -eq 'Strict') {
             throw $msg
         } else {
-            Write-Warn $msg
+            Write-Caution $msg
             return $false
         }
     }
@@ -8569,8 +8604,8 @@ function Test-PatchDependencyClosureOnMount {
     if ($Script:PatchDependencyPolicy -eq 'Strict') {
         throw ("Dependency closure check failed for {0}; aborting before Add-WindowsPackage to avoid DISM 0x800f0823.`n{1}" -f $ImageLabel, $detail)
     }
-    Write-Warn ('Dependency closure ({0}): {1} unsatisfied prerequisite(s); continuing (policy=Warn).' -f $ImageLabel, $missing.Count)
-    Write-Warn $detail
+    Write-Caution ('Dependency closure ({0}): {1} unsatisfied prerequisite(s); continuing (policy=Warn).' -f $ImageLabel, $missing.Count)
+    Write-Caution $detail
     return $false
 }
 
@@ -8648,7 +8683,7 @@ function Invoke-PatchSubPhase {
         if (-not $pkgPath -or -not (Test-Path -LiteralPath $pkgPath)) {
             $sw.Stop()
             $errMsg = ('LocalPath missing or empty for {0}/{1}; cannot apply' -f $type, $kb)
-            Write-Warn ('    [skip] ' + $errMsg)
+            Write-Caution ('    [skip] ' + $errMsg)
             $rows.Add([pscustomobject]@{
                 SubPhase     = $SubPhase.Name
                 ImageLabel   = $ImageLabel
@@ -8937,7 +8972,7 @@ function Select-LatestPatchBySupersedence {
 
     # All candidates excluded each other (shouldn't normally happen).
     # Fall back to the first input candidate and log a warning.
-    Write-Warn ('Supersedence dedup: all {0} {1} candidates marked superseded; falling back to first input.' -f $Candidates.Count, $TypeLabel)
+    Write-Caution ('Supersedence dedup: all {0} {1} candidates marked superseded; falling back to first input.' -f $Candidates.Count, $TypeLabel)
     $result.Best = $Candidates[0]
     $result.Excluded = $excluded.ToArray()
     return $result
@@ -10232,7 +10267,7 @@ function Invoke-SetupPhase01_Initialize {
             # Allow non-admin only when read-only / planning actions are requested
             $readOnlyActions = @('ListPhases','GenerateManifest','Cleanup','Verify')
             if ($readOnlyActions -contains $Action) {
-                Write-Warn ('Not Administrator, but -Action {0} is read-only; continuing.' -f $Action)
+                Write-Caution ('Not Administrator, but -Action {0} is read-only; continuing.' -f $Action)
             } else {
                 throw 'Administrator privilege required for DISM mount operations. Re-launch PowerShell as Administrator.'
             }
@@ -10252,9 +10287,9 @@ function Invoke-SetupPhase01_Initialize {
             Write-Ok ('oscdimg.exe found: {0}' -f $oscdimgPath)
         } catch {
             if ($Action -in @('ListPhases','GenerateManifest','Cleanup','Prepare') -or $Script:EnvironmentInfoOnly) {
-                Write-Warn ('oscdimg.exe not found, but -Action {0} does not need it; continuing.' -f $Action)
+                Write-Caution ('oscdimg.exe not found, but -Action {0} does not need it; continuing.' -f $Action)
             } elseif ($Script:SyntheticTestMode) {
-                Write-Warn 'oscdimg.exe not found; -SyntheticTestMode will use a raw-copy fallback.'
+                Write-Caution 'oscdimg.exe not found; -SyntheticTestMode will use a raw-copy fallback.'
             } elseif ($Script:AutoInstallAdk) {
                 Write-Step 'oscdimg.exe not found; -AutoInstallAdk is set, invoking Install-WindowsAdkFallback...'
                 # Install-WindowsAdkFallback returns the discovered
@@ -10305,12 +10340,12 @@ Expected path after install:
             $freeGB = [Math]::Round($psDrive.Free / 1GB, 1)
             Write-Step ('Free space on {0}: {1} GB' -f $rootDrive, $freeGB)
             if ($freeGB -lt 100) {
-                Write-Warn ('Free space below the documented 100 GB minimum; if -SkipEnvCheck was used and a real build is attempted, expect DISM to fail.')
+                Write-Caution ('Free space below the documented 100 GB minimum; if -SkipEnvCheck was used and a real build is attempted, expect DISM to fail.')
             } else {
                 Write-Ok ('Disk space OK ({0} GB free).' -f $freeGB)
             }
         } else {
-            Write-Warn ('Could not get PSDrive for {0}: skipping informational disk space readout.' -f $rootDrive)
+            Write-Caution ('Could not get PSDrive for {0}: skipping informational disk space readout.' -f $rootDrive)
         }
 
         # Step 5: Hyper-V (BootTest only)
@@ -10326,7 +10361,7 @@ Expected path after install:
                 }
             } catch {
                 if ($Script:SyntheticTestMode) {
-                    Write-Warn 'Hyper-V unavailable; allowed under -SyntheticTestMode.'
+                    Write-Caution 'Hyper-V unavailable; allowed under -SyntheticTestMode.'
                 } else {
                     throw
                 }
@@ -10669,12 +10704,12 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         } catch {
             $scrapeOk  = $false
             $scrapeErr = $_.Exception.Message
-            Write-Warn ('Catalog scrape failed: ' + $scrapeErr)
+            Write-Caution ('Catalog scrape failed: ' + $scrapeErr)
         }
         if ($scrapeOk -and (-not $newPatches -or $newPatches.Count -eq 0)) {
             $scrapeOk  = $false
             $scrapeErr = 'Catalog scrape returned zero entries.'
-            Write-Warn $scrapeErr
+            Write-Caution $scrapeErr
         }
 
         # ---- Failure handling ----
@@ -10684,7 +10719,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
             }
             # UseBaseline (default)
             if (Test-PatchBaselineUsable -Baseline $baseline) {
-                Write-Warn 'P03: scrape failed but existing PatchBaseline.Patches is usable; continuing.'
+                Write-Caution 'P03: scrape failed but existing PatchBaseline.Patches is usable; continuing.'
                 return $true
             }
             throw ('P03 RefreshPatchBaseline failed AND existing PatchBaseline has no usable patches. Cannot proceed.')
@@ -10743,7 +10778,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                 Save-ConfigWithBaseline -ConfigPath $cfgPath -OsProfile $Script:OsProfile
                 Write-Ok ('PatchBaseline written back to: ' + $cfgPath)
             } catch {
-                Write-Warn ('Writeback to Config JSON failed (in-memory baseline is still updated): ' + $_.Exception.Message)
+                Write-Caution ('Writeback to Config JSON failed (in-memory baseline is still updated): ' + $_.Exception.Message)
             }
         } else {
             Write-Step 'AutoRefreshPolicy.WritebackToConfig is false; not persisting changes.'
@@ -10831,7 +10866,7 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
                 if ($existing -gt 100MB) {
                     Write-Ok ('Existing ISO found ({0:F2} GB); skipping download.' -f ($existing / 1GB))
                 } else {
-                    Write-Warn ('Existing ISO is suspiciously small ({0} bytes); re-downloading.' -f $existing)
+                    Write-Caution ('Existing ISO is suspiciously small ({0} bytes); re-downloading.' -f $existing)
                     Remove-Item -LiteralPath $Script:IsoLocalPath -Force
                     $existing = 0
                 }
@@ -10892,7 +10927,7 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
                             Write-Ok '  cached and verified; skipping download.'
                             continue
                         } catch {
-                            Write-Warn ('  cached file failed integrity check ({0}); re-downloading.' -f $_.Exception.Message)
+                            Write-Caution ('  cached file failed integrity check ({0}); re-downloading.' -f $_.Exception.Message)
                             Remove-Item -LiteralPath $p.LocalPath -Force
                         }
                     } else {
@@ -10997,7 +11032,7 @@ function Expand-SourceIso {
         try {
             Dismount-DiskImage -ImagePath $IsoFile | Out-Null
         } catch {
-            Write-Warn ('Dismount-DiskImage failed: {0}' -f $_.Exception.Message)
+            Write-Caution ('Dismount-DiskImage failed: {0}' -f $_.Exception.Message)
         }
     }
 }
@@ -11034,7 +11069,7 @@ function Invoke-PlanPhase05_ExpandIso {
             $Script:WimIndexInventory = $invInstall
         } else {
             if ($Script:SyntheticTestMode) {
-                Write-Warn 'No install.wim found; expected in -SyntheticTestMode with fallback shape.'
+                Write-Caution 'No install.wim found; expected in -SyntheticTestMode with fallback shape.'
             } else {
                 throw ('install.wim not found at expected path: {0}' -f $installWim)
             }
@@ -11252,7 +11287,7 @@ function Invoke-PlanPhase06_ValidatePatchSet {
         } catch {
             $msg = 'P06 could not obtain wsusscn2.cab: ' + $_.Exception.Message
             if ($Script:IgnorePatchValidation) {
-                Write-Warn ($msg + ' (-IgnorePatchValidation set; continuing)')
+                Write-Caution ($msg + ' (-IgnorePatchValidation set; continuing)')
                 return $true
             }
             throw $msg
@@ -11269,7 +11304,7 @@ function Invoke-PlanPhase06_ValidatePatchSet {
                 Save-ConfigWithBaseline -ConfigPath $cfgPath -OsProfile $Script:OsProfile
                 Write-Step ('wsusscn2.cab metadata recorded in: ' + $cfgPath)
             } catch {
-                Write-Warn ('wsusscn2.cab metadata writeback failed: ' + $_.Exception.Message)
+                Write-Caution ('wsusscn2.cab metadata writeback failed: ' + $_.Exception.Message)
             }
         }
 
@@ -11281,7 +11316,7 @@ function Invoke-PlanPhase06_ValidatePatchSet {
         } catch {
             $msg = 'WUA offline scan failed: ' + $_.Exception.Message
             if ($Script:IgnorePatchValidation) {
-                Write-Warn ($msg + ' (-IgnorePatchValidation set; continuing)')
+                Write-Caution ($msg + ' (-IgnorePatchValidation set; continuing)')
                 return $true
             }
             throw $msg
@@ -11332,16 +11367,16 @@ function Invoke-PlanPhase06_ValidatePatchSet {
                             -WsusScnCabInfo $wsusInfoHash `
                             -Status 'Fail' `
                             -Reason 'MissingRequiredPatches'
-            Write-Warn '============================================================'
-            Write-Warn '  PATCH VALIDATION DETECTED MISSING REQUIRED UPDATES'
-            Write-Warn '============================================================'
+            Write-Caution '============================================================'
+            Write-Caution '  PATCH VALIDATION DETECTED MISSING REQUIRED UPDATES'
+            Write-Caution '============================================================'
             foreach ($m in $comparison.Missing) {
-                Write-Warn ('  - {0} ({1})' -f ($m.KbIds -join ','), $m.Title)
+                Write-Caution ('  - {0} ({1})' -f ($m.KbIds -join ','), $m.Title)
             }
-            Write-Warn ('  Diagnostic data exported to: ' + $diagDir)
-            Write-Warn '============================================================'
+            Write-Caution ('  Diagnostic data exported to: ' + $diagDir)
+            Write-Caution '============================================================'
             if ($Script:IgnorePatchValidation) {
-                Write-Warn 'IgnorePatchValidation is set; continuing despite missing patches.'
+                Write-Caution 'IgnorePatchValidation is set; continuing despite missing patches.'
                 return $true
             }
             throw 'P06 ValidatePatchSet: required patches missing. See diagnostic data above.'
@@ -11443,7 +11478,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
 
         # Sandbox-mode safety: require -Execute for write operations
         if (-not $Script:Execute -and -not $Script:SyntheticTestMode) {
-            Write-Warn 'Running in Sandbox mode (no -Execute). Will list intended actions only.'
+            Write-Caution 'Running in Sandbox mode (no -Execute). Will list intended actions only.'
         }
 
         $patches = Get-PatchListForInstallWim
@@ -11614,7 +11649,7 @@ function Invoke-BuildPhase08_PatchBootWim {
         }
 
         if (-not $Script:Execute -and -not $Script:SyntheticTestMode) {
-            Write-Warn 'Running in Sandbox mode (no -Execute); skipping boot.wim modifications.'
+            Write-Caution 'Running in Sandbox mode (no -Execute); skipping boot.wim modifications.'
             return
         }
 
@@ -11676,7 +11711,7 @@ function Invoke-BuildPhase08_PatchBootWim {
             $winReWork = Join-Path $Script:TempDir 'winre_work.wim'
             try {
                 if (-not (Test-Path -LiteralPath $winReInside)) {
-                    Write-Warn 'Winre.wim not found inside install.wim; skipping winre update.'
+                    Write-Caution 'Winre.wim not found inside install.wim; skipping winre update.'
                 } else {
                     # Pull WinRE apply sequence (W1.SSU -> W2.LP -> W3.SafeOsDU -> W4.cleanup)
                     $winReSequence = @($plan.WinReSequence)
@@ -11766,7 +11801,7 @@ function Invoke-BuildPhase09_AssembleIso {
                         -Destination (Join-Path $Script:ExtractedDir 'sources') -Recurse -Force
                     Write-Ok ('Overlay applied: {0}' -f $p.KbId)
                 } else {
-                    Write-Warn ('expand.exe failed for {0}; skipping overlay.' -f $p.KbId)
+                    Write-Caution ('expand.exe failed for {0}; skipping overlay.' -f $p.KbId)
                 }
             }
         } else {
@@ -11907,15 +11942,15 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             # in the final report. A hard throw here would abort
             # PrepareBuildVerify prematurely, hiding the rest of the
             # inspection from the user.
-            Write-Warn ('P10 SKIPPED: snapshot Health is ''Critical''. The source media does not meet the 2024-4B (April 2024 LCU) prerequisite for PCA2023 boot manager conversion.')
+            Write-Caution ('P10 SKIPPED: snapshot Health is ''Critical''. The source media does not meet the 2024-4B (April 2024 LCU) prerequisite for PCA2023 boot manager conversion.')
             foreach ($r in $pre.Reasons) {
-                Write-Warn ('  - {0}' -f $r)
+                Write-Caution ('  - {0}' -f $r)
             }
-            Write-Warn 'To enable PCA2023 conversion on this OS, two conditions must be met:'
-            Write-Warn '  1. Profile EnableInstallWimUpdate=true (so P07 applies LCUs to install.wim)'
-            Write-Warn '  2. Patch baseline must include the 2024-4B LCU (KB5036899) or a later LCU'
-            Write-Warn '     Server 2016/2019/2022 EVAL ISOs ship with 2016/2019/2022-era builds and need years of LCUs first.'
-            Write-Warn 'P11 StaticVerify, P12 VerifyPca2023Readiness, and P13 FinalReport will still run and record this state.'
+            Write-Caution 'To enable PCA2023 conversion on this OS, two conditions must be met:'
+            Write-Caution '  1. Profile EnableInstallWimUpdate=true (so P07 applies LCUs to install.wim)'
+            Write-Caution '  2. Patch baseline must include the 2024-4B LCU (KB5036899) or a later LCU'
+            Write-Caution '     Server 2016/2019/2022 EVAL ISOs ship with 2016/2019/2022-era builds and need years of LCUs first.'
+            Write-Caution 'P11 StaticVerify, P12 VerifyPca2023Readiness, and P13 FinalReport will still run and record this state.'
             New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
             return
         }
@@ -12093,7 +12128,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                 $mountedDrive = ($vol.DriveLetter + ':\')
             }
         } catch {
-            Write-Warn ('Could not mount output ISO: {0}' -f $_.Exception.Message)
+            Write-Caution ('Could not mount output ISO: {0}' -f $_.Exception.Message)
         }
 
         if ($mountedDrive) {
@@ -12149,7 +12184,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                         }
                     }
                 } catch {
-                    Write-Warn ('WIM enumeration failed: {0}' -f $_.Exception.Message)
+                    Write-Caution ('WIM enumeration failed: {0}' -f $_.Exception.Message)
                 }
             }
         }
@@ -12788,7 +12823,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
             Write-Step ('Only language      : {0}' -f $Script:OnlyLanguage)
         }
         if ($Script:DryRun) {
-            Write-Warn 'DryRun is ON: changes will NOT be written back to disk.'
+            Write-Caution 'DryRun is ON: changes will NOT be written back to disk.'
         }
 
         $reportRows = New-Object System.Collections.Generic.List[object]
@@ -12812,14 +12847,14 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
             Set-DebugStep -Step ('os:' + $osKey)
             $cfgFile = Join-Path $configRoot ('config-' + $osKey + '.json')
             if (-not (Test-Path -LiteralPath $cfgFile)) {
-                Write-Warn ('Config not found: {0}' -f $cfgFile)
+                Write-Caution ('Config not found: {0}' -f $cfgFile)
                 continue
             }
             Write-SubSection ('Refreshing {0}' -f $osKey)
             $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson
             $acceptedSchemas = @('2.0','2.1')
             if ($acceptedSchemas -notcontains $raw.Schema) {
-                Write-Warn ('Skipping {0}: Schema is "{1}", expected one of: {2}.' -f $osKey, $raw.Schema, ($acceptedSchemas -join ', '))
+                Write-Caution ('Skipping {0}: Schema is "{1}", expected one of: {2}.' -f $osKey, $raw.Schema, ($acceptedSchemas -join ', '))
                 continue
             }
 
@@ -12887,7 +12922,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                         }
                         'Manual' {
                             $hasUnresolved = $true
-                            Write-Warn ('    -> Manual fill required (no auto Refresher for this group).')
+                            Write-Caution ('    -> Manual fill required (no auto Refresher for this group).')
                             $osSummaries[$osKey].ManualGroups.Add($resolvedPath) | Out-Null
                         }
                         { $_ -in @('InitialFill','Monthly') } {
@@ -12895,7 +12930,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                             $refresher = $g.Refresher
                             if ([string]::IsNullOrEmpty($refresher)) {
                                 $hasUnresolved = $true
-                                Write-Warn ('    -> No Refresher; field requires manual fill.')
+                                Write-Caution ('    -> No Refresher; field requires manual fill.')
                                 $osSummaries[$osKey].ManualGroups.Add($resolvedPath) | Out-Null
                                 break
                             }
@@ -12935,7 +12970,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                                     $osSummaries[$osKey].Changed = $true
                                 } else {
                                     $hasUnresolved = $true
-                                    Write-Warn ('    -> Unknown Refresher "{0}"' -f $refresher)
+                                    Write-Caution ('    -> Unknown Refresher "{0}"' -f $refresher)
                                     $osSummaries[$osKey].ManualGroups.Add($resolvedPath) | Out-Null
                                 }
                             } catch {
@@ -12965,7 +13000,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                 Save-ConfigWithBaseline -ConfigPath $cfgFile -OsProfile $raw
                 Write-Ok ('  Wrote: {0}' -f $cfgFile)
             } elseif ($changed -and $Script:DryRun) {
-                Write-Warn ('  DryRun: would have written {0}' -f $cfgFile)
+                Write-Caution ('  DryRun: would have written {0}' -f $cfgFile)
             } else {
                 Write-Step ('  No changes for {0}' -f $osKey)
             }
@@ -13001,10 +13036,10 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
         try {
             $a04ok = Invoke-AdminPhaseA04_RefreshDependencyDatabase
             if (-not $a04ok) {
-                Write-Warn 'A04 RefreshDependencyDatabase returned $false (soft-fail). A01 baselines are still considered successful.'
+                Write-Caution 'A04 RefreshDependencyDatabase returned $false (soft-fail). A01 baselines are still considered successful.'
             }
         } catch {
-            Write-Warn ('A04 chain raised an exception (soft-fail): {0}' -f $_.Exception.Message)
+            Write-Caution ('A04 chain raised an exception (soft-fail): {0}' -f $_.Exception.Message)
         }
 
         if (-not $okOverall) {
@@ -13013,7 +13048,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
         }
         if ($hasUnresolved) {
             $Script:ExitCode = 2
-            Write-Warn 'Some fields require manual fill; exit code 2.'
+            Write-Caution 'Some fields require manual fill; exit code 2.'
         }
         return $true
     } finally {
@@ -13201,7 +13236,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         Write-Step ('Patch Month          : {0}' -f $patchMonth)
         Write-Step ('Output data dir      : {0}' -f (Get-DataDirectoryPath))
         if ($Script:DryRun) {
-            Write-Warn 'DryRun is ON: no HTTP fetches will be issued; no cache files will be written.'
+            Write-Caution 'DryRun is ON: no HTTP fetches will be issued; no cache files will be written.'
         }
 
         # ============================================================
@@ -13334,7 +13369,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
                     $entry.Notes         = 'No Catalog hits survived title-narrow filter.'
                     $probeRes.Status     = 'Empty'
                     $probeRes.Note       = $entry.Notes
-                    Write-Warn ('    -> Empty: no hits after title-narrow (recorded as IsEmptyMarker).')
+                    Write-Caution ('    -> Empty: no hits after title-narrow (recorded as IsEmptyMarker).')
                 } else {
                     # Deduplicate via Supersedes/SupersededBy when >1 hit.
                     $chosen = $null
@@ -13411,11 +13446,11 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
             $reportRows | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
             Write-Ok ('Report: {0}' -f $reportPath)
         } catch {
-            Write-Warn ('Failed to write A03 report CSV: {0}' -f $_.Exception.Message)
+            Write-Caution ('Failed to write A03 report CSV: {0}' -f $_.Exception.Message)
         }
 
         if (-not $okOverall) {
-            Write-Warn 'One or more sub-steps reported failures; check the summary above and rerun.'
+            Write-Caution 'One or more sub-steps reported failures; check the summary above and rerun.'
         }
         return $okOverall
     } finally {
@@ -13507,7 +13542,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         Write-Step ('StagingDir       : {0}' -f $stagingDir)
         Write-Step ('SkipLayer1Update : {0}' -f $SkipLayer1Update.IsPresent)
         if ($Script:DryRun) {
-            Write-Warn 'DryRun is ON: Stage 4 JSON write and Layer 1 config update will be SKIPPED.'
+            Write-Caution 'DryRun is ON: Stage 4 JSON write and Layer 1 config update will be SKIPPED.'
         }
 
         # ---- Stage 1: acquire wsusscn2.cab ----
@@ -13558,7 +13593,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         Set-DebugStep -Step 'stage4-emit-layer2-json'
         Write-SubSection 'Stage 4: emit Layer 2 dependency database'
         if ($Script:DryRun) {
-            Write-Warn 'DryRun: Stage 4 JSON writeback SKIPPED.'
+            Write-Caution 'DryRun: Stage 4 JSON writeback SKIPPED.'
         } else {
             $written = New-WsusScnDependencyDatabase -ParseResult $parseResult -OutputPath $OutputPath -SourceCabPath $acquiredCab
             $outSize = (Get-Item -LiteralPath $written).Length
@@ -13569,7 +13604,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         if ($SkipLayer1Update) {
             Write-Step 'Layer 1 update SKIPPED (-SkipLayer1Update).'
         } elseif ($Script:DryRun) {
-            Write-Warn 'DryRun: Layer 1 config update SKIPPED.'
+            Write-Caution 'DryRun: Layer 1 config update SKIPPED.'
         } else {
             Set-DebugStep -Step 'layer1-update-configs'
             Write-SubSection 'Layer 1: update _DependencyVerified* fields in config-Server*.json'
@@ -13590,7 +13625,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
     } catch {
         Write-Fail ('A04 RefreshDependencyDatabase failed: {0}' -f $_.Exception.Message)
         if ($stagingDir -and (Test-Path -LiteralPath $stagingDir)) {
-            Write-Warn ('Staging preserved at {0} for inspection.' -f $stagingDir)
+            Write-Caution ('Staging preserved at {0} for inspection.' -f $stagingDir)
         }
         $Script:ExitCode = 1
         return $false
@@ -13653,7 +13688,7 @@ function Update-Layer1DependencyVerification {
             $_.ProductGuids -contains $productGuid
         }
         if (-not $candidates -or @($candidates).Count -eq 0) {
-            Write-Warn ('  {0}: no in-scope bundle found; skipping.' -f $osKey)
+            Write-Caution ('  {0}: no in-scope bundle found; skipping.' -f $osKey)
             $missing++
             continue
         }
@@ -13667,7 +13702,7 @@ function Update-Layer1DependencyVerification {
 
         $configPath = Join-Path $DataRoot ('config-{0}.json' -f $osKey)
         if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
-            Write-Warn ('  {0}: config not found at {1}; skipping.' -f $osKey, $configPath)
+            Write-Caution ('  {0}: config not found at {1}; skipping.' -f $osKey, $configPath)
             $missing++
             continue
         }
@@ -13859,7 +13894,7 @@ function Invoke-PhaseRunner {
     foreach ($id in $PhaseIds) {
         $entry = $Script:PhaseRegistry | Where-Object { $_.Id -eq $id } | Select-Object -First 1
         if (-not $entry) {
-            Write-Warn ('Phase {0} is not registered; skipping.' -f $id)
+            Write-Caution ('Phase {0} is not registered; skipping.' -f $id)
             continue
         }
         if ($Script:DryRun -and ($entry.Group -in @('Build','Verify'))) {
@@ -13916,7 +13951,7 @@ function Invoke-CleanupAction {
         foreach ($m in @($mounted)) {
             foreach ($d in @($Script:MountInstallDir, $Script:MountBoot1Dir, $Script:MountBoot2Dir, $Script:MountWinReDir)) {
                 if ($m.Path -and (($m.Path.TrimEnd('\')) -ieq ($d.TrimEnd('\')))) {
-                    Write-Warn ('Discarding stale mount at {0} before cleanup.' -f $d)
+                    Write-Caution ('Discarding stale mount at {0} before cleanup.' -f $d)
                     Dismount-WindowsImage -Path $d -Discard -ErrorAction SilentlyContinue | Out-Null
                 }
             }
@@ -14204,7 +14239,7 @@ if (-not ($Action -eq 'Cleanup' -or $Action -eq 'TestHarness' -or $EnvironmentIn
 
 # Optional clean
 if ($Script:CleanWorkRoot -and (Test-Path -LiteralPath $Script:WorkRoot)) {
-    Write-Warn ('CleanWorkRoot: deleting {0}' -f $Script:WorkRoot)
+    Write-Caution ('CleanWorkRoot: deleting {0}' -f $Script:WorkRoot)
     if (Test-DangerousPath -Path $Script:WorkRoot) {
         throw ('Refusing to clean dangerous path: {0}' -f $Script:WorkRoot)
     }
@@ -14255,7 +14290,7 @@ try {
     }
 
     if ($Action -eq 'GenerateManifest') {
-        Write-Warn 'GenerateManifest action is a placeholder in this revision. See SPEC Part H.2.'
+        Write-Caution 'GenerateManifest action is a placeholder in this revision. See SPEC Part H.2.'
     }
 } catch {
     $Script:ExitCode = 1

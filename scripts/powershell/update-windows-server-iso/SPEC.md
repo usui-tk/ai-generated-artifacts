@@ -1446,20 +1446,36 @@ collision), exit ≥2 as fatal.
 #### B.19.4.4 Implementation notes (port from Deploy-AMDChipsetDriverOnWindowsServer.ps1)
 
 The three helpers `Get-SevenZipPath`, `Get-LatestSevenZipUrl`, and
-`Install-SevenZipFallback` are ported verbatim from the sister
-project, with two unavoidable adjustments:
+`Install-SevenZipFallback` are ported from the sister project. As of
+the `cross-repo-canon-iso-port-alignment` release the logger names
+have been aligned to the canon: this script no longer carries the
+locally-grown `Write-Warn` / `Write-Step` names where Deploy-AMD uses
+`Write-Caution` / `Write-Detail`. `Write-Warn` was renamed to
+`Write-Caution` script-wide, and the canonical `Write-Detail` helper
+was added so the three info lines in `Install-SevenZipFallback` call it
+directly. See the sibling repository's SPEC §A.11.7 "partial port
+participant" tier for the cross-repo classification and the authoritative
+list of which helpers are maintained byte-identical.
 
-| Aspect | Deploy-AMD source | This script | Reason |
-|:---|:---|:---|:---|
-| Yellow-warning logger | `Write-Caution` | `Write-Warn` | The two scripts have independently-grown logger naming. The role and ANSI colour are identical. |
-| Informational logger | `Write-Detail` | `Write-Step` | Same as above. |
-| HTTP wrapper | raw `Invoke-WebRequest` | raw `Invoke-WebRequest` (unchanged) | This script's local `Invoke-WebRequestWithRetry` wrapper has different retry semantics (exponential backoff, multi-attempt) than the three-tier short-circuit fallback Deploy-AMD uses. Aligning them is deferred to a future revision. |
+After that alignment the only remaining per-script differences in the
+three ported helpers are values that MUST encode this script's own
+identity — not logger naming:
 
-These adjustments are minimum-viable for the port to compile and
-run in this script's environment. They are explicitly *not* a
-"redesign while porting" — function bodies, parameter signatures,
-and pipeline ordering remain byte-identical to Deploy-AMD modulo
-the four lines that invoke the renamed loggers.
+| Helper | Difference vs Deploy-AMD | Why it must differ |
+|:---|:---|:---|
+| `Get-SevenZipPath` | none (byte-identical) | — |
+| `Get-LatestSevenZipUrl` | GitHub API `User-Agent` header is `PowerShell-Update-WindowsServerIso` (vs `PowerShell-AMD-Driver-Prep`) | The User-Agent identifies the calling script to the upstream API and must name this script. |
+| `Install-SevenZipFallback` | the `# psa-disable-line PSA3001` justification comment names `msiexec` (vs `signtool/inf2cat/pnputil`) | The comment describes the actual external tool each script invokes; this helper invokes `msiexec`. |
+
+The separate `Invoke-WebRequestWithRetry` wrapper still differs from
+Deploy-AMD's three-tier short-circuit fallback (exponential backoff,
+multi-attempt). That is genuinely different logic, not a naming
+divergence, and is tracked as a structural carve-out in the sibling
+SPEC §A.11.7 partial-participant carve-out list.
+
+These per-script differences are explicitly *not* a "redesign while
+porting." Function bodies, parameter signatures, and pipeline ordering
+otherwise remain byte-identical to Deploy-AMD.
 
 The three helpers are inserted as a single block immediately after
 `Get-WsusScnCabIfNeeded` (the Stage 1 cab acquisition helper).
