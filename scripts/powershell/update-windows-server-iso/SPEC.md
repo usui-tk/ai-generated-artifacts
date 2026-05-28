@@ -3148,29 +3148,51 @@ even if it parses as valid JSON.
 
 ### B.23.3 PowerShell reference implementation
 
-Two helpers live in `Update-WindowsServerIso.ps1`, immediately after
+Three helpers live in `Update-WindowsServerIso.ps1`, immediately after
 the 7-Zip helper block (§B.19.4):
 
 | Function | Purpose |
 |:---|:---|
-| `ConvertTo-CanonicalJson` | Serialize an object to a canonical JSON string. |
-| `Save-CanonicalJsonFile`  | Serialize and atomically write the result to a file. |
+| `ConvertTo-CanonicalJson`   | Serialize an object to a canonical JSON string. |
+| `Save-CanonicalJsonFile`    | Serialize and atomically write the result to a file. |
+| `ConvertFrom-CanonicalJson` | Parse canonical JSON text back into PowerShell objects. |
 
-`ConvertTo-CanonicalJson` is a thin wrapper over `ConvertTo-Json
--Depth $Depth`. PowerShell 7's `ConvertTo-Json` default output already
-satisfies rules 3, 4, 6, 7, and 9. The wrapper adds three corrections:
+**Version-independence requirement.** The serializer and parser are
+hand-rolled and do **not** call the built-in `ConvertTo-Json` /
+`ConvertFrom-Json` cmdlets, because those cmdlets are not
+byte-stable across PowerShell versions:
 
-1. **CRLF → LF normalisation** (rule 2). PowerShell 7's
-   `ConvertTo-Json` line endings are platform-dependent; the wrapper
-   replaces `\r\n` with `\n` unconditionally so output is identical on
-   Windows and Linux.
-2. **Scientific notation E → e** (parity with Python). PowerShell
-   emits `1E+100`; Python emits `1e+100`. JSON RFC 8259 permits both,
-   but byte parity requires one. The canonical choice is lowercase
-   `e`, matching Python's default; the wrapper post-processes the
-   PowerShell output with the regex `(?<=\d)E(?=[+\-]?\d)`.
-3. **Trailing newline policy** (rule 8). PowerShell adds none; the
-   wrapper adds exactly one LF unless `-NoTrailingNewline` is set.
+- `ConvertTo-Json` indentation differs between Windows PowerShell 5.1
+  (deep, verbose indent; two spaces after the colon) and PowerShell
+  7.x (two-space indent; `": "` separator). The same object therefore
+  serialised to different bytes on different hosts, breaking the
+  cross-runtime (PS 5.1 / 7.x / Python) byte-match.
+- `ConvertFrom-Json` auto-converts ISO-8601-looking strings to
+  `[datetime]` on PowerShell 7.x (5.1 keeps them as strings), losing
+  the original textual form (e.g. a `+09:00` offset) and corrupting
+  values on round-trip.
+
+`ConvertTo-CanonicalJson` walks the object graph directly and emits
+each value per the 10 rules: 2-space indent, `": "` separator,
+`",\n<indent>"` array separator, literal non-ASCII, insertion-order
+keys, `\uXXXX` only for control characters below `0x20` (with the
+short escapes `\b \t \n \f \r \" \\`), integers verbatim,
+Python-compatible floats (integer-valued floats gain a trailing `.0`;
+scientific notation uses lowercase `e`), and exactly one trailing LF
+unless `-NoTrailingNewline` is set. As a safety net, any stray
+`[datetime]` / `[datetimeoffset]` is emitted as
+`ToUniversalTime().ToString('o')` (matching the pipeline's own date
+formatting); the data pipeline itself always stores dates as strings.
+
+`ConvertFrom-CanonicalJson` is a recursive-descent parser that returns
+order-preserving `[pscustomobject]` for objects, `[object[]]` for
+arrays, `[string]` for strings (dates stay strings — no `[datetime]`
+coercion), `[long]`/`[double]` for numbers, `[bool]`, and `$null`. Its
+output shape matches what `ConvertFrom-Json` returned previously
+(dot-access and `.PSObject.Properties` both work), so it is a
+drop-in replacement on every canonical data read path
+(`config-*.json`, `wsusscn2-database.json`, `cache-*.json`). Internal
+JSONL logs and object-clone idioms still use the built-in cmdlets.
 
 `Save-CanonicalJsonFile` wraps the serializer and writes raw bytes
 through `[System.IO.File]::WriteAllBytes` with a `UTF8Encoding(false)`

@@ -535,8 +535,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.28-r09.0'
-$Script:ScriptTag     = 'step2b3-real-data-parser-correction'
+$Script:ScriptVersion = 'update-wsi-2026.05.28-r10.0'
+$Script:ScriptTag     = 'step2b4-version-independent-canonical-json'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -2777,7 +2777,7 @@ function Get-ConfigProfile {
     }
 
     $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8
-    $json = $raw | ConvertFrom-Json
+    $json = $raw | ConvertFrom-CanonicalJson
 
     # Schema validation (v2.0 and v2.1 both accepted)
     $acceptedSchemas = @('2.0','2.1')
@@ -3954,7 +3954,7 @@ function Get-ReleaseInfoCache {
     }
     $bytes = [System.IO.File]::ReadAllBytes($cachePath)
     $json  = [System.Text.Encoding]::UTF8.GetString($bytes)
-    return ($json | ConvertFrom-Json)
+    return ($json | ConvertFrom-CanonicalJson)
 }
 
 # ============================================================
@@ -4453,7 +4453,7 @@ function Update-DotNetCuCache {
 
     $rawBytes = [System.IO.File]::ReadAllBytes($rawPath)
     $rawJson  = [System.Text.Encoding]::UTF8.GetString($rawBytes)
-    $rawAggr  = $rawJson | ConvertFrom-Json
+    $rawAggr  = $rawJson | ConvertFrom-CanonicalJson
 
     $indexParsed = ConvertFrom-DotNetCuIndexMarkdown -Markdown $rawAggr.IndexBody
 
@@ -4515,7 +4515,7 @@ function Get-DotNetCuCache {
     }
     $bytes = [System.IO.File]::ReadAllBytes($cachePath)
     $json  = [System.Text.Encoding]::UTF8.GetString($bytes)
-    return ($json | ConvertFrom-Json)
+    return ($json | ConvertFrom-CanonicalJson)
 }
 
 # ============================================================
@@ -4614,7 +4614,7 @@ function Get-DynamicUpdateCache {
     }
     $bytes = [System.IO.File]::ReadAllBytes($cachePath)
     $json  = [System.Text.Encoding]::UTF8.GetString($bytes)
-    $obj   = ($json | ConvertFrom-Json)
+    $obj   = ($json | ConvertFrom-CanonicalJson)
     # Defensive: ensure Entries serialises back as an array even if the
     # file recorded a single object due to old ConvertTo-Json behaviour.
     if ($null -eq $obj.Entries) {
@@ -4947,7 +4947,7 @@ function Get-CatalogTitleTokenList {
     }
     $bytes  = [System.IO.File]::ReadAllBytes($configPath)
     $json   = [System.Text.Encoding]::UTF8.GetString($bytes)
-    $config = $json | ConvertFrom-Json
+    $config = $json | ConvertFrom-CanonicalJson
     if ($null -eq $config -or $null -eq $config.Common) {
         return @()
     }
@@ -5499,7 +5499,7 @@ function Get-PatchSetFromReleaseInfoDiscovery {
     }
     if (Test-Path -LiteralPath $relInfoCachePath -PathType Leaf) {
         $relJson  = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($relInfoCachePath))
-        $relCache = $relJson | ConvertFrom-Json
+        $relCache = $relJson | ConvertFrom-CanonicalJson
         $monthlyReleases = @()
         if ($null -ne $relCache -and $relCache.PSObject.Properties.Name -contains 'MonthlyReleases') {
             $monthlyReleases = @($relCache.MonthlyReleases)
@@ -5565,7 +5565,7 @@ function Get-PatchSetFromReleaseInfoDiscovery {
     }
     if (Test-Path -LiteralPath $dotnetCachePath -PathType Leaf) {
         $dotnetJson  = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($dotnetCachePath))
-        $dotnetCache = $dotnetJson | ConvertFrom-Json
+        $dotnetCache = $dotnetJson | ConvertFrom-CanonicalJson
         $months = @()
         if ($null -ne $dotnetCache -and $dotnetCache.PSObject.Properties.Name -contains 'Months') {
             $months = @($dotnetCache.Months)
@@ -6883,86 +6883,214 @@ function Install-SevenZipFallback {
 # (Linux Python 3.x, Linux PowerShell 7.x) without producing
 # spurious git diffs from formatter quirks.
 #
-# The canonical format and full rationale are normative in SPEC
-# Part B.23 "JSON Canonical Serialization". The 10 format rules,
-# in brief, are:
-#   1. UTF-8 (no BOM)
-#   2. LF line endings
-#   3. 2-space indentation
-#   4. ": " key/value separator
-#   5. ",\n<indent>" array item separator
-#   6. Literal non-ASCII (no \uXXXX escape)
-#   7. Insertion-order keys (no sort)
-#   8. Exactly one trailing LF
-#   9. Null values emitted as "key": null
-#  10. Depth is caller-controlled
+# ============================================================
+# Canonical JSON serialization & parsing (SPEC Part B.23)
+# ============================================================
 #
-# Implementation strategy: PowerShell 7's default ConvertTo-Json already
-# matches rules 3, 4, 6, 7, and 9. This wrapper adds two corrections so
-# the output matches Python json.dumps byte-for-byte:
-#   (a) CRLF -> LF normalisation (PS 7 output is platform-dependent)
-#   (b) Scientific notation E -> e (PS uses uppercase; Python lowercase)
-# plus a trailing-newline policy switch.
+# These helpers produce / consume the repository-canonical JSON format
+# whose byte sequence matches tests/common/canonical_json.py for the same
+# logical input, on BOTH Windows PowerShell 5.1 AND PowerShell 7.x.
+#
+# Why hand-rolled (no ConvertTo-Json / ConvertFrom-Json):
+#   - ConvertTo-Json indentation differs between PS 5.1 (verbose, 2-space
+#     after colon, deep indent) and PS 7.x (2-space indent, ": " sep), so
+#     the same object serialised on different hosts produced different
+#     bytes and broke the cross-runtime byte-match (PS 5.1 / 7.x / Python).
+#   - ConvertFrom-Json auto-converts ISO-8601-looking strings to [datetime]
+#     on PS 7.x (PS 5.1 keeps them as strings), losing the original textual
+#     form (e.g. "+09:00" offsets) and corrupting values on round-trip.
+# To get a single canonical byte stream across all three runtimes, both the
+# writer and the reader are implemented from scratch here and used in place
+# of the built-in cmdlets for all canonical data files (config-*.json,
+# wsusscn2-database.json, cache-*.json, etc.).
+#
+# Canonical format (SPEC Part B.23 §B.23.1):
+#   1. UTF-8 (no BOM)              6. Literal non-ASCII (no \uXXXX)
+#   2. LF line endings            7. Insertion-order keys (no sort)
+#   3. 2-space indentation        8. Exactly one trailing LF
+#   4. ": " key/value separator   9. Null values emitted as "key": null
+#   5. ",\n<indent>" array sep    10. Depth is caller-controlled
 
 function ConvertTo-CanonicalJson {
     <#
     .SYNOPSIS
-        Serialize an object to canonical JSON text (SPEC Part B.23).
+        Serialize an object to canonical JSON text (SPEC Part B.23), with
+        byte output identical on PS 5.1 / 7.x / Python.
     .DESCRIPTION
-        Returns a string whose bytes match canonical_json_dumps()
-        in tests/common/canonical_json.py for the same logical input.
+        Hand-rolled serializer that does NOT call ConvertTo-Json, so the
+        emitted bytes are independent of the PowerShell version's
+        ConvertTo-Json formatting. Returns a string whose bytes match
+        canonical_json_dumps() in tests/common/canonical_json.py for the
+        same logical input.
 
-        The input MUST be an [ordered] hashtable, a [pscustomobject],
-        or any composition of these with primitives, to preserve key
-        insertion order. Plain [hashtable] (@{ ... }) is enumerated
-        in unspecified order by ConvertTo-Json and MUST NOT be used.
+        Accepted input: [ordered] hashtable, [pscustomobject], plain
+        [hashtable] (key order then follows enumeration order; prefer
+        ordered/pscustomobject for determinism), arrays, and the JSON
+        primitives (string, integer, double, bool, $null). [datetime] /
+        [datetimeoffset] values are emitted as UTC second-precision ISO-8601
+        strings (yyyy-MM-ddTHH:mm:ssZ) as a safety net; the data pipeline
+        itself stores dates as strings.
     .PARAMETER InputObject
-        Object to serialize. Accepts pipeline input.
+        Object to serialize.
     .PARAMETER Depth
-        Maximum nesting depth (default 20). Matches the Python
-        canonical_json_dumps -Depth parameter.
+        Maximum nesting depth (default 20). Matches the Python -Depth.
+    .PARAMETER IndentWidth
+        Spaces per indent level (default 2).
     .PARAMETER NoTrailingNewline
         When set, the returned string ends without a final LF.
-        Default is to emit exactly one trailing LF (rule 8).
     .OUTPUTS
         [string]
     #>
     [CmdletBinding()]
     [OutputType([string])]
     param(
-        [Parameter(Mandatory, ValueFromPipeline, Position=0)]
-        [AllowNull()] $InputObject,
-
+        [Parameter(Mandatory, Position=0)] [AllowNull()] $InputObject,
         [Parameter()] [int] $Depth = 20,
-
+        [Parameter()] [int] $IndentWidth = 2,
         [Parameter()] [switch] $NoTrailingNewline
     )
+    if ($Depth -lt 1)       { throw "depth must be >= 1, got $Depth" }
+    if ($IndentWidth -lt 1) { throw "indent_width must be >= 1, got $IndentWidth" }
 
-    process {
-        # PS 7+ defaults already give 2-space indent, ": " separator,
-        # literal UTF-8, and insertion-order keys (for ordered/pscustomobject).
-        $json = $InputObject | ConvertTo-Json -Depth $Depth
+    $sb = [System.Text.StringBuilder]::new()
+    $indentUnit = ' ' * $IndentWidth
+    _CanonicalJson_WriteValue -Value $InputObject -Depth 0 -MaxDepth $Depth -IndentUnit $indentUnit -Sb $sb
+    $json = $sb.ToString()
+    if (-not $NoTrailingNewline) { $json += "`n" }
+    return $json
+}
 
-        # Correction (a): CRLF -> LF (PS 7 output is platform-dependent;
-        # canonical format is LF only per rule 2).
-        $json = $json -replace "`r`n", "`n"
+function _CanonicalJson_WriteValue {
+    param($Value, [int]$Depth, [int]$MaxDepth, [string]$IndentUnit, [System.Text.StringBuilder]$Sb)
 
-        # Correction (b): scientific notation E -> e for Python parity.
-        # Pattern: digit, then literal E, then optional sign, then digit.
-        # The lookbehind/lookahead make this safe inside string values
-        # like "Hello, E3 from the band E +1!" because those contexts
-        # have no surrounding digits in the lookbehind/lookahead.
-        $json = [System.Text.RegularExpressions.Regex]::Replace(
-            $json, '(?<=\d)E(?=[+\-]?\d)', 'e')
+    if ($null -eq $Value) { [void]$Sb.Append('null'); return }
 
-        # Trailing newline policy (rule 8): exactly one LF, or none.
-        if ($NoTrailingNewline) {
-            $json = $json.TrimEnd("`n")
+    if ($Value -is [bool]) { [void]$Sb.Append($(if ($Value) {'true'} else {'false'})); return }
+
+    # DateTime safety net: pipeline stores dates as strings, but emit any
+    # stray [datetime] in the same UTC ISO-8601 second form for stability.
+    if ($Value -is [datetime]) {
+        # Match the pipeline's own date formatting: ToUniversalTime().ToString('o')
+        # (round-trip ISO-8601, 7-digit fractional seconds, 'Z' for UTC).
+        $ic = [System.Globalization.CultureInfo]::InvariantCulture
+        if ($Value.Kind -eq [System.DateTimeKind]::Unspecified) {
+            $utc = [datetime]::SpecifyKind($Value, [System.DateTimeKind]::Utc)
         } else {
-            if (-not $json.EndsWith("`n")) { $json += "`n" }
+            $utc = $Value.ToUniversalTime()
         }
-        return $json
+        _CanonicalJson_WriteString -S ($utc.ToString('o', $ic)) -Sb $Sb
+        return
     }
+    if ($Value -is [System.DateTimeOffset]) {
+        $ic = [System.Globalization.CultureInfo]::InvariantCulture
+        _CanonicalJson_WriteString -S ($Value.UtcDateTime.ToString('o', $ic)) -Sb $Sb
+        return
+    }
+
+    if ($Value -is [string] -or $Value -is [char]) {
+        _CanonicalJson_WriteString -S ([string]$Value) -Sb $Sb; return
+    }
+
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [int16] -or `
+        $Value -is [byte] -or $Value -is [sbyte] -or $Value -is [uint16] -or `
+        $Value -is [uint32] -or $Value -is [uint64]) {
+        [void]$Sb.Append([string]$Value); return
+    }
+    if ($Value -is [double] -or $Value -is [single] -or $Value -is [decimal]) {
+        _CanonicalJson_WriteNumber -N $Value -Sb $Sb; return
+    }
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $keys = @($Value.Keys)
+        if ($keys.Count -eq 0) { [void]$Sb.Append('{}'); return }
+        $pairs = foreach ($k in $keys) { [pscustomobject]@{ K=[string]$k; V=$Value[$k] } }
+        _CanonicalJson_WriteObject -Pairs @($pairs) -Depth $Depth -MaxDepth $MaxDepth -IndentUnit $IndentUnit -Sb $Sb
+        return
+    }
+
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = @($Value)
+        if ($items.Count -eq 0) { [void]$Sb.Append('[]'); return }
+        _CanonicalJson_WriteArray -Items $items -Depth $Depth -MaxDepth $MaxDepth -IndentUnit $IndentUnit -Sb $Sb
+        return
+    }
+
+    $props = @($Value.PSObject.Properties)
+    if ($props.Count -eq 0) {
+        if ($Value -is [System.Management.Automation.PSCustomObject]) { [void]$Sb.Append('{}') }
+        else { _CanonicalJson_WriteString -S ([string]$Value) -Sb $Sb }
+        return
+    }
+    $pairs = foreach ($p in $props) { [pscustomobject]@{ K=$p.Name; V=$p.Value } }
+    _CanonicalJson_WriteObject -Pairs @($pairs) -Depth $Depth -MaxDepth $MaxDepth -IndentUnit $IndentUnit -Sb $Sb
+}
+
+function _CanonicalJson_WriteObject {
+    param([object[]]$Pairs, [int]$Depth, [int]$MaxDepth, [string]$IndentUnit, [System.Text.StringBuilder]$Sb)
+    if (($Depth + 1) -gt $MaxDepth) { throw "Object nests deeper than allowed depth ($MaxDepth); reached depth $($Depth + 1)." }
+    $childIndent = $IndentUnit * ($Depth + 1)
+    $closeIndent = $IndentUnit * $Depth
+    [void]$Sb.Append("{`n")
+    for ($i = 0; $i -lt $Pairs.Count; $i++) {
+        [void]$Sb.Append($childIndent)
+        _CanonicalJson_WriteString -S $Pairs[$i].K -Sb $Sb
+        [void]$Sb.Append(': ')
+        _CanonicalJson_WriteValue -Value $Pairs[$i].V -Depth ($Depth + 1) -MaxDepth $MaxDepth -IndentUnit $IndentUnit -Sb $Sb
+        if ($i -lt $Pairs.Count - 1) { [void]$Sb.Append(',') }
+        [void]$Sb.Append("`n")
+    }
+    [void]$Sb.Append($closeIndent); [void]$Sb.Append('}')
+}
+
+function _CanonicalJson_WriteArray {
+    param([object[]]$Items, [int]$Depth, [int]$MaxDepth, [string]$IndentUnit, [System.Text.StringBuilder]$Sb)
+    if (($Depth + 1) -gt $MaxDepth) { throw "Object nests deeper than allowed depth ($MaxDepth); reached depth $($Depth + 1)." }
+    $childIndent = $IndentUnit * ($Depth + 1)
+    $closeIndent = $IndentUnit * $Depth
+    [void]$Sb.Append("[`n")
+    for ($i = 0; $i -lt $Items.Count; $i++) {
+        [void]$Sb.Append($childIndent)
+        _CanonicalJson_WriteValue -Value $Items[$i] -Depth ($Depth + 1) -MaxDepth $MaxDepth -IndentUnit $IndentUnit -Sb $Sb
+        if ($i -lt $Items.Count - 1) { [void]$Sb.Append(',') }
+        [void]$Sb.Append("`n")
+    }
+    [void]$Sb.Append($closeIndent); [void]$Sb.Append(']')
+}
+
+function _CanonicalJson_WriteString {
+    param([string]$S, [System.Text.StringBuilder]$Sb)
+    [void]$Sb.Append('"')
+    foreach ($ch in $S.ToCharArray()) {
+        $code = [int]$ch
+        switch ($code) {
+            0x22 { [void]$Sb.Append('\"'); continue }
+            0x5C { [void]$Sb.Append('\\'); continue }
+            0x08 { [void]$Sb.Append('\b'); continue }
+            0x09 { [void]$Sb.Append('\t'); continue }
+            0x0A { [void]$Sb.Append('\n'); continue }
+            0x0C { [void]$Sb.Append('\f'); continue }
+            0x0D { [void]$Sb.Append('\r'); continue }
+            default {
+                if ($code -lt 0x20) { [void]$Sb.Append(('\u{0:x4}' -f $code)) }
+                else { [void]$Sb.Append($ch) }
+            }
+        }
+    }
+    [void]$Sb.Append('"')
+}
+
+function _CanonicalJson_WriteNumber {
+    param($N, [System.Text.StringBuilder]$Sb)
+    $ic = [System.Globalization.CultureInfo]::InvariantCulture
+    if ($N -is [double] -or $N -is [single]) {
+        $s = ([double]$N).ToString('R', $ic)
+        # Python emits integer-valued floats with a trailing .0 (e.g. 100.0).
+        if ($s -notmatch '[.eE]') { $s += '.0' }
+    } else {
+        $s = ([decimal]$N).ToString($ic)
+    }
+    $s = [System.Text.RegularExpressions.Regex]::Replace($s, '(?<=\d)E(?=[+\-]?\d)', 'e')
+    [void]$Sb.Append($s)
 }
 
 function Save-CanonicalJsonFile {
@@ -7000,6 +7128,173 @@ function Save-CanonicalJsonFile {
     $tmpPath = $Path + '.tmp'
     [System.IO.File]::WriteAllBytes($tmpPath, $utf8NoBom.GetBytes($json))
     Move-Item -LiteralPath $tmpPath -Destination $Path -Force
+}
+
+function ConvertFrom-CanonicalJson {
+    <#
+    .SYNOPSIS
+        Parse JSON text into PowerShell objects WITHOUT ConvertFrom-Json.
+    .DESCRIPTION
+        Hand-rolled recursive-descent parser. Returns order-preserving
+        [pscustomobject] for JSON objects, [object[]] for arrays, [string]
+        for strings (dates are kept as strings, NOT converted to [datetime],
+        so the original textual form survives a round-trip on every PS
+        version), [long]/[double] for numbers, [bool], and $null.
+
+        Behaviour matches Python json.loads for the inputs this project
+        produces, and is identical on PS 5.1 and PS 7.x.
+    .PARAMETER Json
+        JSON text to parse.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position=0, ValueFromPipeline)]
+        [AllowEmptyString()] [string] $Json
+    )
+    process {
+        $state = @{ s = $Json; i = 0; n = $Json.Length }
+        _CanonicalJson_SkipWs $state
+        $result = _CanonicalJson_ParseValue $state
+        _CanonicalJson_SkipWs $state
+        if ($state.i -lt $state.n) { throw "Unexpected trailing content at position $($state.i)." }
+        return $result
+    }
+}
+
+function _CanonicalJson_SkipWs {
+    param($State)
+    $s = $State.s
+    while ($State.i -lt $State.n) {
+        $c = $s[$State.i]
+        if ($c -eq ' ' -or $c -eq "`t" -or $c -eq "`n" -or $c -eq "`r") { $State.i++ }
+        else { break }
+    }
+}
+
+function _CanonicalJson_ParseValue {
+    param($State)
+    if ($State.i -ge $State.n) { throw "Unexpected end of input." }
+    $c = $State.s[$State.i]
+    if ($c -eq '{') { return _CanonicalJson_ParseObject $State }
+    if ($c -eq '[') { return _CanonicalJson_ParseArray  $State }
+    if ($c -eq '"') { return _CanonicalJson_ParseString $State }
+    if ($c -eq '-' -or ($c -ge '0' -and $c -le '9')) { return _CanonicalJson_ParseNumber $State }
+    if ($c -eq 't' -or $c -eq 'f') { return _CanonicalJson_ParseBool $State }
+    if ($c -eq 'n') { return _CanonicalJson_ParseNull $State }
+    throw "Unexpected character '$c' at position $($State.i)."
+}
+
+function _CanonicalJson_ParseObject {
+    param($State)
+    $obj = [ordered]@{}
+    $State.i++   # consume '{'
+    _CanonicalJson_SkipWs $State
+    if ($State.i -lt $State.n -and $State.s[$State.i] -eq '}') { $State.i++; return [pscustomobject]$obj }
+    while ($true) {
+        _CanonicalJson_SkipWs $State
+        if ($State.s[$State.i] -ne '"') { throw "Expected string key at position $($State.i)." }
+        $key = _CanonicalJson_ParseString $State
+        _CanonicalJson_SkipWs $State
+        if ($State.s[$State.i] -ne ':') { throw "Expected ':' at position $($State.i)." }
+        $State.i++   # consume ':'
+        _CanonicalJson_SkipWs $State
+        $val = _CanonicalJson_ParseValue $State
+        $obj[$key] = $val
+        _CanonicalJson_SkipWs $State
+        $c = $State.s[$State.i]
+        if ($c -eq ',') { $State.i++; continue }
+        if ($c -eq '}') { $State.i++; break }
+        throw "Expected ',' or '}' at position $($State.i)."
+    }
+    return [pscustomobject]$obj
+}
+
+function _CanonicalJson_ParseArray {
+    param($State)
+    $arr = [System.Collections.Generic.List[object]]::new()
+    $State.i++   # consume '['
+    _CanonicalJson_SkipWs $State
+    if ($State.i -lt $State.n -and $State.s[$State.i] -eq ']') { $State.i++; return ,$arr.ToArray() }
+    while ($true) {
+        _CanonicalJson_SkipWs $State
+        $val = _CanonicalJson_ParseValue $State
+        [void]$arr.Add($val)
+        _CanonicalJson_SkipWs $State
+        $c = $State.s[$State.i]
+        if ($c -eq ',') { $State.i++; continue }
+        if ($c -eq ']') { $State.i++; break }
+        throw "Expected ',' or ']' at position $($State.i)."
+    }
+    return ,$arr.ToArray()
+}
+
+function _CanonicalJson_ParseString {
+    param($State)
+    $sb = [System.Text.StringBuilder]::new()
+    $State.i++   # consume opening quote
+    $s = $State.s
+    while ($State.i -lt $State.n) {
+        $c = $s[$State.i]; $State.i++
+        if ($c -eq '"') { return $sb.ToString() }
+        if ($c -eq '\') {
+            if ($State.i -ge $State.n) { throw "Unterminated escape." }
+            $e = $s[$State.i]; $State.i++
+            switch ($e) {
+                '"'  { [void]$sb.Append('"') }
+                '\'  { [void]$sb.Append('\') }
+                '/'  { [void]$sb.Append('/') }
+                'b'  { [void]$sb.Append([char]0x08) }
+                't'  { [void]$sb.Append([char]0x09) }
+                'n'  { [void]$sb.Append([char]0x0A) }
+                'f'  { [void]$sb.Append([char]0x0C) }
+                'r'  { [void]$sb.Append([char]0x0D) }
+                'u'  {
+                    if ($State.i + 4 -gt $State.n) { throw "Bad \u escape." }
+                    $hex = $s.Substring($State.i, 4); $State.i += 4
+                    [void]$sb.Append([char][System.Convert]::ToInt32($hex, 16))
+                }
+                default { throw "Bad escape '\$e' at position $($State.i)." }
+            }
+        } else {
+            [void]$sb.Append($c)
+        }
+    }
+    throw "Unterminated string."
+}
+
+function _CanonicalJson_ParseNumber {
+    param($State)
+    $start = $State.i
+    $s = $State.s
+    if ($s[$State.i] -eq '-') { $State.i++ }
+    while ($State.i -lt $State.n) {
+        $c = $s[$State.i]
+        if (($c -ge '0' -and $c -le '9') -or $c -eq '.' -or $c -eq 'e' -or $c -eq 'E' -or $c -eq '+' -or $c -eq '-') { $State.i++ }
+        else { break }
+    }
+    $numStr = $s.Substring($start, $State.i - $start)
+    $ic = [System.Globalization.CultureInfo]::InvariantCulture
+    if ($numStr -notmatch '[.eE]') {
+        $asLong = [long]0
+        if ([long]::TryParse($numStr, [ref]$asLong)) { return $asLong }
+        return [double]::Parse($numStr, $ic)
+    }
+    return [double]::Parse($numStr, [System.Globalization.NumberStyles]::Float, $ic)
+}
+
+function _CanonicalJson_ParseBool {
+    param($State)
+    $s = $State.s
+    if ($State.i + 4 -le $State.n -and $s.Substring($State.i,4) -eq 'true')  { $State.i += 4; return $true }
+    if ($State.i + 5 -le $State.n -and $s.Substring($State.i,5) -eq 'false') { $State.i += 5; return $false }
+    throw "Invalid literal at position $($State.i)."
+}
+
+function _CanonicalJson_ParseNull {
+    param($State)
+    $s = $State.s
+    if ($State.i + 4 -le $State.n -and $s.Substring($State.i,4) -eq 'null') { $State.i += 4; return $null }
+    throw "Invalid literal at position $($State.i)."
 }
 
 # ============================================================
@@ -12493,7 +12788,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                 continue
             }
             Write-SubSection ('Refreshing {0}' -f $osKey)
-            $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson
             $acceptedSchemas = @('2.0','2.1')
             if ($acceptedSchemas -notcontains $raw.Schema) {
                 Write-Warn ('Skipping {0}: Schema is "{1}", expected one of: {2}.' -f $osKey, $raw.Schema, ($acceptedSchemas -join ', '))
@@ -13351,7 +13646,7 @@ function Update-Layer1DependencyVerification {
 
         # Read existing config
         $cfgText = [System.IO.File]::ReadAllText($configPath)
-        $cfg = $cfgText | ConvertFrom-Json
+        $cfg = $cfgText | ConvertFrom-CanonicalJson
 
         # Compare against existing fields (idempotent)
         $existingUid = $cfg.PSObject.Properties['_DependencyVerifiedUpdateId']
