@@ -484,7 +484,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.p
 
 ## 自己検証ツール
 
-`tests/` サブディレクトリには 12 個の Python 自己検証ツール（T1 – T12）
+`tests/` サブディレクトリには 13 個の Python 自己検証ツール（T1 – T13）
 に加え、Part C のフォーマットゲートが同梱されています。これらは
 スクリプトの外部依存をプローブし、PowerShell 関数をユニットテストし、
 さらに SPEC §B.23 の JSON canonical 形式を強制します。オフラインツールは
@@ -501,6 +501,7 @@ python3 tests/catalog_title_tokens_test.py   # T9：18 個の Title-token アサ
 python3 tests/release_info_resolver_test.py  # T10：22 個の resolver アサーション
 python3 tests/canonical_json_test.py         # T11：26 個の PS/Python バイトレベル パリティアサーション
 python3 tests/wsusscn2_parser_test.py        # T12：22 個の wsusscn2 パーサーパイプラインアサーション
+python3 tests/wsusscn2_layer1_test.py        # T13：14 個の Layer 1 書き戻しアサーション
 
 # Part C 品質ゲート（JSON ファイルを触るコミットごとに実行）
 python3 tests/canonical_json_format_check.py # 26 JSON ファイルが canonical 形式（SPEC §C.3.4）

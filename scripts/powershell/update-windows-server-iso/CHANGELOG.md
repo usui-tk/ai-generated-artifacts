@@ -16,6 +16,106 @@ the script and follows the
 
 ## [Unreleased]
 
+### r09.0 Step 2b2 - A04 wrapper implementation and Layer 1 integration
+
+This change implements the Phase 2b2 lifecycle glue that turns the
+parser pipeline (landed in Step 2b1) into a full Action: `-Action
+RefreshDependencyDatabase` now chains Stages 1-4 end-to-end and
+propagates the latest LCU KB and CreationDate per Server OS family
+into the data/config-Server*.json baselines. `-Action
+RefreshAllBaselines` automatically chains A04 as a soft-fail
+downstream step, so the monthly refresh workflow gains
+dependency-database freshness without any operator-facing change.
+
+### What is in this commit
+
+**Production code (`Update-WindowsServerIso.ps1`, +244 net lines)**:
+
+| Site | Lines | Purpose |
+|---|---:|---|
+| L538-539 | 1 changed | `$Script:ScriptTag` bumped from `step2b1-parser-pipeline-and-fixture-tooling` to `step2b2-a04-wrapper-implementation-and-layer1-integration`. `$Script:ScriptVersion` unchanged. |
+| L13012-13182 | replaced | `Invoke-AdminPhaseA04_RefreshDependencyDatabase` body, replacing the Step 2a `NotImplementedException` stub. New body executes Stage 1 (`Get-WsusScnCabIfNeeded`) → Stage 2 (`Invoke-WsusScnPackageXmlExtract`) → Stage 3 (`ConvertFrom-WsusScnPackageXml`) → Stage 4 (`New-WsusScnDependencyDatabase`) → Layer 1 writeback (`Update-Layer1DependencyVerification`). Caller-overridable `-CabPath`, `-OutputPath`, `-StaleAfterDays`, `-ForceRefetch`, `-SkipLayer1Update`. DryRun mode parses but skips the JSON and Layer 1 writebacks. Staging directory beneath `$Script:TempDir`; cleaned on success, preserved on failure for inspection. Soft-fail return: `$false` on any pipeline error, `$true` on success or DryRun completion. |
+| L13184-13283 | +100 | `Update-Layer1DependencyVerification` (new helper). For each Server OS family in `$Script:WsusScnOsCategoryGuids`, finds the most-recent LCU-bearing in-scope Update and writes three advisory fields to `data/config-<OsKey>.json`: `_DependencyVerifiedKb`, `_DependencyVerifiedCreationDate`, `_DependencyVerifiedAt`. Idempotent (re-runs report `UnchangedCount` instead of `UpdatedCount` when values match). Uses `Save-ConfigWithBaseline` for atomic LF/UTF-8 writes. |
+| L12602-12624 | +23 | `Invoke-AdminPhaseA01_RefreshAllBaselines` soft-fail chain into A04 immediately after `Show-RefreshAllBaselinesSummary`. A04 failure is reported via `Write-Warn` but does NOT mark A01 as failed (the per-OS config baselines are the primary A01 deliverable; the dependency database is downstream advisory data). |
+
+**Design choices**:
+
+- *A01 -> A04 is a chain, not a dependency*. A01 still completes
+  successfully even if A04 fails. This protects the monthly refresh
+  workflow against transient wsusscn2.cab CDN failures.
+- *Layer 1 writeback writes only three advisory fields* per config.
+  No structural keys are added; no existing keys are renamed.
+  Downstream consumers that do not know about these fields ignore them
+  (forward-compatible JSON).
+- *DryRun is partial-execute, not full-skip*. A04 still acquires the
+  cab and parses package.xml in DryRun so the run is informative; only
+  the Layer 2 JSON write and Layer 1 config writeback are skipped.
+  This matches the established convention for A01 / A02 / A03.
+- *Staging is workspace-local*. The cab extraction stages into
+  `$Script:TempDir`-relative paths rather than `[Path]::GetTempPath()`
+  so the workspace policy (LogsDir / TempDir siblings) is preserved.
+  On failure the staging is left in place for the operator to inspect.
+
+**What is intentionally NOT yet wired up** (Phase 2c scope):
+
+- The SSU/LCU pre-flight gate that *consumes* the `_DependencyVerified*`
+  fields (SPEC §B.19.5) is not yet implemented. The fields are now
+  written but no Phase reads them yet.
+- The dependency-closure graph walk (SPEC §B.19.14, Phase 2c) that
+  expands the Layer 2 JSON into a topologically-sorted patch order is
+  out of scope here.
+
+**New offline test (`tests/wsusscn2_layer1_test.py`, T13, ~190 lines)**:
+
+14 assertions exercising:
+
+- Stub-config setup pre-flight: 4 minimal `config-Server*.json` files
+  created in a temp `data/` directory
+- Run 1 (first invocation): `UpdatedCount=2` (Server 2022 + Server 2025),
+  `UnchangedCount=0`, `MissingCount=2` (Server 2016 + Server 2019,
+  which have no in-scope LCU in the T12 fixture)
+- Field-level correctness on Server 2022: `_DependencyVerifiedKb=KB5099001`,
+  `_DependencyVerifiedCreationDate=2026-04-15T10:00:00Z`,
+  `_DependencyVerifiedAt` present and ISO-8601 formatted
+- Field-level correctness on Server 2025: `_DependencyVerifiedKb=KB5099003`,
+  `_DependencyVerifiedCreationDate=2026-05-10T10:00:00Z`
+- Missing-OS hygiene: Server 2016 config has no `_DependencyVerifiedKb`
+  field added (no spurious writeback)
+- Existing-field preservation: the pre-existing `OsKey` field survives
+  the writeback intact
+- Run 2 (idempotent re-invocation): `UpdatedCount=0`, `UnchangedCount=2`,
+  `MissingCount=2`
+
+The test runs against a tempdir-cloned `data/` so the repository's real
+configs are never touched. Stage 1 (`Get-WsusScnCabIfNeeded`) is
+*not* exercised here; it is covered by the live monthly refresh CI
+and the synthetic-test-mode end-to-end run.
+
+**Documentation updates**:
+
+- `SPEC.md` §B.19.9.5 *A04 wrapper lifecycle (Phase 2b2 binding)*
+  added covering the function signature, parameter semantics, A01
+  chaining model, and Layer 1 writeback contract.
+- `SPEC.md` §B.19.15.3 updated to reflect that A04 is now implemented
+  (was: pointer to Step 2b stub).
+- `tests/README.md`: Tool inventory + Quick start + File layout updated
+  with T13 row.
+- `README.md` / `README.ja.md`: T12 -> T13 in the Self-verification
+  tools count, bilingual lock-step preserved.
+- `TESTING.md` §0 status table updated with T13 row and A04 status
+  changed from "stub" to "implemented".
+
+### Quality gate
+
+| Gate | Result |
+|---|---|
+| `psa.py` (PSA full rule set) | 0 errors, 0 warnings, 0 info |
+| `PSScriptAnalyzer` (Settings.psd1) | 0 findings |
+| Unit tests T2-T12 (no regression) | 160/160 passed (138+22) |
+| **T13 (new)** | **14/14 passed** |
+| Canonical JSON format gate | 26/26 passed (no JSON additions) |
+| Bilingual lock-step (README.md / .ja.md / TESTING.md) | preserved |
+
 ### r09.0 Step 2b1 - wsusscn2 parser pipeline and fixture tooling
 
 This change implements the Phase 2b1 parser pipeline (Stages 2-4 of the

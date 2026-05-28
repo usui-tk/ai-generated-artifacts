@@ -38,6 +38,7 @@ production, this directory ships five tools, summarised below.
 | `release_info_resolver_test.py` (T10) | Offline regression test for the Refresher main-path migration; drives `Get-PatchSetFromReleaseInfoDiscovery` through four scenarios (Server 2025/2022/2019 full set + no-match month) plus defensive cases (empty data dir, invalid PatchMonth). Synthetic fixtures derived from live 2026-05-26 captures cover SPEC B.23.5 B-2 multi-row .NET CU per OS and SPEC B.23.6 absence-of-DU; 18 assertions | After every change to `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or any of the three caches it reads; on every CI run | No  |
 | `canonical_json_test.py` (T11) | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell, in `Update-WindowsServerIso.ps1`) and `canonical_json_dumps` / `save_canonical_json_file` (Python, in `tests/common/canonical_json.py`); 26 assertions covering primitives (12), collections (8), Unicode (3), real-world `data/*.json` shapes (2), and file-level save (1). Verifies the SPEC Part B.23 byte-level parity contract for `data/*.json` and `tests/fixtures/*.json` files. | After every change to `ConvertTo-CanonicalJson`, `Save-CanonicalJsonFile`, or `tests/common/canonical_json.py`; on every CI run | No  |
 | `wsusscn2_parser_test.py` (T12) | Offline self-verification of the wsusscn2 parser pipeline Stages 3 and 4. Drives `ConvertFrom-WsusScnPackageXml` + `New-WsusScnDependencyDatabase` against the small committed fixture `fixtures/wsusscn2/package.xml`, then structurally compares against `fixtures/wsusscn2/expected-output.json` (after stripping environmental `scriptVersion` / `scriptTag` / `generatedAt` / `sourceCab` fields). 22 assertions covering: stats parity, scope-filter admit/reject (Product/Classification/recency), Category-Update detection, FileLocation -> payload-URL join with orphan-digest accounting, Microsoft-prose absence in both fixture and parser output (SPEC §B.19.8 hard rule). | After every change to Stage 3 or Stage 4 of the wsusscn2 parser pipeline, the scope-filter GUID tables, or the `tests/common/wsusscn2_fixture_builder.py` helper; on every CI run | No  |
+| `wsusscn2_layer1_test.py` (T13) | Offline self-verification of the Phase 2b2 Layer 1 writeback helper `Update-Layer1DependencyVerification`. Drives the parser against the T12 fixture, then calls the helper against a tempdir-cloned `data/config-Server*.json` skeleton. 14 assertions covering: stub-config setup pre-flight, Run-1 counts (`UpdatedCount=2`, `UnchangedCount=0`, `MissingCount=2`), field-level correctness of `_DependencyVerifiedKb` / `_DependencyVerifiedCreationDate` / `_DependencyVerifiedAt` on Server 2022 and Server 2025, missing-OS hygiene (no spurious writeback for Server 2016/2019), existing-field preservation (`OsKey`), and idempotent Run-2 (`UpdatedCount=0`, `UnchangedCount=2`). The test never touches the repository's real `data/`. | After every change to `Update-Layer1DependencyVerification`, the `$Script:WsusScnOsCategoryGuids` table, or the A04 wrapper's Layer 1 callout site; on every CI run | No  |
 | `canonical_json_format_check.py` (Part C gate) | Offline format compliance check for every `*.json` file under `data/`, `tests/fixtures/`, and `tests/snapshots/`. Re-serialises each file through `canonical_json_dumps` and fails if the bytes diverge. Implements SPEC §C.3.4. | On every commit that adds or modifies a JSON file in the three scanned directories; on every CI run | No  |
 
 ## Quick start
@@ -49,6 +50,7 @@ python3 catalog_fixture_test.py            # T2: 13 assertions on saved HTML
 python3 powershell_harness.py              # T3: 7 PS function-level assertions
 python3 canonical_json_test.py             # T11: 26 PS/Python byte-level parity assertions
 python3 wsusscn2_parser_test.py            # T12: 22 wsusscn2 parser pipeline assertions
+python3 wsusscn2_layer1_test.py            # T13: 14 Layer 1 writeback helper assertions
 python3 canonical_json_format_check.py     # Part C: every JSON file in canonical format
 
 # Live tests - require network access to Microsoft endpoints
@@ -161,6 +163,7 @@ tests/
   eval_iso_probe.py          T4
   wsusscn2_probe.py          T5
   wsusscn2_parser_test.py    T12 (Stage 3 + Stage 4 self-verification, 22 assertions)
+  wsusscn2_layer1_test.py    T13 (Phase 2b2 Layer 1 writeback helper, 14 assertions)
   common/
     __init__.py              package marker
     catalog_client.py        urllib HTTP fetcher with retry-jitter

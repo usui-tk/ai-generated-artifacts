@@ -536,7 +536,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
 $Script:ScriptVersion = 'update-wsi-2026.05.28-r09.0'
-$Script:ScriptTag     = 'step2b1-parser-pipeline-and-fixture-tooling'
+$Script:ScriptTag     = 'step2b2-a04-wrapper-implementation-and-layer1-integration'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -12593,6 +12593,26 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
             -HasUnresolved ([bool]$hasUnresolved) `
             -OkOverall ([bool]$okOverall)
 
+        # ---- Chain: A04 RefreshDependencyDatabase ----
+        # The dependency database (Layer 2 JSON + Layer 1 _DependencyVerified*
+        # fields) is logically downstream of the per-OS config baselines: it
+        # consumes the same data/cache-* assets and writes the same
+        # data/config-Server*.json files for the verified-KB metadata. So
+        # A01's "refresh everything" intent implies A04 too. A04 is run
+        # soft-fail (its failure is reported but does NOT mark A01 as failed,
+        # because the underlying config baselines have already been written
+        # successfully and that is the primary A01 deliverable).
+        Set-DebugStep -Step 'chain-a04-dependency-database'
+        Write-SubSection 'Chain: A04 RefreshDependencyDatabase'
+        try {
+            $a04ok = Invoke-AdminPhaseA04_RefreshDependencyDatabase
+            if (-not $a04ok) {
+                Write-Warn 'A04 RefreshDependencyDatabase returned $false (soft-fail). A01 baselines are still considered successful.'
+            }
+        } catch {
+            Write-Warn ('A04 chain raised an exception (soft-fail): {0}' -f $_.Exception.Message)
+        }
+
         if (-not $okOverall) {
             $Script:ExitCode = 1
             return $false
@@ -13012,48 +13032,272 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
 function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
     <#
     .SYNOPSIS
-        [r09.0 Step 2a: STUB] Refresh the Layer 2 Servicing Dependency
-        Database (data/wsusscn2-database.json) from wsusscn2.cab.
+        Refresh the Layer 2 Servicing Dependency Database
+        (data/wsusscn2-database.json) from wsusscn2.cab.
     .DESCRIPTION
-        This is a r09.0 Step 2a wrapper STUB. The full implementation
-        ships in r09.0 Step 2b together with the parser pipeline
-        functions Invoke-WsusScnPackageXmlExtract,
-        ConvertFrom-WsusScnPackageXml, and New-WsusScnDependencyDatabase
-        (SPEC Part B.19.9).
-        The wrapper is registered now so that the PhaseRegistry,
-        Get-PhaseListByAction switch, and param() ValidateSet entries
-        for -Action RefreshDependencyDatabase land in a single
-        atomic-feeling commit. Calling -Action RefreshDependencyDatabase
-        before r09.0 Step 2b raises a clear NotImplementedException-style
-        error directing the operator to the SPEC section that describes
-        the planned behaviour.
+        Executes the four-stage wsusscn2 parser pipeline as a single
+        cohesive Action:
+          Stage 1 — Get-WsusScnCabIfNeeded
+                    (download or refresh wsusscn2.cab if older than
+                     -StaleAfterDays; offline cache reuse otherwise)
+          Stage 2 — Invoke-WsusScnPackageXmlExtract
+                    (two-step 7-Zip extraction wsusscn2.cab -> package.xml)
+          Stage 3 — ConvertFrom-WsusScnPackageXml
+                    (XmlReader streaming parse + Product/Classification/recency scope filter)
+          Stage 4 — New-WsusScnDependencyDatabase
+                    (canonical-JSON serialization of dependency graph to OutputPath)
+
+        After Stage 4 the function optionally invokes
+        Update-Layer1DependencyVerification to write the latest LCU
+        KB and CreationDate per Server OS into each
+        data/config-Server*.json, unless -SkipLayer1Update is passed.
+
+        Staging directory is created beneath the workspace ScratchDir
+        and removed on success; preserved on failure for inspection.
+
+        In DryRun mode the cab is still acquired and parsed (so the
+        run is informative) but Stage 4 JSON writeback and Layer 1
+        config writeback are both skipped.
+    .PARAMETER CabPath
+        Optional. Full path to a wsusscn2.cab to use instead of the
+        default cache location. If supplied and freshness can be
+        verified, Stage 1 download is skipped.
+    .PARAMETER OutputPath
+        Optional. Full path to the Layer 2 JSON to write. Defaults to
+        $Script:ScriptRoot/data/wsusscn2-database.json.
+    .PARAMETER StaleAfterDays
+        Stage 1 freshness threshold. Default 7 (matches the typical
+        wsusscn2 release cadence).
+    .PARAMETER ForceRefetch
+        Ignore cache freshness; always re-download wsusscn2.cab from
+        the Microsoft CDN.
+    .PARAMETER SkipLayer1Update
+        After writing the Layer 2 JSON, do NOT propagate the latest
+        LCU KB/CreationDate to data/config-Server*.json. Useful in
+        partial-refresh scenarios where the operator wants to inspect
+        the Layer 2 output first.
     .OUTPUTS
-        [bool] Always throws in r09.0 Step 2a; the future contract is
-        $true on successful refresh, $false on soft-fail (air-gapped
-        without -OfflineCabPath).
+        [bool] $true on successful refresh (Layer 2 JSON written, or
+        DryRun completed without errors); $false on any pipeline error
+        (the underlying exception message is surfaced via Write-Fail).
     #>
     [CmdletBinding()]
     [OutputType([bool])]
-    param()
+    param(
+        [string] $CabPath,
+        [string] $OutputPath,
+        [int]    $StaleAfterDays = 7,
+        [switch] $ForceRefetch,
+        [switch] $SkipLayer1Update
+    )
 
     Start-DebugTrace -Context 'Invoke-AdminPhaseA04_RefreshDependencyDatabase' -PhaseId 'A04'
+    $stagingDir = $null
     try {
-        Write-Warn '-Action RefreshDependencyDatabase is registered but not yet implemented.'
-        Write-Warn 'Planned for r09.0 Step 2b per SPEC Part B.19.15.3.'
-        Write-Warn 'Required prerequisites currently in place after r09.0 Step 2a:'
-        Write-Warn '  - 7-Zip helpers (Get-SevenZipPath, Get-LatestSevenZipUrl, Install-SevenZipFallback)'
-        Write-Warn '  - Stage 1 cab acquisition (Get-WsusScnCabIfNeeded, pre-existing)'
-        Write-Warn 'Pending work in Step 2b:'
-        Write-Warn '  - Stage 2: Invoke-WsusScnPackageXmlExtract (two-step 7-Zip extraction)'
-        Write-Warn '  - Stage 3: ConvertFrom-WsusScnPackageXml (XmlReader streaming, two-pass walk)'
-        Write-Warn '  - Stage 4: New-WsusScnDependencyDatabase (Layer 2 JSON emission)'
-        throw [System.NotImplementedException]::new(
-            'Invoke-AdminPhaseA04_RefreshDependencyDatabase is a r09.0 Step 2a stub. ' +
-            'Implementation lands in r09.0 Step 2b. ' +
-            'See SPEC Part B.19.9 / Part B.19.15.3 for the planned behaviour.'
-        )
+        # ---- Step 1: resolve paths ----
+        Set-DebugStep -Step 'resolve-paths'
+        $dataRoot = Join-Path $Script:ScriptRoot 'data'
+        if (-not (Test-Path -LiteralPath $dataRoot)) {
+            throw ('Data root not found: {0}' -f $dataRoot)
+        }
+
+        $cacheDir = Join-Path $dataRoot 'cache-wsusscn2'
+        if (-not (Test-Path -LiteralPath $cacheDir)) {
+            New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+        }
+
+        if (-not $CabPath) {
+            $CabPath = Join-Path $cacheDir 'wsusscn2.cab'
+        }
+        if (-not $OutputPath) {
+            $OutputPath = Join-Path $dataRoot 'wsusscn2-database.json'
+        }
+
+        $scratchRoot = if ($Script:TempDir) { $Script:TempDir } else { $env:TEMP }
+        if (-not $scratchRoot) { $scratchRoot = [System.IO.Path]::GetTempPath() }
+        $stagingDir = Join-Path $scratchRoot ('wsusscn2-staging-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
+
+        Write-SubSection 'Refresh plan'
+        Write-Step ('Mode             : {0}' -f $Script:Mode)
+        Write-Step ('CabPath          : {0}' -f $CabPath)
+        Write-Step ('OutputPath       : {0}' -f $OutputPath)
+        Write-Step ('StagingDir       : {0}' -f $stagingDir)
+        Write-Step ('StaleAfterDays   : {0}' -f $StaleAfterDays)
+        Write-Step ('ForceRefetch     : {0}' -f $ForceRefetch.IsPresent)
+        Write-Step ('SkipLayer1Update : {0}' -f $SkipLayer1Update.IsPresent)
+        if ($Script:DryRun) {
+            Write-Warn 'DryRun is ON: Stage 4 JSON write and Layer 1 config update will be SKIPPED.'
+        }
+
+        # ---- Stage 1: acquire wsusscn2.cab ----
+        Set-DebugStep -Step 'stage1-acquire-cab'
+        Write-SubSection 'Stage 1: acquire wsusscn2.cab'
+        $acquiredCab = Get-WsusScnCabIfNeeded -CabPath $CabPath -StaleAfterDays $StaleAfterDays -ForceRefetch:$ForceRefetch
+        if (-not $acquiredCab -or -not (Test-Path -LiteralPath $acquiredCab -PathType Leaf)) {
+            throw ('Stage 1 failed to produce a usable wsusscn2.cab (returned: {0})' -f $acquiredCab)
+        }
+        $cabFile = Get-Item -LiteralPath $acquiredCab
+        Write-Ok ('Stage 1 OK : {0} ({1:N0} bytes, modified {2})' -f $cabFile.FullName, $cabFile.Length, $cabFile.LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+
+        # ---- Stage 2: extract package.xml ----
+        Set-DebugStep -Step 'stage2-extract-package-xml'
+        Write-SubSection 'Stage 2: extract package.xml (two-step 7-Zip)'
+        $packageXml = Invoke-WsusScnPackageXmlExtract -CabPath $acquiredCab -StagingDirectory $stagingDir
+        $xmlSize = (Get-Item -LiteralPath $packageXml).Length
+        Write-Ok ('Stage 2 OK : {0} ({1:N0} bytes)' -f $packageXml, $xmlSize)
+
+        # ---- Stage 3: parse package.xml ----
+        Set-DebugStep -Step 'stage3-parse-package-xml'
+        Write-SubSection 'Stage 3: parse package.xml (XmlReader streaming)'
+        $parseResult = ConvertFrom-WsusScnPackageXml -PackageXmlPath $packageXml
+        Write-Ok ('Stage 3 OK : observed={0:N0} in-scope={1:N0} bundles={2:N0} file-locations={3:N0}' -f `
+            $parseResult.Stats.UpdatesObserved, `
+            $parseResult.Stats.UpdatesInScope, `
+            $parseResult.Stats.BundlesObserved, `
+            $parseResult.Stats.FileLocationsRetained)
+
+        # ---- Stage 4: write Layer 2 JSON (skipped on DryRun) ----
+        Set-DebugStep -Step 'stage4-emit-layer2-json'
+        Write-SubSection 'Stage 4: emit Layer 2 dependency database'
+        if ($Script:DryRun) {
+            Write-Warn 'DryRun: Stage 4 JSON writeback SKIPPED.'
+        } else {
+            $written = New-WsusScnDependencyDatabase -ParseResult $parseResult -OutputPath $OutputPath -SourceCabPath $acquiredCab
+            $outSize = (Get-Item -LiteralPath $written).Length
+            Write-Ok ('Stage 4 OK : {0} ({1:N0} bytes)' -f $written, $outSize)
+        }
+
+        # ---- Stage 5: propagate to Layer 1 configs (optional) ----
+        if ($SkipLayer1Update) {
+            Write-Step 'Layer 1 update SKIPPED (-SkipLayer1Update).'
+        } elseif ($Script:DryRun) {
+            Write-Warn 'DryRun: Layer 1 config update SKIPPED.'
+        } else {
+            Set-DebugStep -Step 'layer1-update-configs'
+            Write-SubSection 'Layer 1: update _DependencyVerified* fields in config-Server*.json'
+            $layer1Result = Update-Layer1DependencyVerification -ParseResult $parseResult -DataRoot $dataRoot
+            Write-Ok ('Layer 1 OK : updated={0} unchanged={1} missingProductData={2}' -f `
+                $layer1Result.UpdatedCount, $layer1Result.UnchangedCount, $layer1Result.MissingCount)
+        }
+
+        # ---- Cleanup staging ----
+        Set-DebugStep -Step 'cleanup-staging'
+        if (Test-Path -LiteralPath $stagingDir) {
+            Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        Write-Ok 'A04 RefreshDependencyDatabase: completed successfully.'
+        return $true
+
+    } catch {
+        Write-Fail ('A04 RefreshDependencyDatabase failed: {0}' -f $_.Exception.Message)
+        if ($stagingDir -and (Test-Path -LiteralPath $stagingDir)) {
+            Write-Warn ('Staging preserved at {0} for inspection.' -f $stagingDir)
+        }
+        $Script:ExitCode = 1
+        return $false
     } finally {
         Stop-DebugTrace
+    }
+}
+
+function Update-Layer1DependencyVerification {
+    <#
+    .SYNOPSIS
+        Propagate the latest LCU KB and CreationDate from the in-memory
+        parser result to each data/config-Server*.json.
+    .DESCRIPTION
+        For each Server OS family in $Script:WsusScnOsCategoryGuids, finds
+        the in-scope Update with the most recent CreationDate that
+        carries a KBArticleID (i.e. the most recent LCU for that OS), and
+        writes two fields to the corresponding config:
+
+          _DependencyVerifiedKb           : "KB####" string
+          _DependencyVerifiedCreationDate : ISO-8601 UTC string
+          _DependencyVerifiedAt           : ISO-8601 UTC of THIS update
+
+        These fields are advisory and consumed by SPEC §B.19.5 pre-flight
+        gate; they do not feed into the Catalogue or .NET CU pipelines.
+
+        Writes are skipped if the existing fields already match the new
+        values (idempotent). Uses Save-ConfigWithBaseline for atomic
+        LF/UTF-8 writes per repository convention.
+    .OUTPUTS
+        [pscustomobject] with .UpdatedCount, .UnchangedCount, .MissingCount.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject] $ParseResult,
+
+        [Parameter(Mandatory)]
+        [string] $DataRoot
+    )
+
+    $updated = 0
+    $unchanged = 0
+    $missing = 0
+    $nowIso = ([datetime]::UtcNow).ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+    foreach ($entry in $Script:WsusScnOsCategoryGuids.GetEnumerator()) {
+        $osKey = $entry.Key
+        $productGuid = $entry.Value.ToLowerInvariant()
+
+        # Find the most recent LCU-bearing update for this OS family
+        $candidates = $ParseResult.Updates | Where-Object {
+            ($_.KBArticleIds.Count -gt 0) -and
+            ($_.ProductGuids -contains $productGuid)
+        }
+        if (-not $candidates -or $candidates.Count -eq 0) {
+            Write-Warn ('  {0}: no in-scope updates with KBArticleID found; skipping.' -f $osKey)
+            $missing++
+            continue
+        }
+
+        # Pick the entry with the most recent CreationDate (string compare
+        # works for ISO-8601 'yyyy-MM-ddTHH:mm:ssZ').
+        $latest = $candidates | Sort-Object -Property CreationDate -Descending | Select-Object -First 1
+        $kbId = 'KB' + $latest.KBArticleIds[0]
+
+        $configPath = Join-Path $DataRoot ('config-{0}.json' -f $osKey)
+        if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+            Write-Warn ('  {0}: config not found at {1}; skipping.' -f $osKey, $configPath)
+            $missing++
+            continue
+        }
+
+        # Read existing config
+        $cfgText = [System.IO.File]::ReadAllText($configPath)
+        $cfg = $cfgText | ConvertFrom-Json
+
+        # Compare against existing fields (idempotent)
+        $existingKb   = $cfg.PSObject.Properties['_DependencyVerifiedKb']
+        $existingDate = $cfg.PSObject.Properties['_DependencyVerifiedCreationDate']
+
+        if ($existingKb -and $existingDate `
+                -and $existingKb.Value -eq $kbId `
+                -and $existingDate.Value -eq $latest.CreationDate) {
+            Write-Step ('  {0}: unchanged ({1} @ {2})' -f $osKey, $kbId, $latest.CreationDate)
+            $unchanged++
+            continue
+        }
+
+        # Write the three advisory fields
+        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedKb'           -NotePropertyValue $kbId             -Force
+        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedCreationDate' -NotePropertyValue $latest.CreationDate -Force
+        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedAt'           -NotePropertyValue $nowIso           -Force
+
+        # Atomic writeback via the project's canonical helper
+        Save-ConfigWithBaseline -ConfigPath $configPath -OsProfile $cfg
+        Write-Ok ('  {0}: updated ({1} @ {2})' -f $osKey, $kbId, $latest.CreationDate)
+        $updated++
+    }
+
+    return [pscustomobject]@{
+        UpdatedCount   = $updated
+        UnchangedCount = $unchanged
+        MissingCount   = $missing
     }
 }
 

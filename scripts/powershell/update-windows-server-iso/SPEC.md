@@ -1950,6 +1950,104 @@ Stage 2 is exercised by the live monthly refresh CI. The fixture in
 via `python3 -m tests.common.wsusscn2_fixture_builder` — fixture
 changes are therefore reviewable as code, not as opaque binary blobs.
 
+#### B.19.9.5 A04 wrapper lifecycle (Phase 2b2 binding)
+
+Phase 2b2 promotes the parser pipeline from a set of single-purpose
+helpers into a full Action by implementing the lifecycle glue that
+wraps Stages 1-4 into `Invoke-AdminPhaseA04_RefreshDependencyDatabase`
+and into the data flow that propagates the result into the Layer 1
+configs.
+
+**Function signature**
+
+```
+Invoke-AdminPhaseA04_RefreshDependencyDatabase
+    [-CabPath          <string>]    # default: data/cache-wsusscn2/wsusscn2.cab
+    [-OutputPath       <string>]    # default: data/wsusscn2-database.json
+    [-StaleAfterDays   <int>]       # default: 7
+    [-ForceRefetch                ] # ignore cache freshness
+    [-SkipLayer1Update            ] # skip the Layer 1 writeback step
+    -> [bool]
+```
+
+**Stage chain semantics**
+
+Stage 1 (`Get-WsusScnCabIfNeeded`) decides whether to download or
+reuse the cached cab. With `-ForceRefetch` the cache is bypassed
+unconditionally. With neither flag, the cab is reused if its
+LastWriteTime is within `-StaleAfterDays` of now.
+
+Stage 2 (`Invoke-WsusScnPackageXmlExtract`) extracts package.xml into
+a freshly-created staging subdirectory beneath `$Script:TempDir`. The
+staging directory is cleaned on successful completion and preserved
+on failure (operator inspection convention).
+
+Stage 3 (`ConvertFrom-WsusScnPackageXml`) is invoked with the
+function's defaults: 24-month recency window, all four Server LTSC
+Product GUIDs in scope, all five Classification GUIDs in scope. The
+in-memory parse result is not exposed to the caller.
+
+Stage 4 (`New-WsusScnDependencyDatabase`) writes the canonical JSON
+to `-OutputPath` and threads the source-cab SHA-256 + size into the
+`_meta.sourceCab` block for provenance. In DryRun mode this step is
+SKIPPED but Stages 1-3 still run (so the run is informative).
+
+After Stage 4, the wrapper calls
+`Update-Layer1DependencyVerification` unless `-SkipLayer1Update` is
+set or `$Script:DryRun` is `$true`. This is the function that
+back-propagates the most recent LCU KB / CreationDate per Server OS
+into the matching `data/config-<OsKey>.json`.
+
+**Layer 1 writeback contract**
+
+`Update-Layer1DependencyVerification` writes exactly three advisory
+fields into each `data/config-<OsKey>.json`:
+
+| Field | Type | Source |
+|---|---|---|
+| `_DependencyVerifiedKb` | string | `'KB' + KBArticleIds[0]` of the most-recent LCU-bearing in-scope Update for that OS's Product GUID |
+| `_DependencyVerifiedCreationDate` | string (ISO-8601 UTC) | `CreationDate` of the same Update |
+| `_DependencyVerifiedAt` | string (ISO-8601 UTC) | `[datetime]::UtcNow` at the time of writeback |
+
+The function is **idempotent**: if both `_DependencyVerifiedKb` and
+`_DependencyVerifiedCreationDate` already match the values that would
+be written, the config is left untouched and the OS is counted as
+`UnchangedCount` rather than `UpdatedCount`. If no in-scope LCU
+exists for an OS family (e.g. because the cab has not been refreshed
+recently and the recency window has excluded all entries), the OS is
+counted as `MissingCount` and no writeback is attempted for that OS.
+
+**Forward-compatible JSON**: only the three `_DependencyVerified*`
+fields are added; no structural keys are renamed or removed.
+Downstream consumers that do not yet know about these fields ignore
+them. The fields are advisory only; no Phase **yet** reads them.
+SPEC §B.19.5 (Phase 2c) will define the pre-flight gate that consumes
+them.
+
+**A01 chain integration**
+
+`Invoke-AdminPhaseA01_RefreshAllBaselines` invokes A04 as the last
+step before `return $true`, immediately after
+`Show-RefreshAllBaselinesSummary`. The chain is **soft-fail**: any
+exception or `$false` return from A04 is logged via `Write-Warn` but
+does NOT mark A01 as failed. Rationale: A01's primary deliverable is
+the per-OS config baselines (already written successfully by the time
+A04 is reached); the dependency database is downstream advisory data.
+
+Operators who want to skip the A04 chain entirely can invoke
+`-Action RefreshSnapshots` (A03) instead of A01; that action does not
+chain A04. Operators who want only A04 can invoke
+`-Action RefreshDependencyDatabase` directly.
+
+**Test-side binding (Phase 2b2)**
+
+T13 (`tests/wsusscn2_layer1_test.py`, 14 assertions) covers
+`Update-Layer1DependencyVerification` in isolation against a
+tempdir-cloned `data/` directory and the T12 fixture's parse output.
+The A04 wrapper as a whole (Stage 1 included) remains coupled to the
+live monthly CI workflow because Stage 1 cannot run in the
+Stage 1 Linux unit-test environment.
+
 ### B.19.10 Layer 2 JSON schema (normative)
 
 This is the canonical shape of `data/wsusscn2-database.json`. The
