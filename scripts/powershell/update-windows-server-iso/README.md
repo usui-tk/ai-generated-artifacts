@@ -137,7 +137,7 @@ scripts/powershell/update-windows-server-iso/
 │   ├── cache-release-info.json
 │   ├── cache-dotnet-cu.json
 │   └── cache-du-Server{2022,2025}.json
-├── tests/                            # Self-verification suite (T1-T10)
+├── tests/                            # Self-verification suite (T1-T12)
 └── docs/history/                     # Per-cycle investigation reports
 ```
 
@@ -496,8 +496,8 @@ last-verified row.
 
 ## Self-verification tools
 
-The `tests/` subdirectory ships eleven Python-based self-verification
-tools (T1 – T11) plus the Part C format gate. They probe the script's
+The `tests/` subdirectory ships twelve Python-based self-verification
+tools (T1 – T12) plus the Part C format gate. They probe the script's
 external dependencies, unit-test its PowerShell functions, and enforce
 the SPEC §B.23 JSON canonical format. All offline tools use only the
 Python standard library (no `pip install` required).
@@ -512,9 +512,10 @@ python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
 python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
+python3 tests/wsusscn2_parser_test.py        # T12: 22 wsusscn2 parser pipeline assertions
 
 # Part C quality gate (runs on every commit that touches a JSON file)
-python3 tests/canonical_json_format_check.py # 25 JSON files canonicalised; SPEC §C.3.4
+python3 tests/canonical_json_format_check.py # 26 JSON files canonicalised; SPEC §C.3.4
 
 # Live tests — require unrestricted network egress
 python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog

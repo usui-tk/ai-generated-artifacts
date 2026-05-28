@@ -536,7 +536,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
 $Script:ScriptVersion = 'update-wsi-2026.05.28-r09.0'
-$Script:ScriptTag     = 'step2a-followup-canonical-json-migration'
+$Script:ScriptTag     = 'step2b1-parser-pipeline-and-fixture-tooling'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -565,6 +565,67 @@ $Script:PhaseTimings      = New-Object System.Collections.Generic.List[object]
 # safety net for runs that abort before P13. This flag stops the
 # safety-net call from printing a duplicate table on a happy-path run.
 $Script:PhaseSummaryShown = $false
+
+# ---------------------------------------------------------------------------
+# WSUS Product Category GUID tables (Phase 2b1 scope filter)
+# ---------------------------------------------------------------------------
+# These tables are the canonical reference used by the wsusscn2.cab parser
+# pipeline (Invoke-WsusScnPackageXmlExtract / ConvertFrom-WsusScnPackageXml /
+# New-WsusScnDependencyDatabase) to identify which <Update> entries in the
+# Master XML belong to Server LTSC 2016/2019/2022/2025 and which Update
+# Classification they fall under.
+#
+# Provenance: the GUID values are sourced from research/windows-servicing/
+# windows-server-iso-update-mechanics.{ja,en}.md sections 5.7 and 6.4 (commit
+# 648880e); that research records the cross-reference chain (Microsoft Learn,
+# ansible/ansible Issue 60785, dsccommunity/UpdateServicesDsc Issue 65,
+# WSUSOffline forum) plus the 2026-05-12 wsusscn2.cab reverse-lookup that
+# confirmed Server 2022 LTSC (71718f13...) and Server 2025 LTSC (ca006cfb...).
+#
+# Why three separate tables:
+# - Product GUIDs drive the scope-filter Categories.Product test (SPEC §B.19.7)
+# - The name map exists for debug/log output only; production code uses GUIDs
+# - Classification GUIDs map SSU/LCU/.NET CU/Dynamic Update to wsusscn2 records
+$Script:WsusScnOsCategoryGuids = [ordered]@{
+    'Server2016' = '569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5'
+    'Server2019' = 'f702a48c-919b-45d6-9aef-ca4248d50397'
+    'Server2022' = '71718f13-7324-4b0f-8f9e-2ca9dc978e53'   # Microsoft server operating system-21H2
+    'Server2025' = 'ca006cfb-49eb-439b-880a-1312e1fc9713'   # Microsoft Server Operating System-24H2
+}
+
+# Reverse map: GUID -> human-readable label. Used only for diagnostic output
+# (e.g. write-debug, validation summary). Production logic compares GUIDs,
+# never names, because the names drift (see SPEC §B.19.7 21H2/24H2 rename
+# discussion and research §6.4).
+$Script:WsusScnCategoryGuidNameMap = [ordered]@{
+    '569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5' = 'Windows Server 2016'
+    'f702a48c-919b-45d6-9aef-ca4248d50397' = 'Windows Server 2019'
+    '71718f13-7324-4b0f-8f9e-2ca9dc978e53' = 'Windows Server 2022 LTSC (21H2)'
+    'ca006cfb-49eb-439b-880a-1312e1fc9713' = 'Windows Server 2025 LTSC (24H2)'
+    '0fa1201d-4330-4fa8-8ae9-b877473b6441' = 'SecurityUpdates (Classification)'
+    '28bc880e-0592-4cbf-8f95-c79b17911d5f' = 'UpdateRollups (Classification)'
+    '68c5b0a3-d1a6-4553-ae49-01d3a7827828' = 'ServicePacks (Classification)'
+    'e6cf1350-c01b-414d-a61f-263d14d133b4' = 'CriticalUpdates (Classification)'
+    'cd5ffd1e-e932-4e3a-bf74-18bf0b1bbd83' = 'Updates (Classification)'
+    '6964aab4-c5b5-43bd-a17d-ffb4346a8e1d' = 'Windows (ProductFamily)'
+    '56309036-4c77-4dd9-951a-99ee9c246a94' = 'Microsoft (Company)'
+}
+
+# Update Classification GUIDs: the 5 of 12 official WSUS classifications that
+# the Phase 2b1 dependency parser actually cares about. Mapping rationale:
+# - SSU (Servicing Stack Update)    -> ServicePacks
+# - LCU (Cumulative Update)         -> SecurityUpdates
+# - .NET Framework CU               -> UpdateRollups (primarily)
+# - Dynamic Update (Setup / SafeOS) -> Updates or CriticalUpdates
+# See research §5.7 for the empirical wsusscn2 counts and SPEC §B.19.7 for the
+# scope-filter rule (Product AND Classification AND 24-month recency window).
+$Script:WsusScnUpdateClassificationGuids = [ordered]@{
+    'SecurityUpdates' = '0fa1201d-4330-4fa8-8ae9-b877473b6441'
+    'UpdateRollups'   = '28bc880e-0592-4cbf-8f95-c79b17911d5f'
+    'ServicePacks'    = '68c5b0a3-d1a6-4553-ae49-01d3a7827828'
+    'CriticalUpdates' = 'e6cf1350-c01b-414d-a61f-263d14d133b4'
+    'Updates'         = 'cd5ffd1e-e932-4e3a-bf74-18bf0b1bbd83'
+}
 
 # Phase Registry: declared up front so -Action ListPhases can work
 # without running any phase functions. Func names are bound by
@@ -6928,6 +6989,600 @@ function Save-CanonicalJsonFile {
     $tmpPath = $Path + '.tmp'
     [System.IO.File]::WriteAllBytes($tmpPath, $utf8NoBom.GetBytes($json))
     Move-Item -LiteralPath $tmpPath -Destination $Path -Force
+}
+
+# ============================================================
+# wsusscn2.cab parser pipeline (Phase 2b1)
+# ============================================================
+#
+# The four-stage pipeline that turns wsusscn2.cab into a JSON
+# dependency database (~2-5 MB) consumed by the SSU/LCU pre-flight
+# gate (SPEC §B.19.5) and by `Invoke-AdminPhaseA04_RefreshDependencyDatabase`.
+#
+# Pipeline:
+#   Stage 1: Get-WsusScnCabIfNeeded          (defined above)
+#   Stage 2: Invoke-WsusScnPackageXmlExtract (this section)
+#   Stage 3: ConvertFrom-WsusScnPackageXml   (this section)
+#   Stage 4: New-WsusScnDependencyDatabase   (this section)
+#
+# The pipeline is fully decoupled into single-responsibility helpers so
+# that T12 (tests/wsusscn2_parser_test.py) can exercise Stages 2-4
+# independently against a small fixture without ever fetching a real
+# 612 MB wsusscn2.cab over the network.
+#
+# Hard rule (SPEC §B.19.8): Stages 3 and 4 MUST NOT read or emit any
+# Microsoft prose tags (<Title>, <Description>, <MoreInfoUrl>, ...).
+# The Master XML in package.xml does not contain these tags anyway
+# (verified empirically in research §2.4.1 against the 2026-05-12 fetch),
+# but the parser is structured around a positive-allowlist of element
+# names so that a future Microsoft schema change cannot accidentally
+# leak prose into the dependency database.
+
+function Invoke-WsusScnPackageXmlExtract {
+    <#
+    .SYNOPSIS
+        Stage 2 of the wsusscn2.cab parser pipeline: extract package.xml
+        from the cab.
+    .DESCRIPTION
+        Two-step 7-Zip extraction:
+          Step 1: wsusscn2.cab -> 75 top-level files (one of which is package.cab)
+          Step 2: package.cab  -> package.xml (~108 MB Master XML)
+
+        Returns the full path to the extracted package.xml. The intermediate
+        files (75 top-level + the package.cab itself) are left in the staging
+        directory and may be cleaned up by the caller after Stage 3 consumes
+        package.xml. Per SPEC §B.19.6.4, the caller controls the lifetime of
+        the staging directory; this function only writes into it.
+
+        Two-step extraction is required because PowerShell's built-in CAB
+        expansion (expand.exe -F:) has a self-overwrite bug on nested cabs
+        (research §7.2). 7-Zip avoids this; the wsusscn2 cab itself is also
+        too large for the .NET CabInfo APIs in practical use.
+    .PARAMETER CabPath
+        Full path to wsusscn2.cab (typically obtained from Stage 1
+        Get-WsusScnCabIfNeeded).
+    .PARAMETER StagingDirectory
+        Directory to extract into. Will be created if missing, but its
+        contents will be REMOVED first (this function owns the directory's
+        contents for the duration of the call). Caller-owned for lifecycle.
+    .OUTPUTS
+        [string] Full path to the extracted package.xml.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [string] $CabPath,
+
+        [Parameter(Mandatory)]
+        [string] $StagingDirectory
+    )
+
+    # Pre-flight: CabPath exists
+    if (-not (Test-Path -LiteralPath $CabPath -PathType Leaf)) {
+        throw ('wsusscn2.cab not found at: {0}' -f $CabPath)
+    }
+
+    # Pre-flight: 7-Zip available (with fallback install attempt)
+    $sevenZip = Get-SevenZipPath
+    if (-not $sevenZip) {
+        Write-Verbose '7-Zip not found on PATH; attempting fallback install.'
+        Install-SevenZipFallback -DownloadDir $StagingDirectory
+        $sevenZip = Get-SevenZipPath
+        if (-not $sevenZip) {
+            throw '7-Zip is required for wsusscn2 extraction but is not available; aborting.'
+        }
+    }
+
+    # Reset staging directory (this function owns its contents for the call)
+    if (Test-Path -LiteralPath $StagingDirectory) {
+        Remove-Item -LiteralPath $StagingDirectory -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $StagingDirectory -Force | Out-Null
+
+    $stage1Dir = Join-Path $StagingDirectory 'stage1'
+    $stage2Dir = Join-Path $StagingDirectory 'stage2'
+
+    # Step 1: extract wsusscn2.cab -> stage1
+    Write-Verbose ('7-Zip step 1: extracting {0} -> {1}' -f $CabPath, $stage1Dir)
+    $out1 = & $sevenZip 'x' '-y' '-bd' '-bso0' ('-o{0}' -f $stage1Dir) $CabPath 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $tail = ($out1 | Select-Object -Last 10) -join "`n"
+        throw ('7-Zip step 1 failed (exit {0}). Last output: {1}' -f $LASTEXITCODE, $tail)
+    }
+
+    $packageCab = Join-Path $stage1Dir 'package.cab'
+    if (-not (Test-Path -LiteralPath $packageCab -PathType Leaf)) {
+        throw ('package.cab not found in stage1 (expected at {0}); wsusscn2 cab may have an unexpected layout.' -f $packageCab)
+    }
+
+    # Step 2: extract package.cab -> stage2
+    Write-Verbose ('7-Zip step 2: extracting {0} -> {1}' -f $packageCab, $stage2Dir)
+    $out2 = & $sevenZip 'x' '-y' '-bd' '-bso0' ('-o{0}' -f $stage2Dir) $packageCab 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $tail = ($out2 | Select-Object -Last 10) -join "`n"
+        throw ('7-Zip step 2 failed (exit {0}). Last output: {1}' -f $LASTEXITCODE, $tail)
+    }
+
+    $packageXml = Join-Path $stage2Dir 'package.xml'
+    if (-not (Test-Path -LiteralPath $packageXml -PathType Leaf)) {
+        throw ('package.xml not found in stage2 (expected at {0}); package.cab may have an unexpected layout.' -f $packageXml)
+    }
+
+    $xmlSize = (Get-Item -LiteralPath $packageXml).Length
+    Write-Verbose ('package.xml extracted: {0} ({1:N0} bytes)' -f $packageXml, $xmlSize)
+
+    return $packageXml
+}
+
+function ConvertFrom-WsusScnPackageXml {
+    <#
+    .SYNOPSIS
+        Stage 3 of the wsusscn2.cab parser pipeline: parse package.xml into
+        an in-memory dependency graph, applying the scope filter.
+    .DESCRIPTION
+        Streams package.xml (typically ~108 MB) using System.Xml.XmlReader,
+        not XmlDocument.Load, so that peak memory stays around 200-300 MB
+        instead of the ~536 MB observed with full document load
+        (research §2.4 timings table).
+
+        For each <Update> the parser:
+          1. Reads attributes (UpdateId, RevisionId, CreationDate,
+             DeploymentAction, IsSoftware, IsBundle, etc.)
+          2. Reads child elements WHITE-LISTED in $allowedChildNames only:
+             - <KBArticleID>, <Categories>/<Category>, <Prerequisites>/<UpdateId>,
+             - <SupersededBy>/<UpdateId>/<RevisionId>, <BundledBy>/<RevisionId>,
+             - <Files>/<File @FileDigest>
+             Microsoft prose tags (<Title>, <Description>, <MoreInfoUrl>, ...)
+             are NEVER read; the white-list IS the SPEC §B.19.8 hard-rule
+             enforcement mechanism.
+          3. Applies the scope filter (Product GUID + Classification GUID +
+             recency window) per SPEC §B.19.7.
+
+        For each <FileLocation> the parser captures the FileDigest -> Url
+        mapping so Stage 4 can join payload URLs into the dependency graph.
+
+        Returns a [pscustomobject] with three sub-objects:
+          .Updates       — [object[]] in-scope updates with full metadata
+          .FileLocations — [hashtable] FileDigest -> URL
+          .Stats         — [pscustomobject] observation counts for logs/tests
+    .PARAMETER PackageXmlPath
+        Full path to package.xml (typically from Stage 2
+        Invoke-WsusScnPackageXmlExtract).
+    .PARAMETER ScopeProductGuids
+        Lowercase GUID strings. Updates whose Categories include at least
+        one matching Product GUID are admitted. Default is the LTSC server
+        family from $Script:WsusScnOsCategoryGuids.
+    .PARAMETER ScopeClassificationGuids
+        Lowercase GUID strings. Updates whose Categories include at least
+        one matching Classification GUID are admitted. Default is the five
+        classifications relevant to SSU/LCU/.NET CU/DU
+        ($Script:WsusScnUpdateClassificationGuids).
+    .PARAMETER RecencyMonths
+        Updates whose CreationDate is older than (Now - RecencyMonths) are
+        rejected. Default 24 months per SPEC §B.19.7. Setting -1 disables
+        the recency clause (useful for fixture-driven tests).
+    .PARAMETER Now
+        Current time for the recency check. Caller-controllable so T12 can
+        pin time against a fixture's CreationDate range.
+    .OUTPUTS
+        [pscustomobject] with .Updates, .FileLocations, .Stats sub-objects.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [string] $PackageXmlPath,
+
+        [string[]] $ScopeProductGuids = @(),
+
+        [string[]] $ScopeClassificationGuids = @(),
+
+        [int] $RecencyMonths = 24,
+
+        [datetime] $Now = (Get-Date)
+    )
+
+    if (-not (Test-Path -LiteralPath $PackageXmlPath -PathType Leaf)) {
+        throw ('package.xml not found at: {0}' -f $PackageXmlPath)
+    }
+
+    # Default scope GUIDs from the script-level tables. Done here (not in
+    # param() default) because PowerShell evaluates param defaults in the
+    # function's own scope where $Script:* is reachable but more verbose.
+    if (-not $ScopeProductGuids -or $ScopeProductGuids.Count -eq 0) {
+        $ScopeProductGuids = @($Script:WsusScnOsCategoryGuids.Values)
+    }
+    if (-not $ScopeClassificationGuids -or $ScopeClassificationGuids.Count -eq 0) {
+        $ScopeClassificationGuids = @($Script:WsusScnUpdateClassificationGuids.Values)
+    }
+
+    # Hash sets for O(1) GUID membership; case-insensitive to absorb the
+    # mixed-case observed in real wsusscn2 (e.g. "0FA1201D-..." vs lowercase).
+    $cmp = [System.StringComparer]::OrdinalIgnoreCase
+    $prodSet  = [System.Collections.Generic.HashSet[string]]::new([string[]]$ScopeProductGuids,  $cmp)
+    $classSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$ScopeClassificationGuids, $cmp)
+
+    $useRecency = $RecencyMonths -ge 0
+    $cutoff = if ($useRecency) { $Now.AddMonths(-$RecencyMonths) } else { [datetime]::MinValue }
+
+    # Allowed child element names: positive allowlist that physically
+    # excludes Microsoft prose (SPEC §B.19.8 hard-rule enforcement).
+    $allowedChildNames = [System.Collections.Generic.HashSet[string]]::new(
+        [string[]]@('KBArticleID', 'Categories', 'Category', 'Prerequisites',
+                    'UpdateId', 'RevisionId', 'SupersededBy', 'BundledBy',
+                    'Files', 'File'),
+        $cmp)
+
+    $updates       = New-Object 'System.Collections.Generic.List[object]'
+    $fileLocations = @{}
+
+    $totalUpdates       = 0
+    $bundleCount        = 0
+    $categoryUpdates    = 0
+    $totalFileLocations = 0
+
+    # XmlReader settings: streaming, no DTD, no entity expansion (defence
+    # in depth against malicious upstream cabs; the official Microsoft
+    # wsusscn2 has none of these in any case).
+    $settings = [System.Xml.XmlReaderSettings]::new()
+    $settings.IgnoreComments               = $true
+    $settings.IgnoreWhitespace             = $true
+    $settings.IgnoreProcessingInstructions = $true
+    $settings.DtdProcessing                = [System.Xml.DtdProcessing]::Prohibit
+    $settings.CloseInput                   = $true
+
+    $stream = [System.IO.FileStream]::new(
+        $PackageXmlPath,
+        [System.IO.FileMode]::Open,
+        [System.IO.FileAccess]::Read,
+        [System.IO.FileShare]::Read,
+        65536)
+    try {
+        $reader = [System.Xml.XmlReader]::Create($stream, $settings)
+        try {
+            while ($reader.Read()) {
+                if ($reader.NodeType -ne [System.Xml.XmlNodeType]::Element) { continue }
+
+                if ($reader.Name -eq 'Update') {
+                    $totalUpdates++
+
+                    # Attributes
+                    $updateId          = $reader.GetAttribute('UpdateId')
+                    $revisionId        = $reader.GetAttribute('RevisionId')
+                    $revisionNumber    = $reader.GetAttribute('RevisionNumber')
+                    $creationDateStr   = $reader.GetAttribute('CreationDate')
+                    $deploymentAction  = $reader.GetAttribute('DeploymentAction')
+                    $isSoftwareAttr    = $reader.GetAttribute('IsSoftware')
+                    $isBundleAttr      = $reader.GetAttribute('IsBundle')
+
+                    $creationDate = [datetime]::MinValue
+                    if ($creationDateStr) {
+                        [void][datetime]::TryParse(
+                            $creationDateStr,
+                            [System.Globalization.CultureInfo]::InvariantCulture,
+                            [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal,
+                            [ref] $creationDate)
+                    }
+
+                    $isBundle      = ($isBundleAttr -eq 'true')
+                    $isSoftware    = ($isSoftwareAttr -ne 'false')  # default true if missing
+                    $isCategory    = (($deploymentAction -eq 'Evaluate') -and ($isSoftwareAttr -eq 'false'))
+
+                    if ($isBundle)   { $bundleCount++ }
+                    if ($isCategory) { $categoryUpdates++ }
+
+                    # Collect child data from the Update's subtree
+                    $kbArticleIds  = New-Object 'System.Collections.Generic.List[string]'
+                    $categories    = @{
+                        Product            = New-Object 'System.Collections.Generic.List[string]'
+                        UpdateClassification = New-Object 'System.Collections.Generic.List[string]'
+                        Company            = New-Object 'System.Collections.Generic.List[string]'
+                        ProductFamily      = New-Object 'System.Collections.Generic.List[string]'
+                        Other              = New-Object 'System.Collections.Generic.List[string]'
+                    }
+                    $prereqUpdateIds  = New-Object 'System.Collections.Generic.List[string]'
+                    $supersededByRevs = New-Object 'System.Collections.Generic.List[string]'
+                    $bundledByRevs    = New-Object 'System.Collections.Generic.List[string]'
+                    $payloadDigests   = New-Object 'System.Collections.Generic.List[string]'
+
+                    if (-not $reader.IsEmptyElement) {
+                        $sub = $reader.ReadSubtree()
+                        try {
+                            $stack = New-Object 'System.Collections.Generic.Stack[string]'
+                            while ($sub.Read()) {
+                                if ($sub.NodeType -eq [System.Xml.XmlNodeType]::Element) {
+                                    $name = $sub.Name
+                                    if (-not $allowedChildNames.Contains($name) -and ($name -ne 'Update')) {
+                                        # Allowlist enforcement: skip any element not on the list.
+                                        # This is where SPEC §B.19.8 Microsoft-prose exclusion is enforced.
+                                        if (-not $sub.IsEmptyElement) { [void]$sub.Skip() }
+                                        continue
+                                    }
+                                    switch ($name) {
+                                        'KBArticleID' {
+                                            $kb = $sub.ReadElementContentAsString()
+                                            if ($kb) { $kbArticleIds.Add($kb) }
+                                        }
+                                        'Category' {
+                                            # <Category Type="Product" Id="GUID" />
+                                            $catType = $sub.GetAttribute('Type')
+                                            $catId   = $sub.GetAttribute('Id')
+                                            if ($catId) {
+                                                $catId = $catId.ToLowerInvariant()
+                                                $bucket = if ($catType -and $categories.Contains($catType)) { $catType } else { 'Other' }
+                                                $categories[$bucket].Add($catId)
+                                            }
+                                        }
+                                        'UpdateId' {
+                                            # In Prerequisites: <UpdateId Id="GUID" />
+                                            # In SupersededBy: <UpdateId Id="GUID" />
+                                            $uid = $sub.GetAttribute('Id')
+                                            if ($uid) {
+                                                $uid = $uid.ToLowerInvariant()
+                                                $parent = if ($stack.Count -gt 0) { $stack.Peek() } else { '' }
+                                                if ($parent -eq 'SupersededBy') {
+                                                    $supersededByRevs.Add($uid)
+                                                } else {
+                                                    $prereqUpdateIds.Add($uid)
+                                                }
+                                            }
+                                        }
+                                        'RevisionId' {
+                                            # In BundledBy: <RevisionId Id="123" /> per Phase 5 v4 observation
+                                            $rid = $sub.GetAttribute('Id')
+                                            $parent = if ($stack.Count -gt 0) { $stack.Peek() } else { '' }
+                                            if ($parent -eq 'BundledBy' -and $rid) {
+                                                $bundledByRevs.Add($rid)
+                                            }
+                                        }
+                                        'File' {
+                                            # <File FileDigest="..." />
+                                            $digest = $sub.GetAttribute('Digest')
+                                            if (-not $digest) { $digest = $sub.GetAttribute('FileDigest') }
+                                            if ($digest) { $payloadDigests.Add($digest) }
+                                        }
+                                        default {
+                                            # Container elements: Categories, Prerequisites,
+                                            # SupersededBy, BundledBy, Files. Push to stack for
+                                            # parent-tracking of nested elements.
+                                            if (-not $sub.IsEmptyElement) {
+                                                $stack.Push($name) | Out-Null
+                                            }
+                                        }
+                                    }
+                                }
+                                elseif ($sub.NodeType -eq [System.Xml.XmlNodeType]::EndElement) {
+                                    if ($stack.Count -gt 0 -and $stack.Peek() -eq $sub.Name) {
+                                        [void]$stack.Pop()
+                                    }
+                                }
+                            }
+                        } finally {
+                            $sub.Close()
+                        }
+                    }
+
+                    # Scope filter (SPEC §B.19.7): Product AND Classification AND recency
+                    $matchProd = $false
+                    foreach ($p in $categories.Product) {
+                        if ($prodSet.Contains($p)) { $matchProd = $true; break }
+                    }
+                    $matchClass = $false
+                    foreach ($c in $categories.UpdateClassification) {
+                        if ($classSet.Contains($c)) { $matchClass = $true; break }
+                    }
+                    $matchRecency = if ($useRecency) { $creationDate -ge $cutoff } else { $true }
+
+                    if ($matchProd -and $matchClass -and $matchRecency) {
+                        $updates.Add([pscustomobject]@{
+                            UpdateId             = if ($updateId) { $updateId.ToLowerInvariant() } else { $null }
+                            RevisionId           = $revisionId
+                            RevisionNumber       = $revisionNumber
+                            CreationDate         = if ($creationDate -ne [datetime]::MinValue) { $creationDate.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { $null }
+                            IsBundle             = $isBundle
+                            IsSoftware           = $isSoftware
+                            DeploymentAction     = $deploymentAction
+                            KBArticleIds         = $kbArticleIds.ToArray()
+                            ProductGuids         = $categories.Product.ToArray()
+                            ClassificationGuids  = $categories.UpdateClassification.ToArray()
+                            CompanyGuids         = $categories.Company.ToArray()
+                            ProductFamilyGuids   = $categories.ProductFamily.ToArray()
+                            PrerequisiteUpdateIds = $prereqUpdateIds.ToArray()
+                            SupersededByUpdateIds = $supersededByRevs.ToArray()
+                            BundledByRevisionIds  = $bundledByRevs.ToArray()
+                            PayloadFileDigests    = $payloadDigests.ToArray()
+                        })
+                    }
+                }
+                elseif ($reader.Name -eq 'FileLocation') {
+                    # <FileLocation Id="..." FileDigest="..."><Url>...</Url></FileLocation>
+                    # or <FileLocation FileDigest="..." Url="..." /> (variant)
+                    $totalFileLocations++
+                    $digest = $reader.GetAttribute('FileDigest')
+                    if (-not $digest) { $digest = $reader.GetAttribute('Digest') }
+                    $urlAttr = $reader.GetAttribute('Url')
+
+                    $url = $urlAttr
+                    if ((-not $url) -and (-not $reader.IsEmptyElement)) {
+                        $sub = $reader.ReadSubtree()
+                        try {
+                            while ($sub.Read()) {
+                                if ($sub.NodeType -eq [System.Xml.XmlNodeType]::Element -and $sub.Name -eq 'Url') {
+                                    $url = $sub.ReadElementContentAsString()
+                                    break
+                                }
+                            }
+                        } finally {
+                            $sub.Close()
+                        }
+                    }
+                    if ($digest -and $url) {
+                        $fileLocations[$digest] = $url
+                    }
+                }
+            }
+        } finally {
+            $reader.Close()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+
+    $stats = [pscustomobject]@{
+        UpdatesObserved       = $totalUpdates
+        UpdatesInScope        = $updates.Count
+        BundlesObserved       = $bundleCount
+        CategoryUpdates       = $categoryUpdates
+        FileLocationsObserved = $totalFileLocations
+        FileLocationsRetained = $fileLocations.Count
+        Now                   = $Now.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        RecencyMonths         = $RecencyMonths
+        ScopeProductGuidCount        = $prodSet.Count
+        ScopeClassificationGuidCount = $classSet.Count
+    }
+
+    Write-Verbose ('ConvertFrom-WsusScnPackageXml: observed={0:N0} in-scope={1:N0} file-locations={2:N0}' -f `
+        $totalUpdates, $updates.Count, $fileLocations.Count)
+
+    return [pscustomobject]@{
+        Updates       = $updates.ToArray()
+        FileLocations = $fileLocations
+        Stats         = $stats
+    }
+}
+
+function New-WsusScnDependencyDatabase {
+    <#
+    .SYNOPSIS
+        Stage 4 of the wsusscn2.cab parser pipeline: serialise the parsed
+        dependency graph to the Layer 2 canonical JSON file.
+    .DESCRIPTION
+        Takes a parse result from Stage 3 (ConvertFrom-WsusScnPackageXml),
+        joins payload URLs from the FileLocations table into each Update's
+        record, attaches metadata (generator version, source cab provenance,
+        scope filter inputs, observation stats), and writes the resulting
+        object to disk via Save-CanonicalJsonFile (SPEC §B.23 byte-canonical
+        JSON, depth=32).
+
+        The output file is the Layer 2 database
+        (data/wsusscn2-database.json by repository convention) consumed by
+        the SSU/LCU pre-flight gate (SPEC §B.19.5) and by
+        Invoke-AdminPhaseA04_RefreshDependencyDatabase.
+    .PARAMETER ParseResult
+        The [pscustomobject] returned by ConvertFrom-WsusScnPackageXml,
+        containing .Updates / .FileLocations / .Stats sub-objects.
+    .PARAMETER OutputPath
+        Full path to the JSON file to write. Parent directory will be
+        created if missing. Existing file will be overwritten atomically
+        by Save-CanonicalJsonFile (which uses a .tmp + Move-Item pattern).
+    .PARAMETER SourceCabPath
+        Optional. Full path to the wsusscn2.cab the parse derived from.
+        Used purely for provenance metadata (size, SHA-256). When omitted
+        the metadata fields are left as $null.
+    .OUTPUTS
+        [string] The OutputPath that was written.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [pscustomobject] $ParseResult,
+
+        [Parameter(Mandatory)]
+        [string] $OutputPath,
+
+        [string] $SourceCabPath = $null
+    )
+
+    if (-not $ParseResult.Updates)        { throw 'ParseResult.Updates is missing or empty.' }
+    if ($null -eq $ParseResult.FileLocations) { throw 'ParseResult.FileLocations is missing.' }
+
+    $parentDir = Split-Path -Path $OutputPath -Parent
+    if ($parentDir -and -not (Test-Path -LiteralPath $parentDir)) {
+        New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
+    }
+
+    # Build source-cab provenance block
+    $cabMeta = [pscustomobject]@{
+        path   = $null
+        size   = $null
+        sha256 = $null
+    }
+    if ($SourceCabPath -and (Test-Path -LiteralPath $SourceCabPath -PathType Leaf)) {
+        $cabFile = Get-Item -LiteralPath $SourceCabPath
+        $sha = (Get-FileHash -LiteralPath $SourceCabPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $cabMeta = [pscustomobject]@{
+            path   = $cabFile.FullName
+            size   = $cabFile.Length
+            sha256 = $sha
+        }
+    }
+
+    # Join payload URLs into each update via FileDigests -> Url
+    $updatesEnriched = New-Object 'System.Collections.Generic.List[object]'
+    $urlMissingCount = 0
+    foreach ($u in $ParseResult.Updates) {
+        $urls = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($d in $u.PayloadFileDigests) {
+            if ($ParseResult.FileLocations.ContainsKey($d)) {
+                $urls.Add($ParseResult.FileLocations[$d])
+            } else {
+                $urlMissingCount++
+            }
+        }
+        $updatesEnriched.Add([pscustomobject]@{
+            updateId              = $u.UpdateId
+            revisionId            = $u.RevisionId
+            revisionNumber        = $u.RevisionNumber
+            creationDate          = $u.CreationDate
+            isBundle              = $u.IsBundle
+            isSoftware            = $u.IsSoftware
+            deploymentAction      = $u.DeploymentAction
+            kbArticleIds          = @($u.KBArticleIds)
+            productGuids          = @($u.ProductGuids)
+            classificationGuids   = @($u.ClassificationGuids)
+            companyGuids          = @($u.CompanyGuids)
+            productFamilyGuids    = @($u.ProductFamilyGuids)
+            prerequisiteUpdateIds = @($u.PrerequisiteUpdateIds)
+            supersededByUpdateIds = @($u.SupersededByUpdateIds)
+            bundledByRevisionIds  = @($u.BundledByRevisionIds)
+            payloadFileDigests    = @($u.PayloadFileDigests)
+            payloadUrls           = $urls.ToArray()
+        })
+    }
+
+    # Construct the Layer 2 document
+    $document = [pscustomobject]@{
+        _meta = [pscustomobject]@{
+            generator        = 'Update-WindowsServerIso.ps1 wsusscn2 parser pipeline (Phase 2b1)'
+            scriptVersion    = $Script:ScriptVersion
+            scriptTag        = $Script:ScriptTag
+            generatedAt      = ([datetime]::UtcNow).ToString('yyyy-MM-ddTHH:mm:ssZ')
+            sourceCab        = $cabMeta
+            scope            = [pscustomobject]@{
+                productGuids        = @($Script:WsusScnOsCategoryGuids.Values)
+                classificationGuids = @($Script:WsusScnUpdateClassificationGuids.Values)
+                recencyMonths       = $ParseResult.Stats.RecencyMonths
+                now                 = $ParseResult.Stats.Now
+            }
+            stats            = [pscustomobject]@{
+                updatesObserved       = $ParseResult.Stats.UpdatesObserved
+                updatesInScope        = $ParseResult.Stats.UpdatesInScope
+                bundlesObserved       = $ParseResult.Stats.BundlesObserved
+                categoryUpdates       = $ParseResult.Stats.CategoryUpdates
+                fileLocationsObserved = $ParseResult.Stats.FileLocationsObserved
+                fileLocationsRetained = $ParseResult.Stats.FileLocationsRetained
+                payloadUrlsMissing    = $urlMissingCount
+            }
+        }
+        updates = $updatesEnriched.ToArray()
+    }
+
+    Save-CanonicalJsonFile -InputObject $document -Path $OutputPath -Depth 32
+
+    Write-Verbose ('New-WsusScnDependencyDatabase: wrote {0:N0} updates to {1}' -f $updatesEnriched.Count, $OutputPath)
+    return $OutputPath
 }
 
 function Invoke-WuaOfflineScan {

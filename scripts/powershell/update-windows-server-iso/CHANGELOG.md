@@ -16,6 +16,108 @@ the script and follows the
 
 ## [Unreleased]
 
+### r09.0 Step 2b1 - wsusscn2 parser pipeline and fixture tooling
+
+This change implements the Phase 2b1 parser pipeline (Stages 2-4 of the
+wsusscn2.cab dependency-database production line) inside
+`Update-WindowsServerIso.ps1`, plus the offline T12 self-verification
+suite that exercises the pipeline against a small committed fixture.
+The implementation builds on the GUID inventory and analyzer tooling
+landed in the preceding Step 2b1 preparation commit (648880e).
+
+**Prior-commit metadata correction (AP-9 follow-up)**: the
+preparation-step CHANGELOG entry (commit 648880e) recorded
+`tests/common/wsusscn2_analyzer.py` as `~370 lines`. The actual file
+is 504 lines (verified by `wc -l`). The discrepancy was a CHANGELOG
+self-reported value drift, not a code defect (md5 of the file matched
+between the staged zip and the committed file). This commit does not
+edit 648880e's CHANGELOG entry retroactively but records the
+correction here, per AGENTS.md §4 ground-truth-extraction policy.
+
+### What is in this commit
+
+**Production code (`Update-WindowsServerIso.ps1`, +669 lines)**:
+
+| Site | Lines | Purpose |
+|---|---:|---|
+| L538-539 | 1 changed | `$Script:ScriptTag` bumped from `step2a-followup-canonical-json-migration` to `step2b1-parser-pipeline-and-fixture-tooling`. `$Script:ScriptVersion` unchanged. |
+| L569-630 | +62 | Three `$Script:WsusScn*` lookup tables: `WsusScnOsCategoryGuids` (4 Server LTSC Product GUIDs), `WsusScnCategoryGuidNameMap` (GUID -> human label for diagnostic output), `WsusScnUpdateClassificationGuids` (5 WSUS Classification GUIDs). Provenance documented inline pointing at research §5.7 / §6.4. |
+| L7021-7117 | +97 | `Invoke-WsusScnPackageXmlExtract` (Stage 2). Two-step 7-Zip extraction (wsusscn2.cab -> package.cab -> package.xml). Uses existing `Get-SevenZipPath` / `Install-SevenZipFallback` from Step 2a. Caller owns the staging directory lifecycle. |
+| L7118-7454 | +337 | `ConvertFrom-WsusScnPackageXml` (Stage 3). Streaming `XmlReader`-based parser with a positive child-element allowlist (`KBArticleID`, `Categories`, `Category`, `Prerequisites`, `UpdateId`, `RevisionId`, `SupersededBy`, `BundledBy`, `Files`, `File`) that physically excludes Microsoft prose (`<Title>`/`<Description>`/`<MoreInfoUrl>` are never read; SPEC §B.19.8 hard rule enforcement). Applies the scope filter (Product GUID AND Classification GUID AND 24-month recency, all caller-overridable). Returns `[pscustomobject]` with `Updates` / `FileLocations` / `Stats`. |
+| L7455-7587 | +133 | `New-WsusScnDependencyDatabase` (Stage 4). Joins payload URLs from `FileLocations` into each Update's record, attaches provenance metadata (script version/tag, source-cab SHA-256 and size, scope inputs, observation stats), writes via `Save-CanonicalJsonFile` at SPEC §B.23 canonical JSON (depth=32). |
+
+What is intentionally NOT yet wired up: the `Invoke-AdminPhaseA04_RefreshDependencyDatabase`
+wrapper still throws `NotImplementedException` (its Phase 2b2 lifecycle
+glue would chain Stage 1 → 2 → 3 → 4 with cache-management policy). The
+A01.0 `RefreshAllBaselines` action does not yet call the parser
+either. Both of those are Phase 2b2 scope.
+
+**New offline test (`tests/wsusscn2_parser_test.py`, T12, ~220 lines)**:
+
+22 assertions exercising:
+
+- Fixture pre-flight: package.xml exists, contains zero Microsoft-prose tags (`<Title`, `<Description`, `<MoreInfoUrl`, `<Summary`, `<DefaultPropertiesLanguage`); expected-output.json structurally valid
+- Stage 3 + Stage 4 happy-path: invokes pwsh, dot-sources the script, runs the pipeline against the fixture, parses the produced JSON
+- Stats parity: `updatesObserved=6 / updatesInScope=3 / bundlesObserved=2 / categoryUpdates=1 / fileLocationsRetained=2 / payloadUrlsMissing=1`
+- Scope-filter admit/reject: Server 2022 LTSC bundle + child admitted, Server 2025 LTSC bundle admitted, Office out-of-scope rejected (Product mismatch), 2022-vintage Server 2019 update rejected (recency cutoff), Category-Update record rejected (no Product/Classification refs in its own Categories block)
+- Field-level correctness: `isBundle`, `kbArticleIds`, `productGuids` on the Server 2022 bundle
+- Payload-URL join: child update's `payloadUrls` resolved via the FileLocations table; orphan digest (in `<Files>` but not in `<FileLocations>`) correctly omitted from the output
+- Microsoft-prose absence in parser output (case-insensitive search for `"title"`, `"description"`, `"moreinfourl"` fields)
+- Full structural compare against `expected-output.json` (env-stripped: `scriptVersion`, `scriptTag`, `generatedAt`, `sourceCab`)
+
+Runs offline; no network access; no 7-Zip invocation; no real
+wsusscn2.cab download. Stage 2 (`Invoke-WsusScnPackageXmlExtract`) is
+platform-coupled (needs 7-Zip and Windows file layout) so it is
+exercised only by the live monthly refresh CI workflow, not by T12.
+
+**New fixture builder (`tests/common/wsusscn2_fixture_builder.py`, ~365 lines)**:
+
+CLI + library Python helper that emits both `package.xml` and
+`expected-output.json` into `tests/fixtures/wsusscn2/`. The fixture is
+deliberately constructed (not derived from any real wsusscn2.cab) so
+each Update tests a specific control-flow path in the parser; the GUID
+namespace `f0000001-...` is reserved so the fixture cannot collide
+with real wsusscn2 records.
+
+**New committed fixtures (`tests/fixtures/wsusscn2/`)**:
+
+| File | Size | Role |
+|---|---:|---|
+| `package.xml` | 3,312 bytes | Minimal Master XML covering 6 Updates (2 bundles, 1 child, 1 Category, 1 out-of-scope, 1 old in-scope) and 2 FileLocations |
+| `expected-output.json` | 3,347 bytes | Canonical-JSON serialization of the expected parser output, env-stripped fields are placeholders |
+
+Both files are deterministically regenerated by
+`python3 -m tests.common.wsusscn2_fixture_builder` and `format gate`
+verifies the JSON is canonical.
+
+**Documentation updates**:
+
+- `tests/README.md`: added T12 row to the Tool inventory table and a
+  T12 row to the Quick start block. File layout updated to list
+  `fixtures/wsusscn2/` and `wsusscn2_parser_test.py`.
+- `README.md` / `README.ja.md`: T11 -> T12 in the Self-verification
+  tools count, bilingual lock-step preserved.
+- `TESTING.md`: §0 status table updated with T12 row.
+
+**SPEC.md updates**:
+
+- §B.19.9.4 *Implementation notes for the parser pipeline* added with:
+  function signatures of Stages 2-4, the in-memory schema returned by
+  Stage 3, the Layer 2 JSON schema written by Stage 4, the
+  scope-filter rule, the allowlist enforcement of SPEC §B.19.8, and
+  pointers to research §2.4.1 / §5.7 / §6.4.
+
+### Quality gate
+
+| Gate | Result |
+|---|---|
+| `psa.py` (PSA full rule set) | 0 errors, 0 warnings, 0 info |
+| `PSScriptAnalyzer` (Settings.psd1) | 0 findings |
+| Unit tests T2-T11 (no regression) | 138/138 passed (13+10+13+16+20+18+22+26) |
+| **T12 (new)** | **22/22 passed** |
+| Canonical JSON format gate | 26 passed (25 prior + 1 new `expected-output.json`) |
+| Bilingual lock-step (README.md / .ja.md / TESTING.md) | preserved |
+
 ### r09.0 Step 2b1 preparation - WSUS Product Category GUID investigation and research documentation
 
 This change is a **preparation step** for the Phase 2b1 parser pipeline

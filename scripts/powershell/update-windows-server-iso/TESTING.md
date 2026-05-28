@@ -39,28 +39,28 @@ a build identifier plus a calendar date. Pending items are marked
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r09.0 step2a-followup-canonical-json-migration build (`psa.py` latest mainline) / 2026-05-28 |
-| File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
-| `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r09.0 step2b1-parser-pipeline-and-fixture-tooling build (`psa.py` latest mainline) / 2026-05-28 |
+| File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r09.0 step2b1-parser-pipeline-and-fixture-tooling build / 2026-05-28 |
+| `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r09.0 step2b1-parser-pipeline-and-fixture-tooling build / 2026-05-28 |
 | PSScriptAnalyzer on Windows PowerShell 5.1 (Stage 2) | ✓ pass | CI Stage 2 (continuous) |
 | P01 Initialize — PowerShell env / admin / ADK / disk / Hyper-V probe | ✓ pass on Windows 11 + PS 5.1 | _pending operator confirmation_ |
-| P02 ResolveInputs — Config JSON load + ISO / patch source resolution | ✓ structurally validated via T3 harness | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
+| P02 ResolveInputs — Config JSON load + ISO / patch source resolution | ✓ structurally validated via T3 harness | r09.0 step2b1-parser-pipeline-and-fixture-tooling build / 2026-05-28 |
 | P03 RefreshPatchBaseline — Catalogue scrape (live, monthly) | ✓ scrape paths exercised via T1 | CI Stage 4 monthly |
 | P04 FetchAssets — ISO + patch downloads with SHA-256 verify | _pending operator confirmation_ | not yet exercised on a fresh runner |
-| P05 ExpandIso — source ISO mount + WIM enumeration | _pending operator confirmation_ | r09.0 step2a-followup-canonical-json-migration build (synthetic mode only) |
-| P06 ValidatePatchSet — `wsusscn2.cab` offline scan (Stage 1 catalog-freshness) | ✓ Stage 1 (catalog freshness) exercised | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
-| P06 ValidatePatchSet — Stage 2 (graph-based dependency closure, r09.0+) | not yet implemented | (planned r09.0 Step 2c — see SPEC.md §B.19.14) |
+| P05 ExpandIso — source ISO mount + WIM enumeration | _pending operator confirmation_ | r09.0 step2b1-parser-pipeline-and-fixture-tooling build (synthetic mode only) |
+| P06 ValidatePatchSet — `wsusscn2.cab` offline scan (Stage 1 catalog-freshness) | ✓ Stage 1 (catalog freshness) exercised | r09.0 step2b1-parser-pipeline-and-fixture-tooling build / 2026-05-28 |
+| P06 ValidatePatchSet — Stage 2 (graph-based dependency closure, r09.0+) | parser pipeline lands; A04 wrapper still stubbed | r09.0 step2b1-parser-pipeline-and-fixture-tooling build (Stage 3 + Stage 4 verified via T12) |
 | P07 PatchInstallWim — SSU → LCU → .NET sequence | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P08 PatchBootWim — boot.wim + winre.wim | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P09 AssembleIso — Dynamic Update overlay + `oscdimg` | _pending operator confirmation_ | (requires `oscdimg.exe` on a Windows runner) |
 | P10 ConvertPca2023BootManager — PCA2023 conversion (opt-in) | _pending operator confirmation_ | (requires LCU 2024-4B+ source ISO) |
 | P11 StaticVerify — output ISO mount + KB-package presence check | _pending operator confirmation_ | (requires P07-P09 success) |
-| P12 VerifyPca2023Readiness — `pca2023_readiness.json` + `.md` emission | ✓ structurally validated; runs unconditionally | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
+| P12 VerifyPca2023Readiness — `pca2023_readiness.json` + `.md` emission | ✓ structurally validated; runs unconditionally | r09.0 step2b1-parser-pipeline-and-fixture-tooling build / 2026-05-28 |
 | P13 FinalReport — end-of-run summary + ISO hash | _pending operator confirmation_ | (requires P07-P11 success) |
 | A01 RefreshAllBaselines — Config baseline regeneration from caches | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
-| A02 DumpFieldClassification — field-cadence decision matrix emit | ✓ exercised | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
+| A02 DumpFieldClassification — field-cadence decision matrix emit | ✓ exercised | r09.0 step2b1-parser-pipeline-and-fixture-tooling build / 2026-05-28 |
 | A03 RefreshSnapshots — upstream `data/raw-*` + `data/cache-*` refresh | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
-| A04 RefreshDependencyDatabase (r09.0 Step 2a, stub) — registered Action with `NotImplementedException` body pointing at SPEC §B.19.15.3 | ✓ stub raises actionable error; full body lands in Step 2b | r09.0 Step 2a / 2026-05-28 |
+| A04 RefreshDependencyDatabase (r09.0 Step 2b1, parser pipeline landed; wrapper still stub) — registered Action with `NotImplementedException` body pointing at SPEC §B.19.15.3; Stages 2-4 implemented and verified via T12 | ✓ stub raises actionable error; Stages 2-4 land in this build; wrapper integration lands in Step 2b2 | r09.0 step2b1-parser-pipeline-and-fixture-tooling build / 2026-05-28 |
 | T1 catalog_probe.py | ✓ live probe passes (~7 checks) | CI Stage 4 / 2026-05-15 |
 | T2 catalog_fixture_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T3 powershell_harness.py (10 PS function assertions) | ✓ all pass | CI Stage 1 (continuous) |
@@ -72,8 +72,9 @@ a build identifier plus a calendar date. Pending items are marked
 | T9 catalog_title_tokens_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T10 release_info_resolver_test.py (22 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r09.0 step2a-followup-canonical-json-helpers build / 2026-05-28 |
-| Part C §C.3.4 — `canonical_json_format_check.py` (25 JSON files canonicalised, format gate) | ✓ all pass | r09.0 step2a-followup-canonical-json-migration build / 2026-05-28 |
-| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T11 + format check) | ✓ green | CI continuous |
+| T12 wsusscn2_parser_test.py (22 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.9.4) | ✓ all pass | r09.0 step2b1-parser-pipeline-and-fixture-tooling build / 2026-05-28 |
+| Part C §C.3.4 — `canonical_json_format_check.py` (26 JSON files canonicalised, format gate; 25 prior + 1 new wsusscn2 expected-output) | ✓ all pass | r09.0 step2b1-parser-pipeline-and-fixture-tooling build / 2026-05-28 |
+| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T12 + format check) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |

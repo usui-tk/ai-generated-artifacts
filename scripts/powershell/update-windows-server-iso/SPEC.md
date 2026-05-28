@@ -1773,6 +1773,183 @@ render correctly. The `_meta` block (B.19.10.1) is computed
 separately from script-scope state and inserted at the top of the
 file.
 
+#### B.19.9.4 Implementation notes for the parser pipeline (Phase 2b1 binding)
+
+This section records the concrete bindings between the normative
+text of §B.19.9.1-3 above and the PowerShell functions that
+implement them in `Update-WindowsServerIso.ps1`. It exists so that a
+future maintainer can answer "where is this implemented and how do I
+test it?" by reading this single subsection rather than grepping the
+13,000-line script.
+
+**Function inventory (script-tail line numbers as of r09.0 Step 2b1)**
+
+| Stage | Function | Lines | Returns | Tested by |
+|---:|---|---:|---|---|
+| 2 | `Invoke-WsusScnPackageXmlExtract` | ~97 | `[string]` path to package.xml | live monthly refresh only (platform-coupled to 7-Zip + Windows file layout) |
+| 3 | `ConvertFrom-WsusScnPackageXml`   | ~337 | `[pscustomobject]` with `.Updates`, `.FileLocations`, `.Stats` | T12 (`tests/wsusscn2_parser_test.py`, 22 assertions) |
+| 4 | `New-WsusScnDependencyDatabase`   | ~133 | `[string]` path to the written JSON | T12 (structural compare against `tests/fixtures/wsusscn2/expected-output.json`) |
+
+The three functions are contiguous in the script (Stage 2 immediately
+follows `Save-CanonicalJsonFile`; Stages 3 and 4 follow Stage 2 in
+order), so a maintainer searching for the pipeline can navigate by
+function name alone.
+
+**Stage 3 in-memory schema (return type of `ConvertFrom-WsusScnPackageXml`)**
+
+```
+[pscustomobject] {
+    Updates       = [pscustomobject[]]    # in-scope updates, see fields below
+    FileLocations = [hashtable]           # FileDigest (string) -> Url (string)
+    Stats         = [pscustomobject] {
+        UpdatesObserved        : int   # all <Update> elements seen
+        UpdatesInScope         : int   # admitted by Product+Class+recency filter
+        BundlesObserved        : int   # IsBundle="true" count among observed
+        CategoryUpdates        : int   # DeploymentAction="Evaluate"+IsSoftware="false"
+        FileLocationsObserved  : int   # all <FileLocation> elements seen
+        FileLocationsRetained  : int   # those with both Digest and Url
+        Now                    : string  # ISO-8601, the recency anchor
+        RecencyMonths          : int   # caller-supplied, -1 disables clause
+        ScopeProductGuidCount  : int
+        ScopeClassificationGuidCount : int
+    }
+}
+```
+
+Each element of `Updates` has the following fields (PascalCase in
+PowerShell, camelCase after Stage 4 serializes to JSON):
+
+```
+[pscustomobject] {
+    UpdateId             : string   # lowercase GUID, primary identifier
+    RevisionId           : string   # integer-as-string per Microsoft schema
+    RevisionNumber       : string
+    CreationDate         : string   # ISO-8601 UTC, may be $null if missing
+    IsBundle             : bool
+    IsSoftware           : bool
+    DeploymentAction     : string   # 'Evaluate' for Category, $null typically
+    KBArticleIds         : string[]
+    ProductGuids         : string[] # lowercase, from <Category Type="Product">
+    ClassificationGuids  : string[] # lowercase
+    CompanyGuids         : string[]
+    ProductFamilyGuids   : string[]
+    PrerequisiteUpdateIds: string[] # lowercase, from <Prerequisites><UpdateId>
+    SupersededByUpdateIds: string[] # lowercase, from <SupersededBy><UpdateId>
+    BundledByRevisionIds : string[] # integer-as-string, from <BundledBy><RevisionId>
+    PayloadFileDigests   : string[] # from <Files><File Digest=...>
+}
+```
+
+**Stage 4 Layer 2 JSON schema (output of `New-WsusScnDependencyDatabase`)**
+
+```
+{
+  "_meta": {
+    "generator":     string,            # human-readable identifier
+    "scriptVersion": string,            # $Script:ScriptVersion at write time
+    "scriptTag":     string,            # $Script:ScriptTag at write time
+    "generatedAt":   string,            # ISO-8601 UTC of the write
+    "sourceCab": {                      # provenance, null if unknown
+      "path":   string|null,
+      "size":   int|null,
+      "sha256": string|null             # lowercase hex
+    },
+    "scope": {
+      "productGuids":         string[],
+      "classificationGuids":  string[],
+      "recencyMonths":        int,      # -1 means disabled
+      "now":                  string    # ISO-8601 UTC, the anchor used
+    },
+    "stats": {
+      "updatesObserved":       int,
+      "updatesInScope":        int,
+      "bundlesObserved":       int,
+      "categoryUpdates":       int,
+      "fileLocationsObserved": int,
+      "fileLocationsRetained": int,
+      "payloadUrlsMissing":    int      # PayloadFileDigest with no FileLocation
+    }
+  },
+  "updates": [
+    {
+      "updateId":              string,
+      "revisionId":            string,
+      "revisionNumber":        string,
+      "creationDate":          string|null,
+      "isBundle":              bool,
+      "isSoftware":            bool,
+      "deploymentAction":      string|null,
+      "kbArticleIds":          string[],
+      "productGuids":          string[],
+      "classificationGuids":   string[],
+      "companyGuids":          string[],
+      "productFamilyGuids":    string[],
+      "prerequisiteUpdateIds": string[],
+      "supersededByUpdateIds": string[],
+      "bundledByRevisionIds":  string[],
+      "payloadFileDigests":    string[],
+      "payloadUrls":           string[] # joined from _meta.FileLocations table
+    }
+  ]
+}
+```
+
+All GUIDs are lowercase. The file is written through
+`Save-CanonicalJsonFile` at `-Depth 32`, so it matches the
+byte-canonical JSON rules from §B.23.
+
+**Scope filter rule binding**
+
+The §B.19.7 scope filter (Product GUID AND Classification GUID AND
+recency window) is implemented in `ConvertFrom-WsusScnPackageXml` as
+three boolean tests evaluated in order, with early-exit `foreach`
+loops against `HashSet[string]` (case-insensitive comparer). Default
+GUIDs are read from the script-scope tables (`$Script:WsusScnOsCategoryGuids`
+and `$Script:WsusScnUpdateClassificationGuids`); callers may override
+via the `-ScopeProductGuids` / `-ScopeClassificationGuids` parameters
+(useful for T12 fixture-driven tests). Setting `-RecencyMonths -1`
+disables the recency clause entirely.
+
+**Allowlist enforcement (§B.19.8 hard-rule binding)**
+
+The Microsoft-prose exclusion is enforced as a **positive allowlist**
+inside the Stage 3 subtree walk:
+
+```
+$allowedChildNames = HashSet[string]@(
+    'KBArticleID', 'Categories', 'Category', 'Prerequisites',
+    'UpdateId', 'RevisionId', 'SupersededBy', 'BundledBy',
+    'Files', 'File')
+```
+
+Any element not on this list is `Skip()`-ed by the `XmlReader` and
+never enters the parser's working memory. This is structurally
+stronger than a denylist: a future schema change that adds a new
+prose tag (e.g. `<LocalizedDescription>`) cannot leak into the
+dependency database without an explicit code change to extend the
+list.
+
+**Provenance pointers**
+
+- The four Server LTSC Product GUIDs and five Classification GUIDs
+  in `$Script:WsusScnOsCategoryGuids` / `WsusScnUpdateClassificationGuids`
+  are cross-referenced from research/windows-servicing §5.7 (commit
+  648880e) which documents the Microsoft Learn, ansible/ansible
+  Issue 60785, dsccommunity/UpdateServicesDsc Issue 65, and WSUSOffline
+  forum sources, plus the 2026-05-12 wsusscn2.cab empirical
+  verification.
+- The two-step 7-Zip extraction strategy (Stage 2) and the streaming
+  XmlReader rationale (Stage 3, peak ~200-300 MB vs ~536 MB for full
+  DOM load) are documented in research §2.4.1 and §7.2.
+
+**Test-side binding**
+
+T12 (`tests/wsusscn2_parser_test.py`) covers Stages 3 and 4 only;
+Stage 2 is exercised by the live monthly refresh CI. The fixture in
+`tests/fixtures/wsusscn2/package.xml` is deterministically rebuildable
+via `python3 -m tests.common.wsusscn2_fixture_builder` — fixture
+changes are therefore reviewable as code, not as opaque binary blobs.
+
 ### B.19.10 Layer 2 JSON schema (normative)
 
 This is the canonical shape of `data/wsusscn2-database.json`. The
