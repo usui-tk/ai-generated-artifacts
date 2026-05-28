@@ -695,7 +695,7 @@ This script directory ships a `.psa.config.json` that:
    reference in a comment body is reported. This is feasible because
    the r21 cleanup commit removed every such reference from the
    script body; the strict baseline is the verified end-state.
-2. **Disables** `PSA6003` (plural function noun). Three intentional
+2. **Disables** `PSA6003` (plural function noun) and `PSA7003` (non-ASCII script body, default-on since `psa.py` 4.2.0 — opted out because the script embeds intentional Japanese log strings and em-dashes). For `PSA6003`: three intentional
    plural-noun functions in `Download-SpeakerDeck.ps1` motivate this
    exemption; the rationale is recorded inline in the config file.
 

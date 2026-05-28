@@ -73,7 +73,7 @@ cd scripts/powershell/download-speakerdeck-oracle4engineer
 python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
-The local `.psa.config.json` disables `PSA6003` (plural function noun) for
+The local `.psa.config.json` disables `PSA6003` (plural function noun) and `PSA7003` (non-ASCII script body, default-on since `psa.py` 4.2.0; opted out for the intentional Japanese log strings and em-dashes) for
 this directory only. Rationale: three functions in `Download-SpeakerDeck.ps1`
 (`Resolve-RuntimeDirectories`, `Invoke-CleanupDirectories`,
 `Read-YearOverrides`) intentionally use plural nouns because they operate on

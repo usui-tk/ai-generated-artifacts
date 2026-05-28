@@ -169,7 +169,7 @@ remain unambiguous.
 | A.2 | Source File Format | UTF-8 BOM, CRLF, ASCII-only outside literals, `.gitattributes` enforcement |
 | A.3 | Banner & Version Identification | `$Script:ScriptVersion` / `$Script:ScriptTag` conventions; self-fingerprint via SHA256; banner block layout |
 | A.4 | Phase Architecture | numbering rules; phase groups; phase header / footer; Phase Timing Summary |
-| A.5 | Logging Conventions | `Write-Step` / `Write-Ok` / `Write-Warn` / `Write-Fail` / `Write-Skip` markers; color discipline; console encoding; TLS hardening |
+| A.5 | Logging Conventions | `Write-Step` / `Write-Ok` / `Write-Caution` / `Write-Fail` / `Write-Skip` markers; color discipline; console encoding; TLS hardening |
 | A.6 | Path Handling (`-LiteralPath` rules) | wildcard-interpretation hazard; canonical safe-temp pattern; sanitization of derived filenames |
 | A.7 | Parameter Conventions | standard switches; mutual exclusion patterns; banner display |
 | A.8 | Error & Diagnostic Conventions | three-tier diagnostic output; failure category classification; diagnostic `.txt` dump; JSONL schema |
@@ -1457,6 +1457,8 @@ directly. See the sibling repository's SPEC §A.11.7 "partial port
 participant" tier for the cross-repo classification and the authoritative
 list of which helpers are maintained byte-identical.
 
+A follow-on `cross-repo-canon-iso-encoding-tls-rename` release (`r11.1`) renamed two host-configuration helpers to their canon names: `Set-ConsoleUtf8` → `Set-Utf8PipelineEncoding` (the body sets `[Console]::OutputEncoding`, `[Console]::InputEncoding`, and the pipeline-global `$OutputEncoding`, so the broader name is accurate) and `Set-Tls12` → `Set-TlsSecurityProtocol` (the body assigns the `[Net.ServicePointManager]::SecurityProtocol` bitmask, which the pre-rename name understated). Only the names changed; the shorter, ISO-specific bodies are unchanged and remain in the sibling SPEC §A.11.7 carve-out set rather than the maintained-identical set.
+
 After that alignment the only remaining per-script differences in the
 three ported helpers are values that MUST encode this script's own
 identity — not logger naming:
@@ -2062,7 +2064,7 @@ them.
 `Invoke-AdminPhaseA01_RefreshAllBaselines` invokes A04 as the last
 step before `return $true`, immediately after
 `Show-RefreshAllBaselinesSummary`. The chain is **soft-fail**: any
-exception or `$false` return from A04 is logged via `Write-Warn` but
+exception or `$false` return from A04 is logged via `Write-Caution` but
 does NOT mark A01 as failed. Rationale: A01's primary deliverable is
 the per-OS config baselines (already written successfully by the time
 A04 is reached); the dependency database is downstream advisory data.
@@ -4404,12 +4406,12 @@ when the original needs an upstream fix.
 | Helper | Role |
 |:---|:---|
 | Debug Trace Facility (`Start-DebugTrace`, `Set-DebugStep`, `Stop-DebugTrace`, `Export-DebugTraceJson`) | Per-phase forensic state capture |
-| `Write-Step`, `Write-Ok`, `Write-Warn`, `Write-Fail`, `Write-Skip`, `Write-PhaseHeader`, `Write-PhaseFooter` | Log helpers with severity prefixes (§A.3) |
+| `Write-Step`, `Write-Ok`, `Write-Caution`, `Write-Fail`, `Write-Skip`, `Write-PhaseHeader`, `Write-PhaseFooter` | Log helpers with severity prefixes (§A.3) |
 | `Get-EnvironmentInfo` | Five-pillar environment dump (OS, PS, locale, network, ADK) |
 | `Add-ErrorJsonlEntry` | Per-error JSONL append |
 | `Invoke-DownloadWithProgress` | Progress-aware HTTP download with retry |
 | `Assert-IsAdministrator` | Elevation check |
-| `Set-ConsoleUtf8` | Console encoding setup |
+| `Set-Utf8PipelineEncoding` | Console encoding setup |
 
 ### E.2 Reused from `Deploy-AMDChipsetDriverOnWindowsServer.ps1` (Appendix F)
 

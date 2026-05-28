@@ -121,13 +121,13 @@ following reusable assets:
 - 9-phase architecture (`Setup` / `Scan` / `Plan` / `Fetch` / `Verify` /
   `Report` groups) with year-folder output organization
 - Logging helpers: `Write-PhaseHeader` / `Write-PhaseFooter` /
-  `Format-Elapsed` / `Write-Step` / `Write-Ok` / `Write-Warn` /
+  `Format-Elapsed` / `Write-Step` / `Write-Ok` / `Write-Caution` /
   `Write-Fail` / `Write-Skip` / `Write-SubSection`
 - Banner block layout (Magenta `=` × 72, script-tag line, phase entry /
   exit)
 - Environment dump: `Show-PowerShellEnvironment` /
   `Assert-PowerShellCompatibility`
-- Host-configuration helpers: `Set-ConsoleUtf8` / `Set-Tls12`
+- Host-configuration helpers: `Set-Utf8PipelineEncoding` / `Set-TlsSecurityProtocol`
 - Adaptive parallel download via Runspace Pool
 - PDF metadata reclassification (Phase 8 / year_overrides.csv pattern)
 - CSV cross-phase column conventions (Section A.9)
@@ -312,7 +312,7 @@ The phase-ID column width is `{0,-4}` (sufficient for `P01` … `P99`).
 |---|---|---|---|
 | `[*]` | `Write-Step` | Cyan | Action in progress / informational step |
 | `[+]` | `Write-Ok` | Green | Successful completion |
-| `[!]` | `Write-Warn` | Yellow | Recoverable warning |
+| `[!]` | `Write-Caution` | Yellow | Recoverable warning |
 | `[X]` | `Write-Fail` | Red | Failure (non-fatal) |
 | `[~]` | `Write-Skip` | DarkGray | Intentionally skipped |
 
@@ -656,7 +656,7 @@ Based on the longest successful path length, classify into:
   scripts/
     powershell/
       download-speakerdeck-oracle4engineer/
-        .psa.config.json     # project-local config (disables PSA6003)
+        .psa.config.json     # project-local config (disables PSA6003 + PSA7003)
     python/
       powershell-static-analyzer/
         psa.py               # canonical location, latest mainline

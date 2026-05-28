@@ -400,7 +400,7 @@ if ($needsOsVersion -and [string]::IsNullOrEmpty($OsVersion)) {
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
-function Set-ConsoleUtf8 {
+function Set-Utf8PipelineEncoding {
     <#
     .SYNOPSIS
         Force UTF-8 for console input, output, and pipeline encoding.
@@ -423,14 +423,17 @@ function Set-ConsoleUtf8 {
     try { Set-Variable -Name OutputEncoding -Scope Global -Value ([System.Text.Encoding]::UTF8) -ErrorAction SilentlyContinue } catch { } # psa-disable-line PSA3004 -- intentional best-effort cleanup; no error to surface
 }
 
-function Set-Tls12 {
+function Set-TlsSecurityProtocol {
     <#
     .SYNOPSIS
         Enable TLS 1.2 (and weaker fallbacks) for outbound HTTPS calls.
     .DESCRIPTION
         Required on some Windows PowerShell 5.1 hosts where the default
-        SecurityProtocol is still Ssl3 + Tls (1.0). Speaker Deck and
-        files.speakerdeck.com both negotiate TLS 1.2+, so the default
+        SecurityProtocol is still Ssl3 + Tls (1.0). The Microsoft Update
+        Catalog (catalog.update.microsoft.com), the Windows Update CDN
+        (catalog.s.download.windowsupdate.com) that serves wsusscn2.cab,
+        and the GitHub release endpoints (api.github.com / github.com)
+        used for the 7-Zip fallback all require TLS 1.2+, so the default
         on older hosts results in a handshake failure unless this is
         set. Tls11 and Tls (1.0) are kept in the bitmask as a
         defensive fallback for very old environments; modern hosts
@@ -446,8 +449,8 @@ function Set-Tls12 {
 
 # Apply host configuration immediately so every subsequent write goes
 # through the right encoding and every HTTPS call uses TLS 1.2.
-Set-ConsoleUtf8
-Set-Tls12
+Set-Utf8PipelineEncoding
+Set-TlsSecurityProtocol
 
 # ============================================================
 # Path resolution (relative to the script, not the caller's CWD)
@@ -535,8 +538,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.0'
-$Script:ScriptTag     = 'cross-repo-canon-iso-port-alignment'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.1'
+$Script:ScriptTag     = 'cross-repo-canon-iso-encoding-tls-rename'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath

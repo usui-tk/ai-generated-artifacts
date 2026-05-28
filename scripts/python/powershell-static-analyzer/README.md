@@ -585,6 +585,7 @@ The following repositories and PowerShell scripts are verified with
 |:---|:---|
 | `Download-SpeakerDeck.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
 | `Test-PdfMetadata.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
+| `Update-WindowsServerIso.ps1` | [`scripts/powershell/update-windows-server-iso/`](../../powershell/update-windows-server-iso/) |
 
 ### External repositories
 

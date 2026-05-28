@@ -15,6 +15,14 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
+### Documentation — Verified-consumers table
+
+Added `Update-WindowsServerIso.ps1` (`scripts/powershell/update-windows-server-iso/`) to the **Verified
+consumers → Within this repository** table in `README.md`. The script has
+used `psa.py` (via its own `.psa.config.json` and the Stage 1 Linux CI
+job) since it was introduced; the table simply had not been updated to
+list it.
+
 ### Documentation — Compliance with `scripts/README.md` Required Sections + repository-wide `AGENTS.md` cross-references
 
 A doc-only update that brings this subproject into compliance with
@@ -107,6 +115,13 @@ Appendix C and Appendix D exist — both already present here).
   (BOM + CRLF + ASCII-only). New helper `compute_non_ascii_stats()` and
   check `check_non_ascii_chars()`; see SPEC.md section 4.28b. Added 5
   rule-level tests and 5 `compute_non_ascii_stats` unit tests.
+
+### Rule count
+
+`RULES` registry: 49 → 50 entries (PSA1xxx ×4, PSA2xxx ×13,
+PSA3xxx ×6, PSA4xxx ×4, PSA5xxx ×4, PSA6xxx ×8, PSA7xxx ×3,
+PSA8xxx ×1, PSA9xxx ×2, PSAPxxxx ×5). The single new entry is the
+PSA7xxx (file-format / encoding) family member PSA7003.
 
 ## [4.1.0] - 2026-05-26
 

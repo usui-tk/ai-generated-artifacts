@@ -16,6 +16,16 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.1 - cross-repo canon encoding/TLS helper rename
+
+Renames two host-configuration helpers to their Deploy-AMD canon names so that functions performing the same work carry the same names across repositories. Function behaviour is unchanged; this is a pure rename plus the script-identity bump.
+
+- **`Set-ConsoleUtf8` renamed to `Set-Utf8PipelineEncoding`** (1 definition + 1 call site). The body sets all three encodings — `[Console]::OutputEncoding`, `[Console]::InputEncoding`, and the pipeline-global `$OutputEncoding` — so the canon name (which captures the broader pipeline-encoding scope) is more accurate than the old console-only name.
+- **`Set-Tls12` renamed to `Set-TlsSecurityProtocol`** (1 definition + 1 call site). The body assigns the `[Net.ServicePointManager]::SecurityProtocol` bitmask; the pre-rename name understated this (the bitmask is broader than TLS 1.2).
+- The two bodies are intentionally left unchanged (they are simpler than, and divergent from, the Deploy-AMD canon implementations) and are classified as carve-outs — same name, divergent body — in the sibling repository's SPEC §A.11.7 partial-participant list.
+- Corrected a stale copy/paste comment in the `Set-TlsSecurityProtocol` body: the `.DESCRIPTION` previously cited Speaker Deck / `files.speakerdeck.com` (inherited from the sister `Download-SpeakerDeck.ps1` script it was seeded from). It now names this script's actual TLS 1.2+ download endpoints — the Microsoft Update Catalog (`catalog.update.microsoft.com`), the Windows Update CDN (`catalog.s.download.windowsupdate.com`, which serves `wsusscn2.cab`), and the GitHub release endpoints (`api.github.com` / `github.com`) used for the 7-Zip fallback. Comment-only change; no code or behaviour change.
+- `$Script:ScriptVersion` bumped `update-wsi-2026.05.29-r11.0` → `update-wsi-2026.05.29-r11.1`; `$Script:ScriptTag` set to `cross-repo-canon-iso-encoding-tls-rename`.
+
 ### r11.0 - cross-repo canon port alignment
 
 Aligns this script's ported logging / DebugTrace helpers to the
