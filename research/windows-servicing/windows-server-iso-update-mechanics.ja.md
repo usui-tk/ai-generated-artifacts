@@ -104,7 +104,7 @@ Catalog インタラクションには 2 つの十分に文書化された落と
 
 **Server 2019 と Server 2022 の間で OS 命名が変わった**。 古い OS は更新タイトルでユーザー向けブランド名を使用します:「Windows Server 2019」「Windows Server 2016」。 Server 2022 から、 Microsoft は「Microsoft server operating system, version `<NNHN>`」という命名に切り替えました。 `<NNHN>` はコードネームバージョン:Server 2022 は `21H2`、 Server 2025 は `24H2` です。 Catalog で「Windows Server 2025 2026-04」を検索しても有用な結果は返りません。 「Microsoft server operating system version 24H2 2026-04」を検索すると LCU と依存性が返ってきます。 タイトル文字列ヒューリスティックは両方の命名規則を維持し、 OS バージョンによって分岐する必要があります。
 
-**Server 2025 LCU は現状 2 ファイルのダウンロードセットに解決される**。 すべての Server 2025 LCU 解決は *2 つの* ダウンロード URL を返します:LCU 本体に加えて、 固定 KB(現状は `KB5043080`)— これは Servicing Stack ベースラインです。 これはどの LCU 月をリクエストしても同じ Servicing Stack パッケージです。 運用上、 これは Server 2025 にスタンドアロン SSU が存在しないことを強く示唆します — Microsoft は Catalog の `DownloadDialog.aspx` を介して、 すべての LCU と並んで SSU 依存性を 2 ファイルバンドルとして配信します。 「LCU」URL のみをダウンロードし 2 番目を無視するパイプラインは、 LCU が `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` で適用に失敗する WIM を生成します。 正しいパターンは:2 つの `.msu` ファイルをダウンロードし、 依存性順序の判断は `Add-WindowsPackage` に任せること — これは SSU 順序を自動的に処理します。
+**Server 2025 LCU は現状 2 ファイルのダウンロードセットに解決される**。 すべての Server 2025 LCU 解決は *2 つの* ダウンロード URL を返します:LCU 本体に加えて、 固定 KB(現状は `KB5043080`)— これは Servicing Stack ベースラインです。 これはどの LCU 月をリクエストしても同じ Servicing Stack パッケージです。 運用上、 これは Server 2025 にスタンドアロン SSU が存在しないことを強く示唆します — Microsoft は Catalog の `DownloadDialog.aspx` を介して、 すべての LCU と並んで SSU 依存性を 2 ファイルバンドルとして配信します。 「LCU」URL のみをダウンロードし 2 番目を無視するパイプラインは、 LCU が `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` で適用に失敗する WIM を生成します。 正しいパターンは:2 つの `.msu` ファイルをダウンロードし、 依存性順序の判断は `Add-WindowsPackage` に任せること — これは SSU 順序を自動的に処理します。 Server 2025 で観測されたこの 2 ファイル LCU+SSU 挙動は、 Microsoft の正式なサービシング保証ではなく、 現行 Catalog の挙動として扱うべきです。
 
 release-info から取得した KB を直接(KB のみ入力、 タイトル文字列ヒューリスティックなしで)Catalog 経由でダウンロード URL に変換できるかという検証では、 代表的な 8 サンプルテストの成功率は 8 / 8 です。 したがって Catalog は実用的な URL リゾルバですが、 貧弱なディスカバリ表面です。 元の調査からの広範な試行錯誤から得られた建築的教訓は次の通りです:**release-info / .NET リリースノートが発見者、 Catalog がリゾルバ**。 これによりタイトル文字列ヒューリスティック表面とそれがもたらす脆弱性を最小化できます。
 
@@ -169,9 +169,11 @@ Master XML のパースはそのスケールに注意が必要です。 コモ�
 | パッケージ別 CAB スキャン(`packageN.cab` 内 12,500 ファイル) | 6.7 秒抽出 + 127.9 秒スキャン | < 50 MB |
 | 仮想的な全パッケージ別スキャン(全 75 CAB) | 約 2.5 時間 | 15-20 GB ディスクピーク |
 
-全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<Prerequisites>`、 `<SupersededBy>`、 `<BundledBy>`、 `<PayloadFiles>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる小さな JSON 依存性データベース（本プロジェクトが用いる in-scope bundle 粒度で約 0.2 MB）を生成できます。 完全なオフライン WUA 適用可能性評価は Master XML の直接パースよりも大幅に低速であり、 したがって発見（discovery）ワークフローよりも検証（validation）ワークフローに適しています — これが、 本パイプラインが発見には Master XML パースを用い、 WUA を最終的な適用可能性検証に留保している理由です。
+全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<Prerequisites>`、 `<SupersededBy>`、 `<BundledBy>`、 `<PayloadFiles>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる小さな JSON 依存性データベース（本プロジェクトが用いる in-scope bundle 粒度で約 0.2 MB）を生成できます。 完全なオフライン WUA 適用可能性評価は Master XML の直接パースよりも大幅に低速です — これは想定どおりで、 WUA が直接的なメタデータ抽出ではなく、 完全な適用可能性ルール・supersedence チェーン・コンポーネント状態を評価するためです — したがって発見（discovery）ワークフローよりも検証（validation）ワークフローに適しており、 これが、 本パイプラインが発見には Master XML パースを用い、 WUA を最終的な適用可能性検証に留保している理由です。
 
 > **サポート状況に関する注記。** `package.xml` の直接パースは、 観測されたメタデータ構造に基づく実装手法であり、 Microsoft がサポートする API 契約ではありません。 スキーマは予告なく変更され得ます。 最終的な適用可能性・インストール可能性の判断は、 権威ある適用可能性評価器（authoritative applicability evaluator）である Windows Update Agent のサービシングロジック（マウント済みイメージに対するオフライン WUA スキャン）で検証すべきです。 スキーマがサポート外であるにもかかわらず Master XML が運用上有用であり続けるのは、 依存関係をリポジトリ全体の形で露出し、 完全なオフライン WUA 適用可能性スキャンよりも桁違いに高速に照会できるためです — これが、 発見には Master XML を用い、 最終検証には WUA を留保する理由です。 その複雑さにもかかわらず `wsusscn2.cab` が他に代えがたい価値を持つのは、 Windows サービシングエコシステム全体の前提条件・supersedence 関係をリポジトリ規模で露出する、 広くアクセス可能な唯一のオフラインメタデータコーパスだからです。 とはいえ、 将来の wsusscn2 スキーマ改訂をまたいだ互換性は一切保証されないものと考えるべきです。
+
+**設計思想（Design philosophy）。** 本ワークフロー全体を貫く指導原則は、 リバースエンジニアリングしたメタデータは発見と高速化のために用いつつ、 最終的な適用可能性・インストール可能性の判断は可能な限り Microsoft 自身のサービシングロジック（WUA）に委ねる、 というものです。 したがってサポート外のメタデータは権威あるものではなく助言的なものとして扱います。 本パイプラインは、 サポート外または構造的に曖昧なメタデータに対して意図的に fail-closed（安全側に停止する）設計思想を採用します:予期しない構造に遭遇したパーサーは推測するのではなく中断して人間のレビューを要求し、 前提条件の欠落はパイプラインを停止させ、 署名の曖昧さは無害なエッジケースではなく失敗として扱います。 いかなる schema drift（スキーマのずれ）も、 黙って吸収するパースのエッジケースではなく、 人間のレビューを要する互換性イベントとして扱います。
 
 #### 2.4.1 Category 階層の package.xml 内表現
 
@@ -280,7 +282,7 @@ Server 2016 / 2019 / 2022 では、 `EnableInstallWimUpdate=true` ワークフ�
 
 PowerShell の `Get-AuthenticodeSignature` コマンドレットを EFI バイナリに対して実行すると、 戻り値オブジェクトは `SignerCertificate` プロパティを公開し、 慣習的な思考では、 このプロパティの `Issuer` フィールドがバイナリに署名した CA を示すと考えます。 **これは微妙ですが重要な意味で誤導的です。**
 
-`SignerCertificate` の `Issuer` はチェーン内の **直接の署名者** — つまり leaf の親を返します。 しかし PCA2023 移行で問題となるのは「leaf の直接の署名者は誰か」ではありません — それは「ファームウェアが DB / DBX に対して検証するチェーンのトップにある CA は何か」です。 これを正しく回答するには、 `X509Chain.Build()` でチェーンを再構築して辿る必要があります。
+`SignerCertificate` の `Issuer` はチェーン内の **直接の署名者** — つまり leaf の親を返します。 しかし PCA2023 移行で問題となるのは「leaf の直接の署名者は誰か」ではありません — それは「ファームウェアが DB / DBX に対して検証する証明書チェーンの trust anchor となる CA は何か」です。 これを正しく回答するには、 `X509Chain.Build()` でチェーンを再構築して辿る必要があります。 これが重要なのは、 失敗が後段で現れるためです:直接の発行者によって正しく署名されているように見えるバイナリでも、 異なる trust anchor しか信頼しないファームウェアでは起動に失敗し得ます。
 
 具体例として、 Server 2025 の `EFI_EX\bootmgfw_EX.efi` で観測されたもの:
 
@@ -362,6 +364,17 @@ Microsoft の `Make2023BootableMedia.ps1` v1.4 自体は **検証を一切行い
 > SCOPE: file presence + signer-chain only. Actual boot behaviour on firmware with PCA2011 revoked from DBX is NOT verified here. Manual boot test on hardware or a Hyper-V Gen2 VM with a PCA2023 Secure Boot template is required before production deployment.
 
 パイプライン設計の観点では、 SCOPE clarifier はオペレータに正しい期待を設定します:検証関数からの `Pass` は必要ですが十分ではありません。 実際に証明されるのは、 ファイルシステム構造と Authenticode チェーンが正しいことだけです。 デプロイ対象のファームウェアが実際にチェーンを受け入れるかどうかは、 そのターゲットが Microsoft の PCA2023 DB プロビジョニング更新を受信したかどうかに依存し、 これは ISO のみを操作するツーリングの範囲外です。
+
+検証が及ぶ範囲を明示することは、 オペレータの期待を正しく設定するのに役立ちます。 各検証レイヤーは厳密に異なるものを証明します:
+
+| 検証 | 証明すること | 証明しないこと |
+|:---|:---|:---|
+| Authenticode チェーン検査 | ファイルが期待される署名者チェーンを持つ（例:PCA2023 で終端する） | いずれかのファームウェアがそれを受け入れること |
+| ファイル存在チェック | メディアレイアウトが構造的に正しい（`_EX` バイナリが期待パスに存在） | バイナリが正しく署名されていること |
+| Hyper-V Gen2 ブートテスト | ブートマネージャーが Hyper-V の仮想ファームウェアに受け入れられる | 物理 OEM ファームウェアが受け入れること（DB/DBX 状態は異なり得る） |
+| 物理ハードウェアブートテスト | 特定の OEM ファームウェアの信頼 DB/DBX 状態が互換である | *別の* OEM/ファームウェア世代が互換であること |
+
+どの行も単独では十分ではありません;各行は累積的であり、 実際の DB/DBX 信頼判断を代表的なターゲット上で行使するのは最下行だけです。
 
 ---
 
@@ -525,7 +538,7 @@ Server 2022 の曖昧性は予防する価値があります:最近の月の Ser
 
 §5.5 と §5.6 で SSU-LCU/CU の依存性検証パイプラインを設計しました。 このパイプラインの最初のフィルタリング段階(scope filter)は、 wsusscn2.cab の Master XML に登場する全 ~136,000 件の `<Update>` から **Server LTSC 系列だけを切り出す** ために、 WSUS の `Categories.Product` GUID と `Categories.UpdateClassification` GUID を判定キーとして使います。
 
-このセクションでは scope filter で使う **確定された GUID 表** を示します。 GUID は WSUS の global identifier として時間と共に変わらないので、 タイトル文字列ヒューリスティック(§6.2 で議論する脆弱性)に依存せず堅牢な判定が可能です。
+このセクションでは scope filter で使う **確定された GUID 表** を示します。 GUID は WSUS の global identifier として時間と共に変わらないので、 タイトル文字列ヒューリスティック(§6.2 で議論する脆弱性)に依存せず堅牢な判定が可能です。 GUID ベースのフィルタリングは表示名の変更やローカライズの差異を切り抜けるため、 タイトル文字列ヒューリスティックよりも大幅に安定します — これは本ワークフロー全体の重要なアーキテクチャ上の洞察のひとつです。
 
 **Update Classification GUIDs**(WSUS 公式、 12 種類のうち 5 種類が実 wsusscn2 で観測):
 
@@ -808,6 +821,7 @@ Microsoft リファレンス `Make2023BootableMedia.ps1` v1.4 はこれを一切
 - Server vNext が `_EX` デュアルツリーモデルを継続するか、 別の PCA2023 配信メカニズムに置き換えるか。
 - PCA2011 の DBX 失効タイミングが、 単一の Microsoft 公表日に従うのではなく、 OEM ファームウェアエコシステムごとに異なるか否か。
 - Microsoft が将来、 Server LTSC の Product Category GUID マッピングを公式に公開するか否か（現状は wsusscn2 とコミュニティソースからの逆引きに委ねられている。§5.7 参照）。
+- GitHub バックの release-info Markdown ソース（§2.1）が形式の安定性を保つか、 あるいはテーブルレイアウトのパーサーを破壊する形で廃止・再構成されるか否か。
 
 これらは本記事が回答できるから挙げているのではなく、 長寿命のパイプラインがこれらのいずれかの変化に備えて余裕を持つべきだからです。
 

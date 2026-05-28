@@ -104,7 +104,7 @@ The Catalog interaction has two well-documented gotchas:
 
 **OS naming changed between Server 2019 and Server 2022.** Older OSes use the user-facing brand name in update titles: "Windows Server 2019", "Windows Server 2016". Starting with Server 2022, Microsoft switched to the "Microsoft server operating system, version `<NNHN>`" naming where `<NNHN>` is the codename version: `21H2` for Server 2022 and `24H2` for Server 2025. A Catalog query for "Windows Server 2025 2026-04" returns nothing useful; a query for "Microsoft server operating system version 24H2 2026-04" returns the LCU and its dependencies. Any title-string heuristic must maintain both naming conventions and dispatch by OS version.
 
-**Server 2025 LCUs currently resolve to a 2-file download set.** Every Server 2025 LCU resolution returns *two* download URLs: the LCU itself plus a fixed KB (currently `KB5043080`) that is the Servicing Stack baseline. This is the same Servicing Stack package every time, regardless of which LCU month is requested. Operationally, this strongly suggests that Server 2025 has no standalone SSU — Microsoft serves the SSU dependency alongside every LCU as a two-file bundle through the Catalog's `DownloadDialog.aspx`. A pipeline that downloads only the "LCU" URL and ignores the second will produce a WIM that fails to apply the LCU with `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED`. The correct pattern is: download both `.msu` files and let `Add-WindowsPackage` figure out the dependency order — it handles SSU ordering automatically.
+**Server 2025 LCUs currently resolve to a 2-file download set.** Every Server 2025 LCU resolution returns *two* download URLs: the LCU itself plus a fixed KB (currently `KB5043080`) that is the Servicing Stack baseline. This is the same Servicing Stack package every time, regardless of which LCU month is requested. Operationally, this strongly suggests that Server 2025 has no standalone SSU — Microsoft serves the SSU dependency alongside every LCU as a two-file bundle through the Catalog's `DownloadDialog.aspx`. A pipeline that downloads only the "LCU" URL and ignores the second will produce a WIM that fails to apply the LCU with `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED`. The correct pattern is: download both `.msu` files and let `Add-WindowsPackage` figure out the dependency order — it handles SSU ordering automatically. The observed two-file LCU+SSU behavior for Server 2025 should be treated as current Catalog behavior rather than a formal Microsoft servicing guarantee.
 
 When a release-info KB can be turned directly into download URLs via the Catalog (KB-only input, no title-string heuristics), the success rate across a representative 8-sample test is 8/8. The Catalog is therefore a viable URL resolver, but a poor discovery surface. The architectural lesson, derived from extensive trial-and-error, is: **release-info / .NET release-notes is the discoverer; the Catalog is the resolver**. This minimises the title-string heuristic surface and the brittleness it introduces.
 
@@ -169,9 +169,11 @@ Parsing the Master XML deserves attention to its scale. A representative timing 
 | Per-package CAB scan (`packageN.cab` with 12,500 inner files) | 6.7 s extract + 127.9 s scan | < 50 MB |
 | Hypothetical full per-package scan (all 75 CABs) | ≈ 2.5 hours | 15–20 GB disk peak |
 
-The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<Prerequisites>`, `<SupersededBy>`, `<BundledBy>`, `<PayloadFiles>`, and `<FileLocation>`, producing a small JSON dependency database (~0.2 MB at the in-scope-bundle granularity used by this project) that can answer most pre-flight questions. A full offline WUA applicability evaluation is significantly slower than direct Master XML parsing and is therefore better suited for validation workflows than for discovery workflows — which is the reason this pipeline uses Master XML parsing for discovery and reserves WUA for final applicability validation.
+The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<Prerequisites>`, `<SupersededBy>`, `<BundledBy>`, `<PayloadFiles>`, and `<FileLocation>`, producing a small JSON dependency database (~0.2 MB at the in-scope-bundle granularity used by this project) that can answer most pre-flight questions. A full offline WUA applicability evaluation is significantly slower than direct Master XML parsing — this is expected, because WUA evaluates full applicability rules, supersedence chains, and component state rather than performing direct metadata extraction — and is therefore better suited for validation workflows than for discovery workflows, which is the reason this pipeline uses Master XML parsing for discovery and reserves WUA for final applicability validation.
 
 > **Note on support status.** Direct parsing of `package.xml` is an implementation technique based on observed metadata structure, not a Microsoft-supported API contract. The schema can change without notice. Final applicability and installability decisions should still be validated through the Windows Update Agent servicing logic (an offline WUA scan against the mounted image), which is the authoritative applicability evaluator. Despite the unsupported nature of the schema, the Master XML remains operationally valuable because it exposes dependency relationships in a repository-wide form that is dramatically faster to query than a full offline WUA applicability scan — which is why it is used for discovery while WUA is reserved for final validation. Despite its complexity, `wsusscn2.cab` remains uniquely valuable because it is the only broadly accessible offline metadata corpus that exposes prerequisite and supersedence relationships across the Windows servicing ecosystem at repository scale. That said, no compatibility guarantee should be assumed across future wsusscn2 schema revisions.
+
+**Design philosophy.** The guiding principle throughout this workflow is to use reverse-engineered metadata for discovery and acceleration, but to defer final applicability and installability decisions to Microsoft's own servicing logic (WUA) wherever possible. Unsupported metadata is therefore treated as advisory rather than authoritative. The pipeline intentionally adopts a fail-closed design philosophy for unsupported or structurally ambiguous metadata: a parser that encounters unexpected structure aborts and requests human review rather than guessing, missing prerequisites stop the pipeline, and signature ambiguity is treated as failure rather than as a benign edge case. Any schema drift is treated as a compatibility event requiring human review, not a parsing edge case to absorb silently.
 
 #### 2.4.1 The Category hierarchy embedded in package.xml
 
@@ -280,7 +282,7 @@ The 2025 install.wim has one additional file in EFI: **`SecureBootRecovery.efi`*
 
 When the PowerShell cmdlet `Get-AuthenticodeSignature` is run against an EFI binary, the returned object exposes a `SignerCertificate` property and the conventional thinking is that this property's `Issuer` field tells you which CA signed the binary. **This is misleading in a subtle but important way.**
 
-The `Issuer` of the `SignerCertificate` is the **immediate signer** in the chain — i.e., it returns the leaf's parent. But the question that matters for the PCA2023 migration is not "who is the immediate signer of the leaf" — it is "which certificate authority sits at the top of the chain that the firmware will validate against DB / DBX". To answer that correctly, the chain must be rebuilt with `X509Chain.Build()` and traversed.
+The `Issuer` of the `SignerCertificate` is the **immediate signer** in the chain — i.e., it returns the leaf's parent. But the question that matters for the PCA2023 migration is not "who is the immediate signer of the leaf" — it is "which certificate authority is the trust anchor of the certificate chain that the firmware will validate against DB / DBX". To answer that correctly, the chain must be rebuilt with `X509Chain.Build()` and traversed. This matters because the failure mode appears late: a binary that looks correctly signed by its immediate issuer can still fail to boot on a firmware that only trusts a different trust anchor.
 
 A concrete example, observed on Server 2025's `EFI_EX\bootmgfw_EX.efi`:
 
@@ -362,6 +364,17 @@ A verification function that walks these targets, attempts `Get-AuthenticodeSign
 > SCOPE: file presence + signer-chain only. Actual boot behaviour on firmware with PCA2011 revoked from DBX is NOT verified here. Manual boot test on hardware or a Hyper-V Gen2 VM with a PCA2023 Secure Boot template is required before production deployment.
 
 From a pipeline-design perspective, the SCOPE clarifier sets correct operator expectations: a `Pass` from the verification function is necessary but not sufficient. The only thing it actually proves is that the file-system structure and Authenticode chain are correct. Whether the firmware on the deployment target actually accepts the chain depends on whether that target has received Microsoft's PCA2023 DB provisioning update, which is out of scope for any tooling that operates only on the ISO.
+
+Making the verification's reach explicit helps set operator expectations. Each layer of validation proves a strictly different thing:
+
+| Verification | What it proves | What it does NOT prove |
+|:---|:---|:---|
+| Authenticode chain inspection | The file carries the expected signer chain (e.g. terminates at PCA2023) | That any firmware will accept it |
+| File-presence check | The media layout is structurally correct (`_EX` binaries present at the expected paths) | That the binaries are correctly signed |
+| Hyper-V Gen2 boot test | The boot manager is accepted by Hyper-V's virtual firmware | That physical OEM firmware will accept it (DB/DBX state may differ) |
+| Physical hardware boot test | The specific OEM firmware's trust DB/DBX state is compatible | That a *different* OEM/firmware generation is compatible |
+
+No single row is sufficient on its own; the rows are cumulative, and only the bottom row exercises the real DB/DBX trust decision on a representative target.
 
 ---
 
@@ -525,7 +538,7 @@ The advantage of this layering is reproducibility: Git history of Layer 2 shows 
 
 §5.5 and §5.6 designed the SSU-LCU/CU dependency validation pipeline. The first filtering stage of that pipeline (the scope filter) uses the `Categories.Product` GUID and `Categories.UpdateClassification` GUID as decision keys to **select only the Server LTSC family** from the ~136,000 `<Update>` entries in `wsusscn2.cab`'s Master XML.
 
-This section records the **finalised GUID inventory** used by the scope filter. Because GUIDs are WSUS global identifiers that do not change over time, this approach avoids the brittleness of title-string heuristics (the fragility surface discussed in §6.2).
+This section records the **finalised GUID inventory** used by the scope filter. Because GUIDs are WSUS global identifiers that do not change over time, this approach avoids the brittleness of title-string heuristics (the fragility surface discussed in §6.2). GUID-based filtering survives display-name changes and localization differences, making it substantially more stable than title-string heuristics — this is one of the key architectural insights of the entire workflow.
 
 **Update Classification GUIDs** (WSUS-official, 5 of the 12 are observed in real wsusscn2):
 
@@ -808,6 +821,7 @@ Distinct from the open questions above (which are concrete investigation gaps), 
 - Whether Server vNext continues the `_EX` dual-tree model or replaces it with a different PCA2023 delivery mechanism.
 - Whether the PCA2011 DBX revocation timing will vary across OEM firmware ecosystems rather than following a single Microsoft-announced date.
 - Whether Microsoft will eventually publish the Server LTSC Product Category GUID mappings officially, rather than leaving them to be reverse-looked-up from wsusscn2 and community sources (see §5.7).
+- Whether the GitHub-backed release-info Markdown source (§2.1) will remain stable in format, or be retired / restructured in a way that breaks the table-layout parser.
 
 These are listed not because the article can answer them, but because a long-lived pipeline should budget for the possibility that any of them changes.
 
