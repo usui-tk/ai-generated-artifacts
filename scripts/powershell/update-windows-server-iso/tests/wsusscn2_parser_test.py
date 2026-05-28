@@ -149,65 +149,66 @@ def main() -> int:
 
     # ---- 3. Stats assertions ----
     s = actual["_meta"]["stats"]
-    r.assert_eq("04 Stats.updatesObserved == 6",       s["updatesObserved"],       6)
-    r.assert_eq("05 Stats.updatesInScope == 3",        s["updatesInScope"],        3)
-    r.assert_eq("06 Stats.bundlesObserved == 2",       s["bundlesObserved"],       2)
-    r.assert_eq("07 Stats.categoryUpdates == 1",       s["categoryUpdates"],       1)
-    r.assert_eq("08 Stats.fileLocationsRetained == 2", s["fileLocationsRetained"], 2)
-    r.assert_eq("09 Stats.payloadUrlsMissing == 1 (orphan digest)",
-                s["payloadUrlsMissing"], 1)
+    r.assert_eq("04 Stats.updatesObserved == 8",        s["updatesObserved"],        8)
+    r.assert_eq("05 Stats.updatesInScope == 2 (bundles)", s["updatesInScope"],       2)
+    r.assert_eq("06 Stats.bundlesObserved == 4",        s["bundlesObserved"],        4)
+    r.assert_eq("07 Stats.categoryUpdates == 1",        s["categoryUpdates"],        1)
+    r.assert_eq("08 Stats.leafUpdatesWithPayload == 3", s["leafUpdatesWithPayload"], 3)
+    r.assert_eq("09 Stats.fileLocationsRetained == 3",  s["fileLocationsRetained"],  3)
+    r.assert_eq("10 Stats.payloadDigestsOrphaned == 1 (DDDD)",
+                s["payloadDigestsOrphaned"], 1)
 
     # ---- 4. Scope filter admit/reject ----
+    UID_BUNDLE_A = "f0000001-0000-0000-0000-000000000001"
+    UID_BUNDLE_B = "f0000001-0000-0000-0000-000000000003"
+    UID_OFFICE   = "f0000001-0000-0000-0000-000000000005"
+    UID_OLD      = "f0000001-0000-0000-0000-000000000006"
+    UID_CATEGORY = "b256987d-4693-4c87-955d-dbb9341205eb"
     by_id = {u["updateId"]: u for u in actual["updates"]}
 
-    r.assert_true("10 Server 2022 bundle admitted",
-                  "f0000001-0000-0000-0000-000000000001" in by_id)
-    r.assert_true("11 Server 2022 bundle child admitted",
-                  "f0000001-0000-0000-0000-000000000002" in by_id)
-    r.assert_true("12 Server 2025 bundle admitted",
-                  "f0000001-0000-0000-0000-000000000003" in by_id)
-    r.assert_true("13 Office out-of-scope update rejected (Product mismatch)",
-                  "f0000001-0000-0000-0000-000000000005" not in by_id)
-    r.assert_true("14 Old Server 2019 update rejected (recency)",
-                  "f0000001-0000-0000-0000-000000000006" not in by_id)
-    r.assert_true("15 Category Update rejected (no Product/Classification refs)",
-                  "ca006cfb-49eb-439b-880a-1312e1fc9713" not in by_id)
+    r.assert_true("11 Server 2022 bundle admitted",     UID_BUNDLE_A in by_id)
+    r.assert_true("12 Server 2025 bundle admitted",     UID_BUNDLE_B in by_id)
+    r.assert_true("13 Office bundle rejected (Product mismatch)", UID_OFFICE not in by_id)
+    r.assert_true("14 Old Server 2019 bundle rejected (recency)", UID_OLD not in by_id)
+    r.assert_true("15 Category Update rejected (Evaluate, not a scoped bundle)",
+                  UID_CATEGORY not in by_id)
 
     # ---- 5. Field-level correctness on the Server 2022 bundle ----
-    s2022 = by_id["f0000001-0000-0000-0000-000000000001"]
+    s2022 = by_id[UID_BUNDLE_A]
     r.assert_eq("16 Server 2022 bundle: isBundle == true", s2022["isBundle"], True)
-    r.assert_eq("17 Server 2022 bundle: kbArticleIds == ['5099001']",
-                s2022["kbArticleIds"], ["5099001"])
-    r.assert_eq("18 Server 2022 bundle: productGuids == [Server2022 GUID]",
+    r.assert_eq("17 Server 2022 bundle: productGuids == [Server2022 GUID]",
                 s2022["productGuids"], ["71718f13-7324-4b0f-8f9e-2ca9dc978e53"])
+    r.assert_eq("18 Server 2022 bundle: supersededByRevisionIds == ['990099']",
+                s2022["supersededByRevisionIds"], ["990099"])
 
-    # ---- 6. Payload URL join correctness ----
-    s2022_child = by_id["f0000001-0000-0000-0000-000000000002"]
-    r.assert_eq("19 Server 2022 child: payloadUrls correctly joined from FileLocations",
-                s2022_child["payloadUrls"],
-                ["http://example.invalid/fixture/server2022-lcu.cab"])
+    # ---- 6. Payload URL roll-up (bundle <- leaf BundledBy) ----
+    # Bundle A has two leaves (A1->AAAA, A2->BBBB), both resolve.
+    r.assert_eq("19 Server 2022 bundle: payloadUrls rolled up from 2 leaves",
+                sorted(s2022["payloadUrls"]),
+                sorted(["http://example.invalid/fixture/server2022-lcu-part1.cab",
+                        "http://example.invalid/fixture/server2022-lcu-part2.cab"]))
 
-    s2025 = by_id["f0000001-0000-0000-0000-000000000003"]
+    # Bundle B has one leaf (B1) with CCCC (resolves) + DDDD (orphan, omitted).
+    s2025 = by_id[UID_BUNDLE_B]
     r.assert_eq("20 Server 2025 bundle: payloadUrls excludes orphan digest",
                 s2025["payloadUrls"],
                 ["http://example.invalid/fixture/server2025-lcu.cab"])
 
     # ---- 7. Microsoft-prose exclusion in parser output ----
-    actual_prose_hits = [t.strip("<") for t in ("Title", "Description", "MoreInfoUrl")
+    actual_prose_hits = [t for t in ("Title", "Description", "MoreInfoUrl", "kbArticleIds")
                          if f'"{t.lower()}"' in actual_text.lower()
                          or f'"{t}"' in actual_text]
-    r.assert_eq("21 Parser output contains zero Microsoft-prose fields",
+    r.assert_eq("21 Parser output contains no prose/KB fields (KB not in wsusscn2)",
                 actual_prose_hits, [])
 
     # ---- 8. Structural compare against expected-output.json ----
     stripped_actual = strip_env(actual)
     stripped_expected = strip_env(expected)
     if stripped_actual != stripped_expected:
-        # Helpful diff snippet
         diff_keys = set(json.dumps(stripped_actual, sort_keys=True).split(',')) ^ \
                     set(json.dumps(stripped_expected, sort_keys=True).split(','))
-        print("  --- structural diff (first 5 differing chunks) ---")
-        for line in list(diff_keys)[:5]:
+        print("  --- structural diff (first 8 differing chunks) ---")
+        for line in list(diff_keys)[:8]:
             print(f"      {line}")
     r.assert_true("22 Parser output structurally matches expected-output.json (env-stripped)",
                   stripped_actual == stripped_expected)

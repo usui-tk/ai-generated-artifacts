@@ -529,7 +529,7 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 | `RefreshAllBaselines` | A01 | (`Invoke-AdminPhaseA01_RefreshAllBaselines` at script L586) | Refresh `data/config-Server*.json` baselines from upstream caches |
 | `DumpFieldClassification` | A02 | (`Invoke-AdminPhaseA02_DumpFieldClassification` at script L587) | Emit the field-cadence decision matrix as JSON |
 | `RefreshSnapshots` | A03 | (`Invoke-AdminPhaseA03_RefreshSnapshots` at script L588) | Refresh `data/raw-*` and `data/cache-*` from Microsoft Learn + Catalogue |
-| `RefreshDependencyDatabase` *(planned, r09.0)* | A04 | (not yet implemented; specified in §B.19.15.3) | Refresh `data/wsusscn2-database.json` (layer 2) from `wsusscn2.cab` (layer 3) |
+| `RefreshDependencyDatabase` | A04 | implemented & live-cab-verified (r09.0 Step 2b3); see §B.19.9.5/9.6 | Refresh `data/wsusscn2-database.json` (layer 2) from `wsusscn2.cab` (layer 3) |
 
 A04 is **specified but not implemented** in the current revision
 (`$Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'`). It is
@@ -1803,11 +1803,13 @@ function name alone.
     FileLocations = [hashtable]           # FileDigest (string) -> Url (string)
     Stats         = [pscustomobject] {
         UpdatesObserved        : int   # all <Update> elements seen
-        UpdatesInScope         : int   # admitted by Product+Class+recency filter
+        UpdatesInScope         : int   # in-scope BUNDLES (IsBundle + Product + Class + recency)
         BundlesObserved        : int   # IsBundle="true" count among observed
-        CategoryUpdates        : int   # DeploymentAction="Evaluate"+IsSoftware="false"
+        CategoryUpdates        : int   # DeploymentAction="Evaluate" count
+        LeafUpdatesWithPayload : int   # leaf updates (BundledBy + PayloadFiles) contributing payload digests
         FileLocationsObserved  : int   # all <FileLocation> elements seen
-        FileLocationsRetained  : int   # those with both Digest and Url
+        FileLocationsRetained  : int   # those with both Id (digest) and Url
+        PayloadDigestsOrphaned : int   # in-scope payload digests with no FileLocation match
         Now                    : string  # ISO-8601, the recency anchor
         RecencyMonths          : int   # caller-supplied, -1 disables clause
         ScopeProductGuidCount  : int
@@ -1817,7 +1819,10 @@ function name alone.
 ```
 
 Each element of `Updates` has the following fields (PascalCase in
-PowerShell, camelCase after Stage 4 serializes to JSON):
+PowerShell, camelCase after Stage 4 serializes to JSON). Note: the
+in-scope `Updates` are always BUNDLES (Master XML carries no KB and no
+payload on the bundle itself; the payload URLs are rolled up from the
+leaf updates bundled under each, per §B.19.9.6):
 
 ```
 [pscustomobject] {
@@ -1826,17 +1831,16 @@ PowerShell, camelCase after Stage 4 serializes to JSON):
     RevisionNumber       : string
     CreationDate         : string   # ISO-8601 UTC, may be $null if missing
     IsBundle             : bool
-    IsSoftware           : bool
-    DeploymentAction     : string   # 'Evaluate' for Category, $null typically
-    KBArticleIds         : string[]
+    IsLeaf               : bool
+    DeploymentAction     : string   # 'Evaluate' for Category, 'Bundle' for leaf, $null for bundle
     ProductGuids         : string[] # lowercase, from <Category Type="Product">
     ClassificationGuids  : string[] # lowercase
     CompanyGuids         : string[]
     ProductFamilyGuids   : string[]
-    PrerequisiteUpdateIds: string[] # lowercase, from <Prerequisites><UpdateId>
-    SupersededByUpdateIds: string[] # lowercase, from <SupersededBy><UpdateId>
-    BundledByRevisionIds : string[] # integer-as-string, from <BundledBy><RevisionId>
-    PayloadFileDigests   : string[] # from <Files><File Digest=...>
+    PrerequisiteUpdateIds  : string[] # lowercase, from <Prerequisites><UpdateId>
+    SupersededByRevisionIds: string[] # integer-as-string, from <SupersededBy><Revision Id>
+    PayloadFileDigests     : string[] # union of own + bundled-leaf payload digests (Id attr)
+    PayloadUrls            : string[] # resolved from FileLocations during the post-pass
 }
 ```
 
@@ -1861,34 +1865,33 @@ PowerShell, camelCase after Stage 4 serializes to JSON):
       "now":                  string    # ISO-8601 UTC, the anchor used
     },
     "stats": {
-      "updatesObserved":       int,
-      "updatesInScope":        int,
-      "bundlesObserved":       int,
-      "categoryUpdates":       int,
-      "fileLocationsObserved": int,
-      "fileLocationsRetained": int,
-      "payloadUrlsMissing":    int      # PayloadFileDigest with no FileLocation
+      "updatesObserved":        int,
+      "updatesInScope":         int,    # in-scope bundles
+      "bundlesObserved":        int,
+      "categoryUpdates":        int,
+      "leafUpdatesWithPayload": int,
+      "fileLocationsObserved":  int,
+      "fileLocationsRetained":  int,
+      "payloadDigestsOrphaned": int     # in-scope payload digests with no FileLocation
     }
   },
   "updates": [
     {
-      "updateId":              string,
-      "revisionId":            string,
-      "revisionNumber":        string,
-      "creationDate":          string|null,
-      "isBundle":              bool,
-      "isSoftware":            bool,
-      "deploymentAction":      string|null,
-      "kbArticleIds":          string[],
-      "productGuids":          string[],
-      "classificationGuids":   string[],
-      "companyGuids":          string[],
-      "productFamilyGuids":    string[],
-      "prerequisiteUpdateIds": string[],
-      "supersededByUpdateIds": string[],
-      "bundledByRevisionIds":  string[],
-      "payloadFileDigests":    string[],
-      "payloadUrls":           string[] # joined from _meta.FileLocations table
+      "updateId":                string,
+      "revisionId":              string,
+      "revisionNumber":          string,
+      "creationDate":            string|null,
+      "isBundle":                bool,
+      "isLeaf":                  bool,
+      "deploymentAction":        string|null,
+      "productGuids":            string[],
+      "classificationGuids":     string[],
+      "companyGuids":            string[],
+      "productFamilyGuids":      string[],
+      "prerequisiteUpdateIds":   string[],
+      "supersededByRevisionIds": string[],
+      "payloadFileDigests":      string[],  # union of own + bundled-leaf digests
+      "payloadUrls":             string[]   # resolved in Stage 3, see §B.19.9.6
     }
   ]
 }
@@ -1917,9 +1920,9 @@ inside the Stage 3 subtree walk:
 
 ```
 $allowedChildNames = HashSet[string]@(
-    'KBArticleID', 'Categories', 'Category', 'Prerequisites',
-    'UpdateId', 'RevisionId', 'SupersededBy', 'BundledBy',
-    'Files', 'File')
+    'Categories', 'Category', 'Prerequisites', 'UpdateId',
+    'SupersededBy', 'BundledBy', 'Revision',
+    'PayloadFiles', 'File')
 ```
 
 Any element not on this list is `Skip()`-ed by the `XmlReader` and
@@ -1995,22 +1998,25 @@ SKIPPED but Stages 1-3 still run (so the run is informative).
 After Stage 4, the wrapper calls
 `Update-Layer1DependencyVerification` unless `-SkipLayer1Update` is
 set or `$Script:DryRun` is `$true`. This is the function that
-back-propagates the most recent LCU KB / CreationDate per Server OS
-into the matching `data/config-<OsKey>.json`.
+back-propagates the most recent in-scope LCU bundle identity per
+Server OS into the matching `data/config-<OsKey>.json`.
 
 **Layer 1 writeback contract**
 
-`Update-Layer1DependencyVerification` writes exactly three advisory
-fields into each `data/config-<OsKey>.json`:
+`Update-Layer1DependencyVerification` writes exactly four advisory
+fields into each `data/config-<OsKey>.json`. Because wsusscn2 carries
+no KB number (§B.19.9.6), the verified identity is the bundle's
+`UpdateId` / `RevisionId`, not a KB:
 
 | Field | Type | Source |
 |---|---|---|
-| `_DependencyVerifiedKb` | string | `'KB' + KBArticleIds[0]` of the most-recent LCU-bearing in-scope Update for that OS's Product GUID |
-| `_DependencyVerifiedCreationDate` | string (ISO-8601 UTC) | `CreationDate` of the same Update |
+| `_DependencyVerifiedUpdateId` | string | `UpdateId` of the most-recent in-scope bundle for that OS's Product GUID |
+| `_DependencyVerifiedRevisionId` | string | `RevisionId` of the same bundle |
+| `_DependencyVerifiedCreationDate` | string (ISO-8601 UTC) | `CreationDate` of the same bundle |
 | `_DependencyVerifiedAt` | string (ISO-8601 UTC) | `[datetime]::UtcNow` at the time of writeback |
 
-The function is **idempotent**: if both `_DependencyVerifiedKb` and
-`_DependencyVerifiedCreationDate` already match the values that would
+The function is **idempotent**: if both `_DependencyVerifiedUpdateId`
+and `_DependencyVerifiedRevisionId` already match the values that would
 be written, the config is left untouched and the OS is counted as
 `UnchangedCount` rather than `UpdatedCount`. If no in-scope LCU
 exists for an OS family (e.g. because the cab has not been refreshed
@@ -2047,6 +2053,90 @@ tempdir-cloned `data/` directory and the T12 fixture's parse output.
 The A04 wrapper as a whole (Stage 1 included) remains coupled to the
 live monthly CI workflow because Stage 1 cannot run in the
 Stage 1 Linux unit-test environment.
+
+#### B.19.9.6 Real wsusscn2 Master XML structure (empirical, normative)
+
+The Phase 2b1 parser and its fixtures were originally authored from
+an *assumed* wsusscn2 structure. On 2026-05-12 the live
+`wsusscn2.cab` (641,849,140 bytes; `package.xml` 113,842,356 bytes;
+136,102 `<Update>` rows) was parsed end-to-end on the Linux
+verification host, and the assumed structure was found to be wrong in
+several material ways. The following is the **verified** structure and
+is now binding; §B.19.9.2's earlier prose is superseded where it
+conflicts.
+
+1. **No KB number anywhere in the Master XML.** `<Update>` rows carry
+   no `<KBArticleID>` element and no KB attribute. KB numbers live in
+   the Microsoft Update Catalog, not in wsusscn2. The Layer 2 database
+   therefore identifies updates by `UpdateId` / `RevisionId`, never by
+   KB. Any KB recovery is a Phase-2c Catalog cross-reference concern.
+
+2. **Update taxonomy.** Three row kinds, distinguished by attributes:
+   - *Category* rows: `DeploymentAction="Evaluate"` (~4,204). These
+     define Product / Classification / Company / ProductFamily GUIDs.
+   - *Bundle* rows: `IsBundle="true"` (~21,149). These carry the
+     `Categories` (Product + Classification) that the scope filter
+     matches — but carry **no payload of their own**.
+   - *Leaf* rows: `DeploymentAction="Bundle"` (~110,765). These carry
+     the actual `.cab` / `.msu` payloads and point UP at their bundle.
+
+3. **Payload references.** `<PayloadFiles><File Id="<sha1-b64-digest>" />`
+   — the digest is the `Id` attribute (NOT a `Digest`/`FileDigest`
+   attribute, NOT a `<Files>` wrapper).
+
+4. **Bundle/leaf linkage.** A leaf names its parent bundle(s) via
+   `<BundledBy><Revision Id="<bundle-revision-id>" />` (the child of
+   `BundledBy` is `<Revision>`, not `<RevisionId>` / `<UpdateId>`).
+
+5. **Supersedence.** `<SupersededBy><Revision Id="<revision-id>" />`
+   (child is `<Revision>`, not `<UpdateId>`).
+
+6. **File-location resolution.**
+   `<FileLocations><FileLocation Id="<digest>" Url="http://..." />`
+   — the digest is the `Id` attribute and the URL is the `Url`
+   attribute (both on the element; no child `<Url>`).
+
+**Binding parser algorithm (single streaming pass + post-pass):**
+the parser MUST, in one `XmlReader` pass, (a) collect in-scope bundles
+(§B.19.7), (b) build a map `bundleRevisionId → [payloadDigests]` by
+walking every leaf's `BundledBy` + `PayloadFiles`, and (c) build a map
+`digest → URL` from `<FileLocations>`. In a post-pass it MUST enrich
+each in-scope bundle with the payload URLs of the leaves bundled under
+it (union of own + child payload digests, resolved through the
+digest→URL map). The positive child-element allowlist (§B.19.8) is
+`Categories, Category, Prerequisites, UpdateId, SupersededBy,
+BundledBy, Revision, PayloadFiles, File`; `Languages` and `EulaFiles`
+are skipped.
+
+Verified end-to-end against the 2026-05-12 cab: 136,102 observed →
+138 in-scope bundles → 110,749 leaves with payload → 97,051
+file-locations retained → 0 orphaned digests, with every in-scope
+bundle's `payloadUrls` resolved. Parse time ≈ 4.5 min on the Linux
+host (cold, single core).
+
+#### B.19.9.7 Server 2025 Product GUID correction (normative)
+
+The Server 2025 Product Category GUID was corrected on 2026-05 after
+the live-cab verification showed the previous value silently
+producing a **stale** result (latest 2025-09-08 instead of the current
+month):
+
+| OS | Product GUID | Latest LCU in 2026-05 cab |
+|----|--------------|----------------------------|
+| Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` | KB5087537 (2026-05-11) |
+| Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` | KB5087538 (2026-05-11) |
+| Server 2022 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` | KB5087545 (2026-05-11) |
+| Server 2025 | `b256987d-4693-4c87-955d-dbb9341205eb` | KB5087539 (2026-05-11) |
+
+The superseded value `ca006cfb-49eb-439b-880a-1312e1fc9713` is a
+*different* 24H2-era category whose newest SecurityUpdate bundle
+stalls at 2025-09-08 and never carries KB5087539. The corrected GUID
+`b256987d…` carries KB5087539 (the Server 2025 LCU confirmed by the
+Microsoft update-history page) but does **not** carry KB5089549 (the
+Windows 11 24H2 *client* LCU), so it is server-specific and does not
+leak client updates into scope. Server 2025 shares OS build 26100
+with Windows 11 24H2, so its payload URLs use the `windows11.0`
+filename prefix; this is expected and is not a scope leak.
 
 ### B.19.10 Layer 2 JSON schema (normative)
 

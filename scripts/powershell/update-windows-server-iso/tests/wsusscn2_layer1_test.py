@@ -8,7 +8,7 @@ Exercises the Phase 2b2 Layer 1 writeback helper
   * the function correctly picks the most recent LCU-bearing Update per
     Server OS family (Product GUID lookup against $Script:WsusScnOsCategoryGuids)
   * the three advisory fields are written to each matching
-    config-Server*.json: _DependencyVerifiedKb, _DependencyVerifiedCreationDate,
+    config-Server*.json: _DependencyVerifiedUpdateId, _DependencyVerifiedRevisionId,
     _DependencyVerifiedAt
   * idempotent re-runs report UnchangedCount rather than UpdatedCount
   * OS families with no in-scope LCU in the fixture are counted as
@@ -50,8 +50,16 @@ PINNED_NOW = "2026-05-28T00:00:00Z"
 #  - Server 2025 bundle (revision 990003) is the only in-scope LCU for
 #    Server2025 with KBArticleID=5099003, CreationDate=2026-05-10
 #  - Server 2016 and Server 2019 have no in-scope LCU in the fixture
-EXPECTED_SERVER2022 = {"kb": "KB5099001", "creationDate": "2026-04-15T10:00:00Z"}
-EXPECTED_SERVER2025 = {"kb": "KB5099003", "creationDate": "2026-05-10T10:00:00Z"}
+EXPECTED_SERVER2022 = {
+    "updateId": "f0000001-0000-0000-0000-000000000001",
+    "revisionId": "990001",
+    "creationDate": "2026-04-15T10:00:00Z",
+}
+EXPECTED_SERVER2025 = {
+    "updateId": "f0000001-0000-0000-0000-000000000003",
+    "revisionId": "990003",
+    "creationDate": "2026-05-10T10:00:00Z",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -163,38 +171,39 @@ def main() -> int:
 
         # ---- Verify written field values ----
         s2022_cfg = json.loads(cfg_paths["Server2022"].read_text(encoding="utf-8"))
-        r.assert_eq("05 Server2022: _DependencyVerifiedKb == KB5099001",
-                    s2022_cfg.get("_DependencyVerifiedKb"), EXPECTED_SERVER2022["kb"])
-        r.assert_eq("06 Server2022: _DependencyVerifiedCreationDate matches fixture",
+        r.assert_eq("05 Server2022: _DependencyVerifiedUpdateId matches bundle A",
+                    s2022_cfg.get("_DependencyVerifiedUpdateId"), EXPECTED_SERVER2022["updateId"])
+        r.assert_eq("06 Server2022: _DependencyVerifiedRevisionId == 990001",
+                    s2022_cfg.get("_DependencyVerifiedRevisionId"), EXPECTED_SERVER2022["revisionId"])
+        r.assert_eq("07 Server2022: _DependencyVerifiedCreationDate matches fixture",
                     s2022_cfg.get("_DependencyVerifiedCreationDate"),
                     EXPECTED_SERVER2022["creationDate"])
-        r.assert_true("07 Server2022: _DependencyVerifiedAt present (ISO-8601)",
+        r.assert_true("08 Server2022: _DependencyVerifiedAt present (ISO-8601)",
                       bool(s2022_cfg.get("_DependencyVerifiedAt")))
 
         s2025_cfg = json.loads(cfg_paths["Server2025"].read_text(encoding="utf-8"))
-        r.assert_eq("08 Server2025: _DependencyVerifiedKb == KB5099003",
-                    s2025_cfg.get("_DependencyVerifiedKb"), EXPECTED_SERVER2025["kb"])
-        r.assert_eq("09 Server2025: _DependencyVerifiedCreationDate matches fixture",
-                    s2025_cfg.get("_DependencyVerifiedCreationDate"),
-                    EXPECTED_SERVER2025["creationDate"])
+        r.assert_eq("09 Server2025: _DependencyVerifiedUpdateId matches bundle B",
+                    s2025_cfg.get("_DependencyVerifiedUpdateId"), EXPECTED_SERVER2025["updateId"])
+        r.assert_eq("10 Server2025: _DependencyVerifiedRevisionId == 990003",
+                    s2025_cfg.get("_DependencyVerifiedRevisionId"), EXPECTED_SERVER2025["revisionId"])
 
         # Server2016 / Server2019 should NOT have the fields populated (no fixture data)
         s2016_cfg = json.loads(cfg_paths["Server2016"].read_text(encoding="utf-8"))
-        r.assert_true("10 Server2016: no _DependencyVerifiedKb (Missing path correctly skipped writeback)",
-                      "_DependencyVerifiedKb" not in s2016_cfg)
+        r.assert_true("11 Server2016: no _DependencyVerifiedUpdateId (Missing path skipped writeback)",
+                      "_DependencyVerifiedUpdateId" not in s2016_cfg)
 
         # Pre-existing fields (OsKey) should be preserved on writeback
-        r.assert_eq("11 Server2022: existing OsKey field preserved on writeback",
+        r.assert_eq("12 Server2022: existing OsKey field preserved on writeback",
                     s2022_cfg.get("OsKey"), "Server2022")
 
         # ---- Run 2: idempotent re-invocation -> UnchangedCount == 2 ----
         print()
         print("Run 2: idempotent re-invocation (expected 0 updated, 2 unchanged)...")
         result2 = run_layer1_update(data_dir)
-        r.assert_eq("12 Run 2: UpdatedCount   == 0 (idempotent)", result2["UpdatedCount"],   0)
-        r.assert_eq("13 Run 2: UnchangedCount == 2 (Server2022, Server2025)",
+        r.assert_eq("13 Run 2: UpdatedCount   == 0 (idempotent)", result2["UpdatedCount"],   0)
+        r.assert_eq("14 Run 2: UnchangedCount == 2 (Server2022, Server2025)",
                     result2["UnchangedCount"], 2)
-        r.assert_eq("14 Run 2: MissingCount   == 2 (still Server2016, Server2019)",
+        r.assert_eq("15 Run 2: MissingCount   == 2 (still Server2016, Server2019)",
                     result2["MissingCount"], 2)
 
     return r.summary()

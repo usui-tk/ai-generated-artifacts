@@ -112,12 +112,20 @@ wsusscn2.cab
 
 Master XML(`package.xml`、 展開後 ~108 MB)は CAB 内で最も有用な成果物です。 Windows Update 全体の各更新リビジョンについて、 以下が記録されています:
 
-- `<KBArticleID>` — 人間が見える KB 番号
-- `<Categories>` — OS ファミリ GUID
+- `<Categories>` — OS ファミリ GUID(Product)と Classification GUID
 - `<Prerequisites>` — この更新を適用する前に存在しなければならない UpdateId GUID のフラットリスト
-- `<SupersededBy>` — 逆方向リスト(最近のスナップショットで 14,000 件超);「この LCU はすでに supersede されているか?」を検出するのに役立つ
-- `<FileLocation>` — 相対 URL パス、 ここに KB 番号の正規表現を適用できる
-- `<BundledBy>` — Combined LCU+SSU パッケージの検出に使用
+- `<SupersededBy>` — `<Revision Id>` エントリの逆方向リスト(最近のスナップショットで 14,000 件超);「この LCU はすでに supersede されているか?」を検出するのに役立つ
+- `<PayloadFiles>` — 実ペイロードファイルへの `<File Id="<digest>">` 参照(leaf 更新側に存在）
+- `<FileLocation>` — `Id="<digest>" Url="...">` エントリ。ペイロードの digest をダウンロード URL に解決する（URL には KB 番号の正規表現を適用できる）
+- `<BundledBy>` — `<Revision Id>` の親リンク。Combined LCU+SSU パッケージの検出と、leaf のペイロードを bundle へ集約するのに使用
+
+> **実データによる訂正(2026-05-12 の実 cab 検証）。** Master XML には
+> `<KBArticleID>` element は **存在しません** — KB 番号は package.xml には
+> 一切含まれません。KB 番号は per-package CAB メタデータと Microsoft Update
+> Catalog にのみ存在します（下表参照）。したがって Master XML 内の更新は
+> `UpdateId` / `RevisionId` で識別します。KB 番号は `<FileLocation>` の URL に
+> 時折現れる `kb(\d+)` トークンから *推定* するしかなく、Master XML から
+> 直接得ることはできません。
 
 Master XML と個別の `packageN.cab` フラグメントは、 **同じ依存性データを別視点から記録** しています:
 
@@ -146,7 +154,7 @@ Master XML のパースはそのスケールに注意が必要です。 コモ�
 | パッケージ別 CAB スキャン(`packageN.cab` 内 12,500 ファイル) | 6.7 秒抽出 + 127.9 秒スキャン | < 50 MB |
 | 仮想的な全パッケージ別スキャン(全 75 CAB) | 約 2.5 時間 | 15-20 GB ディスクピーク |
 
-全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<KBArticleID>`、 `<Prerequisites>`、 `<SupersededBy>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる 2-5 MB の JSON 依存性データベースを生成できます。
+全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<Prerequisites>`、 `<SupersededBy>`、 `<BundledBy>`、 `<PayloadFiles>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる小さな JSON 依存性データベース（本プロジェクトが用いる in-scope bundle 粒度で約 0.2 MB）を生成できます。
 
 #### 2.4.1 Category 階層の package.xml 内表現
 
@@ -442,18 +450,22 @@ config ロード時のバンドルタイプ検出は WIM マウント時の SSU-
 
 Combined MSU の世界の外では、 実務者は任意の LCU に対してどの SSU がペアになるかを知る必要があります。 Microsoft は LCU の KB ページのプレーンテキストでこれを公開しています(「Improvements」セクションがしばしば「This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update」で始まります)。 サードパーティサイト `techepages.com` や `windowslatest.com` も日常的にペアリングを繰り返します。
 
-自動化では、 ペアリングは `wsusscn2.cab` からより信頼性高く取得できます。 各 LCU の Master XML エントリには、 必要な SSU の UpdateId を持つ `<Prerequisites>` ブロックが含まれます。 同じ Master XML の `<KBArticleID>` element で UpdateId → KB 番号をマップすれば、 Web スクレイピングなしでペアリングを生成できます。
+自動化では、 ペアリングは `wsusscn2.cab` からより信頼性高く取得できます。 各 LCU の Master XML エントリには、 必要な SSU の UpdateId を持つ `<Prerequisites>` ブロックが含まれます。 ただし Master XML には `<KBArticleID>` が存在しない（§2.4 の訂正を参照）ため、ペアリングは `UpdateId` / `RevisionId` で表現されます。前提 SSU の人間可読な KB 番号は、その SSU 更新の `<FileLocation>` URL に含まれる `kb(\d+)` トークンから復元するか、UpdateId を Microsoft Update Catalog に照合して取得します。KB の文章ページを Web スクレイピングする必要はありません。
 
 Server 2016 の 2026-05 からの具体例:
 
 ```
-LCU KB5087537 (Cumulative Update for Windows Server 2016)
+Windows Server 2016 の LCU, 2026-05 (UpdateId 631fdcea-..., RevisionId 43268251)
   <Prerequisites>
-    <UpdateId Id="<GUID-of-KB5088064>"/>
+    <UpdateId Id="<2026-05 SSU の GUID>"/>
   </Prerequisites>
+  <PayloadFiles><File Id="<digest>"/></PayloadFiles>
 
-KB5088064 (2026-05 Servicing Stack Update for Windows Server 2016)
-  <KBArticleID>5088064</KBArticleID>
+前提 SSU 更新（別の <Update>）は自身の <PayloadFiles> を持ち、その digest は
+<FileLocations> を介して次のような URL に解決されます:
+  .../windows10.0-kb5088064-x64_<hash>.cab
+この URL から KB 番号(KB5088064)を抽出します。Master XML 自体は
+「5088064」を KB element として記載することはありません。
 ```
 
 `wsusscn2.cab` 派生データから config をプリロードするパイプラインは、 config ロード時に KB5087537 が同じパッチセット内に KB5088064 の存在を要求していることを検出できます。 この事前検証なしに config を手編集するオペレータは WIM-apply 時に 0x800f0823 失敗を得て、 編集をバックアウトする必要があります。
@@ -515,7 +527,7 @@ Server 2022 の曖昧性は予防する価値があります:最近の月の Ser
 | Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` | Microsoft 公式コードベース(`ansible/ansible` Issue 60785 の Categories ダンプ、 `dsccommunity/UpdateServicesDsc` Issue 65)+ 実 wsusscn2 の Category Update から逆引き一致 |
 | Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` | WSUSOffline forum + 実 wsusscn2 Category Update created 2018-10-13(GA タイミング一致)|
 | Windows Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` | 実 wsusscn2 Category Update created 2021-08-09(LTSC GA 直前)、 payload URL に ndp481(.NET 4.8.1、 Server 2022 デフォルト)を確認 |
-| Windows Server 2025 LTSC | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` | 実 wsusscn2 で payload URL に **build 26100 の SSU**(`ssu-26100.1440-x64`)が登場、 build 26100 = Server 2025 LTSC で同定 |
+| Windows Server 2025 LTSC | Microsoft server operating system-24H2 | `b256987d-4693-4c87-955d-dbb9341205eb` | **2026-05 訂正**（旧値 `ca006cfb-...`）：b256987d カテゴリの最新 SecurityUpdate bundle（2026-05-11）は現行の Server 2025 LCU **KB5087539**（build 26100.32860）を持つが、Windows 11 24H2 の *クライアント* LCU KB5089549 は持たないため server 専用と確定。旧 `ca006cfb-...` は 2025-09-08 で停止し KB5087539 を持たない（下の注記参照）|
 
 参考(Server LTSC ではないため scope filter には含めない関連 Product):
 
@@ -632,7 +644,7 @@ Microsoft (Company)
 | Server 2016 | Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` |
 | Server 2019 | Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` |
 | Server 2022 LTSC | (新規) | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` |
-| Server 2025 LTSC | (新規) | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` |
+| Server 2025 LTSC | (新規) | Microsoft server operating system-24H2 | `b256987d-4693-4c87-955d-dbb9341205eb` |
 
 この表は §5.7 の scope filter の根拠表と同期しています。
 

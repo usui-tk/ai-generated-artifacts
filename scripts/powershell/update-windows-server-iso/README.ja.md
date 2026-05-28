@@ -217,7 +217,7 @@ SPEC §B.22.12 の設計に対応します。
 | `RefreshSnapshots` | A03 | 上流キャッシュの取得（release-info、.NET CU、Dynamic Update）|
 | `RefreshAllBaselines` | A01 | キャッシュから `data/config-Server*.json` を再生成 |
 | `DumpFieldClassification` | A02 | フィールドのカデンス決定マトリックスを JSON で出力 |
-| `RefreshDependencyDatabase` | A04 | `wsusscn2.cab` から `data/wsusscn2-database.json` を更新（r09.0+、**Step 2a ではスタブ、Step 2b で本体実装**）|
+| `RefreshDependencyDatabase` | A04 | `wsusscn2.cab` から `data/wsusscn2-database.json` を更新（r09.0+、**Step 2b3 で本実装・実 cab 検証済み**）|
 
 ```powershell
 # ---- 第 1 段：上流キャッシュの populate ----
@@ -240,10 +240,10 @@ SPEC §B.22.12 の設計に対応します。
 .\Update-WindowsServerIso.ps1 -Action DumpFieldClassification
 
 # Servicing Dependency Database（layer 2）を wsusscn2.cab から更新
-#   r09.0 Step 2a: 登録済みだがスタブ（NotImplementedException を発生）
-#   r09.0 Step 2b: 本実装（Stage 1 cab 取得 → Stage 2 7-Zip 抽出 →
-#                   Stage 3 XmlReader ストリームパース →
-#                   Stage 4 data/wsusscn2-database.json 出力）
+#   本実装：Stage 1 cab 取得 → Stage 2 7-Zip 抽出 → Stage 3 XmlReader
+#   ストリームパース → Stage 4 data/wsusscn2-database.json 出力 →
+#   Layer 1 config 書き戻し。
+#   （Windows + 7-Zip が必要。実 cab では Stage 3 の解析に約 4〜5 分）
 .\Update-WindowsServerIso.ps1 -Action RefreshDependencyDatabase
 ```
 
@@ -257,24 +257,22 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 ### r09.0 の進捗
 
 4 番目の Admin Action として **`RefreshDependencyDatabase`**（A04）が
-[SPEC.md](./SPEC.md) §B.19.15.3 に仕様化されており、r09.0 Step 2a /
-2b にまたがって段階的に実装中です。`-Action ListPhases` の登録状況
-ベースで、現状は以下のとおりです：
+[SPEC.md](./SPEC.md) §B.19 に仕様化されており、r09.0 Step 2b3 時点で
+**実 `wsusscn2.cab` に対して本実装・検証済み**です。
+`-Action ListPhases` の登録状況ベースで、現状は以下のとおりです：
 
-- **A04 スタブ**（r09.0 Step 2a、適用済み）：Action が
-  `param() ValidateSet`、PhaseRegistry、`Get-PhaseListByAction` に
-  登録されています。ラッパーの本体は SPEC §B.19.15.3 を指し示し、
-  Step 2b で実装される作業項目を列挙した
-  `NotImplementedException` を発生させます。
-- **A04 本体**（r09.0 Step 2b、進行中）：4 ステージの parser
-  パイプライン（`Invoke-WsusScnPackageXmlExtract` →
-  `ConvertFrom-WsusScnPackageXml` → `New-WsusScnDependencyDatabase`）
-  により、Microsoft の `wsusscn2.cab` から
+- **A04 実装済み**（r09.0 Step 2b3）：4 ステージの parser
+  パイプライン（`Get-WsusScnCabIfNeeded` → `Invoke-WsusScnPackageXmlExtract`
+  → `ConvertFrom-WsusScnPackageXml` → `New-WsusScnDependencyDatabase`）
+  が Microsoft の `wsusscn2.cab` から
   `data/wsusscn2-database.json`（Servicing Dependency Database
-  layer 2）を更新します。
-- **A01.0 統合**（r09.0 Step 2b）：`RefreshAllBaselines` の冒頭に
-  A01.0 サブフェーズが追加され、OS ごとのカタログスクレイプの
-  前に A04 を自動実行します。
+  layer 2）を更新し、OS ごとの最新 bundle 識別子を
+  `data/config-Server*.json` に書き戻します。2026-05-12 の実 cab で
+  全工程を end-to-end 実行済み（Server 4 系すべてが 2026-05 の LCU を
+  payload URL 付きで解決。SPEC §B.19.9.6/9.7 参照）。
+- **A01.0 統合**（r09.0 Step 2b2）：`RefreshAllBaselines` は OS ごとの
+  カタログスクレイプの後に A04 を soft-fail の後続ステップとして
+  自動実行します。
 - **P06 Stage 2**（r09.0 Step 2c、予定）：`data/wsusscn2-database.json`
   を用いたグラフベース依存性閉包チェック。
 - **Server 2016 の SSU 依存性修正**（r09.0 Step 2a、適用済み）：

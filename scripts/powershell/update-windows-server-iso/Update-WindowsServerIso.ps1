@@ -536,7 +536,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
 $Script:ScriptVersion = 'update-wsi-2026.05.28-r09.0'
-$Script:ScriptTag     = 'step2b2-a04-wrapper-implementation-and-layer1-integration'
+$Script:ScriptTag     = 'step2b3-real-data-parser-correction'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -580,7 +580,18 @@ $Script:PhaseSummaryShown = $false
 # 648880e); that research records the cross-reference chain (Microsoft Learn,
 # ansible/ansible Issue 60785, dsccommunity/UpdateServicesDsc Issue 65,
 # WSUSOffline forum) plus the 2026-05-12 wsusscn2.cab reverse-lookup that
-# confirmed Server 2022 LTSC (71718f13...) and Server 2025 LTSC (ca006cfb...).
+# confirmed Server 2022 LTSC (71718f13...) and Server 2025 LTSC (b256987d...).
+#
+# Server 2025 GUID correction (verified 2026-05 against the live wsusscn2.cab):
+# the product GUID that carries the current Server 2025 LCU chain
+# (KB5087539 / OS build 26100.32860, 2026-05-12) is
+# b256987d-4693-4c87-955d-dbb9341205eb. An earlier value
+# (ca006cfb-49eb-439b-880a-1312e1fc9713) was a *different* 24H2-era category
+# whose newest SecurityUpdate bundle stalls at 2025-09-08 and never carries
+# KB5087539, so it silently produced a stale Server 2025 result. The
+# b256987d bundles carry KB5087539 (Server LCU) but NOT KB5089549 (the
+# Windows 11 24H2 *client* LCU), so the GUID is server-specific and does not
+# leak client updates into scope. See SPEC §B.19.9.7.
 #
 # Why three separate tables:
 # - Product GUIDs drive the scope-filter Categories.Product test (SPEC §B.19.7)
@@ -590,7 +601,7 @@ $Script:WsusScnOsCategoryGuids = [ordered]@{
     'Server2016' = '569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5'
     'Server2019' = 'f702a48c-919b-45d6-9aef-ca4248d50397'
     'Server2022' = '71718f13-7324-4b0f-8f9e-2ca9dc978e53'   # Microsoft server operating system-21H2
-    'Server2025' = 'ca006cfb-49eb-439b-880a-1312e1fc9713'   # Microsoft Server Operating System-24H2
+    'Server2025' = 'b256987d-4693-4c87-955d-dbb9341205eb'   # Microsoft server operating system-24H2 (carries KB5087539)
 }
 
 # Reverse map: GUID -> human-readable label. Used only for diagnostic output
@@ -601,7 +612,7 @@ $Script:WsusScnCategoryGuidNameMap = [ordered]@{
     '569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5' = 'Windows Server 2016'
     'f702a48c-919b-45d6-9aef-ca4248d50397' = 'Windows Server 2019'
     '71718f13-7324-4b0f-8f9e-2ca9dc978e53' = 'Windows Server 2022 LTSC (21H2)'
-    'ca006cfb-49eb-439b-880a-1312e1fc9713' = 'Windows Server 2025 LTSC (24H2)'
+    'b256987d-4693-4c87-955d-dbb9341205eb' = 'Windows Server 2025 LTSC (24H2)'
     '0fa1201d-4330-4fa8-8ae9-b877473b6441' = 'SecurityUpdates (Classification)'
     '28bc880e-0592-4cbf-8f95-c79b17911d5f' = 'UpdateRollups (Classification)'
     '68c5b0a3-d1a6-4553-ae49-01d3a7827828' = 'ServicePacks (Classification)'
@@ -7119,49 +7130,64 @@ function ConvertFrom-WsusScnPackageXml {
     <#
     .SYNOPSIS
         Stage 3 of the wsusscn2.cab parser pipeline: parse package.xml into
-        an in-memory dependency graph, applying the scope filter.
+        an in-memory dependency graph, applying the scope filter and
+        resolving payload URLs for in-scope bundles.
     .DESCRIPTION
-        Streams package.xml (typically ~108 MB) using System.Xml.XmlReader,
-        not XmlDocument.Load, so that peak memory stays around 200-300 MB
-        instead of the ~536 MB observed with full document load
-        (research §2.4 timings table).
+        Streams package.xml (typically ~110 MB) using System.Xml.XmlReader,
+        not XmlDocument.Load, so that peak memory stays bounded.
 
-        For each <Update> the parser:
-          1. Reads attributes (UpdateId, RevisionId, CreationDate,
-             DeploymentAction, IsSoftware, IsBundle, etc.)
-          2. Reads child elements WHITE-LISTED in $allowedChildNames only:
-             - <KBArticleID>, <Categories>/<Category>, <Prerequisites>/<UpdateId>,
-             - <SupersededBy>/<UpdateId>/<RevisionId>, <BundledBy>/<RevisionId>,
-             - <Files>/<File @FileDigest>
-             Microsoft prose tags (<Title>, <Description>, <MoreInfoUrl>, ...)
-             are NEVER read; the white-list IS the SPEC §B.19.8 hard-rule
-             enforcement mechanism.
-          3. Applies the scope filter (Product GUID + Classification GUID +
-             recency window) per SPEC §B.19.7.
+        The real wsusscn2 Master XML (verified empirically against the
+        2026-05-12 fetch) has this structure, which differs materially
+        from the original Phase 2b1 assumptions:
+          - Updates carry NO KB article number. KB numbers live in the
+            Microsoft Update Catalog, not in wsusscn2 (SPEC §B.19.9.6).
+          - Payload references are <PayloadFiles><File Id="<sha1-b64>"/>,
+            where the Id attribute IS the file digest (not a Digest attr,
+            not a <Files> wrapper).
+          - <BundledBy> and <SupersededBy> children are <Revision Id="..."/>
+            (revision-id integers), not <UpdateId> / <RevisionId>.
+          - "In-scope" product+classification Categories appear on the
+            BUNDLE update (IsBundle="true"), which itself carries no
+            PayloadFiles. The actual .cab/.msu payloads live on the LEAF
+            updates (DeploymentAction="Bundle") that point UP at the bundle
+            via <BundledBy><Revision Id="<bundle-revision-id>"/>.
 
-        For each <FileLocation> the parser captures the FileDigest -> Url
-        mapping so Stage 4 can join payload URLs into the dependency graph.
+        Therefore the parser does a single streaming pass that simultaneously:
+          1. Collects in-scope bundles (Product AND Classification AND
+             recency AND IsBundle="true").
+          2. Builds a map  bundleRevisionId -> [payload digests]  by
+             walking EVERY update's <BundledBy> + <PayloadFiles> (a leaf
+             contributes its payload digests to each parent bundle it
+             names).
+          3. Builds a map  digest -> URL  from the <FileLocations> section.
+
+        After the pass, each in-scope bundle is enriched with the payload
+        URLs of the leaf updates bundled under it (the SSU/LCU/.NET CU
+        .cab/.msu files an operator actually needs to download).
+
+        Hard rule (SPEC §B.19.8): the parser uses a positive child-element
+        allowlist so Microsoft prose tags (<Title>/<Description>/...) can
+        never enter the dependency database, even if a future schema adds
+        them.
 
         Returns a [pscustomobject] with three sub-objects:
-          .Updates       — [object[]] in-scope updates with full metadata
-          .FileLocations — [hashtable] FileDigest -> URL
+          .Updates       — [object[]] in-scope bundles with resolved payloadUrls
+          .FileLocations — [hashtable] digest -> URL (full table)
           .Stats         — [pscustomobject] observation counts for logs/tests
     .PARAMETER PackageXmlPath
         Full path to package.xml (typically from Stage 2
         Invoke-WsusScnPackageXmlExtract).
     .PARAMETER ScopeProductGuids
-        Lowercase GUID strings. Updates whose Categories include at least
-        one matching Product GUID are admitted. Default is the LTSC server
+        Lowercase GUID strings. A bundle whose Categories include at least
+        one matching Product GUID is admitted. Default is the LTSC server
         family from $Script:WsusScnOsCategoryGuids.
     .PARAMETER ScopeClassificationGuids
-        Lowercase GUID strings. Updates whose Categories include at least
-        one matching Classification GUID are admitted. Default is the five
-        classifications relevant to SSU/LCU/.NET CU/DU
-        ($Script:WsusScnUpdateClassificationGuids).
+        Lowercase GUID strings. A bundle whose Categories include at least
+        one matching Classification GUID is admitted. Default is the five
+        classifications in $Script:WsusScnUpdateClassificationGuids.
     .PARAMETER RecencyMonths
-        Updates whose CreationDate is older than (Now - RecencyMonths) are
-        rejected. Default 24 months per SPEC §B.19.7. Setting -1 disables
-        the recency clause (useful for fixture-driven tests).
+        Bundles whose CreationDate is older than (Now - RecencyMonths) are
+        rejected. Default 24 months. Setting -1 disables the recency clause.
     .PARAMETER Now
         Current time for the recency check. Caller-controllable so T12 can
         pin time against a fixture's CreationDate range.
@@ -7187,9 +7213,6 @@ function ConvertFrom-WsusScnPackageXml {
         throw ('package.xml not found at: {0}' -f $PackageXmlPath)
     }
 
-    # Default scope GUIDs from the script-level tables. Done here (not in
-    # param() default) because PowerShell evaluates param defaults in the
-    # function's own scope where $Script:* is reachable but more verbose.
     if (-not $ScopeProductGuids -or $ScopeProductGuids.Count -eq 0) {
         $ScopeProductGuids = @($Script:WsusScnOsCategoryGuids.Values)
     }
@@ -7197,8 +7220,6 @@ function ConvertFrom-WsusScnPackageXml {
         $ScopeClassificationGuids = @($Script:WsusScnUpdateClassificationGuids.Values)
     }
 
-    # Hash sets for O(1) GUID membership; case-insensitive to absorb the
-    # mixed-case observed in real wsusscn2 (e.g. "0FA1201D-..." vs lowercase).
     $cmp = [System.StringComparer]::OrdinalIgnoreCase
     $prodSet  = [System.Collections.Generic.HashSet[string]]::new([string[]]$ScopeProductGuids,  $cmp)
     $classSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$ScopeClassificationGuids, $cmp)
@@ -7206,25 +7227,32 @@ function ConvertFrom-WsusScnPackageXml {
     $useRecency = $RecencyMonths -ge 0
     $cutoff = if ($useRecency) { $Now.AddMonths(-$RecencyMonths) } else { [datetime]::MinValue }
 
-    # Allowed child element names: positive allowlist that physically
-    # excludes Microsoft prose (SPEC §B.19.8 hard-rule enforcement).
+    # Positive allowlist of child element names (SPEC §B.19.8 enforcement).
+    # Real wsusscn2 Update children: Prerequisites/UpdateId, BundledBy/Revision,
+    # PayloadFiles/File, Categories/Category, SupersededBy/Revision,
+    # Languages/Language (skipped), EulaFiles (skipped).
     $allowedChildNames = [System.Collections.Generic.HashSet[string]]::new(
-        [string[]]@('KBArticleID', 'Categories', 'Category', 'Prerequisites',
-                    'UpdateId', 'RevisionId', 'SupersededBy', 'BundledBy',
-                    'Files', 'File'),
+        [string[]]@('Categories', 'Category', 'Prerequisites', 'UpdateId',
+                    'SupersededBy', 'BundledBy', 'Revision',
+                    'PayloadFiles', 'File'),
         $cmp)
 
-    $updates       = New-Object 'System.Collections.Generic.List[object]'
+    # In-scope bundles, keyed by RevisionId for payload join after the pass.
+    $inScopeBundles = New-Object 'System.Collections.Generic.List[object]'
+
+    # bundleRevisionId -> List[string] of payload digests contributed by
+    # leaf updates that name this revision in their <BundledBy>.
+    $bundleChildPayloads = @{}
+
+    # digest -> URL
     $fileLocations = @{}
 
     $totalUpdates       = 0
     $bundleCount        = 0
     $categoryUpdates    = 0
     $totalFileLocations = 0
+    $leafWithPayload    = 0
 
-    # XmlReader settings: streaming, no DTD, no entity expansion (defence
-    # in depth against malicious upstream cabs; the official Microsoft
-    # wsusscn2 has none of these in any case).
     $settings = [System.Xml.XmlReaderSettings]::new()
     $settings.IgnoreComments               = $true
     $settings.IgnoreWhitespace             = $true
@@ -7247,14 +7275,13 @@ function ConvertFrom-WsusScnPackageXml {
                 if ($reader.Name -eq 'Update') {
                     $totalUpdates++
 
-                    # Attributes
-                    $updateId          = $reader.GetAttribute('UpdateId')
-                    $revisionId        = $reader.GetAttribute('RevisionId')
-                    $revisionNumber    = $reader.GetAttribute('RevisionNumber')
-                    $creationDateStr   = $reader.GetAttribute('CreationDate')
-                    $deploymentAction  = $reader.GetAttribute('DeploymentAction')
-                    $isSoftwareAttr    = $reader.GetAttribute('IsSoftware')
-                    $isBundleAttr      = $reader.GetAttribute('IsBundle')
+                    $updateId         = $reader.GetAttribute('UpdateId')
+                    $revisionId       = $reader.GetAttribute('RevisionId')
+                    $revisionNumber   = $reader.GetAttribute('RevisionNumber')
+                    $creationDateStr  = $reader.GetAttribute('CreationDate')
+                    $deploymentAction = $reader.GetAttribute('DeploymentAction')
+                    $isBundleAttr     = $reader.GetAttribute('IsBundle')
+                    $isLeafAttr       = $reader.GetAttribute('IsLeaf')
 
                     $creationDate = [datetime]::MinValue
                     if ($creationDateStr) {
@@ -7265,21 +7292,20 @@ function ConvertFrom-WsusScnPackageXml {
                             [ref] $creationDate)
                     }
 
-                    $isBundle      = ($isBundleAttr -eq 'true')
-                    $isSoftware    = ($isSoftwareAttr -ne 'false')  # default true if missing
-                    $isCategory    = (($deploymentAction -eq 'Evaluate') -and ($isSoftwareAttr -eq 'false'))
+                    $isBundle   = ($isBundleAttr -eq 'true')
+                    $isLeaf     = ($isLeafAttr -eq 'true')
+                    $isCategory = ($deploymentAction -eq 'Evaluate')
 
                     if ($isBundle)   { $bundleCount++ }
                     if ($isCategory) { $categoryUpdates++ }
 
                     # Collect child data from the Update's subtree
-                    $kbArticleIds  = New-Object 'System.Collections.Generic.List[string]'
                     $categories    = @{
-                        Product            = New-Object 'System.Collections.Generic.List[string]'
+                        Product              = New-Object 'System.Collections.Generic.List[string]'
                         UpdateClassification = New-Object 'System.Collections.Generic.List[string]'
-                        Company            = New-Object 'System.Collections.Generic.List[string]'
-                        ProductFamily      = New-Object 'System.Collections.Generic.List[string]'
-                        Other              = New-Object 'System.Collections.Generic.List[string]'
+                        Company              = New-Object 'System.Collections.Generic.List[string]'
+                        ProductFamily        = New-Object 'System.Collections.Generic.List[string]'
+                        Other                = New-Object 'System.Collections.Generic.List[string]'
                     }
                     $prereqUpdateIds  = New-Object 'System.Collections.Generic.List[string]'
                     $supersededByRevs = New-Object 'System.Collections.Generic.List[string]'
@@ -7294,18 +7320,14 @@ function ConvertFrom-WsusScnPackageXml {
                                 if ($sub.NodeType -eq [System.Xml.XmlNodeType]::Element) {
                                     $name = $sub.Name
                                     if (-not $allowedChildNames.Contains($name) -and ($name -ne 'Update')) {
-                                        # Allowlist enforcement: skip any element not on the list.
-                                        # This is where SPEC §B.19.8 Microsoft-prose exclusion is enforced.
+                                        # Allowlist enforcement (SPEC §B.19.8): skip
+                                        # anything not on the list (e.g. Languages,
+                                        # EulaFiles, and any future prose tag).
                                         if (-not $sub.IsEmptyElement) { [void]$sub.Skip() }
                                         continue
                                     }
                                     switch ($name) {
-                                        'KBArticleID' {
-                                            $kb = $sub.ReadElementContentAsString()
-                                            if ($kb) { $kbArticleIds.Add($kb) }
-                                        }
                                         'Category' {
-                                            # <Category Type="Product" Id="GUID" />
                                             $catType = $sub.GetAttribute('Type')
                                             $catId   = $sub.GetAttribute('Id')
                                             if ($catId) {
@@ -7315,37 +7337,33 @@ function ConvertFrom-WsusScnPackageXml {
                                             }
                                         }
                                         'UpdateId' {
-                                            # In Prerequisites: <UpdateId Id="GUID" />
-                                            # In SupersededBy: <UpdateId Id="GUID" />
+                                            # Only appears inside <Prerequisites> in real wsusscn2.
                                             $uid = $sub.GetAttribute('Id')
-                                            if ($uid) {
-                                                $uid = $uid.ToLowerInvariant()
+                                            if ($uid) { $prereqUpdateIds.Add($uid.ToLowerInvariant()) }
+                                        }
+                                        'Revision' {
+                                            # Appears inside <BundledBy> and <SupersededBy>.
+                                            $rid = $sub.GetAttribute('Id')
+                                            if ($rid) {
                                                 $parent = if ($stack.Count -gt 0) { $stack.Peek() } else { '' }
                                                 if ($parent -eq 'SupersededBy') {
-                                                    $supersededByRevs.Add($uid)
-                                                } else {
-                                                    $prereqUpdateIds.Add($uid)
+                                                    $supersededByRevs.Add($rid)
+                                                } elseif ($parent -eq 'BundledBy') {
+                                                    $bundledByRevs.Add($rid)
                                                 }
                                             }
                                         }
-                                        'RevisionId' {
-                                            # In BundledBy: <RevisionId Id="123" /> per Phase 5 v4 observation
-                                            $rid = $sub.GetAttribute('Id')
-                                            $parent = if ($stack.Count -gt 0) { $stack.Peek() } else { '' }
-                                            if ($parent -eq 'BundledBy' -and $rid) {
-                                                $bundledByRevs.Add($rid)
-                                            }
-                                        }
                                         'File' {
-                                            # <File FileDigest="..." />
-                                            $digest = $sub.GetAttribute('Digest')
+                                            # Inside <PayloadFiles>: <File Id="<sha1-b64-digest>" />
+                                            $digest = $sub.GetAttribute('Id')
+                                            if (-not $digest) { $digest = $sub.GetAttribute('Digest') }
                                             if (-not $digest) { $digest = $sub.GetAttribute('FileDigest') }
                                             if ($digest) { $payloadDigests.Add($digest) }
                                         }
                                         default {
                                             # Container elements: Categories, Prerequisites,
-                                            # SupersededBy, BundledBy, Files. Push to stack for
-                                            # parent-tracking of nested elements.
+                                            # SupersededBy, BundledBy, PayloadFiles. Push to
+                                            # stack so nested Revision/File know their parent.
                                             if (-not $sub.IsEmptyElement) {
                                                 $stack.Push($name) | Out-Null
                                             }
@@ -7363,43 +7381,60 @@ function ConvertFrom-WsusScnPackageXml {
                         }
                     }
 
-                    # Scope filter (SPEC §B.19.7): Product AND Classification AND recency
-                    $matchProd = $false
-                    foreach ($p in $categories.Product) {
-                        if ($prodSet.Contains($p)) { $matchProd = $true; break }
+                    # Contribute this update's payload digests to every parent
+                    # bundle it names (leaf -> bundle payload roll-up). Done for
+                    # ALL updates, not just in-scope, because the in-scope set is
+                    # the BUNDLES and the payloads live on their leaf children.
+                    if ($payloadDigests.Count -gt 0 -and $bundledByRevs.Count -gt 0) {
+                        $leafWithPayload++
+                        foreach ($parentRev in $bundledByRevs) {
+                            if (-not $bundleChildPayloads.ContainsKey($parentRev)) {
+                                $bundleChildPayloads[$parentRev] = New-Object 'System.Collections.Generic.List[string]'
+                            }
+                            foreach ($d in $payloadDigests) {
+                                $bundleChildPayloads[$parentRev].Add($d)
+                            }
+                        }
                     }
-                    $matchClass = $false
-                    foreach ($c in $categories.UpdateClassification) {
-                        if ($classSet.Contains($c)) { $matchClass = $true; break }
-                    }
-                    $matchRecency = if ($useRecency) { $creationDate -ge $cutoff } else { $true }
 
-                    if ($matchProd -and $matchClass -and $matchRecency) {
-                        $updates.Add([pscustomobject]@{
-                            UpdateId             = if ($updateId) { $updateId.ToLowerInvariant() } else { $null }
-                            RevisionId           = $revisionId
-                            RevisionNumber       = $revisionNumber
-                            CreationDate         = if ($creationDate -ne [datetime]::MinValue) { $creationDate.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { $null }
-                            IsBundle             = $isBundle
-                            IsSoftware           = $isSoftware
-                            DeploymentAction     = $deploymentAction
-                            KBArticleIds         = $kbArticleIds.ToArray()
-                            ProductGuids         = $categories.Product.ToArray()
-                            ClassificationGuids  = $categories.UpdateClassification.ToArray()
-                            CompanyGuids         = $categories.Company.ToArray()
-                            ProductFamilyGuids   = $categories.ProductFamily.ToArray()
-                            PrerequisiteUpdateIds = $prereqUpdateIds.ToArray()
-                            SupersededByUpdateIds = $supersededByRevs.ToArray()
-                            BundledByRevisionIds  = $bundledByRevs.ToArray()
-                            PayloadFileDigests    = $payloadDigests.ToArray()
-                        })
+                    # Scope filter (SPEC §B.19.7): in-scope = IsBundle AND
+                    # Product AND Classification AND recency.
+                    if ($isBundle) {
+                        $matchProd = $false
+                        foreach ($p in $categories.Product) {
+                            if ($prodSet.Contains($p)) { $matchProd = $true; break }
+                        }
+                        $matchClass = $false
+                        foreach ($c in $categories.UpdateClassification) {
+                            if ($classSet.Contains($c)) { $matchClass = $true; break }
+                        }
+                        $matchRecency = if ($useRecency) { $creationDate -ge $cutoff } else { $true }
+
+                        if ($matchProd -and $matchClass -and $matchRecency) {
+                            $inScopeBundles.Add([pscustomobject]@{
+                                UpdateId              = if ($updateId) { $updateId.ToLowerInvariant() } else { $null }
+                                RevisionId            = $revisionId
+                                RevisionNumber        = $revisionNumber
+                                CreationDate          = if ($creationDate -ne [datetime]::MinValue) { $creationDate.ToString('yyyy-MM-ddTHH:mm:ssZ') } else { $null }
+                                IsBundle              = $isBundle
+                                IsLeaf                = $isLeaf
+                                DeploymentAction      = $deploymentAction
+                                ProductGuids          = $categories.Product.ToArray()
+                                ClassificationGuids   = $categories.UpdateClassification.ToArray()
+                                CompanyGuids          = $categories.Company.ToArray()
+                                ProductFamilyGuids    = $categories.ProductFamily.ToArray()
+                                PrerequisiteUpdateIds = $prereqUpdateIds.ToArray()
+                                SupersededByRevisionIds = $supersededByRevs.ToArray()
+                                OwnPayloadFileDigests = $payloadDigests.ToArray()
+                            })
+                        }
                     }
                 }
                 elseif ($reader.Name -eq 'FileLocation') {
-                    # <FileLocation Id="..." FileDigest="..."><Url>...</Url></FileLocation>
-                    # or <FileLocation FileDigest="..." Url="..." /> (variant)
+                    # Real wsusscn2: <FileLocation Id="<digest>" Url="http://..." />
                     $totalFileLocations++
-                    $digest = $reader.GetAttribute('FileDigest')
+                    $digest = $reader.GetAttribute('Id')
+                    if (-not $digest) { $digest = $reader.GetAttribute('FileDigest') }
                     if (-not $digest) { $digest = $reader.GetAttribute('Digest') }
                     $urlAttr = $reader.GetAttribute('Url')
 
@@ -7429,24 +7464,68 @@ function ConvertFrom-WsusScnPackageXml {
         $stream.Dispose()
     }
 
+    # ---- Post-pass: resolve payload URLs for each in-scope bundle ----
+    # A bundle's downloadable payloads are the union of:
+    #   (a) its own PayloadFiles digests (usually none for a pure bundle), and
+    #   (b) the PayloadFiles digests of every leaf update bundled under it
+    #       (looked up via bundleChildPayloads[bundle.RevisionId]).
+    $updatesEnriched = New-Object 'System.Collections.Generic.List[object]'
+    $orphanDigestTotal = 0
+    foreach ($b in $inScopeBundles) {
+        $digestSet = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($d in $b.OwnPayloadFileDigests) { $digestSet.Add($d) }
+        if ($b.RevisionId -and $bundleChildPayloads.ContainsKey($b.RevisionId)) {
+            foreach ($d in $bundleChildPayloads[$b.RevisionId]) { $digestSet.Add($d) }
+        }
+        $urls = New-Object 'System.Collections.Generic.List[string]'
+        $seenUrl = New-Object 'System.Collections.Generic.HashSet[string]'
+        foreach ($d in $digestSet) {
+            if ($fileLocations.ContainsKey($d)) {
+                $u = $fileLocations[$d]
+                if ($seenUrl.Add($u)) { $urls.Add($u) }
+            } else {
+                $orphanDigestTotal++
+            }
+        }
+        $updatesEnriched.Add([pscustomobject]@{
+            UpdateId                = $b.UpdateId
+            RevisionId              = $b.RevisionId
+            RevisionNumber          = $b.RevisionNumber
+            CreationDate            = $b.CreationDate
+            IsBundle                = $b.IsBundle
+            IsLeaf                  = $b.IsLeaf
+            DeploymentAction        = $b.DeploymentAction
+            ProductGuids            = $b.ProductGuids
+            ClassificationGuids     = $b.ClassificationGuids
+            CompanyGuids            = $b.CompanyGuids
+            ProductFamilyGuids      = $b.ProductFamilyGuids
+            PrerequisiteUpdateIds   = $b.PrerequisiteUpdateIds
+            SupersededByRevisionIds = $b.SupersededByRevisionIds
+            PayloadFileDigests      = $digestSet.ToArray()
+            PayloadUrls             = $urls.ToArray()
+        })
+    }
+
     $stats = [pscustomobject]@{
         UpdatesObserved       = $totalUpdates
-        UpdatesInScope        = $updates.Count
+        UpdatesInScope        = $updatesEnriched.Count
         BundlesObserved       = $bundleCount
         CategoryUpdates       = $categoryUpdates
+        LeafUpdatesWithPayload = $leafWithPayload
         FileLocationsObserved = $totalFileLocations
         FileLocationsRetained = $fileLocations.Count
+        PayloadDigestsOrphaned = $orphanDigestTotal
         Now                   = $Now.ToString('yyyy-MM-ddTHH:mm:ssZ')
         RecencyMonths         = $RecencyMonths
         ScopeProductGuidCount        = $prodSet.Count
         ScopeClassificationGuidCount = $classSet.Count
     }
 
-    Write-Verbose ('ConvertFrom-WsusScnPackageXml: observed={0:N0} in-scope={1:N0} file-locations={2:N0}' -f `
-        $totalUpdates, $updates.Count, $fileLocations.Count)
+    Write-Verbose ('ConvertFrom-WsusScnPackageXml: observed={0:N0} in-scope-bundles={1:N0} file-locations={2:N0}' -f `
+        $totalUpdates, $updatesEnriched.Count, $fileLocations.Count)
 
     return [pscustomobject]@{
-        Updates       = $updates.ToArray()
+        Updates       = $updatesEnriched.ToArray()
         FileLocations = $fileLocations
         Stats         = $stats
     }
@@ -7519,43 +7598,34 @@ function New-WsusScnDependencyDatabase {
         }
     }
 
-    # Join payload URLs into each update via FileDigests -> Url
+    # Updates already carry resolved payloadUrls from Stage 3 (the
+    # bundle -> leaf payload roll-up + FileLocations join happens there).
+    # Stage 4 just reshapes PascalCase -> camelCase for the JSON document.
     $updatesEnriched = New-Object 'System.Collections.Generic.List[object]'
-    $urlMissingCount = 0
     foreach ($u in $ParseResult.Updates) {
-        $urls = New-Object 'System.Collections.Generic.List[string]'
-        foreach ($d in $u.PayloadFileDigests) {
-            if ($ParseResult.FileLocations.ContainsKey($d)) {
-                $urls.Add($ParseResult.FileLocations[$d])
-            } else {
-                $urlMissingCount++
-            }
-        }
         $updatesEnriched.Add([pscustomobject]@{
-            updateId              = $u.UpdateId
-            revisionId            = $u.RevisionId
-            revisionNumber        = $u.RevisionNumber
-            creationDate          = $u.CreationDate
-            isBundle              = $u.IsBundle
-            isSoftware            = $u.IsSoftware
-            deploymentAction      = $u.DeploymentAction
-            kbArticleIds          = @($u.KBArticleIds)
-            productGuids          = @($u.ProductGuids)
-            classificationGuids   = @($u.ClassificationGuids)
-            companyGuids          = @($u.CompanyGuids)
-            productFamilyGuids    = @($u.ProductFamilyGuids)
-            prerequisiteUpdateIds = @($u.PrerequisiteUpdateIds)
-            supersededByUpdateIds = @($u.SupersededByUpdateIds)
-            bundledByRevisionIds  = @($u.BundledByRevisionIds)
-            payloadFileDigests    = @($u.PayloadFileDigests)
-            payloadUrls           = $urls.ToArray()
+            updateId                = $u.UpdateId
+            revisionId              = $u.RevisionId
+            revisionNumber          = $u.RevisionNumber
+            creationDate            = $u.CreationDate
+            isBundle                = $u.IsBundle
+            isLeaf                  = $u.IsLeaf
+            deploymentAction        = $u.DeploymentAction
+            productGuids            = @($u.ProductGuids)
+            classificationGuids     = @($u.ClassificationGuids)
+            companyGuids            = @($u.CompanyGuids)
+            productFamilyGuids      = @($u.ProductFamilyGuids)
+            prerequisiteUpdateIds   = @($u.PrerequisiteUpdateIds)
+            supersededByRevisionIds = @($u.SupersededByRevisionIds)
+            payloadFileDigests      = @($u.PayloadFileDigests)
+            payloadUrls             = @($u.PayloadUrls)
         })
     }
 
     # Construct the Layer 2 document
     $document = [pscustomobject]@{
         _meta = [pscustomobject]@{
-            generator        = 'Update-WindowsServerIso.ps1 wsusscn2 parser pipeline (Phase 2b1)'
+            generator        = 'Update-WindowsServerIso.ps1 wsusscn2 parser pipeline'
             scriptVersion    = $Script:ScriptVersion
             scriptTag        = $Script:ScriptTag
             generatedAt      = ([datetime]::UtcNow).ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -7567,13 +7637,14 @@ function New-WsusScnDependencyDatabase {
                 now                 = $ParseResult.Stats.Now
             }
             stats            = [pscustomobject]@{
-                updatesObserved       = $ParseResult.Stats.UpdatesObserved
-                updatesInScope        = $ParseResult.Stats.UpdatesInScope
-                bundlesObserved       = $ParseResult.Stats.BundlesObserved
-                categoryUpdates       = $ParseResult.Stats.CategoryUpdates
-                fileLocationsObserved = $ParseResult.Stats.FileLocationsObserved
-                fileLocationsRetained = $ParseResult.Stats.FileLocationsRetained
-                payloadUrlsMissing    = $urlMissingCount
+                updatesObserved        = $ParseResult.Stats.UpdatesObserved
+                updatesInScope         = $ParseResult.Stats.UpdatesInScope
+                bundlesObserved        = $ParseResult.Stats.BundlesObserved
+                categoryUpdates        = $ParseResult.Stats.CategoryUpdates
+                leafUpdatesWithPayload = $ParseResult.Stats.LeafUpdatesWithPayload
+                fileLocationsObserved  = $ParseResult.Stats.FileLocationsObserved
+                fileLocationsRetained  = $ParseResult.Stats.FileLocationsRetained
+                payloadDigestsOrphaned = $ParseResult.Stats.PayloadDigestsOrphaned
             }
         }
         updates = $updatesEnriched.ToArray()
@@ -13038,8 +13109,10 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         Executes the four-stage wsusscn2 parser pipeline as a single
         cohesive Action:
           Stage 1 — Get-WsusScnCabIfNeeded
-                    (download or refresh wsusscn2.cab if older than
-                     -StaleAfterDays; offline cache reuse otherwise)
+                    (download wsusscn2.cab into <WorkRoot>/cache, or reuse
+                     the cached copy when Test-WsusScnCabFresh says it is
+                     still fresh; honours -OverridePath for an operator-
+                     supplied cab)
           Stage 2 — Invoke-WsusScnPackageXmlExtract
                     (two-step 7-Zip extraction wsusscn2.cab -> package.xml)
           Stage 3 — ConvertFrom-WsusScnPackageXml
@@ -13048,29 +13121,25 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
                     (canonical-JSON serialization of dependency graph to OutputPath)
 
         After Stage 4 the function optionally invokes
-        Update-Layer1DependencyVerification to write the latest LCU
-        KB and CreationDate per Server OS into each
-        data/config-Server*.json, unless -SkipLayer1Update is passed.
+        Update-Layer1DependencyVerification to write the latest in-scope
+        bundle identity (UpdateId / RevisionId / CreationDate) per Server
+        OS into each data/config-Server*.json, unless -SkipLayer1Update
+        is passed.
 
-        Staging directory is created beneath the workspace ScratchDir
+        Staging directory is created beneath the workspace TempDir
         and removed on success; preserved on failure for inspection.
 
         In DryRun mode the cab is still acquired and parsed (so the
         run is informative) but Stage 4 JSON writeback and Layer 1
         config writeback are both skipped.
-    .PARAMETER CabPath
-        Optional. Full path to a wsusscn2.cab to use instead of the
-        default cache location. If supplied and freshness can be
-        verified, Stage 1 download is skipped.
+    .PARAMETER OverridePath
+        Optional. Full path to an operator-supplied wsusscn2.cab to use
+        instead of the managed cache. Passed straight through to
+        Get-WsusScnCabIfNeeded -OverridePath; if the file exists, the
+        Stage 1 download is skipped.
     .PARAMETER OutputPath
         Optional. Full path to the Layer 2 JSON to write. Defaults to
-        $Script:ScriptRoot/data/wsusscn2-database.json.
-    .PARAMETER StaleAfterDays
-        Stage 1 freshness threshold. Default 7 (matches the typical
-        wsusscn2 release cadence).
-    .PARAMETER ForceRefetch
-        Ignore cache freshness; always re-download wsusscn2.cab from
-        the Microsoft CDN.
+        <ScriptRoot>/data/wsusscn2-database.json.
     .PARAMETER SkipLayer1Update
         After writing the Layer 2 JSON, do NOT propagate the latest
         LCU KB/CreationDate to data/config-Server*.json. Useful in
@@ -13084,10 +13153,8 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
     [CmdletBinding()]
     [OutputType([bool])]
     param(
-        [string] $CabPath,
+        [string] $OverridePath,
         [string] $OutputPath,
-        [int]    $StaleAfterDays = 7,
-        [switch] $ForceRefetch,
         [switch] $SkipLayer1Update
     )
 
@@ -13101,14 +13168,6 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
             throw ('Data root not found: {0}' -f $dataRoot)
         }
 
-        $cacheDir = Join-Path $dataRoot 'cache-wsusscn2'
-        if (-not (Test-Path -LiteralPath $cacheDir)) {
-            New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
-        }
-
-        if (-not $CabPath) {
-            $CabPath = Join-Path $cacheDir 'wsusscn2.cab'
-        }
         if (-not $OutputPath) {
             $OutputPath = Join-Path $dataRoot 'wsusscn2-database.json'
         }
@@ -13118,26 +13177,42 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         $stagingDir = Join-Path $scratchRoot ('wsusscn2-staging-' + [Guid]::NewGuid().ToString('N').Substring(0,8))
 
         Write-SubSection 'Refresh plan'
+        $overrideDisplay = if ($OverridePath) { $OverridePath } else { '(managed cache)' }
         Write-Step ('Mode             : {0}' -f $Script:Mode)
-        Write-Step ('CabPath          : {0}' -f $CabPath)
+        Write-Step ('OverridePath     : {0}' -f $overrideDisplay)
         Write-Step ('OutputPath       : {0}' -f $OutputPath)
         Write-Step ('StagingDir       : {0}' -f $stagingDir)
-        Write-Step ('StaleAfterDays   : {0}' -f $StaleAfterDays)
-        Write-Step ('ForceRefetch     : {0}' -f $ForceRefetch.IsPresent)
         Write-Step ('SkipLayer1Update : {0}' -f $SkipLayer1Update.IsPresent)
         if ($Script:DryRun) {
             Write-Warn 'DryRun is ON: Stage 4 JSON write and Layer 1 config update will be SKIPPED.'
         }
 
         # ---- Stage 1: acquire wsusscn2.cab ----
+        # Mirrors the P06 ValidatePatchSet acquisition pattern. A04 is an
+        # admin Action that may run without a resolved OsProfile, so the
+        # WsusScnCabMeta is taken from the OsProfile only when present;
+        # otherwise $null is passed (Test-WsusScnCabFresh then treats the
+        # cache as stale and Stage 1 downloads a fresh copy).
         Set-DebugStep -Step 'stage1-acquire-cab'
         Write-SubSection 'Stage 1: acquire wsusscn2.cab'
-        $acquiredCab = Get-WsusScnCabIfNeeded -CabPath $CabPath -StaleAfterDays $StaleAfterDays -ForceRefetch:$ForceRefetch
-        if (-not $acquiredCab -or -not (Test-Path -LiteralPath $acquiredCab -PathType Leaf)) {
-            throw ('Stage 1 failed to produce a usable wsusscn2.cab (returned: {0})' -f $acquiredCab)
+        $latestPT = Get-LatestPatchTuesday
+        $wsusMeta = $null
+        if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) {
+            $wsusMeta = $Script:OsProfile.PatchBaseline.WsusScnCab
         }
+        $effectiveOverride = if ($OverridePath) { $OverridePath } else { $Script:WsusScnCabPath }
+        $wsusInfo = Get-WsusScnCabIfNeeded `
+                        -WsusScnCabMeta $wsusMeta `
+                        -WorkRoot $Script:WorkRoot `
+                        -LatestPatchTuesday $latestPT `
+                        -OverridePath $effectiveOverride
+        if (-not $wsusInfo -or [string]::IsNullOrWhiteSpace($wsusInfo.Path) -or -not (Test-Path -LiteralPath $wsusInfo.Path -PathType Leaf)) {
+            throw ('Stage 1 failed to produce a usable wsusscn2.cab (returned path: {0})' -f $wsusInfo.Path)
+        }
+        $acquiredCab = $wsusInfo.Path
         $cabFile = Get-Item -LiteralPath $acquiredCab
-        Write-Ok ('Stage 1 OK : {0} ({1:N0} bytes, modified {2})' -f $cabFile.FullName, $cabFile.Length, $cabFile.LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+        Write-Ok ('Stage 1 OK : {0} ({1:N0} bytes, downloadedNow={2}, source={3})' -f `
+            $cabFile.FullName, $cabFile.Length, $wsusInfo.DownloadedNow, $wsusInfo.Source)
 
         # ---- Stage 2: extract package.xml ----
         Set-DebugStep -Step 'stage2-extract-package-xml'
@@ -13204,20 +13279,26 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
 function Update-Layer1DependencyVerification {
     <#
     .SYNOPSIS
-        Propagate the latest LCU KB and CreationDate from the in-memory
-        parser result to each data/config-Server*.json.
+        Propagate the latest in-scope LCU bundle identity (UpdateId /
+        RevisionId / CreationDate) from the in-memory parser result to
+        each data/config-Server*.json.
     .DESCRIPTION
         For each Server OS family in $Script:WsusScnOsCategoryGuids, finds
-        the in-scope Update with the most recent CreationDate that
-        carries a KBArticleID (i.e. the most recent LCU for that OS), and
-        writes two fields to the corresponding config:
+        the in-scope bundle with the most recent CreationDate for that OS's
+        Product GUID, and writes four advisory fields to the matching
+        config:
 
-          _DependencyVerifiedKb           : "KB####" string
+          _DependencyVerifiedUpdateId     : lowercase GUID of the bundle
+          _DependencyVerifiedRevisionId   : revision-id string of the bundle
           _DependencyVerifiedCreationDate : ISO-8601 UTC string
-          _DependencyVerifiedAt           : ISO-8601 UTC of THIS update
+          _DependencyVerifiedAt           : ISO-8601 UTC of this writeback
 
-        These fields are advisory and consumed by SPEC §B.19.5 pre-flight
-        gate; they do not feed into the Catalogue or .NET CU pipelines.
+        IMPORTANT: wsusscn2's Master XML carries no KB article number
+        (KB numbers live in the Microsoft Update Catalog, see SPEC
+        §B.19.9.6). The verified identity is therefore the wsusscn2
+        UpdateId/RevisionId, not a KB. A future Phase-2c pre-flight gate
+        (SPEC §B.19.5) can cross-reference the UpdateId against the
+        Catalog-derived baseline to recover the KB if needed.
 
         Writes are skipped if the existing fields already match the new
         values (idempotent). Uses Save-ConfigWithBaseline for atomic
@@ -13244,13 +13325,12 @@ function Update-Layer1DependencyVerification {
         $osKey = $entry.Key
         $productGuid = $entry.Value.ToLowerInvariant()
 
-        # Find the most recent LCU-bearing update for this OS family
+        # Find the most recent in-scope bundle for this OS family.
         $candidates = $ParseResult.Updates | Where-Object {
-            ($_.KBArticleIds.Count -gt 0) -and
-            ($_.ProductGuids -contains $productGuid)
+            $_.ProductGuids -contains $productGuid
         }
-        if (-not $candidates -or $candidates.Count -eq 0) {
-            Write-Warn ('  {0}: no in-scope updates with KBArticleID found; skipping.' -f $osKey)
+        if (-not $candidates -or @($candidates).Count -eq 0) {
+            Write-Warn ('  {0}: no in-scope bundle found; skipping.' -f $osKey)
             $missing++
             continue
         }
@@ -13258,7 +13338,9 @@ function Update-Layer1DependencyVerification {
         # Pick the entry with the most recent CreationDate (string compare
         # works for ISO-8601 'yyyy-MM-ddTHH:mm:ssZ').
         $latest = $candidates | Sort-Object -Property CreationDate -Descending | Select-Object -First 1
-        $kbId = 'KB' + $latest.KBArticleIds[0]
+        $verUpdateId = $latest.UpdateId
+        $verRevId    = $latest.RevisionId
+        $verDate     = $latest.CreationDate
 
         $configPath = Join-Path $DataRoot ('config-{0}.json' -f $osKey)
         if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
@@ -13272,25 +13354,26 @@ function Update-Layer1DependencyVerification {
         $cfg = $cfgText | ConvertFrom-Json
 
         # Compare against existing fields (idempotent)
-        $existingKb   = $cfg.PSObject.Properties['_DependencyVerifiedKb']
-        $existingDate = $cfg.PSObject.Properties['_DependencyVerifiedCreationDate']
+        $existingUid = $cfg.PSObject.Properties['_DependencyVerifiedUpdateId']
+        $existingRev = $cfg.PSObject.Properties['_DependencyVerifiedRevisionId']
 
-        if ($existingKb -and $existingDate `
-                -and $existingKb.Value -eq $kbId `
-                -and $existingDate.Value -eq $latest.CreationDate) {
-            Write-Step ('  {0}: unchanged ({1} @ {2})' -f $osKey, $kbId, $latest.CreationDate)
+        if ($existingUid -and $existingRev `
+                -and $existingUid.Value -eq $verUpdateId `
+                -and $existingRev.Value -eq $verRevId) {
+            Write-Step ('  {0}: unchanged ({1} rev {2} @ {3})' -f $osKey, $verUpdateId, $verRevId, $verDate)
             $unchanged++
             continue
         }
 
-        # Write the three advisory fields
-        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedKb'           -NotePropertyValue $kbId             -Force
-        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedCreationDate' -NotePropertyValue $latest.CreationDate -Force
-        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedAt'           -NotePropertyValue $nowIso           -Force
+        # Write the four advisory fields
+        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedUpdateId'     -NotePropertyValue $verUpdateId -Force
+        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedRevisionId'   -NotePropertyValue $verRevId    -Force
+        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedCreationDate' -NotePropertyValue $verDate      -Force
+        $cfg | Add-Member -NotePropertyName '_DependencyVerifiedAt'           -NotePropertyValue $nowIso       -Force
 
         # Atomic writeback via the project's canonical helper
         Save-ConfigWithBaseline -ConfigPath $configPath -OsProfile $cfg
-        Write-Ok ('  {0}: updated ({1} @ {2})' -f $osKey, $kbId, $latest.CreationDate)
+        Write-Ok ('  {0}: updated ({1} rev {2} @ {3})' -f $osKey, $verUpdateId, $verRevId, $verDate)
         $updated++
     }
 

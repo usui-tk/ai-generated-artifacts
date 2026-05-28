@@ -112,12 +112,20 @@ wsusscn2.cab
 
 The Master XML (`package.xml`, ~108 MB extracted) is the single most useful artifact in the CAB. It records, for each update revision in the Windows Update universe:
 
-- `<KBArticleID>` — the human-visible KB number
-- `<Categories>` — the OS family GUID
+- `<Categories>` — the OS family GUID (Product) and the Classification GUID
 - `<Prerequisites>` — flat list of UpdateId GUIDs that must be present before this update can apply
-- `<SupersededBy>` — reverse list (14,000+ entries in a recent snapshot); helps detect "is this LCU already superseded?"
-- `<FileLocation>` — relative URL paths into which a KB-number regex can be applied
-- `<BundledBy>` — used to detect Combined LCU+SSU packages
+- `<SupersededBy>` — reverse list of `<Revision Id>` entries (14,000+ in a recent snapshot); helps detect "is this LCU already superseded?"
+- `<PayloadFiles>` — `<File Id="<digest>">` references to the actual payload files (on leaf updates)
+- `<FileLocation>` — `Id="<digest>" Url="...">` entries that resolve a payload digest to a download URL (a KB-number regex can be applied to the URL)
+- `<BundledBy>` — `<Revision Id>` parent links; used to detect Combined LCU+SSU packages and to roll a leaf's payload up to its bundle
+
+> **Empirical correction (2026-05-12 live-cab verification).** The Master
+> XML carries **no** `<KBArticleID>` element — the KB number is *not* in
+> package.xml at all. KB numbers live only in the per-package CAB metadata
+> and the Microsoft Update Catalog (see the table below). Updates in the
+> Master XML are therefore identified by `UpdateId` / `RevisionId`, and a
+> KB number can only be *inferred* from the `kb(\d+)` token that sometimes
+> appears in a `<FileLocation>` URL.
 
 The Master XML and the individual `packageN.cab` fragments record the **same dependency data from different angles**:
 
@@ -146,7 +154,7 @@ Parsing the Master XML deserves attention to its scale. A representative timing 
 | Per-package CAB scan (`packageN.cab` with 12,500 inner files) | 6.7 s extract + 127.9 s scan | < 50 MB |
 | Hypothetical full per-package scan (all 75 CABs) | ≈ 2.5 hours | 15–20 GB disk peak |
 
-The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<KBArticleID>`, `<Prerequisites>`, `<SupersededBy>`, and `<FileLocation>`, producing a 2-5 MB JSON dependency database that can answer most pre-flight questions.
+The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<Prerequisites>`, `<SupersededBy>`, `<BundledBy>`, `<PayloadFiles>`, and `<FileLocation>`, producing a small JSON dependency database (~0.2 MB at the in-scope-bundle granularity used by this project) that can answer most pre-flight questions.
 
 #### 2.4.1 The Category hierarchy embedded in package.xml
 
@@ -442,18 +450,22 @@ Detection of the bundle type at config-load time avoids the SSU-required failure
 
 Outside the Combined-MSU world, the practitioner needs to know, for any given LCU, which SSU pairs with it. Microsoft does publish this in plain prose on the LCU's KB page (the "Improvements" section often opens with "This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update"). Third-party sites such as `techepages.com` and `windowslatest.com` routinely repeat the pairing.
 
-For automation, the pairing is more reliably retrieved from `wsusscn2.cab`. Each LCU's Master XML entry includes a `<Prerequisites>` block with the UpdateId of any required SSU. Mapping UpdateId → KB number via the same Master XML's `<KBArticleID>` element produces the pairing without web scraping.
+For automation, the pairing is more reliably retrieved from `wsusscn2.cab`. Each LCU's Master XML entry includes a `<Prerequisites>` block with the UpdateId of any required SSU. Because the Master XML carries no `<KBArticleID>` (see §2.4 correction), the pairing is expressed in `UpdateId` / `RevisionId` terms; the human-readable KB number of the prerequisite SSU is recovered from the `kb(\d+)` token in the SSU update's `<FileLocation>` URL, or by cross-referencing the UpdateId against the Microsoft Update Catalog. No web scraping of KB prose pages is required.
 
 A concrete example, from Server 2016 in 2026-05:
 
 ```
-LCU KB5087537 (Cumulative Update for Windows Server 2016)
+LCU for Windows Server 2016, 2026-05 (UpdateId 631fdcea-..., RevisionId 43268251)
   <Prerequisites>
-    <UpdateId Id="<GUID-of-KB5088064>"/>
+    <UpdateId Id="<GUID-of-the-2026-05-SSU>"/>
   </Prerequisites>
+  <PayloadFiles><File Id="<digest>"/></PayloadFiles>
 
-KB5088064 (2026-05 Servicing Stack Update for Windows Server 2016)
-  <KBArticleID>5088064</KBArticleID>
+The prerequisite SSU update (a separate <Update>) carries its own
+<PayloadFiles>, whose digest resolves through <FileLocations> to a URL like
+  .../windows10.0-kb5088064-x64_<hash>.cab
+from which the KB number (KB5088064) is parsed. The Master XML itself
+never states "5088064" as a KB element.
 ```
 
 A pipeline that pre-loads its config from `wsusscn2.cab` derivative data can detect, at config-load time, that KB5087537 requires KB5088064 to be present in the same patch set. An operator who hand-edits a config without this pre-flight gets the 0x800f0823 failure at WIM-apply time and has to back out their edit.
@@ -515,7 +527,7 @@ Source: Microsoft Learn "WSUS Classification GUIDs" (`learn.microsoft.com/ja-jp/
 | Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` | Microsoft-adjacent code (`ansible/ansible` Issue 60785 Categories dump, `dsccommunity/UpdateServicesDsc` Issue 65) + reverse-lookup from real wsusscn2 Category Updates |
 | Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` | WSUSOffline forum + real wsusscn2 Category Update created 2018-10-13 (matches GA timing) |
 | Windows Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` | Real wsusscn2 Category Update created 2021-08-09 (right before LTSC GA), payload URLs include ndp481 (.NET 4.8.1, the Server 2022 default) |
-| Windows Server 2025 LTSC | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` | Real wsusscn2 payload URLs include a **build 26100 SSU** (`ssu-26100.1440-x64`); build 26100 = Server 2025 LTSC |
+| Windows Server 2025 LTSC | Microsoft server operating system-24H2 | `b256987d-4693-4c87-955d-dbb9341205eb` | **Corrected 2026-05** (was `ca006cfb-...`): the b256987d Category's newest SecurityUpdate bundle (2026-05-11) carries the current Server 2025 LCU **KB5087539** (build 26100.32860), but NOT the Windows 11 24H2 *client* LCU KB5089549, so it is server-specific. The old `ca006cfb-...` stalls at 2025-09-08 and never carries KB5087539 (see note below) |
 
 Reference (not Server LTSC, so excluded from the scope filter):
 
@@ -632,7 +644,7 @@ As shown in §6.1, Microsoft switched to a codename-based naming convention star
 | Server 2016 | Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` |
 | Server 2019 | Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` |
 | Server 2022 LTSC | (new) | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` |
-| Server 2025 LTSC | (new) | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` |
+| Server 2025 LTSC | (new) | Microsoft server operating system-24H2 | `b256987d-4693-4c87-955d-dbb9341205eb` |
 
 This table is kept in sync with the scope-filter reference in §5.7.
 

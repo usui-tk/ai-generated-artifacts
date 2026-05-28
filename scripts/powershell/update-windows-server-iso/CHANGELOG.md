@@ -16,6 +16,113 @@ the script and follows the
 
 ## [Unreleased]
 
+### r09.0 Step 2b3 - real-data-driven parser correction
+
+This change corrects the Phase 2b1 parser and the Phase 2b2 Layer 1
+writeback after the **first end-to-end run against a live
+`wsusscn2.cab`** (2026-05-12 fetch, 641,849,140 bytes, 136,102
+`<Update>` rows) on the Linux verification host. Phase 2b1 had been
+authored and unit-tested against an *assumed* wsusscn2 structure that
+diverged from reality in several material ways; every assumption is now
+replaced with the empirically verified structure (SPEC §B.19.9.6) and
+the whole pipeline is validated against the real cab.
+
+This entry **supersedes** the structural claims in the Step 2b2 entry
+below (per the AP-9 metadata-correction rule: corrections are recorded
+as a new entry, not by rewriting the prior one). Stage chaining, the
+A01→A04 soft-fail chain, and DryRun semantics from Step 2b2 are
+unchanged and remain accurate.
+
+#### Root cause
+
+Phase 2b1's parser, fixtures, and tests were written without ever
+parsing a real `wsusscn2.cab`. The synthetic fixture encoded a guessed
+structure, so T12/T13 passed green while the parser produced
+**zero usable data** against the real cab (0 file-locations, 0 payload
+URLs, 0 KB-bearing in-scope updates). The AGENTS.md §4
+ground-truth-extraction rule had not been applied to the external data
+format.
+
+#### Corrections (all verified against the live cab)
+
+**Stage 3 (`ConvertFrom-WsusScnPackageXml`)** — rewritten to the real
+structure:
+
+| Assumed (Phase 2b1) | Real (verified) |
+|---|---|
+| `<KBArticleID>` element holds a KB number | No KB number exists anywhere in the Master XML; KB lives in the Catalog |
+| Payload is `<Files><File Digest="…" />` | `<PayloadFiles><File Id="<digest>" />` (digest in `Id`) |
+| `<BundledBy><RevisionId Id="…" />` | `<BundledBy><Revision Id="…" />` |
+| `<SupersededBy><UpdateId Id="…" />` | `<SupersededBy><Revision Id="…" />` |
+| `<FileLocation FileDigest="…"><Url>…</Url>` | `<FileLocation Id="<digest>" Url="…" />` |
+| In-scope Product+Classification update carries the payload | The in-scope row is a *bundle* with no payload; payloads live on *leaf* rows that point up via `BundledBy` |
+
+The corrected parser does one streaming pass that (a) collects in-scope
+bundles, (b) builds a `bundleRevisionId → [payloadDigests]` roll-up by
+walking every leaf's `BundledBy` + `PayloadFiles`, and (c) builds a
+`digest → URL` map; a post-pass resolves each bundle's `payloadUrls`
+from the leaves bundled under it. The positive child-element allowlist
+(SPEC §B.19.8) is now `Categories, Category, Prerequisites, UpdateId,
+SupersededBy, BundledBy, Revision, PayloadFiles, File`.
+
+**Server 2025 Product GUID correction** (SPEC §B.19.9.7): the Server
+2025 Product Category GUID was `ca006cfb-49eb-439b-880a-1312e1fc9713`,
+whose newest SecurityUpdate bundle silently stalled at 2025-09-08. The
+verified GUID carrying the current Server 2025 LCU (KB5087539,
+2026-05-11) is `b256987d-4693-4c87-955d-dbb9341205eb`. It carries the
+Server LCU but not the Windows 11 24H2 client LCU (KB5089549), so it is
+server-specific. With the fix, all four OS families resolve their
+2026-05-11 LCU (Server 2016 KB5087537, 2019 KB5087538, 2022 KB5087545,
+2025 KB5087539).
+
+**Stage 4 (`New-WsusScnDependencyDatabase`)** — `kbArticleIds` removed
+(no KB in wsusscn2); `supersededByUpdateIds`/`bundledByRevisionIds`
+replaced by `supersededByRevisionIds`; `payloadUrls` now come
+pre-resolved from Stage 3; `_meta.stats` gains `leafUpdatesWithPayload`
+and `payloadDigestsOrphaned`.
+
+**`Get-WsusScnCabIfNeeded` call-site fix (A04 Stage 1)** — the Step 2b2
+A04 wrapper called this with non-existent parameters
+(`-CabPath`/`-StaleAfterDays`/`-ForceRefetch`). Corrected to the real
+signature (`-WsusScnCabMeta`/`-WorkRoot`/`-LatestPatchTuesday`/
+`-OverridePath`), mirroring the P06 ValidatePatchSet acquisition
+pattern. A04 params are now `-OverridePath`/`-OutputPath`/
+`-SkipLayer1Update`.
+
+**Layer 1 (`Update-Layer1DependencyVerification`)** — KB-based fields
+replaced with identity fields, since wsusscn2 has no KB:
+`_DependencyVerifiedUpdateId`, `_DependencyVerifiedRevisionId`,
+`_DependencyVerifiedCreationDate`, `_DependencyVerifiedAt`.
+
+**Tests** — the T12 fixture builder was rewritten to the real
+bundle/leaf structure (`PayloadFiles`, `BundledBy/Revision`,
+`FileLocation Id/Url`, two-tier bundle↔leaf linkage). T12 reworked to
+22 assertions on the new schema; T13 reworked to 15 assertions on the
+UpdateId/RevisionId identity fields.
+
+#### End-to-end verification (live cab, Linux host)
+
+- Stage 1: 612 MB download OK (`downloadedNow=True`).
+- Stage 2: 7-Zip two-step extraction OK (package.xml 113,842,356 bytes).
+- Stage 3: 136,102 observed → 138 in-scope bundles → 110,749 leaves
+  with payload → 97,051 file-locations → **0 orphaned digests**,
+  **every in-scope bundle's payloadUrls resolved**. ≈ 4.5 min parse.
+- Stage 4: Layer 2 JSON written (~198 KB).
+- A04 whole-wrapper run: `A04 RefreshDependencyDatabase: completed
+  successfully` (`returned: True`).
+- Gates: psa 0/0/0, PSScriptAnalyzer 0, T2–T13 175→176 assertions all
+  green, canonical-JSON format 26/26.
+
+#### Files changed
+
+- `Update-WindowsServerIso.ps1`: Stage 3 rewrite, Stage 4 reshape,
+  Layer 1 rewrite, A04 Stage 1 call-site fix, Server 2025 GUID table +
+  name-map correction, `$Script:ScriptTag` → `step2b3-real-data-parser-correction`.
+- `tests/common/wsusscn2_fixture_builder.py`: full rewrite to real structure.
+- `tests/wsusscn2_parser_test.py`, `tests/wsusscn2_layer1_test.py`: reworked assertions.
+- `tests/fixtures/wsusscn2/{package.xml,expected-output.json}`: regenerated.
+- `SPEC.md`: added §B.19.9.6 (verified structure) and §B.19.9.7 (Server 2025 GUID correction).
+
 ### r09.0 Step 2b2 - A04 wrapper implementation and Layer 1 integration
 
 This change implements the Phase 2b2 lifecycle glue that turns the
@@ -279,6 +386,11 @@ Server LTSC Product GUIDs (scope filter targets):
 | Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` |
 | Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` |
 | Server 2025 LTSC | Microsoft Server Operating System-24H2 | `ca006cfb-49eb-439b-880a-1312e1fc9713` |
+
+> **Note (corrected later):** the Server 2025 GUID recorded here
+> (`ca006cfb-...`) was found in Step 2b3 to be a stale 24H2-era
+> category. The verified value is `b256987d-4693-4c87-955d-dbb9341205eb`.
+> See the "Step 2b3" entry above and SPEC §B.19.9.7.
 
 Server 2022 / 2025 GUIDs were finalised in this session via the
 Category-hierarchy reverse-lookup methodology described in §2.4.1

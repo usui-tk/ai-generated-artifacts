@@ -223,7 +223,7 @@ from those caches. This split matches the SPEC §B.22.12 design.
 | `RefreshSnapshots` | A03 | Fetch upstream caches (release-info, .NET CU, Dynamic Update) |
 | `RefreshAllBaselines` | A01 | Regenerate `data/config-Server*.json` from the caches |
 | `DumpFieldClassification` | A02 | Emit the field-cadence decision matrix as JSON |
-| `RefreshDependencyDatabase` | A04 | Refresh `data/wsusscn2-database.json` from `wsusscn2.cab` (r09.0+; **stub in Step 2a, full body in Step 2b**) |
+| `RefreshDependencyDatabase` | A04 | Refresh `data/wsusscn2-database.json` from `wsusscn2.cab` (r09.0+; **fully implemented and verified against the live cab in Step 2b3**) |
 
 ```powershell
 # ---- Stage 1: populate the upstream caches ----
@@ -246,10 +246,10 @@ from those caches. This split matches the SPEC §B.22.12 design.
 .\Update-WindowsServerIso.ps1 -Action DumpFieldClassification
 
 # Refresh the Servicing Dependency Database (layer 2) from wsusscn2.cab
-#   r09.0 Step 2a: registered but stub (raises NotImplementedException)
-#   r09.0 Step 2b: full pipeline (Stage 1 cab acquire -> Stage 2 7-Zip
-#                   extract -> Stage 3 XmlReader stream-parse ->
-#                   Stage 4 emit data/wsusscn2-database.json)
+#   Full pipeline: Stage 1 cab acquire -> Stage 2 7-Zip extract ->
+#   Stage 3 XmlReader stream-parse -> Stage 4 emit
+#   data/wsusscn2-database.json -> Layer 1 config writeback.
+#   (Windows + 7-Zip required; Stage 3 parse takes ~4-5 min on the live cab.)
 .\Update-WindowsServerIso.ps1 -Action RefreshDependencyDatabase
 ```
 
@@ -264,23 +264,23 @@ groups for newly-added languages).
 ### r09.0 progress
 
 The fourth Admin Action — **`RefreshDependencyDatabase`** (A04) —
-is specified in [SPEC.md](./SPEC.md) §B.19.15.3 and progressively
-landing across r09.0 Step 2a / 2b. Current state per the
+is specified in [SPEC.md](./SPEC.md) §B.19 and is **fully
+implemented and verified against the live `wsusscn2.cab`** as of
+r09.0 Step 2b3. Current state per the
 `-Action ListPhases` registry:
 
-- **A04 stub** (r09.0 Step 2a, current): the Action is registered
-  in `param() ValidateSet`, the PhaseRegistry, and
-  `Get-PhaseListByAction`. The wrapper body raises a
-  `NotImplementedException` with an operator-actionable message
-  pointing at SPEC §B.19.15.3 and listing the pending Step 2b work.
-- **A04 full body** (r09.0 Step 2b, in progress): the four-stage
-  parser pipeline (`Invoke-WsusScnPackageXmlExtract` →
-  `ConvertFrom-WsusScnPackageXml` → `New-WsusScnDependencyDatabase`)
-  will refresh `data/wsusscn2-database.json` (Servicing Dependency
-  Database layer 2) from Microsoft's `wsusscn2.cab`.
-- **A01.0 integration** (r09.0 Step 2b): `RefreshAllBaselines`
-  will gain an A01.0 sub-phase that runs A04 automatically before
-  the per-OS catalogue scrape.
+- **A04 implemented** (r09.0 Step 2b3): the four-stage parser
+  pipeline (`Get-WsusScnCabIfNeeded` → `Invoke-WsusScnPackageXmlExtract`
+  → `ConvertFrom-WsusScnPackageXml` → `New-WsusScnDependencyDatabase`)
+  refreshes `data/wsusscn2-database.json` (Servicing Dependency
+  Database layer 2) from Microsoft's `wsusscn2.cab`, then writes the
+  latest per-OS bundle identity into `data/config-Server*.json`. The
+  whole chain was run end-to-end against the 2026-05-12 live cab
+  (all four Server families resolve their 2026-05 LCU with payload
+  URLs; see SPEC §B.19.9.6/9.7).
+- **A01.0 integration** (r09.0 Step 2b2): `RefreshAllBaselines`
+  runs A04 automatically as a soft-fail downstream step after the
+  per-OS catalogue scrape.
 - **P06 Stage 2** (r09.0 Step 2c, planned): graph-based dependency
   closure check using `data/wsusscn2-database.json`.
 - **Server 2016 SSU dependency fix** (r09.0 Step 2a, shipped): the
