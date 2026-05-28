@@ -146,7 +146,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '4.1.0'
+__version__ = '4.2.0'
 
 
 def _verify_version_file_consistency():
