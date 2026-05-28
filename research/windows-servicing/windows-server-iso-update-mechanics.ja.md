@@ -13,7 +13,7 @@ Microsoft Evaluation ISO と累積更新プログラムの束から完全にパ�
 
 ## 1. 背景と対象読者
 
-Microsoft は Windows Server を 2 種類のインストール可能な形式で提供しています:**Evaluation ISO**(Microsoft Evaluation Center からダウンロード可能、 180 日の期限付き、 ライセンス契約なしで自由に入手可能)と、 **小売 / ボリュームライセンス ISO**(Microsoft 365 管理センター、 Volume Licensing Service Center、 または Open Value 契約を介して取得)です。 実務者主導の ISO 自動化では、 ライセンス条項に違反することなく CI アーティファクトストアにチェックインできる唯一の選択肢として、 Evaluation ISO が現実的な入力となります。
+Microsoft は Windows Server を 2 種類のインストール可能な形式で提供しています:**Evaluation ISO**(Microsoft Evaluation Center からダウンロード可能、 180 日の期限付き、 ライセンス契約なしで自由に入手可能)と、 **小売 / ボリュームライセンス ISO**(Microsoft 365 管理センター、 Volume Licensing Service Center、 または Open Value 契約を介して取得)です。 実務者主導の ISO 自動化では Evaluation ISO が最も実用的な入力となることが多いですが、 メディアの再配布・保管は Microsoft のライセンス条項に従う必要があります（例えば CI アーティファクトストアへチェックインする前に、 Evaluation Center の条項がそれを許可しているか確認してください）。
 
 そのような Evaluation メディアから「完全にパッチ済み」の ISO を構築する作業を行う実務者は、 通常以下のような問いから始めます:*「install.wim に最低限どの MSU および CAB パッケージを適用すれば、 イメージがデプロイされて起動したときに、 最新の Patch Tuesday レベルとなり、 かつ PCA2011 を信頼しなくなったセキュアブート環境で受け入れられるか?」*。 ナイーブな回答 — 「今月の LCU を適用する」 — は不完全です。 完全な回答は少なくとも以下に触れます:
 
@@ -55,7 +55,7 @@ Microsoft は Windows Server を 2 種類のインストール可能な形式で
 
 Hotpatch カレンダーには特記事項があります。 暦年 2024 / 2025 / 2026 がすべて公開されています。 Server 2022 の CY2024 には 1 つの例外があります — 8 月が期待される「Hotpatch」ではなく「Baseline (Restart)」とラベル付けされていました — おそらく Microsoft が Server 2022 のベースラインケイデンスを CY2024 と CY2025 の間で調整し、 正典の 1 月 / 4 月 / 7 月 / 10 月パターンに合わせたためです。 教訓:**正典のベースライン月リストはカレンダーの行ごとの `Type` フィールド** であり、 ハードコードされた `{1, 4, 7, 10}` ルールではありません。 1 月 / 4 月 / 7 月 / 10 月ヒューリスティックを使う実装者は、 CY2025 と CY2026 では正解を得ますが、 CY2024 の 1 セルで誤った答えを得ます。
 
-このページのパーサーは小さくて済みます。 2 つのテーブルレイアウトでコンテンツ全体をカバーできます:5 カラムヘッダー `| Servicing option | Update type | Availability date | Build | KB article |` を持つ月次リリーステーブルと、 6 カラムヘッダー `| Month | Update type | Type | Availability date | Build | KB article |` を持つ Hotpatch カレンダーです。 標準ライブラリのみの 300 行程度の Python パーサーで両方を JSON に抽出できます。 パーサーはヘッダーテキストを正確に検証し、 Microsoft がカラムをリネームしたら継続を拒否すべきです — これにより構造ドリフトが発生したら人間のレビューがトリガーされます。
+このページのパーサーは小さくて済みます。 2 つのテーブルレイアウトでコンテンツ全体をカバーできます:5 カラムヘッダー `| Servicing option | Update type | Availability date | Build | KB article |` を持つ月次リリーステーブルと、 6 カラムヘッダー `| Month | Update type | Type | Availability date | Build | KB article |` を持つ Hotpatch カレンダーです。 標準ライブラリのみの 300 行程度の Python パーサーで両方を JSON に抽出できます。 パーサーはヘッダーテキストを正確に検証し、 Microsoft がカラムをリネームしたら継続を拒否すべきです — これにより構造ドリフトが発生したら人間のレビューがトリガーされます。 加えて実装では、 取得したコミット ID・取得タイムスタンプ・生 markdown の SHA-256 をパース済み JSON とともに永続化すべきです。 これにより上流の構造ドリフトを検知でき、 既知の入力に対する再現可能なパースが保てます。
 
 ### 2.2 .NET Framework 累積更新リリースノート
 
@@ -141,7 +141,7 @@ Master XML と個別の `packageN.cab` フラグメントは、 **同じ依存�
 | `<Categories>`(OS ファミリ GUID) | ✓ | ✗ |
 | `<ApplicabilityRules>` | ✗ | ✓ |
 
-「KB5087537 は何に依存するか?」を知りたいパイプラインには Master XML だけで十分です。 「どの依存性 / バンドル判断木の枝がこの OS リビジョンと一致するか?」 を知りたいパイプラインにはパッケージ別 CAB が必要です。
+単純な前提条件の発見（例:「KB5087537 は何に依存するか?」）には Master XML で通常は十分です。 完全な適用可能性評価や分岐解決ロジック（例:「どの依存性 / バンドル判断木の枝がこの OS リビジョンと一致するか?」）には、 パッケージ別 CAB メタデータ — あるいはより信頼性の高い手段として Windows Update Agent の適用可能性評価 — が依然として必要になる場合があります。
 
 Master XML のパースはそのスケールに注意が必要です。 コモディティハードウェアでの代表的な計測値:
 
@@ -155,6 +155,8 @@ Master XML のパースはそのスケールに注意が必要です。 コモ�
 | 仮想的な全パッケージ別スキャン(全 75 CAB) | 約 2.5 時間 | 15-20 GB ディスクピーク |
 
 全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<Prerequisites>`、 `<SupersededBy>`、 `<BundledBy>`、 `<PayloadFiles>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる小さな JSON 依存性データベース（本プロジェクトが用いる in-scope bundle 粒度で約 0.2 MB）を生成できます。
+
+> **サポート状況に関する注記。** `package.xml` の直接パースは、 観測されたメタデータ構造に基づく実装手法であり、 Microsoft がサポートする API 契約ではありません。 スキーマは予告なく変更され得ます。 最終的な適用可能性・インストール可能性の判断は、 権威ある評価器である Windows Update Agent のサービシングロジック（マウント済みイメージに対するオフライン WUA スキャン）で検証すべきです。
 
 #### 2.4.1 Category 階層の package.xml 内表現
 
@@ -253,7 +255,7 @@ ISO ビルドにおける `_EX` ディレクトリの役割:
 | Server 2022 EVAL ja-jp | ✓ | ✗ | 3 | 2016 と同様 |
 | Server 2025 EVAL ja-jp | ✓ | ✓ | **6** | `EFI_EX` が **GA 時点で install.wim に同梱**;合成不要 |
 
-Server 2016 / 2019 / 2022 では、 `EnableInstallWimUpdate=true` ワークフロー(LCU を install.wim に適用してから、 パッチ済 WIM から `_EX` を出力メディアに抽出)が必要です。 Server 2025 では `EnableInstallWimUpdate=false` ワークフローで十分です — LCU はパッチレベル要件のためにまだ WIM にインストールする必要がありますが、 `_EX` バイナリはブートバイナリ抽出時点ですでに存在します。
+Server 2016 / 2019 / 2022 では、 `EnableInstallWimUpdate=true` ワークフロー(LCU を install.wim に適用してから、 パッチ済 WIM から `_EX` を出力メディアに抽出)が必要です。 Server 2025 では、 EFI_EX が install.wim にすでに存在するため、 PCA2023 ブートバイナリ抽出のための EFI_EX 合成は **不要** です。 ただし、 パッチレベル準拠のための install.wim サービシング（LCU の適用）は依然として必要です — スキップできるのは `_EX` 合成ステップのみであり、 パッチ適用ステップそのものではありません。
 
 2025 install.wim には EFI に追加で 1 ファイル含まれます:**`SecureBootRecovery.efi`**(PCA2011 署名)。 Server 2016 / 2019 / 2022 には存在しません。 このファイルはセキュアブートリカバリ手順に関連しており、 2025 に存在することは informational のみです — ビルド時の `_EX` 合成の問題には関係ありません。
 
@@ -320,7 +322,7 @@ Server 2025 で `\Windows\Boot\EFI\bootmgfw.efi` と `\Windows\Boot\EFI_EX\bootm
 
 つまり Microsoft のアプローチは:既存の `bootmgfw.efi` の PE 本体を取り、 PCA2023 で再署名し、 結果を `bootmgfw_EX.efi` として保存する、 というものです。 PE コードは変更されず、 署名のみが新しいものです。 これはゴールに対する妥当な解釈です — ブートマネージャーの実行可能な動作は完全に同じで、 信頼アンカーのみが変わります。
 
-他の `_EX` ファイルでは常に同じというわけではありません。 Server 2025 の `bootmgr_EX.efi` は `bootmgr.efi` と *署名を含めて* バイト単位で同一です — `_EX` サフィックスがあるにも関わらず PCA2011 署名を持ちます。 Microsoft の `Make2023BootableMedia.ps1` v1.4 には、 これについて明示的なコメントがあります:bootmgr_EX は意図的に PCA2011 署名コピーであり、 設計通りである、 と。 これが遷移期間のアーティファクトか永続的な設計選択かは、 まだ公式に文書化されていません。
+他の `_EX` ファイルでは常に同じというわけではありません。 Server 2025 の `bootmgr_EX.efi` は `bootmgr.efi` と *署名を含めて* バイト単位で同一です — `_EX` サフィックスがあるにも関わらず PCA2011 署名を持ちます。 これは検査した Server 2025 メディアで観測され、 bootmgr_EX が PCA2011 署名コピーである旨を示す Microsoft の `Make2023BootableMedia.ps1` v1.4 のコメントと整合します。 Microsoft が正式なサービシング仕様を公開しない限り、 これは実装観測に基づく挙動として扱ってください;遷移期間のアーティファクトか永続的な設計選択かは、 まだ公式に文書化されていません。
 
 ### 3.7 ビルド済 ISO の PCA2023 readiness を検証する
 
@@ -477,7 +479,7 @@ Windows Server 2016 の LCU, 2026-05 (UpdateId 631fdcea-..., RevisionId 43268251
 | Server 2016 | スタンドアロン | SSU は独自の KB を持ち、 LCU 適用前に発見・適用が必要 |
 | Server 2019 | スタンドアロン | 2016 と同様 |
 | Server 2022 | ほぼスタンドアロン | 一部の月は Combined;パイプラインは仮定できない |
-| Server 2025 | 常に Combined(LCU + KB5043080 バンドル) | Catalog はすべての LCU 解決で 2 ファイルダウンロードを提供し、 両方を適用する必要がある |
+| Server 2025 | 現行 2025-2026 の Catalog スナップショットで combined/bundled として観測（LCU + KB5043080 バンドル） | 観測した範囲では Catalog はすべての LCU 解決で 2 ファイルダウンロードを提供し、 両方を適用する必要がある。 契約上の保証ではなく観測されたメタデータ挙動として扱うこと |
 
 Server 2022 の曖昧性は予防する価値があります:最近の月の Server 2022 LCU が Combined であっても、 来月もそうとは限りません。 「Server 2022 は常に Combined」とハードコードするパイプラインは、 スタンドアロン月で失敗します。 堅牢なアプローチは MSU の内容を検査すること(セクション 5.2 の `update.ses` テスト)で、 それに応じて行動することです。
 
@@ -526,7 +528,7 @@ Server 2022 の曖昧性は予防する価値があります:最近の月の Ser
 |:---|:---|:---|:---|
 | Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` | Microsoft 公式コードベース(`ansible/ansible` Issue 60785 の Categories ダンプ、 `dsccommunity/UpdateServicesDsc` Issue 65)+ 実 wsusscn2 の Category Update から逆引き一致 |
 | Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` | WSUSOffline forum + 実 wsusscn2 Category Update created 2018-10-13(GA タイミング一致)|
-| Windows Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` | 実 wsusscn2 Category Update created 2021-08-09(LTSC GA 直前)、 payload URL に ndp481(.NET 4.8.1、 Server 2022 デフォルト)を確認 |
+| Windows Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` | 実 wsusscn2 Category Update created 2021-08-09(LTSC GA 直前);観測した payload URL は ndp481 関連（.NET Framework 4.8.1）パッケージを参照。 同梱ランタイムを payload 名のみから推定はしない |
 | Windows Server 2025 LTSC | Microsoft server operating system-24H2 | `b256987d-4693-4c87-955d-dbb9341205eb` | **2026-05 訂正**（旧値 `ca006cfb-...`）：b256987d カテゴリの最新 SecurityUpdate bundle（2026-05-11）は現行の Server 2025 LCU **KB5087539**（build 26100.32860）を持つが、Windows 11 24H2 の *クライアント* LCU KB5089549 は持たないため server 専用と確定。旧 `ca006cfb-...` は 2025-09-08 で停止し KB5087539 を持たない（下の注記参照）|
 
 参考(Server LTSC ではないため scope filter には含めない関連 Product):
@@ -536,7 +538,7 @@ Server 2022 の曖昧性は予防する価値があります:最近の月の Ser
 | Microsoft Server Operating System-22H2 | `2c7888b6-f9e9-4ee9-87af-a77705193893` | Azure Stack HCI 22H2 系 SAC |
 | Microsoft Server Operating System-23H2 | `607efb8d-feed-48a0-930e-14d0cf2da71f` | Azure Stack HCI 23H2 系 SAC、 payload URL に build 25398 を確認 |
 
-**SSU / LCU / .NET CU / Dynamic Update と Classification の対応**(SPEC §B.19.7 の Update type 表現):
+**SSU / LCU / .NET CU / Dynamic Update と Classification の対応**(SPEC §B.19.7 の Update type 表現)。 なお、 Classification GUID そのものは Microsoft が定義した識別子ですが、 以下の更新 *カテゴリ* と Classification *使用法* の対応は観測された wsusscn2 メタデータパターンに基づくものであり、 契約ではなくヒューリスティックとして扱うべきです:
 
 - **SSU**:Classification = ServicePacks(`68C5B0A3-...`)。 Windows 6.x 世代以前は `Updates` も含んだが、 Windows 10/Server 2016 以降の SSU は ServicePacks に分類される。
 - **LCU**:Classification = SecurityUpdates(`0FA1201D-...`)。 月例セキュリティ更新の Cumulative Update が該当。
@@ -757,7 +759,7 @@ Microsoft リファレンス `Make2023BootableMedia.ps1` v1.4 はこれを一切
 
 ### 8.4 検証境界
 
-自動ツールが越えられない線:**セキュアブートプラットフォームが生成された ISO を実際に起動するかどうか**。 これは、 ターゲットファームウェアが DB に PCA2023 をプロビジョニングされたかどうか(または、 失効後の世界では、 ターゲットファームウェアがまだ DB に PCA2011 を保持しているかどうか)に依存します。 これはマシンごと、 ファームウェアバージョンごとの状態です。 唯一の決定的なテストは ISO を代表的なターゲットで起動することです — デプロイメント世代のファームウェアアップデートを受信した物理ハードウェア、 または、 最近の Microsoft 公開セキュアブートテンプレート(これ自体が PCA2023 を念頭に置いて作成された)から作成された Hyper-V Gen2 VM。
+自動ツールが越えられない線:**セキュアブートプラットフォームが生成された ISO を実際に起動するかどうか**。 これは、 ターゲットファームウェアが DB に PCA2023 をプロビジョニングされたかどうか(または、 失効後の世界では、 ターゲットファームウェアがまだ DB に PCA2011 を保持しているかどうか)に依存します。 これはマシンごと、 ファームウェアバージョンごとの状態です。 唯一の決定的なテストは ISO を代表的なターゲットで起動することです — デプロイメント世代のファームウェアアップデートを受信した物理ハードウェア、 または、 最近の Microsoft 公開セキュアブートテンプレート(これ自体が PCA2023 を念頭に置いて作成された)から作成された Hyper-V Gen2 VM。 Hyper-V Gen2 のセキュアブートテストは有用なデプロイ前検証ステップですが、 代表的な物理ファームウェア検証を完全に代替するものではありません:Hyper-V の仮想ファームウェアの DB/DBX プロビジョニング状態は特定の物理プラットフォームと異なり得るため、 Hyper-V でのパスが物理プラットフォームでのパスを保証するわけではありません。
 
 ブートテストを欠くパイプラインは「壊れて」いません;SCOPE clarifier が人間のオペレータに見えるようにする既知で限定された制限とともに動作しています。
 
@@ -778,6 +780,41 @@ Microsoft リファレンス `Make2023BootableMedia.ps1` v1.4 はこれを一切
 5. **Server 2025 DU.Setup ケイデンス**:セクション 6.3 で述べたように、 Microsoft は Server 2025 の Setup Dynamic Update が打ち切られたのか、 四半期ケイデンスに移ったのか、 単に無関係の理由で長期間欠落しているのか、 を正式にアナウンスしていません。
 
 6. **DISM mount-cache mojibake 根本原因**:セクション 7.1 の仮説(mount-cache 状態破壊)は症状と整合的ですが、 決定的には isolated されていません。 制御されたマウント / アンマウントシーケンスと明示的なキャッシュ検査を伴う、 クリーンな Windows インストールでのクリーンルーム再現は仮説を確証するか否認するかを与えます。
+
+---
+
+## 10. 確信度レベル(Confidence Levels)
+
+本記事は Microsoft が文書化した事実と、 推定あるいは経験的に観測した挙動を混在させているため、 どの主張がどの種類の根拠に基づくのかを明示しておく価値があります。 長寿命のツールを構築する読者は、 確信度の低い分類を変更され得るものとして扱い、 自身の環境に対して再検証すべきです。
+
+### 公式 / Microsoft 文書化済み
+
+Microsoft 自身の公開ドキュメントまたは出荷ツールに基づくもので、 最も安定しています:
+
+- WSUS Classification GUID(5 つの識別子そのもの)。 Microsoft Learn「WSUS Classification GUIDs」ページ準拠。
+- Windows Server release-info ページ(ビルド番号、 KB 番号、 提供日)。 Microsoft Learn 公開。
+- 権威ある適用可能性評価器としての Windows Update Agent(WUA)オフラインスキャンの利用。
+- PCA2023 ブートメディア移行ツールとしての `Make2023BootableMedia.ps1` の目的。
+
+### 高確信度の推定
+
+正式にはそう文書化されていませんが、 裏付ける根拠(実 wsusscn2 データからの逆引き、 複数の独立ソースとの相互参照)が強固なものです:
+
+- Server LTSC Product GUID マッピング(Server 2016 / 2019 / 2022 / 2025)。 実 wsusscn2 メタデータからの逆引きで検証し、 コミュニティ OSS と観測された LCU KB 番号と相互参照。
+- `package.xml` の依存性グラフ関係(`Prerequisites`、 `SupersededBy`、 `BundledBy`、 leaf から bundle への payload ロールアップ)。
+- 現行 Catalog スナップショットで観測された Server 2025 LCU バンドル挙動(combined LCU + SSU 依存性解決メタデータ)。
+
+### 観測されたが契約ではないもの
+
+特定時点のメタデータスナップショットまたはメディアで見られた挙動を記述したものです。 有用ですが Microsoft はコミットしておらず、 予告なく変更され得ます:
+
+- Catalog タイトルヒューリスティック(21H2 / 24H2 の表示名規則と大文字小文字)。
+- OS バージョンごとの Dynamic Update ケイデンス。
+- EFI_EX / bootmgr_EX 実装詳細(どの `_EX` バイナリが同梱されるか、 その署名チェーン)。
+- payload URL 命名規則(KB 番号を抽出する元の `windows10.0-kb<数字>-<arch>` ファイル名パターン)。
+- `package.xml` スキーマの前提(要素名、 属性配置、 KB 要素の不在)。
+
+疑わしい場合、 適用可能性については WUA オフラインスキャンが権威ある判定者であり、 KB とビルドの対応については Microsoft Update Catalog と release-info ページが権威あるソースです。
 
 ---
 
@@ -833,4 +870,4 @@ URL は Microsoft の裁量に従い、 通知なく変更される場合があ�
 
 元のリポジトリの PowerShell パイプラインの上に構築する実装者にとって、 ツール固有動作のソース・オブ・トゥルースはパイプライン自身の `SPEC.md` と `README.md` です;本記事は横断的関心事マップであり、 ユーザーマニュアルではありません。
 
-本記事は Anthropic Claude(Opus 4.7)によりリポジトリメンテナの指示の下、 元の `docs/history/` 内容を読み統合することにより準備されました。 元のログ内で既に引用されている標準的な Microsoft 公開用語と周知の Microsoft ドキュメントリファレンスを超えて、 そのコーパス外からのコンテンツは追加されていません。
+本記事は Anthropic Claude(Opus 4.7)によりリポジトリメンテナの指示の下、 元の `docs/history/` 内容を読み統合することにより準備されました。 リポジトリの調査ログから得られた知見を統合し、 必要に応じて Microsoft の公開ドキュメントを相互参照しています。

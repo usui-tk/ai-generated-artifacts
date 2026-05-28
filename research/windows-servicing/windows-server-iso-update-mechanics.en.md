@@ -13,7 +13,7 @@ This article is a synthesis of the technical findings accumulated over several m
 
 ## 1. Background and Audience
 
-Microsoft ships Windows Server in two install-ready forms: the **Evaluation ISO** (downloadable from the Microsoft Evaluation Center; 180-day timed expiry; freely available without licensing) and the **retail / volume-licensed ISO** (acquired through the Microsoft 365 admin center, Volume Licensing Service Center, or an Open Value agreement). For practitioner-driven ISO automation, the Evaluation ISO is the only realistic input because it is the only one that can be checked into a CI artifact store without violating licensing terms.
+Microsoft ships Windows Server in two install-ready forms: the **Evaluation ISO** (downloadable from the Microsoft Evaluation Center; 180-day timed expiry; freely available without licensing) and the **retail / volume-licensed ISO** (acquired through the Microsoft 365 admin center, Volume Licensing Service Center, or an Open Value agreement). For practitioner-driven ISO automation, the Evaluation ISO is often the most practical input, but redistribution and storage of the media must still comply with Microsoft's licensing terms (for example, before checking media into a CI artifact store, confirm the Evaluation Center terms permit it).
 
 A practitioner approaching the task of building a "fully patched" ISO from such an Evaluation media usually starts from a question like: *what is the minimum set of MSU and CAB packages I need to apply to the install.wim so that, when this image is deployed and booted, it will be at the latest Patch Tuesday level and will be accepted by a Secure Boot environment that no longer trusts PCA2011?* The naive answer — "apply this month's LCU" — is incomplete. The full answer touches at least the following:
 
@@ -55,7 +55,7 @@ The page **does not** contain:
 
 The Hotpatch calendar deserves a specific note. Calendar years 2024 / 2025 / 2026 are all published. Server 2022's CY2024 has one anomaly — August was labelled "Baseline (Restart)" rather than the expected "Hotpatch" — likely because Microsoft adjusted the Server 2022 baseline cadence between CY2024 and CY2025 to align with the canonical Jan / Apr / Jul / Oct pattern. The lesson: **the authoritative baseline-month list is the per-row `Type` field on the calendar**, not a hard-coded `{1, 4, 7, 10}` rule. An implementer who needs the Jan / Apr / Jul / Oct heuristic will get the right answer for CY2025 and CY2026 but the wrong answer for one cell in CY2024.
 
-A parser for this page can be small. Two table layouts cover the entire content: the monthly release table with a 5-column header `| Servicing option | Update type | Availability date | Build | KB article |` and the hotpatch calendar with a 6-column header `| Month | Update type | Type | Availability date | Build | KB article |`. A 300-line standard-library Python parser is enough to extract both into JSON; the parser should validate header text exactly and refuse to continue if Microsoft renames a column, so that any structural drift triggers a human review.
+A parser for this page can be small. Two table layouts cover the entire content: the monthly release table with a 5-column header `| Servicing option | Update type | Availability date | Build | KB article |` and the hotpatch calendar with a 6-column header `| Month | Update type | Type | Availability date | Build | KB article |`. A 300-line standard-library Python parser is enough to extract both into JSON; the parser should validate header text exactly and refuse to continue if Microsoft renames a column, so that any structural drift triggers a human review. Implementations should additionally persist the retrieved commit ID, the retrieval timestamp, and the raw markdown SHA-256 alongside the parsed JSON, so that upstream structural drift is detectable and parsing remains reproducible against a known input.
 
 ### 2.2 .NET Framework cumulative update release notes
 
@@ -141,7 +141,7 @@ The Master XML and the individual `packageN.cab` fragments record the **same dep
 | `<Categories>` (OS family GUID) | ✓ | ✗ |
 | `<ApplicabilityRules>` | ✗ | ✓ |
 
-For a pipeline that wants to know "what does KB5087537 depend on?", the Master XML alone is sufficient. For a pipeline that wants to know "which dependency-or-bundle decision tree branch matches this OS revision?", the per-package CAB is required.
+For straightforward prerequisite discovery (e.g. "what does KB5087537 depend on?"), the Master XML is usually sufficient. For full applicability evaluation and branch-resolution logic (e.g. "which dependency-or-bundle decision tree branch matches this OS revision?"), the per-package CAB metadata — or, more authoritatively, Windows Update Agent applicability evaluation — may still be required.
 
 Parsing the Master XML deserves attention to its scale. A representative timing on commodity hardware:
 
@@ -155,6 +155,8 @@ Parsing the Master XML deserves attention to its scale. A representative timing 
 | Hypothetical full per-package scan (all 75 CABs) | ≈ 2.5 hours | 15–20 GB disk peak |
 
 The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<Prerequisites>`, `<SupersededBy>`, `<BundledBy>`, `<PayloadFiles>`, and `<FileLocation>`, producing a small JSON dependency database (~0.2 MB at the in-scope-bundle granularity used by this project) that can answer most pre-flight questions.
+
+> **Note on support status.** Direct parsing of `package.xml` is an implementation technique based on observed metadata structure, not a Microsoft-supported API contract. The schema can change without notice. Final applicability and installability decisions should still be validated through the Windows Update Agent servicing logic (an offline WUA scan against the mounted image), which is the authoritative evaluator.
 
 #### 2.4.1 The Category hierarchy embedded in package.xml
 
@@ -253,7 +255,7 @@ Direct inspection of the install.wim of an Evaluation ISO for each Server versio
 | Server 2022 EVAL ja-jp | ✓ | ✗ | 3 | Same as 2016 |
 | Server 2025 EVAL ja-jp | ✓ | ✓ | **6** | `EFI_EX` **ships in install.wim** at GA; no synthesis needed |
 
-For Server 2016 / 2019 / 2022, the `EnableInstallWimUpdate=true` workflow (apply LCU into install.wim, then extract `_EX` from the patched WIM into output media) is required. For Server 2025, the `EnableInstallWimUpdate=false` workflow is sufficient — the LCU still needs to be installed into the WIM for the patch-level requirement, but the `_EX` binaries are already there at boot-binary extraction time.
+For Server 2016 / 2019 / 2022, the `EnableInstallWimUpdate=true` workflow (apply LCU into install.wim, then extract `_EX` from the patched WIM into output media) is required. For Server 2025, EFI_EX synthesis is **not** required for PCA2023 boot-binary extraction because EFI_EX already exists in the install.wim. However, install.wim servicing (applying the LCU) is still required for patch-level compliance — only the `_EX`-synthesis step is skippable, not the patching step itself.
 
 The 2025 install.wim has one additional file in EFI: **`SecureBootRecovery.efi`** (PCA2011-signed). Servers 2016 / 2019 / 2022 don't have it. The file is related to Secure Boot recovery procedures and its presence on 2025 is informational only — the file is not relevant to the build-time `_EX` synthesis question.
 
@@ -320,7 +322,7 @@ This is not a contradiction. Authenticode hashing is defined to **exclude** the 
 
 Microsoft's approach is therefore: take the existing `bootmgfw.efi` PE body, re-sign it with PCA2023, save the result as `bootmgfw_EX.efi`. The PE code is unchanged; only the signature is new. This is a reasonable interpretation of the goal — the executable behaviour of the boot manager is exactly the same; only the trust anchor changes.
 
-The same is not always true of the other `_EX` files. Server 2025's `bootmgr_EX.efi` is byte-for-byte identical to `bootmgr.efi` *including* its signature — it carries the PCA2011 signature, despite the `_EX` suffix. Microsoft's `Make2023BootableMedia.ps1` v1.4 contains an explicit comment about this: bootmgr_EX is intentionally a PCA2011-signed copy, by design. Whether this is a transitional artifact or a permanent design choice is not yet documented publicly.
+The same is not always true of the other `_EX` files. Server 2025's `bootmgr_EX.efi` is byte-for-byte identical to `bootmgr.efi` *including* its signature — it carries the PCA2011 signature, despite the `_EX` suffix. This was observed in inspected Server 2025 media and is consistent with a comment in Microsoft's `Make2023BootableMedia.ps1` v1.4 indicating bootmgr_EX is a PCA2011-signed copy. Treat this as implementation-observed behavior unless Microsoft publishes a formal servicing specification; whether it is a transitional artifact or a permanent design choice is not yet documented publicly.
 
 ### 3.7 Verifying a built ISO's PCA2023 readiness
 
@@ -477,7 +479,7 @@ A pipeline that pre-loads its config from `wsusscn2.cab` derivative data can det
 | Server 2016 | Standalone | SSU has its own KB; must be discovered and applied before the LCU |
 | Server 2019 | Standalone | Same as 2016 |
 | Server 2022 | Mostly standalone | Some months are Combined; the pipeline cannot assume |
-| Server 2025 | Always Combined (LCU + KB5043080 bundle) | The Catalog serves a 2-file download for every LCU resolution; both must be applied |
+| Server 2025 | Observed as combined/bundled in current 2025-2026 Catalog snapshots (LCU + KB5043080 bundle) | The Catalog served a 2-file download for every LCU resolution observed; both must be applied. Treat as observed metadata behavior, not a contractual guarantee |
 
 The Server 2022 ambiguity is worth pre-empting: even if a recent month's Server 2022 LCU was Combined, the next month's might not be. A pipeline that hard-codes "Server 2022 is always Combined" will fail on the standalone-month side. The robust approach is to inspect the MSU contents (the `update.ses` test from section 5.2) and act accordingly.
 
@@ -526,7 +528,7 @@ Source: Microsoft Learn "WSUS Classification GUIDs" (`learn.microsoft.com/ja-jp/
 |:---|:---|:---|:---|
 | Windows Server 2016 | Windows Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` | Microsoft-adjacent code (`ansible/ansible` Issue 60785 Categories dump, `dsccommunity/UpdateServicesDsc` Issue 65) + reverse-lookup from real wsusscn2 Category Updates |
 | Windows Server 2019 | Windows Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` | WSUSOffline forum + real wsusscn2 Category Update created 2018-10-13 (matches GA timing) |
-| Windows Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` | Real wsusscn2 Category Update created 2021-08-09 (right before LTSC GA), payload URLs include ndp481 (.NET 4.8.1, the Server 2022 default) |
+| Windows Server 2022 LTSC | Microsoft server operating system-21H2 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` | Real wsusscn2 Category Update created 2021-08-09 (right before LTSC GA); the observed payload URLs reference ndp481-related (.NET Framework 4.8.1) packages. The in-box runtime is not inferred solely from payload names |
 | Windows Server 2025 LTSC | Microsoft server operating system-24H2 | `b256987d-4693-4c87-955d-dbb9341205eb` | **Corrected 2026-05** (was `ca006cfb-...`): the b256987d Category's newest SecurityUpdate bundle (2026-05-11) carries the current Server 2025 LCU **KB5087539** (build 26100.32860), but NOT the Windows 11 24H2 *client* LCU KB5089549, so it is server-specific. The old `ca006cfb-...` stalls at 2025-09-08 and never carries KB5087539 (see note below) |
 
 Reference (not Server LTSC, so excluded from the scope filter):
@@ -536,7 +538,7 @@ Reference (not Server LTSC, so excluded from the scope filter):
 | Microsoft Server Operating System-22H2 | `2c7888b6-f9e9-4ee9-87af-a77705193893` | Azure Stack HCI 22H2 family (SAC) |
 | Microsoft Server Operating System-23H2 | `607efb8d-feed-48a0-930e-14d0cf2da71f` | Azure Stack HCI 23H2 family (SAC); payload URLs confirm build 25398 |
 
-**Mapping SSU / LCU / .NET CU / Dynamic Update to Classification** (the Update type expression in SPEC §B.19.7):
+**Mapping SSU / LCU / .NET CU / Dynamic Update to Classification** (the Update type expression in SPEC §B.19.7). Note: the classification GUIDs themselves are Microsoft-defined identifiers, but the mapping below between update *categories* and classification *usage* is based on observed wsusscn2 metadata patterns and should be treated as heuristic rather than contractual:
 
 - **SSU**: Classification = ServicePacks (`68C5B0A3-...`). On Windows 6.x and earlier, some SSUs were classified as `Updates`, but on Windows 10 / Server 2016 and later they are consistently under ServicePacks.
 - **LCU**: Classification = SecurityUpdates (`0FA1201D-...`). The monthly Cumulative Update with security content.
@@ -757,7 +759,7 @@ The Microsoft reference `Make2023BootableMedia.ps1` v1.4 does none of this. A ve
 
 ### 8.4 The verification boundary
 
-The line that no automated tool can cross: **whether a Secure Boot platform actually boots the produced ISO**. This depends on whether the target firmware has been provisioned with PCA2023 in DB (or, in the post-revocation world, whether the target firmware still has PCA2011 in DB at all). That is per-machine, per-firmware-version state. The only definitive test is to boot the ISO on a representative target — physical hardware that has received the firmware update for the deployment generation, or a Hyper-V Gen2 VM created from a recent Microsoft-published Secure Boot template (which itself was created with PCA2023 in mind).
+The line that no automated tool can cross: **whether a Secure Boot platform actually boots the produced ISO**. This depends on whether the target firmware has been provisioned with PCA2023 in DB (or, in the post-revocation world, whether the target firmware still has PCA2011 in DB at all). That is per-machine, per-firmware-version state. The only definitive test is to boot the ISO on a representative target — physical hardware that has received the firmware update for the deployment generation, or a Hyper-V Gen2 VM created from a recent Microsoft-published Secure Boot template (which itself was created with PCA2023 in mind). A Hyper-V Gen2 Secure Boot test is a useful pre-deployment validation step, but it does not fully substitute for representative physical-firmware validation: the DB/DBX provisioning state of a Hyper-V virtual firmware may differ from a given physical platform's, so a Hyper-V pass does not guarantee a physical-platform pass.
 
 A pipeline that lacks a boot test is not "broken"; it is operating with a known and bounded limitation that the SCOPE clarifier makes visible to the human operator.
 
@@ -778,6 +780,41 @@ This article synthesises the state of knowledge as of mid-2026. Several question
 5. **Server 2025 DU.Setup cadence**: as noted in section 6.3, Microsoft has not formally announced whether Server 2025's Setup Dynamic Update has been discontinued, moved to a quarterly cadence, or merely been absent for an extended period for unrelated reasons.
 
 6. **DISM mount-cache mojibake root cause**: section 7.1's hypothesis (mount-cache state corruption) is consistent with the symptom but has not been definitively isolated. A clean-room reproduction on a fresh Windows install, with controlled mount/unmount sequences and explicit cache inspection, would either confirm the hypothesis or eliminate it.
+
+---
+
+## 10. Confidence Levels
+
+Because this article mixes Microsoft-documented facts with behavior that was inferred or observed empirically, it is worth stating explicitly which claims rest on which class of evidence. Readers building long-lived tooling should treat the lower-confidence classes as subject to change and re-validate them against their own environment.
+
+### Official / Microsoft-documented
+
+These rest on Microsoft's own published documentation or shipped tooling and are the most stable:
+
+- WSUS Classification GUIDs (the five identifiers themselves), per the Microsoft Learn "WSUS Classification GUIDs" page.
+- Windows Server release-info pages (build numbers, KB numbers, availability dates) as published on Microsoft Learn.
+- Windows Update Agent (WUA) offline-scan usage as the authoritative applicability evaluator.
+- The purpose of `Make2023BootableMedia.ps1` as the PCA2023 boot-media migration tool.
+
+### High-confidence inferred
+
+These are not formally documented as such, but the supporting evidence (reverse-lookup from real wsusscn2 data, cross-referenced against multiple independent sources) is strong:
+
+- The Server LTSC Product GUID mapping (Server 2016 / 2019 / 2022 / 2025), verified by reverse-lookup against live wsusscn2 metadata and cross-referenced with community OSS and observed LCU KB numbers.
+- The `package.xml` dependency-graph relationships (`Prerequisites`, `SupersededBy`, `BundledBy`, payload roll-up from leaf to bundle).
+- The observed Server 2025 LCU bundle behavior (combined LCU + SSU-dependency resolution metadata) in current Catalog snapshots.
+
+### Observed but not contractual
+
+These describe behavior seen in specific metadata snapshots or media at a point in time. They are useful, but Microsoft has not committed to them and they may change without notice:
+
+- Catalog title heuristics (the 21H2 / 24H2 display-name conventions and casing).
+- Dynamic Update cadence by OS version.
+- EFI_EX / bootmgr_EX implementation details (which `_EX` binaries ship, and their signing chains).
+- Payload URL naming conventions (the `windows10.0-kb<digits>-<arch>` filename pattern from which KB numbers are parsed).
+- `package.xml` schema assumptions (element names, attribute placement, the absence of a KB element).
+
+When in doubt, the WUA offline scan is the authoritative arbiter for applicability, and the Microsoft Update Catalog plus the release-info pages are authoritative for KB-to-build mapping.
 
 ---
 
@@ -833,4 +870,4 @@ What this article is and is not:
 
 For implementers building on the original repository's PowerShell pipeline, the source-of-truth for tool-specific behaviour is the pipeline's own `SPEC.md` and `README.md`; this article is the cross-cutting concern map, not the user manual.
 
-The article was prepared by Anthropic Claude (Opus 4.7) under the direction of the repository maintainer, by reading and synthesising the original `docs/history/` content. No content from outside that corpus was added beyond standard Microsoft public terminology and well-known Microsoft documentation references already cited in the original logs.
+The article was prepared by Anthropic Claude (Opus 4.7) under the direction of the repository maintainer, by reading and synthesising the original `docs/history/` content. It synthesizes findings from the repository investigation logs and cross-references Microsoft public documentation where noted.
