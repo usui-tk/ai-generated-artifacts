@@ -9,6 +9,19 @@ Microsoft Evaluation ISO と累積更新プログラムの束から完全にパ�
 
 本記事は、 実際の ISO 更新パイプラインで数か月にわたる改訂サイクルを通じて蓄積された技術的な発見の統合です。 これは特定のツールに対する how-to ガイドではありません。 目的は、 言語やフレームワークの選択に関わらず、 今後の実装者(人間あるいは LLM)がナビゲートしなければならないナレッジ表面を記録することにあります。 記事末尾の Provenance(出典)セクションで、 本ドキュメントに統合された投資ログの元のリポジトリを示しています。
 
+### 調査手法(Methodology)
+
+本記事の発見はドキュメントのみからではなく、 経験的に導出されたものです。 それらを生み出した調査は、 複数の月例 Patch Tuesday サイクルにわたって以下の手法を組み合わせて繰り返しました:
+
+- **実 cab の検査**:連続する `wsusscn2.cab` スナップショットに対して Master XML をパースし、 スキーマを仮定するのではなく実際の依存性・バンドル・ペイロード構造を観測。
+- **WIM の検査**:Server 2016 / 2019 / 2022 / 2025 の Evaluation メディアを横断し、 `\Windows\Boot\` レイアウトとバージョンごとの `_EX` ブートバイナリの有無を比較。
+- **Authenticode チェーン検証**:`X509Chain.Build()` により、 直接の署名者の表示名を信頼するのではなく、 各ブートバイナリのチェーンを trust anchor まで辿る。
+- **Microsoft Update Catalog の相互参照検証**:KB とビルドの対応、 および Catalog で観測された combined LCU/SSU ダウンロード挙動を確認。
+- **WSUS および Microsoft Learn ドキュメントとの比較**:公式に公開されている事実（Classification GUID、 release-info のビルド/KB テーブル）について照合。
+- **月例 Patch Tuesday サイクルを横断した再ビルド検証**:新しい更新に対して end-to-end ビルドを再実行し、 観測が単一スナップショットの反映ではなく時間を通じて成立することを確認。
+
+ある主張がこれらの手法のうち 1 つにしか基づかない場合、 確信度レベルのセクション（§10）でその旨を明示しています。
+
 ---
 
 ## 1. 背景と対象読者
@@ -89,13 +102,13 @@ Catalog インタラクションには 2 つの十分に文書化された落と
 
 **Server 2019 と Server 2022 の間で OS 命名が変わった**。 古い OS は更新タイトルでユーザー向けブランド名を使用します:「Windows Server 2019」「Windows Server 2016」。 Server 2022 から、 Microsoft は「Microsoft server operating system, version `<NNHN>`」という命名に切り替えました。 `<NNHN>` はコードネームバージョン:Server 2022 は `21H2`、 Server 2025 は `24H2` です。 Catalog で「Windows Server 2025 2026-04」を検索しても有用な結果は返りません。 「Microsoft server operating system version 24H2 2026-04」を検索すると LCU と依存性が返ってきます。 タイトル文字列ヒューリスティックは両方の命名規則を維持し、 OS バージョンによって分岐する必要があります。
 
-**Server 2025 LCU は 2 ファイルバンドルを返す**。 すべての Server 2025 LCU 解決は *2 つの* ダウンロード URL を返します:LCU 本体に加えて、 固定 KB(現状は `KB5043080`)— これは Servicing Stack ベースラインです。 これはどの LCU 月をリクエストしても同じ Servicing Stack パッケージです。 経験的に、 これは Server 2025 にスタンドアロン SSU が存在しないことを確証します — Microsoft は Catalog の `DownloadDialog.aspx` を介して、 すべての LCU と並んで SSU 依存性を 2 ファイルバンドルとして配信します。 「LCU」URL のみをダウンロードし 2 番目を無視するパイプラインは、 LCU が `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` で適用に失敗する WIM を生成します。 正しいパターンは:2 つの `.msu` ファイルをダウンロードし、 依存性順序の判断は `Add-WindowsPackage` に任せること — これは SSU 順序を自動的に処理します。
+**Server 2025 LCU は 2 ファイルバンドルを返す**。 すべての Server 2025 LCU 解決は *2 つの* ダウンロード URL を返します:LCU 本体に加えて、 固定 KB(現状は `KB5043080`)— これは Servicing Stack ベースラインです。 これはどの LCU 月をリクエストしても同じ Servicing Stack パッケージです。 運用上、 これは Server 2025 にスタンドアロン SSU が存在しないことを強く示唆します — Microsoft は Catalog の `DownloadDialog.aspx` を介して、 すべての LCU と並んで SSU 依存性を 2 ファイルバンドルとして配信します。 「LCU」URL のみをダウンロードし 2 番目を無視するパイプラインは、 LCU が `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` で適用に失敗する WIM を生成します。 正しいパターンは:2 つの `.msu` ファイルをダウンロードし、 依存性順序の判断は `Add-WindowsPackage` に任せること — これは SSU 順序を自動的に処理します。
 
 release-info から取得した KB を直接(KB のみ入力、 タイトル文字列ヒューリスティックなしで)Catalog 経由でダウンロード URL に変換できるかという検証では、 代表的な 8 サンプルテストの成功率は 8 / 8 です。 したがって Catalog は実用的な URL リゾルバですが、 貧弱なディスカバリ表面です。 元の調査からの広範な試行錯誤から得られた建築的教訓は次の通りです:**release-info / .NET リリースノートが発見者、 Catalog がリゾルバ**。 これによりタイトル文字列ヒューリスティック表面とそれがもたらす脆弱性を最小化できます。
 
 ### 2.4 wsusscn2.cab オフラインサービシングデータベース
 
-「更新 KB-A は KB-B が事前にインストールされていることを要求するか?」 という形式の問いに対する正典のソースは、 **Windows Update Standalone Scan** データベースです。 これは `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab` で複数 GB の単一 CAB ファイルとして配信されます。 このファイルはおおよそ月 2 回公開され、 最後の公開以降にリリースされた更新を見るには新しいダウンロードが必要です。
+「更新 KB-A は KB-B が事前にインストールされていることを要求するか?」 という形式の問いに対して、 オフラインで利用できる正典のメタデータソースは **Windows Update Standalone Scan** データベース(`wsusscn2.cab`)です。 これは `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab` で複数 GB の単一 CAB ファイルとして配信されます。 このファイルはおおよそ月 2 回公開され、 最後の公開以降にリリースされた更新を見るには新しいダウンロードが必要です。 なお、 最終的な適用可能性の評価は依然として Windows Update Agent のサービシングロジックが行います。
 
 `wsusscn2.cab` はネストされた CAB で、 以下のような高レベル構造を持ちます:
 
@@ -110,7 +123,7 @@ wsusscn2.cab
     └── (更新ごとの詳細 XML)
 ```
 
-Master XML(`package.xml`、 展開後 ~108 MB)は CAB 内で最も有用な成果物です。 Windows Update 全体の各更新リビジョンについて、 以下が記録されています:
+オフラインでの依存性分析において、 Master XML(`package.xml`、 展開後 ~108 MB)は CAB 内で通常最も有用な成果物です。 Windows Update 全体の各更新リビジョンについて、 以下が記録されています:
 
 - `<Categories>` — OS ファミリ GUID(Product)と Classification GUID
 - `<Prerequisites>` — この更新を適用する前に存在しなければならない UpdateId GUID のフラットリスト
@@ -127,7 +140,7 @@ Master XML(`package.xml`、 展開後 ~108 MB)は CAB 内で最も有用な成�
 > 時折現れる `kb(\d+)` トークンから *推定* するしかなく、Master XML から
 > 直接得ることはできません。
 
-Master XML と個別の `packageN.cab` フラグメントは、 **同じ依存性データを別視点から記録** しています:
+Master XML と個別の `packageN.cab` フラグメントは、 **重複する依存性メタデータを異なる視点から記録** しています — 両者は意味的に等価ではありません。 Master XML はフラット化・グローバル化された要約であり、 各 `packageN.cab` は更新ごとのより豊かな適用可能性セマンティクスを保持しています:
 
 | 情報 | Master XML | パッケージ別 CAB |
 |:---|:-:|:-:|
@@ -154,7 +167,7 @@ Master XML のパースはそのスケールに注意が必要です。 コモ�
 | パッケージ別 CAB スキャン(`packageN.cab` 内 12,500 ファイル) | 6.7 秒抽出 + 127.9 秒スキャン | < 50 MB |
 | 仮想的な全パッケージ別スキャン(全 75 CAB) | 約 2.5 時間 | 15-20 GB ディスクピーク |
 
-全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<Prerequisites>`、 `<SupersededBy>`、 `<BundledBy>`、 `<PayloadFiles>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる小さな JSON 依存性データベース（本プロジェクトが用いる in-scope bundle 粒度で約 0.2 MB）を生成できます。
+全パッケージ別スキャンは定期的な refresh には実用的ではありません。 Master XML のみのストリーミング `XmlReader` パーサーが実用的な妥協点です:数十秒で各 `<Prerequisites>`、 `<SupersededBy>`、 `<BundledBy>`、 `<PayloadFiles>`、 `<FileLocation>` を抽出し、 ほとんどの事前検証質問に答えられる小さな JSON 依存性データベース（本プロジェクトが用いる in-scope bundle 粒度で約 0.2 MB）を生成できます。 完全なオフライン WUA 適用可能性評価は Master XML の直接パースよりも大幅に低速であり、 したがって発見（discovery）ワークフローよりも検証（validation）ワークフローに適しています — これが、 本パイプラインが発見には Master XML パースを用い、 WUA を最終的な適用可能性検証に留保している理由です。
 
 > **サポート状況に関する注記。** `package.xml` の直接パースは、 観測されたメタデータ構造に基づく実装手法であり、 Microsoft がサポートする API 契約ではありません。 スキーマは予告なく変更され得ます。 最終的な適用可能性・インストール可能性の判断は、 権威ある評価器である Windows Update Agent のサービシングロジック（マウント済みイメージに対するオフライン WUA スキャン）で検証すべきです。
 
@@ -226,14 +239,16 @@ Category 階層の逆引きで Server LTSC 系の Product GUID を同定する�
 すべての署名付き Windows ブートバイナリ(`bootmgfw.efi`、 `bootmgr.efi`、 OS ローダーなど)は、 Microsoft の周知のルート認証局のいずれかに証明書チェーンで遡る Authenticode 署名を持っています。 ブートバイナリの関連チェーンは次の通りです:
 
 - **PCA2011 チェーン(レガシー)**:leaf → `Microsoft Windows Production PCA 2011` → `Microsoft Root Certificate Authority 2010`
-- **PCA2023 チェーン(新)**:leaf → `Windows UEFI CA 2023` → `Microsoft Root Certificate Authority 2010`(またはプラットフォームの信頼アンカーによっては 2023 ルート)
+- **PCA2023 信頼チェーン(新)**:leaf → `Windows UEFI CA 2023` → `Microsoft Root Certificate Authority 2010`(またはプラットフォームの信頼アンカーによっては 2023 ルート)
 
 このシフトは実機上で 2 段階で展開されています:
+
+（セキュアブート内部に馴染みの薄い読者向け:DB は許可された署名認証局を、 DBX は明示的に失効された署名または認証局を保持します。）
 
 1. **第 1 段階(2024-2026、 現在)**:Microsoft は PCA2023 で署名されたブートバイナリを出荷しますが、 ファームウェアアップデート(Windows Update またはベンダー固有のチャネル経由で配信)によって PCA2023 証明書がプラットフォームの DB(許可署名)へとローリングベースでプロビジョニングされます。 PCA2011 は引き続き DB に残ります。 両方のチェーンが受け入れられます。
 2. **第 2 段階(2026 年末以降に発表予定)**:ファームウェアアップデートを受信したプラットフォーム上で、 PCA2011 が DB から DBX(失効署名)に移されます。 その時点で、 PCA2011 でのみ署名されたブートマネージャーを持つインストールメディアは、 更新済みプラットフォームでの起動に失敗します。
 
-未来に備えた ISO を生成したいパイプラインは、 PCA2011 が今日まだ受け入れられていても、 PCA2023 チェーンを持つブートバイナリを出荷する必要があります。 これをどう行うかについての Microsoft のリファレンスは `Make2023BootableMedia.ps1` スクリプト(本記事執筆時点の最新版:v1.4、 日付 2026-03-13)で、 Microsoft Support 記事 KB5053484 を介して配信されています。
+前方互換なインストールメディア（PCA2011 廃止後も起動可能であり続けることを意図したメディア）を生成したいパイプラインは、 PCA2011 が今日まだ受け入れられていても、 PCA2023 信頼チェーンを持つブートバイナリを出荷する必要があります。 これをどう行うかについての Microsoft のリファレンスは `Make2023BootableMedia.ps1` スクリプト(本記事執筆時点の最新版:v1.4、 日付 2026-03-13)で、 Microsoft Support 記事 KB5053484 を介して配信されています。
 
 ### 3.2 ステージングディレクトリ:EFI_EX、 Fonts_EX、 DVD_EX
 
@@ -330,7 +345,7 @@ ISO がブートルートへの `_EX` 置換を適用して構築された後、
 
 Microsoft の `Make2023BootableMedia.ps1` v1.4 自体は **検証を一切行いません** — 純粋にファイルコピー操作です。 スクリプトは Authenticode 関連コードを参照しません。 Microsoft の設計上、 出力検証は呼び出し側の責任です。
 
-実用的なビルド後検証アプローチは、 「ファイル存在 + 署名者チェーン」パターンです:仕様で PCA2023 チェーン化されているはずのブートバイナリの小さい固定セットそれぞれについて、 出力 ISO 上の期待されるパスにファイルが存在することと、 その Authenticode チェーンに PCA2023 中間者が含まれることの両方を検証します。 Server 2025 の完全セットは 5 ターゲットです:
+実用的なビルド後検証アプローチは、 「ファイル存在 + 署名者チェーン」パターンです:仕様で PCA2023 信頼チェーンを持つべきとされるブートバイナリの小さい固定セットそれぞれについて、 出力 ISO 上の期待されるパスにファイルが存在することと、 その Authenticode チェーンに PCA2023 中間証明書が含まれることの両方を検証します。 Server 2025 の完全セットは 5 ターゲットです:
 
 | 出力メディアルート上のターゲット | 期待チェーン |
 |---|---|
@@ -387,7 +402,7 @@ Server 2025 上の `EFI_EX` ディレクトリは、 `Get-ChildItem -Recurse -Fi
 | Server 2022 | 3 | 同じ 3 ファイル |
 | Server 2025 | 6 | `EFI\SecureBootRecovery.efi`、 `EFI_EX\bootmgfw_EX.efi`、 `EFI_EX\bootmgr_EX.efi` を追加 |
 
-このリストのすべてのファイルは有効な Authenticode 署名を持っています。 各々のチェーン認証局は PCA2023 作業(セクション 3.7)の関連する質問です;ファイル存在の質問は上の表で回答されています。
+このリストのすべてのファイルは有効な Authenticode 署名を持っています。 各々の信頼チェーン認証局（直接の署名証明書とは区別される、 ルートまたは中間 CA に至る trust-anchor のパス）は PCA2023 作業(セクション 3.7)の関連する質問です;ファイル存在の質問は上の表で回答されています。
 
 ### 4.3 インデックスとエディションのカバレッジ
 
@@ -452,7 +467,7 @@ config ロード時のバンドルタイプ検出は WIM マウント時の SSU-
 
 Combined MSU の世界の外では、 実務者は任意の LCU に対してどの SSU がペアになるかを知る必要があります。 Microsoft は LCU の KB ページのプレーンテキストでこれを公開しています(「Improvements」セクションがしばしば「This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update」で始まります)。 サードパーティサイト `techepages.com` や `windowslatest.com` も日常的にペアリングを繰り返します。
 
-自動化では、 ペアリングは `wsusscn2.cab` からより信頼性高く取得できます。 各 LCU の Master XML エントリには、 必要な SSU の UpdateId を持つ `<Prerequisites>` ブロックが含まれます。 ただし Master XML には `<KBArticleID>` が存在しない（§2.4 の訂正を参照）ため、ペアリングは `UpdateId` / `RevisionId` で表現されます。前提 SSU の人間可読な KB 番号は、その SSU 更新の `<FileLocation>` URL に含まれる `kb(\d+)` トークンから復元するか、UpdateId を Microsoft Update Catalog に照合して取得します。KB の文章ページを Web スクレイピングする必要はありません。
+自動化では、 ペアリングは `wsusscn2.cab` からより信頼性高く取得できます。 各 LCU の Master XML エントリには、 必要な SSU の UpdateId を持つ `<Prerequisites>` ブロックが含まれます。 ただし Master XML には `<KBArticleID>` が存在しない（§2.4 の訂正を参照）ため、ペアリングは `UpdateId` / `RevisionId` で表現されます。前提 SSU の人間可読な KB 番号は、多くの payload URL（その SSU 更新の `<FileLocation>` URL）に埋め込まれた `kb(\d+)` トークンからヒューリスティックに推定するか、より堅牢な手段として UpdateId を Microsoft Update Catalog に照合して取得します。URL 構造は契約的なインターフェースではないため、トークンベースの推定はベストエフォートとして扱うべきです。KB の文章ページを Web スクレイピングする必要はありません。
 
 Server 2016 の 2026-05 からの具体例:
 
@@ -466,7 +481,7 @@ Windows Server 2016 の LCU, 2026-05 (UpdateId 631fdcea-..., RevisionId 43268251
 前提 SSU 更新（別の <Update>）は自身の <PayloadFiles> を持ち、その digest は
 <FileLocations> を介して次のような URL に解決されます:
   .../windows10.0-kb5088064-x64_<hash>.cab
-この URL から KB 番号(KB5088064)を抽出します。Master XML 自体は
+この URL から KB 番号(KB5088064)をヒューリスティックに推定します。Master XML 自体は
 「5088064」を KB element として記載することはありません。
 ```
 
@@ -753,13 +768,13 @@ WIM がマウントされると、 `Add-WindowsPackage` は適用不可能なパ
 
 - **ファイルシステム構造**:期待される `\boot\`、 `\efi\`、 `\sources\` ツリーが存在する
 - **ブートバイナリの同一性**:期待されるパスのバイナリが期待されるファイルまたは Authenticode ハッシュを持つ(セクション 3.6)
-- **Authenticode チェーン**:仕様で PCA2023 チェーン化されているはずのブートバイナリが、 実際に PCA2023 中間者を含むチェーンに再構築される(セクション 3.7)
+- **Authenticode チェーン**:仕様で PCA2023 信頼チェーンを持つべきとされるブートバイナリが、 実際に PCA2023 中間証明書を含むチェーンに再構築される(セクション 3.7)
 
 Microsoft リファレンス `Make2023BootableMedia.ps1` v1.4 はこれを一切しません。 これらのチェックを実行する検証関数は、 したがって Microsoft パターンからの逸脱ではなく、 上位互換の品質改善です。 検証関数の出力はセクション 3.7 の SCOPE clarifier を持つ必要があります — 自動検証はハードウェアブートテストの代わりにはなりません。
 
 ### 8.4 検証境界
 
-自動ツールが越えられない線:**セキュアブートプラットフォームが生成された ISO を実際に起動するかどうか**。 これは、 ターゲットファームウェアが DB に PCA2023 をプロビジョニングされたかどうか(または、 失効後の世界では、 ターゲットファームウェアがまだ DB に PCA2011 を保持しているかどうか)に依存します。 これはマシンごと、 ファームウェアバージョンごとの状態です。 唯一の決定的なテストは ISO を代表的なターゲットで起動することです — デプロイメント世代のファームウェアアップデートを受信した物理ハードウェア、 または、 最近の Microsoft 公開セキュアブートテンプレート(これ自体が PCA2023 を念頭に置いて作成された)から作成された Hyper-V Gen2 VM。 Hyper-V Gen2 のセキュアブートテストは有用なデプロイ前検証ステップですが、 代表的な物理ファームウェア検証を完全に代替するものではありません:Hyper-V の仮想ファームウェアの DB/DBX プロビジョニング状態は特定の物理プラットフォームと異なり得るため、 Hyper-V でのパスが物理プラットフォームでのパスを保証するわけではありません。
+自動ツールが越えられない線:**セキュアブートプラットフォームが生成された ISO を実際に起動するかどうか**。 これは、 ターゲットファームウェアが DB に PCA2023 をプロビジョニングされたかどうか(または、 失効後の世界では、 ターゲットファームウェアがまだ DB に PCA2011 を保持しているかどうか)に依存します。 これはマシンごと、 ファームウェアバージョンごとの状態です。 唯一の決定的なテストは ISO を代表的なターゲットで起動することです — デプロイメント世代のファームウェアアップデートを受信した物理ハードウェア、 または、 最近の Microsoft 公開セキュアブートテンプレート(これ自体が PCA2023 を念頭に置いて作成された)から作成された Hyper-V Gen2 VM。 Hyper-V Gen2 検証はデプロイ前のスモークテストとして有用ですが、 ファームウェアの trust-anchor プロビジョニングは物理 OEM ハードウェアと大きく異なり得ます:Hyper-V の仮想ファームウェアの DB/DBX プロビジョニング状態は特定の物理プラットフォームと異なり得るため、 Hyper-V でのパスが物理プラットフォームでのパスを保証するわけではありません。
 
 ブートテストを欠くパイプラインは「壊れて」いません;SCOPE clarifier が人間のオペレータに見えるようにする既知で限定された制限とともに動作しています。
 

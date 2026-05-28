@@ -9,6 +9,19 @@ Building a fully-patched Windows Server installation medium ("a slipstreamed ISO
 
 This article is a synthesis of the technical findings accumulated over several months of revision cycles on a real-world ISO update pipeline. It is **not** a how-to for any specific tool; the goal is to record the knowledge surface that any future implementer (human or LLM) will need to navigate, regardless of the language or framework they choose. The provenance section at the end of the article identifies the original repository whose investigation logs were synthesized into this document.
 
+### Methodology
+
+The findings in this article were derived empirically, not from documentation alone. The investigation that produced them combined the following methods, repeated across multiple monthly Patch Tuesday cycles:
+
+- **Live-cab inspection** against successive `wsusscn2.cab` snapshots, parsing the Master XML to observe real dependency, bundle, and payload structure rather than assuming a schema.
+- **WIM inspection** across Server 2016 / 2019 / 2022 / 2025 Evaluation media, comparing the `\Windows\Boot\` layout and the presence or absence of `_EX` boot binaries per version.
+- **Authenticode chain verification** via `X509Chain.Build()`, traversing each boot binary's chain to its trust anchor rather than trusting the immediate signer's display name.
+- **Microsoft Update Catalog cross-reference validation**, confirming KB-to-build mappings and the combined LCU/SSU download behavior observed in the Catalog.
+- **Comparison against WSUS and Microsoft Learn documentation** for the facts that are officially published (Classification GUIDs, release-info build/KB tables).
+- **Repeated rebuild validation across monthly Patch Tuesday cycles**, re-running the end-to-end build against fresh updates to confirm that observations held over time rather than reflecting a single snapshot.
+
+Where a claim rests on only one of these methods, the Confidence Levels section (§10) marks it accordingly.
+
 ---
 
 ## 1. Background and Audience
@@ -89,13 +102,13 @@ The Catalog interaction has two well-documented gotchas:
 
 **OS naming changed between Server 2019 and Server 2022.** Older OSes use the user-facing brand name in update titles: "Windows Server 2019", "Windows Server 2016". Starting with Server 2022, Microsoft switched to the "Microsoft server operating system, version `<NNHN>`" naming where `<NNHN>` is the codename version: `21H2` for Server 2022 and `24H2` for Server 2025. A Catalog query for "Windows Server 2025 2026-04" returns nothing useful; a query for "Microsoft server operating system version 24H2 2026-04" returns the LCU and its dependencies. Any title-string heuristic must maintain both naming conventions and dispatch by OS version.
 
-**Server 2025 LCUs return a 2-file bundle.** Every Server 2025 LCU resolution returns *two* download URLs: the LCU itself plus a fixed KB (currently `KB5043080`) that is the Servicing Stack baseline. This is the same Servicing Stack package every time, regardless of which LCU month is requested. Empirically this confirms that Server 2025 has no standalone SSU — Microsoft serves the SSU dependency alongside every LCU as a two-file bundle through the Catalog's `DownloadDialog.aspx`. A pipeline that downloads only the "LCU" URL and ignores the second will produce a WIM that fails to apply the LCU with `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED`. The correct pattern is: download both `.msu` files and let `Add-WindowsPackage` figure out the dependency order — it handles SSU ordering automatically.
+**Server 2025 LCUs return a 2-file bundle.** Every Server 2025 LCU resolution returns *two* download URLs: the LCU itself plus a fixed KB (currently `KB5043080`) that is the Servicing Stack baseline. This is the same Servicing Stack package every time, regardless of which LCU month is requested. Operationally, this strongly suggests that Server 2025 has no standalone SSU — Microsoft serves the SSU dependency alongside every LCU as a two-file bundle through the Catalog's `DownloadDialog.aspx`. A pipeline that downloads only the "LCU" URL and ignores the second will produce a WIM that fails to apply the LCU with `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED`. The correct pattern is: download both `.msu` files and let `Add-WindowsPackage` figure out the dependency order — it handles SSU ordering automatically.
 
 When a release-info KB can be turned directly into download URLs via the Catalog (KB-only input, no title-string heuristics), the success rate across a representative 8-sample test is 8/8. The Catalog is therefore a viable URL resolver, but a poor discovery surface. The architectural lesson, derived from extensive trial-and-error, is: **release-info / .NET release-notes is the discoverer; the Catalog is the resolver**. This minimises the title-string heuristic surface and the brittleness it introduces.
 
 ### 2.4 The wsusscn2.cab offline servicing database
 
-For any question of the form "does update KB-A require KB-B to be installed first?" the authoritative source is the **Windows Update Standalone Scan** database, distributed as a single multi-gigabyte CAB file at `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab`. This file is published roughly twice a month, and a fresh download is required to see updates released since the last publication.
+For any question of the form "does update KB-A require KB-B to be installed first?" the authoritative metadata source available offline is the **Windows Update Standalone Scan** database (`wsusscn2.cab`), distributed as a single multi-gigabyte CAB file at `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab`. This file is published roughly twice a month, and a fresh download is required to see updates released since the last publication.
 
 `wsusscn2.cab` is a nested CAB with the following high-level structure:
 
@@ -110,7 +123,7 @@ wsusscn2.cab
     └── (per-update detail XML)
 ```
 
-The Master XML (`package.xml`, ~108 MB extracted) is the single most useful artifact in the CAB. It records, for each update revision in the Windows Update universe:
+For offline dependency analysis, the Master XML (`package.xml`, ~108 MB extracted) is typically the most useful artifact in the CAB. It records, for each update revision in the Windows Update universe:
 
 - `<Categories>` — the OS family GUID (Product) and the Classification GUID
 - `<Prerequisites>` — flat list of UpdateId GUIDs that must be present before this update can apply
@@ -127,7 +140,7 @@ The Master XML (`package.xml`, ~108 MB extracted) is the single most useful arti
 > KB number can only be *inferred* from the `kb(\d+)` token that sometimes
 > appears in a `<FileLocation>` URL.
 
-The Master XML and the individual `packageN.cab` fragments record the **same dependency data from different angles**:
+The Master XML and the individual `packageN.cab` fragments record **overlapping dependency metadata from different perspectives** — they are not semantically equivalent. The Master XML is a flattened, globalized summary; each `packageN.cab` preserves richer per-update applicability semantics:
 
 | Information | Master XML | Per-package CAB |
 |:---|:-:|:-:|
@@ -154,7 +167,7 @@ Parsing the Master XML deserves attention to its scale. A representative timing 
 | Per-package CAB scan (`packageN.cab` with 12,500 inner files) | 6.7 s extract + 127.9 s scan | < 50 MB |
 | Hypothetical full per-package scan (all 75 CABs) | ≈ 2.5 hours | 15–20 GB disk peak |
 
-The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<Prerequisites>`, `<SupersededBy>`, `<BundledBy>`, `<PayloadFiles>`, and `<FileLocation>`, producing a small JSON dependency database (~0.2 MB at the in-scope-bundle granularity used by this project) that can answer most pre-flight questions.
+The full per-package scan is impractical for routine refresh. A streaming `XmlReader` parser of the Master XML alone is the practical compromise: tens of seconds to extract every `<Prerequisites>`, `<SupersededBy>`, `<BundledBy>`, `<PayloadFiles>`, and `<FileLocation>`, producing a small JSON dependency database (~0.2 MB at the in-scope-bundle granularity used by this project) that can answer most pre-flight questions. A full offline WUA applicability evaluation is significantly slower than direct Master XML parsing and is therefore better suited for validation workflows than for discovery workflows — which is the reason this pipeline uses Master XML parsing for discovery and reserves WUA for final applicability validation.
 
 > **Note on support status.** Direct parsing of `package.xml` is an implementation technique based on observed metadata structure, not a Microsoft-supported API contract. The schema can change without notice. Final applicability and installability decisions should still be validated through the Windows Update Agent servicing logic (an offline WUA scan against the mounted image), which is the authoritative evaluator.
 
@@ -226,14 +239,16 @@ The 2024 Patch Tuesday cycle marks the most disruptive Secure Boot change since 
 Every signed Windows boot binary (`bootmgfw.efi`, `bootmgr.efi`, the OS loader, etc.) carries an Authenticode signature that traces back through a certificate chain to one of Microsoft's well-known root authorities. The relevant chain for boot binaries has been:
 
 - **PCA2011 chain (legacy)**: leaf → `Microsoft Windows Production PCA 2011` → `Microsoft Root Certificate Authority 2010`
-- **PCA2023 chain (new)**: leaf → `Windows UEFI CA 2023` → `Microsoft Root Certificate Authority 2010` (or 2023 root, depending on the platform's trust anchors)
+- **PCA2023 trust chain (new)**: leaf → `Windows UEFI CA 2023` → `Microsoft Root Certificate Authority 2010` (or 2023 root, depending on the platform's trust anchors)
 
 The shift is being rolled out in two stages on real hardware:
+
+(For readers less familiar with Secure Boot internals: DB contains allowed signing authorities, while DBX contains explicitly revoked signatures or authorities.)
 
 1. **Stage 1 (2024-2026, current)**: Microsoft ships boot binaries signed under PCA2023, but firmware updates (delivered via Windows Update or vendor-specific channels) provision the PCA2023 certificate into the platform's DB (allowed signatures) on a rolling basis. PCA2011 remains in DB. Both chains are accepted.
 2. **Stage 2 (announced for late 2026 or beyond)**: PCA2011 is moved from DB to DBX (revoked signatures) on platforms that have received the firmware update. At that point, an installation medium whose boot manager is signed only under PCA2011 will fail to boot on updated platforms.
 
-A pipeline that wants to produce future-proof ISOs must ship boot binaries that carry the PCA2023 chain, even if PCA2011 is still accepted today. Microsoft's reference for how to do this is the `Make2023BootableMedia.ps1` script (current version at the time of writing: v1.4, dated 2026-03-13), distributed via Microsoft Support article KB5053484.
+A pipeline that wants to produce forward-compatible installation media (media intended to remain bootable after PCA2011 retirement) must ship boot binaries that carry the PCA2023 trust chain, even if PCA2011 is still accepted today. Microsoft's reference for how to do this is the `Make2023BootableMedia.ps1` script (current version at the time of writing: v1.4, dated 2026-03-13), distributed via Microsoft Support article KB5053484.
 
 ### 3.2 The staging directories: EFI_EX, Fonts_EX, DVD_EX
 
@@ -330,7 +345,7 @@ Once an ISO has been built with the `_EX` substitution applied to the boot root,
 
 Microsoft's `Make2023BootableMedia.ps1` v1.4 itself does **not** perform any verification — it is purely a file-copy operation. The script references no Authenticode-related code. The output verification is, by Microsoft's design, the caller's responsibility.
 
-A workable post-build verification approach is the "file presence + signer chain" pattern: for each of a small fixed set of boot binaries that the spec says must be PCA2023-chained, verify both that the file exists at the expected path on the output ISO and that its Authenticode chain contains a PCA2023 intermediate. Server 2025's full set is five targets:
+A workable post-build verification approach is the "file presence + signer chain" pattern: for each of a small fixed set of boot binaries that the spec says must carry the PCA2023 trust chain, verify both that the file exists at the expected path on the output ISO and that its Authenticode chain includes a PCA2023 intermediate. Server 2025's full set is five targets:
 
 | Target on output media root | Expected chain |
 |---|---|
@@ -387,7 +402,7 @@ A complete recursive `*.efi` enumeration under `\Windows\Boot\` for each Server 
 | Server 2022 | 3 | same 3 files |
 | Server 2025 | 6 | adds `EFI\SecureBootRecovery.efi`, `EFI_EX\bootmgfw_EX.efi`, `EFI_EX\bootmgr_EX.efi` |
 
-All files in this list have valid Authenticode signatures. The chain authority of each is the relevant question for PCA2023 work (section 3.7); the file-presence question is answered by the table above.
+All files in this list have valid Authenticode signatures. The trust chain authority (the trust-anchor path that terminates at a root or intermediate CA, as distinct from the immediate signer certificate) of each is the relevant question for PCA2023 work (section 3.7); the file-presence question is answered by the table above.
 
 ### 4.3 Indexing and edition coverage
 
@@ -452,7 +467,7 @@ Detection of the bundle type at config-load time avoids the SSU-required failure
 
 Outside the Combined-MSU world, the practitioner needs to know, for any given LCU, which SSU pairs with it. Microsoft does publish this in plain prose on the LCU's KB page (the "Improvements" section often opens with "This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update"). Third-party sites such as `techepages.com` and `windowslatest.com` routinely repeat the pairing.
 
-For automation, the pairing is more reliably retrieved from `wsusscn2.cab`. Each LCU's Master XML entry includes a `<Prerequisites>` block with the UpdateId of any required SSU. Because the Master XML carries no `<KBArticleID>` (see §2.4 correction), the pairing is expressed in `UpdateId` / `RevisionId` terms; the human-readable KB number of the prerequisite SSU is recovered from the `kb(\d+)` token in the SSU update's `<FileLocation>` URL, or by cross-referencing the UpdateId against the Microsoft Update Catalog. No web scraping of KB prose pages is required.
+For automation, the pairing is more reliably retrieved from `wsusscn2.cab`. Each LCU's Master XML entry includes a `<Prerequisites>` block with the UpdateId of any required SSU. Because the Master XML carries no `<KBArticleID>` (see §2.4 correction), the pairing is expressed in `UpdateId` / `RevisionId` terms; the human-readable KB number of the prerequisite SSU is heuristically inferred from the `kb(\d+)` token embedded in many payload URLs (the SSU update's `<FileLocation>` URL), or — more robustly — by cross-referencing the UpdateId against the Microsoft Update Catalog. The URL structure is not a contractual interface, so the token-based inference should be treated as best-effort. No web scraping of KB prose pages is required.
 
 A concrete example, from Server 2016 in 2026-05:
 
@@ -466,8 +481,8 @@ LCU for Windows Server 2016, 2026-05 (UpdateId 631fdcea-..., RevisionId 43268251
 The prerequisite SSU update (a separate <Update>) carries its own
 <PayloadFiles>, whose digest resolves through <FileLocations> to a URL like
   .../windows10.0-kb5088064-x64_<hash>.cab
-from which the KB number (KB5088064) is parsed. The Master XML itself
-never states "5088064" as a KB element.
+from which the KB number (KB5088064) is heuristically inferred. The
+Master XML itself never states "5088064" as a KB element.
 ```
 
 A pipeline that pre-loads its config from `wsusscn2.cab` derivative data can detect, at config-load time, that KB5087537 requires KB5088064 to be present in the same patch set. An operator who hand-edits a config without this pre-flight gets the 0x800f0823 failure at WIM-apply time and has to back out their edit.
@@ -753,13 +768,13 @@ Once the output ISO is produced, a final verification layer can confirm:
 
 - **File-system structure**: the expected `\boot\`, `\efi\`, `\sources\` trees are present
 - **Boot-binary identity**: the binaries at the expected paths have the expected file or Authenticode hash (section 3.6)
-- **Authenticode chain**: the boot binaries that the spec says must be PCA2023-chained do in fact rebuild to a chain that includes a PCA2023 intermediate (section 3.7)
+- **Authenticode chain**: the boot binaries that the spec says must carry the PCA2023 trust chain do in fact rebuild to a chain that includes a PCA2023 intermediate (section 3.7)
 
 The Microsoft reference `Make2023BootableMedia.ps1` v1.4 does none of this. A verification function that performs these checks is therefore an upward-compatible quality improvement, not a deviation from the Microsoft pattern. The output of the verification function should carry the SCOPE clarifier from section 3.7 — automated verification cannot replace a hardware boot test.
 
 ### 8.4 The verification boundary
 
-The line that no automated tool can cross: **whether a Secure Boot platform actually boots the produced ISO**. This depends on whether the target firmware has been provisioned with PCA2023 in DB (or, in the post-revocation world, whether the target firmware still has PCA2011 in DB at all). That is per-machine, per-firmware-version state. The only definitive test is to boot the ISO on a representative target — physical hardware that has received the firmware update for the deployment generation, or a Hyper-V Gen2 VM created from a recent Microsoft-published Secure Boot template (which itself was created with PCA2023 in mind). A Hyper-V Gen2 Secure Boot test is a useful pre-deployment validation step, but it does not fully substitute for representative physical-firmware validation: the DB/DBX provisioning state of a Hyper-V virtual firmware may differ from a given physical platform's, so a Hyper-V pass does not guarantee a physical-platform pass.
+The line that no automated tool can cross: **whether a Secure Boot platform actually boots the produced ISO**. This depends on whether the target firmware has been provisioned with PCA2023 in DB (or, in the post-revocation world, whether the target firmware still has PCA2011 in DB at all). That is per-machine, per-firmware-version state. The only definitive test is to boot the ISO on a representative target — physical hardware that has received the firmware update for the deployment generation, or a Hyper-V Gen2 VM created from a recent Microsoft-published Secure Boot template (which itself was created with PCA2023 in mind). A Hyper-V Gen2 validation is useful for pre-deployment smoke testing, but firmware trust-anchor provisioning can differ significantly from physical OEM hardware: the DB/DBX provisioning state of a Hyper-V virtual firmware may differ from a given physical platform's, so a Hyper-V pass does not guarantee a physical-platform pass.
 
 A pipeline that lacks a boot test is not "broken"; it is operating with a known and bounded limitation that the SCOPE clarifier makes visible to the human operator.
 
