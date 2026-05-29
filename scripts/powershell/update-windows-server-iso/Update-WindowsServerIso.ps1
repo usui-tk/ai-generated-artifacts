@@ -538,8 +538,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.4'
-$Script:ScriptTag     = 'wsusscn2-data-contract-hygiene-and-cache-rename'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.5'
+$Script:ScriptTag     = 'wsusscn2-eos-esu-deny-list-warned-exclusion'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -639,6 +639,23 @@ $Script:WsusScnUpdateClassificationGuids = [ordered]@{
     'ServicePacks'    = '68c5b0a3-d1a6-4553-ae49-01d3a7827828'
     'CriticalUpdates' = 'e6cf1350-c01b-414d-a61f-263d14d133b4'
     'Updates'         = 'cd5ffd1e-e932-4e3a-bf74-18bf0b1bbd83'
+}
+
+# EOS/ESU deny-list (SPEC section B.19.7.1, normative): Server OS product
+# GUIDs that remain present in wsusscn2 with live, payload-bearing updates
+# after the OS leaves support, but are out of ISO-integration scope
+# (end-of-servicing or ESU-only). Defence-in-depth on top of the allow-list
+# under allow-overrides semantics: a bundle is deny-excluded iff it carries a
+# deny GUID AND no allow GUID (multi-OS overlap bundles that also carry an
+# allow GUID stay in scope). The parser counts deny-excluded bundles in
+# Stats.EosEsuBundlesExcluded and New-WsusScnDependencyDatabase emits an
+# operator warning. Verified present in the live cab and cross-checked
+# against the WSUS Offline community list.
+$Script:WsusScnEosEsuDenyProductGuids = [ordered]@{
+    'Server2008'   = 'ba0ae9cc-5f01-40b4-ac3f-50192b5d6aaf'
+    'Server2008R2' = 'fdfe8200-9d98-44ba-a12a-772282bf60ef'
+    'Server2012'   = 'a105a108-7c9b-4518-bbbe-73f0fe30012b'
+    'Server2012R2' = 'd31bd4c3-d872-41c9-a2e7-231f372588cb'
 }
 
 # Shared data-contract identity: the single source of truth for cross-cutting
@@ -7551,6 +7568,8 @@ function ConvertFrom-WsusScnPackageXml {
 
         [int] $RecencyMonths = 24,
 
+        [string[]] $DenyProductGuids = @(),
+
         [datetime] $Now = (Get-Date)
     )
 
@@ -7564,10 +7583,18 @@ function ConvertFrom-WsusScnPackageXml {
     if (-not $ScopeClassificationGuids -or $ScopeClassificationGuids.Count -eq 0) {
         $ScopeClassificationGuids = @($Script:WsusScnUpdateClassificationGuids.Values)
     }
+    if (-not $DenyProductGuids -or $DenyProductGuids.Count -eq 0) {
+        $DenyProductGuids = @($Script:WsusScnEosEsuDenyProductGuids.Values)
+    }
 
     $cmp = [System.StringComparer]::OrdinalIgnoreCase
     $prodSet  = [System.Collections.Generic.HashSet[string]]::new([string[]]$ScopeProductGuids,  $cmp)
     $classSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$ScopeClassificationGuids, $cmp)
+    $denySet  = [System.Collections.Generic.HashSet[string]]::new([string[]]$DenyProductGuids, $cmp)
+    $denyNameByGuid = @{}
+    foreach ($kv in $Script:WsusScnEosEsuDenyProductGuids.GetEnumerator()) {
+        $denyNameByGuid[$kv.Value.ToLowerInvariant()] = $kv.Key
+    }
 
     $useRecency = $RecencyMonths -ge 0
     $cutoff = if ($useRecency) { $Now.AddMonths(-$RecencyMonths) } else { [datetime]::MinValue }
@@ -7599,6 +7626,8 @@ function ConvertFrom-WsusScnPackageXml {
     $lastProgressMark   = 0       # element count at last Stage 3 progress line
     $progressEvery      = 20000   # emit a Stage 3 progress line every N parsed elements
     $leafWithPayload    = 0
+    $eosEsuExcluded     = 0
+    $eosEsuFamilies     = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
     $settings = [System.Xml.XmlReaderSettings]::new()
     $settings.IgnoreComments               = $true
@@ -7751,6 +7780,22 @@ function ConvertFrom-WsusScnPackageXml {
                         foreach ($p in $categories.Product) {
                             if ($prodSet.Contains($p)) { $matchProd = $true; break }
                         }
+                        $matchDeny = $false
+                        foreach ($p in $categories.Product) {
+                            if ($denySet.Contains($p)) { $matchDeny = $true; break }
+                        }
+                        # EOS/ESU deny-list (SPEC B.19.7.1), allow-overrides: a bundle is
+                        # deny-excluded only when it carries a deny GUID and no allow GUID.
+                        if ($matchDeny -and -not $matchProd) {
+                            $eosEsuExcluded++
+                            foreach ($p in $categories.Product) {
+                                if ($denySet.Contains($p)) {
+                                    $pl = $p.ToLowerInvariant()
+                                    $fam = if ($denyNameByGuid.ContainsKey($pl)) { $denyNameByGuid[$pl] } else { $pl }
+                                    [void]$eosEsuFamilies.Add($fam)
+                                }
+                            }
+                        }
                         $matchClass = $false
                         foreach ($c in $categories.UpdateClassification) {
                             if ($classSet.Contains($c)) { $matchClass = $true; break }
@@ -7872,6 +7917,8 @@ function ConvertFrom-WsusScnPackageXml {
         FileLocationsObserved = $totalFileLocations
         FileLocationsRetained = $fileLocations.Count
         PayloadDigestsOrphaned = $orphanDigestTotal
+        EosEsuBundlesExcluded  = $eosEsuExcluded
+        EosEsuFamiliesExcluded = @($eosEsuFamilies | Sort-Object)
         EvaluatedAt           = $Now.ToString('yyyy-MM-ddTHH:mm:ssZ')
         RecencyMonths         = $RecencyMonths
         ScopeProductGuidCount        = $prodSet.Count
@@ -8004,6 +8051,8 @@ function New-WsusScnDependencyDatabase {
                 fileLocationsObserved  = $ParseResult.Stats.FileLocationsObserved
                 fileLocationsRetained  = $ParseResult.Stats.FileLocationsRetained
                 payloadDigestsOrphaned = $ParseResult.Stats.PayloadDigestsOrphaned
+                eosEsuBundlesExcluded  = $ParseResult.Stats.EosEsuBundlesExcluded
+                eosEsuFamiliesExcluded = @($ParseResult.Stats.EosEsuFamiliesExcluded)
             }
         }
         updates = $updatesEnriched.ToArray()
@@ -8011,6 +8060,10 @@ function New-WsusScnDependencyDatabase {
 
     Save-CanonicalJsonFile -InputObject $document -Path $OutputPath -Depth 32
 
+    if ($ParseResult.Stats.EosEsuBundlesExcluded -gt 0) {
+        $eosEsuFams = (@($ParseResult.Stats.EosEsuFamiliesExcluded) -join ', ')
+        Write-Caution ('Excluded {0:N0} EOS/ESU bundle(s) carrying deny-listed Server OS product GUIDs ({1}). These persist in wsusscn2 with live payload but are out of ISO-integration scope (SPEC B.19.7.1).' -f $ParseResult.Stats.EosEsuBundlesExcluded, $eosEsuFams)
+    }
     Write-Verbose ('New-WsusScnDependencyDatabase: wrote {0:N0} updates to {1}' -f $updatesEnriched.Count, $OutputPath)
     return $OutputPath
 }

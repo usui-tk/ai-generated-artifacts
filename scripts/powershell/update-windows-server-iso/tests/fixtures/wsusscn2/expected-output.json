@@ -25,7 +25,9 @@
       "leafUpdatesWithPayload": 3,
       "fileLocationsObserved": 3,
       "fileLocationsRetained": 3,
-      "payloadDigestsOrphaned": 1
+      "payloadDigestsOrphaned": 1,
+      "eosEsuBundlesExcluded": 0,
+      "eosEsuFamiliesExcluded": []
     }
   },
   "updates": [

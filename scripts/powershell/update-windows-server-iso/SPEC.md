@@ -1716,6 +1716,18 @@ allow-list GUID) are admitted. In the real cab, 33 such overlap
 updates exist, so a naive deny-overrides rule would wrongly drop
 them.
 
+Implementation (r11.5): the scope filter in
+`ConvertFrom-WsusScnPackageXml` counts deny-excluded bundles into
+`Stats.eosEsuBundlesExcluded` and records the distinct OS families it
+saw into `Stats.eosEsuFamiliesExcluded`; both are surfaced in the
+Layer 2 `_meta.stats`. When the count is non-zero,
+`New-WsusScnDependencyDatabase` emits a single operator `Write-Caution`
+naming the count and families (the "warned exclusion" of §4 — operators
+are told that EOS/ESU patches were detected and dropped, rather than
+silently pruned). The PowerShell branch is covered by T14
+(`wsusscn2_deny_list_test.py`), the executable check that it matches the
+`classify_scope` allow-overrides reference.
+
 Server 2016's GUID stays on the allow-list across its forthcoming
 ESU transition: the OS keeps the same Product GUID after EOS (proven
 by 2008/2008 R2 still resolving under unchanged GUIDs), so
@@ -1967,7 +1979,9 @@ leaf updates bundled under each, per §B.19.9.6):
       "leafUpdatesWithPayload": int,
       "fileLocationsObserved":  int,
       "fileLocationsRetained":  int,
-      "payloadDigestsOrphaned": int     # in-scope payload digests with no FileLocation
+      "payloadDigestsOrphaned": int,    # in-scope payload digests with no FileLocation
+      "eosEsuBundlesExcluded":  int,    # bundles dropped by the EOS/ESU deny-list (B.19.7.1)
+      "eosEsuFamiliesExcluded": string[] # deny-listed OS families seen in the excluded set
     }
   },
   "updates": [

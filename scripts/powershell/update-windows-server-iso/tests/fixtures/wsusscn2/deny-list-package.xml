@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<OfflineSyncPackage xmlns="http://schemas.microsoft.com/msus/2004/02/OfflineSync" MinimumClientVersion="5.8.0.2678" PackageId="deny-fixture-uuid" ProtocolVersion="1.20" SourceId="deny-src-uuid">
+<Updates>
+<Update CreationDate="2026-05-01T10:00:00Z" DefaultLanguage="en" UpdateId="d0000001-0000-0000-0000-000000000001" RevisionNumber="100" RevisionId="980001" IsLeaf="true" IsBundle="true"><Categories><Category Type="Product" Id="d31bd4c3-d872-41c9-a2e7-231f372588cb" /><Category Type="UpdateClassification" Id="0fa1201d-4330-4fa8-8ae9-b877473b6441" /></Categories></Update>
+<Update CreationDate="2026-05-01T10:00:00Z" DefaultLanguage="en" UpdateId="d0000001-0000-0000-0000-000000000002" RevisionNumber="100" RevisionId="980002" IsLeaf="true" IsBundle="true"><Categories><Category Type="Product" Id="d31bd4c3-d872-41c9-a2e7-231f372588cb" /><Category Type="Product" Id="569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5" /><Category Type="UpdateClassification" Id="0fa1201d-4330-4fa8-8ae9-b877473b6441" /></Categories></Update>
+<Update CreationDate="2026-05-01T10:00:00Z" DefaultLanguage="en" UpdateId="d0000001-0000-0000-0000-000000000003" RevisionNumber="100" RevisionId="980003" IsLeaf="true" IsBundle="true"><Categories><Category Type="Product" Id="ba0ae9cc-5f01-40b4-ac3f-50192b5d6aaf" /><Category Type="UpdateClassification" Id="0fa1201d-4330-4fa8-8ae9-b877473b6441" /></Categories></Update>
+<Update CreationDate="2026-05-01T10:00:00Z" DefaultLanguage="en" UpdateId="d0000001-0000-0000-0000-000000000004" RevisionNumber="100" RevisionId="980004" IsLeaf="true" IsBundle="true"><Categories><Category Type="Product" Id="00000000-dead-beef-cafe-000000000000" /><Category Type="UpdateClassification" Id="0fa1201d-4330-4fa8-8ae9-b877473b6441" /></Categories></Update>
+</Updates>
+<FileLocations>
+</FileLocations>
+</OfflineSyncPackage>
