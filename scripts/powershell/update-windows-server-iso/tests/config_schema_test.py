@@ -2,7 +2,7 @@
 """Config schema conformance test (SPEC B.4, Config Schema v2.1).
 
 Validates every ``data/config-Server*.json`` against the machine-readable
-contract in ``schema/config-v2.1.schema.json``. That schema is the single
+contract in ``schema/config.schema.json``. That schema is the single
 source of truth that mirrors the SPEC B.4 prose; this test is what makes the
 contract enforceable in CI.
 
@@ -25,7 +25,7 @@ Design constraints
 This project's Python tooling is standard-library-only (the same rule psa.py
 follows: "No external dependencies"). The ``jsonschema`` package is therefore
 NOT available on CI runners, so this module ships a tiny draft-07-subset
-validator covering exactly the keywords used by config-v2.1.schema.json:
+validator covering exactly the keywords used by config.schema.json:
 type, required, properties, additionalProperties, patternProperties, items,
 enum, const, $ref (local "#/definitions/..." only), and "not" (required-form,
 used to forbid the legacy Patches field). It is intentionally minimal -- it is
@@ -51,7 +51,7 @@ FAIL = "  FAIL"
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 SUBPROJECT_ROOT = TESTS_DIR.parent
 DATA_DIR = SUBPROJECT_ROOT / "data"
-SCHEMA_PATH = SUBPROJECT_ROOT / "schema" / "config-v2.1.schema.json"
+SCHEMA_PATH = SUBPROJECT_ROOT / "schema" / "config.schema.json"
 
 
 def _type_ok(value, type_name):
