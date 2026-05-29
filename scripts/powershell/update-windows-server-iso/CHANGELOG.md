@@ -16,6 +16,20 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.6 - wsusscn2 servicing-stack extraction (M1, part 2)
+
+Second M1 increment. Adds the per-package CBS metadata extraction that feeds the Phase 2c "SS version comparison" check (SPEC B.19.13 check 2), implemented as two pure, offline-testable functions. `$Script:ScriptVersion` is bumped `r11.5` -> `r11.6`; `$Script:ScriptTag` is set to `wsusscn2-servicing-stack-extraction`. This increment adds the extraction primitives; wiring them into a full LCU-bundle -> leaf -> cab walk over the live cab, and the verdict function itself, follow in later M1 parts.
+
+- **`Resolve-WsusScnRevisionToCab`.** Maps a revision id to the per-package cab that holds its `c/<revisionId>` CBS metadata, using the top-level cab's `index.xml` `<CABLIST>` `RANGESTART` boundaries (a revision `R` lives in the cab with the greatest `RANGESTART` <= `R`). Lets the analysis step locate one revision's metadata with a single targeted 7-Zip extraction instead of expanding all ~73 per-package cabs. Pure function (text in, cab name out); no file or 7-Zip I/O.
+- **`Get-WsusScnServicingStackInfo`.** Reads a leaf's CBS metadata and derives `requiredServicingStackVersion` + `servicingStackModel`:
+  - **separate** (Server 2016 / 2019): `installerAssembly` servicing-stack version is a real build (e.g. `10.0.14393.7692`); that value is the required SS floor for check 2.
+  - **combined** (Server 2022): `installerAssembly` version is the nominal `6.0.0.0` placeholder with an inline `Package_for_ServicingStack_<nnnn>`; the SSU travels inside the LCU, so `requiredSs` is null and check 2 is N/A.
+  - **checkpoint** (Server 2025): no CBS rollup / servicing-stack metadata at all (`.msu` leaf); `requiredSs` is null. Empty input is treated as checkpoint and never throws.
+- **Empirical grounding.** Verified against the 2026-05 `wsusscn2.cab` (sha256 `e51d4b5a...c5d4a126`): newest Server 2016 LCU leaf -> `installerAssembly` `10.0.14393.7692`, no inline servicing-stack package (separate); Server 2022 leaf -> `6.0.0.0` + `Package_for_ServicingStack_5120` (combined); Server 2025 leaf -> ~1 KB metadata blob, no rollup/SS tokens (checkpoint). The RANGESTART map and the model derivation both run correctly over the real cab.
+- **New gate T15 (`wsusscn2_servicing_stack_test.py`).** 16 assertions over a trimmed `index.xml` CABLIST and three minimised real-cab CBS leaf fixtures (`tests/fixtures/wsusscn2/cbs/leaf-{2016-separate,2022-combined,2025-checkpoint}.xml`). Covers RANGESTART mapping (exact-boundary, one-below, zero), the three model derivations, inline-package detection, and empty-input robustness. Offline (text input; no cab/7-Zip).
+- **Docs.** SPEC gains §B.19.13.0 documenting the two functions, the RANGESTART rule, and the separate/combined/checkpoint derivation with the empirical anchors; `TESTING.md` and `tests/README.md` register T15 (suite is now T1-T15).
+- **Verification.** psa.py 4.2.0 0/0/0; `pwsh` 7.4.6 ParseFile 0 errors; full offline suite green under real PowerShell, including **T15 16**: T12 22, T13 15, T14 10, T15 16, scope-invariants 23, config-schema 14, canonical-format 27, canonical 26, release-info-parser 13, release-info-resolver 22, dynamic-update-cache 20, catalog-fixture 13, catalog-title-tokens 18, dotnet-cu 16. Both functions additionally exercised against the live 640 MB cab's real CBS metadata for 2016 / 2022 / 2025.
+
 ### r11.5 - EOS/ESU deny-list warned-exclusion in the wsusscn2 scope filter (M1, part 1)
 
 First implementation increment of M1 (the wsusscn2 analysis step). Adds the explicit EOS/ESU deny-list to the Stage 3 scope filter with allow-overrides semantics matching the `classify_scope` reference, plus warned (not silent) exclusion. `$Script:ScriptVersion` is bumped `r11.4` -> `r11.5`; `$Script:ScriptTag` is set to `wsusscn2-eos-esu-deny-list-warned-exclusion`.

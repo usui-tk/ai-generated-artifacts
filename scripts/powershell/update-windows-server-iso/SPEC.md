@@ -2545,6 +2545,42 @@ the r08.0 Step 4 KB5087537 SSU-prerequisite incident.
 > shape is sketched in the revised verdict note that follows the
 > signature.
 
+##### B.19.13.0 Servicing-stack extraction (M1 part 2, implemented r11.6)
+
+The data feeding check 2 is extracted by two pure functions, kept free
+of file / 7-Zip I/O so they are unit-testable offline (T15):
+
+- **`Resolve-WsusScnRevisionToCab`** maps a revision id to the
+  per-package cab holding its `c/<revisionId>` CBS metadata. The
+  top-level cab's `index.xml` `<CABLIST>` lists each per-package cab
+  with a `RANGESTART` (the lowest revision id it stores); a revision `R`
+  lives in the cab with the greatest `RANGESTART` ≤ `R`. This locates
+  one revision with a single targeted extraction instead of expanding
+  all ~73 per-package cabs.
+- **`Get-WsusScnServicingStackInfo`** reads a leaf's CBS metadata and
+  derives `requiredServicingStackVersion` and `servicingStackModel`:
+  - **checkpoint** — no CBS `Package_for_RollupFix` / `installerAssembly`
+    metadata at all (Server 2025 `.msu` leaves); `requiredSs` = null.
+  - **combined** — `installerAssembly` servicing-stack version is the
+    nominal placeholder `6.0.0.0`, with an inline
+    `Package_for_ServicingStack_<nnnn>` assembly (Server 2022); the SSU
+    travels inside the LCU, so `requiredSs` = null and check 2 is N/A.
+  - **separate** — `installerAssembly` version is a real build, e.g.
+    `10.0.14393.7692` (Server 2016 / 2019); that value is the
+    `requiredServicingStackVersion` compared against the SSU's provided
+    version in check 2.
+
+  These three cases were grounded against the 2026-05 cab: the newest
+  Server 2016 LCU leaf reports `installerAssembly` `10.0.14393.7692`
+  with no inline servicing-stack package (separate); the Server 2022
+  leaf reports `6.0.0.0` + `Package_for_ServicingStack_5120` (combined);
+  the Server 2025 leaf is a ~1 KB metadata blob with no rollup /
+  servicing-stack tokens (checkpoint). The full LCU-bundle → leaf
+  revision → per-package cab → `c/<rev>` extraction flow uses these two
+  functions plus the §B.19.4 7-Zip invocation pattern; T15
+  (`wsusscn2_servicing_stack_test.py`) is the executable contract.
+
+
 #### B.19.13.1 `Test-PatchDependencyClosureFromGraph`
 
 Signature:

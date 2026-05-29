@@ -538,8 +538,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.5'
-$Script:ScriptTag     = 'wsusscn2-eos-esu-deny-list-warned-exclusion'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.6'
+$Script:ScriptTag     = 'wsusscn2-servicing-stack-extraction'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -7486,6 +7486,145 @@ function Invoke-WsusScnPackageXmlExtract {
     Write-Verbose ('package.xml extracted: {0} ({1:N0} bytes)' -f $packageXml, $xmlSize)
 
     return $packageXml
+}
+
+function Resolve-WsusScnRevisionToCab {
+    <#
+    .SYNOPSIS
+        Map a wsusscn2 revision id to the per-package cab that contains its
+        c/<revisionId> CBS metadata, using the cab's index.xml CABLIST.
+    .DESCRIPTION
+        The top-level wsusscn2.cab carries an index.xml whose <CABLIST> lists
+        each per-package cab (package2.cab .. packageNN.cab) with a RANGESTART
+        attribute. RANGESTART is the lowest revision id stored in that cab; a
+        revision R lives in the cab with the greatest RANGESTART <= R. This
+        lets the analysis step (M1) locate a single revision's CBS metadata
+        with one targeted 7-Zip extraction instead of expanding all ~73
+        per-package cabs (SPEC B.19.4 / B.19.13).
+
+        Pure function: takes the index.xml text and a revision id, returns the
+        cab name. No file or 7-Zip I/O, so it is unit-testable offline.
+    .PARAMETER IndexXml
+        The raw text of the cab's index.xml.
+    .PARAMETER RevisionId
+        The revision id to locate (numeric string or int).
+    .OUTPUTS
+        [string] The per-package cab name (e.g. 'package74.cab'), or $null if
+        no cab range covers the revision (which should not happen for a
+        revision drawn from the same cab's Master XML).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [string] $IndexXml,
+
+        [Parameter(Mandatory)]
+        [long] $RevisionId
+    )
+
+    # Parse <CAB NAME="..." RANGESTART="..."> entries. package.cab (the Master
+    # XML container) has no RANGESTART and is skipped.
+    $ranged = [System.Collections.Generic.List[object]]::new()
+    foreach ($m in [regex]::Matches($IndexXml, '<CAB\s+NAME="(?<name>package\d*\.cab)"(?:\s+RANGESTART="(?<rs>\d+)")?')) {
+        $rs = $m.Groups['rs']
+        if ($rs.Success) {
+            $ranged.Add([pscustomobject]@{ Name = $m.Groups['name'].Value; RangeStart = [long]$rs.Value })
+        }
+    }
+    if ($ranged.Count -eq 0) { return $null }
+
+    # Greatest RANGESTART <= RevisionId.
+    $chosen = $null
+    foreach ($entry in ($ranged | Sort-Object RangeStart)) {
+        if ($entry.RangeStart -le $RevisionId) { $chosen = $entry.Name }
+        else { break }
+    }
+    return $chosen
+}
+
+function Get-WsusScnServicingStackInfo {
+    <#
+    .SYNOPSIS
+        Derive the servicing-stack requirement and delivery model for an LCU
+        leaf from its per-package CBS metadata (SPEC B.19.13, M1).
+    .DESCRIPTION
+        Reads the c/<revisionId> CBS metadata XML of an LCU leaf and returns
+        the servicing-stack facts the Phase 2c readiness check needs:
+
+          * requiredServicingStackVersion - the version named by the leaf's
+            <installerAssembly name="Microsoft-Windows-ServicingStack"
+            version="X" />. For the SSU-separate OSes (Server 2016 / 2019)
+            this is the real build the LCU requires (e.g. 10.0.14393.7692).
+            For combined (2022) it is the nominal placeholder 6.0.0.0, which
+            is reported as $null because no separate SSU comparison applies.
+          * servicingStackModel - 'separate' | 'combined' | 'checkpoint':
+              - checkpoint: no CBS RollupFix / ServicingStack metadata at all
+                (Server 2025 .msu leaves carry none).
+              - combined: installerAssembly version is the 6.0.0.0 nominal
+                placeholder AND a Package_for_ServicingStack_<nnnn> assembly
+                is present inline (Server 2022).
+              - separate: installerAssembly version is a real build (not
+                6.0.0.0) (Server 2016 / 2019).
+
+        Empirically grounded against the 2026-05 cab: 2016 LCU ->
+        installerAssembly 10.0.14393.7692, no inline ServicingStack package
+        (separate); 2022 LCU -> installerAssembly 6.0.0.0 + inline
+        Package_for_ServicingStack_5120 (combined); 2025 LCU -> 1 KB leaf
+        meta with no RollupFix/ServicingStack tokens (checkpoint).
+
+        Pure function: takes the CBS metadata text, returns a result object.
+        No file or 7-Zip I/O, so it is unit-testable offline.
+    .PARAMETER CbsMetaXml
+        The raw text of the leaf's c/<revisionId> CBS metadata.
+    .OUTPUTS
+        [pscustomobject] with RequiredServicingStackVersion (string|$null),
+        ServicingStackModel (string), and InlineServicingStackPackage
+        (string|$null, the Package_for_ServicingStack_<nnnn> name when present).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string] $CbsMetaXml
+    )
+
+    $NOMINAL_COMBINED_SS = '6.0.0.0'
+
+    $ssMatch = [regex]::Match($CbsMetaXml,
+        '<installerAssembly\s+name="Microsoft-Windows-ServicingStack"\s+version="(?<v>[^"]+)"')
+    $rollupMatch = [regex]::Match($CbsMetaXml,
+        'name="Package_for_RollupFix"\s+version="(?<v>[^"]+)"')
+    $inlineSsMatch = [regex]::Match($CbsMetaXml, 'Package_for_ServicingStack_(?<n>\d+)')
+
+    $installerSs = if ($ssMatch.Success) { $ssMatch.Groups['v'].Value } else { $null }
+    $inlineSs = if ($inlineSsMatch.Success) { ('Package_for_ServicingStack_{0}' -f $inlineSsMatch.Groups['n'].Value) } else { $null }
+
+    # Model derivation.
+    $model = $null
+    $requiredSs = $null
+    if (-not $ssMatch.Success -and -not $rollupMatch.Success) {
+        # No CBS servicing metadata at all: checkpoint .msu (Server 2025).
+        $model = 'checkpoint'
+        $requiredSs = $null
+    }
+    elseif ($installerSs -eq $NOMINAL_COMBINED_SS) {
+        # Nominal placeholder: the SSU travels inside the LCU (Server 2022).
+        $model = 'combined'
+        $requiredSs = $null
+    }
+    else {
+        # Real build value: a separate SSU supplies it (Server 2016 / 2019).
+        $model = 'separate'
+        $requiredSs = $installerSs
+    }
+
+    return [pscustomobject]@{
+        RequiredServicingStackVersion = $requiredSs
+        ServicingStackModel           = $model
+        InlineServicingStackPackage   = $inlineSs
+    }
 }
 
 function ConvertFrom-WsusScnPackageXml {
