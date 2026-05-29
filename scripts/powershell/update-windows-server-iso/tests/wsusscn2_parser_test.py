@@ -44,7 +44,7 @@ PACKAGE_XML = FIXTURE_DIR / "package.xml"
 EXPECTED_JSON = FIXTURE_DIR / "expected-output.json"
 
 # Environmental fields stripped before structural comparison
-ENV_FIELDS = ("generator", "scriptVersion", "scriptTag", "generatedAt", "sourceCab")
+ENV_FIELDS = ("generator", "scriptVersion", "scriptTag", "generatedAt", "sourceCab", "dataContractId", "dataContractVersion")
 
 PINNED_NOW = "2026-05-28T00:00:00Z"
 

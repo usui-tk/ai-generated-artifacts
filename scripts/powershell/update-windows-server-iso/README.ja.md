@@ -129,7 +129,7 @@ scripts/powershell/update-windows-server-iso/
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
 │   ├── cache-dotnet-cu.json
-│   └── cache-du-Server{2022,2025}.json
+│   └── cache-dynamicupdate-Server{2022,2025}.json
 ├── tests/                            # 自己検証スイート（T1-T13）
 └── docs/history/                     # サイクル別の調査レポート
 ```
@@ -287,11 +287,16 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
   Part C §C.3.4 のフォーマットゲートが、`data/*.json` および
   `tests/fixtures/*.json` を Linux PowerShell 7.x / Python 3 の
   いずれの runtime から編集しても最小 diff になることを保証します。
-- **Config Schema v2.1**（r10.4、適用済み）：`schema/config-v2.1.schema.json`
+- **Config Schema v2.1**（r10.4、適用済み）：`schema/config.schema.json`
   と標準ライブラリのみの `config_schema_test.py` ゲートが、レガシーな
   `PatchBaseline.Patches` フィールドを禁止し `NeutralPatches` を必須化
   します。スクリプトの既定値とすべての baseline 代入は `NeutralPatches`
   を使うようになりました。
+- **Layer 2 スキーマと共通データ契約**（r11.3+、適用済み）：`schema/wsusscn2-database.schema.json`
+  が `data/wsusscn2-database.json` の権威的な形状です。両スキーマはスクリプトが
+  保持し全データ成果物に刻印される単一の横断的データ契約識別子（`dataContractId`
+  ＋ `dataContractVersion`）を共有し、個別のモデル別スキーマバージョンを突き合わせる
+  代わりに 1 回の照合で全体を検証します。
 - **PSA7003 非 ASCII ルール**（r10.1、適用済み）：`psa.py` 4.2.0 が
   `.ps1` 本文中の UTF-8 BOM 以外の非 ASCII 文字を検出します。本スクリプト
   はこのルールで 0 検出を確認した最初の consumer です。

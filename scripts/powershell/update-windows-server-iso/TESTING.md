@@ -75,7 +75,7 @@ a build identifier plus a calendar date. Pending items are marked
 | T12 wsusscn2_parser_test.py (22 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.9.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | T13 wsusscn2_layer1_test.py (15 assertions, `Update-Layer1DependencyVerification` writeback contract per SPEC §B.19.9.5) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Part C §C.3.4 — `canonical_json_format_check.py` (27 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config-v2.1.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Scope-invariants gate — `wsusscn2_scope_invariants_test.py` (23 assertions, EOS/ESU deny-list + allow-overrides over Layer 2 + fixture + synthetic; SPEC §B.19.7/§B.19.7.1) | ✓ all pass | r11.2 wsusscn2-phase2c-eos-esu-scope build / 2026-05-29 |
 | Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T13 + format gate + config schema gate + scope-invariants gate) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
@@ -395,7 +395,7 @@ File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage1_
 | 6 | T11 | `canonical_json_test.py` — PS/Python byte-level parity (26 assertions, SPEC §B.23) |
 | 7 | T12 – T13 | `wsusscn2_parser_test.py` (22 assertions, Stages 3/4) + `wsusscn2_layer1_test.py` (15 assertions, Layer 1 writeback) |
 | 8 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
-| 9 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against `schema/config-v2.1.schema.json` (14 assertions) |
+| 9 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against `schema/config.schema.json` (14 assertions) |
 | 10 | scope-invariants gate | `wsusscn2_scope_invariants_test.py` — EOS/ESU deny-list + allow-overrides over `data/wsusscn2-database.json` + fixture + synthetic cases (23 assertions) |
 
 Triggers: every push, every PR. Required to merge.

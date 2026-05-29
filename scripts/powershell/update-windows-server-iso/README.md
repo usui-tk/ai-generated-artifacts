@@ -136,7 +136,7 @@ scripts/powershell/update-windows-server-iso/
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
 │   ├── cache-dotnet-cu.json
-│   └── cache-du-Server{2022,2025}.json
+│   └── cache-dynamicupdate-Server{2022,2025}.json
 ├── tests/                            # Self-verification suite (T1-T13)
 └── docs/history/                     # Per-cycle investigation reports
 ```
@@ -295,10 +295,16 @@ r09.0 Step 2b3. Current state per the
   guarantee that `data/*.json` and `tests/fixtures/*.json` files
   produce minimal git diffs regardless of which runtime an operator
   edits them from.
-- **Config Schema v2.1** (r10.4, shipped): `schema/config-v2.1.schema.json`
+- **Config Schema v2.1** (r10.4, shipped): `schema/config.schema.json`
   plus the stdlib-only `config_schema_test.py` gate forbid the legacy
   `PatchBaseline.Patches` field and require `NeutralPatches`. The
   script defaults and all baseline assignments now use `NeutralPatches`.
+- **Layer 2 schema + shared data contract** (r11.3+, shipped): `schema/wsusscn2-database.schema.json`
+  is the authoritative shape for `data/wsusscn2-database.json`. Both schemas
+  share one cross-cutting data-contract identity (`dataContractId` +
+  `dataContractVersion`) held by the script and stamped into every data
+  artifact, so a single check validates the whole set instead of reconciling
+  independent per-model schema versions.
 - **PSA7003 non-ASCII rule** (r10.1, shipped): `psa.py` 4.2.0 flags
   non-ASCII characters in `.ps1` bodies outside the UTF-8 BOM; this
   script is its first verified 0-finding consumer.

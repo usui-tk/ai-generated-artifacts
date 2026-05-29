@@ -430,7 +430,7 @@ who is allowed to mutate each field is the §B.14 decision matrix.
 in current configs. Code that resolves a patch set (e.g. P03 
 RefreshPatchBaseline) MUST write to `NeutralPatches`, never to `Patches`. 
 This is enforced mechanically by the machine-readable schema 
-`schema/config-v2.1.schema.json` (which declares `not.required: 
+`schema/config.schema.json` (which declares `not.required: 
 [Patches]` on `PatchBaseline`) and the CI gate in §C.3.2a. Background: 
 the r10.3 P03 defect wrote scrape results to a non-schema `Patches` 
 property; the schema gate exists so that class of drift fails in CI 
@@ -1942,12 +1942,14 @@ leaf updates bundled under each, per §B.19.9.6):
 ```
 {
   "_meta": {
+    "dataContractId":      string,      # $Script:DataContractId (stable family GUID)
+    "dataContractVersion": int,         # $Script:DataContractVersion (shared epoch)
     "generator":     string,            # human-readable identifier
     "scriptVersion": string,            # $Script:ScriptVersion at write time
     "scriptTag":     string,            # $Script:ScriptTag at write time
     "generatedAt":   string,            # ISO-8601 UTC of the write
-    "sourceCab": {                      # provenance, null if unknown
-      "path":   string|null,
+    "sourceCab": {                      # provenance (portable; no local path)
+      "sourceUrl": string,              # canonical CDN URL (Get-WsusScnCabSourceUrl)
       "size":   int|null,
       "sha256": string|null             # lowercase hex
     },
@@ -1955,7 +1957,7 @@ leaf updates bundled under each, per §B.19.9.6):
       "productGuids":         string[],
       "classificationGuids":  string[],
       "recencyMonths":        int,      # -1 means disabled
-      "now":                  string    # ISO-8601 UTC, the anchor used
+      "evaluatedAt":          string    # ISO-8601 UTC, the recency anchor used
     },
     "stats": {
       "updatesObserved":        int,
@@ -1984,7 +1986,11 @@ leaf updates bundled under each, per §B.19.9.6):
       "prerequisiteUpdateIds":   string[],
       "supersededByRevisionIds": string[],
       "payloadFileDigests":      string[],  # union of own + bundled-leaf digests
-      "payloadUrls":             string[]   # resolved in Stage 3, see §B.19.9.6
+      "payloadUrls":             string[],  # resolved in Stage 3, see §B.19.9.6
+      "kbIds":                         string[]|null,  # KB numbers from payloadUrls (M1-populated)
+      "requiredServicingStackVersion": string|null,    # LCU installerAssembly SS floor (M1; null for combined/checkpoint)
+      "providedServicingStackVersion": string|null,    # SS version the configured SSU supplies (M1)
+      "servicingStackModel":           string|null     # 'separate'|'combined'|'checkpoint' (M1)
     }
   ]
 }
@@ -2256,16 +2262,40 @@ filename prefix; this is expected and is not a scope leak.
 >   SSU dependency is the SS-version comparison of §B.19.13, not a KB
 >   list. (This is the same correction as §B.19.3/§B.19.7.)
 >
-> The T12 fixture (`tests/fixtures/wsusscn2/expected-output.json`) and
-> the `tests/wsusscn2_scope_invariants_test.py` gate are authoritative
-> for the implemented shape. The prose below is retained for design
-> history; a future editorial pass should rewrite §B.19.10.1–10.4 to
-> the implemented `_meta` + `updates` shape.
+> **The authoritative shape is now the formal JSON Schema
+> `schema/wsusscn2-database.schema.json`** (Draft-07), parallel to the
+> Layer 1 `schema/config.schema.json`. The T12 fixture
+> (`tests/fixtures/wsusscn2/expected-output.json`) and the
+> `tests/wsusscn2_scope_invariants_test.py` gate remain authoritative
+> for the scope/contract semantics. The prose §B.19.10.1–10.4 below is
+> the deprecated pre-implementation draft and is **superseded by the
+> schema file**; consult the schema, not the prose, for field names and
+> types.
+>
+> Two corrections are folded into the schema and the generator
+> (`New-WsusScnDependencyDatabase`):
+>
+> - **Provenance hygiene.** `_meta.sourceCab` carries a portable
+>   `sourceUrl` (the canonical CDN URL) and no longer a local filesystem
+>   `path`; the recency-evaluation timestamp is `_meta.scope.evaluatedAt`
+>   (renamed from the ambiguous `now`).
+> - **Servicing-stack fields.** Each in-scope update may carry
+>   `requiredServicingStackVersion`, `providedServicingStackVersion`
+>   (full spelling, nullable), `servicingStackModel`
+>   (`separate`/`combined`/`checkpoint`), and `kbIds`, populated by the
+>   wsusscn2 analysis step for the §B.19.13 verification model.
 
-This is the canonical shape of `data/wsusscn2-database.json`. The
-schema is **versioned** via `_meta.ParserVersion`. The parser MUST
-refuse to consume a JSON file whose `ParserVersion` is newer than
-its own; older versions MAY be consumed with a one-time warning.
+Versioning is governed by the **shared data-contract identity**, not by
+a per-model schema version. The script holds a single source of truth in
+`$Script:DataContractId` (a stable family GUID) and
+`$Script:DataContractVersion` (an integer epoch bumped on any breaking
+shape change to any data model), and stamps both into every artifact's
+`_meta` (`dataContractId` / `dataContractVersion`). `Test-DataContractConsistency`
+validates each artifact against the script's values cross-functionally:
+an artifact whose `dataContractVersion` is newer than the script's MUST
+be refused; an older one is treated as stale (regenerate); a missing or
+non-matching `dataContractId` is flagged. This supersedes the earlier
+`_meta.ParserVersion` design, which was never implemented.
 
 #### B.19.10.1 Top-level structure
 
@@ -2496,9 +2526,10 @@ the r08.0 Step 4 KB5087537 SSU-prerequisite incident.
 > The function signature and verdict fields below are retained for
 > historical continuity; the **PowerShell implementation (a later
 > session) MUST replace the `Requires` / `MissingFromSet` KB-closure
-> fields with the SS-version-comparison model above.** The `RequiredSs`
-> / `ProvidedSs` shape is sketched in the revised verdict note that
-> follows the signature.
+> fields with the SS-version-comparison model above.** The
+> `RequiredServicingStackVersion` / `ProvidedServicingStackVersion`
+> shape is sketched in the revised verdict note that follows the
+> signature.
 
 #### B.19.13.1 `Test-PatchDependencyClosureFromGraph`
 
@@ -2544,28 +2575,32 @@ The function MUST NOT mount the WIM. It consumes the **static**
 WIM metadata (build number, installed packages list) captured by
 `Get-WindowsImage` and provided via the `$WimMountState` parameter.
 
-> **Revised verdict shape (target for the next-session implementation).**
-> Per the Phase 2c model correction at the head of §B.19.13, the
-> per-patch verdict replaces the KB-closure fields with the
-> SS-version-comparison and presence/supersession model. Sketch:
+> **Revised verdict shape (finalised; field names match the Layer 2
+> schema, full spelling, no abbreviation).** Per the Phase 2c model
+> correction at the head of §B.19.13, the per-patch verdict replaces the
+> KB-closure fields with the SS-version-comparison and presence/supersession
+> model. The servicing-stack field names use the same full spelling as
+> `schema/wsusscn2-database.schema.json` (`requiredServicingStackVersion`
+> etc.) rather than the earlier `RequiredSs` abbreviation:
 >
 > ```
 > @{
->     KbId         = 'KB5087537'
->     UpdateId     = '...'
->     Verdict      = 'Pass' | 'SsTooOld' | 'NotInDatabase' | 'Superseded' | 'Skipped'
->     RequiredSs   = '10.0.14393.7692'   # LCU installerAssembly floor (2016/2019); $null for combined (2022/2025)
->     ProvidedSs   = '10.0.14393.7692'   # SS version the configured SSU supplies; $null if no SSU in set
->     SsModel      = 'separate' | 'combined' | 'checkpoint'   # per research §5.4
->     Superseded   = $true | $false
->     Notes        = '...'
+>     KbId                          = 'KB5087537'
+>     UpdateId                      = '...'
+>     Verdict                       = 'Pass' | 'SsTooOld' | 'NotInDatabase' | 'Superseded' | 'Skipped'
+>     RequiredServicingStackVersion = '10.0.14393.7692'   # LCU installerAssembly floor (2016/2019); $null for combined (2022/2025)
+>     ProvidedServicingStackVersion = '10.0.14393.7692'   # SS version the configured SSU supplies; $null if no SSU in set
+>     ServicingStackModel           = 'separate' | 'combined' | 'checkpoint'   # per research §5.4
+>     Superseded                    = $true | $false
+>     Notes                         = '...'
 > }
 > ```
 >
-> `SsTooOld` is the `0x800f0823` predictor: `ProvidedSs` < `RequiredSs`
-> for a `separate` OS. For `combined` / `checkpoint` OSes (2022 / 2025),
-> `RequiredSs` is `$null` and the SS check is skipped (the SSU travels
-> inside the LCU).
+> `SsTooOld` is the `0x800f0823` predictor:
+> `ProvidedServicingStackVersion` < `RequiredServicingStackVersion` for a
+> `separate` OS. For `combined` / `checkpoint` OSes (2022 / 2025),
+> `RequiredServicingStackVersion` is `$null` and the SS check is skipped
+> (the SSU travels inside the LCU).
 
 #### B.19.13.2 Relationship to `Test-PatchDependencyClosureOnMount` (§B.13)
 
@@ -2662,7 +2697,7 @@ flags.
 | Layer 2 absent, `-OfflineCabPath <path>` given | Synchronously invoke `RefreshDependencyDatabase` on the given cab; resume | (downstream) |
 | Layer 2 absent, air-gapped, no cab | Skip Stage 2 with one warning per run; rely on Stage 1 (catalog) only | `Unknown` |
 | Layer 2 SHA-256 mismatch from layer 1 | Warning; continue with on-disk layer 2 | (continues to verdict) |
-| Layer 2 has `ParserVersion` newer than running parser | Hard refuse; emit operator action | (no verdict) |
+| Layer 2 has `dataContractVersion` newer than running script | Hard refuse; emit operator action | (no verdict) |
 | `-SkipDependencyCheck` set | Skip Stage 2; emit one notice per run | `Skipped` |
 
 ### B.19.15 Lifecycle (normative)
@@ -2767,9 +2802,10 @@ schema drift is non-zero.
 
 Mitigations:
 
-1. `_meta.ParserVersion` in layer 2. Bumped on every breaking
-   change to the parser's emit shape (B.19.10 schema). Consumers
-   refuse newer versions.
+1. `_meta.dataContractVersion` (the shared data-contract epoch held by
+   `$Script:DataContractVersion`). Bumped on every breaking change to any
+   data model's emit shape (B.19.10 schema). Consumers refuse newer
+   versions via `Test-DataContractConsistency`.
 2. T6 (`tests/release_info_parser_test.py`) has 13 assertions that
    cover the parser's emit shape; a schema-incompatible Master XML
    change would surface there before merging.
@@ -2923,8 +2959,8 @@ scripts/powershell/update-windows-server-iso/
 │   ├── raw-dotnet-cu.json            # Aggregated .NET CU index mirror
 │   ├── cache-release-info.json       # Parsed release-info cache
 │   ├── cache-dotnet-cu.json          # Parsed .NET CU cache
-│   ├── cache-du-Server2022.json      # Parsed Dynamic Update cache (Server 2022)
-│   └── cache-du-Server2025.json      # Parsed Dynamic Update cache (Server 2025)
+│   ├── cache-dynamicupdate-Server2022.json      # Parsed Dynamic Update cache (Server 2022)
+│   └── cache-dynamicupdate-Server2025.json      # Parsed Dynamic Update cache (Server 2025)
 │   # Planned (r09.0 Step 2+):
 │   # └── wsusscn2-database.json     # Layer 2, ~2-5 MB (per §B.19)
 │
@@ -2967,7 +3003,7 @@ scripts/powershell/update-windows-server-iso/
 **Notable layout invariants**:
 
 - `data/` is **flat** (no sub-directories). Per-month or per-OS data
-  is encoded into the filename (`cache-du-Server2025.json`, not
+  is encoded into the filename (`cache-dynamicupdate-Server2025.json`, not
   `cache-du/Server2025.json`).
 - `tests/common/` is the shared-utility location; it is NOT a tool
   itself.
@@ -3605,7 +3641,7 @@ has the expected type. Invoked via:
 **Status**: normative. **Tool**: `tests/config_schema_test.py` 
 (standard-library only, run in CI stage1).
 
-`schema/config-v2.1.schema.json` is the machine-readable single source 
+`schema/config.schema.json` is the machine-readable single source 
 of truth that mirrors this section (B.4). Every 
 `data/config-Server*.json` is validated against it. Unlike the positive 
 key-presence check in C.3.2, the schema gate also rejects:
@@ -3621,7 +3657,7 @@ key-presence check in C.3.2, the schema gate also rejects:
 python3 tests/config_schema_test.py   # 0 = all configs conform
 ```
 
-When SPEC B.4 changes, `schema/config-v2.1.schema.json` MUST be updated 
+When SPEC B.4 changes, `schema/config.schema.json` MUST be updated 
 in the same commit; the two are a matched pair.
 
 ### C.3.3 Cross-field consistency
@@ -3811,7 +3847,7 @@ mirrors that authoritative table.
 | **T12** `wsusscn2_parser_test.py` | Offline self-verification of wsusscn2 parser pipeline Stages 3 and 4 against the committed fixture `fixtures/wsusscn2/package.xml`; structural compare against `expected-output.json` per SPEC §B.19.9.4 | 22 | No | Every commit touching Stage 3 / Stage 4 of the wsusscn2 parser or the scope-filter GUID tables |
 | **T13** `wsusscn2_layer1_test.py` | Offline self-verification of the Layer 1 writeback helper `Update-Layer1DependencyVerification` (Phase 2b2/2b3) per SPEC §B.19.9.5 | 15 | No | Every commit touching `Update-Layer1DependencyVerification`, the OS-category GUID table, or the A04 Layer 1 callout |
 | **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 27 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
-| **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config-v2.1.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config-v2.1.schema.json` |
+| **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config.schema.json` |
 
 **Determinism categories**:
 

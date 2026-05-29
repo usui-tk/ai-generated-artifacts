@@ -538,8 +538,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.1'
-$Script:ScriptTag     = 'cross-repo-canon-iso-encoding-tls-rename'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.4'
+$Script:ScriptTag     = 'wsusscn2-data-contract-hygiene-and-cache-rename'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -640,6 +640,17 @@ $Script:WsusScnUpdateClassificationGuids = [ordered]@{
     'CriticalUpdates' = 'e6cf1350-c01b-414d-a61f-263d14d133b4'
     'Updates'         = 'cd5ffd1e-e932-4e3a-bf74-18bf0b1bbd83'
 }
+
+# Shared data-contract identity: the single source of truth for cross-cutting
+# data-quality checks. Stamped into every generated data artifact's _meta
+# (Layer 1 config-Server*.json and the Layer 2 dependency database) and
+# validated across artifacts by Test-DataContractConsistency, so one
+# comparison validates the whole set instead of reconciling independent
+# per-model schema versions. DataContractVersion is bumped on any breaking
+# shape change to any data model. See schema/wsusscn2-database.schema.json
+# and SPEC section B.19.10.
+$Script:DataContractId      = '4c173c61-c099-4512-9283-f5d951beda8b'
+$Script:DataContractVersion = 1
 
 # Phase Registry: declared up front so -Action ListPhases can work
 # without running any phase functions. Func names are bound by
@@ -4570,7 +4581,7 @@ function Get-DotNetCuCache {
 # observations.
 #
 # This section maintains, for each in-scope OS, a 36-month rolling
-# Catalog probe history in data/cache-du-Server<NNNN>.json. At
+# Catalog probe history in data/cache-dynamicupdate-Server<NNNN>.json. At
 # ISO-build time the Refresher consults the cache and selects, for
 # each DU type, the most recent publish within the 36-month window. If
 # the window contains zero entries, the Refresher logs a warning and
@@ -4582,10 +4593,10 @@ function Get-DotNetCuCache {
 # the cache and never hit the Catalog for DU discovery.
 #
 # Files this section reads or writes:
-#   data/cache-du-Server2016.json
-#   data/cache-du-Server2019.json
-#   data/cache-du-Server2022.json
-#   data/cache-du-Server2025.json
+#   data/cache-dynamicupdate-Server2016.json
+#   data/cache-dynamicupdate-Server2019.json
+#   data/cache-dynamicupdate-Server2022.json
+#   data/cache-dynamicupdate-Server2025.json
 #
 # See SPEC.md section B.23.6 for the design rationale and the cadence
 # table that grounded these observations.
@@ -4596,14 +4607,14 @@ $Script:DynamicUpdateCacheSchema       = '1.0'
 function Get-DynamicUpdateCachePath {
     <#
     .SYNOPSIS
-        Resolve the on-disk path of data/cache-du-Server<NNNN>.json for
+        Resolve the on-disk path of data/cache-dynamicupdate-Server<NNNN>.json for
         the given OS.
     .DESCRIPTION
         Tests can override the directory by passing -DataDir; production
         callers omit it and let the default Get-DataDirectoryPath apply.
     .EXAMPLE
         Get-DynamicUpdateCachePath -OsVersion Server2025
-        # -> /.../data/cache-du-Server2025.json
+        # -> /.../data/cache-dynamicupdate-Server2025.json
     #>
     [OutputType([string])]
     param(
@@ -4613,7 +4624,7 @@ function Get-DynamicUpdateCachePath {
     if ([string]::IsNullOrEmpty($DataDir)) {
         $DataDir = Get-DataDirectoryPath
     }
-    return (Join-Path $DataDir ('cache-du-' + $OsVersion + '.json'))
+    return (Join-Path $DataDir ('cache-dynamicupdate-' + $OsVersion + '.json'))
 }
 
 function New-EmptyDynamicUpdateCache {
@@ -4636,7 +4647,7 @@ function New-EmptyDynamicUpdateCache {
 function Get-DynamicUpdateCache {
     <#
     .SYNOPSIS
-        Read data/cache-du-Server<NNNN>.json and return the deserialised
+        Read data/cache-dynamicupdate-Server<NNNN>.json and return the deserialised
         object. Returns a fresh empty cache when the file does not
         exist; never throws on missing-file (matches the "latest known
         good" stance documented in SPEC B.23.6).
@@ -4670,7 +4681,7 @@ function Get-DynamicUpdateCache {
 function Save-DynamicUpdateCache {
     <#
     .SYNOPSIS
-        Persist a cache object to data/cache-du-Server<NNNN>.json with
+        Persist a cache object to data/cache-dynamicupdate-Server<NNNN>.json with
         UTF-8 + LF + no-BOM, matching the project-wide cache file
         conventions.
     #>
@@ -5726,7 +5737,7 @@ function Resolve-PatchSetFromReleaseInfo {
 
     $discoveries = @(Get-PatchSetFromReleaseInfoDiscovery -OsVersion $OsVersion -PatchMonth $PatchMonth -DataDir $DataDir)
     if ($discoveries.Count -eq 0) {
-        Write-Caution ('Discovery returned zero records for OS={0} Month={1}. Ensure data/cache-release-info.json, data/cache-dotnet-cu.json and data/cache-du-{0}.json have been populated by the refresh action.' -f $OsVersion, $PatchMonth)
+        Write-Caution ('Discovery returned zero records for OS={0} Month={1}. Ensure data/cache-release-info.json, data/cache-dotnet-cu.json and data/cache-dynamicupdate-{0}.json have been populated by the refresh action.' -f $OsVersion, $PatchMonth)
         return @()
     }
     Write-Step ('  Discovered {0} record(s): {1}' -f $discoveries.Count, (($discoveries | ForEach-Object { $_.Type }) -join ', '))
@@ -7861,7 +7872,7 @@ function ConvertFrom-WsusScnPackageXml {
         FileLocationsObserved = $totalFileLocations
         FileLocationsRetained = $fileLocations.Count
         PayloadDigestsOrphaned = $orphanDigestTotal
-        Now                   = $Now.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        EvaluatedAt           = $Now.ToString('yyyy-MM-ddTHH:mm:ssZ')
         RecencyMonths         = $RecencyMonths
         ScopeProductGuidCount        = $prodSet.Count
         ScopeClassificationGuidCount = $classSet.Count
@@ -7930,17 +7941,17 @@ function New-WsusScnDependencyDatabase {
 
     # Build source-cab provenance block
     $cabMeta = [pscustomobject]@{
-        path   = $null
-        size   = $null
-        sha256 = $null
+        sourceUrl = (Get-WsusScnCabSourceUrl)
+        size      = $null
+        sha256    = $null
     }
     if ($SourceCabPath -and (Test-Path -LiteralPath $SourceCabPath -PathType Leaf)) {
         $cabFile = Get-Item -LiteralPath $SourceCabPath
         $sha = (Get-FileHash -LiteralPath $SourceCabPath -Algorithm SHA256).Hash.ToLowerInvariant()
         $cabMeta = [pscustomobject]@{
-            path   = $cabFile.FullName
-            size   = $cabFile.Length
-            sha256 = $sha
+            sourceUrl = (Get-WsusScnCabSourceUrl)
+            size      = $cabFile.Length
+            sha256    = $sha
         }
     }
 
@@ -7971,6 +7982,8 @@ function New-WsusScnDependencyDatabase {
     # Construct the Layer 2 document
     $document = [pscustomobject]@{
         _meta = [pscustomobject]@{
+            dataContractId      = $Script:DataContractId
+            dataContractVersion = $Script:DataContractVersion
             generator        = 'Update-WindowsServerIso.ps1 wsusscn2 parser pipeline'
             scriptVersion    = $Script:ScriptVersion
             scriptTag        = $Script:ScriptTag
@@ -7980,7 +7993,7 @@ function New-WsusScnDependencyDatabase {
                 productGuids        = @($Script:WsusScnOsCategoryGuids.Values)
                 classificationGuids = @($Script:WsusScnUpdateClassificationGuids.Values)
                 recencyMonths       = $ParseResult.Stats.RecencyMonths
-                now                 = $ParseResult.Stats.Now
+                evaluatedAt         = $ParseResult.Stats.EvaluatedAt
             }
             stats            = [pscustomobject]@{
                 updatesObserved        = $ParseResult.Stats.UpdatesObserved
@@ -8000,6 +8013,120 @@ function New-WsusScnDependencyDatabase {
 
     Write-Verbose ('New-WsusScnDependencyDatabase: wrote {0:N0} updates to {1}' -f $updatesEnriched.Count, $OutputPath)
     return $OutputPath
+}
+
+function Test-DataContractConsistency {
+    <#
+    .SYNOPSIS
+        Cross-cutting data-quality gate: verify every data artifact carries the
+        Script's shared data-contract identity (Id + Version).
+    .DESCRIPTION
+        The sub-project holds a single source of truth for its data contract in
+        $Script:DataContractId (a stable family GUID) and
+        $Script:DataContractVersion (an epoch bumped on any breaking shape
+        change to any data model). Every generated artifact stamps both into
+        its _meta, so a single pass validates the whole set rather than
+        reconciling independent per-model versions.
+
+        Per-artifact Status:
+          Current - id matches and version equals the Script's epoch.
+          Stale   - id matches but version is older, OR _meta is present but
+                    unstamped (a pre-contract artifact); regenerate via the
+                    relevant Refresh action.
+          Refuse  - version is newer than this Script understands.
+          Foreign - dataContractId is present but is not this family GUID.
+          Unknown - file has no _meta (not a contract-bearing artifact).
+        OverallStatus is the worst status across all inspected artifacts;
+        Unknown does not worsen the overall result.
+    .PARAMETER Path
+        One or more *.json artifact paths to inspect. When omitted, the
+        sub-project data directory is scanned for *.json files.
+    .OUTPUTS
+        [pscustomobject] with OverallStatus, Files (per-artifact detail),
+        and Reasons.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [string[]] $Path = @()
+    )
+
+    $targets = New-Object 'System.Collections.Generic.List[string]'
+    if ($Path -and $Path.Count -gt 0) {
+        foreach ($p in $Path) { $targets.Add($p) }
+    } else {
+        $dataDir = Join-Path $Script:ScriptRoot 'data'
+        if (Test-Path -LiteralPath $dataDir) {
+            foreach ($f in (Get-ChildItem -LiteralPath $dataDir -Filter '*.json' -File)) {
+                $targets.Add($f.FullName)
+            }
+        }
+    }
+
+    $rank = @{ 'Current' = 0; 'Unknown' = 0; 'Stale' = 2; 'Refuse' = 3; 'Foreign' = 3 }
+    $files   = New-Object 'System.Collections.Generic.List[object]'
+    $reasons = New-Object 'System.Collections.Generic.List[string]'
+    $worst   = 'Current'
+
+    foreach ($t in $targets) {
+        $status       = 'Unknown'
+        $foundId      = $null
+        $foundVersion = $null
+        $reason       = $null
+        if (-not (Test-Path -LiteralPath $t -PathType Leaf)) {
+            $status = 'Foreign'
+            $reason = 'file not found'
+        } else {
+            $doc = $null
+            try {
+                $doc = Get-Content -LiteralPath $t -Raw -Encoding UTF8 | ConvertFrom-Json
+            } catch {
+                $status = 'Foreign'
+                $reason = 'not valid JSON'
+            }
+            if ($doc -and ($doc.PSObject.Properties.Name -contains '_meta')) {
+                $meta         = $doc._meta
+                $foundId      = $meta.dataContractId
+                $foundVersion = $meta.dataContractVersion
+                if (-not $foundId) {
+                    $status = 'Stale'
+                    $reason = 'unstamped (pre-contract) artifact; regenerate'
+                } elseif ($foundId -ne $Script:DataContractId) {
+                    $status = 'Foreign'
+                    $reason = ('dataContractId {0} is not this family' -f $foundId)
+                } elseif ($null -eq $foundVersion) {
+                    $status = 'Stale'
+                    $reason = 'no dataContractVersion; regenerate'
+                } elseif ([int]$foundVersion -eq $Script:DataContractVersion) {
+                    $status = 'Current'
+                } elseif ([int]$foundVersion -lt $Script:DataContractVersion) {
+                    $status = 'Stale'
+                    $reason = ('dataContractVersion {0} < {1}; regenerate' -f $foundVersion, $Script:DataContractVersion)
+                } else {
+                    $status = 'Refuse'
+                    $reason = ('dataContractVersion {0} > {1}; artifact newer than this script' -f $foundVersion, $Script:DataContractVersion)
+                }
+            } elseif ($doc) {
+                $status = 'Unknown'
+                $reason = 'no _meta (not a contract-bearing artifact)'
+            }
+        }
+        if ($reason) { $reasons.Add(('{0}: {1}' -f (Split-Path -Leaf $t), $reason)) }
+        $files.Add([pscustomobject]@{
+            Path                = $t
+            Status              = $status
+            DataContractId      = $foundId
+            DataContractVersion = $foundVersion
+            Reason              = $reason
+        })
+        if ($rank[$status] -gt $rank[$worst]) { $worst = $status }
+    }
+
+    return [pscustomobject]@{
+        OverallStatus = $worst
+        Files         = $files.ToArray()
+        Reasons       = $reasons.ToArray()
+    }
 }
 
 function Invoke-WuaOfflineScan {
@@ -13186,7 +13313,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
            supported OS (Server 2022 and Server 2025 only; Server 2019
            per SPEC B.23.6 and Server 2016 per the modern-DU naming
            convention have no DU and are skipped). Each probe is
-           recorded into data/cache-du-Server<N>.json via
+           recorded into data/cache-dynamicupdate-Server<N>.json via
            Add-DynamicUpdateCacheEntry, including the "empty-marker"
            case so the resolver can distinguish "Microsoft has not
            published a DU for this month" from "we have not yet
