@@ -2602,6 +2602,35 @@ of file / 7-Zip I/O so they are unit-testable offline (T15):
   functions plus the §B.19.4 7-Zip invocation pattern; T15
   (`wsusscn2_servicing_stack_test.py`) is the executable contract.
 
+The populate of the live Layer 2 (M1 part 5b, r11.10) is a two-pass step
+that keeps the cab/7-Zip I/O isolated so the offline CI exercises the
+pure logic:
+
+- Stage 3 now also records, per in-scope bundle, the leaf revision ids
+  bundled under it (`LeafRevisionIds`), so the LCU leaf can be located
+  without re-parsing the Master XML.
+- **`Select-WsusScnLcuLeafRevision`** (pure) picks the LCU leaf from a
+  bundle's `LeafRevisionIds`: a lone leaf, else the leaf whose revision
+  id is the closest below the bundle's own (the LCU is emitted just
+  before its bundle in the cab), else the greatest.
+- **`Invoke-WsusScnLeafServicingStackExtract`** (the only I/O part)
+  resolves each leaf revision to its per-package cab via
+  `Resolve-WsusScnRevisionToCab`, extracts the per-package cab and then
+  only the leaf's `c/<rev>` entry with 7-Zip, and returns a
+  revision → CBS-text map.
+- **`Update-WsusScnServicingStackFromMeta`** (pure) writes
+  `requiredServicingStackVersion` / `servicingStackModel` (and a null
+  `providedServicingStackVersion`, since the provided SS is a property of
+  the configured patch set, resolved at readiness-check time) onto each
+  update from that map, leaving updates with no leaf metadata unchanged.
+
+The two pure halves are covered offline by T18
+(`wsusscn2_servicing_stack_populate_test.py`) with the same CBS fixtures
+as T15; only `Invoke-WsusScnLeafServicingStackExtract` needs a real cab
+(the live monthly CI path). `Get-SevenZipPath` resolves the Linux
+`7z`/`7za` binaries in addition to the Windows `7z.exe`, so the I/O
+wrapper can also be exercised against a cached cab on Linux.
+
 
 #### B.19.13.1 `Test-PatchDependencyClosureFromGraph`
 

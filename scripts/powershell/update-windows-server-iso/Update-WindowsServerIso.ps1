@@ -538,8 +538,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.9'
-$Script:ScriptTag     = 'wsusscn2-layer2-kbids-populate'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.10'
+$Script:ScriptTag     = 'wsusscn2-servicing-stack-populate'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6887,6 +6887,13 @@ function Get-SevenZipPath {
     }
     $cmd = Get-Command 7z.exe -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
+    # Non-Windows / PATH fallbacks: the Linux p7zip binaries (7z, 7za) used by
+    # the offline CI and the test harness. The Windows path is tried first so
+    # this never changes behaviour on Windows.
+    foreach ($name in @('7z','7za')) {
+        $c = Get-Command $name -ErrorAction SilentlyContinue
+        if ($c) { return $c.Source }
+    }
     return $null
 }
 
@@ -7627,6 +7634,211 @@ function Get-WsusScnServicingStackInfo {
     }
 }
 
+function Select-WsusScnLcuLeafRevision {
+    <#
+    .SYNOPSIS
+        Pick the LCU leaf revision for a Layer 2 bundle (M1 part 5b).
+    .DESCRIPTION
+        A wsusscn2 bundle's servicing-stack requirement lives in the CBS
+        metadata of its LCU leaf, not in the bundle record. Stage 3 captures
+        the leaf revision ids bundled under each in-scope bundle
+        (LeafRevisionIds); this pure function chooses which one is the LCU.
+
+        Heuristic, in order: if exactly one leaf revision is present, use it;
+        otherwise prefer the leaf whose revision id is numerically closest
+        below the bundle's own revision id (the LCU leaf is emitted just
+        before its bundle in the cab, as observed empirically: bundle
+        45255709 -> leaf 45255708). Falls back to the greatest leaf revision
+        id. Returns $null when there are no leaf revisions.
+
+        Pure function: integer/string inputs, no I/O, unit-testable offline.
+    .PARAMETER BundleRevisionId
+        The bundle's own revision id.
+    .PARAMETER LeafRevisionIds
+        The leaf revision ids bundled under it (Stage 3 LeafRevisionIds).
+    .OUTPUTS
+        [string] the chosen leaf revision id, or $null.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string] $BundleRevisionId,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]] $LeafRevisionIds
+    )
+    $revs = @($LeafRevisionIds | Where-Object { $_ })
+    if ($revs.Count -eq 0) { return $null }
+    if ($revs.Count -eq 1) { return $revs[0] }
+
+    $bundleNum = 0L
+    [void][long]::TryParse($BundleRevisionId, [ref]$bundleNum)
+
+    $best = $null; $bestDelta = $null; $maxRev = $null
+    foreach ($r in $revs) {
+        $rn = 0L
+        if (-not [long]::TryParse($r, [ref]$rn)) { continue }
+        if ($null -eq $maxRev -or $rn -gt $maxRev) { $maxRev = $rn; $maxRevStr = $r }
+        if ($bundleNum -gt 0 -and $rn -le $bundleNum) {
+            $delta = $bundleNum - $rn
+            if ($null -eq $bestDelta -or $delta -lt $bestDelta) { $bestDelta = $delta; $best = $r }
+        }
+    }
+    if ($best) { return $best }
+    return $maxRevStr
+}
+
+function Update-WsusScnServicingStackFromMeta {
+    <#
+    .SYNOPSIS
+        Populate servicing-stack fields on Layer 2 updates from already-read
+        CBS metadata (M1 part 5b, pure pass).
+    .DESCRIPTION
+        Second pass over the Layer 2 document. For each in-scope update, the
+        caller supplies the LCU leaf's CBS metadata text in $LeafMetaByRevision
+        (keyed by leaf revision id); this function derives the servicing-stack
+        facts via Get-WsusScnServicingStackInfo and writes
+        requiredServicingStackVersion / providedServicingStackVersion /
+        servicingStackModel onto the update. Updates whose leaf metadata is
+        absent are left unchanged (fields stay null/absent), so a partial
+        extraction degrades gracefully.
+
+        This is the I/O-free half of the populate step: it takes the document
+        object and a revision->text map, so it is unit-testable offline with
+        the same CBS fixtures T15 uses. The 7-Zip extraction that produces the
+        map lives in Invoke-WsusScnLeafServicingStackExtract.
+
+        providedServicingStackVersion is left $null here: the SSU that
+        supplies it is a property of the configured patch set, not of the LCU
+        in isolation, and is resolved at readiness-check time (the WimMountState
+        / PolicyOverride inputs to Test-PatchServicingReadinessFromGraph).
+    .PARAMETER Document
+        The Layer 2 document object (with .updates), as parsed from JSON.
+    .PARAMETER LeafMetaByRevision
+        Hashtable: leaf revision id (string) -> CBS metadata text (string).
+    .PARAMETER LeafRevisionByUpdateRevision
+        Hashtable: bundle update revision id -> chosen LCU leaf revision id,
+        as picked by Select-WsusScnLcuLeafRevision. Lets this pure pass avoid
+        re-deriving the leaf choice.
+    .OUTPUTS
+        [pscustomobject] a summary: @{ Populated = <int>; Skipped = <int> }.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [pscustomobject] $Document,
+        [Parameter(Mandatory)] [hashtable] $LeafMetaByRevision,
+        [Parameter(Mandatory)] [hashtable] $LeafRevisionByUpdateRevision
+    )
+    $populated = 0; $skipped = 0
+    foreach ($u in @($Document.updates)) {
+        $urev = [string]$u.revisionId
+        $leafRev = $null
+        if ($LeafRevisionByUpdateRevision.ContainsKey($urev)) { $leafRev = [string]$LeafRevisionByUpdateRevision[$urev] }
+        if (-not $leafRev -or -not $LeafMetaByRevision.ContainsKey($leafRev)) { $skipped++; continue }
+
+        $info = Get-WsusScnServicingStackInfo -CbsMetaXml ([string]$LeafMetaByRevision[$leafRev])
+        # Add or overwrite the SS fields (full spelling, schema names).
+        $u | Add-Member -NotePropertyName 'requiredServicingStackVersion' -NotePropertyValue $info.RequiredServicingStackVersion -Force
+        $u | Add-Member -NotePropertyName 'providedServicingStackVersion' -NotePropertyValue $null -Force
+        $u | Add-Member -NotePropertyName 'servicingStackModel' -NotePropertyValue $info.ServicingStackModel -Force
+        $populated++
+    }
+    return [pscustomobject]@{ Populated = $populated; Skipped = $skipped }
+}
+
+function Invoke-WsusScnLeafServicingStackExtract {
+    <#
+    .SYNOPSIS
+        I/O wrapper: extract each LCU leaf's CBS metadata text from the cab
+        staging directory (M1 part 5b, live-CI only).
+    .DESCRIPTION
+        The only 7-Zip-touching part of the servicing-stack populate. For each
+        (bundle revision -> leaf revision) pair, resolves the per-package cab
+        via Resolve-WsusScnRevisionToCab (using the cab's index.xml), extracts
+        the per-package cab from the top-level wsusscn2.cab if not already
+        present, then extracts only the leaf's c/<revisionId> entry and reads
+        it as text. Returns the revision->text map consumed by the pure
+        Update-WsusScnServicingStackFromMeta.
+
+        Kept deliberately thin so the offline gates exercise the pure halves
+        (Select-WsusScnLcuLeafRevision, Get-WsusScnServicingStackInfo,
+        Update-WsusScnServicingStackFromMeta) and only this function needs a
+        real cab + 7-Zip (the Windows / live-monthly CI path).
+    .PARAMETER LeafRevisions
+        The set of leaf revision ids to extract (strings).
+    .PARAMETER CabPath
+        Path to the top-level wsusscn2.cab.
+    .PARAMETER StagingDirectory
+        Working directory; the cab's index.xml and per-package cabs are
+        extracted here on demand.
+    .OUTPUTS
+        [hashtable] leaf revision id -> CBS metadata text.
+    #>
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]] $LeafRevisions,
+        [Parameter(Mandatory)] [string] $CabPath,
+        [Parameter(Mandatory)] [string] $StagingDirectory
+    )
+    $result = @{}
+    if (-not (Test-Path -LiteralPath $CabPath -PathType Leaf)) {
+        throw ('wsusscn2.cab not found at: {0}' -f $CabPath)
+    }
+    $sevenZip = Get-SevenZipPath
+    if (-not $sevenZip) {
+        Install-SevenZipFallback -DownloadDir $StagingDirectory
+        $sevenZip = Get-SevenZipPath
+        if (-not $sevenZip) { throw '7-Zip is required for servicing-stack extraction but is not available.' }
+    }
+    if (-not (Test-Path -LiteralPath $StagingDirectory)) {
+        New-Item -ItemType Directory -Path $StagingDirectory -Force | Out-Null
+    }
+
+    # Ensure index.xml is available.
+    $indexPath = Join-Path $StagingDirectory 'index.xml'
+    if (-not (Test-Path -LiteralPath $indexPath -PathType Leaf)) {
+        $null = & $sevenZip 'x' '-y' '-bso0' ('-o{0}' -f $StagingDirectory) $CabPath 'index.xml' 2>&1
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $indexPath)) {
+            throw 'failed to extract index.xml from wsusscn2.cab'
+        }
+    }
+    $indexXml = Get-Content -LiteralPath $indexPath -Raw -Encoding utf8
+
+    $perPackageDir = Join-Path $StagingDirectory 'packages'
+    if (-not (Test-Path -LiteralPath $perPackageDir)) { New-Item -ItemType Directory -Path $perPackageDir -Force | Out-Null }
+    $metaDir = Join-Path $StagingDirectory 'meta'
+    if (-not (Test-Path -LiteralPath $metaDir)) { New-Item -ItemType Directory -Path $metaDir -Force | Out-Null }
+
+    $total = @($LeafRevisions | Where-Object { $_ }).Count
+    $idx = 0
+    foreach ($rev in @($LeafRevisions | Where-Object { $_ } | Select-Object -Unique)) {
+        $idx++
+        if ($idx % 10 -eq 0 -or $idx -eq 1) {
+            Write-Verbose ('Servicing-stack extract: leaf {0}/{1} (revision {2})' -f $idx, $total, $rev)
+        }
+        $cabName = Resolve-WsusScnRevisionToCab -IndexXml $indexXml -RevisionId ([long]$rev)
+        if (-not $cabName) { continue }
+
+        # Extract the per-package cab from the top-level cab if needed.
+        $pkgCab = Join-Path $perPackageDir $cabName
+        if (-not (Test-Path -LiteralPath $pkgCab -PathType Leaf)) {
+            $null = & $sevenZip 'x' '-y' '-bso0' ('-o{0}' -f $perPackageDir) $CabPath $cabName 2>&1
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $pkgCab)) { continue }
+        }
+
+        # Extract only c/<rev> from the per-package cab.
+        $entry = ('c/{0}' -f $rev)
+        $outRevDir = Join-Path $metaDir $rev
+        if (-not (Test-Path -LiteralPath $outRevDir)) { New-Item -ItemType Directory -Path $outRevDir -Force | Out-Null }
+        $null = & $sevenZip 'x' '-y' '-bso0' ('-o{0}' -f $outRevDir) $pkgCab $entry 2>&1
+        $metaFile = Join-Path $outRevDir ('c/{0}' -f $rev)
+        if (Test-Path -LiteralPath $metaFile -PathType Leaf) {
+            $result[$rev] = Get-Content -LiteralPath $metaFile -Raw -Encoding utf8
+        }
+    }
+    return $result
+}
+
 function Test-PatchServicingReadinessFromGraph {
     <#
     .SYNOPSIS
@@ -8100,6 +8312,11 @@ function ConvertFrom-WsusScnPackageXml {
     # bundleRevisionId -> List[string] of payload digests contributed by
     # leaf updates that name this revision in their <BundledBy>.
     $bundleChildPayloads = @{}
+    # Parallel to bundleChildPayloads: bundle revision -> list of leaf
+    # revision ids bundled under it. Captured so the servicing-stack
+    # populate step (M1 part 5b) can locate each bundle's LCU leaf, whose
+    # per-package CBS metadata carries the installerAssembly SS version.
+    $bundleChildLeafRevs = @{}
 
     # digest -> URL
     $fileLocations = @{}
@@ -8255,6 +8472,10 @@ function ConvertFrom-WsusScnPackageXml {
                             foreach ($d in $payloadDigests) {
                                 $bundleChildPayloads[$parentRev].Add($d)
                             }
+                            if (-not $bundleChildLeafRevs.ContainsKey($parentRev)) {
+                                $bundleChildLeafRevs[$parentRev] = New-Object 'System.Collections.Generic.List[string]'
+                            }
+                            if ($revisionId) { $bundleChildLeafRevs[$parentRev].Add([string]$revisionId) }
                         }
                     }
 
@@ -8374,6 +8595,10 @@ function ConvertFrom-WsusScnPackageXml {
                 $orphanDigestTotal++
             }
         }
+        $leafRevs = New-Object 'System.Collections.Generic.List[string]'
+        if ($b.RevisionId -and $bundleChildLeafRevs.ContainsKey($b.RevisionId)) {
+            foreach ($lr in $bundleChildLeafRevs[$b.RevisionId]) { $leafRevs.Add($lr) }
+        }
         $updatesEnriched.Add([pscustomobject]@{
             UpdateId                = $b.UpdateId
             RevisionId              = $b.RevisionId
@@ -8390,6 +8615,7 @@ function ConvertFrom-WsusScnPackageXml {
             SupersededByRevisionIds = $b.SupersededByRevisionIds
             PayloadFileDigests      = $digestSet.ToArray()
             PayloadUrls             = $urls.ToArray()
+            LeafRevisionIds         = $leafRevs.ToArray()
         })
     }
 
@@ -8605,7 +8831,17 @@ function Test-DataContractConsistency {
 
     $targets = New-Object 'System.Collections.Generic.List[string]'
     if ($Path -and $Path.Count -gt 0) {
-        foreach ($p in $Path) { $targets.Add($p) }
+        foreach ($p in $Path) {
+            # A directory argument expands to its *.json files; a file argument
+            # is taken as-is. This lets callers pass the data root directly.
+            if (Test-Path -LiteralPath $p -PathType Container) {
+                foreach ($f in (Get-ChildItem -LiteralPath $p -Filter '*.json' -File)) {
+                    $targets.Add($f.FullName)
+                }
+            } else {
+                $targets.Add($p)
+            }
+        }
     } else {
         $dataDir = Join-Path $Script:ScriptRoot 'data'
         if (Test-Path -LiteralPath $dataDir) {
@@ -14293,6 +14529,25 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
             $layer1Result = Update-Layer1DependencyVerification -ParseResult $parseResult -DataRoot $dataRoot
             Write-Ok ('Layer 1 OK : updated={0} unchanged={1} missingProductData={2}' -f `
                 $layer1Result.UpdatedCount, $layer1Result.UnchangedCount, $layer1Result.MissingCount)
+        }
+
+        # ---- Stage 6: cross-cutting data-contract consistency check ----
+        # After Layer 2 is (re)written and Layer 1 is propagated, verify every
+        # data artifact carries the Script's shared data-contract identity, so
+        # a single pass catches a stale/foreign/unstamped artifact instead of
+        # leaving the mismatch to be discovered at consume time.
+        Set-DebugStep -Step 'data-contract-consistency'
+        Write-SubSection 'Data-contract consistency across data artifacts'
+        $contract = Test-DataContractConsistency -Path $dataRoot
+        switch ($contract.OverallStatus) {
+            'Current' { Write-Ok ('Data contract OK : all {0} stamped artifact(s) Current.' -f @($contract.Files | Where-Object { $_.Status -ne 'Unknown' }).Count) }
+            'Stale'   { Write-Caution ('Data contract STALE : one or more artifacts predate the current contract epoch ({0}). Regenerate via the relevant Refresh action.' -f $Script:DataContractVersion) }
+            'Refuse'  { Write-Fail ('Data contract REFUSE : an artifact declares a newer contract version than this script understands. Update the script before consuming.') }
+            'Foreign' { Write-Fail ('Data contract FOREIGN : an artifact carries a dataContractId from a different family. Inspect provenance.') }
+            default   { Write-Caution ('Data contract status: {0}.' -f $contract.OverallStatus) }
+        }
+        foreach ($cf in @($contract.Files | Where-Object { $_.Status -notin @('Current','Unknown') })) {
+            Write-Detail ('{0}: {1}' -f $cf.Path, $cf.Status)
         }
 
         # ---- Cleanup staging ----

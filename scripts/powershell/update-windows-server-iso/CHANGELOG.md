@@ -16,6 +16,27 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.10 - wsusscn2 servicing-stack populate functions and data-contract wiring (M1, parts 5b + 6)
+
+Completes M1's function set. Adds the servicing-stack populate (the I/O-free pure halves plus a thin 7-Zip wrapper, designed so the offline CI exercises the logic and only the wrapper needs a real cab), and wires the existing `Test-DataContractConsistency` into the A04 RefreshDependencyDatabase pipeline. `$Script:ScriptVersion` is bumped `r11.9` -> `r11.10`; `$Script:ScriptTag` is set to `wsusscn2-servicing-stack-populate`. Populating the committed `data/wsusscn2-database.json` with these SS fields (which requires a full A04 run over the real cab) is a follow-up; the fields stay nullable/optional and the readiness check already tolerates their absence.
+
+**M1 part 5b — servicing-stack populate (two-pass, I/O isolated).**
+- Stage 3 (`ConvertFrom-WsusScnPackageXml`) now also records, per in-scope bundle, the leaf revision ids bundled under it (`LeafRevisionIds`), via a `bundleChildLeafRevs` map parallel to the existing payload roll-up. This is a pure addition (text in, no I/O); T12/T13 stay green.
+- **`Select-WsusScnLcuLeafRevision`** (pure) — picks a bundle's LCU leaf revision from its `LeafRevisionIds`: a lone leaf; else the leaf whose revision id is the closest below the bundle's own (the LCU is emitted just before its bundle in the cab — empirically bundle 45255709 -> leaf 45255708); else the greatest; empty -> null.
+- **`Update-WsusScnServicingStackFromMeta`** (pure) — second pass over the Layer 2 document; from a revision -> CBS-text map and a bundle-revision -> leaf-revision map, derives SS facts via `Get-WsusScnServicingStackInfo` and writes `requiredServicingStackVersion` / `servicingStackModel` (and a null `providedServicingStackVersion`, since the provided SS belongs to the configured patch set and is resolved at readiness-check time) onto each update; updates with no leaf metadata are left unchanged.
+- **`Invoke-WsusScnLeafServicingStackExtract`** (the only I/O part) — resolves each leaf revision to its per-package cab via `Resolve-WsusScnRevisionToCab`, extracts the per-package cab then only the leaf's `c/<rev>` entry with 7-Zip, and returns the revision -> CBS-text map. Kept thin so the offline gates cover the pure halves.
+- **`Get-SevenZipPath`** now also resolves the Linux `7z` / `7za` binaries (after the Windows `7z.exe` probe, so Windows behaviour is unchanged), letting the I/O wrapper be exercised against a cached cab on Linux/Claude/CI.
+- Verified end-to-end against the live cab: the newest 2016 / 2022 / 2025 bundles resolved to leaves 45255708 / 45255607 / 295 and populated `separate` + `10.0.14393.7692` / `combined` + null / `checkpoint` + null respectively — matching M1 part 2.
+- **New gate T18 (`wsusscn2_servicing_stack_populate_test.py`)** — 17 assertions over the two pure functions using the same CBS fixtures as T15.
+
+**M1 part 6 — data-contract consistency wiring.**
+- `Test-DataContractConsistency` is now called at the end of A04 (after Layer 2 is written and Layer 1 propagated), classifying every artifact in the data root and logging the worst status, so a stale / foreign / unstamped artifact is caught at refresh time instead of at consume time.
+- The function gained directory-argument support: a directory in `-Path` expands to its `*.json` files (the A04 wiring passes the data root). Previously a directory was mis-read as a single file and reported Foreign.
+- **New gate T19 (`wsusscn2_data_contract_test.py`)** — 11 assertions covering each status (Current / Stale / Refuse / Foreign / Unknown), directory expansion, the roll-up (Unknown never worsens), and that the committed Layer 2 DB classifies Current.
+
+- **Docs.** SPEC §B.19.13.0 documents the populate functions and the Linux 7-Zip resolution; `TESTING.md` and `tests/README.md` register T18 and T19 (suite is now T1-T19).
+- **Verification.** psa.py 4.2.0 0/0/0; `pwsh` 7.4.6 ParseFile 0 errors; full offline suite green under real PowerShell, including **T18 17** and **T19 11**: T12 23, T13 15, T14 10, T15 16, T16 21, T17 15, T18 17, T19 11, scope-invariants 23, Layer 2 schema gate 16, config-schema 14, canonical-format 29, canonical 26, release-info-parser 13, release-info-resolver 22, dynamic-update-cache 20, catalog-fixture 13, catalog-title-tokens 18, dotnet-cu 16.
+
 ### r11.9 - wsusscn2 Layer 2 kbIds populate, DB regeneration, and Layer 2 schema gate (M1, part 5a)
 
 First half of M1's data step. Populates `kbIds` on every Layer 2 update, regenerates the committed `data/wsusscn2-database.json` from the real cab so it conforms to the schema, and adds a gate that keeps the shipped DB in sync with the contract. `$Script:ScriptVersion` is bumped `r11.8` -> `r11.9`; `$Script:ScriptTag` is set to `wsusscn2-layer2-kbids-populate`. The per-leaf servicing-stack extraction (populating `requiredServicingStackVersion` etc.) is deliberately deferred to M1 part 5b; those fields stay optional/nullable in the schema and the readiness check already tolerates their absence.
