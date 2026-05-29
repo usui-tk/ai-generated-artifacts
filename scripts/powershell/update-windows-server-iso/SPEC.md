@@ -2678,10 +2678,12 @@ recovered from `payloadUrls`, matching the scope-invariants gate) and by
 Verdict precedence: `NotInDatabase` > `SsTooOld` > `Superseded` >
 `Pass`. `OverallStatus` is `Fail` if any `NotInDatabase` / `SsTooOld`,
 else `Warning` if any `Superseded`, else `Pass`; a missing or unreadable
-Layer 2 yields `Available = $false` / `OverallStatus = 'Unknown'`. The
-`_meta.generatedAt` value is normalised back to a UTC ISO-8601 string
-(ConvertFrom-Json coerces it to `[datetime]`). T16
-(`wsusscn2_readiness_verdict_test.py`) is the executable contract.
+Layer 2 yields `Available = $false` / `OverallStatus = 'Unknown'`. Layer 2
+is read with `ConvertFrom-CanonicalJson` (the project's hand-rolled parser
+that preserves the textual form of dates on every PowerShell version), so
+`_meta.generatedAt` survives as its canonical ISO-8601 string with no
+reformatting. T16 (`wsusscn2_readiness_verdict_test.py`) is the executable
+contract.
 
 
 #### B.19.13.2 Relationship to `Test-PatchDependencyClosureOnMount` (§B.13)

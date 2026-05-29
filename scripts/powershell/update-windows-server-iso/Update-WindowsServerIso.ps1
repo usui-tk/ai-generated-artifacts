@@ -7728,7 +7728,7 @@ function Test-PatchServicingReadinessFromGraph {
 
     $db = $null
     try {
-        $db = Get-Content -LiteralPath $DatabasePath -Raw -Encoding utf8 | ConvertFrom-Json
+        $db = Get-Content -LiteralPath $DatabasePath -Raw -Encoding utf8 | ConvertFrom-CanonicalJson
     } catch {
         $reasons.Add(('Layer 2 database is not valid JSON: {0}' -f $_.Exception.Message))
         return [pscustomobject]@{
@@ -7743,15 +7743,10 @@ function Test-PatchServicingReadinessFromGraph {
 
     $dbGeneratedAt = $null
     if ($db._meta -and $db._meta.generatedAt) {
-        $rawGen = $db._meta.generatedAt
-        if ($rawGen -is [datetime]) {
-            # ConvertFrom-Json coerces ISO-8601 strings to [datetime]; render
-            # back to a stable UTC ISO-8601 string rather than a culture-
-            # dependent default ToString().
-            $dbGeneratedAt = $rawGen.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-        } else {
-            $dbGeneratedAt = [string]$rawGen
-        }
+        # ConvertFrom-CanonicalJson preserves the original textual form of
+        # dates (it never coerces ISO-8601 strings to [datetime]), so the
+        # value survives as the canonical string with no reformatting needed.
+        $dbGeneratedAt = [string]$db._meta.generatedAt
     }
 
     $updates = @()
