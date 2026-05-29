@@ -16,6 +16,25 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.11 - wsusscn2 servicing-stack Stage 4b wiring (memory-safe streaming) and DB regeneration (M1, part 5b finish)
+
+Wires the servicing-stack populate into the A04 RefreshDependencyDatabase pipeline as Stage 4b, behind a memory-safe streaming extractor, and regenerates the committed `data/wsusscn2-database.json` with the SS fields filled in for all 138 in-scope updates. `$Script:ScriptVersion` is bumped `r11.10` -> `r11.11`; `$Script:ScriptTag` becomes `wsusscn2-servicing-stack-streaming-populate`.
+
+**Memory-safe streaming extractor.**
+- **New `Get-WsusScnCbsServicingSnippet`** — an LCU leaf's `c/<rev>` CBS metadata is a single newline-free line up to ~67 MB (Server 2016); reading it whole with `Get-Content -Raw` peaked ~1.5 GB per leaf and drove the populate out of memory on a 4 GB host. The new scanner reads the file in 1 MiB byte buffers with a stateful UTF-8 decoder and a 512-char carry, keeping only the substrings the downstream `Get-WsusScnServicingStackInfo` matches on; peak is O(buffer) regardless of file size, and the snippet yields a result identical to the full-text read. Its capture patterns are held in lock-step with `Get-WsusScnServicingStackInfo`.
+- **`Invoke-WsusScnLeafServicingStackExtract`** now streams each leaf via the scanner instead of `Get-Content -Raw`, and deletes each extracted `c/<rev>` immediately (disk hygiene). Its contract is unchanged — it still returns a revision -> text map (now a minimised snippet) — so the pure `Update-WsusScnServicingStackFromMeta` and gate T18 are untouched.
+
+**Stage 4b wiring.**
+- A04 gains a `Stage 4b: populate servicing-stack fields` step between Stage 4 (DB write) and Stage 5 (Layer 1). It derives the bundle-revision -> LCU-leaf-revision map from the in-memory parse result, streams the distinct leaves for their SS snippet, re-reads the just-written DB via `ConvertFrom-CanonicalJson`, enriches it in place with `Update-WsusScnServicingStackFromMeta`, and writes it back via `Save-CanonicalJsonFile` (so `_meta` and key order are preserved).
+- **New `-SkipServicingStackPopulate` switch** (sibling of `-SkipLayer1Update`); the step is also skipped in DryRun (no DB was written).
+
+**DB regenerated.**
+- A full A04 run over the live 2026-05 cab (136,102 updates observed, 138 in scope) populated all 138 updates: `separate` x35 (Server 2016/2019 LCUs, e.g. `requiredServicingStackVersion` `10.0.14393.7692`), `combined` x60 (Server 2022/2025 LCUs with the SSU folded in), `checkpoint` x43 (baseline updates); `providedServicingStackVersion` is null throughout. `data/wsusscn2-database.json` grows 279,585 -> 298,218 bytes. Layer 1 was idempotent over the same cab (unchanged=4), so the `data/config-Server<N>.json` baselines are untouched.
+- Peak `pwsh` RSS during the 138-leaf extraction was ~514 MB (vs the prior ~3.9 GB OOM), confirming the streaming scanner as the load-bearing fix.
+
+- **Docs.** SPEC §B documents the Stage 4b semantics and `-SkipServicingStackPopulate`, and the Part B data-shape note now records the SS version/model fields as wired (no longer "a later M1 increment"). README is unchanged (lock-step preserved).
+- **Verification.** psa.py 0/0/0; `pwsh` 7.4.6 ParseFile 0 errors; full offline suite green (15/15), with the data-contract, Layer 2 schema, canonical-format, and scope-invariant gates re-run against the regenerated DB.
+
 ### r11.10 - wsusscn2 servicing-stack populate functions and data-contract wiring (M1, parts 5b + 6)
 
 Completes M1's function set. Adds the servicing-stack populate (the I/O-free pure halves plus a thin 7-Zip wrapper, designed so the offline CI exercises the logic and only the wrapper needs a real cab), and wires the existing `Test-DataContractConsistency` into the A04 RefreshDependencyDatabase pipeline. `$Script:ScriptVersion` is bumped `r11.9` -> `r11.10`; `$Script:ScriptTag` is set to `wsusscn2-servicing-stack-populate`. Populating the committed `data/wsusscn2-database.json` with these SS fields (which requires a full A04 run over the real cab) is a follow-up; the fields stay nullable/optional and the readiness check already tolerates their absence.

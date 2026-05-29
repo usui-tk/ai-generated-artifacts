@@ -3,9 +3,9 @@
     "dataContractId": "4c173c61-c099-4512-9283-f5d951beda8b",
     "dataContractVersion": 1,
     "generator": "Update-WindowsServerIso.ps1 wsusscn2 parser pipeline",
-    "scriptVersion": "update-wsi-2026.05.29-r11.9",
-    "scriptTag": "wsusscn2-layer2-kbids-populate",
-    "generatedAt": "2026-05-29T10:12:22Z",
+    "scriptVersion": "update-wsi-2026.05.29-r11.11",
+    "scriptTag": "wsusscn2-servicing-stack-streaming-populate",
+    "generatedAt": "2026-05-29T12:46:12Z",
     "sourceCab": {
       "sourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
       "size": 641849140,
@@ -26,7 +26,7 @@
         "cd5ffd1e-e932-4e3a-bf74-18bf0b1bbd83"
       ],
       "recencyMonths": 24,
-      "evaluatedAt": "2026-05-29T10:06:19Z"
+      "evaluatedAt": "2026-05-29T12:41:09Z"
     },
     "stats": {
       "updatesObserved": 136102,
@@ -93,7 +93,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "04c9a9e9-ecaf-4324-968c-6254581b9ea6",
@@ -134,7 +137,10 @@
       ],
       "kbIds": [
         "5082417"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "244bab40-f647-4394-bee0-b03f897404d8",
@@ -184,7 +190,10 @@
       ],
       "kbIds": [
         "5063880"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "36befc42-89ff-4ea3-b2c0-7e22496a77b5",
@@ -242,7 +251,10 @@
       ],
       "kbIds": [
         "5053594"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "2515386d-c637-4ece-a510-e6bb25a74edf",
@@ -285,7 +297,10 @@
       ],
       "kbIds": [
         "5049622"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "909ef7f9-113f-4f3a-be9e-dbf5fcac7b4a",
@@ -338,7 +353,10 @@
       ],
       "kbIds": [
         "5065427"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.2963",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "9ba69000-b60b-4aae-96bb-a5506eb6ccfe",
@@ -387,7 +405,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "f43db436-7f4b-482b-b177-1ee1adcc8c8d",
@@ -475,7 +496,10 @@
         "5043080",
         "5046910",
         "5048667"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "55cba28a-85a9-4696-977e-b952ea06af36",
@@ -536,7 +560,10 @@
       ],
       "kbIds": [
         "5046612"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.2963",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "1f849eb6-0f6e-4895-a7e3-d071ac7312fc",
@@ -579,7 +606,10 @@
       "kbIds": [
         "5049617",
         "5049625"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "da327f7c-5d64-43dc-9671-72723a5074f3",
@@ -625,7 +655,10 @@
       ],
       "kbIds": [
         "5068791"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "fcf68132-4409-490f-b632-6a724d3e9b78",
@@ -668,7 +701,10 @@
       ],
       "kbIds": [
         "5073447"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "f26eef43-a2bd-42d0-ac18-23c0ca7a8a82",
@@ -706,7 +742,10 @@
       ],
       "kbIds": [
         "5087065"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "5d08a294-29f3-462f-a0db-a2a111cb13e4",
@@ -755,7 +794,10 @@
       ],
       "kbIds": [
         "5071543"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "2213d28c-b8a3-4155-90c3-e2d097c8d1d6",
@@ -803,7 +845,10 @@
       ],
       "kbIds": [
         "5066586"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "e59809da-d4f9-4ebd-92e5-d07731fac9fe",
@@ -845,7 +890,10 @@
       ],
       "kbIds": [
         "5066131"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "db5bac0b-a277-4d18-9bfd-6c9b08e3251c",
@@ -892,7 +940,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "d12e384b-27f9-4355-aaf6-32f157f06010",
@@ -944,7 +995,10 @@
       ],
       "kbIds": [
         "5060526"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "bbe51346-3515-45c9-a1d9-d9a823019127",
@@ -983,7 +1037,10 @@
       ],
       "kbIds": [
         "5087545"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "f46ef11e-896d-4263-9840-23224a759943",
@@ -1026,7 +1083,10 @@
       "kbIds": [
         "5039879",
         "5039886"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "6b38c376-f79a-4954-b4c7-5eefdd0b371b",
@@ -1075,7 +1135,10 @@
       ],
       "kbIds": [
         "5060954"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "064da798-e482-4953-820d-c824e8b6f93e",
@@ -1117,7 +1180,10 @@
       ],
       "kbIds": [
         "5075902"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "389020c2-ffbf-4ed6-b8cb-5cd5702840a7",
@@ -1161,7 +1227,10 @@
       ],
       "kbIds": [
         "5070247"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "49d3d8e1-e7ce-4a8a-b009-e6ab734134ef",
@@ -1204,7 +1273,10 @@
       "kbIds": [
         "5044016",
         "5044022"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "fd522b7b-4adf-4335-a6fe-2ae3327e54cb",
@@ -1245,7 +1317,10 @@
       ],
       "kbIds": [
         "5082142"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "6cbc00b2-45e9-43d5-a2fc-cfadcdbc420a",
@@ -1298,7 +1373,10 @@
       ],
       "kbIds": [
         "5058385"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "abc0d6bb-7a2b-4a6b-a8dc-7fd08e5fa82d",
@@ -1358,7 +1436,10 @@
       ],
       "kbIds": [
         "5049993"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "65ebbb80-8533-4e92-ae64-bd144c6ace44",
@@ -1400,7 +1481,10 @@
       ],
       "kbIds": [
         "5078766"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "adb94feb-fc86-42ad-acb5-ffca4f52f096",
@@ -1449,7 +1533,10 @@
       ],
       "kbIds": [
         "5065428"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "119775a4-f604-49e9-9e2a-fd6b4aae954d",
@@ -1494,7 +1581,10 @@
       ],
       "kbIds": [
         "5071547"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "0f08c8e4-9998-4bf7-8f51-f3736282d656",
@@ -1571,7 +1661,10 @@
         "5043080",
         "5070762",
         "5070881"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "de3678f4-1681-4c0d-a1ca-ff7babd61e43",
@@ -1616,7 +1709,10 @@
       ],
       "kbIds": [
         "5082198"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "979e9eff-3b91-4da9-8404-1546ccb2340b",
@@ -1665,7 +1761,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "7a48f444-efd7-4fa7-a7bf-ded21b4ef846",
@@ -1709,7 +1808,10 @@
       "kbIds": [
         "5066137",
         "5066143"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "6b3d0f8d-b508-4737-8ec5-19c89cd049ed",
@@ -1750,7 +1852,10 @@
       ],
       "kbIds": [
         "5082123"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "198d07c9-4461-4cbe-850b-bd3c64f165ca",
@@ -1797,7 +1902,10 @@
       ],
       "kbIds": [
         "5065687"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "5a69e96b-7762-4056-8db1-50031faf5aa6",
@@ -1838,7 +1946,10 @@
       ],
       "kbIds": [
         "5066136"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "c0526460-fe30-4333-88f3-96d04820da9f",
@@ -1890,7 +2001,10 @@
       ],
       "kbIds": [
         "5060531"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "284425ac-4392-409e-b555-45a94b60e094",
@@ -1933,7 +2047,10 @@
       "kbIds": [
         "5039889",
         "5039907"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "9285ebf4-6c68-48c7-9c64-99ff94ddbe48",
@@ -1972,7 +2089,10 @@
       ],
       "kbIds": [
         "5087051"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "829b9f88-23fb-4f4b-8583-72369edd2ec2",
@@ -2015,7 +2135,10 @@
       "kbIds": [
         "5044025",
         "5044035"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "f613f841-3167-4d09-800a-4658ecd8a7bb",
@@ -2067,7 +2190,10 @@
       ],
       "kbIds": [
         "5066836"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "afda971c-8941-418e-9b96-d19dc0b4decc",
@@ -2140,7 +2266,10 @@
         "5043080",
         "5075899",
         "5076122"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "3a650f26-c8ee-45d7-a807-69adac701c14",
@@ -2184,7 +2313,10 @@
       ],
       "kbIds": [
         "5073723"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "850602a6-d066-4c22-8c9d-a4e793b31965",
@@ -2239,7 +2371,10 @@
       ],
       "kbIds": [
         "5061010"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "908ef6af-30d6-4ef2-b327-3676b46a67f2",
@@ -2317,7 +2452,10 @@
         "5043080",
         "5066835",
         "5067039"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "dc75aca2-0d25-4cdb-a102-e9ae9d4953da",
@@ -2368,7 +2506,10 @@
       ],
       "kbIds": [
         "5062572"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "2fd2f366-59b4-46cf-981a-28ee782a3692",
@@ -2440,7 +2581,10 @@
         "5043080",
         "5078740",
         "5078794"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "06df32e2-caeb-4bee-a329-23cebcb4dea9",
@@ -2493,7 +2637,10 @@
       ],
       "kbIds": [
         "5050109"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "88879e50-8a32-4cef-ad64-bfe72d4b2d8f",
@@ -2537,7 +2684,10 @@
       ],
       "kbIds": [
         "5044030"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "347b06e9-84df-47b4-af2d-854c420b2222",
@@ -2616,7 +2766,10 @@
         "5043080",
         "5064097",
         "5065426"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "f01e4275-9f74-4d4c-9612-e6950e7edb74",
@@ -2676,7 +2829,10 @@
       ],
       "kbIds": [
         "5048671"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.2963",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "8cc4f06c-8bba-40be-8ce0-af26b197cabe",
@@ -2719,7 +2875,10 @@
       ],
       "kbIds": [
         "5075906"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "7e950b90-cbe1-4b3c-8498-8d8c09fbc651",
@@ -2781,7 +2940,10 @@
       ],
       "kbIds": [
         "5041160"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "824df904-1d1c-484a-8617-decb961ed470",
@@ -2825,7 +2987,10 @@
       "kbIds": [
         "5066134",
         "5066139"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "15592d8f-31eb-4f04-9f60-666d4a928c74",
@@ -2879,7 +3044,10 @@
       ],
       "kbIds": [
         "5043124"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "92ff6f8d-f839-4f66-97cc-d56d57222ab1",
@@ -2942,7 +3110,10 @@
       ],
       "kbIds": [
         "5040437"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "6dc9cd53-6892-42df-887c-df5164a7c29f",
@@ -3001,7 +3172,10 @@
       ],
       "kbIds": [
         "5052006"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "4c344b38-fbe7-48e8-b755-1daf01c12fc0",
@@ -3049,7 +3223,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "fdde99e0-d805-4c36-987b-4d90c2dc913f",
@@ -3098,7 +3275,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "b062fa4c-ad9a-4a7b-bc2a-6d28c9de6ad9",
@@ -3137,7 +3317,10 @@
       ],
       "kbIds": [
         "5044021"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "b053c9c8-edad-4b8c-a9bb-b33a826c2427",
@@ -3181,7 +3364,10 @@
       ],
       "kbIds": [
         "5044030"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "029b20a4-a6e7-420b-b6ed-bb2644b42698",
@@ -3224,7 +3410,10 @@
       ],
       "kbIds": [
         "5049622"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "135c0c28-3af4-46a2-9076-826ad62b0374",
@@ -3267,7 +3456,10 @@
       "kbIds": [
         "5082413",
         "5082414"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "601c5cdb-59a2-46f9-b9bd-dff3b010870c",
@@ -3324,7 +3516,10 @@
       ],
       "kbIds": [
         "5050008"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "41357a68-4d6a-4649-8e1e-caff4fbe952f",
@@ -3380,7 +3575,10 @@
       ],
       "kbIds": [
         "5051979"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "11f699de-9b83-4177-9385-cf69d3b2db53",
@@ -3440,7 +3638,10 @@
       ],
       "kbIds": [
         "5044281"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "ac244d92-9fd7-4512-8e66-4f0a20108410",
@@ -3498,7 +3699,10 @@
       ],
       "kbIds": [
         "5048654"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "fc849866-c826-41ff-b881-42f7d603e383",
@@ -3550,7 +3754,10 @@
       ],
       "kbIds": [
         "5054006"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "5e145d79-bcbe-4ead-9c64-d3b5d71b3797",
@@ -3634,7 +3841,10 @@
         "5043080",
         "5055523",
         "5055671"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "f79f7970-c82e-4f8b-8173-86fca80786c1",
@@ -3682,7 +3892,10 @@
       ],
       "kbIds": [
         "5062799"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "98d84420-8ecd-48f4-a864-4b6fe6b3f614",
@@ -3721,7 +3934,10 @@
       ],
       "kbIds": [
         "5039885"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "2ec291f8-7c9d-48d9-947b-6543b6a1a3b5",
@@ -3768,7 +3984,10 @@
       ],
       "kbIds": [
         "5070884"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "5e7fd3ab-6410-4e19-9595-16d623ac4fab",
@@ -3807,7 +4026,10 @@
       ],
       "kbIds": [
         "5087538"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "d0f1761f-c762-4764-8443-8c567f6929a2",
@@ -3846,7 +4068,10 @@
       ],
       "kbIds": [
         "5088064"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "e2e040fb-c0a6-42ba-aa94-6013be189760",
@@ -3897,7 +4122,10 @@
       ],
       "kbIds": [
         "5070882"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "755226bc-ffee-403a-951d-0d328c56c034",
@@ -3972,7 +4200,10 @@
         "5043080",
         "5072033",
         "5072537"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "4acdb21e-43d2-4176-b829-8a9d22d65a00",
@@ -4046,7 +4277,10 @@
         "5043080",
         "5073379",
         "5073452"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "afbf4fd2-f572-4841-891b-ab1de876e82b",
@@ -4101,7 +4335,10 @@
       ],
       "kbIds": [
         "5053603"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "50cdca5b-7089-4b75-ab39-df8307fd8f6f",
@@ -4151,7 +4388,10 @@
       ],
       "kbIds": [
         "5058524"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "d97986c8-a7ac-4780-8813-b75693cf6a82",
@@ -4232,7 +4472,10 @@
         "5043080",
         "5062553",
         "5062688"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "48c2430d-5330-4b2f-b028-c3840d0b52c9",
@@ -4271,7 +4514,10 @@
       ],
       "kbIds": [
         "5087051"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "129b7cbb-abfc-4af9-a2a0-3f88b1f08927",
@@ -4312,7 +4558,10 @@
       ],
       "kbIds": [
         "5082417"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "3ed2b891-929d-4167-9e32-4ae96415aa9a",
@@ -4354,7 +4603,10 @@
       ],
       "kbIds": [
         "5066131"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "f674ff1b-8872-4c09-8122-46e7b067cf88",
@@ -4408,7 +4660,10 @@
       ],
       "kbIds": [
         "5063871"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.2963",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "f2708f4d-cda3-40a5-b534-ffffb2b8898c",
@@ -4454,7 +4709,10 @@
       ],
       "kbIds": [
         "5068787"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "3b30e6e7-6c5e-4249-93b3-cafebeb02f9d",
@@ -4503,7 +4761,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "6a1e138c-302c-4d61-bb56-7bcae829a7c9",
@@ -4543,7 +4804,10 @@
       ],
       "kbIds": [
         "5082411"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "945dc30e-4df8-48d8-a69e-b1424dec82b4",
@@ -4628,7 +4892,10 @@
         "5043080",
         "5053143",
         "5053598"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "193134c5-466d-4762-8633-762e6c70bf6f",
@@ -4676,7 +4943,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "43bcbcdf-2e05-4e89-b6cd-e44f54f85f35",
@@ -4724,7 +4994,10 @@
       ],
       "kbIds": [
         "5066782"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "711dc72e-e7d9-4b9b-93fe-eeea89715c71",
@@ -4785,7 +5058,10 @@
       ],
       "kbIds": [
         "5042881"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "8895d873-7a0c-464d-8065-f3e22b6832ce",
@@ -4856,7 +5132,10 @@
         "5043080",
         "5082063",
         "5082237"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "bea17640-8ad9-478a-8ac3-d9c5c34ad265",
@@ -4945,7 +5224,10 @@
         "5043080",
         "5046617",
         "5046910"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "9024c69d-4de8-4233-86c2-9ee24bc67ec4",
@@ -4993,7 +5275,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "8cabd6ee-3e86-4e80-86e2-75106e99fa85",
@@ -5049,7 +5334,10 @@
       ],
       "kbIds": [
         "5040562"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "3af8c9cd-205e-4a17-9ba9-66527c18b9e9",
@@ -5092,7 +5380,10 @@
       ],
       "kbIds": [
         "5075904"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "1145c359-b303-4fcb-8817-f7dff469b3c7",
@@ -5148,7 +5439,10 @@
       ],
       "kbIds": [
         "5058383"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "d94abdb2-d4af-467c-89a2-6f83aad70071",
@@ -5198,7 +5492,10 @@
       ],
       "kbIds": [
         "5068864"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "626a0daf-c386-4f2d-aa9a-4bbe234fd6db",
@@ -5245,7 +5542,10 @@
       ],
       "kbIds": [
         "5070883"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "e8d5a0fd-1daa-4345-8806-89881fd5ee3e",
@@ -5296,7 +5596,10 @@
       ],
       "kbIds": [
         "5055661"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "32790d85-22a7-48ad-bbfb-7fea1510eb92",
@@ -5382,7 +5685,10 @@
         "5043080",
         "5051987",
         "5053426"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "e157b6af-24a9-45da-9768-f6522c01d33b",
@@ -5432,7 +5738,10 @@
       ],
       "kbIds": [
         "5063877"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "6bebab55-81e6-4350-95d2-632d562c929a",
@@ -5474,7 +5783,10 @@
       ],
       "kbIds": [
         "5078752"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "ad5e2b63-adb4-45d9-8f48-ff48829b4fe4",
@@ -5529,7 +5841,10 @@
       ],
       "kbIds": [
         "5041576"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "276ca876-09d3-4ef8-9266-22859826b952",
@@ -5572,7 +5887,10 @@
       ],
       "kbIds": [
         "5087537"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "0ae6f8d8-5a5a-4551-a0cc-ca97524fc415",
@@ -5613,7 +5931,10 @@
       "kbIds": [
         "5087059",
         "5087068"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "bd0d4b6b-286c-49b9-b0bf-7d1b106416a4",
@@ -5656,7 +5977,10 @@
       "kbIds": [
         "5049608",
         "5049615"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "519e067f-15c5-4ce2-bdec-5696a13d50ab",
@@ -5705,7 +6029,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "33b5f55f-6a56-4642-9a3c-291810b47335",
@@ -5762,7 +6089,10 @@
       ],
       "kbIds": [
         "5039334"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "61c8b606-70cf-427e-8dc1-1775aba6f6aa",
@@ -5845,7 +6175,10 @@
         "5043080",
         "5058411",
         "5059442"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "0e9e759d-4b49-47a2-b918-1c96dbd657d2",
@@ -5925,7 +6258,10 @@
         "5043080",
         "5063689",
         "5063878"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "b9373e5c-404a-4699-a96b-204167584940",
@@ -5969,7 +6305,10 @@
       ],
       "kbIds": [
         "5073457"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "87c8a6d1-49d1-4645-97c4-bb7fafc9be12",
@@ -6038,7 +6377,10 @@
         "5043080",
         "5087539",
         "5087588"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "973069a3-1b32-4960-a14f-7b40d504a17e",
@@ -6095,7 +6437,10 @@
       ],
       "kbIds": [
         "5049983"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "bdaab34a-fb09-4a7e-a130-4dc032ae012a",
@@ -6143,7 +6488,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "dba6fd1d-61dd-49e4-b433-c6c919120260",
@@ -6197,7 +6545,10 @@
       ],
       "kbIds": [
         "5055526"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "648515f5-da53-4272-87bb-7cb9f60bb9ba",
@@ -6279,7 +6630,10 @@
         "5043080",
         "5059693",
         "5060842"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "4b45d7f3-169e-4843-9511-6a924da9f6f5",
@@ -6326,7 +6680,10 @@
       ],
       "kbIds": [
         "5075999"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "3d8b98e7-8398-4602-8056-ede60f85ebf8",
@@ -6375,7 +6732,10 @@
       ],
       "kbIds": [
         "5065432"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "edfc1183-cb4e-4d06-84f5-abb36248f5d7",
@@ -6451,7 +6811,10 @@
         "5043080",
         "5068861",
         "5070186"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "0158fc31-9969-4b98-abee-140001b85e6b",
@@ -6492,7 +6855,10 @@
       ],
       "kbIds": [
         "5082089"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "34d72c76-85c4-484c-830d-f91ab49daccd",
@@ -6543,7 +6909,10 @@
       ],
       "kbIds": [
         "5062557"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "6a7629d0-0fdc-44db-b9d9-b34ece11efaf",
@@ -6602,7 +6971,10 @@
       ],
       "kbIds": [
         "5046616"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "2071c0f7-f5d7-42b2-a704-1dd0f4ff4582",
@@ -6656,7 +7028,10 @@
       ],
       "kbIds": [
         "5062560"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "8e8259d1-ddd0-4596-9643-e36938b02ed0",
@@ -6702,7 +7077,10 @@
       ],
       "kbIds": [
         "5066584"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "87caf7bf-f67e-4750-8ec5-578d6baa6a41",
@@ -6792,7 +7170,10 @@
         "5043080",
         "5044284",
         "5044612"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "f41515a5-0395-4aa5-bb1d-c93abfb80aae",
@@ -6831,7 +7212,10 @@
       ],
       "kbIds": [
         "5049614"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "6e74266b-3532-40f5-b8c9-f3150806e936",
@@ -6884,7 +7268,10 @@
       ],
       "kbIds": [
         "5058392"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "38666a7f-fb18-471c-9001-2eb0985fc18a",
@@ -6941,7 +7328,10 @@
       ],
       "kbIds": [
         "5055521"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "75fe03ef-bf8c-433e-9348-0114294ca94f",
@@ -7005,7 +7395,10 @@
       ],
       "kbIds": [
         "5039227"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "3372cfa2-8cbf-4be8-98bf-9c680f7b2ad0",
@@ -7050,7 +7443,10 @@
       ],
       "kbIds": [
         "5071544"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.17763.2090",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "0e01f91c-69c4-4b60-bcba-8adf26c299e0",
@@ -7096,7 +7492,10 @@
       ],
       "kbIds": [
         "5078938"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "9657ce40-d97e-491b-b77c-759eb96c447f",
@@ -7139,7 +7538,10 @@
       "kbIds": [
         "5082425",
         "5082427"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     },
     {
       "updateId": "6c09b8e2-eaa3-4587-a2fc-202f5c425ff0",
@@ -7226,7 +7628,10 @@
         "5043080",
         "5050009",
         "5050119"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "dd508da0-a89d-42fe-ad5a-fcd854783e3b",
@@ -7274,7 +7679,10 @@
       ],
       "kbIds": [
         "5073722"
-      ]
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
     },
     {
       "updateId": "e20ecd7e-9517-4f2d-9530-5cd83d0c1e9f",
@@ -7323,7 +7731,10 @@
       ],
       "kbIds": [
         "890830"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
     },
     {
       "updateId": "a57cf2ba-286e-46dc-b15a-a0fc3ec5dbe2",
@@ -7364,7 +7775,10 @@
       "kbIds": [
         "5087061",
         "5087066"
-      ]
+      ],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
     }
   ]
 }

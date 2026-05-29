@@ -538,8 +538,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.10'
-$Script:ScriptTag     = 'wsusscn2-servicing-stack-populate'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.11'
+$Script:ScriptTag     = 'wsusscn2-servicing-stack-streaming-populate'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -7745,6 +7745,80 @@ function Update-WsusScnServicingStackFromMeta {
     return [pscustomobject]@{ Populated = $populated; Skipped = $skipped }
 }
 
+function Get-WsusScnCbsServicingSnippet {
+    <#
+    .SYNOPSIS
+        Stream a single LCU leaf's CBS metadata file and return only the
+        small servicing-stack-relevant snippet (M1 part 5b, live-CI only).
+    .DESCRIPTION
+        An LCU leaf's c/<revisionId> CBS metadata is a single newline-free
+        line that can reach ~67 MB (the Server 2016 LCU leaf). Reading it
+        whole with Get-Content -Raw materialises the entire file as a .NET
+        string (peak ~1.5 GB observed for a 67 MB leaf), which is what drove
+        the populate step out of memory on a 4 GB host.
+
+        This scanner reads the file in fixed byte buffers, decodes with a
+        stateful UTF-8 decoder (so a multi-byte sequence split across a
+        buffer boundary is not corrupted), keeps a small char carry-over so
+        an anchor token straddling a boundary is still matched, and keeps
+        ONLY the substrings that the downstream Get-WsusScnServicingStackInfo
+        actually matches on. Peak memory is O(buffer), independent of file
+        size; a 67 MB leaf yields a snippet of a few hundred bytes that, fed
+        to Get-WsusScnServicingStackInfo, produces a result identical to the
+        full-text read.
+
+        The capture patterns below MUST stay in lock-step with the match
+        patterns in Get-WsusScnServicingStackInfo: each is the same regex
+        (minus the named capture group), so any substring kept here re-matches
+        there. If a pattern changes there, change it here too.
+    .PARAMETER Path
+        Path to the leaf's extracted c/<revisionId> CBS metadata file.
+    .PARAMETER BufferSize
+        Read buffer size in bytes (default 1 MiB).
+    .PARAMETER CarryChars
+        Char overlap retained between buffers so a boundary-straddling token
+        is still matched (default 512; the longest anchor match is < 100).
+    .OUTPUTS
+        [string] the concatenated unique servicing-stack snippet, or '' when
+        the leaf carries no servicing metadata (a checkpoint .msu leaf).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [int] $BufferSize = 1048576,
+        [int] $CarryChars = 512
+    )
+    $capturePatterns = @(
+        '<installerAssembly\s+name="Microsoft-Windows-ServicingStack"\s+version="[^"]+"',
+        'name="Package_for_RollupFix"\s+version="[^"]+"',
+        'Package_for_ServicingStack_\d+'
+    )
+    $captured = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $buffer = [byte[]]::new($BufferSize)
+        $decoder = [System.Text.Encoding]::UTF8.GetDecoder()
+        $carry = ''
+        while (($read = $stream.Read($buffer, 0, $BufferSize)) -gt 0) {
+            $charCount = $decoder.GetCharCount($buffer, 0, $read)
+            $chars = [char[]]::new($charCount)
+            $null = $decoder.GetChars($buffer, 0, $read, $chars, 0)
+            $window = $carry + [string]::new($chars)
+            foreach ($pattern in $capturePatterns) {
+                foreach ($match in [regex]::Matches($window, $pattern)) {
+                    if ($seen.Add($match.Value)) { $captured.Add($match.Value) }
+                }
+            }
+            $carry = if ($window.Length -gt $CarryChars) { $window.Substring($window.Length - $CarryChars) } else { $window }
+        }
+    } finally {
+        $stream.Dispose()
+    }
+    return ($captured -join ' ')
+}
+
 function Invoke-WsusScnLeafServicingStackExtract {
     <#
     .SYNOPSIS
@@ -7755,9 +7829,11 @@ function Invoke-WsusScnLeafServicingStackExtract {
         (bundle revision -> leaf revision) pair, resolves the per-package cab
         via Resolve-WsusScnRevisionToCab (using the cab's index.xml), extracts
         the per-package cab from the top-level wsusscn2.cab if not already
-        present, then extracts only the leaf's c/<revisionId> entry and reads
-        it as text. Returns the revision->text map consumed by the pure
-        Update-WsusScnServicingStackFromMeta.
+        present, then extracts only the leaf's c/<revisionId> entry,
+        streams it via Get-WsusScnCbsServicingSnippet (so the full ~67 MB
+        CBS text is never materialised), and keeps only the small
+        servicing-stack snippet. Returns the revision->snippet map consumed
+        by the pure Update-WsusScnServicingStackFromMeta.
 
         Kept deliberately thin so the offline gates exercise the pure halves
         (Select-WsusScnLcuLeafRevision, Get-WsusScnServicingStackInfo,
@@ -7771,7 +7847,10 @@ function Invoke-WsusScnLeafServicingStackExtract {
         Working directory; the cab's index.xml and per-package cabs are
         extracted here on demand.
     .OUTPUTS
-        [hashtable] leaf revision id -> CBS metadata text.
+        [hashtable] leaf revision id -> servicing-stack snippet text (a
+        minimised slice of the leaf's CBS metadata; see
+        Get-WsusScnCbsServicingSnippet), consumed unchanged by the pure
+        Update-WsusScnServicingStackFromMeta.
     #>
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -7833,7 +7912,14 @@ function Invoke-WsusScnLeafServicingStackExtract {
         $null = & $sevenZip 'x' '-y' '-bso0' ('-o{0}' -f $outRevDir) $pkgCab $entry 2>&1
         $metaFile = Join-Path $outRevDir ('c/{0}' -f $rev)
         if (Test-Path -LiteralPath $metaFile -PathType Leaf) {
-            $result[$rev] = Get-Content -LiteralPath $metaFile -Raw -Encoding utf8
+            # Stream the (single-line, up to ~67 MB) leaf and keep only the
+            # small servicing-stack snippet, so the returned map never holds
+            # the full CBS text. See Get-WsusScnCbsServicingSnippet.
+            $result[$rev] = Get-WsusScnCbsServicingSnippet -Path $metaFile
+        }
+        # Reclaim the extracted leaf immediately; the snippet is all we keep.
+        if (Test-Path -LiteralPath $outRevDir) {
+            Remove-Item -LiteralPath $outRevDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
     return $result
@@ -14431,7 +14517,8 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
     param(
         [string] $OverridePath,
         [string] $OutputPath,
-        [switch] $SkipLayer1Update
+        [switch] $SkipLayer1Update,
+        [switch] $SkipServicingStackPopulate
     )
 
     Start-DebugTrace -Context 'Invoke-AdminPhaseA04_RefreshDependencyDatabase' -PhaseId 'A04'
@@ -14516,6 +14603,48 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
             $written = New-WsusScnDependencyDatabase -ParseResult $parseResult -OutputPath $OutputPath -SourceCabPath $acquiredCab
             $outSize = (Get-Item -LiteralPath $written).Length
             Write-Ok ('Stage 4 OK : {0} ({1:N0} bytes)' -f $written, $outSize)
+        }
+
+        # ---- Stage 4b: populate servicing-stack fields on the Layer 2 JSON ----
+        # The committed database carries no bundle->leaf linkage, so the small
+        # bundle-revision -> LCU-leaf-revision map is derived here from the
+        # in-memory parse result (138 entries) and the LCU leaves' CBS metadata
+        # are streamed for their servicing-stack snippet only (never the full
+        # ~67 MB text; see Get-WsusScnCbsServicingSnippet). Skipped on DryRun
+        # (no JSON was written) or with -SkipServicingStackPopulate.
+        Set-DebugStep -Step 'stage4b-servicing-stack-populate'
+        Write-SubSection 'Stage 4b: populate servicing-stack fields'
+        if ($SkipServicingStackPopulate) {
+            Write-Step 'Servicing-stack populate SKIPPED (-SkipServicingStackPopulate).'
+        } elseif ($Script:DryRun) {
+            Write-Caution 'DryRun: servicing-stack populate SKIPPED.'
+        } else {
+            $leafRevByUpdateRev = @{}
+            $leafRevSet = [System.Collections.Generic.List[string]]::new()
+            foreach ($b in @($parseResult.Updates)) {
+                $bundleRev = [string]$b.RevisionId
+                $leafRev = Select-WsusScnLcuLeafRevision -BundleRevisionId $bundleRev -LeafRevisionIds @($b.LeafRevisionIds)
+                if ($leafRev) {
+                    $leafRevByUpdateRev[$bundleRev] = [string]$leafRev
+                    $leafRevSet.Add([string]$leafRev)
+                }
+            }
+            $ssStaging = Join-Path $stagingDir 'servicing-stack'
+            $leafSnippetByRevision = Invoke-WsusScnLeafServicingStackExtract `
+                                        -LeafRevisions $leafRevSet.ToArray() `
+                                        -CabPath $acquiredCab `
+                                        -StagingDirectory $ssStaging
+            # Re-read the just-written Layer 2 JSON via the canonical parser,
+            # populate, and write it back via the canonical writer (UTF-8
+            # no-BOM / LF / atomic .tmp+rename), preserving _meta and key order.
+            $dbDoc = ConvertFrom-CanonicalJson -Json (Get-Content -LiteralPath $OutputPath -Raw -Encoding utf8)
+            $ssResult = Update-WsusScnServicingStackFromMeta `
+                            -Document $dbDoc `
+                            -LeafMetaByRevision $leafSnippetByRevision `
+                            -LeafRevisionByUpdateRevision $leafRevByUpdateRev
+            $null = Save-CanonicalJsonFile -InputObject $dbDoc -Path $OutputPath
+            Write-Ok ('Stage 4b OK : populated={0} skipped={1} (distinct leaves={2})' -f `
+                $ssResult.Populated, $ssResult.Skipped, $leafRevSet.Count)
         }
 
         # ---- Stage 5: propagate to Layer 1 configs (optional) ----

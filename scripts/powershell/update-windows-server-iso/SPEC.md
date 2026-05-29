@@ -2097,6 +2097,7 @@ Invoke-AdminPhaseA04_RefreshDependencyDatabase
     [-StaleAfterDays   <int>]       # default: 7
     [-ForceRefetch                ] # ignore cache freshness
     [-SkipLayer1Update            ] # skip the Layer 1 writeback step
+    [-SkipServicingStackPopulate  ] # skip the Stage 4b servicing-stack populate
     -> [bool]
 ```
 
@@ -2121,6 +2122,17 @@ Stage 4 (`New-WsusScnDependencyDatabase`) writes the canonical JSON
 to `-OutputPath` and threads the source-cab SHA-256 + size into the
 `_meta.sourceCab` block for provenance. In DryRun mode this step is
 SKIPPED but Stages 1-3 still run (so the run is informative).
+
+Stage 4b (servicing-stack populate) derives, from the in-memory parse
+result, the bundle-revision -> LCU-leaf-revision map and streams each
+distinct LCU leaf's CBS metadata via `Get-WsusScnCbsServicingSnippet`
+to recover only its servicing-stack snippet (never the full ~67 MB
+single-line text, which previously drove the step out of memory). The
+just-written database is re-read through `ConvertFrom-CanonicalJson`,
+enriched in place by the pure `Update-WsusScnServicingStackFromMeta`,
+and written back through `Save-CanonicalJsonFile` (so `_meta` and key
+order are preserved). This step is SKIPPED with
+`-SkipServicingStackPopulate` or in DryRun (no database was written).
 
 After Stage 4, the wrapper calls
 `Update-Layer1DependencyVerification` unless `-SkipLayer1Update` is
@@ -2315,8 +2327,11 @@ filename prefix; this is expected and is not a scope leak.
 >   r11.9, `kbIds` is populated for every update (recovered from
 >   `payloadUrls` during Stage 4, deduplicated and sorted, bare numeric
 >   form per §B.19.8); the servicing-stack version/model fields are
->   populated by the per-leaf CBS extraction wired in a later M1
->   increment and remain optional/nullable until then. The committed
+>   populated by the per-leaf CBS extraction wired into Stage 4b as of
+>   r11.11 (Server 2016/2019 LCUs resolve `separate` with a
+>   `requiredServicingStackVersion`; Server 2022/2025 combined LCUs
+>   resolve `combined`; baseline/checkpoint updates resolve
+>   `checkpoint`). The fields remain schema-optional/nullable. The committed
 >   `data/wsusscn2-database.json` is validated against
 >   `schema/wsusscn2-database.schema.json` by the Layer 2 schema gate
 >   (`tests/wsusscn2_layer2_schema_test.py`).
