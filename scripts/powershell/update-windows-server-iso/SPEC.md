@@ -1659,20 +1659,84 @@ or any of the other plausible variant tags.
 The parser ingests `package.xml` and emits to
 `wsusscn2-database.json` only entries matching **all** of:
 
-1. **OS family**: package targets one of Windows Server 2016, 2019,
-   2022, or 2025 (matched via the `<Categories>` block's
-   `Product` / `ProductFamily` GUIDs; the working set lives in
-   `$Script:WsusScnOsCategoryGuids`).
+1. **OS family (allow-list, allow-overrides)**: package targets one
+   of Windows Server 2016, 2019, 2022, or 2025 (matched via the
+   `<Categories>` block's `Product` / `ProductFamily` GUIDs; the
+   working set lives in `$Script:WsusScnOsCategoryGuids`). An update
+   is admitted if it carries **at least one** allow-list Product
+   GUID, **even if it also carries a deny-list GUID** (§B.19.7.1).
+   This allow-overrides rule is required because some valid updates
+   (e.g. the multi-OS MSRT bundle KB890830) legitimately apply to
+   both an in-scope OS and a deny-listed OS.
 2. **Update type**: SSU, LCU, .NET CU, or Dynamic Update. Client
    SKUs (Windows 10 / 11 consumer), Office, Defender, drivers,
    and Features-On-Demand are excluded.
-3. **Recency**: released within the last **24 months** as of the
-   parser invocation date. The `CreationDate` attribute of the
-   `<Update>` element is the cut-off. Older entries are pruned to
-   bound layer 2 size. The 24-month window is justified by the
-   longest realistic "old baseline still in use" case: operators
-   occasionally retain a baseline for legal-hold purposes that
-   long.
+3. **Recency**: released within the last `RecencyMonths` months as
+   of the parser invocation date. The `CreationDate` attribute of
+   the `<Update>` element is the cut-off. The
+   `ConvertFrom-WsusScnPackageXml -RecencyMonths` parameter controls
+   this: **default 24**, **36 supported**, and **`-1` disables** the
+   clause entirely (no recency pruning). Older entries are pruned to
+   bound layer 2 size. The 24-month default is justified by the
+   longest realistic "old baseline still in use" case (e.g.
+   legal-hold retention). Note (per the §B.19.7.2 reach finding) that
+   the **effective** per-OS reach is usually much shorter than the
+   window because supersession removes older LCUs from the
+   payload-bearing in-scope set; a lookup miss for an older month is
+   supersession, not missing data.
+
+#### B.19.7.1 EOS / ESU deny-list (normative)
+
+A 2026-05-12 reverse-engineering of a real `wsusscn2.cab` established
+that end-of-support (EOS) and ESU-only Server OS product categories
+are **not** removed from the cab when the OS leaves support; they
+persist indefinitely with live, payload-bearing updates, including
+ESU monthly rollups (see research §5.8). Exclusion must therefore be
+**explicit**, not reliant on the data being absent.
+
+The following four Product GUIDs form an explicit deny-list. They are
+defence-in-depth on top of the allow-list (an EOS/ESU-only update
+already fails the allow-list test); the deny-list makes the intent
+auditable and lets the parser emit a warning when it drops such an
+update:
+
+| Server version | Product GUID | State |
+|:---|:---|:---|
+| Windows Server 2008 | `ba0ae9cc-5f01-40b4-ac3f-50192b5d6aaf` | EOS |
+| Windows Server 2008 R2 | `fdfe8200-9d98-44ba-a12a-772282bf60ef` | EOS |
+| Windows Server 2012 | `a105a108-7c9b-4518-bbbe-73f0fe30012b` | ESU (to 2026-10) |
+| Windows Server 2012 R2 | `d31bd4c3-d872-41c9-a2e7-231f372588cb` | ESU (to 2026-10) |
+
+Exclusion semantics (allow-overrides): an update is excluded by the
+deny-list **iff it carries a deny-list Product GUID AND carries no
+allow-list Product GUID**. ESU-specific rollups (KB5087471 /
+KB5063950 / KB5063906, which carry only a 2012 / 2012 R2 GUID) are
+excluded; multi-OS overlap updates (KB890830, which also carries an
+allow-list GUID) are admitted. In the real cab, 33 such overlap
+updates exist, so a naive deny-overrides rule would wrongly drop
+them.
+
+Server 2016's GUID stays on the allow-list across its forthcoming
+ESU transition: the OS keeps the same Product GUID after EOS (proven
+by 2008/2008 R2 still resolving under unchanged GUIDs), so
+"the newest Server 2016 rollup" remains retrievable. Adding 2016 to
+the deny-list is a future operator decision, not a default.
+
+The contract reference for the allow-overrides semantics is the
+`classify_scope` function in
+`tests/wsusscn2_scope_invariants_test.py`; the PowerShell
+implementation of this filter (a later session) MUST match it.
+
+#### B.19.7.2 Effective reach and fallback (informative)
+
+A 36-month robustness trace (research §5.9) found the effective
+per-OS reach into the in-scope set, well short of the 24-month
+window: Server 2022 ~12-13 months, Server 2016 ~7 months, Server
+2025 ~8 months (since GA), Server 2019 ~3-4 months. The newest LCU
+per supported OS is always retrievable; for an older requested month
+not in scope, the pipeline falls back to the newest in-scope LCU for
+that OS and reports the miss as supersession. The fallback ceiling
+is `RecencyMonths` (24 default, 36 supported).
 
 ### B.19.8 Microsoft-prose exclusion rule (normative)
 
@@ -2169,6 +2233,35 @@ filename prefix; this is expected and is not a scope leak.
 
 ### B.19.10 Layer 2 JSON schema (normative)
 
+> **Schema drift correction (the shape below is the original r09.0
+> design; the implemented r10.x+ shape differs).** The
+> `Packages` / `RevisionIndex` / PascalCase design sketched in this
+> section was the pre-implementation draft. The **actually
+> implemented and committed** `data/wsusscn2-database.json` (verified
+> 2026-05) uses a different, flatter, camelCase shape:
+>
+> - Top level is **`_meta` + `updates`** (a flat array), **not**
+>   `Packages` + `RevisionIndex`.
+> - `_meta` keys: `generator`, `scriptVersion`, `scriptTag`,
+>   `generatedAt`, `sourceCab`, `scope`, `stats` (all camelCase).
+> - `_meta.scope` keys: **`productGuids`**, **`classificationGuids`**,
+>   **`recencyMonths`**, **`now`** (not `OsFamilies` / `WindowMonths`).
+> - Each `updates[]` element keys: `updateId`, `revisionId`,
+>   `revisionNumber`, `creationDate`, `isBundle`, `isLeaf`,
+>   `deploymentAction`, `productGuids`, `classificationGuids`,
+>   `companyGuids`, `productFamilyGuids`, `prerequisiteUpdateIds`,
+>   `supersededByRevisionIds`, `payloadFileDigests`, `payloadUrls`.
+> - There is **no per-update KB key and no `Requires` field** — the
+>   KB is recovered from the `kb(\d+)` token in `payloadUrls`, and the
+>   SSU dependency is the SS-version comparison of §B.19.13, not a KB
+>   list. (This is the same correction as §B.19.3/§B.19.7.)
+>
+> The T12 fixture (`tests/fixtures/wsusscn2/expected-output.json`) and
+> the `tests/wsusscn2_scope_invariants_test.py` gate are authoritative
+> for the implemented shape. The prose below is retained for design
+> history; a future editorial pass should rewrite §B.19.10.1–10.4 to
+> the implemented `_meta` + `updates` shape.
+
 This is the canonical shape of `data/wsusscn2-database.json`. The
 schema is **versioned** via `_meta.ParserVersion`. The parser MUST
 refuse to consume a JSON file whose `ParserVersion` is newer than
@@ -2374,6 +2467,39 @@ the r08.0 Step 4 KB5087537 SSU-prerequisite incident.
 
 ### B.19.13 Verification API (normative)
 
+> **Phase 2c model correction (2026-05-12 reverse-engineering).** The
+> verdict structure below was originally designed around an SSU
+> *KB-prerequisite closure* (`Requires` / `MissingFromSet` listing
+> prerequisite KBs). Reverse-engineering of a real `wsusscn2.cab`
+> proved that **no LCU→SSU KB-prerequisite edge exists** in either the
+> Master XML or the per-package CABs (research §5.3; SPEC §B.19.7
+> allow-list note). An LCU's `<Prerequisites>` are applicability /
+> detectoid GUIDs, not install-order dependencies. The actual SSU
+> dependency is a **minimum servicing-stack version** carried in the
+> LCU's per-package CBS metadata
+> (`installerAssembly name="Microsoft-Windows-ServicingStack"
+> version="X"`), checked by CBS as a **numeric version comparison**
+> (failure = `0x800f0823`). Phase 2c verification is therefore
+> redefined as **three independent checks**, none of which is a KB
+> closure:
+>
+> 1. **Presence** — each configured KB resolves to an in-scope update
+>    in layer 2 (else: superseded or out-of-scope; report which).
+> 2. **SS version comparison** — for the SSU-separate OSes (2016 /
+>    2019), the SSU in the set provides a servicing-stack version ≥ the
+>    LCU's required `installerAssembly` version. (Server 2022 / 2025
+>    carry the SSU inside the LCU, so this check is N/A — research
+>    §5.4.)
+> 3. **Supersession / identity** — the chosen LCU is the newest
+>    non-superseded build for that OS (`<SupersededBy>` chain).
+>
+> The function signature and verdict fields below are retained for
+> historical continuity; the **PowerShell implementation (a later
+> session) MUST replace the `Requires` / `MissingFromSet` KB-closure
+> fields with the SS-version-comparison model above.** The `RequiredSs`
+> / `ProvidedSs` shape is sketched in the revised verdict note that
+> follows the signature.
+
 #### B.19.13.1 `Test-PatchDependencyClosureFromGraph`
 
 Signature:
@@ -2417,6 +2543,29 @@ Returns:
 The function MUST NOT mount the WIM. It consumes the **static**
 WIM metadata (build number, installed packages list) captured by
 `Get-WindowsImage` and provided via the `$WimMountState` parameter.
+
+> **Revised verdict shape (target for the next-session implementation).**
+> Per the Phase 2c model correction at the head of §B.19.13, the
+> per-patch verdict replaces the KB-closure fields with the
+> SS-version-comparison and presence/supersession model. Sketch:
+>
+> ```
+> @{
+>     KbId         = 'KB5087537'
+>     UpdateId     = '...'
+>     Verdict      = 'Pass' | 'SsTooOld' | 'NotInDatabase' | 'Superseded' | 'Skipped'
+>     RequiredSs   = '10.0.14393.7692'   # LCU installerAssembly floor (2016/2019); $null for combined (2022/2025)
+>     ProvidedSs   = '10.0.14393.7692'   # SS version the configured SSU supplies; $null if no SSU in set
+>     SsModel      = 'separate' | 'combined' | 'checkpoint'   # per research §5.4
+>     Superseded   = $true | $false
+>     Notes        = '...'
+> }
+> ```
+>
+> `SsTooOld` is the `0x800f0823` predictor: `ProvidedSs` < `RequiredSs`
+> for a `separate` OS. For `combined` / `checkpoint` OSes (2022 / 2025),
+> `RequiredSs` is `$null` and the SS check is skipped (the SSU travels
+> inside the LCU).
 
 #### B.19.13.2 Relationship to `Test-PatchDependencyClosureOnMount` (§B.13)
 

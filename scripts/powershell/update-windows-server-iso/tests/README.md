@@ -41,6 +41,7 @@ production, this directory ships five tools, summarised below.
 | `wsusscn2_layer1_test.py` (T13) | Offline self-verification of the Phase 2b2/2b3 Layer 1 writeback helper `Update-Layer1DependencyVerification`. Drives the parser against the T12 fixture, then calls the helper against a tempdir-cloned `data/config-Server*.json` skeleton. 15 assertions covering: stub-config setup pre-flight, Run-1 counts (`UpdatedCount=2`, `UnchangedCount=0`, `MissingCount=2`), field-level correctness of `_DependencyVerifiedUpdateId` / `_DependencyVerifiedRevisionId` / `_DependencyVerifiedCreationDate` on Server 2022 and Server 2025, missing-OS hygiene (no spurious writeback for Server 2016/2019), existing-field preservation (`OsKey`), and idempotent Run-2 (`UpdatedCount=0`, `UnchangedCount=2`). The test never touches the repository's real `data/`. | After every change to `Update-Layer1DependencyVerification`, the `$Script:WsusScnOsCategoryGuids` table, or the A04 wrapper's Layer 1 callout site; on every CI run | No  |
 | `canonical_json_format_check.py` (Part C gate) | Offline format compliance check for every `*.json` file under `data/`, `tests/fixtures/`, and `tests/snapshots/`. Re-serialises each file through `canonical_json_dumps` and fails if the bytes diverge. Implements SPEC §C.3.4. | On every commit that adds or modifies a JSON file in the three scanned directories; on every CI run | No  |
 | `config_schema_test.py` (config schema gate) | Offline schema-conformance check. A stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config-v2.1.schema.json` (forbids the legacy `Patches` property, requires `NeutralPatches`), with a targeted r10.4 regression guard against `Patches` reappearing. 14 assertions. No T number — schema gate, mirroring the format-gate convention. | On every commit that touches `data/config-Server*.json` or `schema/config-v2.1.schema.json`; on every CI run | No  |
+| `wsusscn2_scope_invariants_test.py` (scope-invariants gate) | Offline, stdlib-only, no-PowerShell data-driven contract check of the EOS/ESU exclusion model over `data/wsusscn2-database.json` (production) and `fixtures/wsusscn2/expected-output.json` (fixture), plus a unit test of the allow-overrides `classify_scope` reference function on synthetic cases. 23 assertions across: GUID-table self-consistency (allow/deny disjoint, canonical case), allow-overrides classification (in-scope LCU, ESU-only excluded, multi-OS overlap KB890830 admitted), scope.productGuids excludes the deny-list, no in-scope update is deny-only, no in-scope payload references an ESU/EOS KB, and the per-OS recency floor. Encodes SPEC §B.19.7/§B.19.7.1 (allow-list + EOS/ESU deny-list, allow-overrides) and the research §5.8/§5.9 findings. The PowerShell deny-list filter (a later session) MUST match `classify_scope`. No T number — invariants gate, mirroring the format/schema-gate convention. | On every commit that touches `data/wsusscn2-database.json`, the scope GUID tables, or the deny-list; on every CI run | No  |
 
 ## Quick start
 
@@ -54,6 +55,7 @@ python3 wsusscn2_parser_test.py            # T12: 22 wsusscn2 parser pipeline as
 python3 wsusscn2_layer1_test.py            # T13: 15 Layer 1 writeback helper assertions
 python3 canonical_json_format_check.py     # Part C: every JSON file in canonical format
 python3 config_schema_test.py              # config schema gate: data/config-Server*.json vs v2.1 schema
+python3 wsusscn2_scope_invariants_test.py  # scope-invariants gate: EOS/ESU deny-list, allow-overrides (23 assertions)
 
 # Live tests - require network access to Microsoft endpoints
 python3 catalog_probe.py --check all       # T1: hits live Catalog (~7 checks)
@@ -166,6 +168,7 @@ tests/
   wsusscn2_probe.py          T5
   wsusscn2_parser_test.py    T12 (Stage 3 + Stage 4 self-verification, 22 assertions)
   wsusscn2_layer1_test.py    T13 (Phase 2b2/2b3 Layer 1 writeback helper, 15 assertions)
+  wsusscn2_scope_invariants_test.py  scope-invariants gate (EOS/ESU deny-list, allow-overrides; 23 assertions; no PowerShell)
   common/
     __init__.py              package marker
     catalog_client.py        urllib HTTP fetcher with retry-jitter

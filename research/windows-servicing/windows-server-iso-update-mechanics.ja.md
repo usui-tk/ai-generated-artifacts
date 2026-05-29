@@ -516,51 +516,72 @@ Combined:    update.mum, update.ses, Windows10.0-KBXXXXXXX-x64.CAB
 
 config ロード時のバンドルタイプ検出は WIM マウント時の SSU-required 失敗を回避します。 WIM マウント時の失敗は高価です(WIM マウントを undo し、 SSU を先に適用してリスタートする必要がある)。 運用上、 この区別は、 ビルドが WIM サービシング開始前に安価に失敗するか、 すでに進行中になってから高価に失敗するかを決めます。
 
-### 5.3 SSU-LCU ペアリング問題
+### 5.3 SSU-LCU ペアリング問題: 依存関係は実際にはどう表現されているか
 
-Combined MSU の世界の外では、 オペレータは任意の LCU に対してどの SSU がペアになるかを知る必要があります。 Microsoft は LCU の KB ページのプレーンテキストでこれを公開しています(「Improvements」セクションがしばしば「This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update」で始まります)。 サードパーティサイト `techepages.com` や `windowslatest.com` も日常的にペアリングを繰り返します。
+Combined-MSU 以外の世界では、運用者は任意の LCU に対してどの SSU がペアになるかを知る必要がある。Microsoft は LCU の KB ページに平文で公開している(「改善点」セクションがしばしば「この更新プログラムは次の依存関係を導入します: KB`<NNNNNNN>` サービス スタック更新プログラム」で始まる)。サードパーティのサイトもこのペアリングを繰り返し掲載している。
 
-自動化では、 ペアリングは `wsusscn2.cab` からより信頼性高く取得できます。 各 LCU の Master XML エントリには、 必要な SSU の UpdateId を持つ `<Prerequisites>` ブロックが含まれます。 ただし Master XML には `<KBArticleID>` が存在しない（§2.4 の訂正を参照）ため、ペアリングは `UpdateId` / `RevisionId` で表現されます。前提 SSU の人間可読な KB 番号は、多くの payload URL（その SSU 更新の `<FileLocation>` URL）に埋め込まれた `kb(\d+)` トークンからヒューリスティックに推定するか、より堅牢な手段として UpdateId を Microsoft Update Catalog に照合して取得します。URL 構造は契約的なインターフェースではないため、トークンベースの推定はベストエフォートとして扱うべきです。したがって `package.xml` を消費するパーサーは、 予期しない構造変化に対してはベストエフォートな解釈を試みるのではなく、 fail closed（安全側に停止）すべきです。KB の文章ページを Web スクレイピングする必要はありません。
+自動化の自然な発想は、`wsusscn2.cab` の中に「LCU から SSU への KB 番号による前提条件(prerequisite)エッジ」を探すことである。**2026-05-12 に実際の `wsusscn2.cab` をリバースエンジニアリングした結果、そのようなエッジは Master XML にも per-package 詳細 CAB にも存在しないことが判明した。** この訂正は正確に述べる価値がある。本セクションの初期ドラフトは依存関係を誤って記述していたためである:
 
-Server 2016 の 2026-05 からの具体例:
+- LCU の Master XML `<Prerequisites>` ブロックが保持するのは **適用可能性 / detectoid の `UpdateId` GUID**(`DeploymentAction="Evaluate"` ノード、および Product カテゴリ・Classification カテゴリの GUID)である。これらは *評価* の関係(「この更新はこのマシンに適用可能か?」)であって、**インストール順序の依存関係ではない**。SSU を名指ししていない。実証的に、in-scope な更新群の prerequisite エッジを in-scope 集合に対して解決すると、in-scope な SSU KB は 0 件になる。
+- したがって SSU 依存について **計算すべき KB-prerequisite の「閉包(closure)」は存在しない**。`<Prerequisites>` をたどっても「この LCU はどの SSU KB を必要とするか?」には答えられない。データがそこに無いからである。
+
+実際に `0x800f0823` を引き起こす依存関係は、代わりに **最小サービス スタック バージョン**として表現される。これは LCU の per-package CBS メタデータ(`packageNN.cab` 内の `c/<RevisionId>`)にある:
 
 ```
-Windows Server 2016 の LCU, 2026-05 (UpdateId 631fdcea-..., RevisionId 43268251)
-  <Prerequisites>
-    <UpdateId Id="<2026-05 SSU の GUID>"/>
-  </Prerequisites>
-  <PayloadFiles><File Id="<digest>"/></PayloadFiles>
-
-前提 SSU 更新（別の <Update>）は自身の <PayloadFiles> を持ち、その digest は
-<FileLocations> を介して次のような URL に解決されます:
-  .../windows10.0-kb5088064-x64_<hash>.cab
-この URL から KB 番号(KB5088064)をヒューリスティックに推定します。Master XML 自体は
-「5088064」を KB element として記載することはありません。
+<CbsPackageApplicabilityMetadata>
+  ...
+  <installerAssembly name="Microsoft-Windows-ServicingStack"
+                     version="10.0.14393.7692" .../>   <-- 最小 SS バージョン
 ```
 
-`wsusscn2.cab` 派生データから config をプリロードするパイプラインは、 config ロード時に KB5087537 が同じパッチセット内に KB5088064 の存在を要求していることを検出できます。 この事前検証なしに config を手編集するオペレータは WIM-apply 時に 0x800f0823 失敗を得て、 編集をバックアウトする必要があります。
+インストール時、CBS はマシンの現在のサービス スタック バージョンをこの `installerAssembly` バージョンと比較し、現在値が必要値を下回る場合に `CBS_E_NEW_SERVICING_STACK_REQUIRED`(`0x800f0823`)を返す。依存関係は **数値バージョン比較**であって、KB の一致ではない。正しい事前検証は次のとおり: *LCU の per-package メタデータから必要 SS バージョンを取り出し、同じパッチセット内の SSU が提供するサービス スタック バージョンがその値以上であることを検証する。*
 
-### 5.4 Server バージョンごとの SSU モデル
+具体例(Server 2016、2026-05、実 cab で検証済み):
 
-| OS | SSU モデル | 備考 |
-|---|---|---|
-| Server 2016 | スタンドアロン | SSU は独自の KB を持ち、 LCU 適用前に発見・適用が必要 |
-| Server 2019 | スタンドアロン | 2016 と同様 |
-| Server 2022 | ほぼスタンドアロン | 一部の月は Combined;パイプラインは仮定できない |
-| Server 2025 | 現行 2025-2026 の Catalog スナップショットで combined/bundled として観測（LCU + KB5043080 バンドル） | 観測した範囲では Catalog はすべての LCU 解決で 2 ファイルダウンロードを提供し、 両方を適用する必要がある。 契約上の保証ではなく観測されたメタデータ挙動として扱うこと |
+```
+Windows Server 2016 の LCU、2026-05 (KB5087537)
+  leaf RevisionId 45255701 (3 つのうち 1 つ。x86/x64/エディション別の変種)
+  per-package メタデータ c/45255701:
+    Package_for_RollupFix version="14393.9140.1.19"   <-- LCU のビルド
+    installerAssembly Microsoft-Windows-ServicingStack
+                      version="10.0.14393.7692"        <-- 必要な SS の下限
 
-Server 2022 の曖昧性は予防する価値があります:最近の月の Server 2022 LCU が Combined であっても、 来月もそうとは限りません。 「Server 2022 は常に Combined」とハードコードするパイプラインは、 スタンドアロン月で失敗します。 堅牢なアプローチは MSU の内容を検査すること(セクション 5.2 の `update.ses` テスト)で、 それに応じて行動することです。
+  対応する SSU KB5088064(別の更新)がサービス スタックを 14393.7692 以上に
+  引き上げる。Master XML は "5088064" を KB 要素として記載しておらず、
+  KB5087537 の prerequisite も KB5088064 を参照していない。
+```
 
-### 5.5 事前検証ゲートとしての依存性グラフ検証
+つまり `wsusscn2.cab` 由来データから config をプリロードするパイプラインは、config ロード時に「Server 2016 LCU は少なくとも `10.0.14393.7692` のサービス スタックを必要とし、運用者がリストした SSU はその値以上を提供しなければならない」と検出できる。人間可読の SSU KB 番号自体は依然としてヒューリスティックにしか得られない(SSU 更新のペイロード URL 内の `kb(\d+)` トークン、または Catalog の相互参照)が、*依存関係の判定*はその KB 番号を知ることに依存しない -- バージョン比較に依存する。正しい SSU を含めずに config を手編集した運用者は WIM 適用時に `0x800f0823` を受け取る。事前のバージョンチェックはその 20 分の失敗を 1 秒の失敗に変える。
 
-実世界のこの作業の繰り返しから導かれた有用な設計パターンは、 依存性検証を **事前検証ゲート** として扱うことです — ビルド時の発見としてではなく。 パイプラインは OS ごとに適用するパッチ(KB 番号、 MSU ファイルへのパス、 など)をリストする設定に対して動作します。 DISM マウントの前に、 パイプラインは:
+### 5.4 Server バージョンごとの SSU モデル (2026-05-12 の cab で検証)
 
-1. 最新の `wsusscn2.cab` 派生依存性データベースをロードする
-2. config 内の各 LCU について、 データベース内の `<Prerequisites>` を検索する
-3. すべての前提条件 KB が config 内にもあることを検証する
-4. 前提条件が欠落している場合、 何を追加すべきかをリストする明確なメッセージで中断する
+2026-05-12 のリバースエンジニアリングでは、各 OS について同一の月次 LCU を 3 か月連続(2026-03/04/05)で解決し、毎回 per-package CBS メタデータを読んだ。4 つの OS は構造的に異なる 4 系統に分かれ、その系統は **月をまたいで安定**している:
 
-これにより、 失敗検出が「20 分以上の WIM マウント、 依存性解決、 コピー作業の後」から「config ロード 1 秒後」へとシフトします。 1 秒の失敗は同じオペレータセッションで診断・修正できます;20 分の失敗は通常オペレータがすでに離席していることを意味します。
+| OS | SSU 系統 | SS 要件の所在 | 観測値 (2026-05) |
+|---|---|---|---|
+| Server 2016 | SSU 完全分離 | LCU の `installerAssembly` が **実際の**最小 SS バージョンを持つ | 必要 SS = `10.0.14393.7692` (3 か月とも一定) |
+| Server 2019 | SSU 分離 + 内包参照 | LCU の `installerAssembly` (実値) **および** 内包の `Package_for_ServicingStack_<nnnn>` | 必要 SS = `10.0.17763.2090`; 内包 SSU `17763.8754` |
+| Server 2022 | Combined (SSU が LCU に統合) | `installerAssembly` はプレースホルダ `6.0.0.0`; 実際の SS 情報は内包の `Package_for_ServicingStack_<nnnn>` | 内包 SSU `20348.5120` (毎月更新) |
+| Server 2025 | Checkpoint 累積更新 (`.msu`) | leaf に `CbsPackageApplicabilityMetadata` が **無い**; `.msu` ペイロードが複数 KB を同梱 | ペイロード = LCU KB5087539 + ベースライン KB5043080 + SafeOS DU KB5087588 |
+
+実務上の帰結は 2 点:
+
+1. **Server 2016 と 2019 が `0x800f0823` の現実的リスクがある OS** である。SSU が別パッケージで、運用者が先に適用しなければならないからだ。その `installerAssembly` バージョンが照合すべき権威ある下限値となる。値は実ビルド番号(例: `10.0.14393.7692`)で、所与の LCU ビルドに対して一定である。
+2. **Server 2022 と 2025 は SSU を LCU 内に内包する。** Server 2022 の `installerAssembly` は `6.0.0.0`(名目上のプレースホルダで、実ビルド番号ではない)を示し、実際のサービス スタック ビルドは内包の `Package_for_ServicingStack_<nnnn>` サブパッケージ(例: `5120` -> ビルド `20348.5120.1.0`)としてのみ可視で、毎月進む。Server 2025 の checkpoint `.msu` は自己完結しているため、外部 SSU ペアリングのチェックはこの OS には意味をなさない。
+
+以前の「Server 2022 はほぼスタンドアロン; `update.ses` を検査せよ」という助言(旧ドラフト)は本知見で更新される: 2026-03/04/05 の cab では Server 2022 LCU は毎月 Combined であり、内包の `Package_for_ServicingStack_<nnnn>` が毎回存在した。§5.2 の `update.ses` テストはディスク上の MSU を検査する際の *実行時* 指標としては依然有効だが、cab メタデータは MSU を開かずとも SS ビルドをパイプラインに伝える。常にそうだが、これは 3 か月の窓での観測挙動であって契約上の保証ではない。パイプラインは OS ごとに系統をハードコードするのではなく、毎月 per-package メタデータを読むべきである。
+
+### 5.5 事前検証ゲートとしての依存性検証 (訂正モデル)
+
+本作業の実地での反復から得られた有用な設計パターンは、依存性検証をビルド時の発見ではなく **事前検証ゲート**として扱うことである。パイプラインは各 OS について適用するパッチをリストした config に対して動作する。DISM マウントの前に、パイプラインは `wsusscn2.cab` 由来の依存性データベースに対してパッチセットを検証する。
+
+本セクションの旧ドラフトはこのゲートを KB-prerequisite の **閉包(closure)**(「LCU の prerequisite を引き、すべての prerequisite KB が config にあるか検証する」)として記述していた。§5.3 で根底のモデルを訂正した: たどるべき SSU KB-prerequisite は存在しない。したがって事前検証ゲートは、いずれも KB 閉包ではない **3 つの独立したチェック**として再定義される:
+
+1. **存在確認(Presence)** -- 運用者がリストした各 KB が Layer 2 の in-scope 更新に解決する(その OS の現行 cab に LCU が実際に存在する)。解決しない KB は、supersede 済み(§5.9 参照)か scope 外(§5.8 参照)のいずれかで、ゲートはどちらかを報告する。
+2. **サービス スタック バージョン比較** -- SSU 分離型の OS(2016/2019)について、LCU の per-package メタデータ(`installerAssembly`)から必要 SS バージョンを読み、同じパッチセット内の SSU がその下限以上のサービス スタック バージョンを提供することを検証する。これが実際に `0x800f0823` を防ぐチェックである。
+3. **Supersession / 同一性** -- 選択した LCU がその OS で最新の非 supersede ビルドであることを(`<SupersededBy>` チェーン経由で)確認し、運用者が陳腐化したビルドをスリップストリームしないようにする。
+
+これにより失敗検出が「20 分以上の WIM マウントとコピー作業の後」から「config ロードの 1 秒後」へ移る。1 秒の失敗は同じ運用者のセッション内で診断・修正できる。20 分の失敗は運用者が席を外していることが多い。重要なのは、このゲートが **静的メタデータのみ**を消費し、WIM をマウントしないことである(SPEC B.19.13 の厳格ルール)。
 
 ### 5.6 3 層データベース設計
 
@@ -613,14 +634,70 @@ Server 2022 の曖昧性は予防する価値があります:最近の月の Ser
 - **.NET CU**:Classification = UpdateRollups(`28BC880E-...`)が主、 一部 SecurityUpdates(セキュリティを含むもの)。 .NET Framework 3.5 / 4.7.x / 4.8 / 4.8.1 の cumulative。
 - **Dynamic Update**:Classification = Updates(`CD5FFD1E-...`)または CriticalUpdates(`E6CF1350-...`)。 Setup DU、 SafeOS DU が該当。 LTSC OS では公開ケイデンスが散発的(§6.3 参照)。
 
-scope filter の正典:
+**deny-list: EOS / ESU の Server OS Product GUID(明示的除外)。** 2026-05-12 の調査で、サポート終了(EOS)および ESU 専用の Server OS 製品カテゴリは、OS がサポートを離れても `wsusscn2.cab` から削除されないことが確認された。これらは ESU 月次ロールアップを含む実ペイロード付き更新とともに無期限に残り続ける。したがって「無い」と仮定するのではなく、**能動的に除外**しなければならない。次の 4 つの GUID を deny-list として記録する(WSUS Offline コミュニティの製品 GUID リストと相互参照し、実 cab 内の存在を確認済み):
+
+| Server バージョン | Product GUID | サポート状態 |
+|:---|:---|:---|
+| Windows Server 2008 | `ba0ae9cc-5f01-40b4-ac3f-50192b5d6aaf` | EOS (ESU 終了) |
+| Windows Server 2008 R2 | `fdfe8200-9d98-44ba-a12a-772282bf60ef` | EOS (ESU 終了) |
+| Windows Server 2012 | `a105a108-7c9b-4518-bbbe-73f0fe30012b` | ESU (2026-10 まで) |
+| Windows Server 2012 R2 | `d31bd4c3-d872-41c9-a2e7-231f372588cb` | ESU (2026-10 まで) |
+
+**deny-overrides ではなく allow-overrides。** 一部の更新は deny-list の OS と allow-list の OS の *両方* に正当に適用される。複数 OS 対応の悪意のあるソフトウェアの削除ツール(MSRT、KB890830)が典型例で、2012 R2 の GUID と 2016/2019 の GUID の両方を持つ。実 cab にはこうした「重複(overlap)」更新が 33 件存在する。したがって scope ルールは、deny-list GUID も併せ持つ場合でも、allow-list GUID を *いずれか* 持つなら更新を admit しなければならない。deny-overrides ルールはこれら正当な in-scope 更新を誤って除外してしまう。deny-list の役割は、**deny-list GUID のみ**を持つ更新(allow-list に何も該当しない ESU 専用ロールアップ。例: KB5087471 / KB5063950 / KB5063906。これらは 2012 / 2012 R2 GUID を持つ)を除外することである。
+
+scope filter の正典(改訂版):
 
 > Update が scope に admit される条件:
-> 1. `Categories.Product` GUID が上記 4 種類の Server LTSC GUID のいずれかと一致する、 AND
-> 2. `Categories.UpdateClassification` GUID が上記 5 種類のいずれかと一致する、 AND
-> 3. `CreationDate` が parser 実行日から過去 24 ヶ月以内である(SPEC §B.19.7 の recency 条件)
+> 1. bundle であり、かつ
+> 2. `Categories.Product` が 4 つの allow-list Server LTSC Product GUID の少なくとも 1 つに一致する(allow-overrides: deny-list GUID が併存していてもこれが成立する)、かつ
+> 3. `Categories.UpdateClassification` が上記 5 つの Classification GUID のいずれかに一致する、かつ
+> 4. `CreationDate` が parser 実行日から RecencyMonths の窓内である。
+>
+> deny-list は多層防御である: deny-list GUID のみ(allow-list GUID 無し)を持つ更新は除外され、警告として表面化させてもよい。これにより運用者は ESU/EOS パッチが検出され意図的に除外されたことを確認できる。
 
-上記 3 条件のすべてを満たす Update のみが Layer 2 JSON に出力されます。 これにより 2026-05-12 取得の wsusscn2 では Master XML の ~136,000 件のうち scope に入るのは ~10,000 件程度に絞り込まれ、 Layer 2 JSON は 2-5 MB の目標サイズに収まります。
+これらの条件を満たす Update のみが Layer 2 JSON に出力される。`RecencyMonths` の窓は parser の `-RecencyMonths` パラメータである: 既定 24、36 設定可、`-1` で条件を完全に無効化する(§5.9 参照)。2026-05-12 取得の wsusscn2 では、Master XML の ~136,000 件が 138 件の in-scope bundle(155 個の distinct payload KB)に絞り込まれ、2-5 MB の目標に十分収まる。
+
+### 5.8 EOS / ESU データの永続性と deny-list
+
+長期運用パイプラインにとって EOS の中心的な問いは、*OS がサポートを離れたとき、そのデータは `wsusscn2.cab` から消えるか?* である。2026-05-12 の調査は、各 OS の Product GUID を持つすべての Master XML 更新を集計することで実証的に答える:
+
+| OS | サポート状態 | cab 内 更新数 | payload 有 | distinct KB | 最新 payload CreationDate |
+|:---|:---|---:|---:|---:|:---|
+| Server 2008 | EOS (ESU 終了) | 6577 | 4080 | 1078 | 2026-05-08 |
+| Server 2008 R2 | EOS (ESU 終了) | 3540 | 2227 | 1018 | 2026-05-08 |
+| Server 2012 | ESU (2026-10 まで) | 1659 | 979 | 803 | 2026-05-11 |
+| Server 2012 R2 | ESU (2026-10 まで) | 1498 | 830 | 806 | 2026-05-11 |
+| Server 2016 | メインストリーム間もなく終了 | 284 | 132 | 119 | 2026-05-11 |
+| Server 2019 | サポート中 | 213 | 118 | 102 | 2026-05-11 |
+| Server 2022 | サポート中 | 184 | 98 | 95 | 2026-05-11 |
+| Server 2025 | サポート中 | 63 | 31 | 47 | 2026-05-11 |
+
+3 つの知見:
+
+1. **EOS はデータを削除しない。** 完全 EOS の Server 2008 / 2008 R2 ですら 1000 を超える payload 付き KB を保持し、最新 CreationDate は cab スナップショットのわずか数週間前である。(これらは主に Defender 定義更新と、権利を持つ顧客に今も配信される ESU 期のセキュリティ ロールアップである。)EOS で消去されるものは無い。
+2. **古い OS ほどデータが *多い*。** Server 2008 は 6577 件、Server 2025 は 63 件。累積更新以前のサービシング時代が、旧 GUID 配下に長年の個別月次パッチを大量に残した一方、累積更新型 OS(2016 以降)はエントリが遥かに少ない。これは、もし deny-list の OS を scope に入れた場合に RecencyMonths の窓がデータ量制御として効く理由である。
+3. **Server 2016 の今後の ESU 移行は取得において非問題である。** 完全 EOS の 2008/2008 R2 ですら GUID を変えずに payload 付きで残り続けているため、Server 2016 の GUID(`569e8e8f-...`)はメインストリーム終了後・ESU 移行後も解決し続ける。OS は ESU 移行時に新しい GUID を取得しない。`569e8e8f-...` を allow-list に残せば「最新の Server 2016 ロールアップ」は取得可能なままである。
+
+これが、EOS/ESU 除外をデータ消滅頼みではなく Product-GUID deny-list として扱う根拠である: データは決して消えないので、除外は明示的でなければならない。
+
+### 5.9 recency 窓とフォールバック深度
+
+`RecencyMonths` 条件(既定 24)は `CreationDate` の窓である: `CreationDate` が `Now - RecencyMonths` より古い bundle は reject され、`-1` で条件は無効化される。2026-05-12 の堅牢性テストは、過去 36 か月分の OS 別 LCU KB 番号(コミュニティの Patch Tuesday アーカイブから収集)を現行 cab の in-scope 集合に対して照合し、「検索ロジックが実際にどこまで遡れるか」を問うた:
+
+| OS | in-scope な最古 LCU | 実効到達 | 形状 |
+|:---|:---|:---|:---|
+| Server 2022 | 2024-06 (KB5039227) | 約 12-13 か月 | 最深 |
+| Server 2016 | 2024-11 (KB5046612) | 約 7 か月 | 中程度 |
+| Server 2025 | 2025-04 (KB5055523) | 約 8 か月 (2024-11 GA 以降) | GA 以降ほぼ全部 |
+| Server 2019 | 2025-08 (KB5063877) | 約 3-4 か月 | 最浅 |
+
+重要な洞察は、**実効到達が 24 か月の窓よりはるかに短く**、OS により異なることである。窓は `CreationDate` の上限だが、supersession が実用的な深度を縮める: 新しい LCU が古い LCU を supersede すると、古い方は payload 付き in-scope bundle ではなくなる。古い月を引いたときの「ミス」は **supersession(より新しいビルドが存在する)であって、データ欠損ではない** -- パイプラインはそのように報告すべきである。
+
+パイプラインにとって、これは正確で実装可能な保証をもたらす:
+
+- サポート中の各 OS の **最新** LCU は常に取得可能(月次サイクルは完全に決定論的)。
+- 特定の古い月が要求され scope に無い場合、その OS の最新 in-scope LCU にフォールバックし、ミスを supersession として扱う。
+- フォールバックの上限は `RecencyMonths` 設定(現在 24; 36 も対応)であり、`CreationDate` 窓がどこまで古いビルドを admit するかを画定する。窓の外では、非 supersede の古いビルドでも設計上除外される -- これが、もし deny-list の EOS OS(数千の履歴 KB を持つ)が admit された場合でも scope を氾濫させないための仕組みでもある。
 
 ---
 

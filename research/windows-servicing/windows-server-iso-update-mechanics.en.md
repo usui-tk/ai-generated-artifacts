@@ -516,51 +516,72 @@ Standalone:  update.mum,             Windows10.0-KBXXXXXXX-x64.CAB
 
 Detection of the bundle type at config-load time avoids the SSU-required failure at WIM-mount time, where the failure is expensive (the WIM mount must be undone and restarted with the SSU applied first). Operationally, this distinction determines whether the build fails cheaply before WIM servicing begins or expensively after it is already under way.
 
-### 5.3 The SSU-LCU pairing problem
+### 5.3 The SSU-LCU pairing problem: how the dependency is actually expressed
 
-Outside the Combined-MSU world, the operator needs to know, for any given LCU, which SSU pairs with it. Microsoft does publish this in plain prose on the LCU's KB page (the "Improvements" section often opens with "This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update"). Third-party sites such as `techepages.com` and `windowslatest.com` routinely repeat the pairing.
+Outside the Combined-MSU world, the operator needs to know, for any given LCU, which SSU pairs with it. Microsoft publishes this in plain prose on the LCU's KB page (the "Improvements" section often opens with "This update introduces the following dependency: KB`<NNNNNNN>` Servicing Stack Update"). Third-party sites routinely repeat the pairing.
 
-For automation, the pairing is more reliably retrieved from `wsusscn2.cab`. Each LCU's Master XML entry includes a `<Prerequisites>` block with the UpdateId of any required SSU. Because the Master XML carries no `<KBArticleID>` (see §2.4 correction), the pairing is expressed in `UpdateId` / `RevisionId` terms; the human-readable KB number of the prerequisite SSU is heuristically inferred from the `kb(\d+)` token embedded in many payload URLs (the SSU update's `<FileLocation>` URL), or — more robustly — by cross-referencing the UpdateId against the Microsoft Update Catalog. The URL structure is not a contractual interface, so the token-based inference should be treated as best-effort. Any parser that consumes `package.xml` should therefore fail closed on unexpected structural changes rather than attempting best-effort interpretation. No web scraping of KB prose pages is required.
+For automation, the natural instinct is to look in `wsusscn2.cab` for an LCU-to-SSU edge expressed as a KB-number prerequisite. **A 2026-05-12 reverse-engineering of a real `wsusscn2.cab` showed that no such edge exists, in either the Master XML or the per-package detail CABs.** This correction is important enough to state precisely, because an earlier draft of this section described the dependency the wrong way:
 
-A concrete example, from Server 2016 in 2026-05:
+- The LCU's Master XML `<Prerequisites>` block holds **applicability / detectoid `UpdateId` GUIDs** (`DeploymentAction="Evaluate"` nodes, plus the Product-category and Classification-category GUIDs). These are *evaluation* relationships ("is this update applicable to this machine?"), **not install-order dependencies**. They do not name the SSU. Empirically, when the in-scope updates' prerequisite edges are resolved against the in-scope set, they yield zero in-scope SSU KBs.
+- There is therefore **no KB-prerequisite "closure" to compute** for the SSU dependency. A pipeline cannot answer "which SSU KB does this LCU require?" by walking `<Prerequisites>`, because the data is not there.
+
+The dependency that actually causes `0x800f0823` is expressed instead as a **minimum servicing-stack version**, found in the LCU's per-package CBS metadata (`c/<RevisionId>` inside `packageNN.cab`):
 
 ```
-LCU for Windows Server 2016, 2026-05 (UpdateId 631fdcea-..., RevisionId 43268251)
-  <Prerequisites>
-    <UpdateId Id="<GUID-of-the-2026-05-SSU>"/>
-  </Prerequisites>
-  <PayloadFiles><File Id="<digest>"/></PayloadFiles>
-
-The prerequisite SSU update (a separate <Update>) carries its own
-<PayloadFiles>, whose digest resolves through <FileLocations> to a URL like
-  .../windows10.0-kb5088064-x64_<hash>.cab
-from which the KB number (KB5088064) is heuristically inferred. The
-Master XML itself never states "5088064" as a KB element.
+<CbsPackageApplicabilityMetadata>
+  ...
+  <installerAssembly name="Microsoft-Windows-ServicingStack"
+                     version="10.0.14393.7692" .../>   <-- minimum SS version
 ```
 
-A pipeline that pre-loads its config from `wsusscn2.cab` derivative data can detect, at config-load time, that KB5087537 requires KB5088064 to be present in the same patch set. An operator who hand-edits a config without this pre-flight gets the 0x800f0823 failure at WIM-apply time and has to back out their edit.
+At install time, CBS compares the machine's current servicing-stack version against this `installerAssembly` version; if current is below required, it returns `CBS_E_NEW_SERVICING_STACK_REQUIRED` (`0x800f0823`). The dependency is therefore a **numeric version comparison**, not a KB match. The correct pre-flight check is: extract the LCU's required SS version from its per-package metadata, and verify that the SSU in the same patch set provides a servicing-stack version greater than or equal to that value.
 
-### 5.4 SSU model per Server version
+A concrete example, from Server 2016 in 2026-05 (verified against the real cab):
 
-| OS | SSU model | Notes |
-|---|---|---|
-| Server 2016 | Standalone | SSU has its own KB; must be discovered and applied before the LCU |
-| Server 2019 | Standalone | Same as 2016 |
-| Server 2022 | Mostly standalone | Some months are Combined; the pipeline cannot assume |
-| Server 2025 | Observed as combined/bundled in current 2025-2026 Catalog snapshots (LCU + KB5043080 bundle) | The Catalog served a 2-file download for every LCU resolution observed; both must be applied. Treat as observed metadata behavior, not a contractual guarantee |
+```
+LCU for Windows Server 2016, 2026-05 (KB5087537)
+  leaf RevisionId 45255701 (one of three; x86/x64/edition variants)
+  per-package metadata c/45255701:
+    Package_for_RollupFix version="14393.9140.1.19"   <-- the LCU build
+    installerAssembly Microsoft-Windows-ServicingStack
+                      version="10.0.14393.7692"        <-- required SS floor
 
-The Server 2022 ambiguity is worth pre-empting: even if a recent month's Server 2022 LCU was Combined, the next month's might not be. A pipeline that hard-codes "Server 2022 is always Combined" will fail on the standalone-month side. The robust approach is to inspect the MSU contents (the `update.ses` test from section 5.2) and act accordingly.
+  The matching SSU KB5088064 (a separate update) raises the servicing
+  stack to >= 14393.7692. The Master XML never states "5088064" as a KB
+  element, and KB5087537's prerequisites never reference KB5088064.
+```
 
-### 5.5 Dependency-graph validation as a pre-flight gate
+So a pipeline that pre-loads its config from `wsusscn2.cab` derivative data can detect, at config-load time, that the Server 2016 LCU needs a servicing stack of at least `10.0.14393.7692`, and that the SSU the operator listed must provide a version greater than or equal to that. The human-readable SSU KB number itself is still only available heuristically (the `kb(\d+)` token in the SSU update's payload URL, or a Catalog cross-reference); but the *dependency decision* does not depend on knowing that KB number -- it depends on the version comparison. An operator who hand-edits a config without the right SSU gets the `0x800f0823` failure at WIM-apply time; the pre-flight version check turns that 20-minute failure into a 1-second one.
 
-A useful design pattern, derived from a real-world iteration of this work, is to treat dependency validation as a **pre-flight gate** rather than a build-time discovery. The pipeline operates against a configuration that lists, for each OS, the patches to apply (KB numbers, paths to MSU files, etc.). Before any DISM mount, the pipeline:
+### 5.4 SSU model per Server version (verified against the 2026-05-12 cab)
 
-1. Loads the most recent `wsusscn2.cab`-derived dependency database
-2. For each LCU in the config, looks up its `<Prerequisites>` in the database
-3. Verifies that every prerequisite KB is also in the config
-4. Aborts with a clear message if any prerequisite is missing, listing what to add
+A 2026-05-12 reverse-engineering exercise resolved the same monthly LCU for each OS across three consecutive months (2026-03/04/05) and read the per-package CBS metadata each time. The four OS fall into four structurally distinct families, and the family is **stable month-over-month**:
 
-This shifts the failure detection from "after 20+ minutes of WIM mount, dependency-resolution, and copy work" to "1 second after config load". A 1-second failure can be diagnosed and fixed in the same operator session; a 20-minute failure usually means the operator has wandered off.
+| OS | SSU family | Where the SS requirement lives | Value observed (2026-05) |
+|---|---|---|---|
+| Server 2016 | SSU fully separate | LCU `installerAssembly` carries the **real** minimum SS version | required SS = `10.0.14393.7692` (constant across all three months) |
+| Server 2019 | SSU separate, plus an embedded reference | LCU `installerAssembly` (real value) **and** an embedded `Package_for_ServicingStack_<nnnn>` | required SS = `10.0.17763.2090`; embedded SSU `17763.8754` |
+| Server 2022 | Combined (SSU folded into the LCU) | `installerAssembly` is the placeholder `6.0.0.0`; the real SS info is the embedded `Package_for_ServicingStack_<nnnn>` | embedded SSU `20348.5120` (advances every month) |
+| Server 2025 | Checkpoint cumulative update (`.msu`) | leaf has **no** `CbsPackageApplicabilityMetadata`; the `.msu` payload bundles multiple KBs | payload = LCU KB5087539 + baseline KB5043080 + SafeOS DU KB5087588 |
+
+Two practical consequences follow:
+
+1. **Server 2016 and 2019 are the OSes where `0x800f0823` is a live risk**, because their SSU is a separate package the operator must apply first. Their `installerAssembly` version is the authoritative floor to check against. The value is a real build number (e.g. `10.0.14393.7692`), constant for a given LCU build.
+2. **Server 2022 and 2025 carry the SSU inside the LCU.** Server 2022's `installerAssembly` reads `6.0.0.0` -- a nominal placeholder, *not* a real build number -- and the real servicing-stack build is only visible as the embedded `Package_for_ServicingStack_<nnnn>` sub-package (e.g. `5120` -> build `20348.5120.1.0`), which advances every month. Server 2025's checkpoint `.msu` is self-contained, so an external SSU pairing check is not meaningful for it.
+
+The earlier "Server 2022 is mostly standalone; inspect `update.ses`" advice (previous draft) is superseded by this finding: in the 2026-03/04/05 cab the Server 2022 LCU was Combined every month, with the embedded `Package_for_ServicingStack_<nnnn>` present each time. The `update.ses` test from §5.2 remains a valid *runtime* indicator when inspecting an MSU on disk, but the cab metadata already tells the pipeline the SS build without opening the MSU. As always, treat this as observed behaviour over a three-month window, not a contractual guarantee; a pipeline should still read the per-package metadata each month rather than hard-coding a family per OS.
+
+### 5.5 Dependency validation as a pre-flight gate (corrected model)
+
+A useful design pattern, derived from a real-world iteration of this work, is to treat dependency validation as a **pre-flight gate** rather than a build-time discovery. The pipeline operates against a configuration that lists, for each OS, the patches to apply. Before any DISM mount, the pipeline validates the patch set against the `wsusscn2.cab`-derived dependency database.
+
+The earlier draft of this section described the gate as a KB-prerequisite **closure** ("look up the LCU's prerequisites, verify every prerequisite KB is in the config"). §5.3 corrected the underlying model: there is no SSU KB-prerequisite to walk. The pre-flight gate is therefore re-stated as **three independent checks**, none of which is a KB closure:
+
+1. **Presence** -- each KB the operator listed resolves to an in-scope update in Layer 2 (the LCU is actually present in the current cab for that OS). A KB that does not resolve is either superseded (see §5.9) or out of scope (see §5.8), and the gate reports which.
+2. **Servicing-stack version comparison** -- for the SSU-separate OSes (2016/2019), read the LCU's required SS version from its per-package metadata (`installerAssembly`), and verify the SSU in the same patch set provides a servicing-stack version greater than or equal to that floor. This is the check that actually prevents `0x800f0823`.
+3. **Supersession / identity** -- confirm the chosen LCU is the newest non-superseded one for that OS (via the `<SupersededBy>` chain), so the operator is not slipstreaming a stale build.
+
+This shifts failure detection from "after 20+ minutes of WIM mount and copy work" to "1 second after config load". A 1-second failure can be diagnosed and fixed in the same operator session; a 20-minute failure usually means the operator has wandered off. Crucially, the gate consumes **static metadata only** -- it never mounts a WIM (SPEC B.19.13 hard rule).
 
 ### 5.6 Three-layer database design
 
@@ -613,14 +634,70 @@ Reference (not Server LTSC, so excluded from the scope filter):
 - **.NET CU**: Classification = UpdateRollups (`28BC880E-...`) mainly, with a few in SecurityUpdates (when they carry security content). Cumulative Update for .NET Framework 3.5 / 4.7.x / 4.8 / 4.8.1.
 - **Dynamic Update**: Classification = Updates (`CD5FFD1E-...`) or CriticalUpdates (`E6CF1350-...`). Setup DU and SafeOS DU. Publication cadence on LTSC OSes is sporadic (see §6.3).
 
-The canonical scope-filter rule:
+**Deny-list: EOS / ESU Server OS Product GUIDs (explicit exclusion).** A 2026-05-12 investigation confirmed that end-of-support and ESU-only Server OS product categories are NOT removed from `wsusscn2.cab` when the OS leaves support; they persist with live, payload-bearing updates (including ESU monthly rollups) indefinitely. They must therefore be **actively excluded**, not assumed absent. These four GUIDs are recorded as a deny-list (cross-referenced with the WSUS Offline community product-GUID list and confirmed present in the real cab):
+
+| Server version | Product GUID | Support state |
+|:---|:---|:---|
+| Windows Server 2008 | `ba0ae9cc-5f01-40b4-ac3f-50192b5d6aaf` | EOS (ESU ended) |
+| Windows Server 2008 R2 | `fdfe8200-9d98-44ba-a12a-772282bf60ef` | EOS (ESU ended) |
+| Windows Server 2012 | `a105a108-7c9b-4518-bbbe-73f0fe30012b` | ESU (through 2026-10) |
+| Windows Server 2012 R2 | `d31bd4c3-d872-41c9-a2e7-231f372588cb` | ESU (through 2026-10) |
+
+**Allow-overrides, not deny-overrides.** Some updates legitimately apply to *both* a deny-listed OS and an allow-listed OS -- the multi-OS Malicious Software Removal Tool bundle (KB890830) is the canonical example, carrying both the 2012 R2 GUID and the 2016/2019 GUIDs. In the real cab, 33 such "overlap" updates exist. The scope rule must therefore admit an update if it carries *any* allow-list GUID, even when it also carries a deny-list GUID; a deny-overrides rule would wrongly drop these valid in-scope updates. The deny-list's job is to exclude updates that carry **only** deny-listed GUIDs (the ESU-specific rollups such as KB5087471 / KB5063950 / KB5063906, which carry the 2012 / 2012 R2 GUID and nothing in the allow-list).
+
+The canonical scope-filter rule (revised):
 
 > An Update is admitted into scope if and only if:
-> 1. `Categories.Product` GUID matches one of the 4 Server LTSC Product GUIDs above, AND
-> 2. `Categories.UpdateClassification` GUID matches one of the 5 Classification GUIDs above, AND
-> 3. `CreationDate` is within the last 24 months relative to the parser invocation date (the recency clause from SPEC §B.19.7).
+> 1. it is a bundle, AND
+> 2. `Categories.Product` matches at least one of the 4 allow-list Server LTSC Product GUIDs (allow-overrides: this holds even if a deny-list GUID is also present), AND
+> 3. `Categories.UpdateClassification` matches one of the 5 Classification GUIDs above, AND
+> 4. `CreationDate` is within the RecencyMonths window relative to the parser invocation date.
+>
+> The deny-list is defence-in-depth: an update carrying only deny-list GUIDs (no allow-list GUID) is excluded and may be surfaced as a warning so the operator can see that an ESU/EOS patch was detected and deliberately dropped.
 
-Only Updates satisfying all three conditions are emitted into the Layer 2 JSON. For the wsusscn2 fetched on 2026-05-12 this reduces the ~136,000 entries in the Master XML to roughly ~10,000 entries, comfortably fitting the 2-5 MB target size for Layer 2 JSON.
+Only Updates satisfying these conditions are emitted into the Layer 2 JSON. The `RecencyMonths` window is the parser's `-RecencyMonths` parameter: default 24, 36 settable, `-1` disables the clause entirely (see §5.9). For the wsusscn2 fetched on 2026-05-12 this reduces the ~136,000 Master XML entries to a Layer 2 of 138 in-scope bundles (155 distinct payload KBs), comfortably inside the 2-5 MB target.
+
+### 5.8 EOS / ESU data persistence and the deny-list
+
+The central EOS question for a long-lived pipeline is: *when an OS leaves support, does its data disappear from `wsusscn2.cab`?* The 2026-05-12 investigation answers it empirically by aggregating every Master XML update that carries each OS's Product GUID:
+
+| OS | Support state | updates in cab | payload-bearing | distinct KB | newest payload CreationDate |
+|:---|:---|---:|---:|---:|:---|
+| Server 2008 | EOS (ESU ended) | 6577 | 4080 | 1078 | 2026-05-08 |
+| Server 2008 R2 | EOS (ESU ended) | 3540 | 2227 | 1018 | 2026-05-08 |
+| Server 2012 | ESU (to 2026-10) | 1659 | 979 | 803 | 2026-05-11 |
+| Server 2012 R2 | ESU (to 2026-10) | 1498 | 830 | 806 | 2026-05-11 |
+| Server 2016 | Mainstream ending soon | 284 | 132 | 119 | 2026-05-11 |
+| Server 2019 | Supported | 213 | 118 | 102 | 2026-05-11 |
+| Server 2022 | Supported | 184 | 98 | 95 | 2026-05-11 |
+| Server 2025 | Supported | 63 | 31 | 47 | 2026-05-11 |
+
+Three findings:
+
+1. **EOS does not remove data.** Even fully-EOS Server 2008 / 2008 R2 retain over a thousand payload-bearing KBs, with a newest CreationDate only weeks before the cab snapshot. (These are largely Defender definition updates and the ESU-era security rollups still served to entitled customers.) Nothing is purged on EOS.
+2. **Older OSes carry *more* data, not less.** Server 2008 has 6577 updates; Server 2025 has 63. The pre-cumulative servicing era left many years of individual monthly patches accumulated under the old GUIDs, whereas the cumulative-update OSes (2016+) have far fewer entries. This is why the RecencyMonths window matters as a data-volume control if a deny-listed OS were ever brought into scope.
+3. **Server 2016's coming ESU transition is a non-event for retrieval.** Since the fully-EOS 2008/2008 R2 still persist with payloads under an unchanged GUID, Server 2016's GUID (`569e8e8f-...`) will keep resolving after its mainstream support ends and it moves to ESU. The OS does not get a new GUID on ESU transition; keeping `569e8e8f-...` on the allow-list keeps "the newest Server 2016 rollup" retrievable.
+
+This is the rationale for treating EOS/ESU exclusion as a Product-GUID deny-list rather than relying on the data disappearing: the data never disappears, so the exclusion has to be explicit.
+
+### 5.9 Recency window and fallback depth
+
+The `RecencyMonths` clause (default 24) is a `CreationDate` window: a bundle whose `CreationDate` is older than `Now - RecencyMonths` is rejected; `-1` disables the clause. A 2026-05-12 robustness test traced 36 months of per-OS LCU KB numbers (collected from community Patch-Tuesday archives) against the current cab's in-scope set, asking "how far back can the search logic actually reach?":
+
+| OS | Oldest in-scope LCU | Effective reach | Shape |
+|:---|:---|:---|:---|
+| Server 2022 | 2024-06 (KB5039227) | ~12-13 months | deepest |
+| Server 2016 | 2024-11 (KB5046612) | ~7 months | moderate |
+| Server 2025 | 2025-04 (KB5055523) | ~8 months (since 2024-11 GA) | full since GA |
+| Server 2019 | 2025-08 (KB5063877) | ~3-4 months | shallowest |
+
+The key insight is that the **effective reach is much shorter than the 24-month window**, and it varies by OS. The window is a `CreationDate` ceiling, but supersession shortens the practical depth: once a newer LCU supersedes an older one, the older one stops being a payload-bearing in-scope bundle. A "miss" when looking up an older month is therefore **supersession (a newer build exists), not missing data** -- and the pipeline should report it that way.
+
+For the pipeline this yields a precise, implementable guarantee:
+
+- The **newest** LCU per supported OS is always retrievable (the monthly cycle is fully deterministic).
+- If a specific older month is requested and not in scope, fall back to the newest in-scope LCU for that OS, treating the miss as supersession.
+- The fallback ceiling is the `RecencyMonths` setting (currently 24; 36 also supported), bounding how far the `CreationDate` window admits older builds. Beyond the window, even non-superseded old builds are excluded by design -- which is also what keeps a deny-listed EOS OS (with its thousands of historical KBs) from flooding the scope if it were ever admitted.
 
 ---
 
