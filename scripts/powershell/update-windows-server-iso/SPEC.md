@@ -2652,6 +2652,38 @@ WIM metadata (build number, installed packages list) captured by
 > `RequiredServicingStackVersion` is `$null` and the SS check is skipped
 > (the SSU travels inside the LCU).
 
+**Implementation (M1 part 3, r11.7).** The readiness verdict is
+implemented as `Test-PatchServicingReadinessFromGraph` (the SS-version
+model; the historical `…DependencyClosureFromGraph` KB-closure name is
+retired). The function reads Layer 2 at `$DatabasePath`, indexes updates
+by KB (the update's `kbIds` when present, else the `kb(\d+)` token
+recovered from `payloadUrls`, matching the scope-invariants gate) and by
+`revisionId`, and scores each resolved patch:
+
+- **Presence** — no KB match → `NotInDatabase`.
+- **SS version comparison** — `separate` only. The provided SS is taken
+  from `$PolicyOverride[OsKey]`, else `$WimMountState.ProvidedServicingStackVersion`,
+  else the matched update's `providedServicingStackVersion`. When a
+  provided and required version are both present and numerically
+  comparable and provided < required → `SsTooOld`. `combined` /
+  `checkpoint` skip the check (N/A). If `servicingStackModel` /
+  `requiredServicingStackVersion` are absent (Layer 2 predates M1
+  population), the SS check is reported as skipped in `Notes` and never
+  fails the patch.
+- **Supersession** — the matched update is `Superseded` only when one of
+  its `supersededByRevisionIds` is itself an in-scope update in Layer 2
+  (a `supersededBy` that points out of scope is not a successor and does
+  not mark the patch superseded).
+
+Verdict precedence: `NotInDatabase` > `SsTooOld` > `Superseded` >
+`Pass`. `OverallStatus` is `Fail` if any `NotInDatabase` / `SsTooOld`,
+else `Warning` if any `Superseded`, else `Pass`; a missing or unreadable
+Layer 2 yields `Available = $false` / `OverallStatus = 'Unknown'`. The
+`_meta.generatedAt` value is normalised back to a UTC ISO-8601 string
+(ConvertFrom-Json coerces it to `[datetime]`). T16
+(`wsusscn2_readiness_verdict_test.py`) is the executable contract.
+
+
 #### B.19.13.2 Relationship to `Test-PatchDependencyClosureOnMount` (§B.13)
 
 Both functions stay enabled in r09.0+. They are complementary:

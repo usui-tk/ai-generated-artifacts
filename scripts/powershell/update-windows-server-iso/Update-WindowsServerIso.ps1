@@ -538,8 +538,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.6'
-$Script:ScriptTag     = 'wsusscn2-servicing-stack-extraction'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.7'
+$Script:ScriptTag     = 'wsusscn2-phase2c-readiness-verdict'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -7624,6 +7624,288 @@ function Get-WsusScnServicingStackInfo {
         RequiredServicingStackVersion = $requiredSs
         ServicingStackModel           = $model
         InlineServicingStackPackage   = $inlineSs
+    }
+}
+
+function Test-PatchServicingReadinessFromGraph {
+    <#
+    .SYNOPSIS
+        Phase 2c readiness check (SPEC B.19.13): score a resolved patch set
+        against the Layer 2 dependency database using the three-check
+        servicing-stack model (presence / SS-version-comparison /
+        supersession). Replaces the abandoned KB-prerequisite-closure model.
+    .DESCRIPTION
+        For each resolved patch the function emits one verdict object with
+        the finalised shape (full-spelling servicing-stack field names that
+        match schema/wsusscn2-database.schema.json):
+
+            KbId UpdateId Verdict RequiredServicingStackVersion
+            ProvidedServicingStackVersion ServicingStackModel Superseded Notes
+
+        The three checks (none of which is a KB closure):
+
+          1. Presence - the patch's KB resolves to an in-scope update in
+             Layer 2. KB->update resolution uses the update's kbIds when
+             present, else the kb(\d+) token recovered from payloadUrls
+             (the same recovery the scope-invariants gate uses). No match
+             -> Verdict 'NotInDatabase'.
+          2. SS version comparison - only for servicingStackModel
+             'separate' (Server 2016 / 2019). When the provided SS version
+             (from $WimMountState.ProvidedServicingStackVersion or a
+             $PolicyOverride entry, or the matched update's
+             providedServicingStackVersion) is lower than the update's
+             requiredServicingStackVersion, Verdict 'SsTooOld' (the
+             0x800f0823 predictor). For 'combined' / 'checkpoint' the SSU
+             travels inside the LCU, so this check is skipped (N/A).
+          3. Supersession - if the matched update carries
+             supersededByRevisionIds and at least one of those revisions is
+             itself an in-scope update in Layer 2, Verdict 'Superseded'
+             (a newer build exists in scope; not a data gap).
+
+        Precedence when several apply: NotInDatabase > SsTooOld > Superseded
+        > Pass. A patch with no OS servicing model resolvable (e.g. SS
+        fields absent because Layer 2 predates M1 population) is scored on
+        presence + supersession only and the SS check is reported as Skipped
+        in Notes, never failing the patch.
+
+        This function MUST NOT mount the WIM. It reads only the static
+        $WimMountState (build number, provided SS) the caller captured via
+        Get-WindowsImage. Pure with respect to the WIM; the only I/O is
+        reading the Layer 2 JSON at $DatabasePath.
+    .PARAMETER ResolvedPatches
+        Array of resolved patch objects; each is expected to carry a KbId
+        (e.g. 'KB5087537') and optionally an OsKey used to pick the
+        provided-SS override.
+    .PARAMETER DatabasePath
+        Path to the Layer 2 dependency database JSON.
+    .PARAMETER WimMountState
+        Optional static WIM metadata: may carry Build and
+        ProvidedServicingStackVersion. InstalledPackages is not required
+        (this check does not need installed-set knowledge).
+    .PARAMETER PolicyOverride
+        Optional hashtable mapping OsKey -> provided servicing-stack version
+        string, letting the caller state the SSU the configured set supplies
+        when it is not derivable from $WimMountState.
+    .OUTPUTS
+        [pscustomobject] with Available, OverallStatus, DatabaseSha256,
+        DatabaseGeneratedAt, PatchVerdicts (array of verdict objects), and
+        Reasons.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [pscustomobject[]] $ResolvedPatches,
+
+        [Parameter()]
+        [string] $DatabasePath = "$PSScriptRoot/data/wsusscn2-database.json",
+
+        [Parameter()]
+        [pscustomobject] $WimMountState,
+
+        [Parameter()]
+        [hashtable] $PolicyOverride
+    )
+
+    $reasons = [System.Collections.Generic.List[string]]::new()
+
+    # ---- Load Layer 2 -----------------------------------------------------
+    if (-not (Test-Path -LiteralPath $DatabasePath -PathType Leaf)) {
+        $reasons.Add(('Layer 2 database not found at {0}' -f $DatabasePath))
+        return [pscustomobject]@{
+            Available           = $false
+            OverallStatus       = 'Unknown'
+            DatabaseSha256      = $null
+            DatabaseGeneratedAt = $null
+            PatchVerdicts       = @()
+            Reasons             = $reasons.ToArray()
+        }
+    }
+
+    $dbSha = $null
+    try { $dbSha = (Get-FileHash -LiteralPath $DatabasePath -Algorithm SHA256).Hash.ToLowerInvariant() } catch { $dbSha = $null }
+
+    $db = $null
+    try {
+        $db = Get-Content -LiteralPath $DatabasePath -Raw -Encoding utf8 | ConvertFrom-Json
+    } catch {
+        $reasons.Add(('Layer 2 database is not valid JSON: {0}' -f $_.Exception.Message))
+        return [pscustomobject]@{
+            Available           = $false
+            OverallStatus       = 'Unknown'
+            DatabaseSha256      = $dbSha
+            DatabaseGeneratedAt = $null
+            PatchVerdicts       = @()
+            Reasons             = $reasons.ToArray()
+        }
+    }
+
+    $dbGeneratedAt = $null
+    if ($db._meta -and $db._meta.generatedAt) {
+        $rawGen = $db._meta.generatedAt
+        if ($rawGen -is [datetime]) {
+            # ConvertFrom-Json coerces ISO-8601 strings to [datetime]; render
+            # back to a stable UTC ISO-8601 string rather than a culture-
+            # dependent default ToString().
+            $dbGeneratedAt = $rawGen.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        } else {
+            $dbGeneratedAt = [string]$rawGen
+        }
+    }
+
+    $updates = @()
+    if ($db.updates) { $updates = @($db.updates) }
+
+    # ---- Build KB -> update and revisionId -> update indexes --------------
+    $kbToUpdate = @{}
+    $revToUpdate = @{}
+    foreach ($u in $updates) {
+        $rid = [string]$u.revisionId
+        if ($rid) { $revToUpdate[$rid] = $u }
+
+        $kbs = [System.Collections.Generic.List[string]]::new()
+        if ($u.PSObject.Properties['kbIds'] -and $u.kbIds) {
+            foreach ($k in @($u.kbIds)) {
+                $ks = ([string]$k).TrimStart('kK','bB')  # tolerate 'KB123'/'123'
+                $digits = ([regex]::Match([string]$k, '\d+')).Value
+                if ($digits) { $kbs.Add($digits) }
+            }
+        }
+        if ($kbs.Count -eq 0 -and $u.PSObject.Properties['payloadUrls'] -and $u.payloadUrls) {
+            foreach ($url in @($u.payloadUrls)) {
+                foreach ($m in [regex]::Matches([string]$url, '(?i)kb(\d+)')) {
+                    $kbs.Add($m.Groups[1].Value)
+                }
+            }
+        }
+        foreach ($d in ($kbs | Select-Object -Unique)) {
+            if (-not $kbToUpdate.ContainsKey($d)) { $kbToUpdate[$d] = $u }
+        }
+    }
+
+    # ---- Provided-SS resolution helper ------------------------------------
+    $globalProvidedSs = $null
+    if ($WimMountState -and $WimMountState.PSObject.Properties['ProvidedServicingStackVersion']) {
+        $globalProvidedSs = $WimMountState.ProvidedServicingStackVersion
+    }
+
+    # Numeric version comparison: returns -1/0/1, or $null if either side is
+    # not parseable as a dotted version.
+    $compareVersion = {
+        param($a, $b)
+        if ([string]::IsNullOrWhiteSpace($a) -or [string]::IsNullOrWhiteSpace($b)) { return $null }
+        $va = $null; $vb = $null
+        if (-not [version]::TryParse($a, [ref]$va)) { return $null }
+        if (-not [version]::TryParse($b, [ref]$vb)) { return $null }
+        return $va.CompareTo($vb)
+    }
+
+    # ---- Score each patch -------------------------------------------------
+    $verdicts = [System.Collections.Generic.List[object]]::new()
+    $anyFail = $false
+    $anyWarn = $false
+
+    foreach ($p in $ResolvedPatches) {
+        if (-not $p) { continue }
+        $kbRaw = if ($p.PSObject.Properties['KbId']) { [string]$p.KbId } else { '' }
+        $kbDigits = ([regex]::Match($kbRaw, '\d+')).Value
+        $osKey = if ($p.PSObject.Properties['OsKey']) { [string]$p.OsKey } else { '' }
+
+        $matched = $null
+        if ($kbDigits -and $kbToUpdate.ContainsKey($kbDigits)) { $matched = $kbToUpdate[$kbDigits] }
+
+        if (-not $matched) {
+            $verdicts.Add([pscustomobject]@{
+                KbId                          = $kbRaw
+                UpdateId                      = $null
+                Verdict                       = 'NotInDatabase'
+                RequiredServicingStackVersion = $null
+                ProvidedServicingStackVersion = $null
+                ServicingStackModel           = $null
+                Superseded                    = $false
+                Notes                         = 'KB did not resolve to an in-scope update in Layer 2 (superseded out of the recency window, or out of scope).'
+            })
+            $anyFail = $true
+            continue
+        }
+
+        $model = if ($matched.PSObject.Properties['servicingStackModel']) { $matched.servicingStackModel } else { $null }
+        $requiredSs = if ($matched.PSObject.Properties['requiredServicingStackVersion']) { $matched.requiredServicingStackVersion } else { $null }
+
+        # Provided SS precedence: PolicyOverride[OsKey] > WimMountState global
+        # > the update's own providedServicingStackVersion.
+        $providedSs = $null
+        if ($PolicyOverride -and $osKey -and $PolicyOverride.ContainsKey($osKey)) {
+            $providedSs = [string]$PolicyOverride[$osKey]
+        } elseif ($globalProvidedSs) {
+            $providedSs = [string]$globalProvidedSs
+        } elseif ($matched.PSObject.Properties['providedServicingStackVersion'] -and $matched.providedServicingStackVersion) {
+            $providedSs = [string]$matched.providedServicingStackVersion
+        }
+
+        # Supersession: any supersededBy revision that is itself in scope.
+        $superseded = $false
+        if ($matched.PSObject.Properties['supersededByRevisionIds'] -and $matched.supersededByRevisionIds) {
+            foreach ($sr in @($matched.supersededByRevisionIds)) {
+                if ($revToUpdate.ContainsKey([string]$sr)) { $superseded = $true; break }
+            }
+        }
+
+        # SS-version comparison: separate only.
+        $verdict = 'Pass'
+        $note = ''
+        if ($model -eq 'separate') {
+            if ($requiredSs -and $providedSs) {
+                $cmp = & $compareVersion $providedSs $requiredSs
+                if ($null -eq $cmp) {
+                    $note = 'Servicing-stack versions not numerically comparable; SS check skipped.'
+                } elseif ($cmp -lt 0) {
+                    $verdict = 'SsTooOld'
+                    $note = ('Provided SS {0} < required SS {1}: predicts 0x800f0823.' -f $providedSs, $requiredSs)
+                }
+            } elseif ($requiredSs -and -not $providedSs) {
+                $note = 'Required SS known but no provided SS supplied; SS check skipped (supply via WimMountState or PolicyOverride).'
+            } else {
+                $note = 'Separate-model OS but requiredServicingStackVersion absent in Layer 2 (predates M1 population); SS check skipped.'
+            }
+        } elseif ($model -eq 'combined' -or $model -eq 'checkpoint') {
+            $note = ('SS check N/A for {0} model (SSU travels inside the LCU).' -f $model)
+        } else {
+            $note = 'servicingStackModel absent in Layer 2 (predates M1 population); scored on presence + supersession only.'
+        }
+
+        # Apply precedence: SsTooOld already set above wins over Superseded.
+        if ($verdict -eq 'Pass' -and $superseded) {
+            $verdict = 'Superseded'
+            if ($note) { $note = $note + ' ' }
+            $note = $note + 'A newer in-scope build supersedes this update.'
+        }
+
+        if ($verdict -eq 'SsTooOld') { $anyFail = $true }
+        elseif ($verdict -eq 'Superseded') { $anyWarn = $true }
+
+        $verdicts.Add([pscustomobject]@{
+            KbId                          = $kbRaw
+            UpdateId                      = if ($matched.PSObject.Properties['updateId']) { $matched.updateId } else { $null }
+            Verdict                       = $verdict
+            RequiredServicingStackVersion = $requiredSs
+            ProvidedServicingStackVersion = $providedSs
+            ServicingStackModel           = $model
+            Superseded                    = $superseded
+            Notes                         = $note.Trim()
+        })
+    }
+
+    $overall = if ($anyFail) { 'Fail' } elseif ($anyWarn) { 'Warning' } else { 'Pass' }
+
+    return [pscustomobject]@{
+        Available           = $true
+        OverallStatus       = $overall
+        DatabaseSha256      = $dbSha
+        DatabaseGeneratedAt = $dbGeneratedAt
+        PatchVerdicts       = $verdicts.ToArray()
+        Reasons             = $reasons.ToArray()
     }
 }
 

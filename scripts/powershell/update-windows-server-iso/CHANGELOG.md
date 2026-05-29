@@ -16,6 +16,20 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.7 - wsusscn2 Phase 2c readiness verdict (M1, part 3)
+
+Third M1 increment. Implements the Phase 2c readiness verdict as `Test-PatchServicingReadinessFromGraph`, replacing the abandoned SSU KB-prerequisite-closure model with the three-check servicing-stack model (SPEC B.19.13 / B.19.13.1). `$Script:ScriptVersion` is bumped `r11.6` -> `r11.7`; `$Script:ScriptTag` is set to `wsusscn2-phase2c-readiness-verdict`.
+
+- **`Test-PatchServicingReadinessFromGraph`.** Reads Layer 2 at `$DatabasePath`, indexes updates by KB (the update's `kbIds` when present, else the `kb(\d+)` token recovered from `payloadUrls`, matching the scope-invariants gate) and by `revisionId`, and emits one verdict object per resolved patch with the finalised full-spelling shape (`KbId` / `UpdateId` / `Verdict` / `RequiredServicingStackVersion` / `ProvidedServicingStackVersion` / `ServicingStackModel` / `Superseded` / `Notes`).
+- **Three checks.**
+  - *Presence* — no KB match in Layer 2 → `NotInDatabase`.
+  - *SS version comparison* — `separate` OSes only. Provided SS resolves from `$PolicyOverride[OsKey]`, else `$WimMountState.ProvidedServicingStackVersion`, else the update's `providedServicingStackVersion`; when provided and required are both present, numerically comparable, and provided < required → `SsTooOld` (the `0x800f0823` predictor). `combined` / `checkpoint` skip the check (SSU travels inside the LCU). When `servicingStackModel` / `requiredServicingStackVersion` are absent (Layer 2 predates M1 population), the SS check is reported as skipped in `Notes` and never fails the patch.
+  - *Supersession* — `Superseded` only when a `supersededByRevisionIds` entry is itself an in-scope update in Layer 2 (a successor that points out of scope does not mark the patch superseded — it is not a data gap).
+- **Roll-up & precedence.** Verdict precedence `NotInDatabase` > `SsTooOld` > `Superseded` > `Pass`; `OverallStatus` = `Fail` (any NotInDatabase/SsTooOld), else `Warning` (any Superseded), else `Pass`. A missing or unreadable Layer 2 yields `Available = $false` / `OverallStatus = 'Unknown'`. `_meta.generatedAt` is normalised back to a UTC ISO-8601 string (ConvertFrom-Json coerces it to `[datetime]`).
+- **New gate T16 (`wsusscn2_readiness_verdict_test.py`).** 21 assertions over a populated Layer 2 fixture (`tests/fixtures/wsusscn2/readiness-database.json`: separate/combined/checkpoint updates, an in-scope-superseded update, an out-of-scope-superseded update). Covers all three checks, both SS outcomes (via WimMountState and via PolicyOverride), N/A skip, supersession in/out of scope, precedence, roll-up, ISO-8601 normalisation, and the missing-DB Unknown path. Offline (only I/O is reading the Layer 2 JSON). The fixture is registered in the canonical-format gate (now 28 files).
+- **Docs.** SPEC §B.19.13.1 documents the implementation; `TESTING.md` and `tests/README.md` register T16 (suite is now T1-T16).
+- **Verification.** psa.py 4.2.0 0/0/0; `pwsh` 7.4.6 ParseFile 0 errors; full offline suite green under real PowerShell, including **T16 21**: T12 22, T13 15, T14 10, T15 16, T16 21, scope-invariants 23, config-schema 14, canonical-format 28, canonical 26, release-info-parser 13, release-info-resolver 22, dynamic-update-cache 20, catalog-fixture 13, catalog-title-tokens 18, dotnet-cu 16. Also exercised against the committed Layer 2 DB (SS fields not yet populated → presence + supersession only, SS reported as skipped), confirming forward-compatibility once M1 part 4 regenerates the data.
+
 ### r11.6 - wsusscn2 servicing-stack extraction (M1, part 2)
 
 Second M1 increment. Adds the per-package CBS metadata extraction that feeds the Phase 2c "SS version comparison" check (SPEC B.19.13 check 2), implemented as two pure, offline-testable functions. `$Script:ScriptVersion` is bumped `r11.5` -> `r11.6`; `$Script:ScriptTag` is set to `wsusscn2-servicing-stack-extraction`. This increment adds the extraction primitives; wiring them into a full LCU-bundle -> leaf -> cab walk over the live cab, and the verdict function itself, follow in later M1 parts.

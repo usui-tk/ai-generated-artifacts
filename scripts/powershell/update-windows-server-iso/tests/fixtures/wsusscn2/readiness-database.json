@@ -1,0 +1,90 @@
+{
+  "_meta": {
+    "generator": "fixture",
+    "scriptVersion": "fixture",
+    "scriptTag": "fixture",
+    "generatedAt": "2026-05-12T00:00:00Z",
+    "sourceCab": {
+      "sourceUrl": "http://example.invalid/wsusscn2.cab",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "scope": {
+      "productGuids": [],
+      "classificationGuids": [],
+      "recencyMonths": 24,
+      "evaluatedAt": "2026-05-12T00:00:00Z"
+    },
+    "stats": {}
+  },
+  "updates": [
+    {
+      "updateId": "00000000-0000-0000-0000-0000000016a1",
+      "revisionId": "1001",
+      "isBundle": true,
+      "isLeaf": false,
+      "payloadUrls": [
+        "http://example.invalid/windows10.0-kb5066666-x64.cab"
+      ],
+      "supersededByRevisionIds": [],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
+    },
+    {
+      "updateId": "00000000-0000-0000-0000-0000000016a2",
+      "revisionId": "1002",
+      "isBundle": true,
+      "isLeaf": false,
+      "payloadUrls": [
+        "http://example.invalid/windows10.0-kb5077777-x64.cab"
+      ],
+      "supersededByRevisionIds": [],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "combined"
+    },
+    {
+      "updateId": "00000000-0000-0000-0000-0000000016a3",
+      "revisionId": "1003",
+      "isBundle": true,
+      "isLeaf": false,
+      "payloadUrls": [
+        "http://example.invalid/windows11.0-kb5088888-x64.msu"
+      ],
+      "supersededByRevisionIds": [],
+      "requiredServicingStackVersion": null,
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "checkpoint"
+    },
+    {
+      "updateId": "00000000-0000-0000-0000-0000000016a4",
+      "revisionId": "1004",
+      "isBundle": true,
+      "isLeaf": false,
+      "payloadUrls": [
+        "http://example.invalid/windows10.0-kb5099999-x64.cab"
+      ],
+      "supersededByRevisionIds": [
+        "1001"
+      ],
+      "requiredServicingStackVersion": "10.0.14393.7000",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
+    },
+    {
+      "updateId": "00000000-0000-0000-0000-0000000016a5",
+      "revisionId": "1005",
+      "isBundle": true,
+      "isLeaf": false,
+      "payloadUrls": [
+        "http://example.invalid/windows10.0-kb5055555-x64.cab"
+      ],
+      "supersededByRevisionIds": [
+        "9999999"
+      ],
+      "requiredServicingStackVersion": "10.0.17763.6500",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
+    }
+  ]
+}
