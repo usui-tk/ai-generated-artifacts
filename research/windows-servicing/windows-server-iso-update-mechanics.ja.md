@@ -163,6 +163,37 @@ wsusscn2.cab
     └── (更新ごとの詳細 XML)
 ```
 
+> **Master XML 自身が名乗るフォーマット名(ルート要素 + 名前空間)。**
+> 見落としやすいものの、 このデータ表面全体にとって最も権威ある命名の
+> 典拠なので、 押さえておく価値があります:`package.xml` を展開して
+> 最初の要素を見ると、 **ルート要素は `<Updates>` でも `<Package>` でも
+> なく `<OfflineSyncPackage>`** であり、 既定の XML 名前空間として
+> **`http://schemas.microsoft.com/msus/2004/02/OfflineSync`**(`msus` =
+> Microsoft Update Services)を宣言しています。 観測されるルートは次の
+> 形です:
+>
+> ```xml
+> <OfflineSyncPackage MinimumClientVersion="5.8.0.2678"
+>     PackageId="..." PackageVersion="1.1" ProtocolVersion="1.0"
+>     SourceId="..."
+>     xmlns="http://schemas.microsoft.com/msus/2004/02/OfflineSync">
+>   <Updates>
+>     <Update UpdateId="..." RevisionId="..." IsLeaf="..." IsBundle="...">
+>       ...
+> ```
+>
+> つまり **「offline sync package」は、 このメタデータに対する Microsoft
+> 自身のフォーマット名** であり、 データ自身の中で宣言されています —
+> `wsusscn2.cab` は単なる配布ファイル名にすぎません(「WSUS オフライン
+> スキャンファイル」は口語的な呼称)。 このフォーマットを消費するコード
+> を命名する際、 不透明な配布ファイル名 `wsusscn2` ではなく権威ある
+> `OfflineSyncPackage` / `OfflineSync` という用語から識別子を導出すると、
+> 初見の読み手にも意図が伝わりやすく、 *オフライン* の同期メタデータを
+> *オンライン* の Microsoft Update Catalog 表面(§2.3)と明確に区別できます。
+> 名前空間中の `2004/02` はスキーマ系統が 2004 年以来安定していることを
+> 示しますが、 それでも前方互換性は保証されないものと考えるべきです
+> (下記サポート状況の注記を参照)。
+
 オフラインでの依存性分析において、 Master XML(`package.xml`、 展開後 ~108 MB)は CAB 内で通常最も有用な成果物です。 Windows Update 全体の各更新リビジョンについて、 以下が記録されています:
 
 - `<Categories>` — OS ファミリ GUID(Product)と Classification GUID
@@ -996,6 +1027,7 @@ Microsoft 自身の公開ドキュメントまたは出荷ツールに基づく�
 | **HRESULT** | Windows API 全体で使用される 32 ビット戻り値コード。 `0x800f0823` は SSU 必要エラー。 |
 | **LCU** | Latest Cumulative Update。 OS 自体の月次 Patch Tuesday ロールアップ。 |
 | **MSU** | Microsoft Update Standalone Installer ファイル(`.msu`)。 Microsoft がダウンロード可能な更新に使うパッケージ形式。 MSU は構造的には `.cab` ペイロードとメタデータファイルを含む CAB。 |
+| **Offline Sync Package** | オフラインスキャン用更新メタデータに対する Microsoft 自身のフォーマット名。 `package.xml` のルート要素 `<OfflineSyncPackage>` と XML 名前空間 `http://schemas.microsoft.com/msus/2004/02/OfflineSync` で宣言される。 `wsusscn2.cab` として配布され、 Windows Update Agent がオフライン適用可能性スキャンで消費する。 不透明な配布ファイル名ではなく、 この表面をパースするコードを命名する際の権威ある用語(§2.4 参照)。 |
 | **PCA2011** | `Microsoft Windows Production PCA 2011`。 Windows 8 時代以降 Windows ブートバイナリに署名してきた証明書認証局。 段階的廃止中。 |
 | **PCA2023** | `Windows UEFI CA 2023`。 置換 CA。 |
 | **PE image hash** | オンディスクの PE ファイル全体（`Get-FileHash` が測定するもの）のハッシュ。 署名領域を含む点で、 それを除外する Authenticode hash と対をなす。 |

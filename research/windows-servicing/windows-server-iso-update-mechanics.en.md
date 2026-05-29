@@ -163,6 +163,37 @@ wsusscn2.cab
     └── (per-update detail XML)
 ```
 
+> **The Master XML's own name for itself (root element + namespace).**
+> A point that is easy to miss but worth pinning down, because it is the
+> single most authoritative naming source for this whole data surface:
+> when `package.xml` is extracted and its first element inspected, the
+> **root element is not `<Updates>` or `<Package>` — it is
+> `<OfflineSyncPackage>`**, and it declares the default XML namespace
+> **`http://schemas.microsoft.com/msus/2004/02/OfflineSync`** (`msus` =
+> Microsoft Update Services). The observed root looks like:
+>
+> ```xml
+> <OfflineSyncPackage MinimumClientVersion="5.8.0.2678"
+>     PackageId="..." PackageVersion="1.1" ProtocolVersion="1.0"
+>     SourceId="..."
+>     xmlns="http://schemas.microsoft.com/msus/2004/02/OfflineSync">
+>   <Updates>
+>     <Update UpdateId="..." RevisionId="..." IsLeaf="..." IsBundle="...">
+>       ...
+> ```
+>
+> In other words, **"offline sync package" is Microsoft's own format name
+> for this metadata**, declared inside the data itself — `wsusscn2.cab` is
+> merely the distribution filename (and "WSUS offline scan file" is the
+> colloquial label). When naming code that consumes this format, deriving
+> identifiers from the authoritative `OfflineSyncPackage` /  `OfflineSync`
+> term (rather than from the opaque distribution filename `wsusscn2`) makes
+> the intent legible to a newcomer and keeps the *offline* sync metadata
+> cleanly distinct from the *online* Microsoft Update Catalog surface
+> (§2.3). The `2004/02` in the namespace indicates the schema lineage has
+> been stable since 2004; nonetheless no forward-compatibility guarantee
+> should be assumed (see the support-status note below).
+
 For offline dependency analysis, the Master XML (`package.xml`, ~108 MB extracted) is typically the most useful artifact in the CAB. It records, for each update revision in the Windows Update universe:
 
 - `<Categories>` — the OS family GUID (Product) and the Classification GUID
@@ -996,6 +1027,7 @@ When in doubt, the WUA offline scan is the authoritative arbiter for applicabili
 | **HRESULT** | A 32-bit return code used throughout Windows APIs. `0x800f0823` is the SSU-required error. |
 | **LCU** | Latest Cumulative Update. The monthly Patch Tuesday rollup for the OS itself. |
 | **MSU** | Microsoft Update Standalone Installer file (`.msu`). The package format Microsoft uses for downloadable updates. An MSU is structurally a CAB containing a `.cab` payload and metadata files. |
+| **Offline Sync Package** | Microsoft's own format name for the offline-scan update metadata, declared by the root element `<OfflineSyncPackage>` and the XML namespace `http://schemas.microsoft.com/msus/2004/02/OfflineSync` inside `package.xml`. Distributed as `wsusscn2.cab`; consumed by the Windows Update Agent for offline applicability scanning. The authoritative term to name code that parses this surface, as opposed to the opaque distribution filename (see §2.4). |
 | **PCA2011** | `Microsoft Windows Production PCA 2011`. The certificate authority that has signed Windows boot binaries since Windows 8 era. Being phased out. |
 | **PCA2023** | `Windows UEFI CA 2023`. The replacement CA. |
 | **PE image hash** | The hash of the full on-disk PE file (what `Get-FileHash` measures), including the signature region — as opposed to the Authenticode hash, which excludes it. |
