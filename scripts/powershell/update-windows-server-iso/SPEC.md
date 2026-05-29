@@ -1750,6 +1750,20 @@ not in scope, the pipeline falls back to the newest in-scope LCU for
 that OS and reports the miss as supersession. The fallback ceiling
 is `RecencyMonths` (24 default, 36 supported).
 
+Implementation (M1 part 4, r11.8): the fallback lives in
+`Test-PatchServicingReadinessFromGraph`. The function builds a
+newest-in-scope-LCU index per OS family (a SecurityUpdates-classified
+bundle carrying the family's allow-list product GUID, picked by greatest
+`creationDate`). When a configured KB does not resolve to an in-scope
+update, the patch's `OsKey` is resolved to a family (an exact family key
+such as `Server2016`, or a free-form key whose year token matches), and
+if that family has an in-scope LCU the verdict is `Superseded` (with the
+fallback target's `UpdateId` and servicing-stack facts surfaced and a
+note naming the target KB) rather than `NotInDatabase`. Only when the
+family cannot be resolved or has no in-scope LCU does the verdict stay
+`NotInDatabase`. T17 (`wsusscn2_recency_fallback_test.py`) is the
+executable contract.
+
 ### B.19.8 Microsoft-prose exclusion rule (normative)
 
 This is a **hard rule, not a target**. Layer 2 (the

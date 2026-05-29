@@ -16,6 +16,18 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.8 - wsusscn2 recency fallback (M1, part 4)
+
+Fourth M1 increment. Adds the recency fallback to `Test-PatchServicingReadinessFromGraph` (SPEC B.19.7.2 / handoff section 2.4): a configured KB that is not in scope is reported as superseded by the newest in-scope LCU for its OS family, rather than as a data gap. `$Script:ScriptVersion` is bumped `r11.7` -> `r11.8`; `$Script:ScriptTag` is set to `wsusscn2-recency-fallback`.
+
+- **Newest-in-scope-LCU index per OS family.** The verdict function now builds, per `$Script:WsusScnOsCategoryGuids` family, the newest in-scope LCU — a `SecurityUpdates`-classified bundle carrying the family's allow-list product GUID, selected by greatest `creationDate`.
+- **Fallback on presence miss.** When a configured KB does not resolve to an in-scope update, the patch's `OsKey` is resolved to a family (an exact family key such as `Server2016`, or a free-form key whose year token matches, e.g. `WindowsServer2022` -> `Server2022`). If that family has an in-scope LCU, the verdict becomes `Superseded` with the fallback target's `UpdateId`, `requiredServicingStackVersion`, and `servicingStackModel` surfaced and a `Notes` line naming the target KB and citing the recency fallback. Only when the family cannot be resolved or has no in-scope LCU does the verdict stay `NotInDatabase`. A direct KB match always wins over the fallback path.
+- **Verified against the committed cab-derived DB.** With the committed `data/wsusscn2-database.json`, an out-of-scope `KB9999999` + `OsKey=Server2016` falls back to `updateId 276ca876-…` (KB5087537), the real newest in-scope Server 2016 LCU (creationDate 2026-05-11) — matching the leaf identified during M1 part 2.
+- **New gate T17 (`wsusscn2_recency_fallback_test.py`).** 15 assertions over `tests/fixtures/wsusscn2/recency-fallback-database.json` (two Server 2016 LCUs of different dates + one Server 2022 LCU): 2016 and 2022 fallbacks (newest-LCU selection, SS surfacing, target KB in notes), exact and free-form OsKey resolution, `NotInDatabase` when no fallback target, direct match precedence, and the roll-up. Offline (only I/O is reading the Layer 2 JSON). The fixture is registered in the canonical-format gate (now 29 files).
+- **psa hygiene.** The OS-family resolver uses a literal `String.Contains` test rather than `-match`, avoiding the `-match`-against-bare-token regex pitfall (PSA2003); the year tokens `2016/2019/2022/2025` are mutually non-substring so a containment test is unambiguous.
+- **Docs.** SPEC §B.19.7.2 documents the implementation; `TESTING.md` and `tests/README.md` register T17 (suite is now T1-T17).
+- **Verification.** psa.py 4.2.0 0/0/0; `pwsh` 7.4.6 ParseFile 0 errors; full offline suite green under real PowerShell, including **T17 15**: T12 22, T13 15, T14 10, T15 16, T16 21, T17 15, scope-invariants 23, config-schema 14, canonical-format 29, canonical 26, release-info-parser 13, release-info-resolver 22, dynamic-update-cache 20, catalog-fixture 13, catalog-title-tokens 18, dotnet-cu 16.
+
 ### r11.7 - wsusscn2 Phase 2c readiness verdict (M1, part 3)
 
 Third M1 increment. Implements the Phase 2c readiness verdict as `Test-PatchServicingReadinessFromGraph`, replacing the abandoned SSU KB-prerequisite-closure model with the three-check servicing-stack model (SPEC B.19.13 / B.19.13.1). `$Script:ScriptVersion` is bumped `r11.6` -> `r11.7`; `$Script:ScriptTag` is set to `wsusscn2-phase2c-readiness-verdict`.

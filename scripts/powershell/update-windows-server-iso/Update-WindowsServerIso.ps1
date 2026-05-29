@@ -538,8 +538,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.7'
-$Script:ScriptTag     = 'wsusscn2-phase2c-readiness-verdict'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.8'
+$Script:ScriptTag     = 'wsusscn2-recency-fallback'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -7779,6 +7779,46 @@ function Test-PatchServicingReadinessFromGraph {
         }
     }
 
+    # ---- Newest in-scope LCU per OS family (recency-fallback target) ------
+    # SPEC B.19.7.2 / handoff section 2.4: when a configured KB is not in scope
+    # (pruned by the recency window or otherwise absent), the readiness check
+    # falls back to the newest in-scope LCU for that OS family and reports the
+    # miss as supersession (a newer build exists), not as a data gap. An LCU
+    # here is a SecurityUpdates-classified bundle; the newest is the one with
+    # the greatest creationDate carrying the family's allow-list product GUID.
+    $SECURITY_UPDATES_GUID = '0fa1201d-4330-4fa8-8ae9-b877473b6441'
+    $newestLcuByFamily = @{}
+    foreach ($u in $updates) {
+        if (-not $u.isBundle) { continue }
+        $cg = @()
+        if ($u.PSObject.Properties['classificationGuids'] -and $u.classificationGuids) { $cg = @($u.classificationGuids | ForEach-Object { ([string]$_).ToLowerInvariant() }) }
+        if ($cg -notcontains $SECURITY_UPDATES_GUID) { continue }
+        $pg = @()
+        if ($u.PSObject.Properties['productGuids'] -and $u.productGuids) { $pg = @($u.productGuids | ForEach-Object { ([string]$_).ToLowerInvariant() }) }
+        $cd = if ($u.PSObject.Properties['creationDate'] -and $u.creationDate) { [string]$u.creationDate } else { '' }
+        foreach ($fam in $Script:WsusScnOsCategoryGuids.GetEnumerator()) {
+            $famGuid = $fam.Value.ToLowerInvariant()
+            if ($pg -notcontains $famGuid) { continue }
+            if (-not $newestLcuByFamily.ContainsKey($fam.Key) -or $cd -gt $newestLcuByFamily[$fam.Key].CreationDate) {
+                $newestLcuByFamily[$fam.Key] = [pscustomobject]@{ Update = $u; CreationDate = $cd }
+            }
+        }
+    }
+
+    # Resolve a patch's OsKey to a family name in $Script:WsusScnOsCategoryGuids.
+    # Accepts an exact family key ('Server2016') or tolerates a free-form OsKey
+    # that contains the year token (e.g. 'WindowsServer2016' -> 'Server2016').
+    $resolveFamily = {
+        param($key)
+        if ([string]::IsNullOrWhiteSpace($key)) { return $null }
+        if ($Script:WsusScnOsCategoryGuids.Contains($key)) { return $key }
+        foreach ($famKey in $Script:WsusScnOsCategoryGuids.Keys) {
+            $token = $famKey -replace '^Server', ''
+            if ($key.Contains($token)) { return $famKey }
+        }
+        return $null
+    }
+
     # ---- Provided-SS resolution helper ------------------------------------
     $globalProvidedSs = $null
     if ($WimMountState -and $WimMountState.PSObject.Properties['ProvidedServicingStackVersion']) {
@@ -7811,6 +7851,35 @@ function Test-PatchServicingReadinessFromGraph {
         if ($kbDigits -and $kbToUpdate.ContainsKey($kbDigits)) { $matched = $kbToUpdate[$kbDigits] }
 
         if (-not $matched) {
+            # Recency fallback (SPEC B.19.7.2): if the OS family has a newest
+            # in-scope LCU, the configured KB is simply superseded by it (a newer
+            # build is in scope), not a true data gap. Report as Superseded and
+            # surface the fallback target's identity / SS facts.
+            $famKey = & $resolveFamily $osKey
+            if ($famKey -and $newestLcuByFamily.ContainsKey($famKey)) {
+                $fb = $newestLcuByFamily[$famKey].Update
+                $fbModel = if ($fb.PSObject.Properties['servicingStackModel']) { $fb.servicingStackModel } else { $null }
+                $fbReq = if ($fb.PSObject.Properties['requiredServicingStackVersion']) { $fb.requiredServicingStackVersion } else { $null }
+                $fbKbs = [System.Collections.Generic.List[string]]::new()
+                if ($fb.PSObject.Properties['payloadUrls'] -and $fb.payloadUrls) {
+                    foreach ($url in @($fb.payloadUrls)) {
+                        foreach ($mm in [regex]::Matches([string]$url, '(?i)kb(\d+)')) { $fbKbs.Add('KB' + $mm.Groups[1].Value) }
+                    }
+                }
+                $fbKbStr = if ($fbKbs.Count -gt 0) { ($fbKbs | Select-Object -Unique) -join ', ' } else { '(unknown KB)' }
+                $verdicts.Add([pscustomobject]@{
+                    KbId                          = $kbRaw
+                    UpdateId                      = if ($fb.PSObject.Properties['updateId']) { $fb.updateId } else { $null }
+                    Verdict                       = 'Superseded'
+                    RequiredServicingStackVersion = $fbReq
+                    ProvidedServicingStackVersion = $null
+                    ServicingStackModel           = $fbModel
+                    Superseded                    = $true
+                    Notes                         = ('Configured KB not in scope; fell back to newest in-scope {0} LCU {1} (recency fallback, SPEC B.19.7.2).' -f $famKey, $fbKbStr)
+                })
+                $anyWarn = $true
+                continue
+            }
             $verdicts.Add([pscustomobject]@{
                 KbId                          = $kbRaw
                 UpdateId                      = $null
@@ -7819,7 +7888,7 @@ function Test-PatchServicingReadinessFromGraph {
                 ProvidedServicingStackVersion = $null
                 ServicingStackModel           = $null
                 Superseded                    = $false
-                Notes                         = 'KB did not resolve to an in-scope update in Layer 2 (superseded out of the recency window, or out of scope).'
+                Notes                         = 'KB did not resolve to an in-scope update in Layer 2, and the OS family has no in-scope LCU to fall back to (out of scope, or OsKey not supplied).'
             })
             $anyFail = $true
             continue
