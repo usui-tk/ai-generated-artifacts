@@ -40,6 +40,38 @@
     },
     "LanguageSpecific": {
       "$ref": "#/definitions/LanguageSpecific"
+    },
+    "_meta": {
+      "type": "object",
+      "description": "Data-contract provenance stamp (shared cross-cutting contract; mirrors the stamp subset of schema/wsusscn2-database.schema.json _meta). Its presence classifies this config as a contract-bearing artifact for Test-DataContractConsistency; absence leaves it 'Unknown' (still valid). Written by Save-ConfigWithBaseline.",
+      "required": [
+        "dataContractId",
+        "dataContractVersion",
+        "scriptVersion",
+        "generatedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "dataContractId": {
+          "type": "string",
+          "const": "4c173c61-c099-4512-9283-f5d951beda8b",
+          "description": "Shared data-contract family GUID. Must match $Script:DataContractId."
+        },
+        "dataContractVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Shared cross-cutting data-contract epoch (see wsusscn2-database.schema.json). Held in lockstep across every data artifact; one comparison validates the whole set."
+        },
+        "scriptVersion": {
+          "type": "string",
+          "description": "Code version of the script that last wrote this config."
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "UTC timestamp (yyyy-MM-ddTHH:mm:ssZ) when this config was last written."
+        }
+      }
     }
   },
   "patternProperties": {

@@ -2348,6 +2348,16 @@ be refused; an older one is treated as stale (regenerate); a missing or
 non-matching `dataContractId` is flagged. This supersedes the earlier
 `_meta.ParserVersion` design, which was never implemented.
 
+As of r11.13 the `data/config-Server*.json` Layer 1 baselines also carry
+this stamp (written by `Save-ConfigWithBaseline` on every config write),
+so they classify as `Current` rather than `Unknown`. The config `_meta`
+is the contract-stamp subset — `dataContractId` / `dataContractVersion` /
+`scriptVersion` / `generatedAt` — defined in `schema/config.schema.json`
+(the Layer-2-specific `sourceCab` / `scope` / `stats` are not carried).
+The shared epoch stays at `1`: adding the stamp introduces a new
+contract-bearing artifact without changing any existing artifact's shape,
+so no regeneration of `data/wsusscn2-database.json` is required.
+
 #### B.19.10.1 Top-level structure
 
 ```jsonc

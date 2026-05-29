@@ -16,6 +16,16 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.13 - config-*.json data-contract `_meta` stamp (Layer 1 joins the shared contract)
+
+Stamps the shared data-contract `_meta` block into the `data/config-Server*.json` Layer 1 baselines so they classify as `Current` under `Test-DataContractConsistency` instead of `Unknown`, completing the "stamped into every data artifact" intent of §B.19.10. `$Script:ScriptVersion` is bumped `r11.12` -> `r11.13`; `$Script:ScriptTag` becomes `config-datacontract-meta-stamp`. The shared epoch is unchanged (`dataContractVersion` stays `1`): the stamp adds a new contract-bearing artifact without altering any existing shape, so `data/wsusscn2-database.json` is NOT regenerated.
+
+- **`schema/config.schema.json`.** Adds an optional `_meta` property (strict sub-schema: `dataContractId` const family GUID, `dataContractVersion` integer >= 1, `scriptVersion`, `generatedAt` date-time; `additionalProperties: false`). `_meta` was already permitted by the `^_` `patternProperties` rule; the explicit definition now also validates its shape. It is intentionally NOT added to the root `required` list, so a config without `_meta` stays schema-valid (and simply classifies `Unknown`).
+- **`Save-ConfigWithBaseline`.** Now stamps/refreshes `_meta` (an order-stable `[pscustomobject]`) immediately before the canonical write, on every config write. Because Layer 1 only writes a config when a verified value actually changed, unchanged configs are not rewritten and their stamp is stable.
+- **`data/config-Server{2016,2019,2022,2025}.json`.** Regenerated through the canonical serializer to append the `_meta` stamp (`dataContractVersion` 1, `scriptVersion` r11.13). The diff is purely additive — only the `_meta` block is added; no existing key is reordered or reformatted. All four now classify `Current`.
+- **Docs.** SPEC §B.19.10 records that the Layer 1 configs carry the stamp as of r11.13 and that the epoch stays at 1. README is unchanged (lock-step preserved).
+- **Verification.** psa.py 0/0/0; `pwsh` 7.4.6 ParseFile 0 errors; full offline suite green (15/15), including `config_schema_test` (validates the new `_meta` sub-schema), `canonical_json_format_check` (configs remain canonical), and `wsusscn2_data_contract_test`.
+
 ### r11.12 - P06 Stage 2 servicing-readiness wiring (off by default) and on-mount check rename (M1, §B.19.19.1 Step 2)
 
 Wires the wsusscn2 Layer 2 servicing-readiness verdict into P06 behind a new opt-in switch, and renames the mount-time prerequisite check to match the servicing-readiness vocabulary. `$Script:ScriptVersion` is bumped `r11.11` -> `r11.12`; `$Script:ScriptTag` becomes `p06-servicing-readiness-wiring`. Per SPEC §B.19.19.1 this is Step 2 and ships as its own commit; default behaviour is unchanged.

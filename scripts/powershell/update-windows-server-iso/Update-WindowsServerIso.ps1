@@ -543,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.12'
-$Script:ScriptTag     = 'p06-servicing-readiness-wiring'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.13'
+$Script:ScriptTag     = 'config-datacontract-meta-stamp'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -3375,6 +3375,25 @@ function Save-ConfigWithBaseline {
         [Parameter(Mandatory)] [string]$ConfigPath,
         [Parameter(Mandatory)] $OsProfile
     )
+    # Stamp the shared data-contract provenance (_meta) so the config is a
+    # contract-bearing artifact classified by Test-DataContractConsistency.
+    # Only dataContractId + dataContractVersion are read by the classifier;
+    # scriptVersion / generatedAt are informational. Refreshed in place on
+    # every write (Layer 1 only writes when a verified value actually
+    # changed, so unchanged configs are not rewritten). Built with an
+    # order-stable [pscustomobject] for canonical-JSON determinism.
+    $contractMeta = [pscustomobject]@{
+        dataContractId      = $Script:DataContractId
+        dataContractVersion = $Script:DataContractVersion
+        scriptVersion       = $Script:ScriptVersion
+        generatedAt         = ([datetime]::UtcNow).ToString('yyyy-MM-ddTHH:mm:ssZ')
+    }
+    if ($OsProfile.PSObject.Properties['_meta']) {
+        $OsProfile._meta = $contractMeta
+    } else {
+        $OsProfile | Add-Member -NotePropertyName '_meta' -NotePropertyValue $contractMeta
+    }
+
     # Persist the OS profile in canonical JSON format (SPEC Part B.23).
     # Save-CanonicalJsonFile handles all of: UTF-8 (no BOM), LF line
     # endings, 2-space indent, ": " separator, trailing newline, and
