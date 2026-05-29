@@ -64,7 +64,8 @@
       "payloadUrls": [
         "http://example.invalid/fixture/server2022-lcu-part1.cab",
         "http://example.invalid/fixture/server2022-lcu-part2.cab"
-      ]
+      ],
+      "kbIds": []
     },
     {
       "updateId": "f0000001-0000-0000-0000-000000000003",
@@ -90,7 +91,8 @@
       ],
       "payloadUrls": [
         "http://example.invalid/fixture/server2025-lcu.cab"
-      ]
+      ],
+      "kbIds": []
     }
   ]
 }

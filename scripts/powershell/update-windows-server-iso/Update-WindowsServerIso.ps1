@@ -538,8 +538,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.8'
-$Script:ScriptTag     = 'wsusscn2-recency-fallback'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.9'
+$Script:ScriptTag     = 'wsusscn2-layer2-kbids-populate'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -8492,6 +8492,19 @@ function New-WsusScnDependencyDatabase {
     # Stage 4 just reshapes PascalCase -> camelCase for the JSON document.
     $updatesEnriched = New-Object 'System.Collections.Generic.List[object]'
     foreach ($u in $ParseResult.Updates) {
+        # kbIds: recover the numeric KB tokens from the resolved payloadUrls
+        # (kb(\d+)), deduplicated and sorted, and persist them for direct
+        # presence lookup by the Phase 2c readiness check (M1; SPEC B.19.10).
+        # The servicing-stack fields (requiredServicingStackVersion etc.)
+        # remain absent here; they are populated by the per-leaf CBS
+        # extraction wired in a later M1 increment, and are optional/nullable
+        # in the schema so the readiness check tolerates their absence.
+        $kbSet = [System.Collections.Generic.SortedSet[string]]::new()
+        foreach ($url in @($u.PayloadUrls)) {
+            foreach ($mm in [regex]::Matches([string]$url, '(?i)kb(\d+)')) {
+                [void]$kbSet.Add($mm.Groups[1].Value)
+            }
+        }
         $updatesEnriched.Add([pscustomobject]@{
             updateId                = $u.UpdateId
             revisionId              = $u.RevisionId
@@ -8508,6 +8521,7 @@ function New-WsusScnDependencyDatabase {
             supersededByRevisionIds = @($u.SupersededByRevisionIds)
             payloadFileDigests      = @($u.PayloadFileDigests)
             payloadUrls             = @($u.PayloadUrls)
+            kbIds                   = @($kbSet)
         })
     }
 

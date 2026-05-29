@@ -1,11 +1,13 @@
 {
   "_meta": {
+    "dataContractId": "4c173c61-c099-4512-9283-f5d951beda8b",
+    "dataContractVersion": 1,
     "generator": "Update-WindowsServerIso.ps1 wsusscn2 parser pipeline",
-    "scriptVersion": "update-wsi-2026.05.28-r10.1",
-    "scriptTag": "step2b4-version-independent-canonical-json",
-    "generatedAt": "2026-05-28T10:15:17Z",
+    "scriptVersion": "update-wsi-2026.05.29-r11.9",
+    "scriptTag": "wsusscn2-layer2-kbids-populate",
+    "generatedAt": "2026-05-29T10:12:22Z",
     "sourceCab": {
-      "path": "D:\\Temp\\Workspace_UpdateWsi\\cache\\wsusscn2.cab",
+      "sourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
       "size": 641849140,
       "sha256": "e51d4b5aaa7634835a5db963d424694c273d96b6dda867865aa4db8cc5d4a126"
     },
@@ -24,7 +26,7 @@
         "cd5ffd1e-e932-4e3a-bf74-18bf0b1bbd83"
       ],
       "recencyMonths": 24,
-      "now": "2026-05-28T19:02:50Z"
+      "evaluatedAt": "2026-05-29T10:06:19Z"
     },
     "stats": {
       "updatesObserved": 136102,
@@ -34,7 +36,14 @@
       "leafUpdatesWithPayload": 110749,
       "fileLocationsObserved": 97051,
       "fileLocationsRetained": 97051,
-      "payloadDigestsOrphaned": 0
+      "payloadDigestsOrphaned": 0,
+      "eosEsuBundlesExcluded": 4910,
+      "eosEsuFamiliesExcluded": [
+        "Server2008",
+        "Server2008R2",
+        "Server2012",
+        "Server2012R2"
+      ]
     }
   },
   "updates": [
@@ -81,6 +90,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/uprl/2024/11/windows-kb890830-x64-v5.130_c569fe3c47c28d5f831cd0324367d4325f1fb95e.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -119,6 +131,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/dfd8df33-f854-4cc3-af50-f9283d4938c1/public/dotnetservicingcompdb_kb5082417.xml_246877643171cfbbae8f50cb55f0e65f620076dd.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/a984d9a8-641e-4dea-9385-aa17a7fd88eb/public/windows11.0-kb5082417-x64-ndp481_2de616763da35aadb80968c61dde177f1b9ea80b.cab"
+      ],
+      "kbIds": [
+        "5082417"
       ]
     },
     {
@@ -166,6 +181,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/08/windows10.0-kb5063880-x64_442af188fae587411f9e22465ab1212818aa2295.cab"
+      ],
+      "kbIds": [
+        "5063880"
       ]
     },
     {
@@ -221,6 +239,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/03/windows10.0-kb5053594-x64_000b4cc04b2c93e45dfc600e7817c8fdac0c0196.cab"
+      ],
+      "kbIds": [
+        "5053594"
       ]
     },
     {
@@ -261,6 +282,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/8b74319d-4a13-492d-8910-480891a27802/public/windows11.0-kb5049622-arm64-ndp481_d49a5921299455c46742a18cbef71272de5262ac.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/68e26499-44f6-43a2-b063-cf3a601acf2f/public/dotnetservicingcompdb_kb5049622.xml_dcb567628e94709836353b9a65270b23262b3ac9.cab"
+      ],
+      "kbIds": [
+        "5049622"
       ]
     },
     {
@@ -311,6 +335,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/09/windows10.0-kb5065427-x64_eef1ae0697765122d589a4c5a1e81acb241f8e45.cab"
+      ],
+      "kbIds": [
+        "5065427"
       ]
     },
     {
@@ -357,6 +384,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/uprl/2025/12/windows-kb890830-x64-v5.138_dc0e0b97d146a92303d881bf9e2912299cbbbac5.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -440,6 +470,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/49ff8cd9-44fd-4205-b8be-7e9c2c7bec9e/public/ssu-26100.2592-x64_9ff1596e76dacf699bf720d289a37b73f1f281a1.psf",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/5436c68b-8df5-4c74-9a17-fbbf236944af/public/fod_common_7491d52800c7d4df7fea3e873b935b6c1597bd4f.wim"
+      ],
+      "kbIds": [
+        "5043080",
+        "5046910",
+        "5048667"
       ]
     },
     {
@@ -498,6 +533,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2024/11/windows10.0-kb5046612-x64_ef76c29f62d87ddc2acda5bec4c36a0a1a09be63.cab"
+      ],
+      "kbIds": [
+        "5046612"
       ]
     },
     {
@@ -537,6 +575,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/12/windows10.0-kb5049625-x64-ndp481_d9c3eb84c05eed7073b3b91994e8c02c2fb92541.cab",
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/12/windows10.0-kb5049617-x64-ndp48_aa8519c9216cef24e0a4efe216fe9e6b9e9a413a.cab"
+      ],
+      "kbIds": [
+        "5049617",
+        "5049625"
       ]
     },
     {
@@ -580,6 +622,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/11/windows10.0-kb5068791-x64_68a2f91e0a7ab3b3007457b80226ad3f4a5d080d.cab"
+      ],
+      "kbIds": [
+        "5068791"
       ]
     },
     {
@@ -620,6 +665,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/01/windows10.0-kb5073447-x64_21b2eff1d0f85eec621088a6b9d6ac96cf0f3bc4.cab"
+      ],
+      "kbIds": [
+        "5073447"
       ]
     },
     {
@@ -655,6 +703,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/05/windows10.0-kb5087065-x64-ndp48_523c7ef3c225bbb5a26b47632078823b382f974c.cab"
+      ],
+      "kbIds": [
+        "5087065"
       ]
     },
     {
@@ -701,6 +752,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/12/windows10.0-kb5071543-x64_a22f6190ea2ae4a1fc6da3c216a074c9923526a8.cab"
+      ],
+      "kbIds": [
+        "5071543"
       ]
     },
     {
@@ -746,6 +800,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/10/windows10.0-kb5066586-x64_982ce98832361ea9fee56dc559ac0d43c5d8c13d.cab"
+      ],
+      "kbIds": [
+        "5066586"
       ]
     },
     {
@@ -785,6 +842,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/e744b14c-f1a7-4881-b5b5-079c353f0b19/public/windows11.0-kb5066131-arm64-ndp481_5979017c7dc2bdadc82e86d19facbfd0e2b879c0.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/75ecbe77-5ff7-47ab-bd18-08599d8467c2/public/dotnetservicingcompdb_kb5066131.xml_ba50507ac9ae620025e81e2cc90d121b1fbac8bf.cab"
+      ],
+      "kbIds": [
+        "5066131"
       ]
     },
     {
@@ -829,6 +889,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/uprl/2026/05/windows-kb890830-x64-v5.141_28e375ae266a48518b85561b124c6d21b82d84a6.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -878,6 +941,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/06/windows10.0-kb5060526-x64_50b51454c8f025b92cfa038de5b79ee59c8d6647.cab"
+      ],
+      "kbIds": [
+        "5060526"
       ]
     },
     {
@@ -914,6 +980,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/05/windows10.0-kb5087545-x64_327c3f4cb80f13eaa49e9f20c2976705411548fc.cab"
+      ],
+      "kbIds": [
+        "5087545"
       ]
     },
     {
@@ -953,6 +1022,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/06/windows10.0-kb5039886-x64-ndp48_a395a7b77412b2991a0fdbc7cc4ee0ba20987353.cab",
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/06/windows10.0-kb5039879-x64_01c8bb0048cc81ee550003eb721178355b81098f.cab"
+      ],
+      "kbIds": [
+        "5039879",
+        "5039886"
       ]
     },
     {
@@ -999,6 +1072,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/06/windows10.0-kb5060954-x64_8a13645aeba650d9204956268cc3c65bc5a8b42e.cab"
+      ],
+      "kbIds": [
+        "5060954"
       ]
     },
     {
@@ -1038,6 +1114,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/02/windows10.0-kb5075902-x64_5907d88cd85e75feaacedb14e6deccf79ff1e96d.cab"
+      ],
+      "kbIds": [
+        "5075902"
       ]
     },
     {
@@ -1079,6 +1158,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/10/windows10.0-kb5070247-x64_5e779091ebf0a42b65ea44f758f38a961aee108e.cab"
+      ],
+      "kbIds": [
+        "5070247"
       ]
     },
     {
@@ -1118,6 +1200,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/09/windows10.0-kb5044016-x64_46100265af3400c46bbacb6b0949d930bce1a239.cab",
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/09/windows10.0-kb5044022-x64-ndp48_4e9e026a16aba33ca564595cb996798cdb00174e.cab"
+      ],
+      "kbIds": [
+        "5044016",
+        "5044022"
       ]
     },
     {
@@ -1156,6 +1242,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5082142-x64_1e897c67c67c112a15e4c2b500c73cfc90f2ea27.cab"
+      ],
+      "kbIds": [
+        "5082142"
       ]
     },
     {
@@ -1206,6 +1295,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/05/windows10.0-kb5058385-x64_b7f9b3768dff1e06358b2dbbf3ac5afed321a3f8.cab"
+      ],
+      "kbIds": [
+        "5058385"
       ]
     },
     {
@@ -1263,6 +1355,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/01/windows10.0-kb5049993-x64_5bbdea2c1590f3824100d1004007721e7719d2f6.cab"
+      ],
+      "kbIds": [
+        "5049993"
       ]
     },
     {
@@ -1302,6 +1397,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/03/windows10.0-kb5078766-x64_779c44dbbb234a8342ff57d5b9f5aff39d7563e0.cab"
+      ],
+      "kbIds": [
+        "5078766"
       ]
     },
     {
@@ -1348,6 +1446,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/09/windows10.0-kb5065428-x64_52c835448187d73c322c01730fc3d39af413a7ac.cab"
+      ],
+      "kbIds": [
+        "5065428"
       ]
     },
     {
@@ -1390,6 +1491,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/12/windows10.0-kb5071547-x64_fdd9ba834c15f3215670c7297e13b96dab9f50e1.cab"
+      ],
+      "kbIds": [
+        "5071547"
       ]
     },
     {
@@ -1462,6 +1566,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/2531d526-48c6-4347-afb8-796e06f0e7e4/public/ssu-26100.6893-x64-express_b2b56a59b29d38078953a00635d75f238b967a62.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/f6539f81-649f-42e1-9d0f-8db44b507eaa/public/microsoft-windows-fodmetadataservicing-server-compdb-package_aa63a72aee039e7b80b40f86c3944fbadcab9c89.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/abc078a4-70c1-4768-b564-ddab2df92f64/public/lp_server_97a45ce26bd86367b01c6de316099b0fc0c6a21c.wim"
+      ],
+      "kbIds": [
+        "5043080",
+        "5070762",
+        "5070881"
       ]
     },
     {
@@ -1504,6 +1613,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5082198-x64_7ff422e3623a4c8d73267cb762937ccb06dd728b.cab"
+      ],
+      "kbIds": [
+        "5082198"
       ]
     },
     {
@@ -1550,6 +1662,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/uprl/2025/11/windows-kb890830-x64-v5.137_d26124d4bdd1a7259db3b081f198db147c7dec0b.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -1590,6 +1705,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/09/windows10.0-kb5066137-x64-ndp48_81c26ef2b4e395ad52cfd93f70d7775610ca0ef2.cab",
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/09/windows10.0-kb5066143-x64_13da9b690af8b3583008f1f69659a0af12b3c535.cab"
+      ],
+      "kbIds": [
+        "5066137",
+        "5066143"
       ]
     },
     {
@@ -1628,6 +1747,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5082123-x64_ca9dfc6b8baa3786dccc839cfc8354442ce7d66a.cab"
+      ],
+      "kbIds": [
+        "5082123"
       ]
     },
     {
@@ -1672,6 +1794,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/09/windows10.0-kb5065687-x64_db574d172545b1bca203d975b945c65ce1fce2e1.cab"
+      ],
+      "kbIds": [
+        "5065687"
       ]
     },
     {
@@ -1710,6 +1835,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/09/windows10.0-kb5066136-x64-ndp48_923514a418a09106478bcc48988d1146e62d0ace.cab"
+      ],
+      "kbIds": [
+        "5066136"
       ]
     },
     {
@@ -1759,6 +1887,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/06/windows10.0-kb5060531-x64_2ac169c4a2d58ecef99993709c02c67eeb0afe3f.cab"
+      ],
+      "kbIds": [
+        "5060531"
       ]
     },
     {
@@ -1798,6 +1929,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/06/windows10.0-kb5039889-x64-ndp48_61da7bf22145ad69e508a994efc05947b27774ed.cab",
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2024/06/windows10.0-kb5039907-x64-ndp481_51cb8413b07a85670054e94c44b4cde680ec7303.cab"
+      ],
+      "kbIds": [
+        "5039889",
+        "5039907"
       ]
     },
     {
@@ -1834,6 +1969,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/f2a7d6d8-8e41-4a16-81c6-0a05654b5549/public/dotnetservicingcompdb_kb5087051.xml_80d0ded88e485eeb1c9424fa21ffb9174e508447.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/7096048a-c82f-44d0-b8da-8f070a3a9300/public/windows11.0-kb5087051-x64-ndp481_8707c54414dfae8005235e8a45e4d93a309bc896.cab"
+      ],
+      "kbIds": [
+        "5087051"
       ]
     },
     {
@@ -1873,6 +2011,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2024/09/windows10.0-kb5044035-x64-ndp481_96b9694ea161cca26928f4274bc2e3abdb6e2a1f.cab",
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2024/09/windows10.0-kb5044025-x64-ndp48_a4d2edda1f9700ac485bff366e7f0f98e362e4c3.cab"
+      ],
+      "kbIds": [
+        "5044025",
+        "5044035"
       ]
     },
     {
@@ -1922,6 +2064,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/10/windows10.0-kb5066836-x64_636f41a1b495983caa8dcc5dd155557bb561e4ba.cab"
+      ],
+      "kbIds": [
+        "5066836"
       ]
     },
     {
@@ -1990,6 +2135,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/db08ac89-625f-488d-b24f-06d3c7224262/public/ssu-26100.32370-x64_58db23a00a7f2e4afc79eb1263d0f40dbb15f273.psf",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/abc078a4-70c1-4768-b564-ddab2df92f64/public/lp_server_97a45ce26bd86367b01c6de316099b0fc0c6a21c.wim",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/f6539f81-649f-42e1-9d0f-8db44b507eaa/public/microsoft-windows-fodmetadataservicing-server-compdb-package_aa63a72aee039e7b80b40f86c3944fbadcab9c89.cab"
+      ],
+      "kbIds": [
+        "5043080",
+        "5075899",
+        "5076122"
       ]
     },
     {
@@ -2031,6 +2181,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/01/windows10.0-kb5073723-x64_6945db0b52db87416c729404aaca32202f30cc03.cab"
+      ],
+      "kbIds": [
+        "5073723"
       ]
     },
     {
@@ -2083,6 +2236,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/06/windows10.0-kb5061010-x64_067f79e18a8d99adfd749d2b38d9a1cd1c512c8b.cab"
+      ],
+      "kbIds": [
+        "5061010"
       ]
     },
     {
@@ -2156,6 +2312,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/7c0d1a12-9944-4b26-bed7-a722c040d631/public/windows11.0-kb5066835-x64_2f193bc50987a9c27e42eceeb90648af19cc813a.msu",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/9d70dbad-a9a7-448b-9ad2-d9ebfad16342/public/fod_server_99978f16e02e67a9d2b225375811ebd747ffdcf4.wim",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/2531d526-48c6-4347-afb8-796e06f0e7e4/public/ssu-26100.6893-x64-express_b2b56a59b29d38078953a00635d75f238b967a62.cab"
+      ],
+      "kbIds": [
+        "5043080",
+        "5066835",
+        "5067039"
       ]
     },
     {
@@ -2204,6 +2365,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/07/windows10.0-kb5062572-x64_d8869a59a87677386a8dbfc2c40312067d972b70.cab"
+      ],
+      "kbIds": [
+        "5062572"
       ]
     },
     {
@@ -2271,6 +2435,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d41b3e59-cc98-4b65-9e5f-01e1d35a0a00/public/edition_common_b01aaa34b66aca8fb45dd8fc6c1381c8579a9eaa.wim",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/89ce0d99-f9da-4b86-81fb-c9f4fd4e99f9/public/windows11.0-kb5078794-x64-baseless_2af77d8d3f86b73c570b3a0adde60c5f1fa5ed91.cab"
+      ],
+      "kbIds": [
+        "5043080",
+        "5078740",
+        "5078794"
       ]
     },
     {
@@ -2321,6 +2490,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/12/windows10.0-kb5050109-x64_f76da52edcb8057650052119041ab5a44134f927.cab"
+      ],
+      "kbIds": [
+        "5050109"
       ]
     },
     {
@@ -2362,6 +2534,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/4aa6cab3-5029-4637-aff0-71a4415ff5a3/public/dotnetservicingcompdb_kb5044030.xml_179dd47882a69008de46ff79ec41d200aa5c6c47.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/302ce31d-5621-4320-8083-877856634ddc/public/windows11.0-kb5044030-x64-ndp481_56356e6348d06dedeb6c1a14939b3342c40f4d26.cab"
+      ],
+      "kbIds": [
+        "5044030"
       ]
     },
     {
@@ -2436,6 +2611,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/f6539f81-649f-42e1-9d0f-8db44b507eaa/public/microsoft-windows-fodmetadataservicing-server-compdb-package_aa63a72aee039e7b80b40f86c3944fbadcab9c89.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/7342fa97-e584-4465-9b3d-71e771c9db5b/public/windows11.0-kb5065426-x64_32b5f85e0f4f08e5d6eabec6586014a02d3b6224.msu",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu"
+      ],
+      "kbIds": [
+        "5043080",
+        "5064097",
+        "5065426"
       ]
     },
     {
@@ -2493,6 +2673,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/12/windows10.0-kb5048671-x64_259cf27999800adbe656994ea6192940fd766de7.cab"
+      ],
+      "kbIds": [
+        "5048671"
       ]
     },
     {
@@ -2533,6 +2716,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/02/windows10.0-kb5075906-x64_eeb51ce126e3aa18c8beb978764793a161f93db8.cab"
+      ],
+      "kbIds": [
+        "5075906"
       ]
     },
     {
@@ -2592,6 +2778,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/08/windows10.0-kb5041160-x64_cf87558fa78179858fd38333e49a61563c104b87.cab"
+      ],
+      "kbIds": [
+        "5041160"
       ]
     },
     {
@@ -2632,6 +2821,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/09/windows10.0-kb5066134-x64-ndp481_048f6fd1500f942c7b36a287e80ba7a1422e7134.cab",
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/09/windows10.0-kb5066139-x64-ndp48_f996914e549c507c05f03116fb2cfc259c5bbe9a.cab"
+      ],
+      "kbIds": [
+        "5066134",
+        "5066139"
       ]
     },
     {
@@ -2683,6 +2876,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/09/windows10.0-kb5043124-x64_c526375b3e324400b656cec5a4e164d1787fe4cc.cab"
+      ],
+      "kbIds": [
+        "5043124"
       ]
     },
     {
@@ -2743,6 +2939,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/07/windows10.0-kb5040437-x64_0b75670067a1bb6eaa929f49dec502f6b07308e9.cab"
+      ],
+      "kbIds": [
+        "5040437"
       ]
     },
     {
@@ -2799,6 +2998,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/02/windows10.0-kb5052006-x64_99764e9ad79577cf8edaba79ff1675e2e70bf578.cab"
+      ],
+      "kbIds": [
+        "5052006"
       ]
     },
     {
@@ -2844,6 +3046,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/uprl/2025/05/windows-kb890830-x64-v5.133_520f72b0ed0a3b1610e49a9ffc58aa497ed27c59.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -2890,6 +3095,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/uprl/2026/02/windows-kb890830-x64-v5.139_c6a3e646b705898985bbd3b88ab2f672b84a8784.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -2926,6 +3134,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2024/09/windows10.0-kb5044021-x64-ndp48_4b4dd5d0a67698fc85e32ebac507e3be43a7a33b.cab"
+      ],
+      "kbIds": [
+        "5044021"
       ]
     },
     {
@@ -2967,6 +3178,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/ed75f0fe-91ef-4b7e-9bd6-046de72a515d/public/windows11.0-kb5044030-arm64-ndp481_f1d9e010e71b5e525afd4c056dc3d989c74e3bff.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/08b417d3-39fb-4107-bdd7-6504c56db7a2/public/dotnetservicingcompdb_kb5044030.xml_a93cac2f2651c6ed68df3cc1ea467d16b6b6e015.cab"
+      ],
+      "kbIds": [
+        "5044030"
       ]
     },
     {
@@ -3007,6 +3221,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/1561e3ee-0010-4ddc-8208-5e469889d147/public/windows11.0-kb5049622-x64-ndp481_1d26b9a3888aba638a01fb036a7c79234366a5bc.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d22a31f1-7272-4a42-a741-dc2b4bc6fb00/public/dotnetservicingcompdb_kb5049622.xml_f5c290a1491ee2a13c6fddd78f26ad5df053e162.cab"
+      ],
+      "kbIds": [
+        "5049622"
       ]
     },
     {
@@ -3046,6 +3263,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/03/windows10.0-kb5082413-x64_04d2d2dfd0444d9356546883c26368713e8a63b5.cab",
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/03/windows10.0-kb5082414-x64-ndp48_19db3b88f507a5cfb5f31a4362f65c920ffac10a.cab"
+      ],
+      "kbIds": [
+        "5082413",
+        "5082414"
       ]
     },
     {
@@ -3100,6 +3321,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/01/windows10.0-kb5050008-x64_709a4a1dd679e04f313990ab5c4d6a92cfc19d4c.cab"
+      ],
+      "kbIds": [
+        "5050008"
       ]
     },
     {
@@ -3153,6 +3377,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/02/windows10.0-kb5051979-x64_332f70670296425aec2031b68f933fce3a18434c.cab"
+      ],
+      "kbIds": [
+        "5051979"
       ]
     },
     {
@@ -3210,6 +3437,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/10/windows10.0-kb5044281-x64_b38e5d7be18977373b54a47ff109d822ccd734a1.cab"
+      ],
+      "kbIds": [
+        "5044281"
       ]
     },
     {
@@ -3265,6 +3495,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/12/windows10.0-kb5048654-x64_972a7c6ad88c8a1e069a72c5388f217fa7d57892.cab"
+      ],
+      "kbIds": [
+        "5048654"
       ]
     },
     {
@@ -3314,6 +3547,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/03/windows10.0-kb5054006-x64_a12daa388fef25c2b65da86505d02b1b9c5c7277.cab"
+      ],
+      "kbIds": [
+        "5054006"
       ]
     },
     {
@@ -3393,6 +3629,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/abc078a4-70c1-4768-b564-ddab2df92f64/public/lp_server_97a45ce26bd86367b01c6de316099b0fc0c6a21c.wim",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/625d0723-5e09-41ce-8747-2f65710a5054/public/ssu-26100.3764-x64-express_be0192ef1d58ace6981e7a2979c76fb8a4b637bb.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/9d70dbad-a9a7-448b-9ad2-d9ebfad16342/public/fod_server_99978f16e02e67a9d2b225375811ebd747ffdcf4.wim"
+      ],
+      "kbIds": [
+        "5043080",
+        "5055523",
+        "5055671"
       ]
     },
     {
@@ -3438,6 +3679,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/07/windows10.0-kb5062799-x64_1358fb4efa146af4fcc4fa7ad7418cf87b0c2489.cab"
+      ],
+      "kbIds": [
+        "5062799"
       ]
     },
     {
@@ -3474,6 +3718,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2024/06/windows10.0-kb5039885-x64-ndp48_580480ecf49dbca45169099ebcf1ddabbcd42bde.cab"
+      ],
+      "kbIds": [
+        "5039885"
       ]
     },
     {
@@ -3518,6 +3765,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/10/windows10.0-kb5070884-x64_b469bdd92fdc58a6bdd1a36664348b030f12ea60.cab"
+      ],
+      "kbIds": [
+        "5070884"
       ]
     },
     {
@@ -3554,6 +3804,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/05/windows10.0-kb5087538-x64_49c94735bed733f971afa209349ffc69d6defac5.cab"
+      ],
+      "kbIds": [
+        "5087538"
       ]
     },
     {
@@ -3590,6 +3843,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/05/windows10.0-kb5088064-x64_0f6a9f3097cfeb044d97a7b2753d2001473825cb.cab"
+      ],
+      "kbIds": [
+        "5088064"
       ]
     },
     {
@@ -3638,6 +3894,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/10/windows10.0-kb5070882-x64_03bdbaa127beb5c7e8787e5c65683e02870f8e72.cab"
+      ],
+      "kbIds": [
+        "5070882"
       ]
     },
     {
@@ -3708,6 +3967,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/1c77f29f-6aed-4acc-936f-cb60f701beab/public/fodmetadata_client_cc6fa0b098b179d2bbd1d53b91cc4de6b0eb5a88.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/a5ee094d-ee8f-429d-bf09-6b21867dc7d9/public/microsoft-windows-fodmetadataservicing-server-metadata-package_b6b70c23562f4cda0532f7d3888a6c60d3fdec8e.cab"
+      ],
+      "kbIds": [
+        "5043080",
+        "5072033",
+        "5072537"
       ]
     },
     {
@@ -3777,6 +4041,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/5f3921a1-520e-4f2e-85b2-c7c19c555b92/public/bfc22941-c68b-41a0-b883-c34a6e912c85_wsus.aggregatedmetadata_cf602b8b2711ca56be6fff88a542043d3d1a29c2.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/95366012-3d2e-4899-a6fa-f060edb18a9c/public/desktopdeployment_2cc8ba721a64b32af51246a0cfc01449565a4188.cab"
+      ],
+      "kbIds": [
+        "5043080",
+        "5073379",
+        "5073452"
       ]
     },
     {
@@ -3829,6 +4098,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/03/windows10.0-kb5053603-x64_8f3a31d85406bce3f6df8f81523a1465fcb569c6.cab"
+      ],
+      "kbIds": [
+        "5053603"
       ]
     },
     {
@@ -3876,6 +4148,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/05/windows10.0-kb5058524-x64_7ac9195da15bb2a09424a057584304a75502ff2f.cab"
+      ],
+      "kbIds": [
+        "5058524"
       ]
     },
     {
@@ -3952,6 +4227,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/a5ee094d-ee8f-429d-bf09-6b21867dc7d9/public/microsoft-windows-fodmetadataservicing-server-metadata-package_b6b70c23562f4cda0532f7d3888a6c60d3fdec8e.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/e15dff21-1242-4e4f-853b-d74f86b48e8e/public/ssu-26100.4651-x64_0_9a688d258e1c4eecd1b73f6d9b68050e3d55b99d.psf",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/a0a2c129-4fb0-40e0-9972-8300d26400c4/public/96f590d2-68c5-420c-8b21-c0289c23c018_wsus.aggregatedmetadata_4789c85259dc0a7e7b42794dc8983b001a9aa40f.cab"
+      ],
+      "kbIds": [
+        "5043080",
+        "5062553",
+        "5062688"
       ]
     },
     {
@@ -3988,6 +4268,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/9fa7b9ea-6495-424b-9027-94e22021a715/public/dotnetservicingcompdb_kb5087051.xml_a75ffa4425f13655391bfa26cd67777fa25cf938.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d6704577-482f-4f44-a427-23bffdc40178/public/windows11.0-kb5087051-arm64-ndp481_d9503621f0d143e2cd65b344d086e2751156c8b1.cab"
+      ],
+      "kbIds": [
+        "5087051"
       ]
     },
     {
@@ -4026,6 +4309,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/c20a5d7f-b5e9-4499-98d6-ac911c59023a/public/dotnetservicingcompdb_kb5082417.xml_bfbbbb3acb3f249fba3aa0110a9ba1e58ca87a9c.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/0e2c617e-2df2-4274-bdd0-94a485551f08/public/windows11.0-kb5082417-arm64-ndp481_d5672437e9666c8e37be80d235e6057015b873a0.cab"
+      ],
+      "kbIds": [
+        "5082417"
       ]
     },
     {
@@ -4065,6 +4351,9 @@
       "payloadUrls": [
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/6ebdea00-5bc7-4d17-9c1f-5d92dbe27cdb/public/dotnetservicingcompdb_kb5066131.xml_df40dae0bdf0e5a908dd8e90956cf2f909262a1f.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d4c7a34d-5f20-4b1b-aceb-f50a496fc250/public/windows11.0-kb5066131-x64-ndp481_76137de4f024f64637c1181f463f24bdf3dc5503.cab"
+      ],
+      "kbIds": [
+        "5066131"
       ]
     },
     {
@@ -4116,6 +4405,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/08/windows10.0-kb5063871-x64_7f3f0180836a583aabcfa49296b44b72cfec20ff.cab"
+      ],
+      "kbIds": [
+        "5063871"
       ]
     },
     {
@@ -4159,6 +4451,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/11/windows10.0-kb5068787-x64_6309f727be994b0768aea18f93008f2d54726734.cab"
+      ],
+      "kbIds": [
+        "5068787"
       ]
     },
     {
@@ -4205,6 +4500,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/uprl/2025/08/windows-kb890830-x64-v5.135_72c48060c5b80784333da5bef85e6d52fddb4b66.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -4242,6 +4540,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/03/windows10.0-kb5082411-x64-ndp48_9e67ed803aac1f1f997eb64d70fd8519b64364bf.cab"
+      ],
+      "kbIds": [
+        "5082411"
       ]
     },
     {
@@ -4322,6 +4623,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/9d70dbad-a9a7-448b-9ad2-d9ebfad16342/public/fod_server_99978f16e02e67a9d2b225375811ebd747ffdcf4.wim",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/f6539f81-649f-42e1-9d0f-8db44b507eaa/public/microsoft-windows-fodmetadataservicing-server-compdb-package_aa63a72aee039e7b80b40f86c3944fbadcab9c89.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/4807b0b1-6c5a-4a70-ab45-b378235fb9d6/public/windows11.0-kb5053598-x64_6cb3ffc5c4d652793dc71705248426eecdacdfd0.msu"
+      ],
+      "kbIds": [
+        "5043080",
+        "5053143",
+        "5053598"
       ]
     },
     {
@@ -4367,6 +4673,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/uprl/2025/02/windows-kb890830-x64-v5.132_99e2f6f80f1b15eaff192caff421e2c4c139796d.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -4412,6 +4721,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/10/windows10.0-kb5066782-x64_38d34107463270032ea507712e7913a627a1182f.cab"
+      ],
+      "kbIds": [
+        "5066782"
       ]
     },
     {
@@ -4470,6 +4782,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2024/09/windows10.0-kb5042881-x64_8df3cf57ac2b0fbf0675d94984020a6168e01830.cab"
+      ],
+      "kbIds": [
+        "5042881"
       ]
     },
     {
@@ -4536,6 +4851,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/488a8a03-4299-4387-a968-338c8bb6f374/public/desktopdeployment_d72447e8b4e1d574bb7c5f54354be90c6a0455d3.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/c9bb80a1-9e5f-4c07-80f5-75e7e2b14932/public/windows11.0-kb5082237-x64_4c0d9b40d322e73fc01eeb5ff93c6c3e967945cf.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/f8f0420a-0875-4e1e-a904-9a7acfcfbe46/public/windows11.0-kb5082063-x64_2fb0b6b3988432626f68c231d154c35362ff58ea.msu"
+      ],
+      "kbIds": [
+        "5043080",
+        "5082063",
+        "5082237"
       ]
     },
     {
@@ -4620,6 +4940,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/bdf48582-8927-46d2-b3f7-416256befeb1/public/windows11.0-kb5046910-x64-baseless_7948f7c76e9c024f1102340c3d9d4e55b7b9f6aa.psf",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d08086c5-7fc9-477d-af35-55e980aa9425/public/d9273851-d943-43ba-b5b8-b29d0bbd98a1_wsus.aggregatedmetadata_eb2cd12a2b3d6e773d7d2e964a1833bd037b1030.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/04cfc96b-b960-4140-a922-a7b833c1e7e6/public/windows11.0-kb5046910-x64-baseless_5739dbf0eb3d199b34a488fd6f5c48d91372c502.cab"
+      ],
+      "kbIds": [
+        "5043080",
+        "5046617",
+        "5046910"
       ]
     },
     {
@@ -4665,6 +4990,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/uprl/2025/06/windows-kb890830-x64-v5.134_a2ddaf9c044fbe6b5bd87b0e494152498503f0e4.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -4718,6 +5046,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/07/windows10.0-kb5040562-x64_9ffbae64e8d4b0e8352b580dcc3e3e8f4680305f.cab"
+      ],
+      "kbIds": [
+        "5040562"
       ]
     },
     {
@@ -4758,6 +5089,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/02/windows10.0-kb5075904-x64_6fb7becf28cf54301d1a53ca108de742e9e03d11.cab"
+      ],
+      "kbIds": [
+        "5075904"
       ]
     },
     {
@@ -4811,6 +5145,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/05/windows10.0-kb5058383-x64_869de02e5be5441eb8ca1c6fd4774aa54bfd4d79.cab"
+      ],
+      "kbIds": [
+        "5058383"
       ]
     },
     {
@@ -4858,6 +5195,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/11/windows10.0-kb5068864-x64_bd64c0cb237a17d8f45ef52facfab66b77433b99.cab"
+      ],
+      "kbIds": [
+        "5068864"
       ]
     },
     {
@@ -4902,6 +5242,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/10/windows10.0-kb5070883-x64_ac41fff4413c75fb87aaa5a6106531b040e4685a.cab"
+      ],
+      "kbIds": [
+        "5070883"
       ]
     },
     {
@@ -4950,6 +5293,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/03/windows10.0-kb5055661-x64_a3ef06f263bc51dd5d493cd9de63ca576e68470d.cab"
+      ],
+      "kbIds": [
+        "5055661"
       ]
     },
     {
@@ -5031,6 +5377,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/f49ee237-22a7-4692-9edd-d7adfbf6bd0e/public/windows11.0-kb5053426-x64_c81b1c234490a57c701ded095d5e2955c1240bdc.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/5436c68b-8df5-4c74-9a17-fbbf236944af/public/fod_common_7491d52800c7d4df7fea3e873b935b6c1597bd4f.wim",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d41b3e59-cc98-4b65-9e5f-01e1d35a0a00/public/edition_common_b01aaa34b66aca8fb45dd8fc6c1381c8579a9eaa.wim"
+      ],
+      "kbIds": [
+        "5043080",
+        "5051987",
+        "5053426"
       ]
     },
     {
@@ -5078,6 +5429,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/08/windows10.0-kb5063877-x64_e0ab535589b1f2c00da8e047461726fa0db8ee6f.cab"
+      ],
+      "kbIds": [
+        "5063877"
       ]
     },
     {
@@ -5117,6 +5471,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/03/windows10.0-kb5078752-x64_e9b42b8891bcf9a9148f202faf7058a5ddc740c6.cab"
+      ],
+      "kbIds": [
+        "5078752"
       ]
     },
     {
@@ -5169,6 +5526,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/08/windows10.0-kb5041576-x64_7db20ed079e5f9f78007d44118f5a688ce648f7d.cab"
+      ],
+      "kbIds": [
+        "5041576"
       ]
     },
     {
@@ -5209,6 +5569,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/05/windows10.0-kb5087537-x64_5b0b23cc6e7b63114e4a35570b5a375317ba83b0.cab"
+      ],
+      "kbIds": [
+        "5087537"
       ]
     },
     {
@@ -5246,6 +5609,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5087059-x64-ndp481_29869515efd6dff914bcc3aab44063e0bfb41793.cab",
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5087068-x64-ndp48_b750c4b64195b41c2a21a049aa587fabb2d8692e.cab"
+      ],
+      "kbIds": [
+        "5087059",
+        "5087068"
       ]
     },
     {
@@ -5285,6 +5652,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/12/windows10.0-kb5049608-x64_1ab3651ffadb5f505697a1f4aa4f7dede734d58c.cab",
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/12/windows10.0-kb5049615-x64-ndp48_1c0fd2029d823ea2312fae36e1d530f830003858.cab"
+      ],
+      "kbIds": [
+        "5049608",
+        "5049615"
       ]
     },
     {
@@ -5331,6 +5702,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/uprl/2025/10/windows-kb890830-x64-v5.136_a19f2811b3fc3411963fc2391fafe4937731acf9.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -5385,6 +5759,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/06/windows10.0-kb5039334-x64_4d5439e1c64a262c8fadd45e6cf25dc61ea848c1.cab"
+      ],
+      "kbIds": [
+        "5039334"
       ]
     },
     {
@@ -5463,6 +5840,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/ef4a386a-7531-48e9-9cda-b06ac79096e1/public/windows11.0-kb5059442-x64_d96d5a62d0a410fd8b07cb3098908e21a4c01c63.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/5436c68b-8df5-4c74-9a17-fbbf236944af/public/fod_common_7491d52800c7d4df7fea3e873b935b6c1597bd4f.wim",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/e34ed574-50b2-4ce3-ab26-544323be318b/public/windows11.0-kb5059442-x64-baseless_ea9af669a814a41388ab55be8f34c8b66cd01e64.psf"
+      ],
+      "kbIds": [
+        "5043080",
+        "5058411",
+        "5059442"
       ]
     },
     {
@@ -5538,6 +5920,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d25bc18f-dbb6-4087-a21e-6f4cff699e8a/public/windows11.0-kb5063689-x64-baseless_b43f67c283549bc1b07e0b86862b0052e0af1a0b.psf",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/c8098965-d070-4247-9a23-baa2ff79bc3f/public/775359cf-3ef9-4716-8127-1db1747e89c5_wsus.aggregatedmetadata_cf6e25685fba562538e1285b6a82e1112e2efafa.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/3c10e46a-6f96-4f61-a1f6-2cd21ebd19b9/public/ssu-26100.4933-x64_0_5a9309ce5656acc1cbf66c8046fdb259c220b7b3.psf"
+      ],
+      "kbIds": [
+        "5043080",
+        "5063689",
+        "5063878"
       ]
     },
     {
@@ -5579,6 +5966,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/01/windows10.0-kb5073457-x64_e2f88610c2b654347c9900a81ecbd790be18865d.cab"
+      ],
+      "kbIds": [
+        "5073457"
       ]
     },
     {
@@ -5643,6 +6033,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/179572b6-939d-4f6f-9397-5982abe12de1/public/windows11.0-kb5087588-x64_b792d3ac80927155478159237b4a5ee17d8d0849.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/2f1593c2-1e75-4eb1-a9dd-c6531589f2fa/public/windows11.0-kb5087539-x64_f796cb25e32212f8115f26ee8ff22397f09d0036.msu",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/292d3787-3bf6-4a90-9f94-0e482c8e2a37/public/windows11.0-kb5087588-x64-baseless_0e415932cd9f510303a8c7e442f43a94714c2a82.psf"
+      ],
+      "kbIds": [
+        "5043080",
+        "5087539",
+        "5087588"
       ]
     },
     {
@@ -5697,6 +6092,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/01/windows10.0-kb5049983-x64_be4753d71a3a58ba921fcb62793fcaaf471475a2.cab"
+      ],
+      "kbIds": [
+        "5049983"
       ]
     },
     {
@@ -5742,6 +6140,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/uprl/2025/01/windows-kb890830-x64-v5.131_b091e745124ba77a02629e887324f4802dc1e919.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -5793,6 +6194,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/04/windows10.0-kb5055526-x64_319c68a1297c1166a2150f3e560f24061228b096.cab"
+      ],
+      "kbIds": [
+        "5055526"
       ]
     },
     {
@@ -5870,6 +6274,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/58b46d94-e497-4048-8aea-4b430fd63d12/public/windows11.0-kb5060842-x64_07871bda98c444c14691e0a90560306703b739cf.msu",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/7cb7f274-29a6-4053-bb8c-59d49e000a82/public/windows11.0-kb5059693-x64_bb51f1eadbba9b776ef15eaf2b736018d9117110.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/847339d7-d826-4414-bca3-999832b338e5/public/ssu-26100.4193-x64_e71e1b747cb8cb39a5ab078982525b2bcd1710a0.psf"
+      ],
+      "kbIds": [
+        "5043080",
+        "5059693",
+        "5060842"
       ]
     },
     {
@@ -5914,6 +6323,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/02/windows10.0-kb5075999-x64_cd6c31bb1aa10c2dde84a958adece4a1c06696fe.cab"
+      ],
+      "kbIds": [
+        "5075999"
       ]
     },
     {
@@ -5960,6 +6372,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/09/windows10.0-kb5065432-x64_51965cdac52fde2bb1f7efca1040573ccf367650.cab"
+      ],
+      "kbIds": [
+        "5065432"
       ]
     },
     {
@@ -6031,6 +6446,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/abc078a4-70c1-4768-b564-ddab2df92f64/public/lp_server_97a45ce26bd86367b01c6de316099b0fc0c6a21c.wim",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/5315757b-0dc6-4282-a148-c7bf0b6b0e90/public/windows11.0-kb5068861-x64_acc4fe9c928835c0d44cdc0419d1867dbd2b62b2.msu",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d41b3e59-cc98-4b65-9e5f-01e1d35a0a00/public/edition_common_b01aaa34b66aca8fb45dd8fc6c1381c8579a9eaa.wim"
+      ],
+      "kbIds": [
+        "5043080",
+        "5068861",
+        "5070186"
       ]
     },
     {
@@ -6069,6 +6489,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5082089-x64_c8ea4caad466cca22fa387bbe249afeca7d2dd4f.cab"
+      ],
+      "kbIds": [
+        "5082089"
       ]
     },
     {
@@ -6117,6 +6540,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/07/windows10.0-kb5062557-x64_38788d22fd9a3b8fd838a702a32edee95e348354.cab"
+      ],
+      "kbIds": [
+        "5062557"
       ]
     },
     {
@@ -6173,6 +6599,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2024/11/windows10.0-kb5046616-x64_d0c80fdda413e0714b276e3b6457c9185210091c.cab"
+      ],
+      "kbIds": [
+        "5046616"
       ]
     },
     {
@@ -6224,6 +6653,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/07/windows10.0-kb5062560-x64_fd2a4c0b3ba8afd0f5f7e33ee9d188bb359f3219.cab"
+      ],
+      "kbIds": [
+        "5062560"
       ]
     },
     {
@@ -6267,6 +6699,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/10/windows10.0-kb5066584-x64_7e9298b3c127fc59c11f3fe554568f1ecaf2f791.cab"
+      ],
+      "kbIds": [
+        "5066584"
       ]
     },
     {
@@ -6352,6 +6787,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/d41b3e59-cc98-4b65-9e5f-01e1d35a0a00/public/edition_common_b01aaa34b66aca8fb45dd8fc6c1381c8579a9eaa.wim",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/93702021-5b36-4f44-ad46-0e077134db08/public/windows11.0-kb5044612-x64-baseless_c084d074b48a5efff84e74316a7fbc39f5a7233d.psf",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/7ff93447-601b-448c-b069-1104de15ab6f/public/desktopdeployment_03749069c85f3b7fd07cea789005b0e673932d11.cab"
+      ],
+      "kbIds": [
+        "5043080",
+        "5044284",
+        "5044612"
       ]
     },
     {
@@ -6388,6 +6828,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/12/windows10.0-kb5049614-x64-ndp48_c8a6ef370e0853d5c897b4da731e67f39f79e118.cab"
+      ],
+      "kbIds": [
+        "5049614"
       ]
     },
     {
@@ -6438,6 +6881,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2025/05/windows10.0-kb5058392-x64_136ef93116f01f8b4680ee5cb5af357f31e947f2.cab"
+      ],
+      "kbIds": [
+        "5058392"
       ]
     },
     {
@@ -6492,6 +6938,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/04/windows10.0-kb5055521-x64_203e6e535582b9c3a8f6925a2b52626fcd914c69.cab"
+      ],
+      "kbIds": [
+        "5055521"
       ]
     },
     {
@@ -6553,6 +7002,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2024/06/windows10.0-kb5039227-x64_bd23035ac4299e74c23e82db5f86b38425061373.cab"
+      ],
+      "kbIds": [
+        "5039227"
       ]
     },
     {
@@ -6595,6 +7047,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2025/12/windows10.0-kb5071544-x64_65250d555c45db225a382a92ccda8282885facfd.cab"
+      ],
+      "kbIds": [
+        "5071544"
       ]
     },
     {
@@ -6638,6 +7093,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/03/windows10.0-kb5078938-x64_1ce420d2c08136cedf86c9851eb3d86273809a2a.cab"
+      ],
+      "kbIds": [
+        "5078938"
       ]
     },
     {
@@ -6677,6 +7135,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/03/windows10.0-kb5082425-x64-ndp481_0d1eecdd7d888bcaf87fa9c4892219752b3385dd.cab",
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/03/windows10.0-kb5082427-x64-ndp48_01ef5f9e0063bbec736e5ae991bbd4e1357abaf1.cab"
+      ],
+      "kbIds": [
+        "5082425",
+        "5082427"
       ]
     },
     {
@@ -6759,6 +7221,11 @@
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/e31f06e1-7492-4800-8843-c942835fedea/public/windows11.0-kb5050119-x64-baseless_5c0e42b2a74979f6c41a8dafe7e86a1f66171a39.psf",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/9b592a9f-6faf-4011-8877-4b737edd9852/public/desktopdeployment_5ca69825eba73b4670cfd08c22aa757af5a3c4c1.cab",
         "http://dl.delivery.mp.microsoft.com/filestreamingservice/files/5436c68b-8df5-4c74-9a17-fbbf236944af/public/fod_common_7491d52800c7d4df7fea3e873b935b6c1597bd4f.wim"
+      ],
+      "kbIds": [
+        "5043080",
+        "5050009",
+        "5050119"
       ]
     },
     {
@@ -6804,6 +7271,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/c/msdownload/update/software/secu/2026/01/windows10.0-kb5073722-x64_8538549b343b3824d6e96a9b83f61e6118940b4a.cab"
+      ],
+      "kbIds": [
+        "5073722"
       ]
     },
     {
@@ -6850,6 +7320,9 @@
       ],
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/uprl/2026/04/windows-kb890830-x64-v5.140_19dee999f6761a77fbeedab883c4917fbec78718.exe"
+      ],
+      "kbIds": [
+        "890830"
       ]
     },
     {
@@ -6887,6 +7360,10 @@
       "payloadUrls": [
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5087066-x64-ndp48_50d3081820a56820af8c869903d4d6e25e65c5d9.cab",
         "http://download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5087061-x64_23f66f7d1adec94240d1d4ea0a99e7c3ac5c72ac.cab"
+      ],
+      "kbIds": [
+        "5087061",
+        "5087066"
       ]
     }
   ]

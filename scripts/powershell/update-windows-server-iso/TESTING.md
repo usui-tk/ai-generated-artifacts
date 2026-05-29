@@ -72,7 +72,7 @@ a build identifier plus a calendar date. Pending items are marked
 | T9 catalog_title_tokens_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T10 release_info_resolver_test.py (22 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| T12 wsusscn2_parser_test.py (22 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.9.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| T12 wsusscn2_parser_test.py (23 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.9.4; includes kbIds-field presence) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | T13 wsusscn2_layer1_test.py (15 assertions, `Update-Layer1DependencyVerification` writeback contract per SPEC §B.19.9.5) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | T14 wsusscn2_deny_list_test.py (10 assertions, EOS/ESU deny-list warned-exclusion + allow-overrides in the PowerShell scope filter, matching the `classify_scope` reference; SPEC §B.19.7.1) | ✓ all pass | r11.5 wsusscn2-eos-esu-deny-list-warned-exclusion build / 2026-05-29 |
 | T15 wsusscn2_servicing_stack_test.py (16 assertions, `Resolve-WsusScnRevisionToCab` RANGESTART mapping + `Get-WsusScnServicingStackInfo` separate/combined/checkpoint derivation from real-cab CBS metadata; SPEC §B.19.13.0) | ✓ all pass | r11.6 wsusscn2-servicing-stack-extraction build / 2026-05-29 |
@@ -81,7 +81,8 @@ a build identifier plus a calendar date. Pending items are marked
 | Part C §C.3.4 — `canonical_json_format_check.py` (27 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Scope-invariants gate — `wsusscn2_scope_invariants_test.py` (23 assertions, EOS/ESU deny-list + allow-overrides over Layer 2 + fixture + synthetic; SPEC §B.19.7/§B.19.7.1) | ✓ all pass | r11.2 wsusscn2-phase2c-eos-esu-scope build / 2026-05-29 |
-| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T17 + format gate + config schema gate + scope-invariants gate) | ✓ green | CI continuous |
+| Layer 2 schema gate — `wsusscn2_layer2_schema_test.py` (16 assertions, committed `data/wsusscn2-database.json` vs `schema/wsusscn2-database.schema.json` + data-contract identity, portable provenance, kbIds populate, Microsoft-prose hard rule; SPEC §B.19.8/§B.19.10) | ✓ all pass | r11.9 wsusscn2-layer2-kbids-populate build / 2026-05-29 |
+| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T17 + format gate + config schema gate + scope-invariants gate + Layer 2 schema gate) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |

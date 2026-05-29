@@ -2311,7 +2311,15 @@ filename prefix; this is expected and is not a scope leak.
 >   `requiredServicingStackVersion`, `providedServicingStackVersion`
 >   (full spelling, nullable), `servicingStackModel`
 >   (`separate`/`combined`/`checkpoint`), and `kbIds`, populated by the
->   wsusscn2 analysis step for the §B.19.13 verification model.
+>   wsusscn2 analysis step for the §B.19.13 verification model. As of
+>   r11.9, `kbIds` is populated for every update (recovered from
+>   `payloadUrls` during Stage 4, deduplicated and sorted, bare numeric
+>   form per §B.19.8); the servicing-stack version/model fields are
+>   populated by the per-leaf CBS extraction wired in a later M1
+>   increment and remain optional/nullable until then. The committed
+>   `data/wsusscn2-database.json` is validated against
+>   `schema/wsusscn2-database.schema.json` by the Layer 2 schema gate
+>   (`tests/wsusscn2_layer2_schema_test.py`).
 
 Versioning is governed by the **shared data-contract identity**, not by
 a per-model schema version. The script holds a single source of truth in

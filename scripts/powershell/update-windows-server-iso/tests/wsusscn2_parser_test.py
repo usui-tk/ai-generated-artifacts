@@ -201,6 +201,13 @@ def main() -> int:
     r.assert_eq("21 Parser output contains no prose/KB fields (KB not in wsusscn2)",
                 actual_prose_hits, [])
 
+    # ---- 7b. kbIds field is emitted for every update (M1; recovered from
+    #          payloadUrls). The fixture's payload URLs carry no kb token, so
+    #          every list is empty here; the live-DB gate exercises non-empty
+    #          recovery against the real cab. ----
+    all_have_kbids = all("kbIds" in u for u in actual.get("updates", []))
+    r.assert_true("21b every update carries a kbIds array (M1 populate)", all_have_kbids)
+
     # ---- 8. Structural compare against expected-output.json ----
     stripped_actual = strip_env(actual)
     stripped_expected = strip_env(expected)
