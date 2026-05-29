@@ -16,6 +16,15 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.12 - P06 Stage 2 servicing-readiness wiring (off by default) and on-mount check rename (M1, §B.19.19.1 Step 2)
+
+Wires the wsusscn2 Layer 2 servicing-readiness verdict into P06 behind a new opt-in switch, and renames the mount-time prerequisite check to match the servicing-readiness vocabulary. `$Script:ScriptVersion` is bumped `r11.11` -> `r11.12`; `$Script:ScriptTag` becomes `p06-servicing-readiness-wiring`. Per SPEC §B.19.19.1 this is Step 2 and ships as its own commit; default behaviour is unchanged.
+
+- **P06 Stage 2 wiring (`-EnableDependencyCheck`, default OFF).** After `compare-patch-sets`, P06 now runs a `servicing-readiness-check` stage that calls the already-tested `Test-PatchServicingReadinessFromGraph` over the provided patch set, logging the overall status and per-patch verdicts (`Pass` / `SsTooOld` / `NotInDatabase` / `Superseded` / `N/A`). The check is **advisory** in this revision — it never blocks the build — and only runs when `-EnableDependencyCheck` is supplied. With the switch absent (the default), P06 behaviour is unchanged. Absence of `data/wsusscn2-database.json` degrades to `Unknown` (Stage 1 still stands), per §B.19.19.2.
+- **Rename `Test-PatchDependencyClosureOnMount` -> `Test-PatchServicingReadinessOnMount`.** The mount-time A-3 prerequisite check (definition + its three call sites in the apply loops) is renamed to align with the servicing-readiness model; behaviour and the `$Script:PatchDependencyPolicy` governance are unchanged. The old name is left intact in historical CHANGELOG entries (history is not rewritten); SPEC §B.13, §B.19.13.2, and the Appendix E function table are updated to the new name.
+- **Docs.** SPEC §B.19.19.1 records Step 2 as implemented (advisory, default OFF); the P06 parameter set documents `-EnableDependencyCheck`. README is unchanged (lock-step preserved).
+- **Verification.** psa.py 0/0/0; `pwsh` 7.4.6 ParseFile 0 errors; full offline suite green (15/15). The new code path is gated off by default; the verdict function it calls is covered by T16/T17.
+
 ### r11.11 - wsusscn2 servicing-stack Stage 4b wiring (memory-safe streaming) and DB regeneration (M1, part 5b finish)
 
 Wires the servicing-stack populate into the A04 RefreshDependencyDatabase pipeline as Stage 4b, behind a memory-safe streaming extractor, and regenerates the committed `data/wsusscn2-database.json` with the SS fields filled in for all 138 in-scope updates. `$Script:ScriptVersion` is bumped `r11.10` -> `r11.11`; `$Script:ScriptTag` becomes `wsusscn2-servicing-stack-streaming-populate`.

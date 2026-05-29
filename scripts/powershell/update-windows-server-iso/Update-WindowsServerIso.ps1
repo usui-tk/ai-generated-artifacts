@@ -266,6 +266,11 @@ param(
     [string]   $WsusScnCabPath,
     [switch]   $UseBaselineOnly,
 
+    # Opt-in (default OFF): run the P06 Stage 2 servicing-readiness check
+    # against the wsusscn2 Layer 2 database. Advisory only - logs verdicts
+    # but never blocks the build (SPEC B.19.19.1 Step 2).
+    [switch]   $EnableDependencyCheck,
+
     # RefreshAllBaselines parameters: control which OS / language /
     # patch month is targeted when running -Action RefreshAllBaselines.
     [ValidateSet('Initial','Monthly','Force')]
@@ -538,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.11'
-$Script:ScriptTag     = 'wsusscn2-servicing-stack-streaming-populate'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.12'
+$Script:ScriptTag     = 'p06-servicing-readiness-wiring'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -9509,10 +9514,10 @@ function Write-PatchPlanSummary {
     }
 }
 
-function Test-PatchDependencyClosureOnMount {
+function Test-PatchServicingReadinessOnMount {
     <#
     .SYNOPSIS
-        Pre-apply dependency closure check (A-3).
+        Pre-apply servicing-readiness check on the mounted image (A-3).
     .DESCRIPTION
         For every patch in $PatchesToApply whose RequiresKbIds is
         non-empty, verify via Get-WindowsPackage that each required KB
@@ -12344,6 +12349,29 @@ function Invoke-PlanPhase06_ValidatePatchSet {
         Write-Step ('Patch set comparison: {0} provided / {1} missing / {2} excluded.' -f `
                     $comparison.Provided.Count, $comparison.Missing.Count, $comparison.ExcludedCount)
 
+        # ---- Stage 2: servicing-readiness check (opt-in, advisory) ----
+        # SPEC B.19.19.1 Step 2: consult the wsusscn2 Layer 2 database for
+        # each provided patch's servicing readiness. Gated by
+        # -EnableDependencyCheck (default OFF) and purely advisory in this
+        # revision - it logs verdicts but never blocks the build. Absence of
+        # the Layer 2 database degrades to "Unknown" (Stage 1 still stands).
+        if ($Script:EnableDependencyCheck) {
+            Set-DebugStep -Step 'servicing-readiness-check'
+            Write-SubSection 'Stage 2: servicing-readiness check (wsusscn2 Layer 2)'
+            $readiness = Test-PatchServicingReadinessFromGraph -ResolvedPatches @($providedPatches)
+            if (-not $readiness.Available) {
+                Write-Caution ('Servicing-readiness check unavailable (status {0}); Layer 2 database absent or unreadable. Stage 1 validation already passed.' -f $readiness.OverallStatus)
+            } else {
+                Write-Step ('Servicing-readiness overall status: {0} (Layer 2 generated {1}).' -f $readiness.OverallStatus, $readiness.DatabaseGeneratedAt)
+                foreach ($v in @($readiness.PatchVerdicts)) {
+                    $note = if ($v.PSObject.Properties['Notes'] -and $v.Notes) { ' : ' + $v.Notes } else { '' }
+                    $msg = ('  KB{0} ({1}) -> {2}{3}' -f $v.KbId, $v.UpdateId, $v.Verdict, $note)
+                    if ($v.Verdict -in @('SsTooOld', 'NotInDatabase')) { Write-Caution $msg } else { Write-Step $msg }
+                }
+            }
+            Write-Step 'Servicing-readiness is advisory in this revision (enabled via -EnableDependencyCheck); it does not block the build.'
+        }
+
         # ---- If missing patches: export diagnostics and decide ----
         if ($comparison.Missing.Count -gt 0) {
             Set-DebugStep -Step 'export-diagnostics'
@@ -12551,7 +12579,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
                     -not $_.RequiresRemount
                 } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
                 Set-DebugStep -Step ('depcheck-install-idx-' + $img.ImageIndex)
-                Test-PatchDependencyClosureOnMount -MountPath $Script:MountInstallDir `
+                Test-PatchServicingReadinessOnMount -MountPath $Script:MountInstallDir `
                     -PatchesToApply $firstPassPatches `
                     -ImageLabel $imgLabel | Out-Null
 
@@ -12685,7 +12713,7 @@ function Invoke-BuildPhase08_PatchBootWim {
                 $allBootPatches = @($bootSequence | Where-Object {
                     -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
                 } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
-                Test-PatchDependencyClosureOnMount -MountPath $mountDir `
+                Test-PatchServicingReadinessOnMount -MountPath $mountDir `
                     -PatchesToApply $allBootPatches `
                     -ImageLabel $imgLabel | Out-Null
 
@@ -12736,7 +12764,7 @@ function Invoke-BuildPhase08_PatchBootWim {
                             $allWinRePatches = @($winReSequence | Where-Object {
                                 -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
                             } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
-                            Test-PatchDependencyClosureOnMount -MountPath $Script:MountWinReDir `
+                            Test-PatchServicingReadinessOnMount -MountPath $Script:MountWinReDir `
                                 -PatchesToApply $allWinRePatches `
                                 -ImageLabel 'winre.wim' | Out-Null
 

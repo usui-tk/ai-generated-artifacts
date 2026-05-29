@@ -764,7 +764,7 @@ documented in §D.NN (umbrella KBs and supersedence drift).
 
 **Status**: normative. **Policy ID**: SPEC-WSI-012.
 
-`Test-PatchDependencyClosureOnMount` runs inside the per-WIM apply
+`Test-PatchServicingReadinessOnMount` runs inside the per-WIM apply
 loop just after `Mount-WindowsImage` and before the first
 `Add-WindowsPackage`. For each patch whose `RequiresKbIds` is
 non-empty, it enumerates installed packages via `Get-WindowsPackage`
@@ -2752,7 +2752,7 @@ reformatting. T16 (`wsusscn2_readiness_verdict_test.py`) is the executable
 contract.
 
 
-#### B.19.13.2 Relationship to `Test-PatchDependencyClosureOnMount` (§B.13)
+#### B.19.13.2 Relationship to `Test-PatchServicingReadinessOnMount` (§B.13)
 
 Both functions stay enabled in r09.0+. They are complementary:
 
@@ -3047,6 +3047,15 @@ Reserved as future work.
 
 Each Step ships as a separate commit on `main` with its own
 CHANGELOG entry.
+
+> **Status (r11.12).** Step 2 is implemented: P06's `compare-patch-sets`
+> stage is followed by a `servicing-readiness-check` stage that calls
+> `Test-PatchServicingReadinessFromGraph` over the provided patch set
+> when `-EnableDependencyCheck` is supplied (default OFF). In this
+> revision the verdict is **advisory** — the overall status and per-patch
+> verdicts are logged but never abort the build — so Step 2 remains fully
+> backward-compatible. Enforcement and the Step 3 default-ON flip (with
+> `-SkipDependencyCheck` opt-out) are future revisions.
 
 #### B.19.19.2 Behaviour when layer 2 is absent at runtime
 
@@ -4774,7 +4783,7 @@ when the original needs an upstream fix.
 | `Select-AllCanonicalPatchFiles` | r04.3 | Umbrella-KB multi-MSU retention (§B.15.2) |
 | `Test-IsCombinedLcuTitle` | r04.3 | LCU+SSU combined detection (§B.15.3) |
 | `Get-CatalogQueryTemplate` | r04.3 | OS-specific Title-token template loader (§B.22.2) |
-| `Test-PatchDependencyClosureOnMount` | r04 | Mount-time prerequisite check (§B.13) |
+| `Test-PatchServicingReadinessOnMount` | r04 | Mount-time prerequisite check (§B.13); renamed from `Test-PatchDependencyClosureOnMount` in r11.12 |
 | `Get-Pca2023ReadinessSnapshot`, `Show-Pca2023ReadinessSnapshot`, `Format-Pca2023ReadinessForReport` | r05.0 | Health verdict for PCA2023 readiness (§B.17) |
 | `Convert-WimBootToPca2023Signed` | r05.0 | PSA-clean reimplementation of `Make2023BootableMedia.ps1` (§B.17) |
 | `Get-IsoBootCertReadiness` | r05.0 | INPUT-side boot.wim readiness inspection (§B.17.2) |
