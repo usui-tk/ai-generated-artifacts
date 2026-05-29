@@ -244,7 +244,7 @@ param(
 
     [Parameter()] [switch]$Execute,
     [Parameter()] [string]$WorkRoot,
-    [Parameter()] [string]$WsusScnCabPath,
+    [Parameter()] [string]$OfflineSyncPackagePath,
     # ... (see script header for the full inventory)
 )
 ```
@@ -1480,7 +1480,7 @@ porting." Function bodies, parameter signatures, and pipeline ordering
 otherwise remain byte-identical to Deploy-AMD.
 
 The three helpers are inserted as a single block immediately after
-`Get-WsusScnCabIfNeeded` (the Stage 1 cab acquisition helper).
+`Get-OfflineSyncPackageIfNeeded` (the Stage 1 cab acquisition helper).
 The placement keeps all `wsusscn2.cab`-adjacent infrastructure
 co-located within a single section of the script body.
 
@@ -1662,7 +1662,7 @@ The parser ingests `package.xml` and emits to
 1. **OS family (allow-list, allow-overrides)**: package targets one
    of Windows Server 2016, 2019, 2022, or 2025 (matched via the
    `<Categories>` block's `Product` / `ProductFamily` GUIDs; the
-   working set lives in `$Script:WsusScnOsCategoryGuids`). An update
+   working set lives in `$Script:OfflineSyncOsCategoryGuids`). An update
    is admitted if it carries **at least one** allow-list Product
    GUID, **even if it also carries a deny-list GUID** (§B.19.7.1).
    This allow-overrides rule is required because some valid updates
@@ -1674,7 +1674,7 @@ The parser ingests `package.xml` and emits to
 3. **Recency**: released within the last `RecencyMonths` months as
    of the parser invocation date. The `CreationDate` attribute of
    the `<Update>` element is the cut-off. The
-   `ConvertFrom-WsusScnPackageXml -RecencyMonths` parameter controls
+   `ConvertFrom-OfflineSyncPackage -RecencyMonths` parameter controls
    this: **default 24**, **36 supported**, and **`-1` disables** the
    clause entirely (no recency pruning). Older entries are pruned to
    bound layer 2 size. The 24-month default is justified by the
@@ -1717,11 +1717,11 @@ updates exist, so a naive deny-overrides rule would wrongly drop
 them.
 
 Implementation (r11.5): the scope filter in
-`ConvertFrom-WsusScnPackageXml` counts deny-excluded bundles into
+`ConvertFrom-OfflineSyncPackage` counts deny-excluded bundles into
 `Stats.eosEsuBundlesExcluded` and records the distinct OS families it
 saw into `Stats.eosEsuFamiliesExcluded`; both are surfaced in the
 Layer 2 `_meta.stats`. When the count is non-zero,
-`New-WsusScnDependencyDatabase` emits a single operator `Write-Caution`
+`New-ServicingDependencyDatabase` emits a single operator `Write-Caution`
 naming the count and families (the "warned exclusion" of §4 — operators
 are told that EOS/ESU patches were detected and dropped, rather than
 silently pruned). The PowerShell branch is covered by T14
@@ -1813,22 +1813,22 @@ the boundary artefact.
 Stage 1: Acquire wsusscn2.cab
   Input  : configured CDN URL + cache freshness state
   Output : <WorkRoot>/cache/wsusscn2/wsusscn2.cab + .meta.json
-  Helper : Get-WsusScnCabIfNeeded (existing)
+  Helper : Get-OfflineSyncPackageIfNeeded (existing)
 
 Stage 2: Extract package.xml from the cab
   Input  : <WorkRoot>/cache/wsusscn2/wsusscn2.cab
   Output : <WorkRoot>/cache/wsusscn2/package.xml (~108 MB)
-  Helper : Invoke-WsusScnPackageXmlExtract (new, two-step 7-Zip)
+  Helper : Invoke-OfflineSyncPackageExtract (new, two-step 7-Zip)
 
 Stage 3: Stream-parse the Master XML into structured form
   Input  : <WorkRoot>/cache/wsusscn2/package.xml
   Output : in-memory hashtable of packages (~10,000 entries post-filter)
-  Helper : ConvertFrom-WsusScnPackageXml (new, XmlReader-based)
+  Helper : ConvertFrom-OfflineSyncPackage (new, XmlReader-based)
 
 Stage 4: Render the hashtable to layer 2 JSON
   Input  : in-memory hashtable + _meta provenance
   Output : data/wsusscn2-database.json
-  Helper : New-WsusScnDependencyDatabase (new)
+  Helper : New-ServicingDependencyDatabase (new)
 ```
 
 #### B.19.9.1 Stage 2 details
@@ -1905,16 +1905,16 @@ test it?" by reading this single subsection rather than grepping the
 
 | Stage | Function | Lines | Returns | Tested by |
 |---:|---|---:|---|---|
-| 2 | `Invoke-WsusScnPackageXmlExtract` | ~97 | `[string]` path to package.xml | live monthly refresh only (platform-coupled to 7-Zip + Windows file layout) |
-| 3 | `ConvertFrom-WsusScnPackageXml`   | ~337 | `[pscustomobject]` with `.Updates`, `.FileLocations`, `.Stats` | T12 (`tests/wsusscn2_parser_test.py`, 22 assertions) |
-| 4 | `New-WsusScnDependencyDatabase`   | ~133 | `[string]` path to the written JSON | T12 (structural compare against `tests/fixtures/wsusscn2/expected-output.json`) |
+| 2 | `Invoke-OfflineSyncPackageExtract` | ~97 | `[string]` path to package.xml | live monthly refresh only (platform-coupled to 7-Zip + Windows file layout) |
+| 3 | `ConvertFrom-OfflineSyncPackage`   | ~337 | `[pscustomobject]` with `.Updates`, `.FileLocations`, `.Stats` | T12 (`tests/wsusscn2_parser_test.py`, 22 assertions) |
+| 4 | `New-ServicingDependencyDatabase`   | ~133 | `[string]` path to the written JSON | T12 (structural compare against `tests/fixtures/wsusscn2/expected-output.json`) |
 
 The three functions are contiguous in the script (Stage 2 immediately
 follows `Save-CanonicalJsonFile`; Stages 3 and 4 follow Stage 2 in
 order), so a maintainer searching for the pipeline can navigate by
 function name alone.
 
-**Stage 3 in-memory schema (return type of `ConvertFrom-WsusScnPackageXml`)**
+**Stage 3 in-memory schema (return type of `ConvertFrom-OfflineSyncPackage`)**
 
 ```
 [pscustomobject] {
@@ -1963,7 +1963,7 @@ leaf updates bundled under each, per §B.19.9.6):
 }
 ```
 
-**Stage 4 Layer 2 JSON schema (output of `New-WsusScnDependencyDatabase`)**
+**Stage 4 Layer 2 JSON schema (output of `New-ServicingDependencyDatabase`)**
 
 ```
 {
@@ -1975,7 +1975,7 @@ leaf updates bundled under each, per §B.19.9.6):
     "scriptTag":     string,            # $Script:ScriptTag at write time
     "generatedAt":   string,            # ISO-8601 UTC of the write
     "sourceCab": {                      # provenance (portable; no local path)
-      "sourceUrl": string,              # canonical CDN URL (Get-WsusScnCabSourceUrl)
+      "sourceUrl": string,              # canonical CDN URL (Get-OfflineSyncPackageUrl)
       "size":   int|null,
       "sha256": string|null             # lowercase hex
     },
@@ -2031,11 +2031,11 @@ byte-canonical JSON rules from §B.23.
 **Scope filter rule binding**
 
 The §B.19.7 scope filter (Product GUID AND Classification GUID AND
-recency window) is implemented in `ConvertFrom-WsusScnPackageXml` as
+recency window) is implemented in `ConvertFrom-OfflineSyncPackage` as
 three boolean tests evaluated in order, with early-exit `foreach`
 loops against `HashSet[string]` (case-insensitive comparer). Default
-GUIDs are read from the script-scope tables (`$Script:WsusScnOsCategoryGuids`
-and `$Script:WsusScnUpdateClassificationGuids`); callers may override
+GUIDs are read from the script-scope tables (`$Script:OfflineSyncOsCategoryGuids`
+and `$Script:OfflineSyncUpdateClassificationGuids`); callers may override
 via the `-ScopeProductGuids` / `-ScopeClassificationGuids` parameters
 (useful for T12 fixture-driven tests). Setting `-RecencyMonths -1`
 disables the recency clause entirely.
@@ -2062,7 +2062,7 @@ list.
 **Provenance pointers**
 
 - The four Server LTSC Product GUIDs and five Classification GUIDs
-  in `$Script:WsusScnOsCategoryGuids` / `WsusScnUpdateClassificationGuids`
+  in `$Script:OfflineSyncOsCategoryGuids` / `OfflineSyncUpdateClassificationGuids`
   are cross-referenced from research/windows-servicing §5.7 (commit
   648880e) which documents the Microsoft Learn, ansible/ansible
   Issue 60785, dsccommunity/UpdateServicesDsc Issue 65, and WSUSOffline
@@ -2103,33 +2103,33 @@ Invoke-AdminPhaseA04_RefreshDependencyDatabase
 
 **Stage chain semantics**
 
-Stage 1 (`Get-WsusScnCabIfNeeded`) decides whether to download or
+Stage 1 (`Get-OfflineSyncPackageIfNeeded`) decides whether to download or
 reuse the cached cab. With `-ForceRefetch` the cache is bypassed
 unconditionally. With neither flag, the cab is reused if its
 LastWriteTime is within `-StaleAfterDays` of now.
 
-Stage 2 (`Invoke-WsusScnPackageXmlExtract`) extracts package.xml into
+Stage 2 (`Invoke-OfflineSyncPackageExtract`) extracts package.xml into
 a freshly-created staging subdirectory beneath `$Script:TempDir`. The
 staging directory is cleaned on successful completion and preserved
 on failure (operator inspection convention).
 
-Stage 3 (`ConvertFrom-WsusScnPackageXml`) is invoked with the
+Stage 3 (`ConvertFrom-OfflineSyncPackage`) is invoked with the
 function's defaults: 24-month recency window, all four Server LTSC
 Product GUIDs in scope, all five Classification GUIDs in scope. The
 in-memory parse result is not exposed to the caller.
 
-Stage 4 (`New-WsusScnDependencyDatabase`) writes the canonical JSON
+Stage 4 (`New-ServicingDependencyDatabase`) writes the canonical JSON
 to `-OutputPath` and threads the source-cab SHA-256 + size into the
 `_meta.sourceCab` block for provenance. In DryRun mode this step is
 SKIPPED but Stages 1-3 still run (so the run is informative).
 
 Stage 4b (servicing-stack populate) derives, from the in-memory parse
 result, the bundle-revision -> LCU-leaf-revision map and streams each
-distinct LCU leaf's CBS metadata via `Get-WsusScnCbsServicingSnippet`
+distinct LCU leaf's CBS metadata via `Get-OfflineSyncCbsServicingSnippet`
 to recover only its servicing-stack snippet (never the full ~67 MB
 single-line text, which previously drove the step out of memory). The
 just-written database is re-read through `ConvertFrom-CanonicalJson`,
-enriched in place by the pure `Update-WsusScnServicingStackFromMeta`,
+enriched in place by the pure `Update-ServicingStackFromMeta`,
 and written back through `Save-CanonicalJsonFile` (so `_meta` and key
 order are preserved). This step is SKIPPED with
 `-SkipServicingStackPopulate` or in DryRun (no database was written).
@@ -2313,7 +2313,7 @@ filename prefix; this is expected and is not a scope leak.
 > types.
 >
 > Two corrections are folded into the schema and the generator
-> (`New-WsusScnDependencyDatabase`):
+> (`New-ServicingDependencyDatabase`):
 >
 > - **Provenance hygiene.** `_meta.sourceCab` carries a portable
 >   `sourceUrl` (the canonical CDN URL) and no longer a local filesystem
@@ -2465,7 +2465,7 @@ variants. The index is small (~10,000 entries × 50 bytes ≈
 | `RequiresRevisions` | The raw `<Prerequisites><UpdateId>` GUIDs from the Master XML. Kept alongside `Requires` for audit and for cases where the prereq is a category GUID rather than a KB. |
 | `SupersededByRevisions` | RevisionId integers from `<SupersededBy><Revision>`. Use `RevisionIndex` to resolve to UpdateId, then `Packages` to resolve to KB. |
 | `BundledIn` | The RevisionId of the Bundle that contains this Standalone. From `<BundledBy><Revision>`. |
-| `Categories` | Per-Type GUID values from `<Categories>`. The GUID values resolve to OS-family / product names through `$Script:WsusScnCategoryGuidNameMap`. |
+| `Categories` | Per-Type GUID values from `<Categories>`. The GUID values resolve to OS-family / product names through `$Script:OfflineSyncCategoryGuidNameMap`. |
 | `IsBundle`, `IsLeaf` | Direct copies of the `<Update>` attributes; used by §B.19.13.3 verification. |
 
 The `IsCombined` flag from earlier B.4 schema is **not** stored in
@@ -2597,14 +2597,14 @@ the r08.0 Step 4 KB5087537 SSU-prerequisite incident.
 The data feeding check 2 is extracted by two pure functions, kept free
 of file / 7-Zip I/O so they are unit-testable offline (T15):
 
-- **`Resolve-WsusScnRevisionToCab`** maps a revision id to the
+- **`Resolve-OfflineSyncRevisionToCab`** maps a revision id to the
   per-package cab holding its `c/<revisionId>` CBS metadata. The
   top-level cab's `index.xml` `<CABLIST>` lists each per-package cab
   with a `RANGESTART` (the lowest revision id it stores); a revision `R`
   lives in the cab with the greatest `RANGESTART` ≤ `R`. This locates
   one revision with a single targeted extraction instead of expanding
   all ~73 per-package cabs.
-- **`Get-WsusScnServicingStackInfo`** reads a leaf's CBS metadata and
+- **`Get-OfflineSyncServicingStackInfo`** reads a leaf's CBS metadata and
   derives `requiredServicingStackVersion` and `servicingStackModel`:
   - **checkpoint** — no CBS `Package_for_RollupFix` / `installerAssembly`
     metadata at all (Server 2025 `.msu` leaves); `requiredSs` = null.
@@ -2634,16 +2634,16 @@ pure logic:
 - Stage 3 now also records, per in-scope bundle, the leaf revision ids
   bundled under it (`LeafRevisionIds`), so the LCU leaf can be located
   without re-parsing the Master XML.
-- **`Select-WsusScnLcuLeafRevision`** (pure) picks the LCU leaf from a
+- **`Select-OfflineSyncLcuLeafRevision`** (pure) picks the LCU leaf from a
   bundle's `LeafRevisionIds`: a lone leaf, else the leaf whose revision
   id is the closest below the bundle's own (the LCU is emitted just
   before its bundle in the cab), else the greatest.
-- **`Invoke-WsusScnLeafServicingStackExtract`** (the only I/O part)
+- **`Invoke-OfflineSyncLeafServicingStackExtract`** (the only I/O part)
   resolves each leaf revision to its per-package cab via
-  `Resolve-WsusScnRevisionToCab`, extracts the per-package cab and then
+  `Resolve-OfflineSyncRevisionToCab`, extracts the per-package cab and then
   only the leaf's `c/<rev>` entry with 7-Zip, and returns a
   revision → CBS-text map.
-- **`Update-WsusScnServicingStackFromMeta`** (pure) writes
+- **`Update-ServicingStackFromMeta`** (pure) writes
   `requiredServicingStackVersion` / `servicingStackModel` (and a null
   `providedServicingStackVersion`, since the provided SS is a property of
   the configured patch set, resolved at readiness-check time) onto each
@@ -2651,7 +2651,7 @@ pure logic:
 
 The two pure halves are covered offline by T18
 (`wsusscn2_servicing_stack_populate_test.py`) with the same CBS fixtures
-as T15; only `Invoke-WsusScnLeafServicingStackExtract` needs a real cab
+as T15; only `Invoke-OfflineSyncLeafServicingStackExtract` needs a real cab
 (the live monthly CI path). `Get-SevenZipPath` resolves the Linux
 `7z`/`7za` binaries in addition to the Windows `7z.exe`, so the I/O
 wrapper can also be exercised against a cached cab on Linux.
@@ -4092,8 +4092,8 @@ code.
 
 A new tool — provisionally **T11 `wsusscn2_parser_test.py`** — is
 planned for r09.0 Step 2+ to provide offline regression coverage for
-the §B.19 Master XML parser (`ConvertFrom-WsusScnPackageXml`,
-`New-WsusScnDependencyDatabase`). It will assert the parser's emit
+the §B.19 Master XML parser (`ConvertFrom-OfflineSyncPackage`,
+`New-ServicingDependencyDatabase`). It will assert the parser's emit
 shape against committed mini-XML fixtures under
 `tests/fixtures/wsusscn2/`. Implementation tracks the §B.19.17 parser
 stability guarantees.
@@ -4800,10 +4800,10 @@ when the original needs an upstream fix.
 | `Test-OutputIsoPca2023Readiness` | r08.0 Step 3 | OUTPUT-side ISO 5-target check (§B.18) |
 | `Assert-WorkspacePreflight` | r04.3 | Workspace structural readiness (§B.21) |
 | `Test-PatchDependencyClosureFromGraph` | r09.0 (planned) | Pre-mount graph-based dependency check (§B.19.13) |
-| `ConvertFrom-WsusScnPackageXml` | r09.0 (planned) | XmlReader-based Master XML parser (§B.19.9) |
-| `New-WsusScnDependencyDatabase` | r09.0 (planned) | Layer 2 JSON renderer (§B.19.9, §B.19.10) |
-| `Invoke-WsusScnPackageXmlExtract` | r09.0 (planned) | Two-stage 7-Zip extract of package.xml (§B.19.9.1) |
-| `Get-WsusScnCabIfNeeded` | r05.0 → extended r09.0 | Conditional wsusscn2.cab download with cache invalidation (§B.19.15.4) |
+| `ConvertFrom-OfflineSyncPackage` | r09.0 (planned) | XmlReader-based Master XML parser (§B.19.9) |
+| `New-ServicingDependencyDatabase` | r09.0 (planned) | Layer 2 JSON renderer (§B.19.9, §B.19.10) |
+| `Invoke-OfflineSyncPackageExtract` | r09.0 (planned) | Two-stage 7-Zip extract of package.xml (§B.19.9.1) |
+| `Get-OfflineSyncPackageIfNeeded` | r05.0 → extended r09.0 | Conditional wsusscn2.cab download with cache invalidation (§B.19.15.4) |
 
 ### E.4 Helper unification (r09.0)
 

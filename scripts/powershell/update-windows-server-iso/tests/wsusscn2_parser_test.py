@@ -1,8 +1,8 @@
 """
 T12: wsusscn2 parser pipeline self-verification test (offline).
 
-Exercises the PowerShell Stage 3 (ConvertFrom-WsusScnPackageXml) and
-Stage 4 (New-WsusScnDependencyDatabase) functions against the small
+Exercises the PowerShell Stage 3 (ConvertFrom-OfflineSyncPackage) and
+Stage 4 (New-ServicingDependencyDatabase) functions against the small
 fixture in tests/fixtures/wsusscn2/, verifying:
 
   * scope-filter admit/reject semantics for Product GUID, Classification
@@ -20,7 +20,7 @@ fixture in tests/fixtures/wsusscn2/, verifying:
     generatedAt, sourceCab) that vary per run
 
 Runs offline; no wsusscn2.cab download or 7-Zip invocation. Stage 2
-(Invoke-WsusScnPackageXmlExtract) is platform-coupled (needs 7-Zip and
+(Invoke-OfflineSyncPackageExtract) is platform-coupled (needs 7-Zip and
 the Windows file layout) so it is exercised only by the live monthly
 refresh, not by T12.
 
@@ -103,8 +103,8 @@ def run_powershell_parser(out_path: Path) -> dict:
 $pinnedNow = [datetime]::ParseExact("{PINNED_NOW}","yyyy-MM-ddTHH:mm:ssZ",
     [System.Globalization.CultureInfo]::InvariantCulture,
     [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal)
-$result = ConvertFrom-WsusScnPackageXml -PackageXmlPath {PACKAGE_XML} -Now $pinnedNow
-$null = New-WsusScnDependencyDatabase -ParseResult $result -OutputPath {out_path}
+$result = ConvertFrom-OfflineSyncPackage -PackageXmlPath {PACKAGE_XML} -Now $pinnedNow
+$null = New-ServicingDependencyDatabase -ParseResult $result -OutputPath {out_path}
 """
     proc = subprocess.run(
         ["pwsh", "-NoProfile", "-Command", pwsh_script],

@@ -75,10 +75,10 @@ a build identifier plus a calendar date. Pending items are marked
 | T12 wsusscn2_parser_test.py (23 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.9.4; includes kbIds-field presence) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | T13 wsusscn2_layer1_test.py (15 assertions, `Update-Layer1DependencyVerification` writeback contract per SPEC §B.19.9.5) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | T14 wsusscn2_deny_list_test.py (10 assertions, EOS/ESU deny-list warned-exclusion + allow-overrides in the PowerShell scope filter, matching the `classify_scope` reference; SPEC §B.19.7.1) | ✓ all pass | r11.5 wsusscn2-eos-esu-deny-list-warned-exclusion build / 2026-05-29 |
-| T15 wsusscn2_servicing_stack_test.py (16 assertions, `Resolve-WsusScnRevisionToCab` RANGESTART mapping + `Get-WsusScnServicingStackInfo` separate/combined/checkpoint derivation from real-cab CBS metadata; SPEC §B.19.13.0) | ✓ all pass | r11.6 wsusscn2-servicing-stack-extraction build / 2026-05-29 |
+| T15 wsusscn2_servicing_stack_test.py (16 assertions, `Resolve-OfflineSyncRevisionToCab` RANGESTART mapping + `Get-OfflineSyncServicingStackInfo` separate/combined/checkpoint derivation from real-cab CBS metadata; SPEC §B.19.13.0) | ✓ all pass | r11.6 wsusscn2-servicing-stack-extraction build / 2026-05-29 |
 | T16 wsusscn2_readiness_verdict_test.py (21 assertions, `Test-PatchServicingReadinessFromGraph` three-check verdict: presence / SS-version-comparison (SsTooOld = 0x800f0823) / supersession, with precedence and Unknown/Available handling; SPEC §B.19.13.1) | ✓ all pass | r11.7 wsusscn2-phase2c-readiness-verdict build / 2026-05-29 |
 | T17 wsusscn2_recency_fallback_test.py (15 assertions, recency fallback in `Test-PatchServicingReadinessFromGraph`: out-of-scope KB falls back to newest in-scope LCU per OS family -> Superseded, with family resolution from OsKey and NotInDatabase when no fallback target; SPEC §B.19.7.2) | ✓ all pass | r11.8 wsusscn2-recency-fallback build / 2026-05-29 |
-| T18 wsusscn2_servicing_stack_populate_test.py (17 assertions, pure halves of the SS populate: `Select-WsusScnLcuLeafRevision` leaf choice + `Update-WsusScnServicingStackFromMeta` field population from CBS metadata; SPEC §B.19.13.0) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
+| T18 wsusscn2_servicing_stack_populate_test.py (17 assertions, pure halves of the SS populate: `Select-OfflineSyncLcuLeafRevision` leaf choice + `Update-ServicingStackFromMeta` field population from CBS metadata; SPEC §B.19.13.0) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
 | T19 wsusscn2_data_contract_test.py (11 assertions, `Test-DataContractConsistency` status classification Current/Stale/Refuse/Foreign/Unknown + directory expansion + roll-up; committed Layer 2 DB classifies Current; SPEC §B.19.10) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
 | Part C §C.3.4 — `canonical_json_format_check.py` (27 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
@@ -372,7 +372,7 @@ python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
 
 `wsusscn2_parser_test.py` (T12, 22 assertions) provides offline
 regression coverage for the §B.19 Master XML parser
-(`ConvertFrom-WsusScnPackageXml`, `New-WsusScnDependencyDatabase`)
+(`ConvertFrom-OfflineSyncPackage`, `New-ServicingDependencyDatabase`)
 against the committed fixture `tests/fixtures/wsusscn2/package.xml`,
 paired with the `tests/common/wsusscn2_*.py` fixture helpers.
 `wsusscn2_layer1_test.py` (T13, 15 assertions) covers the Phase

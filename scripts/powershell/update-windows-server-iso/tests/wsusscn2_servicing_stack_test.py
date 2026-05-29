@@ -5,10 +5,10 @@ Exercises the two pure functions added in M1 part 2 (r11.6) that turn a
 per-package CBS metadata blob into the servicing-stack facts the Phase 2c
 readiness check needs (SPEC B.19.13):
 
-  * Resolve-WsusScnRevisionToCab - maps a revision id to the per-package
+  * Resolve-OfflineSyncRevisionToCab - maps a revision id to the per-package
     cab that holds its c/<revisionId> metadata, using the index.xml
     CABLIST RANGESTART boundaries (greatest RANGESTART <= revision).
-  * Get-WsusScnServicingStackInfo - reads a leaf's CBS metadata and
+  * Get-OfflineSyncServicingStackInfo - reads a leaf's CBS metadata and
     derives requiredServicingStackVersion + servicingStackModel
     ('separate' | 'combined' | 'checkpoint').
 
@@ -92,14 +92,14 @@ $idx = '{idx}'
 $resolve = [ordered]@{{}}
 # exact boundary (44562114 -> package74), one below boundary (44562113 -> package3),
 # the 2016/2022 real leaf revs, and the small 2025 rev.
-$resolve['exact_boundary'] = Resolve-WsusScnRevisionToCab -IndexXml $idx -RevisionId 44562114
-$resolve['below_boundary'] = Resolve-WsusScnRevisionToCab -IndexXml $idx -RevisionId 44562113
-$resolve['rev_45255708']   = Resolve-WsusScnRevisionToCab -IndexXml $idx -RevisionId 45255708
-$resolve['rev_295']        = Resolve-WsusScnRevisionToCab -IndexXml $idx -RevisionId 295
-$resolve['rev_zero']       = Resolve-WsusScnRevisionToCab -IndexXml $idx -RevisionId 0
+$resolve['exact_boundary'] = Resolve-OfflineSyncRevisionToCab -IndexXml $idx -RevisionId 44562114
+$resolve['below_boundary'] = Resolve-OfflineSyncRevisionToCab -IndexXml $idx -RevisionId 44562113
+$resolve['rev_45255708']   = Resolve-OfflineSyncRevisionToCab -IndexXml $idx -RevisionId 45255708
+$resolve['rev_295']        = Resolve-OfflineSyncRevisionToCab -IndexXml $idx -RevisionId 295
+$resolve['rev_zero']       = Resolve-OfflineSyncRevisionToCab -IndexXml $idx -RevisionId 0
 
 function _ss($p) {{
-    $r = Get-WsusScnServicingStackInfo -CbsMetaXml (Get-Content -Raw $p)
+    $r = Get-OfflineSyncServicingStackInfo -CbsMetaXml (Get-Content -Raw $p)
     return [ordered]@{{
         model    = $r.ServicingStackModel
         required = $r.RequiredServicingStackVersion
@@ -110,7 +110,7 @@ $ss = [ordered]@{{
     s2016 = _ss '{f2016}'
     s2022 = _ss '{f2022}'
     s2025 = _ss '{f2025}'
-    empty = (Get-WsusScnServicingStackInfo -CbsMetaXml '' | Select-Object -Property ServicingStackModel,RequiredServicingStackVersion | ForEach-Object {{ [ordered]@{{ model = $_.ServicingStackModel; required = $_.RequiredServicingStackVersion }} }})
+    empty = (Get-OfflineSyncServicingStackInfo -CbsMetaXml '' | Select-Object -Property ServicingStackModel,RequiredServicingStackVersion | ForEach-Object {{ [ordered]@{{ model = $_.ServicingStackModel; required = $_.RequiredServicingStackVersion }} }})
 }}
 [ordered]@{{ resolve = $resolve; ss = $ss }} | ConvertTo-Json -Depth 8 | Set-Content -Path {out_path} -Encoding utf8
 """
@@ -142,7 +142,7 @@ def main() -> int:
     resolve = out["resolve"]
     ss = out["ss"]
 
-    # ---- Resolve-WsusScnRevisionToCab ----
+    # ---- Resolve-OfflineSyncRevisionToCab ----
     r.assert_eq("01 revision == RANGESTART boundary maps to that cab (44562114 -> package74)",
                 resolve["exact_boundary"], "package74.cab")
     r.assert_eq("02 revision one below boundary maps to prior cab (44562113 -> package3)",
@@ -154,7 +154,7 @@ def main() -> int:
     r.assert_eq("05 revision 0 maps to package2 (RANGESTART=0)",
                 resolve["rev_zero"], "package2.cab")
 
-    # ---- Get-WsusScnServicingStackInfo: 2016 separate ----
+    # ---- Get-OfflineSyncServicingStackInfo: 2016 separate ----
     r.assert_eq("06 2016 leaf -> servicingStackModel 'separate'",
                 ss["s2016"]["model"], "separate")
     r.assert_eq("07 2016 leaf -> requiredServicingStackVersion 10.0.14393.7692",

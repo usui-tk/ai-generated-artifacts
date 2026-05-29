@@ -2,7 +2,7 @@
 
 This module exists to give the test infrastructure a stable surface for
 inspecting a real ``wsusscn2.cab`` Master XML without coupling the
-PowerShell production parser (``ConvertFrom-WsusScnPackageXml`` in
+PowerShell production parser (``ConvertFrom-OfflineSyncPackage`` in
 ``Update-WindowsServerIso.ps1``) to it. The analyzer is **not** a parity
 reference for the production parser; that role belongs to
 ``wsusscn2_fixture_builder.py``. Instead, the analyzer offers:
@@ -15,8 +15,8 @@ reference for the production parser; that role belongs to
   ``<Title>`` / ``<Description>`` / ``<MoreInfoUrl>`` = 0).
 - **Category GUID frequency** by ``<Category Type="...">`` value, used
   to discover the script-scope tables that populate
-  ``$Script:WsusScnOsCategoryGuids`` / ``$Script:WsusScnCategoryGuidNameMap``
-  / ``$Script:WsusScnUpdateClassificationGuids`` (SPEC §B.19.7).
+  ``$Script:OfflineSyncOsCategoryGuids`` / ``$Script:OfflineSyncCategoryGuidNameMap``
+  / ``$Script:OfflineSyncUpdateClassificationGuids`` (SPEC §B.19.7).
 - **Update sampling** by classification / family / SupersededBy
   presence, used by the fixture builder to pick representative
   entries for the committed fixture.

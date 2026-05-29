@@ -4,18 +4,18 @@ T18: wsusscn2 servicing-stack populate test (offline, pure halves).
 Exercises the I/O-free halves of the M1 servicing-stack populate
 (M1 part 5b, r11.10; SPEC B.19.13.0):
 
-  * Select-WsusScnLcuLeafRevision - choose a bundle's LCU leaf revision
+  * Select-OfflineSyncLcuLeafRevision - choose a bundle's LCU leaf revision
     from the Stage 3 LeafRevisionIds: single -> that one; multiple ->
     the leaf whose revision id is the closest below the bundle's own
     (LCU emitted just before its bundle); none below -> the greatest;
     empty -> null.
-  * Update-WsusScnServicingStackFromMeta - given a Layer 2 document, a
+  * Update-ServicingStackFromMeta - given a Layer 2 document, a
     revision->CBS-text map, and a bundle-revision->leaf-revision map,
     populate requiredServicingStackVersion / providedServicingStackVersion
-    / servicingStackModel on each update (via Get-WsusScnServicingStackInfo),
+    / servicingStackModel on each update (via Get-OfflineSyncServicingStackInfo),
     leaving updates with no leaf metadata unchanged.
 
-The 7-Zip extraction wrapper (Invoke-WsusScnLeafServicingStackExtract) is
+The 7-Zip extraction wrapper (Invoke-OfflineSyncLeafServicingStackExtract) is
 deliberately NOT exercised here; it is the only cab/7-Zip-touching part
 and is covered by the live monthly CI. These pure functions take text /
 object inputs and are unit-testable offline, reusing the same minimised
@@ -81,15 +81,15 @@ def run_powershell(out_path: Path) -> dict:
     pwsh_script = f"""
 . {SCRIPT_PATH} -Action ListPhases -DryRun *>$null 2>$null
 
-# ---- Select-WsusScnLcuLeafRevision ----
+# ---- Select-OfflineSyncLcuLeafRevision ----
 $sel = [ordered]@{{
-    single        = (Select-WsusScnLcuLeafRevision -BundleRevisionId '100' -LeafRevisionIds @('99'))
-    closest_below = (Select-WsusScnLcuLeafRevision -BundleRevisionId '45255709' -LeafRevisionIds @('45255700','45255708','45255600'))
-    none_below    = (Select-WsusScnLcuLeafRevision -BundleRevisionId '100' -LeafRevisionIds @('200','150','300'))
-    empty         = (Select-WsusScnLcuLeafRevision -BundleRevisionId '100' -LeafRevisionIds @())
+    single        = (Select-OfflineSyncLcuLeafRevision -BundleRevisionId '100' -LeafRevisionIds @('99'))
+    closest_below = (Select-OfflineSyncLcuLeafRevision -BundleRevisionId '45255709' -LeafRevisionIds @('45255700','45255708','45255600'))
+    none_below    = (Select-OfflineSyncLcuLeafRevision -BundleRevisionId '100' -LeafRevisionIds @('200','150','300'))
+    empty         = (Select-OfflineSyncLcuLeafRevision -BundleRevisionId '100' -LeafRevisionIds @())
 }}
 
-# ---- Update-WsusScnServicingStackFromMeta ----
+# ---- Update-ServicingStackFromMeta ----
 # Document with four bundles: 2016/2022/2025 have leaf meta; the fourth has
 # a leaf revision with no metadata in the map (skipped).
 $doc = [pscustomobject]@{{ updates = @(
@@ -104,7 +104,7 @@ $metaMap = @{{
     '9002' = (Get-Content -Raw '{f2022}')
     '9003' = (Get-Content -Raw '{f2025}')
 }}  # note: 9004 absent -> update 1004 skipped
-$summary = Update-WsusScnServicingStackFromMeta -Document $doc -LeafMetaByRevision $metaMap -LeafRevisionByUpdateRevision $leafByRev
+$summary = Update-ServicingStackFromMeta -Document $doc -LeafMetaByRevision $metaMap -LeafRevisionByUpdateRevision $leafByRev
 
 $ups = [ordered]@{{}}
 foreach ($u in $doc.updates) {{
@@ -144,13 +144,13 @@ def main() -> int:
     sel = out["sel"]
     ups = out["ups"]
 
-    # ---- Select-WsusScnLcuLeafRevision ----
+    # ---- Select-OfflineSyncLcuLeafRevision ----
     r.assert_eq("01 single leaf -> that leaf", sel["single"], "99")
     r.assert_eq("02 multiple -> closest below bundle rev", sel["closest_below"], "45255708")
     r.assert_eq("03 none below -> greatest leaf rev", sel["none_below"], "300")
     r.assert_true("04 empty leaf list -> null", sel["empty"] in (None, ""))
 
-    # ---- Update-WsusScnServicingStackFromMeta ----
+    # ---- Update-ServicingStackFromMeta ----
     r.assert_eq("05 populated count == 3", out["populated"], 3)
     r.assert_eq("06 skipped count == 1 (leaf meta absent)", out["skipped"], 1)
 

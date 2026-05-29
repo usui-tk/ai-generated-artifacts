@@ -113,7 +113,7 @@
     Demote P06 ValidatePatchSet failures from "abort" to "warning".
     NOT recommended for production runs; intended for development..
 
-.PARAMETER WsusScnCabPath
+.PARAMETER OfflineSyncPackagePath
     Path to a pre-staged wsusscn2.cab file. When specified, the P06
     ValidatePatchSet phase will use this file instead of downloading
     one to <WorkRoot>/cache/..
@@ -263,7 +263,7 @@ param(
     [string]   $PatchMonth,
     [switch]   $SkipDynamicPatchRefresh,
     [switch]   $IgnorePatchValidation,
-    [string]   $WsusScnCabPath,
+    [string]   $OfflineSyncPackagePath,
     [switch]   $UseBaselineOnly,
 
     # Opt-in (default OFF): run the P06 Stage 2 servicing-readiness check
@@ -380,9 +380,9 @@ if ($UseBaselineOnly -and $AutoDetectLatestPatches) {
 if ($PatchMonth -and ($PatchMonth -notmatch '^\d{4}-\d{2}$')) {
     throw ('-PatchMonth must be in yyyy-MM format (e.g. 2026-06). Got: "' + $PatchMonth + '"')
 }
-if ($WsusScnCabPath -and -not (Test-Path -LiteralPath $WsusScnCabPath)) {
+if ($OfflineSyncPackagePath -and -not (Test-Path -LiteralPath $OfflineSyncPackagePath)) {
     # Just a friendly early warning; the validator will retry/error later.
-    Write-Verbose ('Configured -WsusScnCabPath does not yet exist: ' + $WsusScnCabPath)
+    Write-Verbose ('Configured -OfflineSyncPackagePath does not yet exist: ' + $OfflineSyncPackagePath)
 }
 # ----------
 
@@ -543,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.13'
-$Script:ScriptTag     = 'config-datacontract-meta-stamp'
+$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.14'
+$Script:ScriptTag     = 'offline-sync-package-rename'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -578,8 +578,8 @@ $Script:PhaseSummaryShown = $false
 # WSUS Product Category GUID tables (Phase 2b1 scope filter)
 # ---------------------------------------------------------------------------
 # These tables are the canonical reference used by the wsusscn2.cab parser
-# pipeline (Invoke-WsusScnPackageXmlExtract / ConvertFrom-WsusScnPackageXml /
-# New-WsusScnDependencyDatabase) to identify which <Update> entries in the
+# pipeline (Invoke-OfflineSyncPackageExtract / ConvertFrom-OfflineSyncPackage /
+# New-ServicingDependencyDatabase) to identify which <Update> entries in the
 # Master XML belong to Server LTSC 2016/2019/2022/2025 and which Update
 # Classification they fall under.
 #
@@ -605,7 +605,7 @@ $Script:PhaseSummaryShown = $false
 # - Product GUIDs drive the scope-filter Categories.Product test (SPEC section B.19.7)
 # - The name map exists for debug/log output only; production code uses GUIDs
 # - Classification GUIDs map SSU/LCU/.NET CU/Dynamic Update to wsusscn2 records
-$Script:WsusScnOsCategoryGuids = [ordered]@{
+$Script:OfflineSyncOsCategoryGuids = [ordered]@{
     'Server2016' = '569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5'
     'Server2019' = 'f702a48c-919b-45d6-9aef-ca4248d50397'
     'Server2022' = '71718f13-7324-4b0f-8f9e-2ca9dc978e53'   # Microsoft server operating system-21H2
@@ -616,7 +616,7 @@ $Script:WsusScnOsCategoryGuids = [ordered]@{
 # (e.g. write-debug, validation summary). Production logic compares GUIDs,
 # never names, because the names drift (see SPEC section B.19.7 21H2/24H2 rename
 # discussion and research section 6.4).
-$Script:WsusScnCategoryGuidNameMap = [ordered]@{
+$Script:OfflineSyncCategoryGuidNameMap = [ordered]@{
     '569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5' = 'Windows Server 2016'
     'f702a48c-919b-45d6-9aef-ca4248d50397' = 'Windows Server 2019'
     '71718f13-7324-4b0f-8f9e-2ca9dc978e53' = 'Windows Server 2022 LTSC (21H2)'
@@ -638,7 +638,7 @@ $Script:WsusScnCategoryGuidNameMap = [ordered]@{
 # - Dynamic Update (Setup / SafeOS) -> Updates or CriticalUpdates
 # See research section 5.7 for the empirical wsusscn2 counts and SPEC section B.19.7 for the
 # scope-filter rule (Product AND Classification AND 24-month recency window).
-$Script:WsusScnUpdateClassificationGuids = [ordered]@{
+$Script:OfflineSyncUpdateClassificationGuids = [ordered]@{
     'SecurityUpdates' = '0fa1201d-4330-4fa8-8ae9-b877473b6441'
     'UpdateRollups'   = '28bc880e-0592-4cbf-8f95-c79b17911d5f'
     'ServicePacks'    = '68c5b0a3-d1a6-4553-ae49-01d3a7827828'
@@ -653,10 +653,10 @@ $Script:WsusScnUpdateClassificationGuids = [ordered]@{
 # under allow-overrides semantics: a bundle is deny-excluded iff it carries a
 # deny GUID AND no allow GUID (multi-OS overlap bundles that also carry an
 # allow GUID stay in scope). The parser counts deny-excluded bundles in
-# Stats.EosEsuBundlesExcluded and New-WsusScnDependencyDatabase emits an
+# Stats.EosEsuBundlesExcluded and New-ServicingDependencyDatabase emits an
 # operator warning. Verified present in the live cab and cross-checked
 # against the WSUS Offline community list.
-$Script:WsusScnEosEsuDenyProductGuids = [ordered]@{
+$Script:OfflineSyncEosEsuDenyProductGuids = [ordered]@{
     'Server2008'   = 'ba0ae9cc-5f01-40b4-ac3f-50192b5d6aaf'
     'Server2008R2' = 'fdfe8200-9d98-44ba-a12a-772282bf60ef'
     'Server2012'   = 'a105a108-7c9b-4518-bbbe-73f0fe30012b'
@@ -6751,7 +6751,7 @@ function New-SyntheticTestIso {
 #   - https://learn.microsoft.com/windows/deployment/update/catalog-checkpoint-cumulative-updates
 #   - PoC scripts published by Kazuro Yamauchi (say-tech.co.jp, 2025memo54)
 
-function Get-WsusScnCabSourceUrl {
+function Get-OfflineSyncPackageUrl {
     <#
     .SYNOPSIS
         Return the canonical wsusscn2.cab download URL (the one
@@ -6762,7 +6762,7 @@ function Get-WsusScnCabSourceUrl {
     return 'https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab'
 }
 
-function Test-WsusScnCabFresh {
+function Test-OfflineSyncPackageFresh {
     <#
     .SYNOPSIS
         Decide whether the local wsusscn2.cab is fresh enough to reuse,
@@ -6777,14 +6777,14 @@ function Test-WsusScnCabFresh {
     #>
     [OutputType([bool])]
     param(
-        [Parameter(Mandatory)] [AllowNull()] $WsusScnCabMeta,
+        [Parameter(Mandatory)] [AllowNull()] $OfflineSyncPackageMeta,
         [Parameter(Mandatory)] [datetime]$LatestPatchTuesday
     )
-    if (-not $WsusScnCabMeta) { return $false }
-    $path = $WsusScnCabMeta.LocalCachePath
+    if (-not $OfflineSyncPackageMeta) { return $false }
+    $path = $OfflineSyncPackageMeta.LocalCachePath
     if ([string]::IsNullOrWhiteSpace($path)) { return $false }
     if (-not (Test-Path -LiteralPath $path)) { return $false }
-    $lastStr = $WsusScnCabMeta.LastDownloadedDate
+    $lastStr = $OfflineSyncPackageMeta.LastDownloadedDate
     if ([string]::IsNullOrWhiteSpace($lastStr)) { return $false }
     $lastDate = $null
     if (-not [datetime]::TryParse($lastStr, [ref]$lastDate)) { return $false }
@@ -6793,27 +6793,31 @@ function Test-WsusScnCabFresh {
     return $true
 }
 
-function Get-WsusScnCabIfNeeded {
+function Get-OfflineSyncPackageIfNeeded {
     <#
     .SYNOPSIS
         Conditionally download wsusscn2.cab to a cache directory.
     .DESCRIPTION
+        Acquires Microsoft's "offline sync package" (XML root element
+        <OfflineSyncPackage>, distributed as wsusscn2.cab; the OfflineSync*
+        naming follows that authoritative Microsoft format name).
+
         Behaviour:
           1. If -OverridePath is supplied AND the file exists, use that.
           2. Else compute LocalCachePath = <WorkRoot>/cache/wsusscn2.cab
-          3. If Test-WsusScnCabFresh returns $true, reuse.
+          3. If Test-OfflineSyncPackageFresh returns $true, reuse.
           4. Else download from $SourceUrl with retries.
         Returns a hashtable: @{ Path; SizeBytes; Sha256; DownloadedNow }
     #>
     [OutputType([hashtable])]
     param(
-        [Parameter(Mandatory)] [AllowNull()] $WsusScnCabMeta,
+        [Parameter(Mandatory)] [AllowNull()] $OfflineSyncPackageMeta,
         [Parameter(Mandatory)] [string]$WorkRoot,
         [Parameter(Mandatory)] [datetime]$LatestPatchTuesday,
         [string]$OverridePath
     )
 
-    # (1) Caller-supplied override (`-WsusScnCabPath`)
+    # (1) Caller-supplied override (`-OfflineSyncPackagePath`)
     if (-not [string]::IsNullOrWhiteSpace($OverridePath)) {
         if (Test-Path -LiteralPath $OverridePath) {
             $fi = Get-Item -LiteralPath $OverridePath
@@ -6825,7 +6829,7 @@ function Get-WsusScnCabIfNeeded {
                 Source        = 'OverridePath'
             }
         }
-        Write-Caution ('-WsusScnCabPath was supplied but does not exist: ' + $OverridePath)
+        Write-Caution ('-OfflineSyncPackagePath was supplied but does not exist: ' + $OverridePath)
     }
 
     # (2) Default cache location
@@ -6837,13 +6841,13 @@ function Get-WsusScnCabIfNeeded {
 
     # Construct a meta object reflecting the actual cache location for
     # the freshness check (it may be empty in Config on first run)
-    $meta = $WsusScnCabMeta
+    $meta = $OfflineSyncPackageMeta
     if ($meta -and -not $meta.LocalCachePath) {
         $meta = $meta | Select-Object *
         $meta.LocalCachePath = $cachePath
     }
 
-    if (Test-WsusScnCabFresh -WsusScnCabMeta $meta -LatestPatchTuesday $LatestPatchTuesday) {
+    if (Test-OfflineSyncPackageFresh -OfflineSyncPackageMeta $meta -LatestPatchTuesday $LatestPatchTuesday) {
         $fi = Get-Item -LiteralPath $cachePath
         Write-Step ('wsusscn2.cab cache fresh; reusing: {0} ({1:N0} bytes)' -f $cachePath, $fi.Length)
         return @{
@@ -6856,9 +6860,9 @@ function Get-WsusScnCabIfNeeded {
     }
 
     # (3) Download
-    $url = Get-WsusScnCabSourceUrl
-    if ($WsusScnCabMeta -and $WsusScnCabMeta.SourceUrl) {
-        $url = $WsusScnCabMeta.SourceUrl
+    $url = Get-OfflineSyncPackageUrl
+    if ($OfflineSyncPackageMeta -and $OfflineSyncPackageMeta.SourceUrl) {
+        $url = $OfflineSyncPackageMeta.SourceUrl
     }
     Write-Step ('Downloading wsusscn2.cab from {0} ...' -f $url)
     $tmp = $cachePath + '.' + ([guid]::NewGuid().ToString('N')) + '.part'
@@ -7404,10 +7408,10 @@ function _CanonicalJson_ParseNull {
 # gate (SPEC section B.19.5) and by `Invoke-AdminPhaseA04_RefreshDependencyDatabase`.
 #
 # Pipeline:
-#   Stage 1: Get-WsusScnCabIfNeeded          (defined above)
-#   Stage 2: Invoke-WsusScnPackageXmlExtract (this section)
-#   Stage 3: ConvertFrom-WsusScnPackageXml   (this section)
-#   Stage 4: New-WsusScnDependencyDatabase   (this section)
+#   Stage 1: Get-OfflineSyncPackageIfNeeded          (defined above)
+#   Stage 2: Invoke-OfflineSyncPackageExtract (this section)
+#   Stage 3: ConvertFrom-OfflineSyncPackage   (this section)
+#   Stage 4: New-ServicingDependencyDatabase   (this section)
 #
 # The pipeline is fully decoupled into single-responsibility helpers so
 # that T12 (tests/wsusscn2_parser_test.py) can exercise Stages 2-4
@@ -7422,12 +7426,16 @@ function _CanonicalJson_ParseNull {
 # names so that a future Microsoft schema change cannot accidentally
 # leak prose into the dependency database.
 
-function Invoke-WsusScnPackageXmlExtract {
+function Invoke-OfflineSyncPackageExtract {
     <#
     .SYNOPSIS
         Stage 2 of the wsusscn2.cab parser pipeline: extract package.xml
         from the cab.
     .DESCRIPTION
+        Extracts the package.xml payload of Microsoft's "offline sync
+        package" (XML root element <OfflineSyncPackage>, distributed as
+        wsusscn2.cab; OfflineSync* names derive from that format).
+
         Two-step 7-Zip extraction:
           Step 1: wsusscn2.cab -> 75 top-level files (one of which is package.cab)
           Step 2: package.cab  -> package.xml (~108 MB Master XML)
@@ -7444,7 +7452,7 @@ function Invoke-WsusScnPackageXmlExtract {
         too large for the .NET CabInfo APIs in practical use.
     .PARAMETER CabPath
         Full path to wsusscn2.cab (typically obtained from Stage 1
-        Get-WsusScnCabIfNeeded).
+        Get-OfflineSyncPackageIfNeeded).
     .PARAMETER StagingDirectory
         Directory to extract into. Will be created if missing, but its
         contents will be REMOVED first (this function owns the directory's
@@ -7519,7 +7527,7 @@ function Invoke-WsusScnPackageXmlExtract {
     return $packageXml
 }
 
-function Resolve-WsusScnRevisionToCab {
+function Resolve-OfflineSyncRevisionToCab {
     <#
     .SYNOPSIS
         Map a wsusscn2 revision id to the per-package cab that contains its
@@ -7574,7 +7582,7 @@ function Resolve-WsusScnRevisionToCab {
     return $chosen
 }
 
-function Get-WsusScnServicingStackInfo {
+function Get-OfflineSyncServicingStackInfo {
     <#
     .SYNOPSIS
         Derive the servicing-stack requirement and delivery model for an LCU
@@ -7658,7 +7666,7 @@ function Get-WsusScnServicingStackInfo {
     }
 }
 
-function Select-WsusScnLcuLeafRevision {
+function Select-OfflineSyncLcuLeafRevision {
     <#
     .SYNOPSIS
         Pick the LCU leaf revision for a Layer 2 bundle (M1 part 5b).
@@ -7710,7 +7718,7 @@ function Select-WsusScnLcuLeafRevision {
     return $maxRevStr
 }
 
-function Update-WsusScnServicingStackFromMeta {
+function Update-ServicingStackFromMeta {
     <#
     .SYNOPSIS
         Populate servicing-stack fields on Layer 2 updates from already-read
@@ -7719,7 +7727,7 @@ function Update-WsusScnServicingStackFromMeta {
         Second pass over the Layer 2 document. For each in-scope update, the
         caller supplies the LCU leaf's CBS metadata text in $LeafMetaByRevision
         (keyed by leaf revision id); this function derives the servicing-stack
-        facts via Get-WsusScnServicingStackInfo and writes
+        facts via Get-OfflineSyncServicingStackInfo and writes
         requiredServicingStackVersion / providedServicingStackVersion /
         servicingStackModel onto the update. Updates whose leaf metadata is
         absent are left unchanged (fields stay null/absent), so a partial
@@ -7728,7 +7736,7 @@ function Update-WsusScnServicingStackFromMeta {
         This is the I/O-free half of the populate step: it takes the document
         object and a revision->text map, so it is unit-testable offline with
         the same CBS fixtures T15 uses. The 7-Zip extraction that produces the
-        map lives in Invoke-WsusScnLeafServicingStackExtract.
+        map lives in Invoke-OfflineSyncLeafServicingStackExtract.
 
         providedServicingStackVersion is left $null here: the SSU that
         supplies it is a property of the configured patch set, not of the LCU
@@ -7740,7 +7748,7 @@ function Update-WsusScnServicingStackFromMeta {
         Hashtable: leaf revision id (string) -> CBS metadata text (string).
     .PARAMETER LeafRevisionByUpdateRevision
         Hashtable: bundle update revision id -> chosen LCU leaf revision id,
-        as picked by Select-WsusScnLcuLeafRevision. Lets this pure pass avoid
+        as picked by Select-OfflineSyncLcuLeafRevision. Lets this pure pass avoid
         re-deriving the leaf choice.
     .OUTPUTS
         [pscustomobject] a summary: @{ Populated = <int>; Skipped = <int> }.
@@ -7759,7 +7767,7 @@ function Update-WsusScnServicingStackFromMeta {
         if ($LeafRevisionByUpdateRevision.ContainsKey($urev)) { $leafRev = [string]$LeafRevisionByUpdateRevision[$urev] }
         if (-not $leafRev -or -not $LeafMetaByRevision.ContainsKey($leafRev)) { $skipped++; continue }
 
-        $info = Get-WsusScnServicingStackInfo -CbsMetaXml ([string]$LeafMetaByRevision[$leafRev])
+        $info = Get-OfflineSyncServicingStackInfo -CbsMetaXml ([string]$LeafMetaByRevision[$leafRev])
         # Add or overwrite the SS fields (full spelling, schema names).
         $u | Add-Member -NotePropertyName 'requiredServicingStackVersion' -NotePropertyValue $info.RequiredServicingStackVersion -Force
         $u | Add-Member -NotePropertyName 'providedServicingStackVersion' -NotePropertyValue $null -Force
@@ -7769,7 +7777,7 @@ function Update-WsusScnServicingStackFromMeta {
     return [pscustomobject]@{ Populated = $populated; Skipped = $skipped }
 }
 
-function Get-WsusScnCbsServicingSnippet {
+function Get-OfflineSyncCbsServicingSnippet {
     <#
     .SYNOPSIS
         Stream a single LCU leaf's CBS metadata file and return only the
@@ -7785,14 +7793,14 @@ function Get-WsusScnCbsServicingSnippet {
         stateful UTF-8 decoder (so a multi-byte sequence split across a
         buffer boundary is not corrupted), keeps a small char carry-over so
         an anchor token straddling a boundary is still matched, and keeps
-        ONLY the substrings that the downstream Get-WsusScnServicingStackInfo
+        ONLY the substrings that the downstream Get-OfflineSyncServicingStackInfo
         actually matches on. Peak memory is O(buffer), independent of file
         size; a 67 MB leaf yields a snippet of a few hundred bytes that, fed
-        to Get-WsusScnServicingStackInfo, produces a result identical to the
+        to Get-OfflineSyncServicingStackInfo, produces a result identical to the
         full-text read.
 
         The capture patterns below MUST stay in lock-step with the match
-        patterns in Get-WsusScnServicingStackInfo: each is the same regex
+        patterns in Get-OfflineSyncServicingStackInfo: each is the same regex
         (minus the named capture group), so any substring kept here re-matches
         there. If a pattern changes there, change it here too.
     .PARAMETER Path
@@ -7843,7 +7851,7 @@ function Get-WsusScnCbsServicingSnippet {
     return ($captured -join ' ')
 }
 
-function Invoke-WsusScnLeafServicingStackExtract {
+function Invoke-OfflineSyncLeafServicingStackExtract {
     <#
     .SYNOPSIS
         I/O wrapper: extract each LCU leaf's CBS metadata text from the cab
@@ -7851,17 +7859,17 @@ function Invoke-WsusScnLeafServicingStackExtract {
     .DESCRIPTION
         The only 7-Zip-touching part of the servicing-stack populate. For each
         (bundle revision -> leaf revision) pair, resolves the per-package cab
-        via Resolve-WsusScnRevisionToCab (using the cab's index.xml), extracts
+        via Resolve-OfflineSyncRevisionToCab (using the cab's index.xml), extracts
         the per-package cab from the top-level wsusscn2.cab if not already
         present, then extracts only the leaf's c/<revisionId> entry,
-        streams it via Get-WsusScnCbsServicingSnippet (so the full ~67 MB
+        streams it via Get-OfflineSyncCbsServicingSnippet (so the full ~67 MB
         CBS text is never materialised), and keeps only the small
         servicing-stack snippet. Returns the revision->snippet map consumed
-        by the pure Update-WsusScnServicingStackFromMeta.
+        by the pure Update-ServicingStackFromMeta.
 
         Kept deliberately thin so the offline gates exercise the pure halves
-        (Select-WsusScnLcuLeafRevision, Get-WsusScnServicingStackInfo,
-        Update-WsusScnServicingStackFromMeta) and only this function needs a
+        (Select-OfflineSyncLcuLeafRevision, Get-OfflineSyncServicingStackInfo,
+        Update-ServicingStackFromMeta) and only this function needs a
         real cab + 7-Zip (the Windows / live-monthly CI path).
     .PARAMETER LeafRevisions
         The set of leaf revision ids to extract (strings).
@@ -7873,8 +7881,8 @@ function Invoke-WsusScnLeafServicingStackExtract {
     .OUTPUTS
         [hashtable] leaf revision id -> servicing-stack snippet text (a
         minimised slice of the leaf's CBS metadata; see
-        Get-WsusScnCbsServicingSnippet), consumed unchanged by the pure
-        Update-WsusScnServicingStackFromMeta.
+        Get-OfflineSyncCbsServicingSnippet), consumed unchanged by the pure
+        Update-ServicingStackFromMeta.
     #>
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -7919,7 +7927,7 @@ function Invoke-WsusScnLeafServicingStackExtract {
         if ($idx % 10 -eq 0 -or $idx -eq 1) {
             Write-Verbose ('Servicing-stack extract: leaf {0}/{1} (revision {2})' -f $idx, $total, $rev)
         }
-        $cabName = Resolve-WsusScnRevisionToCab -IndexXml $indexXml -RevisionId ([long]$rev)
+        $cabName = Resolve-OfflineSyncRevisionToCab -IndexXml $indexXml -RevisionId ([long]$rev)
         if (-not $cabName) { continue }
 
         # Extract the per-package cab from the top-level cab if needed.
@@ -7938,8 +7946,8 @@ function Invoke-WsusScnLeafServicingStackExtract {
         if (Test-Path -LiteralPath $metaFile -PathType Leaf) {
             # Stream the (single-line, up to ~67 MB) leaf and keep only the
             # small servicing-stack snippet, so the returned map never holds
-            # the full CBS text. See Get-WsusScnCbsServicingSnippet.
-            $result[$rev] = Get-WsusScnCbsServicingSnippet -Path $metaFile
+            # the full CBS text. See Get-OfflineSyncCbsServicingSnippet.
+            $result[$rev] = Get-OfflineSyncCbsServicingSnippet -Path $metaFile
         }
         # Reclaim the extracted leaf immediately; the snippet is all we keep.
         if (Test-Path -LiteralPath $outRevDir) {
@@ -8118,7 +8126,7 @@ function Test-PatchServicingReadinessFromGraph {
         $pg = @()
         if ($u.PSObject.Properties['productGuids'] -and $u.productGuids) { $pg = @($u.productGuids | ForEach-Object { ([string]$_).ToLowerInvariant() }) }
         $cd = if ($u.PSObject.Properties['creationDate'] -and $u.creationDate) { [string]$u.creationDate } else { '' }
-        foreach ($fam in $Script:WsusScnOsCategoryGuids.GetEnumerator()) {
+        foreach ($fam in $Script:OfflineSyncOsCategoryGuids.GetEnumerator()) {
             $famGuid = $fam.Value.ToLowerInvariant()
             if ($pg -notcontains $famGuid) { continue }
             if (-not $newestLcuByFamily.ContainsKey($fam.Key) -or $cd -gt $newestLcuByFamily[$fam.Key].CreationDate) {
@@ -8127,14 +8135,14 @@ function Test-PatchServicingReadinessFromGraph {
         }
     }
 
-    # Resolve a patch's OsKey to a family name in $Script:WsusScnOsCategoryGuids.
+    # Resolve a patch's OsKey to a family name in $Script:OfflineSyncOsCategoryGuids.
     # Accepts an exact family key ('Server2016') or tolerates a free-form OsKey
     # that contains the year token (e.g. 'WindowsServer2016' -> 'Server2016').
     $resolveFamily = {
         param($key)
         if ([string]::IsNullOrWhiteSpace($key)) { return $null }
-        if ($Script:WsusScnOsCategoryGuids.Contains($key)) { return $key }
-        foreach ($famKey in $Script:WsusScnOsCategoryGuids.Keys) {
+        if ($Script:OfflineSyncOsCategoryGuids.Contains($key)) { return $key }
+        foreach ($famKey in $Script:OfflineSyncOsCategoryGuids.Keys) {
             $token = $famKey -replace '^Server', ''
             if ($key.Contains($token)) { return $famKey }
         }
@@ -8295,13 +8303,21 @@ function Test-PatchServicingReadinessFromGraph {
     }
 }
 
-function ConvertFrom-WsusScnPackageXml {
+function ConvertFrom-OfflineSyncPackage {
     <#
     .SYNOPSIS
         Stage 3 of the wsusscn2.cab parser pipeline: parse package.xml into
         an in-memory dependency graph, applying the scope filter and
         resolving payload URLs for in-scope bundles.
     .DESCRIPTION
+        Naming note for newcomers: an "offline sync package" is
+        Microsoft's own name for this data. The wsusscn2.cab Master XML's
+        root element is <OfflineSyncPackage> (schema namespace
+        http://schemas.microsoft.com/msus/2004/02/OfflineSync). Every
+        OfflineSync* function in this module is named after that
+        authoritative Microsoft format; the cab is also known as the
+        WSUS offline scan file.
+
         Streams package.xml (typically ~110 MB) using System.Xml.XmlReader,
         not XmlDocument.Load, so that peak memory stays bounded.
 
@@ -8345,15 +8361,15 @@ function ConvertFrom-WsusScnPackageXml {
           .Stats         - [pscustomobject] observation counts for logs/tests
     .PARAMETER PackageXmlPath
         Full path to package.xml (typically from Stage 2
-        Invoke-WsusScnPackageXmlExtract).
+        Invoke-OfflineSyncPackageExtract).
     .PARAMETER ScopeProductGuids
         Lowercase GUID strings. A bundle whose Categories include at least
         one matching Product GUID is admitted. Default is the LTSC server
-        family from $Script:WsusScnOsCategoryGuids.
+        family from $Script:OfflineSyncOsCategoryGuids.
     .PARAMETER ScopeClassificationGuids
         Lowercase GUID strings. A bundle whose Categories include at least
         one matching Classification GUID is admitted. Default is the five
-        classifications in $Script:WsusScnUpdateClassificationGuids.
+        classifications in $Script:OfflineSyncUpdateClassificationGuids.
     .PARAMETER RecencyMonths
         Bundles whose CreationDate is older than (Now - RecencyMonths) are
         rejected. Default 24 months. Setting -1 disables the recency clause.
@@ -8385,13 +8401,13 @@ function ConvertFrom-WsusScnPackageXml {
     }
 
     if (-not $ScopeProductGuids -or $ScopeProductGuids.Count -eq 0) {
-        $ScopeProductGuids = @($Script:WsusScnOsCategoryGuids.Values)
+        $ScopeProductGuids = @($Script:OfflineSyncOsCategoryGuids.Values)
     }
     if (-not $ScopeClassificationGuids -or $ScopeClassificationGuids.Count -eq 0) {
-        $ScopeClassificationGuids = @($Script:WsusScnUpdateClassificationGuids.Values)
+        $ScopeClassificationGuids = @($Script:OfflineSyncUpdateClassificationGuids.Values)
     }
     if (-not $DenyProductGuids -or $DenyProductGuids.Count -eq 0) {
-        $DenyProductGuids = @($Script:WsusScnEosEsuDenyProductGuids.Values)
+        $DenyProductGuids = @($Script:OfflineSyncEosEsuDenyProductGuids.Values)
     }
 
     $cmp = [System.StringComparer]::OrdinalIgnoreCase
@@ -8399,7 +8415,7 @@ function ConvertFrom-WsusScnPackageXml {
     $classSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$ScopeClassificationGuids, $cmp)
     $denySet  = [System.Collections.Generic.HashSet[string]]::new([string[]]$DenyProductGuids, $cmp)
     $denyNameByGuid = @{}
-    foreach ($kv in $Script:WsusScnEosEsuDenyProductGuids.GetEnumerator()) {
+    foreach ($kv in $Script:OfflineSyncEosEsuDenyProductGuids.GetEnumerator()) {
         $denyNameByGuid[$kv.Value.ToLowerInvariant()] = $kv.Key
     }
 
@@ -8746,7 +8762,7 @@ function ConvertFrom-WsusScnPackageXml {
         ScopeClassificationGuidCount = $classSet.Count
     }
 
-    Write-Verbose ('ConvertFrom-WsusScnPackageXml: observed={0:N0} in-scope-bundles={1:N0} file-locations={2:N0}' -f `
+    Write-Verbose ('ConvertFrom-OfflineSyncPackage: observed={0:N0} in-scope-bundles={1:N0} file-locations={2:N0}' -f `
         $totalUpdates, $updatesEnriched.Count, $fileLocations.Count)
 
     return [pscustomobject]@{
@@ -8756,13 +8772,13 @@ function ConvertFrom-WsusScnPackageXml {
     }
 }
 
-function New-WsusScnDependencyDatabase {
+function New-ServicingDependencyDatabase {
     <#
     .SYNOPSIS
         Stage 4 of the wsusscn2.cab parser pipeline: serialise the parsed
         dependency graph to the Layer 2 canonical JSON file.
     .DESCRIPTION
-        Takes a parse result from Stage 3 (ConvertFrom-WsusScnPackageXml),
+        Takes a parse result from Stage 3 (ConvertFrom-OfflineSyncPackage),
         joins payload URLs from the FileLocations table into each Update's
         record, attaches metadata (generator version, source cab provenance,
         scope filter inputs, observation stats), and writes the resulting
@@ -8774,7 +8790,7 @@ function New-WsusScnDependencyDatabase {
         the SSU/LCU pre-flight gate (SPEC section B.19.5) and by
         Invoke-AdminPhaseA04_RefreshDependencyDatabase.
     .PARAMETER ParseResult
-        The [pscustomobject] returned by ConvertFrom-WsusScnPackageXml,
+        The [pscustomobject] returned by ConvertFrom-OfflineSyncPackage,
         containing .Updates / .FileLocations / .Stats sub-objects.
     .PARAMETER OutputPath
         Full path to the JSON file to write. Parent directory will be
@@ -8809,7 +8825,7 @@ function New-WsusScnDependencyDatabase {
 
     # Build source-cab provenance block
     $cabMeta = [pscustomobject]@{
-        sourceUrl = (Get-WsusScnCabSourceUrl)
+        sourceUrl = (Get-OfflineSyncPackageUrl)
         size      = $null
         sha256    = $null
     }
@@ -8817,7 +8833,7 @@ function New-WsusScnDependencyDatabase {
         $cabFile = Get-Item -LiteralPath $SourceCabPath
         $sha = (Get-FileHash -LiteralPath $SourceCabPath -Algorithm SHA256).Hash.ToLowerInvariant()
         $cabMeta = [pscustomobject]@{
-            sourceUrl = (Get-WsusScnCabSourceUrl)
+            sourceUrl = (Get-OfflineSyncPackageUrl)
             size      = $cabFile.Length
             sha256    = $sha
         }
@@ -8872,8 +8888,8 @@ function New-WsusScnDependencyDatabase {
             generatedAt      = ([datetime]::UtcNow).ToString('yyyy-MM-ddTHH:mm:ssZ')
             sourceCab        = $cabMeta
             scope            = [pscustomobject]@{
-                productGuids        = @($Script:WsusScnOsCategoryGuids.Values)
-                classificationGuids = @($Script:WsusScnUpdateClassificationGuids.Values)
+                productGuids        = @($Script:OfflineSyncOsCategoryGuids.Values)
+                classificationGuids = @($Script:OfflineSyncUpdateClassificationGuids.Values)
                 recencyMonths       = $ParseResult.Stats.RecencyMonths
                 evaluatedAt         = $ParseResult.Stats.EvaluatedAt
             }
@@ -8899,7 +8915,7 @@ function New-WsusScnDependencyDatabase {
         $eosEsuFams = (@($ParseResult.Stats.EosEsuFamiliesExcluded) -join ', ')
         Write-Caution ('Excluded {0:N0} EOS/ESU bundle(s) carrying deny-listed Server OS product GUIDs ({1}). These persist in wsusscn2 with live payload but are out of ISO-integration scope (SPEC B.19.7.1).' -f $ParseResult.Stats.EosEsuBundlesExcluded, $eosEsuFams)
     }
-    Write-Verbose ('New-WsusScnDependencyDatabase: wrote {0:N0} updates to {1}' -f $updatesEnriched.Count, $OutputPath)
+    Write-Verbose ('New-ServicingDependencyDatabase: wrote {0:N0} updates to {1}' -f $updatesEnriched.Count, $OutputPath)
     return $OutputPath
 }
 
@@ -9051,10 +9067,10 @@ function Invoke-WuaOfflineScan {
     #>
     [OutputType([pscustomobject[]])]
     param(
-        [Parameter(Mandatory)] [string]$WsusScnCabPath
+        [Parameter(Mandatory)] [string]$OfflineSyncPackagePath
     )
-    if (-not (Test-Path -LiteralPath $WsusScnCabPath)) {
-        throw ('wsusscn2.cab not found at ' + $WsusScnCabPath)
+    if (-not (Test-Path -LiteralPath $OfflineSyncPackagePath)) {
+        throw ('wsusscn2.cab not found at ' + $OfflineSyncPackagePath)
     }
     Write-Step 'Creating WUA session for offline scan...'
     $session = $null
@@ -9063,7 +9079,7 @@ function Invoke-WuaOfflineScan {
     try {
         $session = New-Object -ComObject 'Microsoft.Update.Session'
         $serviceMgr = New-Object -ComObject 'Microsoft.Update.ServiceManager'
-        $service = $serviceMgr.AddScanPackageService('UpdateWsi Offline Sync', $WsusScnCabPath)
+        $service = $serviceMgr.AddScanPackageService('UpdateWsi Offline Sync', $OfflineSyncPackagePath)
     } catch {
         throw ('Failed to register wsusscn2.cab with WUA: ' + $_.Exception.Message)
     }
@@ -11767,7 +11783,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                 NeutralPatches = @()
                 ExcludeKbList = @()
                 WsusScnCab = [pscustomobject][ordered]@{
-                    SourceUrl = (Get-WsusScnCabSourceUrl)
+                    SourceUrl = (Get-OfflineSyncPackageUrl)
                     LocalCachePath = ''
                     LastDownloadedDate = ''
                     LastDownloadedSha256 = ''
@@ -12160,7 +12176,7 @@ function Export-PatchValidationReport {
         [Parameter(Mandatory)] [pscustomobject[]]$ProvidedPatches,
         [Parameter(Mandatory)] [pscustomobject[]]$WuaRaw,
         [Parameter(Mandatory)] [hashtable]$Target,
-        [Parameter(Mandatory)] [hashtable]$WsusScnCabInfo,
+        [Parameter(Mandatory)] [hashtable]$OfflineSyncPackageInfo,
         [string]$Status = 'Fail',
         [string]$Reason = 'MissingRequiredPatches'
     )
@@ -12174,7 +12190,7 @@ function Export-PatchValidationReport {
     $summary = [pscustomobject][ordered]@{
         ValidationTimestamp = (Get-Date).ToString('o')
         Target              = $Target
-        WsusScnCab          = $WsusScnCabInfo
+        WsusScnCab          = $OfflineSyncPackageInfo
         Result              = [pscustomobject][ordered]@{
             Status               = $Status
             Reason               = $Reason
@@ -12307,11 +12323,11 @@ function Invoke-PlanPhase06_ValidatePatchSet {
         }
         $wsusInfo = $null
         try {
-            $wsusInfo = Get-WsusScnCabIfNeeded `
-                            -WsusScnCabMeta $wsusMeta `
+            $wsusInfo = Get-OfflineSyncPackageIfNeeded `
+                            -OfflineSyncPackageMeta $wsusMeta `
                             -WorkRoot $Script:WorkRoot `
                             -LatestPatchTuesday $latestPT `
-                            -OverridePath $Script:WsusScnCabPath
+                            -OverridePath $Script:OfflineSyncPackagePath
         } catch {
             $msg = 'P06 could not obtain wsusscn2.cab: ' + $_.Exception.Message
             if ($Script:IgnorePatchValidation) {
@@ -12340,7 +12356,7 @@ function Invoke-PlanPhase06_ValidatePatchSet {
         Set-DebugStep -Step 'wua-offline-scan'
         $wuaRaw = $null
         try {
-            $wuaRaw = Invoke-WuaOfflineScan -WsusScnCabPath $wsusInfo.Path
+            $wuaRaw = Invoke-WuaOfflineScan -OfflineSyncPackagePath $wsusInfo.Path
         } catch {
             $msg = 'WUA offline scan failed: ' + $_.Exception.Message
             if ($Script:IgnorePatchValidation) {
@@ -12415,7 +12431,7 @@ function Invoke-PlanPhase06_ValidatePatchSet {
                             -ProvidedPatches $providedPatches `
                             -WuaRaw $wuaRaw `
                             -Target $target `
-                            -WsusScnCabInfo $wsusInfoHash `
+                            -OfflineSyncPackageInfo $wsusInfoHash `
                             -Status 'Fail' `
                             -Reason 'MissingRequiredPatches'
             Write-Caution '============================================================'
@@ -14517,16 +14533,16 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
     .DESCRIPTION
         Executes the four-stage wsusscn2 parser pipeline as a single
         cohesive Action:
-          Stage 1 - Get-WsusScnCabIfNeeded
+          Stage 1 - Get-OfflineSyncPackageIfNeeded
                     (download wsusscn2.cab into <WorkRoot>/cache, or reuse
-                     the cached copy when Test-WsusScnCabFresh says it is
+                     the cached copy when Test-OfflineSyncPackageFresh says it is
                      still fresh; honours -OverridePath for an operator-
                      supplied cab)
-          Stage 2 - Invoke-WsusScnPackageXmlExtract
+          Stage 2 - Invoke-OfflineSyncPackageExtract
                     (two-step 7-Zip extraction wsusscn2.cab -> package.xml)
-          Stage 3 - ConvertFrom-WsusScnPackageXml
+          Stage 3 - ConvertFrom-OfflineSyncPackage
                     (XmlReader streaming parse + Product/Classification/recency scope filter)
-          Stage 4 - New-WsusScnDependencyDatabase
+          Stage 4 - New-ServicingDependencyDatabase
                     (canonical-JSON serialization of dependency graph to OutputPath)
 
         After Stage 4 the function optionally invokes
@@ -14544,7 +14560,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
     .PARAMETER OverridePath
         Optional. Full path to an operator-supplied wsusscn2.cab to use
         instead of the managed cache. Passed straight through to
-        Get-WsusScnCabIfNeeded -OverridePath; if the file exists, the
+        Get-OfflineSyncPackageIfNeeded -OverridePath; if the file exists, the
         Stage 1 download is skipped.
     .PARAMETER OutputPath
         Optional. Full path to the Layer 2 JSON to write. Defaults to
@@ -14600,8 +14616,8 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         # ---- Stage 1: acquire wsusscn2.cab ----
         # Mirrors the P06 ValidatePatchSet acquisition pattern. A04 is an
         # admin Action that may run without a resolved OsProfile, so the
-        # WsusScnCabMeta is taken from the OsProfile only when present;
-        # otherwise $null is passed (Test-WsusScnCabFresh then treats the
+        # OfflineSyncPackageMeta is taken from the OsProfile only when present;
+        # otherwise $null is passed (Test-OfflineSyncPackageFresh then treats the
         # cache as stale and Stage 1 downloads a fresh copy).
         Set-DebugStep -Step 'stage1-acquire-cab'
         Write-SubSection 'Stage 1: acquire wsusscn2.cab'
@@ -14610,9 +14626,9 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) {
             $wsusMeta = $Script:OsProfile.PatchBaseline.WsusScnCab
         }
-        $effectiveOverride = if ($OverridePath) { $OverridePath } else { $Script:WsusScnCabPath }
-        $wsusInfo = Get-WsusScnCabIfNeeded `
-                        -WsusScnCabMeta $wsusMeta `
+        $effectiveOverride = if ($OverridePath) { $OverridePath } else { $Script:OfflineSyncPackagePath }
+        $wsusInfo = Get-OfflineSyncPackageIfNeeded `
+                        -OfflineSyncPackageMeta $wsusMeta `
                         -WorkRoot $Script:WorkRoot `
                         -LatestPatchTuesday $latestPT `
                         -OverridePath $effectiveOverride
@@ -14627,14 +14643,14 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         # ---- Stage 2: extract package.xml ----
         Set-DebugStep -Step 'stage2-extract-package-xml'
         Write-SubSection 'Stage 2: extract package.xml (two-step 7-Zip)'
-        $packageXml = Invoke-WsusScnPackageXmlExtract -CabPath $acquiredCab -StagingDirectory $stagingDir
+        $packageXml = Invoke-OfflineSyncPackageExtract -CabPath $acquiredCab -StagingDirectory $stagingDir
         $xmlSize = (Get-Item -LiteralPath $packageXml).Length
         Write-Ok ('Stage 2 OK : {0} ({1:N0} bytes)' -f $packageXml, $xmlSize)
 
         # ---- Stage 3: parse package.xml ----
         Set-DebugStep -Step 'stage3-parse-package-xml'
         Write-SubSection 'Stage 3: parse package.xml (XmlReader streaming)'
-        $parseResult = ConvertFrom-WsusScnPackageXml -PackageXmlPath $packageXml
+        $parseResult = ConvertFrom-OfflineSyncPackage -PackageXmlPath $packageXml
         Write-Ok ('Stage 3 OK : observed={0:N0} in-scope={1:N0} bundles={2:N0} file-locations={3:N0}' -f `
             $parseResult.Stats.UpdatesObserved, `
             $parseResult.Stats.UpdatesInScope, `
@@ -14647,7 +14663,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         if ($Script:DryRun) {
             Write-Caution 'DryRun: Stage 4 JSON writeback SKIPPED.'
         } else {
-            $written = New-WsusScnDependencyDatabase -ParseResult $parseResult -OutputPath $OutputPath -SourceCabPath $acquiredCab
+            $written = New-ServicingDependencyDatabase -ParseResult $parseResult -OutputPath $OutputPath -SourceCabPath $acquiredCab
             $outSize = (Get-Item -LiteralPath $written).Length
             Write-Ok ('Stage 4 OK : {0} ({1:N0} bytes)' -f $written, $outSize)
         }
@@ -14657,7 +14673,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         # bundle-revision -> LCU-leaf-revision map is derived here from the
         # in-memory parse result (138 entries) and the LCU leaves' CBS metadata
         # are streamed for their servicing-stack snippet only (never the full
-        # ~67 MB text; see Get-WsusScnCbsServicingSnippet). Skipped on DryRun
+        # ~67 MB text; see Get-OfflineSyncCbsServicingSnippet). Skipped on DryRun
         # (no JSON was written) or with -SkipServicingStackPopulate.
         Set-DebugStep -Step 'stage4b-servicing-stack-populate'
         Write-SubSection 'Stage 4b: populate servicing-stack fields'
@@ -14670,14 +14686,14 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
             $leafRevSet = [System.Collections.Generic.List[string]]::new()
             foreach ($b in @($parseResult.Updates)) {
                 $bundleRev = [string]$b.RevisionId
-                $leafRev = Select-WsusScnLcuLeafRevision -BundleRevisionId $bundleRev -LeafRevisionIds @($b.LeafRevisionIds)
+                $leafRev = Select-OfflineSyncLcuLeafRevision -BundleRevisionId $bundleRev -LeafRevisionIds @($b.LeafRevisionIds)
                 if ($leafRev) {
                     $leafRevByUpdateRev[$bundleRev] = [string]$leafRev
                     $leafRevSet.Add([string]$leafRev)
                 }
             }
             $ssStaging = Join-Path $stagingDir 'servicing-stack'
-            $leafSnippetByRevision = Invoke-WsusScnLeafServicingStackExtract `
+            $leafSnippetByRevision = Invoke-OfflineSyncLeafServicingStackExtract `
                                         -LeafRevisions $leafRevSet.ToArray() `
                                         -CabPath $acquiredCab `
                                         -StagingDirectory $ssStaging
@@ -14685,7 +14701,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
             # populate, and write it back via the canonical writer (UTF-8
             # no-BOM / LF / atomic .tmp+rename), preserving _meta and key order.
             $dbDoc = ConvertFrom-CanonicalJson -Json (Get-Content -LiteralPath $OutputPath -Raw -Encoding utf8)
-            $ssResult = Update-WsusScnServicingStackFromMeta `
+            $ssResult = Update-ServicingStackFromMeta `
                             -Document $dbDoc `
                             -LeafMetaByRevision $leafSnippetByRevision `
                             -LeafRevisionByUpdateRevision $leafRevByUpdateRev
@@ -14754,7 +14770,7 @@ function Update-Layer1DependencyVerification {
         RevisionId / CreationDate) from the in-memory parser result to
         each data/config-Server*.json.
     .DESCRIPTION
-        For each Server OS family in $Script:WsusScnOsCategoryGuids, finds
+        For each Server OS family in $Script:OfflineSyncOsCategoryGuids, finds
         the in-scope bundle with the most recent CreationDate for that OS's
         Product GUID, and writes four advisory fields to the matching
         config:
@@ -14792,7 +14808,7 @@ function Update-Layer1DependencyVerification {
     $missing = 0
     $nowIso = ([datetime]::UtcNow).ToString('yyyy-MM-ddTHH:mm:ssZ')
 
-    foreach ($entry in $Script:WsusScnOsCategoryGuids.GetEnumerator()) {
+    foreach ($entry in $Script:OfflineSyncOsCategoryGuids.GetEnumerator()) {
         $osKey = $entry.Key
         $productGuid = $entry.Value.ToLowerInvariant()
 

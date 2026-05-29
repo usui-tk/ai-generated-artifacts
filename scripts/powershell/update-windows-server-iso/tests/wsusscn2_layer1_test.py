@@ -6,7 +6,7 @@ Exercises the Phase 2b2 Layer 1 writeback helper
 (tests/fixtures/wsusscn2/package.xml), verifying:
 
   * the function correctly picks the most recent LCU-bearing Update per
-    Server OS family (Product GUID lookup against $Script:WsusScnOsCategoryGuids)
+    Server OS family (Product GUID lookup against $Script:OfflineSyncOsCategoryGuids)
   * the three advisory fields are written to each matching
     config-Server*.json: _DependencyVerifiedUpdateId, _DependencyVerifiedRevisionId,
     _DependencyVerifiedAt
@@ -19,7 +19,7 @@ Because the function performs an actual writeback to data/config-*.json,
 the test runs against a temporary copy of the data/ directory (created
 afresh per run) so the repository's real config files are never touched.
 
-Stage 1 (Get-WsusScnCabIfNeeded) is platform-coupled to network
+Stage 1 (Get-OfflineSyncPackageIfNeeded) is platform-coupled to network
 + Windows file layout and is NOT exercised here; it is covered by the
 live monthly refresh CI and the synthetic-test-mode end-to-end run.
 
@@ -121,7 +121,7 @@ def run_layer1_update(data_dir: Path) -> dict:
 $pinnedNow = [datetime]::ParseExact("{PINNED_NOW}","yyyy-MM-ddTHH:mm:ssZ",
     [System.Globalization.CultureInfo]::InvariantCulture,
     [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal)
-$result = ConvertFrom-WsusScnPackageXml -PackageXmlPath {PACKAGE_XML} -Now $pinnedNow
+$result = ConvertFrom-OfflineSyncPackage -PackageXmlPath {PACKAGE_XML} -Now $pinnedNow
 $layer1 = Update-Layer1DependencyVerification -ParseResult $result -DataRoot {data_dir} 2>$null
 $layer1 | ConvertTo-Json -Depth 5
 """

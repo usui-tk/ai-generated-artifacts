@@ -16,6 +16,40 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.14 - WsusScn -> OfflineSync / ServicingDependency identifier rename (input/output layers)
+
+Renames the `WsusScn*` function and variable family to names derived from Microsoft's own authoritative format name for the offline-scan metadata. The `wsusscn2.cab` Master XML's root element is `<OfflineSyncPackage>` (schema namespace `http://schemas.microsoft.com/msus/2004/02/OfflineSync`), so the input/source layer adopts the `OfflineSync*` prefix, while the generated output database adopts the functional `ServicingDependency*` name (matching SPEC B.19). The online Microsoft Update Catalog family (`*Catalog*`) is intentionally left unchanged so the online/offline distinction stays explicit. `$Script:ScriptVersion` `r11.13` -> `r11.14`; `$Script:ScriptTag` becomes `offline-sync-package-rename`. This is a pure identifier rename: no committed data, schema, or fixture file changes, so the shared epoch (`dataContractVersion`) stays `1` and `data/wsusscn2-database.json` is NOT regenerated.
+
+Function renames (old -> new):
+
+- `Get-WsusScnCabSourceUrl` -> `Get-OfflineSyncPackageUrl`
+- `Test-WsusScnCabFresh` -> `Test-OfflineSyncPackageFresh`
+- `Get-WsusScnCabIfNeeded` -> `Get-OfflineSyncPackageIfNeeded`
+- `Invoke-WsusScnPackageXmlExtract` -> `Invoke-OfflineSyncPackageExtract`
+- `ConvertFrom-WsusScnPackageXml` -> `ConvertFrom-OfflineSyncPackage`
+- `Resolve-WsusScnRevisionToCab` -> `Resolve-OfflineSyncRevisionToCab`
+- `Get-WsusScnServicingStackInfo` -> `Get-OfflineSyncServicingStackInfo`
+- `Select-WsusScnLcuLeafRevision` -> `Select-OfflineSyncLcuLeafRevision`
+- `Get-WsusScnCbsServicingSnippet` -> `Get-OfflineSyncCbsServicingSnippet`
+- `Invoke-WsusScnLeafServicingStackExtract` -> `Invoke-OfflineSyncLeafServicingStackExtract`
+- `Update-WsusScnServicingStackFromMeta` -> `Update-ServicingStackFromMeta`
+- `New-WsusScnDependencyDatabase` -> `New-ServicingDependencyDatabase`
+
+Variable / parameter renames (old -> new):
+
+- `$Script:WsusScnOsCategoryGuids` -> `$Script:OfflineSyncOsCategoryGuids`
+- `$Script:WsusScnUpdateClassificationGuids` -> `$Script:OfflineSyncUpdateClassificationGuids`
+- `$Script:WsusScnCategoryGuidNameMap` -> `$Script:OfflineSyncCategoryGuidNameMap`
+- `$Script:WsusScnEosEsuDenyProductGuids` -> `$Script:OfflineSyncEosEsuDenyProductGuids`
+- `$WsusScnCabMeta` -> `$OfflineSyncPackageMeta`
+- `$WsusScnCabInfo` -> `$OfflineSyncPackageInfo`
+- `$WsusScnCabPath` / `$Script:WsusScnCabPath` -> `$OfflineSyncPackagePath`
+- CLI parameter `-WsusScnCabPath` -> `-OfflineSyncPackagePath` (operator-visible; breaking)
+
+Adds newcomer-oriented `.DESCRIPTION` lead notes to the central input-layer functions (`ConvertFrom-OfflineSyncPackage`, `Get-OfflineSyncPackageIfNeeded`, `Invoke-OfflineSyncPackageExtract`) explaining that the `OfflineSync*` names derive from the `<OfflineSyncPackage>` XML root element and the `.../msus/2004/02/OfflineSync` schema namespace.
+
+Deferred to a follow-up data-shape change, intentionally NOT touched here: the config field `PatchBaseline.WsusScnCab`, the artifacts `data/wsusscn2-database.json` and `schema/wsusscn2-database.schema.json`, the `tests/fixtures/wsusscn2/` directory, and the standalone `tests/wsusscn2_probe.py`. The literal `wsusscn2.cab` filename and its download URL are retained verbatim (Microsoft's actual distribution filename).
+
 ### r11.13 - config-*.json data-contract `_meta` stamp (Layer 1 joins the shared contract)
 
 Stamps the shared data-contract `_meta` block into the `data/config-Server*.json` Layer 1 baselines so they classify as `Current` under `Test-DataContractConsistency` instead of `Unknown`, completing the "stamped into every data artifact" intent of §B.19.10. `$Script:ScriptVersion` is bumped `r11.12` -> `r11.13`; `$Script:ScriptTag` becomes `config-datacontract-meta-stamp`. The shared epoch is unchanged (`dataContractVersion` stays `1`): the stamp adds a new contract-bearing artifact without altering any existing shape, so `data/wsusscn2-database.json` is NOT regenerated.

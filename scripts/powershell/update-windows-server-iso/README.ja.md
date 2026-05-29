@@ -262,8 +262,8 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 `-Action ListPhases` の登録状況ベースで、現状は以下のとおりです：
 
 - **A04 実装済み**（r09.0 Step 2b3）：4 ステージの parser
-  パイプライン（`Get-WsusScnCabIfNeeded` → `Invoke-WsusScnPackageXmlExtract`
-  → `ConvertFrom-WsusScnPackageXml` → `New-WsusScnDependencyDatabase`）
+  パイプライン（`Get-OfflineSyncPackageIfNeeded` → `Invoke-OfflineSyncPackageExtract`
+  → `ConvertFrom-OfflineSyncPackage` → `New-ServicingDependencyDatabase`）
   が Microsoft の `wsusscn2.cab` から
   `data/wsusscn2-database.json`（Servicing Dependency Database
   layer 2）を更新し、OS ごとの最新 bundle 識別子を
@@ -395,7 +395,7 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-SkipDynamicPatchRefresh` | PatchBaseline が古くても P03 をスキップ（オフライン / エアギャップ実行）|
 | `-UseBaselineOnly` | PatchBaseline を厳密にそのまま使用、Catalog にアクセスしない |
 | `-IgnorePatchValidation` | P06 検証失敗を中断から警告に降格（非推奨）|
-| `-WsusScnCabPath` | 事前配置済みの `wsusscn2.cab` パス（自動ダウンロードをスキップ）|
+| `-OfflineSyncPackagePath` | 事前配置済みの `wsusscn2.cab` パス（自動ダウンロードをスキップ）|
 | `-WorkRoot` | ワークスペースのルート。デフォルトは `Workspace_UpdateWsi`（スクリプトと同階層）。ドライブの空き容量は 100 GB 以上が必要（プリフライトが強制）|
 | `-OutputDir` | 出力 ISO のディレクトリ（デフォルトは `<WorkRoot>\output`）|
 | `-OnlyInstallWimIndexes` | install.wim 更新対象を限定するカンマ区切りインデックス（例 `'2,4'`）|

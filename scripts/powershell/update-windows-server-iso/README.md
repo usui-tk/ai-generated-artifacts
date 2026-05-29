@@ -270,8 +270,8 @@ r09.0 Step 2b3. Current state per the
 `-Action ListPhases` registry:
 
 - **A04 implemented** (r09.0 Step 2b3): the four-stage parser
-  pipeline (`Get-WsusScnCabIfNeeded` → `Invoke-WsusScnPackageXmlExtract`
-  → `ConvertFrom-WsusScnPackageXml` → `New-WsusScnDependencyDatabase`)
+  pipeline (`Get-OfflineSyncPackageIfNeeded` → `Invoke-OfflineSyncPackageExtract`
+  → `ConvertFrom-OfflineSyncPackage` → `New-ServicingDependencyDatabase`)
   refreshes `data/wsusscn2-database.json` (Servicing Dependency
   Database layer 2) from Microsoft's `wsusscn2.cab`, then writes the
   latest per-OS bundle identity into `data/config-Server*.json`. The
@@ -408,7 +408,7 @@ parameter list. The most commonly used:
 | `-SkipDynamicPatchRefresh` | Skip P03 even if PatchBaseline is stale (offline / air-gapped runs) |
 | `-UseBaselineOnly` | Use PatchBaseline strictly as-is; no Catalog access at all |
 | `-IgnorePatchValidation` | Demote P06 validation failures from abort to warning (NOT recommended) |
-| `-WsusScnCabPath` | Pre-staged `wsusscn2.cab` path (skips automatic download) |
+| `-OfflineSyncPackagePath` | Pre-staged `wsusscn2.cab` path (skips automatic download) |
 | `-WorkRoot` | Workspace root. Default `Workspace_UpdateWsi` resolved next to the script. Drive must have ≥ 100 GB free (preflight enforces this). |
 | `-OutputDir` | Output ISO directory (default `<WorkRoot>\output`) |
 | `-OnlyInstallWimIndexes` | Comma-separated index list (e.g. `'2,4'`) to limit install.wim updates |

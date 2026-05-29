@@ -4,8 +4,8 @@ wsusscn2 fixture builder for T12 (parser pipeline tests).
 Generates a *minimal* package.xml that mirrors the REAL wsusscn2 Master
 XML structure (verified empirically against the 2026-05-12 production
 fetch) and exercises every control-flow path in the PowerShell Stage 3
-parser (`ConvertFrom-WsusScnPackageXml`) and Stage 4 serializer
-(`New-WsusScnDependencyDatabase`).
+parser (`ConvertFrom-OfflineSyncPackage`) and Stage 4 serializer
+(`New-ServicingDependencyDatabase`).
 
 Real wsusscn2 structure modelled here:
   * Updates carry NO KB article number (KB lives in the Catalog).
@@ -45,8 +45,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Canonical GUIDs (must match $Script:WsusScnOsCategoryGuids /
-# $Script:WsusScnUpdateClassificationGuids in the PowerShell script).
+# Canonical GUIDs (must match $Script:OfflineSyncOsCategoryGuids /
+# $Script:OfflineSyncUpdateClassificationGuids in the PowerShell script).
 GUID_SERVER_2016 = "569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5"
 GUID_SERVER_2019 = "f702a48c-919b-45d6-9aef-ca4248d50397"
 GUID_SERVER_2022 = "71718f13-7324-4b0f-8f9e-2ca9dc978e53"

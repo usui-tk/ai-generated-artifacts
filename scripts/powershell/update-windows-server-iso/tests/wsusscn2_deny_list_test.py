@@ -2,7 +2,7 @@
 T14: wsusscn2 EOS/ESU deny-list warned-exclusion test (offline).
 
 Exercises the deny-list branch of the Stage 3 scope filter
-(ConvertFrom-WsusScnPackageXml) against a dedicated fixture, verifying
+(ConvertFrom-OfflineSyncPackage) against a dedicated fixture, verifying
 the allow-overrides exclusion contract of SPEC B.19.7 / B.19.7.1 in the
 PowerShell implementation. This is the executable check that the
 PowerShell deny-list filter matches the reference `classify_scope`
@@ -103,7 +103,7 @@ def run_powershell_parser(out_path: Path) -> dict:
 $pinnedNow = [datetime]::ParseExact("{PINNED_NOW}","yyyy-MM-ddTHH:mm:ssZ",
     [System.Globalization.CultureInfo]::InvariantCulture,
     [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal)
-$result = ConvertFrom-WsusScnPackageXml -PackageXmlPath {PACKAGE_XML} -Now $pinnedNow
+$result = ConvertFrom-OfflineSyncPackage -PackageXmlPath {PACKAGE_XML} -Now $pinnedNow
 $result | ConvertTo-Json -Depth 12 | Set-Content -Path {out_path} -Encoding utf8
 """
     proc = subprocess.run(
