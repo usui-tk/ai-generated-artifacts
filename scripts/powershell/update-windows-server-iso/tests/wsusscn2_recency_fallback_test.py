@@ -10,7 +10,7 @@ exists), not as a data gap. The fallback is only taken when the OS family
 is resolvable and actually has an in-scope LCU; otherwise the verdict
 stays NotInDatabase.
 
-Drives the function against fixtures/wsusscn2/recency-fallback-database.json:
+Drives the function against fixtures/servicing-dependency/recency-fallback-database.json:
   rev 2001  Server 2016 LCU, 2026-03-10, requiredSs 10.0.14393.7000
   rev 2002  Server 2016 LCU, 2026-05-11, requiredSs 10.0.14393.7692  (newest 2016)
   rev 2003  Server 2022 LCU, 2026-05-11, combined                    (newest 2022)
@@ -39,7 +39,7 @@ from pathlib import Path
 TEST_DIR = Path(__file__).resolve().parent
 SUBPROJECT_DIR = TEST_DIR.parent
 SCRIPT_PATH = SUBPROJECT_DIR / "Update-WindowsServerIso.ps1"
-DB_PATH = TEST_DIR / "fixtures" / "wsusscn2" / "recency-fallback-database.json"
+DB_PATH = TEST_DIR / "fixtures" / "servicing-dependency" / "recency-fallback-database.json"
 
 
 class TestResult:

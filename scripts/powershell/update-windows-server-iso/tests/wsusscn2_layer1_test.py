@@ -3,7 +3,7 @@ T13: Update-Layer1DependencyVerification self-verification test (offline).
 
 Exercises the Phase 2b2 Layer 1 writeback helper
 `Update-Layer1DependencyVerification` against the T12 fixture
-(tests/fixtures/wsusscn2/package.xml), verifying:
+(tests/fixtures/servicing-dependency/package.xml), verifying:
 
   * the function correctly picks the most recent LCU-bearing Update per
     Server OS family (Product GUID lookup against $Script:OfflineSyncOsCategoryGuids)
@@ -39,7 +39,7 @@ from pathlib import Path
 TEST_DIR = Path(__file__).resolve().parent
 SUBPROJECT_DIR = TEST_DIR.parent
 SCRIPT_PATH = SUBPROJECT_DIR / "Update-WindowsServerIso.ps1"
-FIXTURE_DIR = TEST_DIR / "fixtures" / "wsusscn2"
+FIXTURE_DIR = TEST_DIR / "fixtures" / "servicing-dependency"
 PACKAGE_XML = FIXTURE_DIR / "package.xml"
 
 PINNED_NOW = "2026-05-28T00:00:00Z"

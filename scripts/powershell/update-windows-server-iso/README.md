@@ -223,7 +223,7 @@ from those caches. This split matches the SPEC §B.22.12 design.
 | `RefreshSnapshots` | A03 | Fetch upstream caches (release-info, .NET CU, Dynamic Update) |
 | `RefreshAllBaselines` | A01 | Regenerate `data/config-Server*.json` from the caches |
 | `DumpFieldClassification` | A02 | Emit the field-cadence decision matrix as JSON |
-| `RefreshDependencyDatabase` | A04 | Refresh `data/wsusscn2-database.json` from `wsusscn2.cab` (r09.0+; **fully implemented and verified against the live cab in Step 2b3**) |
+| `RefreshDependencyDatabase` | A04 | Refresh `data/servicing-dependency-database.json` from `wsusscn2.cab` (r09.0+; **fully implemented and verified against the live cab in Step 2b3**) |
 
 ```powershell
 # ---- Stage 1: populate the upstream caches ----
@@ -248,7 +248,7 @@ from those caches. This split matches the SPEC §B.22.12 design.
 # Refresh the Servicing Dependency Database (layer 2) from wsusscn2.cab
 #   Full pipeline: Stage 1 cab acquire -> Stage 2 7-Zip extract ->
 #   Stage 3 XmlReader stream-parse -> Stage 4 emit
-#   data/wsusscn2-database.json -> Layer 1 config writeback.
+#   data/servicing-dependency-database.json -> Layer 1 config writeback.
 #   (Windows + 7-Zip required; Stage 3 parse takes ~4-5 min on the live cab.)
 .\Update-WindowsServerIso.ps1 -Action RefreshDependencyDatabase
 ```
@@ -272,7 +272,7 @@ r09.0 Step 2b3. Current state per the
 - **A04 implemented** (r09.0 Step 2b3): the four-stage parser
   pipeline (`Get-OfflineSyncPackageIfNeeded` → `Invoke-OfflineSyncPackageExtract`
   → `ConvertFrom-OfflineSyncPackage` → `New-ServicingDependencyDatabase`)
-  refreshes `data/wsusscn2-database.json` (Servicing Dependency
+  refreshes `data/servicing-dependency-database.json` (Servicing Dependency
   Database layer 2) from Microsoft's `wsusscn2.cab`, then writes the
   latest per-OS bundle identity into `data/config-Server*.json`. The
   whole chain was run end-to-end against the 2026-05-12 live cab
@@ -282,7 +282,7 @@ r09.0 Step 2b3. Current state per the
   runs A04 automatically as a soft-fail downstream step after the
   per-OS catalogue scrape.
 - **P06 Stage 2** (r09.0 Step 2c, planned): graph-based dependency
-  closure check using `data/wsusscn2-database.json`.
+  closure check using `data/servicing-dependency-database.json`.
 - **Server 2016 SSU dependency fix** (r09.0 Step 2a, shipped): the
   KB5087537 LCU now declares its KB5088064 SSU prerequisite in
   `data/config-Server2016.json`, preventing the `HRESULT 0x800f0823`
@@ -299,8 +299,8 @@ r09.0 Step 2b3. Current state per the
   plus the stdlib-only `config_schema_test.py` gate forbid the legacy
   `PatchBaseline.Patches` field and require `NeutralPatches`. The
   script defaults and all baseline assignments now use `NeutralPatches`.
-- **Layer 2 schema + shared data contract** (r11.3+, shipped): `schema/wsusscn2-database.schema.json`
-  is the authoritative shape for `data/wsusscn2-database.json`. Both schemas
+- **Layer 2 schema + shared data contract** (r11.3+, shipped): `schema/servicing-dependency-database.schema.json`
+  is the authoritative shape for `data/servicing-dependency-database.json`. Both schemas
   share one cross-cutting data-contract identity (`dataContractId` +
   `dataContractVersion`) held by the script and stamped into every data
   artifact, so a single check validates the whole set instead of reconciling
@@ -459,7 +459,7 @@ P05   ExpandIso
 P06 ValidatePatchSet
         - Stage 1: catalog freshness comparison (existing)
         - Stage 2 (r09.0 Step 2c, planned): graph-based dependency closure check
-          using data/wsusscn2-database.json (see SPEC.md §B.19.14)
+          using data/servicing-dependency-database.json (see SPEC.md §B.19.14)
         - On any missing required prerequisite: ABORT and emit diagnostic files
 P07+  Build / Verify / Report
 ```
@@ -561,7 +561,7 @@ Stage 4 supports `workflow_dispatch` with four inputs (`mode`,
 `onlyOs`, `onlyLanguage`, `dryRun`) so maintainers can trigger an
 ad-hoc refresh or limit the scope without editing the workflow. The
 opened PR is restricted via `add-paths` to `data/config-*.json` (and
-in r09.0+, `data/wsusscn2-database.json`).
+in r09.0+, `data/servicing-dependency-database.json`).
 
 CRITICAL: Stage 3 NEVER uploads an ISO artifact. The evaluation
 licence forbids public distribution of Microsoft binaries; the

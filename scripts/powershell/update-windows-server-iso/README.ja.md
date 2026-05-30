@@ -217,7 +217,7 @@ SPEC §B.22.12 の設計に対応します。
 | `RefreshSnapshots` | A03 | 上流キャッシュの取得（release-info、.NET CU、Dynamic Update）|
 | `RefreshAllBaselines` | A01 | キャッシュから `data/config-Server*.json` を再生成 |
 | `DumpFieldClassification` | A02 | フィールドのカデンス決定マトリックスを JSON で出力 |
-| `RefreshDependencyDatabase` | A04 | `wsusscn2.cab` から `data/wsusscn2-database.json` を更新（r09.0+、**Step 2b3 で本実装・実 cab 検証済み**）|
+| `RefreshDependencyDatabase` | A04 | `wsusscn2.cab` から `data/servicing-dependency-database.json` を更新（r09.0+、**Step 2b3 で本実装・実 cab 検証済み**）|
 
 ```powershell
 # ---- 第 1 段：上流キャッシュの populate ----
@@ -241,7 +241,7 @@ SPEC §B.22.12 の設計に対応します。
 
 # Servicing Dependency Database（layer 2）を wsusscn2.cab から更新
 #   本実装：Stage 1 cab 取得 → Stage 2 7-Zip 抽出 → Stage 3 XmlReader
-#   ストリームパース → Stage 4 data/wsusscn2-database.json 出力 →
+#   ストリームパース → Stage 4 data/servicing-dependency-database.json 出力 →
 #   Layer 1 config 書き戻し。
 #   （Windows + 7-Zip が必要。実 cab では Stage 3 の解析に約 4〜5 分）
 .\Update-WindowsServerIso.ps1 -Action RefreshDependencyDatabase
@@ -265,7 +265,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
   パイプライン（`Get-OfflineSyncPackageIfNeeded` → `Invoke-OfflineSyncPackageExtract`
   → `ConvertFrom-OfflineSyncPackage` → `New-ServicingDependencyDatabase`）
   が Microsoft の `wsusscn2.cab` から
-  `data/wsusscn2-database.json`（Servicing Dependency Database
+  `data/servicing-dependency-database.json`（Servicing Dependency Database
   layer 2）を更新し、OS ごとの最新 bundle 識別子を
   `data/config-Server*.json` に書き戻します。2026-05-12 の実 cab で
   全工程を end-to-end 実行済み（Server 4 系すべてが 2026-05 の LCU を
@@ -273,7 +273,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 - **A01.0 統合**（r09.0 Step 2b2）：`RefreshAllBaselines` は OS ごとの
   カタログスクレイプの後に A04 を soft-fail の後続ステップとして
   自動実行します。
-- **P06 Stage 2**（r09.0 Step 2c、予定）：`data/wsusscn2-database.json`
+- **P06 Stage 2**（r09.0 Step 2c、予定）：`data/servicing-dependency-database.json`
   を用いたグラフベース依存性閉包チェック。
 - **Server 2016 の SSU 依存性修正**（r09.0 Step 2a、適用済み）：
   KB5087537 LCU が `data/config-Server2016.json` で KB5088064 SSU を
@@ -292,8 +292,8 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
   `PatchBaseline.Patches` フィールドを禁止し `NeutralPatches` を必須化
   します。スクリプトの既定値とすべての baseline 代入は `NeutralPatches`
   を使うようになりました。
-- **Layer 2 スキーマと共通データ契約**（r11.3+、適用済み）：`schema/wsusscn2-database.schema.json`
-  が `data/wsusscn2-database.json` の権威的な形状です。両スキーマはスクリプトが
+- **Layer 2 スキーマと共通データ契約**（r11.3+、適用済み）：`schema/servicing-dependency-database.schema.json`
+  が `data/servicing-dependency-database.json` の権威的な形状です。両スキーマはスクリプトが
   保持し全データ成果物に刻印される単一の横断的データ契約識別子（`dataContractId`
   ＋ `dataContractVersion`）を共有し、個別のモデル別スキーマバージョンを突き合わせる
   代わりに 1 回の照合で全体を検証します。
@@ -445,7 +445,7 @@ P04   FetchAssets（新しく解決された URL と SHA-256 を使用）
 P05   ExpandIso
 P06 ValidatePatchSet
         - Stage 1：カタログ鮮度比較（既存）
-        - Stage 2（r09.0 Step 2c、予定）：data/wsusscn2-database.json を用いた
+        - Stage 2（r09.0 Step 2c、予定）：data/servicing-dependency-database.json を用いた
           グラフベース依存性閉包チェック（SPEC.md §B.19.14 参照）
         - 必須プリレキジが欠落しているとき：中断して診断ファイルを生成
 P07+  Build / Verify / Report
@@ -547,7 +547,7 @@ CI マッピングは SPEC.md §C.9 にあります。
 Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage`、
 `dryRun`）に対応しており、ワークフローを編集することなくアドホックな更新
 実行やスコープ限定が可能です。生成される PR は `add-paths` で
-`data/config-*.json`（r09.0+ では `data/wsusscn2-database.json` も）に
+`data/config-*.json`（r09.0+ では `data/servicing-dependency-database.json` も）に
 限定されます。
 
 重要：Stage 3 は ISO アーティファクトを **絶対にアップロードしません**。

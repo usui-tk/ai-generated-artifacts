@@ -3,7 +3,7 @@ T12: wsusscn2 parser pipeline self-verification test (offline).
 
 Exercises the PowerShell Stage 3 (ConvertFrom-OfflineSyncPackage) and
 Stage 4 (New-ServicingDependencyDatabase) functions against the small
-fixture in tests/fixtures/wsusscn2/, verifying:
+fixture in tests/fixtures/servicing-dependency/, verifying:
 
   * scope-filter admit/reject semantics for Product GUID, Classification
     GUID, and recency window (SPEC §B.19.7)
@@ -15,7 +15,7 @@ fixture in tests/fixtures/wsusscn2/, verifying:
   * FileLocation -> payload-URL join correctness, including the
     payloadUrlsMissing counter for orphan digests
   * Canonical JSON output (SPEC §B.23) byte-for-byte parity with the
-    expected JSON in tests/fixtures/wsusscn2/expected-output.json,
+    expected JSON in tests/fixtures/servicing-dependency/expected-output.json,
     after stripping environmental fields (scriptVersion, scriptTag,
     generatedAt, sourceCab) that vary per run
 
@@ -39,7 +39,7 @@ from pathlib import Path
 TEST_DIR = Path(__file__).resolve().parent
 SUBPROJECT_DIR = TEST_DIR.parent
 SCRIPT_PATH = SUBPROJECT_DIR / "Update-WindowsServerIso.ps1"
-FIXTURE_DIR = TEST_DIR / "fixtures" / "wsusscn2"
+FIXTURE_DIR = TEST_DIR / "fixtures" / "servicing-dependency"
 PACKAGE_XML = FIXTURE_DIR / "package.xml"
 EXPECTED_JSON = FIXTURE_DIR / "expected-output.json"
 

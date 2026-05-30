@@ -38,7 +38,7 @@ from pathlib import Path
 TEST_DIR = Path(__file__).resolve().parent
 SUBPROJECT_DIR = TEST_DIR.parent
 SCRIPT_PATH = SUBPROJECT_DIR / "Update-WindowsServerIso.ps1"
-CBS_DIR = TEST_DIR / "fixtures" / "wsusscn2" / "cbs"
+CBS_DIR = TEST_DIR / "fixtures" / "servicing-dependency" / "cbs"
 
 # A trimmed CABLIST that preserves real RANGESTART boundary semantics.
 # package2.cab starts at 0, package3 at 605, package74 at 44562114.

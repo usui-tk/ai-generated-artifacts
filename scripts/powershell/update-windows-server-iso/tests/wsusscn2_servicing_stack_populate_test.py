@@ -43,7 +43,7 @@ from pathlib import Path
 TEST_DIR = Path(__file__).resolve().parent
 SUBPROJECT_DIR = TEST_DIR.parent
 SCRIPT_PATH = SUBPROJECT_DIR / "Update-WindowsServerIso.ps1"
-CBS_DIR = TEST_DIR / "fixtures" / "wsusscn2" / "cbs"
+CBS_DIR = TEST_DIR / "fixtures" / "servicing-dependency" / "cbs"
 
 
 class TestResult:

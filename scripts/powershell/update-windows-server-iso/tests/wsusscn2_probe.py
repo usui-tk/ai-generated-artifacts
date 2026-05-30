@@ -52,7 +52,7 @@ def _probe(url: str, *, timeout: int = 30) -> dict:
     req = urllib.request.Request(
         url,
         headers={
-            'User-Agent': 'Mozilla/5.0 (compatible; UpdateWsi-WsusScn2Probe/0.1)',
+            'User-Agent': 'Mozilla/5.0 (compatible; UpdateWsi-OfflineSyncProbe/0.1)',
             'Range':      'bytes=0-1',
         },
     )

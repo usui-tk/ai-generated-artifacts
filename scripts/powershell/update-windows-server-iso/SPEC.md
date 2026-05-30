@@ -271,7 +271,7 @@ change.
 | Per-OS configuration profile | `data/config-Server{2016,2019,2022,2025}.json` | All actions |
 | Microsoft Update Catalogue | live HTTPS | RefreshAllBaselines, Build (P03/P04) |
 | `wsusscn2.cab` (offline-scan metadata) | Microsoft CDN | P06 dependency validation, RefreshDependencyDatabase |
-| `data/wsusscn2-database.json` (layer 2) | committed in repo | P06 stage 2, when present |
+| `data/servicing-dependency-database.json` (layer 2) | committed in repo | P06 stage 2, when present |
 
 ### B.2.2 Outputs
 
@@ -410,13 +410,13 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
     /* ... SSU, .NET CU, DynamicUpdate.Setup, DynamicUpdate.SafeOs ... */
   ],
   "ExcludeKbList": [],
-  "WsusScnCab": {
+  "OfflineSyncPackage": {
     "SourceUrl":                "https://catalog.s.download.windowsupdate.com/.../wsusscn2.cab",
     "LocalCachePath":           "Workspace_UpdateWsi/cache/wsusscn2/wsusscn2.cab",
     "LastDownloadedDate":       "2026-05-27T10:25:00+09:00",
     "LastDownloadedSha256":     "...",
     "LastDownloadedSizeBytes":  1073741824,
-    "DependencyDatabasePath":   "data/wsusscn2-database.json",
+    "DependencyDatabasePath":   "data/servicing-dependency-database.json",
     "DependencyDatabaseSha256": "..."
   }
 }
@@ -540,7 +540,7 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 | `RefreshAllBaselines` | A01 | (`Invoke-AdminPhaseA01_RefreshAllBaselines` at script L586) | Refresh `data/config-Server*.json` baselines from upstream caches |
 | `DumpFieldClassification` | A02 | (`Invoke-AdminPhaseA02_DumpFieldClassification` at script L587) | Emit the field-cadence decision matrix as JSON |
 | `RefreshSnapshots` | A03 | (`Invoke-AdminPhaseA03_RefreshSnapshots` at script L588) | Refresh `data/raw-*` and `data/cache-*` from Microsoft Learn + Catalogue |
-| `RefreshDependencyDatabase` | A04 | implemented & live-cab-verified (r09.0 Step 2b3); see §B.19.9.5/9.6 | Refresh `data/wsusscn2-database.json` (layer 2) from `wsusscn2.cab` (layer 3) |
+| `RefreshDependencyDatabase` | A04 | implemented & live-cab-verified (r09.0 Step 2b3); see §B.19.9.5/9.6 | Refresh `data/servicing-dependency-database.json` (layer 2) from `wsusscn2.cab` (layer 3) |
 
 A04 is **specified but not implemented** in the current revision
 (`$Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'`). It is
@@ -1205,7 +1205,7 @@ layer that:
 | Workspace cache footprint | ~1.1 GB peak (cab + extracted files) |
 | Implementation effort | ~2–3 weeks at the L2c tier (B.19.1.4) |
 | Maintainer time per Patch Tuesday | ~10–20 minutes (refresh + commit) |
-| Per-user ongoing cost | 0 (uses committed `wsusscn2-database.json`) |
+| Per-user ongoing cost | 0 (uses committed `servicing-dependency-database.json`) |
 
 | Benefit | Quantum |
 |:---|:---|
@@ -1258,7 +1258,7 @@ from layer 3 at runtime — is a specification violation.**
                               │
 ┌─────────────────────────────────────────────────────────────────┐
 │  Layer 2: WSUS-derived aggregated dependency database           │
-│  Location: data/wsusscn2-database.json                           │
+│  Location: data/servicing-dependency-database.json                           │
 │  Git:      committed                                             │
 │  Owner:    maintainer-only (regular contributors do not touch)   │
 │  Contents: facts-only extract from wsusscn2.cab — KB IDs,        │
@@ -1348,7 +1348,7 @@ https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn
 ```
 
 This URL is already present in `config-Server*.json` under
-`PatchBaseline.WsusScnCab.SourceUrl` for all four OS families.
+`PatchBaseline.OfflineSyncPackage.SourceUrl` for all four OS families.
 B.19 formalises the lifecycle around it.
 
 #### B.19.3.3 Update cadence
@@ -1657,7 +1657,7 @@ or any of the other plausible variant tags.
 ### B.19.7 Scope filter (normative)
 
 The parser ingests `package.xml` and emits to
-`wsusscn2-database.json` only entries matching **all** of:
+`servicing-dependency-database.json` only entries matching **all** of:
 
 1. **OS family (allow-list, allow-overrides)**: package targets one
    of Windows Server 2016, 2019, 2022, or 2025 (matched via the
@@ -1767,7 +1767,7 @@ executable contract.
 ### B.19.8 Microsoft-prose exclusion rule (normative)
 
 This is a **hard rule, not a target**. Layer 2 (the
-`wsusscn2-database.json` that ships in the public git repo)
+`servicing-dependency-database.json` that ships in the public git repo)
 **MUST NOT** contain any of:
 
 - KB titles (e.g. _"2026-05 Cumulative Update for Windows Server
@@ -1827,7 +1827,7 @@ Stage 3: Stream-parse the Master XML into structured form
 
 Stage 4: Render the hashtable to layer 2 JSON
   Input  : in-memory hashtable + _meta provenance
-  Output : data/wsusscn2-database.json
+  Output : data/servicing-dependency-database.json
   Helper : New-ServicingDependencyDatabase (new)
 ```
 
@@ -1907,7 +1907,7 @@ test it?" by reading this single subsection rather than grepping the
 |---:|---|---:|---|---|
 | 2 | `Invoke-OfflineSyncPackageExtract` | ~97 | `[string]` path to package.xml | live monthly refresh only (platform-coupled to 7-Zip + Windows file layout) |
 | 3 | `ConvertFrom-OfflineSyncPackage`   | ~337 | `[pscustomobject]` with `.Updates`, `.FileLocations`, `.Stats` | T12 (`tests/wsusscn2_parser_test.py`, 22 assertions) |
-| 4 | `New-ServicingDependencyDatabase`   | ~133 | `[string]` path to the written JSON | T12 (structural compare against `tests/fixtures/wsusscn2/expected-output.json`) |
+| 4 | `New-ServicingDependencyDatabase`   | ~133 | `[string]` path to the written JSON | T12 (structural compare against `tests/fixtures/servicing-dependency/expected-output.json`) |
 
 The three functions are contiguous in the script (Stage 2 immediately
 follows `Save-CanonicalJsonFile`; Stages 3 and 4 follow Stage 2 in
@@ -2076,7 +2076,7 @@ list.
 
 T12 (`tests/wsusscn2_parser_test.py`) covers Stages 3 and 4 only;
 Stage 2 is exercised by the live monthly refresh CI. The fixture in
-`tests/fixtures/wsusscn2/package.xml` is deterministically rebuildable
+`tests/fixtures/servicing-dependency/package.xml` is deterministically rebuildable
 via `python3 -m tests.common.wsusscn2_fixture_builder` — fixture
 changes are therefore reviewable as code, not as opaque binary blobs.
 
@@ -2093,7 +2093,7 @@ configs.
 ```
 Invoke-AdminPhaseA04_RefreshDependencyDatabase
     [-CabPath          <string>]    # default: data/cache-wsusscn2/wsusscn2.cab
-    [-OutputPath       <string>]    # default: data/wsusscn2-database.json
+    [-OutputPath       <string>]    # default: data/servicing-dependency-database.json
     [-StaleAfterDays   <int>]       # default: 7
     [-ForceRefetch                ] # ignore cache freshness
     [-SkipLayer1Update            ] # skip the Layer 1 writeback step
@@ -2283,7 +2283,7 @@ filename prefix; this is expected and is not a scope leak.
 > design; the implemented r10.x+ shape differs).** The
 > `Packages` / `RevisionIndex` / PascalCase design sketched in this
 > section was the pre-implementation draft. The **actually
-> implemented and committed** `data/wsusscn2-database.json` (verified
+> implemented and committed** `data/servicing-dependency-database.json` (verified
 > 2026-05) uses a different, flatter, camelCase shape:
 >
 > - Top level is **`_meta` + `updates`** (a flat array), **not**
@@ -2303,9 +2303,9 @@ filename prefix; this is expected and is not a scope leak.
 >   list. (This is the same correction as §B.19.3/§B.19.7.)
 >
 > **The authoritative shape is now the formal JSON Schema
-> `schema/wsusscn2-database.schema.json`** (Draft-07), parallel to the
+> `schema/servicing-dependency-database.schema.json`** (Draft-07), parallel to the
 > Layer 1 `schema/config.schema.json`. The T12 fixture
-> (`tests/fixtures/wsusscn2/expected-output.json`) and the
+> (`tests/fixtures/servicing-dependency/expected-output.json`) and the
 > `tests/wsusscn2_scope_invariants_test.py` gate remain authoritative
 > for the scope/contract semantics. The prose §B.19.10.1–10.4 below is
 > the deprecated pre-implementation draft and is **superseded by the
@@ -2332,8 +2332,8 @@ filename prefix; this is expected and is not a scope leak.
 >   `requiredServicingStackVersion`; Server 2022/2025 combined LCUs
 >   resolve `combined`; baseline/checkpoint updates resolve
 >   `checkpoint`). The fields remain schema-optional/nullable. The committed
->   `data/wsusscn2-database.json` is validated against
->   `schema/wsusscn2-database.schema.json` by the Layer 2 schema gate
+>   `data/servicing-dependency-database.json` is validated against
+>   `schema/servicing-dependency-database.schema.json` by the Layer 2 schema gate
 >   (`tests/wsusscn2_layer2_schema_test.py`).
 
 Versioning is governed by the **shared data-contract identity**, not by
@@ -2356,7 +2356,24 @@ is the contract-stamp subset — `dataContractId` / `dataContractVersion` /
 (the Layer-2-specific `sourceCab` / `scope` / `stats` are not carried).
 The shared epoch stays at `1`: adding the stamp introduces a new
 contract-bearing artifact without changing any existing artifact's shape,
-so no regeneration of `data/wsusscn2-database.json` is required.
+so no regeneration of `data/servicing-dependency-database.json` is required.
+
+The epoch likewise stays at `1` across the r11.15 artifact rename
+(`PatchBaseline.WsusScnCab` → `PatchBaseline.OfflineSyncPackage`; the
+Layer 2 database, its schema, and the test fixtures directory renamed from
+`wsusscn2-*` to `servicing-dependency-*`). A field rename is an **atomic
+relabel** applied to the script, the schema, and all committed config in a
+single commit — no key is added or removed, no value or value-semantics
+change, only the spelling of one key differs. The contract's only consumer,
+`Test-DataContractConsistency`, compares `_meta.dataContractVersion` between
+the running script and each committed artifact; because the rename ships
+script and data together and the script is not yet used end-to-end, no
+externally-generated artifact carrying the pre-rename spelling exists for a
+bumped script to refuse. Bumping would therefore force a no-op `_meta`
+re-stamp of five files (four `config-Server*.json` plus
+`servicing-dependency-database.json`) for zero behavioural difference, and is
+deliberately omitted. Epoch bumps are reserved for changes that add, remove,
+retype, or re-nest fields in a way an existing consumer could mis-read.
 
 #### B.19.10.1 Top-level structure
 
@@ -2366,7 +2383,7 @@ so no regeneration of `data/wsusscn2-database.json` is required.
     "GeneratedAt": "2026-05-27T10:30:00+09:00",
     "GeneratedBy": "RefreshAllBaselines:r09.0",
     "ParserVersion": "1.0",
-    "WsusScnCab": {
+    "OfflineSyncPackage": {
       "SourceUrl":              "https://catalog.s.download.windowsupdate.com/.../wsusscn2.cab",
       "FetchedAt":              "2026-05-27T10:25:00+09:00",
       "LastModifiedHeader":     "Tue, 12 May 2026 14:00:00 GMT",
@@ -2525,13 +2542,13 @@ delivers. The build number itself comes from the Catalogue scrape
 (`Title` parsing), not from layer 2 — layer 2 contains relationships,
 not build numbers (which would be Microsoft prose per §B.19.8).
 
-#### B.19.12.2 New fields on `PatchBaseline.WsusScnCab`
+#### B.19.12.2 New fields on `PatchBaseline.OfflineSyncPackage`
 
-The §B.4.3 `WsusScnCab` block gains two additional fields:
+The §B.4.3 `OfflineSyncPackage` block gains two additional fields:
 
 | Field | Type | Source |
 |:---|:---|:---|
-| `DependencyDatabasePath` | string | Always `"data/wsusscn2-database.json"` |
+| `DependencyDatabasePath` | string | Always `"data/servicing-dependency-database.json"` |
 | `DependencyDatabaseSha256` | string | SHA-256 of the layer 2 file recorded into layer 1 |
 
 `DependencyDatabaseSha256` lets P06 verify that the layer 2 file on
@@ -2668,7 +2685,7 @@ function Test-PatchDependencyClosureFromGraph {
     param(
         [Parameter(Mandatory)] [pscustomobject[]] $ResolvedPatches,
         [Parameter(Mandatory)] [pscustomobject]   $WimMountState,
-        [Parameter()]          [string]           $DatabasePath = "$PSScriptRoot/data/wsusscn2-database.json",
+        [Parameter()]          [string]           $DatabasePath = "$PSScriptRoot/data/servicing-dependency-database.json",
         [Parameter()]          [hashtable]        $PolicyOverride
     )
 }
@@ -2706,7 +2723,7 @@ WIM metadata (build number, installed packages list) captured by
 > correction at the head of §B.19.13, the per-patch verdict replaces the
 > KB-closure fields with the SS-version-comparison and presence/supersession
 > model. The servicing-stack field names use the same full spelling as
-> `schema/wsusscn2-database.schema.json` (`requiredServicingStackVersion`
+> `schema/servicing-dependency-database.schema.json` (`requiredServicingStackVersion`
 > etc.) rather than the earlier `RequiredSs` abbreviation:
 >
 > ```
@@ -2816,12 +2833,12 @@ runs (the typical air-gapped case), and vice versa.
 #### B.19.14.2 Stage 2 algorithm
 
 ```
-1. Try to load layer 2 from data/wsusscn2-database.json
+1. Try to load layer 2 from data/servicing-dependency-database.json
    - If absent and -OfflineCabPath given: invoke RefreshDependencyDatabase synchronously
    - If absent and online: download wsusscn2.cab, parse, write layer 2
    - If absent and air-gapped: skip stage 2 with warning, set OverallStatus=Unknown
-2. Verify layer 2's _meta.WsusScnCab.Sha256 matches
-   PatchBaseline.WsusScnCab.DependencyDatabaseSha256 (if recorded)
+2. Verify layer 2's _meta.OfflineSyncPackage.Sha256 matches
+   PatchBaseline.OfflineSyncPackage.DependencyDatabaseSha256 (if recorded)
    - On mismatch: emit warning, continue
 3. Call Test-PatchDependencyClosureFromGraph with $ResolvedPatches
 4. Render verdict via Show-DependencyClosureFromGraph
@@ -2886,13 +2903,13 @@ A01 RefreshAllBaselines
 A01.0 logic:
 
 1. Compute `expectedSha = ` SHA-256 of the on-disk
-   `data/wsusscn2-database.json`.
+   `data/servicing-dependency-database.json`.
 2. If layer 2 absent, force a refresh.
 3. If layer 2 present and `_meta.GeneratedAt` < latest Patch
    Tuesday: refresh.
 4. If layer 2 present and current: skip with notice.
 5. Refresh = download cab → parse → write layer 2 → cross-update
-   each `PatchBaseline.WsusScnCab.DependencyDatabaseSha256`.
+   each `PatchBaseline.OfflineSyncPackage.DependencyDatabaseSha256`.
 
 A01.0 emits its own JSON to `<WorkRoot>/diag/refresh-deps/` on
 both skip and execute paths, for audit.
@@ -2944,7 +2961,7 @@ no network. Three operating modes are supported:
 | Mode | Setup | Stage 2 behaviour |
 |:---|:---|:---|
 | Online (typical) | `wsusscn2.cab` auto-fetched as needed | Full validation |
-| Air-gapped with cached layer 2 | `data/wsusscn2-database.json` present (committed via git, or copied in) | Full validation using cached layer 2 |
+| Air-gapped with cached layer 2 | `data/servicing-dependency-database.json` present (committed via git, or copied in) | Full validation using cached layer 2 |
 | Air-gapped with raw cab only | `wsusscn2.cab` placed manually + `-OfflineCabPath <path>` | Parse-and-validate inline |
 | Air-gapped, no cab | (no setup) | Stage 2 skipped with `Unknown`; Stage 1 only |
 
@@ -2970,7 +2987,7 @@ Mitigations:
    cover the parser's emit shape; a schema-incompatible Master XML
    change would surface there before merging.
 3. A new test `tests/wsusscn2_parser_test.py` (T7) is planned for
-   r09.0: it consumes a committed `tests/fixtures/wsusscn2/` set of
+   r09.0: it consumes a committed `tests/fixtures/servicing-dependency/` set of
    miniature Master XML snippets and asserts the parser's behaviour
    on representative `<Update>` shapes. T7 is OFFLINE (uses
    fixtures) so it can run on every PR.
@@ -2990,10 +3007,10 @@ Mitigations:
 .\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Monthly
 
 # 2. Inspect the layer 2 diff
-git diff data/wsusscn2-database.json | head -80
+git diff data/servicing-dependency-database.json | head -80
 
 # 3. Sanity-check layer 2 size
-wc -c data/wsusscn2-database.json
+wc -c data/servicing-dependency-database.json
 
 # 4. Run the synthetic CI locally
 python3 tests/wsusscn2_parser_test.py        # T7 (new)
@@ -3003,15 +3020,15 @@ python3 tests/catalog_fixture_test.py        # T2 (existing)
 git diff data/config-Server*.json
 
 # 6. Commit both layer 1 and layer 2 in the same commit
-git add data/config-Server*.json data/wsusscn2-database.json
+git add data/config-Server*.json data/servicing-dependency-database.json
 git commit -m "data: r09.0 layer-1+2 monthly refresh (2026-MM)"
 ```
 
 #### B.19.18.2 PR review checklist
 
-When reviewing a PR that touches `data/wsusscn2-database.json`:
+When reviewing a PR that touches `data/servicing-dependency-database.json`:
 
-- [ ] `_meta.WsusScnCab.Sha256` is present and is a 64-char hex
+- [ ] `_meta.OfflineSyncPackage.Sha256` is present and is a 64-char hex
       string.
 - [ ] `_meta.GeneratedAt` is recent (within 7 days of the PR
       submission).
@@ -3019,7 +3036,7 @@ When reviewing a PR that touches `data/wsusscn2-database.json`:
       (typical post-scope-filter count).
 - [ ] No KB Title strings, descriptions, or release-notes prose are
       present. Quick grep:
-      `grep -c "Cumulative Update" data/wsusscn2-database.json` →
+      `grep -c "Cumulative Update" data/servicing-dependency-database.json` →
       MUST be 0.
 - [ ] Layer 2 file size is between 1 MB and 8 MB. (`wc -c`)
 - [ ] Layer 1 `DependencyDatabaseSha256` in every
@@ -3070,7 +3087,7 @@ CHANGELOG entry.
 #### B.19.19.2 Behaviour when layer 2 is absent at runtime
 
 Already specified in §B.19.14.4. Summary: r09.0 Step 1+2 is fully
-backward-compatible — the absence of `data/wsusscn2-database.json`
+backward-compatible — the absence of `data/servicing-dependency-database.json`
 behaves as "Stage 2 unknown, Stage 1 still works". Step 3 retains
 that behaviour for the `-OfflineCabPath` flow but warns louder.
 
@@ -3086,7 +3103,7 @@ mount-time checking, which remains the runtime safety net.
 Existing operators upgrade as follows:
 
 1. Pull the new `Update-WindowsServerIso.ps1` and the new
-   `data/wsusscn2-database.json` (both ship together).
+   `data/servicing-dependency-database.json` (both ship together).
 2. No config changes needed — existing
    `config-Server*.json` files are forward-compatible; the new
    optional fields will be populated on the next
@@ -3131,7 +3148,7 @@ scripts/powershell/update-windows-server-iso/
 │   ├── cache-dynamicupdate-Server2022.json      # Parsed Dynamic Update cache (Server 2022)
 │   └── cache-dynamicupdate-Server2025.json      # Parsed Dynamic Update cache (Server 2025)
 │   # Planned (r09.0 Step 2+):
-│   # └── wsusscn2-database.json     # Layer 2, ~2-5 MB (per §B.19)
+│   # └── servicing-dependency-database.json     # Layer 2, ~2-5 MB (per §B.19)
 │
 ├── tests/                            # Python self-verification suite (T1-T13 + gates)
 │   ├── README.md                     # Canonical T-numbering and quick-start
@@ -3203,7 +3220,7 @@ of the upstream HTTP fetch so re-runs can skip unchanged content.
 | Filename | Convention | Comment |
 |:---|:---|:---|
 | `data/config-Server2025.json` | Operator config | One per OS |
-| `data/wsusscn2-database.json` | Tool-generated data | r09.0+, single file |
+| `data/servicing-dependency-database.json` | Tool-generated data | r09.0+, single file |
 | `data/raw-release-info.md` | Mirrored upstream | Refreshed by RefreshSnapshots |
 | `docs/history/r08.0-step2-installwim-symmetry-check.md` | Per-revision investigation | Cycle (r08.0), step (step2), topic kebab-case |
 | `tests/fixtures/2026-05/server2025-lcu.html` | Test fixture | Per-month, per-OS HTML captures |
@@ -3310,7 +3327,7 @@ by Type). Files are distinguished by the §B.20.2 three-prefix rule
 **Why**: A single `data/` directory mirrors operator mental model
 ("the data the script reads"). Type-named sub-directories would
 have proliferated as new data classes were added; the flat layout
-absorbs the new wsusscn2-database.json in r09.0 without surprise.
+absorbs the new servicing-dependency-database.json in r09.0 without surprise.
 
 ### B.22.4 Schema version: stay at 2.1
 
@@ -3395,7 +3412,7 @@ the committed state.
 CI Stage 4 (`...__stage4__monthly-refresh.yml`) runs
 RefreshAllBaselines monthly on the 15th and opens a PR if
 `data/config-Server*.json` changed. r09.0 extends this to also
-include `data/wsusscn2-database.json` in the auto-PR.
+include `data/servicing-dependency-database.json` in the auto-PR.
 
 ### B.22.13 Windows ADK auto-install
 
@@ -3574,7 +3591,7 @@ coercion), `[long]`/`[double]` for numbers, `[bool]`, and `$null`. Its
 output shape matches what `ConvertFrom-Json` returned previously
 (dot-access and `.PSObject.Properties` both work), so it is a
 drop-in replacement on every canonical data read path
-(`config-*.json`, `wsusscn2-database.json`, `cache-*.json`). Internal
+(`config-*.json`, `servicing-dependency-database.json`, `cache-*.json`). Internal
 JSONL logs and object-clone idioms still use the built-in cmdlets.
 
 `Save-CanonicalJsonFile` wraps the serializer and writes raw bytes
@@ -3834,8 +3851,8 @@ in the same commit; the two are a matched pair.
 After r09.0 the layer 1 / layer 2 cross-reference (§B.19.12) adds
 two consistency checks:
 
-- `PatchBaseline.WsusScnCab.DependencyDatabaseSha256` MUST equal
-  the SHA-256 of `data/wsusscn2-database.json` (when both are
+- `PatchBaseline.OfflineSyncPackage.DependencyDatabaseSha256` MUST equal
+  the SHA-256 of `data/servicing-dependency-database.json` (when both are
   present).
 - Every `NeutralPatches[*].RequiresKbIds` entry MUST be either
   empty or refer to KB IDs present in the same `NeutralPatches[]`
@@ -3938,11 +3955,11 @@ each month and after manual `workflow_dispatch`. It:
 1. Checks out `main`.
 2. Runs `.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines`.
 3. (r09.0+) The action's A01.0 sub-phase (§B.19.15.2) refreshes
-   `data/wsusscn2-database.json` first.
+   `data/servicing-dependency-database.json` first.
 4. If any `data/config-Server*.json` or
-   `data/wsusscn2-database.json` changed, opens an auto-PR.
+   `data/servicing-dependency-database.json` changed, opens an auto-PR.
 5. The PR is restricted via `add-paths` to `data/config-*.json` and
-   (r09.0+) `data/wsusscn2-database.json`.
+   (r09.0+) `data/servicing-dependency-database.json`.
 
 Stage 4 supports `workflow_dispatch` with four inputs (`mode`,
 `onlyOs`, `onlyLanguage`, `dryRun`) so a maintainer can trigger an
@@ -4013,7 +4030,7 @@ mirrors that authoritative table.
 | **T9** `catalog_title_tokens_test.py` | Offline regression for `Get-CatalogTitleTokenList` against all four OS configs + `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases | 18 | No | Every commit touching `Common.CatalogTitleTokens` in any OS config, or the narrow-filter helpers |
 | **T10** `release_info_resolver_test.py` | Offline regression for `Get-PatchSetFromReleaseInfoDiscovery` (Refresher main-path migration); 4 scenarios + defensive cases | 18 | No | Every commit touching `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or its three caches |
 | **T11** `canonical_json_test.py` | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell) and `canonical_json_dumps` / `save_canonical_json_file` (Python) per SPEC Part B.23 | 26 | No | Every commit touching the canonical JSON helpers (PS or Python) |
-| **T12** `wsusscn2_parser_test.py` | Offline self-verification of wsusscn2 parser pipeline Stages 3 and 4 against the committed fixture `fixtures/wsusscn2/package.xml`; structural compare against `expected-output.json` per SPEC §B.19.9.4 | 22 | No | Every commit touching Stage 3 / Stage 4 of the wsusscn2 parser or the scope-filter GUID tables |
+| **T12** `wsusscn2_parser_test.py` | Offline self-verification of wsusscn2 parser pipeline Stages 3 and 4 against the committed fixture `fixtures/servicing-dependency/package.xml`; structural compare against `expected-output.json` per SPEC §B.19.9.4 | 22 | No | Every commit touching Stage 3 / Stage 4 of the wsusscn2 parser or the scope-filter GUID tables |
 | **T13** `wsusscn2_layer1_test.py` | Offline self-verification of the Layer 1 writeback helper `Update-Layer1DependencyVerification` (Phase 2b2/2b3) per SPEC §B.19.9.5 | 15 | No | Every commit touching `Update-Layer1DependencyVerification`, the OS-category GUID table, or the A04 Layer 1 callout |
 | **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 27 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
 | **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config.schema.json` |
@@ -4095,7 +4112,7 @@ planned for r09.0 Step 2+ to provide offline regression coverage for
 the §B.19 Master XML parser (`ConvertFrom-OfflineSyncPackage`,
 `New-ServicingDependencyDatabase`). It will assert the parser's emit
 shape against committed mini-XML fixtures under
-`tests/fixtures/wsusscn2/`. Implementation tracks the §B.19.17 parser
+`tests/fixtures/servicing-dependency/`. Implementation tracks the §B.19.17 parser
 stability guarantees.
 
 T11 is **not yet implemented** and is listed for forward traceability

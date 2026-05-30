@@ -543,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.29-r11.14'
-$Script:ScriptTag     = 'offline-sync-package-rename'
+$Script:ScriptVersion = 'update-wsi-2026.05.30-r11.15'
+$Script:ScriptTag     = 'servicing-dependency-artifact-rename'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -669,7 +669,7 @@ $Script:OfflineSyncEosEsuDenyProductGuids = [ordered]@{
 # validated across artifacts by Test-DataContractConsistency, so one
 # comparison validates the whole set instead of reconciling independent
 # per-model schema versions. DataContractVersion is bumped on any breaking
-# shape change to any data model. See schema/wsusscn2-database.schema.json
+# shape change to any data model. See schema/servicing-dependency-database.schema.json
 # and SPEC section B.19.10.
 $Script:DataContractId      = '4c173c61-c099-4512-9283-f5d951beda8b'
 $Script:DataContractVersion = 1
@@ -7003,7 +7003,7 @@ function Install-SevenZipFallback {
 # To get a single canonical byte stream across all three runtimes, both the
 # writer and the reader are implemented from scratch here and used in place
 # of the built-in cmdlets for all canonical data files (config-*.json,
-# wsusscn2-database.json, cache-*.json, etc.).
+# servicing-dependency-database.json, cache-*.json, etc.).
 #
 # Canonical format (SPEC Part B.23 section B.23.1):
 #   1. UTF-8 (no BOM)              6. Literal non-ASCII (no \uXXXX)
@@ -7967,7 +7967,7 @@ function Test-PatchServicingReadinessFromGraph {
     .DESCRIPTION
         For each resolved patch the function emits one verdict object with
         the finalised shape (full-spelling servicing-stack field names that
-        match schema/wsusscn2-database.schema.json):
+        match schema/servicing-dependency-database.schema.json):
 
             KbId UpdateId Verdict RequiredServicingStackVersion
             ProvidedServicingStackVersion ServicingStackModel Superseded Notes
@@ -8029,7 +8029,7 @@ function Test-PatchServicingReadinessFromGraph {
         [pscustomobject[]] $ResolvedPatches,
 
         [Parameter()]
-        [string] $DatabasePath = "$PSScriptRoot/data/wsusscn2-database.json",
+        [string] $DatabasePath = "$PSScriptRoot/data/servicing-dependency-database.json",
 
         [Parameter()]
         [pscustomobject] $WimMountState,
@@ -8786,7 +8786,7 @@ function New-ServicingDependencyDatabase {
         JSON, depth=32).
 
         The output file is the Layer 2 database
-        (data/wsusscn2-database.json by repository convention) consumed by
+        (data/servicing-dependency-database.json by repository convention) consumed by
         the SSU/LCU pre-flight gate (SPEC section B.19.5) and by
         Invoke-AdminPhaseA04_RefreshDependencyDatabase.
     .PARAMETER ParseResult
@@ -11782,7 +11782,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                 ChecksumAlgorithm = 'SHA256'
                 NeutralPatches = @()
                 ExcludeKbList = @()
-                WsusScnCab = [pscustomobject][ordered]@{
+                OfflineSyncPackage = [pscustomobject][ordered]@{
                     SourceUrl = (Get-OfflineSyncPackageUrl)
                     LocalCachePath = ''
                     LastDownloadedDate = ''
@@ -12190,7 +12190,7 @@ function Export-PatchValidationReport {
     $summary = [pscustomobject][ordered]@{
         ValidationTimestamp = (Get-Date).ToString('o')
         Target              = $Target
-        WsusScnCab          = $OfflineSyncPackageInfo
+        OfflineSyncPackage          = $OfflineSyncPackageInfo
         Result              = [pscustomobject][ordered]@{
             Status               = $Status
             Reason               = $Reason
@@ -12319,7 +12319,7 @@ function Invoke-PlanPhase06_ValidatePatchSet {
         Set-DebugStep -Step 'resolve-wsusscn2-cab'
         $wsusMeta = $null
         if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) {
-            $wsusMeta = $Script:OsProfile.PatchBaseline.WsusScnCab
+            $wsusMeta = $Script:OsProfile.PatchBaseline.OfflineSyncPackage
         }
         $wsusInfo = $null
         try {
@@ -12339,10 +12339,10 @@ function Invoke-PlanPhase06_ValidatePatchSet {
 
         # ---- Persist wsusscn2.cab metadata to Config (if newly downloaded) ----
         if ($wsusInfo.DownloadedNow -and $Script:OsProfile.PatchBaseline) {
-            $Script:OsProfile.PatchBaseline.WsusScnCab.LocalCachePath          = $wsusInfo.Path
-            $Script:OsProfile.PatchBaseline.WsusScnCab.LastDownloadedDate      = (Get-Date).ToString('o')
-            $Script:OsProfile.PatchBaseline.WsusScnCab.LastDownloadedSha256    = $wsusInfo.Sha256
-            $Script:OsProfile.PatchBaseline.WsusScnCab.LastDownloadedSizeBytes = $wsusInfo.SizeBytes
+            $Script:OsProfile.PatchBaseline.OfflineSyncPackage.LocalCachePath          = $wsusInfo.Path
+            $Script:OsProfile.PatchBaseline.OfflineSyncPackage.LastDownloadedDate      = (Get-Date).ToString('o')
+            $Script:OsProfile.PatchBaseline.OfflineSyncPackage.LastDownloadedSha256    = $wsusInfo.Sha256
+            $Script:OsProfile.PatchBaseline.OfflineSyncPackage.LastDownloadedSizeBytes = $wsusInfo.SizeBytes
             try {
                 $cfgPath = Get-OsConfigPath -OsKey $Script:OsVersion
                 Save-ConfigWithBaseline -ConfigPath $cfgPath -OsProfile $Script:OsProfile
@@ -14529,7 +14529,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
     <#
     .SYNOPSIS
         Refresh the Layer 2 Servicing Dependency Database
-        (data/wsusscn2-database.json) from wsusscn2.cab.
+        (data/servicing-dependency-database.json) from wsusscn2.cab.
     .DESCRIPTION
         Executes the four-stage wsusscn2 parser pipeline as a single
         cohesive Action:
@@ -14564,7 +14564,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         Stage 1 download is skipped.
     .PARAMETER OutputPath
         Optional. Full path to the Layer 2 JSON to write. Defaults to
-        <ScriptRoot>/data/wsusscn2-database.json.
+        <ScriptRoot>/data/servicing-dependency-database.json.
     .PARAMETER SkipLayer1Update
         After writing the Layer 2 JSON, do NOT propagate the latest
         LCU KB/CreationDate to data/config-Server*.json. Useful in
@@ -14595,7 +14595,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         }
 
         if (-not $OutputPath) {
-            $OutputPath = Join-Path $dataRoot 'wsusscn2-database.json'
+            $OutputPath = Join-Path $dataRoot 'servicing-dependency-database.json'
         }
 
         $scratchRoot = if ($Script:TempDir) { $Script:TempDir } else { $env:TEMP }
@@ -14624,7 +14624,7 @@ function Invoke-AdminPhaseA04_RefreshDependencyDatabase {
         $latestPT = Get-LatestPatchTuesday
         $wsusMeta = $null
         if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) {
-            $wsusMeta = $Script:OsProfile.PatchBaseline.WsusScnCab
+            $wsusMeta = $Script:OsProfile.PatchBaseline.OfflineSyncPackage
         }
         $effectiveOverride = if ($OverridePath) { $OverridePath } else { $Script:OfflineSyncPackagePath }
         $wsusInfo = Get-OfflineSyncPackageIfNeeded `

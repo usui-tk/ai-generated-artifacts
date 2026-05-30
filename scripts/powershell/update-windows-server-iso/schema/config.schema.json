@@ -43,7 +43,7 @@
     },
     "_meta": {
       "type": "object",
-      "description": "Data-contract provenance stamp (shared cross-cutting contract; mirrors the stamp subset of schema/wsusscn2-database.schema.json _meta). Its presence classifies this config as a contract-bearing artifact for Test-DataContractConsistency; absence leaves it 'Unknown' (still valid). Written by Save-ConfigWithBaseline.",
+      "description": "Data-contract provenance stamp (shared cross-cutting contract; mirrors the stamp subset of schema/servicing-dependency-database.schema.json _meta). Its presence classifies this config as a contract-bearing artifact for Test-DataContractConsistency; absence leaves it 'Unknown' (still valid). Written by Save-ConfigWithBaseline.",
       "required": [
         "dataContractId",
         "dataContractVersion",
@@ -60,7 +60,7 @@
         "dataContractVersion": {
           "type": "integer",
           "minimum": 1,
-          "description": "Shared cross-cutting data-contract epoch (see wsusscn2-database.schema.json). Held in lockstep across every data artifact; one comparison validates the whole set."
+          "description": "Shared cross-cutting data-contract epoch (see servicing-dependency-database.schema.json). Held in lockstep across every data artifact; one comparison validates the whole set."
         },
         "scriptVersion": {
           "type": "string",
@@ -215,8 +215,8 @@
           },
           "description": "KBs to exclude, each with a KbId and human Reason."
         },
-        "WsusScnCab": {
-          "$ref": "#/definitions/WsusScnCab"
+        "OfflineSyncPackage": {
+          "$ref": "#/definitions/OfflineSyncPackage"
         }
       },
       "not": {
@@ -321,7 +321,7 @@
       },
       "additionalProperties": false
     },
-    "WsusScnCab": {
+    "OfflineSyncPackage": {
       "type": "object",
       "description": "Offline-scan catalog metadata. SPEC B.4.3.",
       "properties": {

@@ -2,8 +2,8 @@
 wsusscn2 Layer 2 schema gate (offline, stdlib-only).
 
 Validates the committed Layer 2 dependency database
-(data/wsusscn2-database.json) against its authoritative JSON Schema
-(schema/wsusscn2-database.schema.json), and asserts the M1 data-quality
+(data/servicing-dependency-database.json) against its authoritative JSON Schema
+(schema/servicing-dependency-database.schema.json), and asserts the M1 data-quality
 invariants that the schema alone cannot express. This is the gate that
 keeps the shipped, cab-derived Layer 2 in sync with the contract as the
 M1 increments populate it.
@@ -38,8 +38,8 @@ from pathlib import Path
 
 TEST_DIR = Path(__file__).resolve().parent
 SUBPROJECT_DIR = TEST_DIR.parent
-SCHEMA_PATH = SUBPROJECT_DIR / "schema" / "wsusscn2-database.schema.json"
-DB_PATH = SUBPROJECT_DIR / "data" / "wsusscn2-database.json"
+SCHEMA_PATH = SUBPROJECT_DIR / "schema" / "servicing-dependency-database.schema.json"
+DB_PATH = SUBPROJECT_DIR / "data" / "servicing-dependency-database.json"
 
 # Reuse the single draft-07-subset validator in the suite.
 sys.path.insert(0, str(TEST_DIR))

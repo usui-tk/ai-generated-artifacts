@@ -53,7 +53,7 @@
         "Variant": "Full",
         "_DependencyVerifiedDate": "2026-05-28",
         "_DependencyVerifiedSource": "manual-r09-step2a",
-        "_Notes": "SSU prerequisite for KB5087537 LCU (HRESULT 0x800f0823 fix per r08.0 Step 4d). Auto-discovery via Layer 2 wsusscn2-database.json pending r09.0 Step 2b parser implementation. Catalogue UpdateID: d0f1761f-c762-4764-8443-8c567f6929a2 (12.2 MB, Never restarts)."
+        "_Notes": "SSU prerequisite for KB5087537 LCU (HRESULT 0x800f0823 fix per r08.0 Step 4d). Auto-discovery via Layer 2 servicing-dependency-database.json pending r09.0 Step 2b parser implementation. Catalogue UpdateID: d0f1761f-c762-4764-8443-8c567f6929a2 (12.2 MB, Never restarts)."
       },
       {
         "Type": "LCU",
@@ -106,7 +106,7 @@
       }
     ],
     "ExcludeKbList": [],
-    "WsusScnCab": {
+    "OfflineSyncPackage": {
       "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
       "LocalCachePath": "",
       "LastDownloadedDate": "",

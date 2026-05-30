@@ -128,7 +128,7 @@
         "Reason": "Checkpoint Cumulative Update for Win11 24H2 / Server 2025; not required for OS install (per Microsoft Learn)."
       }
     ],
-    "WsusScnCab": {
+    "OfflineSyncPackage": {
       "SourceUrl": "https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab",
       "LocalCachePath": "",
       "LastDownloadedDate": "",

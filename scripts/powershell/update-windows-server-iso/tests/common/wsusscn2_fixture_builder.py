@@ -35,7 +35,7 @@ Expected in-scope bundles: A (rev 990001) + B (rev 990003) = 2
   B.payloadUrls = [URL_CCCC]             (DDDD is orphan -> omitted)
 
 Usage:
-    python3 -m tests.common.wsusscn2_fixture_builder --out-dir tests/fixtures/wsusscn2
+    python3 -m tests.common.wsusscn2_fixture_builder --out-dir tests/fixtures/servicing-dependency
 """
 
 from __future__ import annotations
@@ -317,7 +317,7 @@ def build_expected_output() -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out-dir", type=Path, default=Path("tests/fixtures/wsusscn2"))
+    parser.add_argument("--out-dir", type=Path, default=Path("tests/fixtures/servicing-dependency"))
     parser.add_argument("--print-only", action="store_true")
     args = parser.parse_args()
 

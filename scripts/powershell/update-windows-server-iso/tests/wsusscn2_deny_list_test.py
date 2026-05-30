@@ -8,7 +8,7 @@ PowerShell implementation. This is the executable check that the
 PowerShell deny-list filter matches the reference `classify_scope`
 semantics in wsusscn2_scope_invariants_test.py.
 
-The fixture (tests/fixtures/wsusscn2/deny-list-package.xml) has four
+The fixture (tests/fixtures/servicing-dependency/deny-list-package.xml) has four
 bundles, all recent and SecurityUpdate-classified:
 
   * D1: deny-only Server 2012 R2          -> excluded + counted
@@ -43,7 +43,7 @@ from pathlib import Path
 TEST_DIR = Path(__file__).resolve().parent
 SUBPROJECT_DIR = TEST_DIR.parent
 SCRIPT_PATH = SUBPROJECT_DIR / "Update-WindowsServerIso.ps1"
-FIXTURE_DIR = TEST_DIR / "fixtures" / "wsusscn2"
+FIXTURE_DIR = TEST_DIR / "fixtures" / "servicing-dependency"
 PACKAGE_XML = FIXTURE_DIR / "deny-list-package.xml"
 
 PINNED_NOW = "2026-05-28T00:00:00Z"

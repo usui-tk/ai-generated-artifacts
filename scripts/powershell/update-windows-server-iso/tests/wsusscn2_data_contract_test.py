@@ -21,7 +21,7 @@ touches the repository's real data/) and asserts the classification and
 roll-up, plus the directory-expansion behaviour (a directory argument
 expands to its *.json files) used by the A04 wiring.
 
-The committed data/wsusscn2-database.json is additionally checked to be
+The committed data/servicing-dependency-database.json is additionally checked to be
 classified Current (it was regenerated under the current contract).
 
 Invocation:
@@ -40,7 +40,7 @@ from pathlib import Path
 TEST_DIR = Path(__file__).resolve().parent
 SUBPROJECT_DIR = TEST_DIR.parent
 SCRIPT_PATH = SUBPROJECT_DIR / "Update-WindowsServerIso.ps1"
-DB_PATH = SUBPROJECT_DIR / "data" / "wsusscn2-database.json"
+DB_PATH = SUBPROJECT_DIR / "data" / "servicing-dependency-database.json"
 
 
 def _script_contract():

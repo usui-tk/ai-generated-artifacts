@@ -12,7 +12,7 @@ three-check servicing-stack readiness model (SPEC B.19.13 / B.19.13.1):
 
 Verdict precedence: NotInDatabase > SsTooOld > Superseded > Pass.
 
-Drives the function against fixtures/wsusscn2/readiness-database.json,
+Drives the function against fixtures/servicing-dependency/readiness-database.json,
 whose five updates cover:
   rev 1001  2016 separate, requiredSs 10.0.14393.7692, not superseded
   rev 1002  2022 combined  (SS N/A)
@@ -47,7 +47,7 @@ from pathlib import Path
 TEST_DIR = Path(__file__).resolve().parent
 SUBPROJECT_DIR = TEST_DIR.parent
 SCRIPT_PATH = SUBPROJECT_DIR / "Update-WindowsServerIso.ps1"
-DB_PATH = TEST_DIR / "fixtures" / "wsusscn2" / "readiness-database.json"
+DB_PATH = TEST_DIR / "fixtures" / "servicing-dependency" / "readiness-database.json"
 
 
 class TestResult:

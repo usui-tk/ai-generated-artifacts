@@ -2,8 +2,8 @@
 """wsusscn2 scope-invariants gate (SPEC B.19.7 allow-list / B.19.9 deny-list).
 
 Validates the *scope contract* of the Layer 2 dependency database
-(`data/wsusscn2-database.json`) and the T12 fixture
-(`tests/fixtures/wsusscn2/expected-output.json`) against the empirically
+(`data/servicing-dependency-database.json`) and the T12 fixture
+(`tests/fixtures/servicing-dependency/expected-output.json`) against the empirically
 established EOS/ESU exclusion model. It also unit-tests the allow-overrides
 classification logic on synthetic cases.
 
@@ -60,8 +60,8 @@ import sys
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 SUBPROJECT_ROOT = TESTS_DIR.parent
 DATA_DIR = SUBPROJECT_ROOT / "data"
-LAYER2_PATH = DATA_DIR / "wsusscn2-database.json"
-FIXTURE_PATH = TESTS_DIR / "fixtures" / "wsusscn2" / "expected-output.json"
+LAYER2_PATH = DATA_DIR / "servicing-dependency-database.json"
+FIXTURE_PATH = TESTS_DIR / "fixtures" / "servicing-dependency" / "expected-output.json"
 
 # ---------------------------------------------------------------------------
 # Scope GUID tables (lowercase). Verified against a real wsusscn2.cab
@@ -312,7 +312,7 @@ def main():
 
     # Production document (real, monthly-refreshed data)
     print()
-    print("Section C: contract over production data/wsusscn2-database.json")
+    print("Section C: contract over production data/servicing-dependency-database.json")
     prod = _load(LAYER2_PATH)
     prod_scope, prod_updates = check_layer2_doc(r, "C-prod", prod)
 

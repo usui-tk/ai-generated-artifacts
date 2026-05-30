@@ -83,7 +83,7 @@ a build identifier plus a calendar date. Pending items are marked
 | Part C §C.3.4 — `canonical_json_format_check.py` (27 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Scope-invariants gate — `wsusscn2_scope_invariants_test.py` (23 assertions, EOS/ESU deny-list + allow-overrides over Layer 2 + fixture + synthetic; SPEC §B.19.7/§B.19.7.1) | ✓ all pass | r11.2 wsusscn2-phase2c-eos-esu-scope build / 2026-05-29 |
-| Layer 2 schema gate — `wsusscn2_layer2_schema_test.py` (16 assertions, committed `data/wsusscn2-database.json` vs `schema/wsusscn2-database.schema.json` + data-contract identity, portable provenance, kbIds populate, Microsoft-prose hard rule; SPEC §B.19.8/§B.19.10) | ✓ all pass | r11.9 wsusscn2-layer2-kbids-populate build / 2026-05-29 |
+| Layer 2 schema gate — `wsusscn2_layer2_schema_test.py` (16 assertions, committed `data/servicing-dependency-database.json` vs `schema/servicing-dependency-database.schema.json` + data-contract identity, portable provenance, kbIds populate, Microsoft-prose hard rule; SPEC §B.19.8/§B.19.10) | ✓ all pass | r11.9 wsusscn2-layer2-kbids-populate build / 2026-05-29 |
 | Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T19 + format gate + config schema gate + scope-invariants gate + Layer 2 schema gate) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
@@ -373,7 +373,7 @@ python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
 `wsusscn2_parser_test.py` (T12, 22 assertions) provides offline
 regression coverage for the §B.19 Master XML parser
 (`ConvertFrom-OfflineSyncPackage`, `New-ServicingDependencyDatabase`)
-against the committed fixture `tests/fixtures/wsusscn2/package.xml`,
+against the committed fixture `tests/fixtures/servicing-dependency/package.xml`,
 paired with the `tests/common/wsusscn2_*.py` fixture helpers.
 `wsusscn2_layer1_test.py` (T13, 15 assertions) covers the Phase
 2b2/2b3 Layer 1 writeback helper `Update-Layer1DependencyVerification`.
@@ -403,7 +403,7 @@ File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage1_
 | 7 | T12 – T13 | `wsusscn2_parser_test.py` (22 assertions, Stages 3/4) + `wsusscn2_layer1_test.py` (15 assertions, Layer 1 writeback) |
 | 8 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
 | 9 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against `schema/config.schema.json` (14 assertions) |
-| 10 | scope-invariants gate | `wsusscn2_scope_invariants_test.py` — EOS/ESU deny-list + allow-overrides over `data/wsusscn2-database.json` + fixture + synthetic cases (23 assertions) |
+| 10 | scope-invariants gate | `wsusscn2_scope_invariants_test.py` — EOS/ESU deny-list + allow-overrides over `data/servicing-dependency-database.json` + fixture + synthetic cases (23 assertions) |
 
 Triggers: every push, every PR. Required to merge.
 
