@@ -130,7 +130,7 @@ scripts/powershell/update-windows-server-iso/
 │   ├── cache-release-info.json
 │   ├── cache-dotnet-cu.json
 │   └── cache-dynamicupdate-Server{2022,2025}.json
-├── tests/                            # 自己検証スイート（T1-T13）
+├── tests/                            # 自己検証スイート（T1-T19 + ゲート）
 └── docs/history/                     # サイクル別の調査レポート
 ```
 
@@ -141,41 +141,81 @@ scripts/powershell/update-windows-server-iso/
 ## クイックスタート
 
 ```powershell
-# 1. ファイルのブロック解除（「インターネットからダウンロードした」警告の除去）
+# 1. ファイルのブロック解除と、このプロセスでのローカルスクリプト許可
 Unblock-File .\Update-WindowsServerIso.ps1
-
-# 2. 現在のプロセスについて、署名済みまたはローカルスクリプトの実行を許可
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
-# 3. 登録済みフェーズの表示（読み取り専用）
+# 2. 読み取り専用の確認（書き込みなし）
 .\Update-WindowsServerIso.ps1 -Action ListPhases
-
-# 4. 環境のみのスモークチェック（P01 のみ）
 .\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly
+```
 
-# 5. Server 2019 ja-jp のサンドボックスドライラン（Setup / Fetch / Plan のみ、
-#    DISM への書き込みなし）
+### テンプレート（プレースホルダーを埋める）
+
+OS ごとに `-WorkRoot` を分け、同時実行や再実行で DISM マウントキャッシュを
+共有しないようにします。ログは自動でタイムスタンプを付け、各実行を個別
+ファイルにします（日付の手入力は不要）。
+
+```powershell
+$OsVersion  = 'Server2019'                       # Server2016/2019/2022/2025
+$OsLanguage = 'ja-jp'                             # en-us / ja-jp
+$IsoPath    = 'D:\ISO\WS2019_ja-jp.iso'
+$PatchDir   = 'D:\Patches\Server2019\2026-05'
+$WorkRoot   = "D:\UpdateWsi-$OsVersion"           # OS ごとのワークスペース
+$stamp      = Get-Date -Format 'yyyyMMdd-HHmmss'
+$LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify', $OsVersion, $stamp)
+
+# まずドライラン（Setup / Fetch / Plan のみ。DISM 書き込みなし）
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
-    -OsVersion Server2019 -OsLanguage ja-jp `
-    -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
-    -PatchDirectory 'D:\Patches\Server2019\2026-05' `
-    -WorkRoot 'D:\UpdateWsi'
+    -OsVersion $OsVersion -OsLanguage $OsLanguage `
+    -IsoPath $IsoPath -PatchDirectory $PatchDir `
+    -WorkRoot $WorkRoot -LogFile $LogFile
 
-# 6. フルローカルビルド（-Execute が必須。これだけが WIM を実際に
-#    マウント・改変する唯一のモード）
+# 実ビルド — -Execute を追加（WIM をマウント・変更する唯一のモード）
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
-    -OsVersion Server2019 -OsLanguage ja-jp `
-    -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
-    -PatchDirectory 'D:\Patches\Server2019\2026-05' `
-    -WorkRoot 'D:\UpdateWsi' `
+    -OsVersion $OsVersion -OsLanguage $OsLanguage `
+    -IsoPath $IsoPath -PatchDirectory $PatchDir `
+    -WorkRoot $WorkRoot -LogFile $LogFile `
     -Execute
 ```
 
-`-Execute` を指定しない場合、Build フェーズは計画のみ行い DISM への
-書き込みをコミットしません。これは [SPEC.md](./SPEC.md) §D.12 に
-記述されている **デフォルトでサンドボックス** の姿勢です。
+### 実例：Server 2016 と Server 2025
+
+両 OS は PCA2023 ブートマネージャのスイッチが異なります。Server 2016 は
+PCA2023 処理が不要、Server 2025 は既定で P10 をスキップするため、オプトイン
+には `-EnablePca2023BootManager` と `-ForcePca2023OnServer2025` の両方が
+必要です。
+
+```powershell
+# Server 2016（PCA2023 スイッチなし）
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+.\Update-WindowsServerIso.ps1 `
+    -Action PrepareBuildVerify `
+    -OsVersion Server2016 -OsLanguage ja-jp `
+    -IsoPath 'D:\ISO\WS2016_ja-jp.iso' `
+    -PatchDirectory 'D:\Patches\Server2016\2026-05' `
+    -WorkRoot 'D:\UpdateWsi-Server2016' `
+    -LogFile ('D:\UpdateWsi-Server2016\logs\build-2016-{0}.log' -f $stamp) `
+    -Execute
+
+# Server 2025（PCA2023 変換をオプトイン）
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+.\Update-WindowsServerIso.ps1 `
+    -Action PrepareBuildVerify `
+    -OsVersion Server2025 -OsLanguage ja-jp `
+    -IsoPath 'D:\ISO\WS2025_ja-jp.iso' `
+    -PatchDirectory 'D:\Patches\Server2025\2026-05' `
+    -WorkRoot 'D:\UpdateWsi-Server2025' `
+    -LogFile ('D:\UpdateWsi-Server2025\logs\build-2025-{0}.log' -f $stamp) `
+    -EnablePca2023BootManager -ForcePca2023OnServer2025 `
+    -Execute
+```
+
+`-Execute` なしでは Build フェーズは計画のみで DISM 書き込みを確定しません。
+これは [SPEC.md](./SPEC.md) §D.12 に記載の **既定サンドボックス** の姿勢です。
+
 
 ## アクション一覧（14 アクション）
 
@@ -210,14 +250,14 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Microsoft Update Catalog から上流の `data/raw-*` / `data/cache-*` を取得し、
 `RefreshAllBaselines` が各 `data/config-Server*.json` の
 `PatchBaseline.NeutralPatches[]` をそれらキャッシュから再生成します。この分離は
-SPEC §B.22.12 の設計に対応します。
+SPEC §B.22.1 の Refresher アーキテクチャに対応します。
 
 | Action | Admin Phase | 説明 |
 |:---|:-:|:---|
 | `RefreshSnapshots` | A03 | 上流キャッシュの取得（release-info、.NET CU、Dynamic Update）|
 | `RefreshAllBaselines` | A01 | キャッシュから `data/config-Server*.json` を再生成 |
 | `DumpFieldClassification` | A02 | フィールドのカデンス決定マトリックスを JSON で出力 |
-| `RefreshDependencyDatabase` | A04 | `wsusscn2.cab` から `data/servicing-dependency-database.json` を更新（r09.0+、**Step 2b3 で本実装・実 cab 検証済み**）|
+| `RefreshDependencyDatabase` | A04 | `wsusscn2.cab` から 4 ステージの parser パイプライン（SPEC §B.19.7）で `data/servicing-dependency-database.json`（layer 2）を更新 |
 
 ```powershell
 # ---- 第 1 段：上流キャッシュの populate ----
@@ -253,55 +293,6 @@ SPEC §B.22.12 の設計に対応します。
 `RefreshAllBaselines` の終了コード：`0` = すべて OK、`1` = 少なくとも 1 つの
 Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自動 Refresher 未定義、
 典型的には新規追加された言語の `LanguageSpecific.<lang>.Iso` グループ）。
-
-### r09.0 の進捗
-
-4 番目の Admin Action として **`RefreshDependencyDatabase`**（A04）が
-[SPEC.md](./SPEC.md) §B.19 に仕様化されており、r09.0 Step 2b3 時点で
-**実 `wsusscn2.cab` に対して本実装・検証済み**です。
-`-Action ListPhases` の登録状況ベースで、現状は以下のとおりです：
-
-- **A04 実装済み**（r09.0 Step 2b3）：4 ステージの parser
-  パイプライン（`Get-OfflineSyncPackageIfNeeded` → `Invoke-OfflineSyncPackageExtract`
-  → `ConvertFrom-OfflineSyncPackage` → `New-ServicingDependencyDatabase`）
-  が Microsoft の `wsusscn2.cab` から
-  `data/servicing-dependency-database.json`（Servicing Dependency Database
-  layer 2）を更新し、OS ごとの最新 bundle 識別子を
-  `data/config-Server*.json` に書き戻します。2026-05-12 の実 cab で
-  全工程を end-to-end 実行済み（Server 4 系すべてが 2026-05 の LCU を
-  payload URL 付きで解決。SPEC §B.19.9.6/9.7 参照）。
-- **A01.0 統合**（r09.0 Step 2b2）：`RefreshAllBaselines` は OS ごとの
-  カタログスクレイプの後に A04 を soft-fail の後続ステップとして
-  自動実行します。
-- **P06 Stage 2**（r09.0 Step 2c、予定）：`data/servicing-dependency-database.json`
-  を用いたグラフベース依存性閉包チェック。
-- **Server 2016 の SSU 依存性修正**（r09.0 Step 2a、適用済み）：
-  KB5087537 LCU が `data/config-Server2016.json` で KB5088064 SSU を
-  前提条件として宣言するようになり、r08.0 Step 4d 調査で記録された
-  `HRESULT 0x800f0823` 失敗を防げるようになりました。
-- **JSON Canonical Serialization**（r09.0 Step 2a followup、適用済み）：
-  SPEC Part B.23 が canonical な JSON 形式を規定し、PowerShell 7 と
-  Python 3 がバイト単位で一致する出力を生成できるようになりました。
-  `ConvertTo-CanonicalJson` ヘルパー、Python 側の `canonical_json_dumps`
-  リファレンスモジュール、T11 のバイト単位パリティテスト、および
-  Part C §C.3.4 のフォーマットゲートが、`data/*.json` および
-  `tests/fixtures/*.json` を Linux PowerShell 7.x / Python 3 の
-  いずれの runtime から編集しても最小 diff になることを保証します。
-- **Config Schema v2.1**（r10.4、適用済み）：`schema/config.schema.json`
-  と標準ライブラリのみの `config_schema_test.py` ゲートが、レガシーな
-  `PatchBaseline.Patches` フィールドを禁止し `NeutralPatches` を必須化
-  します。スクリプトの既定値とすべての baseline 代入は `NeutralPatches`
-  を使うようになりました。
-- **Layer 2 スキーマと共通データ契約**（r11.3+、適用済み）：`schema/servicing-dependency-database.schema.json`
-  が `data/servicing-dependency-database.json` の権威的な形状です。両スキーマはスクリプトが
-  保持し全データ成果物に刻印される単一の横断的データ契約識別子（`dataContractId`
-  ＋ `dataContractVersion`）を共有し、個別のモデル別スキーマバージョンを突き合わせる
-  代わりに 1 回の照合で全体を検証します。
-- **PSA7003 非 ASCII ルール**（r10.1、適用済み）：`psa.py` 4.2.0 が
-  `.ps1` 本文中の UTF-8 BOM 以外の非 ASCII 文字を検出します。本スクリプト
-  はこのルールで 0 検出を確認した最初の consumer です。
-
-実装は §B.19.19 のロールアウト計画に従います。
 
 ## 動作要件
 
@@ -374,54 +365,63 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 完全な設計と検証詳細は SPEC.md §B.17（PCA2023 boot manager サポート）と
 §B.18（出力 ISO 検証）を参照してください。
 
-## パラメーター（主要のみ）
+## パラメーター（全件）
 
-完全なパラメーター一覧は `Get-Help .\Update-WindowsServerIso.ps1 -Full` を
-参照してください。よく使うものは次のとおりです。
+全 35 パラメーターを用途別にまとめます。この表はドキュメント時点の
+スナップショットです。常に最新の正規一覧は
+`Get-Help .\Update-WindowsServerIso.ps1 -Full` を参照してください。
 
-| Parameter | 用途 |
-|:---|:---|
-| `-Action` | 上記 14 個のアクションのいずれか（デフォルト：`PrepareBuildVerify`）|
-| `-OnlyPhases` | フェーズ ID の配列（例 `'P04','P07'`）。Action のデフォルトフェーズセットを上書き |
-| `-OsVersion` | `Server2016` / `Server2019` / `Server2022` / `Server2025` |
-| `-OsLanguage` | `en-us` / `ja-jp`（デフォルト：`en-us`）|
-| `-IsoPath` | ローカル ISO パス（`-IsoUrl` と排他）|
-| `-IsoUrl` | 明示的な ISO ダウンロード URL |
-| `-PatchDirectory` | ローカル MSU/CAB パッチを格納したディレクトリ |
-| `-ManifestPath` | ハッシュ付き Metalink `.meta4` マニフェスト |
-| `-PatchUrls` | 明示的なパッチ URL の配列 |
-| `-AutoDetectLatestPatches` | Microsoft Update Catalogue からの PatchBaseline 再取得を強制 |
-| `-PatchMonth` | リフレッシュ対象のパッチ月（例 `2026-06`、デフォルトは当月）|
-| `-SkipDynamicPatchRefresh` | PatchBaseline が古くても P03 をスキップ（オフライン / エアギャップ実行）|
-| `-UseBaselineOnly` | PatchBaseline を厳密にそのまま使用、Catalog にアクセスしない |
-| `-IgnorePatchValidation` | P06 検証失敗を中断から警告に降格（非推奨）|
-| `-OfflineSyncPackagePath` | 事前配置済みの `wsusscn2.cab` パス（自動ダウンロードをスキップ）|
-| `-WorkRoot` | ワークスペースのルート。デフォルトは `Workspace_UpdateWsi`（スクリプトと同階層）。ドライブの空き容量は 100 GB 以上が必要（プリフライトが強制）|
-| `-OutputDir` | 出力 ISO のディレクトリ（デフォルトは `<WorkRoot>\output`）|
-| `-OnlyInstallWimIndexes` | install.wim 更新対象を限定するカンマ区切りインデックス（例 `'2,4'`）|
-| `-DryRun` | Build / Verify フェーズをスキップ（Setup / Fetch / Plan のみ）|
-| `-SyntheticTestMode` | CI モード：Microsoft アセットに触れずに合成 ISO を構築 |
-| `-EvalIsoMode` | Microsoft Evaluation Center の fwlink からのダウンロードを許可 |
-| `-Execute` | DISM への実書き込みに **必須**。指定なしでは Build フェーズは計画のみ |
-| `-EnablePca2023BootManager` | P10 PCA2023 boot manager 変換のオプトイン（デフォルト OFF）|
-| `-ForcePca2023OnServer2025` | Server 2025 デフォルトスキップを上書きして P10 を実行 |
-| `-Pca2023OnlyMode` | 既存 ISO のスタンドアロン P12 検査（`-IsoPath` が必須）|
-| `-Pca2023ScriptPath` | 内部ヘルパーの代わりに外部 `Make2023BootableMedia.ps1` を使用 |
-| `-AutoInstallAdk` | `oscdimg.exe` が見つからない場合に Windows ADK Deployment Tools を自動インストール |
+| パラメーター | 分類 | 既定値 / ValidateSet | 用途 |
+|:---|:---|:---|:---|
+| `-Action` | common | `PrepareBuildVerify`、14 アクションのいずれか | 実行するアクション/パイプライン |
+| `-OsVersion` | common | `Server2016`/`2019`/`2022`/`2025` | 対象 OS ファミリ |
+| `-OsLanguage` | common | `en-us`（または `ja-jp`）| 対象 OS 言語 |
+| `-Execute` | common | switch（OFF）| 実際の DISM 書き込みに**必須**。無指定だと Build は計画のみ |
+| `-WorkRoot` | common | `Workspace_UpdateWsi`（スクリプト隣）| ワークスペース。空き 100 GB 以上必要 |
+| `-LogFile` | common | （なし）| 実行全体の `Start-Transcript` パス |
+| `-OutputDir` | common | `<WorkRoot>\output` | 出力 ISO ディレクトリ |
+| `-CleanWorkRoot` | common | switch（OFF）| 実行前にワークスペースを掃除 |
+| `-IsoPath` | input | （なし）| ローカル ソース ISO パス（`-IsoUrl` と排他）|
+| `-IsoUrl` | input | （なし）| ソース ISO ダウンロード URL（`-IsoPath` と排他）|
+| `-EvalIsoMode` | input | switch（OFF）| Microsoft 評価版センターの fwlink ダウンロードを許可 |
+| `-PatchDirectory` | input | （なし）| ローカル MSU/CAB パッチのディレクトリ |
+| `-PatchUrls` | input | （なし）| 明示的なパッチ URL の配列 |
+| `-ManifestPath` | input | （なし）| ハッシュ付き Metalink `.meta4` マニフェスト |
+| `-OnlyPhases` | advanced | （なし）| アクション既定を上書きするフェーズ ID 配列（例 `'P04','P07'`）|
+| `-OnlyInstallWimIndexes` | advanced | （なし）| install.wim 更新を限定するインデックス一覧（例 `'2,4'`）|
+| `-AutoDetectLatestPatches` | patch | switch（OFF）| Catalog から P03 PatchBaseline 更新を強制 |
+| `-PatchMonth` | patch | 当月 | 更新対象パッチ月（例 `2026-06`）|
+| `-SkipDynamicPatchRefresh` | patch | switch（OFF）| ベースライン陳腐でも P03 をスキップ（オフライン）|
+| `-UseBaselineOnly` | patch | switch（OFF）| PatchBaseline をそのまま使用。Catalog アクセスなし |
+| `-IgnorePatchValidation` | patch | switch（OFF）| P06 Stage 1 の中断を警告に降格（開発時のみ）|
+| `-OfflineSyncPackagePath` | patch | （なし）| ステージ済み `wsusscn2.cab` パス（ダウンロード省略）|
+| `-EnableDependencyCheck` | patch | switch（OFF）| P06 Stage 2 サービシング準備性チェックをオプトイン（アドバイザリ）|
+| `-EnablePca2023BootManager` | secure-boot | switch（OFF）| P10 PCA2023 ブートマネージャ変換をオプトイン |
+| `-ForcePca2023OnServer2025` | secure-boot | switch（OFF）| Server 2025 の P10 既定スキップを上書き |
+| `-Pca2023OnlyMode` | secure-boot | switch（OFF）| 既存 ISO の P12 単独検査（`-IsoPath` 必須）|
+| `-Pca2023ScriptPath` | secure-boot | （なし）| 内部ヘルパーの代わりに外部 `Make2023BootableMedia.ps1` を使用 |
+| `-Mode` | admin | `Monthly`（または `Initial`/`Force`）| `RefreshAllBaselines` の更新モード |
+| `-OnlyOs` | admin | `Server2016`/`2019`/`2022`/`2025` | `RefreshAllBaselines` を 1 OS に限定 |
+| `-OnlyLanguage` | admin | `en-us`/`ja-jp` | `RefreshAllBaselines` を 1 言語に限定 |
+| `-AutoInstallAdk` | admin | switch（OFF）| `oscdimg.exe` 不在時に Windows ADK を自動インストール |
+| `-DryRun` | test | switch（OFF）| Setup/Fetch/Plan のみ。Build/Verify をスキップ |
+| `-SyntheticTestMode` | test | switch（OFF）| CI モード：合成 ISO、Microsoft アセット不使用 |
+| `-SkipEnvCheck` | test | switch（OFF）| 環境プリフライトをスキップ（`-EnvironmentInfoOnly` と排他）|
+| `-EnvironmentInfoOnly` | test | switch（OFF）| 環境情報を表示して終了（`-SkipEnvCheck` と排他）|
 
 ### 排他的指定ルール
 
-スクリプトは複数の排他制約を強制します（L353-L389）。該当する組み合わせは
-以下のとおりです。
+スクリプトは次の排他制約を強制します。
 
-- `-IsoUrl` ⊥ `-IsoPath`
-- `-EnvironmentInfoOnly` ⊥ `-SkipEnvCheck`
-- `-Action BootTest` ⊥ `-SyntheticTestMode`
-- `-SyntheticTestMode` ⊥ `-EvalIsoMode`
-- `-SkipDynamicPatchRefresh` ⊥ `-AutoDetectLatestPatches`
-- `-UseBaselineOnly` ⊥ `-AutoDetectLatestPatches`
+- `-IsoUrl` / `-IsoPath`
+- `-EnvironmentInfoOnly` / `-SkipEnvCheck`
+- `-Action BootTest` / `-SyntheticTestMode`
+- `-SyntheticTestMode` / `-EvalIsoMode`
+- `-SkipDynamicPatchRefresh` / `-AutoDetectLatestPatches`
+- `-UseBaselineOnly` / `-AutoDetectLatestPatches`
 
-`-PatchMonth` は `^\d{4}-\d{2}$` 形式（例 `2026-06`）と一致する必要があります。
+`-PatchMonth` は `YYYY-MM` 形式（例 `2026-06`）である必要があります。
+
 
 ## 動的パッチベースライン（P03）と依存性検証（P06）
 
@@ -445,20 +445,29 @@ P04   FetchAssets（新しく解決された URL と SHA-256 を使用）
 P05   ExpandIso
 P06 ValidatePatchSet
         - Stage 1：カタログ鮮度比較（既存）
-        - Stage 2（r09.0 Step 2c、予定）：data/servicing-dependency-database.json を用いた
-          グラフベース依存性閉包チェック（SPEC.md §B.19.14 参照）
-        - 必須プリレキジが欠落しているとき：中断して診断ファイルを生成
+        - Stage 2（-EnableDependencyCheck でオプトイン、既定 OFF）：
+          data/servicing-dependency-database.json を用いたサービシング
+          準備性チェック（SPEC.md §B.19.10 参照）。アドバイザリのみ — 各
+          パッチの判定（SsTooOld / NotInDatabase / Superseded / Pass）を
+          ログ出力するだけでビルドを中断しない。layer 2 が無い場合は
+          Unknown に縮退。
+        - Stage 1（カタログ鮮度）は必須パッチ欠落時に従来どおり中断し、
+          診断ファイルを生成（後述「検証失敗時の診断データ」参照）
 P07+  Build / Verify / Report
 ```
 
-### 検証失敗時の診断データ
+### 診断データとログ
 
-P06 が必須パッチの欠落を検出すると、診断ファイルが
-`<WorkRoot>/diag/<yyyy-MM-dd_HH-mm-ss>/` に出力されます。ファイル一覧と
-利用方法は SPEC.md §B.19.14.3 を参照してください。
+実行のトラブルシューティングでは、次のファイルを確認します。
 
-`-IgnorePatchValidation` は中断を警告に降格しますが、診断ファイルは引き続き
-生成されます。開発時のみ使用してください。
+| ファイル | タイミング | 内容 |
+|:---|:---|:---|
+| `<LogFile>` | `-LogFile <path>` 指定時 | 実行全体の `Start-Transcript`（全コンソール行）|
+| `<WorkRoot>/logs/debugtrace.jsonl` | 常時（フェーズがトレースを使う場合）| 失敗ステップを特定するステップ単位の JSONL トレース |
+| `<WorkRoot>/diag/<yyyyMMdd-HHmmss>/` | P06 Stage 1 のパッチ欠落失敗時 | `validation_summary.json`、`validation_detail.csv`、`wsusscn2_scan_raw.json`、`dependency_graph.json`（SPEC.md §B.19.12 参照）|
+
+`-IgnorePatchValidation` は Stage 1 の中断を警告に降格しますが、`diag/`
+セットは引き続き生成されます。開発時のみ使用してください。
 
 ### 更新ポリシー
 
@@ -495,8 +504,8 @@ python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.p
 
 ## 自己検証ツール
 
-`tests/` サブディレクトリには 13 個の Python 自己検証ツール（T1 – T13）
-に加え、Part C のフォーマットゲートが同梱されています。これらは
+`tests/` サブディレクトリには 19 個の Python 自己検証ツール（T1 – T19）
+に加え、データ契約ゲートとフォーマットゲートが同梱されています。これらは
 スクリプトの外部依存をプローブし、PowerShell 関数をユニットテストし、
 さらに SPEC §B.23 の JSON canonical 形式を強制します。オフラインツールは
 Python 標準ライブラリのみを利用するため、`pip install` は不要です。
@@ -511,11 +520,20 @@ python3 tests/dynamic_update_cache_test.py   # T8：20 個の DU キャッシュ
 python3 tests/catalog_title_tokens_test.py   # T9：18 個の Title-token アサーション
 python3 tests/release_info_resolver_test.py  # T10：22 個の resolver アサーション
 python3 tests/canonical_json_test.py         # T11：26 個の PS/Python バイトレベル パリティアサーション
-python3 tests/servicing_dependency_parser_test.py        # T12：22 個の wsusscn2 パーサーパイプラインアサーション
-python3 tests/servicing_dependency_layer1_test.py        # T13：14 個の Layer 1 書き戻しアサーション
+python3 tests/servicing_dependency_parser_test.py            # T12：22 個の wsusscn2 パーサーパイプラインアサーション
+python3 tests/servicing_dependency_layer1_test.py            # T13：14 個の Layer 1 書き戻しアサーション
+python3 tests/servicing_dependency_deny_list_test.py         # T14：10 個の EOS/ESU deny-list アサーション
+python3 tests/servicing_dependency_servicing_stack_test.py   # T15：16 個の servicing-stack 抽出アサーション
+python3 tests/servicing_dependency_readiness_verdict_test.py # T16：21 個の readiness verdict アサーション
+python3 tests/servicing_dependency_recency_fallback_test.py  # T17：15 個の recency-fallback アサーション
+python3 tests/servicing_dependency_servicing_stack_populate_test.py # T18：17 個の SS-populate アサーション
+python3 tests/servicing_dependency_data_contract_test.py     # T19：11 個のデータ契約アサーション
 
-# Part C 品質ゲート（JSON ファイルを触るコミットごとに実行）
-python3 tests/canonical_json_format_check.py # 26 JSON ファイルが canonical 形式（SPEC §C.3.4）
+# データ契約 / スキーマ / フォーマットゲート（データを触るコミットごとに実行）
+python3 tests/config_schema_test.py                       # config スキーマゲート
+python3 tests/servicing_dependency_scope_invariants_test.py # scope-invariants ゲート：23 アサーション
+python3 tests/servicing_dependency_layer2_schema_test.py  # Layer 2 スキーマゲート：16 アサーション
+python3 tests/canonical_json_format_check.py              # JSON canonical 形式ゲート（SPEC §C.3.4）
 
 # ライブテスト — 制限のないネットワーク出口が必要
 python3 tests/catalog_probe.py --check all   # T1：Microsoft Update Catalog

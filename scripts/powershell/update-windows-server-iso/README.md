@@ -137,7 +137,7 @@ scripts/powershell/update-windows-server-iso/
 │   ├── cache-release-info.json
 │   ├── cache-dotnet-cu.json
 │   └── cache-dynamicupdate-Server{2022,2025}.json
-├── tests/                            # Self-verification suite (T1-T13)
+├── tests/                            # Self-verification suite (T1-T19 + gates)
 └── docs/history/                     # Per-cycle investigation reports
 ```
 
@@ -148,34 +148,75 @@ lives at the repository-wide canonical location:
 ## Quick start
 
 ```powershell
-# 1. Unblock the file (removes the "downloaded from the internet" warning)
+# 1. Unblock the file and allow local scripts for this process
 Unblock-File .\Update-WindowsServerIso.ps1
-
-# 2. Allow signed-or-local scripts for the current process
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
-# 3. Show registered phases (read-only)
+# 2. Read-only orientation (no writes)
 .\Update-WindowsServerIso.ps1 -Action ListPhases
-
-# 4. Environment-only smoke check (P01 only)
 .\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly
+```
 
-# 5. Sandbox dry run for Server 2019 ja-jp (Setup / Fetch / Plan only; no DISM writes)
+### Template (fill in the placeholders)
+
+Use a per-OS `-WorkRoot` so concurrent or repeated runs never share a
+DISM mount cache, and auto-timestamp the log so each run is its own file
+(no manual date typing):
+
+```powershell
+$OsVersion  = 'Server2019'                       # Server2016/2019/2022/2025
+$OsLanguage = 'ja-jp'                             # en-us / ja-jp
+$IsoPath    = 'D:\ISO\WS2019_ja-jp.iso'
+$PatchDir   = 'D:\Patches\Server2019\2026-05'
+$WorkRoot   = "D:\UpdateWsi-$OsVersion"           # per-OS workspace
+$stamp      = Get-Date -Format 'yyyyMMdd-HHmmss'
+$LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify', $OsVersion, $stamp)
+
+# Dry run first (Setup / Fetch / Plan only; no DISM writes)
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
-    -OsVersion Server2019 -OsLanguage ja-jp `
-    -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
-    -PatchDirectory 'D:\Patches\Server2019\2026-05' `
-    -WorkRoot 'D:\UpdateWsi'
+    -OsVersion $OsVersion -OsLanguage $OsLanguage `
+    -IsoPath $IsoPath -PatchDirectory $PatchDir `
+    -WorkRoot $WorkRoot -LogFile $LogFile
 
-# 6. Full local build (requires -Execute; this is the only mode that
-#    actually mounts and modifies WIMs)
+# Real build — add -Execute (the only mode that mounts and modifies WIMs)
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
-    -OsVersion Server2019 -OsLanguage ja-jp `
-    -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
-    -PatchDirectory 'D:\Patches\Server2019\2026-05' `
-    -WorkRoot 'D:\UpdateWsi' `
+    -OsVersion $OsVersion -OsLanguage $OsLanguage `
+    -IsoPath $IsoPath -PatchDirectory $PatchDir `
+    -WorkRoot $WorkRoot -LogFile $LogFile `
+    -Execute
+```
+
+### Worked example: Server 2016 vs Server 2025
+
+The two OSes differ in the PCA2023 boot-manager switches. Server 2016
+needs no PCA2023 handling; Server 2025 skips P10 by default and needs
+both `-EnablePca2023BootManager` and `-ForcePca2023OnServer2025` to opt
+in.
+
+```powershell
+# Server 2016 (no PCA2023 switches)
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+.\Update-WindowsServerIso.ps1 `
+    -Action PrepareBuildVerify `
+    -OsVersion Server2016 -OsLanguage ja-jp `
+    -IsoPath 'D:\ISO\WS2016_ja-jp.iso' `
+    -PatchDirectory 'D:\Patches\Server2016\2026-05' `
+    -WorkRoot 'D:\UpdateWsi-Server2016' `
+    -LogFile ('D:\UpdateWsi-Server2016\logs\build-2016-{0}.log' -f $stamp) `
+    -Execute
+
+# Server 2025 (opt in to PCA2023 conversion)
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+.\Update-WindowsServerIso.ps1 `
+    -Action PrepareBuildVerify `
+    -OsVersion Server2025 -OsLanguage ja-jp `
+    -IsoPath 'D:\ISO\WS2025_ja-jp.iso' `
+    -PatchDirectory 'D:\Patches\Server2025\2026-05' `
+    -WorkRoot 'D:\UpdateWsi-Server2025' `
+    -LogFile ('D:\UpdateWsi-Server2025\logs\build-2025-{0}.log' -f $stamp) `
+    -EnablePca2023BootManager -ForcePca2023OnServer2025 `
     -Execute
 ```
 
@@ -183,9 +224,10 @@ Without `-Execute`, the Build phases plan but do not commit any DISM
 write. This is the **sandbox-by-default** posture documented in
 [SPEC.md](./SPEC.md) §D.12.
 
+
 ## Action reference (14 Actions)
 
-The script's `param() ValidateSet` declares thirteen Actions, grouped
+The script's `param() ValidateSet` declares fourteen Actions, grouped
 by purpose. The default is `PrepareBuildVerify`.
 
 ### Standard pipeline Actions
@@ -216,14 +258,14 @@ touching any ISO. **The refresh path is two-stage**: `RefreshSnapshots`
 populates the upstream `data/raw-*` / `data/cache-*` files from
 Microsoft Learn + Microsoft Update Catalog, then `RefreshAllBaselines`
 regenerates each `data/config-Server*.json` `PatchBaseline.NeutralPatches[]`
-from those caches. This split matches the SPEC §B.22.12 design.
+from those caches. This split follows the SPEC §B.22.1 refresher architecture.
 
 | Action | Admin Phase | Description |
 |:---|:-:|:---|
 | `RefreshSnapshots` | A03 | Fetch upstream caches (release-info, .NET CU, Dynamic Update) |
 | `RefreshAllBaselines` | A01 | Regenerate `data/config-Server*.json` from the caches |
 | `DumpFieldClassification` | A02 | Emit the field-cadence decision matrix as JSON |
-| `RefreshDependencyDatabase` | A04 | Refresh `data/servicing-dependency-database.json` from `wsusscn2.cab` (r09.0+; **fully implemented and verified against the live cab in Step 2b3**) |
+| `RefreshDependencyDatabase` | A04 | Refresh `data/servicing-dependency-database.json` (layer 2) from `wsusscn2.cab` via the four-stage parser pipeline (SPEC §B.19.7) |
 
 ```powershell
 # ---- Stage 1: populate the upstream caches ----
@@ -260,56 +302,6 @@ at least one sub-step failed. Re-running is idempotent.
 Refresher failed; `2` = some fields require manual fill (no auto
 Refresher available, typically the `LanguageSpecific.<lang>.Iso`
 groups for newly-added languages).
-
-### r09.0 progress
-
-The fourth Admin Action — **`RefreshDependencyDatabase`** (A04) —
-is specified in [SPEC.md](./SPEC.md) §B.19 and is **fully
-implemented and verified against the live `wsusscn2.cab`** as of
-r09.0 Step 2b3. Current state per the
-`-Action ListPhases` registry:
-
-- **A04 implemented** (r09.0 Step 2b3): the four-stage parser
-  pipeline (`Get-OfflineSyncPackageIfNeeded` → `Invoke-OfflineSyncPackageExtract`
-  → `ConvertFrom-OfflineSyncPackage` → `New-ServicingDependencyDatabase`)
-  refreshes `data/servicing-dependency-database.json` (Servicing Dependency
-  Database layer 2) from Microsoft's `wsusscn2.cab`, then writes the
-  latest per-OS bundle identity into `data/config-Server*.json`. The
-  whole chain was run end-to-end against the 2026-05-12 live cab
-  (all four Server families resolve their 2026-05 LCU with payload
-  URLs; see SPEC §B.19.9.6/9.7).
-- **A01.0 integration** (r09.0 Step 2b2): `RefreshAllBaselines`
-  runs A04 automatically as a soft-fail downstream step after the
-  per-OS catalogue scrape.
-- **P06 Stage 2** (r09.0 Step 2c, planned): graph-based dependency
-  closure check using `data/servicing-dependency-database.json`.
-- **Server 2016 SSU dependency fix** (r09.0 Step 2a, shipped): the
-  KB5087537 LCU now declares its KB5088064 SSU prerequisite in
-  `data/config-Server2016.json`, preventing the `HRESULT 0x800f0823`
-  failure documented in the r08.0 Step 4d investigation.
-- **JSON Canonical Serialization** (r09.0 Step 2a followup, shipped):
-  SPEC Part B.23 declares a canonical JSON format that PowerShell 7
-  and Python 3 emit byte-for-byte; the `ConvertTo-CanonicalJson`
-  helper, the Python `canonical_json_dumps` reference module, the T11
-  byte-level parity test, and the Part C §C.3.4 format gate together
-  guarantee that `data/*.json` and `tests/fixtures/*.json` files
-  produce minimal git diffs regardless of which runtime an operator
-  edits them from.
-- **Config Schema v2.1** (r10.4, shipped): `schema/config.schema.json`
-  plus the stdlib-only `config_schema_test.py` gate forbid the legacy
-  `PatchBaseline.Patches` field and require `NeutralPatches`. The
-  script defaults and all baseline assignments now use `NeutralPatches`.
-- **Layer 2 schema + shared data contract** (r11.3+, shipped): `schema/servicing-dependency-database.schema.json`
-  is the authoritative shape for `data/servicing-dependency-database.json`. Both schemas
-  share one cross-cutting data-contract identity (`dataContractId` +
-  `dataContractVersion`) held by the script and stamped into every data
-  artifact, so a single check validates the whole set instead of reconciling
-  independent per-model schema versions.
-- **PSA7003 non-ASCII rule** (r10.1, shipped): `psa.py` 4.2.0 flags
-  non-ASCII characters in `.ps1` bodies outside the UTF-8 BOM; this
-  script is its first verified 0-finding consumer.
-
-Implementation tracks the §B.19.19 rollout plan.
 
 ## Requirements
 
@@ -387,54 +379,63 @@ Common operator decisions:
 Full design and verification details: SPEC.md §B.17 (PCA2023 boot
 manager support) and §B.18 (Output ISO verification).
 
-## Parameters (selected)
+## Parameters (complete)
 
-See `Get-Help .\Update-WindowsServerIso.ps1 -Full` for the complete
-parameter list. The most commonly used:
+All 35 parameters are listed below, grouped by typical use. The table is
+a documentation-time snapshot; the authoritative, always-current list is
+`Get-Help .\Update-WindowsServerIso.ps1 -Full`.
 
-| Parameter | Purpose |
-|:---|:---|
-| `-Action` | One of the 14 Actions listed above (default: `PrepareBuildVerify`) |
-| `-OnlyPhases` | Array of phase IDs (e.g. `'P04','P07'`) overriding the Action's default phase set |
-| `-OsVersion` | `Server2016` / `Server2019` / `Server2022` / `Server2025` |
-| `-OsLanguage` | `en-us` / `ja-jp` (default: `en-us`) |
-| `-IsoPath` | Local ISO path (mutually exclusive with `-IsoUrl`) |
-| `-IsoUrl` | Explicit ISO download URL |
-| `-PatchDirectory` | Directory containing local MSU/CAB patches |
-| `-ManifestPath` | Metalink `.meta4` manifest with hashes |
-| `-PatchUrls` | Array of explicit patch URLs |
-| `-AutoDetectLatestPatches` | Force a refresh of PatchBaseline from Microsoft Update Catalogue |
-| `-PatchMonth` | Target patch month for refresh, e.g. `2026-06` (default: current month) |
-| `-SkipDynamicPatchRefresh` | Skip P03 even if PatchBaseline is stale (offline / air-gapped runs) |
-| `-UseBaselineOnly` | Use PatchBaseline strictly as-is; no Catalog access at all |
-| `-IgnorePatchValidation` | Demote P06 validation failures from abort to warning (NOT recommended) |
-| `-OfflineSyncPackagePath` | Pre-staged `wsusscn2.cab` path (skips automatic download) |
-| `-WorkRoot` | Workspace root. Default `Workspace_UpdateWsi` resolved next to the script. Drive must have ≥ 100 GB free (preflight enforces this). |
-| `-OutputDir` | Output ISO directory (default `<WorkRoot>\output`) |
-| `-OnlyInstallWimIndexes` | Comma-separated index list (e.g. `'2,4'`) to limit install.wim updates |
-| `-DryRun` | Skip Build / Verify phases (Setup / Fetch / Plan only) |
-| `-SyntheticTestMode` | CI mode: build a synthetic ISO without touching Microsoft assets |
-| `-EvalIsoMode` | Allow downloading via Microsoft Evaluation Center fwlink |
-| `-Execute` | **Required** for actual DISM writes; without it, Build phases plan only |
-| `-EnablePca2023BootManager` | Opt-in for P10 PCA2023 boot manager conversion (default OFF) |
-| `-ForcePca2023OnServer2025` | Override Server 2025 default-skip for P10 |
-| `-Pca2023OnlyMode` | Standalone P12 inspection of an existing ISO (`-IsoPath` required) |
-| `-Pca2023ScriptPath` | Use an external `Make2023BootableMedia.ps1` instead of the internal helper |
-| `-AutoInstallAdk` | Auto-install Windows ADK Deployment Tools if `oscdimg.exe` is missing |
+| Parameter | Category | Default / ValidateSet | Purpose |
+|:---|:---|:---|:---|
+| `-Action` | common | `PrepareBuildVerify`; one of the 14 Actions | Which action/pipeline to run |
+| `-OsVersion` | common | `Server2016`/`2019`/`2022`/`2025` | Target OS family |
+| `-OsLanguage` | common | `en-us` (or `ja-jp`) | Target OS language |
+| `-Execute` | common | switch (OFF) | **Required** for real DISM writes; without it Build phases plan only |
+| `-WorkRoot` | common | `Workspace_UpdateWsi` (next to script) | Workspace root; drive needs >= 100 GB free |
+| `-LogFile` | common | (none) | `Start-Transcript` path for the whole run |
+| `-OutputDir` | common | `<WorkRoot>\output` | Output ISO directory |
+| `-CleanWorkRoot` | common | switch (OFF) | Clean the workspace before running |
+| `-IsoPath` | input | (none) | Local source ISO path (mutually exclusive with `-IsoUrl`) |
+| `-IsoUrl` | input | (none) | Explicit source ISO download URL (mutually exclusive with `-IsoPath`) |
+| `-EvalIsoMode` | input | switch (OFF) | Allow Microsoft Evaluation Center fwlink download |
+| `-PatchDirectory` | input | (none) | Directory of local MSU/CAB patches |
+| `-PatchUrls` | input | (none) | Array of explicit patch URLs |
+| `-ManifestPath` | input | (none) | Metalink `.meta4` manifest with hashes |
+| `-OnlyPhases` | advanced | (none) | Phase-ID array (e.g. `'P04','P07'`) overriding the Action's phase set |
+| `-OnlyInstallWimIndexes` | advanced | (none) | Comma-separated index list (e.g. `'2,4'`) limiting install.wim updates |
+| `-AutoDetectLatestPatches` | patch | switch (OFF) | Force a P03 PatchBaseline refresh from the Catalog |
+| `-PatchMonth` | patch | current month | Target patch month for refresh, e.g. `2026-06` |
+| `-SkipDynamicPatchRefresh` | patch | switch (OFF) | Skip P03 even if baseline is stale (offline runs) |
+| `-UseBaselineOnly` | patch | switch (OFF) | Use PatchBaseline strictly as-is; no Catalog access |
+| `-IgnorePatchValidation` | patch | switch (OFF) | Demote P06 Stage 1 abort to a warning (dev only) |
+| `-OfflineSyncPackagePath` | patch | (none) | Pre-staged `wsusscn2.cab` path (skips download) |
+| `-EnableDependencyCheck` | patch | switch (OFF) | Opt-in P06 Stage 2 servicing-readiness check (advisory) |
+| `-EnablePca2023BootManager` | secure-boot | switch (OFF) | Opt-in P10 PCA2023 boot-manager conversion |
+| `-ForcePca2023OnServer2025` | secure-boot | switch (OFF) | Override the Server 2025 default-skip for P10 |
+| `-Pca2023OnlyMode` | secure-boot | switch (OFF) | Standalone P12 inspection of an existing ISO (`-IsoPath` required) |
+| `-Pca2023ScriptPath` | secure-boot | (none) | External `Make2023BootableMedia.ps1` instead of the internal helper |
+| `-Mode` | admin | `Monthly` (or `Initial`/`Force`) | `RefreshAllBaselines` refresh mode |
+| `-OnlyOs` | admin | `Server2016`/`2019`/`2022`/`2025` | Limit `RefreshAllBaselines` to one OS |
+| `-OnlyLanguage` | admin | `en-us`/`ja-jp` | Limit `RefreshAllBaselines` to one language |
+| `-AutoInstallAdk` | admin | switch (OFF) | Auto-install Windows ADK if `oscdimg.exe` is missing |
+| `-DryRun` | test | switch (OFF) | Setup/Fetch/Plan only; skip Build/Verify |
+| `-SyntheticTestMode` | test | switch (OFF) | CI mode: synthetic ISO, no Microsoft assets |
+| `-SkipEnvCheck` | test | switch (OFF) | Skip the environment preflight (mutually exclusive with `-EnvironmentInfoOnly`) |
+| `-EnvironmentInfoOnly` | test | switch (OFF) | Print environment info and exit (mutually exclusive with `-SkipEnvCheck`) |
 
 ### Mutual exclusivity rules
 
-The script enforces several mutual-exclusion constraints (script
-L353-L389). The relevant pairings are:
+The script enforces several mutual-exclusion constraints:
 
-- `-IsoUrl` ⊥ `-IsoPath`
-- `-EnvironmentInfoOnly` ⊥ `-SkipEnvCheck`
-- `-Action BootTest` ⊥ `-SyntheticTestMode`
-- `-SyntheticTestMode` ⊥ `-EvalIsoMode`
-- `-SkipDynamicPatchRefresh` ⊥ `-AutoDetectLatestPatches`
-- `-UseBaselineOnly` ⊥ `-AutoDetectLatestPatches`
+- `-IsoUrl` / `-IsoPath`
+- `-EnvironmentInfoOnly` / `-SkipEnvCheck`
+- `-Action BootTest` / `-SyntheticTestMode`
+- `-SyntheticTestMode` / `-EvalIsoMode`
+- `-SkipDynamicPatchRefresh` / `-AutoDetectLatestPatches`
+- `-UseBaselineOnly` / `-AutoDetectLatestPatches`
 
-`-PatchMonth` must match `^\d{4}-\d{2}$` (e.g. `2026-06`).
+`-PatchMonth` must match the `YYYY-MM` form (e.g. `2026-06`).
+
 
 ## Dynamic patch baseline (P03) and dependency validation (P06)
 
@@ -458,20 +459,28 @@ P04   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
 P05   ExpandIso
 P06 ValidatePatchSet
         - Stage 1: catalog freshness comparison (existing)
-        - Stage 2 (r09.0 Step 2c, planned): graph-based dependency closure check
-          using data/servicing-dependency-database.json (see SPEC.md §B.19.14)
-        - On any missing required prerequisite: ABORT and emit diagnostic files
+        - Stage 2 (opt-in via -EnableDependencyCheck, default OFF):
+          servicing-readiness check using data/servicing-dependency-database.json
+          (see SPEC.md §B.19.10). Advisory only — logs each patch verdict
+          (SsTooOld / NotInDatabase / Superseded / Pass) and never blocks
+          the build. Degrades to Unknown if layer 2 is absent.
+        - Stage 1 (catalog freshness) still aborts on a missing required
+          patch and emits diagnostic files (see "Diagnostic data" below).
 P07+  Build / Verify / Report
 ```
 
-### Diagnostic data on validation failure
+### Diagnostic data and logs
 
-When P06 detects a missing required patch, diagnostic files are emitted
-under `<WorkRoot>/diag/<yyyy-MM-dd_HH-mm-ss>/`. See SPEC.md §B.19.14.3
-for the file inventory and use.
+For troubleshooting a run, these are the files to look at:
 
-`-IgnorePatchValidation` demotes the abort to a warning while still
-emitting the diagnostic files; use only for development.
+| File | When | Content |
+|:---|:---|:---|
+| `<LogFile>` | When `-LogFile <path>` is passed | Full `Start-Transcript` of the run (every console line) |
+| `<WorkRoot>/logs/debugtrace.jsonl` | Always (when a phase uses the trace) | Per-step JSONL trace pinpointing the exact failing step |
+| `<WorkRoot>/diag/<yyyyMMdd-HHmmss>/` | On a P06 Stage 1 missing-patch failure | `validation_summary.json`, `validation_detail.csv`, `wsusscn2_scan_raw.json`, `dependency_graph.json` (see SPEC.md §B.19.12) |
+
+`-IgnorePatchValidation` demotes the Stage 1 abort to a warning while
+still writing the `diag/` set; use only for development.
 
 ### Refresh policy
 
@@ -509,11 +518,11 @@ last-verified row.
 
 ## Self-verification tools
 
-The `tests/` subdirectory ships thirteen Python-based self-verification
-tools (T1 – T13) plus the Part C format gate. They probe the script's
-external dependencies, unit-test its PowerShell functions, and enforce
-the SPEC §B.23 JSON canonical format. All offline tools use only the
-Python standard library (no `pip install` required).
+The `tests/` subdirectory ships nineteen Python-based self-verification
+tools (T1 – T19) plus the data-contract and format gates. They probe the
+script's external dependencies, unit-test its PowerShell functions, and
+enforce the SPEC §B.23 JSON canonical format. All offline tools use only
+the Python standard library (no `pip install` required).
 
 ```bash
 # Offline tests — safe to run anywhere
@@ -525,11 +534,20 @@ python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
 python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
-python3 tests/servicing_dependency_parser_test.py        # T12: 22 wsusscn2 parser pipeline assertions
-python3 tests/servicing_dependency_layer1_test.py        # T13: 14 Layer 1 writeback assertions
+python3 tests/servicing_dependency_parser_test.py            # T12: 22 wsusscn2 parser pipeline assertions
+python3 tests/servicing_dependency_layer1_test.py            # T13: 14 Layer 1 writeback assertions
+python3 tests/servicing_dependency_deny_list_test.py         # T14: 10 EOS/ESU deny-list assertions
+python3 tests/servicing_dependency_servicing_stack_test.py   # T15: 16 servicing-stack extraction assertions
+python3 tests/servicing_dependency_readiness_verdict_test.py # T16: 21 readiness verdict assertions
+python3 tests/servicing_dependency_recency_fallback_test.py  # T17: 15 recency-fallback assertions
+python3 tests/servicing_dependency_servicing_stack_populate_test.py # T18: 17 SS-populate assertions
+python3 tests/servicing_dependency_data_contract_test.py     # T19: 11 data-contract assertions
 
-# Part C quality gate (runs on every commit that touches a JSON file)
-python3 tests/canonical_json_format_check.py # 26 JSON files canonicalised; SPEC §C.3.4
+# Data-contract / schema / format gates (run on every commit that touches data)
+python3 tests/config_schema_test.py                       # config schema gate
+python3 tests/servicing_dependency_scope_invariants_test.py # scope-invariants gate: 23 assertions
+python3 tests/servicing_dependency_layer2_schema_test.py  # Layer 2 schema gate: 16 assertions
+python3 tests/canonical_json_format_check.py              # JSON canonical-format gate; SPEC §C.3.4
 
 # Live tests — require unrestricted network egress
 python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog

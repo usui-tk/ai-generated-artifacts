@@ -543,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.30-r11.16'
-$Script:ScriptTag     = 'servicing-dependency-test-file-rename'
+$Script:ScriptVersion = 'update-wsi-2026.05.30-r11.17'
+$Script:ScriptTag     = 'docs-realign-spec-b19-rebuild'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath

@@ -16,6 +16,35 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.17 - Documentation realignment: SPEC §B.19 rebuild, README/TESTING ground-truth pass
+
+A documentation-quality revision that realigns the in-project Markdown with the implemented code. No runtime logic changes; `$Script:ScriptVersion` `r11.16` -> `r11.17`, `$Script:ScriptTag` becomes `docs-realign-spec-b19-rebuild`. The shared epoch (`dataContractVersion`) stays `1`.
+
+**SPEC.md — §B.19 zero-base rebuild.** §B.19 (Servicing Dependency Database) was reconstructed from the code ground-truth and the repository governance, replacing the previous 77-subsection text (which had accreted pre-implementation drafts, milestone names, and superseded designs) with a 14-section structure that describes only the current specification plus genuinely future work:
+
+- Removed stale / superseded content: the retired `Test-PatchDependencyClosureFromGraph` name and its KB-closure verdict shape (`Requires` / `MissingFromSet`); phantom parameters `-OfflineCabPath` (real: `-OfflineSyncPackagePath`), `-SkipDependencyCheck` opt-out (real: opt-in `-EnableDependencyCheck`), and `-DisablePca2023BootManager` (real: opt-in `-EnablePca2023BootManager`); the `Packages` / `RevisionIndex` / PascalCase Layer 2 draft (real: `_meta` + `updates`, camelCase); PoC milestone names (Phase 2b1, M1 part 5b, r09.0 Step 2b3); cost/benefit and rollout-step history (now CHANGELOG's / out of scope).
+- Added / clarified as current specification: a **Data-processing strategy** section (cab/large-XML handling — 7-Zip-only with the `expand.exe` rationale, two-step targeted extraction, streaming `XmlReader` with the +536 MB DOM-vs-<50 MB streaming budget, encoding and canonical-output integrity); a **testability-driven two-language architecture** rationale (PowerShell body for the Windows-only DISM/Hyper-V targets, pure logic separated from I/O so Python can verify it offline, noted as a candidate for promotion to a shared convention in a future revision); the five-verdict **data-contract** model (`Current` / `Stale` / `Refuse` / `Foreign` / `Unknown`) and the validation-gate inventory (Layer 2 schema, scope-invariants, canonical-format).
+- Corrected a diagnostic-output description: the P06 Stage 1 missing-patch fail path does write `validation_summary.json`, `validation_detail.csv`, `wsusscn2_scan_raw.json`, and `dependency_graph.json` under `<WorkRoot>/diag/<timestamp>/` (`Export-PatchValidationReport`); these are real, not phantom.
+- Fixed §B.19-external references throughout SPEC (function inventory, B.6.3 A04, phase-skip list) and renumbered all cross-references to the new 14-section layout.
+
+**README.md / README.ja.md (bilingual lock-step preserved, 16/12).**
+
+- Action count `thirteen` -> `fourteen` (en; ja already correct).
+- Removed the `r09.0 progress` section (history belongs in this CHANGELOG; future plans belong in SPEC).
+- P06 Stage 2 corrected to opt-in advisory (`-EnableDependencyCheck`): logs verdicts, never blocks; the `ABORT` / "planned" / "dependency closure" wording was removed.
+- Diagnostic section reframed around troubleshooting files an operator actually inspects (`-LogFile` transcript, `<WorkRoot>/logs/debugtrace.jsonl`, the Stage 1 `diag/<timestamp>/` set).
+- Parameters section expanded from "selected" to **all 35 parameters** in a categorised table (category / default / ValidateSet / purpose) with a `Get-Help -Full` pointer.
+- Quick start rewritten as a placeholder template plus a worked Server 2016 / Server 2025 example, using per-OS `-WorkRoot`, an auto-timestamped `-LogFile` via `Get-Date`, and the PCA2023 switch difference between the two OSes.
+- Self-verification list extended from T1–T13 to **T1–T19 plus the gates**.
+
+**TESTING.md.**
+
+- §0 status, §4, and §5 realigned: P06 Stage 2 shown as opt-in advisory; milestone names simplified; SPEC section references renumbered.
+- New **§4.3 Real-machine verification baseline** combining the conventions the operator-pending findings made necessary (per-OS `-WorkRoot`, auto-timestamped `-LogFile`, `-EnableDependencyCheck`, `-Execute`), covering the Server 2016 `0x800f0823` servicing-stack predictor and the P05 mojibake fresh-`-WorkRoot` workaround.
+- §5 extended to the full T1–T19 inventory plus a servicing-dependency suite (T12–T19) summary.
+
+**tests/README.md.** SPEC section references renumbered to the rebuilt §B.19; the scope-invariants gate description updated to reflect that the PowerShell deny-list filter is implemented and matches the `classify_scope` reference (no longer a future "later session").
+
 ### r11.16 - Self-verification test-file rename to servicing_dependency_* (Batch 3)
 
 Completes the `wsusscn2` → `servicing_dependency` rename programme by renaming the output-verification test files themselves, which r11.15 deliberately left at their `wsusscn2_*` names. The renamed suite verifies the generation and quality of the `servicing-dependency-database.json` output artifact, so the filenames now match the artifact they gate (and the `tests/fixtures/servicing-dependency/` they read). `$Script:ScriptVersion` `r11.15` -> `r11.16`; `$Script:ScriptTag` becomes `servicing-dependency-test-file-rename`. No code path, no data, no schema, and no fixture content changes; the shared epoch (`dataContractVersion`) stays `1`.

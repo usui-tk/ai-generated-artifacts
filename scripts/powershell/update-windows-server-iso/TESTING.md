@@ -49,7 +49,7 @@ a build identifier plus a calendar date. Pending items are marked
 | P04 FetchAssets — ISO + patch downloads with SHA-256 verify | _pending operator confirmation_ | not yet exercised on a fresh runner |
 | P05 ExpandIso — source ISO mount + WIM enumeration | _pending operator confirmation_ | r09.0 step2b3-real-data-parser-correction build (synthetic mode only) |
 | P06 ValidatePatchSet — `wsusscn2.cab` offline scan (Stage 1 catalog-freshness) | ✓ Stage 1 (catalog freshness) exercised | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
-| P06 ValidatePatchSet — Stage 2 (graph-based dependency closure, r09.0+) | parser pipeline + Layer 2 JSON + Layer 1 writeback all land in Phase 2b2; dependency-closure walk still pending Phase 2c | r09.0 step2b3-real-data-parser-correction build (A04 implemented; T12 + T13 verified) |
+| P06 ValidatePatchSet — Stage 2 (servicing-readiness, opt-in `-EnableDependencyCheck`) | ✓ implemented as an advisory check (logs verdicts, never blocks); verified offline via T16/T17 | r11.x build / 2026-05-29 |
 | P07 PatchInstallWim — SSU → LCU → .NET sequence | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P08 PatchBootWim — boot.wim + winre.wim | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P09 AssembleIso — Dynamic Update overlay + `oscdimg` | _pending operator confirmation_ | (requires `oscdimg.exe` on a Windows runner) |
@@ -57,10 +57,10 @@ a build identifier plus a calendar date. Pending items are marked
 | P11 StaticVerify — output ISO mount + KB-package presence check | _pending operator confirmation_ | (requires P07-P09 success) |
 | P12 VerifyPca2023Readiness — `pca2023_readiness.json` + `.md` emission | ✓ structurally validated; runs unconditionally | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
 | P13 FinalReport — end-of-run summary + ISO hash | _pending operator confirmation_ | (requires P07-P11 success) |
-| A01 RefreshAllBaselines — Config baseline regeneration from caches; soft-fail chain into A04 (r09.0 Step 2b2) | ✓ exercised in Stage 4 monthly; A04 chain landed but not yet exercised live | CI Stage 4 / 2026-05-15; r09.0 step2b2 build for chain landing |
+| A01 RefreshAllBaselines — Config baseline regeneration from caches; soft-fail chain into A04 | ✓ exercised in Stage 4 monthly; A04 chain landed, not yet exercised live | CI Stage 4 / 2026-05-15 |
 | A02 DumpFieldClassification — field-cadence decision matrix emit | ✓ exercised | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
 | A03 RefreshSnapshots — upstream `data/raw-*` + `data/cache-*` refresh | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
-| A04 RefreshDependencyDatabase (r09.0 Step 2b2, implemented) — Stages 1-4 chain + Layer 1 writeback (`_DependencyVerifiedUpdateId`/`_DependencyVerifiedRevisionId`/`_DependencyVerifiedCreationDate`/`_DependencyVerifiedAt`); Layer 1 helper verified via T13; Stage 1 live-only | ✓ Layer 1 helper + Stages 3/4 verified offline; Stages 1-2 covered by live monthly CI | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
+| A04 RefreshDependencyDatabase — Stages 1-4 chain + Layer 1 writeback (`_DependencyVerifiedUpdateId`/`_DependencyVerifiedRevisionId`/`_DependencyVerifiedCreationDate`/`_DependencyVerifiedAt`); Layer 1 helper verified via T13 | ✓ Layer 1 helper + Stages 3/4 verified offline; Stages 1-2 covered by live monthly CI | 2026-05-28 |
 | T1 catalog_probe.py | ✓ live probe passes (~7 checks) | CI Stage 4 / 2026-05-15 |
 | T2 catalog_fixture_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T3 powershell_harness.py (10 PS function assertions) | ✓ all pass | CI Stage 1 (continuous) |
@@ -72,18 +72,18 @@ a build identifier plus a calendar date. Pending items are marked
 | T9 catalog_title_tokens_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T10 release_info_resolver_test.py (22 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| T12 servicing_dependency_parser_test.py (23 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.9.4; includes kbIds-field presence) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| T13 servicing_dependency_layer1_test.py (15 assertions, `Update-Layer1DependencyVerification` writeback contract per SPEC §B.19.9.5) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| T14 servicing_dependency_deny_list_test.py (10 assertions, EOS/ESU deny-list warned-exclusion + allow-overrides in the PowerShell scope filter, matching the `classify_scope` reference; SPEC §B.19.7.1) | ✓ all pass | r11.5 wsusscn2-eos-esu-deny-list-warned-exclusion build / 2026-05-29 |
-| T15 servicing_dependency_servicing_stack_test.py (16 assertions, `Resolve-OfflineSyncRevisionToCab` RANGESTART mapping + `Get-OfflineSyncServicingStackInfo` separate/combined/checkpoint derivation from real-cab CBS metadata; SPEC §B.19.13.0) | ✓ all pass | r11.6 wsusscn2-servicing-stack-extraction build / 2026-05-29 |
-| T16 servicing_dependency_readiness_verdict_test.py (21 assertions, `Test-PatchServicingReadinessFromGraph` three-check verdict: presence / SS-version-comparison (SsTooOld = 0x800f0823) / supersession, with precedence and Unknown/Available handling; SPEC §B.19.13.1) | ✓ all pass | r11.7 wsusscn2-phase2c-readiness-verdict build / 2026-05-29 |
-| T17 servicing_dependency_recency_fallback_test.py (15 assertions, recency fallback in `Test-PatchServicingReadinessFromGraph`: out-of-scope KB falls back to newest in-scope LCU per OS family -> Superseded, with family resolution from OsKey and NotInDatabase when no fallback target; SPEC §B.19.7.2) | ✓ all pass | r11.8 wsusscn2-recency-fallback build / 2026-05-29 |
-| T18 servicing_dependency_servicing_stack_populate_test.py (17 assertions, pure halves of the SS populate: `Select-OfflineSyncLcuLeafRevision` leaf choice + `Update-ServicingStackFromMeta` field population from CBS metadata; SPEC §B.19.13.0) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
-| T19 servicing_dependency_data_contract_test.py (11 assertions, `Test-DataContractConsistency` status classification Current/Stale/Refuse/Foreign/Unknown + directory expansion + roll-up; committed Layer 2 DB classifies Current; SPEC §B.19.10) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
+| T12 servicing_dependency_parser_test.py (23 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.7; includes kbIds-field presence) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| T13 servicing_dependency_layer1_test.py (15 assertions, `Update-Layer1DependencyVerification` writeback contract per SPEC §B.19.11) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| T14 servicing_dependency_deny_list_test.py (10 assertions, EOS/ESU deny-list warned-exclusion + allow-overrides in the PowerShell scope filter, matching the `classify_scope` reference; SPEC §B.19.4.1) | ✓ all pass | r11.5 wsusscn2-eos-esu-deny-list-warned-exclusion build / 2026-05-29 |
+| T15 servicing_dependency_servicing_stack_test.py (16 assertions, `Resolve-OfflineSyncRevisionToCab` RANGESTART mapping + `Get-OfflineSyncServicingStackInfo` separate/combined/checkpoint derivation from real-cab CBS metadata; SPEC §B.19.9) | ✓ all pass | r11.6 wsusscn2-servicing-stack-extraction build / 2026-05-29 |
+| T16 servicing_dependency_readiness_verdict_test.py (21 assertions, `Test-PatchServicingReadinessFromGraph` three-check verdict: presence / SS-version-comparison (SsTooOld = 0x800f0823) / supersession, with precedence and Unknown/Available handling; SPEC §B.19.10) | ✓ all pass | r11.7 wsusscn2-phase2c-readiness-verdict build / 2026-05-29 |
+| T17 servicing_dependency_recency_fallback_test.py (15 assertions, recency fallback in `Test-PatchServicingReadinessFromGraph`: out-of-scope KB falls back to newest in-scope LCU per OS family -> Superseded, with family resolution from OsKey and NotInDatabase when no fallback target; SPEC §B.19.10) | ✓ all pass | r11.8 wsusscn2-recency-fallback build / 2026-05-29 |
+| T18 servicing_dependency_servicing_stack_populate_test.py (17 assertions, pure halves of the SS populate: `Select-OfflineSyncLcuLeafRevision` leaf choice + `Update-ServicingStackFromMeta` field population from CBS metadata; SPEC §B.19.9) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
+| T19 servicing_dependency_data_contract_test.py (11 assertions, `Test-DataContractConsistency` status classification Current/Stale/Refuse/Foreign/Unknown + directory expansion + roll-up; committed Layer 2 DB classifies Current; SPEC §B.19.13) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
 | Part C §C.3.4 — `canonical_json_format_check.py` (27 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| Scope-invariants gate — `servicing_dependency_scope_invariants_test.py` (23 assertions, EOS/ESU deny-list + allow-overrides over Layer 2 + fixture + synthetic; SPEC §B.19.7/§B.19.7.1) | ✓ all pass | r11.2 wsusscn2-phase2c-eos-esu-scope build / 2026-05-29 |
-| Layer 2 schema gate — `servicing_dependency_layer2_schema_test.py` (16 assertions, committed `data/servicing-dependency-database.json` vs `schema/servicing-dependency-database.schema.json` + data-contract identity, portable provenance, kbIds populate, Microsoft-prose hard rule; SPEC §B.19.8/§B.19.10) | ✓ all pass | r11.9 wsusscn2-layer2-kbids-populate build / 2026-05-29 |
+| Scope-invariants gate — `servicing_dependency_scope_invariants_test.py` (23 assertions, EOS/ESU deny-list + allow-overrides over Layer 2 + fixture + synthetic; SPEC §B.19.4/§B.19.4.1) | ✓ all pass | r11.2 wsusscn2-phase2c-eos-esu-scope build / 2026-05-29 |
+| Layer 2 schema gate — `servicing_dependency_layer2_schema_test.py` (16 assertions, committed `data/servicing-dependency-database.json` vs `schema/servicing-dependency-database.schema.json` + data-contract identity, portable provenance, kbIds populate, Microsoft-prose hard rule; SPEC §B.19.5/§B.19.8) | ✓ all pass | r11.9 wsusscn2-layer2-kbids-populate build / 2026-05-29 |
 | Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T19 + format gate + config schema gate + scope-invariants gate + Layer 2 schema gate) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
@@ -310,15 +310,22 @@ procedure is below; results from past real runs are recorded in
 2. Install Windows ADK Deployment Tools (or pass `-AutoInstallAdk`).
 3. Pre-stage an evaluation ISO (e.g. via `-EvalIsoMode -IsoUrl
    <fwlink>` or place it manually and pass `-IsoPath`).
-4. Run:
+4. Run, using a per-OS `-WorkRoot`, an auto-timestamped `-LogFile`, and
+   the opt-in servicing-readiness check:
 
    ```powershell
+   $OsVersion = 'Server2019'
+   $WorkRoot  = "D:\UpdateWsi-$OsVersion"
+   $stamp     = Get-Date -Format 'yyyyMMdd-HHmmss'
+   $LogFile   = Join-Path $WorkRoot ('logs\PrepareBuildVerify-{0}-{1}.log' -f $OsVersion, $stamp)
+
    .\Update-WindowsServerIso.ps1 `
        -Action PrepareBuildVerify `
-       -OsVersion Server2019 -OsLanguage ja-jp `
+       -OsVersion $OsVersion -OsLanguage ja-jp `
        -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
        -PatchDirectory 'D:\Patches\Server2019\2026-05' `
-       -WorkRoot 'D:\UpdateWsi_2019' `
+       -WorkRoot $WorkRoot -LogFile $LogFile `
+       -EnableDependencyCheck `
        -Execute
    ```
 
@@ -329,17 +336,76 @@ procedure is below; results from past real runs are recorded in
 
 | Item | Note |
 |---|---|
-| Server 2016 `-Execute` build | KB5088064 SSU prerequisite issue documented in [`docs/history/r08.0-step4-findings-and-dependency-investigation.md`](./docs/history/r08.0-step4-findings-and-dependency-investigation.md). Once §B.19 (Servicing Dependency Database) is implemented in r09.0, P06 will catch this at validation time. In the interim, operators must add the prerequisite SSU manually to `data/config-Server2016.json` |
-| Mojibake in P05 WIM-index banner | Did **not** reproduce in r08.0 Step 17 when `-WorkRoot` was changed from `D:\UpdateWsi` to `D:\UpdateWsi_2016`. Working hypothesis is now DISM mount-cache state corruption from prior aborted P10 runs, not console rendering. Workaround: use a fresh `-WorkRoot` per OS family. See [SPEC.md](./SPEC.md) §D.25 |
+| Server 2016 `-Execute` build | The KB5088064 SSU must precede the KB5087537 LCU, or CBS rejects the LCU with `0x800f0823`. With `-EnableDependencyCheck`, P06 Stage 2 now flags this as `SsTooOld` before the mount (advisory). The SSU prerequisite is also recorded in `data/config-Server2016.json` so P03/P04 resolve it automatically. |
+| Mojibake in P05 WIM-index banner | Did **not** reproduce when `-WorkRoot` was changed from `D:\UpdateWsi` to a per-OS root such as `D:\UpdateWsi-Server2016`. Working hypothesis is DISM mount-cache state corruption from prior aborted P10 runs, not console rendering. Workaround: use a fresh per-OS `-WorkRoot`. See [SPEC.md](./SPEC.md) §D.25 |
+
+### 4.3 Real-machine verification baseline
+
+The recommended baseline for an out-of-band real run combines the
+conventions that the operator-pending findings above made necessary, so
+that a single invocation is reproducible, self-documenting, and avoids
+the two known real-machine pitfalls (the `0x800f0823` servicing-stack gap
+and the P05 mojibake from a reused mount cache):
+
+- **Per-OS `-WorkRoot`** (`D:\UpdateWsi-<OsVersion>`) — a fresh workspace
+  per OS family avoids the DISM mount-cache corruption behind the §4.2
+  mojibake item. Never share one `-WorkRoot` across OS families.
+- **Explicit, auto-timestamped `-LogFile`** — one transcript per run,
+  named by action/OS/timestamp via `Get-Date`, so reruns never overwrite
+  evidence and each run is independently auditable.
+- **`-EnableDependencyCheck`** — turns on the P06 Stage 2 advisory so the
+  `0x800f0823` predictor (`SsTooOld`) is logged before the mount. On
+  Server 2016 / 2019 this surfaces a missing or too-old SSU; on Server
+  2022 / 2025 the check is N/A (the SSU travels inside the LCU).
+- **`-Execute`** — the only mode that performs DISM writes.
+
+```powershell
+# One baseline run, parameterised by OS family
+$OsVersion  = 'Server2016'                 # Server2016/2019/2022/2025
+$OsLanguage = 'ja-jp'
+$WorkRoot   = "D:\UpdateWsi-$OsVersion"     # fresh per-OS workspace
+$stamp      = Get-Date -Format 'yyyyMMdd-HHmmss'
+$LogFile    = Join-Path $WorkRoot ('logs\baseline-{0}-{1}.log' -f $OsVersion, $stamp)
+
+$common = @{
+    Action                = 'PrepareBuildVerify'
+    OsVersion             = $OsVersion
+    OsLanguage            = $OsLanguage
+    IsoPath               = "D:\ISO\WS$($OsVersion -replace 'Server','')_$OsLanguage.iso"
+    PatchDirectory        = "D:\Patches\$OsVersion\2026-05"
+    WorkRoot              = $WorkRoot
+    LogFile               = $LogFile
+    EnableDependencyCheck = $true
+    Execute               = $true
+}
+
+# Server 2025 additionally opts in to the PCA2023 boot-manager conversion
+if ($OsVersion -eq 'Server2025') {
+    .\Update-WindowsServerIso.ps1 @common -EnablePca2023BootManager -ForcePca2023OnServer2025
+} else {
+    .\Update-WindowsServerIso.ps1 @common
+}
+```
+
+**What to confirm after the run:**
+
+1. The Stage 2 servicing-readiness lines in the transcript show `Pass`
+   for every configured patch (any `SsTooOld` / `NotInDatabase` means the
+   patch set needs the matching SSU or a baseline refresh before
+   `-Execute` is trusted).
+2. The P05 WIM-index banner renders correctly (no mojibake); if it does
+   not, the `-WorkRoot` was not fresh — clear it and rerun.
+3. The P13 FinalReport hash and elapsed time are recorded in
+   [`CHANGELOG.md`](./CHANGELOG.md).
 
 ---
 
 ## 5. Self-verification tool suite (T1 – T19)
 
-The `tests/` directory ships eleven Python tools plus the Part C
-format gate. The authoritative inventory lives in
-[`tests/README.md`](./tests/README.md); §0 above mirrors their current
-status. The full design rationale is in [SPEC.md](./SPEC.md) §C.9.
+The `tests/` directory ships nineteen Python tools (T1 – T19) plus the
+data-contract, schema, and format gates. The authoritative inventory
+lives in [`tests/README.md`](./tests/README.md); §0 above mirrors their
+current status. The full design rationale is in [SPEC.md](./SPEC.md) §C.9.
 
 ### Quick run reference
 
@@ -353,9 +419,20 @@ python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
 python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
+python3 tests/servicing_dependency_parser_test.py            # T12: 22 parser pipeline assertions
+python3 tests/servicing_dependency_layer1_test.py            # T13: 14 Layer 1 writeback assertions
+python3 tests/servicing_dependency_deny_list_test.py         # T14: 10 EOS/ESU deny-list assertions
+python3 tests/servicing_dependency_servicing_stack_test.py   # T15: 16 servicing-stack extraction assertions
+python3 tests/servicing_dependency_readiness_verdict_test.py # T16: 21 readiness verdict assertions
+python3 tests/servicing_dependency_recency_fallback_test.py  # T17: 15 recency-fallback assertions
+python3 tests/servicing_dependency_servicing_stack_populate_test.py # T18: 17 SS-populate assertions
+python3 tests/servicing_dependency_data_contract_test.py     # T19: 11 data-contract assertions
 
-# Part C quality gate (every commit that touches a JSON file)
-python3 tests/canonical_json_format_check.py # 25 JSON files canonicalised; gate per SPEC §C.3.4
+# Data-contract / schema / format gates (every commit that touches data)
+python3 tests/config_schema_test.py                          # config schema gate
+python3 tests/servicing_dependency_scope_invariants_test.py  # scope-invariants gate: 23 assertions
+python3 tests/servicing_dependency_layer2_schema_test.py     # Layer 2 schema gate: 16 assertions
+python3 tests/canonical_json_format_check.py                 # JSON canonical-format gate; SPEC §C.3.4
 
 # Live tests — require unrestricted egress
 python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog
@@ -365,23 +442,33 @@ python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
 
 ### Determinism categories
 
-- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6, T7, T8, T9, T10, T11, T12, T13, plus the Part C §C.3.4 canonical JSON format gate, the config schema gate, and the scope-invariants gate.
+- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6 – T19,
+  plus the canonical JSON format gate, the config schema gate, the
+  scope-invariants gate, and the Layer 2 schema gate.
 - **Live-network** (Stage 4 monthly + ad-hoc): T1, T4, T5.
 
-### T12 / T13 (r09.0 Step 2b, implemented)
+### Servicing-dependency suite (T12 – T19)
 
-`servicing_dependency_parser_test.py` (T12, 22 assertions) provides offline
-regression coverage for the §B.19 Master XML parser
-(`ConvertFrom-OfflineSyncPackage`, `New-ServicingDependencyDatabase`)
-against the committed fixture `tests/fixtures/servicing-dependency/package.xml`,
-paired with the `tests/common/wsusscn2_*.py` fixture helpers.
-`servicing_dependency_layer1_test.py` (T13, 15 assertions) covers the Phase
-2b2/2b3 Layer 1 writeback helper `Update-Layer1DependencyVerification`.
-The current canonical T-set ends at T13; the three unnumbered gates
-(canonical JSON format gate, config schema gate, scope-invariants
-gate) sit alongside it.
+The §B.19 servicing-dependency facility is covered offline by T12 – T19
+plus the scope-invariants and Layer 2 schema gates, all driven from
+Python against committed fixtures and the committed Layer 2 database so
+no live cab is needed on a PR:
 
----
+- **T12** parser pipeline (`ConvertFrom-OfflineSyncPackage`,
+  `New-ServicingDependencyDatabase`) against
+  `tests/fixtures/servicing-dependency/`.
+- **T13** Layer 1 writeback (`Update-Layer1DependencyVerification`).
+- **T14** EOS/ESU deny-list with allow-overrides.
+- **T15** servicing-stack extraction (RANGESTART map + separate/combined/checkpoint).
+- **T16** readiness verdict (presence / SS-compare / supersession).
+- **T17** recency fallback.
+- **T18** servicing-stack populate (pure halves).
+- **T19** data-contract consistency (Current/Stale/Refuse/Foreign/Unknown).
+
+The live cab is exercised only by T5 (freshness probe) and the monthly CI
+refresh, consistent with the testability-driven split documented in
+[SPEC.md](./SPEC.md) §B.19.6.
+
 
 ## 6. Continuous integration coverage
 
