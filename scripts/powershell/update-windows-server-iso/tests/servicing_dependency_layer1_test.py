@@ -24,7 +24,7 @@ Stage 1 (Get-OfflineSyncPackageIfNeeded) is platform-coupled to network
 live monthly refresh CI and the synthetic-test-mode end-to-end run.
 
 Invocation:
-    python3 wsusscn2_layer1_test.py
+    python3 servicing_dependency_layer1_test.py
 """
 
 from __future__ import annotations

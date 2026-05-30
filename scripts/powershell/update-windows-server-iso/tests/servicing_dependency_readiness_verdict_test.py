@@ -33,7 +33,7 @@ Runs offline; the function's only I/O is reading the Layer 2 JSON, so no
 wsusscn2.cab download or 7-Zip invocation is needed.
 
 Invocation:
-    python3 wsusscn2_readiness_verdict_test.py
+    python3 servicing_dependency_readiness_verdict_test.py
 """
 
 from __future__ import annotations

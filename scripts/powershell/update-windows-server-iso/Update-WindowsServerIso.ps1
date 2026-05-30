@@ -543,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Director
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.30-r11.15'
-$Script:ScriptTag     = 'servicing-dependency-artifact-rename'
+$Script:ScriptVersion = 'update-wsi-2026.05.30-r11.16'
+$Script:ScriptTag     = 'servicing-dependency-test-file-rename'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -7414,7 +7414,7 @@ function _CanonicalJson_ParseNull {
 #   Stage 4: New-ServicingDependencyDatabase   (this section)
 #
 # The pipeline is fully decoupled into single-responsibility helpers so
-# that T12 (tests/wsusscn2_parser_test.py) can exercise Stages 2-4
+# that T12 (tests/servicing_dependency_parser_test.py) can exercise Stages 2-4
 # independently against a small fixture without ever fetching a real
 # 612 MB wsusscn2.cab over the network.
 #

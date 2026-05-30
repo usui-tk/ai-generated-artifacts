@@ -25,7 +25,7 @@ the Windows file layout) so it is exercised only by the live monthly
 refresh, not by T12.
 
 Invocation:
-    python3 wsusscn2_parser_test.py
+    python3 servicing_dependency_parser_test.py
 """
 
 from __future__ import annotations

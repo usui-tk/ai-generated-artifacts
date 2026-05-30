@@ -1725,7 +1725,7 @@ Layer 2 `_meta.stats`. When the count is non-zero,
 naming the count and families (the "warned exclusion" of §4 — operators
 are told that EOS/ESU patches were detected and dropped, rather than
 silently pruned). The PowerShell branch is covered by T14
-(`wsusscn2_deny_list_test.py`), the executable check that it matches the
+(`servicing_dependency_deny_list_test.py`), the executable check that it matches the
 `classify_scope` allow-overrides reference.
 
 Server 2016's GUID stays on the allow-list across its forthcoming
@@ -1736,7 +1736,7 @@ the deny-list is a future operator decision, not a default.
 
 The contract reference for the allow-overrides semantics is the
 `classify_scope` function in
-`tests/wsusscn2_scope_invariants_test.py`; the PowerShell
+`tests/servicing_dependency_scope_invariants_test.py`; the PowerShell
 implementation of this filter (a later session) MUST match it.
 
 #### B.19.7.2 Effective reach and fallback (informative)
@@ -1761,7 +1761,7 @@ if that family has an in-scope LCU the verdict is `Superseded` (with the
 fallback target's `UpdateId` and servicing-stack facts surfaced and a
 note naming the target KB) rather than `NotInDatabase`. Only when the
 family cannot be resolved or has no in-scope LCU does the verdict stay
-`NotInDatabase`. T17 (`wsusscn2_recency_fallback_test.py`) is the
+`NotInDatabase`. T17 (`servicing_dependency_recency_fallback_test.py`) is the
 executable contract.
 
 ### B.19.8 Microsoft-prose exclusion rule (normative)
@@ -1906,7 +1906,7 @@ test it?" by reading this single subsection rather than grepping the
 | Stage | Function | Lines | Returns | Tested by |
 |---:|---|---:|---|---|
 | 2 | `Invoke-OfflineSyncPackageExtract` | ~97 | `[string]` path to package.xml | live monthly refresh only (platform-coupled to 7-Zip + Windows file layout) |
-| 3 | `ConvertFrom-OfflineSyncPackage`   | ~337 | `[pscustomobject]` with `.Updates`, `.FileLocations`, `.Stats` | T12 (`tests/wsusscn2_parser_test.py`, 22 assertions) |
+| 3 | `ConvertFrom-OfflineSyncPackage`   | ~337 | `[pscustomobject]` with `.Updates`, `.FileLocations`, `.Stats` | T12 (`tests/servicing_dependency_parser_test.py`, 22 assertions) |
 | 4 | `New-ServicingDependencyDatabase`   | ~133 | `[string]` path to the written JSON | T12 (structural compare against `tests/fixtures/servicing-dependency/expected-output.json`) |
 
 The three functions are contiguous in the script (Stage 2 immediately
@@ -2074,10 +2074,10 @@ list.
 
 **Test-side binding**
 
-T12 (`tests/wsusscn2_parser_test.py`) covers Stages 3 and 4 only;
+T12 (`tests/servicing_dependency_parser_test.py`) covers Stages 3 and 4 only;
 Stage 2 is exercised by the live monthly refresh CI. The fixture in
 `tests/fixtures/servicing-dependency/package.xml` is deterministically rebuildable
-via `python3 -m tests.common.wsusscn2_fixture_builder` — fixture
+via `python3 -m tests.common.servicing_dependency_fixture_builder` — fixture
 changes are therefore reviewable as code, not as opaque binary blobs.
 
 #### B.19.9.5 A04 wrapper lifecycle (Phase 2b2 binding)
@@ -2186,7 +2186,7 @@ chain A04. Operators who want only A04 can invoke
 
 **Test-side binding (Phase 2b2)**
 
-T13 (`tests/wsusscn2_layer1_test.py`, 14 assertions) covers
+T13 (`tests/servicing_dependency_layer1_test.py`, 14 assertions) covers
 `Update-Layer1DependencyVerification` in isolation against a
 tempdir-cloned `data/` directory and the T12 fixture's parse output.
 The A04 wrapper as a whole (Stage 1 included) remains coupled to the
@@ -2306,7 +2306,7 @@ filename prefix; this is expected and is not a scope leak.
 > `schema/servicing-dependency-database.schema.json`** (Draft-07), parallel to the
 > Layer 1 `schema/config.schema.json`. The T12 fixture
 > (`tests/fixtures/servicing-dependency/expected-output.json`) and the
-> `tests/wsusscn2_scope_invariants_test.py` gate remain authoritative
+> `tests/servicing_dependency_scope_invariants_test.py` gate remain authoritative
 > for the scope/contract semantics. The prose §B.19.10.1–10.4 below is
 > the deprecated pre-implementation draft and is **superseded by the
 > schema file**; consult the schema, not the prose, for field names and
@@ -2334,7 +2334,7 @@ filename prefix; this is expected and is not a scope leak.
 >   `checkpoint`). The fields remain schema-optional/nullable. The committed
 >   `data/servicing-dependency-database.json` is validated against
 >   `schema/servicing-dependency-database.schema.json` by the Layer 2 schema gate
->   (`tests/wsusscn2_layer2_schema_test.py`).
+>   (`tests/servicing_dependency_layer2_schema_test.py`).
 
 Versioning is governed by the **shared data-contract identity**, not by
 a per-model schema version. The script holds a single source of truth in
@@ -2642,7 +2642,7 @@ of file / 7-Zip I/O so they are unit-testable offline (T15):
   servicing-stack tokens (checkpoint). The full LCU-bundle → leaf
   revision → per-package cab → `c/<rev>` extraction flow uses these two
   functions plus the §B.19.4 7-Zip invocation pattern; T15
-  (`wsusscn2_servicing_stack_test.py`) is the executable contract.
+  (`servicing_dependency_servicing_stack_test.py`) is the executable contract.
 
 The populate of the live Layer 2 (M1 part 5b, r11.10) is a two-pass step
 that keeps the cab/7-Zip I/O isolated so the offline CI exercises the
@@ -2667,7 +2667,7 @@ pure logic:
   update from that map, leaving updates with no leaf metadata unchanged.
 
 The two pure halves are covered offline by T18
-(`wsusscn2_servicing_stack_populate_test.py`) with the same CBS fixtures
+(`servicing_dependency_servicing_stack_populate_test.py`) with the same CBS fixtures
 as T15; only `Invoke-OfflineSyncLeafServicingStackExtract` needs a real cab
 (the live monthly CI path). `Get-SevenZipPath` resolves the Linux
 `7z`/`7za` binaries in addition to the Windows `7z.exe`, so the I/O
@@ -2775,7 +2775,7 @@ Layer 2 yields `Available = $false` / `OverallStatus = 'Unknown'`. Layer 2
 is read with `ConvertFrom-CanonicalJson` (the project's hand-rolled parser
 that preserves the textual form of dates on every PowerShell version), so
 `_meta.generatedAt` survives as its canonical ISO-8601 string with no
-reformatting. T16 (`wsusscn2_readiness_verdict_test.py`) is the executable
+reformatting. T16 (`servicing_dependency_readiness_verdict_test.py`) is the executable
 contract.
 
 
@@ -2986,7 +2986,7 @@ Mitigations:
 2. T6 (`tests/release_info_parser_test.py`) has 13 assertions that
    cover the parser's emit shape; a schema-incompatible Master XML
    change would surface there before merging.
-3. A new test `tests/wsusscn2_parser_test.py` (T7) is planned for
+3. A new test `tests/servicing_dependency_parser_test.py` (T7) is planned for
    r09.0: it consumes a committed `tests/fixtures/servicing-dependency/` set of
    miniature Master XML snippets and asserts the parser's behaviour
    on representative `<Update>` shapes. T7 is OFFLINE (uses
@@ -3013,7 +3013,7 @@ git diff data/servicing-dependency-database.json | head -80
 wc -c data/servicing-dependency-database.json
 
 # 4. Run the synthetic CI locally
-python3 tests/wsusscn2_parser_test.py        # T7 (new)
+python3 tests/servicing_dependency_parser_test.py        # T7 (new)
 python3 tests/catalog_fixture_test.py        # T2 (existing)
 
 # 5. Inspect the layer 1 diff
@@ -4030,8 +4030,8 @@ mirrors that authoritative table.
 | **T9** `catalog_title_tokens_test.py` | Offline regression for `Get-CatalogTitleTokenList` against all four OS configs + `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases | 18 | No | Every commit touching `Common.CatalogTitleTokens` in any OS config, or the narrow-filter helpers |
 | **T10** `release_info_resolver_test.py` | Offline regression for `Get-PatchSetFromReleaseInfoDiscovery` (Refresher main-path migration); 4 scenarios + defensive cases | 18 | No | Every commit touching `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or its three caches |
 | **T11** `canonical_json_test.py` | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell) and `canonical_json_dumps` / `save_canonical_json_file` (Python) per SPEC Part B.23 | 26 | No | Every commit touching the canonical JSON helpers (PS or Python) |
-| **T12** `wsusscn2_parser_test.py` | Offline self-verification of wsusscn2 parser pipeline Stages 3 and 4 against the committed fixture `fixtures/servicing-dependency/package.xml`; structural compare against `expected-output.json` per SPEC §B.19.9.4 | 22 | No | Every commit touching Stage 3 / Stage 4 of the wsusscn2 parser or the scope-filter GUID tables |
-| **T13** `wsusscn2_layer1_test.py` | Offline self-verification of the Layer 1 writeback helper `Update-Layer1DependencyVerification` (Phase 2b2/2b3) per SPEC §B.19.9.5 | 15 | No | Every commit touching `Update-Layer1DependencyVerification`, the OS-category GUID table, or the A04 Layer 1 callout |
+| **T12** `servicing_dependency_parser_test.py` | Offline self-verification of wsusscn2 parser pipeline Stages 3 and 4 against the committed fixture `fixtures/servicing-dependency/package.xml`; structural compare against `expected-output.json` per SPEC §B.19.9.4 | 22 | No | Every commit touching Stage 3 / Stage 4 of the wsusscn2 parser or the scope-filter GUID tables |
+| **T13** `servicing_dependency_layer1_test.py` | Offline self-verification of the Layer 1 writeback helper `Update-Layer1DependencyVerification` (Phase 2b2/2b3) per SPEC §B.19.9.5 | 15 | No | Every commit touching `Update-Layer1DependencyVerification`, the OS-category GUID table, or the A04 Layer 1 callout |
 | **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 27 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
 | **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config.schema.json` |
 
@@ -4107,7 +4107,7 @@ code.
 
 ### C.9.6 Planned T11 (r09.0+)
 
-A new tool — provisionally **T11 `wsusscn2_parser_test.py`** — is
+A new tool — provisionally **T11 `servicing_dependency_parser_test.py`** — is
 planned for r09.0 Step 2+ to provide offline regression coverage for
 the §B.19 Master XML parser (`ConvertFrom-OfflineSyncPackage`,
 `New-ServicingDependencyDatabase`). It will assert the parser's emit

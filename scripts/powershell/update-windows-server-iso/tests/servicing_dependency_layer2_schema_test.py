@@ -27,7 +27,7 @@ Checks:
     (forward-compatible with the later SS-population increment).
 
 Invocation:
-    python3 wsusscn2_layer2_schema_test.py
+    python3 servicing_dependency_layer2_schema_test.py
 """
 
 from __future__ import annotations

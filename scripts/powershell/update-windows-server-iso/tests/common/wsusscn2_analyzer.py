@@ -5,7 +5,7 @@ inspecting a real ``wsusscn2.cab`` Master XML without coupling the
 PowerShell production parser (``ConvertFrom-OfflineSyncPackage`` in
 ``Update-WindowsServerIso.ps1``) to it. The analyzer is **not** a parity
 reference for the production parser; that role belongs to
-``wsusscn2_fixture_builder.py``. Instead, the analyzer offers:
+``servicing_dependency_fixture_builder.py``. Instead, the analyzer offers:
 
 - **Two-step 7-Zip extraction** of ``package.xml`` from ``wsusscn2.cab``
   via ``subprocess`` (Linux container friendly). Mirrors the production

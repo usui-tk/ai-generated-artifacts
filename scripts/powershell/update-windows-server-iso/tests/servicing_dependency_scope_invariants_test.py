@@ -48,7 +48,7 @@ PowerShell implementation of the deny-list filter lands in a later session;
 this gate fixes the contract that implementation must satisfy.
 
 Invocation:
-    python3 wsusscn2_scope_invariants_test.py
+    python3 servicing_dependency_scope_invariants_test.py
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ def classify_scope(product_guids):
 
 
 # ---------------------------------------------------------------------------
-# Test infrastructure (mirrors config_schema_test.py / wsusscn2_parser_test.py)
+# Test infrastructure (mirrors config_schema_test.py / servicing_dependency_parser_test.py)
 # ---------------------------------------------------------------------------
 
 class TestResult:

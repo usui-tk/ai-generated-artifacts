@@ -16,6 +16,36 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.16 - Self-verification test-file rename to servicing_dependency_* (Batch 3)
+
+Completes the `wsusscn2` → `servicing_dependency` rename programme by renaming the output-verification test files themselves, which r11.15 deliberately left at their `wsusscn2_*` names. The renamed suite verifies the generation and quality of the `servicing-dependency-database.json` output artifact, so the filenames now match the artifact they gate (and the `tests/fixtures/servicing-dependency/` they read). `$Script:ScriptVersion` `r11.15` -> `r11.16`; `$Script:ScriptTag` becomes `servicing-dependency-test-file-rename`. No code path, no data, no schema, and no fixture content changes; the shared epoch (`dataContractVersion`) stays `1`.
+
+Test-file renames (old -> new), 10 gated suites:
+
+- `tests/wsusscn2_parser_test.py` -> `tests/servicing_dependency_parser_test.py` (T12)
+- `tests/wsusscn2_layer1_test.py` -> `tests/servicing_dependency_layer1_test.py` (T13)
+- `tests/wsusscn2_deny_list_test.py` -> `tests/servicing_dependency_deny_list_test.py` (T14)
+- `tests/wsusscn2_servicing_stack_test.py` -> `tests/servicing_dependency_servicing_stack_test.py` (T15)
+- `tests/wsusscn2_readiness_verdict_test.py` -> `tests/servicing_dependency_readiness_verdict_test.py` (T16)
+- `tests/wsusscn2_recency_fallback_test.py` -> `tests/servicing_dependency_recency_fallback_test.py` (T17)
+- `tests/wsusscn2_servicing_stack_populate_test.py` -> `tests/servicing_dependency_servicing_stack_populate_test.py` (T18)
+- `tests/wsusscn2_data_contract_test.py` -> `tests/servicing_dependency_data_contract_test.py` (T19)
+- `tests/wsusscn2_scope_invariants_test.py` -> `tests/servicing_dependency_scope_invariants_test.py` (scope-invariants gate)
+- `tests/wsusscn2_layer2_schema_test.py` -> `tests/servicing_dependency_layer2_schema_test.py` (Layer 2 schema gate)
+
+Helper rename (1):
+
+- `tests/common/wsusscn2_fixture_builder.py` -> `tests/common/servicing_dependency_fixture_builder.py` (generates the T12 fixture under `tests/fixtures/servicing-dependency/`). Its module path `python3 -m tests.common.servicing_dependency_fixture_builder` is updated in SPEC §B.19 and the helper's own usage line; the reference to it in `tests/common/wsusscn2_analyzer.py`'s docstring is updated too.
+
+Deliberately NOT renamed (input-cab artifacts, by agreement; same axis as retaining the literal `wsusscn2.cab`, the runtime `cache/wsusscn2/` directory, and the `wsusscn2 cab/Master XML/parser pipeline` concept prose):
+
+- `tests/wsusscn2_probe.py` (T5) — a freshness probe whose subject is the input `wsusscn2.cab` itself, not the output database.
+- `tests/common/wsusscn2_analyzer.py` — a `wsusscn2.cab` schema-discovery helper for the Phase 2b1 investigation; operates on the input cab.
+
+Reference sites updated to the new filenames: the T-suite tables and Quick start in `tests/README.md`, the test inventory in SPEC §C and the per-section gate references in SPEC Part B, the `TESTING.md` §0 status table and run commands, the bilingual `README.md` / `README.ja.md` self-verification sections (lock-step preserved), and the single `tests/servicing_dependency_parser_test.py` mention in the `Update-WindowsServerIso.ps1 -Action TestHarness` comment. The `T-numbering` and per-suite assertion counts are unchanged. Concept prose that names the Microsoft artifact ("wsusscn2 parser pipeline") is retained.
+
+Verification: `psa.py` 0/0/0; `pwsh -ParseFile` 0 errors; all 15 gated offline tests green under the new filenames (including `servicing_dependency_layer2_schema_test.py` resolving its `import config_schema_test`); README en/ja lock-step `## 16 / ### 11` preserved; `.ps1` BOM + CRLF preserved (CR == LF == CRLF == 15456). No residual old test-file stems outside this CHANGELOG's history; preserved `wsusscn2_probe` / `wsusscn2_analyzer` / `wsusscn2.cab` references intact.
+
 ### r11.15 - WsusScn / wsusscn2 derived-artifact rename (Batch 2; config field + data/schema/fixture files)
 
 Completes the rename that r11.14 deliberately deferred: the derived artifacts that r11.14 left untouched are now brought onto the `OfflineSync*` (input layer) / `ServicingDependency*` (output layer) naming. r11.14 renamed only pure code identifiers; r11.15 renames the config field, the committed data/schema filenames, and the test-fixtures directory. `$Script:ScriptVersion` `r11.14` -> `r11.15`; `$Script:ScriptTag` becomes `servicing-dependency-artifact-rename`.

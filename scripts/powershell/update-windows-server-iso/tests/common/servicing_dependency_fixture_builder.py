@@ -35,7 +35,7 @@ Expected in-scope bundles: A (rev 990001) + B (rev 990003) = 2
   B.payloadUrls = [URL_CCCC]             (DDDD is orphan -> omitted)
 
 Usage:
-    python3 -m tests.common.wsusscn2_fixture_builder --out-dir tests/fixtures/servicing-dependency
+    python3 -m tests.common.servicing_dependency_fixture_builder --out-dir tests/fixtures/servicing-dependency
 """
 
 from __future__ import annotations

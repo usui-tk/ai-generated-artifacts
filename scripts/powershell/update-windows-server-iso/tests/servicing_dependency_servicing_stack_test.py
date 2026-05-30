@@ -24,7 +24,7 @@ Runs offline; the functions take text input, so no wsusscn2.cab download
 or 7-Zip invocation is needed.
 
 Invocation:
-    python3 wsusscn2_servicing_stack_test.py
+    python3 servicing_dependency_servicing_stack_test.py
 """
 
 from __future__ import annotations

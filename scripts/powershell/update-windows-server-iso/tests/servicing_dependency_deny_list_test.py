@@ -6,7 +6,7 @@ Exercises the deny-list branch of the Stage 3 scope filter
 the allow-overrides exclusion contract of SPEC B.19.7 / B.19.7.1 in the
 PowerShell implementation. This is the executable check that the
 PowerShell deny-list filter matches the reference `classify_scope`
-semantics in wsusscn2_scope_invariants_test.py.
+semantics in servicing_dependency_scope_invariants_test.py.
 
 The fixture (tests/fixtures/servicing-dependency/deny-list-package.xml) has four
 bundles, all recent and SecurityUpdate-classified:
@@ -29,7 +29,7 @@ Verified:
 Runs offline; no wsusscn2.cab download or 7-Zip invocation.
 
 Invocation:
-    python3 wsusscn2_deny_list_test.py
+    python3 servicing_dependency_deny_list_test.py
 """
 
 from __future__ import annotations

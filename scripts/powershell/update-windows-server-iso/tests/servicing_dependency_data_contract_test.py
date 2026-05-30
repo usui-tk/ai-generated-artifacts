@@ -25,7 +25,7 @@ The committed data/servicing-dependency-database.json is additionally checked to
 classified Current (it was regenerated under the current contract).
 
 Invocation:
-    python3 wsusscn2_data_contract_test.py
+    python3 servicing_dependency_data_contract_test.py
 """
 
 from __future__ import annotations

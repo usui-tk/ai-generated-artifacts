@@ -25,7 +25,7 @@ Cases:
 Runs offline; the function's only I/O is reading the Layer 2 JSON.
 
 Invocation:
-    python3 wsusscn2_recency_fallback_test.py
+    python3 servicing_dependency_recency_fallback_test.py
 """
 
 from __future__ import annotations

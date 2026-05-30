@@ -29,7 +29,7 @@ Cases:
             always null (resolved later at readiness-check time).
 
 Invocation:
-    python3 wsusscn2_servicing_stack_populate_test.py
+    python3 servicing_dependency_servicing_stack_populate_test.py
 """
 
 from __future__ import annotations
