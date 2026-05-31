@@ -427,6 +427,12 @@ change.
 12. Did I update `CHANGELOG.md` with the change?
 13. Did the change touch a `SPEC.md`? Did I check the Doc-Touching
     Matrix (§5) for downstream impact?
+14. If `governance/state/*.jsonl` or `governance/schema/*` was touched:
+    run the **governance-state-validator** gate —
+    `python3 quality-tools/governance-state-validator/validate_state.py` →
+    **0 findings** (schema validation, canonical_location existence,
+    manifest/marker coherence, canon coverage, canonical-JSON format).
+    "I didn't run it" is a deviation (M4(A)), not a pass.
 
 ---
 

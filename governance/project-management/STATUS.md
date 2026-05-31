@@ -9,7 +9,7 @@
 > **ADR 0005**. Tier-P design docs stay **unmanaged** (out of repo) and ship as one bundle
 > + MANIFEST at each static-point (never piecemeal).
 
-_Last updated: 2026-05-31 (UTC) — **P1 complete** (P1.1–P1.6): governance auto-load model + ADR 0006 + `governance/SPEC.md` authored; next phase **P2**._
+_Last updated: 2026-05-31 (UTC) — **P2 nearly complete** (P2.1–P2.8a): shared-helper analysis, the `reference-code/powershell` canon (58 units), `manifest.jsonl`, and the governance-state gate; **ADR 0007** (canon QA) + **ADR 0008** (release model) + phase **P2a** inserted. Closing P2 (P2.8b here, P2.8c next); next phase **P2a**._
 
 ---
 
@@ -17,8 +17,8 @@ _Last updated: 2026-05-31 (UTC) — **P1 complete** (P1.1–P1.6): governance au
 
 | Field | Value |
 |:---|:---|
-| Just completed | **P1 — Governance model** (P1.1–P1.6): startup contract (AGENTS.md), thin `CLAUDE.md` `@import`, prompt templates, ADR 0006, `governance/SPEC.md` + ADR↔SPEC closure — committed, gates green |
-| Current phase | **P2 — Analyze + reference model + baseline** — **next: P2.1** (inventory shared units across consumers) |
+| Just completed | **P2 — Analyze + reference model + baseline** (P2.1–P2.8a): inventory → reconcile → classify → schemas (manifest/observation) → `reference-code/powershell` canon (39 Public + 19 Private) → `manifest.jsonl` (58 rows) → governance-state-validator gate; **ADR 0007/0008** + phase **P2a** inserted |
+| Current phase | **P2 closing** — P2.8b (STATUS + AGENTS.md §14 gate clause) is this commit; **P2.8c** (Tier-P bundle + per-repo static-point) remains; then phase **P2a** |
 | Operating loop | per phase: fill per-step schema → dry-run §Y → sign-off §Z → execute (Path 2) |
 
 ## Phase progress
@@ -30,25 +30,37 @@ _Last updated: 2026-05-31 (UTC) — **P1 complete** (P1.1–P1.6): governance au
 | **psaMove.2** (expand: migrate/rename) `[AUTH]` | ✅ done | 26 central refs → new path; path-encoding CI workflow renamed; `.ps1` BOM+CRLF preserved; only the 5 old-dir self-refs remain (deleted at psaMove.5, post-P7) |
 | **P1.1** — A-4 `@import` gate | ✅ verified | thin `CLAUDE.md` can `@import AGENTS.md` (official Claude Code memory docs); supported as assumed, no deviation; caveats: import is inline (no token saving) + advisory (P1 ships no contract-CI — ADR 0006; wiring stays advisory). See plan P1.1 [VERIFIED] |
 | **P1.2–P1.6** — governance model | ✅ done | P1.2 AGENTS.md startup contract (§3) `[AUTH]` · P1.3 thin `CLAUDE.md` `@import` · P1.4 prompt templates (`governance/templates/`) · P1.5 **ADR 0006** (single AGENTS.md source; **no contract-CI at P1**, M2 amends P1 exit) · P1.6 **`governance/SPEC.md`** authored + ADR 0001–0004↔SPEC back-refs closed |
+| **P2.1–P2.3** — analyze + classify | ✅ done | inventory of shared functions across 6 consumers; reconcile (consistent + 9 drift, all dispositioned); **39 canonical units** classified (`canonical`/region/follow-latest) + field-ownership map + marker final form |
+| **P2.4–P2.5** — schemas | ✅ done | `governance/schema/` `manifest.schema.json` + `observation.schema.json` (draft-07) + `field-ownership.md` |
+| **ADR 0007 / P2a insert** — canon functional QA | ✅ done | mandatory full-set canon tests, canon-vs-copy fault attribution, regression-gated reconcile-back; **phase P2a inserted** to author the suite (governs `SPEC §machinery`) |
+| **P2.6 (+amend)** — canon code home | ✅ done | `reference-code/powershell/` 39 Public + 19 Private + `.psm1`/`.psd1`; per-unit markers + norm hash; analyzer config (`.psa.config.json` [PSAP0003/4/5] + `PSScriptAnalyzerSettings.psd1`); marker version = **SemVer** (rNN→0.1.0); full config-aware gate 0/0/0 |
+| **ADR 0008** — canon release model | ✅ done | SemVer pre-release guardrail: `0.x` not vendorable; promote to `1.0.0` on full-suite pass; vendoring gate `version >= 1.0.0`; refines ADR 0007 |
+| **P2.7** — manifest | ✅ done | `governance/state/manifest.jsonl` 58 rows (`canonical_version 0.1.0`, `maturity=draft`, `tested=false`, `consumers=[]`); `maturity`/`tested` added to manifest schema |
+| **P2.8a** — governance-state gate | ✅ done | `quality-tools/governance-state-validator/` (checks A–F: schema · location · manifest↔marker · canon coverage · canonical-JSON); 0 findings on repo, self-test 6/6 |
+| **P2.8b** — STATUS + gate clause | ✅ this commit | STATUS brought current; AGENTS.md post-flight §14 = governance-state gate |
+| **P2.8c** — close P2 | ⬜ next | Tier-P bundle + MANIFEST (§4.8 SemVer marker, ADR 0008, `common.` drop, PSAP0005 roadmap) + per-repo static-point |
 
-Stage-1 gates green at HEAD (psa.py 0/0/0 config-aware from the new path · `--self-check` in sync · suite 280/280 · ParseFile 0). P1 governance docs: `.md` LF + ADR↔SPEC bidirectional integrity green (no PowerShell touched in P1).
+Gates green at HEAD: psa.py 0/0/0 (config-aware, incl. the `reference-code/powershell` canon) · PSScriptAnalyzer 0/0/0 · ParseFile 0 · Import-Module 39 + canonical-JSON round-trip green · governance-state-validator **0 findings** (58 manifest rows ↔ 58 canon files). Runtimes recorded: pwsh 7.4.6 · PSScriptAnalyzer 1.25.0 · python3 · jsonschema.
 
 ## Next action
-Begin **P2 — Analyze + reference model + baseline** at **P2.1** (inventory shared units
-across all consumers) under the per-phase loop (fill per-step schema → §Y dry-run → §Z
-sign-off → execute). Remediate the `$ks` deviation at **P6**.
+Finish **P2.8c** (Tier-P bundle + MANIFEST + per-repo static-point), then begin
+**P2a** — author the full canon behavioral test suite (ADR 0007), promoting each
+passing unit `0.1.0 → 1.0.0` with `tested=true` / `maturity` (ADR 0008). Remediate
+the `$ks` deviation at **P6**.
 
 ## Open pointers
 - `[WORKING]` psa.py move **CONTRACT** (psaMove.4/.5 — delete the old `scripts/python/powershell-static-analyzer/` path) is **after P7**, gated on a cross-repo zero-referrer grep + §9.3 checkpoint. Both paths coexist until then.
 - `[WORKING]` `Deploy-Drivers` 8 references to the old psa path are migrated in **P7** (single PR).
-- `[WORKING]` Subproject migration `scripts/<family>/<name>/ → projects/<lang>-<name>/` is **P5/P6**; `reference-code/<family>/` homes created lazily at **P2.6** (bash/python builds deferred — SPINE-2/5; policies decided).
+- `[WORKING]` Subproject migration `scripts/<family>/<name>/ → projects/<lang>-<name>/` is **P5/P6**; `reference-code/powershell/` is **created (P2.6)** — 58 units, full config-aware gate + governance-state gate green; bash/python canon homes still **deferred** (SPINE-2/5; policies decided).
 - `[WORKING]` Governance docs for psa.py at its new home = **P4**; template finalization (TF) = before **P5**.
 - Known gate deviation: `Update-WindowsServerIso.ps1` PSScriptAnalyzer `0/1/0` (`$ks`, line 8095) — user-dispositioned, remediate at **P6** (§8.3; not accepted-open).
 - **ADR 0006:** P1 ships **no contract-CI** (governance-loading wiring is advisory, not CI-enforced). Revisit at **P5/P6** when file moves raise the regression risk — add the contract check then via a new ADR if warranted.
+- `[WORKING]` **PSAP0005 default-on** in `psa.py` is a **roadmap** item (psa.py rule-default change + tests + version bump). Canon markers already use a SemVer `version=` (non-rNN), so they stay PSAP0005-clean when it flips on.
+- The PowerShell gate (AGENTS.md **§9**) is now the **full config-aware gate** (psa.py config-aware + PSScriptAnalyzer + pwsh ParseFile + import/tests; stand up runtime per baseline §8.2; "no pwsh/deferred" = deviation, M4(A)); the **governance-state gate** (AGENTS.md **§14**) covers `governance/state` + `governance/schema` via the validator (P2.8a).
 
 ## ADR index (`../adr/`)
-- 0001 — tooling language = Python · 0002 — analysis layer = DuckDB (disposable, P8) · 0003 — standalone-tool principle · 0004 — outcome-based execution framework (M8) · 0005 — session-handoff protocol · 0006 — AI-agent config coverage & contract-CI scope.
-- Cross-cutting current-truth view: **`../SPEC.md`** — §tooling/§analysis-layer/§machinery/§execution-framework ← ADR 0001–0004 (bidirectional `governs`↔back-ref).
+- 0001 — tooling language = Python · 0002 — analysis layer = DuckDB (disposable, P8) · 0003 — standalone-tool principle · 0004 — outcome-based execution framework (M8) · 0005 — session-handoff protocol · 0006 — AI-agent config coverage & contract-CI scope · **0007 — canon code functional QA** (P2a) · **0008 — canon release model** (SemVer pre-release guardrail; refines 0007).
+- Cross-cutting current-truth view: **`../SPEC.md`** — §tooling/§analysis-layer/§machinery/§execution-framework ← ADR 0001–0004; **§machinery also ← ADR 0007/0008** (bidirectional `governs`↔back-ref).
 
 ## Design substrate (Tier-P handoff — referenced, not restated, R3)
 - `HANDOFF-baseline-consolidated-design.md` — the living design baseline.
@@ -65,3 +77,4 @@ _Per **ADR 0005**: the four Tier-P docs stay **unmanaged** (out of repo) and are
 | psaMove.1 | `f289933` | per procedure |
 | psaMove.2 | `f8b942b` | per procedure |
 | P1 (governance model) | `1097309`·`dd8f9f3`·`cab8375`·`9a05635`·`9be1056` | per procedure (repo-external Zip at P1 phase-end) |
+| P2 (analyze + canon + manifest + gate) | `597638e` … `32fd8b0` (+ P2.8b/c) | _repo-external Zip at P2 phase-end (**P2.8c**)_ |
