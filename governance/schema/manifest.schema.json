@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/usui-tk/ai-generated-artifacts/governance/schema/manifest.schema.json",
+  "title": "Managed-unit manifest record (one canonical-JSON line per unit)",
+  "description": "Machine-readable contract for governance/state/manifest.jsonl. The manifest is JSONL (one line per managed unit, canonical-JSON / key-sorted) and is the curated manifest tier of the governance data model (SPEC governance §machinery; baseline §4.1 / §4.7). It is the SINGLE source of truth for each unit's canonical location, version, default policies, and consumers list. Markers (in consumer code) and observations (scanner output) reference a unit by unit_id and MUST NOT re-list consumers. Authored against governance/schema/field-ownership.md (the P2.3 SPINE-4 field-ownership record).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "unit_id",
+    "kind",
+    "canonical_location",
+    "canonical_version",
+    "change_policy",
+    "binding_mode",
+    "consumers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Manifest record-shape era; lets the manifest tier evolve its columns independently under schema-on-read (baseline §4.8 #16). Initial value \"1\".",
+      "examples": ["1"]
+    },
+    "unit_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)+$",
+      "description": "Primary key. Kind-prefixed, dotted, lowercase-kebab identifier (baseline §4.4). Markers and observations reference this id.",
+      "examples": ["pwsh.helper.write-caution", "pwsh.helper.convertto-canonicaljson"]
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "powershell-helper",
+        "spec-region",
+        "governance-doc",
+        "bash-region",
+        "tool",
+        "python-helper",
+        "python-tool"
+      ],
+      "description": "Language-agnostic unit type (baseline §4.4)."
+    },
+    "canonical_location": {
+      "type": "string",
+      "description": "Repo-relative path to the canonical source of truth. powershell-helper -> reference-code/powershell/{Public,Private}/<Unit>.ps1 (SPINE-1); spec-region -> governance/spec/common.<family>.md.",
+      "examples": ["reference-code/powershell/Public/Write-Caution.ps1"]
+    },
+    "canonical_version": {
+      "type": "string",
+      "description": "Version/tag the canonical body currently carries; markers claim sync against this value.",
+      "examples": ["r01"]
+    },
+    "change_policy": {
+      "type": "string",
+      "enum": ["canonical", "vendored-upstream-first", "forked"],
+      "description": "Default change policy for inlined instances of this unit (baseline §2.4)."
+    },
+    "binding_mode": {
+      "type": "string",
+      "enum": ["follow-latest", "pin"],
+      "description": "Default binding mode for inlined instances of this unit (baseline §2.4)."
+    },
+    "consumers": {
+      "type": "array",
+      "description": "The SINGLE source of truth for which consumers inline this unit (baseline §4.1). Markers and observations reference unit_id and never re-list consumers. Empty until consumers are wired (registration ownership #9: region units are registered in P2 for the canonical set, then consumers added in P6/P7).",
+      "items": {
+        "type": "object",
+        "required": ["consumer", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "consumer": {
+            "type": "string",
+            "description": "Consumer identifier (e.g. powershell-update-windows-server-iso)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Repo-relative file holding the inlined instance of this unit."
+          }
+        }
+      }
+    },
+    "ext": {
+      "type": "object",
+      "description": "Open extension object for ad-hoc or frequently-changing curated fields, kept out of the top-level namespace so old and new records stay queryable together (schema-on-read; mirrors observation.ext, baseline §4.4)."
+    }
+  }
+}
