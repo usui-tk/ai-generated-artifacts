@@ -6,7 +6,7 @@
 > lives in the Tier-P handoff docs (baseline / plan / spine / register) and in `../adr/`.
 > Decisions are durable in `../adr/`; this file tracks *status*, not decisions.
 
-_Last updated: 2026-05-31 (UTC) — reflects **psa.py move (EXPAND)** complete._
+_Last updated: 2026-05-31 (UTC) — **P1 started**: P1.1 (A-4 `@import` gate) verified; next is P1.2._
 
 ---
 
@@ -15,7 +15,7 @@ _Last updated: 2026-05-31 (UTC) — reflects **psa.py move (EXPAND)** complete._
 | Field | Value |
 |:---|:---|
 | Just completed | **psa.py move — EXPAND** (psaMove.1 copy + psaMove.2 migrate/rename) — committed, gates green |
-| Next phase | **P1 — Governance model, central-local** (unblocked: P1 needs only P0a, which is done) |
+| Current phase | **P1 — Governance model, central-local** — **P1.1 ✅ verified** (`@import` supported); **next: P1.2** (AGENTS.md startup-contract, `[AUTH]`) |
 | Operating loop | per phase: fill per-step schema → dry-run §Y → sign-off §Z → execute (Path 2) |
 
 ## Phase progress
@@ -25,12 +25,14 @@ _Last updated: 2026-05-31 (UTC) — reflects **psa.py move (EXPAND)** complete._
 | **P0a — Foundation** | ✅ done | scaffold (`governance/ quality-tools/ reference-code/ projects/`), gates, `documents/` consolidation (#19), substrate ADRs, this tracker |
 | **psaMove.1** (expand: copy) | ✅ done | byte-identical copy → `quality-tools/powershell-static-analyzer/`; old path coexists |
 | **psaMove.2** (expand: migrate/rename) `[AUTH]` | ✅ done | 26 central refs → new path; path-encoding CI workflow renamed; `.ps1` BOM+CRLF preserved; only the 5 old-dir self-refs remain (deleted at psaMove.5, post-P7) |
-| **P1 — Governance model** | ⬜ next | P1.1 verifies `CLAUDE.md @import AGENTS.md` behavior |
+| **P1.1** — A-4 `@import` gate | ✅ verified | thin `CLAUDE.md` can `@import AGENTS.md` (official Claude Code memory docs); supported as assumed, no deviation; caveats: import is inline (no token saving) + advisory (CI gate = enforcement). See plan P1.1 [VERIFIED] |
+| **P1.2–P1.6** — governance model | ⬜ next | P1.2 = AGENTS.md startup-contract `[AUTH]` (minimal: §3 Pre-Flight already exists) → P1.3 thin CLAUDE.md → P1.4 templates → P1.5 contract-only CI → P1.6 gates |
 
 Stage-1 gates green at HEAD (psa.py 0/0/0 config-aware from the new path · `--self-check` in sync · suite 280/280 · ParseFile 0).
 
 ## Next action
-Prepare **P1** under the per-phase loop (fill → §Y dry-run → §Z sign-off → execute).
+Resume **P1 at P1.2** (AGENTS.md startup-contract, `[AUTH]`) under the per-phase loop
+(draft artifacts → §Y dry-run → §Z sign-off → execute). P1.1 (A-4 gate) is already verified.
 Remediate the `$ks` deviation at **P6**.
 
 ## Open pointers
