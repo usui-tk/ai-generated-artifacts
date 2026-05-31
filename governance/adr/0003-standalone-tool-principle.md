@@ -5,7 +5,7 @@ status: accepted
 date: 2026-05-31
 supersedes: []
 superseded_by: null
-governs: ["governance/SPEC.md §machinery (forward — authored P1)"]
+governs: ["governance/SPEC.md §machinery"]
 ---
 
 <!-- AI read-contract: authoritative for the machinery packaging constraint. -->
