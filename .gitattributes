@@ -123,3 +123,9 @@ templates/**/*.md       linguist-documentation
 **/CODE_OF_CONDUCT.md   linguist-documentation
 **/SECURITY.md          linguist-documentation
 **/CHANGELOG.md         linguist-documentation
+
+# -----------------------------------------------------------------------------
+# [P0a.4] Governance encoding contract (LF for markdown + observation streams)
+# -----------------------------------------------------------------------------
+*.md      text eol=lf
+*.jsonl   text eol=lf

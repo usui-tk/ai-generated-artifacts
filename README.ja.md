@@ -26,13 +26,17 @@ ai-generated-artifacts/
 ├── AGENTS.md                 # LLM 支援貢献者向けワークフローガイド（英語のみ）
 ├── .gitignore
 │
-├── research/                 # リサーチ記事、調査、分析
-├── scripts/                  # 自動化スクリプト、ユーティリティ、コードサンプル
-├── documents/                # 戦略書、設計書、提案書、計画書
-├── presentations/            # プレゼンテーション資料（PowerPoint、Markdown、PDF）
-├── templates/                # 再利用可能なひな型（ADR、WBS、ヒアリングシート）
-├── prompts/                  # 再利用可能な AI プロンプト
-└── study-notes/              # 認定試験・学習ノート
+├── governance/               # ガバナンスハブ：ADR・spec・schema・templates・state・PM（仕組み本体）
+├── quality-tools/            # 検証機械（psa.py・ドリフトスキャナ）— 被管理資産ではない
+├── reference-code/           # 共有コード正本（region-vendoring ヘルパ／言語別）
+├── projects/                 # 卒業可能なサブプロジェクト（<lang>-<name>）— 移行中
+├── scripts/                  # 自動化スクリプト（サブプロジェクトは順次 projects/ へ移行）
+└── documents/                # 横断的ナレッジ資産
+    ├── research/             #   比較・調査・分析（「どんな選択肢があるか」）
+    ├── guides/               #   ハウツー／設計／エンジニアリングガイド（「こうすべき」）
+    ├── presentations/        #   プレゼン資料（PowerPoint、Markdown、PDF）
+    ├── prompts/              #   再利用可能な AI プロンプト
+    └── study-notes/          #   認定試験・学習ノート
 ```
 
 各トップレベルディレクトリには `README.md`（英語と日本語を 1 ファイルに併記）が配置されており、以下の事項を明記しています。
@@ -105,13 +109,13 @@ Update Catalogue の現在状態と乖離している場合、 更新された�
 
 | アーティファクトが主として… | 配置先 |
 |:---|:---|
-| 「**どんな選択肢があるか**」に答える比較・調査・分析 | `research/` |
-| 言語を問わない**実行可能なコード** | `scripts/` |
-| 特定シナリオに対する**具体的な計画・設計・推奨事項** | `documents/` |
-| 発表用の**スライドデック** | `presentations/` |
-| コピーして記入して使う**骨組み・スキャフォールド・フォーム** | `templates/` |
-| **再利用可能な AI プロンプト** | `prompts/` |
-| 認定試験や技術習得のための**学習資料** | `study-notes/` |
+| 「**どんな選択肢があるか**」に答える比較・調査・分析 | `documents/research/` |
+| 言語を問わない**実行可能なコード** | `scripts/`（被管理サブプロジェクトは `projects/`） |
+| **具体的な計画・設計・推奨事項**（「こうすべき」） | `documents/guides/` |
+| 発表用の**スライドデック** | `documents/presentations/` |
+| コピーして記入して使う**骨組み・スキャフォールド・フォーム** | `governance/templates/` |
+| **再利用可能な AI プロンプト** | `documents/prompts/` |
+| 認定試験や技術習得のための**学習資料** | `documents/study-notes/` |
 
 複合的なアーティファクト（例：テンプレートと解説文書のセット）の場合は、主たる配置先を1箇所に決め、もう片方からはクロスリファレンスで参照する形にします。
 
@@ -122,13 +126,13 @@ Update Catalogue の現在状態と乖離している場合、 更新された�
 ### ディレクトリ
 
 - 小文字、ハイフン区切り、**複数形**（コレクションであることを示す）
-  - ✅ `research/`, `scripts/`, `study-notes/`
+  - ✅ `documents/research/`, `scripts/`, `documents/study-notes/`
   - ❌ `Research/`, `script/`, `study_notes/`
 
 ### サブディレクトリ
 
 - 小文字、ハイフン区切り、**トピック・言語・カテゴリ**を端的に表現
-  - ✅ `research/cloud-infrastructure/`, `scripts/powershell/`, `study-notes/aws/`
+  - ✅ `documents/research/cloud-infrastructure/`, `scripts/powershell/`, `documents/study-notes/aws/`
 
 ### ファイル
 
@@ -382,7 +386,7 @@ LLM / AI メンテナ (あるいは人間) が、 `psa.py` で検証される **
 
 5. **アーティファクトに認証情報を埋め込まないでください。** 本レポジトリのアーティファクトには、実在する API キー、パスワード、トークン、非公開のアカウント ID 等の機密情報を含めません。スクリプトは認証情報を環境変数・パラメーター・対話型プロンプト経由で受け取る設計を基本とします。
 
-6. **学習ノートは公式教材の代替ではありません。** `study-notes/` 配下のノートは公開情報を個人的に統合したものであり、認定試験対策の主要教材として依拠することは想定していません。受験 NDA で保護される試験問題内容は一切含めません。
+6. **学習ノートは公式教材の代替ではありません。** `documents/study-notes/` 配下のノートは公開情報を個人的に統合したものであり、認定試験対策の主要教材として依拠することは想定していません。受験 NDA で保護される試験問題内容は一切含めません。
 
 ---
 

@@ -81,3 +81,16 @@ yarn.lock
 secrets/
 credentials/
 *.secret
+
+# ============================================================================
+# [P0a.3] Governance: operational caches, disposable analysis DB, static-points
+# ============================================================================
+# DuckDB analysis layer (disposable; introduced at P8 — ADR 0002)
+*.duckdb
+*.duckdb.wal
+# Layer-3 caches (e.g. reference-code/<lang>/ build caches, wsusscn2 cache)
+**/cache/
+Workspace/cache/
+# Static-point snapshot Zips (repo-external by policy; never committed — #5)
+*-static-point.zip
+static-point-*.zip

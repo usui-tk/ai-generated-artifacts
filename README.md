@@ -26,13 +26,17 @@ ai-generated-artifacts/
 ├── AGENTS.md                 # LLM-assisted contributor workflow guide (English)
 ├── .gitignore
 │
-├── research/                 # Research articles, surveys, analyses
-├── scripts/                  # Automation scripts, utilities, code samples
-├── documents/                # Strategy docs, design docs, proposals, plans
-├── presentations/            # Slide decks (PowerPoint, Markdown, PDF)
-├── templates/                # Reusable templates (ADR, WBS, hearing sheets)
-├── prompts/                  # Reusable AI prompts
-└── study-notes/              # Certification and learning notes
+├── governance/               # Governance hub: ADRs, specs, schema, templates, state, PM (the mechanism)
+├── quality-tools/            # Verification machinery (psa.py, drift scanner) — not a governed asset
+├── reference-code/           # Shared-code canon (region-vendored helpers; per-language)
+├── projects/                 # Graduatable subprojects (<lang>-<name>) — migration in progress
+├── scripts/                  # Automation scripts (subprojects migrate to projects/ incrementally)
+└── documents/                # Cross-cutting knowledge assets
+    ├── research/             #   Comparisons, surveys, analyses ("what are the options?")
+    ├── guides/               #   How-to / design / engineering guides ("here is what to do")
+    ├── presentations/        #   Slide decks (PowerPoint, Markdown, PDF)
+    ├── prompts/              #   Reusable AI prompts
+    └── study-notes/          #   Certification and learning notes
 ```
 
 Each top-level directory has its own `README.md` (with both English and Japanese in a single file) documenting:
@@ -110,13 +114,13 @@ When unsure which directory to use, follow this decision rule:
 
 | The artifact is primarily... | Place it in |
 |:---|:---|
-| A **comparison, survey, or analysis** answering "what are the options?" | `research/` |
-| **Executable code** in any language | `scripts/` |
-| A **specific plan, design, or recommendation** for a particular scenario | `documents/` |
-| A **slide deck** intended to be presented | `presentations/` |
-| A **skeleton, scaffold, or form** designed to be copied and filled in | `templates/` |
-| A **reusable AI prompt** | `prompts/` |
-| **Learning material** for certification or technical study | `study-notes/` |
+| A **comparison, survey, or analysis** answering "what are the options?" | `documents/research/` |
+| **Executable code** in any language | `scripts/` (governed subprojects: `projects/`) |
+| A **specific plan, design, or recommendation** ("here is what to do") | `documents/guides/` |
+| A **slide deck** intended to be presented | `documents/presentations/` |
+| A **skeleton, scaffold, or form** designed to be copied and filled in | `governance/templates/` |
+| A **reusable AI prompt** | `documents/prompts/` |
+| **Learning material** for certification or technical study | `documents/study-notes/` |
 
 For composite artifacts (e.g., a template paired with explanatory commentary), split into the primary location and cross-reference from a single source-of-truth file.
 
@@ -127,13 +131,13 @@ For composite artifacts (e.g., a template paired with explanatory commentary), s
 ### Directories
 
 - Lowercase, hyphen-separated, **plural** form (denotes a collection)
-  - ✅ `research/`, `scripts/`, `study-notes/`
+  - ✅ `documents/research/`, `scripts/`, `documents/study-notes/`
   - ❌ `Research/`, `script/`, `study_notes/`
 
 ### Subdirectories
 
 - Lowercase, hyphen-separated, descriptive of the **topic, language, or category**
-  - ✅ `research/cloud-infrastructure/`, `scripts/powershell/`, `study-notes/aws/`
+  - ✅ `documents/research/cloud-infrastructure/`, `scripts/powershell/`, `documents/study-notes/aws/`
 
 ### Files
 
@@ -387,7 +391,7 @@ By accessing, referencing, executing, or otherwise using any artifact in this re
 
 5. **No credentials in artifacts.** Artifacts in this repository must not contain real secrets (API keys, passwords, tokens, account IDs you wish to keep private). Scripts are designed to receive credentials via environment variables, parameters, or interactive prompts.
 
-6. **Study notes are not a substitute for official material.** Notes under `study-notes/` are personal synthesis from public sources and must not be relied upon as the primary preparation material for certifications. They never contain NDA-protected exam content.
+6. **Study notes are not a substitute for official material.** Notes under `documents/study-notes/` are personal synthesis from public sources and must not be relied upon as the primary preparation material for certifications. They never contain NDA-protected exam content.
 
 ---
 

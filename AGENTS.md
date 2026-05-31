@@ -48,7 +48,7 @@ LLM agents MUST recognise and respect this structure.
 | Layer | Location | Role | Examples |
 |:-:|---|---|---|
 | **Layer 0** | Repository root | Cross-cutting policies | `README.md`, `SPEC.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, this `AGENTS.md` |
-| **Layer 1** | Top-level category directories | Category-wide rules | `scripts/README.md`, `research/README.md`, etc. |
+| **Layer 1** | Top-level category directories | Category-wide rules | `scripts/README.md`, `documents/research/README.md`, etc. |
 | **Layer 2** | Subcategory directories | Subcategory conventions (currently sparse) | `scripts/powershell/`, `scripts/python/` |
 | **Layer 3** | Subproject directories | Project-specific files | `scripts/powershell/<project>/{README.md,SPEC.md,TESTING.md,CHANGELOG.md}` |
 

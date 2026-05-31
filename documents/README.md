@@ -4,85 +4,61 @@
 
 ## Purpose / 目的
 
-**EN:** Contains AI-generated **technical documents** — strategy documents, design documents, proposals, assessments, plans, and similar long-form deliverables.
+**EN:** The single home for **cross-cutting knowledge assets** — material that belongs to no single project and is not governance. Organized first by **purpose** (the subfolders below), then by **domain** within each.
 
-**JA:** AI が生成した**技術ドキュメント**（戦略書、設計書、提案書、評価書、計画書など、長文の成果物）を格納します。
-
----
-
-## What to Include / 収録対象
-
-- Strategy documents (e.g., cloud adoption strategy, AI-MSP strategy)
-- Design documents and architecture decision records (specific instances, not templates)
-- Migration plans and assessment reports
-- Cost analyses and TCO calculations
-- Proposal documents
-- Implementation guides
-
-- 戦略書（クラウド導入戦略、AI-MSP 戦略など）
-- 具体的な設計書・アーキテクチャ決定書（ひな型ではなく具体例）
-- 移行計画書、評価レポート
-- コスト分析、TCO 計算
-- 提案書
-- 実装ガイド
-
-## What NOT to Include / 収録対象外
-
-- Comparative research articles → `research/`
-- Reusable templates → `templates/`
-- Slide decks → `presentations/`
-- Code or scripts → `scripts/`
-- Documents containing real client/project confidential information → **anywhere in this repo**
-
-- 比較リサーチ記事 → `research/`
-- 再利用可能ひな型 → `templates/`
-- スライド資料 → `presentations/`
-- コード／スクリプト → `scripts/`
-- 実顧客・実プロジェクトの機密情報を含む文書 → **本レポジトリのどこにも置かない**
+**JA:** **横断的なナレッジ資産**（特定プロジェクトに属さず、ガバナンスでもない成果物）の単一の置き場です。まず**目的**（下記サブフォルダ）で分け、その中で**ドメイン**別に整理します。
 
 ---
 
-## research/ vs documents/ — How to Decide / 振り分け判定
+## Purpose Subfolders / 目的別サブフォルダ
+
+| Subfolder | Holds / 収録対象 |
+|:---|:---|
+| `research/` | Comparisons, surveys, analyses — *"what are the options?"* / 比較・調査・分析（「どんな選択肢があるか」） |
+| `guides/` | How-to, design, and engineering guides — *"here is what to do / how to design it."* / ハウツー・設計・エンジニアリングガイド（「こうすべき／こう設計する」） |
+| `presentations/` | Slide decks (PowerPoint, Markdown, PDF) / プレゼン資料 |
+| `prompts/` | Reusable AI prompts / 再利用可能な AI プロンプト |
+| `study-notes/` | Certification and learning notes / 認定試験・学習ノート |
+
+Domain subdirectories live **under** a purpose subfolder, created on demand — e.g. `research/cloud-infrastructure/`, `guides/ci-engineering/`, `guides/cloud-migration/`, `guides/cost-analysis/`.
+
+ドメイン別サブディレクトリは目的サブフォルダの**配下**に必要に応じて作成します（例：`research/cloud-infrastructure/`、`guides/ci-engineering/`、`guides/cloud-migration/`、`guides/cost-analysis/`）。
+
+---
+
+## research/ vs guides/ — How to Decide / 振り分け判定
 
 | Question | If yes → | If no → |
 |:---|:---|:---|
 | Is this a **comparison or survey** of options/products/approaches? | `research/` | next question |
-| Is this a **specific recommendation, plan, or design** for a particular scenario? | `documents/` | reconsider category |
+| Is this a **specific recommendation, plan, design, or how-to** for a scenario? | `guides/` | reconsider purpose |
 
-**EN summary:** `research/` answers *"what are the options?"*. `documents/` answers *"here is what to do."*
+**EN summary:** `research/` answers *"what are the options?"*; `guides/` answers *"here is what to do / how to design it."* Both now live under `documents/`.
 
-**JA要約:** `research/` は「**どんな選択肢があるか**」に答える成果物。`documents/` は「**こうすべき**」「**こう設計する**」を示す成果物。
+**JA要約:** `research/` は「**どんな選択肢があるか**」に答える成果物、`guides/` は「**こうすべき**／**こう設計する**」を示す成果物。どちらも `documents/` 配下に置きます。
 
 ---
 
-## Subcategory Policy / サブカテゴリ方針
+## What NOT to Include / 収録対象外
 
-**EN:** Documents are organized by **domain** as the primary axis.
+- Code or scripts → `scripts/` (governed subprojects → `projects/`)
+- Reusable templates / scaffolds (ADR, marker, WBS) → `governance/templates/`
+- Governance ADRs, specs, schema, state → `governance/`
+- Verification tooling → `quality-tools/`
+- Real client/project confidential information → **nowhere in this repo**
 
-**JA:** ドキュメントは**ドメイン**（テーマ・業務領域）を主軸として整理します。
-
-### Possible Subdirectories / 想定サブディレクトリ
-
-| Subdirectory | Description |
-|:---|:---|
-| `cloud-migration/` | Migration planning, assessment, lift-and-shift, refactoring / 移行計画、評価、Lift & Shift、Refactoring |
-| `cloud-architecture/` | Specific architecture designs for cloud workloads / 具体的なクラウドアーキテクチャ設計 |
-| `cost-analysis/` | TCO calculations, cost comparisons, financial models / TCO 計算、コスト比較、財務モデル |
-| `security/` | Security designs, configuration guides for specific scenarios / セキュリティ設計、特定シナリオの設定ガイド |
-| `sre-and-ops/` | SRE and operations strategies, runbooks / SRE・運用戦略、ランブック |
-| `ai-strategy/` | AI adoption strategies, MSP offerings / AI 導入戦略、MSP オファリング |
-| `ci-engineering/` | CI/CD engineering guides, runner-platform reference notes / CI/CD エンジニアリングガイド、ランナープラットフォーム参考資料 |
-
-Subdirectories are created on demand.
-
-サブディレクトリは必要に応じて作成します。
+- コード／スクリプト → `scripts/`（被管理サブプロジェクトは `projects/`）
+- 再利用可能なひな型・スキャフォールド（ADR、マーカー、WBS）→ `governance/templates/`
+- ガバナンス ADR・spec・schema・state → `governance/`
+- 検証ツール → `quality-tools/`
+- 実顧客・実プロジェクトの機密情報 → **本レポジトリのどこにも置かない**
 
 ---
 
 ## File Naming / ファイル命名規則
 
 ```
-<slug>.<lang>.md
+<purpose>/<domain>/<slug>.<lang>.md
 ```
 
 - `<slug>`: lowercase, hyphen-separated, descriptive / 小文字・ハイフン区切り・内容を端的に表す
@@ -91,17 +67,15 @@ Subdirectories are created on demand.
 
 **Examples:**
 ```
-documents/cloud-migration/fujitsu-middleware-legacy-modernization-v3.6.ja.md
-documents/cost-analysis/azure-to-aws-migration-financial-model.en.md
+documents/research/cloud-infrastructure/hyperscaler-cloud-infrastructure-technology-survey.en.md
+documents/guides/ci-engineering/github-actions-windows-powershell-guide.md
 ```
 
 ---
 
 ## Required Metadata / 必須メタデータ
 
-Each document should begin with the following:
-
-各ドキュメントの冒頭には以下を記述します。
+Each document should begin with the following / 各ドキュメントの冒頭には以下を記述します。
 
 - **Title and version** / タイトルと版数
 - **Scope (in-scope / out-of-scope)** / 対象範囲（対象内・対象外）
