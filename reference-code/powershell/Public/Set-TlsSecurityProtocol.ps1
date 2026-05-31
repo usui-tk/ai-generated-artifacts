@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.set-tlssecurityprotocol version=r01 hash=3d18821524b8b723 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.set-tlssecurityprotocol version=0.1.0 hash=3d18821524b8b723 policy=canonical binding=follow-latest >>>
 function Set-TlsSecurityProtocol {
     <#
     .SYNOPSIS

@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.save-canonicaljsonfile version=r01 hash=8cac0388cc0b5da0 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.save-canonicaljsonfile version=0.1.0 hash=8cac0388cc0b5da0 policy=canonical binding=follow-latest >>>
 function Save-CanonicalJsonFile {
     <#
     .SYNOPSIS

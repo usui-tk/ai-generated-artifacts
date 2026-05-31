@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.show-powershellenvironment version=r01 hash=3c1af882bcfbd9d1 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.show-powershellenvironment version=0.1.0 hash=3c1af882bcfbd9d1 policy=canonical binding=follow-latest >>>
 function Show-PowerShellEnvironment {
     <#
     .SYNOPSIS

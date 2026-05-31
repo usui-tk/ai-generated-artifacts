@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writeobject version=r01 hash=52773b3f0e258d35 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writeobject version=0.1.0 hash=52773b3f0e258d35 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_WriteObject {
     param([object[]]$Pairs, [int]$Depth, [int]$MaxDepth, [string]$IndentUnit, [System.Text.StringBuilder]$Sb)
     if (($Depth + 1) -gt $MaxDepth) { throw "Object nests deeper than allowed depth ($MaxDepth); reached depth $($Depth + 1)." }

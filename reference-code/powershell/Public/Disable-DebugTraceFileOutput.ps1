@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.disable-debugtracefileoutput version=r01 hash=0dc4d90f4368280a policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.disable-debugtracefileoutput version=0.1.0 hash=0dc4d90f4368280a policy=canonical binding=follow-latest >>>
 function Disable-DebugTraceFileOutput {
     <#
     .SYNOPSIS

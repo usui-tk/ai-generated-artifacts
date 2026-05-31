@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writevalue version=r01 hash=9e36066de2680f5f policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writevalue version=0.1.0 hash=9e36066de2680f5f policy=canonical binding=follow-latest >>>
 function _CanonicalJson_WriteValue {
     param($Value, [int]$Depth, [int]$MaxDepth, [string]$IndentUnit, [System.Text.StringBuilder]$Sb)
 

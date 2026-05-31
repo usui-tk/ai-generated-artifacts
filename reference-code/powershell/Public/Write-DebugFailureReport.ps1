@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.write-debugfailurereport version=r01 hash=8c1dda9940c309c1 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.write-debugfailurereport version=0.1.0 hash=8c1dda9940c309c1 policy=canonical binding=follow-latest >>>
 function Write-DebugFailureReport {
     <#
     .SYNOPSIS

@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writenumber version=r01 hash=fd7410b6e533b4cd policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writenumber version=0.1.0 hash=fd7410b6e533b4cd policy=canonical binding=follow-latest >>>
 function _CanonicalJson_WriteNumber {
     param($N, [System.Text.StringBuilder]$Sb)
     $ic = [System.Globalization.CultureInfo]::InvariantCulture

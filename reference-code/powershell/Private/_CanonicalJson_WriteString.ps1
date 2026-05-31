@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writestring version=r01 hash=26049b1f66bab97a policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writestring version=0.1.0 hash=26049b1f66bab97a policy=canonical binding=follow-latest >>>
 function _CanonicalJson_WriteString {
     param([string]$S, [System.Text.StringBuilder]$Sb)
     [void]$Sb.Append('"')

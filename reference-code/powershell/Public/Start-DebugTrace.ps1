@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.start-debugtrace version=r01 hash=351f92779b47d079 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.start-debugtrace version=0.1.0 hash=351f92779b47d079 policy=canonical binding=follow-latest >>>
 function Start-DebugTrace {
     <#
     .SYNOPSIS

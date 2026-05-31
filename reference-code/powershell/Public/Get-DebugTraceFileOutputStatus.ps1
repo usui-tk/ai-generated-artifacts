@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.get-debugtracefileoutputstatus version=r01 hash=e03887fcc4e39fd3 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.get-debugtracefileoutputstatus version=0.1.0 hash=e03887fcc4e39fd3 policy=canonical binding=follow-latest >>>
 function Get-DebugTraceFileOutputStatus { # psa-disable-line PSA6003 -- "Status" is singular; analyzer false positive on compound name
     <#
     .SYNOPSIS

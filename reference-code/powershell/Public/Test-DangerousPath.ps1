@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.test-dangerouspath version=r01 hash=066df8896cbf4d25 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.test-dangerouspath version=0.1.0 hash=066df8896cbf4d25 policy=canonical binding=follow-latest >>>
 function Test-DangerousPath {
     # Returns $true if removing this path would be dangerous.
     # Used by Invoke-CleanupDirectories to refuse obviously wrong targets:

@@ -48,7 +48,7 @@
     "canonical_version": {
       "type": "string",
       "description": "Version/tag the canonical body currently carries; markers claim sync against this value.",
-      "examples": ["r01"]
+      "examples": ["0.1.0"]
     },
     "change_policy": {
       "type": "string",

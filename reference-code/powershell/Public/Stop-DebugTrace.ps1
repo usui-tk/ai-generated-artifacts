@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.stop-debugtrace version=r01 hash=241736610d82b7d1 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.stop-debugtrace version=0.1.0 hash=241736610d82b7d1 policy=canonical binding=follow-latest >>>
 function Stop-DebugTrace {
     <#
     .SYNOPSIS

@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.invoke-downloadwithprogress version=r01 hash=3b9d3842004a91c2 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.invoke-downloadwithprogress version=0.1.0 hash=3b9d3842004a91c2 policy=canonical binding=follow-latest >>>
 function Invoke-DownloadWithProgress {
     <#
     .SYNOPSIS

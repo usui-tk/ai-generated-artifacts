@@ -1,0 +1,30 @@
+// psa.py configuration for the reference-code/powershell canon module.
+//
+// Disabled rules (by-design; this canon is the reference implementation of the
+// shared helpers used by the consumer scripts, so it inherits their by-design
+// rule selection):
+//   PSA6003 (plural-noun functions): Initialize-RuntimeDirectories and
+//     Invoke-CleanupDirectories operate over collections; the plural noun is
+//     the accurate description. Mirrors the consumers' .psa.config.json.
+//   PSA7003 (non-ASCII script body): the canon is ASCII-only, so this never
+//     fires; disabled to match the consumer baseline and avoid coupling to
+//     that default-on rule's future evolution.
+//
+// Enabled rules (LLM-assisted-maintenance guardrails; the canon adopts the
+// same strict stance as the Part-A canonical holder):
+//   PSAP0003 / PSAP0004 / PSAP0005 - no per-revision inline tags, no in-body
+//     CHANGELOG blocks, and no rNN references in comment bodies. The canonical
+//     markers carry a SemVer canonical_version (e.g. 0.1.0), deliberately NOT
+//     an rNN token, so markers do not trip PSAP0005 while revision-anchored
+//     prose in bodies remains caught.
+{
+  "enable": [
+    "PSAP0003",
+    "PSAP0004",
+    "PSAP0005"
+  ],
+  "disable": [
+    "PSA6003",
+    "PSA7003"
+  ]
+}

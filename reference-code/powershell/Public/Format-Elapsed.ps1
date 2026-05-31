@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.format-elapsed version=r01 hash=b63f12c32ee28520 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.format-elapsed version=0.1.0 hash=b63f12c32ee28520 policy=canonical binding=follow-latest >>>
 function Format-Elapsed {
     # Render a TimeSpan in a compact human-readable form.
     # Examples: '0.45s', '12.3s', '5m12.4s', '1h05m12s'
