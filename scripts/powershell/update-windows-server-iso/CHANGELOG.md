@@ -5609,7 +5609,7 @@ The tool suite:
 
 All tools use **standard-library Python only** (no `pip install`
 required), matching the dependency policy already set by
-`scripts/python/powershell-static-analyzer/psa.py`.
+`quality-tools/powershell-static-analyzer/psa.py`.
 
 The directory layout:
 

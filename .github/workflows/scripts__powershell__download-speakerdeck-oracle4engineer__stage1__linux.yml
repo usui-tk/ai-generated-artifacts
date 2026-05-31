@@ -20,8 +20,8 @@ on:
       - 'scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1'
       - 'scripts/powershell/download-speakerdeck-oracle4engineer/.psa.config.json'
       - 'scripts/powershell/download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1'
-      - 'scripts/python/powershell-static-analyzer/psa.py'
-      - 'scripts/python/powershell-static-analyzer/VERSION'
+      - 'quality-tools/powershell-static-analyzer/psa.py'
+      - 'quality-tools/powershell-static-analyzer/VERSION'
       - '.github/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml'
   pull_request:
     branches: [main]
@@ -29,8 +29,8 @@ on:
       - 'scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1'
       - 'scripts/powershell/download-speakerdeck-oracle4engineer/.psa.config.json'
       - 'scripts/powershell/download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1'
-      - 'scripts/python/powershell-static-analyzer/psa.py'
-      - 'scripts/python/powershell-static-analyzer/VERSION'
+      - 'quality-tools/powershell-static-analyzer/psa.py'
+      - 'quality-tools/powershell-static-analyzer/VERSION'
       - '.github/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml'
   workflow_dispatch:
     inputs:

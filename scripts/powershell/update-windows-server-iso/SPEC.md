@@ -2463,7 +2463,7 @@ SPEC §D.23 as a higher-severity class of defect (PowerShell AST
 accepts it silently, visual diff tools miss it). When such a file
 is detected, the fix is to re-emit the entire file via the documented
 patterns in
-[`scripts/python/powershell-static-analyzer/SPEC.md` §4.28a](../../python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings).
+[`quality-tools/powershell-static-analyzer/SPEC.md` §4.28a](../../python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings).
 
 ## C.3 Configuration files validation
 

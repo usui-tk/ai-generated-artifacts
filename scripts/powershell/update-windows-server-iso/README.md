@@ -143,7 +143,7 @@ scripts/powershell/update-windows-server-iso/
 
 The PowerShell static analyzer (`psa.py`) used to verify this script
 lives at the repository-wide canonical location:
-[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/).
+[`quality-tools/powershell-static-analyzer/`](../../python/powershell-static-analyzer/).
 
 ## Quick start
 

@@ -24,7 +24,7 @@
 # or UTF-16 re-encoding by third-party editors on ja-JP Windows hosts.
 # Note: this attribute does NOT enforce the UTF-8 BOM byte sequence itself.
 # BOM enforcement is performed at lint time by psa.py rule PSA7001
-# (see scripts/python/powershell-static-analyzer/).
+# (see quality-tools/powershell-static-analyzer/).
 *.ps1     text working-tree-encoding=UTF-8 eol=crlf
 *.psm1    text working-tree-encoding=UTF-8 eol=crlf
 *.psd1    text working-tree-encoding=UTF-8 eol=crlf

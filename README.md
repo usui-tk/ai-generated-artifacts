@@ -74,7 +74,7 @@ sub-project READMEs carry only the badges relevant to that sub-project.
 
 | Workflow | Target | Badge |
 |:---|:---|:---|
-| psa.py self-quality gates | `scripts/python/powershell-static-analyzer/` | [![psa.py CI](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml) |
+| psa.py self-quality gates | `quality-tools/powershell-static-analyzer/` | [![psa.py CI](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml) |
 | Download-SpeakerDeck STAGE 1 (Linux) | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 1](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml) |
 | Download-SpeakerDeck STAGE 2 (Windows) | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 2](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml) |
 | Download-SpeakerDeck STAGE 3 (Release verification) | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 3](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml) |
@@ -220,7 +220,7 @@ A real-world occurrence of (2) is forensically documented in the sister reposito
 ### Mandatory tooling rules
 
 When generating `.ps1` content programmatically, contributors MUST follow these rules. The canonical patterns are documented in detail in
-[`scripts/python/powershell-static-analyzer/SPEC.md` §4.28a](./scripts/python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings)
+[`quality-tools/powershell-static-analyzer/SPEC.md` §4.28a](./quality-tools/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings)
 and in the sister repository's
 [`Deploy-Drivers-For-WindowsServer/SPEC.md §A.2`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a2-source-file-format)
 (subsections A.2.1 — A.2.4). Quick reference:
@@ -242,8 +242,8 @@ For Bash heredocs, post-process with `unix2dos` before writing to a `.ps1` file.
 
 The repository's enforcement surface has three layers:
 
-1. **`psa.py` PSA7001** — fires when a `.ps1` file lacks the UTF-8 BOM. Documented in [`scripts/python/powershell-static-analyzer/SPEC.md` §4.28](./scripts/python/powershell-static-analyzer/SPEC.md#428-psa7001--missing-utf-8-bom).
-2. **`psa.py` PSA7002** (new in v3.7.0) — fires when a `.ps1` file has any LF-only line. The "mixed" variant of the message names up to five specific LF-only line numbers so the reviewer can locate the inserted region. Documented in [`scripts/python/powershell-static-analyzer/SPEC.md` §4.28a](./scripts/python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings).
+1. **`psa.py` PSA7001** — fires when a `.ps1` file lacks the UTF-8 BOM. Documented in [`quality-tools/powershell-static-analyzer/SPEC.md` §4.28](./quality-tools/powershell-static-analyzer/SPEC.md#428-psa7001--missing-utf-8-bom).
+2. **`psa.py` PSA7002** (new in v3.7.0) — fires when a `.ps1` file has any LF-only line. The "mixed" variant of the message names up to five specific LF-only line numbers so the reviewer can locate the inserted region. Documented in [`quality-tools/powershell-static-analyzer/SPEC.md` §4.28a](./quality-tools/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings).
 3. **`.gitattributes`** — applies normalisation at `git add` / `git checkout` time. This is a safety net, not a contract: it does NOT apply to files shared via ZIP, raw GitHub downloads (`raw.githubusercontent.com`), `git archive` consumers that produce non-checkout-form bytes, or pre-`git add` working-tree inspection.
 
 Pre-commit verification (run before `git add` so the working tree matches the canonical form ahead of time):
@@ -280,7 +280,7 @@ The correct mental model: emit canonical bytes at the source, verify before `git
 This repository uses a **repository-wide common policy** for managing per-version change history, applied uniformly across all sub-projects (scripts, tools, prompts) maintained here:
 
 - **Per-version release notes live in `CHANGELOG.md`**, not in script bodies, not in `README.md`, not in `SPEC.md`.
-- Each sub-project that has a meaningful release cadence ships its own `CHANGELOG.md` next to its other files (e.g., [`scripts/python/powershell-static-analyzer/CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md)).
+- Each sub-project that has a meaningful release cadence ships its own `CHANGELOG.md` next to its other files (e.g., [`quality-tools/powershell-static-analyzer/CHANGELOG.md`](./quality-tools/powershell-static-analyzer/CHANGELOG.md)).
 - `CHANGELOG.md` follows the [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format and adheres to [Semantic Versioning 2.0.0](https://semver.org/).
 - `CHANGELOG.md` is **English only**, per the [Language Policy](#language-policy) above.
 
@@ -305,7 +305,7 @@ For per-sub-project deeper guidance, see the **Revision discipline** subsection 
 
 ## psa.py Versioning Policy
 
-This repository hosts [`psa.py`](./scripts/python/powershell-static-analyzer/), the canonical PowerShell static analyzer used by every PowerShell sub-project in this repository **and** by sister repositories (notably [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)). This section defines the repository-wide rule for what version of `psa.py` consumers must validate against, and the canonical workflow for discovering and adopting new versions.
+This repository hosts [`psa.py`](./quality-tools/powershell-static-analyzer/), the canonical PowerShell static analyzer used by every PowerShell sub-project in this repository **and** by sister repositories (notably [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)). This section defines the repository-wide rule for what version of `psa.py` consumers must validate against, and the canonical workflow for discovering and adopting new versions.
 
 ### Core rule: latest mainline is the only supported version
 
@@ -322,7 +322,7 @@ Sub-project documentation (`README.md`, `SPEC.md`, `TESTING.md`, etc.) MUST NOT 
 The canonical source of truth for "what is the current `psa.py` version on mainline" is the `VERSION` file sitting next to `psa.py`:
 
 ```
-scripts/python/powershell-static-analyzer/
+quality-tools/powershell-static-analyzer/
 ├── psa.py        ← __version__ string inside
 ├── VERSION       ← single ASCII line, no leading 'v', terminating LF
 ├── SPEC.md
@@ -334,17 +334,17 @@ Three equivalent retrieval methods (any of them works; pick the one that fits yo
 
 ```bash
 # Method 1 — remote HTTP GET, no clone, no Python (recommended for CI / one-off checks).
-LATEST=$(curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION)
+LATEST=$(curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION)
 echo "Latest psa.py on mainline: $LATEST"
 
 # Method 2 — already cloned (e.g., sister repository checkout next to this one).
-LATEST=$(cat /path/to/ai-generated-artifacts/scripts/python/powershell-static-analyzer/VERSION)
+LATEST=$(cat /path/to/ai-generated-artifacts/quality-tools/powershell-static-analyzer/VERSION)
 
 # Method 3 — invoke a local copy of psa.py (requires Python).
 LATEST=$(python3 /path/to/psa.py --version | awk '{print $2}')
 ```
 
-The three methods MUST agree: `psa.py` runs a startup self-check that compares its `__version__` against the sibling `VERSION` file and warns to stderr if they differ. See [`SPEC.md` §1.4](./scripts/python/powershell-static-analyzer/SPEC.md#14-versioning) for the contract.
+The three methods MUST agree: `psa.py` runs a startup self-check that compares its `__version__` against the sibling `VERSION` file and warns to stderr if they differ. See [`SPEC.md` §1.4](./quality-tools/powershell-static-analyzer/SPEC.md#14-versioning) for the contract.
 
 ### LLM / AI workflow for adopting a new version
 
@@ -355,10 +355,10 @@ When an LLM / AI maintainer (or a human) is about to make changes to **any** Pow
 3. **If `LATEST != LOCAL`**:
    1. Replace `psa.py` AND its sibling `VERSION` file from mainline (both files MUST move together):
       ```bash
-      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/psa.py -o psa.py
-      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION -o VERSION
+      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/psa.py -o psa.py
+      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION -o VERSION
       ```
-   2. Read the new entries in [`CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md) and the current [`SPEC.md`](./scripts/python/powershell-static-analyzer/SPEC.md) to understand what changed (new rules, tightened heuristics, schema changes).
+   2. Read the new entries in [`CHANGELOG.md`](./quality-tools/powershell-static-analyzer/CHANGELOG.md) and the current [`SPEC.md`](./quality-tools/powershell-static-analyzer/SPEC.md) to understand what changed (new rules, tightened heuristics, schema changes).
    3. Re-evaluate the project's `.psa.config.json` `enable` list against the latest `SPEC.md`. Newly-added opt-in rules that match the project's discipline goals SHOULD be enabled.
    4. Re-run the full test suite for every PowerShell script in the project under the new `psa.py`. Treat any new findings as regressions to be addressed in the same change set, not as findings to be deferred.
 4. **If `LATEST == LOCAL`**: proceed with the planned change, but still re-run the analyzer on the modified scripts before declaring done.
@@ -367,7 +367,7 @@ This workflow makes the "latest mainline" rule machine-actionable: an LLM that h
 
 ### What about released SemVer versions in `CHANGELOG.md`?
 
-The version numbers in [`psa.py`'s `CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md) (e.g. `## [3.4.0] — 2026-05-19`) remain the canonical historical record of when each behaviour change shipped. They are written for human auditors and for diffing the API contract between two points in time. They are NOT a pinning target: consumers do not pick "version 3.4.0" as their reference; they pick "mainline today" and consult the CHANGELOG to understand how that differs from "mainline last time I synced".
+The version numbers in [`psa.py`'s `CHANGELOG.md`](./quality-tools/powershell-static-analyzer/CHANGELOG.md) (e.g. `## [3.4.0] — 2026-05-19`) remain the canonical historical record of when each behaviour change shipped. They are written for human auditors and for diffing the API contract between two points in time. They are NOT a pinning target: consumers do not pick "version 3.4.0" as their reference; they pick "mainline today" and consult the CHANGELOG to understand how that differs from "mainline last time I synced".
 
 ---
 

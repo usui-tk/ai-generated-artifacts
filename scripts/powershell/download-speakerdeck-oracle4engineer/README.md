@@ -120,7 +120,7 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
 
 The PowerShell static analyzer (`psa.py`) used to verify this script lives at
 the repository-wide canonical location:
-[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/).
+[`quality-tools/powershell-static-analyzer/`](../../python/powershell-static-analyzer/).
 
 If you only want to **run** the script, read this README. If you want to
 **extend it or build a similar script**, also read `SPEC.md`.
@@ -650,7 +650,7 @@ implementation. Reuse before invention.
 
 This script is verified with `psa.py` (PowerShell Static Analyzer), which
 lives at the repository-wide canonical location
-[`scripts/python/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py).
+[`quality-tools/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py).
 It is a pure-Python tool with no external dependencies.
 
 ```bash

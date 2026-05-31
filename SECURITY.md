@@ -47,7 +47,7 @@ Please include:
 For completeness, the following are already enforced by the repository:
 
 - Artifacts must **never** contain real secrets (`API keys`, `passwords`, `tokens`, sensitive account IDs). See [`README.md`](./README.md) → "No credentials in artifacts".
-- PowerShell scripts in this repository are verified with [`psa.py`](./scripts/python/powershell-static-analyzer/) which includes security-class rules (`PSA5xxx`) for plain-text password parameters, `Invoke-Expression` usage, broken hash algorithms, and hardcoded `ComputerName`.
+- PowerShell scripts in this repository are verified with [`psa.py`](./quality-tools/powershell-static-analyzer/) which includes security-class rules (`PSA5xxx`) for plain-text password parameters, `Invoke-Expression` usage, broken hash algorithms, and hardcoded `ComputerName`.
 - All scripts ship with a `## ⚠️ Disclaimer` section near the top of their README per repo convention (see [`scripts/README.md`](./scripts/README.md) → "Required README Sections").
 - CI workflows under `.github/workflows/` carry a fork-PR `if`-guard that prevents fork-origin pull requests from running CI automatically (see [`SPEC.md`](./SPEC.md#5-spec-ci-030-fork-pr-handling) §5). Reviews of fork PRs follow the human + AI-assisted protocol documented in the same section.
 
@@ -112,7 +112,7 @@ conditions that would prompt the maintainer to revisit them.
 参考までに、本リポジトリではすでに以下を運用しています:
 
 - アーティファクトに実在の機密情報(API キー、パスワード、トークン、機微なアカウント ID)を **絶対に含めない**。[`README.ja.md`](./README.ja.md) の「アーティファクトに認証情報を埋め込まないでください」参照
-- 本リポジトリの PowerShell スクリプトは [`psa.py`](./scripts/python/powershell-static-analyzer/) で検証され、プレーンテキストパスワードパラメータ・`Invoke-Expression` 使用・脆弱なハッシュアルゴリズム・ハードコード `ComputerName` をカバーするセキュリティクラスルール(`PSA5xxx`)が適用されます
+- 本リポジトリの PowerShell スクリプトは [`psa.py`](./quality-tools/powershell-static-analyzer/) で検証され、プレーンテキストパスワードパラメータ・`Invoke-Expression` 使用・脆弱なハッシュアルゴリズム・ハードコード `ComputerName` をカバーするセキュリティクラスルール(`PSA5xxx`)が適用されます
 - 全スクリプトは README 冒頭付近に `## ⚠️ Disclaimer` セクションを必須化(リポジトリ規約 — [`scripts/README.md`](./scripts/README.md) の「README 必須セクション」参照)
 - `.github/workflows/` 配下の CI ワークフローには Fork PR 用 `if` ガードが設定されており、フォーク発信の PR では CI が自動起動しません([`SPEC.md`](./SPEC.md#5-spec-ci-030-fork-pr-handling) §5 参照)。 フォーク PR のレビューは、 同セクションに記載した「人間 + AI 補助」の 2 段階プロトコルに従います。
 

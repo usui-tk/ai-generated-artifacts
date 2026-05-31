@@ -23,7 +23,7 @@
       - 60 GB free disk space on the WorkRoot drive (30 GB minimum)
       - Internet access for ISO/patch downloads (when not using -IsoPath +
         -PatchDirectory)
-      - Optional: python3 + scripts/python/powershell-static-analyzer/psa.py
+      - Optional: python3 + quality-tools/powershell-static-analyzer/psa.py
         from usui-tk/ai-generated-artifacts (latest mainline) for static
         analysis (rule families PSA1001..PSA9002 plus opt-in
         PSAP0001..PSAP0005)

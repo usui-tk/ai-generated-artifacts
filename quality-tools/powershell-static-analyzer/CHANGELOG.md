@@ -1291,7 +1291,7 @@ in this entry.
   consumable without invoking Python:
 
   ```bash
-  curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION
+  curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION
   # → 3.4.0
   ```
 
@@ -1586,11 +1586,11 @@ single-author exploratory work without numbered releases.
 ---
 
 [Unreleased]: https://github.com/usui-tk/ai-generated-artifacts/compare/main...HEAD
-[3.4.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
-[3.3.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
-[3.2.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
-[3.1.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
-[2.3.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
-[2.2.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
-[2.1.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
-[2.0.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/python/powershell-static-analyzer
+[3.4.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer
+[3.3.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer
+[3.2.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer
+[3.1.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer
+[2.3.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer
+[2.2.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer
+[2.1.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer
+[2.0.0]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer

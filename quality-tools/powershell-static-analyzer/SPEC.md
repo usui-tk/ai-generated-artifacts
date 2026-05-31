@@ -116,7 +116,7 @@ GET against the raw URL of the file, with no `git clone` and no Python
 interpreter required:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION
+curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION
 ```
 
 `psa.py`'s `__version__` MUST be updated in lockstep with the

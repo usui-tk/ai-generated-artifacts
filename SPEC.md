@@ -3,7 +3,7 @@
 > This document captures repository-wide policies that span more than one
 > sub-project. Sub-project specifications live in each sub-project's own
 > `SPEC.md` (for example,
-> `scripts/python/powershell-static-analyzer/SPEC.md` and
+> `quality-tools/powershell-static-analyzer/SPEC.md` and
 > `scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`).
 >
 > This file is **English only**, per the repository-wide documentation
@@ -79,7 +79,7 @@ The specification does NOT cover:
 
 - Per-rule semantics of any static analyzer used by CI. Those live in
   each tool's own `SPEC.md` (for example, `psa.py`'s rule catalog is in
-  `scripts/python/powershell-static-analyzer/SPEC.md` §4).
+  `quality-tools/powershell-static-analyzer/SPEC.md` §4).
 - Behaviour of the scripts that CI exercises. Those live in each
   script's own `SPEC.md` (for example, Speaker Deck downloader
   invariants are in
@@ -164,7 +164,7 @@ Examples (mapped to their target sub-project):
 
 | Workflow filename | Target |
 |:---|:---|
-| `scripts__python__powershell-static-analyzer.yml` | `scripts/python/powershell-static-analyzer/` |
+| `scripts__python__powershell-static-analyzer.yml` | `quality-tools/powershell-static-analyzer/` |
 | `scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml` | `scripts/powershell/download-speakerdeck-oracle4engineer/` (STAGE 1) |
 | `scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml` | `scripts/powershell/download-speakerdeck-oracle4engineer/` (STAGE 2) |
 | `scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml` | `scripts/powershell/download-speakerdeck-oracle4engineer/` (STAGE 3) |
@@ -510,7 +510,7 @@ CI workflow changes MUST be recorded in the CI-target script's own
 - A change to
   `.github/workflows/scripts__python__powershell-static-analyzer.yml`
   is recorded in
-  `scripts/python/powershell-static-analyzer/CHANGELOG.md`.
+  `quality-tools/powershell-static-analyzer/CHANGELOG.md`.
 - A change to any of the three Download-SpeakerDeck STAGE workflows is
   recorded in
   `scripts/powershell/download-speakerdeck-oracle4engineer/CHANGELOG.md`.

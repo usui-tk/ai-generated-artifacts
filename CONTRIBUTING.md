@@ -58,7 +58,7 @@ Pull requests are accepted but reviewed on a best-effort basis with no guarantee
 - [ ] **Match the file-format policy** for every file you create or edit. `.ps1` / `.psm1` / `.psd1` must be UTF-8 with BOM and CRLF line endings; `.md` / `.py` / `.yml` / `.json` / etc. must be UTF-8 without BOM and LF-only line endings. AI-agent file generation and Python helper scripts default to the wrong form on Linux / macOS hosts — always emit canonical bytes at the source and verify before `git add`. See [`README.md`](./README.md) → "File Format Policy" for the per-extension contract, tooling rules, and pre-commit verification commands.
 - [ ] Run any applicable static checks. For PowerShell scripts under this repository, this includes the canonical `psa.py` analyzer:
   ```bash
-  python3 scripts/python/powershell-static-analyzer/psa.py <script>.ps1
+  python3 quality-tools/powershell-static-analyzer/psa.py <script>.ps1
   ```
   See [`scripts/README.md`](./scripts/README.md) → "Static Analysis for PowerShell Scripts". `psa.py` rules `PSA7001` (UTF-8 BOM presence) and `PSA7002` (LF-only / mixed line endings, new in v3.7.0) enforce the file-format policy at lint time.
 - [ ] **For PowerShell changes: verify `psa.py` is at the latest mainline version before validating.** Compare the mainline `VERSION` against your local copy and refresh both `psa.py` + `VERSION` together if they differ. See [`README.md`](./README.md) → "psa.py Versioning Policy" for the full workflow.
@@ -166,7 +166,7 @@ PR はベストエフォートで受け付けます(レビュー期限は保証�
 - [ ] **ファイル形式ポリシー** に従う。 `.ps1` / `.psm1` / `.psd1` は UTF-8 with BOM + CRLF、 `.md` / `.py` / `.yml` / `.json` 等は UTF-8 without BOM + LF-only でなければならない。 AI エージェントによるファイル生成や Python ヘルパースクリプトは Linux / macOS ホスト上ではデフォルトで誤った形式 (LF-only) を生成する — オーサリング時点で正本バイトを書き出し、 `git add` 前に検証すること。 拡張子ごとの規約・ツーリング規則・コミット前検証コマンドは [`README.ja.md`](./README.ja.md) の「ファイル形式ポリシー」を参照
 - [ ] 該当する静的チェックを実行する。本リポジトリの PowerShell スクリプトについては、正規配置の `psa.py` を必ず使用:
   ```bash
-  python3 scripts/python/powershell-static-analyzer/psa.py <script>.ps1
+  python3 quality-tools/powershell-static-analyzer/psa.py <script>.ps1
   ```
   詳細は [`scripts/README.md`](./scripts/README.md) の「PowerShell スクリプトの静的解析」を参照。 `psa.py` の `PSA7001`（UTF-8 BOM の存在チェック）と `PSA7002`（LF-only / 改行コード混在、 v3.7.0 新規）がファイル形式ポリシーを lint 時に強制する
 - [ ] **PowerShell 変更時: 検証前に `psa.py` が latest mainline バージョンであることを確認する。** mainline の `VERSION` をローカルコピーと比較し、 異なる場合は `psa.py` と `VERSION` の両方を一緒に更新する。 詳細ワークフローは [`README.ja.md`](./README.ja.md) の「psa.py のバージョニングポリシー」セクションを参照

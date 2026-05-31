@@ -1,5 +1,5 @@
 # ============================================================================
-# CI workflow for scripts/python/powershell-static-analyzer/
+# CI workflow for quality-tools/powershell-static-analyzer/
 # psa.py self-quality gates (Pillar 1, 2, 3).
 #
 # Pillar definitions are authoritative in psa.py SPEC.md §12 and in the
@@ -13,31 +13,31 @@
 #   /SPEC.md
 #
 # Change history for this workflow is recorded in:
-#   scripts/python/powershell-static-analyzer/CHANGELOG.md
+#   quality-tools/powershell-static-analyzer/CHANGELOG.md
 #
 # Do NOT add per-workflow CHANGELOG.md, README.md, or governance docs under
 # .github/workflows/. See /SPEC.md §9 [SPEC-CI-070].
 # ============================================================================
-name: 'scripts/python/powershell-static-analyzer — psa.py CI'
+name: 'quality-tools/powershell-static-analyzer — psa.py CI'
 
 on:
   push:
     branches: [main]
     paths:
-      - 'scripts/python/powershell-static-analyzer/psa.py'
-      - 'scripts/python/powershell-static-analyzer/VERSION'
-      - 'scripts/python/powershell-static-analyzer/test_psa_rules.py'
-      - 'scripts/python/powershell-static-analyzer/SPEC.md'
-      - 'scripts/python/powershell-static-analyzer/.psa.config.json.template'
+      - 'quality-tools/powershell-static-analyzer/psa.py'
+      - 'quality-tools/powershell-static-analyzer/VERSION'
+      - 'quality-tools/powershell-static-analyzer/test_psa_rules.py'
+      - 'quality-tools/powershell-static-analyzer/SPEC.md'
+      - 'quality-tools/powershell-static-analyzer/.psa.config.json.template'
       - '.github/workflows/scripts__python__powershell-static-analyzer.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'scripts/python/powershell-static-analyzer/psa.py'
-      - 'scripts/python/powershell-static-analyzer/VERSION'
-      - 'scripts/python/powershell-static-analyzer/test_psa_rules.py'
-      - 'scripts/python/powershell-static-analyzer/SPEC.md'
-      - 'scripts/python/powershell-static-analyzer/.psa.config.json.template'
+      - 'quality-tools/powershell-static-analyzer/psa.py'
+      - 'quality-tools/powershell-static-analyzer/VERSION'
+      - 'quality-tools/powershell-static-analyzer/test_psa_rules.py'
+      - 'quality-tools/powershell-static-analyzer/SPEC.md'
+      - 'quality-tools/powershell-static-analyzer/.psa.config.json.template'
       - '.github/workflows/scripts__python__powershell-static-analyzer.yml'
   workflow_dispatch:
 
@@ -59,7 +59,7 @@ jobs:
     timeout-minutes: 30  # T1 — Light (see /SPEC.md §4 [SPEC-CI-020])
     defaults:
       run:
-        working-directory: scripts/python/powershell-static-analyzer
+        working-directory: quality-tools/powershell-static-analyzer
     steps:
       - uses: actions/checkout@v5
 
@@ -147,8 +147,8 @@ jobs:
         with:
           name: psa-py-${{ github.run_id }}
           path: |
-            scripts/python/powershell-static-analyzer/pillar1.log
-            scripts/python/powershell-static-analyzer/pillar2.log
-            scripts/python/powershell-static-analyzer/pillar3.log
+            quality-tools/powershell-static-analyzer/pillar1.log
+            quality-tools/powershell-static-analyzer/pillar2.log
+            quality-tools/powershell-static-analyzer/pillar3.log
           if-no-files-found: warn
           retention-days: 14

@@ -23,8 +23,8 @@ on:
       - 'scripts/powershell/update-windows-server-iso/.psa.config.json'
       - 'scripts/powershell/update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
       - 'scripts/powershell/update-windows-server-iso/data/**'
-      - 'scripts/python/powershell-static-analyzer/psa.py'
-      - 'scripts/python/powershell-static-analyzer/VERSION'
+      - 'quality-tools/powershell-static-analyzer/psa.py'
+      - 'quality-tools/powershell-static-analyzer/VERSION'
       - '.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml'
   pull_request:
     branches: [main]
@@ -33,8 +33,8 @@ on:
       - 'scripts/powershell/update-windows-server-iso/.psa.config.json'
       - 'scripts/powershell/update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
       - 'scripts/powershell/update-windows-server-iso/data/**'
-      - 'scripts/python/powershell-static-analyzer/psa.py'
-      - 'scripts/python/powershell-static-analyzer/VERSION'
+      - 'quality-tools/powershell-static-analyzer/psa.py'
+      - 'quality-tools/powershell-static-analyzer/VERSION'
       - '.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml'
   workflow_dispatch:
     inputs:

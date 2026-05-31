@@ -189,7 +189,7 @@ The two canonicals overlap conceptually (reference assets, logging, error handli
 **JA:** 本リポジトリの PowerShell スクリプト（`scripts/powershell/<project>/`、`.ps1` を含む `scripts/aws/<project>/` 等）はすべて、本リポジトリでの正規配置場所にある **`psa.py`** 静的解析ツールで検証する必要があります。
 
 ```
-scripts/python/powershell-static-analyzer/psa.py
+quality-tools/powershell-static-analyzer/psa.py
 ```
 
 **EN:** Do not fork or duplicate `psa.py` into per-script `tools/` directories. Project-local rule suppressions belong in a project-level `.psa.config.json` (see the analyzer's [README](./python/powershell-static-analyzer/README.md) ([日本語](./python/powershell-static-analyzer/README.ja.md))).
@@ -215,9 +215,9 @@ python3 ../../python/powershell-static-analyzer/psa.py <script>.ps1
 
 **JA:** 本ディレクトリ配下の一部サブプロジェクトには GitHub Actions ワークフローが配置されており、 静的解析ゲート (PowerShell では加えて Windows 側チェック) を push と pull request のたびに自動実行します。 これらワークフローのガバナンス — 設計原則、 命名、 タイムアウト階層、 Fork PR の扱い — はレポジトリ直下の [`SPEC.md`](../SPEC.md) に集約しています。 `.github/workflows/` 自体には集約しません ([`SPEC.md`](../SPEC.md#9-spec-ci-070-ci-change-history-location) §9 が `.github/workflows/CHANGELOG.md` 等の作成を禁止しています)。
 
-**EN:** Per-workflow change history lives in the CI-target script's own `CHANGELOG.md` (e.g., a change to `.github/workflows/scripts__python__powershell-static-analyzer.yml` is recorded in `scripts/python/powershell-static-analyzer/CHANGELOG.md`). Sub-project READMEs surface the relevant CI status badges.
+**EN:** Per-workflow change history lives in the CI-target script's own `CHANGELOG.md` (e.g., a change to `.github/workflows/scripts__python__powershell-static-analyzer.yml` is recorded in `quality-tools/powershell-static-analyzer/CHANGELOG.md`). Sub-project READMEs surface the relevant CI status badges.
 
-**JA:** ワークフローごとの変更履歴は、 そのワークフローが検証する対象スクリプトの `CHANGELOG.md` に記録します (例: `.github/workflows/scripts__python__powershell-static-analyzer.yml` への変更は `scripts/python/powershell-static-analyzer/CHANGELOG.md` に記録)。 関連する CI ステータスバッジはサブプロジェクトの README で表示しています。
+**JA:** ワークフローごとの変更履歴は、 そのワークフローが検証する対象スクリプトの `CHANGELOG.md` に記録します (例: `.github/workflows/scripts__python__powershell-static-analyzer.yml` への変更は `quality-tools/powershell-static-analyzer/CHANGELOG.md` に記録)。 関連する CI ステータスバッジはサブプロジェクトの README で表示しています。
 
 ---
 

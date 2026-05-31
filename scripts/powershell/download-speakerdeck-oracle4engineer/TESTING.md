@@ -3,7 +3,7 @@
 This document consolidates everything needed to verify and evaluate
 `Download-SpeakerDeck.ps1`. It covers three areas:
 
-1. **Static analysis** — `scripts/python/powershell-static-analyzer/psa.py` gate (must pass before every commit)
+1. **Static analysis** — `quality-tools/powershell-static-analyzer/psa.py` gate (must pass before every commit)
 2. **Functional verification — DryRun** — Phase 1–5 dry execution against the
    live Speaker Deck site (read-only)
 3. **Functional verification — Real run** — full Phase 1–9 download against
@@ -345,7 +345,7 @@ before running.
 | **r17** | **`Invoke-WebRequest -OutFile` wildcard interpretation breaks `[ ]` paths** | **High** | **Safe-temp GUID file + `Move-Item -LiteralPath`** |
 | r18 | Folder layout integration with `ai-generated-artifacts` repo | Cosmetic | Update README + SPEC for repo placement |
 | r19 | Single account folder couldn't host multiple targets | Cosmetic | Add `-<account>` suffix to folder name |
-| r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md (psa.py later promoted to `scripts/python/powershell-static-analyzer/` as the repository-wide canonical location) |
+| r20 | SPEC file naming inconsistent with upstream | Cosmetic | Rename `spec.en.md` -> `SPEC.md` and `spec.ja.md` -> `SPEC.md`, refresh A.1.x structure, sync psa.py with upstream, add TESTING.md (psa.py later promoted to `quality-tools/powershell-static-analyzer/` as the repository-wide canonical location) |
 | r21 | Inline `# rNN:` / "before r13" prose references accumulated in the source, conflicting with the repo-wide revision-history policy | Cosmetic | Strip all per-revision inline comments; centralise per-release history in `CHANGELOG.md`; enable `PSAP0003` / `PSAP0004` to fail any future regression |
 | r22 | Script header comment still referred to an earlier upstream `psa.py` revision after upstream had moved to a later rule set | Cosmetic | Sync the in-script reference to the then-current mainline (`PSA1001..PSA9002` plus opt-in `PSAP0001..PSAP0004`) |
 | **r23** | **No operation-level diagnostic existed for failures that are NOT per-deck** (e.g. structural exceptions in Phase 5 filename planning, CSV writes); per-deck `P06_errors.jsonl` could not localise such failures to a step inside the function body | **Medium** | **Implement the Debug Trace Facility (Section 1b, ~700 lines); instrument every phase function with `Start-DebugTrace -PhaseId 'PNN'` / `Set-DebugStep` / `Stop-DebugTrace`; activate `Enable-DebugTraceFileOutput` + `Enable-AutoExportOnPhaseFailure` from the main try-block. See SPEC.md A.14** |

@@ -21,7 +21,7 @@ PowerShell スクリプト用の単一 Python 3 ファイル静的解析ツー�
 clone も Python 実行も不要で、 最新の mainline バージョンを軽量に取得できます:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION
+curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION
 ```
 
 これは AI / LLM 駆動のワークフローや CI が、 ローカルにキャッシュした `psa.py` が最新かどうかを判定するための **正規手段** です。 consumer 側に期待される latest-mainline ワークフローの詳細は [SPEC.md §1.4](./SPEC.md#14-versioning) およびリポジトリルートの [`README.md`](../../../README.md) "psa.py Versioning Policy" を参照してください。
@@ -150,53 +150,53 @@ PSScriptAnalyzer を補完するチェックを提供します。PSScriptAnalyze
 
 ```bash
 # 単一スクリプトを解析
-python3 scripts/python/powershell-static-analyzer/psa.py path/to/script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py path/to/script.ps1
 
 # 複数ファイル / glob
-python3 scripts/python/powershell-static-analyzer/psa.py *.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py *.ps1
 
 # ディレクトリを再帰的にスキャン (.ps1 + .psm1)
-python3 scripts/python/powershell-static-analyzer/psa.py -r ./scripts
+python3 quality-tools/powershell-static-analyzer/psa.py -r ./scripts
 
 # JSON 出力（機械可読）
-python3 scripts/python/powershell-static-analyzer/psa.py --format json script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --format json script.ps1
 
 # SARIF 出力（GitHub Code Scanning / IDE プラグイン用）
-python3 scripts/python/powershell-static-analyzer/psa.py --format sarif script.ps1 > result.sarif
+python3 quality-tools/powershell-static-analyzer/psa.py --format sarif script.ps1 > result.sarif
 
 # 重大度でフィルタ
-python3 scripts/python/powershell-static-analyzer/psa.py --severity error script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --severity error script.ps1
 
 # デフォルト無効ルールを有効化
-python3 scripts/python/powershell-static-analyzer/psa.py --enable PSA6002 script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --enable PSA6002 script.ps1
 
 # 特定ルールを無効化
-python3 scripts/python/powershell-static-analyzer/psa.py --disable PSA2001 script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --disable PSA2001 script.ps1
 
 # 指定したルールのみ実行
-python3 scripts/python/powershell-static-analyzer/psa.py --include PSA1001,PSA1002 script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --include PSA1001,PSA1002 script.ps1
 
 # 明示的に設定ファイルを指定 (ローカルパス)
-python3 scripts/python/powershell-static-analyzer/psa.py --config .psa.config.json script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --config .psa.config.json script.ps1
 
 # リモート設定ファイルを使用 (http(s) URL、GitHub raw 推奨)
-python3 scripts/python/powershell-static-analyzer/psa.py \
+python3 quality-tools/powershell-static-analyzer/psa.py \
         --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json script.ps1
 
 # ルール一覧を表示
-python3 scripts/python/powershell-static-analyzer/psa.py --list-rules
+python3 quality-tools/powershell-static-analyzer/psa.py --list-rules
 
 # PowerShell / PSScriptAnalyzer の利用可否を検出（情報提供のみ）
-python3 scripts/python/powershell-static-analyzer/psa.py --check-env
+python3 quality-tools/powershell-static-analyzer/psa.py --check-env
 
 # 通常解析出力に環境サマリを前置（情報提供のみ）
-python3 scripts/python/powershell-static-analyzer/psa.py --show-env script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --show-env script.ps1
 
 # .psa.config.json のスキーマを検証 (ファイル解析は行わない)
-python3 scripts/python/powershell-static-analyzer/psa.py --config-check .psa.config.json
+python3 quality-tools/powershell-static-analyzer/psa.py --config-check .psa.config.json
 
 # SPEC.md と RULES が同期しているかを検証 (リリースプロセスのゲート)
-python3 scripts/python/powershell-static-analyzer/psa.py --self-check
+python3 quality-tools/powershell-static-analyzer/psa.py --self-check
 ```
 
 ### 終了コード
@@ -429,7 +429,7 @@ Start-Process -ArgumentList $args ...
 自分の設定の出発点にできます:
 
 ```bash
-cp scripts/python/powershell-static-analyzer/.psa.config.json.template \
+cp quality-tools/powershell-static-analyzer/.psa.config.json.template \
    .psa.config.json
 # 上書きしたい項目だけコメントを外して編集
 ```
@@ -494,7 +494,7 @@ jobs:
           python-version: '3.x'
       - name: Run psa.py
         run: |
-          python3 scripts/python/powershell-static-analyzer/psa.py -r \
+          python3 quality-tools/powershell-static-analyzer/psa.py -r \
                   --format sarif scripts/ > psa.sarif
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3
@@ -507,7 +507,7 @@ error のみで CI を落とす最小構成:
 ```yaml
       - name: Run psa.py (errors only)
         run: |
-          python3 scripts/python/powershell-static-analyzer/psa.py \
+          python3 quality-tools/powershell-static-analyzer/psa.py \
                   --severity error \
                   scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
 ```

@@ -136,7 +136,7 @@ scripts/powershell/update-windows-server-iso/
 
 本スクリプトの検証に使用する PowerShell 静的解析ツール（`psa.py`）は、
 リポジトリ全体の正規配置場所に格納されています：
-[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
+[`quality-tools/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
 
 ## クイックスタート
 

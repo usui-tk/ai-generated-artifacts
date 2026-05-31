@@ -69,7 +69,7 @@ These are the canonical sources for shared logic in this repository.
 ### A.1.1 Static analyzer
 
 ```
-scripts/python/powershell-static-analyzer/psa.py
+quality-tools/powershell-static-analyzer/psa.py
 ```
 
 `psa.py` is a **pure Python** static analyzer (no PowerShell installation
@@ -81,14 +81,14 @@ the canonical workflow and version discovery. Within this repository
 it must be:
 
 - Reused as-is from the canonical location
-  `scripts/python/powershell-static-analyzer/psa.py`
+  `quality-tools/powershell-static-analyzer/psa.py`
   (do not fork or maintain a separate copy)
 - Used as the gate before every commit
 - Configured per-script-directory via a local `.psa.config.json` when
   rule disables are warranted (see A.11)
 
 See A.11 for project-local conventions and
-[`scripts/python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
+[`quality-tools/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
 for the authoritative rule specification.
 
 ### A.1.2 Companion specifications (this folder)
@@ -103,7 +103,7 @@ Each script folder in this style carries the following set of documentation:
 
 The `psa.py` static analyzer used by these scripts lives at the
 repository-wide canonical location
-[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/),
+[`quality-tools/powershell-static-analyzer/`](../../python/powershell-static-analyzer/),
 not inside each script folder.
 
 Repository-level files like `LICENSE`, `CONTRIBUTING.md`, and the top-level
@@ -1436,7 +1436,7 @@ When asked to create a new PowerShell script in this style:
    - `Format-Elapsed`
    - The CSV / JSONL writers
    - Reference the canonical `psa.py` at
-     `scripts/python/powershell-static-analyzer/psa.py` (do not duplicate
+     `quality-tools/powershell-static-analyzer/psa.py` (do not duplicate
      it into a per-script `tools/` folder)
 4. Replace the phase bodies with the new script's logic.
 5. Renumber phases starting from P01.

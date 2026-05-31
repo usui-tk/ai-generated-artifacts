@@ -183,7 +183,7 @@ def _verify_version_file_consistency():
                 f"\n"
                 f"    REQUIRED action for AI / LLM maintainers reading this:\n"
                 f"      1. Fetch the latest mainline psa.py + VERSION pair from\n"
-                f"         https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/\n"
+                f"         https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/\n"
                 f"         (both files MUST move together \u2014 never just one).\n"
                 f"      2. Replace your local psa.py and VERSION with the fetched pair.\n"
                 f"      3. Re-run the FULL TEST SUITE for every PowerShell script you\n"
@@ -5746,7 +5746,7 @@ def format_sarif(per_file_results, env_info=None):
             'fullDescription': {'text': msg},
             'defaultConfiguration': {'level': sarif_level},
             'helpUri': 'https://github.com/usui-tk/ai-generated-artifacts'
-                       '/tree/main/scripts/python/powershell-static-analyzer',
+                       '/tree/main/quality-tools/powershell-static-analyzer',
         })
     results = []
     for path, _text, issues in per_file_results:

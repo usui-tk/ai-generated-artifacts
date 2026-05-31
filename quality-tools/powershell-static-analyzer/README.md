@@ -25,7 +25,7 @@ overview in [`README.ja.md`](./README.ja.md).
 You can read the current mainline version cheaply, without cloning or running Python:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION
+curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION
 ```
 
 This is the **canonical way** for AI / LLM-driven workflows and CI to discover whether a locally-cached copy of `psa.py` is current. See [SPEC.md §1.4](./SPEC.md#14-versioning) and the repository-root [`README.md`](../../../README.md) "psa.py Versioning Policy" for the full latest-mainline workflow that consumers are expected to follow.
@@ -154,53 +154,53 @@ pipelines that don't have PowerShell available.
 
 ```bash
 # Analyze a single script
-python3 scripts/python/powershell-static-analyzer/psa.py path/to/script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py path/to/script.ps1
 
 # Multiple files / glob
-python3 scripts/python/powershell-static-analyzer/psa.py *.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py *.ps1
 
 # Recursive directory scan (PS1 + PSM1)
-python3 scripts/python/powershell-static-analyzer/psa.py -r ./scripts
+python3 quality-tools/powershell-static-analyzer/psa.py -r ./scripts
 
 # JSON output (machine-readable)
-python3 scripts/python/powershell-static-analyzer/psa.py --format json script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --format json script.ps1
 
 # SARIF output (for GitHub Code Scanning / IDE plugins)
-python3 scripts/python/powershell-static-analyzer/psa.py --format sarif script.ps1 > result.sarif
+python3 quality-tools/powershell-static-analyzer/psa.py --format sarif script.ps1 > result.sarif
 
 # Filter by severity
-python3 scripts/python/powershell-static-analyzer/psa.py --severity error script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --severity error script.ps1
 
 # Enable a disabled-by-default rule
-python3 scripts/python/powershell-static-analyzer/psa.py --enable PSA6002 script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --enable PSA6002 script.ps1
 
 # Disable a specific rule
-python3 scripts/python/powershell-static-analyzer/psa.py --disable PSA2001 script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --disable PSA2001 script.ps1
 
 # Run only a specific subset of rules
-python3 scripts/python/powershell-static-analyzer/psa.py --include PSA1001,PSA1002 script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --include PSA1001,PSA1002 script.ps1
 
 # Use an explicit configuration file (local path)
-python3 scripts/python/powershell-static-analyzer/psa.py --config .psa.config.json script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --config .psa.config.json script.ps1
 
 # Use a remote configuration file (http(s) URL — GitHub raw recommended)
-python3 scripts/python/powershell-static-analyzer/psa.py \
+python3 quality-tools/powershell-static-analyzer/psa.py \
         --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json script.ps1
 
 # Print the rule catalog
-python3 scripts/python/powershell-static-analyzer/psa.py --list-rules
+python3 quality-tools/powershell-static-analyzer/psa.py --list-rules
 
 # Detect PowerShell / PSScriptAnalyzer availability (informational)
-python3 scripts/python/powershell-static-analyzer/psa.py --check-env
+python3 quality-tools/powershell-static-analyzer/psa.py --check-env
 
 # Prepend environment summary to normal analysis output (informational)
-python3 scripts/python/powershell-static-analyzer/psa.py --show-env script.ps1
+python3 quality-tools/powershell-static-analyzer/psa.py --show-env script.ps1
 
 # Validate a .psa.config.json schema (no file is analyzed)
-python3 scripts/python/powershell-static-analyzer/psa.py --config-check .psa.config.json
+python3 quality-tools/powershell-static-analyzer/psa.py --config-check .psa.config.json
 
 # Verify SPEC.md ↔ RULES are in sync (release-process gate)
-python3 scripts/python/powershell-static-analyzer/psa.py --self-check
+python3 quality-tools/powershell-static-analyzer/psa.py --self-check
 ```
 
 ### Exit codes
@@ -433,7 +433,7 @@ default value, all commented out. Copy it to bootstrap your own
 configuration:
 
 ```bash
-cp scripts/python/powershell-static-analyzer/.psa.config.json.template \
+cp quality-tools/powershell-static-analyzer/.psa.config.json.template \
    .psa.config.json
 # then uncomment only what you want to override
 ```
@@ -498,7 +498,7 @@ jobs:
           python-version: '3.x'
       - name: Run psa.py
         run: |
-          python3 scripts/python/powershell-static-analyzer/psa.py -r \
+          python3 quality-tools/powershell-static-analyzer/psa.py -r \
                   --format sarif scripts/ > psa.sarif
       - name: Upload SARIF
         uses: github/codeql-action/upload-sarif@v3
@@ -511,7 +511,7 @@ For a minimal text-only run that fails the build on errors only:
 ```yaml
       - name: Run psa.py (errors only)
         run: |
-          python3 scripts/python/powershell-static-analyzer/psa.py \
+          python3 quality-tools/powershell-static-analyzer/psa.py \
                   --severity error \
                   scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
 ```

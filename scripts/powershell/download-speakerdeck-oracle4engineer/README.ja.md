@@ -118,7 +118,7 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
 
 本スクリプトの検証に用いる PowerShell 静的解析ツール `psa.py` は、
 レポジトリ全体での正規配置場所
-[`scripts/python/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
+[`quality-tools/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
 に格納されています。
 
 スクリプトを **実行するだけ** であれば、この README を読めば十分です。**拡張や類似スクリプト作成** の場合は `SPEC.md` も併せてご確認ください。
@@ -634,7 +634,7 @@ psa.py を一から再導出しないこと。 既存実装からコピーする
 
 このスクリプトは `psa.py`（PowerShell Static Analyzer）で検証済みです。
 このツールはレポジトリ全体での正規配置場所
-[`scripts/python/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py)
+[`quality-tools/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py)
 に格納されており、Pure Python（標準ライブラリのみ）で実装されており、
 外部依存はありません。
 

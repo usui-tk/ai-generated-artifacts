@@ -72,7 +72,7 @@ ai-generated-artifacts/
 
 | ワークフロー | 対象 | バッジ |
 |:---|:---|:---|
-| psa.py セルフ品質ゲート | `scripts/python/powershell-static-analyzer/` | [![psa.py CI](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml) |
+| psa.py セルフ品質ゲート | `quality-tools/powershell-static-analyzer/` | [![psa.py CI](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__python__powershell-static-analyzer.yml) |
 | Download-SpeakerDeck STAGE 1（Linux） | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 1](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml) |
 | Download-SpeakerDeck STAGE 2（Windows） | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 2](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml) |
 | Download-SpeakerDeck STAGE 3（リリース検証） | `scripts/powershell/download-speakerdeck-oracle4engineer/` | [![DSD STAGE 3](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml/badge.svg?branch=main)](https://github.com/usui-tk/ai-generated-artifacts/actions/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml) |
@@ -215,7 +215,7 @@ Update Catalogue の現在状態と乖離している場合、 更新された�
 ### ツーリング規則（必須）
 
 `.ps1` コンテンツをプログラムで生成する場合、 以下のルールを遵守する必要があります。 詳細な是正パターンは
-[`scripts/python/powershell-static-analyzer/SPEC.md` §4.28a](./scripts/python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings)
+[`quality-tools/powershell-static-analyzer/SPEC.md` §4.28a](./quality-tools/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings)
 および姉妹レポジトリの
 [`Deploy-Drivers-For-WindowsServer/SPEC.md §A.2`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a2-source-file-format)
 （サブセクション A.2.1 〜 A.2.4）に記載しています。 簡易リファレンス：
@@ -237,8 +237,8 @@ Bash の heredoc を `.ps1` への書き込みに使う場合は、 `unix2dos` �
 
 リポジトリの強制機構は 3 層構造です：
 
-1. **`psa.py` PSA7001** — `.ps1` に UTF-8 BOM がない場合に発火。 詳細は [`scripts/python/powershell-static-analyzer/SPEC.md` §4.28](./scripts/python/powershell-static-analyzer/SPEC.md#428-psa7001--missing-utf-8-bom)。
-2. **`psa.py` PSA7002**（v3.7.0 で新規追加）— `.ps1` に LF-only 行が 1 行でもあれば発火。 「mixed」バリアントのメッセージには LF-only 行の行番号が最大 5 個含まれるため、 挿入箇所の特定が容易です。 詳細は [`scripts/python/powershell-static-analyzer/SPEC.md` §4.28a](./scripts/python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings)。
+1. **`psa.py` PSA7001** — `.ps1` に UTF-8 BOM がない場合に発火。 詳細は [`quality-tools/powershell-static-analyzer/SPEC.md` §4.28](./quality-tools/powershell-static-analyzer/SPEC.md#428-psa7001--missing-utf-8-bom)。
+2. **`psa.py` PSA7002**（v3.7.0 で新規追加）— `.ps1` に LF-only 行が 1 行でもあれば発火。 「mixed」バリアントのメッセージには LF-only 行の行番号が最大 5 個含まれるため、 挿入箇所の特定が容易です。 詳細は [`quality-tools/powershell-static-analyzer/SPEC.md` §4.28a](./quality-tools/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings)。
 3. **`.gitattributes`** — `git add` / `git checkout` 時に正規化を適用。 これはセーフティネットであって規約ではありません: ZIP 共有・ raw GitHub ダウンロード（`raw.githubusercontent.com`）・チェックアウト形式と異なるバイトを生成する `git archive` 利用者・ `git add` 前の作業ツリー検査では効きません。
 
 コミット前検証（`git add` 前に作業ツリーが正本形式と一致していることを確認）：
@@ -275,7 +275,7 @@ head -c 3 "$file" | od -An -t x1                # NOT "ef bb bf"
 本リポジトリでは、 リリース毎の変更履歴の管理について、 全サブプロジェクト (スクリプト、 ツール、 プロンプト) で統一して適用される **リポジトリ横断の共通ポリシー** を採用しています:
 
 - **リリース毎の変更履歴は `CHANGELOG.md` に集約します。** スクリプト本体や `README.md` や `SPEC.md` の中には書きません。
-- 各サブプロジェクトは、 リリース cadence (頻度) のあるものは独自の `CHANGELOG.md` を他ファイルの隣に配置します (例: [`scripts/python/powershell-static-analyzer/CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md))。
+- 各サブプロジェクトは、 リリース cadence (頻度) のあるものは独自の `CHANGELOG.md` を他ファイルの隣に配置します (例: [`quality-tools/powershell-static-analyzer/CHANGELOG.md`](./quality-tools/powershell-static-analyzer/CHANGELOG.md))。
 - `CHANGELOG.md` は [Keep a Changelog 1.1.0](https://keepachangelog.com/ja/1.1.0/) 形式に従い、 [Semantic Versioning 2.0.0](https://semver.org/lang/ja/) に準拠します。
 - `CHANGELOG.md` は上記「[言語ポリシー](#言語ポリシー)」に従い **英語のみ** で維持されます。
 
@@ -300,7 +300,7 @@ head -c 3 "$file" | od -An -t x1                # NOT "ef bb bf"
 
 ## psa.py のバージョニングポリシー
 
-本レポジトリは [`psa.py`](./scripts/python/powershell-static-analyzer/) を保持しています。 これは本レポジトリ内のすべての PowerShell サブプロジェクト **および** 姉妹レポジトリ (特に [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)) が使用する正典の PowerShell 静的解析ツールです。 本セクションは、 consumer が検証対象とすべき `psa.py` のバージョンに関するレポジトリ横断ルール、 および新バージョンの発見・採用に関する正典ワークフローを定義します。
+本レポジトリは [`psa.py`](./quality-tools/powershell-static-analyzer/) を保持しています。 これは本レポジトリ内のすべての PowerShell サブプロジェクト **および** 姉妹レポジトリ (特に [`Deploy-Drivers-For-WindowsServer`](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)) が使用する正典の PowerShell 静的解析ツールです。 本セクションは、 consumer が検証対象とすべき `psa.py` のバージョンに関するレポジトリ横断ルール、 および新バージョンの発見・採用に関する正典ワークフローを定義します。
 
 ### 中核ルール: latest mainline 以外はサポートしない
 
@@ -317,7 +317,7 @@ consumer (LLM / AI 補助のメンテナ、 CI パイプライン、 人間開�
 「mainline の `psa.py` の現在バージョンは何か」 の正典情報源は、 `psa.py` の隣にある `VERSION` ファイルです:
 
 ```
-scripts/python/powershell-static-analyzer/
+quality-tools/powershell-static-analyzer/
 ├── psa.py        ← 内部に __version__ 文字列
 ├── VERSION       ← 単一 ASCII 行、 先頭 'v' なし、 末尾 LF
 ├── SPEC.md
@@ -329,17 +329,17 @@ scripts/python/powershell-static-analyzer/
 
 ```bash
 # 方法 1 — リモート HTTP GET、 clone 不要、 Python 不要 (CI / 単発チェックに推奨)
-LATEST=$(curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION)
+LATEST=$(curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION)
 echo "Latest psa.py on mainline: $LATEST"
 
 # 方法 2 — 既に clone 済み (例: 姉妹レポジトリのチェックアウトと同階層)
-LATEST=$(cat /path/to/ai-generated-artifacts/scripts/python/powershell-static-analyzer/VERSION)
+LATEST=$(cat /path/to/ai-generated-artifacts/quality-tools/powershell-static-analyzer/VERSION)
 
 # 方法 3 — ローカルの psa.py を起動 (Python 必要)
 LATEST=$(python3 /path/to/psa.py --version | awk '{print $2}')
 ```
 
-3 つの方法は必ず一致します: `psa.py` は起動時に `__version__` と隣接 `VERSION` ファイルを比較する self-check を実行し、 不一致を stderr に警告します。 契約の詳細は [`SPEC.md` §1.4](./scripts/python/powershell-static-analyzer/SPEC.md#14-versioning) を参照。
+3 つの方法は必ず一致します: `psa.py` は起動時に `__version__` と隣接 `VERSION` ファイルを比較する self-check を実行し、 不一致を stderr に警告します。 契約の詳細は [`SPEC.md` §1.4](./quality-tools/powershell-static-analyzer/SPEC.md#14-versioning) を参照。
 
 ### 新バージョン採用のための LLM / AI ワークフロー
 
@@ -350,10 +350,10 @@ LLM / AI メンテナ (あるいは人間) が、 `psa.py` で検証される **
 3. **`LATEST != LOCAL` の場合**:
    1. mainline から `psa.py` と隣接の `VERSION` ファイルの **両方** を置き換える (両ファイルは必ず一緒に動かす):
       ```bash
-      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/psa.py -o psa.py
-      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION -o VERSION
+      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/psa.py -o psa.py
+      curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION -o VERSION
       ```
-   2. [`CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md) の新エントリと現在の [`SPEC.md`](./scripts/python/powershell-static-analyzer/SPEC.md) を読み、 何が変わったか (新ルール、 強化されたヒューリスティクス、 スキーマ変更) を理解する。
+   2. [`CHANGELOG.md`](./quality-tools/powershell-static-analyzer/CHANGELOG.md) の新エントリと現在の [`SPEC.md`](./quality-tools/powershell-static-analyzer/SPEC.md) を読み、 何が変わったか (新ルール、 強化されたヒューリスティクス、 スキーマ変更) を理解する。
    3. プロジェクトの `.psa.config.json` の `enable` リストを、 最新の `SPEC.md` と照らして再評価する。 プロジェクトの規律目標に合う新規 opt-in ルールがあれば、 有効化を検討する。
    4. 新しい `psa.py` で、 プロジェクト内のすべての PowerShell スクリプトに対してフルテストスイートを再実行する。 新たに検出された findings は、 同じ変更セット内で対処すべき regression として扱う (先送りしない)。
 4. **`LATEST == LOCAL` の場合**: 予定の変更を進めて構いません。 ただし変更後のスクリプトに対しては必ず再度 analyzer を回してから完了宣言してください。
@@ -362,7 +362,7 @@ LLM / AI メンテナ (あるいは人間) が、 `psa.py` で検証される **
 
 ### `CHANGELOG.md` 内の released SemVer バージョンの位置づけ
 
-[`psa.py` の `CHANGELOG.md`](./scripts/python/powershell-static-analyzer/CHANGELOG.md) 内のバージョン番号 (例: `## [3.4.0] — 2026-05-19`) は、 各挙動変更がいつリリースされたかの正典的な歴史記録です。 これは人間の監査者向け、 および API 契約を 2 時点間で diff するための記述です。 これは **pin の対象ではありません**: consumer は「バージョン 3.4.0」を参照ポイントとして選ぶのではなく、 「今日の mainline」を選び、 「前回 sync した時の mainline」 との差分を理解するために CHANGELOG を参照します。
+[`psa.py` の `CHANGELOG.md`](./quality-tools/powershell-static-analyzer/CHANGELOG.md) 内のバージョン番号 (例: `## [3.4.0] — 2026-05-19`) は、 各挙動変更がいつリリースされたかの正典的な歴史記録です。 これは人間の監査者向け、 および API 契約を 2 時点間で diff するための記述です。 これは **pin の対象ではありません**: consumer は「バージョン 3.4.0」を参照ポイントとして選ぶのではなく、 「今日の mainline」を選び、 「前回 sync した時の mainline」 との差分を理解するために CHANGELOG を参照します。
 
 ---
 

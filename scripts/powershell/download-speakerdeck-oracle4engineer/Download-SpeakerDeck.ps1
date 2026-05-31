@@ -17,7 +17,7 @@
       - Internet access to speakerdeck.com and files.speakerdeck.com
       - TLS 1.2 capable runtime (the script forces TLS 1.2)
       - Optional: registry "LongPathsEnabled" = 1 for paths > 260 chars
-      - Optional: python3 + scripts/python/powershell-static-analyzer/psa.py
+      - Optional: python3 + quality-tools/powershell-static-analyzer/psa.py
         (latest mainline; rule families PSA1001..PSA9002 plus opt-in
         PSAP0001..PSAP0004) for static analysis
 
