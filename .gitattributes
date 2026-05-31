@@ -125,7 +125,7 @@ templates/**/*.md       linguist-documentation
 **/CHANGELOG.md         linguist-documentation
 
 # -----------------------------------------------------------------------------
-# [P0a.4] Governance encoding contract (LF for markdown + observation streams)
+# [P0a.4] Governance encoding contract — observation streams
+# (markdown is already LF via the *.md rule above; this adds .jsonl)
 # -----------------------------------------------------------------------------
-*.md      text eol=lf
 *.jsonl   text eol=lf
