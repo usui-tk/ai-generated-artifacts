@@ -33,7 +33,17 @@ not import sibling project code and it follows-latest (whole-tool granularity, n
 region-vendoring). Tools live on the **`quality-tools/`** machinery shelf, one tool per
 folder, and never graduate.
 
-Governed by [ADR 0003](./adr/0003-standalone-tool-principle.md).
+The **canonical code itself is quality-assured on three axes**: static lint (psa.py /
+PSScriptAnalyzer), consistency/drift (the scanner — a vendored copy must match the canon
+at its recorded version), and **functional correctness** — every canonical unit carries a
+mandatory behavioral test in its canon test home (`reference-code/<family>/tests/`), run
+as a regression suite on any canon change and before a consumer vendors it. A canon-test
+failure localizes a problem to the **canon**; a drift failure with canon tests green
+localizes it to the **copy**. Folding a consumer's change back into the canon is gated on
+the canon regression suite passing. The full canon test set is authored in phase **P2a**.
+
+Governed by [ADR 0003](./adr/0003-standalone-tool-principle.md) (standalone tools) and
+[ADR 0007](./adr/0007-canon-code-functional-quality-assurance.md) (canon functional QA).
 
 ## Execution framework
 
