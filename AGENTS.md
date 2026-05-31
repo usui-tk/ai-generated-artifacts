@@ -109,8 +109,9 @@ Before authoring ANY change, an LLM agent MUST:
 [ ] 1. Read the relevant Layer 0 governance (root README.md, CONTRIBUTING.md, AGENTS.md)
 [ ] 2. Read the relevant Layer 1 README (e.g., scripts/README.md)
 [ ] 3. Read the immediately target Layer 3 README + SPEC + TESTING
-[ ] 4. If touching PowerShell code: verify psa.py is at latest mainline
-       (see root README.md §psa.py Versioning Policy for the canonical workflow)
+[ ] 4. If touching PowerShell code: stand up the gate runtime (pwsh 7 +
+       PSScriptAnalyzer, baseline §8.2) and verify psa.py is at latest mainline
+       (see root README.md §psa.py Versioning Policy; full gate = Post-flight §9)
 [ ] 5. If touching implementation-describing docs (SPEC / README / TESTING):
        extract implementation ground truth FIRST — see §4
 [ ] 6. Identify which Layer the planned change belongs to;
@@ -403,7 +404,22 @@ change.
 
 ### Post-flight (before declaring done)
 
-9. Run `psa.py` if PowerShell code was touched. **0 / 0 / 0** gate.
+9. **PowerShell gate (when PowerShell code was touched) — all four,
+   config-aware, run-and-green.** `psa.py` alone is NOT the gate.
+   a. **Stand up the runtime first** (baseline §8.2): PowerShell 7
+      (tar.gz from GitHub Releases → `/home/claude/pwsh`) + PSScriptAnalyzer
+      (PSGallery, latest); record the resolved versions. Declaring a gate
+      un-runnable without standing up its runtime is a deviation (M4(A)),
+      not a pass.
+   b. **`psa.py` 0 / 0 / 0**, run **config-aware** — use the target's
+      `.psa.config.json`; a new code home MUST carry its own. Default-rule /
+      config-less runs are NOT the gate.
+   c. **PSScriptAnalyzer 0 / 0 / 0** —
+      `Invoke-ScriptAnalyzer -Settings <target>/PSScriptAnalyzerSettings.psd1`;
+      a new code home MUST carry its own settings.
+   d. **`pwsh` ParseFile 0 errors** + module **Import / offline tests** green.
+   "I didn't run it" / "no pwsh" is a deviation (M4(A); escalate per §8.3),
+   never a pass.
 10. Run `wc -l` on bilingual pairs. The counts should differ by at
     most ~5%. Larger differences suggest a missing section.
 11. Run `grep -c '^## '` and `grep -c '^### '` on bilingual pairs.
