@@ -1,0 +1,196 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/usui-tk/ai-generated-artifacts/governance/schema/observation.schema.json",
+  "title": "Reconciliation observation record (one canonical-JSON line per scanned instance)",
+  "description": "Machine-readable contract for governance/state/observations/repo=<repo>/date=YYYY-MM-DD/run-<run_id>.jsonl. An observation is the scanner's derived output: manifest unit-attrs joined with marker instance-attrs joined with computed hashes joined with drift joined with run provenance, emitted per scan (baseline §4.1/§4.4). This schema is the SOLE output contract the P3 canonical-drift-scanner follows (#8). The region/hash fields are derived from the managed-region marker whose final form is fixed in governance/schema/field-ownership.md (baseline §4.8 #13). Hash policy: normalized hash is the gate, raw hash is forensic-only (baseline §4.5). Whole-tool units (psa.py, the scanner) carry no markers and no hashes, so the region/hash fields are null and drift is 'n/a' (the whole-tool null convention, baseline §4.4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "observed_at",
+    "runtime",
+    "repo",
+    "commit",
+    "unit_id",
+    "granularity",
+    "kind",
+    "consumer",
+    "path",
+    "change_policy",
+    "binding_mode",
+    "drift",
+    "region_locator",
+    "canonical_version",
+    "canonical_hash_norm",
+    "observed_hash_norm",
+    "observed_hash_raw",
+    "hash_what"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Observation record-shape era; lets the observation tier evolve columns independently under schema-on-read (baseline §4.8 #16).",
+      "examples": ["1"]
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[0-9]{8}T[0-9]{6}Z$",
+      "description": "Scan run identity, UTC basic ISO-8601 (baseline §4.8 #14).",
+      "examples": ["20260531T084500Z"]
+    },
+    "observed_at": {
+      "type": "string",
+      "description": "Run timestamp, UTC ISO-8601."
+    },
+    "runtime": {
+      "type": "object",
+      "description": "Run provenance; the runtime is stamped, not pinned (baseline §3/§4.4).",
+      "required": ["python", "duckdb", "scanner_version"],
+      "additionalProperties": false,
+      "properties": {
+        "python": { "type": "string" },
+        "duckdb": { "type": "string" },
+        "scanner_version": { "type": "string" }
+      }
+    },
+    "repo": {
+      "type": "string",
+      "description": "Scanned repository name.",
+      "examples": ["ai-generated-artifacts", "Deploy-Drivers-For-WindowsServer"]
+    },
+    "commit": {
+      "type": "string",
+      "description": "Git SHA of the scanned commit."
+    },
+    "unit_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)+$",
+      "description": "Foreign key to the manifest unit (baseline §4.4). The consumers list lives only in the manifest; this record never re-lists consumers.",
+      "examples": ["pwsh.helper.write-caution", "tool.psa"]
+    },
+    "granularity": {
+      "type": "string",
+      "enum": ["whole-tool", "region"],
+      "description": "The two granularities (baseline §3). whole-tool carries no markers/hashes; region is a marked, hashed, compared region."
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "powershell-helper",
+        "spec-region",
+        "governance-doc",
+        "bash-region",
+        "tool",
+        "python-helper",
+        "python-tool"
+      ],
+      "description": "Language-agnostic unit type (baseline §4.4)."
+    },
+    "consumer": {
+      "type": "string",
+      "description": "The consumer (or tool) whose file holds this instance."
+    },
+    "path": {
+      "type": "string",
+      "description": "Repo-relative file holding this instance."
+    },
+    "region_locator": {
+      "type": ["string", "null"],
+      "description": "Provenance for a region: marker id / BEGIN-END / line span. Null for whole-tool (baseline §4.4)."
+    },
+    "change_policy": {
+      "type": "string",
+      "enum": ["canonical", "vendored-upstream-first", "forked"],
+      "description": "3-state change policy (baseline §2.4)."
+    },
+    "binding_mode": {
+      "type": "string",
+      "enum": ["follow-latest", "pin"],
+      "description": "2-state binding mode (baseline §2.4)."
+    },
+    "canonical_version": {
+      "type": ["string", "null"],
+      "description": "Version/tag the marker claims synced. Null for whole-tool."
+    },
+    "canonical_hash_norm": {
+      "type": ["string", "null"],
+      "description": "Normalized hash of the canonical region at the recorded version — the gate input (baseline §4.5). Null for whole-tool."
+    },
+    "observed_hash_norm": {
+      "type": ["string", "null"],
+      "description": "Normalized hash of the observed inlined region — the gate input (baseline §4.5). Null for whole-tool."
+    },
+    "observed_hash_raw": {
+      "type": ["string", "null"],
+      "description": "Verbatim byte hash of the observed region — forensic only, not used by the gate (baseline §4.5). Null for whole-tool."
+    },
+    "hash_what": {
+      "type": ["string", "null"],
+      "description": "What was hashed and how it was normalized. Null for whole-tool.",
+      "examples": ["region-body; comments/strings->ws; ws-runs->single space"]
+    },
+    "drift": {
+      "type": "string",
+      "enum": ["match", "drift", "forked-frozen", "n/a", "unknown"],
+      "description": "Fast-filter drift state. 'n/a' is reserved for whole-tool; 'forked-frozen' for forked regions (frozen, not compared); match/drift/unknown for compared regions (baseline §4.4/§4.5)."
+    },
+    "forwarded": {
+      "type": ["string", "null"],
+      "description": "DEP-3 fork field (baseline §2.3): not-needed | pending | done | rejected, or a forwarding ref. Populated on forked regions."
+    },
+    "applied_upstream": {
+      "type": ["string", "null"],
+      "description": "DEP-3 fork field (baseline §2.3): version/commit where the change was accepted upstream."
+    },
+    "change_reason": {
+      "type": ["string", "null"],
+      "description": "DEP-3 fork field (baseline §2.3): free-text reason for a fork."
+    },
+    "reason_class": {
+      "type": ["string", "null"],
+      "enum": ["spec-gap", "env-specific", "bug-workaround", "requirement-specific", null],
+      "description": "DEP-3 fork field (baseline §2.3): reason class for a fork."
+    },
+    "ext": {
+      "type": "object",
+      "description": "Open extension object for ad-hoc analysis fields, kept out of the top-level namespace so old and new records stay queryable together (schema-on-read; baseline §4.4)."
+    }
+  },
+  "allOf": [
+    {
+      "description": "Whole-tool null convention: whole-tool units carry no markers/hashes; region & hash fields are null and drift is 'n/a' (baseline §4.4).",
+      "if": {
+        "properties": { "granularity": { "const": "whole-tool" } }
+      },
+      "then": {
+        "properties": {
+          "region_locator": { "type": "null" },
+          "canonical_version": { "type": "null" },
+          "canonical_hash_norm": { "type": "null" },
+          "observed_hash_norm": { "type": "null" },
+          "observed_hash_raw": { "type": "null" },
+          "hash_what": { "type": "null" },
+          "drift": { "const": "n/a" }
+        }
+      }
+    },
+    {
+      "description": "Region granularity: a marked, hashed, compared region requires non-null region & hash fields, and drift is a compared state (not 'n/a').",
+      "if": {
+        "properties": { "granularity": { "const": "region" } }
+      },
+      "then": {
+        "properties": {
+          "region_locator": { "type": "string" },
+          "canonical_version": { "type": "string" },
+          "canonical_hash_norm": { "type": "string" },
+          "observed_hash_norm": { "type": "string" },
+          "observed_hash_raw": { "type": "string" },
+          "hash_what": { "type": "string" },
+          "drift": { "enum": ["match", "drift", "forked-frozen", "unknown"] }
+        }
+      }
+    }
+  ]
+}
