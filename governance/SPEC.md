@@ -41,9 +41,13 @@ as a regression suite on any canon change and before a consumer vendors it. A ca
 failure localizes a problem to the **canon**; a drift failure with canon tests green
 localizes it to the **copy**. Folding a consumer's change back into the canon is gated on
 the canon regression suite passing. The full canon test set is authored in phase **P2a**.
+Release readiness is carried in each unit's SemVer `canonical_version`: `< 1.0.0` (0.x.y)
+is pre-release and MUST NOT be vendored; a unit is promoted to `1.0.0` only after its full
+canon test suite passes, and vendoring (P6/P7) is gated on `version >= 1.0.0`.
 
-Governed by [ADR 0003](./adr/0003-standalone-tool-principle.md) (standalone tools) and
-[ADR 0007](./adr/0007-canon-code-functional-quality-assurance.md) (canon functional QA).
+Governed by [ADR 0003](./adr/0003-standalone-tool-principle.md) (standalone tools),
+[ADR 0007](./adr/0007-canon-code-functional-quality-assurance.md) (canon functional QA), and
+[ADR 0008](./adr/0008-canon-release-model.md) (canon release model).
 
 ## Execution framework
 
