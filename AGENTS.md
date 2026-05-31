@@ -83,6 +83,26 @@ inclusion so the canonical text exists in exactly one place.
 
 ## 3. Required Pre-Flight Checklist (Before Any Change)
 
+### Session Start Contract (read first, every session)
+
+At the **start of any session or task** — before the per-change checklist
+below — read these first; they are the single entry point to current state:
+
+1. **This `AGENTS.md`** — the operating guide (governance model, pre-flight,
+   the ABSOLUTE rules of §6).
+2. **[`governance/project-management/STATUS.md`](./governance/project-management/STATUS.md)**
+   — the **session entry point**: current repo HEAD, phase, next action (step
+   granularity), open `[AUTH]`/`[WORKING]` items, the ADR index, and the
+   static-point index. It is bounded current-truth — history lives in git,
+   decisions live in [`governance/adr/`](./governance/adr/).
+
+When a change touches a *managed unit*, also read the relevant machine-generated
+operational state under [`governance/state/`](./governance/state/) (manifest /
+observations / ledger / reports). Session-to-session handoff follows
+**[ADR 0005](./governance/adr/0005-session-handoff-protocol.md)**: the Tier-P
+design docs stay unmanaged (out of repo), `STATUS.md` is the entry, and each
+static-point ships as one bundle — never piecemeal.
+
 Before authoring ANY change, an LLM agent MUST:
 
 ```
