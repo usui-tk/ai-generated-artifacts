@@ -1,0 +1,3002 @@
+# psa.py Specification
+
+> _Maintained in English only per the repository-wide documentation language policy. Japanese readers should refer to the English source-of-truth together with `README.ja.md` where available._
+This is the formal specification for `psa.py`, the PowerShell static
+analyzer maintained in this directory.
+
+**Document version**: see [`VERSION`](./VERSION) (the canonical source of truth, kept in sync with `psa.py`'s `__version__`)
+**Applies to**: `psa.py` (latest mainline; see [README.md](./README.md) "psa.py Versioning Policy" for consumer obligations)
+**Status**: Normative
+
+For a user-facing overview, see [`README.md`](./README.md). This
+document covers the contract between `psa.py` and its callers — CLI,
+configuration file, output formats, exit codes, suppression syntax, and
+environment detection. Anything not specified here may change between
+patch releases without notice.
+
+---
+
+## Table of contents
+
+1. [Scope](#1-scope)
+2. [Architecture](#2-architecture)
+3. [Command-line interface](#3-command-line-interface)
+4. [Rule specifications](#4-rule-specifications)
+5. [Configuration file](#5-configuration-file)
+6. [Output formats](#6-output-formats)
+7. [Inline suppression](#7-inline-suppression)
+8. [Environment detection](#8-environment-detection)
+9. [Exit codes](#9-exit-codes)
+10. [Tokenizer behaviour](#10-tokenizer-behaviour)
+11. [Extension guide](#11-extension-guide)
+
+Appendices:
+
+- [Appendix A — Rule severity matrix](#appendix-a--rule-severity-matrix)
+- [Appendix B — Document history](#appendix-b--document-history)
+- [Appendix C — Quality Gates & Validation Checklist](#appendix-c--quality-gates--validation-checklist)
+- [Appendix D — Known Pitfalls & Lessons Learned](#appendix-d--known-pitfalls--lessons-learned)
+
+---
+
+## 1. Scope
+
+### 1.1 Purpose
+
+`psa.py` is a single-file Python 3 static analyzer for PowerShell
+scripts (`.ps1` and `.psm1`). It detects classes of bugs that the
+PowerShell parser does not flag at parse time, and that
+[PSScriptAnalyzer][PSScriptAnalyzer] does not cover with its default
+rule set (notably: brace balance over thousand-line scripts,
+heuristically-undefined variable references, security anti-patterns).
+
+[PSScriptAnalyzer]: https://github.com/PowerShell/PSScriptAnalyzer
+
+### 1.2 Non-goals
+
+`psa.py` is **not** a replacement for PSScriptAnalyzer, the PowerShell
+parser, or a full PowerShell runtime. The following are explicitly out
+of scope:
+
+- Cmdlet existence verification (would require a PowerShell session)
+- Type inference (PowerShell is dynamically typed)
+- Module import resolution
+- AST-level analyses (e.g., consistent indentation, casing) — these are
+  PSScriptAnalyzer's domain
+- Auto-fix / code rewriting
+
+### 1.3 Design constraints
+
+`psa.py` MUST:
+
+- Be a single Python file
+- Use only the Python 3 standard library
+- Run on any platform with Python 3.8 or newer
+- Produce identical output for a given (file, configuration) pair on
+  any platform
+- Have a deterministic, finite runtime; static analysis SHOULD complete
+  in O(n) over the file in tokens
+- Never modify input files
+
+### 1.4 Versioning
+
+`psa.py` follows [Semantic Versioning 2.0.0](https://semver.org/). The
+public API surface — for versioning purposes — comprises:
+
+- The command-line interface (flags, exit codes, output format
+  identifiers)
+- The rule code names (`PSAxxxx`)
+- The JSON output schema
+- The SARIF output (which is governed by SARIF 2.1.0)
+- The configuration file schema
+
+Internal Python module boundaries (function and class names within
+`psa.py`) are NOT part of the public API and may change at any time.
+
+**Release history**: The per-version change log for `psa.py` lives in
+[`CHANGELOG.md`](./CHANGELOG.md) ([Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
+format, covering every release from 2.0.0 onward). This SPEC describes
+the *current* behaviour; for the chronological evolution of each rule
+and CLI contract, see `CHANGELOG.md`.
+
+#### 1.4.1 Canonical version metadata
+
+Three artifacts MUST agree on the current version string at all times:
+
+| Artifact                     | Form                          | Audience                                  |
+| ---------------------------- | ----------------------------- | ----------------------------------------- |
+| `psa.py`'s `__version__`     | Python string literal         | The analyzer itself (used by `--version`) |
+| `VERSION` file (this dir)    | One ASCII line, no leading `v`, trailing newline | CI / AI / LLM / `curl` consumers — read **without** invoking Python |
+| Top-level `CHANGELOG.md` entry | `## [X.Y.Z] — YYYY-MM-DD` heading | Human readers and release auditors |
+
+The `VERSION` file is the **canonical bytes-only carrier**. It exists
+to let consumers (especially AI / LLM-driven workflows and CI systems)
+discover the current mainline version of `psa.py` with a single HTTP
+GET against the raw URL of the file, with no `git clone` and no Python
+interpreter required:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/scripts/python/powershell-static-analyzer/VERSION
+```
+
+`psa.py`'s `__version__` MUST be updated in lockstep with the
+`VERSION` file in every release commit. The relationship is intentional
+redundancy: `__version__` is what `psa.py --version` and the JSON/SARIF
+output reports; `VERSION` is what cheap remote probes read.
+
+#### 1.4.2 Startup self-check
+
+At analysis time (i.e., when running `psa.py` against one or more
+PowerShell files), `psa.py` MUST verify that its own `__version__`
+matches the contents of the sibling `VERSION` file. The exact
+semantics are:
+
+- **VERSION file present and matching `__version__`**: no output,
+  analysis proceeds normally.
+- **VERSION file present but mismatching**: a multi-line warning is
+  written to stderr containing (1) both observed values and the path,
+  (2) the diagnosis (release-process desync), and (3) an explicit
+  numbered action list addressed to AI / LLM maintainers — refetch
+  both files, re-run the full PowerShell test suite, re-evaluate the
+  `.psa.config.json` `enable` list against the current `SPEC.md`,
+  and treat the present run's results as provisional. Analysis still
+  proceeds and the exit code is unchanged; the warning is informative,
+  not fatal, so that a transient mismatch does not block downstream
+  tooling. (Rationale: hard-failing on mismatch would create a
+  reliability cliff where a single bad release commit upstream
+  breaks every consumer's CI globally.)
+- **VERSION file absent**: silent no-op. This preserves the supported
+  single-file consumer pattern documented in §1.3, where `psa.py` is
+  copied into a consumer repository on its own without its sibling
+  metadata files.
+
+The self-check is suppressed for `--list-rules` and `--check-env`
+because those modes are purely informational (no PowerShell file is
+analyzed, no results are produced that could be misinterpreted). It
+is also not reached for `--version` and `--help`, which short-circuit
+inside argparse before `main()` runs.
+
+#### 1.4.3 Consumer obligations (latest-mainline policy)
+
+`ai-generated-artifacts` consumers (including sister repositories that
+adopt `psa.py` for their PowerShell pipelines) MUST treat the latest
+`main` of `psa.py` + `VERSION` as the canonical version to validate
+against. Pinning to an older SemVer in consumer code / consumer docs
+is no longer supported — the canonical workflow is "re-fetch on each
+development cycle, re-evaluate the `enable` list against the latest
+`SPEC.md`, re-run tests". The full workflow is documented in the
+repository root [`README.md`](../../../README.md) section
+"psa.py Versioning Policy".
+
+### 1.5 Design philosophy — psa.py as an LLM-assisted maintenance guardrail
+
+Beyond the formal definition above, `psa.py` exists for a specific
+operational reason: to enforce invariants that human authors uphold
+naturally but that LLM-assisted code generation systematically erodes.
+The rule families are organised around the failure modes most common
+in LLM-assisted maintenance of long-running PowerShell repositories.
+
+The mapping between failure mode and enforcement rule is:
+
+| Failure mode (LLM tendency)                              | Rule family enforcing it |
+| -------------------------------------------------------- | ------------------------ |
+| "Helpfully" adds historical context (`# r74: ...`)       | PSAP0003                 |
+| "Helpfully" adds EOF revision history blocks             | PSAP0004                 |
+| **Adds revision-anchored prose in comments (any rNN)**   | **PSAP0005 (new in 4.0.0)** |
+| Silently changes shared helper bodies across files       | PSA8001                  |
+| Emits LF-only / no-BOM `.ps1` when generating from py    | PSA7001, PSA7002         |
+| Substitutes typographic chars for ASCII (em-dash, smart quotes) | **PSA7003 (new in 4.2.0)** |
+| Invents non-existent cmdlets / functions                 | PSA2010                  |
+| Uses locale-dependent constructs (Split-Path ja-JP)      | PSA2011                  |
+| Drops `[pscustomobject]` sealed-object semantics         | PSA2009                  |
+
+Two rule policies follow from this:
+
+- **Language-correctness rules** (PSA1xxx–PSA9xxx, non-project-specific)
+  default to **on** because they encode language-level invariants any
+  PowerShell author should respect.
+- **Project-convention rules** (PSAPxxxx) default to **off** because
+  they encode governance policies that a repository must explicitly
+  adopt. Once opted in via `.psa.config.json`, they become
+  contractual.
+
+For consumers that explicitly position `psa.py` as the LLM-governance
+gate for their repository, the recommended baseline is to enable all
+four `PSAPxxxx` rules, and to commit to `psap0005_relaxed_mode: false`
+as the eventual state (with a documented migration plan if started
+under `true`).
+
+---
+
+## 2. Architecture
+
+### 2.1 Component overview
+
+```
+                  ┌──────────────────┐
+   input          │  expand_paths()  │   recursive glob expansion
+   files /        │                  │   (.ps1, .psm1 collection)
+   directories ──▶└────────┬─────────┘
+                           │
+                           ▼
+                  ┌──────────────────┐
+                  │  read_text()     │   UTF-8 decode with replacement
+                  └────────┬─────────┘   for malformed bytes
+                           │
+                           ▼
+                  ┌────────────────────────────┐
+                  │ strip_strings_and_comments │  preserves line numbers
+                  └────────┬───────────────────┘
+                           │
+                           ▼
+                  ┌──────────────────┐
+                  │  analyze_text()  │   runs all enabled rules
+                  └────────┬─────────┘
+                           │
+                           ▼
+                  ┌──────────────────┐
+                  │  suppression     │   inline / per-line / per-file
+                  │  filter          │
+                  └────────┬─────────┘
+                           │
+                           ▼
+                  ┌──────────────────┐
+                  │  severity filter │
+                  └────────┬─────────┘
+                           │
+                           ▼
+                  ┌──────────────────┐
+                  │  formatter       │   text / json / sarif
+                  │  (text/json/    │
+                  │   sarif)        │
+                  └────────┬─────────┘
+                           │
+                           ▼
+                       stdout
+```
+
+### 2.2 Processing model
+
+`psa.py` is a batch processor. For each input file:
+
+1. **Read** the file as raw bytes; detect the UTF-8 BOM
+   (`0xEF 0xBB 0xBF`) at offset 0; strip the BOM if present; decode the
+   remaining bytes as UTF-8, replacing malformed sequences. The BOM
+   presence flag is preserved in a `file_meta` dict and passed alongside
+   the decoded text to `analyze_text()` so file-format rules
+   (PSA7xxx) can act on it.
+2. **Tokenize** by replacing string and comment content with spaces of
+   the same length (preserving line and column positions)
+3. **Run** every enabled rule against either the raw text or the
+   tokenized text, producing a list of issues
+4. **Filter** issues by inline suppression directives
+5. **Filter** issues by minimum severity (`--severity`)
+6. **Deduplicate** identical (code, line, col, message) tuples
+7. **Sort** by (line, col, code) for stable, reproducible output
+
+Multiple input files are processed independently; there is no
+cross-file analysis.
+
+### 2.3 Issue representation
+
+Internally, every rule produces dicts with these keys:
+
+| Key | Type | Description |
+|:---|:---|:---|
+| `severity` | str | `"error"`, `"warning"`, or `"info"` |
+| `code` | str | The new `PSAxxxx` code |
+| `line` | int | 1-based line number; `0` for whole-file issues (e.g., balance) |
+| `col` | int | 1-based column number; `0` when not applicable |
+| `message` | str | One-line, human-readable description |
+
+---
+
+## 3. Command-line interface
+
+### 3.1 Synopsis
+
+```
+psa.py [OPTIONS] [PATH ...]
+psa.py --list-rules
+psa.py --check-env
+psa.py --config-check PATH_OR_URL
+psa.py --self-check
+psa.py --version
+```
+
+### 3.2 Positional arguments
+
+| Argument | Description |
+|:---|:---|
+| `PATH` | One or more file paths, directory paths, or glob patterns. Glob expansion is performed by `psa.py` itself for portability with non-POSIX shells. Directories are skipped unless `-r` is given. |
+
+### 3.3 Options
+
+| Flag | Argument | Default | Description |
+|:---|:---|:---|:---|
+| `-r`, `--recursive` | — | off | Recursively scan directory arguments for `*.ps1` and `*.psm1` |
+| `--format` | `text\|json\|sarif` | `text` | Output format. See §6. |
+| `--severity` | `error\|warning\|info` | (all reported) | Minimum severity to report. |
+| `--enable` | `CODE[,CODE...]` | — | Enable specific rule codes. Repeatable. |
+| `--disable` | `CODE[,CODE...]` | — | Disable specific rule codes. Repeatable. |
+| `--include` | `CODE[,CODE...]` | — | Run ONLY the listed codes (mutually exclusive with `--enable`'s default-set behaviour). Repeatable. |
+| `--config` | `PATH_OR_URL` | implicit | Load configuration from a local file or an http(s) URL. See §5.4. |
+| `--max-line-length` | `N` | `120` | Threshold for `PSA4003`. |
+| `--no-color` | — | auto | Disable ANSI color output. Color is auto-disabled when stdout is not a TTY or when `NO_COLOR` env var is set. |
+| `--list-rules` | — | — | Print rule catalog to stdout and exit `0`. |
+| `--check-env` | — | — | Run environment detection (§8) and exit `0`. |
+| `--show-env` | — | off | Prepend an environment summary to the normal analysis output. Does not affect exit code. |
+| `--config-check` | `PATH_OR_URL` | — | Validate the schema of a `.psa.config.json` (JSONC) file or URL and exit. See §3.6 / §12. Exits `0` on a clean config, `2` on any error. |
+| `--self-check` | — | — | Verify that the sibling `SPEC.md`'s rule catalog (§4 headings) matches the `RULES` list compiled into this `psa.py`, and exit. See §3.7 / §12. Exits `0` on agreement, `2` on drift. |
+| `--version` | — | — | Print version and exit `0`. |
+
+### 3.4 Argument forms
+
+Rule codes are specified in the `PSAxxxx` form (e.g., `PSA2001`),
+case-insensitive. Comma-separated lists are accepted as a single
+argument value, e.g., `--disable PSA4001,PSA4002`.
+
+### 3.5 Configuration resolution order
+
+Configuration is layered from lowest to highest priority:
+
+1. Built-in defaults (the `RULES` table in `psa.py`)
+2. Configuration file (`.psa.config.json`) — see §5
+3. CLI flags
+4. Inline suppression directives — see §7
+
+Higher-priority settings override lower-priority ones for each rule
+independently. There is no "all-or-nothing" cascade; disabling one rule
+in `--disable` leaves all other rules at their previous state.
+
+### 3.6 `--config-check`: configuration schema validation
+
+`--config-check PATH_OR_URL` loads the same `.psa.config.json` source as
+`--config` (local path **or** http(s) URL, JSONC-aware) and walks every
+field in the parsed document against the schema documented in §5.
+Unlike a normal run, `--config-check`:
+
+- does not analyze any PowerShell file,
+- does not read the implicit `./.psa.config.json`,
+- short-circuits before `Config.load()` so a broken config can still
+  be diagnosed (rather than dying inside `Config.load()` on the first
+  problem encountered).
+
+The checker reports one issue per problem and continues to the end
+rather than stopping at the first violation; this lets a CI pipeline
+see all schema problems in a single run. After printing the report it
+exits `2` if any error was found, `0` otherwise.
+
+Categories reported:
+
+| Class | Examples |
+|:---|:---|
+| Unknown top-level key | `"unknown_key": ...` (only the six keys in §5.2 are accepted) |
+| Wrong value type | `"enable": "PSA1001"` (must be a list), `"max_line_length": "120"` (must be int) |
+| Unknown rule ID | `"enable": ["PSAP9999"]` (not in `RULES`) |
+| enable/disable conflict | The same rule listed in BOTH `enable` and `disable` |
+| Bad severity value | `"severity": "warninz"` (must be `error`/`warning`/`info`) |
+| Non-positive integer | `"max_line_length": -10` |
+| Bad regex | `"psa8001_ignore_functions": ["regex:[unterminated"]` |
+
+### 3.7 `--self-check`: SPEC.md ↔ RULES drift detection
+
+`--self-check` reads the sibling `SPEC.md` (same directory as `psa.py`),
+extracts every `### 4.N PSAxxxx — Title` heading from §4, and diffs the
+resulting set against the rule IDs compiled into the `RULES` table of
+the running `psa.py`. The check is symmetric: rules documented in
+`SPEC.md` but missing from `RULES`, and rules in `RULES` but missing
+from `SPEC.md`, are both reported.
+
+The `### 4.32 PSAPxxxx — Project / pipeline convention rules` overview
+heading (which has no concrete rule ID and serves only as a grouping
+heading for §4.33–§4.36) is explicitly skipped by the parser.
+
+Exit codes: `0` on full agreement, `2` on any drift detected (or if
+`SPEC.md` cannot be read at all). The release process MUST keep this
+check green on the mainline branch.
+
+---
+
+## 4. Rule specifications
+
+This section is normative. Each rule's detection logic is described in
+sufficient detail that an alternative implementation could reproduce
+the same behaviour.
+
+### 4.1 PSA1001 — Brace balance
+
+- **Severity**: Error
+- **Default**: enabled
+
+**Detection**: After string/comment stripping (§11), count occurrences
+of `{` and `}` in the cleaned text. Report if counts differ.
+
+**Reported location**: line `0`, col `0` (whole-file).
+
+### 4.2 PSA1002 — Paren balance
+
+- **Severity**: Error
+- **Default**: enabled
+
+**Detection**: Same as PSA1001 but for `(` / `)`.
+
+### 4.3 PSA1003 — Bracket balance
+
+- **Severity**: Error
+- **Default**: enabled
+
+**Detection**: Same as PSA1001 but for `[` / `]`.
+
+### 4.3a PSA1004 — Bare statement-as-expression
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v4.1.0
+
+**Detection**: After string/comment stripping (§11), the rule walks
+the cleaned text line by line and looks for the pattern
+``(<keyword> (`` where the leading ``(`` is **not** preceded by
+``$`` (subexpression operator), ``@`` (array subexpression operator),
+or backtick (escape). The keywords matched are ``if``, ``switch``,
+``foreach``, ``while``, ``for``, ``do``, ``try`` — PowerShell's
+statement-introducing keywords that legally begin with ``(``.
+
+**Rationale**: PowerShell distinguishes between *statements* and
+*expressions*. The statement ``if (...) { ... }`` produces a value,
+but that value can only be captured if the statement is wrapped in
+the subexpression operator ``$(...)`` or its array form ``@(...)``.
+A bare parenthesised ``(if ($x) { 'a' } else { 'b' })`` is parsed
+as a *command invocation* named ``if`` — which then fails at runtime
+with the localised error:
+
+```
+The term 'if' is not recognized as a name of a cmdlet, function,
+script file, or executable program.
+```
+
+The trap is that the parser accepts both forms as syntactically
+valid. ``if`` is not a reserved word in command-name position, so
+neither ``[System.Management.Automation.Language.Parser]::ParseFile``
+nor PSScriptAnalyzer flags it. The error only surfaces at runtime
+when the call site actually executes, which can be months after the
+offending edit if the code path is conditional.
+
+This was the proximate cause of the r07.0 Step 18 defect in
+``Show-Pca2023ReadinessSnapshot`` (update-windows-server-iso
+pipeline). Five lines used the bare form:
+
+```powershell
+'EFI_EX staging directory : {0}' -f (if ($null -eq $emb.HasEfiExDir) { 'n/a' }
+                                     elseif ($emb.HasEfiExDir)      { 'present' }
+                                     else                           { 'NOT present' })
+```
+
+The bug was unreachable through earlier P12 runs because the
+non-compact rendering path was blocked by an unrelated defect (the
+Write-PhaseHeader Mandatory-parameter trap covered by PSA2012). Once
+Step 17 unblocked the path, the first runtime execution of P12
+immediately surfaced the failure.
+
+**Suggested fix**: Wrap the statement in ``$(...)``:
+
+```powershell
+'EFI_EX staging directory : {0}' -f $(if ($null -eq $emb.HasEfiExDir) { 'n/a' }
+                                      elseif ($emb.HasEfiExDir)      { 'present' }
+                                      else                           { 'NOT present' })
+```
+
+For statements whose result is naturally an array, use ``@(...)``:
+
+```powershell
+$paths = @(if ($includeWorkRoot) { $Script:WorkRoot } else { @() })
+```
+
+**False-positive defenses**:
+
+- ``$(if ...)`` — the leading ``$`` excludes the look-behind.
+- ``@(if ...)`` — the leading ``@`` excludes the look-behind.
+- Identifier-like spellings (``$myiffy``, ``$switching``) — the
+  ``\b`` boundary after the keyword guards against this.
+- Strings and comments — already stripped by the analyzer prelude.
+
+**Inline suppression**: ``# psa-disable-line PSA1004 -- <reason>``
+on the offending line. The rule fires on a real runtime defect; use
+sparingly.
+
+### 4.4 PSA2001 — Undefined variable reference
+
+- **Severity**: Error
+- **Default**: enabled
+
+**Detection**: Heuristic. For each function block (`function Name { … }`):
+
+1. Collect locally-assigned names from `$x = …`, `foreach ($x in …)`,
+   `for ($x = …`, `param(…)` blocks, and inline parameter lists
+2. Collect globally-assigned names (assignments outside any function)
+3. Walk all `$variable` references within the function body
+4. If a reference is not in the local set, not in the global set, not
+   in `AUTO_VARS` (PowerShell automatic variables), and not in an
+   external scope (`$env:`, `$using:`), report it once per
+   (variable_name, function_name) pair
+
+**Reported location**: line and col within the function body.
+
+**Known limitations**: This rule does not understand
+splatting (`@args`), dynamically-resolved variable names
+(`Get-Variable`), or modules' exported variables. False positives are
+possible; suppress with `# psa-disable-line PSA2001` when intentional.
+
+### 4.5 PSA2002 — Auto-variable shadowing
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Any assignment `$name = …` where `name` (lowercased) is
+in the `RISKY_SHADOW_VARS` set. As of v3.6.0 this set was expanded
+from 8 to 38 entries to align with PSScriptAnalyzer's
+`PSAvoidAssignmentToAutomaticVariable` rule. The full set:
+
+```
+_,            psitem,          this,
+args,         input,           matches,         switch,         foreach,
+error,        lastexitcode,    stacktrace,
+event,        eventargs,       eventsubscriber, sender,
+pscmdlet,     psboundparameters,
+host,         home,            pid,             pshome,         profile,
+pscommandpath, psscriptroot,
+myinvocation, executioncontext,
+true,         false,
+ofs,          nestedpromptlevel, consolefilename,
+shellid,      psversiontable,  psculture,       psuiculture,
+psdebugcontext, pssenderinfo
+```
+
+`null` is deliberately excluded because `$null = $expr` is the
+canonical "discard" idiom in PowerShell (the value-suppressing
+equivalent of `[void]$expr`); PSScriptAnalyzer follows the same
+exemption.
+
+### 4.6 PSA2003 — `-match` against bare variable
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `-match $name` where `$name` is not `$null`.
+This is bug-prone because `-match $null` returns `$true` in PowerShell.
+
+### 4.7 PSA2004 — `$null` on the right side of `-eq`/`-ne`
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `$variable -eq $null` (also `-ne`, `-ceq`,
+`-cne`, `-ieq`, `-ine`). PowerShell's `$null -eq $x` form is safer
+because when `$x` is a collection, the right-`$null` form returns
+*elements* equal to `$null` rather than a Boolean.
+
+### 4.8 PSA2005 — Assignment operator inside conditional
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `if|while|elseif ( $variable = ...` where `=`
+is not followed by another `=` (avoiding `==` false-positives).
+
+### 4.9 PSA2006 — Redirection operator inside conditional
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `if|while|elseif ( $variable [<>] ...`.
+In PowerShell, `>` and `<` are file redirection, not comparison.
+Use `-gt` / `-lt`.
+
+### 4.9a PSA2007 — Parameter name shadows a PowerShell automatic variable
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: Inspects every `param(...)` block (both top-level
+script param and per-function param blocks). Fires when a parameter
+declared inside such a block has a name that is in the
+`RISKY_SHADOW_VARS` set (see §4.5). Mirrors PSScriptAnalyzer's
+`PSAvoidAssignmentToAutomaticVariable` rule.
+
+**Rationale**: PowerShell auto-variables like `$Event` (event
+subscribers), `$Args` (argument list), `$Input` (pipeline input),
+`$PSCmdlet` (cmdlet binding), etc., are populated by the runtime in
+specific contexts. A parameter named `$Event` shadows the engine's
+`$Event` and silently misbehaves if the function is ever called from
+inside an event-subscriber action block (`Register-ObjectEvent`,
+`Register-WmiEvent`, etc.).
+
+**Suggested fix**: Rename to `${name}Object`, `${name}Input`, or a
+domain-specific alternative.
+
+**False-positive defense**: Only fires inside an actual `param(...)`
+block. Bare references like `$Event` inside an event-subscriber
+action block are *not* parameter declarations and are correctly
+ignored.
+
+### 4.9b PSA2008 — `$Script:Foo++` / `+=` / `-=` without prior initialisation
+
+- **Severity**: Info
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: Scans for `$Script:Foo++`, `--`, `+=`, `-=` patterns
+and reports each instance where no plain `$Script:Foo = ...`
+initialisation exists anywhere in the same file.
+
+**Rationale**: PowerShell coerces `$null + 1` to `1`, but relying on
+this is type-fragile and obscures the variable's expected type.
+Explicit initialisation also helps PSScriptAnalyzer's
+`PSAvoidUninitializedVariable` rule and aids readers.
+
+**Suggested fix**: Add a plain `$Script:Foo = 0` (or similar) at the
+top of the script's identifier/state-initialisation block.
+
+### 4.9c PSA2009 — PSCustomObject property assigned without prior declaration
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: v3.8.0
+- **Refined in**: v4.0.1 (Step 2c2 indirect-binding defence)
+
+**Detection**: The rule walks the file in five passes.
+
+1. **Initialiser pass.** Every top-level `$VarName = [pscustomobject]@{...}`
+   initialiser is parsed brace-balanced (string-literal-aware), and the
+   declared property names are harvested as the "declared" set for that
+   variable name. Scope qualifiers (`$Script:`, `$Global:`, `$Local:`,
+   `$Private:`) are stripped from the variable name so a `$Script:Foo =
+   [pscustomobject]@{...}` initialiser and a later `$Foo.Bar = ...`
+   assignment correlate correctly.
+2. **`Add-Member` pass.** Two surface forms of
+   `Add-Member -MemberType NoteProperty -Name <propname>` are recognised
+   and the named property is *added* to the declared set for the target
+   variable: `$Var | Add-Member ...` and
+   `Add-Member -InputObject $Var ...`. This makes the rule compatible
+   with the runtime-property-bag pattern.
+3. **Hashtable-form drop pass (direct).** Any variable name that is
+   *also* assigned somewhere in the file with a plain hashtable literal
+   (`$result = @{...}`, `$tbl = [ordered]@{...}`, or
+   `$tbl = [hashtable]@{...}`) is conservatively *dropped* from
+   tracking. This false-positive prevention is necessary because
+   `psa.py` analysis is file-level rather than function-scope-aware,
+   and the same local variable name may legitimately host both
+   pscustomobject and hashtable shapes across different functions.
+4. **Hashtable-form drop pass (indirect, added in v4.0.1).** When a
+   variable is bound through the `$Coll.Add(@{...})` + `foreach (...) in $Coll`
+   pattern (common in PowerShell scripts that schedule parallel work
+   via `RunspacePool` / `ArrayList`), the foreach loop-variable is
+   *also* dropped from tracking. The rule traces pipeline and method
+   derivations to a fixed point, so the following idioms are all
+   recognised:
+
+   ```powershell
+   # Direct foreach over the .Add(@{...}) target:
+   [void]$jobs.Add(@{ Handle = $h; Collected = $false })
+   foreach ($job in $jobs) { $job.Collected = $true }       # safe
+
+   # Pipeline derivation:
+   $newlyDone = $jobs | Where-Object { $_.Handle.IsCompleted }
+   foreach ($job in $newlyDone) { $job.Collected = $true }  # safe
+
+   # LINQ-style method derivation (PS 5.1 `.Where()`, `.ForEach()`, `.Clone()`):
+   $pending = $jobs.Where({ -not $_.Collected })
+   foreach ($p in $pending) { $p.Collected = $true }        # safe
+   ```
+
+   The derivation step iterates to a fixed point with a hard cap (16
+   iterations) to handle multi-hop chains while remaining
+   computationally trivial for the typical script.
+5. **Assignment pass.** Every `$VarName.Property = ...` assignment site is
+   checked against the declared set for `$VarName`. The rule fires when
+   `$VarName` survived both hashtable-form drop passes, the assignment
+   operator is exactly `=` (not `+=`, `-=`, `*=`, `/=`, or `==`), and
+   `Property` is not in the declared set.
+
+The rule does **not** fire on well-known dynamic property bags: `$_`,
+`$Matches`, `$PSBoundParameters`, `$Host`, `$Error`, `$PSCmdlet`,
+`$MyInvocation`, `$args`, `$input`, `$this`.
+
+**Rationale**: PowerShell 5.1's `[pscustomobject]@{...}` accelerator
+constructs a sealed object whose property surface is fixed at the
+moment the initialiser runs. Any subsequent `$obj.NewProp = value`
+assignment that targets a property NOT in the initialiser raises a
+terminating exception (`"<PropName>" の設定中に例外が発生しました:
+"このオブジェクトにプロパティ '<PropName>' が見つかりません。"` in
+Japanese locales; in English: `Exception setting "<PropName>": "The
+property '<PropName>' cannot be found on this object."`). The defect
+surfaces only at runtime, on the first phase that attempts the
+assignment, which is too late for long-lived pipeline scripts where
+the assignment site can be hundreds or thousands of lines from the
+initialiser block. PSA2009 closes this loop at static-analysis time.
+
+The Step 2c2 indirect-binding defence (v4.0.1) is motivated by a real
+false-positive observed in the `Download-SpeakerDeck.ps1` script:
+two `$job.Collected = $true` lines on a `foreach ($job in $newlyDone)`
+loop fired PSA2009 because the file *also* declared an unrelated
+`$job = [PSCustomObject]@{...}` sealed object in a different function,
+and the file-level tracking conflated the two `$job` names. The
+indirect-binding detector teaches PSA2009 that "$job" in the foreach
+loop is bound to a hashtable element of `$jobs`, not to the
+pscustomobject, and therefore must not be flagged.
+
+**Suggested fix**: Add the missing `PropName = $null` declaration to
+the `[pscustomobject]@{...}` initialiser. If the assignment is to an
+inherited or extended object that the author cannot easily annotate,
+use inline suppression: `$obj.X = $value  # psa-disable-line PSA2009`.
+
+**Differences from related rules**:
+
+- **PSA2001 (Undefined variable reference)** operates at the
+  *variable* level. PSA2009 operates at the *property* level. The
+  two rules are orthogonal — PSA2001 cannot detect a missing
+  `[pscustomobject]` property because the variable itself is
+  well-defined.
+- **PSA2002 (Auto-variable shadowing)** is unrelated — it concerns
+  PowerShell engine auto-variables, not user `[pscustomobject]`
+  surface contracts.
+- **PSA8001 (Function-body drift)** operates at the cross-file
+  function-body level. PSA2009 operates inside a single file.
+
+### 4.9d PSA2010 — Call to undefined function
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v3.9.0
+
+**Detection**: The rule operates at the cross-file (driver) level
+because the full set of function definitions in the scan set is
+needed to decide whether a call site has any backing definition.
+
+1. **Definition pass.** For every file in the scan set, the
+   ``^\s*function\s+([A-Za-z][\w-]*)`` regex on the cleaned text
+   (strings and comments already stripped) collects user-defined
+   function names. The union across all scanned files becomes the
+   ``defined_funcs`` set.
+2. **Cmdlet whitelist.** psa.py ships a comprehensive
+   ``KNOWN_CMDLETS`` set covering Microsoft.PowerShell.Core /
+   Management / Security / Utility / Diagnostics, CimCmdlets, PKI,
+   PnpDevice, Defender, BitLocker, NetTCPIP / NetAdapter,
+   SecureBoot, ScheduledTasks, Storage, Archive, WindowsCapability,
+   ConfigCI (WDAC), International, and WSMan. Consumers extend it
+   via the ``.psa.config.json`` ``psa2010_known_cmdlets`` array (an
+   optional ``Module\Name`` prefix is permitted for documentation
+   and stripped before lookup).
+3. **Call-site pass.** Find every token on the cleaned text that
+   matches ``[A-Z][A-Za-z]+-[A-Z][A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*``
+   and appears in **command position** — at start-of-line, after
+   ``;`` ``|`` ``&`` ``(`` ``{`` ``=`` or a backtick, and followed
+   by whitespace / end-of-line / ``;`` / ``|`` / ``)`` / a backtick.
+   The end boundary prevents matches inside version-like strings
+   (``chipset-2026.05.25-r75``).
+4. **Verb gate.** The verb segment (lowercased) must be in
+   ``APPROVED_VERBS``. This deliberately limits the rule's reach to
+   names that look like real PowerShell function invocations and
+   prevents false positives on hyphenated tokens whose first
+   segment is a domain-specific prefix (``Phantom-OK``,
+   ``Multi-OS``, ``Chipset-Driver-CodeSign``) that survives string
+   stripping.
+5. **Resolution.** If the call name (lowercased) is not in the
+   union of ``defined_funcs`` and the (default + extended)
+   ``KNOWN_CMDLETS`` set, fire PSA2010 with severity ``error``.
+
+**Rationale**: PowerShell's late-binding execution model defers
+``CommandNotFoundException`` to the moment the call is reached, so
+a typo like ``Find-Signtool`` (where the actual helper is
+``Find-KitTool 'signtool.exe'``) can sit dormant in the source for
+many releases until a phase that triggers the call runs on a
+specific host. This was the proximate trigger of the 2026-05-24
+WS2019 + Renoir r74 release: every WHQL co-sign classification
+across the r71–r73 lifetime silently degraded to the conservative
+fallback because the inner ``try/catch`` in ``Test-WhqlCoSignature``
+swallowed the ``CommandNotFoundException``. PSA2010 would have
+surfaced this typo at static-analysis time. A subsequent r75 bench
+cycle revealed that the actual operator-visible error stemmed from
+``Split-Path -LiteralPath -Parent`` (see PSA2011 below), with the
+``Find-Signtool`` typo being a separate latent defect that PSA2010
+would have caught either way.
+
+**Suggested fix**: Define the missing function (if it was supposed
+to exist), import the module that provides it (and add the cmdlet
+to ``psa2010_known_cmdlets`` if the rule still fires), or correct
+the typo at the call site. The recommended remediation for the
+historical case is ``$signtool = Find-KitTool 'signtool.exe'``.
+
+**Notes**:
+
+- External executables invoked via ``& $exe`` or ``pnputil
+  /enum-drivers`` do not follow Verb-Noun syntax and are never
+  flagged.
+- Class method calls such as
+  ``[System.IO.Path]::GetDirectoryName($p)`` do not contain a
+  hyphen between the segments and are never flagged.
+- The rule works on any scan size ≥ 1. With a single-file scan,
+  only that file's definitions populate ``defined_funcs``; sister
+  helpers shared across multiple scripts may require ``--include
+  PSA2010`` and pass all sister files together, or addition to
+  ``psa2010_known_cmdlets``.
+
+**Inline suppression**: ``# psa-disable-line PSA2010 -- <reason>``
+on the call line. Use sparingly — the rule fires on real defects
+and most suppression sites should instead define the missing
+function or extend ``psa2010_known_cmdlets``.
+
+### 4.9e PSA2011 — `Split-Path -LiteralPath ... -Parent`
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v3.9.0
+
+**Detection**: The rule walks the file line by line (with backtick
+continuation joined into a single span) and looks for
+``Split-Path`` invocations that contain BOTH the ``-LiteralPath``
+switch AND the ``-Parent`` switch. Switch order does not matter:
+``Split-Path -LiteralPath $p -Parent`` and
+``Split-Path -Parent -LiteralPath $p`` both fire.
+
+The pattern requires the ``Split-Path`` token to be in command
+position (start of statement, after ``|``, ``;``, ``&``, ``(``,
+``{``, ``=``, or a backtick) to avoid false positives where the
+text appears in a here-string body that the stripper conservatively
+preserved.
+
+**Rationale**: On Windows PowerShell 5.1 ja-JP, the combination of
+``-LiteralPath`` and ``-Parent`` triggers an
+``AmbiguousParameterSet`` runtime exception:
+
+```
+指定された名前のパラメーターを使用してパラメーター セットを解決できません。
+FullyQualifiedErrorId: AmbiguousParameterSet,
+    Microsoft.PowerShell.Commands.SplitPathCommand
+```
+
+The two switches live in incompatible parameter sets in the ja-JP
+help table — ``-LiteralPath`` favours the path-decomposition set,
+while ``-Parent`` favours the qualifier-projection set — and PS 5.1
+cannot resolve which set the operator intended. The bug is
+present on PS 5.1.17763.8755 on Windows Server 2019 (ja-JP) and
+some other build / locale combinations; it is absent on
+PowerShell 7.x. Because the bug surfaces only at runtime and only
+on certain locales, code review and English-locale CI both miss it.
+
+This was the proximate cause of the 2026-05-24 r75 bench cycle's
+WHQL co-sign analysis failure on a clean-installed WS2019 + Renoir
+host. The ``Get-InfDriverFileList`` helper used ``Split-Path
+-LiteralPath $InfPath -Parent`` to derive the directory containing
+the staged ``.sys`` files, which raised the ja-JP
+``ParameterBindingException``, propagated through the outer
+``try/catch`` in ``Test-WhqlCoSignature``, and degraded every WHQL
+classification to the conservative ``'self-only'`` verdict.
+
+**Suggested fix**: Use ``[System.IO.Path]::GetDirectoryName($path)``
+for parent-directory extraction. The .NET method has no PS-binder
+ambiguity and works identically across PS 5.1 / 7.x. Alternatively,
+``Split-Path -Path $path -Parent`` (with positional or explicit
+``-Path``, without ``-LiteralPath``) works around the bug; this
+form is preferred only when the path does not contain wildcard
+metacharacters that ``-Path`` would expand (``*``, ``?``, ``[``,
+``]``).
+
+**Inline suppression**: ``# psa-disable-line PSA2011 -- <reason>``
+on the call line. Use sparingly — the rule fires on a real ja-JP
+runtime defect.
+
+**Differences from related rules**:
+
+- **PSA3005 (Start-Transcript -Path should be -LiteralPath)** is
+  the inverse pattern at the file-creation-time layer: ``-Path``
+  expands wildcards and breaks on special characters, so
+  ``-LiteralPath`` is preferred. PSA2011 is the opposite — for
+  ``Split-Path -Parent``, ``-LiteralPath`` triggers the runtime
+  parameter-binder bug, so ``-Path`` (or the .NET method) is
+  preferred. The two rules are not contradictory; they apply to
+  different cmdlets with different parameter-set ambiguities.
+
+### 4.9f PSA2012 — Positional call with insufficient args to a Mandatory-param function
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v4.1.0
+
+**Detection**: Two-pass analysis on the cleaned text:
+
+1. **Function-table build.** For each ``function Name { ... }`` block
+   in the file, extract the body's first ``param(...)`` declaration,
+   then enumerate ``[Parameter(Mandatory)] [type] $Name`` occurrences.
+   Build a mapping ``{function_name_lower: [mandatory_param_names_lower, ...]}``.
+   Only functions with ``len(mandatory_params) >= 2`` enter the
+   candidate set; single-Mandatory functions are tolerated because
+   their positional-call ergonomics are familiar.
+2. **Call-site scan.** Walk every non-definition line. For each
+   candidate function name found at a word boundary that is **not**
+   preceded by ``-`` (parameter prefix), ``.`` (member access), or
+   ``:`` (scope qualifier), count the remaining tokens on the line
+   as positional arguments and named-parameter pairs. Argument
+   counting uses the ORIGINAL text (string literals occupy positional
+   slots) rather than the strings-stripped text. If the call's
+   ``positional + named_matching_mandatory < len(mandatory)``, fire.
+
+The rule explicitly excludes:
+
+- Bare-name references (``$ref = Get-Command Foo``).
+- Pipeline-arg calls (``$x | Foo``); the count is intentionally on
+  stdin.
+- Calls on the LHS of an assignment (uncommon in PS but defensive).
+
+**Rationale**: A PowerShell function declared with multiple
+``[Parameter(Mandatory)]`` parameters, when called positionally with
+fewer arguments, does not fail immediately. Instead PowerShell
+prompts the user interactively for each missing value:
+
+```
+cmdlet Write-PhaseHeader at command pipeline position 1
+Supply values for the following parameters:
+Name:
+_
+```
+
+In interactive shells this is just annoying. In CI pipelines, batch
+scripts, or unattended sessions, the script **hangs forever**
+waiting on stdin. The trap is that the call site looks fine at a
+glance — ``Write-PhaseHeader 'P12'`` is syntactically valid, and no
+static analyzer flagged it.
+
+This was the proximate cause of the r07.0 Step 17 defect in
+``Show-Pca2023ReadinessSnapshot`` (update-windows-server-iso
+pipeline). The function called:
+
+```powershell
+Write-PhaseHeader 'Pca2023 readiness (P12)'
+```
+
+with one positional argument; the target function had three
+``[Parameter(Mandatory)]`` parameters (``-Id``, ``-Name``,
+``-Group``). PowerShell prompted for ``-Name`` and the user had to
+Ctrl-C to recover. The fix in the original PS1 was to switch to
+``Write-SubSection 'PCA2023 readiness detail'`` — semantically the
+correct idiom (the function was being called *during* a phase, not
+as the start of one) — but the analyzer rule documented here
+catches the underlying mistake before it ships.
+
+**Suggested fix**: Use named arguments for every Mandatory
+parameter:
+
+```powershell
+Write-PhaseHeader -Id 'P12' -Name 'Verify' -Group 'Verify'
+```
+
+If the function is overloaded for positional callers as a
+convenience, prefer providing **all** positional arguments rather
+than relying on PowerShell's prompt behaviour to fill in the rest:
+
+```powershell
+Write-PhaseHeader 'P12' 'Verify' 'Verify'
+```
+
+**Limitations**:
+
+- Cross-file: PSA2012 is currently file-local. A call site that
+  invokes a function defined in another file is invisible to the
+  rule. (This is consistent with PSA2011's file-local design.)
+- Splatting: ``@params``-style splatting is not analyzed.
+- Dynamic parameter sets: ``[Parameter(ParameterSetName='X', Mandatory)]``
+  introduces conditional Mandatory semantics; the rule treats every
+  Mandatory annotation as global, which can over-fire on
+  multi-parameter-set functions. Use inline suppression in that case.
+
+**Inline suppression**: ``# psa-disable-line PSA2012 -- <reason>``
+on the call line.
+
+### 4.9g PSA2013 — `$Script:Foo` read but never assigned
+
+- **Severity**: Error
+- **Default**: enabled
+- **Added in**: v4.1.0
+
+**Detection**: Two-pass analysis on the cleaned text:
+
+1. **Assignment pass.** Collect every ``$Script:Name = ...``
+   occurrence in the file (where ``=`` is followed by something
+   other than ``=``). Stores names as a case-insensitive set.
+2. **Read pass.** Walk every line. For each ``$Script:Name``
+   reference (case-insensitive) where the following token is **not**
+   ``=`` (assignment LHS), report unless the name appears in the
+   assignment set, OR matches a top-level script parameter (auto-
+   populated by PowerShell), OR is in the well-known auto-vars
+   allowlist (``$Script:MyInvocation``, ``$Script:PSScriptRoot``,
+   ``$Script:PSCommandPath``, ``$Script:PSCmdlet``,
+   ``$Script:PSBoundParameters``, ``$Script:args``,
+   ``$Script:input``, ``$Script:LASTEXITCODE``, ``$Script:true``,
+   ``$Script:false``, ``$Script:null``, plus the script-identifier
+   convention vars covered by PSAP0002).
+
+To avoid flooding output on a global typo with many call sites, the
+rule emits at most 5 hits per distinct typo'd name.
+
+**Rationale**: PowerShell silently evaluates an unassigned
+``$Script:Foo`` to ``$null``. This often hides typo bugs in
+script-scope variable names because:
+
+- There is no "undefined variable" error at runtime — PowerShell
+  treats the read as a deliberate query for "any script-scope global
+  named ``Foo``", and ``$null`` is the documented answer when none
+  exists.
+- PSA2001 (the generic undefined-variable rule) only checks within
+  function scopes; it cannot see the cross-function flow of
+  ``$Script:`` globals.
+- The defect manifests downstream as bizarre null-related errors,
+  usually far from the typo. A common symptom is a defensive check
+  ``if (-not $extractedPath) { throw 'P05 did not run' }`` firing
+  even though P05 ran fine — because ``$extractedPath`` was assigned
+  from a typo'd ``$Script:`` read that silently returned ``$null``.
+
+This was the proximate cause of the r07.0 Step 15 defect in
+``Invoke-BuildPhase10_ConvertPca2023BootManager`` and
+``Invoke-VerifyPhase12_VerifyPca2023Readiness``
+(update-windows-server-iso pipeline). Two typo'd globals had
+hidden in plain sight across 8 call sites:
+
+- ``$Script:ExtractedMediaPath`` (correct: ``$Script:ExtractedDir``)
+- ``$Script:WorkRootFull`` (correct: ``$Script:WorkRoot``)
+
+A defensive ``check_undefined_globals.py`` one-off was authored
+to find the bugs. PSA2013 productionises that check as a built-in
+rule, so the same class of defect is caught at gate time on every
+file.
+
+**Suggested fix**: Either correct the typo to match the actual
+assignment, or add the missing initialisation. The error message
+includes the offending name to make grep-driven correction easy.
+
+**False-positive defenses**:
+
+- Script parameters: a top-level ``param([string]$OsVersion)``
+  auto-populates ``$Script:OsVersion``. The rule detects this from
+  the first ``param(...)`` block before any ``function`` keyword.
+- Well-known auto-vars: the allowlist above prevents flagging on
+  ``$Script:MyInvocation`` and friends. The list is conservative;
+  add to ``_PSA2013_KNOWN_AUTO_SCRIPT_VARS`` if you find a missing
+  PowerShell-built-in that fires here.
+- Cross-function assignments: an assignment in *any* function body
+  satisfies the rule for reads in *any other* function body. The
+  pass scans the entire file before any read is evaluated.
+- Defensively-read globals with ``IsNullOrEmpty`` guards (e.g.
+  ``if (-not [string]::IsNullOrEmpty($Script:ScriptPath)) { ... }``):
+  these are intentional null-tolerant reads; the allowlist includes
+  ``scriptpath`` and ``errorsjsonlpath`` for this reason. Extend the
+  allowlist as new defensive patterns emerge.
+
+**Limitations**:
+
+- Cross-file: PSA2013 is file-local. A ``$Script:Foo`` assigned in
+  ``init.ps1`` and read in ``other.ps1`` will fire if both are not
+  scanned together. (This is correct from a PowerShell semantics
+  perspective: each ``.ps1`` is a separate script scope when
+  invoked individually.)
+- Module exports: ``Import-Module`` does not propagate ``$Script:``
+  globals to importers, so the file-local model is sound here.
+
+**Inline suppression**: ``# psa-disable-line PSA2013 -- <reason>``
+on the read line.
+
+
+
+### 4.10 PSA3001 — `Start-Process -ArgumentList`
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `Start-Process … -ArgumentList`. The
+`-ArgumentList` parameter has known quoting issues with paths
+containing spaces; prefer `System.Diagnostics.ProcessStartInfo`.
+
+### 4.11 PSA3002 — Backtick continuation before empty line
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: A line ending in a single backtick (not `` `` ``)
+followed by a line that is empty or contains only whitespace.
+
+**Source text**: This rule examines the raw text (not the stripped
+form) because trailing whitespace after the backtick is significant.
+
+### 4.12 PSA3003 — `-match` against empty string
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `-match ''` or `-match ""`. Always true.
+
+### 4.13 PSA3004 — Empty catch block
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: `catch [Type]? { }` with no content between the braces.
+A 4-line look-ahead window allows `catch {\n}` to be detected.
+
+### 4.13b PSA3005 — `Start-Transcript -Path` should be `-LiteralPath`
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: 3.2.0
+
+**Rationale**: `Start-Transcript -Path` performs wildcard expansion on
+its argument. Paths containing PowerShell metacharacters such as `[`,
+`]`, or backtick will be misinterpreted, causing transcript creation
+to silently fail or write to the wrong file. `-LiteralPath` disables
+expansion and is the safer default for log-file capture.
+
+**Detection**: A `Start-Transcript` invocation that EITHER explicitly
+uses `-Path` OR uses positional binding (which binds to `-Path` by
+default) AND does NOT use `-LiteralPath` anywhere on the logical line
+(backtick-continued lines are joined before the check).
+
+**Examples**:
+
+```powershell
+# FAIL - -Path may expand wildcards
+Start-Transcript -Path "C:\Temp\Logs\foo[1].log"
+
+# FAIL - positional binding goes to -Path
+Start-Transcript $logPath
+
+# OK
+Start-Transcript -LiteralPath $logPath
+```
+
+**Suppression**: When intentionally testing both `-Path` and
+`-LiteralPath` forms (e.g., a fallback cascade), suppress per-line:
+
+```powershell
+Start-Transcript -Path $p -Force -ErrorAction Stop  # psa-disable-line PSA3005 -- deliberate cascade
+```
+
+### 4.13c PSA3006 — Deprecated WMI cmdlet
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: Any of the following cmdlet invocations:
+`Get-WmiObject`, `Invoke-WmiMethod`, `Register-WmiEvent`,
+`Remove-WmiObject`, `Set-WmiInstance`. The `gwmi` alias is also
+detected. Mirrors PSScriptAnalyzer's `PSAvoidUsingWMICmdlet`.
+
+**Rationale**: PowerShell 3.0 introduced the CIM cmdlets
+(`Get-CimInstance`, `Invoke-CimMethod`, etc.) as the cross-platform
+successor to WMI. PowerShell 6+ has removed the WMI cmdlets entirely.
+Code that uses WMI cmdlets cannot run on `pwsh.exe` / PSCore.
+
+**Suggested fix**: Replace each WMI cmdlet with its CIM equivalent:
+
+| WMI cmdlet            | CIM replacement                |
+|:----------------------|:-------------------------------|
+| `Get-WmiObject`       | `Get-CimInstance`              |
+| `Invoke-WmiMethod`    | `Invoke-CimMethod`             |
+| `Register-WmiEvent`   | `Register-CimIndicationEvent`  |
+| `Remove-WmiObject`    | `Remove-CimInstance`           |
+| `Set-WmiInstance`     | `Set-CimInstance`              |
+
+**Suppression**: Intentional WMI usage (e.g., a CIM-fallback path on
+Server Core where CIM is constrained) should be silenced with the
+inline suppression marker plus a rationale:
+
+```powershell
+$os = Get-WmiObject -Class Win32_OperatingSystem  # psa-disable-line PSA3006 -- intentional fallback when CIM is constrained
+```
+
+### 4.14 PSA4001 — Unfinished marker
+
+- **Severity**: Info
+- **Default**: enabled
+
+**Detection**: Within a `#` comment, the words `TODO`, `FIXME`, `XXX`,
+or `HACK` (case-sensitive, word-bounded).
+
+### 4.15 PSA4002 — Trailing whitespace
+
+- **Severity**: Info
+- **Default**: enabled
+
+**Detection**: A line whose final non-newline character is `\t` or `' '`.
+
+### 4.16 PSA4003 — Long line
+
+- **Severity**: Info
+- **Default**: **disabled**
+
+**Detection**: A line whose visible length exceeds `max_line_length`
+(default 120). Configure via `--max-line-length` or `max_line_length`
+in `.psa.config.json`.
+
+### 4.17 PSA4004 — Trailing semicolon
+
+- **Severity**: Info
+- **Default**: enabled
+
+**Detection**: A line whose stripped form ends in a single `;`
+(`;;` is not flagged — it is more often a deliberate marker).
+
+### 4.18 PSA5001 — Plain-text password parameter
+
+- **Severity**: Error
+- **Default**: enabled
+
+**Detection**: Pattern `[string]$NamePassword`,
+`[string]$NamePwd`, or `[string]$NameCredential` (case-insensitive,
+suffix/prefix-insensitive match). PowerShell offers `[SecureString]`
+and `[PSCredential]` for these.
+
+### 4.19 PSA5002 — `Invoke-Expression`
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `Invoke-Expression` or the alias `iex` as a
+command word. Equivalent to `eval()` in other languages.
+
+### 4.20 PSA5003 — Broken hash algorithm
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `MD5(CryptoServiceProvider|Managed)?`,
+`SHA1(CryptoServiceProvider|Managed)?`, or `-Algorithm "MD5"`/`"SHA1"`.
+
+### 4.21 PSA5004 — Hardcoded `ComputerName`
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `-ComputerName "literal"` (or single-quoted).
+The literals `localhost`, `.`, and `127.0.0.1` are whitelisted.
+
+### 4.22 PSA6001 — Non-approved verb
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: A `function VerbName-NounName` whose verb (lowercased)
+is not in the PowerShell approved-verb set (~100 verbs from
+`Get-Verb`, hard-coded into `APPROVED_VERBS`).
+
+### 4.23 PSA6002 — Cmdlet alias
+
+- **Severity**: Warning
+- **Default**: **disabled**
+
+**Detection**: Any of the standard cmdlet aliases (`ls`, `cd`, `dir`,
+`where`, etc.; ~150 aliases hard-coded) used in command position
+(line start, after `;`, `|`, `&`, or `(` ).
+
+**Exclusions**:
+
+- `foreach (`, `switch (`, `select (`, `sort (`, `set (` — these are
+  PowerShell keyword forms, not aliases
+- `name = …` — hashtable key or property assignment
+
+### 4.24 PSA6003 — Plural function noun
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: A function name `Verb-Noun` where `Noun` ends in `s`
+(lowercased) and is NOT in the legitimate-plurals whitelist:
+`process`, `address`, `progress`, `access`, `success`, `class`,
+`pass`, `business`, `analysis`, `basis`, `series`, `species`,
+`thesis`, `crisis`, `status`, `bus`. Names ending in `ss` are also
+exempted.
+
+### 4.25 PSA6004 — `$global:` variable definition
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `$global:Name = …`. Use `$script:` or pass as a
+parameter instead.
+
+### 4.26 PSA6005 — Mandatory parameter with default value
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern
+`[Parameter(…Mandatory…)] [Type] $Name = default`. A Mandatory
+parameter can never use its default; declaring one is misleading.
+
+### 4.27 PSA6006 — Switch parameter defaulting to `$true`
+
+- **Severity**: Warning
+- **Default**: enabled
+
+**Detection**: Pattern `[switch]$Name = $true`. A switch always
+defaults to `$false`; setting it to `$true` confuses callers.
+
+### 4.27a PSA6007 — Function returning a value should declare `[OutputType()]`
+
+- **Severity**: Info
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: A function fires this rule when ALL three conditions
+hold:
+
+1. The function has a `[CmdletBinding()]` attribute (i.e., it is an
+   advanced function — plain helpers without `[CmdletBinding()]` are
+   exempt to keep the false-positive rate low).
+2. The function body contains at least one `return <expr>` where
+   `<expr>` is non-empty.
+3. The function does NOT already declare `[OutputType(...)]` in any
+   shape.
+
+Mirrors PSScriptAnalyzer's `PSUseOutputTypeCorrectly`.
+
+**Rationale**: The `[OutputType()]` attribute documents the function's
+return contract to PowerShell tooling (IntelliSense,
+`Get-Command -Syntax`, `Get-Help -Full`) and to downstream type
+inference. PSScriptAnalyzer's `PSUseOutputTypeCorrectly` reports the
+same condition at Information level.
+
+**Suggested fix**: Add `[OutputType([<type>])]` immediately after the
+`[CmdletBinding()]` line:
+
+```powershell
+function Get-Foo {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    return [pscustomobject]@{ A = 1; B = 2 }
+}
+```
+
+For functions returning multiple types (e.g., `[string]` or
+`[pscustomobject]`), pass a list:
+`[OutputType([string], [pscustomobject])]`.
+
+### 4.27b PSA6008 — Function with attributes lacks an explicit `param()` block
+
+- **Severity**: Info
+- **Default**: enabled
+- **Added in**: v3.6.0
+
+**Detection**: A function fires this rule when it has at least one of
+the following attributes — `[CmdletBinding(...)]`,
+`[OutputType(...)]`, `[Alias(...)]`,
+`[Diagnostics.CodeAnalysis.SuppressMessageAttribute(...)]`,
+`[Diagnostics.*]` — BUT does NOT have an explicit `param()`
+declaration anywhere in its body.
+
+**Rationale**: PowerShell silently accepts a function without
+`param()`, but the attributes then have no target and downstream
+tooling (PSScriptAnalyzer, `Get-Help -Full`, IntelliSense) cannot
+discover them.
+
+**Suggested fix**: Add an explicit empty `param()` block (or one with
+the actual parameters) immediately after the attribute(s):
+
+```powershell
+function Show-Banner {
+    [CmdletBinding()]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWMICmdlet', '',
+        Justification = 'Intentional WMI fallback path for Server Core.')]
+    param()      # ← required for the attributes above to take effect
+
+    Write-Host '=== Banner ==='
+}
+```
+
+This rule has no direct PSScriptAnalyzer equivalent; it is a
+quality-of-life rule motivated by a v3.5.x review where a
+`Show-PowerShellEnvironment` helper had attributes attached but no
+`param()` block, and the attributes were silently inert.
+
+### 4.28 PSA7001 — Missing UTF-8 BOM
+
+- **Severity**: Warning
+- **Default**: Enabled
+- **Category**: PSA7xxx (file format / encoding)
+
+#### Rationale
+
+Windows PowerShell 5.1 reads `.ps1` files using the system Active Code
+Page (`chcp`) when no BOM is present. On a ja-JP host that defaults to
+Shift-JIS / cp932, a `.ps1` file authored as UTF-8 but committed without
+BOM gets mis-decoded — every non-ASCII byte sequence in log strings,
+parameter help text, or `Write-Host` calls becomes mojibake. PowerShell
+7.x defaults to UTF-8 without BOM and is unaffected, but until 5.1 is
+fully retired across the supported execution surface (Windows Server
+2019/2022/2025 ships with PS 5.1 by default), the BOM remains the
+robust portable encoding marker.
+
+#### Detection
+
+The rule fires when the first three bytes of the input file are NOT
+`0xEF 0xBB 0xBF`. The check is performed on raw bytes before UTF-8
+decoding because `pathlib.Path.read_text()` silently strips the BOM
+from the returned string, making in-string inspection impossible.
+
+#### Reported location
+
+Whole-file issue: `line: 0, col: 0` per §2.3.
+
+#### Suppression
+
+Inline suppression via `# psa-disable-file PSA7001` at the top of the
+file. Note that since the rule fires only when BOM is absent, and an
+absent BOM means the file might be Shift-JIS interpreted by PS 5.1,
+the suppression comment itself relies on PS / Python being able to
+parse the line — which they can, since the comment is ASCII-only.
+Configuration-file suppression (`"disable": ["PSA7001"]` in
+`.psa.config.json`) is also supported.
+
+#### Remediation
+
+Re-save the file with UTF-8 BOM. Examples:
+
+- **PowerShell 5.1**:
+  ```powershell
+  $content = Get-Content -Raw -Path .\script.ps1
+  $utf8Bom = New-Object System.Text.UTF8Encoding $true
+  [System.IO.File]::WriteAllText('.\script.ps1', $content, $utf8Bom)
+  ```
+- **PowerShell 7.x**: `Set-Content -Encoding utf8BOM`
+- **VS Code**: status bar → "UTF-8" → "Save with Encoding" → "UTF-8 with BOM"
+
+#### Limitations
+
+- Only the first 3 bytes are inspected. Multi-byte BOM variants
+  (UTF-16 LE/BE, UTF-32) are out of scope; a future PSA7003 rule
+  may cover them.
+- BOM presence alone is checked; full-file UTF-8 validity is a
+  separate concern (potential future PSA7004).
+- Environments targeting PowerShell 7.x exclusively may suppress this
+  rule via configuration.
+
+---
+
+### 4.28a PSA7002 — LF-only or mixed line endings
+
+- **Severity**: Warning
+- **Default**: Enabled
+- **Category**: PSA7xxx (file format / encoding)
+- **Introduced**: v3.7.0
+
+#### Rationale
+
+The canonical form for `.ps1` files in mixed-tooling environments
+(Windows PowerShell 5.1 + PowerShell 7.x + signtool + pnputil + MSI
+authoring tools) is **CRLF**. PowerShell's own AST parser tolerates
+LF-only and mixed line endings silently, but several downstream
+consumers do not: some signtool builds inspecting embedded catalog
+scripts, certain MSI authoring tools, and Windows ISE on older builds
+require strict CRLF. The Git-checkout form on Windows (under the
+common `.gitattributes` rule `*.ps1 text working-tree-encoding=UTF-8
+eol=crlf`) is always BOM + CRLF, so any LF-only line in the working
+tree will produce a confusing "modified file" diff at the next
+`git add` even when no content changed.
+
+The rule's primary value is detecting the **mixed** case (some lines
+CRLF, others LF-only), which is the most insidious defect in this
+category: it is invisible to PowerShell's AST parser, to visual diff
+tools, and to grep-based "line contains CR" counts. It typically
+arises when a programmatic content-generation step inserts an
+LF-only block (Python triple-quoted strings, Node template literals,
+shell heredocs, AI-agent file-write actions) into an otherwise
+CRLF-correct file. The all-LF case is also caught, because a
+`.ps1` checked in as all-LF would otherwise produce a single bulk
+normalisation diff at any consumer's first `git add`.
+
+The motivating real-world occurrence of the mixed case is documented
+in the `Deploy-Drivers-For-WindowsServer` repository's `SPEC.md §D.23`
+("Mixed line endings in programmatically emitted `.ps1` content").
+
+#### Detection
+
+The rule operates on the raw byte buffer of the file (after the
+3-byte UTF-8 BOM is stripped, if present). The detection logic is:
+
+1. Count total CR bytes (`\r`) and total LF bytes (`\n`) in the body.
+2. Split the body on LF and inspect each chunk except the last. For
+   each chunk that does NOT end in CR, the line was terminated by
+   LF only — record its 1-based line number.
+3. If at least one LF-only line was found, the rule fires.
+
+The message text distinguishes two variants for actionability:
+
+- **All-LF variant** (CR byte count is zero): `"PowerShell script
+  has LF-only line endings (N line(s)); canonical form is CRLF
+  (re-save with CRLF, or let .gitattributes normalise)"`. The
+  remediation is a single bulk conversion of the file.
+- **Mixed variant** (some CR present, some lines LF-only): `"PowerShell
+  script has mixed line endings: N of its lines are LF-only while M
+  are CRLF (LF-only lines: ...). This is typically caused by
+  programmatic insertion of LF-only content ... into a CRLF file.
+  Normalise the whole file to CRLF before committing."`. Up to five
+  specific line numbers are included in the message to give the
+  reviewer a starting point for inspecting the inserted block.
+
+Like PSA7001, this check is implemented in `main()`'s raw-bytes pass
+and propagated through `file_meta['line_ending_stats']`. The
+`analyze_text()` rule function `check_line_endings(file_meta)` reads
+the stats dict and emits the issue if `lf_only_count > 0`. Callers
+that pass an empty `file_meta` (or `None`) get silent no-op,
+preserving back-compat for direct `analyze_text()` consumers.
+
+#### Reported location
+
+Whole-file issue: `line: 0, col: 0` per §2.3. The specific LF-only
+line numbers are surfaced in the message text rather than the
+`line` field because PSA7002 is conceptually a whole-file
+classification (the file is or is not LF-canonical) rather than a
+defect attributable to a single line. SARIF and JSON consumers can
+parse the line list from the message if needed; a future revision
+may add a structured `lf_only_lines` field to the JSON output.
+
+#### Suppression
+
+Inline suppression via `# psa-disable-file PSA7002` at the top of
+the file. Configuration-file suppression (`"disable": ["PSA7002"]`
+in `.psa.config.json`) is also supported.
+
+**Note on cross-rule interaction with PSA7001**: BOM-stripping
+happens before line-ending stats are computed, so a file with a
+UTF-8 BOM and LF-only line endings will fire BOTH `PSA7001`-not-
+applicable (BOM is present, no warning) and `PSA7002` (LF-only).
+Conversely, a file without BOM but with all-CRLF endings will fire
+`PSA7001` and not `PSA7002`. The two rules are orthogonal.
+
+#### Remediation
+
+- **PowerShell 5.1 / 7.x**:
+  ```powershell
+  $content = (Get-Content -Raw -Path .\script.ps1) -replace "(?<!\r)\n", "`r`n"
+  $utf8Bom = New-Object System.Text.UTF8Encoding $true
+  [System.IO.File]::WriteAllText('.\script.ps1', $content, $utf8Bom)
+  ```
+  The negative-lookbehind regex `(?<!\r)\n` replaces only LF bytes
+  that are NOT already preceded by CR, leaving existing CRLF
+  sequences intact. This is the safe form for the mixed case.
+
+- **VS Code**: status bar → "LF" or "Mixed" → "CRLF" → save. Note
+  that VS Code's UI sometimes reports "CRLF" even when one or two
+  LF-only lines exist; the byte-level check via psa.py is
+  authoritative.
+
+- **Bash / WSL**:
+  ```bash
+  # Normalise file in place; preserves BOM.
+  python3 -c "
+  import sys
+  data = open(sys.argv[1], 'rb').read()
+  bom = b''
+  if data.startswith(b'\xef\xbb\xbf'):
+      bom, data = data[:3], data[3:]
+  data = data.replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+  open(sys.argv[1], 'wb').write(bom + data)
+  " script.ps1
+  ```
+
+- **Git-side safety net**: If the destination repository has a
+  `.gitattributes` rule `*.ps1 text eol=crlf`, the next `git add`
+  will normalise the working tree automatically. This is a
+  safety net, NOT a substitute for emitting correct bytes; see
+  the documentation in the consumer repository for why
+  (specifically: ZIP archives bypass this normalisation, and
+  consumer tooling that reads pre-`git add` working-tree bytes
+  will see the defect).
+
+#### Limitations
+
+- The rule operates on raw bytes and is exact. There is no
+  false-positive risk.
+- The "all-LF" remediation hint (`re-save with CRLF, or let
+  .gitattributes normalise`) is informational and not enforced by
+  the rule itself; psa.py does not inspect or modify the file.
+- Up to five LF-only line numbers are listed in the message; for
+  files with hundreds of defective lines, callers needing the full
+  list should use the JSON output format and inspect future
+  structured fields (not yet emitted as of v3.8.0).
+
+---
+
+### 4.28b PSA7003 — Non-ASCII character in script body
+
+- **Severity**: Warning
+- **Default**: Enabled
+- **Category**: PSA7xxx (file format / encoding)
+- **Introduced**: v4.2.0
+
+#### Rationale
+
+A repository convention — enforced by the CI source-format gate —
+requires `.ps1` bodies to be **ASCII-only** outside the 3-byte UTF-8 BOM.
+Non-ASCII characters in PowerShell sources cause two distinct problems:
+
+1. **Encoding misread.** Windows PowerShell 5.1 may decode a script under
+   a Shift-JIS / cp932 fallback when the BOM is absent or stripped,
+   turning stray non-ASCII bytes into mojibake in log output and string
+   literals (this is the same failure mode PSA7001 guards against).
+2. **CI gate failure.** A separate ASCII-only check in the build pipeline
+   rejects any byte greater than `0x7F` in a `.ps1` body, failing the
+   commit before the static-analysis or test stages even run.
+
+The dominant source of this defect today is **AI/LLM-assisted editing**
+and Markdown-to-code copy/paste, which silently substitute typographic
+characters for their ASCII counterparts: em / en dashes for `-`, the
+section sign `U+00A7` for the word `section`, curly quotes
+(`U+2018`/`U+2019`/`U+201C`/`U+201D`) for straight quotes, the horizontal
+ellipsis `U+2026` for `...`, and the no-break space `U+00A0` for a normal
+space. These glyphs are visually near-identical to their ASCII forms, so
+they survive human review and are caught only by a byte-level check such
+as this rule.
+
+#### Detection
+
+The rule operates on the decoded, BOM-stripped script body. Each
+character whose code point exceeds `0x7F` is reported with its 1-based
+line and column, its `U+XXXX` code point, and — for the most common
+offenders — a human-readable name (em dash, section sign, smart
+quote, ellipsis, no-break space, etc.). `CR` and `LF` are ASCII and are
+never flagged; `CR` does not advance the reported column so positions
+line up with the on-screen text.
+
+Because every ASCII character occupies a single UTF-8 byte in the range
+`0x00`—`0x7F`, flagging characters whose code point exceeds `0x7F`
+is byte-equivalent to the CI gate's "any byte > 0x7F" test, while
+allowing the diagnostic to name the exact character and location.
+
+#### Example
+
+```powershell
+# Flagged (U+2014 em dash, U+00A7 section sign, U+201C/D smart quotes):
+# See SPEC —B.1; the value — when present — is “canonical”.
+
+# Clean (ASCII only):
+# See SPEC section B.1; the value - when present - is "canonical".
+```
+
+#### Suppression / Configuration
+
+Disable per-line with a trailing `# psa-disable PSA7003`, per-file with a
+top-of-file `# psa-disable-file PSA7003`, or globally by setting
+`"PSA7003": false` in the rule map of `.psa.config.json`. Suppression is
+discouraged for shipped scripts: the CI ASCII-only gate is not
+configurable, so a suppressed PSA7003 finding will still fail the build.
+
+### 4.29 PSA8001 — Function body hash drift across files
+
+- **Severity**: Warning
+- **Default**: enabled
+- **Added in**: 3.2.0
+- **Scope**: cross-file (requires 2+ files in the same invocation)
+
+**Rationale**: Repositories that ship a family of related scripts (the
+canonical example being the Deploy-Drivers-For-WindowsServer pipeline:
+four `Deploy-*` scripts sharing a 21-phase architecture) often have
+many helper functions — `Format-Elapsed`, `Write-Detail`, the entire
+`Start-DebugTrace` family — that are intended to remain byte-for-byte
+identical across the family. Without active enforcement, these
+gradually drift apart as fixes land in one script but not the others.
+PSA8001 catches the drift at lint time.
+
+**Detection**: For each function name that appears in two or more of
+the files in the same scan, compute a hash of the function body
+(comments and strings already stripped to whitespace by the standard
+preprocessing; remaining whitespace runs collapsed to single spaces).
+When the same function name produces two or more distinct hashes,
+emit one PSA8001 entry per occurrence, pointing to the function
+header line. The message identifies the file's own hash and lists
+all observed variants with their occurrence counts.
+
+**Single-file invocations emit nothing** — there are no peers to
+compare. PSA8001 only fires from the multi-file analyze() driver
+that runs AFTER the per-file pass completes.
+
+**Tuning**: `psa8001_ignore_functions` (list, default `[]`) suppresses
+the rule for function names that are intentionally per-file. Each
+entry is either:
+
+- an exact case-insensitive function name match, or
+- a regex pattern prefixed with `regex:`, e.g.
+  `"regex:^Invoke-(Prep|Verify|Inst)Phase\\d{2}_"`
+
+**Suppression**: Inline `# psa-disable-line PSA8001` at the function
+declaration line works for individual exceptions. For a stable set of
+"this function is intentionally per-script" exceptions, prefer the
+`psa8001_ignore_functions` config option to keep the script body
+clean.
+
+### 4.30 PSA9001 — Function body exceeds `max_function_lines`
+
+- **Severity**: Info
+- **Default**: **disabled**
+- **Added in**: 3.2.0
+
+**Rationale**: Functions longer than ~200 lines are difficult to
+review or test as a unit. This rule is opt-in because the
+appropriate threshold is project-dependent.
+
+**Detection**: A function whose physical body (header through matching
+closing brace, inclusive) exceeds `max_function_lines` (default 200).
+
+**Tuning**: `max_function_lines` (int, default 200) sets the
+threshold. Configure via `--max-line-length`-style CLI is NOT
+supported for this option; use `.psa.config.json`:
+
+```jsonc
+{
+  "enable": ["PSA9001"],
+  "max_function_lines": 300
+}
+```
+
+### 4.31 PSA9002 — External-process invocation without `$LASTEXITCODE` check
+
+- **Severity**: Warning
+- **Default**: **disabled**
+- **Added in**: 3.2.0
+
+**Rationale**: PowerShell's `&` call operator and native-command
+invocations do NOT throw on non-zero exit. Scripts that drop the exit
+code silently can mask real failures from external tools.
+
+**Detection**: A line matching either:
+
+- `& <executable>` (the call operator), or
+- A bare invocation of one of the recognised native commands
+  (`msiexec`, `signtool`, `inf2cat`, `pnputil`, `bcdedit`, `sc.exe`,
+  `regsvr32`, `wevtutil`, `dism`, `gpupdate`, `certutil`, `reg.exe`,
+  `cmd.exe`, `cmd`, `powershell`)
+
+WITHIN 5 lines after which there is no `$LASTEXITCODE`, `$?`,
+`.ExitCode`, or `-PassThru` reference. `Start-Process` lines are
+excluded because `Start-Process -ErrorAction Stop` does throw.
+
+**Note**: This rule is heuristic; the 5-line window is a deliberate
+trade-off between recall and false-positive rate. For scripts with
+many `try { & exe; if ($LASTEXITCODE -ne 0) { throw } } catch { ... }`
+patterns, the rule is well-behaved. For scripts that capture exit
+codes far from the invocation (e.g., into a hashtable for batch
+reporting), inline suppression at the invocation site is the
+recommended response.
+
+### 4.32 PSAPxxxx — Project / pipeline convention rules
+
+The PSAPxxxx family is a new rule space introduced in 3.2.0 for
+**opinionated, project-specific conventions**. Every PSAPxxxx rule:
+
+- Is disabled by default
+- Must be enabled per repository via `.psa.config.json` `enable`
+- Has a clearly documented "what convention does this enforce"
+  rationale tied to a specific style of repository
+
+Currently shipped PSAPxxxx rules are listed below.
+
+### 4.33 PSAP0001 — Phase function naming convention
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 3.2.0
+- **Convention origin**: Deploy-Drivers-For-WindowsServer 21-phase
+  pipeline (Chipset / Graphics / NPU / MSBthPan family)
+
+**Convention**: Functions that implement a pipeline phase MUST follow
+the canonical pattern:
+
+```
+Invoke-(Prep|Verify|Inst)Phase<NN>_<DescriptiveName>
+```
+
+Examples:
+
+- `Invoke-PrepPhase00_Initialize` — OK
+- `Invoke-VerifyPhase06_HardwareImpactAnalysis` — OK
+- `Invoke-InstPhase04_PostInstallVerification` — OK
+- `Invoke-Phase00` — FAIL (missing Prep/Verify/Inst)
+- `Invoke-PrepPhase0_Initialize` — FAIL (NN must be 2 digits)
+- `Invoke-VerifyHardware` — FAIL (no PhaseNN_)
+
+**Detection**: The rule is permissive: it ONLY fires on functions
+whose names start with `Invoke-(Prep|Verify|Inst|Phase|Pipeline)` but
+do not match the canonical regex. Other function names are left
+alone (so general-purpose `Invoke-RestMethod` wrappers etc. are not
+mistakenly flagged).
+
+### 4.34 PSAP0002 — Required script-identifier variables
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 3.2.0
+- **Convention origin**: Deploy-Drivers-For-WindowsServer phase-banner
+  and DebugTrace JSONL output (script identity required for log
+  correlation across runs)
+
+**Convention**: Every pipeline script MUST assign the following three
+identifier variables at script-load time:
+
+- `$Script:ScriptVersion` — e.g., `'chipset-2026.05.18-r60'`
+- `$Script:ScriptHash` — e.g., the first 12 hex chars of the git SHA
+- `$Script:ScriptShortTag` — composed of the above two
+
+The variables are consumed by phase-banner output, DebugTrace JSONL
+file headers, and log-correlation tooling.
+
+**Detection**: The rule scans for `$Script:NAME =` or
+`${Script:NAME} =` assignments. For each missing required identifier,
+emits one PSAP0002 entry at line 1 of the file.
+
+### 4.35 PSAP0003 — Inline revision-tag comments
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 3.3.0
+- **Convention origin**: Deploy-Drivers-For-WindowsServer
+  revision-discipline policy (SPEC.md §A.13 "Where revision history
+  lives") — revision history belongs in `CHANGELOG.md`, not in the
+  script body.
+
+**Convention**: Inline comments must NOT carry per-revision history
+tags such as `# r42:`, `# r56+:`, or `# r9-update:`. Such tags
+accumulate over time as untraceable "where did this come from"
+markers; readers cannot meaningfully resolve them without consulting
+Git history anyway. The single source of truth for chronological
+history is `CHANGELOG.md` at the repository root.
+
+**Detected patterns** (case-sensitive):
+
+- `# r42:` — bare inline revision tag
+- `# r42+:` — inclusive-onwards tag
+- `# r42-update3:` — composite revision-with-sub-tag form
+- `# ---- r42: ---- some text` — dash-decorated section header
+- `# (r42) some text` — parenthesised inline tag
+
+**Detection**: A line-level scan over comments. Tags inside string
+literals are not matched. The rule treats `$Script:ScriptVersion =
+'chipset-2026.05.18-r60'` and similar **non-comment** uses of `rNN`
+as legitimate (these are tested via PSAP0002).
+
+**Detection scope (clarified in 4.0.0)**:
+
+- Inline comment bodies only.
+- References inside string literals are NOT matched.
+- Block comments `<# ... #>` are NOT scanned. The block-comment
+  scanner is intentionally separate; PSAP0003 / PSAP0004 / PSAP0005
+  all share the inline-comment scanner. Repository policy documents
+  should be explicit about block-comment expectations as a residual
+  human-review responsibility.
+- One report per matching line maximum.
+
+**Relationship with PSAP0005 (4.0.0+)**: PSAP0005 is the broader
+revision-reference rule; PSAP0003 catches a strict subset of the
+same problem (only the five structured tag forms above). When both
+rules are enabled, PSAP0003 owns the line and PSAP0005 does not
+double-fire on the same line.
+
+**Remediation**: When porting a legacy script, move revision-tagged
+prose into `CHANGELOG.md` under the appropriate version section. If
+the design rationale is what mattered (not the revision), move it to
+`SPEC.md` Part D as a "Known Pitfalls and Lessons Learned" entry.
+
+### 4.36 PSAP0004 — End-of-file REVISION HISTORY blocks
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 3.3.0
+- **Convention origin**: same as PSAP0003 (see above).
+
+**Convention**: Script bodies must NOT contain end-of-file
+`REVISION HISTORY` or `CHANGELOG` comment blocks. Such blocks
+duplicate `CHANGELOG.md` and drift out of sync over time.
+
+**Detected patterns** (case-sensitive):
+
+- A comment line matching `^\s*#\s*(REVISION HISTORY|CHANGELOG|VERSION HISTORY)\s*:?\s*$`
+- The same pattern surrounded by `# ===` / `# ---` decoration lines
+
+**Detection**: A line-level scan. The rule fires once per matching
+header line; it does NOT attempt to detect the end of the block (an
+operator just needs the lead pointer to know there is something to
+remove).
+
+**Remediation**: Move the content of the block into `CHANGELOG.md`
+under the appropriate version sections. Verify nothing references the
+in-script block (search for "REVISION HISTORY" in other docs); update
+those references to point to `CHANGELOG.md`.
+
+### 4.37 PSAP0005 — Revision reference in comment body
+
+- **Severity**: Warning
+- **Default**: **disabled** (opt-in)
+- **Added in**: 4.0.0
+- **Extended in**: 4.0.2 (additional relaxed-mode exempt patterns
+  E1-E9 + comment-block-level exempt)
+- **Convention origin**: Deploy-Drivers-For-WindowsServer SPEC.md
+  §A.13 "Where revision history lives" — script bodies should
+  describe current behaviour with timeless wording; revision-anchored
+  prose belongs in `CHANGELOG.md` (chronological log) or `SPEC.md`
+  Part D (architectural rationale).
+
+**Convention**: Inline comments must NOT contain any reference to a
+revision identifier of the form `rNN`, regardless of whether the
+reference is a structured tag (caught by PSAP0003) or descriptive
+prose ("Added in the r71 release", "As of r74, ...", "Before r74,
+...", "Earlier revisions (before r74)"). PSAP0005 is the broader
+LLM-assisted-maintenance guardrail; PSAP0003 catches a strict subset
+of the same problem.
+
+**Relationship with PSAP0003**: PSAP0005 and PSAP0003 cover
+overlapping ground intentionally. When both rules are enabled, a
+line already reported by PSAP0003 is **not** double-counted by
+PSAP0005; PSAP0003 owns the line. This makes it safe to enable both
+rules simultaneously, and is what the canonical Deploy-Drivers
+`.psa.config.json` does.
+
+**Detection scope**:
+
+- Scans comment bodies only. References inside string literals (e.g.,
+  `$Script:ScriptVersion = 'chipset-2026.05.25-r75'`) are NOT
+  matched, the same as PSAP0003.
+- Out of scope: block comments `<# ... #>`. PSAP0005, like
+  PSAP0003 / PSAP0004, uses the inline-comment scanner; block-comment
+  detection would require a different scanner. Repository policy
+  documents (e.g., consumer SPEC §A.13) should be explicit about
+  block-comment expectations as a residual human-review
+  responsibility.
+- Token boundary: `rNN` must be word-bounded with `[A-Za-z0-9_-]` on
+  both sides. This means compound identifiers with embedded `rNN`
+  segments (e.g., `radeon-r9000-series`) do not fire the rule.
+- One report per line maximum (the first `rNN` token wins).
+
+**Operating modes**: PSAP0005 has two modes controlled by the
+configuration flag `psap0005_relaxed_mode` (boolean):
+
+- **Strict mode** (`psap0005_relaxed_mode: false`, default): Any
+  `rNN` reference inside a comment body fires PSAP0005 (subject to
+  the scope rules above and PSAP0003 de-duplication).
+
+- **Relaxed mode** (`psap0005_relaxed_mode: true`): Established
+  prose exemption patterns are applied. A comment matching any of
+  them does not fire.
+
+  **Original four exemption patterns (introduced in 4.0.0)**:
+
+  | Exemption                          | Example                                                            |
+  | ---------------------------------- | ------------------------------------------------------------------ |
+  | A. SECTION header                  | `# SECTION r71: WHQL co-sign pre-detection`                        |
+  | B. SPEC cross-reference            | `# Phantom file reference (r65, SPEC D.24): inspect`               |
+  | C. Added-in-release phrasing       | `# Build the WHQL co-sign analysis (added with the r71 release)`   |
+  | D. Earlier-revisions prose         | `# Earlier revisions called Find-Signtool, ... before r74.`         |
+
+  **Extended exemption patterns (introduced in 4.0.2)** — added to
+  cover established prose patterns observed in real-world consumer
+  scripts that the original A/B/C/D patterns did not catch:
+
+  | Exemption                                       | Example                                                                  |
+  | ----------------------------------------------- | ------------------------------------------------------------------------ |
+  | E1. Semi-section header                          | `# r71 Pre-check: Path B prerequisite check`                             |
+  | E2. SPEC cross-reference, slash/dash separator  | `# Orphan catalog cleanup (r66 / SPEC D.24):` / `(r75 - SPEC D.33):`     |
+  | E3. SPEC cross-reference, reversed parens       | `# r68 (SPEC §D.26): LOADED honesty gate`                                |
+  | E4. SPEC ref + rNN co-occurrence                | `# See SPEC SS D.31 for the full r71 design contract`                    |
+  | E5. Added-in-release variant phrasings          | `# r71 adds two operator-protection mechanisms` / `# the /all addition in r74` / `# documents the r72 follow-on` / `# Until r39, Graphics shipped` |
+  | E6. Earlier-revisions prose variants             | `# very old workspace prior to r65` / `# the inventory predates r65` / `# recovered from an r65 run` |
+  | E7. Q-Reference patterns                         | `# r69 (QI-6): bypass CRITICAL` / `# (Q-X1, r17).` / `# QI-9 (r69, 2026-05-23):` |
+  | E8. Cross-port marker                            | `# r40 (graphics): build the OEM-name lookup set` / `# r22 (bthpan): ...`    |
+  | E9. Follow-up sentence (this declaration)       | `# r73: this declaration was missing in r71/r72`                         |
+
+  **Comment-block-level exempt (introduced in 4.0.2)**: In addition
+  to line-level pattern matching, the entire contiguous comment block
+  (consecutive lines whose first non-whitespace character is `#`) is
+  checked for an exempt-trigger pattern. If any line of the block
+  matches an exempt pattern, the whole block is exempt. This handles
+  multi-line narrative blocks where the exempt trigger
+  (e.g., `(added with the r71 release)`) appears on the opening line
+  but subsequent lines reference `rNN` without repeating the trigger
+  phrase.
+
+  Exemption-C verb set: `added`, `introduced`, `landed`, `ported`,
+  followed by `in` or `with`, optionally followed by `the`, optionally
+  followed by a script-identifier word (e.g., `chipset`), followed by
+  `rNN`.
+
+  Notably **NOT** exempt under relaxed mode (these still fire):
+
+  - `# As of r74, ...` (a forward-looking anchor, not a backward
+    descriptive one)
+  - `# r42:` and `# (r42)` (PSAP0003 owns the line; if PSAP0003 is
+    not enabled, PSAP0005 fires)
+  - `# NOTE (r74): ...` (parenthesised tag form; PSAP0003 owns it
+    when enabled, otherwise PSAP0005 fires)
+
+  Relaxed mode is intended as a **migration aid** for repositories
+  with significant pre-existing rNN-anchored prose under SPEC §D.31-
+  style conventions. The recommended steady-state is
+  `psap0005_relaxed_mode: false` (strict), with the migration plan
+  documented in the consumer SPEC.
+
+**Remediation**: Replace revision-anchored prose with timeless
+wording:
+
+- "Previously / Now / no-anchor wording" per consumer SPEC §A.13.
+- "Earlier revisions did X; the current implementation does Y." (no
+  `rNN`).
+- For architectural rationale that mattered for a specific release,
+  cite `SPEC.md` Part D by section number, e.g. `# See SPEC §D.32
+  for the post-incident analysis.` (no `rNN` in the comment).
+- For chronological discovery, point readers at `CHANGELOG.md`
+  rather than embedding the version into the comment.
+
+---
+
+## 5. Configuration file
+
+### 5.1 Location and discovery
+
+`psa.py` resolves the active configuration file from these sources, in
+order:
+
+1. The value given to `--config` (a local path OR an http(s) URL — see
+   §5.4). If the source cannot be read or parsed, `psa.py` prints an
+   error to stderr and exits with code `2`.
+2. `.psa.config.json` in the current working directory (implicit
+   discovery). Only attempted when `--config` is absent.
+
+If neither is available, built-in defaults apply.
+
+### 5.2 File format
+
+The configuration file is **JSONC**: regular JSON with two extensions:
+
+- `// line comments` — until end of line
+- `/* block comments */` — may span multiple lines
+
+Comment-like sequences inside string literals are preserved unchanged.
+Newlines inside block comments are preserved so that line numbers in
+JSON-parse error messages remain meaningful.
+
+A template file named `.psa.config.json.template` ships alongside
+`psa.py` in this directory. It documents every field with its
+built-in default and is suitable for `cp .psa.config.json.template
+.psa.config.json`.
+
+The file MUST be UTF-8 encoded and MUST parse to a JSON **object**
+(not an array or scalar). All top-level fields are optional; `{}` is
+a valid configuration.
+
+### 5.3 Schema
+
+```jsonc
+{
+  // Rule codes to force-enable (overrides default-disabled state)
+  "enable": ["PSA6002"],
+
+  // Rule codes to force-disable
+  "disable": ["PSA4001"],
+
+  // Minimum severity to report. One of: "error", "warning", "info"
+  "severity": "warning",
+
+  // Line-length threshold used by PSA4003
+  "max_line_length": 120,
+
+  // PSA8001 function-sync ignore list (exact names or "regex:..." patterns)
+  "psa8001_ignore_functions": [],
+
+  // PSA2010 extra known-cmdlets allow-list
+  "psa2010_known_cmdlets": [],
+
+  // PSAP0005 relaxed mode (4.0.0+). When true, apply the four
+  // exemption patterns described in §4.37. Default false (strict).
+  "psap0005_relaxed_mode": false
+}
+```
+
+| Field | Type | Default | Notes |
+|:---|:---|:---|:---|
+| `enable` | array of strings | `[]` | Each string is a rule code (`PSAxxxx`). Unknown codes are silently ignored. |
+| `disable` | array of strings | `[]` | Same format as `enable`. |
+| `severity` | string | `"info"` | Floor for the displayed severity. |
+| `max_line_length` | integer | `120` | Must be positive. |
+| `max_function_lines` | integer | `200` | Must be positive. PSA9001 threshold. |
+| `psa8001_ignore_functions` | array of strings | `[]` | Function names (exact, or `regex:...`). |
+| `psa2010_known_cmdlets` | array of strings | `[]` | Additional cmdlets / functions to whitelist for PSA2010. |
+| `psap0005_relaxed_mode` | boolean | `false` | If `true`, apply the four PSAP0005 exemption patterns (§4.37). |
+
+### 5.4 Remote configuration (HTTP / HTTPS)
+
+`--config` accepts an http(s) URL in addition to a filesystem path:
+
+```bash
+psa.py --config https://raw.githubusercontent.com/<owner>/<repo>/<branch>/.psa.config.json <script>.ps1
+```
+
+For GitHub, use the **raw** URL form (`raw.githubusercontent.com/...`).
+The regular blob URL (`github.com/.../blob/...`) returns HTML and will
+fail JSON parsing.
+
+#### 5.4.1 TLS configuration
+
+`psa.py` builds the SSL context explicitly:
+
+| Setting | Value | Rationale |
+|:---|:---|:---|
+| `minimum_version` | `TLSv1_2` | Industry baseline since 2020. TLS 1.0/1.1 are deprecated (RFC 8996, 2021) and not offered. GitHub and major CDNs require at least TLS 1.2. |
+| `maximum_version` | (default) | Left unset so the handshake auto-negotiates the strongest mutually-supported version, typically TLS 1.3 against modern servers, falling back to TLS 1.2 against older ones. |
+| `verify_mode` | `CERT_REQUIRED` | OS trust store is loaded via `ssl.create_default_context()`. Certificate verification is ALWAYS on and cannot be disabled. |
+| `check_hostname` | `True` | Hostname mismatch causes the handshake to fail. |
+
+The "automatic downshift to whatever the server supports" behaviour is
+therefore intrinsic to the TLS handshake itself — `psa.py` does not
+need a custom downgrade-retry loop.
+
+#### 5.4.2 Request headers
+
+To be reachable through CDNs and WAFs (notably Cloudflare-fronted
+sites) that default-reject obvious bot User-Agents even on public raw
+files, `psa.py` presents itself as a recent Chrome build:
+
+```
+User-Agent       : Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36
+Accept           : application/json, text/plain, text/*, */*
+Accept-Language  : en-US,en;q=0.9
+Accept-Encoding  : identity
+Sec-Ch-Ua        : "Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"
+Sec-Ch-Ua-Mobile : ?0
+Sec-Ch-Ua-Platform : "Windows"
+```
+
+The Sec-Ch-Ua client hints intentionally agree with the User-Agent
+string. The Chrome version is bumped together with the UA when the
+template is updated.
+
+#### 5.4.3 Retry policy
+
+`psa.py` retries the fetch on transient failures, with exponential
+backoff. Pattern adapted from `Invoke-WebRequestWithRetry` in the
+companion `Download-SpeakerDeck.ps1` project.
+
+| Outcome | Action | Backoff before next attempt |
+|:---|:---|:---|
+| Success (`2xx`) | return body | — |
+| Server error (`5xx`) | retry | `2^attempt × 3` seconds (6 s, 12 s, 24 s, …) |
+| Network / timeout / connection error | retry | `2^attempt` seconds (2 s, 4 s, 8 s, …) |
+| Client error (`4xx`: 404, 403, 401, …) | abort immediately | — (persistent failure; retrying wastes time) |
+
+Total attempts including the first one is `PSA_CONFIG_MAX_RETRIES`
+(default 3). On exhaustion, the most recent exception is propagated to
+`Config.load()` and surfaced as a user-facing error.
+
+Each retry emits a single-line message to stderr, e.g.::
+
+```
+psa.py: HTTP 503 from https://example.com/.psa.config.json; retry 1/2 in 6s
+psa.py: HTTP 503 from https://example.com/.psa.config.json; retry 2/2 in 12s
+```
+
+Set `PSA_CONFIG_QUIET=1` to suppress these.
+
+#### 5.4.4 Environment-variable tuning
+
+| Variable | Default | Effect |
+|:---|---:|:---|
+| `PSA_CONFIG_TIMEOUT` | `30` | Per-attempt connect+read timeout in seconds. |
+| `PSA_CONFIG_MAX_RETRIES` | `3` | Total attempts including the first. `1` disables retries. |
+| `PSA_CONFIG_QUIET` | (unset) | When set (any non-empty value), suppresses retry-progress messages on stderr. |
+
+Invalid values (non-numeric, non-positive) silently revert to the
+default to avoid breaking CI on a typo.
+
+#### 5.4.5 Caching
+
+Remote configurations are fetched **once per invocation** and are not
+cached on disk. Repeated `psa.py` invocations will hit the upstream
+URL each time. In high-frequency CI scenarios, consider mirroring the
+config to a local file and pointing `--config` at that.
+
+### 5.5 Precedence
+
+When the same rule appears in both `enable` and `disable`, the result
+is implementation-defined; do not rely on either order. CLI flags
+always override configuration file settings.
+
+---
+
+## 6. Output formats
+
+### 6.1 Text format
+
+Produced by `--format text` (the default). Output structure:
+
+```
+==== psa.py: PowerShell Static Analyzer ====
+File   : <path>
+Lines  : <total-line-count>
+Issues : <N> errors, <M> warnings, <K> info
+
+---- ERROR (<N>) ----
+  [<CODE>] line <L>:<C>: <message>
+  ...
+
+---- WARNING (<M>) ----
+  ...
+
+---- INFO (<K>) ----
+  ...
+```
+
+When no issues are found, the body is `  (no issues found)`.
+
+ANSI colour escapes are emitted when stdout is a TTY and the
+`NO_COLOR` environment variable is not set. `--no-color` forces colour
+off unconditionally.
+
+### 6.2 JSON format
+
+Produced by `--format json`. For a single input file:
+
+```jsonc
+{
+  "file": "<path>",
+  "lines": 4106,
+  "summary": {
+    "errors": 0,
+    "warnings": 17,
+    "info": 0
+  },
+  "issues": [
+    {
+      "code": "PSA3004",
+      "severity": "warning",
+      "line": 211,
+      "col": 0,
+      "message": "empty catch block"
+    },
+    // ...
+  ],
+
+  // Present only when --show-env was passed:
+  "environment": { /* see §8 */ }
+}
+```
+
+For multiple input files, the top-level is wrapped:
+
+```jsonc
+{
+  "files": [ /* each file's object as above, but without env */ ],
+  "environment": { /* see §8 */ }  // only with --show-env
+}
+```
+
+The JSON output is always pretty-printed with 2-space indentation and
+no ASCII-only escaping (`ensure_ascii=False`).
+
+### 6.3 SARIF 2.1.0 format
+
+Produced by `--format sarif`. Conforms to the SARIF 2.1.0 schema. The
+top-level structure:
+
+```jsonc
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "psa.py",
+          "version": "<X.Y.Z>",
+          "informationUri": "...",
+          "rules": [ /* 49 rule descriptors */ ]
+        }
+      },
+      "results": [ /* one entry per issue */ ],
+      "properties": {
+        "environment": { /* §8, only with --show-env */ }
+      }
+    }
+  ]
+}
+```
+
+Severity mapping (SARIF `level` field):
+
+| `psa.py` severity | SARIF `level` |
+|:---|:---|
+| `error` | `error` |
+| `warning` | `warning` |
+| `info` | `note` |
+
+The `properties.environment` extension is a `psa.py`-specific
+property bag permitted by SARIF for tool extensions.
+
+---
+
+## 7. Inline suppression
+
+### 7.1 Syntax
+
+Suppression directives are PowerShell comments parsed by `psa.py`:
+
+```ebnf
+suppression  ::=  "#" whitespace? directive
+directive    ::=  scope whitespace codes
+scope        ::=  "psa-disable-line"      // suppress on same line
+              |  "psa-disable-next-line"  // suppress on following line
+              |  "psa-disable-file"        // suppress for whole file
+codes        ::=  code ( ( "," | whitespace ) code )*
+code         ::=  "PSA" digit{4}  | "C" digit{1,2}
+```
+
+The directive name is case-insensitive. Codes may be in either form.
+
+### 7.2 Semantics
+
+- `psa-disable-line CODES` — suppress the listed codes on the same
+  source line where the comment appears.
+- `psa-disable-next-line CODES` — suppress the listed codes on the
+  immediately following source line.
+- `psa-disable-file CODES` — suppress the listed codes throughout the
+  entire file, regardless of position. Multiple `psa-disable-file`
+  comments accumulate.
+
+Suppression applies AFTER rule execution: rules still run, but matching
+issues are filtered before output.
+
+### 7.3 Examples
+
+```powershell
+$x -match $pattern  # psa-disable-line PSA2003
+
+# psa-disable-next-line PSA3001,PSA3002
+Start-Process -ArgumentList $args ...
+
+# psa-disable-file PSA4001
+function Do-Something {
+  # TODO: this won't be reported
+}
+```
+
+---
+
+## 8. Environment detection
+
+### 8.1 Purpose
+
+Environment detection is an **informational** feature. It probes the
+runtime for PowerShell and PSScriptAnalyzer, so that users running
+`psa.py` in a constrained environment (e.g., AI sandboxes without
+PowerShell installed) can confirm whether complementary tools are
+available. The output is purely advisory: it never affects the exit
+code, the issue count, or any filter.
+
+### 8.2 Modes
+
+Two CLI flags trigger environment detection:
+
+- `--check-env`: run detection only and exit. No analysis is performed.
+  Exit code is `0` regardless of detection result.
+- `--show-env`: prepend an environment summary to the normal analysis
+  output. Analysis proceeds as usual; detection adds latency of up to
+  approximately 2 × `ENV_PROBE_TIMEOUT` seconds (currently 10s each,
+  so ~20s worst case) when PowerShell is installed but slow to start.
+
+### 8.3 Probe procedure
+
+1. **Locate the PowerShell binary**. Try, in order: `pwsh`,
+   `powershell`, `powershell.exe`. The first that resolves via
+   `shutil.which()` is used.
+2. **Probe the PowerShell version**. Execute:
+
+   ```
+   <binary> -NoProfile -NonInteractive -Command "$PSVersionTable.PSVersion.ToString()"
+   ```
+
+   with a timeout of 10 seconds. If the command times out, exits
+   non-zero, or produces empty output, PowerShell is reported as
+   unavailable.
+
+3. **Probe PSScriptAnalyzer** (only if step 2 succeeded). Execute:
+
+   ```
+   <binary> -NoProfile -NonInteractive -Command \
+     "$m = Get-Module -ListAvailable PSScriptAnalyzer | \
+      Sort-Object Version -Descending | Select-Object -First 1; \
+      if ($m) { $m.Version.ToString() }"
+   ```
+
+   with a timeout of 10 seconds. The latest installed version is
+   reported.
+
+### 8.4 Output (text format)
+
+```
+==== psa.py: Environment Detection ====
+psa.py        : <psa version>
+Python        : <python version> (<OS> <release>)
+PowerShell    : <command> <PSVersion> at <full path>
+                ^^^ "not found on PATH" if absent
+PSScriptAnalyzer : <module version> (available)
+                ^^^ "not installed" if absent
+
+Info:
+  <one of three message variants — see §8.5>
+```
+
+### 8.5 Recommendation variants
+
+`psa.py` selects one of three info-level messages:
+
+| PowerShell | PSScriptAnalyzer | Message |
+|:---:|:---:|:---|
+| ✓ | ✓ | "PSScriptAnalyzer is available… consider running both tools" |
+| ✓ | ✗ | "PowerShell is available, but PSScriptAnalyzer is not installed. To install:…" |
+| ✗ | ✗ | "psa.py is operating in standalone mode. No PowerShell runtime detected on PATH." |
+
+### 8.6 Output (JSON / SARIF)
+
+Returned data structure (used for `--check-env --format json`,
+`--show-env --format json`, and SARIF `properties.environment`):
+
+```jsonc
+{
+  "python_version": "3.12.3",
+  "python_executable": "/usr/bin/python3",
+  "platform": "Linux 6.18.5",
+  "psa_version": "3.1.0",
+  "powershell": {
+    "command": "pwsh",
+    "path": "/usr/bin/pwsh",
+    "version": "7.4.6"
+  } | null,
+  "psscriptanalyzer": {
+    "version": "1.22.0"
+  } | null
+}
+```
+
+`powershell` and `psscriptanalyzer` are `null` when unavailable. The
+data model is stable; new keys MAY be added in future minor releases
+but existing keys will not be renamed or removed within a major
+version.
+
+### 8.7 Determinism and side effects
+
+Environment detection is **idempotent** and **side-effect-free**:
+
+- No files are written
+- No network calls are made
+- No environment variables are mutated
+- The probed PowerShell processes run with `-NoProfile -NonInteractive`
+  to bypass user profile execution
+
+Probe failures (timeout, missing binary, non-zero exit) are NEVER
+propagated as Python exceptions; they always reduce to "the tool was
+not detected".
+
+---
+
+## 9. Exit codes
+
+| Exit code | Condition |
+|:---:|:---|
+| `0` | Analysis succeeded; no errors or warnings reported. Also returned by `--list-rules`, `--check-env`, `--version`, and `--help`. |
+| `1` | Analysis succeeded; warnings reported but no errors. Info-level issues alone do NOT produce exit `1`. |
+| `2` | Analysis succeeded; one or more errors reported. ALSO returned for fatal startup errors (no input files, unreadable config, etc.). |
+| `130` | Interrupted by SIGINT (Ctrl-C). |
+
+The `--show-env` flag NEVER affects the exit code, regardless of what
+the environment probe reports.
+
+---
+
+## 10. Tokenizer behaviour
+
+The tokenizer (`strip_strings_and_comments`) replaces the content of
+strings, here-strings, and comments with space characters while
+preserving line numbers and column offsets. This guarantees that
+downstream regex-based rules see only "real" PowerShell code without
+having to re-implement quoting rules.
+
+### 10.1 Recognized constructs
+
+| Construct | Behaviour |
+|:---|:---|
+| `# …\n` | Replaced with spaces up to end of line. |
+| `<# … #>` | Replaced with spaces; spans multiple lines. |
+| `'…'` | Replaced with spaces. `''` is treated as an escaped single quote. |
+| `"…"` | Replaced with spaces, BUT `$variable` references inside are preserved (this is essential for undefined-variable detection). `` `" `` is recognized as a backtick-escaped quote. |
+| `@'\n…\n'@` | Here-string (single-quoted). Replaced with spaces. |
+| `@"\n…\n"@` | Here-string (double-quoted). Same as `"…"`: `$variable` preserved. |
+
+### 10.2 Variable identifier extraction
+
+Inside double-quoted strings and here-strings, variable references are
+preserved in these forms:
+
+- `$name` — simple identifier
+- `$scope:name` — scoped (`$env:`, `$using:`, etc.)
+- `${complex}` — brace-quoted (any content)
+
+### 10.3 Line preservation
+
+The tokenizer's output has exactly the same number of characters per
+line and the same number of lines as the input. This is critical for
+accurate line / column reporting.
+
+---
+
+## 11. Extension guide
+
+### 11.1 Adding a new rule
+
+To add `PSA7001`:
+
+1. Append an entry to the `RULES` tuple list at the top of `psa.py`:
+
+   ```python
+   ('PSA7001', 'warning', None, True, 'Short message'),
+   ```
+
+   The 4-tuple is `(code, severity, default_enabled, short_message)`.
+
+2. Implement a `check_yourthing(...)` function that returns a list of
+   issue dicts with the standard 5 keys (see §2.3).
+
+3. Wire it into `analyze_text()`:
+
+   ```python
+   if cfg.enabled['PSA7001']:
+       raw += check_yourthing(clean)
+   ```
+
+4. Add a row to the rule table in `README.md`, `README.ja.md`, and §4
+   of this SPEC (and its Japanese counterpart).
+
+5. Bump the minor version (e.g., `2.1.0` → `2.2.0`).
+
+### 11.2 Adding a new output format
+
+1. Implement `format_yourformat(per_file_results, env_info=None)`.
+
+2. Add the format name to the `--format` choices in `parse_args()`:
+
+   ```python
+   p.add_argument('--format', choices=('text', 'json', 'sarif', 'yourformat'), ...)
+   ```
+
+3. Dispatch in `main()`:
+
+   ```python
+   elif cfg.format == 'yourformat':
+       print(format_yourformat(per_file, env_info))
+   ```
+
+4. Document in §6 of this SPEC.
+
+### 11.3 Adding a new configuration field
+
+1. Add the field to `Config.__init__()` with a default value.
+
+2. Parse it from `data` in `Config.load()`.
+
+3. Use it where needed in the rule implementations.
+
+4. Document in §5.2 of this SPEC.
+
+---
+
+## 12. Self-quality gates
+
+`psa.py` includes three built-in self-quality mechanisms that work
+together to keep the analyzer's own correctness verifiable from the
+command line. The design follows a single principle: **the
+implementation lives inside `psa.py`, and the test suite drives it
+via the CLI** so that consumers and CI pipelines exercise the same
+code paths. There is no separate "test-only" implementation that
+could drift from the production behaviour.
+
+### 12.1 Pillar 1 — Rule self-tests (`test_psa_rules.py`)
+
+The sibling file `test_psa_rules.py` (no third-party dependencies;
+just `python3 test_psa_rules.py`) ships fixtures for every rule in
+the `RULES` catalog. Each rule has, at minimum, one positive case
+(rule must fire) and one negative case (rule must NOT fire), and
+where applicable an edge case that pins false-positive defences
+(e.g., a rule that scans for a keyword must NOT fire when the
+keyword appears inside a string literal, here-string, or comment).
+
+The suite is organised into three sections:
+
+| Section | Coverage |
+|:---|:---|
+| 1 | Per-rule `analyze_text()` calls. Each test enables ONLY the rule under inspection so cross-rule interaction cannot pollute the count. PSA7001 (file-meta-driven) is exercised by passing the same `file_meta` dict that `main()` constructs. |
+| 2 | PSA8001 (cross-file body-hash drift). Drives `collect_function_bodies()` + `check_function_sync()` directly with synthetic multi-file inputs, including the regex-based `psa8001_ignore_functions` ignore list. |
+| 3 | CLI self-checks. Drives `psa.py --config-check` and `psa.py --self-check` via `subprocess` against (a) the shipped tree (must pass), (b) hand-crafted broken configs (must fail with exit 2), and (c) a hand-crafted minimal good config (must pass). |
+
+Adding a new rule to `RULES` without simultaneously extending
+`test_psa_rules.py` is a release-blocking gap; see §12.4 below.
+
+### 12.2 Pillar 2 — Config schema validation (`--config-check`)
+
+`--config-check PATH_OR_URL` validates a `.psa.config.json` against
+the schema documented in §5, without analyzing any PowerShell file.
+See §3.6 for the CLI contract; this subsection covers the design
+rationale.
+
+**Why this rather than failing inside `Config.load()`?**
+`Config.load()` exists to load *whatever the user wrote* into a
+runnable `Config` object. It silently ignores unknown rule IDs in
+`enable`/`disable`, silently coerces some types, and exits the
+process on the first hard error it encounters. None of those
+behaviours are wrong for the analyzer's main path, but they are
+exactly wrong for a config-quality check: a CI pipeline wants to
+see *every* problem in *one* run.
+
+`_validate_config_data()` therefore re-walks the parsed JSON with a
+strict schema and *enumerates* problems. It is independent of
+`Config.load()`; the two functions can be evolved separately.
+
+### 12.3 Pillar 3 — SPEC drift detection (`--self-check`)
+
+`--self-check` reads the sibling `SPEC.md`, extracts every
+`### 4.N PSAxxxx — Title` heading from §4, and diffs that set
+against the `RULES` table compiled into the running `psa.py`. The
+`### 4.32 PSAPxxxx — Project / pipeline convention rules` overview
+heading (no concrete rule ID, serves only as a grouping heading
+for §4.33–§4.36) is intentionally skipped by the parser's regex
+(`PSA[A-Z]?\d{4}` — literal `xxxx` does not match).
+
+The check is symmetric: both directions of drift are reported.
+Exit codes: `0` on full agreement, `2` on any drift detected (or
+if `SPEC.md` cannot be read at all). See §3.7 for the CLI contract.
+
+### 12.4 Release process implications
+
+When preparing a `psa.py` release, the following commands MUST all
+exit `0` on the mainline tree before the version is tagged:
+
+```bash
+python3 test_psa_rules.py
+python3 psa.py --self-check
+python3 psa.py --config-check .psa.config.json.template
+```
+
+When adding a new rule:
+
+1. Add the entry to `RULES`.
+2. Add `### 4.N — PSAxxxx — Title` to `SPEC.md` §4.
+3. Add positive / negative (/ edge) fixtures to `test_psa_rules.py`.
+4. Re-run the three commands above. All three must remain green.
+
+Step 2 keeps `--self-check` green; step 3 keeps the test suite
+green and ensures the rule's behaviour is locked against future
+regressions. Step 4 is the single combined gate; if any of the
+three fails, the release is not ready.
+
+### 12.5 Consumer-side adoption (informative)
+
+This subsection is **informative** (non-normative): it records how
+consumer repositories that depend on `psa.py` typically wire the
+self-quality gates from §12.2 and §12.3 into their own workflows.
+Nothing in this subsection imposes any obligation on `psa.py`
+itself; the gates as specified above are complete without consumer
+adoption.
+
+`--config-check` and `--self-check` are designed to be useful from
+the *consumer* side, not just the upstream side: a downstream
+repository that pulls `psa.py` from mainline (per the workflow in
+SPEC.md §1.4.3 *Consumer obligations*) can run the same gates
+against its own checked-in `.psa.config.json` and against its own
+locally-cached copy of `psa.py`. The verified consumer listed in
+[`README.md`](./README.md#verified-consumers) "Verified consumers"
+documents its consumer-side usage of these gates in its own SPEC —
+specifically:
+
+- [`usui-tk/Deploy-Drivers-For-WindowsServer` — SPEC §A.11.6
+  *Self-quality gates for `psa.py` (consumer-side
+  usage)*](https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer/blob/main/SPEC.md#a116-self-quality-gates-for-psapy-consumer-side-usage)
+  describes (a) when each gate is run on the consumer side (PR
+  edits `.psa.config.json` → run `--config-check`; PR refreshes a
+  locally-cached `psa.py` → run `--self-check`), (b) the expected
+  output on a clean tree, and (c) the activation matrix that maps
+  PR triggers to gate invocations.
+
+When the upstream and downstream documents are read together, the
+overall lifecycle is fully covered: the upstream §12.1–§12.4 above
+specify how the gates are *implemented* and *released*, and the
+linked downstream §A.11.6 specifies how the gates are *consumed*
+in practice. New consumers adopting `psa.py` are encouraged to
+mirror the pattern (its own SPEC subsection, with cross-links in
+both directions); future entries to the Verified consumers table
+will be added here as they emerge.
+
+Pillar 1 (`test_psa_rules.py`, §12.1) is intentionally not part of
+the consumer-side adoption story: a passing upstream test suite is
+a precondition of every release, and `--self-check` will detect
+any drift the consumer cares about. Consumers MAY run the test
+suite directly when investigating a suspected analyzer bug, but
+they are not expected to wire it into their CI.
+
+### 12.6 Continuous Integration in this repository
+
+The three pillars defined in §12.1, §12.2, and §12.3 are enforced
+automatically on every push and pull request that touches `psa.py`,
+its sibling `VERSION` file, `test_psa_rules.py`, this `SPEC.md`, or
+`.psa.config.json.template`. The workflow lives at:
+
+```
+.github/workflows/scripts__python__powershell-static-analyzer.yml
+```
+
+CI governance — design principles, naming conventions, timeout
+tiers, fork-PR handling, and the rule that CI change history is
+recorded in this directory's own `CHANGELOG.md` — is documented in
+the repository-root `SPEC.md` at the top of the `ai-generated-artifacts`
+repository. This sub-project's CI does **not** maintain its own
+governance file; updates to the workflow are recorded in
+[`CHANGELOG.md`](./CHANGELOG.md) here.
+
+---
+
+## Appendix A — Rule severity matrix
+
+| Code | Severity | Default |
+|:---|:---|:---:|
+| PSA1001 | error | ✅ |
+| PSA1002 | error | ✅ |
+| PSA1003 | error | ✅ |
+| PSA1004 | error | ✅ |
+| PSA2001 | error | ✅ |
+| PSA2002 | warning | ✅ |
+| PSA2003 | warning | ✅ |
+| PSA2004 | warning | ✅ |
+| PSA2005 | warning | ✅ |
+| PSA2006 | warning | ✅ |
+| PSA2007 | warning | ✅ |
+| PSA2008 | info | ✅ |
+| PSA2009 | warning | ✅ |
+| PSA2010 | error | ✅ |
+| PSA2011 | error | ✅ |
+| PSA2012 | error | ✅ |
+| PSA2013 | error | ✅ |
+| PSA3001 | warning | ✅ |
+| PSA3002 | warning | ✅ |
+| PSA3003 | warning | ✅ |
+| PSA3004 | warning | ✅ |
+| PSA3005 | warning | ✅ |
+| PSA3006 | warning | ✅ |
+| PSA4001 | info | ✅ |
+| PSA4002 | info | ✅ |
+| PSA4003 | info | ⛔ |
+| PSA4004 | info | ✅ |
+| PSA5001 | error | ✅ |
+| PSA5002 | warning | ✅ |
+| PSA5003 | warning | ✅ |
+| PSA5004 | warning | ✅ |
+| PSA6001 | warning | ✅ |
+| PSA6002 | warning | ⛔ |
+| PSA6003 | warning | ✅ |
+| PSA6004 | warning | ✅ |
+| PSA6005 | warning | ✅ |
+| PSA6006 | warning | ✅ |
+| PSA6007 | info | ✅ |
+| PSA6008 | info | ✅ |
+| PSA7001 | warning | ✅ |
+| PSA7002 | warning | ✅ |
+| PSA8001 | warning | ✅ |
+| PSA9001 | info | ⛔ |
+| PSA9002 | warning | ⛔ |
+| PSAP0001 | warning | ⛔ |
+| PSAP0002 | warning | ⛔ |
+| PSAP0003 | warning | ⛔ |
+| PSAP0004 | warning | ⛔ |
+| PSAP0005 | warning | ⛔ |
+
+---
+
+## Appendix B — Document history
+
+The chronological per-version change log for `psa.py` (and for this
+SPEC document, which tracks `psa.py` releases) lives in
+[`CHANGELOG.md`](./CHANGELOG.md) in
+[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) format.
+
+### Revision discipline (where revision history lives)
+
+This project follows the repository-wide
+[Revision History Policy](../../../README.md#revision-history-policy)
+documented at the root of `ai-generated-artifacts`. The summary:
+
+- **Per-version release notes belong in [`CHANGELOG.md`](./CHANGELOG.md).**
+  They do NOT belong in:
+  - `psa.py` source comments (no `# r42:`, no end-of-file
+    `# REVISION HISTORY` block; the `PSAP0003` / `PSAP0004` rules
+    detect these patterns when opted in)
+  - `README.md` (other than a brief pointer to `CHANGELOG.md`)
+  - `SPEC.md` (this document — it describes *current* behaviour;
+    chronological history lives in `CHANGELOG.md`)
+- **This SPEC describes the current behaviour of `psa.py`.** When a
+  rule's semantics change, this SPEC is updated to describe the *new*
+  semantics, and a `CHANGELOG.md` entry is added under a new version
+  section describing what changed and why.
+- **Architectural rationale** (root-cause analyses of past pitfalls)
+  belongs in [Appendix D — Known Pitfalls & Lessons Learned](#appendix-d--known-pitfalls--lessons-learned)
+  below. `CHANGELOG.md` cross-references back to Appendix D where
+  applicable.
+
+This three-way split — `psa.py` source for current code,
+`CHANGELOG.md` for chronological release log, this SPEC for the
+authoritative current-behaviour reference — keeps each document
+focused on a single responsibility.
+
+---
+
+## Appendix C — Quality Gates & Validation Checklist
+
+> This appendix mirrors the **Part C** convention used by sibling script
+> SPECs in this repository (`ol-aws-ami-builder/SPEC.md`,
+> `download-speakerdeck-oracle4engineer/SPEC.md`). Because `psa.py`'s
+> primary specification body is a formal API spec (numbered sections
+> 1–11), the equivalent material is anchored here as an appendix.
+>
+> For repository-wide LLM-agent operating guidance that complements
+> the pre-commit checklist below — in particular the Pre-flight /
+> Mid-flight / Post-flight self-check gates that apply to every
+> code or documentation change in this repository — see
+> [`AGENTS.md` §8 Self-Check Gates](../../../AGENTS.md#8-self-check-gates).
+> The checklist below is project-specific; the AGENTS.md gates are
+> repository-wide and complementary.
+
+Before any commit to `psa.py`, all of the following must pass.
+
+### Static checks
+
+- [ ] `python3 -m py_compile psa.py` → 0 errors (parse-only check)
+- [ ] `python3 psa.py --list-rules` exits 0 and lists every documented rule (sanity that `RULES` tuple is internally consistent)
+- [ ] No new external dependencies are introduced (`psa.py` MUST remain pure stdlib per §1.3)
+- [ ] `psa.py` runs unchanged on Python 3.8 (the minimum-supported version per §1.3)
+- [ ] All new rule code names follow the `PSAxxxx` pattern (§4)
+
+### Functional checks (self-analysis)
+
+- [ ] `python3 psa.py psa.py` produces no `PSA1xxx` (parse/structural) issues — the tool can analyze itself
+- [ ] `python3 psa.py --format json psa.py` produces valid JSON parsable by `python3 -c "import json,sys; json.load(open('output.json'))"`
+- [ ] `python3 psa.py --format sarif psa.py` produces a SARIF 2.1.0 document accepted by `github/codeql-action/upload-sarif`
+- [ ] Inline suppression directives (`# psa-disable-line`, `# psa-disable-next-line`, `# psa-disable-file`) suppress the targeted code without affecting others (§7)
+
+### Consumer regression checks
+
+- [ ] `python3 psa.py ../../powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1` reports 0 errors / 0 warnings / 0 info (steady-state for the in-repo consumer)
+- [ ] `python3 psa.py ../../powershell/download-speakerdeck-oracle4engineer/Test-PdfMetadata.ps1` reports 0 / 0 / 0
+- [ ] External consumers (`usui-tk/Deploy-Drivers-For-WindowsServer`) are notified of any rule change that could newly flag previously-clean scripts (per "Adding a new check" in README.md)
+
+### Documentation checks
+
+- [ ] `README.md` mentions every new CLI flag, rule code, or configuration field
+- [ ] `README.ja.md` is structurally equivalent (table layout, section order match)
+- [ ] If a new rule is added, the rule catalog in `README.md` AND `README.ja.md` AND this SPEC's §4 AND Appendix A are all updated together
+- [ ] Version bump (Appendix B) reflects the change category: patch (bug fix), minor (new rule / new feature), major (breaking CLI / schema change)
+- [ ] `--check-env` / `--show-env` output remains stable (no schema break for CI integrations)
+
+### Cross-format / schema checks
+
+- [ ] JSON output schema (§6.2) — no field renaming or type change in a patch or minor release
+- [ ] SARIF output (§6.3) — `tool.driver.version` matches `psa.py`'s self-reported version
+- [ ] Exit codes (§9) — same triple `0 / 1 / 2` semantics across all releases in the same major version
+
+---
+
+## Appendix D — Known Pitfalls & Lessons Learned
+
+> Each entry documents a real bug surfaced in production use of `psa.py`,
+> together with the fix and the design rule that prevents recurrence.
+> Future revisions inherit the fix; never reintroduce the bug.
+>
+> For repository-wide anti-patterns observed in LLM-assisted
+> contributions (which complement the `psa.py`-specific pitfalls
+> recorded here) — including Part A bloat regressions, mixed
+> line-ending defects in programmatically generated `.ps1` content,
+> bilingual divergence, and self-referential governance non-application
+> — see [`AGENTS.md` §9 Anti-Patterns
+> (Forensically Documented)](../../../AGENTS.md#9-anti-patterns-forensically-documented).
+> The entries below are project-specific; the AGENTS.md catalogue is
+> repository-wide and complementary.
+
+### D.1 Heredoc / sub-expression tokens leaking into rule scans (2.0.0)
+
+**Symptom**: Rules like `PSA2003` (`-match` against bare `$variable`)
+fired inside `@"…"@` here-strings, producing false positives wherever a
+docstring or `Write-Host` block contained PowerShell-like syntax for
+demonstration purposes.
+
+**Root cause**: The original `strip_strings_and_comments()` did not
+recognize PowerShell here-strings; their content reached the regex
+rules unchanged.
+
+**Fix**: The tokenizer (§10) now removes the contents of `@"…"@`,
+`@'…'@`, `$()`, and `@()` constructs while preserving line numbers
+(filled with spaces). Every new rule MUST consume the tokenized text
+unless it specifically wants the raw form.
+
+### D.2 Auto-variable list drift (`$using:` introduction)
+
+**Symptom**: After Windows PowerShell 5.1 introduced `$using:` for
+remote scopes, `PSA2001` falsely flagged variables prefixed with
+`$using:` as undefined.
+
+**Root cause**: The auto-variable allow-list in `psa.py` did not
+include `$using:` as a scope prefix.
+
+**Fix**: Scope prefixes (`$global:`, `$script:`, `$local:`, `$private:`,
+`$using:`, `$env:`, `$variable:`) are stripped before the auto-variable
+lookup. Any new PowerShell scope-prefix discovered upstream must be
+added to this list, along with a test PowerShell snippet pinned in the
+relevant rule's docstring.
+
+### D.3 SARIF output rejected by GitHub Code Scanning (early 2.0.x)
+
+**Symptom**: Uploaded SARIF documents were rejected with
+`The SARIF file contains a Validation Error`.
+
+**Root cause**: Early SARIF output omitted the `tool.driver.rules`
+array. GitHub's validator treats this as a hard error even though the
+SARIF 2.1.0 specification considers it optional.
+
+**Fix**: `format_sarif()` always emits the `rules` array with every
+known rule (whether or not it produced findings in the current run).
+This is now a permanent contract — do not optimize it out.
+
+### D.4 `.psa.config.json` discovered in CI's `$HOME`
+
+**Symptom**: CI runs occasionally picked up a stale configuration from
+the runner's home directory, disabling rules that should have been
+active.
+
+**Root cause**: The original implicit-discovery walk searched ancestor
+directories up to `/` without bounding to the project tree, so a
+`.psa.config.json` in `$HOME` (which `/home/runner` was an ancestor
+of) won.
+
+**Fix**: Implicit discovery stops at the first ancestor that contains
+`.psa.config.json`, OR at the first ancestor that is itself a git
+repository root (`.git/` present), whichever comes first. Use
+`--config <path>` for fully-explicit configuration in CI.
+
+### D.5 Remote `--config` fetch blocked by CDN bot filters (pre-2.3.0)
+
+**Symptom**: `--config https://raw.githubusercontent.com/...` worked
+on developer laptops but failed in CI with HTTP 403 or TLS handshake
+errors against Cloudflare-fronted forks.
+
+**Root cause**: The default `urllib` User-Agent (`Python-urllib/3.x`)
+is a known WAF heuristic for bot traffic; some CDN defaults reject it
+outright. Additionally, `urllib` may negotiate TLS 1.0/1.1 if the OS
+default permits, which modern servers refuse.
+
+**Fix**: §5.4 — explicit TLS 1.2 minimum SSL context; Chrome 131
+User-Agent and Sec-Ch-Ua client hints; exponential-backoff retry on
+5xx and network errors (4xx not retried). Tunable via
+`PSA_CONFIG_TIMEOUT`, `PSA_CONFIG_MAX_RETRIES`, `PSA_CONFIG_QUIET`.
+
+### D.6 JSONC comment-in-string-literal false strip
+
+**Symptom**: A `.psa.config.json` containing
+`"description": "use // to enable trace"` produced a JSON parse error
+after the comment-stripper ran.
+
+**Root cause**: The first-pass comment stripper did not respect string
+boundaries.
+
+**Fix**: The JSONC stripper now tracks string-literal state
+(considering escaped quotes) and only strips `//` and `/* */` outside
+of string literals. Single-line `//` inside a string is preserved
+verbatim.
+
