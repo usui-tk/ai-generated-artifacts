@@ -5,6 +5,9 @@
 > secrets/credentials/client data. References, does not restate (R3): the design substrate
 > lives in the Tier-P handoff docs (baseline / plan / spine / register) and in `../adr/`.
 > Decisions are durable in `../adr/`; this file tracks *status*, not decisions.
+> **Session entry point** — read first per the AGENTS.md startup contract. Handoff rule:
+> **ADR 0005**. Tier-P design docs stay **unmanaged** (out of repo) and ship as one bundle
+> + MANIFEST at each static-point (never piecemeal).
 
 _Last updated: 2026-05-31 (UTC) — **P1 started**: P1.1 (A-4 `@import` gate) verified; next is P1.2._
 
@@ -43,13 +46,15 @@ Remediate the `$ks` deviation at **P6**.
 - Known gate deviation: `Update-WindowsServerIso.ps1` PSScriptAnalyzer `0/1/0` (`$ks`, line 8095) — user-dispositioned, remediate at **P6** (§8.3; not accepted-open).
 
 ## ADR index (`../adr/`)
-- 0001 — tooling language = Python · 0002 — analysis layer = DuckDB (disposable, P8) · 0003 — standalone-tool principle · 0004 — outcome-based execution framework (M8).
+- 0001 — tooling language = Python · 0002 — analysis layer = DuckDB (disposable, P8) · 0003 — standalone-tool principle · 0004 — outcome-based execution framework (M8) · 0005 — session-handoff protocol.
 
 ## Design substrate (Tier-P handoff — referenced, not restated, R3)
 - `HANDOFF-baseline-consolidated-design.md` — the living design baseline.
 - `IMPLEMENTATION-PLAN-skeleton.md` — the living implementation plan (§0.1 disciplines, §Y dry-run incl. Y.1 P0a + Y.5 psaMove, §Z sign-off).
 - `TRACEABILITY-SPINE.md` — outcome→deliverable→producer→dependency→gate spine (orphans = 0).
 - `TEMPLATE-REQUIREMENTS-REGISTER.md` — Tier-P template/dotfile requirements register.
+
+_Per **ADR 0005**: the four Tier-P docs stay **unmanaged** (out of repo) and are delivered as **one bundle (zip) + MANIFEST** at each static-point — never piecemeal, never assume a current local copy._
 
 ## Static-point index (recoverable points = commits; repo-external Zips per `../static-point-procedure.md`)
 | Phase | Commit | Static-point |
