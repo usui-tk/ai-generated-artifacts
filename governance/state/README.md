@@ -8,7 +8,7 @@
 - `manifest.jsonl` — the asset manifest (one canonical-JSON object per line).
   Authored at **P2.7**: 58 canonical PowerShell-helper units (39 Public + 19
   Private). The single source of truth for each unit's canonical location,
-  version, default policies, maturity, and consumers.
+  version, default policies, and consumers.
 - `observations/` — drift observations, hive-partitioned
   `repo=<repo>/date=YYYY-MM-DD/run-<run_id>.jsonl` (produced from P3 onward).
 - `ledger/` — reconciliation ledger: `proposals.jsonl` + `summary.md` (P8 onward).

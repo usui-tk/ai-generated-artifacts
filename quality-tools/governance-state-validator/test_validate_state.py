@@ -35,7 +35,6 @@ BASE_RECORD = {
     "change_policy": "canonical",
     "binding_mode": "follow-latest",
     "consumers": [],
-    "maturity": "draft",
     "tested": False,
 }
 
@@ -77,8 +76,8 @@ def run():
     cases.append(("happy-path green", findings == [], findings))
     shutil.rmtree(root)
 
-    # A: schema violation (maturity not in enum).
-    bad = dict(BASE_RECORD, maturity="bogus")
+    # A: schema violation (change_policy not in enum).
+    bad = dict(BASE_RECORD, change_policy="bogus")
     root = build_root([_canonical_line(bad)])
     findings, _, _ = validate(root, quiet=True)
     cases.append(("A schema enum violation caught", "A" in checks_present(findings),

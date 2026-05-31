@@ -13,7 +13,6 @@
     "change_policy",
     "binding_mode",
     "consumers",
-    "maturity",
     "tested"
   ],
   "additionalProperties": false,
@@ -80,11 +79,6 @@
           }
         }
       }
-    },
-    "maturity": {
-      "type": "string",
-      "enum": ["draft", "tested", "released"],
-      "description": "Lifecycle stage of the canonical unit (ADR 0008 release model). 'draft' = canon body present, full test suite not yet authored/passing (tested=false, canonical_version 0.x). 'tested' = full canon test suite (ADR 0007 / P2a) authored and green (tested=true), eligible for release promotion, still 0.x. 'released' = promoted to canonical_version >= 1.0.0, vendorable. Stays in lock-step with 'tested' and the SemVer major."
     },
     "tested": {
       "type": "boolean",

@@ -39,8 +39,10 @@ release-gate semantics rather than treating it as a free-form label.
    (ADR 0007 / phase P2a) passes.** `1.0.0` means released — eligible for vendoring.
 4. **Vendoring (P6 / P7) precondition: `version >= 1.0.0`** — a mechanical gate that
    complements ADR 0007's "vendoring precondition = passing canon test" and the manifest
-   `tested` / `maturity` facts. The version major is the human-facing release-readiness
-   signal; the manifest fields are the backing evidence.
+   `tested` fact. The version major is the human-facing release-readiness signal; the
+   manifest `tested` flag is the backing evidence. (The manifest `maturity` axis is a
+   *separate*, CNCF-aligned adoption/stability metadata, deferred to template
+   finalization per baseline §2.10; it is not this release gate.)
 5. Initial canon (P2.6) ships all units at **`0.1.0`** (canon present, not yet
    test-verified, not vendorable).
 6. Post-`1.0.0` bumps follow standard SemVer: **major** = breaking helper-contract
@@ -55,6 +57,6 @@ release-gate semantics rather than treating it as a free-form label.
 - The marker `version=` token is SemVer, deliberately not an `rNN` revision token, so it
   does not trip the psa.py PSAP0005 guardrail (revision-anchored prose in comment bodies)
   and that guardrail can later be made default-on without conflicting with markers.
-- `tested` / `maturity` in the manifest and the SemVer major stay in lock-step
-  (`tested=false` ⇔ `0.x`; full-suite pass ⇔ `>= 1.0.0`); divergence is a defect to
+- The manifest `tested` flag and the SemVer major stay in lock-step
+  (`tested=false` <-> `0.x`; full-suite pass <-> `>= 1.0.0`); divergence is a defect to
   surface, not a state to accept.

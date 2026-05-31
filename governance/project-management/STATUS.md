@@ -35,7 +35,7 @@ _Last updated: 2026-05-31 (UTC) — **P2 nearly complete** (P2.1–P2.8a): share
 | **ADR 0007 / P2a insert** — canon functional QA | ✅ done | mandatory full-set canon tests, canon-vs-copy fault attribution, regression-gated reconcile-back; **phase P2a inserted** to author the suite (governs `SPEC §machinery`) |
 | **P2.6 (+amend)** — canon code home | ✅ done | `reference-code/powershell/` 39 Public + 19 Private + `.psm1`/`.psd1`; per-unit markers + norm hash; analyzer config (`.psa.config.json` [PSAP0003/4/5] + `PSScriptAnalyzerSettings.psd1`); marker version = **SemVer** (rNN→0.1.0); full config-aware gate 0/0/0 |
 | **ADR 0008** — canon release model | ✅ done | SemVer pre-release guardrail: `0.x` not vendorable; promote to `1.0.0` on full-suite pass; vendoring gate `version >= 1.0.0`; refines ADR 0007 |
-| **P2.7** — manifest | ✅ done | `governance/state/manifest.jsonl` 58 rows (`canonical_version 0.1.0`, `maturity=draft`, `tested=false`, `consumers=[]`); `maturity`/`tested` added to manifest schema |
+| **P2.7** — manifest | ✅ done | `governance/state/manifest.jsonl` 58 rows (`canonical_version 0.1.0`, `tested=false`, `consumers=[]`); `tested` added to manifest schema (`maturity` **deferred to TF** — baseline §2.10 CNCF axis, values open until final stage) |
 | **P2.8a** — governance-state gate | ✅ done | `quality-tools/governance-state-validator/` (checks A–F: schema · location · manifest↔marker · canon coverage · canonical-JSON); 0 findings on repo, self-test 6/6 |
 | **P2.8b** — STATUS + gate clause | ✅ this commit | STATUS brought current; AGENTS.md post-flight §14 = governance-state gate |
 | **P2.8c** — close P2 | ⬜ next | Tier-P bundle + MANIFEST (§4.8 SemVer marker, ADR 0008, `common.` drop, PSAP0005 roadmap) + per-repo static-point |
@@ -45,7 +45,7 @@ Gates green at HEAD: psa.py 0/0/0 (config-aware, incl. the `reference-code/power
 ## Next action
 Finish **P2.8c** (Tier-P bundle + MANIFEST + per-repo static-point), then begin
 **P2a** — author the full canon behavioral test suite (ADR 0007), promoting each
-passing unit `0.1.0 → 1.0.0` with `tested=true` / `maturity` (ADR 0008). Remediate
+passing unit `0.1.0 → 1.0.0` with `tested=true` (ADR 0008). Remediate
 the `$ks` deviation at **P6**.
 
 ## Open pointers

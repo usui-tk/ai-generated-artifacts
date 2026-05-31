@@ -49,8 +49,8 @@ the third quality axis alongside static-lint and consistency-drift.
 2. **Two-axis fault attribution.** Canon correctness and copy consistency are independent,
    separately-observable signals: a **canon-test failure ⇒ a canon-level problem**; a
    **drift-gate failure with canon tests green ⇒ a copy-level problem**. Canon
-   test/coverage state is a unit attribute recorded in the manifest (`maturity` /
-   `tested`); per-instance drift stays in the observation record. The two are never
+   test/coverage state is a unit attribute recorded in the manifest (`tested`);
+   per-instance drift stays in the observation record. The two are never
    conflated.
 3. **Regression-gated reconcile-back.** When the scanner detects a consumer divergence
    proposed for upstreaming (DEP-3 `forwarded=pending`, §2.3) and that change is folded
@@ -75,9 +75,11 @@ canon-test gate and the regression-on-reconcile gate are the CI worth building a
 - The upstream-first reconcile loop is safe (regression-gated), so consumer improvements
   flow back without breaking other consumers.
 - Cost: authoring the ~37 missing tests is real work, **isolated in P2a**; P2.6 stays
-  "create + lint-clean", P2.7 records `maturity`/`tested`.
-- The manifest schema gains `maturity` / `tested` fields (additive); P2.7 writes them; the
+  "create + lint-clean", P2.7 records `tested`.
+- The manifest schema gains a `tested` field (additive); P2.7 writes it; the
   observation/report layer can join canon-test state with drift for attribution.
+  (The CNCF-aligned `maturity` axis, baseline §2.10, is a separate adoption/stability
+  metadata deferred to template finalization, not this test-state flag.)
 - A new phase (P2a) is introduced **without renumbering P3–P8** (the P0a precedent),
   preserving existing P-step anchors (P6.4, P6.6, P7, …).
 
