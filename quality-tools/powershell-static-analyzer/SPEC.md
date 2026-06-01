@@ -638,6 +638,14 @@ Explicit initialisation also helps PSScriptAnalyzer's
 **Suggested fix**: Add a plain `$Script:Foo = 0` (or similar) at the
 top of the script's identifier/state-initialisation block.
 
+**Externally-owned counters (config-driven, v4.3.0+)**: a counter
+owned and initialised by another file in the same module/runtime (a
+shared helper split out of a consumer that initialises the session
+state) is *mutated*, not first-initialised, in the helper. Such names
+are declared in `.psa.config.json` via `psa2013_known_script_vars`
+(shared with PSA2013; see §5.3) and exempted from PSA2008 as well.
+Names not listed still fire.
+
 ### 4.9c PSA2009 — PSCustomObject property assigned without prior declaration
 
 - **Severity**: Warning
@@ -1071,6 +1079,17 @@ includes the offending name to make grep-driven correction easy.
   these are intentional null-tolerant reads; the allowlist includes
   ``scriptpath`` and ``errorsjsonlpath`` for this reason. Extend the
   allowlist as new defensive patterns emerge.
+- **Externally-owned ``$Script:`` state (config-driven, v4.3.0+)**: a
+  shared-library helper split out of a consumer script legitimately
+  reads ``$Script:`` session state that the consumer (or module loader)
+  owns and initialises -- an intentional external-scope dependency, not
+  a typo. Such names are DECLARED in ``.psa.config.json`` via
+  ``psa2013_known_script_vars`` (see §5.3) and exempted. Matched
+  case-insensitively, with or without a leading ``$Script:`` /
+  ``Script:`` prefix. Names NOT listed still fire. This is how the
+  ``reference-code/powershell`` canon (shared helpers whose ``$Script:``
+  state is owned by the consuming script) stays ``0/0/0`` without
+  weakening the rule for first-party code.
 
 **Limitations**:
 
@@ -2092,6 +2111,10 @@ a valid configuration.
   // PSA2010 extra known-cmdlets allow-list
   "psa2010_known_cmdlets": [],
 
+  // PSA2013/PSA2008 external-scope contract: $Script: names owned and
+  // initialised by another file in the same module/runtime (4.3.0+).
+  "psa2013_known_script_vars": [],
+
   // PSAP0005 relaxed mode (4.0.0+). When true, apply the four
   // exemption patterns described in §4.37. Default false (strict).
   "psap0005_relaxed_mode": false
@@ -2107,6 +2130,7 @@ a valid configuration.
 | `max_function_lines` | integer | `200` | Must be positive. PSA9001 threshold. |
 | `psa8001_ignore_functions` | array of strings | `[]` | Function names (exact, or `regex:...`). |
 | `psa2010_known_cmdlets` | array of strings | `[]` | Additional cmdlets / functions to whitelist for PSA2010. |
+| `psa2013_known_script_vars` | array of strings | `[]` | Externally-owned `$Script:` names (owned/initialised by another file in the same module/runtime). Exempts them from PSA2013 (read) and PSA2008 (mutate). Case-insensitive; optional `$Script:` / `Script:` prefix. |
 | `psap0005_relaxed_mode` | boolean | `false` | If `true`, apply the four PSAP0005 exemption patterns (§4.37). |
 
 ### 5.4 Remote configuration (HTTP / HTTPS)

@@ -439,4 +439,33 @@
   //
   //   "psap0005_relaxed_mode": true
 
+
+  // ===========================================================================
+  // psa2013_known_script_vars: external-scope $Script: contract declaration
+  //                            (list of strings, new in 4.3.0)
+  // ===========================================================================
+  //
+  // PSA2013 (error, default ON) fires when a $Script:Foo is READ in a
+  // file with no $Script:Foo = ... assignment. PSA2008 (info, default
+  // ON) fires when a $Script:Foo is MUTATED (++ / += / -=) without a
+  // prior init in the file. For a self-contained script both catch
+  // genuine typos and missing initialisation.
+  //
+  // For a SHARED LIBRARY helper split out of a consumer script, the
+  // $Script: session state is owned and initialised by the consumer
+  // (or module loader), not the per-helper file. The read / mutation in
+  // the helper is then an intentional external-scope dependency. DECLARE
+  // those names here to exempt them from BOTH rules. This is a positive
+  // contract declaration, not a blanket disable: names NOT listed still
+  // fire, so genuine typos remain caught.
+  //
+  // Names match case-insensitively, with or without a leading
+  // "$Script:" / "Script:" prefix. Built-in default: [] (none exempt).
+  //
+  //   "psa2013_known_script_vars": [
+  //     "DebugTraceStack",
+  //     "DebugTraceEventSeq",
+  //     "ScriptRoot"
+  //   ]
+
 }

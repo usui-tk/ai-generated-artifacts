@@ -266,12 +266,12 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA2005** | Warning | ✅ 有効 | `if` / `while` 条件内に代入演算子 `=` |
 | **PSA2006** | Warning | ✅ 有効 | `if` / `while` 条件内にリダイレクト演算子 `>` / `<` |
 | **PSA2007** | Warning | ✅ 有効 | パラメータ名が PowerShell 自動変数と衝突 (3.6.0 新規) |
-| **PSA2008** | Info | ✅ 有効 | `$Script:Foo++` / `+=` / `-=` の前に初期化がない (3.6.0 新規) |
+| **PSA2008** | Info | ✅ 有効 | `$Script:Foo++` / `+=` / `-=` の前に初期化がない (3.6.0 新規)。 別ファイルが所有・初期化するカウンタは `.psa.config.json` の `psa2013_known_script_vars` で宣言可能 (4.3.0+)。 |
 | **PSA2009** | Warning | ✅ 有効 | `[pscustomobject]@{...}` のイニシャライザで宣言されていないプロパティを `.` 代入している (3.8.0 新規) — PowerShell 5.1 のシール済みオブジェクト実行時例外 (`"<PropName>" の設定中に例外が発生しました: "このオブジェクトにプロパティ '<PropName>' が見つかりません。"`) を静的解析で検出 |
 | **PSA2010** | Error | ✅ 有効 | スキャン対象のいずれのファイルにも定義されていない関数呼び出しを検出 (3.9.0 新規) — `Find-Signtool` (正しくは `Find-KitTool 'signtool.exe'`) のような typo を捕捉。 `.psa.config.json` の `psa2010_known_cmdlets` で組み込み cmdlet 一覧を拡張可能 |
 | **PSA2011** | Error | ✅ 有効 | `Split-Path -LiteralPath ... -Parent` が Windows PowerShell 5.1 ja-JP で `AmbiguousParameterSet` を発生させるパターンを検出 (3.9.0 新規) — `[System.IO.Path]::GetDirectoryName($path)` または `Split-Path -Path $path -Parent` に修正 |
 | **PSA2012** | Error | ✅ 有効 | `[Parameter(Mandatory)]` パラメータが N 個ある関数を、引数 N 個未満で positional 呼び出しした場合に検出 (4.1.0 新規) — PowerShell が対話的に不足値を要求するため、非対話実行 (CI/バッチ) ではスクリプトが stdin 待ちでハングする。名前付き引数 (`-Name value`) の使用を推奨 |
-| **PSA2013** | Error | ✅ 有効 | `$Script:Foo` を読んでいるが、スクリプト全体で `$Script:Foo = ...` の代入が存在しないケースを検出 (4.1.0 新規) — PowerShell は未代入の `$Script:` 変数を sucessfully `$null` として評価するため、typo バグが下流のヌル絡みエラーとして遠方で表面化することが多い |
+| **PSA2013** | Error | ✅ 有効 | `$Script:Foo` を読んでいるが、スクリプト全体で `$Script:Foo = ...` の代入が存在しないケースを検出 (4.1.0 新規) — PowerShell は未代入の `$Script:` 変数を sucessfully `$null` として評価するため、typo バグが下流のヌル絡みエラーとして遠方で表面化することが多い。 別ファイル（状態を所有する consumer から切り出した共有ヘルパ等）が所有・初期化する `$Script:` 状態は `.psa.config.json` の `psa2013_known_script_vars` で宣言可能 (4.3.0+)。 リストにない名前は引き続き検出される |
 
 `PSA3xxx` — コーディングパターン（Warning）
 
@@ -417,7 +417,10 @@ Start-Process -ArgumentList $args ...
   "severity": "warning",
 
   // PSA4003 の行長制限
-  "max_line_length": 120
+  "max_line_length": 120,
+
+  // PSA2013/PSA2008 を免除する外部所有の $Script: 名 (4.3.0+)
+  "psa2013_known_script_vars": []
 }
 ```
 

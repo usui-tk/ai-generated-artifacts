@@ -15,6 +15,47 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-06-01
+
+### Added - `psa2013_known_script_vars` configuration key
+
+A new optional `.psa.config.json` key, `psa2013_known_script_vars`
+(array of strings, default `[]`), DECLARES `$Script:` variable names
+that are owned and initialised by a different file in the same
+module / runtime - for example a shared-library helper split out of a
+consumer script which initialises the session state.
+
+Listed names are exempted from both:
+
+- **PSA2013** (`$Script:Foo` read but never assigned in the file -
+  Error, default ON), and
+- **PSA2008** (`$Script:Foo++` / `+=` / `-=` without prior init in the
+  file - Info, default ON).
+
+Matched case-insensitively, with or without a leading `$Script:` /
+`Script:` prefix. Names **not** on the list continue to fire, so
+genuine typos and missing initialisation in first-party code remain
+caught (verified by regression tests). This is a positive contract
+declaration, not a blanket rule disable.
+
+#### Why
+
+The `reference-code/powershell` canon holds shared helper functions
+extracted from consumer scripts. Those helpers read and mutate
+`$Script:` session state (debug-trace stacks/counters, phase timings)
+that the **consuming script** owns and initialises - not the per-helper
+file. Under PSA2013/PSA2008's correct file-local model these intentional
+external-scope accesses were false positives that prevented the canon
+from reaching `0/0/0`. The key resolves this precisely, declaring the
+external-scope dependency rather than disabling the rules.
+
+### Compatibility
+
+Backward-compatible (minor bump). Configs that do not set the new key
+behave exactly as in 4.2.0. The key is registered in the
+`--config-check` allowed-keys set and documented in
+`.psa.config.json.template` and `SPEC.md` §4.9b / §4.9g / §5.3.
+
 ### Documentation — Verified-consumers table
 
 Added `Update-WindowsServerIso.ps1` (`scripts/powershell/update-windows-server-iso/`) to the **Verified

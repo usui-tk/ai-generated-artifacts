@@ -146,7 +146,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '4.2.0'
+__version__ = '4.3.0'
 
 
 def _verify_version_file_consistency():
@@ -2095,7 +2095,7 @@ def check_param_block_required(clean):
     return out
 
 
-def check_script_var_mutation(clean):
+def check_script_var_mutation(clean, known_script_vars=None):
     """PSA2008: ``$Script:Foo++`` / ``+=`` / ``-=`` without prior init.
 
     New in v3.6.0. PSScriptAnalyzer does not have a direct equivalent.
@@ -2108,6 +2108,13 @@ def check_script_var_mutation(clean):
     Fires at Info level by default; this is a readability suggestion,
     not a defect.
 
+    ``known_script_vars`` (from the ``psa2013_known_script_vars`` config
+    key, lowercased) is the same external-scope contract declaration
+    honoured by PSA2013: a counter owned and initialised by another file
+    in the same module/runtime (a shared helper split out of a consumer)
+    is mutated, not first-initialised, in the helper, so the mutation is
+    an intentional external-scope access. Only listed names are exempt.
+
     Detection
     ---------
     1. Scan for every ``$Script:Foo = ...`` assignment.
@@ -2117,6 +2124,8 @@ def check_script_var_mutation(clean):
        the same name has been seen anywhere in the file.
     """
     out = []
+    if known_script_vars is None:
+        known_script_vars = frozenset()
     # Pass 1: collect names that are initialised somewhere in the file.
     init_pat = re.compile(
         r'\$Script:([A-Za-z_]\w*)\s*=(?!=)', re.IGNORECASE)
@@ -2130,6 +2139,8 @@ def check_script_var_mutation(clean):
     for ln, line in enumerate(clean.split('\n'), 1):
         for m in mut_pat.finditer(line):
             name = m.group(1)
+            if name.lower() in known_script_vars:
+                continue
             if name.lower() not in initialised:
                 out.append({
                     'severity': 'info', 'code': 'PSA2008',
@@ -3080,15 +3091,27 @@ _TOP_LEVEL_PARAM_PATTERN = re.compile(
 )
 
 
-def check_script_var_read_never_assigned(clean):
+def check_script_var_read_never_assigned(clean, known_script_vars=None):
     """PSA2013: $Script:Foo read with no $Script:Foo = ... in file.
 
     For every distinct $Script:Foo name referenced in the file, verify
     that some assignment $Script:Foo = ... appears. If not, fire once
     per read site (capped to the first 5 sites per name to avoid
     flooding output on a global typo with many call sites).
+
+    ``known_script_vars`` is a caller-supplied allowlist (from the
+    ``psa2013_known_script_vars`` config key, lowercased) that DECLARES
+    $Script: names whose owner/initialiser is a DIFFERENT file in the
+    same module/runtime -- e.g. shared library helpers split out of a
+    consumer script that initialises the session state. This is a
+    positive *contract declaration* ("these reads are an intentional
+    external-scope dependency"), not a blanket suppression: a name is
+    exempt ONLY if the maintainer has listed it. Names NOT on the list
+    still fire, so first-party typos remain caught.
     """
     issues = []
+    if known_script_vars is None:
+        known_script_vars = frozenset()
 
     # Pass 1: collect every script-scope assignment.
     assigned = set()
@@ -3146,6 +3169,10 @@ def check_script_var_read_never_assigned(clean):
                 continue
             # Skip well-known auto vars.
             if name in _PSA2013_KNOWN_AUTO_SCRIPT_VARS:
+                continue
+            # Skip caller-declared external-scope script vars (owned and
+            # initialised by another file in the same module/runtime).
+            if name in known_script_vars:
                 continue
             # Per-name cap.
             seen_per_name.setdefault(name, 0)
@@ -4827,6 +4854,7 @@ _CONFIG_ALLOWED_KEYS = frozenset({
     'max_function_lines',
     'psa8001_ignore_functions',
     'psa2010_known_cmdlets',
+    'psa2013_known_script_vars',
     'psap0005_relaxed_mode',
 })
 
@@ -5191,6 +5219,17 @@ class Config:
         # Storage, Archive, WindowsCapability, ConfigCI (WDAC),
         # International, and WSMan.
         self.psa2010_known_cmdlets = []
+        # PSA2013 / PSA2008 external-scope contract declaration. Lists
+        # $Script: names owned and initialised by another file in the
+        # same module/runtime (a shared helper split out of a consumer
+        # that owns the session state). Declaring a name here states
+        # "this external-scope read/mutation is intentional"; it does
+        # NOT blanket-disable the rules. Names absent from the list still
+        # fire, so first-party typos / missing-init stay caught.
+        # Matched case-insensitively, with or without a leading
+        # "$Script:" / "Script:" prefix. Honoured by PSA2013 (read) and
+        # PSA2008 (mutate).
+        self.psa2013_known_script_vars = []
         # PSAP0005 relaxed-mode flag. When True, four established
         # prose patterns are exempted from PSAP0005:
         #   A. SECTION header   (# SECTION rNN: ...)
@@ -5266,6 +5305,23 @@ class Config:
                     print(f'psa.py: psa2010_known_cmdlets must be a '
                           f'list (got {type(v).__name__})',
                           file=sys.stderr)
+                    raise SystemExit(2)
+            if 'psa2013_known_script_vars' in data:
+                v = data['psa2013_known_script_vars']
+                if isinstance(v, list):
+                    norm = []
+                    for x in v:
+                        s = str(x).strip()
+                        low = s.lower()
+                        if low.startswith('$script:'):
+                            s = s[len('$script:'):]
+                        elif low.startswith('script:'):
+                            s = s[len('script:'):]
+                        norm.append(s.lower())
+                    c.psa2013_known_script_vars = norm
+                else:
+                    print('psa.py: psa2013_known_script_vars must be a '
+                          f'list (got {type(v).__name__})', file=sys.stderr)
                     raise SystemExit(2)
             if 'psap0005_relaxed_mode' in data:
                 v = data['psap0005_relaxed_mode']
@@ -5351,7 +5407,8 @@ def analyze_text(text, cfg, file_meta=None):
     if cfg.enabled['PSA2007']:
         raw += check_param_auto_var(clean)
     if cfg.enabled['PSA2008']:
-        raw += check_script_var_mutation(clean)
+        raw += check_script_var_mutation(
+            clean, frozenset(cfg.psa2013_known_script_vars))
     if cfg.enabled['PSA2009']:
         raw += check_pscustomobject_undeclared(clean)
     # PSA2010 (call to undefined function) requires cross-file context
@@ -5363,7 +5420,8 @@ def analyze_text(text, cfg, file_meta=None):
     if cfg.enabled['PSA2012']:
         raw += check_positional_mandatory_call(text, clean)
     if cfg.enabled['PSA2013']:
-        raw += check_script_var_read_never_assigned(clean)
+        raw += check_script_var_read_never_assigned(
+            clean, frozenset(cfg.psa2013_known_script_vars))
 
     if cfg.enabled['PSA3001']:
         raw += check_argumentlist(clean)

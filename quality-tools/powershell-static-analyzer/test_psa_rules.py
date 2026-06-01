@@ -1477,6 +1477,74 @@ def _run_psap0003_0005_dedupe():
 
 
 # ---------------------------------------------------------------------------
+# Config key: psa2013_known_script_vars (new in 4.3.0)
+# ---------------------------------------------------------------------------
+# Contract declaration that exempts caller-owned external-scope $Script:
+# names from PSA2013 (read) and PSA2008 (mutate), WITHOUT weakening
+# detection of names that are NOT declared.
+
+def _run_psa2013_2008_known_script_vars_tests():
+    failures = []
+
+    def run(rule, source, known, expected):
+        cfg = psa.Config()
+        cfg.enabled = {k: False for k in cfg.enabled}
+        cfg.enabled[rule] = True
+        cfg.min_severity = 'info'
+        cfg.psa2013_known_script_vars = known
+        results = psa.analyze_text(source, cfg, file_meta=None)
+        return _count(results, rule), expected
+
+    cases = [
+        ('PSA2013 neg: allowlisted external-scope read is exempt',
+         'PSA2013', "function U { $a = $Script:DebugTraceStack }\n",
+         ['debugtracestack'], 0),
+        ('PSA2013 pos: non-allowlisted typo still fires',
+         'PSA2013', "function U { $a = $Script:TypoVariableXyz }\n",
+         ['debugtracestack'], 1),
+        ('PSA2008 neg: allowlisted counter mutation is exempt',
+         'PSA2008', "function B { $Script:DebugTraceEventSeq++ }\n",
+         ['debugtraceeventseq'], 0),
+        ('PSA2008 pos: non-allowlisted counter mutation still fires',
+         'PSA2008', "function B { $Script:AnotherCounter++ }\n",
+         ['debugtraceeventseq'], 1),
+        ('PSA2013 neg: empty allowlist preserves baseline',
+         'PSA2013', "function U { $a = $Script:DebugTraceStack }\n",
+         [], 1),
+    ]
+    for name, rule, source, known, expected in cases:
+        got, exp = run(rule, source, known, expected)
+        if got != exp:
+            failures.append(f'  FAIL: {name}\n'
+                            f'         expected {rule}={exp}, got {rule}={got}')
+
+    # Config.load normalisation: strip $Script:/Script: prefix, lowercase.
+    import json as _json, tempfile as _tempfile, os as _os
+
+    class _Args:
+        config = None; enable = None; disable = None; include = None
+        severity = None; format = None; no_color = True; max_line_length = None
+
+    payload = {'psa2013_known_script_vars':
+               ['$Script:DebugTraceStack', 'Script:ScriptRoot', 'PhaseTimings']}
+    fd, path = _tempfile.mkstemp(suffix='.json')
+    try:
+        with _os.fdopen(fd, 'w') as fh:
+            _json.dump(payload, fh)
+        args = _Args(); args.config = path
+        loaded = psa.Config.load(args)
+        want = ['debugtracestack', 'scriptroot', 'phasetimings']
+        if loaded.psa2013_known_script_vars != want:
+            failures.append('  FAIL: psa2013_known_script_vars normalisation\n'
+                            f'         expected {want}\n'
+                            f'         got      {loaded.psa2013_known_script_vars}')
+    finally:
+        _os.unlink(path)
+
+    return failures
+
+
+# ---------------------------------------------------------------------------
 # File-meta rule: PSA7001 — Missing UTF-8 BOM (warning, default ON)
 # ---------------------------------------------------------------------------
 # PSA7001 fires from analyze_text() ONLY when file_meta carries
@@ -2030,6 +2098,24 @@ def run():
         print('  [FAIL] PSAP0003 + PSAP0005 dedupe')
         fail_count += 1
         failures.append(('PSAP0003 + PSAP0005 dedupe', dedupe_failures))
+
+    # --- Section 2d2: psa2013_known_script_vars (PSA2013 + PSA2008) ---
+    print()
+    print('=' * 72)
+    print('Section 2d2: psa2013_known_script_vars (PSA2013 + PSA2008, '
+          'new in 4.3.0)')
+    print('=' * 72)
+    ksv_failures = _run_psa2013_2008_known_script_vars_tests()
+    if not ksv_failures:
+        print('  [PASS] listed external-scope vars exempt; non-listed still '
+              'fire; loader normalises names')
+        pass_count += 1
+    else:
+        print('  [FAIL] psa2013_known_script_vars')
+        for line in ksv_failures:
+            print(line)
+        fail_count += 1
+        failures.append(('psa2013_known_script_vars', ksv_failures))
 
     # --- Section 2e: v4.0.2 strict-mode regression tests ---
     print()

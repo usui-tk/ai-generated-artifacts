@@ -17,6 +17,18 @@
 //     markers carry a SemVer canonical_version (e.g. 0.1.0), deliberately NOT
 //     an rNN token, so markers do not trip PSAP0005 while revision-anchored
 //     prose in bodies remains caught.
+//
+// External-scope $Script: contract (psa2013_known_script_vars; psa.py 4.3.0+):
+//   the canon holds shared helpers split out of the consumer scripts. Those
+//   helpers READ/MUTATE $Script: session state (debug-trace stacks/counters,
+//   phase timings, script-root/-start) that the CONSUMING script owns and
+//   initialises - not the per-helper file. Under PSA2013 (read-never-assigned,
+//   error) and PSA2008 (mutate-without-init, info) these intentional external-
+//   scope accesses would be false positives. The names below were established
+//   by per-unit inspection as consumer-owned globals (verified initialised in
+//   the consumers, e.g. update-windows-server-iso); they are DECLARED here as
+//   an intentional external-scope dependency, not a blanket suppression. Names
+//   NOT listed still fire, so genuine canon-local typos remain caught.
 {
   "enable": [
     "PSAP0003",
@@ -26,5 +38,29 @@
   "disable": [
     "PSA6003",
     "PSA7003"
+  ],
+  "psa2013_known_script_vars": [
+    "CurrentPhaseStart",
+    "DebugTraceAutoExportDir",
+    "DebugTraceAutoExportEnabled",
+    "DebugTraceCompletedCap",
+    "DebugTraceCompletedFrames",
+    "DebugTraceEventSeq",
+    "DebugTraceHistoryCap",
+    "DebugTraceJsonDepth",
+    "DebugTraceJsonlBuffer",
+    "DebugTraceJsonlBufferCap",
+    "DebugTraceJsonlEnabled",
+    "DebugTraceJsonlErrorCount",
+    "DebugTraceJsonlLastError",
+    "DebugTraceJsonlLineCap",
+    "DebugTraceJsonlPath",
+    "DebugTraceJsonlWriteCount",
+    "DebugTracePhaseRegistry",
+    "DebugTraceStack",
+    "PhaseTimings",
+    "ScriptRoot",
+    "ScriptStartTime",
+    "ScriptTag"
   ]
 }

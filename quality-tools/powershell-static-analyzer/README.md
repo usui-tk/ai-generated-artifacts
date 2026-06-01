@@ -270,12 +270,12 @@ optional column, and a short message.
 | **PSA2005** | Warning | ✅ on | Assignment operator (`=`) inside `if` / `while` |
 | **PSA2006** | Warning | ✅ on | Redirection operator (`>` / `<`) inside `if` / `while` |
 | **PSA2007** | Warning | ✅ on | Parameter name shadows a PowerShell automatic variable (new in 3.6.0) |
-| **PSA2008** | Info | ✅ on | `$Script:Foo++` / `+=` / `-=` without prior initialisation (new in 3.6.0) |
+| **PSA2008** | Info | ✅ on | `$Script:Foo++` / `+=` / `-=` without prior initialisation (new in 3.6.0). Externally-owned counters can be declared via `.psa.config.json` `psa2013_known_script_vars` (4.3.0+). |
 | **PSA2009** | Warning | ✅ on | `[pscustomobject]@{...}` property assigned without prior declaration in the initialiser (new in 3.8.0) — guards against the PowerShell 5.1 sealed-object runtime exception |
 | **PSA2010** | Error | ✅ on | Call to a function not defined in any scanned file and not in the built-in cmdlet whitelist (new in 3.9.0) — catches typos such as `Find-Signtool` where the actual helper is `Find-KitTool 'signtool.exe'`. Extend the whitelist via `.psa.config.json` `psa2010_known_cmdlets`. |
 | **PSA2011** | Error | ✅ on | `Split-Path -LiteralPath ... -Parent` triggers `AmbiguousParameterSet` on Windows PowerShell 5.1 ja-JP (new in 3.9.0) — fix with `[System.IO.Path]::GetDirectoryName($path)` or `Split-Path -Path $path -Parent`. |
 | **PSA2012** | Error | ✅ on | Positional call provides fewer args than the target function has `[Parameter(Mandatory)]` parameters (new in 4.1.0) — PowerShell prompts interactively for the missing values, hanging unattended sessions. Use named arguments. |
-| **PSA2013** | Error | ✅ on | `$Script:Foo` is read but never assigned anywhere in the file (new in 4.1.0) — PowerShell silently evaluates this to `$null`, hiding typo bugs. |
+| **PSA2013** | Error | ✅ on | `$Script:Foo` is read but never assigned anywhere in the file (new in 4.1.0) — PowerShell silently evaluates this to `$null`, hiding typo bugs. Externally-owned `$Script:` state (e.g. shared helpers split out of a consumer that owns the state) can be declared via `.psa.config.json` `psa2013_known_script_vars` (4.3.0+); names not listed still fire. |
 
 `PSA3xxx` — coding patterns (Warning)
 
@@ -421,7 +421,10 @@ Configuration files are **JSONC** — JSON plus `//` line comments and
   "severity": "warning",
 
   // Line-length limit for PSA4003
-  "max_line_length": 120
+  "max_line_length": 120,
+
+  // Externally-owned $Script: names exempt from PSA2013/PSA2008 (4.3.0+)
+  "psa2013_known_script_vars": []
 }
 ```
 

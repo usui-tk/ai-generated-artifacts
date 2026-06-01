@@ -46,8 +46,12 @@ is pre-release and MUST NOT be vendored; a unit is promoted to `1.0.0` only afte
 canon test suite passes, and vendoring (P6/P7) is gated on `version >= 1.0.0`.
 
 Governed by [ADR 0003](./adr/0003-standalone-tool-principle.md) (standalone tools),
-[ADR 0007](./adr/0007-canon-code-functional-quality-assurance.md) (canon functional QA), and
-[ADR 0008](./adr/0008-canon-release-model.md) (canon release model).
+[ADR 0007](./adr/0007-canon-code-functional-quality-assurance.md) (canon functional QA),
+[ADR 0008](./adr/0008-canon-release-model.md) (canon release model), and
+[ADR 0009](./adr/0009-psa-canonical-lifecycle.md) (psa.py canonical lifecycle: the
+`quality-tools/` copy is the continuously-updated source of truth; the original
+`scripts/python/...` copy is frozen until the psaMove contract deletes it after P7;
+consumers repoint and follow-latest at the `scripts/`->`projects/` migration).
 
 ## Execution framework
 
