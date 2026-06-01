@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-skipws version=0.1.0 hash=fb17dca5e9c37829 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-skipws version=1.0.0 hash=fb17dca5e9c37829 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_SkipWs {
     param($State)
     $s = $State.s

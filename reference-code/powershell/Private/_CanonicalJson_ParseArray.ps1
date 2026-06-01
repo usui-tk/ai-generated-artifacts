@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsearray version=0.1.0 hash=bbf604ace71922f6 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsearray version=1.0.0 hash=bbf604ace71922f6 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseArray {
     param($State)
     $arr = [System.Collections.Generic.List[object]]::new()

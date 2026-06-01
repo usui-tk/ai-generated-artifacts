@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.debugtrace-nextseq version=0.1.0 hash=40affbda93e0dc92 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.debugtrace-nextseq version=1.0.0 hash=40affbda93e0dc92 policy=canonical binding=follow-latest >>>
 function _DebugTrace_NextSeq {
     # Atomic-ish counter. Single-threaded PowerShell so no Interlocked
     # needed; this is just a small helper for readability.

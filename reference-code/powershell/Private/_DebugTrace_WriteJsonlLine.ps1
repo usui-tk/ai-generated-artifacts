@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.debugtrace-writejsonlline version=0.1.0 hash=9b0be39d7c4a0e35 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.debugtrace-writejsonlline version=1.0.0 hash=9b0be39d7c4a0e35 policy=canonical binding=follow-latest >>>
 function _DebugTrace_WriteJsonlLine {
     # Append one JSONL line to the debugtrace.jsonl file (or to the
     # pre-activation buffer if file output isn't enabled yet). All

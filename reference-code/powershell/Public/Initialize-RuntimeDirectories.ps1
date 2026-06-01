@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.initialize-runtimedirectories version=0.1.0 hash=30bff32f7d40fca8 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.initialize-runtimedirectories version=1.0.0 hash=30bff32f7d40fca8 policy=canonical binding=follow-latest >>>
 function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical unit_id retained; noun stays plural by design
     <#
     .SYNOPSIS

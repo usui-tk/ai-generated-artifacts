@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.invoke-cleanupdirectories version=0.1.0 hash=4f6b6f7c4bb39f96 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.invoke-cleanupdirectories version=1.0.0 hash=4f6b6f7c4bb39f96 policy=canonical binding=follow-latest >>>
 function Invoke-CleanupDirectories { # psa-disable-line PSA6003 -- "Directories" is plural by design; takes multiple directory args
     # Wipe $OutputDir and $WorkDir trees. Idempotent (missing dirs are
     # silently skipped). Throws if either path looks dangerous.

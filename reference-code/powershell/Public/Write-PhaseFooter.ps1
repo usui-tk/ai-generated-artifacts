@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.write-phasefooter version=0.1.0 hash=762ec88efd33dc33 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.write-phasefooter version=1.0.0 hash=762ec88efd33dc33 policy=canonical binding=follow-latest >>>
 function Write-PhaseFooter {
     # Closes a phase started by Write-PhaseHeader. Records the elapsed
     # duration in $Script:PhaseTimings (used by run-summary helpers).

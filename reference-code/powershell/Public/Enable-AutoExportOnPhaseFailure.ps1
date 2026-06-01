@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.enable-autoexportonphasefailure version=0.1.0 hash=81f2415bbc83f281 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.enable-autoexportonphasefailure version=1.0.0 hash=81f2415bbc83f281 policy=canonical binding=follow-latest >>>
 function Enable-AutoExportOnPhaseFailure {
     <#
     .SYNOPSIS

@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.show-phasesummary version=0.1.0 hash=22ed90223f442cc8 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.show-phasesummary version=1.0.0 hash=22ed90223f442cc8 policy=canonical binding=follow-latest >>>
 function Show-PhaseSummary {
     <#
     .SYNOPSIS

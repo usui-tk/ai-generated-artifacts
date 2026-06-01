@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.export-debugtracejson version=0.1.0 hash=4471e5482eaafc8c policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.export-debugtracejson version=1.0.0 hash=4471e5482eaafc8c policy=canonical binding=follow-latest >>>
 function Export-DebugTraceJson {
     <#
     .SYNOPSIS

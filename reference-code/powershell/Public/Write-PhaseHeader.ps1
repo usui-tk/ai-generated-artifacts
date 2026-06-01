@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.write-phaseheader version=0.1.0 hash=a002b1883e7d48ba policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.write-phaseheader version=1.0.0 hash=a002b1883e7d48ba policy=canonical binding=follow-latest >>>
 function Write-PhaseHeader {
     # Prints a magenta banner that opens a phase. Records phase start
     # time so subsequent log lines can show '[+elapsed]'.

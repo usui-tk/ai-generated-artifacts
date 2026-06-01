@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.format-debugfailure version=0.1.0 hash=0ed20da6d346d5b8 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.format-debugfailure version=1.0.0 hash=0ed20da6d346d5b8 policy=canonical binding=follow-latest >>>
 function Format-DebugFailure {
     <#
     .SYNOPSIS

@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.get-sevenzippath version=0.1.0 hash=a3901d3b12779526 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.get-sevenzippath version=1.0.0 hash=a3901d3b12779526 policy=canonical binding=follow-latest >>>
 function Get-SevenZipPath {
     foreach ($p in @("${env:ProgramFiles}\7-Zip\7z.exe","${env:ProgramFiles(x86)}\7-Zip\7z.exe")) {
         if (Test-Path $p) { return $p }

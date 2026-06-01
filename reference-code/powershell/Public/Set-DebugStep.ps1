@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.set-debugstep version=0.1.0 hash=0ff66497b3b281c8 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.set-debugstep version=1.0.0 hash=0ff66497b3b281c8 policy=canonical binding=follow-latest >>>
 function Set-DebugStep {
     <#
     .SYNOPSIS

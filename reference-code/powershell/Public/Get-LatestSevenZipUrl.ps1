@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.get-latestsevenzipurl version=0.1.0 hash=973f44b6539008d4 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.get-latestsevenzipurl version=1.0.0 hash=973f44b6539008d4 policy=canonical binding=follow-latest >>>
 function Get-LatestSevenZipUrl {
     # Tier 1: 7-zip.org
     try {

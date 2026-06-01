@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.set-utf8pipelineencoding version=0.1.0 hash=16192049ae7363e8 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.set-utf8pipelineencoding version=1.0.0 hash=16192049ae7363e8 policy=canonical binding=follow-latest >>>
 function Set-Utf8PipelineEncoding {
     <#
     .SYNOPSIS

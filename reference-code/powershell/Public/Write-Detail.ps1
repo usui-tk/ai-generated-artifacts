@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.write-detail version=0.1.0 hash=7fa6224e26175e15 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.write-detail version=1.0.0 hash=7fa6224e26175e15 policy=canonical binding=follow-latest >>>
 function Write-Detail {
     # ====================================================================
     # Continuation / detail line for a preceding marker line, or a row

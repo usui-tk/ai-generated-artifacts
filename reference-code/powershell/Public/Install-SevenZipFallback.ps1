@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.install-sevenzipfallback version=0.1.0 hash=a66ae5d392104ab5 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.install-sevenzipfallback version=1.0.0 hash=a66ae5d392104ab5 policy=canonical binding=follow-latest >>>
 function Install-SevenZipFallback {
     param([string]$DownloadDir)
     $info = Get-LatestSevenZipUrl

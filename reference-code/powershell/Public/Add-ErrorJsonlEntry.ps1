@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.add-errorjsonlentry version=0.1.0 hash=cecbc2af5da9ce31 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.add-errorjsonlentry version=1.0.0 hash=cecbc2af5da9ce31 policy=canonical binding=follow-latest >>>
 function Add-ErrorJsonlEntry {
     <#
     .SYNOPSIS

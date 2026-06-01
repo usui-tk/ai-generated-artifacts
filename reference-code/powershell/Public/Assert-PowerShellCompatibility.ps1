@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.assert-powershellcompatibility version=0.1.0 hash=b2061e25acaa873c policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.assert-powershellcompatibility version=1.0.0 hash=b2061e25acaa873c policy=canonical binding=follow-latest >>>
 function Assert-PowerShellCompatibility {
     <#
     .SYNOPSIS

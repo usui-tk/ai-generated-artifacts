@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsenumber version=0.1.0 hash=0624198cd56a3e41 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsenumber version=1.0.0 hash=0624198cd56a3e41 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseNumber {
     param($State)
     $start = $State.i

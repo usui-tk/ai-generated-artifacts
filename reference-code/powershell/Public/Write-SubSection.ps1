@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.write-subsection version=0.1.0 hash=524c6903ce0d76ea policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.write-subsection version=1.0.0 hash=524c6903ce0d76ea policy=canonical binding=follow-latest >>>
 function Write-SubSection {
     # Lightweight section break inside a phase (e.g. [Step A]/[Step B]).
     # Prints with a leading blank line and a horizontal rule.

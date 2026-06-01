@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.debugtrace-retireframe version=0.1.0 hash=d6ed295961b4416e policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.debugtrace-retireframe version=1.0.0 hash=d6ed295961b4416e policy=canonical binding=follow-latest >>>
 function _DebugTrace_RetireFrame {
     # Move a frame from the active stack into the completed list.
     # Handles the history cap. Idempotent: safe to call even if the

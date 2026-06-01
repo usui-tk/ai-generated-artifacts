@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.wait-withjitter version=0.1.0 hash=15aba6cbcbfa9966 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.wait-withjitter version=1.0.0 hash=15aba6cbcbfa9966 policy=canonical binding=follow-latest >>>
 function Wait-WithJitter {
     param(
         [double]$BaseSeconds,

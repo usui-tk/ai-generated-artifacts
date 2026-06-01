@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'powershell.psm1'
-    ModuleVersion     = '0.1.0'
+    ModuleVersion     = '1.0.0'
     GUID              = 'deaf9b50-4be5-53b3-9efa-1c113263f6f5'
     Description       = 'Canonical shared PowerShell helpers (reference-code canon). Public functions are vendored into consumers; Private are internal dependencies. The module wrapper is test scaffolding, not a vendored unit.'
     PowerShellVersion = '5.1'
