@@ -29,6 +29,13 @@
 //   the consumers, e.g. update-windows-server-iso); they are DECLARED here as
 //   an intentional external-scope dependency, not a blanket suppression. Names
 //   NOT listed still fire, so genuine canon-local typos remain caught.
+// Known external cmdlets (psa2010_known_cmdlets): PSA2010 flags calls to
+//   functions/cmdlets not defined in the scanned set and not in PowerShell's
+//   built-in list. The canon-test gate runner (tests/Invoke-CanonTests.ps1) drives
+//   the Pester module, whose cmdlets are legitimate external dependencies declared
+//   here (the runner Import-Module Pester before using them). This is an explicit
+//   external-dependency declaration, like psa2013_known_script_vars - not a blanket
+//   disable of PSA2010, so genuine undefined-function typos elsewhere still fire.
 {
   "enable": [
     "PSAP0003",
@@ -38,6 +45,10 @@
   "disable": [
     "PSA6003",
     "PSA7003"
+  ],
+  "psa2010_known_cmdlets": [
+    "Invoke-Pester",
+    "New-PesterConfiguration"
   ],
   "psa2013_known_script_vars": [
     "CurrentPhaseId",
