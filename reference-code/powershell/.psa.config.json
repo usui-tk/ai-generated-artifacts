@@ -40,6 +40,7 @@
     "PSA7003"
   ],
   "psa2013_known_script_vars": [
+    "CurrentPhaseId",
     "CurrentPhaseStart",
     "DebugTraceAutoExportDir",
     "DebugTraceAutoExportEnabled",

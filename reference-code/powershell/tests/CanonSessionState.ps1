@@ -47,10 +47,12 @@ function Initialize-CanonSessionState {
         $Script:CurrentPhaseStart = $null
         $Script:CurrentPhaseId    = $null
         $Script:PhaseTimings      = New-Object 'System.Collections.Generic.List[object]'
+        $Script:PhaseSummaryShown = $false
         $Script:ScriptStartTime   = Get-Date
 
         # --- Script identity (consumer init block) ---
         $Script:ScriptRoot     = $ScriptRoot
+        $Script:ScriptPath     = (Join-Path $ScriptRoot 'canon-test.ps1')
         $Script:ScriptTag      = $ScriptTag
         $Script:ScriptVersion  = $ScriptVersion
         $Script:ScriptHash     = $ScriptHash
