@@ -53,6 +53,7 @@ function Initialize-CanonSessionState {
         # --- Script identity (consumer init block) ---
         $Script:ScriptRoot     = $ScriptRoot
         $Script:ScriptPath     = (Join-Path $ScriptRoot 'canon-test.ps1')
+        $Script:ErrorsJsonlPath = $null
         $Script:ScriptTag      = $ScriptTag
         $Script:ScriptVersion  = $ScriptVersion
         $Script:ScriptHash     = $ScriptHash
