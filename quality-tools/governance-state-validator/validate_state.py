@@ -17,9 +17,13 @@ invariants that the schemas alone cannot express:
                              version match the manifest record (manifest is the
                              single source of truth; the marker claims sync
                              against it).
-  E. canon coverage          - the set of canon unit files under reference-code/
-                             is in bijection with the powershell-helper manifest
-                             records (no orphan canon file, no dangling record).
+  E. canon coverage          - the set of canon unit files in the unit home
+                             (reference-code/<family>/{Public,Private}) is in
+                             bijection with the powershell-helper manifest records
+                             (no orphan unit-home file, no dangling record).
+                             Manifest-master (ADR 0011 §1): non-unit areas
+                             (tests/, .psm1/.psd1 scaffolding) are not managed
+                             units and are not enumerated.
   F. canonical JSONL format  - every state record is canonical-JSON: key-sorted,
                              compact separators, one record per line.
 
@@ -156,12 +160,23 @@ def validate(root, quiet=False):
                 fail("D", "%s: version mismatch (manifest=%s marker=%s)"
                      % (unit_id, record.get("canonical_version"), marker_ver))
 
-    # --- E. canon coverage (bijection canon files <-> powershell-helper rows) ---
-    canon_glob = os.path.join(root, "reference-code", "powershell", "**", "*.ps1")
-    canon_files = {os.path.normpath(os.path.relpath(p, root))
-                   for p in glob.glob(canon_glob, recursive=True)}
+    # --- E. canon coverage (bijection unit-home files <-> powershell-helper rows) ---
+    # Manifest-master (ADR 0011 §1): the unit set is what the manifest registers,
+    # not whatever sits under the canon tree. The on-disk side of the bijection is
+    # therefore the UNIT HOME only - Public/ and Private/ - where canonical units
+    # live. Non-unit areas under reference-code/<family>/ (tests/, and the
+    # .psm1/.psd1 module scaffolding per ADR 0010) are not managed units and are
+    # not enumerated here; an unregistered file is flagged only when it sits in the
+    # unit home. This is a positive definition of the managed set, not an exclusion
+    # list bolted onto a whole-tree glob.
+    canon_files = set()
+    for home in ("Public", "Private"):
+        home_glob = os.path.join(root, "reference-code", "powershell", home,
+                                 "**", "*.ps1")
+        canon_files |= {os.path.normpath(os.path.relpath(p, root))
+                        for p in glob.glob(home_glob, recursive=True)}
     for orphan in sorted(canon_files - registered_ps1):
-        fail("E", "canon file not registered in manifest: %s" % orphan)
+        fail("E", "canon unit-home file not registered in manifest: %s" % orphan)
     for dangling in sorted(registered_ps1 - canon_files):
         fail("E", "manifest powershell-helper location has no canon file: %s"
              % dangling)

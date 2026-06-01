@@ -40,7 +40,7 @@ BASE_RECORD = {
 
 
 def build_root(manifest_lines, marker_ver="0.1.0", write_canon=True,
-               canon_extra=None):
+               canon_extra=None, tests_extra=None):
     root = tempfile.mkdtemp(prefix="gsv-test-")
     os.makedirs(os.path.join(root, "governance", "schema"))
     os.makedirs(os.path.join(root, "governance", "state"))
@@ -60,6 +60,13 @@ def build_root(manifest_lines, marker_ver="0.1.0", write_canon=True,
         with open(os.path.join(pub, extra), "wb") as handle:
             handle.write(MARKER.format(uid="pwsh.helper.x", ver="0.1.0")
                          .encode("utf-8"))
+    # Non-unit files under the canon tree (tests/) must NOT be treated as units
+    # (ADR 0011 manifest-master): create them to prove they are not flagged.
+    for extra in (tests_extra or []):
+        tests_dir = os.path.join(root, "reference-code", "powershell", "tests")
+        os.makedirs(tests_dir, exist_ok=True)
+        with open(os.path.join(tests_dir, extra), "wb") as handle:
+            handle.write(b"\xef\xbb\xbf# test scaffolding, not a managed unit\r\n")
     return root
 
 
@@ -102,6 +109,16 @@ def run():
     root = build_root([_canonical_line(BASE_RECORD)], canon_extra=["Orphan.ps1"])
     findings, _, _ = validate(root, quiet=True)
     cases.append(("E orphan canon file caught", "E" in checks_present(findings),
+                  findings))
+    shutil.rmtree(root)
+
+    # E (manifest-master, ADR 0011 §1): a file under tests/ is NOT a managed unit
+    # and must NOT be flagged, even though it lives under the canon tree.
+    root = build_root([_canonical_line(BASE_RECORD)],
+                      tests_extra=["Canon.Smoke.Tests.ps1", "CanonSessionState.ps1"])
+    findings, _, _ = validate(root, quiet=True)
+    cases.append(("E tests/ file not flagged (manifest-master)",
+                  "E" not in checks_present(findings) and findings == [],
                   findings))
     shutil.rmtree(root)
 

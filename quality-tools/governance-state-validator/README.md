@@ -13,7 +13,7 @@ considered consistent.
 | **B** | Every `governance/state/observations/**/*.jsonl` record validates against `observation.schema.json`. Skipped while no observation files exist (before P3). |
 | **C** | Every manifest record's `canonical_location` exists on disk. |
 | **D** | For `kind = powershell-helper`, the `canonical_location` file carries a canonical marker whose `unit_id` and `version` match the manifest record. The manifest is the single source of truth; the marker claims sync against it. |
-| **E** | The canon unit files under `reference-code/` are in bijection with the powershell-helper manifest records (no orphan canon file, no dangling record). |
+| **E** | The canon unit files in the unit home (`reference-code/<family>/{Public,Private}`) are in bijection with the powershell-helper manifest records (no orphan unit-home file, no dangling record). Manifest-master (ADR 0011 §1): non-unit areas (`tests/`, `.psm1`/`.psd1` scaffolding) are not managed units and are not enumerated. |
 | **F** | Every state record is canonical JSON: key-sorted, compact separators, one record per line (diff-stable). |
 
 Field-ownership separation (manifest vs marker vs observation) is enforced by
