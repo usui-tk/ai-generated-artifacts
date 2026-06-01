@@ -154,7 +154,12 @@ function Export-DebugTraceJson {
         $hostInfo = [pscustomobject]@{
             psVersion   = $PSVersionTable.PSVersion.ToString()
             psEdition   = $PSVersionTable.PSEdition
-            clrVersion  = $PSVersionTable.CLRVersion.ToString()
+            # Dual-runtime policy (ADR 0012): $PSVersionTable.CLRVersion exists
+            # only on Windows PowerShell 5.1 and is absent on PS 7 (so
+            # .ToString() throws). Use [System.Environment]::Version - the
+            # executing .NET runtime version, present on both runtimes - and keep
+            # the field name 'clrVersion' for export-schema backward compatibility.
+            clrVersion  = [System.Environment]::Version.ToString()
             os          = ([System.Environment]::OSVersion.VersionString)
             culture     = (Get-Culture).Name
             uiCulture   = (Get-UICulture).Name

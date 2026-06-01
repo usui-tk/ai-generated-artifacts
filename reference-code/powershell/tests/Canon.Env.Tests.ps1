@@ -130,12 +130,9 @@ Describe 'F-env Enable-DebugTraceFileOutput + Export-DebugTraceJson (filesystem)
         Enable-DebugTraceFileOutput -Directory $TestDrive
         (& $script:M { $Script:DebugTraceJsonlEnabled }) | Should -BeTrue
     }
-    It 'Export-DebugTraceJson writes a JSON file and returns its path' -Skip {
-        # SKIP (canon bug, recorded): Export-DebugTraceJson calls
-        # $PSVersionTable.CLRVersion.ToString(); CLRVersion is $null on
-        # PowerShell 7 (PS Core), so it throws off-Windows-PowerShell. Tracked
-        # as a canon defect to fix via the change-management process (ADR 0011);
-        # not a test defect. Re-enable once the canon guards CLRVersion.
+    It 'Export-DebugTraceJson writes a JSON file and returns its path' {
+        # Fixed under ADR 0012 (dual-runtime policy): clrVersion now uses
+        # [System.Environment]::Version, runtime-safe on PS 7.
         $path = Join-Path $TestDrive 'export.json'
         $ret = & $script:M {
             param($p)
@@ -271,13 +268,11 @@ Describe 'F-env Invoke-DownloadWithProgress (network mocked, tmpdir, Private)' {
 
 Describe 'F-env Show-PowerShellEnvironment (CIM mocked)' {
     BeforeEach { Initialize-CanonSessionState -Module 'powershell' }
-    It 'emits environment info without throwing' -Skip {
-        # SKIP (canon bug, recorded): Show-PowerShellEnvironment references
-        # $pv.CLRVersion (line ~49); $PSVersionTable has no CLRVersion key on
-        # PowerShell 7, so under Set-StrictMode the property access throws
-        # off-Windows-PowerShell. Same defect class as Export-DebugTraceJson.
-        # Tracked as a canon defect to fix via the change-management process
-        # (ADR 0011). Re-enable once the canon guards CLRVersion.
-        $true | Should -BeTrue
+    It 'emits environment info without throwing' {
+        # Fixed under ADR 0012 (dual-runtime policy): CLR/.NET line now uses
+        # [System.Environment]::Version + FrameworkDescription, StrictMode-safe
+        # on PS 7. Get-CimInstance is absent here; the canon guards it in
+        # try/catch ($os=$null fallback), so the function still runs.
+        { Show-PowerShellEnvironment 6>&1 | Out-Null } | Should -Not -Throw
     }
 }

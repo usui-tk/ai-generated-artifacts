@@ -46,13 +46,25 @@ function Show-PowerShellEnvironment {
     }
     Write-Host ('    PowerShell Version  : {0}' -f $pv.PSVersion)
     Write-Host ('    PowerShell Edition  : {0,-25} ({1})' -f $pv.PSEdition, $editionDesc)
-    if ($pv.CLRVersion) {
-        Write-Host ('    CLR / .NET          : {0}' -f $pv.CLRVersion)
-    } else {
-        Write-Host  '    CLR / .NET          : (CLRVersion not exposed; PS Core is .NET 5+ via System.Environment.Version)'
-    }
-    if ($pv.BuildVersion) {
+    # CLR / .NET runtime version. Dual-runtime policy (ADR 0012): report the
+    # executing .NET runtime version on BOTH PS 5.1 and PS 7.x, never degrade.
+    # $PSVersionTable.CLRVersion exists only on Windows PowerShell 5.1 (and the
+    # bare property access throws under StrictMode on PS 7 because the key is
+    # absent), so use [System.Environment]::Version - same meaning (a [Version]
+    # value), present on both runtimes - and annotate with the framework family
+    # description for human readability.
+    $runtimeVersion = [System.Environment]::Version
+    $frameworkDesc  = [System.Runtime.InteropServices.RuntimeInformation]::FrameworkDescription
+    Write-Host ('    CLR / .NET          : {0,-25} ({1})' -f $runtimeVersion, $frameworkDesc)
+    # Engine build identity. Dual-runtime policy (ADR 0012): BuildVersion is a
+    # Windows PowerShell 5.1-only key (absent on PS 7, so the bare access throws
+    # under StrictMode). $PSVersionTable is a PSVersionHashTable, so the
+    # StrictMode-safe existence test is .ContainsKey(). Fall back to GitCommitId,
+    # the PS 7 engine-build identity, so both runtimes report an engine build.
+    if ($pv.ContainsKey('BuildVersion') -and $pv.BuildVersion) {
         Write-Host ('    Engine Build        : {0}' -f $pv.BuildVersion)
+    } elseif ($pv.ContainsKey('GitCommitId') -and $pv.GitCommitId) {
+        Write-Host ('    Engine Build        : {0}' -f $pv.GitCommitId)
     }
 
     $procBitness = if ([Environment]::Is64BitProcess) { '64-bit process' } else { '32-bit process' }
