@@ -54,7 +54,11 @@ Governed by [ADR 0003](./adr/0003-standalone-tool-principle.md) (standalone tool
 consumers repoint and follow-latest at the `scripts/`->`projects/` migration), and
 [ADR 0010](./adr/0010-canon-test-taxonomy-and-data.md) (canon test taxonomy: dependency
 buckets, unit-vs-functional, test-data classes, and the `reference-code/<family>/tests/`
-data-management policy - complements ADR 0007's mandatory test rule).
+data-management policy - complements ADR 0007's mandatory test rule), and
+[ADR 0011](./adr/0011-canon-change-management-governance.md) (canon change-management
+governance: manifest = Git-resident master with tool-mediated CRUD; many triggers -> one
+process; an impact-weighted decision gate in series before the quality gate; audit trail =
+commit + CHANGELOG - principles fixed here, machinery built in a later phase).
 
 ## Execution framework
 
