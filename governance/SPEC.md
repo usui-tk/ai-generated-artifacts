@@ -51,7 +51,10 @@ Governed by [ADR 0003](./adr/0003-standalone-tool-principle.md) (standalone tool
 [ADR 0009](./adr/0009-psa-canonical-lifecycle.md) (psa.py canonical lifecycle: the
 `quality-tools/` copy is the continuously-updated source of truth; the original
 `scripts/python/...` copy is frozen until the psaMove contract deletes it after P7;
-consumers repoint and follow-latest at the `scripts/`->`projects/` migration).
+consumers repoint and follow-latest at the `scripts/`->`projects/` migration), and
+[ADR 0010](./adr/0010-canon-test-taxonomy-and-data.md) (canon test taxonomy: dependency
+buckets, unit-vs-functional, test-data classes, and the `reference-code/<family>/tests/`
+data-management policy - complements ADR 0007's mandatory test rule).
 
 ## Execution framework
 
