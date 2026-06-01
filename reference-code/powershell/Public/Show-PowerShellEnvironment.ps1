@@ -35,6 +35,9 @@ function Show-PowerShellEnvironment {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSAvoidUsingWMICmdlet', '',
         Justification = 'Intentional Get-WmiObject fallback path. CIM is the primary path; WMI is the secondary path used only when CIM is constrained (some Server Core / container images). PS 5.1 supports both; PS 7+ exposes Get-WmiObject only when the WMI compatibility module is loaded, which is fine because the script declares PS 5.1+ as its baseline.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSUseCompatibleCommands', '',
+        Justification = 'platform_scope=windows-enhanced (ADR 0013). The Get-CimInstance / Get-WmiObject OS-info path is intentionally Windows-specific: on non-Windows it is guarded by try/catch and degrades gracefully to "(CIM/WMI unavailable)". The function itself is cross-platform and runs everywhere; only this OS-detail section is Windows-enhanced. The compatibility gate flags these Windows-only commands on the PS-7-Linux profile; that is expected and accepted for a windows-enhanced unit, not a defect.')]
     param()
 
     # ---- (1) Engine + process ----
@@ -51,11 +54,15 @@ function Show-PowerShellEnvironment {
     # $PSVersionTable.CLRVersion exists only on Windows PowerShell 5.1 (and the
     # bare property access throws under StrictMode on PS 7 because the key is
     # absent), so use [System.Environment]::Version - same meaning (a [Version]
-    # value), present on both runtimes - and annotate with the framework family
-    # description for human readability.
+    # value), present on EVERY supported runtime (.NET 1.1+).
+    # NOTE: RuntimeInformation::FrameworkDescription was considered as a
+    # human-readable annotation but REMOVED - it requires .NET Framework 4.7.1+
+    # and would throw on older PS 5.1 hosts (.NET 4.5-4.7.0), violating the very
+    # dual-runtime policy it was meant to serve (the compatibility static-analysis
+    # gate surfaced this). Environment.Version alone is the safe, meaning-
+    # preserving choice.
     $runtimeVersion = [System.Environment]::Version
-    $frameworkDesc  = [System.Runtime.InteropServices.RuntimeInformation]::FrameworkDescription
-    Write-Host ('    CLR / .NET          : {0,-25} ({1})' -f $runtimeVersion, $frameworkDesc)
+    Write-Host ('    CLR / .NET          : {0}' -f $runtimeVersion)
     # Engine build identity. Dual-runtime policy (ADR 0012): BuildVersion is a
     # Windows PowerShell 5.1-only key (absent on PS 7, so the bare access throws
     # under StrictMode). $PSVersionTable is a PSVersionHashTable, so the

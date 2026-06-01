@@ -269,10 +269,11 @@ Describe 'F-env Invoke-DownloadWithProgress (network mocked, tmpdir, Private)' {
 Describe 'F-env Show-PowerShellEnvironment (CIM mocked)' {
     BeforeEach { Initialize-CanonSessionState -Module 'powershell' }
     It 'emits environment info without throwing' {
-        # Fixed under ADR 0012 (dual-runtime policy): CLR/.NET line now uses
-        # [System.Environment]::Version + FrameworkDescription, StrictMode-safe
-        # on PS 7. Get-CimInstance is absent here; the canon guards it in
-        # try/catch ($os=$null fallback), so the function still runs.
+        # Fixed under ADR 0012 (dual-runtime policy): CLR/.NET line uses
+        # [System.Environment]::Version only (FrameworkDescription removed -
+        # needs .NET Framework 4.7.1+, unsafe on older PS 5.1; ADR 0013).
+        # StrictMode-safe on PS 7. Get-CimInstance is absent here; the canon
+        # guards it in try/catch ($os=$null fallback), so the function still runs.
         { Show-PowerShellEnvironment 6>&1 | Out-Null } | Should -Not -Throw
     }
 }

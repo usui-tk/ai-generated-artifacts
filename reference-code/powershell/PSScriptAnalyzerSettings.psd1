@@ -54,5 +54,44 @@
     )
 
     Rules = @{
+        # ------------------------------------------------------------------
+        # Multi-version x multi-OS compatibility matrix (ADR 0013).
+        # The canon supports Windows PowerShell 5.1 AND PowerShell 7.x, on
+        # Windows AND Linux. These rules verify that statically. Three
+        # meaningful cells (5.1 is Windows-only, so "5.1 x Linux" does not
+        # exist), using the REAL bundled profile filenames (the short aliases
+        # like 'desktop-5.1...' do not resolve from a settings .psd1):
+        #   - win-8_x64_10.0.14393.0_5.1.14393.2791_x64_4.0.30319.42000_framework
+        #       = Windows PowerShell 5.1 on Windows Server 2016 (.NET 4.x)
+        #   - win-8_x64_10.0.17763.0_7.0.0_x64_3.1.2_core
+        #       = PowerShell 7.0 on Windows Server 2019
+        #   - ubuntu_x64_18.04_7.0.0_x64_3.1.2_core
+        #       = PowerShell 7.0 on Ubuntu 18.04 (Linux)
+        # LIMITATION (ADR 0013): a profile DB is not exhaustive - e.g. it does
+        # not catch that RuntimeInformation::FrameworkDescription needs .NET
+        # Framework 4.7.1+. A 0-finding result here is NECESSARY but NOT
+        # SUFFICIENT for compatibility; real-host / CI verification is the
+        # eventual complement. Windows-enhanced units (platform_scope, ADR 0013)
+        # suppress these rules at function scope with a recorded justification.
+        PSUseCompatibleSyntax = @{
+            Enable         = $true
+            TargetVersions = @('5.1', '7.0')
+        }
+        PSUseCompatibleCommands = @{
+            Enable         = $true
+            TargetProfiles = @(
+                'win-8_x64_10.0.14393.0_5.1.14393.2791_x64_4.0.30319.42000_framework',
+                'win-8_x64_10.0.17763.0_7.0.0_x64_3.1.2_core',
+                'ubuntu_x64_18.04_7.0.0_x64_3.1.2_core'
+            )
+        }
+        PSUseCompatibleTypes = @{
+            Enable         = $true
+            TargetProfiles = @(
+                'win-8_x64_10.0.14393.0_5.1.14393.2791_x64_4.0.30319.42000_framework',
+                'win-8_x64_10.0.17763.0_7.0.0_x64_3.1.2_core',
+                'ubuntu_x64_18.04_7.0.0_x64_3.1.2_core'
+            )
+        }
     }
 }

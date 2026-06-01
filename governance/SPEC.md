@@ -58,7 +58,15 @@ data-management policy - complements ADR 0007's mandatory test rule), and
 [ADR 0011](./adr/0011-canon-change-management-governance.md) (canon change-management
 governance: manifest = Git-resident master with tool-mediated CRUD; many triggers -> one
 process; an impact-weighted decision gate in series before the quality gate; audit trail =
-commit + CHANGELOG - principles fixed here, machinery built in a later phase).
+commit + CHANGELOG - principles fixed here, machinery built in a later phase),
+[ADR 0012](./adr/0012-dual-runtime-environment-info-policy.md) (dual-runtime environment-info
+policy: a dual-runtime canon function reports equivalent-quality info on both PS 5.1 and
+7.x, never degrading - the first worked example of the ADR 0011 process), and
+[ADR 0013](./adr/0013-multi-platform-multi-version-quality-assurance.md) (multi-platform /
+multi-version quality assurance: a three-cell PSScriptAnalyzer compatibility matrix + a
+per-unit `platform_scope` manifest classification (cross-platform / windows-enhanced /
+windows-only) + classification-backed suppression of intentional OS-specific findings, with
+the profile-DB limitation recorded as necessary-but-not-sufficient).
 
 ## Execution framework
 

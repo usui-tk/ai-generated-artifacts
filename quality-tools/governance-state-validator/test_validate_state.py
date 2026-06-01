@@ -36,6 +36,7 @@ BASE_RECORD = {
     "binding_mode": "follow-latest",
     "consumers": [],
     "tested": False,
+    "platform_scope": "cross-platform",
 }
 
 
