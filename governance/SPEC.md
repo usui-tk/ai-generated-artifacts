@@ -103,6 +103,28 @@ normalized-hash contract: the computable normalization + sha256/16-hex definitio
 from baseline §4.5; read-side check G; the write-side re-stamp tool; and the interim
 metadata guardrail bridging to the ADR 0011 CRUD tool).
 
+### Scanner output-contract pins
+
+The P3 consumer-drift scanner's sole output contract is `observation.schema.json`. Three of its
+required fields are fixed here so the contract is uniquely determined before any scanner code.
+**(1) `runtime.duckdb`** is a stamped per-run fact (baseline §3, "stamp not pin"); a scanner that
+does not use DuckDB stamps **`"n/a"`** (DuckDB is P8-only, ADR 0002), replaced by the resolved
+version at P8. **(2) `granularity`** is **derived from `kind`** (the manifest carries no
+`granularity` field; `kind` is the single source): `powershell-helper` / `bash-region` /
+`spec-region` → **`region`** (inlined marked region → normalized-hash body-drift, ADR 0015);
+`python-helper` / `python-tool` / `tool` → **`whole-tool`** (import or whole-tool machinery — no
+inlined body; whole-tool null convention, baseline §4.4); `governance-doc` is **out of this
+scanner's body-hash-drift scope** (class-(B) rendered docs carry no per-file hash/marker — ADR
+0014 §2 — and are governed by the document-conformance gate, not this scanner). The split is
+import-vs-inline, not language. **(3) `drift=unknown`** is the determinability fallback — emitted
+for a `region` instance the scanner located but could not resolve to a comparison result (so it
+never crashes or emits an out-of-enum value); its precise trigger conditions are pinned at P6,
+when real consumer scanning first exercises the paths.
+
+Governed by [ADR 0016](./adr/0016-scanner-output-contract-pins.md) (scanner output-contract
+pins: `runtime.duckdb="n/a"` pre-P8; the `kind`→`granularity` derivation table; and the
+`drift=unknown` determinability fallback, framed now / detailed at P6).
+
 ## Execution framework
 
 Execution is **outcome-based**: each phase is value-anchored (value → entry/exit → gate),

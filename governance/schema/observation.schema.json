@@ -50,7 +50,7 @@
       "additionalProperties": false,
       "properties": {
         "python": { "type": "string" },
-        "duckdb": { "type": "string" },
+        "duckdb": { "type": "string", "description": "Resolved DuckDB version, stamped per run. DuckDB is introduced only at P8 (ADR 0002); a scanner that does not use DuckDB stamps \"n/a\" (ADR 0016 F1)." },
         "scanner_version": { "type": "string" }
       }
     },
@@ -72,7 +72,7 @@
     "granularity": {
       "type": "string",
       "enum": ["whole-tool", "region"],
-      "description": "The two granularities (baseline §3). whole-tool carries no markers/hashes; region is a marked, hashed, compared region."
+      "description": "The two granularities (baseline §3). whole-tool carries no markers/hashes; region is a marked, hashed, compared region. Derived from kind, not a manifest field (ADR 0016 F3): powershell-helper/bash-region/spec-region -> region; python-helper/python-tool/tool -> whole-tool; governance-doc is out of this scanner's body-hash-drift scope (ADR 0014)."
     },
     "kind": {
       "type": "string",
@@ -133,7 +133,7 @@
     "drift": {
       "type": "string",
       "enum": ["match", "drift", "forked-frozen", "n/a", "unknown"],
-      "description": "Fast-filter drift state. 'n/a' is reserved for whole-tool; 'forked-frozen' for forked regions (frozen, not compared); match/drift/unknown for compared regions (baseline §4.4/§4.5)."
+      "description": "Fast-filter drift state. 'n/a' is reserved for whole-tool; 'forked-frozen' for forked regions (frozen, not compared); match/drift for compared regions; 'unknown' is the determinability fallback for a region the scanner located but could not resolve to a comparison result (ADR 0016 F4; precise conditions pinned at P6) (baseline §4.4/§4.5)."
     },
     "forwarded": {
       "type": ["string", "null"],
