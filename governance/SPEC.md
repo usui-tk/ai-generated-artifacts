@@ -77,6 +77,32 @@ recomputation); and the rule that every reconstruction/sync point is also a qual
 the DOCUMENT analog of ADR 0007 + ADR 0008, introducing no new phase: TF and the P4-P7 exit
 criteria absorb it).
 
+### Canonical normalized-hash contract
+
+The `hash=` on a canonical marker, and the `*_hash_norm` fields on observations, are a single
+**computable** value: take the region body (lines strictly between the `>>> CANONICAL` and
+`<<< CANONICAL` lines, LF-joined, BOM-stripped), normalize it with the PSA8001 tokenizer
+(comments and string contents -> whitespace; `$variables` in double-quoted strings preserved),
+collapse all whitespace runs to one space and strip the ends, then take
+`sha256(normalized)` truncated to **16 hex**. The gate compares normalized hashes
+(encoding-neutral under BOM+CRLF); the verbatim-byte hash is **forensic-only**; `forked`
+regions are frozen (`forked-frozen`), not compared; whole-tool records carry null hashes and
+`drift=n/a`. The normalizer travels as **reuse-by-copy** (ADR 0003 no-cross-reference), and
+every copy's conformance to this one contract is pinned by the golden vectors in the
+governance-state-validator self-test, not by a shared import. The 16-hex canonical width is
+deliberately **not** unified with psa.py PSA8001's 12-hex relative-comparison hash. The
+validator's read-side **check G** recomputes and compares each marker hash (and check D
+verifies marker `policy`/`binding` against the manifest); the write side is the
+`quality-tools/canon-hash-restamp/` tool (metadata-only; never a code change). Until the
+ADR 0011 CRUD tool (P3a), edits to `manifest.jsonl` or a canonical marker MUST pass the
+validator (including G) at the §Y dry-run, before the patch is cut — verification-before-patch
+is the interim metadata guardrail, with tool-mediated writes as the complement.
+
+Governed by [ADR 0015](./adr/0015-canonical-normalized-hash-contract.md) (canonical
+normalized-hash contract: the computable normalization + sha256/16-hex definition promoted
+from baseline §4.5; read-side check G; the write-side re-stamp tool; and the interim
+metadata guardrail bridging to the ADR 0011 CRUD tool).
+
 ## Execution framework
 
 Execution is **outcome-based**: each phase is value-anchored (value → entry/exit → gate),
