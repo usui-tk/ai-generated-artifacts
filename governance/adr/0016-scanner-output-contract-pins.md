@@ -88,7 +88,7 @@ consumer scanning exists (P6).
    consumer scanning first exercises these paths (consumers carry no vendored markers until
    P6/P7 - manifest `consumers[]` is empty until then; spine: the scanner's first real consumers
    are P6.6/P7.6). Deciding the exact conditions now, against no real input, would be speculation
-   - exactly the over-dependence-on-absent-現物 this review is meant to avoid in reverse.
+   - exactly the over-dependence-on-absent-artifacts this review is meant to avoid in reverse.
 
 ## Consequences
 
