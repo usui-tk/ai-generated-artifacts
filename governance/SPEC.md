@@ -66,7 +66,16 @@ policy: a dual-runtime canon function reports equivalent-quality info on both PS
 multi-version quality assurance: a three-cell PSScriptAnalyzer compatibility matrix + a
 per-unit `platform_scope` manifest classification (cross-platform / windows-enhanced /
 windows-only) + classification-backed suppression of intentional OS-specific findings, with
-the profile-DB limitation recorded as necessary-but-not-sufficient).
+the profile-DB limitation recorded as necessary-but-not-sufficient), and
+[ADR 0014](./adr/0014-document-governance-model.md) (document governance model: the three
+cross-repo document classes - (A) reference / (B) own-and-reconstruct / (C) vendored-copy;
+`governance/templates/` elevated to a document-template canon at code parity, with a
+`kind=template` manifest registration, a SemVer release gate, and a conformance gate over
+rendered doc-sets; the class-(B) reconstruction procedure including the graduation structural
+transform (prefix-strip + relative->absolute link rebinding + ADRs-travel + doc-set
+recomputation); and the rule that every reconstruction/sync point is also a quality gate -
+the DOCUMENT analog of ADR 0007 + ADR 0008, introducing no new phase: TF and the P4-P7 exit
+criteria absorb it).
 
 ## Execution framework
 
