@@ -398,6 +398,18 @@ change.
 > verification-before-patch, not only in the post-`git am` battery. Marker
 > `hash=` edits go through `canon-hash-restamp` (§14 item 15), never by hand.
 
+> **whole-tool registration convention (`kind=tool`):** the manifest's
+> region-helper `required` fields carry **sentinel values** on a whole-tool
+> machinery row, since they have no region meaning (the whole-tool null
+> convention lives on the OBSERVATION side, baseline §4.4): `change_policy=canonical`,
+> `binding_mode=follow-latest`, `platform_scope=cross-platform`, `canonical_version`
+> = the tool's own SemVer, and **`tested` = the tool's self-test passes** (re-defined
+> for whole-tool: self-test green, not the ADR 0007 canon-test suite). First applied
+> to `tool.canonical-drift-scanner` at P3.6. **[P4.4 DECISION OWED]** when `psa.py`
+> is registered (`kind=tool`) at P4.4, re-evaluate this convention against that second
+> instance and **decide then whether to promote it to an ADR** (it is intentionally
+> NOT an ADR yet — one instance is too few; see the handoff note).
+
 ### Mid-flight (during writing)
 
 5. Does each section I write correspond to a specific rule in the

@@ -9,7 +9,7 @@
 > **ADR 0005**. Tier-P design docs stay **unmanaged** (out of repo) and ship as one bundle
 > + MANIFEST at each static-point (never piecemeal).
 
-_Last updated: 2026-06-02 (UTC) — **ADR 0016 (scanner output-contract pins) accepted; P3.1 complete**. A documents-only structural review (before any scanner code) found three observation-schema fields the prior normative set did not uniquely determine, and pinned them: **F1** `runtime.duckdb = "n/a"` pre-P8 (DuckDB is P8-only, ADR 0002; runtime is stamped not pinned); **F3** the `kind`→`granularity` derivation table in SPEC §machinery (manifest carries no `granularity`; `kind` is the source — powershell-helper/bash-region/spec-region→region, python-helper/python-tool/tool→whole-tool, governance-doc out of body-hash-drift scope per ADR 0014); **F4** `drift=unknown` framed as the determinability fallback (precise conditions pinned at P6). Schema gained description-only annotations (no structure change). Also clarified (no decision): **P3 builds + fixture-tests the scanner; its first real run is P6** (consumers carry no markers until vendoring). Prior: ADR 0015 / P3.0 (hash-contract pin); P2a complete (canon released 1.0.0)._
+_Last updated: 2026-06-02 (UTC) — **P3.6 complete: the canonical-drift scanner is built + self-tested**. `quality-tools/canonical-drift-scanner/scanner.py` (single-file, stdlib-only, no-cross-reference) reuse-by-copies the ADR 0015 normalizer, derives `granularity` from `kind` (ADR 0016 F3), stamps `runtime.duckdb="n/a"` (F1), and reserves `drift=unknown` as the determinability fallback (F4). `test_scanner.py` is **12/12** (region match/drift/forked-frozen, whole-tool null, F1, F4-malformed, schema-conformance, golden vectors GV-1..5). Registered as **whole-tool unit #9** (`tool.canonical-drift-scanner`) in `manifest.jsonl` using the **sentinel-value convention** (`tested=true` re-defined as self-test green; `platform_scope=cross-platform`; `change_policy=canonical`; `binding_mode=follow-latest`; `canonical_version=0.1.0`) — documented in AGENTS.md §8, NOT yet an ADR (**P4.4 decision owed**: re-evaluate against `psa.py` registration, decide ADR-or-not then). Real run pre-P6 emits only whole-tool rows (consumers carry no markers until vendoring — ADR 0016 F2). Prior: ADR 0016 / P3.1; ADR 0015 / P3.0; P2a (canon released 1.0.0)._
 
 ---
 
@@ -17,8 +17,8 @@ _Last updated: 2026-06-02 (UTC) — **ADR 0016 (scanner output-contract pins) ac
 
 | Field | Value |
 |:---|:---|
-| Just completed | **ADR 0016 — scanner output-contract pins (P3.1)**: a documents-only structural review pinned three observation-schema fields the prior set left undetermined — **F1** `runtime.duckdb="n/a"` pre-P8; **F3** the `kind`→`granularity` table (SPEC §machinery); **F4** `drift=unknown` = determinability fallback (detail at P6). Description-only schema annotations; no structure/code/canon change. *(Prior: **ADR 0015 / P3.0** hash-contract pin; **P2a** — canon released 1.0.0.)* |
-| Current phase | **In P3; P3.0 + P3.1 complete** — the hash contract (ADR 0015) and the scanner output-contract pins (ADR 0016) are both fixed, so the scanner's sole contract is uniquely determined. Next: **P3.2+ — build the scanner** (`quality-tools/canonical-drift-scanner/`; reuse-by-copies the ADR 0015 normalizer, passes GV-1..5, derives `granularity` per ADR 0016, stamps `duckdb="n/a"`; **built + fixture-tested at P3, first real run at P6**), then **P3a** (manifest CRUD tool — direct manifest/marker edits then stop and the interim guardrail is superseded) |
+| Just completed | **P3.6 — scanner built + self-tested + registered (#9)**: `canonical-drift-scanner/scanner.py` (single-file, stdlib-only) reuse-by-copies the ADR 0015 normalizer (GV-1..5 green), derives `granularity` per ADR 0016 F3, stamps `duckdb="n/a"` (F1), reserves `drift=unknown` (F4); `test_scanner.py` **12/12**. Registered as whole-tool unit #9 via the **sentinel-value convention** (AGENTS.md §8; `tested`=self-test green). *(Prior: **ADR 0016 / P3.1**; **ADR 0015 / P3.0**.)* |
+| Current phase | **In P3; scanner built (P3.6)** — built + fixture-tested; first real run is P6 (consumers carry no markers until vendoring). **Next: P3.7** (phase-end gates + front-load TEMPLATE-REQUIREMENTS-REGISTER for TF.1 + static-point), then **P3a** (manifest CRUD tool — direct manifest/marker edits then stop and the ADR 0015 §6 interim guardrail is superseded). **P4.4 decision owed:** when `psa.py` is registered (`kind=tool`), re-evaluate the whole-tool sentinel-value convention against that 2nd instance and decide whether to promote it to an ADR |
 | Operating loop | per phase: fill per-step schema → dry-run §Y → sign-off §Z → execute (Path 2) |
 
 ## Phase progress
@@ -49,21 +49,24 @@ _Last updated: 2026-06-02 (UTC) — **ADR 0016 (scanner output-contract pins) ac
 | **ADR 0014** — document governance model | ✅ done | `8249f2e` `[AUTH]` (doc-only): the DOCUMENT analog of ADR 0007+0008. Three cross-repo doc classes (A reference / B own-and-reconstruct / C vendored-copy); `governance/templates/` = document-template canon at code parity (`kind=template` + SemVer release gate + conformance gate over rendered doc-sets); class-(B) reconstruction = graduation structural transform; every reconstruction/sync = a quality gate. **No new phase / no renumbering** (TF + P4–P7 exits absorb it). governs `SPEC §machinery` (bidirectional back-ref). Instance-level wiring deferred to TF.1 |
 | **P3.0 / ADR 0015** — canonical normalized-hash contract (P3 opening) | ✅ done | promoted baseline §4.5 → in-repo SPEC §machinery as a **computable** contract (region body → strip comments/strings → collapse whitespace → `sha256`/**16-hex**; gate=normalized, raw=forensic, forked=frozen, whole-tool=null/`n/a`). Validator **check G** (recompute marker hash) + **check D** extended (marker `policy`/`binding` vs manifest); **`quality-tools/canon-hash-restamp/`** write-side tool (metadata-only); conformance pinned by **golden vectors GV-1..5** (no shared import; ADR 0003 reuse-by-copy). Check G caught **20/58 markers mis-stamped at `5d5f0b1`** → re-stamped **no version bump** (bodies byte-identical). Validator self-test **15/15**. Interim **metadata guardrail**: validator (incl. G) green at §Y before patch; bridges to ADR 0011 CRUD tool (P3a) |
 | **P3.1 / ADR 0016** — scanner output-contract pins | ✅ done | documents-only structural review (no scanner code yet) pinned 3 undetermined observation-schema fields: **F1** `runtime.duckdb="n/a"` pre-P8 (ADR 0002; runtime stamped not pinned); **F3** `kind`→`granularity` table in SPEC §machinery (manifest has no `granularity`; powershell-helper/bash-region/spec-region→region, python-helper/python-tool/tool→whole-tool, governance-doc out of body-hash-drift scope per ADR 0014); **F4** `drift=unknown` = determinability fallback (conditions pinned at P6). Description-only schema annotations; no structure/code/canon change. Clarified (no decision): **P3 builds+fixture-tests; first real run P6** |
+| **P3.6** — scanner build + self-test + register #9 | ✅ done | `quality-tools/canonical-drift-scanner/scanner.py` + `test_scanner.py` (**12/12**): single-file, stdlib-only, no-cross-reference; reuse-by-copies the ADR 0015 normalizer (GV-1..5), marker parse + region extract, normalized+raw hashes, canonical-JSON emit, `granularity` from `kind` (ADR 0016 F3), `runtime.duckdb="n/a"` (F1), `drift=unknown` fallback (F4). Registered as whole-tool unit **#9** (`tool.canonical-drift-scanner`) via the **sentinel-value convention** (`tested`=self-test green, re-defined for whole-tool; cross-platform/canonical/follow-latest/0.1.0) — AGENTS.md §8, not an ADR (**P4.4 decision owed**). Real run pre-P6: whole-tool rows only (ADR 0016 F2) |
 
 Gates green at HEAD: psa.py 0 (config-aware, incl. the `reference-code/powershell` canon + the canon-test runner via `psa2010_known_cmdlets`) · PSScriptAnalyzer 0/0/0 (standard + the ADR 0013 3-cell compatibility matrix, Public/Private) · governance-state-validator **0 findings (A–G)** (58 manifest rows ↔ 58 canon files; **check G** marker-hash integrity + check D marker `policy`/`binding`; self-test **15/15**) · **canon-test runner PASS (71/1-skip/0)** · **`canon-hash-restamp --check` IN SYNC (58/58)**. Runtimes: pwsh 7.4.6 · PSScriptAnalyzer 1.25.0 · python3 · jsonschema 4.26.0 · Pester 5.7.1.
 
 ## Next action
-**P3.0 + P3.1 complete** — the hash contract (ADR 0015) and the scanner output-contract pins
-(ADR 0016) are both fixed, so `observation.schema.json` is uniquely determined for every
-required field. Proceed to **P3.2+ — build the scanner** (`quality-tools/canonical-drift-scanner/`,
-single-file, stdlib-only, schema-first): reuse-by-copy the ADR 0015 normalizer (passes
-GV-1..5), derive `granularity` per the ADR 0016 `kind`-map, stamp `runtime.duckdb="n/a"`,
-reserve `drift=unknown` as the fallback. **It is built and fixture-tested at P3 (P3.7 gate);
-its first real run is P6** (consumers carry no vendored markers until then — manifest
-`consumers[]` is empty; the (あ) current-state/operational review of the consumers belongs to
-that P6 exercise, not P3). It emits `observation.schema.json` records feeding the **ADR 0011**
-reconcile-back process. **P3a** then builds the manifest CRUD tool — after which direct
+**P3.6 complete — the scanner is built, self-tested (12/12), and registered (#9).** Proceed to
+**P3.7 — phase-end**: run the gate battery (scanner self-test green + the emitted JSONL passes
+the #3 schema gate); **append P3-discovered template requirements to
+`TEMPLATE-REQUIREMENTS-REGISTER.md`, then front-load the anticipated P4–P7 template requirements**
+(doc-set #4, bilingual lock-step, marker/manifest shape) so the register is TF.1-ready; update
+`STATUS.md`; static-point. Then **P3a** builds the manifest CRUD tool — after which direct
 manifest/marker edits stop and the **interim metadata guardrail (ADR 0015 §6) is superseded**.
+**P4.4 decision owed:** when `psa.py` is registered (`kind=tool`), re-evaluate the whole-tool
+**sentinel-value convention** (AGENTS.md §8) against that 2nd instance and **decide then whether
+to promote it to an ADR** (deliberately not an ADR yet — one instance is too few). The scanner's
+first **real** run is **P6**; the (あ) consumer current-state/operational review belongs to that
+P6 exercise, which also pins the three deferred items (region_locator final form, `unknown`
+conditions, the `bash` normalization profile — see the P6-investigation notes in `scanner.py`).
 Vendoring (P6/P7) is UNBLOCKED (canon ≥ 1.0.0) but later. Remediate `$ks` at **P6**.
 
 ## Open pointers
