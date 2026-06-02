@@ -9,7 +9,7 @@
 > **ADR 0005**. Tier-P design docs stay **unmanaged** (out of repo) and ship as one bundle
 > + MANIFEST at each static-point (never piecemeal).
 
-_Last updated: 2026-06-02 (UTC) — **P3.6 complete: the canonical-drift scanner is built + self-tested**. `quality-tools/canonical-drift-scanner/scanner.py` (single-file, stdlib-only, no-cross-reference) reuse-by-copies the ADR 0015 normalizer, derives `granularity` from `kind` (ADR 0016 F3), stamps `runtime.duckdb="n/a"` (F1), and reserves `drift=unknown` as the determinability fallback (F4). `test_scanner.py` is **12/12** (region match/drift/forked-frozen, whole-tool null, F1, F4-malformed, schema-conformance, golden vectors GV-1..5). Registered as **whole-tool unit #9** (`tool.canonical-drift-scanner`) in `manifest.jsonl` using the **sentinel-value convention** (`tested=true` re-defined as self-test green; `platform_scope=cross-platform`; `change_policy=canonical`; `binding_mode=follow-latest`; `canonical_version=0.1.0`) — documented in AGENTS.md §8, NOT yet an ADR (**P4.4 decision owed**: re-evaluate against `psa.py` registration, decide ADR-or-not then). Real run pre-P6 emits only whole-tool rows (consumers carry no markers until vendoring — ADR 0016 F2). Prior: ADR 0016 / P3.1; ADR 0015 / P3.0; P2a (canon released 1.0.0)._
+_Last updated: 2026-06-02 (UTC) — **P3.7 complete: P3 (scanner build) phase closed**. The canonical-drift scanner is built, self-tested (`test_scanner.py` **12/12**), and registered as whole-tool unit #9 (P3.6); the phase-end gate battery is green and the `TEMPLATE-REQUIREMENTS-REGISTER` is front-loaded for TF.1 (new §9 machinery-registration TR-TOOL-1/2/3, reflected in the Tier-P bundle). Static-point taken at this HEAD. The scanner's first real run is **P6** (consumers carry no vendored markers until vendoring — ADR 0016 F2); the three deferred items (region_locator final form, `drift=unknown` precise conditions, the `bash` normalization profile) are recorded as P6-investigation notes in `scanner.py`. **Next: P3a** (manifest CRUD tool, ADR 0011). **[P4.4 decision owed]:** when `psa.py` is registered (`kind=tool`, 2nd whole-tool instance), re-evaluate the sentinel-value registration convention (AGENTS.md §8) and decide whether to promote it to an ADR. Prior: P3.6 scanner build; ADR 0016 / P3.1; ADR 0015 / P3.0; P2a (canon released 1.0.0)._
 
 ---
 
@@ -17,8 +17,8 @@ _Last updated: 2026-06-02 (UTC) — **P3.6 complete: the canonical-drift scanner
 
 | Field | Value |
 |:---|:---|
-| Just completed | **P3.6 — scanner built + self-tested + registered (#9)**: `canonical-drift-scanner/scanner.py` (single-file, stdlib-only) reuse-by-copies the ADR 0015 normalizer (GV-1..5 green), derives `granularity` per ADR 0016 F3, stamps `duckdb="n/a"` (F1), reserves `drift=unknown` (F4); `test_scanner.py` **12/12**. Registered as whole-tool unit #9 via the **sentinel-value convention** (AGENTS.md §8; `tested`=self-test green). *(Prior: **ADR 0016 / P3.1**; **ADR 0015 / P3.0**.)* |
-| Current phase | **In P3; scanner built (P3.6)** — built + fixture-tested; first real run is P6 (consumers carry no markers until vendoring). **Next: P3.7** (phase-end gates + front-load TEMPLATE-REQUIREMENTS-REGISTER for TF.1 + static-point), then **P3a** (manifest CRUD tool — direct manifest/marker edits then stop and the ADR 0015 §6 interim guardrail is superseded). **P4.4 decision owed:** when `psa.py` is registered (`kind=tool`), re-evaluate the whole-tool sentinel-value convention against that 2nd instance and decide whether to promote it to an ADR |
+| Just completed | **P3.7 — P3 (scanner build) phase closed**: phase-end gate battery green; scanner built + self-tested 12/12 + registered #9 (P3.6); register front-loaded for TF.1 (§9 TR-TOOL-1/2/3, Tier-P). Static-point taken. *(Prior: **P3.6** scanner build; **ADR 0016 / P3.1**; **ADR 0015 / P3.0**.)* |
+| Current phase | **P3 complete** — the canonical-drift scanner is built, registered, and gate-green; its first real run is P6. **Next: P3a** (manifest CRUD tool, ADR 0011 — direct manifest/marker edits then stop and the ADR 0015 §6 interim guardrail is superseded). **[P4.4 decision owed]:** when `psa.py` is registered (`kind=tool`, 2nd instance), re-evaluate the whole-tool sentinel-value convention (AGENTS.md §8) and decide whether to promote it to an ADR |
 | Operating loop | per phase: fill per-step schema → dry-run §Y → sign-off §Z → execute (Path 2) |
 
 ## Phase progress
@@ -50,24 +50,24 @@ _Last updated: 2026-06-02 (UTC) — **P3.6 complete: the canonical-drift scanner
 | **P3.0 / ADR 0015** — canonical normalized-hash contract (P3 opening) | ✅ done | promoted baseline §4.5 → in-repo SPEC §machinery as a **computable** contract (region body → strip comments/strings → collapse whitespace → `sha256`/**16-hex**; gate=normalized, raw=forensic, forked=frozen, whole-tool=null/`n/a`). Validator **check G** (recompute marker hash) + **check D** extended (marker `policy`/`binding` vs manifest); **`quality-tools/canon-hash-restamp/`** write-side tool (metadata-only); conformance pinned by **golden vectors GV-1..5** (no shared import; ADR 0003 reuse-by-copy). Check G caught **20/58 markers mis-stamped at `5d5f0b1`** → re-stamped **no version bump** (bodies byte-identical). Validator self-test **15/15**. Interim **metadata guardrail**: validator (incl. G) green at §Y before patch; bridges to ADR 0011 CRUD tool (P3a) |
 | **P3.1 / ADR 0016** — scanner output-contract pins | ✅ done | documents-only structural review (no scanner code yet) pinned 3 undetermined observation-schema fields: **F1** `runtime.duckdb="n/a"` pre-P8 (ADR 0002; runtime stamped not pinned); **F3** `kind`→`granularity` table in SPEC §machinery (manifest has no `granularity`; powershell-helper/bash-region/spec-region→region, python-helper/python-tool/tool→whole-tool, governance-doc out of body-hash-drift scope per ADR 0014); **F4** `drift=unknown` = determinability fallback (conditions pinned at P6). Description-only schema annotations; no structure/code/canon change. Clarified (no decision): **P3 builds+fixture-tests; first real run P6** |
 | **P3.6** — scanner build + self-test + register #9 | ✅ done | `quality-tools/canonical-drift-scanner/scanner.py` + `test_scanner.py` (**12/12**): single-file, stdlib-only, no-cross-reference; reuse-by-copies the ADR 0015 normalizer (GV-1..5), marker parse + region extract, normalized+raw hashes, canonical-JSON emit, `granularity` from `kind` (ADR 0016 F3), `runtime.duckdb="n/a"` (F1), `drift=unknown` fallback (F4). Registered as whole-tool unit **#9** (`tool.canonical-drift-scanner`) via the **sentinel-value convention** (`tested`=self-test green, re-defined for whole-tool; cross-platform/canonical/follow-latest/0.1.0) — AGENTS.md §8, not an ADR (**P4.4 decision owed**). Real run pre-P6: whole-tool rows only (ADR 0016 F2) |
+| **P3.7** — phase-end (gates + register front-load + static-point) | ✅ done | **P3 phase closed.** Gate battery green (scanner self-test 12/12 + emitted JSONL passes #3; validator A–G + 15/15; restamp in-sync; psa self-check; PSSA 0/0/0; canon-test 71/1/0). `TEMPLATE-REQUIREMENTS-REGISTER` front-loaded for TF.1 (new **§9 TR-TOOL-1/2/3** machinery-registration, P3.6-discovered; reflected in the Tier-P bundle). Static-point taken. Next: **P3a** |
 
 Gates green at HEAD: psa.py 0 (config-aware, incl. the `reference-code/powershell` canon + the canon-test runner via `psa2010_known_cmdlets`) · PSScriptAnalyzer 0/0/0 (standard + the ADR 0013 3-cell compatibility matrix, Public/Private) · governance-state-validator **0 findings (A–G)** (58 manifest rows ↔ 58 canon files; **check G** marker-hash integrity + check D marker `policy`/`binding`; self-test **15/15**) · **canon-test runner PASS (71/1-skip/0)** · **`canon-hash-restamp --check` IN SYNC (58/58)**. Runtimes: pwsh 7.4.6 · PSScriptAnalyzer 1.25.0 · python3 · jsonschema 4.26.0 · Pester 5.7.1.
 
 ## Next action
-**P3.6 complete — the scanner is built, self-tested (12/12), and registered (#9).** Proceed to
-**P3.7 — phase-end**: run the gate battery (scanner self-test green + the emitted JSONL passes
-the #3 schema gate); **append P3-discovered template requirements to
-`TEMPLATE-REQUIREMENTS-REGISTER.md`, then front-load the anticipated P4–P7 template requirements**
-(doc-set #4, bilingual lock-step, marker/manifest shape) so the register is TF.1-ready; update
-`STATUS.md`; static-point. Then **P3a** builds the manifest CRUD tool — after which direct
-manifest/marker edits stop and the **interim metadata guardrail (ADR 0015 §6) is superseded**.
-**P4.4 decision owed:** when `psa.py` is registered (`kind=tool`), re-evaluate the whole-tool
-**sentinel-value convention** (AGENTS.md §8) against that 2nd instance and **decide then whether
-to promote it to an ADR** (deliberately not an ADR yet — one instance is too few). The scanner's
-first **real** run is **P6**; the (あ) consumer current-state/operational review belongs to that
-P6 exercise, which also pins the three deferred items (region_locator final form, `unknown`
-conditions, the `bash` normalization profile — see the P6-investigation notes in `scanner.py`).
-Vendoring (P6/P7) is UNBLOCKED (canon ≥ 1.0.0) but later. Remediate `$ks` at **P6**.
+**P3 complete — the canonical-drift scanner is built, self-tested (12/12), registered (#9), and
+the phase is closed at this static-point.** Proceed to **P3a — the manifest CRUD tool**
+(`quality-tools/canon-manifest-tool/`, ADR 0011 §2/§3-machine): the tool-mediated master write
+path that retires direct manifest edits and self-validates (post-op governance-state validator
+green), plus the machine trigger (scanner drift → structured change request → CRUD tool). Once it
+exists, **direct manifest/marker edits stop and the ADR 0015 §6 interim metadata guardrail is
+superseded**. **[P4.4 decision owed]:** when `psa.py` is registered (`kind=tool`, 2nd whole-tool
+instance), re-evaluate the **sentinel-value registration convention** (AGENTS.md §8) and **decide
+then whether to promote it to an ADR** (deliberately not an ADR yet — one instance is too few).
+The scanner's first **real** run is **P6**, which also pins the three deferred items
+(region_locator final form, `drift=unknown` precise conditions, the `bash` normalization profile
+— see the P6-investigation notes in `scanner.py`) and the (あ) consumer current-state/operational
+review. Vendoring (P6/P7) is UNBLOCKED (canon ≥ 1.0.0) but later. Remediate `$ks` at **P6**.
 
 ## Open pointers
 - `[WORKING]` psa.py move **CONTRACT** (psaMove.4/.5 — delete the old `scripts/python/powershell-static-analyzer/` path) is **after P7**, gated on a cross-repo zero-referrer grep + §9.3 checkpoint. Both paths coexist until then.
