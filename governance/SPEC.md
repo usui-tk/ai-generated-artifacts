@@ -136,3 +136,13 @@ cross-repo edits require explicit authorization; gate-criterion deviations escal
 user.
 
 Governed by [ADR 0004](./adr/0004-outcome-based-execution-framework.md).
+
+Within that framework, the **review order** is fixed (the epistemic-order complement to the
+gating above): for any new finding or design question, verify **structural validity inside
+the normative set first** (い), then investigate the **current state / 現物 second** (あ) — the
+現物 fills a correct structure, it does not define it; structural correctness sits above the
+artifact. On each new finding, re-scan the governance md/ADRs, run a full forward/back impact
+analysis, and split now-decisions from items deferrable until implementation/現物 is visible
+(naming, for each deferral, what to decide and how to investigate it).
+
+Governed by [ADR 0017](./adr/0017-structure-first-review-methodology.md).
