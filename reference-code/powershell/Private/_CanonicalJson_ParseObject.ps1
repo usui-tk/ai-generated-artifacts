@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parseobject version=1.0.0 hash=85c4245a7afe16d3 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parseobject version=1.0.0 hash=abf2dd1e42a261a2 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseObject {
     param($State)
     $obj = [ordered]@{}

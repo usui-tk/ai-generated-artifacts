@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.invoke-webrequestwithretry version=1.0.0 hash=742b14b134af612c policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.invoke-webrequestwithretry version=1.0.0 hash=959c46975eb04b15 policy=canonical binding=follow-latest >>>
 function Invoke-WebRequestWithRetry {
     <#
     .SYNOPSIS

@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsebool version=1.0.0 hash=358456debe522966 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsebool version=1.0.0 hash=13b060dca910d5f7 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseBool {
     param($State)
     $s = $State.s

@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.convertto-canonicaljson version=1.0.0 hash=97b75b019e00fc8f policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.convertto-canonicaljson version=1.0.0 hash=efedb9ecf58ea1b3 policy=canonical binding=follow-latest >>>
 function ConvertTo-CanonicalJson {
     <#
     .SYNOPSIS

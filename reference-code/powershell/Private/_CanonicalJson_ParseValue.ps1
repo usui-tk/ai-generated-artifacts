@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsevalue version=1.0.0 hash=78c338c6b5ad298d policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsevalue version=1.0.0 hash=d4708a17197eae1f policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseValue {
     param($State)
     if ($State.i -ge $State.n) { throw "Unexpected end of input." }

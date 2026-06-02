@@ -1,4 +1,4 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsestring version=1.0.0 hash=ece100d0911bf1bb policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsestring version=1.0.0 hash=c2adebf7aec2f1ee policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseString {
     param($State)
     $sb = [System.Text.StringBuilder]::new()
