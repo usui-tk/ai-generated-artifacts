@@ -391,6 +391,13 @@ change.
 4. Is the change I am planning at the right Layer? (Could it apply
    to siblings? If yes, propose at the higher layer instead.)
 
+> **Metadata guardrail (ADR 0015 §6, interim until the ADR 0011 CRUD tool /
+> P3a):** if the change will touch `governance/state/manifest.jsonl` or a
+> canonical marker, the governance-state-validator (incl. check G) MUST be green
+> on the working tree **at the dry-run, before `git format-patch`** —
+> verification-before-patch, not only in the post-`git am` battery. Marker
+> `hash=` edits go through `canon-hash-restamp` (§14 item 15), never by hand.
+
 ### Mid-flight (during writing)
 
 5. Does each section I write correspond to a specific rule in the
@@ -427,12 +434,24 @@ change.
 12. Did I update `CHANGELOG.md` with the change?
 13. Did the change touch a `SPEC.md`? Did I check the Doc-Touching
     Matrix (§5) for downstream impact?
-14. If `governance/state/*.jsonl` or `governance/schema/*` was touched:
+14. If `governance/state/*.jsonl` or `governance/schema/*` was touched,
+    OR a **canonical marker** (a `# >>> CANONICAL …` line in a
+    `reference-code/<family>/` unit) was touched:
     run the **governance-state-validator** gate —
     `python3 quality-tools/governance-state-validator/validate_state.py` →
-    **0 findings** (schema validation, canonical_location existence,
-    manifest/marker coherence, canon coverage, canonical-JSON format).
-    "I didn't run it" is a deviation (M4(A)), not a pass.
+    **0 findings (A–G)**: schema validation, canonical_location existence,
+    manifest/marker coherence **incl. marker `policy`/`binding` vs manifest
+    (D)**, canon coverage, canonical-JSON format, and **marker-hash integrity
+    (G)** — each marker's `hash=` MUST equal the ADR 0015 normalized hash
+    recomputed from its region body. "I didn't run it" is a deviation
+    (M4(A)), not a pass.
+15. **Marker hashes are never hand-edited.** To (re)compute or correct a
+    canonical marker `hash=`, use the write-side tool —
+    `python3 quality-tools/canon-hash-restamp/restamp.py --check` (report) /
+    `--write` (fix in place; metadata-only, never a code change). Hand-editing
+    a `hash=` value is a deviation; check G (above) will catch a stale or
+    hand-stamped hash regardless. This is the tool-mediated write path for
+    marker hashes until the ADR 0011 manifest CRUD tool (P3a) subsumes it.
 
 ---
 
