@@ -391,12 +391,18 @@ change.
 4. Is the change I am planning at the right Layer? (Could it apply
    to siblings? If yes, propose at the higher layer instead.)
 
-> **Metadata guardrail (ADR 0015 §6, interim until the ADR 0011 CRUD tool /
-> P3a):** if the change will touch `governance/state/manifest.jsonl` or a
-> canonical marker, the governance-state-validator (incl. check G) MUST be green
-> on the working tree **at the dry-run, before `git format-patch`** —
-> verification-before-patch, not only in the post-`git am` battery. Marker
-> `hash=` edits go through `canon-hash-restamp` (§14 item 15), never by hand.
+> **Metadata guardrail (ADR 0015 §6) — SUPERSEDED FOR MANIFEST-ROW EDITS at P3a.1.**
+> `governance/state/manifest.jsonl` rows are now mutated ONLY through the
+> self-validating `quality-tools/canon-manifest-tool/` (ADR 0011 §2): it runs the
+> governance-state-validator after every op and rolls back on any finding, so a
+> manifest-row change can never be committed in an invalid state — direct manifest
+> edits stop. The guardrail still governs **canonical-marker edits** (a region unit's
+> `version`/`policy`/`binding`/`hash` in `reference-code/.../*.ps1`), which the manifest
+> tool does NOT write: those stay verification-before-patch — the governance-state
+> validator (incl. check G) MUST be green on the working tree **at the dry-run, before
+> `git format-patch`** — and marker `hash=` edits go through `canon-hash-restamp`
+> (§14 item 15), never by hand, until the coupled manifest-row+marker write path
+> (the deferred `unit-record coupled write`) is built at P6/P7.
 
 > **whole-tool registration convention (`kind=tool`):** the manifest's
 > region-helper `required` fields carry **sentinel values** on a whole-tool
@@ -405,10 +411,14 @@ change.
 > `binding_mode=follow-latest`, `platform_scope=cross-platform`, `canonical_version`
 > = the tool's own SemVer, and **`tested` = the tool's self-test passes** (re-defined
 > for whole-tool: self-test green, not the ADR 0007 canon-test suite). First applied
-> to `tool.canonical-drift-scanner` at P3.6. **[P4.4 DECISION OWED]** when `psa.py`
-> is registered (`kind=tool`) at P4.4, re-evaluate this convention against that second
-> instance and **decide then whether to promote it to an ADR** (it is intentionally
-> NOT an ADR yet — one instance is too few; see the handoff note).
+> to `tool.canonical-drift-scanner` at P3.6. **[P4.4 DECISION OWED]** the discriminating
+> second instance is `psa.py` (registered `kind=tool` at P4.4) because it is the first
+> **SemVer/platform-heterogeneous** instance (its own real SemVer, not `0.1.0`); the
+> `canon-manifest-tool` + machine-trigger rows registered at P3a.3 are homogeneous
+> `0.1.0`/`cross-platform` whole-tool instances and do NOT stress the convention, so the
+> re-evaluation stays at P4.4. There, **decide whether to promote this convention to an
+> ADR** (it is intentionally NOT an ADR yet — one instance is too few, and `platform_scope`
+> may need a `windows-only` tool to settle sentinel-vs-real; see the handoff note).
 
 ### Mid-flight (during writing)
 
@@ -463,7 +473,10 @@ change.
     `--write` (fix in place; metadata-only, never a code change). Hand-editing
     a `hash=` value is a deviation; check G (above) will catch a stale or
     hand-stamped hash regardless. This is the tool-mediated write path for
-    marker hashes until the ADR 0011 manifest CRUD tool (P3a) subsumes it.
+    marker hashes. (The ADR 0011 CRUD tool — `quality-tools/canon-manifest-tool/` —
+    subsumes the **manifest-row** write path at P3a.1; the **marker-hash** write path
+    stays here until the coupled manifest-row+marker write — the deferred `unit-record
+    coupled write` — is built at P6/P7.)
 
 ---
 
