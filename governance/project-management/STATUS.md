@@ -114,4 +114,4 @@ _Per **ADR 0005**: the four Tier-P docs stay **unmanaged** (out of repo) and are
 | P2 (analyze + canon + manifest + gate) | `597638e` … `867efe3` | _repo-external Zip at P2 phase-end_ |
 | P2a (canon test suite + release 1.0.0) | `964752c` … `30b67f1` | _repo-external Zip at P2a phase-end (this phase)_ |
 | P3 (normalized-hash contract + drift scanner) | `30b67f1` … `90117ca` | per procedure (ADR 0015/0016 + scanner; P3 phase-end) |
-| P3a (canon change-mgmt machinery: CRUD tool + trigger + registration) | `90117ca` … `540a2d1` (+ this STATUS commit) | _repo-external Zip at P3a phase-end (this phase)_ |
+| P3a (canon change-mgmt machinery: CRUD tool + trigger + registration) | `90117ca` … `648033e` (registration) · `59c100c` (P3a STATUS exit) | _repo-external Zip at P3a phase-end (this phase)_ |
