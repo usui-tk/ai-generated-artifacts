@@ -234,9 +234,46 @@ skipping each one.
 - Section count and order MUST match — verify via `grep -c '^## '`
 - Subsection count MUST match — verify via `grep -c '^### '`
 - Code blocks, file paths, parameter names: keep in ASCII verbatim
-- Headers and table column labels: use 「全角コロン (：)」 in Japanese
+- Headers and table column labels in the Japanese README use the full-width
+  colon (`U+FF1A`), not the ASCII `:`
 - Per the sibling SPEC `A.12.4`, when both files carry a
   `Lines : NNNN` field, the field values MUST match
+
+### Authoring language and labels (always)
+
+Conversation with the contributor may be in Japanese; **artifacts and labels follow
+the rules below regardless of the conversation language.** This complements the
+file-by-file [Language Policy](./README.md#language-policy) (which fixes *which files*
+are English-only vs bilingual); the rules here fix *which characters* may appear and
+*how options are labelled*.
+
+- **In-repo governance and machinery artifacts are English / ASCII only.** This covers
+  ADRs, `governance/SPEC.md`, `STATUS.md`, this `AGENTS.md`, manifests and schemas,
+  templates, canon code, and tool docs **other than** the bilingual `README` pair. No
+  CJK ideographs and no kana in these files. (`§` and the em-dash `—` are allowed
+  punctuation, not a violation.)
+- **Explicit exception — intentional Japanese.** The bilingual `README.md` / `README.ja.md`
+  pair (and `<slug>.en.md` / `<slug>.ja.md` content docs) carry Japanese **by design**,
+  as does Japanese held as *data* (e.g. locale error-message detection strings in
+  `psa.py`, non-ASCII canonical-JSON test fixtures, a documented mojibake example). These
+  are not leaks and are not to be "cleaned".
+- **Selection / option labels are English letters or numerals** — `(A)` / `(B)` / `(C)`
+  or `1` / `2` / `3` — in conversation **and** in artifacts. **Never** kana labels
+  (parenthesized hiragana, e.g. a Japanese "i"/"ro"/"ha" sequence) and never katakana
+  labels. An option label is structural, not prose, so it is held to the artifact rule
+  even mid-Japanese-sentence.
+- **Where Japanese is used, kanji MUST be Japanese kanji only.** Chinese characters —
+  **Simplified and Traditional non-Japanese forms** — are excluded everywhere (artifacts
+  and conversation). Use the Japanese form (e.g. the kanji at `U+8AD6`, never its
+  Simplified variant `U+8BBA`); when in doubt for an English artifact, write the English
+  word instead.
+
+Rationale (forensic): Japanese option labels once leaked into ADR 0017 / SPEC / STATUS and
+had to be corrected metadata-only (commit `90117ca`); a later session leaked a
+Simplified-Chinese character (`U+8BBA`) into a handoff document. Both are AI-authoring
+slips that this rule exists to prevent. A pre-flight/post-flight CJK sweep (§8) over the
+English-only set should return zero; any hit outside the intentional-Japanese exception
+is a leak to fix before commit.
 
 ---
 
@@ -453,6 +490,13 @@ change.
     most ~5%. Larger differences suggest a missing section.
 11. Run `grep -c '^## '` and `grep -c '^### '` on bilingual pairs.
     Counts MUST match exactly.
+11a. **CJK / kana sweep over the English-only set** (§5 authoring rule). Any
+    governance or machinery artifact I touched (ADR, `SPEC.md`, `STATUS.md`,
+    `AGENTS.md`, manifest/schema, template, canon code, tool doc that is not the
+    bilingual `README` pair) MUST contain **no kana and no CJK ideographs** — and
+    nowhere may a **Chinese (Simplified/Traditional non-Japanese) character** appear.
+    Selection/option labels are English/numeric, never kana. Intentional Japanese
+    (the `README.ja.md` pair, `<slug>.ja.md` docs, Japanese *data* strings) is exempt.
 12. Did I update `CHANGELOG.md` with the change?
 13. Did the change touch a `SPEC.md`? Did I check the Doc-Touching
     Matrix (§5) for downstream impact?
