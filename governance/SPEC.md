@@ -75,7 +75,14 @@ rendered doc-sets; the class-(B) reconstruction procedure including the graduati
 transform (prefix-strip + relative->absolute link rebinding + ADRs-travel + doc-set
 recomputation); and the rule that every reconstruction/sync point is also a quality gate -
 the DOCUMENT analog of ADR 0007 + ADR 0008, introducing no new phase: TF and the P4-P7 exit
-criteria absorb it).
+criteria absorb it), and
+[ADR 0018](./adr/0018-template-canon-version-model.md) (template-canon version model: two
+version axes - Axis 1, a per-template body `canonical_version` for provenance; Axis 2, a
+single `governance/templates/VERSION` that is the reconstructability gate and the consumer pin
+target. The gate axis follows the unit of delivery - per-unit for vendored code (ADR 0008),
+per-set for reconstructed doc-sets (ADR 0014 class-(B)). Axis 2 is a release-commit artifact
+outside the manifest, like the code canon's `.psd1` `ModuleVersion`, so the ADR 0011 CRUD
+manifest-row write-path boundary is unaffected. Refines ADR 0014 §2).
 
 ### Canonical normalized-hash contract
 
