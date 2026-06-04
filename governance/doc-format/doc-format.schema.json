@@ -1,0 +1,114 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/usui-tk/ai-generated-artifacts/governance/doc-format/doc-format.schema.json",
+  "title": "Layer-1 document-format item (one canonical-JSON line per format item)",
+  "description": "Machine-readable contract for governance/doc-format/doc-format.jsonl - the Layer-1 (L1) document-format canon. THIS FILE + the JSONL it validates ARE the 'Layer-1 document-format definition' referenced by ADR 0014 \u00a72 and ADR 0019. L1 is LANGUAGE-INDEPENDENT and ITEM-LEVEL: it fixes the MECE set of doc-set items (sections / structural members), each item's role, and its per-item applicability (the document analog of code's platform_scope / consumers, enabling mechanical impact). L1 is LIGHT - structural only, NO content hash. The three-layer model (baseline \u00a710 M10): L1 format (here) -> L2 language template (governance/templates/<family>-*; common content vendored from the spec home governance/spec/<family>.md) -> L3 rendered doc-set. The heavy marker+hash machinery localizes to L2-common 'vendored' items only; L1/L3 stay light structural conformance. SCOPE (ADR 0014 \u00a72, master-ownership discriminator): L1 governs documents (human/AI-facing prose - README/README.ja/SPEC/TESTING/CHANGELOG, community-health, the .github PR template) and repo-structural dotfiles that have NO master elsewhere (.gitattributes/.gitignore/workflows). It does NOT govern tool-owned configuration (e.g. .psa.config.json), whose master is the owning tool canon and which consumers follow-latest from it (ADR 0009), not a reconstructed template - the discriminator is: an artifact whose master another canon already owns is referenced/followed, never re-mastered here. A tool's own doc-set (e.g. psa.py README/SPEC) may be FORMAT-conformance-checked against L1 yet stays content-owned by the tool. CONSUMERS: the L2 templates conform to L1; the document-conformance gate (ADR 0014 \u00a72, built at TF) reads L1 as ground truth for item-membership + applicability resolution. VERSIONING: governance/doc-format/VERSION is the L1 SemVer (the 'layer-1-format' front-matter pin, ADR 0019); 0.1.0 pre-release, promoted to 1.0.0 at the TF freeze (mirroring the code canon and the L2 governance/templates/VERSION).",
+  "$comment": "AI read-contract: this is the authoritative, machine-checkable definition of WHICH items a governed doc-set is made of and WHERE each applies (by family / topology / presence). Edit only via the per-phase loop with [AUTH]; the conformance gate validates rendered doc-sets against the JSONL this schema constrains. NOT in scope: tool-owned configs (master-ownership rule above), and the authoring scaffolding (adr/prompt templates, GAP-4). Do NOT add content hashes to L1 items - heavy machinery is reserved for L2 'vendored' items (ADR 0015 markers in the spec home).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "item_id",
+    "member",
+    "order",
+    "role",
+    "content_model",
+    "bilingual",
+    "applicability",
+    "source"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "L1 item record-shape era; lets the L1 tier evolve its columns independently under schema-on-read (mirrors the manifest convention). Initial value \"1\".",
+      "examples": ["1"]
+    },
+    "item_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)+$",
+      "description": "Primary key. Member-prefixed, dotted, lowercase-kebab identifier (the member prefix may itself contain a hyphen, e.g. community-health) (e.g. readme.ci-status-table, spec.part-a.reference-assets, changelog.format). Unique across the canon (MECE: no overlap).",
+      "examples": ["spec.part-a.reference-assets", "readme.disclaimer", "changelog.format"]
+    },
+    "member": {
+      "type": "string",
+      "enum": ["readme", "spec", "testing", "changelog", "dotfile", "community-health"],
+      "description": "The doc-set member this item belongs to. README.ja is NOT a separate member - it is the lock-step mirror of README, expressed by the per-item 'bilingual' flag."
+    },
+    "order": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Ordinal position of this item within its member (MECE ordering; unique within a member). Used for rendered-section sequencing."
+    },
+    "role": {
+      "type": "string",
+      "description": "Short human label for what this item is / does."
+    },
+    "content_model": {
+      "type": "string",
+      "enum": ["common-fixed", "common-parameterized", "vendored", "specific", "mixed"],
+      "description": "How the item's content is produced. common-fixed = identical verbatim across consumers (template renders it as-is, e.g. CHANGELOG format header, .gitattributes encoding contract). common-parameterized = common structure with {{TOKEN}} substitution (README spine, CI badge table, workflows). vendored = common content VENDORED from the L2-common spec home governance/spec/<family>.md via ADR 0015 markers + normalized hash (the ONLY items carrying heavy machinery; e.g. SPEC Part A). specific = per-consumer authored content (e.g. SPEC Part B, README action/phase refs, CHANGELOG entries). mixed = a common skeleton with consumer-specific fill."
+    },
+    "bilingual": {
+      "type": "boolean",
+      "description": "Whether this item participates in the README.md / README.ja.md lock-step pair (AGENTS.md \u00a75 bilingual lock-step). Meaningful for member=readme; false for the English-only members (spec/testing/changelog/dotfile/community-health, per TR-SPEC-3)."
+    },
+    "applicability": {
+      "type": "object",
+      "description": "The variance axis - the document analog of code's platform_scope/consumers (baseline \u00a710 M10): which families / topologies the item applies to, and whether it is required. Enables mechanical impact analysis without conditional template assembly.",
+      "required": ["families", "topologies", "presence"],
+      "additionalProperties": false,
+      "properties": {
+        "families": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["powershell", "bash", "python"]
+          },
+          "description": "Scripting/tool families this item applies to. powershell/bash = script doc-set shape; python = tool doc-set shape (psa.py: no Part A, no TESTING, has VERSION)."
+        },
+        "topologies": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["subproject", "graduated-repo"]
+          },
+          "description": "Repo topologies this item applies to. subproject = lives under projects/<lang>-<name>/ in the monorepo (inherits monorepo-root community-health/dotfiles). graduated-repo = the spun-out repo root (carries its own community-health)."
+        },
+        "presence": {
+          "type": "string",
+          "enum": ["required", "optional-feature", "conditional"],
+          "description": "required = the item MUST be present for every applicable target (its family/topology). optional-feature = the item MAY be present (per-consumer opt-in feature, e.g. SPEC A.14 cross-script feature). conditional = present iff a stated condition holds (see 'condition'; e.g. only where the #4 doc-set includes TESTING/CHANGELOG)."
+        },
+        "condition": {
+          "type": "string",
+          "description": "Required when presence=conditional: the human-readable condition under which the item is present (resolved against the target's #4 doc-set / interface)."
+        }
+      }
+    },
+    "source": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" },
+      "description": "Provenance (non-load-bearing): the M5 register rows (TR-*), Phase-I current-state sections, baseline sections, and/or ADRs this item was derived from. The Tier-P register remains the fuller requirements rationale.",
+      "examples": [["Phase-I \u00a73", "TR-SPEC-2", "AGENTS.md \u00a76"]]
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional free-text clarification for this item."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "applicability": { "properties": { "presence": { "const": "conditional" } } } }
+      },
+      "then": {
+        "properties": { "applicability": { "required": ["condition"] } }
+      }
+    }
+  ]
+}
