@@ -75,7 +75,9 @@ rendered doc-sets; the class-(B) reconstruction procedure including the graduati
 transform (prefix-strip + relative->absolute link rebinding + ADRs-travel + doc-set
 recomputation); and the rule that every reconstruction/sync point is also a quality gate -
 the DOCUMENT analog of ADR 0007 + ADR 0008, introducing no new phase: TF and the P4-P7 exit
-criteria absorb it), and
+criteria absorb it; scope clarification (2026-06-04) - the canon governs documents + masterless
+repo-structural dotfiles, NOT tool-owned configs such as `.psa.config.json` whose master is the
+owning tool canon and which consumers follow-latest per ADR 0009 - discriminator = master-ownership), and
 [ADR 0018](./adr/0018-template-canon-version-model.md) (template-canon version model: two
 version axes - Axis 1, a per-template body `canonical_version` for provenance; Axis 2, a
 single `governance/templates/VERSION` that is the reconstructability gate and the consumer pin

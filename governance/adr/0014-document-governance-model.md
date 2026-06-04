@@ -90,6 +90,18 @@ as code:
   membership (#4). This is the document analog of the canon-test gate; it is deliberately
   LIGHTER than the code drift gate (no per-file hash/marker on rendered docs).
 
+**Scope boundary (clarification, 2026-06-04, from the ADR 0019 redesign).** The template
+canon governs **documents** (human/AI-facing prose - README/README.ja/SPEC/TESTING/CHANGELOG,
+community-health, the `.github` PR template) plus **repo-structural dotfiles that have no
+master elsewhere** (`.gitattributes`/`.gitignore`/workflows). It does **NOT** govern
+**tool-owned configuration** (e.g. `.psa.config.json`): that file's master is the owning tool
+canon and consumers **follow-latest** from it ([ADR 0009](./0009-psa-canonical-lifecycle.md)),
+not a reconstructed template - registering it here would create a second, competing master.
+The discriminator is **master-ownership**: an artifact whose master another canon already owns
+is referenced/followed, never re-mastered here. (A tool's own doc-set, e.g. psa.py's
+README/SPEC, may be FORMAT-conformance-checked against the canon yet stays content-owned by
+the tool.) This boundary is stated in full in the Layer-1 document-format definition.
+
 ### 3. Class-(B) reconstruction is structure-parameterized; graduation is a transform
 
 The same template renders to a subproject path OR a repo root. **Graduation is a
