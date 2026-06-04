@@ -275,6 +275,28 @@ slips that this rule exists to prevent. A pre-flight/post-flight CJK sweep (§8)
 English-only set should return zero; any hit outside the intentional-Japanese exception
 is a leak to fix before commit.
 
+### Commit-author identity (always)
+
+Patches are authored by Claude and applied (`git am`) + pushed by the human contributor.
+Keep the commit **author** stable and recognizable so the history stays readable across
+sessions:
+
+- When Claude authors a commit for a patch, set `git config user.name` to **`Claude`**
+  (optionally with a phase note, e.g. `Claude (TF.2 author)`) and `user.email` to
+  **`claude@anthropic.com`**. The fixed, recognizable identity is the name `Claude` plus
+  the `claude@anthropic.com` email.
+- The contributor's `git am` / push supplies the **committer** (the human pusher), so a
+  pushed commit reads *author = Claude, committer = the contributor* — the form of commit
+  `eb34339`.
+- **Never** use ad-hoc or per-session identities (`AI Agent`, `session`, `session@local`,
+  `TF2 authoring session`, and the like). Phase / scope context belongs in the commit
+  **subject** (and optionally the author parenthetical), never in a drifting name or email.
+
+Rationale (forensic): across sessions the author drifted (`AI Agent <ai@example.com>`,
+`session <session@local>`, `TF2 authoring session <session@local>`), lowering commit-log
+visibility; the good reference form is `eb34339` (author `Claude … <claude@anthropic.com>`,
+committer = the pusher). A stable author keeps "what did Claude author" greppable.
+
 ---
 
 ## 6. Part A Inheritance Rule (ABSOLUTE)
@@ -427,6 +449,9 @@ change.
    ground truth (§4) and is it accessible during writing?
 4. Is the change I am planning at the right Layer? (Could it apply
    to siblings? If yes, propose at the higher layer instead.)
+5. Will the commit be authored as **`Claude <claude@anthropic.com>`** (§5
+   "Commit-author identity")? Set `git config user.name`/`user.email` before
+   committing — never an ad-hoc or per-session name.
 
 > **Metadata guardrail (ADR 0015 §6) — SUPERSEDED FOR MANIFEST-ROW EDITS at P3a.1.**
 > `governance/state/manifest.jsonl` rows are now mutated ONLY through the
