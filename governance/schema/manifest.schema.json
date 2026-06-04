@@ -43,7 +43,8 @@
         "bash-region",
         "tool",
         "python-helper",
-        "python-tool"
+        "python-tool",
+        "template"
       ],
       "description": "Language-agnostic unit type (baseline \u00a74.4)."
     },
