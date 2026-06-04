@@ -82,7 +82,16 @@ single `governance/templates/VERSION` that is the reconstructability gate and th
 target. The gate axis follows the unit of delivery - per-unit for vendored code (ADR 0008),
 per-set for reconstructed doc-sets (ADR 0014 class-(B)). Axis 2 is a release-commit artifact
 outside the manifest, like the code canon's `.psd1` `ModuleVersion`, so the ADR 0011 CRUD
-manifest-row write-path boundary is unaffected. Refines ADR 0014 §2).
+manifest-row write-path boundary is unaffected. Refines ADR 0014 §2), and
+[ADR 0019](./adr/0019-document-vendor-model-and-provenance-embedding.md) (document vendor model
++ provenance embedding: a three-layer doc model - L1 language-independent format / L2 language
+template [common = vendored-from-code + subproject-specific] / L3 rendered doc-set - in which
+L2-common content is VENDORED into L3 via a managed region (marker + hash + tool-sync), not
+referenced; provenance is embedded two ways (a doc-level YAML front-matter pin + region-level
+ADR 0015 markers) feeding a two-level staleness trigger; variance is explicit applicability
+metadata, never conditional fold-in; the heavy marker/hash machinery is localized to L2-common
+vendored regions while L1/L3 stay light structural conformance. Refines ADR 0014; evolves
+AGENTS.md §6 + TR-SPEC-2).
 
 ### Canonical normalized-hash contract
 
