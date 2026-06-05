@@ -121,6 +121,33 @@ normalized-hash contract: the computable normalization + sha256/16-hex definitio
 from baseline §4.5; read-side check G; the write-side re-stamp tool; and the interim
 metadata guardrail bridging to the ADR 0011 CRUD tool).
 
+### Doc-region normalized-hash contract
+
+The code contract above governs `.ps1` / reference-code regions. **Documentation** regions (the
+spec home and the doc-set templates) are governed by a parallel, distinct contract. The
+doc-region `hash=` is computed by: take the region body (between the `>>> CANONICAL` and
+`<<< CANONICAL` lines), **drop HTML comments** (`<!-- ... -->` - authoring notes, `FILL`, and
+`ASSEMBLE` directives, never rendered content), collapse all whitespace runs to one space and
+strip (the same whitespace convention as the code hash), then `sha256(normalized)` truncated to
+**16 hex**. This hash is defined only for the **verbatim-canonical** content models -
+`common-fixed` and `vendored`. `common-parameterized`, `specific`, and `mixed` regions are
+**not** hash-pinned: their marker carries `policy=structural` + `hash=NONE`, and they are
+verified structurally (region present, `unit_id` resolves to a real L1 doc-format item, marker
+coherence, non-empty body). Marker `unit_id`s map to L1 items by stripping the family segment
+(`spec.powershell.part-a.X` → `spec.part-a.X`).
+
+All doc-region inspection - marker coherence, the verbatim-canonical hash stamp + verify, the
+structural checks, the doc-level YAML front-matter provenance pin (ADR 0019), and L1
+item-membership - is owned by the **`quality-tools/document-conformance-gate/`** tool (`--check`
+to verify, `--stamp` to write `PENDING` → real hash / structural sentinel). The split from the
+code side is firm: the governance-state validator's checks D / G and `canon-hash-restamp` stay
+scoped to `powershell-helper` / reference-code and are **never** extended to markdown.
+
+Governed by [ADR 0020](./adr/0020-doc-region-normalized-hash-contract.md) (doc-region
+normalized-hash contract + document-conformance gate boundary), complementing ADR 0015 (code
+hash) and [ADR 0019](./adr/0019-document-vendor-model-and-provenance-embedding.md) (document
+vendor model).
+
 ### Scanner output-contract pins
 
 The P3 consumer-drift scanner's sole output contract is `observation.schema.json`. Three of its
