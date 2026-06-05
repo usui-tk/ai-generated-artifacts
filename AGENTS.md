@@ -62,8 +62,9 @@ Layer 0  →  Layer 1  →  Layer 2  →  Layer 3
 
 Lower layers MAY extend or specialise upper-layer rules; they MUST NOT
 contradict them. When a Layer 3 SPEC has a Part A "Common
-Specification" section, that Part A is INHERITED from a canonical
-sibling SPEC, NOT restated. See §6.
+Specification" section, that Part A is VENDORED from the canonical
+family **spec home** (`governance/spec/<family>.md`) as gate-verified
+marker+hash regions (ADR 0019 / 0020), NOT free-hand restated. See §6.
 
 ### Sibling-isolation policy
 
@@ -220,7 +221,7 @@ skipping each one.
 
 | Change in SPEC | Required downstream updates |
 |---|---|
-| Part A inheritance declaration | **No downstream**: Part A change MUST be made at the canonical sibling SPEC (see §6), not here |
+| Part A (vendored common regions) | **Source is the family spec home, not here**: a Part A change MUST be made at `governance/spec/<family>.md` (see §6); each consumer's vendored copies are re-synced (ADR 0019) and the document-conformance gate verifies the doc-region hashes (§8) |
 | §B Action map / parameter list | `README.md` "Action reference" + `README.ja.md` mirror + `TESTING.md` §2 smoke checklist |
 | §B Phase architecture (phase add / remove / rename) | `README.md` "Phase reference" + `README.ja.md` mirror + `TESTING.md` §0 status table |
 | §C.9 Self-verification suite (T-numbering / assertion counts) | `README.md` "Self-verification tools" + `README.ja.md` mirror + `TESTING.md` §0 + `TESTING.md` §5 |
@@ -328,32 +329,48 @@ Structure":
 > Part A — Common Specification: Cross-project conventions inherited
 > by every script in this style.
 
-Part A of a Layer 3 SPEC is the **inherited** layer. The canonical
-text lives in the **in-house reference SPEC for each scripting
-family** — the repository currently maintains **two** canonical
-sibling SPECs, organised by language / target environment:
+Part A of a Layer 3 SPEC is the **inherited** common-conventions
+layer. Its canonical text lives in **exactly one place - the family
+*spec home*** (`governance/spec/<family>.md`), registered as a
+`spec-region` unit in the manifest. A consumer does not own or
+restate this text; it **vendors** it.
 
-- **PowerShell scripts**: [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md), sections A.1–A.14
-- **Bash / AWS scripts**: [`scripts/aws/ol-aws-ami-builder/SPEC.md`](./scripts/aws/ol-aws-ami-builder/SPEC.md), sections A.1–A.11
+**The inheritance mechanism is vendoring (ADR 0019), not a pointer.**
+Each Part A region is copied into the consumer's SPEC as a managed
+region delimited by `<!-- >>> CANONICAL ... >>> -->` / `<!-- <<< ... -->`
+markers carrying a doc-region `hash=` (ADR 0020). The
+**document-conformance gate** (`quality-tools/document-conformance-gate/doc_gate.py`)
+recomputes each vendored region's hash and compares it to the spec
+home, so a drifted or hand-edited copy is caught mechanically (§8).
+This **supersedes** the earlier "by-reference inheritance
+declaration" model: the inherited text now travels as a gate-managed
+copy, not a reference to another project's SPEC. What remains
+absolutely forbidden is **free-hand restating** - un-managed prose
+duplication outside the marker / hash machinery (the `c40755c`
+regression below).
 
-The two canonicals overlap conceptually (reference assets, logging,
-error handling, dev workflow) but diverge in concrete form (Bash
-idioms vs PowerShell idioms, `env.properties` files vs `param()`
-blocks, `shellcheck` vs `psa.py`). A new script's Part A:
+**Per-family state (rule-of-two, §2).** A family gets a spec home only
+once **>=2** consumers share observed common content:
 
-- MUST consist of an inheritance declaration (~50 lines)
-- MUST reference the canonical sibling SPEC sections **of the same
-  scripting family** (do NOT inherit a PowerShell canonical from a
-  Bash script, or vice versa)
-- MUST NOT restate the canonical text
-- MAY have a project-specific extensions subsection (`A.x`) recording
-  ONLY deviations or additions
+- **PowerShell**: spec home `governance/spec/powershell.md` exists
+  (Part A regions A.1-A.14, unit `spec.powershell.part-a`). New
+  PowerShell consumers vendor from it.
+- **Bash**: **no spec home yet** - the canon currently has a single
+  Bash consumer, so extraction would be premature (§2). Until a
+  second Bash consumer triggers extraction,
+  `scripts/aws/ol-aws-ami-builder/SPEC.md` Part A is the **de-facto
+  Bash reference** (§7). Do NOT manufacture a Bash spec home from one
+  project.
 
-If a new scripting family emerges in the future (e.g., Python pure
-scripts beyond `psa.py`, or other shell variants), declare a new
-canonical sibling SPEC for that family and update this section
-accordingly — do NOT shoehorn a new family into one of the existing
-canonicals.
+A consumer's Part A MAY still carry a project-specific extensions
+subsection (`A.x`) recording ONLY deviations or additions; this is
+`specific` content, authored by the consumer, never vendored.
+
+**Existing consumers predate this model.** The current Layer 3
+consumers (e.g. `download-speakerdeck-oracle4engineer`,
+`update-windows-server-iso`) were authored under the prior
+by-reference model; their conversion to gate-managed vendored Part A
+is performed at **migration**, not assumed retroactively here.
 
 ### The anti-pattern (what the c40755c regression did)
 
@@ -369,24 +386,36 @@ This introduced four problems simultaneously:
 4. **Maintenance burden** — every future sibling Part A change requires
    N+1 file updates instead of 1
 
+Under the vendor model the distinction is sharp: the sanctioned
+mechanism **is** a copy — but a *managed* one (marker + doc-region
+hash + gate). The anti-pattern is the **un-managed** free-hand copy,
+which carries no hash and has no gate to catch divergence.
+
 ### Why LLM agents break this rule
 
 LLM agents reading a Layer 3 SPEC may not realise Part A is inherited
 because:
 
-- The inheritance declaration is short and easy to mistake for "stub content"
+- The vendored regions are wrapped in HTML-comment markers (invisible
+  when the Markdown renders), so an agent may not realise they are
+  managed and edits them in place — silently breaking the doc-region
+  hash (the gate, §8, will catch it)
 - LLMs trained on generic software-engineering corpora associate
   "comprehensive Part A" with quality
-- The canonical sibling is not always reachable from the Layer 3 SPEC alone
+- The spec home is a separate file, not always reachable from the
+  Layer 3 SPEC alone
 
 To prevent recurrence:
 
-- BEFORE touching Part A of any Layer 3 SPEC, read the canonical
-  sibling SPEC's Part A in full
-- BEFORE "improving" Part A by adding content, classify the content:
-  if it is generic, propose to the canonical sibling SPEC; if it is
-  project-specific, record under `A.x` (extensions)
-- NEVER restate the canonical text inline as a "convenience" for readers
+- BEFORE touching Part A of any Layer 3 SPEC, read the family **spec
+  home** Part A in full (for Bash, the de-facto reference SPEC until a
+  spec home exists)
+- BEFORE "improving" Part A by adding content, classify it: if it is
+  generic, propose it to the **spec home** (and re-sync the vendored
+  copies); if it is project-specific, record it under `A.x` (extensions)
+- NEVER free-hand restate the canonical text inline; the only permitted
+  copy is a gate-managed vendored region (marker + hash), verified by
+  `doc_gate.py` (§8)
 
 ---
 
@@ -422,13 +451,17 @@ text lives in the files listed.
   Part C quality gate verification, and the ground truth verification
   rule (the latter added in the same cycle as this `AGENTS.md`)
 
-### In canonical sibling SPECs
+### Part A canonical source and reference SPECs
 
-The repository maintains two canonical sibling SPECs (one per
-scripting family); both are useful references for LLM agents
-working in this repository.
+The canonical Part A common conventions are **vendored from the family
+spec home** (§6): for **PowerShell**, `governance/spec/powershell.md`
+(unit `spec.powershell.part-a`, gate-verified); for **Bash**, no spec
+home yet (rule-of-two, §2) - `scripts/aws/ol-aws-ami-builder/SPEC.md`
+Part A is the de-facto reference until extraction. The two Layer 3
+SPECs below remain useful **worked examples** (concrete idioms), not
+the canonical Part A source for PowerShell.
 
-**PowerShell canonical** — [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md):
+**PowerShell reference** — [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md):
 
 - §A.13 Development Workflow — iteration cycle, revision discipline,
   and the "reuse before invention" principle
@@ -570,11 +603,16 @@ and should be actively guarded against by LLM agents.
 
 ### AP-1. Part A bloat (c40755c regression)
 
-See §6. **Symptom**: Layer 3 SPEC's Part A grows from ~50 lines
-(inheritance declaration) to hundreds of lines (restated content).
-**Root cause**: LLM mistaking the inheritance declaration for stub
-content. **Prevention**: §6 rule; read the canonical sibling Part A
-before touching any Layer 3 Part A.
+See §6. **Symptom**: a Layer 3 SPEC's Part A is **free-hand restated**
+(un-managed prose duplication) instead of carried as gate-managed
+vendored regions - it grows from a small vendored set to hundreds of
+lines of hand-copied content. **Root cause**: LLM mistaking inherited
+Part A for content to author and copying it outside the marker / hash
+machinery. **Prevention**: §6 vendor model - vendor Part A regions
+from the family spec home (marker + doc-region hash) and let the
+**document-conformance gate** (`doc_gate.py`, §8) verify them; the gate
+now **catches** this drift mechanically, which it could not under the
+old by-reference model. Free-hand restating remains forbidden.
 
 ### AP-2. Action / Phase list drift
 
