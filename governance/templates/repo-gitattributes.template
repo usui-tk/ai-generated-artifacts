@@ -1,0 +1,109 @@
+# =============================================================================
+# .gitattributes - canonical encoding / line-ending / linguist contract
+# =============================================================================
+# Purpose:
+#   - Force consistent line endings across Windows/Linux/macOS contributors.
+#   - Mark binary file types so Git does not diff or merge them.
+#   - Configure GitHub linguist so the "Languages" stats reflect authored code.
+# This is the repo- (family-agnostic) canonical template; it is vendored
+# whole-file into a consumer's repository root. Consumer-specific linguist
+# path hints (if any) are added by the consumer below the marked tail section.
+# =============================================================================
+
+# Default: treat unspecified text files as text and auto-normalize to LF on
+# commit. Windows checkouts still see CRLF where eol= says so below.
+* text=auto
+
+# -----------------------------------------------------------------------------
+# Line-ending discipline by language
+# -----------------------------------------------------------------------------
+
+# PowerShell: UTF-8 working-tree encoding, CRLF on disk. (BOM itself is enforced
+# at lint time by psa.py PSA7001, not by this attribute.)
+*.ps1     text working-tree-encoding=UTF-8 eol=crlf
+*.psm1    text working-tree-encoding=UTF-8 eol=crlf
+*.psd1    text working-tree-encoding=UTF-8 eol=crlf
+
+# Shell / Bash / Python: LF only (Unix runtimes).
+*.sh      text eol=lf
+*.bash    text eol=lf
+*.py      text eol=lf
+*.pyw     text eol=lf
+
+# Generic config / data formats: LF on disk.
+*.json    text eol=lf
+*.jsonl   text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.toml    text eol=lf
+*.ini     text eol=lf
+*.conf    text eol=lf
+*.cfg     text eol=lf
+
+# Markdown / plain documentation: LF.
+*.md      text eol=lf
+*.markdown text eol=lf
+*.txt     text eol=lf
+*.rst     text eol=lf
+
+# Web assets (rare, but in case any artifact ships them).
+*.html    text eol=lf
+*.css     text eol=lf
+*.js      text eol=lf
+
+# -----------------------------------------------------------------------------
+# Binary file types - never auto-convert line endings, never diff
+# -----------------------------------------------------------------------------
+
+# Office / publishable documents
+*.docx    binary
+*.xlsx    binary
+*.xlsm    binary
+*.pptx    binary
+*.pdf     binary
+
+# Images
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.bmp     binary
+*.tif     binary
+*.tiff    binary
+*.webp    binary
+
+# Archives
+*.zip     binary
+*.gz      binary
+*.tar     binary
+*.tgz     binary
+*.7z      binary
+*.xz      binary
+*.bz2     binary
+
+# Misc binary
+*.bin     binary
+*.exe     binary
+*.dll     binary
+
+# -----------------------------------------------------------------------------
+# GitHub Linguist - mark the standard doc-set as documentation so it does not
+# dominate the language bar. These globs are family-agnostic and universal.
+# -----------------------------------------------------------------------------
+**/README.md            linguist-documentation
+**/README.*.md          linguist-documentation
+**/SPEC.md              linguist-documentation
+**/SPEC.*.md            linguist-documentation
+**/TESTING.md           linguist-documentation
+**/TESTING.*.md         linguist-documentation
+**/CHANGELOG.md         linguist-documentation
+**/CONTRIBUTING.md      linguist-documentation
+**/CODE_OF_CONDUCT.md   linguist-documentation
+**/SECURITY.md          linguist-documentation
+
+# -----------------------------------------------------------------------------
+# Consumer-specific linguist path hints (optional) - the consumer MAY add
+# repository-local `linguist-documentation` / `linguist-vendored` globs below.
+# Leave empty if none.
+# -----------------------------------------------------------------------------
