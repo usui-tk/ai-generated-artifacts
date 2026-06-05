@@ -1,7 +1,7 @@
 # Static-Point Snapshot Procedure
 
 > Governance procedure (referenced by `project-management/STATUS.md`). Defines the
-> per-repo, per-phase "static point" (静止点) snapshot.
+> per-repo, per-phase "static point" (seishi-ten) snapshot.
 
 ## What a static point is
 A reversible, repo-relative snapshot of a repository taken at a phase boundary, so any
