@@ -583,6 +583,21 @@ change.
     (G)** — each marker's `hash=` MUST equal the ADR 0015 normalized hash
     recomputed from its region body. "I didn't run it" is a deviation
     (M4(A)), not a pass.
+14a. **Document-conformance gate (when a doc-set template, the spec
+    home `governance/spec/<family>.md`, or any doc-region
+    `<!-- >>> CANONICAL … -->` marker under `governance/` was touched).**
+    Run the gate —
+    `python3 quality-tools/document-conformance-gate/doc_gate.py --check`
+    → **PASS, 0 findings**: marker coherence, the doc-region hash for the
+    verbatim-canonical regions (`common-fixed` / `vendored`) and
+    structural conformance for the rest (`common-parameterized` /
+    `specific` / `mixed`), L1 item-membership, and the front-matter
+    provenance pin (ADR 0020). This is the **doc-side parallel of check
+    G**: the validator's checks D / G and `canon-hash-restamp` (items
+    14-15) stay scoped to `reference-code` / `powershell-helper` and are
+    **NOT** extended to Markdown (ADR 0020 tool boundary). The write side
+    is `doc_gate.py --stamp` (PENDING → real hash / structural sentinel);
+    never hand-edit a doc-region `hash=`.
 15. **Marker hashes are never hand-edited.** To (re)compute or correct a
     canonical marker `hash=`, use the write-side tool —
     `python3 quality-tools/canon-hash-restamp/restamp.py --check` (report) /
