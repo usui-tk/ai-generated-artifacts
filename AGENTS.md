@@ -79,6 +79,20 @@ notice a useful pattern in subproject B: DO NOT copy it into A's
 SPEC.md as a "project-specific convention". Raise it for Layer 0/1
 inclusion so the canonical text exists in exactly one place.
 
+### Common-canon extraction timing (rule of two)
+
+A family **spec home** (the canonical Part A common-conventions source, e.g.
+`governance/spec/powershell.md`) exists to factor out content that **two or more**
+real consumers vendor identically (ADR 0019). Do NOT create a family spec home, or its
+doc-set templates, ahead of a grounded second consumer: with a single project in a
+family the "common" content is just that one project's content, and extracting it is
+premature abstraction — the hashed `vendored` regions would only pin placeholder text.
+Extract a spec home when **≥2** family members share *observed* common conventions
+(distilled from them, not guessed); scaffold a doc-set template when a new consumer is
+imminent or ≥2 consumers need structural standardisation. L1 `doc-format` already
+declares each member's intended family applicability, so deferring the L2 realisation
+loses no design intent.
+
 ---
 
 ## 3. Required Pre-Flight Checklist (Before Any Change)
