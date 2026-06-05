@@ -520,7 +520,7 @@ change.
 > `binding_mode=follow-latest`, `platform_scope=cross-platform`, `canonical_version`
 > = the tool's own SemVer, and **`tested` = the tool's self-test passes** (re-defined
 > for whole-tool: self-test green, not the ADR 0007 canon-test suite). First applied
-> to `tool.canonical-drift-scanner` at P3.6. **[P4.4 DECISION OWED]** the discriminating
+> to `tool.canonical-drift-scanner` at P3.6. **[Deferred to P4.4 - tracked]** the discriminating
 > second instance is `psa.py` (registered `kind=tool` at P4.4) because it is the first
 > **SemVer/platform-heterogeneous** instance (its own real SemVer, not `0.1.0`); the
 > `canon-manifest-tool` + machine-trigger rows registered at P3a.3 are homogeneous
