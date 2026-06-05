@@ -131,6 +131,19 @@ def run_tests():
                   and "tool.new-tool" in ids(root)))
     shutil.rmtree(root)
 
+    # 1b. register a NEW kind=template row -> OK (KINDS in sync with schema enum).
+    root = build_repo()
+    os.makedirs(os.path.join(root, "governance", "templates"), exist_ok=True)
+    open(os.path.join(root, "governance", "templates", "repo-x.template"), "w").write("x\n")
+    rc = run(["--root", root, "register", "--unit-id", "template.dotfile.x",
+              "--kind", "template", "--location", "governance/templates/repo-x.template",
+              "--version", "0.1.0", "--change-policy", "canonical",
+              "--binding", "follow-latest", "--platform-scope", "cross-platform",
+              "--tested", "false"])
+    cases.append(("register kind=template unit succeeds", rc == 0
+                  and "template.dotfile.x" in ids(root)))
+    shutil.rmtree(root)
+
     # 2. register with a duplicate unit_id -> refused at pre-check, no write.
     root = build_repo()
     before = read_bytes(mpath(root))

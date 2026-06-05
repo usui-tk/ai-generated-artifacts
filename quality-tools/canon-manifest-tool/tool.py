@@ -56,7 +56,7 @@ import tempfile
 
 # --- enums / pattern mirrored from governance/schema/manifest.schema.json -------------
 KINDS = ("powershell-helper", "spec-region", "governance-doc", "bash-region",
-         "tool", "python-helper", "python-tool")
+         "tool", "python-helper", "python-tool", "template")
 CHANGE_POLICIES = ("canonical", "vendored-upstream-first", "forked")
 BINDING_MODES = ("follow-latest", "pin")
 PLATFORM_SCOPES = ("cross-platform", "windows-enhanced", "windows-only")
