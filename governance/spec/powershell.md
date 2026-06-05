@@ -156,8 +156,11 @@ workflow filenames are path-encoded per consumer (A.13 / the dotfile conventions
 ### A.12 Documentation language policy
 
 Code, configuration, and the SPEC/TESTING/CHANGELOG doc-set are authored in **English / ASCII**.
-Intentional Japanese appears only in the **bilingual README pair** (`README.ja.md`) and in
-sanctioned data/string literals. The doc-set file-set and each document's role follow the
+Intentional Japanese appears only in (a) the **bilingual README pair** (`README.md` +
+`README.ja.md`, twin-file), (b) the **bilingual community-health files**
+(`CODE_OF_CONDUCT` / `CONTRIBUTING` / `SECURITY`, in-file English + Japanese sections),
+and (c) sanctioned data/string literals. The bilingual *mode* is fixed by document member -
+twin-file for README, in-file dual-language for community-health. The doc-set file-set and each document's role follow the
 canonical structure (README + README.ja, SPEC, and where applicable TESTING and CHANGELOG):
 **history lives in CHANGELOG, current/forward design in SPEC**. `README.md` and `README.ja.md`
 are maintained in **lock-step** (AGENTS.md §5). The mandatory README disclaimer and license
