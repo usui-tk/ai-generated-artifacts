@@ -12,6 +12,7 @@
 
 <!-- ===== ASSEMBLE GROUP 1: repo- README CORE の "CI ステータス" の後に挿入(L1 order 6-8) ===== -->
 
+<!-- >>> CANONICAL unit_id=readme.action-reference version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## アクション一覧
 
 <!-- readme.action-reference (L1 order 6; [powershell, bash]; conditional -
@@ -19,14 +20,19 @@
      FILL: 全 action をカテゴリ別に列挙。各 action に 1 行の目的、書き込み(状態変更)
      の有無、権限要件を記載。 -->
 
+<!-- <<< CANONICAL unit_id=readme.action-reference <<< -->
+<!-- >>> CANONICAL unit_id=readme.phase-reference version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## フェーズ一覧
 
 <!-- readme.phase-reference (L1 order 7; [powershell, bash]; conditional)。
      FILL: 内部のフェーズ / ステージ構成 - フェーズ ID、各フェーズの動作、実行順序、
      DryRun / 評価モードでスキップされるフェーズ。 -->
 
+<!-- <<< CANONICAL unit_id=readme.phase-reference <<< -->
+<!-- >>> CANONICAL unit_id=readme.parameters version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## パラメーター
 
 <!-- readme.parameters (L1 order 8; [powershell, bash]; required)。
      FILL: 完全なオプション / 引数表(名前 | 型 | デフォルト | 説明)に続き、
      「排他的指定 / オプショングループ」サブセクションで併用不可の組合せを明記。 -->
+<!-- <<< CANONICAL unit_id=readme.parameters <<< -->

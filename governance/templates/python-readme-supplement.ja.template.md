@@ -10,6 +10,7 @@
 
 <!-- ===== ASSEMBLE GROUP 1: repo- README CORE の "CI ステータス" の後に挿入(L1 order 9-10) ===== -->
 
+<!-- >>> CANONICAL unit_id=readme.rule-catalog version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## ルールカタログ
 
 <!-- readme.rule-catalog (L1 order 9; [python]; conditional -
@@ -17,8 +18,11 @@
      FILL: ルールのカタログ - ルール ID、カテゴリ、何を検出するか、デフォルト重大度、
      デフォルトで有効か。デフォルト無効のルールとその理由も記載。 -->
 
+<!-- <<< CANONICAL unit_id=readme.rule-catalog <<< -->
+<!-- >>> CANONICAL unit_id=readme.output-format version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## 出力フォーマット
 
 <!-- readme.output-format (L1 order 10; [python]; conditional)。
      FILL: ツールが出力する形式(例: 人間可読テキスト、JSON、SARIF)、各形式の選択方法、
      デフォルト形式の短い例。 -->
+<!-- <<< CANONICAL unit_id=readme.output-format <<< -->

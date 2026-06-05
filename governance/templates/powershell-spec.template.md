@@ -49,6 +49,7 @@
        A.13 spec.powershell.part-a.development-workflow
      Until reconstruction, consult the spec home for the authoritative Part A text. -->
 
+<!-- >>> CANONICAL unit_id=spec.powershell.part-b.identity-io-phases version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 # Part B — Script-Specific Specification
 
 <!-- The script's unique processing logic. B.1-B.4 are the canonical structural
@@ -75,6 +76,8 @@
 <!-- FILL (B.5+): one subsection per script-specific concern - algorithm, data
      structure, failure recovery, idempotency, and so on. -->
 
+<!-- <<< CANONICAL unit_id=spec.powershell.part-b.identity-io-phases <<< -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-c.quality-gates version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 # Part C — Quality Gates & Validation Checklist
 
 <!-- The gate battery that must pass before any commit. Common categories are listed;
@@ -106,12 +109,15 @@
        ### Debug Trace Facility checks  (if the Part A debug-trace facility is present)
 -->
 
+<!-- <<< CANONICAL unit_id=spec.powershell.part-c.quality-gates <<< -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-d.pitfalls version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 # Part D — Known Pitfalls & Lessons Learned
 
 <!-- An append-only list of pitfalls discovered for THIS script (symptom -> cause ->
      resolution), each tagged with the revision where it was found.
      FILL: D.1, D.2, ... as they accumulate. -->
 
+<!-- <<< CANONICAL unit_id=spec.powershell.part-d.pitfalls <<< -->
 ## Appendix: How to seed a new script from this SPEC
 
 <!-- FILL: the short procedure to start a new script from this template - inherit

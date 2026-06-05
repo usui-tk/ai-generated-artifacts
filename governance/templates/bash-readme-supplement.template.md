@@ -17,6 +17,7 @@
 
 <!-- ===== ASSEMBLE GROUP 1: interleaves into the repo- README CORE after "CI status" (L1 order 6-8) ===== -->
 
+<!-- >>> CANONICAL unit_id=readme.action-reference version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Action reference
 
 <!-- readme.action-reference (L1 order 6; [powershell, bash]; conditional - include
@@ -24,15 +25,20 @@
      FILL: list every action, grouped by category. For each action give a one-line
      purpose, whether it writes (mutates state), and any privilege requirement. -->
 
+<!-- <<< CANONICAL unit_id=readme.action-reference <<< -->
+<!-- >>> CANONICAL unit_id=readme.phase-reference version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Phase reference
 
 <!-- readme.phase-reference (L1 order 7; [powershell, bash]; conditional).
      FILL: the internal phase / stage structure - phase IDs, what each phase does,
      execution order, and which phases are skipped in dry-run / evaluation mode. -->
 
+<!-- <<< CANONICAL unit_id=readme.phase-reference <<< -->
+<!-- >>> CANONICAL unit_id=readme.parameters version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Parameters
 
 <!-- readme.parameters (L1 order 8; [powershell, bash]; required).
      FILL: a complete option / argument table (name | type | default | description),
      followed by a "Mutual exclusivity / option groups" subsection stating which
      options cannot be combined. -->
+<!-- <<< CANONICAL unit_id=readme.parameters <<< -->

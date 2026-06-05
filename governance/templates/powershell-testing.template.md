@@ -23,6 +23,7 @@
 > Verification procedure and recorded results for `{{PROJECT_TITLE}}`. Test design and
 > the static-analysis contract follow the Part A conventions documented in `SPEC.md`.
 
+<!-- >>> CANONICAL unit_id=testing.status-summary version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Verification status summary
 
 <!-- testing.status-summary (L1 order 0; [powershell, bash]; conditional;
@@ -33,6 +34,8 @@
 <!-- FILL: rows - e.g. current revision, static-analysis gate, offline tests, live
      tests, last real-run / real-machine validation. -->
 
+<!-- <<< CANONICAL unit_id=testing.status-summary <<< -->
+<!-- >>> CANONICAL unit_id=testing.static-analysis-gate version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Static analysis gate
 
 <!-- testing.static-analysis-gate (L1 order 1; [powershell, bash]; conditional;
@@ -54,12 +57,16 @@ The gate passes only at **0 errors / 0 warnings / 0 info**.
 
 <!-- FILL: any inline suppressions in use and their justification (default: none). -->
 
+<!-- <<< CANONICAL unit_id=testing.static-analysis-gate <<< -->
+<!-- >>> CANONICAL unit_id=testing.discovered-bugs version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Discovered bugs and fix history
 
 <!-- testing.discovered-bugs (L1 order 2; [powershell, bash]; conditional; specific).
      FILL: an append-only list - symptom -> root cause -> fix (revision), one entry per
      defect found during verification. -->
 
+<!-- <<< CANONICAL unit_id=testing.discovered-bugs <<< -->
+<!-- >>> CANONICAL unit_id=testing.ci-coverage version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Continuous integration coverage
 
 <!-- testing.ci-coverage (L1 order 3; [powershell, bash]; conditional;
@@ -67,14 +74,19 @@ The gate passes only at **0 errors / 0 warnings / 0 info**.
      Linux, then platform validation stage(s)). FILL: the per-stage definitions and an
      explicit "what CI does NOT cover" note. -->
 
+<!-- <<< CANONICAL unit_id=testing.ci-coverage <<< -->
+<!-- >>> CANONICAL unit_id=testing.verification-procedure version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Verification procedure
 
 <!-- testing.verification-procedure (L1 order 4; [powershell, bash]; optional; specific).
      FILL: the offline / smoke tests, live checks, and self-verification suite - test
      IDs and what each asserts, how to run them, and determinism categories. -->
 
+<!-- <<< CANONICAL unit_id=testing.verification-procedure <<< -->
+<!-- >>> CANONICAL unit_id=testing.validation-results version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Recorded validation results
 
 <!-- testing.validation-results (L1 order 5; [powershell]; optional; specific).
      FILL: recorded real-run / real-machine validation results and the baseline they
      establish (operator-pending items, environment, and outcomes). -->
+<!-- <<< CANONICAL unit_id=testing.validation-results <<< -->

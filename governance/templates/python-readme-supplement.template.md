@@ -13,6 +13,7 @@
 
 <!-- ===== ASSEMBLE GROUP 1: interleaves into the repo- README CORE after "CI status" (L1 order 9-10) ===== -->
 
+<!-- >>> CANONICAL unit_id=readme.rule-catalog version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Rule catalog
 
 <!-- readme.rule-catalog (L1 order 9; [python]; conditional - include only if the tool
@@ -20,8 +21,11 @@
      FILL: the catalog of rules - rule ID, category, what it flags, default severity,
      and whether it is enabled by default. Note any rules disabled by default and why. -->
 
+<!-- <<< CANONICAL unit_id=readme.rule-catalog <<< -->
+<!-- >>> CANONICAL unit_id=readme.output-format version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Output format
 
 <!-- readme.output-format (L1 order 10; [python]; conditional).
      FILL: the output formats the tool emits (e.g. human-readable text, JSON, SARIF),
      how to select each, and a short example of the default format. -->
+<!-- <<< CANONICAL unit_id=readme.output-format <<< -->
