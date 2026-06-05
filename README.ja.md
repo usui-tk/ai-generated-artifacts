@@ -20,9 +20,9 @@ ai-generated-artifacts/
 ├── README.md                 # 英語版（プライマリ）
 ├── README.ja.md              # 日本語版
 ├── SPEC.md                   # レポジトリレベルの CI / 横断的ポリシー（英語のみ）
-├── CONTRIBUTING.md           # 貢献ルール（英語のみ）
-├── SECURITY.md               # 脆弱性報告ポリシー（英語のみ）
-├── CODE_OF_CONDUCT.md        # 行動規範（英語のみ）
+├── CONTRIBUTING.md           # 貢献ルール（日英バイリンガル）
+├── SECURITY.md               # 脆弱性報告ポリシー（日英バイリンガル）
+├── CODE_OF_CONDUCT.md        # 行動規範（日英バイリンガル）
 ├── AGENTS.md                 # LLM 支援貢献者向けワークフローガイド（英語のみ）
 ├── .gitignore
 │
@@ -141,7 +141,7 @@ Update Catalogue の現在状態と乖離している場合、 更新された�
   - **パターン A — 言語サフィックス対** (`<slug>.en.md` / `<slug>.ja.md`)
     リサーチ記事や学習ノートなど一般的なコンテンツファイルに使用。
   - **パターン B — プライマリ + 翻訳** (`<NAME>.md` が英語プライマリ、`<NAME>.ja.md` が日本語翻訳版)
-    `README.md` / `README.ja.md` に使用。 他のリポジトリ慣例ファイル (`SPEC.md`、 `TESTING.md`、 `CHANGELOG.md`、 `CONTRIBUTING.md`、 `SECURITY.md`、 `CODE_OF_CONDUCT.md`、 `AGENTS.md`) は下記「言語ポリシー」により **英語のみ** で維持されます。
+    `README.md` / `README.ja.md` に使用。 他のリポジトリ慣例ファイル (`SPEC.md`、 `TESTING.md`、 `CHANGELOG.md`、 `AGENTS.md`) は **英語のみ**、 `CONTRIBUTING.md`、 `SECURITY.md`、 `CODE_OF_CONDUCT.md` は 1 ファイル内に日英併記で、 下記「言語ポリシー」に従い維持されます。
 - 単一言語ファイル: `<slug>.md`
 - コードファイルは言語の慣習に従う（例：PowerShell は `Verb-Noun.ps1`、Bash は `kebab-case.sh`、Python は `snake_case.py`）
 
@@ -165,11 +165,12 @@ Update Catalogue の現在状態と乖離している場合、 更新された�
 | `SPEC.md` | **英語のみ** | — | 仕様書は drift 回避のため英語のみで維持。 |
 | `TESTING.md` | **英語のみ** | — | テスト手順・検証結果、 英語のみ。 |
 | `CHANGELOG.md` | **英語のみ** | — | 時系列のリリースノート、 英語のみ。 |
-| `CONTRIBUTING.md`、 `SECURITY.md`、 `CODE_OF_CONDUCT.md`、 `AGENTS.md` | **英語のみ** | — | リポジトリポリシーファイル、 英語のみ。 |
+| `AGENTS.md` | **英語のみ** | — | エージェント／貢献者向け運用マニュアル、 英語のみ。 |
+| `CONTRIBUTING.md`、 `SECURITY.md`、 `CODE_OF_CONDUCT.md` | **1 ファイル内に日英併記** | — | コミュニティヘルスファイル。 両言語を 1 ファイルに併記 (D-CH1)、 下記サブディレクトリ README と同様。 |
 | リサーチ記事・学習ノート (パターン A `<slug>.en.md` / `<slug>.ja.md`) | 可能であれば英語および日本語 | — | コンテンツファイル。 現実的な範囲でバイリンガル化。 |
 | トップレベル直下のサブディレクトリの README | 1 ファイル内に日英を併記 | — | 非常に短い概要 README で重複が無駄になる場合の例外。 両言語が等しく完全であることが条件。 |
 
-**ポリシーの根拠**: 新規読者の入口となる `README.md` のみ日本語版を並行維持します。 仕様書・テスト手順・リリースノートは同期 drift を回避するため英語のみで維持します — これは LLM 支援メンテナンスで特に発生しやすい問題です。 日本語話者の読者は `README.ja.md` でオリエンテーションを取った後、 詳細な技術内容については英語のソース・オブ・トゥルースを参照する想定です。
+**ポリシーの根拠**: 新規読者・貢献者の入口となる `README.md` は日本語版を並行維持し、 コミュニティヘルスファイル (`CONTRIBUTING.md`、 `SECURITY.md`、 `CODE_OF_CONDUCT.md`) は 1 ファイル内に日英を併記します (D-CH1)。 仕様書・テスト手順・リリースノートは同期 drift を回避するため英語のみで維持します — これは LLM 支援メンテナンスで特に発生しやすい問題です。 日本語話者の読者は `README.ja.md` でオリエンテーションを取った後、 詳細な技術内容については英語のソース・オブ・トゥルースを参照する想定です。
 
 過去アーティファクトに `SPEC.ja.md` や `TESTING.ja.md` が残っている場合は、 次のメンテナンスパスで削除し、 他ドキュメントの参照を英語版に向け直してください。
 
