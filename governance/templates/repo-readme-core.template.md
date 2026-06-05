@@ -24,6 +24,7 @@
 
 > Read this in [Japanese](./README.ja.md).
 
+<!-- >>> CANONICAL unit_id=readme.disclaimer version=0.1.0 hash=108f4d4d82931e3e policy=canonical binding=follow-latest >>> -->
 ## ⚠️ Disclaimer
 
 **USE AT YOUR OWN RISK.** This artifact is provided "AS IS" without warranty
@@ -54,6 +55,8 @@ artifacts in this repository, see the
 [root README]({{REPO_ROOT_RELPATH}}/README.md)
 ([Japanese]({{REPO_ROOT_RELPATH}}/README.ja.md)).
 
+<!-- <<< CANONICAL unit_id=readme.disclaimer <<< -->
+<!-- >>> CANONICAL unit_id=readme.license version=0.1.0 hash=e44d509badd86ef1 policy=canonical binding=follow-latest >>> -->
 ## License
 
 This project is part of the `{{REPO_SLUG}}` repository, which is licensed
@@ -65,6 +68,8 @@ purpose, provided that the original copyright and license notices are
 preserved. The software is provided without warranty, as detailed in the
 Disclaimer above and in the LICENSE file.
 
+<!-- <<< CANONICAL unit_id=readme.license <<< -->
+<!-- >>> CANONICAL unit_id=readme.why-exists version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Why this exists
 
 <!-- FILL: 1-2 paragraphs. What manual or unmet need this artifact addresses,
@@ -90,6 +95,8 @@ Disclaimer above and in the LICENSE file.
 - For the **repository-wide LLM-agent operating guide**, see
   [`AGENTS.md`]({{REPO_ROOT_RELPATH}}/AGENTS.md) at the repository root.
 
+<!-- <<< CANONICAL unit_id=readme.why-exists <<< -->
+<!-- >>> CANONICAL unit_id=readme.folder-layout version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Folder layout
 
 ```
@@ -105,12 +112,16 @@ Disclaimer above and in the LICENSE file.
 If you only want to **use** the artifact, read this README. If you want to
 **extend it or build a similar one**, also read `SPEC.md`.
 
+<!-- <<< CANONICAL unit_id=readme.folder-layout <<< -->
+<!-- >>> CANONICAL unit_id=readme.quick-start version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Quick start
 
 <!-- FILL: minimal copy-pasteable steps to a first safe (dry-run / evaluation)
      invocation, then a real run. Use a fenced code block in the artifact's
      native language. -->
 
+<!-- <<< CANONICAL unit_id=readme.quick-start <<< -->
+<!-- >>> CANONICAL unit_id=readme.ci-status-table version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## CI status
 
 | Stage | Workflow | Status |
@@ -122,6 +133,7 @@ This repository runs a multi-stage CI model (static analysis first, then
 platform validation). See [`SPEC.md`](./SPEC.md) for the canonical CI model
 and the per-stage definitions.
 
+<!-- <<< CANONICAL unit_id=readme.ci-status-table <<< -->
 <!-- ASSEMBLE: per-language / per-feature SUPPLEMENT sections (L1 order 6-10)
      interleave here, in L1 order, per applicability:
        6  readme.action-reference  [powershell, bash]  (conditional)
@@ -131,23 +143,29 @@ and the per-stage definitions.
        10 readme.output-format     [python]            (conditional)
 -->
 
+<!-- >>> CANONICAL unit_id=readme.configuration version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Configuration
 
 <!-- Present only if the artifact reads external configuration (conditional).
      FILL: configuration files / environment variables / precedence and an
      example. Omit this section entirely if not applicable. -->
 
+<!-- <<< CANONICAL unit_id=readme.configuration <<< -->
+<!-- >>> CANONICAL unit_id=readme.self-verification version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Self-verification
 
 <!-- Present only if the artifact ships a self-check / self-test (optional).
      FILL: how to run the artifact's own verification and what a pass looks
      like. Omit if not applicable. -->
 
+<!-- <<< CANONICAL unit_id=readme.self-verification <<< -->
+<!-- >>> CANONICAL unit_id=readme.troubleshooting version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## Troubleshooting
 
 <!-- Present only if there are known failure modes worth documenting (optional).
      FILL: symptom -> cause -> resolution entries. Omit if not applicable. -->
 
+<!-- <<< CANONICAL unit_id=readme.troubleshooting <<< -->
 <!-- ASSEMBLE: per-language / per-feature SUPPLEMENT sections (L1 order 14-15)
      interleave here, in L1 order, per applicability:
        14 readme.risk-classification [powershell] (optional)

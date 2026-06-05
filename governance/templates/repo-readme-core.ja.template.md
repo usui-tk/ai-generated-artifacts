@@ -10,6 +10,7 @@
 
 > 英語版は [README.md](./README.md) を参照してください。
 
+<!-- >>> CANONICAL unit_id=readme.disclaimer version=0.1.0 hash=05e14b1761ddaba2 policy=canonical binding=follow-latest >>> -->
 ## ⚠️ 免責事項
 
 **ご利用は自己責任でお願いします。** 本成果物は「現状のまま (AS IS)」提供されて
@@ -38,6 +39,8 @@
 ついては、[ルート README]({{REPO_ROOT_RELPATH}}/README.ja.md)
 ([English]({{REPO_ROOT_RELPATH}}/README.md))を参照してください。
 
+<!-- <<< CANONICAL unit_id=readme.disclaimer <<< -->
+<!-- >>> CANONICAL unit_id=readme.license version=0.1.0 hash=bbc62dda20fb6742 policy=canonical binding=follow-latest >>> -->
 ## ライセンス
 
 本プロジェクトは `{{REPO_SLUG}}` リポジトリの一部であり、**MIT ライセンス** の
@@ -48,6 +51,8 @@
 問わず自由に使用、改変、配布できます。本ソフトウェアは無保証で提供されます。
 詳細は上記の免責事項および LICENSE ファイルを参照してください。
 
+<!-- <<< CANONICAL unit_id=readme.license <<< -->
+<!-- >>> CANONICAL unit_id=readme.why-exists version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## なぜこれが必要か
 
 <!-- FILL: 1〜2 段落。本成果物が解決する手作業上の課題や未充足のニーズ、
@@ -72,6 +77,8 @@
 - **リポジトリ全体の LLM エージェント運用ガイド**については、リポジトリルートの
   [`AGENTS.md`]({{REPO_ROOT_RELPATH}}/AGENTS.md) を参照。
 
+<!-- <<< CANONICAL unit_id=readme.why-exists <<< -->
+<!-- >>> CANONICAL unit_id=readme.folder-layout version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## フォルダ構成
 
 ```
@@ -87,11 +94,15 @@
 **使う**だけならこの README を読んでください。**拡張する/同種のものを作る**
 場合は `SPEC.md` も読んでください。
 
+<!-- <<< CANONICAL unit_id=readme.folder-layout <<< -->
+<!-- >>> CANONICAL unit_id=readme.quick-start version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## クイックスタート
 
 <!-- FILL: 最初の安全な(DryRun / 評価)起動、続いて本番実行までの、コピー
      して実行できる最小手順。成果物のネイティブ言語のコードブロックを使用。 -->
 
+<!-- <<< CANONICAL unit_id=readme.quick-start <<< -->
+<!-- >>> CANONICAL unit_id=readme.ci-status-table version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## CI ステータス
 
 | ステージ | ワークフロー | ステータス |
@@ -104,6 +115,7 @@
 実行します。正準の CI モデルと各ステージの定義は [`SPEC.md`](./SPEC.md) を
 参照してください。
 
+<!-- <<< CANONICAL unit_id=readme.ci-status-table <<< -->
 <!-- ASSEMBLE: 言語別 / 機能別の SUPPLEMENT セクション(L1 order 6-10)が、
      applicability に従い L1 order でここに挿入される:
        6  readme.action-reference  [powershell, bash]  (conditional)
@@ -113,22 +125,28 @@
        10 readme.output-format     [python]            (conditional)
 -->
 
+<!-- >>> CANONICAL unit_id=readme.configuration version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## 設定
 
 <!-- 外部設定を読み込む成果物の場合のみ記載(conditional)。
      FILL: 設定ファイル / 環境変数 / 優先順位と例。該当しない場合はこの
      セクションごと省略。 -->
 
+<!-- <<< CANONICAL unit_id=readme.configuration <<< -->
+<!-- >>> CANONICAL unit_id=readme.self-verification version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## 自己検証
 
 <!-- 自己チェック / 自己テストを同梱する場合のみ記載(optional)。
      FILL: 成果物自身の検証の実行方法と、合格時の状態。該当しない場合は省略。 -->
 
+<!-- <<< CANONICAL unit_id=readme.self-verification <<< -->
+<!-- >>> CANONICAL unit_id=readme.troubleshooting version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## トラブルシューティング
 
 <!-- 文書化に値する既知の失敗モードがある場合のみ記載(optional)。
      FILL: 症状 -> 原因 -> 解決 の項目。該当しない場合は省略。 -->
 
+<!-- <<< CANONICAL unit_id=readme.troubleshooting <<< -->
 <!-- ASSEMBLE: 言語別 / 機能別の SUPPLEMENT セクション(L1 order 14-15)が、
      applicability に従い L1 order でここに挿入される:
        14 readme.risk-classification [powershell] (optional)

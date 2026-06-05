@@ -8,6 +8,7 @@
   No doc-region hash markers (TF (e) owns the contract).
   Tokens: {{PROJECT_TITLE}} {{REPO_ROOT_RELPATH}}
 -->
+<!-- >>> CANONICAL unit_id=changelog.format version=0.1.0 hash=797cc7c3afb396d3 policy=canonical binding=follow-latest >>> -->
 # Changelog
 
 All notable changes to `{{PROJECT_TITLE}}` are documented in this file.
@@ -23,6 +24,8 @@ The format is based on
 This CHANGELOG is **English only** per the repository-wide
 [documentation language policy]({{REPO_ROOT_RELPATH}}/README.md).
 
+<!-- <<< CANONICAL unit_id=changelog.format <<< -->
+<!-- >>> CANONICAL unit_id=changelog.entries version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 ## [Unreleased]
 
 <!-- changelog.entries (L1 order 1; families=all; specific).
@@ -47,3 +50,4 @@ This CHANGELOG is **English only** per the repository-wide
 - ...
 
   Keep entries factual and reviewer-oriented; record the "why", not just the "what". -->
+<!-- <<< CANONICAL unit_id=changelog.entries <<< -->
