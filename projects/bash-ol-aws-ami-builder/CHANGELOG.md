@@ -68,6 +68,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- OL6 root filesystem is now `ext4` (was `xfs`). The OL6.10 installer
+  (anaconda-13) **refuses** to place the root partition on XFS and aborts at
+  partitioning, so no AMI was ever produced — a runtime policy that
+  `ksvalidator` cannot see (`part / --fstype=xfs` is valid RHEL6 *syntax*).
+  Confirmed by a bare `virt-install` against the OL6.10 DVD: an xfs root is
+  rejected at partitioning, whereas an ext4 root installs cleanly through the
+  full 217-package set (ext4 `/boot` + `/`, UEK4, `linux-firmware`). Changes:
+  `env.properties.aws-ol6` now sets `ROOT_FS="ext4"`; `distr::validate()`
+  rejects any non-ext4 OL6 root at preflight (before ISO download); and the
+  former `distr::kickstart` ext4->xfs root rewrite (which only ever produced an
+  install-failing config) was removed. OL7/8/9/10 keep `xfs` (newer anaconda
+  supports it). See SPEC D.16/D.18.
 - README (EN + JA) "Common Requirements" build-host OS row corrected to match
   the version-aware `phase1_install_prerequisites` and SPEC B.6: it had said
   "Oracle Linux 9 / RHEL 9 / Ubuntu 22.04 or newer (recommended)", but the
@@ -86,9 +98,10 @@ This CHANGELOG is **English only** per the repository-wide
   `%packages`: it is a RHEL7+ package absent on OL6 (the `iptables` package
   itself provides the service) — a runtime package-selection fix that syntax
   validation cannot catch. `timezone --isUtc`, `part --label`, and `cmdline`
-  were verified valid on RHEL6 and left unchanged. `ROOT_FS=xfs` is retained for
-  OL6 by decision; xfs-root viability on anaconda-13 is confirmed by a live
-  build, not by syntax validation. See SPEC D.18.
+  were verified valid on RHEL6 and left unchanged. (The OL6 root filesystem was
+  subsequently pinned to `ext4` — see the OL6 ext4 entry below — after a live
+  install proved anaconda-13 refuses an xfs root; the xfs-root question raised
+  here is now settled. See SPEC D.16/D.18.)
 - Phase 5 no longer aborts on a non-SELinux build host. On Debian / Ubuntu the
   `libguestfs` build omits the `selinuxrelabel` optgroup (compiled out of
   `guestfsd`; no host package enables it), so upstream `bin/build-image.sh`'s

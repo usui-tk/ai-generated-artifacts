@@ -767,7 +767,7 @@ for design rationale, and B.5 for the overall OL6 architecture.
 | `# AMI_NAME` example | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` | `OracleLinux-6-U10-...` |
 | `KERNEL` | unset (use distr default) | unset | unset | `uek` (required — see D.10) | `uek` (required — see D.12) |
 | `UEK_RELEASE` | unset | unset | unset | `6` (the only viable UEK for OL7) | `4` (the only viable UEK for OL6) |
-| `ROOT_FS` | unset (xfs default) | unset | unset | `xfs` (only xfs/btrfs/lvm valid in upstream OL7+) | `xfs` (xfs or ext4; /boot kept on ext4 — see B.4 / D.16) |
+| `ROOT_FS` | unset (xfs default) | unset | unset | `xfs` (only xfs/btrfs/lvm valid in upstream OL7+) | `ext4` (required; anaconda-13 refuses an xfs/lvm/btrfs root — see D.16) |
 | `BOOT_MODE_BUILD` | unset | unset | unset | `bios` | `bios` |
 | Top-of-file warning banner | none | none | none | EOL / patch / production-prohibited notice | EOL / **2 patches** / runtime-synthesized `distr/` / production-prohibited notice |
 
@@ -1659,64 +1659,52 @@ images), `detect_os_variant()` returns 1 and the operator must set
 
 ---
 
-## D.16 OL6 `ROOT_FS=xfs` must keep `/boot` on ext4
+## D.16 OL6 root filesystem must be ext4 (anaconda-13 refuses an XFS root)
 
-**Symptom**: When the OL6 env template defaults shifted from
-`ROOT_FS="ext4"` to `ROOT_FS="xfs"` (to align with OL7/8/9/10), the
-initial `distr::kickstart` implementation in the wrapper-synthesized
-`distr/ol6-slim/image-scripts.sh` performed a global substitution:
+**Symptom**: With the OL6 env template set to `ROOT_FS="xfs"` (to align
+with OL7/8/9/10), the build reached Phase 5, the VM booted the installer,
+ran for ~28 seconds, then powered off with **zero** bytes written to the
+target disk and no AMI produced. Under the headless default the serial
+console was blank, so the failure looked like an early hang.
 
-```bash
-sed -i -e 's!--fstype="ext4"!--fstype="xfs"!g' "${ks_file}"
-```
+**Root cause**: The OL6.10 installer (**anaconda-13.21**) categorically
+refuses to place the **root** partition on XFS. Captured on the serial
+console of a bare `virt-install` reproduction (text mode), the installer
+prints, at the partitioning step, a message to the effect that placing the
+root partition on an XFS filesystem is not supported on Oracle Linux
+Server, then reboots. This is an **installer policy** decision, not a
+missing package and not a kernel limitation: UEK4 (kernel 4.1.12) mounts
+XFS fine at runtime; anaconda-13 simply will not *create* an XFS root
+during installation. (Newer anaconda on OL7+ does support it, which is why
+the OL7/8/9/10 templates keep `xfs`.)
 
-This rewrote **both** `/boot` and `/` partitions to xfs:
+**Why static checks missed it**: `part / --fstype=xfs` is *syntactically*
+valid for RHEL6, so `ksvalidator -v RHEL6` passes it (see D.18). Only a
+live install surfaces the policy refusal.
 
-```
-part /boot    --fstype="xfs" --ondisk=sda --size=500  --label=/boot
-part /        --fstype="xfs" --ondisk=sda --size=4096 --label=root  --grow
-```
+**Fix**: OL6 root is **ext4-only**.
 
-**Root cause**: OL6 ships GRUB Legacy 0.97 as the bootloader. While
-grub-0.97 *does* include XFS read support in OL6's patched build, the
-combination has been less battle-tested than XFS on grub2 (OL7+). The
-industry-standard practice on OL6 systems running an XFS root is to keep
-`/boot` on a smaller ext4 partition; this is also what RHEL 6 / OL 6
-anaconda's automatic partitioning chooses when the user opts for XFS as
-the root filesystem.
+1. `env.properties.aws-ol6` sets `ROOT_FS="ext4"` (with the rationale
+   inline).
+2. `distr::validate()` rejects anything other than `ext4` for OL6 during
+   **preflight** (before any ISO download), with a clear error pointing
+   here.
+3. The previous `distr::kickstart` step that rewrote the root partition
+   `ext4`→`xfs` when `ROOT_FS=xfs` has been **removed**: it only ever
+   produced an install-failing config. The embedded kickstart template
+   already declares both `/boot` and `/` as ext4, so no rewrite is needed.
 
-**Fix**: The substitution was changed to a line-anchored, partition-
-specific pattern that targets only the root partition:
+**Verification (live)**: A bare `virt-install` against the OL6.10 DVD with
+the wrapper-synthesized kickstart was run twice on the build host:
 
-```bash
-sed -i -e 's!^\(part /        --fstype=\)"ext4"!\1"xfs"!' "${ks_file}"
-```
-
-The pattern relies on the four-space alignment between `part /` and
-`--fstype=` in the kickstart template embedded in
-`phase3_clone_repository`. If that template is ever reformatted, this
-substitution must be updated together with it (the kickstart template
-and the sed pattern are co-located in `build-ol-aws-ami.sh` precisely so
-this co-evolution is easy to spot).
-
-**Verification**: A static check confirmed:
-
-1. The pattern matches the `part /        --fstype="ext4"` line in the
-   embedded kickstart template byte-for-byte.
-2. The pattern does NOT match the `part /boot    --fstype="ext4"` line
-   (different number of spaces; the anchor `part /        ` requires
-   eight characters between `/` and `--fstype=`, which `/boot    ` does
-   not satisfy).
-3. The pattern is idempotent: re-running it on an already-substituted
-   line is a no-op because `"xfs"` no longer matches the literal
-   `"ext4"` source string.
-
-**Caveat**: End-to-end (Phase C) validation of OL6 with `ROOT_FS=xfs`
-has not yet been performed by the author (the OL6 build pipeline as a
-whole remains Phase A/B verified only). The fix is structurally
-correct based on the OL7 reference kickstart and GRUB Legacy XFS
-documentation, but operators running OL6+XFS in anger should expect to
-debug if anaconda or grub2 misbehaves on first boot.
+1. Root = **xfs** → installer refuses at partitioning ("root on XFS not
+   supported") and reboots; no disk writes. **Reproduces the failure.**
+2. Root = **ext4** → installer creates ext4 filesystems on `/dev/sda1`
+   (`/boot`) and `/dev/sda2` (`/`), resolves the OL Server + UEK4 repos,
+   and proceeds through the full 217-package set (including
+   `linux-firmware` per D.13, `iptables` per D.18, and
+   `kernel-uek-4.1.12-124.16.4.el6uek` per D.12). **Confirms ext4 is the
+   only viable OL6 root.**
 
 ---
 
@@ -1868,12 +1856,14 @@ and `cmdline`. `ksvalidator -v RHEL6` accepts **all three** — they are valid o
 anaconda-13 and were left unchanged. Lesson: validate against the target
 release's actual command set, not against examples from a newer release.
 
-**The `xfs` root caveat (separate, runtime).** `part / --fstype=xfs` is
-*syntactically* valid on RHEL6, so `ksvalidator` passes it, but whether
-anaconda-13 can actually *create* an xfs root is a runtime question this tool
-cannot answer (cross-ref D.16, which keeps `/boot` on ext4). OL6 keeps
-`ROOT_FS=xfs` by maintainer decision; confirm xfs-root viability with a live
-`SERIAL_CONSOLE=yes` build.
+**The `xfs` root caveat (separate, runtime) — now confirmed unsupported.**
+`part / --fstype=xfs` is *syntactically* valid on RHEL6, so `ksvalidator`
+passes it, but whether anaconda-13 can actually *create* an xfs root is a
+runtime question this tool cannot answer. A live `virt-install` settled it:
+anaconda-13 **refuses** an XFS root on OL6 and aborts at partitioning. OL6 is
+therefore pinned to `ROOT_FS=ext4`, enforced at preflight (cross-ref D.16 for
+the evidence and the fix). This entry stays as the canonical example of a
+runtime failure that syntax validation cannot catch.
 
 **Prevention.**
 1. `tests/validate-kickstart.sh` runs `ksvalidator -v RHEL6` on the synthesized

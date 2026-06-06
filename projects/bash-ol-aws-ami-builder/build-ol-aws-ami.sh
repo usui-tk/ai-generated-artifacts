@@ -1188,14 +1188,14 @@ EOF_OL6_ENV
 # Mirrors the structure of distr/ol7-slim/image-scripts.sh with OL6-specific
 # adjustments:
 #   - UEK_RELEASE accepts only 4 (UEK2/3/5/6/7 not supported on OL6 for AWS)
-#   - ROOT_FS accepts ext4 or xfs (lvm and btrfs not supported on OL6)
+#   - ROOT_FS must be ext4 (anaconda-13 refuses xfs/lvm/btrfs root on OL6)
 #
 
 #######################################
 # Validate distribution parameters
 #######################################
 distr::validate() {
-  [[ "${ROOT_FS,,}" =~ ^((ext4)|(xfs))$ ]] || common::error "ROOT_FS must be ext4 or xfs (OL6 does not support lvm/btrfs at this layer)"
+  [[ "${ROOT_FS,,}" == "ext4" ]] || common::error "ROOT_FS must be ext4 on OL6. The OL6.10 installer (anaconda-13) refuses an XFS (or lvm/btrfs) root partition and aborts at partitioning; set ROOT_FS=ext4 (see SPEC.md D.16/D.18)."
   [[ "${TMP_IN_TMPFS,,}" =~ ^((yes)|(no))$ ]] || common::error "TMP_IN_TMPFS must be yes or no"
   [[ "${UEK_RELEASE}" =~ ^4$ ]] || common::error "UEK_RELEASE must be 4 (OL6 + AWS Nitro requires UEK4; UEK2/3 lack ENA, UEK5+ not available)"
   [[ "${LINUX_FIRMWARE,,}" =~ ^((yes)|(no))$ ]] || common::error "LINUX_FIRMWARE must be yes or no"
@@ -1210,22 +1210,12 @@ distr::validate() {
 distr::kickstart() {
   local ks_file="$1"
 
-  # For OL6, ROOT_FS can be ext4 or xfs. The kickstart is populated for ext4
-  # on both /boot and /. When ROOT_FS=xfs we rewrite ONLY the root partition
-  # ('part /        ...') and intentionally leave '/boot' on ext4.
-  #
-  # Why /boot stays on ext4:
-  #   GRUB Legacy 0.97 (the bootloader on OL6) reads ext4 most reliably.
-  #   XFS support exists in OL6 GRUB but is less battle-tested for /boot.
-  #   The industry-standard combination on OL6 systems running an XFS root
-  #   is /boot=ext4 + /=xfs, so we follow that convention.
-  if [[ "${ROOT_FS,,}" = "xfs" ]]; then
-    # Anchor the substitution at the root partition line. The kickstart uses
-    # exactly four spaces between 'part /' and '--fstype=' (see ol6-ks.cfg
-    # template in build-ol-aws-ami.sh phase3_clone_repository), so the
-    # regex matches that line uniquely without touching '/boot'.
-    sed -i -e 's!^\(part /        --fstype=\)"ext4"!\1"xfs"!' "${ks_file}"
-  fi
+  # OL6 root filesystem is ext4-only. The embedded kickstart template already
+  # declares both '/boot' and '/' as ext4, and distr::validate() rejects any
+  # other ROOT_FS during preflight, so no fstype rewrite is performed here.
+  # (The OL6.10 installer refuses an XFS root partition outright -- see
+  # SPEC.md D.16/D.18. A previous xfs-rewrite step lived here and only ever
+  # produced an install-failing config, so it was removed.)
 
   # Pass kernel selection (always uek for OL6+AWS, but propagate for completeness)
   sed -i -e 's!^KERNEL=.*$!KERNEL='"${KERNEL}"'!' "${ks_file}"
