@@ -118,11 +118,14 @@ n, errs = G.stamp_file(p, L1)
 after = G.check_file(p, L1, "f.md")
 check("stamp resolves PENDING (>=2 changed, 0 residual findings)", n >= 2 and after == [])
 
-# 16) front-matter provenance pin
-check("front-matter missing keys -> finding",
+# 16) front-matter doc-provenance pin (ADR 0019)
+check("front-matter without doc-provenance -> finding",
       G.check_front_matter("---\ntitle: x\n---\nbody") != [])
-check("front-matter with provenance keys -> pass",
-      G.check_front_matter("---\ncanonical_source: governance/spec/powershell.md\ncanonical_version: 0.1.0\n---\nbody") == [])
+_PROV = "---\ndoc-provenance:\n  layer-1-format: 1.0.0\n  layer-2-template: 1.0.0\n  rendered: 2026-06-06\n---\nbody"
+check("front-matter with doc-provenance block -> pass", G.check_front_matter(_PROV) == [])
+check("front-matter missing a doc-provenance key -> finding",
+      any("missing key" in f for f in
+          G.check_front_matter("---\ndoc-provenance:\n  layer-1-format: 1.0.0\n  rendered: 2026-06-06\n---\nb")))
 check("no front-matter -> 0 findings", G.check_front_matter("# just a template\nbody") == [])
 
 # ---- report ----
@@ -178,6 +181,40 @@ check("C6 governs=[] carve-out -> no finding for that ADR",
 check("C6 catches governs path that does not exist",
       any("does not exist" in f for f in
           G.check_adr_spec_xref(_mkroot({"0012.md": _adr("0012", governs='["reference-code/nope/missing.ps1"]')}, _SPEC))))
+
+# L3 reconstructed (ADR 0019 |7): provenance / bilingual lock-step / encoding / abs-link
+_L3 = tempfile.mkdtemp()
+
+
+def _wf3(rel, text, raw=False):
+    p = os.path.join(_L3, rel)
+    if raw:
+        with open(p, "wb") as fh:
+            fh.write(text)
+    else:
+        with open(p, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
+    return rel
+
+
+_wf3("README.md", _PROV + "\nSee [guide](https://example.com).\n")
+_wf3("README.ja.md", _PROV + "\nガイドは [guide](https://example.com)。\n")
+_wf3("SPEC.md", _PROV + "\nspec body\n")
+check("L3 clean reconstructed set -> 0 findings",
+      G.check_reconstructed(["README.md", "README.ja.md", "SPEC.md"], _L3) == [])
+_wf3("NOFM.md", "no front matter here\n")
+check("L3 missing provenance -> finding",
+      any("missing YAML front-matter" in f for f in G.check_reconstructed(["NOFM.md"], _L3)))
+_wf3("RELLINK.md", _PROV + "\nsee [agents](../AGENTS.md) and [adr](governance/adr/0014.md)\n")
+check("L3 relative governance link -> finding",
+      any("absolute URL" in f for f in G.check_reconstructed(["RELLINK.md"], _L3)))
+_wf3("README.md", _PROV.replace("layer-2-template: 1.0.0", "layer-2-template: 2.0.0") + "\nx\n")
+check("L3 bilingual lock-step mismatch -> finding",
+      any("bilingual lock-step" in f for f in
+          G.check_reconstructed(["README.md", "README.ja.md"], _L3)))
+_wf3("CRLF.md", (_PROV + "\nx\n").replace("\n", "\r\n").encode("utf-8"), raw=True)
+check("L3 CRLF -> finding",
+      any("CRLF" in f for f in G.check_reconstructed(["CRLF.md"], _L3)))
 
 passed = sum(1 for _, ok in _checks if ok)
 total = len(_checks)

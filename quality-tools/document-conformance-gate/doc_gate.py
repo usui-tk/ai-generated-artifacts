@@ -13,7 +13,8 @@ Implements the ADR 0020 doc-region contract over the documentation doc-set
   * marker coherence (open/close pairing + unit_id agreement, no duplicates).
   * L1 item-membership (marker unit_id maps to a real L1 item; family segment
     stripped: spec.powershell.part-a.X -> spec.part-a.X).
-  * doc-level YAML front-matter provenance pin (ADR 0019), when present.
+  * doc-level YAML front-matter doc-provenance pin (ADR 0019: layer-1-format /
+    layer-2-template / rendered), when present.
   * C6 ADR<->SPEC cross-reference integrity over the LIVE governance corpus
     (ADR 0014 §4.10): every accepted ADR's governs target resolves to a real
     SPEC.md section by its canonical (lowercase) anchor and that section
@@ -29,6 +30,7 @@ Usage:
   doc_gate.py --root . [--check]     verify; exit 1 if any finding
   doc_gate.py --root . --stamp       rewrite hash=PENDING -> real / structural
   doc_gate.py --path FILE [...]      operate on explicit files instead of manifest
+  doc_gate.py --reconstructed FILE [...]   L3 light structural conformance (ADR 0019 |7)
 """
 import argparse
 import hashlib
@@ -133,20 +135,83 @@ def map_unit_to_l1(unit_id):
     return ".".join(seg for seg in unit_id.split(".") if seg not in FAMILIES)
 
 
-# ---- front-matter provenance pin (ADR 0019) ------------------------------------
-def check_front_matter(text):
-    """If a doc carries YAML front-matter, require the ADR 0019 provenance pin."""
+# ---- doc-provenance front-matter (ADR 0019) ------------------------------------
+_DOC_PROV_KEYS = ("layer-1-format", "layer-2-template", "rendered")
+# A governance-class link that is RELATIVE (not an absolute URL). Reconstructed /
+# graduated doc-sets must point at governance docs by absolute URL so the link
+# survives a cross-repo move (the relative->absolute rebinding policy).
+_REL_GOV_LINK = re.compile(
+    r"\]\(\s*(?!https?://)[^)]*?(?:AGENTS\.md|governance/|/adr/)[^)]*\)")
+
+
+def _front_matter_block(text):
+    """(block, error): block is None when the doc has no YAML front-matter."""
     if not text.startswith("---\n"):
-        return []  # no front-matter (e.g. a template) -> nothing to check
+        return None, None
     end = text.find("\n---", 4)
     if end == -1:
-        return ["front-matter: opening '---' has no closing '---'"]
-    block = text[4:end]
+        return None, "front-matter: opening '---' has no closing '---'"
+    return text[4:end], None
+
+
+def _provenance_findings(block):
+    """Validate the ADR 0019 doc-provenance block (doc-provenance: layer-1-format /
+    layer-2-template / rendered). This replaces the earlier canonical_source /
+    canonical_version keys, which did not match the ADR 0019 format."""
     keys = {ln.split(":", 1)[0].strip() for ln in block.split("\n") if ":" in ln}
-    missing = [k for k in ("canonical_source", "canonical_version") if k not in keys]
+    out = []
+    if "doc-provenance" not in keys:
+        out.append("front-matter has no 'doc-provenance:' block (ADR 0019)")
+    missing = [k for k in _DOC_PROV_KEYS if k not in keys]
     if missing:
-        return ["front-matter: missing provenance key(s): %s" % ", ".join(missing)]
-    return []
+        out.append("doc-provenance missing key(s): %s" % ", ".join(missing))
+    return out
+
+
+def check_front_matter(text):
+    """If a doc carries YAML front-matter, require the ADR 0019 doc-provenance pin.
+    Marker-led L2 templates / the spec-home carry no front-matter -> no-op."""
+    block, err = _front_matter_block(text)
+    if err:
+        return [err]
+    if block is None:
+        return []
+    return ["front-matter: " + e for e in _provenance_findings(block)]
+
+
+# ---- L3 reconstructed class-(B) doc-set: light structural conformance ----------
+# ADR 0014/0019 |7: L1/L3 are governed by LIGHT structural conformance (provenance
+# presence, bilingual README lock-step, encoding, governance-link absoluteness) - NOT
+# the marker/hash machinery, which is vendored-region-only (ADR 0019 |88). A
+# reconstructed class-(B) doc-set carries NO markers, so it is verified HERE rather
+# than by the per-region check_file path.
+def check_reconstructed(paths, root):
+    findings = []
+    prov_by_name = {}
+    for rel in paths:
+        with open(os.path.join(root, rel), "rb") as fh:
+            raw = fh.read()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            findings.append("%s: has a UTF-8 BOM (L3 docs are BOM-less)" % rel)
+        if b"\r\n" in raw:
+            findings.append("%s: contains CRLF (L3 docs use LF)" % rel)
+        text = raw.decode("utf-8", "replace")
+        block, err = _front_matter_block(text)
+        if err:
+            findings.append("%s: %s" % (rel, err))
+        elif block is None:
+            findings.append("%s: missing YAML front-matter doc-provenance block (ADR 0019)" % rel)
+        else:
+            findings += ["%s: %s" % (rel, e) for e in _provenance_findings(block)]
+            prov_by_name[os.path.basename(rel)] = block
+        for m in _REL_GOV_LINK.finditer(text):
+            findings.append("%s: governance-class link must be an absolute URL "
+                            "(cross-repo policy): %s" % (rel, m.group(0).strip()[:70]))
+    if "README.md" in prov_by_name and "README.ja.md" in prov_by_name:
+        if prov_by_name["README.md"] != prov_by_name["README.ja.md"]:
+            findings.append("README.md / README.ja.md doc-provenance front-matter differ "
+                            "(ADR 0019 bilingual lock-step)")
+    return findings
 
 
 # ---- per-file check ------------------------------------------------------------
@@ -369,10 +434,25 @@ def main(argv=None):
                     help="rewrite hash=PENDING -> real (canonical) / NONE (structural)")
     ap.add_argument("--path", nargs="*", default=None,
                     help="explicit files (relative to --root); default: manifest md units")
+    ap.add_argument("--reconstructed", nargs="*", default=None, metavar="FILE",
+                    help="L3 light structural conformance over a reconstructed class-(B) "
+                         "doc-set (ADR 0019 |7: provenance + bilingual lock-step + encoding "
+                         "+ absolute governance links); files relative to --root")
     args = ap.parse_args(argv)
     root = args.root
     l1 = load_l1(root)
     rels = args.path if args.path is not None else discover_files(root)
+
+    if args.reconstructed is not None:
+        findings = check_reconstructed(args.reconstructed, root)
+        n = len(args.reconstructed)
+        if findings:
+            for f in findings:
+                print("FINDING: " + f)
+            print("doc-gate: %d L3 finding(s) across %d file(s)." % (len(findings), n))
+            return 1
+        print("doc-gate: L3 PASS - 0 findings across %d file(s)." % n)
+        return 0
 
     if args.stamp:
         total = 0
