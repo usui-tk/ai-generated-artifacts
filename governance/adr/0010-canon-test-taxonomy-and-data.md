@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-01
 supersedes: []
 superseded_by: null
-governs: ["governance/SPEC.md §Machinery"]
+governs: ["governance/SPEC.md §machinery"]
 ---
 
 <!-- AI read-contract: authoritative for HOW the canon behavioral test suite (ADR 0007)

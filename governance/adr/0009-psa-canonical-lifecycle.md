@@ -5,7 +5,7 @@ status: accepted
 date: 2026-06-01
 supersedes: []
 superseded_by: null
-governs: ["governance/SPEC.md §Machinery"]
+governs: ["governance/SPEC.md §machinery"]
 ---
 
 <!-- AI read-contract: authoritative for the lifecycle of the psa.py tool across its two
