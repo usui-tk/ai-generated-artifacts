@@ -294,6 +294,19 @@ load_env() {
   : "${ROOT_FS:=xfs}"
   : "${DISK_SIZE_GB:=10}"
   : "${SERIAL_CONSOLE_RUNTIME:=Yes}"
+  # Install-time serial console (upstream SERIAL_CONSOLE). When "yes", the
+  # anaconda installer output streams live so an install-time failure is
+  # visible instead of a silent headless wait (the failure mode that hid the
+  # OL6 kickstart parse error). This is DISTINCT from SERIAL_CONSOLE_RUNTIME
+  # above (which configures the *generated image's* console). Upstream applies
+  # NO install timeout when SERIAL_CONSOLE=yes; the Phase-5 watchdog below
+  # provides the bounded wait instead. Set "no" for a bounded headless install.
+  : "${SERIAL_CONSOLE:=yes}"
+  # Phase-5 build watchdog, in minutes. Bounds the upstream build-image.sh run
+  # even when SERIAL_CONSOLE=yes removes upstream's own install timeout. On
+  # expiry the wrapper reaps the transient build VM and aborts. Generous default
+  # so a normal 20-60 min build never trips it; raise for slow hosts/links.
+  : "${BUILD_TIMEOUT_MIN:=120}"
   # Build-time boot mode.
   # IMPORTANT: Oracle's build-image.sh enforces BOOT_MODE=bios for AWS.
   # See cloud/aws/image-scripts.sh in oracle-linux-image-tools.
@@ -1252,7 +1265,11 @@ timezone UTC --isUtc
 network  --bootproto=dhcp --device=eth0 --onboot=yes --hostname=localhost.localdomain
 
 # Root password -- will be overridden by the builder
-rootpw --lock
+# NOTE: RHEL6/anaconda-13 requires a password argument for rootpw; a bare
+# "rootpw --lock" is a kickstart parse error there (it is valid only on
+# RHEL7+/anaconda-19+). Supply a locked, no-valid-password account form that
+# anaconda-13 accepts. See SPEC Part D pitfall D.18.
+rootpw --lock --iscrypted '*'
 
 # System services (OL6: no firewalld, no chronyd)
 services --disabled="ip6tables,kdump,rhsmcertd" --enabled="iptables,network,sshd,rsyslog,ntpd"
@@ -1260,7 +1277,11 @@ selinux --enforcing
 firewall --service=ssh
 
 # Bootloader (OL6: GRUB Legacy, not GRUB2)
-bootloader --append="console=tty0" --location=mbr --timeout=10  --boot-drive=sda
+# NOTE: --boot-drive is RHEL7+/anaconda-19+ only and is an "unrecognized
+# arguments" parse error on RHEL6/anaconda-13. The install disk is already
+# constrained by "ignoredisk --only-use=sda", so it is redundant here.
+# See SPEC Part D pitfall D.18.
+bootloader --append="console=tty0" --location=mbr --timeout=10
 
 # Partitioning
 zerombr
@@ -1296,7 +1317,10 @@ device-mapper
 kpartx
 net-tools
 iptables
-iptables-services
+# NOTE: iptables-services is RHEL7+ and does NOT exist on OL6 (verified against
+# ol6_latest: only the iptables package ships, e.g. iptables-1.4.7-19.0.1.el6,
+# and it provides the /etc/init.d/iptables service). Listing iptables-services
+# makes anaconda fail OL6 package selection. See SPEC Part D pitfall D.18.
 ntp
 acpid
 cronie
@@ -1885,6 +1909,7 @@ SELINUX=${SELINUX}
 ROOT_FS=${ROOT_FS}
 DISK_SIZE_GB=${DISK_SIZE_GB}
 SERIAL_CONSOLE_RUNTIME=${SERIAL_CONSOLE_RUNTIME}
+SERIAL_CONSOLE=${SERIAL_CONSOLE}
 BOOT_MODE=${BOOT_MODE_BUILD}
 
 # Kernel selection (uek or rhck) - falls back to distr default if unset
@@ -1956,8 +1981,32 @@ phase5_run_build() {
   log_info "LIBGUESTFS_BACKEND = ${LIBGUESTFS_BACKEND}"
 
   log_info "Starting build (this typically takes 20-60 minutes)"
-  ( cd "${tool_dir}" && ./bin/build-image.sh --env "${tool_env}" ) \
-    || die "build-image.sh failed"
+  log_info "Build watchdog: ${BUILD_TIMEOUT_MIN} min (SERIAL_CONSOLE=${SERIAL_CONSOLE}; upstream applies no install timeout when the serial console is enabled)"
+
+  # Snapshot running libvirt domains BEFORE the build so a watchdog timeout can
+  # reap the transient install VM. virt-install --transient domains are managed
+  # by libvirtd and survive a killed build-image.sh, so they would otherwise
+  # keep running (and hold the workspace disk) after we abort.
+  local doms_before
+  doms_before=$(virsh list --name 2>/dev/null | sed '/^$/d' | sort || true)
+
+  local build_rc=0
+  timeout --signal=TERM --kill-after=60s "${BUILD_TIMEOUT_MIN}m" \
+    bash -c 'cd "$1" && ./bin/build-image.sh --env "$2"' _ "${tool_dir}" "${tool_env}" || build_rc=$?
+
+  if [[ ${build_rc} -eq 124 ]]; then
+    log_error "build-image.sh exceeded the ${BUILD_TIMEOUT_MIN}-minute watchdog and was terminated."
+    local doms_after dom
+    doms_after=$(virsh list --name 2>/dev/null | sed '/^$/d' | sort || true)
+    while IFS= read -r dom; do
+      [[ -z "${dom}" ]] && continue
+      log_warn "Reaping leftover transient build VM: ${dom}"
+      virsh destroy "${dom}" >/dev/null 2>&1 || true
+    done < <(comm -13 <(printf '%s\n' "${doms_before}") <(printf '%s\n' "${doms_after}"))
+    die "build-image.sh timed out after ${BUILD_TIMEOUT_MIN} minutes (raise BUILD_TIMEOUT_MIN for slow hosts/links, or set SERIAL_CONSOLE=no for a bounded headless install)"
+  elif [[ ${build_rc} -ne 0 ]]; then
+    die "build-image.sh failed (exit ${build_rc})"
+  fi
 
   # Locate the produced VMDK file
   # Naming convention: OL{N}U{M}_x86_64-aws-b<BUILD_NUMBER>.vmdk

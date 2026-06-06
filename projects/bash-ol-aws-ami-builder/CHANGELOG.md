@@ -19,8 +19,33 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added
+
+- `tests/validate-kickstart.sh` + `TESTING.md`: a kickstart **syntax**
+  conformance test for the wrapper-synthesized OL6 kickstart, using
+  `pykickstart` (`ksvalidator -v RHEL6`). It rejects OL7-syntax directives that
+  are invalid on OL6/anaconda-13 before they can halt the install. Syntax-only:
+  it does not verify runtime filesystem support (e.g. xfs root) or package
+  availability — those are confirmed by a live `SERIAL_CONSOLE=yes` build. See
+  SPEC D.18. (Subproject-local; the bash TESTING doc-template stays deferred in
+  the canon per the rule-of-two, so `TESTING.md` carries no doc-provenance pin.)
+
 ### Changed
 
+- Install-time `SERIAL_CONSOLE` now defaults to `yes` and is actually wired
+  through to the upstream `env.properties.local` (previously it was not passed
+  through at all, so setting it had no effect). The anaconda installer now
+  streams to the serial console, making an install-time failure visible instead
+  of disappearing into a silent headless 30-minute wait — the failure mode that
+  hid the OL6 kickstart parse error. Set in all five
+  `env.properties.aws-ol{6,7,8,9,10}` templates. This does **not** change the
+  produced AMI: the generated image's console is governed by the independent
+  `SERIAL_CONSOLE_RUNTIME` (unchanged). See SPEC A.7.
+- Added a Phase-5 build watchdog: `BUILD_TIMEOUT_MIN` (minutes, default `120`,
+  a wrapper key) bounds the upstream `bin/build-image.sh` run. Upstream applies
+  no install timeout when `SERIAL_CONSOLE=yes`, so on expiry the wrapper reaps
+  the leftover transient libvirt domain (`virt-install --transient`, which
+  survives a killed `build-image.sh`) and aborts. See SPEC A.7.
 - Documented the guest Oracle Linux package-manager split (OL6/7 use `yum`,
   OL8/9/10 use `dnf`) and the per-OL kernel / security-update / config-manager
   conventions as SPEC B.7 'Guest OS package-manager matrix'; added a rationale
@@ -43,6 +68,20 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- OL6 kickstart (`EOF_OL6_KS`) now validates cleanly against the OL6
+  anaconda-13 command set (`ksvalidator -v RHEL6`). It previously carried
+  OL7-only syntax inherited from the `ol7-ks.cfg` mirror, which halted the OL6
+  install at kickstart parse time — before any disk write, and invisibly under
+  the old headless default (the build just waited out its 30-minute timeout).
+  Removed `bootloader --boot-drive=sda` (`--boot-drive` is RHEL7+/anaconda-19+
+  only) and changed the bare `rootpw --lock` to `rootpw --lock --iscrypted '*'`
+  (RHEL6 requires a password argument). Also removed `iptables-services` from
+  `%packages`: it is a RHEL7+ package absent on OL6 (the `iptables` package
+  itself provides the service) — a runtime package-selection fix that syntax
+  validation cannot catch. `timezone --isUtc`, `part --label`, and `cmdline`
+  were verified valid on RHEL6 and left unchanged. `ROOT_FS=xfs` is retained for
+  OL6 by decision; xfs-root viability on anaconda-13 is confirmed by a live
+  build, not by syntax validation. See SPEC D.18.
 - Phase 5 no longer aborts on a non-SELinux build host. On Debian / Ubuntu the
   `libguestfs` build omits the `selinuxrelabel` optgroup (compiled out of
   `guestfsd`; no host package enables it), so upstream `bin/build-image.sh`'s

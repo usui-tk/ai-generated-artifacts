@@ -382,6 +382,7 @@ and should usually be left alone.
 | `ROOT_FS` | `xfs` | Root filesystem of the resulting AMI |
 | `DISK_SIZE_GB` | `10` | Root volume size of the AMI |
 | `SERIAL_CONSOLE_RUNTIME` | `Yes` | Required for EC2 Serial Console |
+| `SERIAL_CONSOLE` | `yes` | Install-time anaconda console (live install output); see note + D.18 |
 | `CLOUD_INIT` | `Yes` | Enable cloud-init in the AMI |
 | `CLOUD_USER` | `ec2-user` | AWS-convention first-login user |
 | `KERNEL` | `uek` (OL7) / unset (OL8+) | OL7 requires UEK; see D.10 |
@@ -391,6 +392,18 @@ and should usually be left alone.
 
 If `oracle-linux-image-tools` adds, renames, or drops keys upstream,
 update the templates and this table in lockstep.
+
+Note on the two serial-console keys (they are independent):
+`SERIAL_CONSOLE` (install-time) controls whether the anaconda *installer*
+streams to the serial console. The wrapper defaults it to `yes` so an
+install-time failure is visible instead of a silent headless wait — the
+failure mode that hid the OL6 kickstart parse error (see D.18). Set it to `no`
+for a bounded headless install. `SERIAL_CONSOLE_RUNTIME` independently
+configures the *generated image's* console (EC2 Serial Console). Upstream
+applies **no install timeout when `SERIAL_CONSOLE=yes`**; the wrapper-level
+`BUILD_TIMEOUT_MIN` (minutes, default `120` — a wrapper key, *not* passed
+through to upstream) bounds the Phase-5 build and reaps the transient build VM
+if it expires.
 
 Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
 when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable
@@ -994,6 +1007,13 @@ When `oracle-linux-image-tools` is refactored:
    etc.), the OL6 heredoc templates in `phase3_clone_repository` must
    be updated by hand. This is the highest-risk surface for upstream
    drift.
+4. The OL6 kickstart (`EOF_OL6_KS`) is a *mirror* of OL7's `ol7-ks.cfg`,
+   but OL6 ships **anaconda-13** with an older kickstart command set.
+   After any edit to that heredoc — and especially after re-syncing it
+   from a newer `ol7-ks.cfg` — run `tests/validate-kickstart.sh`
+   (`ksvalidator -v RHEL6`) to catch OL7-syntax leakage before it halts
+   the install (see D.18 for the failure mode and `TESTING.md` for the
+   procedure and its syntax-only limitation).
 
 ---
 
@@ -1806,6 +1826,67 @@ true for the OL base in every supported OL6-10 target. This path is exercised
 when building on apt-family hosts; full end-to-end (Phase C) confirmation that
 the first-boot relabel completes and the AMI comes up `enforcing` should be
 performed by operators building on Debian / Ubuntu.
+
+## D.18 OL7-syntax directives leaking into the OL6 (anaconda-13) kickstart
+
+**Symptom.** An OL6 build hangs in Phase 5 at "Install Oracle Linux": the
+domain runs but makes no progress (`virsh domstats` shows idle vCPUs and
+`block.*.wr.bytes=0` — *zero* writes to the target disk), and `virsh console`
+is blank. The installer booted (the ISO stage2 is read) but never partitions or
+writes anything, then the 30-minute headless wait elapses.
+
+**Root cause.** The OL6 kickstart is *synthesized* by this wrapper as a mirror
+of upstream's `ol7-ks.cfg` (upstream ships no `distr/ol6-slim`; see B.4). OL7
+ships anaconda-19+, but OL6 ships **anaconda-13**, whose kickstart command set
+is older. Directives that are valid only on the newer anaconda are a
+**parse-time error** on anaconda-13 — and anaconda fails *before* any
+partitioning/write. With `SERIAL_CONSOLE=no` (the old default) that error is
+rendered on tty1, invisible over the headless serial line, so the only
+observable effect is the silent wait. This is a *class* of bug: any
+"OL7-ism" that survives the mirror can reappear.
+
+**Authoritative evidence.** Validate the synthesized kickstart with
+[`pykickstart`](https://pykickstart.readthedocs.io/)'s RHEL6 command set
+(`ksvalidator -v RHEL6`). On the pre-fix kickstart it reports exactly two
+syntax errors:
+
+| Directive (pre-fix) | RHEL6 / anaconda-13 verdict | Fix |
+|---|---|---|
+| `bootloader … --boot-drive=sda` | **invalid** — `--boot-drive` is RHEL7+/anaconda-19+ ("unrecognized arguments") | drop `--boot-drive` (the disk is already pinned by `ignoredisk --only-use=sda`) |
+| `rootpw --lock` (bare) | **invalid** — RHEL6 requires a password argument ("a single argument is expected") | `rootpw --lock --iscrypted '*'` (locked, no valid password) |
+
+A third defect is **not** a syntax error and is therefore *not* caught by
+`ksvalidator` — it is a runtime package-selection failure:
+
+| Item | OL6 reality | Fix |
+|---|---|---|
+| `iptables-services` in `%packages` | RHEL7+ package; **absent on OL6** (only `iptables` ships, e.g. `iptables-1.4.7-19.0.1.el6`, which itself provides the service) | remove the line; keep `iptables` |
+
+**Hypotheses the tool cleared (recorded so they are not "re-fixed").** An
+initial web-based reading suspected `timezone … --isUtc`, `part … --label=…`,
+and `cmdline`. `ksvalidator -v RHEL6` accepts **all three** — they are valid on
+anaconda-13 and were left unchanged. Lesson: validate against the target
+release's actual command set, not against examples from a newer release.
+
+**The `xfs` root caveat (separate, runtime).** `part / --fstype=xfs` is
+*syntactically* valid on RHEL6, so `ksvalidator` passes it, but whether
+anaconda-13 can actually *create* an xfs root is a runtime question this tool
+cannot answer (cross-ref D.16, which keeps `/boot` on ext4). OL6 keeps
+`ROOT_FS=xfs` by maintainer decision; confirm xfs-root viability with a live
+`SERIAL_CONSOLE=yes` build.
+
+**Prevention.**
+1. `tests/validate-kickstart.sh` runs `ksvalidator -v RHEL6` on the synthesized
+   OL6 kickstart (see `TESTING.md`); it catches the *syntax* class above.
+2. The install-time `SERIAL_CONSOLE` default is now `yes` (A.7), so an
+   install-time failure streams live instead of disappearing into the headless
+   wait.
+3. The Phase-5 `BUILD_TIMEOUT_MIN` watchdog bounds the build and reaps the
+   transient VM, since `SERIAL_CONSOLE=yes` removes upstream's own install
+   timeout.
+
+Runtime issues that syntax validation cannot see (xfs-root support, package
+availability) are still confirmed only by a live build.
 
 ---
 
