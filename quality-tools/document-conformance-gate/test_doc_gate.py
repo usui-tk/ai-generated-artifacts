@@ -126,6 +126,59 @@ check("front-matter with provenance keys -> pass",
 check("no front-matter -> 0 findings", G.check_front_matter("# just a template\nbody") == [])
 
 # ---- report ----
+# --- C6: ADR<->SPEC cross-reference integrity (live corpus, ADR 0014 §4.10) ---
+check("spec-anchor lowercases + hyphenates",
+      G._spec_anchor("Machinery") == "machinery" and G._spec_anchor("Analysis layer") == "analysis-layer")
+_fm = G._parse_adr_front_matter(
+    '---\nid: 0009\nstatus: accepted\ngoverns: ["governance/SPEC.md \u00a7machinery"]\n'
+    'supersedes: []\nsuperseded_by: null\n---\nbody')
+check("front-matter parses governs list", _fm["governs"] == ["governance/SPEC.md \u00a7machinery"])
+check("front-matter null list-field -> []", _fm["superseded_by"] == [])
+
+
+def _mkroot(adrs, spec):
+    root = tempfile.mkdtemp()
+    os.makedirs(os.path.join(root, "governance", "adr"))
+    for nm, txt in adrs.items():
+        with open(os.path.join(root, "governance", "adr", nm), "w", encoding="utf-8") as fh:
+            fh.write(txt)
+    with open(os.path.join(root, "governance", "SPEC.md"), "w", encoding="utf-8") as fh:
+        fh.write(spec)
+    return root
+
+
+def _adr(i, status="accepted", governs='["governance/SPEC.md \u00a7machinery"]', sup="[]", supby="null"):
+    return ("---\nid: %s\nstatus: %s\ngoverns: %s\nsupersedes: %s\nsuperseded_by: %s\n---\nText.\n"
+            % (i, status, governs, sup, supby))
+
+
+# SPEC with a direct back-ref (0009) and one inside a ## subsection (0010) to exercise level-aware bodies
+_SPEC = ("# SPEC\n\n## Machinery\n\nGoverned by [ADR 0009](./adr/0009.md).\n\n"
+         "### Sub thing\n\nGoverned by [ADR 0010](./adr/0010.md).\n\n## Other\n\nbody\n")
+check("C6 clean corpus -> 0 findings",
+      G.check_adr_spec_xref(_mkroot({"0009.md": _adr("0009"), "0010.md": _adr("0010")}, _SPEC)) == [])
+check("C6 level-aware: back-ref in ## subsection is in-scope",
+      not any("0010" in f for f in
+              G.check_adr_spec_xref(_mkroot({"0009.md": _adr("0009"), "0010.md": _adr("0010")}, _SPEC))))
+check("C6 catches §Machinery casing drift (F5)",
+      any("0009" in f and "canonical anchor" in f for f in
+          G.check_adr_spec_xref(_mkroot({"0009.md": _adr("0009", governs='["governance/SPEC.md \u00a7Machinery"]')}, _SPEC))))
+check("C6 catches missing bidirectional back-ref",
+      any("0099" in f and "back-reference" in f for f in
+          G.check_adr_spec_xref(_mkroot({"0099.md": _adr("0099")}, _SPEC))))
+check("C6 catches superseded ADR still live in SPEC",
+      any("0009" in f and "superseded" in f for f in
+          G.check_adr_spec_xref(_mkroot({"0009.md": _adr("0009", status="superseded")}, _SPEC))))
+check("C6 catches asymmetric supersedes/superseded_by",
+      any("asymmetric" in f for f in
+          G.check_adr_spec_xref(_mkroot({"0009.md": _adr("0009", sup='["0010"]'), "0010.md": _adr("0010")}, _SPEC))))
+check("C6 governs=[] carve-out -> no finding for that ADR",
+      not any("0005" in f for f in
+              G.check_adr_spec_xref(_mkroot({"0005.md": _adr("0005", governs="[]")}, _SPEC))))
+check("C6 catches governs path that does not exist",
+      any("does not exist" in f for f in
+          G.check_adr_spec_xref(_mkroot({"0012.md": _adr("0012", governs='["reference-code/nope/missing.ps1"]')}, _SPEC))))
+
 passed = sum(1 for _, ok in _checks if ok)
 total = len(_checks)
 for name, ok in _checks:

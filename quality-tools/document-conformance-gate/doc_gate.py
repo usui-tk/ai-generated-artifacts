@@ -14,6 +14,12 @@ Implements the ADR 0020 doc-region contract over the documentation doc-set
   * L1 item-membership (marker unit_id maps to a real L1 item; family segment
     stripped: spec.powershell.part-a.X -> spec.part-a.X).
   * doc-level YAML front-matter provenance pin (ADR 0019), when present.
+  * C6 ADR<->SPEC cross-reference integrity over the LIVE governance corpus
+    (ADR 0014 §4.10): every accepted ADR's governs target resolves to a real
+    SPEC.md section by its canonical (lowercase) anchor and that section
+    back-references the ADR; superseded/deprecated ADRs are not live governing
+    refs; supersedes/superseded_by are symmetric. governs=[] is a carve-out for
+    process/meta ADRs. Runs on a full manifest verify (not for --path subsets).
 
 Design (ADR 0003): single-file, stdlib-only, no cross-reference. Tool boundary
 (ADR 0020 step 4): this gate owns ALL doc-region inspection; the governance-state
@@ -238,6 +244,124 @@ def discover_files(root):
     return sorted(set(paths))
 
 
+# ---- C6: ADR <-> SPEC cross-reference integrity (LIVE corpus) ------------------
+# TR-TPLCANON-3 C6 extended from templates to the live governance/adr/ +
+# governance/SPEC.md corpus, implementing the baseline ADR 0014 §4.10 MANDATORY
+# ADR<->SPEC integrity gate. doc_gate owns doc inspection (ADR 0020); the
+# governance-state validator stays reference-code-scoped, so this check lives here.
+_SPEC_REF = re.compile(r"governance/SPEC\.md\s+\u00a7(?P<anchor>\S+)")
+_LIVE = ("accepted",)
+
+
+def _parse_adr_front_matter(text):
+    fm = {"id": None, "status": None, "governs": [], "supersedes": [], "superseded_by": []}
+    if not text.startswith("---\n"):
+        return fm
+    end = text.find("\n---", 4)
+    block = text[4:end] if end != -1 else text[4:]
+    for ln in block.split("\n"):
+        if ":" not in ln:
+            continue
+        key, val = ln.split(":", 1)
+        key, val = key.strip(), val.strip()
+        if key in ("id", "status"):
+            fm[key] = val.strip('"').strip("'")
+        elif key in ("governs", "supersedes", "superseded_by"):
+            inner = val.strip()
+            if inner.startswith("[") and inner.endswith("]"):
+                fm[key] = [x.strip().strip('"').strip("'")
+                           for x in inner[1:-1].split(",") if x.strip()]
+            # else: null / ~ / empty / scalar -> leave as the [] default
+    return fm
+
+
+def _spec_anchor(header):
+    """GitHub-style anchor for a heading: lowercase, drop punctuation, spaces -> hyphens."""
+    h = re.sub(r"[^\w\s-]", "", header.strip().lower())
+    return re.sub(r"\s+", "-", h)
+
+
+def _load_spec_sections(root):
+    """anchor -> section body, where a section spans its heading through the line
+    before the next heading of the SAME-OR-HIGHER level (so '## Machinery' includes
+    its '###' subsections, where governing back-references commonly live)."""
+    with open(os.path.join(root, "governance", "SPEC.md"), encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    heads = []  # (line_idx, level, anchor)
+    for i, ln in enumerate(lines):
+        m = re.match(r"^(#{1,6})\s+(.*)$", ln)
+        if m:
+            heads.append((i, len(m.group(1)), _spec_anchor(m.group(2))))
+    sections = {}
+    for j, (idx, level, anchor) in enumerate(heads):
+        end = len(lines)
+        for k in range(j + 1, len(heads)):
+            if heads[k][1] <= level:
+                end = heads[k][0]
+                break
+        sections[anchor] = "\n".join(lines[idx:end])
+    return sections
+
+
+def check_adr_spec_xref(root):
+    """ADR 0014 §4.10 integrity: governs-resolves, bidirectional back-ref,
+    superseded-not-live, supersedes/superseded_by symmetry. governs=[] is a
+    deliberate carve-out (process/meta ADRs that govern no SPEC section)."""
+    findings = []
+    adr_dir = os.path.join(root, "governance", "adr")
+    if not os.path.isdir(adr_dir):
+        return findings
+    sections = _load_spec_sections(root)
+    with open(os.path.join(root, "governance", "SPEC.md"), encoding="utf-8") as fh:
+        spec_text = fh.read()
+    adrs = {}
+    for name in sorted(os.listdir(adr_dir)):
+        if name.endswith(".md"):
+            with open(os.path.join(adr_dir, name), encoding="utf-8") as fh:
+                fm = _parse_adr_front_matter(fh.read())
+            if fm["id"]:
+                adrs[fm["id"]] = fm
+    for aid, fm in sorted(adrs.items()):
+        backref = re.compile(r"adr/0*%s\b|ADR\s+0*%s\b" % (aid.lstrip("0") or "0", aid.lstrip("0") or "0"))
+        if fm["status"] in _LIVE:
+            for tgt in fm["governs"]:                       # (1)+(2)
+                m = _SPEC_REF.search(tgt)
+                if m:
+                    anchor = m.group("anchor")
+                    if anchor not in sections:
+                        findings.append("ADR %s: governs 'SPEC.md \u00a7%s' but no SPEC section "
+                                        "has that canonical anchor (have: %s)"
+                                        % (aid, anchor, ", ".join(sorted(sections))))
+                    elif not backref.search(sections[anchor]):
+                        findings.append("ADR %s: governs 'SPEC.md \u00a7%s' but that section does "
+                                        "not back-reference the ADR (bidirectional link broken)"
+                                        % (aid, anchor))
+                else:
+                    p = tgt.split("\u00a7")[0].strip()
+                    if "/" in p and not os.path.exists(os.path.join(root, p)):
+                        findings.append("ADR %s: governs path '%s' does not exist" % (aid, p))
+        elif fm["status"] in ("superseded", "deprecated"):  # (3)
+            if backref.search(spec_text):
+                findings.append("ADR %s is %s but is still referenced by the live SPEC.md "
+                                "(a superseded ADR must not be a current governing ref)"
+                                % (aid, fm["status"]))
+        for other in fm["supersedes"]:                      # (4)
+            o = adrs.get(other)
+            if o is None:
+                findings.append("ADR %s supersedes unknown ADR %s" % (aid, other))
+            elif aid not in o["superseded_by"]:
+                findings.append("ADR %s supersedes %s but %s.superseded_by omits %s (asymmetric)"
+                                % (aid, other, other, aid))
+        for other in fm["superseded_by"]:
+            o = adrs.get(other)
+            if o is None:
+                findings.append("ADR %s.superseded_by lists unknown ADR %s" % (aid, other))
+            elif aid not in o["supersedes"]:
+                findings.append("ADR %s.superseded_by lists %s but %s.supersedes omits %s (asymmetric)"
+                                % (aid, other, other, aid))
+    return findings
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Document-conformance gate (ADR 0020).")
     ap.add_argument("--root", default=".")
@@ -265,6 +389,10 @@ def main(argv=None):
     findings = []
     for rel in rels:
         findings += check_file(os.path.join(root, rel), l1, rel)
+    if args.path is None:
+        # C6: ADR<->SPEC integrity over the live corpus (ADR 0014 §4.10), run on a
+        # full manifest verify (not when an explicit --path subset is given).
+        findings += check_adr_spec_xref(root)
     if findings:
         for f in findings:
             print("FINDING: " + f)
