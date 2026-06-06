@@ -36,8 +36,21 @@ This CHANGELOG is **English only** per the repository-wide
   tools absent, initramfs not extractable) are fail-open (warn + continue), so a
   missing tool never aborts an otherwise-good build. Detection only — no
   remediation. Validated against a known-good OL10 image (all four checks PASS).
-  See SPEC A.7 and Part C. (A follow-up will add an ENA/kernel-version-based
-  per-Nitro-generation instance-assurance report.)
+  See SPEC A.7 and Part C.
+
+- Phase 5.5 also emits an **advisory Nitro instance assurance report**: it
+  classifies each Nitro generation (v2–v6) as `ASSURED` / `SUPPORTED` /
+  `NOT-ASSURED` and lists representative instance families per generation. The
+  signal is ENA capability — the standalone amzn driver `MODULE_VERSION` when
+  present (against AWS's hard floor: ENI attach fails below pre-v5 `1.2.0` /
+  v5+ `2.2.9`, with `2.2.9g` recommended for v4) — but because UEK ships ENA
+  in-tree with no `MODULE_VERSION`, it falls back to the **kernel version** vs
+  AWS's documented OL/RHEL minimum (`4.18.0-305`) for Nitro v4+ optimal
+  behaviour. The kernel fallback is a conservative proxy (UEK may backport), so
+  a sub-proxy kernel is reported `SUPPORTED` (verify with `ethtool -i`), never as
+  a failure; the report aborts the build only when a *measurable* ENA version is
+  below the hard floor (fatal under `enforce`). Source: AWS *Instances built on
+  the AWS Nitro System*.
 
 - Added a Phase-5 progress heartbeat: `HEARTBEAT_INTERVAL_SEC` (seconds,
   default `20`; `0` disables — a wrapper key) logs an elapsed-time + build-disk

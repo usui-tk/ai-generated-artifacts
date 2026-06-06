@@ -438,6 +438,24 @@ inspection tools (`libguestfs-tools`, and `unmkinitramfs` from
 `initramfs-tools-core` or `lsinitrd`) are the same family already required for
 the upstream `virt-sparsify` step.
 
+After the four boot checks, Phase 5.5 also prints an **advisory Nitro instance
+assurance report**: it classifies each Nitro generation (v2–v6) as `ASSURED`,
+`SUPPORTED` (works but potentially suboptimal), or `NOT-ASSURED` and lists
+representative instance families per generation. The signal is the ENA driver
+capability: the standalone amzn driver's `MODULE_VERSION` when present
+(`modinfo`), against AWS's hard floor (ENI attachment fails below pre-v5 `1.2.0`
+/ v5+ `2.2.9`) and the v4 optimal recommendation (`2.2.9g`); but UEK ships ENA
+**in-tree with no `MODULE_VERSION`**, so the report falls back to the **kernel
+version** against AWS's documented OL/RHEL minimum (kernel `4.18.0-305`) for
+Nitro v4+ optimal behaviour. The kernel fallback is a deliberately conservative
+proxy — UEK may backport ENA features below that kernel — so a sub-proxy kernel
+is reported as `SUPPORTED` (with a `ethtool -i` verification hint), never as a
+failure. The report itself never aborts the build; the only fatal case is a
+*measurable* ENA version below the hard floor, which feeds the gate verdict
+(fatal under `enforce`). Source: AWS *Instances built on the AWS Nitro System*
+(Nitro instance requirements). The per-generation family lists are
+representative, not exhaustive.
+
 Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
 when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable
 release for OL7) and harmless to set (or omit) on OL8/9/10 where the

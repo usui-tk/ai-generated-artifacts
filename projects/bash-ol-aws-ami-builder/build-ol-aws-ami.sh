@@ -2298,12 +2298,87 @@ phase5_5_nitro_readiness_check() {
     indeterminate=1
   fi
 
+  # --- Nitro instance assurance report (advisory) ----------------------------
+  # ENA is required for every Nitro generation (gated by CHECK 2). Which
+  # generations an image is *assured* on depends on ENA capability:
+  #   - Standalone amzn ENA driver: its MODULE_VERSION is authoritative. AWS hard
+  #     floor (ENI attach fails below): pre-v5 >= 1.2.0, v5+ >= 2.2.9; v4 optimal
+  #     wants >= 2.2.9g.
+  #   - UEK ships ENA in-tree with NO MODULE_VERSION, so we fall back to the
+  #     kernel version vs AWS's documented OL/RHEL minimum (kernel 4.18.0-305)
+  #     for Nitro v4+ optimal behaviour. This is a conservative proxy -- UEK may
+  #     backport ENA features below that kernel -- so sub-proxy is reported as
+  #     SUPPORTED (verify with 'ethtool -i'), never as a failure.
+  # Tiers are advisory and never abort the build, EXCEPT a measurable ENA
+  # version below the hard floor (a real ENI attach failure), which feeds the
+  # gate verdict (fatal under enforce). Source: AWS "Instances built on the AWS
+  # Nitro System" (Nitro instance requirements).
+  if [[ "${ena_cfg}" == "y" || -n "${ena_mod}" ]]; then
+    local fam_v2="M5 C5 R5 T3 T4g M6g C6g R6g"
+    local fam_v3="M5n C5n R5n I3en P4d G4dn"
+    local fam_v4="M6i M7i C6i C7i R6i R7i M7g C7g R7g I4i"
+    local fam_v5="M8g C8g R8g C7gn I7ie P5en Trn2"
+    local fam_v6="M8i C8i R8i M8a C8a R8a"
+    local v2_tier="ASSURED" v3_tier="ASSURED" v4_tier="ASSURED" v5_tier="ASSURED" v6_tier="ASSURED"
+    local ena_ver="" signal=""
+
+    if [[ -n "${ena_mod}" ]]; then
+      virt-copy-out -a "${img}" "/lib/modules/${kver}/kernel${ena_mod}" "${work}/" 2>/dev/null || true
+      local enako; enako="${work}/$(basename "${ena_mod}")"
+      if [[ -r "${enako}" ]]; then
+        case "${enako}" in
+          *.xz)  xz   -df "${enako}" 2>/dev/null || true; enako="${enako%.xz}";;
+          *.gz)  gzip -df "${enako}" 2>/dev/null || true; enako="${enako%.gz}";;
+          *.zst) zstd -df "${enako}" 2>/dev/null || true; enako="${enako%.zst}";;
+        esac
+        if command -v modinfo >/dev/null 2>&1; then
+          ena_ver="$(modinfo -F version "${enako}" 2>/dev/null | head -1 || true)"
+        fi
+      fi
+    fi
+
+    if [[ -n "${ena_ver}" ]]; then
+      local vnum; vnum="$(printf '%s' "${ena_ver}" | grep -oE '^[0-9]+(\.[0-9]+){1,2}' || true)"
+      signal="ENA driver version ${ena_ver} (modinfo)"
+      if [[ -n "${vnum}" ]]; then
+        if [[ "$(printf '1.2.0\n%s\n' "${vnum}" | sort -V | head -1)" != "1.2.0" ]]; then
+          v2_tier="NOT-ASSURED (<1.2.0: ENI attach fails)"; v3_tier="${v2_tier}"; v4_tier="${v2_tier}"
+          log_error "  ENA version ${ena_ver} is below the AWS hard floor 1.2.0 (ENI attachment fails)."
+          fail=1
+        fi
+        if [[ "$(printf '2.2.9\n%s\n' "${vnum}" | sort -V | head -1)" != "2.2.9" ]]; then
+          v5_tier="NOT-ASSURED (<2.2.9: ENI attach fails)"; v6_tier="${v5_tier}"
+          log_error "  ENA version ${ena_ver} is below the AWS Nitro v5+ floor 2.2.9 (ENI attachment fails)."
+          fail=1
+        fi
+      else
+        signal="ENA driver version '${ena_ver}' (unparseable; verify with ethtool -i)"
+      fi
+    else
+      signal="kernel ${kver} vs AWS OL/RHEL minimum 4.18.0-305 (ENA in-tree; no module version)"
+      local mm="${kver%%-*}"
+      if [[ -z "${mm}" || "$(printf '4.18\n%s\n' "${mm}" | sort -V | head -1)" != "4.18" ]]; then
+        v4_tier="SUPPORTED (kernel < proxy 4.18; UEK may backport -- verify ethtool -i)"
+        v5_tier="${v4_tier}"; v6_tier="${v4_tier}"
+      fi
+    fi
+
+    log_info "  --- Nitro instance assurance (advisory) ---"
+    log_info "    signal : ${signal}"
+    log_info "    Nitro v2  ${v2_tier}  e.g. ${fam_v2}"
+    log_info "    Nitro v3  ${v3_tier}  e.g. ${fam_v3}"
+    log_info "    Nitro v4  ${v4_tier}  e.g. ${fam_v4}"
+    log_info "    Nitro v5  ${v5_tier}  e.g. ${fam_v5}"
+    log_info "    Nitro v6  ${v6_tier}  e.g. ${fam_v6}"
+    log_info "    note: advisory tiers; confirm on the target instance with 'ethtool -i eth0'."
+  fi
+
   rm -rf "${work}"
 
   # --- verdict ---------------------------------------------------------------
   if [[ "${fail}" -gt 0 ]]; then
     if [[ "${mode}" == "enforce" ]]; then
-      die "Nitro readiness pre-check FAILED (see the [CHECK N] lines above). Aborting before the upload/snapshot/register phases. Re-run with NITRO_PRECHECK=warn to proceed anyway, or =off to skip the check."
+      die "Nitro readiness pre-check FAILED (see the [CHECK N] / assurance lines above). Aborting before the upload/snapshot/register phases. Re-run with NITRO_PRECHECK=warn to proceed anyway, or =off to skip the check."
     fi
     log_warn "Nitro readiness pre-check found blocking issue(s) (NITRO_PRECHECK=warn; continuing despite the failure(s) above)."
   elif [[ "${indeterminate}" -gt 0 ]]; then
