@@ -1147,6 +1147,17 @@ Fedora <= 42, CentOS Stream <= 8, OL / RHEL / Rocky / Alma <= 8.
 > The remaining rows are organized from cross-referenced install recipes; the
 > only version-dependent difference is the qemu package name.
 
+**SELinux relabel caveat (apt family)**: the Debian / Ubuntu `libguestfs`
+build omits the `selinuxrelabel` optgroup — it is compiled out of `guestfsd`
+at libguestfs build time, so **no host package enables it** (installing
+`policycoreutils` / `selinux-utils` to provide `setfiles` does not help; see
+Part D D.17). Consequently the host-side per-filesystem relabel in upstream
+`bin/build-image.sh` cannot run on apt-family hosts. The wrapper patches
+upstream in Phase 3 to fall back to a guest first-boot relabel
+(`touch /.autorelabel`); the resulting AMI is still `SELINUX=enforcing`. On
+dnf-family hosts the optgroup is present and the host-side relabel runs
+unchanged, so the patch is a no-op there.
+
 ## B.7 Guest OS package-manager matrix
 
 The package operations that run **inside the guest** during the image build
@@ -1674,6 +1685,94 @@ whole remains Phase A/B verified only). The fix is structurally
 correct based on the OL7 reference kickstart and GRUB Legacy XFS
 documentation, but operators running OL6+XFS in anger should expect to
 debug if anaconda or grub2 misbehaves on first boot.
+
+---
+
+## D.17 Phase 5 SELinux relabel fails on a non-SELinux build host
+
+**Symptom**: On a Debian / Ubuntu build host (observed on Ubuntu 26.04,
+`DISTR=ol10-slim`, `SELINUX=enforcing`), Phase 5 aborts inside upstream
+`bin/build-image.sh` at the non-root filesystem relabel step:
+
+```
+build-ol-aws-ami.sh: SELinux relabel non-root filesystems
+    relabelling /boot
+libguestfs: error: selinux_relabel: feature 'selinuxrelabel' is not available in this build of libguestfs
+[ERROR] build-image.sh failed
+```
+
+Upstream relabels each non-root mount with
+`guestfish --remote selinux-relabel <file_contexts> <mount>`, which needs
+the host `libguestfs` to provide the `selinuxrelabel` optgroup.
+
+**Root cause**: The `selinuxrelabel` optgroup is a **build-time** capability of
+the libguestfs daemon (`guestfsd`), gated by `HAVE_LIBSELINUX` when libguestfs
+itself is compiled. The Debian / Ubuntu libguestfs packages are built **without
+it**, so the optgroup is permanently unavailable in the appliance regardless of
+what is installed on the host. It is **not** a runtime probe for `setfiles`.
+
+This was confirmed empirically: installing `policycoreutils` + `selinux-utils`
+(so `/usr/sbin/setfiles` exists) and rebuilding the supermin appliance
+(`libguestfs-test-tool` finishing OK) did **not** enable it —
+
+```
+$ command -v setfiles          # -> /usr/sbin/setfiles  (present)
+$ LIBGUESTFS_BACKEND=direct guestfish -a /dev/null run : available selinuxrelabel
+libguestfs: error: selinuxrelabel: group not available   # exit 1, still
+```
+
+So adding host SELinux packages is a dead end; the only fix is to avoid the
+host-side relabel when the optgroup is absent.
+
+**Fix**: `phase3_clone_repository` patches upstream `bin/build-image.sh` (the
+same clone-local, re-applied-every-clone discipline as the OL6/7 patches in
+D.10/D.11, but host-OS- and OL-version-**independent**). Right after the
+listening `guestfish` session is opened, it probes the optgroup; when it is
+unavailable it touches `/.autorelabel` in the guest and skips the host-side
+per-filesystem relabel loop entirely:
+
+```bash
+if ! guestfish --remote available selinuxrelabel >/dev/null 2>&1; then
+  common::echo_message "    [ol-aws-ami-builder PATCH selinux-relabel-fallback] ..."
+  guestfish --remote touch /.autorelabel
+else
+  # ... original mountpoints loop ...
+fi
+guestfish --remote quit   # shared by both branches
+```
+
+A `SELINUX!=disabled` guest carrying `/.autorelabel` relabels every filesystem
+on first boot (systemd `selinux-autorelabel` on OL7/8/9/10; `rc.sysinit` on
+OL6) using the guest's own `setfiles` / targeted policy, then reboots once —
+yielding a correctly-labelled `enforcing` image. This is the
+libguestfs-recommended fallback (the same one `virt-customize` / `virt-sysprep`
+`--selinux-relabel` use internally). On SELinux-capable hosts (RHEL / OL /
+Fedora) the optgroup **is** available, the probe passes, and the original
+host-side relabel runs unchanged — so the patch is applied unconditionally and
+is a no-op there. See A.5 "Caller pattern for libguestfs" and B.6.
+
+**Verification**: A static + behavioral check confirmed:
+
+1. The two `sed` edits, replayed on a fresh upstream `bin/build-image.sh`,
+   produce the expected clean `if/else` and pass `bash -n`; `shellcheck
+   --severity=warning` on the wrapper is clean.
+2. The probe sits in an `if !` / non-final `&& ` position, so the upstream
+   script's `set -euo pipefail` does not abort on the (expected) non-zero
+   exit. A stubbed-`guestfish` harness verified both branches under `set -e`:
+   optgroup-absent -> no abort, `/.autorelabel` touched, host relabel skipped;
+   optgroup-present -> behaviour unchanged, host relabel runs, no
+   `/.autorelabel`.
+3. The patch is idempotent (grep-guarded by the
+   `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` marker) and degrades
+   to a logged no-op if upstream refactors the relabel block.
+
+**Caveat**: The autorelabel fallback adds one relabel pass plus a single reboot
+to the guest's **first** boot (a one-time cost; subsequent boots are normal).
+The guest must contain its own `setfiles` / `fixfiles` and targeted policy —
+true for the OL base in every supported OL6-10 target. This path is exercised
+when building on apt-family hosts; full end-to-end (Phase C) confirmation that
+the first-boot relabel completes and the AMI comes up `enforcing` should be
+performed by operators building on Debian / Ubuntu.
 
 ---
 

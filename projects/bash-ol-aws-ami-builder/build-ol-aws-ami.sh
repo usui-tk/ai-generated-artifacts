@@ -868,6 +868,62 @@ phase3_clone_repository() {
   [[ -d "${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}" ]] \
     || die "Directory ${OL_TOOLS_SUBDIR} not found in the clone"
 
+  # SELinux relabel resilience patch (host-OS-independent; applies to every OL
+  # target). See SPEC Part D "SELinux relabel fails on a non-SELinux build
+  # host" and B.6.
+  #
+  # Background:
+  #   In Phase 5, upstream bin/build-image.sh relabels the guest's non-root
+  #   filesystems with an explicit loop:
+  #       guestfish --remote selinux-relabel <file_contexts> <mount>
+  #   That call needs the host libguestfs to provide the 'selinuxrelabel'
+  #   optgroup. On Debian/Ubuntu build hosts the optgroup is COMPILED OUT of
+  #   the libguestfs build (it is a build-time capability of guestfsd, NOT a
+  #   runtime probe for setfiles -- installing policycoreutils/selinux-utils on
+  #   the host does NOT enable it), so the call aborts the build with:
+  #       libguestfs: error: selinuxrelabel: group not available
+  #
+  # Fix (libguestfs-recommended fallback; host-independent):
+  #   When the optgroup is unavailable, skip the host-side per-filesystem
+  #   relabel and instead touch /.autorelabel in the guest. A SELINUX!=disabled
+  #   guest then relabels every filesystem on first boot (systemd
+  #   selinux-autorelabel on OL7/8/9/10; rc.sysinit on OL6) and reboots once,
+  #   yielding a correctly-labelled enforcing image. On SELinux-capable hosts
+  #   (RHEL/OL/Fedora) the optgroup IS available, the probe passes, and the
+  #   original host-side relabel runs unchanged -- so the patch is applied
+  #   unconditionally and is a no-op on SELinux hosts.
+  #
+  # Edit 1 inserts the optgroup probe + autorelabel branch right after the
+  # listening guestfish session is opened; Edit 2 closes that branch just
+  # before the shared 'guestfish --remote quit' (which runs in both branches).
+  # The failing probe sits in an 'if !' / non-final '&&|| ' position, so it is
+  # exempt from the upstream script's 'set -e'.
+  #
+  # Caveat (same discipline as the OL6/7 patches): local to the cloned working
+  # copy, re-applied on every clone, grep-guarded for idempotency, and a no-op
+  # (with a warning) if upstream refactors the relabel block.
+  local build_image_sh="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/bin/build-image.sh"
+  if [[ -f "${build_image_sh}" ]]; then
+    if grep -Fq '[ol-aws-ami-builder PATCH selinux-relabel-fallback]' "${build_image_sh}"; then
+      log_info "  -> build-image.sh SELinux relabel fallback already applied (idempotent skip)"
+    elif grep -Fq 'selinux-relabel /etc/selinux/targeted/contexts/files/file_contexts' "${build_image_sh}"; then
+      log_info "Applying SELinux relabel resilience patch to upstream bin/build-image.sh"
+      sed -i.selinux-relabel.bak \
+        -e '/guestfish -a .*--selinux --listen/ s|$|\n    if ! guestfish --remote available selinuxrelabel >/dev/null 2>\&1; then\n      common::echo_message "    [ol-aws-ami-builder PATCH selinux-relabel-fallback] host libguestfs lacks selinuxrelabel optgroup; scheduling first-boot autorelabel (/.autorelabel)"\n      guestfish --remote touch /.autorelabel\n    else|' \
+        -e 's|^\(\s*\)guestfish --remote quit$|\1fi\n\1guestfish --remote quit|' \
+        "${build_image_sh}"
+
+      if grep -Fq '[ol-aws-ami-builder PATCH selinux-relabel-fallback]' "${build_image_sh}"; then
+        log_info "  -> SELinux relabel resilience patch applied (backup at ${build_image_sh}.selinux-relabel.bak)"
+      else
+        die "Failed to apply SELinux relabel resilience patch to ${build_image_sh}"
+      fi
+    else
+      log_warn "  Upstream selinux-relabel call not found in ${build_image_sh}."
+      log_warn "  Assuming the upstream relabel block has been refactored; proceeding."
+    fi
+  fi
+
   # Guest package manager by OL generation (see SPEC B.7 "Guest OS
   # package-manager matrix"):
   #   * OL6, OL7  -> yum  (yum-config-manager comes from yum-utils;
