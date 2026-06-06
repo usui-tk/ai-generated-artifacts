@@ -1107,6 +1107,58 @@ phase3_clone_repository() {
     fi
   fi
 
+  # env.properties.defaults 'declare -gA' guard (OL6 only).
+  #
+  # Background:
+  #   Upstream env.properties.defaults ends with:
+  #     declare -gA REPO
+  #   The '-g' (global) flag for 'declare' was added in bash 4.2. This file is
+  #   ENV_FILE_DEFAULTS -- the head of build-image.sh's ENV_FILES -- so it is
+  #   concatenated FIRST into the in-guest provision.d/env.properties, which
+  #   provision.sh then sources INSIDE the guest. OL6 ships bash 4.1, which
+  #   rejects '-g' ("declare: -g: invalid option"), so guest provisioning
+  #   aborts and build-image.sh exits 1 -- AFTER an otherwise successful
+  #   install. OL7 (bash 4.2), OL8 (4.4) and OL10 (5.x) accept '-g', so this
+  #   only bites OL6.
+  #
+  # Fix:
+  #   Rewrite the line to try the original (host-preserving) form and fall back
+  #   to a 4.1-compatible 'declare -A' when '-g' is unavailable:
+  #     declare -gA REPO 2>/dev/null || declare -A REPO
+  #   On the host (bash 5.x, sourced inside a build-image.sh function) the first
+  #   form succeeds, so REPO stays a global associative array exactly as
+  #   upstream intends. In the OL6 guest the first form fails quietly and the
+  #   fallback runs; REPO is unused by guest provisioning, so its scope there is
+  #   immaterial -- the point is only that sourcing no longer aborts. 'A || B'
+  #   is safe under 'set -e' (it does not trip errexit).
+  #
+  # Idempotency: grep the wrapper marker before substituting.
+  if [[ "${OL_MAJOR_VERSION}" -eq 6 ]]; then
+    local ol_defaults="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/env.properties.defaults"
+    log_info "Applying declare -gA bash-4.1 guard to upstream env.properties.defaults (OL${OL_MAJOR_VERSION})"
+
+    if [[ ! -f "${ol_defaults}" ]]; then
+      die "Cannot apply declare -gA guard: ${ol_defaults} not found"
+    fi
+
+    if grep -Fq '[ol-aws-ami-builder PATCH declare-g-ol6]' "${ol_defaults}"; then
+      log_info "  -> declare -gA guard already applied (idempotent skip)"
+    elif grep -Eq '^declare -gA REPO[[:space:]]*$' "${ol_defaults}"; then
+      sed -i.declare-g-guard.bak \
+        -e 's@^declare -gA REPO[[:space:]]*$@declare -gA REPO 2>/dev/null || declare -A REPO  # [ol-aws-ami-builder PATCH declare-g-ol6] bash 4.1 (OL6 guest) has no declare -g@' \
+        "${ol_defaults}"
+
+      if grep -Fq '[ol-aws-ami-builder PATCH declare-g-ol6]' "${ol_defaults}"; then
+        log_info "  -> declare -gA guard applied (backup at ${ol_defaults}.declare-g-guard.bak)"
+      else
+        die "Failed to apply declare -gA guard to ${ol_defaults}"
+      fi
+    else
+      log_warn "  'declare -gA REPO' line not found in ${ol_defaults}."
+      log_warn "  Assuming upstream changed the env defaults; proceeding (verify OL6 provisioning)."
+    fi
+  fi
+
   # OL6 distr/ol6-slim/ runtime generation.
   #
   # Background:

@@ -1898,6 +1898,52 @@ availability) are still confirmed only by a live build.
 
 ---
 
+## D.19 OL6 (bash 4.1) chokes on `declare -g` in upstream `env.properties.defaults`
+
+**Symptom.** On OL6 the install completes, then Phase 5 fails during the
+provisioning step with:
+
+```
+=== Load environment ===
+/tmp/provision.d/env.properties: line 69: declare: -g: invalid option
+declare: usage: declare [-aAfFilrtux] [-p] [name[=value] ...]
+virt-customize: error: /bin/bash /tmp/provision.d/provision.sh: command exited with an error
+```
+
+`build-image.sh` then exits 1. OL7/OL8/OL9/OL10 are unaffected.
+
+**Cause.** Upstream `env.properties.defaults` ends with `declare -gA REPO`. The
+`-g` (declare-as-global) flag was introduced in **bash 4.2**. That file is
+`ENV_FILE_DEFAULTS`, the head of `build-image.sh`'s `ENV_FILES`, so `stage_files`
+concatenates it **first** into the in-guest `provision.d/env.properties`, which
+`provision.sh` sources **inside the guest**. OL6 ships **bash 4.1**, which does
+not understand `-g`. The newer guests do (OL7 = 4.2, OL8 = 4.4, OL10 = 5.x), so
+the defect is OL6-specific. The install itself is fine; only the guest-side env
+sourcing aborts.
+
+**Fix.** A Phase-3 patch (OL6 only, same discipline as D.11) rewrites the line to:
+
+```
+declare -gA REPO 2>/dev/null || declare -A REPO
+```
+
+On the host (bash 5.x, where the file is sourced inside a `build-image.sh`
+function) the first form succeeds and `REPO` remains a global associative array
+exactly as upstream intends. In the OL6 guest the first form fails quietly and
+the `declare -A` fallback runs; `REPO` is not consumed by guest provisioning, so
+its scope there is immaterial — the only goal is that sourcing no longer aborts.
+`A || B` does not trip `set -e`. The patch is grep-guarded for idempotency and
+keeps a `.declare-g-guard.bak` backup.
+
+**Prevention.** This is a host-bash-version vs guest-bash-version skew that
+static checks on the wrapper cannot see (the offending line lives in upstream
+content fetched at build time). The guard is re-applied on every clone; if a
+future upstream refactor drops or moves `declare -gA REPO`, the patch becomes a
+logged no-op rather than a hard failure. Subsequent OL6 provisioning steps may
+surface further bash-4.1 incompatibilities, which are addressed as they appear.
+
+---
+
 ## Appendix: How to add support for a new OL major release
 
 When Oracle ships OL11:

@@ -97,6 +97,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- OL6 build no longer aborts at provisioning on `declare: -g: invalid option`.
+  Upstream `env.properties.defaults` ends with `declare -gA REPO`; the `-g`
+  (global) flag is bash 4.2+, but that file is concatenated first into the
+  in-guest `provision.d/env.properties` and sourced inside the OL6 guest, which
+  runs bash 4.1 — so the install succeeded but provisioning died, and
+  `build-image.sh` exited 1. A Phase-3 patch (OL6 only) rewrites the line to
+  `declare -gA REPO 2>/dev/null || declare -A REPO`: the host keeps the
+  intended global associative array (bash 5.x), while the OL6 guest falls back
+  to a 4.1-compatible form (`REPO` is unused by guest provisioning). OL7/8/9/10
+  guests (bash 4.2+) were never affected. Grep-guarded for idempotency; keeps a
+  `.declare-g-guard.bak` backup. See SPEC D.19.
+
 - OL6 root filesystem is now `ext4` (was `xfs`). The OL6.10 installer
   (anaconda-13) **refuses** to place the root partition on XFS and aborts at
   partitioning, so no AMI was ever produced — a runtime policy that
