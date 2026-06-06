@@ -1726,19 +1726,22 @@ host-side relabel when the optgroup is absent.
 
 **Fix**: `phase3_clone_repository` patches upstream `bin/build-image.sh` (the
 same clone-local, re-applied-every-clone discipline as the OL6/7 patches in
-D.10/D.11, but host-OS- and OL-version-**independent**). Right after the
-listening `guestfish` session is opened, it probes the optgroup; when it is
-unavailable it touches `/.autorelabel` in the guest and skips the host-side
-per-filesystem relabel loop entirely:
+D.10/D.11, but host-OS- and OL-version-**independent**). It probes the optgroup
+with a **standalone** `guestfish` (no `--selinux`, no `--listen`); when the
+optgroup is unavailable it touches `/.autorelabel` with **another standalone**
+`guestfish` session and skips the entire upstream relabel block — the
+`eval ... --selinux --listen` **and** the per-filesystem loop:
 
 ```bash
-if ! guestfish --remote available selinuxrelabel >/dev/null 2>&1; then
+common::echo_message "SELinux relabel non-root filesystems"
+if ! guestfish -a /dev/null run : available selinuxrelabel >/dev/null 2>&1; then
   common::echo_message "    [ol-aws-ami-builder PATCH selinux-relabel-fallback] ..."
-  guestfish --remote touch /.autorelabel
+  guestfish --rw -a "${WORKSPACE}/${VM_NAME}/${VM_NAME}.qcow2" -i touch /.autorelabel
 else
-  # ... original mountpoints loop ...
+  eval "$(guestfish -a ... --selinux --listen)"   # original block, unchanged
+  # ... mountpoints loop ...
+  guestfish --remote quit
 fi
-guestfish --remote quit   # shared by both branches
 ```
 
 A `SELINUX!=disabled` guest carrying `/.autorelabel` relabels every filesystem
@@ -1746,22 +1749,40 @@ on first boot (systemd `selinux-autorelabel` on OL7/8/9/10; `rc.sysinit` on
 OL6) using the guest's own `setfiles` / targeted policy, then reboots once —
 yielding a correctly-labelled `enforcing` image. This is the
 libguestfs-recommended fallback (the same one `virt-customize` / `virt-sysprep`
-`--selinux-relabel` use internally). On SELinux-capable hosts (RHEL / OL /
-Fedora) the optgroup **is** available, the probe passes, and the original
-host-side relabel runs unchanged — so the patch is applied unconditionally and
-is a no-op there. See A.5 "Caller pattern for libguestfs" and B.6.
+`--selinux-relabel` use internally; virt-sysprep's earlier `[ x.x ] SELinux
+relabelling` step takes the same fallback, so `/.autorelabel` is typically
+already present — the explicit touch makes it certain). On SELinux-capable
+hosts (RHEL / OL / Fedora) the optgroup **is** available, the probe passes, and
+the original host-side relabel runs unchanged — so the patch is applied
+unconditionally and is a no-op there. See A.5 "Caller pattern for libguestfs"
+and B.6.
+
+> **Why standalone sessions (lesson from the first attempt)**: the initial fix
+> reused upstream's `--selinux --listen` daemon — it probed with `guestfish
+> --remote available selinuxrelabel` and touched `/.autorelabel` over the same
+> `--remote` session. On an optgroup-less host that **fails**: the
+> `--selinux --listen` daemon is torn down as soon as the missing group is
+> exercised, so the socket disappears and the follow-up `guestfish --remote
+> touch /.autorelabel` dies with `looks like the server is not running`, which
+> `set -e` turns into a build abort. The corrected fix never enters the
+> `--selinux --listen` path on such hosts: it probes and writes with
+> self-contained `guestfish -a ...` invocations only. The probe form
+> `guestfish -a /dev/null run : available selinuxrelabel` is the exact one-shot
+> used to diagnose the root cause (it returns a clean non-zero, "group not
+> available", without disturbing any session).
 
 **Verification**: A static + behavioral check confirmed:
 
 1. The two `sed` edits, replayed on a fresh upstream `bin/build-image.sh`,
    produce the expected clean `if/else` and pass `bash -n`; `shellcheck
    --severity=warning` on the wrapper is clean.
-2. The probe sits in an `if !` / non-final `&& ` position, so the upstream
-   script's `set -euo pipefail` does not abort on the (expected) non-zero
-   exit. A stubbed-`guestfish` harness verified both branches under `set -e`:
-   optgroup-absent -> no abort, `/.autorelabel` touched, host relabel skipped;
-   optgroup-present -> behaviour unchanged, host relabel runs, no
-   `/.autorelabel`.
+2. The probe sits in an `if !` position, so the upstream script's
+   `set -euo pipefail` does not abort on the (expected) non-zero exit. A
+   stubbed-`guestfish` harness verified both branches under `set -e`:
+   optgroup-absent -> no abort, the `--selinux --listen` daemon is **never
+   started**, `/.autorelabel` is touched via a standalone session, host relabel
+   skipped; optgroup-present -> behaviour unchanged, `--listen` started, host
+   relabel runs, no `/.autorelabel`.
 3. The patch is idempotent (grep-guarded by the
    `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` marker) and degrades
    to a logged no-op if upstream refactors the relabel block.

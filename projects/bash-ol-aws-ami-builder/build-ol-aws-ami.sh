@@ -884,20 +884,32 @@ phase3_clone_repository() {
   #       libguestfs: error: selinuxrelabel: group not available
   #
   # Fix (libguestfs-recommended fallback; host-independent):
-  #   When the optgroup is unavailable, skip the host-side per-filesystem
-  #   relabel and instead touch /.autorelabel in the guest. A SELINUX!=disabled
-  #   guest then relabels every filesystem on first boot (systemd
-  #   selinux-autorelabel on OL7/8/9/10; rc.sysinit on OL6) and reboots once,
-  #   yielding a correctly-labelled enforcing image. On SELinux-capable hosts
-  #   (RHEL/OL/Fedora) the optgroup IS available, the probe passes, and the
-  #   original host-side relabel runs unchanged -- so the patch is applied
-  #   unconditionally and is a no-op on SELinux hosts.
+  #   Probe the optgroup with a STANDALONE guestfish (no --selinux, no
+  #   --listen); when it is unavailable, touch /.autorelabel in the guest with
+  #   another STANDALONE guestfish session and skip the entire upstream relabel
+  #   block (the eval --selinux --listen + the per-filesystem loop). A
+  #   SELINUX!=disabled guest carrying /.autorelabel relabels every filesystem
+  #   on first boot (systemd selinux-autorelabel on OL7/8/9/10; rc.sysinit on
+  #   OL6) and reboots once, yielding a correctly-labelled enforcing image. On
+  #   SELinux-capable hosts (RHEL/OL/Fedora) the optgroup IS available, the
+  #   probe passes, and the original host-side relabel runs unchanged -- so the
+  #   patch is applied unconditionally and is a no-op there.
+  #
+  #   Why standalone sessions (and NOT the upstream --remote session): on an
+  #   optgroup-less host the `guestfish ... --selinux --listen` daemon is torn
+  #   down as soon as the missing group is exercised (the socket disappears and
+  #   subsequent `guestfish --remote` calls fail with "server is not running"),
+  #   so the fallback cannot reuse that session to touch /.autorelabel. Hence
+  #   the fallback probes and writes with self-contained `guestfish -a ...`
+  #   invocations and never enters the --selinux --listen path at all. The
+  #   probe form `guestfish -a /dev/null run : available selinuxrelabel` is the
+  #   exact, verified one-shot used to diagnose this (see SPEC D.17).
   #
   # Edit 1 inserts the optgroup probe + autorelabel branch right after the
-  # listening guestfish session is opened; Edit 2 closes that branch just
-  # before the shared 'guestfish --remote quit' (which runs in both branches).
-  # The failing probe sits in an 'if !' / non-final '&&|| ' position, so it is
-  # exempt from the upstream script's 'set -e'.
+  # "SELinux relabel non-root filesystems" message, wrapping the original
+  # eval/loop as the else-branch; Edit 2 closes that branch just after the
+  # original 'guestfish --remote quit'. The failing probe sits in an 'if !'
+  # position, so it is exempt from the upstream script's 'set -e'.
   #
   # Caveat (same discipline as the OL6/7 patches): local to the cloned working
   # copy, re-applied on every clone, grep-guarded for idempotency, and a no-op
@@ -909,8 +921,8 @@ phase3_clone_repository() {
     elif grep -Fq 'selinux-relabel /etc/selinux/targeted/contexts/files/file_contexts' "${build_image_sh}"; then
       log_info "Applying SELinux relabel resilience patch to upstream bin/build-image.sh"
       sed -i.selinux-relabel.bak \
-        -e '/guestfish -a .*--selinux --listen/ s|$|\n    if ! guestfish --remote available selinuxrelabel >/dev/null 2>\&1; then\n      common::echo_message "    [ol-aws-ami-builder PATCH selinux-relabel-fallback] host libguestfs lacks selinuxrelabel optgroup; scheduling first-boot autorelabel (/.autorelabel)"\n      guestfish --remote touch /.autorelabel\n    else|' \
-        -e 's|^\(\s*\)guestfish --remote quit$|\1fi\n\1guestfish --remote quit|' \
+        -e '/common::echo_message "SELinux relabel non-root filesystems"/ s|$|\n    if ! guestfish -a /dev/null run : available selinuxrelabel >/dev/null 2>\&1; then\n      common::echo_message "    [ol-aws-ami-builder PATCH selinux-relabel-fallback] host libguestfs lacks selinuxrelabel optgroup; scheduling first-boot autorelabel (/.autorelabel)"\n      guestfish --rw -a "${WORKSPACE}/${VM_NAME}/${VM_NAME}.qcow2" -i touch /.autorelabel\n    else|' \
+        -e 's|^\(\s*\)guestfish --remote quit$|\1guestfish --remote quit\n\1fi|' \
         "${build_image_sh}"
 
       if grep -Fq '[ol-aws-ami-builder PATCH selinux-relabel-fallback]' "${build_image_sh}"; then

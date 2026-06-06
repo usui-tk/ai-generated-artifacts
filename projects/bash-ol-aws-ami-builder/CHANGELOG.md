@@ -48,9 +48,12 @@ This CHANGELOG is **English only** per the repository-wide
   `guestfsd`; no host package enables it), so upstream `bin/build-image.sh`'s
   host-side `guestfish selinux-relabel` failed with `selinuxrelabel: group not
   available`. `phase3_clone_repository` now patches upstream (host-OS- and
-  OL-version-independent, grep-guarded, idempotent) to fall back to a guest
-  first-boot relabel (`touch /.autorelabel`) when the optgroup is unavailable,
-  and to skip the host-side relabel; the resulting AMI is still
-  `SELINUX=enforcing`. On SELinux-capable hosts (RHEL / OL / Fedora) the
-  optgroup is present and the original relabel runs unchanged (the patch is a
-  no-op there). See SPEC D.17 and B.6.
+  OL-version-independent, grep-guarded, idempotent): it probes the optgroup with
+  a standalone `guestfish` and, when it is unavailable, schedules a guest
+  first-boot relabel (`touch /.autorelabel` via a standalone `guestfish -i`
+  session) and skips the entire upstream relabel block, including the
+  `--selinux --listen` session. The standalone sessions are required because
+  that listening session is torn down on optgroup-less hosts and cannot be
+  reused. The resulting AMI is still `SELINUX=enforcing`. On SELinux-capable
+  hosts (RHEL / OL / Fedora) the optgroup is present and the original relabel
+  runs unchanged (the patch is a no-op there). See SPEC D.17 and B.6.
