@@ -416,6 +416,28 @@ regardless of anaconda generation (OL6 streams to the serial console; OL8+ runs
 anaconda in tmux and is near-silent there). The default is short because this
 script is usually run interactively; it does not affect completion detection.
 
+A third wrapper key, `NITRO_PRECHECK` (`enforce` | `warn` | `off`, default
+`enforce`; *not* passed through to upstream), gates a **Phase 5.5 Nitro
+readiness pre-check**: an offline, read-only inspection of the freshly built
+VMDK (via libguestfs, `LIBGUESTFS_BACKEND=direct`, targeting the UEK kernel)
+that adapts the logic of AWS's NitroInstanceChecks to the built image rather
+than a running instance. It verifies the Nitro boot essentials: (1) the NVMe
+**host** driver `nvme.ko` is built into the kernel or present in the kernel's
+initramfs (else Nitro cannot mount the EBS/NVMe root); (2) the ENA driver is
+present (built-in or module); (3) `/etc/fstab` uses `UUID=`/`LABEL=` rather than
+`/dev/sd*`|`/dev/xvd*` (Nitro renames disks to `/dev/nvme*`); and (4) the
+bootloader `root=` is likewise UUID/LABEL/LVM based (GRUB2 `linux*` lines and
+OL6 GRUB-legacy `kernel` lines in `grub.conf`/`menu.lst`). It runs after the
+VMDK is produced and before the upload/snapshot/register phases, so a
+non-bootable image is caught before those wasted steps. `enforce` `die`s on a
+blocking finding; `warn` reports without dying; `off` skips it. Results that
+cannot be determined (inspection tools absent, initramfs not extractable) are
+**fail-open** — the check warns and continues, so a missing tool never aborts an
+otherwise-good build. Detection only; the wrapper performs no remediation. The
+inspection tools (`libguestfs-tools`, and `unmkinitramfs` from
+`initramfs-tools-core` or `lsinitrd`) are the same family already required for
+the upstream `virt-sparsify` step.
+
 Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
 when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable
 release for OL7) and harmless to set (or omit) on OL8/9/10 where the
@@ -1244,6 +1266,7 @@ Before any commit to this directory, all of the following must pass.
 - [ ] Phase 0 self-diagnosis (`detect_ec2_environment` / `guide_ec2_kvm_issue`) emits the appropriate Case A/B/C message on a non-KVM host (per B.1)
 - [ ] When `ISO_URL` references OL7, the OL7 warning banner appears in `load_env` output
 - [ ] When `ISO_URL` references OL6, the OL6 warning banner appears in `load_env` output and the three runtime modifications (Patch #1, Patch #2, synthesized `distr/ol6-slim/`) are applied in Phase 3
+- [ ] Phase 5.5 Nitro readiness pre-check (`NITRO_PRECHECK`, default `enforce`) runs after the VMDK is produced: it `die`s on a blocking finding (NVMe host / ENA / fstab / bootloader) before the upload phases, is fail-open when inspection tools are absent, and is suppressible via `warn`/`off` (see A.7). Verified against a known-good image (e.g. OL10 PASS)
 
 ### Documentation checks
 

@@ -333,6 +333,17 @@ load_env() {
   # default is short because this script is usually run interactively, not in
   # CI, where a long silent gap reads as a hang.
   : "${HEARTBEAT_INTERVAL_SEC:=20}"
+  # Nitro readiness pre-check mode (Phase 5.5). Offline, read-only inspection of
+  # the built image for the AWS Nitro boot essentials (NVMe host driver, ENA
+  # driver, UUID/LABEL-based fstab and bootloader root=), run after the VMDK is
+  # produced and before the upload/snapshot/register phases so a non-bootable
+  # image is caught before those wasted steps.
+  #   enforce (default) - die on a blocking finding
+  #   warn              - inspect and report, but never die
+  #   off               - skip the check entirely
+  # Indeterminate results (inspection tools missing, initramfs not extractable)
+  # are fail-open: warn and continue, never abort an otherwise-good build.
+  : "${NITRO_PRECHECK:=enforce}"
   # Build-time boot mode.
   # IMPORTANT: Oracle's build-image.sh enforces BOOT_MODE=bios for AWS.
   # See cloud/aws/image-scripts.sh in oracle-linux-image-tools.
@@ -2149,6 +2160,159 @@ phase5_run_build() {
 #------------------------------------------------------------------------------
 # Phase 6: Upload the VMDK to S3
 #------------------------------------------------------------------------------
+phase5_5_nitro_readiness_check() {
+  # Offline, read-only Nitro boot-readiness gate. Adapts the logic of AWS's
+  # NitroInstanceChecks to inspect the BUILT IMAGE (no EC2 launch) via
+  # libguestfs, targeting the UEK kernel. Blocking findings abort the run
+  # before the wasted upload/snapshot/register phases. Detection only -- no
+  # remediation. See SPEC A.7 (NITRO_PRECHECK) and Part C.
+  local mode="${NITRO_PRECHECK,,}"
+
+  if [[ "${mode}" == "off" ]]; then
+    log_info "Nitro readiness pre-check: skipped (NITRO_PRECHECK=off)"
+    return 0
+  fi
+
+  log_step "Phase 5.5: Nitro readiness pre-check (offline image inspection)"
+
+  local img="${VMDK_PATH:-}"
+  if [[ -z "${img}" || ! -f "${img}" ]]; then
+    log_warn "No VMDK to inspect (VMDK_PATH unset); skipping Nitro pre-check"
+    return 0
+  fi
+
+  # Dependency preflight (fail-open: a missing tool must not abort a good build).
+  local missing=() t
+  for t in virt-ls virt-cat virt-copy-out; do
+    command -v "${t}" >/dev/null 2>&1 || missing+=("${t}")
+  done
+  if ! command -v unmkinitramfs >/dev/null 2>&1 && ! command -v lsinitrd >/dev/null 2>&1; then
+    missing+=("unmkinitramfs|lsinitrd")
+  fi
+  if [[ "${#missing[@]}" -gt 0 ]]; then
+    log_warn "Nitro pre-check inspection tools missing: ${missing[*]}"
+    log_warn "  Install with: sudo apt-get install -y libguestfs-tools  (unmkinitramfs ships in initramfs-tools-core)"
+    log_warn "  Skipping the pre-check (fail-open); the built image was NOT verified for Nitro readiness."
+    return 0
+  fi
+
+  export LIBGUESTFS_BACKEND=direct
+  local work; work="$(mktemp -d "${TMPDIR:-/tmp}/nitro-precheck.XXXXXX")"
+
+  local fail=0 indeterminate=0
+
+  # --- target the UEK kernel (mandated for OL on Nitro) ----------------------
+  local kvers kver
+  kvers="$(virt-ls -a "${img}" /lib/modules 2>/dev/null | sort -V || true)"
+  kver="$(printf '%s\n' "${kvers}" | grep -i uek | sort -V | tail -1 || true)"
+  if [[ -z "${kver}" ]]; then
+    log_error "  No UEK kernel found under /lib/modules (UEK is mandated for OL on Nitro)."
+    kver="$(printf '%s\n' "${kvers}" | sort -V | tail -1 || true)"
+    fail=1
+  fi
+  log_info "  Target kernel: ${kver:-<none>}"
+
+  # kernel config + module tree (read once)
+  local cfg=""
+  virt-copy-out -a "${img}" "/boot/config-${kver}" "${work}/" 2>/dev/null || true
+  [[ -r "${work}/config-${kver}" ]] && cfg="${work}/config-${kver}"
+  local tree
+  tree="$(virt-ls -R -a "${img}" "/lib/modules/${kver}/kernel" 2>/dev/null || true)"
+
+  local nvme_cfg="" core_cfg="" ena_cfg=""
+  if [[ -n "${cfg}" ]]; then
+    nvme_cfg="$(grep -E '^CONFIG_BLK_DEV_NVME=' "${cfg}" | head -1 | cut -d= -f2 || true)"
+    core_cfg="$(grep -E '^CONFIG_NVME_CORE='   "${cfg}" | head -1 | cut -d= -f2 || true)"
+    ena_cfg="$(grep -E '^CONFIG_ENA_ETHERNET=' "${cfg}" | head -1 | cut -d= -f2 || true)"
+  fi
+
+  # --- CHECK 1: NVMe host driver (find the EBS/NVMe root at boot) -------------
+  local nvme_mod nvme_initrd="" initrd
+  nvme_mod="$(printf '%s\n' "${tree}" | grep -E '(^|/)nvme\.ko(\.[a-z0-9]+)?$' | head -1 || true)"
+  initrd="$(virt-ls -a "${img}" /boot 2>/dev/null | grep -E "^initramfs-${kver}\.img$" | head -1 || true)"
+  [[ -z "${initrd}" ]] && initrd="$(virt-ls -a "${img}" /boot 2>/dev/null | grep -E "initramfs.*${kver}|initrd.*${kver}" | head -1 || true)"
+  if [[ -n "${initrd}" ]]; then
+    virt-copy-out -a "${img}" "/boot/${initrd}" "${work}/" 2>/dev/null || true
+    if [[ -r "${work}/${initrd}" ]]; then
+      mkdir -p "${work}/initrd"
+      if ! unmkinitramfs "${work}/${initrd}" "${work}/initrd" 2>/dev/null; then
+        lsinitrd "${work}/${initrd}" 2>/dev/null > "${work}/initrd/_ls.txt" || true
+      fi
+      nvme_initrd="$(find "${work}/initrd" -name '*.ko*' 2>/dev/null | grep -E '(^|/)nvme\.ko(\.[a-z0-9]+)?$' | head -1 || true)"
+      if [[ -z "${nvme_initrd}" && -r "${work}/initrd/_ls.txt" ]]; then
+        nvme_initrd="$(grep -E '(^|/)nvme\.ko' "${work}/initrd/_ls.txt" | head -1 || true)"
+      fi
+    fi
+  fi
+  if [[ "${nvme_cfg}" == "y" && "${core_cfg}" == "y" ]]; then
+    log_info "  [CHECK 1] NVMe host driver: PASS (built into the kernel)"
+  elif [[ -n "${nvme_initrd}" ]]; then
+    log_info "  [CHECK 1] NVMe host driver: PASS (module present in the initramfs)"
+  elif [[ -n "${nvme_mod}" && -z "${initrd}" ]]; then
+    log_warn "  [CHECK 1] NVMe host driver: INDETERMINATE (module exists; initramfs not inspectable)"
+    indeterminate=1
+  else
+    log_error "  [CHECK 1] NVMe host driver: FAIL (not built-in and not in the initramfs -- Nitro cannot mount the root)"
+    fail=1
+  fi
+
+  # --- CHECK 2: ENA network driver (Nitro networking) ------------------------
+  local ena_mod
+  ena_mod="$(printf '%s\n' "${tree}" | grep -E '(^|/)ena\.ko(\.[a-z0-9]+)?$' | head -1 || true)"
+  if [[ "${ena_cfg}" == "y" || -n "${ena_mod}" ]]; then
+    log_info "  [CHECK 2] ENA driver: PASS (built-in or module present)"
+  else
+    log_error "  [CHECK 2] ENA driver: FAIL (no ENA driver -- Nitro requires ENA for networking)"
+    fail=1
+  fi
+
+  # --- CHECK 3: fstab uses UUID/LABEL (Nitro renames disks to /dev/nvme*) -----
+  local fstab bad_fstab
+  fstab="$(virt-cat -a "${img}" /etc/fstab 2>/dev/null | grep -vE '^[[:space:]]*#' | grep -vE '^[[:space:]]*$' || true)"
+  bad_fstab="$(printf '%s\n' "${fstab}" | awk '{print $1}' | grep -E '^/dev/(sd|xvd|hd)[a-z]' | tr '\n' ' ' || true)"
+  if [[ -n "${bad_fstab// /}" ]]; then
+    log_error "  [CHECK 3] fstab: FAIL (kernel device-name mounts: ${bad_fstab}-- use UUID=/LABEL=)"
+    fail=1
+  else
+    log_info "  [CHECK 3] fstab: PASS (no /dev/sd*|/dev/xvd*|/dev/hd* device-name mounts)"
+  fi
+
+  # --- CHECK 4: bootloader root= uses UUID/LABEL -----------------------------
+  # Covers GRUB2 (linux/linuxefi) and OL6 GRUB-legacy (grub.conf / menu.lst, 'kernel').
+  local grubcfg="" g d b roots bad_root
+  for g in /boot/grub2/grub.cfg /boot/grub/grub.cfg /boot/grub/grub.conf /boot/grub/menu.lst; do
+    d="$(dirname "${g}")"; b="$(basename "${g}")"
+    if virt-ls -a "${img}" "${d}" 2>/dev/null | grep -qx "${b}"; then grubcfg="${g}"; break; fi
+  done
+  if [[ -n "${grubcfg}" ]]; then
+    roots="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*(linux|linux16|linuxefi|kernel)[[:space:]]' | grep -oE 'root=[^[:space:]]+' | sort -u || true)"
+    bad_root="$(printf '%s\n' "${roots}" | grep -E 'root=/dev/(sd|xvd|hd)[a-z]' | tr '\n' ' ' || true)"
+    if [[ -n "${bad_root// /}" ]]; then
+      log_error "  [CHECK 4] bootloader: FAIL (kernel device-name root=: ${bad_root})"
+      fail=1
+    else
+      log_info "  [CHECK 4] bootloader: PASS (${grubcfg}: root= is UUID/LABEL/LVM based)"
+    fi
+  else
+    log_warn "  [CHECK 4] bootloader: INDETERMINATE (no grub.cfg/grub.conf/menu.lst found)"
+    indeterminate=1
+  fi
+
+  rm -rf "${work}"
+
+  # --- verdict ---------------------------------------------------------------
+  if [[ "${fail}" -gt 0 ]]; then
+    if [[ "${mode}" == "enforce" ]]; then
+      die "Nitro readiness pre-check FAILED (see the [CHECK N] lines above). Aborting before the upload/snapshot/register phases. Re-run with NITRO_PRECHECK=warn to proceed anyway, or =off to skip the check."
+    fi
+    log_warn "Nitro readiness pre-check found blocking issue(s) (NITRO_PRECHECK=warn; continuing despite the failure(s) above)."
+  elif [[ "${indeterminate}" -gt 0 ]]; then
+    log_warn "Nitro readiness pre-check: no failures, but some checks were INDETERMINATE (see above). Verify manually if in doubt."
+  else
+    log_info "Nitro readiness pre-check PASSED (NVMe host, ENA, fstab, bootloader all Nitro-ready)."
+  fi
+}
+
 phase6_upload_to_s3() {
   log_step "Phase 6: Uploading VMDK to S3"
 
@@ -2342,6 +2506,7 @@ main() {
   phase3_clone_repository
   phase4_prepare_env_properties
   phase5_run_build
+  phase5_5_nitro_readiness_check
 
   if [[ ${BUILD_ONLY} -eq 1 || ${SKIP_AWS_IMPORT} -eq 1 ]]; then
     log_info "Build-only mode. Skipping AWS import phases."

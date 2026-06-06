@@ -21,6 +21,24 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added a **Phase 5.5 Nitro readiness pre-check** (`NITRO_PRECHECK`,
+  `enforce` | `warn` | `off`, default `enforce`; a wrapper key). After the VMDK
+  is built and before the upload/snapshot/register phases, it inspects the image
+  **offline and read-only** (libguestfs, `LIBGUESTFS_BACKEND=direct`, targeting
+  the UEK kernel) for the AWS Nitro boot essentials, adapting the logic of AWS's
+  NitroInstanceChecks to a built image rather than a running instance:
+  (1) the NVMe **host** driver `nvme.ko` is built in or in the kernel's
+  initramfs; (2) the ENA driver is present; (3) `/etc/fstab` uses `UUID=`/
+  `LABEL=` (not `/dev/sd*`|`/dev/xvd*`, which Nitro renames to `/dev/nvme*`);
+  and (4) the bootloader `root=` is UUID/LABEL/LVM based (GRUB2 and OL6 GRUB-
+  legacy). `enforce` `die`s on a blocking finding before the wasted upload
+  phases; `warn` reports only; `off` skips. Indeterminate results (inspection
+  tools absent, initramfs not extractable) are fail-open (warn + continue), so a
+  missing tool never aborts an otherwise-good build. Detection only — no
+  remediation. Validated against a known-good OL10 image (all four checks PASS).
+  See SPEC A.7 and Part C. (A follow-up will add an ENA/kernel-version-based
+  per-Nitro-generation instance-assurance report.)
+
 - Added a Phase-5 progress heartbeat: `HEARTBEAT_INTERVAL_SEC` (seconds,
   default `20`; `0` disables — a wrapper key) logs an elapsed-time + build-disk
   growth (`du`, *actual* on-disk clusters, not the preallocated apparent size)
