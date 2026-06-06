@@ -40,6 +40,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- Phase-5 logging now clearly separates this wrapper's output from the external
+  tool's. The wrapper's own lines keep our defined format (`[INFO]`/`[WARN]`/
+  `[ERROR]`, the `==========` step banners, and a new `[BUILD]` progress tag for
+  the heartbeat), while **every line of the external oracle-linux-image-tools
+  output** (the `build-image.sh` orchestrator plus the libguestfs / virt-* sub-
+  tools it runs) is re-emitted as
+  `[EXTERNAL] HH:MM:SS [build-image.sh] <line>` — an external-call tag, a
+  per-line timestamp, the script name, then the original message. Output is
+  merged (`2>&1`) and attributed line-by-line by a small `log_external` helper;
+  `pipefail` preserves the build's real exit status. Also corrected the build-
+  watchdog log line, which previously claimed "upstream applies no install
+  timeout when the serial console is enabled" — inaccurate under the default
+  `SERIAL_CONSOLE=no`, where upstream applies its own install wait. (Note: the
+  external `virt-sparsify` progress bar, which redraws via carriage returns,
+  appears at completion rather than animating, because attribution is
+  line-based.)
+
 - Install-time `SERIAL_CONSOLE` is now **wired through** to the upstream
   `env.properties.local` (previously it was not passed through at all, so
   setting it had no effect). The default remains `no` (headless), which is the

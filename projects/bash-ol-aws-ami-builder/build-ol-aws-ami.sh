@@ -124,6 +124,21 @@ log_info()  { echo -e "\033[1;34m[INFO]\033[0m  $(date '+%Y-%m-%d %H:%M:%S') $*"
 log_warn()  { echo -e "\033[1;33m[WARN]\033[0m  $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; }
 log_error() { echo -e "\033[1;31m[ERROR]\033[0m $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; }
 log_step()  { echo -e "\n\033[1;32m========== $* ==========\033[0m\n"; }
+# Build-phase progress (heartbeat) -- our format, distinct [BUILD] tag.
+log_progress() { echo -e "\033[1;36m[BUILD]\033[0m $(date '+%H:%M:%S') $*"; }
+# Re-emit external-tool output read on stdin, one attributed line at a time:
+#   [EXTERNAL] HH:MM:SS [<script>] <original line>
+# so output produced by the invoked external script (and its children) is
+# unmistakably distinct from this wrapper's own [INFO]/[BUILD] lines. The
+# timestamp is per-line (current time as each line arrives). $1 = script name.
+log_external() {
+  local script="$1" line
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    printf '\033[90m[EXTERNAL]\033[0m %s \033[90m[%s]\033[0m %s\n' \
+      "$(date '+%H:%M:%S')" "${script}" "${line}"
+    line=""
+  done
+}
 
 die() { log_error "$*"; exit 1; }
 
@@ -1973,10 +1988,10 @@ phase5_progress_heartbeat() {
       state=$(virsh --connect qemu:///system domstate "${name}" 2>/dev/null | head -n 1)
       [[ -z "${state}" ]] && state="(no domain)"
       delta_mb=$(( (${used_kb:-0} - prev_kb) / 1024 ))
-      log_info "  [build progress] elapsed ${elapsed}m | image ${used_h} ($(printf '%+d' "${delta_mb}")MB) | domain ${state}"
+      log_progress "elapsed ${elapsed}m | disk ${used_h} ($(printf '%+d' "${delta_mb}")MB) | vm ${state}"
       prev_kb=${used_kb:-0}
     else
-      log_info "  [build progress] elapsed ${elapsed}m | build image not yet allocated"
+      log_progress "elapsed ${elapsed}m | build image not yet allocated"
     fi
   done
 }
@@ -2017,7 +2032,7 @@ phase5_run_build() {
   log_info "LIBGUESTFS_BACKEND = ${LIBGUESTFS_BACKEND}"
 
   log_info "Starting build (this typically takes 20-60 minutes)"
-  log_info "Build watchdog: ${BUILD_TIMEOUT_MIN} min (SERIAL_CONSOLE=${SERIAL_CONSOLE}; upstream applies no install timeout when the serial console is enabled)"
+  log_info "Build watchdog: ${BUILD_TIMEOUT_MIN} min outer bound (SERIAL_CONSOLE=${SERIAL_CONSOLE})"
 
   # Snapshot running libvirt domains BEFORE the build so a watchdog timeout can
   # reap the transient install VM. virt-install --transient domains are managed
@@ -2037,8 +2052,15 @@ phase5_run_build() {
     log_info "Progress heartbeat: every ${HEARTBEAT_INTERVAL_SEC}s (set HEARTBEAT_INTERVAL_SEC=0 to disable)"
   fi
 
+  # Attribute every line of the external oracle-linux-image-tools output (the
+  # build-image.sh orchestrator plus the libguestfs / virt-* sub-tools it runs)
+  # as "[EXTERNAL] HH:MM:SS [build-image.sh] <line>", clearly separating it from
+  # this wrapper's own [INFO]/[BUILD] lines. 2>&1 folds external stderr into the
+  # attributed stream; 'set -o pipefail' (top of file) propagates the
+  # timeout/build exit status through the pipe so build_rc reflects the result.
   timeout --signal=TERM --kill-after=60s "${BUILD_TIMEOUT_MIN}m" \
-    bash -c 'cd "$1" && ./bin/build-image.sh --env "$2"' _ "${tool_dir}" "${tool_env}" || build_rc=$?
+    bash -c 'cd "$1" && ./bin/build-image.sh --env "$2"' _ "${tool_dir}" "${tool_env}" 2>&1 \
+    | log_external "build-image.sh" || build_rc=$?
 
   if [[ -n "${hb_pid}" ]]; then
     kill "${hb_pid}" 2>/dev/null || true
