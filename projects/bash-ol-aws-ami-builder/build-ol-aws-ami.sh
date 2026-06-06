@@ -311,6 +311,13 @@ load_env() {
   # expiry the wrapper reaps the transient build VM and aborts. Generous
   # default so a normal 20-60 min build never trips it; raise for slow hosts.
   : "${BUILD_TIMEOUT_MIN:=120}"
+  # Phase-5 progress heartbeat, in seconds (0 disables). Independent of the
+  # install console, the wrapper logs an elapsed-time + build-disk growth line
+  # every interval so a headless build's liveness/progress is visible even when
+  # anaconda emits nothing to the serial line (OL8+ runs anaconda in tmux). The
+  # default is short because this script is usually run interactively, not in
+  # CI, where a long silent gap reads as a hang.
+  : "${HEARTBEAT_INTERVAL_SEC:=20}"
   # Build-time boot mode.
   # IMPORTANT: Oracle's build-image.sh enforces BOOT_MODE=bios for AWS.
   # See cloud/aws/image-scripts.sh in oracle-linux-image-tools.
@@ -1940,6 +1947,41 @@ EOF
 }
 
 #------------------------------------------------------------------------------
+# Phase-5 progress heartbeat (runs in the background during the build)
+#------------------------------------------------------------------------------
+# Visibility independent of the install console. Every ${interval} seconds it
+# logs elapsed time and the build VM disk's ACTUAL on-disk growth (du -k, i.e.
+# real clusters written, not the preallocated apparent size), plus best-effort
+# domain state. This is generation-independent: OL6/anaconda-13 streams text to
+# the serial console, but OL8+ anaconda runs in tmux and is near-silent there,
+# so this is the reliable way to confirm a headless build is alive/progressing.
+# Args: $1 = WORKSPACE, $2 = interval (seconds). Loops until killed.
+#------------------------------------------------------------------------------
+phase5_progress_heartbeat() {
+  local ws="$1" interval="$2"
+  local start prev_kb=0
+  start=$(date +%s)
+  while :; do
+    sleep "${interval}"
+    local img elapsed used_kb used_h name state delta_mb
+    img=$(find "${ws}" -maxdepth 3 -name '*.qcow2' 2>/dev/null | head -n 1)
+    elapsed=$(( ($(date +%s) - start) / 60 ))
+    if [[ -n "${img}" && -f "${img}" ]]; then
+      used_kb=$(du -k "${img}" 2>/dev/null | awk '{print $1}')
+      used_h=$(du -h "${img}" 2>/dev/null | awk '{print $1}')
+      name=$(basename "${img}" .qcow2)
+      state=$(virsh --connect qemu:///system domstate "${name}" 2>/dev/null | head -n 1)
+      [[ -z "${state}" ]] && state="(no domain)"
+      delta_mb=$(( (${used_kb:-0} - prev_kb) / 1024 ))
+      log_info "  [build progress] elapsed ${elapsed}m | image ${used_h} ($(printf '%+d' "${delta_mb}")MB) | domain ${state}"
+      prev_kb=${used_kb:-0}
+    else
+      log_info "  [build progress] elapsed ${elapsed}m | build image not yet allocated"
+    fi
+  done
+}
+
+#------------------------------------------------------------------------------
 # Phase 5: Run oracle-linux-image-tools to produce the VMDK
 #------------------------------------------------------------------------------
 phase5_run_build() {
@@ -1985,8 +2027,23 @@ phase5_run_build() {
   doms_before=$(virsh list --name 2>/dev/null | sed '/^$/d' | sort || true)
 
   local build_rc=0
+  # Start the progress heartbeat (visibility independent of the install
+  # console). Stopped right after the build returns, so it covers the success,
+  # failure, and watchdog-timeout paths below.
+  local hb_pid=""
+  if [[ "${HEARTBEAT_INTERVAL_SEC}" -gt 0 ]] 2>/dev/null; then
+    phase5_progress_heartbeat "${WORKSPACE}" "${HEARTBEAT_INTERVAL_SEC}" &
+    hb_pid=$!
+    log_info "Progress heartbeat: every ${HEARTBEAT_INTERVAL_SEC}s (set HEARTBEAT_INTERVAL_SEC=0 to disable)"
+  fi
+
   timeout --signal=TERM --kill-after=60s "${BUILD_TIMEOUT_MIN}m" \
     bash -c 'cd "$1" && ./bin/build-image.sh --env "$2"' _ "${tool_dir}" "${tool_env}" || build_rc=$?
+
+  if [[ -n "${hb_pid}" ]]; then
+    kill "${hb_pid}" 2>/dev/null || true
+    wait "${hb_pid}" 2>/dev/null || true
+  fi
 
   if [[ ${build_rc} -eq 124 ]]; then
     log_error "build-image.sh exceeded the ${BUILD_TIMEOUT_MIN}-minute watchdog and was terminated."

@@ -407,7 +407,14 @@ install phase (be ready to kill the VM). `SERIAL_CONSOLE_RUNTIME` independently
 configures the *generated image's* console (EC2 Serial Console). The
 wrapper-level `BUILD_TIMEOUT_MIN` (minutes, default `120` — a wrapper key,
 *not* passed through to upstream) is an outer safety bound on the Phase-5 build
-and reaps the transient build VM if it expires.
+and reaps the transient build VM if it expires. A second wrapper key,
+`HEARTBEAT_INTERVAL_SEC` (seconds, default `20`; `0` disables), logs a Phase-5
+progress line every interval — elapsed time plus the build disk's *actual*
+on-disk growth (`du`, i.e. real clusters written, not the preallocated apparent
+size) and best-effort domain state — so a headless build's liveness is visible
+regardless of anaconda generation (OL6 streams to the serial console; OL8+ runs
+anaconda in tmux and is near-silent there). The default is short because this
+script is usually run interactively; it does not affect completion detection.
 
 Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
 when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable

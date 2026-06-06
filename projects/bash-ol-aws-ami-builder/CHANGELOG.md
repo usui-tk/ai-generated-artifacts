@@ -21,7 +21,14 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
-- `tests/validate-kickstart.sh` + `TESTING.md`: a kickstart **syntax**
+- Added a Phase-5 progress heartbeat: `HEARTBEAT_INTERVAL_SEC` (seconds,
+  default `20`; `0` disables — a wrapper key) logs an elapsed-time + build-disk
+  growth (`du`, *actual* on-disk clusters, not the preallocated apparent size)
+  + best-effort domain-state line during the build. This makes a headless
+  build's liveness/progress visible independent of the install console (OL6
+  streams to the serial console, but OL8+ anaconda runs in tmux and is
+  near-silent there), without changing completion detection. The default is
+  short because the script is usually run interactively. See SPEC A.7.
   conformance test for the wrapper-synthesized OL6 kickstart, using
   `pykickstart` (`ksvalidator -v RHEL6`). It rejects OL7-syntax directives that
   are invalid on OL6/anaconda-13 before they can halt the install. Syntax-only:
