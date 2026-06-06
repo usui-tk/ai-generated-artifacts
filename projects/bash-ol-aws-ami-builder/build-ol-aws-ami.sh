@@ -633,38 +633,91 @@ phase1_install_prerequisites() {
 
   log_step "Phase 1: Provisioning build host (KVM / libvirt / virt-install / libguestfs)"
 
-  # Detect OS family
-  local os_id=""
+  # Detect the host distro id + version from /etc/os-release. ID/VERSION_ID
+  # identify the concrete release; ID_LIKE is only a fallback used to produce a
+  # clearer refusal message for unlisted derivatives.
+  local host_id="" host_like="" host_ver=""
   if [[ -f /etc/os-release ]]; then
     # shellcheck source=/dev/null
-    os_id=$(. /etc/os-release && echo "${ID_LIKE:-${ID}}")
+    host_id=$(. /etc/os-release && echo "${ID:-}")
+    # shellcheck source=/dev/null
+    host_like=$(. /etc/os-release && echo "${ID_LIKE:-}")
+    # shellcheck source=/dev/null
+    host_ver=$(. /etc/os-release && echo "${VERSION_ID:-}")
   fi
+  # Major version: strip any minor component (24.04 -> 24, 9.5 -> 9, 10 -> 10).
+  local host_major="${host_ver%%.*}"
 
-  case "${os_id}" in
-    *rhel*|*fedora*|*ol*|*"oracle linux"*)
-      log_info "RHEL/OL family detected. Installing packages via dnf."
+  # This builder installs the KVM + libguestfs superset the whole pipeline
+  # needs (not just the minimal "install KVM" set) and supports only the
+  # latest TWO generations of each build host OS. Older releases are
+  # reference-only and refused here. See SPEC B.6 "Build host package matrix".
+  local pkg_mgr="" qemu_pkg="qemu-kvm"
+
+  case "${host_id}" in
+    ol|rhel|rocky|almalinux|centos)
+      # RHEL family, including CentOS Stream. Supported: 10, 9.
+      pkg_mgr="dnf"
+      case "${host_major}" in
+        10|9) : ;;
+        *) die "Unsupported ${host_id} ${host_ver}: only the latest two generations (10, 9) are supported; older releases are reference-only (SPEC B.6)." ;;
+      esac
+      ;;
+    fedora)
+      pkg_mgr="dnf"
+      case "${host_major}" in
+        44|43) : ;;
+        *) die "Unsupported Fedora ${host_ver}: only the latest two generations (44, 43) are supported (SPEC B.6)." ;;
+      esac
+      ;;
+    ubuntu)
+      pkg_mgr="apt"
+      # Supported LTS: 26.04, 24.04. The qemu package was renamed: 26.04 drops
+      # the qemu-kvm transitional package in favour of qemu-system.
+      case "${host_ver}" in
+        26.04) qemu_pkg="qemu-system" ;;
+        24.04) qemu_pkg="qemu-kvm" ;;
+        *) die "Unsupported Ubuntu ${host_ver}: only the latest two LTS generations (26.04, 24.04) are supported; 22.04 and older are reference-only (SPEC B.6)." ;;
+      esac
+      ;;
+    debian)
+      pkg_mgr="apt"
+      case "${host_major}" in
+        13|12) qemu_pkg="qemu-kvm" ;;
+        *) die "Unsupported Debian ${host_ver}: only the latest two generations (13, 12) are supported; 11 and older are reference-only (SPEC B.6)." ;;
+      esac
+      ;;
+    *)
+      case "${host_like}" in
+        *rhel*|*fedora*) die "Unsupported RHEL-family host (ID=${host_id}, ID_LIKE=${host_like}). Supported: OL/RHEL/Rocky/Alma/CentOS Stream 10 or 9, Fedora 44 or 43 (SPEC B.6)." ;;
+        *debian*|*ubuntu*) die "Unsupported Debian-family host (ID=${host_id}, ID_LIKE=${host_like}). Supported: Ubuntu 26.04/24.04, Debian 13/12 (SPEC B.6)." ;;
+        *) die "Unsupported build host OS (ID=${host_id}, ID_LIKE=${host_like}, VERSION_ID=${host_ver}); see SPEC B.6 for the supported matrix." ;;
+      esac
+      ;;
+  esac
+
+  case "${pkg_mgr}" in
+    dnf)
+      log_info "Build host: ${host_id} ${host_ver} (dnf family). Installing KVM/libguestfs packages."
       sudo dnf install -y \
-        libvirt qemu-kvm libguestfs guestfs-tools virt-install \
-        libvirt-client libvirt-daemon-config-network \
-        libvirt-daemon-driver-qemu \
+        qemu-kvm libvirt libvirt-client \
+        libvirt-daemon-config-network libvirt-daemon-driver-qemu \
+        virt-install libguestfs guestfs-tools \
         edk2-ovmf \
         libosinfo osinfo-db osinfo-db-tools \
         acl \
-        || die "Failed to install RHEL/OL packages"
+        || die "Failed to install build host packages via dnf"
       ;;
-    *debian*|*ubuntu*)
-      log_info "Debian/Ubuntu family detected. Installing packages via apt."
+    apt)
+      log_info "Build host: ${host_id} ${host_ver} (apt family). Installing KVM/libguestfs packages (qemu: ${qemu_pkg})."
       sudo apt-get update -y
       sudo apt-get install -y \
-        qemu-kvm libvirt-daemon-system libvirt-clients \
+        "${qemu_pkg}" libvirt-daemon-system libvirt-daemon libvirt-clients \
         virtinst libguestfs-tools \
         ovmf \
         libosinfo-bin osinfo-db osinfo-db-tools \
         acl \
-        || die "Failed to install Debian/Ubuntu packages"
-      ;;
-    *)
-      die "Unsupported OS (ID_LIKE=${os_id}). Use RHEL/OL 9-family or Ubuntu/Debian."
+        || die "Failed to install build host packages via apt"
       ;;
   esac
 

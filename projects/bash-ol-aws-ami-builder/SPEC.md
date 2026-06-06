@@ -49,6 +49,7 @@ doc-provenance:
   - [B.3 env.properties.aws-ol{6,7,8,9,10}](#b3-envpropertiesaws-ol6789-10)
   - [B.4 OL6 runtime synthesis (distr/ol6-slim/ + cloud/aws/ patches)](#b4-ol6-runtime-synthesis-distrol6-slim--cloudaws-patches)
   - [B.5 OL6 Overall Architecture](#b5-ol6-overall-architecture)
+  - [B.6 Build host package matrix](#b6-build-host-package-matrix)
 - [Part C — Quality Gates & Validation Checklist](#part-c--quality-gates--validation-checklist)
 - [Part D — Known Pitfalls & Lessons Learned](#part-d--known-pitfalls--lessons-learned)
 - [Appendix: How to add support for a new OL major release](#appendix-how-to-add-support-for-a-new-ol-major-release)
@@ -1097,6 +1098,53 @@ overall-architecture section (B.5) and OL7 did not: OL7 is a thin patch
 on top of an otherwise-functional upstream pipeline, whereas OL6
 essentially rebuilds the OL-specific glue layer from scratch inside the
 wrapper.
+
+## B.6 Build host package matrix
+
+`phase1_install_prerequisites` provisions the build host. Detection reads
+`ID` / `VERSION_ID` from `/etc/os-release` (`ID_LIKE` is only a fallback used
+to produce a clearer refusal message for unlisted derivatives). The builder
+installs the **KVM + libguestfs superset** the whole pipeline needs — not just
+the minimal "install KVM" set — and supports only the **latest two
+generations** of each build host OS. Older releases are reference-only and
+refused with a `die` (they are not branched).
+
+**Supported (dnf family)** — OL / RHEL / Rocky / AlmaLinux / CentOS Stream
+**10, 9**; Fedora **44, 43**:
+
+```
+qemu-kvm libvirt libvirt-client libvirt-daemon-config-network \
+libvirt-daemon-driver-qemu virt-install libguestfs guestfs-tools \
+edk2-ovmf libosinfo osinfo-db osinfo-db-tools acl
+```
+
+**Supported (apt family)** — Ubuntu **26.04, 24.04**; Debian **13, 12**:
+
+```
+<qemu> libvirt-daemon-system libvirt-daemon libvirt-clients virtinst \
+libguestfs-tools ovmf libosinfo-bin osinfo-db osinfo-db-tools acl
+```
+
+where `<qemu>` is **`qemu-system`** on Ubuntu 26.04 (the `qemu-kvm`
+transitional package was dropped) and **`qemu-kvm`** on Ubuntu 24.04 /
+Debian 13 / 12. `bridge-utils` is intentionally **not** installed: the builder
+relies on the libvirt default NAT network (`virbr0`).
+
+| family | OS / versions | pkg mgr | qemu package | guestfs | OVMF | osinfo |
+|--------|---------------|---------|--------------|---------|------|--------|
+| dnf | OL/RHEL/Rocky/Alma/CentOS Stream 10, 9; Fedora 44, 43 | `dnf` | `qemu-kvm` | `libguestfs` + `guestfs-tools` | `edk2-ovmf` | `libosinfo` `osinfo-db` `osinfo-db-tools` |
+| apt | Ubuntu 26.04 | `apt` | `qemu-system` | `libguestfs-tools` | `ovmf` | `libosinfo-bin` `osinfo-db` `osinfo-db-tools` |
+| apt | Ubuntu 24.04, Debian 13, 12 | `apt` | `qemu-kvm` | `libguestfs-tools` | `ovmf` | `libosinfo-bin` `osinfo-db` `osinfo-db-tools` |
+
+**Reference-only (refused with `die`)**: Ubuntu 22.04, Debian 11 / 10,
+Fedora <= 42, CentOS Stream <= 8, OL / RHEL / Rocky / Alma <= 8.
+
+> The Ubuntu 26.04 row is taken verbatim from the upstream server-world KVM
+> page (`qemu-system libvirt-daemon-system libvirt-daemon virtinst
+> bridge-utils libosinfo-bin`); `bridge-utils` is then dropped and the
+> libguestfs / OVMF / osinfo / acl superset this pipeline requires is added.
+> The remaining rows are organized from cross-referenced install recipes; the
+> only version-dependent difference is the qemu package name.
 
 ---
 
