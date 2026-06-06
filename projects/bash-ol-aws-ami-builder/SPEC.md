@@ -382,7 +382,7 @@ and should usually be left alone.
 | `ROOT_FS` | `xfs` | Root filesystem of the resulting AMI |
 | `DISK_SIZE_GB` | `10` | Root volume size of the AMI |
 | `SERIAL_CONSOLE_RUNTIME` | `Yes` | Required for EC2 Serial Console |
-| `SERIAL_CONSOLE` | `yes` | Install-time anaconda console (live install output); see note + D.18 |
+| `SERIAL_CONSOLE` | `no` | Install-time anaconda console; **debug opt-in** (`yes` can hang the build at install-VM end) — see note + D.18 |
 | `CLOUD_INIT` | `Yes` | Enable cloud-init in the AMI |
 | `CLOUD_USER` | `ec2-user` | AWS-convention first-login user |
 | `KERNEL` | `uek` (OL7) / unset (OL8+) | OL7 requires UEK; see D.10 |
@@ -395,15 +395,19 @@ update the templates and this table in lockstep.
 
 Note on the two serial-console keys (they are independent):
 `SERIAL_CONSOLE` (install-time) controls whether the anaconda *installer*
-streams to the serial console. The wrapper defaults it to `yes` so an
-install-time failure is visible instead of a silent headless wait — the
-failure mode that hid the OL6 kickstart parse error (see D.18). Set it to `no`
-for a bounded headless install. `SERIAL_CONSOLE_RUNTIME` independently
-configures the *generated image's* console (EC2 Serial Console). Upstream
-applies **no install timeout when `SERIAL_CONSOLE=yes`**; the wrapper-level
-`BUILD_TIMEOUT_MIN` (minutes, default `120` — a wrapper key, *not* passed
-through to upstream) bounds the Phase-5 build and reaps the transient build VM
-if it expires.
+streams to the serial console. The wrapper defaults it to **`no` (headless)**:
+upstream then detects install completion via the domain lifecycle and applies
+its own install timeout — the historically reliable path. Setting it to `yes`
+makes upstream wait on `virsh console`, which does **not** cleanly return when
+the install VM ends (reboot/poweroff/teardown) and was observed to **hang
+`build-image.sh` until `BUILD_TIMEOUT_MIN`** even on otherwise-successful
+builds; it also only streams useful output on old anaconda (OL6/7), not on OL8+
+(tmux-based). Treat `yes` as a **debug-only opt-in** for watching the OL6/7
+install phase (be ready to kill the VM). `SERIAL_CONSOLE_RUNTIME` independently
+configures the *generated image's* console (EC2 Serial Console). The
+wrapper-level `BUILD_TIMEOUT_MIN` (minutes, default `120` — a wrapper key,
+*not* passed through to upstream) is an outer safety bound on the Phase-5 build
+and reaps the transient build VM if it expires.
 
 Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
 when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable
@@ -1828,8 +1832,8 @@ of upstream's `ol7-ks.cfg` (upstream ships no `distr/ol6-slim`; see B.4). OL7
 ships anaconda-19+, but OL6 ships **anaconda-13**, whose kickstart command set
 is older. Directives that are valid only on the newer anaconda are a
 **parse-time error** on anaconda-13 — and anaconda fails *before* any
-partitioning/write. With `SERIAL_CONSOLE=no` (the old default) that error is
-rendered on tty1, invisible over the headless serial line, so the only
+partitioning/write. Under the default headless install (`SERIAL_CONSOLE=no`)
+that error is rendered on tty1, not visible over the serial line, so the only
 observable effect is the silent wait. This is a *class* of bug: any
 "OL7-ism" that survives the mirror can reappear.
 
@@ -1867,13 +1871,20 @@ runtime failure that syntax validation cannot catch.
 
 **Prevention.**
 1. `tests/validate-kickstart.sh` runs `ksvalidator -v RHEL6` on the synthesized
-   OL6 kickstart (see `TESTING.md`); it catches the *syntax* class above.
-2. The install-time `SERIAL_CONSOLE` default is now `yes` (A.7), so an
-   install-time failure streams live instead of disappearing into the headless
-   wait.
-3. The Phase-5 `BUILD_TIMEOUT_MIN` watchdog bounds the build and reaps the
-   transient VM, since `SERIAL_CONSOLE=yes` removes upstream's own install
-   timeout.
+   OL6 kickstart (see `TESTING.md`); it catches the *syntax* class above. This
+   is the primary safeguard — a parse error is caught statically, before a
+   build is ever launched.
+2. For a *runtime* failure that syntax validation cannot see, reproduce the
+   install in isolation with a bare `virt-install` (text mode, explicit
+   `console=ttyS0`) where the installer output is fully visible — this is how
+   the xfs-root refusal above was pinned. `SERIAL_CONSOLE=yes` can also stream
+   the OL6/7 install live, but it is a **debug-only opt-in**: it makes upstream
+   wait on `virsh console`, which may not return when the install VM ends and
+   can hang `build-image.sh` until the watchdog (default reverted to `no` — see
+   A.7).
+3. The Phase-5 `BUILD_TIMEOUT_MIN` watchdog is an outer safety bound on the
+   build (in addition to upstream's own install timeout, which applies under the
+   default `SERIAL_CONSOLE=no`); on expiry it reaps the transient build VM.
 
 Runtime issues that syntax validation cannot see (xfs-root support, package
 availability) are still confirmed only by a live build.

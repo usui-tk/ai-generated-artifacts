@@ -60,6 +60,8 @@ which are RHEL7+/anaconda-19+ only and halt OL6/anaconda-13 at parse time.
   repositories (only `iptables` does); a missing package is a runtime package-
   selection failure, not a syntax error.
 
-These are confirmed only by a **live build with `SERIAL_CONSOLE=yes`**, which
-streams the anaconda installer output so any parse error or runtime failure is
-visible instead of disappearing into a silent headless wait.
+These are confirmed only by a **live build** — for a runtime failure, reproduce
+the install in isolation with a bare `virt-install` (text mode, explicit
+`console=ttyS0`) so the anaconda output is fully visible. (`SERIAL_CONSOLE=yes`
+can stream the OL6/7 install too, but it is a debug-only opt-in that can hang
+the build at install-VM end — the default is `no`; see SPEC A.7 / D.18.)

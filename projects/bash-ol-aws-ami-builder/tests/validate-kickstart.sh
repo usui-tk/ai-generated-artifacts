@@ -19,7 +19,8 @@
 # LIMITATION (important): this checks SYNTAX ONLY. It does NOT verify runtime
 # capability -- e.g. whether anaconda-13 can actually create an xfs root, or
 # whether a listed package exists in the OL6 repos (iptables-services does not).
-# Those are confirmed only by a live build with SERIAL_CONSOLE=yes.
+# Those are confirmed only by a live build (e.g. an isolated virt-install with
+# the installer console visible).
 #==============================================================================
 set -euo pipefail
 

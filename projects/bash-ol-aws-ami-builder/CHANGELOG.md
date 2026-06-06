@@ -26,26 +26,31 @@ This CHANGELOG is **English only** per the repository-wide
   `pykickstart` (`ksvalidator -v RHEL6`). It rejects OL7-syntax directives that
   are invalid on OL6/anaconda-13 before they can halt the install. Syntax-only:
   it does not verify runtime filesystem support (e.g. xfs root) or package
-  availability — those are confirmed by a live `SERIAL_CONSOLE=yes` build. See
+  availability — those are confirmed by a live build (e.g. an isolated
+  `virt-install` with the installer console visible). See
   SPEC D.18. (Subproject-local; the bash TESTING doc-template stays deferred in
   the canon per the rule-of-two, so `TESTING.md` carries no doc-provenance pin.)
 
 ### Changed
 
-- Install-time `SERIAL_CONSOLE` now defaults to `yes` and is actually wired
-  through to the upstream `env.properties.local` (previously it was not passed
-  through at all, so setting it had no effect). The anaconda installer now
-  streams to the serial console, making an install-time failure visible instead
-  of disappearing into a silent headless 30-minute wait — the failure mode that
-  hid the OL6 kickstart parse error. Set in all five
-  `env.properties.aws-ol{6,7,8,9,10}` templates. This does **not** change the
+- Install-time `SERIAL_CONSOLE` is now **wired through** to the upstream
+  `env.properties.local` (previously it was not passed through at all, so
+  setting it had no effect). The default remains `no` (headless), which is the
+  reliable path: upstream detects install completion via the domain lifecycle
+  and applies its own install timeout. `yes` is available as a **debug-only
+  opt-in** to stream the OL6/7 install live, but it makes upstream wait on
+  `virsh console`, which does not cleanly return when the install VM ends and
+  can hang the build until the watchdog (observed even on otherwise-successful
+  builds) — so it is not the default. Set explicitly in all five
+  `env.properties.aws-ol{6,7,8,9,10}` templates. Does **not** change the
   produced AMI: the generated image's console is governed by the independent
-  `SERIAL_CONSOLE_RUNTIME` (unchanged). See SPEC A.7.
+  `SERIAL_CONSOLE_RUNTIME` (unchanged). See SPEC A.7 / D.18.
 - Added a Phase-5 build watchdog: `BUILD_TIMEOUT_MIN` (minutes, default `120`,
-  a wrapper key) bounds the upstream `bin/build-image.sh` run. Upstream applies
-  no install timeout when `SERIAL_CONSOLE=yes`, so on expiry the wrapper reaps
-  the leftover transient libvirt domain (`virt-install --transient`, which
-  survives a killed `build-image.sh`) and aborts. See SPEC A.7.
+  a wrapper key) is an outer safety bound on the upstream `bin/build-image.sh`
+  run (in addition to upstream's own headless install timeout). On expiry the
+  wrapper reaps the leftover transient libvirt domain (`virt-install
+  --transient`, which survives a killed `build-image.sh`) and aborts. See SPEC
+  A.7.
 - Documented the guest Oracle Linux package-manager split (OL6/7 use `yum`,
   OL8/9/10 use `dnf`) and the per-OL kernel / security-update / config-manager
   conventions as SPEC B.7 'Guest OS package-manager matrix'; added a rationale

@@ -294,18 +294,22 @@ load_env() {
   : "${ROOT_FS:=xfs}"
   : "${DISK_SIZE_GB:=10}"
   : "${SERIAL_CONSOLE_RUNTIME:=Yes}"
-  # Install-time serial console (upstream SERIAL_CONSOLE). When "yes", the
-  # anaconda installer output streams live so an install-time failure is
-  # visible instead of a silent headless wait (the failure mode that hid the
-  # OL6 kickstart parse error). This is DISTINCT from SERIAL_CONSOLE_RUNTIME
-  # above (which configures the *generated image's* console). Upstream applies
-  # NO install timeout when SERIAL_CONSOLE=yes; the Phase-5 watchdog below
-  # provides the bounded wait instead. Set "no" for a bounded headless install.
-  : "${SERIAL_CONSOLE:=yes}"
-  # Phase-5 build watchdog, in minutes. Bounds the upstream build-image.sh run
-  # even when SERIAL_CONSOLE=yes removes upstream's own install timeout. On
-  # expiry the wrapper reaps the transient build VM and aborts. Generous default
-  # so a normal 20-60 min build never trips it; raise for slow hosts/links.
+  # Install-time serial console (upstream SERIAL_CONSOLE). Default "no"
+  # (headless): upstream detects install completion via the domain lifecycle
+  # and applies its own install timeout -- the historically reliable path.
+  # When "yes", upstream instead waits on `virsh console`, which does NOT
+  # cleanly return when the install VM ends (reboot/poweroff/teardown) and was
+  # observed to hang build-image.sh until the watchdog even on otherwise
+  # successful builds; it also only streams useful output on old anaconda
+  # (OL6/7), not on OL8+ (tmux-based). Treat "yes" as a debug-only opt-in for
+  # watching the OL6/7 install phase, and expect to kill the VM. DISTINCT from
+  # SERIAL_CONSOLE_RUNTIME above (which configures the *generated image's*
+  # console). See SPEC A.7 / D.18.
+  : "${SERIAL_CONSOLE:=no}"
+  # Phase-5 build watchdog, in minutes. An outer safety bound on the upstream
+  # build-image.sh run (in addition to upstream's own install timeout). On
+  # expiry the wrapper reaps the transient build VM and aborts. Generous
+  # default so a normal 20-60 min build never trips it; raise for slow hosts.
   : "${BUILD_TIMEOUT_MIN:=120}"
   # Build-time boot mode.
   # IMPORTANT: Oracle's build-image.sh enforces BOOT_MODE=bios for AWS.
