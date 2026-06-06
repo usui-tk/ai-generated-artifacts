@@ -1,12 +1,18 @@
-# Developer Specification (SPEC)
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-06
+---
+# Bash Script Specification (SPEC) — build-ol-aws-ami.sh
 
-> **Purpose of this document**
->
-> This file is the authoritative specification for maintaining and extending
-> the `build-ol-aws-ami.sh` wrapper script and its companion env templates
-> in this directory. It is written to be picked up directly by a human
-> contributor or an LLM (Claude) at the start of a new feature or bug-fix
-> iteration so that conventions do not have to be re-derived from scratch.
+> This SPEC documents `build-ol-aws-ami.sh` and its companion env templates.
+> **Part A** is the repository-wide common specification, authored inline below
+> (canonical-in-principle: bash has a single consumer today, so per the rule-of-two
+> there is no shared bash spec home yet); **Parts B-D** are specific to this script.
+> History lives in `CHANGELOG.md`; current and forward design lives here. This SPEC
+> is reconstructed from the repository template canon and inherits the repository
+> governance model rather than asserting its own.
 >
 > **The single most important rule**: when a piece of behavior is described
 > here (phase contract, log markers, env property keys, validation order),
@@ -15,10 +21,9 @@
 > rules — they have been hardened through many revisions documented in
 > Part D, and rewriting them invites regressions.
 >
-> The repository-wide ⚠️ AI generation policy (see
-> [`../../README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md))
-> still applies; this SPEC supplements it with implementation-level detail
-> specific to the Oracle Linux AWS AMI builder.
+> The repository-wide AI-generation policy and contributor rules apply; see
+> [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md)
+> and the repository root `README.md`.
 
 > **Documentation language policy**: This SPEC is maintained in English only. Japanese readers should refer to the English SPEC together with `README.ja.md` for an orientation. See the repository root `README.md` "Language Policy" section for the repository-wide policy.
 
@@ -70,9 +75,9 @@
 > rationale, and the forensic record of past inheritance violations
 > (notably the `c40755c` Part A bloat regression in a sibling
 > PowerShell SPEC) are recorded in the repository-wide
-> [`AGENTS.md` §6 Part A Inheritance Rule (ABSOLUTE)](../../../AGENTS.md#6-part-a-inheritance-rule-absolute)
+> [`AGENTS.md` §6 Part A Inheritance Rule (ABSOLUTE)](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md#6-part-a-inheritance-rule-absolute)
 > and
-> [`AGENTS.md` §9 AP-1](../../../AGENTS.md#9-anti-patterns-forensically-documented).
+> [`AGENTS.md` §9 AP-1](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md#9-anti-patterns-forensically-documented).
 > LLM agents authoring or revising any Layer 3 Part A MUST consult
 > both references before touching the inherited surface.
 

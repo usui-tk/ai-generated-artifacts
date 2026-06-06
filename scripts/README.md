@@ -155,7 +155,7 @@ scripts/<language>/<project-name>/
 **EN:** Part A is the **inherited** layer, not a stub to be filled in. The canonical text of Part A lives in **the in-house reference SPEC for each scripting family**:
 
 - **PowerShell scripts**: [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./powershell/download-speakerdeck-oracle4engineer/SPEC.md) sections A.1–A.14
-- **Bash / AWS scripts**: [`scripts/aws/ol-aws-ami-builder/SPEC.md`](./aws/ol-aws-ami-builder/SPEC.md) sections A.1–A.11
+- **Bash / AWS scripts**: [`projects/bash-ol-aws-ami-builder/SPEC.md`](../projects/bash-ol-aws-ami-builder/SPEC.md) sections A.1–A.11
 
 The two canonicals overlap conceptually (reference assets, logging, error handling, dev workflow) but diverge in concrete form (Bash idioms vs PowerShell idioms, `env.properties` files vs `param()` blocks, `shellcheck` vs `psa.py`). A new script's Part A:
 
@@ -167,7 +167,7 @@ The two canonicals overlap conceptually (reference assets, logging, error handli
 **JA:** Part A は「埋めるべき空欄」ではなく、**継承される**層です。Part A の正典は **スクリプト系統ごとに対応する** 社内リファレンス SPEC にあります:
 
 - **PowerShell 系スクリプト**:[`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./powershell/download-speakerdeck-oracle4engineer/SPEC.md) の A.1–A.14
-- **Bash / AWS 系スクリプト**:[`scripts/aws/ol-aws-ami-builder/SPEC.md`](./aws/ol-aws-ami-builder/SPEC.md) の A.1–A.11
+- **Bash / AWS 系スクリプト**:[`projects/bash-ol-aws-ami-builder/SPEC.md`](../projects/bash-ol-aws-ami-builder/SPEC.md) の A.1–A.11
 
 両者は概念的には重複(reference assets、ロギング、エラー処理、開発ワークフロー)しますが、具体的な形態は異なります(Bash 慣用句 vs PowerShell 慣用句、`env.properties` ファイル vs `param()` ブロック、`shellcheck` vs `psa.py`)。新規スクリプトの Part A は:
 

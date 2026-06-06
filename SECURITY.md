@@ -23,7 +23,7 @@ Instead, use one of the following private channels:
 
 Please include:
 
-- **Affected artifact path** within the repository (e.g., `scripts/aws/ol-aws-ami-builder/build-ol-aws-ami.sh`).
+- **Affected artifact path** within the repository (e.g., `projects/bash-ol-aws-ami-builder/build-ol-aws-ami.sh`).
 - **Concrete reproduction** — a command sequence, an input file, or a step-by-step description.
 - **Observed impact** — what an attacker (or unwary user) could do as a result.
 - **Suggested fix** if you have one.
@@ -88,7 +88,7 @@ conditions that would prompt the maintainer to revisit them.
 
 報告時には以下を含めてください:
 
-- **対象アーティファクトのパス**(例:`scripts/aws/ol-aws-ami-builder/build-ol-aws-ami.sh`)
+- **対象アーティファクトのパス**(例:`projects/bash-ol-aws-ami-builder/build-ol-aws-ami.sh`)
 - **具体的な再現手順** — コマンド列、入力ファイル、ステップバイステップの説明等
 - **観測された影響** — 攻撃者(または不注意な利用者)が結果として何ができるか
 - **修正案**(あれば)

@@ -358,7 +358,7 @@ once **>=2** consumers share observed common content:
 - **Bash**: **no spec home yet** - the canon currently has a single
   Bash consumer, so extraction would be premature (§2). Until a
   second Bash consumer triggers extraction,
-  `scripts/aws/ol-aws-ami-builder/SPEC.md` Part A is the **de-facto
+  `projects/bash-ol-aws-ami-builder/SPEC.md` Part A is the **de-facto
   Bash reference** (§7). Do NOT manufacture a Bash spec home from one
   project.
 
@@ -456,7 +456,7 @@ text lives in the files listed.
 The canonical Part A common conventions are **vendored from the family
 spec home** (§6): for **PowerShell**, `governance/spec/powershell.md`
 (unit `spec.powershell.part-a`, gate-verified); for **Bash**, no spec
-home yet (rule-of-two, §2) - `scripts/aws/ol-aws-ami-builder/SPEC.md`
+home yet (rule-of-two, §2) - `projects/bash-ol-aws-ami-builder/SPEC.md`
 Part A is the de-facto reference until extraction. The two Layer 3
 SPECs below remain useful **worked examples** (concrete idioms), not
 the canonical Part A source for PowerShell.
@@ -470,7 +470,7 @@ the canonical Part A source for PowerShell.
 - §A.14 Debug Trace Facility — operation-level diagnostic facility,
   designed to be reused verbatim across PowerShell scripts in this style
 
-**Bash / AWS canonical** — [`scripts/aws/ol-aws-ami-builder/SPEC.md`](./scripts/aws/ol-aws-ami-builder/SPEC.md):
+**Bash / AWS canonical** — [`projects/bash-ol-aws-ami-builder/SPEC.md`](./projects/bash-ol-aws-ami-builder/SPEC.md):
 
 - §A.5 Shell Options and Defensive Coding — the `set -euo pipefail`
   discipline and equivalent Bash idioms for safe error propagation

@@ -38,7 +38,7 @@ The following are **not** expected to be acted on:
 
 A high-quality issue includes:
 
-1. **Which artifact** is affected — full path within the repo (e.g., `scripts/aws/ol-aws-ami-builder/SPEC.md` §B.3.2).
+1. **Which artifact** is affected — full path within the repo (e.g., `projects/bash-ol-aws-ami-builder/SPEC.md` §B.3.2).
 2. **What you expected vs. what you observed** — concrete, reproducible.
 3. **Environment context** when relevant (OS version, PowerShell version, AWS region, etc.).
 4. **A proposed fix** if you have one, even informally.
@@ -90,7 +90,7 @@ Examples:
 
 ```
 docs: fix broken link to AWS VM Import/Export documentation
-scripts/aws/ol-aws-ami-builder: update OL10 ISO checksum for U2 release
+projects/bash-ol-aws-ami-builder: update OL10 ISO checksum for U2 release
 research/cloud-infrastructure: correct CPU SKU naming in EPYC Bergamo section
 ```
 
@@ -146,7 +146,7 @@ By submitting a pull request, you agree that your contribution is licensed under
 
 ## 質の高い Issue を起票するために
 
-1. **対象アーティファクト**:リポジトリ内のフルパス(例:`scripts/aws/ol-aws-ami-builder/SPEC.md` §B.3.2)
+1. **対象アーティファクト**:リポジトリ内のフルパス(例:`projects/bash-ol-aws-ami-builder/SPEC.md` §B.3.2)
 2. **期待した挙動 / 実際の挙動**:再現可能な形で具体的に
 3. **環境コンテキスト**:OS バージョン、PowerShell バージョン、AWS リージョン等(関連する場合)
 4. **修正案**:あれば(非公式でも可)
@@ -198,7 +198,7 @@ PR はベストエフォートで受け付けます(レビュー期限は保証�
 
 ```
 docs: fix broken link to AWS VM Import/Export documentation
-scripts/aws/ol-aws-ami-builder: update OL10 ISO checksum for U2 release
+projects/bash-ol-aws-ami-builder: update OL10 ISO checksum for U2 release
 research/cloud-infrastructure: correct CPU SKU naming in EPYC Bergamo section
 ```
 

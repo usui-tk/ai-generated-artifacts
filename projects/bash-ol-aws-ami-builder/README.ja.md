@@ -1,8 +1,14 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-06
+---
 # Oracle Linux AWS AMI Builder
 
 [English](./README.md) | 日本語
 
-> 📂 [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) リポジトリの [`scripts/aws/ol-aws-ami-builder/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/aws/ol-aws-ami-builder) 配下のアーティファクトです
+> 📂 [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) リポジトリの [`projects/bash-ol-aws-ami-builder/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/bash-ol-aws-ami-builder) 配下のアーティファクトです
 > ⚠️ **AI 生成コンテンツ** — 実行前にソースコードを確認してください。[`scripts/` ディレクトリ規約](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md)で完全な免責事項を確認できます。
 > 📐 **開発者向け仕様書**:[`SPEC.md`](./SPEC.md) (English only)([English](./SPEC.md)) — phase contract、ログ規約、env プロパティキー、現実装ですでに対処済みの過去の落とし穴を記録
 
@@ -93,7 +99,7 @@ streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
 - **リポジトリ全体に共通する LLM エージェント運用ガイド**(ガバナンス
   階層、 ground truth 抽出、 Doc-Touching マトリクス、 Part A 継承
   ルール、 アンチパターン)は、 リポジトリルートの
-  [`AGENTS.md`](../../../AGENTS.md) を参照してください(英語のみ)。
+  [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) を参照してください(英語のみ)。
   本スクリプトの `SPEC.md` Part A は、 本リポジトリの sibling
   **Bash / AWS スクリプト用の正典継承元** として機能します
   ([`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../../powershell/download-speakerdeck-oracle4engineer/SPEC.md)

@@ -1,8 +1,14 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-06
+---
 # Oracle Linux AWS AMI Builder
 
 English | [日本語](./README.ja.md)
 
-> 📂 Part of [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) → [`scripts/aws/ol-aws-ami-builder/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/aws/ol-aws-ami-builder)
+> 📂 Part of [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) → [`projects/bash-ol-aws-ami-builder/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/bash-ol-aws-ami-builder)
 > ⚠️ **AI-generated content** — review the source before executing. See the [scripts directory policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) for the full disclaimer.
 > 📐 **Developer specification**: [SPEC.md](./SPEC.md) (English only) — phase contract, log conventions, env property keys, and the historical pitfalls already accounted for in the current implementation.
 
@@ -91,7 +97,7 @@ one-file change.
 - For the **repository-wide LLM-agent operating guide** (governance
   hierarchy, ground-truth extraction, Doc-Touching Matrix, Part A
   inheritance rule, anti-patterns), see
-  [`AGENTS.md`](../../../AGENTS.md) at the repository root. Note
+  [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) at the repository root. Note
   that this script's `SPEC.md` Part A serves as the **canonical
   inheritance source for sibling Bash / AWS scripts** in this
   repository — the parallel role to the canonical PowerShell SPEC
