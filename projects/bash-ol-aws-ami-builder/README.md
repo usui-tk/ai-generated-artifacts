@@ -194,7 +194,7 @@ If you already have a KVM-capable Linux host on premises, the build runs there w
 
 | Item | Requirement |
 |------|-------------|
-| OS | **Oracle Linux 9 / RHEL 9 / Ubuntu 22.04 or newer** recommended |
+| OS | **Latest two generations only** (older releases are refused at Phase 1). dnf family: OL / RHEL / Rocky / AlmaLinux / CentOS Stream **10 or 9**, Fedora **44 or 43**. apt family: Ubuntu **26.04 or 24.04 LTS**, Debian **13 or 12**. See [SPEC B.6](./SPEC.md) for the full package matrix and the reference-only refusals (e.g. Ubuntu 22.04, OL / RHEL 8 and older). |
 | Architecture | **x86_64** (must match the target AMI architecture) |
 | Memory | 8 GB or more (allocated to the build VM) |
 | Disk | At least **30 GB free** in the workspace |

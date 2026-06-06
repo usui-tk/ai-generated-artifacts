@@ -68,6 +68,13 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- README (EN + JA) "Common Requirements" build-host OS row corrected to match
+  the version-aware `phase1_install_prerequisites` and SPEC B.6: it had said
+  "Oracle Linux 9 / RHEL 9 / Ubuntu 22.04 or newer (recommended)", but the
+  script supports only the latest two generations and **refuses** older hosts
+  (e.g. Ubuntu 22.04, OL/RHEL 8) with a `die`. Now states OL/RHEL/Rocky/Alma/
+  CentOS Stream 10 or 9, Fedora 44 or 43, Ubuntu 26.04/24.04 LTS, Debian 13/12,
+  and points to SPEC B.6. Documentation only.
 - OL6 kickstart (`EOF_OL6_KS`) now validates cleanly against the OL6
   anaconda-13 command set (`ksvalidator -v RHEL6`). It previously carried
   OL7-only syntax inherited from the `ol7-ks.cfg` mirror, which halted the OL6

@@ -196,7 +196,7 @@ aws ec2 run-instances \
 
 | 項目 | 要件 |
 |------|------|
-| OS | **Oracle Linux 9 / RHEL 9 / Ubuntu 22.04 以上** を推奨 |
+| OS | **最新2世代のみ**(それ以前は Phase 1 で拒否)。dnf 系: OL / RHEL / Rocky / AlmaLinux / CentOS Stream **10 または 9**、Fedora **44 または 43**。apt 系: Ubuntu **26.04 または 24.04 LTS**、Debian **13 または 12**。完全なパッケージ一覧と参照のみ(拒否対象。例: Ubuntu 22.04、OL / RHEL 8 以前)は [SPEC B.6](./SPEC.md) を参照 |
 | アーキテクチャ | **x86_64**(ターゲット AMI と一致させる必要あり) |
 | メモリ | 8 GB 以上(ビルド VM 用に割り当て) |
 | ディスク | ワークスペースに **30GB 以上の空き** |
