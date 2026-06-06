@@ -918,7 +918,7 @@ Current markers:
 |--------|--------------|---------|
 | `[ol-aws-ami-builder OL6 PATCH]` | `cloud/aws/image-scripts.sh` | Remove OL8+ guard (OL6 mode) |
 | `[ol-aws-ami-builder OL7 PATCH]` | `cloud/aws/image-scripts.sh` | Remove OL8+ guard (OL7 mode) |
-| `[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]` | `cloud/aws/provision.sh` | Skip `kernel-uek-modules` install on OL6 |
+| `[ol-aws-ami-builder PATCH kernel-uek-modules]` | `cloud/aws/provision.sh` | Skip `kernel-uek-modules` install on OL6/OL7 (UEK < R7) |
 
 Each patch leaves a `.bak` backup file next to the modified one and
 includes a `grep -Fq` idempotency guard so re-runs against an existing
@@ -987,7 +987,7 @@ When `oracle-linux-image-tools` is refactored:
    subsequently fails.
 2. If the `kernel-uek-modules` install line in
    `cloud/aws/provision.sh` is removed or renamed, patch #2 silently
-   no-ops; OL6 is then expected to still work because the absent
+   no-ops; OL6/OL7 are then expected to still work because the absent
    package would no longer be installed.
 3. If `distr/ol7-slim/` structure changes (function signatures, common
    helper names like `common::distr_cleanup`, `common::latest_kernel`,
@@ -1014,7 +1014,7 @@ Three runtime modifications are therefore needed:
 | # | Type | Target | Purpose |
 |---|------|--------|---------|
 | 1 | `sed` patch | `cloud/aws/image-scripts.sh` | Remove OL8+ guard (shared with OL7) |
-| 2 | `sed` patch | `cloud/aws/provision.sh` | Skip `kernel-uek-modules` install on OL6 (D.11) |
+| 2 | `sed` patch | `cloud/aws/provision.sh` | Skip `kernel-uek-modules` install on OL6/OL7 (D.11) |
 | 3 | Directory synthesis | `distr/ol6-slim/` (4 files) | Provide kickstart + image-scripts + provision logic |
 
 All three live inside `phase3_clone_repository` so they are
@@ -1082,15 +1082,15 @@ a real builder host.
 | Aspect | OL7 | OL6 |
 |--------|-----|-----|
 | Upstream `distr/` | Present (`ol7-slim`) | **Absent** — synthesized at runtime |
-| `sed` patches needed | 1 (`image-scripts.sh` guard) | 2 (`image-scripts.sh` + `provision.sh`) |
-| Kernel | UEK6 (4.14) | UEK4 (4.1.12) — only ENA-capable kernel for OL6 |
+| `sed` patches needed | 2 (`image-scripts.sh` + `provision.sh`) | 2 (`image-scripts.sh` + `provision.sh`) |
+| Kernel | UEK6 (5.4.17) | UEK4 (4.1.12) — only ENA-capable kernel for OL6 |
 | Filesystem options | xfs, btrfs | ext4, xfs (no lvm/btrfs at this layer) |
 | Init system | systemd | Upstart (`service` / `chkconfig`) |
 | Bootloader | GRUB2 | GRUB Legacy |
 | Kickstart syntax | Anaconda 19.x (`inst.` prefix) | Anaconda 13.x (no `inst.` prefix) |
 | NTP daemon | chronyd | ntpd |
 | `linux-firmware` | optional | hard dependency of `kernel-uek` |
-| `kernel-uek-modules` package | present (UEK6) | absent (UEK4) |
+| `kernel-uek-modules` package | absent (UEK6; bundled in `kernel-uek`) | absent (UEK4; bundled in `kernel-uek`) |
 | AWS VM Import support | EOL (2024-12-31) | EOL (with ELS ended 2024) |
 | End-to-end validated | No (patch verified, build not run) | No (Phase A+B done, Phase C not run) |
 
@@ -1168,7 +1168,7 @@ OL 6-10 remain supported; the manager is organized as follows:
 | OL | pkg mgr | config-manager | security update | kernel | provision source |
 |----|---------|----------------|-----------------|--------|------------------|
 | 6 | `yum` | `yum-config-manager` (yum-utils) | `yum-plugin-security` -> `yum update --security` | `kernel-uek` (UEKR4; modules bundled, no `kernel-uek-modules`) | synthesized by this wrapper (B.4) |
-| 7 | `yum` | `yum-config-manager` (yum-utils) | `yum-plugin-security` | `kernel-uek` + `kernel-uek-modules` | upstream `distr/ol7-slim/` + OL7 patch |
+| 7 | `yum` | `yum-config-manager` (yum-utils) | `yum-plugin-security` | `kernel-uek` (UEKR6; modules bundled, no `kernel-uek-modules`) | upstream `distr/ol7-slim/` + OL7 patches |
 | 8 | `dnf` | `dnf config-manager` (dnf-plugins-core) | `dnf upgrade --security` (built in) | `kernel-uek(-modules)` | upstream `distr/ol8-slim/` |
 | 9 | `dnf` | `dnf config-manager` (dnf-plugins-core) | `dnf upgrade --security` | `kernel-uek(-modules)` | upstream `distr/ol9-slim/` |
 | 10 | `dnf` | `dnf config-manager` (dnf-plugins-core) | `dnf upgrade --security` | `kernel-uek(-modules)` | upstream `distr/ol10-slim/` |
@@ -1181,8 +1181,10 @@ Notes:
 - The OL6 kickstart `%packages` already includes **`yum-utils`** (provides
   `yum-config-manager`) and **`yum-plugin-security`**, so the OL6 provision can
   rely on them without an extra install step.
-- `kernel-uek-modules` does **not** exist on OL6 / UEKR4 (the modules are
-  bundled inside `kernel-uek`); see the OL6 `provision.sh` patch in B.4.
+- `kernel-uek-modules` does **not** exist on OL6 / UEKR4 or OL7 / UEKR6 (the
+  modules, including `amazon/ena`, are bundled inside `kernel-uek`); the
+  separate package exists only from **UEK R7 (OL8+)**. See the `provision.sh`
+  patch in B.4 and **D.11**.
 - This matrix governs only the **guest** package operations; the **build
   host** package matrix is B.6.
 
@@ -1459,49 +1461,59 @@ the cloned tree.
 
 ---
 
-## D.11 OL6/UEKR4 has no `kernel-uek-modules` package
+## D.11 OL6/UEKR4 and OL7/UEKR6 have no `kernel-uek-modules` package
 
 **Symptom**: When the upstream `cloud/aws/provision.sh`'s
-`cloud::install_aws_packages()` is executed on OL6, the line
-`yum install -y "${YUM_VERBOSE}" kernel-uek-modules` fails with
-`No package kernel-uek-modules available`.
+`cloud::install_aws_packages()` runs on OL6 or OL7 with `KERNEL=uek`, the
+line `yum install -y "${YUM_VERBOSE}" kernel-uek-modules` fails — on OL6 with
+`No package kernel-uek-modules available`, and on OL7 with `Error: Nothing to
+do` — which aborts `provision.sh` and therefore the whole Phase 5 build.
 
-**Root cause**: The `kernel-uek-modules` package is a *split-out modules
-package* introduced in OL7 / UEK6 to keep the main `kernel-uek` RPM
-smaller. On OL6's UEKR4 (`4.1.12-124.x`), no such split exists — all
-driver `.ko` files (including `ena.ko`, `nvme.ko`, `nvme-core.ko`,
-`virtio*.ko`, `xen-*.ko`, `hv_*.ko`) are bundled directly inside the
-`kernel-uek` RPM itself. Verified against
-`https://yum.oracle.com/repo/OracleLinux/OL6/UEKR4/x86_64/repodata/primary.xml.gz`:
-no `kernel-uek-modules-*` entries exist.
+**Root cause**: The separate `kernel-uek-modules` *split-out modules package*
+was introduced in **UEK R7 (OL8+)**, not earlier. UEK before R7 — OL6's UEKR4
+(`4.1.12-124.x`) and OL7's UEKR6 (`5.4.17-...el7uek`) — ships a single
+`kernel-uek` RPM with all driver `.ko` files (including `ena.ko`, `nvme.ko`,
+`nvme-core.ko`, `virtio*.ko`, `xen-*.ko`, `hv_*.ko`) bundled directly inside
+it; no `kernel-uek-modules` package exists in those repos. Verified: the
+`ol6_UEKR4` repodata has no `kernel-uek-modules-*` entries, and the
+`ol7_UEKR6` `kernel-uek-5.4.17-...el7uek` RPM contains
+`lib/modules/<ver>/kernel/drivers/net/ethernet/amazon/ena/` directly. So the
+install both *fails* (no such package) and is *unnecessary* (ena.ko is already
+present from `kernel-uek`).
 
-**Fix**: `phase3_clone_repository` applies a second runtime patch on top
-of the OL7-shared `image-scripts.sh` patch, rewriting the offending line
-to be conditional on `ORACLE_RELEASE >= 7`:
+> An earlier version of this fix guarded the line on `ORACLE_RELEASE >= 7`,
+> on the mistaken belief that the split landed in OL7/UEK6. OL7 then hit the
+> same failure. The correct boundary is **>= 8** (UEK R7 / OL8+).
+
+**Fix**: `phase3_clone_repository` applies, for OL6 **and** OL7, a runtime
+patch on top of the shared `image-scripts.sh` patch, rewriting the offending
+line to be conditional on `ORACLE_RELEASE >= 8`:
 
 ```bash
-# [ol-aws-ami-builder OL6 PATCH kernel-uek-modules] OL6/UEKR4 has no separate kernel-uek-modules package (modules bundled in kernel-uek)
-[[ "${ORACLE_RELEASE}" -ge 7 ]] && yum install -y "${YUM_VERBOSE}" kernel-uek-modules
+# [ol-aws-ami-builder PATCH kernel-uek-modules] separate kernel-uek-modules exists only from UEK R7 (OL8+); UEKR4/UEKR6 (OL6/OL7) bundle modules (incl. amazon/ena) in kernel-uek
+[[ "${ORACLE_RELEASE}" -ge 8 ]] && yum install -y "${YUM_VERBOSE}" kernel-uek-modules
 ```
 
-The `&&` short-circuit makes the line a no-op on OL6 while preserving
-the original semantics for OL7+.
+The `&&` short-circuit makes the line a no-op on OL6/OL7 while preserving the
+original semantics for OL8+. The patch is applied only for OL6/OL7 builds; the
+OL8+ build path is left untouched (upstream installs `kernel-uek-modules`
+there as before).
 
 **Guard rails**:
 
-1. A `grep -Fq '[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]'`
-   precedes the substitution for idempotency.
-2. A `grep -Fq 'yum install -y "${YUM_VERBOSE}" kernel-uek-modules'`
-   verifies the original line is still present (if upstream removes it,
-   the patch is skipped with a `log_warn`).
-3. Post-substitution, the marker grep `die`s the script if the patch
-   silently failed to apply.
+1. A `grep -Fq '[ol-aws-ami-builder PATCH kernel-uek-modules]'` precedes the
+   substitution for idempotency.
+2. A `grep -Fq 'yum install -y "${YUM_VERBOSE}" kernel-uek-modules'` verifies
+   the original line is still present (if upstream removes it, the patch is
+   skipped with a `log_warn`).
+3. Post-substitution, the marker grep `die`s the script if the patch silently
+   failed to apply.
 
 **Verification**: ENA / NVMe driver availability on the produced AMI is
 confirmed by `lsmod | grep -E '^(ena|nvme)'` after first boot, plus
-`modinfo ena nvme nvme_core` to inspect the kernel module metadata. This
-check is in Phase C-4 of the verification plan (not yet executed by the
-author).
+`modinfo ena nvme nvme_core` to inspect the kernel module metadata. The OL7
+`ena.ko`-in-`kernel-uek` presence was confirmed directly from the `ol7_UEKR6`
+RPM contents.
 
 ---
 

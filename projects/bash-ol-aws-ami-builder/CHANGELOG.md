@@ -57,3 +57,13 @@ This CHANGELOG is **English only** per the repository-wide
   reused. The resulting AMI is still `SELINUX=enforcing`. On SELinux-capable
   hosts (RHEL / OL / Fedora) the optgroup is present and the original relabel
   runs unchanged (the patch is a no-op there). See SPEC D.17 and B.6.
+- OL7 builds no longer abort in the cloud provisioner at "Install amazon/ena
+  module". The upstream `cloud/aws/provision.sh` runs `yum install
+  kernel-uek-modules`, but the separate `kernel-uek-modules` package exists
+  only from UEK R7 (OL8+); OL7's UEK R6 (and OL6's UEK R4) bundle all modules,
+  including `amazon/ena`, in `kernel-uek`, so the install failed with "Error:
+  Nothing to do". The `phase3_clone_repository` guard that skipped this install
+  is now applied for OL6 **and** OL7 (previously OL6 only) and gates on
+  `ORACLE_RELEASE >= 8` (previously the boundary was mistakenly `>= 7`). OL8+ is
+  unaffected. `ena.ko` is already present from `kernel-uek` on OL6/OL7, so no
+  driver is lost. See SPEC D.11.

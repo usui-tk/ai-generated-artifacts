@@ -219,6 +219,9 @@ load_env() {
     log_warn "  * OL7 Premier Support ended on 2024-12-31."
     log_warn "  * Upstream oracle-linux-image-tools EXCLUDES OL7 from the AWS cloud"
     log_warn "    target; build-ol-aws-ami.sh applies a runtime patch in Phase 3."
+    log_warn "  * OL7's UEK R6 bundles kernel modules (incl. amazon/ena) in"
+    log_warn "    kernel-uek; the kernel-uek-modules install is skipped in Phase 3"
+    log_warn "    (that separate package exists only from UEK R7 / OL8+)."
     log_warn "  * OL7 only supports x86_64 (no aarch64) and bios boot (no UEFI)."
     log_warn "  * Do NOT use the resulting AMI for production workloads requiring"
     log_warn "    Oracle Premier Support. Intended for verification, learning, or"
@@ -1005,7 +1008,7 @@ phase3_clone_repository() {
     fi
   fi
 
-  # OL6-specific patch #2: cloud/aws/provision.sh kernel-uek-modules guard.
+  # cloud/aws/provision.sh kernel-uek-modules guard (OL6 and OL7).
   #
   # Background:
   #   The upstream cloud/aws/provision.sh contains:
@@ -1015,26 +1018,31 @@ phase3_clone_repository() {
   #       yum install -y "${YUM_VERBOSE}" kernel-modules
   #     fi
   #
-  #   On OL6/UEKR4, the 'kernel-uek-modules' package does NOT exist
-  #   (verified against ol6_UEKR4 primary.xml). All ENA/NVMe/virtio
-  #   driver .ko files are bundled directly inside the main 'kernel-uek'
-  #   RPM, so no separate modules package install is needed.
+  #   The separate 'kernel-uek-modules' package exists only from UEK R7
+  #   onward (OL8+). UEK before R7 - OL6/UEKR4 and OL7/UEKR6 - bundles ALL
+  #   modules, including amazon/ena, directly inside the main 'kernel-uek'
+  #   RPM (verified: ol6_UEKR4 has no kernel-uek-modules; the ol7_UEKR6
+  #   kernel-uek RPM ships
+  #   lib/modules/<ver>/kernel/drivers/net/ethernet/amazon/ena/). On those
+  #   releases the package does not exist, so the upstream install aborts the
+  #   build with 'Error: Nothing to do' - and no separate install is needed
+  #   because ena.ko is already present from kernel-uek.
   #
   # Fix:
-  #   Rewrite the install line to gate it behind ORACLE_RELEASE >= 7.
-  #   On OL7+ the original behavior is preserved; on OL6 the line
-  #   becomes a no-op.
+  #   Gate the install behind ORACLE_RELEASE >= 8. On OL8+ the original
+  #   behavior is preserved (kernel-uek-modules installed); on OL6/OL7 the
+  #   line becomes a no-op. Applied for OL6/OL7 only; the OL8+ build path is
+  #   left untouched.
   #
   # Idempotency:
   #   A grep for the wrapper marker is performed before substitution to
-  #   avoid double-patching when Phase 3 re-runs against an existing
-  #   clone.
-  if [[ "${OL_MAJOR_VERSION}" -eq 6 ]]; then
+  #   avoid double-patching when Phase 3 re-runs against an existing clone.
+  if [[ "${OL_MAJOR_VERSION}" -le 7 ]]; then
     local aws_provision="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
-    log_info "Applying OL6 compatibility patch to upstream cloud/aws/provision.sh"
+    log_info "Applying kernel-uek-modules guard to upstream cloud/aws/provision.sh (OL${OL_MAJOR_VERSION})"
 
     if [[ ! -f "${aws_provision}" ]]; then
-      die "Cannot apply OL6 patch: ${aws_provision} not found"
+      die "Cannot apply kernel-uek-modules guard: ${aws_provision} not found"
     fi
 
     # In the grep and sed lines below, ${YUM_VERBOSE} and ${ORACLE_RELEASE}
@@ -1042,17 +1050,17 @@ phase3_clone_repository() {
     # upstream shell code that expands them at runtime inside
     # cloud/aws/provision.sh, not in this wrapper.
     # shellcheck disable=SC2016
-    if grep -Fq '[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]' "${aws_provision}"; then
-      log_info "  -> OL6 provision.sh patch already applied (idempotent skip)"
+    if grep -Fq '[ol-aws-ami-builder PATCH kernel-uek-modules]' "${aws_provision}"; then
+      log_info "  -> provision.sh kernel-uek-modules guard already applied (idempotent skip)"
     elif grep -Fq 'yum install -y "${YUM_VERBOSE}" kernel-uek-modules' "${aws_provision}"; then
-      sed -i.ol6-patch-uek-modules.bak \
-        -e 's|^\(\s*\)yum install -y "${YUM_VERBOSE}" kernel-uek-modules$|\1# [ol-aws-ami-builder OL6 PATCH kernel-uek-modules] OL6/UEKR4 has no separate kernel-uek-modules package (modules bundled in kernel-uek)\n\1[[ "${ORACLE_RELEASE}" -ge 7 ]] \&\& yum install -y "${YUM_VERBOSE}" kernel-uek-modules|' \
+      sed -i.uek-modules-guard.bak \
+        -e 's|^\(\s*\)yum install -y "${YUM_VERBOSE}" kernel-uek-modules$|\1# [ol-aws-ami-builder PATCH kernel-uek-modules] separate kernel-uek-modules exists only from UEK R7 (OL8+); UEKR4/UEKR6 (OL6/OL7) bundle modules (incl. amazon/ena) in kernel-uek\n\1[[ "${ORACLE_RELEASE}" -ge 8 ]] \&\& yum install -y "${YUM_VERBOSE}" kernel-uek-modules|' \
         "${aws_provision}"
 
-      if grep -Fq '[ol-aws-ami-builder OL6 PATCH kernel-uek-modules]' "${aws_provision}"; then
-        log_info "  -> OL6 provision.sh patch applied (backup at ${aws_provision}.ol6-patch-uek-modules.bak)"
+      if grep -Fq '[ol-aws-ami-builder PATCH kernel-uek-modules]' "${aws_provision}"; then
+        log_info "  -> provision.sh kernel-uek-modules guard applied (backup at ${aws_provision}.uek-modules-guard.bak)"
       else
-        die "Failed to apply OL6 patch to ${aws_provision}"
+        die "Failed to apply kernel-uek-modules guard to ${aws_provision}"
       fi
     else
       log_warn "  kernel-uek-modules install line not found in ${aws_provision}."
