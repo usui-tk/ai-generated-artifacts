@@ -50,6 +50,7 @@ doc-provenance:
   - [B.4 OL6 runtime synthesis (distr/ol6-slim/ + cloud/aws/ patches)](#b4-ol6-runtime-synthesis-distrol6-slim--cloudaws-patches)
   - [B.5 OL6 Overall Architecture](#b5-ol6-overall-architecture)
   - [B.6 Build host package matrix](#b6-build-host-package-matrix)
+  - [B.7 Guest OS package-manager matrix](#b7-guest-os-package-manager-matrix)
 - [Part C — Quality Gates & Validation Checklist](#part-c--quality-gates--validation-checklist)
 - [Part D — Known Pitfalls & Lessons Learned](#part-d--known-pitfalls--lessons-learned)
 - [Appendix: How to add support for a new OL major release](#appendix-how-to-add-support-for-a-new-ol-major-release)
@@ -1145,6 +1146,34 @@ Fedora <= 42, CentOS Stream <= 8, OL / RHEL / Rocky / Alma <= 8.
 > libguestfs / OVMF / osinfo / acl superset this pipeline requires is added.
 > The remaining rows are organized from cross-referenced install recipes; the
 > only version-dependent difference is the qemu package name.
+
+## B.7 Guest OS package-manager matrix
+
+The package operations that run **inside the guest** during the image build
+(the kickstart `%post` and the `distr/<rel>-slim/provision.sh` functions) use
+the OL guest's own package manager, which differs by major release. All of
+OL 6-10 remain supported; the manager is organized as follows:
+
+| OL | pkg mgr | config-manager | security update | kernel | provision source |
+|----|---------|----------------|-----------------|--------|------------------|
+| 6 | `yum` | `yum-config-manager` (yum-utils) | `yum-plugin-security` -> `yum update --security` | `kernel-uek` (UEKR4; modules bundled, no `kernel-uek-modules`) | synthesized by this wrapper (B.4) |
+| 7 | `yum` | `yum-config-manager` (yum-utils) | `yum-plugin-security` | `kernel-uek` + `kernel-uek-modules` | upstream `distr/ol7-slim/` + OL7 patch |
+| 8 | `dnf` | `dnf config-manager` (dnf-plugins-core) | `dnf upgrade --security` (built in) | `kernel-uek(-modules)` | upstream `distr/ol8-slim/` |
+| 9 | `dnf` | `dnf config-manager` (dnf-plugins-core) | `dnf upgrade --security` | `kernel-uek(-modules)` | upstream `distr/ol9-slim/` |
+| 10 | `dnf` | `dnf config-manager` (dnf-plugins-core) | `dnf upgrade --security` | `kernel-uek(-modules)` | upstream `distr/ol10-slim/` |
+
+Notes:
+
+- **OL6/7 use `yum`; OL8/9/10 use `dnf`.** On OL8+ `yum` is a `dnf` shim, but
+  the synthesized (OL6) / patched (OL7) logic targets the native tool for each
+  generation.
+- The OL6 kickstart `%packages` already includes **`yum-utils`** (provides
+  `yum-config-manager`) and **`yum-plugin-security`**, so the OL6 provision can
+  rely on them without an extra install step.
+- `kernel-uek-modules` does **not** exist on OL6 / UEKR4 (the modules are
+  bundled inside `kernel-uek`); see the OL6 `provision.sh` patch in B.4.
+- This matrix governs only the **guest** package operations; the **build
+  host** package matrix is B.6.
 
 ---
 

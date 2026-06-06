@@ -21,6 +21,12 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- Documented the guest Oracle Linux package-manager split (OL6/7 use `yum`,
+  OL8/9/10 use `dnf`) and the per-OL kernel / security-update / config-manager
+  conventions as SPEC B.7 'Guest OS package-manager matrix'; added a rationale
+  comment in `phase3_clone_repository`. All of OL6-10 remain supported. No
+  functional change: the OL6 kickstart `%packages` already ships `yum-utils`
+  and `yum-plugin-security`, so no extra install step was required.
 - Made `phase1_install_prerequisites` (build host provisioning) version-aware:
   detection now reads `ID` + `VERSION_ID` from `/etc/os-release` and selects a
   per-OS/version KVM + libguestfs package set. Supported build hosts are the

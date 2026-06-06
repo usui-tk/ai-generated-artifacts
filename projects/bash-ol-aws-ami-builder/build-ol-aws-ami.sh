@@ -868,6 +868,19 @@ phase3_clone_repository() {
   [[ -d "${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}" ]] \
     || die "Directory ${OL_TOOLS_SUBDIR} not found in the clone"
 
+  # Guest package manager by OL generation (see SPEC B.7 "Guest OS
+  # package-manager matrix"):
+  #   * OL6, OL7  -> yum  (yum-config-manager comes from yum-utils;
+  #                        yum-plugin-security drives --security updates)
+  #   * OL8/9/10  -> dnf  (dnf config-manager from dnf-plugins-core;
+  #                        built-in `dnf upgrade --security`)
+  # OL6 is fully synthesized below (yum-based) because upstream ships no
+  # distr/ol6-slim/; its kickstart %packages already pulls in yum-utils and
+  # yum-plugin-security, so the OL6 provision relies on them without an extra
+  # install step. OL7 is a thin patch over the upstream yum-based
+  # distr/ol7-slim/; OL8-10 use the upstream dnf-based distr/<rel>-slim/
+  # unchanged.
+
   # Apply the OL6/OL7 compatibility patch when targeting Oracle Linux 6 or 7.
   #
   # Background:
