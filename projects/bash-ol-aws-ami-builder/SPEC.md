@@ -457,10 +457,13 @@ introduced for OL/RHEL (RHEL 8.3, `4.18.0-240`). That kernel check is a
 deliberately conservative proxy — UEK may backport ENAv3 below it, and the
 in-tree driver still attaches in ENAv2 mode — so a sub-proxy kernel is reported
 `SUPPORTED` (with an `ethtool -i` verification hint), never as a failure. The
-only build-aborting case is a *measurable* driver version `< 1.2.0`. Source:
-amzn/amzn-drivers ENA Linux driver (`ENA_Linux_Best_Practices.rst`,
-`RELEASENOTES.md`). The per-generation family lists are representative, not
-exhaustive.
+assurance report is **purely advisory and never aborts the build** — only the
+four boot-readiness checks (CHECK 1–4) feed the gate verdict. A driver `< 1.2.0`
+(e.g. OL6's default ENA `1.1.2`) is reported as a Nitro v4+ ENAv3 attach risk
+but does **not** fail the build, so the AMI can still be registered; refresh the
+ENA driver in the guest for Nitro v4+ targets. Source: amzn/amzn-drivers ENA
+Linux driver (`ENA_Linux_Best_Practices.rst`, `RELEASENOTES.md`). The
+per-generation family lists are representative, not exhaustive.
 
 Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
 when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable

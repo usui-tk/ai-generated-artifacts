@@ -73,6 +73,16 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- The Phase 6 Nitro **instance-assurance report** is now **purely advisory and
+  never aborts the build** — only the four boot-readiness checks (CHECK 1–4:
+  NVMe host / ENA present / fstab / bootloader) feed the gate verdict. A
+  measurable ENA driver version `< 1.2.0` (e.g. OL6's default ENA `1.1.2`)
+  previously failed the gate under `enforce`; it is now reported as a Nitro v4+
+  ENAv3 attach risk (`NOT-ASSURED`, with a "refresh the driver" hint) but no
+  longer stops the build, so OL images with an old in-distro ENA driver still
+  reach S3 upload / snapshot import / AMI registration. Boot-blocking findings
+  (CHECK 1–4) remain fatal under `enforce` as before. See SPEC A.7.
+
 - Phase-5 logging now clearly separates this wrapper's output from the external
   tool's. The wrapper's own lines keep our defined format (`[INFO]`/`[WARN]`/
   `[ERROR]`, the `==========` step banners, and a new `[BUILD]` progress tag for

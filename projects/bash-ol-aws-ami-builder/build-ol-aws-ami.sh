@@ -2326,10 +2326,13 @@ phase6_nitro_readiness_check() {
   # 4.18.0-240). That kernel check is a conservative proxy -- UEK may backport
   # ENAv3 below it, and the in-tree driver still attaches in ENAv2 mode -- so a
   # sub-proxy kernel is reported SUPPORTED (verify with 'ethtool -i'), never as a
-  # failure. Tiers are advisory and never abort the build, EXCEPT a *measurable*
-  # driver version < 1.2.0 (ENAv3 attach failure on Nitro v4+), which feeds the
-  # gate verdict (fatal under enforce). Source: amzn/amzn-drivers ENA Linux
-  # driver (ENA_Linux_Best_Practices.rst, RELEASENOTES.md).
+  # failure. These generation tiers are PURELY ADVISORY and never abort the
+  # build -- only the four boot-readiness checks (CHECK 1-4) feed the gate
+  # verdict. In particular a driver < 1.2.0 (e.g. OL6's default ENA 1.1.2) is
+  # reported as a Nitro v4+ ENAv3 attach risk but does NOT fail the build, so the
+  # AMI can still be registered; refresh the ENA driver in the guest for Nitro
+  # v4+ targets. Source: amzn/amzn-drivers ENA Linux driver
+  # (ENA_Linux_Best_Practices.rst, RELEASENOTES.md).
   if [[ "${ena_cfg}" == "y" || -n "${ena_mod}" ]]; then
     local fam_v2="M5 C5 R5 T3 T4g M6g C6g R6g"
     local fam_v3="M5n C5n R5n I3en P4d G4dn"
@@ -2360,11 +2363,12 @@ phase6_nitro_readiness_check() {
       if [[ -z "${vnum}" ]]; then
         signal="ENA driver '${ena_ver}' (unparseable; verify with ethtool -i)"
       elif [[ "$(printf '1.2.0\n%s\n' "${vnum}" | sort -V | head -1)" != "1.2.0" ]]; then
-        # driver < 1.2.0: ENAv3 ENI attach FAILS (Nitro v4+ use ENAv3).
-        # Nitro v2/v3 (ENAv1/ENAv2) still attach, so they stay ASSURED.
-        v4_tier="NOT-ASSURED (driver <1.2.0: ENAv3 ENI attach fails)"; v5_tier="${v4_tier}"; v6_tier="${v4_tier}"
-        log_error "  ENA driver ${ena_ver} < 1.2.0: ENAv3 ENI attachment fails on Nitro v4+ instances."
-        fail=1
+        # driver < 1.2.0: ENAv3 ENI attach fails on Nitro v4+ (ENAv1/v2 on Nitro
+        # v2/v3 still attach). ADVISORY ONLY -- this does NOT abort the build, so
+        # images with an old default driver (e.g. OL6's ENA 1.1.2) still reach
+        # AMI registration. Refresh the ENA driver in the guest for v4+ targets.
+        v4_tier="NOT-ASSURED (driver <1.2.0: ENAv3 ENI attach fails; refresh driver)"; v5_tier="${v4_tier}"; v6_tier="${v4_tier}"
+        log_warn "  ENA driver ${ena_ver} < 1.2.0: ENAv3 ENI attach fails on Nitro v4+ (advisory, not aborting). Nitro v2/v3 unaffected; refresh the ENA driver for v4+ targets."
       elif [[ "$(printf '2.2.9\n%s\n' "${vnum}" | sort -V | head -1)" != "2.2.9" ]]; then
         # 1.2.0 <= driver < 2.2.9: ENAv3 performance DEGRADATION (not a failure).
         v4_tier="DEGRADED (driver <2.2.9: ENAv3 perf degradation)"; v5_tier="${v4_tier}"; v6_tier="${v4_tier}"
@@ -2396,7 +2400,7 @@ phase6_nitro_readiness_check() {
   # --- verdict ---------------------------------------------------------------
   if [[ "${fail}" -gt 0 ]]; then
     if [[ "${mode}" == "enforce" ]]; then
-      die "Nitro readiness pre-check FAILED (see the [CHECK N] / assurance lines above). Aborting before the upload/snapshot/register phases. Re-run with NITRO_PRECHECK=warn to proceed anyway, or =off to skip the check."
+      die "Nitro readiness pre-check FAILED (see the [CHECK 1-4] boot-readiness lines above; the Nitro assurance report is advisory and does not fail the build). Aborting before the upload/snapshot/register phases. Re-run with NITRO_PRECHECK=warn to proceed anyway, or =off to skip the check."
     fi
     log_warn "Nitro readiness pre-check found blocking issue(s) (NITRO_PRECHECK=warn; continuing despite the failure(s) above)."
   elif [[ "${indeterminate}" -gt 0 ]]; then
