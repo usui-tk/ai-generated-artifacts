@@ -513,21 +513,22 @@ change.
 > (§14 item 15), never by hand, until the coupled manifest-row+marker write path
 > (the deferred `unit-record coupled write`) is built at P6/P7.
 
-> **whole-tool registration convention (`kind=tool`):** the manifest's
-> region-helper `required` fields carry **sentinel values** on a whole-tool
+> **whole-tool registration convention (`kind=tool`) — governed by [ADR 0021](./governance/adr/0021-whole-tool-registration-convention.md):**
+> the manifest's region-helper `required` fields carry **sentinel values** on a whole-tool
 > machinery row, since they have no region meaning (the whole-tool null
 > convention lives on the OBSERVATION side, baseline §4.4): `change_policy=canonical`,
 > `binding_mode=follow-latest`, `platform_scope=cross-platform`, `canonical_version`
 > = the tool's own SemVer, and **`tested` = the tool's self-test passes** (re-defined
-> for whole-tool: self-test green, not the ADR 0007 canon-test suite). First applied
-> to `tool.canonical-drift-scanner` at P3.6. **[Deferred to P4.4 - tracked]** the discriminating
-> second instance is `psa.py` (registered `kind=tool` at P4.4) because it is the first
-> **SemVer/platform-heterogeneous** instance (its own real SemVer, not `0.1.0`); the
-> `canon-manifest-tool` + machine-trigger rows registered at P3a.3 are homogeneous
-> `0.1.0`/`cross-platform` whole-tool instances and do NOT stress the convention, so the
-> re-evaluation stays at P4.4. There, **decide whether to promote this convention to an
-> ADR** (it is intentionally NOT an ADR yet — one instance is too few, and `platform_scope`
-> may need a `windows-only` tool to settle sentinel-vs-real; see the handoff note).
+> for whole-tool: self-test green, not the ADR 0007 canon-test suite). A whole-tool's
+> `canonical_version` is NOT a release-gate signal — the ADR 0008 vendoring gate
+> (`version >= 1.0.0`) does not apply to whole-tool units (run-as-is / follow-latest, never
+> vendored). First applied to `tool.canonical-drift-scanner` at P3.6; the discriminating
+> SemVer-heterogeneous second instance is **`psa.py`** (`tool.powershell-static-analyzer`, own
+> SemVer `4.3.0`), registered `kind=tool` at **P4**. **[P4.4 RESOLVED]** with rule-of-two met,
+> the convention is promoted to **ADR 0021** (current-truth view in `governance/SPEC.md`
+> §machinery). `platform_scope` remains `cross-platform` for every whole-tool to date;
+> `windows-enhanced`/`windows-only` stay defined for honest future classification (ADR 0013
+> parity), to be exercised by a future Windows-bound tool.
 
 ### Mid-flight (during writing)
 

@@ -95,6 +95,29 @@ metadata, never conditional fold-in; the heavy marker/hash machinery is localize
 vendored regions while L1/L3 stay light structural conformance. Refines ADR 0014; evolves
 AGENTS.md §6 + TR-SPEC-2).
 
+### Whole-tool registration convention
+
+A whole-tool machinery unit (`kind=tool`: psa.py, the canonical-drift-scanner, the
+canon-manifest-tool, the canon-drift-trigger, the document-conformance-gate) is registered in
+`manifest.jsonl` by filling the region-helper `required` fields with **sentinel values** that carry
+no region meaning: `change_policy=canonical`, `binding_mode=follow-latest`,
+`platform_scope=cross-platform`, `canonical_version` = **the tool's own SemVer** (e.g. `1.0.0` for
+the four reference-code-adjacent tools, `4.3.0` for psa.py), and `tested=true` once the tool's
+**own self-test** passes - re-defined for whole-tool to mean self-test green, not the ADR 0007 canon
+behavioral suite. The region/hash fields are an **observation**-side concern (the whole-tool null
+convention, ADR 0016), not manifest fields, so no manifest null allowance is needed. A whole-tool's
+`canonical_version` is **not** a release-gate signal: the ADR 0008 vendoring gate
+(`version >= 1.0.0`) does not apply to whole-tool units, which are run-as-is / follow-latest and are
+never vendored (only the `reference-code/` region canon is). `platform_scope` is `cross-platform`
+for every whole-tool to date (pure-Python, stdlib-only); `windows-enhanced` / `windows-only` stay
+defined for honest future classification (mirroring ADR 0013 on the code side), to be exercised by a
+future Windows-bound tool.
+
+Governed by [ADR 0021](./adr/0021-whole-tool-registration-convention.md) (whole-tool registration
+convention: sentinel values for the region-helper required fields on a `kind=tool` row; `tested`
+re-defined as self-test-green for whole-tool; the ADR 0008 vendoring gate does not apply to
+whole-tool units; rule-of-two met by psa.py as the SemVer-heterogeneous second instance).
+
 ### Canonical normalized-hash contract
 
 The `hash=` on a canonical marker, and the `*_hash_norm` fields on observations, are a single

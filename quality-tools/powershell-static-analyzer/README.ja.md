@@ -24,7 +24,7 @@ clone も Python 実行も不要で、 最新の mainline バージョンを軽�
 curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION
 ```
 
-これは AI / LLM 駆動のワークフローや CI が、 ローカルにキャッシュした `psa.py` が最新かどうかを判定するための **正規手段** です。 consumer 側に期待される latest-mainline ワークフローの詳細は [SPEC.md §1.4](./SPEC.md#14-versioning) およびリポジトリルートの [`README.md`](../../../README.md) "psa.py Versioning Policy" を参照してください。
+これは AI / LLM 駆動のワークフローや CI が、 ローカルにキャッシュした `psa.py` が最新かどうかを判定するための **正規手段** です。 consumer 側に期待される latest-mainline ワークフローの詳細は [SPEC.md §1.4](./SPEC.md#14-versioning) およびリポジトリルートの [`README.md`](../../README.md) "psa.py Versioning Policy" を参照してください。
 
 ## ⚠️ 免責事項
 
@@ -52,7 +52,7 @@ curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/
   レビューせずに正しさの証明と見なすことは、 ツールの誤用です。
   静的解析ゲートに関する LLM ワークフロー(§3 着手前チェックリスト、
   §8 セルフチェックゲート)は、 リポジトリ全体の
-  [`AGENTS.md`](../../../AGENTS.md) を参照してください。
+  [`AGENTS.md`](../../AGENTS.md) を参照してください。
 - **`psa.py` はガードレールであり、 レビューの代替ではありません。**
   静的解析はコミットをゲートし、 人(あるいは慎重にプロンプトされた
   LLM)レビュアーが設計をゲートします。
@@ -61,7 +61,7 @@ curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/
   も厳格化される可能性があります。 古いバージョンでクリーンだった
   コードベースが、 現行の mainline でクリーンであることは保証され
   ません。 fetch / compare / 再テストの正規ワークフローは、
-  リポジトリルートの [`README.md`](../../../README.md) "psa.py
+  リポジトリルートの [`README.md`](../../README.md) "psa.py
   Versioning Policy" を参照してください。
 - **`psa.py` の提案は適用前に必ずレビューしてください。** インライン
   抑制ディレクティブ (`psa-disable-line` / `psa-disable-next-line` /
@@ -70,14 +70,14 @@ curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/
 
 本リポジトリ内のすべてのアーティファクトに適用される免責事項と
 自己責任条件の完全版については、 ルートの
-[`README.ja.md`](../../../README.ja.md) 「**自己責任でご利用ください
+[`README.ja.md`](../../README.ja.md) 「**自己責任でご利用ください
 (Use at Your Own Risk)**」を参照してください。
 
 ## ライセンス
 
 `psa.py` は本 `ai-generated-artifacts` リポジトリの他のコンテンツと
 同じ **MIT ライセンス** で提供されます。 ライセンス全文はリポジトリ
-ルートの [`LICENSE`](../../../LICENSE) を参照してください。
+ルートの [`LICENSE`](../../LICENSE) を参照してください。
 
 要約: 本アナライザは、 商用 PowerShell 開発ワークフロー組み込みや
 姉妹リポジトリへの組み込みを含むあらゆる目的での使用・改変・配布が
@@ -97,7 +97,7 @@ curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/
 
 なお、 リポジトリ共通のドキュメント言語ポリシーにより、
 `CHANGELOG.md` は **英語のみ** で維持されています。
-詳細は本リポジトリのルート [`README.ja.md`](../../../README.ja.md)
+詳細は本リポジトリのルート [`README.ja.md`](../../README.ja.md)
 の「言語ポリシー」セクションを参照してください。
 
 ## 由来と保守ポリシー
@@ -579,8 +579,8 @@ python3 psa.py --config-check .psa.config.json.template
 
 | スクリプト | パス |
 |:---|:---|
-| `Download-SpeakerDeck.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
-| `Test-PdfMetadata.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
+| `Download-SpeakerDeck.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../scripts/powershell/download-speakerdeck-oracle4engineer/) |
+| `Test-PdfMetadata.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../scripts/powershell/download-speakerdeck-oracle4engineer/) |
 
 ### 外部リポジトリ
 

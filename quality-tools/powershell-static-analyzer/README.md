@@ -28,7 +28,7 @@ You can read the current mainline version cheaply, without cloning or running Py
 curl -sSL https://raw.githubusercontent.com/usui-tk/ai-generated-artifacts/main/quality-tools/powershell-static-analyzer/VERSION
 ```
 
-This is the **canonical way** for AI / LLM-driven workflows and CI to discover whether a locally-cached copy of `psa.py` is current. See [SPEC.md §1.4](./SPEC.md#14-versioning) and the repository-root [`README.md`](../../../README.md) "psa.py Versioning Policy" for the full latest-mainline workflow that consumers are expected to follow.
+This is the **canonical way** for AI / LLM-driven workflows and CI to discover whether a locally-cached copy of `psa.py` is current. See [SPEC.md §1.4](./SPEC.md#14-versioning) and the repository-root [`README.md`](../../README.md) "psa.py Versioning Policy" for the full latest-mainline workflow that consumers are expected to follow.
 
 ## ⚠️ Disclaimer
 
@@ -54,7 +54,7 @@ By relying on its judgements, you acknowledge that:
 - **AI / LLM consumers MUST independently verify the analyzer's
   output.** An LLM that treats `psa.py` 0/0/0 as proof of correctness
   without reviewing the actual code change is misusing the tool. See
-  the repository-wide [`AGENTS.md`](../../../AGENTS.md) for the
+  the repository-wide [`AGENTS.md`](../../AGENTS.md) for the
   expected LLM workflow around static-analysis gates (§3 Pre-Flight
   Checklist, §8 Self-Check Gates).
 - **`psa.py` is a guardrail, not a substitute for review.** Static
@@ -64,7 +64,7 @@ By relying on its judgements, you acknowledge that:
   previously-hidden discipline violations; existing rules may be
   tightened. A codebase that was clean under an older version is not
   guaranteed to be clean under the current mainline. See the
-  repository-root [`README.md`](../../../README.md) "psa.py
+  repository-root [`README.md`](../../README.md) "psa.py
   Versioning Policy" for the canonical fetch / compare / re-test
   workflow.
 - **You will review `psa.py`'s suggestions before applying them.**
@@ -74,14 +74,14 @@ By relying on its judgements, you acknowledge that:
 
 For the full disclaimer and self-responsibility terms that apply to
 all artifacts in this repository, see the root
-[`README.md`](../../../README.md) "Use at Your Own Risk
+[`README.md`](../../README.md) "Use at Your Own Risk
 (Self-Responsibility)".
 
 ## License
 
 `psa.py` is released under the same **MIT License** as the rest of
 this `ai-generated-artifacts` repository. See the
-[`LICENSE`](../../../LICENSE) at the repository root for the full
+[`LICENSE`](../../LICENSE) at the repository root for the full
 license text.
 
 In short: you are free to use, modify, and distribute this analyzer
@@ -586,9 +586,9 @@ The following repositories and PowerShell scripts are verified with
 
 | Script | Path |
 |:---|:---|
-| `Download-SpeakerDeck.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
-| `Test-PdfMetadata.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../powershell/download-speakerdeck-oracle4engineer/) |
-| `Update-WindowsServerIso.ps1` | [`scripts/powershell/update-windows-server-iso/`](../../powershell/update-windows-server-iso/) |
+| `Download-SpeakerDeck.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../scripts/powershell/download-speakerdeck-oracle4engineer/) |
+| `Test-PdfMetadata.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../scripts/powershell/download-speakerdeck-oracle4engineer/) |
+| `Update-WindowsServerIso.ps1` | [`scripts/powershell/update-windows-server-iso/`](../../scripts/powershell/update-windows-server-iso/) |
 
 ### External repositories
 
