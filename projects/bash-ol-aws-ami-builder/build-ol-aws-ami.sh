@@ -2304,20 +2304,52 @@ phase6_nitro_readiness_check() {
   fi
 
   # --- CHECK 1: NVMe host driver (find the EBS/NVMe root at boot) -------------
-  local nvme_mod nvme_initrd="" initrd
+  # nvme.ko must be built into the kernel or present in the initramfs so Nitro
+  # can mount the NVMe-backed EBS root. We confirm (a) the module exists in the
+  # on-disk module tree and (b) it is in the initramfs. dracut initramfs images
+  # vary by compression (gzip/xz/zstd/lz4) and may carry a leading uncompressed
+  # microcode cpio, so a single extractor can fail to read one format while
+  # succeeding on another (observed: OL6's image inspectable on an Ubuntu host,
+  # OL7's not). We therefore try several listing methods; and crucially, if the
+  # initramfs exists but NONE of them can read it, we report INDETERMINATE
+  # (fail-open) instead of FAIL, so a host-side extraction gap never blocks an
+  # otherwise-good build. A hard FAIL is reserved for the case where nvme.ko is
+  # genuinely absent from both the kernel and an inspectable initramfs.
+  local nvme_mod nvme_initrd="" initrd initrd_inspected=0
   nvme_mod="$(printf '%s\n' "${tree}" | grep -E '(^|/)nvme\.ko(\.[a-z0-9]+)?$' | head -1 || true)"
   initrd="$(virt-ls -a "${img}" /boot 2>/dev/null | grep -E "^initramfs-${kver}\.img$" | head -1 || true)"
   [[ -z "${initrd}" ]] && initrd="$(virt-ls -a "${img}" /boot 2>/dev/null | grep -E "initramfs.*${kver}|initrd.*${kver}" | head -1 || true)"
   if [[ -n "${initrd}" ]]; then
     virt-copy-out -a "${img}" "/boot/${initrd}" "${work}/" 2>/dev/null || true
     if [[ -r "${work}/${initrd}" ]]; then
+      local listing="${work}/initrd-listing.txt"; : > "${listing}"
+      # Method 1: unmkinitramfs extraction (handles concatenated early-cpio).
       mkdir -p "${work}/initrd"
-      if ! unmkinitramfs "${work}/${initrd}" "${work}/initrd" 2>/dev/null; then
-        lsinitrd "${work}/${initrd}" 2>/dev/null > "${work}/initrd/_ls.txt" || true
+      if unmkinitramfs "${work}/${initrd}" "${work}/initrd" 2>/dev/null; then
+        find "${work}/initrd" -name '*.ko*' 2>/dev/null >> "${listing}" || true
       fi
-      nvme_initrd="$(find "${work}/initrd" -name '*.ko*' 2>/dev/null | grep -E '(^|/)nvme\.ko(\.[a-z0-9]+)?$' | head -1 || true)"
-      if [[ -z "${nvme_initrd}" && -r "${work}/initrd/_ls.txt" ]]; then
-        nvme_initrd="$(grep -E '(^|/)nvme\.ko' "${work}/initrd/_ls.txt" | head -1 || true)"
+      # Method 2: dracut's own lister, if present on the host.
+      if ! grep -qE '\.ko' "${listing}" 2>/dev/null && command -v lsinitrd >/dev/null 2>&1; then
+        lsinitrd "${work}/${initrd}" 2>/dev/null >> "${listing}" || true
+      fi
+      # Method 3: initramfs-tools lister, if present.
+      if ! grep -qE '\.ko' "${listing}" 2>/dev/null && command -v lsinitramfs >/dev/null 2>&1; then
+        lsinitramfs "${work}/${initrd}" 2>/dev/null >> "${listing}" || true
+      fi
+      # Method 4: best-effort manual decompress + cpio table of contents
+      # (covers single-stream images that the above could not read).
+      if ! grep -qE '\.ko' "${listing}" 2>/dev/null; then
+        local dc
+        for dc in zstdcat xzcat zcat lz4cat; do
+          command -v "${dc}" >/dev/null 2>&1 || continue
+          if "${dc}" < "${work}/${initrd}" 2>/dev/null | cpio -t 2>/dev/null > "${work}/cpio-t.txt" && [[ -s "${work}/cpio-t.txt" ]]; then
+            cat "${work}/cpio-t.txt" >> "${listing}"; break
+          fi
+        done
+      fi
+      if [[ -s "${listing}" ]]; then
+        initrd_inspected=1
+        nvme_initrd="$(grep -E '(^|/)nvme\.ko(\.[a-z0-9]+)?$' "${listing}" | head -1 || true)"
       fi
     fi
   fi
@@ -2325,11 +2357,14 @@ phase6_nitro_readiness_check() {
     log_info "  [CHECK 1] NVMe host driver: PASS (built into the kernel)"
   elif [[ -n "${nvme_initrd}" ]]; then
     log_info "  [CHECK 1] NVMe host driver: PASS (module present in the initramfs)"
+  elif [[ -n "${nvme_mod}" && "${initrd_inspected}" -eq 0 ]]; then
+    log_warn "  [CHECK 1] NVMe host driver: INDETERMINATE (module present on disk; initramfs could not be inspected on this host -- verify the target boots)"
+    indeterminate=1
   elif [[ -n "${nvme_mod}" && -z "${initrd}" ]]; then
-    log_warn "  [CHECK 1] NVMe host driver: INDETERMINATE (module exists; initramfs not inspectable)"
+    log_warn "  [CHECK 1] NVMe host driver: INDETERMINATE (module exists; no initramfs found to inspect)"
     indeterminate=1
   else
-    log_error "  [CHECK 1] NVMe host driver: FAIL (not built-in and not in the initramfs -- Nitro cannot mount the root)"
+    log_error "  [CHECK 1] NVMe host driver: FAIL (not built-in and not in an inspectable initramfs -- Nitro cannot mount the root)"
     fail=1
   fi
 

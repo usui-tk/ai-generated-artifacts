@@ -155,6 +155,21 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- Phase 6 **CHECK 1 (NVMe host driver)** no longer reports a false `FAIL` when
+  the guest's dracut initramfs cannot be read on the build host. dracut images
+  vary by compression (gzip/xz/zstd/lz4) and may carry a leading microcode cpio;
+  an OL7 (UEK R6, 5.4) image was unreadable by the host's `unmkinitramfs` while
+  OL6 was readable, so the old logic mistook "could not inspect" for "driver
+  absent" and aborted the build. CHECK 1 now tries several listing methods
+  (`unmkinitramfs`, then `lsinitrd`/`lsinitramfs`, then a manual decompress +
+  `cpio -t`); when nvme.ko is present on disk but no method can read the
+  initramfs, it reports `INDETERMINATE` (fail-open) rather than `FAIL`. A hard
+  `FAIL` remains only when nvme.ko is absent from both the kernel and an
+  inspectable initramfs. Also recorded the measured baseline in-distro ENA
+  drivers (OL6 `1.1.2` on `kernel-uek-4.1.12-124.48.6.el6uek`, OL7 `2.1.0K` on
+  `kernel-uek-5.4.17-2136.338.4.2.el7uek`) in SPEC A.7 as the rationale for the
+  ENA self-build. See SPEC A.7 and D.21.
+
 - OL6 build no longer aborts at the Cleanup stage on
   `virt-sysprep ... --truncate /etc/machine-id: No such file or directory`.
   Upstream `build-image.sh::image_cleanup()` unconditionally truncates

@@ -432,12 +432,19 @@ OL6 GRUB-legacy `kernel` lines in `grub.conf`/`menu.lst`). It runs after the
 VMDK is produced and before the upload/snapshot/register phases, so a
 non-bootable image is caught before those wasted steps. `enforce` `die`s on a
 blocking finding; `warn` reports without dying; `off` skips it. Results that
-cannot be determined (inspection tools absent, initramfs not extractable) are
+cannot be determined (inspection tools absent, initramfs not readable) are
 **fail-open** — the check warns and continues, so a missing tool never aborts an
-otherwise-good build. Detection only; the wrapper performs no remediation. The
-inspection tools (`libguestfs-tools`, and `unmkinitramfs` from
-`initramfs-tools-core` or `lsinitrd`) are the same family already required for
-the upstream `virt-sparsify` step.
+otherwise-good build. The NVMe check (CHECK 1) inspects the initramfs with
+several methods (`unmkinitramfs`, then `lsinitrd`/`lsinitramfs`, then a manual
+decompress + `cpio -t`) because dracut images vary by compression
+(gzip/xz/zstd/lz4) and may carry a leading microcode cpio; when the module is on
+disk but **no** method can read the initramfs on the build host, CHECK 1 reports
+`INDETERMINATE` rather than `FAIL` (a hard `FAIL` is reserved for nvme.ko being
+genuinely absent from both the kernel and an inspectable initramfs). Detection
+only; the wrapper performs no remediation. The inspection tools
+(`libguestfs-tools`, and `unmkinitramfs` from `initramfs-tools-core` or
+`lsinitrd`) are the same family already required for the upstream
+`virt-sparsify` step.
 
 After the four boot checks, Phase 6 also prints an **advisory Nitro instance
 assurance report**: it classifies each Nitro generation (v2–v6) as `ASSURED`,
@@ -466,6 +473,24 @@ Linux driver (`ENA_Linux_Best_Practices.rst`, `RELEASENOTES.md`). The
 per-generation family lists are representative, not exhaustive.
 
 ### ENA driver self-build (`--skip-ena-driver`)
+
+**Rationale — baseline in-distro ENA drivers (measured).** The default OL images
+ship an ENA driver bundled in `kernel-uek` that is too old for ENAv3 (Nitro
+v4+). The Phase 6 assurance report measured the following on freshly built
+images, which is the concrete justification for self-building a newer ENA driver
+when producing an AWS-optimized AMI:
+
+| OL | Kernel package (UEK) | In-distro ENA (`modinfo`) | ENAv3 status (amzn-drivers) | Self-build pin |
+|----|----------------------|---------------------------|-----------------------------|----------------|
+| OL6 U10 | `kernel-uek-4.1.12-124.48.6.el6uek.x86_64` | `1.1.2` | `< 1.2.0` → ENAv3 ENI attach **fails** on Nitro v4+ | `ena_linux_2.5.0` |
+| OL7 U9  | `kernel-uek-5.4.17-2136.338.4.2.el7uek.x86_64` | `2.1.0K` | `1.2.0`–`< 2.2.9` → ENAv3 **performance degradation** | `ena_linux_2.17.0` |
+
+Both bundled drivers are below the `2.2.9` full-ENAv3 threshold, so on Nitro v4+
+instances the stock images either fail to attach an ENAv3 ENI (OL6) or run
+degraded (OL7). The pinned self-build versions (`2.5.0` / `2.17.0`) are both
+`>= 2.2.9`, restoring full ENAv3 support. (Versions/kernels above are the
+measured baseline as of 2026-06 and will shift as the OL ISOs receive errata;
+the installer always reports the before/after `modinfo` version.)
 
 By default the wrapper produces an **AWS-optimized AMI**: Phase 3 appends a hook
 to the upstream `cloud/aws/provision.sh` that builds and installs a pinned
@@ -2073,6 +2098,43 @@ defensive measure.
 static checks cannot see, because the failing command lives in upstream content
 run at build time. The `%post` lines are part of the wrapper-synthesized OL6
 kickstart, so they travel with every build.
+
+---
+
+## D.21 OL7 Phase 6 CHECK 1 false `FAIL` when the dracut initramfs is unreadable on the host
+
+**Symptom.** An OL7 build produces a good VMDK, but the Phase 6 NVMe check fails
+even though nvme.ko is present, aborting before the upload phases:
+
+```
+[CHECK 1] NVMe host driver: FAIL (not built-in and not in the initramfs ...)
+```
+
+while the equivalent OL6 build passes CHECK 1 with "module present in the
+initramfs".
+
+**Cause.** CHECK 1 confirms nvme.ko is in the kernel's initramfs by extracting
+it on the **build host** (Ubuntu) with `unmkinitramfs`. dracut initramfs images
+differ by compression (gzip/xz/zstd/lz4) and may prepend an uncompressed
+microcode cpio; the OL6 image happened to be readable by the host's
+`unmkinitramfs` while the OL7 (UEK R6, 5.4) image was not. The original logic
+treated "initramfs file found but yielded no nvme.ko" as a hard `FAIL`, so an
+inability to *read* the archive on the host was indistinguishable from the
+driver being genuinely absent — a false negative, since a cloud (generic)
+initramfs does include nvme.
+
+**Fix.** CHECK 1 now tries several listing methods (`unmkinitramfs`, then
+`lsinitrd`/`lsinitramfs`, then a manual decompress + `cpio -t`) and tracks
+whether *any* of them could read the archive. When nvme.ko exists in the on-disk
+module tree but no method can read the initramfs on the host, CHECK 1 reports
+`INDETERMINATE` (fail-open: warn + continue) instead of `FAIL`. A hard `FAIL` is
+reserved for nvme.ko being absent from both the kernel and an inspectable
+initramfs. See A.7.
+
+**Prevention.** Detection robustness only; it does not change the produced image.
+If CHECK 1 is `INDETERMINATE`, confirm the AMI boots on a Nitro instance (the
+generic cloud initramfs normally includes nvme); the ENA self-build's `dracut -f`
+also regenerates the initramfs for the target kernel.
 
 ---
 
