@@ -151,9 +151,9 @@ and D.3 for the full rationale.
 7. Argument parsing                   usage, parse_args
 8. Environment loading                parse_ol_version_from_iso, load_env
 9. EC2 helpers                        detect_ec2_environment, resolve_aws_region, guide_ec2_kvm_issue
-10. Phase 0–8 functions               phase0_preflight_checks ... phase8_register_ami
+10. Phase 0–9 functions               phase0_preflight_checks ... phase9_register_ami
 11. Helper functions interleaved      detect_qemu_user, derive_oracle_checksum_url, detect_os_variant
-12. main()                            Calls phase0..phase8 with skip/build-only branching
+12. main()                            Calls phase0..phase9 with skip/build-only branching
 13. Bottom-of-file invocation         main "$@"
 ```
 
@@ -174,7 +174,7 @@ repository-level `scripts/README.md` policy:
 
 ### Numbering rules
 
-- Phases are numbered **0 through 8 with no gaps** (no `Phase 1.5`).
+- Phases are numbered **0 through 9 with no gaps** (no `Phase 5.5`).
 - Phase function names follow `phase{N}_<verb>_<noun>()` (snake_case).
 - Phase 0 is preflight; subsequent phases assume Phase 0 passed.
 
@@ -188,9 +188,10 @@ repository-level `scripts/README.md` policy:
 | 3 | `phase3_clone_repository` | Build | `git clone --depth 1` of oracle/oracle-linux. **For OL7 only**: rewrites the OL7-blocking line in `cloud/aws/image-scripts.sh` to a no-op (`.ol7-patch.bak` backup left in place). See D.10. |
 | 4 | `phase4_prepare_env_properties` | Build | Resolve ISO checksum, OS_VARIANT, generate `env.properties.local` |
 | 5 | `phase5_run_build` | Build | Invoke `bin/build-image.sh`; produce VMDK |
-| 6 | `phase6_upload_to_s3` | AWS | `aws s3 cp` the VMDK |
-| 7 | `phase7_import_snapshot` | AWS | `import-snapshot` + polling loop |
-| 8 | `phase8_register_ami` | AWS | `register-image` with conditional `--tpm-support` |
+| 6 | `phase6_nitro_readiness_check` | Validation | Offline Nitro boot-readiness gate (NVMe host / ENA / fstab / bootloader) + instance-assurance report |
+| 7 | `phase7_upload_to_s3` | AWS | `aws s3 cp` the VMDK |
+| 8 | `phase8_import_snapshot` | AWS | `import-snapshot` + polling loop |
+| 9 | `phase9_register_ami` | AWS | `register-image` with conditional `--tpm-support` |
 
 ### Phase groups (semantic)
 
@@ -214,7 +215,7 @@ Every phase MUST:
 
 - `--skip-prereq` → Skip Phase 1 only (Phase 2 still runs, since ACLs may
   need refreshing even when packages are installed).
-- `--build-only` → Run through Phase 5, then exit 0.
+- `--build-only` → Run through Phase 6 (VMDK build + Nitro readiness check), then exit 0.
 - `--skip-aws-import` → Synonym for `--build-only`.
 
 ---
@@ -417,7 +418,7 @@ anaconda in tmux and is near-silent there). The default is short because this
 script is usually run interactively; it does not affect completion detection.
 
 A third wrapper key, `NITRO_PRECHECK` (`enforce` | `warn` | `off`, default
-`enforce`; *not* passed through to upstream), gates a **Phase 5.5 Nitro
+`enforce`; *not* passed through to upstream), gates a **Phase 6 Nitro
 readiness pre-check**: an offline, read-only inspection of the freshly built
 VMDK (via libguestfs, `LIBGUESTFS_BACKEND=direct`, targeting the UEK kernel)
 that adapts the logic of AWS's NitroInstanceChecks to the built image rather
@@ -438,7 +439,7 @@ inspection tools (`libguestfs-tools`, and `unmkinitramfs` from
 `initramfs-tools-core` or `lsinitrd`) are the same family already required for
 the upstream `virt-sparsify` step.
 
-After the four boot checks, Phase 5.5 also prints an **advisory Nitro instance
+After the four boot checks, Phase 6 also prints an **advisory Nitro instance
 assurance report**: it classifies each Nitro generation (v2–v6) as `ASSURED`,
 `SUPPORTED` (works but potentially suboptimal), or `NOT-ASSURED` and lists
 representative instance families per generation. The signal is the ENA driver
@@ -731,10 +732,10 @@ Before writing any new helper function:
   `${KEY:+KEY=${KEY}}` form to emit-or-omit cleanly.
 - **Phase 5** explicitly exports `LIBGUESTFS_BACKEND=direct` before
   invoking `bin/build-image.sh`. See D.6.
-- **Phase 7** polling loop has a 90-minute hard timeout (90 iterations
+- **Phase 8** polling loop has a 90-minute hard timeout (90 iterations
   of 60s) and treats describe-import-snapshot-tasks API failures as
   transient (retry, don't abort).
-- **Phase 8** conditionally adds `--tpm-support v2.0` only when
+- **Phase 9** conditionally adds `--tpm-support v2.0` only when
   `BOOT_MODE` is `uefi` or `uefi-preferred`. NitroTPM with `legacy-bios`
   AMIs is invalid.
 
@@ -853,7 +854,7 @@ isolation is preserved by `S3_KEY_PREFIX="ol{N}-ami-import"` in each env
 template, which causes the staged objects to land under
 `s3://my-oracle-linux-ami-import-bucket/ol{N}-ami-import/...`.
 
-The bucket itself is created lazily by `phase6_upload_to_s3` if missing
+The bucket itself is created lazily by `phase7_upload_to_s3` if missing
 (public access blocked), so the operator does not need to pre-create it.
 
 ### B.3.2 Dynamic `AWS_REGION` resolution
@@ -1284,7 +1285,7 @@ Before any commit to this directory, all of the following must pass.
 - [ ] Phase 0 self-diagnosis (`detect_ec2_environment` / `guide_ec2_kvm_issue`) emits the appropriate Case A/B/C message on a non-KVM host (per B.1)
 - [ ] When `ISO_URL` references OL7, the OL7 warning banner appears in `load_env` output
 - [ ] When `ISO_URL` references OL6, the OL6 warning banner appears in `load_env` output and the three runtime modifications (Patch #1, Patch #2, synthesized `distr/ol6-slim/`) are applied in Phase 3
-- [ ] Phase 5.5 Nitro readiness pre-check (`NITRO_PRECHECK`, default `enforce`) runs after the VMDK is produced: it `die`s on a blocking finding (NVMe host / ENA / fstab / bootloader) before the upload phases, is fail-open when inspection tools are absent, and is suppressible via `warn`/`off` (see A.7). Verified against a known-good image (e.g. OL10 PASS)
+- [ ] Phase 6 Nitro readiness pre-check (`NITRO_PRECHECK`, default `enforce`) runs after the VMDK is produced: it `die`s on a blocking finding (NVMe host / ENA / fstab / bootloader) before the upload phases, is fail-open when inspection tools are absent, and is suppressible via `warn`/`off` (see A.7). Verified against a known-good image (e.g. OL10 PASS)
 
 ### Documentation checks
 
@@ -1449,7 +1450,7 @@ never matched.
 
 ## D.9 Phase polling loop empty-status infinite loop
 
-**Symptom**: Phase 7 could hang indefinitely if
+**Symptom**: Phase 8 could hang indefinitely if
 `describe-import-snapshot-tasks` returned an empty `Status` field
 (transient AWS API issue).
 

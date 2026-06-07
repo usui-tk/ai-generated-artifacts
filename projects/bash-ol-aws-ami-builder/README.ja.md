@@ -360,7 +360,7 @@ vi env.properties.local
 |-----------|------|
 | `--skip-prereq` | KVM 等のパッケージ導入(Phase 1)をスキップ。2 回目以降の実行で時間短縮 |
 | `--build-only` | VMDK 生成(Phase 5)までで停止。AWS 取り込みは別途実行したい場合 |
-| `--skip-aws-import` | Phase 6〜8 をスキップ(`--build-only` と同等) |
+| `--skip-aws-import` | Phase 7〜9 をスキップ(`--build-only` と同等) |
 
 ### 6.3 Phase 0 の自動診断機能
 
@@ -597,7 +597,7 @@ sudo usermod -aG kvm,libvirt $USER
 # グループ変更を反映するため再ログインが必要
 ```
 
-### Phase 7 で `ClientError: Unsupported kernel version`
+### Phase 8 で `ClientError: Unsupported kernel version`
 
 → AWS VM Import が OL10 のカーネルを未認識。`import-image` 経由ならこのエラーになりますが、本スクリプトは `import-snapshot` を使うため**本来は発生しません**。発生した場合は AWS サポートに OL10 サポート追加を依頼してください。
 

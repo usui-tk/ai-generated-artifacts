@@ -358,7 +358,7 @@ Expected total time: **40–90 minutes** (depends on bandwidth and instance perf
 |--------|----------|
 | `--skip-prereq` | Skip KVM package installation (Phase 1). Useful for re-runs. |
 | `--build-only` | Stop after VMDK is built (Phase 5). Run the AWS import separately. |
-| `--skip-aws-import` | Skip Phases 6–8 (equivalent to `--build-only`). |
+| `--skip-aws-import` | Skip Phases 7–9 (equivalent to `--build-only`). |
 
 ### 6.3 Phase 0 self-diagnosis
 
@@ -594,7 +594,7 @@ sudo usermod -aG kvm,libvirt $USER
 # Log out and back in for the new groups to take effect
 ```
 
-### Phase 7: `ClientError: Unsupported kernel version`
+### Phase 8: `ClientError: Unsupported kernel version`
 
 → AWS VM Import does not recognize the OL10 kernel. This is the typical failure with `import-image`, but **should not occur** with this script since it uses `import-snapshot`. If it does occur, file a support request asking AWS to extend OL10 support.
 

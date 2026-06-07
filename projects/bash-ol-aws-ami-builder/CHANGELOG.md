@@ -21,7 +21,7 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
-- Added a **Phase 5.5 Nitro readiness pre-check** (`NITRO_PRECHECK`,
+- Added a **Phase 6 Nitro readiness pre-check** (`NITRO_PRECHECK`,
   `enforce` | `warn` | `off`, default `enforce`; a wrapper key). After the VMDK
   is built and before the upload/snapshot/register phases, it inspects the image
   **offline and read-only** (libguestfs, `LIBGUESTFS_BACKEND=direct`, targeting
@@ -38,7 +38,7 @@ This CHANGELOG is **English only** per the repository-wide
   remediation. Validated against a known-good OL10 image (all four checks PASS).
   See SPEC A.7 and Part C.
 
-- Phase 5.5 also emits an **advisory Nitro instance assurance report**: it
+- Phase 6 also emits an **advisory Nitro instance assurance report**: it
   classifies each Nitro generation (v2–v6) as `ASSURED` / `SUPPORTED` /
   `NOT-ASSURED` and lists representative instance families per generation. The
   signal is ENA capability — the standalone amzn driver `MODULE_VERSION` when

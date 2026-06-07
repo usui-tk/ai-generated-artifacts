@@ -65,9 +65,10 @@
 #   Phase 3:   Clone the oracle/oracle-linux repository
 #   Phase 4:   Resolve ISO checksum and generate env.properties
 #   Phase 5:   Run oracle-linux-image-tools to produce a VMDK
-#   Phase 6:   Upload the VMDK to S3
-#   Phase 7:   Convert the VMDK to an EBS snapshot via import-snapshot
-#   Phase 8:   Register the snapshot as an AMI
+#   Phase 6:   Nitro readiness pre-check (offline image inspection)
+#   Phase 7:   Upload the VMDK to S3
+#   Phase 8:   Convert the VMDK to an EBS snapshot via import-snapshot
+#   Phase 9:   Register the snapshot as an AMI
 #
 # ----- Options ----------------------------------------------------------------
 #   --env <file>          : Path to the environment properties file (required)
@@ -333,7 +334,7 @@ load_env() {
   # default is short because this script is usually run interactively, not in
   # CI, where a long silent gap reads as a hang.
   : "${HEARTBEAT_INTERVAL_SEC:=20}"
-  # Nitro readiness pre-check mode (Phase 5.5). Offline, read-only inspection of
+  # Nitro readiness pre-check mode (Phase 6). Offline, read-only inspection of
   # the built image for the AWS Nitro boot essentials (NVMe host driver, ENA
   # driver, UUID/LABEL-based fstab and bootloader root=), run after the VMDK is
   # produced and before the upload/snapshot/register phases so a non-bootable
@@ -2158,9 +2159,9 @@ phase5_run_build() {
 }
 
 #------------------------------------------------------------------------------
-# Phase 6: Upload the VMDK to S3
+# Phase 6: Nitro readiness pre-check (offline image inspection)
 #------------------------------------------------------------------------------
-phase5_5_nitro_readiness_check() {
+phase6_nitro_readiness_check() {
   # Offline, read-only Nitro boot-readiness gate. Adapts the logic of AWS's
   # NitroInstanceChecks to inspect the BUILT IMAGE (no EC2 launch) via
   # libguestfs, targeting the UEK kernel. Blocking findings abort the run
@@ -2173,7 +2174,7 @@ phase5_5_nitro_readiness_check() {
     return 0
   fi
 
-  log_step "Phase 5.5: Nitro readiness pre-check (offline image inspection)"
+  log_step "Phase 6: Nitro readiness pre-check (offline image inspection)"
 
   local img="${VMDK_PATH:-}"
   if [[ -z "${img}" || ! -f "${img}" ]]; then
@@ -2388,8 +2389,9 @@ phase5_5_nitro_readiness_check() {
   fi
 }
 
-phase6_upload_to_s3() {
-  log_step "Phase 6: Uploading VMDK to S3"
+# Phase 7: Upload the VMDK to S3
+phase7_upload_to_s3() {
+  log_step "Phase 7: Uploading VMDK to S3"
 
   local vmdk_filename
   vmdk_filename=$(basename "${VMDK_PATH}")
@@ -2416,10 +2418,10 @@ phase6_upload_to_s3() {
 }
 
 #------------------------------------------------------------------------------
-# Phase 7: Convert the VMDK to an EBS snapshot via import-snapshot
+# Phase 8: Convert the VMDK to an EBS snapshot via import-snapshot
 #------------------------------------------------------------------------------
-phase7_import_snapshot() {
-  log_step "Phase 7: Creating EBS snapshot via import-snapshot"
+phase8_import_snapshot() {
+  log_step "Phase 8: Creating EBS snapshot via import-snapshot"
 
   # Confirm that the vmimport role exists
   if ! aws iam get-role --role-name "${VMIMPORT_ROLE_NAME}" >/dev/null 2>&1; then
@@ -2510,10 +2512,10 @@ phase7_import_snapshot() {
 }
 
 #------------------------------------------------------------------------------
-# Phase 8: Register the snapshot as an AMI
+# Phase 9: Register the snapshot as an AMI
 #------------------------------------------------------------------------------
-phase8_register_ami() {
-  log_step "Phase 8: Registering AMI via register-image"
+phase9_register_ami() {
+  log_step "Phase 9: Registering AMI via register-image"
 
   # Build the register-image argument list.
   # NitroTPM (--tpm-support) requires UEFI boot; it is incompatible with
@@ -2581,7 +2583,7 @@ main() {
   phase3_clone_repository
   phase4_prepare_env_properties
   phase5_run_build
-  phase5_5_nitro_readiness_check
+  phase6_nitro_readiness_check
 
   if [[ ${BUILD_ONLY} -eq 1 || ${SKIP_AWS_IMPORT} -eq 1 ]]; then
     log_info "Build-only mode. Skipping AWS import phases."
@@ -2589,9 +2591,9 @@ main() {
     exit 0
   fi
 
-  phase6_upload_to_s3
-  phase7_import_snapshot
-  phase8_register_ami
+  phase7_upload_to_s3
+  phase8_import_snapshot
+  phase9_register_ami
 }
 
 main "$@"
