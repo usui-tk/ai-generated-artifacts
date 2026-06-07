@@ -174,6 +174,19 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Docs (no behaviour change):** SPEC **A.4 (Logging Conventions)** had drifted
+  behind the logging framework that Part E documents. A.4 listed only
+  `[STEP]/[INFO]/[WARN]/[ERROR]` (missing `[BUILD]`, `[DEBUG]`, `[EXTERNAL]`),
+  forbade "new markers (`[DEBUG]`, ...)" even though `[DEBUG]` now exists, omitted
+  the optional `[OLAWS-CODE]` from the line format, and stated "INFO/WARN/STEP go
+  to stdout" when `log_warn` (like `log_error`) writes to **stderr**. A.4 now lists
+  the full marker set with destinations, notes `log_step` is a banner with no
+  literal `[STEP]` tag, records the unified `YYYY-MM-DD HH:MM:SS` timestamp and the
+  optional logic-code, corrects the stderr routing (`[WARN]`/`[ERROR]`), and defers
+  the authoritative axis detail to Part E (no duplication). README log text
+  unchanged: the README defers logging conventions to SPEC and carries no
+  marker/routing table to mirror.
+
 - **Docs/comments (no behaviour change):** `--build-only` and `--skip-aws-import`
   were described three different ways. The script header said `--skip-aws-import`
   "Skip Phases 6-8" and `--build-only` "Run through Phase 5 only", and the README

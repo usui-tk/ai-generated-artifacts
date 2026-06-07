@@ -224,24 +224,40 @@ Every phase MUST:
 
 ### Markers (color-coded)
 
-| Marker | Helper | ANSI Color | Semantic |
-|--------|--------|------------|----------|
-| `[STEP]` | `log_step` | Bold green | Phase header banner |
-| `[INFO]` | `log_info` | Bold blue | Informational; progress |
-| `[WARN]` | `log_warn` | Bold yellow | Degraded but non-fatal |
-| `[ERROR]` | `log_error` | Bold red | Failure; usually followed by `die` |
+| Marker | Helper | ANSI Color | Destination | Semantic |
+|--------|--------|------------|-------------|----------|
+| (banner) | `log_step` | Bold green | stdout | Phase header banner (`==========`; carries no literal `[STEP]` tag) |
+| `[INFO]` | `log_info` | Bold blue | stdout | Informational; progress |
+| `[WARN]` | `log_warn` | Bold yellow | **stderr** | Degraded but non-fatal advisory |
+| `[ERROR]` | `log_error` | Bold red | **stderr** | Failure; usually followed by `die` |
+| `[BUILD]` | `log_progress` | Bold cyan | stdout | Wrapper build-phase heartbeat |
+| `[DEBUG]` | `log_debug` | (none) | **file always**; console only with `--debug` | Verbose diagnostics |
+| `[EXTERNAL]` | `log_external` | Grey | stdout | A line re-emitted from an invoked external tool, attributed to its script |
+
+This table is the Part A summary; **Part E is the authoritative, fuller
+description** of the three logging axes (severity / source / logic-code) and the
+file-logging behaviour. Do not duplicate Part E here — extend Part E when the
+logging model changes.
 
 ### Line format
 
 ```
-[MARKER] YYYY-MM-DD HH:MM:SS <message>
+[SEVERITY]  YYYY-MM-DD HH:MM:SS  [OLAWS-CODE]  <message>
 ```
 
-- The timestamp is local wall-clock time (`date '+%Y-%m-%d %H:%M:%S'`).
-- The marker / color combination is the only acceptable styling. Do not
-  invent new markers (`[DEBUG]`, `[OK]`, `[!]`); they break the visual
-  scan pattern that operators rely on across many runs.
-- All ERROR output goes to `>&2`; INFO/WARN/STEP go to stdout.
+- The timestamp is local wall-clock time (`date '+%Y-%m-%d %H:%M:%S'`), **unified
+  to this `YYYY-MM-DD HH:MM:SS` form on every timestamped channel** (including the
+  `[BUILD]` heartbeat and the `[EXTERNAL]` re-emission). The phase banner
+  (`log_step`) is the one channel with no timestamp.
+- The `[OLAWS-<AREA><NN>]` logic-code tag is **optional**: it appears only on
+  curated decision points and the Phase-6 assurance checks, never on every line
+  (catalogue in Part E.4).
+- Markers are a **curated, append-only** set (Part E): add a new marker only for a
+  genuine new severity or source, never an ad-hoc one-off (`[OK]`, `[!]`), so the
+  visual scan pattern operators rely on across many runs stays stable.
+- `[WARN]` and `[ERROR]` go to `>&2` (stderr); `[INFO]`, the phase banner, and
+  `[BUILD]` go to stdout; `[DEBUG]` goes to the log file always and to the console
+  only with `--debug`.
 
 ### Banner blocks
 
