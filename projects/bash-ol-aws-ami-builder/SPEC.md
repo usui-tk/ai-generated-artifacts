@@ -1986,6 +1986,52 @@ surface further bash-4.1 incompatibilities, which are addressed as they appear.
 
 ---
 
+## D.20 OL6 Cleanup fails: `virt-sysprep --truncate /etc/machine-id` (no systemd)
+
+**Symptom.** With the D.19 fix in place an OL6 build now installs and provisions
+successfully (SELinux relabel, "Finishing off"), then aborts in the upstream
+**Cleanup** stage:
+
+```
+[   2.9] Performing "customize" ...
+[   2.9] Truncating: /etc/machine-id
+virt-sysprep: error: libguestfs error: truncate: open: /etc/machine-id: No such file or directory
+-> build-image.sh failed (exit 1)
+```
+
+**Cause.** Upstream `build-image.sh::image_cleanup()` runs, unconditionally:
+
+```
+virt-sysprep --delete "${BUILD_INFO}" \
+  --truncate /etc/machine-id \
+  --truncate /etc/resolv.conf \
+  -a .../VM.qcow2 "${virt_sysprep_args[@]}"
+```
+
+`/etc/machine-id` is a **systemd** artifact. OL6 uses Upstart and has no
+`/etc/machine-id`, so `--truncate` (which opens the file) fails and aborts the
+build. OL7+ ship systemd, so the file exists and the truncate succeeds — the
+defect is OL6-specific. The `cloud::sysprep_args` hook only *appends* arguments,
+so the hardcoded `--truncate` cannot be removed without patching `build-image.sh`
+itself. (The fact that OL7+ succeed also proves virt-sysprep's built-in
+`machine-id` operation *empties* the file rather than removing it — otherwise the
+subsequent `--truncate` would fail there too.)
+
+**Fix.** Create an empty `/etc/machine-id` in the OL6 guest in the synthesized
+`distr/ol6-slim/ol6-ks.cfg` `%post` (`: > /etc/machine-id`), so OL6 reaches the
+same on-disk state OL7+ are already in when `virt-sysprep` runs. This is
+upstream-agnostic (no patch to `build-image.sh`) and harmless: an empty
+`/etc/machine-id` is the standard "regenerate on first boot" marker. `%post` also
+creates `/etc/resolv.conf` if absent (the next `--truncate` target) as a
+defensive measure.
+
+**Prevention.** This is another systemd-vs-Upstart skew (cf. D.19) that wrapper
+static checks cannot see, because the failing command lives in upstream content
+run at build time. The `%post` lines are part of the wrapper-synthesized OL6
+kickstart, so they travel with every build.
+
+---
+
 ## Appendix: How to add support for a new OL major release
 
 When Oracle ships OL11:

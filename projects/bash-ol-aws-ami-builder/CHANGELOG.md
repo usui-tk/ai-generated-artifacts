@@ -128,6 +128,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- OL6 build no longer aborts at the Cleanup stage on
+  `virt-sysprep ... --truncate /etc/machine-id: No such file or directory`.
+  Upstream `build-image.sh::image_cleanup()` unconditionally truncates
+  `/etc/machine-id` (a systemd artifact); OL6 uses Upstart and has no such file,
+  so the truncate aborted the whole build after a successful install and
+  provisioning. The synthesized OL6 kickstart `%post` now creates an empty
+  `/etc/machine-id` (and `/etc/resolv.conf` if absent), so OL6 reaches the same
+  state OL7+ are already in when `virt-sysprep` runs — upstream-agnostic, no
+  patch to `build-image.sh`, and harmless (an empty `/etc/machine-id` is the
+  standard regenerate-on-first-boot marker). OL7/8/9/10 were never affected.
+  See SPEC D.20.
+
 - OL6 build no longer aborts at provisioning on `declare: -g: invalid option`.
   Upstream `env.properties.defaults` ends with `declare -gA REPO`; the `-g`
   (global) flag is bash 4.2+, but that file is concatenated first into the

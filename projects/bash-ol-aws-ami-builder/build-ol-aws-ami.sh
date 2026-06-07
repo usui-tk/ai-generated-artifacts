@@ -1519,6 +1519,18 @@ if [[ "${TMP_IN_TMPFS,,}" == "yes" ]]; then
   echo "tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0" >> /etc/fstab
 fi
 
+# virt-sysprep prerequisite (see SPEC D.20). The upstream image_cleanup() runs
+#   virt-sysprep ... --truncate /etc/machine-id --truncate /etc/resolv.conf ...
+# unconditionally. OL6 uses Upstart (no systemd), so /etc/machine-id does not
+# exist and that --truncate aborts the entire build at the Cleanup stage. Create
+# the file (empty) so OL6 reaches the same state the systemd distros (OL7+) are
+# already in when virt-sysprep runs. An empty /etc/machine-id is also the
+# standard "regenerate on first boot" marker, so this is harmless on OL6.
+: > /etc/machine-id
+# resolv.conf is the next --truncate target; create it only if absent so a real
+# one written during install is left intact (virt-sysprep blanks it afterwards).
+[[ -e /etc/resolv.conf ]] || : > /etc/resolv.conf
+
 %end
 EOF_OL6_KS
 
