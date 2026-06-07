@@ -2292,6 +2292,47 @@ tool's accepted syntax, not the build host's modern tool (cf. D.18, D.19, D.20).
 
 ---
 
+## D.25 AWS `Get System Log` is empty: serial console (`ttyS0`) missing from the kernel cmdline
+
+**Symptom.** A built AMI boots and is reachable, but the EC2 console
+(`Get System Log` / `get-console-output`) shows nothing — no kernel ring buffer,
+no boot messages. This is what made the OL6 SSH failure (D.24) so painful to
+diagnose: with no console output there was no way to see *why* the instance was
+unhealthy.
+
+**Cause.** AWS captures only what the guest writes to the serial port,
+`ttyS0`. Neither tier carried it:
+- **OL6** — the synthesized kickstart set the kernel cmdline to `console=tty0`
+  only, and a `%post` line then actively **stripped** any `console=ttyS0` from
+  `/boot/grub/grub.conf` ("re-enabled at runtime by builder" — but nothing
+  re-enabled it). Net: VGA console only.
+- **OL7+** — the upstream `GRUB_CMDLINE_LINUX` carries `console=tty0` but not
+  `console=ttyS0`, and the wrapper never added it.
+
+**Fix (per-OS, isolated).** Both tiers now ensure
+`console=tty0 console=ttyS0,115200n8` on the kernel cmdline, each via its own
+mechanism so a change to one cannot regress the other:
+- **OL6 (GRUB Legacy)** — the kickstart `%post` strip is replaced by an
+  idempotent append of `console=ttyS0,115200n8` after `console=tty0` in
+  `/boot/grub/grub.conf`.
+- **OL7+ (GRUB2)** — a new Phase-3 hook
+  (`[ol-aws-ami-builder PATCH serial-console]`) injected into
+  `cloud/aws/provision.sh` appends `console=ttyS0,115200n8` to
+  `GRUB_CMDLINE_LINUX` and runs `grub2-mkconfig`. It is **guarded on
+  `/etc/default/grub`**, which exists only on GRUB2, so it is a clean no-op on
+  OL6 — the two paths never overlap.
+
+**Verification (CHECK 5, advisory).** Phase 6 adds a serial-console check that
+reads the located bootloader config and reports whether `console=ttyS0` is on
+the kernel cmdline. It is **advisory** (warn only, never fails the gate): a
+missing serial console costs observability, not bootability, so it must not
+block an otherwise-bootable AMI. Because the fix above sets it deterministically
+*in the same build*, a CHECK 5 warning is a real signal that the fix did not take
+effect (the check is one `fail=1` away from fatal if a stricter policy is ever
+wanted).
+
+---
+
 ## Appendix: How to add support for a new OL major release
 
 When Oracle ships OL11:

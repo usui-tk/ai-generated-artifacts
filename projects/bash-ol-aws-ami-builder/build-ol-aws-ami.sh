@@ -1193,6 +1193,69 @@ OLAWS_NITRO_BODY
     log_warn "cloud/aws/provision.sh not found; skipping Nitro initramfs-drivers hook"
   fi
 
+  # cloud/aws/provision.sh serial-console hook (GRUB2 / OL7+).
+  #
+  # AWS 'Get System Log' (the instance console) only captures output sent to the
+  # serial port ttyS0. The upstream OL7+ GRUB_CMDLINE_LINUX carries console=tty0
+  # but NOT console=ttyS0, so a built AMI boots fine yet the console log is empty
+  # -- which is exactly what made the OL6 SSH failure (D.24) so hard to debug.
+  # This hook ensures 'console=tty0 console=ttyS0,115200n8' on the GRUB2 kernel
+  # cmdline and regenerates grub.cfg. It is GUARDED on /etc/default/grub, which
+  # exists only on GRUB2 systems (OL7+); on OL6 (GRUB Legacy) it is a no-op, so
+  # OL6's own kickstart handles the serial console (per-OS isolation -- an OL7+
+  # change cannot regress OL6, and vice-versa). Idempotent via the marker and an
+  # internal 'already has console=ttyS0' guard.
+  local serial_body
+  serial_body="$(cat <<'OLAWS_SERIAL_BODY'
+#!/bin/sh
+# Ensure the AWS serial console (ttyS0) is on the GRUB2 kernel cmdline so
+# 'Get System Log' captures boot output. GRUB2 only (guarded on /etc/default/grub).
+set -u
+[ -f /etc/default/grub ] || { echo "[serial-console] no /etc/default/grub (GRUB Legacy?); skipping"; exit 0; }
+if grep -q 'console=ttyS0' /etc/default/grub; then
+  echo "[serial-console] console=ttyS0 already present in /etc/default/grub"
+else
+  # Append ttyS0 inside the existing GRUB_CMDLINE_LINUX="...".
+  sed -i -e 's/\(GRUB_CMDLINE_LINUX="[^"]*\)"/\1 console=ttyS0,115200n8"/' /etc/default/grub
+  # Make sure console=tty0 is also present (kept as the primary VGA console).
+  grep -q 'console=tty0' /etc/default/grub || \
+    sed -i -e 's/\(GRUB_CMDLINE_LINUX="\)/\1console=tty0 /' /etc/default/grub
+  echo "[serial-console] added console=ttyS0,115200n8 to GRUB_CMDLINE_LINUX"
+fi
+# Regenerate grub.cfg at the correct path (legacy-bios AMIs use /boot/grub2).
+if [ -d /sys/firmware/efi ] && [ -f /boot/efi/EFI/redhat/grub.cfg ]; then
+  grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg || echo "[serial-console] WARNING: grub2-mkconfig (EFI) failed"
+elif [ -f /boot/grub2/grub.cfg ]; then
+  grub2-mkconfig -o /boot/grub2/grub.cfg || echo "[serial-console] WARNING: grub2-mkconfig failed"
+else
+  echo "[serial-console] WARNING: no grub2.cfg found to regenerate"
+fi
+exit 0
+OLAWS_SERIAL_BODY
+)"
+  if [[ -f "${aws_provision}" ]]; then
+    if grep -Fq '[ol-aws-ami-builder PATCH serial-console]' "${aws_provision}"; then
+      log_info "Serial-console hook already present (idempotent skip)"
+    else
+      log_info "Injecting serial-console hook into cloud/aws/provision.sh (GRUB2/OL7+; ensures ttyS0 for Get System Log)"
+      {
+        printf '\n# >>> [ol-aws-ami-builder PATCH serial-console] >>>\n'
+        printf "cat > /usr/local/sbin/ol-aws-serial-console.sh <<'OLAWS_SERIAL_CONSOLE_EOF'\n"
+        printf '%s\n' "${serial_body}"
+        printf 'OLAWS_SERIAL_CONSOLE_EOF\n'
+        printf 'sh /usr/local/sbin/ol-aws-serial-console.sh\n'
+        printf '# <<< [ol-aws-ami-builder PATCH serial-console] <<<\n'
+      } >> "${aws_provision}"
+      if grep -Fq '[ol-aws-ami-builder PATCH serial-console]' "${aws_provision}"; then
+        log_info "  -> Serial-console hook injected (console=tty0 console=ttyS0,115200n8 + grub2-mkconfig)"
+      else
+        die "Failed to inject serial-console hook into ${aws_provision}"
+      fi
+    fi
+  else
+    log_warn "cloud/aws/provision.sh not found; skipping serial-console hook"
+  fi
+
   # cloud/aws/provision.sh ENA driver self-build hook.
   #
   # Default ON: append a hook to the AWS-cloud provisioning script that builds
@@ -1597,9 +1660,15 @@ EOF
 
 echo "RUN_FIRSTBOOT=NO" > /etc/sysconfig/firstboot
 
-# Remove serial console from default boot (re-enabled at runtime by builder)
-# OL6: edit /boot/grub/grub.conf (GRUB Legacy)
-sed -i -e 's/ console=ttyS0//' /boot/grub/grub.conf
+# Ensure the AWS serial console (ttyS0) is on the kernel cmdline so 'Get System
+# Log' captures boot output. OL6 uses GRUB Legacy (/boot/grub/grub.conf); the
+# kickstart bootloader line sets console=tty0, so append ttyS0 after it.
+# Idempotent: only add when console=ttyS0 is not already present.
+# (Previously this line STRIPPED console=ttyS0, leaving the AWS console log
+#  empty and OL6 boot failures undebuggable -- see SPEC D.25.)
+if ! grep -q 'console=ttyS0' /boot/grub/grub.conf; then
+  sed -i -e 's/console=tty0/console=tty0 console=ttyS0,115200n8/g' /boot/grub/grub.conf
+fi
 
 EXCLUDE_DOCS="no"
 echo "Exclude documentation: ${EXCLUDE_DOCS^^}"
@@ -2531,6 +2600,26 @@ phase6_nitro_readiness_check() {
   else
     log_warn "  [CHECK 4] bootloader: INDETERMINATE (no grub.cfg/grub.conf/menu.lst found)"
     indeterminate=1
+  fi
+
+  # --- CHECK 5: serial console on the kernel cmdline (advisory) --------------
+  # AWS 'Get System Log' only captures output on ttyS0. B4 sets
+  # 'console=tty0 console=ttyS0,115200n8' deterministically (OL6 grub.conf,
+  # OL7+ /etc/default/grub -> grub2-mkconfig) and this check verifies the result
+  # IN THE SAME BUILD. It is ADVISORY (warn only, never fails the gate): missing
+  # ttyS0 costs you the console log, not the boot, so it must not block an
+  # otherwise-bootable AMI. If this ever warns, B4 did not take effect -- treat
+  # it as a real signal. (One-line switch to fatal: set `fail=1` in the warn arm.)
+  if [[ -n "${grubcfg}" ]]; then
+    local serial_lines
+    serial_lines="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*(linux|linux16|linuxefi|kernel)[[:space:]]' | grep -c 'console=ttyS0' || true)"
+    if [[ "${serial_lines}" -gt 0 ]]; then
+      log_info "  [CHECK 5] serial console: PASS (console=ttyS0 on the kernel cmdline in ${grubcfg})"
+    else
+      log_warn "  [CHECK 5] serial console: ADVISORY (no console=ttyS0 on the kernel cmdline in ${grubcfg}; AWS 'Get System Log' will be empty -- B4 should have set it)"
+    fi
+  else
+    log_warn "  [CHECK 5] serial console: ADVISORY (no bootloader config located to inspect)"
   fi
 
   # --- Nitro instance assurance report (advisory) ----------------------------

@@ -155,6 +155,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **AWS `Get System Log` was empty** because the serial console (`ttyS0`) was
+  not on the kernel cmdline, so boot/kernel output never reached the EC2 console
+  — which is what made the OL6 SSH failure (above) so hard to diagnose. Both
+  tiers now set `console=tty0 console=ttyS0,115200n8`, each via its own
+  mechanism (per-OS isolation): **OL6** appends `ttyS0` in the GRUB-Legacy
+  `/boot/grub/grub.conf` (the old kickstart line that *stripped* it is gone);
+  **OL7+** get a new `cloud/aws/provision.sh` hook that adds `ttyS0` to
+  `GRUB_CMDLINE_LINUX` and runs `grub2-mkconfig`, guarded on `/etc/default/grub`
+  so it no-ops on OL6. Phase 6 gains an **advisory CHECK 5** that verifies
+  `console=ttyS0` is present (warn only — observability, not bootability). See
+  SPEC D.25.
+
 - **OL6 SSH was unreachable (`Connection refused`)** because sshd refused to
   start: the wrapper wrote `PermitRootLogin prohibit-password` into
   `sshd_config`, but that token (OpenSSH 6.7+) is a **fatal parse error** on
