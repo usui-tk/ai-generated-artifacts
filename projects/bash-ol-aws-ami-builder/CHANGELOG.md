@@ -40,17 +40,19 @@ This CHANGELOG is **English only** per the repository-wide
 
 - Phase 6 also emits an **advisory Nitro instance assurance report**: it
   classifies each Nitro generation (v2–v6) as `ASSURED` / `SUPPORTED` /
-  `NOT-ASSURED` and lists representative instance families per generation. The
-  signal is ENA capability — the standalone amzn driver `MODULE_VERSION` when
-  present (against AWS's hard floor: ENI attach fails below pre-v5 `1.2.0` /
-  v5+ `2.2.9`, with `2.2.9g` recommended for v4) — but because UEK ships ENA
-  in-tree with no `MODULE_VERSION`, it falls back to the **kernel version** vs
-  AWS's documented OL/RHEL minimum (`4.18.0-305`) for Nitro v4+ optimal
-  behaviour. The kernel fallback is a conservative proxy (UEK may backport), so
-  a sub-proxy kernel is reported `SUPPORTED` (verify with `ethtool -i`), never as
-  a failure; the report aborts the build only when a *measurable* ENA version is
-  below the hard floor (fatal under `enforce`). Source: AWS *Instances built on
-  the AWS Nitro System*.
+  `DEGRADED` / `NOT-ASSURED` and lists representative instance families per
+  generation. The signal is ENA **ENAv3** support, per the amzn/amzn-drivers ENA
+  driver docs (ENAv3 is on the majority of Nitro v4+ types; Nitro v2/v3 use
+  ENAv1/v2 and are unaffected): a standalone driver `MODULE_VERSION` `< 1.2.0`
+  fails to attach an ENAv3 ENI (Nitro v4+ `NOT-ASSURED`; the only
+  fatal-under-`enforce` case), `1.2.0`–`< 2.2.9` is ENAv3 performance
+  degradation (`DEGRADED`, a warning — *not* a failure), `≥ 2.2.9` is full
+  support; the driver supports kernels `>= 3.10`. Because UEK ships ENA in-tree
+  with no `MODULE_VERSION`, the report falls back to the kernel version vs the
+  ENAv3-introduction kernel for OL/RHEL (RHEL 8.3, `4.18.0-240`); a lower kernel
+  is reported `SUPPORTED` (ENAv2 mode; verify with `ethtool -i`), never a
+  failure. Source: amzn/amzn-drivers `ENA_Linux_Best_Practices.rst` /
+  `RELEASENOTES.md`.
 
 - Added a Phase-5 progress heartbeat: `HEARTBEAT_INTERVAL_SEC` (seconds,
   default `20`; `0` disables — a wrapper key) logs an elapsed-time + build-disk

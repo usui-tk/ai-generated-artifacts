@@ -2312,20 +2312,24 @@ phase6_nitro_readiness_check() {
   fi
 
   # --- Nitro instance assurance report (advisory) ----------------------------
-  # ENA is required for every Nitro generation (gated by CHECK 2). Which
-  # generations an image is *assured* on depends on ENA capability:
-  #   - Standalone amzn ENA driver: its MODULE_VERSION is authoritative. AWS hard
-  #     floor (ENI attach fails below): pre-v5 >= 1.2.0, v5+ >= 2.2.9; v4 optimal
-  #     wants >= 2.2.9g.
-  #   - UEK ships ENA in-tree with NO MODULE_VERSION, so we fall back to the
-  #     kernel version vs AWS's documented OL/RHEL minimum (kernel 4.18.0-305)
-  #     for Nitro v4+ optimal behaviour. This is a conservative proxy -- UEK may
-  #     backport ENA features below that kernel -- so sub-proxy is reported as
-  #     SUPPORTED (verify with 'ethtool -i'), never as a failure.
-  # Tiers are advisory and never abort the build, EXCEPT a measurable ENA
-  # version below the hard floor (a real ENI attach failure), which feeds the
-  # gate verdict (fatal under enforce). Source: AWS "Instances built on the AWS
-  # Nitro System" (Nitro instance requirements).
+  # ENA is required for every Nitro generation (gated by CHECK 2). What varies by
+  # generation is ENAv3 support: ENAv3 is the device generation on the majority
+  # of Nitro v4+ instance types (Nitro v2/v3 use ENAv1/ENAv2). Per the amzn ENA
+  # driver docs (kernel/linux/ena/ENA_Linux_Best_Practices.rst):
+  #   - ENA driver < 1.2.0     -> ENAv3 ENI attachment FAILS (a real failure).
+  #   - 1.2.0 <= driver < 2.2.9 -> ENAv3 works but with performance DEGRADATION.
+  #   - driver >= 2.2.9        -> full ENAv3 support.
+  # The driver itself supports kernels >= 3.10, so ENAv1/v2 (Nitro v2/v3) work on
+  # much older kernels regardless. UEK ships ENA in-tree with NO MODULE_VERSION,
+  # so when the version is not exposed we fall back to the kernel version vs the
+  # kernel where ENAv3 support was introduced for OL/RHEL (RHEL 8.3,
+  # 4.18.0-240). That kernel check is a conservative proxy -- UEK may backport
+  # ENAv3 below it, and the in-tree driver still attaches in ENAv2 mode -- so a
+  # sub-proxy kernel is reported SUPPORTED (verify with 'ethtool -i'), never as a
+  # failure. Tiers are advisory and never abort the build, EXCEPT a *measurable*
+  # driver version < 1.2.0 (ENAv3 attach failure on Nitro v4+), which feeds the
+  # gate verdict (fatal under enforce). Source: amzn/amzn-drivers ENA Linux
+  # driver (ENA_Linux_Best_Practices.rst, RELEASENOTES.md).
   if [[ "${ena_cfg}" == "y" || -n "${ena_mod}" ]]; then
     local fam_v2="M5 C5 R5 T3 T4g M6g C6g R6g"
     local fam_v3="M5n C5n R5n I3en P4d G4dn"
@@ -2352,26 +2356,27 @@ phase6_nitro_readiness_check() {
 
     if [[ -n "${ena_ver}" ]]; then
       local vnum; vnum="$(printf '%s' "${ena_ver}" | grep -oE '^[0-9]+(\.[0-9]+){1,2}' || true)"
-      signal="ENA driver version ${ena_ver} (modinfo)"
-      if [[ -n "${vnum}" ]]; then
-        if [[ "$(printf '1.2.0\n%s\n' "${vnum}" | sort -V | head -1)" != "1.2.0" ]]; then
-          v2_tier="NOT-ASSURED (<1.2.0: ENI attach fails)"; v3_tier="${v2_tier}"; v4_tier="${v2_tier}"
-          log_error "  ENA version ${ena_ver} is below the AWS hard floor 1.2.0 (ENI attachment fails)."
-          fail=1
-        fi
-        if [[ "$(printf '2.2.9\n%s\n' "${vnum}" | sort -V | head -1)" != "2.2.9" ]]; then
-          v5_tier="NOT-ASSURED (<2.2.9: ENI attach fails)"; v6_tier="${v5_tier}"
-          log_error "  ENA version ${ena_ver} is below the AWS Nitro v5+ floor 2.2.9 (ENI attachment fails)."
-          fail=1
-        fi
-      else
-        signal="ENA driver version '${ena_ver}' (unparseable; verify with ethtool -i)"
+      signal="ENA driver ${ena_ver} (modinfo); ENAv3 thresholds per amzn-drivers"
+      if [[ -z "${vnum}" ]]; then
+        signal="ENA driver '${ena_ver}' (unparseable; verify with ethtool -i)"
+      elif [[ "$(printf '1.2.0\n%s\n' "${vnum}" | sort -V | head -1)" != "1.2.0" ]]; then
+        # driver < 1.2.0: ENAv3 ENI attach FAILS (Nitro v4+ use ENAv3).
+        # Nitro v2/v3 (ENAv1/ENAv2) still attach, so they stay ASSURED.
+        v4_tier="NOT-ASSURED (driver <1.2.0: ENAv3 ENI attach fails)"; v5_tier="${v4_tier}"; v6_tier="${v4_tier}"
+        log_error "  ENA driver ${ena_ver} < 1.2.0: ENAv3 ENI attachment fails on Nitro v4+ instances."
+        fail=1
+      elif [[ "$(printf '2.2.9\n%s\n' "${vnum}" | sort -V | head -1)" != "2.2.9" ]]; then
+        # 1.2.0 <= driver < 2.2.9: ENAv3 performance DEGRADATION (not a failure).
+        v4_tier="DEGRADED (driver <2.2.9: ENAv3 perf degradation)"; v5_tier="${v4_tier}"; v6_tier="${v4_tier}"
+        log_warn "  ENA driver ${ena_ver} < 2.2.9: ENAv3 devices (Nitro v4+) run with reduced performance (not a failure)."
       fi
     else
-      signal="kernel ${kver} vs AWS OL/RHEL minimum 4.18.0-305 (ENA in-tree; no module version)"
+      # In-tree ENA (no MODULE_VERSION): proxy on the kernel where ENAv3 support
+      # was introduced for OL/RHEL (RHEL 8.3, 4.18.0-240); driver supports >=3.10.
+      signal="kernel ${kver}; ENAv3 introduced ~RHEL8.3/4.18.0-240 (ENA in-tree, no module version; driver supports kernels >=3.10)"
       local mm="${kver%%-*}"
       if [[ -z "${mm}" || "$(printf '4.18\n%s\n' "${mm}" | sort -V | head -1)" != "4.18" ]]; then
-        v4_tier="SUPPORTED (kernel < proxy 4.18; UEK may backport -- verify ethtool -i)"
+        v4_tier="SUPPORTED (kernel < ENAv3 proxy 4.18; ENAv2 mode, UEK may backport -- verify ethtool -i)"
         v5_tier="${v4_tier}"; v6_tier="${v4_tier}"
       fi
     fi

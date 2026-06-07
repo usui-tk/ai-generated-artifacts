@@ -441,21 +441,26 @@ the upstream `virt-sparsify` step.
 
 After the four boot checks, Phase 6 also prints an **advisory Nitro instance
 assurance report**: it classifies each Nitro generation (v2–v6) as `ASSURED`,
-`SUPPORTED` (works but potentially suboptimal), or `NOT-ASSURED` and lists
-representative instance families per generation. The signal is the ENA driver
-capability: the standalone amzn driver's `MODULE_VERSION` when present
-(`modinfo`), against AWS's hard floor (ENI attachment fails below pre-v5 `1.2.0`
-/ v5+ `2.2.9`) and the v4 optimal recommendation (`2.2.9g`); but UEK ships ENA
-**in-tree with no `MODULE_VERSION`**, so the report falls back to the **kernel
-version** against AWS's documented OL/RHEL minimum (kernel `4.18.0-305`) for
-Nitro v4+ optimal behaviour. The kernel fallback is a deliberately conservative
-proxy — UEK may backport ENA features below that kernel — so a sub-proxy kernel
-is reported as `SUPPORTED` (with a `ethtool -i` verification hint), never as a
-failure. The report itself never aborts the build; the only fatal case is a
-*measurable* ENA version below the hard floor, which feeds the gate verdict
-(fatal under `enforce`). Source: AWS *Instances built on the AWS Nitro System*
-(Nitro instance requirements). The per-generation family lists are
-representative, not exhaustive.
+`SUPPORTED` (works, ENAv2 mode), `DEGRADED`, or `NOT-ASSURED` and lists
+representative instance families per generation. The signal is ENA **ENAv3**
+support — ENAv3 is the device generation on the majority of Nitro v4+ instance
+types, while Nitro v2/v3 use ENAv1/ENAv2 and are unaffected by the ENAv3
+thresholds. Per the amzn ENA driver docs, when the standalone driver's
+`MODULE_VERSION` is present (`modinfo`): a driver `< 1.2.0` **fails to attach an
+ENAv3 ENI** (Nitro v4+ → `NOT-ASSURED`, the one fatal-under-`enforce` case);
+`1.2.0 ≤ driver < 2.2.9` works but with ENAv3 **performance degradation**
+(Nitro v4+ → `DEGRADED`, a warning, *not* a failure); `≥ 2.2.9` is full ENAv3
+support. The driver supports kernels `>= 3.10`, so ENAv1/v2 (Nitro v2/v3) work
+regardless. UEK ships ENA **in-tree with no `MODULE_VERSION`**, so the report
+falls back to the **kernel version** against the kernel where ENAv3 support was
+introduced for OL/RHEL (RHEL 8.3, `4.18.0-240`). That kernel check is a
+deliberately conservative proxy — UEK may backport ENAv3 below it, and the
+in-tree driver still attaches in ENAv2 mode — so a sub-proxy kernel is reported
+`SUPPORTED` (with an `ethtool -i` verification hint), never as a failure. The
+only build-aborting case is a *measurable* driver version `< 1.2.0`. Source:
+amzn/amzn-drivers ENA Linux driver (`ENA_Linux_Best_Practices.rst`,
+`RELEASENOTES.md`). The per-generation family lists are representative, not
+exhaustive.
 
 Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
 when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable
