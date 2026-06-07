@@ -155,6 +155,15 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **OL6 logged in as `cloud-user` instead of `ec2-user`** even though every env
+  template sets `CLOUD_USER="ec2-user"`. OL6's cloud-init 0.7.5 ships
+  `system_info.default_user.name: cloud-user` and the upstream `CLOUD_USER`
+  mechanism does not override it there, so the EC2 metadata SSH key was injected
+  into `cloud-user`. A new **OL6-only** `cloud/aws/provision.sh` hook (guarded on
+  `/etc/oracle-release`) rewrites `default_user.name` in `/etc/cloud/cloud.cfg`
+  to `CLOUD_USER`; cloud-init then creates `ec2-user` and lands the key on it.
+  OL7+ are untouched (per-OS isolation). See SPEC D.26.
+
 - **AWS `Get System Log` was empty** because the serial console (`ttyS0`) was
   not on the kernel cmdline, so boot/kernel output never reached the EC2 console
   — which is what made the OL6 SSH failure (above) so hard to diagnose. Both

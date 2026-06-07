@@ -1256,6 +1256,63 @@ OLAWS_SERIAL_BODY
     log_warn "cloud/aws/provision.sh not found; skipping serial-console hook"
   fi
 
+  # cloud/aws/provision.sh OL6 cloud-init default-user hook (OL6 only).
+  #
+  # OL6's cloud-init (0.7.5) ships system_info.default_user.name = cloud-user,
+  # and the upstream CLOUD_USER mechanism does not rewrite it on OL6, so the EC2
+  # metadata SSH key is injected into 'cloud-user' rather than the expected
+  # 'ec2-user' (CLOUD_USER). cloud-init creates the default_user account from
+  # this config, so aligning the name both creates ec2-user and lands the key on
+  # it. Injected only for OL6 builds (OL7+ get ec2-user via the upstream path --
+  # per-OS isolation); it also self-guards on /etc/oracle-release at runtime.
+  # Runs at the cloud-target stage, after cloud-init is installed.
+  if [[ "${OL_MAJOR_VERSION}" -eq 6 ]]; then
+    local cloud_user_body
+    cloud_user_body="$(cat <<'OLAWS_OL6_CLOUD_USER_BODY'
+#!/bin/sh
+# OL6 only: align cloud-init's default_user to CLOUD_USER (ec2-user).
+set -u
+case "$(cat /etc/oracle-release 2>/dev/null)" in
+  *"release 6"*) : ;;
+  *) echo "[ol6-cloud-user] not OL6; skipping"; exit 0 ;;
+esac
+want="${CLOUD_USER:-ec2-user}"
+cfg=/etc/cloud/cloud.cfg
+[ -f "$cfg" ] || { echo "[ol6-cloud-user] no $cfg; skipping"; exit 0; }
+if grep -qE "^[[:space:]]+name:[[:space:]]*${want}[[:space:]]*\$" "$cfg"; then
+  echo "[ol6-cloud-user] default_user already ${want}"
+else
+  # Within the default_user: block (up to the next top-level key), set name:.
+  sed -i -E "/^[[:space:]]*default_user:[[:space:]]*\$/,/^[^[:space:]#]/ s/^([[:space:]]+name:)[[:space:]]*.*/\1 ${want}/" "$cfg"
+  echo "[ol6-cloud-user] set cloud-init default_user name to ${want}"
+fi
+exit 0
+OLAWS_OL6_CLOUD_USER_BODY
+)"
+    if [[ -f "${aws_provision}" ]]; then
+      if grep -Fq '[ol-aws-ami-builder PATCH ol6-cloud-user]' "${aws_provision}"; then
+        log_info "OL6 cloud-init default-user hook already present (idempotent skip)"
+      else
+        log_info "Injecting OL6 cloud-init default-user hook into cloud/aws/provision.sh (default_user -> ec2-user)"
+        {
+          printf '\n# >>> [ol-aws-ami-builder PATCH ol6-cloud-user] >>>\n'
+          printf "cat > /usr/local/sbin/ol-aws-ol6-cloud-user.sh <<'OLAWS_OL6_CLOUD_USER_EOF'\n"
+          printf '%s\n' "${cloud_user_body}"
+          printf 'OLAWS_OL6_CLOUD_USER_EOF\n'
+          printf 'sh /usr/local/sbin/ol-aws-ol6-cloud-user.sh\n'
+          printf '# <<< [ol-aws-ami-builder PATCH ol6-cloud-user] <<<\n'
+        } >> "${aws_provision}"
+        if grep -Fq '[ol-aws-ami-builder PATCH ol6-cloud-user]' "${aws_provision}"; then
+          log_info "  -> OL6 cloud-init default-user hook injected"
+        else
+          die "Failed to inject OL6 cloud-init default-user hook into ${aws_provision}"
+        fi
+      fi
+    else
+      log_warn "cloud/aws/provision.sh not found; skipping OL6 cloud-init default-user hook"
+    fi
+  fi
+
   # cloud/aws/provision.sh ENA driver self-build hook.
   #
   # Default ON: append a hook to the AWS-cloud provisioning script that builds

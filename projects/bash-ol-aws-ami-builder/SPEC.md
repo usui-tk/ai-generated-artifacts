@@ -2333,6 +2333,31 @@ wanted).
 
 ---
 
+## D.26 OL6 logs in as `cloud-user`, not `ec2-user`, despite `CLOUD_USER=ec2-user`
+
+**Symptom.** An OL6 AMI built with `CLOUD_USER="ec2-user"` (as every env
+template sets) is reachable only as `cloud-user` — `ssh ec2-user@host` is
+rejected, `ssh cloud-user@host` works. OL7+ correctly accept `ec2-user`.
+
+**Cause.** On OL6, cloud-init is **0.7.5**, whose shipped `/etc/cloud/cloud.cfg`
+hard-codes `system_info.default_user.name: cloud-user` (Oracle's default). The
+upstream `CLOUD_USER` mechanism does not rewrite that key on OL6, so cloud-init
+creates and key-provisions its *default user* — `cloud-user` — and the EC2
+metadata SSH key lands there. `ec2-user` never becomes the cloud-init default
+user.
+
+**Fix (OL6 only).** A Phase-3 hook
+(`[ol-aws-ami-builder PATCH ol6-cloud-user]`), injected into
+`cloud/aws/provision.sh` **only for OL6 builds** (and self-guarded on
+`/etc/oracle-release` at runtime), rewrites `system_info.default_user.name` in
+`/etc/cloud/cloud.cfg` to `CLOUD_USER` (`ec2-user`). cloud-init creates the
+default-user account from this config, so aligning the name both creates
+`ec2-user` and lands the metadata key on it. It runs at the cloud-target stage
+(after cloud-init is installed) and is idempotent. OL7+ are untouched (they get
+`ec2-user` via the upstream path — per-OS isolation).
+
+---
+
 ## Appendix: How to add support for a new OL major release
 
 When Oracle ships OL11:
