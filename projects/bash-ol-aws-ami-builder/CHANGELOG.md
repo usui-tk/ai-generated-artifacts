@@ -21,6 +21,10 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added an **`--imds-support` option** (env `IMDS_SUPPORT`) to choose the AMI's
+  baked-in IMDS support: `default` (IMDSv1+v2, `HttpTokens=optional`) or `v2.0`
+  (IMDSv2-required, OL7+ only). Default is `default`. See SPEC D.27.
+
 - Added an **in-guest Amazon ENA driver self-build** (`install-ena-driver.sh`),
   enabled by default and disabled with the new `--skip-ena-driver` switch — the
   default yields an **AWS-optimized AMI** (Nitro v4+/ENAv3 capable) while
@@ -154,6 +158,13 @@ This CHANGELOG is **English only** per the repository-wide
   governance links to absolute URLs. No script behavior changed.
 
 ### Fixed
+
+- **`register-image` no longer hardcodes `--imds-support v2.0` for every AMI**,
+  which baked IMDSv2-required into OL6 AMIs whose cloud-init (0.7.5) cannot use
+  IMDSv2 — so a default launch got no metadata and no SSH key. `--imds-support`
+  is now conditional (`IMDS_SUPPORT`, default `default` = IMDSv1+v2, omitted from
+  the register call); `v2.0` is opt-in and OL7+ only (OL6+v2.0 is rejected at
+  validation). See SPEC D.27.
 
 - **OL6 logged in as `cloud-user` instead of `ec2-user`** even though every env
   template sets `CLOUD_USER="ec2-user"`. OL6's cloud-init 0.7.5 ships

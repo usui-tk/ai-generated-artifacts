@@ -78,6 +78,9 @@
 #   --skip-ena-driver     : Do NOT build/install the Amazon ENA driver in the
 #                           guest. Default is to build it (AWS-optimized AMI);
 #                           this switch produces a pure, unmodified OL AMI.
+#   --imds-support <mode> : IMDS support baked into the AMI. 'default'
+#                           (IMDSv1+v2; HttpTokens=optional) or 'v2.0'
+#                           (IMDSv2-required, OL7+ only). Default: 'default'.
 #   -h | --help           : Show this help
 #
 # ----- Known limitations ------------------------------------------------------
@@ -169,6 +172,7 @@ parse_args() {
       --skip-aws-import)  SKIP_AWS_IMPORT=1;   shift ;;
       --build-only)       BUILD_ONLY=1;        shift ;;
       --skip-ena-driver)  ENA_DRIVER_BUILD=0;  shift ;;
+      --imds-support)     IMDS_SUPPORT="$2";   shift 2 ;;
       -h|--help)          usage 0 ;;
       *)                  log_error "Unknown option: $1"; usage 1 ;;
     esac
@@ -333,6 +337,24 @@ load_env() {
   # SERIAL_CONSOLE_RUNTIME above (which configures the *generated image's*
   # console). See SPEC A.7 / D.18.
   : "${SERIAL_CONSOLE:=no}"
+  # AMI Instance Metadata Service (IMDS) support baked into the registered AMI.
+  #   default : do NOT pass --imds-support -> instances allow IMDSv1+IMDSv2
+  #             (HttpTokens=optional). Most compatible, and the only safe choice
+  #             for OL6 (cloud-init 0.7.5 cannot fetch metadata via IMDSv2).
+  #   v2.0    : register with --imds-support v2.0 -> instances default to
+  #             IMDSv2-required (HttpTokens=required). OL7+ only.
+  : "${IMDS_SUPPORT:=default}"
+  IMDS_SUPPORT="${IMDS_SUPPORT,,}"
+  case "${IMDS_SUPPORT}" in
+    default|v1+v2|v1v2)      IMDS_SUPPORT="default" ;;
+    v2|v2.0|v2only|v2-only)  IMDS_SUPPORT="v2.0" ;;
+    *) die "Invalid IMDS_SUPPORT='${IMDS_SUPPORT}' (use 'default' for IMDSv1+v2, or 'v2.0' for IMDSv2-only)" ;;
+  esac
+  # OL6's cloud-init (0.7.5) cannot use IMDSv2, so an IMDSv2-only AMI would break
+  # metadata-based SSH-key injection on first boot. Reject v2.0 for OL6 up front.
+  if [[ "${OL_MAJOR_VERSION}" -eq 6 && "${IMDS_SUPPORT}" == "v2.0" ]]; then
+    die "IMDS_SUPPORT=v2.0 is not supported for OL6: its cloud-init 0.7.5 cannot fetch instance metadata over IMDSv2, so an IMDSv2-only AMI would fail SSH-key injection. Use IMDS_SUPPORT=default (IMDSv1+v2) for OL6."
+  fi
   # Phase-5 build watchdog, in minutes. An outer safety bound on the upstream
   # build-image.sh run (in addition to upstream's own install timeout). On
   # expiry the wrapper reaps the transient build VM and aborts. Generous
@@ -2925,9 +2947,19 @@ phase9_register_ami() {
     --virtualization-type hvm
     --ena-support
     --boot-mode "${BOOT_MODE}"
-    --imds-support v2.0
     --block-device-mappings "DeviceName=/dev/sda1,Ebs={SnapshotId=${SNAPSHOT_ID},VolumeSize=${DISK_SIZE_GB},VolumeType=gp3,DeleteOnTermination=true}"
   )
+
+  # IMDS support (F1): the default OMITS --imds-support so instances allow both
+  # IMDSv1 and IMDSv2 (HttpTokens=optional) -- the compatible default and the
+  # only one that works for OL6's cloud-init 0.7.5. 'v2.0' bakes in
+  # IMDSv2-required (OL7+; OL6+v2.0 is rejected during env validation).
+  if [[ "${IMDS_SUPPORT}" == "v2.0" ]]; then
+    register_args+=(--imds-support v2.0)
+    log_info "AMI IMDS support: v2.0 (instances default to IMDSv2-required)"
+  else
+    log_info "AMI IMDS support: default (IMDSv1+v2 allowed; HttpTokens=optional)"
+  fi
 
   # NitroTPM is only valid for UEFI-bootable AMIs
   if [[ "${BOOT_MODE,,}" == "uefi" || "${BOOT_MODE,,}" == "uefi-preferred" ]]; then

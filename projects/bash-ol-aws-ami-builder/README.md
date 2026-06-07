@@ -361,6 +361,7 @@ Expected total time: **40–90 minutes** (depends on bandwidth and instance perf
 | `--build-only` | Stop after VMDK is built (Phase 5). Run the AWS import separately. |
 | `--skip-aws-import` | Skip Phases 7–9 (equivalent to `--build-only`). |
 | `--skip-ena-driver` | Do **not** build/install the Amazon ENA driver in the guest. The default builds it (AWS-optimized AMI, Nitro v4+/ENAv3 capable); this switch produces a pure, unmodified OL AMI. |
+| `--imds-support <mode>` | IMDS support baked into the AMI: `default` (IMDSv1+v2, `HttpTokens=optional`) or `v2.0` (IMDSv2-required, **OL7+ only**). Default `default`. OL6 + `v2.0` is rejected (its cloud-init 0.7.5 cannot use IMDSv2). |
 
 ### 6.3 Phase 0 self-diagnosis
 

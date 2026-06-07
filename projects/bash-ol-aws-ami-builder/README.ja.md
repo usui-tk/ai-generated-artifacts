@@ -363,6 +363,7 @@ vi env.properties.local
 | `--build-only` | VMDK 生成(Phase 5)までで停止。AWS 取り込みは別途実行したい場合 |
 | `--skip-aws-import` | Phase 7〜9 をスキップ(`--build-only` と同等) |
 | `--skip-ena-driver` | ゲスト内で Amazon ENA ドライバをビルド/導入**しない**。既定ではビルド(AWS 最適化 AMI、Nitro v4+/ENAv3 対応)。本スイッチで純粋な(無改変の)OL AMI を生成 |
+| `--imds-support <mode>` | AMI に焼き込む IMDS サポート: `default`(IMDSv1+v2、`HttpTokens=optional`)または `v2.0`(IMDSv2 必須、**OL7+ のみ**)。既定は `default`。OL6 + `v2.0` は拒否(cloud-init 0.7.5 が IMDSv2 非対応のため) |
 
 ### 6.3 Phase 0 の自動診断機能
 

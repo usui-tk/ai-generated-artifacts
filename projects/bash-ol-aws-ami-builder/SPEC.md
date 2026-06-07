@@ -2358,6 +2358,36 @@ default-user account from this config, so aligning the name both creates
 
 ---
 
+## D.27 `register-image` hardcoded `--imds-support v2.0` — broke OL6 metadata/SSH-key injection
+
+**Symptom.** OL6 instances launched from the built AMI with no explicit IMDS
+options never received their SSH key and could not be logged into; cloud-init
+appeared to run but fetched no metadata.
+
+**Cause.** Phase 9 registered *every* AMI with `--imds-support v2.0`
+unconditionally. That bakes `HttpTokens=required` (IMDSv2-only) as the AMI's
+default, so a launch that does not override it forces IMDSv2. OL6's cloud-init
+is **0.7.5**, which has no IMDSv2 (token) support, so it cannot read the
+instance metadata at all — no SSH key, no user-data. (The OL6 test instance
+worked only because it was launched with an explicit `HttpTokens=optional`
+override; the AMI's own default was wrong.)
+
+**Fix (F1).** `--imds-support` is now conditional, controlled by `IMDS_SUPPORT`
+(env or `--imds-support` flag):
+- **`default`** (the new default) — `--imds-support` is **omitted**, so the AMI
+  imposes no IMDS preference and instances allow IMDSv1+IMDSv2
+  (`HttpTokens=optional`). Compatible with every OL generation.
+- **`v2.0`** — registers `--imds-support v2.0` (IMDSv2-required). **OL7+ only.**
+- **OL6 + `v2.0` is rejected** at env validation (it cannot work).
+
+**Operator note.** If your AWS account/Organization enforces "IMDSv2 required"
+(IMDSv1 disabled account-wide), OL6 AMIs cannot be used — OL6's cloud-init
+cannot satisfy IMDSv2. That is an OL6/cloud-init limitation, not a wrapper one;
+it is the operator's responsibility to keep IMDSv1 available where OL6 is
+required, or to not target OL6 under such a policy.
+
+---
+
 ## Appendix: How to add support for a new OL major release
 
 When Oracle ships OL11:
