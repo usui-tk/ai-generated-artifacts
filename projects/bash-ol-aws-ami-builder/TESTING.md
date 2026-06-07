@@ -76,10 +76,12 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **98 passed, 1 skipped, 0 failed** (B-T1 = 19,
-B-T2 = 14, B-T3 = 25, command-mock = 9, env-parity = 31; plus B-T4 kickstart
-which is **1 pass with `ksvalidator`, 1 skip without** -> 99/0 with it). A tier
-SKIPs cleanly when its optional dependency is absent.
+Current fixed pass count: **118 passed, 1 skipped, 0 failed** (B-T1 = 20,
+B-T2 = 15, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8; plus
+B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 119/0
+with it). The host-runnable tiers (L0-L2) are now complete; B-T7/B-T8 (L3/L4)
+remain deferred (builder host + AWS). A tier SKIPs cleanly when its optional
+dependency is absent.
 
 ## Environment & version dependencies
 
@@ -117,9 +119,9 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` via `.shellcheckrc`; 3 documented inline exemptions; SKIPs if shellcheck absent |
 | B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
 | B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
-| B-T (IMDS rejection) | L1 | planned | OL6 + `IMDS_SUPPORT=v2.0` -> `die`; needs a small `normalize_imds_support` extraction or a fixture-driven `load_env` |
+| B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t3_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
 | B-T5 env parity | L2 | implemented | `tests/t6_envparity.sh`: 20 common-core keys, OL6/OL7-only KERNEL/UEK_RELEASE extras, S3_BUCKET/AWS_REGION/UPDATE_TO_LATEST/CLOUD invariants, per-OS DISTR; 31 asserts |
-| B-T6 idempotency | L2 | planned | Phase-3 marker-guarded injection applied twice (fixture) |
+| B-T6 idempotency | L2 | implemented | `tests/t7_idempotency.sh` (structural): each of the 7 `[ol-aws-ami-builder PATCH ...]` markers is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
 | B-T4 kickstart | L2 | implemented | `tests/validate-kickstart.sh`, **wired into the runner** via `tests/t5_kickstart.sh` (SKIPs without `ksvalidator`); see below |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |

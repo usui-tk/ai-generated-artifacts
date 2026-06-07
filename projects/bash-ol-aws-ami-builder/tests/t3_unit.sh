@@ -83,4 +83,45 @@ rm -f "${fix}"
 assert_eq 0 "${rc}" "parse_args: valid --env returns 0"
 assert_match "${out}" "ENV_FILE=/" "parse_args: sets ENV_FILE"
 
+# --- normalize_imds_support : normalisation + OL6 rejection (Axis 2/3) ---------
+# row: input_IMDS | ol_major | expect (value on success, or DIE:<needle>)
+while IFS='|' read -r imds ol expect; do
+  [ -z "${imds}${ol}${expect}" ] && continue
+  case "${expect}" in
+    DIE:*)
+      needle="${expect#DIE:}"
+      err="$(
+        (
+          # shellcheck source=/dev/null
+          . "${MAIN}" >/dev/null 2>&1
+          IMDS_SUPPORT="${imds}" OL_MAJOR_VERSION="${ol}" normalize_imds_support
+        ) 2>&1 >/dev/null
+      )"; rc=$?
+      assert_eq 1 "${rc}" "normalize_imds_support: '${imds}' (OL${ol}) exits 1"
+      assert_match "${err}" "${needle}" "normalize_imds_support: '${imds}' (OL${ol}) message"
+      ;;
+    *)
+      val="$(
+        (
+          # shellcheck source=/dev/null
+          . "${MAIN}" >/dev/null 2>&1
+          IMDS_SUPPORT="${imds}"
+          OL_MAJOR_VERSION="${ol}" normalize_imds_support
+          printf '%s' "${IMDS_SUPPORT}"
+        ) 2>/dev/null
+      )"
+      assert_eq "${expect}" "${val}" "normalize_imds_support: '${imds}' (OL${ol}) -> ${expect}"
+      ;;
+  esac
+done <<'TABLE'
+|9|default
+v1+v2|9|default
+V2.0|7|v2.0
+v2only|7|v2.0
+default|6|default
+v2.0|7|v2.0
+bogus|9|DIE:Invalid IMDS_SUPPORT
+v2.0|6|DIE:not supported for OL6
+TABLE
+
 t_done

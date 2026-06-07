@@ -21,6 +21,19 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added the **OL6 + IMDSv2-only rejection unit** and a **B-T6 idempotency-guard
+  check** (test increment 6). Extracted the inline IMDS normalisation + OL6
+  rejection out of `load_env` into a new `normalize_imds_support()`
+  (behaviour-neutral refactor of `build-ol-aws-ami.sh`; direct execution
+  unchanged) so it can be unit tested; `tests/t3_unit.sh` now drives it
+  table-driven (normalisation of `default`/`v1+v2`/`V2.0`/`v2only`, `OL6+default`
+  allowed, `OL7+v2.0` allowed, invalid value -> `die`, **`OL6+v2.0` -> `die`**;
+  10 asserts). Added `tests/t7_idempotency.sh` (B-T6, L2, structural): asserts
+  each of the 7 `[ol-aws-ami-builder PATCH ...]` injection markers is fronted by
+  a `grep -Fq` idempotency guard (runtime apply-twice remains B-T7/B-T8). Suite
+  now **118 passed, 1 skipped, 0 failed**; the host-runnable tiers (L0-L2) are
+  complete. New/changed scripts are shellcheck `-S style` clean.
+
 - Added **B-T5 env-template parity** (`tests/t6_envparity.sh`, test increment 5,
   L2): data-driven checks over `env.properties.aws-ol{6,7,8,9,10}` - a 20-key
   common core in all five, the documented `KERNEL`/`UEK_RELEASE` extras present

@@ -279,6 +279,30 @@ parse_ol_version_from_iso() {
 #------------------------------------------------------------------------------
 # Load environment properties and validate required keys
 #------------------------------------------------------------------------------
+normalize_imds_support() {
+  # AMI Instance Metadata Service (IMDS) support baked into the registered AMI.
+  #   default : do NOT pass --imds-support -> instances allow IMDSv1+IMDSv2
+  #             (HttpTokens=optional). Most compatible, and the only safe choice
+  #             for OL6 (cloud-init 0.7.5 cannot fetch metadata via IMDSv2).
+  #   v2.0    : register with --imds-support v2.0 -> instances default to
+  #             IMDSv2-required (HttpTokens=required). OL7+ only.
+  # Reads and normalises the IMDS_SUPPORT global, rejects unsupported values and
+  # the OL6 + IMDSv2-only combination. Behaviour-identical to the former inline
+  # block in load_env (extracted so it can be unit tested - see tests/t3_unit.sh).
+  : "${IMDS_SUPPORT:=default}"
+  IMDS_SUPPORT="${IMDS_SUPPORT,,}"
+  case "${IMDS_SUPPORT}" in
+    default|v1+v2|v1v2)      IMDS_SUPPORT="default" ;;
+    v2|v2.0|v2only|v2-only)  IMDS_SUPPORT="v2.0" ;;
+    *) die "Invalid IMDS_SUPPORT='${IMDS_SUPPORT}' (use 'default' for IMDSv1+v2, or 'v2.0' for IMDSv2-only)" ;;
+  esac
+  # OL6's cloud-init (0.7.5) cannot use IMDSv2, so an IMDSv2-only AMI would break
+  # metadata-based SSH-key injection on first boot. Reject v2.0 for OL6 up front.
+  if [[ "${OL_MAJOR_VERSION}" -eq 6 && "${IMDS_SUPPORT}" == "v2.0" ]]; then
+    die "IMDS_SUPPORT=v2.0 is not supported for OL6: its cloud-init 0.7.5 cannot fetch instance metadata over IMDSv2, so an IMDSv2-only AMI would fail SSH-key injection. Use IMDS_SUPPORT=default (IMDSv1+v2) for OL6."
+  fi
+}
+
 load_env() {
   log_step "Loading environment properties: ${ENV_FILE}"
 
@@ -406,24 +430,9 @@ load_env() {
   # SERIAL_CONSOLE_RUNTIME above (which configures the *generated image's*
   # console). See SPEC A.7 / D.18.
   : "${SERIAL_CONSOLE:=no}"
-  # AMI Instance Metadata Service (IMDS) support baked into the registered AMI.
-  #   default : do NOT pass --imds-support -> instances allow IMDSv1+IMDSv2
-  #             (HttpTokens=optional). Most compatible, and the only safe choice
-  #             for OL6 (cloud-init 0.7.5 cannot fetch metadata via IMDSv2).
-  #   v2.0    : register with --imds-support v2.0 -> instances default to
-  #             IMDSv2-required (HttpTokens=required). OL7+ only.
-  : "${IMDS_SUPPORT:=default}"
-  IMDS_SUPPORT="${IMDS_SUPPORT,,}"
-  case "${IMDS_SUPPORT}" in
-    default|v1+v2|v1v2)      IMDS_SUPPORT="default" ;;
-    v2|v2.0|v2only|v2-only)  IMDS_SUPPORT="v2.0" ;;
-    *) die "Invalid IMDS_SUPPORT='${IMDS_SUPPORT}' (use 'default' for IMDSv1+v2, or 'v2.0' for IMDSv2-only)" ;;
-  esac
-  # OL6's cloud-init (0.7.5) cannot use IMDSv2, so an IMDSv2-only AMI would break
-  # metadata-based SSH-key injection on first boot. Reject v2.0 for OL6 up front.
-  if [[ "${OL_MAJOR_VERSION}" -eq 6 && "${IMDS_SUPPORT}" == "v2.0" ]]; then
-    die "IMDS_SUPPORT=v2.0 is not supported for OL6: its cloud-init 0.7.5 cannot fetch instance metadata over IMDSv2, so an IMDSv2-only AMI would fail SSH-key injection. Use IMDS_SUPPORT=default (IMDSv1+v2) for OL6."
-  fi
+  # Normalise IMDS_SUPPORT (and reject OL6 + IMDSv2-only); see
+  # normalize_imds_support.
+  normalize_imds_support
   # Phase-5 build watchdog, in minutes. An outer safety bound on the upstream
   # build-image.sh run (in addition to upstream's own install timeout). On
   # expiry the wrapper reaps the transient build VM and aborts. Generous
