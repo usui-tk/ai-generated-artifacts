@@ -3105,4 +3105,10 @@ main() {
   phase9_register_ami
 }
 
-main "$@"
+# Run the pipeline only when executed directly. When the script is sourced
+# (e.g. by the B-T3 unit tests in tests/t3_unit.sh) this guard keeps main from
+# running, so individual functions can be exercised without side effects.
+# Behaviour when executed directly is unchanged.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi

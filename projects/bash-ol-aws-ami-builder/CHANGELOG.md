@@ -21,6 +21,20 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added **B-T3 pure-function unit** tests (`tests/t3_unit.sh`, test increment 3,
+  test pyramid layer L1, hermetic): table-driven `parse_ol_version_from_iso`
+  (OL6-OL10 + a malformed name + a full URL path) and the `parse_args` contract
+  (unknown flag -> `usage 1`; missing `--env` -> `die`; valid `--env` -> rc 0 with
+  `ENV_FILE` set), each exercised in an isolated subshell. To allow sourcing the
+  wrapper for unit tests without running the pipeline, the tail `main "$@"` is now
+  guarded by `if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then main "$@"; fi` - a
+  2-line, **behaviour-neutral** change (direct execution is unchanged; sourcing
+  defines functions with no side effects, the bash analogue of importing a
+  `.psm1`). Suite now **50 passed, 0 failed** (B-T1 15 + B-T2 10 + B-T3 25). The
+  `load_env` IMDS `v2.0` OL6 rejection is ledgered as a planned L1 test (needs a
+  small extraction or fixture-driven run). New test script is shellcheck `-S
+  style` clean.
+
 - Added **B-T2 ShellCheck** as a deterministic static gate (`tests/t2_shellcheck.sh`,
   test increment 2): runs ShellCheck at the **canonical `-S style`** (strictest)
   over every `.sh` and asserts zero findings per file, turning ShellCheck into a
