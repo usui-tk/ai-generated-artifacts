@@ -174,6 +174,19 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Docs (no behaviour change):** SPEC **A.3 (Pipeline Architecture)** had two
+  drifts. (1) The Phase-3 registry row said the upstream-guard rewrite is "**For
+  OL7 only**" with an `.ol7-patch.bak` backup, but Phase 3 patches when
+  `OL_MAJOR_VERSION <= 7` — i.e. **OL6 and OL7** — and the backup is
+  `.ol${N}-patch.bak`; OL6 additionally gets a second patch plus a synthesized
+  `distr/ol6-slim/`. (2) The "Phase groups (semantic)" summary listed
+  `Validation (0)` and `AWS (6, 7, 8)`, contradicting its own registry: Phase 6 is
+  the **offline** Nitro readiness check (Validation) and Phase 9 is the AWS
+  register step. Corrected to `Validation (0, 6)` and `AWS (7, 8, 9)`, and the
+  Phase-3 row to OL6/OL7 (`<= 7`) with the generalized backup name. README phase
+  text unchanged: the README has no phase-grouping table, and its Phase-3 patch
+  description already documents the OL6 share (`<= 7`, shared with OL7) in 9.7.
+
 - **Docs (no behaviour change):** SPEC **A.4 (Logging Conventions)** had drifted
   behind the logging framework that Part E documents. A.4 listed only
   `[STEP]/[INFO]/[WARN]/[ERROR]` (missing `[BUILD]`, `[DEBUG]`, `[EXTERNAL]`),

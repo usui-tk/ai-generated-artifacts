@@ -185,7 +185,7 @@ repository-level `scripts/README.md` policy:
 | 0 | `phase0_preflight_checks` | Validation | KVM exposure, required commands, free disk, tmpfs/noexec checks |
 | 1 | `phase1_install_prerequisites` | Provisioning | Install KVM/libvirt/virt-install/libguestfs/osinfo-db/acl |
 | 2 | `phase2_grant_qemu_access` | Provisioning | setfacl `u:qemu:x` on WORKSPACE parent chain |
-| 3 | `phase3_clone_repository` | Build | `git clone --depth 1` of oracle/oracle-linux. **For OL7 only**: rewrites the OL7-blocking line in `cloud/aws/image-scripts.sh` to a no-op (`.ol7-patch.bak` backup left in place). See D.10. |
+| 3 | `phase3_clone_repository` | Build | `git clone --depth 1` of oracle/oracle-linux. **For OL6 and OL7** (`OL_MAJOR_VERSION <= 7`): rewrites the OL8+-guard line in `cloud/aws/image-scripts.sh` to a no-op (an `.ol${N}-patch.bak` backup — e.g. `.ol6-patch.bak` / `.ol7-patch.bak` — left in place). OL6 additionally gets a second patch (`provision.sh` `kernel-uek-modules` skip) and a runtime-synthesized `distr/ol6-slim/` (see B.5). See D.10. |
 | 4 | `phase4_prepare_env_properties` | Build | Resolve ISO checksum, OS_VARIANT, generate `env.properties.local` |
 | 5 | `phase5_run_build` | Build | Invoke `bin/build-image.sh`; produce VMDK |
 | 6 | `phase6_nitro_readiness_check` | Validation | Offline Nitro boot-readiness gate (NVMe host / ENA / fstab / bootloader) + instance-assurance report |
@@ -195,10 +195,10 @@ repository-level `scripts/README.md` policy:
 
 ### Phase groups (semantic)
 
-- **Validation** (0): Read-only diagnostics; never mutates state.
+- **Validation** (0, 6): Read-only diagnostics / offline image inspection; never mutates state.
 - **Provisioning** (1, 2): Requires sudo; idempotent (skip if already done).
 - **Build** (3, 4, 5): Operates inside `WORKSPACE`; produces a VMDK.
-- **AWS** (6, 7, 8): Network operations against the configured `AWS_REGION`.
+- **AWS** (7, 8, 9): Network operations against the configured `AWS_REGION`.
 
 ### Phase entry/exit contract
 
