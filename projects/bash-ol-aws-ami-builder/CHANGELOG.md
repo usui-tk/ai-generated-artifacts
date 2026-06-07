@@ -155,6 +155,20 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- Phase 6 **CHECK 2 (ENA driver) and the assurance report now scan the full
+  `/lib/modules/<kver>` tree** (`/kernel` + `/extra` + `/updates`) instead of
+  only `/kernel`. The in-guest ENA self-build installs `ena.ko` via DKMS into
+  `/extra` (or `/updates/dkms`), which depmod ranks above the stock `/kernel`
+  copy; the old `/kernel`-only scan missed it, so a default (self-build) OL7
+  build hit a false `CHECK 2 FAIL (no ENA driver)`. CHECK 2 now selects the
+  *effective* `ena.ko` by depmod precedence (`updates` > `extra` > `kernel`),
+  and the assurance report's `modinfo` copy-out prepends the real
+  `/lib/modules/<kver>` base rather than a hardcoded `/kernel`. The report also
+  annotates driver **provenance** (`stock in-tree` vs `self-built, DKMS …`) so
+  the self-build's effect — and the absence of any CHECK 1-4 regression — is
+  visible. Feature-aware and OL-version-independent (stock or DKMS, any OL). See
+  SPEC D.23 and A.7.
+
 - Force **nvme + ena into the initramfs** so OL AMIs actually boot on Nitro. The
   image is built in a VM with a virtio root disk, so dracut's hostonly mode omits
   nvme from the initramfs; an OL7 build's initramfs had `nvme.ko` on disk but not

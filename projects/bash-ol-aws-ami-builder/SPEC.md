@@ -2212,6 +2212,43 @@ that nvme is in the regenerated initramfs.
 
 ---
 
+## D.23 Phase 6 CHECK 2 false `FAIL` when the ENA self-build moves `ena.ko` out of `/kernel`
+
+**Symptom.** A default OL7 build (ENA self-build ON) produces a good VMDK whose
+guest carries a freshly built ENA driver, yet Phase 6 reports:
+
+```
+[CHECK 2] ENA driver: FAIL (no ENA driver -- Nitro requires ENA for networking)
+```
+
+A host-side inspection then shows `ena.ko` **is** present on disk, but under
+`/lib/modules/<kver>/extra/` rather than the stock
+`/lib/modules/<kver>/kernel/drivers/net/ethernet/amazon/ena/`.
+
+**Cause.** The Phase 6 module inventory listed only the `/kernel` subtree
+(`virt-ls -R /lib/modules/<kver>/kernel`). DKMS — which the in-guest ENA
+self-build (D + A.7) uses — installs the built module into `/extra` (or
+`/updates/dkms`) and depmod ranks those **above** `/kernel`, so the self-built
+driver is exactly the one the running kernel loads. Because the scan stopped at
+`/kernel`, CHECK 2's `ena.ko` match (and the assurance report's `modinfo`
+copy-out, which hardcoded a `/kernel` path prefix) missed it entirely. The
+earlier `--skip-ena-driver` builds passed only because the stock `ena.ko`
+stayed in `/kernel`. CHECK 1 was unaffected because `nvme.ko` is never
+relocated by DKMS.
+
+**Fix.** Phase 6 now scans the **full** `/lib/modules/<kver>` tree
+(`/kernel` + `/extra` + `/updates`) and selects the *effective* `ena.ko` by
+depmod precedence (`updates` > `extra` > `kernel`). The assurance report's
+`modinfo` copy-out prepends `/lib/modules/<kver>` (the real base of the matched
+relative path) instead of a fixed `/kernel`. The check is **feature-aware and
+OL-version-independent**: it finds the driver whether it is stock in-tree or
+DKMS-built, on any OL. The report also annotates the driver **provenance**
+(`stock in-tree /kernel` vs `self-built, DKMS /extra|/updates`) so an operator
+can confirm the self-build took effect and that CHECK 1-4 still pass (no
+boot-readiness regression). See A.7 ("Nitro initramfs drivers" / ENA self-build).
+
+---
+
 ## Appendix: How to add support for a new OL major release
 
 When Oracle ships OL11:

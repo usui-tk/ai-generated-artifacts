@@ -2356,8 +2356,14 @@ phase6_nitro_readiness_check() {
   local cfg=""
   virt-copy-out -a "${img}" "/boot/config-${kver}" "${work}/" 2>/dev/null || true
   [[ -r "${work}/config-${kver}" ]] && cfg="${work}/config-${kver}"
+  # Scan the FULL module tree under /lib/modules/<kver> -- not just /kernel.
+  # DKMS (the in-guest ENA self-build) installs the built ena.ko into /extra
+  # (or /updates/dkms), which depmod ranks ABOVE the stock /kernel copy;
+  # scanning only /kernel missed the self-built driver and made CHECK 2
+  # falsely FAIL on default (ENA-self-build) builds. virt-ls -R returns paths
+  # relative to this dir (e.g. /kernel/.../nvme.ko.xz, /extra/ena.ko.xz).
   local tree
-  tree="$(virt-ls -R -a "${img}" "/lib/modules/${kver}/kernel" 2>/dev/null || true)"
+  tree="$(virt-ls -R -a "${img}" "/lib/modules/${kver}" 2>/dev/null || true)"
 
   local nvme_cfg="" core_cfg="" ena_cfg=""
   if [[ -n "${cfg}" ]]; then
@@ -2432,10 +2438,25 @@ phase6_nitro_readiness_check() {
   fi
 
   # --- CHECK 2: ENA network driver (Nitro networking) ------------------------
-  local ena_mod
-  ena_mod="$(printf '%s\n' "${tree}" | grep -E '(^|/)ena\.ko(\.[a-z0-9]+)?$' | head -1 || true)"
-  if [[ "${ena_cfg}" == "y" || -n "${ena_mod}" ]]; then
-    log_info "  [CHECK 2] ENA driver: PASS (built-in or module present)"
+  # Pick the EFFECTIVE ena.ko by depmod precedence (updates > extra > kernel),
+  # so a DKMS self-built module (in /extra or /updates) wins over the stock
+  # in-tree copy -- which is also what the running kernel would load. Classify
+  # its provenance so the report can state whether the in-guest self-build took
+  # effect (F2) without depending on the wrapper's own --skip-ena-driver flag.
+  local ena_mod ena_loc="" ena_all
+  ena_all="$(printf '%s\n' "${tree}" | grep -E '(^|/)ena\.ko(\.[a-z0-9]+)?$' || true)"
+  ena_mod="$(printf '%s\n' "${ena_all}" | grep -E '(^|/)updates/' | head -1 || true)"
+  [[ -z "${ena_mod}" ]] && ena_mod="$(printf '%s\n' "${ena_all}" | grep -E '(^|/)extra/' | head -1 || true)"
+  [[ -z "${ena_mod}" ]] && ena_mod="$(printf '%s\n' "${ena_all}" | grep -E '\S' | head -1 || true)"
+  case "${ena_mod}" in
+    */updates/*) ena_loc="self-built, DKMS /updates" ;;
+    */extra/*)   ena_loc="self-built, DKMS /extra" ;;
+    ?*)          ena_loc="stock in-tree /kernel" ;;
+  esac
+  if [[ "${ena_cfg}" == "y" ]]; then
+    log_info "  [CHECK 2] ENA driver: PASS (built into the kernel)"
+  elif [[ -n "${ena_mod}" ]]; then
+    log_info "  [CHECK 2] ENA driver: PASS (module present -- ${ena_loc})"
   else
     log_error "  [CHECK 2] ENA driver: FAIL (no ENA driver -- Nitro requires ENA for networking)"
     fail=1
@@ -2505,7 +2526,10 @@ phase6_nitro_readiness_check() {
     local ena_ver="" signal=""
 
     if [[ -n "${ena_mod}" ]]; then
-      virt-copy-out -a "${img}" "/lib/modules/${kver}/kernel${ena_mod}" "${work}/" 2>/dev/null || true
+      # ena_mod is relative to /lib/modules/<kver> (it may live under /kernel,
+      # /extra or /updates); prepend that base only -- NOT a hardcoded /kernel,
+      # or the modinfo copy-out of a DKMS-installed module would silently miss.
+      virt-copy-out -a "${img}" "/lib/modules/${kver}${ena_mod}" "${work}/" 2>/dev/null || true
       local enako; enako="${work}/$(basename "${ena_mod}")"
       if [[ -r "${enako}" ]]; then
         case "${enako}" in
@@ -2521,7 +2545,7 @@ phase6_nitro_readiness_check() {
 
     if [[ -n "${ena_ver}" ]]; then
       local vnum; vnum="$(printf '%s' "${ena_ver}" | grep -oE '^[0-9]+(\.[0-9]+){1,2}' || true)"
-      signal="ENA driver ${ena_ver} (modinfo); ENAv3 thresholds per amzn-drivers"
+      signal="ENA driver ${ena_ver} (modinfo, ${ena_loc}); ENAv3 thresholds per amzn-drivers"
       if [[ -z "${vnum}" ]]; then
         signal="ENA driver '${ena_ver}' (unparseable; verify with ethtool -i)"
       elif [[ "$(printf '1.2.0\n%s\n' "${vnum}" | sort -V | head -1)" != "1.2.0" ]]; then
@@ -2547,6 +2571,10 @@ phase6_nitro_readiness_check() {
       fi
     fi
 
+    case "${ena_loc}" in
+      self-built*) log_info "  ENA driver provenance: ${ena_loc} -- the in-guest self-build replaced the stock in-tree driver; CHECK 1-4 above confirm boot-readiness is preserved (no regression)." ;;
+      ?*)          log_info "  ENA driver provenance: ${ena_loc}." ;;
+    esac
     log_info "  --- Nitro instance assurance (advisory) ---"
     log_info "    signal : ${signal}"
     log_info "    Nitro v2  ${v2_tier}  e.g. ${fam_v2}"
