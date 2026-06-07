@@ -508,10 +508,23 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
   in-distro driver. Pins are chosen as the newest release supporting each target
   OS (the ENA driver is a kernel module; newer releases assume newer
   kernels/toolchains). Override per run with `ENA_DRIVER_VERSION`.
-- **Targets the installed UEK kernel, not `uname -r`**: provisioning runs under
-  a libguestfs appliance, so the running kernel is the appliance's. The installer
-  detects the image's UEK from `/lib/modules` and builds explicitly against it
+- **Self-contained**: it installs everything it needs itself — the EPEL repo,
+  `gcc`/`make`, `dkms`, and the matching `kernel-uek-devel` headers — so it can
+  be run directly on a stock OL6/OL7 instance (see "Standalone validation"
+  below) as well as from provisioning.
+- **Dual-mode target kernel**: standalone on a running instance it targets the
+  **live** kernel (its `/lib/modules` dir exists); under the libguestfs
+  appliance (provisioning) `uname -r` is the appliance's, so it falls back to the
+  highest UEK under `/lib/modules`. It always builds against a specific kernel
   (`dkms ... -k <kver>`).
+- **Resolves missing `kernel-uek-devel`**: the stock OL ISO ships an older
+  `kernel-uek` whose `-devel` may be pruned from the repos (`No package
+  kernel-uek-devel-<ver> available`); since `yum` does not fail on a missing
+  package, DKMS would otherwise abort with "kernel headers ... cannot be found".
+  The installer enables the UEK repo (`*UEKR4*`/`*UEKR6*`), tries the exact
+  `-devel`, and if the headers are still absent installs the **latest**
+  `kernel-uek` + matching `-devel` and **retargets** to it (a guaranteed
+  buildable pair).
 - **Builds via DKMS** (`REMAKE_INITRD`/`AUTOINSTALL`), so the module is rebuilt
   automatically across in-instance kernel upgrades. DKMS comes from EPEL —
   Oracle-provided `ol7_developer_EPEL` on OL7, and the Fedora **EPEL 6 archive**
@@ -521,10 +534,19 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
   driver is present at boot, and removes any stale
   `/etc/udev/rules.d/70-persistent-net.rules` for AMI hygiene.
 
-Provisioning has outbound access to the Oracle Linux yum servers and EPEL, so it
-also reaches GitHub to fetch the pinned `amzn-drivers` release tarball. Source:
-amzn/amzn-drivers ENA Linux driver (`RELEASENOTES.md`,
-`ENA_Linux_Best_Practices.rst`) and the supported-distributions list.
+**Standalone validation.** `install-ena-driver.sh` can be copied to a freshly
+launched **stock** OL6/OL7 instance and run directly (`sudo ./install-ena-driver.sh`)
+to iterate on the driver build in isolation before any end-to-end image build.
+It targets the live kernel; if that kernel's `-devel` is unavailable it installs
+and retargets to the latest `kernel-uek` (verify with `modinfo ena` after a
+reboot into the new kernel). This makes the build a repeatable, independently
+verifiable step.
+
+Provisioning (and a launched instance) has outbound access to the Oracle Linux
+yum servers and EPEL, so it also reaches GitHub to fetch the pinned
+`amzn-drivers` release tarball. Source: amzn/amzn-drivers ENA Linux driver
+(`RELEASENOTES.md`, `ENA_Linux_Best_Practices.rst`) and the
+supported-distributions list.
 
 Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
 when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable

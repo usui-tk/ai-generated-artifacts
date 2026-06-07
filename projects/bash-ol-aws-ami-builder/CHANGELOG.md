@@ -155,6 +155,20 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- `install-ena-driver.sh` is now **self-contained and runnable standalone**, and
+  resolves the `kernel-uek-devel` gap that aborted the DKMS build. The stock OL
+  ISO ships an older `kernel-uek` whose `-devel` is often pruned from the repos
+  (`No package kernel-uek-devel-<ver> available`); because `yum` does not fail on
+  a missing package, DKMS aborted with "kernel headers ... cannot be found". The
+  installer now enables the UEK repo (`*UEKR4*`/`*UEKR6*`), tries the exact
+  `-devel`, and if the headers are still absent installs the latest `kernel-uek`
+  + matching `-devel` and retargets the build to that kernel. It also installs
+  all build prerequisites itself (EPEL, `gcc`/`make`, `dkms`, headers) and, when
+  run on a live instance, targets the running kernel (falling back to the highest
+  UEK under `/lib/modules` only under the provisioning appliance). This lets the
+  driver build be validated by running the script directly on a stock OL6/OL7
+  instance, independently of the end-to-end image build. See SPEC A.7.
+
 - Phase 6 **CHECK 1 (NVMe host driver)** no longer reports a false `FAIL` when
   the guest's dracut initramfs cannot be read on the build host. dracut images
   vary by compression (gzip/xz/zstd/lz4) and may carry a leading microcode cpio;

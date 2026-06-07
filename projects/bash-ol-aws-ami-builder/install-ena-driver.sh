@@ -2,12 +2,17 @@
 #
 # install-ena-driver.sh
 #
-# Build and install a pinned Amazon ENA Linux kernel driver INSIDE the guest
-# image, so the produced AMI is AWS-optimized (Nitro v4+ / ENAv3 capable). It is
-# invoked from the AWS-cloud provisioning step of oracle-linux-image-tools by a
-# hook that the wrapper (build-ol-aws-ami.sh, Phase 3) appends to
-# cloud/aws/provision.sh. It runs by default; the wrapper's --skip-ena-driver
-# switch removes the hook entirely to produce a pure (unmodified) OL AMI.
+# Build and install a pinned Amazon ENA Linux kernel driver, so an OL image/
+# instance is AWS-optimized (Nitro v4+ / ENAv3 capable). It is SELF-CONTAINED:
+# it sets up the repos (EPEL) and installs every build dependency itself (gcc,
+# make, dkms, and the matching kernel-uek-devel headers), so it can be run two
+# ways:
+#   1. Standalone, directly on a stock OL6/OL7 EC2 instance, to iterate on and
+#      validate the driver build before any end-to-end image build.
+#   2. From oracle-linux-image-tools provisioning, via a hook the wrapper
+#      (build-ol-aws-ami.sh, Phase 3) appends to cloud/aws/provision.sh. It runs
+#      by default; the wrapper's --skip-ena-driver switch removes the hook to
+#      produce a pure (unmodified) OL AMI.
 #
 # Why a pinned version (not "latest"):
 #   The ENA driver is a kernel module; newer releases progressively assume newer
@@ -20,10 +25,13 @@
 #   Override per run with ENA_DRIVER_VERSION (single pin) for evaluation.
 #
 # Target kernel:
-#   Provisioning runs under a libguestfs appliance, so `uname -r` is the
-#   APPLIANCE kernel, not the image's installed UEK. We therefore detect the
-#   target kernel from /lib/modules (the installed UEK) and build explicitly
-#   against it with `dkms ... -k <kver>`.
+#   Standalone on a running instance -> the LIVE kernel (its /lib/modules dir
+#   exists). Under a libguestfs appliance (provisioning) `uname -r` is the
+#   APPLIANCE kernel with no modules dir in the guest, so we fall back to the
+#   highest UEK under /lib/modules. The build always targets a specific kernel
+#   via `dkms ... -k <kver>`. If the stock kernel's kernel-uek-devel has been
+#   pruned from the repos, we install the latest kernel-uek + matching headers
+#   and retarget to it (a guaranteed buildable pair).
 #
 # DKMS:
 #   The driver is installed via DKMS (REMAKE_INITRD/AUTOINSTALL) so it is rebuilt
@@ -76,8 +84,19 @@ case "${osmajor}" in
 esac
 log "Target ENA driver version: ${ena_version}"
 
-# ---- detect target kernel (installed UEK, not the appliance's uname -r) -----
+# ---- detect target kernel --------------------------------------------------
+# Standalone on a running OL instance: target the LIVE kernel (its modules dir
+# exists), so the freshly built module can be loaded/validated immediately.
+# In oracle-linux-image-tools provisioning the script runs under a libguestfs
+# appliance whose `uname -r` is NOT the guest's kernel and has no modules dir in
+# the guest fs, so we fall back to the highest UEK under /lib/modules.
 kver="${ENA_DRIVER_KVER:-}"
+if [[ -z "${kver}" ]]; then
+  runk="$(uname -r 2>/dev/null || true)"
+  if [[ -n "${runk}" && -d "/lib/modules/${runk}/kernel" ]]; then
+    kver="${runk}"
+  fi
+fi
 if [[ -z "${kver}" ]]; then
   kver="$(highest_modules_dir '/lib/modules/*uek*/')"
 fi
@@ -132,9 +151,43 @@ EOF
 }
 
 # ---- install build prerequisites -------------------------------------------
-log "Installing build prerequisites (${develpkg}, gcc, make)"
-yum install -y gcc make tar findutils "${develpkg}" \
-  || die "failed to install build prerequisites (${develpkg})"
+# Ensure kernel-uek-devel headers exist for the target kernel. The stock OL ISO
+# ships an older kernel-uek whose -devel may have been pruned from the repos
+# ("No package kernel-uek-devel-<ver> available"); yum does not fail on a missing
+# package, so DKMS then aborts with "kernel headers ... cannot be found". We (1)
+# enable the UEK repo and try the exact -devel; (2) if the headers still are not
+# present, install the latest kernel-uek + matching -devel and retarget to it
+# (always a matched, buildable pair). Self-contained: no external pre-setup.
+ensure_kernel_devel() {
+  local -a yk=(-y)
+  case "${osmajor}" in
+    6) yk+=("--enablerepo=*UEKR4*") ;;
+    7) yk+=("--enablerepo=*UEKR6*") ;;
+  esac
+  yum "${yk[@]}" install "kernel-uek-devel-${kver}" 2>/dev/null || true
+  if [[ -e "/lib/modules/${kver}/build" ]]; then
+    return 0
+  fi
+  log "kernel-uek-devel for ${kver} not available; installing the latest kernel-uek + headers and retargeting"
+  yum "${yk[@]}" install kernel-uek kernel-uek-devel 2>/dev/null \
+    || yum "${yk[@]}" update kernel-uek kernel-uek-devel 2>/dev/null || true
+  local newk; newk="$(highest_modules_dir '/lib/modules/*uek*/')"
+  if [[ -n "${newk}" && "${newk}" != "${kver}" ]]; then
+    log "retargeting kernel: ${kver} -> ${newk}"
+    kver="${newk}"; develpkg="kernel-uek-devel-${kver}"
+  fi
+  yum "${yk[@]}" install "kernel-uek-devel-${kver}" 2>/dev/null || true
+  [[ -e "/lib/modules/${kver}/build" ]]
+}
+
+log "Installing build prerequisites (gcc, make, kernel headers)"
+yum install -y gcc make tar findutils || die "failed to install gcc/make/tar"
+if [[ "${kver}" == *uek* ]]; then
+  ensure_kernel_devel || die "could not obtain kernel-uek-devel headers for ${kver} (enable the UEK repo / update the kernel and retry)"
+else
+  yum install -y "${develpkg}" || die "failed to install ${develpkg}"
+  [[ -e "/lib/modules/${kver}/build" ]] || die "kernel headers for ${kver} not present after install"
+fi
 
 use_dkms=1
 setup_epel
