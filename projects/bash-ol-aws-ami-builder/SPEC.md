@@ -752,7 +752,8 @@ This SPEC must include:
    for the relevant function (parse_ol_version_from_iso, detect_os_variant)
 2. Modify code in build-ol-aws-ami.sh
 3. bash -n build-ol-aws-ami.sh                  ← syntax gate: must pass
-4. shellcheck --severity=warning ...            ← lint gate: must have 0 warnings
+4. bash tests/run-all.sh                        ← static+test gate: B-T1 parse,
+                                                   B-T2 shellcheck -S style, ...; 0 failures
 5. Re-run the affected phase against AWS        ← functional gate
 6. Update README.md + README.ja.md if behavior or contract changed
    (per A.10, only the README is bilingual; SPEC.md is English only).
@@ -1396,7 +1397,7 @@ Before any commit to this directory, all of the following must pass.
 
 - [ ] `bash -n build-ol-aws-ami.sh` → 0 errors (parse-only check)
 - [ ] `bash -n setup-vmimport-role.sh` → 0 errors
-- [ ] `shellcheck --severity=error build-ol-aws-ami.sh setup-vmimport-role.sh` → clean (warnings audited case-by-case)
+- [ ] `bash tests/run-all.sh` → all tiers pass. Includes **B-T2 ShellCheck at the canonical `-S style`** (the strictest level) over every `.sh`, via the checked-in `.shellcheckrc`; the only exemptions are three documented inline `# shellcheck disable=`/`source=` directives (no rule is disabled globally). See TESTING.md.
 - [ ] The script starts with `#!/usr/bin/env bash` followed by the header banner with all five required sections (Purpose / Prerequisites / Usage / Limitations / AI info — see A.2)
 - [ ] `set -euo pipefail` appears at the top of every shell script in this directory
 - [ ] Every new `${VAR:?...}` / `${VAR:=...}` assignment is paired with a `log_info` line confirming the resolved value (per A.5)
@@ -1972,7 +1973,7 @@ and B.6.
 
 1. The two `sed` edits, replayed on a fresh upstream `bin/build-image.sh`,
    produce the expected clean `if/else` and pass `bash -n`; `shellcheck
-   --severity=warning` on the wrapper is clean.
+   --severity=style` on the wrapper is clean.
 2. The probe sits in an `if !` position, so the upstream script's
    `set -euo pipefail` does not abort on the (expected) non-zero exit. A
    stubbed-`guestfish` harness verified both branches under `set -e`:
@@ -2495,7 +2496,7 @@ When Oracle ships OL11:
 4. **Sanity check**:
    ```bash
    bash -n build-ol-aws-ami.sh
-   shellcheck --severity=warning build-ol-aws-ami.sh
+   shellcheck -S style build-ol-aws-ami.sh
    ./build-ol-aws-ami.sh --env env.properties.aws-ol11 --build-only
    ```
 

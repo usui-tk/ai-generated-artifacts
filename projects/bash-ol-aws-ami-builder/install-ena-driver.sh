@@ -72,6 +72,9 @@ if [[ -r /etc/oracle-release ]]; then
   osmajor="$(grep -oE 'release [0-9]+' /etc/oracle-release 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)"
 fi
 if [[ -z "${osmajor}" && -r /etc/os-release ]]; then
+  # /etc/os-release exists only at runtime on the target host; treat as empty
+  # for the static lint (deterministic regardless of the lint host).
+  # shellcheck source=/dev/null
   osmajor="$(. /etc/os-release 2>/dev/null; echo "${VERSION_ID%%.*}")"
 fi
 [[ -n "${osmajor}" ]] || die "cannot determine Oracle Linux major version"

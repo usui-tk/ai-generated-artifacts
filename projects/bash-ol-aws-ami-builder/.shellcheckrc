@@ -1,0 +1,14 @@
+# ShellCheck project configuration - bash-ol-aws-ami-builder
+#
+# Policy: every ShellCheck code stays ACTIVE project-wide. The canonical B-T2
+# severity is `style` (the strictest), enforced on the command line by
+# tests/t2_shellcheck.sh (see TESTING.md "Test model" and Part C). This file
+# deliberately declares NO global `disable=` - it would weaken the gate
+# everywhere. The only exemptions are three narrow, documented, inline
+# `# shellcheck disable=`/`source=` directives at the relevant statements.
+#
+# `external-sources=true` + `source-path=SCRIPTDIR` let ShellCheck FOLLOW the
+# harness's `# shellcheck source=lib/...` directives (resolving SC1091 properly
+# rather than suppressing it) - this strengthens checking, it does not relax it.
+external-sources=true
+source-path=SCRIPTDIR

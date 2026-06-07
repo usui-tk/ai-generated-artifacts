@@ -76,9 +76,9 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **13 passed, 0 failed** (B-T1 only; grows as tiers are
-added). A tier SKIPs cleanly when its optional dependency is absent
-(`shellcheck` for B-T2, `ksvalidator` for B-T4).
+Current fixed pass count: **23 passed, 0 failed** (B-T1 = 14, B-T2 = 9; grows as
+tiers are added). A tier SKIPs cleanly when its optional dependency is absent
+(`shellcheck` for B-T2 -> 1 skip; `ksvalidator` for B-T4).
 
 ## Environment & version dependencies
 
@@ -88,8 +88,16 @@ them so a run is reproducible:
 - **bash** >= 4 (arrays, `${var,,}`); developed and run on bash 5.x in the
   Claude Linux container substrate.
 - **ShellCheck** (B-T2): obtained as the self-contained static binary from the
-  upstream GitHub release (no runtime deps); **pin the version** and record it.
-  `run-all.sh` prints the resolved version; B-T2 SKIPs if absent.
+  upstream GitHub release (no runtime deps); **pinned to 0.10.0** - record the
+  version (`run-all.sh` prints the resolved one). The canonical severity is
+  **`style`** (the strictest), set on the command line by `tests/t2_shellcheck.sh`;
+  `.shellcheckrc` carries `external-sources=true` + `source-path=SCRIPTDIR` only
+  (no global `disable=`). Determinism comes from three documented inline
+  exemptions, each a single code on a single statement with a rationale comment:
+  `SC2016` at the SELinux-relabel sed injection and at the `bash -c '...$1...'`
+  secure idiom in `build-ol-aws-ami.sh`, and `source=/dev/null` at the runtime
+  `. /etc/os-release` in `install-ena-driver.sh`. Every other code stays active
+  everywhere. B-T2 SKIPs if shellcheck is absent (the CI gate requires it).
 - **pykickstart / `ksvalidator`** (B-T4): optional; B-T4 SKIPs if absent.
 - **awk / sed / grep / find** (coreutils + gawk): present in the container.
 
@@ -105,7 +113,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | Tier | Layer | Status | Notes |
 |:--|:--|:--|:--|
 | B-T1 parse | L0 | implemented | `bash -n` all `.sh` + 5 shell-bodied heredoc bodies; 13 asserts |
-| B-T2 ShellCheck | L0 | planned | deterministic gate via a checked-in `.shellcheckrc` (documented suppressions) |
+| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` via `.shellcheckrc`; 3 documented inline exemptions; SKIPs if shellcheck absent |
 | B-T3 pure-function unit | L1 | planned | `parse_ol_version_from_iso`, `parse_args`, IMDS `v2.0` OL6 rejection |
 | B-T (command mock) | L1 | planned | dependency class "external commands" via PATH-shadow |
 | B-T5 env parity | L2 | planned | `env.properties.aws-ol{6,7,8,9,10}` key-set / invariant checks |

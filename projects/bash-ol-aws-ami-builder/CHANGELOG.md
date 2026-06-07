@@ -21,6 +21,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added **B-T2 ShellCheck** as a deterministic static gate (`tests/t2_shellcheck.sh`,
+  test increment 2): runs ShellCheck at the **canonical `-S style`** (strictest)
+  over every `.sh` and asserts zero findings per file, turning ShellCheck into a
+  reproducible pass/fail summary with no per-run judgement. A checked-in
+  `.shellcheckrc` enables `external-sources=true` + `source-path=SCRIPTDIR` (to
+  *follow* the harness's sourced libs - strengthening, not relaxing) and declares
+  **no** global `disable=`. Three narrow, documented inline exemptions remain
+  (each one code on one statement, with a rationale): `SC2016` at the
+  SELinux-relabel sed injection and at the `bash -c '...$1...'` secure idiom in
+  `build-ol-aws-ami.sh`, and `source=/dev/null` at the runtime `. /etc/os-release`
+  in `install-ena-driver.sh`. Reconciled the previously split ShellCheck severity
+  references in SPEC (A.11 iteration cycle, Part C checklist `--severity=error`,
+  Part D, Part E `--severity=warning`) to the canonical `style` gate run via
+  `tests/run-all.sh`. Suite now **23 passed, 0 failed** (B-T1 14 + B-T2 9);
+  B-T2 SKIPs if shellcheck is absent. Script changes are comment-only
+  (no behaviour change). ShellCheck pinned to 0.10.0 (recorded in TESTING.md).
+
 - Added a **self-contained bash test harness** under `tests/` (the bash-idiom
   analogue of the PowerShell canon's test discipline, framework-free by policy):
   a single entry runner `tests/run-all.sh` that runs every tier, aggregates

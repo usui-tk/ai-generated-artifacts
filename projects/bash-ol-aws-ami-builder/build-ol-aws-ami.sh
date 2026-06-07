@@ -1078,6 +1078,11 @@ phase3_clone_repository() {
       log_info "  -> build-image.sh SELinux relabel fallback already applied (idempotent skip)"
     elif grep -Fq 'selinux-relabel /etc/selinux/targeted/contexts/files/file_contexts' "${build_image_sh}"; then
       log_info "Applying SELinux relabel resilience patch to upstream bin/build-image.sh"
+      # ${WORKSPACE}/${VM_NAME} inside the single-quoted sed program are kept
+      # literal on purpose: they must expand at build-image.sh runtime (its own
+      # env), not at sed-injection time; single-quoting also protects the sed
+      # metacharacters $| \n \&. See TESTING.md / SPEC D.17.
+      # shellcheck disable=SC2016
       sed -i.selinux-relabel.bak \
         -e '/common::echo_message "SELinux relabel non-root filesystems"/ s|$|\n    if ! guestfish -a /dev/null run : available selinuxrelabel >/dev/null 2>\&1; then\n      common::echo_message "    [ol-aws-ami-builder PATCH selinux-relabel-fallback] host libguestfs lacks selinuxrelabel optgroup; scheduling first-boot autorelabel (/.autorelabel)"\n      guestfish --rw -a "${WORKSPACE}/${VM_NAME}/${VM_NAME}.qcow2" -i touch /.autorelabel\n    else|' \
         -e 's|^\(\s*\)guestfish --remote quit$|\1guestfish --remote quit\n\1fi|' \
@@ -2519,6 +2524,11 @@ phase5_run_build() {
   # this wrapper's own [INFO]/[BUILD] lines. 2>&1 folds external stderr into the
   # attributed stream; 'set -o pipefail' (top of file) propagates the
   # timeout/build exit status through the pipe so build_rc reflects the result.
+  # The single-quoted `bash -c '...$1...$2...'` is the intended secure idiom:
+  # the qcow2 dir and env path are passed as positional parameters ($1/$2) and
+  # must NOT be expanded by the outer shell (injection-safe). SC2016 is a false
+  # positive here.
+  # shellcheck disable=SC2016
   timeout --signal=TERM --kill-after=60s "${BUILD_TIMEOUT_MIN}m" \
     bash -c 'cd "$1" && ./bin/build-image.sh --env "$2"' _ "${tool_dir}" "${tool_env}" 2>&1 \
     | log_external "build-image.sh" || build_rc=$?
