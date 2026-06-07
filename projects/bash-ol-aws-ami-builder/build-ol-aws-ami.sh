@@ -84,8 +84,13 @@
 # ----- Options ----------------------------------------------------------------
 #   --env <file>          : Path to the environment properties file (required)
 #   --skip-prereq         : Skip Phase 1 when build host packages are present
-#   --skip-aws-import     : Skip Phases 6-8 (build VMDK only)
-#   --build-only          : Run through Phase 5 only
+#   --skip-aws-import     : Skip the AWS import phases (Phases 7-9): run
+#                           through the VMDK build and the Phase 6 Nitro
+#                           readiness check, then exit. Equivalent to
+#                           --build-only.
+#   --build-only          : Run through Phase 6 (VMDK build + Nitro readiness
+#                           check), then exit without the AWS import phases
+#                           (Phases 7-9). Equivalent to --skip-aws-import.
 #   --skip-ena-driver     : Do NOT build/install the Amazon ENA driver in the
 #                           guest. Default is to build it (AWS-optimized AMI);
 #                           this switch produces a pure, unmodified OL AMI.

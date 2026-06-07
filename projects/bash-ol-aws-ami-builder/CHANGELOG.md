@@ -174,6 +174,16 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Docs/comments (no behaviour change):** `--build-only` and `--skip-aws-import`
+  were described three different ways. The script header said `--skip-aws-import`
+  "Skip Phases 6-8" and `--build-only` "Run through Phase 5 only", and the README
+  pair said `--build-only` stops "after VMDK is built (Phase 5)" — all inaccurate.
+  In `main()` Phase 6 (the Nitro readiness check) always runs, and **both** flags
+  then skip the AWS import phases (7-9) and exit, so the two are equivalent. The
+  header (printed by `usage()`/`--help`) and `README.md` / `README.ja.md` now state
+  "run through Phase 6, then skip Phases 7-9; equivalent to the other flag",
+  matching SPEC A.3 (already correct). Bilingual README pair updated in lock-step.
+
 - **Docs/comments (no behaviour change):** the script header's supported-version
   banner listed only `8 / 9 / 10` with `Experimental: 7`, **omitting OL6**, and
   the example env-file list and the AI-generation note likewise predated OL6
