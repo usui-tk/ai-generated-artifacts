@@ -1130,6 +1130,69 @@ phase3_clone_repository() {
     fi
   fi
 
+  # cloud/aws/provision.sh Nitro initramfs-drivers hook (ALWAYS on).
+  #
+  # Forcing nvme + ena into the initramfs is a Nitro BOOT requirement (the root
+  # is NVMe-backed), independent of the ENA driver *version* and of
+  # --skip-ena-driver: even a pure OL AMI must boot on Nitro. dracut runs in
+  # hostonly mode on the non-NVMe build VM (root on virtio /dev/sda), so it
+  # omits nvme from the initramfs -- observed on OL7 (UEK R6): nvme.ko was on
+  # disk but absent from the initramfs, so the image could not mount its root on
+  # Nitro (Phase 6 CHECK 1 correctly FAILed). We drop an /etc/dracut.conf.d
+  # add_drivers file (persists across in-instance kernel updates) and regenerate
+  # the initramfs for the installed kernel. Best-effort: it never aborts the
+  # build (CHECK 1 verifies the result). Idempotent via the wrapper marker.
+  local aws_provision="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
+  local nitro_body
+  nitro_body="$(cat <<'OLAWS_NITRO_BODY'
+#!/bin/sh
+# Ensure Nitro-essential drivers (nvme, ena) are present in the initramfs.
+# Targets the installed kernel (highest UEK under /lib/modules); `uname -r` is
+# the libguestfs appliance kernel during provisioning, so it is not used.
+set -u
+kver=""
+for d in /lib/modules/*uek*/ ; do
+  [ -d "$d" ] || continue
+  b=${d%/}; b=${b##*/}
+  if [ -z "$kver" ] || [ "$(printf '%s\n%s\n' "$kver" "$b" | sort -V | tail -1)" = "$b" ]; then
+    kver="$b"
+  fi
+done
+[ -n "$kver" ] || { echo "[nitro-initramfs] no UEK kernel under /lib/modules; skipping"; exit 0; }
+mkdir -p /etc/dracut.conf.d
+printf 'add_drivers+=" nvme nvme-core ena "\n' > /etc/dracut.conf.d/02-ol-aws-nitro.conf
+if command -v dracut >/dev/null 2>&1; then
+  echo "[nitro-initramfs] regenerating initramfs for $kver (force nvme/ena)"
+  dracut -f "/boot/initramfs-${kver}.img" "$kver" || echo "[nitro-initramfs] WARNING: dracut -f failed for $kver"
+else
+  echo "[nitro-initramfs] dracut not found; wrote dracut.conf.d drop-in only"
+fi
+exit 0
+OLAWS_NITRO_BODY
+)"
+  if [[ -f "${aws_provision}" ]]; then
+    if grep -Fq '[ol-aws-ami-builder PATCH nitro-initramfs]' "${aws_provision}"; then
+      log_info "Nitro initramfs-drivers hook already present (idempotent skip)"
+    else
+      log_info "Injecting Nitro initramfs-drivers hook into cloud/aws/provision.sh (force nvme/ena; boot requirement)"
+      {
+        printf '\n# >>> [ol-aws-ami-builder PATCH nitro-initramfs] >>>\n'
+        printf "cat > /usr/local/sbin/ol-aws-nitro-initramfs.sh <<'OLAWS_NITRO_INITRAMFS_EOF'\n"
+        printf '%s\n' "${nitro_body}"
+        printf 'OLAWS_NITRO_INITRAMFS_EOF\n'
+        printf 'sh /usr/local/sbin/ol-aws-nitro-initramfs.sh\n'
+        printf '# <<< [ol-aws-ami-builder PATCH nitro-initramfs] <<<\n'
+      } >> "${aws_provision}"
+      if grep -Fq '[ol-aws-ami-builder PATCH nitro-initramfs]' "${aws_provision}"; then
+        log_info "  -> Nitro initramfs-drivers hook injected (add_drivers nvme/ena + dracut -f)"
+      else
+        die "Failed to inject Nitro initramfs-drivers hook into ${aws_provision}"
+      fi
+    fi
+  else
+    log_warn "cloud/aws/provision.sh not found; skipping Nitro initramfs-drivers hook"
+  fi
+
   # cloud/aws/provision.sh ENA driver self-build hook.
   #
   # Default ON: append a hook to the AWS-cloud provisioning script that builds

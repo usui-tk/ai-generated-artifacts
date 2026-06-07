@@ -155,6 +155,19 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- Force **nvme + ena into the initramfs** so OL AMIs actually boot on Nitro. The
+  image is built in a VM with a virtio root disk, so dracut's hostonly mode omits
+  nvme from the initramfs; an OL7 build's initramfs had `nvme.ko` on disk but not
+  in the initramfs, so it could not mount its NVMe-backed root on Nitro (Phase 6
+  CHECK 1 correctly FAILed). Phase 3 now **always** (even with
+  `--skip-ena-driver`, since booting is not optional) appends a hook to
+  `cloud/aws/provision.sh` that drops `/etc/dracut.conf.d/02-ol-aws-nitro.conf`
+  (`add_drivers+=" nvme nvme-core ena "`, persisting across kernel updates) and
+  regenerates the initramfs for the installed kernel. It targets the highest UEK
+  under `/lib/modules` (not the appliance `uname -r`) and is best-effort. CHECK 1
+  is unchanged — its OL7 FAIL was a true positive, not a detection bug. See SPEC
+  A.7 ("Nitro initramfs drivers") and D.22.
+
 - `install-ena-driver.sh` is now **self-contained and runnable standalone**, and
   resolves the `kernel-uek-devel` gap that aborted the DKMS build. The stock OL
   ISO ships an older `kernel-uek` whose `-devel` is often pruned from the repos

@@ -472,6 +472,23 @@ ENA driver in the guest for Nitro v4+ targets. Source: amzn/amzn-drivers ENA
 Linux driver (`ENA_Linux_Best_Practices.rst`, `RELEASENOTES.md`). The
 per-generation family lists are representative, not exhaustive.
 
+### Nitro initramfs drivers (nvme/ena)
+
+Independently of the ENA driver *version*, the **initramfs must contain `nvme`
+(and `ena`)** — on Nitro the root filesystem is NVMe-backed, so without nvme in
+the initramfs the instance cannot mount root and fails to boot. The image is
+built in a VM whose disk is virtio (`/dev/sda`), so dracut's **hostonly** mode
+omits nvme from the initramfs (observed on OL7 UEK R6: `nvme.ko` was on disk but
+absent from the initramfs, and Phase 6 CHECK 1 correctly FAILed). This is a boot
+requirement, so Phase 3 **always** (even with `--skip-ena-driver`) appends a hook
+to `cloud/aws/provision.sh` that writes `/etc/dracut.conf.d/02-ol-aws-nitro.conf`
+(`add_drivers+=" nvme nvme-core ena "`, which also persists across in-instance
+kernel updates) and regenerates the initramfs for the installed kernel
+(`dracut -f`). It targets the highest UEK under `/lib/modules` (the appliance's
+`uname -r` is not the guest's) and is best-effort — it never aborts the build;
+CHECK 1 verifies the result. OL6 already shipped nvme in its UEK4 initramfs, so
+the step is a harmless refresh there.
+
 ### ENA driver self-build (`--skip-ena-driver`)
 
 **Rationale — baseline in-distro ENA drivers (measured).** The default OL images
@@ -2157,6 +2174,41 @@ initramfs. See A.7.
 If CHECK 1 is `INDETERMINATE`, confirm the AMI boots on a Nitro instance (the
 generic cloud initramfs normally includes nvme); the ENA self-build's `dracut -f`
 also regenerates the initramfs for the target kernel.
+
+---
+
+## D.22 OL7 initramfs omits nvme (hostonly dracut) -> not bootable on Nitro
+
+**Symptom.** A clean OL7 build (even a `--skip-ena-driver` "pure" build) produces
+a good VMDK but Phase 6 CHECK 1 FAILs:
+
+```
+[CHECK 1] NVMe host driver: FAIL (not built-in and not in an inspectable initramfs ...)
+```
+
+and a host-side inspection confirms `nvme.ko` is present on disk
+(`/lib/modules/<kver>/kernel/drivers/nvme/host/nvme.ko.xz`) but **absent from the
+initramfs** (e.g. `unmkinitramfs` extracts ~110 modules, none of them nvme).
+
+**Cause.** Unlike D.21 (a host-side *inspection* gap), this is a genuine
+omission. The image is installed in a VM whose root disk is virtio
+(`/dev/sda`), and dracut runs in **hostonly** mode, so it only includes drivers
+for devices present at build time — nvme is not among them. On a real Nitro
+instance the root is NVMe-backed, so the initramfs cannot find root and the
+instance fails to boot. (OL6's UEK4 initramfs happened to include nvme, so OL6
+passed; OL7's UEK R6 hostonly initramfs did not.) CHECK 1's FAIL is therefore a
+true positive, not a false negative.
+
+**Fix.** Phase 3 appends an always-on hook to `cloud/aws/provision.sh` (it runs
+even with `--skip-ena-driver`, because booting on Nitro is not optional) that
+writes `/etc/dracut.conf.d/02-ol-aws-nitro.conf` with
+`add_drivers+=" nvme nvme-core ena "` and regenerates the initramfs for the
+installed kernel with `dracut -f`. The drop-in also makes future in-instance
+kernel updates keep nvme/ena. See A.7 ("Nitro initramfs drivers").
+
+**Prevention.** The hook targets the highest UEK under `/lib/modules` (not the
+appliance `uname -r`) and is idempotent and best-effort; CHECK 1 then verifies
+that nvme is in the regenerated initramfs.
 
 ---
 
