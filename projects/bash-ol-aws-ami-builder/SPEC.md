@@ -2249,6 +2249,49 @@ boot-readiness regression). See A.7 ("Nitro initramfs drivers" / ENA self-build)
 
 ---
 
+## D.24 OL6 `sshd` refuses to start: `PermitRootLogin prohibit-password` invalid on OpenSSH 5.3
+
+**Symptom.** A freshly built OL6 AMI boots, gets a network address and answers
+ping, but every SSH attempt is met with `Connection refused`. The instance
+console shows host keys being generated normally and then:
+
+```
+Starting sshd: [FAILED]
+```
+
+i.e. nothing is listening on port 22. It is **not** a key-pair, security-group,
+or IMDS problem — sshd itself never started.
+
+**Cause.** The wrapper applies a root-login policy to `sshd_config` from the
+upstream `PERMIT_ROOT_LOGIN` env property, whose modern default is
+`prohibit-password`. That token was introduced in **OpenSSH 6.7**. OL6 ships
+**OpenSSH 5.3**, whose config parser accepts only
+`yes | no | without-password | forced-commands-only` and treats any other value
+as a **fatal** parse error, so sshd exits at startup. `prohibit-password` is in
+fact just the modern alias for `without-password` (identical behavior: key-based
+root login allowed, password root login denied), so OL6 was being handed a
+semantically-correct policy in syntax its sshd could not parse. OL7+ are
+unaffected (OpenSSH 7.4p1 accepts the modern token).
+
+**Fix.** In the OL6-only synthesized `provision.sh` (`distr::common_cfg`), the
+policy value is lowercased and `prohibit-password` is mapped back to
+`without-password` before the `sshd_config` substitution, giving OL6 the
+identical policy in 5.3-valid syntax. OL7+ keep the modern value via their own
+upstream path (per-OS isolation — an OL6 fix cannot regress OL7-10).
+
+**Prevention (build-time gate + audit).** After editing `sshd_config`, the OL6
+provision step now runs `sshd -t -f /etc/ssh/sshd_config` (with an ephemeral
+`-h` host key so the test is independent of whether real host keys exist yet)
+and **aborts the build** on any parse error. This converts the entire class of
+"a modern directive/value leaked into OL6's OpenSSH 5.3 config" from a silent
+first-boot `Connection refused` into a loud, deterministic build-time failure.
+This is one instance of the broader **OL6-vs-modern compatibility audit**: any
+config synthesized by the wrapper and consumed by an OL6 (bash 4.1 / anaconda-13
+/ OpenSSH 5.3 / Upstart) toolchain must be validated against the *older*
+tool's accepted syntax, not the build host's modern tool (cf. D.18, D.19, D.20).
+
+---
+
 ## Appendix: How to add support for a new OL major release
 
 When Oracle ships OL11:

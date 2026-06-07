@@ -155,6 +155,17 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **OL6 SSH was unreachable (`Connection refused`)** because sshd refused to
+  start: the wrapper wrote `PermitRootLogin prohibit-password` into
+  `sshd_config`, but that token (OpenSSH 6.7+) is a **fatal parse error** on
+  OL6's OpenSSH 5.3, which accepts only
+  `yes|no|without-password|forced-commands-only`. The OL6-only `provision.sh`
+  now maps `prohibit-password` → `without-password` (its identical pre-6.7
+  alias) before editing `sshd_config`, and then **validates the result with
+  `sshd -t`** (using an ephemeral host key) and aborts the build on any parse
+  error — turning a silent first-boot failure into a deterministic build-time
+  one. OL7+ are untouched (per-OS isolation). See SPEC D.24.
+
 - Phase 6 **CHECK 2 (ENA driver) and the assurance report now scan the full
   `/lib/modules/<kver>` tree** (`/kernel` + `/extra` + `/updates`) instead of
   only `/kernel`. The in-guest ENA self-build installs `ena.ko` via DKMS into

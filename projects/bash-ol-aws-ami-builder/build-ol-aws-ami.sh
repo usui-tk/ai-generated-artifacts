@@ -1752,12 +1752,51 @@ distr::common_cfg() {
     yum update --security -y "${YUM_VERBOSE}"
   fi
 
-  common::echo_message "sshd root login policy: ${PERMIT_ROOT_LOGIN}"
+  # OpenSSH 5.3 (OL6) predates 'prohibit-password' (added in 6.7); its parser
+  # accepts only yes|no|without-password|forced-commands-only and FATALs on any
+  # other value, so sshd refuses to start -> port 22 closed -> the instance
+  # pings but SSH gives 'Connection refused'. 'prohibit-password' is the modern
+  # alias for 'without-password'; map it back so OL6 gets the identical policy in
+  # 5.3-valid syntax. This is OL6-only (distr::common_cfg lives in the synthesized
+  # OL6 provision.sh); OL7+ keep the modern value via their own upstream path.
+  local ol6_root_login="${PERMIT_ROOT_LOGIN,,}"
+  [ "${ol6_root_login}" = "prohibit-password" ] && ol6_root_login="without-password"
+  common::echo_message "sshd root login policy (OL6/OpenSSH 5.3): ${ol6_root_login}"
   ex -s /etc/ssh/sshd_config <<EOF
-:%substitute/^#\?\(PermitRootLogin\) .*$/\1 ${PERMIT_ROOT_LOGIN,,}/
+:%substitute/^#\?\(PermitRootLogin\) .*$/\1 ${ol6_root_login}/
 :update
 :quit
 EOF
+
+  # Validate the generated sshd_config with sshd's own parser BEFORE the image
+  # is sealed. 'sshd -t' exits non-zero on ANY unknown directive/value (the exact
+  # prohibit-password-on-5.3 failure mode, and any future OL6/5.3 incompatibility),
+  # turning a silent first-boot 'Connection refused' into a loud, deterministic
+  # build-time abort. An ephemeral host key (-h) keeps the test independent of
+  # whether real host keys exist yet at provision time, so only genuine CONFIG
+  # errors fail it; missing tools degrade to a warning (never a false abort).
+  local sshd_bin="" sshd_tkey
+  command -v sshd >/dev/null 2>&1 && sshd_bin="$(command -v sshd)"
+  [ -z "${sshd_bin}" ] && [ -x /usr/sbin/sshd ] && sshd_bin=/usr/sbin/sshd
+  if [ -n "${sshd_bin}" ] && command -v ssh-keygen >/dev/null 2>&1; then
+    sshd_tkey="$(mktemp -u /tmp/ol-aws-sshd-test.XXXXXX)"
+    if ssh-keygen -q -t rsa -b 2048 -f "${sshd_tkey}" -N "" </dev/null 2>/dev/null && [ -f "${sshd_tkey}" ]; then
+      if "${sshd_bin}" -t -f /etc/ssh/sshd_config -h "${sshd_tkey}" 2>/tmp/ol-aws-sshd-test.err; then
+        common::echo_message "sshd_config validated by 'sshd -t' (PermitRootLogin=${ol6_root_login}; OK)"
+      else
+        common::echo_message "FATAL: 'sshd -t' rejected the generated sshd_config (PermitRootLogin=${ol6_root_login}):"
+        cat /tmp/ol-aws-sshd-test.err 2>/dev/null || true
+        rm -f "${sshd_tkey}" "${sshd_tkey}.pub" /tmp/ol-aws-sshd-test.err
+        exit 1
+      fi
+      rm -f "${sshd_tkey}" "${sshd_tkey}.pub" /tmp/ol-aws-sshd-test.err
+    else
+      common::echo_message "WARNING: could not create an ephemeral test host key; skipped 'sshd -t' validation"
+      rm -f "${sshd_tkey}" "${sshd_tkey}.pub" 2>/dev/null || true
+    fi
+  else
+    common::echo_message "WARNING: sshd/ssh-keygen not found; skipped 'sshd -t' validation"
+  fi
 
   # OL6 uses /etc/ntp.conf, not chrony
   if [[ -f /etc/ntp.conf ]]; then
