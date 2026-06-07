@@ -2388,7 +2388,83 @@ required, or to not target OL6 under such a policy.
 
 ---
 
-## Appendix: How to add support for a new OL major release
+# Part E — Logging & Diagnostics
+
+The wrapper emits a single, uniform log stream to the console and (by default)
+to a persistent file. Three orthogonal axes describe every line.
+
+## E.1 Line format
+
+```
+[SEVERITY]  YYYY-MM-DD HH:MM:SS  [OLAWS-CODE]  <message>
+```
+
+- The **timestamp is unified** to `YYYY-MM-DD HH:MM:SS` on every channel,
+  including the `[BUILD]` heartbeat and the `[EXTERNAL]` re-emission (N2). Prior
+  versions used a bare `HH:MM:SS` on those two channels.
+- The **`[OLAWS-CODE]` tag is optional**: it appears only on curated logic
+  points (the wrapper's own decisions and the Phase-6 assurance checks), never
+  on every line.
+
+## E.2 Axis 1 — SEVERITY
+
+| Tag | Meaning | Destination |
+|:--|:--|:--|
+| `[INFO]` | normal progress | console + file |
+| `[WARN]` | non-fatal anomaly / advisory | console + file (stderr) |
+| `[ERROR]` | fatal; precedes `die` | console + file (stderr) |
+| `[DEBUG]` | verbose diagnostics | **file always**; console only with `--debug` |
+
+`[DEBUG]` (F4) is written to the log file unconditionally and mirrored to the
+console only when `--debug` (`DEBUG=1`) is set, so the default console stays
+readable while the file retains full detail.
+
+## E.3 Axis 2 — SOURCE
+
+| Tag | Source |
+|:--|:--|
+| (none / severity only) | this wrapper's own logic |
+| `[BUILD]` | wrapper build-phase heartbeat |
+| `[EXTERNAL] … [<script>]` | output re-emitted from an invoked external tool (and its children), attributed to the originating script |
+
+## E.4 Axis 3 — LOGIC-CODE (`[OLAWS-<AREA><NN>]`)
+
+Stable identifiers for the wrapper's own decision/diagnostic points, so a log
+can be grepped by concern. An **OS suffix** (`/OL6`, `/OL7`, …) is appended when
+the line is specific to one generation (e.g. `[OLAWS-USR01/OL6]`).
+
+| Code | Meaning |
+|:--|:--|
+| `OLAWS-LOG01` | build-log location (and whether `--debug` console output is on) |
+| `OLAWS-CFG01` | resolved feature knobs (`[DEBUG]`: ENA/IMDS/skip flags) |
+| `OLAWS-NVM01` | Nitro initramfs-drivers hook injected (nvme/ena into initramfs) |
+| `OLAWS-ENA01` | in-guest ENA driver self-build hook injected |
+| `OLAWS-CON01` | serial-console (`ttyS0`) hook injected (GRUB2 / OL7+) |
+| `OLAWS-USR01` | OL6 cloud-init default-user alignment hook injected (→ `ec2-user`) |
+| `OLAWS-IMD01` | AMI IMDS support mode chosen at `register-image` |
+| `OLAWS-CHK01` | Phase-6 assurance CHECK 1 — NVMe host driver |
+| `OLAWS-CHK02` | Phase-6 assurance CHECK 2 — ENA driver |
+| `OLAWS-CHK03` | Phase-6 assurance CHECK 3 — fstab device-name mounts |
+| `OLAWS-CHK04` | Phase-6 assurance CHECK 4 — bootloader `root=` form |
+| `OLAWS-CHK05` | Phase-6 assurance CHECK 5 — serial console (advisory) |
+
+The catalogue is **append-only and curated**: new codes are added for genuine
+decision points, not for routine output. Codes are intentionally absent from
+ordinary `[INFO]`/`[BUILD]`/`[EXTERNAL]` lines.
+
+## E.5 File logging (N3)
+
+The full run is mirrored to a file while the console is preserved:
+
+- **Default path:** `${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log`
+  (the timestamp is the build start time).
+- **Override:** `--log-file <path>` (env `LOG_FILE`).
+- The console keeps ANSI colour; the **file is ANSI-stripped** so it stays
+  grep-friendly. `[DEBUG]` lines reach the file via a direct handle even when
+  they are suppressed on the console.
+
+---
+
 
 When Oracle ships OL11:
 

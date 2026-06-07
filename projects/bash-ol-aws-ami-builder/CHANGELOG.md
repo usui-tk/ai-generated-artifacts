@@ -21,6 +21,17 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added a **persistent build log** (N3): the full run is mirrored to
+  `${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log` by default while the
+  console is preserved; **`--log-file <path>`** (env `LOG_FILE`) overrides the
+  location. The file is ANSI-stripped so it stays grep-friendly. See SPEC E.5.
+- Added a **`[DEBUG]` severity** and a **`--debug`** switch (F4): `[DEBUG]`
+  lines are always written to the log file and mirrored to the console only
+  with `--debug`. See SPEC E.2.
+- Added **`[OLAWS-<AREA><NN>]` logic-code tags** on curated decision points and
+  the Phase-6 assurance checks, so a log can be grepped by concern (with an OS
+  suffix such as `/OL6` where generation-specific). Catalogue in SPEC E.4.
+
 - Added an **`--imds-support` option** (env `IMDS_SUPPORT`) to choose the AMI's
   baked-in IMDS support: `default` (IMDSv1+v2, `HttpTokens=optional`) or `v2.0`
   (IMDSv2-required, OL7+ only). Default is `default`. See SPEC D.27.
@@ -91,6 +102,10 @@ This CHANGELOG is **English only** per the repository-wide
   the canon per the rule-of-two, so `TESTING.md` carries no doc-provenance pin.)
 
 ### Changed
+
+- **Unified the log timestamp** to `YYYY-MM-DD HH:MM:SS` across every channel
+  (N2). The `[BUILD]` heartbeat and the `[EXTERNAL]` re-emission previously used
+  a bare `HH:MM:SS`; they now match `[INFO]`/`[WARN]`/`[ERROR]`. See SPEC E.1.
 
 - The Phase 6 Nitro **instance-assurance report** is now **purely advisory and
   never aborts the build** — only the four boot-readiness checks (CHECK 1–4:

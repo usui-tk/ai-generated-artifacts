@@ -362,6 +362,8 @@ Expected total time: **40–90 minutes** (depends on bandwidth and instance perf
 | `--skip-aws-import` | Skip Phases 7–9 (equivalent to `--build-only`). |
 | `--skip-ena-driver` | Do **not** build/install the Amazon ENA driver in the guest. The default builds it (AWS-optimized AMI, Nitro v4+/ENAv3 capable); this switch produces a pure, unmodified OL AMI. |
 | `--imds-support <mode>` | IMDS support baked into the AMI: `default` (IMDSv1+v2, `HttpTokens=optional`) or `v2.0` (IMDSv2-required, **OL7+ only**). Default `default`. OL6 + `v2.0` is rejected (its cloud-init 0.7.5 cannot use IMDSv2). |
+| `--log-file <path>` | Write the full run log here. Default: `${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log` (console output is mirrored to the file either way; the file is ANSI-stripped). |
+| `--debug` | Also print `[DEBUG]` lines to the console (they are always written to the log file regardless). |
 
 ### 6.3 Phase 0 self-diagnosis
 

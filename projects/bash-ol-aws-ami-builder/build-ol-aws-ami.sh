@@ -81,6 +81,11 @@
 #   --imds-support <mode> : IMDS support baked into the AMI. 'default'
 #                           (IMDSv1+v2; HttpTokens=optional) or 'v2.0'
 #                           (IMDSv2-required, OL7+ only). Default: 'default'.
+#   --log-file <path>     : Write the full run log here. Default:
+#                           ${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log
+#                           (console output is mirrored to the file either way).
+#   --debug               : Also print [DEBUG] lines to the console (they are
+#                           always written to the log file regardless).
 #   -h | --help           : Show this help
 #
 # ----- Known limitations ------------------------------------------------------
@@ -130,6 +135,12 @@ BUILD_ONLY=0
 # turns it OFF -> pure, unmodified OL AMI).
 ENA_DRIVER_BUILD=1
 ENV_FILE=""
+# Logging (N3/F4). DEBUG=1 (--debug) also mirrors [DEBUG] lines to the console;
+# they are always written to the log file regardless. LOG_FILE empty -> default
+# under WORKSPACE (set in setup_logging()); --log-file <path> overrides.
+DEBUG=0
+LOG_FILE=""
+LOG_SETUP_DONE=""
 
 #------------------------------------------------------------------------------
 # Logging helpers
@@ -139,9 +150,21 @@ log_warn()  { echo -e "\033[1;33m[WARN]\033[0m  $(date '+%Y-%m-%d %H:%M:%S') $*"
 log_error() { echo -e "\033[1;31m[ERROR]\033[0m $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; }
 log_step()  { echo -e "\n\033[1;32m========== $* ==========\033[0m\n"; }
 # Build-phase progress (heartbeat) -- our format, distinct [BUILD] tag.
-log_progress() { echo -e "\033[1;36m[BUILD]\033[0m $(date '+%H:%M:%S') $*"; }
+# Timestamp unified to 'YYYY-MM-DD HH:MM:SS' across every channel (N2).
+log_progress() { echo -e "\033[1;36m[BUILD]\033[0m $(date '+%Y-%m-%d %H:%M:%S') $*"; }
+# [DEBUG] (F4 severity). Always written to the log file; mirrored to the console
+# only when DEBUG=1 (--debug). When quiet it goes straight to fd 3 (the direct
+# file handle opened in setup_logging), bypassing the console tee.
+log_debug() {
+  local line; line="[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') $*"
+  if [[ "${DEBUG}" == "1" ]]; then
+    printf '%s\n' "${line}"
+  elif [[ -n "${LOG_SETUP_DONE}" ]]; then
+    printf '%s\n' "${line}" >&3
+  fi
+}
 # Re-emit external-tool output read on stdin, one attributed line at a time:
-#   [EXTERNAL] HH:MM:SS [<script>] <original line>
+#   [EXTERNAL] YYYY-MM-DD HH:MM:SS [<script>] <original line>
 # so output produced by the invoked external script (and its children) is
 # unmistakably distinct from this wrapper's own [INFO]/[BUILD] lines. The
 # timestamp is per-line (current time as each line arrives). $1 = script name.
@@ -149,12 +172,30 @@ log_external() {
   local script="$1" line
   while IFS= read -r line || [[ -n "${line}" ]]; do
     printf '\033[90m[EXTERNAL]\033[0m %s \033[90m[%s]\033[0m %s\n' \
-      "$(date '+%H:%M:%S')" "${script}" "${line}"
+      "$(date '+%Y-%m-%d %H:%M:%S')" "${script}" "${line}"
     line=""
   done
 }
 
 die() { log_error "$*"; exit 1; }
+
+# N3: persist the whole run to a log file while keeping the console. By default
+# the file is ${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log; --log-file
+# <path> (LOG_FILE) overrides. Called once from load_env() after WORKSPACE is
+# resolved+created, so it captures the env summary and every phase. fd 3 is a
+# direct (un-tee'd) handle for [DEBUG] lines suppressed on the console; the tee
+# branch strips ANSI colour so the file stays grep-friendly while the console
+# keeps colour.
+setup_logging() {
+  [[ -n "${LOG_SETUP_DONE}" ]] && return 0
+  : "${LOG_FILE:=${WORKSPACE}/build-ol-aws-ami-$(date '+%Y%m%d-%H%M%S').log}"
+  local log_dir; log_dir="$(dirname "${LOG_FILE}")"
+  mkdir -p "${log_dir}" 2>/dev/null || true
+  exec 3>>"${LOG_FILE}"
+  exec > >(tee >(sed -u 's/\x1b\[[0-9;]*m//g' >> "${LOG_FILE}")) 2>&1
+  LOG_SETUP_DONE=1
+  log_info "[OLAWS-LOG01] build log: ${LOG_FILE}$([[ "${DEBUG}" == "1" ]] && echo ' (debug console output ON)')"
+}
 
 #------------------------------------------------------------------------------
 # Argument parsing
@@ -173,6 +214,8 @@ parse_args() {
       --build-only)       BUILD_ONLY=1;        shift ;;
       --skip-ena-driver)  ENA_DRIVER_BUILD=0;  shift ;;
       --imds-support)     IMDS_SUPPORT="$2";   shift 2 ;;
+      --log-file)         LOG_FILE="$2";       shift 2 ;;
+      --debug)            DEBUG=1;             shift ;;
       -h|--help)          usage 0 ;;
       *)                  log_error "Unknown option: $1"; usage 1 ;;
     esac
@@ -298,6 +341,10 @@ load_env() {
   WORKSPACE=$(realpath -m "${WORKSPACE}")
   mkdir -p "${WORKSPACE}"
 
+  # N3: start mirroring console output to the build log now that WORKSPACE
+  # exists (so the env summary below and every phase are captured).
+  setup_logging
+
   # Required parameters for AWS import (unless skipped)
   if [[ ${SKIP_AWS_IMPORT} -eq 0 && ${BUILD_ONLY} -eq 0 ]]; then
     : "${S3_BUCKET:?S3_BUCKET is not defined}"
@@ -395,6 +442,8 @@ load_env() {
     log_info "AMI_NAME           = ${AMI_NAME}"
     log_info "BOOT_MODE          = ${BOOT_MODE}"
   fi
+  # [DEBUG] (F4): the resolved feature knobs -- file always, console with --debug.
+  log_debug "[OLAWS-CFG01] knobs: ENA_DRIVER_BUILD=${ENA_DRIVER_BUILD} IMDS_SUPPORT=${IMDS_SUPPORT} SKIP_PREREQ=${SKIP_PREREQ} SKIP_AWS_IMPORT=${SKIP_AWS_IMPORT} BUILD_ONLY=${BUILD_ONLY}"
 
   # Validate BOOT_MODE_BUILD: oracle-linux-image-tools restricts AWS to bios.
   if [[ "${CLOUD,,}" == "aws" && "${BOOT_MODE_BUILD,,}" != "bios" ]]; then
@@ -1206,7 +1255,7 @@ OLAWS_NITRO_BODY
         printf '# <<< [ol-aws-ami-builder PATCH nitro-initramfs] <<<\n'
       } >> "${aws_provision}"
       if grep -Fq '[ol-aws-ami-builder PATCH nitro-initramfs]' "${aws_provision}"; then
-        log_info "  -> Nitro initramfs-drivers hook injected (add_drivers nvme/ena + dracut -f)"
+        log_info "  [OLAWS-NVM01] Nitro initramfs-drivers hook injected (add_drivers nvme/ena + dracut -f)"
       else
         die "Failed to inject Nitro initramfs-drivers hook into ${aws_provision}"
       fi
@@ -1269,7 +1318,7 @@ OLAWS_SERIAL_BODY
         printf '# <<< [ol-aws-ami-builder PATCH serial-console] <<<\n'
       } >> "${aws_provision}"
       if grep -Fq '[ol-aws-ami-builder PATCH serial-console]' "${aws_provision}"; then
-        log_info "  -> Serial-console hook injected (console=tty0 console=ttyS0,115200n8 + grub2-mkconfig)"
+        log_info "  [OLAWS-CON01] serial-console hook injected (console=tty0 console=ttyS0,115200n8 + grub2-mkconfig)"
       else
         die "Failed to inject serial-console hook into ${aws_provision}"
       fi
@@ -1325,7 +1374,7 @@ OLAWS_OL6_CLOUD_USER_BODY
           printf '# <<< [ol-aws-ami-builder PATCH ol6-cloud-user] <<<\n'
         } >> "${aws_provision}"
         if grep -Fq '[ol-aws-ami-builder PATCH ol6-cloud-user]' "${aws_provision}"; then
-          log_info "  -> OL6 cloud-init default-user hook injected"
+          log_info "  [OLAWS-USR01] OL6 cloud-init default-user hook injected (default_user -> ec2-user)"
         else
           die "Failed to inject OL6 cloud-init default-user hook into ${aws_provision}"
         fi
@@ -1379,7 +1428,7 @@ OLAWS_OL6_CLOUD_USER_BODY
       } >> "${aws_provision_ena}"
 
       if grep -Fq '[ol-aws-ami-builder PATCH ena-driver-build]' "${aws_provision_ena}"; then
-        log_info "  -> ENA driver hook injected (pins: OL6 2.5.0, OL7 2.17.0; in-guest DKMS build)"
+        log_info "  [OLAWS-ENA01] ENA driver hook injected (pins: OL6 2.5.0, OL7 2.17.0; in-guest DKMS build)"
       else
         die "Failed to inject ENA driver hook into ${aws_provision_ena}"
       fi
@@ -2610,17 +2659,17 @@ phase6_nitro_readiness_check() {
     fi
   fi
   if [[ "${nvme_cfg}" == "y" && "${core_cfg}" == "y" ]]; then
-    log_info "  [CHECK 1] NVMe host driver: PASS (built into the kernel)"
+    log_info "  [OLAWS-CHK01] [CHECK 1] NVMe host driver: PASS (built into the kernel)"
   elif [[ -n "${nvme_initrd}" ]]; then
-    log_info "  [CHECK 1] NVMe host driver: PASS (module present in the initramfs)"
+    log_info "  [OLAWS-CHK01] [CHECK 1] NVMe host driver: PASS (module present in the initramfs)"
   elif [[ -n "${nvme_mod}" && "${initrd_inspected}" -eq 0 ]]; then
-    log_warn "  [CHECK 1] NVMe host driver: INDETERMINATE (module present on disk; initramfs could not be inspected on this host -- verify the target boots)"
+    log_warn "  [OLAWS-CHK01] [CHECK 1] NVMe host driver: INDETERMINATE (module present on disk; initramfs could not be inspected on this host -- verify the target boots)"
     indeterminate=1
   elif [[ -n "${nvme_mod}" && -z "${initrd}" ]]; then
-    log_warn "  [CHECK 1] NVMe host driver: INDETERMINATE (module exists; no initramfs found to inspect)"
+    log_warn "  [OLAWS-CHK01] [CHECK 1] NVMe host driver: INDETERMINATE (module exists; no initramfs found to inspect)"
     indeterminate=1
   else
-    log_error "  [CHECK 1] NVMe host driver: FAIL (not built-in and not in an inspectable initramfs -- Nitro cannot mount the root)"
+    log_error "  [OLAWS-CHK01] [CHECK 1] NVMe host driver: FAIL (not built-in and not in an inspectable initramfs -- Nitro cannot mount the root)"
     fail=1
   fi
 
@@ -2641,11 +2690,11 @@ phase6_nitro_readiness_check() {
     ?*)          ena_loc="stock in-tree /kernel" ;;
   esac
   if [[ "${ena_cfg}" == "y" ]]; then
-    log_info "  [CHECK 2] ENA driver: PASS (built into the kernel)"
+    log_info "  [OLAWS-CHK02] [CHECK 2] ENA driver: PASS (built into the kernel)"
   elif [[ -n "${ena_mod}" ]]; then
-    log_info "  [CHECK 2] ENA driver: PASS (module present -- ${ena_loc})"
+    log_info "  [OLAWS-CHK02] [CHECK 2] ENA driver: PASS (module present -- ${ena_loc})"
   else
-    log_error "  [CHECK 2] ENA driver: FAIL (no ENA driver -- Nitro requires ENA for networking)"
+    log_error "  [OLAWS-CHK02] [CHECK 2] ENA driver: FAIL (no ENA driver -- Nitro requires ENA for networking)"
     fail=1
   fi
 
@@ -2654,10 +2703,10 @@ phase6_nitro_readiness_check() {
   fstab="$(virt-cat -a "${img}" /etc/fstab 2>/dev/null | grep -vE '^[[:space:]]*#' | grep -vE '^[[:space:]]*$' || true)"
   bad_fstab="$(printf '%s\n' "${fstab}" | awk '{print $1}' | grep -E '^/dev/(sd|xvd|hd)[a-z]' | tr '\n' ' ' || true)"
   if [[ -n "${bad_fstab// /}" ]]; then
-    log_error "  [CHECK 3] fstab: FAIL (kernel device-name mounts: ${bad_fstab}-- use UUID=/LABEL=)"
+    log_error "  [OLAWS-CHK03] [CHECK 3] fstab: FAIL (kernel device-name mounts: ${bad_fstab}-- use UUID=/LABEL=)"
     fail=1
   else
-    log_info "  [CHECK 3] fstab: PASS (no /dev/sd*|/dev/xvd*|/dev/hd* device-name mounts)"
+    log_info "  [OLAWS-CHK03] [CHECK 3] fstab: PASS (no /dev/sd*|/dev/xvd*|/dev/hd* device-name mounts)"
   fi
 
   # --- CHECK 4: bootloader root= uses UUID/LABEL -----------------------------
@@ -2671,13 +2720,13 @@ phase6_nitro_readiness_check() {
     roots="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*(linux|linux16|linuxefi|kernel)[[:space:]]' | grep -oE 'root=[^[:space:]]+' | sort -u || true)"
     bad_root="$(printf '%s\n' "${roots}" | grep -E 'root=/dev/(sd|xvd|hd)[a-z]' | tr '\n' ' ' || true)"
     if [[ -n "${bad_root// /}" ]]; then
-      log_error "  [CHECK 4] bootloader: FAIL (kernel device-name root=: ${bad_root})"
+      log_error "  [OLAWS-CHK04] [CHECK 4] bootloader: FAIL (kernel device-name root=: ${bad_root})"
       fail=1
     else
-      log_info "  [CHECK 4] bootloader: PASS (${grubcfg}: root= is UUID/LABEL/LVM based)"
+      log_info "  [OLAWS-CHK04] [CHECK 4] bootloader: PASS (${grubcfg}: root= is UUID/LABEL/LVM based)"
     fi
   else
-    log_warn "  [CHECK 4] bootloader: INDETERMINATE (no grub.cfg/grub.conf/menu.lst found)"
+    log_warn "  [OLAWS-CHK04] [CHECK 4] bootloader: INDETERMINATE (no grub.cfg/grub.conf/menu.lst found)"
     indeterminate=1
   fi
 
@@ -2693,12 +2742,12 @@ phase6_nitro_readiness_check() {
     local serial_lines
     serial_lines="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*(linux|linux16|linuxefi|kernel)[[:space:]]' | grep -c 'console=ttyS0' || true)"
     if [[ "${serial_lines}" -gt 0 ]]; then
-      log_info "  [CHECK 5] serial console: PASS (console=ttyS0 on the kernel cmdline in ${grubcfg})"
+      log_info "  [OLAWS-CHK05] [CHECK 5] serial console: PASS (console=ttyS0 on the kernel cmdline in ${grubcfg})"
     else
-      log_warn "  [CHECK 5] serial console: ADVISORY (no console=ttyS0 on the kernel cmdline in ${grubcfg}; AWS 'Get System Log' will be empty -- B4 should have set it)"
+      log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no console=ttyS0 on the kernel cmdline in ${grubcfg}; AWS 'Get System Log' will be empty -- B4 should have set it)"
     fi
   else
-    log_warn "  [CHECK 5] serial console: ADVISORY (no bootloader config located to inspect)"
+    log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no bootloader config located to inspect)"
   fi
 
   # --- Nitro instance assurance report (advisory) ----------------------------
@@ -2956,9 +3005,9 @@ phase9_register_ami() {
   # IMDSv2-required (OL7+; OL6+v2.0 is rejected during env validation).
   if [[ "${IMDS_SUPPORT}" == "v2.0" ]]; then
     register_args+=(--imds-support v2.0)
-    log_info "AMI IMDS support: v2.0 (instances default to IMDSv2-required)"
+    log_info "[OLAWS-IMD01] AMI IMDS support: v2.0 (instances default to IMDSv2-required)"
   else
-    log_info "AMI IMDS support: default (IMDSv1+v2 allowed; HttpTokens=optional)"
+    log_info "[OLAWS-IMD01] AMI IMDS support: default (IMDSv1+v2 allowed; HttpTokens=optional)"
   fi
 
   # NitroTPM is only valid for UEFI-bootable AMIs
