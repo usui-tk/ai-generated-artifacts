@@ -11,7 +11,110 @@ checks, not part of the build pipeline itself.
 > doc-set verified by `doc_gate --reconstructed`. When a bash TESTING template
 > is later canonised, this file can be reconstructed/pinned to it.
 
-## Kickstart syntax conformance (`tests/validate-kickstart.sh`)
+## 0. Test model (top-down baseline)
+
+This project is the repository's first bash consumer, so the bash testing
+discipline is **built up incrementally and documented here as the de-facto bash
+test reference** (the same standing as this SPEC's Part A). It is derived
+top-down so that future tests slot into named cells rather than accreting
+ad hoc. The harness is **self-contained** (no bats / shunit2 / ShellSpec): the
+methodology of those frameworks is adopted, the implementation is our own, in
+keeping with the repository's single-file / stdlib-only tooling policy and to
+avoid an unmaintained third-party dependency.
+
+The model has three structuring axes plus a coverage ledger.
+
+### Axis 1 - test pyramid (scope / cost)
+
+| Layer | What it checks | Execution | Tiers here |
+|:--|:--|:--|:--|
+| L0 Static | syntax / lint | no execution | B-T1 parse, B-T2 ShellCheck |
+| L1 Unit (hermetic) | a function's output / exit code from injected inputs | executed, isolated | B-T3 pure-function |
+| L2 Component / Contract | CLI contract, data-set invariants, artifact conformance | executed | B-T5 env parity, B-T6 idempotency, B-T4 kickstart |
+| L3 Integration | interaction with real external tools / filesystem | executed, real deps | B-T7 offline image inspection |
+| L4 E2E | real build + real Nitro boot | builder host + AWS | B-T8 |
+
+### Axis 2 - dependency-injection matrix
+
+A bash unit's "inputs" are broader than its arguments. Every dependency class
+has a defined injection / simulation technique; a hermetic L1 unit MUST control
+the classes it touches rather than depend on the host.
+
+| Dependency class | Injection / simulation technique |
+|:--|:--|
+| arguments (`$1..$@`) | pass directly in the test |
+| environment vars / env file | export in the test / `source` a fixture env file |
+| shell global state, `set -euo pipefail` | subshell isolation + explicit setup |
+| external commands (`aws`, `git`, `virsh`, `guestfish`, `dnf`, `osinfo-query`, ...) | mock via PATH-shadow or function override; verify call arguments (spy) |
+| filesystem (`${WORKSPACE}`, generated files) | temp dirs / fixtures |
+| OS / distro identity (`/etc/os-release`, `uname`) | inject a fake so the same test is deterministic on any host |
+| network / cloud (AWS APIs, ISO / checksum URLs) | fake CLI / local fixtures, or push to L3 / L4 |
+| stdin / tty | feed via heredoc / pipe |
+
+### Axis 3 - data variation
+
+Bash has no rich objects, so input coverage is **table-driven**: a table of
+input rows (valid / invalid / boundary) x expected output. Structured data
+(arrays, associative arrays, structured text) is asserted by normalising to a
+canonical serialized form (e.g. sorted `key=value`) and diffing.
+
+### Hermeticity rule
+
+L1 unit results MUST NOT depend on the host's real distro or tools; host- and
+cloud-dependent behaviour is mocked (Axis 2) or moved explicitly to L3 / L4.
+This is what keeps the suite simultaneously **comprehensive and deterministic**
+on the pinned Linux container substrate.
+
+## Running the suite
+
+```sh
+bash tests/run-all.sh
+```
+
+The single runner executes every tier (`tests/tN_*.sh`) as an isolated
+subprocess, aggregates pass / fail / skip, prints one summary, and exits
+non-zero if any tier fails. It records the resolved tool versions at run time.
+**Wire `tests/run-all.sh` into the project gate battery.**
+
+Current fixed pass count: **13 passed, 0 failed** (B-T1 only; grows as tiers are
+added). A tier SKIPs cleanly when its optional dependency is absent
+(`shellcheck` for B-T2, `ksvalidator` for B-T4).
+
+## Environment & version dependencies
+
+The harness is host-distro-agnostic but depends on a few tools; pin / record
+them so a run is reproducible:
+
+- **bash** >= 4 (arrays, `${var,,}`); developed and run on bash 5.x in the
+  Claude Linux container substrate.
+- **ShellCheck** (B-T2): obtained as the self-contained static binary from the
+  upstream GitHub release (no runtime deps); **pin the version** and record it.
+  `run-all.sh` prints the resolved version; B-T2 SKIPs if absent.
+- **pykickstart / `ksvalidator`** (B-T4): optional; B-T4 SKIPs if absent.
+- **awk / sed / grep / find** (coreutils + gawk): present in the container.
+
+Host-only tiers (B-T1, B-T2, B-T3, B-T5, B-T6) run entirely in the container.
+**B-T7 / B-T8 are integration / E2E** and require a real KVM builder host and an
+AWS account; they are documented, not run by `run-all.sh`.
+
+## Coverage ledger
+
+Tracks which tiers exist so gaps are visible top-down (the bash analogue of the
+PowerShell canon's `tested` + fixed pass count). New tests register a row.
+
+| Tier | Layer | Status | Notes |
+|:--|:--|:--|:--|
+| B-T1 parse | L0 | implemented | `bash -n` all `.sh` + 5 shell-bodied heredoc bodies; 13 asserts |
+| B-T2 ShellCheck | L0 | planned | deterministic gate via a checked-in `.shellcheckrc` (documented suppressions) |
+| B-T3 pure-function unit | L1 | planned | `parse_ol_version_from_iso`, `parse_args`, IMDS `v2.0` OL6 rejection |
+| B-T (command mock) | L1 | planned | dependency class "external commands" via PATH-shadow |
+| B-T5 env parity | L2 | planned | `env.properties.aws-ol{6,7,8,9,10}` key-set / invariant checks |
+| B-T6 idempotency | L2 | planned | Phase-3 marker-guarded injection applied twice (fixture) |
+| B-T4 kickstart | L2 | implemented | `tests/validate-kickstart.sh` (see below) |
+| B-T7 offline image inspection | L3 | deferred | builder host |
+| B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
+
+## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
 
 Upstream `oracle-linux-image-tools` ships no `distr/ol6-slim`, so this wrapper
 **synthesizes** the OL6 kickstart (the `EOF_OL6_KS` heredoc in

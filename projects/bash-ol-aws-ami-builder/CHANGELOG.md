@@ -21,6 +21,22 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added a **self-contained bash test harness** under `tests/` (the bash-idiom
+  analogue of the PowerShell canon's test discipline, framework-free by policy):
+  a single entry runner `tests/run-all.sh` that runs every tier, aggregates
+  pass/fail/skip and exits non-zero on failure; an assertion library
+  `tests/lib/assert.sh`; a heredoc-body extractor `tests/lib/heredoc.sh`; and the
+  first tier **B-T1 parse** (`tests/t1_parse.sh`): `bash -n` on every `.sh` plus
+  `bash -n` on each shell-bodied heredoc that ships into the guest / into
+  `distr/ol6-slim/` (`OLAWS_NITRO_BODY`, `OLAWS_SERIAL_BODY`,
+  `OLAWS_OL6_CLOUD_USER_BODY`, `EOF_OL6_IMG`, `EOF_OL6_PROV`) - which the outer
+  parse does not cover. Current suite: **13 passed, 0 failed**. `TESTING.md`
+  documents the top-down test model (5-layer pyramid + dependency-injection
+  matrix + data-variation + hermeticity + coverage ledger) as the de-facto bash
+  test reference, the run command, and the environment/version dependencies.
+  Built incrementally; subsequent tiers (B-T2 ShellCheck gate, B-T3 unit, env
+  parity, idempotency) follow. No change to `build-ol-aws-ami.sh`.
+
 - Added a **persistent build log** (N3): the full run is mirrored to
   `${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log` by default while the
   console is preserved; **`--log-file <path>`** (env `LOG_FILE`) overrides the
