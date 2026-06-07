@@ -45,7 +45,7 @@ the classes it touches rather than depend on the host.
 | arguments (`$1..$@`) | pass directly in the test |
 | environment vars / env file | export in the test / `source` a fixture env file |
 | shell global state, `set -euo pipefail` | subshell isolation + explicit setup |
-| external commands (`aws`, `git`, `virsh`, `guestfish`, `dnf`, `osinfo-query`, ...) | mock via PATH-shadow or function override; verify call arguments (spy) |
+| external commands (`aws`, `git`, `virsh`, `guestfish`, `dnf`, `osinfo-query`, ...) | mock via PATH-shadow + call-log spy (implemented in `tests/lib/mock.sh`; see `tests/t4_cmdmock.sh`) or function override |
 | filesystem (`${WORKSPACE}`, generated files) | temp dirs / fixtures |
 | OS / distro identity (`/etc/os-release`, `uname`) | inject a fake so the same test is deterministic on any host |
 | network / cloud (AWS APIs, ISO / checksum URLs) | fake CLI / local fixtures, or push to L3 / L4 |
@@ -76,9 +76,10 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **50 passed, 0 failed** (B-T1 = 15, B-T2 = 10,
-B-T3 = 25; grows as tiers are added). A tier SKIPs cleanly when its optional
-dependency is absent (`shellcheck` for B-T2 -> 1 skip; `ksvalidator` for B-T4).
+Current fixed pass count: **63 passed, 0 failed** (B-T1 = 17, B-T2 = 12,
+B-T3 = 25, command-mock = 9; grows as tiers are added). A tier SKIPs cleanly
+when its optional dependency is absent (`shellcheck` for B-T2 -> 1 skip;
+`ksvalidator` for B-T4).
 
 ## Environment & version dependencies
 
@@ -115,7 +116,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T1 parse | L0 | implemented | `bash -n` all `.sh` + 5 shell-bodied heredoc bodies; 13 asserts |
 | B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` via `.shellcheckrc`; 3 documented inline exemptions; SKIPs if shellcheck absent |
 | B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
-| B-T (command mock) | L1 | planned | dependency class "external commands" via PATH-shadow |
+| B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | planned | OL6 + `IMDS_SUPPORT=v2.0` -> `die`; needs a small `normalize_imds_support` extraction or a fixture-driven `load_env` |
 | B-T5 env parity | L2 | planned | `env.properties.aws-ol{6,7,8,9,10}` key-set / invariant checks |
 | B-T6 idempotency | L2 | planned | Phase-3 marker-guarded injection applied twice (fixture) |

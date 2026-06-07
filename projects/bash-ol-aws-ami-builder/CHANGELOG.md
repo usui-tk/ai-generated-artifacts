@@ -21,6 +21,21 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added a **command-mock + spy layer** for dependency-injection class "external
+  commands" (`tests/lib/mock.sh`, `tests/t4_cmdmock.sh`, test increment 4, L1
+  hermetic; self-contained PATH-shadow mocks - no bats/shellmock). `mock_setup`
+  prepends a shadow bin to PATH and starts a call log; `mock_cmd NAME BEHAVIOUR`
+  installs a fake that records its argv then runs the behaviour; `mock_calls`
+  exposes the log for spying. Driven against `detect_qemu_user` (mocks `id`:
+  qemu-present, libvirt-qemu fallback, neither-present, with call spying) and
+  `detect_os_variant` (mocks `osinfo-query`: exact `ol9.6` short-id, graceful
+  degradation to `rhel9.0`, and the absent-tool branch which SKIPs if the host
+  has a real `osinfo-query`). Suite now **63 passed, 0 failed** (B-T1 17 +
+  B-T2 12 + B-T3 25 + command-mock 9). TESTING.md ledger + dependency-injection
+  matrix updated with the implementation. No change to `build-ol-aws-ami.sh`;
+  new scripts are shellcheck `-S style` clean (two documented `SC2016` exemptions
+  on literal mock-behaviour strings).
+
 - Added **B-T3 pure-function unit** tests (`tests/t3_unit.sh`, test increment 3,
   test pyramid layer L1, hermetic): table-driven `parse_ol_version_from_iso`
   (OL6-OL10 + a malformed name + a full URL path) and the `parse_args` contract
