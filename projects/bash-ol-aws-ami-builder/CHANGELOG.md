@@ -21,6 +21,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added **B-T5 env-template parity** (`tests/t6_envparity.sh`, test increment 5,
+  L2): data-driven checks over `env.properties.aws-ol{6,7,8,9,10}` - a 20-key
+  common core in all five, the documented `KERNEL`/`UEK_RELEASE` extras present
+  only in OL6/OL7, the cross-file invariants (`S3_BUCKET`, `AWS_REGION=""`,
+  `UPDATE_TO_LATEST=yes`, `CLOUD=aws`), and the per-OS `DISTR=olN-slim` (31
+  asserts). Also **wired B-T4 kickstart conformance into the single runner**
+  (`tests/t5_kickstart.sh` wraps `tests/validate-kickstart.sh`; SKIPs without
+  `ksvalidator`) - previously it was only runnable standalone. Suite now **98
+  passed, 1 skipped, 0 failed** (B-T1 19 + B-T2 14 + B-T3 25 + command-mock 9 +
+  env-parity 31, B-T4 kickstart skipped without ksvalidator). No change to
+  `build-ol-aws-ami.sh`; new tiers are shellcheck `-S style` clean.
+
 - Added a **command-mock + spy layer** for dependency-injection class "external
   commands" (`tests/lib/mock.sh`, `tests/t4_cmdmock.sh`, test increment 4, L1
   hermetic; self-contained PATH-shadow mocks - no bats/shellmock). `mock_setup`
