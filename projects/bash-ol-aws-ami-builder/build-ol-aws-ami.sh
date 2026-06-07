@@ -75,6 +75,9 @@
 #   --skip-prereq         : Skip Phase 1 when build host packages are present
 #   --skip-aws-import     : Skip Phases 6-8 (build VMDK only)
 #   --build-only          : Run through Phase 5 only
+#   --skip-ena-driver     : Do NOT build/install the Amazon ENA driver in the
+#                           guest. Default is to build it (AWS-optimized AMI);
+#                           this switch produces a pure, unmodified OL AMI.
 #   -h | --help           : Show this help
 #
 # ----- Known limitations ------------------------------------------------------
@@ -103,6 +106,10 @@ set -euo pipefail
 
 readonly OL_REPO_URL="https://github.com/oracle/oracle-linux.git"
 readonly OL_TOOLS_SUBDIR="oracle-linux-image-tools"
+# Directory this wrapper lives in, so Phase 3 can locate sibling artifacts
+# (e.g. install-ena-driver.sh) regardless of the caller's working directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 
 # Default ISO information.
 # DEFAULT_ISO_URL is consumed in load_env() as the fallback when the user
@@ -116,6 +123,9 @@ readonly DEFAULT_ISO_URL="https://yum.oracle.com/ISOS/OracleLinux/OL10/u1/x86_64
 SKIP_PREREQ=0
 SKIP_AWS_IMPORT=0
 BUILD_ONLY=0
+# ENA driver self-build (default ON -> AWS-optimized AMI; --skip-ena-driver
+# turns it OFF -> pure, unmodified OL AMI).
+ENA_DRIVER_BUILD=1
 ENV_FILE=""
 
 #------------------------------------------------------------------------------
@@ -158,6 +168,7 @@ parse_args() {
       --skip-prereq)      SKIP_PREREQ=1;       shift ;;
       --skip-aws-import)  SKIP_AWS_IMPORT=1;   shift ;;
       --build-only)       BUILD_ONLY=1;        shift ;;
+      --skip-ena-driver)  ENA_DRIVER_BUILD=0;  shift ;;
       -h|--help)          usage 0 ;;
       *)                  log_error "Unknown option: $1"; usage 1 ;;
     esac
@@ -1117,6 +1128,59 @@ phase3_clone_repository() {
       log_warn "  kernel-uek-modules install line not found in ${aws_provision}."
       log_warn "  Assuming the upstream provision logic has been refactored; proceeding."
     fi
+  fi
+
+  # cloud/aws/provision.sh ENA driver self-build hook.
+  #
+  # Default ON: append a hook to the AWS-cloud provisioning script that builds
+  # and installs a pinned Amazon ENA driver inside the guest (AWS-optimized
+  # AMI). The wrapper's --skip-ena-driver switch leaves the hook out, producing
+  # a pure, unmodified OL AMI -- the two distinct build purposes.
+  #
+  # The hook writes our install-ena-driver.sh verbatim into the guest and runs
+  # it during provisioning. The installer self-gates by OS major (acts on
+  # OL6/OL7, no-ops on OL8+), detects the installed UEK kernel from
+  # /lib/modules (provisioning runs under a libguestfs appliance, so `uname -r`
+  # is the appliance kernel), and builds via DKMS against that kernel. The
+  # embedded heredoc is single-quoted, so the installer's own text (including
+  # its '\${kernelver}') is written through unmodified.
+  #
+  # Idempotent via the wrapper marker so a Phase 3 re-run does not double-append.
+  if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
+    local aws_provision_ena="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
+    local ena_installer="${SCRIPT_DIR}/install-ena-driver.sh"
+    log_info "Injecting ENA driver self-build hook into cloud/aws/provision.sh (AWS-optimized AMI; --skip-ena-driver disables)"
+
+    if [[ ! -f "${aws_provision_ena}" ]]; then
+      die "Cannot inject ENA driver hook: ${aws_provision_ena} not found"
+    fi
+    if [[ ! -f "${ena_installer}" ]]; then
+      die "Cannot inject ENA driver hook: installer not found at ${ena_installer}"
+    fi
+
+    if grep -Fq '[ol-aws-ami-builder PATCH ena-driver-build]' "${aws_provision_ena}"; then
+      log_info "  -> ENA driver hook already present (idempotent skip)"
+    else
+      {
+        printf '\n# >>> [ol-aws-ami-builder PATCH ena-driver-build] >>>\n'
+        printf '# Build & install a pinned Amazon ENA driver in the guest (AWS-optimized AMI).\n'
+        printf '# Pure-OL builds omit this hook via the wrapper'"'"'s --skip-ena-driver switch.\n'
+        printf "cat > /usr/local/sbin/ol-aws-install-ena-driver.sh <<'OLAWS_ENA_INSTALLER_EOF'\n"
+        cat "${ena_installer}"
+        printf 'OLAWS_ENA_INSTALLER_EOF\n'
+        printf 'chmod +x /usr/local/sbin/ol-aws-install-ena-driver.sh\n'
+        printf '/usr/local/sbin/ol-aws-install-ena-driver.sh\n'
+        printf '# <<< [ol-aws-ami-builder PATCH ena-driver-build] <<<\n'
+      } >> "${aws_provision_ena}"
+
+      if grep -Fq '[ol-aws-ami-builder PATCH ena-driver-build]' "${aws_provision_ena}"; then
+        log_info "  -> ENA driver hook injected (pins: OL6 2.5.0, OL7 2.17.0; in-guest DKMS build)"
+      else
+        die "Failed to inject ENA driver hook into ${aws_provision_ena}"
+      fi
+    fi
+  else
+    log_info "ENA driver self-build disabled (--skip-ena-driver); producing a pure OL AMI"
   fi
 
   # env.properties.defaults 'declare -gA' guard (OL6 only).

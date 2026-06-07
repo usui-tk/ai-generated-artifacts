@@ -118,6 +118,7 @@ streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
 | `env.properties.aws-ol7` | **Oracle Linux 7 Update 9**(x86_64)用パラメータ — **実験的・アップストリーム非推奨**。重要な注意事項はセクション 9.6 および 10 を参照 |
 | `env.properties.aws-ol6` | **Oracle Linux 6 Update 10**(x86_64)用パラメータ — **実験的・アップストリームに `distr/ol6-slim/` 自体が無い**。重要な注意事項はセクション 9.7 および 10 を参照 |
 | `setup-vmimport-role.sh` | AWS VM Import/Export 用の `vmimport` IAM サービスロールを初回のみ作成 |
+| `install-ena-driver.sh` | ゲスト側で指定バージョンの Amazon ENA ドライバを DKMS でビルド/導入(OL6 → 2.5.0、OL7 → 2.17.0、OL8+ は何もしない)。ENA ビルド有効時(既定)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
 | `README.md` | エンドユーザ向けドキュメント(英語、ベースライン) |
 | `README.ja.md` | エンドユーザ向けドキュメント(日本語) |
 | `SPEC.md` | 開発者向け仕様書(英語)— phase contract、ログ規約、設計判断の詳細 |
@@ -361,6 +362,7 @@ vi env.properties.local
 | `--skip-prereq` | KVM 等のパッケージ導入(Phase 1)をスキップ。2 回目以降の実行で時間短縮 |
 | `--build-only` | VMDK 生成(Phase 5)までで停止。AWS 取り込みは別途実行したい場合 |
 | `--skip-aws-import` | Phase 7〜9 をスキップ(`--build-only` と同等) |
+| `--skip-ena-driver` | ゲスト内で Amazon ENA ドライバをビルド/導入**しない**。既定ではビルド(AWS 最適化 AMI、Nitro v4+/ENAv3 対応)。本スイッチで純粋な(無改変の)OL AMI を生成 |
 
 ### 6.3 Phase 0 の自動診断機能
 

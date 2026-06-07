@@ -116,6 +116,7 @@ one-file change.
 | `env.properties.aws-ol7` | Build parameters for **Oracle Linux 7 Update 9** (x86_64) — **experimental / deprecated upstream**. See sections 9.6 and 10 for important caveats. |
 | `env.properties.aws-ol6` | Build parameters for **Oracle Linux 6 Update 10** (x86_64) — **experimental / not shipped upstream**. See sections 9.7 and 10 for important caveats. |
 | `setup-vmimport-role.sh` | One-time setup script that creates the `vmimport` IAM service role for AWS VM Import/Export. |
+| `install-ena-driver.sh` | Guest-side script that builds and installs a pinned Amazon ENA driver via DKMS (OL6 → 2.5.0, OL7 → 2.17.0; no-op on OL8+). Injected into the guest's AWS provisioning by Phase 3 when the ENA build is enabled (the default). |
 | `README.md` | End-user documentation (English, baseline). |
 | `README.ja.md` | End-user documentation (Japanese). |
 | `SPEC.md` | Developer specification (English) — phase contract, log conventions, design decisions. |
@@ -359,6 +360,7 @@ Expected total time: **40–90 minutes** (depends on bandwidth and instance perf
 | `--skip-prereq` | Skip KVM package installation (Phase 1). Useful for re-runs. |
 | `--build-only` | Stop after VMDK is built (Phase 5). Run the AWS import separately. |
 | `--skip-aws-import` | Skip Phases 7–9 (equivalent to `--build-only`). |
+| `--skip-ena-driver` | Do **not** build/install the Amazon ENA driver in the guest. The default builds it (AWS-optimized AMI, Nitro v4+/ENAv3 capable); this switch produces a pure, unmodified OL AMI. |
 
 ### 6.3 Phase 0 self-diagnosis
 

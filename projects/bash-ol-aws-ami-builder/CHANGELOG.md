@@ -21,6 +21,21 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- Added an **in-guest Amazon ENA driver self-build** (`install-ena-driver.sh`),
+  enabled by default and disabled with the new `--skip-ena-driver` switch — the
+  default yields an **AWS-optimized AMI** (Nitro v4+/ENAv3 capable) while
+  `--skip-ena-driver` yields a **pure, unmodified OL AMI**. Phase 3 appends a
+  hook to the upstream `cloud/aws/provision.sh` that embeds and runs the
+  installer during guest provisioning. The installer self-gates by OS major
+  (builds on OL6 → pinned `ena_linux_2.5.0`, OL7 → pinned `ena_linux_2.17.0`;
+  no-op on OL8+), detects the installed UEK kernel from `/lib/modules` (rather
+  than the libguestfs appliance's `uname -r`) and builds explicitly against it
+  via **DKMS** (`REMAKE_INITRD`/`AUTOINSTALL`, so it survives kernel upgrades),
+  sourcing DKMS from Oracle's `ol7_developer_EPEL` on OL7 and the Fedora EPEL 6
+  archive on OL6 (with a plain-`make` fallback), then regenerates the initramfs.
+  Pins are the newest release supporting each target OS; override with
+  `ENA_DRIVER_VERSION`. See SPEC A.7. Source: amzn/amzn-drivers.
+
 - Added a **Phase 6 Nitro readiness pre-check** (`NITRO_PRECHECK`,
   `enforce` | `warn` | `off`, default `enforce`; a wrapper key). After the VMDK
   is built and before the upload/snapshot/register phases, it inspects the image

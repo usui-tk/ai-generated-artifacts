@@ -465,6 +465,42 @@ ENA driver in the guest for Nitro v4+ targets. Source: amzn/amzn-drivers ENA
 Linux driver (`ENA_Linux_Best_Practices.rst`, `RELEASENOTES.md`). The
 per-generation family lists are representative, not exhaustive.
 
+### ENA driver self-build (`--skip-ena-driver`)
+
+By default the wrapper produces an **AWS-optimized AMI**: Phase 3 appends a hook
+to the upstream `cloud/aws/provision.sh` that builds and installs a pinned
+Amazon ENA driver inside the guest during provisioning. The CLI switch
+`--skip-ena-driver` removes the hook, producing a **pure, unmodified OL AMI** —
+the two distinct build purposes. The hook embeds `install-ena-driver.sh`
+(shipped alongside the wrapper) verbatim via a single-quoted heredoc and runs it.
+
+The installer is the remedy for OL's old in-distro ENA driver (e.g. OL6 ships
+ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
+
+- **Self-gates by OS major**: builds for **OL6** (pinned `ena_linux_2.5.0`) and
+  **OL7** (pinned `ena_linux_2.17.0`, the newest release confirmed to support
+  RHEL7 as of 2026-06); on **OL8+** it is a no-op because those ship a current
+  in-distro driver. Pins are chosen as the newest release supporting each target
+  OS (the ENA driver is a kernel module; newer releases assume newer
+  kernels/toolchains). Override per run with `ENA_DRIVER_VERSION`.
+- **Targets the installed UEK kernel, not `uname -r`**: provisioning runs under
+  a libguestfs appliance, so the running kernel is the appliance's. The installer
+  detects the image's UEK from `/lib/modules` and builds explicitly against it
+  (`dkms ... -k <kver>`).
+- **Builds via DKMS** (`REMAKE_INITRD`/`AUTOINSTALL`), so the module is rebuilt
+  automatically across in-instance kernel upgrades. DKMS comes from EPEL —
+  Oracle-provided `ol7_developer_EPEL` on OL7, and the Fedora **EPEL 6 archive**
+  on OL6 (Oracle does not provide EPEL 6). If DKMS is unavailable it falls back
+  to a plain `make` build plus `depmod`.
+- **Regenerates the initramfs** for the target kernel (`dracut -f`) so the new
+  driver is present at boot, and removes any stale
+  `/etc/udev/rules.d/70-persistent-net.rules` for AMI hygiene.
+
+Provisioning has outbound access to the Oracle Linux yum servers and EPEL, so it
+also reaches GitHub to fetch the pinned `amzn-drivers` release tarball. Source:
+amzn/amzn-drivers ENA Linux driver (`RELEASENOTES.md`,
+`ENA_Linux_Best_Practices.rst`) and the supported-distributions list.
+
 Note on `UEK_RELEASE`: this key is only consumed by the upstream tool
 when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable
 release for OL7) and harmless to set (or omit) on OL8/9/10 where the
