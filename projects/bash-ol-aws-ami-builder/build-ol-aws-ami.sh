@@ -8,11 +8,14 @@
 # provisioning -> VM build -> S3 upload -> AMI registration) is automated.
 #
 # Supported Oracle Linux versions: 8 / 9 / 10 (x86_64).
-# Experimental support: 7 (x86_64; deprecated upstream, verification use only).
+# Experimental support: 7 and 6 (x86_64; deprecated upstream, verification
+# use only). OL7 is rejected upstream for the AWS target and re-enabled by a
+# Phase 3 patch; OL6 is not shipped upstream at all (no distr/ol6-slim/) and is
+# additionally synthesized at runtime. See the OL7 / OL6 notes below.
 # The actual version, ISO URL, and AMI naming are driven from the env
 # properties file specified with --env. See env.properties.aws-ol10 (or
-# env.properties.aws-ol9 / env.properties.aws-ol8 / env.properties.aws-ol7)
-# for working examples.
+# env.properties.aws-ol9 / env.properties.aws-ol8 / env.properties.aws-ol7 /
+# env.properties.aws-ol6) for working examples.
 #
 # Note on OL7:
 #   The upstream oracle-linux-image-tools project explicitly rejects OL7 for
@@ -20,6 +23,14 @@
 #   This wrapper applies a runtime patch in Phase 3 (after cloning the
 #   upstream repository) to allow OL7 builds. Use at your own risk; OL7
 #   Premier Support ended on 2024-12-31.
+#
+# Note on OL6:
+#   OL6 is supported as a deeper workaround than OL7. Upstream ships no
+#   distr/ol6-slim/ at all, so Phase 3 synthesizes it at runtime and applies
+#   two sed patches (the shared OL8+-guard removal plus an OL6-only
+#   kernel-uek-modules skip). Use at your own risk; OL6 Premier Support ended
+#   2021-03-31 and Extended Life Support ended in 2024. IMDS_SUPPORT=v2.0 is
+#   rejected for OL6 (its cloud-init 0.7.5 cannot fetch metadata over IMDSv2).
 #
 # Upstream reference:
 #   https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools
@@ -102,12 +113,18 @@
 #
 # ----- AI generation info -----------------------------------------------------
 #   AI tool: Anthropic Claude (Sonnet 4.5) for OL8/9/10 base, Claude (Opus 4.7)
-#            for the OL7 experimental support layer added in 2026-05.
+#            for the OL7 and OL6 experimental support layers added in 2026-05.
 #   Generated / iteratively refined: 2026-05
 #   Verified by the author against real OL8 / OL9 / OL10 builds on AWS.
 #   OL7 support has been verified only at the patch-mechanism level
 #   (sed substitution, syntax integrity); end-to-end OL7 AMI builds
-#   have NOT been validated by the author. Use at your own risk.
+#   have NOT been validated by the author.
+#   OL6 support has been verified at the static + boot-test level (Phase A:
+#   osinfo-db / ISO checksum / repo / cloud-init checks; Phase B: virt-install
+#   + Anaconda 13.x TUI boot test), and the two runtime patches plus the
+#   synthesized distr/ol6-slim/ are syntax-validated; end-to-end OL6 AMI builds
+#   (kickstart completion through AWS Nitro launch) have NOT been validated by
+#   the author. Use at your own risk.
 #==============================================================================
 
 set -euo pipefail

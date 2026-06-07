@@ -174,6 +174,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Docs/comments (no behaviour change):** the script header's supported-version
+  banner listed only `8 / 9 / 10` with `Experimental: 7`, **omitting OL6**, and
+  the example env-file list and the AI-generation note likewise predated OL6
+  support. OL6 has in fact been a supported (experimental) target since the OL6
+  layer was added — the body validates it, warns on it, rejects `IMDS_SUPPORT=v2.0`
+  for it, and synthesizes `distr/ol6-slim/` at runtime. The header (which
+  `usage()`/`--help` prints verbatim) now lists OL6 alongside OL7 as experimental,
+  adds `env.properties.aws-ol6` to the examples, carries a "Note on OL6", and the
+  AI-generation note records OL6's static + boot-test verification status — matching
+  the README (`9.7`, AI-generation note) and SPEC B.5.3 (OL6/OL7 both *not* yet
+  end-to-end validated).
+
 - **`register-image` no longer hardcodes `--imds-support v2.0` for every AMI**,
   which baked IMDSv2-required into OL6 AMIs whose cloud-init (0.7.5) cannot use
   IMDSv2 — so a default launch got no metadata and no SSH key. `--imds-support`
