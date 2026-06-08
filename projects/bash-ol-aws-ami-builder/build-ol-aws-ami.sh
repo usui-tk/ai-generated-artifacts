@@ -1383,8 +1383,14 @@ OLAWS_SERIAL_BODY
   #       an operator inspecting the built image. Aligning it removes that
   #       confusion. Verified no-op (both files resolve to ec2-user).
   # OL7+ are untouched (their systemd-journal group exists -- per-OS isolation).
-  # Self-guards on /etc/oracle-release; runs after cloud-init is installed (so the
-  # config files exist); idempotent.
+  # Self-guards on /etc/oracle-release; idempotent. TIMING: the hook MUST run after
+  # cloud-init is installed and 90_ol.cfg is written. bin/provision.sh SOURCES
+  # cloud/aws/provision.sh (executing any top-level code) during load_env, BEFORE it
+  # calls cloud::provision -> cloud::cloud_init (which installs cloud-init and writes
+  # the configs). So the hook is wired by WRAPPING cloud::cloud_init -- a top-level
+  # "sh ..." appended here would run at source time, before the config files exist,
+  # and silently skip ("no cloud-init config found"), which is why earlier revisions
+  # of this hook never actually applied.
   if [[ "${OL_MAJOR_VERSION}" -eq 6 ]]; then
     local cloud_user_body
     cloud_user_body="$(cat <<'OLAWS_OL6_CLOUD_USER_BODY'
@@ -1426,12 +1432,26 @@ OLAWS_OL6_CLOUD_USER_BODY
         log_info "OL6 cloud-init default-user hook already present (idempotent skip)"
       else
         log_info "Injecting OL6 cloud-init default-user hook into cloud/aws/provision.sh (drop systemd-journal group; align name to ec2-user)"
+        # The $(...), ${...} and "$@" below are deliberately left literal: they
+        # are emitted verbatim into cloud/aws/provision.sh, where they expand at
+        # runtime (declare -f / wrap), not in this wrapper.
+        # shellcheck disable=SC2016
         {
           printf '\n# >>> [ol-aws-ami-builder PATCH ol6-cloud-user] >>>\n'
           printf "cat > /usr/local/sbin/ol-aws-ol6-cloud-user.sh <<'OLAWS_OL6_CLOUD_USER_EOF'\n"
           printf '%s\n' "${cloud_user_body}"
           printf 'OLAWS_OL6_CLOUD_USER_EOF\n'
-          printf 'sh /usr/local/sbin/ol-aws-ol6-cloud-user.sh\n'
+          # Wire the hook to run AFTER cloud-init is installed and 90_ol.cfg is
+          # written, by wrapping cloud::cloud_init. bin/provision.sh sources this
+          # file (running top-level code) before it calls cloud::cloud_init, so a
+          # top-level "sh ..." would run too early and skip; wrapping defers it to
+          # immediately after the original cloud_init writes the config.
+          printf 'if declare -f cloud::cloud_init >/dev/null 2>&1; then\n'
+          printf '  eval "olaws::__orig_cloud_init() $(declare -f cloud::cloud_init | tail -n +2)"\n'
+          printf '  cloud::cloud_init() { olaws::__orig_cloud_init "$@"; CLOUD_USER="${CLOUD_USER:-ec2-user}" sh /usr/local/sbin/ol-aws-ol6-cloud-user.sh; }\n'
+          printf 'else\n'
+          printf '  echo "[ol6-cloud-user] ERROR: cloud::cloud_init not found; hook not wired" >&2\n'
+          printf 'fi\n'
           printf '# <<< [ol-aws-ami-builder PATCH ol6-cloud-user] <<<\n'
         } >> "${aws_provision}"
         if grep -Fq '[ol-aws-ami-builder PATCH ol6-cloud-user]' "${aws_provision}"; then

@@ -21,6 +21,29 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **OL6: the `ec2-user` cloud-init hook never actually applied (it ran too
+  early).** A rebuilt OL6 AMI was still unreachable over SSH after the fix above:
+  a launched instance showed `ec2-user` absent (`id: ec2-user: No such user`),
+  `90_ol.cfg` still carrying `groups: [adm, systemd-journal]`, and the stock
+  `cloud.cfg` still reading `name: cloud-user` — i.e. neither edit had been made.
+  Root cause: the hook was wired by appending a **top-level** `sh …` invocation to
+  `cloud/aws/provision.sh`, but `bin/provision.sh` **sources** that file (running
+  top-level statements) during `load_env`, *before* it calls `cloud::provision` →
+  `cloud::cloud_init`. The invocation therefore ran at source time — before
+  cloud-init was installed and `cloud.cfg`/`90_ol.cfg` existed — and silently
+  skipped (`no cloud-init config found`). The hook is now wired by **wrapping**
+  `cloud::cloud_init` (capture via `declare -f`, redefine to call the original
+  then the hook), so it fires immediately after the configs are written. Verified
+  locally: the wrapped `cloud_init` runs original-then-hook (late binding), and
+  the hook applies both edits against real-shaped `cloud.cfg`/`90_ol.cfg`
+  (idempotent); the emitted `provision.sh` passes `bash -n`. OL6-only; OL7-10
+  untouched. SPEC D.26 gains a *Wiring (timing)* note. A new host-runnable
+  regression tier **B-T9** (`tests/t8_hooktiming.sh`) now guards this class: it
+  asserts the injection wraps `cloud::cloud_init` (and emits no top-level
+  `sh <hook>`), and behaviourally that the hook fires after `cloud_init` and
+  produces `groups: [adm]` / name `ec2-user`. `bash -n` +
+  `shellcheck -S style` clean; suite 128/1/0.
+
 - **OL6: cloud-init failed to create `ec2-user`, breaking SSH access.** A
   launched OL6 AMI was unreachable over SSH; cloud-init 0.7.5 failed with
   `Failed to create user ec2-user` → `Running users-groups (cc_users_groups)

@@ -2422,8 +2422,7 @@ scriptlets create no users.*
 **Fix (OL6 only).** The Phase-3 hook
 (`[ol-aws-ami-builder PATCH ol6-cloud-user]`), injected into
 `cloud/aws/provision.sh` **only for OL6 builds** (self-guarded on
-`/etc/oracle-release`, run after cloud-init is installed so the config files
-exist, idempotent), does two things to `/etc/cloud/cloud.cfg` and
+`/etc/oracle-release`, idempotent), does two things to `/etc/cloud/cloud.cfg` and
 `/etc/cloud/cloud.cfg.d/90_ol.cfg`:
 
 1. **Fix (functional):** strips `systemd-journal` from the `default_user.groups`
@@ -2437,6 +2436,26 @@ exist, idempotent), does two things to `/etc/cloud/cloud.cfg` and
    otherwise still literally reads `name: cloud-user`, which would mislead an
    operator inspecting the built image. This is a verified no-op kept purely for
    config legibility.
+
+**Wiring (timing).** The hook must run *after* `cloud::cloud_init` has installed
+cloud-init and written `90_ol.cfg`. `bin/provision.sh` **sources**
+`cloud/aws/provision.sh` (executing any top-level statements) during `load_env`,
+*before* it calls `cloud::provision` → `cloud::cloud_init`. The hook is therefore
+wired by **wrapping** `cloud::cloud_init`: it captures the original definition
+(`declare -f`) and redefines the function to call the original and then run the
+hook, so the edits fire immediately after the config files are created (late
+binding makes `cloud::provision` reach the wrapped function). An earlier revision
+appended a top-level `sh …` invocation instead; that executed at *source* time —
+before cloud-init was installed and the configs existed — and silently skipped
+(`[ol6-cloud-user] no cloud-init config found; skipping`), so neither edit ever
+applied. This was confirmed on a launched OL6 instance: `90_ol.cfg` still carried
+`groups: [adm, systemd-journal]`, the stock `cloud.cfg` still read
+`name: cloud-user`, and `ec2-user` did not exist (`id: ec2-user: No such user`).
+Verified locally that the wrapped `cloud_init` runs the original then the hook,
+and the hook applies both edits against real-shaped `cloud.cfg`/`90_ol.cfg`
+(idempotent). A host-runnable regression tier (B-T9, `tests/t8_hooktiming.sh`)
+guards this: it asserts the injection wraps `cloud::cloud_init` and emits no
+top-level `sh <hook>`, and behaviourally that the hook fires after `cloud_init`.
 
 OL7+ are untouched (their `systemd-journal` group exists — per-OS isolation).
 

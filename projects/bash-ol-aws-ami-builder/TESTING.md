@@ -76,12 +76,12 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **118 passed, 1 skipped, 0 failed** (B-T1 = 20,
-B-T2 = 15, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8; plus
-B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 119/0
-with it). The host-runnable tiers (L0-L2) are now complete; B-T7/B-T8 (L3/L4)
-remain deferred (builder host + AWS). A tier SKIPs cleanly when its optional
-dependency is absent.
+Current fixed pass count: **128 passed, 1 skipped, 0 failed** (B-T1 = 21,
+B-T2 = 16, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
+hook-timing = 8; plus B-T4 kickstart which is **1 pass with `ksvalidator`, 1
+skip without** -> 129/0 with it). The host-runnable tiers (L0-L2) are complete;
+B-T7/B-T8 (L3/L4) remain deferred (builder host + AWS). A tier SKIPs cleanly
+when its optional dependency is absent.
 
 ## Environment & version dependencies
 
@@ -104,7 +104,7 @@ them so a run is reproducible:
 - **pykickstart / `ksvalidator`** (B-T4): optional; B-T4 SKIPs if absent.
 - **awk / sed / grep / find** (coreutils + gawk): present in the container.
 
-Host-only tiers (B-T1, B-T2, B-T3, B-T5, B-T6) run entirely in the container.
+Host-only tiers (B-T1, B-T2, B-T3, B-T5, B-T6, B-T9) run entirely in the container.
 **B-T7 / B-T8 are integration / E2E** and require a real KVM builder host and an
 AWS account; they are documented, not run by `run-all.sh`.
 
@@ -123,6 +123,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T5 env parity | L2 | implemented | `tests/t6_envparity.sh`: 20 common-core keys, OL6/OL7-only KERNEL/UEK_RELEASE extras, S3_BUCKET/AWS_REGION/UPDATE_TO_LATEST/CLOUD invariants, per-OS DISTR; 31 asserts |
 | B-T6 idempotency | L2 | implemented | `tests/t7_idempotency.sh` (structural): each of the 7 `[ol-aws-ami-builder PATCH ...]` markers is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
 | B-T4 kickstart | L2 | implemented | `tests/validate-kickstart.sh`, **wired into the runner** via `tests/t5_kickstart.sh` (SKIPs without `ksvalidator`); see below |
+| B-T9 hook timing | L1/L2 | implemented | `tests/t8_hooktiming.sh`: the OL6 cloud-user hook must run *after* `cloud::cloud_init` (configs exist), never at source time; static wrapper-wiring + no-top-level-`sh` guards, plus a behavioural order/edit check; 8 asserts |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
 
