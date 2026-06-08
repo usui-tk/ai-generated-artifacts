@@ -21,6 +21,21 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **Phase 6 now reports the in-box and self-built ENA driver versions on
+  separate lines** (`build-ol-aws-ami.sh`). The Nitro assurance report prints an
+  `in-box ENA driver` line (stock in-tree `/kernel`, or `built into the kernel
+  (=y)`) and a `self-built ENA driver` line (the DKMS `/extra`|`/updates` module,
+  or `not present` for a `--skip-ena-driver` / pure-OL build), each with its
+  `modinfo` version. This makes the effect of the in-guest self-build explicit
+  in the build log even though successful guest provisioning is otherwise silent
+  (libguestfs echoes a provisioning script's output only on failure). A new
+  internal helper `_ena_module_version` copies each candidate module into its own
+  temp subdir (so the stock and self-built copies — same basename — do not
+  collide) and `modinfo`s it. The ENAv3-tier `signal` line is unchanged and still
+  reflects the effective module (depmod precedence `updates` > `extra` >
+  `kernel`); the gate verdict (CHECK 1-4) is unaffected. SPEC A.7 updated. New
+  code is shellcheck `-S style` clean; suite 118/1/0.
+
 - **ENA self-build now surfaces the in-guest compiler error on failure**
   (`install-ena-driver.sh`). When the DKMS module build fails, the script now
   dumps `dkms status` and every `make.log` found under

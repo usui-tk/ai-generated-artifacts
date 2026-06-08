@@ -488,6 +488,16 @@ ENA driver in the guest for Nitro v4+ targets. Source: amzn/amzn-drivers ENA
 Linux driver (`ENA_Linux_Best_Practices.rst`, `RELEASENOTES.md`). The
 per-generation family lists are representative, not exhaustive.
 
+Ahead of the advisory tiers the report prints two explicit lines — the **in-box
+ENA driver** (stock in-tree `/kernel`, or `built into the kernel (=y)`) and the
+**self-built ENA driver** (the DKMS `/extra`|`/updates` module, or `not present`
+for a `--skip-ena-driver` / pure-OL build) — each with its `modinfo` version.
+These make the effect of the in-guest self-build visible directly in the build
+log even though successful guest provisioning is otherwise silent (libguestfs
+echoes a provisioning script's output to the host only on failure). The
+ENAv3-tier `signal` line continues to reflect the **effective** module (depmod
+precedence `updates` > `extra` > `kernel`).
+
 ### Nitro initramfs drivers (nvme/ena)
 
 Independently of the ENA driver *version*, the **initramfs must contain `nvme`
@@ -566,6 +576,14 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
 - **Regenerates the initramfs** for the target kernel (`dracut -f`) so the new
   driver is present at boot, and removes any stale
   `/etc/udev/rules.d/70-persistent-net.rules` for AMI hygiene.
+- **Surfaces build diagnostics on failure.** If the module build fails (DKMS or
+  the plain-`make` fallback) the script dumps `dkms status` and every `make.log`
+  under `/var/lib/dkms/amzn-drivers/<version>/` to stderr (prefixed
+  `[ena-driver][ERROR]`) before aborting. Because `oracle-linux-image-tools`
+  (libguestfs `virt-customize`) echoes a guest provisioning script's output to
+  the host build log **only on failure**, this is what makes the actual
+  compiler error visible there — without it a forwarded build log shows only the
+  opaque "Bad return status for module build" and an in-guest `make.log` path.
 
 **Standalone validation.** `install-ena-driver.sh` can be copied to a freshly
 launched **stock** OL6/OL7 instance and run directly (`sudo ./install-ena-driver.sh`)

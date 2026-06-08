@@ -2577,6 +2577,29 @@ phase5_run_build() {
 #------------------------------------------------------------------------------
 # Phase 6: Nitro readiness pre-check (offline image inspection)
 #------------------------------------------------------------------------------
+
+# modinfo the ENA module version out of the built image. Args:
+#   $1 img  $2 kver  $3 work-dir  $4 module path relative to /lib/modules/<kver>
+# Echoes the version string, or "" if the module is absent/unreadable. Each call
+# copies into its own temp subdir so the stock /kernel copy and the self-built
+# /extra|/updates copy (same basename) do not collide. Used by the Phase-6
+# assurance report to show the in-box and self-built ENA versions side by side.
+_ena_module_version() {
+  local img="$1" kver="$2" work="$3" rel="$4" d f
+  [[ -n "${rel}" ]] || return 0
+  d="$(mktemp -d "${work}/ena.XXXXXX")" || return 0
+  virt-copy-out -a "${img}" "/lib/modules/${kver}${rel}" "${d}/" 2>/dev/null || true
+  f="${d}/$(basename "${rel}")"
+  [[ -r "${f}" ]] || return 0
+  case "${f}" in
+    *.xz)  xz   -df "${f}" 2>/dev/null || true; f="${f%.xz}";;
+    *.gz)  gzip -df "${f}" 2>/dev/null || true; f="${f%.gz}";;
+    *.zst) zstd -df "${f}" 2>/dev/null || true; f="${f%.zst}";;
+  esac
+  command -v modinfo >/dev/null 2>&1 || return 0
+  modinfo -F version "${f}" 2>/dev/null | head -1 || true
+}
+
 phase6_nitro_readiness_check() {
   # Offline, read-only Nitro boot-readiness gate. Adapts the logic of AWS's
   # NitroInstanceChecks to inspect the BUILT IMAGE (no EC2 launch) via
@@ -2872,6 +2895,32 @@ phase6_nitro_readiness_check() {
       self-built*) log_info "  ENA driver provenance: ${ena_loc} -- the in-guest self-build replaced the stock in-tree driver; CHECK 1-4 above confirm boot-readiness is preserved (no regression)." ;;
       ?*)          log_info "  ENA driver provenance: ${ena_loc}." ;;
     esac
+    # Explicit before/after view: report the stock in-box ENA version and the
+    # self-built (DKMS) version on SEPARATE lines, so the operator can confirm
+    # the added in-guest self-build actually ran -- successful provisioning is
+    # otherwise silent in the build log (libguestfs echoes a guest script only on
+    # failure). OS-independent: applies to OL6 and OL7+ alike. ena_all (CHECK 2)
+    # already holds every ena.ko path relative to /lib/modules/<kver>.
+    local ena_inbox_mod ena_self_mod inbox_ver self_ver self_loc
+    ena_inbox_mod="$(printf '%s\n' "${ena_all}" | grep -E '(^|/)kernel/' | head -1 || true)"
+    ena_self_mod="$(printf '%s\n' "${ena_all}" | grep -E '(^|/)(updates|extra)/' | head -1 || true)"
+    inbox_ver="$(_ena_module_version "${img}" "${kver}" "${work}" "${ena_inbox_mod}")"
+    self_ver="$(_ena_module_version "${img}" "${kver}" "${work}" "${ena_self_mod}")"
+    self_loc="DKMS"
+    case "${ena_self_mod}" in
+      */updates/*) self_loc="DKMS /updates" ;;
+      */extra/*)   self_loc="DKMS /extra" ;;
+    esac
+    if [[ "${ena_cfg}" == "y" ]]; then
+      log_info "  in-box ENA driver   : built into the kernel (=y; no separate module)"
+    else
+      log_info "  in-box ENA driver   : ${inbox_ver:-none} (stock in-tree /kernel)"
+    fi
+    if [[ -n "${ena_self_mod}" ]]; then
+      log_info "  self-built ENA driver: ${self_ver:-unknown} (${self_loc}; in-guest self-build active)"
+    else
+      log_info "  self-built ENA driver: not present (--skip-ena-driver / pure OL AMI)"
+    fi
     log_info "  --- Nitro instance assurance (advisory) ---"
     log_info "    signal : ${signal}"
     log_info "    Nitro v2  ${v2_tier}  e.g. ${fam_v2}"
