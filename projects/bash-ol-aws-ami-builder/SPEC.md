@@ -574,7 +574,12 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
     *Floor:* below ~`2.8.6` the driver's `kcompat.h` redefines `page_ref_count`,
     which Oracle backported into UEK4 `>= 124.43.1`, so the build fails with a
     redefinition error (amzn/amzn-drivers issue #210; resolved driver-side at
-    `2.8.6`). *Ceiling:* `2.10.0` introduced the ECC (ENA Compatibility Check)
+    `2.8.6`). **That driver-side fix is conditional on the build detecting UEK**
+    (`IS_UEK` + `ENA_KERNEL_SUBVERSION_*`), which the amzn Makefile derives from
+    `uname -r`; under the libguestfs appliance `uname -r` is the non-UEK appliance
+    kernel, so even `2.9.1` redefines `page_ref_count` on a backported UEK4 target
+    unless the detection is retargeted to the build target — see "UEK detection
+    (cross-kernel build)" below. *Ceiling:* `2.10.0` introduced the ECC (ENA Compatibility Check)
     build-time API autodetect, which **false-positives on this old kernel + EL6
     toolchain** and emits calls to newer-kernel symbols that are absent here
     (`pci_dev_id`, `irq_update_affinity_hint`, `ethtool_puts`,
@@ -599,6 +604,19 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
   `-devel`, and if the headers are still absent installs the **latest**
   `kernel-uek` + matching `-devel` and **retargets** to it (a guaranteed
   buildable pair).
+- **UEK detection (cross-kernel build, OL6).** The amzn-drivers Makefile derives
+  `IS_UEK` and `ENA_KERNEL_SUBVERSION_*` from `uname -r` (the *running* kernel),
+  and those gate the `kcompat.h` `page_ref_count` UEK-backport guard. Under the
+  libguestfs provisioning appliance `uname -r` is the non-UEK appliance kernel,
+  so the macros are unset and the guard redefines `page_ref_count` against a
+  backported UEK4 target (`>= 4.1.12-124.43.1`, e.g. `-124.48.6`) — a
+  build-breaking redefinition that the version pin alone does not avoid. Because
+  the build already passes the target kernel as `BUILD_KERNEL`, the installer
+  patches that detection (OL6 only) to read `BUILD_KERNEL`, so the guard
+  evaluates against the DKMS target rather than the appliance. OL7/UEKR6 is a
+  `>= 4.6` kernel, so the `page_ref_count` block is compiled out regardless and
+  its Makefile is left untouched (per-OS isolation). Standalone runs on a live
+  instance are unaffected (`uname -r` is the real UEK kernel there).
 - **Builds via DKMS** (`REMAKE_INITRD`/`AUTOINSTALL`), so the module is rebuilt
   automatically across in-instance kernel upgrades. DKMS comes from EPEL —
   Oracle-provided `ol7_developer_EPEL` on OL7, and the Fedora **EPEL 6 archive**

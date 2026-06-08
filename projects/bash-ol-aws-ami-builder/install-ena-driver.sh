@@ -21,7 +21,9 @@
 #              ENAv3 capable. The buildable window on the updated UEK4 kernel
 #              4.1.12-124.48.6.el6uek is roughly [2.8.6, 2.9.1], validated on a
 #              real Nitro instance: below ~2.8.6 the driver's kcompat redefines
-#              page_ref_count (Oracle backported it into UEK4 >= 124.43.1); at
+#              page_ref_count (Oracle backported it into UEK4 >= 124.43.1; the
+#              driver's guard is conditional on UEK detection -- see "Target
+#              kernel"); at
 #              2.10.0 the driver gained the ECC build-time API autodetect, which
 #              false-positives on this old kernel + EL6 gcc 4.4.7 and pulls in
 #              newer-kernel symbols absent here (pci_dev_id, irq_update_affinity_
@@ -40,6 +42,11 @@
 #   via `dkms ... -k <kver>`. If the stock kernel's kernel-uek-devel has been
 #   pruned from the repos, we install the latest kernel-uek + matching headers
 #   and retarget to it (a guaranteed buildable pair).
+#   The amzn-drivers Makefile ALSO derives IS_UEK / ENA_KERNEL_SUBVERSION_* from
+#   `uname -r`; under the appliance that is the non-UEK appliance kernel, which
+#   mis-fires the kcompat.h page_ref_count guard against a backported UEK4 kernel
+#   (>= 124.43.1). For OL6 we patch that detection to read BUILD_KERNEL (the
+#   DKMS target) -- see patch_ena_uek_detection() below.
 #
 # DKMS:
 #   The driver is installed via DKMS (REMAKE_INITRD/AUTOINSTALL) so it is rebuilt
@@ -249,6 +256,40 @@ rm -f "${src_tgz}"
 [[ -d "/usr/src/amzn-drivers-ena_linux_${ena_version}" ]] \
   || die "unexpected archive layout for ena_linux_${ena_version}"
 mv "/usr/src/amzn-drivers-ena_linux_${ena_version}" "${src_dir}"
+
+# ---- retarget the amzn-drivers Makefile's UEK detection (OL6 cross-kernel) --
+# The ENA Makefile derives IS_UEK and ENA_KERNEL_SUBVERSION_* from `uname -r`
+# (the RUNNING kernel). Under the libguestfs provisioning appliance `uname -r`
+# is the non-UEK appliance kernel, not the DKMS target, so neither macro is set;
+# the kcompat.h page_ref_count guard then mis-fires and redefines a symbol the
+# backported UEK4 kernel (>= 4.1.12-124.43.1, e.g. -124.48.6) already provides
+# -> "redefinition of 'page_ref_count'". The build already passes the target
+# kernel as BUILD_KERNEL, so point the detection at it instead. OL6-only
+# (per-OS isolation): OL7/UEKR6 is a >= 4.6 kernel, so the page_ref_count block
+# is compiled out regardless and its Makefile is left untouched.
+patch_ena_uek_detection() {
+  local mk="${src_dir}/kernel/linux/ena/Makefile" S='$' sentinel
+  sentinel="echo \"${S}(BUILD_KERNEL)\" | grep uek"
+  [[ -f "${mk}" ]] || die "amzn-drivers Makefile not found at ${mk}"
+  if grep -Fq "${sentinel}" "${mk}"; then
+    log "[ena-uek-detect] Makefile UEK detection already retargeted to BUILD_KERNEL; skipping"
+    return 0
+  fi
+  cp -f "${mk}" "${mk}.uek-detect.bak"
+  # Read the DKMS target kernel (BUILD_KERNEL), not the running kernel. The
+  # `BUILD_KERNEL ?= $(shell uname -r)` default line carries no pipe, so the
+  # two pipe-anchored substitutions below leave it untouched.
+  sed -i \
+    -e "s#uname -r | grep uek#echo \"${S}(BUILD_KERNEL)\" | grep uek#" \
+    -e "s#uname -r | sed#echo \"${S}(BUILD_KERNEL)\" | sed#" \
+    "${mk}"
+  grep -Fq "${sentinel}" "${mk}" \
+    || die "[ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?)"
+  log "[ena-uek-detect] retargeted ENA Makefile UEK detection to the DKMS target kernel (backup ${mk}.uek-detect.bak)"
+}
+if [[ "${osmajor}" == "6" ]]; then
+  patch_ena_uek_detection
+fi
 
 # ---- build & install --------------------------------------------------------
 build_install_dkms() {

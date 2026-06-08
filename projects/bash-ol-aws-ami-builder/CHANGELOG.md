@@ -21,6 +21,35 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **OL6: the in-guest ENA self-build failed with `kcompat.h: ... redefinition of
+  'page_ref_count'`** even at the pinned `2.9.1`, so an AWS-optimized OL6 AMI
+  could not be built (a pure `--skip-ena-driver` AMI was unaffected). The
+  amzn-drivers ENA `Makefile` derives `IS_UEK` and `ENA_KERNEL_SUBVERSION_*` from
+  `uname -r` (the *running* kernel), and those gate the `kcompat.h` guard that
+  skips redefining `page_ref_count` on UEK4 kernels carrying Oracle's backport
+  (`>= 4.1.12-124.43.1`). During provisioning the DKMS build runs under the
+  libguestfs appliance, whose `uname -r` is the non-UEK appliance kernel, so the
+  macros were unset and the driver redefined `page_ref_count` against the
+  backported `4.1.12-124.48.6.el6uek` target — a collision the version pin cannot
+  avoid. (This is why the self-build succeeded **standalone** on a live OL6
+  instance, where `uname -r` is the real UEK kernel, yet failed in the image
+  build.) `install-ena-driver.sh` now patches the amzn-drivers `Makefile`
+  (OL6-only, per-OS isolation) to derive that detection from `BUILD_KERNEL` (the
+  DKMS target the build already passes) instead of `uname -r`, so the guard
+  evaluates against the target kernel; the patch is fronted by a `grep -Fq`
+  idempotency guard and leaves a `.uek-detect.bak` backup. OL7/UEKR6 (`>= 4.6`)
+  compiles the `page_ref_count` block out regardless and its Makefile is left
+  untouched. Verified at the logic level (preprocessor: the guard flips
+  define→skip once the target-kernel UEK macros are supplied; the version pin is
+  not the cause); end-to-end build/boot confirmation is the build-host E2E
+  (B-T7/B-T8). **Doc drift corrected:** SPEC A.7's "OL6/UEK4 buildable window"
+  *Floor* note said the `>= 2.8.6` driver-side fix resolves the redefinition, but
+  omitted that the fix is conditional on the build detecting UEK (`IS_UEK`), which
+  fails under the libguestfs `uname -r`; A.7 now records that condition and the
+  cross-kernel retarget. Pin unchanged (`2.9.1`). A new host-runnable regression
+  tier (`tests/t10_enaukedetect.sh`) guards the retarget. `bash -n` +
+  `shellcheck -S style` clean.
+
 - **OL6: the `ec2-user` cloud-init hook never actually applied (it ran too
   early).** A rebuilt OL6 AMI was still unreachable over SSH after the fix above:
   a launched instance showed `ec2-user` absent (`id: ec2-user: No such user`),

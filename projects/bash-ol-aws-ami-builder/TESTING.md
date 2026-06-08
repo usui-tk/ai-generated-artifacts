@@ -76,10 +76,11 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **142 passed, 1 skipped, 0 failed** (B-T1 = 22,
-B-T2 = 17, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
-hook-timing = 8, log-format = 12; plus B-T4 kickstart which is **1 pass with
-`ksvalidator`, 1 skip without** -> 143/0 with it). The host-runnable tiers
+Current fixed pass count: **153 passed, 1 skipped, 0 failed** (B-T1 = 23,
+B-T2 = 18, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
+hook-timing = 8, log-format = 12, ena-uek-detect = 9; plus B-T4 kickstart which
+is **1 pass with `ksvalidator`, 1 skip without** -> 154/0 with it). The
+host-runnable tiers
 (L0-L2) are complete; B-T7/B-T8 (L3/L4) remain deferred (builder host + AWS). A
 tier SKIPs cleanly when its optional dependency is absent.
 
@@ -126,6 +127,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T4 kickstart | L2 | implemented | `tests/validate-kickstart.sh`, **wired into the runner** via `tests/t5_kickstart.sh` (SKIPs without `ksvalidator`); see below |
 | B-T9 hook timing | L1/L2 | implemented | `tests/t8_hooktiming.sh`: the OL6 cloud-user hook must run *after* `cloud::cloud_init` (configs exist), never at source time; static wrapper-wiring + no-top-level-`sh` guards, plus a behavioural order/edit check; 8 asserts |
 | B-T (log format) | L1 | implemented | `tests/t9_logformat.sh`: every timestamped channel emits **date-first** (`YYYY-MM-DD HH:MM:SS` leads, `[SEVERITY]`/source tag follows; SPEC E.1); colour-stripped match across info/warn/error/build/debug/external + a negative guard against the old tag-first order; 12 asserts |
+| B-T (ena uek-detect) | L1/L2 | implemented | `tests/t10_enaukedetect.sh`: the OL6 ENA self-build retargets the amzn-drivers Makefile UEK detection (`IS_UEK`/`ENA_KERNEL_SUBVERSION_*`) from `uname -r` to `BUILD_KERNEL` (the DKMS target), so the `kcompat.h` `page_ref_count` guard evaluates against the build target rather than the libguestfs appliance kernel; structural (present, OL6-gated, idempotency-guarded, pipe-anchored) + behavioural fixture transform; 9 asserts. Compile/boot proof is B-T7/B-T8 |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
 
