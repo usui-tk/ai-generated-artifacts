@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 
-from scanner import scan, canon_norm_hash, _canonical_line  # noqa: E402
+from scanner import scan, canon_norm_hash, _canonical_line, extract_region  # noqa: E402
 
 # A canonical region body and its correct hash (computed live, so the happy path
 # never goes stale; the FIXED contract is pinned by GV-1..5 below).
@@ -183,6 +183,26 @@ def run():
     ok, _ = all_conform(rows)
     cases.append(("F4 malformed marker -> drift=unknown (conformant)",
                   len(region) == 1 and region[0]["drift"] == "unknown" and ok))
+
+    # region_locator final form (P6): a real consumer inlines MANY regions in one
+    # file; extract_region selects the region by unit_id (not "one pair per file").
+    _mk = ("# >>> CANONICAL unit_id=%s version=1.0.0 hash=%s policy=canonical "
+           "binding=follow-latest >>>\r\n%s\r\n# <<< CANONICAL unit_id=%s <<<")
+    _foo = ("pwsh.helper.foo", "0" * 16, "function Foo {\r\n    $A\r\n}", "pwsh.helper.foo")
+    _bar = ("pwsh.helper.bar", "1" * 16, "function Bar {\r\n    $B\r\n}", "pwsh.helper.bar")
+    multi = (_mk % _foo) + "\r\n\r\n" + (_mk % _bar)
+    bfoo, _mf, lfoo = extract_region(multi, "pwsh.helper.foo")
+    bbar, _mb, lbar = extract_region(multi, "pwsh.helper.bar")
+    cases.append(("region_locator: multi-region selects foo by unit_id (symbol-anchored)",
+                  bfoo == "function Foo {\n    $A\n}" and lfoo == "marker:pwsh.helper.foo@fn:Foo"))
+    cases.append(("region_locator: multi-region selects bar by unit_id",
+                  bbar == "function Bar {\n    $B\n}" and lbar == "marker:pwsh.helper.bar@fn:Bar"))
+    # F4 enumerated indeterminate conditions: duplicate unit_id, and absent unit_id.
+    dup = (_mk % _foo) + "\r\n" + (_mk % _foo)
+    cases.append(("F4 duplicate unit_id marker in one file -> indeterminate",
+                  extract_region(dup, "pwsh.helper.foo") == (None, None, None)))
+    cases.append(("F4 absent unit_id -> indeterminate",
+                  extract_region(multi, "pwsh.helper.nope") == (None, None, None)))
 
     # Schema conformance + canonical-JSON across a mixed run.
     rows = rows_for(consumer_body="function Foo {\r\n    param($X)\r\n    $X\r\n}")

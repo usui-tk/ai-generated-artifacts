@@ -53,11 +53,16 @@ SCANNER_VERSION = "0.1.0"
 KIND_GRANULARITY = {
     "powershell-helper": "region",
     "bash-region": "region",
-    "spec-region": "region",
     "python-helper": "whole-tool",
     "python-tool": "whole-tool",
     "tool": "whole-tool",
-    # "governance-doc": out of scope (handled by the document-conformance gate)
+    # "governance-doc" and "spec-region": out of scope (handled by the
+    # document-conformance gate / doc_gate --path). Those carry HTML-comment
+    # doc-region markers ("<!-- >>> CANONICAL ... -->") whose hashes doc_gate
+    # recomputes against the spec home; this scanner parses only the
+    # "# >>> CANONICAL" hash-comment markers of code regions (ADR 0014). The
+    # spec-region scope was pinned here at P6a, the first run with a real spec
+    # consumer (download-speakerdeck SPEC.md), which made the split concrete.
 }
 
 MARKER_BEGIN = re.compile(
@@ -172,25 +177,51 @@ def _read_text(path):
         return handle.read()
 
 
-def extract_region(text):
-    """Return (region_body, marker_dict, locator) for a file carrying exactly one
-    well-formed marker pair, else (None, None, None).
+def extract_region(text, unit_id):
+    """Return (region_body, marker_dict, locator) for the marker pair in `text`
+    whose unit_id == `unit_id`, else (None, None, None).
 
-    locator format (P3 provisional; final form pinned at P6 - see foot of file):
-        "marker:<unit_id>@L<begin>-L<end>"  (1-based marker line numbers)
+    A real consumer file inlines MANY vendored regions (dozens of helper bodies
+    in one .ps1; many doc regions in one SPEC), so the region to compare is
+    selected by `unit_id` rather than by assuming a single marker pair per file
+    (region_locator final form, pinned at P6 - see foot of file).
+
+    Indeterminate (None, None, None) - the F4 drift="unknown" triggers - when the
+    unit_id's BEGIN marker is absent (0 matches), appears more than once in the
+    same file (ambiguous duplicate), or has no matching END marker after it.
+
+    locator (final form, P6): symbol/context-anchored - the unit_id plus the
+    enclosing function name parsed from the region body - so a region re-finds
+    across edits even as raw line numbers drift run-to-run (ADR 0014 §4
+    "locate by symbol/context, not line number").
     """
     lines = text.splitlines()
-    begins = [i for i, l in enumerate(lines) if MARKER_BEGIN.match(l)]
-    ends = [i for i, l in enumerate(lines) if MARKER_END.match(l)]
-    if len(begins) != 1 or len(ends) != 1 or ends[0] <= begins[0]:
-        return None, None, None
-    m = MARKER_BEGIN.match(lines[begins[0]])
+    begins = [i for i, l in enumerate(lines)
+              if (m := MARKER_BEGIN.match(l)) and m.group(1) == unit_id]
+    if len(begins) != 1:
+        return None, None, None  # absent (0) or ambiguous duplicate (>1) -> F4
+    bi = begins[0]
+    ei = None
+    for j in range(bi + 1, len(lines)):
+        me = MARKER_END.match(lines[j])
+        if me and me.group(1) == unit_id:
+            ei = j
+            break
+    if ei is None:
+        return None, None, None  # BEGIN with no matching END -> F4
+    m = MARKER_BEGIN.match(lines[bi])
     marker = {
         "unit_id": m.group(1), "version": m.group(2), "hash": m.group(3),
         "policy": m.group(4), "binding": m.group(5),
     }
-    body = "\n".join(lines[begins[0] + 1:ends[0]])
-    locator = "marker:%s@L%d-L%d" % (marker["unit_id"], begins[0] + 1, ends[0] + 1)
+    body = "\n".join(lines[bi + 1:ei])
+    sym = None
+    for bl in lines[bi + 1:ei]:
+        s = bl.strip()
+        if s.startswith("function "):
+            sym = s[len("function "):].split("{")[0].split("(")[0].strip()
+            break
+    locator = ("marker:%s@fn:%s" % (unit_id, sym)) if sym else ("marker:%s" % unit_id)
     return body, marker, locator
 
 
@@ -209,7 +240,7 @@ def canonical_norm_hash_of_unit(root, manifest_by_id, unit_id):
     abs_loc = os.path.join(root, loc)
     if not os.path.exists(abs_loc):
         return None
-    body, _marker, _locator = extract_region(_read_text(abs_loc))
+    body, _marker, _locator = extract_region(_read_text(abs_loc), unit_id)
     if body is None:
         return None
     return canon_norm_hash(body)
@@ -286,7 +317,7 @@ def scan(root, repo, commit, now=None):
                 obs.update(_unknown_region(canon_norm))
                 yield obs
                 continue
-            body, marker, locator = extract_region(_read_text(abs_path))
+            body, marker, locator = extract_region(_read_text(abs_path), unit_id)
             if body is None:
                 # malformed/absent marker pair -> indeterminate (F4 fallback).
                 obs.update(_unknown_region(canon_norm))
