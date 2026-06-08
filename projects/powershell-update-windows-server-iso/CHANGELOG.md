@@ -1,9 +1,15 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-08
+---
 # Changelog
 
 All notable changes to `Update-WindowsServerIso.ps1` (and its
 companion files in this project directory) are documented in this
 file. Per the repository-wide policy documented in the root
-[`SPEC.md`](../../../SPEC.md), CI workflow changes are recorded here
+[`SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md), CI workflow changes are recorded here
 too — not inside `.github/workflows/` — because this project is the
 CI target.
 
@@ -3743,7 +3749,7 @@ The Phase 6 SPEC rewrite (commit c40755c) introduced four regressions
 relative to the implementation, all corrected here:
 
 1. **Part A bloated to 365 lines (governance violation)**. Per
-   [`scripts/README.md`](../../README.md) "Standard SPEC Structure",
+   [`scripts/README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) "Standard SPEC Structure",
    Part A is the cross-project inherited layer maintained by the
    sibling SPEC ([`../download-speakerdeck-oracle4engineer/SPEC.md`](../download-speakerdeck-oracle4engineer/SPEC.md)
    sections A.1-A.14). The Phase 6 rewrite restated A.1-A.7 content
@@ -3850,7 +3856,7 @@ touched.
 ### r09.0 Step 1 follow-up 2 (governance cross-reference) - subproject docs reference repository-wide AGENTS.md
 
 A small follow-up to the prior `r09.0 Step 1 follow-up (doc-renewal)`
-entry above. The repository-wide [`AGENTS.md`](../../../AGENTS.md) — the
+entry above. The repository-wide [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) — the
 LLM-assisted contributor operating guide, introduced at the
 repository root in the same Step 6 governance cycle — is now
 referenced from this subproject's documentation:
@@ -5851,7 +5857,7 @@ directory shipped with the script.
 ### Added - `TESTING.md`
 
 Created `TESTING.md` for this sub-project to align with the
-repository-wide governance documented in the root [`README.md`](../../../README.md)
+repository-wide governance documented in the root [`README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md)
 "Language Policy" section, which lists `TESTING.md` among the
 sub-project documents that are maintained in English only. The
 sister project `download-speakerdeck-oracle4engineer/` has carried

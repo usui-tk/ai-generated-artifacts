@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-08
+---
 # Update-WindowsServerIso.ps1
 
 | Stage | Status |
@@ -17,7 +23,7 @@ Dynamic Update、および .NET Framework cumulative update を Windows Server
 
 本スクリプトは
 [`usui-tk/ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts)
-リポジトリ配下の `scripts/powershell/update-windows-server-iso/` に格納されています。
+リポジトリ配下の `projects/powershell-update-windows-server-iso/` に格納されています。
 
 ## なぜこのスクリプトが必要か
 
@@ -63,11 +69,11 @@ Windows Update は稼働中サーバーを最新状態に保つ標準的な手�
   [`SPEC.md`](./SPEC.md)（開発者・LLM 向け仕様書）も併読してください。
 - **検証手順と実行結果** は [`TESTING.md`](./TESTING.md) を参照してください。
 - **リビジョン単位の変更履歴** は [`CHANGELOG.md`](./CHANGELOG.md) を参照してください。
-- **リポジトリ全体に共通する LLM エージェント運用ガイド**(ガバナンス階層、ground truth 抽出、Doc-Touching マトリクス、Part A 継承ルール、アンチパターン)は、リポジトリルートの [`AGENTS.md`](../../../AGENTS.md) を参照してください。
+- **リポジトリ全体に共通する LLM エージェント運用ガイド**(ガバナンス階層、ground truth 抽出、Doc-Touching マトリクス、Part A 継承ルール、アンチパターン)は、リポジトリルートの [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) を参照してください。
 - **リポジトリ全体に共通する** 言語ポリシー、ファイル形式ポリシー、免責事項、
-  貢献ルールは、ルートの [`README.md`](../../../README.md)、
-  [`CONTRIBUTING.md`](../../../CONTRIBUTING.md)、
-  [`SECURITY.md`](../../../SECURITY.md) に集約されています。
+  貢献ルールは、ルートの [`README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md)、
+  [`CONTRIBUTING.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/CONTRIBUTING.md)、
+  [`SECURITY.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SECURITY.md) に集約されています。
 
 ## ⚠️ 免責事項
 
@@ -96,14 +102,14 @@ Windows Update は稼働中サーバーを最新状態に保つ標準的な手�
   評価版 ISO を公衆向けに再配布することは Microsoft ライセンス違反です。
 
 本リポジトリ全アーティファクトに適用される完全な免責条項と自己責任条件は、
-[ルート README](../../../README.md)
-（[英語版](../../../README.md)）を参照してください。
+[ルート README](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md)
+（[英語版](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md)）を参照してください。
 
 ## ライセンス
 
 本プロジェクトは `usui-tk/ai-generated-artifacts` リポジトリの一部であり、
 **MIT License** のもとでライセンスされています。完全なライセンス本文は、
-リポジトリルートの [`LICENSE`](../../../LICENSE) ファイルを参照してください。
+リポジトリルートの [`LICENSE`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/LICENSE) ファイルを参照してください。
 
 要約すると：利用者は原著作権表示とライセンス表示の保持を条件として、
 本ソフトウェアを任意の目的で使用・改変・再配布する自由を持ちます。
@@ -115,7 +121,7 @@ Microsoft 社固有のライセンスのもとに置かれ、本プロジェク�
 ## ディレクトリ構成
 
 ```
-scripts/powershell/update-windows-server-iso/
+projects/powershell-update-windows-server-iso/
 ├── Update-WindowsServerIso.ps1     # メインスクリプト
 ├── README.md / README.ja.md         # 利用者向けドキュメント（本ファイル）
 ├── SPEC.md (English only)            # 開発者・LLM 向け仕様書
@@ -136,7 +142,7 @@ scripts/powershell/update-windows-server-iso/
 
 本スクリプトの検証に使用する PowerShell 静的解析ツール（`psa.py`）は、
 リポジトリ全体の正規配置場所に格納されています：
-[`quality-tools/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
+[`quality-tools/powershell-static-analyzer/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer/)
 
 ## クイックスタート
 
@@ -557,10 +563,10 @@ CI マッピングは SPEC.md §C.9 にあります。
 | `...__stage4__monthly-refresh.yml` | `-Action RefreshAllBaselines`。`data/config-Server*.json` に差分が出たら自動 PR を起票 | cron `0 2 15 * *`（月次）、手動 |
 
 ワークフローの実体は
-[`.github/workflows/`](../../../.github/workflows/) にあります。
+[`.github/workflows/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/.github/workflows/) にあります。
 各ワークフローの変更履歴は本プロジェクトの
 [`CHANGELOG.md`](./CHANGELOG.md) に記録します（ルートの
-[`SPEC.md`](../../../SPEC.md) §9 で規定されているリポジトリ規約に従う）。
+[`SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md) §9 で規定されているリポジトリ規約に従う）。
 
 Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage`、
 `dryRun`）に対応しており、ワークフローを編集することなくアドホックな更新

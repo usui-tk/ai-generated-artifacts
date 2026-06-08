@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-08
+---
 # Update-WindowsServerIso.ps1 — Developer Specification (SPEC)
 
 > **Status**: r09.0 baseline (rewritten 2026-05-27). This document is the
@@ -7,13 +13,13 @@
 > the design from the source code.
 >
 > **Language**: English only, per the repository-wide
-> [Language Policy](../../../README.md#language-policy). Bilingual
+> [Language Policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md#language-policy). Bilingual
 > entry-point documentation lives in
 > [`README.md`](./README.md) / [`README.ja.md`](./README.ja.md).
 >
 > **Relationship to the repository-level SPEC**: cross-project rules
 > (CI workflow design, naming conventions, timeout policy, supply-chain
-> security) live in the [repository-level SPEC](../../../SPEC.md). This
+> security) live in the [repository-level SPEC](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md). This
 > document inherits those rules and restates only what is specific to
 > this script.
 >
@@ -93,8 +99,8 @@ remain unambiguous.
 - [Conventions (RFC 2119)](#conventions-rfc-2119)
 - [Stable Identifiers](#stable-identifiers)
 - [Policy Index](#policy-index-quick-reference-for-ai-agents)
-- [**Part A — Inherited Common Specification**](#part-a--inherited-common-specification)
-  - [A.1 – A.14 — Inherited verbatim from the sibling SPEC](#a1--a14--inherited-verbatim-from-the-sibling-spec)
+- [**Part A — Common Specification (inherited; vendored from the spec home)**](#part-a---common-specification-inherited-vendored-from-the-spec-home)
+  - A.1–A.13 vendored from the spec home; A.14 Debug Trace Facility (cross-script feature)
   - [A.x — Project-specific extensions](#ax--project-specific-extensions)
 - [**Part B — Script-Specific Specification**](#part-b--script-specific-specification)
   - [B.1 Script identity and entry point](#b1-script-identity-and-entry-point)
@@ -145,69 +151,304 @@ remain unambiguous.
 
 ---
 
-# Part A — Inherited Common Specification
+# Part A - Common Specification (inherited; vendored from the spec home)
 
-> **Inheritance declaration**. This Part inherits the
-> **Common Specification (reusable across all scripts)** maintained at
-> the companion in-house reference:
->
-> [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../download-speakerdeck-oracle4engineer/SPEC.md)
-> sections **A.1 through A.14**.
->
-> Per the repository-wide governance in
-> [`scripts/README.md`](../../README.md) "Standard SPEC Structure",
-> Part A is the cross-project layer. Restating its text in this file
-> would duplicate the canonical source and create drift risk. Readers
-> should consult the sibling SPEC for the authoritative text of every
-> section listed below.
+> **Status: inherited - vendored from the spec home.** Per the
+> [`AGENTS.md` Section 6 Part A Inheritance Rule (ABSOLUTE)](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md), the 14
+> canonical Part A regions below are vendored from
+> [`governance/spec/powershell.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/governance/spec/powershell.md) as marker+hash
+> regions and are verified against the spec home by the document-conformance gate /
+> drift scanner; they are never hand-edited. The A.14 slot below is this consumer's
+> project-specific cross-script feature (not vendored).
 
-## A.1 – A.14 — Inherited verbatim from the sibling SPEC
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.reference-assets version=0.1.0 hash=d1f03d5c548d4f3f policy=canonical binding=follow-latest >>> -->
+### A.1 Reference assets
 
-| Section | Title | Scope |
-|:-:|---|---|
-| A.1 | Reference Assets | `psa.py` canonical location; companion specifications; companion in-house script identification; target-specific folder naming |
-| A.2 | Source File Format | UTF-8 BOM, CRLF, ASCII-only outside literals, `.gitattributes` enforcement |
-| A.3 | Banner & Version Identification | `$Script:ScriptVersion` / `$Script:ScriptTag` conventions; self-fingerprint via SHA256; banner block layout |
-| A.4 | Phase Architecture | numbering rules; phase groups; phase header / footer; Phase Timing Summary |
-| A.5 | Logging Conventions | `Write-Step` / `Write-Ok` / `Write-Caution` / `Write-Fail` / `Write-Skip` markers; color discipline; console encoding; TLS hardening |
-| A.6 | Path Handling (`-LiteralPath` rules) | wildcard-interpretation hazard; canonical safe-temp pattern; sanitization of derived filenames |
-| A.7 | Parameter Conventions | standard switches; mutual exclusion patterns; banner display |
-| A.8 | Error & Diagnostic Conventions | three-tier diagnostic output; failure category classification; diagnostic `.txt` dump; JSONL schema |
-| A.9 | CSV / JSONL Column Conventions | shared columns across per-phase CSVs; filename pattern; persistent state files |
-| A.10 | Environment Evaluation (Phase 1) | PowerShell host check; registry probe; real-world filesystem tests; tier classification |
-| A.11 | Static Analysis with `psa.py` | setup; required gate; rule coverage; project-local suppression policy; CI integration |
-| A.12 | Documentation Language Policy | file set (README bilingual; SPEC / TESTING / CHANGELOG English-only); README synchronization rule (Lines field match); README.ja.md style; mandatory Disclaimer and License sections (A.12.5) |
-| A.13 | Development Workflow | iteration cycle; revision discipline; reuse-before-invention principle |
-| A.14 | Debug Trace Facility | three subsystems; module-level state; standard usage pattern; activation order; output format; coexistence with A.8; runtime overhead; common pitfalls |
+Every PowerShell script in the canon draws on a shared set of reference assets: (1) the
+static-analysis configuration and gate (see A.11); (2) the companion specification documents
+that make up the doc-set (README + README.ja, SPEC, and where applicable TESTING and
+CHANGELOG); (3) the in-house canonical reference script `{{REFERENCE_SCRIPT}}`, the worked
+example of these conventions; and (4) the shared helper units vendored from the code canon
+(`reference-code/powershell/`). The specific reference script and helper set a consumer uses
+are recorded in that consumer's own SPEC; this region only fixes that the assets exist and
+where their conventions are defined.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.reference-assets <<< -->
 
-## A.x — Project-specific extensions
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.source-file-format version=0.1.0 hash=f7105ebfe3d202ff policy=canonical binding=follow-latest >>> -->
+### A.2 Source file format
 
-Reserved for any extensions or deviations from the inherited Part A
-that are unique to `Update-WindowsServerIso.ps1`. As of this revision
-there are **no project-specific extensions**; the inherited contract
-is followed verbatim. Project-specific elaboration of Phase architecture
-(P01–P13), parameters, error formats, and so on, is recorded in
-**Part B** below.
+Script source files are encoded **UTF-8 with BOM** and use **CRLF** line endings. Non-ASCII
+characters are confined to intentional data/string literals; identifiers, keywords, and code
+are ASCII (the documentation-language policy is A.12). Encoding and line-ending conformance is
+enforced by the static-analysis gate (A.11); files that are not BOM+CRLF, or that carry stray
+non-ASCII outside sanctioned literals, fail the gate.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.source-file-format <<< -->
 
-If a future revision needs a project-specific deviation (e.g., a
-different console-encoding strategy, an additional logging marker, or
-a parameter convention not yet adopted by the sibling), record it as
-`A.x.N` here with rationale. The default disposition is to first
-propose the change to the sibling SPEC so the convention can be
-inherited rather than forked.
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.banner-version version=0.1.0 hash=9821c85a0e065145 policy=canonical binding=follow-latest >>> -->
+### A.3 Banner and version
 
-### A.x.0 — Rationale and forensic record (inheritance rule)
+Each script carries a single canonical **version string** and emits a **startup banner** that
+prints the script identity, the version, and a **SHA256 self-fingerprint** of the running
+file. The version string is the one source of truth for the script's revision and is the value
+recorded in CHANGELOG. The banner format and the fingerprint computation are common; the
+concrete version value is per-consumer.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.banner-version <<< -->
 
-The Part A inheritance rule above is normative for this SPEC and for
-every Layer 3 SPEC in this repository style. The rationale, the
-canonical anti-pattern (the bloated 365-line Part A in commit
-`c40755c`, which this SPEC corrected in commit `8df9ff4`), and the
-LLM-agent operating guidance for preserving the rule are recorded
-permanently in the repository-wide [`AGENTS.md` §6 Part A Inheritance
-Rule (ABSOLUTE)](../../../AGENTS.md#6-part-a-inheritance-rule-absolute)
-and in [`AGENTS.md` §9 Anti-Patterns (AP-1)](../../../AGENTS.md#9-anti-patterns-forensically-documented).
-LLM agents extending or revising this SPEC MUST consult both
-references before touching Part A.
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.phase-architecture version=0.1.0 hash=9af42a0010ff6f52 policy=canonical binding=follow-latest >>> -->
+### A.4 Phase architecture
+
+Scripts are organised into **numbered phases**. The numbering convention (monotonic integer
+phases, optional phase *groups*, and a uniform per-phase header/footer log line carrying the
+phase number, title, and elapsed tag) is common. The **phase count and the phase map**
+(which work each phase does) are consumer-specific and are defined in the consumer's **Part
+B**, not here.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.phase-architecture <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.logging version=0.1.0 hash=8e1353694d8216fa policy=canonical binding=follow-latest >>> -->
+### A.5 Logging conventions
+
+Logging goes through the shared logging helper family (vendored from the code canon). Messages
+carry a **severity marker** from the canonical set (informational / detail / caution / error
+and the phase markers); console output uses the canonical colour discipline for each severity;
+network operations use TLS. Scripts do not write ad-hoc colour or bypass the helpers. The
+helper set is fixed by the code canon; this region fixes the *conventions* for using it.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.logging <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.path-handling version=0.1.0 hash=1526d2dbb85bb58f policy=canonical binding=follow-latest >>> -->
+### A.6 Path handling
+
+Paths are handled defensively: prefer **`-LiteralPath`** over wildcard-expanding parameters;
+never expand wildcards on externally supplied input; build paths with validated joins (not
+string concatenation); and confine scratch files to a controlled work root rather than the
+current directory or a shared temp location. These rules are common; the specific work-root
+location is per-consumer.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.path-handling <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.parameter-handling version=0.1.0 hash=9969ad954a28fc39 policy=canonical binding=follow-latest >>> -->
+### A.7 Parameter conventions
+
+Scripts expose the canonical **standard parameter set** (the shared switches every consumer
+provides) plus consumer-specific parameters. Mutually exclusive options are validated at
+entry; invalid combinations fail fast with a diagnostic. Help/usage shows the startup banner.
+The standard switch set and the validation discipline are common; the consumer-specific
+parameter list is defined in the consumer's SPEC.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.parameter-handling <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.error-diagnostic version=0.1.0 hash=0d472879675b224b policy=canonical binding=follow-latest >>> -->
+### A.8 Error and diagnostic model
+
+Diagnostics are **three-layered**: (1) human-readable console output; (2) a per-run detail log
+file; (3) structured per-failure records. Failures are **classified** (e.g. transient vs
+fatal vs configuration) so callers can react. Each failure is recorded as a structured entry
+following the canonical record shape (A.9 JSONL conventions). If a consumer additionally
+provides an **operation-level trace facility** (an optional feature - see the consumer's Part
+A.14 / project section), the per-failure records and the operation-level trace coexist; this
+region does not require such a facility.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.error-diagnostic <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.csv-conventions version=0.1.0 hash=38cb631efd9af8a9 policy=canonical binding=follow-latest >>> -->
+### A.9 CSV conventions
+
+Tabular outputs and state files share common **column-naming** and **file-naming** conventions:
+stable snake/Pascal column names, a per-phase output-file naming scheme, and a designated state
+file for resumable runs. CSV is the baseline tabular format every consumer supports.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.csv-conventions <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.jsonl-conventions version=0.1.0 hash=3d605116d9e9b33c policy=canonical binding=follow-latest >>> -->
+### A.9 (cont.) JSONL conventions - optional feature
+
+A consumer **may** additionally emit JSONL (one JSON object per line) for machine consumption -
+notably the per-failure records of A.8. When present, JSONL files follow the canonical naming
+(per-phase, purpose-suffixed), use **camelCase** keys, and are LF-terminated. This region is an
+**optional feature**: a consumer that emits only CSV omits it.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.jsonl-conventions <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.environment-eval version=0.1.0 hash=669c9ba612d6f35b policy=canonical binding=follow-latest >>> -->
+### A.10 Environment evaluation
+
+The **environment-evaluation phase (the first phase of the run)** assesses the host before any
+work: it gathers platform/runtime facts in tiers (a baseline probe, then progressively
+deeper checks) and **asserts compatibility** (runtime version, privileges, required tooling),
+failing fast with a clear diagnostic when a prerequisite is unmet. The tiered model and the
+fail-fast compatibility assertion are common; the specific phase number/name and the exact
+checks are consumer-specific (Part B).
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.environment-eval <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.static-analysis version=0.1.0 hash=a9e9c8d44b702ac2 policy=canonical binding=follow-latest >>> -->
+### A.11 Static analysis
+
+`psa.py` (the canon's PowerShell static analyzer; canonical home in the tool canon) is the
+**mandatory static-analysis gate**. Every consumer runs it with a project-local
+`.psa.config.json` and MUST be **clean (0 errors / 0 warnings / 0 info)** before each commit.
+The `.psa.config.json` **follows-latest** from the analyzer's canonical home (ADR 0009); it is
+tool-owned, not part of this doc canon. Which rules a consumer suppresses (with justification)
+and any project-specific false-positive dispositions are recorded in the consumer's own SPEC,
+not here. CI runs a **three-stage model**: Stage 1 - lint / static analysis (psa.py +
+PSScriptAnalyzer), cross-platform; Stage 2 - functional / parse validation (Windows where
+required); Stage 3 - release / packaging. The three-stage model is common; the concrete
+workflow filenames are path-encoded per consumer (A.13 / the dotfile conventions).
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.static-analysis <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.doc-language-policy version=0.1.0 hash=8e392c54780c4a7f policy=canonical binding=follow-latest >>> -->
+### A.12 Documentation language policy
+
+Code, configuration, and the SPEC/TESTING/CHANGELOG doc-set are authored in **English / ASCII**.
+Intentional Japanese appears only in (a) the **bilingual README pair** (`README.md` +
+`README.ja.md`, twin-file), (b) the **bilingual community-health files**
+(`CODE_OF_CONDUCT` / `CONTRIBUTING` / `SECURITY`, in-file English + Japanese sections),
+and (c) sanctioned data/string literals. The bilingual *mode* is fixed by document member -
+twin-file for README, in-file dual-language for community-health. The doc-set file-set and each document's role follow the
+canonical structure (README + README.ja, SPEC, and where applicable TESTING and CHANGELOG):
+**history lives in CHANGELOG, current/forward design in SPEC**. `README.md` and `README.ja.md`
+are maintained in **lock-step** (AGENTS.md §5). The mandatory README disclaimer and license
+sections are defined by the canonical README format (the `readme.disclaimer` / `readme.license`
+items) and are **not restated here**.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.doc-language-policy <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.development-workflow version=0.1.0 hash=fdadacb9bf023186 policy=canonical binding=follow-latest >>> -->
+### A.13 Development workflow
+
+Changes follow an **iterate-to-green** cycle: edit; run the static-analysis gate (A.11) to
+**0/0/0**; run the consumer's verification/tests where present; then commit. Revision history
+is recorded in **CHANGELOG** (Keep a Changelog format); the SPEC records the current design,
+not a change log. Doc-touching changes keep the doc-set in sync (AGENTS.md §5): a SPEC change
+that alters behaviour updates README / README.ja / TESTING in the same change. CI workflow
+files are named with a per-consumer path-encoded prefix.
+<!-- <<< CANONICAL unit_id=spec.powershell.part-a.development-workflow <<< -->
+
+### A.14 Debug Trace Facility (cross-script feature)
+
+The Debug Trace Facility is a reusable operation-level diagnostic
+mechanism vendored into `Update-WindowsServerIso.ps1` from the shared
+canon helper set. It complements the per-record diagnostics of A.8:
+where A.8 answers "which record failed", the Debug Trace Facility
+answers "which named step inside this function was in progress when
+the exception was raised".
+
+It is generic - it makes no assumption about phases, records, or any
+script-specific concept - which is why it occupies the Part A
+cross-script feature slot. The public API, module-level state, and
+output formats below are canonical (shared verbatim by every consumer
+of the facility); only the activation sites are script-specific.
+
+### A.14.1 Three subsystems
+
+| Subsystem | Public API |
+|---|---|
+| Trace primitives | `Start-DebugTrace` / `Set-DebugStep` / `Stop-DebugTrace` / `Format-DebugFailure` / `Write-DebugFailureReport` |
+| JSONL file output (real-time stream) | `Enable-DebugTraceFileOutput` / `Disable-DebugTraceFileOutput` / `Get-DebugTraceFileOutputStatus` |
+| JSON point-in-time export + auto-export-on-failure | `Export-DebugTraceJson` / `Enable-AutoExportOnPhaseFailure` |
+
+### A.14.2 Module-level state
+
+The facility maintains the following script-scope variables, declared
+at script-load time so they exist before any function body references
+them:
+
+```powershell
+$Script:DebugTraceStack             = New-Object 'System.Collections.Generic.Stack[object]'
+$Script:DebugTraceCompletedFrames   = New-Object 'System.Collections.Generic.List[object]'
+$Script:DebugTraceCompletedCap      = 1024
+$Script:DebugTraceHistoryCap        = 256
+$Script:DebugTraceJsonlLineCap      = 8192
+$Script:DebugTraceJsonDepth         = 100
+$Script:DebugTraceJsonlEnabled      = $false
+$Script:DebugTraceJsonlPath         = $null
+$Script:DebugTraceJsonlBuffer       = New-Object 'System.Collections.Generic.List[string]'
+$Script:DebugTraceJsonlBufferCap    = 4096
+$Script:DebugTraceJsonlWriteCount   = 0
+$Script:DebugTraceJsonlErrorCount   = 0
+$Script:DebugTraceJsonlLastError    = $null
+$Script:DebugTraceAutoExportEnabled = $false
+$Script:DebugTraceAutoExportDir     = $null
+$Script:DebugTracePhaseRegistry     = @{}
+$Script:DebugTraceEventSeq          = 0
+```
+
+### A.14.3 Standard usage pattern
+
+Every function that should participate in tracing follows this
+entry / body / catch / finally template:
+
+```powershell
+function Invoke-Something {
+    Start-DebugTrace -Context 'Invoke-Something' -PhaseId 'PNN'
+    try {
+        Set-DebugStep 'validate inputs'
+        # ...
+        return $result
+    } catch {
+        Write-DebugFailureReport $_ -IncludeStepHistory -AutoExport
+        throw
+    } finally {
+        Stop-DebugTrace
+    }
+}
+```
+
+Rules:
+
+1. `Start-DebugTrace -PhaseId 'PNN'` is used for phase-level frames
+   only; inner helpers called from a phase body may use
+   `Start-DebugTrace` without `-PhaseId` to nest a sub-frame.
+2. `Set-DebugStep` is a no-op when no frame is active, so library-style
+   helpers can use it opportunistically without forcing callers to set
+   up tracing.
+3. `Write-DebugFailureReport -AutoExport` triggers a JSON snapshot only
+   when `Enable-AutoExportOnPhaseFailure` has been called previously
+   (this script enables it during startup, after
+   `Initialize-RuntimeDirectories`).
+4. The `finally` block must always call `Stop-DebugTrace` to keep the
+   stack balanced. An early-return branch that bypasses the natural
+   flow MUST call `Stop-DebugTrace` itself, and the `finally` block then
+   guards against a double-pop via `$Script:DebugTraceStack.Count`.
+
+### A.14.4 Activation order
+
+```powershell
+# After any cleanup and Initialize-RuntimeDirectories.
+Enable-DebugTraceFileOutput -Directory $Script:LogsDir
+Enable-AutoExportOnPhaseFailure -OutputDirectory $Script:DiagDir
+```
+
+Both functions are best-effort: if activation fails (e.g. permission
+denied on the logs directory), the script continues without the
+diagnostic feature and the failure surfaces as a `Write-Warning`. The
+in-memory pre-activation buffer accumulates up to its cap, so a
+successful late activation still flushes whatever trace events occurred
+during startup.
+
+### A.14.5 Output format
+
+The JSONL stream is one JSON object per line, append-only. Event kinds:
+
+| `kind` | Emitted by | Key fields |
+|---|---|---|
+| `frame.open` | `Start-DebugTrace` | `ctx`, `depth`, `phase` |
+| `step` | `Set-DebugStep` | `ctx`, `step`, `detail` |
+| `frame.close` | `Stop-DebugTrace` | `ctx`, `outcome`, `durMs`, `steps`, `phase` |
+| `failure` | `Write-DebugFailureReport` | `ctx`, `step`, `exType`, `msg`, `stack`, `stepHistory[]` |
+| `file.open` / `file.disable` / `file.close` | Lifecycle markers | `procId`, `scriptVer`, `scriptSha` |
+
+The point-in-time export is a single self-contained object with the
+top-level keys `schemaVersion`, `exportedAtUtc`, `hostInfo`, `script`,
+`fileOutput`, `phases[]`, `activeFrames[]`, `completedFrames[]`,
+`events[]` (only when `-IncludeEvents` is passed; otherwise `[]`), and
+`eventCount`.
+
+### A.14.6 Coexistence with A.8 and field-name note
+
+The Debug Trace Facility (A.14) and the per-record error pipeline (A.8)
+log independently, never share files, and never mutate each other's
+state: A.8 records *which input record failed*; A.14 records *which
+named step inside a function was in progress*. When a record failed and
+the in-function step also matters, consult both files - they were
+designed to coexist on a single phase body without overlap.
+
+Field-name note: the export and JSONL lines use `procId`, `hostName`,
+and `hostInfo` rather than `pid` / `host`, because PowerShell 5.1 has
+been observed to treat `host` as the `$Host` automatic variable in
+certain parser contexts.
 
 ---
 
@@ -226,7 +467,7 @@ references before touching Part A.
 
 The script is a single-file PowerShell artefact named
 `Update-WindowsServerIso.ps1` located at
-`scripts/powershell/update-windows-server-iso/`. It targets
+`projects/powershell-update-windows-server-iso/`. It targets
 Windows PowerShell 5.1 as the primary host with PowerShell 7+ as a
 secondary supported host on Linux for static analysis only.
 
@@ -621,7 +862,7 @@ CI Stage 3 (`...__stage3__synthetic.yml`) exercises this mode end to
 end. It MUST NOT upload any artefact containing Microsoft binary
 content; this is enforced by the workflow file's explicit
 `actions/upload-artifact` `path:` enumeration per the repository
-[Artifact Content Minimization](../../../SPEC.md#12-spec-ci-081-artifact-content-minimization)
+[Artifact Content Minimization](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md#12-spec-ci-081-artifact-content-minimization)
 policy.
 
 ---
@@ -1796,7 +2037,7 @@ before the default-on flip.
 ### B.20.1 Directory layout
 
 ```
-scripts/powershell/update-windows-server-iso/
+projects/powershell-update-windows-server-iso/
 ├── Update-WindowsServerIso.ps1     # Main script (§B.19 servicing-dependency facility implemented)
 ├── README.md / README.ja.md         # End-user documentation (bilingual, lock-step)
 ├── SPEC.md                           # This file (English only)
@@ -1902,7 +2143,7 @@ of the upstream HTTP fetch so re-runs can skip unchanged content.
   enforced by PSScriptAnalyzer's `PSUseApprovedVerbs` rule.
 - Naming of CI workflow files. Those follow the repository-wide
   convention documented in the
-  [repository-level SPEC](../../../SPEC.md) §3.1, which uses
+  [repository-level SPEC](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md) §3.1, which uses
   double-underscore (`__`) as a path-segment separator.
 
 ## B.21 Workspace preflight
@@ -2389,7 +2630,7 @@ Two static analysers MUST report zero findings before commit:
 ### C.1.1 psa.py (the project's primary analyser)
 
 ```bash
-cd scripts/powershell/update-windows-server-iso
+cd projects/powershell-update-windows-server-iso
 python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
@@ -2463,7 +2704,7 @@ SPEC §D.23 as a higher-severity class of defect (PowerShell AST
 accepts it silently, visual diff tools miss it). When such a file
 is detected, the fix is to re-emit the entire file via the documented
 patterns in
-[`quality-tools/powershell-static-analyzer/SPEC.md` §4.28a](../../python/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings).
+[`quality-tools/powershell-static-analyzer/SPEC.md` §4.28a](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md#428a-psa7002--lf-only-or-mixed-line-endings).
 
 ## C.3 Configuration files validation
 
@@ -2612,7 +2853,7 @@ Microsoft binary content. The output ISO is created and verified
 on the runner, but only logs are uploaded. This is enforced by the
 workflow's explicit `actions/upload-artifact` `path:` enumeration
 per the repository-level
-[Artifact Content Minimization](../../../SPEC.md#12-spec-ci-081-artifact-content-minimization)
+[Artifact Content Minimization](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md#12-spec-ci-081-artifact-content-minimization)
 policy.
 
 ## C.6 Monthly baseline refresh

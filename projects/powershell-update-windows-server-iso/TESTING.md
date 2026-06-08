@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-08
+---
 # TESTING.md — Verification Procedure and Real-Run Results
 
 This document consolidates everything needed to verify and evaluate
@@ -13,7 +19,7 @@ This document consolidates everything needed to verify and evaluate
 > **Documentation language policy**: This document is maintained in
 > English only per the repository-wide policy. See `README.md` and
 > `README.ja.md` for the bilingual entry-point documentation; for the
-> repository-wide language policy see the root [`README.md`](../../../README.md)
+> repository-wide language policy see the root [`README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md)
 > "Language Policy" section.
 
 ---

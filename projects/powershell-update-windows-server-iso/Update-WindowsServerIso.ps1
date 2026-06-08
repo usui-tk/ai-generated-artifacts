@@ -405,6 +405,7 @@ if ($needsOsVersion -and [string]::IsNullOrEmpty($OsVersion)) {
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
+# >>> CANONICAL unit_id=pwsh.helper.set-utf8pipelineencoding version=1.0.0 hash=16192049ae7363e8 policy=canonical binding=follow-latest >>>
 function Set-Utf8PipelineEncoding {
     <#
     .SYNOPSIS
@@ -427,30 +428,29 @@ function Set-Utf8PipelineEncoding {
     try { [Console]::InputEncoding  = [System.Text.Encoding]::UTF8 } catch { } # psa-disable-line PSA3004 -- best-effort host config; no real console may exist
     try { Set-Variable -Name OutputEncoding -Scope Global -Value ([System.Text.Encoding]::UTF8) -ErrorAction SilentlyContinue } catch { } # psa-disable-line PSA3004 -- intentional best-effort cleanup; no error to surface
 }
+# <<< CANONICAL unit_id=pwsh.helper.set-utf8pipelineencoding <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.set-tlssecurityprotocol version=1.0.0 hash=137ffea3b2034e15 policy=canonical binding=follow-latest >>>
 function Set-TlsSecurityProtocol {
-    <#
-    .SYNOPSIS
-        Enable TLS 1.2 (and weaker fallbacks) for outbound HTTPS calls.
-    .DESCRIPTION
-        Required on some Windows PowerShell 5.1 hosts where the default
-        SecurityProtocol is still Ssl3 + Tls (1.0). The Microsoft Update
-        Catalog (catalog.update.microsoft.com), the Windows Update CDN
-        (catalog.s.download.windowsupdate.com) that serves wsusscn2.cab,
-        and the GitHub release endpoints (api.github.com / github.com)
-        used for the 7-Zip fallback all require TLS 1.2+, so the default
-        on older hosts results in a handshake failure unless this is
-        set. Tls11 and Tls (1.0) are kept in the bitmask as a
-        defensive fallback for very old environments; modern hosts
-        will negotiate Tls12.
-    #>
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = `
-            [Net.SecurityProtocolType]::Tls12 -bor `
-            [Net.SecurityProtocolType]::Tls11 -bor `
-            [Net.SecurityProtocolType]::Tls
-    } catch { } # psa-disable-line PSA3004 -- older PS hosts may lack newer enum values; ignore silently
+    # ====================================================================
+    # Enable TLS for outbound HTTPS calls with best-effort multi-version
+    # fallback. Tls12 is the baseline (required by most modern endpoints
+    # including AMD/Microsoft download servers and Speaker Deck CDN).
+    # Tls13 is added when the running .NET supports it (Framework 4.8+,
+    # PowerShell 7+, WS2022 / WS2025). Tls11 and Tls (1.0) are added as
+    # a defensive fallback for very old environments (WS2016 / WS2019
+    # with stock .NET); modern hosts will negotiate Tls13/Tls12 and the
+    # legacy bits are ignored by the server. Each enum lookup is wrapped
+    # in try/catch because older .NET runtimes raise an enum-value error
+    # for protocols they don't recognise.
+    # ====================================================================
+    $protos = [Net.SecurityProtocolType]::Tls12
+    try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls13 } catch { } # psa-disable-line PSA3004 -- Tls13 enum may not exist on older .NET
+    try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls11 } catch { } # psa-disable-line PSA3004 -- defensive legacy fallback for very old environments
+    try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls   } catch { } # psa-disable-line PSA3004 -- defensive legacy fallback for very old environments
+    [Net.ServicePointManager]::SecurityProtocol = $protos
 }
+# <<< CANONICAL unit_id=pwsh.helper.set-tlssecurityprotocol <<<
 
 # Apply host configuration immediately so every subsequent write goes
 # through the right encoding and every HTTPS call uses TLS 1.2.
@@ -474,6 +474,7 @@ if ([string]::IsNullOrEmpty($Script:ScriptRoot)) {
     $Script:ScriptRoot = (Get-Location).Path
 }
 
+# >>> CANONICAL unit_id=pwsh.helper.resolve-relativetoscript version=1.0.0 hash=a5655b401eeda2b5 policy=canonical binding=follow-latest >>>
 function Resolve-RelativeToScript {
     # Make a path absolute. Relative paths resolve against $Script:ScriptRoot.
     param([Parameter(Mandatory)] [string]$Path)
@@ -482,6 +483,7 @@ function Resolve-RelativeToScript {
     }
     return [System.IO.Path]::GetFullPath($Path)
 }
+# <<< CANONICAL unit_id=pwsh.helper.resolve-relativetoscript <<<
 
 # -----------------
 # Workspace tree resolution
@@ -513,23 +515,31 @@ $Script:LogsDir           = Join-Path $Script:WorkRoot 'logs'
 $Script:DiagDir           = Join-Path $Script:WorkRoot 'diag'
 $Script:MarkersDir        = Join-Path $Script:WorkRoot '.markers'
 
-function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- "Directories" is plural by design; multiple workspace dirs are created in a single call
-    # Idempotently (re-)create the directory tree the script needs.
-    # Called once during startup, after any optional -CleanWorkRoot wipe.
-    # Mount directories are recreated on demand by P07/P08; only the
-    # parent and stable working dirs are touched here.
-    foreach ($d in @(
-        $Script:WorkRoot, $Script:OutputDir,
-        $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir,
-        $Script:PatchesDir, $Script:ManifestsDir,
-        (Join-Path $Script:WorkRoot 'work'),
-        $Script:TempDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir
-    )) {
+# >>> CANONICAL unit_id=pwsh.helper.initialize-runtimedirectories version=1.0.0 hash=30bff32f7d40fca8 policy=canonical binding=follow-latest >>>
+function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical unit_id retained; noun stays plural by design
+    <#
+    .SYNOPSIS
+        Idempotently (re-)create a set of runtime directories.
+    .DESCRIPTION
+        Canonical, parameterized form: the caller passes its own directory
+        list (each consumer's workspace layout is its own concern); the
+        idempotent create loop is the shared canonical logic. Supersedes the
+        former per-tool bodies that hard-coded their own $Script: directory
+        sets (reconciled at P2.2/P2.3, ADR-tracked).
+    .PARAMETER Directory
+        One or more directory paths to ensure exist.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string[]] $Directory
+    )
+    foreach ($d in $Directory) {
         if (-not (Test-Path -LiteralPath $d)) {
             New-Item -ItemType Directory -Path $d -Force | Out-Null
         }
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.initialize-runtimedirectories <<<
 
 # ============================================================
 # Script version identification
@@ -907,13 +917,16 @@ $Script:DebugTraceEventSeq = 0
 
 # --- 1b.2: Internal helpers (not part of public API) ----------
 
+# >>> CANONICAL unit_id=pwsh.helper.debugtrace-nextseq version=1.0.0 hash=40affbda93e0dc92 policy=canonical binding=follow-latest >>>
 function _DebugTrace_NextSeq {
     # Atomic-ish counter. Single-threaded PowerShell so no Interlocked
     # needed; this is just a small helper for readability.
     $Script:DebugTraceEventSeq++
     return $Script:DebugTraceEventSeq
 }
+# <<< CANONICAL unit_id=pwsh.helper.debugtrace-nextseq <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.debugtrace-now version=1.0.0 hash=6cef1239adbe85aa policy=canonical binding=follow-latest >>>
 function _DebugTrace_Now {
     # Return current time as ISO 8601 string with milliseconds and Z
     # suffix. Pre-converted to string so ConvertTo-Json doesn't render
@@ -921,7 +934,9 @@ function _DebugTrace_Now {
     # readable representation regardless of PS version.
     return (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
 }
+# <<< CANONICAL unit_id=pwsh.helper.debugtrace-now <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.debugtrace-writejsonlline version=1.0.0 hash=2a6dab2b78cdec25 policy=canonical binding=follow-latest >>>
 function _DebugTrace_WriteJsonlLine {
     # Append one JSONL line to the debugtrace.jsonl file (or to the
     # pre-activation buffer if file output isn't enabled yet). All
@@ -992,7 +1007,9 @@ function _DebugTrace_WriteJsonlLine {
         }
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.debugtrace-writejsonlline <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.debugtrace-retireframe version=1.0.0 hash=d6ed295961b4416e policy=canonical binding=follow-latest >>>
 function _DebugTrace_RetireFrame {
     # Move a frame from the active stack into the completed list.
     # Handles the history cap. Idempotent: safe to call even if the
@@ -1011,9 +1028,11 @@ function _DebugTrace_RetireFrame {
         $Script:DebugTraceCompletedFrames.RemoveAt(0)
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.debugtrace-retireframe <<<
 
 # --- 1b.3: Public API - trace primitives ----------------------
 
+# >>> CANONICAL unit_id=pwsh.helper.start-debugtrace version=1.0.0 hash=351f92779b47d079 policy=canonical binding=follow-latest >>>
 function Start-DebugTrace {
     <#
     .SYNOPSIS
@@ -1066,7 +1085,9 @@ function Start-DebugTrace {
         phase = $PhaseId
     })
 }
+# <<< CANONICAL unit_id=pwsh.helper.start-debugtrace <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.set-debugstep version=1.0.0 hash=0ff66497b3b281c8 policy=canonical binding=follow-latest >>>
 function Set-DebugStep {
     <#
     .SYNOPSIS
@@ -1107,7 +1128,9 @@ function Set-DebugStep {
         detail = $Detail
     })
 }
+# <<< CANONICAL unit_id=pwsh.helper.set-debugstep <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.stop-debugtrace version=1.0.0 hash=241736610d82b7d1 policy=canonical binding=follow-latest >>>
 function Stop-DebugTrace {
     <#
     .SYNOPSIS
@@ -1149,7 +1172,9 @@ function Stop-DebugTrace {
         phase   = $frame.PhaseId
     })
 }
+# <<< CANONICAL unit_id=pwsh.helper.stop-debugtrace <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.format-debugfailure version=1.0.0 hash=0ed20da6d346d5b8 policy=canonical binding=follow-latest >>>
 function Format-DebugFailure {
     <#
     .SYNOPSIS
@@ -1197,7 +1222,9 @@ function Format-DebugFailure {
         StepHistory      = $stepHistory
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.format-debugfailure <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.write-debugfailurereport version=1.0.0 hash=8c1dda9940c309c1 policy=canonical binding=follow-latest >>>
 function Write-DebugFailureReport {
     <#
     .SYNOPSIS
@@ -1282,9 +1309,11 @@ function Write-DebugFailureReport {
         }
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-debugfailurereport <<<
 
 # --- 1b.4: Public API - file output ---------------------------
 
+# >>> CANONICAL unit_id=pwsh.helper.enable-debugtracefileoutput version=1.0.0 hash=e87c4ef0ecc70f94 policy=canonical binding=follow-latest >>>
 function Enable-DebugTraceFileOutput {
     <#
     .SYNOPSIS
@@ -1383,7 +1412,9 @@ function Enable-DebugTraceFileOutput {
         Write-Warning '   Trace events remain captured in memory and are exportable via Export-DebugTraceJson.'
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.enable-debugtracefileoutput <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.disable-debugtracefileoutput version=1.0.0 hash=0dc4d90f4368280a policy=canonical binding=follow-latest >>>
 function Disable-DebugTraceFileOutput {
     <#
     .SYNOPSIS
@@ -1400,7 +1431,9 @@ function Disable-DebugTraceFileOutput {
     })
     $Script:DebugTraceJsonlEnabled = $false
 }
+# <<< CANONICAL unit_id=pwsh.helper.disable-debugtracefileoutput <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.get-debugtracefileoutputstatus version=1.0.0 hash=e03887fcc4e39fd3 policy=canonical binding=follow-latest >>>
 function Get-DebugTraceFileOutputStatus { # psa-disable-line PSA6003 -- "Status" is singular; analyzer false positive on compound name
     <#
     .SYNOPSIS
@@ -1420,9 +1453,11 @@ function Get-DebugTraceFileOutputStatus { # psa-disable-line PSA6003 -- "Status"
         CompletedFrames = $Script:DebugTraceCompletedFrames.Count
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.get-debugtracefileoutputstatus <<<
 
 # --- 1b.5: Public API - JSON Export ---------------------------
 
+# >>> CANONICAL unit_id=pwsh.helper.enable-autoexportonphasefailure version=1.0.0 hash=81f2415bbc83f281 policy=canonical binding=follow-latest >>>
 function Enable-AutoExportOnPhaseFailure {
     <#
     .SYNOPSIS
@@ -1439,7 +1474,9 @@ function Enable-AutoExportOnPhaseFailure {
     $Script:DebugTraceAutoExportEnabled = $true
     $Script:DebugTraceAutoExportDir     = $OutputDirectory
 }
+# <<< CANONICAL unit_id=pwsh.helper.enable-autoexportonphasefailure <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.export-debugtracejson version=1.0.0 hash=d23eeab86dc4fc3a policy=canonical binding=follow-latest >>>
 function Export-DebugTraceJson {
     <#
     .SYNOPSIS
@@ -1595,7 +1632,12 @@ function Export-DebugTraceJson {
         $hostInfo = [pscustomobject]@{
             psVersion   = $PSVersionTable.PSVersion.ToString()
             psEdition   = $PSVersionTable.PSEdition
-            clrVersion  = $PSVersionTable.CLRVersion.ToString()
+            # Dual-runtime policy (ADR 0012): $PSVersionTable.CLRVersion exists
+            # only on Windows PowerShell 5.1 and is absent on PS 7 (so
+            # .ToString() throws). Use [System.Environment]::Version - the
+            # executing .NET runtime version, present on both runtimes - and keep
+            # the field name 'clrVersion' for export-schema backward compatibility.
+            clrVersion  = [System.Environment]::Version.ToString()
             os          = ([System.Environment]::OSVersion.VersionString)
             culture     = (Get-Culture).Name
             uiCulture   = (Get-UICulture).Name
@@ -1665,11 +1707,13 @@ function Export-DebugTraceJson {
         Stop-DebugTrace
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.export-debugtracejson <<<
 
 # ============================================================
 # Display utilities
 # ============================================================
 
+# >>> CANONICAL unit_id=pwsh.helper.format-elapsed version=1.0.0 hash=b63f12c32ee28520 policy=canonical binding=follow-latest >>>
 function Format-Elapsed {
     # Render a TimeSpan in a compact human-readable form.
     # Examples: '0.45s', '12.3s', '5m12.4s', '1h05m12s'
@@ -1688,14 +1732,18 @@ function Format-Elapsed {
         return ('{0}h{1:D2}m{2:D2}s' -f $h, $m, $s)
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.format-elapsed <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.get-phaseelapsedtag version=1.0.0 hash=79f7a70e60311a27 policy=canonical binding=follow-latest >>>
 function Get-PhaseElapsedTag {
     # Returns elapsed-since-current-phase-start as '[+X.XXs]' or empty.
     if ($null -eq $Script:CurrentPhaseStart) { return '' }
     $span = (Get-Date) - $Script:CurrentPhaseStart
     return ('[+{0}]' -f (Format-Elapsed $span))
 }
+# <<< CANONICAL unit_id=pwsh.helper.get-phaseelapsedtag <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.logline version=1.0.0 hash=de5d6e6301d19d87 policy=canonical binding=follow-latest >>>
 function _LogLine {
     # Internal: emits '[HH:mm:ss] [+X.XXs]   [marker] message'
     param([string]$Marker, [string]$Msg, [string]$Color)
@@ -1707,6 +1755,7 @@ function _LogLine {
         Write-Host ("[{0}] {1,-12} {2} {3}" -f $ts, '', $Marker, $Msg) -ForegroundColor $Color
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.logline <<<
 
 # Public log helpers. Names are kept compatible with the prior code so
 # all existing callsites continue to work; only the rendering changed.
@@ -1721,11 +1770,22 @@ function _LogLine {
 # Canonical names (no duplicates, no trailing-digit suffixes). None of
 # these collide with built-in cmdlets - PowerShell has Write-Warning
 # and Write-Information but not Write-Caution / Write-Skip / Write-Step.
+# >>> CANONICAL unit_id=pwsh.helper.write-step version=1.0.0 hash=257272636c6d4122 policy=canonical binding=follow-latest >>>
 function Write-Step  { param($Msg) _LogLine '[*]' $Msg 'Cyan'     }
+# <<< CANONICAL unit_id=pwsh.helper.write-step <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-ok version=1.0.0 hash=383749ef0ee509b4 policy=canonical binding=follow-latest >>>
 function Write-Ok    { param($Msg) _LogLine '[+]' $Msg 'Green'    }
+# <<< CANONICAL unit_id=pwsh.helper.write-ok <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-caution version=1.0.0 hash=29f499cc2213fcc6 policy=canonical binding=follow-latest >>>
 function Write-Caution  { param($Msg) _LogLine '[!]' $Msg 'Yellow'   }
+# <<< CANONICAL unit_id=pwsh.helper.write-caution <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-fail version=1.0.0 hash=13071c0f83f38048 policy=canonical binding=follow-latest >>>
 function Write-Fail  { param($Msg) _LogLine '[X]' $Msg 'Red'      }
+# <<< CANONICAL unit_id=pwsh.helper.write-fail <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-skip version=1.0.0 hash=1fc992418d41baad policy=canonical binding=follow-latest >>>
 function Write-Skip  { param($Msg) _LogLine '[~]' $Msg 'DarkGray' }
+# <<< CANONICAL unit_id=pwsh.helper.write-skip <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-detail version=1.0.0 hash=7fa6224e26175e15 policy=canonical binding=follow-latest >>>
 function Write-Detail {
     # ====================================================================
     # Continuation / detail line for a preceding marker line, or a row
@@ -1759,7 +1819,9 @@ function Write-Detail {
         Write-Host ("    {0}" -f $Msg) -ForegroundColor $Color
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-detail <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.write-subsection version=1.0.0 hash=524c6903ce0d76ea policy=canonical binding=follow-latest >>>
 function Write-SubSection {
     # Lightweight section break inside a phase (e.g. [Step A]/[Step B]).
     # Prints with a leading blank line and a horizontal rule.
@@ -1767,7 +1829,9 @@ function Write-SubSection {
     Write-Host ''
     Write-Host (' -- ' + $Title + ' ' + ('-' * [Math]::Max(1, 60 - $Title.Length))) -ForegroundColor Gray
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-subsection <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.write-phaseheader version=1.0.0 hash=a002b1883e7d48ba policy=canonical binding=follow-latest >>>
 function Write-PhaseHeader {
     # Prints a magenta banner that opens a phase. Records phase start
     # time so subsequent log lines can show '[+elapsed]'.
@@ -1790,22 +1854,31 @@ function Write-PhaseHeader {
     Write-Host (' script: {0}' -f $Script:ScriptShortTag) -ForegroundColor DarkGray
     Write-Host $line -ForegroundColor Magenta
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-phaseheader <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.write-phasefooter version=1.0.0 hash=762ec88efd33dc33 policy=canonical binding=follow-latest >>>
 function Write-PhaseFooter {
     # Closes a phase started by Write-PhaseHeader. Records the elapsed
-    # duration in $Script:PhaseTimings (used by Show-PhaseSummary).
+    # duration in $Script:PhaseTimings (used by run-summary helpers).
     #
     # Idempotent: a second call with the same Id is ignored, so wrapping
     # try/finally blocks do not double-count.
+    #
+    # Status values:
+    #   done    - phase completed successfully
+    #   cached  - phase was a no-op because the target state was already met
+    #   skipped - phase was intentionally skipped (e.g. -OnlyPhases filter)
+    #   failed  - phase threw an exception
     param(
         [Parameter(Mandatory)] [string]$Id,
-        [Parameter(Mandatory)] [ValidateSet('done','skipped','failed')] [string]$Status
+        [Parameter(Mandatory)] [ValidateSet('done','cached','skipped','failed')] [string]$Status
     )
     foreach ($t in $Script:PhaseTimings) {
         if ($t.Id -eq $Id) { return }
     }
     $color = switch ($Status) {
         'done'    { 'Green' }
+        'cached'  { 'DarkGray' }
         'skipped' { 'DarkGray' }
         'failed'  { 'Red' }
     }
@@ -1821,10 +1894,14 @@ function Write-PhaseFooter {
 
     Write-Host (' PHASE {0,-4} -> {1,-7}  elapsed: {2}' -f $Id, $Status.ToUpper(), $elapsedStr) -ForegroundColor $color
 
+    # Reset so any stray Write-Step/Ok between phases doesn't show a
+    # misleading [+X.XXs] tag inherited from the previous phase.
     $Script:CurrentPhaseStart = $null
     $Script:CurrentPhaseId    = $null
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-phasefooter <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.show-phasesummary version=1.0.0 hash=22ed90223f442cc8 policy=canonical binding=follow-latest >>>
 function Show-PhaseSummary {
     <#
     .SYNOPSIS
@@ -1885,11 +1962,13 @@ function Show-PhaseSummary {
     Write-Host ('  Total elapsed: {0}' -f (Format-Elapsed $totalElapsed)) -ForegroundColor Cyan
     Write-Host ('=' * 72) -ForegroundColor Cyan
 }
+# <<< CANONICAL unit_id=pwsh.helper.show-phasesummary <<<
 
 # ============================================================
 # Cleanup helpers (used by -Clean / -CleanOnly)
 # ============================================================
 
+# >>> CANONICAL unit_id=pwsh.helper.test-dangerouspath version=1.0.0 hash=066df8896cbf4d25 policy=canonical binding=follow-latest >>>
 function Test-DangerousPath {
     # Returns $true if removing this path would be dangerous.
     # Used by Invoke-CleanupDirectories to refuse obviously wrong targets:
@@ -1919,7 +1998,9 @@ function Test-DangerousPath {
     }
     return $false
 }
+# <<< CANONICAL unit_id=pwsh.helper.test-dangerouspath <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.invoke-cleanupdirectories version=1.0.0 hash=54e92fb426d23d2b policy=canonical binding=follow-latest >>>
 function Invoke-CleanupDirectories { # psa-disable-line PSA6003 -- "Directories" is plural by design; takes multiple directory args
     # Wipe $OutputDir and $WorkDir trees. Idempotent (missing dirs are
     # silently skipped). Throws if either path looks dangerous.
@@ -1965,6 +2046,7 @@ function Invoke-CleanupDirectories { # psa-disable-line PSA6003 -- "Directories"
     }
     Write-Ok "cleanup completed"
 }
+# <<< CANONICAL unit_id=pwsh.helper.invoke-cleanupdirectories <<<
 # ============================================================
 # Error handling helpers
 # ============================================================
@@ -1986,6 +2068,7 @@ function Invoke-CleanupDirectories { # psa-disable-line PSA6003 -- "Directories"
 # Failures inside Add-ErrorJsonlEntry are deliberately swallowed so the
 # main pipeline cannot be derailed by a logging glitch.
 
+# >>> CANONICAL unit_id=pwsh.helper.add-errorjsonlentry version=1.0.0 hash=cecbc2af5da9ce31 policy=canonical binding=follow-latest >>>
 function Add-ErrorJsonlEntry {
     <#
     .SYNOPSIS
@@ -2031,11 +2114,13 @@ function Add-ErrorJsonlEntry {
         $null = $_
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.add-errorjsonlentry <<<
 
 # ============================================================
 # Common helpers
 # ============================================================
 
+# >>> CANONICAL unit_id=pwsh.helper.wait-withjitter version=1.0.0 hash=15aba6cbcbfa9966 policy=canonical binding=follow-latest >>>
 function Wait-WithJitter {
     param(
         [double]$BaseSeconds,
@@ -2045,6 +2130,7 @@ function Wait-WithJitter {
     $actualSleep = [Math]::Max(0.1, $BaseSeconds + $jitter)
     Start-Sleep -Milliseconds ([int]($actualSleep * 1000))
 }
+# <<< CANONICAL unit_id=pwsh.helper.wait-withjitter <<<
 
 function Format-MegabyteCount {
     <#
@@ -2062,6 +2148,7 @@ function Format-MegabyteCount {
     return ('{0:N1} MB' -f ($Bytes / 1MB))
 }
 
+# >>> CANONICAL unit_id=pwsh.helper.invoke-downloadwithprogress version=1.0.0 hash=3b9d3842004a91c2 policy=canonical binding=follow-latest >>>
 function Invoke-DownloadWithProgress {
     <#
     .SYNOPSIS
@@ -2310,7 +2397,9 @@ function Invoke-DownloadWithProgress {
 
     Write-Ok ('Downloaded: {0:N1} MB in {1} ({2} MB/s avg)' -f $finalMB, $totalStr, $avgSpeed)
 }
+# <<< CANONICAL unit_id=pwsh.helper.invoke-downloadwithprogress <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.invoke-webrequestwithretry version=1.0.0 hash=959c46975eb04b15 policy=canonical binding=follow-latest >>>
 function Invoke-WebRequestWithRetry {
     <#
     .SYNOPSIS
@@ -2428,11 +2517,13 @@ function Invoke-WebRequestWithRetry {
     }
     throw $lastError
 }
+# <<< CANONICAL unit_id=pwsh.helper.invoke-webrequestwithretry <<<
 
 # ============================================================
 # Phase 1: Environment evaluation
 # ============================================================
 
+# >>> CANONICAL unit_id=pwsh.helper.show-powershellenvironment version=1.0.0 hash=c7b2d656d36133b9 policy=canonical binding=follow-latest >>>
 function Show-PowerShellEnvironment {
     <#
     .SYNOPSIS
@@ -2469,6 +2560,9 @@ function Show-PowerShellEnvironment {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSAvoidUsingWMICmdlet', '',
         Justification = 'Intentional Get-WmiObject fallback path. CIM is the primary path; WMI is the secondary path used only when CIM is constrained (some Server Core / container images). PS 5.1 supports both; PS 7+ exposes Get-WmiObject only when the WMI compatibility module is loaded, which is fine because the script declares PS 5.1+ as its baseline.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSUseCompatibleCommands', '',
+        Justification = 'platform_scope=windows-enhanced (ADR 0013). The Get-CimInstance / Get-WmiObject OS-info path is intentionally Windows-specific: on non-Windows it is guarded by try/catch and degrades gracefully to "(CIM/WMI unavailable)". The function itself is cross-platform and runs everywhere; only this OS-detail section is Windows-enhanced. The compatibility gate flags these Windows-only commands on the PS-7-Linux profile; that is expected and accepted for a windows-enhanced unit, not a defect.')]
     param()
 
     # ---- (1) Engine + process ----
@@ -2480,13 +2574,29 @@ function Show-PowerShellEnvironment {
     }
     Write-Host ('    PowerShell Version  : {0}' -f $pv.PSVersion)
     Write-Host ('    PowerShell Edition  : {0,-25} ({1})' -f $pv.PSEdition, $editionDesc)
-    if ($pv.CLRVersion) {
-        Write-Host ('    CLR / .NET          : {0}' -f $pv.CLRVersion)
-    } else {
-        Write-Host  '    CLR / .NET          : (CLRVersion not exposed; PS Core is .NET 5+ via System.Environment.Version)'
-    }
-    if ($pv.BuildVersion) {
+    # CLR / .NET runtime version. Dual-runtime policy (ADR 0012): report the
+    # executing .NET runtime version on BOTH PS 5.1 and PS 7.x, never degrade.
+    # $PSVersionTable.CLRVersion exists only on Windows PowerShell 5.1 (and the
+    # bare property access throws under StrictMode on PS 7 because the key is
+    # absent), so use [System.Environment]::Version - same meaning (a [Version]
+    # value), present on EVERY supported runtime (.NET 1.1+).
+    # NOTE: RuntimeInformation::FrameworkDescription was considered as a
+    # human-readable annotation but REMOVED - it requires .NET Framework 4.7.1+
+    # and would throw on older PS 5.1 hosts (.NET 4.5-4.7.0), violating the very
+    # dual-runtime policy it was meant to serve (the compatibility static-analysis
+    # gate surfaced this). Environment.Version alone is the safe, meaning-
+    # preserving choice.
+    $runtimeVersion = [System.Environment]::Version
+    Write-Host ('    CLR / .NET          : {0}' -f $runtimeVersion)
+    # Engine build identity. Dual-runtime policy (ADR 0012): BuildVersion is a
+    # Windows PowerShell 5.1-only key (absent on PS 7, so the bare access throws
+    # under StrictMode). $PSVersionTable is a PSVersionHashTable, so the
+    # StrictMode-safe existence test is .ContainsKey(). Fall back to GitCommitId,
+    # the PS 7 engine-build identity, so both runtimes report an engine build.
+    if ($pv.ContainsKey('BuildVersion') -and $pv.BuildVersion) {
         Write-Host ('    Engine Build        : {0}' -f $pv.BuildVersion)
+    } elseif ($pv.ContainsKey('GitCommitId') -and $pv.GitCommitId) {
+        Write-Host ('    Engine Build        : {0}' -f $pv.GitCommitId)
     }
 
     $procBitness = if ([Environment]::Is64BitProcess) { '64-bit process' } else { '32-bit process' }
@@ -2597,7 +2707,9 @@ function Show-PowerShellEnvironment {
         Write-Host  '      [!] OS             WARN  (CIM/WMI both failed; could not determine OS build)' -ForegroundColor Yellow
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.show-powershellenvironment <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.assert-powershellcompatibility version=1.0.0 hash=cbe202e59516c121 policy=canonical binding=follow-latest >>>
 function Assert-PowerShellCompatibility {
     <#
     .SYNOPSIS
@@ -2647,6 +2759,7 @@ validated under 64-bit PowerShell.
 '@
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.assert-powershellcompatibility <<<
 
 function Assert-WorkspacePreflight {
     <#
@@ -6909,6 +7022,7 @@ function Get-OfflineSyncPackageIfNeeded {
 # research/windows-servicing/windows-server-iso-update-mechanics.{en,ja}.md
 # section 7.2 for the failure-mode evidence.
 
+# >>> CANONICAL unit_id=pwsh.helper.get-sevenzippath version=1.0.0 hash=9fa5a18e04c0f6cb policy=canonical binding=follow-latest >>>
 function Get-SevenZipPath {
     foreach ($p in @("${env:ProgramFiles}\7-Zip\7z.exe","${env:ProgramFiles(x86)}\7-Zip\7z.exe")) {
         if (Test-Path $p) { return $p }
@@ -6924,7 +7038,9 @@ function Get-SevenZipPath {
     }
     return $null
 }
+# <<< CANONICAL unit_id=pwsh.helper.get-sevenzippath <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.get-latestsevenzipurl version=1.0.0 hash=df73d0c52090c978 policy=canonical binding=follow-latest >>>
 function Get-LatestSevenZipUrl {
     # Tier 1: 7-zip.org
     try {
@@ -6958,7 +7074,9 @@ function Get-LatestSevenZipUrl {
         Source='pinned fallback'
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.get-latestsevenzipurl <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.install-sevenzipfallback version=1.0.0 hash=60007e7fce5e614e policy=canonical binding=follow-latest >>>
 function Install-SevenZipFallback {
     param([string]$DownloadDir)
     $info = Get-LatestSevenZipUrl
@@ -6972,6 +7090,7 @@ function Install-SevenZipFallback {
     $proc = Start-Process msiexec.exe -ArgumentList @('/i',"`"$msi`"",'/qn','/norestart') -Wait -PassThru # psa-disable-line PSA3001 -- Start-Process -ArgumentList is the canonical pattern for invoking msiexec with explicit args
     if ($proc.ExitCode -ne 0) { throw "7-Zip MSI install failed (exit $($proc.ExitCode))" }
 }
+# <<< CANONICAL unit_id=pwsh.helper.install-sevenzipfallback <<<
 
 # ============================================================
 # JSON Canonical Serialization helpers
@@ -7012,6 +7131,7 @@ function Install-SevenZipFallback {
 #   4. ": " key/value separator   9. Null values emitted as "key": null
 #   5. ",\n<indent>" array sep    10. Depth is caller-controlled
 
+# >>> CANONICAL unit_id=pwsh.helper.convertto-canonicaljson version=1.0.0 hash=efedb9ecf58ea1b3 policy=canonical binding=follow-latest >>>
 function ConvertTo-CanonicalJson {
     <#
     .SYNOPSIS
@@ -7060,7 +7180,9 @@ function ConvertTo-CanonicalJson {
     if (-not $NoTrailingNewline) { $json += "`n" }
     return $json
 }
+# <<< CANONICAL unit_id=pwsh.helper.convertto-canonicaljson <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writevalue version=1.0.0 hash=9e36066de2680f5f policy=canonical binding=follow-latest >>>
 function _CanonicalJson_WriteValue {
     param($Value, [int]$Depth, [int]$MaxDepth, [string]$IndentUnit, [System.Text.StringBuilder]$Sb)
 
@@ -7125,7 +7247,9 @@ function _CanonicalJson_WriteValue {
     $pairs = foreach ($p in $props) { [pscustomobject]@{ K=$p.Name; V=$p.Value } }
     _CanonicalJson_WriteObject -Pairs @($pairs) -Depth $Depth -MaxDepth $MaxDepth -IndentUnit $IndentUnit -Sb $Sb
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-writevalue <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writeobject version=1.0.0 hash=5e9b78c9269b68cb policy=canonical binding=follow-latest >>>
 function _CanonicalJson_WriteObject {
     param([object[]]$Pairs, [int]$Depth, [int]$MaxDepth, [string]$IndentUnit, [System.Text.StringBuilder]$Sb)
     if (($Depth + 1) -gt $MaxDepth) { throw "Object nests deeper than allowed depth ($MaxDepth); reached depth $($Depth + 1)." }
@@ -7142,7 +7266,9 @@ function _CanonicalJson_WriteObject {
     }
     [void]$Sb.Append($closeIndent); [void]$Sb.Append('}')
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-writeobject <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writearray version=1.0.0 hash=7592ea486c2a8c1c policy=canonical binding=follow-latest >>>
 function _CanonicalJson_WriteArray {
     param([object[]]$Items, [int]$Depth, [int]$MaxDepth, [string]$IndentUnit, [System.Text.StringBuilder]$Sb)
     if (($Depth + 1) -gt $MaxDepth) { throw "Object nests deeper than allowed depth ($MaxDepth); reached depth $($Depth + 1)." }
@@ -7157,7 +7283,9 @@ function _CanonicalJson_WriteArray {
     }
     [void]$Sb.Append($closeIndent); [void]$Sb.Append(']')
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-writearray <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writestring version=1.0.0 hash=02854a7bf4fb707d policy=canonical binding=follow-latest >>>
 function _CanonicalJson_WriteString {
     param([string]$S, [System.Text.StringBuilder]$Sb)
     [void]$Sb.Append('"')
@@ -7179,7 +7307,9 @@ function _CanonicalJson_WriteString {
     }
     [void]$Sb.Append('"')
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-writestring <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-writenumber version=1.0.0 hash=fd7410b6e533b4cd policy=canonical binding=follow-latest >>>
 function _CanonicalJson_WriteNumber {
     param($N, [System.Text.StringBuilder]$Sb)
     $ic = [System.Globalization.CultureInfo]::InvariantCulture
@@ -7193,7 +7323,9 @@ function _CanonicalJson_WriteNumber {
     $s = [System.Text.RegularExpressions.Regex]::Replace($s, '(?<=\d)E(?=[+\-]?\d)', 'e')
     [void]$Sb.Append($s)
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-writenumber <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.save-canonicaljsonfile version=1.0.0 hash=8cac0388cc0b5da0 policy=canonical binding=follow-latest >>>
 function Save-CanonicalJsonFile {
     <#
     .SYNOPSIS
@@ -7230,7 +7362,9 @@ function Save-CanonicalJsonFile {
     [System.IO.File]::WriteAllBytes($tmpPath, $utf8NoBom.GetBytes($json))
     Move-Item -LiteralPath $tmpPath -Destination $Path -Force
 }
+# <<< CANONICAL unit_id=pwsh.helper.save-canonicaljsonfile <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.convertfrom-canonicaljson version=1.0.0 hash=5a1072331d093c23 policy=canonical binding=follow-latest >>>
 function ConvertFrom-CanonicalJson {
     <#
     .SYNOPSIS
@@ -7262,7 +7396,9 @@ function ConvertFrom-CanonicalJson {
         return $result
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.convertfrom-canonicaljson <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-skipws version=1.0.0 hash=fb17dca5e9c37829 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_SkipWs {
     param($State)
     $s = $State.s
@@ -7272,7 +7408,9 @@ function _CanonicalJson_SkipWs {
         else { break }
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-skipws <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsevalue version=1.0.0 hash=d4708a17197eae1f policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseValue {
     param($State)
     if ($State.i -ge $State.n) { throw "Unexpected end of input." }
@@ -7285,7 +7423,9 @@ function _CanonicalJson_ParseValue {
     if ($c -eq 'n') { return _CanonicalJson_ParseNull $State }
     throw "Unexpected character '$c' at position $($State.i)."
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-parsevalue <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parseobject version=1.0.0 hash=abf2dd1e42a261a2 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseObject {
     param($State)
     $obj = [ordered]@{}
@@ -7310,7 +7450,9 @@ function _CanonicalJson_ParseObject {
     }
     return [pscustomobject]$obj
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-parseobject <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsearray version=1.0.0 hash=07283971f638c8b0 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseArray {
     param($State)
     $arr = [System.Collections.Generic.List[object]]::new()
@@ -7329,7 +7471,9 @@ function _CanonicalJson_ParseArray {
     }
     return ,$arr.ToArray()
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-parsearray <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsestring version=1.0.0 hash=c2adebf7aec2f1ee policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseString {
     param($State)
     $sb = [System.Text.StringBuilder]::new()
@@ -7363,7 +7507,9 @@ function _CanonicalJson_ParseString {
     }
     throw "Unterminated string."
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-parsestring <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsenumber version=1.0.0 hash=0624198cd56a3e41 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseNumber {
     param($State)
     $start = $State.i
@@ -7383,7 +7529,9 @@ function _CanonicalJson_ParseNumber {
     }
     return [double]::Parse($numStr, [System.Globalization.NumberStyles]::Float, $ic)
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-parsenumber <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsebool version=1.0.0 hash=13b060dca910d5f7 policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseBool {
     param($State)
     $s = $State.s
@@ -7391,13 +7539,16 @@ function _CanonicalJson_ParseBool {
     if ($State.i + 5 -le $State.n -and $s.Substring($State.i,5) -eq 'false') { $State.i += 5; return $false }
     throw "Invalid literal at position $($State.i)."
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-parsebool <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.canonicaljson-parsenull version=1.0.0 hash=b1c867999c4d74bb policy=canonical binding=follow-latest >>>
 function _CanonicalJson_ParseNull {
     param($State)
     $s = $State.s
     if ($State.i + 4 -le $State.n -and $s.Substring($State.i,4) -eq 'null') { $State.i += 4; return $null }
     throw "Invalid literal at position $($State.i)."
 }
+# <<< CANONICAL unit_id=pwsh.helper.canonicaljson-parsenull <<<
 
 # ============================================================
 # wsusscn2.cab parser pipeline (Phase 2b1)
@@ -8092,7 +8243,6 @@ function Test-PatchServicingReadinessFromGraph {
         $kbs = [System.Collections.Generic.List[string]]::new()
         if ($u.PSObject.Properties['kbIds'] -and $u.kbIds) {
             foreach ($k in @($u.kbIds)) {
-                $ks = ([string]$k).TrimStart('kK','bB')  # tolerate 'KB123'/'123'
                 $digits = ([regex]::Match([string]$k, '\d+')).Value
                 if ($digits) { $kbs.Add($digits) }
             }
@@ -15375,7 +15525,7 @@ if ($Script:CleanWorkRoot -and (Test-Path -LiteralPath $Script:WorkRoot)) {
     Remove-Item -LiteralPath $Script:WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Initialize-RuntimeDirectories
+Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:OutputDir, $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir, $Script:PatchesDir, $Script:ManifestsDir, (Join-Path $Script:WorkRoot 'work'), $Script:TempDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir)
 
 # Activate debug trace JSONL file output
 try {

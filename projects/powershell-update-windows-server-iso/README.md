@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-08
+---
 # Update-WindowsServerIso.ps1
 
 | Stage | Status |
@@ -18,7 +24,7 @@ Windows PowerShell 5.1 (also runs on PowerShell 7+).
 
 This script is part of the
 [`usui-tk/ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts)
-repository, under `scripts/powershell/update-windows-server-iso/`.
+repository, under `projects/powershell-update-windows-server-iso/`.
 
 ## Why this script exists
 
@@ -66,8 +72,8 @@ solve well on its own:
 - For **verification procedures and recorded results**, see
   [`TESTING.md`](./TESTING.md).
 - For **per-revision change history**, see [`CHANGELOG.md`](./CHANGELOG.md).
-- For the **repository-wide LLM-agent operating guide** (governance hierarchy, ground-truth extraction, Doc-Touching Matrix, Part A inheritance rule, anti-patterns), see [`AGENTS.md`](../../../AGENTS.md) at the repository root.
-- The **repository-wide** Language Policy, File Format Policy, Disclaimer, and Contribution rules live at the [root `README.md`](../../../README.md), [`CONTRIBUTING.md`](../../../CONTRIBUTING.md), and [`SECURITY.md`](../../../SECURITY.md).
+- For the **repository-wide LLM-agent operating guide** (governance hierarchy, ground-truth extraction, Doc-Touching Matrix, Part A inheritance rule, anti-patterns), see [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) at the repository root.
+- The **repository-wide** Language Policy, File Format Policy, Disclaimer, and Contribution rules live at the [root `README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md), [`CONTRIBUTING.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/CONTRIBUTING.md), and [`SECURITY.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SECURITY.md).
 
 ## ⚠️ Disclaimer
 
@@ -102,14 +108,14 @@ By running this script, you acknowledge that:
 
 For the full disclaimer and self-responsibility terms that apply to
 all artifacts in this repository, see the
-[root README](../../../README.md)
-([Japanese](../../../README.ja.md)).
+[root README](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md)
+([Japanese](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.ja.md)).
 
 ## License
 
 This project is part of the `usui-tk/ai-generated-artifacts` repository,
 which is licensed under the **MIT License**. See the
-[`LICENSE`](../../../LICENSE) file at the repository root for the full
+[`LICENSE`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/LICENSE) file at the repository root for the full
 license text.
 
 In short: you are free to use, modify, and distribute this software for
@@ -122,7 +128,7 @@ own licences and are not redistributed by this project.
 ## Folder layout
 
 ```
-scripts/powershell/update-windows-server-iso/
+projects/powershell-update-windows-server-iso/
 ├── Update-WindowsServerIso.ps1     # Main script
 ├── README.md / README.ja.md         # End-user documentation (you are reading these)
 ├── SPEC.md (English only)            # Developer / LLM specification
@@ -143,7 +149,7 @@ scripts/powershell/update-windows-server-iso/
 
 The PowerShell static analyzer (`psa.py`) used to verify this script
 lives at the repository-wide canonical location:
-[`quality-tools/powershell-static-analyzer/`](../../python/powershell-static-analyzer/).
+[`quality-tools/powershell-static-analyzer/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/quality-tools/powershell-static-analyzer/).
 
 ## Quick start
 
@@ -570,10 +576,10 @@ Four GitHub Actions workflows verify and maintain this script:
 | `...__stage4__monthly-refresh.yml` | `-Action RefreshAllBaselines`; open auto-PR if `data/config-Server*.json` changed | cron `0 2 15 * *` (monthly), manual |
 
 The workflows live at
-[`.github/workflows/`](../../../.github/workflows/). Per-workflow
+[`.github/workflows/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/.github/workflows/). Per-workflow
 change history lives in this project's [`CHANGELOG.md`](./CHANGELOG.md)
 (per the repository policy documented in the root
-[`SPEC.md`](../../../SPEC.md) §9).
+[`SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md) §9).
 
 Stage 4 supports `workflow_dispatch` with four inputs (`mode`,
 `onlyOs`, `onlyLanguage`, `dryRun`) so maintainers can trigger an
