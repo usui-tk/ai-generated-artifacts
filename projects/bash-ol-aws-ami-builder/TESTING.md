@@ -76,10 +76,11 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **170 passed, 1 skipped, 0 failed** (B-T1 = 24,
-B-T2 = 19, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
-hook-timing = 8, log-format = 12, ena-uek-detect = 9, ena-reporting = 15; plus
-B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 171/0
+Current fixed pass count: **189 passed, 1 skipped, 0 failed** (B-T1 = 25,
+B-T2 = 20, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
+hook-timing = 8, log-format = 12, ena-uek-detect = 9, ena-reporting = 15,
+build-visibility = 17; plus
+B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 190/0
 with it). The host-runnable tiers
 (L0-L2) are complete; B-T7/B-T8 (L3/L4) remain deferred (builder host + AWS). A
 tier SKIPs cleanly when its optional dependency is absent.
@@ -129,6 +130,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (log format) | L1 | implemented | `tests/t9_logformat.sh`: every timestamped channel emits **date-first** (`YYYY-MM-DD HH:MM:SS` leads, `[SEVERITY]`/source tag follows; SPEC E.1); colour-stripped match across info/warn/error/build/debug/external + a negative guard against the old tag-first order; 12 asserts |
 | B-T (ena uek-detect) | L1/L2 | implemented | `tests/t10_enaukedetect.sh`: the OL6 ENA self-build retargets the amzn-drivers Makefile UEK detection (`IS_UEK`/`ENA_KERNEL_SUBVERSION_*`) from `uname -r` to `BUILD_KERNEL` (the DKMS target), so the `kcompat.h` `page_ref_count` guard evaluates against the build target rather than the libguestfs appliance kernel; structural (present, OL6-gated, idempotency-guarded, pipe-anchored) + behavioural fixture transform; 9 asserts. Compile/boot proof is B-T7/B-T8 |
 | B-T (ena reporting) | L1/L2 | implemented | `tests/t11_enareporting.sh`: the Phase 6 readiness report prints aligned, fixed-width `ENA Driver (Kernel in-box)` / `ENA Driver (Self-Build)` lines with an explicit in-tree no-version fallback; `install-ena-driver.sh` logs the in-box ENA identity before the self-build; the auto AMI name/description gain a self-built-ENA marker and the final summary prints the description + an ENA driver line; the `[OLAWS-ENA01]` hook log and the marker read the pin from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` default (no hardcoded `OL6 2.5.0` drift). Structural presence checks grep files directly (avoiding a `printf\|grep -q` SIGPIPE race under `pipefail` on the large wrapper) + behavioural pin-reader fixture; 15 asserts. AMI naming/boot proof is B-T7/B-T8 |
+| B-T (build visibility) | L1/L2 | implemented | `tests/t12_buildvisibility.sh`: OL7 build-log visibility (handoff B.1.5 feedback 4). `install-ena-driver.sh` emits greppable `[ena-driver][stage]` breadcrumbs at the phase boundaries (esp. dkms add/build/install) and `record_make_log()` preserves the DKMS make.log to `/var/log/ol-aws-ami-builder-ena-make.log` on a successful build (guest output is swallowed by virt-customize on success); the wrapper records the latest LIVE orchestrator line to `BUILD_STAGE_FILE` in `log_external` and the Phase-5 heartbeat shows it as `stage: …` (assembled into one atomic `log_progress` write); `HEARTBEAT_INTERVAL_SEC` default is 10s. Structural greps (file-direct) + a behavioural `log_external`→stage-file fixture; 17 asserts. Real OL7 build/boot proof is B-T7/B-T8 |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
 

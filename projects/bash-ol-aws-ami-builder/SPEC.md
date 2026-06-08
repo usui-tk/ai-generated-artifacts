@@ -443,12 +443,21 @@ configures the *generated image's* console (EC2 Serial Console). The
 wrapper-level `BUILD_TIMEOUT_MIN` (minutes, default `120` — a wrapper key,
 *not* passed through to upstream) is an outer safety bound on the Phase-5 build
 and reaps the transient build VM if it expires. A second wrapper key,
-`HEARTBEAT_INTERVAL_SEC` (seconds, default `20`; `0` disables), logs a Phase-5
+`HEARTBEAT_INTERVAL_SEC` (seconds, default `10`; `0` disables), logs a Phase-5
 progress line every interval — elapsed time plus the build disk's *actual*
 on-disk growth (`du`, i.e. real clusters written, not the preallocated apparent
-size) and best-effort domain state — so a headless build's liveness is visible
-regardless of anaconda generation (OL6 streams to the serial console; OL8+ runs
-anaconda in tmux and is near-silent there). The default is short because this
+size), best-effort domain state, and a `stage:` field — so a headless build's
+liveness is visible regardless of anaconda generation (OL6 streams to the serial
+console; OL8+ runs anaconda in tmux and is near-silent there). The `stage:` field
+is the latest *live* `build-image.sh` orchestrator line, recorded by `log_external`
+to a `BUILD_STAGE_FILE` (`${WORKSPACE}/.build-stage`, reset at Phase-5 start and
+removed after the build) and read by the heartbeat; during a long, quiet in-guest
+ENA compile it holds the last orchestrator line (e.g. the customize step), so an
+elapsed-time-growing / disk-`+0MB` heartbeat reads as "alive but quiet", not a
+hang. (The in-guest `install-ena-driver.sh` output — its `[ena-driver][stage]`
+breadcrumbs — is *not* a live signal: virt-customize swallows guest provisioning
+output unless the script fails; those breadcrumbs surface on the failure path and
+in the make.log preserved at `/var/log/ol-aws-ami-builder-ena-make.log`.) The default is short because this
 script is usually run interactively; it does not affect completion detection.
 
 A third wrapper key, `NITRO_PRECHECK` (`enforce` | `warn` | `off`, default

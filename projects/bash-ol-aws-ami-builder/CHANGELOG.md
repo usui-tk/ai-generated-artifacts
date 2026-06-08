@@ -19,7 +19,35 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added
+
+- **OL7 build-log visibility (feedback ④).** A long, near-silent in-guest ENA
+  DKMS compile made OL7 builds look stalled. The wrapper now surfaces live
+  progress and preserves a build record:
+  - *Live heartbeat stage (B):* `log_external` records the latest `build-image.sh`
+    orchestrator line to a `BUILD_STAGE_FILE` (`${WORKSPACE}/.build-stage`), and
+    the Phase-5 heartbeat appends a `stage: …` field. During the quiet compile the
+    heartbeat shows the customize step + growing elapsed time + disk `+0MB`, i.e.
+    "alive but quiet" rather than a suspected hang. (The in-guest provision.sh
+    output is swallowed by virt-customize on success, so the orchestrator stream —
+    not the guest's own lines — is the only live signal.)
+  - *In-guest stage breadcrumbs (C):* `install-ena-driver.sh` gains a `stage()`
+    helper emitting `[ena-driver][stage]` markers at the phase boundaries
+    (prereqs, kernel-devel, EPEL+dkms, download, dkms add/build/install). On a
+    failed build these pin which sub-step broke.
+  - *Preserved make.log (D):* `record_make_log()` copies the DKMS make.log to
+    `/var/log/ol-aws-ami-builder-ena-make.log` on a successful build, so the
+    compile record ships inside the AMI for post-hoc inspection (guest output is
+    otherwise discarded on success; on failure `dump_build_diag` still surfaces it).
+  - New regression tier `tests/t12_buildvisibility.sh` (17 asserts) guards all of
+    the above. Suite 171/0/0 → **190/0/0** (with `ksvalidator`).
+
 ### Changed
+
+- **`HEARTBEAT_INTERVAL_SEC` default `20` → `10` seconds** (feedback ④; `0` still
+  disables). A shorter interval makes the live `stage:` field and elapsed/disk
+  deltas more responsive during a quiet in-guest compile; matches the runtime
+  disambiguation recommended in the prior session's diagnosis.
 
 - **OL7/OL8 E2E feedback — ENA driver reporting, AMI identification, pin-log accuracy.**
   - *Phase 6 ENA report (feedback ①②):* the two driver lines are now aligned,
