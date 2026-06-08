@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-08
+---
 # TESTING.md — Verification Procedure and Real-Run Results
 
 This document consolidates everything needed to verify and evaluate
@@ -62,15 +68,15 @@ is intentionally NOT set in `.psa.config.json`, so any `rNN` reference
 inside a comment body is reported. The r21 cleanup commit removed
 every such reference, so the strict baseline is the verified
 end-state. For the canonical version-discovery and refresh workflow,
-see repository root [`README.md`](../../../README.md) "psa.py
+see repository root [`README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md) "psa.py
 Versioning Policy".
 
 `psa.py` auto-discovers `.psa.config.json` in the current working directory,
 so the canonical invocation is from this script directory:
 
 ```bash
-cd scripts/powershell/download-speakerdeck-oracle4engineer
-python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
+cd projects/powershell-download-speakerdeck-oracle4engineer
+python3 ../../quality-tools/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
 The local `.psa.config.json` disables `PSA6003` (plural function noun) and `PSA7003` (non-ASCII script body, default-on since `psa.py` 4.2.0; opted out for the intentional Japanese log strings and em-dashes) for
@@ -92,7 +98,7 @@ Issues : 0 errors, 0 warnings, 0 info
 ```
 
 Any deviation from `0 / 0 / 0` blocks the commit. See
-[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
+[`../../python/powershell-static-analyzer/SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md)
 §4 for the full specification of the 46 rules
 (`PSA1xxx` syntax / `PSA2xxx` semantics / `PSA3xxx` style / `PSA4xxx`
 hygiene / `PSA5xxx` security / `PSA6xxx` best practice / `PSA7xxx`
@@ -608,4 +614,4 @@ A.14.6.
 ## License
 
 This document is part of the `usui-tk/ai-generated-artifacts` repository,
-licensed under the [MIT License](../../../LICENSE).
+licensed under the [MIT License](https://github.com/usui-tk/ai-generated-artifacts/blob/main/LICENSE).

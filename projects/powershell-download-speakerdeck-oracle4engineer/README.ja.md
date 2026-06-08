@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-08
+---
 # Download-SpeakerDeck.ps1
 
 | ステージ | ステータス |
@@ -13,7 +19,7 @@ Windows 11 + Windows PowerShell 5.1 を想定（PowerShell 7+ でも動作しま
 
 このスクリプトは
 [`usui-tk/ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts)
-リポジトリの `scripts/powershell/download-speakerdeck-oracle4engineer/` 配下に格納されています。
+リポジトリの `projects/powershell-download-speakerdeck-oracle4engineer/` 配下に格納されています。
 
 ## ⚠️ 免責事項
 
@@ -41,13 +47,13 @@ Windows 11 + Windows PowerShell 5.1 を想定（PowerShell 7+ でも動作しま
 ください。
 
 本リポジトリ内のすべての成果物に適用される完全な免責事項と自己責任条項
-については、[ルート README](../../../README.ja.md)
-([English](../../../README.md))を参照してください。
+については、[ルート README](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.ja.md)
+([English](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md))を参照してください。
 
 ## ライセンス
 
 本プロジェクトは `usui-tk/ai-generated-artifacts` リポジトリの一部であり、**MIT ライセンス** の下で公開されています。完全な条文はリポジトリルートの
-[`LICENSE`](../../../LICENSE)
+[`LICENSE`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/LICENSE)
 ファイルを参照してください。
 
 要約：原著作権表示およびライセンス表示を保持する限り、本ソフトウェアを目的を問わず自由に使用、改変、配布できます。本ソフトウェアは無保証で提供されます。詳細は上記の免責事項および LICENSE ファイルを参照してください。
@@ -102,14 +108,14 @@ Speaker Deck のウェブ UI が提供するダウンロード機能は、 1 デ
 - **リポジトリ全体に共通する LLM エージェント運用ガイド**(ガバナンス
   階層、 ground truth 抽出、 Doc-Touching マトリクス、 Part A 継承
   ルール、 アンチパターン)は、 リポジトリルートの
-  [`AGENTS.md`](../../../AGENTS.md) を参照してください(英語のみ)。
+  [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) を参照してください(英語のみ)。
   本スクリプトの `SPEC.md` Part A は、 本リポジトリスタイルの
   sibling Layer 3 SPEC の **正典継承元** として機能します。
 
 ## フォルダ構成
 
 ```
-scripts/powershell/download-speakerdeck-oracle4engineer/
+projects/powershell-download-speakerdeck-oracle4engineer/
   Download-SpeakerDeck.ps1     # 本体スクリプト（この README が説明する対象）
   README.md / README.ja.md     # エンドユーザー向けドキュメント（このファイル群）
   SPEC.md (English only)         # 開発者 / LLM 向け仕様書（下記「開発者向け仕様」参照）
@@ -118,7 +124,7 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
 
 本スクリプトの検証に用いる PowerShell 静的解析ツール `psa.py` は、
 レポジトリ全体での正規配置場所
-[`quality-tools/powershell-static-analyzer/`](../../python/powershell-static-analyzer/)
+[`quality-tools/powershell-static-analyzer/`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/)
 に格納されています。
 
 スクリプトを **実行するだけ** であれば、この README を読めば十分です。**拡張や類似スクリプト作成** の場合は `SPEC.md` も併せてご確認ください。
@@ -615,13 +621,13 @@ Phase が例外を投げたとき、 トップレベルの catch ハンドラが
 
 `psa.py` 静的解析ツール(latest mainline; `PSA1001`〜`PSA9002` + opt-in
 規約ルール `PSAP0001`〜`PSAP0005`)の詳細は
-[`../../python/powershell-static-analyzer/README.ja.md`](../../python/powershell-static-analyzer/README.ja.md)
-(英語版は [README.md](../../python/powershell-static-analyzer/README.md))、
-または完全な仕様書 [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md)
+[`../../python/powershell-static-analyzer/README.ja.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/README.ja.md)
+(英語版は [README.md](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/README.md))、
+または完全な仕様書 [`SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md)
 を参照してください。 正典の analyzer バージョンは
-[`../../python/powershell-static-analyzer/VERSION`](../../python/powershell-static-analyzer/VERSION)
+[`../../python/powershell-static-analyzer/VERSION`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/VERSION)
 ファイルに記録されています。 consumer 側のワークフロー詳細はリポジトリ
-ルート [`README.ja.md`](../../../README.ja.md) の「psa.py のバージョニング
+ルート [`README.ja.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.ja.md) の「psa.py のバージョニング
 ポリシー」を参照してください。
 
 **新規開発における最重要ルール**:フェーズヘッダー、 ログマーカー、
@@ -634,14 +640,14 @@ psa.py を一から再導出しないこと。 既存実装からコピーする
 
 このスクリプトは `psa.py`（PowerShell Static Analyzer）で検証済みです。
 このツールはレポジトリ全体での正規配置場所
-[`quality-tools/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py)
+[`quality-tools/powershell-static-analyzer/psa.py`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/psa.py)
 に格納されており、Pure Python（標準ライブラリのみ）で実装されており、
 外部依存はありません。
 
 ```bash
 # 静的解析の実行（psa.py がローカルの .psa.config.json を自動発見します）
-cd scripts/powershell/download-speakerdeck-oracle4engineer
-python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
+cd projects/powershell-download-speakerdeck-oracle4engineer
+python3 ../../quality-tools/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
 ### ルールカバレッジ (psa.py — latest mainline)
@@ -652,7 +658,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 のルール、 `PSAPxxxx`(プロジェクト/パイプライン規約)は opt-in
 規約ルールです。 ルールセットのバージョン別変遷については analyzer
 自身の
-[CHANGELOG.md](../../python/powershell-static-analyzer/CHANGELOG.md)
+[CHANGELOG.md](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/CHANGELOG.md)
 を参照してください。
 
 | カテゴリ | コード範囲 | 例 |
@@ -669,7 +675,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 | プロジェクト規約 | `PSAP0001`〜`PSAP0005` | phase 関数命名規約、 必須のスクリプト識別子変数、 インラインリビジョンタグコメント (`PSAP0003`)、 EOF の `REVISION HISTORY` ブロック (`PSAP0004`)、 **コメント本体内のリビジョン参照** (`PSAP0005`、 psa.py 4.0.0 で新規追加)。 **PSAPxxxx は全て default OFF**。 本プロジェクトは `PSAP0003` / `PSAP0004` / `PSAP0005` に opt-in しています (PSAP0005 は strict mode — `psap0005_relaxed_mode` は設定しないため、 コメント本体内の任意の `rNN` 参照が報告される)。 総ルール数は **46** です。 |
 
 各ルールの完全仕様は
-[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4 を参照。
+[`../../python/powershell-static-analyzer/SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md) §4 を参照。
 
 ### プロジェクト固有設定
 

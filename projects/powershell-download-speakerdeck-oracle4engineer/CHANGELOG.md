@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-08
+---
 # Changelog
 
 All notable changes to `Download-SpeakerDeck.ps1` (the Speaker Deck
@@ -11,7 +17,7 @@ header lines, and (from r23 onwards) in the Debug Trace Facility's
 JSONL stream (`work/logs/debugtrace.jsonl`).
 
 This CHANGELOG is **English only** per the
-[repository-wide documentation language policy](../../../README.md#language-policy).
+[repository-wide documentation language policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md#language-policy).
 
 ## [Unreleased]
 
@@ -104,15 +110,15 @@ artifact in this subproject.
 ### Documentation — Add `Why this script exists` section and repository-wide `AGENTS.md` cross-references
 
 A doc-only update that adds the SHOULD-level `Why this script exists`
-section recommended by [`scripts/README.md`](../../README.md) Recommended
+section recommended by [`scripts/README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md) Recommended
 Additional Section (L125–L135), and surfaces the newly-introduced
-repository-wide [`AGENTS.md`](../../../AGENTS.md) from this subproject's
+repository-wide [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) from this subproject's
 documentation. In particular, `SPEC.md` Part A — which is the
 canonical inheritance source for sibling Layer 3 SPECs — now carries
 an explicit Status banner clarifying its role and pointing to
-[`AGENTS.md` §6](../../../AGENTS.md#6-part-a-inheritance-rule-absolute)
+[`AGENTS.md` §6](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md#6-part-a-inheritance-rule-absolute)
 for the inheritance rule and to
-[`AGENTS.md` §9 AP-1](../../../AGENTS.md#9-anti-patterns-forensically-documented)
+[`AGENTS.md` §9 AP-1](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md#9-anti-patterns-forensically-documented)
 for the forensic record of past violations.
 
 #### Changes
@@ -740,7 +746,7 @@ The per-revision history for r1 through r19 is not formally recorded
 in this CHANGELOG file. Earlier releases tracked changes via inline
 `# rNN:` comments in the script body. Those comments were removed in
 r21 (see above) per the repository-wide revision-history policy
-([root README, "Revision History Policy"](../../../README.md#revision-history-policy)),
+([root README, "Revision History Policy"](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md#revision-history-policy)),
 which centralises per-release notes in `CHANGELOG.md`.
 
 For the historical context that prior revisions encoded, refer to the
@@ -750,10 +756,10 @@ repository.
 
 ---
 
-[Unreleased]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
-[r25]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
-[r24]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
-[r23]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
-[r22]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
-[r21]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
-[r20]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/scripts/powershell/download-speakerdeck-oracle4engineer
+[Unreleased]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-download-speakerdeck-oracle4engineer
+[r25]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-download-speakerdeck-oracle4engineer
+[r24]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-download-speakerdeck-oracle4engineer
+[r23]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-download-speakerdeck-oracle4engineer
+[r22]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-download-speakerdeck-oracle4engineer
+[r21]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-download-speakerdeck-oracle4engineer
+[r20]: https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-download-speakerdeck-oracle4engineer

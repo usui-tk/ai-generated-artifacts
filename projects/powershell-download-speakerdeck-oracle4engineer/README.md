@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-06-08
+---
 # Download-SpeakerDeck.ps1
 
 | Stage | Status |
@@ -13,7 +19,7 @@ Targeted at Windows 11 + Windows PowerShell 5.1 (also runs on PowerShell 7+).
 
 This script is part of the
 [`usui-tk/ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts)
-repository, under `scripts/powershell/download-speakerdeck-oracle4engineer/`.
+repository, under `projects/powershell-download-speakerdeck-oracle4engineer/`.
 
 ## ⚠️ Disclaimer
 
@@ -40,14 +46,14 @@ faster or more often than necessary.
 
 For the full disclaimer and self-responsibility terms that apply to all
 artifacts in this repository, see the
-[root README](../../../README.md)
-([Japanese](../../../README.ja.md)).
+[root README](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md)
+([Japanese](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.ja.md)).
 
 ## License
 
 This project is part of the `usui-tk/ai-generated-artifacts` repository,
 which is licensed under the **MIT License**. See the
-[`LICENSE`](../../../LICENSE) file at the repository root for the full
+[`LICENSE`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/LICENSE) file at the repository root for the full
 license text.
 
 In short: you are free to use, modify, and distribute this software for
@@ -103,7 +109,7 @@ executes the plan with built-in throttling.
 - For the **repository-wide LLM-agent operating guide** (governance
   hierarchy, ground-truth extraction, Doc-Touching Matrix, Part A
   inheritance rule, anti-patterns), see
-  [`AGENTS.md`](../../../AGENTS.md) at the repository root. Note
+  [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) at the repository root. Note
   that this script's `SPEC.md` Part A serves as the **canonical
   inheritance source** for sibling Layer 3 SPECs in this repository
   style.
@@ -111,7 +117,7 @@ executes the plan with built-in throttling.
 ## Folder layout
 
 ```
-scripts/powershell/download-speakerdeck-oracle4engineer/
+projects/powershell-download-speakerdeck-oracle4engineer/
   Download-SpeakerDeck.ps1     # Main script (this README documents it)
   README.md / README.ja.md     # End-user documentation (you are reading these)
   SPEC.md (English only)         # Developer / LLM specification (see "Developer specification" below)
@@ -120,7 +126,7 @@ scripts/powershell/download-speakerdeck-oracle4engineer/
 
 The PowerShell static analyzer (`psa.py`) used to verify this script lives at
 the repository-wide canonical location:
-[`quality-tools/powershell-static-analyzer/`](../../python/powershell-static-analyzer/).
+[`quality-tools/powershell-static-analyzer/`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/).
 
 If you only want to **run** the script, read this README. If you want to
 **extend it or build a similar script**, also read `SPEC.md`.
@@ -635,10 +641,10 @@ documents the most recent successful real-run
 
 For details on the `psa.py` static analyzer (latest mainline; with
 `PSA1001..PSA9002` plus `PSAP0001..PSAP0005` opt-in rules), see
-[`../../python/powershell-static-analyzer/README.md`](../../python/powershell-static-analyzer/README.md)
-and the full [`SPEC.md`](../../python/powershell-static-analyzer/SPEC.md).
+[`../../python/powershell-static-analyzer/README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/README.md)
+and the full [`SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md).
 The canonical analyzer version is recorded in
-[`../../python/powershell-static-analyzer/VERSION`](../../python/powershell-static-analyzer/VERSION).
+[`../../python/powershell-static-analyzer/VERSION`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/VERSION).
 
 The **single most important rule** for new development: do not re-derive
 phase headers, log markers, or psa.py — copy them from the existing
@@ -650,13 +656,13 @@ implementation. Reuse before invention.
 
 This script is verified with `psa.py` (PowerShell Static Analyzer), which
 lives at the repository-wide canonical location
-[`quality-tools/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py).
+[`quality-tools/powershell-static-analyzer/psa.py`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/psa.py).
 It is a pure-Python tool with no external dependencies.
 
 ```bash
 # Run static analysis (psa.py auto-discovers the local .psa.config.json)
-cd scripts/powershell/download-speakerdeck-oracle4engineer
-python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
+cd projects/powershell-download-speakerdeck-oracle4engineer
+python3 ../../quality-tools/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 ```
 
 ### Rule coverage (psa.py — generic + opt-in conventions)
@@ -667,7 +673,7 @@ python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1
 are higher-level; `PSAPxxxx` (project / pipeline conventions) are
 opt-in opinionated rules. For per-version evolution of the rule set,
 see the analyzer's own
-[CHANGELOG.md](../../python/powershell-static-analyzer/CHANGELOG.md).
+[CHANGELOG.md](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/CHANGELOG.md).
 
 | Category | Code range | Examples |
 | -------- | ---------- | -------- |
@@ -683,7 +689,7 @@ see the analyzer's own
 | Project / pipeline conventions | `PSAP0001`..`PSAP0005` | phase function naming, required script-identifier variables, inline revision-tag comments (`PSAP0003`), end-of-file `REVISION HISTORY` blocks (`PSAP0004`), **revision reference in comment body** (`PSAP0005`, new in psa.py 4.0.0). **All PSAPxxxx rules are off by default**; this project opts in to `PSAP0003`, `PSAP0004`, and `PSAP0005` (strict mode — `psap0005_relaxed_mode` is not set, so any `rNN` reference in a comment body is reported). The total rule count is **46**. |
 
 For the full specification of each rule, see
-[`../../python/powershell-static-analyzer/SPEC.md`](../../python/powershell-static-analyzer/SPEC.md) §4.
+[`../../python/powershell-static-analyzer/SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md) §4.
 
 ### Project-local configuration
 

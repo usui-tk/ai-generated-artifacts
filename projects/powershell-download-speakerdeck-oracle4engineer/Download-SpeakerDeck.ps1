@@ -7,7 +7,7 @@
     from a Speaker Deck account.
 
     Repository: https://github.com/usui-tk/ai-generated-artifacts
-    Location  : scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+    Location  : projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
     License   : MIT (see LICENSE at the repository root)
 
     Prerequisites:
@@ -228,6 +228,7 @@ $ErrorActionPreference = 'Stop'
 # restricted hosts may not allow the assignment, and the script body
 # can continue without the optimisation.
 
+# >>> CANONICAL unit_id=pwsh.helper.set-utf8pipelineencoding version=1.0.0 hash=16192049ae7363e8 policy=canonical binding=follow-latest >>>
 function Set-Utf8PipelineEncoding {
     # ====================================================================
     # SPEC A.5 / D.5: enforce UTF-8 console encoding so ja-JP Japanese
@@ -258,7 +259,9 @@ function Set-Utf8PipelineEncoding {
     try { [Console]::InputEncoding  = [System.Text.Encoding]::UTF8 } catch { } # psa-disable-line PSA3004 -- intentional best-effort cleanup; no error to surface
     try { Set-Variable -Name OutputEncoding -Scope Global -Value ([System.Text.Encoding]::UTF8) -ErrorAction SilentlyContinue } catch { } # psa-disable-line PSA3004 -- intentional best-effort cleanup; no error to surface
 }
+# <<< CANONICAL unit_id=pwsh.helper.set-utf8pipelineencoding <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.set-tlssecurityprotocol version=1.0.0 hash=137ffea3b2034e15 policy=canonical binding=follow-latest >>>
 function Set-TlsSecurityProtocol {
     # ====================================================================
     # Enable TLS for outbound HTTPS calls with best-effort multi-version
@@ -278,6 +281,7 @@ function Set-TlsSecurityProtocol {
     try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls   } catch { } # psa-disable-line PSA3004 -- defensive legacy fallback for very old environments
     [Net.ServicePointManager]::SecurityProtocol = $protos
 }
+# <<< CANONICAL unit_id=pwsh.helper.set-tlssecurityprotocol <<<
 # Apply host configuration immediately so every subsequent write goes
 # through the right encoding and every HTTPS call uses TLS 1.2.
 Set-Utf8PipelineEncoding
@@ -349,6 +353,7 @@ if ([string]::IsNullOrEmpty($Script:ScriptRoot)) {
     $Script:ScriptRoot = (Get-Location).Path
 }
 
+# >>> CANONICAL unit_id=pwsh.helper.resolve-relativetoscript version=1.0.0 hash=a5655b401eeda2b5 policy=canonical binding=follow-latest >>>
 function Resolve-RelativeToScript {
     # Make a path absolute. Relative paths resolve against $Script:ScriptRoot.
     param([Parameter(Mandatory)] [string]$Path)
@@ -357,6 +362,7 @@ function Resolve-RelativeToScript {
     }
     return [System.IO.Path]::GetFullPath($Path)
 }
+# <<< CANONICAL unit_id=pwsh.helper.resolve-relativetoscript <<<
 
 $OutputDir = Resolve-RelativeToScript -Path $OutputDir
 $WorkDir   = Resolve-RelativeToScript -Path $WorkDir
@@ -372,18 +378,31 @@ $Script:FailedDir       = Join-Path $Script:DiagDir 'failed'
 $Script:LogsDir         = Join-Path $WorkDir 'logs'
 $Script:ErrorsJsonlPath = Join-Path $Script:LogsDir 'P06_errors.jsonl'
 
-function Initialize-RuntimeDirectories {
-    # Idempotently (re-)create the directory tree the script needs.
-    # Called once during startup, after any optional -Clean wipe.
-    # FailedDir is created lazily on first failure (most runs have 0
-    # failures, and we don't want an empty 'failed' folder cluttering
-    # the workspace).
-    foreach ($d in @($Script:OutputDir, $Script:WorkDir, $Script:DiagDir, $Script:LogsDir)) {
+# >>> CANONICAL unit_id=pwsh.helper.initialize-runtimedirectories version=1.0.0 hash=30bff32f7d40fca8 policy=canonical binding=follow-latest >>>
+function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical unit_id retained; noun stays plural by design
+    <#
+    .SYNOPSIS
+        Idempotently (re-)create a set of runtime directories.
+    .DESCRIPTION
+        Canonical, parameterized form: the caller passes its own directory
+        list (each consumer's workspace layout is its own concern); the
+        idempotent create loop is the shared canonical logic. Supersedes the
+        former per-tool bodies that hard-coded their own $Script: directory
+        sets (reconciled at P2.2/P2.3, ADR-tracked).
+    .PARAMETER Directory
+        One or more directory paths to ensure exist.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string[]] $Directory
+    )
+    foreach ($d in $Directory) {
         if (-not (Test-Path -LiteralPath $d)) {
             New-Item -ItemType Directory -Path $d -Force | Out-Null
         }
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.initialize-runtimedirectories <<<
 
 # ============================================================
 # Script version identification
@@ -536,13 +555,16 @@ $Script:DebugTraceEventSeq = 0
 
 # --- 1b.2: Internal helpers (not part of public API) ----------
 
+# >>> CANONICAL unit_id=pwsh.helper.debugtrace-nextseq version=1.0.0 hash=40affbda93e0dc92 policy=canonical binding=follow-latest >>>
 function _DebugTrace_NextSeq {
     # Atomic-ish counter. Single-threaded PowerShell so no Interlocked
     # needed; this is just a small helper for readability.
     $Script:DebugTraceEventSeq++
     return $Script:DebugTraceEventSeq
 }
+# <<< CANONICAL unit_id=pwsh.helper.debugtrace-nextseq <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.debugtrace-now version=1.0.0 hash=6cef1239adbe85aa policy=canonical binding=follow-latest >>>
 function _DebugTrace_Now {
     # Return current time as ISO 8601 string with milliseconds and Z
     # suffix. Pre-converted to string so ConvertTo-Json doesn't render
@@ -550,7 +572,9 @@ function _DebugTrace_Now {
     # readable representation regardless of PS version.
     return (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
 }
+# <<< CANONICAL unit_id=pwsh.helper.debugtrace-now <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.debugtrace-writejsonlline version=1.0.0 hash=2a6dab2b78cdec25 policy=canonical binding=follow-latest >>>
 function _DebugTrace_WriteJsonlLine {
     # Append one JSONL line to the debugtrace.jsonl file (or to the
     # pre-activation buffer if file output isn't enabled yet). All
@@ -621,7 +645,9 @@ function _DebugTrace_WriteJsonlLine {
         }
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.debugtrace-writejsonlline <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.debugtrace-retireframe version=1.0.0 hash=d6ed295961b4416e policy=canonical binding=follow-latest >>>
 function _DebugTrace_RetireFrame {
     # Move a frame from the active stack into the completed list.
     # Handles the history cap. Idempotent: safe to call even if the
@@ -640,9 +666,11 @@ function _DebugTrace_RetireFrame {
         $Script:DebugTraceCompletedFrames.RemoveAt(0)
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.debugtrace-retireframe <<<
 
 # --- 1b.3: Public API - trace primitives ----------------------
 
+# >>> CANONICAL unit_id=pwsh.helper.start-debugtrace version=1.0.0 hash=351f92779b47d079 policy=canonical binding=follow-latest >>>
 function Start-DebugTrace {
     <#
     .SYNOPSIS
@@ -695,7 +723,9 @@ function Start-DebugTrace {
         phase = $PhaseId
     })
 }
+# <<< CANONICAL unit_id=pwsh.helper.start-debugtrace <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.set-debugstep version=1.0.0 hash=0ff66497b3b281c8 policy=canonical binding=follow-latest >>>
 function Set-DebugStep {
     <#
     .SYNOPSIS
@@ -736,7 +766,9 @@ function Set-DebugStep {
         detail = $Detail
     })
 }
+# <<< CANONICAL unit_id=pwsh.helper.set-debugstep <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.stop-debugtrace version=1.0.0 hash=241736610d82b7d1 policy=canonical binding=follow-latest >>>
 function Stop-DebugTrace {
     <#
     .SYNOPSIS
@@ -778,7 +810,9 @@ function Stop-DebugTrace {
         phase    = $frame.PhaseId
     })
 }
+# <<< CANONICAL unit_id=pwsh.helper.stop-debugtrace <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.format-debugfailure version=1.0.0 hash=0ed20da6d346d5b8 policy=canonical binding=follow-latest >>>
 function Format-DebugFailure {
     <#
     .SYNOPSIS
@@ -826,7 +860,9 @@ function Format-DebugFailure {
         StepHistory      = $stepHistory
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.format-debugfailure <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.write-debugfailurereport version=1.0.0 hash=8c1dda9940c309c1 policy=canonical binding=follow-latest >>>
 function Write-DebugFailureReport {
     <#
     .SYNOPSIS
@@ -911,15 +947,17 @@ function Write-DebugFailureReport {
         }
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-debugfailurereport <<<
 
 # --- 1b.4: Public API - file output ---------------------------
 
+# >>> CANONICAL unit_id=pwsh.helper.enable-debugtracefileoutput version=1.0.0 hash=e87c4ef0ecc70f94 policy=canonical binding=follow-latest >>>
 function Enable-DebugTraceFileOutput {
     <#
     .SYNOPSIS
-        Activate the JSONL writer. Typically called by P01 once the
-        workspace logs directory exists. Flushes the pre-activation
-        buffer into the file in one go.
+        Activate the JSONL writer. Typically called from the main
+        try-block once the logs directory exists. Flushes the pre-
+        activation buffer into the file in one go.
     .PARAMETER Directory
         Target directory. The file is named 'debugtrace.jsonl' inside
         this dir. If a same-named file exists, it is appended.
@@ -942,13 +980,15 @@ function Enable-DebugTraceFileOutput {
 
         # Probe write a header line so the file exists and is writable.
         # If a same-name lock collision occurs, fall back to per-pid filename.
+        # Renamed 'host' to 'hostName' defensively to avoid collision with
+        # the $Host auto-variable on certain PS 5.1 parser contexts.
         $headerObj = [pscustomobject]@{
             ts        = _DebugTrace_Now
             kind      = 'file.open'
             scriptVer = $Script:ScriptVersion
             scriptSha = $Script:ScriptHash
-            pid       = $PID
-            host      = $Host.Name
+            procId    = $PID
+            hostName  = $Host.Name
             psVer     = $PSVersionTable.PSVersion.ToString()
             culture   = (Get-Culture).Name
         }
@@ -971,7 +1011,6 @@ function Enable-DebugTraceFileOutput {
             $Script:DebugTraceJsonlBuffer.Clear()
             try {
                 $blob = ($bufferedLines -join "`r`n") + "`r`n"
-                # UTF-8 with BOM (see _DebugTrace_WriteJsonlLine comment).
                 [System.IO.File]::AppendAllText($path, $blob, [System.Text.UTF8Encoding]::new($true))
                 $Script:DebugTraceJsonlWriteCount += $bufferedLines.Count
             } catch {
@@ -989,7 +1028,7 @@ function Enable-DebugTraceFileOutput {
         Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action {
             try {
                 if ($Script:DebugTraceJsonlEnabled -and $Script:DebugTraceJsonlPath) {
-                    $closeEvent = '{{"ts":"{0}","kind":"file.close","pid":{1}}}' -f `
+                    $closeEvent = '{{"ts":"{0}","kind":"file.close","procId":{1}}}' -f `
                         (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ'), $PID
                     [System.IO.File]::AppendAllText(
                         $Script:DebugTraceJsonlPath,
@@ -1011,7 +1050,9 @@ function Enable-DebugTraceFileOutput {
         Write-Warning '   Trace events remain captured in memory and are exportable via Export-DebugTraceJson.'
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.enable-debugtracefileoutput <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.disable-debugtracefileoutput version=1.0.0 hash=0dc4d90f4368280a policy=canonical binding=follow-latest >>>
 function Disable-DebugTraceFileOutput {
     <#
     .SYNOPSIS
@@ -1028,7 +1069,9 @@ function Disable-DebugTraceFileOutput {
     })
     $Script:DebugTraceJsonlEnabled = $false
 }
+# <<< CANONICAL unit_id=pwsh.helper.disable-debugtracefileoutput <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.get-debugtracefileoutputstatus version=1.0.0 hash=e03887fcc4e39fd3 policy=canonical binding=follow-latest >>>
 function Get-DebugTraceFileOutputStatus { # psa-disable-line PSA6003 -- "Status" is singular; analyzer false positive on compound name
     <#
     .SYNOPSIS
@@ -1048,9 +1091,11 @@ function Get-DebugTraceFileOutputStatus { # psa-disable-line PSA6003 -- "Status"
         CompletedFrames = $Script:DebugTraceCompletedFrames.Count
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.get-debugtracefileoutputstatus <<<
 
 # --- 1b.5: Public API - JSON Export ---------------------------
 
+# >>> CANONICAL unit_id=pwsh.helper.enable-autoexportonphasefailure version=1.0.0 hash=81f2415bbc83f281 policy=canonical binding=follow-latest >>>
 function Enable-AutoExportOnPhaseFailure {
     <#
     .SYNOPSIS
@@ -1067,7 +1112,9 @@ function Enable-AutoExportOnPhaseFailure {
     $Script:DebugTraceAutoExportEnabled = $true
     $Script:DebugTraceAutoExportDir     = $OutputDirectory
 }
+# <<< CANONICAL unit_id=pwsh.helper.enable-autoexportonphasefailure <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.export-debugtracejson version=1.0.0 hash=d23eeab86dc4fc3a policy=canonical binding=follow-latest >>>
 function Export-DebugTraceJson {
     <#
     .SYNOPSIS
@@ -1093,24 +1140,13 @@ function Export-DebugTraceJson {
         [switch]$Compress
     )
 
-    # Refactor for robustness on PS 5.1 ja-JP. The previous
-    # implementation used inline `if/else` expressions as hashtable values
-    # and a property named `host` (which collides with the PS auto-
-    # variable name in some parser contexts). User report on
-    # 2026-05-17 showed AmbiguousParameterSet failure when
-    # -ExportTraceOnExit triggered this function from the finally block.
-    # This refactor:
-    #   1. Pre-computes every hashtable value into a local variable so
-    #      no `if/else` expression appears inside [pscustomobject]@{...}.
-    #   2. Renames the `host` key to `hostInfo` defensively.
-    #   3. Uses [Parameter(Mandatory=$true)] (explicit boolean) instead
-    #      of bare [Parameter(Mandatory)] which is normally equivalent
-    #      but has been observed to fail parameter-set resolution on
-    #      some PS 5.1 builds.
-    #   4. Adds Section 1b's Start-DebugTrace / Set-DebugStep instrumen-
-    #      tation so any future failure surfaces the failing step name
-    #      in the JSONL stream even if the JSON export itself can't be
-    #      written.
+    # NOTE: Pre-compute every hashtable value into a local variable so
+    # no `if/else` expression appears inside [pscustomobject]@{...}; this
+    # avoids an AmbiguousParameterSet failure observed on certain PS 5.1
+    # ja-JP hosts. Also: instrumented with this section's own
+    # Start-DebugTrace / Set-DebugStep so any future failure here
+    # surfaces the failing step in the JSONL stream even if the JSON
+    # export itself can't be written.
     Start-DebugTrace -Context 'Export-DebugTraceJson'
     try {
         # ------ Section A: active frames (in-progress at snapshot time) -----
@@ -1216,13 +1252,9 @@ function Export-DebugTraceJson {
                     if ([string]::IsNullOrWhiteSpace($l)) { continue }
                     try {
                         $events += (ConvertFrom-Json -InputObject $l -ErrorAction Stop)
-                    } catch {
-                        # Skip lines that don't parse (malformed truncation).
-                    }
+                    } catch { } # psa-disable-line PSA3004 -- skip lines that don't parse (malformed truncation)
                 }
-            } catch {
-                # Ignore file-read errors; events stays empty.
-            }
+            } catch { } # psa-disable-line PSA3004 -- ignore file-read errors; events stays empty
         }
         $eventsToSerialize = @()
         $eventCount = -1
@@ -1234,13 +1266,16 @@ function Export-DebugTraceJson {
         # ------ Section E: host + script metadata (pre-computed) ------------
         Set-DebugStep 'compose host + script metadata'
         # Pre-compute the host metadata as a standalone variable so no
-        # inline expression appears in the outer hashtable. Renamed key
-        # from 'host' to 'hostInfo' to avoid any chance of collision
-        # with the $Host auto-variable on PS 5.1.
+        # inline expression appears in the outer hashtable.
         $hostInfo = [pscustomobject]@{
             psVersion   = $PSVersionTable.PSVersion.ToString()
             psEdition   = $PSVersionTable.PSEdition
-            clrVersion  = $PSVersionTable.CLRVersion.ToString()
+            # Dual-runtime policy (ADR 0012): $PSVersionTable.CLRVersion exists
+            # only on Windows PowerShell 5.1 and is absent on PS 7 (so
+            # .ToString() throws). Use [System.Environment]::Version - the
+            # executing .NET runtime version, present on both runtimes - and keep
+            # the field name 'clrVersion' for export-schema backward compatibility.
+            clrVersion  = [System.Environment]::Version.ToString()
             os          = ([System.Environment]::OSVersion.VersionString)
             culture     = (Get-Culture).Name
             uiCulture   = (Get-UICulture).Name
@@ -1281,8 +1316,7 @@ function Export-DebugTraceJson {
         # `Split-Path -LiteralPath $Path -Parent`. On PS 5.1, those two
         # parameters belong to mutually-exclusive parameter sets
         # (LiteralPathSet vs ParentSet), which causes
-        # AmbiguousParameterSet at runtime. The.NET method has no such
-        # constraint and behaves identically.
+        # AmbiguousParameterSet at runtime.
         $parentDir = [System.IO.Path]::GetDirectoryName($Path)
         if ($parentDir -and -not (Test-Path -LiteralPath $parentDir)) {
             New-Item -ItemType Directory -Path $parentDir -Force -ErrorAction SilentlyContinue | Out-Null
@@ -1290,15 +1324,12 @@ function Export-DebugTraceJson {
 
         # ------ Section H: serialize and write to disk ---------------------
         Set-DebugStep 'ConvertTo-Json + write to disk'
-        # Render with the configured max depth so deeply nested objects
-        # (especially ExInner chains and step details) never get clipped.
         if ($Compress) {
             $json = $snapshot | ConvertTo-Json -Depth $Script:DebugTraceJsonDepth -Compress
         } else {
             $json = $snapshot | ConvertTo-Json -Depth $Script:DebugTraceJsonDepth
         }
-        # UTF-8 with BOM so the file is correctly read on PS 5.1 ja-JP
-        # via `Get-Content` (default) without `-Encoding UTF8`.
+        # UTF-8 with BOM so the file is correctly read on PS 5.1 ja-JP.
         [System.IO.File]::WriteAllText($Path, $json, [System.Text.UTF8Encoding]::new($true))
 
         Set-DebugStep 'return result path'
@@ -1314,11 +1345,13 @@ function Export-DebugTraceJson {
         Stop-DebugTrace
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.export-debugtracejson <<<
 
 # ============================================================
 # Display utilities
 # ============================================================
 
+# >>> CANONICAL unit_id=pwsh.helper.format-elapsed version=1.0.0 hash=b63f12c32ee28520 policy=canonical binding=follow-latest >>>
 function Format-Elapsed {
     # Render a TimeSpan in a compact human-readable form.
     # Examples: '0.45s', '12.3s', '5m12.4s', '1h05m12s'
@@ -1337,12 +1370,16 @@ function Format-Elapsed {
         return ('{0}h{1:D2}m{2:D2}s' -f $h, $m, $s)
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.format-elapsed <<<
+# >>> CANONICAL unit_id=pwsh.helper.get-phaseelapsedtag version=1.0.0 hash=79f7a70e60311a27 policy=canonical binding=follow-latest >>>
 function Get-PhaseElapsedTag {
     # Returns elapsed-since-current-phase-start as '[+X.XXs]' or empty.
     if ($null -eq $Script:CurrentPhaseStart) { return '' }
     $span = (Get-Date) - $Script:CurrentPhaseStart
     return ('[+{0}]' -f (Format-Elapsed $span))
 }
+# <<< CANONICAL unit_id=pwsh.helper.get-phaseelapsedtag <<<
+# >>> CANONICAL unit_id=pwsh.helper.logline version=1.0.0 hash=de5d6e6301d19d87 policy=canonical binding=follow-latest >>>
 function _LogLine {
     # Internal: emits '[HH:mm:ss] [+X.XXs]   [marker] message'
     param([string]$Marker, [string]$Msg, [string]$Color)
@@ -1354,6 +1391,7 @@ function _LogLine {
         Write-Host ("[{0}] {1,-12} {2} {3}" -f $ts, '', $Marker, $Msg) -ForegroundColor $Color
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.logline <<<
 # Public log helpers. Names are kept compatible with the prior code so
 # all existing callsites continue to work; only the rendering changed.
 #
@@ -1367,12 +1405,23 @@ function _LogLine {
 # Canonical names (no duplicates, no trailing-digit suffixes). None of
 # these collide with built-in cmdlets - PowerShell has Write-Warning
 # and Write-Information but not Write-Caution / Write-Skip / Write-Step.
+# >>> CANONICAL unit_id=pwsh.helper.write-step version=1.0.0 hash=257272636c6d4122 policy=canonical binding=follow-latest >>>
 function Write-Step  { param($Msg) _LogLine '[*]' $Msg 'Cyan'     }
+# <<< CANONICAL unit_id=pwsh.helper.write-step <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-ok version=1.0.0 hash=383749ef0ee509b4 policy=canonical binding=follow-latest >>>
 function Write-Ok    { param($Msg) _LogLine '[+]' $Msg 'Green'    }
+# <<< CANONICAL unit_id=pwsh.helper.write-ok <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-caution version=1.0.0 hash=29f499cc2213fcc6 policy=canonical binding=follow-latest >>>
 function Write-Caution { param($Msg) _LogLine '[!]' $Msg 'Yellow'   }
+# <<< CANONICAL unit_id=pwsh.helper.write-caution <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-fail version=1.0.0 hash=13071c0f83f38048 policy=canonical binding=follow-latest >>>
 function Write-Fail  { param($Msg) _LogLine '[X]' $Msg 'Red'      }
+# <<< CANONICAL unit_id=pwsh.helper.write-fail <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-skip version=1.0.0 hash=1fc992418d41baad policy=canonical binding=follow-latest >>>
 function Write-Skip  { param($Msg) _LogLine '[~]' $Msg 'DarkGray' }
+# <<< CANONICAL unit_id=pwsh.helper.write-skip <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.write-detail version=1.0.0 hash=7fa6224e26175e15 policy=canonical binding=follow-latest >>>
 function Write-Detail {
     # ====================================================================
     # Continuation / detail line for a preceding marker line, or a row
@@ -1406,7 +1455,9 @@ function Write-Detail {
         Write-Host ("    {0}" -f $Msg) -ForegroundColor $Color
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-detail <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.write-subsection version=1.0.0 hash=524c6903ce0d76ea policy=canonical binding=follow-latest >>>
 function Write-SubSection {
     # Lightweight section break inside a phase (e.g. [Step A]/[Step B]).
     # Prints with a leading blank line and a horizontal rule.
@@ -1414,7 +1465,9 @@ function Write-SubSection {
     Write-Host ''
     Write-Host (' -- ' + $Title + ' ' + ('-' * [Math]::Max(1, 60 - $Title.Length))) -ForegroundColor Gray
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-subsection <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.write-phaseheader version=1.0.0 hash=a002b1883e7d48ba policy=canonical binding=follow-latest >>>
 function Write-PhaseHeader {
     # Prints a magenta banner that opens a phase. Records phase start
     # time so subsequent log lines can show '[+elapsed]'.
@@ -1438,6 +1491,8 @@ function Write-PhaseHeader {
     Write-Host (' script: {0}' -f $Script:ScriptShortTag) -ForegroundColor DarkGray
     Write-Host $line -ForegroundColor Magenta
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-phaseheader <<<
+# >>> CANONICAL unit_id=pwsh.helper.write-phasefooter version=1.0.0 hash=762ec88efd33dc33 policy=canonical binding=follow-latest >>>
 function Write-PhaseFooter {
     # Closes a phase started by Write-PhaseHeader. Records the elapsed
     # duration in $Script:PhaseTimings (used by run-summary helpers).
@@ -1480,8 +1535,46 @@ function Write-PhaseFooter {
     $Script:CurrentPhaseStart = $null
     $Script:CurrentPhaseId    = $null
 }
+# <<< CANONICAL unit_id=pwsh.helper.write-phasefooter <<<
+# >>> CANONICAL unit_id=pwsh.helper.show-phasesummary version=1.0.0 hash=22ed90223f442cc8 policy=canonical binding=follow-latest >>>
 function Show-PhaseSummary {
-    # End-of-run summary table, one row per executed phase.
+    <#
+    .SYNOPSIS
+        End-of-run summary table, one row per executed phase.
+
+    .DESCRIPTION
+        Two callers exist by design:
+          1. P13 FinalReport (`Invoke-ReportPhase13_FinalReport`),
+             which calls this as documented in SPEC.md Part B.5
+             Step 1 -- the timing table is part of the FinalReport.
+          2. The script-tail `finally` block, which calls this as
+             a safety net so that a run aborted before P13 (or in
+             the outer catch block) still produces a timing table.
+
+        Without coordination, a happy-path run prints the same
+        table twice -- once from P13, once from the finally. To
+        avoid that visual duplication while keeping the
+        safety-net behaviour intact, this function is idempotent:
+        the first call prints the table and records the fact via
+        `$Script:PhaseSummaryShown`; subsequent calls return
+        without printing. Callers that want to force a re-print
+        (rare, for testing) can clear the flag first.
+
+    .PARAMETER Force
+        If set, prints the table even if it has already been
+        printed in this run. Used for ad-hoc inspection; the
+        production callers never set this.
+    #>
+    [CmdletBinding()]
+    [OutputType([void])]
+    param(
+        [switch]$Force
+    )
+    if ($Script:PhaseSummaryShown -and -not $Force) {
+        return
+    }
+    $Script:PhaseSummaryShown = $true
+
     Write-Host ''
     Write-Host ('=' * 72) -ForegroundColor Cyan
     Write-Host ' Phase Timing Summary' -ForegroundColor Cyan
@@ -1504,11 +1597,13 @@ function Show-PhaseSummary {
     Write-Host ('  Total elapsed: {0}' -f (Format-Elapsed $totalElapsed)) -ForegroundColor Cyan
     Write-Host ('=' * 72) -ForegroundColor Cyan
 }
+# <<< CANONICAL unit_id=pwsh.helper.show-phasesummary <<<
 
 # ============================================================
 # Cleanup helpers (used by -Clean / -CleanOnly)
 # ============================================================
 
+# >>> CANONICAL unit_id=pwsh.helper.test-dangerouspath version=1.0.0 hash=066df8896cbf4d25 policy=canonical binding=follow-latest >>>
 function Test-DangerousPath {
     # Returns $true if removing this path would be dangerous.
     # Used by Invoke-CleanupDirectories to refuse obviously wrong targets:
@@ -1538,7 +1633,9 @@ function Test-DangerousPath {
     }
     return $false
 }
+# <<< CANONICAL unit_id=pwsh.helper.test-dangerouspath <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.invoke-cleanupdirectories version=1.0.0 hash=54e92fb426d23d2b policy=canonical binding=follow-latest >>>
 function Invoke-CleanupDirectories {
     # Wipe $OutputDir and $WorkDir trees. Idempotent (missing dirs are
     # silently skipped). Throws if either path looks dangerous.
@@ -1584,6 +1681,7 @@ function Invoke-CleanupDirectories {
     }
     Write-Ok "cleanup completed"
 }
+# <<< CANONICAL unit_id=pwsh.helper.invoke-cleanupdirectories <<<
 
 # ============================================================
 # URL handling helper
@@ -1776,56 +1874,59 @@ function Write-FailureDiagnostic {
     }
 }
 
+# >>> CANONICAL unit_id=pwsh.helper.add-errorjsonlentry version=1.0.0 hash=cecbc2af5da9ce31 policy=canonical binding=follow-latest >>>
 function Add-ErrorJsonlEntry {
-    # Append one JSON object (single line) to $Script:ErrorsJsonlPath.
-    # JSONL is a streaming-friendly format: one self-contained JSON
-    # object per line, ideal for jq / grep / structured analysis.
-    param([Parameter(Mandatory)] $Item)
+    <#
+    .SYNOPSIS
+        Append one structured JSON-Lines record to the run-level errors
+        log at $Script:ErrorsJsonlPath.
+    .PARAMETER Phase
+        Phase identifier (e.g. 'P03', 'P07'). Required.
+    .PARAMETER Kind
+        Short category label for the entry (e.g. 'failure', 'warning').
+        Required.
+    .PARAMETER Properties
+        Free-form hashtable merged into the JSON object. Keys colliding
+        with the well-known fields (timestamp / scriptVersion / phase /
+        kind) are silently dropped to protect the reserved schema.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Phase,
+        [Parameter(Mandatory)] [string]$Kind,
+        [hashtable]$Properties = @{}
+    )
 
     if ([string]::IsNullOrEmpty($Script:ErrorsJsonlPath)) { return }
 
     try {
         $obj = [ordered]@{
-            timestamp            = (Get-Date).ToString('o')
-            scriptVersion        = $Script:ScriptShortTag
-            index                = $Item.Index
-            title                = $Item.Title
-            deckUrl              = $Item.DeckUrl
-            downloadUrl          = $Item.DownloadUrl
-            originalFilename     = $Item.OriginalFilename
-            outputFilename       = $Item.OutputFilename
-            outputFullPath       = $Item.OutputFullPath
-            outputFullPathLength = if ($Item.OutputFullPath) { $Item.OutputFullPath.Length } else { $null }
-            outputType           = $Item.OutputType
-            publishDate          = $Item.PublishDate
-            status               = $Item.Status
-            attempts             = $Item.Attempts
-            durationMs           = [int]$Item.DurationMs
-            bytes                = $Item.Bytes
-            category             = (Get-FailureCategory -Item $Item)
+            timestamp     = (Get-Date).ToString('o')
+            scriptVersion = $Script:ScriptShortTag
+            phase         = $Phase
+            kind          = $Kind
         }
-        $ed = $Item.ErrorDetails
-        if ($ed) {
-            $obj['httpStatusCode']        = $ed.LastStatusCode
-            $obj['exceptionType']         = $ed.LastErrorType
-            $obj['exceptionMessage']      = $ed.LastErrorMessage
-            $obj['innerExceptionType']    = $ed.InnerErrorType
-            $obj['innerExceptionMessage'] = $ed.InnerErrorMessage
-            $obj['attemptHistory']        = $ed.AttemptHistory
-        } else {
-            $obj['errorMessage'] = $Item.ErrorMessage
+        if ($Properties) {
+            foreach ($key in $Properties.Keys) {
+                # Reserved keys cannot be overridden
+                if ($obj.Contains($key)) { continue }
+                $obj[$key] = $Properties[$key]
+            }
         }
         $json = $obj | ConvertTo-Json -Compress -Depth 8
         Add-Content -Path $Script:ErrorsJsonlPath -Value $json -Encoding UTF8 -ErrorAction Stop
     } catch {
-        # Silently ignore failures here so the main flow is not disrupted.
+        # Logging is best-effort: swallow so the main flow is not disrupted
+        $null = $_
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.add-errorjsonlentry <<<
 
 # ============================================================
 # Common helpers
 # ============================================================
 
+# >>> CANONICAL unit_id=pwsh.helper.wait-withjitter version=1.0.0 hash=15aba6cbcbfa9966 policy=canonical binding=follow-latest >>>
 function Wait-WithJitter {
     param(
         [double]$BaseSeconds,
@@ -1835,10 +1936,66 @@ function Wait-WithJitter {
     $actualSleep = [Math]::Max(0.1, $BaseSeconds + $jitter)
     Start-Sleep -Milliseconds ([int]($actualSleep * 1000))
 }
+# <<< CANONICAL unit_id=pwsh.helper.wait-withjitter <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.invoke-webrequestwithretry version=1.0.0 hash=959c46975eb04b15 policy=canonical binding=follow-latest >>>
 function Invoke-WebRequestWithRetry {
+    <#
+    .SYNOPSIS
+        Wrapper around Invoke-WebRequest with exponential-backoff retry.
+
+    .DESCRIPTION
+        Two modes:
+
+          1) In-memory fetch (no -OutFile)
+             Returns the BasicHtmlWebResponseObject. Used for HTML/JSON
+             scraping (Microsoft Learn release-info, .NET CU index, etc).
+
+          2) File download (-OutFile <path>)
+             Delegates to Invoke-DownloadWithProgress, which uses a
+             background Start-Job + main-thread file-size polling to
+             give the user "X MB / Y MB at Z MB/s ETA Ns" progress
+             lines every few seconds. The underlying Invoke-WebRequest
+             still runs with ProgressPreference='SilentlyContinue' to
+             avoid PS 5.1's O(N^2) progress-bar slowdown on multi-GB
+             downloads.
+
+        Retries on transient errors (network + HTTP 429/503) with
+        exponential backoff; bails on the final attempt with the
+        captured exception. The -MaxAttempts alias is preserved for
+        backward compatibility with existing call sites.
+
+    .PARAMETER Uri
+        Source URL. Mandatory.
+
+    .PARAMETER OutFile
+        When provided, the response body is saved to this path via
+        Invoke-DownloadWithProgress. The caller is responsible for
+        any post-download verification (SHA-256, atomic move, etc).
+
+    .PARAMETER Headers
+        Optional hashtable of HTTP request headers (e.g. custom
+        User-Agent). When not provided, Invoke-WebRequest's default
+        headers are used.
+
+    .PARAMETER MaxRetries
+        Maximum number of attempts before giving up. Default 3. The
+        -MaxAttempts alias is honoured for callers that used the
+        original parameter name.
+
+    .PARAMETER TimeoutSec
+        Per-attempt HTTP timeout. Default 60 for in-memory fetches.
+        For -OutFile downloads, this is passed through to
+        Invoke-DownloadWithProgress (which uses 600 by default
+        internally; the explicit value here wins).
+    #>
+    [CmdletBinding()]
+    [OutputType([Microsoft.PowerShell.Commands.BasicHtmlWebResponseObject])]
     param(
         [Parameter(Mandatory)] [string]$Uri,
+        [string]$OutFile,
+        [hashtable]$Headers,
+        [Alias('MaxAttempts')]
         [int]$MaxRetries = 3,
         [int]$TimeoutSec = 60
     )
@@ -1846,12 +2003,38 @@ function Invoke-WebRequestWithRetry {
     $lastError = $null
     for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
         try {
-            $response = Invoke-WebRequest -Uri $Uri `
-                -UserAgent $Script:UserAgent `
-                -Headers $Script:RequestHeaders `
-                -TimeoutSec $TimeoutSec `
-                -UseBasicParsing `
-                -ErrorAction Stop
+            if ($PSBoundParameters.ContainsKey('OutFile') -and $OutFile) {
+                # Delegate to the progress-aware helper. We give it
+                # the larger of TimeoutSec (the caller's value) and
+                # 600 seconds, because in-memory fetch timeouts are
+                # typically small (60s) but a multi-GB ISO can take
+                # 15+ minutes - whichever the caller specified, we
+                # honour it but never go below 600 for large DLs.
+                $effectiveTimeout = [Math]::Max($TimeoutSec, 600)
+                $progressParams = @{
+                    Uri        = $Uri
+                    OutFile    = $OutFile
+                    TimeoutSec = $effectiveTimeout
+                }
+                if ($PSBoundParameters.ContainsKey('Headers') -and $Headers) {
+                    $progressParams['Headers'] = $Headers
+                }
+                Invoke-DownloadWithProgress @progressParams
+                return
+            }
+
+            # In-memory fetch path: keep using Invoke-WebRequest directly.
+            # No progress bar concerns since the payload is small (HTML/JSON).
+            $params = @{
+                Uri             = $Uri
+                TimeoutSec      = $TimeoutSec
+                UseBasicParsing = $true
+                ErrorAction     = 'Stop'
+            }
+            if ($PSBoundParameters.ContainsKey('Headers') -and $Headers) {
+                $params['Headers'] = $Headers
+            }
+            $response = Invoke-WebRequest @params
             return $response
         }
         catch {
@@ -1873,6 +2056,258 @@ function Invoke-WebRequestWithRetry {
     }
     throw $lastError
 }
+# <<< CANONICAL unit_id=pwsh.helper.invoke-webrequestwithretry <<<
+
+# >>> CANONICAL unit_id=pwsh.helper.invoke-downloadwithprogress version=1.0.0 hash=3b9d3842004a91c2 policy=canonical binding=follow-latest >>>
+function Invoke-DownloadWithProgress {
+    <#
+    .SYNOPSIS
+        Download a URL to disk while emitting periodic progress
+        messages to the script's log channel (Write-Step / Write-Detail).
+
+    .DESCRIPTION
+        PS 5.1's Invoke-WebRequest has a notorious O(N^2) progress-bar
+        slowdown on multi-GB downloads, so the existing
+        Invoke-WebRequestWithRetry wrapper silences ProgressPreference
+        for performance. The trade-off is that long downloads (a 6 GB
+        ISO can take 10-15 minutes) produce no on-screen feedback for
+        the full duration, which is a poor user experience.
+
+        This function recovers visibility WITHOUT re-enabling the
+        slow built-in progress bar:
+
+          1. HEAD request first (cheap, ~1 second) to learn the
+             expected Content-Length when the server reports it.
+          2. Spawn a background Start-Job that runs the actual
+             Invoke-WebRequest with ProgressPreference suppressed,
+             so the worker still gets the fast-path streaming.
+          3. From the main thread, poll the destination file size
+             every -ProgressIntervalSec seconds and print:
+               "  ... 1,234.5 MB / 6,852.3 MB (18.0%) at 12.3 MB/s ETA 8m 12s"
+          4. On completion, print a final summary line with total
+             MB, elapsed time, and average MB/s.
+
+        Inspired by the Write-Step / Write-Detail / Set-DebugStep
+        idiom in Deploy-AMDChipsetDriverOnWindowsServer.ps1
+        (https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer)
+        but extended with the background-job + polling pattern to
+        give real-time feedback rather than only start/end markers.
+
+        Returns nothing; the file is at $OutFile on success and the
+        function throws on failure (network error, HTTP error, job
+        failure, or empty file).
+
+    .PARAMETER Uri
+        Source URL. Mandatory.
+
+    .PARAMETER OutFile
+        Destination file path. Mandatory. Parent directory must
+        already exist; the caller is responsible for any post-
+        download verification (SHA-256, atomic move, etc).
+
+    .PARAMETER Headers
+        Optional hashtable of HTTP request headers (e.g. User-Agent
+        override for CDNs that reject the default PowerShell UA).
+
+    .PARAMETER TimeoutSec
+        Per-attempt HTTP timeout passed to Invoke-WebRequest.
+        Default 600 (10 minutes), matching the upper bound the
+        Deploy-AMDChipsetDriver reference uses.
+
+    .PARAMETER ProgressIntervalSec
+        How often to print a "still going" progress line.
+        Default 5. Set to 0 to suppress progress lines and only
+        emit start/end markers.
+
+    .PARAMETER MinSizeBytes
+        If set (> 0) and the downloaded file is smaller than this,
+        the function deletes the file and throws. Defends against
+        the CDN-returns-error-page scenario the Deploy-AMD
+        reference also guards against (it expects >5 MB; ISO
+        downloads should expect >100 MB or >1 GB).
+
+    .NOTES
+        Threading model: PowerShell's Start-Job creates a separate
+        runspace; the worker has its own $ProgressPreference scope
+        and cannot pollute the caller's. The polling loop on the
+        main thread reads the *file system* (Get-Item .Length),
+        not any shared state with the worker - so there is no race.
+    #>
+    [CmdletBinding()]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)] [string]$Uri,
+        [Parameter(Mandatory)] [string]$OutFile,
+        [hashtable]$Headers,
+        [int]$TimeoutSec = 600,
+        [int]$ProgressIntervalSec = 5,
+        [long]$MinSizeBytes = 0
+    )
+
+    # ---- Phase 1: probe expected size via HEAD ----
+    Set-DebugStep -Step 'download-head-probe'
+    $expectedBytes = $null
+    $expectedMB = $null
+    try {
+        $headParams = @{
+            Uri             = $Uri
+            Method          = 'Head'
+            UseBasicParsing = $true
+            TimeoutSec      = 30
+            ErrorAction     = 'Stop'
+        }
+        if ($PSBoundParameters.ContainsKey('Headers') -and $Headers) {
+            $headParams['Headers'] = $Headers
+        }
+        $oldPp = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        try {
+            $headResp = Invoke-WebRequest @headParams
+        } finally {
+            $ProgressPreference = $oldPp
+        }
+        $clen = $null
+        if ($headResp.Headers.ContainsKey('Content-Length')) {
+            $clen = $headResp.Headers['Content-Length']
+        }
+        if ($clen) {
+            # Headers can be returned as string or string[] depending
+            # on the PowerShell version; coerce to the first element.
+            if ($clen -is [array]) { $clen = $clen[0] }
+            $expectedBytes = [long]$clen
+            $expectedMB = [math]::Round($expectedBytes / 1MB, 1)
+        }
+    } catch {
+        # HEAD not supported, or server rejects HEAD (some CDNs do).
+        # Continue without an expected-size estimate.
+    }
+
+    $fileName = [System.IO.Path]::GetFileName($Uri)
+    if ([string]::IsNullOrEmpty($fileName)) { $fileName = '(file)' }
+
+    Write-Step ('Downloading: {0}' -f $fileName)
+    Write-Step ('  URL    : {0}' -f $Uri)
+    Write-Step ('  Dest   : {0}' -f $OutFile)
+    if ($expectedBytes) {
+        Write-Step ('  Size   : {0:N1} MB (from Content-Length header)' -f $expectedMB)
+    } else {
+        Write-Step '  Size   : (unknown; server did not return Content-Length)'
+    }
+    Write-Step ('  Start  : {0:HH:mm:ss}' -f (Get-Date))
+
+    # ---- Phase 2: spawn background job for the actual download ----
+    Set-DebugStep -Step 'download-start-job'
+    $startTime = Get-Date
+    $workerScript = {
+        param($u, $o, $h, $t)
+        $oldPp = $ProgressPreference
+        $ProgressPreference = 'SilentlyContinue'
+        try {
+            $p = @{
+                Uri             = $u
+                OutFile         = $o
+                UseBasicParsing = $true
+                TimeoutSec      = $t
+                ErrorAction     = 'Stop'
+            }
+            if ($h) { $p['Headers'] = $h }
+            Invoke-WebRequest @p | Out-Null
+        } finally {
+            $ProgressPreference = $oldPp
+        }
+    }
+    $headersArg = if ($Headers) { $Headers } else { $null }
+    $job = Start-Job -ScriptBlock $workerScript -ArgumentList $Uri, $OutFile, $headersArg, $TimeoutSec
+
+    # ---- Phase 3: poll job state + file size, emit progress lines ----
+    Set-DebugStep -Step 'download-progress-poll'
+    $lastReportSec = 0
+    $progressLines = 0
+    try {
+        while ($job.State -eq 'Running') {
+            Start-Sleep -Milliseconds 500
+            if ($ProgressIntervalSec -le 0) { continue }
+            $elapsedSec = [int](New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds
+            if (($elapsedSec - $lastReportSec) -lt $ProgressIntervalSec) { continue }
+            $lastReportSec = $elapsedSec
+
+            if (-not (Test-Path -LiteralPath $OutFile)) { continue }
+            $curBytes = (Get-Item -LiteralPath $OutFile -ErrorAction SilentlyContinue).Length
+            if (-not $curBytes) { $curBytes = 0 }
+            $curMB = [math]::Round($curBytes / 1MB, 1)
+            $speedMBs = if ($elapsedSec -gt 0) { [math]::Round(($curBytes / 1MB) / $elapsedSec, 1) } else { 0.0 }
+
+            if ($expectedBytes -and $expectedBytes -gt 0) {
+                $pct = [math]::Round((100.0 * $curBytes) / $expectedBytes, 1)
+                $remainBytes = $expectedBytes - $curBytes
+                if ($speedMBs -gt 0 -and $remainBytes -gt 0) {
+                    $etaSec = [int](($remainBytes / 1MB) / $speedMBs)
+                    if ($etaSec -ge 60) {
+                        $etaStr = ('ETA {0}m {1:00}s' -f [int]($etaSec / 60), ($etaSec % 60))
+                    } else {
+                        $etaStr = ('ETA {0}s' -f $etaSec)
+                    }
+                } else {
+                    $etaStr = 'ETA --'
+                }
+                Write-Step ('  ... {0:N1} MB / {1:N1} MB ({2}%) at {3} MB/s {4}' -f $curMB, $expectedMB, $pct, $speedMBs, $etaStr)
+            } else {
+                # No expected size: print bytes downloaded + speed only
+                if ($elapsedSec -ge 60) {
+                    $elapsedStr = ('{0}m {1:00}s' -f [int]($elapsedSec / 60), ($elapsedSec % 60))
+                } else {
+                    $elapsedStr = ('{0}s' -f $elapsedSec)
+                }
+                Write-Step ('  ... {0:N1} MB at {1} MB/s ({2} elapsed)' -f $curMB, $speedMBs, $elapsedStr)
+            }
+            $progressLines++
+        }
+
+        # ---- Phase 4: receive worker result, propagate errors ----
+        Set-DebugStep -Step 'download-job-finalize'
+        if ($job.State -eq 'Failed') {
+            $jobErr = $null
+            try {
+                $null = Receive-Job -Job $job -ErrorAction Stop
+            } catch {
+                $jobErr = $_.Exception.Message
+            }
+            throw ('Download job failed for {0}: {1}' -f $Uri, $(if ($jobErr) { $jobErr } else { '(no error message)' }))
+        }
+        # Drain any output from the worker (should be empty -- we Out-Null'd it)
+        $null = Receive-Job -Job $job -ErrorAction SilentlyContinue
+    } finally {
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
+
+    # ---- Phase 5: post-download validation + summary line ----
+    Set-DebugStep -Step 'download-postcheck'
+    if (-not (Test-Path -LiteralPath $OutFile)) {
+        throw ('Download appeared to succeed but {0} does not exist' -f $OutFile)
+    }
+    $finalBytes = (Get-Item -LiteralPath $OutFile).Length
+    $finalMB = [math]::Round($finalBytes / 1MB, 1)
+    $totalSec = [int](New-TimeSpan -Start $startTime -End (Get-Date)).TotalSeconds
+    if ($totalSec -lt 1) { $totalSec = 1 } # avoid div-by-zero on cached/very small DLs
+    $avgSpeed = [math]::Round(($finalBytes / 1MB) / $totalSec, 1)
+    if ($totalSec -ge 60) {
+        $totalStr = ('{0}m {1:00}s' -f [int]($totalSec / 60), ($totalSec % 60))
+    } else {
+        $totalStr = ('{0}s' -f $totalSec)
+    }
+
+    if ($MinSizeBytes -gt 0 -and $finalBytes -lt $MinSizeBytes) {
+        $minMB = [math]::Round($MinSizeBytes / 1MB, 1)
+        try { Remove-Item -LiteralPath $OutFile -Force -ErrorAction Stop } catch {
+            # best-effort cleanup; the next call to this function
+            # will overwrite the truncated file anyway
+        } # psa-disable-line PSA3004 -- best-effort cleanup of a truncated download
+        throw ('Downloaded file is only {0:N1} MB (expected >= {1:N1} MB). The CDN likely returned an error page or the connection was truncated. Try -IsoUrl with a known-good direct URL.' -f $finalMB, $minMB)
+    }
+
+    Write-Ok ('Downloaded: {0:N1} MB in {1} ({2} MB/s avg)' -f $finalMB, $totalStr, $avgSpeed)
+}
+# <<< CANONICAL unit_id=pwsh.helper.invoke-downloadwithprogress <<<
 
 function ConvertFrom-HtmlEntity {
     param([string]$Text)
@@ -2429,6 +2864,7 @@ function Get-OutputFilename {
 # Phase 1: Environment evaluation
 # ============================================================
 
+# >>> CANONICAL unit_id=pwsh.helper.show-powershellenvironment version=1.0.0 hash=c7b2d656d36133b9 policy=canonical binding=follow-latest >>>
 function Show-PowerShellEnvironment {
     <#
     .SYNOPSIS
@@ -2465,6 +2901,9 @@ function Show-PowerShellEnvironment {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSAvoidUsingWMICmdlet', '',
         Justification = 'Intentional Get-WmiObject fallback path. CIM is the primary path; WMI is the secondary path used only when CIM is constrained (some Server Core / container images). PS 5.1 supports both; PS 7+ exposes Get-WmiObject only when the WMI compatibility module is loaded, which is fine because the script declares PS 5.1+ as its baseline.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSUseCompatibleCommands', '',
+        Justification = 'platform_scope=windows-enhanced (ADR 0013). The Get-CimInstance / Get-WmiObject OS-info path is intentionally Windows-specific: on non-Windows it is guarded by try/catch and degrades gracefully to "(CIM/WMI unavailable)". The function itself is cross-platform and runs everywhere; only this OS-detail section is Windows-enhanced. The compatibility gate flags these Windows-only commands on the PS-7-Linux profile; that is expected and accepted for a windows-enhanced unit, not a defect.')]
     param()
 
     # ---- (1) Engine + process ----
@@ -2476,13 +2915,29 @@ function Show-PowerShellEnvironment {
     }
     Write-Host ('    PowerShell Version  : {0}' -f $pv.PSVersion)
     Write-Host ('    PowerShell Edition  : {0,-25} ({1})' -f $pv.PSEdition, $editionDesc)
-    if ($pv.CLRVersion) {
-        Write-Host ('    CLR / .NET          : {0}' -f $pv.CLRVersion)
-    } else {
-        Write-Host  '    CLR / .NET          : (CLRVersion not exposed; PS Core is .NET 5+ via System.Environment.Version)'
-    }
-    if ($pv.BuildVersion) {
+    # CLR / .NET runtime version. Dual-runtime policy (ADR 0012): report the
+    # executing .NET runtime version on BOTH PS 5.1 and PS 7.x, never degrade.
+    # $PSVersionTable.CLRVersion exists only on Windows PowerShell 5.1 (and the
+    # bare property access throws under StrictMode on PS 7 because the key is
+    # absent), so use [System.Environment]::Version - same meaning (a [Version]
+    # value), present on EVERY supported runtime (.NET 1.1+).
+    # NOTE: RuntimeInformation::FrameworkDescription was considered as a
+    # human-readable annotation but REMOVED - it requires .NET Framework 4.7.1+
+    # and would throw on older PS 5.1 hosts (.NET 4.5-4.7.0), violating the very
+    # dual-runtime policy it was meant to serve (the compatibility static-analysis
+    # gate surfaced this). Environment.Version alone is the safe, meaning-
+    # preserving choice.
+    $runtimeVersion = [System.Environment]::Version
+    Write-Host ('    CLR / .NET          : {0}' -f $runtimeVersion)
+    # Engine build identity. Dual-runtime policy (ADR 0012): BuildVersion is a
+    # Windows PowerShell 5.1-only key (absent on PS 7, so the bare access throws
+    # under StrictMode). $PSVersionTable is a PSVersionHashTable, so the
+    # StrictMode-safe existence test is .ContainsKey(). Fall back to GitCommitId,
+    # the PS 7 engine-build identity, so both runtimes report an engine build.
+    if ($pv.ContainsKey('BuildVersion') -and $pv.BuildVersion) {
         Write-Host ('    Engine Build        : {0}' -f $pv.BuildVersion)
+    } elseif ($pv.ContainsKey('GitCommitId') -and $pv.GitCommitId) {
+        Write-Host ('    Engine Build        : {0}' -f $pv.GitCommitId)
     }
 
     $procBitness = if ([Environment]::Is64BitProcess) { '64-bit process' } else { '32-bit process' }
@@ -2593,7 +3048,9 @@ function Show-PowerShellEnvironment {
         Write-Host  '      [!] OS             WARN  (CIM/WMI both failed; could not determine OS build)' -ForegroundColor Yellow
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.show-powershellenvironment <<<
 
+# >>> CANONICAL unit_id=pwsh.helper.assert-powershellcompatibility version=1.0.0 hash=cbe202e59516c121 policy=canonical binding=follow-latest >>>
 function Assert-PowerShellCompatibility {
     <#
     .SYNOPSIS
@@ -2643,6 +3100,7 @@ validated under 64-bit PowerShell.
 '@
     }
 }
+# <<< CANONICAL unit_id=pwsh.helper.assert-powershellcompatibility <<<
 
 function Test-Environment {
     param(
@@ -5039,7 +5497,7 @@ try {
     }
 
     # Now that any cleanup is done, (re-)create the directory tree.
-    Initialize-RuntimeDirectories
+    Initialize-RuntimeDirectories -Directory @($Script:OutputDir, $Script:WorkDir, $Script:DiagDir, $Script:LogsDir)
 
     # ===== Activate the Debug Trace Facility =====
     # Now that $Script:LogsDir and $Script:DiagDir exist on disk, route
