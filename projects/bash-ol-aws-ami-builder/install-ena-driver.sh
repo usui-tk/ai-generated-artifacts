@@ -66,6 +66,13 @@ ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.0}"
 EPEL6_ARCHIVE_BASEURL="${EPEL6_ARCHIVE_BASEURL:-https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/}"
 
 log() { echo "[ena-driver] $*"; }
+# Greppable build-stage breadcrumb. Distinct from log() so the host wrapper (and
+# a human reading a failed build) can pick out the phase boundaries. NOTE: the
+# guest provisioning output is swallowed by virt-customize on a SUCCESSFUL build
+# (see dump_build_diag) -- these breadcrumbs surface on the failure path (where
+# they pin which sub-step broke) and in the preserved make.log context, not as a
+# live host signal. Live host-side progress comes from the wrapper heartbeat.
+stage() { echo "[ena-driver][stage] $*"; }
 die() { echo "[ena-driver][ERROR] $*" >&2; exit 1; }
 
 # On a failed build, surface the DKMS diagnostics to stderr so the actual
@@ -90,6 +97,27 @@ dump_build_diag() {
     sed 's/^/[ena-driver][ERROR]   /' "${ml}" >&2 || true
   done < <(find "/var/lib/dkms/amzn-drivers/${ena_version:-}" -name 'make.log' 2>/dev/null || true)
   echo "[ena-driver][ERROR] ---- end build diagnostics ----" >&2
+}
+
+# On a SUCCESSFUL build the guest provisioning output is swallowed by
+# virt-customize (see dump_build_diag), so the DKMS make.log -- the only record
+# of what the compile actually did -- would be lost. Copy it to a stable path
+# that ships inside the produced AMI, so it can be inspected post-hoc on a
+# launched instance. Best-effort: never the cause of a new failure. (On a FAILED
+# build, dump_build_diag already surfaces the same make.log to the host log.)
+record_make_log() {
+  local dest="/var/log/ol-aws-ami-builder-ena-make.log" ml
+  ml="$(find "/var/lib/dkms/amzn-drivers/${ena_version:-}" -name 'make.log' 2>/dev/null | head -1 || true)"
+  if [[ -n "${ml}" && -f "${ml}" ]]; then
+    mkdir -p "$(dirname "${dest}")" 2>/dev/null || true
+    if cp -f "${ml}" "${dest}" 2>/dev/null; then
+      stage "preserved DKMS make.log -> ${dest} (ships in the AMI for post-hoc inspection)"
+    else
+      log "[make.log] could not copy ${ml} -> ${dest}"
+    fi
+  else
+    log "[make.log] no DKMS make.log under /var/lib/dkms/amzn-drivers/${ena_version:-} (nothing to preserve)"
+  fi
 }
 
 # Highest /lib/modules entry matching a shell glob (by version sort), or "".
@@ -222,9 +250,11 @@ ensure_kernel_devel() {
   [[ -e "/lib/modules/${kver}/build" ]]
 }
 
+stage "installing build prerequisites (gcc, make, kernel headers)"
 log "Installing build prerequisites (gcc, make, kernel headers)"
 yum install -y gcc make tar findutils || die "failed to install gcc/make/tar"
 if [[ "${kver}" == *uek* ]]; then
+  stage "resolving kernel-uek-devel headers for ${kver}"
   ensure_kernel_devel || die "could not obtain kernel-uek-devel headers for ${kver} (enable the UEK repo / update the kernel and retry)"
 else
   yum install -y "${develpkg}" || die "failed to install ${develpkg}"
@@ -232,6 +262,7 @@ else
 fi
 
 use_dkms=1
+stage "enabling EPEL + installing dkms"
 setup_epel
 if ! yum install -y dkms; then
   log "DKMS not installable; falling back to a plain make build (no auto-rebuild on kernel upgrade)"
@@ -242,6 +273,7 @@ fi
 src_tgz="/usr/src/ena_linux_${ena_version}.tar.gz"
 src_dir="/usr/src/amzn-drivers-${ena_version}"
 url="https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_${ena_version}.tar.gz"
+stage "downloading amzn-drivers ${ena_version} source"
 log "Downloading ${url}"
 rm -rf "${src_dir}"
 if command -v curl >/dev/null 2>&1; then
@@ -321,9 +353,13 @@ REMAKE_INITRD="yes"
 AUTOINSTALL="yes"
 EOF
   dkms remove  -m amzn-drivers -v "${ena_version}" --all 2>/dev/null || true
+  stage "dkms add (amzn-drivers ${ena_version})"
   dkms add     -m amzn-drivers -v "${ena_version}"
+  stage "dkms build for ${kver} -- long, quiet in-guest compile (typically a few minutes)"
   dkms build   -m amzn-drivers -v "${ena_version}" -k "${kver}"
+  stage "dkms install for ${kver}"
   dkms install -m amzn-drivers -v "${ena_version}" -k "${kver}" --force
+  stage "dkms build + install complete for ${kver}"
 }
 
 build_install_plain() {
@@ -338,6 +374,7 @@ if [[ "${use_dkms}" -eq 1 ]]; then
   log "Building & installing ENA ${ena_version} via DKMS for ${kver}"
   report_inbox_ena
   build_install_dkms || { dump_build_diag; die "DKMS build/install failed (compiler output dumped above; in-guest make.log)"; }
+  record_make_log
 else
   log "Building & installing ENA ${ena_version} via plain make for ${kver}"
   report_inbox_ena
