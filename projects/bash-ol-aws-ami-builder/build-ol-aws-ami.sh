@@ -198,6 +198,14 @@ log_external() {
   while IFS= read -r line || [[ -n "${line}" ]]; do
     printf '%s \033[90m[EXTERNAL]\033[0m \033[90m[%s]\033[0m %s\n' \
       "$(date '+%Y-%m-%d %H:%M:%S')" "${script}" "${line}"
+    # Record the latest LIVE orchestrator line so the Phase-5 heartbeat can show
+    # "what build-image.sh is doing now". NOTE: the in-guest provision.sh output
+    # (install-ena-driver.sh's [ena-driver] lines) is swallowed by virt-customize
+    # until/unless the guest script fails, so it is NOT a live signal -- only this
+    # orchestrator stream is. Best-effort, single overwrite (latest wins).
+    if [[ -n "${BUILD_STAGE_FILE:-}" ]]; then
+      printf '%s\n' "[${script}] ${line}" > "${BUILD_STAGE_FILE}" 2>/dev/null || true
+    fi
     line=""
   done
 }
@@ -458,7 +466,7 @@ load_env() {
   # anaconda emits nothing to the serial line (OL8+ runs anaconda in tmux). The
   # default is short because this script is usually run interactively, not in
   # CI, where a long silent gap reads as a hang.
-  : "${HEARTBEAT_INTERVAL_SEC:=20}"
+  : "${HEARTBEAT_INTERVAL_SEC:=10}"
   # Nitro readiness pre-check mode (Phase 6). Offline, read-only inspection of
   # the built image for the AWS Nitro boot essentials (NVMe host driver, ENA
   # driver, UUID/LABEL-based fstab and bootloader root=), run after the VMDK is
@@ -2510,11 +2518,25 @@ phase5_progress_heartbeat() {
   local ws="$1" interval="$2"
   local start prev_kb=0
   start=$(date +%s)
+  # A: runs as a background job on its OWN timer, independent of the build pipe,
+  # so it keeps reporting even while build-image.sh is blocked in a long, quiet
+  # in-guest step. Each tick is assembled into one string and emitted as a SINGLE
+  # log_progress write (atomic under PIPE_BUF), so it never interleaves mid-line
+  # with the [EXTERNAL] stream that shares stdout.
   while :; do
     sleep "${interval}"
-    local img elapsed used_kb used_h name state delta_mb
+    local img elapsed used_kb used_h name state delta_mb stage msg
     img=$(find "${ws}" -maxdepth 3 -name '*.qcow2' 2>/dev/null | head -n 1)
     elapsed=$(( ($(date +%s) - start) / 60 ))
+    # B: append the latest LIVE orchestrator stage (recorded by log_external),
+    # truncated so the heartbeat line stays readable. During a long quiet in-guest
+    # compile this holds the last build-image.sh line (e.g. the customize step),
+    # which is exactly what "looks idle but is alive" should show.
+    stage=""
+    if [[ -n "${BUILD_STAGE_FILE:-}" && -r "${BUILD_STAGE_FILE}" ]]; then
+      stage=$(tail -n 1 "${BUILD_STAGE_FILE}" 2>/dev/null | cut -c1-70)
+      [[ -n "${stage}" ]] && stage=" | stage: ${stage}"
+    fi
     if [[ -n "${img}" && -f "${img}" ]]; then
       used_kb=$(du -k "${img}" 2>/dev/null | awk '{print $1}')
       used_h=$(du -h "${img}" 2>/dev/null | awk '{print $1}')
@@ -2522,11 +2544,12 @@ phase5_progress_heartbeat() {
       state=$(virsh --connect qemu:///system domstate "${name}" 2>/dev/null | head -n 1)
       [[ -z "${state}" ]] && state="(no domain)"
       delta_mb=$(( (${used_kb:-0} - prev_kb) / 1024 ))
-      log_progress "elapsed ${elapsed}m | disk ${used_h} ($(printf '%+d' "${delta_mb}")MB) | vm ${state}"
+      msg="elapsed ${elapsed}m | disk ${used_h} ($(printf '%+d' "${delta_mb}")MB) | vm ${state}${stage}"
       prev_kb=${used_kb:-0}
     else
-      log_progress "elapsed ${elapsed}m | build image not yet allocated"
+      msg="elapsed ${elapsed}m | build image not yet allocated${stage}"
     fi
+    log_progress "${msg}"
   done
 }
 
@@ -2576,6 +2599,10 @@ phase5_run_build() {
   doms_before=$(virsh list --name 2>/dev/null | sed '/^$/d' | sort || true)
 
   local build_rc=0
+  # B: shared stage file the heartbeat reads and log_external writes (latest
+  # live orchestrator line). Lives in WORKSPACE; reset now, removed after.
+  BUILD_STAGE_FILE="${WORKSPACE}/.build-stage"
+  : > "${BUILD_STAGE_FILE}" 2>/dev/null || BUILD_STAGE_FILE=""
   # Start the progress heartbeat (visibility independent of the install
   # console). Stopped right after the build returns, so it covers the success,
   # failure, and watchdog-timeout paths below.
@@ -2604,6 +2631,9 @@ phase5_run_build() {
   if [[ -n "${hb_pid}" ]]; then
     kill "${hb_pid}" 2>/dev/null || true
     wait "${hb_pid}" 2>/dev/null || true
+  fi
+  if [[ -n "${BUILD_STAGE_FILE:-}" ]]; then
+    rm -f "${BUILD_STAGE_FILE}" 2>/dev/null || true
   fi
 
   if [[ ${build_rc} -eq 124 ]]; then
