@@ -1,25 +1,21 @@
-﻿# >>> CANONICAL unit_id=pwsh.helper.set-tlssecurityprotocol version=1.0.0 hash=3d18821524b8b723 policy=canonical binding=follow-latest >>>
+﻿# >>> CANONICAL unit_id=pwsh.helper.set-tlssecurityprotocol version=1.0.0 hash=137ffea3b2034e15 policy=canonical binding=follow-latest >>>
 function Set-TlsSecurityProtocol {
-    <#
-    .SYNOPSIS
-        Enable TLS 1.2 (and weaker fallbacks) for outbound HTTPS calls.
-    .DESCRIPTION
-        Required on some Windows PowerShell 5.1 hosts where the default
-        SecurityProtocol is still Ssl3 + Tls (1.0). The Microsoft Update
-        Catalog (catalog.update.microsoft.com), the Windows Update CDN
-        (catalog.s.download.windowsupdate.com) that serves wsusscn2.cab,
-        and the GitHub release endpoints (api.github.com / github.com)
-        used for the 7-Zip fallback all require TLS 1.2+, so the default
-        on older hosts results in a handshake failure unless this is
-        set. Tls11 and Tls (1.0) are kept in the bitmask as a
-        defensive fallback for very old environments; modern hosts
-        will negotiate Tls12.
-    #>
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = `
-            [Net.SecurityProtocolType]::Tls12 -bor `
-            [Net.SecurityProtocolType]::Tls11 -bor `
-            [Net.SecurityProtocolType]::Tls
-    } catch { } # psa-disable-line PSA3004 -- older PS hosts may lack newer enum values; ignore silently
+    # ====================================================================
+    # Enable TLS for outbound HTTPS calls with best-effort multi-version
+    # fallback. Tls12 is the baseline (required by most modern endpoints
+    # including AMD/Microsoft download servers and Speaker Deck CDN).
+    # Tls13 is added when the running .NET supports it (Framework 4.8+,
+    # PowerShell 7+, WS2022 / WS2025). Tls11 and Tls (1.0) are added as
+    # a defensive fallback for very old environments (WS2016 / WS2019
+    # with stock .NET); modern hosts will negotiate Tls13/Tls12 and the
+    # legacy bits are ignored by the server. Each enum lookup is wrapped
+    # in try/catch because older .NET runtimes raise an enum-value error
+    # for protocols they don't recognise.
+    # ====================================================================
+    $protos = [Net.SecurityProtocolType]::Tls12
+    try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls13 } catch { } # psa-disable-line PSA3004 -- Tls13 enum may not exist on older .NET
+    try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls11 } catch { } # psa-disable-line PSA3004 -- defensive legacy fallback for very old environments
+    try { $protos = $protos -bor [Net.SecurityProtocolType]::Tls   } catch { } # psa-disable-line PSA3004 -- defensive legacy fallback for very old environments
+    [Net.ServicePointManager]::SecurityProtocol = $protos
 }
 # <<< CANONICAL unit_id=pwsh.helper.set-tlssecurityprotocol <<<
