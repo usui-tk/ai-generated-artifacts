@@ -47,6 +47,31 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Docs (no behaviour change):** SPEC **B.4 (Wrapper-patch marker convention)**
+  had drifted behind the implementation. The "Current markers" table listed only
+  3 of the 8 marker-guarded patches the script actually applies in
+  `phase3_clone_repository` — it was missing `declare-g-ol6`, `ol6-cloud-user`,
+  `nitro-initramfs`, `serial-console`, `ena-driver-build`, and
+  `selinux-relabel-fallback` (the first three had **no** marker-tag mention
+  anywhere in the SPEC). The "canonical marker format" line described a single
+  `[ol-aws-ami-builder OL{N} PATCH {short-tag}]` shape that no marker actually
+  uses, and "Each patch leaves a `.bak` backup" was true only for the `sed`-based
+  patches, not the `>>`-appended hook injections. The table now lists all 8
+  markers with file-patched / trigger / purpose (cross-referencing D.17/D.25/D.26
+  and A.7), documents the two real marker shapes, and states the `.bak` vs
+  append distinction. SPEC-only: the README does not restate the marker tags and
+  `tests/t7_idempotency.sh` already enumerates all 7 named markers.
+
+- **Docs (no behaviour change):** SPEC **B.5.2 (Phase A static check #9)**
+  contradicted the rest of the document on the OL6 cloud-init version. Check #9
+  presented `cloud-init-18.4-2.0.9.el6.x86_64` (the `ol6_addons` build) as the
+  OL6 cloud-init, but the **operative** version everywhere else — the IMDSv2
+  rejection (D.27), the `ec2-user` fix verified against `cloud-init-0.7.5-8.el6_9.2`
+  (D.26), the `cloud.cfg.d` merge semantics (B.5), and the README pair — is the
+  stock base-repo **0.7.5**. Check #9 now leads with the operative 0.7.5 (the
+  version every OL6 hook targets) and reframes the `ol6_addons` 18.4 as available
+  but not relied upon, removing the internal contradiction. SPEC-only.
+
 - **OL6: the in-guest ENA self-build failed with `kcompat.h: ... redefinition of
   'page_ref_count'`** even at the pinned `2.9.1`, so an AWS-optimized OL6 AMI
   could not be built (a pure `--skip-ena-driver` AMI was unaffected). The

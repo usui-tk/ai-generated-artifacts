@@ -1166,26 +1166,35 @@ in `build-ol-aws-ami.sh` and are gated behind `OL_MAJOR_VERSION == 6`
 ### Wrapper-patch marker convention
 
 All wrapper-applied modifications to the upstream working copy must be
-discoverable by `grep -r '\[ol-aws-ami-builder' "${WORK_REPO_DIR}"`. The
-canonical marker format is:
+discoverable by `grep -r '\[ol-aws-ami-builder' "${WORK_REPO_DIR}"`. Markers
+take one of two shapes:
 
 ```
-[ol-aws-ami-builder OL{N} PATCH {short-tag}]
+[ol-aws-ami-builder OL{N} PATCH]          # version-specific (the OL8+-guard removal)
+[ol-aws-ami-builder PATCH {short-tag}]    # feature-specific, version-independent
 ```
 
-where `{N}` is the OL major version (6, 7, ...) and `{short-tag}` is a
-descriptive identifier (omitted when only one patch exists per OL major).
-Current markers:
+where `{N}` is the OL major version (6 or 7) and `{short-tag}` is a descriptive
+identifier. All are applied inside `phase3_clone_repository`. Current markers:
 
-| Marker | File patched | Purpose |
-|--------|--------------|---------|
-| `[ol-aws-ami-builder OL6 PATCH]` | `cloud/aws/image-scripts.sh` | Remove OL8+ guard (OL6 mode) |
-| `[ol-aws-ami-builder OL7 PATCH]` | `cloud/aws/image-scripts.sh` | Remove OL8+ guard (OL7 mode) |
-| `[ol-aws-ami-builder PATCH kernel-uek-modules]` | `cloud/aws/provision.sh` | Skip `kernel-uek-modules` install on OL6/OL7 (UEK < R7) |
+| Marker | File patched | Trigger | Purpose |
+|--------|--------------|---------|---------|
+| `[ol-aws-ami-builder OL6 PATCH]` | `cloud/aws/image-scripts.sh` | `OL_MAJOR_VERSION == 6` | Remove the OL8+ guard (OL6 mode) |
+| `[ol-aws-ami-builder OL7 PATCH]` | `cloud/aws/image-scripts.sh` | `OL_MAJOR_VERSION == 7` | Remove the OL8+ guard (OL7 mode) |
+| `[ol-aws-ami-builder PATCH kernel-uek-modules]` | `cloud/aws/provision.sh` | `OL_MAJOR_VERSION <= 7` | Skip the `kernel-uek-modules` install on OL6/OL7 (UEK < R7; bundled in `kernel-uek`) |
+| `[ol-aws-ami-builder PATCH declare-g-ol6]` | `env.properties.defaults` | `OL_MAJOR_VERSION == 6` | Guard `declare -gA REPO` with a `\|\| declare -A` fallback (bash 4.1 in the OL6 guest has no `declare -g`) |
+| `[ol-aws-ami-builder PATCH ol6-cloud-user]` | `cloud/aws/provision.sh` | `OL_MAJOR_VERSION == 6` | Wrap `cloud::cloud_init` so the OL6 cloud-init default user becomes `ec2-user` (strips the absent `systemd-journal` group; runs after the configs are written) — see D.26 |
+| `[ol-aws-ami-builder PATCH nitro-initramfs]` | `cloud/aws/provision.sh` | always (AWS cloud path) | Drop an `/etc/dracut.conf.d` `add_drivers` file forcing `nvme`/`ena` into the initramfs and regenerate it (Nitro boot requirement; Phase 6 CHECK 1 verifies the result) |
+| `[ol-aws-ami-builder PATCH serial-console]` | `cloud/aws/provision.sh` | GRUB2 systems (OL7+; hook self-skips on OL6 GRUB Legacy) | Ensure `console=tty0 console=ttyS0,115200n8` on the GRUB2 kernel cmdline + `grub2-mkconfig`, so AWS `Get System Log` captures boot output — see D.25 |
+| `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; installer is a no-op on OL8+) — logged as `[OLAWS-ENA01]`, see A.7 |
+| `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` | `bin/build-image.sh` | host libguestfs lacks the `selinuxrelabel` optgroup | Schedule a first-boot `/.autorelabel` instead of the offline relabel when the build host's libguestfs cannot relabel — see D.17 |
 
-Each patch leaves a `.bak` backup file next to the modified one and
-includes a `grep -Fq` idempotency guard so re-runs against an existing
-clone do not double-apply.
+The `sed`-based substitutions (the OL6/OL7 guard removals, `kernel-uek-modules`,
+`declare-g-ol6`) leave a `.bak` backup next to the modified file; the
+marker-bracketed hook injections (`ol6-cloud-user`, `nitro-initramfs`,
+`serial-console`, `ena-driver-build`) are `>>`-appended blocks. Every patch is
+idempotent: it is fronted by a `grep -Fq` marker check so a re-run against an
+existing clone re-detects its marker and skips.
 
 ### `sed` invocation conventions
 
@@ -1326,10 +1335,14 @@ RHEL 10.0 with libvirt 11.5.0-2.el10, qemu-kvm 10.0.0-13.el10.
 8. OL6 UEKR4 repo (`https://yum.oracle.com/repo/OracleLinux/OL6/UEKR4/x86_64/`)
    responds HTTP 200; `primary.xml.gz` confirms `kernel-uek-4.1.12-*`
    present and `kernel-uek-modules-*` absent.
-9. OL6 cloud-init availability:
-   `cloud-init-18.4-2.0.9.el6.x86_64` and
-   `cloud-utils-growpart-0.27-9.el6.x86_64` confirmed in the
-   `ol6_addons` repo.
+9. OL6 cloud-init: the **operative** version is the stock base-repo
+   `cloud-init-0.7.5` — every OL6 cloud-init hook in this wrapper targets it,
+   and the `ec2-user` fix (D.26) was verified against
+   `cloud-init-0.7.5-8.el6_9.2`. (The `ol6_addons` repo additionally offers a
+   newer `cloud-init-18.4-2.0.9.el6.x86_64`, but the OL6 path does not rely on
+   it — the handling is written against 0.7.5's `cloud.cfg.d` merge semantics
+   and IMDSv1-only metadata; see A.7 / D.27.) `cloud-utils-growpart-0.27-9.el6.x86_64`
+   confirmed in `ol6_addons`.
 
 **Phase B — Dynamic checks (2 items, all PASS):**
 
