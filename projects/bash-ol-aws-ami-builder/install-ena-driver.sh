@@ -291,6 +291,21 @@ if [[ "${osmajor}" == "6" ]]; then
   patch_ena_uek_detection
 fi
 
+# ---- report the in-box ENA driver BEFORE the self-build replaces it --------
+# The self-build is otherwise silent about what it supersedes. Capture the stock
+# in-tree ENA module's identity for the TARGET kernel now, so the before/after
+# delta is on record. modinfo's `version` field is frequently empty for an
+# in-tree module (e.g. OL7/OL8); fall back to srcversion and always show the
+# module file so the line is never uninformative.
+report_inbox_ena() {
+  command -v modinfo >/dev/null 2>&1 || { log "[in-box ENA] modinfo unavailable; skipping pre-build report"; return 0; }
+  local ver src fn
+  ver="$(modinfo -k "${kver}" -F version ena 2>/dev/null | head -1)"
+  src="$(modinfo -k "${kver}" -F srcversion ena 2>/dev/null | head -1)"
+  fn="$(modinfo -k "${kver}" -F filename ena 2>/dev/null | head -1)"
+  log "[in-box ENA] before self-build: version=${ver:-<none; in-tree, no version field>} srcversion=${src:-?} file=${fn:-<not found>}"
+}
+
 # ---- build & install --------------------------------------------------------
 build_install_dkms() {
   cat > "${src_dir}/dkms.conf" <<EOF
@@ -321,9 +336,11 @@ build_install_plain() {
 
 if [[ "${use_dkms}" -eq 1 ]]; then
   log "Building & installing ENA ${ena_version} via DKMS for ${kver}"
+  report_inbox_ena
   build_install_dkms || { dump_build_diag; die "DKMS build/install failed (compiler output dumped above; in-guest make.log)"; }
 else
   log "Building & installing ENA ${ena_version} via plain make for ${kver}"
+  report_inbox_ena
   build_install_plain || { dump_build_diag; die "plain make build/install failed (build output above)"; }
 fi
 

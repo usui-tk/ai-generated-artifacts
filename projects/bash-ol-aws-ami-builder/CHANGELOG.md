@@ -19,6 +19,32 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed
+
+- **OL7/OL8 E2E feedback — ENA driver reporting, AMI identification, pin-log accuracy.**
+  - *Phase 6 ENA report (feedback ①②):* the two driver lines are now aligned,
+    fixed-width headers — `ENA Driver (Kernel in-box) - ...` and
+    `ENA Driver (Self-Build)    - ...` — so the in-box vs self-built version delta
+    is legible at a glance. When the in-tree module exposes no `modinfo` version
+    field (OL7/OL8 in-tree ENA), the in-box line now reads
+    `in-tree, no version field (kernel-bundled)` instead of a bare `none`.
+    `install-ena-driver.sh` additionally logs the in-box ENA identity
+    (`version`/`srcversion`/`file`) for the target kernel BEFORE the self-build
+    replaces it.
+  - *AMI identification (feedback ③):* when the ENA self-build is enabled
+    (default), the auto `AMI_NAME` gains an `-ena${ENA_BUILD_VERSION}` suffix and
+    `AMI_DESCRIPTION` a self-built-ENA clause, so a self-built AMI is
+    distinguishable from a pure OL AMI before launch; the final summary now prints
+    `AMI Description:` and an `ENA driver:` line. An explicitly set
+    name/description is left untouched.
+  - *Pin-log accuracy (drift):* the Phase-3 `[OLAWS-ENA01]` hook-injection log no
+    longer hardcodes `OL6 2.5.0` (stale since the OL6 pin moved to `2.9.1`); it now
+    reports `pin: OL<major> <version>` read from `install-ena-driver.sh`'s
+    `ENA_VERSION_OL<major>` default (single source of truth), so it cannot drift
+    again. The AMI name/description share this reader (`ENA_BUILD_VERSION`).
+  Guarded by a new host-runnable tier `tests/t11_enareporting.sh`. `bash -n` +
+  `shellcheck -S style` clean.
+
 ### Fixed
 
 - **OL6: the in-guest ENA self-build failed with `kcompat.h: ... redefinition of

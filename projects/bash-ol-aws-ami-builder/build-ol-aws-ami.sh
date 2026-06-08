@@ -156,6 +156,9 @@ BUILD_ONLY=0
 # ENA driver self-build (default ON -> AWS-optimized AMI; --skip-ena-driver
 # turns it OFF -> pure, unmodified OL AMI).
 ENA_DRIVER_BUILD=1
+# Resolved ENA self-build pin (filled by load_env from install-ena-driver.sh when
+# ENA_DRIVER_BUILD=1); stays empty for a pure OL AMI. Used in the AMI name/desc.
+ENA_BUILD_VERSION=""
 ENV_FILE=""
 # Logging (N3/F4). DEBUG=1 (--debug) also mirrors [DEBUG] lines to the console;
 # they are always written to the log file regardless. LOG_FILE empty -> default
@@ -399,8 +402,19 @@ load_env() {
     # fallback chain. Sets AWS_REGION_SOURCE for downstream logging.
     resolve_aws_region
     : "${AWS_REGION:?AWS_REGION could not be resolved (this should not happen)}"
-    : "${AMI_NAME:=OracleLinux-${OL_MAJOR_VERSION}-U${OL_UPDATE_VERSION}-x86_64-$(date +%Y%m%d-%H%M)}"
-    : "${AMI_DESCRIPTION:=Oracle Linux ${OL_MAJOR_VERSION} Update ${OL_UPDATE_VERSION} (x86_64) custom AMI built via oracle-linux-image-tools}"
+    # ENA self-build identity, folded into the AMI name (brief) and description
+    # (full) so a self-built-ENA AMI is distinguishable from a pure OL AMI BEFORE
+    # launch. ENA_BUILD_VERSION is the installer's pin (single source of truth);
+    # it stays empty for --skip-ena-driver. Only the AUTO defaults gain the
+    # marker -- an explicitly set AMI_NAME/AMI_DESCRIPTION is left untouched (:=).
+    local _ena_name_sfx="" _ena_desc_sfx=" (pure OL; ENA self-build skipped)"
+    if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
+      ENA_BUILD_VERSION="$(_ena_pin_for_major "${OL_MAJOR_VERSION}")"
+      _ena_name_sfx="-ena${ENA_BUILD_VERSION:-}"
+      _ena_desc_sfx=" with self-built Amazon ENA ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized for Nitro)"
+    fi
+    : "${AMI_NAME:=OracleLinux-${OL_MAJOR_VERSION}-U${OL_UPDATE_VERSION}-x86_64-$(date +%Y%m%d-%H%M)${_ena_name_sfx}}"
+    : "${AMI_DESCRIPTION:=Oracle Linux ${OL_MAJOR_VERSION} Update ${OL_UPDATE_VERSION} (x86_64) custom AMI built via oracle-linux-image-tools${_ena_desc_sfx}}"
     # AMI registration boot mode.
     # IMPORTANT: oracle-linux-image-tools currently produces BIOS-only images
     # for the AWS target (BOOT_MODE_BUILD must be 'bios'), so the AMI must
@@ -1509,7 +1523,7 @@ OLAWS_OL6_CLOUD_USER_BODY
       } >> "${aws_provision_ena}"
 
       if grep -Fq '[ol-aws-ami-builder PATCH ena-driver-build]' "${aws_provision_ena}"; then
-        log_info "  [OLAWS-ENA01] ENA driver hook injected (pins: OL6 2.5.0, OL7 2.17.0; in-guest DKMS build)"
+        log_info "  [OLAWS-ENA01] ENA driver hook injected (pin: OL${OL_MAJOR_VERSION} $(_ena_pin_for_major "${OL_MAJOR_VERSION}"); in-guest DKMS build)"
       else
         die "Failed to inject ENA driver hook into ${aws_provision_ena}"
       fi
@@ -2645,6 +2659,17 @@ _ena_module_version() {
   modinfo -F version "${f}" 2>/dev/null | head -1 || true
 }
 
+# Resolve the ENA self-build pin for an OL major by reading the single source of
+# truth -- install-ena-driver.sh's ENA_VERSION_OL<major> default -- so wrapper-side
+# messages, the AMI name/description, and the hook log never drift from the
+# installer's actual pins. Echoes empty if it cannot be determined.
+_ena_pin_for_major() {
+  local major="$1" inst="${SCRIPT_DIR}/install-ena-driver.sh"
+  [[ -f "${inst}" ]] || return 0
+  grep -E "^ENA_VERSION_OL${major}=" "${inst}" \
+    | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
+}
+
 phase6_nitro_readiness_check() {
   # Offline, read-only Nitro boot-readiness gate. Adapts the logic of AWS's
   # NitroInstanceChecks to inspect the BUILT IMAGE (no EC2 launch) via
@@ -2956,16 +2981,27 @@ phase6_nitro_readiness_check() {
       */updates/*) self_loc="DKMS /updates" ;;
       */extra/*)   self_loc="DKMS /extra" ;;
     esac
+    local inbox_disp self_disp
     if [[ "${ena_cfg}" == "y" ]]; then
-      log_info "  in-box ENA driver   : built into the kernel (=y; no separate module)"
+      inbox_disp="built into the kernel (=y; no separate module)"
+    elif [[ -n "${inbox_ver}" ]]; then
+      inbox_disp="${inbox_ver} (stock in-tree /kernel)"
+    elif [[ -n "${ena_inbox_mod}" ]]; then
+      inbox_disp="in-tree, no version field (kernel-bundled) (stock in-tree /kernel)"
     else
-      log_info "  in-box ENA driver   : ${inbox_ver:-none} (stock in-tree /kernel)"
+      inbox_disp="none found"
     fi
     if [[ -n "${ena_self_mod}" ]]; then
-      log_info "  self-built ENA driver: ${self_ver:-unknown} (${self_loc}; in-guest self-build active)"
+      self_disp="${self_ver:-unknown} (${self_loc}; in-guest self-build active)"
     else
-      log_info "  self-built ENA driver: not present (--skip-ena-driver / pure OL AMI)"
+      self_disp="not present (--skip-ena-driver / pure OL AMI)"
     fi
+    # Aligned, fixed-width labels so the operator can eyeball the in-box vs
+    # self-built ENA version delta at a glance (feedback: header alignment). The
+    # in-box line falls back to an explicit in-tree note when the kernel module
+    # carries no modinfo version field (true for OL7/OL8 in-tree ENA).
+    log_info "  ENA Driver (Kernel in-box) - ${inbox_disp}"
+    log_info "  ENA Driver (Self-Build)    - ${self_disp}"
     log_info "  --- Nitro instance assurance (advisory) ---"
     log_info "    signal : ${signal}"
     log_info "    Nitro v2  ${v2_tier}  e.g. ${fam_v2}"
@@ -3173,12 +3209,20 @@ phase9_register_ami() {
   log_info "=========================================="
   log_info "  AMI build completed successfully"
   log_info "=========================================="
-  log_info "  AMI ID:       ${ami_id}"
-  log_info "  AMI Name:     ${AMI_NAME}"
-  log_info "  Region:       ${AWS_REGION}"
-  log_info "  Snapshot ID:  ${SNAPSHOT_ID}"
-  log_info "  Boot Mode:    ${BOOT_MODE}"
-  log_info "  ENA Support:  enabled"
+  local ena_summary
+  if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
+    ena_summary="self-built ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized)"
+  else
+    ena_summary="stock in-box (pure OL AMI)"
+  fi
+  log_info "  AMI ID:          ${ami_id}"
+  log_info "  AMI Name:        ${AMI_NAME}"
+  log_info "  AMI Description: ${AMI_DESCRIPTION}"
+  log_info "  Region:          ${AWS_REGION}"
+  log_info "  Snapshot ID:     ${SNAPSHOT_ID}"
+  log_info "  Boot Mode:       ${BOOT_MODE}"
+  log_info "  ENA driver:      ${ena_summary}"
+  log_info "  ENA Support:     enabled"
   log_info "=========================================="
 }
 

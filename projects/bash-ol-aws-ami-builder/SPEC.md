@@ -376,8 +376,8 @@ bash. Avoid command substitutions in env files (security and reproducibility).
 |-----|--------------|
 | `DISTR` | `ol${OL_MAJOR_VERSION}-slim` |
 | `CLOUD` | `aws` |
-| `AMI_NAME` | `OracleLinux-${MAJOR}-U${UPDATE}-x86_64-$(date +%Y%m%d-%H%M)` |
-| `AMI_DESCRIPTION` | `Oracle Linux ${MAJOR} Update ${UPDATE} (x86_64) custom AMI built via oracle-linux-image-tools` |
+| `AMI_NAME` | `OracleLinux-${MAJOR}-U${UPDATE}-x86_64-$(date +%Y%m%d-%H%M)`; when the ENA self-build is enabled (default), the auto-default also appends `-ena${ENA_BUILD_VERSION}` (the installer's pin) so a self-built-ENA AMI is distinguishable pre-launch. An explicitly set `AMI_NAME` is left untouched. |
+| `AMI_DESCRIPTION` | `Oracle Linux ${MAJOR} Update ${UPDATE} (x86_64) custom AMI built via oracle-linux-image-tools`; the auto-default appends ` with self-built Amazon ENA ${ENA_BUILD_VERSION} (DKMS, AWS-optimized for Nitro)` when self-build is on, or ` (pure OL; ENA self-build skipped)` for `--skip-ena-driver`. `ENA_BUILD_VERSION` is read from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` pin (single source of truth). |
 | `BOOT_MODE_BUILD` | `bios` (Oracle tool restricts AWS to bios) |
 | `BOOT_MODE` | `legacy-bios` (must match `BOOT_MODE_BUILD`) |
 | `OS_VARIANT` | Auto-detected via `detect_os_variant` |
@@ -506,13 +506,19 @@ ENA driver in the guest for Nitro v4+ targets. Source: amzn/amzn-drivers ENA
 Linux driver (`ENA_Linux_Best_Practices.rst`, `RELEASENOTES.md`). The
 per-generation family lists are representative, not exhaustive.
 
-Ahead of the advisory tiers the report prints two explicit lines — the **in-box
-ENA driver** (stock in-tree `/kernel`, or `built into the kernel (=y)`) and the
-**self-built ENA driver** (the DKMS `/extra`|`/updates` module, or `not present`
-for a `--skip-ena-driver` / pure-OL build) — each with its `modinfo` version.
-These make the effect of the in-guest self-build visible directly in the build
-log even though successful guest provisioning is otherwise silent (libguestfs
-echoes a provisioning script's output to the host only on failure). The
+Ahead of the advisory tiers the report prints two aligned, fixed-width lines —
+**`ENA Driver (Kernel in-box)`** (stock in-tree `/kernel`, or `built into the
+kernel (=y)`) and **`ENA Driver (Self-Build)`** (the DKMS `/extra`|`/updates`
+module, or `not present` for a `--skip-ena-driver` / pure-OL build) — each with
+its `modinfo` version. When the in-tree module carries no `modinfo` version
+field (common for OL7/OL8 in-tree ENA), the in-box line shows an explicit
+`in-tree, no version field (kernel-bundled)` note rather than a bare `none`. The
+labels are width-aligned so the in-box vs self-built version delta is legible at
+a glance. `install-ena-driver.sh` additionally logs the in-box module identity
+(`version`/`srcversion`/`file`) for the target kernel BEFORE the self-build, so
+the before/after delta is on record even though successful guest provisioning is
+otherwise silent (libguestfs echoes a provisioning script's output to the host
+only on failure). The
 ENAv3-tier `signal` line continues to reflect the **effective** module (depmod
 precedence `updates` > `extra` > `kernel`).
 
