@@ -543,12 +543,12 @@ when producing an AWS-optimized AMI:
 
 | OL | Kernel package (UEK) | In-distro ENA (`modinfo`) | ENAv3 status (amzn-drivers) | Self-build pin |
 |----|----------------------|---------------------------|-----------------------------|----------------|
-| OL6 U10 | `kernel-uek-4.1.12-124.48.6.el6uek.x86_64` | `1.1.2` | `< 1.2.0` → ENAv3 ENI attach **fails** on Nitro v4+ | `ena_linux_2.5.0` |
+| OL6 U10 | `kernel-uek-4.1.12-124.48.6.el6uek.x86_64` | `1.1.2` | `< 1.2.0` → ENAv3 ENI attach **fails** on Nitro v4+ | `ena_linux_2.9.1` |
 | OL7 U9  | `kernel-uek-5.4.17-2136.338.4.2.el7uek.x86_64` | `2.1.0K` | `1.2.0`–`< 2.2.9` → ENAv3 **performance degradation** | `ena_linux_2.17.0` |
 
 Both bundled drivers are below the `2.2.9` full-ENAv3 threshold, so on Nitro v4+
 instances the stock images either fail to attach an ENAv3 ENI (OL6) or run
-degraded (OL7). The pinned self-build versions (`2.5.0` / `2.17.0`) are both
+degraded (OL7). The pinned self-build versions (`2.9.1` / `2.17.0`) are both
 `>= 2.2.9`, restoring full ENAv3 support. (Versions/kernels above are the
 measured baseline as of 2026-06 and will shift as the OL ISOs receive errata;
 the installer always reports the before/after `modinfo` version.)
@@ -563,12 +563,25 @@ the two distinct build purposes. The hook embeds `install-ena-driver.sh`
 The installer is the remedy for OL's old in-distro ENA driver (e.g. OL6 ships
 ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
 
-- **Self-gates by OS major**: builds for **OL6** (pinned `ena_linux_2.5.0`) and
+- **Self-gates by OS major**: builds for **OL6** (pinned `ena_linux_2.9.1`) and
   **OL7** (pinned `ena_linux_2.17.0`, the newest release confirmed to support
   RHEL7 as of 2026-06); on **OL8+** it is a no-op because those ship a current
-  in-distro driver. Pins are chosen as the newest release supporting each target
-  OS (the ENA driver is a kernel module; newer releases assume newer
+  in-distro driver. Pins are chosen as the newest release that **builds** on each
+  target OS (the ENA driver is a kernel module; newer releases assume newer
   kernels/toolchains). Override per run with `ENA_DRIVER_VERSION`.
+  - **OL6/UEK4 buildable window (`ena_linux` ≈ `[2.8.6, 2.9.1]`).** Validated on a
+    real Nitro OL6.10 instance (kernel `4.1.12-124.48.6.el6uek`, gcc 4.4.7).
+    *Floor:* below ~`2.8.6` the driver's `kcompat.h` redefines `page_ref_count`,
+    which Oracle backported into UEK4 `>= 124.43.1`, so the build fails with a
+    redefinition error (amzn/amzn-drivers issue #210; resolved driver-side at
+    `2.8.6`). *Ceiling:* `2.10.0` introduced the ECC (ENA Compatibility Check)
+    build-time API autodetect, which **false-positives on this old kernel + EL6
+    toolchain** and emits calls to newer-kernel symbols that are absent here
+    (`pci_dev_id`, `irq_update_affinity_hint`, `ethtool_puts`,
+    `netif_napi_add_config`), so `2.10.0`+ fail to compile. `2.9.1` is the last
+    pre-ECC release and is the pinned ceiling; `2.8.6` is a proven fallback. Both
+    are `>= 2.2.9` (full ENAv3). Re-evaluate when the OL6 UEK4 errata kernel or
+    the driver's ECC changes.
 - **Self-contained**: it installs everything it needs itself — the EPEL repo,
   `gcc`/`make`, `dkms`, and the matching `kernel-uek-devel` headers — so it can
   be run directly on a stock OL6/OL7 instance (see "Standalone validation"

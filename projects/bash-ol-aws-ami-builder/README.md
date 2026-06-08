@@ -116,7 +116,7 @@ one-file change.
 | `env.properties.aws-ol7` | Build parameters for **Oracle Linux 7 Update 9** (x86_64) — **experimental / deprecated upstream**. See sections 9.6 and 10 for important caveats. |
 | `env.properties.aws-ol6` | Build parameters for **Oracle Linux 6 Update 10** (x86_64) — **experimental / not shipped upstream**. See sections 9.7 and 10 for important caveats. |
 | `setup-vmimport-role.sh` | One-time setup script that creates the `vmimport` IAM service role for AWS VM Import/Export. |
-| `install-ena-driver.sh` | Self-contained script that builds and installs a pinned Amazon ENA driver via DKMS (OL6 → 2.5.0, OL7 → 2.17.0; no-op on OL8+). Installs its own deps (EPEL, gcc/make, dkms, `kernel-uek-devel`) and can be run **standalone on a stock OL6/OL7 instance** for validation, or injected into the guest's AWS provisioning by Phase 3 when the ENA build is enabled (the default). |
+| `install-ena-driver.sh` | Self-contained script that builds and installs a pinned Amazon ENA driver via DKMS (OL6 → 2.9.1, OL7 → 2.17.0; no-op on OL8+). Installs its own deps (EPEL, gcc/make, dkms, `kernel-uek-devel`) and can be run **standalone on a stock OL6/OL7 instance** for validation, or injected into the guest's AWS provisioning by Phase 3 when the ENA build is enabled (the default). |
 | `README.md` | End-user documentation (English, baseline). |
 | `README.ja.md` | End-user documentation (Japanese). |
 | `SPEC.md` | Developer specification (English) — phase contract, log conventions, design decisions. |

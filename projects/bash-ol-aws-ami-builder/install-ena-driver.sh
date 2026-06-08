@@ -16,9 +16,17 @@
 #
 # Why a pinned version (not "latest"):
 #   The ENA driver is a kernel module; newer releases progressively assume newer
-#   kernels/toolchains. We pin the newest release that supports each target OS:
-#     - OL6 -> ena_linux_2.5.0  (validated on EL6 userland; >= 2.2.9 so ENAv3
-#              capable; "supports older kernels correctly")
+#   kernels/toolchains. We pin the newest release that BUILDS on each target OS:
+#     - OL6 -> ena_linux_2.9.1  (newest that builds on OL6/UEK4; >= 2.2.9 so
+#              ENAv3 capable. The buildable window on the updated UEK4 kernel
+#              4.1.12-124.48.6.el6uek is roughly [2.8.6, 2.9.1], validated on a
+#              real Nitro instance: below ~2.8.6 the driver's kcompat redefines
+#              page_ref_count (Oracle backported it into UEK4 >= 124.43.1); at
+#              2.10.0 the driver gained the ECC build-time API autodetect, which
+#              false-positives on this old kernel + EL6 gcc 4.4.7 and pulls in
+#              newer-kernel symbols absent here (pci_dev_id, irq_update_affinity_
+#              hint, ethtool_puts, netif_napi_add_config), so 2.10.0+ fail to
+#              compile. 2.9.1 is the last pre-ECC release -> the ceiling.)
 #     - OL7 -> ena_linux_2.17.0 (newest release supporting RHEL7 confirmed as of
 #              2026-06; RHEL7 remains in the driver's supported-distros list)
 #   OL8+ ship a current in-distro ENA driver, so this script no-ops there.
@@ -46,7 +54,7 @@
 set -euo pipefail
 
 # ---- pinned versions (overridable) -----------------------------------------
-ENA_VERSION_OL6="${ENA_VERSION_OL6:-2.5.0}"
+ENA_VERSION_OL6="${ENA_VERSION_OL6:-2.9.1}"
 ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.0}"
 EPEL6_ARCHIVE_BASEURL="${EPEL6_ARCHIVE_BASEURL:-https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/}"
 

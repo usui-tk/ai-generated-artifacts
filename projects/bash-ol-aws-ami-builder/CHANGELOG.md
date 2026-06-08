@@ -75,6 +75,22 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **OL6 ENA self-build pin bumped `2.5.0` → `2.9.1`** (`install-ena-driver.sh`).
+  The previous `2.5.0` pin does **not** build on the updated OL6 UEK4 kernel
+  (`4.1.12-124.48.6.el6uek`): its `kcompat.h` redefines `page_ref_count`, which
+  Oracle backported into UEK4 `>= 124.43.1` (amzn/amzn-drivers issue #210). The
+  buildable window on that kernel (gcc 4.4.7) is `ena_linux` ≈ `[2.8.6, 2.9.1]`,
+  validated standalone on a real Nitro OL6.10 instance (build + boot + `ena`
+  module load + `eth0` up + SSH). `2.10.0`+ fail to compile: `2.10.0` introduced
+  the ECC build-time API autodetect, which false-positives on this old
+  kernel/toolchain and pulls in newer-kernel symbols absent here (`pci_dev_id`,
+  `irq_update_affinity_hint`, `ethtool_puts`, `netif_napi_add_config`). `2.9.1`
+  is the last pre-ECC release (the ceiling) and is `>= 2.2.9` (full ENAv3);
+  `2.8.6` is a proven fallback. OL7 (`2.17.0`) is unchanged. SPEC A.7 ENA
+  self-build section and the README script tables (both languages) updated to
+  `2.9.1`; the `install-ena-driver.sh` header rationale rewritten to document the
+  buildable window. `ENA_DRIVER_VERSION` still overrides per run.
+
 - **Log line format reordered to date-first** (`build-ol-aws-ami.sh`). Every
   timestamped channel now emits the unified `YYYY-MM-DD HH:MM:SS` timestamp
   **first**, followed by the `[SEVERITY]` / source tag, then the optional
