@@ -410,6 +410,24 @@ and should usually be left alone.
 If `oracle-linux-image-tools` adds, renames, or drops keys upstream,
 update the templates and this table in lockstep.
 
+**EC2 login user (authority and precedence).** Every AMI this builder produces
+(OL6-OL10) uses **`ec2-user`** as the first-boot SSH login account (key-only;
+root/password login disabled). The name is cloud-init's
+`system_info.default_user.name`, resolved at first boot from three layers,
+lowest to highest precedence: (1) the Oracle Linux `cloud-init` **package
+default** in `/etc/cloud/cloud.cfg` (`cloud-user`); (2) the **upstream
+`oracle-linux-image-tools`** `cloud/aws` drop-in
+`/etc/cloud/cloud.cfg.d/90_ol.cfg` (`name: ${CLOUD_USER}`), which wins because
+cloud-init merges `cloud.cfg.d` over `cloud.cfg`; (3) **this builder**, whose env
+templates set `CLOUD_USER="ec2-user"`. The deciding entity for the effective
+login name is therefore this project's env templates, and the default login user
+is **unified to `ec2-user` across all OL versions** — `cloud-user` is never the
+operative account. On OL6 the `[ol-aws-ami-builder PATCH ol6-cloud-user]` hook
+additionally drops the `systemd-journal` group (absent on OL6, so cloud-init's
+`useradd` would otherwise fail and create no account) and rewrites the
+otherwise-inert `cloud-user` string in `cloud.cfg` to `ec2-user` for legibility
+(see D.26).
+
 Note on the two serial-console keys (they are independent):
 `SERIAL_CONSOLE` (install-time) controls whether the anaconda *installer*
 streams to the serial console. The wrapper defaults it to **`no` (headless)**:
@@ -2368,28 +2386,59 @@ wanted).
 
 ---
 
-## D.26 OL6 logs in as `cloud-user`, not `ec2-user`, despite `CLOUD_USER=ec2-user`
+## D.26 OL6 cloud-init fails to create `ec2-user` (`systemd-journal` group absent) — no SSH
 
-**Symptom.** An OL6 AMI built with `CLOUD_USER="ec2-user"` (as every env
-template sets) is reachable only as `cloud-user` — `ssh ec2-user@host` is
-rejected, `ssh cloud-user@host` works. OL7+ correctly accept `ec2-user`.
+**Symptom.** A launched OL6 AMI is unreachable over SSH (reproducible across
+instances). The boot console shows cloud-init 0.7.5 failing:
+`Failed to create user ec2-user` → `Running users-groups (cc_users_groups)
+failed` → `Applying ssh credentials failed!` (and later
+`ssh-authkey-fingerprints failed`). OL7+ are unaffected.
 
-**Cause.** On OL6, cloud-init is **0.7.5**, whose shipped `/etc/cloud/cloud.cfg`
-hard-codes `system_info.default_user.name: cloud-user` (Oracle's default). The
-upstream `CLOUD_USER` mechanism does not rewrite that key on OL6, so cloud-init
-creates and key-provisions its *default user* — `cloud-user` — and the EC2
-metadata SSH key lands there. `ec2-user` never becomes the cloud-init default
-user.
+**Cause.** The upstream `cloud/aws` provisioning (`cloud::cloud_init`) writes
+`/etc/cloud/cloud.cfg.d/90_ol.cfg` with `system_info.default_user.groups:
+[adm, systemd-journal]` and `name: <CLOUD_USER>` (`ec2-user`) for **every** OL
+version. cloud-init 0.7.5 merges `cloud.cfg.d` over the main `cloud.cfg` with
+the drop-in winning (`read_conf_with_confd` → `mergemanydict([confd, cfg])`,
+dict merger `no_replace`, filenames reverse-sorted), so `90_ol.cfg` is the
+**effective** `default_user` on OL6 — the name is already `ec2-user`. The defect
+is the group: **OL6 has no systemd, so the `systemd-journal` group does not
+exist.** At first boot `cc_users_groups` calls `useradd ec2-user --groups
+adm,systemd-journal …`, which aborts (`group 'systemd-journal' does not exist`);
+the default user is never created, so `cc_ssh` (`setup_user_keys` →
+`pwd.getpwnam('ec2-user')`) cannot apply the EC2 metadata key — all three log
+failures share this single root cause. OL7-10 ship systemd (the group exists),
+which is why the failure surfaced only on OL6's first real launch (Phase C,
+B.5.3). *Verified against the `cloud-init-0.7.5-8.el6_9.2` RPM: the stock
+`cloud.cfg` `default_user` has only `name: cloud-user` (no `groups`); the group
+comes solely from the provision-written `90_ol.cfg`; the merge, `useradd
+--groups`, and `cc_ssh` paths are byte-identical to upstream 0.7.5; the RPM
+scriptlets create no users.*
 
-**Fix (OL6 only).** A Phase-3 hook
+> The earlier diagnosis ("logs in as `cloud-user`; name not rewritten on OL6")
+> was an **unverified inference** (Phase C had never been run): the effective
+> name was always `ec2-user` (`90_ol.cfg` wins the merge), and user creation was
+> failing all along.
+
+**Fix (OL6 only).** The Phase-3 hook
 (`[ol-aws-ami-builder PATCH ol6-cloud-user]`), injected into
-`cloud/aws/provision.sh` **only for OL6 builds** (and self-guarded on
-`/etc/oracle-release` at runtime), rewrites `system_info.default_user.name` in
-`/etc/cloud/cloud.cfg` to `CLOUD_USER` (`ec2-user`). cloud-init creates the
-default-user account from this config, so aligning the name both creates
-`ec2-user` and lands the metadata key on it. It runs at the cloud-target stage
-(after cloud-init is installed) and is idempotent. OL7+ are untouched (they get
-`ec2-user` via the upstream path — per-OS isolation).
+`cloud/aws/provision.sh` **only for OL6 builds** (self-guarded on
+`/etc/oracle-release`, run after cloud-init is installed so the config files
+exist, idempotent), does two things to `/etc/cloud/cloud.cfg` and
+`/etc/cloud/cloud.cfg.d/90_ol.cfg`:
+
+1. **Fix (functional):** strips `systemd-journal` from the `default_user.groups`
+   list (scoped to the `groups:` line, any position). The effective `groups`
+   becomes `[adm]` (`adm` is a base EL6 group), so `useradd` succeeds and
+   `ec2-user` — with the SSH key — is created.
+2. **Clarity (no functional effect):** aligns `default_user.name` to
+   `CLOUD_USER` (`ec2-user`) in the stock `cloud.cfg` as well. `90_ol.cfg`
+   already sets the name and wins the merge (so the account is `ec2-user`
+   regardless and `cloud-user` is never instantiated), but the stock `cloud.cfg`
+   otherwise still literally reads `name: cloud-user`, which would mislead an
+   operator inspecting the built image. This is a verified no-op kept purely for
+   config legibility.
+
+OL7+ are untouched (their `systemd-journal` group exists — per-OS isolation).
 
 ---
 

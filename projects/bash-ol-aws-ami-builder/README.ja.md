@@ -472,7 +472,19 @@ Oracle 上位の `bin/build-image.sh` は AWS 対象に対し `BOOT_MODE=bios` �
 
 ### 9.4 cloud-init / ec2-user
 
-`CLOUD_INIT="Yes"` と `CLOUD_USER="ec2-user"` を指定することで、AWS 慣習に合わせた `ec2-user` 経由の SSH 鍵ログインが可能になります。すべての env テンプレート(OL6 / OL7 / OL8 / OL9 / OL10)でデフォルト。
+**EC2 ログインユーザー.** 本ビルダーが生成する全 AMI(OL6 / OL7 / OL8 / OL9 / OL10)で、初回起動時のログインアカウントは **`ec2-user`** です(SSH 鍵のみ。パスワード/ root ログインは無効)。接続:
+
+```
+ssh -i your-keypair.pem ec2-user@<public-ip>
+```
+
+**ユーザー名を決める主体と優先順位.** ログインユーザーは cloud-init の `system_info.default_user.name` で、初回起動時に以下の3層(優先度 低→高)で解決されます。
+
+1. **OS パッケージ既定値** — Oracle Linux の `cloud-init` RPM が同梱する `/etc/cloud/cloud.cfg` の `default_user.name: cloud-user`。これは**ディストリのパッケージ値**であり、本プロジェクトの値では**ありません**。
+2. **上流 image-tools** — `oracle-linux-image-tools` の `cloud/aws` プロビジョニングがドロップイン `/etc/cloud/cloud.cfg.d/90_ol.cfg` に `name: ${CLOUD_USER}` を書き込みます。cloud-init は `cloud.cfg.d` のドロップインを基底 `cloud.cfg` より優先してマージするため、これがパッケージ既定値を**上書き**します。
+3. **本ビルダー** — すべての `env.properties.aws-ol{N}` テンプレートが `CLOUD_USER="ec2-user"` を設定するため、層 2 が `ec2-user` に解決されます。よって実効ログイン名の決定主体は **本プロジェクトの env テンプレート**です。
+
+**デフォルトユーザーは全バージョンで `ec2-user` に統一.** 全 OL バージョンで `ec2-user` を唯一・正典のログインアカウントとして扱ってください。`cloud-user` は運用上のアカウントには決してならないため、依存しないでください。`cloud-user` という文字列はパッケージの `/etc/cloud/cloud.cfg` に不活性のまま残る場合があります(層 2 で上書きされる)。OL6 では本ビルダーのプロビジョニングフックがさらに、(a) デフォルトユーザーから `systemd-journal` グループを除去し(このグループは systemd 系=OL7+ のみに存在し、存在すると cloud-init の `useradd` が失敗してログインアカウントが作られない。SPEC D.26 参照)、(b) その不活性な `cloud-user` 文字列を `ec2-user` に書き換えて、ビルド済みイメージの点検時に名前が一貫して見えるようにします。OL7-10 は層 1-3 のまま `ec2-user` を取得します。
 
 ### 9.4a 全バージョン共通の `S3_BUCKET`
 

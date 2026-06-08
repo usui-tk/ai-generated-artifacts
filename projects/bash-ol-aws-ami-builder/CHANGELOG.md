@@ -19,6 +19,37 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed
+
+- **OL6: cloud-init failed to create `ec2-user`, breaking SSH access.** A
+  launched OL6 AMI was unreachable over SSH; cloud-init 0.7.5 failed with
+  `Failed to create user ec2-user` → `Running users-groups (cc_users_groups)
+  failed` → `Applying ssh credentials failed!` (reproducible across instances).
+  Root cause (verified against the `cloud-init-0.7.5-8.el6_9.2` RPM, not upstream
+  inference): the upstream `cloud/aws` provisioning writes
+  `/etc/cloud/cloud.cfg.d/90_ol.cfg` with `default_user.groups: [adm,
+  systemd-journal]` for every OL version, and cloud-init 0.7.5 merges
+  `cloud.cfg.d` over the main `cloud.cfg` with the drop-in winning — so that is
+  the effective `default_user` on OL6. **OL6 has no systemd, so the
+  `systemd-journal` group does not exist**, and `useradd --groups
+  adm,systemd-journal ec2-user` aborts; the user (and the EC2 SSH key) is never
+  created. The OL6-only Phase-3 hook `[ol-aws-ami-builder PATCH ol6-cloud-user]`
+  now (1) strips `systemd-journal` from the `default_user.groups` list in
+  `cloud.cfg`/`90_ol.cfg` (effective `groups` becomes `[adm]`, so `useradd`
+  succeeds and `ec2-user` is created with the key), and (2) aligns
+  `default_user.name` to `ec2-user` in the stock `cloud.cfg` as well. (2) is a
+  verified no-op functionally — `90_ol.cfg` already sets the name and wins the
+  merge, so `cloud-user` is never instantiated — but it removes the misleading
+  `name: cloud-user` an operator would otherwise see when inspecting the built
+  image's `cloud.cfg`. OL6-only (per-OS isolation); OL7-10 untouched (their
+  `systemd-journal` group exists). SPEC D.26 rewritten to the verified root
+  cause. README §9.4 and SPEC §A.7 now document the EC2 login user (`ec2-user`)
+  and the authority/precedence that decides the name (OS package default
+  `cloud-user` → upstream `90_ol.cfg` `name: ${CLOUD_USER}` → this builder's
+  `CLOUD_USER="ec2-user"`), plus the premise that the default user is unified to
+  `ec2-user` across OL6-10. `bash -n` + `shellcheck -S style` clean (incl. the
+  B-T1 heredoc-body parse of the hook); suite 118/1/0.
+
 ### Changed
 
 - **Phase 6 now reports the in-box and self-built ENA driver versions on

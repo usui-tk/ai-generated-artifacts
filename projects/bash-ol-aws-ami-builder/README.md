@@ -470,7 +470,19 @@ Oracle's upstream `bin/build-image.sh` enforces `BOOT_MODE=bios` for AWS targets
 
 ### 9.4 cloud-init / ec2-user
 
-Setting `CLOUD_INIT="Yes"` and `CLOUD_USER="ec2-user"` aligns with the AWS convention of first-login via SSH key on the `ec2-user` account. This is the default in every env template (OL6 / OL7 / OL8 / OL9 / OL10).
+**EC2 login user.** Every AMI this builder produces — OL6, OL7, OL8, OL9, OL10 — uses **`ec2-user`** as the first-boot login account (SSH key only; password and root login are disabled). Connect with:
+
+```
+ssh -i your-keypair.pem ec2-user@<public-ip>
+```
+
+**Who decides the name (authority and precedence).** The login user is cloud-init's `system_info.default_user.name`, resolved at first boot from three layers, lowest to highest precedence:
+
+1. **OS package default** — the Oracle Linux `cloud-init` RPM ships `/etc/cloud/cloud.cfg` with `default_user.name: cloud-user`. This is the distro package's value, **not** this project's.
+2. **Upstream image-tools** — `oracle-linux-image-tools`' `cloud/aws` provisioning writes the drop-in `/etc/cloud/cloud.cfg.d/90_ol.cfg` with `name: ${CLOUD_USER}`. cloud-init merges `cloud.cfg.d` drop-ins over the base `cloud.cfg` with the drop-in taking precedence, so this **overrides** the package default.
+3. **This builder** — every `env.properties.aws-ol{N}` template sets `CLOUD_USER="ec2-user"`, so layer 2 resolves to `ec2-user`. The deciding entity for the effective login name is therefore **this project's env templates**.
+
+**Default user is unified to `ec2-user` across all versions.** Treat `ec2-user` as the single, canonical login account for every OL version; do not rely on `cloud-user`, which is never the operative account. The literal string `cloud-user` may still appear, inert, in the package's `/etc/cloud/cloud.cfg` (it is overridden per layer 2). On OL6 this builder's provisioning hook additionally (a) removes the `systemd-journal` group from the default user — that group exists only on systemd distros (OL7+), and its presence makes cloud-init's `useradd` fail so that no login account is created (see SPEC D.26) — and (b) rewrites that inert `cloud-user` string to `ec2-user`, so an operator inspecting the built image sees a consistent name. OL7-10 obtain `ec2-user` through layers 1-3 unchanged.
 
 ### 9.4a Shared `S3_BUCKET` across versions
 
