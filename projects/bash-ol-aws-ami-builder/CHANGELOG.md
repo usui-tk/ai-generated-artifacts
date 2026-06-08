@@ -47,6 +47,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Docs (no behaviour change):** the **English README intro** had drifted from
+  its `README.ja.md` twin and from SPEC. (D3) The OL7 sentence linked only to
+  section 1 and section 10, omitting the **section 9.6** cross-reference its
+  Japanese twin carries (and that the OL6 sentence carries for 9.7); the EN now
+  links section 9.6 too. (D4) The OL6 sentence said the wrapper "synthesizes
+  **one** `distr/ol6-slim/`" whereas the Japanese twin and SPEC B.4 say it
+  synthesizes the directory's **four files** (`env.properties`, `image-scripts.sh`,
+  `ol6-ks.cfg`, `provision.sh`); the EN now states "the entire `distr/ol6-slim/`
+  directory (four files)". The Japanese twin already had the correct content, so
+  this brings the pair back into lock-step (heading counts unchanged: 16 `##` /
+  37 `###`).
+
 - **Docs (no behaviour change):** SPEC **B.4 (Wrapper-patch marker convention)**
   had drifted behind the implementation. The "Current markers" table listed only
   3 of the 8 marker-guarded patches the script actually applies in

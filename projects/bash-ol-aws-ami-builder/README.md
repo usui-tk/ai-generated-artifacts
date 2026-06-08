@@ -14,9 +14,9 @@ English | [日本語](./README.ja.md)
 
 A set of wrapper scripts that build AWS AMIs for **Oracle Linux 8, 9, or 10** (x86_64) using the official Oracle [`oracle-linux-image-tools`](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) project.
 
-Experimental support is also provided for **Oracle Linux 7** (x86_64) — see the OL7 note at the end of [section 1](#1-repository-layout) and the dedicated warnings in [section 10](#10-known-limitations-and-caveats).
+Experimental support is also provided for **Oracle Linux 7** (x86_64) — see the OL7 note at the end of [section 1](#1-repository-layout), [section 9.6](#96-oracle-linux-7-support-experimental), and the dedicated warnings in [section 10](#10-known-limitations-and-caveats).
 
-Even more experimental support is provided for **Oracle Linux 6** (x86_64). The upstream tooling does not ship a `distr/ol6-slim/` directory at all, so this wrapper synthesizes one at runtime in addition to applying two `sed` patches. See [section 9.7](#97-oracle-linux-6-support-experimental) for the mechanism and [section 10](#10-known-limitations-and-caveats) item 8 for the caveats.
+Even more experimental support is provided for **Oracle Linux 6** (x86_64). The upstream tooling does not ship a `distr/ol6-slim/` directory at all, so this wrapper synthesizes the entire `distr/ol6-slim/` directory (four files) at runtime in addition to applying two `sed` patches. See [section 9.7](#97-oracle-linux-6-support-experimental) for the mechanism and [section 10](#10-known-limitations-and-caveats) item 8 for the caveats.
 
 Created in response to the discontinuation of Oracle's official AMI offerings (owner ID `131827586825`) on the AWS Marketplace, with the goal of establishing an independent build and operations workflow for Oracle Linux AMIs.
 
