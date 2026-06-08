@@ -53,6 +53,30 @@ EPEL6_ARCHIVE_BASEURL="${EPEL6_ARCHIVE_BASEURL:-https://archives.fedoraproject.o
 log() { echo "[ena-driver] $*"; }
 die() { echo "[ena-driver][ERROR] $*" >&2; exit 1; }
 
+# On a failed build, surface the DKMS diagnostics to stderr so the actual
+# compiler error is captured in the parent build log. This matters because
+# oracle-linux-image-tools (libguestfs virt-customize) only echoes a guest
+# provisioning script's output to the host when the script FAILS; on success it
+# is silent. Without this, a DKMS module-build failure leaves only the opaque
+# "Bad return status for module build" line and an in-guest make.log path that
+# the operator (or a downstream user filing a report) never gets to see. Emits
+# `dkms status` and every make.log found under the module's DKMS tree, each line
+# prefixed so it stays greppable. Best-effort: never the cause of a new failure.
+dump_build_diag() {
+  local ml
+  echo "[ena-driver][ERROR] ---- build diagnostics (ENA ${ena_version:-?}, kernel ${kver:-?}) ----" >&2
+  if command -v dkms >/dev/null 2>&1; then
+    echo "[ena-driver][ERROR] dkms status:" >&2
+    dkms status 2>&1 | sed 's/^/[ena-driver][ERROR]   /' >&2 || true
+  fi
+  while IFS= read -r ml; do
+    [[ -n "${ml}" ]] || continue
+    echo "[ena-driver][ERROR] ---- ${ml} ----" >&2
+    sed 's/^/[ena-driver][ERROR]   /' "${ml}" >&2 || true
+  done < <(find "/var/lib/dkms/amzn-drivers/${ena_version:-}" -name 'make.log' 2>/dev/null || true)
+  echo "[ena-driver][ERROR] ---- end build diagnostics ----" >&2
+}
+
 # Highest /lib/modules entry matching a shell glob (by version sort), or "".
 highest_modules_dir() {
   local pattern="$1" best="" d bn
@@ -248,10 +272,10 @@ build_install_plain() {
 
 if [[ "${use_dkms}" -eq 1 ]]; then
   log "Building & installing ENA ${ena_version} via DKMS for ${kver}"
-  build_install_dkms || die "DKMS build/install failed"
+  build_install_dkms || { dump_build_diag; die "DKMS build/install failed (compiler output dumped above; in-guest make.log)"; }
 else
   log "Building & installing ENA ${ena_version} via plain make for ${kver}"
-  build_install_plain || die "plain make build/install failed"
+  build_install_plain || { dump_build_diag; die "plain make build/install failed (build output above)"; }
 fi
 
 # ---- regenerate initramfs for the target kernel ----------------------------

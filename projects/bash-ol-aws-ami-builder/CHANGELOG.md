@@ -19,6 +19,20 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed
+
+- **ENA self-build now surfaces the in-guest compiler error on failure**
+  (`install-ena-driver.sh`). When the DKMS module build fails, the script now
+  dumps `dkms status` and every `make.log` found under
+  `/var/lib/dkms/amzn-drivers/<version>/` to stderr (each line prefixed
+  `[ena-driver][ERROR]`) before `die`. `oracle-linux-image-tools` (libguestfs
+  `virt-customize`) only echoes a guest provisioning script's output to the host
+  log when the script fails, so previously a module-build failure left only the
+  opaque "Bad return status for module build" line plus an in-guest make.log
+  path the operator never saw — making a forwarded build log untriageable. The
+  dump is best-effort and runs only on the failure path; the success path and
+  direct execution are unchanged. New code is shellcheck `-S style` clean.
+
 ### Added
 
 - Added the **OL6 + IMDSv2-only rejection unit** and a **B-T6 idempotency-guard
