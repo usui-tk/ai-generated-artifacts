@@ -242,7 +242,7 @@ logging model changes.
 ### Line format
 
 ```
-[SEVERITY]  YYYY-MM-DD HH:MM:SS  [OLAWS-CODE]  <message>
+YYYY-MM-DD HH:MM:SS  [SEVERITY]  [OLAWS-CODE]  <message>
 ```
 
 - The timestamp is local wall-clock time (`date '+%Y-%m-%d %H:%M:%S'`), **unified
@@ -702,16 +702,16 @@ When `die`'ing on a recoverable misconfiguration, the message MUST include:
 Example (good):
 
 ```
-[ERROR] BOOT_MODE_BUILD='uefi' is not supported for CLOUD=aws.
-[ERROR]   oracle-linux-image-tools only accepts BOOT_MODE=bios for AWS targets.
-[ERROR]   Set BOOT_MODE_BUILD="bios" in env.properties.local (or remove the line
-[ERROR]   to use the default).
+2026-06-08 07:32:35 [ERROR] BOOT_MODE_BUILD='uefi' is not supported for CLOUD=aws.
+2026-06-08 07:32:35 [ERROR]   oracle-linux-image-tools only accepts BOOT_MODE=bios for AWS targets.
+2026-06-08 07:32:35 [ERROR]   Set BOOT_MODE_BUILD="bios" in env.properties.local (or remove the line
+2026-06-08 07:32:35 [ERROR]   to use the default).
 ```
 
 Example (bad):
 
 ```
-[ERROR] Invalid BOOT_MODE_BUILD
+2026-06-08 07:32:35 [ERROR] Invalid BOOT_MODE_BUILD
 ```
 
 ### Diagnostic categories
@@ -1034,7 +1034,7 @@ The function sets `AWS_REGION_SOURCE` to `env` / `imdsv2` / `imdsv1` /
 `fallback` so the choice is visible in the load-env banner:
 
 ```
-[INFO] AWS_REGION         = us-east-1 (source: imdsv2)
+2026-06-08 07:32:35 [INFO]  AWS_REGION         = us-east-1 (source: imdsv2)
 ```
 
 **Why both v2 and v1?** AWS recommends v2 for security (token mitigates
@@ -1932,7 +1932,7 @@ the wrapper-synthesized kickstart was run twice on the build host:
 build-ol-aws-ami.sh: SELinux relabel non-root filesystems
     relabelling /boot
 libguestfs: error: selinux_relabel: feature 'selinuxrelabel' is not available in this build of libguestfs
-[ERROR] build-image.sh failed
+2026-06-08 07:36:38 [ERROR] build-image.sh failed
 ```
 
 Upstream relabels each non-root mount with
@@ -2499,9 +2499,14 @@ to a persistent file. Three orthogonal axes describe every line.
 ## E.1 Line format
 
 ```
-[SEVERITY]  YYYY-MM-DD HH:MM:SS  [OLAWS-CODE]  <message>
+YYYY-MM-DD HH:MM:SS  [SEVERITY]  [OLAWS-CODE]  <message>
 ```
 
+- The **timestamp leads the line** on every timestamped channel; the
+  `[SEVERITY]` / source tag (`[BUILD]` / `[EXTERNAL]`) follows it, then the
+  optional `[OLAWS-CODE]`, then the message. (Earlier versions placed the
+  `[SEVERITY]` tag first; the timestamp is now the first field so a `sort` or a
+  visual time-scan lines up by column.)
 - The **timestamp is unified** to `YYYY-MM-DD HH:MM:SS` on every channel,
   including the `[BUILD]` heartbeat and the `[EXTERNAL]` re-emission (N2). Prior
   versions used a bare `HH:MM:SS` on those two channels.

@@ -371,27 +371,27 @@ Phase 0 inspects the runtime environment and emits targeted guidance when someth
 
 **Case A: An M8i-family instance with nested virtualization currently disabled**
 ```
-[ERROR] CPU virtualization extensions are NOT exposed on this EC2 host
-[INFO]  Detected instance type: m8i.xlarge
-[WARN]  [Case A] m8i supports nested virtualization, but the feature is currently disabled.
-[INFO]  Action: enable nested virtualization on this instance.
-[INFO]    aws ec2 stop-instances --instance-ids i-xxxxx --region ap-northeast-1
-[INFO]    aws ec2 modify-instance-cpu-options ...
+2026-06-08 07:32:35 [ERROR] CPU virtualization extensions are NOT exposed on this EC2 host
+2026-06-08 07:32:35 [INFO]  Detected instance type: m8i.xlarge
+2026-06-08 07:32:35 [WARN]  [Case A] m8i supports nested virtualization, but the feature is currently disabled.
+2026-06-08 07:32:35 [INFO]  Action: enable nested virtualization on this instance.
+2026-06-08 07:32:35 [INFO]    aws ec2 stop-instances --instance-ids i-xxxxx --region ap-northeast-1
+2026-06-08 07:32:35 [INFO]    aws ec2 modify-instance-cpu-options ...
 ```
 
 **Case B: Running on an instance family that does not support nested virtualization**
 ```
-[WARN]  [Case B] m5 does NOT support nested virtualization.
-[INFO]  Option 1 (recommended): Use a nested-virtualization-capable C8i / M8i / R8i instance
-[INFO]  Option 2: Switch to a bare-metal instance
+2026-06-08 07:32:35 [WARN]  [Case B] m5 does NOT support nested virtualization.
+2026-06-08 07:32:35 [INFO]  Option 1 (recommended): Use a nested-virtualization-capable C8i / M8i / R8i instance
+2026-06-08 07:32:35 [INFO]  Option 2: Switch to a bare-metal instance
 ```
 
 **Case C: A bare-metal instance that has /dev/kvm missing**
 ```
-[WARN]  [Case C] m5.metal is bare metal but /dev/kvm is unavailable.
-[INFO]  Action:
-[INFO]    1) Check whether the kvm module is loaded: lsmod | grep kvm
-[INFO]    2) If not loaded, load it manually: sudo modprobe kvm-intel
+2026-06-08 07:32:35 [WARN]  [Case C] m5.metal is bare metal but /dev/kvm is unavailable.
+2026-06-08 07:32:35 [INFO]  Action:
+2026-06-08 07:32:35 [INFO]    1) Check whether the kvm module is loaded: lsmod | grep kvm
+2026-06-08 07:32:35 [INFO]    2) If not loaded, load it manually: sudo modprobe kvm-intel
 ```
 
 This automation **minimizes the trial-and-error of first-time setup**.

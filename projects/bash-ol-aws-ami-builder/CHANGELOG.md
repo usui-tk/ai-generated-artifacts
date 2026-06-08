@@ -75,6 +75,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **Log line format reordered to date-first** (`build-ol-aws-ami.sh`). Every
+  timestamped channel now emits the unified `YYYY-MM-DD HH:MM:SS` timestamp
+  **first**, followed by the `[SEVERITY]` / source tag, then the optional
+  `[OLAWS-CODE]`, then the message (previously the `[SEVERITY]` tag came first,
+  then the timestamp). This applies to `log_info` / `log_warn` / `log_error` /
+  `log_progress` (`[BUILD]`) / `log_debug` / `log_external` (`[EXTERNAL]`); the
+  phase banner (`log_step`) remains timestamp-less. ANSI colour on the tag and
+  the ANSI-stripped file mirror are unchanged, as are the stdout/stderr
+  destinations. The new order lets a plain `sort` and a visual time-scan line up
+  by the leading column. SPEC E.1 (and the A.4 summary) "Line format" updated to
+  `YYYY-MM-DD HH:MM:SS  [SEVERITY]  [OLAWS-CODE]  <message>`; README section 6.3
+  log examples (both languages) and the SPEC examples re-rendered in the new
+  order. A new host-runnable regression tier **log-format**
+  (`tests/t9_logformat.sh`) asserts every channel is date-first (and guards
+  against a return to tag-first). `bash -n` + `shellcheck -S style` clean; suite
+  142/1/0 (143/0 with `ksvalidator`).
+
 - **Phase 6 now reports the in-box and self-built ENA driver versions on
   separate lines** (`build-ol-aws-ami.sh`). The Nitro assurance report prints an
   `in-box ENA driver` line (stock in-tree `/kernel`, or `built into the kernel

@@ -167,18 +167,18 @@ LOG_SETUP_DONE=""
 #------------------------------------------------------------------------------
 # Logging helpers
 #------------------------------------------------------------------------------
-log_info()  { echo -e "\033[1;34m[INFO]\033[0m  $(date '+%Y-%m-%d %H:%M:%S') $*"; }
-log_warn()  { echo -e "\033[1;33m[WARN]\033[0m  $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; }
-log_error() { echo -e "\033[1;31m[ERROR]\033[0m $(date '+%Y-%m-%d %H:%M:%S') $*" >&2; }
+log_info()  { echo -e "$(date '+%Y-%m-%d %H:%M:%S') \033[1;34m[INFO]\033[0m  $*"; }
+log_warn()  { echo -e "$(date '+%Y-%m-%d %H:%M:%S') \033[1;33m[WARN]\033[0m  $*" >&2; }
+log_error() { echo -e "$(date '+%Y-%m-%d %H:%M:%S') \033[1;31m[ERROR]\033[0m $*" >&2; }
 log_step()  { echo -e "\n\033[1;32m========== $* ==========\033[0m\n"; }
 # Build-phase progress (heartbeat) -- our format, distinct [BUILD] tag.
-# Timestamp unified to 'YYYY-MM-DD HH:MM:SS' across every channel (N2).
-log_progress() { echo -e "\033[1;36m[BUILD]\033[0m $(date '+%Y-%m-%d %H:%M:%S') $*"; }
+# Timestamp unified to 'YYYY-MM-DD HH:MM:SS' and emitted first on every channel (N2).
+log_progress() { echo -e "$(date '+%Y-%m-%d %H:%M:%S') \033[1;36m[BUILD]\033[0m $*"; }
 # [DEBUG] (F4 severity). Always written to the log file; mirrored to the console
 # only when DEBUG=1 (--debug). When quiet it goes straight to fd 3 (the direct
 # file handle opened in setup_logging), bypassing the console tee.
 log_debug() {
-  local line; line="[DEBUG] $(date '+%Y-%m-%d %H:%M:%S') $*"
+  local line; line="$(date '+%Y-%m-%d %H:%M:%S') [DEBUG] $*"
   if [[ "${DEBUG}" == "1" ]]; then
     printf '%s\n' "${line}"
   elif [[ -n "${LOG_SETUP_DONE}" ]]; then
@@ -186,14 +186,14 @@ log_debug() {
   fi
 }
 # Re-emit external-tool output read on stdin, one attributed line at a time:
-#   [EXTERNAL] YYYY-MM-DD HH:MM:SS [<script>] <original line>
+#   YYYY-MM-DD HH:MM:SS [EXTERNAL] [<script>] <original line>
 # so output produced by the invoked external script (and its children) is
 # unmistakably distinct from this wrapper's own [INFO]/[BUILD] lines. The
 # timestamp is per-line (current time as each line arrives). $1 = script name.
 log_external() {
   local script="$1" line
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    printf '\033[90m[EXTERNAL]\033[0m %s \033[90m[%s]\033[0m %s\n' \
+    printf '%s \033[90m[EXTERNAL]\033[0m \033[90m[%s]\033[0m %s\n' \
       "$(date '+%Y-%m-%d %H:%M:%S')" "${script}" "${line}"
     line=""
   done
