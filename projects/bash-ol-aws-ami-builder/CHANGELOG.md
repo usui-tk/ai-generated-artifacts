@@ -70,29 +70,32 @@ This CHANGELOG is **English only** per the repository-wide
   - New regression tier `tests/t12_buildvisibility.sh` (17 asserts) guards all of
     the above. Suite 171/0/0 → **190/0/0** (with `ksvalidator`).
 
-- **OL10 clean-core package SBOM + official-image reference memo.** Two static
-  snapshots under `tests/cleancore/`: `cleancore-ol10.sbom.json` (the finalized
-  OL10 clean-core's package set, names-only, reusable JSON; 177 packages) and
-  `REFERENCE-oracle-official-images.md` (the official `ol10-slim` image's
-  sources, pinned `container-images` commit, and 96-package name-version
-  manifest — the reference footprint the clean-core derives from). Neither is a
-  `.sh`, so both sit outside B-T1/B-T2 and are not drift-checked gates.
+- **OL9/OL10 clean-core package SBOMs + official-image reference memo.** Static
+  snapshots under `tests/cleancore/`: `cleancore-ol9.sbom.json` (186 packages)
+  and `cleancore-ol10.sbom.json` (177 packages) record each finalized
+  clean-core's package set names-only as reusable JSON, and
+  `REFERENCE-oracle-official-images.md` documents the official `ol9-slim` /
+  `ol10-slim` images' sources, pinned `container-images` commit, and
+  name-version manifests (107 / 96 packages — the reference footprints the
+  clean-cores derive from). Neither is a `.sh`, so both sit outside B-T1/B-T2
+  and are not drift-checked gates.
 
 ### Changed
 
-- **OL10 clean-core trimmed to a slim-aligned set (was kickstart-derived).**
-  `build-cleancore-ol10.sh` now drops `@core` (so no kernel/boot/firewall/cron/
-  syslog) and installs a minimal userland plus explicit test-base essentials:
-  `git-core` instead of `git` (avoiding ~62 `perl-*` packages), no `net-tools`,
+- **OL9 and OL10 clean-core trimmed to a slim-aligned set (was kickstart-derived).**
+  `build-cleancore-ol{9,10}.sh` now drop `@core` (so no kernel/boot/firewall/cron/
+  syslog) and install a minimal userland plus explicit test-base essentials:
+  `git-core` instead of `git` (avoiding ~60 `perl-*` packages), no `net-tools`,
   archive/network/troubleshooting tools, and `dnf-plugins-core` + `yum-utils`
-  (EL10 has no standalone `dnf-utils`; `yum-utils` provides it). The Oracle EPEL
-  repo is installed but **finalized to `enabled=0`** so the ENA/SSM harnesses
-  enable it explicitly (e.g. for `dkms`). On EL10 `systemd` is a hard dependency
-  of full `dnf`/`pam`/`sudo` and is therefore present, but never PID 1 in
-  container/chroot use. Result: 245 pkgs / 445M (`@core`) → **177 pkgs / 316M**.
-  The self-test's `sshd present` assertion is flipped to `sshd absent` (the
-  slim-aligned base ships no `openssh-server`). OL7–OL9 remain kickstart-derived
-  pending their own passes.
+  (EL9/EL10 have no standalone `dnf-utils`; `yum-utils` provides it). The Oracle
+  EPEL repo is installed but **finalized to `enabled=0`** so the ENA/SSM
+  harnesses enable it explicitly (e.g. for `dkms`). `systemd` is a hard
+  dependency of full `dnf` (plus `pam`/`sudo` on EL10) and is therefore present,
+  but never PID 1 in container/chroot use. Result: OL10 245 → **177 pkgs**
+  (445M → **316M**); OL9 `@core`-set → **186 pkgs / 313M**. Each self-test's
+  `sshd present` assertion is flipped to `sshd absent` (the slim-aligned base
+  ships no `openssh-server`). OL6–OL8 remain kickstart-derived pending their own
+  passes.
 
 - **`HEARTBEAT_INTERVAL_SEC` default `20` → `10` seconds** (feedback ④; `0` still
   disables). A shorter interval makes the live `stage:` field and elapsed/disk

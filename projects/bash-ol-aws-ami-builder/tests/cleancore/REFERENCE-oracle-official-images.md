@@ -126,3 +126,129 @@ tar-1.35-9.el10_1.x86_64
 xz-libs-5.6.2-4.el10_0.x86_64
 zlib-ng-compat-2.2.3-3.el10_1.x86_64
 ```
+
+## Oracle Linux 9 (`ol9-slim`)
+
+**Upstream sources** (from the build script's PRIMARY SOURCES):
+
+- Slim container image (rootfs): <https://github.com/oracle/container-images/tree/0218ab4ba2f820b1b978dcc5a76435040397a472/9-slim>
+- Rootfs tarball (pinned): <https://github.com/oracle/container-images/raw/0218ab4ba2f820b1b978dcc5a76435040397a472/9-slim/oraclelinux-9-slim-amd64-rootfs.tar.xz>
+- Slim kickstart (`ol9-ks.cfg`): <https://github.com/oracle/oracle-linux/blob/main/oracle-linux-image-tools/distr/ol9-slim/ol9-ks.cfg>
+- Package repositories (BaseOS + AppStream): <https://yum.oracle.com/>
+- Pinned `container-images` commit: `0218ab4ba2f820b1b978dcc5a76435040397a472`
+
+**Official `ol9-slim` RPM manifest** (107 packages, name-version-release.arch).
+Like ol10-slim this is the systemd-less reference footprint (`microdnf` + `dnf-data`,
+no full `dnf`/`pam`/`sudo`), hence no `systemd`. The `cleancore-ol9` image keeps
+this slim philosophy (no `@core`) but adds the explicit test-base essentials, which
+transitively pull `systemd` back in via full `dnf`.
+
+```text
+alternatives-1.24-2.0.1.el9.x86_64
+audit-libs-3.1.5-7.0.1.el9.x86_64
+basesystem-11-13.el9.noarch
+bash-5.1.8-9.el9.x86_64
+bzip2-libs-1.0.8-10.el9_5.x86_64
+ca-certificates-2025.2.80_v9.0.305-91.el9.noarch
+coreutils-single-8.32-39.0.1.el9.x86_64
+crypto-policies-20250905-1.git377cc42.el9_7.noarch
+curl-7.76.1-35.el9_7.3.x86_64
+cyrus-sasl-lib-2.1.27-22.el9.x86_64
+dnf-data-4.14.0-31.0.1.el9.noarch
+file-libs-5.39-16.el9.x86_64
+filesystem-3.16-5.el9.x86_64
+findutils-4.8.0-7.el9.x86_64
+gawk-5.1.0-6.el9.x86_64
+gdbm-libs-1.23-1.el9.x86_64
+glib2-2.68.4-18.el9_7.2.x86_64
+glibc-2.34-231.0.1.el9_7.10.x86_64
+glibc-common-2.34-231.0.1.el9_7.10.x86_64
+glibc-minimal-langpack-2.34-231.0.1.el9_7.10.x86_64
+gmp-6.2.0-13.el9.x86_64
+gnupg2-2.3.3-5.el9_7.x86_64
+gnutls-3.8.3-10.el9_7.x86_64
+gobject-introspection-1.68.0-11.el9.x86_64
+gpg-pubkey-8b4efbe6-629ec292
+gpg-pubkey-8d8b756f-629e59ec
+gpgme-1.15.1-6.el9.x86_64
+grep-3.6-5.el9.x86_64
+json-c-0.14-11.el9.x86_64
+keyutils-libs-1.6.3-1.el9.x86_64
+krb5-libs-1.21.1-9.0.1.el9_7.x86_64
+libacl-2.3.1-4.el9.x86_64
+libarchive-3.5.3-9.el9_7.x86_64
+libassuan-2.5.5-3.el9.x86_64
+libattr-2.5.1-3.el9.x86_64
+libblkid-2.37.4-21.0.1.el9_7.x86_64
+libbrotli-1.0.9-9.el9_7.x86_64
+libcap-2.48-10.el9_7.1.x86_64
+libcap-ng-0.8.2-7.el9.x86_64
+libcom_err-1.46.5-8.el9.x86_64
+libcurl-7.76.1-35.el9_7.3.x86_64
+libdnf-0.69.0-17.0.1.el9_7.x86_64
+libevent-2.1.12-8.el9_4.x86_64
+libffi-3.4.2-8.el9.x86_64
+libgcc-11.5.0-11.0.2.el9.x86_64
+libgcrypt-1.10.0-11.el9.x86_64
+libgpg-error-1.42-5.el9.x86_64
+libidn2-2.3.0-7.el9.x86_64
+libksba-1.5.1-7.el9.x86_64
+libmodulemd-2.13.0-2.el9.x86_64
+libmount-2.37.4-21.0.1.el9_7.x86_64
+libnghttp2-1.43.0-6.el9_7.1.x86_64
+libpeas-1.30.0-4.el9.x86_64
+libpsl-0.21.1-5.el9.x86_64
+librepo-1.14.5-3.el9.x86_64
+libreport-filesystem-2.15.2-6.0.3.el9.noarch
+libselinux-3.6-3.el9.x86_64
+libsemanage-3.6-5.el9_6.x86_64
+libsepol-3.6-3.el9.x86_64
+libsigsegv-2.13-4.el9.x86_64
+libsmartcols-2.37.4-21.0.1.el9_7.x86_64
+libsolv-0.7.24-3.el9.x86_64
+libssh-0.10.4-17.el9_7.x86_64
+libssh-config-0.10.4-17.el9_7.noarch
+libstdc++-11.5.0-11.0.2.el9.x86_64
+libtasn1-4.16.0-9.el9.x86_64
+libtool-ltdl-2.4.6-46.el9.x86_64
+libunistring-0.9.10-15.el9.x86_64
+libuuid-2.37.4-21.0.1.el9_7.x86_64
+libverto-0.3.2-3.el9.x86_64
+libxcrypt-4.4.18-3.el9.x86_64
+libxml2-2.9.13-14.el9_7.x86_64
+libyaml-0.2.5-7.el9.x86_64
+libzstd-1.5.5-1.el9.x86_64
+lua-libs-5.4.4-4.el9.x86_64
+lz4-libs-1.9.3-5.el9.x86_64
+microdnf-3.9.1-3.el9.x86_64
+mpfr-4.1.0-7.el9.x86_64
+ncurses-base-6.2-12.20210508.el9.noarch
+ncurses-libs-6.2-12.20210508.el9.x86_64
+nettle-3.10.1-1.el9.x86_64
+npth-1.6-8.el9.x86_64
+openldap-2.6.8-4.el9.x86_64
+openssl-fips-provider-3.0.7-8.0.1.el9.x86_64
+openssl-fips-provider-so-3.0.7-8.0.1.el9.x86_64
+openssl-libs-3.5.1-7.0.1.el9_7.x86_64
+oraclelinux-release-9.7-1.0.6.el9.x86_64
+oraclelinux-release-el9-1.0-26.el9.x86_64
+p11-kit-0.25.3-3.el9_5.x86_64
+p11-kit-trust-0.25.3-3.el9_5.x86_64
+pcre-8.44-4.el9.x86_64
+pcre2-10.40-6.0.1.el9.x86_64
+pcre2-syntax-10.40-6.0.1.el9.noarch
+popt-1.18-8.el9.x86_64
+publicsuffix-list-dafsa-20210518-3.el9.noarch
+readline-8.1-4.el9.x86_64
+redhat-release-9.7-0.6.0.1.el9.x86_64
+rpm-4.16.1.3-39.el9.x86_64
+rpm-libs-4.16.1.3-39.el9.x86_64
+sed-4.8-9.el9.x86_64
+setup-2.13.7-10.el9.noarch
+shadow-utils-4.9-15.el9.x86_64
+sqlite-libs-3.34.1-9.el9_7.x86_64
+tar-1.34-9.el9_7.x86_64
+tzdata-2026a-1.el9.noarch
+xz-libs-5.2.5-8.el9_0.x86_64
+zlib-1.2.11-40.el9.x86_64
+```

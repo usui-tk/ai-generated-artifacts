@@ -176,15 +176,15 @@ Each builder uses three tagged execution environments:
 Per-OL specifics: OL6/OL7 build with `yum`; OL8/OL9/OL10 install the full `dnf`
 into the slim builder (`microdnf install dnf`) first. The OL6 manifest is the
 **project's own** `EOF_OL6_KS` heredoc (`build-ol-aws-ami.sh`; no upstream
-`ol6-slim`); OL7–OL9 are still the upstream `distr/ol{7,8,9}-slim` kickstart
+`ol6-slim`); OL7–OL8 are still the upstream `distr/ol{7,8}-slim` kickstart
 `%packages` (kickstart-derived, faithful to the VM image, over-including for a
-pure container). **OL10 has been trimmed** to a slim-aligned, container-
+pure container). **OL9 and OL10 have been trimmed** to a slim-aligned, container-
 appropriate set: `@core` dropped (no kernel/boot/firewall/cron/syslog), explicit
-test-base essentials, `git-core` instead of `git` (avoiding ~62 `perl-*`), no
+test-base essentials, `git-core` instead of `git` (avoiding ~60 `perl-*`), no
 `net-tools`, and the Oracle EPEL repo wired in but **shipped disabled** (enabled
-on demand by the ENA/SSM harnesses for e.g. `dkms`). `systemd` stays present on
-OL10 (a hard dependency of full `dnf`/`pam`/`sudo`) but is never PID 1 in
-container/chroot use. Trimming OL7–OL9 the same way is per-OL follow-on work.
+on demand by the ENA/SSM harnesses for e.g. `dkms`). `systemd` stays present (a
+hard dependency of full `dnf`, plus `pam`/`sudo` on EL10) but is never PID 1 in
+container/chroot use. Trimming OL7–OL8 the same way is per-OL follow-on work.
 Two static snapshots accompany the base: `cleancore-ol<MAJOR>.sbom.json` (each
 finalized image's package set, names-only, reusable JSON) and
 `REFERENCE-oracle-official-images.md` (the official slim images' sources, pinned
