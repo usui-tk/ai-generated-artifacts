@@ -1,5 +1,5 @@
 # ============================================================================
-# CI workflow for scripts/powershell/download-speakerdeck-oracle4engineer/
+# CI workflow for projects/powershell-download-speakerdeck-oracle4engineer/
 # STAGE 1 — Linux checks (psa.py + PSScriptAnalyzer on PowerShell 7.x)
 #
 # This is the first stage of the Download-SpeakerDeck.ps1 CI chain.
@@ -9,29 +9,29 @@
 # which natively produces SARIF output suitable for Code Scanning upload.
 #
 # Governance: /SPEC.md
-# Change history: scripts/powershell/download-speakerdeck-oracle4engineer/CHANGELOG.md
+# Change history: projects/powershell-download-speakerdeck-oracle4engineer/CHANGELOG.md
 # ============================================================================
-name: 'scripts/powershell/download-speakerdeck-oracle4engineer — STAGE 1: Linux checks'
+name: 'projects/powershell-download-speakerdeck-oracle4engineer — STAGE 1: Linux checks'
 
 on:
   push:
     branches: [main]
     paths:
-      - 'scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1'
-      - 'scripts/powershell/download-speakerdeck-oracle4engineer/.psa.config.json'
-      - 'scripts/powershell/download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1'
+      - 'projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1'
+      - 'projects/powershell-download-speakerdeck-oracle4engineer/.psa.config.json'
+      - 'projects/powershell-download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1'
       - 'quality-tools/powershell-static-analyzer/psa.py'
       - 'quality-tools/powershell-static-analyzer/VERSION'
-      - '.github/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml'
+      - '.github/workflows/projects__powershell-download-speakerdeck-oracle4engineer__stage1__linux.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1'
-      - 'scripts/powershell/download-speakerdeck-oracle4engineer/.psa.config.json'
-      - 'scripts/powershell/download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1'
+      - 'projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1'
+      - 'projects/powershell-download-speakerdeck-oracle4engineer/.psa.config.json'
+      - 'projects/powershell-download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1'
       - 'quality-tools/powershell-static-analyzer/psa.py'
       - 'quality-tools/powershell-static-analyzer/VERSION'
-      - '.github/workflows/scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml'
+      - '.github/workflows/projects__powershell-download-speakerdeck-oracle4engineer__stage1__linux.yml'
   workflow_dispatch:
     inputs:
       scope:
@@ -79,19 +79,19 @@ jobs:
       # to run from repo root without explicitly passing --config.
       - name: '[psa.py] Run text analysis'
         if: ${{ inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch' }}
-        working-directory: scripts/powershell/download-speakerdeck-oracle4engineer
-        run: python3 ../../python/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1 | tee psa.log
+        working-directory: projects/powershell-download-speakerdeck-oracle4engineer
+        run: python3 ../../quality-tools/powershell-static-analyzer/psa.py Download-SpeakerDeck.ps1 | tee psa.log
 
       - name: '[psa.py] Generate SARIF'
         if: ${{ inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch' }}
-        working-directory: scripts/powershell/download-speakerdeck-oracle4engineer
-        run: python3 ../../python/powershell-static-analyzer/psa.py --format sarif Download-SpeakerDeck.ps1 > psa.sarif
+        working-directory: projects/powershell-download-speakerdeck-oracle4engineer
+        run: python3 ../../quality-tools/powershell-static-analyzer/psa.py --format sarif Download-SpeakerDeck.ps1 > psa.sarif
 
       - name: '[psa.py] Upload SARIF to Code Scanning'
         if: ${{ always() && (inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch') }}
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: scripts/powershell/download-speakerdeck-oracle4engineer/psa.sarif
+          sarif_file: projects/powershell-download-speakerdeck-oracle4engineer/psa.sarif
           category: psa-py
 
       # --- Tool group: PSScriptAnalyzer (PowerShell 7.x via Marketplace action) ---
@@ -102,8 +102,8 @@ jobs:
         id: pssa-linux
         uses: microsoft/psscriptanalyzer-action@v1.1
         with:
-          path: ./scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
-          settings: ./scripts/powershell/download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1
+          path: ./projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+          settings: ./projects/powershell-download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1
           recurse: false
           output: pssa.sarif
 
@@ -138,8 +138,8 @@ jobs:
             echo "## STAGE 1 — Linux checks results"
             echo ""
             echo "### psa.py"
-            if [ -f scripts/powershell/download-speakerdeck-oracle4engineer/psa.log ]; then
-              tail -20 scripts/powershell/download-speakerdeck-oracle4engineer/psa.log
+            if [ -f projects/powershell-download-speakerdeck-oracle4engineer/psa.log ]; then
+              tail -20 projects/powershell-download-speakerdeck-oracle4engineer/psa.log
             fi
             echo ""
             echo "### PSScriptAnalyzer (pwsh 7)"
@@ -160,8 +160,8 @@ jobs:
         with:
           name: dsd-stage1-${{ github.run_id }}
           path: |
-            scripts/powershell/download-speakerdeck-oracle4engineer/psa.log
-            scripts/powershell/download-speakerdeck-oracle4engineer/psa.sarif
+            projects/powershell-download-speakerdeck-oracle4engineer/psa.log
+            projects/powershell-download-speakerdeck-oracle4engineer/psa.sarif
             pssa.log
             pssa.sarif
           if-no-files-found: warn

@@ -1,5 +1,5 @@
 # ============================================================================
-# CI workflow for scripts/powershell/download-speakerdeck-oracle4engineer/
+# CI workflow for projects/powershell-download-speakerdeck-oracle4engineer/
 # STAGE 2 — Windows checks (PSScriptAnalyzer on Windows PowerShell 5.1 +
 # Phase 1 Step 0 smoke test via -EnvironmentInfoOnly).
 #
@@ -8,13 +8,13 @@
 # Windows PowerShell 5.1 (the action supports both pwsh 7 and Windows PS 5.1).
 #
 # Governance: /SPEC.md
-# Change history: scripts/powershell/download-speakerdeck-oracle4engineer/CHANGELOG.md
+# Change history: projects/powershell-download-speakerdeck-oracle4engineer/CHANGELOG.md
 # ============================================================================
-name: 'scripts/powershell/download-speakerdeck-oracle4engineer — STAGE 2: Windows checks'
+name: 'projects/powershell-download-speakerdeck-oracle4engineer — STAGE 2: Windows checks'
 
 on:
   workflow_run:
-    workflows: ['scripts/powershell/download-speakerdeck-oracle4engineer — STAGE 1: Linux checks']
+    workflows: ['projects/powershell-download-speakerdeck-oracle4engineer — STAGE 1: Linux checks']
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -55,8 +55,8 @@ jobs:
         id: pssa-windows
         uses: microsoft/psscriptanalyzer-action@v1.1
         with:
-          path: ./scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
-          settings: ./scripts/powershell/download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1
+          path: ./projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+          settings: ./projects/powershell-download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1
           recurse: false
           output: pssa.sarif
 
@@ -93,7 +93,7 @@ jobs:
       - name: '[Phase1-smoke] Run Download-SpeakerDeck.ps1 with -EnvironmentInfoOnly'
         shell: powershell
         timeout-minutes: 5
-        working-directory: scripts/powershell/download-speakerdeck-oracle4engineer
+        working-directory: projects/powershell-download-speakerdeck-oracle4engineer
         run: |
           .\Download-SpeakerDeck.ps1 -EnvironmentInfoOnly
           if ($LASTEXITCODE -ne 0) {

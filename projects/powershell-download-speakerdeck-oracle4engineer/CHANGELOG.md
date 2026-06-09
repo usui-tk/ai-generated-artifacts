@@ -21,6 +21,16 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
+### CI / build — Complete the scripts -> projects migration for this project's workflows
+
+The `scripts/powershell/download-speakerdeck-oracle4engineer/` -> `projects/powershell-download-speakerdeck-oracle4engineer/` migration moved the project tree but left this project's three CI workflows pointing at the old path (the same omission fixed earlier for `update-windows-server-iso`). No script change.
+
+- `.github/workflows/`: renamed the three `scripts__powershell__download-speakerdeck-oracle4engineer__*.yml` to `projects__powershell-download-speakerdeck-oracle4engineer__*.yml` (path-encoded filenames per the dotfile convention). Repointed all in-file paths (project directory, `paths:` trigger filters, `working-directory`, SARIF/artifact paths, header comments, `name:` fields, and stage1's `paths:` self-reference), and corrected the psa.py invocation to `../../quality-tools/powershell-static-analyzer/psa.py` (psa.py now lives under `quality-tools/`; the old `scripts/python/powershell-static-analyzer/` copy is being removed).
+- The stage2 `workflow_run` chain (it triggers on completion of stage1, matched by stage1's `name:`) stays in sync: both ends now carry the renamed `projects/...` workflow name.
+- README.md / README.ja.md: CI badge URLs repointed (bilingual lock-step preserved). TESTING.md: the three workflow-file references renamed to match.
+
+Note: renaming the workflow files changes their GitHub workflow identity (run history detaches; required-check names change). Any branch-protection rule that requires these checks by the old file name must be updated in repository settings after this lands.
+
 ### Fixed — Documentation/implementation reconciliation (parameter table, `.PARAMETER DryRun` note, AI-tool note)
 
 A doc-only update that closes three documentation/implementation

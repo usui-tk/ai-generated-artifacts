@@ -1,5 +1,5 @@
 # ============================================================================
-# CI workflow for scripts/powershell/download-speakerdeck-oracle4engineer/
+# CI workflow for projects/powershell-download-speakerdeck-oracle4engineer/
 # STAGE 3 — Windows release verification (full -DryRun execution).
 #
 # Runs on release publication (release/published event) or manual dispatch.
@@ -11,9 +11,9 @@
 # Windows PowerShell 5.1.
 #
 # Governance: /SPEC.md
-# Change history: scripts/powershell/download-speakerdeck-oracle4engineer/CHANGELOG.md
+# Change history: projects/powershell-download-speakerdeck-oracle4engineer/CHANGELOG.md
 # ============================================================================
-name: 'scripts/powershell/download-speakerdeck-oracle4engineer — STAGE 3: Windows release verification'
+name: 'projects/powershell-download-speakerdeck-oracle4engineer — STAGE 3: Windows release verification'
 
 on:
   release:
@@ -52,7 +52,7 @@ jobs:
       - name: '[Release-verify] Full DryRun execution (Phase 1-5)'
         shell: powershell
         timeout-minutes: 230
-        working-directory: scripts/powershell/download-speakerdeck-oracle4engineer
+        working-directory: projects/powershell-download-speakerdeck-oracle4engineer
         run: |
           # Full Phase 1-5 dry-run including Speaker Deck access.
           # No actual file writes happen because -DryRun explicitly marks
@@ -80,7 +80,7 @@ jobs:
         with:
           name: dsd-stage3-${{ github.run_id }}
           path: |
-            scripts/powershell/download-speakerdeck-oracle4engineer/work/logs/**
-            scripts/powershell/download-speakerdeck-oracle4engineer/*.log
+            projects/powershell-download-speakerdeck-oracle4engineer/work/logs/**
+            projects/powershell-download-speakerdeck-oracle4engineer/*.log
           if-no-files-found: warn
           retention-days: 30

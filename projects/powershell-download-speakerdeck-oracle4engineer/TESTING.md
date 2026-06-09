@@ -374,7 +374,7 @@ directly to the corresponding workflow page.
 
 ### 7.1 STAGE 1 — Linux checks
 
-**File**: `scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml`
+**File**: `projects__powershell-download-speakerdeck-oracle4engineer__stage1__linux.yml`
 **Runner**: `ubuntu-latest`
 **Triggers**: `push` / `pull_request` on `main` (paths-filtered to
 this script, the project `.psa.config.json`, the project
@@ -410,7 +410,7 @@ optional `scope` input (`all` / `psa-only` / `pssa-only`).
 
 ### 7.2 STAGE 2 — Windows checks (PowerShell 5.1 + Phase 1 smoke)
 
-**File**: `scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml`
+**File**: `projects__powershell-download-speakerdeck-oracle4engineer__stage2__windows.yml`
 **Runner**: `windows-latest`
 **Triggers**: `workflow_run` on STAGE 1 completion (only fires when
 the upstream conclusion is `success`), plus `workflow_dispatch`.
@@ -435,7 +435,7 @@ the upstream conclusion is `success`), plus `workflow_dispatch`.
 
 ### 7.3 STAGE 3 — Windows release verification
 
-**File**: `scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml`
+**File**: `projects__powershell-download-speakerdeck-oracle4engineer__stage3__windows-release.yml`
 **Runner**: `windows-latest`
 **Triggers**: `release/published`, plus manual `workflow_dispatch`
 (with an optional free-text `reason` input).
