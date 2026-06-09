@@ -21,6 +21,34 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **Container clean-core test base (`tests/cleancore/`).** Five self-contained
+  builders — `build-cleancore-ol6.sh` / `-ol7.sh` / `-ol8.sh` / `-ol9.sh` /
+  `-ol10.sh` — each producing a clean-core Oracle Linux container rootfs for one
+  OL major, as a reusable developer/CI test base (repo-availability, guest
+  provisioning shell logic, ENA compile-tests, upstream-drift structural checks).
+  Tagged `[A] HOST` / `[B] BUILDER` (throwaway, EL-native, build-use only) /
+  `[C] CLEAN-CORE` (the `.tar.gz` deliverable from a `yum`/`dnf --installroot`
+  transaction against `yum.oracle.com`). The builder is EL-native so the
+  in-guest rpm reads the rpmdb (OL6 stays rpm 4.8 / db4 forever, so an EL6-native
+  builder is mandatory; the OL6.6 builder is TLS-modernized first). Package set
+  is the upstream `distr/ol{7,8,9,10}-slim` kickstart for OL7-OL10 and the
+  project's own `EOF_OL6_KS` heredoc for OL6.
+  - **Not** part of the AMI build pipeline and **not** run by `tests/run-all.sh`
+    (a run needs root + network + a large build); covered by B-T1 (parse) +
+    B-T2 (`shellcheck -S style`) like every `.sh`, raising those tiers to
+    **30** and **25** asserts respectively. Suite 190/0/0 → **200/0/0** (with
+    `ksvalidator`; 199/1/0 without).
+  - Documented in `SPEC.md` **B.8** (canonical reference) + Part C static-checks
+    pointer, and `TESTING.md` ("Container clean-core test base" + coverage-ledger
+    row + environment dependencies). The container shares the host kernel (no
+    `/dev/kvm`), so this base covers the guest userland only — not the VM
+    build/boot, which stays on the Fedora KVM host (B-T7/B-T8).
+  - The package set is kickstart-derived (faithful to the VM image) and so
+    over-includes for a pure container; trimming it to a container-appropriate
+    set is tracked as separate follow-on work.
+  - Doc drift corrected in passing: the B-T1 coverage-ledger note read a stale
+    `13 asserts` (the live count was 25); set to the accurate **30**.
+
 - **OL7 build-log visibility (feedback ④).** A long, near-silent in-guest ENA
   DKMS compile made OL7 builds look stalled. The wrapper now surfaces live
   progress and preserves a build record:

@@ -76,12 +76,15 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **189 passed, 1 skipped, 0 failed** (B-T1 = 25,
-B-T2 = 20, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
+Current fixed pass count: **199 passed, 1 skipped, 0 failed** (B-T1 = 30,
+B-T2 = 25, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
 hook-timing = 8, log-format = 12, ena-uek-detect = 9, ena-reporting = 15,
 build-visibility = 17; plus
-B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 190/0
-with it). The host-runnable tiers
+B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 200/0
+with it). The B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core
+builders (see "Container clean-core test base" below): B-T1 and B-T2 parse- and
+lint-check **every** `.sh` in the project, so adding a script raises both counts
+by one. The host-runnable tiers
 (L0-L2) are complete; B-T7/B-T8 (L3/L4) remain deferred (builder host + AWS). A
 tier SKIPs cleanly when its optional dependency is absent.
 
@@ -105,6 +108,13 @@ them so a run is reproducible:
   everywhere. B-T2 SKIPs if shellcheck is absent (the CI gate requires it).
 - **pykickstart / `ksvalidator`** (B-T4): optional; B-T4 SKIPs if absent.
 - **awk / sed / grep / find** (coreutils + gawk): present in the container.
+- **clean-core builders** (`tests/cleancore/`, see below): these standalone
+  builders are NOT run by `run-all.sh`; B-T1/B-T2 only parse- and lint-check
+  them. To actually *run* one needs `root` plus `curl`, `tar`, `xz`, `gzip`,
+  `unshare`, `chroot`, `mknod`, `truncate`, `find` (and, optionally, a `podman`
+  / `docker` runtime for the readiness probe). Each builder SKIP-degrades its own
+  network-dependent readiness test when offline; its build pass/fail is governed
+  by the unconditional self-test section.
 
 Host-only tiers (B-T1, B-T2, B-T3, B-T5, B-T6, B-T9, log-format) run entirely in
 the container.
@@ -118,8 +128,8 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 
 | Tier | Layer | Status | Notes |
 |:--|:--|:--|:--|
-| B-T1 parse | L0 | implemented | `bash -n` all `.sh` + 5 shell-bodied heredoc bodies; 13 asserts |
-| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` via `.shellcheckrc`; 3 documented inline exemptions; SKIPs if shellcheck absent |
+| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/`) + 5 shell-bodied heredoc bodies; 30 asserts (the prior `13` note was stale) |
+| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 25 asserts |
 | B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
 | B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t3_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
@@ -133,6 +143,50 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (build visibility) | L1/L2 | implemented | `tests/t12_buildvisibility.sh`: OL7 build-log visibility (handoff B.1.5 feedback 4). `install-ena-driver.sh` emits greppable `[ena-driver][stage]` breadcrumbs at the phase boundaries (esp. dkms add/build/install) and `record_make_log()` preserves the DKMS make.log to `/var/log/ol-aws-ami-builder-ena-make.log` on a successful build (guest output is swallowed by virt-customize on success); the wrapper records the latest LIVE orchestrator line to `BUILD_STAGE_FILE` in `log_external` and the Phase-5 heartbeat shows it as `stage: …` (assembled into one atomic `log_progress` write); `HEARTBEAT_INTERVAL_SEC` default is 10s. Structural greps (file-direct) + a behavioural `log_external`→stage-file fixture; 17 asserts. Real OL7 build/boot proof is B-T7/B-T8 |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
+| clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |
+
+## Container clean-core test base (`tests/cleancore/`)
+
+The `tests/cleancore/` directory holds five self-contained builders —
+`build-cleancore-ol6.sh` / `-ol7.sh` / `-ol8.sh` / `-ol9.sh` / `-ol10.sh`
+(naming convention: `build-cleancore-ol<MAJOR>.sh`) — that produce a **clean-core
+Oracle Linux container rootfs** per OL major as a reusable test base for the
+project's container-level checks (repo-availability, guest provisioning shell
+logic, ENA driver compile-tests, upstream-drift structural checks). They are
+developer/CI-side tooling: **not part of the AMI build pipeline** and **not run
+by `run-all.sh`**. The canonical reference for this test base lives in `SPEC.md`
+**B.8**; this section is the operational note.
+
+Each builder uses three tagged execution environments:
+
+- **[A] HOST** — the machine running the script (the Claude sandbox / CI =
+  Ubuntu 24.04 / end-user = RHEL 10|9, Fedora 44). It only orchestrates:
+  download, extract, edit, pack, self-test.
+- **[B] BUILDER** — a **throwaway** Oracle-distributed image, driven via
+  `unshare`+`chroot`, used build-use only (its contents are never shipped). It
+  is **EL-native** so the in-guest rpm can read the rpmdb it writes — mandatory
+  for OL6, whose rpm stays 4.8 / BerkeleyDB-4 forever (an EL7 rpm 4.11 / db5
+  builder yields a db an EL6 rpm reads as 0 packages). OL6 additionally needs a
+  TLS-stack modernization before it can reach modern `yum.oracle.com`.
+- **[C] CLEAN-CORE** — the deliverable rootfs from the `yum`/`dnf
+  --installroot` transaction, finalized (device nodes, OCI yum-variable rewrite,
+  build-time repo dropped, logs zero-filled, machine-id / ssh host keys cleared)
+  and packed as a `.tar.gz`.
+
+Per-OL specifics: the package manifest is the upstream `distr/ol{7,8,9,10}-slim`
+kickstart `%packages` for OL7-OL10, and the **project's own** `EOF_OL6_KS`
+heredoc (`build-ol-aws-ami.sh`) for OL6 (there is no upstream `ol6-slim`).
+OL6/OL7 build with `yum`; OL8/OL9/OL10 install the full `dnf` into the slim
+builder (`microdnf install dnf`) first. The package set is currently
+**kickstart-derived** (i.e. faithful to the VM image), so it intentionally
+over-includes for a pure container; trimming it to a container-appropriate set
+is tracked as separate follow-on work.
+
+Run one with `bash tests/cleancore/build-cleancore-ol<MAJOR>.sh [output.tar.gz]`
+(see "Environment & version dependencies" for the required tools; `INSECURE_TLS=0`
+drops the build-time `sslverify=0` on a trusted host). The script exits 0 only if
+the build and the unconditional self-test section pass; the network-dependent
+readiness probe SKIPs (never fails the build) when offline.
 
 ## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
 

@@ -1482,6 +1482,86 @@ Notes:
 
 ---
 
+## B.8 Container clean-core test base (`tests/cleancore/`)
+
+`tests/cleancore/` holds five self-contained builders —
+`build-cleancore-ol6.sh` / `-ol7.sh` / `-ol8.sh` / `-ol9.sh` / `-ol10.sh`
+(naming convention: `build-cleancore-ol<MAJOR>.sh`) — each producing a
+**clean-core Oracle Linux container rootfs** for one OL major. They are a
+reusable, general-purpose **test base** for the project's container-level checks
+(repo-availability, guest provisioning shell logic, ENA driver compile-tests,
+upstream-drift structural checks). This is **developer / CI-side tooling**: it is
+**not part of the AMI build pipeline** (`build-ol-aws-ami.sh`) and is **not run
+by `tests/run-all.sh`** (a run needs root, network, and a multi-hundred-MB
+build). The builders live in the project blast-radius; operational run notes are
+in `TESTING.md` ("Container clean-core test base").
+
+A container shares the host kernel and has no `/dev/kvm`, so this base covers the
+**guest userland** only — it is **not** a substitute for the VM image build /
+Nitro boot (those stay on the Fedora KVM host; see B-T7 / B-T8 in `TESTING.md`).
+
+### Three execution environments
+
+Each builder tags every block with the environment it runs in:
+
+- **[A] HOST** — the machine running the script (Claude sandbox / CI = Ubuntu
+  24.04 / end-user = RHEL 10|9, Fedora 44). Orchestrates only: download, extract,
+  edit, pack, self-test. No container runtime is required.
+- **[B] BUILDER** — a **throwaway** Oracle-distributed image driven via
+  `unshare`+`chroot`, **build-use only** (its contents never enter the
+  deliverable). It must be **EL-native** so the in-guest rpm can read the rpmdb
+  it writes. It reads **only** a build-dedicated `cleancore.repo` pointing at
+  verified `yum.oracle.com` URLs; its own bundled repo configs are removed.
+- **[C] CLEAN-CORE** — the deliverable rootfs from the `yum`/`dnf
+  --installroot` transaction, finalized from [A] (device nodes; OCI yum-variable
+  rewrite to `yum.oracle.com` + `https`; OL6 UEK enable-vars disabled;
+  build-time repo dropped; logs zero-filled; `machine-id` / ssh host keys
+  cleared) and packed as a `.tar.gz`. The self-test runs against a **fresh
+  unpack** of that tarball (what a container runtime would see), not the build
+  tree.
+
+### Per-OL specifics
+
+| OL | builder (build-use only) | pkg mgr | enabled repos | package-set source |
+|----|--------------------------|---------|----------------|--------------------|
+| 6 | OL6.6 public-yum docker image (rpm 4.8 / db4); **TLS-modernized first** | `yum` | `latest` | the project's **own** `EOF_OL6_KS` heredoc (`build-ol-aws-ami.sh`; no upstream `ol6-slim`) |
+| 7 | `7-slim` rootfs (ships `yum`) | `yum` | `latest` + `UEKR6` | upstream `distr/ol7-slim/ol7-ks.cfg` `%packages` |
+| 8 | `8-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | upstream `distr/ol8-slim` `%packages` |
+| 9 | `9-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | upstream `distr/ol9-slim` `%packages` |
+| 10 | `10-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | upstream `distr/ol10-slim` `%packages` |
+
+- **EL-native builder is mandatory.** rpm / BerkeleyDB versions must match the
+  target so the in-guest rpm reads the rpmdb. **OL6 stays rpm 4.8 / db4 forever**
+  (EOL), and an EL7 rpm 4.11 / db5 builder writes a db an EL6 rpm reads as **0
+  packages** — so OL6 uses an EL6-native builder, giving permanent rpmdb
+  compatibility.
+- **OL6 builder modernization.** The 2014-era OL6.6 image's NSS/curl cannot
+  TLS-handshake modern `yum.oracle.com`; the builder's own rpm 4.8 first installs
+  host-fetched `el6_10` NSS/curl/ca-certs RPMs, then `yum` updates the package
+  managers, after which `https` works.
+- **Package set is kickstart-derived.** The manifest mirrors the VM kickstart
+  `%packages`, so it is intentionally faithful to the VM image and over-includes
+  for a pure container. Trimming the per-OL `INCLUDE`/`EXCLUDE` to a
+  container-appropriate set (against an Oracle-distributed slim image as the
+  reference) is tracked as **separate follow-on work**, not part of this base.
+
+### Test integration
+
+- **Not a `run-all.sh` tier.** `tests/run-all.sh` discovers tiers via
+  `t[0-9]*.sh`; the clean-core builders do not match and are never executed by
+  the runner.
+- **Covered by B-T1 / B-T2.** Both tiers walk **every** `.sh` in the project, so
+  each builder is parse-checked (`bash -n`) and lint-checked (`shellcheck -S
+  style`) like any other script. Each builder carries the usual single-code,
+  single-statement inline exemptions with a rationale (`SC2086` on the `mknod`
+  word-split; `SC2016` on literal `yum`-variable text).
+- **Self-test.** Each builder runs an unconditional self-test section (userland
+  executes, rpmdb readable, firmware excluded, machine-id / host keys cleared,
+  OCI variables rewritten, valid `.tar.gz`, ...) plus a network-gated readiness
+  probe that **SKIPs** (never fails the build) when offline.
+
+---
+
 ---
 
 # Part C — Quality Gates & Validation Checklist
@@ -1493,6 +1573,7 @@ Before any commit to this directory, all of the following must pass.
 - [ ] `bash -n build-ol-aws-ami.sh` → 0 errors (parse-only check)
 - [ ] `bash -n setup-vmimport-role.sh` → 0 errors
 - [ ] `bash tests/run-all.sh` → all tiers pass. Includes **B-T2 ShellCheck at the canonical `-S style`** (the strictest level) over every `.sh`, via the checked-in `.shellcheckrc`; the only exemptions are three documented inline `# shellcheck disable=`/`source=` directives (no rule is disabled globally). See TESTING.md.
+- [ ] The `tests/cleancore/` clean-core builders (B.8) parse (`bash -n`) and lint (`shellcheck -S style`) cleanly — they are covered by B-T1/B-T2 (every `.sh`), though not executed by `run-all.sh`
 - [ ] The script starts with `#!/usr/bin/env bash` followed by the header banner with all five required sections (Purpose / Prerequisites / Usage / Limitations / AI info — see A.2)
 - [ ] `set -euo pipefail` appears at the top of every shell script in this directory
 - [ ] Every new `${VAR:?...}` / `${VAR:=...}` assignment is paired with a `log_info` line confirming the resolved value (per A.5)
