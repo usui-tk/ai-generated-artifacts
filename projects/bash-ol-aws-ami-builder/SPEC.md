@@ -1526,7 +1526,7 @@ Each builder tags every block with the environment it runs in:
 |----|--------------------------|---------|----------------|--------------------|
 | 6 | OL6.6 public-yum docker image (rpm 4.8 / db4); **TLS-modernized first** | `yum` | `latest` | the project's **own** `EOF_OL6_KS` heredoc (`build-ol-aws-ami.sh`; no upstream `ol6-slim`) |
 | 7 | `7-slim` rootfs (ships `yum`) | `yum` | `latest` + `UEKR6` | upstream `distr/ol7-slim/ol7-ks.cfg` `%packages` |
-| 8 | `8-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | upstream `distr/ol8-slim` `%packages` |
+| 8 | `8-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 | 9 | `9-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 | 10 | `10-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 
@@ -1539,17 +1539,22 @@ Each builder tags every block with the environment it runs in:
   TLS-handshake modern `yum.oracle.com`; the builder's own rpm 4.8 first installs
   host-fetched `el6_10` NSS/curl/ca-certs RPMs, then `yum` updates the package
   managers, after which `https` works.
-- **Package set: per-OL, slim-aligned where trimmed.** OL6–OL8 manifests still
-  mirror the VM kickstart `%packages` (intentionally faithful to the VM image,
-  over-including for a pure container). **OL9 and OL10 have been trimmed** to a
-  container-appropriate, slim-aligned set: `@core` is dropped (so no
+- **Package set: per-OL, slim-aligned where trimmed.** OL6 and OL7 manifests
+  still mirror the VM kickstart `%packages` (intentionally faithful to the VM
+  image, over-including for a pure container). **OL8, OL9 and OL10 have been
+  trimmed** to a container-appropriate, slim-aligned set: `@core` is dropped (so no
   kernel/boot/firewall/cron/syslog), a minimal userland plus explicit test-base
   essentials are installed, `git-core` replaces `git` (avoiding ~60 `perl-*`
   packages), `net-tools` is omitted, and the Oracle EPEL repo is wired in but
   **shipped disabled** (the ENA/SSM harnesses enable it on demand for e.g.
-  `dkms`). `systemd` is a hard dependency of full `dnf` (and, on EL10, `pam`/
+  `dkms`). `systemd` is a hard dependency of full `dnf` (and, on EL8/EL10, `pam`/
   `sudo`) and is therefore present, but in container/chroot use it is never
-  PID 1. Trimming OL6–OL8 the same way is per-OL follow-on work.
+  PID 1. **EL8 specific:** a raw `dnf` with no langpack selection defaults to
+  `glibc-all-langpacks` (~416 MB of world locales), which the official `ol8-slim`
+  does not ship — so the OL8 builder pins `glibc-minimal-langpack` and excludes
+  `glibc-all-langpacks` to match the slim reference (EL9/EL10 default to the
+  minimal langpack, so they need no pin). Trimming OL6 and OL7 the same way is
+  per-OL follow-on work.
 - **Reference + SBOM artifacts.** The official slim image each clean-core derives
   from is documented (sources, pinned commit, name+version manifest) in
   `tests/cleancore/REFERENCE-oracle-official-images.md`. Each finalized

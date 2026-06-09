@@ -252,3 +252,128 @@ tzdata-2026a-1.el9.noarch
 xz-libs-5.2.5-8.el9_0.x86_64
 zlib-1.2.11-40.el9.x86_64
 ```
+## Oracle Linux 8 (`ol8-slim`)
+
+**Upstream sources** (from the build script's PRIMARY SOURCES):
+
+- Slim container image (rootfs): <https://github.com/oracle/container-images/tree/0218ab4ba2f820b1b978dcc5a76435040397a472/8-slim>
+- Rootfs tarball (pinned): <https://github.com/oracle/container-images/raw/0218ab4ba2f820b1b978dcc5a76435040397a472/8-slim/oraclelinux-8-slim-amd64-rootfs.tar.xz>
+- Slim kickstart (`ol8-ks.cfg`): <https://github.com/oracle/oracle-linux/blob/main/oracle-linux-image-tools/distr/ol8-slim/ol8-ks.cfg>
+- Package repositories (BaseOS + AppStream): <https://yum.oracle.com/>
+- Pinned `container-images` commit: `0218ab4ba2f820b1b978dcc5a76435040397a472`
+
+**Official `ol8-slim` RPM manifest** (103 packages, name-version-release.arch).
+Like ol9-slim/ol10-slim this is the microdnf-based reference footprint
+(`systemd-libs` only -- no full `systemd`/`dnf`/`pam`/`sudo`). It ships
+`glibc-minimal-langpack` (en_US only), NOT `glibc-all-langpacks`. The
+`cleancore-ol8` image keeps this slim philosophy (no `@core`) but adds the
+explicit test-base essentials, which transitively pull full `dnf` (and with it
+`systemd`, `pam`, `sudo`) back in. EL8 dnf would otherwise default to
+`glibc-all-langpacks` (~416 MB), so the builder pins `glibc-minimal-langpack`
+and excludes `glibc-all-langpacks` to match this slim reference.
+
+```text
+audit-libs-3.1.2-1.0.1.el8_10.1.x86_64
+basesystem-11-5.el8.noarch
+bash-4.4.20-6.el8_10.x86_64
+brotli-1.0.6-4.el8_10.x86_64
+bzip2-libs-1.0.6-28.el8_10.x86_64
+ca-certificates-2025.2.80_v9.0.304-80.2.el8_10.noarch
+chkconfig-1.19.2-1.0.2.el8.x86_64
+coreutils-single-8.30-17.0.1.el8_10.x86_64
+crypto-policies-20230731-1.git3177e06.el8.noarch
+curl-7.61.1-34.el8_10.11.x86_64
+cyrus-sasl-lib-2.1.27-6.el8_5.x86_64
+elfutils-libelf-0.190-2.el8.x86_64
+file-libs-5.33-27.el8_10.x86_64
+filesystem-3.8-6.el8.x86_64
+gawk-4.2.1-4.el8.x86_64
+glib2-2.56.4-169.el8_10.x86_64
+glibc-2.28-251.0.4.el8_10.34.x86_64
+glibc-common-2.28-251.0.4.el8_10.34.x86_64
+glibc-minimal-langpack-2.28-251.0.4.el8_10.34.x86_64
+gmp-6.1.2-11.el8.x86_64
+gnupg2-2.2.20-4.el8_10.x86_64
+gnutls-3.6.16-8.el8_10.5.x86_64
+gobject-introspection-1.56.1-1.el8.x86_64
+gpg-pubkey-ad986da3-5cabf60d.(none)
+gpgme-1.13.1-12.el8.x86_64
+grep-3.1-6.el8.x86_64
+info-6.5-7.el8.x86_64
+json-c-0.13.1-3.el8.x86_64
+keyutils-libs-1.5.10-9.0.1.el8.x86_64
+krb5-libs-1.18.2-34.0.1.el8_10.x86_64
+libacl-2.2.53-3.el8.x86_64
+libarchive-3.3.3-7.el8_10.x86_64
+libassuan-2.5.1-3.el8.x86_64
+libattr-2.4.48-3.el8.x86_64
+libblkid-2.32.1-48.0.2.el8_10.x86_64
+libcap-2.48-6.el8_10.1.x86_64
+libcap-ng-0.7.11-1.el8.x86_64
+libcom_err-1.45.6-7.el8_10.x86_64
+libcurl-7.61.1-34.el8_10.11.x86_64
+libdb-5.3.28-42.0.1.el8_4.x86_64
+libdb-utils-5.3.28-42.0.1.el8_4.x86_64
+libdnf-0.63.0-21.0.1.el8_10.x86_64
+libffi-3.1-24.el8.x86_64
+libgcc-8.5.0-28.0.1.el8_10.x86_64
+libgcrypt-1.8.5-7.el8_6.x86_64
+libgpg-error-1.31-1.el8.x86_64
+libidn2-2.2.0-1.el8.x86_64
+libksba-1.3.5-9.el8_7.x86_64
+libmodulemd-2.13.0-1.el8.x86_64
+libmount-2.32.1-48.0.2.el8_10.x86_64
+libnghttp2-1.33.0-6.el8_10.2.x86_64
+libpeas-1.22.0-6.el8.x86_64
+libpsl-0.20.2-6.el8.x86_64
+librepo-1.14.2-5.el8.x86_64
+libselinux-2.9-11.el8_10.x86_64
+libsemanage-2.9-12.el8_10.x86_64
+libsepol-2.9-3.el8.x86_64
+libsigsegv-2.11-5.el8.x86_64
+libsmartcols-2.32.1-48.0.2.el8_10.x86_64
+libsolv-0.7.20-6.el8.x86_64
+libssh-0.9.6-16.el8_10.x86_64
+libssh-config-0.9.6-16.el8_10.noarch
+libstdc++-8.5.0-28.0.1.el8_10.x86_64
+libtasn1-4.13-5.el8_10.x86_64
+libunistring-0.9.9-3.el8.x86_64
+libusbx-1.0.23-4.el8.x86_64
+libuuid-2.32.1-48.0.2.el8_10.x86_64
+libverto-0.3.2-2.el8.x86_64
+libxcrypt-4.1.1-6.el8.x86_64
+libxml2-2.9.7-21.el8_10.4.x86_64
+libyaml-0.1.7-5.el8.x86_64
+libzstd-1.4.4-1.0.1.el8.x86_64
+lua-libs-5.3.4-12.el8.x86_64
+lz4-libs-1.8.3-5.el8_10.x86_64
+microdnf-3.8.0-2.el8.x86_64
+mpfr-3.1.6-1.el8.x86_64
+ncurses-base-6.1-10.20180224.el8.noarch
+ncurses-libs-6.1-10.20180224.el8.x86_64
+nettle-3.4.1-7.el8.x86_64
+npth-1.5-4.el8.x86_64
+openldap-2.4.46-21.el8_10.x86_64
+openssl-libs-1.1.1k-15.el8_6.x86_64
+oraclelinux-release-8.10-1.0.7.el8.x86_64
+oraclelinux-release-el8-1.0-38.el8.x86_64
+p11-kit-0.23.22-2.el8.x86_64
+p11-kit-trust-0.23.22-2.el8.x86_64
+pcre-8.42-6.el8.x86_64
+pcre2-10.32-3.el8_6.x86_64
+popt-1.18-1.el8.x86_64
+publicsuffix-list-dafsa-20180723-1.el8.noarch
+readline-7.0-10.el8.x86_64
+redhat-release-8.10-0.2.0.1.el8.x86_64
+rpm-4.14.3-32.0.1.el8_10.x86_64
+rpm-libs-4.14.3-32.0.1.el8_10.x86_64
+sed-4.5-5.el8_10.x86_64
+setup-2.12.2-9.el8.noarch
+shadow-utils-4.6-23.el8_10.x86_64
+sqlite-libs-3.26.0-20.el8_10.x86_64
+systemd-libs-239-82.0.11.el8_10.16.x86_64
+tar-1.30-11.el8_10.x86_64
+tzdata-2026a-1.0.1.el8.noarch
+xz-libs-5.2.4-4.el8_6.x86_64
+zlib-1.2.11-25.el8.x86_64
+```

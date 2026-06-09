@@ -62,26 +62,33 @@ SSL=1; [ "${INSECURE_TLS}" = "1" ] && SSL=0
 REPO_BASEOS="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/baseos/latest/x86_64/"
 REPO_APPSTREAM="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/appstream/x86_64/"
 
-# Package manifest (upstream ol8-slim ol8-ks.cfg %packages; @core implicit base).
-# hwdata + dracut-config-generic are the ks's explicit additions; a raw dnf
-# --installroot (no Anaconda) needs them listed.
-INCLUDE=( @core
-  oraclelinux-release oraclelinux-release-el8
-  hwdata dracut-config-generic )
+# Package manifest (slim-aligned, NOT @core). The pristine ol8-slim image is the
+# reference footprint: dropping @core means no kernel/boot/firewall/cron/syslog. A
+# minimal userland comes in via dnf + oraclelinux-release; the rest are the explicit
+# essentials a test base needs. systemd is unavoidable on EL8 once full dnf is present
+# (it hard-requires systemd) and is accepted here -- in container/chroot use it is
+# never PID 1. git-core (not git) avoids ~60 perl-* subcommand packages; net-tools is
+# omitted (iproute/iputils cover it); the Oracle EPEL repo is wired in but shipped
+# disabled (finalized below) so DKMS/ENA tooling can enable it on demand.
+# glibc-minimal-langpack is pinned explicitly: on EL8 a raw dnf with no langpack
+# selection defaults to glibc-all-langpacks (~416 MB of world locales), which the
+# official ol8-slim does NOT ship (it carries glibc-minimal-langpack). Pinning it
+# + excluding glibc-all-langpacks below keeps the en_US locale only and matches the
+# slim reference. (EL9/EL10 default to the minimal langpack, so they need no pin.)
+INCLUDE=( dnf oraclelinux-release-el8 oracle-epel-release-el8
+  dnf-plugins-core yum-utils
+  curl wget git-core git-lfs bzip2 unzip zip zstd
+  sudo which tar diffutils less findutils procps-ng psmisc hostname vim-minimal
+  iproute iputils bind-utils traceroute nmap-ncat tcpdump
+  glibc-minimal-langpack )
 
-# ol8-ks.cfg "-pkg" removals. With group_package_types=mandatory (below) the
-# @core *Default* members (NetworkManager-team/-tui, biosdevname, the iwl*
-# firmware, lshw, ...) are not pulled in the first place; the *Mandatory* ones
-# the ks drops (dnf-plugin-spacewalk, iprutils, irqbalance, parted, plymouth,
-# rhn-*, rng-tools, sssd-*, tuned) are excluded here. Firmware (option A): the
-# iwl* names ARE real packages on EL8 -- excluded robustly via the *firmware*
-# glob (also catches linux-firmware / linux-firmware-core). kernel-uek is a
-# *Mandatory* @core member on EL8 but a clean-core container ships no kernel
-# (matching OL7's kernel-less result), so it is excluded too.
-EXCLUDE="dnf-plugin-spacewalk,iprutils,irqbalance,parted,plymouth,\
-rhn-client-tools,rhn-setup,rhnlib,rhnsd,rng-tools,sssd-common,sssd-kcm,tuned,\
-NetworkManager-team,NetworkManager-tui,biosdevname,lshw,lsscsi,microcode_ctl,\
-prefixdevname,sg3_utils,sg3_utils-libs,*firmware*,kernel-uek"
+# Defensive excludes only. Without @core the bulky members (kernel, firmware,
+# firewalld, cron, syslog, NetworkManager, sssd, rhn-*) are never candidates, so
+# the old @core-removal list is unnecessary. The globs below are a safety net in
+# case a dependency ever tries to pull a kernel or firmware blob into what must
+# remain a kernel-less container rootfs; glibc-all-langpacks is excluded so the
+# explicit glibc-minimal-langpack pin (above) is the only langpack provider.
+EXCLUDE="*firmware*,kernel*,glibc-all-langpacks"
 
 BUILDER="${WORK}/builder"      # [B] throwaway EL8-native builder rootfs
 OUT="/cleancore"               # [C] installroot path INSIDE the builder
@@ -181,6 +188,11 @@ find "${DELIV}/etc/yum.repos.d" -type f -name '*.repo*' -print0 \
       -e 's|yum$ociregion.$ocidomain|yum.oracle.com|g' \
       -e 's|yum$ociregion.oracle.com|yum.oracle.com|g' \
       -e 's|http://yum.oracle.com|https://yum.oracle.com|g'
+# (C-ii) ship the Oracle EPEL repo present but DISABLED; the ENA/SSM harnesses
+# enable it explicitly (e.g. dkms from EPEL). The base then resolves against the
+# base repos only, which keeps clean-core behaviour predictable.
+find "${DELIV}/etc/yum.repos.d" -type f -name 'oracle-epel-*.repo*' -print0 \
+  | xargs -0 -r sed -i -E 's/^enabled[[:space:]]*=[[:space:]]*1/enabled=0/'
 
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║ [C] CLEAN-CORE — (2-cleanup) logs / transient data.                        ║
@@ -268,7 +280,7 @@ if [ -f "${IMG}/etc/yum.repos.d/cleancore.repo" ]; then CC_REPO=1; else CC_REPO=
 st "userland executes (/bin/bash runs in chroot)"   t_run /bin/bash -c true
 st "rpmdb readable, >0 packages (${PKGS})"          test "${PKGS}" -gt 0
 st "package manager runs (dnf --version)"            t_run /usr/bin/dnf --version
-st "ssh daemon present (sshd)"                       test -x "${IMG}/usr/sbin/sshd"
+st "ssh daemon absent (slim base ships no sshd)"     test ! -e "${IMG}/usr/sbin/sshd"
 st "OS is Oracle Linux 8"                            grep -q "release 8" "${IMG}/etc/oracle-release"
 st "firmware excluded (0 packages)"                  test "${FW}" -eq 0
 st "machine-id blanked (0 bytes)"                    test "${MID_SIZE}" -eq 0

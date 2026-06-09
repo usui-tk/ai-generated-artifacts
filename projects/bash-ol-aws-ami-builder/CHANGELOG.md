@@ -80,6 +80,15 @@ This CHANGELOG is **English only** per the repository-wide
   clean-cores derive from). Neither is a `.sh`, so both sit outside B-T1/B-T2
   and are not drift-checked gates.
 
+- **OL8 clean-core package SBOM + official-image reference (OL8 section).** Static
+  snapshot `tests/cleancore/cleancore-ol8.sbom.json` (206 packages) records the
+  finalized OL8 clean-core's package set names-only as reusable JSON, and an
+  Oracle Linux 8 section is added to `REFERENCE-oracle-official-images.md` (the
+  official `ol8-slim` image's sources, pinned `container-images` commit, and
+  103-package name-version manifest — the reference footprint the clean-core
+  derives from). Neither is a `.sh`, so both sit outside B-T1/B-T2 and are not
+  drift-checked gates.
+
 ### Changed
 
 - **OL9 and OL10 clean-core trimmed to a slim-aligned set (was kickstart-derived).**
@@ -94,7 +103,23 @@ This CHANGELOG is **English only** per the repository-wide
   but never PID 1 in container/chroot use. Result: OL10 245 → **177 pkgs**
   (445M → **316M**); OL9 `@core`-set → **186 pkgs / 313M**. Each self-test's
   `sshd present` assertion is flipped to `sshd absent` (the slim-aligned base
-  ships no `openssh-server`). OL6–OL8 remain kickstart-derived pending their own
+  ships no `openssh-server`). OL6 and OL7 remain kickstart-derived pending their own
+  passes.
+
+- **OL8 clean-core trimmed to a slim-aligned set (was kickstart-derived).**
+  `build-cleancore-ol8.sh` now drops `@core` and installs a minimal userland plus
+  explicit test-base essentials, matching the OL9/OL10 pass: `git-core` instead of
+  `git` (avoiding ~60 `perl-*` packages), no `net-tools`, archive/network/
+  troubleshooting tools, and `dnf-plugins-core` + `yum-utils` (EL8 has no standalone
+  `dnf-utils`; `yum-utils` provides it). The Oracle EPEL repo is installed but
+  **finalized to `enabled=0`**. `systemd` is a hard dependency of full `dnf` (plus
+  `pam`/`sudo` on EL8) and is therefore present, but never PID 1 in container/chroot
+  use. **EL8-specific:** a raw EL8 `dnf` with no langpack selection defaults to
+  `glibc-all-langpacks` (~416 MB of world locales), which the official `ol8-slim`
+  does not ship — the builder pins `glibc-minimal-langpack` and excludes
+  `glibc-all-langpacks` to match the slim reference. Result: `@core`-set 278 pkgs /
+  697M → **206 pkgs / 346M** (tarball 120M). The self-test `sshd present` assertion
+  is flipped to `sshd absent`. OL6 and OL7 remain kickstart-derived pending their own
   passes.
 
 - **`HEARTBEAT_INTERVAL_SEC` default `20` → `10` seconds** (feedback ④; `0` still
