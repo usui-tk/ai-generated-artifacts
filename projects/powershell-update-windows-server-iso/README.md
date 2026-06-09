@@ -345,7 +345,7 @@ Pipeline of thirteen phases:
 | P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue scrape; writeback to `data/config-<OsKey>.json` |
 | P04 | FetchAssets | Fetch | ISO + patch downloads with hash verification |
 | P05 | ExpandIso | Plan | Mount source ISO; copy to workspace; enumerate WIM indexes |
-| P06 | ValidatePatchSet | Plan | `wsusscn2.cab` offline scan; verify patch set covers all required KBs |
+| P06 | ValidatePatchServicing | Plan | Servicing-readiness gate vs the `data/` Layer 2 database (default-ON, blocking) |
 | P07 | PatchInstallWim | Build | For each install.wim index: SSU → LCU → .NET → DISM cleanup |
 | P08 | PatchBootWim | Build | boot.wim (PE + Setup) and winre.wim |
 | P09 | AssembleIso | Build | Dynamic Update Setup overlay; Export-WindowsImage; oscdimg ISO build |
@@ -413,9 +413,7 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-PatchMonth` | patch | current month | Target patch month for refresh, e.g. `2026-06` |
 | `-SkipDynamicPatchRefresh` | patch | switch (OFF) | Skip P03 even if baseline is stale (offline runs) |
 | `-UseBaselineOnly` | patch | switch (OFF) | Use PatchBaseline strictly as-is; no Catalog access |
-| `-IgnorePatchValidation` | patch | switch (OFF) | Demote P06 Stage 1 abort to a warning (dev only) |
 | `-OfflineSyncPackagePath` | patch | (none) | Pre-staged `wsusscn2.cab` path (skips download) |
-| `-EnableDependencyCheck` | patch | switch (OFF) | Opt-in P06 Stage 2 servicing-readiness check (advisory) |
 | `-EnablePca2023BootManager` | secure-boot | switch (OFF) | Opt-in P10 PCA2023 boot-manager conversion |
 | `-ForcePca2023OnServer2025` | secure-boot | switch (OFF) | Override the Server 2025 default-skip for P10 |
 | `-Pca2023OnlyMode` | secure-boot | switch (OFF) | Standalone P12 inspection of an existing ISO (`-IsoPath` required) |
@@ -463,15 +461,18 @@ P03 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
         - Write back PatchBaseline.NeutralPatches to Config JSON (atomically)
 P04   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
 P05   ExpandIso
-P06 ValidatePatchSet
-        - Stage 1: catalog freshness comparison (existing)
-        - Stage 2 (opt-in via -EnableDependencyCheck, default OFF):
-          servicing-readiness check using data/servicing-dependency-database.json
-          (see SPEC.md §B.19.10). Advisory only — logs each patch verdict
-          (SsTooOld / NotInDatabase / Superseded / Pass) and never blocks
-          the build. Degrades to Unknown if layer 2 is absent.
-        - Stage 1 (catalog freshness) still aborts on a missing required
-          patch and emits diagnostic files (see "Diagnostic data" below).
+P06 ValidatePatchServicing
+        - Servicing-readiness gate (default-ON, blocking) using
+          data/servicing-dependency-database.json (see SPEC.md §B.19.10).
+          Validates the resolved patch set against the pre-generated
+          Layer 2 dependency database and logs each verdict
+          (SsTooOld / NotInDatabase / Superseded / Pass).
+        - Blocks on OverallStatus Fail (SsTooOld predicts 0x800f0823, or
+          NotInDatabase); warns on Superseded; passes otherwise.
+        - Blocks if Layer 2 is absent/unreadable (run -Action
+          RefreshDependencyDatabase, or pass -UseBaselineOnly to skip P06).
+        - The former live Windows Update Agent offline scan was removed
+          (host-relative; produced false negatives on cross-OS builds).
 P07+  Build / Verify / Report
 ```
 
@@ -483,10 +484,6 @@ For troubleshooting a run, these are the files to look at:
 |:---|:---|:---|
 | `<LogFile>` | When `-LogFile <path>` is passed | Full `Start-Transcript` of the run (every console line) |
 | `<WorkRoot>/logs/debugtrace.jsonl` | Always (when a phase uses the trace) | Per-step JSONL trace pinpointing the exact failing step |
-| `<WorkRoot>/diag/<yyyyMMdd-HHmmss>/` | On a P06 Stage 1 missing-patch failure | `validation_summary.json`, `validation_detail.csv`, `wsusscn2_scan_raw.json`, `dependency_graph.json` (see SPEC.md §B.19.12) |
-
-`-IgnorePatchValidation` demotes the Stage 1 abort to a warning while
-still writing the `diag/` set; use only for development.
 
 ### Refresh policy
 
@@ -604,7 +601,7 @@ enforces this per repository SPEC.md §12 (SPEC-CI-081).
 | Wrong `Type` on `NeutralPatches[]` entries after RefreshAllBaselines | A new caller of `Convert-CatalogPatchToBaselineEntry` did not pass `-KnownType` | Pass `-KnownType $q.Type` from the Catalogue search context. See SPEC.md §D.20 |
 | .NET CU baseline entry seems to be missing a sub-file | Umbrella KB with multiple `.msu` files; only one was kept | Confirm `Resolve-PatchSetFromCatalog` routes `Type='DotNet'` through `Select-AllCanonicalPatchFiles`. See SPEC.md §D.21 |
 | `0x800f081e` in Warning lines | Patch not applicable to this SKU | Expected for cross-SKU patch sets; safe to ignore (see SPEC.md §D.8) |
-| `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` mid-P07 | LCU's prerequisite SSU is missing from the baseline | Add the prerequisite SSU to `NeutralPatches[]`. The r09.0+ Servicing Dependency Database (SPEC.md §B.19) catches this at P06 before any DISM mount. See SPEC.md §D.2 |
+| `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` mid-P07 | LCU's prerequisite SSU is missing from the baseline | Add the prerequisite SSU to `NeutralPatches[]`. The Servicing Dependency Database (SPEC.md §B.19) catches this at P06, a blocking gate, before any DISM mount. See SPEC.md §D.2 |
 | Mojibake (doubled Japanese characters) in P05 WIM-index banner | DISM mount-cache poisoning from prior aborted runs | Use **one fresh `-WorkRoot` per OS family** (`D:\UpdateWsi_2016`, `D:\UpdateWsi_2019`, …). See SPEC.md §D.25 |
 | Stale WIM mount blocks new run | Previous run crashed mid-mount | Run `dism /Get-MountedImageInfo` then `dism /Cleanup-Mountpoints`. See SPEC.md §D.1 |
 | ISO SHA-256 mismatch on download | Microsoft rotated the Evaluation Center snapshot URL | Update `data/config-<OsKey>.json` `LanguageSpecific.<lang>.Iso.Sha256` to the new value. See SPEC.md §D.11 |

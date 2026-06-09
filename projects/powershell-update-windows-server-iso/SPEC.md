@@ -511,8 +511,8 @@ change.
 | Microsoft Windows Server evaluation ISO | Microsoft Evaluation Center | Build, Verify |
 | Per-OS configuration profile | `data/config-Server{2016,2019,2022,2025}.json` | All actions |
 | Microsoft Update Catalogue | live HTTPS | RefreshAllBaselines, Build (P03/P04) |
-| `wsusscn2.cab` (offline-scan metadata) | Microsoft CDN | P06 dependency validation, RefreshDependencyDatabase |
-| `data/servicing-dependency-database.json` (layer 2) | committed in repo | P06 stage 2, when present |
+| `wsusscn2.cab` (offline-scan metadata) | Microsoft CDN | RefreshDependencyDatabase (builds Layer 2) |
+| `data/servicing-dependency-database.json` (layer 2) | committed in repo | P06 servicing-readiness gate (required) |
 
 ### B.2.2 Outputs
 
@@ -716,7 +716,7 @@ The pipeline consists of 13 phases organised into 5 groups:
 | P03 | Setup | RefreshPatchBaseline: catalogue scrape (skippable) |
 | P04 | Fetch | FetchAssets: download ISO + patches |
 | P05 | Plan | ExpandIso: robocopy expand into workspace |
-| P06 | Plan | ValidatePatchSet: dependency closure check (r09.0: two stages) |
+| P06 | Plan | ValidatePatchServicing: /data Layer 2 servicing-readiness gate (default-ON, blocking) |
 | P07 | Build | PatchInstallWim: apply LCU / .NET / DU to install.wim |
 | P08 | Build | PatchBootWim: apply SSU / LP / LCU to boot.wim + WinRE.wim |
 | P09 | Build | AssembleIso: oscdimg re-emit |
@@ -732,8 +732,7 @@ effect:
 ```
 P03:  -UseBaselineOnly        OR  -SyntheticTestMode
 P04:  -SyntheticTestMode      (uses New-SyntheticTestIso)
-P06:  Stage 1: -UseBaselineOnly OR Action ∉ Setup
-      Stage 2: runs only with -EnableDependencyCheck (opt-in, advisory; see §B.19)
+P06:  -UseBaselineOnly  OR  -SyntheticTestMode
 P07:  -not Common.EnableInstallWimUpdate
 P08:  -not Common.EnableBootWimUpdate (per-target sub-checks)
 P10:  opt-in; runs only when -EnablePca2023BootManager is set (default OFF)
@@ -853,7 +852,7 @@ operations. Specifically:
 - P03 (RefreshPatchBaseline) is skipped.
 - P04 (FetchAssets) calls `New-SyntheticTestIso` to fabricate a
   synthetic ISO file with the correct shape but minimal contents.
-- P06 (ValidatePatchSet) is skipped (no real patches to validate).
+- P06 (ValidatePatchServicing) is skipped (no real patches to validate).
 - P07, P08, P10 are guarded by `if (-not $SyntheticTestMode) { ... }`
   blocks that emit `Write-Skip` lines.
 - P11, P12, P13 run on the synthetic output and produce reports.
@@ -1029,9 +1028,9 @@ needed.
 check operates on a **mounted** WIM and reads the actual installed
 package list. It is runtime-accurate but expensive. The new
 `Test-PatchServicingReadinessFromGraph` (§B.19.10) runs **before**
-the mount in P06 Stage 2, using `Get-WindowsImage` metadata only,
+the mount in P06, using `Get-WindowsImage` metadata only,
 and uses the layer 2 database as its source of truth. The two are
-complementary; both stay enabled in r09.0+.
+complementary; both stay enabled.
 
 ## B.14 Refresh policy and RefreshAllBaselines decision matrix
 
@@ -1902,39 +1901,39 @@ Automation level is semi-automatic: the writeback runs as part of A04 /
 RefreshAllBaselines, but the operator reviews the resulting Layer 1 / Layer 2
 diff before committing.
 
-### B.19.12 P06 ValidatePatchSet integration (normative)
+### B.19.12 P06 ValidatePatchServicing integration (normative)
 
-P06 has two independent stages. Stage 1 (catalog freshness, existing) is
-unaffected. Stage 2 is the servicing-readiness check and is:
+P06 is a single, default-ON, blocking servicing-readiness gate. It
+validates the resolved patch set (`$Script:ResolvedPatches`) against the
+pre-generated wsusscn2 Layer 2 dependency database via
+`Test-PatchServicingReadinessFromGraph` (§B.19.10), and:
 
-- **Opt-in** via `-EnableDependencyCheck` (default OFF); it does not run
-  otherwise.
-- **Advisory** — it logs each verdict inline (`SsTooOld` / `NotInDatabase`
-  via `Write-Caution`, others via `Write-Step`) plus a one-line overall
-  status, and explicitly notes that it does not block the build.
-- **Degrading** — when Layer 2 is absent or unreadable it reports
-  `Available = $false` / `OverallStatus = Unknown` with one caution;
-  Stage 1 still stands.
+- **Default-ON** — it runs on every Setup-group run; there is no opt-in
+  switch. It is skipped only under `-UseBaselineOnly` (trust the
+  pre-verified baseline as-is) or `-SyntheticTestMode` (no real patches).
+- **Blocking** — it throws (aborts the build) when the overall status is
+  `Fail`: `SsTooOld` (predicts install error `0x800f0823`) or
+  `NotInDatabase` (an uncovered patch). `Superseded` is logged as a
+  warning and does not block; `Pass` proceeds.
+- **Strict on absence** — when Layer 2 is absent or unreadable it reports
+  `Available = $false` / `OverallStatus = Unknown`, and P06 **blocks**
+  (run `-Action RefreshDependencyDatabase` to build Layer 2, or pass
+  `-UseBaselineOnly` to bypass P06).
 
-Stage 2 only reads whatever Layer 2 is already on disk; it does not
-acquire the cab. Acquiring Layer 2 is the separate `RefreshDependencyDatabase`
+P06 only reads whatever Layer 2 is already on disk; it does not acquire
+the cab. Acquiring/refreshing Layer 2 is the separate `RefreshDependencyDatabase`
 (A04) operation, optionally fed a manually-staged cab via
 `-OfflineSyncPackagePath`.
 
-Stage 2 itself emits no dedicated diagnostic files (its verdicts are
-logged inline). The Stage 1 fail path, however, does: when Stage 1
-detects a missing required patch, `Export-PatchValidationReport` writes a
-timestamped diagnostic set under `<WorkRoot>/diag/<yyyyMMdd-HHmmss>/`:
-
-| File | Content |
-|:---|:---|
-| `validation_summary.json` | Top-level result: status, provided/missing counts, missing-patch list, recommendation |
-| `validation_detail.csv` | One row per provided and per missing patch (Type, KbId, UpdateId, Title, provided-vs-required-by-WUA, supersedes, apply order, download hint) |
-| `wsusscn2_scan_raw.json` | The raw Windows Update Agent scan result the comparison was computed from |
-| `dependency_graph.json` | Adjacency view of the resolved set's supersedes/prerequisite edges, for triage |
-
-`-IgnorePatchValidation` demotes the Stage 1 abort to a warning while
-still writing the diagnostic set; it is for development use only.
+The former Stage 1 — a live Windows Update Agent COM offline scan against
+`wsusscn2.cab` — was removed. WUA evaluates applicability against the
+local host's OS image rather than the mounted target WIM, so it was
+host-relative and returned false negatives on cross-OS-family builds
+(e.g. a Server 2025 host building a Server 2016 image). The removal also
+retired `-IgnorePatchValidation`, `-EnableDependencyCheck`,
+`Invoke-WuaOfflineScan`, `Compare-PatchSetVsWuaScan`,
+`Export-PatchValidationReport`, and the `diag/<timestamp>/`
+patch-validation report set.
 
 ### B.19.13 Data contract and versioning (normative)
 
@@ -2001,7 +2000,7 @@ modes: with a committed/copied `data/servicing-dependency-database.json`
 present (full check using the cached Layer 2), or by staging a cab
 manually and running `-Action RefreshDependencyDatabase`
 `-OfflineSyncPackagePath <path>` to parse it to Layer 2. With neither,
-Stage 2 degrades to `Unknown` and Stage 1 alone applies.
+P06 has no Layer 2 to read and blocks (run `-Action RefreshDependencyDatabase`, or pass `-UseBaselineOnly`).
 
 #### B.19.14.4 Monthly refresh procedure
 
@@ -2020,11 +2019,9 @@ git commit -m "data: monthly servicing-dependency refresh (<yyyy-MM>)"
 
 #### B.19.14.5 Current status and future work
 
-In the current revision Stage 2 is opt-in and advisory
-(`-EnableDependencyCheck`). A future revision is planned to flip Stage 2 to
-on-by-default with a dedicated `-SkipDependencyCheck` opt-out switch (not
-yet implemented), and to add a deeper live-cab schema probe and CI
-automation for the monthly refresh. Cross-OS `-Execute` validation on real
+In the current revision the servicing-readiness gate is on-by-default
+and blocking; `-UseBaselineOnly` is the bypass. Planned future work: a
+deeper live-cab schema probe and CI automation for the monthly refresh. Cross-OS `-Execute` validation on real
 hardware (Server 2016/2019/2022/2025) is the remaining field-test step
 before the default-on flip.
 
@@ -2257,7 +2254,7 @@ combined; the loader treats them as independently-trackable units.
 .NET CU umbrella KBs that bundle multiple `.msu` files keep all
 sub-files via §B.15.2 `Select-AllCanonicalPatchFiles`.
 
-**Why**: Independent tracking of SSU and LCU enables P06 Stage 2
+**Why**: Independent tracking of SSU and LCU enables P06 servicing-readiness
 (§B.19) to surface SSU-prerequisite failures cleanly; without
 separation, the prerequisite chain would not be representable in
 layer 1.
@@ -2934,7 +2931,7 @@ mirrors that authoritative table.
 | **T2** `catalog_fixture_test.py` | Offline HTML fixture regression against `fixtures/<patch-month>/` | 13 | No  | Every commit that touches parsers or TitleTokens |
 | **T3** `powershell_harness.py` | PS function unit tests via `-Action TestHarness` | **7** | No  | Every commit that touches a PS scrape helper |
 | **T4** `eval_iso_probe.py` | Evaluation ISO endpoint check (HTTP Range-GET; 4 OS × 2 lang) | live (4 OS) | Yes | Before release; on Microsoft Evaluation Center snapshot rotation |
-| **T5** `wsusscn2_probe.py` | `wsusscn2.cab` freshness check (existence + size + Last-Modified; 60-day warn threshold) | live | Yes | Before running P06; monthly CI |
+| **T5** `wsusscn2_probe.py` | `wsusscn2.cab` freshness check (existence + size + Last-Modified; 60-day warn threshold) | live | Yes | Before RefreshDependencyDatabase; monthly CI |
 | **T6** `release_info_parser_test.py` | Offline regression for `ConvertFrom-ReleaseInfoMarkdown` against the PoC fixture | 13 | No | Every commit that touches the release-info parser |
 | **T7** `dotnet_cu_parser_test.py` | Offline regression for `ConvertFrom-DotNetCuIndexMarkdown` / `ConvertFrom-DotNetCuMarkdown` against `snapshots/dotnet_cu/` | 16 | No | Every commit touching the .NET CU parsers or the fetch/cache pipeline |
 | **T8** `dynamic_update_cache_test.py` | Offline regression for the Dynamic Update 36-month cache subsystem (`Add-/Get-/Remove-DynamicUpdateCacheEntry`); 3 fixture scenarios + 3 defensive cases | 20 | No | Every commit touching the DU cache functions or the 36-month window logic |

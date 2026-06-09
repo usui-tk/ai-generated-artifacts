@@ -109,13 +109,9 @@
     refresh. Equivalent to -SkipDynamicPatchRefresh plus a guarantee
     that no Catalog access occurs..
 
-.PARAMETER IgnorePatchValidation
-    Demote P06 ValidatePatchSet failures from "abort" to "warning".
-    NOT recommended for production runs; intended for development..
-
 .PARAMETER OfflineSyncPackagePath
-    Path to a pre-staged wsusscn2.cab file. When specified, the P06
-    ValidatePatchSet phase will use this file instead of downloading
+    Path to a pre-staged wsusscn2.cab file. When specified, the
+    RefreshDependencyDatabase action will use this file instead of downloading
     one to <WorkRoot>/cache/..
 
 .PARAMETER Mode
@@ -262,14 +258,8 @@ param(
     # ---- dynamic baseline / validation parameters ----
     [string]   $PatchMonth,
     [switch]   $SkipDynamicPatchRefresh,
-    [switch]   $IgnorePatchValidation,
     [string]   $OfflineSyncPackagePath,
     [switch]   $UseBaselineOnly,
-
-    # Opt-in (default OFF): run the P06 Stage 2 servicing-readiness check
-    # against the wsusscn2 Layer 2 database. Advisory only - logs verdicts
-    # but never blocks the build (SPEC B.19.19.1 Step 2).
-    [switch]   $EnableDependencyCheck,
 
     # RefreshAllBaselines parameters: control which OS / language /
     # patch month is targeted when running -Action RefreshAllBaselines.
@@ -553,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.09-r11.18'
-$Script:ScriptTag     = 'docs-realign-action-phase-map-and-pca2023-comment'
+$Script:ScriptVersion = 'update-wsi-2026.06.09-r11.19'
+$Script:ScriptTag     = 'remove-live-wua-scan-data-first-servicing-gate'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -693,7 +683,7 @@ $Script:PhaseRegistry = @(
     [pscustomobject]@{ Id='P03';   Name='RefreshPatchBaseline';    Group='Setup';  Func='Invoke-SetupPhase03_RefreshPatchBaseline' }
     [pscustomobject]@{ Id='P04';   Name='FetchAssets';               Group='Fetch';  Func='Invoke-FetchPhase04_FetchAssets' }
     [pscustomobject]@{ Id='P05';   Name='ExpandIso';                 Group='Plan';   Func='Invoke-PlanPhase05_ExpandIso' }
-    [pscustomobject]@{ Id='P06';   Name='ValidatePatchSet';        Group='Plan';   Func='Invoke-PlanPhase06_ValidatePatchSet' }
+    [pscustomobject]@{ Id='P06';   Name='ValidatePatchServicing'; Group='Plan';   Func='Invoke-PlanPhase06_ValidatePatchServicing' }
     [pscustomobject]@{ Id='P07';   Name='PatchInstallWim';           Group='Build';  Func='Invoke-BuildPhase07_PatchInstallWim' }
     [pscustomobject]@{ Id='P08';   Name='PatchBootWim';              Group='Build';  Func='Invoke-BuildPhase08_PatchBootWim' }
     [pscustomobject]@{ Id='P09';   Name='AssembleIso';               Group='Build';  Func='Invoke-BuildPhase09_AssembleIso' }
@@ -9193,131 +9183,6 @@ function Test-DataContractConsistency {
     }
 }
 
-function Invoke-WuaOfflineScan {
-    <#
-    .SYNOPSIS
-        Run a Windows Update Agent COM API offline scan against an
-        install.wim image that is currently mounted at $MountPath.
-    .DESCRIPTION
-        Uses Microsoft.Update.Session + Microsoft.Update.ServiceManager
-        to register the supplied wsusscn2.cab as an offline scan source.
-        Then runs $UpdateSearcher.Search("IsInstalled=0 ...") to obtain
-        the set of updates that the WUA engine judges as APPLICABLE-
-        BUT-NOT-INSTALLED for the current host's OS image.
-
-        IMPORTANT: WUA scans the LOCAL host's OS image, not the mounted
-        WIM directly. The caller must therefore run this function FROM
-        a Windows host whose OS family matches the install.wim target
-        (i.e. Server 2025 host to scan a Server 2025 image). When such
-        a host is not available, P06 will skip with a warning rather
-        than fail.
-
-        Returns: array of [pscustomobject] with UpdateId / Title /
-        KbIds / SupersededBy / IsMandatory / Severity / SizeBytes
-    #>
-    [OutputType([pscustomobject[]])]
-    param(
-        [Parameter(Mandatory)] [string]$OfflineSyncPackagePath
-    )
-    if (-not (Test-Path -LiteralPath $OfflineSyncPackagePath)) {
-        throw ('wsusscn2.cab not found at ' + $OfflineSyncPackagePath)
-    }
-    Write-Step 'Creating WUA session for offline scan...'
-    $session = $null
-    $serviceMgr = $null
-    $service = $null
-    try {
-        $session = New-Object -ComObject 'Microsoft.Update.Session'
-        $serviceMgr = New-Object -ComObject 'Microsoft.Update.ServiceManager'
-        $service = $serviceMgr.AddScanPackageService('UpdateWsi Offline Sync', $OfflineSyncPackagePath)
-    } catch {
-        throw ('Failed to register wsusscn2.cab with WUA: ' + $_.Exception.Message)
-    }
-    $searcher = $session.CreateUpdateSearcher()
-    $searcher.ServerSelection = 3 # ssOthers
-    $searcher.ServiceID = [string]$service.ServiceID
-    Write-Step 'Running WUA search (IsInstalled=0 and Type=Software and IsHidden=0)...'
-    $result = $searcher.Search("IsInstalled=0 and Type='Software' and IsHidden=0")
-    $items = New-Object System.Collections.Generic.List[object]
-    for ($i = 0; $i -lt $result.Updates.Count; $i++) {
-        $u = $result.Updates.Item($i)
-        $kbList = New-Object System.Collections.Generic.List[string]
-        if ($u.KBArticleIDs) {
-            for ($k = 0; $k -lt $u.KBArticleIDs.Count; $k++) {
-                $kbList.Add('KB' + $u.KBArticleIDs.Item($k)) | Out-Null
-            }
-        }
-        $sevStr = ''
-        try { $sevStr = [string]$u.MsrcSeverity } catch { $sevStr = '' }
-        $sizeBytes = 0L
-        try { $sizeBytes = [long]$u.MaxDownloadSize } catch { $sizeBytes = 0L }
-        $items.Add([pscustomobject][ordered]@{
-            UpdateId    = [string]$u.Identity.UpdateID
-            Title       = [string]$u.Title
-            KbIds       = $kbList.ToArray()
-            IsMandatory = [bool]$u.IsMandatory
-            Severity    = $sevStr
-            SizeBytes   = $sizeBytes
-            SupportUrl  = [string]$u.SupportUrl
-        }) | Out-Null
-    }
-    Write-Ok ('WUA scan returned {0} applicable update(s).' -f $items.Count)
-    return $items.ToArray()
-}
-
-function Compare-PatchSetVsWuaScan {
-    <#
-    .SYNOPSIS
-        Compare the provided PatchBaseline.Patches (or local patch dir)
-        against the WUA scan result and classify each WUA-required
-        update as Provided / Missing.
-    .DESCRIPTION
-        Matches by KB number. Excludes Checkpoint Cumulative Updates
-        (PatchBaseline.ExcludeKbList) and any patches the user opted
-        out of via -OnlyInstallWimIndexes etc.
-    #>
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)] [pscustomobject[]]$ProvidedPatches,
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [pscustomobject[]]$WuaRequired,
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [pscustomobject[]]$ExcludeKbList
-    )
-    $providedKbSet = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($p in $ProvidedPatches) {
-        if ($p.KbId) { [void]$providedKbSet.Add($p.KbId.ToUpper()) }
-    }
-    $excludeSet = New-Object System.Collections.Generic.HashSet[string]
-    foreach ($e in $ExcludeKbList) {
-        if ($e -and $e.KbId) { [void]$excludeSet.Add($e.KbId.ToUpper()) }
-    }
-
-    $missing = New-Object System.Collections.Generic.List[object]
-    $supplied = New-Object System.Collections.Generic.List[object]
-
-    foreach ($w in $WuaRequired) {
-        $wKbs = @($w.KbIds | ForEach-Object { $_.ToUpper() })
-        $isExcluded = $false
-        foreach ($k in $wKbs) {
-            if ($excludeSet.Contains($k)) { $isExcluded = $true; break }
-        }
-        if ($isExcluded) { continue }
-        $isProvided = $false
-        foreach ($k in $wKbs) {
-            if ($providedKbSet.Contains($k)) { $isProvided = $true; break }
-        }
-        if ($isProvided) {
-            $supplied.Add($w) | Out-Null
-        } else {
-            $missing.Add($w) | Out-Null
-        }
-    }
-    return [pscustomobject][ordered]@{
-        Provided      = $supplied.ToArray()
-        Missing       = $missing.ToArray()
-        ExcludedCount = $excludeSet.Count
-    }
-}
-
 # ============================================================
 # PatchPlan engine
 # ============================================================
@@ -12294,312 +12159,79 @@ function Invoke-PlanPhase05_ExpandIso {
 
 
 # ============================================================
-# Phase P06: ValidatePatchSet
+# Phase P06: ValidatePatchServicing
 # ============================================================
-# After P05 has extracted install.wim, this phase verifies that the
-# user-supplied patch set (or the one derived from PatchBaseline) is
-# sufficient by running a Windows Update Agent (WUA) offline scan
-# against wsusscn2.cab.
+# After P05 has extracted install.wim, this phase validates that the
+# resolved patch set is serviceable against the pre-generated wsusscn2
+# Layer 2 dependency database (data/servicing-dependency-database.json,
+# refreshed monthly via -Action RefreshDependencyDatabase). This is a
+# /data-first, default-ON blocking gate.
+#
+# The former Stage 1 (a live Windows Update Agent COM offline scan) was
+# removed: WUA evaluates applicability against the LOCAL host's OS image,
+# not the mounted target WIM, so it was host-relative and produced false
+# negatives on cross-OS-family builds (e.g. a Server 2025 host building a
+# Server 2016 image). The pre-verified baseline plus the Layer 2 database
+# supersede it.
 #
 # Skip conditions:
-#   - $Script:SyntheticTestMode  (no real Microsoft assets in play)
-#   - $Script:UseBaselineOnly    (caller explicitly opted out of catalog)
-#   - WUA scan cannot run from this host (non-Windows or COM blocked)
+#   - $Script:SyntheticTestMode  (synthetic patches; nothing to validate)
+#   - $Script:UseBaselineOnly    (trust the pre-verified baseline as-is)
 #
-# Failure handling:
-#   - Missing patches detected AND $IgnorePatchValidation = $false -> throw
-#   - Missing patches detected AND $IgnorePatchValidation = $true  -> warn
-#   - Diagnostic data (4 files) is ALWAYS exported on missing-detection,
-#     regardless of $IgnorePatchValidation.
+# Verdict handling (Test-PatchServicingReadinessFromGraph):
+#   - Layer 2 database absent/unreadable             -> block (throw)
+#   - OverallStatus 'Fail' (SsTooOld / NotInDatabase) -> block (throw)
+#   - OverallStatus 'Warning' (Superseded only)      -> warn, continue
+#   - OverallStatus 'Pass'                           -> pass
 
-function Export-PatchValidationReport {
-    <#
-    .SYNOPSIS
-        Emit the four diagnostic files (validation_summary.json,
-        validation_detail.csv, wsusscn2_scan_raw.json, dependency_graph.json)
-        documented in SPEC C.4.
-    #>
-    [OutputType([string])]
-    param(
-        [Parameter(Mandatory)] [string]$DiagRoot,
-        [Parameter(Mandatory)] [pscustomobject]$Comparison,
-        [Parameter(Mandatory)] [pscustomobject[]]$ProvidedPatches,
-        [Parameter(Mandatory)] [pscustomobject[]]$WuaRaw,
-        [Parameter(Mandatory)] [hashtable]$Target,
-        [Parameter(Mandatory)] [hashtable]$OfflineSyncPackageInfo,
-        [string]$Status = 'Fail',
-        [string]$Reason = 'MissingRequiredPatches'
-    )
-    $ts = (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss')
-    $dir = Join-Path $DiagRoot $ts
-    if (-not (Test-Path -LiteralPath $dir)) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    }
-
-    # validation_summary.json
-    $summary = [pscustomobject][ordered]@{
-        ValidationTimestamp = (Get-Date).ToString('o')
-        Target              = $Target
-        OfflineSyncPackage          = $OfflineSyncPackageInfo
-        Result              = [pscustomobject][ordered]@{
-            Status               = $Status
-            Reason               = $Reason
-            ProvidedPatchCount   = $ProvidedPatches.Count
-            MissingPatchCount    = $Comparison.Missing.Count
-            SupersededPatchCount = 0
-        }
-        ProvidedPatches = $ProvidedPatches
-        MissingPatches  = $Comparison.Missing
-        SupersededPatches = @()
-        Recommendation = @(
-            'Run with -AutoDetectLatestPatches to refresh PatchBaseline from Microsoft Update Catalog.',
-            'Or download the missing KBs from the Catalog manually and add to -PatchDirectory.'
-        )
-    }
-    Save-CanonicalJsonFile -InputObject $summary -Path (Join-Path $dir 'validation_summary.json') -Depth 32
-
-    # validation_detail.csv
-    $rows = New-Object System.Collections.Generic.List[object]
-    foreach ($p in $ProvidedPatches) {
-        $rows.Add([pscustomobject][ordered]@{
-            Type        = $p.Type
-            KbId        = $p.KbId
-            UpdateId    = $p.UpdateId
-            Title       = $p.Title
-            Provided    = 'Yes'
-            RequiredByWUA = 'No'
-            Severity    = ''
-            Supersedes  = ($p.Supersedes -join ';')
-            RequiresKbIds = ($p.RequiresKbIds -join ';')
-            ApplyOrder  = $p.ApplyOrder
-            DownloadHint = $p.DownloadUrl
-        }) | Out-Null
-    }
-    foreach ($m in $Comparison.Missing) {
-        $kbDisp = ($m.KbIds -join ';')
-        $rows.Add([pscustomobject][ordered]@{
-            Type        = ''
-            KbId        = $kbDisp
-            UpdateId    = $m.UpdateId
-            Title       = $m.Title
-            Provided    = 'No'
-            RequiredByWUA = 'Yes'
-            Severity    = $m.Severity
-            Supersedes  = ''
-            RequiresKbIds = ''
-            ApplyOrder  = ''
-            DownloadHint = 'https://catalog.update.microsoft.com/Search.aspx?q=' + $kbDisp
-        }) | Out-Null
-    }
-    $csvPath = Join-Path $dir 'validation_detail.csv'
-    $rows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
-
-    # wsusscn2_scan_raw.json
-    Save-CanonicalJsonFile -InputObject $WuaRaw -Path (Join-Path $dir 'wsusscn2_scan_raw.json') -Depth 32
-
-    # dependency_graph.json (simple adjacency from PatchBaseline)
-    $nodes = New-Object System.Collections.Generic.List[object]
-    $edges = New-Object System.Collections.Generic.List[object]
-    foreach ($p in $ProvidedPatches) {
-        $nodes.Add([pscustomobject][ordered]@{
-            Id    = $p.KbId
-            Title = $p.Title
-            Type  = $p.Type
-            Provided = $true
-        }) | Out-Null
-        foreach ($req in $p.RequiresKbIds) {
-            $edges.Add([pscustomobject][ordered]@{
-                From = $p.KbId; To = $req; Kind = 'Requires'
-            }) | Out-Null
-        }
-        foreach ($sup in $p.Supersedes) {
-            $edges.Add([pscustomobject][ordered]@{
-                From = $p.KbId; To = $sup; Kind = 'Supersedes'
-            }) | Out-Null
-        }
-    }
-    foreach ($m in $Comparison.Missing) {
-        foreach ($k in $m.KbIds) {
-            $nodes.Add([pscustomobject][ordered]@{
-                Id = $k; Title = $m.Title; Type = ''; Provided = $false
-            }) | Out-Null
-        }
-    }
-    $graph = [pscustomobject][ordered]@{
-        Nodes = $nodes.ToArray()
-        Edges = $edges.ToArray()
-    }
-    Save-CanonicalJsonFile -InputObject $graph -Path (Join-Path $dir 'dependency_graph.json') -Depth 32
-    return $dir
-}
-
-function Invoke-PlanPhase06_ValidatePatchSet {
+function Invoke-PlanPhase06_ValidatePatchServicing {
     <#
     .OUTPUTS
         System.Boolean
     #>
     [OutputType([bool])]
     param()
-    Start-DebugTrace -Context 'Invoke-PlanPhase06_ValidatePatchSet' -PhaseId 'P06'
+    Start-DebugTrace -Context 'Invoke-PlanPhase06_ValidatePatchServicing' -PhaseId 'P06'
     try {
         Set-DebugStep -Step 'check-skip-conditions'
 
         # ---- Skip conditions ----
         if ($Script:SyntheticTestMode) {
-            Write-Skip 'P06 skipped: -SyntheticTestMode disables wsusscn2 validation.'
+            Write-Skip 'P06 skipped: -SyntheticTestMode uses synthetic patches; nothing to validate.'
             return $true
         }
         if ($Script:UseBaselineOnly) {
-            Write-Skip 'P06 skipped: -UseBaselineOnly explicitly set.'
-            return $true
-        }
-        # Only run on Windows (COM API unavailable elsewhere)
-        $isWin = $false
-        try { $isWin = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) }
-        catch { $isWin = ($env:OS -eq 'Windows_NT') }
-        if (-not $isWin) {
-            Write-Skip 'P06 skipped: non-Windows host; WUA COM API unavailable.'
+            Write-Skip 'P06 skipped: -UseBaselineOnly trusts the pre-verified baseline as-is.'
             return $true
         }
 
-        Set-DebugStep -Step 'compute-latest-patch-tuesday'
-        $latestPT = Get-LatestPatchTuesday
+        # ---- Servicing-readiness check against the wsusscn2 Layer 2 database ----
+        Set-DebugStep -Step 'servicing-readiness-check'
+        $resolved = @($Script:ResolvedPatches)
+        Write-Step ('Validating servicing readiness of {0} resolved patch(es) against the wsusscn2 Layer 2 database.' -f $resolved.Count)
+        $readiness = Test-PatchServicingReadinessFromGraph -ResolvedPatches $resolved
 
-        # ---- Resolve wsusscn2.cab ----
-        Set-DebugStep -Step 'resolve-wsusscn2-cab'
-        $wsusMeta = $null
-        if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) {
-            $wsusMeta = $Script:OsProfile.PatchBaseline.OfflineSyncPackage
-        }
-        $wsusInfo = $null
-        try {
-            $wsusInfo = Get-OfflineSyncPackageIfNeeded `
-                            -OfflineSyncPackageMeta $wsusMeta `
-                            -WorkRoot $Script:WorkRoot `
-                            -LatestPatchTuesday $latestPT `
-                            -OverridePath $Script:OfflineSyncPackagePath
-        } catch {
-            $msg = 'P06 could not obtain wsusscn2.cab: ' + $_.Exception.Message
-            if ($Script:IgnorePatchValidation) {
-                Write-Caution ($msg + ' (-IgnorePatchValidation set; continuing)')
-                return $true
-            }
-            throw $msg
+        if (-not $readiness.Available) {
+            throw ('P06 ValidatePatchServicing: the wsusscn2 Layer 2 dependency database is absent or unreadable (status {0}). Generate it via -Action RefreshDependencyDatabase, or pass -UseBaselineOnly to trust the pre-verified baseline as-is.' -f $readiness.OverallStatus)
         }
 
-        # ---- Persist wsusscn2.cab metadata to Config (if newly downloaded) ----
-        if ($wsusInfo.DownloadedNow -and $Script:OsProfile.PatchBaseline) {
-            $Script:OsProfile.PatchBaseline.OfflineSyncPackage.LocalCachePath          = $wsusInfo.Path
-            $Script:OsProfile.PatchBaseline.OfflineSyncPackage.LastDownloadedDate      = (Get-Date).ToString('o')
-            $Script:OsProfile.PatchBaseline.OfflineSyncPackage.LastDownloadedSha256    = $wsusInfo.Sha256
-            $Script:OsProfile.PatchBaseline.OfflineSyncPackage.LastDownloadedSizeBytes = $wsusInfo.SizeBytes
-            try {
-                $cfgPath = Get-OsConfigPath -OsKey $Script:OsVersion
-                Save-ConfigWithBaseline -ConfigPath $cfgPath -OsProfile $Script:OsProfile
-                Write-Step ('wsusscn2.cab metadata recorded in: ' + $cfgPath)
-            } catch {
-                Write-Caution ('wsusscn2.cab metadata writeback failed: ' + $_.Exception.Message)
-            }
+        Set-DebugStep -Step 'report-verdicts'
+        Write-Step ('Servicing-readiness overall status: {0} (Layer 2 generated {1}).' -f $readiness.OverallStatus, $readiness.DatabaseGeneratedAt)
+        foreach ($v in @($readiness.PatchVerdicts)) {
+            $note = if ($v.PSObject.Properties['Notes'] -and $v.Notes) { ' : ' + $v.Notes } else { '' }
+            $msg = ('  KB{0} ({1}) -> {2}{3}' -f $v.KbId, $v.UpdateId, $v.Verdict, $note)
+            if ($v.Verdict -in @('SsTooOld', 'NotInDatabase', 'Superseded')) { Write-Caution $msg }
+            else { Write-Step $msg }
         }
 
-        # ---- Run WUA offline scan ----
-        Set-DebugStep -Step 'wua-offline-scan'
-        $wuaRaw = $null
-        try {
-            $wuaRaw = Invoke-WuaOfflineScan -OfflineSyncPackagePath $wsusInfo.Path
-        } catch {
-            $msg = 'WUA offline scan failed: ' + $_.Exception.Message
-            if ($Script:IgnorePatchValidation) {
-                Write-Caution ($msg + ' (-IgnorePatchValidation set; continuing)')
-                return $true
-            }
-            throw $msg
+        if ($readiness.OverallStatus -eq 'Fail') {
+            throw 'P06 ValidatePatchServicing: one or more patches failed the servicing-readiness check (SsTooOld predicts install error 0x800f0823; NotInDatabase indicates an uncovered patch). See the verdicts above.'
+        }
+        if ($readiness.OverallStatus -eq 'Warning') {
+            Write-Caution 'P06 ValidatePatchServicing: servicing-readiness completed with warnings (superseded updates); continuing.'
         }
 
-        # ---- Compare patch sets ----
-        Set-DebugStep -Step 'compare-patch-sets'
-        $providedPatches = @()
-        if ($Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.Patches) {
-            $providedPatches = @($Script:OsProfile.PatchBaseline.Patches)
-        }
-        $excludeKbList = @()
-        if ($Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.ExcludeKbList) {
-            $excludeKbList = @($Script:OsProfile.PatchBaseline.ExcludeKbList)
-        }
-        $comparison = Compare-PatchSetVsWuaScan `
-                        -ProvidedPatches $providedPatches `
-                        -WuaRequired $wuaRaw `
-                        -ExcludeKbList $excludeKbList
-
-        Write-Step ('Patch set comparison: {0} provided / {1} missing / {2} excluded.' -f `
-                    $comparison.Provided.Count, $comparison.Missing.Count, $comparison.ExcludedCount)
-
-        # ---- Stage 2: servicing-readiness check (opt-in, advisory) ----
-        # SPEC B.19.19.1 Step 2: consult the wsusscn2 Layer 2 database for
-        # each provided patch's servicing readiness. Gated by
-        # -EnableDependencyCheck (default OFF) and purely advisory in this
-        # revision - it logs verdicts but never blocks the build. Absence of
-        # the Layer 2 database degrades to "Unknown" (Stage 1 still stands).
-        if ($Script:EnableDependencyCheck) {
-            Set-DebugStep -Step 'servicing-readiness-check'
-            Write-SubSection 'Stage 2: servicing-readiness check (wsusscn2 Layer 2)'
-            $readiness = Test-PatchServicingReadinessFromGraph -ResolvedPatches @($providedPatches)
-            if (-not $readiness.Available) {
-                Write-Caution ('Servicing-readiness check unavailable (status {0}); Layer 2 database absent or unreadable. Stage 1 validation already passed.' -f $readiness.OverallStatus)
-            } else {
-                Write-Step ('Servicing-readiness overall status: {0} (Layer 2 generated {1}).' -f $readiness.OverallStatus, $readiness.DatabaseGeneratedAt)
-                foreach ($v in @($readiness.PatchVerdicts)) {
-                    $note = if ($v.PSObject.Properties['Notes'] -and $v.Notes) { ' : ' + $v.Notes } else { '' }
-                    $msg = ('  KB{0} ({1}) -> {2}{3}' -f $v.KbId, $v.UpdateId, $v.Verdict, $note)
-                    if ($v.Verdict -in @('SsTooOld', 'NotInDatabase')) { Write-Caution $msg } else { Write-Step $msg }
-                }
-            }
-            Write-Step 'Servicing-readiness is advisory in this revision (enabled via -EnableDependencyCheck); it does not block the build.'
-        }
-
-        # ---- If missing patches: export diagnostics and decide ----
-        if ($comparison.Missing.Count -gt 0) {
-            Set-DebugStep -Step 'export-diagnostics'
-            $diagRoot = Join-Path $Script:WorkRoot 'diag'
-            $target = @{
-                OsVersion = $Script:OsVersion
-                OsLanguage = $Script:OsLanguage
-                BaseBuild = $Script:OsProfile.Build
-                InstallWimIndex = 'multiple'
-                WimEdition = ''
-            }
-            $wsusInfoHash = @{
-                Path = $wsusInfo.Path
-                Sha256 = $wsusInfo.Sha256
-                DownloadedDate = if ($wsusInfo.DownloadedNow) { (Get-Date).ToString('o') } else { '(cached)' }
-                SizeBytes = $wsusInfo.SizeBytes
-                Source = $wsusInfo.Source
-            }
-            $diagDir = Export-PatchValidationReport `
-                            -DiagRoot $diagRoot `
-                            -Comparison $comparison `
-                            -ProvidedPatches $providedPatches `
-                            -WuaRaw $wuaRaw `
-                            -Target $target `
-                            -OfflineSyncPackageInfo $wsusInfoHash `
-                            -Status 'Fail' `
-                            -Reason 'MissingRequiredPatches'
-            Write-Caution '============================================================'
-            Write-Caution '  PATCH VALIDATION DETECTED MISSING REQUIRED UPDATES'
-            Write-Caution '============================================================'
-            foreach ($m in $comparison.Missing) {
-                Write-Caution ('  - {0} ({1})' -f ($m.KbIds -join ','), $m.Title)
-            }
-            Write-Caution ('  Diagnostic data exported to: ' + $diagDir)
-            Write-Caution '============================================================'
-            if ($Script:IgnorePatchValidation) {
-                Write-Caution 'IgnorePatchValidation is set; continuing despite missing patches.'
-                return $true
-            }
-            throw 'P06 ValidatePatchSet: required patches missing. See diagnostic data above.'
-        }
-
-        Write-Ok 'P06 ValidatePatchSet: all required patches are provided.'
+        Write-Ok 'P06 ValidatePatchServicing: servicing readiness verified against the Layer 2 database.'
         return $true
     } finally {
         Stop-DebugTrace

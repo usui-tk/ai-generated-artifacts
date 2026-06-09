@@ -22,6 +22,23 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.19 - Remove live WUA offline scan; P06 becomes a /data-first servicing-readiness gate (blocking)
+
+A behavioural revision that retires P06's live Windows Update Agent (WUA) offline scan and repurposes P06 into a single, default-ON, blocking servicing-readiness gate against the pre-generated wsusscn2 Layer 2 database (`data/servicing-dependency-database.json`). `$Script:ScriptVersion` `r11.18` -> `r11.19`; `$Script:ScriptTag` becomes `remove-live-wua-scan-data-first-servicing-gate`. **Breaking change** (pre-1.0; no real consumers yet): `-IgnorePatchValidation` and `-EnableDependencyCheck` are removed.
+
+**Why.** The former P06 Stage 1 ran a live WUA COM offline scan that evaluates applicability against the *local host's* OS image, not the mounted target WIM. It was therefore host-relative and returned false negatives on cross-OS-family builds (a Server 2025 host building a Server 2016 image scanned the host and reported 0 applicable updates), and it crashed before that point by comparing against the never-populated `PatchBaseline.Patches`. The pre-verified baseline (`NeutralPatches[]`, dependency-verified monthly) plus the Layer 2 database already provide the dependency answer, so the live scan was redundant as well as incorrect.
+
+**Removed.**
+- Functions `Invoke-WuaOfflineScan`, `Compare-PatchSetVsWuaScan`, and `Export-PatchValidationReport` (all P06-Stage-1-only).
+- Parameters `-IgnorePatchValidation` (P06-Stage-1-only) and `-EnableDependencyCheck` (the servicing-readiness check is now always on). `-OfflineSyncPackagePath` is kept (shared with `RefreshDependencyDatabase`).
+- The `<WorkRoot>/diag/<timestamp>/` patch-validation report set (`validation_summary.json`, `validation_detail.csv`, `wsusscn2_scan_raw.json`, `dependency_graph.json`).
+
+**P06 now (`ValidatePatchServicing`; `PhaseRegistry` `Name`/`Func` renamed).** Skips only under `-UseBaselineOnly` or `-SyntheticTestMode`. Validates `$Script:ResolvedPatches` against the Layer 2 database via `Test-PatchServicingReadinessFromGraph` and: blocks on `OverallStatus` `Fail` (`SsTooOld` predicts `0x800f0823`, or `NotInDatabase`); warns on `Superseded`; passes otherwise; **blocks** when Layer 2 is absent/unreadable (run `-Action RefreshDependencyDatabase`, or pass `-UseBaselineOnly`). The non-Windows skip was removed (the gate reads JSON and is cross-platform).
+
+**Docs.** SPEC §B.19.12 rewritten; the phase table, skip table, data-source table, and §B.19.14.5 updated; README.md / README.ja.md phase + parameter tables and the P06 narrative updated (bilingual lock-step preserved, 16/12); TESTING.md status table and the §4.x baseline examples no longer reference `-EnableDependencyCheck`.
+
+**Tests.** Added `removed_live_wua_guard_test.py` (T20, offline static guard, 21 assertions): the three removed functions and two removed parameters stay absent, the old `Invoke-PlanPhase06_ValidatePatchSet` name is gone, and P06's new gate stays wired and blocking (calls `Test-PatchServicingReadinessFromGraph`, keeps both `throw` paths). The verdict -> block mapping (block-on-absence, block-on-`Fail`, warn-on-`Superseded`, pass) is already exercised by T16 (`servicing_dependency_readiness_verdict_test.py`).
+
 ### r11.18 - Documentation/comment realignment: Action → Phase map + ForcePca2023OnServer2025 comment
 
 A documentation/comment-quality revision that aligns the Markdown and the in-script comment-based help with the implemented code; no runtime logic changes. `$Script:ScriptVersion` `r11.17` -> `r11.18`, `$Script:ScriptTag` becomes `docs-realign-action-phase-map-and-pca2023-comment`. The shared epoch (`dataContractVersion`) stays `1`.

@@ -13,7 +13,7 @@ This document consolidates everything needed to verify and evaluate
 2. **Synthetic smoke tests** — read-only Actions executable in CI
 3. **Live Catalogue verification** — probes that catch Microsoft-side schema drift
 4. **Operator-pending verification** — full `-Execute` builds (requires Windows + ADK + ≥ 100 GB disk + admin)
-5. **Self-verification tool suite** — T1 through T19 (canonical inventory in [`tests/README.md`](./tests/README.md))
+5. **Self-verification tool suite** — T1 through T20 (canonical inventory in [`tests/README.md`](./tests/README.md))
 6. **Continuous integration** — four GitHub Actions stages
 
 > **Documentation language policy**: This document is maintained in
@@ -54,8 +54,7 @@ a build identifier plus a calendar date. Pending items are marked
 | P03 RefreshPatchBaseline — Catalogue scrape (live, monthly) | ✓ scrape paths exercised via T1 | CI Stage 4 monthly |
 | P04 FetchAssets — ISO + patch downloads with SHA-256 verify | _pending operator confirmation_ | not yet exercised on a fresh runner |
 | P05 ExpandIso — source ISO mount + WIM enumeration | _pending operator confirmation_ | r09.0 step2b3-real-data-parser-correction build (synthetic mode only) |
-| P06 ValidatePatchSet — `wsusscn2.cab` offline scan (Stage 1 catalog-freshness) | ✓ Stage 1 (catalog freshness) exercised | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
-| P06 ValidatePatchSet — Stage 2 (servicing-readiness, opt-in `-EnableDependencyCheck`) | ✓ implemented as an advisory check (logs verdicts, never blocks); verified offline via T16/T17 | r11.x build / 2026-05-29 |
+| P06 ValidatePatchServicing — /data Layer 2 servicing-readiness gate (default-ON, blocking) | ✓ implemented; verified offline via T16/T17 and the harness; blocks on `Fail` / Layer-2-absent | r11.19 build / 2026-06-09 |
 | P07 PatchInstallWim — SSU → LCU → .NET sequence | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P08 PatchBootWim — boot.wim + winre.wim | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P09 AssembleIso — Dynamic Update overlay + `oscdimg` | _pending operator confirmation_ | (requires `oscdimg.exe` on a Windows runner) |
@@ -86,11 +85,12 @@ a build identifier plus a calendar date. Pending items are marked
 | T17 servicing_dependency_recency_fallback_test.py (15 assertions, recency fallback in `Test-PatchServicingReadinessFromGraph`: out-of-scope KB falls back to newest in-scope LCU per OS family -> Superseded, with family resolution from OsKey and NotInDatabase when no fallback target; SPEC §B.19.10) | ✓ all pass | r11.8 wsusscn2-recency-fallback build / 2026-05-29 |
 | T18 servicing_dependency_servicing_stack_populate_test.py (17 assertions, pure halves of the SS populate: `Select-OfflineSyncLcuLeafRevision` leaf choice + `Update-ServicingStackFromMeta` field population from CBS metadata; SPEC §B.19.9) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
 | T19 servicing_dependency_data_contract_test.py (11 assertions, `Test-DataContractConsistency` status classification Current/Stale/Refuse/Foreign/Unknown + directory expansion + roll-up; committed Layer 2 DB classifies Current; SPEC §B.19.13) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
+| T20 removed_live_wua_guard_test.py (21 assertions, offline static guard: the r11.19-removed live-WUA functions/parameters stay absent and P06 ValidatePatchServicing stays wired + blocking; SPEC §B.19.12) | ✓ all pass | r11.19 remove-live-wua-scan-data-first-servicing-gate build / 2026-06-09 |
 | Part C §C.3.4 — `canonical_json_format_check.py` (27 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Scope-invariants gate — `servicing_dependency_scope_invariants_test.py` (23 assertions, EOS/ESU deny-list + allow-overrides over Layer 2 + fixture + synthetic; SPEC §B.19.4/§B.19.4.1) | ✓ all pass | r11.2 wsusscn2-phase2c-eos-esu-scope build / 2026-05-29 |
 | Layer 2 schema gate — `servicing_dependency_layer2_schema_test.py` (16 assertions, committed `data/servicing-dependency-database.json` vs `schema/servicing-dependency-database.schema.json` + data-contract identity, portable provenance, kbIds populate, Microsoft-prose hard rule; SPEC §B.19.5/§B.19.8) | ✓ all pass | r11.9 wsusscn2-layer2-kbids-populate build / 2026-05-29 |
-| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T19 + format gate + config schema gate + scope-invariants gate + Layer 2 schema gate) | ✓ green | CI continuous |
+| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T20 + format gate + config schema gate + scope-invariants gate + Layer 2 schema gate) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
@@ -331,7 +331,6 @@ procedure is below; results from past real runs are recorded in
        -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
        -PatchDirectory 'D:\Patches\Server2019\2026-05' `
        -WorkRoot $WorkRoot -LogFile $LogFile `
-       -EnableDependencyCheck `
        -Execute
    ```
 
@@ -342,7 +341,7 @@ procedure is below; results from past real runs are recorded in
 
 | Item | Note |
 |---|---|
-| Server 2016 `-Execute` build | The KB5088064 SSU must precede the KB5087537 LCU, or CBS rejects the LCU with `0x800f0823`. With `-EnableDependencyCheck`, P06 Stage 2 now flags this as `SsTooOld` before the mount (advisory). The SSU prerequisite is also recorded in `data/config-Server2016.json` so P03/P04 resolve it automatically. |
+| Server 2016 `-Execute` build | The KB5088064 SSU must precede the KB5087537 LCU, or CBS rejects the LCU with `0x800f0823`. P06 ValidatePatchServicing flags this as `SsTooOld` before the mount and blocks by default. The SSU prerequisite is also recorded in `data/config-Server2016.json` so P03/P04 resolve it automatically. |
 | Mojibake in P05 WIM-index banner | Did **not** reproduce when `-WorkRoot` was changed from `D:\UpdateWsi` to a per-OS root such as `D:\UpdateWsi-Server2016`. Working hypothesis is DISM mount-cache state corruption from prior aborted P10 runs, not console rendering. Workaround: use a fresh per-OS `-WorkRoot`. See [SPEC.md](./SPEC.md) §D.25 |
 
 ### 4.3 Real-machine verification baseline
@@ -359,10 +358,11 @@ and the P05 mojibake from a reused mount cache):
 - **Explicit, auto-timestamped `-LogFile`** — one transcript per run,
   named by action/OS/timestamp via `Get-Date`, so reruns never overwrite
   evidence and each run is independently auditable.
-- **`-EnableDependencyCheck`** — turns on the P06 Stage 2 advisory so the
-  `0x800f0823` predictor (`SsTooOld`) is logged before the mount. On
-  Server 2016 / 2019 this surfaces a missing or too-old SSU; on Server
-  2022 / 2025 the check is N/A (the SSU travels inside the LCU).
+- **Servicing-readiness gate (default-ON)** — P06 ValidatePatchServicing
+  logs the `0x800f0823` predictor (`SsTooOld`) before the mount and blocks
+  on a `Fail`. On Server 2016 / 2019 this surfaces a missing or too-old
+  SSU; on Server 2022 / 2025 the check is N/A (the SSU travels inside the
+  LCU).
 - **`-Execute`** — the only mode that performs DISM writes.
 
 ```powershell
@@ -381,7 +381,6 @@ $common = @{
     PatchDirectory        = "D:\Patches\$OsVersion\2026-05"
     WorkRoot              = $WorkRoot
     LogFile               = $LogFile
-    EnableDependencyCheck = $true
     Execute               = $true
 }
 
@@ -448,7 +447,7 @@ python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
 
 ### Determinism categories
 
-- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6 – T19,
+- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6 – T20,
   plus the canonical JSON format gate, the config schema gate, the
   scope-invariants gate, and the Layer 2 schema gate.
 - **Live-network** (Stage 4 monthly + ad-hoc): T1, T4, T5.

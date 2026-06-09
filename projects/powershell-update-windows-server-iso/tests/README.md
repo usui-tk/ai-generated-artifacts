@@ -30,7 +30,7 @@ production, this directory ships five tools, summarised below.
 | `catalog_fixture_test.py` (T2) | Offline regression test against saved HTML fixtures under `fixtures/<patch-month>/`; deterministic | After every parser or TitleToken change; on every CI run | No  |
 | `powershell_harness.py`   (T3) | Drives `Update-WindowsServerIso.ps1 -Action TestHarness` to unit-test PowerShell functions from Python | After every PS function change in the catalog / patch-selection layers | No  |
 | `eval_iso_probe.py`       (T4) | HTTP Range-GET against each `data/config-Server<N>.json` Iso URL; reports size + Last-Modified | When the Microsoft Evaluation Center publishes a new snapshot; before release | Yes |
-| `wsusscn2_probe.py`       (T5) | HTTP probe of `wsusscn2.cab`; warns when the cab is older than 60 days | Before running P06 ValidatePatchSet; on every CI monthly refresh | Yes |
+| `wsusscn2_probe.py`       (T5) | HTTP probe of `wsusscn2.cab`; warns when the cab is older than 60 days | Before RefreshDependencyDatabase; on every CI monthly refresh | Yes |
 | `release_info_parser_test.py` (T6) | Offline regression test for the PowerShell `ConvertFrom-ReleaseInfoMarkdown` parser against the PoC fixture; asserts row counts and per-OS coverage | After every change to the release-info parser or its helpers; on every CI run | No  |
 | `dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown` against live-captured snapshots under `tests/snapshots/dotnet_cu/` (independent of the PoC fixtures); 16 assertions covering entry counts, date range, per-OS row counts, per-entry deep equality, typo handling, and OS-label mapping | After every change to the .NET CU parsers, the OS-label mapper, or the fetch/cache pipeline; on every CI run | No  |
 | `dynamic_update_cache_test.py` (T8) | Offline regression test for the Dynamic Update 36-month cache subsystem; drives `Add-DynamicUpdateCacheEntry`, `Get-DynamicUpdateCache`, `Get-LatestDynamicUpdate`, `Remove-DynamicUpdateOutsideWindow` through three fixture scenarios (mixing live Catalog probe results from 2026-05-26 with synthetic older months) plus three ad-hoc scenarios (cross-OS isolation, missing-file empty cache, PatchMonth validation); 20 assertions, isolated via `-DataDir` and anchored via `-Now` | After every change to the DU cache functions or the 36-month window logic; on every CI run | No  |
@@ -66,6 +66,7 @@ python3 servicing_dependency_readiness_verdict_test.py # T16: 21 Phase 2c readin
 python3 servicing_dependency_recency_fallback_test.py  # T17: 15 recency-fallback assertions
 python3 servicing_dependency_servicing_stack_populate_test.py # T18: 17 SS-populate (pure halves) assertions
 python3 servicing_dependency_data_contract_test.py     # T19: 11 data-contract consistency assertions
+python3 removed_live_wua_guard_test.py                 # T20: 21 removed-live-WUA static-guard assertions
 python3 canonical_json_format_check.py     # Part C: every JSON file in canonical format
 python3 config_schema_test.py              # config schema gate: data/config-Server*.json vs v2.1 schema
 python3 servicing_dependency_scope_invariants_test.py  # scope-invariants gate: EOS/ESU deny-list, allow-overrides (23 assertions)
@@ -188,6 +189,7 @@ tests/
   servicing_dependency_recency_fallback_test.py T17 (recency fallback: out-of-scope KB -> newest in-scope LCU, 15 assertions)
   servicing_dependency_servicing_stack_populate_test.py T18 (SS populate pure halves: leaf select + field populate, 17 assertions)
   servicing_dependency_data_contract_test.py     T19 (data-contract consistency: Current/Stale/Refuse/Foreign/Unknown, 11 assertions)
+  removed_live_wua_guard_test.py         T20 (removed-live-WUA static guard: functions/params absent + P06 gate wired, 21 assertions)
   servicing_dependency_scope_invariants_test.py  scope-invariants gate (EOS/ESU deny-list, allow-overrides; 23 assertions; no PowerShell)
   servicing_dependency_layer2_schema_test.py     Layer 2 schema gate (committed DB vs schema + M1 invariants; 16 assertions; no PowerShell)
   common/

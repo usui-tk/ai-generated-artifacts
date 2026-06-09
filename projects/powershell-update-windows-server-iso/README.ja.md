@@ -335,7 +335,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue スクレイプ、`data/config-<OsKey>.json` への書き戻し |
 | P04 | FetchAssets | Fetch | ISO + パッチのダウンロード（ハッシュ検証付き）|
 | P05 | ExpandIso | Plan | ソース ISO のマウント、ワークスペースへのコピー、WIM インデックスの列挙 |
-| P06 | ValidatePatchSet | Plan | `wsusscn2.cab` のオフラインスキャン、必須 KB がパッチセットを網羅するか検証 |
+| P06 | ValidatePatchServicing | Plan | `data/` Layer 2 データベースに対するサービシング準備性ゲート（既定 ON、ブロック）|
 | P07 | PatchInstallWim | Build | install.wim 各インデックスに対し SSU → LCU → .NET → DISM クリーンアップ |
 | P08 | PatchBootWim | Build | boot.wim（PE + Setup）と winre.wim |
 | P09 | AssembleIso | Build | Dynamic Update Setup オーバーレイ、Export-WindowsImage、oscdimg による ISO ビルド |
@@ -399,9 +399,7 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-PatchMonth` | patch | 当月 | 更新対象パッチ月（例 `2026-06`）|
 | `-SkipDynamicPatchRefresh` | patch | switch（OFF）| ベースライン陳腐でも P03 をスキップ（オフライン）|
 | `-UseBaselineOnly` | patch | switch（OFF）| PatchBaseline をそのまま使用。Catalog アクセスなし |
-| `-IgnorePatchValidation` | patch | switch（OFF）| P06 Stage 1 の中断を警告に降格（開発時のみ）|
 | `-OfflineSyncPackagePath` | patch | （なし）| ステージ済み `wsusscn2.cab` パス（ダウンロード省略）|
-| `-EnableDependencyCheck` | patch | switch（OFF）| P06 Stage 2 サービシング準備性チェックをオプトイン（アドバイザリ）|
 | `-EnablePca2023BootManager` | secure-boot | switch（OFF）| P10 PCA2023 ブートマネージャ変換をオプトイン |
 | `-ForcePca2023OnServer2025` | secure-boot | switch（OFF）| Server 2025 の P10 既定スキップを上書き |
 | `-Pca2023OnlyMode` | secure-boot | switch（OFF）| 既存 ISO の P12 単独検査（`-IsoPath` 必須）|
@@ -449,16 +447,18 @@ P03 RefreshPatchBaseline（ベースラインが古いとき、または -AutoDe
         - PatchBaseline.NeutralPatches を Config JSON にアトミックに書き戻し
 P04   FetchAssets（新しく解決された URL と SHA-256 を使用）
 P05   ExpandIso
-P06 ValidatePatchSet
-        - Stage 1：カタログ鮮度比較（既存）
-        - Stage 2（-EnableDependencyCheck でオプトイン、既定 OFF）：
-          data/servicing-dependency-database.json を用いたサービシング
-          準備性チェック（SPEC.md §B.19.10 参照）。アドバイザリのみ — 各
-          パッチの判定（SsTooOld / NotInDatabase / Superseded / Pass）を
-          ログ出力するだけでビルドを中断しない。layer 2 が無い場合は
-          Unknown に縮退。
-        - Stage 1（カタログ鮮度）は必須パッチ欠落時に従来どおり中断し、
-          診断ファイルを生成（後述「検証失敗時の診断データ」参照）
+P06 ValidatePatchServicing
+        - サービシング準備性ゲート（既定 ON、ブロック）：
+          data/servicing-dependency-database.json を用いて解決済みパッチ
+          セットを事前生成 Layer 2 依存性データベースに照合し、各判定
+          （SsTooOld / NotInDatabase / Superseded / Pass）をログ出力
+          （SPEC.md §B.19.10 参照）。
+        - OverallStatus が Fail（SsTooOld は 0x800f0823 を予測、または
+          NotInDatabase）のときブロック、Superseded は警告、それ以外は通過。
+        - Layer 2 が無い/読めない場合もブロック（-Action
+          RefreshDependencyDatabase を実行するか、-UseBaselineOnly で P06 を省略）。
+        - 旧来のライブ Windows Update Agent オフラインスキャンは削除
+          （ホスト相対で、クロス OS ビルドで偽陰性を生じたため）。
 P07+  Build / Verify / Report
 ```
 
@@ -470,10 +470,6 @@ P07+  Build / Verify / Report
 |:---|:---|:---|
 | `<LogFile>` | `-LogFile <path>` 指定時 | 実行全体の `Start-Transcript`（全コンソール行）|
 | `<WorkRoot>/logs/debugtrace.jsonl` | 常時（フェーズがトレースを使う場合）| 失敗ステップを特定するステップ単位の JSONL トレース |
-| `<WorkRoot>/diag/<yyyyMMdd-HHmmss>/` | P06 Stage 1 のパッチ欠落失敗時 | `validation_summary.json`、`validation_detail.csv`、`wsusscn2_scan_raw.json`、`dependency_graph.json`（SPEC.md §B.19.12 参照）|
-
-`-IgnorePatchValidation` は Stage 1 の中断を警告に降格しますが、`diag/`
-セットは引き続き生成されます。開発時のみ使用してください。
 
 ### 更新ポリシー
 
@@ -591,7 +587,7 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 | RefreshAllBaselines 後の `NeutralPatches[]` エントリの `Type` が誤っている | `Convert-CatalogPatchToBaselineEntry` の新規呼び出し側で `-KnownType` 未渡し | Catalogue 検索コンテキストから `-KnownType $q.Type` を渡す（SPEC.md §D.20 参照）|
 | .NET CU ベースラインエントリのサブファイルが欠落しているように見える | 複数 `.msu` を持つアンブレラ KB で 1 つしか保持されなかった | `Resolve-PatchSetFromCatalog` が `Type='DotNet'` を `Select-AllCanonicalPatchFiles` 経由でルーティングしているか確認（SPEC.md §D.21 参照）|
 | Warning 行に `0x800f081e` が表示 | このパッチは当該 SKU には適用不能 | クロス SKU のパッチセットでは想定内、無視して問題なし（SPEC.md §D.8 参照）|
-| P07 の途中で `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` | LCU が前提とする SSU がベースラインから欠落 | 前提 SSU を `NeutralPatches[]` に追加。r09.0+ の Servicing Dependency Database（SPEC.md §B.19）は DISM マウント前の P06 でこれを検出します（SPEC.md §D.2 参照）|
+| P07 の途中で `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` | LCU が前提とする SSU がベースラインから欠落 | 前提 SSU を `NeutralPatches[]` に追加。Servicing Dependency Database（SPEC.md §B.19）はブロックゲートである P06 で DISM マウント前にこれを検出します（SPEC.md §D.2 参照）|
 | P05 の WIM インデックスバナーで文字化け（日本語が二重）| 過去の中断ランによる DISM マウントキャッシュ汚染 | **OS ファミリごとに新しい `-WorkRoot` を使用**（`D:\UpdateWsi_2016`、`D:\UpdateWsi_2019`、…）（SPEC.md §D.25 参照）|
 | 古い WIM マウントが新規実行を阻害 | 過去の実行がマウント途中でクラッシュ | `dism /Get-MountedImageInfo` 実行後に `dism /Cleanup-Mountpoints` を実行（SPEC.md §D.1 参照）|
 | ダウンロード後の ISO SHA-256 不一致 | Microsoft が Evaluation Center スナップショット URL を更新 | `data/config-<OsKey>.json` の `LanguageSpecific.<lang>.Iso.Sha256` を新しい値に更新（SPEC.md §D.11 参照）|
