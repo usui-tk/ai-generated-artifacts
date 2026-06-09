@@ -200,7 +200,7 @@ tests/
     snapshot.py              JSON snapshot read/write + diff
     canonical_json.py        Python reference for SPEC Part B.23 canonical JSON (used by T11)
     wsusscn2_analyzer.py     wsusscn2.cab schema-discovery helper (CLI + library; used by the Phase 2b1 investigation, see research/windows-servicing §2.4.1 / §5.7 / §6.4)
-    servicing_dependency_fixture_builder.py  Generator for the T12 fixture (`fixtures/servicing-dependency/package.xml` + `expected-output.json`); CLI + library
+    servicing_dependency_fixture_builder.py  Generator for the T12 fixture (`fixtures/servicing-dependency/package.xml` + `expected-output.json`) and the T21 SSU->LCU scenario (`fixtures/servicing-dependency/ssu-prereq/package.xml`); CLI + library
   fixtures/
     2026-05/
       server2016_lcu_search.html
@@ -220,6 +220,11 @@ tests/
         leaf-2025-checkpoint.xml     #   checkpoint model, no CBS servicing metadata
       readiness-database.json        # Layer 2 DB with populated SS fields for T16
       recency-fallback-database.json # Layer 2 DB with per-OS LCUs for T17 fallback
+      ssu-prereq-readiness-database.json # Layer 2 DB (Server 2016 LCU, separate model) for T22
+      ssu-prereq/
+        package.xml                  # SSU->LCU prerequisite scenario for T21 (build_ssu_prereq_package_xml)
+    config-guard/
+      bad-config-ssu-empty-url.json  # Type=SSU with empty DownloadUrl: the T23 negative fixture
   snapshots/
     .gitkeep
     last_probe.json          (written by T1 --snapshot)

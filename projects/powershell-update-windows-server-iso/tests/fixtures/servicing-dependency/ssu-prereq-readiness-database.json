@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "generator": "fixture",
+    "scriptVersion": "fixture",
+    "scriptTag": "fixture",
+    "generatedAt": "2026-05-12T00:00:00Z",
+    "sourceCab": {
+      "sourceUrl": "http://example.invalid/wsusscn2.cab",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "scope": {
+      "productGuids": [],
+      "classificationGuids": [],
+      "recencyMonths": 24,
+      "evaluatedAt": "2026-05-12T00:00:00Z"
+    },
+    "stats": {}
+  },
+  "updates": [
+    {
+      "updateId": "00000000-0000-0000-0000-000000087537",
+      "revisionId": "991120",
+      "isBundle": true,
+      "isLeaf": false,
+      "payloadUrls": [
+        "http://example.invalid/fixture/windows10.0-kb5087537-x64.cab"
+      ],
+      "supersededByRevisionIds": [],
+      "requiredServicingStackVersion": "10.0.14393.7692",
+      "providedServicingStackVersion": null,
+      "servicingStackModel": "separate"
+    }
+  ]
+}

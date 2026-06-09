@@ -90,6 +90,30 @@ _URL_A1 = "http://example.invalid/fixture/server2022-lcu-part1.cab"
 _URL_A2 = "http://example.invalid/fixture/server2022-lcu-part2.cab"
 _URL_B1 = "http://example.invalid/fixture/server2025-lcu.cab"
 
+# --- SSU -> LCU prerequisite scenario (Server 2016, separate model) ---------
+# Models the real-world Server 2016 case where an LCU (catalogued as KB5087537)
+# requires a separate servicing-stack update (SSU, KB5088064) as a prerequisite.
+# When the provided servicing stack predates the SSU, the LCU install fails on a
+# real host with CBS_E_NEW_SERVICING_STACK_REQUIRED (0x800f0823). This fixture
+# lets the readiness gate predict that failure entirely offline on Linux. KB
+# numbers live only in these comments / payload URLs - real wsusscn2 Updates
+# never carry a KB article number. UpdateIds are synthetic (the f0000003-* block)
+# and do not collide with the T12 fixture (f0000001-* / f0000002 unused).
+_REV_SSU_BUNDLE = "991110"   # SSU bundle (Server 2016 SecurityUpdates, in-scope)
+_REV_SSU_LEAF   = "991102"   # SSU leaf (revision < bundle, real wsusscn2 shape)
+_REV_LCU_BUNDLE = "991120"   # LCU bundle (Server 2016 SecurityUpdates, in-scope)
+_REV_LCU_LEAF   = "991104"   # LCU leaf (revision < bundle)
+_UID_SSU_BUNDLE = "f0000003-0000-0000-0000-000000000001"
+_UID_SSU_LEAF   = "f0000003-0000-0000-0000-0000000000a1"
+_UID_LCU_BUNDLE = "f0000003-0000-0000-0000-000000000002"
+_UID_LCU_LEAF   = "f0000003-0000-0000-0000-0000000000a2"
+_DIGEST_SSU = "fixture-digest-ssu1"
+_DIGEST_LCU = "fixture-digest-lcu1"
+# KB number embedded in the payload URL so the readiness KB->update matcher
+# (payloadUrls regex 'kb(\\d+)') can map a ResolvedPatch to the parsed update.
+_URL_SSU = "http://example.invalid/fixture/windows10.0-kb5088064-x64.cab"
+_URL_LCU = "http://example.invalid/fixture/windows10.0-kb5087537-x64.cab"
+
 
 def _render_update(
     *,
@@ -248,6 +272,71 @@ def build_package_xml() -> str:
     return '\n'.join(parts) + '\n'
 
 
+def build_ssu_prereq_package_xml() -> str:
+    """Construct a package.xml modelling a Server 2016 SSU -> LCU prerequisite.
+
+    Two in-scope Server 2016 bundles: an SSU (KB5088064) and an LCU (KB5087537)
+    whose leaf declares the SSU bundle as a prerequisite. Feeding the produced
+    Layer 2 DB through the servicing-stack populate step (CBS leaf
+    leaf-2016-separate.xml -> requiredServicingStackVersion 10.0.14393.7692,
+    model 'separate') and then Test-PatchServicingReadinessFromGraph reproduces
+    the 0x800f0823 prediction (SsTooOld) entirely offline. No Microsoft prose.
+    """
+    parts: list[str] = []
+    parts.append('<?xml version="1.0" encoding="utf-8"?>')
+    parts.append(
+        '<OfflineSyncPackage xmlns="http://schemas.microsoft.com/msus/2004/02/OfflineSync"'
+        ' MinimumClientVersion="5.8.0.2678"'
+        ' PackageId="fixture-ssu-prereq-uuid"'
+        ' ProtocolVersion="1.20"'
+        ' SourceId="fixture-src-uuid">'
+    )
+    parts.append('<Updates>')
+
+    # SSU bundle (Server 2016 SecurityUpdates, in-scope) - the prerequisite.
+    parts.append(_render_update(
+        update_id=_UID_SSU_BUNDLE, revision_id=_REV_SSU_BUNDLE, revision_number="100",
+        creation_date="2026-05-10T10:00:00Z", is_bundle=True,
+        categories=[
+            ("Product", GUID_SERVER_2016),
+            ("UpdateClassification", GUID_CLASS_SECURITY),
+        ],
+    ))
+    # SSU leaf: payload SSU, bundledBy SSU bundle.
+    parts.append(_render_update(
+        update_id=_UID_SSU_LEAF, revision_id=_REV_SSU_LEAF, revision_number="100",
+        creation_date="2026-05-10T10:00:00Z", deployment_action="Bundle",
+        bundled_by_revs=[_REV_SSU_BUNDLE], payload_digests=[_DIGEST_SSU],
+    ))
+
+    # LCU bundle (Server 2016 SecurityUpdates, in-scope) - requires the SSU.
+    parts.append(_render_update(
+        update_id=_UID_LCU_BUNDLE, revision_id=_REV_LCU_BUNDLE, revision_number="100",
+        creation_date="2026-05-12T10:00:00Z", is_bundle=True,
+        categories=[
+            ("Product", GUID_SERVER_2016),
+            ("UpdateClassification", GUID_CLASS_SECURITY),
+        ],
+    ))
+    # LCU leaf: payload LCU, bundledBy LCU bundle, prerequisite = SSU bundle.
+    parts.append(_render_update(
+        update_id=_UID_LCU_LEAF, revision_id=_REV_LCU_LEAF, revision_number="100",
+        creation_date="2026-05-12T10:00:00Z", deployment_action="Bundle",
+        bundled_by_revs=[_REV_LCU_BUNDLE], payload_digests=[_DIGEST_LCU],
+        prerequisites=[_UID_SSU_BUNDLE],
+    ))
+
+    parts.append('</Updates>')
+
+    parts.append('<FileLocations>')
+    parts.append(f'<FileLocation Id="{_DIGEST_SSU}" Url="{_URL_SSU}" />')
+    parts.append(f'<FileLocation Id="{_DIGEST_LCU}" Url="{_URL_LCU}" />')
+    parts.append('</FileLocations>')
+
+    parts.append('</OfflineSyncPackage>')
+    return '\n'.join(parts) + '\n'
+
+
 def build_expected_output() -> dict[str, Any]:
     """Expected env-stripped parser output for the fixture above."""
     return {
@@ -338,6 +427,12 @@ def main() -> int:
 
     print(f"Wrote {xml_path} ({xml_path.stat().st_size:,} bytes)")
     print(f"Wrote {json_path} ({json_path.stat().st_size:,} bytes)")
+
+    ssu_dir = args.out_dir / "ssu-prereq"
+    ssu_dir.mkdir(parents=True, exist_ok=True)
+    ssu_xml_path = ssu_dir / "package.xml"
+    ssu_xml_path.write_bytes(build_ssu_prereq_package_xml().encode("utf-8"))
+    print(f"Wrote {ssu_xml_path} ({ssu_xml_path.stat().st_size:,} bytes)")
     return 0
 
 

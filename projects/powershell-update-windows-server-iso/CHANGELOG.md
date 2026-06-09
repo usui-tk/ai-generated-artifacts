@@ -22,6 +22,18 @@ the script and follows the
 
 ## [Unreleased]
 
+### Tests - offline reproduction + guards for the Server 2016 0x800f0823 SSU-prerequisite failure (no script revision)
+
+Adds three offline tests that reproduce and guard the real-machine Server 2016 "LCU applied without its prerequisite SSU" failure (`CBS_E_NEW_SERVICING_STACK_REQUIRED`, 0x800f0823) entirely on Linux, ahead of the heavier Windows scenario evaluation. **No `$Script:ScriptVersion` bump** - `Update-WindowsServerIso.ps1` is unchanged; this is test/fixture/doc-only.
+
+- **T21** (`tests/servicing_dependency_ssu_prereq_pipeline_test.py`, 20 assertions): builds a Server 2016 SSU -> LCU prerequisite `package.xml`, runs it through the real Stage 3/4 parser (`ConvertFrom-OfflineSyncPackage`, `New-ServicingDependencyDatabase`) and the servicing-stack populate step (`Update-ServicingStackFromMeta`, CBS leaf `leaf-2016-separate.xml` -> requiredSs `10.0.14393.7692`, `separate` model), then asserts `Test-PatchServicingReadinessFromGraph` predicts `SsTooOld` / `Fail` when the provided servicing stack predates the SSU, and `Pass` when it does not. Includes a freshness guard that the committed fixture matches `build_ssu_prereq_package_xml()`.
+- **T22** (`tests/servicing_dependency_ssu_prereq_readiness_test.py`, 15 assertions): a fast, pipeline-free readiness-verdict unit over a hand-authored Layer 2 fixture, exercising the SS-compare boundary (RTM / one-below / exact / newer).
+- **T23** (`tests/config_required_ssu_downloadurl_test.py`, 11 assertions): a static config-contract guard that no `NeutralPatches` entry of Type `SSU` ships with an empty `DownloadUrl` (the config data defect behind the on-host failure); checks the bad-config fixture and every committed `data/config-Server*.json`.
+
+- `tests/common/servicing_dependency_fixture_builder.py`: added `build_ssu_prereq_package_xml()` and a `ssu-prereq/package.xml` emission to `main()`; the existing T12 fixture (`package.xml` + `expected-output.json`) is byte-unchanged.
+- New fixtures: `tests/fixtures/servicing-dependency/ssu-prereq/package.xml`, `tests/fixtures/servicing-dependency/ssu-prereq-readiness-database.json`, `tests/fixtures/config-guard/bad-config-ssu-empty-url.json`.
+- `TESTING.md`, `tests/README.md`: registered the new tests and fixtures.
+
 ### CI / build-infrastructure: complete the scripts -> projects migration for this project's workflows (no script revision)
 
 The `scripts/powershell/update-windows-server-iso/` -> `projects/powershell-update-windows-server-iso/` migration (commit `7566d22c`, "migrate to gate-managed vendored Part A") moved the project tree but left this project's four CI workflows pointing at the old path, which broke Stage 1's `[Format]` (FileNotFoundError) and the psa.py / PSScriptAnalyzer SARIF-upload steps (path does not exist). This change completes the migration for the workflows and the in-project references that name them. **No `$Script:ScriptVersion` bump** — script logic is unchanged; the only `.ps1` edit is the stale `Location` help-comment path.

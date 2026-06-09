@@ -432,6 +432,9 @@ python3 tests/servicing_dependency_readiness_verdict_test.py # T16: 21 readiness
 python3 tests/servicing_dependency_recency_fallback_test.py  # T17: 15 recency-fallback assertions
 python3 tests/servicing_dependency_servicing_stack_populate_test.py # T18: 17 SS-populate assertions
 python3 tests/servicing_dependency_data_contract_test.py     # T19: 11 data-contract assertions
+python3 tests/servicing_dependency_ssu_prereq_pipeline_test.py   # T21: 20 SSU->LCU end-to-end pipeline assertions (0x800f0823 prediction)
+python3 tests/servicing_dependency_ssu_prereq_readiness_test.py  # T22: 15 SSU->LCU readiness-unit assertions
+python3 tests/config_required_ssu_downloadurl_test.py            # T23: 11 required-SSU DownloadUrl static-guard assertions
 
 # Data-contract / schema / format gates (every commit that touches data)
 python3 tests/config_schema_test.py                          # config schema gate
@@ -447,15 +450,15 @@ python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
 
 ### Determinism categories
 
-- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6 – T20,
+- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6 – T23,
   plus the canonical JSON format gate, the config schema gate, the
   scope-invariants gate, and the Layer 2 schema gate.
 - **Live-network** (Stage 4 monthly + ad-hoc): T1, T4, T5.
 
-### Servicing-dependency suite (T12 – T19)
+### Servicing-dependency suite (T12 – T19, T21 – T23)
 
-The §B.19 servicing-dependency facility is covered offline by T12 – T19
-plus the scope-invariants and Layer 2 schema gates, all driven from
+The §B.19 servicing-dependency facility is covered offline by T12 – T19 and
+T21 – T23 plus the scope-invariants and Layer 2 schema gates, all driven from
 Python against committed fixtures and the committed Layer 2 database so
 no live cab is needed on a PR:
 
@@ -469,6 +472,17 @@ no live cab is needed on a PR:
 - **T17** recency fallback.
 - **T18** servicing-stack populate (pure halves).
 - **T19** data-contract consistency (Current/Stale/Refuse/Foreign/Unknown).
+- **T21** SSU -> LCU end-to-end pipeline: builds the prerequisite `package.xml`,
+  runs it through the real Stage 3/4 parser and the servicing-stack populate
+  (CBS leaf `leaf-2016-separate.xml`), and asserts the readiness gate predicts
+  the on-host 0x800f0823 (`SsTooOld` / `Fail`) entirely offline; includes a
+  guard that the committed fixture still matches `build_ssu_prereq_package_xml()`.
+- **T22** SSU -> LCU readiness unit: drives `Test-PatchServicingReadinessFromGraph`
+  against a hand-authored Layer 2 fixture across the SS-compare boundary
+  (RTM / one-below / exact / newer) without the parse/populate stages.
+- **T23** required-SSU DownloadUrl static guard: asserts no NeutralPatch of Type
+  `SSU` ships with an empty DownloadUrl (the config data defect behind the real
+  0x800f0823); covers the bad-config fixture and every committed config.
 
 The live cab is exercised only by T5 (freshness probe) and the monthly CI
 refresh, consistent with the testability-driven split documented in
