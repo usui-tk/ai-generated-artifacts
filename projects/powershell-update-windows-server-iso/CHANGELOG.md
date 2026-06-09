@@ -22,6 +22,18 @@ the script and follows the
 
 ## [Unreleased]
 
+### CI / build-infrastructure: complete the scripts -> projects migration for this project's workflows (no script revision)
+
+The `scripts/powershell/update-windows-server-iso/` -> `projects/powershell-update-windows-server-iso/` migration (commit `7566d22c`, "migrate to gate-managed vendored Part A") moved the project tree but left this project's four CI workflows pointing at the old path, which broke Stage 1's `[Format]` (FileNotFoundError) and the psa.py / PSScriptAnalyzer SARIF-upload steps (path does not exist). This change completes the migration for the workflows and the in-project references that name them. **No `$Script:ScriptVersion` bump** — script logic is unchanged; the only `.ps1` edit is the stale `Location` help-comment path.
+
+- `.github/workflows/`: renamed the four `scripts__powershell__update-windows-server-iso__*.yml` to `projects__powershell-update-windows-server-iso__*.yml` (path-encoded filenames per the dotfile convention). Repointed every in-file path (project directory, `paths:` trigger filters, `working-directory`, SARIF/artifact paths, header comments, and the `name:` field), and corrected the psa.py invocation to `../../quality-tools/powershell-static-analyzer/psa.py` (psa.py now lives under `quality-tools/`; the old `scripts/python/powershell-static-analyzer/` copy is being removed).
+- README.md / README.ja.md: CI badge URLs repointed to the renamed workflow files (bilingual lock-step preserved).
+- TESTING.md: the four workflow-file references in the CI section renamed to match.
+- schema/config.schema.json, schema/servicing-dependency-database.schema.json: `$id` path segment updated to the new location (opaque identifier; nothing `$ref`s it, and the schema gates resolve local `#/definitions` only).
+- tests/common/__init__.py, Update-WindowsServerIso.ps1: stale `scripts/...` path strings in a docstring / help-comment corrected.
+
+Note: renaming the workflow files changes their GitHub workflow identity (run history detaches; required-check names change). Any branch-protection rule that requires these checks by the old file name must be updated in repository settings after this lands.
+
 ### r11.19 - Remove live WUA offline scan; P06 becomes a /data-first servicing-readiness gate (blocking)
 
 A behavioural revision that retires P06's live Windows Update Agent (WUA) offline scan and repurposes P06 into a single, default-ON, blocking servicing-readiness gate against the pre-generated wsusscn2 Layer 2 database (`data/servicing-dependency-database.json`). `$Script:ScriptVersion` `r11.18` -> `r11.19`; `$Script:ScriptTag` becomes `remove-live-wua-scan-data-first-servicing-gate`. **Breaking change** (pre-1.0; no real consumers yet): `-IgnorePatchValidation` and `-EnableDependencyCheck` are removed.

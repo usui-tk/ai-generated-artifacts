@@ -11,7 +11,7 @@
     Server 2016 / 2019 / 2022 / 2025.
 
     Repository: https://github.com/usui-tk/ai-generated-artifacts
-    Location  : scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1
+    Location  : projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1
     License   : MIT (see LICENSE at the repository root)
 
     Prerequisites:

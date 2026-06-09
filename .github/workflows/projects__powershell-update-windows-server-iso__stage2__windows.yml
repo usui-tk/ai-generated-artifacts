@@ -1,5 +1,5 @@
 # ============================================================================
-# CI workflow for scripts/powershell/update-windows-server-iso/
+# CI workflow for projects/powershell-update-windows-server-iso/
 # STAGE 2 - Windows checks (PSScriptAnalyzer on Windows PowerShell 5.1 +
 # read-only smoke modes including -EnvironmentInfoOnly and -Action ListPhases).
 #
@@ -10,13 +10,13 @@
 # See CHANGELOG.md "r07.0 Step 11" for the migration rationale.
 #
 # Governance: /SPEC.md
-# Change history: scripts/powershell/update-windows-server-iso/CHANGELOG.md
+# Change history: projects/powershell-update-windows-server-iso/CHANGELOG.md
 # ============================================================================
-name: 'scripts/powershell/update-windows-server-iso - STAGE 2: Windows checks'
+name: 'projects/powershell-update-windows-server-iso - STAGE 2: Windows checks'
 
 on:
   workflow_run:
-    workflows: ['scripts/powershell/update-windows-server-iso - STAGE 1: Linux checks']
+    workflows: ['projects/powershell-update-windows-server-iso - STAGE 1: Linux checks']
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -205,8 +205,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Import-Module -Name ConvertToSARIF -Force
 
-          $scriptPath   = './scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1'
-          $settingsPath = './scripts/powershell/update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
+          $scriptPath   = './projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1'
+          $settingsPath = './projects/powershell-update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
 
           Invoke-ScriptAnalyzer -Path $scriptPath -Settings $settingsPath |
               ConvertTo-SARIF -FilePath ./pssa.sarif
@@ -247,7 +247,7 @@ jobs:
       # but not on Linux pwsh 7.
       - name: '[Parse-pwsh51] AST parse-only check'
         shell: powershell
-        working-directory: scripts/powershell/update-windows-server-iso
+        working-directory: projects/powershell-update-windows-server-iso
         run: |
           $tokens = $null; $errors = $null
           $ast = [System.Management.Automation.Language.Parser]::ParseFile(
@@ -264,7 +264,7 @@ jobs:
       - name: '[Smoke1] -Action ListPhases'
         shell: powershell
         timeout-minutes: 2
-        working-directory: scripts/powershell/update-windows-server-iso
+        working-directory: projects/powershell-update-windows-server-iso
         run: |
           $ErrorActionPreference = 'Stop'
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -280,7 +280,7 @@ jobs:
       - name: '[Smoke2] -EnvironmentInfoOnly'
         shell: powershell
         timeout-minutes: 5
-        working-directory: scripts/powershell/update-windows-server-iso
+        working-directory: projects/powershell-update-windows-server-iso
         run: |
           $ErrorActionPreference = 'Stop'
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -298,7 +298,7 @@ jobs:
       - name: '[Smoke3] Synthetic + DryRun'
         shell: powershell
         timeout-minutes: 5
-        working-directory: scripts/powershell/update-windows-server-iso
+        working-directory: projects/powershell-update-windows-server-iso
         run: |
           $ErrorActionPreference = 'Stop'
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8

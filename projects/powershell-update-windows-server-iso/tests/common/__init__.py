@@ -1,6 +1,6 @@
 """Common utilities for the Update-WindowsServerIso self-verification tools.
 
-These tools live under ``scripts/powershell/update-windows-server-iso/tests/``
+These tools live under ``projects/powershell-update-windows-server-iso/tests/``
 and exist to give Claude (and human operators) a self-verification surface
 for the Microsoft Update Catalog HTTP scrape paths and other external
 dependencies baked into ``Update-WindowsServerIso.ps1``. The split between

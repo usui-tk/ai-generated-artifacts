@@ -482,7 +482,7 @@ Four GitHub Actions workflows together provide automated coverage of
 
 ### 6.1 Stage 1 — Linux psa.py + PSScriptAnalyzer + offline T-suite
 
-File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml`
+File: `.github/workflows/projects__powershell-update-windows-server-iso__stage1__linux.yml`
 
 | Step | Tool | Purpose |
 |---|---|---|
@@ -501,7 +501,7 @@ Triggers: every push, every PR. Required to merge.
 
 ### 6.2 Stage 2 — Windows PSScriptAnalyzer + parse + read-only smoke
 
-File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage2__windows.yml`
+File: `.github/workflows/projects__powershell-update-windows-server-iso__stage2__windows.yml`
 
 | Step | Tool | Purpose |
 |---|---|---|
@@ -514,7 +514,7 @@ Triggers: every push, every PR.
 
 ### 6.3 Stage 3 — Synthetic full pipeline (Windows + ADK)
 
-File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage3__synthetic.yml`
+File: `.github/workflows/projects__powershell-update-windows-server-iso__stage3__synthetic.yml`
 
 | Step | Tool | Purpose |
 |---|---|---|
@@ -528,7 +528,7 @@ documented in §B.18 and repository SPEC.md §12).
 
 ### 6.4 Stage 4 — Monthly baseline refresh + auto-PR
 
-File: `.github/workflows/scripts__powershell__update-windows-server-iso__stage4__monthly-refresh.yml`
+File: `.github/workflows/projects__powershell-update-windows-server-iso__stage4__monthly-refresh.yml`
 
 | Step | Action | Purpose |
 |---|---|---|

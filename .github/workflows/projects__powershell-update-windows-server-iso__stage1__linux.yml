@@ -1,5 +1,5 @@
 # ============================================================================
-# CI workflow for scripts/powershell/update-windows-server-iso/
+# CI workflow for projects/powershell-update-windows-server-iso/
 # STAGE 1 - Linux checks (psa.py + PSScriptAnalyzer on PowerShell 7.x)
 #
 # This is the first stage of the Update-WindowsServerIso.ps1 CI chain.
@@ -11,28 +11,28 @@
 # for the migration rationale.
 #
 # Governance: /SPEC.md
-# Change history: scripts/powershell/update-windows-server-iso/CHANGELOG.md
+# Change history: projects/powershell-update-windows-server-iso/CHANGELOG.md
 # ============================================================================
-name: 'scripts/powershell/update-windows-server-iso - STAGE 1: Linux checks'
+name: 'projects/powershell-update-windows-server-iso - STAGE 1: Linux checks'
 
 on:
   push:
     branches: [main]
     paths:
-      - 'scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1'
-      - 'scripts/powershell/update-windows-server-iso/.psa.config.json'
-      - 'scripts/powershell/update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
-      - 'scripts/powershell/update-windows-server-iso/data/**'
+      - 'projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1'
+      - 'projects/powershell-update-windows-server-iso/.psa.config.json'
+      - 'projects/powershell-update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
+      - 'projects/powershell-update-windows-server-iso/data/**'
       - 'quality-tools/powershell-static-analyzer/psa.py'
       - 'quality-tools/powershell-static-analyzer/VERSION'
       - '.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1'
-      - 'scripts/powershell/update-windows-server-iso/.psa.config.json'
-      - 'scripts/powershell/update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
-      - 'scripts/powershell/update-windows-server-iso/data/**'
+      - 'projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1'
+      - 'projects/powershell-update-windows-server-iso/.psa.config.json'
+      - 'projects/powershell-update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
+      - 'projects/powershell-update-windows-server-iso/data/**'
       - 'quality-tools/powershell-static-analyzer/psa.py'
       - 'quality-tools/powershell-static-analyzer/VERSION'
       - '.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml'
@@ -123,7 +123,7 @@ jobs:
           python3 - <<'PY'
           import sys
           from pathlib import Path
-          p = Path('scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1')
+          p = Path('projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1')
           data = p.read_bytes()
           if data[:3] != b'\xef\xbb\xbf':
               print('FAIL: UTF-8 BOM missing (expected EF BB BF)', file=sys.stderr)
@@ -151,7 +151,7 @@ jobs:
           import sys
           from pathlib import Path
 
-          d = Path('scripts/powershell/update-windows-server-iso/data')
+          d = Path('projects/powershell-update-windows-server-iso/data')
           required = {'config-Server2016.json', 'config-Server2019.json', 'config-Server2022.json', 'config-Server2025.json'}
           present = {p.name for p in d.glob('config-Server*.json')}
           missing = required - present
@@ -209,7 +209,7 @@ jobs:
       # key-presence check above with structural / additional-property / forbidden-
       # field checks (e.g. the legacy PatchBaseline.Patches field, r10.3 defect).
       - name: '[Schema] Validate config against JSON Schema (SPEC B.4)'
-        working-directory: scripts/powershell/update-windows-server-iso
+        working-directory: projects/powershell-update-windows-server-iso
         run: python3 tests/config_schema_test.py
 
       # --- Tool group: psa.py ---
@@ -219,19 +219,19 @@ jobs:
       # to run from repo root without explicitly passing --config.
       - name: '[psa.py] Run text analysis'
         if: ${{ inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch' }}
-        working-directory: scripts/powershell/update-windows-server-iso
-        run: python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1 | tee psa.log
+        working-directory: projects/powershell-update-windows-server-iso
+        run: python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1 | tee psa.log
 
       - name: '[psa.py] Generate SARIF'
         if: ${{ inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch' }}
-        working-directory: scripts/powershell/update-windows-server-iso
-        run: python3 ../../python/powershell-static-analyzer/psa.py --format sarif Update-WindowsServerIso.ps1 > psa.sarif
+        working-directory: projects/powershell-update-windows-server-iso
+        run: python3 ../../quality-tools/powershell-static-analyzer/psa.py --format sarif Update-WindowsServerIso.ps1 > psa.sarif
 
       - name: '[psa.py] Upload SARIF to Code Scanning'
         if: ${{ always() && (inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch') }}
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: scripts/powershell/update-windows-server-iso/psa.sarif
+          sarif_file: projects/powershell-update-windows-server-iso/psa.sarif
           category: psa-py
 
       # --- Tool group: PSScriptAnalyzer (PowerShell 7.x, inline) ---
@@ -330,8 +330,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Import-Module -Name ConvertToSARIF -Force
 
-          $scriptPath   = './scripts/powershell/update-windows-server-iso/Update-WindowsServerIso.ps1'
-          $settingsPath = './scripts/powershell/update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
+          $scriptPath   = './projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1'
+          $settingsPath = './projects/powershell-update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
 
           Invoke-ScriptAnalyzer -Path $scriptPath -Settings $settingsPath |
               ConvertTo-SARIF -FilePath ./pssa.sarif
@@ -374,8 +374,8 @@ jobs:
             echo "## STAGE 1 - Linux checks results"
             echo ""
             echo "### psa.py"
-            if [ -f scripts/powershell/update-windows-server-iso/psa.log ]; then
-              tail -20 scripts/powershell/update-windows-server-iso/psa.log
+            if [ -f projects/powershell-update-windows-server-iso/psa.log ]; then
+              tail -20 projects/powershell-update-windows-server-iso/psa.log
             fi
             echo ""
             echo "### PSScriptAnalyzer (pwsh 7)"
@@ -396,8 +396,8 @@ jobs:
         with:
           name: uwsi-stage1-${{ github.run_id }}
           path: |
-            scripts/powershell/update-windows-server-iso/psa.log
-            scripts/powershell/update-windows-server-iso/psa.sarif
+            projects/powershell-update-windows-server-iso/psa.log
+            projects/powershell-update-windows-server-iso/psa.sarif
             pssa.log
             pssa.sarif
           if-no-files-found: warn

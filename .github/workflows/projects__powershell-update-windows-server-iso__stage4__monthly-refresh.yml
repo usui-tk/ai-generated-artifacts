@@ -1,5 +1,5 @@
 # ============================================================================
-# CI workflow for scripts/powershell/update-windows-server-iso/
+# CI workflow for projects/powershell-update-windows-server-iso/
 # STAGE 4 - Monthly Baseline Refresh.
 #
 # Runs `-Action RefreshAllBaselines` on a schedule (the 15th of every
@@ -19,9 +19,9 @@
 #                        DryRun inputs
 #
 # Governance: /SPEC.md
-# Change history: scripts/powershell/update-windows-server-iso/CHANGELOG.md
+# Change history: projects/powershell-update-windows-server-iso/CHANGELOG.md
 # ============================================================================
-name: 'scripts/powershell/update-windows-server-iso - STAGE 4: Monthly Baseline Refresh'
+name: 'projects/powershell-update-windows-server-iso - STAGE 4: Monthly Baseline Refresh'
 
 on:
   schedule:
@@ -195,7 +195,7 @@ jobs:
         id: diff
         shell: pwsh
         run: |
-          $configRel = 'scripts/powershell/update-windows-server-iso/data'
+          $configRel = 'projects/powershell-update-windows-server-iso/data'
           # `git diff --name-only` shows tracked-file modifications;
           # `git ls-files --others --exclude-standard` shows newly
           # untracked files. We care about either category.
@@ -222,7 +222,7 @@ jobs:
         if: steps.diff.outputs.has-changes == 'true'
         shell: pwsh
         run: |
-          $configRel = 'scripts/powershell/update-windows-server-iso/data'
+          $configRel = 'projects/powershell-update-windows-server-iso/data'
           Write-Host '=== git diff (full) ==='
           & git -C $env:GITHUB_WORKSPACE diff -- $configRel
           Write-Host ''
@@ -239,7 +239,7 @@ jobs:
           branch: auto/uwsi-baseline-refresh-${{ github.run_id }}
           delete-branch: true
           add-paths: |
-            scripts/powershell/update-windows-server-iso/data/config-*.json
+            projects/powershell-update-windows-server-iso/data/config-*.json
           title: 'chore(uwsi): monthly baseline refresh (run #${{ github.run_id }})'
           commit-message: |
             chore(uwsi): monthly baseline refresh (auto)

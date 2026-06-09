@@ -1,5 +1,5 @@
 # ============================================================================
-# CI workflow for scripts/powershell/update-windows-server-iso/
+# CI workflow for projects/powershell-update-windows-server-iso/
 # STAGE 3 - Windows synthetic full pipeline (ADK install +
 # -SyntheticTestMode -Execute end-to-end).
 #
@@ -21,9 +21,9 @@
 # leaking evaluation content via CI artifacts.
 #
 # Governance: /SPEC.md
-# Change history: scripts/powershell/update-windows-server-iso/CHANGELOG.md
+# Change history: projects/powershell-update-windows-server-iso/CHANGELOG.md
 # ============================================================================
-name: 'scripts/powershell/update-windows-server-iso - STAGE 3: Synthetic full pipeline'
+name: 'projects/powershell-update-windows-server-iso - STAGE 3: Synthetic full pipeline'
 
 on:
   release:
@@ -161,7 +161,7 @@ jobs:
       - name: '[Synthetic] Run Update-WindowsServerIso.ps1 in -SyntheticTestMode (full)'
         shell: powershell
         timeout-minutes: 60
-        working-directory: scripts/powershell/update-windows-server-iso
+        working-directory: projects/powershell-update-windows-server-iso
         run: |
           $ErrorActionPreference = 'Stop'
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
