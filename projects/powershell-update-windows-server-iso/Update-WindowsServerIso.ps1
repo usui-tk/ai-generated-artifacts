@@ -4174,8 +4174,8 @@ function Get-ReleaseInfoCache {
 # Markdown body. The aggregated container exists because .NET CU has
 # many monthly pages and one container is easier to review in a
 # Patch-Tuesday diff than dozens of per-month files. See SPEC.md
-# section B.23.3 for the raw-/cache- prefix convention and section
-# B.23.5 for the .NET CU multiplicity background.
+# section B.22.3 for the raw-/cache- prefix convention and section
+# B.22.5 for the .NET CU multiplicity background.
 
 $Script:DotNetCuIndexUrl = (
     'https://learn.microsoft.com/en-us/dotnet/framework/release-notes/' +
@@ -5647,7 +5647,7 @@ function Get-PatchSetFromReleaseInfoDiscovery {
         - .NET CU: read .NET CU cache, find Months[] entry matching
           the requested month (Date or DateText prefix). Emit ONE
           discovery record per Rows[] entry for the requested OS (per
-          SPEC B.23.5 B-2 every release-notes row becomes its own
+          SPEC B.22.5 every release-notes row becomes its own
           PatchBaseline entry).
         - DU: read per-OS DU cache, call the in-process
           Get-LatestDynamicUpdate for each of
@@ -11549,8 +11549,8 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                      $Script:OsProfile.PatchBaseline.Patches.Count -gt 0)))) {
             # PatchBaseline-driven path. The OS-neutral baseline is
             # stored under PatchBaseline.NeutralPatches[] (committed
-            # via stage5 / -Action RefreshAllBaselines, see SPEC B.23.5
-            # and B.23.8). Legacy schemas used PatchBaseline.Patches[]
+            # via stage5 / -Action RefreshAllBaselines, see SPEC B.22.5
+            # and B.22.8). Legacy schemas used PatchBaseline.Patches[]
             # for the same data; both are honoured here for backward
             # compatibility, preferring NeutralPatches[] which is the
             # current source of truth. P03 (when not skipped via

@@ -22,6 +22,19 @@ the script and follows the
 
 ## [Unreleased]
 
+### Docs: repoint stale SPEC B.23.x cross-references in code comments to the r09.0 B.22 decision records (no script revision)
+
+The r09.0 SPEC rewrite moved the old B.23 narrative's architecture decisions into the B.22 decision-record section (see SPEC §G.3 deprecation note: the 24-subsection B.23 narrative was superseded by §B.22), but several `Update-WindowsServerIso.ps1` comments still cited the pre-rewrite B.23.x section numbers, which now point at the unrelated "JSON Canonical Serialization" section. This corrects the unambiguous ones - **comment-only; no `$Script:ScriptVersion` bump, no behaviour change** (verified: CRLF/BOM preserved, restamp IN SYNC, psa 0/0/0):
+
+- raw-/cache- prefix convention: `B.23.3` -> `B.22.3` ("Data directory: flat with 3-prefix naming").
+- .NET CU multiplicity: `B.23.5` -> `B.22.5` ("SSU separation and .NET CU multiplicity").
+- NeutralPatches storage: `B.23.5` / `B.23.8` -> `B.22.5` / `B.22.8` ("PatchBaseline.NeutralPatches[].Type").
+
+Deliberately left out of this change:
+- the combined-LCU / "every current monthly LCU embeds the SSU" comments (old decision B-1): their *claim*, not just the section number, is stale for the SSU-separate OSes (Server 2016/2019), and is corrected together with the resolver behaviour in the separate-model SSU resolution work (tracked as SPEC §G.2's "config-side pending action" follow-up).
+- the LCU-priority .NET dedup references (old B-3): no single current B.22 home; left untouched pending a dedicated doc pass.
+- the `docs/history/` references throughout SPEC/README: these are intentional pointers to the out-of-repo investigation-report tree (maintained outside this checkout, like the maintenance handoff), not dangling links.
+
 ### Data / tests: resolve the Server 2016 SSU (KB5088064) DownloadUrl + fix the T23 guard to check the real config path (no script revision)
 
 Fills the empty `DownloadUrl` on the Server 2016 servicing-stack update (SSU, KB5088064) in `data/config-Server2016.json` so the SSU can be staged ahead of its dependent LCU - the missing input behind the on-host 0x800f0823. The URL was resolved from the Microsoft Update Catalog (UpdateId `d0f1761f-c762-4764-8443-8c567f6929a2`; verified live: HTTP 200, 12,761,169 bytes) and stored in the same baseline shape as the LCU/.NET entries (`DownloadUrl` + `FileName` set; `SizeBytes` / `Sha256` left at `0` / `""` for the real-machine download+verify step to populate, exactly as the LCU/.NET entries currently sit). **No `$Script:ScriptVersion` bump.**
