@@ -43,9 +43,14 @@ def find_required_ssu_without_downloadurl(config: dict) -> list[str]:
 
     An SSU is a servicing-stack prerequisite; with no DownloadUrl it cannot be
     staged, which leads to a downstream 0x800f0823 on the target host.
+
+    NeutralPatches live under PatchBaseline in the real config schema
+    (schema/config.schema.json -> PatchBaseline.NeutralPatches), so that is the
+    path checked here.
     """
     violations: list[str] = []
-    for patch in config.get("NeutralPatches") or []:
+    patches = (config.get("PatchBaseline") or {}).get("NeutralPatches") or []
+    for patch in patches:
         ptype = (patch.get("Type") or "").strip().upper()
         url = (patch.get("DownloadUrl") or "").strip()
         if ptype == "SSU" and not url:
@@ -97,20 +102,20 @@ def main() -> int:
 
     # ---- the same config with the URL filled is clean --------------------
     good = copy.deepcopy(bad)
-    for patch in good["NeutralPatches"]:
+    for patch in good["PatchBaseline"]["NeutralPatches"]:
         if (patch.get("Type") or "").upper() == "SSU":
             patch["DownloadUrl"] = "http://example.invalid/fixture/windows10.0-kb5088064-x64.cab"
     r.assert_eq("03 filled-URL config is clean", find_required_ssu_without_downloadurl(good), [])
 
     # whitespace-only URL is treated as empty
     ws = copy.deepcopy(bad)
-    for patch in ws["NeutralPatches"]:
+    for patch in ws["PatchBaseline"]["NeutralPatches"]:
         if (patch.get("Type") or "").upper() == "SSU":
             patch["DownloadUrl"] = "   "
     r.assert_eq("04 whitespace-only URL still flagged", len(find_required_ssu_without_downloadurl(ws)), 1)
 
     # a non-SSU patch with an empty URL is NOT this guard's concern
-    non_ssu = {"NeutralPatches": [{"Type": "LCU", "KbId": "KB5087537", "DownloadUrl": ""}]}
+    non_ssu = {"PatchBaseline": {"NeutralPatches": [{"Type": "LCU", "KbId": "KB5087537", "DownloadUrl": ""}]}}
     r.assert_eq("05 empty URL on a non-SSU patch is not flagged",
                 find_required_ssu_without_downloadurl(non_ssu), [])
 
@@ -122,6 +127,15 @@ def main() -> int:
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
         v = find_required_ssu_without_downloadurl(cfg)
         r.assert_eq(f"07 {cfg_path.name} has no empty-URL SSU", v, [])
+
+    # ---- lock in the Server 2016 SSU resolution (the 0x800f0823 fix) ------
+    s2016 = json.loads((DATA_DIR / "config-Server2016.json").read_text(encoding="utf-8"))
+    ssus = [p for p in (s2016.get("PatchBaseline") or {}).get("NeutralPatches") or []
+            if (p.get("Type") or "").upper() == "SSU"]
+    r.assert_eq("08 Server2016 has exactly one SSU NeutralPatch", len(ssus), 1)
+    r.assert_true("09 Server2016 SSU (KB5088064) has a non-empty DownloadUrl",
+                  bool((ssus[0].get("DownloadUrl") or "").strip()) and ssus[0].get("KbId") == "KB5088064",
+                  f"SSU entry={ssus[0] if ssus else None}")
 
     return r.summary()
 

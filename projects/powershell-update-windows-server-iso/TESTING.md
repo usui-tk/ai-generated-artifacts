@@ -434,7 +434,7 @@ python3 tests/servicing_dependency_servicing_stack_populate_test.py # T18: 17 SS
 python3 tests/servicing_dependency_data_contract_test.py     # T19: 11 data-contract assertions
 python3 tests/servicing_dependency_ssu_prereq_pipeline_test.py   # T21: 20 SSU->LCU end-to-end pipeline assertions (0x800f0823 prediction)
 python3 tests/servicing_dependency_ssu_prereq_readiness_test.py  # T22: 15 SSU->LCU readiness-unit assertions
-python3 tests/config_required_ssu_downloadurl_test.py            # T23: 11 required-SSU DownloadUrl static-guard assertions
+python3 tests/config_required_ssu_downloadurl_test.py            # T23: 13 required-SSU DownloadUrl static-guard assertions (PatchBaseline.NeutralPatches)
 
 # Data-contract / schema / format gates (every commit that touches data)
 python3 tests/config_schema_test.py                          # config schema gate
@@ -481,8 +481,10 @@ no live cab is needed on a PR:
   against a hand-authored Layer 2 fixture across the SS-compare boundary
   (RTM / one-below / exact / newer) without the parse/populate stages.
 - **T23** required-SSU DownloadUrl static guard: asserts no NeutralPatch of Type
-  `SSU` ships with an empty DownloadUrl (the config data defect behind the real
-  0x800f0823); covers the bad-config fixture and every committed config.
+  `SSU` under `PatchBaseline.NeutralPatches` ships with an empty DownloadUrl (the
+  config data defect behind the real 0x800f0823), and locks in that the
+  Server 2016 SSU (KB5088064) carries a resolved DownloadUrl; covers the
+  bad-config fixture and every committed `data/config-Server*.json` (13 assertions).
 
 The live cab is exercised only by T5 (freshness probe) and the monthly CI
 refresh, consistent with the testability-driven split documented in

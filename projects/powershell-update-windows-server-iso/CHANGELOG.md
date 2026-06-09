@@ -22,6 +22,19 @@ the script and follows the
 
 ## [Unreleased]
 
+### Data / tests: resolve the Server 2016 SSU (KB5088064) DownloadUrl + fix the T23 guard to check the real config path (no script revision)
+
+Fills the empty `DownloadUrl` on the Server 2016 servicing-stack update (SSU, KB5088064) in `data/config-Server2016.json` so the SSU can be staged ahead of its dependent LCU - the missing input behind the on-host 0x800f0823. The URL was resolved from the Microsoft Update Catalog (UpdateId `d0f1761f-c762-4764-8443-8c567f6929a2`; verified live: HTTP 200, 12,761,169 bytes) and stored in the same baseline shape as the LCU/.NET entries (`DownloadUrl` + `FileName` set; `SizeBytes` / `Sha256` left at `0` / `""` for the real-machine download+verify step to populate, exactly as the LCU/.NET entries currently sit). **No `$Script:ScriptVersion` bump.**
+
+Also fixes a correctness bug in the T23 guard (added earlier this Unreleased cycle): it read a top-level `NeutralPatches` key, but the real schema nests them under `PatchBaseline.NeutralPatches`, so it had been passing vacuously on the real configs. T23 now reads the real path, the bad-config fixture mirrors it, and two assertions lock in the Server 2016 SSU resolution. T23 is now 13 assertions.
+
+- `data/config-Server2016.json`: SSU KB5088064 `DownloadUrl` + `FileName` resolved from the catalog.
+- `tests/config_required_ssu_downloadurl_test.py`: read `PatchBaseline.NeutralPatches`; add assertions 08/09 (Server 2016 SSU present + resolved).
+- `tests/fixtures/config-guard/bad-config-ssu-empty-url.json`: nested under `PatchBaseline` to mirror the real schema.
+- `TESTING.md`: T23 assertion count -> 13.
+
+Note: this SSU URL was hand-resolved as a stop-gap. The root cause - A01 `RefreshAllBaselines` resolves the LCU/.NET catalog URLs but not the SSU's - is addressed separately so future baseline refreshes fill it automatically.
+
 ### Tests / fixture-builder: make T12 fixture regeneration byte-identical + guard it against drift (no script revision)
 
 `tests/common/servicing_dependency_fixture_builder.py`'s `build_expected_output()` had drifted behind the committed `tests/fixtures/servicing-dependency/expected-output.json`: the function still emitted the old `scope.now` key (committed: `scope.evaluatedAt`) and omitted `stats.eosEsuBundlesExcluded` / `stats.eosEsuFamiliesExcluded` and the per-update `kbIds` field. Running the documented regeneration command therefore corrupted the committed T12 fixture. **No `$Script:ScriptVersion` bump** - test/tooling only; the committed `expected-output.json` is byte-unchanged.
