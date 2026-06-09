@@ -1,0 +1,128 @@
+# REFERENCE — Oracle Linux official container images
+
+> **Research memo (static snapshot).** This file records the *official* Oracle
+> Linux container images that the `tests/cleancore/build-cleancore-ol{N}.sh`
+> scripts use as their build baseline, together with the exact upstream sources
+> (sites, URLs, pinned commits) and the official image's RPM manifest
+> (name + version). It exists so the self-build clean-core can be understood
+> against its reference footprint. It is captured by hand and refreshed when the
+> pin or the upstream image changes; it is **not** a drift-checked gate. The
+> clean-core images' own package sets are recorded separately, names-only, in
+> `tests/cleancore/cleancore-ol<N>.sbom.json`.
+
+## Oracle Linux 10 (`ol10-slim`)
+
+**Upstream sources** (from the build script's PRIMARY SOURCES):
+
+- Slim container image (rootfs): <https://github.com/oracle/container-images/tree/0218ab4ba2f820b1b978dcc5a76435040397a472/10-slim>
+- Rootfs tarball (pinned): <https://github.com/oracle/container-images/raw/0218ab4ba2f820b1b978dcc5a76435040397a472/10-slim/oraclelinux-10-slim-amd64-rootfs.tar.xz>
+- Slim kickstart (`ol10-ks.cfg`): <https://github.com/oracle/oracle-linux/blob/main/oracle-linux-image-tools/distr/ol10-slim/ol10-ks.cfg>
+- Package repositories (BaseOS + AppStream): <https://yum.oracle.com/>
+- Pinned `container-images` commit: `0218ab4ba2f820b1b978dcc5a76435040397a472`
+
+**Official `ol10-slim` RPM manifest** (96 packages, name-version-release.arch).
+This is the systemd-less reference footprint (full `dnf` is replaced by
+`microdnf` + `dnf-data`, and there is no `pam`/`sudo`), which is why the slim
+image carries no `systemd`. The `cleancore-ol10` image keeps this slim philosophy
+(no `@core`, hence no kernel/boot/firewall/cron/syslog) but adds the explicit
+test-base essentials, which transitively pull `systemd` back in via full
+`dnf`/`pam`/`sudo`.
+
+```text
+alternatives-1.30-2.0.1.el10.x86_64
+audit-libs-4.0.3-4.0.1.el10.x86_64
+basesystem-11-22.0.1.el10.noarch
+bash-5.2.26-6.el10.x86_64
+bzip2-libs-1.0.8-25.el10.x86_64
+ca-certificates-2025.2.80_v9.0.305-102.el10_1.noarch
+coreutils-single-9.5-6.0.1.el10.x86_64
+crypto-policies-20250905-2.gitc7eb7b2.el10_1.1.noarch
+curl-8.12.1-2.el10_1.2.x86_64
+cyrus-sasl-lib-2.1.28-29.el10.x86_64
+dnf-data-4.20.0-18.0.1.el10.noarch
+filesystem-3.18-17.el10.x86_64
+findutils-4.10.0-5.el10.x86_64
+gawk-5.3.0-6.el10.x86_64
+gdbm-libs-1.23-12.el10_0.x86_64
+glib2-2.80.4-10.el10_1.13.x86_64
+glibc-2.39-58.0.1.el10_1.7.x86_64
+glibc-common-2.39-58.0.1.el10_1.7.x86_64
+glibc-minimal-langpack-2.39-58.0.1.el10_1.7.x86_64
+gmp-6.2.1-12.el10.x86_64
+gnutls-3.8.10-3.el10_1.x86_64
+gobject-introspection-1.79.1-6.el10.x86_64
+gpg-pubkey-8b4efbe6-61e77439
+gpg-pubkey-8d8b756f-61e772ef
+grep-3.11-10.el10.x86_64
+json-c-0.18-3.el10.x86_64
+keyutils-libs-1.6.3-5.el10.x86_64
+krb5-libs-1.21.3-9.el10_1.x86_64
+libacl-2.3.2-4.el10.x86_64
+libarchive-3.7.7-8.el10_1.x86_64
+libattr-2.5.2-5.el10.x86_64
+libblkid-2.40.2-16.el10_1.x86_64
+libbrotli-1.1.0-7.el10_1.x86_64
+libcap-2.69-7.el10_1.1.x86_64
+libcap-ng-0.8.4-6.el10.x86_64
+libcom_err-1.47.1-4.el10.x86_64
+libcurl-8.12.1-2.el10_1.2.x86_64
+libdnf-0.73.1-12.0.1.el10_1.1.x86_64
+libeconf-0.6.2-4.el10.x86_64
+libevent-2.1.12-16.el10.x86_64
+libffi-3.4.4-10.el10.x86_64
+libgcc-14.3.1-2.1.el10.x86_64
+libidn2-2.3.7-3.el10.x86_64
+libmodulemd-2.15.0-12.el10.x86_64
+libmount-2.40.2-16.el10_1.x86_64
+libnghttp2-1.64.0-2.el10_1.1.x86_64
+libpeas1-1.36.0-8.el10.x86_64
+libpsl-0.21.5-6.el10.x86_64
+librepo-1.18.0-6.el10_1.x86_64
+libselinux-3.9-1.el10.x86_64
+libsemanage-3.9-1.el10.x86_64
+libsepol-3.9-1.el10.x86_64
+libsmartcols-2.40.2-16.el10_1.x86_64
+libsolv-0.7.29-8.el10.x86_64
+libssh-0.11.1-5.el10_1.x86_64
+libssh-config-0.11.1-5.el10_1.noarch
+libstdc++-14.3.1-2.1.el10.x86_64
+libtasn1-4.20.0-1.el10.x86_64
+libunistring-1.1-10.el10.x86_64
+libuuid-2.40.2-16.el10_1.x86_64
+libverto-0.3.2-10.el10.x86_64
+libxcrypt-4.4.36-10.el10.x86_64
+libxml2-2.12.5-9.el10_0.x86_64
+libyaml-0.2.5-16.el10.x86_64
+libzstd-1.5.5-9.el10.x86_64
+lua-libs-5.4.6-7.el10.x86_64
+lz4-libs-1.9.4-8.el10.x86_64
+microdnf-3.10.1-1.el10.x86_64
+mpfr-4.2.1-5.el10.x86_64
+ncurses-base-6.4-15.20240127.el10_1.noarch
+ncurses-libs-6.4-15.20240127.el10_1.x86_64
+openldap-2.6.9-1.el10.x86_64
+openssl-fips-provider-3.0.7-8.0.1.el10.x86_64
+openssl-fips-provider-so-3.0.7-8.0.1.el10.x86_64
+openssl-libs-3.5.1-7.0.1.el10_1.x86_64
+oraclelinux-release-10.1-1.0.6.el10.x86_64
+oraclelinux-release-el10-1.0-17.el10.x86_64
+p11-kit-0.25.5-7.el10.x86_64
+p11-kit-trust-0.25.5-7.el10.x86_64
+pam-libs-1.6.1-8.el10.x86_64
+pcre2-10.44-1.0.1.el10.3.x86_64
+pcre2-syntax-10.44-1.0.1.el10.3.noarch
+popt-1.19-8.el10.x86_64
+publicsuffix-list-dafsa-20240107-5.el10.noarch
+readline-8.2-11.el10.x86_64
+redhat-release-10.1-16.0.1.el10.x86_64
+rpm-4.19.1.1-20.0.1.el10.x86_64
+rpm-libs-4.19.1.1-20.0.1.el10.x86_64
+rpm-sequoia-1.9.0.3-1.0.1.el10_1.x86_64
+sed-4.9-3.el10.x86_64
+setup-2.14.5-7.el10.noarch
+shadow-utils-4.15.0-10.el10_1.x86_64
+sqlite-libs-3.46.1-5.el10_1.x86_64
+tar-1.35-9.el10_1.x86_64
+xz-libs-5.6.2-4.el10_0.x86_64
+zlib-ng-compat-2.2.3-3.el10_1.x86_64
+```

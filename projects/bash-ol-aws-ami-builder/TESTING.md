@@ -173,14 +173,23 @@ Each builder uses three tagged execution environments:
   build-time repo dropped, logs zero-filled, machine-id / ssh host keys cleared)
   and packed as a `.tar.gz`.
 
-Per-OL specifics: the package manifest is the upstream `distr/ol{7,8,9,10}-slim`
-kickstart `%packages` for OL7-OL10, and the **project's own** `EOF_OL6_KS`
-heredoc (`build-ol-aws-ami.sh`) for OL6 (there is no upstream `ol6-slim`).
-OL6/OL7 build with `yum`; OL8/OL9/OL10 install the full `dnf` into the slim
-builder (`microdnf install dnf`) first. The package set is currently
-**kickstart-derived** (i.e. faithful to the VM image), so it intentionally
-over-includes for a pure container; trimming it to a container-appropriate set
-is tracked as separate follow-on work.
+Per-OL specifics: OL6/OL7 build with `yum`; OL8/OL9/OL10 install the full `dnf`
+into the slim builder (`microdnf install dnf`) first. The OL6 manifest is the
+**project's own** `EOF_OL6_KS` heredoc (`build-ol-aws-ami.sh`; no upstream
+`ol6-slim`); OL7–OL9 are still the upstream `distr/ol{7,8,9}-slim` kickstart
+`%packages` (kickstart-derived, faithful to the VM image, over-including for a
+pure container). **OL10 has been trimmed** to a slim-aligned, container-
+appropriate set: `@core` dropped (no kernel/boot/firewall/cron/syslog), explicit
+test-base essentials, `git-core` instead of `git` (avoiding ~62 `perl-*`), no
+`net-tools`, and the Oracle EPEL repo wired in but **shipped disabled** (enabled
+on demand by the ENA/SSM harnesses for e.g. `dkms`). `systemd` stays present on
+OL10 (a hard dependency of full `dnf`/`pam`/`sudo`) but is never PID 1 in
+container/chroot use. Trimming OL7–OL9 the same way is per-OL follow-on work.
+Two static snapshots accompany the base: `cleancore-ol<MAJOR>.sbom.json` (each
+finalized image's package set, names-only, reusable JSON) and
+`REFERENCE-oracle-official-images.md` (the official slim images' sources, pinned
+commits, and name-version manifests). Neither is a `.sh`, so both are outside
+B-T1/B-T2 and are not drift-checked gates.
 
 Run one with `bash tests/cleancore/build-cleancore-ol<MAJOR>.sh [output.tar.gz]`
 (see "Environment & version dependencies" for the required tools; `INSECURE_TLS=0`
