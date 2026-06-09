@@ -377,3 +377,134 @@ tzdata-2026a-1.0.1.el8.noarch
 xz-libs-5.2.4-4.el8_6.x86_64
 zlib-1.2.11-25.el8.x86_64
 ```
+## Oracle Linux 7 (`ol7-slim`)
+
+**Upstream sources** (from the build script's PRIMARY SOURCES):
+
+- Slim container image (rootfs): <https://github.com/oracle/container-images/tree/0218ab4ba2f820b1b978dcc5a76435040397a472/7-slim>
+- Rootfs tarball (pinned): <https://github.com/oracle/container-images/raw/0218ab4ba2f820b1b978dcc5a76435040397a472/7-slim/oraclelinux-7-slim-amd64-rootfs.tar.xz>
+- Slim kickstart (`ol7-ks.cfg`): <https://github.com/oracle/oracle-linux/blob/main/oracle-linux-image-tools/distr/ol7-slim/ol7-ks.cfg>
+- Package repositories (latest + UEKR6): <https://yum.oracle.com/>
+- Pinned `container-images` commit: `0218ab4ba2f820b1b978dcc5a76435040397a472`
+
+**Official `ol7-slim` RPM manifest** (108 packages, name-version-release.arch).
+The pristine ol7-slim is systemd-less and uses `yum` (EL7 has no `dnf`). EL7 also
+has no `glibc` langpack split, so no `glibc-all-langpacks`/`-minimal-langpack`
+distinction applies. The `cleancore-ol7` image keeps the slim philosophy (no
+`@core`) but adds explicit test-base essentials; `systemd` returns transitively
+(pulled by `iputils`/`procps-ng` on EL7, not by a package manager). EL7-specific
+package notes: `git` is plain `git` (no `git-core` split on EL7; it pulls
+~30 `perl-*` packages), and `git-lfs`/`zstd` are EPEL-only/absent in the EL7
+base repos so they are not in the clean-core (installable on demand from the
+shipped-disabled Oracle EPEL repo).
+
+```text
+audit-libs-2.8.5-4.el7.x86_64
+basesystem-10.0-7.0.1.el7.noarch
+bash-4.2.46-35.el7_9.x86_64
+bzip2-libs-1.0.6-13.el7.x86_64
+ca-certificates-2024.2.69_v8.0.303-71.0.1.el7_9.noarch
+chkconfig-1.7.6-1.0.3.el7.x86_64
+coreutils-8.22-24.0.1.el7_9.2.x86_64
+cpio-2.11-28.el7.x86_64
+curl-7.29.0-59.0.3.el7_9.2.x86_64
+cyrus-sasl-lib-2.1.26-24.0.1.el7_9.x86_64
+diffutils-3.3-6.el7_9.x86_64
+elfutils-libelf-0.176-5.el7.x86_64
+expat-2.1.0-15.0.1.el7_9.x86_64
+file-libs-5.11-37.el7.x86_64
+filesystem-3.2-25.el7.x86_64
+findutils-4.5.11-6.el7.x86_64
+gawk-4.0.2-4.el7_3.1.x86_64
+gdbm-1.10-8.el7.x86_64
+glib2-2.56.1-9.el7_9.x86_64
+glibc-2.17-326.0.9.el7_9.3.x86_64
+glibc-common-2.17-326.0.9.el7_9.3.x86_64
+gmp-6.0.0-15.el7.x86_64
+gnupg2-2.0.22-5.el7_5.x86_64
+gpg-pubkey-ec551f03-53619141.(none)
+gpgme-1.3.2-5.el7.x86_64
+grep-2.20-3.el7.x86_64
+info-5.1-5.el7.x86_64
+kernel-container-3.10.0-0.0.0.2.el7.x86_64
+keyutils-libs-1.5.8-3.el7.x86_64
+krb5-libs-1.15.1-55.0.7.el7_9.x86_64
+libacl-2.2.51-15.el7.x86_64
+libassuan-2.1.0-3.el7.x86_64
+libattr-2.4.46-13.el7.x86_64
+libblkid-2.23.2-65.0.4.el7_9.1.x86_64
+libcap-2.22-11.el7.x86_64
+libcap-ng-0.7.5-4.el7.x86_64
+libcom_err-1.45.4-3.0.7.el7.x86_64
+libcurl-7.29.0-59.0.3.el7_9.2.x86_64
+libdb-5.3.21-25.el7.x86_64
+libdb-utils-5.3.21-25.el7.x86_64
+libffi-3.0.13-19.el7.x86_64
+libgcc-4.8.5-44.0.3.el7.x86_64
+libgcrypt-1.5.3-14.el7.x86_64
+libgpg-error-1.12-3.el7.x86_64
+libidn-1.28-4.el7.x86_64
+libmount-2.23.2-65.0.4.el7_9.1.x86_64
+libselinux-2.5-15.el7.x86_64
+libsemanage-2.5-14.el7.x86_64
+libsepol-2.5-10.el7.x86_64
+libssh2-1.8.0-4.el7_9.1.x86_64
+libstdc++-4.8.5-44.0.3.el7.x86_64
+libtasn1-4.10-1.el7.x86_64
+libuuid-2.23.2-65.0.4.el7_9.1.x86_64
+libverto-0.2.5-4.el7.x86_64
+libxml2-2.9.1-6.0.3.el7_9.6.x86_64
+libxml2-python-2.9.1-6.0.3.el7_9.6.x86_64
+lua-5.1.4-15.el7.x86_64
+ncurses-5.9-14.20130511.el7_4.x86_64
+ncurses-base-5.9-14.20130511.el7_4.noarch
+ncurses-libs-5.9-14.20130511.el7_4.x86_64
+nspr-4.35.0-1.el7_9.x86_64
+nss-3.90.0-2.el7_9.x86_64
+nss-pem-1.0.3-7.el7_9.1.x86_64
+nss-softokn-3.90.0-6.0.1.el7_9.x86_64
+nss-softokn-freebl-3.90.0-6.0.1.el7_9.x86_64
+nss-sysinit-3.90.0-2.el7_9.x86_64
+nss-tools-3.90.0-2.el7_9.x86_64
+nss-util-3.90.0-1.el7_9.x86_64
+openldap-2.4.44-25.el7_9.x86_64
+openssl-libs-1.0.2k-26.el7_9.x86_64
+oraclelinux-release-7.9-1.0.13.el7.x86_64
+oraclelinux-release-el7-1.0-17.el7.x86_64
+p11-kit-0.23.5-3.el7.x86_64
+p11-kit-trust-0.23.5-3.el7.x86_64
+pcre-8.32-17.el7.x86_64
+pinentry-0.8.1-17.el7.x86_64
+popt-1.13-16.el7.x86_64
+pth-2.0.7-23.el7.x86_64
+pygpgme-0.3-9.el7.x86_64
+pyliblzma-0.5.3-11.el7.x86_64
+python-2.7.5-94.0.1.el7_9.x86_64
+python-chardet-2.2.1-3.el7.noarch
+python-iniparse-0.4-9.el7.noarch
+python-kitchen-1.1.1-5.el7.noarch
+python-libs-2.7.5-94.0.1.el7_9.x86_64
+python-pycurl-7.19.0-19.el7.x86_64
+python-urlgrabber-3.10-10.el7.noarch
+pyxattr-0.5.1-5.el7.x86_64
+readline-6.2-11.el7.x86_64
+redhat-release-server-7.9-6.0.1.el7_9.x86_64
+rpm-4.11.3-48.0.3.el7_9.x86_64
+rpm-build-libs-4.11.3-48.0.3.el7_9.x86_64
+rpm-libs-4.11.3-48.0.3.el7_9.x86_64
+rpm-python-4.11.3-48.0.3.el7_9.x86_64
+sed-4.2.2-7.el7.x86_64
+setup-2.8.71-11.el7.noarch
+shadow-utils-4.6-5.0.1.el7.x86_64
+shared-mime-info-1.8-5.el7.x86_64
+sqlite-3.7.17-8.el7_7.1.x86_64
+tar-1.26-35.el7.x86_64
+tzdata-2024b-2.el7.noarch
+ustr-1.0.4-16.el7.x86_64
+xz-libs-5.2.2-2.el7_9.x86_64
+yum-3.4.3-168.0.5.el7.noarch
+yum-metadata-parser-1.1.4-10.el7.x86_64
+yum-plugin-ovl-1.1.31-54.0.1.el7_8.noarch
+yum-utils-1.1.31-54.0.1.el7_8.noarch
+zlib-1.2.7-21.el7_9.x86_64
+```

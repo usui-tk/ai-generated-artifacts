@@ -60,25 +60,30 @@ SSL=1; [ "${INSECURE_TLS}" = "1" ] && SSL=0
 REPO_LATEST="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/latest/x86_64/"
 REPO_UEKR6="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/UEKR6/x86_64/"
 
-# Package manifest (upstream ol7-slim ol7-ks.cfg %packages; --nobase => @core base).
-INCLUDE=( @core
-  yum initscripts passwd rsyslog vim-minimal openssh-server openssh-clients
-  dhclient chkconfig rootfiles policycoreutils checkpolicy selinux-policy
-  selinux-policy-targeted libselinux oraclelinux-release oraclelinux-release-el7
-  yum-rhn-plugin yum-plugin-security device-mapper-libs device-mapper kpartx
-  net-tools iptables-services btrfs-progs chrony acpid tmpwatch cronie
-  cronie-anacron crontabs )
+# Package manifest (slim-aligned, NOT @core). The pristine ol7-slim image is the
+# reference footprint: dropping @core means no kernel/boot/firewall/cron/syslog. A
+# minimal userland comes in via yum + oraclelinux-release; the rest are the explicit
+# essentials a test base needs. EL7-specific vs OL8-OL10: this is yum (no dnf, so no
+# dnf-plugins-core); no langpack pin (EL7 has no glibc langpack split); git is plain
+# git (EL7 has no git-core split -- it pulls ~30 perl-* packages, accepted for tool
+# parity with the other OLs); git-lfs and the zstd CLI are NOT in the EL7 base repos
+# (EPEL-only / absent), so they are omitted (installable on demand from EPEL). The
+# Oracle EPEL repo is wired in but shipped disabled (finalized below). systemd is
+# pulled transitively by iputils/procps-ng on EL7 and is accepted -- in container/
+# chroot use it is never PID 1. NOTE (EL7-specific): the base oraclelinux-release
+# (which provides /etc/oracle-release) must be listed explicitly -- unlike EL8-EL10,
+# the EL7 oraclelinux-release-el7 repo-config package does NOT pull it in.
+INCLUDE=( yum oraclelinux-release oraclelinux-release-el7 oracle-epel-release-el7 yum-utils
+  curl wget git bzip2 unzip zip
+  sudo which tar diffutils less findutils procps-ng psmisc hostname vim-minimal
+  iproute iputils bind-utils traceroute nmap-ncat tcpdump )
 
-# Kickstart removals safe under a raw `yum --exclude`. Hard deps that Anaconda
-# soft-drops but raw yum CANNOT are intentionally NOT excluded: acl (systemd),
-# lzo/liblzo2 (btrfs-progs), elfutils-libs/libdw (@core). Raw-yum cascade:
-# excluding NetworkManager also requires NetworkManager-team + NetworkManager-tui
-# (they Require: NetworkManager). Firmware via the `*-firmware` glob (EL7 @core
-# pulls none, kept for parity); alsa-lib/iprutils are libs, listed explicitly.
-EXCLUDE="attr,audit,oraclelinux-release-notes,efibootmgr,kexec-tools,\
-cyrus-sasl,postfix,mysql-libs,NetworkManager,NetworkManager-team,\
-NetworkManager-tui,alsa-lib,iprutils,*-firmware,plymouth,biosdevname,\
-b43-openfwwf,wireless-tools,system-config-securitylevel-tui"
+# Defensive excludes only. Without @core the bulky members (kernel, firmware,
+# firewalld, cron, syslog, NetworkManager, sssd, rhn-*) are never candidates, so
+# the old @core-removal list is unnecessary. The globs below are a safety net in
+# case a dependency ever tries to pull a kernel or firmware blob into what must
+# remain a kernel-less container rootfs.
+EXCLUDE="*firmware*,kernel*"
 
 BUILDER="${WORK}/builder"      # [B] throwaway EL7-native builder rootfs
 OUT="/cleancore"               # [C] installroot path INSIDE the builder
@@ -180,6 +185,12 @@ find "${DELIV}/etc/yum.repos.d" -type f -name '*.repo*' -print0 \
       -e 's|yum$ociregion.$ocidomain|yum.oracle.com|g' \
       -e 's|yum$ociregion.oracle.com|yum.oracle.com|g' \
       -e 's|http://yum.oracle.com|https://yum.oracle.com|g'
+# (C-ii) ship the Oracle EPEL repo present but DISABLED; the ENA/SSM harnesses
+# enable it explicitly (e.g. dkms from EPEL, or git-lfs/zstd which are EPEL-only
+# on EL7). The base then resolves against the base repos only, which keeps
+# clean-core behaviour predictable.
+find "${DELIV}/etc/yum.repos.d" -type f -name 'oracle-epel-*.repo*' -print0 \
+  | xargs -0 -r sed -i -E 's/^enabled[[:space:]]*=[[:space:]]*1/enabled=0/'
 
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║ [C] CLEAN-CORE — (2-cleanup) logs / transient data.                        ║
@@ -268,7 +279,7 @@ if [ -f "${IMG}/etc/yum.repos.d/cleancore.repo" ]; then CC_REPO=1; else CC_REPO=
 st "userland executes (/bin/bash runs in chroot)"   t_run /bin/bash -c true
 st "rpmdb readable, >0 packages (${PKGS})"          test "${PKGS}" -gt 0
 st "package manager runs (yum --version)"            t_run /usr/bin/yum --version
-st "ssh daemon present (sshd)"                       test -x "${IMG}/usr/sbin/sshd"
+st "ssh daemon absent (slim base ships no sshd)"     test ! -e "${IMG}/usr/sbin/sshd"
 st "OS is Oracle Linux 7"                            grep -q "release 7" "${IMG}/etc/oracle-release"
 st "firmware excluded (0 packages)"                  test "${FW}" -eq 0
 st "machine-id blanked (0 bytes)"                    test "${MID_SIZE}" -eq 0

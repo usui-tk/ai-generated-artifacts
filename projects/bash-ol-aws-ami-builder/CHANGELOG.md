@@ -89,6 +89,15 @@ This CHANGELOG is **English only** per the repository-wide
   derives from). Neither is a `.sh`, so both sit outside B-T1/B-T2 and are not
   drift-checked gates.
 
+- **OL7 clean-core package SBOM + official-image reference (OL7 section).** Static
+  snapshot `tests/cleancore/cleancore-ol7.sbom.json` (198 packages) records the
+  finalized OL7 clean-core's package set names-only as reusable JSON, and an
+  Oracle Linux 7 section is added to `REFERENCE-oracle-official-images.md` (the
+  official `ol7-slim` image's sources, pinned `container-images` commit, and
+  108-package name-version manifest — the reference footprint the clean-core
+  derives from). Neither is a `.sh`, so both sit outside B-T1/B-T2 and are not
+  drift-checked gates.
+
 ### Changed
 
 - **OL9 and OL10 clean-core trimmed to a slim-aligned set (was kickstart-derived).**
@@ -103,8 +112,8 @@ This CHANGELOG is **English only** per the repository-wide
   but never PID 1 in container/chroot use. Result: OL10 245 → **177 pkgs**
   (445M → **316M**); OL9 `@core`-set → **186 pkgs / 313M**. Each self-test's
   `sshd present` assertion is flipped to `sshd absent` (the slim-aligned base
-  ships no `openssh-server`). OL6 and OL7 remain kickstart-derived pending their own
-  passes.
+  ships no `openssh-server`). OL6 remains kickstart-derived pending its own
+  pass.
 
 - **OL8 clean-core trimmed to a slim-aligned set (was kickstart-derived).**
   `build-cleancore-ol8.sh` now drops `@core` and installs a minimal userland plus
@@ -121,6 +130,23 @@ This CHANGELOG is **English only** per the repository-wide
   697M → **206 pkgs / 346M** (tarball 120M). The self-test `sshd present` assertion
   is flipped to `sshd absent`. OL6 and OL7 remain kickstart-derived pending their own
   passes.
+
+- **OL7 clean-core trimmed to a slim-aligned set (was kickstart-derived).**
+  `build-cleancore-ol7.sh` now drops `@core` and installs a minimal userland plus
+  explicit test-base essentials, matching the OL8-OL10 pass. EL7-specific
+  differences (vs the dnf-based OL8-OL10): the manager is `yum` (no `dnf`, so no
+  `dnf-plugins-core` — `yum-utils` only); there is no `glibc` langpack split, so no
+  langpack pin; `git` is plain `git` (EL7 has no `git-core` split; it pulls ~30
+  `perl-*` packages — kept for tool parity with the other OLs, per maintainer
+  choice); `git-lfs` and the `zstd` CLI are EPEL-only/absent in the EL7 base repos
+  so they are not installed (available on demand from the shipped-disabled EPEL
+  repo); and the base `oraclelinux-release` (which provides `/etc/oracle-release`)
+  is listed explicitly because EL7's `oraclelinux-release-el7` does not pull it.
+  The Oracle EPEL repo is installed but **finalized to `enabled=0`**. `systemd` is
+  pulled transitively by `iputils`/`procps-ng` and is therefore present, but never
+  PID 1 in container/chroot use. Result: `@core`-set 261 pkgs / 556M → **198 pkgs /
+  448M** (tarball 137M). The self-test `sshd present` assertion is flipped to
+  `sshd absent`. OL6 remains kickstart-derived pending its own pass.
 
 - **`HEARTBEAT_INTERVAL_SEC` default `20` → `10` seconds** (feedback ④; `0` still
   disables). A shorter interval makes the live `stage:` field and elapsed/disk

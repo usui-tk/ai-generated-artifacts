@@ -176,18 +176,22 @@ Each builder uses three tagged execution environments:
 Per-OL specifics: OL6/OL7 build with `yum`; OL8/OL9/OL10 install the full `dnf`
 into the slim builder (`microdnf install dnf`) first. The OL6 manifest is the
 **project's own** `EOF_OL6_KS` heredoc (`build-ol-aws-ami.sh`; no upstream
-`ol6-slim`); OL7 is still the upstream `distr/ol7-slim` kickstart `%packages`
-(kickstart-derived, faithful to the VM image, over-including for a pure
-container). **OL8, OL9 and OL10 have been trimmed** to a slim-aligned, container-
+`ol6-slim`); OL7's manifest no longer mirrors the upstream `distr/ol7-slim`
+kickstart (it has been trimmed — see below). **OL7, OL8, OL9 and OL10 have been
+trimmed** to a slim-aligned, container-
 appropriate set: `@core` dropped (no kernel/boot/firewall/cron/syslog), explicit
 test-base essentials, `git-core` instead of `git` (avoiding ~60 `perl-*`), no
 `net-tools`, and the Oracle EPEL repo wired in but **shipped disabled** (enabled
 on demand by the ENA/SSM harnesses for e.g. `dkms`). `systemd` stays present (a
-hard dependency of full `dnf`, plus `pam`/`sudo` on EL8/EL10) but is never PID 1 in
+hard dependency of full `dnf`, plus `pam`/`sudo` on EL8/EL10; pulled by
+`iputils`/`procps-ng` on EL7) but is never PID 1 in
 container/chroot use. On EL8 the builder additionally pins `glibc-minimal-langpack`
 and excludes `glibc-all-langpacks` (~416 MB), which a raw EL8 `dnf` would otherwise
-pull but the official `ol8-slim` does not ship. Trimming OL7 (and OL6) the same way
-is per-OL follow-on work.
+pull but the official `ol8-slim` does not ship. On EL7 (no `git-core` split) OL7
+carries plain `git` (~30 `perl-*`); `git-lfs`/`zstd` are EPEL-only/absent in the
+EL7 base so they are omitted, and the base `oraclelinux-release` is listed
+explicitly (EL7's `oraclelinux-release-el7` does not pull it). Trimming OL6 the
+same way is per-OL follow-on work.
 Two static snapshots accompany the base: `cleancore-ol<MAJOR>.sbom.json` (each
 finalized image's package set, names-only, reusable JSON) and
 `REFERENCE-oracle-official-images.md` (the official slim images' sources, pinned
