@@ -508,3 +508,199 @@ yum-plugin-ovl-1.1.31-54.0.1.el7_8.noarch
 yum-utils-1.1.31-54.0.1.el7_8.noarch
 zlib-1.2.7-21.el7_9.x86_64
 ```
+
+## Oracle Linux 6 (no `ol6-slim`; base = `oraclelinux:6.6` image)
+
+**Upstream sources** (from the build script's PRIMARY SOURCES):
+
+- Official OL6 container image (rpm 4.8 / db4), Oracle public-yum:
+  <https://public-yum.oracle.com/docker-images/OracleLinux/OL6/oraclelinux-6.6.tar.xz>
+- Package repositories (OL6/latest + UEKR4): <https://yum.oracle.com/>
+- EPEL 6 release RPM (EOL; Oracle does not host EPEL 6), Fedora community archive:
+  <https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/epel-release-6-8.noarch.rpm>
+
+Unlike OL7-OL10, Oracle never produced an `ol6-slim` container image or a slim
+kickstart for EL6, so there is no upstream slim manifest to diff against. The
+official `oraclelinux:6.6` image (manifest below, 165 packages) is a fuller base;
+`build-cleancore-ol6.sh` uses it only as the EL6-native *builder* (its rpm 4.8
+writes a db4 rpmdb the in-guest EL6 rpm can read), then performs a fresh curated
+`yum --installroot` install from OL6/latest -- so `cleancore-ol6` is NOT a trim
+of this image but an independently composed set (recorded names-only in
+`cleancore-ol6.sbom.json`). EL6-specific notes: `procps` (not `procps-ng`), `nc`
+(not `nmap-ncat`), plain `git` (no `git-core` split; pulls ~`perl-*`), and
+`net-tools` is included because EL6 has no standalone `hostname` package (the
+command ships in `net-tools`). EPEL 6 is wired in via the Fedora archive (Oracle
+hosts no EPEL 6): the clean-core enables its NSS dynamic CA trust, fetches the
+release RPM with its own curl and installs it with its own rpm, and ships the
+repo repointed to the archive and `enabled=0`. `systemd` does not apply (EL6 is
+upstart).
+
+**Official `oraclelinux:6.6` RPM manifest** (165 packages, name-version-release.arch):
+
+```text
+MAKEDEV-3.24-6.el6.x86_64
+audit-libs-2.3.7-5.el6.x86_64
+basesystem-10.0-4.0.1.el6.noarch
+bash-4.1.2-29.el6.x86_64
+binutils-2.20.51.0.2-5.42.el6.x86_64
+bzip2-libs-1.0.5-7.el6_0.x86_64
+ca-certificates-2014.1.98-65.1.el6.noarch
+checkpolicy-2.0.22-1.el6.x86_64
+chkconfig-1.3.49.3-2.el6_4.1.x86_64
+coreutils-8.4-37.0.1.el6.x86_64
+coreutils-libs-8.4-37.0.1.el6.x86_64
+cpio-2.10-12.el6_5.x86_64
+cracklib-2.8.16-4.el6.x86_64
+cracklib-dicts-2.8.16-4.el6.x86_64
+curl-7.19.7-37.el6_5.3.x86_64
+cyrus-sasl-lib-2.1.23-15.el6.x86_64
+db4-4.7.25-18.el6_4.x86_64
+db4-utils-4.7.25-18.el6_4.x86_64
+dbus-glib-0.86-6.el6_4.x86_64
+dbus-libs-1.2.24-7.0.1.el6_3.x86_64
+dbus-python-0.83.0-6.1.el6.x86_64
+dhclient-4.1.1-43.P1.0.1.el6.x86_64
+dhcp-common-4.1.1-43.P1.0.1.el6.x86_64
+diffutils-2.8.1-28.el6.x86_64
+elfutils-libelf-0.158-3.2.el6.x86_64
+ethtool-3.5-5.el6.x86_64
+expat-2.0.1-11.el6_2.x86_64
+file-libs-5.04-21.el6.x86_64
+filesystem-2.4.30-3.el6.x86_64
+findutils-4.4.2-6.el6.x86_64
+fipscheck-1.2.0-7.el6.x86_64
+fipscheck-lib-1.2.0-7.el6.x86_64
+gamin-0.1.10-9.el6.x86_64
+gawk-3.1.7-10.el6.x86_64
+gdbm-1.8.0-36.el6.x86_64
+glib2-2.28.8-4.el6.x86_64
+glibc-2.12-1.149.el6.x86_64
+glibc-common-2.12-1.149.el6.x86_64
+gmp-4.3.1-7.el6_2.2.x86_64
+gnupg2-2.0.14-8.el6.x86_64
+gpg-pubkey-ec551f03-53619141.(none)
+gpgme-1.1.8-3.el6.x86_64
+grep-2.6.3-6.el6.x86_64
+groff-1.18.1.4-21.el6.x86_64
+gzip-1.3.12-22.el6.x86_64
+hwdata-0.233-11.1.el6.noarch
+info-4.13a-8.el6.x86_64
+initscripts-9.03.46-1.0.2.el6.x86_64
+iproute-2.6.32-32.el6_5.x86_64
+iptables-1.4.7-14.0.1.el6.x86_64
+iputils-20071127-17.el6_4.2.x86_64
+keyutils-libs-1.4-5.el6.x86_64
+krb5-libs-1.10.3-33.el6.x86_64
+less-436-13.el6.x86_64
+libacl-2.2.49-6.el6.x86_64
+libattr-2.4.44-7.el6.x86_64
+libblkid-2.17.2-12.18.0.1.el6.x86_64
+libcap-2.16-5.5.el6.x86_64
+libcap-ng-0.6.4-3.el6_0.1.x86_64
+libcom_err-1.42.8-1.0.1.el6.x86_64
+libcurl-7.19.7-37.el6_5.3.x86_64
+libedit-2.11-4.20080712cvs.1.el6.x86_64
+libffi-3.0.5-3.2.el6.x86_64
+libgcc-4.4.7-11.el6.x86_64
+libgcrypt-1.4.5-11.el6_4.x86_64
+libgpg-error-1.7-4.el6.x86_64
+libgudev1-147-2.57.0.2.el6.x86_64
+libidn-1.18-2.el6.x86_64
+libnih-1.0.1-7.el6.x86_64
+libnl-1.1.4-2.el6.x86_64
+libselinux-2.0.94-5.8.el6.x86_64
+libselinux-utils-2.0.94-5.8.el6.x86_64
+libsemanage-2.0.43-4.2.el6.x86_64
+libsepol-2.0.41-4.el6.x86_64
+libssh2-1.4.2-1.el6.x86_64
+libstdc++-4.4.7-11.el6.x86_64
+libtasn1-2.3-6.el6_5.x86_64
+libudev-147-2.57.0.2.el6.x86_64
+libusb-0.1.12-23.el6.x86_64
+libuser-0.56.13-5.el6.x86_64
+libutempter-1.1.5-4.1.el6.x86_64
+libuuid-2.17.2-12.18.0.1.el6.x86_64
+libxml2-2.7.6-14.0.1.el6_5.2.x86_64
+libxml2-python-2.7.6-14.0.1.el6_5.2.x86_64
+logrotate-3.7.8-17.el6.x86_64
+lua-5.1.4-4.1.el6.x86_64
+m2crypto-0.20.2-9.el6.x86_64
+make-3.81-20.el6.x86_64
+mingetty-1.08-5.el6.x86_64
+module-init-tools-3.9-24.0.1.el6.x86_64
+ncurses-5.7-3.20090208.el6.x86_64
+ncurses-base-5.7-3.20090208.el6.x86_64
+ncurses-libs-5.7-3.20090208.el6.x86_64
+net-tools-1.60-110.el6_2.x86_64
+newt-0.52.11-3.el6.x86_64
+newt-python-0.52.11-3.el6.x86_64
+nspr-4.10.6-1.el6_5.x86_64
+nss-3.16.1-14.0.1.el6.x86_64
+nss-softokn-3.14.3-17.el6.x86_64
+nss-softokn-freebl-3.14.3-17.el6.x86_64
+nss-sysinit-3.16.1-14.0.1.el6.x86_64
+nss-tools-3.16.1-14.0.1.el6.x86_64
+nss-util-3.16.1-3.el6.x86_64
+openldap-2.4.39-8.el6.x86_64
+openssh-5.3p1-104.el6.x86_64
+openssh-clients-5.3p1-104.el6.x86_64
+openssh-server-5.3p1-104.el6.x86_64
+openssl-1.0.1e-30.el6_6.2.x86_64
+oracle-logos-60.0.14-1.0.2.el6.noarch
+oraclelinux-release-6Server-6.0.2.x86_64
+p11-kit-0.18.5-2.el6_5.2.x86_64
+p11-kit-trust-0.18.5-2.el6_5.2.x86_64
+pam-1.1.1-20.el6.x86_64
+passwd-0.77-4.el6_2.2.x86_64
+pcre-7.8-6.el6.x86_64
+pinentry-0.7.6-6.el6.x86_64
+pkgconfig-0.23-9.1.el6.x86_64
+policycoreutils-2.0.83-19.47.0.1.el6.x86_64
+popt-1.13-7.el6.x86_64
+procps-3.2.8-30.0.1.el6.x86_64
+psmisc-22.6-19.el6_5.x86_64
+pth-2.0.7-9.3.el6.x86_64
+pyOpenSSL-0.10-2.el6.x86_64
+pygobject2-2.20.0-5.el6.x86_64
+pygpgme-0.1-18.20090824bzr68.el6.x86_64
+python-2.6.6-52.el6.x86_64
+python-dmidecode-3.10.13-3.el6_4.x86_64
+python-ethtool-0.6-5.el6.x86_64
+python-gudev-147.1-4.el6_0.1.x86_64
+python-iniparse-0.3.1-2.1.el6.noarch
+python-libs-2.6.6-52.el6.x86_64
+python-pycurl-7.19.0-8.el6.x86_64
+python-urlgrabber-3.9.1-9.0.1.el6.noarch
+readline-6.0-4.el6.x86_64
+redhat-release-server-6Server-6.6.0.2.0.1.el6.x86_64
+rhn-check-1.0.0.1-18.0.2.el6.noarch
+rhn-client-tools-1.0.0.1-18.0.2.el6.noarch
+rhn-setup-1.0.0.1-18.0.2.el6.noarch
+rhnlib-2.5.22-15.0.1.el6.noarch
+rhnsd-4.9.3-2.0.1.el6.x86_64
+rootfiles-8.1-6.1.el6.noarch
+rpm-4.8.0-37.el6.x86_64
+rpm-libs-4.8.0-37.el6.x86_64
+rpm-python-4.8.0-37.el6.x86_64
+rsyslog-5.8.10-8.0.1.el6.x86_64
+sed-4.2.1-10.el6.x86_64
+setup-2.8.14-20.el6_4.1.noarch
+shadow-utils-4.1.4.2-19.el6.x86_64
+shared-mime-info-0.70-6.el6.x86_64
+slang-2.2.1-1.el6.x86_64
+sqlite-3.6.20-1.el6.x86_64
+sysvinit-tools-2.87-5.dsf.el6.x86_64
+tcp_wrappers-libs-7.6-57.el6.x86_64
+tzdata-2014g-1.el6.noarch
+udev-147-2.57.0.2.el6.x86_64
+upstart-0.6.5-13.el6_5.3.x86_64
+usermode-1.102-3.el6.x86_64
+ustr-1.0.4-9.1.el6.x86_64
+util-linux-ng-2.17.2-12.18.0.1.el6.x86_64
+vim-minimal-7.2.411-1.8.el6.x86_64
+xz-libs-4.999.9-0.5.beta.20091007git.el6.x86_64
+yum-3.2.29-60.0.1.el6.noarch
+yum-metadata-parser-1.1.2-16.el6.x86_64
+yum-rhn-plugin-0.9.1-50.0.1.el6.noarch
+zlib-1.2.3-29.el6.x86_64
+```

@@ -12,9 +12,11 @@
 # OL6 is the YUM-family + NEEDS-VERIFICATION member: it is EOL, so its rpm stays
 # 4.8 / BerkeleyDB-4 FOREVER. Only an EL6-native rpm can write an rpmdb that the
 # in-guest EL6 rpm can read (an EL7 rpm 4.11 / db5 builder yields a db an EL6 rpm
-# reads as 0 packages -- proven). Hence the builder MUST be an EL6 image, and the
-# package set comes from the PROJECT'S OWN OL6 kickstart (there is no upstream
-# ol6-slim), not from a ks under oracle-linux-image-tools.
+# reads as 0 packages -- proven). Hence the builder MUST be an EL6 image. The
+# package set is a slim-aligned, container-appropriate trim (@core dropped, a
+# minimal userland plus test-base essentials, EPEL wired in but shipped disabled)
+# that mirrors clean-core OL7's Include/Exclude translated to EL6 names; there is
+# no upstream ol6-slim to diff against, so the set is curated (see INCLUDE below).
 #
 # Three execution environments are involved; each block below is tagged:
 #   [A] HOST       - orchestrates only (download, extract, fetch RPMs, edit, pack, test).
@@ -30,10 +32,12 @@
 # PRIMARY SOURCES (verify upstream)
 #   - Builder image (OL6.6 public-yum docker image; rpm 4.8 / db4), Oracle official:
 #       https://public-yum.oracle.com/docker-images/OracleLinux/OL6/oraclelinux-6.6.tar.xz
-#   - Package set = the PROJECT'S OWN OL6 kickstart %packages (no upstream ol6-slim):
-#       build-ol-aws-ami.sh  ->  EOF_OL6_KS heredoc  (%packages ~L1795)
+#   - Package set = a slim-aligned curated trim (mirrors clean-core OL7 in EL6
+#     names; no upstream ol6-slim exists). See the INCLUDE/EXCLUDE below.
 #   - Package repositories + el6_10 TLS RPMs, Oracle official:
 #       https://yum.oracle.com/repo/OracleLinux/OL6/latest/x86_64/
+#   - EPEL 6 release RPM (EOL; Oracle does not host EPEL 6), Fedora archive:
+#       https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/epel-release-6-8.noarch.rpm
 #   - Cleanup guidance (VM-oriented; container-applicable subset adopted), AWS:
 #       https://docs.aws.amazon.com/imagebuilder/latest/userguide/security-best-practices.html
 # ----------------------------------------------------------------------------
@@ -65,25 +69,35 @@ REPO_BASE="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/latest/x86_64"
 TLS_PKGS=( nspr nss nss-util nss-softokn nss-softokn-freebl nss-sysinit
            nss-tools curl libcurl ca-certificates openssl )
 
-# Package manifest = the PROJECT'S OWN OL6 kickstart %packages (@core implicit
-# base). NOTE the OL6-specific names vs newer OLs: iptables (not
-# iptables-services), ntp (not chrony), grub (legacy GRUB), yum (not dnf).
-INCLUDE=( @core
-  yum initscripts passwd rsyslog vim-minimal openssh-server openssh-clients
-  dhclient chkconfig rootfiles policycoreutils checkpolicy selinux-policy
-  selinux-policy-targeted libselinux oraclelinux-release oraclelinux-release-notes
-  yum-rhn-plugin yum-plugin-security yum-utils device-mapper-libs device-mapper
-  kpartx net-tools iptables ntp acpid cronie cronie-anacron crontabs grub )
+# Package manifest = a slim-aligned, container-appropriate set: @core is dropped
+# (no kernel/boot/init/firewall/cron/syslog/sshd -- a container is never PID 1),
+# leaving a minimal userland plus explicit test-base essentials. This mirrors the
+# clean-core OL7 Include translated to EL6 package names; every name is verified
+# present in OL6/latest. EL6 name differences vs OL7: procps-ng -> procps;
+# nmap-ncat -> nc; no git-core split -> plain git (pulls ~perl-*); the release is
+# oraclelinux-release-el6. net-tools IS included (the one deliberate deviation
+# from OL7's no-net-tools): EL6 has no standalone hostname package, so the
+# hostname command ships in net-tools.
+INCLUDE=( yum oraclelinux-release oraclelinux-release-el6 yum-utils
+  curl wget git bzip2 unzip zip
+  sudo which tar diffutils less findutils procps psmisc net-tools vim-minimal
+  iproute iputils bind-utils traceroute nc tcpdump )
 
-# OL6 kickstart removals. Firmware (option A) via the *-firmware glob (catches
-# kernel-firmware = EL6's linux-firmware, plus iwl*/ql*/bfa/...). Raw-yum hard
-# deps that Anaconda would soft-drop are intentionally NOT excluded so the
-# transaction resolves: plymouth (initscripts), cyrus-sasl (sendmail = EL6 @core
-# MTA), acl, lzo, elfutils-libs. EL6 has no group_package_types=mandatory step
-# (this faithfully reproduces the project's own OL6 image, unlike OL7-10).
-EXCLUDE="NetworkManager,iprutils,biosdevname,wireless-tools,\
-system-config-securitylevel-tui,postfix,mysql-libs,kexec-tools,efibootmgr,\
-bc,busybox,mdadm,pciutils-libs,snappy,attr,audit,*-firmware,b43-openfwwf"
+# Defensive excludes only. With @core dropped, the bulky members (kernel,
+# firmware, firewall, cron, syslog, NetworkManager, sssd, rhn-*) are never
+# candidates, so the old @core-removal list is unnecessary. The globs are a
+# safety net against a dependency ever pulling a kernel or firmware blob into
+# what must stay a kernel-less container rootfs.
+EXCLUDE="*firmware*,kernel*"
+
+# OL6 EPEL: Oracle does not host EPEL 6 (no oracle-epel-release-el6); EPEL 6 is
+# EOL and lives only at the Fedora community archive (https only -- http 302-
+# redirects there). In finalize the clean-core ENABLES its NSS dynamic CA trust
+# (C), then fetches this release RPM with its OWN curl and installs it with its
+# OWN rpm (B), and the repo is repointed to the archive + shipped DISABLED. yum is
+# avoided for the fetch: EL6 yum's urlgrabber cannot fetch a direct https package
+# URL. The ENA/SSM harnesses enable the repo on demand for e.g. dkms.
+EPEL_RPM_URL="https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/epel-release-6-8.noarch.rpm"
 
 BUILDER="${WORK}/builder"      # [B] throwaway EL6-native builder rootfs
 OUT="/cleancore"               # [C] installroot path INSIDE the builder
@@ -196,8 +210,10 @@ unshare --fork --pid --mount --uts --ipc bash -c "
 
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║ [C] CLEAN-CORE — finalized from [A] (host).                                ║
-# ║     (3) device nodes + OCI-variable rewrite + OL6 UEK enable-var disable +  ║
-# ║         drop the build-time repo.                                          ║
+# ║     (3) device nodes + OCI-variable rewrite + OL6 UEK enable-var disable;   ║
+# ║         then (C) enable the NSS dynamic CA trust, (B) the clean-core fetches ║
+# ║         + installs the EPEL release RPM with its OWN curl/rpm, and the EPEL  ║
+# ║         repo is repointed to the archive + force-disabled; drop build repo.  ║
 # ╚════════════════════════════════════════════════════════════════════════╝
 log "[A->C] (3) device nodes, OCI + UEK rewrite, drop build-time repo"
 for n in "null c 1 3" "zero c 1 5" "random c 1 8" "urandom c 1 9" \
@@ -220,6 +236,48 @@ find "${DELIV}/etc/yum.repos.d" -type f -name '*.repo*' -print0 \
       -e "s|enabled[ ]*=[ ]*'\?\$uekr4'\?|enabled=0|g" \
       -e "s|enabled[ ]*=[ ]*'\?\$uekr3'\?|enabled=0|g" \
       -e "s|enabled[ ]*=[ ]*'\?\$uek'\?|enabled=0|g"
+
+# (C) Enable the NSS dynamic CA trust INSIDE the clean-core. EL6's curl/yum are
+# NSS-backed; until 'update-ca-trust enable' is run the system CA store is inert
+# and NSS verifies NOTHING -- so no https repo (the OL6 base on yum.oracle.com or
+# EPEL) is usable on a real host. This runs BEFORE (B) so the release-RPM fetch
+# below itself verifies TLS on a trusted host.
+log "[A->C] (C) enabling NSS dynamic CA trust in the clean-core"
+unshare --fork --pid --mount --uts --ipc bash -c "
+  mount --bind /dev '${DELIV}/dev'  2>/dev/null || true
+  mount -t proc proc '${DELIV}/proc' 2>/dev/null || true
+  chroot '${DELIV}' /usr/bin/update-ca-trust enable
+  chroot '${DELIV}' /usr/bin/update-ca-trust extract
+"
+
+# (B) The clean-core fetches the EPEL 6 release RPM with its OWN curl and installs
+# it with its OWN rpm (EL6 rpm 4.8 -> db4 rpmdb stays consistent; no host rpm
+# --root, which would write an EL6-incompatible rpmdb). yum is avoided on purpose:
+# EL6 yum's urlgrabber cannot fetch a direct https package URL here. On a trusted
+# host the fetch verifies (after C); in CI (INSECURE_TLS=1) it is insecure (-k)
+# because the sandbox egress proxy presents an intercepting cert. epel-release's
+# only real dep (redhat-release>=6) is provided by the installed oraclelinux-release.
+log "[A->C] (B) clean-core fetches + installs the EPEL 6 release RPM <- ${EPEL_RPM_URL}"
+cp -f /etc/resolv.conf "${DELIV}/etc/resolv.conf" 2>/dev/null || true
+CURL_K=""; [ "${INSECURE_TLS}" = "1" ] && CURL_K="-k"
+unshare --fork --pid --mount --uts --ipc bash -c "
+  mount --bind /dev '${DELIV}/dev'  2>/dev/null || true
+  mount -t proc proc '${DELIV}/proc' 2>/dev/null || true
+  chroot '${DELIV}' /usr/bin/curl -fsSL ${CURL_K} -o /tmp/epel-release-6-8.noarch.rpm '${EPEL_RPM_URL}'
+  chroot '${DELIV}' /bin/rpm -Uvh /tmp/epel-release-6-8.noarch.rpm
+  chroot '${DELIV}' /bin/rm -f /tmp/epel-release-6-8.noarch.rpm
+"
+rm -f "${DELIV}/etc/resolv.conf"
+# EPEL 6 (just installed): Oracle does not host it, so the shipped repo points at
+# a dead mirrorlist with the baseurl commented. Repoint the baseurl to the Fedora
+# community archive, disable the mirrorlist, and force the repo DISABLED (the
+# ENA/SSM harnesses enable it on demand). gpgcheck + key are kept; $basearch is a
+# real yum var -- preserved.
+find "${DELIV}/etc/yum.repos.d" -type f -name 'epel*.repo*' -print0 \
+  | xargs -0 -r sed -i -E \
+      -e 's|^#?baseurl=http://download\.fedoraproject\.org/pub/epel/|baseurl=https://archives.fedoraproject.org/pub/archive/epel/|' \
+      -e 's|^mirrorlist=|#mirrorlist=|' \
+      -e 's|^enabled=1|enabled=0|'
 
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║ [C] CLEAN-CORE — (2-cleanup) logs / transient data (zero-fill preferred).  ║
@@ -293,11 +351,18 @@ NONEMPTY_LOGS="$(find "${IMG}/var/log" -type f -size +0c 2>/dev/null | wc -l)"
 OCI_LEFT="$( { grep -rl 'ociregion' "${IMG}/etc/yum.repos.d/" 2>/dev/null || true; } | wc -l)"
 UEK_ON="$( { grep -rsE "enabled[ ]*=[ ]*'?\\\$uek" "${IMG}/etc/yum.repos.d/" 2>/dev/null || true; } | wc -l)"
 if [ -f "${IMG}/etc/yum.repos.d/cleancore.repo" ]; then CC_REPO=1; else CC_REPO=0; fi
+EPEL_REPO="${IMG}/etc/yum.repos.d/epel.repo"
+EPEL_PRESENT=0; [ -f "${EPEL_REPO}" ] && EPEL_PRESENT=1
+EPEL_ENABLED1="$( { grep -cE '^enabled[ ]*=[ ]*1' "${EPEL_REPO}" 2>/dev/null || true; } )"; EPEL_ENABLED1="${EPEL_ENABLED1:-0}"
+EPEL_ARCHIVE="$( { grep -cE '^baseurl=https://archives\.fedoraproject\.org/pub/archive/epel/' "${EPEL_REPO}" 2>/dev/null || true; } )"; EPEL_ARCHIVE="${EPEL_ARCHIVE:-0}"
+# dynamic CA trust enabled => ca-bundle.crt is a symlink into the extracted store;
+# this is the precondition for NSS-backed curl/yum to verify TLS (EPEL/base https).
+CATRUST=0; [ -L "${IMG}/etc/pki/tls/certs/ca-bundle.crt" ] && CATRUST=1
 
 st "userland executes (/bin/bash runs in chroot)"   t_run /bin/bash -c true
 st "rpmdb readable, >0 packages (${PKGS})"          test "${PKGS}" -gt 0
 st "package manager runs (yum --version)"            t_run /usr/bin/yum --version
-st "ssh daemon present (sshd)"                       test -x "${IMG}/usr/sbin/sshd"
+st "ssh daemon absent (slim base ships no sshd)"     test ! -e "${IMG}/usr/sbin/sshd"
 st "OS is Oracle Linux 6"                            grep -q "release 6" "${IMG}/etc/oracle-release"
 st "firmware excluded (0 packages)"                  test "${FW}" -eq 0
 st "machine-id blanked (0 bytes)"                    test "${MID_SIZE}" -eq 0
@@ -306,6 +371,10 @@ st "logs zero-filled (no non-empty log files)"       test "${NONEMPTY_LOGS}" -eq
 st "OCI yum variables rewritten (none remain)"       test "${OCI_LEFT}" -eq 0
 st "UEK enable-vars disabled (none remain)"          test "${UEK_ON}" -eq 0
 st "build-time repo dropped"                          test "${CC_REPO}" -eq 0
+st "EPEL repo present (epel.repo installed)"         test "${EPEL_PRESENT}" -eq 1
+st "EPEL shipped disabled (no enabled=1 in epel.repo)" test "${EPEL_ENABLED1}" -eq 0
+st "EPEL baseurl repointed to the Fedora archive"    test "${EPEL_ARCHIVE}" -ge 1
+st "NSS dynamic CA trust enabled (TLS verifiable)"   test "${CATRUST}" -eq 1
 st "tar.gz is a valid gzip archive"                  gzip -t "${OUT_TARBALL}"
 
 # ───────────────────────────────────────────────────────────────────────────

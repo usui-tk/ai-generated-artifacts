@@ -98,6 +98,16 @@ This CHANGELOG is **English only** per the repository-wide
   derives from). Neither is a `.sh`, so both sit outside B-T1/B-T2 and are not
   drift-checked gates.
 
+- **OL6 clean-core package SBOM + official-image reference (OL6 section).** Static
+  snapshot `tests/cleancore/cleancore-ol6.sbom.json` (165 packages) records the
+  finalized OL6 clean-core's package set names-only as reusable JSON, and an
+  Oracle Linux 6 section is added to `REFERENCE-oracle-official-images.md`. Unlike
+  the slim variants there is no upstream `ol6-slim`, so the reference records the
+  official `oraclelinux:6.6` image's sources and its 165-package name-version
+  manifest — the base footprint the EL6-native builder runs from (the clean-core
+  is a fresh curated install, not a trim of that image). Neither is a `.sh`, so
+  both sit outside B-T1/B-T2 and are not drift-checked gates.
+
 ### Changed
 
 - **OL9 and OL10 clean-core trimmed to a slim-aligned set (was kickstart-derived).**
@@ -147,6 +157,25 @@ This CHANGELOG is **English only** per the repository-wide
   PID 1 in container/chroot use. Result: `@core`-set 261 pkgs / 556M → **198 pkgs /
   448M** (tarball 137M). The self-test `sshd present` assertion is flipped to
   `sshd absent`. OL6 remains kickstart-derived pending its own pass.
+
+- **OL6 clean-core trimmed to a slim-aligned set (was kickstart-derived); completes
+  the OL6-OL10 pass.** `build-cleancore-ol6.sh` now drops `@core` and installs a
+  minimal userland plus explicit test-base essentials. EL6-specific differences:
+  the manager is `yum`; `git` is plain `git` (EL6 has no `git-core` split);
+  `procps`/`nc` replace `procps-ng`/`nmap-ncat`; and — uniquely among the
+  clean-cores — `net-tools` is **included**, because EL6 has no standalone
+  `hostname` package (the command ships in `net-tools`). EPEL 6 is EOL and Oracle
+  hosts none, so finalize (C) enables the NSS dynamic CA trust — EL6's `curl`/`yum`
+  are NSS-backed and verify no TLS until `update-ca-trust enable` is run, so no
+  https repo (EPEL or the OL6 base on `yum.oracle.com`) is usable on a real host
+  without it — then (B) fetches the EPEL 6 release RPM from the Fedora community
+  archive with the clean-core's own `curl` and installs it with its own `rpm`
+  (EL6 `yum` cannot fetch a direct https package URL), and the repo is repointed to
+  the archive and **`enabled=0`**. `systemd` does not apply (EL6 is upstart).
+  Result: the former `@core`/kickstart-derived set → **165 pkgs / 383M**. The
+  self-test gains `EPEL present` / `EPEL enabled=0` / `EPEL baseurl→archive` and
+  `NSS dynamic CA trust enabled` rows and flips `sshd present` to `sshd absent`
+  (**19** checks total).
 
 - **`HEARTBEAT_INTERVAL_SEC` default `20` → `10` seconds** (feedback ④; `0` still
   disables). A shorter interval makes the live `stage:` field and elapsed/disk

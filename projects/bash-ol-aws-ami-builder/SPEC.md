@@ -1524,7 +1524,7 @@ Each builder tags every block with the environment it runs in:
 
 | OL | builder (build-use only) | pkg mgr | enabled repos | package-set source |
 |----|--------------------------|---------|----------------|--------------------|
-| 6 | OL6.6 public-yum docker image (rpm 4.8 / db4); **TLS-modernized first** | `yum` | `latest` | the project's **own** `EOF_OL6_KS` heredoc (`build-ol-aws-ami.sh`; no upstream `ol6-slim`) |
+| 6 | OL6.6 public-yum docker image (rpm 4.8 / db4); **TLS-modernized first** | `yum` | `latest` | **slim-aligned curated essentials** (`@core` dropped; no upstream `ol6-slim`; see "Package set" below) |
 | 7 | `7-slim` rootfs (ships `yum`) | `yum` | `latest` + `UEKR6` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 | 8 | `8-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 | 9 | `9-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
@@ -1539,9 +1539,7 @@ Each builder tags every block with the environment it runs in:
   TLS-handshake modern `yum.oracle.com`; the builder's own rpm 4.8 first installs
   host-fetched `el6_10` NSS/curl/ca-certs RPMs, then `yum` updates the package
   managers, after which `https` works.
-- **Package set: per-OL, slim-aligned where trimmed.** The OL6 manifest still
-  mirrors the VM kickstart `%packages` (intentionally faithful to the VM image,
-  over-including for a pure container). **OL7, OL8, OL9 and OL10 have been
+- **Package set: per-OL, slim-aligned.** **OL6 through OL10 have all been
   trimmed** to a container-appropriate, slim-aligned set: `@core` is dropped (so no
   kernel/boot/firewall/cron/syslog), a minimal userland plus explicit test-base
   essentials are installed, `git-core` replaces `git` (avoiding ~60 `perl-*`
@@ -1560,7 +1558,20 @@ Each builder tags every block with the environment it runs in:
   demand from the shipped-disabled EPEL repo); EL7 has no `glibc` langpack split;
   and the base `oraclelinux-release` (which provides `/etc/oracle-release`) is
   listed explicitly because the EL7 `oraclelinux-release-el7` does not pull it in.
-  Trimming OL6 the same way is per-OL follow-on work.
+  **EL6 specific:** OL6 (EOL; rpm 4.8 / db4) is built by an EL6-native builder
+  (the OL6.6 image) doing a fresh curated `yum --installroot` install — not a trim
+  of an upstream slim, which does not exist for EL6. Like EL7 it carries plain
+  `git` (no `git-core` split) plus `procps` (not `procps-ng`) and `nc` (not
+  `nmap-ncat`); unlike the other clean-cores it **includes `net-tools`**, because
+  EL6 has no standalone `hostname` package (the command ships in `net-tools`).
+  EPEL 6 is EOL and Oracle hosts none, so in finalize the clean-core (C) enables
+  its NSS dynamic CA trust — EL6's `curl`/`yum` are NSS-backed and verify nothing
+  until `update-ca-trust enable` is run, so no https repo (EPEL or the OL6 base on
+  `yum.oracle.com`) is usable on a real host without it — then (B) fetches the
+  EPEL 6 release RPM from the Fedora community archive with its own `curl` and
+  installs it with its own `rpm` (EL6 `yum` cannot fetch a direct https package
+  URL), and the repo is repointed to the archive and shipped `enabled=0`. EL6 is
+  upstart, so `systemd` does not apply.
 - **Reference + SBOM artifacts.** The official slim image each clean-core derives
   from is documented (sources, pinned commit, name+version manifest) in
   `tests/cleancore/REFERENCE-oracle-official-images.md`. Each finalized
