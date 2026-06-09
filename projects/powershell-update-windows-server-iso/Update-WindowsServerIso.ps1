@@ -313,12 +313,12 @@ param(
     # set (i.e. virtually all hardware shipped before 2026-06 cert expiry).
     [switch]   $EnablePca2023BootManager,
 
-    # When set, P12 VerifyPca2023Readiness still runs against Server 2025
-    # output ISOs (default-skipped because Server 2025 certified server
-    # platforms include the 2023 certs in firmware per Microsoft; PCA2023
-    # boot manager conversion is documented as not required). Use only
-    # when you operate non-certified Server 2025 hardware and need to
-    # confirm the ISO would still boot under PCA2023-only firmware.
+    # When set, P10 ConvertPca2023BootManager still runs against Server
+    # 2025 output ISOs (default-skipped because Server 2025 certified
+    # server platforms already include the 2023 certs in firmware per
+    # Microsoft; the boot-manager conversion is documented as not
+    # required). Takes effect only with -EnablePca2023BootManager (P10
+    # is opt-in); both are needed to convert on Server 2025. Advanced use.
     [switch]   $ForcePca2023OnServer2025,
 
     # When set, the script enters a special mode that takes an existing
@@ -553,8 +553,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.05.30-r11.17'
-$Script:ScriptTag     = 'docs-realign-spec-b19-rebuild'
+$Script:ScriptVersion = 'update-wsi-2026.06.09-r11.18'
+$Script:ScriptTag     = 'docs-realign-action-phase-map-and-pca2023-comment'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath

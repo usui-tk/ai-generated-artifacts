@@ -22,6 +22,21 @@ the script and follows the
 
 ## [Unreleased]
 
+### r11.18 - Documentation/comment realignment: Action → Phase map + ForcePca2023OnServer2025 comment
+
+A documentation/comment-quality revision that aligns the Markdown and the in-script comment-based help with the implemented code; no runtime logic changes. `$Script:ScriptVersion` `r11.17` -> `r11.18`, `$Script:ScriptTag` becomes `docs-realign-action-phase-map-and-pca2023-comment`. The shared epoch (`dataContractVersion`) stays `1`.
+
+**Action → Phase map corrected (README.md / README.ja.md / SPEC.md §B.6.1; bilingual lock-step preserved, 16/12).** The Standard pipeline Actions table listed phase sets that predate the current staged-pipeline design. `Get-PhaseListByAction` (script L15080) returns, for a default (non-synthetic) run:
+
+- `Prepare`: `P01-P05` -> **`P01-P06`** (the `standardPrepare` set includes P06 ValidatePatchSet; still no patching and no DISM mount).
+- `Build`: `P01-P02 + P04-P10` -> **`P07-P10`** (Build runs only the build phases; it presumes a prior Prepare staged the workspace and does not re-run setup in-line).
+- `Verify`: `P01-P02 + P11-P13` -> **`P11-P13`** (Verify runs only the verify phases).
+- Removed the SPEC's misleading `or runs it in-line` clause from the Build row (setup is not re-run in-line).
+
+**`-ForcePca2023OnServer2025` parameter comment corrected (script L316-L321).** The comment described the switch as gating `P12 VerifyPca2023Readiness`, but the switch actually governs `P10 ConvertPca2023BootManager`: the Server-2025 default-skip gate lives inside P10 (`if ($osKey -eq 'Server2025' -and -not $Script:ForcePca2023OnServer2025)`, script L13120; advisory NOTE at L11022), and it takes effect only together with the opt-in `-EnablePca2023BootManager`. P12 always runs (the SPEC phase-skip list `P12: none (always runs)` and the README `P12 ... Always runs` row are both correct). The README parameter row (L420, already `Override the Server 2025 default-skip for P10`) was already correct and is unchanged.
+
+**Not touched.** No phase logic, parameter contract, or output format changed. All edits are outside canonical regions: the 58 vendored canon code-regions and the 14 vendored Part A doc-regions are unchanged. `TESTING.md` is unaffected (no test or phase-skip claim changed).
+
 ### r11.17 - Documentation realignment: SPEC §B.19 rebuild, README/TESTING ground-truth pass
 
 A documentation-quality revision that realigns the in-project Markdown with the implemented code. No runtime logic changes; `$Script:ScriptVersion` `r11.16` -> `r11.17`, `$Script:ScriptTag` becomes `docs-realign-spec-b19-rebuild`. The shared epoch (`dataContractVersion`) stays `1`.

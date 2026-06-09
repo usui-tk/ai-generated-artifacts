@@ -758,9 +758,9 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 
 | Action | Phases run | Description |
 |:---|:---|:---|
-| `Prepare` | P01-P05 | Stage only (no patching, no DISM mount) |
-| `Build` | P01-P02 + P04-P10 | Patch and assemble; presumes Prepare already happened or runs it in-line |
-| `Verify` | P01-P02 + P11-P13 | Verify an existing output ISO (presumes a prior Build -Execute produced it) |
+| `Prepare` | P01-P06 | Stage only (no patching, no DISM mount) |
+| `Build` | P07-P10 | Patch and assemble; presumes Prepare already staged the workspace |
+| `Verify` | P11-P13 | Verify an existing output ISO (presumes a prior Build -Execute produced it) |
 | `PrepareBuildVerify` (default) | P01-P13 | Combined full pipeline (the standardFull sequence per script L12262) |
 | `All` | P01-P13 + post-pipeline extras | StandardFull plus the additional steps gated by `if ($Action -in @('BootTest','All'))` (script L9088 / L12707) |
 

@@ -232,9 +232,9 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 | Action | 実行フェーズ | 説明 |
 |:---|:---|:---|
-| `Prepare` | P01-P05 | ステージングのみ（パッチ適用なし、DISM マウントなし）|
-| `Build` | P01-P02 + P04-P10 | パッチ適用とアセンブル |
-| `Verify` | P01-P02 + P11-P13 | 既存の出力 ISO を検証 |
+| `Prepare` | P01-P06 | ステージングのみ（パッチ適用なし、DISM マウントなし）|
+| `Build` | P07-P10 | パッチ適用とアセンブル（Prepare で作業領域が準備済みであることを前提）|
+| `Verify` | P11-P13 | 既存の出力 ISO を検証（先行する Build -Execute による生成を前提）|
 | `PrepareBuildVerify`（デフォルト）| P01-P13 | フルパイプライン |
 | `All` | P01-P13 + extras | フルパイプライン + 追加処理 |
 

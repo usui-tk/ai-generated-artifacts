@@ -240,9 +240,9 @@ by purpose. The default is `PrepareBuildVerify`.
 
 | Action | Phases run | Description |
 |:---|:---|:---|
-| `Prepare` | P01-P05 | Stage only (no patching, no DISM mount) |
-| `Build` | P01-P02 + P04-P10 | Patch and assemble |
-| `Verify` | P01-P02 + P11-P13 | Verify an existing output ISO |
+| `Prepare` | P01-P06 | Stage only (no patching, no DISM mount) |
+| `Build` | P07-P10 | Patch and assemble (presumes Prepare already staged the workspace) |
+| `Verify` | P11-P13 | Verify an existing output ISO (presumes a prior Build -Execute produced it) |
 | `PrepareBuildVerify` (default) | P01-P13 | Combined full pipeline |
 | `All` | P01-P13 + extras | Full pipeline + post-pipeline steps |
 
