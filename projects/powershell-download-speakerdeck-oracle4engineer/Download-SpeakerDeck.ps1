@@ -33,7 +33,7 @@
         deleting it resets Phase 8 rescue history
 
     AI tool: Generated and iteratively refined with Anthropic Claude
-            (Sonnet 4.5 / Opus 4.6 era; latest revision r20 on 2026-05-13).
+            (Sonnet 4.5 / Opus 4.6 / Opus 4.8 era; latest revision r29 on 2026-05-27).
 
 .DESCRIPTION_PHASES
     Phases:
@@ -100,9 +100,9 @@
 
 .PARAMETER DryRun
     Run Phase 1 through Phase 5 fully (including the filename plan
-    output), explicitly mark Phase 6 (Download) and Phase 7
-    (Reconciliation) as SKIPPED, and emit the Phase 9 final report.
-    No PDFs are actually downloaded.
+    output), explicitly mark Phase 6 (Download), Phase 7
+    (Reconciliation), and Phase 8 (PDF reclassification) as SKIPPED,
+    and emit the Phase 9 final report. No PDFs are actually downloaded.
 
 .PARAMETER SkipEnvCheck
     Skip Phase 1 and use safe-default thresholds.

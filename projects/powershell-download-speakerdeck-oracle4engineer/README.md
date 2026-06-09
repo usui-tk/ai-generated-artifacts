@@ -167,6 +167,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 | `-CleanOnly`         | (off)            | Same wipe as `-Clean`, then exit without running phases           |
 | `-FlatLayout`             | (off)            | Save all files into OutputDir as a flat layout (no year subfolders) |
 | `-SkipPdfReclassification`| (off)            | Skip Phase 8 (PDF-metadata-based rescue of _undated files)         |
+| `-EnvironmentInfoOnly`    | (off)            | Dump the PowerShell environment (Phase 1 Step 0) and exit with status 0 — CI smoke test; cannot be combined with `-SkipEnvCheck` |
 
 ## Year-folder organization (default)
 

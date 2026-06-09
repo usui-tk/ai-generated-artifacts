@@ -21,6 +21,44 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
+### Fixed — Documentation/implementation reconciliation (parameter table, `.PARAMETER DryRun` note, AI-tool note)
+
+A doc-only update that closes three documentation/implementation
+divergences found by grounding the docs against the live script body
+(`AGENTS.md` §4). The running script is authoritative; the docs and the
+in-script comment-based help are brought in line with it. No phase
+logic, parameter contract, or output format changed.
+
+#### Drifts reconciled
+
+- **`-EnvironmentInfoOnly` was undocumented.** The switch is fully
+  implemented (param declaration, `.PARAMETER` help, the mutual-exclusion
+  guard with `-SkipEnvCheck`, and the Phase 1 Step 0 environment dump
+  that exits with status 0 for CI smoke testing) but was absent from the
+  `README.md` / `README.ja.md` Parameters tables. Added the row to both,
+  in bilingual lock-step.
+- **`.PARAMETER DryRun` omitted Phase 8.** The header comment listed only
+  Phase 6 and Phase 7 as SKIPPED under `-DryRun`, but Phase 8 (PDF
+  reclassification) is also skipped in DryRun mode (the
+  `Invoke-Phase8UndatedReclassify` `IsDryRun` guard). Corrected the
+  comment to include Phase 8. `README.md` / `README.ja.md` already
+  documented 6/7/8 correctly and were not changed for this item.
+- **Stale AI-tool note.** The header AI-tool note named
+  `latest revision r20 on 2026-05-13`, while `$Script:ScriptVersion` is
+  `speakerdeck-2026.05.27-r29`. Synced the note to `r29 on 2026-05-27`
+  and refreshed the model era to include `Opus 4.8`.
+
+#### Not touched
+
+- No source logic. Only the comment-based help header (outside any
+  canonical region) was edited in `Download-SpeakerDeck.ps1`; the 39
+  vendored canon code-regions are unchanged. This remains an
+  `Unreleased`-bucket doc-only entry; no `rNN` revision bump.
+- `SPEC.md`, `TESTING.md`. `SPEC.md` `B.2 Inputs` documents input
+  sources, not a full parameter table, and the Phase Map (`B.4`) already
+  matches the script, so neither needed an edit.
+- The 14 vendored Part A doc-regions (canon-owned; out of scope).
+
 ### Documentation — Bilingual lock-step compliance for README
 
 A doc-only update that brings the Japanese `README.ja.md` in line

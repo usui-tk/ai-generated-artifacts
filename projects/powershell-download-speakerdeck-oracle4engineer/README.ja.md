@@ -165,6 +165,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 | `-CleanOnly`         | (off)            | `-Clean` と同じ削除を行い、Phase 実行せず即終了                     |
 | `-FlatLayout`             | (off)            | 年フォルダ分割を無効化し、すべてのファイルを OutputDir 直下にフラット配置 |
 | `-SkipPdfReclassification`| (off)            | Phase 8（PDF メタデータによる `_undated` ファイル救済）をスキップ        |
+| `-EnvironmentInfoOnly`    | (off)            | PowerShell 環境情報をダンプ（Phase 1 Step 0）して status 0 で終了 — CI スモークテスト用。`-SkipEnvCheck` とは併用不可 |
 
 ## 年フォルダ分割（デフォルト動作）
 
