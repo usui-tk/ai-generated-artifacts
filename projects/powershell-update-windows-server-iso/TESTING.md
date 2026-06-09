@@ -77,7 +77,7 @@ a build identifier plus a calendar date. Pending items are marked
 | T9 catalog_title_tokens_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T10 release_info_resolver_test.py (22 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| T12 servicing_dependency_parser_test.py (23 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.7; includes kbIds-field presence) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| T12 servicing_dependency_parser_test.py (25 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.7; includes kbIds-field presence and a build_package_xml() / build_expected_output() freshness guard) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | T13 servicing_dependency_layer1_test.py (15 assertions, `Update-Layer1DependencyVerification` writeback contract per SPEC §B.19.11) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | T14 servicing_dependency_deny_list_test.py (10 assertions, EOS/ESU deny-list warned-exclusion + allow-overrides in the PowerShell scope filter, matching the `classify_scope` reference; SPEC §B.19.4.1) | ✓ all pass | r11.5 wsusscn2-eos-esu-deny-list-warned-exclusion build / 2026-05-29 |
 | T15 servicing_dependency_servicing_stack_test.py (16 assertions, `Resolve-OfflineSyncRevisionToCab` RANGESTART mapping + `Get-OfflineSyncServicingStackInfo` separate/combined/checkpoint derivation from real-cab CBS metadata; SPEC §B.19.9) | ✓ all pass | r11.6 wsusscn2-servicing-stack-extraction build / 2026-05-29 |
@@ -424,7 +424,7 @@ python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
 python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
-python3 tests/servicing_dependency_parser_test.py            # T12: 22 parser pipeline assertions
+python3 tests/servicing_dependency_parser_test.py            # T12: 25 parser pipeline assertions (incl. builder freshness guard)
 python3 tests/servicing_dependency_layer1_test.py            # T13: 14 Layer 1 writeback assertions
 python3 tests/servicing_dependency_deny_list_test.py         # T14: 10 EOS/ESU deny-list assertions
 python3 tests/servicing_dependency_servicing_stack_test.py   # T15: 16 servicing-stack extraction assertions
@@ -506,7 +506,7 @@ File: `.github/workflows/projects__powershell-update-windows-server-iso__stage1_
 | 4 | T3 | `powershell_harness.py` (10 assertions) |
 | 5 | T6 – T10 | Five offline parser / cache / resolver regression tests |
 | 6 | T11 | `canonical_json_test.py` — PS/Python byte-level parity (26 assertions, SPEC §B.23) |
-| 7 | T12 – T13 | `servicing_dependency_parser_test.py` (22 assertions, Stages 3/4) + `servicing_dependency_layer1_test.py` (15 assertions, Layer 1 writeback) |
+| 7 | T12 – T13 | `servicing_dependency_parser_test.py` (25 assertions, Stages 3/4) + `servicing_dependency_layer1_test.py` (15 assertions, Layer 1 writeback) |
 | 8 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
 | 9 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against `schema/config.schema.json` (14 assertions) |
 | 10 | scope-invariants gate | `servicing_dependency_scope_invariants_test.py` — EOS/ESU deny-list + allow-overrides over `data/servicing-dependency-database.json` + fixture + synthetic cases (23 assertions) |

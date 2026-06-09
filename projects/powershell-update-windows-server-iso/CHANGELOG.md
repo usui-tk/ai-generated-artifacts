@@ -22,6 +22,14 @@ the script and follows the
 
 ## [Unreleased]
 
+### Tests / fixture-builder: make T12 fixture regeneration byte-identical + guard it against drift (no script revision)
+
+`tests/common/servicing_dependency_fixture_builder.py`'s `build_expected_output()` had drifted behind the committed `tests/fixtures/servicing-dependency/expected-output.json`: the function still emitted the old `scope.now` key (committed: `scope.evaluatedAt`) and omitted `stats.eosEsuBundlesExcluded` / `stats.eosEsuFamiliesExcluded` and the per-update `kbIds` field. Running the documented regeneration command therefore corrupted the committed T12 fixture. **No `$Script:ScriptVersion` bump** - test/tooling only; the committed `expected-output.json` is byte-unchanged.
+
+- `tests/common/servicing_dependency_fixture_builder.py`: realigned `build_expected_output()` with the committed parser output (`scope.now` -> `scope.evaluatedAt`; add `stats.eosEsuBundlesExcluded` + `stats.eosEsuFamiliesExcluded`; add `kbIds: []` to each in-scope bundle). `python3 -m tests.common.servicing_dependency_fixture_builder --out-dir tests/fixtures/servicing-dependency` now regenerates `package.xml`, `expected-output.json`, and `ssu-prereq/package.xml` byte-identically.
+- `tests/servicing_dependency_parser_test.py` (T12): added a freshness guard (`00a` / `00b`) asserting the committed `package.xml` and `expected-output.json` match `build_package_xml()` / `build_expected_output()`, so the builder can no longer silently drift (mirrors the T21 guard). T12 is now 25 assertions.
+- `TESTING.md`: T12 assertion count references updated to 25.
+
 ### Tests - offline reproduction + guards for the Server 2016 0x800f0823 SSU-prerequisite failure (no script revision)
 
 Adds three offline tests that reproduce and guard the real-machine Server 2016 "LCU applied without its prerequisite SSU" failure (`CBS_E_NEW_SERVICING_STACK_REQUIRED`, 0x800f0823) entirely on Linux, ahead of the heavier Windows scenario evaluation. **No `$Script:ScriptVersion` bump** - `Update-WindowsServerIso.ps1` is unchanged; this is test/fixture/doc-only.

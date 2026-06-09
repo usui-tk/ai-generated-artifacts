@@ -352,7 +352,7 @@ def build_expected_output() -> dict[str, Any]:
                     "cd5ffd1e-e932-4e3a-bf74-18bf0b1bbd83",
                 ],
                 "recencyMonths": 24,
-                "now": PINNED_NOW,
+                "evaluatedAt": PINNED_NOW,
             },
             "stats": {
                 "updatesObserved": 8,
@@ -363,6 +363,8 @@ def build_expected_output() -> dict[str, Any]:
                 "fileLocationsObserved": 3,
                 "fileLocationsRetained": 3,
                 "payloadDigestsOrphaned": 1,
+                "eosEsuBundlesExcluded": 0,
+                "eosEsuFamiliesExcluded": [],
             },
         },
         "updates": [
@@ -382,6 +384,7 @@ def build_expected_output() -> dict[str, Any]:
                 "supersededByRevisionIds": ["990099"],
                 "payloadFileDigests": [_DIGEST_A1, _DIGEST_A2],
                 "payloadUrls": [_URL_A1, _URL_A2],
+                "kbIds": [],
             },
             {
                 "updateId": _UID_BUNDLE_B,
@@ -399,6 +402,7 @@ def build_expected_output() -> dict[str, Any]:
                 "supersededByRevisionIds": [],
                 "payloadFileDigests": [_DIGEST_B1, _DIGEST_ORPHAN],
                 "payloadUrls": [_URL_B1],
+                "kbIds": [],
             },
         ],
     }

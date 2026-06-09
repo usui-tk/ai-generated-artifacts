@@ -31,6 +31,7 @@ Invocation:
 from __future__ import annotations
 
 import json
+import importlib.util
 import subprocess
 import sys
 import tempfile
@@ -119,6 +120,16 @@ $null = New-ServicingDependencyDatabase -ParseResult $result -OutputPath {out_pa
 # Main
 # ---------------------------------------------------------------------------
 
+def _load_builder():
+    """Import the fixture builder by file path (tests/ is not a package)."""
+    spec = importlib.util.spec_from_file_location(
+        "t12_fixture_builder", TEST_DIR / "common" / "servicing_dependency_fixture_builder.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def main() -> int:
     print(f"T12: wsusscn2 parser pipeline self-verification")
     print(f"  fixture: {PACKAGE_XML}")
@@ -126,6 +137,25 @@ def main() -> int:
     print()
 
     r = TestResult()
+
+    # ---- 00 fixture builder freshness: regenerating must not drift -------
+    # Guards the footgun where build_package_xml() / build_expected_output()
+    # silently diverge from the committed fixtures, so that
+    #   python3 -m tests.common.servicing_dependency_fixture_builder \
+    #       --out-dir tests/fixtures/servicing-dependency
+    # stays a safe, byte-identical regeneration.
+    builder = _load_builder()
+    r.assert_true(
+        "00a committed package.xml matches build_package_xml()",
+        PACKAGE_XML.read_text(encoding="utf-8") == builder.build_package_xml(),
+        "fixture drifted; regenerate via "
+        "python3 -m tests.common.servicing_dependency_fixture_builder",
+    )
+    r.assert_eq(
+        "00b committed expected-output.json matches build_expected_output()",
+        json.loads(EXPECTED_JSON.read_text(encoding="utf-8")),
+        builder.build_expected_output(),
+    )
 
     # ---- 1. Pre-flight: fixture exists and contains no Microsoft prose ----
     fixture_text = PACKAGE_XML.read_text(encoding="utf-8")
