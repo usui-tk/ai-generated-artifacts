@@ -25,7 +25,7 @@ on:
       - 'projects/powershell-update-windows-server-iso/data/**'
       - 'quality-tools/powershell-static-analyzer/psa.py'
       - 'quality-tools/powershell-static-analyzer/VERSION'
-      - '.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml'
+      - '.github/workflows/projects__powershell-update-windows-server-iso__stage1__linux.yml'
   pull_request:
     branches: [main]
     paths:
@@ -35,7 +35,7 @@ on:
       - 'projects/powershell-update-windows-server-iso/data/**'
       - 'quality-tools/powershell-static-analyzer/psa.py'
       - 'quality-tools/powershell-static-analyzer/VERSION'
-      - '.github/workflows/scripts__powershell__update-windows-server-iso__stage1__linux.yml'
+      - '.github/workflows/projects__powershell-update-windows-server-iso__stage1__linux.yml'
   workflow_dispatch:
     inputs:
       scope:
