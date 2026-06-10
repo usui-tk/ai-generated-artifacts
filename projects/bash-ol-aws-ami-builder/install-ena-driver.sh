@@ -31,7 +31,11 @@
 #              compile. 2.9.1 is the last pre-ECC release -> the ceiling.)
 #     - OL7 -> ena_linux_2.17.0 (newest release supporting RHEL7 confirmed as of
 #              2026-06; RHEL7 remains in the driver's supported-distros list)
-#   OL8+ ship a current in-distro ENA driver, so this script no-ops there.
+#     - OL8 -> ena_linux_2.17.0 (same as OL7; OL8 runs the same UEK6 family).
+#              STANDALONE ONLY: the AMI pipeline keeps OL8 on its in-distro ENA
+#              (build-ol-aws-ami.sh gates the self-build hook to OL6/OL7). This
+#              script builds OL8 when run on its own (VM or container test).
+#   OL9+ ship a current in-distro ENA driver, so this script no-ops there.
 #   Override per run with ENA_DRIVER_VERSION (single pin) for evaluation.
 #
 # Target kernel:
@@ -63,6 +67,10 @@ set -euo pipefail
 # ---- pinned versions (overridable) -----------------------------------------
 ENA_VERSION_OL6="${ENA_VERSION_OL6:-2.9.1}"
 ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.0}"
+# OL8 self-build is standalone-only (the AMI pipeline keeps OL8 on its in-distro
+# ENA -- see build-ol-aws-ami.sh, hook gated to OL6/OL7). Pinned to the OL7
+# version (newest ENA release) since OL8 runs the same UEK6 family.
+ENA_VERSION_OL8="${ENA_VERSION_OL8:-2.17.0}"
 EPEL6_ARCHIVE_BASEURL="${EPEL6_ARCHIVE_BASEURL:-https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/}"
 
 # ---- execution-environment switch (default = production) -------------------
@@ -179,6 +187,7 @@ log "Oracle Linux major version: ${osmajor}"
 case "${osmajor}" in
   6) ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL6}}" ;;
   7) ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL7}}" ;;
+  8) ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL8}}" ;;
   *) log "OL${osmajor} ships a current in-distro ENA driver; no rebuild needed. Skipping."; exit 0 ;;
 esac
 log "Target ENA driver version: ${ena_version}"
@@ -203,6 +212,16 @@ if [[ "${ENA_BUILDTEST}" == "1" ]]; then
     7)
       sed -i '/^\[ol7_developer_EPEL\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/oracle-epel-ol7.repo
       bt_uek_repo="ol7_UEKR6" ;;
+    8)
+      sed -i '/^\[ol8_developer_EPEL\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/oracle-epel-ol8.repo
+      # OL8 slim ships dnf only; bootstrap the yum compat so the production yum
+      # calls (here and below) resolve. A real OL8 VM already has it.
+      if [[ "${INSECURE_TLS}" == "1" ]]; then
+        dnf -y --setopt=sslverify=false install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL8"
+      else
+        dnf -y install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL8"
+      fi
+      bt_uek_repo="ol8_UEKR6" ;;
     *) die "ENA_BUILDTEST: OS major ${osmajor} not wired for the container test" ;;
   esac
   if [[ "${INSECURE_TLS}" == "1" ]]; then
@@ -269,6 +288,16 @@ setup_epel() {
         yum-config-manager --enable ol7_developer_EPEL >/dev/null 2>&1 || true
       fi
       ;;
+    8)
+      # Oracle-provided EPEL for OL8 (standalone self-build only; the AMI
+      # pipeline does not build ENA on OL8).
+      yum install -y oracle-epel-release-el8 2>/dev/null || true
+      if command -v dnf >/dev/null 2>&1; then
+        dnf config-manager --set-enabled ol8_developer_EPEL >/dev/null 2>&1 || true
+      elif command -v yum-config-manager >/dev/null 2>&1; then
+        yum-config-manager --enable ol8_developer_EPEL >/dev/null 2>&1 || true
+      fi
+      ;;
     6)
       # Oracle does NOT provide EPEL 6; point at the Fedora archive directly.
       cat > /etc/yum.repos.d/epel-archive.repo <<EOF
@@ -295,6 +324,7 @@ ensure_kernel_devel() {
   case "${osmajor}" in
     6) yk+=("--enablerepo=*UEKR4*") ;;
     7) yk+=("--enablerepo=*UEKR6*") ;;
+    8) yk+=("--enablerepo=*UEKR6*") ;;
   esac
   yum "${yk[@]}" install "kernel-uek-devel-${kver}" 2>/dev/null || true
   if [[ -e "/lib/modules/${kver}/build" ]]; then
