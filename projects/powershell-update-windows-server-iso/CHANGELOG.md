@@ -22,6 +22,16 @@ the script and follows the
 
 ## [Unreleased]
 
+### Docs: propagate the standalone-SSU + pinned-month behaviour across SPEC, README, and the windows-servicing research note (no code change)
+
+Documentation-only follow-up to the r11.20 resolver/baseline change below; aligns the prose docs with the shipped behaviour.
+
+- **SPEC §G.2**: the KB5087537 SSU-prerequisite "config-side pending action" is marked resolved (the standalone Server 2016 SSU is now auto-discovered, not hand-patched).
+- **SPEC §B.22.11**: `-PatchMonth` is clarified as read-only in the build path but month-pinning in `RefreshAllBaselines` (where it also drives `PatchTuesdayOfBaseline` via `Get-PatchTuesdayForMonth`).
+- **SPEC §B.22.5**: documents the same-month Catalog title-search SSU discovery and its role as the SSU-separate-vs-combined discriminator.
+- **SPEC schema example**: `PatchTuesdayOfBaseline` corrected to `2026-05-12` (the actual May 2026 Patch Tuesday, matching the regenerated baseline).
+- **README.md / README.ja.md**: the `0x800f0823` troubleshooting row notes the same-month SSU is now auto-discovered (manual `NeutralPatches[]` add is the fallback).
+- **`documents/research/windows-servicing/windows-server-iso-update-mechanics.{en,ja}.md`**: §5.3 records the validated same-month "Servicing Stack Update <OS>" Catalog title-search as the SSU-KB discovery method, with the empirical 2026-05 result (Server 2016 -> KB5088064; Server 2019 / 2022 / 2025 -> none).
 ### Resolver: discover the standalone same-month SSU and regenerate the 2026-05 baseline (`$Script:ScriptVersion` `update-wsi-2026.06.09-r11.19` -> `update-wsi-2026.06.10-r11.20`)
 
 Completes the "config-side pending action" deferred in the docs entry below: implements separate-model SSU resolution so the Server 2016 servicing-stack update is discovered by the generator instead of being hand-patched into `data/config-Server2016.json`.

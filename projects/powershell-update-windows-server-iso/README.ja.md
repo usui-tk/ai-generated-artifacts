@@ -587,7 +587,7 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 | RefreshAllBaselines 後の `NeutralPatches[]` エントリの `Type` が誤っている | `Convert-CatalogPatchToBaselineEntry` の新規呼び出し側で `-KnownType` 未渡し | Catalogue 検索コンテキストから `-KnownType $q.Type` を渡す（SPEC.md §D.20 参照）|
 | .NET CU ベースラインエントリのサブファイルが欠落しているように見える | 複数 `.msu` を持つアンブレラ KB で 1 つしか保持されなかった | `Resolve-PatchSetFromCatalog` が `Type='DotNet'` を `Select-AllCanonicalPatchFiles` 経由でルーティングしているか確認（SPEC.md §D.21 参照）|
 | Warning 行に `0x800f081e` が表示 | このパッチは当該 SKU には適用不能 | クロス SKU のパッチセットでは想定内、無視して問題なし（SPEC.md §D.8 参照）|
-| P07 の途中で `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` | LCU が前提とする SSU がベースラインから欠落 | 前提 SSU を `NeutralPatches[]` に追加。Servicing Dependency Database（SPEC.md §B.19）はブロックゲートである P06 で DISM マウント前にこれを検出します（SPEC.md §D.2 参照）|
+| P07 の途中で `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` | LCU が前提とする SSU がベースラインから欠落 | `RefreshAllBaselines` が同月のスタンドアロン SSU を自動発見するようになった（SPEC.md §B.22.5）ため、SSU の欠落は稀です。なお欠落する場合は前提 SSU を `NeutralPatches[]` に追加。Servicing Dependency Database（SPEC.md §B.19）はブロックゲートである P06 で DISM マウント前にこれを検出します（SPEC.md §D.2 参照）|
 | P05 の WIM インデックスバナーで文字化け（日本語が二重）| 過去の中断ランによる DISM マウントキャッシュ汚染 | **OS ファミリごとに新しい `-WorkRoot` を使用**（`D:\UpdateWsi_2016`、`D:\UpdateWsi_2019`、…）（SPEC.md §D.25 参照）|
 | 古い WIM マウントが新規実行を阻害 | 過去の実行がマウント途中でクラッシュ | `dism /Get-MountedImageInfo` 実行後に `dism /Cleanup-Mountpoints` を実行（SPEC.md §D.1 参照）|
 | ダウンロード後の ISO SHA-256 不一致 | Microsoft が Evaluation Center スナップショット URL を更新 | `data/config-<OsKey>.json` の `LanguageSpecific.<lang>.Iso.Sha256` を新しい値に更新（SPEC.md §D.11 参照）|

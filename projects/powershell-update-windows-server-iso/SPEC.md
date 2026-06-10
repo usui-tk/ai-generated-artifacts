@@ -625,7 +625,7 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
 "PatchBaseline": {
   "Schema":                  "2.0",
   "TargetBuildAfterUpdate":  "26100.32522",
-  "PatchTuesdayOfBaseline":  "2026-05-13",
+  "PatchTuesdayOfBaseline":  "2026-05-12",
   "LastVerifiedDate":        "2026-05-24T00:00:00+09:00",
   "LastVerifiedBy":          "auto-scrape:Catalog",
   "VerificationMethod":      "auto-scrape+wsusscn2",
@@ -2259,6 +2259,18 @@ sub-files via §B.15.2 `Select-AllCanonicalPatchFiles`.
 separation, the prerequisite chain would not be representable in
 layer 1.
 
+**Discovery (r11.20+)**: `Resolve-PatchSetFromReleaseInfo` finds the
+standalone SSU by a same-month Catalog title search -- for each resolved
+LCU it queries the Microsoft Update Catalog for the OS's `<yyyy-MM>
+Servicing Stack Update` and keeps the non-preview hit matching
+`(?i)servicing stack update`. The search result is itself the
+SSU-separate-vs-combined discriminator: 2026-05 returned one SSU for
+Server 2016 (KB5088064, Catalog UpdateId
+`d0f1761f-c762-4764-8443-8c567f6929a2`) and none for Server 2019 / 2022 /
+2025, so the 2016 LCU is emitted with `IsCombined=false` alongside the
+SSU while the others stay `IsCombined=true`. The search needs no layer 2
+/ `-DataDir` input, so it works on the `RefreshAllBaselines` call path.
+
 ### B.22.6 Dynamic Update lookback: 36-month cache
 
 Per-OS Dynamic Update caches under `data/raw-dynamic-update/` keep a
@@ -2306,14 +2318,18 @@ feature is shipped.
 
 ### B.22.11 Past-month inspection: read-only `-PatchMonth`
 
-`-PatchMonth <yyyy-MM>` allows the script to be pointed at a past
-baseline state for inspection. The flag is read-only: it changes how
-Stage 1 catalog comparison works but does not enable mutation of
-`data/config-*.json`.
+`-PatchMonth <yyyy-MM>` has two distinct roles. In the **build path**
+it is read-only: it points Stage 1 catalog comparison at a past
+baseline state for inspection and does not mutate `data/config-*.json`.
+In **RefreshAllBaselines** (§B.14) the same flag instead pins which
+month is generated -- the resolver fetches that month's patch set and
+(r11.20+) `PatchTuesdayOfBaseline` is derived from that month's Patch
+Tuesday via `Get-PatchTuesdayForMonth`, not the wall-clock latest one.
 
-**Why**: Historical reproducibility — an operator can replay a past
-month's baseline against a current `wsusscn2.cab` without polluting
-the committed state.
+**Why**: Historical reproducibility for inspection; and, for a pinned
+RefreshAllBaselines regeneration, correctness and byte-reproducibility
+of the generated month -- e.g. regenerating the 2026-05 baseline on the
+2026-06 Patch Tuesday stamps `2026-05-12`, not `2026-06-09`.
 
 ### B.22.12 CI structure: stage4 monthly refresh
 
@@ -3806,9 +3822,12 @@ Open at r09.0 inception:
 - r09.0 Step 2: Wire `-EnableDependencyCheck` opt-in; default OFF.
 - r09.0 Step 3: Default-ON for `-EnableDependencyCheck`.
 - r09.0 Step 4+: Fleet roll-out (Server 2019 / 2022 / 2025 `-Action
-  Build -Execute` with stage 2 verifying); deal with the residual
-  KB5087537 SSU-prerequisite incident (currently a config-side
-  pending action).
+  Build -Execute` with stage 2 verifying). The residual KB5087537
+  SSU-prerequisite incident is **resolved on the config side as of
+  r11.20**: the standalone Server 2016 SSU (KB5088064) is now
+  auto-discovered by `Resolve-PatchSetFromReleaseInfo` (§B.22.5)
+  instead of being hand-patched into `config-Server2016.json`. The
+  runtime dependency-check fleet roll-out itself remains future work.
 
 ### G.3 Deprecation list (kept for context)
 
