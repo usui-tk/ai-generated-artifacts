@@ -92,7 +92,17 @@ log() { echo "[ena-driver]$(_env_tag) $*"; }
 # they pin which sub-step broke) and in the preserved make.log context, not as a
 # live host signal. Live host-side progress comes from the wrapper heartbeat.
 stage() { echo "[ena-driver]$(_env_tag)[stage] $*"; }
-die() { echo "[ena-driver]$(_env_tag)[ERROR] $*" >&2; exit 1; }
+die() {
+  echo "[ena-driver]$(_env_tag)[ERROR] $*" >&2
+  if [[ "${ENA_BUILDTEST}" == "1" ]]; then
+    # structured fail result for the test harness (reason JSON-escaped). The exit
+    # code (non-zero, below) agrees with status=fail. Test mode only.
+    printf '[ena-driver][buildtest][result] {"status":"fail","osmajor":"%s","ena_version":"%s","kver":"%s","reason":"%s"}\n' \
+      "${osmajor:-}" "${ena_version:-}" "${kver:-}" \
+      "$(printf '%s' "$*" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  fi
+  exit 1
+}
 
 # On a failed build, surface the DKMS diagnostics to stderr so the actual
 # compiler error is captured in the parent build log. This matters because
@@ -454,3 +464,12 @@ fi
 rm -f /etc/udev/rules.d/70-persistent-net.rules 2>/dev/null || true
 
 log "ENA driver build complete (OL${osmajor}, kernel ${kver}, version ${ena_version})"
+
+# ENA_BUILDTEST: structured success result for the test harness. Single-line JSON
+# tagged [ena-driver][buildtest][result]; the exit code (0) agrees with
+# status=ok. Carries the {OS x ena_linux x kernel} facts a build ledger needs.
+# Test mode only; production emits nothing here.
+if [[ "${ENA_BUILDTEST}" == "1" ]]; then
+  printf '[ena-driver][buildtest][result] {"status":"ok","osmajor":"%s","ena_version":"%s","kver":"%s","dkms":%s,"ko":"%s","ko_version":"%s"}\n' \
+    "${osmajor}" "${ena_version}" "${kver}" "${use_dkms}" "${ko}" "${newver}"
+fi
