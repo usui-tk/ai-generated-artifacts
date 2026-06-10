@@ -236,6 +236,16 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Executable bit normalized on directly-runnable scripts (no content change).** Git tracks the
+  POSIX exec bit per file; several scripts had been committed `100644`, so a fresh clone left them
+  non-executable while `install-ena-driver.sh` and most test tiers were `100755`. Set mode `100755`
+  on the scripts that carry a `#!/usr/bin/env bash` shebang and are invoked directly:
+  `build-ol-aws-ami.sh`, `setup-vmimport-role.sh`, and the test tiers `tests/t9_logformat.sh`,
+  `tests/t10_enaukedetect.sh`, `tests/t11_enareporting.sh`. The sourced libraries
+  `tests/lib/{assert,heredoc,mock}.sh` (loaded via `.`, no shebang, `# shellcheck shell=bash`)
+  deliberately stay `100644`. The suite is unaffected (`tests/run-all.sh` invokes tiers via
+  `bash "${tier}"`); this only fixes `./script` / `git clone` ergonomics.
+
 - **Docs (no behaviour change):** the **English README intro** had drifted from
   its `README.ja.md` twin and from SPEC. (D3) The OL7 sentence linked only to
   section 1 and section 10, omitting the **section 9.6** cross-reference its
