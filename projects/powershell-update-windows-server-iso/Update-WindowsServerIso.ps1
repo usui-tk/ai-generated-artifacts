@@ -543,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.10-r11.20'
-$Script:ScriptTag     = 'remove-live-wua-scan-data-first-servicing-gate'
+$Script:ScriptVersion = 'update-wsi-2026.06.10-r11.21'
+$Script:ScriptTag     = 'trace-all-dism-invocations'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6330,6 +6330,7 @@ function Invoke-WimMountSafe {
         [string]$LogDir
     )
     Set-DebugStep -Step ('wim-mount-prepare')
+    Write-DismInvocation -Operation 'Mount-WindowsImage' -Parameters @{ Path = $Path; ImagePath = $ImagePath; Index = $Index }
 
     # Ensure mount directory exists and is empty
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -6399,6 +6400,7 @@ function Invoke-WimDismountSafe {
         [string] $LogDir
     )
     Set-DebugStep -Step 'wim-dismount-pre-sleep'
+    Write-DismInvocation -Operation 'Dismount-WindowsImage' -Parameters @{ Path = $Path; Discard = [bool]$Discard }
     Start-Sleep -Seconds 10
 
     $extra = @{}
@@ -6460,6 +6462,7 @@ function Add-WindowsPackageWithRetry {
         throw ('Package missing: {0}' -f $PackagePath)
     }
     Set-DebugStep -Step ('add-pkg-' + [System.IO.Path]::GetFileName($PackagePath))
+    Write-DismInvocation -Operation 'Add-WindowsPackage' -Parameters @{ Path = $MountPath; PackagePath = $PackagePath }
 
     $logArg = @{}
     if ($LogDir) {
@@ -6486,6 +6489,63 @@ function Add-WindowsPackageWithRetry {
     }
 }
 
+function Write-DismInvocation {
+    <#
+    .SYNOPSIS
+        Uniform logger for every DISM operation the build performs.
+    .DESCRIPTION
+        DISM is the least predictable and hardest-to-diagnose dependency
+        in this pipeline: a malformed argument can fail at runtime with an
+        opaque exit code and nothing in the build log to show what was
+        actually handed to it. Every mutating DISM operation - the dism.exe
+        command-line calls (via Invoke-DismCli) and the DISM cmdlets Mount /
+        Dismount / Add-WindowsPackage (via their Invoke-WimMountSafe,
+        Invoke-WimDismountSafe and Add-WindowsPackageWithRetry wrappers) -
+        routes through this helper, which surfaces the fully-resolved runtime
+        parameters into the build log BEFORE the operation runs.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Operation,
+        [hashtable]$Parameters = @{}
+    )
+    Write-Step ('  DISM op: {0}' -f $Operation)
+    foreach ($key in ($Parameters.Keys | Sort-Object)) {
+        Write-Step ('    {0,-14}: [{1}]' -f $key, $Parameters[$key])
+    }
+}
+
+function Invoke-DismCli {
+    <#
+    .SYNOPSIS
+        Single chokepoint for every dism.exe command-line invocation.
+    .DESCRIPTION
+        Logs the fully-resolved command line (every argument) and the
+        resulting exit code through Write-DismInvocation, then returns the
+        exit code so the caller decides how to treat a failure. Routing all
+        dism.exe calls through here means the exact command - including any
+        empty or malformed argument - is always visible in the build log,
+        the information that was missing when a /Cleanup-Image run failed
+        with an opaque exit code 1639. dism.exe stdout is sent to the host
+        so it stays on the console without polluting the returned value.
+    .OUTPUTS
+        Int32 - the dism.exe process exit code.
+    #>
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$Arguments,
+        [string]$Context = 'dism'
+    )
+    Set-DebugStep -Step ('dism-cli-' + $Context)
+    Write-DismInvocation -Operation ('dism.exe ' + $Context) -Parameters @{ CommandLine = ('dism.exe ' + ($Arguments -join ' ')) }
+    & dism.exe @Arguments | Out-Host
+    $code = $LASTEXITCODE
+    Write-Step ('  DISM op: dism.exe {0} -> exit code {1}' -f $Context, $code)
+    return $code
+}
+
+
 function Invoke-DismCleanup {
     <#
     .SYNOPSIS
@@ -6500,9 +6560,9 @@ function Invoke-DismCleanup {
     param([Parameter(Mandatory)] [string]$MountPath)
     Set-DebugStep -Step 'dism-cleanup-image'
     $dismArgs = @('/Image:' + $MountPath, '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase')
-    & dism.exe @dismArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw ('dism.exe /Cleanup-Image failed with exit code {0}' -f $LASTEXITCODE)
+    $code = Invoke-DismCli -Arguments $dismArgs -Context 'cleanup-image'
+    if ($code -ne 0) {
+        throw ('dism.exe /Cleanup-Image failed with exit code {0}' -f $code)
     }
 }
 
@@ -6880,9 +6940,10 @@ function New-SyntheticTestIso {
 
     Set-DebugStep -Step 'synthetic-capture-wim'
     $installWim = Join-Path $synthSources 'install.wim'
-    & dism.exe /Capture-Image ('/ImageFile:' + $installWim) ('/CaptureDir:' + $synthSrc) /Name:Synthetic_For_CI /Compress:none
-    if ($LASTEXITCODE -ne 0) {
-        throw ('dism /Capture-Image failed with exit code {0}' -f $LASTEXITCODE)
+    $capArgs = @('/Capture-Image', ('/ImageFile:' + $installWim), ('/CaptureDir:' + $synthSrc), '/Name:Synthetic_For_CI', '/Compress:none')
+    $code = Invoke-DismCli -Arguments $capArgs -Context 'capture-synthetic'
+    if ($code -ne 0) {
+        throw ('dism /Capture-Image failed with exit code {0}' -f $code)
     }
 
     Set-DebugStep -Step 'synthetic-build-iso'
