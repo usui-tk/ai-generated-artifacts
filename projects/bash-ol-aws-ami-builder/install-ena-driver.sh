@@ -65,15 +65,29 @@ ENA_VERSION_OL6="${ENA_VERSION_OL6:-2.9.1}"
 ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.0}"
 EPEL6_ARCHIVE_BASEURL="${EPEL6_ARCHIVE_BASEURL:-https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/}"
 
-log() { echo "[ena-driver] $*"; }
+# ---- execution-environment switch (default = production) -------------------
+# ENA_BUILDTEST=1 selects the container compile-test environment (kernel-less;
+# dkms build only -- no install/boot). Default 0 = the production path (VM-build
+# provisioning, or a standalone live OL instance), unchanged. The test-mode
+# branches are added incrementally; see SPEC A.7 / handoff B.1.9 Part 3.
+ENA_BUILDTEST="${ENA_BUILDTEST:-0}"
+
+# Execution-environment segment, computed once from the switch and injected by
+# every [ena-driver] emitter below, so output is tagged by environment WITHOUT
+# changing call sites. Production (ENA_BUILDTEST=0) -> empty -> the historical
+# tags are emitted unchanged; the container compile-test (=1) inserts a
+# [buildtest] segment after the script tag. The environment segment is
+# orthogonal to the message-kind segment ([stage]/[ERROR]).
+_env_tag() { if [[ "${ENA_BUILDTEST}" == "1" ]]; then printf '[buildtest]'; fi; }
+log() { echo "[ena-driver]$(_env_tag) $*"; }
 # Greppable build-stage breadcrumb. Distinct from log() so the host wrapper (and
 # a human reading a failed build) can pick out the phase boundaries. NOTE: the
 # guest provisioning output is swallowed by virt-customize on a SUCCESSFUL build
 # (see dump_build_diag) -- these breadcrumbs surface on the failure path (where
 # they pin which sub-step broke) and in the preserved make.log context, not as a
 # live host signal. Live host-side progress comes from the wrapper heartbeat.
-stage() { echo "[ena-driver][stage] $*"; }
-die() { echo "[ena-driver][ERROR] $*" >&2; exit 1; }
+stage() { echo "[ena-driver]$(_env_tag)[stage] $*"; }
+die() { echo "[ena-driver]$(_env_tag)[ERROR] $*" >&2; exit 1; }
 
 # On a failed build, surface the DKMS diagnostics to stderr so the actual
 # compiler error is captured in the parent build log. This matters because
@@ -85,18 +99,18 @@ die() { echo "[ena-driver][ERROR] $*" >&2; exit 1; }
 # `dkms status` and every make.log found under the module's DKMS tree, each line
 # prefixed so it stays greppable. Best-effort: never the cause of a new failure.
 dump_build_diag() {
-  local ml
-  echo "[ena-driver][ERROR] ---- build diagnostics (ENA ${ena_version:-?}, kernel ${kver:-?}) ----" >&2
+  local ml pfx; pfx="[ena-driver]$(_env_tag)[ERROR]"
+  echo "${pfx} ---- build diagnostics (ENA ${ena_version:-?}, kernel ${kver:-?}) ----" >&2
   if command -v dkms >/dev/null 2>&1; then
-    echo "[ena-driver][ERROR] dkms status:" >&2
-    dkms status 2>&1 | sed 's/^/[ena-driver][ERROR]   /' >&2 || true
+    echo "${pfx} dkms status:" >&2
+    dkms status 2>&1 | sed "s/^/${pfx}   /" >&2 || true
   fi
   while IFS= read -r ml; do
     [[ -n "${ml}" ]] || continue
-    echo "[ena-driver][ERROR] ---- ${ml} ----" >&2
-    sed 's/^/[ena-driver][ERROR]   /' "${ml}" >&2 || true
+    echo "${pfx} ---- ${ml} ----" >&2
+    sed "s/^/${pfx}   /" "${ml}" >&2 || true
   done < <(find "/var/lib/dkms/amzn-drivers/${ena_version:-}" -name 'make.log' 2>/dev/null || true)
-  echo "[ena-driver][ERROR] ---- end build diagnostics ----" >&2
+  echo "${pfx} ---- end build diagnostics ----" >&2
 }
 
 # On a SUCCESSFUL build the guest provisioning output is swallowed by
