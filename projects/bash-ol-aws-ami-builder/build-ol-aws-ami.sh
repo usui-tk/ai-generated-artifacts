@@ -413,10 +413,13 @@ load_env() {
     # ENA self-build identity, folded into the AMI name (brief) and description
     # (full) so a self-built-ENA AMI is distinguishable from a pure OL AMI BEFORE
     # launch. ENA_BUILD_VERSION is the installer's pin (single source of truth);
-    # it stays empty for --skip-ena-driver. Only the AUTO defaults gain the
-    # marker -- an explicitly set AMI_NAME/AMI_DESCRIPTION is left untouched (:=).
+    # it stays empty for --skip-ena-driver. Wired for OL6/OL7 only -- OL8+ keep
+    # their in-distro ENA driver in the AMI pipeline (the standalone
+    # install-ena-driver.sh can still build OL8 on demand). Only the AUTO
+    # defaults gain the marker -- an explicitly set AMI_NAME/AMI_DESCRIPTION is
+    # left untouched (:=).
     local _ena_name_sfx="" _ena_desc_sfx=" (pure OL; ENA self-build skipped)"
-    if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
+    if [[ "${ENA_DRIVER_BUILD}" -eq 1 && ( "${OL_MAJOR_VERSION}" == "6" || "${OL_MAJOR_VERSION}" == "7" ) ]]; then
       ENA_BUILD_VERSION="$(_ena_pin_for_major "${OL_MAJOR_VERSION}")"
       _ena_name_sfx="-ena${ENA_BUILD_VERSION:-}"
       _ena_desc_sfx=" with self-built Amazon ENA ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized for Nitro)"
@@ -1495,15 +1498,21 @@ OLAWS_OL6_CLOUD_USER_BODY
   # a pure, unmodified OL AMI -- the two distinct build purposes.
   #
   # The hook writes our install-ena-driver.sh verbatim into the guest and runs
-  # it during provisioning. The installer self-gates by OS major (acts on
-  # OL6/OL7, no-ops on OL8+), detects the installed UEK kernel from
-  # /lib/modules (provisioning runs under a libguestfs appliance, so `uname -r`
-  # is the appliance kernel), and builds via DKMS against that kernel. The
-  # embedded heredoc is single-quoted, so the installer's own text (including
-  # its '\${kernelver}') is written through unmodified.
+  # it during provisioning. It is injected for OL6/OL7 only: OL8+ keep their
+  # current in-distro ENA driver in the AMI (the standalone install-ena-driver.sh
+  # can still build OL8 on demand, but the pipeline does not). The installer
+  # detects the installed UEK kernel from /lib/modules (provisioning runs under a
+  # libguestfs appliance, so `uname -r` is the appliance kernel), and builds via
+  # DKMS against that kernel. The embedded heredoc is single-quoted, so the
+  # installer's own text (including its '\${kernelver}') is written through
+  # unmodified.
   #
   # Idempotent via the wrapper marker so a Phase 3 re-run does not double-append.
-  if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
+  if [[ "${ENA_DRIVER_BUILD}" -ne 1 ]]; then
+    log_info "ENA driver self-build disabled (--skip-ena-driver); producing a pure OL AMI"
+  elif [[ "${OL_MAJOR_VERSION}" != "6" && "${OL_MAJOR_VERSION}" != "7" ]]; then
+    log_info "ENA driver self-build hook not injected for OL${OL_MAJOR_VERSION} (AMI keeps its in-distro ENA driver; the standalone install-ena-driver.sh can build it on demand)"
+  else
     local aws_provision_ena="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
     local ena_installer="${SCRIPT_DIR}/install-ena-driver.sh"
     log_info "Injecting ENA driver self-build hook into cloud/aws/provision.sh (AWS-optimized AMI; --skip-ena-driver disables)"
@@ -1536,8 +1545,6 @@ OLAWS_OL6_CLOUD_USER_BODY
         die "Failed to inject ENA driver hook into ${aws_provision_ena}"
       fi
     fi
-  else
-    log_info "ENA driver self-build disabled (--skip-ena-driver); producing a pure OL AMI"
   fi
 
   # env.properties.defaults 'declare -gA' guard (OL6 only).
