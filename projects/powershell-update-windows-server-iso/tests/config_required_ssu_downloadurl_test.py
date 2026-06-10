@@ -1,5 +1,5 @@
 """
-T23: required-SSU DownloadUrl static guard (offline, pure Python).
+T23: required-SSU consistency contract (offline, pure Python).
 
 Catches the exact data defect behind the real-machine Server 2016 failure: a
 servicing-stack update (Type 'SSU') listed in a config's NeutralPatches with an
@@ -12,8 +12,13 @@ CI-side counterpart to the readiness gate exercised by T21/T22. T21/T22 prove
 the gate would PREDICT the failure given correct inputs; T23 ensures the input
 config itself never ships an unstageable required SSU in the first place.
 
-Rule: every NeutralPatch whose Type is 'SSU' (case-insensitive) MUST carry a
-non-empty DownloadUrl.
+Rules (a static, offline contract over PatchBaseline.NeutralPatches):
+  1. every NeutralPatch whose Type is 'SSU' (case-insensitive) MUST carry a
+     non-empty DownloadUrl;
+  2. any LCU marked IsCombined=false MUST be paired with a Type 'SSU' entry that
+     itself has a DownloadUrl (a standalone LCU needs its standalone SSU);
+  3. a config that carries a Type 'SSU' MUST have at least one IsCombined=false
+     LCU (the SSU is not an orphan).
 
 Coverage:
   * the bad-config fixture (one SSU with an empty URL) is flagged;
@@ -56,6 +61,18 @@ def find_required_ssu_without_downloadurl(config: dict) -> list[str]:
         if ptype == "SSU" and not url:
             violations.append(patch.get("KbId") or "<no KbId>")
     return violations
+
+
+def config_lcus(config: dict) -> list[dict]:
+    patches = (config.get("PatchBaseline") or {}).get("NeutralPatches") or []
+    return [p for p in patches if (p.get("Type") or "").strip().upper() == "LCU"]
+
+
+def config_ssus_with_url(config: dict) -> list[dict]:
+    patches = (config.get("PatchBaseline") or {}).get("NeutralPatches") or []
+    return [p for p in patches
+            if (p.get("Type") or "").strip().upper() == "SSU"
+            and (p.get("DownloadUrl") or "").strip()]
 
 
 class TestResult:
@@ -136,6 +153,36 @@ def main() -> int:
     r.assert_true("09 Server2016 SSU (KB5088064) has a non-empty DownloadUrl",
                   bool((ssus[0].get("DownloadUrl") or "").strip()) and ssus[0].get("KbId") == "KB5088064",
                   f"SSU entry={ssus[0] if ssus else None}")
+
+    # ---- SSU / IsCombined consistency contract (servicing-stack spec) ----
+    # A standalone SSU is paired with an LCU ONLY when one is actually published
+    # for that LCU's required servicing stack. Server 2016 (KB5088064, a recent SS
+    # floor) has such an SSU; Server 2019's LCU is separate-classified in Layer 2
+    # but no standalone SSU is published post-2021 (its low SS floor is satisfied by
+    # the combined/embedded stack), so it correctly carries no SSU. The offline,
+    # deterministic invariant is therefore CONSISTENCY (not "separate => SSU"):
+    #   * every Type=SSU NeutralPatch has a non-empty DownloadUrl;
+    #   * an LCU with IsCombined=false is accompanied by a Type=SSU (with URL);
+    #   * a config carrying a Type=SSU has at least one IsCombined=false LCU.
+    # The decision of which OS actually gets an SSU is made at generation time by
+    # Catalog discovery + the servicing-stack-version check, not asserted statically.
+    for cfg_path in configs:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        ssus_with_url = config_ssus_with_url(cfg)
+        separate_lcus = [l for l in config_lcus(cfg) if not bool(l.get("IsCombined"))]
+        bad_url = find_required_ssu_without_downloadurl(cfg)
+        r.assert_true(f"10 {cfg_path.name}: every Type=SSU has a non-empty DownloadUrl",
+                      not bad_url, f"SSU(s) without DownloadUrl: {bad_url}")
+        if separate_lcus:
+            r.assert_true(
+                f"11 {cfg_path.name}: IsCombined=false LCU(s) are paired with an SSU (URL set)",
+                len(ssus_with_url) > 0,
+                f"LCU(s) {[l.get('KbId') for l in separate_lcus]} are IsCombined=false but no Type=SSU with a DownloadUrl")
+        if ssus_with_url:
+            r.assert_true(
+                f"12 {cfg_path.name}: a config with a Type=SSU has an IsCombined=false LCU",
+                len(separate_lcus) > 0,
+                f"has SSU {[s.get('KbId') for s in ssus_with_url]} but every LCU is IsCombined=true")
 
     return r.summary()
 

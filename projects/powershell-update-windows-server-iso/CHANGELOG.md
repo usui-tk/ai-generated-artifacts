@@ -22,6 +22,15 @@ the script and follows the
 
 ## [Unreleased]
 
+### Resolver: discover the standalone same-month SSU and regenerate the 2026-05 baseline (`$Script:ScriptVersion` `update-wsi-2026.06.09-r11.19` -> `update-wsi-2026.06.10-r11.20`)
+
+Completes the "config-side pending action" deferred in the docs entry below: implements separate-model SSU resolution so the Server 2016 servicing-stack update is discovered by the generator instead of being hand-patched into `data/config-Server2016.json`.
+
+- **`Resolve-PatchSetFromReleaseInfo`**: after emitting the per-UpdateId records, search the Microsoft Update Catalog for a same-month "Servicing Stack Update" of the OS. When one is found (Server 2016 -> KB5088064, UpdateId `d0f1761f-c762-4764-8443-8c567f6929a2`) it is emitted as a `Type=SSU` NeutralPatch and the matching LCU is flipped to `IsCombined=false`; when none is found (Server 2019/2022/2025) the LCU stays `IsCombined=true`. The same-month + OS-narrowed title search is itself the discriminator, so the step needs no Layer 2 / `-DataDir` input and works on the `RefreshAllBaselines` (A01) call path.
+- **Stale "every monthly LCU embeds the SSU" docstrings corrected** (old decision B-1) in the discovery and resolver function headers to match the new behaviour.
+- **`RefreshAllBaselines` (A01)**: when `-PatchMonth` pins a specific month, derive `PatchTuesdayOfBaseline` from that month's Patch Tuesday (via `Get-PatchTuesdayForMonth`) instead of the wall-clock latest one, so generating a specific month's baseline is correct and byte-reproducible (a 2026-05 baseline generated on the 2026-06 Patch Tuesday is stamped `2026-05-12`, not `2026-06-09`).
+- **T23** (`config_required_ssu_downloadurl_test.py`) extended from the DownloadUrl-only guard to a three-part required-SSU consistency contract (SSU DownloadUrl present; an `IsCombined=false` LCU is paired with an SSU; an SSU implies an `IsCombined=false` LCU); now 19 assertions.
+- **`data/config-Server{2016,2019,2022,2025}.json`**: regenerated for the finalised 2026-05 Patch Tuesday baseline with the fixed generator. The Server 2016 SSU is now generator-produced (the manual `_DependencyVerified*` / `_Notes` markers are retired); supersedence is refreshed to the current Catalog; `PatchTuesdayOfBaseline` is `2026-05-12`. Patch identities (KB / UpdateId / DownloadUrl / IsCombined) are unchanged from the previous baseline.
 ### Docs: repoint stale SPEC B.23.x cross-references in code comments to the r09.0 B.22 decision records (no script revision)
 
 The r09.0 SPEC rewrite moved the old B.23 narrative's architecture decisions into the B.22 decision-record section (see SPEC §G.3 deprecation note: the 24-subsection B.23 narrative was superseded by §B.22), but several `Update-WindowsServerIso.ps1` comments still cited the pre-rewrite B.23.x section numbers, which now point at the unrelated "JSON Canonical Serialization" section. This corrects the unambiguous ones - **comment-only; no `$Script:ScriptVersion` bump, no behaviour change** (verified: CRLF/BOM preserved, restamp IN SYNC, psa 0/0/0):

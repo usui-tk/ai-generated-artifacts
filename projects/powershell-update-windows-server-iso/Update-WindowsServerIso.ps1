@@ -543,7 +543,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.09-r11.19'
+$Script:ScriptVersion = 'update-wsi-2026.06.10-r11.20'
 $Script:ScriptTag     = 'remove-live-wua-scan-data-first-servicing-gate'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -5662,11 +5662,13 @@ function Get-PatchSetFromReleaseInfoDiscovery {
         skips that source and continues with the others. The caller
         decides whether to error on empty discovery.
 
-        SSU is NOT emitted as a separate record. Per SPEC B.23.5
-        decision B-1, every current monthly LCU embeds the SSU, and
-        the LCU's Catalog response carries both .msu URLs; the
-        orchestrator's per-file Convert-CatalogPatchToBaselineEntry
-        path classifies them correctly via filename heuristic.
+        This discovery step does NOT emit a standalone SSU record.
+        Most current monthly LCUs embed the SSU (combined LCU+SSU)
+        and carry both .msu URLs under one Catalog UpdateId, which
+        the per-file Convert-CatalogPatchToBaselineEntry path
+        classifies via filename heuristic. Discovery of a *standalone*
+        same-month SSU (for SSU-separate OSes such as Server 2016) is
+        handled downstream by Resolve-PatchSetFromReleaseInfo.
     .EXAMPLE
         Get-PatchSetFromReleaseInfoDiscovery -OsVersion Server2025 `
             -PatchMonth '2026-05'
@@ -5845,14 +5847,18 @@ function Resolve-PatchSetFromReleaseInfo {
         .NET CU multiplicity (B-2) and the LCU + SSU bundle handling
         (B-1) that this function inherits unchanged.
 
-        Per SPEC B.23.5 decision B-1, every current monthly LCU
-        embeds the SSU; this function does NOT discover a separate
-        SSU. When the LCU's Catalog UpdateId carries multiple .msu
-        files, the per-file Convert-CatalogPatchToBaselineEntry path
-        classifies them correctly via filename heuristic
-        (Get-PatchType) -- the resulting PatchBaseline can therefore
-        contain a Type=SSU entry alongside the Type=LCU one without
-        a discovery round-trip.
+        Most current monthly LCUs embed the SSU (combined LCU+SSU),
+        but some OSes (e.g. Server 2016) still publish a *standalone*
+        same-month Servicing Stack Update under a separate Catalog
+        UpdateId. After emitting the per-UpdateId records, this
+        function searches the Catalog for a same-month "Servicing
+        Stack Update" of the OS: when one is found it emits a Type=SSU
+        entry and flips the matching LCU to IsCombined=$false; when
+        none is found the LCU stays IsCombined=$true (combined
+        convention). When an LCU's Catalog UpdateId itself carries
+        multiple .msu files, the per-file
+        Convert-CatalogPatchToBaselineEntry path still classifies them
+        via filename heuristic (Get-PatchType).
 
         Per SPEC B.23.2, the Catalog narrow-filter consumes
         `Test-CatalogTitleMatch` and the per-OS Config-driven
@@ -5861,9 +5867,9 @@ function Resolve-PatchSetFromReleaseInfo {
         edit alone.
 
         Returns an array of fully-populated PatchBaseline entries
-        (same shape as the old Resolve-PatchSetFromCatalog return)
-        with an additional IsCombined flag on the LCU set to $true
-        unconditionally (combined-LCU convention).
+        (same shape as the old Resolve-PatchSetFromCatalog return).
+        The LCU's IsCombined flag defaults to $true and is set to
+        $false when a standalone same-month SSU is discovered for it.
     .EXAMPLE
         Resolve-PatchSetFromReleaseInfo `
             -OsVersion Server2025 -OsLanguage en-us -PatchMonth '2026-05'
@@ -6004,6 +6010,84 @@ function Resolve-PatchSetFromReleaseInfo {
             $entry | Add-Member -NotePropertyName 'Variant' -NotePropertyValue 'Full' -Force
 
             $resolved.Add($entry) | Out-Null
+        }
+    }
+
+    # ----- Standalone servicing-stack update (SSU) discovery -----
+    # Some LCUs name a required servicing-stack version that ships as a
+    # *standalone* SSU package under a DIFFERENT Catalog UpdateId than the LCU,
+    # so the per-UpdateId file walk above never surfaces it. For each resolved
+    # LCU, search the Catalog for the same-month "Servicing Stack Update" of this
+    # OS; the search result is itself the discriminator:
+    #   * found  (e.g. Server 2016 KB5088064) -> emit a Type=SSU NeutralPatch and
+    #     flip the LCU to IsCombined=$false (a standalone SSU now accompanies it);
+    #   * none   (e.g. Server 2019 post-2021, whose low SS floor is met by the
+    #     combined/embedded stack, and combined OSes 2022/2025) -> leave the LCU
+    #     IsCombined=$true with no standalone SSU.
+    # The same-month + OS-narrowed title filter keeps this precise; the SS-version
+    # readiness gate and the downstream DISM apply remain the runtime safety net.
+    if (@($resolved | Where-Object { $_.Type -eq 'SSU' }).Count -eq 0) {
+        $osTokens = @(Get-CatalogTitleTokenList -OsVersion $OsVersion)
+        $osSearchToken = if ($osTokens.Count -gt 0) { [string]$osTokens[0] } else { $OsVersion }
+        foreach ($lcu in @($resolved | Where-Object { $_.Type -eq 'LCU' })) {
+            $ssuQuery = '{0} Servicing Stack Update {1}' -f $PatchMonth, $osSearchToken
+            $ssuHits = $null
+            try {
+                $ssuHits = Get-UpdateIdFromCatalog -KbId $ssuQuery -MaxRetries $MaxRetries
+            } catch {
+                Write-Caution ('Standalone SSU search failed for {0} {1}: {2}' -f $OsVersion, $PatchMonth, $_.Exception.Message)
+                $ssuHits = $null
+            }
+            $ssuHits = @($ssuHits | Where-Object {
+                (Test-CatalogTitleMatch -OsVersion $OsVersion -Title ([string]$_.Title)) -and
+                ([string]$_.Title -match '(?i)servicing stack update') -and
+                ([string]$_.Title -notmatch '(?i)preview')
+            })
+            if ($ssuHits.Count -eq 0) {
+                Write-Step ('  No standalone SSU published for {0} {1} (separate-model LCU {2}); leaving IsCombined=$true.' -f $OsVersion, $PatchMonth, $lcu.KbId)
+                continue
+            }
+            $ssuHit = $ssuHits[0]
+            $ssuUid = [string]$ssuHit.UpdateId
+            $ssuLinks = $null
+            try {
+                $ssuLinks = Get-DownloadLinkFromCatalog -UpdateId $ssuUid -MaxRetries $MaxRetries
+            } catch {
+                Write-Caution ('Standalone SSU {0}: DownloadDialog failed: {1}' -f $ssuUid, $_.Exception.Message)
+                continue
+            }
+            if (-not $ssuLinks -or $ssuLinks.Count -eq 0) {
+                Write-Caution ('Standalone SSU {0}: no download link; leaving LCU {1} IsCombined=$true.' -f $ssuUid, $lcu.KbId)
+                continue
+            }
+            $ssuFile = Select-CanonicalPatchFile -Links $ssuLinks -PatchType 'SSU' -Architecture 'x64'
+            if ($null -eq $ssuFile) {
+                Write-Caution ('Standalone SSU {0}: no canonical file; leaving LCU {1} IsCombined=$true.' -f $ssuUid, $lcu.KbId)
+                continue
+            }
+            $ssuKbId = Get-KbIdFromPatchFileName -FileName $ssuFile.FileName
+            if ([string]::IsNullOrEmpty($ssuKbId)) {
+                if ([string]$ssuHit.Title -match '(?i)\b(KB\d{6,})\b') { $ssuKbId = $matches[1] }
+            }
+            $ssuSupers = $null
+            try { $ssuSupers = Get-SupersedenceFromCatalog -UpdateId $ssuUid -MaxRetries $MaxRetries } catch { $ssuSupers = $null }
+            $ssuSupersList = if ($null -ne $ssuSupers) { @($ssuSupers.Supersedes) } else { @() }
+            $ssuEntry = Convert-CatalogPatchToBaselineEntry `
+                -KbId $ssuKbId `
+                -Title ([string]$ssuHit.Title) `
+                -UpdateId $ssuUid `
+                -DownloadUrl $ssuFile.Url `
+                -FileName $ssuFile.FileName `
+                -Sha256 '' `
+                -Supersedes $ssuSupersList `
+                -ApplicableArchitecture 'x64' `
+                -ApplicableLanguages @('neutral') `
+                -KnownType 'SSU'
+            $ssuEntry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $false -Force
+            $ssuEntry | Add-Member -NotePropertyName 'Variant' -NotePropertyValue 'Full' -Force
+            $lcu | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $false -Force
+            $resolved.Add($ssuEntry) | Out-Null
+            Write-Ok ('  Resolved standalone SSU {0} ({1}) for LCU {2}; LCU set IsCombined=$false.' -f $ssuKbId, $ssuUid, $lcu.KbId)
         }
     }
 
@@ -13661,6 +13745,16 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
         if (-not [string]::IsNullOrEmpty($Script:PatchMonth)) {
             $patchMonth = $Script:PatchMonth
             Write-Step ('Override patch month: {0}' -f $patchMonth)
+            # When the operator pins a specific month, the PatchTuesday-of-
+            # baseline marker must reflect THAT month's Patch Tuesday, not the
+            # wall-clock latest one (otherwise a May baseline regenerated on
+            # June Patch Tuesday would be stamped with June's date). This keeps
+            # a pinned-month regeneration both correct and byte-reproducible.
+            $pmParts = $patchMonth -split '-'
+            if ($pmParts.Count -eq 2) {
+                $latestPt = (Get-PatchTuesdayForMonth -Year ([int]$pmParts[0]) -Month ([int]$pmParts[1])).ToString('yyyy-MM-dd')
+                Write-Step ('PatchTuesday-of-baseline (from pinned month): {0}' -f $latestPt)
+            }
         }
 
         Write-SubSection 'Refresh plan'
