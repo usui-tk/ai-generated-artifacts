@@ -21,23 +21,34 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
-- **ENA driver container compile-test mode (`ENA_BUILDTEST=1`, OL6 + OL7).** Runs
+- **ENA driver container compile-test mode (`ENA_BUILDTEST=1`, OL6/OL7/OL8).** Runs
   `install-ena-driver.sh` inside a disposable, kernel-less clean-core container
   by provisioning a full `kernel-uek` + headers up front, after which the
   production build path (kver detection, `kernel-uek-devel` resolve, DKMS
   build+install, `ena.ko` verify) runs unchanged — the driver actually compiles
   and installs. Validated end-to-end: `ena.ko` 2.9.1g on OL6/UEK4
-  `4.1.12-124.48.6.el6uek`, and `ena.ko.xz` 2.17.0g on OL7/UEK6
-  `5.4.17-2136.338.4.2.el7uek`. The kernel-provision step is per-OS (literal):
+  `4.1.12-124.48.6.el6uek`, `ena.ko.xz` 2.17.0g on OL7/UEK6
+  `5.4.17-2136.338.4.2.el7uek`, and `ena.ko.xz` 2.17.0g on OL8/UEK6
+  `5.4.17-2136.356.4.2.el8uek`. The kernel-provision step is per-OS (literal):
   OL6 enables the Fedora-archive EPEL + `ol6_UEKR4`; OL7 enables
-  `ol7_developer_EPEL` + `ol7_UEKR6`. Production is unaffected: the switch
-  defaults off and the log/build paths are byte-identical when it is. Includes
-  environment-tagged logging (`[ena-driver][buildtest]…`), an `INSECURE_TLS=1`
-  knob (default 0; relaxes TLS only for the test-mode network commands — e.g.
-  behind a MITM dev proxy or EL6 NSS trust gaps), and a machine-parseable result
-  line `[ena-driver][buildtest][result] {…}` (JSON: `status=ok|fail` plus
+  `ol7_developer_EPEL` + `ol7_UEKR6`; OL8 (slim base ships `dnf` only)
+  bootstraps the `yum` compat via `dnf`, then `ol8_developer_EPEL` + `ol8_UEKR6`.
+  Production is unaffected: the switch defaults off and the log/build paths are
+  byte-identical when it is. Includes environment-tagged logging
+  (`[ena-driver][buildtest]…`), an `INSECURE_TLS=1` knob (default 0; relaxes TLS
+  only for the test-mode network commands — e.g. behind a MITM dev proxy or EL6
+  NSS trust gaps), and a machine-parseable result line
+  `[ena-driver][buildtest][result] {…}` (JSON: `status=ok|fail` plus
   `osmajor`/`ena_version`/`kver`/`ko`/`ko_version`, agreeing with the exit code)
-  for a test harness / build ledger. OL8 wiring and a host test tier follow.
+  for a test harness / build ledger. A host test tier follows.
+- **Standalone OL8 ENA self-build (`install-ena-driver.sh`).** OL8 now builds the
+  pinned ENA driver (`ena_linux 2.17.0`, same as OL7's UEK6) when the installer is
+  run on its own (VM or container test). The AMI pipeline is **not** affected:
+  `build-ol-aws-ami.sh` gates the provision.sh self-build hook *and* the
+  `-ena<ver>` AMI name/description suffix to OL6/OL7, so OL8+ AMIs are produced
+  with their current in-distro ENA driver (unmodified). This also corrects the
+  prior OL8 AMI naming, which appended an empty `-ena` suffix while the installer
+  no-op'd. OL9+ remain a no-op in the installer.
 - **Container clean-core test base (`tests/cleancore/`).** Five self-contained
   builders — `build-cleancore-ol6.sh` / `-ol7.sh` / `-ol8.sh` / `-ol9.sh` /
   `-ol10.sh` — each producing a clean-core Oracle Linux container rootfs for one

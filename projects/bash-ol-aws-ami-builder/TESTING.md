@@ -255,8 +255,10 @@ code agrees with `status` (`0` = ok, non-zero = fail):
 [ena-driver][buildtest][result] {"status":"ok","osmajor":"7","ena_version":"2.17.0","kver":"5.4.17-2136.338.4.2.el7uek.x86_64","dkms":1,"ko":".../extra/ena.ko.xz","ko_version":"2.17.0g"}
 ```
 
-Validated: OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`) and OL7
-(`ena.ko.xz` 2.17.0g, UEK6 `5.4.17-2136.338.4.2.el7uek`). OL8 is not yet wired.
+Validated: OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`), OL7
+(`ena.ko.xz` 2.17.0g, UEK6 `5.4.17-2136.338.4.2.el7uek`), and OL8 (`ena.ko.xz`
+2.17.0g, UEK6 `5.4.17-2136.356.4.2.el8uek`). OL8 self-build is standalone-only;
+the AMI pipeline keeps OL8 on its in-distro ENA driver. OL9+ no-op.
 
 ## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
 

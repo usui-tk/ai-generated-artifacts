@@ -688,9 +688,11 @@ all inert.
   retarget, DKMS `build`+`install`, initramfs regeneration, and `ena.ko`
   verification — runs unchanged. The provisioning step is per-OS (literal
   commands, by detected `OL_MAJOR`): OL6 enables the shipped Fedora-archive EPEL
-  + `ol6_UEKR4`; OL7 enables `ol7_developer_EPEL` + `ol7_UEKR6`. The shipped
-  (disabled) EPEL is enabled persistently so the production `setup_epel` finds it
-  already enabled and does not create a second repo.
+  + `ol6_UEKR4`; OL7 enables `ol7_developer_EPEL` + `ol7_UEKR6`; OL8 (whose slim
+  base ships `dnf` only) bootstraps the `yum` compat via `dnf`, then enables
+  `ol8_developer_EPEL` + `ol8_UEKR6`. The shipped (disabled) EPEL is enabled
+  persistently so the production `setup_epel` finds it already enabled and does
+  not create a second repo.
 - **`INSECURE_TLS`.** `INSECURE_TLS=1` (default `0`) drops TLS peer verification
   for the test-mode network commands only — `yum --setopt=sslverify=false` and
   `curl -k` — for environments where the container cannot verify the peer chain
@@ -706,10 +708,12 @@ all inert.
     `die`; `reason` is JSON-escaped). The exit code always agrees with `status`.
 
 Validated end-to-end (the driver actually compiles, installs, and verifies) on
-OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`) and OL7 (`ena.ko.xz`
-2.17.0g, UEK6 `5.4.17-2136.338.4.2.el7uek`). OL8 is not yet wired: it currently
-no-ops (the OL8+ in-distro ENA rationale above), so `ENA_BUILDTEST` `die`s with
-"OS major 8 not wired for the container test".
+OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`), OL7 (`ena.ko.xz` 2.17.0g,
+UEK6 `5.4.17-2136.338.4.2.el7uek`), and OL8 (`ena.ko.xz` 2.17.0g, UEK6
+`5.4.17-2136.356.4.2.el8uek`). OL8 self-build is **standalone-only**: the AMI
+pipeline keeps OL8 on its in-distro ENA driver — `build-ol-aws-ami.sh` gates the
+provision.sh self-build hook (and the `-ena<ver>` AMI naming) to OL6/OL7, so OL8+
+AMIs are produced unmodified. OL9+ remain a no-op in the installer.
 
 ### File naming convention
 
