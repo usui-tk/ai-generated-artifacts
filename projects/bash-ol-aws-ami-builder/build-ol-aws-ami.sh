@@ -3049,10 +3049,14 @@ phase6_nitro_readiness_check() {
   # v4+ targets. Source: amzn/amzn-drivers ENA Linux driver
   # (ENA_Linux_Best_Practices.rst, RELEASENOTES.md).
   if [[ "${ena_cfg}" == "y" || -n "${ena_mod}" ]]; then
-    local fam_v2="M5 C5 R5 T3 T4g M6g C6g R6g"
+    # Example instance families per Nitro generation. This builder produces
+    # x86-64 AMIs, so ARM/Graviton (e.g. *6g/*7g/*8g, C7gn) and Trainium/
+    # Inferentia (Trn*/Inf*, Graviton-hosted) types are intentionally excluded --
+    # an x86-64 AMI cannot launch on them.
+    local fam_v2="M5 C5 R5 T3"
     local fam_v3="M5n C5n R5n I3en P4d G4dn"
-    local fam_v4="M6i M7i C6i C7i R6i R7i M7g C7g R7g I4i"
-    local fam_v5="M8g C8g R8g C7gn I7ie P5en Trn2"
+    local fam_v4="M6i M7i C6i C7i R6i R7i I4i"
+    local fam_v5="I7ie P5en"
     local fam_v6="M8i C8i R8i M8a C8a R8a"
     local v2_tier="ASSURED" v3_tier="ASSURED" v4_tier="ASSURED" v5_tier="ASSURED" v6_tier="ASSURED"
     local ena_ver="" signal=""

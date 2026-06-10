@@ -495,7 +495,9 @@ only; the wrapper performs no remediation. The inspection tools
 After the four boot checks, Phase 6 also prints an **advisory Nitro instance
 assurance report**: it classifies each Nitro generation (v2–v6) as `ASSURED`,
 `SUPPORTED` (works, ENAv2 mode), `DEGRADED`, or `NOT-ASSURED` and lists
-representative instance families per generation. The signal is ENA **ENAv3**
+representative **x86-64** instance families per generation (this builder produces
+x86-64 AMIs, so ARM/Graviton and Trainium/Inferentia types are intentionally
+excluded — an x86-64 AMI cannot launch on them). The signal is ENA **ENAv3**
 support — ENAv3 is the device generation on the majority of Nitro v4+ instance
 types, while Nitro v2/v3 use ENAv1/ENAv2 and are unaffected by the ENAv3
 thresholds. Per the amzn ENA driver docs, when the standalone driver's

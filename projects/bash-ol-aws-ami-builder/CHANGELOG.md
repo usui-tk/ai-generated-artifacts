@@ -236,6 +236,14 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Nitro assurance report no longer lists ARM/Graviton example instance types.** The advisory
+  report's per-generation "e.g." families included Graviton (ARM) types — `T4g M6g C6g R6g` (v2),
+  `M7g C7g R7g` (v4), `M8g C8g R8g C7gn` and `Trn2` (v5) — which **cannot launch an x86-64 AMI**,
+  so listing them as ASSURED was misleading. This builder produces x86-64 AMIs; the example lists
+  now show x86-64 families only (v2 `M5 C5 R5 T3`; v4 `M6i M7i C6i C7i R6i R7i I4i`; v5 `I7ie P5en`;
+  v3/v6 unchanged). Advisory-text only — no boot-check or gate behaviour changes. See SPEC Part-A
+  (Nitro instance assurance report).
+
 - **CHECK 4 (bootloader `root=`) is now BLS-aware — closes a silent false-PASS on OL8/9/10.** The
   Phase-6 assurance check scanned only `grub.cfg` menuentries (`linux`/`linux16`/`kernel`) for
   `root=`. On OL8+ (BLS) the kernel cmdline — including `root=` — lives in
