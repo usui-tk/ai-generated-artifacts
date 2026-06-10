@@ -1,26 +1,19 @@
 #!/usr/bin/env python3
 """T24 - Get-DismCleanupArgumentList argument-vector regression test.
 
-Guards the operator-precedence trap that silently broke the offline
-``dism.exe /Cleanup-Image`` pass. The cleanup vector used to be built as::
+Guards two things:
 
-    @('/Image:' + $MountPath, '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase')
+1. The operator-precedence trap that silently broke the offline
+   ``dism.exe /Cleanup-Image`` pass. The vector used to be built as
+   ``@('/Image:' + $MountPath, '/Cleanup-Image', ...)``; PowerShell binds the
+   comma operator tighter than ``+``, so the trailing array was stringified
+   (space-joined) into the ``/Image:`` value, collapsing the whole vector into
+   a SINGLE argument and yielding dism.exe exit 1639. The fix builds the
+   vector with ``"/Image:$MountPath"`` (interpolation, no ``+``).
 
-PowerShell binds the comma operator tighter than ``+``, so this parsed as
-``'/Image:' + ($MountPath, '/Cleanup-Image', ...)`` -- the trailing array was
-stringified (space-joined) into the ``/Image:`` value, collapsing the whole
-vector into a SINGLE argument. dism.exe then received one malformed ``/Image:``
-token with no servicing command and failed with exit code 1639 ("the
-command-line is missing a required servicing command"). The DISM CLI logging
-made the command look correct, because the build log joins the argument array
-with spaces -- only ``dism.log`` (which quoted the entire string as one
-argument) exposed the collapse.
-
-The fix moved construction into the pure ``Get-DismCleanupArgumentList`` helper using
-``"/Image:$MountPath"`` (interpolation, no ``+``). This test invokes that
-helper through the PowerShell harness and asserts the vector stays at four
-discrete tokens, the first targets the mount path, the servicing tokens follow
-in order, and -- the bug signature -- no token contains an embedded space.
+2. The ``/ResetBase`` default. ``/ResetBase`` is very slow per index, so it is
+   OFF by default (the cleanup is ``/Cleanup-Image /StartComponentCleanup``
+   only) and is appended only when ``-IncludeResetBase`` is set.
 
 Runs anywhere (pure string construction; no DISM, no mounted image).
 """
@@ -39,58 +32,45 @@ PASS = "  PASS"
 FAIL = "  FAIL"
 
 
+def as_list(result):
+    return result if isinstance(result, list) else [result]
+
+
 def main() -> int:
     mount = r"D:\UpdateWsi-Server2016\work\mount_install"
-    expected = [
-        f"/Image:{mount}",
-        "/Cleanup-Image",
-        "/StartComponentCleanup",
-        "/ResetBase",
-    ]
+    default_expected = [f"/Image:{mount}", "/Cleanup-Image", "/StartComponentCleanup"]
+    reset_expected = default_expected + ["/ResetBase"]
 
     with PSSession(SCRIPT_PATH) as ps:
-        result = ps.invoke("Get-DismCleanupArgumentList", MountPath=mount)
-
-    # The harness serialises a [string[]] as a JSON array; a hypothetical
-    # single-token collapse would deserialise as a lone string instead.
-    args = result if isinstance(result, list) else [result]
+        default_args = as_list(ps.invoke("Get-DismCleanupArgumentList", MountPath=mount))
+        reset_args = as_list(ps.invoke("Get-DismCleanupArgumentList", MountPath=mount, IncludeResetBase=True))
 
     passed = 0
     failed = 0
 
-    # Test 1: discrete-token count (the collapse produced 1, the fix produces 4)
-    if len(args) == 4:
-        print(f"{PASS}  token count is 4 (vector did not collapse)")
-        passed += 1
-    else:
-        print(f"{FAIL}  token count is {len(args)}, expected 4: {args!r}")
-        failed += 1
+    def check(label, cond, detail=""):
+        nonlocal passed, failed
+        if cond:
+            print(f"{PASS}  {label}")
+            passed += 1
+        else:
+            print(f"{FAIL}  {label}{(' -> ' + detail) if detail else ''}")
+            failed += 1
 
-    # Test 2: first token is exactly the /Image: target (nothing glued on)
-    if args and args[0] == expected[0]:
-        print(f"{PASS}  arg[0] is the clean /Image: target")
-        passed += 1
-    else:
-        got = args[0] if args else "<none>"
-        print(f"{FAIL}  arg[0] should be {expected[0]!r}, got {got!r}")
-        failed += 1
+    # Default mode: /ResetBase OFF, three discrete tokens
+    check("default vector is exactly /Cleanup-Image /StartComponentCleanup (no /ResetBase)",
+          default_args == default_expected, repr(default_args))
+    check("default vector has no /ResetBase token",
+          "/ResetBase" not in default_args, repr(default_args))
 
-    # Test 3: servicing tokens follow, in order
-    if args[1:] == expected[1:]:
-        print(f"{PASS}  servicing tokens follow in order")
-        passed += 1
-    else:
-        print(f"{FAIL}  tail should be {expected[1:]!r}, got {args[1:]!r}")
-        failed += 1
+    # Opt-in mode: -IncludeResetBase appends /ResetBase as the 4th token
+    check("-IncludeResetBase appends /ResetBase as a fourth discrete token",
+          reset_args == reset_expected, repr(reset_args))
 
-    # Test 4: bug signature - no token may contain an embedded space
-    spaced = [a for a in args if " " in str(a)]
-    if not spaced:
-        print(f"{PASS}  no token contains an embedded space")
-        passed += 1
-    else:
-        print(f"{FAIL}  token(s) contain embedded spaces (collapse signature): {spaced!r}")
-        failed += 1
+    # Bug signature (both modes): no token may contain an embedded space
+    spaced = [a for a in (default_args + reset_args) if " " in str(a)]
+    check("no token contains an embedded space (collapse signature)",
+          not spaced, repr(spaced))
 
     print()
     print(f"  {passed} passed, {failed} failed")

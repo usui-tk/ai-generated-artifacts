@@ -962,6 +962,21 @@ loop for any sub-phase. Phase workers iterate the sequence, calling
 `Invoke-PatchSubPhase` for content-bearing sub-phases and running
 `Invoke-DismCleanup` for `IsCleanupMarker` sub-phases.
 
+**Cleanup / export policy (r11.24).** The per-image cleanup is
+`/Cleanup-Image /StartComponentCleanup` only by default; `/ResetBase`
+is appended only when the operator opts in via `-ResetBaseOnCleanup`,
+because it resets the component-store base (smaller image, applied
+updates no longer removable) at a large per-index time cost. The
+"Export" half of `I6.CleanupAndExport` is realised as a single
+post-loop pass: after every install.wim index has been serviced and
+dismounted, `Export-InstallWimCompressed` runs one
+`dism.exe /Export-Image ... /Compress:max` over all indexes (in index
+order, preserving every edition) into a fresh WIM and replaces
+install.wim, recompressing and single-instancing files shared across
+editions. The exported WIM is index-count-verified before the swap;
+on failure the original is left untouched. Default ON; `-SkipExportCompress`
+opts out.
+
 ## B.12 Catalogue scrape and supersedence selection
 
 **Status**: normative. **Policy ID**: SPEC-WSI-015.

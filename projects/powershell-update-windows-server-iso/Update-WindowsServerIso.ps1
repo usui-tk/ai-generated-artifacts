@@ -275,6 +275,20 @@ param(
     [string]   $OutputDir,
     [string]   $OnlyInstallWimIndexes,
 
+    # P07 install.wim cleanup: by default the per-image DISM cleanup runs
+    # /Cleanup-Image /StartComponentCleanup only. -ResetBaseOnCleanup appends
+    # /ResetBase (resets the component-store base: smaller image, applied
+    # updates no longer removable) at a large per-index time cost. Default OFF,
+    # matching Microsoft's released-media practice; size is instead recovered
+    # by the default Export-Image /Compress:max pass (see -SkipExportCompress).
+    [switch]   $ResetBaseOnCleanup,
+
+    # P07 install.wim size optimisation: after all indexes are serviced, a
+    # single Export-Image /Compress:max pass recompresses and single-instances
+    # files shared across editions, then replaces install.wim. Default ON;
+    # -SkipExportCompress opts out (faster build, larger install.wim).
+    [switch]   $SkipExportCompress,
+
     [switch]   $CleanWorkRoot,
     [string]   $LogFile,
     [switch]   $DryRun,
@@ -338,6 +352,8 @@ $Script:ForcePca2023OnServer2025  = [bool]$ForcePca2023OnServer2025
 $Script:Pca2023OnlyMode           = [bool]$Pca2023OnlyMode
 $Script:Pca2023ScriptPath         = $Pca2023ScriptPath
 $Script:AutoInstallAdk            = [bool]$AutoInstallAdk
+$Script:ResetBaseOnCleanup        = [bool]$ResetBaseOnCleanup
+$Script:SkipExportCompress        = [bool]$SkipExportCompress
 
 # -----------------
 # Parameter validation
@@ -543,8 +559,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.11-r11.23'
-$Script:ScriptTag     = 'fix-dism-cleanup-arg-vector'
+$Script:ScriptVersion = 'update-wsi-2026.06.11-r11.24'
+$Script:ScriptTag     = 'p07-resetbase-off-export-compress'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6589,43 +6605,145 @@ function Get-DismCleanupArgumentList {
         operator-precedence trap that previously collapsed the vector: written
         as @('/Image:' + $MountPath, '/Cleanup-Image', ...), PowerShell binds
         the comma operator tighter than +, so the expression parsed as
-        '/Image:' + ($MountPath, '/Cleanup-Image', '/StartComponentCleanup',
-        '/ResetBase') -- the trailing array was stringified (space-joined) into
-        the /Image: value, yielding a SINGLE argument. dism.exe then saw one
-        malformed /Image: token with no servicing command and failed with exit
-        code 1639 ("the command-line is missing a required servicing command").
-        Using "/Image:$MountPath" (interpolation, no + operator) keeps the
-        first element intact and the vector at four discrete tokens.
+        '/Image:' + ($MountPath, '/Cleanup-Image', ...) -- the trailing array
+        was stringified (space-joined) into the /Image: value, yielding a
+        SINGLE argument and dism.exe exit code 1639. Using "/Image:$MountPath"
+        (interpolation, no + operator) keeps the first element intact.
+
+        By default the vector is /Cleanup-Image /StartComponentCleanup only.
+        /ResetBase resets the component-store base (smaller image, applied
+        updates no longer removable) but is very slow per index, so it is OFF
+        by default (matching Microsoft's released-media practice) and appended
+        only when -IncludeResetBase is set. Size is instead recovered by the
+        default Export-Image /Compress:max pass.
     .PARAMETER MountPath
         Path to the mounted offline image (the /Image: target).
+    .PARAMETER IncludeResetBase
+        When set, append /ResetBase to the cleanup vector.
     .OUTPUTS
-        String[] - the four dism.exe arguments, in order.
+        String[] - three cleanup arguments by default; four when
+        -IncludeResetBase appends /ResetBase.
     #>
     [CmdletBinding()]
     [OutputType([string[]])]
-    param([Parameter(Mandatory)] [string]$MountPath)
-    return @("/Image:$MountPath", '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase')
+    param(
+        [Parameter(Mandatory)] [string]$MountPath,
+        [switch]$IncludeResetBase
+    )
+    $vector = @("/Image:$MountPath", '/Cleanup-Image', '/StartComponentCleanup')
+    if ($IncludeResetBase) {
+        $vector += '/ResetBase'
+    }
+    return $vector
 }
 
 
 function Invoke-DismCleanup {
     <#
     .SYNOPSIS
-        Invoke "dism.exe /Image:<path> /Cleanup-Image
-        /StartComponentCleanup /ResetBase" against a mounted image.
+        Run "dism.exe /Image:<path> /Cleanup-Image /StartComponentCleanup"
+        against a mounted image (optionally with /ResetBase).
     .DESCRIPTION
-        Cleanup is run once per image, AFTER all packages for that
-        image have been applied. /ResetBase locks out roll-back of
-        previously applied updates and shrinks the WIM substantially.
+        Cleanup runs once per image, AFTER all packages for that image have
+        been applied. By default it is /StartComponentCleanup only; /ResetBase
+        is appended only when the operator opts in via -ResetBaseOnCleanup
+        ($Script:ResetBaseOnCleanup), because /ResetBase costs many minutes per
+        index. Size is instead recovered by the default Export-Image
+        /Compress:max pass (Export-InstallWimCompressed).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string]$MountPath)
     Set-DebugStep -Step 'dism-cleanup-image'
-    $dismArgs = Get-DismCleanupArgumentList -MountPath $MountPath
+    $dismArgs = Get-DismCleanupArgumentList -MountPath $MountPath -IncludeResetBase:$Script:ResetBaseOnCleanup
     $code = Invoke-DismCli -Arguments $dismArgs -Context 'cleanup-image'
     if ($code -ne 0) {
         throw ('dism.exe /Cleanup-Image failed with exit code {0}' -f $code)
     }
+}
+
+function Get-DismExportArgumentList {
+    <#
+    .SYNOPSIS
+        Build the dism.exe /Export-Image argument vector for one source index.
+    .DESCRIPTION
+        Pure function (no invocation) returning the arguments as a [string[]]
+        so each token reaches dism.exe separately and the vector can be
+        unit-tested. Uses interpolation ("/SourceImageFile:$SourceWim" etc.,
+        no + operator) to avoid the comma/+ precedence collapse. /Compress:max
+        recompresses and single-instances shared files in the destination WIM.
+    .PARAMETER SourceWim
+        Path to the source WIM file.
+    .PARAMETER SourceIndex
+        Image index to export from the source WIM.
+    .PARAMETER DestinationWim
+        Path to the destination WIM (created, or appended to in index order).
+    .OUTPUTS
+        String[] - the five dism.exe /Export-Image arguments, in order.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)] [string]$SourceWim,
+        [Parameter(Mandatory)] [int]$SourceIndex,
+        [Parameter(Mandatory)] [string]$DestinationWim
+    )
+    return @(
+        '/Export-Image',
+        "/SourceImageFile:$SourceWim",
+        "/SourceIndex:$SourceIndex",
+        "/DestinationImageFile:$DestinationWim",
+        '/Compress:max'
+    )
+}
+
+function Export-InstallWimCompressed {
+    <#
+    .SYNOPSIS
+        Recompress + single-instance install.wim via Export-Image /Compress:max.
+    .DESCRIPTION
+        After every index has been serviced and dismounted, a single
+        Export-Image pass over ALL indexes (in index order) into a fresh WIM
+        with /Compress:max recompresses and single-instances files shared
+        across editions, recovering the size that the now-default-off
+        /ResetBase used to reclaim - without the per-index /ResetBase time
+        cost. ALL indexes are exported so no edition is dropped (even when only
+        a subset was serviced via -OnlyInstallWimIndexes). The exported WIM is
+        index-count-verified BEFORE the original is replaced; on any failure or
+        count mismatch the original install.wim is left untouched.
+    .PARAMETER WimPath
+        Path to the serviced install.wim to optimise in place.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string]$WimPath)
+    $before = Get-WimIndexInventory -WimPath $WimPath
+    $sourceCount = ($before | Measure-Object).Count
+    if ($sourceCount -lt 1) {
+        throw ('install.wim reports no indexes; cannot export: {0}' -f $WimPath)
+    }
+    $exported = $WimPath + '.optimized.wim'
+    if (Test-Path -LiteralPath $exported) {
+        Remove-Item -LiteralPath $exported -Force
+    }
+    $origBytes = (Get-Item -LiteralPath $WimPath).Length
+    Write-Step ('Export-Image /Compress:max over {0} index(es) to recover size (no /ResetBase).' -f $sourceCount)
+    foreach ($img in ($before | Sort-Object ImageIndex)) {
+        Set-DebugStep -Step ('export-install-idx-' + $img.ImageIndex)
+        $exportArgs = Get-DismExportArgumentList -SourceWim $WimPath -SourceIndex $img.ImageIndex -DestinationWim $exported
+        $code = Invoke-DismCli -Arguments $exportArgs -Context ('export-image-idx' + $img.ImageIndex)
+        if ($code -ne 0) {
+            throw ('dism.exe /Export-Image failed (index {0}) with exit code {1}' -f $img.ImageIndex, $code)
+        }
+    }
+    $after = Get-WimIndexInventory -WimPath $exported
+    $exportedCount = ($after | Measure-Object).Count
+    if ($exportedCount -ne $sourceCount) {
+        throw ('Export-Image index-count mismatch (source {0}, exported {1}); leaving install.wim untouched.' -f $sourceCount, $exportedCount)
+    }
+    Remove-Item -LiteralPath $WimPath -Force
+    Move-Item -LiteralPath $exported -Destination $WimPath -Force
+    $newBytes = (Get-Item -LiteralPath $WimPath).Length
+    $savedPct = if ($origBytes -gt 0) { [Math]::Round((1 - ($newBytes / $origBytes)) * 100, 1) } else { 0 }
+    Write-Ok ('install.wim recompressed: {0:N0} -> {1:N0} bytes ({2}% smaller).' -f $origBytes, $newBytes, $savedPct)
 }
 
 function Get-WimIndexInventory {
@@ -12667,6 +12785,17 @@ function Invoke-BuildPhase07_PatchInstallWim {
                     Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir
                 }
             }
+        }
+
+        # Recover install.wim size with a single Export-Image /Compress:max pass
+        # over all indexes (default ON; -SkipExportCompress opts out). Replaces the
+        # /ResetBase size reclamation - now off by default - without the per-index
+        # /ResetBase time cost.
+        if ($Script:SkipExportCompress) {
+            Write-Skip 'Export-Image /Compress:max skipped (-SkipExportCompress); install.wim left as serviced.'
+        } elseif ($Script:Execute -and -not $Script:SyntheticTestMode) {
+            Set-DebugStep -Step 'export-install-compress'
+            Export-InstallWimCompressed -WimPath $installWim
         }
 
         $csvPath = Join-Path $Script:LogsDir 'P05_patch_inventory.csv'
