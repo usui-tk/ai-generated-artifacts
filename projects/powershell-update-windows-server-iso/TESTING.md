@@ -34,6 +34,7 @@ This document consolidates everything needed to verify and evaluate
 - [5. Self-verification tool suite (T1 – T19)](#5-self-verification-tool-suite-t1--t19)
 - [6. Continuous integration coverage](#6-continuous-integration-coverage)
 - [7. Discovered bugs and fix history](#7-discovered-bugs-and-fix-history)
+- [8. Monthly baseline regeneration — agent/LLM verification procedure](#8-monthly-baseline-regeneration--agentllm-verification-procedure)
 
 ---
 
@@ -594,3 +595,74 @@ the current cycle:
   Database design.
 
 For the full catalogue of pitfalls and fixes, see SPEC.md Part D.
+
+---
+
+## 8. Monthly baseline regeneration — agent/LLM verification procedure
+
+This section records the procedure an operator or coding agent follows
+to regenerate a monthly `/data` baseline (Layer 1 `config-Server*.json`
+plus Layer 2 `servicing-dependency-database.json`) and the verification
+gates that decide whether the result is committable. It was distilled
+from the 2026-05 and 2026-06 real runs, and is the LLM-side checklist
+to apply on every monthly rebuild.
+
+### 8.1 Regeneration sequence
+
+Run from a clean checkout at the target HEAD, with a pre-staged
+`wsusscn2.cab` for the target month and `-SkipEnvCheck` to bypass the
+100 GB `-Execute` preflight (these admin actions mount no WIM):
+
+1. **A03 `RefreshSnapshots`** — refreshes `data/raw-*` and `data/cache-*`
+   (release-info Markdown, .NET CU, Dynamic Update) from the web. Fast
+   (~30 s); network only, no cab.
+2. **A01 `RefreshAllBaselines -Mode Force -PatchMonth <yyyy-MM> -OfflineSyncPackagePath <cab>`**
+   — regenerates Layer 1 from the refreshed caches and soft-chains A04.
+   `-PatchMonth` pins the generated month and (r11.20+) derives
+   `PatchTuesdayOfBaseline` from that month's Patch Tuesday (§B.22.11).
+3. **A04 `RefreshDependencyDatabase`** — runs as the A01 chain, or
+   standalone via `-Action RefreshDependencyDatabase -OfflineSyncPackagePath <cab>`;
+   parses `package.xml` (~114 MB) with a streaming `XmlReader` and
+   rewrites Layer 2 plus the Layer 1 `_DependencyVerified*` stamps.
+
+### 8.2 Verification gates (all must hold before commit)
+
+| Gate | Check | Failure signal |
+|---|---|---|
+| **G1 Cab freshness** | staged cab SHA-256/size differ from the committed Layer 2 `_meta.sourceCab`; `package.xml` carries `CreationDate="<yyyy-MM>…"` rows and the month's KBs | identical hash → no new cab yet |
+| **G2 Discovery-source currency** *(critical)* | the refreshed `data/raw-release-info.md` already lists the target month | A01 logs `Discovery returned zero records for OS=… Month=<yyyy-MM>` |
+| **G3 Stamp / patch-set consistency** | every `config-Server*.json` has `PatchTuesdayOfBaseline` = the target month's Patch Tuesday **and** resolved LCU/SSU KBs belonging to that month | a new-month stamp sitting over previous-month KBs |
+| **G4 Layer 2 provenance** | `servicing-dependency-database.json` `_meta.sourceCab.sha256` matches the staged cab; `generatedAt` is the run date | stale `_meta` |
+| **G5 Standing gates** | `psa.py` 0/0/0, offline suite (T1–T23) green, restamp IN SYNC, `doc_gate` PASS, validator A–G green | any non-green |
+
+**G2 is the gate that is easy to miss.** The cab and the Microsoft
+Update Catalog lead the release-health page by **a day or more after
+Patch Tuesday**. Discovery is release-info-driven (§B.22.1), so a regen
+attempted before release-info catches up yields a wrong-month or empty
+patch set even though the cab is already updated. When G2 fails, **stop
+and defer the regen** — never commit a baseline whose
+`PatchTuesdayOfBaseline` is the new month but whose patch entries are
+the previous month's KBs.
+
+### 8.3 Resource profile (this environment)
+
+A04's `package.xml` parse completes in ~5 minutes on a 3.9 GB-RAM
+container; the parser streams via `XmlReader` rather than loading the
+document, so peak memory stays well under the limit. Earlier
+intermittent process exits seen mid-parse were environment-transient
+and did not recur — A04 is not a local-only blocker.
+
+### 8.4 Real-run log
+
+- **2026-05** — full Layer 1 regen for `2026-05` committed (`b322be1`);
+  the standalone Server 2016 SSU (KB5088064) was auto-discovered (G1–G5
+  all green).
+- **2026-06** — the 2026-06 cab (SHA-256 `5b075a6d…`, 649 MB) was
+  published and validated (G1 ✓: 2026-06 `CreationDate` rows present,
+  KB5094126 present) and A04 regenerated Layer 2 cleanly (~5 min, G4 ✓).
+  **G2 failed**: on 2026-06-10, one day after the 2026-06-09 Patch
+  Tuesday, the release-health page still listed 2026-05 as the latest
+  month, so A01 discovery returned zero records for 2026-06 across all
+  four OSes (G3 would have been violated). The regen was **deferred, not
+  committed**; it is to be re-run once the release-health page publishes
+  2026-06.

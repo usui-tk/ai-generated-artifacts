@@ -22,6 +22,9 @@ the script and follows the
 
 ## [Unreleased]
 
+### Docs: add the monthly baseline regeneration / verification procedure to TESTING.md §8 (no code change)
+
+Records the agent/LLM verification gates (G1-G5) for a monthly `/data` rebuild, distilled from the 2026-05 and 2026-06 real runs. The critical gate **G2 (discovery-source currency)**: the `wsusscn2.cab` and the Update Catalog lead the Microsoft release-health page by a day or more after Patch Tuesday, so a regen attempted before release-info publishes the target month yields a wrong-month or empty patch set (A01 logs `Discovery returned zero records`); such a regen must be deferred, not committed. Logs the 2026-06 deferral: the 2026-06 cab was valid and A04 regenerated Layer 2 cleanly (~5 min), but on 2026-06-10 release-info still listed 2026-05, so the 2026-06 Layer 1 regen was deferred.
 ### Docs: propagate the standalone-SSU + pinned-month behaviour across SPEC, README, and the windows-servicing research note (no code change)
 
 Documentation-only follow-up to the r11.20 resolver/baseline change below; aligns the prose docs with the shipped behaviour.
