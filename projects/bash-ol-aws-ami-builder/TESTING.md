@@ -212,6 +212,52 @@ drops the build-time `sslverify=0` on a trusted host). The script exits 0 only i
 the build and the unconditional self-test section pass; the network-dependent
 readiness probe SKIPs (never fails the build) when offline.
 
+## ENA driver container compile-test (`ENA_BUILDTEST`)
+
+Proves the pinned ENA driver actually **compiles + installs** for a given OL
+major / UEK kernel without a full AMI build or a live Nitro instance, by running
+`install-ena-driver.sh` with `ENA_BUILDTEST=1` inside a disposable clean-core
+container (above). SPEC A.7 "Container compile-test (`ENA_BUILDTEST`)" defines
+the switch and the result contract; this is the operator recipe.
+
+Because a container is kernel-less, the test mode installs a full `kernel-uek` +
+headers up front (per-OS repo wiring), after which the production build path runs
+unchanged. Like the clean-core base, it is **manual / on-demand** — it needs
+root, network, and a few-minute compile — and is **not** part of
+`tests/run-all.sh`.
+
+### Run
+
+```sh
+# 1. build (or reuse) a clean-core rootfs for the target OL major
+bash tests/cleancore/build-cleancore-ol7.sh /tmp/cc-ol7.tar.gz
+
+# 2. unpack into a throwaway dir and run the script under unshare + chroot
+img=$(mktemp -d); tar -C "$img" -xzf /tmp/cc-ol7.tar.gz
+cp /etc/resolv.conf "$img/etc/resolv.conf"; cp install-ena-driver.sh "$img/"
+unshare --fork --pid --mount --uts --ipc -- bash -c "
+  mount --bind /dev   '$img/dev';  mount -t proc  proc '$img/proc'
+  mount -t sysfs sys   '$img/sys'
+  chroot '$img' env ENA_BUILDTEST=1 INSECURE_TLS=1 bash /install-ena-driver.sh"
+# (unshare --mount keeps the binds private; the throwaway dir is rm -rf'd after)
+```
+
+`INSECURE_TLS=1` is only needed behind a MITM proxy or where EL6 NSS cannot
+verify the GitHub chain (curl error 77); omit it on a trusted host. Mounting
+`/sys` (and `/run`) quiets the cosmetic `depmod`/`dracut` warnings.
+
+### Result
+
+The run prints one JSON line tagged `[ena-driver][buildtest][result]`; the exit
+code agrees with `status` (`0` = ok, non-zero = fail):
+
+```
+[ena-driver][buildtest][result] {"status":"ok","osmajor":"7","ena_version":"2.17.0","kver":"5.4.17-2136.338.4.2.el7uek.x86_64","dkms":1,"ko":".../extra/ena.ko.xz","ko_version":"2.17.0g"}
+```
+
+Validated: OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`) and OL7
+(`ena.ko.xz` 2.17.0g, UEK6 `5.4.17-2136.338.4.2.el7uek`). OL8 is not yet wired.
+
 ## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
 
 Upstream `oracle-linux-image-tools` ships no `distr/ol6-slim`, so this wrapper

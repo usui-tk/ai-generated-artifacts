@@ -668,6 +668,49 @@ when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable
 release for OL7) and harmless to set (or omit) on OL8/9/10 where the
 upstream distr-level default is preferred.
 
+### Container compile-test (`ENA_BUILDTEST`)
+
+`ENA_BUILDTEST=1` runs `install-ena-driver.sh` as a self-checking compile-test
+inside a disposable, kernel-less clean-core container (see TESTING, "ENA driver
+container compile-test"), so the pinned driver can be proven to build per OL
+major / UEK kernel without a full image build or a live Nitro instance. It is a
+test-only switch: with `ENA_BUILDTEST` unset or `0` (the default) the script is
+the production path byte-for-byte — the environment-tagged logging, the
+container kernel provisioning, the TLS relaxation, and the result line below are
+all inert.
+
+- **Kernel provisioning.** A container has no running kernel and no
+  `/lib/modules` tree, so before the production kernel-detection step the test
+  mode installs a full `kernel-uek` + `kernel-uek-devel` (the container is
+  throwaway, so the kernel footprint is irrelevant). This creates
+  `/lib/modules/<kver>/` and the `build` symlink, after which the production path
+  — kernel detection, `kernel-uek-devel` resolution, the OL6 Makefile UEK
+  retarget, DKMS `build`+`install`, initramfs regeneration, and `ena.ko`
+  verification — runs unchanged. The provisioning step is per-OS (literal
+  commands, by detected `OL_MAJOR`): OL6 enables the shipped Fedora-archive EPEL
+  + `ol6_UEKR4`; OL7 enables `ol7_developer_EPEL` + `ol7_UEKR6`. The shipped
+  (disabled) EPEL is enabled persistently so the production `setup_epel` finds it
+  already enabled and does not create a second repo.
+- **`INSECURE_TLS`.** `INSECURE_TLS=1` (default `0`) drops TLS peer verification
+  for the test-mode network commands only — `yum --setopt=sslverify=false` and
+  `curl -k` — for environments where the container cannot verify the peer chain
+  (a MITM dev proxy, or EL6 NSS trust gaps that otherwise fail the GitHub fetch
+  with curl error 77). It is read only inside the `ENA_BUILDTEST` branches;
+  production never consults it beyond the default.
+- **Result contract.** Beyond the exit code (`0` = ok, non-zero = fail), the run
+  prints one machine-parseable JSON line tagged
+  `[ena-driver][buildtest][result]`, so a harness can judge pass/fail and record
+  the `{OS x ena_linux x kernel}` facts without scraping logs:
+  - ok: `{"status":"ok","osmajor","ena_version","kver","dkms","ko","ko_version"}`
+  - fail: `{"status":"fail","osmajor","ena_version","kver","reason"}` (emitted by
+    `die`; `reason` is JSON-escaped). The exit code always agrees with `status`.
+
+Validated end-to-end (the driver actually compiles, installs, and verifies) on
+OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`) and OL7 (`ena.ko.xz`
+2.17.0g, UEK6 `5.4.17-2136.338.4.2.el7uek`). OL8 is not yet wired: it currently
+no-ops (the OL8+ in-distro ENA rationale above), so `ENA_BUILDTEST` `die`s with
+"OS major 8 not wired for the container test".
+
 ### File naming convention
 
 ```
