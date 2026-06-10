@@ -193,16 +193,24 @@ log "Target ENA driver version: ${ena_version}"
 # dev proxy). Production never enters this block.
 if [[ "${ENA_BUILDTEST}" == "1" ]]; then
   log "provisioning kernel-uek + build deps into the container (disposable)"
-  # Enable the shipped (disabled) EPEL so the production setup_epel below finds
-  # it already enabled and early-returns (no second epel-archive repo), and the
-  # build's dkms resolves from it.
-  sed -i '/^\[epel\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/epel.repo
+  # Per-OS: enable the shipped (disabled) EPEL persistently so the production
+  # setup_epel below finds it already enabled and early-returns (no second repo),
+  # and select the UEK repo for kernel-uek. Plain test commands.
+  case "${osmajor}" in
+    6)
+      sed -i '/^\[epel\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/epel.repo
+      bt_uek_repo="ol6_UEKR4" ;;
+    7)
+      sed -i '/^\[ol7_developer_EPEL\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/oracle-epel-ol7.repo
+      bt_uek_repo="ol7_UEKR6" ;;
+    *) die "ENA_BUILDTEST: OS major ${osmajor} not wired for the container test" ;;
+  esac
   if [[ "${INSECURE_TLS}" == "1" ]]; then
-    yum -y --setopt=sslverify=false --enablerepo=ol6_UEKR4 \
+    yum -y --setopt=sslverify=false --enablerepo="${bt_uek_repo}" \
       install kernel-uek kernel-uek-devel gcc make tar findutils dkms \
       || die "ENA_BUILDTEST: failed to provision kernel-uek + build deps"
   else
-    yum -y --enablerepo=ol6_UEKR4 \
+    yum -y --enablerepo="${bt_uek_repo}" \
       install kernel-uek kernel-uek-devel gcc make tar findutils dkms \
       || die "ENA_BUILDTEST: failed to provision kernel-uek + build deps"
   fi
