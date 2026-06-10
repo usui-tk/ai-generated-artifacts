@@ -543,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.10-r11.21'
-$Script:ScriptTag     = 'trace-all-dism-invocations'
+$Script:ScriptVersion = 'update-wsi-2026.06.10-r11.22'
+$Script:ScriptTag     = 'route-all-dism-through-helpers'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6330,7 +6330,6 @@ function Invoke-WimMountSafe {
         [string]$LogDir
     )
     Set-DebugStep -Step ('wim-mount-prepare')
-    Write-DismInvocation -Operation 'Mount-WindowsImage' -Parameters @{ Path = $Path; ImagePath = $ImagePath; Index = $Index }
 
     # Ensure mount directory exists and is empty
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -6339,11 +6338,11 @@ function Invoke-WimMountSafe {
 
     # Clean up stale mount at this path, if any
     try {
-        $existing = Get-WindowsImage -Mounted -ErrorAction SilentlyContinue
+        $existing = Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ Mounted = $true; ErrorAction = 'SilentlyContinue' }
         foreach ($m in @($existing)) {
             if ($m.Path -and (($m.Path.TrimEnd('\')) -ieq ($Path.TrimEnd('\')))) {
                 Write-Caution ('Stale mount detected at {0}; discarding before remount.' -f $Path)
-                Dismount-WindowsImage -Path $Path -Discard -ErrorAction SilentlyContinue | Out-Null
+                Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path = $Path; Discard = $true; ErrorAction = 'SilentlyContinue' } | Out-Null
             }
         }
     } catch {
@@ -6378,7 +6377,7 @@ function Invoke-WimMountSafe {
         $logPath = Join-Path $LogDir (('mount_idx{0}_{1:yyyyMMdd-HHmmss}.log' -f $Index, (Get-Date)))
         $mountArgs['LogPath'] = $logPath
     }
-    Mount-WindowsImage @mountArgs | Out-Null
+    Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters $mountArgs | Out-Null
     return $Path
 }
 
@@ -6400,7 +6399,6 @@ function Invoke-WimDismountSafe {
         [string] $LogDir
     )
     Set-DebugStep -Step 'wim-dismount-pre-sleep'
-    Write-DismInvocation -Operation 'Dismount-WindowsImage' -Parameters @{ Path = $Path; Discard = [bool]$Discard }
     Start-Sleep -Seconds 10
 
     $extra = @{}
@@ -6411,9 +6409,9 @@ function Invoke-WimDismountSafe {
     Set-DebugStep -Step 'wim-dismount-first-try'
     try {
         if ($Discard) {
-            Dismount-WindowsImage -Path $Path -Discard @extra -ErrorAction SilentlyContinue | Out-Null
+            Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters (@{ Path = $Path; Discard = $true; ErrorAction = 'SilentlyContinue' } + $extra) | Out-Null
         } else {
-            Dismount-WindowsImage -Path $Path -Save -CheckIntegrity @extra -ErrorAction SilentlyContinue | Out-Null
+            Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters (@{ Path = $Path; Save = $true; CheckIntegrity = $true; ErrorAction = 'SilentlyContinue' } + $extra) | Out-Null
         }
     } catch {
         Write-Caution ('First Dismount failed: {0}; waiting 30s and retrying...' -f $_.Exception.Message)
@@ -6422,7 +6420,7 @@ function Invoke-WimDismountSafe {
     # Verify the mount is gone; if still present, retry the harder way
     $stillMounted = $false
     try {
-        $cur = Get-WindowsImage -Mounted -ErrorAction SilentlyContinue
+        $cur = Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ Mounted = $true; ErrorAction = 'SilentlyContinue' }
         foreach ($m in @($cur)) {
             if ($m.Path -and (($m.Path.TrimEnd('\')) -ieq ($Path.TrimEnd('\')))) {
                 $stillMounted = $true; break
@@ -6434,9 +6432,9 @@ function Invoke-WimDismountSafe {
         Set-DebugStep -Step 'wim-dismount-retry-after-30s'
         Start-Sleep -Seconds 30
         if ($Discard) {
-            Dismount-WindowsImage -Path $Path -Discard @extra | Out-Null
+            Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters (@{ Path = $Path; Discard = $true } + $extra) | Out-Null
         } else {
-            Dismount-WindowsImage -Path $Path -Save -CheckIntegrity @extra | Out-Null
+            Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters (@{ Path = $Path; Save = $true; CheckIntegrity = $true } + $extra) | Out-Null
         }
     }
 }
@@ -6462,7 +6460,6 @@ function Add-WindowsPackageWithRetry {
         throw ('Package missing: {0}' -f $PackagePath)
     }
     Set-DebugStep -Step ('add-pkg-' + [System.IO.Path]::GetFileName($PackagePath))
-    Write-DismInvocation -Operation 'Add-WindowsPackage' -Parameters @{ Path = $MountPath; PackagePath = $PackagePath }
 
     $logArg = @{}
     if ($LogDir) {
@@ -6470,7 +6467,7 @@ function Add-WindowsPackageWithRetry {
     }
 
     try {
-        Add-WindowsPackage -Path $MountPath -PackagePath $PackagePath @logArg -ErrorAction Stop | Out-Null
+        Invoke-DismCmdlet -CommandName 'Add-WindowsPackage' -Parameters (@{ Path = $MountPath; PackagePath = $PackagePath; ErrorAction = 'Stop' } + $logArg) | Out-Null
         return 'Ok'
     } catch {
         $m = [string]$_.Exception.Message
@@ -6481,7 +6478,7 @@ function Add-WindowsPackageWithRetry {
         if ($m -match '0x800f0a13') {
             Write-Caution ('0x800f0a13: Modules Installer transient error; retrying after 10s...')
             Start-Sleep -Seconds 10
-            Add-WindowsPackage -Path $MountPath -PackagePath $PackagePath @logArg -ErrorAction Stop | Out-Null
+            Invoke-DismCmdlet -CommandName 'Add-WindowsPackage' -Parameters (@{ Path = $MountPath; PackagePath = $PackagePath; ErrorAction = 'Stop' } + $logArg) | Out-Null
             return 'OkAfterRetry'
         }
         # All other errors propagate (0x800f0922, 0xC1420127, etc.)
@@ -6497,12 +6494,14 @@ function Write-DismInvocation {
         DISM is the least predictable and hardest-to-diagnose dependency
         in this pipeline: a malformed argument can fail at runtime with an
         opaque exit code and nothing in the build log to show what was
-        actually handed to it. Every mutating DISM operation - the dism.exe
-        command-line calls (via Invoke-DismCli) and the DISM cmdlets Mount /
-        Dismount / Add-WindowsPackage (via their Invoke-WimMountSafe,
-        Invoke-WimDismountSafe and Add-WindowsPackageWithRetry wrappers) -
-        routes through this helper, which surfaces the fully-resolved runtime
-        parameters into the build log BEFORE the operation runs.
+        actually handed to it. Every DISM operation routes through one of
+        two distinct-named chokepoints that call this logger first:
+        Invoke-DismCli for dism.exe command-line calls, and Invoke-DismCmdlet
+        for every DISM cmdlet, read and write (Get-WindowsImage,
+        Get-WindowsPackage, Get-WindowsOptionalFeature, Mount / Dismount /
+        Add-WindowsPackage). The in-box cmdlets are never shadowed; callers
+        pass the cmdlet name explicitly. Parameters are surfaced into the
+        build log BEFORE the operation runs.
     #>
     [CmdletBinding()]
     param(
@@ -6545,6 +6544,39 @@ function Invoke-DismCli {
     return $code
 }
 
+function Invoke-DismCmdlet {
+    <#
+    .SYNOPSIS
+        Single chokepoint for every DISM cmdlet invocation, read and write.
+    .DESCRIPTION
+        Logs the cmdlet name and its fully-resolved parameters through
+        Write-DismInvocation, then runs the real cmdlet by name with those
+        parameters splatted in, and returns whatever the cmdlet returns.
+        Gives uniform, comprehensive visibility of every DISM operation -
+        Get-WindowsImage / Get-WindowsPackage / Get-WindowsOptionalFeature
+        reads as well as Mount / Dismount / Add-WindowsPackage writes - at the
+        point of failure (corrupt or unreadable WIM, version-incompatible
+        image, missing servicing command, etc.). The in-box cmdlets are NOT
+        shadowed by same-named proxies: callers invoke this helper by its
+        distinct name and pass the cmdlet name and a parameter hashtable
+        explicitly, so Get-Command, IntelliSense and module auto-loading
+        behave normally. Errors and pipeline output propagate unchanged; only
+        logging is added (Write-DismInvocation writes via Write-Host, so the
+        returned value is exactly the cmdlet's own output).
+    .PARAMETER CommandName
+        The DISM cmdlet to run, e.g. 'Get-WindowsImage'.
+    .PARAMETER Parameters
+        Hashtable of parameters splatted into the cmdlet.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$CommandName,
+        [hashtable]$Parameters = @{}
+    )
+    Write-DismInvocation -Operation $CommandName -Parameters $Parameters
+    & $CommandName @Parameters
+}
+
 
 function Invoke-DismCleanup {
     <#
@@ -6579,7 +6611,7 @@ function Get-WimIndexInventory {
     if (-not (Test-Path -LiteralPath $WimPath)) {
         throw ('WIM not found: {0}' -f $WimPath)
     }
-    $entries = Get-WindowsImage -ImagePath $WimPath
+    $entries = Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ ImagePath = $WimPath }
     $list = New-Object System.Collections.Generic.List[object]
     foreach ($e in $entries) {
         $list.Add([pscustomobject]@{
@@ -9772,7 +9804,7 @@ function Test-PatchServicingReadinessOnMount {
 
     $installedPackages = @()
     try {
-        $installedPackages = @(Get-WindowsPackage -Path $MountPath -ErrorAction Stop)
+        $installedPackages = @(Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ Path = $MountPath; ErrorAction = 'Stop' })
     } catch {
         $msg = ('Get-WindowsPackage failed on {0}: {1}' -f $MountPath, $_.Exception.Message)
         if ($Script:PatchDependencyPolicy -eq 'Strict') {
@@ -10252,7 +10284,7 @@ function Get-LcuVersionFromInstallWim {
     $prereqDate = [DateTime]::Parse('2024-04-09')
 
     try {
-        $packages = Get-WindowsPackage -Path $MountPath -ErrorAction Stop
+        $packages = Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ Path = $MountPath; ErrorAction = 'Stop' }
     } catch {
         $result.ErrorMessage = ('Get-WindowsPackage failed: {0}' -f $_.Exception.Message)
         return $result
@@ -10508,7 +10540,7 @@ function Get-IsoBootCertReadiness {
         $mountedRo = $false
         $stepStart = Get-Date
         try {
-            $null = Mount-WindowsImage -ImagePath $bootWimPath -Index 1 -Path $bootMount -ReadOnly -ErrorAction Stop
+            $null = Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ ImagePath = $bootWimPath; Index = 1; Path = $bootMount; ReadOnly = $true; ErrorAction = 'Stop' }
             $mountedRo = $true
             $stepElapsed = [int](New-TimeSpan -Start $stepStart -End (Get-Date)).TotalSeconds
             Write-Step ('         boot.wim mounted ({0}s); inspecting EFI_EX / FONTS_EX / DVD_EX ...' -f $stepElapsed)
@@ -10538,7 +10570,7 @@ function Get-IsoBootCertReadiness {
                 Write-Step '  [2/4] Dismounting boot.wim (discard) ...'
                 $dismountStart = Get-Date
                 try {
-                    $null = Dismount-WindowsImage -Path $bootMount -Discard -ErrorAction Stop
+                    $null = Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path = $bootMount; Discard = $true; ErrorAction = 'Stop' }
                     $dismountElapsed = [int](New-TimeSpan -Start $dismountStart -End (Get-Date)).TotalSeconds
                     Write-Step ('         boot.wim dismounted ({0}s)' -f $dismountElapsed)
                 } catch {
@@ -10589,7 +10621,7 @@ function Get-IsoBootCertReadiness {
             $iwMounted = $false
             $iwMountStart = Get-Date
             try {
-                $null = Mount-WindowsImage -ImagePath $installWimPath -Index 1 -Path $installMount -ReadOnly -ErrorAction Stop
+                $null = Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ ImagePath = $installWimPath; Index = 1; Path = $installMount; ReadOnly = $true; ErrorAction = 'Stop' }
                 $iwMounted = $true
                 $iwMountElapsed = [int](New-TimeSpan -Start $iwMountStart -End (Get-Date)).TotalSeconds
                 Write-Step ('         install.wim mounted ({0}s); enumerating installed packages ...' -f $iwMountElapsed)
@@ -10615,7 +10647,7 @@ function Get-IsoBootCertReadiness {
                     Write-Step '  [4/4] Dismounting install.wim (discard) ...'
                     $iwDismountStart = Get-Date
                     try {
-                        $null = Dismount-WindowsImage -Path $installMount -Discard -ErrorAction Stop
+                        $null = Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path = $installMount; Discard = $true; ErrorAction = 'Stop' }
                         $iwDismountElapsed = [int](New-TimeSpan -Start $iwDismountStart -End (Get-Date)).TotalSeconds
                         Write-Step ('         install.wim dismounted ({0}s)' -f $iwDismountElapsed)
                     } catch {
@@ -11331,7 +11363,7 @@ function Convert-WimBootToPca2023Signed {
     $mounted = $false
     try {
         Write-Step ('Mounting boot.wim (read-only, for PCA2023 source extraction): {0}' -f $bootWimPath)
-        $null = Mount-WindowsImage -ImagePath $bootWimPath -Index 1 -Path $mount -ReadOnly -ErrorAction Stop
+        $null = Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ ImagePath = $bootWimPath; Index = 1; Path = $mount; ReadOnly = $true; ErrorAction = 'Stop' }
         $mounted = $true
 
         $exBins  = Join-Path $mount 'Windows\Boot\EFI_EX'
@@ -11411,7 +11443,7 @@ function Convert-WimBootToPca2023Signed {
     } finally {
         if ($mounted) {
             try {
-                $null = Dismount-WindowsImage -Path $mount -Discard -ErrorAction Stop
+                $null = Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path = $mount; Discard = $true; ErrorAction = 'Stop' }
             } catch {
                 # Best-effort cleanup; subsequent runs may need 'dism /Cleanup-Wim'
             } # psa-disable-line PSA3004 -- intentional best-effort dismount; cleanup happens automatically on next reboot
@@ -11557,7 +11589,7 @@ Expected path after install:
             Set-DebugStep -Step 'hyperv-check'
             Write-SubSection 'Step 5: Hyper-V availability'
             try {
-                $hv = Get-WindowsOptionalFeature -Online -FeatureName 'Microsoft-Hyper-V-All' -ErrorAction Stop
+                $hv = Invoke-DismCmdlet -CommandName 'Get-WindowsOptionalFeature' -Parameters @{ Online = $true; FeatureName = 'Microsoft-Hyper-V-All'; ErrorAction = 'Stop' }
                 if ($hv.State -eq 'Enabled') {
                     Write-Ok 'Hyper-V is Enabled.'
                 } else {
@@ -13162,7 +13194,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                     if ($expectedKbs.Count -gt 0 -and $Script:Execute) {
                         $firstIdx = $inv[0].ImageIndex
                         Set-DebugStep -Step ('verify-pkg-idx-' + $firstIdx)
-                        $pkgs = Get-WindowsPackage -ImagePath $installWim -Index $firstIdx
+                        $pkgs = Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ ImagePath = $installWim; Index = $firstIdx }
                         $pkgNames = @($pkgs | ForEach-Object { $_.PackageName })
                         foreach ($kb in $expectedKbs) {
                             $found = $false
@@ -15013,12 +15045,12 @@ function Invoke-CleanupAction {
     }
     # Discard any mounts still pointing at our mount dirs
     try {
-        $mounted = Get-WindowsImage -Mounted -ErrorAction SilentlyContinue
+        $mounted = Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ Mounted = $true; ErrorAction = 'SilentlyContinue' }
         foreach ($m in @($mounted)) {
             foreach ($d in @($Script:MountInstallDir, $Script:MountBoot1Dir, $Script:MountBoot2Dir, $Script:MountWinReDir)) {
                 if ($m.Path -and (($m.Path.TrimEnd('\')) -ieq ($d.TrimEnd('\')))) {
                     Write-Caution ('Discarding stale mount at {0} before cleanup.' -f $d)
-                    Dismount-WindowsImage -Path $d -Discard -ErrorAction SilentlyContinue | Out-Null
+                    Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path = $d; Discard = $true; ErrorAction = 'SilentlyContinue' } | Out-Null
                 }
             }
         }
