@@ -236,6 +236,8 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **CHECK 4 & CHECK 5 now resolve the OL8 `$kernelopts` indirection — fixes false INDETERMINATE/ADVISORY.** The OL8 E2E showed CHECK 4 INDETERMINATE and CHECK 5 ADVISORY even though the image was correct: on OL8 the BLS entry's cmdline line is `options $kernelopts` (a reference), and the real `root=`/`console=ttyS0` live in `/boot/grub2/grubenv` (`kernelopts=`). The checks read only the literal `options` line, so they saw neither value. Both checks now also read grubenv `kernelopts` (falling back to the `grub.cfg` `set kernelopts=` default) as a cmdline source. Verified against the live OL8 image data: `kernelopts=root=UUID=… console=tty0 console=ttyS0,115200n8` → CHECK 4 PASS (UUID), CHECK 5 PASS (console=ttyS0). OL6 (`grub.conf` `kernel`) and OL7 (`grub.cfg` `linux16`) have no grubenv `kernelopts` and are unaffected. Advisory/INDETERMINATE classification only — no gate or boot behaviour change. The serial-console fix itself was already correct on OL8 (grubby wrote `console=ttyS0` into `kernelopts`; GRUB_TERMINAL/SERIAL and `serial-getty@ttyS0` all applied); this only stops the checks from crying wolf. See SPEC D.25 / Part-A CHECK 4.
+
 - **Nitro assurance report no longer lists ARM/Graviton example instance types.** The advisory
   report's per-generation "e.g." families included Graviton (ARM) types — `T4g M6g C6g R6g` (v2),
   `M7g C7g R7g` (v4), `M8g C8g R8g C7gn` and `Trn2` (v5) — which **cannot launch an x86-64 AMI**,

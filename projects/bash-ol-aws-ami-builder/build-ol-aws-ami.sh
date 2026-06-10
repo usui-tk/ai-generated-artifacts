@@ -2955,11 +2955,12 @@ phase6_nitro_readiness_check() {
   # --- CHECK 4: bootloader root= uses UUID/LABEL -----------------------------
   # Covers GRUB2 (linux/linuxefi), OL6 GRUB-legacy (grub.conf / menu.lst,
   # 'kernel'), AND BLS (OL8+): on BLS the kernel cmdline -- including root= --
-  # lives in /boot/loader/entries/*.conf 'options', NOT in grub.cfg menuentries.
-  # A grub.cfg-only scan finds no 'linux' lines there and would PASS vacuously
-  # (false PASS), so we read the BLS entries too and treat "no root= anywhere" as
-  # INDETERMINATE rather than PASS.
-  local grubcfg="" g d b roots bad_root bls_entries _e bls_roots
+  # lives in /boot/loader/entries/*.conf 'options'. On OL8 that line is commonly
+  # 'options $kernelopts', a reference resolved at boot from /boot/grub2/grubenv
+  # ('kernelopts='), with grub.cfg carrying a 'set kernelopts=' fallback -- so we
+  # also read grubenv (then the grub.cfg fallback). "no root= anywhere" is
+  # reported INDETERMINATE, not a vacuous PASS.
+  local grubcfg="" g d b roots bad_root bls_entries _e bls_roots kopts kopts_root
   for g in /boot/grub2/grub.cfg /boot/grub/grub.cfg /boot/grub/grub.conf /boot/grub/menu.lst; do
     d="$(dirname "${g}")"; b="$(basename "${g}")"
     if virt-ls -a "${img}" "${d}" 2>/dev/null | grep -qx "${b}"; then grubcfg="${g}"; break; fi
@@ -2976,10 +2977,16 @@ phase6_nitro_readiness_check() {
       [[ -n "${bls_roots}" ]] && roots="$(printf '%s\n%s' "${roots}" "${bls_roots}")"
     done <<< "${bls_entries}"
   fi
+  # grubenv kernelopts resolves the BLS 'options $kernelopts' indirection (OL8);
+  # fall back to the grub.cfg 'set kernelopts=' default if grubenv has none.
+  kopts="$(virt-cat -a "${img}" /boot/grub2/grubenv 2>/dev/null | grep -E '^kernelopts=' || true)"
+  [[ -z "${kopts}" && -n "${grubcfg}" ]] && kopts="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*set kernelopts=' || true)"
+  kopts_root="$(printf '%s\n' "${kopts}" | grep -oE 'root=[^[:space:]]+' || true)"
+  [[ -n "${kopts_root}" ]] && roots="$(printf '%s\n%s' "${roots}" "${kopts_root}")"
   roots="$(printf '%s\n' "${roots}" | grep -E 'root=' | sort -u || true)"
-  if [[ -n "${grubcfg}" || -n "${bls_entries}" ]]; then
+  if [[ -n "${grubcfg}" || -n "${bls_entries}" || -n "${kopts}" ]]; then
     if [[ -z "${roots}" ]]; then
-      log_warn "  [OLAWS-CHK04] [CHECK 4] bootloader: INDETERMINATE (no root= in grub.cfg menuentries or /boot/loader/entries/*.conf)"
+      log_warn "  [OLAWS-CHK04] [CHECK 4] bootloader: INDETERMINATE (no root= in grub.cfg menuentries, /boot/loader/entries/*.conf, or grubenv kernelopts)"
       indeterminate=1
     else
       bad_root="$(printf '%s\n' "${roots}" | grep -E 'root=/dev/(sd|xvd|hd)[a-z]' | tr '\n' ' ' || true)"
@@ -2999,11 +3006,13 @@ phase6_nitro_readiness_check() {
   # AWS 'Get System Log' only captures output on ttyS0. B4 sets
   # 'console=tty0 console=ttyS0,115200n8' deterministically and this check
   # verifies the result IN THE SAME BUILD. BLS-aware: on OL8+ the kernel cmdline
-  # lives in /boot/loader/entries/*.conf 'options' (NOT grub.cfg), so we inspect
-  # BOTH the bootloader menuentries (OL6 grub.conf 'kernel', OL7 'linux16') AND
-  # the BLS entries. ADVISORY (warn only, never fails the gate): missing ttyS0
-  # costs the console log, not the boot. If this warns, B4 did not take effect.
-  local serial_lines=0 bls_serial=0 serial_src="" bls_entries _e
+  # lives in /boot/loader/entries/*.conf 'options' (NOT grub.cfg) -- and that line
+  # is commonly 'options $kernelopts', resolved from /boot/grub2/grubenv at boot,
+  # so we inspect the menuentries (OL6 'kernel', OL7 'linux16'), the BLS entries,
+  # AND grubenv 'kernelopts=' (then the grub.cfg 'set kernelopts=' fallback).
+  # ADVISORY (warn only, never fails the gate): missing ttyS0 costs the console
+  # log, not the boot. If this warns, B4 did not take effect.
+  local serial_lines=0 bls_serial=0 kopts_serial=0 serial_src="" bls_entries _e kopts
   if [[ -n "${grubcfg}" ]]; then
     serial_lines="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*(linux|linux16|linuxefi|kernel)[[:space:]]' | grep -c 'console=ttyS0' || true)"
     [[ "${serial_lines}" -gt 0 ]] && serial_src="${grubcfg}"
@@ -3018,10 +3027,18 @@ phase6_nitro_readiness_check() {
     done <<< "${bls_entries}"
     [[ "${bls_serial}" -gt 0 && -z "${serial_src}" ]] && serial_src="/boot/loader/entries/*.conf (BLS)"
   fi
-  if [[ "${serial_lines}" -gt 0 || "${bls_serial}" -gt 0 ]]; then
+  # grubenv kernelopts resolves the BLS 'options $kernelopts' indirection (OL8);
+  # fall back to the grub.cfg 'set kernelopts=' default if grubenv has none.
+  kopts="$(virt-cat -a "${img}" /boot/grub2/grubenv 2>/dev/null | grep -E '^kernelopts=' || true)"
+  [[ -z "${kopts}" && -n "${grubcfg}" ]] && kopts="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*set kernelopts=' || true)"
+  if printf '%s\n' "${kopts}" | grep -q 'console=ttyS0'; then
+    kopts_serial=1
+    [[ -z "${serial_src}" ]] && serial_src="/boot/grub2/grubenv (kernelopts)"
+  fi
+  if [[ "${serial_lines}" -gt 0 || "${bls_serial}" -gt 0 || "${kopts_serial}" -gt 0 ]]; then
     log_info "  [OLAWS-CHK05] [CHECK 5] serial console: PASS (console=ttyS0 on the kernel cmdline in ${serial_src})"
-  elif [[ -n "${grubcfg}" || -n "${bls_entries}" ]]; then
-    log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no console=ttyS0 on the kernel cmdline in grub.cfg or /boot/loader/entries/*.conf; AWS 'Get System Log' will be empty -- B4 should have set it)"
+  elif [[ -n "${grubcfg}" || -n "${bls_entries}" || -n "${kopts}" ]]; then
+    log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no console=ttyS0 on the kernel cmdline in grub.cfg, /boot/loader/entries/*.conf, or grubenv kernelopts; AWS 'Get System Log' will be empty -- B4 should have set it)"
   else
     log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no bootloader config located to inspect)"
   fi

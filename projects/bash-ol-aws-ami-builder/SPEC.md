@@ -473,8 +473,10 @@ present (built-in or module); (3) `/etc/fstab` uses `UUID=`/`LABEL=` rather than
 bootloader `root=` is likewise UUID/LABEL/LVM based (GRUB2 `linux*` lines and
 OL6 GRUB-legacy `kernel` lines in `grub.conf`/`menu.lst`, **and** the BLS
 `options` line in `/boot/loader/entries/*.conf` on OL8+, where the cmdline does
-not live in `grub.cfg`; "no `root=` found anywhere" is reported INDETERMINATE,
-not a vacuous PASS). It runs after the
+not live in `grub.cfg` — and where that line is commonly `options $kernelopts`,
+so the check also resolves `kernelopts` from `/boot/grub2/grubenv`, falling back
+to the `set kernelopts=` default in `grub.cfg`; "no `root=` found anywhere" is
+reported INDETERMINATE, not a vacuous PASS). It runs after the
 VMDK is produced and before the upload/snapshot/register phases, so a
 non-bootable image is caught before those wasted steps. `enforce` `die`s on a
 blocking finding; `warn` reports without dying; `off` skips it. Results that
@@ -2633,15 +2635,18 @@ The OL7–10 layers live in the Phase-3 hook
 `cloud/aws/provision.sh`, **guarded on `/etc/default/grub`** (GRUB2-only), so it
 is a clean no-op on OL6 — the two paths never overlap (per-OS isolation).
 
-**Verification (CHECK 5, advisory) — BLS-aware.** Phase 6 inspects **both** the
-located bootloader menuentries (OL6 `grub.conf` `kernel`, OL7 `grub.cfg`
-`linux16`) **and** the BLS entries (`/boot/loader/entries/*.conf` `options` — the
-truth source on OL8+), and PASSes if `console=ttyS0` is on the cmdline in either.
-It remains **advisory** (warn only, never fails the gate): a missing serial
-console costs observability, not bootability (one `fail=1` from fatal if ever
-wanted). On a launched instance, confirm with: `cat /proc/cmdline`; `sudo grubby
---info=ALL | grep args` (OL7–10); `cat /boot/loader/entries/*.conf | grep
-^options` (OL8–10); `sudo grep -E 'serial|terminal' /boot/grub2/grub.cfg`
+**Verification (CHECK 5, advisory) — BLS-aware.** Phase 6 inspects the located
+bootloader menuentries (OL6 `grub.conf` `kernel`, OL7 `grub.cfg` `linux16`), the
+BLS entries (`/boot/loader/entries/*.conf` `options`), **and** — because on OL8
+that `options` line is commonly `$kernelopts` rather than the expanded cmdline —
+the `kernelopts` value in `/boot/grub2/grubenv` (falling back to the `grub.cfg`
+`set kernelopts=` default). It PASSes if `console=ttyS0` is on the cmdline in any
+of these. It remains **advisory** (warn only, never fails the gate): a missing
+serial console costs observability, not bootability (one `fail=1` from fatal if
+ever wanted). On a launched instance, confirm with: `cat /proc/cmdline`; `sudo
+grubby --info=ALL | grep args` (OL7–10); `sudo grub2-editenv list | grep
+kernelopts` or `cat /boot/loader/entries/*.conf | grep ^options` (OL8–10); `sudo
+grep -E 'serial|terminal' /boot/grub2/grub.cfg`
 (OL7–10) or `/boot/grub/grub.conf` (OL6); and `systemctl is-enabled
 serial-getty@ttyS0.service` (OL7–10).
 
