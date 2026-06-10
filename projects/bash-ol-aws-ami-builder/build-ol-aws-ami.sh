@@ -3373,7 +3373,9 @@ phase9_register_ami() {
   log_info "  AMI build completed successfully"
   log_info "=========================================="
   local ena_summary
-  if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
+  # Mirror the AMI-description gate: the self-build hook is injected for OL6/OL7
+  # only, so OL8+ keep their in-distro ENA driver even when ENA_DRIVER_BUILD=1.
+  if [[ "${ENA_DRIVER_BUILD}" -eq 1 && ( "${OL_MAJOR_VERSION}" == "6" || "${OL_MAJOR_VERSION}" == "7" ) ]]; then
     ena_summary="self-built ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized)"
   else
     ena_summary="stock in-box (pure OL AMI)"
