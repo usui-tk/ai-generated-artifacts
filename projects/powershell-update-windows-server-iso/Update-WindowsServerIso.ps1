@@ -543,8 +543,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.10-r11.22'
-$Script:ScriptTag     = 'route-all-dism-through-helpers'
+$Script:ScriptVersion = 'update-wsi-2026.06.11-r11.23'
+$Script:ScriptTag     = 'fix-dism-cleanup-arg-vector'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6578,6 +6578,36 @@ function Invoke-DismCmdlet {
 }
 
 
+function Get-DismCleanupArgumentList {
+    <#
+    .SYNOPSIS
+        Build the dism.exe argument vector for the offline /Cleanup-Image pass.
+    .DESCRIPTION
+        Returns the arguments as a [string[]] so each token reaches dism.exe as
+        a SEPARATE argument. Kept as a pure function (no invocation, no side
+        effects) so the vector can be unit-tested directly. This guards the
+        operator-precedence trap that previously collapsed the vector: written
+        as @('/Image:' + $MountPath, '/Cleanup-Image', ...), PowerShell binds
+        the comma operator tighter than +, so the expression parsed as
+        '/Image:' + ($MountPath, '/Cleanup-Image', '/StartComponentCleanup',
+        '/ResetBase') -- the trailing array was stringified (space-joined) into
+        the /Image: value, yielding a SINGLE argument. dism.exe then saw one
+        malformed /Image: token with no servicing command and failed with exit
+        code 1639 ("the command-line is missing a required servicing command").
+        Using "/Image:$MountPath" (interpolation, no + operator) keeps the
+        first element intact and the vector at four discrete tokens.
+    .PARAMETER MountPath
+        Path to the mounted offline image (the /Image: target).
+    .OUTPUTS
+        String[] - the four dism.exe arguments, in order.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)] [string]$MountPath)
+    return @("/Image:$MountPath", '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase')
+}
+
+
 function Invoke-DismCleanup {
     <#
     .SYNOPSIS
@@ -6591,7 +6621,7 @@ function Invoke-DismCleanup {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string]$MountPath)
     Set-DebugStep -Step 'dism-cleanup-image'
-    $dismArgs = @('/Image:' + $MountPath, '/Cleanup-Image', '/StartComponentCleanup', '/ResetBase')
+    $dismArgs = Get-DismCleanupArgumentList -MountPath $MountPath
     $code = Invoke-DismCli -Arguments $dismArgs -Context 'cleanup-image'
     if ($code -ne 0) {
         throw ('dism.exe /Cleanup-Image failed with exit code {0}' -f $code)

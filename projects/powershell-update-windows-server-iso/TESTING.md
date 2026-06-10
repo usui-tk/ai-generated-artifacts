@@ -87,6 +87,7 @@ a build identifier plus a calendar date. Pending items are marked
 | T18 servicing_dependency_servicing_stack_populate_test.py (17 assertions, pure halves of the SS populate: `Select-OfflineSyncLcuLeafRevision` leaf choice + `Update-ServicingStackFromMeta` field population from CBS metadata; SPEC §B.19.9) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
 | T19 servicing_dependency_data_contract_test.py (11 assertions, `Test-DataContractConsistency` status classification Current/Stale/Refuse/Foreign/Unknown + directory expansion + roll-up; committed Layer 2 DB classifies Current; SPEC §B.19.13) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
 | T20 removed_live_wua_guard_test.py (21 assertions, offline static guard: the r11.19-removed live-WUA functions/parameters stay absent and P06 ValidatePatchServicing stays wired + blocking; SPEC §B.19.12) | ✓ all pass | r11.19 remove-live-wua-scan-data-first-servicing-gate build / 2026-06-09 |
+| T24 dism_cleanup_args_test.py (4 assertions, `Get-DismCleanupArgumentList` returns a four-token `[string[]]` vector via `"/Image:$MountPath"`; guards the comma/`+` precedence collapse that made `dism.exe /Cleanup-Image` fail with exit 1639) | ✓ all pass | r11.23 fix-dism-cleanup-arg-vector build / 2026-06-11 |
 | Part C §C.3.4 — `canonical_json_format_check.py` (27 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Scope-invariants gate — `servicing_dependency_scope_invariants_test.py` (23 assertions, EOS/ESU deny-list + allow-overrides over Layer 2 + fixture + synthetic; SPEC §B.19.4/§B.19.4.1) | ✓ all pass | r11.2 wsusscn2-phase2c-eos-esu-scope build / 2026-05-29 |
@@ -436,6 +437,7 @@ python3 tests/servicing_dependency_data_contract_test.py     # T19: 11 data-cont
 python3 tests/servicing_dependency_ssu_prereq_pipeline_test.py   # T21: 20 SSU->LCU end-to-end pipeline assertions (0x800f0823 prediction)
 python3 tests/servicing_dependency_ssu_prereq_readiness_test.py  # T22: 15 SSU->LCU readiness-unit assertions
 python3 tests/config_required_ssu_downloadurl_test.py            # T23: 19 required-SSU consistency-contract assertions (PatchBaseline.NeutralPatches)
+python3 tests/dism_cleanup_args_test.py                          # T24: 4 cleanup-arg-vector assertions (DISM /Cleanup-Image 1639 precedence-collapse guard)
 
 # Data-contract / schema / format gates (every commit that touches data)
 python3 tests/config_schema_test.py                          # config schema gate
