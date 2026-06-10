@@ -236,6 +236,16 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **CHECK 4 (bootloader `root=`) is now BLS-aware — closes a silent false-PASS on OL8/9/10.** The
+  Phase-6 assurance check scanned only `grub.cfg` menuentries (`linux`/`linux16`/`kernel`) for
+  `root=`. On OL8+ (BLS) the kernel cmdline — including `root=` — lives in
+  `/boot/loader/entries/*.conf` (`options`), not in `grub.cfg`, so the scan found nothing and
+  reported PASS **without inspecting the real cmdline** (a device-name `root=/dev/xvda1` would have
+  slipped through). CHECK 4 now also reads the BLS `options` lines, and reports INDETERMINATE
+  (not a vacuous PASS) when no `root=` is found in either source. OL6/OL7 behaviour is unchanged.
+  Extraction + device-name detection validated in isolation (BLS LVM/UUID/device-name, OL7
+  `linux16`, OL6 `kernel`); VM-path re-validation is the maintainer's. See SPEC Part-A CHECK 4.
+
 - **Serial console now persists on OL8/9/10 (BLS), plus the full AWS-recommended config.** The
   OL6–OL10 E2E run found `console=ttyS0` missing from the kernel cmdline on OL8/9/10 (CHECK 5
   ADVISORY; AWS `Get System Log` empty). Root cause: OL8+ enable the GRUB BootLoaderSpec, so the

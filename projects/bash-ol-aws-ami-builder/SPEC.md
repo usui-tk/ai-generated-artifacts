@@ -471,7 +471,10 @@ initramfs (else Nitro cannot mount the EBS/NVMe root); (2) the ENA driver is
 present (built-in or module); (3) `/etc/fstab` uses `UUID=`/`LABEL=` rather than
 `/dev/sd*`|`/dev/xvd*` (Nitro renames disks to `/dev/nvme*`); and (4) the
 bootloader `root=` is likewise UUID/LABEL/LVM based (GRUB2 `linux*` lines and
-OL6 GRUB-legacy `kernel` lines in `grub.conf`/`menu.lst`). It runs after the
+OL6 GRUB-legacy `kernel` lines in `grub.conf`/`menu.lst`, **and** the BLS
+`options` line in `/boot/loader/entries/*.conf` on OL8+, where the cmdline does
+not live in `grub.cfg`; "no `root=` found anywhere" is reported INDETERMINATE,
+not a vacuous PASS). It runs after the
 VMDK is produced and before the upload/snapshot/register phases, so a
 non-bootable image is caught before those wasted steps. `enforce` `die`s on a
 blocking finding; `warn` reports without dying; `off` skips it. Results that

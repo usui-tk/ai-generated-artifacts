@@ -2953,23 +2953,45 @@ phase6_nitro_readiness_check() {
   fi
 
   # --- CHECK 4: bootloader root= uses UUID/LABEL -----------------------------
-  # Covers GRUB2 (linux/linuxefi) and OL6 GRUB-legacy (grub.conf / menu.lst, 'kernel').
-  local grubcfg="" g d b roots bad_root
+  # Covers GRUB2 (linux/linuxefi), OL6 GRUB-legacy (grub.conf / menu.lst,
+  # 'kernel'), AND BLS (OL8+): on BLS the kernel cmdline -- including root= --
+  # lives in /boot/loader/entries/*.conf 'options', NOT in grub.cfg menuentries.
+  # A grub.cfg-only scan finds no 'linux' lines there and would PASS vacuously
+  # (false PASS), so we read the BLS entries too and treat "no root= anywhere" as
+  # INDETERMINATE rather than PASS.
+  local grubcfg="" g d b roots bad_root bls_entries _e bls_roots
   for g in /boot/grub2/grub.cfg /boot/grub/grub.cfg /boot/grub/grub.conf /boot/grub/menu.lst; do
     d="$(dirname "${g}")"; b="$(basename "${g}")"
     if virt-ls -a "${img}" "${d}" 2>/dev/null | grep -qx "${b}"; then grubcfg="${g}"; break; fi
   done
+  roots=""
   if [[ -n "${grubcfg}" ]]; then
-    roots="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*(linux|linux16|linuxefi|kernel)[[:space:]]' | grep -oE 'root=[^[:space:]]+' | sort -u || true)"
-    bad_root="$(printf '%s\n' "${roots}" | grep -E 'root=/dev/(sd|xvd|hd)[a-z]' | tr '\n' ' ' || true)"
-    if [[ -n "${bad_root// /}" ]]; then
-      log_error "  [OLAWS-CHK04] [CHECK 4] bootloader: FAIL (kernel device-name root=: ${bad_root})"
-      fail=1
+    roots="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*(linux|linux16|linuxefi|kernel)[[:space:]]' | grep -oE 'root=[^[:space:]]+' || true)"
+  fi
+  bls_entries="$(virt-ls -a "${img}" /boot/loader/entries 2>/dev/null | grep '\.conf$' || true)"
+  if [[ -n "${bls_entries}" ]]; then
+    while IFS= read -r _e; do
+      [[ -z "${_e}" ]] && continue
+      bls_roots="$(virt-cat -a "${img}" "/boot/loader/entries/${_e}" 2>/dev/null | grep -E '^[[:space:]]*options[[:space:]]' | grep -oE 'root=[^[:space:]]+' || true)"
+      [[ -n "${bls_roots}" ]] && roots="$(printf '%s\n%s' "${roots}" "${bls_roots}")"
+    done <<< "${bls_entries}"
+  fi
+  roots="$(printf '%s\n' "${roots}" | grep -E 'root=' | sort -u || true)"
+  if [[ -n "${grubcfg}" || -n "${bls_entries}" ]]; then
+    if [[ -z "${roots}" ]]; then
+      log_warn "  [OLAWS-CHK04] [CHECK 4] bootloader: INDETERMINATE (no root= in grub.cfg menuentries or /boot/loader/entries/*.conf)"
+      indeterminate=1
     else
-      log_info "  [OLAWS-CHK04] [CHECK 4] bootloader: PASS (${grubcfg}: root= is UUID/LABEL/LVM based)"
+      bad_root="$(printf '%s\n' "${roots}" | grep -E 'root=/dev/(sd|xvd|hd)[a-z]' | tr '\n' ' ' || true)"
+      if [[ -n "${bad_root// /}" ]]; then
+        log_error "  [OLAWS-CHK04] [CHECK 4] bootloader: FAIL (kernel device-name root=: ${bad_root})"
+        fail=1
+      else
+        log_info "  [OLAWS-CHK04] [CHECK 4] bootloader: PASS (root= is UUID/LABEL/LVM based)"
+      fi
     fi
   else
-    log_warn "  [OLAWS-CHK04] [CHECK 4] bootloader: INDETERMINATE (no grub.cfg/grub.conf/menu.lst found)"
+    log_warn "  [OLAWS-CHK04] [CHECK 4] bootloader: INDETERMINATE (no grub.cfg/grub.conf/menu.lst or BLS entries found)"
     indeterminate=1
   fi
 
