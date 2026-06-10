@@ -1328,39 +1328,99 @@ OLAWS_NITRO_BODY
   # cloud/aws/provision.sh serial-console hook (GRUB2 / OL7+).
   #
   # AWS 'Get System Log' (the instance console) only captures output sent to the
-  # serial port ttyS0. The upstream OL7+ GRUB_CMDLINE_LINUX carries console=tty0
+  # serial port ttyS0; the interactive EC2 Serial Console additionally needs GRUB
+  # and a login getty on that port. The upstream OL7+ config carries console=tty0
   # but NOT console=ttyS0, so a built AMI boots fine yet the console log is empty
   # -- which is exactly what made the OL6 SSH failure (D.24) so hard to debug.
-  # This hook ensures 'console=tty0 console=ttyS0,115200n8' on the GRUB2 kernel
-  # cmdline and regenerates grub.cfg. It is GUARDED on /etc/default/grub, which
-  # exists only on GRUB2 systems (OL7+); on OL6 (GRUB Legacy) it is a no-op, so
-  # OL6's own kickstart handles the serial console (per-OS isolation -- an OL7+
-  # change cannot regress OL6, and vice-versa). Idempotent via the marker and an
-  # internal 'already has console=ttyS0' guard.
+  # This hook applies the AWS-recommended serial-console config in THREE layers:
+  #   (1) kernel cmdline 'console=tty0 console=ttyS0,115200n8' on EVERY existing
+  #       boot entry via `grubby --update-kernel=ALL` -- the BLS-aware, version-
+  #       stable path. On OL8+ the kernel cmdline lives in /boot/loader/entries
+  #       (BLS), which a plain grub2-mkconfig does NOT rewrite (this is why OL8/9/10
+  #       previously came up without ttyS0); grubby updates those entries directly,
+  #       so we avoid the grub2-mkconfig --update-bls-cmdline version matrix (flag
+  #       needed on 8.x/9.0-9.1, dropped on 9.2+). GRUB_CMDLINE_LINUX is also set so
+  #       future kernel installs inherit it.
+  #   (2) GRUB-over-serial: GRUB_TERMINAL="console serial" + GRUB_SERIAL_COMMAND so
+  #       the interactive EC2 Serial Console reaches the GRUB menu/prompt.
+  #   (3) serial-getty@ttyS0 enabled (a login prompt on the serial console).
+  # GUARDED on /etc/default/grub, which exists only on GRUB2 (OL7+); on OL6 (GRUB
+  # Legacy) it is a no-op, so OL6's own kickstart handles its serial console
+  # (per-OS isolation -- an OL7+ change cannot regress OL6, and vice-versa).
+  # Idempotent via the marker and per-layer guards.
   local serial_body
   serial_body="$(cat <<'OLAWS_SERIAL_BODY'
 #!/bin/sh
-# Ensure the AWS serial console (ttyS0) is on the GRUB2 kernel cmdline so
-# 'Get System Log' captures boot output. GRUB2 only (guarded on /etc/default/grub).
+# AWS-optimized serial console for GRUB2 systems (OL7+). Three layers:
+#   (1) kernel cmdline 'console=tty0 console=ttyS0,115200n8' on EVERY boot entry
+#       (Get System Log + serial getty attach here) -- via grubby (BLS-aware).
+#   (2) GRUB-over-serial (GRUB_TERMINAL/GRUB_SERIAL_COMMAND).
+#   (3) serial-getty@ttyS0 enabled.
+# GRUB2 only (guarded on /etc/default/grub); OL6 handles its own in the kickstart.
 set -u
 [ -f /etc/default/grub ] || { echo "[serial-console] no /etc/default/grub (GRUB Legacy?); skipping"; exit 0; }
+
+# --- (1) kernel cmdline ----------------------------------------------------
+# GRUB_CMDLINE_LINUX governs FUTURE kernel installs.
 if grep -q 'console=ttyS0' /etc/default/grub; then
   echo "[serial-console] console=ttyS0 already present in /etc/default/grub"
 else
-  # Append ttyS0 inside the existing GRUB_CMDLINE_LINUX="...".
   sed -i -e 's/\(GRUB_CMDLINE_LINUX="[^"]*\)"/\1 console=ttyS0,115200n8"/' /etc/default/grub
-  # Make sure console=tty0 is also present (kept as the primary VGA console).
   grep -q 'console=tty0' /etc/default/grub || \
     sed -i -e 's/\(GRUB_CMDLINE_LINUX="\)/\1console=tty0 /' /etc/default/grub
-  echo "[serial-console] added console=ttyS0,115200n8 to GRUB_CMDLINE_LINUX"
+  echo "[serial-console] added console=ttyS0,115200n8 to GRUB_CMDLINE_LINUX (future kernels)"
 fi
-# Regenerate grub.cfg at the correct path (legacy-bios AMIs use /boot/grub2).
+# grubby updates EXISTING entries directly -- the part grub2-mkconfig does NOT do
+# on BLS (OL8+: entries in /boot/loader/entries). Version-stable across OL7-10.
+if command -v grubby >/dev/null 2>&1; then
+  if grubby --update-kernel=ALL --args="console=tty0 console=ttyS0,115200n8"; then
+    echo "[serial-console] grubby: applied console=ttyS0 to ALL existing kernels"
+  else
+    echo "[serial-console] WARNING: grubby --update-kernel=ALL failed"
+  fi
+else
+  echo "[serial-console] WARNING: grubby not found; relying on GRUB_CMDLINE_LINUX + grub2-mkconfig"
+fi
+
+# --- (2) GRUB-over-serial (interactive EC2 Serial Console) -----------------
+# GRUB_TERMINAL supersedes GRUB_TERMINAL_OUTPUT; drop the latter to avoid conflict.
+sed -i -e '/^GRUB_TERMINAL_OUTPUT=/d' /etc/default/grub
+if grep -q '^GRUB_TERMINAL=' /etc/default/grub; then
+  sed -i -e 's/^GRUB_TERMINAL=.*/GRUB_TERMINAL="console serial"/' /etc/default/grub
+else
+  printf 'GRUB_TERMINAL="console serial"\n' >> /etc/default/grub
+fi
+if grep -q '^GRUB_SERIAL_COMMAND=' /etc/default/grub; then
+  sed -i -e 's/^GRUB_SERIAL_COMMAND=.*/GRUB_SERIAL_COMMAND="serial --speed=115200"/' /etc/default/grub
+else
+  printf 'GRUB_SERIAL_COMMAND="serial --speed=115200"\n' >> /etc/default/grub
+fi
+echo "[serial-console] set GRUB_TERMINAL/GRUB_SERIAL_COMMAND (GRUB-over-serial)"
+
+# --- regenerate grub.cfg (embeds (2); on non-BLS also re-embeds (1)) --------
 if [ -d /sys/firmware/efi ] && [ -f /boot/efi/EFI/redhat/grub.cfg ]; then
   grub2-mkconfig -o /boot/efi/EFI/redhat/grub.cfg || echo "[serial-console] WARNING: grub2-mkconfig (EFI) failed"
 elif [ -f /boot/grub2/grub.cfg ]; then
   grub2-mkconfig -o /boot/grub2/grub.cfg || echo "[serial-console] WARNING: grub2-mkconfig failed"
 else
   echo "[serial-console] WARNING: no grub2.cfg found to regenerate"
+fi
+
+# --- (3) serial getty (login prompt on ttyS0) ------------------------------
+# systemd auto-spawns serial-getty for the console= device; enable it explicitly
+# for determinism. Offline (virt-customize) 'systemctl enable' may no-op under
+# chroot detection, so fall back to the symlink it would create.
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable serial-getty@ttyS0.service >/dev/null 2>&1 || {
+    mkdir -p /etc/systemd/system/getty.target.wants
+    ln -sf /usr/lib/systemd/system/serial-getty@.service \
+           /etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service
+  }
+  if [ -e /etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service ]; then
+    echo "[serial-console] serial-getty@ttyS0 enabled"
+  else
+    echo "[serial-console] WARNING: could not enable serial-getty@ttyS0"
+  fi
 fi
 exit 0
 OLAWS_SERIAL_BODY
@@ -1379,7 +1439,7 @@ OLAWS_SERIAL_BODY
         printf '# <<< [ol-aws-ami-builder PATCH serial-console] <<<\n'
       } >> "${aws_provision}"
       if grep -Fq '[ol-aws-ami-builder PATCH serial-console]' "${aws_provision}"; then
-        log_info "  [OLAWS-CON01] serial-console hook injected (console=tty0 console=ttyS0,115200n8 + grub2-mkconfig)"
+        log_info "  [OLAWS-CON01] serial-console hook injected (grubby --update-kernel=ALL console=ttyS0 + GRUB_TERMINAL/SERIAL + serial-getty@ttyS0)"
       else
         die "Failed to inject serial-console hook into ${aws_provision}"
       fi
@@ -1906,6 +1966,18 @@ echo "RUN_FIRSTBOOT=NO" > /etc/sysconfig/firstboot
 #  empty and OL6 boot failures undebuggable -- see SPEC D.25.)
 if ! grep -q 'console=ttyS0' /boot/grub/grub.conf; then
   sed -i -e 's/console=tty0/console=tty0 console=ttyS0,115200n8/g' /boot/grub/grub.conf
+fi
+
+# (2) GRUB-over-serial for OL6 (GRUB Legacy): make GRUB itself talk to ttyS0 so
+# the interactive EC2 Serial Console reaches the boot menu. This is the GRUB
+# Legacy equivalent of GRUB2's GRUB_TERMINAL="console serial" +
+# GRUB_SERIAL_COMMAND -- the 'serial'/'terminal' directives in grub.conf's global
+# section (inserted before the first 'title' so they stay global). Idempotent.
+# NOTE: 'terminal --timeout=10' makes GRUB wait up to 10s for a keypress to pick
+# the active terminal; on a headless boot it then defaults to serial. This adds a
+# small menu-selection delay -- acceptable for OL6 (verification/legacy only).
+if ! grep -q '^serial ' /boot/grub/grub.conf; then
+  sed -i '0,/^title/ s/^title/serial --unit=0 --speed=115200\nterminal --timeout=10 serial console\n&/' /boot/grub/grub.conf
 fi
 
 EXCLUDE_DOCS="no"
@@ -2903,20 +2975,31 @@ phase6_nitro_readiness_check() {
 
   # --- CHECK 5: serial console on the kernel cmdline (advisory) --------------
   # AWS 'Get System Log' only captures output on ttyS0. B4 sets
-  # 'console=tty0 console=ttyS0,115200n8' deterministically (OL6 grub.conf,
-  # OL7+ /etc/default/grub -> grub2-mkconfig) and this check verifies the result
-  # IN THE SAME BUILD. It is ADVISORY (warn only, never fails the gate): missing
-  # ttyS0 costs you the console log, not the boot, so it must not block an
-  # otherwise-bootable AMI. If this ever warns, B4 did not take effect -- treat
-  # it as a real signal. (One-line switch to fatal: set `fail=1` in the warn arm.)
+  # 'console=tty0 console=ttyS0,115200n8' deterministically and this check
+  # verifies the result IN THE SAME BUILD. BLS-aware: on OL8+ the kernel cmdline
+  # lives in /boot/loader/entries/*.conf 'options' (NOT grub.cfg), so we inspect
+  # BOTH the bootloader menuentries (OL6 grub.conf 'kernel', OL7 'linux16') AND
+  # the BLS entries. ADVISORY (warn only, never fails the gate): missing ttyS0
+  # costs the console log, not the boot. If this warns, B4 did not take effect.
+  local serial_lines=0 bls_serial=0 serial_src="" bls_entries _e
   if [[ -n "${grubcfg}" ]]; then
-    local serial_lines
     serial_lines="$(virt-cat -a "${img}" "${grubcfg}" 2>/dev/null | grep -E '^[[:space:]]*(linux|linux16|linuxefi|kernel)[[:space:]]' | grep -c 'console=ttyS0' || true)"
-    if [[ "${serial_lines}" -gt 0 ]]; then
-      log_info "  [OLAWS-CHK05] [CHECK 5] serial console: PASS (console=ttyS0 on the kernel cmdline in ${grubcfg})"
-    else
-      log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no console=ttyS0 on the kernel cmdline in ${grubcfg}; AWS 'Get System Log' will be empty -- B4 should have set it)"
-    fi
+    [[ "${serial_lines}" -gt 0 ]] && serial_src="${grubcfg}"
+  fi
+  bls_entries="$(virt-ls -a "${img}" /boot/loader/entries 2>/dev/null | grep '\.conf$' || true)"
+  if [[ -n "${bls_entries}" ]]; then
+    while IFS= read -r _e; do
+      [[ -z "${_e}" ]] && continue
+      if virt-cat -a "${img}" "/boot/loader/entries/${_e}" 2>/dev/null | grep -E '^[[:space:]]*options[[:space:]]' | grep -q 'console=ttyS0'; then
+        bls_serial=$((bls_serial + 1))
+      fi
+    done <<< "${bls_entries}"
+    [[ "${bls_serial}" -gt 0 && -z "${serial_src}" ]] && serial_src="/boot/loader/entries/*.conf (BLS)"
+  fi
+  if [[ "${serial_lines}" -gt 0 || "${bls_serial}" -gt 0 ]]; then
+    log_info "  [OLAWS-CHK05] [CHECK 5] serial console: PASS (console=ttyS0 on the kernel cmdline in ${serial_src})"
+  elif [[ -n "${grubcfg}" || -n "${bls_entries}" ]]; then
+    log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no console=ttyS0 on the kernel cmdline in grub.cfg or /boot/loader/entries/*.conf; AWS 'Get System Log' will be empty -- B4 should have set it)"
   else
     log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no bootloader config located to inspect)"
   fi

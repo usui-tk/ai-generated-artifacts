@@ -236,6 +236,22 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Serial console now persists on OL8/9/10 (BLS), plus the full AWS-recommended config.** The
+  OL6–OL10 E2E run found `console=ttyS0` missing from the kernel cmdline on OL8/9/10 (CHECK 5
+  ADVISORY; AWS `Get System Log` empty). Root cause: OL8+ enable the GRUB BootLoaderSpec, so the
+  kernel cmdline lives in `/boot/loader/entries/*.conf`, which a plain `grub2-mkconfig` does not
+  rewrite (the OL7-era hook only edited `GRUB_CMDLINE_LINUX` + ran `grub2-mkconfig`). The
+  serial-console hook now applies the AWS-recommended config in three layers across OL6–OL10:
+  (1) cmdline `console=tty0 console=ttyS0,115200n8` on every entry — OL7–10 via
+  `grubby --update-kernel=ALL` (BLS-aware, version-stable; avoids the `--update-bls-cmdline` 8.x/9.2+
+  matrix) plus `GRUB_CMDLINE_LINUX` for future kernels; OL6 via its existing kickstart append;
+  (2) GRUB-over-serial — OL7–10 `GRUB_TERMINAL="console serial"` + `GRUB_SERIAL_COMMAND` (+
+  `grub2-mkconfig`), OL6 `serial`/`terminal` directives in `grub.conf`; (3) `serial-getty@ttyS0`
+  enabled on OL7–10 (symlink fallback for the offline build). CHECK 5 is now **BLS-aware**: it
+  inspects both `grub.cfg` menuentries and `/boot/loader/entries/*.conf` `options`. OL6 cmdline and
+  OL7 behaviour are unchanged (per-OS isolation); VM-path re-validation across OL6–OL10 is the
+  maintainer's. See SPEC D.25.
+
 - **Executable bit normalized on directly-runnable scripts (no content change).** Git tracks the
   POSIX exec bit per file; several scripts had been committed `100644`, so a fresh clone left them
   non-executable while `install-ena-driver.sh` and most test tiers were `100755`. Set mode `100755`

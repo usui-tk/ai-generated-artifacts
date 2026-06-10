@@ -1241,7 +1241,7 @@ identifier. All are applied inside `phase3_clone_repository`. Current markers:
 | `[ol-aws-ami-builder PATCH declare-g-ol6]` | `env.properties.defaults` | `OL_MAJOR_VERSION == 6` | Guard `declare -gA REPO` with a `\|\| declare -A` fallback (bash 4.1 in the OL6 guest has no `declare -g`) |
 | `[ol-aws-ami-builder PATCH ol6-cloud-user]` | `cloud/aws/provision.sh` | `OL_MAJOR_VERSION == 6` | Wrap `cloud::cloud_init` so the OL6 cloud-init default user becomes `ec2-user` (strips the absent `systemd-journal` group; runs after the configs are written) — see D.26 |
 | `[ol-aws-ami-builder PATCH nitro-initramfs]` | `cloud/aws/provision.sh` | always (AWS cloud path) | Drop an `/etc/dracut.conf.d` `add_drivers` file forcing `nvme`/`ena` into the initramfs and regenerate it (Nitro boot requirement; Phase 6 CHECK 1 verifies the result) |
-| `[ol-aws-ami-builder PATCH serial-console]` | `cloud/aws/provision.sh` | GRUB2 systems (OL7+; hook self-skips on OL6 GRUB Legacy) | Ensure `console=tty0 console=ttyS0,115200n8` on the GRUB2 kernel cmdline + `grub2-mkconfig`, so AWS `Get System Log` captures boot output — see D.25 |
+| `[ol-aws-ami-builder PATCH serial-console]` | `cloud/aws/provision.sh` | GRUB2 systems (OL7+; hook self-skips on OL6 GRUB Legacy) | AWS-recommended serial console in 3 layers: (1) `console=tty0 console=ttyS0,115200n8` on all entries via `grubby --update-kernel=ALL` (BLS-aware) + `GRUB_CMDLINE_LINUX`; (2) `GRUB_TERMINAL`/`GRUB_SERIAL_COMMAND` + `grub2-mkconfig`; (3) `serial-getty@ttyS0` enabled — see D.25 |
 | `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; installer is a no-op on OL8+) — logged as `[OLAWS-ENA01]`, see A.7 |
 | `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` | `bin/build-image.sh` | host libguestfs lacks the `selinuxrelabel` optgroup | Schedule a first-boot `/.autorelabel` instead of the offline relabel when the build host's libguestfs cannot relabel — see D.17 |
 
@@ -2575,36 +2575,70 @@ no boot messages. This is what made the OL6 SSH failure (D.24) so painful to
 diagnose: with no console output there was no way to see *why* the instance was
 unhealthy.
 
-**Cause.** AWS captures only what the guest writes to the serial port,
-`ttyS0`. Neither tier carried it:
+**Cause.** AWS captures only what the guest writes to the serial port `ttyS0`,
+and the interactive EC2 Serial Console additionally needs GRUB and a login getty
+on that port. Three historical gaps:
 - **OL6** — the synthesized kickstart set the kernel cmdline to `console=tty0`
   only, and a `%post` line then actively **stripped** any `console=ttyS0` from
-  `/boot/grub/grub.conf` ("re-enabled at runtime by builder" — but nothing
-  re-enabled it). Net: VGA console only.
-- **OL7+** — the upstream `GRUB_CMDLINE_LINUX` carries `console=tty0` but not
+  `/boot/grub/grub.conf`. Net: VGA console only.
+- **OL7** — the upstream `GRUB_CMDLINE_LINUX` carries `console=tty0` but not
   `console=ttyS0`, and the wrapper never added it.
+- **OL8/9/10 (BLS)** — *discovered in the OL6–OL10 E2E run.* OL8+ enable the GRUB
+  BootLoaderSpec (`GRUB_ENABLE_BLSCFG=true`): the kernel cmdline lives in
+  `/boot/loader/entries/*.conf` (`options` line), **not** in `grub.cfg`
+  menuentries. A plain `grub2-mkconfig` does **not** rewrite existing BLS
+  entries' `options` from `GRUB_CMDLINE_LINUX`, so the OL7-era hook (which only
+  edited `GRUB_CMDLINE_LINUX` + ran `grub2-mkconfig`) left OL8/9/10 booting
+  without `ttyS0` — CHECK 5 reported ADVISORY on all three. AWS's own RHEL
+  guidance confirms the trap: it uses `grub2-mkconfig … --update-bls-cmdline` on
+  8.x/9.0–9.1 but plain `grub2-mkconfig` on 9.2+ (a version-dependent flag).
 
-**Fix (per-OS, isolated).** Both tiers now ensure
-`console=tty0 console=ttyS0,115200n8` on the kernel cmdline, each via its own
-mechanism so a change to one cannot regress the other:
-- **OL6 (GRUB Legacy)** — the kickstart `%post` strip is replaced by an
-  idempotent append of `console=ttyS0,115200n8` after `console=tty0` in
-  `/boot/grub/grub.conf`.
-- **OL7+ (GRUB2)** — a new Phase-3 hook
-  (`[ol-aws-ami-builder PATCH serial-console]`) injected into
-  `cloud/aws/provision.sh` appends `console=ttyS0,115200n8` to
-  `GRUB_CMDLINE_LINUX` and runs `grub2-mkconfig`. It is **guarded on
-  `/etc/default/grub`**, which exists only on GRUB2, so it is a clean no-op on
-  OL6 — the two paths never overlap.
+**Fix — AWS-recommended serial console, three layers, per-OS isolated.** The
+wrapper now applies the full AWS-recommended serial-console config in three
+layers, each via its OS-appropriate mechanism so one tier cannot regress another:
 
-**Verification (CHECK 5, advisory).** Phase 6 adds a serial-console check that
-reads the located bootloader config and reports whether `console=ttyS0` is on
-the kernel cmdline. It is **advisory** (warn only, never fails the gate): a
-missing serial console costs observability, not bootability, so it must not
-block an otherwise-bootable AMI. Because the fix above sets it deterministically
-*in the same build*, a CHECK 5 warning is a real signal that the fix did not take
-effect (the check is one `fail=1` away from fatal if a stricter policy is ever
-wanted).
+1. **Kernel cmdline** `console=tty0 console=ttyS0,115200n8` on *every* boot entry
+   (`ttyS0` last → it becomes the effective `/dev/console`, driving both
+   `Get System Log` and the serial getty).
+   - **OL6 (GRUB Legacy)** — idempotent kickstart `%post` append in
+     `/boot/grub/grub.conf` (unchanged; already green).
+   - **OL7–10 (GRUB2)** — `grubby --update-kernel=ALL --args="console=tty0
+     console=ttyS0,115200n8"` updates **existing** entries directly: BLS-aware
+     (rewrites `/boot/loader/entries/*.conf` on OL8+) and version-stable across
+     OL7–10, so the `--update-bls-cmdline` version matrix is avoided entirely.
+     `GRUB_CMDLINE_LINUX` is also set so **future** kernel installs inherit it.
+2. **GRUB-over-serial** (so the interactive EC2 Serial Console reaches the GRUB
+   menu/prompt):
+   - **OL6** — `serial --unit=0 --speed=115200` + `terminal --timeout=10 serial
+     console` in `grub.conf`'s global section. (The `terminal` timeout adds a
+     small menu-selection wait on a headless boot — acceptable for OL6, which is
+     verification/legacy only.)
+   - **OL7–10** — `GRUB_TERMINAL="console serial"` + `GRUB_SERIAL_COMMAND="serial
+     --speed=115200"` in `/etc/default/grub` (dropping any `GRUB_TERMINAL_OUTPUT`),
+     then `grub2-mkconfig`.
+3. **Serial getty** (login prompt on `ttyS0`):
+   - **OL7–10** — `systemctl enable serial-getty@ttyS0.service` (with a symlink
+     fallback for the offline virt-customize context). systemd auto-spawns it from
+     `console=ttyS0`, but it is enabled explicitly for determinism.
+   - **OL6 (Upstart)** — out of scope (no `serial-getty@` unit); boot-output via
+     the cmdline is unaffected.
+
+The OL7–10 layers live in the Phase-3 hook
+(`[ol-aws-ami-builder PATCH serial-console]`) injected into
+`cloud/aws/provision.sh`, **guarded on `/etc/default/grub`** (GRUB2-only), so it
+is a clean no-op on OL6 — the two paths never overlap (per-OS isolation).
+
+**Verification (CHECK 5, advisory) — BLS-aware.** Phase 6 inspects **both** the
+located bootloader menuentries (OL6 `grub.conf` `kernel`, OL7 `grub.cfg`
+`linux16`) **and** the BLS entries (`/boot/loader/entries/*.conf` `options` — the
+truth source on OL8+), and PASSes if `console=ttyS0` is on the cmdline in either.
+It remains **advisory** (warn only, never fails the gate): a missing serial
+console costs observability, not bootability (one `fail=1` from fatal if ever
+wanted). On a launched instance, confirm with: `cat /proc/cmdline`; `sudo grubby
+--info=ALL | grep args` (OL7–10); `cat /boot/loader/entries/*.conf | grep
+^options` (OL8–10); `sudo grep -E 'serial|terminal' /boot/grub2/grub.cfg`
+(OL7–10) or `/boot/grub/grub.conf` (OL6); and `systemctl is-enabled
+serial-getty@ttyS0.service` (OL7–10).
 
 ---
 

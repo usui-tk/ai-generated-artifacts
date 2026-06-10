@@ -314,3 +314,46 @@ the install in isolation with a bare `virt-install` (text mode, explicit
 `console=ttyS0`) so the anaconda output is fully visible. (`SERIAL_CONSOLE=yes`
 can stream the OL6/7 install too, but it is a debug-only opt-in that can hang
 the build at install-VM end — the default is `no`; see SPEC A.7 / D.18.)
+
+## Serial console verification (CHECK 5 + on-instance)
+
+The AWS serial-console fix (SPEC **D.25**) spans the boot path, so it has two
+verification layers: an in-build advisory check and an on-instance confirmation
+after launch.
+
+### In-build: CHECK 5 (Phase 6, advisory, BLS-aware)
+
+CHECK 5 confirms `console=ttyS0` reached the kernel cmdline of the built image
+*in the same build*. It is **BLS-aware**: OL8+ enable the GRUB BootLoaderSpec, so
+the cmdline lives in `/boot/loader/entries/*.conf` (`options` line), **not** in
+`grub.cfg`. The check therefore inspects **both**:
+
+- the located bootloader menuentries (`virt-cat` of the `grub.cfg`/`grub.conf`,
+  grepping `kernel`/`linux16`/`linuxefi`/`linux` lines), and
+- every BLS entry (`virt-ls /boot/loader/entries` → `virt-cat` each `*.conf`,
+  grepping the `options` line),
+
+and PASSes if `console=ttyS0` is present in **either**. It is **advisory** (warn
+only, never fails the gate): a missing serial console costs observability, not
+bootability. A warning here is a real signal that the Phase-3 serial-console hook
+did not take effect — investigate before relying on `Get System Log`.
+
+### On-instance (after launch) — the maintainer's VM-path check
+
+CHECK 5 reads the *image*; only a launched instance proves the running cmdline.
+On each OL6–OL10 instance:
+
+```sh
+cat /proc/cmdline                                   # all: console=ttyS0 present, last
+sudo grubby --info=ALL | grep args                  # OL7-10: args carry console=ttyS0
+cat /boot/loader/entries/*.conf | grep '^options'   # OL8-10 (BLS): options carry console=ttyS0
+sudo grep -E 'serial|terminal' /boot/grub2/grub.cfg # OL7-10: GRUB-over-serial (GRUB_TERMINAL/SERIAL)
+sudo grep -E '^serial|^terminal' /boot/grub/grub.conf  # OL6: serial/terminal directives
+systemctl is-enabled serial-getty@ttyS0.service     # OL7-10: enabled
+systemctl is-active  serial-getty@ttyS0.service     # OL7-10: active
+```
+
+And from the AWS side: `aws ec2 get-console-output` (or the console's **Get System
+Log**) should now show the kernel ring buffer and boot messages; the EC2 **Serial
+Console** should reach a login prompt (and the GRUB menu, via layer 2). These are
+the maintainer's checks — the sandbox has no KVM/AWS path.
