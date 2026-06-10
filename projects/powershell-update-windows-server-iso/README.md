@@ -167,13 +167,16 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 Use a per-OS `-WorkRoot` so concurrent or repeated runs never share a
 DISM mount cache, and auto-timestamp the log so each run is its own file
-(no manual date typing):
+(no manual date typing). With the patch baseline shipped in `data/`, the
+script resolves the source ISO download URL from the OS profile and takes
+its patch set from the distributed baseline, so **no `-IsoPath` or
+`-PatchDirectory` is needed**; `-UseBaselineOnly` pins the run to that
+shipped baseline, so it never depends on live Catalog / release-info
+publication timing:
 
 ```powershell
 $OsVersion  = 'Server2019'                       # Server2016/2019/2022/2025
 $OsLanguage = 'ja-jp'                             # en-us / ja-jp
-$IsoPath    = 'D:\ISO\WS2019_ja-jp.iso'
-$PatchDir   = 'D:\Patches\Server2019\2026-05'
 $WorkRoot   = "D:\UpdateWsi-$OsVersion"           # per-OS workspace
 $stamp      = Get-Date -Format 'yyyyMMdd-HHmmss'
 $LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify', $OsVersion, $stamp)
@@ -182,15 +185,15 @@ $LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion $OsVersion -OsLanguage $OsLanguage `
-    -IsoPath $IsoPath -PatchDirectory $PatchDir `
-    -WorkRoot $WorkRoot -LogFile $LogFile
+    -WorkRoot $WorkRoot -LogFile $LogFile `
+    -UseBaselineOnly
 
 # Real build — add -Execute (the only mode that mounts and modifies WIMs)
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion $OsVersion -OsLanguage $OsLanguage `
-    -IsoPath $IsoPath -PatchDirectory $PatchDir `
     -WorkRoot $WorkRoot -LogFile $LogFile `
+    -UseBaselineOnly `
     -Execute
 ```
 
@@ -207,10 +210,9 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion Server2016 -OsLanguage ja-jp `
-    -IsoPath 'D:\ISO\WS2016_ja-jp.iso' `
-    -PatchDirectory 'D:\Patches\Server2016\2026-05' `
     -WorkRoot 'D:\UpdateWsi-Server2016' `
     -LogFile ('D:\UpdateWsi-Server2016\logs\build-2016-{0}.log' -f $stamp) `
+    -UseBaselineOnly `
     -Execute
 
 # Server 2025 (opt in to PCA2023 conversion)
@@ -218,11 +220,10 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion Server2025 -OsLanguage ja-jp `
-    -IsoPath 'D:\ISO\WS2025_ja-jp.iso' `
-    -PatchDirectory 'D:\Patches\Server2025\2026-05' `
     -WorkRoot 'D:\UpdateWsi-Server2025' `
     -LogFile ('D:\UpdateWsi-Server2025\logs\build-2025-{0}.log' -f $stamp) `
     -EnablePca2023BootManager -ForcePca2023OnServer2025 `
+    -UseBaselineOnly `
     -Execute
 ```
 

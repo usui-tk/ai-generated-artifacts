@@ -22,6 +22,9 @@ the script and follows the
 
 ## [Unreleased]
 
+### Docs: simplify the README Quick Start command examples for end users (no code change)
+
+The Quick Start "Template" and "Worked example" blocks (README.md + README.ja.md) drop the explicit `-IsoPath`/`-PatchDirectory` placeholders -- an end-user machine has neither by default, and with the patch baseline shipped in `data/` the script resolves the source ISO download URL from the OS profile and takes its patch set from the distributed baseline -- and now pass `-UseBaselineOnly` by default so a run on the shipped data never depends on live Catalog / release-info publication timing. The `-IsoPath`/`-PatchDirectory`/`-IsoUrl` parameters remain documented in the parameter reference for advanced/offline use.
 ### Docs: add the monthly baseline regeneration / verification procedure to TESTING.md §8 (no code change)
 
 Records the agent/LLM verification gates (G1-G5) for a monthly `/data` rebuild, distilled from the 2026-05 and 2026-06 real runs. The critical gate **G2 (discovery-source currency)**: the `wsusscn2.cab` and the Update Catalog lead the Microsoft release-health page by a day or more after Patch Tuesday, so a regen attempted before release-info publishes the target month yields a wrong-month or empty patch set (A01 logs `Discovery returned zero records`); such a regen must be deferred, not committed. Logs the 2026-06 deferral: the 2026-06 cab was valid and A04 regenerated Layer 2 cleanly (~5 min), but on 2026-06-10 release-info still listed 2026-05, so the 2026-06 Layer 1 regen was deferred.
