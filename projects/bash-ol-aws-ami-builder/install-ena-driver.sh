@@ -71,6 +71,11 @@ EPEL6_ARCHIVE_BASEURL="${EPEL6_ARCHIVE_BASEURL:-https://archives.fedoraproject.o
 # provisioning, or a standalone live OL instance), unchanged. The test-mode
 # branches are added incrementally; see SPEC A.7 / handoff B.1.9 Part 3.
 ENA_BUILDTEST="${ENA_BUILDTEST:-0}"
+# INSECURE_TLS=1 drops TLS peer verification for the test-mode network commands
+# only (MITM dev proxy / EL6 NSS trust gaps). Default 0 = verification on.
+# Production never reads this beyond the default; it is consulted only inside the
+# ENA_BUILDTEST branches.
+INSECURE_TLS="${INSECURE_TLS:-0}"
 
 # Execution-environment segment, computed once from the switch and injected by
 # every [ena-driver] emitter below, so output is tagged by environment WITHOUT
@@ -167,6 +172,31 @@ case "${osmajor}" in
   *) log "OL${osmajor} ships a current in-distro ENA driver; no rebuild needed. Skipping."; exit 0 ;;
 esac
 log "Target ENA driver version: ${ena_version}"
+
+# ---- ENA_BUILDTEST: provision a kernel into the disposable container -------
+# A container is kernel-less (no running kernel, no /lib/modules tree), so the
+# production kernel detection below cannot work. The test container is throwaway,
+# so install a full kernel-uek + its headers up front: that creates
+# /lib/modules/<kver>/ (+ the build symlink), after which the production path
+# (kver detection, header check, dkms build/install, verify) runs unchanged.
+# Plain test commands; sslverify is dropped only at INSECURE_TLS=1 (e.g. a MITM
+# dev proxy). Production never enters this block.
+if [[ "${ENA_BUILDTEST}" == "1" ]]; then
+  log "provisioning kernel-uek + build deps into the container (disposable)"
+  # Enable the shipped (disabled) EPEL so the production setup_epel below finds
+  # it already enabled and early-returns (no second epel-archive repo), and the
+  # build's dkms resolves from it.
+  sed -i '/^\[epel\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/epel.repo
+  if [[ "${INSECURE_TLS}" == "1" ]]; then
+    yum -y --setopt=sslverify=false --enablerepo=ol6_UEKR4 \
+      install kernel-uek kernel-uek-devel gcc make tar findutils dkms \
+      || die "ENA_BUILDTEST: failed to provision kernel-uek + build deps"
+  else
+    yum -y --enablerepo=ol6_UEKR4 \
+      install kernel-uek kernel-uek-devel gcc make tar findutils dkms \
+      || die "ENA_BUILDTEST: failed to provision kernel-uek + build deps"
+  fi
+fi
 
 # ---- detect target kernel --------------------------------------------------
 # Standalone on a running OL instance: target the LIVE kernel (its modules dir
@@ -291,7 +321,11 @@ stage "downloading amzn-drivers ${ena_version} source"
 log "Downloading ${url}"
 rm -rf "${src_dir}"
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "${url}" -o "${src_tgz}" || die "download failed: ${url}"
+  if [[ "${ENA_BUILDTEST}" == "1" && "${INSECURE_TLS}" == "1" ]]; then
+    curl -fsSL -k "${url}" -o "${src_tgz}" || die "download failed: ${url}"
+  else
+    curl -fsSL "${url}" -o "${src_tgz}" || die "download failed: ${url}"
+  fi
 elif command -v wget >/dev/null 2>&1; then
   wget -q -O "${src_tgz}" "${url}" || die "download failed: ${url}"
 else
