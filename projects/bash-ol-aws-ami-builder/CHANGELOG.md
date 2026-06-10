@@ -21,6 +21,20 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **ENA driver container compile-test mode (`ENA_BUILDTEST=1`, OL6).** Runs
+  `install-ena-driver.sh` inside a disposable, kernel-less clean-core container
+  by provisioning a full `kernel-uek` + headers up front, after which the
+  production build path (kver detection, `kernel-uek-devel` resolve, DKMS
+  build+install, `ena.ko` verify) runs unchanged — the driver actually compiles
+  and installs (validated: `ena.ko` 2.9.1g on UEK4 `4.1.12-124.48.6.el6uek`).
+  Production is unaffected: the switch defaults off and the log/build paths are
+  byte-identical when it is. Includes environment-tagged logging
+  (`[ena-driver][buildtest]…`), an `INSECURE_TLS=1` knob (default 0; relaxes TLS
+  only for the test-mode network commands — e.g. behind a MITM dev proxy or EL6
+  NSS trust gaps), and a machine-parseable result line
+  `[ena-driver][buildtest][result] {…}` (JSON: `status=ok|fail` plus
+  `osmajor`/`ena_version`/`kver`/`ko`/`ko_version`, agreeing with the exit code)
+  for a test harness / build ledger. OL7/OL8 wiring and a host test tier follow.
 - **Container clean-core test base (`tests/cleancore/`).** Five self-contained
   builders — `build-cleancore-ol6.sh` / `-ol7.sh` / `-ol8.sh` / `-ol9.sh` /
   `-ol10.sh` — each producing a clean-core Oracle Linux container rootfs for one
