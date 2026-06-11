@@ -219,6 +219,30 @@
       "expected_types": [],
       "expected_kbs": [],
       "description": "Server 2025 in a month with no matching cache entries (suspended Setup DU territory)"
+    },
+    {
+      "os": "Server2019",
+      "patch_month": "2026-06",
+      "expected_types": [
+        "DotNet.Runtime",
+        "DotNet.Runtime"
+      ],
+      "expected_kbs": [
+        "KB5087061",
+        "KB5087066"
+      ],
+      "description": "B.22.5 .NET CU publication-gap carry-forward: 2026-06 published no .NET CU and release-info has no 2026-06 LCU, so discovery carries forward the most-recent in-window .NET CU month (2026-05) for this OS. Server 2019's two May .NET CU rows (KB5087061, KB5087066) are emitted; no LCU and no DU (2019 has no DU)."
+    },
+    {
+      "os": "Server2016",
+      "patch_month": "2026-06",
+      "expected_types": [
+        "DotNet.Runtime"
+      ],
+      "expected_kbs": [
+        "KB5087065"
+      ],
+      "description": "B.22.5 carry-forward + cross-month LCU-priority dedup regression guard: carrying 2026-05 forward into 2026-06 must NOT resurface KB5087537 (the May Server 2016 LCU that Microsoft lists under a .NET row) as a .NET CU. The dedup is seeded from every release-info LCU KbId for this OS, so KB5087537 is dropped and only KB5087065 (.NET 4.8) is carried forward."
     }
   ]
 }

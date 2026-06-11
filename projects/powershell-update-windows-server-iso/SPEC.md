@@ -2319,6 +2319,25 @@ Server 2016 (KB5088064, Catalog UpdateId
 SSU while the others stay `IsCombined=true`. The search needs no layer 2
 / `-DataDir` input, so it works on the `RefreshAllBaselines` call path.
 
+**.NET CU publication-gap carry-forward (r11.27)**: .NET Framework CUs
+are not published every month (the release-notes index has gaps), so
+`Get-PatchSetFromReleaseInfoDiscovery` does not require an exact
+PatchMonth match for the .NET CU. When the requested month lists no .NET
+CU for an OS, discovery carries forward the most-recent .NET CU month
+that is `<= PatchMonth`, that still falls inside the same 36-month window
+as the Dynamic Update lookback (§B.22.6), and that actually lists a row
+for that OS (the choice is per-OS, because .NET CU coverage varies by
+month). The carried record's `DiscoveryNote` records the source month.
+.NET CUs are cumulative and OS-lifecycle-applicable, so the latest-
+applicable build is the correct content for a fully-patched ISO; silently
+dropping it on a gap month would ship an ISO with no .NET servicing. To
+keep the LCU-priority dedup correct across months, the dedup set is seeded
+from *every* release-info LCU KbId for the OS (any in-cache month), not
+just the requested month's LCU, so a prior-month LCU that Microsoft lists
+under a .NET row (e.g. the Server 2016 sliced cumulative `KB5087537`) is
+never resurfaced as a spurious .NET CU when a later month carries it
+forward.
+
 ### B.22.6 Dynamic Update lookback: 36-month cache
 
 Per-OS Dynamic Update caches under `data/raw-dynamic-update/` keep a

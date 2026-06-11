@@ -580,8 +580,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.11-r11.26'
-$Script:ScriptTag     = 'defender-exclusion-optin'
+$Script:ScriptVersion = 'update-wsi-2026.06.12-r11.27'
+$Script:ScriptTag     = 'dotnet-cu-carryforward'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5789,6 +5789,21 @@ function Get-PatchSetFromReleaseInfoDiscovery {
             [void]$lcuKbSet.Add([string]$r.KbId)
         }
     }
+    # Carry-forward safety (B.22.5): a .NET CU row can carry a KbId that is
+    # actually an LCU in some month -- e.g. the Server 2016 sliced cumulative
+    # KB5087537, which Microsoft lists under a .NET row. The $records loop
+    # above only sees this month's LCU, so when a prior month's .NET rows are
+    # carried forward below, a prior-month LCU KbId could resurface as a
+    # spurious .NET CU. Seed the dedup set with every LCU KbId release-info
+    # lists for this OS (any in-cache month), so a KB that is an LCU in any
+    # month is never emitted as a .NET CU.
+    if ((Test-Path Variable:monthlyReleases) -and $monthlyReleases) {
+        foreach ($row in $monthlyReleases) {
+            if ([string]$row.OsShortName -eq $OsVersion -and -not [string]::IsNullOrEmpty([string]$row.KbId)) {
+                [void]$lcuKbSet.Add([string]$row.KbId)
+            }
+        }
+    }
 
     $dotnetCachePath = if ([string]::IsNullOrEmpty($DataDir)) {
         Get-DotNetCuCachePath
@@ -5802,14 +5817,40 @@ function Get-PatchSetFromReleaseInfoDiscovery {
         if ($null -ne $dotnetCache -and $dotnetCache.PSObject.Properties.Name -contains 'Months') {
             $months = @($dotnetCache.Months)
         }
-        # Match the month entry whose Date begins with the requested YYYY-MM.
-        $monthEntry = $null
+        # Select the .NET CU month: prefer the exact PatchMonth; if that month
+        # published no .NET CU for this OS, carry forward the most-recent .NET
+        # CU month that is <= PatchMonth, still inside the 36-month lookback
+        # window, and that carries a row for this OS. .NET Framework CUs are
+        # cumulative and OS-lifecycle-applicable, so the latest-applicable
+        # build is the correct content for a fully-patched ISO; silently
+        # dropping it on a publication-gap month (a month with no .NET CU)
+        # would ship an ISO with no .NET servicing. Mirrors the Dynamic Update
+        # 36-month recency (Get-LatestDynamicUpdate); see SPEC B.22.5.
+        $dotnetAnchorDate  = [datetime]::ParseExact(($PatchMonth + '-01'), 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+        $dotnetEarliestKey = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth (Get-DynamicUpdateWindowEarliestPatchMonth -Now $dotnetAnchorDate)
+        $monthEntry      = $null
+        $monthEntryKey   = -1
+        $monthEntryMonth = ''
         foreach ($m in $months) {
             $isoDate = [string]$m.Date
-            if ($isoDate.StartsWith($PatchMonth + '-') -or $isoDate -eq $PatchMonth) {
-                $monthEntry = $m
-                break
+            if ([string]::IsNullOrWhiteSpace($isoDate) -or $isoDate.Length -lt 7) { continue }
+            $mMonth = $isoDate.Substring(0, 7)
+            $mKey   = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth $mMonth
+            if ($mKey -lt 0 -or $mKey -gt $monthKey -or $mKey -lt $dotnetEarliestKey) { continue }
+            $hasOsRow = $false
+            if ($m.PSObject.Properties.Name -contains 'Entries') {
+                $hasOsRow = @($m.Entries | Where-Object { [string]$_.OsNormalised -eq $OsVersion }).Count -gt 0
             }
+            if (-not $hasOsRow) { continue }
+            if ($mKey -gt $monthEntryKey -or ($mKey -eq $monthEntryKey -and $null -ne $monthEntry -and [string]::Compare($isoDate, [string]$monthEntry.Date) -gt 0)) {
+                $monthEntry      = $m
+                $monthEntryKey   = $mKey
+                $monthEntryMonth = $mMonth
+            }
+        }
+        $dotnetCarriedForward = ($null -ne $monthEntry -and $monthEntryMonth -ne $PatchMonth)
+        if ($dotnetCarriedForward) {
+            Write-Step ('  No .NET CU published for {0} {1}; carried forward the latest in-window .NET CU from {2}.' -f $PatchMonth, $OsVersion, $monthEntryMonth)
         }
         if ($null -ne $monthEntry -and $monthEntry.PSObject.Properties.Name -contains 'Entries') {
             $osBlocks = @($monthEntry.Entries | Where-Object { [string]$_.OsNormalised -eq $OsVersion })
@@ -5834,7 +5875,7 @@ function Get-PatchSetFromReleaseInfoDiscovery {
                         UpdateId      = ''
                         SourceCache   = 'dotnet-cu'
                         SourceRow     = $row
-                        DiscoveryNote = ('DotNet.Runtime from dotnet-cu: OsLabel="{0}" versions="{1}"' -f $block.OsLabel, $row.DotNetVersions)
+                        DiscoveryNote = (('DotNet.Runtime from dotnet-cu: OsLabel="{0}" versions="{1}"' -f $block.OsLabel, $row.DotNetVersions) + $(if ($dotnetCarriedForward) { ' (carried forward from {0}; no {1} .NET CU published)' -f $monthEntryMonth, $PatchMonth } else { '' }))
                     })
                 }
             }

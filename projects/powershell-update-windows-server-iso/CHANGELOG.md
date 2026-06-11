@@ -22,6 +22,16 @@ the script and follows the
 
 ## [Unreleased]
 
+### .NET CU publication-gap carry-forward in release-info discovery (`$Script:ScriptVersion` -> `update-wsi-2026.06.12-r11.27`, tag `dotnet-cu-carryforward`)
+
+`Get-PatchSetFromReleaseInfoDiscovery` selected the .NET Framework CU by an exact `PatchMonth` match. Microsoft does not publish a .NET CU every month, so on a publication-gap month (e.g. 2026-06) discovery emitted no `DotNet.Runtime` records at all and the generated baseline silently lost .NET servicing. The Dynamic Update path already tolerates gaps via its 36-month recency (SPEC §B.22.6); the .NET CU path did not.
+
+- **Carry-forward.** When the requested month lists no .NET CU for an OS, discovery now carries forward the most-recent .NET CU month that is `<= PatchMonth`, that still falls inside the same 36-month window as the Dynamic Update lookback, and that actually lists a row for that OS (the choice is per-OS because .NET CU coverage varies by month). An exact-month hit is unchanged; only gap months fall back.
+- **Provenance.** The carried record's `DiscoveryNote` records the source month (`... (carried forward from <yyyy-MM>; no <PatchMonth> .NET CU published)`) and a `Write-Step` line is logged, so a carried-forward selection is visible in the build log and in the baseline.
+- **Cross-month LCU-priority dedup hardening.** The dedup set is now seeded from every release-info LCU `KbId` for the OS (any in-cache month), not just the requested month's LCU. This prevents a prior-month LCU that Microsoft lists under a .NET row (the Server 2016 sliced cumulative `KB5087537`) from being resurfaced as a spurious `DotNet.Runtime` record when a later month carries the prior month forward.
+- **Docs / tests.** SPEC §B.22.5 extended with the publication-gap carry-forward rule (cross-referencing the §B.22.6 36-month window). `T10` (`release_info_resolver_test.py`) gains two scenarios: a basic Server 2019 gap-month carry-forward and a Server 2016 gap-month case that doubles as the cross-month dedup regression guard. Offline suite 25/25.
+- **Scope.** Behavioural change to release-info discovery only; no Action, parameter, or data-schema change, so `README.md` / `README.ja.md` are unaffected. Blast radius is the project directory (script + SPEC + test fixture).
+
 ### Docs / comments: make stale SPEC section references fact-based and version-independent (no `$Script:ScriptVersion` bump)
 
 The r09.0 SPEC rewrite repurposed §B.23 as "JSON Canonical Serialization" and migrated the architecture decisions to §B.22, but a number of in-code comments (and two runtime messages) still cited the old `B.23.x` subsections for non-canonical-JSON topics — release-info as the truth source, the three-prefix data layout, Catalog title tokens, the SSU / .NET combined-vs-separate handling, Dynamic Update cadence, the legacy `DotNet` type, the two-stage refresh, and empty-baseline seeding. Those numbers now mis-resolve into the JSON-canonical section or dangle.
