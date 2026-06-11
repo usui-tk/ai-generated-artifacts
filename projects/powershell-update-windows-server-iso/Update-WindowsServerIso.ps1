@@ -2805,7 +2805,7 @@ function Assert-WorkspacePreflight {
            from P02 (load) and A01 (RefreshAllBaselines) and would
            throw a less helpful error if the file is missing. We
            check up-front, in a single place, with a clear "which
-           files are missing" message. See SPEC.md section B.23.3 for the
+           files are missing" message. See SPEC.md for the
            directory layout.
 
         2. Drive free space. The default workspace ('Workspace_UpdateWsi',
@@ -3018,14 +3018,14 @@ function Get-ConfigProfile {
     # and 'DotNet.OsLevel' (OS-offering KB recorded but not applied).
     # A config still carrying Type='DotNet' is from an older baseline
     # and must be regenerated via -Action RefreshAllBaselines under
-    # the current code path. See SPEC.md section B.23.8.
+    # the current code path. See SPEC.md.
     if ($json.PatchBaseline -and $json.PatchBaseline.Patches) {
         $legacyDotNet = @($json.PatchBaseline.Patches | Where-Object {
             $_.Type -eq 'DotNet'
         })
         if ($legacyDotNet.Count -gt 0) {
             $legacyKbs = ($legacyDotNet | ForEach-Object { $_.KbId }) -join ', '
-            throw ('Config {0} carries {1} legacy Type="DotNet" entry/entries (KBs: {2}). The DotNet type was replaced by DotNet.Runtime + DotNet.OsLevel; re-run -Action RefreshAllBaselines to regenerate the baseline. See SPEC.md section B.23.8.' -f $cfgFile, $legacyDotNet.Count, $legacyKbs)
+            throw ('Config {0} carries {1} legacy Type="DotNet" entry/entries (KBs: {2}). The DotNet type was replaced by DotNet.Runtime + DotNet.OsLevel; re-run -Action RefreshAllBaselines to regenerate the baseline.' -f $cfgFile, $legacyDotNet.Count, $legacyKbs)
         }
     }
 
@@ -3616,7 +3616,7 @@ function Get-OsConfigPath {
         so the P03 writeback knows where to save.
     .DESCRIPTION
         OS configuration is stored under data/config-<OsKey>.json. See
-        SPEC.md section B.23.3 for the three-prefix naming scheme
+        SPEC.md for the three-prefix naming scheme
         (config-/cache-/raw-).
     #>
     [OutputType([string])]
@@ -3674,8 +3674,8 @@ $Script:AdkInstallerOptionId = 'OptionId.DeploymentTools'
 #   data/raw-release-info.meta.json  HTTP headers + fetch timestamp.
 #   data/cache-release-info.json     Parsed structured data for fast access.
 #
-# See SPEC.md section B.23.1 (release-info as the truth source) and
-# section B.23.3 (three-prefix data/ layout).
+# See SPEC.md: release-info is the truth source, and data/ uses the
+# three-prefix (config-/cache-/raw-) layout.
 
 $Script:ReleaseInfoUrl = (
     'https://learn.microsoft.com/en-us/windows/release-health/' +
@@ -3726,7 +3726,7 @@ function Get-DataDirectoryPath {
         Update-WindowsServerIso.ps1.
     .DESCRIPTION
         Used by every cache- and raw- accessor in this section.
-        See SPEC.md section B.23.3 for the directory layout.
+        See SPEC.md for the directory layout.
     #>
     [OutputType([string])]
     param()
@@ -4779,7 +4779,7 @@ function Get-DotNetCuCache {
 #   data/cache-dynamicupdate-Server2022.json
 #   data/cache-dynamicupdate-Server2025.json
 #
-# See SPEC.md section B.23.6 for the design rationale and the cadence
+# See SPEC.md for the design rationale and the cadence
 # table that grounded these observations.
 
 $Script:DynamicUpdateCacheWindowMonths = 36
@@ -4831,7 +4831,7 @@ function Get-DynamicUpdateCache {
         Read data/cache-dynamicupdate-Server<NNNN>.json and return the deserialised
         object. Returns a fresh empty cache when the file does not
         exist; never throws on missing-file (matches the "latest known
-        good" stance documented in SPEC B.23.6).
+        good" stance documented in SPEC.md).
     #>
     [OutputType([pscustomobject])]
     param(
@@ -5153,7 +5153,7 @@ function Get-CatalogTitleTokenList {
         data/config-<OsVersion>.json that is used to narrow Microsoft
         Update Catalog responses to the right OS variant.
     .DESCRIPTION
-        SPEC.md section B.23.2 specifies that the disambiguating token
+        SPEC.md specifies that the disambiguating token
         list is Config-driven, not hardcoded in PowerShell. This helper
         is the single read path: it parses the OS Config and returns
         the `Common.CatalogTitleTokens` array. When the field is
@@ -5700,12 +5700,12 @@ function Get-PatchSetFromReleaseInfoDiscovery {
         decides whether to error on empty discovery.
 
         This discovery step does NOT emit a standalone SSU record.
-        Most current monthly LCUs embed the SSU (combined LCU+SSU)
-        and carry both .msu URLs under one Catalog UpdateId, which
-        the per-file Convert-CatalogPatchToBaselineEntry path
-        classifies via filename heuristic. Discovery of a *standalone*
-        same-month SSU (for SSU-separate OSes such as Server 2016) is
-        handled downstream by Resolve-PatchSetFromReleaseInfo.
+        On the combined model (e.g. Server 2022/2025) the monthly LCU
+        embeds the SSU and carries both .msu URLs under one Catalog
+        UpdateId, which the per-file Convert-CatalogPatchToBaselineEntry
+        path classifies via filename heuristic. On the separate model
+        (e.g. Server 2016/2019) the standalone same-month SSU is handled
+        downstream by Resolve-PatchSetFromReleaseInfo.
     .EXAMPLE
         Get-PatchSetFromReleaseInfoDiscovery -OsVersion Server2025 `
             -PatchMonth '2026-05'
@@ -5766,7 +5766,7 @@ function Get-PatchSetFromReleaseInfoDiscovery {
     # ----- .NET CU from dotnet-cu cache -----
     #
     # Build a case-insensitive set of LCU KbIds already discovered above
-    # so the .NET CU loop can dedup against them. Per SPEC B.23.5 B-3,
+    # so the .NET CU loop can dedup against them. Per SPEC.md,
     # the Windows 10 1607 / Server 2016 era LCU literally embeds the
     # .NET 3.5 / 4.6.2 / 4.7.x cumulative-update payload as OS components
     # ("sliced cumulative update" design): Microsoft's
@@ -5819,13 +5819,13 @@ function Get-PatchSetFromReleaseInfoDiscovery {
                 foreach ($row in $rows) {
                     $rowKb = [string]$row.KbId
                     if ([string]::IsNullOrEmpty($rowKb)) { continue }
-                    # SPEC B.23.5 B-3 LCU-priority dedup: drop any .NET CU
+                    # SPEC.md LCU-priority dedup: drop any .NET CU
                     # row whose KbId duplicates an LCU KbId already in
                     # $records. See the long comment above the
                     # $lcuKbSet construction for the Microsoft-side
                     # rationale (Server 2016 sliced cumulative update).
                     if ($lcuKbSet.Contains($rowKb)) {
-                        Write-Verbose ('Get-PatchSetFromReleaseInfoDiscovery: skipping .NET CU row {0} for OS={1} Month={2}; duplicates an LCU KbId already discovered (SPEC B.23.5 B-3, LCU is authoritative).' -f $rowKb, $OsVersion, $PatchMonth)
+                        Write-Verbose ('Get-PatchSetFromReleaseInfoDiscovery: skipping .NET CU row {0} for OS={1} Month={2}; duplicates an LCU KbId already discovered (per SPEC.md, LCU is authoritative).' -f $rowKb, $OsVersion, $PatchMonth)
                         continue
                     }
                     $records.Add([pscustomobject]@{
@@ -5879,13 +5879,13 @@ function Resolve-PatchSetFromReleaseInfo {
         Title-string discovery against the Catalog (one Search.aspx
         query per Type with hand-crafted templates); the new one
         defers discovery to the Step 2a cache layer and uses the
-        Catalog only as a URL resolver. SPEC.md section B.23.1
-        documents the migration; section B.23.5 covers the per-OS
-        .NET CU multiplicity (B-2) and the LCU + SSU bundle handling
-        (B-1) that this function inherits unchanged.
+        Catalog only as a URL resolver. SPEC.md documents the
+        migration; it also covers the per-OS .NET CU multiplicity
+        and the LCU + SSU bundle handling that this function
+        inherits unchanged.
 
-        Most current monthly LCUs embed the SSU (combined LCU+SSU),
-        but some OSes (e.g. Server 2016) still publish a *standalone*
+        On the combined model the monthly LCU embeds the SSU; on the
+        separate model some OSes (e.g. Server 2016/2019) still publish a *standalone*
         same-month Servicing Stack Update under a separate Catalog
         UpdateId. After emitting the per-UpdateId records, this
         function searches the Catalog for a same-month "Servicing
@@ -5897,7 +5897,7 @@ function Resolve-PatchSetFromReleaseInfo {
         Convert-CatalogPatchToBaselineEntry path still classifies them
         via filename heuristic (Get-PatchType).
 
-        Per SPEC B.23.2, the Catalog narrow-filter consumes
+        Per SPEC.md, the Catalog narrow-filter consumes
         `Test-CatalogTitleMatch` and the per-OS Config-driven
         `CatalogTitleTokens`, so the URL resolver tolerates
         Microsoft re-naming the Catalog title format by Config
@@ -5992,7 +5992,7 @@ function Resolve-PatchSetFromReleaseInfo {
             $passKnownType = $true
         }
         elseif ($rec.Type -eq 'LCU') {
-            # Combined-LCU convention (SPEC B.23.5 B-1): take every canonical file
+            # Combined-LCU convention (see SPEC.md): take every canonical file
             # (LCU + bundled SSU when present) and let the per-file filename
             # heuristic in Convert-CatalogPatchToBaselineEntry classify Type.
             $primaries = @(Select-AllCanonicalPatchFiles -Links $links -PatchType $rec.Type -Architecture 'x64')
@@ -6039,7 +6039,7 @@ function Resolve-PatchSetFromReleaseInfo {
                 -KnownType $knownArg
 
             if ($entry.Type -eq 'LCU') {
-                # Combined-month convention per SPEC B.23.5 B-1.
+                # Combined-month convention; see SPEC.md.
                 $entry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $true -Force
             } else {
                 $entry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $false -Force
@@ -7714,7 +7714,7 @@ function Install-SevenZipFallback {
 # of the built-in cmdlets for all canonical data files (config-*.json,
 # servicing-dependency-database.json, cache-*.json, etc.).
 #
-# Canonical format (SPEC Part B.23 section B.23.1):
+# Canonical format (SPEC Part B.23):
 #   1. UTF-8 (no BOM)              6. Literal non-ASCII (no \uXXXX)
 #   2. LF line endings            7. Insertion-order keys (no sort)
 #   3. 2-space indentation        8. Exactly one trailing LF
@@ -12454,7 +12454,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
             $derived = New-Object System.Collections.Generic.List[object]
             foreach ($p in $newPatches) {
                 # Same LocalPath / ExpectedHashes derivation as the P02
-                # baseline-seeding path; see SPEC B.23.17 for the empty-
+                # baseline-seeding path; see SPEC.md for the empty-
                 # LocalPath bug this guards against (would crash P04
                 # Step 2 'Patches' at 'Split-Path -LiteralPath').
                 $pFileName = $p.FileName
@@ -14573,7 +14573,7 @@ function Get-DynamicUpdateProbePlan {
         (OsVersion, DuType, QueryTemplate) probe to issue against the
         Microsoft Update Catalog Search.aspx endpoint.
     .DESCRIPTION
-        Server 2019 is intentionally absent: per SPEC B.23.6, Microsoft
+        Server 2019 is intentionally absent: per SPEC.md, Microsoft
         does not publish Setup / Safe OS Dynamic Update packages for the
         Server 2019 (1809) baseline, and T10's resolver test asserts
         this absence. Server 2016 (1607) is likewise absent because the
@@ -14628,7 +14628,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         Populate data/raw-*.json + data/cache-*.json snapshots from
         Microsoft Learn (release-info, .NET CU release-notes) and
         Microsoft Update Catalog (Dynamic Update probes). This is the
-        first stage of the SPEC B.23.14 two-stage refresh; the
+        first stage of the two-stage refresh (see SPEC.md); the
         complementary second stage (-Action RefreshAllBaselines)
         consumes the populated caches to regenerate
         data/config-Server*.json NeutralPatches[].
@@ -14651,7 +14651,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         3. Dynamic Update: probe Microsoft Update Catalog for the
            current Patch Tuesday's Setup DU and Safe OS DU per
            supported OS (Server 2022 and Server 2025 only; Server 2019
-           per SPEC B.23.6 and Server 2016 per the modern-DU naming
+           per SPEC.md and Server 2016 per the modern-DU naming
            convention have no DU and are skipped). Each probe is
            recorded into data/cache-dynamicupdate-Server<N>.json via
            Add-DynamicUpdateCacheEntry, including the "empty-marker"

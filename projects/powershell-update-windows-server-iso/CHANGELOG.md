@@ -22,6 +22,15 @@ the script and follows the
 
 ## [Unreleased]
 
+### Docs / comments: make stale SPEC section references fact-based and version-independent (no `$Script:ScriptVersion` bump)
+
+The r09.0 SPEC rewrite repurposed §B.23 as "JSON Canonical Serialization" and migrated the architecture decisions to §B.22, but a number of in-code comments (and two runtime messages) still cited the old `B.23.x` subsections for non-canonical-JSON topics — release-info as the truth source, the three-prefix data layout, Catalog title tokens, the SSU / .NET combined-vs-separate handling, Dynamic Update cadence, the legacy `DotNet` type, the two-stage refresh, and empty-baseline seeding. Those numbers now mis-resolve into the JSON-canonical section or dangle.
+
+- Replaced the stale `B.23.x` citations with version-independent wording (a plain "see SPEC.md" pointer or a direct statement of the fact), so the comments no longer depend on a specific SPEC section number that can drift on the next reorganisation.
+- Corrected the misleading universal claim "most current monthly LCUs embed the SSU" to the accurate combined-vs-separate statement: combined-model OSes (Server 2022/2025) ship the SSU inside the monthly LCU, while the separate model (Server 2016/2019) publishes a standalone same-month SSU.
+- Left the genuinely-canonical-JSON `SPEC Part B.23` references intact (that section legitimately is JSON Canonical Serialization) and did not touch any vendored / canonical region.
+- Comment / message wording only: no behaviour change and no `$Script:ScriptVersion` bump. The behavioural separate-model SSU auto-discovery remains separate future work.
+
 ### CI: fix the STAGE 2 Windows checks on the Server 2025 runner and refresh action majors (no `$Script:ScriptVersion` bump)
 
 The `windows-latest` GitHub-hosted runner moved from Windows Server 2022 to Server 2025. On that image, Windows PowerShell 5.1 does not have PSGallery pre-registered and `Register-PSRepository -Default` fails against the image's bundled NuGet provider (`NuGet.Commands.CommandException: Missing option value for: '-source'`), which left PSGallery unregistered and aborted the STAGE 2 module-install step (`Set-PSRepository ... No repository with the name 'PSGallery' was found`, exit 1).
