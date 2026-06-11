@@ -22,6 +22,17 @@ the script and follows the
 
 ## [Unreleased]
 
+### P07: restore /ResetBase as the default, localise DISM scratch I/O under the work area (r11.25)
+
+A real end-to-end run of r11.24 (with /ResetBase OFF) REGRESSED total time 4h10m -> 6h17m: P07 went 3h52m -> 5h58m. Log analysis pinned the cause to the cleanup, not the export. `/StartComponentCleanup` WITHOUT `/ResetBase` ran ~36 min/index for Core editions and ~72 min/index for Desktop editions (~3h36m total), versus ~88 min total WITH `/ResetBase` on the prior run. `/StartComponentCleanup`-alone preserves uninstall capability and therefore scavenges the component store granularly (many small WinSxS file operations), whereas `/ResetBase` resets the base in bulk (fewer, larger operations); on this heavily-agented host the granular path is hit far harder by per-file AV / change-tracking interception, and the cleanup time scaled ~2x with edition component count -- the interception signature. The default Export-Image /Compress:max pass, by contrast, took only ~20 seconds for all four indexes and delivered the size win (9.50 GB -> 6.04 GB install.wim, 36.4% smaller), confirming it as a near-free keeper.
+
+- `/ResetBase` is ON by default again. A patched golden ISO exists to ship the latest updates already applied; uninstalling those updates is not a use case, so resetting the component-store base (updates non-removable) is the correct default -- and it is empirically faster on this host. The opt-in `-ResetBaseOnCleanup` switch is replaced by the opt-out `-SkipResetBaseOnCleanup` (keeps updates removable; omits `/ResetBase`); `$Script:ResetBaseOnCleanup` is now `-not $SkipResetBaseOnCleanup`. `Get-DismCleanupArgumentList` stays policy-neutral (`-IncludeResetBase` still gates the token); the script wiring sets the default.
+- DISM scratch I/O is now localised under the work area. A new `$Script:ScratchDir` (`<WorkRoot>\work\scratch`, created at startup) is threaded into the heavy DISM operations: package application (`Add-WindowsPackage`) via `-ScratchDirectory`, and `/Cleanup-Image` and `/Export-Image` via a `/ScratchDir:<path>` token appended by `Get-DismCleanupArgumentList` / `Get-DismExportArgumentList` when a scratch path is supplied. Previously DISM used its implicit per-process scratch under `C:\`, invisible to a work-area-scoped exclusion; localising it keeps all DISM temp I/O under one directory (and keeps `C:` clean). This is the prerequisite for evaluating a workspace AV-exclusion as the root-cause fix for the interception above.
+- The Export-Image /Compress:max pass is unchanged in policy (default ON, `-SkipExportCompress` opts out) and now also receives `/ScratchDir`.
+- T24 / T25 each gained two assertions: `-ScratchDir` appends exactly one `/ScratchDir:<path>` token (no embedded space) and the token is omitted when no scratch path is supplied.
+
+`$Script:ScriptVersion` -> `update-wsi-2026.06.11-r11.25`; `$Script:ScriptTag` -> `p07-resetbase-default-on-scratchdir`.
+
 ### P07 build-time optimisation: /ResetBase off by default, recover size with a single Export-Image /Compress:max pass (r11.24)
 
 On a real end-to-end run P07 (PatchInstallWim) took 3h52m -- 93% of the 4h10m total. Per-index timing showed the two dominant costs were the LCU apply (~24-32 min/index, inherent to DISM offline servicing) and `/Cleanup-Image /StartComponentCleanup /ResetBase` (~17-27 min/index). `/ResetBase` rebuilds the component-store base and is the avoidable half.

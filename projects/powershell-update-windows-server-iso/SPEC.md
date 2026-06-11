@@ -962,11 +962,18 @@ loop for any sub-phase. Phase workers iterate the sequence, calling
 `Invoke-PatchSubPhase` for content-bearing sub-phases and running
 `Invoke-DismCleanup` for `IsCleanupMarker` sub-phases.
 
-**Cleanup / export policy (r11.24).** The per-image cleanup is
-`/Cleanup-Image /StartComponentCleanup` only by default; `/ResetBase`
-is appended only when the operator opts in via `-ResetBaseOnCleanup`,
-because it resets the component-store base (smaller image, applied
-updates no longer removable) at a large per-index time cost. The
+**Cleanup / export policy (r11.25).** The per-image cleanup is
+`/Cleanup-Image /StartComponentCleanup /ResetBase` by default.
+`/ResetBase` resets the component-store base (smaller image, applied
+updates no longer removable) -- the correct default for a patched
+golden ISO that ships the latest updates already applied (uninstalling
+them is not a use case), and empirically the faster cleanup on
+heavily-agented hosts (bulk base reset vs granular per-component
+scavenging). `-SkipResetBaseOnCleanup` opts out (keeps updates
+removable). All heavy DISM operations write scratch to a
+workspace-local `$Script:ScratchDir` (`<WorkRoot>\work\scratch`):
+`Add-WindowsPackage` via `-ScratchDirectory`; `/Cleanup-Image` and
+`/Export-Image` via a `/ScratchDir:` token. The
 "Export" half of `I6.CleanupAndExport` is realised as a single
 post-loop pass: after every install.wim index has been serviced and
 dismounted, `Export-InstallWimCompressed` runs one

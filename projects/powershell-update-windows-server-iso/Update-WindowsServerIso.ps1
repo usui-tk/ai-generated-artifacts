@@ -276,12 +276,14 @@ param(
     [string]   $OnlyInstallWimIndexes,
 
     # P07 install.wim cleanup: by default the per-image DISM cleanup runs
-    # /Cleanup-Image /StartComponentCleanup only. -ResetBaseOnCleanup appends
-    # /ResetBase (resets the component-store base: smaller image, applied
-    # updates no longer removable) at a large per-index time cost. Default OFF,
-    # matching Microsoft's released-media practice; size is instead recovered
-    # by the default Export-Image /Compress:max pass (see -SkipExportCompress).
-    [switch]   $ResetBaseOnCleanup,
+    # /Cleanup-Image /StartComponentCleanup /ResetBase. /ResetBase resets the
+    # component-store base (smaller image; applied updates no longer removable),
+    # the correct default for a patched golden ISO whose purpose is to ship the
+    # latest updates already applied -- uninstalling them is not a use case. On
+    # heavily-agented hosts /ResetBase's bulk base reset is also faster than
+    # granular /StartComponentCleanup-only scavenging. -SkipResetBaseOnCleanup
+    # opts out (keeps updates removable; omits /ResetBase).
+    [switch]   $SkipResetBaseOnCleanup,
 
     # P07 install.wim size optimisation: after all indexes are serviced, a
     # single Export-Image /Compress:max pass recompresses and single-instances
@@ -352,7 +354,7 @@ $Script:ForcePca2023OnServer2025  = [bool]$ForcePca2023OnServer2025
 $Script:Pca2023OnlyMode           = [bool]$Pca2023OnlyMode
 $Script:Pca2023ScriptPath         = $Pca2023ScriptPath
 $Script:AutoInstallAdk            = [bool]$AutoInstallAdk
-$Script:ResetBaseOnCleanup        = [bool]$ResetBaseOnCleanup
+$Script:ResetBaseOnCleanup        = -not [bool]$SkipResetBaseOnCleanup
 $Script:SkipExportCompress        = [bool]$SkipExportCompress
 
 # -----------------
@@ -517,6 +519,7 @@ $Script:MountBoot1Dir     = Join-Path $Script:WorkRoot 'work\mount_boot_idx1'
 $Script:MountBoot2Dir     = Join-Path $Script:WorkRoot 'work\mount_boot_idx2'
 $Script:MountWinReDir     = Join-Path $Script:WorkRoot 'work\mount_winre'
 $Script:TempDir           = Join-Path $Script:WorkRoot 'work\temp'
+$Script:ScratchDir        = Join-Path $Script:WorkRoot 'work\scratch'
 $Script:LogsDir           = Join-Path $Script:WorkRoot 'logs'
 $Script:DiagDir           = Join-Path $Script:WorkRoot 'diag'
 $Script:MarkersDir        = Join-Path $Script:WorkRoot '.markers'
@@ -559,8 +562,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.11-r11.24'
-$Script:ScriptTag     = 'p07-resetbase-off-export-compress'
+$Script:ScriptVersion = 'update-wsi-2026.06.11-r11.25'
+$Script:ScriptTag     = 'p07-resetbase-default-on-scratchdir'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6477,13 +6480,16 @@ function Add-WindowsPackageWithRetry {
     }
     Set-DebugStep -Step ('add-pkg-' + [System.IO.Path]::GetFileName($PackagePath))
 
-    $logArg = @{}
+    $extraArg = @{}
     if ($LogDir) {
-        $logArg['LogPath'] = Join-Path $LogDir (('addpkg_{0:yyyyMMdd-HHmmss}.log' -f (Get-Date)))
+        $extraArg['LogPath'] = Join-Path $LogDir (('addpkg_{0:yyyyMMdd-HHmmss}.log' -f (Get-Date)))
+    }
+    if (-not [string]::IsNullOrEmpty($Script:ScratchDir)) {
+        $extraArg['ScratchDirectory'] = $Script:ScratchDir
     }
 
     try {
-        Invoke-DismCmdlet -CommandName 'Add-WindowsPackage' -Parameters (@{ Path = $MountPath; PackagePath = $PackagePath; ErrorAction = 'Stop' } + $logArg) | Out-Null
+        Invoke-DismCmdlet -CommandName 'Add-WindowsPackage' -Parameters (@{ Path = $MountPath; PackagePath = $PackagePath; ErrorAction = 'Stop' } + $extraArg) | Out-Null
         return 'Ok'
     } catch {
         $m = [string]$_.Exception.Message
@@ -6494,7 +6500,7 @@ function Add-WindowsPackageWithRetry {
         if ($m -match '0x800f0a13') {
             Write-Caution ('0x800f0a13: Modules Installer transient error; retrying after 10s...')
             Start-Sleep -Seconds 10
-            Invoke-DismCmdlet -CommandName 'Add-WindowsPackage' -Parameters (@{ Path = $MountPath; PackagePath = $PackagePath; ErrorAction = 'Stop' } + $logArg) | Out-Null
+            Invoke-DismCmdlet -CommandName 'Add-WindowsPackage' -Parameters (@{ Path = $MountPath; PackagePath = $PackagePath; ErrorAction = 'Stop' } + $extraArg) | Out-Null
             return 'OkAfterRetry'
         }
         # All other errors propagate (0x800f0922, 0xC1420127, etc.)
@@ -6628,11 +6634,15 @@ function Get-DismCleanupArgumentList {
     [OutputType([string[]])]
     param(
         [Parameter(Mandatory)] [string]$MountPath,
-        [switch]$IncludeResetBase
+        [switch]$IncludeResetBase,
+        [string]$ScratchDir
     )
     $vector = @("/Image:$MountPath", '/Cleanup-Image', '/StartComponentCleanup')
     if ($IncludeResetBase) {
         $vector += '/ResetBase'
+    }
+    if (-not [string]::IsNullOrEmpty($ScratchDir)) {
+        $vector += "/ScratchDir:$ScratchDir"
     }
     return $vector
 }
@@ -6645,16 +6655,17 @@ function Invoke-DismCleanup {
         against a mounted image (optionally with /ResetBase).
     .DESCRIPTION
         Cleanup runs once per image, AFTER all packages for that image have
-        been applied. By default it is /StartComponentCleanup only; /ResetBase
-        is appended only when the operator opts in via -ResetBaseOnCleanup
-        ($Script:ResetBaseOnCleanup), because /ResetBase costs many minutes per
-        index. Size is instead recovered by the default Export-Image
-        /Compress:max pass (Export-InstallWimCompressed).
+        been applied. By default it runs /StartComponentCleanup /ResetBase;
+        /ResetBase ($Script:ResetBaseOnCleanup, default ON) resets the
+        component-store base so the patched golden image ships the latest
+        updates already applied. -SkipResetBaseOnCleanup omits /ResetBase
+        (keeps updates removable). A workspace-local /ScratchDir keeps DISM
+        temp I/O under the work area.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string]$MountPath)
     Set-DebugStep -Step 'dism-cleanup-image'
-    $dismArgs = Get-DismCleanupArgumentList -MountPath $MountPath -IncludeResetBase:$Script:ResetBaseOnCleanup
+    $dismArgs = Get-DismCleanupArgumentList -MountPath $MountPath -IncludeResetBase:$Script:ResetBaseOnCleanup -ScratchDir $Script:ScratchDir
     $code = Invoke-DismCli -Arguments $dismArgs -Context 'cleanup-image'
     if ($code -ne 0) {
         throw ('dism.exe /Cleanup-Image failed with exit code {0}' -f $code)
@@ -6685,15 +6696,20 @@ function Get-DismExportArgumentList {
     param(
         [Parameter(Mandatory)] [string]$SourceWim,
         [Parameter(Mandatory)] [int]$SourceIndex,
-        [Parameter(Mandatory)] [string]$DestinationWim
+        [Parameter(Mandatory)] [string]$DestinationWim,
+        [string]$ScratchDir
     )
-    return @(
+    $vector = @(
         '/Export-Image',
         "/SourceImageFile:$SourceWim",
         "/SourceIndex:$SourceIndex",
         "/DestinationImageFile:$DestinationWim",
         '/Compress:max'
     )
+    if (-not [string]::IsNullOrEmpty($ScratchDir)) {
+        $vector += "/ScratchDir:$ScratchDir"
+    }
+    return $vector
 }
 
 function Export-InstallWimCompressed {
@@ -6728,7 +6744,7 @@ function Export-InstallWimCompressed {
     Write-Step ('Export-Image /Compress:max over {0} index(es) to recover size (no /ResetBase).' -f $sourceCount)
     foreach ($img in ($before | Sort-Object ImageIndex)) {
         Set-DebugStep -Step ('export-install-idx-' + $img.ImageIndex)
-        $exportArgs = Get-DismExportArgumentList -SourceWim $WimPath -SourceIndex $img.ImageIndex -DestinationWim $exported
+        $exportArgs = Get-DismExportArgumentList -SourceWim $WimPath -SourceIndex $img.ImageIndex -DestinationWim $exported -ScratchDir $Script:ScratchDir
         $code = Invoke-DismCli -Arguments $exportArgs -Context ('export-image-idx' + $img.ImageIndex)
         if ($code -ne 0) {
             throw ('dism.exe /Export-Image failed (index {0}) with exit code {1}' -f $img.ImageIndex, $code)
@@ -15503,7 +15519,7 @@ if ($Script:CleanWorkRoot -and (Test-Path -LiteralPath $Script:WorkRoot)) {
     Remove-Item -LiteralPath $Script:WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:OutputDir, $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir, $Script:PatchesDir, $Script:ManifestsDir, (Join-Path $Script:WorkRoot 'work'), $Script:TempDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir)
+Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:OutputDir, $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir, $Script:PatchesDir, $Script:ManifestsDir, (Join-Path $Script:WorkRoot 'work'), $Script:TempDir, $Script:ScratchDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir)
 
 # Activate debug trace JSONL file output
 try {

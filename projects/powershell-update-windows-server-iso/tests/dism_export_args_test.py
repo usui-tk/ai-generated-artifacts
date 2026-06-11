@@ -41,10 +41,15 @@ def main() -> int:
         "/Compress:max",
     ]
 
+    scratch = r"D:\UpdateWsi-Server2016\work\scratch"
     with PSSession(SCRIPT_PATH) as ps:
         args = as_list(ps.invoke(
             "Get-DismExportArgumentList",
             SourceWim=src, SourceIndex=index, DestinationWim=dst,
+        ))
+        scratch_args = as_list(ps.invoke(
+            "Get-DismExportArgumentList",
+            SourceWim=src, SourceIndex=index, DestinationWim=dst, ScratchDir=scratch,
         ))
 
     passed = 0
@@ -65,7 +70,11 @@ def main() -> int:
           "/Compress:max" in args, repr(args))
     check(f"targets the requested source index (/SourceIndex:{index})",
           f"/SourceIndex:{index}" in args, repr(args))
-    spaced = [a for a in args if " " in str(a)]
+    check("-ScratchDir appends /ScratchDir:<path> as one token",
+          f"/ScratchDir:{scratch}" in scratch_args, repr(scratch_args))
+    check("/ScratchDir omitted when -ScratchDir not supplied",
+          not any(str(a).startswith("/ScratchDir:") for a in args), repr(args))
+    spaced = [a for a in (args + scratch_args) if " " in str(a)]
     check("no token contains an embedded space (collapse signature)",
           not spaced, repr(spaced))
 

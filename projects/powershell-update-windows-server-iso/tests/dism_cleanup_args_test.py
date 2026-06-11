@@ -38,12 +38,14 @@ def as_list(result):
 
 def main() -> int:
     mount = r"D:\UpdateWsi-Server2016\work\mount_install"
+    scratch = r"D:\UpdateWsi-Server2016\work\scratch"
     default_expected = [f"/Image:{mount}", "/Cleanup-Image", "/StartComponentCleanup"]
     reset_expected = default_expected + ["/ResetBase"]
 
     with PSSession(SCRIPT_PATH) as ps:
         default_args = as_list(ps.invoke("Get-DismCleanupArgumentList", MountPath=mount))
         reset_args = as_list(ps.invoke("Get-DismCleanupArgumentList", MountPath=mount, IncludeResetBase=True))
+        scratch_args = as_list(ps.invoke("Get-DismCleanupArgumentList", MountPath=mount, IncludeResetBase=True, ScratchDir=scratch))
 
     passed = 0
     failed = 0
@@ -67,8 +69,14 @@ def main() -> int:
     check("-IncludeResetBase appends /ResetBase as a fourth discrete token",
           reset_args == reset_expected, repr(reset_args))
 
-    # Bug signature (both modes): no token may contain an embedded space
-    spaced = [a for a in (default_args + reset_args) if " " in str(a)]
+    # -ScratchDir appends /ScratchDir:<path> as a single discrete token
+    check("-ScratchDir appends /ScratchDir:<path> as one token",
+          f"/ScratchDir:{scratch}" in scratch_args, repr(scratch_args))
+    check("/ScratchDir omitted when -ScratchDir not supplied",
+          not any(str(a).startswith("/ScratchDir:") for a in reset_args), repr(reset_args))
+
+    # Bug signature (all modes): no token may contain an embedded space
+    spaced = [a for a in (default_args + reset_args + scratch_args) if " " in str(a)]
     check("no token contains an embedded space (collapse signature)",
           not spaced, repr(spaced))
 
