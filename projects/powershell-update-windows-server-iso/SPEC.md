@@ -984,6 +984,20 @@ editions. The exported WIM is index-count-verified before the swap;
 on failure the original is left untouched. Default ON; `-SkipExportCompress`
 opts out.
 
+**Defender exclusion option (r11.26).** `-UseDefenderExclusions` (opt-in,
+default off, security-affecting) temporarily excludes the `WorkRoot` tree and
+the servicing processes (`dism.exe`, `DismHost.exe`, `TiWorker.exe`,
+`TrustedInstaller.exe`, by file name) from Windows Defender real-time scanning
+for the duration of a run, then removes them. A controlled A/B probe measured
+~35% faster LCU apply with the exclusion; the cleanup is storage-bound and
+unaffected. It is **fail-closed** (`Get-DefenderExclusionDecision`): applied
+only when Defender is present, `WinDefend` is running, real-time protection is
+on, Tamper Protection is off and `AMRunningMode` is `Normal`; any unmet or
+unknown state skips the feature (the build continues unexcluded). Additions are
+recorded to `<WorkRoot>\state\defender-exclusions.json`; only recorded entries
+are removed (in the top-level `finally` and via a startup self-heal of a
+crashed run), never pre-existing user exclusions.
+
 ## B.12 Catalogue scrape and supersedence selection
 
 **Status**: normative. **Policy ID**: SPEC-WSI-015.

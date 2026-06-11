@@ -396,6 +396,7 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-ManifestPath` | input | （なし）| ハッシュ付き Metalink `.meta4` マニフェスト |
 | `-OnlyPhases` | advanced | （なし）| アクション既定を上書きするフェーズ ID 配列（例 `'P04','P07'`）|
 | `-OnlyInstallWimIndexes` | advanced | （なし）| install.wim 更新を限定するインデックス一覧（例 `'2,4'`）|
+| `-UseDefenderExclusions` | advanced | switch（OFF）| オプトイン: 実行中だけ WorkRoot ツリー ＋ dism/DismHost/TiWorker/TrustedInstaller を Defender 除外（fail-closed・LCU 適用が約 35% 高速化）|
 | `-AutoDetectLatestPatches` | patch | switch（OFF）| Catalog から P03 PatchBaseline 更新を強制 |
 | `-PatchMonth` | patch | 当月 | 更新対象パッチ月（例 `2026-06`）|
 | `-SkipDynamicPatchRefresh` | patch | switch（OFF）| ベースライン陳腐でも P03 をスキップ（オフライン）|

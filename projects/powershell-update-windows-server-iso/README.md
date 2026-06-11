@@ -410,6 +410,7 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-ManifestPath` | input | (none) | Metalink `.meta4` manifest with hashes |
 | `-OnlyPhases` | advanced | (none) | Phase-ID array (e.g. `'P04','P07'`) overriding the Action's phase set |
 | `-OnlyInstallWimIndexes` | advanced | (none) | Comma-separated index list (e.g. `'2,4'`) limiting install.wim updates |
+| `-UseDefenderExclusions` | advanced | switch (OFF) | Opt-in: temporarily exclude the WorkRoot tree + dism/DismHost/TiWorker/TrustedInstaller from Defender for the run (fail-closed; ~35% faster LCU apply) |
 | `-AutoDetectLatestPatches` | patch | switch (OFF) | Force a P03 PatchBaseline refresh from the Catalog |
 | `-PatchMonth` | patch | current month | Target patch month for refresh, e.g. `2026-06` |
 | `-SkipDynamicPatchRefresh` | patch | switch (OFF) | Skip P03 even if baseline is stale (offline runs) |

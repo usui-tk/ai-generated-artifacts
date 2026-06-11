@@ -22,6 +22,18 @@ the script and follows the
 
 ## [Unreleased]
 
+### Add an opt-in Windows Defender exclusion manager for the build (`-UseDefenderExclusions`, r11.26)
+
+A controlled real-machine A/B probe (idx1, P01-P07, the only variable being the Defender exclusion) measured that excluding the work area and the DISM/CBS servicing processes from Defender real-time scanning cuts the LCU apply ~35% (22m56s -> 14m57s); the StartComponentCleanup is storage-bound (small-file synchronous-write latency, ~900-2,600 writes/s across three drives) and is NOT helped by the exclusion. This adds an opt-in `-UseDefenderExclusions` switch (default OFF, security-affecting) that manages those exclusions only for the duration of a run.
+
+- **Scope.** One path exclusion -- the `WorkRoot` tree (covers mount, scratch, source install.wim and patches recursively) -- plus four process exclusions by file name: `dism.exe`, `DismHost.exe`, `TiWorker.exe`, `TrustedInstaller.exe` (file-name, not full path, because `TiWorker.exe` lives under a versioned WinSxS path).
+- **Fail-closed.** Exclusions are applied ONLY when every prerequisite is positively confirmed: the four `*-MpPreference`/`Get-MpComputerStatus` commands exist, `WinDefend` is running, real-time protection is on, Tamper Protection is off, and `AMRunningMode` is `Normal`. Any unmet or unknown condition (e.g. an older Server SKU that does not report `AMRunningMode`) skips the feature entirely and the build continues without exclusions, printing the specific reason. The decision is a pure helper (`Get-DefenderExclusionDecision`).
+- **Only-add-what's-absent + only-remove-what-we-added.** `Get-DefenderExclusionPlan` (pure) adds only exclusions not already present (case/trailing-slash-insensitive); what this run adds is recorded to `<WorkRoot>\state\defender-exclusions.json` and only those entries are removed on teardown -- never a pre-existing user exclusion.
+- **Crash-safe.** Restoration runs in the script's top-level `finally`; additionally a startup self-heal removes orphaned exclusions recorded by a previous interrupted run. `-Action Cleanup` preserves the `<WorkRoot>\state` folder so that record survives a workspace teardown.
+- New test **T26** (`defender_exclusion_plan_test.py`, 13 assertions) covers the three pure helpers (managed set, add-only-absent plan, fail-closed decision incl. `$null`/unknown inputs). The `Add-/Remove-MpPreference` / `Get-MpComputerStatus` wrappers are Windows-only (not exercised offline, same boundary as the DISM cmdlets).
+
+`$Script:ScriptVersion` -> `update-wsi-2026.06.11-r11.26`; `$Script:ScriptTag` -> `defender-exclusion-optin`.
+
 ### P07: restore /ResetBase as the default, localise DISM scratch I/O under the work area (r11.25)
 
 A real end-to-end run of r11.24 (with /ResetBase OFF) REGRESSED total time 4h10m -> 6h17m: P07 went 3h52m -> 5h58m. Log analysis pinned the cause to the cleanup, not the export. `/StartComponentCleanup` WITHOUT `/ResetBase` ran ~36 min/index for Core editions and ~72 min/index for Desktop editions (~3h36m total), versus ~88 min total WITH `/ResetBase` on the prior run. `/StartComponentCleanup`-alone preserves uninstall capability and therefore scavenges the component store granularly (many small WinSxS file operations), whereas `/ResetBase` resets the base in bulk (fewer, larger operations); on this heavily-agented host the granular path is hit far harder by per-file AV / change-tracking interception, and the cleanup time scaled ~2x with edition component count -- the interception signature. The default Export-Image /Compress:max pass, by contrast, took only ~20 seconds for all four indexes and delivered the size win (9.50 GB -> 6.04 GB install.wim, 36.4% smaller), confirming it as a near-free keeper.

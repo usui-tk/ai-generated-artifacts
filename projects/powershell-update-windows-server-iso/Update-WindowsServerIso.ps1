@@ -145,6 +145,14 @@
     Comma-separated index list (e.g. '2,4') to limit install.wim updates.
     Default: all indexes in install.wim.
 
+.PARAMETER UseDefenderExclusions
+    Opt-in. Temporarily add Windows Defender exclusions (the WorkRoot path and
+    the dism/DismHost/TiWorker/TrustedInstaller processes) for the run, then
+    remove them. Speeds the LCU apply (~35% in a measured A/B probe); the
+    cleanup is storage-bound and unaffected. Fail-closed: applied only when
+    Defender is present, running in Normal mode, real-time protection on and
+    Tamper Protection off; any other or unknown state -> skipped. Default off.
+
 .PARAMETER CleanWorkRoot
     Delete WorkRoot before starting (preserves the output directory).
 
@@ -291,6 +299,14 @@ param(
     # -SkipExportCompress opts out (faster build, larger install.wim).
     [switch]   $SkipExportCompress,
 
+    # Opt-in Windows Defender exclusion management (security-affecting; default
+    # off). When set, the WorkRoot path and the DISM/CBS servicing processes
+    # are excluded from Defender real-time scanning for the run and removed
+    # afterwards. Fail-closed (Get-DefenderExclusionDecision) and crash-safe
+    # (state file + startup self-heal). Measured A/B: ~35% faster LCU apply;
+    # the cleanup is storage-bound and unaffected.
+    [switch]   $UseDefenderExclusions,
+
     [switch]   $CleanWorkRoot,
     [string]   $LogFile,
     [switch]   $DryRun,
@@ -356,6 +372,7 @@ $Script:Pca2023ScriptPath         = $Pca2023ScriptPath
 $Script:AutoInstallAdk            = [bool]$AutoInstallAdk
 $Script:ResetBaseOnCleanup        = -not [bool]$SkipResetBaseOnCleanup
 $Script:SkipExportCompress        = [bool]$SkipExportCompress
+$Script:UseDefenderExclusions     = [bool]$UseDefenderExclusions
 
 # -----------------
 # Parameter validation
@@ -523,6 +540,7 @@ $Script:ScratchDir        = Join-Path $Script:WorkRoot 'work\scratch'
 $Script:LogsDir           = Join-Path $Script:WorkRoot 'logs'
 $Script:DiagDir           = Join-Path $Script:WorkRoot 'diag'
 $Script:MarkersDir        = Join-Path $Script:WorkRoot '.markers'
+$Script:StateDir          = Join-Path $Script:WorkRoot 'state'
 
 # >>> CANONICAL unit_id=pwsh.helper.initialize-runtimedirectories version=1.0.0 hash=30bff32f7d40fca8 policy=canonical binding=follow-latest >>>
 function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical unit_id retained; noun stays plural by design
@@ -562,8 +580,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.11-r11.25'
-$Script:ScriptTag     = 'p07-resetbase-default-on-scratchdir'
+$Script:ScriptVersion = 'update-wsi-2026.06.11-r11.26'
+$Script:ScriptTag     = 'defender-exclusion-optin'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6760,6 +6778,247 @@ function Export-InstallWimCompressed {
     $newBytes = (Get-Item -LiteralPath $WimPath).Length
     $savedPct = if ($origBytes -gt 0) { [Math]::Round((1 - ($newBytes / $origBytes)) * 100, 1) } else { 0 }
     Write-Ok ('install.wim recompressed: {0:N0} -> {1:N0} bytes ({2}% smaller).' -f $origBytes, $newBytes, $savedPct)
+}
+
+# ===========================================================================
+# Windows Defender exclusion management (opt-in, -UseDefenderExclusions)
+# ---------------------------------------------------------------------------
+# A real-machine A/B probe (2026-06) measured that excluding the work area
+# plus the DISM/CBS servicing processes from Defender real-time scanning cuts
+# the LCU apply ~35% (the cleanup is storage-bound and unaffected). OPT-IN and
+# security-affecting: exclusions are added for the run and removed afterwards.
+# Invariants:
+#   * fail-closed -- applied ONLY when every prerequisite is positively
+#     confirmed (commands present, WinDefend running, real-time on, Tamper off,
+#     AMRunningMode = Normal). Any unknown/unmet condition -> skip (touch
+#     nothing). Older Server SKUs that do not report these properties are thus
+#     skipped, by design.
+#   * only-add-what's-absent + only-remove-what-WE-added -- a state file records
+#     exactly what this run added; restore removes only those, never a
+#     pre-existing user exclusion.
+#   * guaranteed restore (main finally) + startup self-heal of a state file
+#     left by a crashed run.
+# The pure helpers (Get-DefenderManagedExclusionSet, Get-DefenderExclusionPlan,
+# Get-DefenderExclusionDecision) are unit-tested (T26); the
+# Get-MpComputerStatus / Add-/Remove-MpPreference calls are thin Windows-only
+# wrappers (these cmdlets do not exist on Linux).
+# ===========================================================================
+
+function Get-DefenderManagedExclusionSet {
+    # Pure. The canonical set this tool manages: the WorkRoot tree (one path
+    # exclusion covers all children recursively) and the servicing processes
+    # by FILE NAME (TiWorker.exe lives under a versioned WinSxS path, so a full
+    # path is not stable; file-name exclusions are version-robust).
+    param([Parameter(Mandatory)] [string]$WorkRoot)
+    return [pscustomobject]@{
+        Paths     = @($WorkRoot)
+        Processes = @('dism.exe', 'DismHost.exe', 'TiWorker.exe', 'TrustedInstaller.exe')
+    }
+}
+
+function Get-DefenderExclusionPlan {
+    # Pure. Return only the desired items NOT already present (case-insensitive;
+    # paths compared trailing-slash-insensitively). Output preserves desired
+    # casing. Guarantees "only add what is absent".
+    param(
+        [string[]]$DesiredPaths,
+        [string[]]$DesiredProcesses,
+        [string[]]$ExistingPaths,
+        [string[]]$ExistingProcesses
+    )
+    $existPathSet = @{}
+    foreach ($p in @($ExistingPaths)) {
+        if (-not [string]::IsNullOrWhiteSpace($p)) { $existPathSet[$p.TrimEnd('\').ToLowerInvariant()] = $true }
+    }
+    $existProcSet = @{}
+    foreach ($q in @($ExistingProcesses)) {
+        if (-not [string]::IsNullOrWhiteSpace($q)) { $existProcSet[$q.ToLowerInvariant()] = $true }
+    }
+    $pathsToAdd = @()
+    foreach ($p in @($DesiredPaths)) {
+        if ([string]::IsNullOrWhiteSpace($p)) { continue }
+        if (-not $existPathSet.ContainsKey($p.TrimEnd('\').ToLowerInvariant())) { $pathsToAdd += $p }
+    }
+    $procsToAdd = @()
+    foreach ($q in @($DesiredProcesses)) {
+        if ([string]::IsNullOrWhiteSpace($q)) { continue }
+        if (-not $existProcSet.ContainsKey($q.ToLowerInvariant())) { $procsToAdd += $q }
+    }
+    return [pscustomobject]@{
+        PathsToAdd     = @($pathsToAdd)
+        ProcessesToAdd = @($procsToAdd)
+    }
+}
+
+function Get-DefenderExclusionDecision {
+    # Pure, fail-closed. Each input is [object] so an unreported value is $null
+    # (older Server SKUs may omit AMRunningMode / IsTamperProtected). Apply ONLY
+    # when every condition is positively satisfied; otherwise skip with a
+    # specific reason. Flat params (not a status object) keep it unit-testable.
+    param(
+        [object]$CommandsAvailable,
+        [object]$ServiceRunning,
+        [object]$RealTimeEnabled,
+        [object]$TamperProtected,
+        [object]$RunningMode
+    )
+    if ($CommandsAvailable -ne $true) {
+        return [pscustomobject]@{ Apply = $false; Reason = 'Defender PowerShell commands are not all available' }
+    }
+    if ($ServiceRunning -ne $true) {
+        return [pscustomobject]@{ Apply = $false; Reason = 'the WinDefend service is absent or not running' }
+    }
+    if ($RealTimeEnabled -ne $true) {
+        return [pscustomobject]@{ Apply = $false; Reason = 'real-time protection is off or unknown (exclusions would have no effect)' }
+    }
+    if ($TamperProtected -ne $false) {
+        return [pscustomobject]@{ Apply = $false; Reason = 'Tamper Protection is on or unknown (exclusions may be ignored)' }
+    }
+    if ($RunningMode -ne 'Normal') {
+        $m = if ($null -eq $RunningMode) { 'unknown' } else { $RunningMode }
+        return [pscustomobject]@{ Apply = $false; Reason = ('AMRunningMode is not Normal (got: {0}); another AV may be primary' -f $m) }
+    }
+    return [pscustomobject]@{ Apply = $true; Reason = 'all prerequisites satisfied (Normal mode, real-time on, Tamper off)' }
+}
+
+function Test-DefenderToolingAvailable {
+    # Windows-only. Explicit search so a missing cmdlet/service yields $false,
+    # not a terminating error (older Server SKUs may differ).
+    $cmds = @('Get-MpComputerStatus', 'Get-MpPreference', 'Add-MpPreference', 'Remove-MpPreference')
+    $cmdsOk = $true
+    foreach ($c in $cmds) {
+        if (-not (Get-Command -Name $c -ErrorAction SilentlyContinue)) { $cmdsOk = $false; break }
+    }
+    $svc = Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'WinDefend' }
+    $svcRunning = [bool]($svc -and $svc.Status -eq 'Running')
+    return [pscustomobject]@{ CommandsAvailable = $cmdsOk; ServiceRunning = $svcRunning }
+}
+
+function Get-DefenderStatusNormalized {
+    # Windows-only. Calls Get-MpComputerStatus defensively; normalises the three
+    # decision properties to $true/$false/$null (older SKUs may omit
+    # AMRunningMode / IsTamperProtected -> $null -> fail-closed skip).
+    $tooling = Test-DefenderToolingAvailable
+    $rt = $null; $tamper = $null; $mode = $null
+    if ($tooling.CommandsAvailable) {
+        try {
+            $st = Get-MpComputerStatus -ErrorAction Stop
+            $names = @($st.PSObject.Properties.Name)
+            if ($names -contains 'RealTimeProtectionEnabled') { $rt = [bool]$st.RealTimeProtectionEnabled }
+            if ($names -contains 'IsTamperProtected')         { $tamper = [bool]$st.IsTamperProtected }
+            if ($names -contains 'AMRunningMode')              { $mode = [string]$st.AMRunningMode }
+        } catch {
+            $null = $_
+        }
+    }
+    return [pscustomobject]@{
+        CommandsAvailable = $tooling.CommandsAvailable
+        ServiceRunning    = $tooling.ServiceRunning
+        RealTimeEnabled   = $rt
+        TamperProtected   = $tamper
+        RunningMode       = $mode
+    }
+}
+
+function Get-DefenderExclusionStatePath {
+    return (Join-Path $Script:StateDir 'defender-exclusions.json')
+}
+
+function Write-DefenderExclusionState {
+    param([string[]]$PathsAdded, [string[]]$ProcessesAdded)
+    if (-not (Test-Path -LiteralPath $Script:StateDir)) {
+        New-Item -ItemType Directory -Path $Script:StateDir -Force | Out-Null
+    }
+    $obj = [pscustomobject]@{
+        schema         = 'defender-exclusions/1'
+        createdUtc     = (Get-Date).ToUniversalTime().ToString('o')
+        ownerPid       = $PID
+        pathsAdded     = @($PathsAdded)
+        processesAdded = @($ProcessesAdded)
+    }
+    $obj | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Get-DefenderExclusionStatePath) -Encoding UTF8
+}
+
+function Read-DefenderExclusionState {
+    $f = Get-DefenderExclusionStatePath
+    if (-not (Test-Path -LiteralPath $f)) { return $null }
+    try { return (Get-Content -LiteralPath $f -Raw | ConvertFrom-Json) } catch { return $null }
+}
+
+function Remove-DefenderExclusionState {
+    $f = Get-DefenderExclusionStatePath
+    if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+}
+
+function Disable-ManagedDefenderExclusion {
+    # Windows-only. Remove ONLY what this run recorded, then delete the state
+    # file. Idempotent, best-effort, never throws.
+    $state = Read-DefenderExclusionState
+    if ($null -eq $state) { return }
+    try {
+        $paths = @($state.pathsAdded) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        $procs = @($state.processesAdded) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        $hasRemove = [bool](Get-Command -Name 'Remove-MpPreference' -ErrorAction SilentlyContinue)
+        if ($hasRemove -and $paths.Count -gt 0) { Remove-MpPreference -ExclusionPath $paths -ErrorAction SilentlyContinue }
+        if ($hasRemove -and $procs.Count -gt 0) { Remove-MpPreference -ExclusionProcess $procs -ErrorAction SilentlyContinue }
+        Write-Step ('Defender exclusions removed (paths: {0}; processes: {1}).' -f ($paths -join ', '), ($procs -join ', '))
+    } catch {
+        Write-Caution ('Defender exclusion removal warning: {0}' -f $_.Exception.Message)
+    } finally {
+        Remove-DefenderExclusionState
+    }
+}
+
+function Enable-ManagedDefenderExclusion {
+    # Windows-only orchestration. Diagnose (fail-closed); only on a fully
+    # satisfied environment add the absent exclusions and record them FIRST so
+    # restore can always undo them. Never throws into the build.
+    if (-not $Script:UseDefenderExclusions) { return }
+    try {
+        $status = Get-DefenderStatusNormalized
+        $modeStr = if ($null -eq $status.RunningMode) { 'unknown' } else { $status.RunningMode }
+        Write-Step ('Defender: mode={0} realtime={1} tamper={2} service={3}' -f $modeStr, $status.RealTimeEnabled, $status.TamperProtected, $status.ServiceRunning)
+        $decisionArgs = @{
+            CommandsAvailable = $status.CommandsAvailable
+            ServiceRunning    = $status.ServiceRunning
+            RealTimeEnabled   = $status.RealTimeEnabled
+            TamperProtected   = $status.TamperProtected
+            RunningMode       = $status.RunningMode
+        }
+        $decision = Get-DefenderExclusionDecision @decisionArgs
+        if (-not $decision.Apply) {
+            Write-Caution ('Defender exclusions NOT applied: {0}. Build continues without exclusions.' -f $decision.Reason)
+            return
+        }
+        $desired = Get-DefenderManagedExclusionSet -WorkRoot $Script:WorkRoot
+        $pref = Get-MpPreference -ErrorAction Stop
+        $plan = Get-DefenderExclusionPlan -DesiredPaths $desired.Paths -DesiredProcesses $desired.Processes -ExistingPaths @($pref.ExclusionPath) -ExistingProcesses @($pref.ExclusionProcess)
+        if ($plan.PathsToAdd.Count -eq 0 -and $plan.ProcessesToAdd.Count -eq 0) {
+            Write-Step 'Defender: every managed exclusion is already present (added outside this tool); nothing added, nothing recorded.'
+            return
+        }
+        Write-DefenderExclusionState -PathsAdded $plan.PathsToAdd -ProcessesAdded $plan.ProcessesToAdd
+        if ($plan.PathsToAdd.Count -gt 0)     { Add-MpPreference -ExclusionPath $plan.PathsToAdd -ErrorAction Stop }
+        if ($plan.ProcessesToAdd.Count -gt 0) { Add-MpPreference -ExclusionProcess $plan.ProcessesToAdd -ErrorAction Stop }
+        $appliedMsg = ('Defender exclusions applied (paths: {0}; processes: {1}). ' -f ($plan.PathsToAdd -join ', '), ($plan.ProcessesToAdd -join ', '))
+        $appliedMsg += 'Expected effect: ~35% faster LCU apply; the cleanup is storage-bound and unaffected. Exclusions are removed at the end of the run.'
+        Write-Ok $appliedMsg
+    } catch {
+        Write-Caution ('Defender exclusion setup failed ({0}); rolling back and continuing without exclusions.' -f $_.Exception.Message)
+        try { Disable-ManagedDefenderExclusion } catch { $null = $_ }
+    }
+}
+
+function Invoke-DefenderExclusionSelfHeal {
+    # Windows-only. If a state file is present at startup, a previous run left
+    # exclusions behind (e.g. the process was killed before its finally ran).
+    # Remove exactly those recorded and clear the record. Runs regardless of
+    # -UseDefenderExclusions so a crashed run is cleaned on the next invocation
+    # that reuses the same WorkRoot.
+    $state = Read-DefenderExclusionState
+    if ($null -eq $state) { return }
+    Write-Caution 'Found a Defender-exclusion state file from a previous run (likely interrupted); restoring those exclusions now.'
+    Disable-ManagedDefenderExclusion
 }
 
 function Get-WimIndexInventory {
@@ -15232,9 +15491,15 @@ function Invoke-CleanupAction {
     } catch { $null = $_ }
 
     if (Test-Path -LiteralPath $Script:WorkRoot) {
-        Write-Step ('Removing: {0}' -f $Script:WorkRoot)
-        Remove-Item -LiteralPath $Script:WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Ok 'Workspace removed.'
+        Write-Step ('Removing: {0} (preserving the Defender-exclusion state folder)' -f $Script:WorkRoot)
+        # Preserve <WorkRoot>\state so a crashed run's self-heal record survives
+        # -Action Cleanup; it records machine-global Defender exclusions this
+        # tool added, and losing it would orphan them.
+        $stateLeaf = Split-Path -Leaf $Script:StateDir
+        Get-ChildItem -LiteralPath $Script:WorkRoot -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne $stateLeaf } |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+        Write-Ok 'Workspace removed (state folder preserved).'
     } else {
         Write-Step 'Workspace already absent.'
     }
@@ -15519,7 +15784,7 @@ if ($Script:CleanWorkRoot -and (Test-Path -LiteralPath $Script:WorkRoot)) {
     Remove-Item -LiteralPath $Script:WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:OutputDir, $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir, $Script:PatchesDir, $Script:ManifestsDir, (Join-Path $Script:WorkRoot 'work'), $Script:TempDir, $Script:ScratchDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir)
+Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:OutputDir, $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir, $Script:PatchesDir, $Script:ManifestsDir, (Join-Path $Script:WorkRoot 'work'), $Script:TempDir, $Script:ScratchDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir, $Script:StateDir)
 
 # Activate debug trace JSONL file output
 try {
@@ -15531,6 +15796,10 @@ try {
 
 $Script:ExitCode = 0
 try {
+    # Self-heal: remove any Defender exclusions left by a crashed prior run
+    # (reads the WorkRoot state file; no-op if absent). Runs for every action.
+    Invoke-DefenderExclusionSelfHeal
+
     if ($Action -eq 'Cleanup') {
         Invoke-CleanupAction
         exit 0
@@ -15548,6 +15817,10 @@ try {
     } else {
         $phaseList = Get-PhaseListByAction -ActionName $Action
     }
+
+    # Opt-in Defender exclusions for the servicing run (fail-closed; removed
+    # in the finally below).
+    Enable-ManagedDefenderExclusion
 
     if ($phaseList.Count -gt 0) {
         Invoke-PhaseRunner -PhaseIds $phaseList
@@ -15583,6 +15856,9 @@ try {
         }
     } catch { $null = $_ }
 } finally {
+    # Always remove any Defender exclusions this run added (reads the state
+    # file; removes only what we recorded; no-op if none).
+    try { Disable-ManagedDefenderExclusion } catch { $null = $_ }
     try {
         Show-PhaseSummary
     } catch { $null = $_ }
