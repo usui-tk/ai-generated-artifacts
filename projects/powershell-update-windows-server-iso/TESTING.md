@@ -630,6 +630,9 @@ Run from a clean checkout at the target HEAD, with a pre-staged
    standalone via `-Action RefreshDependencyDatabase -OfflineSyncPackagePath <cab>`;
    parses `package.xml` (~114 MB) with a streaming `XmlReader` and
    rewrites Layer 2 plus the Layer 1 `_DependencyVerified*` stamps.
+   A04's wall time is **~5–7 min**; under an agent/CLI runner that imposes
+   a per-call timeout, run it **detached** and poll (see §8.5) rather than
+   in a synchronous foreground call.
 
 ### 8.2 Verification gates (all must hold before commit)
 
@@ -654,9 +657,13 @@ the previous month's KBs.
 
 A04's `package.xml` parse completes in ~5 minutes on a 3.9 GB-RAM
 container; the parser streams via `XmlReader` rather than loading the
-document, so peak memory stays well under the limit. Earlier
-intermittent process exits seen mid-parse were environment-transient
-and did not recur — A04 is not a local-only blocker.
+document, so peak memory stays well under the limit. The mid-parse
+process exits seen in earlier sessions were **not** environment-transient
+RAM failures: they are the **agent/CLI runner's per-call timeout** (often
+~5–6 min, separate from any `timeout N` inside the command) killing a
+**synchronous foreground** A04 around the "parsed ~100,000 updates" mark,
+before Stage 4 writes Layer 2. A04 is not a local blocker once it is run
+detached; see §8.5 for the pattern.
 
 ### 8.4 Real-run log
 
@@ -664,11 +671,89 @@ and did not recur — A04 is not a local-only blocker.
   the standalone Server 2016 SSU (KB5088064) was auto-discovered (G1–G5
   all green).
 - **2026-06** — the 2026-06 cab (SHA-256 `5b075a6d…`, 649 MB) was
-  published and validated (G1 ✓: 2026-06 `CreationDate` rows present,
-  KB5094126 present) and A04 regenerated Layer 2 cleanly (~5 min, G4 ✓).
-  **G2 failed**: on 2026-06-10, one day after the 2026-06-09 Patch
-  Tuesday, the release-health page still listed 2026-05 as the latest
-  month, so A01 discovery returned zero records for 2026-06 across all
-  four OSes (G3 would have been violated). The regen was **deferred, not
-  committed**; it is to be re-run once the release-health page publishes
-  2026-06.
+  published and validated (G1 ✓: 2026-06 `CreationDate` rows present)
+  and A04 regenerated Layer 2 cleanly (~5 min, G4 ✓). First attempt
+  (2026-06-10, one day after the 2026-06-09 Patch Tuesday) hit **G2**:
+  the release-health page still listed 2026-05, so A01 discovery returned
+  zero records for 2026-06 — the regen was **deferred, not committed**,
+  per the G2 rule above.
+- **2026-06 (completed 2026-06-11)** — re-run once release-health
+  published 2026-06. Full regen succeeded: A03 (~27 s) → A01 `-Mode Force
+  -PatchMonth 2026-06` (Layer 1, all 4 OS) → A04 detached (~7 min, Layer 2
+  + `_DependencyVerified*` stamps, updated=4). **G1–G5 green** (G4
+  `_meta.sourceCab.sha256 = 5b075a6d…`, `generatedAt 2026-06-11`; G3
+  `PatchTuesdayOfBaseline = 2026-06-09` over this-month KBs; G5 servicing-
+  dependency offline gates PASS — run the full T1–T23 + psa + doc_gate +
+  validator before committing). Resolved set: 2016 LCU KB5094122 + SSU
+  KB5094141; 2019 LCU KB5094123; 2022 LCU KB5094128 + DU.SafeOs KB5094157;
+  2025 LCU KB5094125 + DU.SafeOs KB5094150 + DU.Setup KB5095966
+  (+ KB5043080 checkpoint, unchanged). Three findings were surfaced and
+  routed to the maintenance handoff for separate investigation (do NOT
+  silently bake into the baseline): (F1) Server 2019 Layer 1
+  `IsCombined=True` vs Layer 2 `servicingStackModel=separate` divergence;
+  (F2) all `DotNet.Runtime` entries dropped because no June .NET CU was
+  published and discovery is month-pinned (no carry-forward); (F3)
+  Server 2025 DU.Setup (KB5095966) exists in June, contra the report's
+  "discontinued" framing. Per-run work-log recorded (see §8.6).
+
+### 8.5 Agent execution notes (running the long A04 under a timed runner)
+
+The data generation itself is **PowerShell admin actions**, not Python:
+there is no Python orchestrator. The Python layer that "drives the PS
+functions" is the test harness (`powershell_harness.py`, T3, via
+`-Action TestHarness`) and the source-readiness probes
+(`wsusscn2_probe.py` T5, `catalog_probe.py` T1, `eval_iso_probe.py` T4).
+The agent-friendly **first move** is therefore a probe — run
+`python3 tests/wsusscn2_probe.py` to confirm cab reachability/freshness
+(a G1 signal) — and the standing gates (G5) are all Python too. The
+fetch + parse + resolve is pwsh underneath.
+
+Because A04 runs ~5–7 min and the runner's per-call timeout is shorter,
+run the steps like this:
+
+1. Pre-stage the cab once (so retries do not re-download 619 MB):
+   ```bash
+   curl -fsSL 'https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab' \
+     -o /home/<workroot>/wsusscn2.cab
+   ```
+2. A03 (RefreshSnapshots) and A01 (RefreshAllBaselines, Layer 1) finish
+   in seconds / ~1 min — run them in the foreground.
+3. Run A04 **fully detached** so it survives across separate runner
+   calls, then poll:
+   ```bash
+   setsid bash -c 'cd <iso-dir> && PATH=/home/claude/pwsh:$PATH \
+     pwsh -NoProfile -File ./Update-WindowsServerIso.ps1 \
+       -Action RefreshDependencyDatabase \
+       -OfflineSyncPackagePath /home/<workroot>/wsusscn2.cab \
+       -SkipEnvCheck -WorkRoot /home/<workroot> \
+       > /home/<workroot>/a04.log 2>&1' < /dev/null &
+   # poll with short calls:
+   #   pgrep -af RefreshDependencyDatabase
+   #   tail -n 20 /home/<workroot>/a04.log
+   # done when the log prints: "A04 RefreshDependencyDatabase: completed successfully."
+   ```
+   A plain `nohup ... &` was observed **not** to survive across separate
+   runner calls in this environment; `setsid ... < /dev/null &` did.
+   Stage markers to expect: Stage 2 (extract) ~12 s, Stage 3 (parse)
+   ~5 min, Stage 4 (emit Layer 2) + Stage 4b (servicing-stack populate +
+   Layer 1 stamp) ~2 min.
+4. A01 reporting **"PARTIAL / exit code 2 / manual fill still needed"** is
+   normal: the 12 manual items are ISO source URLs + hashes (`Common`,
+   `LanguageSpecific.*.Iso`) the resolver cannot auto-fill.
+
+### 8.6 Work-log convention (compaction resilience)
+
+An agent's working context can be compacted mid-task, erasing what was
+verified. So **every agent-run regeneration MUST record a per-run
+work-log to a file** as it goes — not only at the end. The log captures:
+the staged cab size + SHA-256, the exact commands and their timings, the
+G1–G5 results, the May→June KB delta, and any findings/anomalies. Then:
+
+- the **canonical one-paragraph run summary** is appended to §8.4 above;
+- any **anomaly / recheck item** (a surprise from the reverse-engineered
+  data, e.g. F1/F2/F3 from the 2026-06 run) is written to the
+  out-of-repo maintenance handoff so the next session sees it at A0 —
+  never silently folded into the committed baseline.
+
+This is what lets a later session reconstruct state without re-running
+the ~7 min parse or rediscovering the §8.5 timeout workaround.

@@ -2040,18 +2040,30 @@ P06 has no Layer 2 to read and blocks (run `-Action RefreshDependencyDatabase`, 
 
 #### B.19.14.4 Monthly refresh procedure
 
+Pre-stage the target month's `wsusscn2.cab`, then:
+
 ```powershell
-# 1. Refresh baselines (chains A04 to refresh Layer 2)
-.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Monthly
-# 2. Review the Layer 2 and Layer 1 diffs
+# 1. Refresh upstream caches (release-info / .NET CU / Dynamic Update)
+.\Update-WindowsServerIso.ps1 -Action RefreshSnapshots -SkipEnvCheck
+# 2. Regenerate Layer 1 for the target month (soft-chains A04 -> Layer 2)
+.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Force `
+    -PatchMonth <yyyy-MM> -OfflineSyncPackagePath <path-to-wsusscn2.cab> -SkipEnvCheck
+# 3. Review the Layer 2 and Layer 1 diffs
 git diff data/servicing-dependency-database.json data/config-Server*.json
-# 3. Run the offline gates
+# 4. Run the offline gates
 python3 tests/servicing_dependency_parser_test.py   # T12
 python3 tests/servicing_dependency_layer2_schema_test.py
-# 4. Commit Layer 1 and Layer 2 together
+# 5. Commit Layer 1 and Layer 2 together
 git add data/config-Server*.json data/servicing-dependency-database.json
 git commit -m "data: monthly servicing-dependency refresh (<yyyy-MM>)"
 ```
+
+A04's `package.xml` parse runs ~5–7 min; under an agent/CLI runner with a
+per-call timeout, run A04 detached and poll instead of in a synchronous
+foreground call. The full agent/LLM procedure, the G1–G5 verification
+gates (G2 — release-health currency — being the easy-to-miss blocker),
+the detached-execution pattern, and the per-run work-log convention are
+in `TESTING.md` §8.
 
 #### B.19.14.5 Current status and future work
 
