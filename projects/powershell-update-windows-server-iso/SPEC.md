@@ -1035,6 +1035,23 @@ the I3.LCU.FirstPass sub-phase and produce a botched install.wim.
 The original r04.2 incident that motivated this section is
 documented in §D.NN (umbrella KBs and supersedence drift).
 
+**Deterministic supersedence extraction (r11.28).** The ScopedView
+`supersedesInfo` section lists the *entire* supersedence chain as
+repeated `<div>TITLE (KBxxxx)</div>` entries, and the Catalogue reorders
+those entries per request. An earlier non-greedy `...</div>` boundary
+captured only the first entry, so the recorded value depended on the
+Catalogue's per-request ordering and was not byte-reproducible across
+regenerations. `Get-SupersedenceFromCatalog` now captures the full
+section (bounded by the next `id="..."` panel) and
+`ConvertFrom-CatalogSupersedenceSection` returns the complete chain as an
+ordinal-sorted, de-duplicated list plus a single `Latest` — the immediate
+predecessor, defined as the entry with the highest `yyyy-MM` title prefix
+(ties broken on the highest KB number; falling back to the highest KB
+number when no entry carries a `yyyy-MM`). `PatchBaseline.NeutralPatches[].Supersedes`
+persists only that single immediate-predecessor KB, which keeps the field
+deterministic and the baseline byte-reproducible while remaining the most
+informative single value.
+
 ## B.13 Pre-apply dependency closure check
 
 **Status**: normative. **Policy ID**: SPEC-WSI-012.

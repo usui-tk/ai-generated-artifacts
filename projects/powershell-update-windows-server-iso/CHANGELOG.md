@@ -22,6 +22,16 @@ the script and follows the
 
 ## [Unreleased]
 
+### Deterministic supersedence extraction (`$Script:ScriptVersion` -> `update-wsi-2026.06.12-r11.28`, tag `supersedence-determinism`)
+
+`Get-SupersedenceFromCatalog` scraped the Catalog ScopedView `supersedesInfo` section with a non-greedy `...</div>` boundary that stopped at the first inner entry. Because the Catalog reorders that section's entries per request, the single captured KB varied run-to-run, so `PatchBaseline.NeutralPatches[].Supersedes` was not byte-reproducible across regenerations (the only non-deterministic field in an otherwise reproducible `/data` set). The full entry set is identical across requests; only its order changes.
+
+- **Full-section capture.** Extraction now spans the whole `supersedesInfo` / `supersededbyInfo` section (bounded by the next `id="..."` panel), so the complete supersedence chain is read instead of just the first entry.
+- **Deterministic parse.** New helper `ConvertFrom-CatalogSupersedenceSection` returns the chain as an ordinal-sorted, de-duplicated list plus a single `Latest` — the immediate predecessor: the entry with the highest `yyyy-MM` title prefix, ties broken on the highest KB number, falling back to the highest KB number when no entry carries a `yyyy-MM`.
+- **Compact, meaningful persistence.** The config `Supersedes` field now persists only the immediate-predecessor KB (one deterministic value), keeping the baseline byte-reproducible and the field compact while making it more accurate than the previous arbitrary first-in-list value. The candidate-narrowing path is unaffected (it selects by title).
+- **Test.** New `tests/supersedence_section_test.py` asserts order-independence (shuffled input -> identical output), the immediate-predecessor rule, the no-`yyyy-MM` fallback, and de-duplication. Offline suite 26/26.
+- **Scope.** `Get-SupersedenceFromCatalog` and its two record-build call sites only; SPEC §B.12 documents the rule. No data-schema change (`Supersedes` stays a single-element list).
+
 ### .NET CU publication-gap carry-forward in release-info discovery (`$Script:ScriptVersion` -> `update-wsi-2026.06.12-r11.27`, tag `dotnet-cu-carryforward`)
 
 `Get-PatchSetFromReleaseInfoDiscovery` selected the .NET Framework CU by an exact `PatchMonth` match. Microsoft does not publish a .NET CU every month, so on a publication-gap month (e.g. 2026-06) discovery emitted no `DotNet.Runtime` records at all and the generated baseline silently lost .NET servicing. The Dynamic Update path already tolerates gaps via its 36-month recency (SPEC §B.22.6); the .NET CU path did not.

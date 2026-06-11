@@ -580,8 +580,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.12-r11.27'
-$Script:ScriptTag     = 'dotnet-cu-carryforward'
+$Script:ScriptVersion = 'update-wsi-2026.06.12-r11.28'
+$Script:ScriptTag     = 'supersedence-determinism'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5582,6 +5582,53 @@ function Get-CatalogQueryUrl {
     return 'https://www.catalog.update.microsoft.com/Search.aspx?q=' + [uri]::EscapeDataString($combined)
 }
 
+function ConvertFrom-CatalogSupersedenceSection {
+    <#
+    .SYNOPSIS
+        Parse one ScopedView supersedence section into a deterministic,
+        sorted, deduplicated KB list plus the immediate-predecessor KB.
+    .DESCRIPTION
+        Each section lists the whole chain as repeated
+        <div ...>TITLE (KBxxxx)</div> entries. The Catalog reorders these
+        per request, so document order is not stable. 'Latest' (the
+        immediate predecessor) is the entry carrying the highest yyyy-MM
+        title prefix, breaking ties on the highest KB number, and falling
+        back to the highest KB number when no entry carries a yyyy-MM
+        prefix. See SPEC B.12.
+    #>
+    [OutputType([pscustomobject])]
+    param([string]$Html)
+    $kbPattern = 'KB\d{6,7}'
+    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $latestKb = ''
+    $latestYm = ''
+    if (-not [string]::IsNullOrEmpty($Html)) {
+        foreach ($entry in [regex]::Matches($Html, '(?is)<div[^>]*>(.*?)</div>')) {
+            $txt = $entry.Groups[1].Value
+            $kbM = [regex]::Match($txt, $kbPattern)
+            if (-not $kbM.Success) { continue }
+            $kb = $kbM.Value
+            [void]$set.Add($kb)
+            $ymM = [regex]::Match($txt, '\d{4}-\d{2}')
+            $ym  = if ($ymM.Success) { $ymM.Value } else { '' }
+            if (($ym -gt $latestYm) -or
+                ($ym -eq $latestYm -and [string]::Compare($kb, $latestKb, [System.StringComparison]::Ordinal) -gt 0)) {
+                $latestYm = $ym
+                $latestKb = $kb
+            }
+        }
+        if ($set.Count -eq 0) {
+            foreach ($k in [regex]::Matches($Html, $kbPattern)) { [void]$set.Add($k.Value) }
+        }
+    }
+    $arr = [string[]]@($set)
+    [array]::Sort($arr, [System.StringComparer]::Ordinal)
+    if ([string]::IsNullOrEmpty($latestKb) -and $arr.Count -gt 0) {
+        $latestKb = ($arr | Sort-Object { [int64]($_ -replace '\D', '') } -Descending | Select-Object -First 1)
+    }
+    return [pscustomobject][ordered]@{ All = @($arr); Latest = $latestKb }
+}
+
 function Get-SupersedenceFromCatalog {
     <#
     .SYNOPSIS
@@ -5613,34 +5660,33 @@ function Get-SupersedenceFromCatalog {
             if ($attempt -ge $MaxRetries) {
                 # Supersedence info is best-effort
                 return [pscustomobject][ordered]@{
-                    Supersedes   = @()
-                    SupersededBy = @()
-                    Error        = $_.Exception.Message
+                    Supersedes       = @()
+                    SupersedesLatest = ''
+                    SupersededBy     = @()
+                    Error            = $_.Exception.Message
                 }
             }
             Wait-WithJitter -BaseSeconds 2 -JitterRange 1
         }
     }
-    $kbPattern = 'KB\d{6,7}'
-    # Section pattern: <div id="supersededbyInfo" ...> ... </div>
-    $reSupBy = '(?is)id\s*=\s*["'']supersededbyInfo["''][^>]*>(.*?)</div>'
-    $reSup   = '(?is)id\s*=\s*["'']supersedesInfo["''][^>]*>(.*?)</div>'
-    $mBy = [regex]::Match($resp.Content, $reSupBy)
-    if ($mBy.Success) {
-        foreach ($kb in [regex]::Matches($mBy.Groups[1].Value, $kbPattern)) {
-            if (-not $supersededBy.Contains($kb.Value)) { $supersededBy.Add($kb.Value) | Out-Null }
-        }
-    }
+    # Capture the FULL supersedes / superseded-by sections. Each lists the
+    # whole chain as repeated <div>TITLE (KBxxxx)</div> entries and ends at
+    # the next id="..." panel. The previous '(.*?)</div>' boundary stopped at
+    # the first inner entry, capturing a single KB whose identity was
+    # non-deterministic because the Catalog reorders the list per request.
+    # ConvertFrom-CatalogSupersedenceSection returns the full sorted chain
+    # plus the immediate predecessor (Latest). See SPEC B.12.
+    $reSupBy = '(?is)id\s*=\s*["'']supersededbyInfo["''][^>]*>(.*?)(?=\bid\s*=\s*["'']|\z)'
+    $reSup   = '(?is)id\s*=\s*["'']supersedesInfo["''][^>]*>(.*?)(?=\bid\s*=\s*["'']|\z)'
+    $mBy  = [regex]::Match($resp.Content, $reSupBy)
     $mSup = [regex]::Match($resp.Content, $reSup)
-    if ($mSup.Success) {
-        foreach ($kb in [regex]::Matches($mSup.Groups[1].Value, $kbPattern)) {
-            if (-not $supersedes.Contains($kb.Value)) { $supersedes.Add($kb.Value) | Out-Null }
-        }
-    }
+    $byParsed  = ConvertFrom-CatalogSupersedenceSection -Html $(if ($mBy.Success)  { $mBy.Groups[1].Value }  else { '' })
+    $supParsed = ConvertFrom-CatalogSupersedenceSection -Html $(if ($mSup.Success) { $mSup.Groups[1].Value } else { '' })
     return [pscustomobject][ordered]@{
-        Supersedes   = $supersedes.ToArray()
-        SupersededBy = $supersededBy.ToArray()
-        Error        = $null
+        Supersedes       = $supParsed.All
+        SupersedesLatest = $supParsed.Latest
+        SupersededBy     = $byParsed.All
+        Error            = $null
     }
 }
 
@@ -6060,7 +6106,7 @@ function Resolve-PatchSetFromReleaseInfo {
         } catch {
             $supers = $null
         }
-        $supersList = if ($null -ne $supers) { @($supers.Supersedes) } else { @() }
+        $supersList = if ($null -ne $supers -and $supers.SupersedesLatest) { @($supers.SupersedesLatest) } else { @() }
 
         foreach ($primary in $primaries) {
             $kbFromFile = Get-KbIdFromPatchFileName -FileName $primary.FileName
@@ -6149,7 +6195,7 @@ function Resolve-PatchSetFromReleaseInfo {
             }
             $ssuSupers = $null
             try { $ssuSupers = Get-SupersedenceFromCatalog -UpdateId $ssuUid -MaxRetries $MaxRetries } catch { $ssuSupers = $null }
-            $ssuSupersList = if ($null -ne $ssuSupers) { @($ssuSupers.Supersedes) } else { @() }
+            $ssuSupersList = if ($null -ne $ssuSupers -and $ssuSupers.SupersedesLatest) { @($ssuSupers.SupersedesLatest) } else { @() }
             $ssuEntry = Convert-CatalogPatchToBaselineEntry `
                 -KbId $ssuKbId `
                 -Title ([string]$ssuHit.Title) `
