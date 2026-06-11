@@ -535,7 +535,7 @@ The required and current versions are explicit, which simplifies the resolution:
 
 Microsoft has, over the years, oscillated between two distribution shapes:
 
-- **Standalone LCU**: the LCU MSU contains only the LCU; the SSU is a separate MSU published in parallel with its own KB number. The pipeline must apply both, SSU first. Server 2016, Server 2019, Server 2022 (mostly) follow this pattern.
+- **Standalone LCU**: the LCU MSU contains only the LCU; a servicing-stack update is published as a separate MSU with its own KB number, applied first. Empirically (§5.3, reconfirmed in 2026-05 and 2026-06 via the same-month Catalog title search) **only Server 2016 still ships a standalone SSU**; Server 2019, 2022, and 2025 return zero standalone-SSU hits. Server 2019's LCU does declare a real servicing-stack floor (§5.4), but no separate SSU is published — the floor is met by the servicing stack embedded in the LCU, so in practice 2019 is applied like a combined LCU.
 - **Combined LCU+SSU**: a single MSU contains both the LCU and the SSU as bundled packages. `Add-WindowsPackage` handles the ordering automatically. The pipeline only needs to download one MSU. Server 2025 follows this pattern (the SSU is bundled with every LCU as a two-file Catalog download — see section 2.3).
 
 A reliable implementation-level indicator of a Combined MSU is the presence of an `update.ses` file alongside `update.mum` and the `.cab` payload. A standalone LCU lacks `update.ses`. A pipeline that looks inside the MSU (via `expand.exe -F:* msu_file destination`) can detect this:
@@ -599,7 +599,7 @@ A 2026-05-12 reverse-engineering exercise resolved the same monthly LCU for each
 
 Two practical consequences follow:
 
-1. **Server 2016 and 2019 are the OSes where `0x800f0823` is a live risk**, because their SSU is a separate package the operator must apply first. Their `installerAssembly` version is the authoritative floor to check against. The value is a real build number (e.g. `10.0.14393.7692`), constant for a given LCU build.
+1. **Server 2016 and 2019 are the OSes where `0x800f0823` is a live risk**, because their LCU declares a real servicing-stack floor in `installerAssembly` — a real build number (e.g. `10.0.14393.7692` for 2016, `10.0.17763.2090` for 2019), constant for a given LCU build. The *remedy* differs by OS: **only Server 2016 has a standalone SSU package to apply first** (§5.3). For Server 2019 no separate SSU is published, so the floor is satisfied by the servicing stack embedded in the LCU and the pipeline applies the LCU directly without emitting a separate SSU entry. The `installerAssembly` value is the authoritative floor to check against in both cases.
 2. **Server 2022 and 2025 carry the SSU inside the LCU.** Server 2022's `installerAssembly` reads `6.0.0.0` -- a nominal placeholder, *not* a real build number -- and the real servicing-stack build is only visible as the embedded `Package_for_ServicingStack_<nnnn>` sub-package (e.g. `5120` -> build `20348.5120.1.0`), which advances every month. Server 2025's checkpoint `.msu` is self-contained, so an external SSU pairing check is not meaningful for it.
 
 The earlier "Server 2022 is mostly standalone; inspect `update.ses`" advice (previous draft) is superseded by this finding: in the 2026-03/04/05 cab the Server 2022 LCU was Combined every month, with the embedded `Package_for_ServicingStack_<nnnn>` present each time. The `update.ses` test from §5.2 remains a valid *runtime* indicator when inspecting an MSU on disk, but the cab metadata already tells the pipeline the SS build without opening the MSU. As always, treat this as observed behaviour over a three-month window, not a contractual guarantee; a pipeline should still read the per-package metadata each month rather than hard-coding a family per OS.
@@ -611,7 +611,7 @@ A useful design pattern, derived from a real-world iteration of this work, is to
 The earlier draft of this section described the gate as a KB-prerequisite **closure** ("look up the LCU's prerequisites, verify every prerequisite KB is in the config"). §5.3 corrected the underlying model: there is no SSU KB-prerequisite to walk. The pre-flight gate is therefore re-stated as **three independent checks**, none of which is a KB closure:
 
 1. **Presence** -- each KB the operator listed resolves to an in-scope update in Layer 2 (the LCU is actually present in the current cab for that OS). A KB that does not resolve is either superseded (see §5.9) or out of scope (see §5.8), and the gate reports which.
-2. **Servicing-stack version comparison** -- for the SSU-separate OSes (2016/2019), read the LCU's required SS version from its per-package metadata (`installerAssembly`), and verify the SSU in the same patch set provides a servicing-stack version greater than or equal to that floor. This is the check that actually prevents `0x800f0823`.
+2. **Servicing-stack version comparison** -- for any OS whose LCU declares a real `installerAssembly` floor (2016, 2019), verify the floor is met. For Server 2016 the standalone SSU in the same patch set must provide a servicing-stack version greater than or equal to the floor. For Server 2019 there is no standalone SSU to pair, so the floor is verified against the servicing stack already present on the base image (or embedded in the LCU) rather than a separate package. This is the check that actually prevents `0x800f0823`.
 3. **Supersession / identity** -- confirm the chosen LCU is the newest non-superseded one for that OS (via the `<SupersededBy>` chain), so the operator is not slipstreaming a stale build.
 
 This shifts failure detection from "after 20+ minutes of WIM mount and copy work" to "1 second after config load". A 1-second failure can be diagnosed and fixed in the same operator session; a 20-minute failure usually means the operator has wandered off. Crucially, the gate consumes **static metadata only** -- it never mounts a WIM (SPEC B.19.13 hard rule).
@@ -784,9 +784,9 @@ The empirical Dynamic Update cadence picture:
 | Server 2016 | Not published monthly | Not published monthly | DU only ships on feature-update windows; for LTSC OSes this is rare |
 | Server 2019 | Not published monthly | Not published monthly | Same as 2016 |
 | Server 2022 | Optional, monthly when published | Optional, monthly when published | Catalog usually returns 1 hit each |
-| Server 2025 | **Discontinued or sporadic** (no publications observed for many consecutive months in the 2025-12 to 2026-04 window) | Monthly | Microsoft has not formally announced the cadence change |
+| Server 2025 | **Sporadic** (no publications observed in the 2025-12 to 2026-04 window, then resumed — 2026-06 published KB5095966) | Monthly | Microsoft has not formally announced the cadence change |
 
-A pipeline must therefore treat "DU.Setup absent for this month on Server 2025" as a soft signal, not an error. The Refresher logs "no Setup DU published" and proceeds. This matches what Server 2016 and 2019 have always done.
+A pipeline must therefore treat "DU.Setup absent for this month on Server 2025" as a soft signal, not an error. The Refresher logs "no Setup DU published" and proceeds. This matches what Server 2016 and 2019 have always done. The cadence is intermittent rather than discontinued: a month with no Setup DU is normal, and a later month may publish one again (as 2026-06 did).
 
 ### 6.4 WSUS Product Category GUIDs and the Server LTSC mapping
 
@@ -955,7 +955,7 @@ This article synthesises the state of knowledge as of mid-2026. Several question
 
 4. **Hotpatch ISO integration**: the Hotpatch calendar (section 2.1) is queryable, but nothing in the data suggests that hotpatch packages can be `Add-WindowsPackage`'d into a mounted offline WIM. The Hotpatch model is a runtime in-memory patching mechanism that requires the running OS to be enrolled. A pipeline that builds from a Hotpatch baseline-month LCU (so that a fresh deployment can enrol in hotpatching without an immediate baseline-update reboot) is conceivable; whether Microsoft formally supports this pattern is not known.
 
-5. **Server 2025 DU.Setup cadence**: as noted in section 6.3, Microsoft has not formally announced whether Server 2025's Setup Dynamic Update has been discontinued, moved to a quarterly cadence, or merely been absent for an extended period for unrelated reasons.
+5. **Server 2025 DU.Setup cadence**: as noted in section 6.3, Microsoft has not formally announced the cadence. The 2025-12 to 2026-04 gap was followed by a 2026-06 publication (KB5095966), so the pattern is intermittent rather than discontinued; whether it is a deliberate move to an irregular/quarterly cadence or merely incidental gaps remains unconfirmed.
 
 6. **DISM mount-cache mojibake root cause**: section 7.1's hypothesis (mount-cache state corruption) is consistent with the symptom but has not been definitively isolated. A clean-room reproduction on a fresh Windows install, with controlled mount/unmount sequences and explicit cache inspection, would either confirm the hypothesis or eliminate it.
 
