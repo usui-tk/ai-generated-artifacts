@@ -613,6 +613,32 @@ gates that decide whether the result is committable. It was distilled
 from the 2026-05 and 2026-06 real runs, and is the LLM-side checklist
 to apply on every monthly rebuild.
 
+### 8.0 Preconditions — live site-content gates (G-pre, run first)
+
+Before any fetch or regeneration, confirm the live truth sources
+actually carry the target month, so the run cannot silently regenerate
+against stale upstream content. All four must PASS; if any fails, **stop
+and defer** (G-pre-1 is the same currency wall as G2 below).
+
+| Gate | Check (target month `<yyyy-MM>`) | Source |
+|---|---|---|
+| **G-pre-1** release-health currency | the page lists `<yyyy-MM> B` for all four OS (the month's LCU KBs) | `learn.microsoft.com/en-us/windows/release-health/windows-server-release-info?accept=text/markdown` (§B.22.1) |
+| **G-pre-2** .NET CU source | index reachable; latest listed month `<= <yyyy-MM>` — when the target is a `.NET` publication gap, this is the month carry-forward resolves (§B.22.5) | `learn.microsoft.com/en-us/dotnet/framework/release-notes/release-notes?accept=text/markdown` |
+| **G-pre-3** Catalog reachable | `Search.aspx?q=<a target LCU KB>` returns HTTP 200 with the KB | `www.catalog.update.microsoft.com` |
+| **G-pre-4** cab available | staged `wsusscn2.cab` present (else A01/A04 downloads ~619 MB) | pre-staged path / Catalog |
+
+Example (bash, same egress path the script uses):
+
+```bash
+UA='ai-generated-artifacts/release-info (+https://github.com/usui-tk/ai-generated-artifacts)'
+# G-pre-1: expect >= 4 (one row per OS)
+curl -fsSL -A "$UA" 'https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info?accept=text/markdown' | grep -c '<yyyy-MM> B'
+# G-pre-2: latest .NET CU month listed
+curl -fsSL -A "$UA" 'https://learn.microsoft.com/en-us/dotnet/framework/release-notes/release-notes?accept=text/markdown' | grep -oE '20[0-9]{2}-[0-9]{2}' | sort -u | tail -1
+# G-pre-3: expect 200
+curl -s -o /dev/null -w '%{http_code}\n' -A "$UA" 'https://www.catalog.update.microsoft.com/Search.aspx?q=<LCU-KB>'
+```
+
 ### 8.1 Regeneration sequence
 
 Run from a clean checkout at the target HEAD, with a pre-staged
@@ -634,6 +660,18 @@ Run from a clean checkout at the target HEAD, with a pre-staged
    a per-call timeout, run it **detached** and poll (see §8.5) rather than
    in a synchronous foreground call.
 
+**`-Mode Force` A01 is itself the full Layer 1 + Layer 2 regenerator**
+(Stages 1–4): it parses the cab and emits
+`servicing-dependency-database.json` directly, so a separate A04 is the
+*Layer-2-only* refresher, not a required follow-up after a `-Mode Force`
+A01. When `-OfflineSyncPackagePath` is omitted, A01 **downloads** the
+~619 MB cab itself, and that download dominates its runtime. Both A03 and
+A01 can exceed a ~5–6 min foreground runner budget (observed 2026-06:
+**A03 2m28s, A01 6m32s**), so run **both** detached under such a runner.
+Exit code **2 = manual-fill-only** — the 12 `Common` / per-language `Iso`
+fields (`cadence=IsoRelease`, `decision=Manual`), which ship **empty** in
+the committed baseline — and is **expected**, not a failure.
+
 ### 8.2 Verification gates (all must hold before commit)
 
 | Gate | Check | Failure signal |
@@ -652,6 +690,26 @@ patch set even though the cab is already updated. When G2 fails, **stop
 and defer the regen** — never commit a baseline whose
 `PatchTuesdayOfBaseline` is the new month but whose patch entries are
 the previous month's KBs.
+
+**Correctness cross-check (G5 add-on).** After regen, confirm each
+`config-Server*.json` LCU KbId equals the `<yyyy-MM> B` LCU on the live
+release-health page (G-pre-1), and — when the target is a `.NET` gap
+month — that every OS carries a non-empty `.NET` CU (carried forward from
+the latest `<= <yyyy-MM>` month, §B.22.5). A useful reproducibility check
+is to diff the non-`.NET` patch entries (LCU/SSU/DU `KbId`+`DownloadUrl`+
+`UpdateId`+`FileName`) against the prior independent regen: they should
+match byte-for-byte.
+
+**T23 (`config_required_ssu_downloadurl_test.py`) follows the data, not
+the reverse.** It asserts a **hard-coded** Server 2016 SSU KbId. When the
+baseline advances, the standalone SSU KbId changes (e.g. 2026-05
+`KB5088064` → 2026-06 `KB5094141`), so T23 fails on the freshly
+regenerated data until its hard-coded KbId is advanced to the target
+month's SSU. **Advancing T23 is part of the *same commit* as the new
+`/data` baseline — never commit the baseline without it.** The generic
+SSU assertion ("every `Type=SSU` has a non-empty `DownloadUrl`") is
+data-driven and stays green, so a lone T23 failure on otherwise-green
+gates is the expected signal that only the hard-coded KbId needs bumping.
 
 ### 8.3 Resource profile (this environment)
 
