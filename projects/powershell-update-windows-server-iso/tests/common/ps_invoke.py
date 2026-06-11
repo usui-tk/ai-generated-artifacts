@@ -117,9 +117,16 @@ class PSSession:
         except (BrokenPipeError, OSError) as exc:
             raise PSHarnessError(f'TestHarness stdin closed unexpectedly: {exc}') from exc
 
-        # One JSON object per line on stdout. We may receive a noisy
-        # newline before the response if PowerShell flushed earlier;
-        # skip empty lines.
+        # The TestHarness emits exactly one response object per request on
+        # stdout, but a function under test may incidentally write to the host /
+        # information stream (e.g. Write-Host logging from the DISM chokepoint),
+        # which on some PowerShell hosts renders to stdout. Read until the JSON
+        # response line, skipping any non-JSON noise so a stray line cannot
+        # desynchronise this long-lived session. The response envelope is a JSON
+        # object carrying an "ok" field; empty lines and anything that is not
+        # such an envelope are treated as noise.
+        noise = []
+        resp = None
         while True:
             line = self._proc.stdout.readline()
             if line == '':
@@ -130,18 +137,23 @@ class PSSession:
                         stderr = self._proc.stderr.read()
                     except Exception:
                         pass
-                raise PSHarnessError(
-                    f'TestHarness exited without a response. stderr: {stderr.strip()[:500]}'
-                )
+                detail = f'TestHarness exited without a response. stderr: {stderr.strip()[:500]}'
+                if noise:
+                    detail += f' (skipped non-response output: {noise[-3:]!r})'
+                raise PSHarnessError(detail)
             line = line.strip()
             if not line:
                 continue
-            break
-
-        try:
-            resp = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise PSHarnessError(f'TestHarness emitted non-JSON: {line[:200]!r}') from exc
+            try:
+                candidate = json.loads(line)
+            except json.JSONDecodeError:
+                noise.append(line[:200])
+                continue
+            if isinstance(candidate, dict) and 'ok' in candidate:
+                resp = candidate
+                break
+            # Parsed as JSON but not a TestHarness response envelope -> noise.
+            noise.append(line[:200])
         if not resp.get('ok'):
             raise PSHarnessError(
                 f'PowerShell call {fn!r} failed: {resp.get("error", "<no error message>")}'

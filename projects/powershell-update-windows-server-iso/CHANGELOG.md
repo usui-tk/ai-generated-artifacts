@@ -22,6 +22,10 @@ the script and follows the
 
 ## [Unreleased]
 
+### Tests / harness reader: skip non-response output so the TestHarness session cannot desynchronise (no `$Script:ScriptVersion` bump)
+
+Defence-in-depth companion to the TestHarness stdout fix below. `tests/common/ps_invoke.py` now reads until the JSON response envelope (a JSON object carrying an `ok` field), skipping any empty or non-envelope line instead of treating the first non-empty line as the response. A stray line on stdout (host / information-stream output from a function under test) is therefore discarded rather than mis-read as the response — which previously desynchronised the long-lived per-session `pwsh` process and surfaced as failures on later calls. On EOF without a response the skipped output is included in the raised error for diagnosis. Python test code only; no script change and no `$Script:ScriptVersion` bump.
+
 ### Tests / TestHarness: keep the `-Action TestHarness` stdout channel clean so the Python harness reads one JSON object per response (no `$Script:ScriptVersion` bump)
 
 The Python behavioural harness (`tests/powershell_harness.py`, via `tests/common/ps_invoke.py`) drives `Update-WindowsServerIso.ps1 -Action TestHarness` over a single long-lived `pwsh` process and reads exactly one JSON object per line on stdout. Functions that route DISM access through `Invoke-DismCmdlet` (the r11.22 chokepoint) log via `Write-Host`; on PowerShell 7.x the information stream renders to stdout, so those log lines were interleaved ahead of the JSON response. Because the harness reuses one process per session, a stray line desynchronised the request/response pairing and surfaced as JSON-parse / parameter-binding failures on later calls (observed 6 pass / 4 fail under pwsh 7.6.2).
