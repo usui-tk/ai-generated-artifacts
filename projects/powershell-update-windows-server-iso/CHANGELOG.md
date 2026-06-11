@@ -22,6 +22,14 @@ the script and follows the
 
 ## [Unreleased]
 
+### Tests / TestHarness: keep the `-Action TestHarness` stdout channel clean so the Python harness reads one JSON object per response (no `$Script:ScriptVersion` bump)
+
+The Python behavioural harness (`tests/powershell_harness.py`, via `tests/common/ps_invoke.py`) drives `Update-WindowsServerIso.ps1 -Action TestHarness` over a single long-lived `pwsh` process and reads exactly one JSON object per line on stdout. Functions that route DISM access through `Invoke-DismCmdlet` (the r11.22 chokepoint) log via `Write-Host`; on PowerShell 7.x the information stream renders to stdout, so those log lines were interleaved ahead of the JSON response. Because the harness reuses one process per session, a stray line desynchronised the request/response pairing and surfaced as JSON-parse / parameter-binding failures on later calls (observed 6 pass / 4 fail under pwsh 7.6.2).
+
+- The fix redirects the information stream away from the call inside the TestHarness request loop (`& $cmd @splat 6>$null`), so only the success-stream result is captured and exactly one JSON object is emitted per request.
+- The canonical logging helpers (`_LogLine` / `Write-Step` and the other vendored log functions) are unchanged — this is confined to the consumer-owned TestHarness dispatch block.
+- TestHarness-only: no production code path is touched and there is no `$Script:ScriptVersion` change. The offline behavioural gate is back to 10/10.
+
 ### Add an opt-in Windows Defender exclusion manager for the build (`-UseDefenderExclusions`, r11.26)
 
 A controlled real-machine A/B probe (idx1, P01-P07, the only variable being the Defender exclusion) measured that excluding the work area and the DISM/CBS servicing processes from Defender real-time scanning cuts the LCU apply ~35% (22m56s -> 14m57s); the StartComponentCleanup is storage-bound (small-file synchronous-write latency, ~900-2,600 writes/s across three drives) and is NOT helped by the exclusion. This adds an opt-in `-UseDefenderExclusions` switch (default OFF, security-affecting) that manages those exclusions only for the duration of a run.

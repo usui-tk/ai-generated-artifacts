@@ -15661,7 +15661,16 @@ if ($Action -eq 'TestHarness') {
                     $splat[$prop.Name] = $prop.Value
                 }
             }
-            $result = & $cmd @splat
+            # TestHarness contract: the ONLY thing that may reach stdout per
+            # request is the single JSON response line emitted below. Some
+            # functions under test route DISM access through Invoke-DismCmdlet,
+            # which logs via Write-Host (the information stream). On pwsh 7.x the
+            # information stream renders to stdout and would corrupt the
+            # one-JSON-object-per-line contract that the Python harness
+            # (tests/common/ps_invoke.py) reads. Redirect the information stream
+            # to $null for the duration of the call so only the success-stream
+            # result is captured; the canonical logging helpers are unchanged.
+            $result = & $cmd @splat 6>$null
             $payload = [pscustomobject]@{
                 ok     = $true
                 fn     = $fnName
