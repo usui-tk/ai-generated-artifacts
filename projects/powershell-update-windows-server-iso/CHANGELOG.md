@@ -22,6 +22,14 @@ the script and follows the
 
 ## [Unreleased]
 
+### CI: fix the STAGE 2 Windows checks on the Server 2025 runner and refresh action majors (no `$Script:ScriptVersion` bump)
+
+The `windows-latest` GitHub-hosted runner moved from Windows Server 2022 to Server 2025. On that image, Windows PowerShell 5.1 does not have PSGallery pre-registered and `Register-PSRepository -Default` fails against the image's bundled NuGet provider (`NuGet.Commands.CommandException: Missing option value for: '-source'`), which left PSGallery unregistered and aborted the STAGE 2 module-install step (`Set-PSRepository ... No repository with the name 'PSGallery' was found`, exit 1).
+
+- **STAGE 2 PSGallery bootstrap.** Register PSGallery explicitly (`Register-PSRepository -Name PSGallery -SourceLocation https://www.powershellgallery.com/api/v2 -PublishLocation .../package/ -InstallationPolicy Trusted`) with a PackageManagement-layer fallback (`Register-PackageSource -ProviderName PowerShellGet`); neither path goes through the failing `-Default` bootstrap. STAGE 1 (Ubuntu, pwsh 7) is unaffected by the image change and is left unchanged.
+- **Action majors refreshed to current latest** across this project's four CI workflows (each verified against the action's GitHub releases): `actions/checkout` v5 -> v6, `actions/upload-artifact` v5 -> v7, `actions/cache` v4 -> v5. `actions/setup-python` (v6), `github/codeql-action` (v4), and `peter-evans/create-pull-request` (v8) are already current. Artifact uploads use per-run unique names and the cache uses a plain path/key, so the bumps are compatible with the current usage.
+- CI-only: no script change and no `$Script:ScriptVersion` bump. The Server 2025 bootstrap is validated by the next CI run on the live runner — it cannot be reproduced on the Linux authoring host.
+
 ### Tests / harness reader: skip non-response output so the TestHarness session cannot desynchronise (no `$Script:ScriptVersion` bump)
 
 Defence-in-depth companion to the TestHarness stdout fix below. `tests/common/ps_invoke.py` now reads until the JSON response envelope (a JSON object carrying an `ok` field), skipping any empty or non-envelope line instead of treating the first non-empty line as the response. A stray line on stdout (host / information-stream output from a function under test) is therefore discarded rather than mis-read as the response — which previously desynchronised the long-lived per-session `pwsh` process and surfaced as failures on later calls. On EOF without a response the skipped output is included in the raised error for diagnosis. Python test code only; no script change and no `$Script:ScriptVersion` bump.

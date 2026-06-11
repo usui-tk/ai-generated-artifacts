@@ -98,7 +98,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0       # full history so the PR branch diff resolves cleanly
           persist-credentials: true
@@ -182,7 +182,7 @@ jobs:
 
       - name: Upload refresh artefacts
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: refresh-report-${{ github.run_id }}
           if-no-files-found: warn

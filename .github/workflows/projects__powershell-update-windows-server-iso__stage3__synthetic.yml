@@ -66,7 +66,7 @@ jobs:
     env:
       CI: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       # --- Pre-flight: runner environment diagnostics ---
       # The windows-latest image is rolled weekly. Recording PS version,
@@ -107,7 +107,7 @@ jobs:
       # --- Cache the ADK installer to avoid re-downloading ~1 GB ---
       - name: '[ADK] Cache installer'
         id: adk-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: C:\AdkCache
           key: adk-deploy-2024-v1
@@ -211,7 +211,7 @@ jobs:
       # the output/ folder.
       - name: '[Artifacts] Upload diagnostic logs (NO ISO)'
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: uwsi-stage3-${{ github.run_id }}
           path: |
