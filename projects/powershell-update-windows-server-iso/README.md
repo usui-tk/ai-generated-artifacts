@@ -632,7 +632,7 @@ issues that motivated each Pitfall entry in SPEC.md Part D.
 - The PCA2023 boot-manager conversion (P10 `Convert-WimBootToPca2023Signed`)
   is a PSA-clean re-implementation of Microsoft's
   [`Make2023BootableMedia.ps1`](https://github.com/microsoft/secureboot_objects)
-  v1.4 `Copy-2023BootBins` (function L829-L941); the upstream-compatible
+  (`v1.6.4-signed`, commit `bd7abe3`) `Copy-2023BootBins`; the upstream-compatible
   output-verification facility (P12 `Test-OutputIsoPca2023Readiness`)
   is a quality extension not present in the Microsoft original.
 

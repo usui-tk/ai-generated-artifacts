@@ -619,7 +619,7 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
   から取得しました。
 - PCA2023 boot manager 変換（P10 `Convert-WimBootToPca2023Signed`）は、
   Microsoft の [`Make2023BootableMedia.ps1`](https://github.com/microsoft/secureboot_objects)
-  v1.4 の `Copy-2023BootBins`（関数 L829-L941）の PSA-clean 再実装です。
+  （`v1.6.4-signed`、commit `bd7abe3`）の `Copy-2023BootBins` の PSA-clean 再実装です。
   上流互換の出力検証機能（P12 `Test-OutputIsoPca2023Readiness`）は、
   Microsoft オリジナルにはない品質向上のための拡張です。
 

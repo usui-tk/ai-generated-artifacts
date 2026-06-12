@@ -5970,7 +5970,7 @@ function Resolve-PatchSetFromReleaseInfo {
         inherits unchanged.
 
         On the combined model the monthly LCU embeds the SSU; on the
-        separate model some OSes (e.g. Server 2016/2019) still publish a *standalone*
+        separate model some OSes (e.g. Server 2016 today) still publish a *standalone*
         same-month Servicing Stack Update under a separate Catalog
         UpdateId. After emitting the per-UpdateId records, this
         function searches the Catalog for a same-month "Servicing
@@ -7320,7 +7320,7 @@ function Resolve-OscdimgExe {
 
         The reference hash table is lifted verbatim from Microsoft's
         secureboot_objects repository
-        (scripts/windows/Make2023BootableMedia.ps1 Version 1.4,
+        (scripts/windows/Make2023BootableMedia.ps1 v1.6.4-signed / commit bd7abe3,
         $global:oscdimg_known_hashes). These hashes correspond to the
         oscdimg.exe binaries distributed via Microsoft's public symbol
         server (https://msdl.microsoft.com/download/symbols/).
@@ -7340,7 +7340,7 @@ function Resolve-OscdimgExe {
     param()
 
     # Microsoft official oscdimg.exe SHA-256 hashes (from secureboot_objects
-    # Make2023BootableMedia.ps1 Version 1.4 / 2026-03-13). These are the
+    # Make2023BootableMedia.ps1 v1.6.4-signed / commit bd7abe3). These are the
     # hashes of binaries downloaded from the Microsoft public symbol server.
     $knownHashes = @{
         'AMD64' = 'ABCD07318EBD8CDBE274B46C9DE78820DCA9709D558CDBC1F5D1730924264D07'
@@ -11192,7 +11192,7 @@ function Test-OutputIsoPca2023Readiness {
     .SYNOPSIS
         Verify an extracted OUTPUT-ISO directory against the five
         conversion targets defined by Microsoft's
-        Make2023BootableMedia.ps1 v1.4 (Copy-2023BootBins, L829-L941).
+        Make2023BootableMedia.ps1 v1.6.4-signed / commit bd7abe3 (Copy-2023BootBins).
 
         This is a STRICTLY READ-ONLY function. No DISM mounts and no
         registry hive loads; only Test-Path + Get-AuthenticodeSignature
@@ -11232,7 +11232,7 @@ function Test-OutputIsoPca2023Readiness {
               PCA2023 -> Pass; PCA2011 -> Fail; missing -> Fail
           Target #2 (\bootmgr.efi)
               any signature or missing -> PassWithNotes
-              (Microsoft design L876-L884)
+              (Microsoft design; see SPEC B.16.3)
           Target #3 (\efi\microsoft\boot\efisys_ex.bin)
               present -> Pass; missing -> Fail
           Target #4 (\efi\microsoft\boot\fonts\*.ttf)
@@ -11359,7 +11359,7 @@ function Test-OutputIsoPca2023Readiness {
             IsPca2023         = $chain2.IsPca2023
             IsPca2011         = $chain2.IsPca2011
             Status            = 'PassWithNotes'
-            Notes             = 'Per Make2023BootableMedia.ps1 v1.4 L876-L884, bootmgr.efi at ISO root is by-design NOT signed with the 2023 cert. UEFI Secure Boot does not consult this file; BIOS/MBR boot paths do.'
+            Notes             = 'Per Make2023BootableMedia.ps1 (v1.6.4-signed / commit bd7abe3, Copy-2023BootBins), bootmgr.efi at ISO root is by-design NOT signed with the 2023 cert. UEFI Secure Boot does not consult this file; BIOS/MBR boot paths do.'
         }) | Out-Null
     } else {
         $checks.Add([pscustomobject]@{
@@ -11370,7 +11370,7 @@ function Test-OutputIsoPca2023Readiness {
             IsPca2023         = $false
             IsPca2011         = $false
             Status            = 'PassWithNotes'
-            Notes             = 'bootmgr.efi at ISO root is missing. Per Microsoft spec (L876-L884) this file is optional ("if present in the update, it should be copied").'
+            Notes             = 'bootmgr.efi at ISO root is missing. Per Microsoft spec (Make2023BootableMedia.ps1 Copy-2023BootBins) this file is optional ("if present in the update, it should be copied").'
         }) | Out-Null
     }
 
@@ -11456,7 +11456,7 @@ function Test-OutputIsoPca2023Readiness {
             IsPca2023         = $false
             IsPca2011         = $false
             Status            = 'PassWithNotes'
-            Notes             = 'boot.stl is missing. Per Microsoft spec (Make2023BootableMedia.ps1 L909-L911) this file is optional and "Skipping" is acceptable.'
+            Notes             = 'boot.stl is missing. Per Microsoft Make2023BootableMedia.ps1 (Copy-2023BootBins, boot.stl best-effort step) this file is optional and "Skipping" is acceptable when the source carries no boot.stl.'
         }) | Out-Null
     }
 
@@ -11821,7 +11821,7 @@ function Convert-WimBootToPca2023Signed {
     .SYNOPSIS
         PSA-clean re-implementation of Microsoft's Copy-2023BootBins
         logic (from Make2023BootableMedia.ps1, microsoft/secureboot_objects
-        repo, Version 1.4 / 2026-03-13).
+        repo, v1.6.4-signed / commit bd7abe3).
 
         DIFFERENCES from upstream Make2023BootableMedia.ps1:
 

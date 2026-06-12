@@ -1239,7 +1239,7 @@ The r08.0 Step 1 / Step 2 investigation established this is
 
 | OS | install.wim ships EFI_EX? | LCU delivers EFI_EX? | Acquisition path |
 |:---|:---:|:---:|:---|
-| Server 2016 | No (verified via direct mount) | Yes (6 unique binaries) | Apply LCU → WinSxS deposits assets → P10 reads from boot.wim |
+| Server 2016 | No (verified via direct mount) | Yes (6 unique binaries) | Apply LCU → EFI_EX is deposited into the serviced install.wim's `\Windows\Boot\EFI_EX\` (signtool `/all`-verified: `bootmgfw_EX.efi` = "Windows UEFI CA 2023"); the conversion sources it from there (path under verification, §B.16.4) |
 | Server 2019 | No (verified) | Yes (6 unique binaries) | Same as Server 2016 |
 | Server 2022 | No (verified) | Yes (6 unique binaries) | Same |
 | Server 2025 | **Yes** (72 files pre-populated) | No (0 `*_EX.efi` binaries in LCU) | install.wim contains assets natively; P10 can run without LCU |
@@ -1254,7 +1254,7 @@ Direct inspection of Server 2025 install.wim's `EFI_EX/` showed:
 | File | Signer chain | Notes |
 |:---|:---|:---|
 | `EFI_EX\bootmgfw_EX.efi` | **PCA2023** (single-sign) | The critical PCA2023 asset for P10 |
-| `EFI_EX\bootmgr_EX.efi` | **PCA2011** (single-sign) | Intentionally PCA2011 per Microsoft `Make2023BootableMedia.ps1` v1.4 L876-L884 |
+| `EFI_EX\bootmgr_EX.efi` | **PCA2011** (single-sign) | Intentionally PCA2011 per Microsoft `Make2023BootableMedia.ps1` (`v1.6.4-signed`, commit `bd7abe3`; function `Copy-2023BootBins`) |
 
 Neither file is dual-signed. The "PCA2011 + PCA2023 dual-sign"
 hypothesis briefly entertained during r08.0 Step 2 was disproved by
@@ -1267,9 +1267,22 @@ excludes the signature region).
 
 - P07 applies the LCU to install.wim before P09 / P10 (when
   `EnableInstallWimUpdate=true`).
-- P10 reads from boot.wim, which P08 must have patched to bring the
-  Microsoft-shipped EFI_EX staging assets out of install.wim's
-  WinSxS into boot.wim's `\Windows\Boot\`.
+- The PCA2023 boot manager (`bootmgfw_EX.efi`, "Windows UEFI CA 2023")
+  is LCU-delivered into the **serviced install.wim's**
+  `\Windows\Boot\EFI_EX\`, NOT into boot.wim (signtool `/all` ground
+  truth; the unpatched install.wim has no `EFI_EX\`). The earlier
+  "P08 surfaces EFI_EX from install.wim's WinSxS into boot.wim" step
+  is **disproven and was never implemented**: the OS LCU does not
+  service WinPE/boot.wim (Microsoft Learn "Add an Update to a Windows
+  PE Image"; empirically `0x80070032` for the combined `.msu` and
+  `0x8007371b` for the extracted `.cab` — missing WinPE
+  `BootEnvironment-*-PXE.Resources` members), so boot.wim is not made
+  current by the OS LCU and the staging assets never reach it.
+- P10 therefore sources EFI_EX from the serviced install.wim. The
+  exact conversion path (pre-seed the install.wim EFI_EX into the
+  media + delegate to Microsoft `Make2023BootableMedia.ps1` + ADK) is
+  **under real-environment verification** (see the Secure-Boot
+  campaign; the final mechanism text lands once verified).
 - For Server 2025, P10 can short-circuit via the
   `RequiredByDefault=false` policy, since the install.wim already
   contains the assets natively.
@@ -1281,15 +1294,17 @@ excludes the signature region).
 ### B.17.1 Conversion target inventory (Microsoft 5-target spec)
 
 The Microsoft authoritative reference is
-`scripts/windows/Make2023BootableMedia.ps1` v1.4 (2026-03-13) in the
-`microsoft/secureboot_objects` repository, function
-`Copy-2023BootBins` L829-L941. Five targets are written into the
+`scripts/windows/Make2023BootableMedia.ps1` (`v1.6.4-signed`, commit
+`bd7abe3` in the `microsoft/secureboot_objects` repository; `main` is
+byte-identical to that tag — the script's internal version string still
+reads "1.4", so the tag/commit identifies it, not the internal string),
+function `Copy-2023BootBins`. Five targets are written into the
 output media:
 
 | # | Source (in boot.wim) | Destination (in ISO root) | Required | Expected signer |
 |:-:|:---|:---|:---:|:---|
 | 1 | `Windows\Boot\EFI_EX\bootmgfw_EX.efi` | `\efi\boot\bootx64.efi` (or `bootaa64.efi`) | required | **PCA2023** |
-| 2 | `Windows\Boot\EFI_EX\bootmgr_EX.efi` (if present) | `\bootmgr.efi` | optional | **PCA2011 by Microsoft design** (see L876-L884) |
+| 2 | `Windows\Boot\EFI_EX\bootmgr_EX.efi` (if present) | `\bootmgr.efi` | optional | **PCA2011 by Microsoft design** (see B.16.3) |
 | 3 | `Windows\Boot\DVD_EX\EFI\en-US\efisys_EX.bin` | `\efi\microsoft\boot\efisys_ex.bin` | required | n/a (binary) |
 | 4 | `Windows\Boot\FONTS_EX\*_EX.ttf` (rename) | `\efi\microsoft\boot\fonts\*.ttf` | required | n/a (fonts) |
 | 5 | `Windows\Boot\EFI\boot.stl` (best-effort) | `\EFI\Microsoft\Boot\boot.stl` | optional | n/a (cert trust list) |
