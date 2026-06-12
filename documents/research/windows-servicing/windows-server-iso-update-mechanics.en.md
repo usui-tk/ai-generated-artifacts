@@ -321,7 +321,9 @@ The shift is being rolled out in two stages on real hardware:
 1. **Stage 1 (2024-2026, current)**: Microsoft ships boot binaries signed under PCA2023, but firmware updates (delivered via Windows Update or vendor-specific channels) provision the PCA2023 certificate into the platform's DB (allowed signatures) on a rolling basis. PCA2011 remains in DB. Both chains are accepted.
 2. **Stage 2 (announced for late 2026 or beyond)**: PCA2011 is moved from DB to DBX (revoked signatures) on platforms that have received the firmware update. At that point, an installation medium whose boot manager is signed only under PCA2011 will fail to boot on updated platforms.
 
-A pipeline that wants to produce forward-compatible installation media (media intended to remain bootable after PCA2011 retirement) must ship boot binaries that carry the PCA2023 trust chain, even if PCA2011 is still accepted today. Microsoft's reference for how to do this is the `Make2023BootableMedia.ps1` script (current version at the time of writing: v1.4, dated 2026-03-13), distributed via Microsoft Support article KB5053484.
+A pipeline that wants to produce forward-compatible installation media (media intended to remain bootable after PCA2011 retirement) must ship boot binaries that carry the PCA2023 trust chain, even if PCA2011 is still accepted today. Microsoft's reference for how to do this is the `Make2023BootableMedia.ps1` script, distributed via Microsoft Support article KB5053484 and maintained in the `microsoft/secureboot_objects` GitHub repository.
+
+A versioning pitfall worth pinning down: the script's **internal version string has stayed at "1.4 (2026-03-13)" across content-changing releases**. The repository's release tags kept advancing (the latest signed release at the time of this revision is `v1.6.4-signed`, commit `bd7abe3`; its script content was verified identical to the repository's `main` branch in 2026-06), and at least one release changed the script's behaviour (an active `boot.stl` copy and an `oscdimg` auto-download were added) without bumping the internal string. Any document or tool that needs to cite the script's behaviour should therefore pin it by **release tag or commit hash plus function name**, never by the internal version string or by line numbers — both have already gone stale in real investigations against this script.
 
 ### 3.2 The staging directories: EFI_EX, Fonts_EX, DVD_EX
 
@@ -329,7 +331,7 @@ The mechanism Microsoft chose for the PCA2023 rollout is **dual-staging within t
 
 For an ISO build, the role of the `_EX` directories is:
 
-- **Build time**: the `Make2023BootableMedia.ps1` reference logic copies the `_EX` siblings from inside the mounted install.wim into the output media's root (replacing or supplementing the existing `\boot\` and `\efi\` directories at the ISO root level)
+- **Build time**: the `Make2023BootableMedia.ps1` reference logic (`Copy-2023BootBins`, verified directly against the `v1.6.4-signed` source) mounts **`\sources\boot.wim` index 1 of the staged media** read-only and copies the `_EX` content found inside *that mounted boot.wim's* `\Windows\Boot\` into the output media's root (replacing or supplementing the existing `\boot\` and `\efi\` directories at the ISO root level). It requires **all three** staging directories — `EFI_EX`, `FONTS_EX`, and `DVD_EX` — to be present inside boot.wim; if any is missing it aborts with "staged but was not updated" and the advice to apply 2024-4B-or-later updates. An earlier draft of this section stated the script copies from the mounted *install.wim*; that was wrong — the script never opens install.wim. On media whose boot.wim does not carry the `_EX` directories (the normal state for Server 2016 / 2019 — boot.wim cannot be brought current via the LCU, see §3.8), Microsoft's accepted workaround is to source the binaries from the **serviced install.wim** manually (e.g. copy `\Windows\Boot\EFI_EX\bootmgfw_EX.efi` over the media's `\efi\boot\bootx64.efi`).
 - **Runtime**: a Secure Boot platform that has been provisioned with PCA2023 trusts the resulting media
 
 ### 3.3 install.wim shape per Server version
@@ -338,12 +340,22 @@ Direct inspection of the install.wim of an Evaluation ISO for each Server versio
 
 | OS | EFI present | EFI_EX present | Total `*.efi` in `\Windows\Boot\` | Mechanism |
 |---|:-:|:-:|:-:|---|
-| Server 2016 EVAL ja-jp | ✓ | ✗ | 3 | `EFI_EX` must be **synthesised** during build by applying a recent LCU that adds the `_EX` binaries via WinSxS |
+| Server 2016 EVAL ja-jp | ✓ | ✗ | 3 | `EFI_EX` must be **synthesised** during build by applying a recent LCU to install.wim, which lays the `_EX` staging directories down directly under `\Windows\Boot\` inside the WIM |
 | Server 2019 EVAL ja-jp | ✓ | ✗ | 3 | Same as 2016 |
 | Server 2022 EVAL ja-jp | ✓ | ✗ | 3 | Same as 2016 |
 | Server 2025 EVAL ja-jp | ✓ | ✓ | **6** | `EFI_EX` **ships in install.wim** at GA; no synthesis needed |
 
 For Server 2016 / 2019 / 2022, the `EnableInstallWimUpdate=true` workflow (apply LCU into install.wim, then extract `_EX` from the patched WIM into output media) is required. For Server 2025, EFI_EX synthesis is **not** required for PCA2023 boot-binary extraction because EFI_EX already exists in the install.wim. However, install.wim servicing (applying the LCU) is still required for patch-level compliance — only the `_EX`-synthesis step is skippable, not the patching step itself.
+
+**The synthesis is not symmetric across OS versions.** Direct inspection of LCU-serviced (2026-06 patch level) install.wim images shows what each OS actually materialises:
+
+| OS (serviced install.wim) | EFI_EX | FONTS_EX | DVD_EX (`efisys_EX.bin`) |
+|---|:-:|:-:|:-:|
+| Server 2016 | ✓ (LCU-delivered) | ✓ | **✗ — does not materialise** |
+| Server 2019 | ✓ (LCU-delivered) | ✓ | ✓ |
+| Server 2025 | ✓ (ships at GA) | ✓ | ✓ |
+
+Server 2016 and 2019 receive **byte-identical** PCA2023-signed `bootmgfw_EX.efi` / `bootmgr_EX.efi` binaries from their respective LCUs. But Server 2016's LCU does not deliver the `DVD_EX` tree, so `efisys_EX.bin` — a *required* target of the Microsoft 5-target media spec and one of the three directories `Copy-2023BootBins` insists on (§3.2) — has no source inside Server 2016's own media even after full servicing. The canonical alternate source for it is an open question (§9): candidates are a sibling SKU's serviced install.wim (plausible given the byte-identical boot managers, but unverified) or the Windows ADK lineage that ships `etfsboot.com` / `efisys` boot-sector artifacts alongside `oscdimg`.
 
 The 2025 install.wim has one additional file in EFI: **`SecureBootRecovery.efi`** (PCA2011-signed). Servers 2016 / 2019 / 2022 don't have it. The file is related to Secure Boot recovery procedures and its presence on 2025 is informational only — the file is not relevant to the build-time `_EX` synthesis question.
 
@@ -416,7 +428,7 @@ The same is not always true of the other `_EX` files. Server 2025's `bootmgr_EX.
 
 Once an ISO has been built with the `_EX` substitution applied to the boot root, the build-pipeline author has a verification problem: how to confirm, without a hardware boot test, that the output ISO will pass on a Secure Boot environment with PCA2011 removed from DB.
 
-Microsoft's `Make2023BootableMedia.ps1` v1.4 itself does **not** perform any verification — it is purely a file-copy operation. The script references no Authenticode-related code. The output verification is, by Microsoft's design, the caller's responsibility.
+Microsoft's `Make2023BootableMedia.ps1` itself does **not** perform any signature verification — the boot-binary handling is purely a file-copy operation, and this remains true through `v1.6.4-signed` (later releases added an active `boot.stl` copy and an `oscdimg` auto-download, but still no Authenticode-related code). The output verification is, by Microsoft's design, the caller's responsibility.
 
 A workable post-build verification approach is the "file presence + signer chain" pattern: for each of a small fixed set of boot binaries that the spec says must carry the PCA2023 trust chain, verify both that the file exists at the expected path on the output ISO and that its Authenticode chain includes a PCA2023 intermediate. Server 2025's full set is five targets:
 
@@ -427,6 +439,8 @@ A workable post-build verification approach is the "file presence + signer chain
 | `\efi\boot\bootx64.efi` | **PCA2023** |
 | `\sources\boot.wim` contains updated `bootmgfw.efi` | **PCA2023** |
 | `\setup.exe` | PCA2011 (signed installer; not a boot binary; PCA2023 not required) |
+
+A caveat on the `\sources\boot.wim` row: it describes media whose boot.wim already carries current boot binaries (e.g. Server 2025 GA media). On Server 2016 / 2019 the LCU **cannot** bring boot.wim to that state (§3.8) — an offline servicing pipeline leaves boot.wim byte-identical to the source — so for those OSes the PCA2023 binaries on the output media are sourced from the serviced install.wim instead, and the boot.wim-internal binaries remain at their source signing level. A verification function should treat the boot.wim expectation as per-OS-conditional rather than universal.
 
 A verification function that walks these targets, attempts `Get-AuthenticodeSignature` followed by `X509Chain.Build()` for each, and aggregates to a four-state outcome (`Pass`, `PassWithNotes`, `Warning`, `Fail`) gives a deterministic pre-deployment signal. The function MUST attach a SCOPE clarifier to every report — something like:
 
@@ -444,6 +458,22 @@ Making the verification's reach explicit helps set operator expectations. Each l
 | Physical hardware boot test | The specific OEM firmware's trust DB/DBX state is compatible | That a *different* OEM/firmware generation is compatible |
 
 No single row is sufficient on its own; the rows are cumulative, and only the bottom row exercises the real DB/DBX trust decision on a representative target.
+
+### 3.8 boot.wim is not serviced by the LCU: the WinPE constraint
+
+A premise that has misled real pipeline designs — including an earlier revision of the pipeline this article synthesises — is that `\sources\boot.wim` can be brought to the month's patch level the same way install.wim is: mount it, apply the LCU, commit. **That premise is wrong, by Microsoft's own servicing model, and the failure modes are reproducible.**
+
+The documented side: Microsoft Learn ("Add an update to Windows PE") states that most Windows update packages do not apply to Windows PE, because WinPE is a reduced subset of the OS. WinPE has shipped as a separate ADK add-on with its **own servicing lifecycle** since Windows 10 1809 — it takes its own dedicated updates, not the OS LCU.
+
+The empirical side (Server 2019 boot.wim index 1, 2026-06 patch set; reproduced across method variations):
+
+- Applying the combined LCU **`.msu`** via `Add-WindowsPackage` fails with **`0x80070032` ERROR_NOT_SUPPORTED** — WinPE rejects the `.msu`'s Unattend-style handler outright.
+- Extracting the `.msu` (`expand -f:*`) and applying the nested CABs in order gets further — the **SSU `.cab` applies cleanly** — but the **LCU `.cab` fails with `0x8007371b` ERROR_SXS_TRANSACTION_CLOSURE_INCOMPLETE**: the LCU's changelist pre-stages `BootEnvironment-Core-BootManager-EFI.Resources` / `-PXE.Resources` component families per-culture, including `qps-ploc` / `qps-plocm` pseudo-locale members that are simply absent from the reduced WinPE image, so the CBS transaction closure can never complete.
+- The failure is structural, not repairable corruption: inserting a commit boundary between the SSU and the LCU (dismount-save, remount) does not change the outcome, and the DISM repair avenue is closed too — `/Cleanup-Image /ScanHealth` and `/RestoreHealth` refuse WinPE targets ("Scan health cannot be run on a Windows PE target image ... full Windows OS image only"), so the missing members cannot be supplied from either an online or an offline repair source.
+
+Two design consequences follow. First, a pipeline must not plan a "patch boot.wim with the LCU" step at all; the LCU's boot-binary payload (the very `EFI_EX` content the PCA2023 conversion needs) materialises only in the **serviced install.wim**, which is where the conversion must source it — exactly Microsoft's accepted workaround noted in §3.2. Second, the constraint applies to *package servicing*, not to the filesystem: mounting boot.wim read-write and **copying files into it** (for example, staging `_EX` directories so that `Make2023BootableMedia.ps1`'s boot.wim-internal expectations are met) remains mechanically possible, with the usual mount/commit hygiene. What WinPE refuses is the CBS package transaction, not the write.
+
+(For completeness: the WinRE image inside install.wim is also not LCU-serviced; Microsoft's media-dynamic-update sequence services it with the Safe OS Dynamic Update instead. That path is unaffected by this constraint.)
 
 ---
 
@@ -732,6 +762,21 @@ For the pipeline this yields a precise, implementable guarantee:
 - If a specific older month is requested and not in scope, fall back to the newest in-scope LCU for that OS, treating the miss as supersession.
 - The fallback ceiling is the `RecencyMonths` setting (currently 24; 36 also supported), bounding how far the `CreationDate` window admits older builds. Beyond the window, even non-superseded old builds are excluded by design -- which is also what keeps a deny-listed EOS OS (with its thousands of historical KBs) from flooding the scope if it were ever admitted.
 
+### 5.10 The image-side servicing-stack floor: a third axis the metadata does not carry
+
+§5.2–§5.4 cover two axes of the SSU problem: *is a standalone SSU published this month* (the Catalog search answer), and *what minimum servicing-stack version does the LCU declare* (the CBS `installerAssembly` floor). A real 2026 incident on Server 2022 exposed a **third axis that neither of those captures**, specific to the Combined model applied offline:
+
+- An evaluation-media Server 2022 install.wim (servicing stack `10.0.20348.557`, GA-era) was offline-serviced with the 2026-05 combined LCU (KB5087545, `IsCombined`). CBS loaded the image's old servicing stack, then **failed to extract the LCU's own embedded `SSU-20348.5120` CAB** (DPX `TOC.xml` errors) and returned **`0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED`** — the old stack literally cannot unpack the package format that carries its replacement.
+- The requirement is documented by Microsoft — but **only as prose on the LCU's KB page**: for offline media, the image must already include **LCU KB5030216 (2023-09-12) or later**, which raises the servicing stack to **20348.1960**, the documented minimum. The bootstrap remedy on Server 2022 is therefore a *prior LCU*, not a standalone SSU (none is published for 2022).
+- Critically, this floor exists in **no machine-readable surface**: the 2022 LCU's `installerAssembly` is the nominal placeholder `6.0.0.0` (§5.4), so the derived per-update "required servicing-stack version" is empty, and `wsusscn2.cab` carries nothing else that expresses it. A metadata-driven pre-flight gate (§5.5) **cannot derive this floor**; baseline pre-verification of the patch *set* says nothing about the *image* the set will be applied to.
+
+The practical mitigation is therefore split by what each side can know:
+
+1. **Data side**: a per-OS, operator-curated `minimum image servicing-stack` floor, sourced from the KB-page prose and recorded **with its citation** (the KB number and the sentence it came from), so the value's provenance survives review. This is honest about the fact that the value cannot be machine-derived today.
+2. **Image side**: at mount time, read the mounted image's actual servicing-stack version (the `Microsoft-Windows-ServicingStack` component / WinSxS directory version) and compare it against the curated floor — *unknown floor* degrades to a warning, *known floor unmet* stops the run before the expensive WIM work, mirroring the §5.5 fail-cheap philosophy.
+
+The general lesson generalises beyond Server 2022: "the patch set is internally consistent" (axes 1–2) and "this image can consume this package format" (axis 3) are independent questions, and only the first is answerable from update metadata alone.
+
 ---
 
 ## 6. Microsoft Update Catalog Naming Quirks
@@ -923,7 +968,7 @@ Once the WIM is mounted, `Add-WindowsPackage` will reject inapplicable packages 
 - `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` — the SSU dependency was not satisfied (section 5.1)
 - `0x800f0922 CBS_E_INSTALLERS_FAILED_TO_LOAD` — a corrupted SSU or incompatible architecture
 
-Neither failure is "the script's fault" in the conventional sense; they reflect a config error that should have been caught at pre-flight. The remediation is to fail loudly, leave the WIM unmounted in a clean state, and tell the operator which config line needs attention.
+Neither failure is "the script's fault" in the conventional sense; they reflect a precondition problem that pre-flight should surface wherever the data allows. One documented exception bounds that "wherever": the combined-model **image-side servicing-stack floor** (§5.10), whose requirement exists only as KB-page prose and is therefore invisible to any metadata-driven pre-flight — that class needs an image-side version check at mount time, not better config validation. In every case the remediation is to fail loudly, leave the WIM unmounted in a clean state, and tell the operator which precondition needs attention.
 
 ### 8.3 Post-build verification
 
@@ -959,6 +1004,8 @@ This article synthesises the state of knowledge as of mid-2026. Several question
 
 6. **DISM mount-cache mojibake root cause**: section 7.1's hypothesis (mount-cache state corruption) is consistent with the symptom but has not been definitively isolated. A clean-room reproduction on a fresh Windows install, with controlled mount/unmount sequences and explicit cache inspection, would either confirm the hypothesis or eliminate it.
 
+7. **Canonical alternate source for Server 2016's `DVD_EX` / `efisys_EX.bin`**: Server 2016's LCU does not deliver the `DVD_EX` tree into install.wim (§3.3), yet `efisys_EX.bin` is a required target of the Microsoft 5-target media spec and one of the three directories `Make2023BootableMedia.ps1` insists on (§3.2). Two candidate sources exist, neither validated: a **sibling SKU's serviced install.wim** (Server 2016 and 2019 receive byte-identical PCA2023-signed boot managers from their LCUs, which makes cross-SKU compatibility of the `DVD_EX` assets plausible but unproven), and the **Windows ADK lineage** (`etfsboot.com` / `efisys` boot-sector artifacts ship alongside `oscdimg`; whether a current ADK carries an `_EX`-equivalent, and whether a non-`_EX` `efisys` is acceptable on PCA2023-enforcing firmware, are both unverified). Resolving this determines whether Server 2016 media can be made fully PCA2023-bootable at all without external assets.
+
 ### Known Unknowns
 
 Distinct from the open questions above (which are concrete investigation gaps), the following are forward-looking uncertainties whose resolution depends on Microsoft's future decisions rather than on further analysis of current data:
@@ -987,6 +1034,7 @@ These rest on Microsoft's own published documentation or shipped tooling and are
 - Windows Server release-info pages (build numbers, KB numbers, availability dates) as published on Microsoft Learn.
 - Windows Update Agent (WUA) offline-scan usage as the authoritative applicability evaluator.
 - The purpose of `Make2023BootableMedia.ps1` as the PCA2023 boot-media migration tool.
+- WinPE not being a target of general Windows update packages (Microsoft Learn; the documented basis of §3.8), with the WinPE add-on carrying its own servicing lifecycle.
 
 ### High-confidence inferred
 
@@ -1093,6 +1141,9 @@ This table consolidates the epistemic status of the major claims in the article,
 | `_EX` dual-tree directory structure | Observed (Server 2025 media) |
 | Server 2025 dual-file LCU+SSU Catalog behavior | Observed (current Catalog) |
 | `bootmgr_EX.efi` PCA2011 signing | Observed / implementation-consistent |
+| LCU cannot service WinPE / boot.wim (`0x80070032` / `0x8007371b`) | Officially documented (MS Learn) AND empirically confirmed |
+| Combined-LCU image-side SS floor (e.g. Server 2022: KB5030216 → SSU 20348.1960) | Documented on the KB page as prose only; absent from all machine-readable metadata |
+| Server 2016 serviced install.wim lacks `DVD_EX` / `efisys_EX.bin` | Observed (2026-06 serviced media) |
 | Dynamic Update cadence on LTSC | Observed only |
 | Final applicability / installability | Authoritative only via WUA servicing logic |
 
