@@ -5647,8 +5647,6 @@ function Get-SupersedenceFromCatalog {
     )
     $uri = 'https://www.catalog.update.microsoft.com/ScopedViewInline.aspx?updateid=' + [uri]::EscapeDataString($UpdateId)
     $headers = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; UpdateWsi/r02)' }
-    $supersedes  = New-Object System.Collections.Generic.List[string]
-    $supersededBy = New-Object System.Collections.Generic.List[string]
     $resp = $null
     $attempt = 0
     while ($attempt -lt $MaxRetries -and -not $resp) {
