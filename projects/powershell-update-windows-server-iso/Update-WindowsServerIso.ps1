@@ -580,8 +580,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.12-r11.28'
-$Script:ScriptTag     = 'supersedence-determinism'
+$Script:ScriptVersion = 'update-wsi-2026.06.12-r11.29'
+$Script:ScriptTag     = 'dism-scratchdir-localisation'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6495,6 +6495,9 @@ function Invoke-WimMountSafe {
         Index     = $Index
         Path      = $Path
     }
+    if (-not [string]::IsNullOrEmpty($Script:ScratchDir)) {
+        $mountArgs['ScratchDirectory'] = $Script:ScratchDir
+    }
     if ($LogDir) {
         $logPath = Join-Path $LogDir (('mount_idx{0}_{1:yyyyMMdd-HHmmss}.log' -f $Index, (Get-Date)))
         $mountArgs['LogPath'] = $logPath
@@ -6526,6 +6529,9 @@ function Invoke-WimDismountSafe {
     $extra = @{}
     if ($LogDir) {
         $extra['LogPath'] = (Join-Path $LogDir (('dismount_{0:yyyyMMdd-HHmmss}.log' -f (Get-Date))))
+    }
+    if (-not [string]::IsNullOrEmpty($Script:ScratchDir)) {
+        $extra['ScratchDirectory'] = $Script:ScratchDir
     }
 
     Set-DebugStep -Step 'wim-dismount-first-try'

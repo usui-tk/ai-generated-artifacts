@@ -22,6 +22,13 @@ the script and follows the
 
 ## [Unreleased]
 
+### Localise DISM scratch for mount + dismount (`$Script:ScriptVersion` -> `update-wsi-2026.06.12-r11.29`, tag `dism-scratchdir-localisation`)
+
+`Mount-WindowsImage` and `Dismount-WindowsImage` were invoked without `-ScratchDirectory`, so DISM fell back to its default scratch (typically under `%SystemRoot%\Temp`) — off the WorkRoot volume and outside the `-UseDefenderExclusions` path-exclusion set, which both weakened the exclusion benefit and split DISM scratch I/O across volumes. `Add-WindowsPackage`, `/Cleanup-Image`, and `/Export-Image` already pass the workspace-local `$Script:ScratchDir` (`<WorkRoot>\work\scratch`, introduced in r11.25); the mount and dismount paths were the two that still defaulted.
+
+- **Change.** The mount and dismount argument builders now set `ScratchDirectory = $Script:ScratchDir` (guarded on non-empty, matching the existing call sites), so every DISM operation's scratch stays under the single Defender-excluded WorkRoot.
+- **Scope.** `Invoke-WimMountSafe` / `Invoke-WimDismountSafe` only; no Action, parameter, output, or data-schema change, so `README.md` / `README.ja.md` are unaffected. Blast radius is the project script.
+
 ### Deterministic supersedence extraction (`$Script:ScriptVersion` -> `update-wsi-2026.06.12-r11.28`, tag `supersedence-determinism`)
 
 `Get-SupersedenceFromCatalog` scraped the Catalog ScopedView `supersedesInfo` section with a non-greedy `...</div>` boundary that stopped at the first inner entry. Because the Catalog reorders that section's entries per request, the single captured KB varied run-to-run, so `PatchBaseline.NeutralPatches[].Supersedes` was not byte-reproducible across regenerations (the only non-deterministic field in an otherwise reproducible `/data` set). The full entry set is identical across requests; only its order changes.
