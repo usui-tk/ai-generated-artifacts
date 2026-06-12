@@ -72,7 +72,7 @@ REPO_APPSTREAM="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/appstream/x
 # disabled (finalized below) so DKMS/ENA tooling can enable it on demand.
 INCLUDE=( dnf oraclelinux-release-el9 oracle-epel-release-el9
   dnf-plugins-core yum-utils
-  curl wget git-core git-lfs bzip2 unzip zip zstd
+  curl wget git-core git-lfs jq bzip2 unzip zip zstd
   sudo which tar diffutils less findutils procps-ng psmisc hostname vim-minimal
   iproute iputils bind-utils traceroute nmap-ncat tcpdump )
 
@@ -273,6 +273,7 @@ if [ -f "${IMG}/etc/yum.repos.d/cleancore.repo" ]; then CC_REPO=1; else CC_REPO=
 st "userland executes (/bin/bash runs in chroot)"   t_run /bin/bash -c true
 st "rpmdb readable, >0 packages (${PKGS})"          test "${PKGS}" -gt 0
 st "package manager runs (dnf --version)"            t_run /usr/bin/dnf --version
+st "jq present and executable (jq --version)"         t_run /usr/bin/jq --version
 st "ssh daemon absent (slim base ships no sshd)"     test ! -e "${IMG}/usr/sbin/sshd"
 st "OS is Oracle Linux 9"                            grep -q "release 9" "${IMG}/etc/oracle-release"
 st "firmware excluded (0 packages)"                  test "${FW}" -eq 0

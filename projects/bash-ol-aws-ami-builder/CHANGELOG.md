@@ -138,6 +138,24 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **`jq` added to every clean-core container builder (`tests/cleancore/`).** Each
+  `build-cleancore-ol{6,7,8,9,10}.sh` now installs `jq` as a curated test-base
+  essential. Per-OS repo routing (per the maintainer's instruction): OL7/OL8/OL9/
+  OL10 take it from the **standard OL repo** (already enabled — `latest` on OL7,
+  `appstream` on OL8/9/10), so it is simply added to the `INCLUDE` set; OL6 — where
+  `jq` is not in the base repo but is an **EPEL** package — installs it from the
+  **EPEL archive** in finalize by enabling EPEL **transiently for that one
+  transaction** (`--enablerepo=epel`), so the shipped EPEL repo stays `enabled=0`
+  (unchanged from the documented OL6 EPEL handling). Each builder's unconditional
+  self-test now asserts `jq --version` runs in the finalized image. Builders are
+  parse/lint-only under B-T1/B-T2 (not run by `run-all.sh`), so the host suite stays
+  **200/0/0**. SPEC **B.8** (Package set) and `TESTING.md` (clean-core section)
+  updated. **NOTE:** the names-only SBOM snapshots
+  `tests/cleancore/cleancore-ol<MAJOR>.sbom.json` are produced from a real build's
+  `rpm -qa` (SPEC B.8: "refreshed by hand when the package set changes"; static
+  snapshots, not drift-checked gates) and are **regenerated on the next real
+  clean-core build**, which captures `jq` plus its transitive closure
+  (e.g. `oniguruma`); they are intentionally not hand-edited here.
 - **OL9 and OL10 clean-core trimmed to a slim-aligned set (was kickstart-derived).**
   `build-cleancore-ol{9,10}.sh` now drop `@core` (so no kernel/boot/firewall/cron/
   syslog) and install a minimal userland plus explicit test-base essentials:

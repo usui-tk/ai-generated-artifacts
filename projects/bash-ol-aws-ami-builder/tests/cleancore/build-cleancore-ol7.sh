@@ -74,7 +74,7 @@ REPO_UEKR6="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/UEKR6/x86_64/"
 # (which provides /etc/oracle-release) must be listed explicitly -- unlike EL8-EL10,
 # the EL7 oraclelinux-release-el7 repo-config package does NOT pull it in.
 INCLUDE=( yum oraclelinux-release oraclelinux-release-el7 oracle-epel-release-el7 yum-utils
-  curl wget git bzip2 unzip zip
+  curl wget git jq bzip2 unzip zip
   sudo which tar diffutils less findutils procps-ng psmisc hostname vim-minimal
   iproute iputils bind-utils traceroute nmap-ncat tcpdump )
 
@@ -279,6 +279,7 @@ if [ -f "${IMG}/etc/yum.repos.d/cleancore.repo" ]; then CC_REPO=1; else CC_REPO=
 st "userland executes (/bin/bash runs in chroot)"   t_run /bin/bash -c true
 st "rpmdb readable, >0 packages (${PKGS})"          test "${PKGS}" -gt 0
 st "package manager runs (yum --version)"            t_run /usr/bin/yum --version
+st "jq present and executable (jq --version)"         t_run /usr/bin/jq --version
 st "ssh daemon absent (slim base ships no sshd)"     test ! -e "${IMG}/usr/sbin/sshd"
 st "OS is Oracle Linux 7"                            grep -q "release 7" "${IMG}/etc/oracle-release"
 st "firmware excluded (0 packages)"                  test "${FW}" -eq 0

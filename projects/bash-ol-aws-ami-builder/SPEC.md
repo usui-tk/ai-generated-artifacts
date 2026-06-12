@@ -1599,7 +1599,13 @@ Each builder tags every block with the environment it runs in:
   essentials are installed, `git-core` replaces `git` (avoiding ~60 `perl-*`
   packages), `net-tools` is omitted, and the Oracle EPEL repo is wired in but
   **shipped disabled** (the ENA/SSM harnesses enable it on demand for e.g.
-  `dkms`). `systemd` is present (a hard dependency of full `dnf` on EL8/EL10, with
+  `dkms`). **`jq`** (a curated test-base essential) is installed on every
+  clean-core: from the **standard OL repo** on OL7–OL10 (where it is part of the
+  enabled `latest`/`appstream` set, so it is simply an `INCLUDE` member), and on
+  **OL6** — where `jq` is not in the base repo but is an EPEL package — from the
+  **EPEL archive**, by enabling EPEL **transiently for that one install** in
+  finalize (after the EPEL repo is configured); the shipped EPEL repo stays
+  `enabled=0`. `systemd` is present (a hard dependency of full `dnf` on EL8/EL10, with
   `pam`/`sudo`; pulled transitively by `iputils`/`procps-ng` on EL7) but in
   container/chroot use it is never PID 1. **EL8 specific:** a raw `dnf` with no
   langpack selection defaults to `glibc-all-langpacks` (~416 MB of world locales),

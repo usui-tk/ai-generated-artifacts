@@ -199,7 +199,12 @@ and unhosted by Oracle, so the OL6 build (C) enables the NSS dynamic CA trust
 is usable on a real host without it), then (B) fetches the EPEL 6 release RPM from
 the Fedora archive with the clean-core's own `curl` and installs it with its own
 `rpm` (EL6 `yum` cannot fetch a direct https package URL), shipping the repo
-repointed to the archive and `enabled=0`.
+repointed to the archive and `enabled=0`. **`jq`** is a curated test-base
+essential on every clean-core: on OL7–OL10 it is part of the enabled standard OL
+repo (a plain `INCLUDE` member), and on OL6 — where `jq` is an EPEL package and
+absent from the base — it is installed from that EPEL archive by enabling EPEL
+**transiently for the one install**, leaving the shipped EPEL `enabled=0`. The
+unconditional self-test asserts `jq --version` runs in the finalized image.
 Two static snapshots accompany the base: `cleancore-ol<MAJOR>.sbom.json` (each
 finalized image's package set, names-only, reusable JSON) and
 `REFERENCE-oracle-official-images.md` (the official slim images' sources, pinned

@@ -279,6 +279,24 @@ find "${DELIV}/etc/yum.repos.d" -type f -name 'epel*.repo*' -print0 \
       -e 's|^mirrorlist=|#mirrorlist=|' \
       -e 's|^enabled=1|enabled=0|'
 
+# (B) jq: not in the OL6 base repo (it is an EPEL package on EL6), so install it
+# from the just-configured EPEL archive. The shipped EPEL repo stays enabled=0
+# (above); EPEL is enabled TRANSIENTLY for this one transaction only
+# (--enablerepo=epel), so the deliverable's repo state is unchanged. The
+# clean-core's OWN EL6 yum performs the install (db4-consistent rpmdb), with
+# --nogpgcheck + --setopt=sslverify=${SSL} to match the base install. Network is
+# needed, so resolv.conf is supplied transiently (the rootfs ships none).
+log "[A->C] (B) clean-core installs jq from EPEL (archive); EPEL stays disabled"
+cp -f /etc/resolv.conf "${DELIV}/etc/resolv.conf" 2>/dev/null || true
+unshare --fork --pid --mount --uts --ipc bash -c "
+  mount --bind /dev '${DELIV}/dev'  2>/dev/null || true
+  mount -t proc proc '${DELIV}/proc' 2>/dev/null || true
+  chroot '${DELIV}' /usr/bin/yum -y --enablerepo=epel --nogpgcheck \
+    --setopt=tsflags=nodocs --setopt=sslverify=${SSL} install jq
+  chroot '${DELIV}' /usr/bin/yum clean all >/dev/null 2>&1 || true
+"
+rm -f "${DELIV}/etc/resolv.conf"
+
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║ [C] CLEAN-CORE — (2-cleanup) logs / transient data (zero-fill preferred).  ║
 # ║     OL6 is systemd-less (upstart): there is no journal; machine-id is a     ║
@@ -362,6 +380,7 @@ CATRUST=0; [ -L "${IMG}/etc/pki/tls/certs/ca-bundle.crt" ] && CATRUST=1
 st "userland executes (/bin/bash runs in chroot)"   t_run /bin/bash -c true
 st "rpmdb readable, >0 packages (${PKGS})"          test "${PKGS}" -gt 0
 st "package manager runs (yum --version)"            t_run /usr/bin/yum --version
+st "jq present and executable (jq --version)"         t_run /usr/bin/jq --version
 st "ssh daemon absent (slim base ships no sshd)"     test ! -e "${IMG}/usr/sbin/sshd"
 st "OS is Oracle Linux 6"                            grep -q "release 6" "${IMG}/etc/oracle-release"
 st "firmware excluded (0 packages)"                  test "${FW}" -eq 0
