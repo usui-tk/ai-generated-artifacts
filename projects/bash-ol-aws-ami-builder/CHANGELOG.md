@@ -21,6 +21,26 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **Clean-core build orchestrator (`tests/cleancore/build-cleancore.sh`).** A
+  self-contained wrapper (inline helpers, no shared library — repo policy for
+  user-run scripts) over the per-OL clean-core builders: `--ol <N>` builds one,
+  `--all` builds every OL that has a `build-cleancore-ol<N>.sh` (ascending;
+  `--continue` to keep going past a failing OL), writing
+  `<out-dir>/cleancore-ol<N>.tar.gz` (default out-dir `./cleancore-out`). It
+  **invokes each builder as a separate executable** (never sources it), so a
+  builder stays the single source of truth for its own OL. It recognises the
+  SPEC B.6 build-host matrix (RHEL-family 10|9, Fedora 44|43, Ubuntu 26.04|24.04,
+  Debian 13|12 — the AMI pipeline's supported execution environments and the
+  `ubuntu-latest` CI target) and only **warns** on a host outside it (a
+  clean-core build is userland-only, hence host-agnostic), while it
+  **hard-fails** on a missing prerequisite (root + the
+  `unshare`/`chroot`/`mknod`/`curl`/`tar`/`xz`/`gzip`/`truncate`/`find`
+  toolchain). Like the builders it is manual / on-demand and **not** a
+  `run-all.sh` tier; B-T1/B-T2 parse/lint it like any `.sh`, so the host suite
+  goes 202/0 → **204/0** (B-T1 31→32, B-T2 26→27). `SPEC.md` B.8 and `TESTING.md`
+  document it. Second of the ENA self-build test-matrix pieces (the matrix
+  harness follows).
+
 - **ENA driver release-list collector (`tests/ena/list-ena-releases.sh`).** Reads
   the Amazon ENA Linux driver version list from the `amzn-drivers` GitHub repo and
   writes the static snapshot `tests/ena/ena-driver-releases.json` (70 versions at

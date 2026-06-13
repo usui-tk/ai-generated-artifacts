@@ -76,11 +76,11 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **201 passed, 1 skipped, 0 failed** (B-T1 = 31,
-B-T2 = 26, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
+Current fixed pass count: **203 passed, 1 skipped, 0 failed** (B-T1 = 32,
+B-T2 = 27, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
 hook-timing = 8, log-format = 12, ena-uek-detect = 9, ena-reporting = 15,
 build-visibility = 17; plus
-B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 202/0
+B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 204/0
 with it). The B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core
 builders (see "Container clean-core test base" below): B-T1 and B-T2 parse- and
 lint-check **every** `.sh` in the project, so adding a script raises both counts
@@ -128,8 +128,8 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 
 | Tier | Layer | Status | Notes |
 |:--|:--|:--|:--|
-| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) + 5 shell-bodied heredoc bodies; 31 asserts |
-| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 26 asserts |
+| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) + 5 shell-bodied heredoc bodies; 32 asserts |
+| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 27 asserts |
 | B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
 | B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t3_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
@@ -143,7 +143,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (build visibility) | L1/L2 | implemented | `tests/t12_buildvisibility.sh`: OL7 build-log visibility (handoff B.1.5 feedback 4). `install-ena-driver.sh` emits greppable `[ena-driver][stage]` breadcrumbs at the phase boundaries (esp. dkms add/build/install) and `record_make_log()` preserves the DKMS make.log to `/var/log/ol-aws-ami-builder-ena-make.log` on a successful build (guest output is swallowed by virt-customize on success); the wrapper records the latest LIVE orchestrator line to `BUILD_STAGE_FILE` in `log_external` and the Phase-5 heartbeat shows it as `stage: …` (assembled into one atomic `log_progress` write); `HEARTBEAT_INTERVAL_SEC` default is 10s. Structural greps (file-direct) + a behavioural `log_external`→stage-file fixture; 17 asserts. Real OL7 build/boot proof is B-T7/B-T8 |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
-| clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |
+| clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below), plus `tests/cleancore/build-cleancore.sh` (the `--all`/`--ol` orchestrator wrapping them). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |
 
 ## Container clean-core test base (`tests/cleancore/`)
 
@@ -216,6 +216,34 @@ Run one with `bash tests/cleancore/build-cleancore-ol<MAJOR>.sh [output.tar.gz]`
 drops the build-time `sslverify=0` on a trusted host). The script exits 0 only if
 the build and the unconditional self-test section pass; the network-dependent
 readiness probe SKIPs (never fails the build) when offline.
+
+### Orchestrator (`build-cleancore.sh`)
+
+`tests/cleancore/build-cleancore.sh` is a self-contained wrapper (inline helpers,
+no shared library — repo policy for user-run scripts) that drives the per-OL
+builders in one call. It **invokes them as separate executables** (never sources
+them), so each `build-cleancore-ol<MAJOR>.sh` stays the single source of truth
+for its own OL; the wrapper only adds a "build every supported OL" mode, a
+host-OS sanity check, and a hard prerequisite gate:
+
+```sh
+bash tests/cleancore/build-cleancore.sh --ol 6                  # one OL major
+bash tests/cleancore/build-cleancore.sh --all --out-dir ./cc    # OL 6,7,8,9,10
+bash tests/cleancore/build-cleancore.sh --all --continue        # don't stop on a failing OL
+```
+
+Each OL `N` writes `<out-dir>/cleancore-ol<N>.tar.gz` (default out-dir
+`./cleancore-out`); `--ol <N>` builds one, `--all` builds every OL that has a
+builder, ascending, stopping at the first failure unless `--continue`. It
+**recognises** the SPEC B.6 build-host matrix (RHEL-family 10|9, Fedora 44|43,
+Ubuntu 26.04|24.04, Debian 13|12 — the AMI pipeline's supported execution
+environments, and the `ubuntu-latest` CI target) and only **warns** on a host
+outside it (a clean-core build is userland-only, so far more host-agnostic than
+the AMI pipeline); it **hard-fails** only on a genuinely missing prerequisite —
+not root, or a missing `unshare`/`chroot`/`mknod`/`curl`/`tar`/`xz`/`gzip`/
+`truncate`/`find`. Like the builders it is **manual / on-demand** (root +
+network + a multi-hundred-MB build) and **not** a `run-all.sh` tier; B-T1/B-T2
+parse- and lint-check it like any `.sh`.
 
 ## ENA driver release list (`tests/ena/`)
 

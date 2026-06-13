@@ -1550,6 +1550,19 @@ by `tests/run-all.sh`** (a run needs root, network, and a multi-hundred-MB
 build). The builders live in the project blast-radius; operational run notes are
 in `TESTING.md` ("Container clean-core test base").
 
+A self-contained orchestrator `tests/cleancore/build-cleancore.sh` wraps the
+per-OL builders: `--ol <N>` builds one, `--all` builds every OL that has a
+builder (ascending; `--continue` to keep going past a failure), writing
+`<out-dir>/cleancore-ol<N>.tar.gz`. It **invokes each builder as a separate
+executable** (never sources it), so a builder remains the single source of truth
+for its own OL. It recognises the B.6 build-host matrix (the AMI pipeline's
+supported execution environments, including the `ubuntu-latest` CI target) and
+only **warns** outside it — a clean-core build is userland-only and host-agnostic
+— while it **hard-fails** on a missing prerequisite (root + the
+`unshare`/`chroot`/`mknod`/`curl`/`tar`/`xz`/`gzip`/`truncate`/`find` toolchain).
+Like the builders it is self-contained (inline helpers, no shared library) and
+not a `run-all.sh` tier.
+
 A container shares the host kernel and has no `/dev/kvm`, so this base covers the
 **guest userland** only — it is **not** a substitute for the VM image build /
 Nitro boot (those stay on the Fedora KVM host; see B-T7 / B-T8 in `TESTING.md`).
