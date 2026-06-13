@@ -32,6 +32,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **ENA self-build: a failed driver compile is no longer reported as success
+  (`install-ena-driver.sh`).** The verify asserted only that *some* `ena.ko`
+  existed and downgraded a version mismatch to a non-fatal warning. But EL6
+  `dkms` (2.4.0) returns exit `0` even when the in-guest compile fails (so
+  `set -euo pipefail` did not catch it), and `kernel-uek` ships a stock in-tree
+  `ena.ko` (`1.1.2`); together these made a failed build (e.g. ENA `2.12.0`,
+  whose ECC build-time autodetect false-positives on UEK4 and emits the absent
+  `irq_update_affinity_hint`) report `status:ok` with the stock module's version.
+  The verify now decides success from the installed module *version*: it walks
+  every `ena.ko` under the tree and requires one whose `modinfo` version matches
+  the requested `ena_version` (prefix match; the pin installs as e.g. `2.9.1g`),
+  failing fatally otherwise via the new pure `ena_buildtest_verdict`. This fixes
+  false `ok` rows in the ENA test-matrix ledger AND makes a production AMI build
+  abort on a non-building pin instead of silently shipping the stock driver.
+  Unit-tested by `tests/t12_enaverify.sh` (12 cases: pin/exact/above-window
+  builds pass; stock-only, none-found, and wrong-version fail).
+
 - **ENA matrix harness: run the ENA build by absolute `/bin/bash` under an
   explicit PATH (fixes `env: bash: No such file or directory` on usrmerge
   hosts).** `run_one_buildtest` entered the clean-core with

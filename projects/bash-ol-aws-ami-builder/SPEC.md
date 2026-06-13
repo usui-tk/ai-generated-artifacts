@@ -713,6 +713,17 @@ all inert.
   - ok: `{"status":"ok","osmajor","ena_version","kver","dkms","ko","ko_version"}`
   - fail: `{"status":"fail","osmajor","ena_version","kver","reason"}` (emitted by
     `die`; `reason` is JSON-escaped). The exit code always agrees with `status`.
+- **`status:ok` certifies the REQUESTED version was built — not mere presence.**
+  The verify trusts the installed module *version*, not the `dkms` exit code or
+  file presence: EL6 `dkms` (2.4.0) returns `0` even when the in-guest compile
+  fails (so `set -e` does not catch it), and `kernel-uek` ships a stock in-tree
+  `ena.ko` (e.g. `1.1.2`). The verify walks every `ena.ko` under the tree and
+  requires one whose `modinfo` version matches the requested `ena_version` (a
+  prefix match — the pin installs as e.g. `2.9.1g`); if none matches (the build
+  failed and only the stock module remains) it is a **fatal `status:fail`**, not
+  a false `ok`. This applies in production too: a non-building pin aborts the AMI
+  build rather than silently shipping the stock driver. (Pure verdict logic:
+  `ena_buildtest_verdict`, unit-tested by `tests/t12_enaverify.sh`.)
 
 Validated end-to-end (the driver actually compiles, installs, and verifies) on
 OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`), OL7 (`ena.ko.xz` 2.17.0g,

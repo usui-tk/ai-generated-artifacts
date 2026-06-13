@@ -136,6 +136,36 @@ dump_build_diag() {
   echo "${pfx} ---- end build diagnostics ----" >&2
 }
 
+# Verdict for the self-build verify: decide whether the requested ENA version was
+# ACTUALLY built, from the versions of every ena.ko found under the module tree.
+# This is the guard against a silent false success: `dkms build`/`dkms install`
+# on the EL6 dkms (2.4.0) return exit 0 even when the in-guest compile FAILS, so
+# `set -e` does not catch it; the kernel-uek package also ships a stock in-tree
+# ena.ko (e.g. 1.1.2), so a naive "is any ena.ko present?" check passes on the
+# stock module and reports success for a build that never produced the pinned
+# version. The robust signal is therefore the installed MODULE VERSION, not the
+# command exit code or mere file presence: the build succeeded iff some installed
+# ena.ko reports the requested version (the pinned version is known-good in
+# production and installs as e.g. `2.9.1g`, so a prefix match on the request is
+# the success shape). Pure (args only) so it is unit-testable in isolation.
+#   ena_buildtest_verdict <requested_version> [found_version ...]
+# On success: prints the matching version and returns 0.
+# On failure: prints a human/LLM-readable reason and returns 1.
+ena_buildtest_verdict() {
+  local want="$1"; shift
+  local found="$*" v
+  if [[ -z "${found// /}" ]]; then
+    printf 'no ena.ko found under the module tree after install -- the dkms build produced no module'
+    return 1
+  fi
+  for v in ${found}; do
+    if [[ "${v}" == "${want}"* ]]; then printf '%s' "${v}"; return 0; fi
+  done
+  printf 'no installed ena.ko matches the requested ENA version %s (found only: %s) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains' \
+    "${want}" "${found}"
+  return 1
+}
+
 # On a SUCCESSFUL build the guest provisioning output is swallowed by
 # virt-customize (see dump_build_diag), so the DKMS make.log -- the only record
 # of what the compile actually did -- would be lost. Copy it to a stable path
@@ -489,14 +519,27 @@ else
 fi
 
 # ---- verify -----------------------------------------------------------------
-ko="$(find "/lib/modules/${kver}" -type f -name 'ena.ko*' 2>/dev/null | grep -E '/updates/|/extra/' | head -1 || true)"
-[[ -n "${ko}" ]] || ko="$(find "/lib/modules/${kver}" -type f -name 'ena.ko*' 2>/dev/null | head -1 || true)"
-[[ -n "${ko}" ]] || die "ena.ko not found under /lib/modules/${kver} after install"
-newver="$(modinfo -F version "${ko}" 2>/dev/null | head -1 || true)"
-log "Installed ENA driver: ${ko} (version ${newver:-unknown})"
-if [[ "${newver}" != "${ena_version}"* ]]; then
-  log "WARNING: installed version '${newver}' does not match pinned '${ena_version}'"
+# Trust the installed MODULE VERSION, not the dkms exit code (EL6 dkms returns 0
+# even on a failed compile) or mere file presence (kernel-uek ships a stock
+# in-tree ena.ko). Walk every ena.ko under the tree, record their versions, and
+# take the one whose version matches the request as the self-built result;
+# ena_buildtest_verdict turns "no match" / "none found" into a FATAL error so a
+# masked build failure can never be reported as success (in the matrix OR in a
+# production AMI build).
+ko=""; newver=""; _found_vers=""
+while IFS= read -r _k; do
+  [[ -n "${_k}" ]] || continue
+  _v="$(modinfo -F version "${_k}" 2>/dev/null | head -1 || true)"
+  [[ -n "${_v}" ]] && _found_vers="${_found_vers} ${_v}"
+  if [[ -z "${ko}" && "${_v}" == "${ena_version}"* ]]; then ko="${_k}"; newver="${_v}"; fi
+done < <(find "/lib/modules/${kver}" -type f -name 'ena.ko*' 2>/dev/null)
+if [[ -z "${ko}" ]]; then
+  dump_build_diag
+  # Intentional word-splitting of the space-separated version list into args.
+  # shellcheck disable=SC2086
+  die "$(ena_buildtest_verdict "${ena_version}" ${_found_vers})"
 fi
+log "Installed ENA driver: ${ko} (version ${newver})"
 
 # ---- AMI hygiene: drop stale persistent-net rules --------------------------
 rm -f /etc/udev/rules.d/70-persistent-net.rules 2>/dev/null || true
