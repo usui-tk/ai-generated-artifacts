@@ -753,6 +753,22 @@ detached; see §8.5 for the pattern.
   published and discovery is month-pinned (no carry-forward); (F3)
   Server 2025 DU.Setup (KB5095966) exists in June, contra the report's
   "discontinued" framing. Per-run work-log recorded (see §8.6).
+- **2026-06 (committed 2026-06-13)** — the 2026-06 baseline was regenerated
+  again on the r11.32 code and **committed** (this is the first committed 2026-06
+  baseline; the 2026-06-11 run above was held back for the findings). Same cab
+  (SHA-256 `5b075a6d…`, 649,341,212 bytes); A03 ~22 s -> A01 `-Mode Force
+  -PatchMonth 2026-06` (Layer 1, all 4 OS) -> A04 detached ~6 min (Layer 2 +
+  `_DependencyVerified*`, updated=4). G1–G5 green; resolved set identical to the
+  2026-06-11 entry (2016 LCU KB5094122 + SSU KB5094141; 2019 KB5094123; 2022
+  KB5094128 + DU.SafeOs KB5094157; 2025 KB5094125 + DU.Setup KB5095966 + DU.SafeOs
+  KB5094150). Two differences from the 2026-06-11 run, both from intervening code:
+  the standalone Server 2016 SSU **KB5094141** was **auto-discovered** on the A01
+  path (r11.20), not hand-filled; and the `DotNet.Runtime` CU is now **carried
+  forward** for all four OS across the June .NET gap (r11.27, §B.22.5) — so the
+  earlier (F2) ".NET dropped" no longer applies. T23's hard-coded Server 2016 SSU
+  KbId was advanced `KB5088064` -> `KB5094141` in the same commit. Findings (F1)
+  2019 L1/L2 label split and (F3) 2025 DU.Setup-present remain routed for separate
+  investigation; not baked.
 
 ### 8.5 Agent execution notes (running the long A04 under a timed runner)
 

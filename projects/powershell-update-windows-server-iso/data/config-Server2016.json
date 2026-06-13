@@ -34,19 +34,19 @@
     "NeutralPatches": [
       {
         "Type": "LCU",
-        "KbId": "KB5087537",
-        "Title": "2026-05 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5087537)",
-        "UpdateId": "276ca876-09d3-4ef8-9266-22859826b952",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/05/windows10.0-kb5087537-x64_1a68955ee2525f63b2b6ab4a5f212eb0547a58e3.msu",
-        "FileName": "windows10.0-kb5087537-x64_1a68955ee2525f63b2b6ab4a5f212eb0547a58e3.msu",
+        "KbId": "KB5094122",
+        "Title": "2026-06 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5094122)",
+        "UpdateId": "1c551f54-2b38-4a7f-9d36-c52501b521e5",
+        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
+        "FileName": "windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
         "SizeBytes": 0,
         "Sha256": "",
         "ReleaseDate": "",
         "Supersedes": [
-          "KB5078938"
+          "KB5087537"
         ],
         "RequiresKbIds": [
-          "KB5088064"
+          "KB5094141"
         ],
         "ApplyOrder": 3,
         "ApplicableArchitecture": "x64",
@@ -67,7 +67,7 @@
         "Sha256": "",
         "ReleaseDate": "",
         "Supersedes": [
-          "KB5066136"
+          "KB5082411"
         ],
         "RequiresKbIds": [],
         "ApplyOrder": 6,
@@ -80,16 +80,16 @@
       },
       {
         "Type": "SSU",
-        "KbId": "KB5088064",
-        "Title": "2026-05 Servicing Stack Update for Windows Server 2016 for x64-based Systems (KB5088064)",
-        "UpdateId": "d0f1761f-c762-4764-8443-8c567f6929a2",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/05/windows10.0-kb5088064-x64_1f5e521ef529be5a04bf52e43852e980118b62f4.msu",
-        "FileName": "windows10.0-kb5088064-x64_1f5e521ef529be5a04bf52e43852e980118b62f4.msu",
+        "KbId": "KB5094141",
+        "Title": "2026-06 Servicing Stack Update for Windows Server 2016 for x64-based Systems (KB5094141)",
+        "UpdateId": "a5501aa9-aad8-4dc4-922b-23b02e4fe0bf",
+        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
+        "FileName": "windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
         "SizeBytes": 0,
         "Sha256": "",
         "ReleaseDate": "",
         "Supersedes": [
-          "KB5060954"
+          "KB5088064"
         ],
         "RequiresKbIds": [],
         "ApplyOrder": 1,
@@ -109,9 +109,9 @@
       "LastDownloadedSha256": "",
       "LastDownloadedSizeBytes": 0
     },
-    "LastVerifiedDate": "2026-06-10T00:41:44.3363846+00:00",
+    "LastVerifiedDate": "2026-06-13T11:33:29.0165296+00:00",
     "LastVerifiedBy": "auto:RefreshAllBaselines",
-    "PatchTuesdayOfBaseline": "2026-05-12"
+    "PatchTuesdayOfBaseline": "2026-06-09"
   },
   "Pca2023": {
     "RequiredByDefault": true,
@@ -147,9 +147,9 @@
         "LanguagePacks": [],
         "LxpUpdates": [],
         "DotNetLanguagePacks": [],
-        "LastVerifiedDate": "2026-06-10T00:41:45.5625173+00:00",
+        "LastVerifiedDate": "2026-06-13T11:33:30.2609808+00:00",
         "LastVerifiedBy": "auto:RefreshAllBaselines",
-        "PatchTuesdayOfBaseline": "2026-05-12"
+        "PatchTuesdayOfBaseline": "2026-06-09"
       }
     },
     "ja-jp": {
@@ -169,20 +169,20 @@
         "LanguagePacks": [],
         "LxpUpdates": [],
         "DotNetLanguagePacks": [],
-        "LastVerifiedDate": "2026-06-10T00:41:46.5340787+00:00",
+        "LastVerifiedDate": "2026-06-13T11:33:31.2390457+00:00",
         "LastVerifiedBy": "auto:RefreshAllBaselines",
-        "PatchTuesdayOfBaseline": "2026-05-12"
+        "PatchTuesdayOfBaseline": "2026-06-09"
       }
     }
   },
-  "_DependencyVerifiedUpdateId": "276ca876-09d3-4ef8-9266-22859826b952",
-  "_DependencyVerifiedRevisionId": "45255709",
-  "_DependencyVerifiedCreationDate": "2026-05-11T23:02:35Z",
-  "_DependencyVerifiedAt": "2026-05-28T09:49:54Z",
   "_meta": {
     "dataContractId": "4c173c61-c099-4512-9283-f5d951beda8b",
     "dataContractVersion": 1,
-    "scriptVersion": "update-wsi-2026.06.10-r11.20",
-    "generatedAt": "2026-06-10T00:41:46Z"
-  }
+    "scriptVersion": "update-wsi-2026.06.13-r11.32",
+    "generatedAt": "2026-06-13T11:46:33Z"
+  },
+  "_DependencyVerifiedUpdateId": "1c551f54-2b38-4a7f-9d36-c52501b521e5",
+  "_DependencyVerifiedRevisionId": "45430515",
+  "_DependencyVerifiedCreationDate": "2026-06-09T03:08:20Z",
+  "_DependencyVerifiedAt": "2026-06-13T11:46:33Z"
 }

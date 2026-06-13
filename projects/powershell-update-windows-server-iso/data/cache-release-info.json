@@ -1,21 +1,34 @@
 {
   "Schema": "1.0",
-  "GeneratedAt": "2026-05-26T06:31:11.5569634Z",
+  "GeneratedAt": "2026-06-13T11:29:40.3697204Z",
   "SourceUrl": "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info?accept=text/markdown",
   "RawMarkdownPath": "raw-release-info.md",
-  "MonthlyRowCount": 471,
+  "MonthlyRowCount": 475,
   "HotpatchRowCount": 62,
   "PerOsMonthlyCounts": {
-    "Server2019": 165,
-    "Server2022": 89,
-    "Server2025": 30,
-    "Server2016": 187
+    "Server2019": 166,
+    "Server2022": 90,
+    "Server2016": 188,
+    "Server2025": 31
   },
   "PerOsHotpatchCounts": {
     "Server2022": 36,
     "Server2025": 26
   },
   "MonthlyReleases": [
+    {
+      "OsShortName": "Server2025",
+      "OsBuild": "26100",
+      "ServicingOption": "LTSC",
+      "UpdateType": "2026-06 B",
+      "UpdateTypeYear": 2026,
+      "UpdateTypeMonth": 6,
+      "UpdateTypeLetter": "B",
+      "AvailabilityDate": "2026-06-09",
+      "BuildAfterUpdate": "26100.32995",
+      "KbId": "KB5094125",
+      "KbUrl": "https://support.microsoft.com/help/5094125"
+    },
     {
       "OsShortName": "Server2025",
       "OsBuild": "26100",
@@ -405,6 +418,19 @@
       "BuildAfterUpdate": "26100.1742",
       "KbId": "",
       "KbUrl": ""
+    },
+    {
+      "OsShortName": "Server2022",
+      "OsBuild": "20348",
+      "ServicingOption": "LTSC",
+      "UpdateType": "2026-06 B",
+      "UpdateTypeYear": 2026,
+      "UpdateTypeMonth": 6,
+      "UpdateTypeLetter": "B",
+      "AvailabilityDate": "2026-06-09",
+      "BuildAfterUpdate": "20348.5256",
+      "KbId": "KB5094128",
+      "KbUrl": "https://support.microsoft.com/help/5094128"
     },
     {
       "OsShortName": "Server2022",
@@ -1562,6 +1588,19 @@
       "BuildAfterUpdate": "20348.202",
       "KbId": "KB5005104",
       "KbUrl": "https://support.microsoft.com/help/5005104"
+    },
+    {
+      "OsShortName": "Server2019",
+      "OsBuild": "17763",
+      "ServicingOption": "LTSC",
+      "UpdateType": "2026-06 B",
+      "UpdateTypeYear": 2026,
+      "UpdateTypeMonth": 6,
+      "UpdateTypeLetter": "B",
+      "AvailabilityDate": "2026-06-09",
+      "BuildAfterUpdate": "17763.8880",
+      "KbId": "KB5094123",
+      "KbUrl": "https://support.microsoft.com/help/5094123"
     },
     {
       "OsShortName": "Server2019",
@@ -3707,6 +3746,19 @@
       "BuildAfterUpdate": "17763.1",
       "KbId": "",
       "KbUrl": ""
+    },
+    {
+      "OsShortName": "Server2016",
+      "OsBuild": "14393",
+      "ServicingOption": "LTSB",
+      "UpdateType": "2026-06 B",
+      "UpdateTypeYear": 2026,
+      "UpdateTypeMonth": 6,
+      "UpdateTypeLetter": "B",
+      "AvailabilityDate": "2026-06-09",
+      "BuildAfterUpdate": "14393.9234",
+      "KbId": "KB5094122",
+      "KbUrl": "https://support.microsoft.com/help/5094122"
     },
     {
       "OsShortName": "Server2016",
@@ -6218,12 +6270,12 @@
       "MonthName": "June",
       "MonthNumber": 6,
       "UpdateType": "2026.06 B",
-      "HotpatchType": "Hotpatch",
-      "IsBaseline": false,
-      "AvailabilityDate": "",
-      "BuildAfterUpdate": "",
-      "KbId": "",
-      "KbUrl": ""
+      "HotpatchType": "Baseline (Restart)",
+      "IsBaseline": true,
+      "AvailabilityDate": "2026-06-09",
+      "BuildAfterUpdate": "26100.32995",
+      "KbId": "KB5094125",
+      "KbUrl": "https://support.microsoft.com/help/5094125"
     },
     {
       "OsShortName": "Server2025",
@@ -6582,12 +6634,12 @@
       "MonthName": "June",
       "MonthNumber": 6,
       "UpdateType": "2026.06 B",
-      "HotpatchType": "Hotpatch",
-      "IsBaseline": false,
-      "AvailabilityDate": "",
-      "BuildAfterUpdate": "",
-      "KbId": "",
-      "KbUrl": ""
+      "HotpatchType": "Baseline (Restart)",
+      "IsBaseline": true,
+      "AvailabilityDate": "2026-06-09",
+      "BuildAfterUpdate": "20348.5256",
+      "KbId": "KB5094128",
+      "KbUrl": "https://support.microsoft.com/help/5094128"
     },
     {
       "OsShortName": "Server2022",

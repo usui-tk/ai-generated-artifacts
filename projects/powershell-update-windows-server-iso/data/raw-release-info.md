@@ -8,7 +8,7 @@ feedback_system: None
 adobe-target: true
 description: Release information about Windows Server
 ms.topic: release-notes
-ms.date: 2026-05-12T00:00:00.0000000Z
+ms.date: 2026-06-09T00:00:00.0000000Z
 author: direek
 ms.author: direek
 ms.service: windows-server
@@ -16,10 +16,10 @@ ms.localizationpriority: medium
 locale: en-us
 document_id: e8f023d4-8c21-a54e-413c-8e0cbe5962c8
 document_version_independent_id: e8f023d4-8c21-a54e-413c-8e0cbe5962c8
-updated_at: 2026-05-13T02:11:00.0000000Z
+updated_at: 2026-06-11T14:10:00.0000000Z
 original_content_git_url: https://github.com/MicrosoftDocs/windows-release-pr/blob/live/windows/release-information/windows-server-release-info.md
-gitcommit: https://github.com/MicrosoftDocs/windows-release-pr/blob/a6d7092416badcdff27c219f3884a89685f7c50e/windows/release-information/windows-server-release-info.md
-git_commit_id: a6d7092416badcdff27c219f3884a89685f7c50e
+gitcommit: https://github.com/MicrosoftDocs/windows-release-pr/blob/8ff6efc4a875001305dc1cb5292eb9f00336432c/windows/release-information/windows-server-release-info.md
+git_commit_id: 8ff6efc4a875001305dc1cb5292eb9f00336432c
 site_name: Docs
 depot_name: TechNet.rel-info
 page_type: conceptual
@@ -27,7 +27,7 @@ toc_rel: toc.json
 feedback_product_url: ''
 feedback_help_link_type: ''
 feedback_help_link_url: ''
-word_count: 3902
+word_count: 3934
 asset_id: windows-server-release-info
 moniker_range_name: 
 monikers: []
@@ -54,10 +54,10 @@ If you are an IT administrator and want to programmatically get information from
 
 | Windows Server version | Servicing option | Editions | Availability date | Mainstream support end date | Extended support end date | Latest update for ESU | Latest revision date | Latest build |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Windows Server 2025 | Long-Term Servicing Channel (LTSC) | Datacenter, Standard | 2024-11-01 | 2029-11-13 | 2034-11-14 | [2026-05 B](https://support.microsoft.com/help/5087539) | 2026-05-12 | 26100.32860 |
-| Windows Server 2022 | Long-Term Servicing Channel (LTSC) | Datacenter, Standard | 2021-08-18 | 2026-10-13 | 2031-10-14 | [2026-05 B](https://support.microsoft.com/help/5087545) | 2026-05-12 | 20348.5139 |
-| Windows Server 2019 (version 1809) | Long-Term Servicing Channel (LTSC) | Datacenter, Standard | 2018-11-13 | End of updates | 2029-01-09 | [2026-05 B](https://support.microsoft.com/help/5087538) | 2026-05-12 | 17763.8755 |
-| Windows Server 2016 (version 1607) | Long-Term Servicing Branch (LTSB) | Datacenter, Essentials, Standard | 2016-08-02 | End of updates | 2027-01-12 | [2026-05 B](https://support.microsoft.com/help/5087537) | 2026-05-12 | 14393.9140 |
+| Windows Server 2025 | Long-Term Servicing Channel (LTSC) | Datacenter, Standard | 2024-11-01 | 2029-11-13 | 2034-11-14 | [2026-06 B](https://support.microsoft.com/help/5094125) | 2026-06-09 | 26100.32995 |
+| Windows Server 2022 | Long-Term Servicing Channel (LTSC) | Datacenter, Standard | 2021-08-18 | 2026-10-13 | 2031-10-14 | [2026-06 B](https://support.microsoft.com/help/5094128) | 2026-06-09 | 20348.5256 |
+| Windows Server 2019 (version 1809) | Long-Term Servicing Channel (LTSC) | Datacenter, Standard | 2018-11-13 | End of updates | 2029-01-09 | [2026-06 B](https://support.microsoft.com/help/5094123) | 2026-06-09 | 17763.8880 |
+| Windows Server 2016 (version 1607) | Long-Term Servicing Branch (LTSB) | Datacenter, Essentials, Standard | 2016-08-02 | End of updates | 2027-01-12 | [2026-06 B](https://support.microsoft.com/help/5094122) | 2026-06-09 | 14393.9234 |
 
 Note
 
@@ -70,6 +70,7 @@ The table below shows the history of all monthly security and non-security previ
 
 | Servicing option | Update type | Availability date | Build | KB article |
 | --- | --- | --- | --- | --- |
+| LTSC | 2026-06 B | 2026-06-09 | 26100.32995 | [KB5094125](https://support.microsoft.com/help/5094125) |
 | LTSC | 2026-05 B | 2026-05-12 | 26100.32860 | [KB5087539](https://support.microsoft.com/help/5087539) |
 | LTSC | 2026-04 OOB | 2026-04-19 | 26100.32698 | [KB5091157](https://support.microsoft.com/help/5091157) |
 | LTSC | 2026-04 B | 2026-04-14 | 26100.32690 | [KB5082063](https://support.microsoft.com/help/5082063) |
@@ -105,6 +106,7 @@ The table below shows the history of all monthly security and non-security previ
 
 | Servicing option | Update type | Availability date | Build | KB article |
 | --- | --- | --- | --- | --- |
+| LTSC | 2026-06 B | 2026-06-09 | 20348.5256 | [KB5094128](https://support.microsoft.com/help/5094128) |
 | LTSC | 2026-05 B | 2026-05-12 | 20348.5139 | [KB5087545](https://support.microsoft.com/topic/may-12-2026-kb5087545-os-build-20348-5139-6aed2a73-37f9-468c-8bdc-4bae674797cf) |
 | LTSC | 2026-04 OOB | 2026-04-19 | 20348.5024 | [KB5091575](https://support.microsoft.com/help/5091575) |
 | LTSC | 2026-04 B | 2026-04-14 | 20348.5020 | [KB5082142](https://support.microsoft.com/help/5082142) |
@@ -199,6 +201,7 @@ The table below shows the history of all monthly security and non-security previ
 
 | Servicing option | Update type | Availability date | Build | KB article |
 | --- | --- | --- | --- | --- |
+| LTSC | 2026-06 B | 2026-06-09 | 17763.8880 | [KB5094123](https://support.microsoft.com/help/5094123) |
 | LTSC | 2026-05 B | 2026-05-12 | 17763.8755 | [KB5087538](https://support.microsoft.com/help/5087538) |
 | LTSC | 2026-04 OOB | 2026-04-19 | 17763.8647 | [KB5091573](https://support.microsoft.com/help/5091573) |
 | LTSC | 2026-04 B | 2026-04-14 | 17763.8644 | [KB5082123](https://support.microsoft.com/help/5082123) |
@@ -369,6 +372,7 @@ The table below shows the history of all monthly security and non-security previ
 
 | Servicing option | Update type | Availability date | Build | KB article |
 | --- | --- | --- | --- | --- |
+| LTSB | 2026-06 B | 2026-06-09 | 14393.9234 | [KB5094122](https://support.microsoft.com/help/5094122) |
 | LTSB | 2026-05 B | 2026-05-12 | 14393.9140 | [KB5087537](https://support.microsoft.com/topic/may-12-2026-kb5087537-os-build-14393-9140-2ef98591-73f0-4517-9fa0-12764b51858f) |
 | LTSB | 2026-04 OOB | 2026-04-19 | 14393.9062 | [KB5091572](https://support.microsoft.com/help/5091572) |
 | LTSB | 2026-04 OOB | 2026-04-19 | 14393.9062 | [KB5091572](https://support.microsoft.com/help/5091572) |
@@ -571,7 +575,7 @@ For details on what is included in each update, see [Release notes for Hotpatch 
 | March | 2026.03 B | Hotpatch | 2026-03-10 | 26100.32463 | [KB5078736](https://support.microsoft.com/topic/march-10-2026-hotpatch-kb5078736-os-build-26100-32463-d62230e0-d4fb-4597-8df4-81410e827f79) |
 | April | 2026.04 B | Baseline (Restart) | 2026-04-14 | 26100.32690 | [KB5082063](https://support.microsoft.com/topic/april-14-2026-baseline-3ed94012-763a-4ebe-86f4-32b01390a11a) |
 | May | 2026.05 B | Hotpatch | 2026-05-12 | 26100.32772 | [KB5087423](https://support.microsoft.com/topic/may-12-2026-hotpatch-kb5087423-os-build-26100-32772-6a3275dd-3206-42b4-ab09-515421b3f142) |
-| June | 2026.06 B | Hotpatch |  |  |  |
+| June | 2026.06 B | Baseline (Restart) | 2026-06-09 | 26100.32995 | [KB5094125](https://support.microsoft.com/help/5094125) |
 | July | 2026.07 B | Baseline (Restart) |  |  |  |
 | August | 2026.08 B | Hotpatch |  |  |  |
 | September | 2026.09 B | Hotpatch |  |  |  |
@@ -615,7 +619,7 @@ For details on what is included in each update, see [Release notes for Hotpatch 
 | March | 2026.03 B | Hotpatch | 2026-03-10 | 20348.4830 | [KB5078737](https://support.microsoft.com/topic/march-10-2026-hotpatch-kb5078737-os-build-20348-4830-c3e0f4b0-62ac-4f92-9a7c-1831d02dc155) |
 | April | 2026.04 B | Baseline (Restart) | 2026-04-14 | 20348.5020 | [KB5082142](https://support.microsoft.com/topic/april-14-2026-baseline-5d0db586-d5a5-4ba2-b3c8-a4536db17225) |
 | May | 2026.05 B | Hotpatch | 2026-05-12 | 20348.5074 | [KB5087424](https://support.microsoft.com/topic/may-12-2026-hotpatch-kb5087424-os-build-20348-5074-2984f4af-5751-411c-9a0b-78f05dc8d5d0) |
-| June | 2026.06 B | Hotpatch |  |  |  |
+| June | 2026.06 B | Baseline (Restart) | 2026-06-09 | 20348.5256 | [KB5094128](https://support.microsoft.com/help/5094128) |
 | July | 2026.07 B | Baseline (Restart) |  |  |  |
 | August | 2026.08 B | Hotpatch |  |  |  |
 | September | 2026.09 B | Hotpatch |  |  |  |

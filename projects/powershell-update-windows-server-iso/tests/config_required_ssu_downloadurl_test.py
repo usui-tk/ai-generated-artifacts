@@ -150,13 +150,13 @@ def main() -> int:
     ssus = [p for p in (s2016.get("PatchBaseline") or {}).get("NeutralPatches") or []
             if (p.get("Type") or "").upper() == "SSU"]
     r.assert_eq("08 Server2016 has exactly one SSU NeutralPatch", len(ssus), 1)
-    r.assert_true("09 Server2016 SSU (KB5088064) has a non-empty DownloadUrl",
-                  bool((ssus[0].get("DownloadUrl") or "").strip()) and ssus[0].get("KbId") == "KB5088064",
+    r.assert_true("09 Server2016 SSU (KB5094141) has a non-empty DownloadUrl",
+                  bool((ssus[0].get("DownloadUrl") or "").strip()) and ssus[0].get("KbId") == "KB5094141",
                   f"SSU entry={ssus[0] if ssus else None}")
 
     # ---- SSU / IsCombined consistency contract (servicing-stack spec) ----
     # A standalone SSU is paired with an LCU ONLY when one is actually published
-    # for that LCU's required servicing stack. Server 2016 (KB5088064, a recent SS
+    # for that LCU's required servicing stack. Server 2016 (KB5094141, a recent SS
     # floor) has such an SSU; Server 2019's LCU is separate-classified in Layer 2
     # but no standalone SSU is published post-2021 (its low SS floor is satisfied by
     # the combined/embedded stack), so it correctly carries no SSU. The offline,
