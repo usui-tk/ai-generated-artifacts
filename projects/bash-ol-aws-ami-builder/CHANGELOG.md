@@ -68,6 +68,22 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **ENA matrix mandatory QA preflight (`tests/ena/run-ena-buildtest-matrix.sh`,
+  `--preflight-retries`).** Before the version matrix, each OL first builds only
+  its pinned ENA version as a smoke test that the clean-core rootfs +
+  `install-ena-driver.sh` are healthy. It is QA-only — **not recorded in the
+  ledger** — and a clear failure early-exits that OL (the matrix is skipped, the
+  ledger left untouched), writing a self-contained diagnostic bundle
+  `<cleancore-dir>/preflight-ol<N>-FAILED.log` (header with OL / pin / kver /
+  reason / host context, then the full `install-ena-driver.sh` output) for human
+  / LLM analysis. Transient-looking failures (mirror / `kernel-uek` provision /
+  network hiccups) retry up to `--preflight-retries` (default 2); a clear
+  build/compile failure is treated as real and not retried. Mandatory in **every**
+  mode (incl. `--force`); the matrix then re-builds the pin as the recorded
+  per-run canary, so the pin is built twice by design. SPEC B.9 + TESTING.md
+  document it; no new `.sh` (logic lives in the matrix script) so the B-T1/B-T2
+  per-`.sh` counts are unchanged. First of the ENA matrix preflight/gate pieces.
+
 - **ENA self-build test matrix (`tests/ena/run-ena-buildtest-matrix.sh`).** A
   self-contained harness (inline helpers, no shared library — repo policy for
   user-run scripts) that runs `ENA_BUILDTEST` across an **OS major × ENA version

@@ -368,6 +368,19 @@ Two evidence layers, both committed so the state persists across runs:
   aborts the matrix. Any non-`ok` build's full log is preserved to
   `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log` for diagnosis.
 
+Before the matrix, each OL runs a **mandatory QA preflight**: a smoke build of
+only the pinned ENA version, to confirm the clean-core rootfs and
+`install-ena-driver.sh` are healthy before the (expensive) full sweep. It is
+**QA-only — not recorded in the ledger** and uses its own debug namespace; a clear
+failure **early-exits that OL** (the matrix is skipped, the ledger untouched),
+emitting a self-contained diagnostic bundle
+`<cleancore-dir>/preflight-ol<N>-FAILED.log` (header + result + host context + the
+full `install-ena-driver.sh` output) for human / LLM analysis. Transient-looking
+failures (mirror / `kernel-uek` provision / network hiccups) are retried up to
+`--preflight-retries` (default 2); a clear build/compile failure is treated as
+real and not retried. The matrix then re-builds the pin as the recorded canary,
+so the pin is built twice by design.
+
 ```sh
 # a few cases locally (the full matrix is for the user's env / CI):
 bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --ena-versions "2.9.1 2.2.0"

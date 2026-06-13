@@ -1729,6 +1729,23 @@ the dedup state):
   continues — a single build never aborts the matrix — and any non-`ok` build's
   full log is preserved to `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log`.
 
+### QA preflight (mandatory, every mode)
+
+Before the version matrix, each OL builds **only its pinned ENA version** as a
+smoke test that the clean-core rootfs and `install-ena-driver.sh` are healthy.
+The preflight is **QA-only**: its result is **not recorded** in the ledger and
+lives in a separate debug namespace. A clear failure **early-exits that OL** —
+the matrix is not run and the ledger is left untouched — and a self-contained
+diagnostic bundle `<cleancore-dir>/preflight-ol<N>-FAILED.log` (a header with
+OL / pin / kver / reason / host context, then the full `install-ena-driver.sh`
+output) is written for human or LLM analysis. Transient-looking failures (mirror
+/ `kernel-uek` provision / network hiccups) are retried up to
+`--preflight-retries` (default 2); a clear build/compile failure is treated as
+real and not retried. The gate is mandatory in **every** mode (it guards data
+quality, so it is never skipped); the matrix then re-builds the pin as the
+recorded per-run canary, so the pin is built twice by design — the un-recorded
+QA build, then the recorded run.
+
 A container is kernel-less, so `ENA_BUILDTEST` provisions a full `kernel-uek` +
 headers up front (A.7); the matrix inherits that and the B.8 host requirements
 (root + `unshare`/`chroot` + network). The committed ledger / `RESULTS-ol6.md`

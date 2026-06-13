@@ -30,6 +30,16 @@
 # --pinned-only. Narrowing to a few versions is the supported way to run "a few
 # cases" locally; the FULL matrix is meant for the user's environment / CI.
 #
+# QA PREFLIGHT (mandatory, every mode). Before the matrix, each OL first builds
+# ONLY its pinned ENA version as a smoke test that the clean-core rootfs +
+# install-ena-driver.sh are healthy. This is QA only -- it is NOT recorded in the
+# ledger and writes its own debug bundle (preflight-ol<N>-FAILED.log). A clear
+# failure early-exits that OL (the matrix is skipped and the ledger is left
+# untouched); transient-looking failures (mirror / kernel-uek provision / TLS
+# hiccups) are retried up to --preflight-retries. The matrix then re-builds the
+# pin as a recorded canary, so the pin is built twice by design (un-recorded QA,
+# then the recorded run).
+#
 # Usage:
 #   bash tests/ena/run-ena-buildtest-matrix.sh [options]
 # Options:
@@ -42,6 +52,7 @@
 #   --cleancore-dir <dir>  holds/receives cleancore-ol<N>.tar.gz (default: ./cleancore-out)
 #   --releases <path>      release-list JSON (default: tests/ena/ena-driver-releases.json)
 #   --rebuild-cleancore    rebuild the clean-core rootfs even if present
+#   --preflight-retries <n>  QA-preflight retries on a transient failure (default: 2)
 #   --force                ignore the ledger; (re)test every requested combo
 #   -h | --help
 # Env (passed through): INSECURE_TLS (default 1 here, for the sandbox; set 0 on a
@@ -67,6 +78,7 @@ CLEANCORE_DIR="./cleancore-out"
 RELEASES="${SCRIPT_DIR}/ena-driver-releases.json"
 REBUILD_CLEANCORE=0
 FORCE=0
+PREFLIGHT_RETRIES=2
 INSECURE_TLS="${INSECURE_TLS:-1}"
 
 log()  { printf '%s [ena-matrix] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
@@ -87,6 +99,7 @@ while [ "$#" -gt 0 ]; do
     --cleancore-dir)    CLEANCORE_DIR="${2:-}"; shift ;;
     --releases)         RELEASES="${2:-}"; shift ;;
     --rebuild-cleancore) REBUILD_CLEANCORE=1 ;;
+    --preflight-retries) PREFLIGHT_RETRIES="${2:-}"; shift ;;
     --force)            FORCE=1 ;;
     -h|--help)          sed -n '2,/^# ---.*$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                  die "unknown argument: $1 (-h for help)" ;;
@@ -144,6 +157,78 @@ run_one_buildtest() {
   { grep -E '\[ena-driver\]\[buildtest\]\[result\]' "${outlog}" || true; } | tail -1 | sed 's/^.*\[result\] //'
 }
 
+# QA preflight: build ONLY the pinned ENA version as a smoke test that the
+# clean-core rootfs + install-ena-driver.sh are healthy, before the (expensive)
+# full version matrix. The result is QA-only -- NOT recorded in the ledger -- and
+# a clear failure early-exits this OL (the matrix is skipped, the ledger stays
+# untouched). Transient-looking failures (mirror / kernel-uek provision / network
+# hiccups) are retried up to PREFLIGHT_RETRIES. The gate is mandatory in every
+# mode (including --force): it guards data quality, so it is never skipped.
+preflight_reason_is_transient() {
+  # transient = worth a retry; a clear build/compile failure is real -> no retry.
+  case "$1" in
+    *"No more mirrors"*|*"Could not retrieve mirrorlist"*|*"failed to provision kernel-uek"*|\
+    *"Could not resolve host"*|*"Connection timed out"*|*"Connection refused"*|\
+    *"Temporary failure"*|*"timed out"*|*"Cannot retrieve"*|*"Network is unreachable"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+preflight_qa() {
+  local ol="$1" pin="$2" tarball="$3"
+  local max attempt=0 plog rjson st reason kv bundle
+  max=$(( PREFLIGHT_RETRIES + 1 ))
+  if [ -z "${pin}" ]; then
+    warn "OL${ol}: no pinned ENA version known; skipping the QA preflight build."
+    return 0
+  fi
+  while [ "${attempt}" -lt "${max}" ]; do
+    attempt=$(( attempt + 1 ))
+    log "OL${ol}: QA preflight -- building pinned ENA ${pin} (attempt ${attempt}/${max}, NOT recorded)..."
+    plog="$(mktemp)"
+    rjson="$(run_one_buildtest "${ol}" "${pin}" "${tarball}" "${plog}" || true)"
+    st="$(printf '%s' "${rjson}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)"
+    if [ "${st}" = "ok" ]; then
+      kv="$(printf '%s' "${rjson}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('kver',''))" 2>/dev/null || true)"
+      log "OL${ol}: QA preflight OK (pinned ${pin}, kver ${kv:-?}) -- proceeding to the matrix."
+      rm -f "${plog}"
+      return 0
+    fi
+    reason="$(printf '%s' "${rjson}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('reason',''))" 2>/dev/null || true)"
+    [ -z "${rjson}" ] && reason="no result line (install-ena-driver.sh died before its result, or unshare/chroot failed)"
+    if [ "${attempt}" -lt "${max}" ] && preflight_reason_is_transient "${reason}"; then
+      warn "OL${ol}: QA preflight transient failure (${reason}); retrying."
+      rm -f "${plog}"
+      continue
+    fi
+    # Final failure -> assemble a self-contained diagnostic bundle (for a human or
+    # an LLM to analyse) and early-exit this OL. Own debug namespace; not recorded.
+    bundle="${CLEANCORE_DIR}/preflight-ol${ol}-FAILED.log"
+    kv="$(printf '%s' "${rjson}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('kver',''))" 2>/dev/null || true)"
+    {
+      echo "==== ENA QA preflight FAILED -- diagnostic bundle ===="
+      echo "generated    : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+      echo "OL major     : ${ol}"
+      echo "pinned ENA   : ${pin}"
+      echo "kver         : ${kv:-(unknown)}"
+      echo "reason       : ${reason:-(none parsed)}"
+      echo "attempts     : ${attempt}/${max}"
+      echo "result json  : ${rjson:-(empty)}"
+      echo "INSECURE_TLS : ${INSECURE_TLS}"
+      echo "clean-core   : ${tarball} ($(du -h "${tarball}" 2>/dev/null | cut -f1))"
+      echo "host uname   : $(uname -a 2>/dev/null)"
+      echo "host os      : $(grep -E '^PRETTY_NAME=' /etc/os-release 2>/dev/null)"
+      echo
+      echo "==== install-ena-driver.sh full output (ENA_BUILDTEST, pinned ${pin}) ===="
+      cat "${plog}" 2>/dev/null
+    } > "${bundle}"
+    rm -f "${plog}"
+    warn "OL${ol}: PREFLIGHT FAILED (pinned ${pin}) -- see ${bundle}"
+    return 1
+  done
+  return 1
+}
+
 # ---- run the matrix --------------------------------------------------------
 RESULTS_TSV="$(mktemp)"   # one row per attempted build: ol \t version \t result-json
 trap 'rm -f "${RESULTS_TSV}"' EXIT
@@ -161,6 +246,13 @@ for ol in ${OL_LIST}; do
       || die "OL${ol}: clean-core build failed (cannot run the ENA matrix for this OL)"
   else
     log "OL${ol}: reusing existing clean-core rootfs ${tarball}"
+  fi
+
+  # QA preflight (mandatory, every mode incl. --force): a pinned smoke build that
+  # the clean-core + install-ena-driver.sh are healthy, before the full matrix.
+  # QA-only -- NOT recorded; a clear failure early-exits this OL (ledger untouched).
+  if ! preflight_qa "${ol}" "$(pin_for "${ol}")" "${tarball}"; then
+    continue
   fi
 
   # Order: pinned version first (the per-run kver canary), then the rest ascending.
