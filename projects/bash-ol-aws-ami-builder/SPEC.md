@@ -1729,6 +1729,32 @@ the dedup state):
   continues — a single build never aborts the matrix — and any non-`ok` build's
   full log is preserved to `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log`.
 
+### Update gate (default on; `--force` bypasses)
+
+Before building anything for an OL, the matrix gates on whether the live upstream
+has something the ledger has not covered, so a no-change OL costs only the probes
+(no clean-core build). Two probes, compared to the ledger with the same `vkey`
+version order used elsewhere:
+
+- **kernel-uek** — the latest `kernel-uek` (x86_64) for the OL is read from
+  `yum.oracle.com` (`repomd.xml` → `primary.xml.gz`, parsed with the python3
+  standard library only — `gzip` + `xml.etree`, no extra package) under the fixed
+  `OL → UEKR` map (OL6 → `UEKR4`, OL7/8 → `UEKR6`; source RPMs are ignored). A kver
+  greater than the ledger's max for that OL is a **new kernel**.
+- **ENA** — the highest upstream `ena_linux` tag (`git ls-remote`, rate-limit-
+  immune; falls back to the release-list JSON if the remote is unreachable). ENA
+  is judged on the **latest version only** (releases are incremental); a latest
+  not yet in the ledger for that OL is a **new ENA**.
+
+A **new kernel or a new ENA** (or no ledger entry for the OL) runs the OL;
+otherwise it is **skipped** with no build and the ledger untouched. A probe that
+cannot determine the latest (DNS / timeout / TLS / 404 / parse) is **fail-open**
+(the OL runs, to avoid missing data) by default, or **fail-closed** (skipped)
+under `--strict`. `--force` bypasses the gate entirely (every requested OL runs)
+and the per-combo dedup (every version re-tests); the QA preflight is **not**
+affected (it runs in every mode). The dynamic "follow the latest UEKR" refinement
+is deferred to a whole-project cleanup (D.11/D.12 fix the map for now).
+
 ### QA preflight (mandatory, every mode)
 
 Before the version matrix, each OL builds **only its pinned ENA version** as a

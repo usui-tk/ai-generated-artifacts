@@ -68,6 +68,27 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **ENA matrix per-OL update gate (`tests/ena/run-ena-buildtest-matrix.sh`,
+  `--strict`; `--force` now also bypasses it).** Before building anything for an
+  OL, the matrix probes whether the live upstream has something the ledger has not
+  covered, so a no-change OL costs only the probes (no clean-core build). Two
+  probes, compared to the ledger with the existing `vkey` order: the latest
+  `kernel-uek` (x86_64) for the OL from `yum.oracle.com` (`repomd.xml` →
+  `primary.xml.gz`, parsed with the python3 standard library only — `gzip` +
+  `xml.etree`, no extra package — under the fixed `OL → UEKR` map OL6=`UEKR4`,
+  OL7/8=`UEKR6`; source RPMs ignored), and the latest upstream `ena_linux` tag
+  (`git ls-remote`, rate-limit-immune, falling back to the release-list JSON).
+  A new kernel **or** a new ENA (latest only — releases are incremental) **or** no
+  ledger entry runs the OL; otherwise it is skipped with the ledger untouched. A
+  probe that cannot determine the latest is fail-open (the OL runs) by default, or
+  fail-closed (skipped) under `--strict`. `--force` now bypasses the gate (every OL
+  runs) in addition to the per-combo dedup; the mandatory QA preflight is
+  unaffected. Network is `curl` (bounded by `--max-time` / `--max-filesize`); the
+  dynamic "follow the latest UEKR" refinement is deferred to a whole-project
+  cleanup (D.11/D.12 fix the map). SPEC B.9 + TESTING.md document it; no new `.sh`
+  (logic lives in the matrix script) so the B-T1/B-T2 per-`.sh` counts hold.
+  Second of the ENA matrix preflight/gate pieces.
+
 - **ENA matrix mandatory QA preflight (`tests/ena/run-ena-buildtest-matrix.sh`,
   `--preflight-retries`).** Before the version matrix, each OL first builds only
   its pinned ENA version as a smoke test that the clean-core rootfs +

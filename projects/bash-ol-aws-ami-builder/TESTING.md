@@ -368,6 +368,15 @@ Two evidence layers, both committed so the state persists across runs:
   aborts the matrix. Any non-`ok` build's full log is preserved to
   `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log` for diagnosis.
 
+By default each OL is first **update-gated** (turn off with `--force`): before any
+build, the matrix probes the latest `kernel-uek` for the OL (`yum.oracle.com`
+`repomd.xml` → `primary.xml.gz`, python3 stdlib parse, fixed `OL → UEKR` map) and
+the latest upstream ENA (`git ls-remote`), and runs the OL only if either is newer
+than what the ledger covers (or the OL has no ledger entry); otherwise it is
+skipped with no build. A probe that cannot determine the latest is fail-open (the
+OL runs) by default, or fail-closed (skipped) under `--strict`. `--force` bypasses
+both the gate (every OL runs) and the per-combo dedup (every version re-tests).
+
 Before the matrix, each OL runs a **mandatory QA preflight**: a smoke build of
 only the pinned ENA version, to confirm the clean-core rootfs and
 `install-ena-driver.sh` are healthy before the (expensive) full sweep. It is

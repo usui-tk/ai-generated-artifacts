@@ -40,6 +40,17 @@
 # pin as a recorded canary, so the pin is built twice by design (un-recorded QA,
 # then the recorded run).
 #
+# UPDATE GATE (default ON; --force turns it OFF). Before building anything, each
+# OL is gated on whether the live upstream has something the ledger has not
+# covered: the latest kernel-uek for that OL (yum.oracle.com repomd.xml ->
+# primary.xml.gz, parsed with python3 stdlib only; fixed OL->UEKR map: OL6=UEKR4,
+# OL7/8=UEKR6) and the latest ENA release (git ls-remote). A new kernel OR a new
+# ENA (or no ledger entry for the OL) runs that OL; otherwise it is skipped with
+# no clean-core build and the ledger untouched. A probe that cannot determine the
+# latest is fail-open (the OL runs) by default, or fail-closed (skipped) under
+# --strict. --force bypasses the gate (every OL runs) and the per-combo dedup
+# (every version re-tests); the QA preflight still runs (it is never skipped).
+#
 # Usage:
 #   bash tests/ena/run-ena-buildtest-matrix.sh [options]
 # Options:
@@ -53,7 +64,10 @@
 #   --releases <path>      release-list JSON (default: tests/ena/ena-driver-releases.json)
 #   --rebuild-cleancore    rebuild the clean-core rootfs even if present
 #   --preflight-retries <n>  QA-preflight retries on a transient failure (default: 2)
-#   --force                ignore the ledger; (re)test every requested combo
+#   --strict               update-gate probe failure is fail-closed (skip the OL)
+#                          instead of the default fail-open (run the OL)
+#   --force                bypass the update gate (run every OL) and the ledger
+#                          dedup (re-test every requested combo)
 #   -h | --help
 # Env (passed through): INSECURE_TLS (default 1 here, for the sandbox; set 0 on a
 #   trusted host). Requires: root, unshare, chroot, tar, curl, python3, and the
@@ -78,6 +92,7 @@ CLEANCORE_DIR="./cleancore-out"
 RELEASES="${SCRIPT_DIR}/ena-driver-releases.json"
 REBUILD_CLEANCORE=0
 FORCE=0
+STRICT=0
 PREFLIGHT_RETRIES=2
 INSECURE_TLS="${INSECURE_TLS:-1}"
 
@@ -100,6 +115,7 @@ while [ "$#" -gt 0 ]; do
     --releases)         RELEASES="${2:-}"; shift ;;
     --rebuild-cleancore) REBUILD_CLEANCORE=1 ;;
     --preflight-retries) PREFLIGHT_RETRIES="${2:-}"; shift ;;
+    --strict)           STRICT=1 ;;
     --force)            FORCE=1 ;;
     -h|--help)          sed -n '2,/^# ---.*$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                  die "unknown argument: $1 (-h for help)" ;;
@@ -229,15 +245,139 @@ preflight_qa() {
   return 1
 }
 
+# ---- update gate -----------------------------------------------------------
+# Fixed OL -> UEKR repo (matches install-ena-driver.sh and SPEC D.11/D.12).
+# Dynamic "follow the latest UEKR" is deferred to a whole-project cleanup.
+uekr_for() { case "$1" in 6) echo UEKR4 ;; 7|8) echo UEKR6 ;; *) echo "" ;; esac; }
+
+# UEK probe: the latest kernel-uek kver (x86_64) for this OL, from yum.oracle.com
+# via repomd.xml -> primary.xml.gz, parsed with python3 stdlib only (gzip +
+# xml.etree, NO extra package). Network is curl (bounded by --max-time /
+# --max-filesize); python only parses local files. Source RPMs (arch=src) are
+# excluded -- only x86_64 kernel-uek packages count. Echoes the kver, or nothing
+# on any failure (caller treats empty as "probe failed").
+probe_latest_uek_kver() {
+  local ol="$1" uekr base repomd gz out href kver
+  uekr="$(uekr_for "${ol}")"; [ -n "${uekr}" ] || return 1
+  base="https://yum.oracle.com/repo/OracleLinux/OL${ol}/${uekr}/x86_64"
+  repomd="$(mktemp)"; gz="$(mktemp)"; out="$(mktemp)"
+  if curl -fsS --max-time 60 "${base}/repodata/repomd.xml" -o "${repomd}" 2>/dev/null; then
+    href="$(grep -oE '"[^"]*-primary\.xml\.gz"' "${repomd}" | head -1 | tr -d '"')"
+    if [ -n "${href}" ] && curl -fsS --max-time 180 --max-filesize 134217728 "${base}/${href}" -o "${gz}" 2>/dev/null; then
+      python3 - "${gz}" "${out}" 2>/dev/null <<'PY' || true
+import gzip,sys,xml.etree.ElementTree as ET
+def vkey(s):
+    o=[]
+    for part in str(s).replace('-','.').split('.'):
+        o.append((1,int(part)) if part.isdigit() else (0,part))
+    return o
+ns={'c':'http://linux.duke.edu/metadata/common'}
+try:
+    root=ET.fromstring(gzip.open(sys.argv[1]).read())
+except Exception:
+    sys.exit(1)
+kv=[]
+for p in root.findall('c:package', ns):
+    n=p.find('c:name', ns); a=p.find('c:arch', ns); v=p.find('c:version', ns)
+    if n is not None and n.text == 'kernel-uek' and a is not None and a.text == 'x86_64' and v is not None:
+        kv.append('%s-%s.%s' % (v.get('ver'), v.get('rel'), a.text))
+if kv:
+    open(sys.argv[2], 'w').write(sorted(set(kv), key=vkey)[-1])
+PY
+    fi
+  fi
+  kver="$(cat "${out}" 2>/dev/null || true)"
+  rm -f "${repomd}" "${gz}" "${out}"
+  [ -n "${kver}" ] || return 1
+  printf '%s' "${kver}"
+}
+
+# ENA probe: the highest upstream ena_linux version (git ls-remote tags, rate-
+# limit-immune), falling back to the release-list JSON max if the remote fails.
+probe_latest_ena() {
+  local v
+  v="$(git ls-remote --tags https://github.com/amzn/amzn-drivers 2>/dev/null \
+        | sed -n 's#.*refs/tags/ena_linux_\([0-9][0-9.]*\)$#\1#p' \
+        | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+  if [ -z "${v}" ] && [ -f "${RELEASES}" ]; then
+    v="$(python3 -c "import json,sys; xs=[x['version'] for x in json.load(open(sys.argv[1])).get('versions',[])]; print(sorted(xs, key=lambda s:[int(p) for p in s.split('.')])[-1] if xs else '')" "${RELEASES}" 2>/dev/null || true)"
+  fi
+  printf '%s' "${v}"
+}
+
+# Per-OL update gate (default ON; --force bypasses in the caller). Runs the OL
+# only if the live upstream has a kernel-uek or ENA the ledger has not covered;
+# otherwise skips it (no clean-core build, ledger untouched). ENA is judged on the
+# LATEST version only (releases are incremental). A probe that cannot determine
+# the latest is fail-open (run) by default, fail-closed (skip) under --strict.
+# Returns 0 = run this OL, 1 = skip.
+gate_should_run_ol() {
+  local ol="$1" latest_kver latest_ena dec verdict reason probe_failed=0
+  latest_kver="$(probe_latest_uek_kver "${ol}" 2>/dev/null || true)"
+  latest_ena="$(probe_latest_ena 2>/dev/null || true)"
+  [ -z "${latest_kver}" ] && probe_failed=1
+  [ -z "${latest_ena}" ] && probe_failed=1
+  dec="$(python3 - "${LEDGER}" "${ol}" "${latest_kver}" "${latest_ena}" 2>/dev/null <<'PY' || true
+import json,sys,os
+def vkey(s):
+    o=[]
+    for part in str(s).replace('-','.').split('.'):
+        o.append((1,int(part)) if part.isdigit() else (0,part))
+    return o
+ledger,ol,lk,le=sys.argv[1],sys.argv[2],sys.argv[3],sys.argv[4]
+es=[]
+if os.path.exists(ledger):
+    es=[e for e in json.load(open(ledger)).get('entries',[]) if e.get('osmajor')==ol]
+if not es:
+    print('run|no ledger entry for OL%s'%ol); sys.exit(0)
+reasons=[]
+kvers=[e['kver'] for e in es if e.get('kver')]
+if lk and kvers and vkey(lk)>max((vkey(k) for k in kvers)):
+    reasons.append('new kernel %s (ledger max %s)'%(lk, sorted(kvers,key=vkey)[-1]))
+elif lk and not kvers:
+    reasons.append('new kernel %s'%lk)
+enas=set(e['ena_version'] for e in es if e.get('ena_version'))
+if le and le not in enas:
+    reasons.append('new ENA %s'%le)
+print(('run|'+'; '.join(reasons)) if reasons else 'skip|no kernel/ENA update')
+PY
+)"
+  [ -z "${dec}" ] && probe_failed=1
+  verdict="${dec%%|*}"; reason="${dec#*|}"
+  if [ "${verdict}" = "run" ]; then
+    log "OL${ol}: ${reason} -- running."
+    return 0
+  fi
+  if [ "${probe_failed}" = "1" ]; then
+    if [ "${STRICT}" = "1" ]; then
+      warn "OL${ol}: update probe incomplete and --strict set -- skipping (fail-closed)."
+      return 1
+    fi
+    warn "OL${ol}: update probe incomplete -- running anyway (fail-open; pass --strict to skip)."
+    return 0
+  fi
+  log "OL${ol}: no kernel/ENA update -- skipped."
+  return 1
+}
+
 # ---- run the matrix --------------------------------------------------------
 RESULTS_TSV="$(mktemp)"   # one row per attempted build: ol \t version \t result-json
 trap 'rm -f "${RESULTS_TSV}"' EXIT
 
 if [ "${PINNED_ONLY}" = "1" ]; then ena_desc="pinned-only"; elif [ -n "${ENA_VERSIONS}" ]; then ena_desc="${ENA_VERSIONS}"; else ena_desc="all (from release list)"; fi
-log "matrix: OL [${OL_LIST}] x ENA [${ena_desc}]  (INSECURE_TLS=${INSECURE_TLS}, force=${FORCE})"
+log "matrix: OL [${OL_LIST}] x ENA [${ena_desc}]  (INSECURE_TLS=${INSECURE_TLS}, force=${FORCE}, strict=${STRICT})"
 
 for ol in ${OL_LIST}; do
   case "${ol}" in 6|7|8) : ;; *) warn "OL${ol}: ENA_BUILDTEST is wired for OL6/7/8 only; skipping."; continue ;; esac
+
+  # Update gate (default ON; --force bypasses): skip this OL unless the live
+  # upstream has a kernel-uek or ENA the ledger has not covered -- before any
+  # clean-core build, so a no-update OL costs only the probes.
+  if [ "${FORCE}" != "1" ]; then
+    if ! gate_should_run_ol "${ol}"; then
+      continue
+    fi
+  fi
 
   tarball="${CLEANCORE_DIR}/cleancore-ol${ol}.tar.gz"
   if [ ! -f "${tarball}" ] || [ "${REBUILD_CLEANCORE}" = "1" ]; then
