@@ -309,6 +309,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | PowerShell | Windows PowerShell 5.1+（PowerShell 7+ でも動作）、64-bit プロセス必須 |
 | 権限 | Administrator（DISM マウントは管理者権限が必須）|
 | Windows ADK | Deployment Tools 機能（`oscdimg.exe` を提供）。不在時に自動インストール（スイッチ不要）|
+| Windows SDK Signing Tools | 埋め込み PCA2023/PCA2011 ブート署名検証用の `signtool.exe` を提供（P10/P12 readiness）。不在時に自動インストール（スイッチ不要）|
 | ディスク空き容量 | `-WorkRoot` ドライブに 100 GB 以上（最低 60 GB、Workspace プリフライトが 100 GB を強制チェック）|
 | ネットワーク | ISO とパッチのダウンロード用インターネットアクセス（`-IsoPath` + `-PatchDirectory` 利用時は不要）|
 | 静的解析 | `python3` + 正規配置の `psa.py`（後述「静的解析」を参照）|

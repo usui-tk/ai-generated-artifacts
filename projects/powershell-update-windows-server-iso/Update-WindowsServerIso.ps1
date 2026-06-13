@@ -551,7 +551,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.13-r11.31'
+$Script:ScriptVersion = 'update-wsi-2026.06.13-r11.32'
 $Script:ScriptTag     = 'dism-scratchdir-localisation'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -3657,6 +3657,12 @@ $Script:AdkInstallerOptionId = 'OptionId.DeploymentTools'
 $Script:SdkInstallerUrl      = 'https://go.microsoft.com/fwlink/?linkid=2338977'
 $Script:SdkInstallerVersion  = '10.0.26100.6584'
 $Script:SdkInstallerOptionId = 'OptionId.SigningTools'
+
+# Runtime memo for the resolved signtool.exe path (set lazily by
+# Get-ResolvedSignToolExe): $null = not yet attempted, '' = attempted and
+# unavailable, <path> = resolved. Keeps signtool resolution/auto-install to
+# at most once per run.
+$Script:ResolvedSignToolExe  = $null
 
 
 # ============================================================
@@ -11047,13 +11053,110 @@ function Get-WimSystemHiveValue {
     }
 }
 
+function Get-SignToolEmbeddedClass {
+    <#
+    .SYNOPSIS
+        Classify a PE file's EMBEDDED Authenticode signatures as PCA2023 /
+        PCA2011 using `signtool verify /v /all /pa` (enumerates every embedded
+        signature incl. nested co-signatures; embedded-only, revocation not
+        checked - offline analysis). Complements the catalog-following
+        Get-AuthenticodeSignature path, which under-reports the LCU-materialized
+        PCA2023 boot manager (SPEC.md B.16.3 / B.22.22).
+
+    .OUTPUTS
+        [pscustomobject] .Parsed .IsPca2023 .IsPca2011 .SigCount .Error
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$SignTool,
+        [Parameter(Mandatory)] [string]$Path
+    )
+    $res = [pscustomobject]@{
+        Parsed    = $false
+        IsPca2023 = $false
+        IsPca2011 = $false
+        SigCount  = 0
+        Error     = $null
+    }
+    try {
+        # signtool exits non-zero on an untrusted chain; capture stdout
+        # regardless of exit code so the enumerated signatures are still read.
+        $raw  = & $SignTool verify /v /all /pa $Path 2>&1
+        $text = ($raw | Out-String)
+    } catch {
+        $res.Error = ('signtool invocation failed: {0}' -f $_.Exception.Message)
+        return $res
+    }
+    $lines = @($text -split "`r?`n")
+    # Collect 'Issued to:' subjects across all 'Signature Index:' blocks and
+    # count the signatures. Plain arrays only (no generic List, no
+    # [bool](collection) cast: both threw ArgumentException on the host
+    # PowerShell during the S1 diagnosis).
+    $tokens = @()
+    foreach ($line in $lines) {
+        $mTo = [regex]::Match($line, 'Issued to:\s*(.+?)\s*$')
+        if ($mTo.Success) { $tokens += ($mTo.Groups[1].Value.Trim()) }
+        if ([regex]::IsMatch($line, 'Signature Index:\s*\d+')) { $res.SigCount++ }
+    }
+    if ($res.SigCount -eq 0 -and $tokens.Count -gt 0) { $res.SigCount = 1 }
+    foreach ($t in $tokens) {
+        if ($t -match 'Windows UEFI CA 2023') { $res.IsPca2023 = $true }
+        if ($t -match 'PCA 2011')             { $res.IsPca2011 = $true }
+    }
+    if ($tokens.Count -gt 0) {
+        $res.Parsed = $true
+    } elseif ($text -match 'No signature found' -or $text -match 'is not signed') {
+        $res.Error = 'signtool: file is not embedded-signed (may be catalog-signed only).'
+    } else {
+        $res.Error = 'signtool produced no parseable signature block.'
+    }
+    return $res
+}
+
+function Get-ResolvedSignToolExe {
+    <#
+    .SYNOPSIS
+        Resolve signtool.exe for embedded-signature inspection, acquiring the
+        Windows SDK Signing Tools on first use if it is absent (SPEC.md
+        B.22.22). Memoized in $Script:ResolvedSignToolExe so resolution and the
+        one-time auto-install are attempted at most once per run.
+
+    .OUTPUTS
+        [string] absolute path to signtool.exe, or $null if unavailable.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    if ($null -ne $Script:ResolvedSignToolExe) {
+        # Already attempted this run ('' means tried-and-unavailable).
+        return $(if ($Script:ResolvedSignToolExe) { $Script:ResolvedSignToolExe } else { $null })
+    }
+
+    $exe = Resolve-SignToolExe
+    if (-not $exe) {
+        # Not present -> one-time auto-install (mirrors the 7-Zip / ADK
+        # acquire-if-missing policy). Failure is non-fatal: the caller falls
+        # back to Get-AuthenticodeSignature.
+        try {
+            $exe = Install-WindowsSdkFallback
+        } catch {
+            Write-Caution ('signtool.exe unavailable and auto-install failed: {0}. Falling back to Get-AuthenticodeSignature (catalog-path reads may under-report PCA2023; see SPEC.md B.22.22).' -f $_.Exception.Message)
+            $exe = $null
+        }
+    }
+    $Script:ResolvedSignToolExe = if ($exe) { $exe } else { '' }
+    return $exe
+}
+
 function Test-Pca2023AuthenticodeChain {
     <#
     .SYNOPSIS
-        Inspect the Authenticode signer chain on a UEFI boot file
-        and report whether it terminates at 'Windows UEFI CA 2023'
-        or the legacy 'Windows Production PCA 2011' / 'Microsoft
-        Windows Production PCA 2011' chain.
+        Inspect the Authenticode signature on a UEFI boot file and
+        report whether it is signed via 'Windows UEFI CA 2023' or the
+        legacy 'Windows Production PCA 2011' / 'Microsoft Windows
+        Production PCA 2011' chain.
 
         Returns a pscustomobject:
           .Available     - $true if Get-AuthenticodeSignature ran
@@ -11063,6 +11166,18 @@ function Test-Pca2023AuthenticodeChain {
           .ChainTokens   - array of subject CNs walking the chain
           .IsPca2023     - $true when 'Windows UEFI CA 2023' appears
           .IsPca2011     - $true when '*PCA 2011' appears
+          .Method        - which method set the 2023/2011 verdict:
+                           'signtool /v /all /pa (embedded)' (preferred)
+                           or 'X509Chain (Get-AuthenticodeSignature)'.
+
+        The 2023/2011 verdict prefers the EMBEDDED signature read by
+        signtool '/v /all /pa'. Get-AuthenticodeSignature + X509Chain
+        follows the catalog / cross-cert path, which under-reports the
+        LCU-materialized PCA2023 boot manager (SPEC.md B.16.3); signtool
+        reads the embedded signature directly. signtool.exe is acquired
+        on first use (SPEC.md B.22.22); when it is unavailable the
+        X509Chain verdict stands and .Method records that. The leaf
+        SignerName / RootChain / ChainTokens always come from X509Chain.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -11078,6 +11193,7 @@ function Test-Pca2023AuthenticodeChain {
         ChainTokens   = @()
         IsPca2023     = $false
         IsPca2011     = $false
+        Method        = 'X509Chain (Get-AuthenticodeSignature)'
     }
 
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -11125,6 +11241,23 @@ function Test-Pca2023AuthenticodeChain {
     # build fails but signer subject is informative)
     if (-not $result.IsPca2023 -and $result.SignerName -match 'Windows UEFI CA 2023') {
         $result.IsPca2023 = $true
+    }
+
+    # Prefer the EMBEDDED signature for the 2023/2011 verdict. The X509Chain
+    # walk above follows the catalog / cross-cert path, which under-reports the
+    # LCU-materialized PCA2023 boot manager: for a file whose embedded signature
+    # is 'Windows UEFI CA 2023' it can report 'Windows Production PCA 2011'
+    # (SPEC.md B.16.3). signtool '/v /all /pa' reads the embedded signature(s)
+    # directly; it is acquired on first use (SPEC.md B.22.22). When signtool is
+    # unavailable the X509 verdict stands.
+    $signTool = Get-ResolvedSignToolExe
+    if ($signTool) {
+        $embedded = Get-SignToolEmbeddedClass -SignTool $signTool -Path $Path
+        if ($embedded.Parsed) {
+            $result.IsPca2023 = $embedded.IsPca2023
+            $result.IsPca2011 = $embedded.IsPca2011
+            $result.Method    = 'signtool /v /all /pa (embedded)'
+        }
     }
     return $result
 }
@@ -11347,9 +11480,14 @@ function Test-OutputIsoPca2023Readiness {
         conversion targets defined by Microsoft's
         Make2023BootableMedia.ps1 v1.6.4-signed / commit bd7abe3 (Copy-2023BootBins).
 
-        This is a STRICTLY READ-ONLY function. No DISM mounts and no
-        registry hive loads; only Test-Path + Get-AuthenticodeSignature
-        on a fixed set of paths under the extracted media tree.
+        This function performs no DISM mounts and no registry hive
+        loads; it inspects a fixed set of paths under the extracted
+        media tree. Signer classification uses the shared
+        Test-Pca2023AuthenticodeChain helper, which prefers the embedded
+        signature read by signtool /v /all /pa and falls back to
+        Get-AuthenticodeSignature (SPEC.md B.17.2). signtool.exe is
+        acquired on first use if absent (SPEC.md B.22.22), so the
+        function is otherwise read-only.
 
         Complementary to Get-IsoBootCertReadiness:
           - Get-IsoBootCertReadiness  : inspects the INPUT (pre-P10)

@@ -1328,6 +1328,17 @@ Two functions cooperate to gate P10:
 P10 runs unless `Get-Pca2023ReadinessSnapshot` returns `Critical`
 (skip-with-warn); for Server 2025 it also requires `-ForcePca2023OnServer2025`.
 
+Both readiness paths classify a UEFI boot file's signer through the
+shared `Test-Pca2023AuthenticodeChain` helper, which prefers the EMBEDDED
+signature read by signtool `/v /all /pa` and falls back to
+`Get-AuthenticodeSignature` + X509Chain when signtool is unavailable. The
+embedded read is required because `Get-AuthenticodeSignature` follows the
+catalog / cross-cert path and under-reports the LCU-materialized PCA2023
+boot manager (§B.16.3) — most visibly on the converted OUTPUT `bootx64.efi`,
+where the catalog read would otherwise mis-report a successful conversion
+as still-PCA2011. signtool.exe is acquired on first use (§B.22.22); the
+helper's `.Method` field records which path set the verdict.
+
 ### B.17.3 Per-OS readiness defaults
 
 Per the matrix in §B.4.4:
@@ -1357,7 +1368,10 @@ natively (§B.16.2).
 The function consumes an `ExtractedMediaPath` (the extracted output
 ISO tree, not the boot.wim) and returns a structured verdict that
 the §B.17 five-target contract was actually written to disk after
-P10.
+P10. Target signer classification (Targets #1 / #2) uses the shared
+`Test-Pca2023AuthenticodeChain` helper, so the converted OUTPUT critical
+path is judged by its EMBEDDED signature (signtool `/v /all /pa`), not the
+catalog path — see §B.17.2 / §B.22.22.
 
 ```
 Test-OutputIsoPca2023Readiness

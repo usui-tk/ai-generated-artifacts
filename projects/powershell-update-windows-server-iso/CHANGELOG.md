@@ -22,6 +22,16 @@ the script and follows the
 
 ## [Unreleased]
 
+### Read PCA2023/PCA2011 boot signatures from the EMBEDDED signature via signtool (`$Script:ScriptVersion` -> `update-wsi-2026.06.13-r11.32`, tag `signtool-embedded-readiness`)
+
+The shared signer classifier `Test-Pca2023AuthenticodeChain` now prefers the EMBEDDED signature read by `signtool /v /all /pa`, falling back to `Get-AuthenticodeSignature` + X509Chain only when signtool is unavailable. `Get-AuthenticodeSignature` follows the catalog / cross-cert path, which under-reports the LCU-materialized PCA2023 boot manager: a file whose embedded signature is “Windows UEFI CA 2023” can be read as “Windows Production PCA 2011” (§B.16.3). This is most consequential on the converted OUTPUT `bootx64.efi`, where the catalog read made `Test-OutputIsoPca2023Readiness` Target #1 report a successful PCA2023 conversion as still-PCA2011 (false Fail).
+
+- **One fix, three call sites.** `Test-Pca2023AuthenticodeChain` is the single classifier behind `Get-IsoBootCertReadiness` (media `bootx64.efi`) and `Test-OutputIsoPca2023Readiness` (output Targets #1/#2), so the embedded read corrects all of them, including the false Fail on the converted output.
+- **`Get-SignToolEmbeddedClass`** runs `signtool verify /v /all /pa` and classifies 2023/2011 from the `Issued to:` subjects across every embedded signature (plain arrays; no generic-list `@()` cast, which throws on PowerShell 7.5/7.6).
+- **`Get-ResolvedSignToolExe`** resolves signtool.exe and, if absent, performs a one-time auto-install via `Install-WindowsSdkFallback` (§B.22.22), memoized for the run. When signtool stays unavailable the X509 verdict stands and the new `.Method` field on the result records which path was used.
+- **Docs.** SPEC §B.17.2 / §B.18.1 document the embedded-preferred classification; `Test-OutputIsoPca2023Readiness`'s docstring is corrected (it is no longer “only Get-AuthenticodeSignature”); `README.md` / `README.ja.md` add a Windows SDK Signing Tools requirement row in lock-step. ScriptVersion -> r11.32.
+- **Scope.** `projects/powershell-update-windows-server-iso/` only; new functions added outside all canonical markers; no vendored Part A region touched.
+
 ### Auto-install the Windows ADK Deployment Tools when missing; remove the `-AutoInstallAdk` switch (`$Script:ScriptVersion` -> `update-wsi-2026.06.13-r11.31`, tag `adk-auto-install`)
 
 Aligns ADK/oscdimg acquisition with the script's dominant tool-acquisition policy: install-if-missing with no switch, matching 7-Zip (§B.19.4) and the signtool acquisition added in r11.30 (§B.22.22). Previously ADK was the lone opt-in (`-AutoInstallAdk`); P01 now auto-installs the Deployment Tools feature whenever `oscdimg.exe` is missing, exactly as it already does for 7-Zip.

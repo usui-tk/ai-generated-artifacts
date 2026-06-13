@@ -318,6 +318,7 @@ groups for newly-added languages).
 | PowerShell | Windows PowerShell 5.1+ (also runs on PowerShell 7+); 64-bit process required |
 | Privileges | Administrator (DISM Mount requires elevation) |
 | Windows ADK | Deployment Tools feature (provides `oscdimg.exe`); auto-installed when missing (no switch) |
+| Windows SDK Signing Tools | Provides `signtool.exe` for embedded PCA2023/PCA2011 boot-signature verification (P10/P12 readiness); auto-installed when missing (no switch) |
 | Disk space | 100 GB free on the `-WorkRoot` drive (60 GB minimum, 100 GB enforced by Workspace preflight) |
 | Network | Internet access for ISO / patch downloads (when not using `-IsoPath` + `-PatchDirectory`) |
 | Static analysis | `python3` + the canonical `psa.py` for static analysis (see "Static analysis" below) |
