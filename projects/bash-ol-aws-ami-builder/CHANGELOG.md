@@ -19,6 +19,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added
+
+- **External, read-only ENA build-result verifier
+  (`tests/ena/verify-ena-buildresults.sh`).** Answers the layer above
+  `ENA_BUILDTEST` -- "would the built module actually load on its target
+  kernel?" -- as a SEPARATE pass that never touches the production build path
+  (composes as build -> verify -> build). It reads the matrix ledger plus a
+  small verification bundle the build preserved (per-version `ena.ko`; shared
+  per-kver `Module.symvers` + kernel `vermagic` + initramfs listing) and emits
+  its own report. Per ok row: L4a vermagic-match and L4b symbol-CRC vs
+  `Module.symvers` are gates (a fail = would not `insmod`); L3 initramfs-
+  inclusion is informational (DKMS/dracut territory; ena-absent is not a
+  defect); L5 real load is skipped (needs real Nitro, B-T8). A missing bundle
+  artifact for an ok row is a fail, never a silent skip. The pure verdict logic
+  is unit-tested by `tests/t16_enaverifyresults.sh` (15 cases). Module
+  integration stays delegated to DKMS; no judgement is added to the build script.
+
 ### Changed
 
 - **Test tier rename: `tests/t12_enaverify.sh` -> `tests/t15_enaverify.sh`

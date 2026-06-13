@@ -1795,6 +1795,40 @@ headers up front (A.7); the matrix inherits that and the B.8 host requirements
 are an in-environment **sample** (OL6: `2.9.1` ok, `2.2.0` fail on UEK4
 `4.1.12-124.48.6.el6uek`); a full run grows the ledger as a clean append.
 
+### Load-readiness verification (external, read-only)
+
+`ENA_BUILDTEST` answers "did the requested version compile + DKMS-install?". A
+separate, **read-only** tool answers the deeper question "would that module
+actually load on its target kernel?" without touching the build path:
+`tests/ena/verify-ena-buildresults.sh` reads the matrix ledger plus a small
+**verification bundle** the build side preserved, and emits its own report.
+It composes as a distinct pass — build → verify → build — so that no condition
+or judgement lives inside the build script; module integration stays delegated
+to DKMS, and a reader cannot perturb the build.
+
+The bundle is small (the data needed is already in the artifacts): per built
+version only the `ena.ko` varies; `Module.symvers` + the kernel `vermagic` +
+the `initramfs` listing are shared per kver. Per ok ledger row the verifier
+runs, against that kver:
+
+- **L4a vermagic-match** (gate) — the module's `vermagic` equals the kernel's
+  (read from the `.ko` via `modinfo`, or `strings` where kmod is absent); a
+  mismatch would fail at `insmod`.
+- **L4b symbol-crc-kabi** (gate) — every symbol the module requires is present
+  in `Module.symvers` with a matching CRC (needs kmod to dump the module's
+  required symbols; skips loudly where kmod is unavailable).
+- **L3 initramfs-inclusion** (info, non-gating) — whether `ena.ko` is in the
+  initramfs the build produced. `ena` absent is expected and not a defect:
+  initramfs composition is DKMS/dracut territory, root is on nvme, and ena loads
+  post-pivot. Reported, never acted on.
+- **L5 module-load+device** (skip) — a real `modprobe` + device check needs the
+  UEK kernel running on real Nitro (B-T8); not containerizable.
+
+`load_ready` is decided by the gates only; a **missing bundle artifact for an ok
+row is a fail** (load_ready unknown), never a silent skip — the same no-false-ok
+discipline as the install-time verify. The verdict logic is pure and unit-tested
+(`tests/t16_enaverifyresults.sh`).
+
 ---
 
 # Part C — Quality Gates & Validation Checklist

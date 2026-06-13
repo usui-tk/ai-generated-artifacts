@@ -367,6 +367,15 @@ Two evidence layers, both committed so the state persists across runs:
   synthetic `fail` and the run continues to the next version/OL — one build never
   aborts the matrix. Any non-`ok` build's full log is preserved to
   `<cleancore-dir>/buildtest-ol<N>-ena_<ver>.log` for diagnosis.
+- `tests/ena/verify-ena-buildresults.sh` — a standalone, **read-only**
+  load-readiness verifier (the layer above `ENA_BUILDTEST`: "would the built
+  module actually load on its target kernel?"). It runs as a SEPARATE pass
+  (build → verify → build), never touching the build path: it reads the ledger
+  plus a small bundle the build preserved and judges each `ok` row (L4a vermagic
+  + L4b symbol-CRC are gates; L3 initramfs-inclusion is informational; L5 real
+  load is the B-T8 ceiling). A missing bundle artifact for an `ok` row is a fail,
+  not a silent skip. The pure verdict logic is unit-tested by
+  `tests/t16_enaverifyresults.sh`.
 
 By default each OL is first **update-gated** (turn off with `--force`): before any
 build, the matrix probes the latest `kernel-uek` for the OL (`yum.oracle.com`
