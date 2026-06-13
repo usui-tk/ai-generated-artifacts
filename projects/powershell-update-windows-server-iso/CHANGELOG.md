@@ -22,6 +22,15 @@ the script and follows the
 
 ## [Unreleased]
 
+### Auto-install the Windows ADK Deployment Tools when missing; remove the `-AutoInstallAdk` switch (`$Script:ScriptVersion` -> `update-wsi-2026.06.13-r11.31`, tag `adk-auto-install`)
+
+Aligns ADK/oscdimg acquisition with the script's dominant tool-acquisition policy: install-if-missing with no switch, matching 7-Zip (§B.19.4) and the signtool acquisition added in r11.30 (§B.22.22). Previously ADK was the lone opt-in (`-AutoInstallAdk`); P01 now auto-installs the Deployment Tools feature whenever `oscdimg.exe` is missing, exactly as it already does for 7-Zip.
+
+- **`-AutoInstallAdk` removed** (parameter, `$Script:AutoInstallAdk`, `.PARAMETER` doc, the `.EXAMPLE` usage, and the P01 opt-in branch). The previous "throw an actionable error and abort" arm is gone; `Install-WindowsAdkFallback` still throws a clear error if the install fails or `oscdimg.exe` is still absent afterwards, so a genuine failure remains actionable.
+- **P01 wiring.** The Resolve-OscdimgExe-fails branch now auto-installs unconditionally (after the existing "action does not need oscdimg" and `-SyntheticTestMode` guards), mirroring the 7-Zip `Get-SevenZipPath` / `Install-SevenZipFallback` path.
+- **Docs.** SPEC §B.22.13 rewritten (opt-in -> auto) and the stale `-AutoInstallAdk` dropped from the §C.5 synthetic example; `README.md` / `README.ja.md` updated in lock-step (tool table, parameter-table row removed, troubleshooting entry); `TESTING.md` §4.1 step 2 reworded. ScriptVersion -> r11.31.
+- **Scope.** `projects/powershell-update-windows-server-iso/` only; no vendored Part A region touched. This removes a parameter, but per the project's reverse-engineering-driven status there are no downstream consumers to preserve.
+
 ### Add the Windows SDK Signing Tools (signtool.exe) acquisition machinery (`$Script:ScriptVersion` -> `update-wsi-2026.06.13-r11.30`, tag `signtool-acquisition`)
 
 Adds the install-if-missing machinery for `signtool.exe` (Windows SDK Signing Tools) so signature-verification consumers can rely on signtool being present without assuming a pre-installed SDK — mirroring the 7-Zip (§B.19.4) and ADK/oscdimg (§B.22.13) tool-acquisition idioms already in the script. The machinery is defined here; the PCA2023 readiness classifier is wired to use it in a follow-up commit in this series.

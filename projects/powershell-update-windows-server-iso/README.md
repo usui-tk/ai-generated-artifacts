@@ -317,7 +317,7 @@ groups for newly-added languages).
 | Host OS | Windows 10/11 Pro/Enterprise/Education or Windows Server 2016+ |
 | PowerShell | Windows PowerShell 5.1+ (also runs on PowerShell 7+); 64-bit process required |
 | Privileges | Administrator (DISM Mount requires elevation) |
-| Windows ADK | Deployment Tools feature (provides `oscdimg.exe`); auto-installable via `-AutoInstallAdk` |
+| Windows ADK | Deployment Tools feature (provides `oscdimg.exe`); auto-installed when missing (no switch) |
 | Disk space | 100 GB free on the `-WorkRoot` drive (60 GB minimum, 100 GB enforced by Workspace preflight) |
 | Network | Internet access for ISO / patch downloads (when not using `-IsoPath` + `-PatchDirectory`) |
 | Static analysis | `python3` + the canonical `psa.py` for static analysis (see "Static analysis" below) |
@@ -423,7 +423,6 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-Mode` | admin | `Monthly` (or `Initial`/`Force`) | `RefreshAllBaselines` refresh mode |
 | `-OnlyOs` | admin | `Server2016`/`2019`/`2022`/`2025` | Limit `RefreshAllBaselines` to one OS |
 | `-OnlyLanguage` | admin | `en-us`/`ja-jp` | Limit `RefreshAllBaselines` to one language |
-| `-AutoInstallAdk` | admin | switch (OFF) | Auto-install Windows ADK if `oscdimg.exe` is missing |
 | `-DryRun` | test | switch (OFF) | Setup/Fetch/Plan only; skip Build/Verify |
 | `-SyntheticTestMode` | test | switch (OFF) | CI mode: synthetic ISO, no Microsoft assets |
 | `-SkipEnvCheck` | test | switch (OFF) | Skip the environment preflight (mutually exclusive with `-EnvironmentInfoOnly`) |
@@ -596,7 +595,7 @@ enforces this per repository SPEC.md §12 (SPEC-CI-081).
 | Symptom | Cause | Action |
 |:---|:---|:---|
 | `Administrator privilege required` | Running as a non-elevated user | Re-launch PowerShell as Administrator |
-| `oscdimg.exe not found` | Windows ADK Deployment Tools not installed | Re-run with `-AutoInstallAdk` (auto-installs the ~50-80 MB Deployment Tools feature) or install manually from the [Windows ADK installer](https://go.microsoft.com/fwlink/?linkid=2289980). See SPEC.md §B.22.13 |
+| `oscdimg.exe not found` | Windows ADK Deployment Tools not installed | P01 auto-installs the ~50-80 MB Deployment Tools feature when `oscdimg.exe` is missing (no switch); if that fails, install manually from the [Windows ADK installer](https://go.microsoft.com/fwlink/?linkid=2289980). See SPEC.md §B.22.13 |
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` drive has less than 100 GB free | Move `-WorkRoot` to a larger volume, or free up space (the 100 GB minimum covers an end-to-end PrepareBuildVerify run for one OS) |
 | `Workspace preflight failed: ... required Config file(s) missing` | The `data/config-Server<N>.json` files were deleted or not copied | Restore the `data/` directory alongside `Update-WindowsServerIso.ps1` (all four `Server2016/2019/2022/2025.json` must be present) |
 | `Catalogue: no narrowed result for ... / Server2022`; `Resolved 0 patch entries` | Microsoft changed the Catalogue title format (punctuation drift) | Add the new title form to the relevant `TitleTokens` array in `data/config-Server*.json`. See SPEC.md §D.19 |

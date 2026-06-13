@@ -2439,9 +2439,14 @@ include `data/servicing-dependency-database.json` in the auto-PR.
 
 ### B.22.13 Windows ADK auto-install
 
-`-AutoInstallAdk` downloads and silently installs only the
-Deployment Tools feature of the Windows ADK (~50–80 MB). The flag
-is opt-in to avoid surprise on CI runners.
+When `oscdimg.exe` is not found, P01 Initialize automatically downloads
+and silently installs only the Deployment Tools feature of the Windows
+ADK (~50-80 MB) via `Install-WindowsAdkFallback` (no switch), matching
+the 7-Zip auto-acquire strategy (§B.19.4) and the signtool acquisition
+(§B.22.22). `Install-WindowsAdkFallback` throws an actionable error if
+the install fails or `oscdimg.exe` is still absent. Actions that do not
+need `oscdimg.exe` (`ListPhases`, `GenerateManifest`, `Cleanup`,
+`Prepare`) and `-SyntheticTestMode` continue without it.
 
 ### B.22.14 Eval ISO URL: record both fwlink and direct CDN URL
 
@@ -2982,7 +2987,7 @@ the Windows ADK pre-installed:
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify -Execute `
     -OsKey Server2019 -OsLang ja-jp `
-    -SyntheticTestMode -AutoInstallAdk `
+    -SyntheticTestMode `
     -WorkRoot 'D:\synth-ws'
 ```
 

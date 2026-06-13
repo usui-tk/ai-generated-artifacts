@@ -308,7 +308,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | ホスト OS | Windows 10/11 Pro/Enterprise/Education または Windows Server 2016+ |
 | PowerShell | Windows PowerShell 5.1+（PowerShell 7+ でも動作）、64-bit プロセス必須 |
 | 権限 | Administrator（DISM マウントは管理者権限が必須）|
-| Windows ADK | Deployment Tools 機能（`oscdimg.exe` を提供）。`-AutoInstallAdk` で自動インストール可能 |
+| Windows ADK | Deployment Tools 機能（`oscdimg.exe` を提供）。不在時に自動インストール（スイッチ不要）|
 | ディスク空き容量 | `-WorkRoot` ドライブに 100 GB 以上（最低 60 GB、Workspace プリフライトが 100 GB を強制チェック）|
 | ネットワーク | ISO とパッチのダウンロード用インターネットアクセス（`-IsoPath` + `-PatchDirectory` 利用時は不要）|
 | 静的解析 | `python3` + 正規配置の `psa.py`（後述「静的解析」を参照）|
@@ -409,7 +409,6 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-Mode` | admin | `Monthly`（または `Initial`/`Force`）| `RefreshAllBaselines` の更新モード |
 | `-OnlyOs` | admin | `Server2016`/`2019`/`2022`/`2025` | `RefreshAllBaselines` を 1 OS に限定 |
 | `-OnlyLanguage` | admin | `en-us`/`ja-jp` | `RefreshAllBaselines` を 1 言語に限定 |
-| `-AutoInstallAdk` | admin | switch（OFF）| `oscdimg.exe` 不在時に Windows ADK を自動インストール |
 | `-DryRun` | test | switch（OFF）| Setup/Fetch/Plan のみ。Build/Verify をスキップ |
 | `-SyntheticTestMode` | test | switch（OFF）| CI モード：合成 ISO、Microsoft アセット不使用 |
 | `-SkipEnvCheck` | test | switch（OFF）| 環境プリフライトをスキップ（`-EnvironmentInfoOnly` と排他）|
@@ -582,7 +581,7 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 | 症状：| 原因：| 対処：|
 |:---|:---|:---|
 | `Administrator privilege required` | 非管理者ユーザーで実行 | PowerShell を管理者として再起動 |
-| `oscdimg.exe not found` | Windows ADK Deployment Tools 未インストール | `-AutoInstallAdk` で再実行（約 50-80 MB の Deployment Tools 機能を自動インストール）するか、[Windows ADK インストーラ](https://go.microsoft.com/fwlink/?linkid=2289980) から手動インストール（SPEC.md §B.22.13 参照）|
+| `oscdimg.exe not found` | Windows ADK Deployment Tools 未インストール | `oscdimg.exe` 不在時に P01 が約 50-80 MB の Deployment Tools 機能を自動インストール（スイッチ不要）。失敗した場合は [Windows ADK インストーラ](https://go.microsoft.com/fwlink/?linkid=2289980) から手動インストール（SPEC.md §B.22.13 参照）|
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` ドライブの空き容量が 100 GB 未満 | `-WorkRoot` をより大きなボリュームへ移動するか、空きを確保する（100 GB は 1 OS 分の PrepareBuildVerify エンドツーエンドに必要な最低量）|
 | `Workspace preflight failed: ... required Config file(s) missing` | `data/config-Server<N>.json` ファイル群が削除またはコピー漏れ | `Update-WindowsServerIso.ps1` と同階層に `data/` ディレクトリを復元（`Server2016/2019/2022/2025.json` の 4 ファイルすべてが必須）|
 | `Catalogue: no narrowed result for ... / Server2022`、`Resolved 0 patch entries` | Microsoft が Catalogue のタイトル形式を変更（句読点ドリフト）| 該当 `data/config-Server*.json` の `TitleTokens` 配列に新形式を追加（SPEC.md §D.19 参照）|
