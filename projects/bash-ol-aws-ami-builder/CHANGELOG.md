@@ -32,6 +32,16 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **ENA test-matrix ledger: a version-mismatched `ok` is recorded as `fail`
+  (`tests/ena/run-ena-buildtest-matrix.sh`).** Defense-in-depth on top of the
+  installer fix: the ledger writer trusted `install-ena-driver.sh`'s `status`
+  verbatim. It now independently checks the recorded `ko_version` against the
+  requested `ena_version` and downgrades an `ok` to `fail` (with an explanatory
+  reason) when they do not match — so a masked build failure (or a row produced
+  by an older installer that fell back to the stock in-tree `ena.ko`) cannot
+  enter the ledger as `ok` and silence the kver-primary dedup gate. SPEC B.9
+  updated; tested by `tests/t13_enaledgerguard.sh`.
+
 - **ENA self-build: a failed driver compile is no longer reported as success
   (`install-ena-driver.sh`).** The verify asserted only that *some* `ena.ko`
   existed and downgraded a version mismatch to a non-fatal warning. But EL6

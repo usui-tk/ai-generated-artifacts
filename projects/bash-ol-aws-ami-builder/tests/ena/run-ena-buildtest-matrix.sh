@@ -499,6 +499,15 @@ if os.path.exists(tsv_path):
              "ko_version": r.get("ko_version", None),
              "reason": r.get("reason", None),
              "tested_at": now}
+        # Defense-in-depth (independent of install-ena-driver.sh): an "ok" whose
+        # installed ko_version does not match the requested ena_version means the
+        # build never produced the requested module (e.g. an older installer that
+        # fell back to the stock in-tree ena.ko). Never let such a row enter the
+        # ledger as ok -- it would poison the report and the kver-primary dedup
+        # gate (the bad combo would be skipped on every future run). Downgrade it.
+        if e["status"] == "ok" and e["ko_version"] and not str(e["ko_version"]).startswith(e["ena_version"]):
+            e["reason"] = "ko_version %s does not match requested %s -- build did not produce the requested module (recorded as fail)" % (e["ko_version"], e["ena_version"])
+            e["status"] = "fail"
         idx[(e["osmajor"], e["ena_version"], e["kver"])] = e
 
 def vkey(s):

@@ -1727,6 +1727,12 @@ the dedup state):
   is taken from the build **result** — the first build of a run establishes it,
   so the pinned version is tried first as the per-run canary (one build per OL
   per run re-confirms the live kver rather than trusting a possibly-stale probe).
+  As a defense-in-depth guard (independent of `install-ena-driver.sh`), the
+  writer downgrades a recorded `ok` to `fail` whenever its `ko_version` does not
+  match the requested `ena_version` (the build did not produce the requested
+  module — e.g. an older installer that fell back to the stock in-tree `ena.ko`),
+  so a masked build failure cannot enter the ledger as `ok` and silence the
+  dedup gate. (Tested by `tests/t13_enaledgerguard.sh`.)
 - **`RESULTS-ol<N>.md`** — a per-OS human report regenerated from the ledger,
   **newest kernel first** and opening with a `## Latest kernel <kver>` summary of
   the ENA versions that build on the newest kernel tested (so the latest result
