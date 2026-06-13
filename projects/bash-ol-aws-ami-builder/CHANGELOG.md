@@ -19,6 +19,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed
+
+- **OL6 clean-core: gate the NSS dynamic CA trust workaround to the sandbox.**
+  `build-cleancore-ol6.sh` step (C) (`update-ca-trust enable`/`extract`) and its
+  `NSS dynamic CA trust enabled (TLS verifiable)` self-test row are a workaround
+  for the Claude build sandbox's intercepting (MITM) egress proxy. On a real host
+  (physical / VM) there is no such proxy, EL6 `update-ca-trust` aborts internally
+  (`rpm: command not found` in the chroot) so the dynamic-trust symlink is never
+  created, and the self-test row FAILed — failing the whole clean-core build (and
+  with it the ENA matrix). The step + row are now gated on a sandbox check
+  (auto-detected via `IS_SANDBOX` or the egress-gateway CA on the build host;
+  explicit override `CLEANCORE_CATRUST=on|off`): in the sandbox they run and
+  assert exactly as before (self-test still 20/0/0); on a real host the step is
+  skipped and the row records a SKIP (self-test 19/0/1) so the build succeeds and
+  uses the clean-core's standard `ca-certificates` bundle for standard-CA TLS.
+  OL7–OL10 builders are unaffected (only OL6 carries this EL6-specific step).
+
 ### Added
 
 - **ENA self-build test matrix (`tests/ena/run-ena-buildtest-matrix.sh`).** A

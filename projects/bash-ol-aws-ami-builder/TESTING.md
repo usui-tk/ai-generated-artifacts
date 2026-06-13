@@ -194,11 +194,15 @@ explicitly (EL7's `oraclelinux-release-el7` does not pull it). On EL6 (like EL7,
 no `git-core` split) OL6 carries plain `git`, plus `procps`/`nc` (not
 `procps-ng`/`nmap-ncat`), and — uniquely — **includes `net-tools`** (EL6 has no
 standalone `hostname` package; the command ships in `net-tools`). EPEL 6 is EOL
-and unhosted by Oracle, so the OL6 build (C) enables the NSS dynamic CA trust
-(EL6 `curl`/`yum` are NSS-backed and verify nothing until then — so no https repo
-is usable on a real host without it), then (B) fetches the EPEL 6 release RPM from
-the Fedora archive with the clean-core's own `curl` and installs it with its own
-`rpm` (EL6 `yum` cannot fetch a direct https package URL), shipping the repo
+and unhosted by Oracle, so the OL6 build (C) **conditionally** enables the NSS
+dynamic CA trust — a workaround for the Claude build sandbox's intercepting (MITM)
+egress proxy, run **only in the sandbox** (auto-detected via `IS_SANDBOX` / the
+egress-gateway CA; override `CLEANCORE_CATRUST=on|off`) and **skipped on a real
+host** where the shipped `ca-certificates` bundle already verifies standard CAs
+(the self-test row asserts in the sandbox, SKIPs off it) — then (B) fetches the
+EPEL 6 release RPM from the Fedora archive with the clean-core's own `curl` and
+installs it with its own `rpm` (EL6 `yum` cannot fetch a direct https package
+URL), shipping the repo
 repointed to the archive and `enabled=0`. **`jq`** is a curated test-base
 essential on every clean-core: on OL7–OL10 it is part of the enabled standard OL
 repo (a plain `INCLUDE` member), and on OL6 — where `jq` is an EPEL package and

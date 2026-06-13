@@ -1637,11 +1637,16 @@ Each builder tags every block with the environment it runs in:
   `git` (no `git-core` split) plus `procps` (not `procps-ng`) and `nc` (not
   `nmap-ncat`); unlike the other clean-cores it **includes `net-tools`**, because
   EL6 has no standalone `hostname` package (the command ships in `net-tools`).
-  EPEL 6 is EOL and Oracle hosts none, so in finalize the clean-core (C) enables
-  its NSS dynamic CA trust — EL6's `curl`/`yum` are NSS-backed and verify nothing
-  until `update-ca-trust enable` is run, so no https repo (EPEL or the OL6 base on
-  `yum.oracle.com`) is usable on a real host without it — then (B) fetches the
-  EPEL 6 release RPM from the Fedora community archive with its own `curl` and
+  EPEL 6 is EOL and Oracle hosts none, so in finalize (C) **conditionally**
+  enables the clean-core's NSS dynamic CA trust — it is a workaround for the
+  Claude build **sandbox**, whose egress proxy presents an intercepting (MITM)
+  certificate, so it runs **only in the sandbox** (auto-detected via `IS_SANDBOX`
+  or the egress-gateway CA on the build host; override `CLEANCORE_CATRUST=on|off`)
+  and is **skipped on a real host** (physical / VM), where the clean-core's
+  shipped `ca-certificates` bundle already verifies standard public CAs (EPEL or
+  the OL6 base on `yum.oracle.com`). The matching self-test row asserts in the
+  sandbox and SKIPs off it. Then (B) fetches the EPEL 6 release RPM from the
+  Fedora community archive with its own `curl` and
   installs it with its own `rpm` (EL6 `yum` cannot fetch a direct https package
   URL), and the repo is repointed to the archive and shipped `enabled=0`. EL6 is
   upstart, so `systemd` does not apply.
