@@ -32,6 +32,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Phase 6 CHECK 2: a self-build that did not take effect is now a `FAIL`
+  (`build-ol-aws-ami.sh`).** Layer 3 of the false-ok remediation. CHECK 2 passed
+  on mere ENA module presence, so an AMI that requested the self-built pin but
+  ended up with only the stock in-tree `ena.ko` would still pass. The check now
+  gates the PASS on provenance via the pure `_ena_check2_ok`: when a self-build
+  ran (`ENA_BUILD_VERSION` set -- OL6/OL7 default) the effective module must be
+  the DKMS `/updates|/extra` copy, else `FAIL`; when no self-build was requested
+  (`--skip-ena-driver`, OL8+ in-distro, OL9+) any present module still passes.
+  With `install-ena-driver.sh` now aborting on a failed build, this is a
+  defense-in-depth image guard (manual builds, other installers, regressions).
+  SPEC D.23 updated; tested by `tests/t14_enacheck2.sh`.
+
 - **ENA test-matrix ledger: a version-mismatched `ok` is recorded as `fail`
   (`tests/ena/run-ena-buildtest-matrix.sh`).** Defense-in-depth on top of the
   installer fix: the ledger writer trusted `install-ena-driver.sh`'s `status`

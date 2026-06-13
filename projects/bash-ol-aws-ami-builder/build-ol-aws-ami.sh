@@ -2779,6 +2779,26 @@ _ena_pin_for_major() {
     | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
 }
 
+# CHECK 2 provenance verdict: is the effective ena.ko acceptable for THIS build?
+# When a self-build was performed (ENA_BUILD_VERSION is non-empty -- set only for
+# OL6/OL7 with the default self-build on), the in-guest DKMS build MUST have
+# produced the module in /updates or /extra; the stock in-tree /kernel copy alone
+# means the self-build did not take effect and the AMI would ship the stock
+# driver instead of the requested pin. When no self-build was requested
+# (--skip-ena-driver, OL8+ in-distro, OL9+ no-op -> ENA_BUILD_VERSION empty) any
+# present module is the expected, correct outcome. Pure (args only) -> unit-tested.
+#   _ena_check2_ok <ena_build_version> <ena_mod_path>
+# returns 0 if acceptable; 1 if a self-build was requested but only the stock
+# module is present.
+_ena_check2_ok() {
+  local want="$1" mod="$2"
+  [[ -z "${want}" ]] && return 0   # no self-build requested -> any module is fine
+  case "${mod}" in
+    */updates/*|*/extra/*) return 0 ;;   # self-built module present -> ok
+  esac
+  return 1                                # self-build requested but only stock present
+}
+
 phase6_nitro_readiness_check() {
   # Offline, read-only Nitro boot-readiness gate. Adapts the logic of AWS's
   # NitroInstanceChecks to inspect the BUILT IMAGE (no EC2 launch) via
@@ -2935,7 +2955,17 @@ phase6_nitro_readiness_check() {
   if [[ "${ena_cfg}" == "y" ]]; then
     log_info "  [OLAWS-CHK02] [CHECK 2] ENA driver: PASS (built into the kernel)"
   elif [[ -n "${ena_mod}" ]]; then
-    log_info "  [OLAWS-CHK02] [CHECK 2] ENA driver: PASS (module present -- ${ena_loc})"
+    if _ena_check2_ok "${ENA_BUILD_VERSION:-}" "${ena_mod}"; then
+      log_info "  [OLAWS-CHK02] [CHECK 2] ENA driver: PASS (module present -- ${ena_loc})"
+    else
+      # A self-build was requested (pin set) but the effective module is the
+      # stock in-tree copy: the in-guest DKMS self-build did not take effect, so
+      # the AMI would carry the stock driver, not the requested pin. (install-ena-
+      # driver.sh now aborts on a failed build, so this should not occur via the
+      # wrapper; the image check guards manual builds / regressions regardless.)
+      log_error "  [OLAWS-CHK02] [CHECK 2] ENA driver: FAIL (self-build requested (pin ${ENA_BUILD_VERSION}) but only the ${ena_loc} module is present -- the in-guest self-build did not take effect)"
+      fail=1
+    fi
   else
     log_error "  [OLAWS-CHK02] [CHECK 2] ENA driver: FAIL (no ENA driver -- Nitro requires ENA for networking)"
     fail=1

@@ -2673,6 +2673,19 @@ DKMS-built, on any OL. The report also annotates the driver **provenance**
 can confirm the self-build took effect and that CHECK 1-4 still pass (no
 boot-readiness regression). See A.7 ("Nitro initramfs drivers" / ENA self-build).
 
+**Provenance is now also enforced (defense-in-depth).** CHECK 2 no longer passes
+on mere presence when a self-build was performed: if `ENA_BUILD_VERSION` is set
+(an in-guest self-build ran -- OL6/OL7 with the default on) but the effective
+`ena.ko` is the stock in-tree `/kernel` copy rather than the DKMS `/updates|
+/extra` module, the self-build did not take effect and the AMI would ship the
+stock driver instead of the requested pin -- a **`FAIL`**. When no self-build was
+requested (`--skip-ena-driver`, OL8+ in-distro, OL9+) the stock module is the
+expected outcome and still passes. The verdict is the pure `_ena_check2_ok`
+(unit-tested by `tests/t14_enacheck2.sh`). With `install-ena-driver.sh` now
+aborting on a failed build (it requires the installed module version to match the
+request), this image check is a guard for manual builds / other installers /
+future regressions rather than the primary gate.
+
 ---
 
 ## D.24 OL6 `sshd` refuses to start: `PermitRootLogin prohibit-password` invalid on OpenSSH 5.3
