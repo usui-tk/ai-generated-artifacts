@@ -22,6 +22,16 @@ the script and follows the
 
 ## [Unreleased]
 
+### Add the Windows SDK Signing Tools (signtool.exe) acquisition machinery (`$Script:ScriptVersion` -> `update-wsi-2026.06.13-r11.30`, tag `signtool-acquisition`)
+
+Adds the install-if-missing machinery for `signtool.exe` (Windows SDK Signing Tools) so signature-verification consumers can rely on signtool being present without assuming a pre-installed SDK — mirroring the 7-Zip (§B.19.4) and ADK/oscdimg (§B.22.13) tool-acquisition idioms already in the script. The machinery is defined here; the PCA2023 readiness classifier is wired to use it in a follow-up commit in this series.
+
+- **`Resolve-SignToolExe`** locates signtool.exe (PATH first, then `Windows Kits\10\bin` under both Program Files roots, preferring the newest x64 build) and returns `$null` (does not throw) when absent. No integrity hash check: unlike `oscdimg.exe`, signtool.exe has no fixed reference SHA-256 (it varies per SDK build), so acquisition trust rests on the Microsoft fwlink plus presence verification.
+- **`Install-WindowsSdkFallback`** downloads `winsdksetup.exe` from the pinned Microsoft fwlink (`$Script:SdkInstallerUrl` = linkid=2338977, SDK `10.0.26100.6584`) to `<WorkRoot>\cache\sdk\` and runs it with `/features OptionId.SigningTools /quiet /norestart` (Signing Tools feature only, never the full SDK), verifying by tool presence — the same defensive pattern as `Install-WindowsAdkFallback`.
+- **Acquisition is automatic (no switch)**, matching the 7-Zip strategy.
+- **Spec.** New SPEC §B.22.22 documents the acquisition machinery. No vendored Part A region is touched.
+- **Scope.** `projects/powershell-update-windows-server-iso/` only; functions added outside all canonical markers; no Action, parameter, output, or data-schema change, so `README.md` / `README.ja.md` are unaffected at this step.
+
 ### Correct the disproven boot.wim/EFI_EX servicing premise + refresh the Make2023BootableMedia reference (docs/comments only; no `$Script:ScriptVersion` change)
 
 A documentation/comment-only correction pass (no behavioural change, so the script version is unchanged). It removes a disproven spec premise and stale citations surfaced by the Secure-Boot investigation (real-environment DISM evidence + Microsoft primary sources + `signtool /all` measurement).

@@ -2515,6 +2515,37 @@ was fixed by making `Show-PhaseSummary` idempotent via a
 | Microsoft tool dependency avoidance | §B.19.4 | — | §D.27 |
 | Helper function unification | §B.10 | — | §D.30 |
 
+### B.22.22 Windows SDK Signing Tools auto-install (signtool.exe)
+
+`signtool.exe` (Windows SDK Signing Tools) is acquired with the same
+install-if-missing idiom this script uses for 7-Zip (§B.19.4) and the
+ADK Deployment Tools (§B.22.13): a resolver locates the tool, and a
+fallback installer fetches it when absent.
+
+- `Resolve-SignToolExe` returns the absolute path to signtool.exe,
+  preferring the x64 build of the newest installed SDK. It checks PATH
+  first (`Get-Command`), then walks `Windows Kits\10\bin` under both
+  Program Files (x86) and Program Files, recursing for signtool.exe and
+  preferring an `\x64\` hit. It returns `$null` (does not throw) when
+  signtool.exe is not found, so the caller can choose to install or
+  degrade. Unlike `oscdimg.exe` (§D.4), signtool.exe carries no fixed
+  reference SHA-256 — it varies per SDK build — so there is no integrity
+  hash check; acquisition trust rests on the Microsoft fwlink plus
+  presence verification.
+- `Install-WindowsSdkFallback` downloads `winsdksetup.exe` from the
+  pinned Microsoft fwlink (`$Script:SdkInstallerUrl`, linkid=2338977,
+  SDK 10.0.26100.6584) to `<WorkRoot>\cache\sdk\`, then runs it with
+  `/features OptionId.SigningTools /quiet /norestart` so only the Signing
+  Tools feature is installed, never the full SDK. It verifies by tool
+  presence (a non-zero installer exit with signtool.exe present is
+  treated as "already installed"), mirroring `Install-WindowsAdkFallback`.
+
+Acquisition is automatic and requires no switch, matching the 7-Zip
+strategy (§B.19.4). The pinned constants live in one place in the
+global-constants block alongside the ADK pins. The machinery is provided
+for signature-verification consumers (the PCA2023 readiness classifier,
+§B.17.2 / §B.18.1).
+
 ## B.23 JSON Canonical Serialization
 
 **Status**: normative. **Scope**: every `data/*.json` and every

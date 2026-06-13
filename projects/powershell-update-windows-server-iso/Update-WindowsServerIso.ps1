@@ -580,7 +580,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.12-r11.29'
+$Script:ScriptVersion = 'update-wsi-2026.06.13-r11.30'
 $Script:ScriptTag     = 'dism-scratchdir-localisation'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -3657,6 +3657,35 @@ function Get-OsConfigPath {
 $Script:AdkInstallerUrl      = 'https://go.microsoft.com/fwlink/?linkid=2289980'
 $Script:AdkInstallerVersion  = '10.1.26100.2454'
 $Script:AdkInstallerOptionId = 'OptionId.DeploymentTools'
+
+# ============================================================
+# Windows SDK Signing Tools installer (signtool.exe acquisition)
+# ============================================================
+#
+# signtool.exe ships in the Windows SDK (NOT the ADK Deployment
+# Tools), under Windows Kits\10\bin\<ver>\<arch>\signtool.exe. It
+# is acquired with the SAME install-if-missing idiom this script
+# already uses for 7-Zip (Get-SevenZipPath / Install-SevenZipFallback)
+# and ADK/oscdimg (Resolve-OscdimgExe / Install-WindowsAdkFallback),
+# mirroring the Install-WindowsSdkFallback pattern in
+# Deploy-AMDChipsetDriverOnWindowsServer.ps1.
+#
+# Version pinning rationale:
+#   winsdksetup.exe is fetched from the Microsoft-published fwlink
+#   (linkid=2338977, Windows SDK 10.0.26100.6584) and run with
+#   /features OptionId.SigningTools so ONLY the Signing Tools feature
+#   (signtool.exe) is installed, never the full SDK. The fwlink is
+#   stable; bump the constants below in one place if Microsoft retires
+#   it. Unlike oscdimg.exe there is no fixed reference SHA-256 to pin
+#   (signtool.exe varies per SDK build), so acquisition trust rests on
+#   the Microsoft fwlink + presence verification (see Resolve-SignToolExe).
+#
+# Reference:
+#   https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool
+$Script:SdkInstallerUrl      = 'https://go.microsoft.com/fwlink/?linkid=2338977'
+$Script:SdkInstallerVersion  = '10.0.26100.6584'
+$Script:SdkInstallerOptionId = 'OptionId.SigningTools'
+
 
 # ============================================================
 # ISO Updater specific: Microsoft Learn release-info support
@@ -7395,6 +7424,158 @@ function Resolve-OscdimgExe {
     } # psa-disable-line PSA3004 -- intentional best-effort integrity-check warning; hash mismatch is advisory only
 
     return $found
+}
+
+function Resolve-SignToolExe {
+    <#
+    .SYNOPSIS
+        Locate signtool.exe (Windows SDK Signing Tools). Mirrors the
+        Resolve-OscdimgExe / Get-SevenZipPath resolve pattern and the
+        Find-KitTool walk in Deploy-AMDChipsetDriverOnWindowsServer.ps1.
+
+    .DESCRIPTION
+        Returns the absolute path to a usable signtool.exe, preferring
+        the x64 build of the newest installed SDK. Search order:
+          1) PATH (Get-Command) - winsdksetup may have updated the env.
+          2) Windows Kits\10\bin under Program Files (x86) then Program
+             Files, recursing for signtool.exe; prefer an \x64\ hit
+             (newest by descending path sort), else any architecture.
+        No integrity hash check: unlike oscdimg.exe (which has Microsoft
+        symbol-server reference hashes), signtool.exe has no single fixed
+        reference SHA-256 - it varies per SDK build - so presence is the
+        only check (the SDK is acquired from the Microsoft fwlink).
+
+        Returns $null when signtool.exe is not found anywhere; the caller
+        decides whether to Install-WindowsSdkFallback or degrade.
+
+    .OUTPUTS
+        [string] - absolute path to signtool.exe, or $null if not found.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    # (1) PATH lookup first (an installer may have updated the environment)
+    $cmd = Get-Command -Name 'signtool.exe' -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    # (2) Walk the Windows Kits bin directories; prefer x64 + newest.
+    foreach ($root in @("${env:ProgramFiles(x86)}\Windows Kits\10\bin", "${env:ProgramFiles}\Windows Kits\10\bin")) {
+        if (-not (Test-Path -LiteralPath $root)) { continue }
+        $hits = @(Get-ChildItem -Path $root -Recurse -Filter 'signtool.exe' -ErrorAction SilentlyContinue)
+        if ($hits.Count -eq 0) { continue }
+        $x64 = $hits | Where-Object { $_.FullName -match '\\x64\\' } |
+               Sort-Object FullName -Descending | Select-Object -First 1
+        if ($x64) { return $x64.FullName }
+        $any = $hits | Sort-Object FullName -Descending | Select-Object -First 1
+        if ($any) { return $any.FullName }
+    }
+    return $null
+}
+
+function Install-WindowsSdkFallback {
+    <#
+    .SYNOPSIS
+        Download Microsoft's winsdksetup.exe and silently install the
+        Windows SDK Signing Tools feature (signtool.exe).
+
+    .DESCRIPTION
+        Called when a signtool.exe consumer (the PCA2023 readiness
+        classifier, SPEC.md B.17.2 / B.18.1) finds signtool.exe missing.
+        Mirrors Install-WindowsAdkFallback (and the
+        Install-WindowsSdkFallback pattern in
+        Deploy-AMDChipsetDriverOnWindowsServer.ps1):
+
+          1) Download $Script:SdkInstallerUrl (fwlink, pinned in the
+             global-constants block) to <WorkRoot>\cache\sdk\winsdksetup.exe.
+             Reuse cache if already present.
+          2) Run winsdksetup.exe with /features $Script:SdkInstallerOptionId
+             (OptionId.SigningTools) /quiet /norestart.
+          3) Defensive verify: a non-zero installer exit code with
+             signtool.exe present afterwards is treated as
+             "already installed" (warn-only). Only a missing signtool.exe
+             after install is a hard failure.
+
+        Returns the absolute path to the discovered signtool.exe so the
+        caller does not need to re-invoke Resolve-SignToolExe.
+
+    .OUTPUTS
+        [string] - absolute path to signtool.exe
+
+    .NOTES
+        Network access is required. signtool.exe is part of the Windows
+        SDK; only the SigningTools feature is installed, never the full SDK.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    $cacheDir = Join-Path $Script:WorkRoot 'cache\sdk'
+    if (-not (Test-Path -LiteralPath $cacheDir)) {
+        New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+    }
+    $exePath = Join-Path $cacheDir 'winsdksetup.exe'
+
+    Write-Step ('SDK installer version : {0} (pinned)' -f $Script:SdkInstallerVersion)
+    Write-Step ('SDK installer URL     : {0}' -f $Script:SdkInstallerUrl)
+    Write-Step ('Cache path            : {0}' -f $exePath)
+    Write-Step ('Feature               : {0}' -f $Script:SdkInstallerOptionId)
+
+    if (Test-Path -LiteralPath $exePath) {
+        $fi = Get-Item -LiteralPath $exePath
+        Write-Step ('Reusing cached winsdksetup.exe ({0:N0} bytes)' -f $fi.Length)
+    } else {
+        Write-Step 'Downloading winsdksetup.exe from Microsoft Learn fwlink...'
+        try {
+            # Force TLS 1.2 for compatibility with older Server hosts
+            $oldSp = [System.Net.ServicePointManager]::SecurityProtocol
+            [System.Net.ServicePointManager]::SecurityProtocol =
+                [System.Net.SecurityProtocolType]::Tls12
+            try {
+                Invoke-WebRequest -Uri $Script:SdkInstallerUrl `
+                                  -OutFile $exePath `
+                                  -UseBasicParsing
+            } finally {
+                [System.Net.ServicePointManager]::SecurityProtocol = $oldSp
+            }
+        } catch {
+            throw ('Windows SDK installer download failed: {0}' -f $_.Exception.Message)
+        }
+        if (-not (Test-Path -LiteralPath $exePath)) {
+            throw 'Windows SDK installer download appeared to succeed but winsdksetup.exe is not present.'
+        }
+        $fi = Get-Item -LiteralPath $exePath
+        Write-Ok ('winsdksetup.exe downloaded ({0:N0} bytes)' -f $fi.Length)
+    }
+
+    $installArgs = @(
+        '/features', $Script:SdkInstallerOptionId,
+        '/quiet',
+        '/norestart'
+    )
+    Write-Step ('Running: winsdksetup.exe {0}' -f ($installArgs -join ' '))
+
+    # psa-disable-next-line PSA3001 -- Start-Process -ArgumentList is the
+    # canonical pattern for invoking installer EXEs with explicit args;
+    # matches Install-WindowsAdkFallback and the SDK fallback in the
+    # Deploy-AMDChipsetDriverOnWindowsServer.ps1 reference.
+    $proc = Start-Process -FilePath $exePath `
+                          -ArgumentList $installArgs `
+                          -Wait -PassThru
+
+    # Defensive verify by tool presence rather than trusting the exit
+    # code (winsdksetup.exe can exit non-zero when the kit is already
+    # on the machine).
+    $signToolPath = Resolve-SignToolExe
+
+    if ($signToolPath) {
+        if ($proc.ExitCode -ne 0) {
+            Write-Caution ('SDK installer exit code {0}; signtool.exe is present, treating as already installed.' -f $proc.ExitCode)
+        }
+        Write-Ok ('Windows SDK Signing Tools installed: {0}' -f $signToolPath)
+        return $signToolPath
+    }
+    throw ('Windows SDK install failed (exit {0}); signtool.exe still not found.' -f $proc.ExitCode)
 }
 
 function New-BootableIso {
