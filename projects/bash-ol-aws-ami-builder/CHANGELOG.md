@@ -21,6 +21,29 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **ENA driver release-list collector (`tests/ena/list-ena-releases.sh`).** Reads
+  the Amazon ENA Linux driver version list from the `amzn-drivers` GitHub repo and
+  writes the static snapshot `tests/ena/ena-driver-releases.json` (70 versions at
+  capture: `1.1.2` … `2.17.0`), each with its deterministic source `tarball_url`
+  **and an explicit availability pre-check of that URL** (`tarball_available` +
+  `tarball_http_status`; all 70 verified `200` at capture). The probe is a
+  self-contained `url_check_status()` function inlined in the script (repo policy:
+  user-run scripts are self-contained; reuse is by copy) so the same
+  existence/fetchability check can be copied into other download-gated tests
+  (e.g. the AWS SSM Agent RPM). `SKIP_TARBALL_CHECK=1` runs list-only.
+  This is the **input** to the forthcoming ENA self-build test matrix (the
+  `{OS major × ENA version × kernel}` ledger consumes the `versions[]` array).
+  The authoritative source is the `ena_linux_<ver>` git tags read via
+  **`git ls-remote --tags`** (git protocol) — NOT the GitHub REST API, which is
+  rate-limited to 60 req/h unauthenticated and shared-IP-exhausted on CI / the
+  sandbox (`403`). The JSON embeds **no timestamp**, so re-running changes it only
+  when the upstream tag set changes (`git diff` then shows exactly the new ENA
+  releases — the "test the diff" signal). Network-dependent and **not** a
+  `run-all.sh` tier; B-T1/B-T2 parse/lint it like any `.sh`, so the host suite
+  goes 200/0 → **202/0** (B-T1 30→31, B-T2 25→26). `TESTING.md` documents the
+  tool. First of the ENA self-build test-matrix pieces (clean-core build
+  orchestrator and the matrix harness follow).
+
 - **ENA driver container compile-test mode (`ENA_BUILDTEST=1`, OL6/OL7/OL8).** Runs
   `install-ena-driver.sh` inside a disposable, kernel-less clean-core container
   by provisioning a full `kernel-uek` + headers up front, after which the

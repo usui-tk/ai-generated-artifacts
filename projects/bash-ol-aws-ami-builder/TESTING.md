@@ -76,11 +76,11 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **199 passed, 1 skipped, 0 failed** (B-T1 = 30,
-B-T2 = 25, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
+Current fixed pass count: **201 passed, 1 skipped, 0 failed** (B-T1 = 31,
+B-T2 = 26, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
 hook-timing = 8, log-format = 12, ena-uek-detect = 9, ena-reporting = 15,
 build-visibility = 17; plus
-B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 200/0
+B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 202/0
 with it). The B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core
 builders (see "Container clean-core test base" below): B-T1 and B-T2 parse- and
 lint-check **every** `.sh` in the project, so adding a script raises both counts
@@ -128,8 +128,8 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 
 | Tier | Layer | Status | Notes |
 |:--|:--|:--|:--|
-| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/`) + 5 shell-bodied heredoc bodies; 30 asserts (the prior `13` note was stale) |
-| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 25 asserts |
+| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) + 5 shell-bodied heredoc bodies; 31 asserts |
+| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 26 asserts |
 | B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
 | B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t3_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
@@ -216,6 +216,44 @@ Run one with `bash tests/cleancore/build-cleancore-ol<MAJOR>.sh [output.tar.gz]`
 drops the build-time `sslverify=0` on a trusted host). The script exits 0 only if
 the build and the unconditional self-test section pass; the network-dependent
 readiness probe SKIPs (never fails the build) when offline.
+
+## ENA driver release list (`tests/ena/`)
+
+`tests/ena/list-ena-releases.sh` collects the Amazon ENA Linux driver release
+list from the `amzn-drivers` GitHub repository and writes the static snapshot
+`tests/ena/ena-driver-releases.json`. This snapshot is the **input** to the ENA
+self-build test matrix: "test every ENA version" iterates the `versions[]`
+array, and each entry carries the deterministic source `tarball_url`
+(`…/archive/refs/tags/ena_linux_<ver>.tar.gz`) that `install-ena-driver.sh`
+fetches. Each entry ALSO carries an explicit availability pre-check of that
+tarball URL — `tarball_available` (bool) + `tarball_http_status` — so the matrix
+can gate on whether a given version is actually fetchable before it tries to
+build it. The probe is a self-contained `url_check_status()` function **inlined**
+in the script (repo policy: user-run scripts are self-contained — no shared
+library / no config externalization; reuse is **by copy**), written so the same
+existence/fetchability check can be copied as-is into other download-gated tests
+(e.g. the AWS SSM Agent RPM on `s3.amazonaws.com`). It probes with HEAD,
+following the `github.com`→`codeload` 302 to a real `200`/`404`, and honors
+`INSECURE_TLS=1` (curl `-k`) + `URL_CHECK_TIMEOUT`; top-level `available_count` /
+`unavailable_count` summarise the probe. `SKIP_TARBALL_CHECK=1` runs list-only
+(availability fields → `null` / `"unchecked"`).
+
+The authoritative version source is the set of git tags
+`ena_linux_<MAJOR>.<MINOR>.<PATCH>`, read with **`git ls-remote --tags`** (the
+git protocol), NOT the GitHub REST API. `ls-remote` needs no auth and is not
+subject to the REST API's 60-request/hour unauthenticated rate limit, which is
+shared-IP-exhausted on CI runners and the sandbox (the REST `/tags` endpoint
+returns `403 rate limit exceeded` there). The JSON embeds **no timestamp**, so
+re-running changes it only when the upstream tag set changes — `git diff` after
+a refresh shows exactly the newly released ENA versions (the "test the diff"
+signal). Run it manually / on demand (it is network-dependent and **not** a
+`run-all.sh` tier; B-T1/B-T2 parse- and lint-check the script like any other):
+
+```sh
+bash tests/ena/list-ena-releases.sh                      # -> tests/ena/ena-driver-releases.json
+SKIP_TARBALL_CHECK=1 bash tests/ena/list-ena-releases.sh # fast, list only (no probes)
+bash tests/ena/list-ena-releases.sh out.json             # explicit output path
+```
 
 ## ENA driver container compile-test (`ENA_BUILDTEST`)
 
