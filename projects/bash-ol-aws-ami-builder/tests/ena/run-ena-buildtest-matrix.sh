@@ -123,11 +123,19 @@ run_one_buildtest() {
   tar -C "${img}" -xzf "${tarball}"
   cp /etc/resolv.conf "${img}/etc/resolv.conf" 2>/dev/null || true
   cp "${INSTALL_SCRIPT}" "${img}/install-ena-driver.sh"
+  # Force an explicit PATH that includes /bin and run bash by absolute path: the
+  # EL6 clean-core ships bash only at /bin/bash (no usrmerge) and a chroot
+  # inherits the host PATH, so on a usrmerge host (PATH without /bin) the old
+  # 'env ... bash ...' failed with "env: bash: No such file or directory". Using
+  # /bin/bash directly + a known PATH makes both bash and install-ena-driver.sh's
+  # own tools (yum/rpm/curl/...) resolve regardless of the host's PATH.
   unshare --fork --pid --mount --uts --ipc -- bash -c "
+    export PATH=/usr/sbin:/usr/bin:/sbin:/bin
     mount --bind /dev '${img}/dev'
     mount -t proc proc '${img}/proc'
     mount -t sysfs sys '${img}/sys'
-    chroot '${img}' env ENA_BUILDTEST=1 ENA_DRIVER_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}' bash /install-ena-driver.sh
+    export ENA_BUILDTEST=1 ENA_DRIVER_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}'
+    chroot '${img}' /bin/bash /install-ena-driver.sh
   " > "${outlog}" 2>&1 || true
   rm -rf "${img}"
   # No [result] line is a valid outcome (the install script died before its

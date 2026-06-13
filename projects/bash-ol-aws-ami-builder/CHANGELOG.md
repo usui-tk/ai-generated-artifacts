@@ -21,6 +21,21 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **ENA matrix harness: run the ENA build by absolute `/bin/bash` under an
+  explicit PATH (fixes `env: bash: No such file or directory` on usrmerge
+  hosts).** `run_one_buildtest` entered the clean-core with
+  `chroot "$img" env … bash /install-ena-driver.sh`; the `chroot` inherits the
+  host's PATH, but the EL6 clean-core ships bash only at `/bin/bash` (no
+  usrmerge). On a usrmerge host whose PATH omits `/bin`, `env` could not find
+  `bash` and every ENA build failed in ~2 s with `env: bash: No such file or
+  directory` before `install-ena-driver.sh` ran (it worked only where the host
+  PATH happened to include `/bin`). The harness now exports an explicit
+  `PATH=/usr/sbin:/usr/bin:/sbin:/bin` and execs `/bin/bash` by absolute path, so
+  both bash and `install-ena-driver.sh`'s own tools (`yum`/`rpm`/`curl`/…) resolve
+  regardless of the host PATH. Verified in-env on a real OL6 run: `2.9.1` now
+  builds to `ok` (~3 min, kernel module produced) and `2.2.0` fails with its real
+  build reason (UEK Makefile patch did not apply) rather than the exec error.
+
 - **ENA matrix harness: a single build emitting no `[result]` line no longer
   aborts the whole run.** In `run-ena-buildtest-matrix.sh`, `run_one_buildtest`
   ended with a `grep … [result]` whose no-match exit (under `set -o pipefail`)
