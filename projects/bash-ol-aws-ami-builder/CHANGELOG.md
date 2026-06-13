@@ -19,6 +19,17 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed
+
+- **ENA matrix harness: clearer, more user-friendly run logging
+  (`tests/ena/run-ena-buildtest-matrix.sh`).** Each OL is now framed by a `===`
+  banner, the QA-preflight and build-matrix phases by `----` separators, every
+  build line carries an `[i/N]` progress counter, and each OL closes with a
+  `matrix done -- X ok, Y fail, Z skipped (of N)` line plus a final
+  `ENA matrix complete -- ...` summary (mirroring the clean-core builder's
+  result + summary style). Log presentation only -- no behaviour change; the
+  ledger and reports are byte-identical.
+
 ### Fixed
 
 - **ENA matrix harness: run the ENA build by absolute `/bin/bash` under an

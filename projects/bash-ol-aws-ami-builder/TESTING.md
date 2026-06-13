@@ -390,6 +390,12 @@ failures (mirror / `kernel-uek` provision / network hiccups) are retried up to
 real and not retried. The matrix then re-builds the pin as the recorded canary,
 so the pin is built twice by design.
 
+The run log frames each OL with a `===` banner, separates the QA-preflight and
+build-matrix phases with `----` lines, tags every build with an `[i/N]` progress
+counter, and prints a per-OL `matrix done -- X ok, Y fail, Z skipped (of N)` line
+plus a final `ENA matrix complete -- ...` summary (the clean-core builder's
+result + summary style).
+
 ```sh
 # a few cases locally (the full matrix is for the user's env / CI):
 bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --ena-versions "2.9.1 2.2.0"

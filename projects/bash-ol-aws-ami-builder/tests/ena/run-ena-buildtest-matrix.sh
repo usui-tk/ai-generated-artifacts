@@ -99,6 +99,7 @@ INSECURE_TLS="${INSECURE_TLS:-1}"
 log()  { printf '%s [ena-matrix] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 warn() { log "WARNING: $*" >&2; }
 die()  { log "ERROR: $*" >&2; exit 1; }
+hr()   { log "================================================================"; }
 
 # pinned ENA version per OL major (mirrors install-ena-driver.sh's defaults).
 pin_for() { case "$1" in 6) echo 2.9.1 ;; 7) echo 2.17.0 ;; 8) echo 2.17.0 ;; *) echo "" ;; esac; }
@@ -367,17 +368,24 @@ trap 'rm -f "${RESULTS_TSV}"' EXIT
 if [ "${PINNED_ONLY}" = "1" ]; then ena_desc="pinned-only"; elif [ -n "${ENA_VERSIONS}" ]; then ena_desc="${ENA_VERSIONS}"; else ena_desc="all (from release list)"; fi
 log "matrix: OL [${OL_LIST}] x ENA [${ena_desc}]  (INSECURE_TLS=${INSECURE_TLS}, force=${FORCE}, strict=${STRICT})"
 
+g_ok=0; g_fail=0; g_skip=0; g_builds=0; g_ol_ran=0; g_ol_skipped=0
+ol_total="$(echo "${OL_LIST}" | wc -w)"
+ol_pos=0
 for ol in ${OL_LIST}; do
-  case "${ol}" in 6|7|8) : ;; *) warn "OL${ol}: ENA_BUILDTEST is wired for OL6/7/8 only; skipping."; continue ;; esac
+  ol_pos=$(( ol_pos + 1 ))
+  case "${ol}" in 6|7|8) : ;; *) warn "OL${ol}: ENA_BUILDTEST is wired for OL6/7/8 only; skipping."; g_ol_skipped=$(( g_ol_skipped + 1 )); continue ;; esac
 
   # Update gate (default ON; --force bypasses): skip this OL unless the live
   # upstream has a kernel-uek or ENA the ledger has not covered -- before any
   # clean-core build, so a no-update OL costs only the probes.
   if [ "${FORCE}" != "1" ]; then
     if ! gate_should_run_ol "${ol}"; then
+      g_ol_skipped=$(( g_ol_skipped + 1 ))
       continue
     fi
   fi
+  g_ol_ran=$(( g_ol_ran + 1 ))
+  hr; log "OL${ol}: ENA self-build test matrix  (OL ${ol_pos}/${ol_total} in [${OL_LIST}])"; hr
 
   tarball="${CLEANCORE_DIR}/cleancore-ol${ol}.tar.gz"
   if [ ! -f "${tarball}" ] || [ "${REBUILD_CLEANCORE}" = "1" ]; then
@@ -391,6 +399,7 @@ for ol in ${OL_LIST}; do
   # QA preflight (mandatory, every mode incl. --force): a pinned smoke build that
   # the clean-core + install-ena-driver.sh are healthy, before the full matrix.
   # QA-only -- NOT recorded; a clear failure early-exits this OL (ledger untouched).
+  log "---- OL${ol}: QA preflight (pinned $(pin_for "${ol}"), not recorded) ----"
   if ! preflight_qa "${ol}" "$(pin_for "${ol}")" "${tarball}"; then
     continue
   fi
@@ -403,12 +412,15 @@ for ol in ${OL_LIST}; do
     case " ${ordered[*]} " in *" ${v} "*) : ;; *) [ -n "${v}" ] && ordered+=("${v}") ;; esac
   done
 
+  total="${#ordered[@]}"; idx=0; ol_ok=0; ol_fail=0; ol_skip=0
+  log "---- OL${ol}: build matrix (${total} version(s)) ----"
   live_kver=""
   for ver in "${ordered[@]}"; do
     # case it was requested? (pin may not be in --ena-versions) -- only test requested ones + the canary pin.
     if [ -n "${ENA_VERSIONS}" ] || [ "${PINNED_ONLY}" = "1" ]; then
       case " $(versions_for_ol "${ol}") ${pin} " in *" ${ver} "*) : ;; *) continue ;; esac
     fi
+    idx=$(( idx + 1 ))
     if [ "${FORCE}" != "1" ] && [ -n "${live_kver}" ]; then
       if python3 -c "
 import json,sys,os
@@ -418,11 +430,12 @@ d=json.load(open(p))
 k=(sys.argv[2],sys.argv[3],sys.argv[4])
 sys.exit(0 if any((e['osmajor'],e['ena_version'],e['kver'])==k for e in d.get('entries',[])) else 1)
 " "${LEDGER}" "${ol}" "${ver}" "${live_kver}"; then
-        log "OL${ol} ENA ${ver}: SKIP (already in ledger for kver ${live_kver})"
+        log "OL${ol} [${idx}/${total}] ENA ${ver}: SKIP (already in ledger for kver ${live_kver})"
+        ol_skip=$(( ol_skip + 1 ))
         continue
       fi
     fi
-    log "OL${ol} ENA ${ver}: building (ENA_BUILDTEST)..."
+    log "OL${ol} [${idx}/${total}] ENA ${ver}: building (ENA_BUILDTEST)..."
     blog="$(mktemp)"
     rjson="$(run_one_buildtest "${ol}" "${ver}" "${tarball}" "${blog}" || true)"
     if [ -z "${rjson}" ]; then
@@ -432,15 +445,24 @@ sys.exit(0 if any((e['osmajor'],e['ena_version'],e['kver'])==k for e in d.get('e
     if [ "${st}" != "ok" ]; then
       keep="${CLEANCORE_DIR}/buildtest-ol${ol}-ena${ver}.log"
       cp -f "${blog}" "${keep}" 2>/dev/null || true
-      warn "OL${ol} ENA ${ver}: ${st:-no-result} -- build log preserved at ${keep}"
+      warn "OL${ol} [${idx}/${total}] ENA ${ver}: ${st:-no-result} -- build log preserved at ${keep}"
+      ol_fail=$(( ol_fail + 1 ))
+    else
+      ol_ok=$(( ol_ok + 1 ))
     fi
     rm -f "${blog}"
     printf '%s\t%s\t%s\n' "${ol}" "${ver}" "${rjson}" >> "${RESULTS_TSV}"
     kv="$(printf '%s' "${rjson}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('kver',''))" 2>/dev/null || true)"
     [ -n "${kv}" ] && live_kver="${kv}"
-    log "OL${ol} ENA ${ver}: ${st:-?} (kver ${live_kver:-?})"
+    log "OL${ol} [${idx}/${total}] ENA ${ver}: ${st:-?} (kver ${live_kver:-?})"
   done
+  log "---- OL${ol}: matrix done -- ${ol_ok} ok, ${ol_fail} fail, ${ol_skip} skipped (of ${total}) ----"
+  g_ok=$(( g_ok + ol_ok )); g_fail=$(( g_fail + ol_fail )); g_skip=$(( g_skip + ol_skip )); g_builds=$(( g_builds + ol_ok + ol_fail ))
 done
+
+hr
+log "ENA matrix complete -- ${g_ok} ok, ${g_fail} fail, ${g_skip} skipped across ${g_builds} build(s); OL ran ${g_ol_ran}, skipped ${g_ol_skipped} (of ${ol_total})"
+hr
 
 # ---- merge into the ledger + regenerate the per-OS Markdown -----------------
 log "updating ledger ${LEDGER} and per-OS reports in ${RESULTS_DIR}"
