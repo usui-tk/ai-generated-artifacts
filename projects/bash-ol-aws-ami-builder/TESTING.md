@@ -357,7 +357,9 @@ Two evidence layers, both committed so the state persists across runs:
   of a run establishes it, so the pinned version is tried first as that per-run
   canary.
 - `tests/ena/RESULTS-ol<N>.md` — a per-OS human report regenerated from the
-  ledger, **newest kernel first**, each kernel a section with an `ok`/total
+  ledger, **newest kernel first**, opening with a `## Latest kernel <kver>`
+  summary of the ENA versions that build on the newest kernel tested (kept
+  visible as kernels accumulate); each kernel a section with an `ok`/total
   count and a per-version table. A `fail` row is recorded evidence (e.g. an ENA
   release too old for that kernel), not a harness error, so the run still exits
   0. A build that emits no `[result]` line at all (its `install-ena-driver.sh`

@@ -80,8 +80,11 @@ This CHANGELOG is **English only** per the repository-wide
   `tests/ena/buildtest-ledger.json` keyed on `(osmajor, ena_version, kver)` with
   kver primary (a combo already present — pass **or** fail — is skipped; a new
   kernel re-tests all; a new ENA release tests only the diff), and per-OS
-  `tests/ena/RESULTS-ol<N>.md` reports regenerated newest-kernel-first (a `fail`
-  is recorded evidence, not a harness error → the run still exits 0). Ships an
+  `tests/ena/RESULTS-ol<N>.md` reports regenerated newest-kernel-first — each
+  opening with a `## Latest kernel <kver> - N/M ok` summary of the ENA versions
+  that build on the newest kernel tested, so the latest result stays visible as
+  kernels accumulate below (a `fail` is recorded evidence, not a harness error →
+  the run still exits 0). Ships an
   in-environment sample ledger / `RESULTS-ol6.md` (OL6: `2.9.1` ok + `2.2.0` fail
   on UEK4 `4.1.12-124.48.6.el6uek`). Manual / on-demand and **not** a
   `run-all.sh` tier; B-T1/B-T2 parse/lint it, so the host suite goes 204/0 →

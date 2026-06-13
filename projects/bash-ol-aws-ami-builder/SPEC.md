@@ -1717,8 +1717,10 @@ the dedup state):
   so the pinned version is tried first as the per-run canary (one build per OL
   per run re-confirms the live kver rather than trusting a possibly-stale probe).
 - **`RESULTS-ol<N>.md`** — a per-OS human report regenerated from the ledger,
-  **newest kernel first**; each kernel is a section with an `ok`/total headline
-  and a per-version table. A `fail` is recorded evidence (e.g. an ENA release too
+  **newest kernel first** and opening with a `## Latest kernel <kver>` summary of
+  the ENA versions that build on the newest kernel tested (so the latest result
+  stays visible as kernels accumulate); each kernel is a section with an
+  `ok`/total headline and a per-version table. A `fail` is recorded evidence (e.g. an ENA release too
   old for that kernel's kcompat), **not** a harness error, so the run exits 0;
   the harness fails non-zero only on an infrastructure error (missing tool, a
   clean-core build that will not produce a rootfs, ...). A build that emits no

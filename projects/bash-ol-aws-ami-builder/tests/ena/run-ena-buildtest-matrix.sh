@@ -271,6 +271,17 @@ for ol, es in sorted(by_ol.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit()
              "`buildtest-ledger.json`. Dedup key `(osmajor, ena_version, kver)`; "
              "newest kernel first. A `fail` row is recorded evidence (e.g. an ENA "
              "release too old for that kernel), not a harness error.", ""]
+    # Prominent summary of the newest kernel tested, so the latest result stays
+    # visible at the top of the report as older kernels accumulate below.
+    if kvers:
+        latest = kvers[0]
+        lrows = sorted([e for e in es if e["kver"] == latest], key=lambda e: vkey(e["ena_version"]), reverse=True)
+        lok = [e["ena_version"] for e in lrows if e["status"] == "ok"]
+        summary = (f"Buildable ENA versions: {', '.join(lok)}." if lok
+                   else "No ENA version builds on this kernel yet.")
+        lines += [f"## Latest kernel `{latest}`  -  {len(lok)}/{len(lrows)} ok", "",
+                  summary, "",
+                  "_Full per-kernel history below, newest first._", ""]
     for kv in kvers:
         rows = sorted([e for e in es if e["kver"] == kv], key=lambda e: vkey(e["ena_version"]), reverse=True)
         n_ok = sum(1 for e in rows if e["status"] == "ok")
