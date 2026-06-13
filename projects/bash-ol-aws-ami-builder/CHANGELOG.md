@@ -21,6 +21,14 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **Test tier rename: `tests/t12_enaverify.sh` -> `tests/t15_enaverify.sh`
+  (resolve a tier-number collision).** The ENA self-build verify tier was
+  introduced as `t12_*` alongside the pre-existing `tests/t12_buildvisibility.sh`
+  -- two `t12_*` tiers. Both ran (the runner globs `tests/t[0-9]*.sh`), so the
+  suite was correct, but the duplicate number bent the "tiers named by execution
+  order" convention. Renamed to the next free number; no logic change (still 12
+  cases). Doc references updated.
+
 - **ENA matrix harness: clearer, more user-friendly run logging
   (`tests/ena/run-ena-buildtest-matrix.sh`).** Each OL is now framed by a `===`
   banner, the QA-preflight and build-matrix phases by `----` separators, every
@@ -68,7 +76,7 @@ This CHANGELOG is **English only** per the repository-wide
   failing fatally otherwise via the new pure `ena_buildtest_verdict`. This fixes
   false `ok` rows in the ENA test-matrix ledger AND makes a production AMI build
   abort on a non-building pin instead of silently shipping the stock driver.
-  Unit-tested by `tests/t12_enaverify.sh` (12 cases: pin/exact/above-window
+  Unit-tested by `tests/t15_enaverify.sh` (12 cases: pin/exact/above-window
   builds pass; stock-only, none-found, and wrong-version fail).
 
 - **ENA matrix harness: run the ENA build by absolute `/bin/bash` under an

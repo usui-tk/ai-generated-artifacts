@@ -723,7 +723,7 @@ all inert.
   failed and only the stock module remains) it is a **fatal `status:fail`**, not
   a false `ok`. This applies in production too: a non-building pin aborts the AMI
   build rather than silently shipping the stock driver. (Pure verdict logic:
-  `ena_buildtest_verdict`, unit-tested by `tests/t12_enaverify.sh`.)
+  `ena_buildtest_verdict`, unit-tested by `tests/t15_enaverify.sh`.)
 
 Validated end-to-end (the driver actually compiles, installs, and verifies) on
 OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`), OL7 (`ena.ko.xz` 2.17.0g,

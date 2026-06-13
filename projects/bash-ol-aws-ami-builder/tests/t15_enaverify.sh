@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t12_enaverify.sh - ENA self-build verify verdict (layer L0/L1, pure unit)
+# tests/t15_enaverify.sh - ENA self-build verify verdict (layer L0/L1, pure unit)
 #
 # Guards the false-ok regression: `dkms build`/`dkms install` on the EL6 dkms
 # (2.4.0) return exit 0 even when the in-guest compile FAILS, and kernel-uek
