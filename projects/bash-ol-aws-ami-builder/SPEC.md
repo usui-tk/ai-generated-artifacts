@@ -1744,7 +1744,7 @@ the dedup state):
   `[result]` line (its `install-ena-driver.sh` died before the result, or
   `unshare`/`chroot` failed) is recorded as a synthetic `fail` and the run
   continues — a single build never aborts the matrix — and any non-`ok` build's
-  full log is preserved to `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log`.
+  full log is preserved to `<cleancore-dir>/buildtest-ol<N>-ena_<ver>.log`.
 
 ### Update gate (default on; `--force` bypasses)
 

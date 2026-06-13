@@ -366,7 +366,7 @@ Two evidence layers, both committed so the state persists across runs:
   died before the result, or `unshare`/`chroot` failed) is recorded as a
   synthetic `fail` and the run continues to the next version/OL — one build never
   aborts the matrix. Any non-`ok` build's full log is preserved to
-  `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log` for diagnosis.
+  `<cleancore-dir>/buildtest-ol<N>-ena_<ver>.log` for diagnosis.
 
 By default each OL is first **update-gated** (turn off with `--force`): before any
 build, the matrix probes the latest `kernel-uek` for the OL (`yum.oracle.com`

@@ -104,7 +104,7 @@ This CHANGELOG is **English only** per the repository-wide
   call site is `… || true`, so an empty result falls through to the existing
   synthetic-`fail` path and the matrix continues to the next version/OL. In
   addition, any non-`ok` build's full log is now preserved to
-  `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log` (and the path is logged) so the
+  `<cleancore-dir>/buildtest-ol<N>-ena_<ver>.log` (and the path is logged) so the
   cause is diagnosable. Verified in-env: a no-result build is recorded as a
   synthetic fail and the run continues; a real OL6 run (`2.9.1` ok + `2.2.0` fail)
   completes with `MATRIX_EXIT=0`, the fail log preserved.

@@ -443,7 +443,7 @@ sys.exit(0 if any((e['osmajor'],e['ena_version'],e['kver'])==k for e in d.get('e
     fi
     st="$(printf '%s' "${rjson}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)"
     if [ "${st}" != "ok" ]; then
-      keep="${CLEANCORE_DIR}/buildtest-ol${ol}-ena${ver}.log"
+      keep="${CLEANCORE_DIR}/buildtest-ol${ol}-ena_${ver}.log"
       cp -f "${blog}" "${keep}" 2>/dev/null || true
       warn "OL${ol} [${idx}/${total}] ENA ${ver}: ${st:-no-result} -- build log preserved at ${keep}"
       ol_fail=$(( ol_fail + 1 ))
