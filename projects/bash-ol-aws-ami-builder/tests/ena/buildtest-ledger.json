@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "ledger_type": "ena-buildtest-matrix",
+  "generated_by": "tests/ena/run-ena-buildtest-matrix.sh",
+  "dedup_key": [
+    "osmajor",
+    "ena_version",
+    "kver"
+  ],
+  "entries": [
+    {
+      "osmajor": "6",
+      "ena_version": "2.2.0",
+      "kver": "4.1.12-124.48.6.el6uek.x86_64",
+      "status": "fail",
+      "dkms": null,
+      "ko": null,
+      "ko_version": null,
+      "reason": "[ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?)",
+      "tested_at": "2026-06-13T01:43:40Z"
+    },
+    {
+      "osmajor": "6",
+      "ena_version": "2.9.1",
+      "kver": "4.1.12-124.48.6.el6uek.x86_64",
+      "status": "ok",
+      "dkms": 1,
+      "ko": "/lib/modules/4.1.12-124.48.6.el6uek.x86_64/extra/ena.ko",
+      "ko_version": "2.9.1g",
+      "reason": null,
+      "tested_at": "2026-06-13T01:43:40Z"
+    }
+  ]
+}

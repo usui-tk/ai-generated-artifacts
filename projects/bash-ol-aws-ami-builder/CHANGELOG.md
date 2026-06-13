@@ -21,6 +21,26 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **ENA self-build test matrix (`tests/ena/run-ena-buildtest-matrix.sh`).** A
+  self-contained harness (inline helpers, no shared library — repo policy for
+  user-run scripts) that runs `ENA_BUILDTEST` across an **OS major × ENA version
+  × kernel** grid for OL6/7/8, driving the existing pieces as separate
+  executables (`tests/cleancore/build-cleancore.sh` for the rootfs,
+  `install-ena-driver.sh ENA_BUILDTEST=1` for each version). The ENA set defaults
+  to the full release list and is narrowable (`--ena-versions`, `--pinned-only`)
+  so a few cases run locally while the full matrix is for the user's env / CI.
+  Two committed evidence layers double as the **dedup state**:
+  `tests/ena/buildtest-ledger.json` keyed on `(osmajor, ena_version, kver)` with
+  kver primary (a combo already present — pass **or** fail — is skipped; a new
+  kernel re-tests all; a new ENA release tests only the diff), and per-OS
+  `tests/ena/RESULTS-ol<N>.md` reports regenerated newest-kernel-first (a `fail`
+  is recorded evidence, not a harness error → the run still exits 0). Ships an
+  in-environment sample ledger / `RESULTS-ol6.md` (OL6: `2.9.1` ok + `2.2.0` fail
+  on UEK4 `4.1.12-124.48.6.el6uek`). Manual / on-demand and **not** a
+  `run-all.sh` tier; B-T1/B-T2 parse/lint it, so the host suite goes 204/0 →
+  **206/0** (B-T1 32→33, B-T2 27→28). `SPEC.md` B.9 and `TESTING.md` document it.
+  Third / last of the ENA self-build test-matrix pieces.
+
 - **Clean-core build orchestrator (`tests/cleancore/build-cleancore.sh`).** A
   self-contained wrapper (inline helpers, no shared library — repo policy for
   user-run scripts) over the per-OL clean-core builders: `--ol <N>` builds one,

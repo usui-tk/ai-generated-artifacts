@@ -76,11 +76,11 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **203 passed, 1 skipped, 0 failed** (B-T1 = 32,
-B-T2 = 27, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
+Current fixed pass count: **205 passed, 1 skipped, 0 failed** (B-T1 = 33,
+B-T2 = 28, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
 hook-timing = 8, log-format = 12, ena-uek-detect = 9, ena-reporting = 15,
 build-visibility = 17; plus
-B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 204/0
+B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 206/0
 with it). The B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core
 builders (see "Container clean-core test base" below): B-T1 and B-T2 parse- and
 lint-check **every** `.sh` in the project, so adding a script raises both counts
@@ -128,8 +128,8 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 
 | Tier | Layer | Status | Notes |
 |:--|:--|:--|:--|
-| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) + 5 shell-bodied heredoc bodies; 32 asserts |
-| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 27 asserts |
+| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) + 5 shell-bodied heredoc bodies; 33 asserts |
+| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 28 asserts |
 | B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
 | B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t3_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
@@ -330,6 +330,45 @@ Validated: OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`), OL7
 (`ena.ko.xz` 2.17.0g, UEK6 `5.4.17-2136.338.4.2.el7uek`), and OL8 (`ena.ko.xz`
 2.17.0g, UEK6 `5.4.17-2136.356.4.2.el8uek`). OL8 self-build is standalone-only;
 the AMI pipeline keeps OL8 on its in-distro ENA driver. OL9+ no-op.
+
+## ENA self-build test matrix (`tests/ena/run-ena-buildtest-matrix.sh`)
+
+`run-ena-buildtest-matrix.sh` runs `ENA_BUILDTEST` across an **OS × ENA-version ×
+kernel** matrix and records the outcomes in a machine-readable **ledger** that is
+both the evidence store and the dedup state (SPEC B.9). It is self-contained
+(inline helpers, no shared library) and drives the existing pieces as separate
+executables — `tests/cleancore/build-cleancore.sh` for the per-OL rootfs and
+`install-ena-driver.sh ENA_BUILDTEST=1` for each version. Targets **OL6/7/8**
+(where `ENA_BUILDTEST` is wired); like the builders it is **manual / on-demand**
+(root + network + multi-hundred-MB builds) and **not** a `run-all.sh` tier.
+
+Two evidence layers, both committed so the state persists across runs:
+
+- `tests/ena/buildtest-ledger.json` — one entry per `(osmajor, ena_version,
+  kver)` with `status` (`ok`/`fail`), `dkms`, `ko`, `ko_version`, `reason`,
+  `tested_at`. This is the **dedup key**: kver is the primary discriminator, so a
+  combo already present (pass **or** fail) is skipped, a **new kernel** re-tests
+  everything (no key matches the new kver), and a **new ENA release** tests only
+  the diff. The live kver per OL is read from the build result — the first build
+  of a run establishes it, so the pinned version is tried first as that per-run
+  canary.
+- `tests/ena/RESULTS-ol<N>.md` — a per-OS human report regenerated from the
+  ledger, **newest kernel first**, each kernel a section with an `ok`/total
+  count and a per-version table. A `fail` row is recorded evidence (e.g. an ENA
+  release too old for that kernel), not a harness error, so the run still exits
+  0.
+
+```sh
+# a few cases locally (the full matrix is for the user's env / CI):
+bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --ena-versions "2.9.1 2.2.0"
+bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --pinned-only   # just the pin
+bash tests/ena/run-ena-buildtest-matrix.sh                        # OL6/7/8 x all releases
+```
+
+The committed `buildtest-ledger.json` / `RESULTS-ol6.md` are an in-environment
+**sample** (OL6, `2.9.1` ok + `2.2.0` fail on UEK4 `4.1.12-124.48.6.el6uek`); a
+full run in the user's environment / CI grows the ledger (the dedup makes that a
+clean append).
 
 ## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
 

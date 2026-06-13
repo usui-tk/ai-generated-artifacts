@@ -1672,6 +1672,60 @@ Each builder tags every block with the environment it runs in:
 
 ---
 
+## B.9 ENA self-build test matrix (`tests/ena/`)
+
+`tests/ena/` holds the ENA driver **self-build test matrix** — a developer / CI
+tool that proves the pinned-or-arbitrary ENA driver actually compiles across an
+**OS major × ENA version × kernel** grid, and records the evidence so re-runs
+skip what is already known. Like the clean-core base (B.8) it is **developer /
+CI-side tooling**, **not** part of the AMI pipeline, and **not** run by
+`tests/run-all.sh`. Two self-contained scripts (inline helpers, no shared
+library — the user-run-script policy):
+
+`list-ena-releases.sh` collects the upstream ENA version list (the
+`ena_linux_<ver>` git tags read via `git ls-remote --tags`, not the rate-limited
+REST API) into the deterministic snapshot `ena-driver-releases.json`, each
+version pre-checked for tarball fetchability (`tarball_available` +
+`tarball_http_status`, via the inline reuse-by-copy `url_check_status`). This is
+the matrix **input**.
+
+`run-ena-buildtest-matrix.sh` drives, for each target OL major (6/7/8 — where
+`ENA_BUILDTEST` is wired) and each target ENA version, the existing pieces **as
+separate executables**: `tests/cleancore/build-cleancore.sh` (B.8) for the
+per-OL clean-core rootfs, then `install-ena-driver.sh ENA_BUILDTEST=1` (A.7) for
+the per-version compile-test. The ENA version set defaults to the full release
+list and is narrowable (`--ena-versions`, `--pinned-only`) so a few cases can run
+locally while the **full** matrix is meant for the user's environment / CI.
+
+### Dedup ledger + per-OS reports
+
+Evidence is two layers, **both committed** so the state persists (a commit *is*
+the dedup state):
+
+- **`buildtest-ledger.json`** — one entry per `(osmajor, ena_version, kver)`
+  carrying `status` (`ok`/`fail`), `dkms`, `ko`, `ko_version`, `reason`,
+  `tested_at`. The triple is the **dedup key**, with **kver primary**: a combo
+  already present (pass **or** fail) is skipped; a **new kernel** (kver changes)
+  shares no key with the old rows so the whole set re-tests; a **new ENA
+  release** is the only missing key so only the diff tests. The live kver per OL
+  is taken from the build **result** — the first build of a run establishes it,
+  so the pinned version is tried first as the per-run canary (one build per OL
+  per run re-confirms the live kver rather than trusting a possibly-stale probe).
+- **`RESULTS-ol<N>.md`** — a per-OS human report regenerated from the ledger,
+  **newest kernel first**; each kernel is a section with an `ok`/total headline
+  and a per-version table. A `fail` is recorded evidence (e.g. an ENA release too
+  old for that kernel's kcompat), **not** a harness error, so the run exits 0;
+  the harness fails non-zero only on an infrastructure error (missing tool, a
+  clean-core build that will not produce a rootfs, ...).
+
+A container is kernel-less, so `ENA_BUILDTEST` provisions a full `kernel-uek` +
+headers up front (A.7); the matrix inherits that and the B.8 host requirements
+(root + `unshare`/`chroot` + network). The committed ledger / `RESULTS-ol6.md`
+are an in-environment **sample** (OL6: `2.9.1` ok, `2.2.0` fail on UEK4
+`4.1.12-124.48.6.el6uek`); a full run grows the ledger as a clean append.
+
+---
+
 # Part C — Quality Gates & Validation Checklist
 
 Before any commit to this directory, all of the following must pass.
