@@ -130,7 +130,10 @@ run_one_buildtest() {
     chroot '${img}' env ENA_BUILDTEST=1 ENA_DRIVER_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}' bash /install-ena-driver.sh
   " > "${outlog}" 2>&1 || true
   rm -rf "${img}"
-  grep -E '\[ena-driver\]\[buildtest\]\[result\]' "${outlog}" | tail -1 | sed 's/^.*\[result\] //'
+  # No [result] line is a valid outcome (the install script died before its
+  # die-handler, or unshare/chroot failed): emit empty, never fail the pipeline
+  # (pipefail + set -e in the caller would otherwise abort the whole matrix).
+  { grep -E '\[ena-driver\]\[buildtest\]\[result\]' "${outlog}" || true; } | tail -1 | sed 's/^.*\[result\] //'
 }
 
 # ---- run the matrix --------------------------------------------------------
@@ -181,15 +184,20 @@ sys.exit(0 if any((e['osmajor'],e['ena_version'],e['kver'])==k for e in d.get('e
     fi
     log "OL${ol} ENA ${ver}: building (ENA_BUILDTEST)..."
     blog="$(mktemp)"
-    rjson="$(run_one_buildtest "${ol}" "${ver}" "${tarball}" "${blog}")"
-    rm -f "${blog}"
+    rjson="$(run_one_buildtest "${ol}" "${ver}" "${tarball}" "${blog}" || true)"
     if [ -z "${rjson}" ]; then
       rjson="{\"status\":\"fail\",\"osmajor\":\"${ol}\",\"ena_version\":\"${ver}\",\"kver\":\"${live_kver}\",\"reason\":\"no result line (infrastructure error)\"}"
     fi
+    st="$(printf '%s' "${rjson}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)"
+    if [ "${st}" != "ok" ]; then
+      keep="${CLEANCORE_DIR}/buildtest-ol${ol}-ena${ver}.log"
+      cp -f "${blog}" "${keep}" 2>/dev/null || true
+      warn "OL${ol} ENA ${ver}: ${st:-no-result} -- build log preserved at ${keep}"
+    fi
+    rm -f "${blog}"
     printf '%s\t%s\t%s\n' "${ol}" "${ver}" "${rjson}" >> "${RESULTS_TSV}"
     kv="$(printf '%s' "${rjson}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('kver',''))" 2>/dev/null || true)"
     [ -n "${kv}" ] && live_kver="${kv}"
-    st="$(printf '%s' "${rjson}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)"
     log "OL${ol} ENA ${ver}: ${st:-?} (kver ${live_kver:-?})"
   done
 done

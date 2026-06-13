@@ -360,7 +360,11 @@ Two evidence layers, both committed so the state persists across runs:
   ledger, **newest kernel first**, each kernel a section with an `ok`/total
   count and a per-version table. A `fail` row is recorded evidence (e.g. an ENA
   release too old for that kernel), not a harness error, so the run still exits
-  0.
+  0. A build that emits no `[result]` line at all (its `install-ena-driver.sh`
+  died before the result, or `unshare`/`chroot` failed) is recorded as a
+  synthetic `fail` and the run continues to the next version/OL — one build never
+  aborts the matrix. Any non-`ok` build's full log is preserved to
+  `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log` for diagnosis.
 
 ```sh
 # a few cases locally (the full matrix is for the user's env / CI):

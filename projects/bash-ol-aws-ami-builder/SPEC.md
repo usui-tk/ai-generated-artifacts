@@ -1721,7 +1721,11 @@ the dedup state):
   and a per-version table. A `fail` is recorded evidence (e.g. an ENA release too
   old for that kernel's kcompat), **not** a harness error, so the run exits 0;
   the harness fails non-zero only on an infrastructure error (missing tool, a
-  clean-core build that will not produce a rootfs, ...).
+  clean-core build that will not produce a rootfs, ...). A build that emits no
+  `[result]` line (its `install-ena-driver.sh` died before the result, or
+  `unshare`/`chroot` failed) is recorded as a synthetic `fail` and the run
+  continues — a single build never aborts the matrix — and any non-`ok` build's
+  full log is preserved to `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log`.
 
 A container is kernel-less, so `ENA_BUILDTEST` provisions a full `kernel-uek` +
 headers up front (A.7); the matrix inherits that and the B.8 host requirements

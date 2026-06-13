@@ -21,6 +21,21 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **ENA matrix harness: a single build emitting no `[result]` line no longer
+  aborts the whole run.** In `run-ena-buildtest-matrix.sh`, `run_one_buildtest`
+  ended with a `grep … [result]` whose no-match exit (under `set -o pipefail`)
+  propagated through the `rjson="$(…)"` command substitution and, under `set -e`,
+  silently terminated the entire matrix — so a build whose `install-ena-driver.sh`
+  exited before its `die` handler (or whose `unshare`/`chroot` failed) killed the
+  run instead of being recorded. The result grep is now no-match-tolerant and the
+  call site is `… || true`, so an empty result falls through to the existing
+  synthetic-`fail` path and the matrix continues to the next version/OL. In
+  addition, any non-`ok` build's full log is now preserved to
+  `<cleancore-dir>/buildtest-ol<N>-ena<ver>.log` (and the path is logged) so the
+  cause is diagnosable. Verified in-env: a no-result build is recorded as a
+  synthetic fail and the run continues; a real OL6 run (`2.9.1` ok + `2.2.0` fail)
+  completes with `MATRIX_EXIT=0`, the fail log preserved.
+
 - **OL6 clean-core: gate the NSS dynamic CA trust workaround to the sandbox.**
   `build-cleancore-ol6.sh` step (C) (`update-ca-trust enable`/`extract`) and its
   `NSS dynamic CA trust enabled (TLS verifiable)` self-test row are a workaround
