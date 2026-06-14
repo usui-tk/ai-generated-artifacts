@@ -1872,8 +1872,9 @@ Go program: the latest RPM is statically linked (no glibc dependency) so its
 runnability is gated by the kernel (the Go runtime's minimum kernel rises per
 toolchain); older versions are dynamically linked (Requires glibc) so the OS
 glibc gates install/run. The ledger dedup key is `(osmajor, ssm_version, kver)`
-with **kver PRIMARY** (a new kernel re-tests every version); `glibc` and
-`go_version` are per-entry fields, measured/recorded empirically.
+with **kver PRIMARY** (a new kernel re-tests every version); `glibc`,
+`go_version`, and the derived `min_kernel` (kernel-axis proxy) are per-entry
+fields, measured/recorded empirically.
 
 **Test depth.** `install-ssm-agent.sh` (a) installs the RPM with `rpm -Uvh` —
 the local file, no repository, so the agent's only real dependency (glibc) is
@@ -1891,10 +1892,16 @@ container's real OL glibc fails-to-install/run a version needing newer glibc. Th
 **kernel axis is NOT** faithful in a container: `uname -r` is the runner's kernel
 (shared by the container), not the OL's UEK, so the Go minimum-kernel never trips
 on a modern runner. The matrix therefore records `kver` as context and surfaces a
-**static kernel-axis proxy** from each release's go.mod `go` directive
-(`list-ssm-releases.sh` records `go_version`; the matrix derives `min_kernel` via
-`go_min_kernel`). go.mod is the source of truth (the spec's `BuildRequires:
-golang` is stale). A faithful kernel verdict needs a kernel-matched runner or a
+**static kernel-axis proxy** from each release's go.mod `go` directive. The
+release list records, mirroring its rpm fields, `go_version` plus
+`go_version_available` (a `go` directive was found) and `go_mod_http_status` (the
+go.mod fetch status -- `404` is a pre-go-modules tag with no go.mod, distinct from
+a `200` carrying no `go` line), and the `min_kernel` proxy; the ledger likewise
+stores `min_kernel` per entry. The proxy mapping (`go_min_kernel`) is one logic,
+reuse-by-copy in `list-ssm-releases.sh` and the matrix, kept in lock-step by
+`tests/t18_ssmverdict.sh`. go.mod is the source of truth (the spec's
+`BuildRequires: golang` is stale). A faithful kernel verdict needs a
+kernel-matched runner or a
 real instance. (Empirically, even the latest's `go 1.25` floor of Linux 3.2 is
 met by OL6 UEK4 `4.1.12`, so the kernel is not the OL6 blocker; glibc + packaging
 are.)
@@ -1918,7 +1925,8 @@ an agent update, affected by the 2026-06-16 deprecation), or `none`.
 
 **Scripts + tests.** `install-ssm-agent.sh` (`SSM_INSTALLTEST` mode, mirroring
 `install-ena-driver.sh`'s `ENA_BUILDTEST`); `tests/ssm/list-ssm-releases.sh` (the
-version list + per-version RPM availability + go.mod `go_version`);
+version list + per-version RPM availability + the go.mod fields `go_version`,
+`go_version_available`, `go_mod_http_status`, and the `min_kernel` proxy);
 `tests/ssm/run-ssm-installtest-matrix.sh` (the matrix). The pure verdict/proxy/
 filter logic (`ssm_ge`, `go_min_kernel`, `ssm_in_scope`, `ssm_compliance`) is
 unit-tested by `tests/t18_ssmverdict.sh` (no container/network). The release list

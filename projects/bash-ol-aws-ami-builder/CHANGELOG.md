@@ -101,6 +101,20 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **SSM release list + ledger now carry self-describing go/kernel fields.** Per the
+  review: `tests/ssm/list-ssm-releases.sh` records, alongside `go_version`, a
+  `go_version_available` (bool) and `go_mod_http_status` (mirroring the rpm fields)
+  so a null `go_version` explains itself -- `404` is a pre-go-modules tag with no
+  go.mod (distinct from a `200` carrying no `go` directive); the data also makes the
+  Go-modules adoption boundary (at SSM `3.0.1390.0`) self-evident. Both the release
+  list and the ledger now store the `min_kernel` kernel-axis proxy as explicit data
+  (previously derived only at report time), so the (Go, kernel) relationship is
+  legible without running code. The `go_min_kernel` mapping is one logic,
+  reuse-by-copy in the lister and the matrix, kept in lock-step by a new
+  `tests/t18_ssmverdict.sh` consistency check (t18: 23 -> 32 cases). The committed
+  `ssm-agent-releases.json` and sample `ssm-installtest-ledger.json` + `RESULTS-ol6.md`
+  were regenerated with the new fields. SPEC B.10 + TESTING updated.
+
 - **Both clean-core matrices now set an explicit, per-driver build work-dir
   (`--work-dir`), so concurrent ENA + SSM runs never collide.**
   `run-ena-buildtest-matrix.sh` and `run-ssm-installtest-matrix.sh` previously let

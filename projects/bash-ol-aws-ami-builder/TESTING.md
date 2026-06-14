@@ -441,13 +441,17 @@ yum-over-HTTPS quirk is avoided) and runs `amazon-ssm-agent -version` locally
 (no AWS/IMDS) to prove the Go runtime loads. `status=ok` requires install + run.
 
 The compatibility surface is `(kernel, glibc) x version`; the ledger dedups on
-`(osmajor, ssm_version, kver)` kver-PRIMARY with `glibc` + `go_version` per entry.
-**Fidelity:** the glibc axis is faithful (the container's real OL glibc gates a
-dynamic version), but the **kernel axis is not** in a container — `kver` is the
-runner's kernel, so the matrix records it as context and surfaces a static
-kernel-axis proxy from each release's go.mod `go` directive (`list-ssm-releases.sh`
-records `go_version`; the matrix derives `min_kernel` via `go_min_kernel`). A
-faithful kernel verdict needs a kernel-matched runner or a real instance.
+`(osmajor, ssm_version, kver)` kver-PRIMARY with `glibc`, `go_version`, and the
+derived `min_kernel` per entry. **Fidelity:** the glibc axis is faithful (the
+container's real OL glibc gates a dynamic version), but the **kernel axis is not**
+in a container — `kver` is the runner's kernel, so the matrix records it as
+context and surfaces a static kernel-axis proxy from each release's go.mod `go`
+directive. `list-ssm-releases.sh` records `go_version` plus `go_version_available`
++ `go_mod_http_status` (so a null `go_version` is self-explaining: `404` = a
+pre-go-modules tag with no go.mod) and the `min_kernel` proxy; the `go_min_kernel`
+mapping is reuse-by-copy across the lister and the matrix, kept in lock-step by
+`tests/t18_ssmverdict.sh`. A faithful kernel verdict needs a kernel-matched runner
+or a real instance.
 
 Default mode tests only versions `>= 3.3.3598.0` (the question "is remediation
 possible?"); `--full` tests every version (for the all-NG case). `RESULTS-ol<N>.md`

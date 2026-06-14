@@ -31,11 +31,19 @@
 # install-test is faithful on glibc but NOT on the kernel axis -- it runs on the
 # runner's kernel). The reliable, recordable signal is the `go` directive in the
 # release's go.mod, fetched per version from raw.githubusercontent.com (a tiny
-# file -- no 25 MB source tarball). Recorded as `go_version`; the matrix derives a
-# `min_kernel` proxy from it. (The spec file's `BuildRequires: golang` is STALE --
-# it reads "1.15.12" even on the latest, which go.mod shows is go 1.25 -- so go.mod
-# is the source of truth.) Set SKIP_GO_VERSION=1 to skip the per-version go.mod
-# fetch (emitted as null).
+# file -- no 25 MB source tarball). Each version records, mirroring the rpm fields:
+#   go_version           the `go` directive (e.g. "1.24"), or null
+#   go_version_available  true/false -- whether a go_version was found (false on
+#                        pre-go-modules tags, which have no go.mod at all)
+#   go_mod_http_status   the go.mod fetch status ("200", "404", ...): "404" is the
+#                        pre-modules absence; a "200" with go_version=null would be
+#                        a go.mod present but carrying no `go` directive
+#   min_kernel           the kernel-axis proxy derived from go_version via
+#                        go_min_kernel() ("3.2" / "2.6.32" / "2.6.23" / "unknown")
+# (The spec file's `BuildRequires: golang` is STALE -- it reads "1.15.12" even on
+# the latest, which go.mod shows is go 1.25 -- so go.mod is the source of truth.)
+# Set SKIP_GO_VERSION=1 to skip the per-version go.mod fetch (the four fields are
+# then null/unchecked/unknown).
 #
 # DETERMINISTIC OUTPUT. No timestamp embedded: re-running changes the file ONLY
 # when the upstream tag set (or an RPM's availability) changes, so `git diff`
@@ -92,17 +100,37 @@ url_check_status() {
 # Fetch the `go` directive from a release's go.mod (the kernel-axis build signal),
 # via raw.githubusercontent.com (a tiny file -- not the 25 MB source tarball).
 # Echoes e.g. "1.24", or "" if unavailable. Honors INSECURE_TLS / URL_CHECK_TIMEOUT.
-go_version_for() {
-  local ver="$1" url to gomod
+# Probe a release's go.mod (the kernel-axis build signal) via raw.githubusercontent
+# (a tiny file -- not the 25 MB source tarball). Echoes "<http_status>\t<go_ver>"
+# (go_ver empty when the file is absent or carries no `go` directive). Does NOT use
+# curl -f, so a 404 yields the status (404) + empty version rather than an error.
+probe_gomod() {
+  local ver="$1" url to resp status body
   url="${GOMOD_URL_TMPL//<ver>/${ver}}"
   to="${URL_CHECK_TIMEOUT:-25}"
-  local -a opts=(-fsSL --max-time "${to}")
+  local -a opts=(-sS --max-time "${to}" -w '\n%{http_code}')
   if [ "${INSECURE_TLS:-0}" = "1" ]; then opts+=(-k); fi
-  gomod="$(curl "${opts[@]}" "${url}" 2>/dev/null || true)"
-  # `|| true`: pre-go-modules tags (and 404s) have no `go` directive, so grep
-  # finds nothing and returns non-zero; without this the `gv="$(...)"` caller
-  # would abort under `set -e`. Empty output -> recorded as null.
-  printf '%s\n' "${gomod}" | grep -oE '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}' || true
+  resp="$(curl "${opts[@]}" "${url}" 2>/dev/null || true)"
+  status="$(printf '%s' "${resp}" | tail -n1)"
+  body="$(printf '%s' "${resp}" | sed '$d')"
+  printf '%s\t%s\n' "${status:-000}" \
+    "$(printf '%s\n' "${body}" | grep -oE '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}' || true)"
+}
+
+# Map a go.mod `go` directive (e.g. 1.24) to the Go toolchain's published MINIMUM
+# Linux kernel (the kernel-axis proxy). REUSE-BY-COPY of go_min_kernel() in
+# tests/ssm/run-ssm-installtest-matrix.sh -- keep the two identical (the shared
+# logic is exercised by tests/t18_ssmverdict.sh). Empty -> "unknown".
+go_min_kernel() {
+  local gov="${1:-}" maj min
+  [ -n "${gov}" ] || { printf 'unknown'; return 0; }
+  maj="${gov%%.*}"; min="${gov#*.}"; min="${min%%.*}"
+  case "${maj}" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
+  case "${min}" in ''|*[!0-9]*) min=0 ;; esac
+  if [ "${maj}" -gt 1 ]; then printf '3.2'; return 0; fi
+  if   [ "${min}" -ge 21 ]; then printf '3.2'
+  elif [ "${min}" -ge 18 ]; then printf '2.6.32'
+  else printf '2.6.23'; fi
 }
 
 log "fetching SSM Agent tags from ${SSM_REPO_URL} (git ls-remote --tags)"
@@ -172,14 +200,16 @@ unavail=0
       if [ $((i % 10)) -eq 0 ]; then log "  ...checked ${i}/${count}"; fi
     fi
     if [ "${SKIP_GO_VERSION}" = "1" ]; then
-      gov="null"
+      gov="null"; gv_avail="null"; gomod_status="unchecked"; mink="unknown"
     else
-      gv="$(go_version_for "${v}")"
-      if [ -n "${gv}" ]; then gov="\"${gv}\""; else gov="null"; fi
+      gv="$(probe_gomod "${v}")"
+      gomod_status="${gv%%$'\t'*}"; gv="${gv#*$'\t'}"
+      if [ -n "${gv}" ]; then gov="\"${gv}\""; gv_avail="true"; else gov="null"; gv_avail="false"; fi
+      mink="$(go_min_kernel "${gv}")"
     fi
     if [ "${i}" -eq "${count}" ]; then sep=""; else sep=","; fi
-    body+="$(printf '    { "version": "%s", "rpm_url": "%s", "rpm_available": %s, "rpm_http_status": "%s", "go_version": %s }%s\n' \
-      "${v}" "${url}" "${av}" "${status}" "${gov}" "${sep}")"
+    body+="$(printf '    { "version": "%s", "rpm_url": "%s", "rpm_available": %s, "rpm_http_status": "%s", "go_version": %s, "go_version_available": %s, "go_mod_http_status": "%s", "min_kernel": "%s" }%s\n' \
+      "${v}" "${url}" "${av}" "${status}" "${gov}" "${gv_avail}" "${gomod_status}" "${mink}" "${sep}")"
     body+=$'\n'
   done <<< "${versions}"
   printf '  "available_count": %s,\n' "${avail}"

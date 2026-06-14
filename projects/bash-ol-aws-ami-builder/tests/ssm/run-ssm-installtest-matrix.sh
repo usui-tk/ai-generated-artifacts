@@ -437,6 +437,7 @@ if os.path.exists(tsv_path):
             "kver": str(r.get('kver', '')),
             "glibc": str(r.get('glibc', '')),
             "go_version": gv or '',
+            "min_kernel": go_min_kernel(gv or ''),
             "status": str(r.get('status', '')),
             "ran": bool(r.get('ran', False)),
             "installed_version": str(r.get('installed_version', '')),
@@ -501,7 +502,7 @@ for ol, entries in by_ol.items():
             note = note.replace('|', '\\|')
             lines.append(f"| {e['ssm_version']} | {e.get('status','')} | {'yes' if e.get('ran') else 'no'} | "
                          f"{e.get('glibc','') or '?'} | {e.get('go_version','') or '?'} | "
-                         f"{go_min_kernel(e.get('go_version',''))} | {note} |")
+                         f"{e.get('min_kernel') or go_min_kernel(e.get('go_version',''))} | {note} |")
         lines.append("")
     open(os.path.join(results_dir, f"RESULTS-ol{ol}.md"), 'w').write("\n".join(lines).rstrip("\n") + "\n")
 

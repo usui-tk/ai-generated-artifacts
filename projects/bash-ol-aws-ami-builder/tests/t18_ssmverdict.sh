@@ -70,4 +70,20 @@ assert_eq "compliant-capable" "$(ssm_compliance 3.3.3598.0 "${MIN}")" "max == mi
 assert_eq "ec2messages-only"  "$(ssm_compliance 3.0.1479.0 "${MIN}")" "max < min -> ec2messages-only (non-remediable)"
 assert_eq "none"              "$(ssm_compliance '' "${MIN}")"         "nothing install+ran -> none"
 
+# --- reuse-by-copy consistency: list-ssm-releases.sh carries its own go_min_kernel
+# copy (for the release list's min_kernel column); assert it matches this matrix's.
+LISTER="${PROJ}/tests/ssm/list-ssm-releases.sh"
+if [ -f "${LISTER}" ]; then
+  # shellcheck disable=SC1090
+  . <(sed -n '/^go_min_kernel()/,/^}/p' "${LISTER}" | sed 's/^go_min_kernel()/go_min_kernel_list()/')
+  if declare -F go_min_kernel_list >/dev/null 2>&1; then
+    for g in 1.15 1.18 1.20 1.21 1.24 1.25 "" abc 2.0; do
+      assert_eq "$(go_min_kernel "${g}")" "$(go_min_kernel_list "${g}")" \
+        "list-ssm-releases.sh go_min_kernel matches matrix for go '${g}'"
+    done
+  else
+    t_fail "could not load go_min_kernel from list-ssm-releases.sh"
+  fi
+fi
+
 t_done
