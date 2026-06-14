@@ -1943,15 +1943,20 @@ version list + per-version RPM availability + the go.mod fields `go_version`,
 `tests/ssm/run-ssm-installtest-matrix.sh` (the matrix). The pure verdict/proxy/
 filter logic (`ssm_ge`, `go_min_kernel`, `ssm_in_scope`, `ssm_compliance`) is
 unit-tested by `tests/t18_ssmverdict.sh` (no container/network). The release list
-(`ssm-agent-releases.json`, the deterministic matrix INPUT) and a provisional
-sample ledger (`ssm-installtest-ledger.json`) + `RESULTS-ol6.md` ARE committed,
-generated in-sandbox like the ENA pair (B.9): the release list is the full
-upstream snapshot (206 versions, RPM availability, go.mod `go_version`); the
-sample is an OL6 run of three representative versions (`3.0.1479.0` below the
-minimum, the `3.3.3598.0` boundary, the latest `3.3.4624.0` — all install+run on
-the sandbox's modern kernel, verdict compliant-capable). A real run in the
-maintainer's env / CI (and a kernel-matched runner for a faithful kernel axis)
-grows the ledger via the kver-PRIMARY dedup append.
+(`ssm-agent-releases.json`, the deterministic matrix INPUT) and the ledger
+(`ssm-installtest-ledger.json`) + `RESULTS-ol{6,7,8}.md` ARE committed: the
+release list is the full upstream snapshot (206 versions, RPM availability, go.mod
+`go_version`); the committed ledger and reports are a **real** default-mode
+(`>= 3.3.3598.0`) run on the maintainer's host (30 rows = 10 versions x
+OL6/OL7/OL8), OL6 UEK4 `4.1.12-124.48.6.el6uek` / OL7 UEK6
+`5.4.17-2136.338.4.2.el7uek` / OL8 UEK6 `5.4.17-2136.356.4.2.el8uek`, with
+`test_host_kernel` the runner's OL10 kernel. Each OL is **8/10 ok**: `3.3.3883.0`
+and `3.3.4364.0` are the only fails — their RPMs are not published at the S3 URL
+(HTTP 403), an upstream availability gap, not an install/run incompatibility — so
+every OL's verdict is **compliant-capable** (max install+run `3.3.4624.0` >=
+`3.3.3598.0`). A later run in the maintainer's env / CI (and a kernel-matched
+runner for a faithful kernel axis) grows the ledger via the kver-PRIMARY dedup
+append.
 
 ---
 

@@ -167,6 +167,23 @@ This CHANGELOG is **English only** per the repository-wide
   attach remain B-T7/B-T8 (and the read-only load-readiness verifier).
   Tooling-doc only (dev/CI evidence); the AMI build path is unchanged.
 
+- **SSM install+run matrix: committed the real OL6/OL7/OL8 E2E ledger + reports,
+  replacing the provisional sample (`tests/ssm/`).** The previous
+  `ssm-installtest-ledger.json` / `RESULTS-ol6.md` were a 3-version OL6 sample;
+  they are replaced by the maintainer's real default-mode (`>= 3.3.3598.0`) run
+  (30 rows = 10 versions x OL6/OL7/OL8, one UEK per OL: OL6 UEK4
+  `4.1.12-124.48.6.el6uek`, OL7 UEK6 `5.4.17-2136.338.4.2.el7uek`, OL8 UEK6
+  `5.4.17-2136.356.4.2.el8uek`; `test_host_kernel` = the runner's OL10 kernel).
+  Each OL is 8/10 ok: `3.3.3883.0` and `3.3.4364.0` are the only fails -- their
+  RPMs are not published at the S3 URL (HTTP 403), an upstream availability gap,
+  not an install/run incompatibility -- so every OL's verdict is
+  `compliant-capable` (max install+run `3.3.4624.0` >= `3.3.3598.0`).
+  `RESULTS-ol7.md` / `RESULTS-ol8.md` are added. The ledger was verified
+  well-formed, the reports regenerate byte-identically from it (no hand-edits),
+  and every fail's recorded reason matches its run log. `ssm-agent-releases.json`
+  is unchanged. SPEC B.10 + TESTING updated to describe the real run.
+  Tooling-doc only (dev/CI evidence); the AMI build path is unchanged.
+
 - **Test tier rename: `tests/t12_enaverify.sh` -> `tests/t15_enaverify.sh`
   (resolve a tier-number collision).** The ENA self-build verify tier was
   introduced as `t12_*` alongside the pre-existing `tests/t12_buildvisibility.sh`
