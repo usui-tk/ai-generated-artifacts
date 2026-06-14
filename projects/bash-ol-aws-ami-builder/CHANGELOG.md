@@ -101,7 +101,29 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
-- **SSM release list + ledger now carry self-describing go/kernel fields.** Per the
+- **SSM report now records the OL kernel from the rpm db (not the runner's), and
+  its columns are category-labelled.** Per the review: the install+run test now
+  provisions the OL UEK into the kernel-less container
+  (`yum --enablerepo=<UEKR> install kernel-uek`) the same install-at-test-time way
+  the ENA matrix does, so `kver` is read authoritatively from the rpm db
+  (`rpm -q kernel-uek`, e.g. `4.1.12-124.48.6.el6uek.x86_64`) exactly as `glibc` is
+  -- instead of `uname -r`, which in a container is the runner's kernel, not the
+  OL's. The runner kernel the binary actually executed on is still recorded, now as
+  a separate `test_host_kernel` field, and the report's fidelity note keeps the
+  honesty that the run does not exercise the OL kernel axis (a container shares the
+  host kernel). The ledger dedup key `(osmajor, ssm_version, kver)` is therefore
+  now keyed on the OL UEK, mirroring ENA. `RESULTS-ol<N>.md` was restructured for
+  clarity: it opens with a paraphrased summary of the AWS Systems Manager Run
+  Command `ec2messages` deprecation (with AWS doc links) so a third-party reader
+  sees why versions below `3.3.3598.0` matter; the constant test environment moves
+  into a `env_kernel` / `env_glibc` / `test_host_kernel` block; and the per-version
+  table uses category-prefixed columns (`agent_go_version` = the agent's Go build,
+  `compat_min_kernel` = the Go-derived compatibility floor) so the three distinct
+  meanings are no longer conflated. `install-ssm-agent.sh`,
+  `run-ssm-installtest-matrix.sh`, the sample ledger + `RESULTS-ol6.md`, and SPEC
+  B.10 + TESTING were updated together.
+
+
   review: `tests/ssm/list-ssm-releases.sh` records, alongside `go_version`, a
   `go_version_available` (bool) and `go_mod_http_status` (mirroring the rpm fields)
   so a null `go_version` explains itself -- `404` is a pre-go-modules tag with no

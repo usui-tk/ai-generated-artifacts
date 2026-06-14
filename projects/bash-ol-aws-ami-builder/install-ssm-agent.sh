@@ -22,8 +22,11 @@
 # runtime's minimum supported Linux rises per toolchain): too old -> "installs
 # but won't run". Older versions are dynamically linked (Requires glibc) -> the
 # OS glibc gates install/run. So the real surface is (kernel, glibc) x version.
-# In a container `uname -r` is the live (host/runner) kernel the binary actually
-# executes against, and `rpm -q glibc` is the OL rootfs's glibc -- both recorded.
+# The OL target kernel is read from the rpm db (`rpm -q kernel-uek`, the UEK
+# provisioned in the test the same way the ENA path provisions it), and `rpm -q
+# glibc` is the OL rootfs's glibc -- both authoritative from rpm. `uname -r` is
+# the live host/runner kernel the binary actually executes against (in a
+# container NOT the OL UEK); it is recorded separately as test_host_kernel.
 #
 # The agent VERSION is the practical proxy for the AWS endpoint requirement:
 # from 2026-06-16 SSM Run Command stops supporting instances on the legacy
@@ -61,14 +64,14 @@ stage() { echo "[ssm-agent]$(_env_tag)[stage] $*"; }
 
 # Per-entry context, filled in as it is measured, so the die-handler can emit a
 # fully-populated fail result.
-osmajor=""; ssm_version="${SSM_AGENT_VERSION}"; kver=""; glibc=""
+osmajor=""; ssm_version="${SSM_AGENT_VERSION}"; kver=""; glibc=""; test_host_kernel=""
 installed_version=""; ran="false"; run_method=""
 
 die() {
   echo "[ssm-agent]$(_env_tag)[ERROR] $*" >&2
   if [[ "${SSM_INSTALLTEST}" == "1" ]]; then
-    printf '[ssm-agent][installtest][result] {"status":"fail","osmajor":"%s","ssm_version":"%s","kver":"%s","glibc":"%s","installed_version":"%s","ran":%s,"run_method":"%s","reason":"%s"}\n' \
-      "${osmajor}" "${ssm_version}" "${kver}" "${glibc}" "${installed_version}" "${ran}" "${run_method}" \
+    printf '[ssm-agent][installtest][result] {"status":"fail","osmajor":"%s","ssm_version":"%s","kver":"%s","test_host_kernel":"%s","glibc":"%s","installed_version":"%s","ran":%s,"run_method":"%s","reason":"%s"}\n' \
+      "${osmajor}" "${ssm_version}" "${kver}" "${test_host_kernel}" "${glibc}" "${installed_version}" "${ran}" "${run_method}" \
       "$(printf '%s' "$*" | sed 's/\\/\\\\/g; s/"/\\"/g')"
   fi
   exit 1
@@ -131,11 +134,57 @@ agent_runs_locally() {
 
 osmajor="$(detect_osmajor)"
 [[ -n "${osmajor}" ]] || die "cannot determine Oracle Linux major version"
-kver="$(uname -r 2>/dev/null || true)"
+
+# The runner/host kernel the agent binary actually executes against. In a
+# container this is the host (runner) kernel, NOT the OL UEK -- recorded as-is
+# for honesty (the install+run was validated against this kernel).
+test_host_kernel="$(uname -r 2>/dev/null || true)"
+
+# ---- SSM_INSTALLTEST: provision the OL UEK kernel into the container --------
+# Mirrors install-ena-driver.sh's ENA_BUILDTEST kernel provisioning, but installs
+# the kernel-uek PACKAGE ONLY (no -devel/gcc/make/dkms): the SSM agent does not
+# build a module, so kernel-uek is provisioned solely so the OL target kernel can
+# be read authoritatively from the rpm db (rpm -q kernel-uek), exactly the way
+# glibc is -- the same (kernel-less clean-core, install-at-test-time) architecture
+# as ENA. A container shares the host kernel, so this does NOT change what the
+# binary runs on (test_host_kernel above); it records the kernel a real OL
+# instance would run. kernel-uek comes from the UEK repo; its deps resolve from
+# the default-enabled base OS repo, so no EPEL is needed. sslverify is dropped
+# only at INSECURE_TLS=1. Production (no SSM_INSTALLTEST) never enters this block.
+if [[ "${SSM_INSTALLTEST}" == "1" ]]; then
+  case "${osmajor}" in
+    6) bt_uek_repo="ol6_UEKR4" ;;
+    7) bt_uek_repo="ol7_UEKR6" ;;
+    8)
+      # OL8 slim ships dnf only; bootstrap the yum compat for the install below.
+      if [[ "${INSECURE_TLS}" == "1" ]]; then
+        dnf -y --setopt=sslverify=false install yum >/dev/null 2>&1 || die "SSM_INSTALLTEST: failed to bootstrap yum on OL8"
+      else
+        dnf -y install yum >/dev/null 2>&1 || die "SSM_INSTALLTEST: failed to bootstrap yum on OL8"
+      fi
+      bt_uek_repo="ol8_UEKR6" ;;
+    *) die "SSM_INSTALLTEST: OS major ${osmajor} not wired for the container kernel record" ;;
+  esac
+  stage "provisioning kernel-uek (OL target-kernel version record) via ${bt_uek_repo}"
+  if [[ "${INSECURE_TLS}" == "1" ]]; then
+    yum -y --setopt=sslverify=false --enablerepo="${bt_uek_repo}" install kernel-uek \
+      || die "SSM_INSTALLTEST: failed to provision kernel-uek"
+  else
+    yum -y --enablerepo="${bt_uek_repo}" install kernel-uek \
+      || die "SSM_INSTALLTEST: failed to provision kernel-uek"
+  fi
+fi
+
+# Target OL kernel, read authoritatively from the rpm db (like glibc below). In
+# SSM_INSTALLTEST the kernel-uek just provisioned is the OL UEK a real instance
+# would run; on a real OL instance (production/standalone) the live UEK is already
+# installed. Falls back to the host kernel only if no kernel-uek is present.
+kver="$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-uek 2>/dev/null | grep -E '^[0-9]' | sort -V | tail -1 || true)"
+[[ -n "${kver}" ]] || kver="${test_host_kernel}"
 glibc="$(rpm -q --qf '%{VERSION}' glibc 2>/dev/null | grep -E '^[0-9]' | head -1 || true)"
 [[ -n "${glibc}" ]] || glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}' || true)"
 
-log "OL${osmajor} | kver ${kver:-?} | glibc ${glibc:-?} | requested SSM ${ssm_version}"
+log "OL${osmajor} | kver ${kver:-?} (host ${test_host_kernel:-?}) | glibc ${glibc:-?} | requested SSM ${ssm_version}"
 
 # ---- install ---------------------------------------------------------------
 rpm_url="$(rpm_url_for "${ssm_version}")"
@@ -184,8 +233,8 @@ fi
 
 # ---- SSM_INSTALLTEST: structured success result for the matrix -------------
 if [[ "${SSM_INSTALLTEST}" == "1" ]]; then
-  printf '[ssm-agent][installtest][result] {"status":"ok","osmajor":"%s","ssm_version":"%s","kver":"%s","glibc":"%s","installed_version":"%s","ran":%s,"run_method":"%s"}\n' \
-    "${osmajor}" "${ssm_version}" "${kver}" "${glibc}" "${installed_version}" "${ran}" "${run_method}"
+  printf '[ssm-agent][installtest][result] {"status":"ok","osmajor":"%s","ssm_version":"%s","kver":"%s","test_host_kernel":"%s","glibc":"%s","installed_version":"%s","ran":%s,"run_method":"%s"}\n' \
+    "${osmajor}" "${ssm_version}" "${kver}" "${test_host_kernel}" "${glibc}" "${installed_version}" "${ran}" "${run_method}"
 fi
 
 log "done."

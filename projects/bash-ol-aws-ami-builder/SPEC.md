@@ -1872,9 +1872,12 @@ Go program: the latest RPM is statically linked (no glibc dependency) so its
 runnability is gated by the kernel (the Go runtime's minimum kernel rises per
 toolchain); older versions are dynamically linked (Requires glibc) so the OS
 glibc gates install/run. The ledger dedup key is `(osmajor, ssm_version, kver)`
-with **kver PRIMARY** (a new kernel re-tests every version); `glibc`,
-`go_version`, and the derived `min_kernel` (kernel-axis proxy) are per-entry
-fields, measured/recorded empirically.
+with **kver PRIMARY**, where `kver` is the **OL UEK** read from the rpm db
+(`rpm -q kernel-uek`, provisioned into the container the same install-at-test-time
+way the ENA matrix provisions it) — so a new OL UEK re-tests every version,
+mirroring ENA. `test_host_kernel` (the runner kernel the binary actually ran on),
+`glibc`, `go_version`, and the derived `min_kernel` (kernel-axis proxy) are
+per-entry fields, measured/recorded empirically.
 
 **Test depth.** `install-ssm-agent.sh` (a) installs the RPM with `rpm -Uvh` —
 the local file, no repository, so the agent's only real dependency (glibc) is
@@ -1889,10 +1892,14 @@ in-container proxy (as the ENA compile-test proxies boot/`ethtool`, B-T7/B-T8).
 
 **Fidelity (verified 2026-06-14).** The **glibc axis is faithful** — the
 container's real OL glibc fails-to-install/run a version needing newer glibc. The
-**kernel axis is NOT** faithful in a container: `uname -r` is the runner's kernel
-(shared by the container), not the OL's UEK, so the Go minimum-kernel never trips
-on a modern runner. The matrix therefore records `kver` as context and surfaces a
-**static kernel-axis proxy** from each release's go.mod `go` directive. The
+**kernel axis is NOT** faithful in a container: the container shares the host
+kernel, so the binary executes on the runner's kernel (recorded as
+`test_host_kernel`), not the OL's UEK, and the Go minimum-kernel never trips on a
+modern runner. `kver` is the **OL UEK**, provisioned into the container and read
+from the rpm db (`rpm -q kernel-uek`, the same install-at-test-time path as ENA)
+so the report records the kernel a real OL instance runs; rather than pretend the
+run tested it, the matrix surfaces a **static kernel-axis proxy** from each
+release's go.mod `go` directive. The
 release list records, mirroring its rpm fields, `go_version` plus
 `go_version_available` (a `go` directive was found) and `go_mod_http_status` (the
 go.mod fetch status -- `404` is a pre-go-modules tag with no go.mod, distinct from
@@ -1913,15 +1920,21 @@ possible here?". `--full` tests every version, for the all-NG case, to show wher
 threshold.
 
 **Update gate.** Unlike ENA (a kernel module, gated on the UEK probe), the SSM
-agent runs on the runner's kernel in a container, so the gate is the SSM-VERSION
-probe (`git ls-remote`): run the OL if upstream's latest is newer than the
-ledger's max for it; a new runner kernel is handled by the kver-PRIMARY dedup.
-Fail-open by default, `--strict` fail-closed, `--force` bypasses.
+agent runs on the host kernel in a container (so its runnability does not depend
+on the OL UEK), so the gate is the SSM-VERSION probe (`git ls-remote`): run the OL
+if upstream's latest is newer than the ledger's max for it; a new OL UEK is still
+handled by the kver-PRIMARY dedup (`kver = rpm -q kernel-uek`). Fail-open by
+default, `--strict` fail-closed, `--force` bypasses.
 
-**Headline output.** Per OL/kver, `RESULTS-ol<N>.md` gives the max install+run
-version and the verdict vs `3.3.3598.0`: `compliant-capable` (max `>=` min,
-remediation possible), `ec2messages-only` (max `<` min — cannot be remediated by
-an agent update, affected by the 2026-06-16 deprecation), or `none`.
+**Headline output.** Per OL/kver, `RESULTS-ol<N>.md` opens with a summary of the
+AWS Run Command ec2messages deprecation (paraphrased, with doc links), then a
+**test-environment** block (`env_kernel` = `rpm -q kernel-uek`, `env_glibc` =
+`rpm -q glibc`, `test_host_kernel` = the runner kernel the binary ran on), and a
+per-version table with category-prefixed columns (`agent_go_version`,
+`compat_min_kernel`). It gives the max install+run version and the verdict vs
+`3.3.3598.0`: `compliant-capable` (max `>=` min, remediation possible),
+`ec2messages-only` (max `<` min — cannot be remediated by an agent update,
+affected by the 2026-06-16 deprecation), or `none`.
 
 **Scripts + tests.** `install-ssm-agent.sh` (`SSM_INSTALLTEST` mode, mirroring
 `install-ena-driver.sh`'s `ENA_BUILDTEST`); `tests/ssm/list-ssm-releases.sh` (the

@@ -435,18 +435,23 @@ Structurally the same as the ENA matrix, but for the AWS SSM Agent (a Go binary,
 not a kernel module). `run-ssm-installtest-matrix.sh` determines per OL which SSM
 versions **install AND run** in a clean-core container and evaluates them against
 the AWS minimum `>= 3.3.3598.0` (the 2026-06-16 Run Command `ec2messages`
-deprecation). `install-ssm-agent.sh SSM_INSTALLTEST=1` installs the RPM with
-`rpm -Uvh` (local file, no repo — only glibc is required, and the EL6
-yum-over-HTTPS quirk is avoided) and runs `amazon-ssm-agent -version` locally
-(no AWS/IMDS) to prove the Go runtime loads. `status=ok` requires install + run.
+deprecation). `install-ssm-agent.sh SSM_INSTALLTEST=1` provisions the OL UEK into
+the kernel-less container (`yum --enablerepo=<UEKR> install kernel-uek`, the same
+install-at-test-time path as the ENA matrix, so `rpm -q kernel-uek` records the OL
+kernel like `rpm -q glibc` records glibc), installs the agent RPM with `rpm -Uvh`
+(local file, no repo — only glibc is required, and the EL6 yum-over-HTTPS quirk is
+avoided) and runs `amazon-ssm-agent -version` locally (no AWS/IMDS) to prove the
+Go runtime loads. `status=ok` requires install + run.
 
 The compatibility surface is `(kernel, glibc) x version`; the ledger dedups on
-`(osmajor, ssm_version, kver)` kver-PRIMARY with `glibc`, `go_version`, and the
-derived `min_kernel` per entry. **Fidelity:** the glibc axis is faithful (the
-container's real OL glibc gates a dynamic version), but the **kernel axis is not**
-in a container — `kver` is the runner's kernel, so the matrix records it as
-context and surfaces a static kernel-axis proxy from each release's go.mod `go`
-directive. `list-ssm-releases.sh` records `go_version` plus `go_version_available`
+`(osmajor, ssm_version, kver)` kver-PRIMARY (`kver` = the OL UEK, `rpm -q
+kernel-uek`, mirroring ENA) with `test_host_kernel` (the runner kernel the binary
+ran on), `glibc`, `go_version`, and the derived `min_kernel` per entry.
+**Fidelity:** the glibc axis is faithful (the container's real OL glibc gates a
+dynamic version), but the **kernel axis is not** in a container — the binary runs
+on the host (runner) kernel, recorded as `test_host_kernel`, while `kver` records
+the OL UEK from the rpm db; the matrix surfaces a static kernel-axis proxy from
+each release's go.mod `go` directive. `list-ssm-releases.sh` records `go_version` plus `go_version_available`
 + `go_mod_http_status` (so a null `go_version` is self-explaining: `404` = a
 pre-go-modules tag with no go.mod) and the `min_kernel` proxy; the `go_min_kernel`
 mapping is reuse-by-copy across the lister and the matrix, kept in lock-step by
@@ -455,8 +460,11 @@ or a real instance.
 
 Default mode tests only versions `>= 3.3.3598.0` (the question "is remediation
 possible?"); `--full` tests every version (for the all-NG case). `RESULTS-ol<N>.md`
-gives, per kver, the max install+run version and the verdict (`compliant-capable`
-/ `ec2messages-only` / `none`). The pure verdict/proxy/filter logic (`ssm_ge`,
+opens with a paraphrased summary of the AWS Run Command ec2messages deprecation
+(with doc links), then a test-environment block (`env_kernel` / `env_glibc` /
+`test_host_kernel`) and a per-version table with category-prefixed columns
+(`agent_go_version`, `compat_min_kernel`); it gives, per kver, the max install+run
+version and the verdict (`compliant-capable` / `ec2messages-only` / `none`). The pure verdict/proxy/filter logic (`ssm_ge`,
 `go_min_kernel`, `ssm_in_scope`, `ssm_compliance`) is unit-tested by
 `tests/t18_ssmverdict.sh` (host-only, no container/network). Run examples:
 
@@ -470,9 +478,10 @@ The matrix is manual / on-demand (root + container; NOT a `run-all.sh` tier). Th
 release list (`ssm-agent-releases.json`) and a provisional sample ledger
 (`ssm-installtest-ledger.json`) + `RESULTS-ol6.md` are committed, generated
 in-sandbox like the ENA pair (the sample is an OL6 run of `3.0.1479.0` /
-`3.3.3598.0` / `3.3.4624.0`, all install+run on the sandbox's modern kernel). A
-real run in the maintainer's env / CI (a kernel-matched runner for the kernel
-axis) grows the ledger via the kver-PRIMARY dedup append. Production integration
+`3.3.3598.0` / `3.3.4624.0`, all install+run; `kver` = the provisioned OL UEK
+`4.1.12-124.48.6.el6uek.x86_64`, with `test_host_kernel` recording the sandbox's
+modern runner kernel). A real run in the maintainer's env / CI (a kernel-matched
+runner for the kernel axis) grows the ledger via the kver-PRIMARY dedup append. Production integration
 into `build-ol-aws-ami.sh` is deferred (decided from the report).
 
 ## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
