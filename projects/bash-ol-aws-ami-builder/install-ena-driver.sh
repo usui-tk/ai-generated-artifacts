@@ -161,7 +161,7 @@ ena_buildtest_verdict() {
   for v in ${found}; do
     if [[ "${v}" == "${want}"* ]]; then printf '%s' "${v}"; return 0; fi
   done
-  printf 'no installed ena.ko matches the requested ENA version %s (found only: %s) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains' \
+  printf 'no installed ena.ko matches the requested ENA version %s (found only: %s) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains' \
     "${want}" "${found}"
   return 1
 }

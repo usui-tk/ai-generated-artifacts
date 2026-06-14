@@ -164,6 +164,22 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **ENA build-test verdict reason no longer hardcodes "EL6" for every OS.** The
+  `ena_buildtest_verdict()` failure message in `install-ena-driver.sh` attributed a
+  failed build to "the EL6 dkms exit 0" masking -- but the function is OS-agnostic
+  and runs for all majors, so the committed `RESULTS-ol7.md` / `RESULTS-ol8.md` (and
+  OL6) carried the EL6-specific claim even on OL7/OL8, where it is inaccurate (the
+  exit-0 quirk is the old EL6 dkms 2.4.0; newer dkms returns non-zero). The reason
+  is rewritten to the OS-agnostic observable fact: the dkms build did not produce a
+  module matching the request, the installed module version (not the build exit
+  status) is authoritative, and only the stock in-tree module remains. The
+  EL6-specific rationale is retained where it belongs -- the code comments
+  explaining WHY the version-based check exists. The committed
+  `buildtest-ledger.json` reason fields (88 rows: 18 OL6, 35 OL7, 35 OL8) were
+  corrected and `RESULTS-ol{6,7,8}.md` regenerated from it (the maintainer's real
+  results are unchanged -- only the explanatory wording). `tests/t15_enaverify.sh`
+  still passes unchanged (it asserts the surviving "stock in-tree module remains").
+
 - **Phase 6 CHECK 2: a self-build that did not take effect is now a `FAIL`
   (`build-ol-aws-ami.sh`).** Layer 3 of the false-ok remediation. CHECK 2 passed
   on mere ENA module presence, so an AMI that requested the self-built pin but

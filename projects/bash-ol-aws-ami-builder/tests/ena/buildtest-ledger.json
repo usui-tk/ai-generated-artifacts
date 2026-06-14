@@ -335,7 +335,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.2.12 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.2.12 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -599,7 +599,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.10.0 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.10.0 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -610,7 +610,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.11.0 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.11.0 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -621,7 +621,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.11.1 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.11.1 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -632,7 +632,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.12.0 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.12.0 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -643,7 +643,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.12.1 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.12.1 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -654,7 +654,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.12.2 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.12.2 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -665,7 +665,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.12.3 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.12.3 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -676,7 +676,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.13.0 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.13.0 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -687,7 +687,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.13.1 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.13.1 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -698,7 +698,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.13.2 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.13.2 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -709,7 +709,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.13.3 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.13.3 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -720,7 +720,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.14.0 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.14.0 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -731,7 +731,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.14.1 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.14.1 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -742,7 +742,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.15.0 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.15.0 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -753,7 +753,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.16.0 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.16.0 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -764,7 +764,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.16.1 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.16.1 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -775,7 +775,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.17.0 (found only: 1.1.2) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.17.0 (found only: 1.1.2) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -786,7 +786,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.1.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.1.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -797,7 +797,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.1.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.1.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -808,7 +808,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.2.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.2.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -819,7 +819,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.3.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.3.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -830,7 +830,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.4.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.4.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -841,7 +841,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.5.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.5.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -852,7 +852,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.5.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.5.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -863,7 +863,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.5.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.5.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -874,7 +874,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.5.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.5.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -885,7 +885,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.6.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.6.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -896,7 +896,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.0.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.0.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -907,7 +907,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.0.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.0.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1105,7 +1105,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.2.12 (found only: 2.12.2g) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.2.12 (found only: 2.12.2g) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1182,7 +1182,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1193,7 +1193,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1204,7 +1204,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1215,7 +1215,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1226,7 +1226,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.4 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.4 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1237,7 +1237,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1248,7 +1248,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1259,7 +1259,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1270,7 +1270,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1281,7 +1281,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.4 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.4 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1292,7 +1292,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.5 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.5 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1303,7 +1303,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.6 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.6 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1314,7 +1314,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.7 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.7 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1325,7 +1325,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.8 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.8 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1336,7 +1336,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.9 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.9 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1347,7 +1347,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.9.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.9.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1358,7 +1358,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.9.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.9.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1369,7 +1369,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.10.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.10.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1380,7 +1380,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.11.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.11.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1391,7 +1391,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.11.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.11.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1402,7 +1402,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.12.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.12.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1413,7 +1413,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.12.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.12.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1556,7 +1556,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.1.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.1.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1567,7 +1567,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.1.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.1.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1578,7 +1578,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.2.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.2.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1589,7 +1589,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.3.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.3.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1600,7 +1600,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.4.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.4.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1611,7 +1611,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.5.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.5.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1622,7 +1622,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.5.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.5.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1633,7 +1633,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.5.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.5.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1644,7 +1644,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.5.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.5.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1655,7 +1655,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 1.6.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 1.6.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1666,7 +1666,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.0.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.0.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1677,7 +1677,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.0.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.0.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1875,7 +1875,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.2.12 (found only: 2.12.2g) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.2.12 (found only: 2.12.2g) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1952,7 +1952,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1963,7 +1963,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1974,7 +1974,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1985,7 +1985,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -1996,7 +1996,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.7.4 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.7.4 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2007,7 +2007,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2018,7 +2018,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2029,7 +2029,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.2 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.2 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2040,7 +2040,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.3 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.3 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2051,7 +2051,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.4 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.4 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2062,7 +2062,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.5 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.5 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2073,7 +2073,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.6 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.6 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2084,7 +2084,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.7 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.7 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2095,7 +2095,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.8 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.8 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2106,7 +2106,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.8.9 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.8.9 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2117,7 +2117,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.9.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.9.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2128,7 +2128,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.9.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.9.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2139,7 +2139,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.10.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.10.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2150,7 +2150,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.11.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.11.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2161,7 +2161,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.11.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.11.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2172,7 +2172,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.12.0 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.12.0 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
@@ -2183,7 +2183,7 @@
       "dkms": null,
       "ko": null,
       "ko_version": null,
-      "reason": "no installed ena.ko matches the requested ENA version 2.12.1 (found only: 2.1.0K) -- the dkms build failed (its non-zero status is masked by the EL6 dkms exit 0) and the stock in-tree module remains",
+      "reason": "no installed ena.ko matches the requested ENA version 2.12.1 (found only: 2.1.0K) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains",
       "tested_at": "2026-06-14T01:17:43Z"
     },
     {
