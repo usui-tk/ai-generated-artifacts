@@ -1791,9 +1791,19 @@ QA build, then the recorded run.
 
 A container is kernel-less, so `ENA_BUILDTEST` provisions a full `kernel-uek` +
 headers up front (A.7); the matrix inherits that and the B.8 host requirements
-(root + `unshare`/`chroot` + network). The committed ledger / `RESULTS-ol6.md`
-are an in-environment **sample** (OL6: `2.9.1` ok, `2.2.0` fail on UEK4
-`4.1.12-124.48.6.el6uek`); a full run grows the ledger as a clean append.
+(root + `unshare`/`chroot` + network). The committed ledger and
+`RESULTS-ol{6,7,8}.md` are a **real** full-release-list run on the maintainer's
+host (210 rows = 70 ENA versions x OL6/OL7/OL8): OL6 UEK4
+`4.1.12-124.48.6.el6uek` builds **6/70** — exactly the `[2.8.6, 2.9.1]`
+buildable window (D.11/D.12; `2.10.0`+ fail on the ECC build-time autodetect,
+older releases predate the `BUILD_KERNEL` UEK-detect patch site or the
+`page_ref_count` floor); OL7 UEK6 `5.4.17-2136.338.4.2.el7uek` and OL8 UEK6
+`5.4.17-2136.356.4.2.el8uek` build **35/70** each. An `ok` row means the
+requested version compiled and DKMS-installed on that kernel — **necessary, not
+sufficient**: real module load and device attach are proven separately on real
+Nitro (B-T7/B-T8), and the read-only load-readiness verifier below adds the
+vermagic / KABI gates. A later run grows the ledger as a clean append
+(kver-primary dedup).
 
 ### Load-readiness verification (external, read-only)
 

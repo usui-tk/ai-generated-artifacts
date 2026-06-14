@@ -412,10 +412,12 @@ bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --pinned-only   # just the pin
 bash tests/ena/run-ena-buildtest-matrix.sh                        # OL6/7/8 x all releases
 ```
 
-The committed `buildtest-ledger.json` / `RESULTS-ol6.md` are an in-environment
-**sample** (OL6, `2.9.1` ok + `2.2.0` fail on UEK4 `4.1.12-124.48.6.el6uek`); a
-full run in the user's environment / CI grows the ledger (the dedup makes that a
-clean append).
+The committed `buildtest-ledger.json` / `RESULTS-ol{6,7,8}.md` are a **real**
+full-release-list run on the maintainer's host (210 rows = 70 ENA versions x
+OL6/OL7/OL8): OL6 UEK4 `4.1.12-124.48.6.el6uek` builds 6/70 (the `[2.8.6,
+2.9.1]` window), OL7/OL8 UEK6 build 35/70 each. An `ok` is compile + DKMS-install
+(necessary, not sufficient; real load/device is B-T7/B-T8). A later run in the
+user's environment / CI grows the ledger (the dedup makes that a clean append).
 
 ## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
 

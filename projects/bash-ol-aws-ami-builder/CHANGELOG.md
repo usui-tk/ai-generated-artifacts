@@ -38,6 +38,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **ENA build-test matrix: committed the real OL6/OL7/OL8 E2E ledger + reports,
+  replacing the in-environment sample (`tests/ena/`).** The previous
+  `buildtest-ledger.json` / `RESULTS-ol6.md` were a 2-row OL6 sample; they are
+  replaced by the maintainer's real full-release-list run (210 rows = 70 ENA
+  versions x OL6/OL7/OL8, one kernel per OL). OL6 UEK4
+  `4.1.12-124.48.6.el6uek` builds 6/70 -- exactly the documented `[2.8.6, 2.9.1]`
+  window (`2.10.0`+ fail on the ECC build-time autodetect); OL7 UEK6 and OL8 UEK6
+  build 35/70 each. `RESULTS-ol7.md` / `RESULTS-ol8.md` are added. The ledger was
+  verified well-formed, the reports regenerate byte-identically from it (no
+  hand-edits), every fail is a real compile/install failure (no synthetic/infra
+  rows), and there are no false-ok rows (the kver-mismatch ledger guard correctly
+  downgraded the OL7/OL8 `2.2.12` row). The generated `RESULTS-ol<N>.md` preamble
+  and SPEC B.9 / TESTING now state explicitly that an `ok` is "compiled +
+  DKMS-installed" -- necessary, not sufficient; real module load and device
+  attach remain B-T7/B-T8 (and the read-only load-readiness verifier).
+  Tooling-doc only (dev/CI evidence); the AMI build path is unchanged.
+
 - **Test tier rename: `tests/t12_enaverify.sh` -> `tests/t15_enaverify.sh`
   (resolve a tier-number collision).** The ENA self-build verify tier was
   introduced as `t12_*` alongside the pre-existing `tests/t12_buildvisibility.sh`
