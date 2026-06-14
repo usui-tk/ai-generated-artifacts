@@ -21,6 +21,35 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **AWS SSM Agent install+run test harness (`tests/ssm/`, `install-ssm-agent.sh`).**
+  A dev/CI harness structurally mirroring the ENA matrix (B.9): per OL major it
+  determines, in a disposable clean-core container, which SSM Agent versions
+  **install and run** on this `(kernel, glibc)`, and evaluates them against the
+  AWS minimum `>= 3.3.3598.0` (the 2026-06-16 Run Command `ec2messages`
+  deprecation). New `install-ssm-agent.sh` (`SSM_INSTALLTEST` mode) installs the
+  RPM with `rpm -Uvh` (local file, no repo — only glibc is required, avoiding the
+  EL6 yum-over-HTTPS NSS quirk; the NOKEY warning and the container's missing init
+  system are benign) and runs `amazon-ssm-agent -version` locally (no AWS/IMDS) to
+  prove the Go runtime loads; `status=ok` requires install + run + version match.
+  `tests/ssm/list-ssm-releases.sh` collects the version list (`git ls-remote`) with
+  per-version RPM availability and the **go.mod `go_version`** (fetched from
+  raw.githubusercontent.com — the kernel-axis build signal; the spec's `golang`
+  BuildRequires is stale). `tests/ssm/run-ssm-installtest-matrix.sh` runs the
+  matrix: ledger dedup `(osmajor, ssm_version, kver)` kver-PRIMARY with `glibc` +
+  `go_version` per entry; a default (`>= 3.3.3598.0`) vs `--full` version filter;
+  an SSM-version update gate; and per-OS `RESULTS-ol<N>.md` with the max-install+run
+  verdict (`compliant-capable` / `ec2messages-only` / `none`) plus a
+  `min_kernel(proxy)` column derived from `go_version`. **Fidelity:** the glibc
+  axis is faithful in a container; the kernel axis is not (`kver` is the runner's
+  kernel), so the go.mod-derived proxy is the static kernel-axis signal and a
+  faithful kernel verdict needs a kernel-matched runner / real instance. The pure
+  verdict/proxy/filter logic is unit-tested by the new `tests/t18_ssmverdict.sh`
+  (23 cases, host-only — no container/network). Manual / on-demand (NOT a
+  `run-all.sh` tier); the ledger + RESULTS are generated on the first real run
+  (not committed); production integration into `build-ol-aws-ami.sh` is deferred.
+  Feasibility verified end-to-end in-sandbox (OL6 clean-core; `3.0.1479.0` dynamic
+  and `3.3.4624.0` static both install + run). SPEC B.10 + TESTING added.
+
 - **Load-readiness bundle PRODUCER in the ENA matrix
   (`tests/ena/run-ena-buildtest-matrix.sh`).** Completes the pair with the 0016
   verifier: after each build, a dumb `cp` (no load-readiness judgement, no branch

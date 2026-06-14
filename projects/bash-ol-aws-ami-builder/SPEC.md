@@ -1855,6 +1855,79 @@ The `cp` layout is contract-tested against the verifier's read-paths by
 
 ---
 
+## B.10 SSM Agent install+run test matrix (`tests/ssm/`)
+
+A dev/CI harness, structurally the same as the ENA matrix (B.9), that determines
+per OL major (6/7/8) which AWS SSM Agent versions **install AND run** in a
+disposable clean-core container, and evaluates them against the AWS requirement
+**SSM Agent `>= 3.3.3598.0`** (from 2026-06-16 SSM Run Command drops the legacy
+`ec2messages` endpoint; agents at/above this use `ssmmessages`). It reuses
+`tests/cleancore/build-cleancore.sh` for the rootfs and drives
+`install-ssm-agent.sh SSM_INSTALLTEST=1` per version. Manual / on-demand (NOT a
+`run-all.sh` tier); production integration into the AMI pipeline is deferred
+(decided from the report) — `build-ol-aws-ami.sh` does not install SSM today.
+
+**The compatibility surface is `(kernel, glibc) x ssm_version`.** The agent is a
+Go program: the latest RPM is statically linked (no glibc dependency) so its
+runnability is gated by the kernel (the Go runtime's minimum kernel rises per
+toolchain); older versions are dynamically linked (Requires glibc) so the OS
+glibc gates install/run. The ledger dedup key is `(osmajor, ssm_version, kver)`
+with **kver PRIMARY** (a new kernel re-tests every version); `glibc` and
+`go_version` are per-entry fields, measured/recorded empirically.
+
+**Test depth.** `install-ssm-agent.sh` (a) installs the RPM with `rpm -Uvh` —
+the local file, no repository, so the agent's only real dependency (glibc) is
+enforced against the rpm DB and the EL6 yum-over-HTTPS NSS quirk never arises;
+the unsigned-to-us NOKEY warning and the container's missing init system (the
+%post upstart/systemd start) are benign — then (b) runs the binary locally
+(`amazon-ssm-agent -version`, no AWS/IMDS) to prove the Go runtime + linked libs
+load. `status=ok` requires install AND run (and the installed version to match
+the request). The ec2messages-vs-ssmmessages endpoint behaviour is real-instance
+runtime, not container-testable; the running VERSION vs `3.3.3598.0` is the
+in-container proxy (as the ENA compile-test proxies boot/`ethtool`, B-T7/B-T8).
+
+**Fidelity (verified 2026-06-14).** The **glibc axis is faithful** — the
+container's real OL glibc fails-to-install/run a version needing newer glibc. The
+**kernel axis is NOT** faithful in a container: `uname -r` is the runner's kernel
+(shared by the container), not the OL's UEK, so the Go minimum-kernel never trips
+on a modern runner. The matrix therefore records `kver` as context and surfaces a
+**static kernel-axis proxy** from each release's go.mod `go` directive
+(`list-ssm-releases.sh` records `go_version`; the matrix derives `min_kernel` via
+`go_min_kernel`). go.mod is the source of truth (the spec's `BuildRequires:
+golang` is stale). A faithful kernel verdict needs a kernel-matched runner or a
+real instance. (Empirically, even the latest's `go 1.25` floor of Linux 3.2 is
+met by OL6 UEK4 `4.1.12`, so the kernel is not the OL6 blocker; glibc + packaging
+are.)
+
+**Modes.** Default tests only versions meeting the minimum (`>= MIN_SSM_VERSION`,
+default `3.3.3598.0`, the boundary included) — the question "is remediation
+possible here?". `--full` tests every version, for the all-NG case, to show where
+`(kernel, glibc)` caps out (a detailed ledger). `--min-version` overrides the
+threshold.
+
+**Update gate.** Unlike ENA (a kernel module, gated on the UEK probe), the SSM
+agent runs on the runner's kernel in a container, so the gate is the SSM-VERSION
+probe (`git ls-remote`): run the OL if upstream's latest is newer than the
+ledger's max for it; a new runner kernel is handled by the kver-PRIMARY dedup.
+Fail-open by default, `--strict` fail-closed, `--force` bypasses.
+
+**Headline output.** Per OL/kver, `RESULTS-ol<N>.md` gives the max install+run
+version and the verdict vs `3.3.3598.0`: `compliant-capable` (max `>=` min,
+remediation possible), `ec2messages-only` (max `<` min — cannot be remediated by
+an agent update, affected by the 2026-06-16 deprecation), or `none`.
+
+**Scripts + tests.** `install-ssm-agent.sh` (`SSM_INSTALLTEST` mode, mirroring
+`install-ena-driver.sh`'s `ENA_BUILDTEST`); `tests/ssm/list-ssm-releases.sh` (the
+version list + per-version RPM availability + go.mod `go_version`);
+`tests/ssm/run-ssm-installtest-matrix.sh` (the matrix). The pure verdict/proxy/
+filter logic (`ssm_ge`, `go_min_kernel`, `ssm_in_scope`, `ssm_compliance`) is
+unit-tested by `tests/t18_ssmverdict.sh` (no container/network). The ledger
+(`ssm-installtest-ledger.json`) and `RESULTS-ol<N>.md` are generated on the first
+real run (a long-running, root + container step for the maintainer's env / CI,
+and a kernel-matched runner for the kernel axis) — not committed as a sample.
+
+---
+
 # Part C — Quality Gates & Validation Checklist
 
 Before any commit to this directory, all of the following must pass.

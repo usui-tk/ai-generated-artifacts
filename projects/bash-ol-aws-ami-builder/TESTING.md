@@ -429,6 +429,45 @@ OL6/OL7/OL8): OL6 UEK4 `4.1.12-124.48.6.el6uek` builds 6/70 (the `[2.8.6,
 (necessary, not sufficient; real load/device is B-T7/B-T8). A later run in the
 user's environment / CI grows the ledger (the dedup makes that a clean append).
 
+## SSM Agent install+run test matrix (`tests/ssm/`)
+
+Structurally the same as the ENA matrix, but for the AWS SSM Agent (a Go binary,
+not a kernel module). `run-ssm-installtest-matrix.sh` determines per OL which SSM
+versions **install AND run** in a clean-core container and evaluates them against
+the AWS minimum `>= 3.3.3598.0` (the 2026-06-16 Run Command `ec2messages`
+deprecation). `install-ssm-agent.sh SSM_INSTALLTEST=1` installs the RPM with
+`rpm -Uvh` (local file, no repo — only glibc is required, and the EL6
+yum-over-HTTPS quirk is avoided) and runs `amazon-ssm-agent -version` locally
+(no AWS/IMDS) to prove the Go runtime loads. `status=ok` requires install + run.
+
+The compatibility surface is `(kernel, glibc) x version`; the ledger dedups on
+`(osmajor, ssm_version, kver)` kver-PRIMARY with `glibc` + `go_version` per entry.
+**Fidelity:** the glibc axis is faithful (the container's real OL glibc gates a
+dynamic version), but the **kernel axis is not** in a container — `kver` is the
+runner's kernel, so the matrix records it as context and surfaces a static
+kernel-axis proxy from each release's go.mod `go` directive (`list-ssm-releases.sh`
+records `go_version`; the matrix derives `min_kernel` via `go_min_kernel`). A
+faithful kernel verdict needs a kernel-matched runner or a real instance.
+
+Default mode tests only versions `>= 3.3.3598.0` (the question "is remediation
+possible?"); `--full` tests every version (for the all-NG case). `RESULTS-ol<N>.md`
+gives, per kver, the max install+run version and the verdict (`compliant-capable`
+/ `ec2messages-only` / `none`). The pure verdict/proxy/filter logic (`ssm_ge`,
+`go_min_kernel`, `ssm_in_scope`, `ssm_compliance`) is unit-tested by
+`tests/t18_ssmverdict.sh` (host-only, no container/network). Run examples:
+
+```
+bash tests/ssm/list-ssm-releases.sh                                  # version list + go_version
+bash tests/ssm/run-ssm-installtest-matrix.sh --ol 6                  # OL6, versions >= 3.3.3598.0
+bash tests/ssm/run-ssm-installtest-matrix.sh --ol 6 --full           # OL6, every version
+```
+
+The matrix is manual / on-demand (root + container; NOT a `run-all.sh` tier). The
+ledger + `RESULTS-ol<N>.md` are generated on the first real run (the maintainer's
+env / CI, a kernel-matched runner for the kernel axis), not committed as a sample.
+Production integration into `build-ol-aws-ami.sh` is deferred (decided from the
+report).
+
 ## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
 
 Upstream `oracle-linux-image-tools` ships no `distr/ol6-slim`, so this wrapper
