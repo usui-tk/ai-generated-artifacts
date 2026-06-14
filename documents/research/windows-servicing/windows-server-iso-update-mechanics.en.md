@@ -15,7 +15,8 @@ This article is a synthesis of the technical findings accumulated over several m
 
 The findings in this article were derived empirically, not from documentation alone. The investigation that produced them combined the following methods, repeated across multiple monthly Patch Tuesday cycles:
 
-- **Live-cab inspection** against successive `wsusscn2.cab` snapshots, parsing the Master XML to observe real dependency, bundle, and payload structure rather than assuming a schema.
+- **Live SOAP-API inspection** of the MS-WSUSSS server-server-sync API (§2.6), querying `GetUpdateData` per `(updateId, revision)` to read each update's real bundle → leaf → files → applicability structure directly. **This is the primary and most reliable analysis surface used here**: it returns the same metadata the offline cab carries, but per-update on demand and without the local-parse fragility described next. The bulk of the SSU, applicability, and UUP-composition findings below were derived or re-verified on this surface in the 2026-06 cycle.
+- **Live-cab inspection** against successive `wsusscn2.cab` snapshots. This surface is *authoritative* (it is what the Windows Update Agent itself consumes) but, in practice, **local parsing of it is frequently incomplete** — the deeply nested per-package CABs and their internal CBS manifests are awkward to extract and were a recurring source of partial/unreliable reads. It remains a valid cross-check, but where it disagreed with — or could not resolve what — the SOAP API showed, the SOAP observation is treated as the trusted source.
 - **WIM inspection** across Server 2016 / 2019 / 2022 / 2025 Evaluation media, comparing the `\Windows\Boot\` layout and the presence or absence of `_EX` boot binaries per version.
 - **Authenticode chain verification** via `X509Chain.Build()`, traversing each boot binary's chain to its trust anchor rather than trusting the immediate signer's display name.
 - **Microsoft Update Catalog cross-reference validation**, confirming KB-to-build mappings and the combined LCU/SSU download behavior observed in the Catalog.
@@ -148,7 +149,9 @@ When a release-info KB can be turned directly into download URLs via the Catalog
 
 ### 2.4 The wsusscn2.cab offline servicing database
 
-For any question of the form "does update KB-A require KB-B to be installed first?" the most authoritative offline metadata source is the **Windows Update Standalone Scan** database (`wsusscn2.cab`), distributed as a single multi-gigabyte CAB file at `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab`. This file is published roughly twice a month, and a fresh download is required to see updates released since the last publication.
+For any question of the form "does update KB-A require KB-B to be installed first?" the **authoritative** offline metadata source is the **Windows Update Standalone Scan** database (`wsusscn2.cab`), distributed as a single multi-gigabyte CAB file at `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab`. This file is published roughly twice a month, and a fresh download is required to see updates released since the last publication.
+
+> **Reliability note (2026-06).** `wsusscn2.cab` is authoritative — it is what the WUA offline scan consumes — but as a *practical* analysis surface it proved fragile: the multi-gigabyte nested-CAB structure and the per-package CBS manifests are awkward to extract locally, and several earlier conclusions drawn from incomplete local parses turned out to be wrong (see the corrections in §5.2–§5.4). The **MS-WSUSSS server-server-sync SOAP API (§2.6)** exposes the *same* per-update structure on demand and without that fragility; this article therefore treats the SOAP surface as the trusted primary source and `wsusscn2.cab` as the authoritative-but-harder-to-parse cross-check. The structural description below is retained because it remains correct and useful for understanding the shared data model.
 
 `wsusscn2.cab` is a nested CAB with the following high-level structure:
 
@@ -300,6 +303,23 @@ A practical note that has cost real time in the original investigation: the choi
 | `7-Zip` (CLI or library) | **Recommended** | Fast (sub-5-second for top-level), exit codes 0/1/≥2 (ok/warn/fatal) are clean to interpret, deterministic |
 
 The cleanest pattern is: `7za x -y -bd -bso0 wsusscn2.cab` into a fresh staging directory, then walk the produced tree.
+
+### 2.6 The MS-WSUSSS server-server-sync SOAP API (the primary surface)
+
+Alongside the offline cab (§2.4) and the HTML Catalog (§2.3), Microsoft exposes the **server-server-sync SOAP API** (protocol MS-WSUSSS) at `https://sws.update.microsoft.com/…` — the interface a downstream WSUS server uses to synchronise metadata from an upstream one. A 2026-06 investigation accessed it anonymously and established it as the **most reliable practical analysis surface**: it returns the same per-update structure as `wsusscn2.cab`, but resolvable per `(updateId, revision)` on demand and **without the nested-CAB local-parse fragility** that made the offline cab unreliable in practice. The findings in §5 were derived or re-verified here.
+
+**Access model.** The API uses an anonymous three-call cookie handshake (`GetAuthConfig` → `GetAuthorizationCookie` → `GetCookie`) followed by `GetUpdateData(updateId, revision)` and `GetRevisionIdList(filter)`. The endpoint is reachable **only from a host that trusts the Microsoft Update internal PKI** — in practice a Windows machine; a generic client receives `HTTP 503`. The *download* hosts the responses point to are public, so the working split is: **run the SOAP calls on a Windows host; download the resolved payloads/CompDBs from any host.** Empirically (2026-06):
+
+| Host | Role | Reachable from a generic (non-PKI) host? |
+|---|---|---|
+| `sws.update.microsoft.com` | SOAP metadata (GetUpdateData / GetRevisionIdList) | **No** (HTTP 503) — Windows + MS-Update PKI only |
+| `dl.delivery.mp.microsoft.com` | UUP payloads, CompDB cabs | **Yes** for file paths (`/filestreamingservice/files/…`) |
+| `download.windowsupdate.com` | legacy `.cab` / `.msu` payloads | **Yes** |
+| `*.catalog.update.microsoft.com` | Catalog (KB / product → identity) | **Yes** |
+
+**What it carries (depth, not breadth).** Each `GetUpdateData` returns a compressed metadata blob plus a separate `fileUrls` list. The blob is the same **bundle → leaf → files → applicability** structure as a wsusscn2 package: a metadata-only *bundle* (Relationships = SupersededUpdates / Prerequisites / BundledUpdates) wrapping a *leaf* that carries the payload `Files` (SHA-1 + SHA-256 digests, sizes, `PatchingType`), the `ApplicabilityRules`, the `Handler`, and — for legacy updates — the full `CbsPackageApplicabilityMetadata` tree including the `installerAssembly` servicing-stack floor (§5.3). `fileUrls` resolves each file digest to a concrete CDN URL.
+
+**The discovery gap.** What the SOAP surface does *not* give is breadth: from the fixed Product/Classification GUIDs alone, this month's bundle UpdateIDs are **not** reachable (they are absent from both the `GetConfig` category dictionary and the scoped `GetRevisionIdList` set). The seed — the current `(updateId, revision)` for this month's LCU/SSU/.NET/DU — must come from outside the SOAP surface (the §2.3 Catalog title search, or a wsusscn2 enumeration). The SOAP API is a **resolver/decoder, not a discoverer** — the same division of labour the Catalog has.
 
 ---
 
@@ -565,10 +585,12 @@ The required and current versions are explicit, which simplifies the resolution:
 
 Microsoft has, over the years, oscillated between two distribution shapes:
 
-- **Standalone LCU**: the LCU MSU contains only the LCU; a servicing-stack update is published as a separate MSU with its own KB number, applied first. Empirically (§5.3, reconfirmed in 2026-05 and 2026-06 via the same-month Catalog title search) **only Server 2016 still ships a standalone SSU**; Server 2019, 2022, and 2025 return zero standalone-SSU hits. Server 2019's LCU does declare a real servicing-stack floor (§5.4), but no separate SSU is published — the floor is met by the servicing stack embedded in the LCU, so in practice 2019 is applied like a combined LCU.
-- **Combined LCU+SSU**: a single MSU contains both the LCU and the SSU as bundled packages. `Add-WindowsPackage` handles the ordering automatically. The pipeline only needs to download one MSU. Server 2025 follows this pattern (the SSU is bundled with every LCU as a two-file Catalog download — see section 2.3).
+- **Standalone LCU**: the LCU MSU contains only the LCU; a servicing-stack update is published as a separate MSU with its own KB number, applied first. **Verified on the SOAP surface (§2.6) in 2026-06: only Server 2016 still ships a standalone SSU** (`KB5094141`, build `14393.9220`, a self-updating/permanent Cbs package in its own bundle/leaf). Server 2019, 2022, and 2025 publish **no** standalone SSU.
+- **Combined LCU+SSU**: a single update carries both the LCU and the SSU. Direct SOAP observation of the 2026-06 LCU leaves shows the SSU as an **embedded `selfUpdate="true" permanence="permanent"` package inside the LCU leaf** for both Server 2019 (`KB5094143`) and Server 2022 (`KB5094147`); Server 2025 carries the SSU as a **bundled payload file** (`SSU-26100.32985`, an express cab + psf) inside its UUP mega-payload leaf, with no separate CompDB (§5.11). `Add-WindowsPackage` handles the ordering automatically; the pipeline downloads one update.
 
-A reliable implementation-level indicator of a Combined MSU is the presence of an `update.ses` file alongside `update.mum` and the `.cab` payload. A standalone LCU lacks `update.ses`. A pipeline that looks inside the MSU (via `expand.exe -F:* msu_file destination`) can detect this:
+> **Correction (2026-06, SOAP-verified).** An earlier wsusscn2-based reading described Server 2019 as "SSU separate, plus an embedded reference." Direct SOAP observation shows there is **no separate 2019 SSU**; the servicing stack is delivered *only* as the embedded `KB5094143` package in the LCU leaf — i.e. 2019 is combined, like 2022. The standalone-vs-combined split is therefore: **2016 standalone · 2019 + 2022 embedded · 2025 bundled file.**
+
+A runtime indicator of a Combined MSU on disk is the presence of an `update.ses` file alongside `update.mum` and the `.cab` payload (a standalone LCU lacks it):
 
 ```
 Combined:    update.mum, update.ses, Windows10.0-KBXXXXXXX-x64.CAB
@@ -616,23 +638,28 @@ So a pipeline that pre-loads its config from `wsusscn2.cab` derivative data can 
 
 A second, independent way to recover the standalone SSU's KB number — validated empirically in the 2026-05 cycle — is a **same-month Catalog title search**: query the Microsoft Update Catalog for `"<yyyy-MM> Servicing Stack Update <OS display name>"` and keep the non-preview hit whose title matches `(?i)servicing stack update`. This search doubles as the SSU-separate-vs-combined discriminator. The 2026-05 search returned exactly one SSU for Server 2016 (KB5088064, Catalog UpdateId `d0f1761f-c762-4764-8443-8c567f6929a2`) and **zero** hits for Server 2019, 2022, and 2025 — consistent with the §5.4 family table below. A pipeline can therefore run the search unconditionally for each resolved LCU and let the presence or absence of a result decide whether to emit a standalone SSU entry (and mark the LCU as non-combined), without consulting any prior per-OS family table.
 
-### 5.4 SSU model per Server version (verified against the 2026-05-12 cab)
+### 5.4 SSU model per Server version (verified via the SOAP API, 2026-06)
 
-A 2026-05-12 reverse-engineering exercise resolved the same monthly LCU for each OS across three consecutive months (2026-03/04/05) and read the per-package CBS metadata each time. The four OS fall into four structurally distinct families, and the family is **stable month-over-month**:
+The four OS fall into structurally distinct SSU families. This table was re-derived directly on the SOAP
+surface (§2.6) in 2026-06 and is consistent with the earlier wsusscn2 reading (the per-month build numbers
+advance, but the *family* is stable):
 
-| OS | SSU family | Where the SS requirement lives | Value observed (2026-05) |
+| OS | SSU family (SOAP-observed) | Where the SS requirement lives | Value observed (2026-06) |
 |---|---|---|---|
-| Server 2016 | SSU fully separate | LCU `installerAssembly` carries the **real** minimum SS version | required SS = `10.0.14393.7692` (constant across all three months) |
-| Server 2019 | SSU separate, plus an embedded reference | LCU `installerAssembly` (real value) **and** an embedded `Package_for_ServicingStack_<nnnn>` | required SS = `10.0.17763.2090`; embedded SSU `17763.8754` |
-| Server 2022 | Combined (SSU folded into the LCU) | `installerAssembly` is the placeholder `6.0.0.0`; the real SS info is the embedded `Package_for_ServicingStack_<nnnn>` | embedded SSU `20348.5120` (advances every month) |
-| Server 2025 | Checkpoint cumulative update (`.msu`) | leaf has **no** `CbsPackageApplicabilityMetadata`; the `.msu` payload bundles multiple KBs | payload = LCU KB5087539 + baseline KB5043080 + SafeOS DU KB5087588 |
+| Server 2016 | **Standalone** SSU | LCU leaf `installerAssembly` carries the **real** minimum SS version | required SS floor `10.0.14393.7692`; standalone SSU `KB5094141` provides `14393.9220` |
+| Server 2019 | **Embedded** (combined) | LCU leaf `installerAssembly` (real floor) **and** an embedded `selfUpdate/permanent` SSU package | floor `10.0.17763.2090`; embedded SSU `KB5094143` ≈ `17763.8880` |
+| Server 2022 | **Embedded** (combined) | `installerAssembly` is the placeholder `6.0.0.0`; the real SS is the embedded SSU package | embedded SSU `KB5094147` `20348.5251` (advances every month) |
+| Server 2025 | **UUP** (bundled-file SSU) | leaf has **no** `CbsPackageApplicabilityMetadata`; applicability is in the UUP CompDB (§5.11) | SSU is the bundled file `SSU-26100.32985` (no separate CompDB) |
 
 Two practical consequences follow:
 
-1. **Server 2016 and 2019 are the OSes where `0x800f0823` is a live risk**, because their LCU declares a real servicing-stack floor in `installerAssembly` — a real build number (e.g. `10.0.14393.7692` for 2016, `10.0.17763.2090` for 2019), constant for a given LCU build. The *remedy* differs by OS: **only Server 2016 has a standalone SSU package to apply first** (§5.3). For Server 2019 no separate SSU is published, so the floor is satisfied by the servicing stack embedded in the LCU and the pipeline applies the LCU directly without emitting a separate SSU entry. The `installerAssembly` value is the authoritative floor to check against in both cases.
-2. **Server 2022 and 2025 carry the SSU inside the LCU.** Server 2022's `installerAssembly` reads `6.0.0.0` -- a nominal placeholder, *not* a real build number -- and the real servicing-stack build is only visible as the embedded `Package_for_ServicingStack_<nnnn>` sub-package (e.g. `5120` -> build `20348.5120.1.0`), which advances every month. Server 2025's checkpoint `.msu` is self-contained, so an external SSU pairing check is not meaningful for it.
+1. **Server 2016 and 2019 are the OSes where `0x800f0823` is a live risk**, because their LCU leaf declares a real servicing-stack floor in `installerAssembly` (`10.0.14393.7692` for 2016, `10.0.17763.2090` for 2019), constant for a given LCU build. The *remedy* differs: **only Server 2016 has a standalone SSU to apply first**; for Server 2019 the floor is satisfied by the embedded `KB5094143` SSU in the LCU, so the pipeline applies the LCU directly. The `installerAssembly` value is the authoritative floor to check in both cases.
+2. **Server 2022 and 2025 carry the SSU inside the LCU.** Server 2022's `installerAssembly` reads the placeholder `6.0.0.0`; the real servicing-stack build is only visible as the embedded SSU package (`KB5094147` → `20348.5251`), which advances monthly. Server 2025's UUP leaf is self-contained (the SSU is a bundled file), so an external SSU pairing check is not meaningful for it.
 
-The earlier "Server 2022 is mostly standalone; inspect `update.ses`" advice (previous draft) is superseded by this finding: in the 2026-03/04/05 cab the Server 2022 LCU was Combined every month, with the embedded `Package_for_ServicingStack_<nnnn>` present each time. The `update.ses` test from §5.2 remains a valid *runtime* indicator when inspecting an MSU on disk, but the cab metadata already tells the pipeline the SS build without opening the MSU. As always, treat this as observed behaviour over a three-month window, not a contractual guarantee; a pipeline should still read the per-package metadata each month rather than hard-coding a family per OS.
+This article previously framed §5.4 as a wsusscn2 finding "verified against the 2026-05-12 cab"; the 2026-06
+SOAP observation reproduces the same families from a second, independent surface, which is why the families
+are now stated with higher confidence (§10). As always, a pipeline should read the per-update metadata each
+month rather than hard-coding a family per OS.
 
 ### 5.5 Dependency validation as a pre-flight gate (corrected model)
 
@@ -777,6 +804,58 @@ The practical mitigation is therefore split by what each side can know:
 
 The general lesson generalises beyond Server 2022: "the patch set is internally consistent" (axes 1–2) and "this image can consume this package format" (axis 3) are independent questions, and only the first is answerable from update metadata alone.
 
+> **SOAP confirmation (2026-06).** Direct SOAP observation of the current Server 2022 LCU leaf shows the embedded SSU at **`20348.5251`** (advancing monthly). The documented offline-media image floor of **`20348.1960`** (from KB5030216) is a *different* value on a *different* axis: `20348.5251` is what the LCU *ships*, while `20348.1960` is the minimum the *target image* must already have to unpack the combined package format. This confirms §5.10's central point — the image floor is genuinely absent from the machine-readable metadata (the SOAP `installerAssembly` for 2022 is the `6.0.0.0` placeholder), so it still must be operator-curated with its KB-page citation.
+
+### 5.11 The UUP composition model: how Server 2025 applicability is actually expressed
+
+The §5.4 table notes that the Server 2025 leaf has **no** `CbsPackageApplicabilityMetadata`. That is not the
+end of the story: the applicability and composition detail for the UUP generation lives in a **Composition
+Database (CompDB)**, an XML carried in a small (~11 KB) cab and declared under the schema
+`http://schemas.microsoft.com/embedded/2004/10/ImageUpdate` — the same image-composition system that DISM
+`/Apply-Image` consumes. Because these CompDB cabs are tiny and served from the public CDN
+(`dl.delivery.mp.microsoft.com`), they can be fetched and read directly (no Windows host required). Decoded
+structure:
+
+```
+CompDB @SchemaVersion @Product=Desktop @BuildArch=amd64
+       @Type            (Standalone | BuildUpdate | …)        ← update class
+       @OSVersion       (base build)  →  @TargetOSVersion     ← BUILD-LEVEL applicability
+  Tags  @Type=CumulativeUpdate → Tag UpdateType=Canonical
+  Features → Feature @Type (GDR | SetupDynamicUpdate | SafeOSUpdate | LanguagePack | OnDemandFeature | Required) @FeatureID=…
+  Packages → Package @ID @Version @InstalledSize
+    Payload → PayloadItem @Path=<the .cab/.esd> @PayloadHash @PayloadSize @PayloadType
+```
+
+Observed `Feature Type` values across the 2026-06 Server 2025 patch set:
+
+| Update | CompDB `Type` | `Feature Type` | `OSVersion → TargetOSVersion` |
+|---|---|---|---|
+| .NET `KB5087051` | Standalone | **GDR** | 26200.1 → 26200.9335 |
+| Setup DU `KB5095966` | BuildUpdate | **SetupDynamicUpdate** | 26100.1 → 26100.32950 |
+| SafeOS DU `KB5094150` | BuildUpdate | **SafeOSUpdate** | 26100.1 → 26100.32995 |
+| Language Pack (per language) | Build | **LanguagePack** (`Language.UI.Server~<lang>`, incl. `ja-jp`) → `.esd` | (image composition) |
+
+So Server 2025's applicability is **build-level composition** ("apply this package to a base build at
+`OSVersion` to reach `TargetOSVersion`"), not the per-assembly CBS evaluation tree of the legacy
+generations. This gives a clean **three-era applicability model** for a future implementer:
+
+- **Era A — 2016 / 2019:** full CBS applicability tree in the (SOAP) leaf, including the real
+  `installerAssembly` servicing-stack floor (§5.3). `0x800f0823` risk is live.
+- **Era B — 2022:** thin leaf; the SSU is embedded and the `installerAssembly` floor is a `6.0.0.0`
+  placeholder. The real applicability detail has moved into the LCU payload cab.
+- **Era C — 2025 (UUP):** no CBS tree at all; applicability is the ImageUpdate **CompDB** (build-level
+  composition), consumed by DISM `/Apply-Image`. The SSU is a bundled payload file with no CompDB of its own.
+
+A second observation closes the 2025 servicing-stack and language picture. The Server 2025 LCU leaf is a
+**16-file mega-payload** (the LCU MSU, a GA baseline LCU MSU, the bundled SSU express cab + psf, SafeOS DU
+cabs, and the language/FoD WIMs — `LP_Server.wim`, `FoD_Server.wim`, `FoD_Common.wim`, `Edition_Common.wim`).
+The **Language Pack** for 2025 is therefore not a separate monthly update but a WIM bundled in the LCU leaf,
+whose per-language composition is described by `LanguagePack` `Feature` entries in a FoD-metadata CompDB
+(`ja-jp` present, pointing to an `.esd` under `editionpackages\ja-jp\Server\`). For the legacy generations
+(2016/2019/2022) language is metadata-only over a language-neutral payload — a Japanese system applies the
+identical monthly binaries as an English one — so "Language Pack" is not part of the legacy monthly servicing
+stream at all.
+
 ---
 
 ## 6. Microsoft Update Catalog Naming Quirks
@@ -826,12 +905,14 @@ The empirical Dynamic Update cadence picture:
 
 | OS | DU.Setup | DU.SafeOs | Notes |
 |---|---|---|---|
-| Server 2016 | Not published monthly | Not published monthly | DU only ships on feature-update windows; for LTSC OSes this is rare |
-| Server 2019 | Not published monthly | Not published monthly | Same as 2016 |
-| Server 2022 | Optional, monthly when published | Optional, monthly when published | Catalog usually returns 1 hit each |
-| Server 2025 | **Sporadic** (no publications observed in the 2025-12 to 2026-04 window, then resumed — 2026-06 published KB5095966) | Monthly | Microsoft has not formally announced the cadence change |
+| Server 2016 | Not published | Not published | DU only ships on feature-update windows; for LTSC this is rare |
+| Server 2019 | Not published | Not published | Same as 2016 |
+| Server 2022 (21H2) | **Never** — no "Setup Dynamic Update" product exists for 21H2 | Optional, monthly when published (titled plainly "Dynamic Update … version 21H2") | See correction below |
+| Server 2025 (24H2) | **Sporadic** (no publications 2025-12 → 2026-04, then resumed — 2026-06 published KB5095966) | Monthly (`SafeOSUpdate`, now via the UUP OSInstaller + CompDB model, §5.11) | cadence not formally announced |
 
-A pipeline must therefore treat "DU.Setup absent for this month on Server 2025" as a soft signal, not an error. The Refresher logs "no Setup DU published" and proceeds. This matches what Server 2016 and 2019 have always done. The cadence is intermittent rather than discontinued: a month with no Setup DU is normal, and a later month may publish one again (as 2026-06 did).
+> **Correction (2026-06, Catalog-verified).** A Catalog title search confirms that **"Setup Dynamic Update" is published only for the 23H2 / 24H2 product line**, with **zero** "Setup Dynamic Update … version 21H2" hits — i.e. **Server 2022 has no Setup DU at all**. What Server 2022 receives is a single product titled "Dynamic Update … version 21H2", which is the SafeOS/WinRE variant (e.g. `KB5094157`, a `CommandLineInstallation` run-the-cab update). An earlier draft that listed Server 2022 `DU.Setup` as "optional, monthly when published" conflated this plain SafeOS DU with a Setup DU; Setup DU is a UUP-era (23H2/24H2) construct only. Note also the handler shift: the 2022 SafeOS DU is `CommandLineInstallation`, whereas the 2025 SafeOS DU (`KB5094150`) is the UUP `OSInstaller` + CompDB model (§5.11).
+
+A pipeline must therefore treat "DU.Setup absent for this OS/month" correctly: for Server 2016/2019/2022 it is *always* absent (a hard `—`, not a soft signal); for Server 2025 it is intermittent and a missing month is normal. The Refresher logs "no Setup DU published" and proceeds.
 
 ### 6.4 WSUS Product Category GUIDs and the Server LTSC mapping
 
@@ -1042,7 +1123,8 @@ These are not formally documented as such, but the supporting evidence (reverse-
 
 - The Server LTSC Product GUID mapping (Server 2016 / 2019 / 2022 / 2025), verified by reverse-lookup against live wsusscn2 metadata and cross-referenced with community OSS and observed LCU KB numbers.
 - The `package.xml` dependency-graph relationships (`Prerequisites`, `SupersededBy`, `BundledBy`, payload roll-up from leaf to bundle).
-- The observed Server 2025 LCU bundle behavior (combined LCU + SSU-dependency resolution metadata) in current Catalog snapshots.
+- **The four-family SSU model and the three-era applicability model (§5.4, §5.11)** — these were originally read from wsusscn2 and then **independently reproduced on the SOAP API (§2.6) in 2026-06**; cross-validation across two surfaces raises them above a single-snapshot inference. The per-month build numbers are point-in-time, but the families/eras are stable.
+- The UUP CompDB composition model for Server 2025 (`ImageUpdate` schema; `Feature Type` = GDR / SetupDynamicUpdate / SafeOSUpdate / LanguagePack), read directly from the CompDB cabs.
 
 ### Observed but not contractual
 
@@ -1122,6 +1204,8 @@ For implementers building on the original repository's PowerShell pipeline, the 
 
 The article was prepared by Anthropic Claude (Opus 4.7) under the direction of the repository maintainer, by reading and synthesising the original `docs/history/` content. It synthesizes findings from the repository investigation logs and cross-references Microsoft public documentation where noted.
 
+**Revision (2026-06).** This article was revised to make the **MS-WSUSSS server-server-sync SOAP API (§2.6)** the primary, most-reliable analysis surface, after the offline `wsusscn2.cab` proved fragile to local parsing. The SSU, Dynamic Update, and UUP-composition findings were re-derived directly on the SOAP surface; passages that an earlier wsusscn2-based reading had stated incorrectly (notably the Server 2019 SSU shape in §5.4 and the Server 2022 Setup-DU claim in §6.3) were overwritten with the SOAP/Catalog observations, and the new UUP CompDB applicability model (§5.11) was added. Where a prior claim was corrected, the change is marked inline as a *Correction (2026-06)*.
+
 ---
 
 ## Appendix D: Operational Guarantees vs Observations
@@ -1144,7 +1228,10 @@ This table consolidates the epistemic status of the major claims in the article,
 | LCU cannot service WinPE / boot.wim (`0x80070032` / `0x8007371b`) | Officially documented (MS Learn) AND empirically confirmed |
 | Combined-LCU image-side SS floor (e.g. Server 2022: KB5030216 → SSU 20348.1960) | Documented on the KB page as prose only; absent from all machine-readable metadata |
 | Server 2016 serviced install.wim lacks `DVD_EX` / `efisys_EX.bin` | Observed (2026-06 serviced media) |
-| Dynamic Update cadence on LTSC | Observed only |
+| Dynamic Update cadence on LTSC | Observed only — but "no Setup DU for 21H2/Server 2022" is Catalog-verified (§6.3) |
+| MS-WSUSSS SOAP API as a per-update metadata surface (§2.6) | Operationally stable (undocumented; anonymous handshake observed 2026-06) |
+| Four-family SSU model + three-era applicability model (§5.4, §5.11) | Operationally stable — cross-validated on wsusscn2 AND the SOAP API |
+| UUP CompDB composition model (ImageUpdate schema, §5.11) | Observed (read directly from 2026-06 CompDB cabs) |
 | Final applicability / installability | Authoritative only via WUA servicing logic |
 
 When a row says anything other than "Officially announced" or "Officially documented", treat it as advisory: useful for discovery and acceleration, but not a substitute for Microsoft's own servicing validation.

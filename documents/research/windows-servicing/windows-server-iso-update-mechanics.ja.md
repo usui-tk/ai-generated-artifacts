@@ -15,7 +15,8 @@ Microsoft Evaluation ISO と累積更新プログラムの束から完全にパ�
 
 本記事の発見はドキュメントのみからではなく、 経験的に導出されたものです。 それらを生み出した調査は、 複数の月例 Patch Tuesday サイクルにわたって以下の手法を組み合わせて繰り返しました:
 
-- **実 cab の検査**:連続する `wsusscn2.cab` スナップショットに対して Master XML をパースし、 スキーマを仮定するのではなく実際の依存性・バンドル・ペイロード構造を観測。
+- **実 SOAP-API の検査**:MS-WSUSSS server-server-sync API(§2.6)に対し `(updateId, revision)` ごとに `GetUpdateData` を発行し、 各更新の実際の バンドル → リーフ → ファイル → 適用性 構造を直接読む。 **本稿で用いた一次かつ最も信頼できる解析面はこれである**:オフライン cab と同じメタデータを、 更新ごとにオンデマンドで、 かつ次に述べるローカルパースの脆さなしに返す。 以下の SSU・適用性・UUP 合成に関する知見の大半は、 2026-06 サイクルでこの面から導出・再検証した。
+- **実 cab の検査**:連続する `wsusscn2.cab` スナップショット。 この面は *権威的* である(Windows Update Agent 自身が消費する)が、 実務上 **ローカルパースがしばしば不完全** になる ── 深くネストした per-package CAB とその内部 CBS マニフェストは抽出が厄介で、 部分的・不安定な読み取りの再発源だった。 有効なクロスチェックではあるが、 SOAP API が示した内容と食い違う/解決できない場合は、 SOAP の観測を信頼できるソースとして扱う。
 - **WIM の検査**:Server 2016 / 2019 / 2022 / 2025 の Evaluation メディアを横断し、 `\Windows\Boot\` レイアウトとバージョンごとの `_EX` ブートバイナリの有無を比較。
 - **Authenticode チェーン検証**:`X509Chain.Build()` により、 直接の署名者の表示名を信頼するのではなく、 各ブートバイナリのチェーンを trust anchor まで辿る。
 - **Microsoft Update Catalog の相互参照検証**:KB とビルドの対応、 および Catalog で観測された combined LCU/SSU ダウンロード挙動を確認。
@@ -148,7 +149,9 @@ release-info から取得した KB を直接(KB のみ入力、 タイトル文�
 
 ### 2.4 wsusscn2.cab オフラインサービシングデータベース
 
-「更新 KB-A は KB-B が事前にインストールされていることを要求するか?」 という形式の問いに対して、 最も権威あるオフラインのメタデータソースは **Windows Update Standalone Scan** データベース(`wsusscn2.cab`)です。 これは `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab` で複数 GB の単一 CAB ファイルとして配信されます。 このファイルはおおよそ月 2 回公開され、 最後の公開以降にリリースされた更新を見るには新しいダウンロードが必要です。 なお、 最終的な適用可能性の評価は依然として Windows Update Agent のサービシングロジックが行います。
+「更新 KB-A は KB-B が事前にインストールされていることを要求するか?」 という形式の問いに対して、 **権威ある** オフラインのメタデータソースは **Windows Update Standalone Scan** データベース(`wsusscn2.cab`)です。 これは `https://catalog.s.download.windowsupdate.com/d/msdownload/update/v3/static/trusted/.../wsusscn2.cab` で複数 GB の単一 CAB ファイルとして配信されます。 このファイルはおおよそ月 2 回公開され、 最後の公開以降にリリースされた更新を見るには新しいダウンロードが必要です。
+
+> **信頼性に関する注記(2026-06)。** `wsusscn2.cab` は権威的 ── WUA のオフラインスキャンが消費するもの ── ですが、 *実務的な* 解析面としては脆いことが判明しました:複数 GB のネスト CAB 構造と per-package CBS マニフェストはローカル抽出が厄介で、 不完全なローカルパースから導いた過去の結論のいくつかは誤りでした(§5.2–§5.4 の訂正を参照)。 **MS-WSUSSS server-server-sync SOAP API(§2.6)** は *同じ* 更新単位の構造をオンデマンドで、 かつその脆さなしに露出します。 そのため本稿では SOAP 面を信頼できる一次ソースとし、 `wsusscn2.cab` は権威はあるがパースが難しいクロスチェックとして扱います。 以下の構造説明は、 共有データモデルを理解する上で正しく有用なため残します。
 
 `wsusscn2.cab` はネストされた CAB で、 以下のような高レベル構造を持ちます:
 
@@ -300,6 +303,23 @@ Category 階層の逆引きで Server LTSC 系の Product GUID を同定する�
 | `7-Zip`(CLI またはライブラリ) | **推奨** | 高速(最上位は 5 秒未満)、 終了コード 0/1/≥2(ok / warn / fatal)が解釈しやすい、 決定的 |
 
 最もクリーンなパターンは:`7za x -y -bd -bso0 wsusscn2.cab` を新しいステージングディレクトリへ展開し、 生成されたツリーを辿る、 です。
+
+### 2.6 MS-WSUSSS server-server-sync SOAP API(一次解析面)
+
+オフライン cab(§2.4)と HTML Catalog(§2.3)に加え、 Microsoft は **server-server-sync SOAP API**(プロトコル MS-WSUSSS)を `https://sws.update.microsoft.com/…` に公開しています ── 下流 WSUS サーバが上流からメタデータを同期する際のインターフェースです。 2026-06 の調査で匿名アクセスし、 **最も信頼できる実務的解析面** であることを確認しました:`wsusscn2.cab` と同じ更新単位構造を、 `(updateId, revision)` ごとにオンデマンドで、 かつオフライン cab を実務上不安定にしていたネスト CAB のローカルパース脆性なしに返します。 §5 の知見はここで導出・再検証しました。
+
+**アクセスモデル。** 本 API は匿名の 3 コール cookie ハンドシェイク(`GetAuthConfig` → `GetAuthorizationCookie` → `GetCookie`)の後に `GetUpdateData(updateId, revision)` と `GetRevisionIdList(filter)` を用います。 エンドポイントは **Microsoft Update 内部 PKI を信頼するホストからのみ** 到達可能 ── 実務上は Windows マシン ── で、 一般クライアントは `HTTP 503` を受けます。 応答が指すダウンロード先は公開ホストなので、 実務的な分担は:**SOAP 呼び出しは Windows ホストで実行し、 解決済みペイロード/CompDB のダウンロードは任意のホストで行う。** 実測(2026-06):
+
+| ホスト | 役割 | 一般(非 PKI)ホストから到達可? |
+|---|---|---|
+| `sws.update.microsoft.com` | SOAP メタデータ(GetUpdateData / GetRevisionIdList) | **不可**(HTTP 503)── Windows + MS-Update PKI のみ |
+| `dl.delivery.mp.microsoft.com` | UUP ペイロード、 CompDB cab | **可**(ファイルパス `/filestreamingservice/files/…`) |
+| `download.windowsupdate.com` | レガシー `.cab` / `.msu` ペイロード | **可** |
+| `*.catalog.update.microsoft.com` | Catalog(KB / 製品 → identity) | **可** |
+
+**何を運ぶか(深さであって広さではない)。** 各 `GetUpdateData` は圧縮メタデータ blob と別個の `fileUrls` リストを返します。 blob は wsusscn2 パッケージと同じ **バンドル → リーフ → ファイル → 適用性** 構造です:メタデータのみの *バンドル*(Relationships = SupersededUpdates / Prerequisites / BundledUpdates)が、 ペイロード `Files`(SHA-1 + SHA-256 ダイジェスト、 サイズ、 `PatchingType`)・`ApplicabilityRules`・`Handler`・そしてレガシー更新では `installerAssembly` の servicing-stack フロア(§5.3)を含む完全な `CbsPackageApplicabilityMetadata` ツリーを運ぶ *リーフ* を包みます。 `fileUrls` は各ファイルのダイジェストを具体的な CDN URL に解決します。
+
+**発見ギャップ。** SOAP 面が与え *ない* のは広さです:固定の Product/Classification GUID だけからは今月のバンドル UpdateID には到達できません(`GetConfig` のカテゴリ辞書にも、 スコープ付き `GetRevisionIdList` 集合にも存在しない)。 種(seed)── 今月の LCU/SSU/.NET/DU の `(updateId, revision)` ── は SOAP 面の外(§2.3 の Catalog タイトル検索、 または wsusscn2 列挙)から得る必要があります。 SOAP API は **resolver/decoder であって discoverer ではない** ── Catalog と同じ分担です。
 
 ---
 
@@ -565,10 +585,12 @@ Package "Package_for_RollupFix~31bf3856ad364e35~amd64~~14393.9140.1.19"
 
 Microsoft は、 長年の間、 2 つの配信形態を行き来してきました:
 
-- **スタンドアロン LCU**:LCU MSU には LCU のみが含まれ、サービシングスタック更新は独自の KB 番号を持つ別個の MSU として配信され、先に適用される。 実証的には(§5.3、 2026-05 と 2026-06 の同月 Catalog タイトル検索で再確認) **スタンドアロン SSU を今なお出荷するのは Server 2016 のみ** であり、 Server 2019 / 2022 / 2025 はスタンドアロン SSU のヒットが 0 件である。 Server 2019 の LCU は実在のサービシングスタック下限値(§5.4)を宣言するが、 別個の SSU は公開されない — その下限値は LCU に内包されたサービシングスタックで充足されるため、 実運用上 2019 は combined LCU と同様に適用される。
-- **Combined LCU+SSU**:単一の MSU に LCU と SSU の両方がバンドルパッケージとして含まれる。 `Add-WindowsPackage` が順序を自動的に処理する。 パイプラインは 1 つの MSU だけダウンロードすれば良い。 Server 2025 はこのパターンに従う(SSU はすべての LCU と 2 ファイル Catalog ダウンロードとしてバンドルされる — セクション 2.3 参照)。
+- **スタンドアロン LCU**:LCU MSU には LCU のみが含まれ、 サービシングスタック更新は独自の KB 番号を持つ別個の MSU として配信され、 先に適用される。 **SOAP 面(§2.6)で 2026-06 に検証:スタンドアロン SSU を今なお出荷するのは Server 2016 のみ**(`KB5094141`、 ビルド `14393.9220`、 自身のバンドル/リーフを持つ self-updating/permanent な Cbs パッケージ)。 Server 2019 / 2022 / 2025 はスタンドアロン SSU を **公開しない**。
+- **Combined LCU+SSU**:単一の更新が LCU と SSU の両方を運ぶ。 2026-06 の LCU リーフを SOAP で直接観測すると、 Server 2019(`KB5094143`)と Server 2022(`KB5094147`)では SSU は LCU リーフ内の **`selfUpdate="true" permanence="permanent"` な内包パッケージ** として現れる。 Server 2025 は SSU を UUP メガペイロードリーフ内の **バンドルされたペイロードファイル**(`SSU-26100.32985`、 express cab + psf)として運び、 専用 CompDB は持たない(§5.11)。 `Add-WindowsPackage` が順序を自動処理し、 パイプラインは 1 つの更新をダウンロードする。
 
-Combined MSU を判別する信頼できる実装レベルの指標は、 `update.mum` と `.cab` ペイロードに加えて `update.ses` ファイルが存在することです。 スタンドアロン LCU には `update.ses` がありません。 MSU の中を覗くパイプライン(`expand.exe -F:* msu_file destination` 経由)はこれを検出できます:
+> **訂正(2026-06、 SOAP で検証)。** 以前の wsusscn2 ベースの読みは Server 2019 を「SSU 分離 + 内包参照」と記述していた。 SOAP の直接観測では **2019 に別個の SSU は無く**、 サービシングスタックは LCU リーフ内の内包 `KB5094143` パッケージとして *のみ* 配信される ── すなわち 2019 は 2022 と同じ combined である。 したがってスタンドアロン vs combined の区分は:**2016 スタンドアロン・2019 + 2022 内包・2025 バンドルファイル** である。
+
+ディスク上の MSU で Combined を判別する実行時指標は、 `update.mum` と `.cab` ペイロードに加えて `update.ses` ファイルが存在することです(スタンドアロン LCU には無い):
 
 ```
 Combined:    update.mum, update.ses, Windows10.0-KBXXXXXXX-x64.CAB
@@ -616,23 +638,26 @@ Windows Server 2016 の LCU、2026-05 (KB5087537)
 
 スタンドアロン SSU の KB 番号を回収するもう 1 つの独立した方法 — 2026-05 サイクルで実証済み — は **同月の Catalog タイトル検索** である:Microsoft Update Catalog で `"<yyyy-MM> Servicing Stack Update <OS 表示名>"` を検索し、タイトルが `(?i)servicing stack update` に一致する非プレビューのヒットを採用する。この検索はそのまま「SSU 分離型か combined 型か」の判別子になる。2026-05 の検索は Server 2016 に対してちょうど 1 件の SSU(KB5088064、Catalog UpdateId `d0f1761f-c762-4764-8443-8c567f6929a2`)を返し、Server 2019 / 2022 / 2025 には **0 件** を返した — 下の §5.4 のファミリー表と一致する。したがってパイプラインは、解決済みの各 LCU に対してこの検索を無条件に実行し、結果の有無で「スタンドアロン SSU エントリを emit する(かつ LCU を非 combined としてマークする)か」を判定でき、事前の OS 別ファミリー表に頼る必要がない。
 
-### 5.4 Server バージョンごとの SSU モデル (2026-05-12 の cab で検証)
+### 5.4 Server バージョンごとの SSU モデル (SOAP API で検証、 2026-06)
 
-2026-05-12 のリバースエンジニアリングでは、各 OS について同一の月次 LCU を 3 か月連続(2026-03/04/05)で解決し、毎回 per-package CBS メタデータを読んだ。4 つの OS は構造的に異なる 4 系統に分かれ、その系統は **月をまたいで安定**している:
+4 つの OS は構造的に異なる SSU 系統に分かれる。 この表は 2026-06 に SOAP 面(§2.6)で直接再導出したもので、
+以前の wsusscn2 の読みと整合する(月ごとのビルド番号は進むが、 *系統* は安定):
 
-| OS | SSU 系統 | SS 要件の所在 | 観測値 (2026-05) |
+| OS | SSU 系統 (SOAP 観測) | SS 要件の所在 | 観測値 (2026-06) |
 |---|---|---|---|
-| Server 2016 | SSU 完全分離 | LCU の `installerAssembly` が **実際の**最小 SS バージョンを持つ | 必要 SS = `10.0.14393.7692` (3 か月とも一定) |
-| Server 2019 | SSU 分離 + 内包参照 | LCU の `installerAssembly` (実値) **および** 内包の `Package_for_ServicingStack_<nnnn>` | 必要 SS = `10.0.17763.2090`; 内包 SSU `17763.8754` |
-| Server 2022 | Combined (SSU が LCU に統合) | `installerAssembly` はプレースホルダ `6.0.0.0`; 実際の SS 情報は内包の `Package_for_ServicingStack_<nnnn>` | 内包 SSU `20348.5120` (毎月更新) |
-| Server 2025 | Checkpoint 累積更新 (`.msu`) | leaf に `CbsPackageApplicabilityMetadata` が **無い**; `.msu` ペイロードが複数 KB を同梱 | ペイロード = LCU KB5087539 + ベースライン KB5043080 + SafeOS DU KB5087588 |
+| Server 2016 | **スタンドアロン** SSU | LCU リーフの `installerAssembly` が **実際の**最小 SS バージョンを持つ | SS フロア `10.0.14393.7692`; スタンドアロン SSU `KB5094141` が `14393.9220` を提供 |
+| Server 2019 | **内包**(combined) | LCU リーフの `installerAssembly`(実フロア)**および** 内包の `selfUpdate/permanent` SSU パッケージ | フロア `10.0.17763.2090`; 内包 SSU `KB5094143` ≈ `17763.8880` |
+| Server 2022 | **内包**(combined) | `installerAssembly` はプレースホルダ `6.0.0.0`; 実 SS は内包 SSU パッケージ | 内包 SSU `KB5094147` `20348.5251`(毎月進む) |
+| Server 2025 | **UUP**(バンドルファイル SSU) | leaf に `CbsPackageApplicabilityMetadata` が **無い**; 適用性は UUP CompDB(§5.11) | SSU はバンドルファイル `SSU-26100.32985`(専用 CompDB なし) |
 
 実務上の帰結は 2 点:
 
-1. **Server 2016 と 2019 が `0x800f0823` の現実的リスクがある OS** である。両者の LCU が `installerAssembly` に実在のサービシングスタック下限値 — 実ビルド番号(2016 は例 `10.0.14393.7692`、 2019 は `10.0.17763.2090`、 所与の LCU ビルドに対して一定) — を宣言するからだ。 ただし *対処* は OS で異なる:**先に適用すべきスタンドアロン SSU パッケージが存在するのは Server 2016 のみ**(§5.3)。 Server 2019 は別個の SSU が公開されないため、 下限値は LCU に内包されたサービシングスタックで充足され、 パイプラインは別 SSU エントリを emit せず LCU を直接適用する。 `installerAssembly` 値はいずれの場合も照合すべき権威ある下限値である。
-2. **Server 2022 と 2025 は SSU を LCU 内に内包する。** Server 2022 の `installerAssembly` は `6.0.0.0`(名目上のプレースホルダで、実ビルド番号ではない)を示し、実際のサービス スタック ビルドは内包の `Package_for_ServicingStack_<nnnn>` サブパッケージ(例: `5120` -> ビルド `20348.5120.1.0`)としてのみ可視で、毎月進む。Server 2025 の checkpoint `.msu` は自己完結しているため、外部 SSU ペアリングのチェックはこの OS には意味をなさない。
+1. **Server 2016 と 2019 が `0x800f0823` の現実的リスクがある OS** である。 両者の LCU リーフが `installerAssembly` に実在のサービシングスタックフロア(2016 は `10.0.14393.7692`、 2019 は `10.0.17763.2090`、 所与の LCU ビルドに対して一定)を宣言するからだ。 *対処* は異なる:**先に適用すべきスタンドアロン SSU が存在するのは Server 2016 のみ**; Server 2019 はフロアが LCU 内の内包 `KB5094143` SSU で充足されるため、 パイプラインは LCU を直接適用する。 `installerAssembly` 値はいずれの場合も照合すべき権威あるフロアである。
+2. **Server 2022 と 2025 は SSU を LCU 内に内包する。** Server 2022 の `installerAssembly` はプレースホルダ `6.0.0.0` を示し、 実サービシングスタックビルドは内包 SSU パッケージ(`KB5094147` → `20348.5251`、 毎月進む)としてのみ可視。 Server 2025 の UUP リーフは自己完結(SSU はバンドルファイル)のため、 外部 SSU ペアリングのチェックは意味をなさない。
 
-以前の「Server 2022 はほぼスタンドアロン; `update.ses` を検査せよ」という助言(旧ドラフト)は本知見で更新される: 2026-03/04/05 の cab では Server 2022 LCU は毎月 Combined であり、内包の `Package_for_ServicingStack_<nnnn>` が毎回存在した。§5.2 の `update.ses` テストはディスク上の MSU を検査する際の *実行時* 指標としては依然有効だが、cab メタデータは MSU を開かずとも SS ビルドをパイプラインに伝える。常にそうだが、これは 3 か月の窓での観測挙動であって契約上の保証ではない。パイプラインは OS ごとに系統をハードコードするのではなく、毎月 per-package メタデータを読むべきである。
+本稿は以前 §5.4 を「2026-05-12 の cab で検証」した wsusscn2 の知見として記述していたが、 2026-06 の SOAP
+観測が第二の独立した面から同じ系統を再現したため、 系統はより高い確信度で述べている(§10)。 とはいえパイプラインは
+OS ごとに系統をハードコードせず、 毎月更新ごとのメタデータを読むべきである。
 
 ### 5.5 事前検証ゲートとしての依存性検証 (訂正モデル)
 
@@ -777,6 +802,54 @@ scope filter の正典(改訂版):
 
 一般的な教訓は Server 2022 を超えて一般化されます:「パッチセットが内部的に整合している」(軸 1〜2)と「このイメージがこのパッケージフォーマットを消費できる」(軸 3)は独立した問いであり、 更新メタデータだけから答えられるのは前者のみです。
 
+> **SOAP による確認(2026-06)。** 現行 Server 2022 LCU リーフを SOAP で直接観測すると、 内包 SSU は **`20348.5251`**(毎月進む)である。 文書化されたオフラインメディアのイメージフロア **`20348.1960`**(KB5030216 由来)は *別の軸* の *別の値* である:`20348.5251` は LCU が *出荷する* もの、 `20348.1960` は *対象イメージ* が combined パッケージ形式を展開するために *既に持っていなければならない* 最小値である。 これは §5.10 の中心的論点 ── イメージフロアはマシン可読メタデータに本当に存在しない(2022 の SOAP `installerAssembly` は `6.0.0.0` プレースホルダ) ── を裏付ける。 よってこの値は依然として、 KB ページの引用とともに運用者がキュレートする必要がある。
+
+### 5.11 UUP 合成モデル:Server 2025 の適用性は実際にどう表現されるか
+
+§5.4 の表は Server 2025 リーフに `CbsPackageApplicabilityMetadata` が **無い** と記す。 だがそれで話は終わらない:
+UUP 世代の適用性・合成の詳細は **Composition Database(CompDB)** ── 小さな(~11 KB)cab に入った XML で、
+スキーマ `http://schemas.microsoft.com/embedded/2004/10/ImageUpdate`(DISM `/Apply-Image` が消費するのと同じ
+イメージ合成システム)で宣言される ── に存在する。 これらの CompDB cab は小さく公開 CDN
+(`dl.delivery.mp.microsoft.com`)から配信されるため、 直接取得して読める(Windows ホスト不要)。 解読した構造:
+
+```
+CompDB @SchemaVersion @Product=Desktop @BuildArch=amd64
+       @Type            (Standalone | BuildUpdate | …)        ← 更新クラス
+       @OSVersion       (ベースビルド)  →  @TargetOSVersion   ← ビルドレベルの適用性
+  Tags  @Type=CumulativeUpdate → Tag UpdateType=Canonical
+  Features → Feature @Type (GDR | SetupDynamicUpdate | SafeOSUpdate | LanguagePack | OnDemandFeature | Required) @FeatureID=…
+  Packages → Package @ID @Version @InstalledSize
+    Payload → PayloadItem @Path=<the .cab/.esd> @PayloadHash @PayloadSize @PayloadType
+```
+
+2026-06 の Server 2025 パッチセットで観測した `Feature Type`:
+
+| 更新 | CompDB `Type` | `Feature Type` | `OSVersion → TargetOSVersion` |
+|---|---|---|---|
+| .NET `KB5087051` | Standalone | **GDR** | 26200.1 → 26200.9335 |
+| Setup DU `KB5095966` | BuildUpdate | **SetupDynamicUpdate** | 26100.1 → 26100.32950 |
+| SafeOS DU `KB5094150` | BuildUpdate | **SafeOSUpdate** | 26100.1 → 26100.32995 |
+| Language Pack(言語別) | Build | **LanguagePack**(`Language.UI.Server~<lang>`、 `ja-jp` を含む)→ `.esd` | (イメージ合成) |
+
+つまり Server 2025 の適用性は **ビルドレベルの合成**(「このパッケージを `OSVersion` のベースビルドに適用して
+`TargetOSVersion` に到達させる」)であり、 レガシー世代のアセンブリ単位 CBS 評価ツリーではない。 これにより将来の
+実装者向けに明快な **3 エラー(時代)の適用性モデル** が得られる:
+
+- **Era A — 2016 / 2019:**(SOAP)リーフに完全な CBS 適用性ツリー。 実在の `installerAssembly`
+  servicing-stack フロア(§5.3)を含む。 `0x800f0823` リスクが現実的。
+- **Era B — 2022:** 薄いリーフ。 SSU は内包され、 `installerAssembly` フロアは `6.0.0.0` プレースホルダ。
+  実際の適用性詳細は LCU ペイロード cab へ移動。
+- **Era C — 2025(UUP):** CBS ツリーは皆無。 適用性は ImageUpdate **CompDB**(ビルドレベル合成)で、 DISM
+  `/Apply-Image` が消費。 SSU は専用 CompDB を持たないバンドルペイロードファイル。
+
+もう 1 つの観測が 2025 のサービシングスタックと言語の像を閉じる。 Server 2025 LCU リーフは **16 ファイルの
+メガペイロード**(LCU MSU、 GA ベースライン LCU MSU、 バンドル SSU express cab + psf、 SafeOS DU cab、 言語/FoD
+WIM ── `LP_Server.wim`、 `FoD_Server.wim`、 `FoD_Common.wim`、 `Edition_Common.wim`)である。 したがって 2025 の
+**Language Pack** は別個の月次更新ではなく LCU リーフに内包される WIM であり、 その言語別合成は FoD メタデータ
+CompDB 内の `LanguagePack` `Feature` エントリ(`ja-jp` が存在し、 `editionpackages\ja-jp\Server\` 下の `.esd` を指す)
+で記述される。 レガシー世代(2016/2019/2022)では言語は言語中立ペイロード上のメタデータのみ ── 日本語システムも
+英語と同一の月次バイナリを適用する ── であり、 「Language Pack」はレガシーの月次サービシングの流れには含まれない。
+
 ---
 
 ## 6. Microsoft Update Catalog の命名上のクセ
@@ -826,12 +899,14 @@ Title: 2026-04 Cumulative Update for Microsoft server operating system, version 
 
 | OS | DU.Setup | DU.SafeOs | 備考 |
 |---|---|---|---|
-| Server 2016 | 月次公開なし | 月次公開なし | DU は feature-update window のみ;LTSC OS にはこれは稀 |
-| Server 2019 | 月次公開なし | 月次公開なし | 2016 と同様 |
-| Server 2022 | オプション、 公開時月次 | オプション、 公開時月次 | Catalog は通常各 1 ヒット返す |
-| Server 2025 | **散発的**(2025-12 から 2026-04 のウィンドウで公開なし、 その後再開 — 2026-06 に KB5095966 を公開) | 月次 | Microsoft はケイデンス変更を正式にアナウンスしていない |
+| Server 2016 | 公開なし | 公開なし | DU は feature-update window のみ;LTSC には稀 |
+| Server 2019 | 公開なし | 公開なし | 2016 と同様 |
+| Server 2022 (21H2) | **皆無** — 21H2 向け「Setup Dynamic Update」製品は存在しない | オプション、 公開時月次(単に「Dynamic Update … version 21H2」と題される) | 下記訂正を参照 |
+| Server 2025 (24H2) | **散発的**(2025-12 → 2026-04 公開なし、 その後再開 — 2026-06 に KB5095966) | 月次(`SafeOSUpdate`、 現在は UUP OSInstaller + CompDB モデル、 §5.11) | ケイデンスは正式アナウンスなし |
 
-パイプラインは「Server 2025 で今月 DU.Setup なし」を soft シグナルとして扱い、 エラーとしてではなく扱う必要があります。 Refresher は「No Setup DU published」をログして進む。 これは Server 2016 と 2019 が常に行ってきたことに一致します。 ケイデンスは打ち切りではなく断続的である:Setup DU の無い月は正常であり、 後の月に再び公開されることがある(2026-06 がそうであった)。
+> **訂正(2026-06、 Catalog で検証)。** Catalog タイトル検索により、 **「Setup Dynamic Update」が公開されるのは 23H2 / 24H2 系列のみ** で、 「Setup Dynamic Update … version 21H2」は **0 件** ── すなわち **Server 2022 には Setup DU が一切存在しない** ことを確認した。 Server 2022 が受け取るのは「Dynamic Update … version 21H2」という単一製品で、 これは SafeOS/WinRE 系(例 `KB5094157`、 `CommandLineInstallation` の run-the-cab 更新)である。 Server 2022 の `DU.Setup` を「オプション、 公開時月次」と記した旧ドラフトは、 この素の SafeOS DU を Setup DU と混同していた。 Setup DU は UUP 世代(23H2/24H2)固有の構成物である。 ハンドラの変化にも注意:2022 SafeOS DU は `CommandLineInstallation`、 2025 SafeOS DU(`KB5094150`)は UUP `OSInstaller` + CompDB モデル(§5.11)。
+
+したがってパイプラインは「この OS/月に DU.Setup なし」を正しく扱う必要がある:Server 2016/2019/2022 では *常に* 不在(soft シグナルではなく確定的な `—`)、 Server 2025 では断続的で欠落月は正常。 Refresher は「No Setup DU published」をログして進む。
 
 ### 6.4 WSUS Product Category GUIDs と Server LTSC 系列の対応
 
@@ -1042,7 +1117,8 @@ Microsoft 自身の公開ドキュメントまたは出荷ツールに基づく�
 
 - Server LTSC Product GUID マッピング(Server 2016 / 2019 / 2022 / 2025)。 実 wsusscn2 メタデータからの逆引きで検証し、 コミュニティ OSS と観測された LCU KB 番号と相互参照。
 - `package.xml` の依存性グラフ関係(`Prerequisites`、 `SupersededBy`、 `BundledBy`、 leaf から bundle への payload ロールアップ)。
-- 現行 Catalog スナップショットで観測された Server 2025 LCU バンドル挙動(combined LCU + SSU 依存性解決メタデータ)。
+- **4 系統の SSU モデルと 3 エラーの適用性モデル(§5.4、 §5.11)** ── これらは元々 wsusscn2 から読み、 その後 **SOAP API(§2.6)で 2026-06 に独立して再現** された。 2 つの面をまたぐクロス検証により、 単一スナップショットの推論より上位に位置づく。 月ごとのビルド番号は時点依存だが、 系統/時代は安定。
+- Server 2025 の UUP CompDB 合成モデル(`ImageUpdate` スキーマ;`Feature Type` = GDR / SetupDynamicUpdate / SafeOSUpdate / LanguagePack)── CompDB cab から直接読んだ。
 
 ### 観測されたが契約ではないもの
 
@@ -1122,6 +1198,8 @@ URL は Microsoft の裁量に従い、 通知なく変更される場合があ�
 
 本記事は Anthropic Claude(Opus 4.7)によりリポジトリメンテナの指示の下、 元の `docs/history/` 内容を読み統合することにより準備されました。 リポジトリの調査ログから得られた知見を統合し、 必要に応じて Microsoft の公開ドキュメントを相互参照しています。
 
+**改訂(2026-06)。** 本記事は、 オフライン `wsusscn2.cab` がローカルパースに脆いと判明したことを受け、 **MS-WSUSSS server-server-sync SOAP API(§2.6)** を一次かつ最も信頼できる解析面とするよう改訂した。 SSU・Dynamic Update・UUP 合成の知見は SOAP 面で直接再導出し、 以前の wsusscn2 ベースの読みが誤っていた箇所(特に §5.4 の Server 2019 SSU 形態、 §6.3 の Server 2022 Setup-DU の主張)を SOAP/Catalog の観測で上書きし、 新しい UUP CompDB 適用性モデル(§5.11)を追加した。 過去の主張を訂正した箇所は本文中に *訂正(2026-06)* として明示している。
+
 ---
 
 ## 付録 D:運用上の保証 vs 観測
@@ -1144,7 +1222,10 @@ URL は Microsoft の裁量に従い、 通知なく変更される場合があ�
 | LCU は WinPE / boot.wim をサービシングできない(`0x80070032` / `0x8007371b`) | 公式文書化(MS Learn)かつ経験的に確証 |
 | Combined-LCU のイメージ側 SS フロア(例:Server 2022: KB5030216 → SSU 20348.1960) | KB ページにプロズとしてのみ文書化;機械可読メタデータには一切存在しない |
 | Server 2016 のサービシング済み install.wim は `DVD_EX` / `efisys_EX.bin` を欠く | 観測(2026-06 サービシング済みメディア) |
-| LTSC での Dynamic Update ケイデンス | 観測のみ |
+| LTSC での Dynamic Update ケイデンス | 観測のみ ── ただし「21H2/Server 2022 に Setup DU 無し」は Catalog で検証済(§6.3) |
+| 更新単位メタデータ面としての MS-WSUSSS SOAP API(§2.6) | 運用上安定(非文書化;匿名ハンドシェイクを 2026-06 観測) |
+| 4 系統 SSU モデル + 3 エラー適用性モデル(§5.4、 §5.11) | 運用上安定 ── wsusscn2 と SOAP API の両面でクロス検証 |
+| UUP CompDB 合成モデル(ImageUpdate スキーマ、 §5.11) | 観測(2026-06 の CompDB cab から直接読取) |
 | 最終的な適用可能性 / インストール可能性 | WUA サービシングロジックのみが権威 |
 
 「公式アナウンス済み」または「公式文書化済み」以外のステータスの行は、 助言的なものとして扱ってください:発見と高速化には有用ですが、 Microsoft 自身のサービシング検証の代替にはなりません。
