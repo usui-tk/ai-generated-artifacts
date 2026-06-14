@@ -21,6 +21,21 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **Committed the SSM release list + a provisional sample ledger/report
+  (`tests/ssm/`).** Now that the harness generates them in-sandbox (it could not at
+  first), `ssm-agent-releases.json` (the deterministic matrix INPUT: 206 upstream
+  versions with RPM availability and the go.mod `go_version`) and a provisional
+  `ssm-installtest-ledger.json` + `RESULTS-ol6.md` are committed, mirroring the ENA
+  release-list + sample precedent (B.9). The sample is an OL6 run of three
+  representative versions (`3.0.1479.0` below the minimum, the `3.3.3598.0`
+  boundary, the latest `3.3.4624.0`); all install+run on the sandbox's modern
+  kernel (verdict compliant-capable), and a real run in the maintainer's env / CI
+  grows the ledger via the kver-PRIMARY dedup append. Also fixed
+  `list-ssm-releases.sh` to not abort under `set -e` on pre-go-modules tags (which
+  have no go.mod, so the `go_version` grep matched nothing): the lookup now yields
+  an empty `go_version` (recorded as null) instead of failing the whole run. SPEC
+  B.10 + TESTING updated to reflect the committed artifacts.
+
 - **AWS SSM Agent install+run test harness (`tests/ssm/`, `install-ssm-agent.sh`).**
   A dev/CI harness structurally mirroring the ENA matrix (B.9): per OL major it
   determines, in a disposable clean-core container, which SSM Agent versions

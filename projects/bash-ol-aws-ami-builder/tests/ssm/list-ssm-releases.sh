@@ -99,7 +99,10 @@ go_version_for() {
   local -a opts=(-fsSL --max-time "${to}")
   if [ "${INSECURE_TLS:-0}" = "1" ]; then opts+=(-k); fi
   gomod="$(curl "${opts[@]}" "${url}" 2>/dev/null || true)"
-  printf '%s\n' "${gomod}" | grep -oE '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}'
+  # `|| true`: pre-go-modules tags (and 404s) have no `go` directive, so grep
+  # finds nothing and returns non-zero; without this the `gv="$(...)"` caller
+  # would abort under `set -e`. Empty output -> recorded as null.
+  printf '%s\n' "${gomod}" | grep -oE '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}' || true
 }
 
 log "fetching SSM Agent tags from ${SSM_REPO_URL} (git ls-remote --tags)"

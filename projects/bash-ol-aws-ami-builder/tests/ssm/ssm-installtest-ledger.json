@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "ledger_type": "ssm-installtest",
+  "min_ssm_version": "3.3.3598.0",
+  "entries": [
+    {
+      "osmajor": "6",
+      "ssm_version": "3.0.1479.0",
+      "kver": "6.18.5",
+      "glibc": "2.12",
+      "go_version": "1.15",
+      "status": "ok",
+      "ran": true,
+      "installed_version": "3.0.1479.0",
+      "run_method": "amazon-ssm-agent -version",
+      "reason": ""
+    },
+    {
+      "osmajor": "6",
+      "ssm_version": "3.3.3598.0",
+      "kver": "6.18.5",
+      "glibc": "2.12",
+      "go_version": "1.24",
+      "status": "ok",
+      "ran": true,
+      "installed_version": "3.3.3598.0",
+      "run_method": "amazon-ssm-agent -version",
+      "reason": ""
+    },
+    {
+      "osmajor": "6",
+      "ssm_version": "3.3.4624.0",
+      "kver": "6.18.5",
+      "glibc": "2.12",
+      "go_version": "1.25",
+      "status": "ok",
+      "ran": true,
+      "installed_version": "3.3.4624.0",
+      "run_method": "amazon-ssm-agent -version",
+      "reason": ""
+    }
+  ]
+}

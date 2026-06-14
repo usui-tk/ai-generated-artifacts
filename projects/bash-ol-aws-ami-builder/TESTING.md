@@ -463,10 +463,13 @@ bash tests/ssm/run-ssm-installtest-matrix.sh --ol 6 --full           # OL6, ever
 ```
 
 The matrix is manual / on-demand (root + container; NOT a `run-all.sh` tier). The
-ledger + `RESULTS-ol<N>.md` are generated on the first real run (the maintainer's
-env / CI, a kernel-matched runner for the kernel axis), not committed as a sample.
-Production integration into `build-ol-aws-ami.sh` is deferred (decided from the
-report).
+release list (`ssm-agent-releases.json`) and a provisional sample ledger
+(`ssm-installtest-ledger.json`) + `RESULTS-ol6.md` are committed, generated
+in-sandbox like the ENA pair (the sample is an OL6 run of `3.0.1479.0` /
+`3.3.3598.0` / `3.3.4624.0`, all install+run on the sandbox's modern kernel). A
+real run in the maintainer's env / CI (a kernel-matched runner for the kernel
+axis) grows the ledger via the kver-PRIMARY dedup append. Production integration
+into `build-ol-aws-ami.sh` is deferred (decided from the report).
 
 ## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
 

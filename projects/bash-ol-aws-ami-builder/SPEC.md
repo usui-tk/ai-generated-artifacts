@@ -1921,10 +1921,16 @@ an agent update, affected by the 2026-06-16 deprecation), or `none`.
 version list + per-version RPM availability + go.mod `go_version`);
 `tests/ssm/run-ssm-installtest-matrix.sh` (the matrix). The pure verdict/proxy/
 filter logic (`ssm_ge`, `go_min_kernel`, `ssm_in_scope`, `ssm_compliance`) is
-unit-tested by `tests/t18_ssmverdict.sh` (no container/network). The ledger
-(`ssm-installtest-ledger.json`) and `RESULTS-ol<N>.md` are generated on the first
-real run (a long-running, root + container step for the maintainer's env / CI,
-and a kernel-matched runner for the kernel axis) — not committed as a sample.
+unit-tested by `tests/t18_ssmverdict.sh` (no container/network). The release list
+(`ssm-agent-releases.json`, the deterministic matrix INPUT) and a provisional
+sample ledger (`ssm-installtest-ledger.json`) + `RESULTS-ol6.md` ARE committed,
+generated in-sandbox like the ENA pair (B.9): the release list is the full
+upstream snapshot (206 versions, RPM availability, go.mod `go_version`); the
+sample is an OL6 run of three representative versions (`3.0.1479.0` below the
+minimum, the `3.3.3598.0` boundary, the latest `3.3.4624.0` — all install+run on
+the sandbox's modern kernel, verdict compliant-capable). A real run in the
+maintainer's env / CI (and a kernel-matched runner for a faithful kernel axis)
+grows the ledger via the kver-PRIMARY dedup append.
 
 ---
 
