@@ -46,6 +46,10 @@
 #   --ledger <path>        ledger JSON (default: tests/ssm/ssm-installtest-ledger.json)
 #   --results-dir <dir>    where RESULTS-ol<N>.md are written (default: tests/ssm)
 #   --cleancore-dir <dir>  holds/receives cleancore-ol<N>.tar.gz (default: ./cleancore-out)
+#   --work-dir <dir>       clean-core BUILD scratch base; each OL builds under
+#                          <dir>/cleancore-ol<N> and it is rm -rf'd on completion.
+#                          Explicit + per-driver so concurrent ENA/SSM runs never
+#                          collide (default: ${TMPDIR:-/tmp}/cleancore-work-ssm-installtest).
 #   --releases <path>      release-list JSON (default: tests/ssm/ssm-agent-releases.json)
 #   --rebuild-cleancore    rebuild the clean-core rootfs even if present
 #   --preflight-retries <n>  QA-preflight retries on a transient failure (default: 2)
@@ -73,6 +77,7 @@ MIN_SSM_VERSION="3.3.3598.0"
 LEDGER="${SCRIPT_DIR}/ssm-installtest-ledger.json"
 RESULTS_DIR="${SCRIPT_DIR}"
 CLEANCORE_DIR="./cleancore-out"
+WORK_BASE=""
 RELEASES="${SCRIPT_DIR}/ssm-agent-releases.json"
 REBUILD_CLEANCORE=0
 FORCE=0
@@ -143,6 +148,7 @@ while [ "$#" -gt 0 ]; do
     --ledger)            LEDGER="${2:-}"; shift ;;
     --results-dir)       RESULTS_DIR="${2:-}"; shift ;;
     --cleancore-dir)     CLEANCORE_DIR="${2:-}"; shift ;;
+    --work-dir)          WORK_BASE="${2:-}"; shift ;;
     --releases)          RELEASES="${2:-}"; shift ;;
     --rebuild-cleancore) REBUILD_CLEANCORE=1 ;;
     --preflight-retries) PREFLIGHT_RETRIES="${2:-}"; shift ;;
@@ -158,11 +164,23 @@ SSM_VERSIONS="${SSM_VERSIONS//,/ }"
 
 # ---- pre-flight ------------------------------------------------------------
 [ "$(id -u)" -eq 0 ] || die "must run as root (clean-core build + unshare/chroot need it)."
+# Irregular-placement guard: a script resolving to '/' (or empty) would make the
+# clean-core build scratch root-level, and the builder does `rm -rf` on it -- refuse.
+case "${SCRIPT_DIR}" in
+  ""|/) die "refusing to run: matrix script resolves to '${SCRIPT_DIR:-<empty>}' (irregular placement; destructive clean-core cleanup could hit the OS root)." ;;
+esac
 for t in unshare chroot tar curl python3; do
   command -v "${t}" >/dev/null 2>&1 || die "missing required host tool: ${t}"
 done
 [ -f "${ORCHESTRATOR}" ]   || die "orchestrator not found: ${ORCHESTRATOR}"
 [ -f "${INSTALL_SCRIPT}" ] || die "install-ssm-agent.sh not found: ${INSTALL_SCRIPT}"
+# Explicit, per-driver clean-core BUILD scratch base (NOT the source tree, NOT the
+# shared /tmp/cleancore-ol<N>): so concurrent ENA/SSM runs never collide. The
+# builder rm -rf's <base>/cleancore-ol<N>, so refuse any root-level resolution.
+WORK_BASE="${WORK_BASE:-${TMPDIR:-/tmp}/cleancore-work-ssm-installtest}"
+case "${WORK_BASE}" in ""|/|//) die "refusing to run: --work-dir resolves to '${WORK_BASE:-<empty>}' (would risk destructive cleanup)." ;; esac
+mkdir -p "${WORK_BASE}"; WORK_BASE="$(cd "${WORK_BASE}" && pwd)"
+[ "${WORK_BASE}" = "/" ] && die "refusing to run: --work-dir resolved to '/'."
 
 # ---- the version list for an OL (from --ssm-versions, else the releases JSON),
 # filtered by the mode (default >= MIN_SSM_VERSION; --full = all). -------------
@@ -297,7 +315,7 @@ for ol in ${OL_LIST}; do
   tarball="${CLEANCORE_DIR}/cleancore-ol${ol}.tar.gz"
   if [ "${REBUILD_CLEANCORE}" = "1" ] || [ ! -f "${tarball}" ]; then
     log "OL${ol}: building clean-core rootfs -> ${tarball}"
-    INSECURE_TLS="${INSECURE_TLS}" bash "${ORCHESTRATOR}" --ol "${ol}" --out-dir "${CLEANCORE_DIR}" \
+    INSECURE_TLS="${INSECURE_TLS}" bash "${ORCHESTRATOR}" --ol "${ol}" --out-dir "${CLEANCORE_DIR}" --work-dir "${WORK_BASE}" \
       || die "OL${ol}: clean-core build failed"
   fi
   [ -f "${tarball}" ] || die "OL${ol}: clean-core tarball missing after build: ${tarball}"

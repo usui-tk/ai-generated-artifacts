@@ -61,6 +61,10 @@
 #   --ledger <path>        ledger JSON (default: tests/ena/buildtest-ledger.json)
 #   --results-dir <dir>    where RESULTS-ol<N>.md are written (default: tests/ena)
 #   --cleancore-dir <dir>  holds/receives cleancore-ol<N>.tar.gz (default: ./cleancore-out)
+#   --work-dir <dir>       clean-core BUILD scratch base; each OL builds under
+#                          <dir>/cleancore-ol<N> and it is rm -rf'd on completion.
+#                          Explicit + per-driver so concurrent ENA/SSM runs never
+#                          collide (default: ${TMPDIR:-/tmp}/cleancore-work-ena-buildtest).
 #   --bundle-dir <dir>     load-readiness bundle the verifier reads, emitted per
 #                          build (default: <cleancore-dir>/verify-bundle)
 #   --releases <path>      release-list JSON (default: tests/ena/ena-driver-releases.json)
@@ -91,6 +95,7 @@ PINNED_ONLY=0
 LEDGER="${SCRIPT_DIR}/buildtest-ledger.json"
 RESULTS_DIR="${SCRIPT_DIR}"
 CLEANCORE_DIR="./cleancore-out"
+WORK_BASE=""
 BUNDLE_DIR=""
 RELEASES="${SCRIPT_DIR}/ena-driver-releases.json"
 REBUILD_CLEANCORE=0
@@ -116,6 +121,7 @@ while [ "$#" -gt 0 ]; do
     --ledger)           LEDGER="${2:-}"; shift ;;
     --results-dir)      RESULTS_DIR="${2:-}"; shift ;;
     --cleancore-dir)    CLEANCORE_DIR="${2:-}"; shift ;;
+    --work-dir)         WORK_BASE="${2:-}"; shift ;;
     --bundle-dir)       BUNDLE_DIR="${2:-}"; shift ;;
     --releases)         RELEASES="${2:-}"; shift ;;
     --rebuild-cleancore) REBUILD_CLEANCORE=1 ;;
@@ -134,6 +140,11 @@ BUNDLE_DIR="${BUNDLE_DIR:-${CLEANCORE_DIR}/verify-bundle}"
 
 # ---- pre-flight ------------------------------------------------------------
 [ "$(id -u)" -eq 0 ] || die "must run as root (clean-core build + unshare/chroot need it)."
+# Irregular-placement guard: a script resolving to '/' (or empty) would make the
+# clean-core build scratch root-level, and the builder does `rm -rf` on it -- refuse.
+case "${SCRIPT_DIR}" in
+  ""|/) die "refusing to run: matrix script resolves to '${SCRIPT_DIR:-<empty>}' (irregular placement; destructive clean-core cleanup could hit the OS root)." ;;
+esac
 for t in unshare chroot tar curl python3; do
   command -v "${t}" >/dev/null 2>&1 || die "missing required host tool: ${t}"
 done
@@ -141,6 +152,13 @@ done
 [ -f "${INSTALL_SCRIPT}" ] || die "install-ena-driver.sh not found: ${INSTALL_SCRIPT}"
 mkdir -p "${CLEANCORE_DIR}"; CLEANCORE_DIR="$(cd "${CLEANCORE_DIR}" && pwd)"
 mkdir -p "${RESULTS_DIR}";   RESULTS_DIR="$(cd "${RESULTS_DIR}" && pwd)"
+# Explicit, per-driver clean-core BUILD scratch base (NOT the source tree, NOT the
+# shared /tmp/cleancore-ol<N>): so concurrent ENA/SSM runs never collide. The
+# builder rm -rf's <base>/cleancore-ol<N>, so refuse any root-level resolution.
+WORK_BASE="${WORK_BASE:-${TMPDIR:-/tmp}/cleancore-work-ena-buildtest}"
+case "${WORK_BASE}" in ""|/|//) die "refusing to run: --work-dir resolves to '${WORK_BASE:-<empty>}' (would risk destructive cleanup)." ;; esac
+mkdir -p "${WORK_BASE}"; WORK_BASE="$(cd "${WORK_BASE}" && pwd)"
+[ "${WORK_BASE}" = "/" ] && die "refusing to run: --work-dir resolved to '/'."
 
 # Resolve the ENA version set for an OL (echo space-separated, ascending).
 versions_for_ol() {
@@ -448,7 +466,7 @@ for ol in ${OL_LIST}; do
   tarball="${CLEANCORE_DIR}/cleancore-ol${ol}.tar.gz"
   if [ ! -f "${tarball}" ] || [ "${REBUILD_CLEANCORE}" = "1" ]; then
     log "OL${ol}: building clean-core rootfs via the orchestrator -> ${tarball}"
-    INSECURE_TLS="${INSECURE_TLS}" bash "${ORCHESTRATOR}" --ol "${ol}" --out-dir "${CLEANCORE_DIR}" \
+    INSECURE_TLS="${INSECURE_TLS}" bash "${ORCHESTRATOR}" --ol "${ol}" --out-dir "${CLEANCORE_DIR}" --work-dir "${WORK_BASE}" \
       || die "OL${ol}: clean-core build failed (cannot run the ENA matrix for this OL)"
   else
     log "OL${ol}: reusing existing clean-core rootfs ${tarball}"

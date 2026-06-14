@@ -86,6 +86,19 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **Both clean-core matrices now set an explicit, per-driver build work-dir
+  (`--work-dir`), so concurrent ENA + SSM runs never collide.**
+  `run-ena-buildtest-matrix.sh` and `run-ssm-installtest-matrix.sh` previously let
+  `build-cleancore.sh` fall back to its fixed `/tmp/cleancore-ol<N>` scratch, which
+  two concurrent runs of the same OL would share (and the builder `rm -rf`'s it).
+  Each matrix now passes `--work-dir` explicitly, defaulting to a distinct,
+  outside-the-source-tree base (`${TMPDIR:-/tmp}/cleancore-work-ena-buildtest` /
+  `...-ssm-installtest`) and overridable per run. Added an irregular-placement
+  safety guard: each matrix refuses to run if its script dir or the resolved
+  work-dir is `/` (or empty), since the builder's `rm -rf` on the scratch could
+  otherwise reach the OS root. (No source-tree pollution, so the lint tiers are
+  unaffected.)
+
 - **ENA build-test matrix: committed the real OL6/OL7/OL8 E2E ledger + reports,
   replacing the in-environment sample (`tests/ena/`).** The previous
   `buildtest-ledger.json` / `RESULTS-ol6.md` were a 2-row OL6 sample; they are
