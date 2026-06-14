@@ -21,6 +21,25 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **Load-readiness bundle PRODUCER in the ENA matrix
+  (`tests/ena/run-ena-buildtest-matrix.sh`).** Completes the pair with the 0016
+  verifier: after each build, a dumb `cp` (no load-readiness judgement, no branch
+  on the build's ok/fail status) preserves the artifacts the build already
+  produced into the exact layout `verify-ena-buildresults.sh` reads -- the
+  DKMS-built `ena.ko` to `<bundle>/modules/ol<N>-ena_<ver>-<kver>.ko`, and the
+  shared per-kver `Module.symvers` + `kernel.vermagic` (sourced from a **stock**
+  in-tree module, so the verifier's L4a vermagic compare stays independent of the
+  freshly built module) + an `initramfs.list` (`lsinitrd`, else `cpio -t`) to
+  `<bundle>/kver/<kver>/`. New `--bundle-dir` flag; defaults to
+  `<cleancore-dir>/verify-bundle`. The bundle accumulates like the ledger
+  (per-version module added, shared per-kver files overwritten idempotently); a
+  failed build leaves no DKMS module to copy, so none is fabricated (the verifier
+  flags a missing ok-row artifact itself). The `cp` layout is contract-tested
+  against the verifier's read-paths by the new `tests/t17_enabundle.sh` (13 cases,
+  a host-only unit test over a fabricated image tree -- no real build/kernel/kmod).
+  SPEC B.9 and TESTING updated. End-to-end against a real matrix run remains the
+  user's-env / CI step.
+
 - **External, read-only ENA build-result verifier
   (`tests/ena/verify-ena-buildresults.sh`).** Answers the layer above
   `ENA_BUILDTEST` -- "would the built module actually load on its target

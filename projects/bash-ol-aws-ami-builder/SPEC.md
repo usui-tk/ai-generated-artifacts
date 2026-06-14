@@ -1839,6 +1839,20 @@ row is a fail** (load_ready unknown), never a silent skip — the same no-false-
 discipline as the install-time verify. The verdict logic is pure and unit-tested
 (`tests/t16_enaverifyresults.sh`).
 
+The build side emits this bundle. `run-ena-buildtest-matrix.sh` preserves, after
+each build (a dumb `cp` — no load-readiness judgement, no branch on the build's
+ok/fail status), the DKMS-built `ena.ko` to
+`<bundle>/modules/ol<N>-ena_<ver>-<kver>.ko` and the shared per-kver
+`Module.symvers` + `kernel.vermagic` (a **stock** in-tree module's vermagic, so
+the L4a compare stays independent of the freshly built module) + an
+`initramfs.list` (`lsinitrd`, else `cpio -t`) to `<bundle>/kver/<kver>/`. The
+bundle dir defaults to `<cleancore-dir>/verify-bundle` (`--bundle-dir` overrides)
+and accumulates exactly like the ledger: per-version `ena.ko` added, shared
+per-kver files overwritten idempotently. A failed build leaves no DKMS module to
+copy, so the producer never fabricates one — the verifier flags the gap itself.
+The `cp` layout is contract-tested against the verifier's read-paths by
+`tests/t17_enabundle.sh` (no real build needed).
+
 ---
 
 # Part C — Quality Gates & Validation Checklist

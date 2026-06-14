@@ -376,6 +376,16 @@ Two evidence layers, both committed so the state persists across runs:
   load is the B-T8 ceiling). A missing bundle artifact for an `ok` row is a fail,
   not a silent skip. The pure verdict logic is unit-tested by
   `tests/t16_enaverifyresults.sh`.
+- **The matrix emits that bundle** (the producer for the verifier above). After
+  each build, `run-ena-buildtest-matrix.sh` does a dumb `cp` — no load-readiness
+  judgement, no branch on ok/fail — of the DKMS `ena.ko` to
+  `<bundle>/modules/ol<N>-ena_<ver>-<kver>.ko` and the shared per-kver
+  `Module.symvers` + `kernel.vermagic` (a **stock** module's vermagic) +
+  `initramfs.list` to `<bundle>/kver/<kver>/`. The bundle dir defaults to
+  `<cleancore-dir>/verify-bundle` (`--bundle-dir` overrides) and accumulates like
+  the ledger. The `cp` layout is contract-tested against the verifier's
+  read-paths by `tests/t17_enabundle.sh` — a host-only unit test with a fabricated
+  image tree, so it needs no real build, kernel, or kmod.
 
 By default each OL is first **update-gated** (turn off with `--force`): before any
 build, the matrix probes the latest `kernel-uek` for the OL (`yum.oracle.com`

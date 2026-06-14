@@ -61,6 +61,8 @@
 #   --ledger <path>        ledger JSON (default: tests/ena/buildtest-ledger.json)
 #   --results-dir <dir>    where RESULTS-ol<N>.md are written (default: tests/ena)
 #   --cleancore-dir <dir>  holds/receives cleancore-ol<N>.tar.gz (default: ./cleancore-out)
+#   --bundle-dir <dir>     load-readiness bundle the verifier reads, emitted per
+#                          build (default: <cleancore-dir>/verify-bundle)
 #   --releases <path>      release-list JSON (default: tests/ena/ena-driver-releases.json)
 #   --rebuild-cleancore    rebuild the clean-core rootfs even if present
 #   --preflight-retries <n>  QA-preflight retries on a transient failure (default: 2)
@@ -89,6 +91,7 @@ PINNED_ONLY=0
 LEDGER="${SCRIPT_DIR}/buildtest-ledger.json"
 RESULTS_DIR="${SCRIPT_DIR}"
 CLEANCORE_DIR="./cleancore-out"
+BUNDLE_DIR=""
 RELEASES="${SCRIPT_DIR}/ena-driver-releases.json"
 REBUILD_CLEANCORE=0
 FORCE=0
@@ -113,6 +116,7 @@ while [ "$#" -gt 0 ]; do
     --ledger)           LEDGER="${2:-}"; shift ;;
     --results-dir)      RESULTS_DIR="${2:-}"; shift ;;
     --cleancore-dir)    CLEANCORE_DIR="${2:-}"; shift ;;
+    --bundle-dir)       BUNDLE_DIR="${2:-}"; shift ;;
     --releases)         RELEASES="${2:-}"; shift ;;
     --rebuild-cleancore) REBUILD_CLEANCORE=1 ;;
     --preflight-retries) PREFLIGHT_RETRIES="${2:-}"; shift ;;
@@ -125,6 +129,8 @@ while [ "$#" -gt 0 ]; do
 done
 OL_LIST="${OL_LIST//,/ }"
 ENA_VERSIONS="${ENA_VERSIONS//,/ }"
+# Default the bundle dir UNDER the (possibly overridden) cleancore dir.
+BUNDLE_DIR="${BUNDLE_DIR:-${CLEANCORE_DIR}/verify-bundle}"
 
 # ---- pre-flight ------------------------------------------------------------
 [ "$(id -u)" -eq 0 ] || die "must run as root (clean-core build + unshare/chroot need it)."
@@ -143,6 +149,55 @@ versions_for_ol() {
   if [ -n "${ENA_VERSIONS}" ]; then printf '%s' "${ENA_VERSIONS}"; return 0; fi
   [ -f "${RELEASES}" ] || die "release list not found: ${RELEASES} (run list-ena-releases.sh, or pass --ena-versions)"
   python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(' '.join(v['version'] for v in d['versions']))" "${RELEASES}"
+}
+
+# 0017: emit the load-readiness verification bundle that the SEPARATE, read-only
+# verify-ena-buildresults.sh (0016) consumes. This is a DUMB copy of artifacts
+# the build already produced into the exact layout the verifier reads -- it adds
+# NO load-readiness judgement and does NOT branch on the build's ok/fail status
+# (existence guards only: a failed build simply leaves no DKMS ena.ko to copy,
+# and the verifier flags a missing artifact for an ok row itself). Layout:
+#   <bundle>/modules/ol<N>-ena_<ver>-<kver>.ko   per built version (only file that varies)
+#   <bundle>/kver/<kver>/Module.symvers          shared per kver (the kernel's)
+#   <bundle>/kver/<kver>/kernel.vermagic         shared per kver (a STOCK module's vermagic)
+#   <bundle>/kver/<kver>/initramfs.list          shared per kver (lsinitrd / cpio -t listing)
+# Args: <ol> <ver> <img-root> <bundle-dir>. Runs on the host against the still-
+# mounted container tree; safe under set -e (every step is guarded, returns 0).
+preserve_bundle() {
+  local ol="$1" ver="$2" img="$3" bdir="$4" kver ko symvers stockko initramfs
+  [ -n "${bdir}" ] || return 0
+  [ -d "${img}/lib/modules" ] || return 0
+  # Target kernel = the highest UEK modules dir the build provisioned (mirrors
+  # install-ena-driver.sh's own selection), else the highest of any.
+  kver="$(find "${img}/lib/modules" -maxdepth 1 -mindepth 1 -type d -name '*uek*' -printf '%f\n' 2>/dev/null | sort -V | tail -1 || true)"
+  [ -n "${kver}" ] || kver="$(find "${img}/lib/modules" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V | tail -1 || true)"
+  [ -n "${kver}" ] || return 0
+  mkdir -p "${bdir}/modules" "${bdir}/kver/${kver}" 2>/dev/null || return 0
+  # per-version: the DKMS-built ena.ko (the /updates|/extra copy, never the stock
+  # in-tree module). Absent on a failed build -> nothing copied.
+  ko="$(find "${img}/lib/modules/${kver}" -type f -name 'ena.ko*' 2>/dev/null | grep -E '/updates/|/extra/' | head -1 || true)"
+  if [ -n "${ko}" ]; then cp -f "${ko}" "${bdir}/modules/ol${ol}-ena_${ver}-${kver}.ko" 2>/dev/null || true; fi
+  # shared per-kver (idempotent overwrite; identical for every version on this kver).
+  symvers="${img}/lib/modules/${kver}/build/Module.symvers"
+  if [ -f "${symvers}" ]; then cp -f "${symvers}" "${bdir}/kver/${kver}/Module.symvers" 2>/dev/null || true; fi
+  # kernel.vermagic from a STOCK in-tree module -- independent of the freshly built
+  # module, so the verifier's L4a vermagic compare is meaningful (catches a module
+  # built against the wrong kernel). modinfo, else strings on the .modinfo section.
+  stockko="$(find "${img}/lib/modules/${kver}/kernel" -type f -name '*.ko*' 2>/dev/null | head -1 || true)"
+  if [ -n "${stockko}" ]; then
+    { modinfo -F vermagic "${stockko}" 2>/dev/null \
+        || strings "${stockko}" 2>/dev/null | sed -n 's/^vermagic=//p'; } \
+      | head -1 > "${bdir}/kver/${kver}/kernel.vermagic" 2>/dev/null || true
+  fi
+  # initramfs.list (INFO, non-gating): listing of the initramfs the build
+  # regenerated, if any. lsinitrd (dracut), else zcat|cpio -t (mkinitrd/EL6).
+  initramfs="${img}/boot/initramfs-${kver}.img"
+  if [ -f "${initramfs}" ]; then
+    { lsinitrd "${initramfs}" 2>/dev/null \
+        || { zcat "${initramfs}" 2>/dev/null || cat "${initramfs}" 2>/dev/null; } | cpio -t 2>/dev/null; } \
+      > "${bdir}/kver/${kver}/initramfs.list" 2>/dev/null || true
+  fi
+  return 0
 }
 
 # Run ONE ENA_BUILDTEST for (ol, version) against a clean-core tarball; echo the
@@ -167,6 +222,9 @@ run_one_buildtest() {
     export ENA_BUILDTEST=1 ENA_DRIVER_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}'
     chroot '${img}' /bin/bash /install-ena-driver.sh
   " > "${outlog}" 2>&1 || true
+  # 0017: preserve the load-readiness bundle the verifier reads, while the built
+  # container still exists (it is removed next). Dumb cp only -- see preserve_bundle.
+  preserve_bundle "${ol}" "${ver}" "${img}" "${BUNDLE_DIR}" || true
   rm -rf "${img}"
   # No [result] line is a valid outcome (the install script died before its
   # die-handler, or unshare/chroot failed): emit empty, never fail the pipeline
@@ -572,4 +630,7 @@ if [ -s "${RESULTS_TSV}" ]; then
   log "summary: ${n_total} build(s) attempted this run, ${n_ok} ok; ledger + RESULTS-ol*.md updated"
 else
   log "summary: nothing built this run (all requested combos already in the ledger); reports regenerated"
+fi
+if [ -d "${BUNDLE_DIR}/modules" ]; then
+  log "load-readiness bundle at ${BUNDLE_DIR} -- verify with: bash tests/ena/verify-ena-buildresults.sh --ledger ${LEDGER} --bundle ${BUNDLE_DIR}"
 fi
