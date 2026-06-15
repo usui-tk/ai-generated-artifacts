@@ -2054,10 +2054,23 @@ failure should therefore not abort an otherwise-good AMI, so the injected hook
 traps the installer's failure to a warning and provisioning continues. (The ENA
 hook, by contrast, is fatal.)
 
-**AMI naming.** When enabled, the AUTO-default `AMI_NAME` appends `-ssm${version}`
-(or `-ssmlatest`) and the description appends `, Amazon SSM Agent ${version}`, so an
-SSM-managed AMI is distinguishable pre-launch. An explicitly set
-`AMI_NAME`/`AMI_DESCRIPTION` is left untouched (`:=`).
+**AMI naming + version resolution.** When enabled, the AUTO-default `AMI_NAME`
+appends `-ssm${version}` and the description appends `, Amazon SSM Agent
+${version}`, so an SSM-managed AMI is distinguishable pre-launch. Because
+"latest" is unsuitable for a persistent artifact, the wrapper **resolves the
+`/latest/` alias to a concrete version** for the AMI name/description, the
+injection log (`[OLAWS-SSM01]`), and the final build report: `_ssm_resolve_latest()`
+reads GitHub's `amazon-ssm-agent` `releases/latest` tag and then VERIFIES that
+version's RPM is actually published on S3 with a HEAD (the GitHub tag can lead S3
+publication — e.g. `3.3.3883.0` / `3.3.4364.0` are tagged but 403 on S3), logging
+the outcome as `[OLAWS-SSM02]`. This is **display/identity only**: the in-guest
+install path is unchanged (the hook still installs the per-OL target, i.e. the
+`/latest/` S3 alias for OL7-OL10), so install behaviour does not depend on the
+build host's network. If resolution fails (offline, or GitHub leads S3), the
+identity gracefully falls back to the literal `latest`. The final report prints a
+`SSM Agent:` line with the resolved version (or `not installed` for
+`--skip-ssm-agent`). An explicitly set `AMI_NAME`/`AMI_DESCRIPTION` is left
+untouched (`:=`).
 
 **Validation status.** OL6/OL7/OL8 install+run is matrix-verified (B.10) and the
 OL6/OL7 build+boot pipeline is validated on real Nitro; **OL9/OL10 install+run is

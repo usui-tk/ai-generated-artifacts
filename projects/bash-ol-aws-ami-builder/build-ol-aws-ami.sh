@@ -414,6 +414,29 @@ load_env() {
   # exists (so the env summary below and every phase are captured).
   setup_logging
 
+  # Resolve the SSM Agent version for the persistent AMI identity + report.
+  # SSM_AGENT_RESOLVED starts as the per-OL target (OL6 pin, OL7-OL10 "latest");
+  # if it is "latest", resolve it to the concrete S3-published version so the AMI
+  # name/description, the injection log, and the final report record a real
+  # version instead of the word "latest" (unsuitable for a persistent artifact).
+  # The guest install is UNCHANGED -- the hook still installs the /latest/ alias;
+  # this is display/identity only. Runs for every build (incl. --build-only) so
+  # the injection log is concrete too. Best-effort: an offline/failed resolution
+  # falls back to "latest".
+  if [[ "${SSM_AGENT_INSTALL}" -eq 1 ]]; then
+    SSM_AGENT_RESOLVED="$(_ssm_pin_for_major "${OL_MAJOR_VERSION}")"
+    if [[ -z "${SSM_AGENT_RESOLVED}" || "${SSM_AGENT_RESOLVED}" == "latest" ]]; then
+      local _ssm_latest; _ssm_latest="$(_ssm_resolve_latest)"
+      if [[ -n "${_ssm_latest}" ]]; then
+        SSM_AGENT_RESOLVED="${_ssm_latest}"
+        log_info "[OLAWS-SSM02] resolved SSM Agent 'latest' -> ${SSM_AGENT_RESOLVED} for the AMI identity/report (the guest still installs the /latest/ alias)"
+      else
+        SSM_AGENT_RESOLVED="latest"
+        log_warn "[OLAWS-SSM02] could not resolve SSM Agent 'latest' to a concrete version; AMI identity/report will show 'latest'"
+      fi
+    fi
+  fi
+
   # Required parameters for AWS import (unless skipped)
   if [[ ${SKIP_AWS_IMPORT} -eq 0 && ${BUILD_ONLY} -eq 0 ]]; then
     : "${S3_BUCKET:?S3_BUCKET is not defined}"
@@ -441,7 +464,8 @@ load_env() {
     # version; a /latest/ OL shows '-ssmlatest'. AUTO defaults only (:=).
     local _ssm_name_sfx="" _ssm_desc_sfx=""
     if [[ "${SSM_AGENT_INSTALL}" -eq 1 ]]; then
-      SSM_AGENT_RESOLVED="$(_ssm_pin_for_major "${OL_MAJOR_VERSION}")"
+      # SSM_AGENT_RESOLVED was resolved above (a concrete version when "latest"
+      # could be looked up; the literal "latest" only if resolution failed).
       if [[ -z "${SSM_AGENT_RESOLVED}" || "${SSM_AGENT_RESOLVED}" == "latest" ]]; then
         _ssm_name_sfx="-ssmlatest"
         _ssm_desc_sfx=", Amazon SSM Agent (latest)"
@@ -1683,7 +1707,7 @@ OLAWS_OL6_CLOUD_USER_BODY
       } >> "${aws_provision_ssm}"
 
       if grep -Fq '[ol-aws-ami-builder PATCH ssm-agent-install]' "${aws_provision_ssm}"; then
-        log_info "  [OLAWS-SSM01] SSM Agent hook injected (version: OL${OL_MAJOR_VERSION} $(_ssm_pin_for_major "${OL_MAJOR_VERSION}"); install + boot-enable)"
+        log_info "  [OLAWS-SSM01] SSM Agent hook injected (version: OL${OL_MAJOR_VERSION} ${SSM_AGENT_RESOLVED:-latest}; install + boot-enable)"
       else
         die "Failed to inject SSM Agent hook into ${aws_provision_ssm}"
       fi
@@ -2872,6 +2896,26 @@ _ssm_pin_for_major() {
     | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
 }
 
+# Resolve the SSM Agent "/latest/" alias to a concrete, S3-published version --
+# for the persistent AMI name/description + the final report only ("latest" is
+# unsuitable for a persistent artifact). The guest install is UNCHANGED: the hook
+# still installs the per-OL target (the /latest/ alias for OL7-OL10). Strategy,
+# curl-only (no rpm dependency on the build host): read GitHub's releases/latest
+# tag via the redirect, then VERIFY that version's RPM is actually published on S3
+# (a HEAD) -- the GitHub tag can lead S3 publication (e.g. 3.3.3883.0 / 3.3.4364.0
+# are tagged but 403 on S3). Echoes the concrete version, or "" on any failure
+# (the caller then keeps the literal "latest").
+_ssm_resolve_latest() {
+  local base="https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent" arch="linux_amd64"
+  local loc ver
+  loc="$(curl -fsSL -o /dev/null -w '%{url_effective}' --max-time 15 \
+         https://github.com/aws/amazon-ssm-agent/releases/latest 2>/dev/null || true)"
+  ver="$(printf '%s' "${loc}" | sed -nE 's#.*/tag/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*#\1#p')"
+  [[ -n "${ver}" ]] || return 0
+  curl -fsI --max-time 15 "${base}/${ver}/${arch}/amazon-ssm-agent.rpm" >/dev/null 2>&1 || return 0
+  printf '%s' "${ver}"
+}
+
 # CHECK 2 provenance verdict: is the effective ena.ko acceptable for THIS build?
 # When a self-build was performed (ENA_BUILD_VERSION is non-empty -- set only for
 # OL6/OL7 with the default self-build on), the in-guest DKMS build MUST have
@@ -3511,6 +3555,13 @@ phase9_register_ami() {
   log_info "  Boot Mode:       ${BOOT_MODE}"
   log_info "  ENA driver:      ${ena_summary}"
   log_info "  ENA Support:     enabled"
+  local ssm_summary
+  if [[ "${SSM_AGENT_INSTALL}" -eq 1 ]]; then
+    ssm_summary="${SSM_AGENT_RESOLVED:-latest} (installed + enabled for boot)"
+  else
+    ssm_summary="not installed (--skip-ssm-agent)"
+  fi
+  log_info "  SSM Agent:       ${ssm_summary}"
   log_info "=========================================="
 }
 

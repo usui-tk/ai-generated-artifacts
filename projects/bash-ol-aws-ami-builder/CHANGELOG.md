@@ -123,6 +123,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **SSM Agent: persistent AMI identity + final report now show a concrete
+  version, not `latest`.** "latest" is unsuitable for a persistent artifact, so
+  `build-ol-aws-ami.sh` resolves the `/latest/` alias (for OL7-OL10) to a concrete
+  S3-published version via `_ssm_resolve_latest()` (GitHub `releases/latest` tag +
+  an S3 HEAD verify, since the tag can lead S3 publication; logged as
+  `[OLAWS-SSM02]`) and uses it in the `-ssm<ver>` AMI name, the AMI description,
+  the `[OLAWS-SSM01]` injection log, and a new `SSM Agent:` line in the final
+  build report. This is **display/identity only** — the in-guest install path is
+  unchanged (the hook still installs the `/latest/` alias), so install behaviour
+  does not depend on the build host. Resolution is best-effort: an offline build
+  (or a GitHub tag that leads S3) falls back to the literal `latest`.
+
 - **SSM ledger: OL9/OL10 re-run on the maintainer's host (uniform OL6-OL10
   `test_host_kernel`).** A maintainer End-to-End run executed the full OL6-OL10
   matrix on one host, so OL9/OL10's `test_host_kernel` moves from the in-sandbox
