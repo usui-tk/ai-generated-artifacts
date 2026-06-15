@@ -101,6 +101,26 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **SSM install+run matrix: extended to OL9 and OL10; committed the real
+  OL6-OL10 ledger + reports (`tests/ssm/`).** The matrix now wires OL9 and OL10
+  alongside OL6/7/8: `install-ssm-agent.sh` provisions the OL UEK via
+  `ol9_UEKR7` / `ol10_UEKR8` (each with the OL8-style dnf->yum bootstrap, since
+  the 9-slim/10-slim bases ship dnf only), and `run-ssm-installtest-matrix.sh`
+  gains OL9/OL10 in its per-OL guard, QA-preflight pin, default OL list, and
+  usage. The committed `ssm-installtest-ledger.json` grows from 30 to **50 rows**
+  (10 versions x OL6/OL7/OL8/OL9/OL10) and `RESULTS-ol9.md` / `RESULTS-ol10.md`
+  are added. OL9 is UEK7 `5.15.0-321.202.5.1.el9uek` (glibc 2.34) and OL10 is
+  UEK8 `6.12.0-203.76.7.3.el10uek` (glibc 2.39), each **8/10 ok** with the same
+  two fails as the other majors -- `3.3.3883.0` / `3.3.4364.0`, whose RPMs return
+  HTTP 403 at the S3 URL (an upstream availability gap, not an install/run
+  incompatibility) -- so every OL's verdict stays `compliant-capable` (max
+  install+run `3.3.4624.0` >= `3.3.3598.0`). OL9/OL10 were run from a separate
+  clean-core build (`test_host_kernel` `6.18.5`); the OL6/7/8 rows are byte
+  unchanged, the reports regenerate byte-identically from the merged ledger, and
+  every fail's recorded reason matches its run log. `ssm-agent-releases.json` is
+  unchanged. SPEC B.10 + TESTING updated. Tooling-doc only (dev/CI evidence); the
+  AMI build path is unchanged.
+
 - **SSM report now records the OL kernel from the rpm db (not the runner's), and
   its columns are category-labelled.** Per the review: the install+run test now
   provisions the OL UEK into the kernel-less container

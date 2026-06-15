@@ -42,7 +42,7 @@
 # Usage:
 #   bash tests/ssm/run-ssm-installtest-matrix.sh [options]
 # Options:
-#   --ol <list>            OL majors to test, comma/space (default: 6,7,8)
+#   --ol <list>            OL majors to test, comma/space (default: 6,7,8,9,10)
 #   --ssm-versions <list>  SSM versions to test, comma/space (default: all in the
 #                          release-list JSON, filtered by the mode below)
 #   --full                 test EVERY version (default: only >= MIN_SSM_VERSION)
@@ -74,7 +74,7 @@ PROJ_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ORCHESTRATOR="${SCRIPT_DIR}/../cleancore/build-cleancore.sh"
 INSTALL_SCRIPT="${PROJ_DIR}/install-ssm-agent.sh"
 
-OL_LIST="6 7 8"
+OL_LIST="6 7 8 9 10"
 SSM_VERSIONS=""
 FULL=0
 MIN_SSM_VERSION="3.3.3598.0"
@@ -96,7 +96,7 @@ die()  { log "ERROR: $*" >&2; exit 1; }
 hr()   { log "================================================================"; }
 
 # pinned QA-preflight version per OL major (a known-good smoke version).
-pin_for() { case "$1" in 6) echo 3.0.1479.0 ;; 7|8) echo 3.3.3598.0 ;; *) echo "" ;; esac; }
+pin_for() { case "$1" in 6) echo 3.0.1479.0 ;; 7|8|9|10) echo 3.3.3598.0 ;; *) echo "" ;; esac; }
 
 # ===========================================================================
 # Pure helpers (no I/O) -- unit-tested by tests/t18_ssmverdict.sh. Keep each a
@@ -313,7 +313,7 @@ ol_total=0; g_ol_ran=0; g_ol_skipped=0; g_ok=0; g_fail=0; g_skip=0; g_tests=0
 for ol in ${OL_LIST}; do ol_total=$(( ol_total + 1 )); done
 
 for ol in ${OL_LIST}; do
-  case "${ol}" in 6|7|8) : ;; *) warn "OL${ol}: wired for OL6/7/8 only; skipping."; g_ol_skipped=$(( g_ol_skipped + 1 )); continue ;; esac
+  case "${ol}" in 6|7|8|9|10) : ;; *) warn "OL${ol}: wired for OL6/7/8/9/10 only; skipping."; g_ol_skipped=$(( g_ol_skipped + 1 )); continue ;; esac
 
   if ! gate_should_run_ol "${ol}"; then g_ol_skipped=$(( g_ol_skipped + 1 )); continue; fi
 

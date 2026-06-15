@@ -163,6 +163,22 @@ if [[ "${SSM_INSTALLTEST}" == "1" ]]; then
         dnf -y install yum >/dev/null 2>&1 || die "SSM_INSTALLTEST: failed to bootstrap yum on OL8"
       fi
       bt_uek_repo="ol8_UEKR6" ;;
+    9)
+      # OL9 slim ships dnf only; bootstrap the yum compat for the install below.
+      if [[ "${INSECURE_TLS}" == "1" ]]; then
+        dnf -y --setopt=sslverify=false install yum >/dev/null 2>&1 || die "SSM_INSTALLTEST: failed to bootstrap yum on OL9"
+      else
+        dnf -y install yum >/dev/null 2>&1 || die "SSM_INSTALLTEST: failed to bootstrap yum on OL9"
+      fi
+      bt_uek_repo="ol9_UEKR7" ;;
+    10)
+      # OL10 slim ships dnf only; bootstrap the yum compat for the install below.
+      if [[ "${INSECURE_TLS}" == "1" ]]; then
+        dnf -y --setopt=sslverify=false install yum >/dev/null 2>&1 || die "SSM_INSTALLTEST: failed to bootstrap yum on OL10"
+      else
+        dnf -y install yum >/dev/null 2>&1 || die "SSM_INSTALLTEST: failed to bootstrap yum on OL10"
+      fi
+      bt_uek_repo="ol10_UEKR8" ;;
     *) die "SSM_INSTALLTEST: OS major ${osmajor} not wired for the container kernel record" ;;
   esac
   stage "provisioning kernel-uek (OL target-kernel version record) via ${bt_uek_repo}"
