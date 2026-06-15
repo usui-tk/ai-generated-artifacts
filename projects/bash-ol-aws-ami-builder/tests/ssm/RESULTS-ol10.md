@@ -14,7 +14,7 @@ References (AWS docs): [Run Command](https://docs.aws.amazon.com/systems-manager
 
 - `env_kernel` : 6.12.0-203.76.7.3.el10uek.x86_64  (`rpm -q kernel-uek` -- the OL UEK a real instance runs)
 - `env_glibc` : 2.39  (`rpm -q glibc`)
-- `test_host_kernel` : 6.18.5  (the agent binary actually executed on the runner's kernel; a container shares the host kernel, so the OL kernel axis is not exercised by the run)
+- `test_host_kernel` : 6.12.0-211.22.1.el10_2.x86_64  (the agent binary actually executed on the runner's kernel; a container shares the host kernel, so the OL kernel axis is not exercised by the run)
 
 Verdict: **compliant-capable** -- max install+run `3.3.4624.0` >= `3.3.3598.0` (remediation possible).
 

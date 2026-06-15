@@ -1950,11 +1950,11 @@ release list is the full upstream snapshot (206 versions, RPM availability, go.m
 (`>= 3.3.3598.0`) run (50 rows = 10 versions x OL6/OL7/OL8/OL9/OL10), OL6 UEK4
 `4.1.12-124.48.6.el6uek` / OL7 UEK6 `5.4.17-2136.338.4.2.el7uek` / OL8 UEK6
 `5.4.17-2136.356.4.2.el8uek` / OL9 UEK7 `5.15.0-321.202.5.1.el9uek` (glibc 2.34) /
-OL10 UEK8 `6.12.0-203.76.7.3.el10uek` (glibc 2.39). OL6/7/8 were run on the
-maintainer's host (`test_host_kernel` its OL10 `6.12.0-211.22.1.el10_2`); OL9/OL10
-were run from a separate clean-core build (`test_host_kernel` `6.18.5`) — since the
-agent runs on the host kernel in a container, both are real install+run results and
-the recorded `kver` is the provisioned OL UEK in each case. Each OL is **8/10 ok**: `3.3.3883.0`
+OL10 UEK8 `6.12.0-203.76.7.3.el10uek` (glibc 2.39). All five majors were run on
+the maintainer's host (uniform `test_host_kernel` `6.12.0-211.22.1.el10_2`); since
+the agent runs on the host kernel in a container the run does not exercise the OL
+kernel axis, but each install+run is real and the recorded `kver` is the
+provisioned OL UEK in each case. Each OL is **8/10 ok**: `3.3.3883.0`
 and `3.3.4364.0` are the only fails — their RPMs are not published at the S3 URL
 (HTTP 403), an upstream availability gap, not an install/run incompatibility — so
 every OL's verdict is **compliant-capable** (max install+run `3.3.4624.0` >=

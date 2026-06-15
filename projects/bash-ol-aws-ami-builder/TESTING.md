@@ -484,10 +484,10 @@ S3 URL -- an upstream availability gap, not an install/run incompatibility), so
 every OL's verdict is `compliant-capable`. `kver` is each OL's provisioned UEK
 (OL6 `4.1.12-124.48.6.el6uek`, OL7/OL8 the UEK6 `5.4.17-*` kernels, OL9 UEK7
 `5.15.0-321.202.5.1.el9uek` / glibc 2.34, OL10 UEK8 `6.12.0-203.76.7.3.el10uek` /
-glibc 2.39). OL6/7/8 ran on the maintainer's host and OL9/OL10 from a separate
-clean-core build (`test_host_kernel` `6.12.0-211.22.1.el10_2` and `6.18.5`
-respectively); since the agent runs on the host kernel in a container, both are
-real install+run results and the recorded `kver` is the provisioned OL UEK in
+glibc 2.39). All five majors ran on the maintainer's host (uniform
+`test_host_kernel` `6.12.0-211.22.1.el10_2`); since the agent runs on the host
+kernel in a container the run does not exercise the OL kernel axis, but each
+install+run is real and the recorded `kver` is the provisioned OL UEK in
 each case. A later run in the maintainer's env / CI (a kernel-matched runner for
 the kernel axis) grows the ledger via the kver-PRIMARY dedup append. Production
 integration into `build-ol-aws-ami.sh` is deferred (decided from the report).

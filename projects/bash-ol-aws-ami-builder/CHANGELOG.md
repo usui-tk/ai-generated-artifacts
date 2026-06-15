@@ -101,6 +101,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **SSM ledger: OL9/OL10 re-run on the maintainer's host (uniform OL6-OL10
+  `test_host_kernel`).** A maintainer End-to-End run executed the full OL6-OL10
+  matrix on one host, so OL9/OL10's `test_host_kernel` moves from the in-sandbox
+  clean-core build's `6.18.5` to the maintainer's `6.12.0-211.22.1.el10_2` --
+  the same runner as OL6/7/8. The run independently reproduces the committed
+  OL9/OL10 result rows exactly (same `kver`, `glibc`, `status`, and the two
+  `3.3.3883.0` / `3.3.4364.0` HTTP-403 fails), so only the `test_host_kernel`
+  field changes (20 ledger rows) and `RESULTS-ol9/ol10.md` re-render with the new
+  environment line; OL6/7/8 rows + reports are byte-unchanged, RESULTS stay
+  byte-reproducible from the ledger, and every fail reason still matches its run
+  log. `ssm-agent-releases.json` unchanged. SPEC B.10 + TESTING updated.
+
 - **SSM install+run matrix: extended to OL9 and OL10; committed the real
   OL6-OL10 ledger + reports (`tests/ssm/`).** The matrix now wires OL9 and OL10
   alongside OL6/7/8: `install-ssm-agent.sh` provisions the OL UEK via
