@@ -21,6 +21,28 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **SSM Agent production install in `build-ol-aws-ami.sh` (default ON; OL6-OL10;
+  `--skip-ssm-agent` to opt out).** Phase 3 now appends a marker-bracketed hook
+  (`[ol-aws-ami-builder PATCH ssm-agent-install]`) to `cloud/aws/provision.sh`,
+  mirroring the ENA self-build hook: it writes `install-ssm-agent.sh` verbatim
+  into the guest and runs it, so the AMI boots with an installed, **boot-enabled**
+  Amazon SSM Agent and is AWS Run Command compliant out of the box (agents
+  `>= 3.3.3598.0`; the legacy `ec2messages` endpoints retire 2026-06-16).
+  `install-ssm-agent.sh` gains a per-OL version map (`SSM_AGENT_VERSION_OL<major>`:
+  **OL6 pinned `3.3.4624.0`, OL7-OL10 `latest`**) and a production-only
+  service boot-enable (systemd on OL7+, SysV/upstart on OL6) — the install-test
+  path (`SSM_INSTALLTEST=1`) is unchanged, so the B.10 matrix + ledger are
+  untouched. The wrapper adds `SSM_AGENT_INSTALL=1` / `--skip-ssm-agent`,
+  `_ssm_pin_for_major()`, and an `-ssm<ver>` / `-ssmlatest` AMI name/description
+  suffix. The hook is **non-fatal** (unlike the Nitro-critical ENA hook): the SSM
+  Agent is management tooling, so a transient fetch failure warns and lets
+  provisioning continue. The in-guest RPM fetch uses a plain `curl -fsSL` (the same
+  TLS model as the ENA hook). New PATCH marker count is pinned at 8 (`t7`). SPEC
+  B.11 + the B.4 marker table + README pair documented. **Validation:** OL6-OL8
+  install+run is matrix-verified and OL6/OL7 boot-validated on Nitro; OL9/OL10
+  install+run is matrix-verified but the SSM-enabled AMI is not yet boot-validated
+  on a real instance (shipped enabled with that caveat).
+
 - **Committed the SSM release list + a provisional sample ledger/report
   (`tests/ssm/`).** Now that the harness generates them in-sandbox (it could not at
   first), `ssm-agent-releases.json` (the deterministic matrix INPUT: 206 upstream

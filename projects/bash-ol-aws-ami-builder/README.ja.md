@@ -119,6 +119,7 @@ streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
 | `env.properties.aws-ol6` | **Oracle Linux 6 Update 10**(x86_64)用パラメータ — **実験的・アップストリームに `distr/ol6-slim/` 自体が無い**。重要な注意事項はセクション 9.7 および 10 を参照 |
 | `setup-vmimport-role.sh` | AWS VM Import/Export 用の `vmimport` IAM サービスロールを初回のみ作成 |
 | `install-ena-driver.sh` | 指定バージョンの Amazon ENA ドライバを DKMS でビルド/導入する自己完結スクリプト(OL6 → 2.9.1、OL7 → 2.17.0、OL8+ は何もしない)。依存(EPEL・gcc/make・dkms・`kernel-uek-devel`)を自身で導入し、**素の OL6/OL7 インスタンス上で単体実行**して検証可能。ENA ビルド有効時(既定)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
+| `install-ssm-agent.sh` | Amazon SSM Agent の RPM を導入し起動時に有効化する自己完結スクリプト(OL6 → 固定 `3.3.4624.0`、OL7-OL10 → `latest`)。RPM を `curl` で取得し `rpm -Uvh` で導入(EL6 の yum-over-HTTPS 問題を回避)。install+run テストマトリクス(`tests/ssm/`)向けに**単体実行**可能、または SSM 導入有効時(既定)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
 | `README.md` | エンドユーザ向けドキュメント(英語、ベースライン) |
 | `README.ja.md` | エンドユーザ向けドキュメント(日本語) |
 | `SPEC.md` | 開発者向け仕様書(英語)— phase contract、ログ規約、設計判断の詳細 |
@@ -363,6 +364,7 @@ vi env.properties.local
 | `--build-only` | Phase 6(VMDK 生成 + Nitro 起動準備チェック)まで実行し、AWS 取り込みフェーズ(7〜9)の手前で停止。AWS 取り込みは別途実行したい場合。`--skip-aws-import` と同等 |
 | `--skip-aws-import` | Phase 7〜9 をスキップ(`--build-only` と同等) |
 | `--skip-ena-driver` | ゲスト内で Amazon ENA ドライバをビルド/導入**しない**。既定ではビルド(AWS 最適化 AMI、Nitro v4+/ENAv3 対応)。本スイッチで純粋な(無改変の)OL AMI を生成 |
+| `--skip-ssm-agent` | ゲスト内で Amazon SSM Agent を導入**しない**。既定では導入し起動時に有効化(OL6-OL10)するため、AMI は AWS SSM Run Command 準拠で出荷される。本スイッチでエージェントを除外 |
 | `--imds-support <mode>` | AMI に焼き込む IMDS サポート: `default`(IMDSv1+v2、`HttpTokens=optional`)または `v2.0`(IMDSv2 必須、**OL7+ のみ**)。既定は `default`。OL6 + `v2.0` は拒否(cloud-init 0.7.5 が IMDSv2 非対応のため) |
 | `--log-file <path>` | 実行ログの出力先。既定は `${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log`(いずれの場合もコンソール出力をファイルにも記録。ファイルは ANSI 除去済み) |
 | `--debug` | `[DEBUG]` 行をコンソールにも出力(ファイルには指定有無に関わらず常時記録) |

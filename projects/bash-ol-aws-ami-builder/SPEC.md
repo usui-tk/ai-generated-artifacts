@@ -331,6 +331,8 @@ is **non-negotiable**; see D.6.
 | `--skip-prereq` | flag | | Skip Phase 1 (package installation) |
 | `--skip-aws-import` | flag | | Skip Phases 6–8 (build VMDK only) |
 | `--build-only` | flag | | Synonym for `--skip-aws-import` |
+| `--skip-ena-driver` | flag | | Do NOT self-build the Amazon ENA driver (default ON for OL6/OL7); produces a pure OL AMI — see B.4 / the ENA self-build section |
+| `--skip-ssm-agent` | flag | | Do NOT install the Amazon SSM Agent (default ON for OL6-OL10); produces an AMI with no SSM Agent — see B.11 |
 | `-h`, `--help` | flag | | Show help and exit 0 |
 
 ### Mutual exclusion
@@ -376,8 +378,8 @@ bash. Avoid command substitutions in env files (security and reproducibility).
 |-----|--------------|
 | `DISTR` | `ol${OL_MAJOR_VERSION}-slim` |
 | `CLOUD` | `aws` |
-| `AMI_NAME` | `OracleLinux-${MAJOR}-U${UPDATE}-x86_64-$(date +%Y%m%d-%H%M)`; when the ENA self-build is enabled (default), the auto-default also appends `-ena${ENA_BUILD_VERSION}` (the installer's pin) so a self-built-ENA AMI is distinguishable pre-launch. An explicitly set `AMI_NAME` is left untouched. |
-| `AMI_DESCRIPTION` | `Oracle Linux ${MAJOR} Update ${UPDATE} (x86_64) custom AMI built via oracle-linux-image-tools`; the auto-default appends ` with self-built Amazon ENA ${ENA_BUILD_VERSION} (DKMS, AWS-optimized for Nitro)` when self-build is on, or ` (pure OL; ENA self-build skipped)` for `--skip-ena-driver`. `ENA_BUILD_VERSION` is read from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` pin (single source of truth). |
+| `AMI_NAME` | `OracleLinux-${MAJOR}-U${UPDATE}-x86_64-$(date +%Y%m%d-%H%M)`; when the ENA self-build is enabled (default), the auto-default also appends `-ena${ENA_BUILD_VERSION}` (the installer's pin); when the SSM Agent install is enabled (default), it further appends `-ssm${version}` (or `-ssmlatest`) so an ENA-self-built / SSM-managed AMI is distinguishable pre-launch. An explicitly set `AMI_NAME` is left untouched. |
+| `AMI_DESCRIPTION` | `Oracle Linux ${MAJOR} Update ${UPDATE} (x86_64) custom AMI built via oracle-linux-image-tools`; the auto-default appends ` with self-built Amazon ENA ${ENA_BUILD_VERSION} (DKMS, AWS-optimized for Nitro)` when self-build is on, or ` (pure OL; ENA self-build skipped)` for `--skip-ena-driver`, and further appends `, Amazon SSM Agent ${version}` when the SSM install is on (omitted for `--skip-ssm-agent`). `ENA_BUILD_VERSION` is read from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` pin and the SSM version from `install-ssm-agent.sh`'s `SSM_AGENT_VERSION_OL<major>` pin (single source of truth). |
 | `BOOT_MODE_BUILD` | `bios` (Oracle tool restricts AWS to bios) |
 | `BOOT_MODE` | `legacy-bios` (must match `BOOT_MODE_BUILD`) |
 | `OS_VARIANT` | Auto-detected via `detect_os_variant` |
@@ -1261,12 +1263,13 @@ identifier. All are applied inside `phase3_clone_repository`. Current markers:
 | `[ol-aws-ami-builder PATCH nitro-initramfs]` | `cloud/aws/provision.sh` | always (AWS cloud path) | Drop an `/etc/dracut.conf.d` `add_drivers` file forcing `nvme`/`ena` into the initramfs and regenerate it (Nitro boot requirement; Phase 6 CHECK 1 verifies the result) |
 | `[ol-aws-ami-builder PATCH serial-console]` | `cloud/aws/provision.sh` | GRUB2 systems (OL7+; hook self-skips on OL6 GRUB Legacy) | AWS-recommended serial console in 3 layers: (1) `console=tty0 console=ttyS0,115200n8` on all entries via `grubby --update-kernel=ALL` (BLS-aware) + `GRUB_CMDLINE_LINUX`; (2) `GRUB_TERMINAL`/`GRUB_SERIAL_COMMAND` + `grub2-mkconfig`; (3) `serial-getty@ttyS0` enabled — see D.25 |
 | `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; installer is a no-op on OL8+) — logged as `[OLAWS-ENA01]`, see A.7 |
+| `[ol-aws-ami-builder PATCH ssm-agent-install]` | `cloud/aws/provision.sh` | `SSM_AGENT_INSTALL == 1` (default; `--skip-ssm-agent` disables) | Inject the in-guest Amazon SSM Agent install+boot-enable hook (OL6-OL10; OL6 pinned, OL7-OL10 `latest`; non-fatal) — logged as `[OLAWS-SSM01]`, see B.11 |
 | `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` | `bin/build-image.sh` | host libguestfs lacks the `selinuxrelabel` optgroup | Schedule a first-boot `/.autorelabel` instead of the offline relabel when the build host's libguestfs cannot relabel — see D.17 |
 
 The `sed`-based substitutions (the OL6/OL7 guard removals, `kernel-uek-modules`,
 `declare-g-ol6`) leave a `.bak` backup next to the modified file; the
 marker-bracketed hook injections (`ol6-cloud-user`, `nitro-initramfs`,
-`serial-console`, `ena-driver-build`) are `>>`-appended blocks. Every patch is
+`serial-console`, `ena-driver-build`, `ssm-agent-install`) are `>>`-appended blocks. Every patch is
 idempotent: it is fronted by a `grep -Fq` marker check so a re-run against an
 existing clone re-detects its marker and skips.
 
@@ -2006,6 +2009,62 @@ Before any commit to this directory, all of the following must pass.
 - [ ] `AWS_REGION=""` is consistent across templates (resolution chain documented in A.7 / B.3)
 - [ ] `UPDATE_TO_LATEST="yes"` is consistent across templates (CVE-coverage default per B.3)
 - [ ] Every template's `ISO_CHECKSUM` value matches `https://linux.oracle.com/security/gpg/checksum/` for the corresponding ISO
+
+---
+
+## B.11 SSM Agent production install (`--skip-ssm-agent`)
+
+By default (`SSM_AGENT_INSTALL=1`) the wrapper produces an **SSM-managed AMI**:
+Phase 3 appends a marker-bracketed hook (`[ol-aws-ami-builder PATCH
+ssm-agent-install]`) to `cloud/aws/provision.sh` that writes `install-ssm-agent.sh`
+verbatim into the guest and runs it during provisioning, so the AMI boots with an
+installed, enabled Amazon SSM Agent. `--skip-ssm-agent` (`SSM_AGENT_INSTALL=0`)
+leaves the hook out, producing an AMI with no SSM Agent — the two distinct build
+purposes, exactly parallel to `--skip-ena-driver`.
+
+**Why this is on by default.** AWS Systems Manager Run Command stops serving the
+legacy `ec2messages` endpoints from **2026-06-16**; only agents **>= 3.3.3598.0**
+speak the newer `ssmmessages` channel (see B.10 for the full deprecation note and
+the per-OL install+run evidence). Shipping a compliant agent by default means a
+freshly built AMI is SSM-manageable out of the box.
+
+**Per-OL version.** `install-ssm-agent.sh` holds the source-of-truth map
+`SSM_AGENT_VERSION_OL<major>`: **OL6 is pinned to `3.3.4624.0`** (a fixed,
+install+run-verified build — the EL6 NSS/glibc combination is the fragile one, so
+a moving target is riskier there), and **OL7-OL10 follow the `/latest/` S3 alias**.
+An explicit `SSM_AGENT_VERSION` overrides the map. The wrapper's
+`_ssm_pin_for_major()` reads the same map for the AMI name/description marker
+(single source of truth, mirroring `_ena_pin_for_major()`).
+
+**Install mechanism.** The in-guest installer fetches the per-OL RPM with a plain
+`curl -fsSL` (normal TLS trust — the same fetch model as the ENA hook; `-k` is a
+test-mode-only switch via `INSECURE_TLS`, never used in production) and installs
+the LOCAL file with `rpm -Uvh` (the agent's only real dependency is glibc, already
+present, so no repo metadata is needed — this also sidesteps the EL6
+yum-over-HTTPS NSS quirk). It then enables the service for boot per init system:
+`systemctl enable amazon-ssm-agent` on OL7/OL8/OL9/OL10, and `chkconfig` (SysV) or
+the shipped upstart job on OL6. The boot-enable runs **only on the production
+path** (`SSM_INSTALLTEST != 1`), so the B.10 install+run test matrix and its
+committed ledger are untouched.
+
+**Non-fatal by design.** Unlike the ENA driver — which is Nitro network-critical
+(no driver, no `eth0`, the instance is unreachable) — the SSM Agent is management
+tooling: an instance with no agent still boots and is reachable. A transient fetch
+failure should therefore not abort an otherwise-good AMI, so the injected hook
+traps the installer's failure to a warning and provisioning continues. (The ENA
+hook, by contrast, is fatal.)
+
+**AMI naming.** When enabled, the AUTO-default `AMI_NAME` appends `-ssm${version}`
+(or `-ssmlatest`) and the description appends `, Amazon SSM Agent ${version}`, so an
+SSM-managed AMI is distinguishable pre-launch. An explicitly set
+`AMI_NAME`/`AMI_DESCRIPTION` is left untouched (`:=`).
+
+**Validation status.** OL6/OL7/OL8 install+run is matrix-verified (B.10) and the
+OL6/OL7 build+boot pipeline is validated on real Nitro; **OL9/OL10 install+run is
+matrix-verified, but the SSM-enabled AMI has not yet been boot-validated end to end
+on a real OL9/OL10 instance** — they ship enabled by default (per the all-OL6-OL10
+decision) with this caveat noted. A real-AMI boot check for OL9/OL10 is the natural
+follow-up.
 
 ---
 

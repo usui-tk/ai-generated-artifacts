@@ -76,11 +76,11 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **205 passed, 1 skipped, 0 failed** (B-T1 = 33,
-B-T2 = 28, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 8,
+Current fixed pass count: **206 passed, 1 skipped, 0 failed** (B-T1 = 33,
+B-T2 = 28, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 9,
 hook-timing = 8, log-format = 12, ena-uek-detect = 9, ena-reporting = 15,
 build-visibility = 17; plus
-B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 206/0
+B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 207/0
 with it). The B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core
 builders (see "Container clean-core test base" below): B-T1 and B-T2 parse- and
 lint-check **every** `.sh` in the project, so adding a script raises both counts
@@ -134,7 +134,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t3_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
 | B-T5 env parity | L2 | implemented | `tests/t6_envparity.sh`: 20 common-core keys, OL6/OL7-only KERNEL/UEK_RELEASE extras, S3_BUCKET/AWS_REGION/UPDATE_TO_LATEST/CLOUD invariants, per-OS DISTR; 31 asserts |
-| B-T6 idempotency | L2 | implemented | `tests/t7_idempotency.sh` (structural): each of the 7 `[ol-aws-ami-builder PATCH ...]` markers is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
+| B-T6 idempotency | L2 | implemented | `tests/t7_idempotency.sh` (structural): each of the 8 `[ol-aws-ami-builder PATCH ...]` markers is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
 | B-T4 kickstart | L2 | implemented | `tests/validate-kickstart.sh`, **wired into the runner** via `tests/t5_kickstart.sh` (SKIPs without `ksvalidator`); see below |
 | B-T9 hook timing | L1/L2 | implemented | `tests/t8_hooktiming.sh`: the OL6 cloud-user hook must run *after* `cloud::cloud_init` (configs exist), never at source time; static wrapper-wiring + no-top-level-`sh` guards, plus a behavioural order/edit check; 8 asserts |
 | B-T (log format) | L1 | implemented | `tests/t9_logformat.sh`: every timestamped channel emits **date-first** (`YYYY-MM-DD HH:MM:SS` leads, `[SEVERITY]`/source tag follows; SPEC E.1); colour-stripped match across info/warn/error/build/debug/external + a negative guard against the old tag-first order; 12 asserts |

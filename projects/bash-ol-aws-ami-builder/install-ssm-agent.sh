@@ -42,9 +42,17 @@
 set -euo pipefail
 
 # ---- pinned version (overridable) ------------------------------------------
-# Production default: "latest" (the /latest/ S3 alias). A specific version is
-# selected with SSM_AGENT_VERSION (the test matrix always sets it).
-SSM_AGENT_VERSION="${SSM_AGENT_VERSION:-latest}"
+# Per-OL default: OL6 is pinned to a known-good build (the EL6 NSS/glibc combo is
+# the fragile one, so a fixed, install+run-verified version is safer than a moving
+# target); OL7-OL10 follow the `/latest/` S3 alias. An explicit SSM_AGENT_VERSION
+# overrides the per-OL default (the install-test matrix always sets it). This
+# mirrors install-ena-driver.sh's ENA_VERSION_OL<major> map.
+SSM_AGENT_VERSION_OL6="${SSM_AGENT_VERSION_OL6:-3.3.4624.0}"
+SSM_AGENT_VERSION_OL7="${SSM_AGENT_VERSION_OL7:-latest}"
+SSM_AGENT_VERSION_OL8="${SSM_AGENT_VERSION_OL8:-latest}"
+SSM_AGENT_VERSION_OL9="${SSM_AGENT_VERSION_OL9:-latest}"
+SSM_AGENT_VERSION_OL10="${SSM_AGENT_VERSION_OL10:-latest}"
+SSM_AGENT_VERSION="${SSM_AGENT_VERSION:-}"
 SSM_RPM_BASEURL="${SSM_RPM_BASEURL:-https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent}"
 SSM_RPM_ARCH="${SSM_RPM_ARCH:-linux_amd64}"
 
@@ -134,6 +142,20 @@ agent_runs_locally() {
 
 osmajor="$(detect_osmajor)"
 [[ -n "${osmajor}" ]] || die "cannot determine Oracle Linux major version"
+
+# Resolve the agent version: an explicit SSM_AGENT_VERSION wins; otherwise the
+# per-OL default (OL6 pinned, OL7-OL10 the /latest/ alias). The install-test
+# matrix always sets SSM_AGENT_VERSION, so this per-OL fallback is production-only.
+if [[ -z "${ssm_version}" ]]; then
+  case "${osmajor}" in
+    6)  ssm_version="${SSM_AGENT_VERSION_OL6}" ;;
+    7)  ssm_version="${SSM_AGENT_VERSION_OL7}" ;;
+    8)  ssm_version="${SSM_AGENT_VERSION_OL8}" ;;
+    9)  ssm_version="${SSM_AGENT_VERSION_OL9}" ;;
+    10) ssm_version="${SSM_AGENT_VERSION_OL10}" ;;
+    *)  ssm_version="latest" ;;
+  esac
+fi
 
 # The runner/host kernel the agent binary actually executes against. In a
 # container this is the host (runner) kernel, NOT the OL UEK -- recorded as-is
@@ -245,6 +267,36 @@ if run_method="$(agent_runs_locally)"; then
 else
   ran="false"
   die "installs-but-wont-run: amazon-ssm-agent ${installed_version} installed but the binary did not run on this (kernel ${kver}, glibc ${glibc}) -- Go runtime/kernel or a runtime-lib miss"
+fi
+
+# ---- enable the service for boot (production only) -------------------------
+# The install-test path stops at install+run (service management is a real-
+# instance concern, irrelevant to install/run capability). A real AMI, however,
+# must start the agent at boot, so the production path enables it per init
+# system: systemd (OL7/OL8/OL9/OL10) or SysV/upstart (OL6). This runs inside the
+# guest during provisioning; `systemctl enable` only writes the wanted-by symlink
+# (no daemon needed), so it works under the libguestfs appliance. The test path
+# (SSM_INSTALLTEST=1) does NOT reach here, so its behaviour and ledger are
+# unchanged.
+if [[ "${SSM_INSTALLTEST}" != "1" ]]; then
+  stage "enable amazon-ssm-agent for boot"
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl enable amazon-ssm-agent >/dev/null 2>&1; then
+      log "enabled amazon-ssm-agent via systemd (starts on boot)"
+    else
+      log "WARNING: 'systemctl enable amazon-ssm-agent' failed; the RPM preset may still enable it -- verify on the instance"
+    fi
+  elif command -v chkconfig >/dev/null 2>&1 && [[ -f /etc/init.d/amazon-ssm-agent ]]; then
+    if chkconfig amazon-ssm-agent on >/dev/null 2>&1; then
+      log "enabled amazon-ssm-agent via chkconfig (SysV, starts on boot)"
+    else
+      log "WARNING: 'chkconfig amazon-ssm-agent on' failed -- verify boot-start on the instance"
+    fi
+  elif [[ -f /etc/init/amazon-ssm-agent.conf ]]; then
+    log "amazon-ssm-agent ships an upstart job (/etc/init/amazon-ssm-agent.conf); it starts on boot via its 'start on' stanza"
+  else
+    log "WARNING: no recognized init integration for amazon-ssm-agent; verify boot-start on the instance"
+  fi
 fi
 
 # ---- SSM_INSTALLTEST: structured success result for the matrix -------------

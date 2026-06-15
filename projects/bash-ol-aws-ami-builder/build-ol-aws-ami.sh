@@ -94,6 +94,10 @@
 #   --skip-ena-driver     : Do NOT build/install the Amazon ENA driver in the
 #                           guest. Default is to build it (AWS-optimized AMI);
 #                           this switch produces a pure, unmodified OL AMI.
+#   --skip-ssm-agent      : Do NOT install the Amazon SSM Agent in the guest.
+#                           Default is to install + enable it for boot (OL6-OL10),
+#                           so the AMI is SSM Run Command compliant out of the box;
+#                           this switch leaves the agent out.
 #   --imds-support <mode> : IMDS support baked into the AMI. 'default'
 #                           (IMDSv1+v2; HttpTokens=optional) or 'v2.0'
 #                           (IMDSv2-required, OL7+ only). Default: 'default'.
@@ -159,6 +163,13 @@ ENA_DRIVER_BUILD=1
 # Resolved ENA self-build pin (filled by load_env from install-ena-driver.sh when
 # ENA_DRIVER_BUILD=1); stays empty for a pure OL AMI. Used in the AMI name/desc.
 ENA_BUILD_VERSION=""
+# SSM Agent install (default ON -> the AMI ships an enabled, AWS-compliant Amazon
+# SSM Agent; --skip-ssm-agent turns it OFF). Wired for OL6-OL10. The pinned/latest
+# version per OL lives in install-ssm-agent.sh (SSM_AGENT_VERSION_OL<major>).
+SSM_AGENT_INSTALL=1
+# Resolved SSM Agent version for THIS OL (filled when SSM_AGENT_INSTALL=1, from
+# install-ssm-agent.sh's per-OL map); "latest" or a pin. Used in the AMI name/desc.
+SSM_AGENT_RESOLVED=""
 ENV_FILE=""
 # Logging (N3/F4). DEBUG=1 (--debug) also mirrors [DEBUG] lines to the console;
 # they are always written to the log file regardless. LOG_FILE empty -> default
@@ -246,6 +257,7 @@ parse_args() {
       --skip-aws-import)  SKIP_AWS_IMPORT=1;   shift ;;
       --build-only)       BUILD_ONLY=1;        shift ;;
       --skip-ena-driver)  ENA_DRIVER_BUILD=0;  shift ;;
+      --skip-ssm-agent)   SSM_AGENT_INSTALL=0; shift ;;
       --imds-support)     IMDS_SUPPORT="$2";   shift 2 ;;
       --log-file)         LOG_FILE="$2";       shift 2 ;;
       --debug)            DEBUG=1;             shift ;;
@@ -424,8 +436,22 @@ load_env() {
       _ena_name_sfx="-ena${ENA_BUILD_VERSION:-}"
       _ena_desc_sfx=" with self-built Amazon ENA ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized for Nitro)"
     fi
-    : "${AMI_NAME:=OracleLinux-${OL_MAJOR_VERSION}-U${OL_UPDATE_VERSION}-x86_64-$(date +%Y%m%d-%H%M)${_ena_name_sfx}}"
-    : "${AMI_DESCRIPTION:=Oracle Linux ${OL_MAJOR_VERSION} Update ${OL_UPDATE_VERSION} (x86_64) custom AMI built via oracle-linux-image-tools${_ena_desc_sfx}}"
+    # SSM Agent identity, folded into the AMI name/desc the same way. Default ON
+    # for OL6-OL10; --skip-ssm-agent leaves it empty. A pinned OL (OL6) shows the
+    # version; a /latest/ OL shows '-ssmlatest'. AUTO defaults only (:=).
+    local _ssm_name_sfx="" _ssm_desc_sfx=""
+    if [[ "${SSM_AGENT_INSTALL}" -eq 1 ]]; then
+      SSM_AGENT_RESOLVED="$(_ssm_pin_for_major "${OL_MAJOR_VERSION}")"
+      if [[ -z "${SSM_AGENT_RESOLVED}" || "${SSM_AGENT_RESOLVED}" == "latest" ]]; then
+        _ssm_name_sfx="-ssmlatest"
+        _ssm_desc_sfx=", Amazon SSM Agent (latest)"
+      else
+        _ssm_name_sfx="-ssm${SSM_AGENT_RESOLVED}"
+        _ssm_desc_sfx=", Amazon SSM Agent ${SSM_AGENT_RESOLVED}"
+      fi
+    fi
+    : "${AMI_NAME:=OracleLinux-${OL_MAJOR_VERSION}-U${OL_UPDATE_VERSION}-x86_64-$(date +%Y%m%d-%H%M)${_ena_name_sfx}${_ssm_name_sfx}}"
+    : "${AMI_DESCRIPTION:=Oracle Linux ${OL_MAJOR_VERSION} Update ${OL_UPDATE_VERSION} (x86_64) custom AMI built via oracle-linux-image-tools${_ena_desc_sfx}${_ssm_desc_sfx}}"
     # AMI registration boot mode.
     # IMPORTANT: oracle-linux-image-tools currently produces BIOS-only images
     # for the AWS target (BOOT_MODE_BUILD must be 'bios'), so the AMI must
@@ -499,7 +525,7 @@ load_env() {
     log_info "BOOT_MODE          = ${BOOT_MODE}"
   fi
   # [DEBUG] (F4): the resolved feature knobs -- file always, console with --debug.
-  log_debug "[OLAWS-CFG01] knobs: ENA_DRIVER_BUILD=${ENA_DRIVER_BUILD} IMDS_SUPPORT=${IMDS_SUPPORT} SKIP_PREREQ=${SKIP_PREREQ} SKIP_AWS_IMPORT=${SKIP_AWS_IMPORT} BUILD_ONLY=${BUILD_ONLY}"
+  log_debug "[OLAWS-CFG01] knobs: ENA_DRIVER_BUILD=${ENA_DRIVER_BUILD} SSM_AGENT_INSTALL=${SSM_AGENT_INSTALL} IMDS_SUPPORT=${IMDS_SUPPORT} SKIP_PREREQ=${SKIP_PREREQ} SKIP_AWS_IMPORT=${SKIP_AWS_IMPORT} BUILD_ONLY=${BUILD_ONLY}"
 
   # Validate BOOT_MODE_BUILD: oracle-linux-image-tools restricts AWS to bios.
   if [[ "${CLOUD,,}" == "aws" && "${BOOT_MODE_BUILD,,}" != "bios" ]]; then
@@ -1603,6 +1629,63 @@ OLAWS_OL6_CLOUD_USER_BODY
         log_info "  [OLAWS-ENA01] ENA driver hook injected (pin: OL${OL_MAJOR_VERSION} $(_ena_pin_for_major "${OL_MAJOR_VERSION}"); in-guest DKMS build)"
       else
         die "Failed to inject ENA driver hook into ${aws_provision_ena}"
+      fi
+    fi
+  fi
+
+  # cloud/aws/provision.sh SSM Agent install hook (default ON; OL6-OL10).
+  #
+  # Writes our install-ssm-agent.sh verbatim into the guest and runs it during
+  # provisioning: it fetches the per-OL Amazon SSM Agent RPM (OL6 pinned to a
+  # known-good build, OL7-OL10 the /latest/ alias) with a plain in-guest
+  # `curl -fsSL` (the same fetch model as the ENA hook -- normal TLS trust, no
+  # -k), installs it with `rpm -Uvh`, and enables it for boot per init system
+  # (systemd on OL7+, SysV/upstart on OL6). The result is an AMI that is AWS SSM
+  # Run Command compliant out of the box. --skip-ssm-agent leaves the hook out.
+  #
+  # NON-FATAL by design: unlike the ENA driver (Nitro network-critical -- no
+  # driver, no eth0), the SSM Agent is management tooling; a transient fetch
+  # failure should not abort an otherwise-good AMI, so the hook invocation traps
+  # its own failure to a warning and provisioning continues. The embedded heredoc
+  # is single-quoted, so the installer's own text (heredocs, '\$' refs) is written
+  # through unmodified. Idempotent via the wrapper marker.
+  #
+  # NOTE: OL6-OL8 install+run is matrix-verified AND the OL6/OL7 pipeline is
+  # boot-validated on real Nitro; OL9/OL10 install+run is matrix-verified but the
+  # SSM-enabled AMI has not yet been boot-validated end to end on a real instance.
+  if [[ "${SSM_AGENT_INSTALL}" -ne 1 ]]; then
+    log_info "SSM Agent install disabled (--skip-ssm-agent); the AMI ships without the Amazon SSM Agent"
+  else
+    local aws_provision_ssm="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
+    local ssm_installer="${SCRIPT_DIR}/install-ssm-agent.sh"
+    log_info "Injecting SSM Agent install hook into cloud/aws/provision.sh (default ON; --skip-ssm-agent disables)"
+
+    if [[ ! -f "${aws_provision_ssm}" ]]; then
+      die "Cannot inject SSM Agent hook: ${aws_provision_ssm} not found"
+    fi
+    if [[ ! -f "${ssm_installer}" ]]; then
+      die "Cannot inject SSM Agent hook: installer not found at ${ssm_installer}"
+    fi
+
+    if grep -Fq '[ol-aws-ami-builder PATCH ssm-agent-install]' "${aws_provision_ssm}"; then
+      log_info "  -> SSM Agent hook already present (idempotent skip)"
+    else
+      {
+        printf '\n# >>> [ol-aws-ami-builder PATCH ssm-agent-install] >>>\n'
+        printf '# Install + boot-enable the per-OL Amazon SSM Agent in the guest (SSM Run Command compliant).\n'
+        printf '# Omitted by the wrapper'"'"'s --skip-ssm-agent switch. Non-fatal: a failure warns and continues.\n'
+        printf "cat > /usr/local/sbin/ol-aws-install-ssm-agent.sh <<'OLAWS_SSM_INSTALLER_EOF'\n"
+        cat "${ssm_installer}"
+        printf 'OLAWS_SSM_INSTALLER_EOF\n'
+        printf 'chmod +x /usr/local/sbin/ol-aws-install-ssm-agent.sh\n'
+        printf '/usr/local/sbin/ol-aws-install-ssm-agent.sh || echo "[ssm-agent] WARNING: SSM Agent install hook failed; AMI built without an installed SSM Agent (non-fatal: management tooling, not boot-critical)"\n'
+        printf '# <<< [ol-aws-ami-builder PATCH ssm-agent-install] <<<\n'
+      } >> "${aws_provision_ssm}"
+
+      if grep -Fq '[ol-aws-ami-builder PATCH ssm-agent-install]' "${aws_provision_ssm}"; then
+        log_info "  [OLAWS-SSM01] SSM Agent hook injected (version: OL${OL_MAJOR_VERSION} $(_ssm_pin_for_major "${OL_MAJOR_VERSION}"); install + boot-enable)"
+      else
+        die "Failed to inject SSM Agent hook into ${aws_provision_ssm}"
       fi
     fi
   fi
@@ -2776,6 +2859,16 @@ _ena_pin_for_major() {
   local major="$1" inst="${SCRIPT_DIR}/install-ena-driver.sh"
   [[ -f "${inst}" ]] || return 0
   grep -E "^ENA_VERSION_OL${major}=" "${inst}" \
+    | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
+}
+
+# Resolve the SSM Agent version for an OL major from install-ssm-agent.sh's
+# per-OL map (SSM_AGENT_VERSION_OL<major>); echoes "latest" or a pin. Mirrors
+# _ena_pin_for_major. Used only for the AMI name/description marker.
+_ssm_pin_for_major() {
+  local major="$1" inst="${SCRIPT_DIR}/install-ssm-agent.sh"
+  [[ -f "${inst}" ]] || return 0
+  grep -E "^SSM_AGENT_VERSION_OL${major}=" "${inst}" \
     | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
 }
 
