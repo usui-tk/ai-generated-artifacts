@@ -269,6 +269,17 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **`TESTING.md` drift corrected to the live suite (`TESTING.md`).** The "Running
+  the suite" headline still claimed **206 passed / 1 skipped** with an 11-tier
+  breakdown, and the coverage ledger stopped at `t12`. Updated to the verified live
+  result: **310 passed / 0 skipped / 0 failed across 18 tiers**, with the full
+  per-tier breakdown and the drifted B-T1 / B-T2 assert counts refreshed (33->43,
+  28->38, from added project scripts). Added coverage-ledger rows for
+  `t13_enaledgerguard`, `t14_enacheck2`, `t15_enaverify`, `t16_enaverifyresults`,
+  `t17_enabundle`, and `t18_ssmverdict`, and a `python3` entry under "Environment &
+  version dependencies" documenting the cpio-free initramfs fallback. Documentation
+  only; no behaviour change.
+
 - **The ENA-bundle initramfs fixture is now cpio-independent, so its assertions
   RUN instead of SKIPping where `cpio` is absent (`tests/t17_enabundle.sh`,
   `tests/ena/run-ena-buildtest-matrix.sh`).** `tests/t17_enabundle.sh` builds a

@@ -76,17 +76,21 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count: **206 passed, 1 skipped, 0 failed** (B-T1 = 33,
-B-T2 = 28, B-T3 = 35, command-mock = 9, env-parity = 31, idempotency = 9,
-hook-timing = 8, log-format = 12, ena-uek-detect = 9, ena-reporting = 15,
-build-visibility = 17; plus
-B-T4 kickstart which is **1 pass with `ksvalidator`, 1 skip without** -> 207/0
-with it). The B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core
-builders (see "Container clean-core test base" below): B-T1 and B-T2 parse- and
-lint-check **every** `.sh` in the project, so adding a script raises both counts
-by one. The host-runnable tiers
-(L0-L2) are complete; B-T7/B-T8 (L3/L4) remain deferred (builder host + AWS). A
-tier SKIPs cleanly when its optional dependency is absent.
+Current fixed pass count (full toolchain present — pinned ShellCheck 0.10.0,
+`ksvalidator`, and `python3`): **310 passed, 0 skipped, 0 failed** across **18
+tiers** (B-T1 parse = 43, B-T2 ShellCheck = 38, B-T3 unit = 35, command-mock = 9,
+B-T4 kickstart = 1, env-parity = 31, idempotency = 9, hook-timing = 8,
+log-format = 12, ena-uek-detect = 9, ena-reporting = 15, build-visibility = 17,
+ena-ledger-guard = 5, ena-check-2 = 6, ena-verify = 12, ena-verify-results = 15,
+ena-bundle = 13, ssm-verdict = 32). Optional-tool degradations are the only way
+to see a skip: without `ksvalidator` B-T4 contributes a skip (-> 309/1); without
+ShellCheck B-T2 skips; the B-T (ena-bundle) initramfs fixture builds via cpio
+**or** a self-contained `python3` newc fallback, so it no longer skips. The
+B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core builders (see
+"Container clean-core test base" below): B-T1 and B-T2 parse- and lint-check
+**every** `.sh` in the project, so adding a script raises both counts by one. The
+host-runnable tiers (L0-L2) are complete; B-T7/B-T8 (L3/L4) remain deferred
+(builder host + AWS). A tier SKIPs cleanly when its optional dependency is absent.
 
 ## Environment & version dependencies
 
@@ -108,6 +112,13 @@ them so a run is reproducible:
   everywhere. B-T2 SKIPs if shellcheck is absent (the CI gate requires it).
 - **pykickstart / `ksvalidator`** (B-T4): optional; B-T4 SKIPs if absent.
 - **awk / sed / grep / find** (coreutils + gawk): present in the container.
+- **python3** (stdlib only): used by the pure-logic tiers that drive matrix /
+  verifier python (B-T ena-ledger-guard) and, in `tests/t17_enabundle.sh` +
+  `preserve_bundle()`, as a self-contained newc-cpio writer/reader so the
+  initramfs-listing fixture and its assertions run even on a host **without**
+  `cpio` (the real builder hosts have `cpio`/`lsinitrd` and never reach it).
+  Effectively universal, so the B-T (ena-bundle) initramfs assertions no longer
+  SKIP for a missing `cpio`.
 - **clean-core builders** (`tests/cleancore/`, see below): these standalone
   builders are NOT run by `run-all.sh`; B-T1/B-T2 only parse- and lint-check
   them. To actually *run* one needs `root` plus `curl`, `tar`, `xz`, `gzip`,
@@ -128,8 +139,8 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 
 | Tier | Layer | Status | Notes |
 |:--|:--|:--|:--|
-| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) + 5 shell-bodied heredoc bodies; 33 asserts |
-| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 28 asserts |
+| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) + 5 shell-bodied heredoc bodies; 43 asserts |
+| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 38 asserts |
 | B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
 | B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t3_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
@@ -141,6 +152,12 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (ena uek-detect) | L1/L2 | implemented | `tests/t10_enaukedetect.sh`: the OL6 ENA self-build retargets the amzn-drivers Makefile UEK detection (`IS_UEK`/`ENA_KERNEL_SUBVERSION_*`) from `uname -r` to `BUILD_KERNEL` (the DKMS target), so the `kcompat.h` `page_ref_count` guard evaluates against the build target rather than the libguestfs appliance kernel; structural (present, OL6-gated, idempotency-guarded, pipe-anchored) + behavioural fixture transform; 9 asserts. Compile/boot proof is B-T7/B-T8 |
 | B-T (ena reporting) | L1/L2 | implemented | `tests/t11_enareporting.sh`: the Phase 6 readiness report prints aligned, fixed-width `ENA Driver (Kernel in-box)` / `ENA Driver (Self-Build)` lines with an explicit in-tree no-version fallback; `install-ena-driver.sh` logs the in-box ENA identity before the self-build; the auto AMI name/description gain a self-built-ENA marker and the final summary prints the description + an ENA driver line; the `[OLAWS-ENA01]` hook log and the marker read the pin from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` default (no hardcoded `OL6 2.5.0` drift). Structural presence checks grep files directly (avoiding a `printf\|grep -q` SIGPIPE race under `pipefail` on the large wrapper) + behavioural pin-reader fixture; 15 asserts. AMI naming/boot proof is B-T7/B-T8 |
 | B-T (build visibility) | L1/L2 | implemented | `tests/t12_buildvisibility.sh`: OL7 build-log visibility (handoff B.1.5 feedback 4). `install-ena-driver.sh` emits greppable `[ena-driver][stage]` breadcrumbs at the phase boundaries (esp. dkms add/build/install) and `record_make_log()` preserves the DKMS make.log to `/var/log/ol-aws-ami-builder-ena-make.log` on a successful build (guest output is swallowed by virt-customize on success); the wrapper records the latest LIVE orchestrator line to `BUILD_STAGE_FILE` in `log_external` and the Phase-5 heartbeat shows it as `stage: …` (assembled into one atomic `log_progress` write); `HEARTBEAT_INTERVAL_SEC` default is 10s. Structural greps (file-direct) + a behavioural `log_external`→stage-file fixture; 17 asserts. Real OL7 build/boot proof is B-T7/B-T8 |
+| B-T (ena ledger guard) | L1 | implemented | `tests/t13_enaledgerguard.sh`: the matrix ledger-writer keeps an INDEPENDENT version-mismatch guard — an `ok` whose installed `ko_version` does not match the requested `ena_version` (e.g. a stale installer that fell back to the stock in-tree `ena.ko` 1.1.2) is downgraded to `fail` before it can enter the ledger, so it cannot poison the report or the kver-primary dedup gate. Extracts the real ledger-writer python out of the matrix and drives it with a synthetic results TSV; python3 only, no container/dkms/build; 5 asserts |
+| B-T (ena check-2 provenance) | L0/L1 | implemented | `tests/t14_enacheck2.sh`: Phase-6 CHECK 2 (offline image inspection) must gate its PASS on provenance, not mere module presence — the pure `_ena_check2_ok` requires the self-built `/updates`\|`/extra` module when a self-build was requested (OL6/OL7 default); the stock `/kernel` copy alone is a FAIL, while no-self-build paths (`--skip-ena-driver`, OL8+ in-distro, OL9+) accept any present module. Loads ONLY that function out of the (guarded) wrapper; 6 asserts |
+| B-T (ena verify verdict) | L0/L1 | implemented | `tests/t15_enaverify.sh`: guards the false-ok regression where EL6 `dkms` (2.4.0) returns exit 0 even on a failed in-guest compile while a stock in-tree `ena.ko` is present — success is decided from the installed MODULE VERSION via the pure `ena_buildtest_verdict`. Loads ONLY that function; no container/dkms/build; 12 asserts |
+| B-T (ena verify-results) | L1 | implemented | `tests/t16_enaverifyresults.sh`: the standalone READ-ONLY `tests/ena/verify-ena-buildresults.sh` judges, after the fact, whether each ok build's module is load-ready WITHOUT touching the production path; this tier loads ONLY its two pure verdict functions — `lc_vermagic_verdict` (L4a gate) and `lc_symbols_verdict` (L4b gate) — and asserts them across the verifier's shapes; no I/O/kmod/bundle; 15 asserts |
+| B-T (ena bundle producer) | L1 | implemented | `tests/t17_enabundle.sh`: the matrix's `preserve_bundle()` is a DUMB copy that lifts each build's artifacts into the exact layout the read-only verifier consumes (per-version `ena.ko`, shared per-kver `Module.symvers` / `kernel.vermagic` / `initramfs.list`); loads ONLY that function and drives it against a fabricated image tree. The initramfs fixture builds via cpio **or** a self-contained `python3` newc writer/reader, so the listing assertions RUN on any host with cpio+gzip or python3 (rather than skipping); 13 asserts |
+| B-T (ssm verdict) | L0/L1 | implemented | `tests/t18_ssmverdict.sh`: loads the four pure helpers of `tests/ssm/run-ssm-installtest-matrix.sh` — `ssm_ge` (dotted 4-part compare), `go_min_kernel` (go.mod `go` directive → min-kernel proxy), `ssm_in_scope` (default `>=min` vs `--full` filter), `ssm_compliance` (headline verdict vs AWS min `>= 3.3.3598.0`) — and asserts them across the matrix's shapes; no container/network/clean-core; 32 asserts |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
 | clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below), plus `tests/cleancore/build-cleancore.sh` (the `--all`/`--ol` orchestrator wrapping them). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |
