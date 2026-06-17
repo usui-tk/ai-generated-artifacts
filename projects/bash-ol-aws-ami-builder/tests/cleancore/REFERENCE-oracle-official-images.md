@@ -759,3 +759,112 @@ yum-metadata-parser-1.1.2-16.el6.x86_64
 yum-rhn-plugin-0.9.1-50.0.1.el6.noarch
 zlib-1.2.3-29.el6.x86_64
 ```
+
+## Oracle Linux 5 (`oraclelinux:5` = `5.11`) — FEASIBILITY INVESTIGATION (build PROVEN)
+
+> **Status: feasibility proven; no builder authored yet.** Unlike the OL6-OL10
+> sections (each documents a live `build-cleancore-ol<N>.sh`), this section records
+> a feasibility study for an OL5 clean-core. OL5 is EOL (the channels persist as
+> sustaining/archived), which is exactly its value: a faithful OL5 clean-core gives
+> a quasi-validation environment for the legacy OL5 systems still running in the
+> Japanese market. **Conclusion: an OL5 clean-core is feasible and was
+> proof-of-concept-verified in-sandbox**, by bootstrapping an EL5-native rpm from
+> the OL5 RPMs themselves and installing from a local mirror over `file://` - so it
+> needs neither GHCR nor any in-OS TLS.
+
+### (1) Image availability (verified 2026-06-18)
+
+| Image / source | Channel | Tag / pin | Version | Status |
+|----------------|---------|-----------|---------|--------|
+| `oraclelinux:5` = `oraclelinux:5.11` | GHCR | `5` = `5.11` (aliases of one version `127976`) | OL5.11 | published; amd64-only `manifest.v2`; ~82 MB layer; digest `sha256:a3575cba...`; EOL/frozen; still pulled |
+| `5/`, `5-slim/` rootfs.tar.xz | git raw (container-images) | `@0218ab4` | - | **HTTP 404** (no OL5 rootfs in the git tree) |
+| OL5 docker image | public-yum | - | - | **HTTP 404** (none) |
+| OL5/latest, OL5/UEK R2, EL5/addons, EL5/unsupported (x86_64) | yum.oracle.com | - | - | **HTTP 200** (OL5/latest = 15734 pkgs) |
+
+OL5 predates `*-slim`, so there is one full `oraclelinux:5` image (also `5.11`) and
+no `5-slim`; the manifest is single-arch (amd64). There is **no git-raw rootfs and
+no public-yum docker image** for OL5. The GHCR image is therefore the only
+*pre-built* EL5-native rootfs - but, per (3), the builder does **not** need it.
+
+**Sandbox note (2026-06-18):** bare `ghcr.io` returns `x-deny-reason:
+host_not_allowed` in the Claude egress proxy (the allow-list carries `*.ghcr.io`
+but not the apex that serves the registry token + `/v2/` API), so the GHCR image
+cannot be pulled in-sandbox. This does **not** block the build, because the
+EL5-native userland is bootstrapped from the OL5 RPMs (below), all of which are on
+the allow-listed `yum.oracle.com`.
+
+### (2) OL5 base facts + the "why do the repos exist if OL5 can't fetch them" question
+
+From `OracleLinux/OL5/latest/x86_64` (verified 2026-06-18):
+
+| Component | OL5 | OL6.10 (contrast) | Note |
+|-----------|-----|--------------------|------|
+| `rpm` / BerkeleyDB | **4.4.2.3 / db4 4.3.29** | 4.8 / db4 4.7.25 | rpmdb format |
+| `glibc` | **2.5** | 2.12 | runtime floor |
+| `openssl` | **0.9.8e** (TLS 1.0 ceiling) | 1.0.1e (TLS 1.2) | the TLS problem |
+| `nss` / `curl` | 3.21.3 / 7.15.5 (openssl-linked) | 3.36 / 7.19 (NSS-linked) | in-OS HTTPS client |
+| `yum` / `python` | 3.2.22 / 2.4.3 | 3.2.29 / 2.6.6 | package manager |
+| kernel / UEK | 2.6.18 / **UEK R2** 2.6.32 | 2.6.32 / UEK R4 | - |
+| `ca-certificates` | **no separate package** (ships with openssl) | present | trust store |
+| `jq` | **absent** (EPEL 5 EOL/archived) | EPEL-transient | test-base essential |
+
+**The repos are fully usable - by modern clients/mirrors, not by OL5's own TLS
+stack.** `yum.oracle.com` requires **TLS 1.2** (a forced `--tls-max 1.0` handshake
+is refused) and redirects `http` -> `https`, so there is **no plain-HTTP path**.
+OL5's in-OS client (`curl 7.15.5` + `openssl 0.9.8e`) tops out at **TLS 1.0**, so a
+legacy OL5 box can no longer fetch directly. That is expected and is **not** a
+contradiction: the OL5 channels exist as the authoritative *source* that **modern
+tooling mirrors from** - the standard way to service EOL systems today is to
+`reposync`/mirror on a modern host and serve the legacy boxes from that mirror
+(over a LAN, `file://`, or NFS). This is exactly the pattern the OL5 clean-core
+builder uses.
+
+### (3) Feasibility - PROVEN by in-sandbox proof-of-concept (2026-06-18)
+
+The two OL5 blockers - (i) no in-OS TLS 1.2, (ii) needing an EL5-native rpm so the
+rpmdb is db4.3-native - are both solved **without GHCR** by bootstrapping the
+EL5 userland from the OL5 RPMs and installing from a local mirror. Verified
+end-to-end in-sandbox:
+
+1. **Host fetches OL5 packages over TLS 1.2** (the modern host / build container is
+   the TLS-1.2 client). 38 base RPMs pulled from `yum.oracle.com/.../OL5/latest`
+   (rpm, rpm-libs, popt, db4, beecrypt, elfutils-libelf, glibc, glibc-common,
+   bash, coreutils, libselinux, libsepol, nss, openssl, ... ~41 MB) - all HTTP 200.
+2. **Extract the EL5 `rpm` 4.4 binary + its libs from those RPMs** with `bsdtar`
+   (libarchive; preserves symlinks/modes) - no rpm needed on the host.
+3. **Run EL5 `rpm` 4.4 inside an `unshare -m` + `chroot`** of a minimal EL5 rootfs
+   (consistent EL5 loader + libs): `rpm --version` -> `RPM version 4.4.2.3`.
+4. **`rpm --initdb`** creates a **native db4.3 rpmdb** (`Packages` + `__db.00*`).
+5. **`rpm -Uvh` installs the staged LOCAL RPMs** (the local mirror, no network/TLS
+   in the install path), and **`rpm -qa` reads back all 38** (glibc-2.5,
+   openssl-0.9.8e, nss-3.21.3, rpm-4.4.2.3, ...) - the EL5 rpm writes AND reads its
+   own db4.3, so the **rpmdb-compat question is moot for this path** (no cross-rpm
+   db is ever written).
+
+So a real OL5 clean-core does not need GHCR and does not need the OL6.6-style
+in-builder TLS modernization (which is impossible on OL5 anyway, since no OL5
+openssl speaks TLS 1.2). The TLS-1.2 fetch is the **host's** job; the EL5-native
+rpm only ever touches `file://` local paths.
+
+**Resulting builder design (`build-cleancore-ol5.sh`, to author next):**
+
+- **[A] HOST** mirrors the curated OL5 package closure from `yum.oracle.com/OL5/
+  latest` over TLS 1.2 (a `curl`/`reposync`-style fetch into a local dir;
+  `createrepo` for a `file://` repo, or a resolved RPM list for `rpm -Uvh`). This is
+  the analog of the OL6.6 fallback's host-fetch, generalized from "just the TLS
+  stack" to "the package set".
+- **[B] BUILDER = EL5-native, bootstrapped from the OL5 RPMs** (extract rpm 4.4 +
+  deps with `bsdtar`), not the GHCR image - removing the only GHCR dependency. (If
+  GHCR is later allow-listed, pulling `oraclelinux:5` is an equivalent shortcut.)
+- **[C] CLEAN-CORE** = a fresh `yum --installroot` (or staged `rpm -Uvh`) from the
+  **`file://` local mirror**, so the install path needs no TLS; the deliverable's
+  own rpm is EL5 4.4 and its rpmdb is native db4.3. Finalize + self-test mirror the
+  OL6 builder.
+
+**Remaining work / caveats (for the build, a long-running [C]3 task):** curate the
+OL5 INCLUDE (older names: `procps`, `SysVinit`, no `git-core`; **`jq` decision** -
+EPEL 5 is archived, so either pull from the EPEL-5 archive or omit on OL5); decide
+EL5 `yum` vs direct `rpm -Uvh` for the install transaction (yum needs python 2.4 +
+yum + deps staged in the builder); and run the full build under the
+long-running-execution protocol. The PoC proves the mechanism; the full curated
+build is the next unit of work.

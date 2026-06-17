@@ -21,6 +21,30 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **OL5 clean-core feasibility investigation - build PROVEN
+  (`tests/cleancore/REFERENCE-oracle-official-images.md`).** Added an "Oracle Linux
+  5" section recording a feasibility study for an OL5 (= OL5.11) clean-core test
+  base, motivated by quasi-validation of legacy OL5 systems still running in the
+  Japanese market. Findings (verified 2026-06-18): `ghcr.io/oracle/oraclelinux:5`
+  (= `:5.11`, one amd64-only version `127976`, ~82 MB layer, EOL/frozen) is still
+  published, but there is no `5-slim`, no git-raw rootfs, and no public-yum docker
+  image; and bare `ghcr.io` is outside the Claude egress allow-list. Despite that,
+  **an OL5 clean-core was proof-of-concept-verified in-sandbox without GHCR**:
+  `yum.oracle.com` requires TLS 1.2 (no plain-HTTP path) and OL5's own openssl
+  0.9.8e tops out at TLS 1.0, so the EL5-native `rpm` 4.4 is **bootstrapped from the
+  OL5 RPMs themselves** (host-fetched over TLS 1.2, extracted with `bsdtar`) and run
+  in an `unshare`+`chroot`; it `--initdb`s a native db4.3 rpmdb, `rpm -Uvh`-installs
+  from a **`file://` local mirror** (no in-OS TLS), and `rpm -qa` reads all 38 base
+  packages back. The repos are thus fully usable as a *source for modern
+  clients/mirrors* (the standard way to service EOL systems), and the rpmdb-compat
+  question is moot for this path (the EL5 rpm writes its own db). The section
+  records OL5 base facts (rpm 4.4.2.3 / db4 4.3, glibc 2.5, openssl 0.9.8e, nss
+  3.21, UEK R2, no `ca-certificates` package, `jq` absent) and a concrete
+  `build-cleancore-ol5.sh` design (host mirror -> EL5 bootstrap builder -> `file://`
+  `--installroot`). Documentation only; no builder authored yet (the full curated
+  build is a long-running follow-on). Reference doc only - not a `.sh`, suite
+  unchanged at 386/0/0.
+
 - **`register-image` input validation + `--dry-run` pre-flight (Phase 9).**
   Hardened the AMI registration in `build-ol-aws-ami.sh` against the documented
   AWS EC2 `register-image` constraints. (1) Two new pure validators —
