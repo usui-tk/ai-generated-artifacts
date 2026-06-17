@@ -272,8 +272,9 @@ v1 block). Its only dependency is already in the base set, so it is a clean `+1`
 to each SBOM.
 Two static snapshots accompany the base: `cleancore-ol<MAJOR>.sbom.json` (each
 finalized image's package set, names-only, reusable JSON) and
-`REFERENCE-oracle-official-images.md` (the official slim images' sources, pinned
-commits, and name-version manifests). Neither is a `.sh`, so both are outside
+`REFERENCE-oracle-official-images.md` (each official container image's sources -
+the container-registry.oracle.com floating tag and the pinned `oracle/container-images`
+rootfs - and their name-version RPM manifests). Neither is a `.sh`, so both are outside
 B-T1/B-T2 and are not drift-checked gates.
 
 Run one with `bash tests/cleancore/build-cleancore-ol<MAJOR>.sh [output.tar.gz]`
@@ -281,6 +282,48 @@ Run one with `bash tests/cleancore/build-cleancore-ol<MAJOR>.sh [output.tar.gz]`
 drops the build-time `sslverify=0` on a trusted host). The script exits 0 only if
 the build and the unconditional self-test section pass; the network-dependent
 readiness probe SKIPs (never fails the build) when offline.
+
+### OL5 background & base facts
+
+> Relocated from `REFERENCE-oracle-official-images.md` (which is now a pure
+> container-image report). This is the OL5 investigation record that explains
+> *why* the OL5 clean-core uses the OL10 work-env model rather than an EL5 image.
+
+OL5 base facts (from `OracleLinux/OL5/latest/x86_64`), contrasted with OL6.10:
+
+| Component | OL5 | OL6.10 (contrast) | Note |
+|-----------|-----|--------------------|------|
+| `rpm` / BerkeleyDB | **4.4.2.3 / db4 4.3.29** | 4.8 / db4 4.7.25 | rpmdb format |
+| `glibc` | **2.5** | 2.12 | runtime floor |
+| `openssl` | **0.9.8e** (TLS 1.0 ceiling) | 1.0.1e (TLS 1.2) | the TLS problem |
+| `nss` / `curl` | 3.21.3 / 7.15.5 (openssl-linked) | 3.36 / 7.19 (NSS-linked) | in-OS HTTPS client |
+| `yum` / `python` | 3.2.22 / 2.4.3 | 3.2.29 / 2.6.6 | package manager |
+| kernel / UEK | 2.6.18 / **UEK R2** 2.6.32 | 2.6.32 / UEK R4 | - |
+| `ca-certificates` | **no separate package** (ships with openssl) | present | trust store |
+| `jq` | **absent** (EPEL 5 EOL/archived) | EPEL-transient | test-base essential |
+
+**Why the OL5 repos are still usable even though OL5's own TLS can't reach them.**
+`yum.oracle.com` requires **TLS 1.2** (an `http` request is redirected to `https`,
+so there is no plain-HTTP path), and OL5's in-OS client (`curl 7.15.5` +
+`openssl 0.9.8e`) tops out at **TLS 1.0** - so a legacy OL5 box cannot fetch
+directly. That is expected: the OL5 channels exist as the authoritative *source*
+that **modern tooling mirrors from**. The standard way to service EOL systems is to
+`reposync`/mirror on a modern host and serve the legacy boxes from that mirror
+(LAN, `file://`, or NFS) - exactly the pattern `build-cleancore-ol5.sh` uses (the
+modern host/build container does the TLS-1.2 fetch; the EL5-native rpm only ever
+touches `file://` local paths).
+
+**Feasibility (proven in-sandbox).** The two OL5 blockers - no in-OS TLS 1.2, and
+needing an EL5-native rpm so the rpmdb is db4.3-native - are both solved without any
+EL5 container image: (1) the host fetches the OL5 package closure over TLS 1.2 from
+`OracleLinux/OL5/latest`; (2) the EL5 `rpm` 4.4 binary + libs are extracted from
+those RPMs with `bsdtar` (no rpm needed on the host); (3) EL5 `rpm` 4.4 runs inside
+an `unshare -m` + `chroot` of a minimal EL5 rootfs (`rpm --version` -> 4.4.2.3);
+(4) `rpm --initdb` creates a native **db4.3** rpmdb; (5) `rpm -Uvh` installs the
+staged local RPMs and `rpm -qa` reads them all back - so the rpmdb-compat question is
+moot (no cross-rpm db is ever written). The shipped builder generalizes this from
+"just the TLS stack" to "the whole curated package set", installed from a `file://`
+local mirror. See SPEC.md B.8 ("EL5 specific") for the operational model.
 
 ### Orchestrator (`build-cleancore.sh`)
 

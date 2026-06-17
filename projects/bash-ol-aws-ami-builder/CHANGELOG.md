@@ -235,6 +235,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **`tests/cleancore/REFERENCE-oracle-official-images.md` renewed into a pure
+  container-image report.** Each OL6-OL10 section now records BOTH builder-image
+  acquisition sources separately: the **① `container-registry.oracle.com/os/oraclelinux:N-slim`**
+  floating-tag image (the new primary; captured RPM manifest, 2026-06-18) and the
+  **② pinned `oracle/container-images@0218ab4` `N-slim`** rootfs (the fallback; its
+  own manifest). The two are NVRA-identical today but are kept distinct because the
+  floating tag advances while the pin is frozen. OL6 additionally keeps the **③
+  legacy `oraclelinux:6.6`** manifest as a third-fallback reference. The **OL6 and
+  OL5 sections were rebuilt on the OL10 template**: the OL6 "Availability
+  investigation" / "OL6 optimization" memo and the OL5 feasibility-study / PoC memo
+  were removed; OL5 now documents the official **`oraclelinux:5` (5.11)** full image
+  (123 packages; OL5 predates `*-slim`, so no `5-slim`, no git-raw rootfs, no
+  public-yum docker image). The registry channel is standardized on
+  `container-registry.oracle.com` (what the builders pull) instead of GHCR. The OL5
+  base-facts, the TLS-1.2 / mirror rationale, and the EL5 PoC record were relocated
+  to TESTING.md ("OL5 background & base facts"). Reference-only; no code or gate change.
+
 - **OL6 clean-core builder now uses the `6-slim` (OL6.10) rootfs as the primary
   base, with the OL6.6 image as a fallback.** `tests/cleancore/build-cleancore-ol6.sh`
   acquired its EL6-native *builder* from the legacy OL6.6 public-yum docker image,
