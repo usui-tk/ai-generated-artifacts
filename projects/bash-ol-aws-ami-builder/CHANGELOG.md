@@ -21,29 +21,39 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
-- **OL5 clean-core feasibility investigation - build PROVEN
-  (`tests/cleancore/REFERENCE-oracle-official-images.md`).** Added an "Oracle Linux
-  5" section recording a feasibility study for an OL5 (= OL5.11) clean-core test
-  base, motivated by quasi-validation of legacy OL5 systems still running in the
-  Japanese market. Findings (verified 2026-06-18): `ghcr.io/oracle/oraclelinux:5`
-  (= `:5.11`, one amd64-only version `127976`, ~82 MB layer, EOL/frozen) is still
-  published, but there is no `5-slim`, no git-raw rootfs, and no public-yum docker
-  image; and bare `ghcr.io` is outside the Claude egress allow-list. Despite that,
-  **an OL5 clean-core was proof-of-concept-verified in-sandbox without GHCR**:
-  `yum.oracle.com` requires TLS 1.2 (no plain-HTTP path) and OL5's own openssl
-  0.9.8e tops out at TLS 1.0, so the EL5-native `rpm` 4.4 is **bootstrapped from the
-  OL5 RPMs themselves** (host-fetched over TLS 1.2, extracted with `bsdtar`) and run
-  in an `unshare`+`chroot`; it `--initdb`s a native db4.3 rpmdb, `rpm -Uvh`-installs
-  from a **`file://` local mirror** (no in-OS TLS), and `rpm -qa` reads all 38 base
-  packages back. The repos are thus fully usable as a *source for modern
-  clients/mirrors* (the standard way to service EOL systems), and the rpmdb-compat
-  question is moot for this path (the EL5 rpm writes its own db). The section
-  records OL5 base facts (rpm 4.4.2.3 / db4 4.3, glibc 2.5, openssl 0.9.8e, nss
-  3.21, UEK R2, no `ca-certificates` package, `jq` absent) and a concrete
-  `build-cleancore-ol5.sh` design (host mirror -> EL5 bootstrap builder -> `file://`
-  `--installroot`). Documentation only; no builder authored yet (the full curated
-  build is a long-running follow-on). Reference doc only - not a `.sh`, suite
-  unchanged at 386/0/0.
+- **OL5 clean-core builder shipped (`tests/cleancore/build-cleancore-ol5.sh`).**
+  Added a live `build-cleancore-ol5.sh` (= OL5.11) clean-core test-base builder and
+  wired it into the `build-cleancore.sh` orchestrator (`--all` now spans
+  `5,6,7,8,9,10`), motivated by quasi-validation of legacy OL5 systems still running
+  in the Japanese market. End-to-end verified in-sandbox: **125 packages, self-test
+  15 passed / 0 failed / 1 skipped (PASSED)**, with a names-only SBOM
+  `cleancore-ol5.sbom.json`. OL5 is the deepest EOL member — its `rpm` stays 4.4 /
+  BerkeleyDB-4.3 forever and its in-OS `openssl` 0.9.8e tops out at TLS 1.0, so it
+  can neither write a modern rpmdb nor reach the TLS-1.2-only `yum.oracle.com`, and
+  no distributed OL5 image carries a usable EL5 rpm over the normal channel.
+  **Architecture (OL10 work-env model):** the HOST installs nothing and pulls the
+  latest distributed `oraclelinux:10` image (floating `:10`) over the **OCI registry
+  v2 API with `curl`** (anonymous token -> index -> amd64 manifest -> single ~94 MB
+  layer; no container runtime) as a throwaway work environment; that OL10 env does
+  the TLS-1.2 work — fetch the OL5 metadata + RPMs, resolve the closure (**dnf
+  first**, empty installroot + `--releasever=5`; an embedded checksum-agnostic
+  **Python resolver** is the fallback that EL5's directory-`provide` semantics, e.g.
+  `libxml2-python` needing `/usr/lib64/python2.4`, force in practice), and bootstrap
+  an **EL5-native builder** (`rpm2cpio | cpio` from the OL5 RPMs). The HOST then does
+  a single-level EL5 `chroot` in which the EL5-native **`createrepo` 0.4.11** writes
+  the sha1/gzip repodata EL5 `yum` 3.2.22 can read (OL10's `createrepo_c` emits only
+  sha256, uncheckable by EL5 yum) and `yum --installroot` installs the clean-core
+  from a `file://` mirror — no in-OS TLS, rpmdb db4.3 written by EL5-native rpm. EL5
+  yum lacks `--releasever`/`--setopt` (so `tsflags=nodocs` lives in the builder
+  `yum.conf`) and exits non-zero on a successful `Complete!` under chroot (so install
+  success is gated on the rpmdb package count, not the exit code); the sandbox egress
+  CA is seeded into the OL10 work-env trust store (no-op on a real host). EL5 deltas:
+  **`git` and `jq` omitted** (no EL5 build of either — `jq` not even in the EPEL 5
+  archive), versionlock = `yum-versionlock`, release = `oraclelinux-release`,
+  `procps`/`nc` + `net-tools`. Docs updated: SPEC.md **B.8** (OL5 row + "EL5
+  specific" note), the REFERENCE "Oracle Linux 5" section flipped from feasibility to
+  shipped, TESTING.md. Suite **386/0/0 -> 388/0/0** (+2: the new builder is walked by
+  B-T1 parse + B-T2 ShellCheck).
 
 - **`register-image` input validation + `--dry-run` pre-flight (Phase 9).**
   Hardened the AMI registration in `build-ol-aws-ami.sh` against the documented

@@ -77,16 +77,16 @@ non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
 Current fixed pass count (full toolchain present — pinned ShellCheck 0.10.0,
-`ksvalidator`, and `python3`): **386 passed, 0 skipped, 0 failed** across **20
-tiers** (B-T1 parse = 48, B-T2 ShellCheck = 43, B-T3 unit = 35, command-mock = 9,
+`ksvalidator`, and `python3`): **388 passed, 0 skipped, 0 failed** across **20
+tiers** (B-T1 parse = 49, B-T2 ShellCheck = 44, B-T3 unit = 35, command-mock = 9,
 B-T4 kickstart = 1, env-parity = 31, idempotency = 9, hook-timing = 8,
 log-format = 12, ena-uek-detect = 9, ena-reporting = 15, build-visibility = 17,
 ena-ledger-guard = 5, ena-check-2 = 6, ena-verify = 12, ena-verify-results = 15,
 ena-bundle = 13, ssm-verdict = 32, awscli-verdict = 43, register-validation = 23). Optional-tool degradations are the only way
-to see a skip: without `ksvalidator` B-T4 contributes a skip (-> 385/1); without
+to see a skip: without `ksvalidator` B-T4 contributes a skip (-> 387/1); without
 ShellCheck B-T2 skips; the B-T (ena-bundle) initramfs fixture builds via cpio
 **or** a self-contained `python3` newc fallback, so it no longer skips. The
-B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core builders (see
+B-T1 / B-T2 counts include the six `tests/cleancore/` clean-core builders (see
 "Container clean-core test base" below) and the AWS CLI v2 install-test scripts
 (`install-awscli.sh`, `tests/awscli/`): B-T1 and B-T2 parse- and lint-check
 **every** `.sh` in the project, so adding a script raises both counts by one. The
@@ -163,13 +163,13 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (register validation) | L1 | implemented | `tests/t020_register.sh`: sources the wrapper (guarded `main`) and exercises the two pure validators that guard `aws ec2 register-image` — `validate_ami_name` (`--name`: length 3-128 + allowed set alphanumerics and `()[]` space `. / - ' @ _`) and `validate_ami_description` (`--description`: length 0-255) — across length boundaries (2/3/128/129/0), realistic auto names (ENA/SSM markers), the full allowed special set, and a battery of disallowed characters (`# * , : + = % !`, braces, tab, multibyte); argument-only, no network; 23 asserts. The Phase-9 `--dry-run` pre-flight that also gates the real call is a live AWS interaction, proved by B-T8 (E2E) |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
-| clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below), plus `tests/cleancore/build-cleancore.sh` (the `--all`/`--ol` orchestrator wrapping them). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |
+| clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{5,6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below), plus `tests/cleancore/build-cleancore.sh` (the `--all`/`--ol` orchestrator wrapping them). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |
 | awscli install-test | (test base) | implemented | `install-awscli.sh` + `tests/awscli/run-awscli-installtest-matrix.sh` + `tests/awscli/list-awscli-releases.sh` — the AWS CLI v2 install+run matrix (glibc axis) and its release-list resolver (see "AWS CLI v2 install+run test matrix" below). **Not** run by `run-all.sh` (heavy: needs root + network + clean-core); the pure verdict/lifecycle helpers are unit-tested host-only by `tests/t019_awscliverdict.sh`; all are covered by B-T1 (parse) + B-T2 (lint) |
 
 ## Container clean-core test base (`tests/cleancore/`)
 
-The `tests/cleancore/` directory holds five self-contained builders —
-`build-cleancore-ol6.sh` / `-ol7.sh` / `-ol8.sh` / `-ol9.sh` / `-ol10.sh`
+The `tests/cleancore/` directory holds six self-contained builders —
+`build-cleancore-ol5.sh` / `-ol6.sh` / `-ol7.sh` / `-ol8.sh` / `-ol9.sh` / `-ol10.sh`
 (naming convention: `build-cleancore-ol<MAJOR>.sh`) — that produce a **clean-core
 Oracle Linux container rootfs** per OL major as a reusable test base for the
 project's container-level checks (repo-availability, guest provisioning shell
@@ -198,7 +198,7 @@ Per-OL specifics: OL6/OL7 build with `yum`; OL8/OL9/OL10 install the full `dnf`
 into the slim builder (`microdnf install dnf`) first. OL7's manifest no longer
 mirrors the upstream `distr/ol7-slim` kickstart, and OL6 builds from the `6-slim`
 container rootfs (OL6.10; fallback the OL6.6 public-yum image) as a fresh curated
-`yum --installroot` install rather than from a VM kickstart. **OL6 through OL10 have all been trimmed** to a
+`yum --installroot` install rather than from a VM kickstart. **OL5 through OL10 have all been trimmed** to a
 slim-aligned, container-
 appropriate set: `@core` dropped (no kernel/boot/firewall/cron/syslog), explicit
 test-base essentials, `git-core` instead of `git` (avoiding ~60 `perl-*`), no
@@ -224,14 +224,41 @@ host** where the shipped `ca-certificates` bundle already verifies standard CAs
 EPEL 6 release RPM from the Fedora archive with the clean-core's own `curl` and
 installs it with its own `rpm` (EL6 `yum` cannot fetch a direct https package
 URL), shipping the repo
-repointed to the archive and `enabled=0`. **`jq`** is a curated test-base
-essential on every clean-core: on OL7–OL10 it is part of the enabled standard OL
+repointed to the archive and `enabled=0`. **OL5** is the deepest EOL member and
+is built by a distinct model: its rpm stays 4.4 / BerkeleyDB-4.3 forever and its
+in-OS `openssl` 0.9.8e tops out at TLS 1.0, so it can neither write a modern rpmdb
+nor reach the TLS-1.2-only `yum.oracle.com`, and no distributed OL5 image carries a
+usable EL5 rpm over the normal channel. So OL5 uses the **latest distributed
+`oraclelinux:10` image (floating `:10`) as a throwaway work environment** — pulled
+anonymously over the OCI registry v2 API with `curl` only (no container runtime, no
+host package installs) — which does all the TLS-1.2 work: fetch the OL5 metadata +
+RPMs, resolve the closure (**dnf first**, with an embedded checksum-agnostic Python
+resolver as the fallback that EL5's directory-`provide` semantics, e.g.
+`libxml2-python` needing `/usr/lib64/python2.4`, force in practice), and bootstrap
+an **EL5-native builder** (`rpm2cpio | cpio`) from the OL5 RPMs. The host then runs
+a single-level EL5 `chroot` in which the **EL5-native `createrepo` 0.4.11** emits
+the sha1/gzip repodata that EL5 `yum` 3.2.22 can read (OL10's `createrepo_c` only
+emits sha256, which EL5 yum cannot checksum), and `yum --installroot` installs the
+clean-core from the `file://` mirror — no in-OS TLS, rpmdb db4.3. EL5 `yum` has no
+`--releasever` / `--setopt`, so `tsflags=nodocs` is carried in the builder's
+`yum.conf`, and install success is verified by the rpmdb package count (EL5 yum
+exits non-zero on a successful `Complete!` under chroot). The sandbox egress CA is
+seeded into the OL10 work env's trust store (a no-op on a real host). EL5 deltas:
+`git` and `jq` are **omitted** (no EL5 build exists for either — `jq` not even in
+the EPEL 5 archive; `git` is EPEL-only and drags a `perl` chain), versionlock is
+`yum-versionlock`, the release package is `oraclelinux-release`, and `procps`/`nc`
+(not `procps-ng`/`nmap-ncat`) plus `net-tools` (for `hostname`) mirror OL6.
+**`jq`** is a curated test-base essential on every clean-core: on OL7–OL10 it is
+part of the enabled standard OL
 repo (a plain `INCLUDE` member), and on OL6 — where `jq` is an EPEL package and
 absent from the base — it is installed from that EPEL archive by enabling EPEL
-**transiently for the one install**, leaving the shipped EPEL `enabled=0`. The
-unconditional self-test asserts `jq --version` runs in the finalized image.
-The **versionlock plugin** (`yum-plugin-versionlock` on OL6/OL7,
-`python3-dnf-plugin-versionlock` on OL8–OL10) is likewise a default `INCLUDE`
+**transiently for the one install**, leaving the shipped EPEL `enabled=0` (OL5 is
+the exception: no EL5 `jq` build exists anywhere, so it is omitted there). The
+unconditional self-test asserts `jq --version` runs in the finalized image (on OL5
+it instead asserts `jq`'s intentional absence).
+The **versionlock plugin** (`yum-versionlock` on OL5, `yum-plugin-versionlock` on
+OL6/OL7, `python3-dnf-plugin-versionlock` on OL8–OL10) is likewise a default
+`INCLUDE`
 member on every clean-core — present in each OS's standard repo (OL6/OL7
 `latest`, OL8–OL10 `baseos`), so it is a plain add with no extra repo — giving the
 base package-pinning out of the box (parallel to `install-awscli.sh`'s versionlock
@@ -260,7 +287,7 @@ host-OS sanity check, and a hard prerequisite gate:
 
 ```sh
 bash tests/cleancore/build-cleancore.sh --ol 6                  # one OL major
-bash tests/cleancore/build-cleancore.sh --all --out-dir ./cc    # OL 6,7,8,9,10
+bash tests/cleancore/build-cleancore.sh --all --out-dir ./cc    # OL 5,6,7,8,9,10
 bash tests/cleancore/build-cleancore.sh --all --continue        # don't stop on a failing OL
 ```
 

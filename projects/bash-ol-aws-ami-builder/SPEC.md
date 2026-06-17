@@ -1573,8 +1573,8 @@ Notes:
 
 ## B.8 Container clean-core test base (`tests/cleancore/`)
 
-`tests/cleancore/` holds five self-contained builders —
-`build-cleancore-ol6.sh` / `-ol7.sh` / `-ol8.sh` / `-ol9.sh` / `-ol10.sh`
+`tests/cleancore/` holds six self-contained builders —
+`build-cleancore-ol5.sh` / `-ol6.sh` / `-ol7.sh` / `-ol8.sh` / `-ol9.sh` / `-ol10.sh`
 (naming convention: `build-cleancore-ol<MAJOR>.sh`) — each producing a
 **clean-core Oracle Linux container rootfs** for one OL major. They are a
 reusable, general-purpose **test base** for the project's container-level checks
@@ -1626,6 +1626,7 @@ Each builder tags every block with the environment it runs in:
 
 | OL | builder (build-use only) | pkg mgr | enabled repos | package-set source |
 |----|--------------------------|---------|----------------|--------------------|
+| 5 | **`oraclelinux:10` work-env** (floating `:10`, OCI v2 `curl` pull; no host installs) bootstraps an **EL5-native builder** (`rpm2cpio\|cpio` from the OL5 RPMs); rpm 4.4 / db4.3 | EL5 `yum` 3.2.22 + EL5 `createrepo` 0.4.11 | `file://` mirror (OL5/latest) | **slim-aligned curated essentials** (`@core` dropped; no `git`/`jq`; see "Package set" below) |
 | 6 | `6-slim` rootfs (OL6.10, ships `yum`); **fallback** OL6.6 public-yum docker image (rpm 4.8 / db4), TLS-modernized first | `yum` | `latest` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 | 7 | `7-slim` rootfs (ships `yum`) | `yum` | `latest` + `UEKR6` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 | 8 | `8-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
@@ -1636,7 +1637,11 @@ Each builder tags every block with the environment it runs in:
   target so the in-guest rpm reads the rpmdb. **OL6 stays rpm 4.8 / db4 forever**
   (EOL), and an EL7 rpm 4.11 / db5 builder writes a db an EL6 rpm reads as **0
   packages** — so OL6 uses an EL6-native builder, giving permanent rpmdb
-  compatibility.
+  compatibility. **OL5 is the deepest case** (rpm 4.4 / db4.3, `openssl` 0.9.8e =
+  TLS-1.0): no distributed OL5 image carries a usable EL5 rpm over the normal
+  channel, so OL5 instead bootstraps its EL5-native builder inside the OL10
+  work-env (see the **EL5 specific** note below) — the OL10 rpm never writes the
+  deliverable rpmdb (a modern rpm yields a db the in-guest OL5 rpm reads as 0).
 - **OL6 builder source (6-slim primary, 6.6 fallback).** The builder is acquired
   in preference order: (1) the Oracle **`6-slim` rootfs (OL6.10)** pinned in
   `oracle/container-images` at the **same commit `0218ab4` the OL7/OL8 builders
@@ -1654,8 +1659,8 @@ Each builder tags every block with the environment it runs in:
   which `https` works. The **6.10-slim primary already ships that stack** (OpenSSL
   1.0.1e, NSS 3.36 line, `libcurl.so.4`), so the whole `el6_10` fetch +
   modernization is **skipped** on the primary path — its single most fragile step.
-- **Package set: per-OL, slim-aligned.** **OL6 through OL10 have all been
-  trimmed** to a container-appropriate, slim-aligned set: `@core` is dropped (so no
+- **Package set: per-OL, slim-aligned.** **OL5 through OL10** all converge on a
+  container-appropriate, slim-aligned set: `@core` is dropped (so no
   kernel/boot/firewall/cron/syslog), a minimal userland plus explicit test-base
   essentials are installed, `git-core` replaces `git` (avoiding ~60 `perl-*`
   packages), `net-tools` is omitted, and the Oracle EPEL repo is wired in but
@@ -1666,8 +1671,11 @@ Each builder tags every block with the environment it runs in:
   **OL6** — where `jq` is not in the base repo but is an EPEL package — from the
   **EPEL archive**, by enabling EPEL **transiently for that one install** in
   finalize (after the EPEL repo is configured); the shipped EPEL repo stays
-  `enabled=0`. **Package-locking is likewise a default:** the versionlock plugin
-  (`yum-plugin-versionlock` on OL6/OL7, `python3-dnf-plugin-versionlock` on
+  `enabled=0` (**OL5 omits `jq`** entirely — no EL5 `jq` build exists anywhere,
+  not even in the EPEL 5 archive). **Package-locking is likewise a default:** the
+  versionlock plugin
+  (`yum-versionlock` on OL5, `yum-plugin-versionlock` on OL6/OL7,
+  `python3-dnf-plugin-versionlock` on
   OL8–OL10) is an `INCLUDE` member on every clean-core, present in each OS's
   **standard** repo (OL6/OL7 `latest`, OL8–OL10 `baseos`) — so it is a plain
   `INCLUDE` add (no extra repo, unlike OL6 `jq`), and the base can hold/exclude
@@ -1710,6 +1718,34 @@ Each builder tags every block with the environment it runs in:
   installs it with its own `rpm` (EL6 `yum` cannot fetch a direct https package
   URL), and the repo is repointed to the archive and shipped `enabled=0`. EL6 is
   upstart, so `systemd` does not apply.
+- **EL5 specific (OL10 work-env model).** OL5 cannot fetch its own packages
+  (`openssl` 0.9.8e = TLS-1.0 vs. the TLS-1.2-only `yum.oracle.com`) and cannot be
+  built by a modern rpm (its rpmdb must stay db4.3). So `build-cleancore-ol5.sh`
+  uses **four** tagged environments rather than three: **[A] HOST** installs
+  nothing and only pulls the latest distributed `oraclelinux:10` image (floating
+  `:10`) over the **OCI registry v2 API with `curl`** (anonymous token → image
+  index → amd64 manifest → single ~94 MB layer; no container runtime) into a
+  throwaway **[W] OL10 work-env**; [W] does all TLS-1.2 work — fetch the OL5
+  metadata + RPMs, resolve the closure (**dnf first**, against an empty installroot
+  with `--releasever=5`; an embedded checksum-agnostic **Python resolver** is the
+  fallback, which EL5's directory-`provide` semantics force in practice, e.g.
+  `libxml2-python` requiring `/usr/lib64/python2.4`), and bootstrap the **[B]
+  EL5-native builder** (`rpm2cpio | cpio` from the OL5 RPMs). The HOST then does a
+  **single-level** EL5 `chroot` (no nesting) in which the EL5-native **`createrepo`
+  0.4.11** writes the sha1/gzip repodata EL5 `yum` 3.2.22 can read (OL10's
+  `createrepo_c` emits only sha256, which EL5 yum cannot checksum), and `yum
+  --installroot` installs the **[C] clean-core** from the `file://` mirror. EL5
+  `yum` has neither `--releasever` nor `--setopt`, so `tsflags=nodocs` is carried
+  in the builder's `yum.conf`; and because EL5 yum exits non-zero on a successful
+  `Complete!` under chroot, install success is gated on the rpmdb **package count**,
+  not the exit code. The sandbox egress-proxy CA is seeded into the OL10 work-env
+  trust store (a no-op on a real host). EL5 deltas vs. the others: **`git` and `jq`
+  are omitted** (no EL5 build of either — `git` is EPEL-only and pulls a `perl`
+  chain; `jq` has no EL5 build even in the EPEL 5 archive), versionlock is
+  `yum-versionlock`, the release package is `oraclelinux-release`, and `procps` /
+  `nc` (not `procps-ng` / `nmap-ncat`) plus `net-tools` (for `hostname`) mirror
+  OL6. OL5 ships no EPEL and needs no NSS CA dance (the install path is `file://`
+  only). EL5 is SysV-init, so `systemd` does not apply.
 - **Reference + SBOM artifacts.** The official slim image each clean-core derives
   from is documented (sources, pinned commit, name+version manifest) in
   `tests/cleancore/REFERENCE-oracle-official-images.md`. Each finalized

@@ -760,17 +760,30 @@ yum-rhn-plugin-0.9.1-50.0.1.el6.noarch
 zlib-1.2.3-29.el6.x86_64
 ```
 
-## Oracle Linux 5 (`oraclelinux:5` = `5.11`) — FEASIBILITY INVESTIGATION (build PROVEN)
+## Oracle Linux 5 (`oraclelinux:5` = `5.11`) — BUILDER SHIPPED (OL10 work-env model)
 
-> **Status: feasibility proven; no builder authored yet.** Unlike the OL6-OL10
-> sections (each documents a live `build-cleancore-ol<N>.sh`), this section records
-> a feasibility study for an OL5 clean-core. OL5 is EOL (the channels persist as
-> sustaining/archived), which is exactly its value: a faithful OL5 clean-core gives
-> a quasi-validation environment for the legacy OL5 systems still running in the
-> Japanese market. **Conclusion: an OL5 clean-core is feasible and was
-> proof-of-concept-verified in-sandbox**, by bootstrapping an EL5-native rpm from
-> the OL5 RPMs themselves and installing from a local mirror over `file://` - so it
-> needs neither GHCR nor any in-OS TLS.
+> **Status: builder shipped — `tests/cleancore/build-cleancore-ol5.sh`.** This
+> section began as a feasibility study and is retained as the investigation record;
+> the live builder now exists and was **end-to-end verified in-sandbox** (125
+> packages, self-test 15/0/1 PASSED; SBOM `cleancore-ol5.sbom.json`). OL5 is EOL
+> (the channels persist as sustaining/archived), which is exactly its value: a
+> faithful OL5 clean-core gives a quasi-validation environment for the legacy OL5
+> systems still running in the Japanese market.
+>
+> **The shipped builder does NOT use the GHCR `oraclelinux:5` image studied below.**
+> Because OL5's `openssl` 0.9.8e cannot reach the TLS-1.2-only `yum.oracle.com` and
+> its rpmdb must stay db4.3, the builder instead pulls the **latest distributed
+> `oraclelinux:10` image (floating `:10`)** over the OCI registry v2 API with `curl`
+> (no container runtime, no host package installs) and uses it as a throwaway **work
+> environment**: it does the TLS-1.2 fetch, resolves the closure (**dnf first**, with
+> an embedded Python resolver fallback that EL5's directory-`provide` semantics force
+> in practice), bootstraps an **EL5-native builder** (`rpm2cpio | cpio` from the OL5
+> RPMs), and the host then runs a single-level EL5 `chroot` where the EL5-native
+> **`createrepo` 0.4.11** writes sha1/gzip repodata (EL5 yum cannot checksum the
+> sha256 that OL10's `createrepo_c` emits) and `yum --installroot` installs from a
+> `file://` mirror — so it needs neither GHCR nor any in-OS TLS. See SPEC.md **B.8**
+> ("EL5 specific") and TESTING.md for the operational model. The image-availability
+> and base-facts investigation below remains accurate and is kept for reference.
 
 ### (1) Image availability (verified 2026-06-18)
 

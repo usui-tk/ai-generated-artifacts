@@ -123,7 +123,7 @@ if [ "${MODE}" = "one" ]; then
   TARGETS=("${ONLY_OL}")
 else
   # --all: every OL that has a build-cleancore-ol<N>.sh, ascending.
-  for n in 6 7 8 9 10; do
+  for n in 5 6 7 8 9 10; do
     if [ -f "$(builder_for "${n}")" ]; then TARGETS+=("${n}"); fi
   done
 fi
