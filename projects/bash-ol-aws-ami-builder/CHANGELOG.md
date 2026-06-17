@@ -355,6 +355,27 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **OL6 clean-core SBOM under-reported `jq` and its EL6 dependencies
+  (`tests/cleancore/cleancore-ol6.sbom.json`).** A real OL6 clean-core build
+  (the `6-slim` OL6.10 primary builder) was run and its deliverable `rpm -qa`
+  name set compared against the committed SBOM: the build installs **169**
+  packages but the SBOM listed **166**. The three missing names are `jq` plus
+  its EL6 runtime dependencies `libjq1` and `oniguruma`, which OL6 pulls in when
+  `jq` is installed transiently from the EPEL archive in finalize (SPEC B.8 — on
+  OL6 `jq` is an EPEL package, not a base-repo `INCLUDE` member, so it is sourced
+  outside the main transaction). The drift dates to the commit that added `jq` to
+  every clean-core builder (`install jq in every OL clean-core builder`): the
+  SBOMs were not refreshed for it, and the later `versionlock` `+1` (165->166)
+  carried the omission forward. Corrected the drifted fields **names-only**:
+  added `jq`, `libjq1`, `oniguruma` in sorted position and bumped
+  `package_count` **166 -> 169**; `versions_included` stays `false`. The SBOM is a
+  static, hand-refreshed snapshot (not a `.sh`, so outside B-T1/B-T2 and not a
+  gated artifact), the builders are not run by `run-all.sh`, and no `.sh` changed,
+  so the suite is unchanged at **386/0/0**. NOTE: the same `jq` omission very
+  likely affects the OL7-OL10 SBOMs (the adding commit touched every builder), but
+  those clean-cores were not rebuilt this session, so their SBOMs are left
+  unchanged pending their own real builds (ground-truth over inference).
+
 - **`TESTING.md` drift corrected to the live suite (`TESTING.md`).** The "Running
   the suite" headline still claimed **206 passed / 1 skipped** with an 11-tier
   breakdown, and the coverage ledger stopped at `t012`. Updated to the verified live
