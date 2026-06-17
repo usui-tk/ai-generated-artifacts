@@ -269,6 +269,21 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **Intermittent suite false-negative eliminated: `assert_match` no longer trips a
+  SIGPIPE-under-`pipefail` race (`tests/lib/assert.sh`).** `assert_match` matched
+  with `printf '%s' "$1" | grep -Eq -- "$2"`. `grep -q` exits at the first match
+  and closes its stdin; on a large haystack (e.g. the ~28 KB `install-ena-driver.sh`
+  read whole by `tests/t10_enaukedetect.sh`) the upstream `printf` is still writing
+  and takes SIGPIPE, exiting 141. Under the tiers' `set -o pipefail` that 141 became
+  the pipeline status, so a genuine match was reported as "no match" -- a
+  load-dependent flake (~1/12-1/17 in the full suite, ~0 in isolation) that surfaced
+  on a *different* assertion each time as the early match landed at a different file
+  offset. The matcher now feeds the haystack via a here-string
+  (`grep -Eq -- "$2" <<<"$1"`): no upstream writer process exists, so the command
+  status is grep's alone and the race cannot occur. Verified: 0 flakes in 26 full-suite
+  runs (was 2/25 + 1/12); suite pass count unchanged. (`t11`/`t12` had previously
+  worked around the *symptom* with file-direct greps; the source is now fixed.)
+
 - **ENA build-test verdict reason no longer hardcodes "EL6" for every OS.** The
   `ena_buildtest_verdict()` failure message in `install-ena-driver.sh` attributed a
   failed build to "the EL6 dkms exit 0" masking -- but the function is OS-agnostic

@@ -46,8 +46,18 @@ assert_eq() {
 }
 
 # assert_match STRING EXTENDED_REGEX MESSAGE
+#
+# The haystack is fed to grep via a here-string, NOT `printf '%s' "$1" | grep`.
+# Rationale (race fix): `grep -q` exits at the first match and closes its stdin;
+# with a large haystack the upstream `printf` may still be writing, takes SIGPIPE,
+# and exits 141. Under the tiers' `set -o pipefail` that 141 becomes the pipeline
+# status, so a genuine match is misread as "no match" -- an intermittent,
+# load-dependent false negative (most visible on the big install-*.sh haystacks,
+# e.g. t10). A here-string has no upstream writer process in the pipeline, so the
+# command status is grep's alone and the race cannot occur. (`<<<` appends a
+# trailing newline, which is harmless for these line-anchored EREs.)
 assert_match() {
-  if printf '%s' "$1" | grep -Eq -- "$2"; then
+  if grep -Eq -- "$2" <<<"$1"; then
     t_pass "$3"
   else
     t_fail "$3 (no match for /$2/)"
