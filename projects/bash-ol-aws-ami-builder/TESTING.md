@@ -229,6 +229,13 @@ repo (a plain `INCLUDE` member), and on OL6 — where `jq` is an EPEL package an
 absent from the base — it is installed from that EPEL archive by enabling EPEL
 **transiently for the one install**, leaving the shipped EPEL `enabled=0`. The
 unconditional self-test asserts `jq --version` runs in the finalized image.
+The **versionlock plugin** (`yum-plugin-versionlock` on OL6/OL7,
+`python3-dnf-plugin-versionlock` on OL8–OL10) is likewise a default `INCLUDE`
+member on every clean-core — present in each OS's standard repo (OL6/OL7
+`latest`, OL8–OL10 `baseos`), so it is a plain add with no extra repo — giving the
+base package-pinning out of the box (parallel to `install-awscli.sh`'s versionlock
+v1 block). Its only dependency is already in the base set, so it is a clean `+1`
+to each SBOM.
 Two static snapshots accompany the base: `cleancore-ol<MAJOR>.sbom.json` (each
 finalized image's package set, names-only, reusable JSON) and
 `REFERENCE-oracle-official-images.md` (the official slim images' sources, pinned

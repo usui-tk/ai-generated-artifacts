@@ -6,7 +6,7 @@
   "image": "cleancore-ol6",
   "generated_by": "tests/cleancore/build-cleancore-ol6.sh",
   "versions_included": false,
-  "package_count": 165,
+  "package_count": 166,
   "packages": [
     "MAKEDEV",
     "audit-libs",
@@ -170,6 +170,7 @@
     "xz-libs",
     "yum",
     "yum-metadata-parser",
+    "yum-plugin-versionlock",
     "yum-utils",
     "zip",
     "zlib"

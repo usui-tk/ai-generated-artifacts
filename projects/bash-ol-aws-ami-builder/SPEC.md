@@ -1632,7 +1632,16 @@ Each builder tags every block with the environment it runs in:
   **OL6** — where `jq` is not in the base repo but is an EPEL package — from the
   **EPEL archive**, by enabling EPEL **transiently for that one install** in
   finalize (after the EPEL repo is configured); the shipped EPEL repo stays
-  `enabled=0`. `systemd` is present (a hard dependency of full `dnf` on EL8/EL10, with
+  `enabled=0`. **Package-locking is likewise a default:** the versionlock plugin
+  (`yum-plugin-versionlock` on OL6/OL7, `python3-dnf-plugin-versionlock` on
+  OL8–OL10) is an `INCLUDE` member on every clean-core, present in each OS's
+  **standard** repo (OL6/OL7 `latest`, OL8–OL10 `baseos`) — so it is a plain
+  `INCLUDE` add (no extra repo, unlike OL6 `jq`), and the base can hold/exclude
+  packages out of the box, parallel to the install-test/production versionlock
+  usage (e.g. `install-awscli.sh`'s v1 block). Its only named dependency is already
+  in the base set (`yum` on OL6/OL7; `python3-dnf-plugins-core` on OL8–OL10), so it
+  is a clean `+1` to each clean-core SBOM (the authoritative count is re-confirmed
+  on the next clean-core rebuild). `systemd` is present (a hard dependency of full `dnf` on EL8/EL10, with
   `pam`/`sudo`; pulled transitively by `iputils`/`procps-ng` on EL7) but in
   container/chroot use it is never PID 1. **EL8 specific:** a raw `dnf` with no
   langpack selection defaults to `glibc-all-langpacks` (~416 MB of world locales),

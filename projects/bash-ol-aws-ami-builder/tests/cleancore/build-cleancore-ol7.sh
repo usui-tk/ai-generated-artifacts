@@ -73,7 +73,9 @@ REPO_UEKR6="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/UEKR6/x86_64/"
 # chroot use it is never PID 1. NOTE (EL7-specific): the base oraclelinux-release
 # (which provides /etc/oracle-release) must be listed explicitly -- unlike EL8-EL10,
 # the EL7 oraclelinux-release-el7 repo-config package does NOT pull it in.
-INCLUDE=( yum oraclelinux-release oraclelinux-release-el7 oracle-epel-release-el7 yum-utils
+# yum-plugin-versionlock (default; in OL7/latest): package-pinning plugin so the
+# base can hold/exclude packages -- parallels install-awscli.sh's versionlock v1-block.
+INCLUDE=( yum oraclelinux-release oraclelinux-release-el7 oracle-epel-release-el7 yum-utils yum-plugin-versionlock
   curl wget git jq bzip2 unzip zip
   sudo which tar diffutils less findutils procps-ng psmisc hostname vim-minimal
   iproute iputils bind-utils traceroute nmap-ncat tcpdump )

@@ -21,6 +21,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **versionlock plugin in the clean-core default package set (OL6-OL10).** The
+  package-pinning plugin is now a default `INCLUDE` member of every clean-core
+  test-base builder: `yum-plugin-versionlock` on OL6/OL7 and
+  `python3-dnf-plugin-versionlock` on OL8/OL9/OL10. Repository survey: the package
+  is in each OS's **standard** repo already enabled by the builder (OL6/OL7
+  `latest`, OL8-OL10 `baseos`), so it is a plain `INCLUDE` add with **no extra
+  repo** (unlike OL6 `jq`) — including on OL6, the version of concern. This gives
+  the base package-hold/exclude capability out of the box, parallel to the
+  install-test/production versionlock usage (e.g. `install-awscli.sh`'s v1 block).
+  The plugin's only named dependency is already in the base set (`yum` on OL6/OL7;
+  `python3-dnf-plugins-core` on OL8-OL10), so each `cleancore-ol<N>.sbom.json` is
+  a clean `+1` (OL6 165->166, OL7 198->199, OL8 206->207, OL9 186->187, OL10
+  177->178); the authoritative package set is re-confirmed on the next clean-core
+  rebuild. Docs: SPEC.md (B.1 clean-core package set) + TESTING.md. The builders
+  are not run by `run-all.sh` (root + network + multi-hundred-MB build), so the
+  suite is unchanged at 361/0/0.
+
 - **AWS CLI v2 install+run test matrix (install-test tooling; `tests/awscli/`).**
   New `install-awscli.sh` (modes: production / `AWSCLI_INSTALLTEST=1`) plus
   `tests/awscli/run-awscli-installtest-matrix.sh`,

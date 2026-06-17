@@ -71,7 +71,9 @@ REPO_APPSTREAM="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/appstream/x
 # net-tools is omitted (iproute/iputils cover it); the Oracle EPEL repo is wired in
 # but shipped disabled (finalized below) so DKMS/ENA tooling can enable it on demand.
 INCLUDE=( dnf oraclelinux-release-el10 oracle-epel-release-el10
-  dnf-plugins-core yum-utils
+  # python3-dnf-plugin-versionlock (default; in OL10 baseos): package-pinning plugin
+  # so the base can hold/exclude packages -- parallels install-awscli.sh's v1-block.
+  dnf-plugins-core python3-dnf-plugin-versionlock yum-utils
   curl wget git-core git-lfs jq bzip2 unzip zip zstd
   sudo which tar diffutils less findutils procps-ng psmisc hostname vim-minimal
   iproute iputils bind-utils traceroute nmap-ncat tcpdump )

@@ -6,7 +6,7 @@
   "image": "cleancore-ol7",
   "generated_by": "tests/cleancore/build-cleancore-ol7.sh",
   "versions_included": false,
-  "package_count": 198,
+  "package_count": 199,
   "packages": [
     "GeoIP",
     "acl",
@@ -203,6 +203,7 @@
     "xz-libs",
     "yum",
     "yum-metadata-parser",
+    "yum-plugin-versionlock",
     "yum-utils",
     "zip",
     "zlib"

@@ -6,7 +6,7 @@
   "image": "cleancore-ol8",
   "generated_by": "tests/cleancore/build-cleancore-ol8.sh",
   "versions_included": false,
-  "package_count": 206,
+  "package_count": 207,
   "packages": [
     "acl",
     "audit-libs",
@@ -173,6 +173,7 @@
     "python3-dateutil",
     "python3-dbus",
     "python3-dnf",
+    "python3-dnf-plugin-versionlock",
     "python3-dnf-plugins-core",
     "python3-gpg",
     "python3-hawkey",

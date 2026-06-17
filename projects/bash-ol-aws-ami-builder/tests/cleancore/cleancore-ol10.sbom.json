@@ -6,7 +6,7 @@
   "image": "cleancore-ol10",
   "generated_by": "tests/cleancore/build-cleancore-ol10.sh",
   "versions_included": false,
-  "package_count": 177,
+  "package_count": 178,
   "packages": [
     "alternatives",
     "attr",
@@ -146,6 +146,7 @@
     "python3-dateutil",
     "python3-dbus",
     "python3-dnf",
+    "python3-dnf-plugin-versionlock",
     "python3-dnf-plugins-core",
     "python3-hawkey",
     "python3-libcomps",

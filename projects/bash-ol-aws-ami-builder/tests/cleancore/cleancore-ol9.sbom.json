@@ -6,7 +6,7 @@
   "image": "cleancore-ol9",
   "generated_by": "tests/cleancore/build-cleancore-ol9.sh",
   "versions_included": false,
-  "package_count": 186,
+  "package_count": 187,
   "packages": [
     "alternatives",
     "attr",
@@ -155,6 +155,7 @@
     "python3-dateutil",
     "python3-dbus",
     "python3-dnf",
+    "python3-dnf-plugin-versionlock",
     "python3-dnf-plugins-core",
     "python3-gpg",
     "python3-hawkey",

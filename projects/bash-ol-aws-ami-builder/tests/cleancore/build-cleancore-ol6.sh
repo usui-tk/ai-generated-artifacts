@@ -101,7 +101,9 @@ TLS_PKGS=( nspr nss nss-util nss-softokn nss-softokn-freebl nss-sysinit
 # oraclelinux-release-el6. net-tools IS included (the one deliberate deviation
 # from OL7's no-net-tools): EL6 has no standalone hostname package, so the
 # hostname command ships in net-tools.
-INCLUDE=( yum oraclelinux-release oraclelinux-release-el6 yum-utils
+# yum-plugin-versionlock (default; in OL6/latest): package-pinning plugin so the
+# base can hold/exclude packages -- parallels install-awscli.sh's versionlock v1-block.
+INCLUDE=( yum oraclelinux-release oraclelinux-release-el6 yum-utils yum-plugin-versionlock
   curl wget git bzip2 unzip zip
   sudo which tar diffutils less findutils procps psmisc net-tools vim-minimal
   iproute iputils bind-utils traceroute nc tcpdump )
