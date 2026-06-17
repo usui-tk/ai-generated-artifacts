@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t13_enaledgerguard.sh - ENA matrix ledger writer: version-mismatch guard
+# tests/t013_enaledgerguard.sh - ENA matrix ledger writer: version-mismatch guard
 #                               (layer L1, defense-in-depth for the false-ok bug)
 #
 # The matrix records install-ena-driver.sh's [result] verbatim. Even with the
-# installer hardened (t12), the ledger keeps an INDEPENDENT guard: an "ok" whose
+# installer hardened (t012), the ledger keeps an INDEPENDENT guard: an "ok" whose
 # installed ko_version does not match the requested ena_version (e.g. a stale
 # installer that fell back to the stock in-tree ena.ko 1.1.2) is downgraded to
 # "fail" before it can enter the ledger -- otherwise it would poison the report

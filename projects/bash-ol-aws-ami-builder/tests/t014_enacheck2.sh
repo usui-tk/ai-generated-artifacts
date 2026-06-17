@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t14_enacheck2.sh - Phase 6 CHECK 2 self-build provenance verdict
+# tests/t014_enacheck2.sh - Phase 6 CHECK 2 self-build provenance verdict
 #                          (layer L0/L1, pure unit; defense-in-depth Layer 3)
 #
 # CHECK 2 (offline image inspection, B-T7) passed on mere ENA module presence,

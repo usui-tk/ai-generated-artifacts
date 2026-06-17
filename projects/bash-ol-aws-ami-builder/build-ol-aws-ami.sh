@@ -311,7 +311,7 @@ normalize_imds_support() {
   #             IMDSv2-required (HttpTokens=required). OL7+ only.
   # Reads and normalises the IMDS_SUPPORT global, rejects unsupported values and
   # the OL6 + IMDSv2-only combination. Behaviour-identical to the former inline
-  # block in load_env (extracted so it can be unit tested - see tests/t3_unit.sh).
+  # block in load_env (extracted so it can be unit tested - see tests/t003_unit.sh).
   : "${IMDS_SUPPORT:=default}"
   IMDS_SUPPORT="${IMDS_SUPPORT,,}"
   case "${IMDS_SUPPORT}" in
@@ -3592,7 +3592,7 @@ main() {
 }
 
 # Run the pipeline only when executed directly. When the script is sourced
-# (e.g. by the B-T3 unit tests in tests/t3_unit.sh) this guard keeps main from
+# (e.g. by the B-T3 unit tests in tests/t003_unit.sh) this guard keeps main from
 # running, so individual functions can be exercised without side effects.
 # Behaviour when executed directly is unchanged.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then

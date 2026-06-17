@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t1_parse.sh - B-T1 Parse (test pyramid layer L0, static)
+# tests/t001_parse.sh - B-T1 Parse (test pyramid layer L0, static)
 #
 # (1) `bash -n` every .sh in the project (main wrapper + siblings + the test
 #     harness itself, dogfooded).

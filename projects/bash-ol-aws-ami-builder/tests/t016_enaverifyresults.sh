@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t16_enaverifyresults.sh - external build-result verifier verdicts
+# tests/t016_enaverifyresults.sh - external build-result verifier verdicts
 #                                  (pure unit; layer L4a/L4b logic)
 #
 # tests/ena/verify-ena-buildresults.sh is a standalone, READ-ONLY verifier: it

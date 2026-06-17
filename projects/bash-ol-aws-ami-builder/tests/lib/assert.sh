@@ -53,7 +53,7 @@ assert_eq() {
 # and exits 141. Under the tiers' `set -o pipefail` that 141 becomes the pipeline
 # status, so a genuine match is misread as "no match" -- an intermittent,
 # load-dependent false negative (most visible on the big install-*.sh haystacks,
-# e.g. t10). A here-string has no upstream writer process in the pipeline, so the
+# e.g. t010). A here-string has no upstream writer process in the pipeline, so the
 # command status is grep's alone and the race cannot occur. (`<<<` appends a
 # trailing newline, which is harmless for these line-anchored EREs.)
 assert_match() {

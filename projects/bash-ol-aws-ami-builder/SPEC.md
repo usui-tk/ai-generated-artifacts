@@ -725,7 +725,7 @@ all inert.
   failed and only the stock module remains) it is a **fatal `status:fail`**, not
   a false `ok`. This applies in production too: a non-building pin aborts the AMI
   build rather than silently shipping the stock driver. (Pure verdict logic:
-  `ena_buildtest_verdict`, unit-tested by `tests/t15_enaverify.sh`.)
+  `ena_buildtest_verdict`, unit-tested by `tests/t015_enaverify.sh`.)
 
 Validated end-to-end (the driver actually compiles, installs, and verifies) on
 OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`), OL7 (`ena.ko.xz` 2.17.0g,
@@ -1735,7 +1735,7 @@ the dedup state):
   match the requested `ena_version` (the build did not produce the requested
   module — e.g. an older installer that fell back to the stock in-tree `ena.ko`),
   so a masked build failure cannot enter the ledger as `ok` and silence the
-  dedup gate. (Tested by `tests/t13_enaledgerguard.sh`.)
+  dedup gate. (Tested by `tests/t013_enaledgerguard.sh`.)
 - **`RESULTS-ol<N>.md`** — a per-OS human report regenerated from the ledger,
   **newest kernel first** and opening with a `## Latest kernel <kver>` summary of
   the ENA versions that build on the newest kernel tested (so the latest result
@@ -1840,7 +1840,7 @@ runs, against that kver:
 `load_ready` is decided by the gates only; a **missing bundle artifact for an ok
 row is a fail** (load_ready unknown), never a silent skip — the same no-false-ok
 discipline as the install-time verify. The verdict logic is pure and unit-tested
-(`tests/t16_enaverifyresults.sh`).
+(`tests/t016_enaverifyresults.sh`).
 
 The build side emits this bundle. `run-ena-buildtest-matrix.sh` preserves, after
 each build (a dumb `cp` — no load-readiness judgement, no branch on the build's
@@ -1854,7 +1854,7 @@ and accumulates exactly like the ledger: per-version `ena.ko` added, shared
 per-kver files overwritten idempotently. A failed build leaves no DKMS module to
 copy, so the producer never fabricates one — the verifier flags the gap itself.
 The `cp` layout is contract-tested against the verifier's read-paths by
-`tests/t17_enabundle.sh` (no real build needed).
+`tests/t017_enabundle.sh` (no real build needed).
 
 ---
 
@@ -1909,7 +1909,7 @@ go.mod fetch status -- `404` is a pre-go-modules tag with no go.mod, distinct fr
 a `200` carrying no `go` line), and the `min_kernel` proxy; the ledger likewise
 stores `min_kernel` per entry. The proxy mapping (`go_min_kernel`) is one logic,
 reuse-by-copy in `list-ssm-releases.sh` and the matrix, kept in lock-step by
-`tests/t18_ssmverdict.sh`. go.mod is the source of truth (the spec's
+`tests/t018_ssmverdict.sh`. go.mod is the source of truth (the spec's
 `BuildRequires: golang` is stale). A faithful kernel verdict needs a
 kernel-matched runner or a
 real instance. (Empirically, even the latest's `go 1.25` floor of Linux 3.2 is
@@ -1945,7 +1945,7 @@ version list + per-version RPM availability + the go.mod fields `go_version`,
 `go_version_available`, `go_mod_http_status`, and the `min_kernel` proxy);
 `tests/ssm/run-ssm-installtest-matrix.sh` (the matrix). The pure verdict/proxy/
 filter logic (`ssm_ge`, `go_min_kernel`, `ssm_in_scope`, `ssm_compliance`) is
-unit-tested by `tests/t18_ssmverdict.sh` (no container/network). The release list
+unit-tested by `tests/t018_ssmverdict.sh` (no container/network). The release list
 (`ssm-agent-releases.json`, the deterministic matrix INPUT) and the ledger
 (`ssm-installtest-ledger.json`) + `RESULTS-ol{6,7,8,9,10}.md` ARE committed: the
 release list is the full upstream snapshot (206 versions, RPM availability, go.mod
@@ -2141,7 +2141,7 @@ EOL/EOS**, then per kver a verdict (`current` / `capped at <ver>` / `none`) and 
 per-version table carrying `bundled_python`, `python_eol`, and `compat_min_glibc
 (measured / heuristic)`. The pure verdict/lifecycle logic (`awscli_ge`,
 `awscli_min_glibc`, `awscli_in_scope`, `awscli_verdict`, `python_eol`) is
-unit-tested host-only by `tests/t19_awscliverdict.sh`, which also locks the
+unit-tested host-only by `tests/t019_awscliverdict.sh`, which also locks the
 reuse-by-copy `awscli_min_glibc` in `list-awscli-releases.sh` to the matrix. The
 release list (`awscli-releases.json`), ledger (`awscli-installtest-ledger.json`)
 and `RESULTS-ol{6,7,8}.md` are produced by a real maintainer-env matrix run /
@@ -2989,7 +2989,7 @@ on mere presence when a self-build was performed: if `ENA_BUILD_VERSION` is set
 stock driver instead of the requested pin -- a **`FAIL`**. When no self-build was
 requested (`--skip-ena-driver`, OL8+ in-distro, OL9+) the stock module is the
 expected outcome and still passes. The verdict is the pure `_ena_check2_ok`
-(unit-tested by `tests/t14_enacheck2.sh`). With `install-ena-driver.sh` now
+(unit-tested by `tests/t014_enacheck2.sh`). With `install-ena-driver.sh` now
 aborting on a failed build (it requires the installed module version to match the
 request), this image check is a guard for manual builds / other installers /
 future regressions rather than the primary gate.
@@ -3184,7 +3184,7 @@ applied. This was confirmed on a launched OL6 instance: `90_ol.cfg` still carrie
 `name: cloud-user`, and `ec2-user` did not exist (`id: ec2-user: No such user`).
 Verified locally that the wrapped `cloud_init` runs the original then the hook,
 and the hook applies both edits against real-shaped `cloud.cfg`/`90_ol.cfg`
-(idempotent). A host-runnable regression tier (B-T9, `tests/t8_hooktiming.sh`)
+(idempotent). A host-runnable regression tier (B-T9, `tests/t008_hooktiming.sh`)
 guards this: it asserts the injection wraps `cloud::cloud_init` and emits no
 top-level `sh <hook>`, and behaviourally that the hook fires after `cloud_init`.
 

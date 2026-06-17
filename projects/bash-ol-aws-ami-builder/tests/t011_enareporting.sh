@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t11_enareporting.sh - ENA reporting / AMI identification / pin-log
+# tests/t011_enareporting.sh - ENA reporting / AMI identification / pin-log
 #                             accuracy (layer L1/L2, structural + behavioural)
 #
 # Guards the OL7/OL8 E2E-feedback changes:

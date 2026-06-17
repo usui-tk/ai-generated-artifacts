@@ -99,7 +99,7 @@ hr()   { log "================================================================";
 pin_for() { case "$1" in 6) echo 3.0.1479.0 ;; 7|8|9|10) echo 3.3.3598.0 ;; *) echo "" ;; esac; }
 
 # ===========================================================================
-# Pure helpers (no I/O) -- unit-tested by tests/t18_ssmverdict.sh. Keep each a
+# Pure helpers (no I/O) -- unit-tested by tests/t018_ssmverdict.sh. Keep each a
 # column-0 function from its definition line to the first column-0 '}'.
 # ===========================================================================
 

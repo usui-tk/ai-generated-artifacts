@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t18_ssmverdict.sh - SSM install-test matrix pure logic (no real run)
+# tests/t018_ssmverdict.sh - SSM install-test matrix pure logic (no real run)
 #
 # tests/ssm/run-ssm-installtest-matrix.sh determines which SSM Agent versions
 # install+run per OL and evaluates them against the AWS minimum (>= 3.3.3598.0).

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t3_unit.sh - B-T3 pure-function unit (test pyramid layer L1, hermetic)
+# tests/t003_unit.sh - B-T3 pure-function unit (test pyramid layer L1, hermetic)
 #
 # Source the wrapper (its tail `main` is guarded, so sourcing has no side
 # effects) and exercise pure functions in isolated subshells. Dependency classes

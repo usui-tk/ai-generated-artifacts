@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t4_cmdmock.sh - command-mock unit tier (test pyramid layer L1, hermetic)
+# tests/t004_cmdmock.sh - command-mock unit tier (test pyramid layer L1, hermetic)
 #
 # Demonstrates dependency class "external commands" (Axis 2): functions that
 # branch on an external command are driven with PATH-shadow mocks, and the

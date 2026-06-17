@@ -120,7 +120,7 @@ probe_gomod() {
 # Map a go.mod `go` directive (e.g. 1.24) to the Go toolchain's published MINIMUM
 # Linux kernel (the kernel-axis proxy). REUSE-BY-COPY of go_min_kernel() in
 # tests/ssm/run-ssm-installtest-matrix.sh -- keep the two identical (the shared
-# logic is exercised by tests/t18_ssmverdict.sh). Empty -> "unknown".
+# logic is exercised by tests/t018_ssmverdict.sh). Empty -> "unknown".
 go_min_kernel() {
   local gov="${1:-}" maj min
   [ -n "${gov}" ] || { printf 'unknown'; return 0; }

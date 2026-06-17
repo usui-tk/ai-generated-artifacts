@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t7_idempotency.sh - B-T6 idempotency-guard presence (layer L2, structural)
+# tests/t007_idempotency.sh - B-T6 idempotency-guard presence (layer L2, structural)
 #
 # The wrapper patches upstream files by injecting marker-bracketed blocks
 # ([ol-aws-ami-builder PATCH <id>]). Each such injection must be fronted by a

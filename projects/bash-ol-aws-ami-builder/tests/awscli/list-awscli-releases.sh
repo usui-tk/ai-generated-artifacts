@@ -32,7 +32,7 @@
 # (2024-09-16), versions >= 2.17.50 are manylinux2014 (glibc 2.17), and <= 2.17.49
 # the older manylinux1 floor (2.5). Computed locally (no per-version download) by
 # awscli_min_glibc() below -- a REUSE-BY-COPY of the same helper in
-# run-awscli-installtest-matrix.sh (kept identical; verified by t19_awscliverdict.sh).
+# run-awscli-installtest-matrix.sh (kept identical; verified by t019_awscliverdict.sh).
 #
 # DETERMINISTIC OUTPUT. No timestamp embedded: re-running changes the file ONLY
 # when the upstream tag set (or a zip's availability) changes, so `git diff` after
@@ -84,7 +84,7 @@ url_check_status() {
 # --- end reuse-by-copy block -------------------------------------------------
 
 # awscli_ge <a> <b> : dotted-numeric compare (REUSE-BY-COPY of the matrix helper;
-# kept identical -- verified by tests/t19_awscliverdict.sh).
+# kept identical -- verified by tests/t019_awscliverdict.sh).
 awscli_ge() {
   local a="$1" b="$2" hi
   [ "${a}" = "${b}" ] && return 0
@@ -93,7 +93,7 @@ awscli_ge() {
 }
 
 # awscli_min_glibc <version> : documented manylinux floor (REUSE-BY-COPY of the
-# matrix helper; kept identical -- verified by tests/t19_awscliverdict.sh).
+# matrix helper; kept identical -- verified by tests/t019_awscliverdict.sh).
 awscli_min_glibc() {
   local v="${1:-}"
   [ -n "${v}" ] || { printf 'unknown'; return 0; }

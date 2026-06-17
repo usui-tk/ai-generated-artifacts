@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t19_awscliverdict.sh - AWS CLI v2 install-test matrix pure logic (no real run)
+# tests/t019_awscliverdict.sh - AWS CLI v2 install-test matrix pure logic (no real run)
 #
 # tests/awscli/run-awscli-installtest-matrix.sh determines which AWS CLI v2
 # versions install+run per OL and evaluates them on the glibc axis. This tier

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t6_envparity.sh - B-T5 env-template parity (test pyramid layer L2)
+# tests/t006_envparity.sh - B-T5 env-template parity (test pyramid layer L2)
 #
 # Static/data-driven checks over env.properties.aws-olN. The five templates
 # share a common-core key set; only OL6/OL7 carry the documented extra UEK keys

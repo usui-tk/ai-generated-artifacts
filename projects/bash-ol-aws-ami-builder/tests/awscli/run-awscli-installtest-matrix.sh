@@ -89,7 +89,7 @@ hr()   { log "================================================================";
 pin_for() { case "$1" in 6|7|8) echo 2.17.49 ;; *) echo "" ;; esac; }
 
 # ===========================================================================
-# Pure helpers (no I/O) -- unit-tested by tests/t19_awscliverdict.sh. Keep each a
+# Pure helpers (no I/O) -- unit-tested by tests/t019_awscliverdict.sh. Keep each a
 # column-0 function from its definition line to the first column-0 '}'.
 # ===========================================================================
 

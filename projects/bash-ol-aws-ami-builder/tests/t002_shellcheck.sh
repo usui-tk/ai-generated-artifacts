@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t2_shellcheck.sh - B-T2 ShellCheck (test pyramid layer L0, static)
+# tests/t002_shellcheck.sh - B-T2 ShellCheck (test pyramid layer L0, static)
 #
 # Deterministic lint gate: run ShellCheck at the CANONICAL severity `style`
 # (the strictest level) over every .sh, honouring the checked-in .shellcheckrc

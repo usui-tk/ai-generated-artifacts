@@ -25,7 +25,7 @@ This CHANGELOG is **English only** per the repository-wide
   New `install-awscli.sh` (modes: production / `AWSCLI_INSTALLTEST=1`) plus
   `tests/awscli/run-awscli-installtest-matrix.sh`,
   `tests/awscli/list-awscli-releases.sh`, and the pure-logic tier
-  `tests/t19_awscliverdict.sh`. The matrix characterizes, per **OL6/OL7/OL8**,
+  `tests/t019_awscliverdict.sh`. The matrix characterizes, per **OL6/OL7/OL8**,
   which AWS CLI v2 versions install AND run on the **glibc** axis: v2 bundles its
   own Python built against a manylinux glibc, so the OS glibc gates install/run
   (OL6 glibc 2.12 caps at v2 `<= 2.17.49`; OL7/OL8 run current). Each ledger entry
@@ -39,7 +39,7 @@ This CHANGELOG is **English only** per the repository-wide
   frozen-bundled-Python lifecycle risk (the bundle's Python is not independently
   patchable; a glibc-capped OS caps the Python too). The v1 OL-repo `awscli` is
   blocked in the production path via versionlock. Suite **310 -> 361** (19 tiers;
-  new `t19` = 43 asserts, B-T1 47 / B-T2 42). The release list / ledger / RESULTS
+  new `t019` = 43 asserts, B-T1 47 / B-T2 42). The release list / ledger / RESULTS
   are produced by a real maintainer-env run (NOT committed from this authoring
   environment). Production integration into `build-ol-aws-ami.sh` is deferred,
   mirroring SSM.
@@ -60,7 +60,7 @@ This CHANGELOG is **English only** per the repository-wide
   suffix. The hook is **non-fatal** (unlike the Nitro-critical ENA hook): the SSM
   Agent is management tooling, so a transient fetch failure warns and lets
   provisioning continue. The in-guest RPM fetch uses a plain `curl -fsSL` (the same
-  TLS model as the ENA hook). New PATCH marker count is pinned at 8 (`t7`). SPEC
+  TLS model as the ENA hook). New PATCH marker count is pinned at 8 (`t007`). SPEC
   B.11 + the B.4 marker table + README pair documented. **Validation:** OL6-OL8
   install+run is matrix-verified and OL6/OL7 boot-validated on Nitro; OL9/OL10
   install+run is matrix-verified but the SSM-enabled AMI is not yet boot-validated
@@ -103,7 +103,7 @@ This CHANGELOG is **English only** per the repository-wide
   axis is faithful in a container; the kernel axis is not (`kver` is the runner's
   kernel), so the go.mod-derived proxy is the static kernel-axis signal and a
   faithful kernel verdict needs a kernel-matched runner / real instance. The pure
-  verdict/proxy/filter logic is unit-tested by the new `tests/t18_ssmverdict.sh`
+  verdict/proxy/filter logic is unit-tested by the new `tests/t018_ssmverdict.sh`
   (23 cases, host-only — no container/network). Manual / on-demand (NOT a
   `run-all.sh` tier); the ledger + RESULTS are generated on the first real run
   (not committed); production integration into `build-ol-aws-ami.sh` is deferred.
@@ -124,7 +124,7 @@ This CHANGELOG is **English only** per the repository-wide
   (per-version module added, shared per-kver files overwritten idempotently); a
   failed build leaves no DKMS module to copy, so none is fabricated (the verifier
   flags a missing ok-row artifact itself). The `cp` layout is contract-tested
-  against the verifier's read-paths by the new `tests/t17_enabundle.sh` (13 cases,
+  against the verifier's read-paths by the new `tests/t017_enabundle.sh` (13 cases,
   a host-only unit test over a fabricated image tree -- no real build/kernel/kmod).
   SPEC B.9 and TESTING updated. End-to-end against a real matrix run remains the
   user's-env / CI step.
@@ -141,7 +141,7 @@ This CHANGELOG is **English only** per the repository-wide
   inclusion is informational (DKMS/dracut territory; ena-absent is not a
   defect); L5 real load is skipped (needs real Nitro, B-T8). A missing bundle
   artifact for an ok row is a fail, never a silent skip. The pure verdict logic
-  is unit-tested by `tests/t16_enaverifyresults.sh` (15 cases). Module
+  is unit-tested by `tests/t016_enaverifyresults.sh` (15 cases). Module
   integration stays delegated to DKMS; no judgement is added to the build script.
 
 ### Changed
@@ -222,7 +222,7 @@ This CHANGELOG is **English only** per the repository-wide
   (previously derived only at report time), so the (Go, kernel) relationship is
   legible without running code. The `go_min_kernel` mapping is one logic,
   reuse-by-copy in the lister and the matrix, kept in lock-step by a new
-  `tests/t18_ssmverdict.sh` consistency check (t18: 23 -> 32 cases). The committed
+  `tests/t018_ssmverdict.sh` consistency check (t018: 23 -> 32 cases). The committed
   `ssm-agent-releases.json` and sample `ssm-installtest-ledger.json` + `RESULTS-ol6.md`
   were regenerated with the new fields. SPEC B.10 + TESTING updated.
 
@@ -273,9 +273,9 @@ This CHANGELOG is **English only** per the repository-wide
   is unchanged. SPEC B.10 + TESTING updated to describe the real run.
   Tooling-doc only (dev/CI evidence); the AMI build path is unchanged.
 
-- **Test tier rename: `tests/t12_enaverify.sh` -> `tests/t15_enaverify.sh`
+- **Test tier rename: `tests/t12_enaverify.sh` -> `tests/t015_enaverify.sh`
   (resolve a tier-number collision).** The ENA self-build verify tier was
-  introduced as `t12_*` alongside the pre-existing `tests/t12_buildvisibility.sh`
+  introduced as `t12_*` alongside the pre-existing `tests/t012_buildvisibility.sh`
   -- two `t12_*` tiers. Both ran (the runner globs `tests/t[0-9]*.sh`), so the
   suite was correct, but the duplicate number bent the "tiers named by execution
   order" convention. Renamed to the next free number; no logic change (still 12
@@ -294,18 +294,18 @@ This CHANGELOG is **English only** per the repository-wide
 
 - **`TESTING.md` drift corrected to the live suite (`TESTING.md`).** The "Running
   the suite" headline still claimed **206 passed / 1 skipped** with an 11-tier
-  breakdown, and the coverage ledger stopped at `t12`. Updated to the verified live
+  breakdown, and the coverage ledger stopped at `t012`. Updated to the verified live
   result: **310 passed / 0 skipped / 0 failed across 18 tiers**, with the full
   per-tier breakdown and the drifted B-T1 / B-T2 assert counts refreshed (33->43,
   28->38, from added project scripts). Added coverage-ledger rows for
-  `t13_enaledgerguard`, `t14_enacheck2`, `t15_enaverify`, `t16_enaverifyresults`,
-  `t17_enabundle`, and `t18_ssmverdict`, and a `python3` entry under "Environment &
+  `t013_enaledgerguard`, `t014_enacheck2`, `t015_enaverify`, `t016_enaverifyresults`,
+  `t017_enabundle`, and `t018_ssmverdict`, and a `python3` entry under "Environment &
   version dependencies" documenting the cpio-free initramfs fallback. Documentation
   only; no behaviour change.
 
 - **The ENA-bundle initramfs fixture is now cpio-independent, so its assertions
-  RUN instead of SKIPping where `cpio` is absent (`tests/t17_enabundle.sh`,
-  `tests/ena/run-ena-buildtest-matrix.sh`).** `tests/t17_enabundle.sh` builds a
+  RUN instead of SKIPping where `cpio` is absent (`tests/t017_enabundle.sh`,
+  `tests/ena/run-ena-buildtest-matrix.sh`).** `tests/t017_enabundle.sh` builds a
   gzipped-newc-cpio initramfs and `preserve_bundle()` lists it; both required
   `cpio`, so a host without it (a minimal CI container) deterministically skipped
   two assertions. Both sides gain a self-contained `python3` newc fallback: the
@@ -314,14 +314,14 @@ This CHANGELOG is **English only** per the repository-wide
   hosts always have `lsinitrd`/`cpio` and never reach the fallback (behaviour there
   is byte-identical); `python3` is effectively universal, so the two skips are now
   passes. The matrix's "no sourced module" design is preserved (the reader is inline
-  in `preserve_bundle()`, so `tests/t17`'s single-function `sed` extraction still
+  in `preserve_bundle()`, so `tests/t017`'s single-function `sed` extraction still
   carries it). Full suite: 308 passed / 2 skipped -> **310 passed / 0 skipped**.
 
 - **Intermittent suite false-negative eliminated: `assert_match` no longer trips a
   SIGPIPE-under-`pipefail` race (`tests/lib/assert.sh`).** `assert_match` matched
   with `printf '%s' "$1" | grep -Eq -- "$2"`. `grep -q` exits at the first match
   and closes its stdin; on a large haystack (e.g. the ~28 KB `install-ena-driver.sh`
-  read whole by `tests/t10_enaukedetect.sh`) the upstream `printf` is still writing
+  read whole by `tests/t010_enaukedetect.sh`) the upstream `printf` is still writing
   and takes SIGPIPE, exiting 141. Under the tiers' `set -o pipefail` that 141 became
   the pipeline status, so a genuine match was reported as "no match" -- a
   load-dependent flake (~1/12-1/17 in the full suite, ~0 in isolation) that surfaced
@@ -329,7 +329,7 @@ This CHANGELOG is **English only** per the repository-wide
   offset. The matcher now feeds the haystack via a here-string
   (`grep -Eq -- "$2" <<<"$1"`): no upstream writer process exists, so the command
   status is grep's alone and the race cannot occur. Verified: 0 flakes in 26 full-suite
-  runs (was 2/25 + 1/12); suite pass count unchanged. (`t11`/`t12` had previously
+  runs (was 2/25 + 1/12); suite pass count unchanged. (`t011`/`t012` had previously
   worked around the *symptom* with file-direct greps; the source is now fixed.)
 
 - **ENA build-test verdict reason no longer hardcodes "EL6" for every OS.** The
@@ -345,7 +345,7 @@ This CHANGELOG is **English only** per the repository-wide
   explaining WHY the version-based check exists. The committed
   `buildtest-ledger.json` reason fields (88 rows: 18 OL6, 35 OL7, 35 OL8) were
   corrected and `RESULTS-ol{6,7,8}.md` regenerated from it (the maintainer's real
-  results are unchanged -- only the explanatory wording). `tests/t15_enaverify.sh`
+  results are unchanged -- only the explanatory wording). `tests/t015_enaverify.sh`
   still passes unchanged (it asserts the surviving "stock in-tree module remains").
 
 - **Phase 6 CHECK 2: a self-build that did not take effect is now a `FAIL`
@@ -358,7 +358,7 @@ This CHANGELOG is **English only** per the repository-wide
   (`--skip-ena-driver`, OL8+ in-distro, OL9+) any present module still passes.
   With `install-ena-driver.sh` now aborting on a failed build, this is a
   defense-in-depth image guard (manual builds, other installers, regressions).
-  SPEC D.23 updated; tested by `tests/t14_enacheck2.sh`.
+  SPEC D.23 updated; tested by `tests/t014_enacheck2.sh`.
 
 - **ENA test-matrix ledger: a version-mismatched `ok` is recorded as `fail`
   (`tests/ena/run-ena-buildtest-matrix.sh`).** Defense-in-depth on top of the
@@ -368,7 +368,7 @@ This CHANGELOG is **English only** per the repository-wide
   reason) when they do not match — so a masked build failure (or a row produced
   by an older installer that fell back to the stock in-tree `ena.ko`) cannot
   enter the ledger as `ok` and silence the kver-primary dedup gate. SPEC B.9
-  updated; tested by `tests/t13_enaledgerguard.sh`.
+  updated; tested by `tests/t013_enaledgerguard.sh`.
 
 - **ENA self-build: a failed driver compile is no longer reported as success
   (`install-ena-driver.sh`).** The verify asserted only that *some* `ena.ko`
@@ -384,7 +384,7 @@ This CHANGELOG is **English only** per the repository-wide
   failing fatally otherwise via the new pure `ena_buildtest_verdict`. This fixes
   false `ok` rows in the ENA test-matrix ledger AND makes a production AMI build
   abort on a non-building pin instead of silently shipping the stock driver.
-  Unit-tested by `tests/t15_enaverify.sh` (12 cases: pin/exact/above-window
+  Unit-tested by `tests/t015_enaverify.sh` (12 cases: pin/exact/above-window
   builds pass; stock-only, none-found, and wrong-version fail).
 
 - **ENA matrix harness: run the ENA build by absolute `/bin/bash` under an
@@ -611,7 +611,7 @@ This CHANGELOG is **English only** per the repository-wide
     `/var/log/ol-aws-ami-builder-ena-make.log` on a successful build, so the
     compile record ships inside the AMI for post-hoc inspection (guest output is
     otherwise discarded on success; on failure `dump_build_diag` still surfaces it).
-  - New regression tier `tests/t12_buildvisibility.sh` (17 asserts) guards all of
+  - New regression tier `tests/t012_buildvisibility.sh` (17 asserts) guards all of
     the above. Suite 171/0/0 → **190/0/0** (with `ksvalidator`).
 
 - **OL9/OL10 clean-core package SBOMs + official-image reference memo.** Static
@@ -765,7 +765,7 @@ This CHANGELOG is **English only** per the repository-wide
     reports `pin: OL<major> <version>` read from `install-ena-driver.sh`'s
     `ENA_VERSION_OL<major>` default (single source of truth), so it cannot drift
     again. The AMI name/description share this reader (`ENA_BUILD_VERSION`).
-  Guarded by a new host-runnable tier `tests/t11_enareporting.sh`. `bash -n` +
+  Guarded by a new host-runnable tier `tests/t011_enareporting.sh`. `bash -n` +
   `shellcheck -S style` clean.
 
 ### Fixed
@@ -812,8 +812,8 @@ This CHANGELOG is **English only** per the repository-wide
   POSIX exec bit per file; several scripts had been committed `100644`, so a fresh clone left them
   non-executable while `install-ena-driver.sh` and most test tiers were `100755`. Set mode `100755`
   on the scripts that carry a `#!/usr/bin/env bash` shebang and are invoked directly:
-  `build-ol-aws-ami.sh`, `setup-vmimport-role.sh`, and the test tiers `tests/t9_logformat.sh`,
-  `tests/t10_enaukedetect.sh`, `tests/t11_enareporting.sh`. The sourced libraries
+  `build-ol-aws-ami.sh`, `setup-vmimport-role.sh`, and the test tiers `tests/t009_logformat.sh`,
+  `tests/t010_enaukedetect.sh`, `tests/t011_enareporting.sh`. The sourced libraries
   `tests/lib/{assert,heredoc,mock}.sh` (loaded via `.`, no shebang, `# shellcheck shell=bash`)
   deliberately stay `100644`. The suite is unaffected (`tests/run-all.sh` invokes tiers via
   `bash "${tier}"`); this only fixes `./script` / `git clone` ergonomics.
@@ -843,7 +843,7 @@ This CHANGELOG is **English only** per the repository-wide
   markers with file-patched / trigger / purpose (cross-referencing D.17/D.25/D.26
   and A.7), documents the two real marker shapes, and states the `.bak` vs
   append distinction. SPEC-only: the README does not restate the marker tags and
-  `tests/t7_idempotency.sh` already enumerates all 7 named markers.
+  `tests/t007_idempotency.sh` already enumerates all 7 named markers.
 
 - **Docs (no behaviour change):** SPEC **B.5.2 (Phase A static check #9)**
   contradicted the rest of the document on the OL6 cloud-init version. Check #9
@@ -881,7 +881,7 @@ This CHANGELOG is **English only** per the repository-wide
   omitted that the fix is conditional on the build detecting UEK (`IS_UEK`), which
   fails under the libguestfs `uname -r`; A.7 now records that condition and the
   cross-kernel retarget. Pin unchanged (`2.9.1`). A new host-runnable regression
-  tier (`tests/t10_enaukedetect.sh`) guards the retarget. `bash -n` +
+  tier (`tests/t010_enaukedetect.sh`) guards the retarget. `bash -n` +
   `shellcheck -S style` clean.
 
 - **OL6: the `ec2-user` cloud-init hook never actually applied (it ran too
@@ -901,7 +901,7 @@ This CHANGELOG is **English only** per the repository-wide
   the hook applies both edits against real-shaped `cloud.cfg`/`90_ol.cfg`
   (idempotent); the emitted `provision.sh` passes `bash -n`. OL6-only; OL7-10
   untouched. SPEC D.26 gains a *Wiring (timing)* note. A new host-runnable
-  regression tier **B-T9** (`tests/t8_hooktiming.sh`) now guards this class: it
+  regression tier **B-T9** (`tests/t008_hooktiming.sh`) now guards this class: it
   asserts the injection wraps `cloud::cloud_init` (and emits no top-level
   `sh <hook>`), and behaviourally that the hook fires after `cloud_init` and
   produces `groups: [adm]` / name `ec2-user`. `bash -n` +
@@ -967,7 +967,7 @@ This CHANGELOG is **English only** per the repository-wide
   `YYYY-MM-DD HH:MM:SS  [SEVERITY]  [OLAWS-CODE]  <message>`; README section 6.3
   log examples (both languages) and the SPEC examples re-rendered in the new
   order. A new host-runnable regression tier **log-format**
-  (`tests/t9_logformat.sh`) asserts every channel is date-first (and guards
+  (`tests/t009_logformat.sh`) asserts every channel is date-first (and guards
   against a return to tag-first). `bash -n` + `shellcheck -S style` clean; suite
   142/1/0 (143/0 with `ksvalidator`).
 
@@ -1004,29 +1004,29 @@ This CHANGELOG is **English only** per the repository-wide
   check** (test increment 6). Extracted the inline IMDS normalisation + OL6
   rejection out of `load_env` into a new `normalize_imds_support()`
   (behaviour-neutral refactor of `build-ol-aws-ami.sh`; direct execution
-  unchanged) so it can be unit tested; `tests/t3_unit.sh` now drives it
+  unchanged) so it can be unit tested; `tests/t003_unit.sh` now drives it
   table-driven (normalisation of `default`/`v1+v2`/`V2.0`/`v2only`, `OL6+default`
   allowed, `OL7+v2.0` allowed, invalid value -> `die`, **`OL6+v2.0` -> `die`**;
-  10 asserts). Added `tests/t7_idempotency.sh` (B-T6, L2, structural): asserts
+  10 asserts). Added `tests/t007_idempotency.sh` (B-T6, L2, structural): asserts
   each of the 7 `[ol-aws-ami-builder PATCH ...]` injection markers is fronted by
   a `grep -Fq` idempotency guard (runtime apply-twice remains B-T7/B-T8). Suite
   now **118 passed, 1 skipped, 0 failed**; the host-runnable tiers (L0-L2) are
   complete. New/changed scripts are shellcheck `-S style` clean.
 
-- Added **B-T5 env-template parity** (`tests/t6_envparity.sh`, test increment 5,
+- Added **B-T5 env-template parity** (`tests/t006_envparity.sh`, test increment 5,
   L2): data-driven checks over `env.properties.aws-ol{6,7,8,9,10}` - a 20-key
   common core in all five, the documented `KERNEL`/`UEK_RELEASE` extras present
   only in OL6/OL7, the cross-file invariants (`S3_BUCKET`, `AWS_REGION=""`,
   `UPDATE_TO_LATEST=yes`, `CLOUD=aws`), and the per-OS `DISTR=olN-slim` (31
   asserts). Also **wired B-T4 kickstart conformance into the single runner**
-  (`tests/t5_kickstart.sh` wraps `tests/validate-kickstart.sh`; SKIPs without
+  (`tests/t005_kickstart.sh` wraps `tests/validate-kickstart.sh`; SKIPs without
   `ksvalidator`) - previously it was only runnable standalone. Suite now **98
   passed, 1 skipped, 0 failed** (B-T1 19 + B-T2 14 + B-T3 25 + command-mock 9 +
   env-parity 31, B-T4 kickstart skipped without ksvalidator). No change to
   `build-ol-aws-ami.sh`; new tiers are shellcheck `-S style` clean.
 
 - Added a **command-mock + spy layer** for dependency-injection class "external
-  commands" (`tests/lib/mock.sh`, `tests/t4_cmdmock.sh`, test increment 4, L1
+  commands" (`tests/lib/mock.sh`, `tests/t004_cmdmock.sh`, test increment 4, L1
   hermetic; self-contained PATH-shadow mocks - no bats/shellmock). `mock_setup`
   prepends a shadow bin to PATH and starts a call log; `mock_cmd NAME BEHAVIOUR`
   installs a fake that records its argv then runs the behaviour; `mock_calls`
@@ -1040,7 +1040,7 @@ This CHANGELOG is **English only** per the repository-wide
   new scripts are shellcheck `-S style` clean (two documented `SC2016` exemptions
   on literal mock-behaviour strings).
 
-- Added **B-T3 pure-function unit** tests (`tests/t3_unit.sh`, test increment 3,
+- Added **B-T3 pure-function unit** tests (`tests/t003_unit.sh`, test increment 3,
   test pyramid layer L1, hermetic): table-driven `parse_ol_version_from_iso`
   (OL6-OL10 + a malformed name + a full URL path) and the `parse_args` contract
   (unknown flag -> `usage 1`; missing `--env` -> `die`; valid `--env` -> rc 0 with
@@ -1054,7 +1054,7 @@ This CHANGELOG is **English only** per the repository-wide
   small extraction or fixture-driven run). New test script is shellcheck `-S
   style` clean.
 
-- Added **B-T2 ShellCheck** as a deterministic static gate (`tests/t2_shellcheck.sh`,
+- Added **B-T2 ShellCheck** as a deterministic static gate (`tests/t002_shellcheck.sh`,
   test increment 2): runs ShellCheck at the **canonical `-S style`** (strictest)
   over every `.sh` and asserts zero findings per file, turning ShellCheck into a
   reproducible pass/fail summary with no per-run judgement. A checked-in
@@ -1076,7 +1076,7 @@ This CHANGELOG is **English only** per the repository-wide
   a single entry runner `tests/run-all.sh` that runs every tier, aggregates
   pass/fail/skip and exits non-zero on failure; an assertion library
   `tests/lib/assert.sh`; a heredoc-body extractor `tests/lib/heredoc.sh`; and the
-  first tier **B-T1 parse** (`tests/t1_parse.sh`): `bash -n` on every `.sh` plus
+  first tier **B-T1 parse** (`tests/t001_parse.sh`): `bash -n` on every `.sh` plus
   `bash -n` on each shell-bodied heredoc that ships into the guest / into
   `distr/ol6-slim/` (`OLAWS_NITRO_BODY`, `OLAWS_SERIAL_BODY`,
   `OLAWS_OL6_CLOUD_USER_BODY`, `EOF_OL6_IMG`, `EOF_OL6_PROV`) - which the outer

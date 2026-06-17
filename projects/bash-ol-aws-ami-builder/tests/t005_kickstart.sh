@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t5_kickstart.sh - B-T4 kickstart conformance, wired into the runner
+# tests/t005_kickstart.sh - B-T4 kickstart conformance, wired into the runner
 # (test pyramid layer L2). Thin wrapper around tests/validate-kickstart.sh so
 # the single runner aggregates it; SKIPs cleanly when ksvalidator is absent.
 #

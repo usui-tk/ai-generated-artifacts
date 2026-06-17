@@ -45,7 +45,7 @@ the classes it touches rather than depend on the host.
 | arguments (`$1..$@`) | pass directly in the test |
 | environment vars / env file | export in the test / `source` a fixture env file |
 | shell global state, `set -euo pipefail` | subshell isolation + explicit setup |
-| external commands (`aws`, `git`, `virsh`, `guestfish`, `dnf`, `osinfo-query`, ...) | mock via PATH-shadow + call-log spy (implemented in `tests/lib/mock.sh`; see `tests/t4_cmdmock.sh`) or function override |
+| external commands (`aws`, `git`, `virsh`, `guestfish`, `dnf`, `osinfo-query`, ...) | mock via PATH-shadow + call-log spy (implemented in `tests/lib/mock.sh`; see `tests/t004_cmdmock.sh`) or function override |
 | filesystem (`${WORKSPACE}`, generated files) | temp dirs / fixtures |
 | OS / distro identity (`/etc/os-release`, `uname`) | inject a fake so the same test is deterministic on any host |
 | network / cloud (AWS APIs, ISO / checksum URLs) | fake CLI / local fixtures, or push to L3 / L4 |
@@ -103,7 +103,7 @@ them so a run is reproducible:
 - **ShellCheck** (B-T2): obtained as the self-contained static binary from the
   upstream GitHub release (no runtime deps); **pinned to 0.10.0** - record the
   version (`run-all.sh` prints the resolved one). The canonical severity is
-  **`style`** (the strictest), set on the command line by `tests/t2_shellcheck.sh`;
+  **`style`** (the strictest), set on the command line by `tests/t002_shellcheck.sh`;
   `.shellcheckrc` carries `external-sources=true` + `source-path=SCRIPTDIR` only
   (no global `disable=`). Determinism comes from three documented inline
   exemptions, each a single code on a single statement with a rationale comment:
@@ -114,7 +114,7 @@ them so a run is reproducible:
 - **pykickstart / `ksvalidator`** (B-T4): optional; B-T4 SKIPs if absent.
 - **awk / sed / grep / find** (coreutils + gawk): present in the container.
 - **python3** (stdlib only): used by the pure-logic tiers that drive matrix /
-  verifier python (B-T ena-ledger-guard) and, in `tests/t17_enabundle.sh` +
+  verifier python (B-T ena-ledger-guard) and, in `tests/t017_enabundle.sh` +
   `preserve_bundle()`, as a self-contained newc-cpio writer/reader so the
   initramfs-listing fixture and its assertions run even on a host **without**
   `cpio` (the real builder hosts have `cpio`/`lsinitrd` and never reach it).
@@ -143,27 +143,27 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/`, `tests/ena/`, `tests/ssm/`, `tests/awscli/`) + 5 shell-bodied heredoc bodies; 47 asserts |
 | B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/`, `tests/ena/`, `tests/ssm/`, `tests/awscli/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 42 asserts |
 | B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
-| B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
-| B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t3_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
-| B-T5 env parity | L2 | implemented | `tests/t6_envparity.sh`: 20 common-core keys, OL6/OL7-only KERNEL/UEK_RELEASE extras, S3_BUCKET/AWS_REGION/UPDATE_TO_LATEST/CLOUD invariants, per-OS DISTR; 31 asserts |
-| B-T6 idempotency | L2 | implemented | `tests/t7_idempotency.sh` (structural): each of the 8 `[ol-aws-ami-builder PATCH ...]` markers is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
-| B-T4 kickstart | L2 | implemented | `tests/validate-kickstart.sh`, **wired into the runner** via `tests/t5_kickstart.sh` (SKIPs without `ksvalidator`); see below |
-| B-T9 hook timing | L1/L2 | implemented | `tests/t8_hooktiming.sh`: the OL6 cloud-user hook must run *after* `cloud::cloud_init` (configs exist), never at source time; static wrapper-wiring + no-top-level-`sh` guards, plus a behavioural order/edit check; 8 asserts |
-| B-T (log format) | L1 | implemented | `tests/t9_logformat.sh`: every timestamped channel emits **date-first** (`YYYY-MM-DD HH:MM:SS` leads, `[SEVERITY]`/source tag follows; SPEC E.1); colour-stripped match across info/warn/error/build/debug/external + a negative guard against the old tag-first order; 12 asserts |
-| B-T (ena uek-detect) | L1/L2 | implemented | `tests/t10_enaukedetect.sh`: the OL6 ENA self-build retargets the amzn-drivers Makefile UEK detection (`IS_UEK`/`ENA_KERNEL_SUBVERSION_*`) from `uname -r` to `BUILD_KERNEL` (the DKMS target), so the `kcompat.h` `page_ref_count` guard evaluates against the build target rather than the libguestfs appliance kernel; structural (present, OL6-gated, idempotency-guarded, pipe-anchored) + behavioural fixture transform; 9 asserts. Compile/boot proof is B-T7/B-T8 |
-| B-T (ena reporting) | L1/L2 | implemented | `tests/t11_enareporting.sh`: the Phase 6 readiness report prints aligned, fixed-width `ENA Driver (Kernel in-box)` / `ENA Driver (Self-Build)` lines with an explicit in-tree no-version fallback; `install-ena-driver.sh` logs the in-box ENA identity before the self-build; the auto AMI name/description gain a self-built-ENA marker and the final summary prints the description + an ENA driver line; the `[OLAWS-ENA01]` hook log and the marker read the pin from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` default (no hardcoded `OL6 2.5.0` drift). Structural presence checks grep files directly (avoiding a `printf\|grep -q` SIGPIPE race under `pipefail` on the large wrapper) + behavioural pin-reader fixture; 15 asserts. AMI naming/boot proof is B-T7/B-T8 |
-| B-T (build visibility) | L1/L2 | implemented | `tests/t12_buildvisibility.sh`: OL7 build-log visibility (handoff B.1.5 feedback 4). `install-ena-driver.sh` emits greppable `[ena-driver][stage]` breadcrumbs at the phase boundaries (esp. dkms add/build/install) and `record_make_log()` preserves the DKMS make.log to `/var/log/ol-aws-ami-builder-ena-make.log` on a successful build (guest output is swallowed by virt-customize on success); the wrapper records the latest LIVE orchestrator line to `BUILD_STAGE_FILE` in `log_external` and the Phase-5 heartbeat shows it as `stage: …` (assembled into one atomic `log_progress` write); `HEARTBEAT_INTERVAL_SEC` default is 10s. Structural greps (file-direct) + a behavioural `log_external`→stage-file fixture; 17 asserts. Real OL7 build/boot proof is B-T7/B-T8 |
-| B-T (ena ledger guard) | L1 | implemented | `tests/t13_enaledgerguard.sh`: the matrix ledger-writer keeps an INDEPENDENT version-mismatch guard — an `ok` whose installed `ko_version` does not match the requested `ena_version` (e.g. a stale installer that fell back to the stock in-tree `ena.ko` 1.1.2) is downgraded to `fail` before it can enter the ledger, so it cannot poison the report or the kver-primary dedup gate. Extracts the real ledger-writer python out of the matrix and drives it with a synthetic results TSV; python3 only, no container/dkms/build; 5 asserts |
-| B-T (ena check-2 provenance) | L0/L1 | implemented | `tests/t14_enacheck2.sh`: Phase-6 CHECK 2 (offline image inspection) must gate its PASS on provenance, not mere module presence — the pure `_ena_check2_ok` requires the self-built `/updates`\|`/extra` module when a self-build was requested (OL6/OL7 default); the stock `/kernel` copy alone is a FAIL, while no-self-build paths (`--skip-ena-driver`, OL8+ in-distro, OL9+) accept any present module. Loads ONLY that function out of the (guarded) wrapper; 6 asserts |
-| B-T (ena verify verdict) | L0/L1 | implemented | `tests/t15_enaverify.sh`: guards the false-ok regression where EL6 `dkms` (2.4.0) returns exit 0 even on a failed in-guest compile while a stock in-tree `ena.ko` is present — success is decided from the installed MODULE VERSION via the pure `ena_buildtest_verdict`. Loads ONLY that function; no container/dkms/build; 12 asserts |
-| B-T (ena verify-results) | L1 | implemented | `tests/t16_enaverifyresults.sh`: the standalone READ-ONLY `tests/ena/verify-ena-buildresults.sh` judges, after the fact, whether each ok build's module is load-ready WITHOUT touching the production path; this tier loads ONLY its two pure verdict functions — `lc_vermagic_verdict` (L4a gate) and `lc_symbols_verdict` (L4b gate) — and asserts them across the verifier's shapes; no I/O/kmod/bundle; 15 asserts |
-| B-T (ena bundle producer) | L1 | implemented | `tests/t17_enabundle.sh`: the matrix's `preserve_bundle()` is a DUMB copy that lifts each build's artifacts into the exact layout the read-only verifier consumes (per-version `ena.ko`, shared per-kver `Module.symvers` / `kernel.vermagic` / `initramfs.list`); loads ONLY that function and drives it against a fabricated image tree. The initramfs fixture builds via cpio **or** a self-contained `python3` newc writer/reader, so the listing assertions RUN on any host with cpio+gzip or python3 (rather than skipping); 13 asserts |
-| B-T (ssm verdict) | L0/L1 | implemented | `tests/t18_ssmverdict.sh`: loads the four pure helpers of `tests/ssm/run-ssm-installtest-matrix.sh` — `ssm_ge` (dotted 4-part compare), `go_min_kernel` (go.mod `go` directive → min-kernel proxy), `ssm_in_scope` (default `>=min` vs `--full` filter), `ssm_compliance` (headline verdict vs AWS min `>= 3.3.3598.0`) — and asserts them across the matrix's shapes; no container/network/clean-core; 32 asserts |
-| B-T (awscli verdict) | L0/L1 | implemented | `tests/t19_awscliverdict.sh`: loads the five pure helpers of `tests/awscli/run-awscli-installtest-matrix.sh` — `awscli_ge` (dotted compare, versions + glibc), `awscli_min_glibc` (documented manylinux floor 2.17/2.5), `awscli_in_scope` (v2-major filter), `awscli_verdict` (`runs`/`glibc-too-old`/`unexpected-fail`), `python_eol` (bundled CPython minor → documented EOL date) — and verifies the reuse-by-copy consistency of `awscli_min_glibc` with `tests/awscli/list-awscli-releases.sh`; no container/network/clean-core; 43 asserts |
+| B-T (command mock) | L1 | implemented | `tests/t004_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
+| B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t003_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
+| B-T5 env parity | L2 | implemented | `tests/t006_envparity.sh`: 20 common-core keys, OL6/OL7-only KERNEL/UEK_RELEASE extras, S3_BUCKET/AWS_REGION/UPDATE_TO_LATEST/CLOUD invariants, per-OS DISTR; 31 asserts |
+| B-T6 idempotency | L2 | implemented | `tests/t007_idempotency.sh` (structural): each of the 8 `[ol-aws-ami-builder PATCH ...]` markers is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
+| B-T4 kickstart | L2 | implemented | `tests/validate-kickstart.sh`, **wired into the runner** via `tests/t005_kickstart.sh` (SKIPs without `ksvalidator`); see below |
+| B-T9 hook timing | L1/L2 | implemented | `tests/t008_hooktiming.sh`: the OL6 cloud-user hook must run *after* `cloud::cloud_init` (configs exist), never at source time; static wrapper-wiring + no-top-level-`sh` guards, plus a behavioural order/edit check; 8 asserts |
+| B-T (log format) | L1 | implemented | `tests/t009_logformat.sh`: every timestamped channel emits **date-first** (`YYYY-MM-DD HH:MM:SS` leads, `[SEVERITY]`/source tag follows; SPEC E.1); colour-stripped match across info/warn/error/build/debug/external + a negative guard against the old tag-first order; 12 asserts |
+| B-T (ena uek-detect) | L1/L2 | implemented | `tests/t010_enaukedetect.sh`: the OL6 ENA self-build retargets the amzn-drivers Makefile UEK detection (`IS_UEK`/`ENA_KERNEL_SUBVERSION_*`) from `uname -r` to `BUILD_KERNEL` (the DKMS target), so the `kcompat.h` `page_ref_count` guard evaluates against the build target rather than the libguestfs appliance kernel; structural (present, OL6-gated, idempotency-guarded, pipe-anchored) + behavioural fixture transform; 9 asserts. Compile/boot proof is B-T7/B-T8 |
+| B-T (ena reporting) | L1/L2 | implemented | `tests/t011_enareporting.sh`: the Phase 6 readiness report prints aligned, fixed-width `ENA Driver (Kernel in-box)` / `ENA Driver (Self-Build)` lines with an explicit in-tree no-version fallback; `install-ena-driver.sh` logs the in-box ENA identity before the self-build; the auto AMI name/description gain a self-built-ENA marker and the final summary prints the description + an ENA driver line; the `[OLAWS-ENA01]` hook log and the marker read the pin from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` default (no hardcoded `OL6 2.5.0` drift). Structural presence checks grep files directly (avoiding a `printf\|grep -q` SIGPIPE race under `pipefail` on the large wrapper) + behavioural pin-reader fixture; 15 asserts. AMI naming/boot proof is B-T7/B-T8 |
+| B-T (build visibility) | L1/L2 | implemented | `tests/t012_buildvisibility.sh`: OL7 build-log visibility (handoff B.1.5 feedback 4). `install-ena-driver.sh` emits greppable `[ena-driver][stage]` breadcrumbs at the phase boundaries (esp. dkms add/build/install) and `record_make_log()` preserves the DKMS make.log to `/var/log/ol-aws-ami-builder-ena-make.log` on a successful build (guest output is swallowed by virt-customize on success); the wrapper records the latest LIVE orchestrator line to `BUILD_STAGE_FILE` in `log_external` and the Phase-5 heartbeat shows it as `stage: …` (assembled into one atomic `log_progress` write); `HEARTBEAT_INTERVAL_SEC` default is 10s. Structural greps (file-direct) + a behavioural `log_external`→stage-file fixture; 17 asserts. Real OL7 build/boot proof is B-T7/B-T8 |
+| B-T (ena ledger guard) | L1 | implemented | `tests/t013_enaledgerguard.sh`: the matrix ledger-writer keeps an INDEPENDENT version-mismatch guard — an `ok` whose installed `ko_version` does not match the requested `ena_version` (e.g. a stale installer that fell back to the stock in-tree `ena.ko` 1.1.2) is downgraded to `fail` before it can enter the ledger, so it cannot poison the report or the kver-primary dedup gate. Extracts the real ledger-writer python out of the matrix and drives it with a synthetic results TSV; python3 only, no container/dkms/build; 5 asserts |
+| B-T (ena check-2 provenance) | L0/L1 | implemented | `tests/t014_enacheck2.sh`: Phase-6 CHECK 2 (offline image inspection) must gate its PASS on provenance, not mere module presence — the pure `_ena_check2_ok` requires the self-built `/updates`\|`/extra` module when a self-build was requested (OL6/OL7 default); the stock `/kernel` copy alone is a FAIL, while no-self-build paths (`--skip-ena-driver`, OL8+ in-distro, OL9+) accept any present module. Loads ONLY that function out of the (guarded) wrapper; 6 asserts |
+| B-T (ena verify verdict) | L0/L1 | implemented | `tests/t015_enaverify.sh`: guards the false-ok regression where EL6 `dkms` (2.4.0) returns exit 0 even on a failed in-guest compile while a stock in-tree `ena.ko` is present — success is decided from the installed MODULE VERSION via the pure `ena_buildtest_verdict`. Loads ONLY that function; no container/dkms/build; 12 asserts |
+| B-T (ena verify-results) | L1 | implemented | `tests/t016_enaverifyresults.sh`: the standalone READ-ONLY `tests/ena/verify-ena-buildresults.sh` judges, after the fact, whether each ok build's module is load-ready WITHOUT touching the production path; this tier loads ONLY its two pure verdict functions — `lc_vermagic_verdict` (L4a gate) and `lc_symbols_verdict` (L4b gate) — and asserts them across the verifier's shapes; no I/O/kmod/bundle; 15 asserts |
+| B-T (ena bundle producer) | L1 | implemented | `tests/t017_enabundle.sh`: the matrix's `preserve_bundle()` is a DUMB copy that lifts each build's artifacts into the exact layout the read-only verifier consumes (per-version `ena.ko`, shared per-kver `Module.symvers` / `kernel.vermagic` / `initramfs.list`); loads ONLY that function and drives it against a fabricated image tree. The initramfs fixture builds via cpio **or** a self-contained `python3` newc writer/reader, so the listing assertions RUN on any host with cpio+gzip or python3 (rather than skipping); 13 asserts |
+| B-T (ssm verdict) | L0/L1 | implemented | `tests/t018_ssmverdict.sh`: loads the four pure helpers of `tests/ssm/run-ssm-installtest-matrix.sh` — `ssm_ge` (dotted 4-part compare), `go_min_kernel` (go.mod `go` directive → min-kernel proxy), `ssm_in_scope` (default `>=min` vs `--full` filter), `ssm_compliance` (headline verdict vs AWS min `>= 3.3.3598.0`) — and asserts them across the matrix's shapes; no container/network/clean-core; 32 asserts |
+| B-T (awscli verdict) | L0/L1 | implemented | `tests/t019_awscliverdict.sh`: loads the five pure helpers of `tests/awscli/run-awscli-installtest-matrix.sh` — `awscli_ge` (dotted compare, versions + glibc), `awscli_min_glibc` (documented manylinux floor 2.17/2.5), `awscli_in_scope` (v2-major filter), `awscli_verdict` (`runs`/`glibc-too-old`/`unexpected-fail`), `python_eol` (bundled CPython minor → documented EOL date) — and verifies the reuse-by-copy consistency of `awscli_min_glibc` with `tests/awscli/list-awscli-releases.sh`; no container/network/clean-core; 43 asserts |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
 | clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below), plus `tests/cleancore/build-cleancore.sh` (the `--all`/`--ol` orchestrator wrapping them). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |
-| awscli install-test | (test base) | implemented | `install-awscli.sh` + `tests/awscli/run-awscli-installtest-matrix.sh` + `tests/awscli/list-awscli-releases.sh` — the AWS CLI v2 install+run matrix (glibc axis) and its release-list resolver (see "AWS CLI v2 install+run test matrix" below). **Not** run by `run-all.sh` (heavy: needs root + network + clean-core); the pure verdict/lifecycle helpers are unit-tested host-only by `tests/t19_awscliverdict.sh`; all are covered by B-T1 (parse) + B-T2 (lint) |
+| awscli install-test | (test base) | implemented | `install-awscli.sh` + `tests/awscli/run-awscli-installtest-matrix.sh` + `tests/awscli/list-awscli-releases.sh` — the AWS CLI v2 install+run matrix (glibc axis) and its release-list resolver (see "AWS CLI v2 install+run test matrix" below). **Not** run by `run-all.sh` (heavy: needs root + network + clean-core); the pure verdict/lifecycle helpers are unit-tested host-only by `tests/t019_awscliverdict.sh`; all are covered by B-T1 (parse) + B-T2 (lint) |
 
 ## Container clean-core test base (`tests/cleancore/`)
 
@@ -395,7 +395,7 @@ Two evidence layers, both committed so the state persists across runs:
   + L4b symbol-CRC are gates; L3 initramfs-inclusion is informational; L5 real
   load is the B-T8 ceiling). A missing bundle artifact for an `ok` row is a fail,
   not a silent skip. The pure verdict logic is unit-tested by
-  `tests/t16_enaverifyresults.sh`.
+  `tests/t016_enaverifyresults.sh`.
 - **The matrix emits that bundle** (the producer for the verifier above). After
   each build, `run-ena-buildtest-matrix.sh` does a dumb `cp` — no load-readiness
   judgement, no branch on ok/fail — of the DKMS `ena.ko` to
@@ -404,7 +404,7 @@ Two evidence layers, both committed so the state persists across runs:
   `initramfs.list` to `<bundle>/kver/<kver>/`. The bundle dir defaults to
   `<cleancore-dir>/verify-bundle` (`--bundle-dir` overrides) and accumulates like
   the ledger. The `cp` layout is contract-tested against the verifier's
-  read-paths by `tests/t17_enabundle.sh` — a host-only unit test with a fabricated
+  read-paths by `tests/t017_enabundle.sh` — a host-only unit test with a fabricated
   image tree, so it needs no real build, kernel, or kmod.
 
 By default each OL is first **update-gated** (turn off with `--force`): before any
@@ -475,7 +475,7 @@ each release's go.mod `go` directive. `list-ssm-releases.sh` records `go_version
 + `go_mod_http_status` (so a null `go_version` is self-explaining: `404` = a
 pre-go-modules tag with no go.mod) and the `min_kernel` proxy; the `go_min_kernel`
 mapping is reuse-by-copy across the lister and the matrix, kept in lock-step by
-`tests/t18_ssmverdict.sh`. A faithful kernel verdict needs a kernel-matched runner
+`tests/t018_ssmverdict.sh`. A faithful kernel verdict needs a kernel-matched runner
 or a real instance.
 
 Default mode tests only versions `>= 3.3.3598.0` (the question "is remediation
@@ -486,7 +486,7 @@ opens with a paraphrased summary of the AWS Run Command ec2messages deprecation
 (`agent_go_version`, `compat_min_kernel`); it gives, per kver, the max install+run
 version and the verdict (`compliant-capable` / `ec2messages-only` / `none`). The pure verdict/proxy/filter logic (`ssm_ge`,
 `go_min_kernel`, `ssm_in_scope`, `ssm_compliance`) is unit-tested by
-`tests/t18_ssmverdict.sh` (host-only, no container/network). Run examples:
+`tests/t018_ssmverdict.sh` (host-only, no container/network). Run examples:
 
 ```
 bash tests/ssm/list-ssm-releases.sh                                  # version list + go_version
@@ -553,7 +553,7 @@ verified date + sources, Q2 option b), then per kver a verdict (`current` /
 `capped at <ver>` / `none`) and a per-version table with `bundled_python`,
 `python_eol`, and `compat_min_glibc (measured / heuristic)`. The pure
 verdict/lifecycle logic (`awscli_ge`, `awscli_min_glibc`, `awscli_in_scope`,
-`awscli_verdict`, `python_eol`) is unit-tested by `tests/t19_awscliverdict.sh`
+`awscli_verdict`, `python_eol`) is unit-tested by `tests/t019_awscliverdict.sh`
 (host-only, no container/network), which also locks the reuse-by-copy
 `awscli_min_glibc` in `list-awscli-releases.sh` to the matrix. Run examples:
 

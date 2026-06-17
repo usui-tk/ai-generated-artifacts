@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t17_enabundle.sh - load-readiness bundle PRODUCER layout/contract
+# tests/t017_enabundle.sh - load-readiness bundle PRODUCER layout/contract
 #                          (pure unit; the 0017 cp, no real build)
 #
 # tests/ena/run-ena-buildtest-matrix.sh's preserve_bundle() is a DUMB copy: after

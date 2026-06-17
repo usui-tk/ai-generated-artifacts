@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t9_logformat.sh - log line-format / field-order regression guard (L1)
+# tests/t009_logformat.sh - log line-format / field-order regression guard (L1)
 #
 # Source the wrapper (its tail `main` is guarded, so sourcing has no side
 # effects) and drive each timestamped log helper, asserting the emitted line is

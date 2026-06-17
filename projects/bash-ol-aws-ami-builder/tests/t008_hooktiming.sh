@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t8_hooktiming.sh - B-T9 OL6 cloud-user hook execution-timing (L1/L2)
+# tests/t008_hooktiming.sh - B-T9 OL6 cloud-user hook execution-timing (L1/L2)
 #
 # Regression guard for the source-time-execution defect (SPEC D.26 "Wiring").
 # The OL6 [ol-aws-ami-builder PATCH ol6-cloud-user] hook edits cloud-init's

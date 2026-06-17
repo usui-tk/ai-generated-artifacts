@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t10_enaukedetect.sh - ENA Makefile UEK-detection retarget (layer L1/L2)
+# tests/t010_enaukedetect.sh - ENA Makefile UEK-detection retarget (layer L1/L2)
 #
 # install-ena-driver.sh patches the amzn-drivers ENA Makefile (OL6 only) so its
 # IS_UEK / ENA_KERNEL_SUBVERSION_* detection reads the DKMS target kernel

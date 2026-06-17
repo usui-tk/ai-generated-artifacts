@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #==============================================================================
-# tests/t12_buildvisibility.sh - OL7 build-log visibility (layer L1/L2,
+# tests/t012_buildvisibility.sh - OL7 build-log visibility (layer L1/L2,
 #                                 structural + behavioural)
 #
 # Guards the OL7 build-log visibility work (handoff B.1.5 feedback (4)):
