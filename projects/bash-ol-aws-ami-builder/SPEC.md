@@ -2079,6 +2079,75 @@ on a real OL9/OL10 instance** — they ship enabled by default (per the all-OL6-
 decision) with this caveat noted. A real-AMI boot check for OL9/OL10 is the natural
 follow-up.
 
+## B.12 AWS CLI v2 install+run test matrix (`tests/awscli/`)
+
+A dev/CI harness, structurally the same as the SSM matrix (B.10), that determines
+per OL major (**6/7/8**) which AWS CLI **v2** versions **install AND run** in a
+disposable clean-core container. It reuses `tests/cleancore/build-cleancore.sh`
+for the rootfs and drives `install-awscli.sh AWSCLI_INSTALLTEST=1` per version.
+Manual / on-demand (NOT a `run-all.sh` tier); production integration into
+`build-ol-aws-ami.sh` is deferred (install-test tooling only, mirroring SSM's B.10
+→ B.11 staging). The v1 OL-repo `awscli` package is **out of scope** for the
+matrix; the production path blocks it via versionlock so a later `yum`/`dnf` cannot
+shadow the v2 bundle.
+
+**The compatibility surface is `glibc x awscli_version`, and the glibc axis is
+FAITHFUL.** AWS CLI v2 ships a self-contained zip bundle that **bundles its own
+Python**, so it does not use the OS Python — but the bundled interpreter and its
+C-extension `.so`s are built against a **manylinux glibc**, so the OS glibc gates
+whether the bundle installs/runs. Per AWS's *Linux Support Updates for AWS CLI v2*
+(2024-09-16), current v2 is **manylinux2014 (glibc 2.17)** and supports glibc
+≥ 2.17; glibc ≤ 2.16 must pin v2 **≤ 2.17.49**. So OL6 (glibc 2.12) installs/runs
+only ≤ 2.17.49; OL7 (2.17, the floor) and OL8 (2.28) run current. Because the
+container's real OL glibc (`rpm -q glibc`) is exactly what the bundle links
+against, this install-test is **conclusive for glibc** — unlike the SSM/ENA kernel
+axis. The ledger dedup key is `(osmajor, awscli_version, kver)` with **kver
+PRIMARY** (`kver` = the OL UEK from `rpm -q kernel-uek`, provisioned the same
+install-at-test-time way as SSM, so a new OL UEK re-tests every version);
+`test_host_kernel` is the runner kernel the binary actually ran on.
+
+**Bundled Python + empirical glibc (per-entry, free).** The install-test already
+unzips each bundle, so two facts are recorded for free and survive the
+glibc-too-old case (no need to execute the binary): `bundled_python` — the bundled
+CPython, read offline from `aws/dist/libpython3.X.so*` and refined to the full
+patch from `aws --version`'s `Python/X.Y.Z` when it runs; and `min_glibc_measured`
+— the bundle's **empirical** glibc floor, the max `GLIBC_x.y` symbol version
+required across its `.so`s, read with a dependency-free `grep` of the version
+strings embedded in the binaries (no `readelf`/binutils in the clean-core; it
+matches `readelf` exactly). The documented heuristic `min_glibc` (≥ 2.17.50 →
+2.17, else 2.5) is recorded alongside as a cross-check, and `python_eol` records
+the bundled Python's documented end-of-life. Empirically: v2 2.0.x–2.17.49 require
+`GLIBC_2.4`–`2.5` (so OL6 runs them), while current v2 requires `GLIBC_2.17` — the
+glibc floor tracks AWS's manylinux build base, not the Python version per se.
+
+**Test depth.** `install-awscli.sh` (a) installs with `aws/install` (the bundled
+interpreter runs; a too-old glibc fails the loader here — the faithful "won't
+install on this glibc" signal), then (b) runs **`aws --version` + `aws configure
+list`** locally (no AWS creds / no IMDS) to prove the bundled Python + glibc-linked
+`.so`s load and a CLI session + botocore import succeed. `status=ok` requires
+install AND both run checks (and the installed version to match the request;
+`latest` may resolve to any version). `aws sts get-caller-identity` needs creds +
+network and is the real-instance confirmation, not container-testable.
+
+**Lifecycle (the bundled Python is frozen).** The bundled CPython is not
+independently patchable; the only way to a newer (still-supported) Python is a
+newer v2 — and a glibc-capped OS caps the v2 version, hence the bundled Python,
+hence its support horizon. The headline forward risk: OL6 caps at v2 `2.17.49` =
+Python `3.11.9` (security-support end **2027-10-31**); after that OL6 has no
+in-place remediation (newer v2 needs glibc 2.17 the OS lacks). `RESULTS-ol<N>.md`
+therefore opens with the glibc rationale, then a **static**, provenance-stamped
+(verified date + source sites; Q2 option b) **Python-EOL table** and the **OS's own
+EOL/EOS**, then per kver a verdict (`current` / `capped at <ver>` / `none`) and a
+per-version table carrying `bundled_python`, `python_eol`, and `compat_min_glibc
+(measured / heuristic)`. The pure verdict/lifecycle logic (`awscli_ge`,
+`awscli_min_glibc`, `awscli_in_scope`, `awscli_verdict`, `python_eol`) is
+unit-tested host-only by `tests/t19_awscliverdict.sh`, which also locks the
+reuse-by-copy `awscli_min_glibc` in `list-awscli-releases.sh` to the matrix. The
+release list (`awscli-releases.json`), ledger (`awscli-installtest-ledger.json`)
+and `RESULTS-ol{6,7,8}.md` are produced by a real maintainer-env matrix run /
+network probe (a long-running clean-core + network task) and are not generated in
+this authoring environment.
+
 ---
 
 # Part D — Known Pitfalls & Lessons Learned

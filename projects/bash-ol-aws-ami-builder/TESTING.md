@@ -77,17 +77,18 @@ non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
 Current fixed pass count (full toolchain present — pinned ShellCheck 0.10.0,
-`ksvalidator`, and `python3`): **310 passed, 0 skipped, 0 failed** across **18
-tiers** (B-T1 parse = 43, B-T2 ShellCheck = 38, B-T3 unit = 35, command-mock = 9,
+`ksvalidator`, and `python3`): **361 passed, 0 skipped, 0 failed** across **19
+tiers** (B-T1 parse = 47, B-T2 ShellCheck = 42, B-T3 unit = 35, command-mock = 9,
 B-T4 kickstart = 1, env-parity = 31, idempotency = 9, hook-timing = 8,
 log-format = 12, ena-uek-detect = 9, ena-reporting = 15, build-visibility = 17,
 ena-ledger-guard = 5, ena-check-2 = 6, ena-verify = 12, ena-verify-results = 15,
-ena-bundle = 13, ssm-verdict = 32). Optional-tool degradations are the only way
-to see a skip: without `ksvalidator` B-T4 contributes a skip (-> 309/1); without
+ena-bundle = 13, ssm-verdict = 32, awscli-verdict = 43). Optional-tool degradations are the only way
+to see a skip: without `ksvalidator` B-T4 contributes a skip (-> 360/1); without
 ShellCheck B-T2 skips; the B-T (ena-bundle) initramfs fixture builds via cpio
 **or** a self-contained `python3` newc fallback, so it no longer skips. The
 B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core builders (see
-"Container clean-core test base" below): B-T1 and B-T2 parse- and lint-check
+"Container clean-core test base" below) and the AWS CLI v2 install-test scripts
+(`install-awscli.sh`, `tests/awscli/`): B-T1 and B-T2 parse- and lint-check
 **every** `.sh` in the project, so adding a script raises both counts by one. The
 host-runnable tiers (L0-L2) are complete; B-T7/B-T8 (L3/L4) remain deferred
 (builder host + AWS). A tier SKIPs cleanly when its optional dependency is absent.
@@ -139,8 +140,8 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 
 | Tier | Layer | Status | Notes |
 |:--|:--|:--|:--|
-| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) + 5 shell-bodied heredoc bodies; 43 asserts |
-| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/` and `tests/ena/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 38 asserts |
+| B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/`, `tests/ena/`, `tests/ssm/`, `tests/awscli/`) + 5 shell-bodied heredoc bodies; 47 asserts |
+| B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/`, `tests/ena/`, `tests/ssm/`, `tests/awscli/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 42 asserts |
 | B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
 | B-T (command mock) | L1 | implemented | `tests/t4_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t3_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
@@ -158,9 +159,11 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (ena verify-results) | L1 | implemented | `tests/t16_enaverifyresults.sh`: the standalone READ-ONLY `tests/ena/verify-ena-buildresults.sh` judges, after the fact, whether each ok build's module is load-ready WITHOUT touching the production path; this tier loads ONLY its two pure verdict functions — `lc_vermagic_verdict` (L4a gate) and `lc_symbols_verdict` (L4b gate) — and asserts them across the verifier's shapes; no I/O/kmod/bundle; 15 asserts |
 | B-T (ena bundle producer) | L1 | implemented | `tests/t17_enabundle.sh`: the matrix's `preserve_bundle()` is a DUMB copy that lifts each build's artifacts into the exact layout the read-only verifier consumes (per-version `ena.ko`, shared per-kver `Module.symvers` / `kernel.vermagic` / `initramfs.list`); loads ONLY that function and drives it against a fabricated image tree. The initramfs fixture builds via cpio **or** a self-contained `python3` newc writer/reader, so the listing assertions RUN on any host with cpio+gzip or python3 (rather than skipping); 13 asserts |
 | B-T (ssm verdict) | L0/L1 | implemented | `tests/t18_ssmverdict.sh`: loads the four pure helpers of `tests/ssm/run-ssm-installtest-matrix.sh` — `ssm_ge` (dotted 4-part compare), `go_min_kernel` (go.mod `go` directive → min-kernel proxy), `ssm_in_scope` (default `>=min` vs `--full` filter), `ssm_compliance` (headline verdict vs AWS min `>= 3.3.3598.0`) — and asserts them across the matrix's shapes; no container/network/clean-core; 32 asserts |
+| B-T (awscli verdict) | L0/L1 | implemented | `tests/t19_awscliverdict.sh`: loads the five pure helpers of `tests/awscli/run-awscli-installtest-matrix.sh` — `awscli_ge` (dotted compare, versions + glibc), `awscli_min_glibc` (documented manylinux floor 2.17/2.5), `awscli_in_scope` (v2-major filter), `awscli_verdict` (`runs`/`glibc-too-old`/`unexpected-fail`), `python_eol` (bundled CPython minor → documented EOL date) — and verifies the reuse-by-copy consistency of `awscli_min_glibc` with `tests/awscli/list-awscli-releases.sh`; no container/network/clean-core; 43 asserts |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
 | clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below), plus `tests/cleancore/build-cleancore.sh` (the `--all`/`--ol` orchestrator wrapping them). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |
+| awscli install-test | (test base) | implemented | `install-awscli.sh` + `tests/awscli/run-awscli-installtest-matrix.sh` + `tests/awscli/list-awscli-releases.sh` — the AWS CLI v2 install+run matrix (glibc axis) and its release-list resolver (see "AWS CLI v2 install+run test matrix" below). **Not** run by `run-all.sh` (heavy: needs root + network + clean-core); the pure verdict/lifecycle helpers are unit-tested host-only by `tests/t19_awscliverdict.sh`; all are covered by B-T1 (parse) + B-T2 (lint) |
 
 ## Container clean-core test base (`tests/cleancore/`)
 
@@ -508,6 +511,65 @@ install+run is real and the recorded `kver` is the provisioned OL UEK in
 each case. A later run in the maintainer's env / CI (a kernel-matched runner for
 the kernel axis) grows the ledger via the kver-PRIMARY dedup append. Production
 integration into `build-ol-aws-ami.sh` is deferred (decided from the report).
+
+## AWS CLI v2 install+run test matrix (`tests/awscli/`)
+
+Structurally the same as the SSM matrix, but for AWS CLI v2 and on the **glibc**
+axis. `run-awscli-installtest-matrix.sh` determines per OL (**OL6/OL7/OL8**) which
+v2 versions **install AND run** in a clean-core container.
+`install-awscli.sh AWSCLI_INSTALLTEST=1` provisions the OL UEK (so `rpm -q
+kernel-uek` records the OL kernel, mirroring SSM), unzips the self-contained v2
+bundle (`awscli-exe-linux-x86_64[-<ver>].zip`), installs it with `aws/install`,
+and runs **`aws --version` + `aws configure list`** locally (no AWS creds / no
+IMDS) to prove the bundled interpreter + glibc-linked `.so`s load. `status=ok`
+requires install + both run checks. (`aws sts get-caller-identity` needs creds +
+network — a real-instance confirmation, not run here.)
+
+**Why glibc.** v2 BUNDLES its own Python, so it does not use the OS Python — but
+the bundled interpreter + C-extension `.so`s are built against a manylinux glibc,
+so the OS glibc gates install/run. Per AWS's *Linux Support Updates for AWS CLI
+v2* (2024-09-16), current v2 is manylinux2014 (glibc 2.17); glibc ≤ 2.16 must pin
+v2 ≤ 2.17.49. The container's real OL glibc (`rpm -q glibc`) is what the bundle
+links against, so unlike the SSM/ENA kernel axis this install-test is **faithful**
+for glibc.
+
+**Bundled Python + empirical glibc (recorded per entry).** Because the matrix
+already unzips each bundle, two facts are read for free and survive the
+glibc-too-old case (the binary need not execute): `bundled_python` (the bundled
+CPython, from `aws/dist/libpython3.X.so*`, refined to the full patch from
+`aws --version` when it runs) and `min_glibc_measured` (the bundle's empirical
+floor — the max `GLIBC_x.y` symbol required across its `.so`s, read with a
+dependency-free grep that matches `readelf`). The documented heuristic floor
+`min_glibc` (≥2.17.50 → 2.17, else 2.5) is also recorded as a cross-check, and
+`python_eol` records the bundled Python's documented end-of-life. The ledger
+dedups on `(osmajor, awscli_version, kver)` kver-PRIMARY.
+
+**Lifecycle (the bundled Python is frozen).** The bundled interpreter is not
+independently patchable; moving to a newer (supported) Python means moving to a
+newer v2 — and a glibc-capped OS caps the v2 version, so it caps the Python too.
+`RESULTS-ol<N>.md` therefore opens with the glibc rationale, a **static**
+Python-EOL table and the **OS's own EOL/EOS** (both provenance-stamped with the
+verified date + sources, Q2 option b), then per kver a verdict (`current` /
+`capped at <ver>` / `none`) and a per-version table with `bundled_python`,
+`python_eol`, and `compat_min_glibc (measured / heuristic)`. The pure
+verdict/lifecycle logic (`awscli_ge`, `awscli_min_glibc`, `awscli_in_scope`,
+`awscli_verdict`, `python_eol`) is unit-tested by `tests/t19_awscliverdict.sh`
+(host-only, no container/network), which also locks the reuse-by-copy
+`awscli_min_glibc` in `list-awscli-releases.sh` to the matrix. Run examples:
+
+```
+bash tests/awscli/list-awscli-releases.sh                            # v2 version list + zip availability + min_glibc
+bash tests/awscli/run-awscli-installtest-matrix.sh --ol 6            # OL6, every v2 version
+bash tests/awscli/run-awscli-installtest-matrix.sh --ol "6 7 8"      # the full OL6/7/8 sweep
+```
+
+The matrix is manual / on-demand (root + container; NOT a `run-all.sh` tier). The
+release list (`awscli-releases.json`), the ledger
+(`awscli-installtest-ledger.json`) and `RESULTS-ol{6,7,8}.md` are produced by a
+**real** matrix run / network probe in the maintainer's env (a long-running
+clean-core + network task) and are not generated in this authoring environment;
+they append to the ledger via the kver-PRIMARY dedup. Production integration into
+`build-ol-aws-ami.sh` is deferred (install-test tooling only, mirroring SSM).
 
 ## B-T4 - Kickstart syntax conformance (`tests/validate-kickstart.sh`)
 

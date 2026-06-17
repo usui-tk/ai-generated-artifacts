@@ -21,6 +21,29 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **AWS CLI v2 install+run test matrix (install-test tooling; `tests/awscli/`).**
+  New `install-awscli.sh` (modes: production / `AWSCLI_INSTALLTEST=1`) plus
+  `tests/awscli/run-awscli-installtest-matrix.sh`,
+  `tests/awscli/list-awscli-releases.sh`, and the pure-logic tier
+  `tests/t19_awscliverdict.sh`. The matrix characterizes, per **OL6/OL7/OL8**,
+  which AWS CLI v2 versions install AND run on the **glibc** axis: v2 bundles its
+  own Python built against a manylinux glibc, so the OS glibc gates install/run
+  (OL6 glibc 2.12 caps at v2 `<= 2.17.49`; OL7/OL8 run current). Each ledger entry
+  records the **bundled CPython** (`bundled_python`, read offline from the bundle
+  so a glibc-too-old result still carries it), the **empirical glibc floor**
+  (`min_glibc_measured` — the max `GLIBC_x.y` symbol required across the bundle's
+  `.so`s, a dependency-free grep matching `readelf`) with the documented heuristic
+  `min_glibc` as a cross-check, and the bundled Python's documented end-of-life
+  (`python_eol`). `RESULTS-ol<N>.md` carries a provenance-stamped (verified date +
+  sources) **static** Python-EOL table and the **OS's own EOL/EOS**, surfacing the
+  frozen-bundled-Python lifecycle risk (the bundle's Python is not independently
+  patchable; a glibc-capped OS caps the Python too). The v1 OL-repo `awscli` is
+  blocked in the production path via versionlock. Suite **310 -> 361** (19 tiers;
+  new `t19` = 43 asserts, B-T1 47 / B-T2 42). The release list / ledger / RESULTS
+  are produced by a real maintainer-env run (NOT committed from this authoring
+  environment). Production integration into `build-ol-aws-ami.sh` is deferred,
+  mirroring SSM.
+
 - **SSM Agent production install in `build-ol-aws-ami.sh` (default ON; OL6-OL10;
   `--skip-ssm-agent` to opt out).** Phase 3 now appends a marker-bracketed hook
   (`[ol-aws-ami-builder PATCH ssm-agent-install]`) to `cloud/aws/provision.sh`,
