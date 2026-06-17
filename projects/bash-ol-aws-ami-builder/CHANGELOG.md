@@ -269,6 +269,20 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Fixed
 
+- **The ENA-bundle initramfs fixture is now cpio-independent, so its assertions
+  RUN instead of SKIPping where `cpio` is absent (`tests/t17_enabundle.sh`,
+  `tests/ena/run-ena-buildtest-matrix.sh`).** `tests/t17_enabundle.sh` builds a
+  gzipped-newc-cpio initramfs and `preserve_bundle()` lists it; both required
+  `cpio`, so a host without it (a minimal CI container) deterministically skipped
+  two assertions. Both sides gain a self-contained `python3` newc fallback: the
+  fixture builder writes the gzipped newc archive, and `preserve_bundle()`'s listing
+  chain appends a `python3` reader after `lsinitrd` / `zcat|cpio -t`. Real builder
+  hosts always have `lsinitrd`/`cpio` and never reach the fallback (behaviour there
+  is byte-identical); `python3` is effectively universal, so the two skips are now
+  passes. The matrix's "no sourced module" design is preserved (the reader is inline
+  in `preserve_bundle()`, so `tests/t17`'s single-function `sed` extraction still
+  carries it). Full suite: 308 passed / 2 skipped -> **310 passed / 0 skipped**.
+
 - **Intermittent suite false-negative eliminated: `assert_match` no longer trips a
   SIGPIPE-under-`pipefail` race (`tests/lib/assert.sh`).** `assert_match` matched
   with `printf '%s' "$1" | grep -Eq -- "$2"`. `grep -q` exits at the first match

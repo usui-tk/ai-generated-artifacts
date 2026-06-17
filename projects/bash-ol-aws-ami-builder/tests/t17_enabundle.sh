@@ -17,8 +17,10 @@
 #   * a failed build (no DKMS ena.ko) fabricates no per-version module
 #   * the produced paths are exactly the ones the verifier reads
 #
-# Host-runnable; self-contained. Fixture tools (cpio/strings) are optional: their
-# assertions skip (never fail) where the tool is absent.
+# Host-runnable; self-contained. The initramfs fixture builds via cpio when
+# present, else a self-contained python3 newc writer, so the initramfs.list
+# assertions RUN on any host with cpio+gzip or python3 (rather than skipping);
+# the `strings` vermagic fallback remains optional.
 #==============================================================================
 set -uo pipefail
 
@@ -62,15 +64,47 @@ make_img() {  # <root> ; build a fake post-build /lib/modules + /boot tree
                                                   > "${r}/lib/modules/${KVER}/kernel/drivers/net/ethernet/amazon/ena/ena.ko"
 }
 
-# a gzipped-cpio initramfs that lists ena.ko (so the zcat|cpio -t fallback works)
+# A gzipped-cpio (newc) initramfs that lists ena.ko, so the producer's listing
+# path and the assertions on it can run. Built with cpio when present (the real
+# builder-host tool); otherwise with a self-contained python3 writer so a minimal
+# container WITHOUT cpio still EXERCISES the path instead of skipping it. Returns
+# 1 only if neither cpio+gzip nor python3 is available (a near-impossible host).
 make_initramfs() {  # <root>
-  command -v cpio >/dev/null 2>&1 || return 1
-  command -v gzip >/dev/null 2>&1 || return 1
-  local r="$1" stg; stg="$(mktemp -d)"
-  mkdir -p "${stg}/lib/modules/${KVER}/updates"
-  : > "${stg}/lib/modules/${KVER}/updates/ena.ko"
-  ( cd "${stg}" && find . | cpio -o -H newc 2>/dev/null ) | gzip > "${r}/boot/initramfs-${KVER}.img"
-  rm -rf "${stg}"
+  local r="$1" stg
+  if command -v cpio >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1; then
+    stg="$(mktemp -d)"
+    mkdir -p "${stg}/lib/modules/${KVER}/updates"
+    : > "${stg}/lib/modules/${KVER}/updates/ena.ko"
+    ( cd "${stg}" && find . | cpio -o -H newc 2>/dev/null ) | gzip > "${r}/boot/initramfs-${KVER}.img"
+    rm -rf "${stg}"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "${KVER}" "${r}/boot/initramfs-${KVER}.img" <<'PYMK'
+import sys, os, gzip
+kver = sys.argv[1]
+out  = sys.argv[2]
+def ent(name, data, mode, ino, nlink):
+    nb = name.encode() + b"\x00"
+    f = [ino, mode, 0, 0, nlink, 0, len(data), 0, 0, 0, 0, len(nb), 0]
+    h = b"070701" + b"".join(b"%08X" % x for x in f) + nb
+    h += b"\x00" * ((-len(h)) % 4)
+    h += data
+    h += b"\x00" * ((-len(data)) % 4)
+    return h
+buf = bytearray(); ino = 1
+for d in ("lib", "lib/modules", "lib/modules/%s" % kver,
+          "lib/modules/%s/updates" % kver):
+    buf += ent("./" + d, b"", 0o040755, ino, 2); ino += 1
+buf += ent("./lib/modules/%s/updates/ena.ko" % kver, b"", 0o100644, ino, 1); ino += 1
+buf += ent("TRAILER!!!", b"", 0, ino, 1)
+os.makedirs(os.path.dirname(out), exist_ok=True)
+with gzip.open(out, "wb") as g:
+    g.write(bytes(buf))
+PYMK
+    return 0
+  fi
+  return 1
 }
 
 IMG="$(mktemp -d)"; BUNDLE="$(mktemp -d)"
@@ -97,12 +131,14 @@ assert_match "$(cat "${kdir}/Module.symvers" 2>/dev/null)" "ena_com_init" "Modul
 assert_file "${kdir}/kernel.vermagic" "kernel.vermagic under kver/<kver>/"
 assert_eq "${VM}" "$(cat "${kdir}/kernel.vermagic" 2>/dev/null)" "kernel.vermagic is the STOCK module's vermagic (independent of the built ko)"
 
-# 4) initramfs.list (optional fixture)
+# 4) initramfs.list -- the fixture now builds via cpio OR a python3 fallback, so
+#    this runs on any host with cpio+gzip or python3; the skip is reached only on
+#    the near-impossible host that has none of them.
 if [ "${HAVE_INITRAMFS}" -eq 1 ]; then
   assert_file "${kdir}/initramfs.list" "initramfs.list under kver/<kver>/"
-  assert_match "$(cat "${kdir}/initramfs.list" 2>/dev/null)" "ena\.ko" "initramfs.list lists ena.ko (cpio -t fallback)"
+  assert_match "$(cat "${kdir}/initramfs.list" 2>/dev/null)" "ena\.ko" "initramfs.list lists ena.ko (cpio -t / python3 newc fallback)"
 else
-  t_skip "initramfs.list (no cpio/gzip on host to build the fixture)"
+  t_skip "initramfs.list (no cpio/gzip and no python3 on host to build the fixture)"
   t_skip "initramfs.list content (fixture unavailable)"
 fi
 

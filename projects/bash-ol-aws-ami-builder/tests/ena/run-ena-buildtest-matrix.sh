@@ -208,12 +208,35 @@ preserve_bundle() {
       | head -1 > "${bdir}/kver/${kver}/kernel.vermagic" 2>/dev/null || true
   fi
   # initramfs.list (INFO, non-gating): listing of the initramfs the build
-  # regenerated, if any. lsinitrd (dracut), else zcat|cpio -t (mkinitrd/EL6).
+  # regenerated, if any. lsinitrd (dracut), else zcat|cpio -t (mkinitrd/EL6). If a
+  # minimal host has neither lsinitrd nor cpio, a self-contained python3 reader of
+  # the gzipped newc archive keeps the listing from silently going empty. Real
+  # builder hosts always have lsinitrd/cpio and never reach the python fallback.
   initramfs="${img}/boot/initramfs-${kver}.img"
   if [ -f "${initramfs}" ]; then
-    { lsinitrd "${initramfs}" 2>/dev/null \
-        || { zcat "${initramfs}" 2>/dev/null || cat "${initramfs}" 2>/dev/null; } | cpio -t 2>/dev/null; } \
-      > "${bdir}/kver/${kver}/initramfs.list" 2>/dev/null || true
+    {
+      lsinitrd "${initramfs}" 2>/dev/null \
+      || { command -v cpio >/dev/null 2>&1 \
+             && { zcat "${initramfs}" 2>/dev/null || cat "${initramfs}" 2>/dev/null; } | cpio -t 2>/dev/null; } \
+      || python3 - "${initramfs}" 2>/dev/null <<'PYNEWC'
+import sys, gzip
+d = open(sys.argv[1], "rb").read()
+if d[:2] == b"\x1f\x8b":
+    d = gzip.decompress(d)
+i = 0
+while i + 110 <= len(d) and d[i:i+6] == b"070701":
+    ns = int(d[i+6+11*8:i+6+12*8], 16)
+    fs = int(d[i+6+6*8:i+6+7*8], 16)
+    name = d[i+110:i+110+ns-1].decode("latin-1")
+    i += 110 + ns
+    i += (-i) % 4
+    if name == "TRAILER!!!":
+        break
+    print(name)
+    i += fs
+    i += (-i) % 4
+PYNEWC
+    } > "${bdir}/kver/${kver}/initramfs.list" 2>/dev/null || true
   fi
   return 0
 }
