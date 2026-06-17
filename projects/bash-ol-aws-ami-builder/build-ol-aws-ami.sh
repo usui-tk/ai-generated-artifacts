@@ -326,6 +326,47 @@ normalize_imds_support() {
   fi
 }
 
+# validate_ami_name NAME
+#   Enforce the AWS EC2 register-image --name constraints (see
+#   https://docs.aws.amazon.com/cli/latest/reference/ec2/register-image.html):
+#   length 3-128, and the allowed character set is alphanumerics plus the
+#   literals ()[] space . / - ' @ _ . Returns 0 when valid; on a violation it
+#   prints a one-line reason to stderr and returns 1 (it never exits, so the
+#   caller decides how to fail). Pure (argument-only: no env, fs, or network),
+#   so it is unit tested in isolation -- see tests/t020_register.sh.
+validate_ami_name() {
+  local name="$1"
+  local n="${#name}"
+  if (( n < 3 || n > 128 )); then
+    printf 'AMI name length %d is out of range (must be 3-128 characters)\n' "${n}" >&2
+    return 1
+  fi
+  # Match any character OUTSIDE the allowed set. In the bracket expression ']'
+  # is listed first and '-' last so both are literal; the single quote is part
+  # of the set. LC_ALL=C gives byte semantics so a multibyte character (which is
+  # outside the ASCII allowed set) is correctly rejected.
+  if printf '%s' "${name}" | LC_ALL=C grep -q "[^]A-Za-z0-9()[ ./'@_-]"; then
+    printf "AMI name contains a character outside the allowed set (alphanumerics and these literals: ()[] space . / - ' @ _)\n" >&2
+    return 1
+  fi
+  return 0
+}
+
+# validate_ami_description DESCRIPTION
+#   Enforce the AWS EC2 register-image --description constraint: length 0-255
+#   (any character; an empty description is allowed). Returns 0 when valid; on a
+#   violation prints a one-line reason to stderr and returns 1. Pure; unit tested
+#   in tests/t020_register.sh.
+validate_ami_description() {
+  local desc="$1"
+  local n="${#desc}"
+  if (( n > 255 )); then
+    printf 'AMI description length %d exceeds the maximum of 255 characters\n' "${n}" >&2
+    return 1
+  fi
+  return 0
+}
+
 load_env() {
   log_step "Loading environment properties: ${ENV_FILE}"
 
@@ -476,6 +517,15 @@ load_env() {
     fi
     : "${AMI_NAME:=OracleLinux-${OL_MAJOR_VERSION}-U${OL_UPDATE_VERSION}-x86_64-$(date +%Y%m%d-%H%M)${_ena_name_sfx}${_ssm_name_sfx}}"
     : "${AMI_DESCRIPTION:=Oracle Linux ${OL_MAJOR_VERSION} Update ${OL_UPDATE_VERSION} (x86_64) custom AMI built via oracle-linux-image-tools${_ena_desc_sfx}${_ssm_desc_sfx}}"
+    # Validate the resolved AMI name/description against the AWS register-image
+    # limits NOW, before Phases 1-8, so an out-of-range or mis-charactered value
+    # (most likely an explicit override) fails fast instead of after a full
+    # build. The same constraints are re-checked implicitly by the Phase-9
+    # --dry-run pre-flight. See validate_ami_name / validate_ami_description.
+    validate_ami_name "${AMI_NAME}" \
+      || die "AMI_NAME is invalid for AWS register-image: '${AMI_NAME}'. It must be 3-128 characters from the allowed set [alphanumerics ()[] space . / - ' @ _]."
+    validate_ami_description "${AMI_DESCRIPTION}" \
+      || die "AMI_DESCRIPTION is invalid for AWS register-image (length ${#AMI_DESCRIPTION}): it must be at most 255 characters."
     # AMI registration boot mode.
     # IMPORTANT: oracle-linux-image-tools currently produces BIOS-only images
     # for the AWS target (BOOT_MODE_BUILD must be 'bios'), so the AMI must
@@ -3520,6 +3570,23 @@ phase9_register_ami() {
   fi
 
   local ami_id
+  # Pre-flight: a register-image --dry-run checks IAM permissions and the
+  # parameter set WITHOUT creating an AMI. Per the AWS API, a dry run that WOULD
+  # succeed returns the error "DryRunOperation" (and a non-zero exit); anything
+  # else -- "UnauthorizedOperation", a parameter/validation error, etc. -- means
+  # the real call would fail. Gate the real registration on seeing
+  # "DryRunOperation", so a doomed registration is caught before it runs.
+  log_info "register-image --dry-run pre-flight (validates permissions/parameters; no AMI is created)"
+  local dry_out
+  dry_out="$(aws ec2 register-image "${register_args[@]}" --dry-run 2>&1)" || true
+  if printf '%s' "${dry_out}" | grep -q 'DryRunOperation'; then
+    log_info "  dry-run OK (DryRunOperation): proceeding with the real registration"
+  else
+    log_error "register-image --dry-run did not return DryRunOperation; the real call would fail:"
+    log_error "  ${dry_out}"
+    die "register-image dry-run pre-flight failed; aborting before the real registration"
+  fi
+
   ami_id=$(aws ec2 register-image "${register_args[@]}" --query 'ImageId' --output text) \
     || die "register-image failed"
 

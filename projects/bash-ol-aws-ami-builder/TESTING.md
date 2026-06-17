@@ -77,13 +77,13 @@ non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
 Current fixed pass count (full toolchain present — pinned ShellCheck 0.10.0,
-`ksvalidator`, and `python3`): **361 passed, 0 skipped, 0 failed** across **19
-tiers** (B-T1 parse = 47, B-T2 ShellCheck = 42, B-T3 unit = 35, command-mock = 9,
+`ksvalidator`, and `python3`): **386 passed, 0 skipped, 0 failed** across **20
+tiers** (B-T1 parse = 48, B-T2 ShellCheck = 43, B-T3 unit = 35, command-mock = 9,
 B-T4 kickstart = 1, env-parity = 31, idempotency = 9, hook-timing = 8,
 log-format = 12, ena-uek-detect = 9, ena-reporting = 15, build-visibility = 17,
 ena-ledger-guard = 5, ena-check-2 = 6, ena-verify = 12, ena-verify-results = 15,
-ena-bundle = 13, ssm-verdict = 32, awscli-verdict = 43). Optional-tool degradations are the only way
-to see a skip: without `ksvalidator` B-T4 contributes a skip (-> 360/1); without
+ena-bundle = 13, ssm-verdict = 32, awscli-verdict = 43, register-validation = 23). Optional-tool degradations are the only way
+to see a skip: without `ksvalidator` B-T4 contributes a skip (-> 385/1); without
 ShellCheck B-T2 skips; the B-T (ena-bundle) initramfs fixture builds via cpio
 **or** a self-contained `python3` newc fallback, so it no longer skips. The
 B-T1 / B-T2 counts include the five `tests/cleancore/` clean-core builders (see
@@ -160,6 +160,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (ena bundle producer) | L1 | implemented | `tests/t017_enabundle.sh`: the matrix's `preserve_bundle()` is a DUMB copy that lifts each build's artifacts into the exact layout the read-only verifier consumes (per-version `ena.ko`, shared per-kver `Module.symvers` / `kernel.vermagic` / `initramfs.list`); loads ONLY that function and drives it against a fabricated image tree. The initramfs fixture builds via cpio **or** a self-contained `python3` newc writer/reader, so the listing assertions RUN on any host with cpio+gzip or python3 (rather than skipping); 13 asserts |
 | B-T (ssm verdict) | L0/L1 | implemented | `tests/t018_ssmverdict.sh`: loads the four pure helpers of `tests/ssm/run-ssm-installtest-matrix.sh` — `ssm_ge` (dotted 4-part compare), `go_min_kernel` (go.mod `go` directive → min-kernel proxy), `ssm_in_scope` (default `>=min` vs `--full` filter), `ssm_compliance` (headline verdict vs AWS min `>= 3.3.3598.0`) — and asserts them across the matrix's shapes; no container/network/clean-core; 32 asserts |
 | B-T (awscli verdict) | L0/L1 | implemented | `tests/t019_awscliverdict.sh`: loads the five pure helpers of `tests/awscli/run-awscli-installtest-matrix.sh` — `awscli_ge` (dotted compare, versions + glibc), `awscli_min_glibc` (documented manylinux floor 2.17/2.5), `awscli_in_scope` (v2-major filter), `awscli_verdict` (`runs`/`glibc-too-old`/`unexpected-fail`), `python_eol` (bundled CPython minor → documented EOL date) — and verifies the reuse-by-copy consistency of `awscli_min_glibc` with `tests/awscli/list-awscli-releases.sh`; no container/network/clean-core; 43 asserts |
+| B-T (register validation) | L1 | implemented | `tests/t020_register.sh`: sources the wrapper (guarded `main`) and exercises the two pure validators that guard `aws ec2 register-image` — `validate_ami_name` (`--name`: length 3-128 + allowed set alphanumerics and `()[]` space `. / - ' @ _`) and `validate_ami_description` (`--description`: length 0-255) — across length boundaries (2/3/128/129/0), realistic auto names (ENA/SSM markers), the full allowed special set, and a battery of disallowed characters (`# * , : + = % !`, braces, tab, multibyte); argument-only, no network; 23 asserts. The Phase-9 `--dry-run` pre-flight that also gates the real call is a live AWS interaction, proved by B-T8 (E2E) |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
 | clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below), plus `tests/cleancore/build-cleancore.sh` (the `--all`/`--ol` orchestrator wrapping them). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |

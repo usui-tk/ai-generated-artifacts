@@ -21,6 +21,27 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **`register-image` input validation + `--dry-run` pre-flight (Phase 9).**
+  Hardened the AMI registration in `build-ol-aws-ami.sh` against the documented
+  AWS EC2 `register-image` constraints. (1) Two new pure validators —
+  `validate_ami_name` (`--name`: length **3-128**, allowed set = alphanumerics
+  and the literals `()[]` space `. / - ' @ _`) and `validate_ami_description`
+  (`--description`: length **0-255**) — are called in `load_env` right after the
+  AMI name/description are resolved, so an out-of-range or mis-charactered value
+  (typically an explicit override, or an unexpectedly long auto name) fails fast
+  with a clear `die` **before** the Phases 1-8 build rather than at the very end.
+  (2) Phase 9 now runs a `register-image --dry-run` pre-flight with the real
+  argument set before the actual registration: per the AWS API a dry run that
+  *would* succeed returns the error `DryRunOperation`, so the real call is gated
+  on detecting `DryRunOperation` and is aborted (no AMI created) on anything else
+  (e.g. `UnauthorizedOperation` for a missing IAM permission, or a parameter
+  error). New unit tier `tests/t020_register.sh` (23 asserts) covers the
+  validators across length boundaries, realistic auto names, the full allowed
+  special set, and disallowed characters; the live dry-run remains E2E (B-T8).
+  Suite **361 -> 386** (20 tiers): +23 (t020) and +1/+1 to B-T1/B-T2 (the new
+  `.sh` is parse- and lint-checked). Docs: SPEC.md (Phase 9 + register-image
+  input validation) + TESTING.md.
+
 - **versionlock plugin in the clean-core default package set (OL6-OL10).** The
   package-pinning plugin is now a default `INCLUDE` member of every clean-core
   test-base builder: `yum-plugin-versionlock` on OL6/OL7 and

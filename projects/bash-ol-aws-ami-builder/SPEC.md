@@ -191,7 +191,7 @@ repository-level `scripts/README.md` policy:
 | 6 | `phase6_nitro_readiness_check` | Validation | Offline Nitro boot-readiness gate (NVMe host / ENA / fstab / bootloader) + instance-assurance report |
 | 7 | `phase7_upload_to_s3` | AWS | `aws s3 cp` the VMDK |
 | 8 | `phase8_import_snapshot` | AWS | `import-snapshot` + polling loop |
-| 9 | `phase9_register_ami` | AWS | `register-image` with conditional `--tpm-support` |
+| 9 | `phase9_register_ami` | AWS | `register-image` (name/description pre-validated; `--dry-run` pre-flight gates the real call) with conditional `--tpm-support` |
 
 ### Phase groups (semantic)
 
@@ -1011,7 +1011,28 @@ Before writing any new helper function:
   transient (retry, don't abort).
 - **Phase 9** conditionally adds `--tpm-support v2.0` only when
   `BOOT_MODE` is `uefi` or `uefi-preferred`. NitroTPM with `legacy-bios`
-  AMIs is invalid.
+  AMIs is invalid. Before the real `register-image` it runs the same
+  argument set with `--dry-run` as a pre-flight: per the AWS API a dry run
+  that *would* succeed returns the error `DryRunOperation` (non-zero exit),
+  so Phase 9 gates the real call on seeing `DryRunOperation` in the output
+  and aborts (without creating an AMI) on anything else — e.g.
+  `UnauthorizedOperation` (missing IAM permission) or a parameter error. The
+  AMI `--name` and `--description` are additionally validated against the AWS
+  register-image limits up front, in `load_env`, so a bad value fails fast
+  before the build rather than at Phase 9 (see below).
+- **`register-image` input validation.** Two pure validators enforce the AWS
+  EC2 `register-image` string constraints
+  ([reference](https://docs.aws.amazon.com/cli/latest/reference/ec2/register-image.html)):
+  `validate_ami_name` requires `--name` to be **3-128** characters drawn only
+  from alphanumerics and the literals `()[]` space `. / - ' @ _`;
+  `validate_ami_description` requires `--description` to be **0-255**
+  characters (any character; empty allowed). Both are argument-only (no env,
+  fs, or network) and return a reason + non-zero on violation without exiting,
+  so `load_env` calls them right after the AMI name/description are resolved
+  and turns a violation into a fast `die` — catching a too-long or
+  mis-charactered override (or an unexpectedly long auto name) before Phases
+  1-8. Unit-tested by `tests/t020_register.sh`; the live `--dry-run` pre-flight
+  is E2E (B-T8).
 
 ### Known constraints
 
