@@ -509,23 +509,78 @@ yum-utils-1.1.31-54.0.1.el7_8.noarch
 zlib-1.2.7-21.el7_9.x86_64
 ```
 
-## Oracle Linux 6 (no `ol6-slim`; base = `oraclelinux:6.6` image)
+## Oracle Linux 6 (`6-slim` = OL6.10, primary; `oraclelinux:6.6` image, fallback)
 
 **Upstream sources** (from the build script's PRIMARY SOURCES):
 
-- Official OL6 container image (rpm 4.8 / db4), Oracle public-yum:
+- **PRIMARY** "6-slim" container rootfs (**OL6.10**), Oracle official, pinned in
+  `oracle/container-images` at the **same commit** the OL7/OL8 builders use
+  (`0218ab4ba2f820b1b978dcc5a76435040397a472`):
+  <https://github.com/oracle/container-images/raw/0218ab4ba2f820b1b978dcc5a76435040397a472/6-slim/oraclelinux-6-slim-amd64-rootfs.tar.xz>
+  (a plain `FROM scratch + ADD rootfs.tar.xz` image; equivalent to
+  `ghcr.io/oracle/oraclelinux:6-slim`, which is built FROM this rootfs).
+- **FALLBACK** legacy OL6.6 container image (rpm 4.8 / db4), Oracle public-yum:
   <https://public-yum.oracle.com/docker-images/OracleLinux/OL6/oraclelinux-6.6.tar.xz>
 - Package repositories (OL6/latest + UEKR4): <https://yum.oracle.com/>
 - EPEL 6 release RPM (EOL; Oracle does not host EPEL 6), Fedora community archive:
   <https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/epel-release-6-8.noarch.rpm>
 
-Unlike OL7-OL10, Oracle never produced an `ol6-slim` container image or a slim
-kickstart for EL6, so there is no upstream slim manifest to diff against. The
-official `oraclelinux:6.6` image (manifest below, 165 packages) is a fuller base;
-`build-cleancore-ol6.sh` uses it only as the EL6-native *builder* (its rpm 4.8
-writes a db4 rpmdb the in-guest EL6 rpm can read), then performs a fresh curated
-`yum --installroot` install from OL6/latest -- so `cleancore-ol6` is NOT a trim
-of this image but an independently composed set (recorded names-only in
+### Availability investigation (verified 2026-06-17)
+
+An `ol6-slim` *does* exist — the earlier assumption that "Oracle never produced
+one" was wrong. Both OL6 official images are still published and pullable:
+
+| Image | Channel | Tag / pin | Version | Digest | Status |
+|-------|---------|-----------|---------|--------|--------|
+| `oraclelinux:6` | GHCR | `6` = `6.10` | OL6.10 | `sha256:f4f7375d3a220de1158f57719eb1df7a7438cad9e33c3a8b8ce88907684b656b` | published; still pulled |
+| `oraclelinux:6-slim` | GHCR | `6-slim` | OL6.10 | `sha256:dbae3e4779d5b412d13d8b06e5ed8bf2a6a9a5a82414646ee76505b10f2fb173` | published; still pulled |
+| `6-slim/...rootfs.tar.xz` | git raw (container-images) | `@0218ab4` | OL6.10 | (git blob) | **HTTP 200** at the pinned commit |
+| `oraclelinux-6.6.tar.xz` | public-yum | (n/a) | OL6.6 | (n/a) | **HTTP 200**, Last-Modified 2014-11-10 |
+
+Notes on permanence: the GHCR `6`/`6-slim` tags are the **current** OL6.10 images
+(published "over 5 years ago", still showing download activity — the content is
+static). The **git-raw rootfs** is gone from the repo's `main` branch (OL6 was
+removed in an EOL cleanup, like `7-slim`), **but it is permanent at the pinned
+commit** `0218ab4` — exactly the durability guarantee the OL7/OL8 builders
+already rely on (a git blob at a fixed SHA never changes). The legacy 6.6
+public-yum tarball is also still served, so the fallback remains valid.
+
+The builder therefore prefers the **6-slim rootfs at `0218ab4`** (same channel +
+pin as OL7/OL8; a plain `curl` of a `tar.xz`, no OCI token/manifest dance) and
+falls back to the 6.6 public-yum docker image only if that fetch fails. The GHCR
+image is the same OL6.10 content via a different (registry-API) channel; the
+git-raw channel is chosen for alignment, dependency-lightness, and because it is
+reachable from the same allow-list the OL7/OL8 builders use.
+
+### OL6 optimization (enabled by the 6.10-slim base)
+
+Starting from `6-slim` (OL6.10) instead of the 6.6 image removes the single most
+fragile part of the OL6 path:
+
+- **TLS modernization is no longer needed (primary path).** The 6.6 image carried
+  a 2014-era NSS that cannot TLS-handshake modern `yum.oracle.com`, so the builder
+  host-fetched the `el6_10` NSS/curl/ca-certificates/openssl RPMs and rpm-installed
+  them with the builder's own rpm 4.8 before it could resolve packages. The
+  6.10-slim rootfs **already ships that stack** — verified in the rootfs: OpenSSL
+  `1.0.1e` (TLS 1.2-capable), NSS (OL6.10 = 3.36 line), `libcurl.so.4.1.1`, plus
+  `usr/bin/yum` and `bin/rpm`. So on the primary path the whole `el6_10` fetch +
+  `rpm -Uvh` modernization is **skipped**; it runs only on the 6.6 fallback.
+- **Channel + format alignment with OL7/OL8.** 6-slim is a plain rootfs `tar.xz`
+  (extracted directly), not a docker `manifest.json` + `layer.tar` image, so the
+  primary path no longer parses a docker manifest. The acquisition now mirrors the
+  OL7/OL8 builders (same repo, same pinned commit, same extraction shape).
+- **Newer + smaller base.** OL6.10 vs OL6.6 (4 years of EL6 updates already in the
+  builder); the slim rootfs is ~24.9 MB (vs the 7-slim ~29.2 MB).
+- **Clean-core output is unchanged in *name* set.** The deliverable is still a
+  fresh `yum --installroot` install from OL6/latest with the **same `INCLUDE`**, so
+  `cleancore-ol6.sbom.json` (names-only) is unaffected by the builder-image switch;
+  only package *versions* in the finalized image move forward (re-confirmed on the
+  next clean-core rebuild).
+
+`build-cleancore-ol6.sh` uses the builder image only as the EL6-native *builder*
+(its rpm writes/reads a db4 rpmdb), then performs a fresh curated
+`yum --installroot` install from OL6/latest -- so `cleancore-ol6` is NOT a trim of
+the builder image but an independently composed set (recorded names-only in
 `cleancore-ol6.sbom.json`). EL6-specific notes: `procps` (not `procps-ng`), `nc`
 (not `nmap-ncat`), plain `git` (no `git-core` split; pulls ~`perl-*`), and
 `net-tools` is included because EL6 has no standalone `hostname` package (the
@@ -535,7 +590,7 @@ release RPM with its own curl and installs it with its own rpm, and ships the
 repo repointed to the archive and `enabled=0`. `systemd` does not apply (EL6 is
 upstart).
 
-**Official `oraclelinux:6.6` RPM manifest** (165 packages, name-version-release.arch):
+**Legacy fallback `oraclelinux:6.6` RPM manifest** (165 packages, name-version-release.arch):
 
 ```text
 MAKEDEV-3.24-6.el6.x86_64

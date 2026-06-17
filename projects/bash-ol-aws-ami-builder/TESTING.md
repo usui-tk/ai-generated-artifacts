@@ -196,9 +196,9 @@ Each builder uses three tagged execution environments:
 
 Per-OL specifics: OL6/OL7 build with `yum`; OL8/OL9/OL10 install the full `dnf`
 into the slim builder (`microdnf install dnf`) first. OL7's manifest no longer
-mirrors the upstream `distr/ol7-slim` kickstart, and OL6 (which has no upstream
-`ol6-slim`) is built as a fresh curated `yum --installroot` install rather than
-from the VM kickstart. **OL6 through OL10 have all been trimmed** to a
+mirrors the upstream `distr/ol7-slim` kickstart, and OL6 builds from the `6-slim`
+container rootfs (OL6.10; fallback the OL6.6 public-yum image) as a fresh curated
+`yum --installroot` install rather than from a VM kickstart. **OL6 through OL10 have all been trimmed** to a
 slim-aligned, container-
 appropriate set: `@core` dropped (no kernel/boot/firewall/cron/syslog), explicit
 test-base essentials, `git-core` instead of `git` (avoiding ~60 `perl-*`), no

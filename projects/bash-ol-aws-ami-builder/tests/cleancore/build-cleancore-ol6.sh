@@ -20,21 +20,31 @@
 #
 # Three execution environments are involved; each block below is tagged:
 #   [A] HOST       - orchestrates only (download, extract, fetch RPMs, edit, pack, test).
-#   [B] BUILDER    - a THROWAWAY OL6.6 public-yum docker image (rpm 4.8 / db4),
-#                    driven via unshare+chroot. Its 2014-era NSS/curl cannot TLS
-#                    -handshake modern yum.oracle.com, so it is FIRST modernized:
-#                    (a) host-fetched el6_10 TLS RPMs are rpm-installed by the
-#                    builder's own rpm 4.8; (b) yum + rpm are updated. Then it can
-#                    resolve current packages. Contents are NOT shipped.
+#   [B] BUILDER    - a THROWAWAY EL6-native builder rootfs, driven via unshare+chroot.
+#                    Acquired in preference order: (1) the Oracle "6-slim" container
+#                    rootfs (OL6.10) pinned in oracle/container-images at the SAME
+#                    commit OL7/OL8 use -- already ships the el6_10 NSS/openssl
+#                    1.0.1e/curl stack, so it can TLS-handshake modern yum.oracle.com
+#                    directly (no modernization); (2) FALLBACK the legacy OL6.6
+#                    public-yum docker image (rpm 4.8 / db4), whose 2014-era NSS/curl
+#                    CANNOT handshake modern yum.oracle.com, so that path is FIRST
+#                    modernized -- host-fetched el6_10 TLS RPMs are rpm-installed by
+#                    the builder's own rpm 4.8, then yum+rpm updated. Contents are
+#                    NOT shipped either way.
 #   [C] CLEAN-CORE - the DELIVERABLE rootfs from the yum --installroot transaction.
 #
 # ----------------------------------------------------------------------------
 # PRIMARY SOURCES (verify upstream)
-#   - Builder image (OL6.6 public-yum docker image; rpm 4.8 / db4), Oracle official:
+#   - Builder image (1) "6-slim" rootfs (OL6.10), Oracle official -- a plain
+#     `FROM scratch + ADD rootfs.tar.xz` tarball, same channel/pin as OL7/OL8;
+#     equivalent to ghcr.io/oracle/oraclelinux:6-slim (this rootfs IS its source):
+#       https://github.com/oracle/container-images/tree/0218ab4ba2f820b1b978dcc5a76435040397a472/6-slim
+#       https://github.com/oracle/container-images/raw/0218ab4ba2f820b1b978dcc5a76435040397a472/6-slim/oraclelinux-6-slim-amd64-rootfs.tar.xz
+#   - Builder image (2) FALLBACK OL6.6 public-yum docker image (rpm 4.8 / db4):
 #       https://public-yum.oracle.com/docker-images/OracleLinux/OL6/oraclelinux-6.6.tar.xz
 #   - Package set = a slim-aligned curated trim (mirrors clean-core OL7 in EL6
-#     names; no upstream ol6-slim exists). See the INCLUDE/EXCLUDE below.
-#   - Package repositories + el6_10 TLS RPMs, Oracle official:
+#     names). See the INCLUDE/EXCLUDE below.
+#   - Package repositories + el6_10 TLS RPMs (fallback path only), Oracle official:
 #       https://yum.oracle.com/repo/OracleLinux/OL6/latest/x86_64/
 #   - EPEL 6 release RPM (EOL; Oracle does not host EPEL 6), Fedora archive:
 #       https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/epel-release-6-8.noarch.rpm
@@ -52,7 +62,20 @@ set -euo pipefail
 # ║ [A] HOST — configuration (inline by design; not externalized)            ║
 # ╚════════════════════════════════════════════════════════════════════════╝
 OSMAJOR=6
-BUILDER_URL="https://public-yum.oracle.com/docker-images/OracleLinux/OL6/oraclelinux-6.6.tar.xz"
+# Builder image, in preference order (see the [B] notes above):
+#   1) PRIMARY  - the Oracle "6-slim" container rootfs (OL6.10), pinned in
+#      oracle/container-images at the SAME commit the OL7/OL8 builders use. A plain
+#      rootfs tar.xz (`FROM scratch + ADD`), extracted directly like OL7/OL8. OL6.10
+#      already ships the el6_10 NSS/openssl(1.0.1e)/curl stack, so it handshakes
+#      modern yum.oracle.com with NO bootstrap modernization. Equivalent to
+#      ghcr.io/oracle/oraclelinux:6-slim (same image; this rootfs is its source).
+#      The raw-git channel matches OL7/OL8 and avoids the OCI token/manifest dance.
+#   2) FALLBACK - the legacy OL6.6 public-yum docker image (rpm 4.8 / db4). Its
+#      2014-era NSS/curl cannot handshake modern yum.oracle.com, so this path ALSO
+#      runs the el6_10 TLS RPM modernization (host-fetched, rpm-installed).
+CI_COMMIT="0218ab4ba2f820b1b978dcc5a76435040397a472"
+BUILDER_SLIM_URL="https://github.com/oracle/container-images/raw/${CI_COMMIT}/6-slim/oraclelinux-6-slim-amd64-rootfs.tar.xz"
+BUILDER_PUBYUM_URL="https://public-yum.oracle.com/docker-images/OracleLinux/OL6/oraclelinux-6.6.tar.xz"
 
 WORK="${WORK:-/tmp/cleancore-ol6}"
 OUT_TARBALL="${1:-${WORK}/cleancore-ol6-rootfs.tar.gz}"
@@ -132,59 +155,74 @@ log() { printf '%s [cleancore-ol6] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 
 
 # ╔════════════════════════════════════════════════════════════════════════╗
-# ║ [A] HOST — acquire the builder rootfs from a docker-save tarball.          ║
-# ║     The public-yum docker image is `manifest.json` + per-layer `layer.tar` ║
-# ║     (OL6.6 is a single layer); extract each layer in order into [B].       ║
+# ║ [A] HOST — acquire the builder rootfs. PRIMARY: the 6-slim rootfs (OL6.10) ║
+# ║     -- a plain `FROM scratch + ADD rootfs.tar.xz` tarball, extracted        ║
+# ║     directly (like OL7/OL8). FALLBACK: the OL6.6 public-yum docker image     ║
+# ║     (`manifest.json` + per-layer `layer.tar`; single layer).                ║
 # ╚════════════════════════════════════════════════════════════════════════╝
-log "[A] downloading OL6.6 public-yum docker image (builder)"
+log "[A] acquiring the EL6 builder rootfs"
 rm -rf "${WORK}"
 mkdir -p "${BUILDER}"
-curl -fsSL -o "${WORK}/builder.tar.xz" "${BUILDER_URL}"
-STAGE="${WORK}/stage"
-mkdir -p "${STAGE}"
-tar -C "${STAGE}" -xJf "${WORK}/builder.tar.xz"
-rm -f "${WORK}/builder.tar.xz"
-log "[A] unpacking docker layer(s) into the builder rootfs"
-if [ -f "${STAGE}/manifest.json" ]; then
-  # ordered layer list from the docker manifest
-  grep -oE '"[^"]*layer\.tar"' "${STAGE}/manifest.json" | tr -d '"' | while read -r layer; do
-    [ -n "${layer}" ] && tar -C "${BUILDER}" -xf "${STAGE}/${layer}"
-  done
+BUILDER_KIND=""
+if curl -fsSL --retry 2 -o "${WORK}/builder.tar.xz" "${BUILDER_SLIM_URL}" 2>/dev/null; then
+  log "[A] using the 6-slim rootfs (OL6.10): ${BUILDER_SLIM_URL}"
+  tar -C "${BUILDER}" -xJf "${WORK}/builder.tar.xz"
+  rm -f "${WORK}/builder.tar.xz"
+  BUILDER_KIND="slim610"
 else
-  find "${STAGE}" -name 'layer.tar' -exec tar -C "${BUILDER}" -xf {} \;
+  log "[A] 6-slim rootfs unavailable; falling back to the OL6.6 public-yum docker image"
+  curl -fsSL -o "${WORK}/builder.tar.xz" "${BUILDER_PUBYUM_URL}"
+  STAGE="${WORK}/stage"
+  mkdir -p "${STAGE}"
+  tar -C "${STAGE}" -xJf "${WORK}/builder.tar.xz"
+  rm -f "${WORK}/builder.tar.xz"
+  log "[A] unpacking docker layer(s) into the builder rootfs"
+  if [ -f "${STAGE}/manifest.json" ]; then
+    # ordered layer list from the docker manifest
+    grep -oE '"[^"]*layer\.tar"' "${STAGE}/manifest.json" | tr -d '"' | while read -r layer; do
+      [ -n "${layer}" ] && tar -C "${BUILDER}" -xf "${STAGE}/${layer}"
+    done
+  else
+    find "${STAGE}" -name 'layer.tar' -exec tar -C "${BUILDER}" -xf {} \;
+  fi
+  rm -rf "${STAGE}"
+  BUILDER_KIND="pubyum66"
 fi
-rm -rf "${STAGE}"
 [ -x "${BUILDER}/bin/rpm" ] || { log "[A] ERROR: builder has no /bin/rpm"; exit 1; }
 cp -f /etc/resolv.conf "${BUILDER}/etc/resolv.conf" 2>/dev/null || true
 
 # ╔════════════════════════════════════════════════════════════════════════╗
-# ║ [A] HOST — fetch the el6_10 TLS RPMs (newest x86_64/noarch each), using     ║
-# ║     the host's modern TLS, by parsing the OL6 repo primary.xml.            ║
+# ║ [A] HOST — (FALLBACK path only) fetch the el6_10 TLS RPMs (newest           ║
+# ║     x86_64/noarch each), using the host's modern TLS, by parsing the OL6    ║
+# ║     repo primary.xml. The 6-slim (OL6.10) builder already ships this stack. ║
 # ╚════════════════════════════════════════════════════════════════════════╝
-log "[A] fetching el6_10 TLS bootstrap RPMs from ${REPO_BASE}"
 TLSDIR="${WORK}/tls"
-mkdir -p "${TLSDIR}"
-curl -fsSL "${REPO_BASE}/repodata/repomd.xml" -o "${WORK}/repomd.xml"
-PRIMARY_REL="$(grep -oE 'repodata/[a-f0-9]+-primary\.xml\.gz' "${WORK}/repomd.xml" | head -1)"
-[ -n "${PRIMARY_REL}" ] || { log "[A] ERROR: primary.xml.gz not found in repomd"; exit 1; }
-curl -fsSL "${REPO_BASE}/${PRIMARY_REL}" -o "${WORK}/primary.xml.gz"
-gunzip -f "${WORK}/primary.xml.gz"   # -> ${WORK}/primary.xml
-for name in "${TLS_PKGS[@]}"; do
-  # newest (version-sorted) x86_64/noarch href for exactly this package name
-  href="$(grep -oE "getPackage/${name}-[0-9][^\"]*\.rpm" "${WORK}/primary.xml" \
-            | grep -vE '\.i686\.rpm$' | sort -V | tail -1)"
-  [ -n "${href}" ] || { log "[A] ERROR: no RPM found for TLS package '${name}'"; exit 1; }
-  curl -fsSL "${REPO_BASE}/${href}" -o "${TLSDIR}/$(basename "${href}")"
-done
-log "[A] fetched $(find "${TLSDIR}" -name '*.rpm' | wc -l) TLS RPMs"
+if [ "${BUILDER_KIND}" = "pubyum66" ]; then
+  log "[A] (fallback) fetching el6_10 TLS bootstrap RPMs from ${REPO_BASE}"
+  mkdir -p "${TLSDIR}"
+  curl -fsSL "${REPO_BASE}/repodata/repomd.xml" -o "${WORK}/repomd.xml"
+  PRIMARY_REL="$(grep -oE 'repodata/[a-f0-9]+-primary\.xml\.gz' "${WORK}/repomd.xml" | head -1)"
+  [ -n "${PRIMARY_REL}" ] || { log "[A] ERROR: primary.xml.gz not found in repomd"; exit 1; }
+  curl -fsSL "${REPO_BASE}/${PRIMARY_REL}" -o "${WORK}/primary.xml.gz"
+  gunzip -f "${WORK}/primary.xml.gz"   # -> ${WORK}/primary.xml
+  for name in "${TLS_PKGS[@]}"; do
+    # newest (version-sorted) x86_64/noarch href for exactly this package name
+    href="$(grep -oE "getPackage/${name}-[0-9][^\"]*\.rpm" "${WORK}/primary.xml" \
+              | grep -vE '\.i686\.rpm$' | sort -V | tail -1)"
+    [ -n "${href}" ] || { log "[A] ERROR: no RPM found for TLS package '${name}'"; exit 1; }
+    curl -fsSL "${REPO_BASE}/${href}" -o "${TLSDIR}/$(basename "${href}")"
+  done
+  log "[A] fetched $(find "${TLSDIR}" -name '*.rpm' | wc -l) TLS RPMs"
+else
+  log "[A] 6-slim (OL6.10) already ships the el6_10 NSS/openssl/curl stack; skipping TLS modernization"
+fi
 
 # ╔════════════════════════════════════════════════════════════════════════╗
-# ║ [A->B] stage the TLS RPMs inside [B] and install the builder-dedicated     ║
-# ║        clean-core yum.repo as the ONLY repo (builder's own repos removed). ║
+# ║ [A->B] write the builder-dedicated clean-core yum.repo as the ONLY repo     ║
+# ║        (builder's own repos removed); on the FALLBACK path also stage the   ║
+# ║        el6_10 TLS RPMs for the modernization step below.                    ║
 # ╚════════════════════════════════════════════════════════════════════════╝
-log "[A->B] (1) staging TLS RPMs + writing builder clean-core yum.repo"
-mkdir -p "${BUILDER}/tmp/tls"
-cp -f "${TLSDIR}"/*.rpm "${BUILDER}/tmp/tls/"
+log "[A->B] writing builder clean-core yum.repo"
 rm -f "${BUILDER}/etc/yum.repos.d/"*.repo
 cat > "${BUILDER}/etc/yum.repos.d/cleancore.repo" <<EOF
 [cc_ol6_latest]
@@ -194,20 +232,29 @@ gpgcheck=0
 sslverify=${SSL}
 enabled=1
 EOF
+if [ "${BUILDER_KIND}" = "pubyum66" ]; then
+  log "[A->B] (fallback) staging el6_10 TLS RPMs into the builder"
+  mkdir -p "${BUILDER}/tmp/tls"
+  cp -f "${TLSDIR}"/*.rpm "${BUILDER}/tmp/tls/"
+fi
 
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║ [B] BUILDER — modernize (runs INSIDE the builder via chroot):              ║
-# ║   (TLS) builder rpm 4.8 installs the el6_10 NSS/curl/ca-certs stack         ║
-# ║   (4A)  yum updates the package managers (yum, rpm)                         ║
+# ║   (TLS) FALLBACK only -- builder rpm 4.8 installs the el6_10 NSS/curl/ca     ║
+# ║         stack so its NSS 3.16 -> 3.44 and modern https becomes possible.     ║
+# ║         The 6-slim (OL6.10) builder already has this stack and skips it.     ║
+# ║   (4A)  yum updates the package managers (yum, rpm) -- both paths.           ║
 # ║   oraclelinux-release is intentionally NOT updated here (the builder reads  ║
 # ║   only cleancore.repo; the deliverable's release comes from the install).   ║
 # ╚════════════════════════════════════════════════════════════════════════╝
-log "[B] (TLS) installing el6_10 TLS stack via the builder's rpm 4.8"
-unshare --fork --pid --mount --uts --ipc bash -c "
-  mount --bind /dev '${BUILDER}/dev'  2>/dev/null || true
-  mount -t proc proc '${BUILDER}/proc' 2>/dev/null || true
-  chroot '${BUILDER}' /bin/rpm -Uvh --replacepkgs --replacefiles /tmp/tls/*.rpm
-"
+if [ "${BUILDER_KIND}" = "pubyum66" ]; then
+  log "[B] (TLS) installing el6_10 TLS stack via the builder's rpm 4.8"
+  unshare --fork --pid --mount --uts --ipc bash -c "
+    mount --bind /dev '${BUILDER}/dev'  2>/dev/null || true
+    mount -t proc proc '${BUILDER}/proc' 2>/dev/null || true
+    chroot '${BUILDER}' /bin/rpm -Uvh --replacepkgs --replacefiles /tmp/tls/*.rpm
+  "
+fi
 log "[B] (4A) updating builder package managers (yum, rpm)"
 unshare --fork --pid --mount --uts --ipc bash -c "
   mount --bind /dev '${BUILDER}/dev'  2>/dev/null || true

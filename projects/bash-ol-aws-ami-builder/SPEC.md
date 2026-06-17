@@ -1626,7 +1626,7 @@ Each builder tags every block with the environment it runs in:
 
 | OL | builder (build-use only) | pkg mgr | enabled repos | package-set source |
 |----|--------------------------|---------|----------------|--------------------|
-| 6 | OL6.6 public-yum docker image (rpm 4.8 / db4); **TLS-modernized first** | `yum` | `latest` | **slim-aligned curated essentials** (`@core` dropped; no upstream `ol6-slim`; see "Package set" below) |
+| 6 | `6-slim` rootfs (OL6.10, ships `yum`); **fallback** OL6.6 public-yum docker image (rpm 4.8 / db4), TLS-modernized first | `yum` | `latest` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 | 7 | `7-slim` rootfs (ships `yum`) | `yum` | `latest` + `UEKR6` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 | 8 | `8-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 | 9 | `9-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
@@ -1637,10 +1637,23 @@ Each builder tags every block with the environment it runs in:
   (EOL), and an EL7 rpm 4.11 / db5 builder writes a db an EL6 rpm reads as **0
   packages** — so OL6 uses an EL6-native builder, giving permanent rpmdb
   compatibility.
-- **OL6 builder modernization.** The 2014-era OL6.6 image's NSS/curl cannot
-  TLS-handshake modern `yum.oracle.com`; the builder's own rpm 4.8 first installs
-  host-fetched `el6_10` NSS/curl/ca-certs RPMs, then `yum` updates the package
-  managers, after which `https` works.
+- **OL6 builder source (6-slim primary, 6.6 fallback).** The builder is acquired
+  in preference order: (1) the Oracle **`6-slim` rootfs (OL6.10)** pinned in
+  `oracle/container-images` at the **same commit `0218ab4` the OL7/OL8 builders
+  use** — a plain `FROM scratch + ADD rootfs.tar.xz` image (the same OL6.10 content
+  as `ghcr.io/oracle/oraclelinux:6-slim`, fetched via the git-raw channel to match
+  OL7/OL8 and avoid the OCI token/manifest dance); (2) **fallback** the legacy
+  OL6.6 public-yum docker image. Both remain published (verified 2026-06-17); the
+  git-raw rootfs is permanent at the pinned commit even though OL6 was dropped from
+  the repo's `main`. See `tests/cleancore/REFERENCE-oracle-official-images.md` for
+  the digests and the availability investigation.
+- **OL6 builder modernization (fallback only).** The 2014-era OL6.6 image's
+  NSS/curl cannot TLS-handshake modern `yum.oracle.com`, so on the **fallback** path
+  the builder's own rpm 4.8 first installs host-fetched `el6_10`
+  NSS/curl/ca-certs/openssl RPMs, then `yum` updates the package managers, after
+  which `https` works. The **6.10-slim primary already ships that stack** (OpenSSL
+  1.0.1e, NSS 3.36 line, `libcurl.so.4`), so the whole `el6_10` fetch +
+  modernization is **skipped** on the primary path — its single most fragile step.
 - **Package set: per-OL, slim-aligned.** **OL6 through OL10 have all been
   trimmed** to a container-appropriate, slim-aligned set: `@core` is dropped (so no
   kernel/boot/firewall/cron/syslog), a minimal userland plus explicit test-base
@@ -1676,11 +1689,14 @@ Each builder tags every block with the environment it runs in:
   and the base `oraclelinux-release` (which provides `/etc/oracle-release`) is
   listed explicitly because the EL7 `oraclelinux-release-el7` does not pull it in.
   **EL6 specific:** OL6 (EOL; rpm 4.8 / db4) is built by an EL6-native builder
-  (the OL6.6 image) doing a fresh curated `yum --installroot` install — not a trim
-  of an upstream slim, which does not exist for EL6. Like EL7 it carries plain
-  `git` (no `git-core` split) plus `procps` (not `procps-ng`) and `nc` (not
-  `nmap-ncat`); unlike the other clean-cores it **includes `net-tools`**, because
-  EL6 has no standalone `hostname` package (the command ships in `net-tools`).
+  (the `6-slim` OL6.10 rootfs primary, or the OL6.6 image fallback) doing a fresh
+  curated `yum --installroot` install — not a trim of the builder image. (An
+  `ol6-slim` *does* exist after all — OL6.10, at the pinned `0218ab4` — so the
+  builder uses it as the primary base; see the OL6 builder bullets above.) Like EL7
+  it carries plain `git` (no `git-core` split) plus `procps` (not `procps-ng`) and
+  `nc` (not `nmap-ncat`); unlike the other clean-cores it **includes `net-tools`**,
+  because EL6 has no standalone `hostname` package (the command ships in
+  `net-tools`).
   EPEL 6 is EOL and Oracle hosts none, so in finalize (C) **conditionally**
   enables the clean-core's NSS dynamic CA trust — it is a workaround for the
   Claude build **sandbox**, whose egress proxy presents an intercepting (MITM)

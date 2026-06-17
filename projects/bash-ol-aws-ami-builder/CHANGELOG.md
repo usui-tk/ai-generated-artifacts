@@ -184,6 +184,31 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Changed
 
+- **OL6 clean-core builder now uses the `6-slim` (OL6.10) rootfs as the primary
+  base, with the OL6.6 image as a fallback.** `tests/cleancore/build-cleancore-ol6.sh`
+  acquired its EL6-native *builder* from the legacy OL6.6 public-yum docker image,
+  whose 2014-era NSS/curl cannot TLS-handshake modern `yum.oracle.com` — so it
+  host-fetched the `el6_10` NSS/curl/ca-certs/openssl RPMs and rpm-installed them to
+  modernize the builder before it could resolve packages. Investigation (2026-06-17)
+  found an `ol6-slim` **does** exist: `ghcr.io/oracle/oraclelinux:6-slim` (OL6.10,
+  digest `sha256:dbae3e47…`) and, crucially, the same OL6.10 rootfs is pinned in
+  `oracle/container-images` at commit `0218ab4` — the **same channel and pin the
+  OL7/OL8 builders already use** — as a plain `FROM scratch + ADD rootfs.tar.xz`
+  tarball (`oraclelinux-6-slim-amd64-rootfs.tar.xz`, HTTP 200; permanent at the
+  pinned commit even though OL6 was dropped from the repo's `main`). The builder now
+  fetches that 6-slim rootfs first (a direct `curl` + extract, like OL7/OL8) and
+  falls back to the OL6.6 docker image only if the fetch fails. **Optimization:** the
+  6.10-slim rootfs already ships the `el6_10` stack (verified: OpenSSL 1.0.1e, NSS
+  3.36 line, `libcurl.so.4`), so the entire TLS-modernization fetch + `rpm -Uvh` is
+  **skipped on the primary path** and runs only on the 6.6 fallback — removing the
+  OL6 path's single most fragile step and aligning its acquisition shape with
+  OL7/OL8. The clean-core deliverable is a fresh `yum --installroot` install with the
+  **same `INCLUDE`**, so `cleancore-ol6.sbom.json` (names-only) is unchanged; only
+  finalized package *versions* move forward (re-confirmed on the next clean-core
+  rebuild). The builder is lint-only in `run-all.sh` (root + network + multi-hundred-MB
+  build), so the suite is unchanged at 386/0/0. Docs: `REFERENCE-oracle-official-images.md`
+  (availability investigation + OL6 optimization) + SPEC.md + TESTING.md.
+
 - **SSM Agent: persistent AMI identity + final report now show a concrete
   version, not `latest`.** "latest" is unsuitable for a persistent artifact, so
   `build-ol-aws-ami.sh` resolves the `/latest/` alias (for OL7-OL10) to a concrete
