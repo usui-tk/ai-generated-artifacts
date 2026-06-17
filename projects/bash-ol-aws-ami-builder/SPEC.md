@@ -1627,11 +1627,11 @@ Each builder tags every block with the environment it runs in:
 | OL | builder (build-use only) | pkg mgr | enabled repos | package-set source |
 |----|--------------------------|---------|----------------|--------------------|
 | 5 | **`oraclelinux:10` work-env** (floating `:10`, OCI v2 `curl` pull; no host installs) bootstraps an **EL5-native builder** (`rpm2cpio\|cpio` from the OL5 RPMs); rpm 4.4 / db4.3 | EL5 `yum` 3.2.22 + EL5 `createrepo` 0.4.11 | `file://` mirror (OL5/latest) | **slim-aligned curated essentials** (`@core` dropped; no `git`/`jq`; see "Package set" below) |
-| 6 | `6-slim` rootfs (OL6.10, ships `yum`); **fallback** OL6.6 public-yum docker image (rpm 4.8 / db4), TLS-modernized first | `yum` | `latest` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
-| 7 | `7-slim` rootfs (ships `yum`) | `yum` | `latest` + `UEKR6` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
-| 8 | `8-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
-| 9 | `9-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
-| 10 | `10-slim` rootfs + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
+| 6 | floating **`6-slim` tag** (registry, latest 6.x = OL6.10, ships `yum`) -> **fallback** pinned `6-slim` git-raw rootfs -> **last** OL6.6 public-yum docker (rpm 4.8 / db4, TLS-modernized first) | `yum` | `latest` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
+| 7 | floating **`7-slim` tag** (registry, latest 7.x) -> **fallback** pinned `7-slim` git-raw rootfs; ships `yum` | `yum` | `latest` + `UEKR6` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
+| 8 | floating **`8-slim` tag** (registry, latest 8.x) -> **fallback** pinned `8-slim` git-raw rootfs; + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
+| 9 | floating **`9-slim` tag** (registry, latest 9.x) -> **fallback** pinned `9-slim` git-raw rootfs; + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
+| 10 | floating **`10-slim` tag** (registry, latest 10.x) -> **fallback** pinned `10-slim` git-raw rootfs; + `microdnf install dnf` | `dnf` | `baseos` + `appstream` | **slim-aligned curated essentials** (`@core` dropped; see "Package set" below) |
 
 - **EL-native builder is mandatory.** rpm / BerkeleyDB versions must match the
   target so the in-guest rpm reads the rpmdb. **OL6 stays rpm 4.8 / db4 forever**
@@ -1642,6 +1642,21 @@ Each builder tags every block with the environment it runs in:
   channel, so OL5 instead bootstraps its EL5-native builder inside the OL10
   work-env (see the **EL5 specific** note below) — the OL10 rpm never writes the
   deliverable rpmdb (a modern rpm yields a db the in-guest OL5 rpm reads as 0).
+- **Builder image acquisition (OL6-OL10): floating tag primary, pinned fallback.**
+  Each OL6-OL10 builder first pulls its `N-slim` image by its **floating tag** from
+  the Oracle container registry (`container-registry.oracle.com/os/oraclelinux:N-slim`)
+  over the **OCI registry v2 API** — `curl`-only (anonymous token -> manifest/index
+  -> amd64 sub-manifest if multi-arch -> gzip layer blobs), or a container runtime
+  (`podman`/`docker` `pull` + `export`) as a fast path if one is present. This tracks
+  the **latest N.x slim** with no commit bump. If the registry is unreachable the
+  builder **falls back** to the byte-stable **pinned `N-slim` git-raw rootfs**
+  (`oracle/container-images` at `CI_COMMIT`); OL6 then has a third fallback (the OL6.6
+  public-yum image). The tag and the pinned rootfs are the same slim content stream,
+  so the fallback is a faithful substitute. This mirrors the OL5 builder's OCI pull
+  (shared, self-contained `oci_pull_rootfs()` in each builder; host `curl` uses `-k`
+  only under `INSECURE_TLS=1`). The acquisition is **build-use only** and does not
+  change the deliverable, which is the curated `--installroot` set against
+  `yum.oracle.com/latest` regardless of the builder image's exact version.
 - **OL6 builder source (6-slim primary, 6.6 fallback).** The builder is acquired
   in preference order: (1) the Oracle **`6-slim` rootfs (OL6.10)** pinned in
   `oracle/container-images` at the **same commit `0218ab4` the OL7/OL8 builders

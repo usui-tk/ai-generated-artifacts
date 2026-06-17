@@ -21,7 +21,24 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
-- **OL5 clean-core builder shipped (`tests/cleancore/build-cleancore-ol5.sh`).**
+- **OL6-OL10 clean-core builders: floating-tag builder image with pinned fallback.**
+  Adopted the OL5 builder's tag-based container-image acquisition across
+  `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh`. Each now **pulls its `N-slim`
+  image by its floating tag** from the Oracle container registry
+  (`container-registry.oracle.com/os/oraclelinux:N-slim`) over the OCI registry v2
+  API as the **primary** source (shared, self-contained `oci_pull_rootfs()`:
+  anonymous token -> manifest/multi-arch index -> amd64 sub-manifest -> gzip layer
+  blobs via `curl`, or a `podman`/`docker` `pull`+`export` fast path if present),
+  so the builder always tracks the latest N.x slim. If the registry is unreachable
+  it **falls back** to the byte-stable **pinned `N-slim` git-raw rootfs**
+  (`oracle/container-images` at `CI_COMMIT`); OL6 keeps the OL6.6 public-yum image
+  as a third fallback. Verified all five `N-slim` tags pull anonymously with the
+  expected tooling (OL6/OL7 -> `yum`, OL8/OL9/OL10 -> `microdnf` + `rpm`). Robustness
+  only: the acquisition is build-use, so the deliverable (curated `--installroot`
+  set against `yum.oracle.com/latest`) is unchanged; OL6's `BUILDER_KIND` keeps the
+  TLS-modernization on the OL6.6 path only. Host `curl` uses `-k` only under
+  `INSECURE_TLS=1`. Docs: SPEC.md **B.8** (Per-OL table + acquisition bullet),
+  TESTING.md ([B] BUILDER note). Suite unchanged **388/0/0** (lint-only delta).
   Added a live `build-cleancore-ol5.sh` (= OL5.11) clean-core test-base builder and
   wired it into the `build-cleancore.sh` orchestrator (`--all` now spans
   `5,6,7,8,9,10`), motivated by quasi-validation of legacy OL5 systems still running

@@ -188,7 +188,13 @@ Each builder uses three tagged execution environments:
   is **EL-native** so the in-guest rpm can read the rpmdb it writes — mandatory
   for OL6, whose rpm stays 4.8 / BerkeleyDB-4 forever (an EL7 rpm 4.11 / db5
   builder yields a db an EL6 rpm reads as 0 packages). OL6 additionally needs a
-  TLS-stack modernization before it can reach modern `yum.oracle.com`.
+  TLS-stack modernization before it can reach modern `yum.oracle.com`. **OL6-OL10
+  acquire this image by its floating `N-slim` tag** from the Oracle container
+  registry (`container-registry.oracle.com`, OCI v2 / `curl`, or a container
+  runtime as a fast path) so the builder tracks the latest N.x slim, and **fall
+  back** to the byte-stable pinned `N-slim` git-raw rootfs (OL6 then to the OL6.6
+  image) if the registry is unreachable — the same `oci_pull_rootfs` model the OL5
+  builder uses for `oraclelinux:10`.
 - **[C] CLEAN-CORE** — the deliverable rootfs from the `yum`/`dnf
   --installroot` transaction, finalized (device nodes, OCI yum-variable rewrite,
   build-time repo dropped, logs zero-filled, machine-id / ssh host keys cleared)

@@ -46,7 +46,15 @@ set -euo pipefail
 # ║ [A] HOST — configuration (inline by design; not externalized)            ║
 # ╚════════════════════════════════════════════════════════════════════════╝
 OSMAJOR=7
-CI_COMMIT="0218ab4ba2f820b1b978dcc5a76435040397a472"   # oracle/container-images pin
+# Builder image, in preference order: (1) PRIMARY the Oracle container-registry
+# "7-slim" image by its FLOATING tag (always the latest 7.x slim), pulled over the
+# OCI registry v2 API (curl-only, or a container runtime if present); (2) FALLBACK
+# the SAME 7-slim rootfs pinned in oracle/container-images at CI_COMMIT (byte-stable
+# git-raw tarball) if the registry is unreachable.
+OL_REGISTRY="${OL_REGISTRY:-https://container-registry.oracle.com}"
+OL_IMAGE="${OL_IMAGE:-os/oraclelinux}"
+OL_TAG="${OL_TAG:-7-slim}"                              # floating: latest 7.x slim
+CI_COMMIT="0218ab4ba2f820b1b978dcc5a76435040397a472"   # oracle/container-images pin (fallback)
 BUILDER_URL="https://github.com/oracle/container-images/raw/${CI_COMMIT}/7-slim/oraclelinux-7-slim-amd64-rootfs.tar.xz"
 
 WORK="${WORK:-/tmp/cleancore-ol7}"
@@ -56,6 +64,7 @@ OUT_TARBALL="${1:-${WORK}/cleancore-ol7-rootfs.tar.gz}"
 # supplied transiently via --setopt (never written into the deliverable's repos).
 INSECURE_TLS="${INSECURE_TLS:-1}"
 SSL=1; [ "${INSECURE_TLS}" = "1" ] && SSL=0
+CURL_K=""; [ "${INSECURE_TLS}" = "1" ] && CURL_K="-k"   # host curl for the registry pull
 
 REPO_LATEST="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/latest/x86_64/"
 REPO_UEKR6="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/UEKR6/x86_64/"
@@ -98,15 +107,99 @@ log() { printf '%s [cleancore-ol7] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 # bash true); no namespaces / /dev bind are needed for these.
 c_run() { chroot "${DELIV}" "$@"; }
 
+# --- Tag-based builder image pull (OCI registry v2; curl-only + runtime fast-path) ---
+# Pull oraclelinux:<tag> from the Oracle container registry into a rootfs dir. A
+# floating tag (e.g. 7-slim) is always the latest N.x slim. Returns 0 on success,
+# 1 to let the caller fall back. Self-contained (no shared lib) per the per-builder
+# design; mirrors the OL5 builder. Needs host curl (+ python3 for the curl-only
+# path); a missing tool or any failure simply returns 1 (-> caller falls back).
+oci_pull_rootfs() {
+  local _reg="$1" _repo="$2" _tag="$3" _dest="$4"
+  local _rt="" _c _ref _cid _tok _amd _meta _dig
+  for _c in podman docker; do
+    if command -v "${_c}" >/dev/null 2>&1; then _rt="${_c}"; break; fi
+  done
+  if [ -n "${_rt}" ]; then
+    _ref="${_reg#https://}/${_repo}:${_tag}"
+    "${_rt}" pull "${_ref}" >/dev/null 2>&1 || return 1
+    _cid="$("${_rt}" create "${_ref}" /bin/true 2>/dev/null)" || return 1
+    if ! "${_rt}" export "${_cid}" 2>/dev/null | tar -C "${_dest}" -xf -; then
+      "${_rt}" rm -f "${_cid}" >/dev/null 2>&1 || true; return 1
+    fi
+    "${_rt}" rm -f "${_cid}" >/dev/null 2>&1 || true
+    return 0
+  fi
+  command -v python3 >/dev/null 2>&1 || return 1
+  _meta="$(mktemp -d)" || return 1
+  _tok="$(curl -fsS ${CURL_K} --get "${_reg}/auth" \
+            --data-urlencode "service=Oracle Registry" \
+            --data-urlencode "scope=repository:${_repo}:pull" 2>/dev/null \
+          | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])' 2>/dev/null)" || true
+  if [ -z "${_tok}" ]; then rm -rf "${_meta}"; return 1; fi
+  if ! curl -fsSL ${CURL_K} -H "Authorization: Bearer ${_tok}" \
+      -H "Accept: application/vnd.oci.image.index.v1+json" \
+      -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+      -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+      -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+      "${_reg}/v2/${_repo}/manifests/${_tag}" -o "${_meta}/index.json" 2>/dev/null; then
+    rm -rf "${_meta}"; return 1
+  fi
+  _amd="$(python3 -c '
+import sys,json
+d=json.load(open(sys.argv[1]))
+if "manifests" in d:
+    for m in d["manifests"]:
+        p=m.get("platform",{})
+        if p.get("architecture")=="amd64" and p.get("os")=="linux":
+            print(m["digest"]); break
+else:
+    print("")' "${_meta}/index.json" 2>/dev/null)" || true
+  if [ -n "${_amd}" ]; then
+    if ! curl -fsSL ${CURL_K} -H "Authorization: Bearer ${_tok}" \
+        -H "Accept: application/vnd.oci.image.manifest.v1+json" \
+        -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+        "${_reg}/v2/${_repo}/manifests/${_amd}" -o "${_meta}/manifest.json" 2>/dev/null; then
+      rm -rf "${_meta}"; return 1
+    fi
+  else
+    cp -f "${_meta}/index.json" "${_meta}/manifest.json"
+  fi
+  if ! python3 -c '
+import sys,json
+d=json.load(open(sys.argv[1]))
+for l in d.get("layers",[]): print(l["digest"])' "${_meta}/manifest.json" 2>/dev/null > "${_meta}/layers.txt"; then
+    rm -rf "${_meta}"; return 1
+  fi
+  if [ ! -s "${_meta}/layers.txt" ]; then rm -rf "${_meta}"; return 1; fi
+  while IFS= read -r _dig; do
+    [ -n "${_dig}" ] || continue
+    if ! curl -fsSL ${CURL_K} -H "Authorization: Bearer ${_tok}" \
+        "${_reg}/v2/${_repo}/blobs/${_dig}" 2>/dev/null | tar -C "${_dest}" -xz; then
+      rm -rf "${_meta}"; return 1
+    fi
+  done < "${_meta}/layers.txt"
+  rm -rf "${_meta}"
+  return 0
+}
+
 # ╔════════════════════════════════════════════════════════════════════════╗
-# ║ [A] HOST — acquire the builder rootfs (download + extract; no runtime)    ║
+# ║ [A] HOST — acquire the builder rootfs. PRIMARY: the floating 7-slim tag    ║
+# ║     from the Oracle container registry (latest 7.x; OCI v2 / curl).         ║
+# ║     FALLBACK: the pinned 7-slim git-raw rootfs (byte-stable) if unreachable.║
 # ╚════════════════════════════════════════════════════════════════════════╝
-log "[A] downloading 7-slim builder rootfs"
+log "[A] acquiring the EL7 builder rootfs"
 rm -rf "${WORK}"
 mkdir -p "${BUILDER}"
-curl -fsSL -o "${WORK}/builder.tar.xz" "${BUILDER_URL}"
-tar -C "${BUILDER}" -xJf "${WORK}/builder.tar.xz"
-rm -f "${WORK}/builder.tar.xz"
+if oci_pull_rootfs "${OL_REGISTRY}" "${OL_IMAGE}" "${OL_TAG}" "${BUILDER}"; then
+  log "[A] using the floating ${OL_TAG} image from ${OL_REGISTRY#https://}/${OL_IMAGE} (latest 7.x)"
+elif curl -fsSL --retry 2 -o "${WORK}/builder.tar.xz" "${BUILDER_URL}" 2>/dev/null; then
+  log "[A] registry pull unavailable; falling back to the pinned 7-slim rootfs (${BUILDER_URL})"
+  tar -C "${BUILDER}" -xJf "${WORK}/builder.tar.xz"
+  rm -f "${WORK}/builder.tar.xz"
+else
+  log "[A] ERROR: could not acquire the 7-slim builder rootfs (registry + pinned both failed)"; exit 1
+fi
+[ -x "${BUILDER}/bin/rpm" ] || [ -x "${BUILDER}/usr/bin/rpm" ] || { log "[A] ERROR: builder has no rpm"; exit 1; }
 # the slim image ships no resolv.conf; share host DNS for the build
 cp -f /etc/resolv.conf "${BUILDER}/etc/resolv.conf" 2>/dev/null || true
 
