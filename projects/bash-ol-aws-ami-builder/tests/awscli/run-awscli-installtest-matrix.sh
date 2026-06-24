@@ -83,10 +83,12 @@ warn() { log "WARNING: $*" >&2; }
 die()  { log "ERROR: $*" >&2; exit 1; }
 hr()   { log "================================================================"; }
 
-# pinned QA-preflight version per OL major (a known-good smoke version). 2.17.49
-# is the documented last build for glibc <= 2.16, so it installs+runs on OL6
-# (2.12), OL7 (2.17) and OL8 (2.28) alike -- a safe health-check across the scope.
-pin_for() { case "$1" in 6|7|8) echo 2.17.49 ;; *) echo "" ;; esac; }
+# pinned QA-preflight version per OL major (a known-good smoke version). 2.17.51
+# is the highest build proven to install+run on OL6 (glibc 2.12) by this matrix --
+# the last GLIBC_2.5 / Python-3.11.9 build -- and it runs on OL7 (2.17) and OL8
+# (2.28) alike, so it is a safe health-check across the scope. Kept in step with
+# install-awscli.sh's OL6 production pin (AWSCLI_VERSION_OL6).
+pin_for() { case "$1" in 6|7|8) echo 2.17.51 ;; *) echo "" ;; esac; }
 
 # ===========================================================================
 # Pure helpers (no I/O) -- unit-tested by tests/t019_awscliverdict.sh. Keep each a

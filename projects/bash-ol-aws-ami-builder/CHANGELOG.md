@@ -21,6 +21,16 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **awscli matrix: QA-preflight pin aligned to 2.17.51.** `tests/awscli/run-awscli-installtest-matrix.sh`'s
+  `pin_for()` smoke version moves `2.17.49` -> `2.17.51` to match the OL6 production
+  pin (`install-awscli.sh` `AWSCLI_VERSION_OL6`). 2.17.51 is the empirically highest
+  install+run build on OL6 (glibc 2.12) -- the last GLIBC_2.5 / Python-3.11.9 build --
+  so it remains a safe cross-OL (6/7/8) preflight health-check. Smoke-only: the value
+  does not appear in the committed ledger/RESULTS (those carry one row per real
+  attempt) and is not unit-tested, so the suite is unchanged at **388/0/0**. The
+  documented manylinux heuristic boundary (`>= 2.17.50 -> 2.17`) and the AWS-documented
+  `<= 2.17.49` citation in the report header are unchanged.
+
 - **AWS CLI v2 install+run E2E results committed; OL6 production pin 2.17.49 -> 2.17.51.**
   Landed the maintainer's real OL6/OL7/OL8 install+run matrix run (a clean-core +
   network task not reproducible in the authoring env): `tests/awscli/awscli-installtest-ledger.json`
