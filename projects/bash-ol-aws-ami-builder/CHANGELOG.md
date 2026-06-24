@@ -21,6 +21,32 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **AWS CLI v2 production install integrated into `build-ol-aws-ami.sh` (OL6/OL7/OL8; default ON).**
+  By default (`AWSCLI_INSTALL=1`) the wrapper now installs **AWS CLI v2** into the
+  guest on **OL6/OL7/OL8**, so a built AMI ships v2 as the standard CLI (AWS CLI v1
+  is increasingly unsupported). Phase 3 appends a marker-bracketed hook
+  `[ol-aws-ami-builder PATCH awscli-install]` to `cloud/aws/provision.sh` that writes
+  `install-awscli.sh` verbatim into the guest and runs it (install the per-OL bundle
+  + exclude the OL-repo v1 `awscli` via versionlock), mirroring the SSM hook.
+  **NON-FATAL** (utility tooling, not Nitro-critical): a transient failure warns and
+  provisioning continues. `--skip-awscli` opts out. **OL9/OL10 are out of scope** —
+  they install AWS CLI v2 from their default package manager, so the hook is not
+  injected there (an info line is logged) and `--skip-awscli` has no effect on them.
+  **AMI identity:** when enabled, the AUTO-default `AMI_NAME` appends `-awscli${ver}`
+  and the description `, AWS CLI v2 ${ver}` — always a **concrete `x.y.z`**: OL6 the
+  pin `2.17.51`, OL7/OL8 the `latest` bundle resolved to a concrete published version
+  by `_awscli_resolve_latest()` (enumerate v2 tags via `git ls-remote --tags`, walk
+  newest-first, return the highest whose CDN zip is published via a HEAD — the newest
+  tag can lead CDN publication). Display/identity only: the guest still installs the
+  OL7/OL8 `latest` bundle. If resolution fails (e.g. an offline `--build-only`), the
+  identity **omits the awscli marker** rather than ever printing `latest`. Per-OL pin
+  read from `install-awscli.sh`'s `AWSCLI_VERSION_OL<major>` via `_awscli_pin_for_major()`
+  (single source of truth, mirroring `_ssm_pin_for_major()`). The final report gains
+  an `AWS CLI:` line. `--skip-awscli` + knobs log + usage added. New SPEC **B.13**
+  (+ B.4 marker row, B.1 `AMI_NAME`/`AMI_DESCRIPTION` rows, switch table) + README
+  pair (flag row + script-inventory row, bilingual lock-step) + TESTING.md.
+  `tests/t007_idempotency.sh` marker count **8 -> 9**; suite **388 -> 389**.
+
 - **awscli matrix: QA-preflight pin aligned to 2.17.51.** `tests/awscli/run-awscli-installtest-matrix.sh`'s
   `pin_for()` smoke version moves `2.17.49` -> `2.17.51` to match the OL6 production
   pin (`install-awscli.sh` `AWSCLI_VERSION_OL6`). 2.17.51 is the empirically highest

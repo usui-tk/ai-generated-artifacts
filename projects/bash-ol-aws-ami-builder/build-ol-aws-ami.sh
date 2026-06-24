@@ -98,6 +98,11 @@
 #                           Default is to install + enable it for boot (OL6-OL10),
 #                           so the AMI is SSM Run Command compliant out of the box;
 #                           this switch leaves the agent out.
+#   --skip-awscli         : Do NOT install AWS CLI v2 in the guest. Default is to
+#                           install it on OL6/OL7/OL8 (the standard CLI, since
+#                           AWS CLI v1 is increasingly unsupported); this switch
+#                           leaves it out. OL9/OL10 are out of scope (use their
+#                           default package manager) and unaffected by this switch.
 #   --imds-support <mode> : IMDS support baked into the AMI. 'default'
 #                           (IMDSv1+v2; HttpTokens=optional) or 'v2.0'
 #                           (IMDSv2-required, OL7+ only). Default: 'default'.
@@ -170,6 +175,17 @@ SSM_AGENT_INSTALL=1
 # Resolved SSM Agent version for THIS OL (filled when SSM_AGENT_INSTALL=1, from
 # install-ssm-agent.sh's per-OL map); "latest" or a pin. Used in the AMI name/desc.
 SSM_AGENT_RESOLVED=""
+# AWS CLI v2 install (default ON -> the AMI ships AWS CLI v2 as the standard CLI,
+# since AWS CLI v1 is increasingly unsupported; --skip-awscli turns it OFF). Wired
+# for OL6/OL7/OL8 ONLY -- OL9/OL10 install AWS CLI v2 from their default package
+# manager, so this wrapper leaves them out of scope. The pinned/latest version per
+# OL lives in install-awscli.sh (AWSCLI_VERSION_OL<major>).
+AWSCLI_INSTALL=1
+# Resolved AWS CLI v2 version for THIS OL (filled when AWSCLI_INSTALL=1 and the OL
+# is in scope, from install-awscli.sh's per-OL map; "latest" is resolved to a
+# concrete version). Used in the AMI name/desc -- which always carries a concrete
+# x.y.z, never the word "latest".
+AWSCLI_RESOLVED=""
 ENV_FILE=""
 # Logging (N3/F4). DEBUG=1 (--debug) also mirrors [DEBUG] lines to the console;
 # they are always written to the log file regardless. LOG_FILE empty -> default
@@ -258,6 +274,7 @@ parse_args() {
       --build-only)       BUILD_ONLY=1;        shift ;;
       --skip-ena-driver)  ENA_DRIVER_BUILD=0;  shift ;;
       --skip-ssm-agent)   SSM_AGENT_INSTALL=0; shift ;;
+      --skip-awscli)      AWSCLI_INSTALL=0; shift ;;
       --imds-support)     IMDS_SUPPORT="$2";   shift 2 ;;
       --log-file)         LOG_FILE="$2";       shift 2 ;;
       --debug)            DEBUG=1;             shift ;;
@@ -478,6 +495,29 @@ load_env() {
     fi
   fi
 
+  # Resolve the AWS CLI v2 version for the persistent AMI identity + report.
+  # Wired for OL6/OL7/OL8 ONLY (OL9/OL10 install v2 from their default package
+  # manager -- out of scope here). AWSCLI_RESOLVED starts as the per-OL target
+  # (OL6 pin 2.17.51, OL7/OL8 "latest"); if it is "latest", resolve it to the
+  # concrete published version so the AMI name/description always carries a
+  # concrete x.y.z, never the word "latest". The guest install is UNCHANGED --
+  # the OL7/OL8 hook still installs the /latest/ bundle; this is display/identity
+  # only. If resolution fails (e.g. offline --build-only), AWSCLI_RESOLVED is left
+  # empty and the AMI identity simply omits the awscli marker (never "latest").
+  if [[ "${AWSCLI_INSTALL}" -eq 1 && ( "${OL_MAJOR_VERSION}" == "6" || "${OL_MAJOR_VERSION}" == "7" || "${OL_MAJOR_VERSION}" == "8" ) ]]; then
+    AWSCLI_RESOLVED="$(_awscli_pin_for_major "${OL_MAJOR_VERSION}")"
+    if [[ -z "${AWSCLI_RESOLVED}" || "${AWSCLI_RESOLVED}" == "latest" ]]; then
+      local _awscli_latest; _awscli_latest="$(_awscli_resolve_latest)"
+      if [[ -n "${_awscli_latest}" ]]; then
+        AWSCLI_RESOLVED="${_awscli_latest}"
+        log_info "[OLAWS-AWSCLI02] resolved AWS CLI v2 'latest' -> ${AWSCLI_RESOLVED} for the AMI identity/report (the guest still installs the latest bundle)"
+      else
+        AWSCLI_RESOLVED=""
+        log_warn "[OLAWS-AWSCLI02] could not resolve AWS CLI v2 'latest' to a concrete version; the AMI identity will omit the awscli marker (no non-concrete 'latest' in the AMI name)"
+      fi
+    fi
+  fi
+
   # Required parameters for AWS import (unless skipped)
   if [[ ${SKIP_AWS_IMPORT} -eq 0 && ${BUILD_ONLY} -eq 0 ]]; then
     : "${S3_BUCKET:?S3_BUCKET is not defined}"
@@ -515,8 +555,18 @@ load_env() {
         _ssm_desc_sfx=", Amazon SSM Agent ${SSM_AGENT_RESOLVED}"
       fi
     fi
-    : "${AMI_NAME:=OracleLinux-${OL_MAJOR_VERSION}-U${OL_UPDATE_VERSION}-x86_64-$(date +%Y%m%d-%H%M)${_ena_name_sfx}${_ssm_name_sfx}}"
-    : "${AMI_DESCRIPTION:=Oracle Linux ${OL_MAJOR_VERSION} Update ${OL_UPDATE_VERSION} (x86_64) custom AMI built via oracle-linux-image-tools${_ena_desc_sfx}${_ssm_desc_sfx}}"
+    # AWS CLI v2 identity, folded into the AMI name/desc the same way. Default ON
+    # for OL6/OL7/OL8; --skip-awscli and OL9/OL10 (out of scope) leave it empty.
+    # AWSCLI_RESOLVED is a concrete x.y.z (resolved above; empty if resolution
+    # failed) -- so the marker ALWAYS carries a concrete version and is omitted
+    # entirely rather than ever printing the word "latest". AUTO defaults only (:=).
+    local _awscli_name_sfx="" _awscli_desc_sfx=""
+    if [[ -n "${AWSCLI_RESOLVED}" ]]; then
+      _awscli_name_sfx="-awscli${AWSCLI_RESOLVED}"
+      _awscli_desc_sfx=", AWS CLI v2 ${AWSCLI_RESOLVED}"
+    fi
+    : "${AMI_NAME:=OracleLinux-${OL_MAJOR_VERSION}-U${OL_UPDATE_VERSION}-x86_64-$(date +%Y%m%d-%H%M)${_ena_name_sfx}${_ssm_name_sfx}${_awscli_name_sfx}}"
+    : "${AMI_DESCRIPTION:=Oracle Linux ${OL_MAJOR_VERSION} Update ${OL_UPDATE_VERSION} (x86_64) custom AMI built via oracle-linux-image-tools${_ena_desc_sfx}${_ssm_desc_sfx}${_awscli_desc_sfx}}"
     # Validate the resolved AMI name/description against the AWS register-image
     # limits NOW, before Phases 1-8, so an out-of-range or mis-charactered value
     # (most likely an explicit override) fails fast instead of after a full
@@ -599,7 +649,7 @@ load_env() {
     log_info "BOOT_MODE          = ${BOOT_MODE}"
   fi
   # [DEBUG] (F4): the resolved feature knobs -- file always, console with --debug.
-  log_debug "[OLAWS-CFG01] knobs: ENA_DRIVER_BUILD=${ENA_DRIVER_BUILD} SSM_AGENT_INSTALL=${SSM_AGENT_INSTALL} IMDS_SUPPORT=${IMDS_SUPPORT} SKIP_PREREQ=${SKIP_PREREQ} SKIP_AWS_IMPORT=${SKIP_AWS_IMPORT} BUILD_ONLY=${BUILD_ONLY}"
+  log_debug "[OLAWS-CFG01] knobs: ENA_DRIVER_BUILD=${ENA_DRIVER_BUILD} SSM_AGENT_INSTALL=${SSM_AGENT_INSTALL} AWSCLI_INSTALL=${AWSCLI_INSTALL} IMDS_SUPPORT=${IMDS_SUPPORT} SKIP_PREREQ=${SKIP_PREREQ} SKIP_AWS_IMPORT=${SKIP_AWS_IMPORT} BUILD_ONLY=${BUILD_ONLY}"
 
   # Validate BOOT_MODE_BUILD: oracle-linux-image-tools restricts AWS to bios.
   if [[ "${CLOUD,,}" == "aws" && "${BOOT_MODE_BUILD,,}" != "bios" ]]; then
@@ -1760,6 +1810,63 @@ OLAWS_OL6_CLOUD_USER_BODY
         log_info "  [OLAWS-SSM01] SSM Agent hook injected (version: OL${OL_MAJOR_VERSION} ${SSM_AGENT_RESOLVED:-latest}; install + boot-enable)"
       else
         die "Failed to inject SSM Agent hook into ${aws_provision_ssm}"
+      fi
+    fi
+  fi
+
+  # cloud/aws/provision.sh AWS CLI v2 install hook (default ON; OL6/OL7/OL8 ONLY).
+  #
+  # Writes our install-awscli.sh verbatim into the guest and runs it during
+  # provisioning: it installs the per-OL AWS CLI v2 bundle (OL6 pinned to the
+  # install+run-verified 2.17.51, OL7/OL8 the moving `latest`) and excludes the
+  # OL-repo `awscli` (v1) via versionlock, so the AMI ships AWS CLI v2 as the
+  # standard CLI (v1 is increasingly unsupported). Same in-guest fetch model as
+  # the SSM/ENA hooks (plain `curl -fsSL`, normal TLS trust; `-k` is a test-only
+  # INSECURE_TLS switch, never used in production). --skip-awscli leaves the hook
+  # out. OL9/OL10 are OUT OF SCOPE -- they install AWS CLI v2 from their default
+  # package manager -- so the hook is not injected there (an info line is logged).
+  #
+  # NON-FATAL by design: like the SSM Agent (and unlike the Nitro-network-critical
+  # ENA driver), AWS CLI v2 is utility tooling; a transient install failure should
+  # not abort an otherwise-good AMI, so the hook invocation traps its own failure
+  # to a warning and provisioning continues. The embedded heredoc is single-quoted,
+  # so the installer's own text is written through unmodified. Idempotent via the
+  # wrapper marker.
+  if [[ "${AWSCLI_INSTALL}" -ne 1 ]]; then
+    log_info "AWS CLI v2 install disabled (--skip-awscli); the AMI ships without AWS CLI v2"
+  elif [[ "${OL_MAJOR_VERSION}" != "6" && "${OL_MAJOR_VERSION}" != "7" && "${OL_MAJOR_VERSION}" != "8" ]]; then
+    log_info "AWS CLI v2 install skipped on OL${OL_MAJOR_VERSION} (out of scope; OL9/OL10 install AWS CLI v2 from the default package manager)"
+  else
+    local aws_provision_cli="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
+    local awscli_installer="${SCRIPT_DIR}/install-awscli.sh"
+    log_info "Injecting AWS CLI v2 install hook into cloud/aws/provision.sh (default ON for OL6/OL7/OL8; --skip-awscli disables)"
+
+    if [[ ! -f "${aws_provision_cli}" ]]; then
+      die "Cannot inject AWS CLI v2 hook: ${aws_provision_cli} not found"
+    fi
+    if [[ ! -f "${awscli_installer}" ]]; then
+      die "Cannot inject AWS CLI v2 hook: installer not found at ${awscli_installer}"
+    fi
+
+    if grep -Fq '[ol-aws-ami-builder PATCH awscli-install]' "${aws_provision_cli}"; then
+      log_info "  -> AWS CLI v2 hook already present (idempotent skip)"
+    else
+      {
+        printf '\n# >>> [ol-aws-ami-builder PATCH awscli-install] >>>\n'
+        printf '# Install the per-OL AWS CLI v2 in the guest (standard CLI; v1 excluded via versionlock).\n'
+        printf '# Omitted by the wrapper'"'"'s --skip-awscli switch. Non-fatal: a failure warns and continues.\n'
+        printf "cat > /usr/local/sbin/ol-aws-install-awscli.sh <<'OLAWS_AWSCLI_INSTALLER_EOF'\n"
+        cat "${awscli_installer}"
+        printf 'OLAWS_AWSCLI_INSTALLER_EOF\n'
+        printf 'chmod +x /usr/local/sbin/ol-aws-install-awscli.sh\n'
+        printf '/usr/local/sbin/ol-aws-install-awscli.sh || echo "[awscli] WARNING: AWS CLI v2 install hook failed; AMI built without AWS CLI v2 (non-fatal: utility tooling, not boot-critical)"\n'
+        printf '# <<< [ol-aws-ami-builder PATCH awscli-install] <<<\n'
+      } >> "${aws_provision_cli}"
+
+      if grep -Fq '[ol-aws-ami-builder PATCH awscli-install]' "${aws_provision_cli}"; then
+        log_info "  [OLAWS-AWSCLI01] AWS CLI v2 hook injected (version: OL${OL_MAJOR_VERSION} ${AWSCLI_RESOLVED:-latest})"
+      else
+        die "Failed to inject AWS CLI v2 hook into ${aws_provision_cli}"
       fi
     fi
   fi
@@ -2966,6 +3073,48 @@ _ssm_resolve_latest() {
   printf '%s' "${ver}"
 }
 
+# Resolve the AWS CLI v2 version for an OL major from install-awscli.sh's per-OL
+# map (AWSCLI_VERSION_OL<major>); echoes "latest" or a pin (OL6 -> 2.17.51,
+# OL7/OL8 -> latest). Mirrors _ssm_pin_for_major. Used only for the AMI
+# name/description marker + report (OL6/OL7/OL8 only).
+_awscli_pin_for_major() {
+  local major="$1" inst="${SCRIPT_DIR}/install-awscli.sh"
+  [[ -f "${inst}" ]] || return 0
+  grep -E "^AWSCLI_VERSION_OL${major}=" "${inst}" \
+    | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
+}
+
+# Resolve the AWS CLI v2 "latest" to a concrete, CDN-published version -- for the
+# persistent AMI name/description + the final report only (the AMI identity always
+# carries a concrete x.y.z, never the word "latest"). The guest install is
+# UNCHANGED: the OL7/OL8 hook still installs the latest bundle. Strategy, mirroring
+# _ssm_resolve_latest but adapted to aws-cli (which does NOT publish GitHub
+# "releases", so the releases/latest redirect does not work): enumerate the v2 tags
+# with `git ls-remote --tags` (the same auth-free method as list-awscli-releases.sh),
+# walk them newest-first, and return the highest whose bundle zip is actually
+# published on the CDN (a HEAD) -- the newest tag can lead CDN publication, so a
+# plain "take the max tag" would point at an unpublished version. Echoes the
+# concrete version, or "" on any failure (the caller then omits the awscli marker
+# rather than printing "latest"). git + curl are already build-host dependencies.
+_awscli_resolve_latest() {
+  local repo="https://github.com/aws/aws-cli"
+  local zbase="https://awscli.amazonaws.com/awscli-exe-linux-x86_64"
+  local tags v i=0
+  tags="$(git ls-remote --tags "${repo}" 2>/dev/null \
+            | sed -E 's#.*refs/tags/v?##; s/\^\{\}$//' \
+            | grep -oE '^2\.[0-9]+\.[0-9]+$' \
+            | sort -t. -k1,1n -k2,2n -k3,3n -u | tac)"
+  [[ -n "${tags}" ]] || return 0
+  while IFS= read -r v; do
+    [[ -n "${v}" ]] || continue
+    i=$((i+1)); [[ ${i} -gt 12 ]] && break   # bounded probe window (CDN lag is small)
+    if curl -fsI --max-time 15 "${zbase}-${v}.zip" >/dev/null 2>&1; then
+      printf '%s' "${v}"; return 0
+    fi
+  done <<< "${tags}"
+  return 0
+}
+
 # CHECK 2 provenance verdict: is the effective ena.ko acceptable for THIS build?
 # When a self-build was performed (ENA_BUILD_VERSION is non-empty -- set only for
 # OL6/OL7 with the default self-build on), the in-guest DKMS build MUST have
@@ -3629,6 +3778,17 @@ phase9_register_ami() {
     ssm_summary="not installed (--skip-ssm-agent)"
   fi
   log_info "  SSM Agent:       ${ssm_summary}"
+  local awscli_summary
+  if [[ "${AWSCLI_INSTALL}" -ne 1 ]]; then
+    awscli_summary="not installed (--skip-awscli)"
+  elif [[ "${OL_MAJOR_VERSION}" != "6" && "${OL_MAJOR_VERSION}" != "7" && "${OL_MAJOR_VERSION}" != "8" ]]; then
+    awscli_summary="not installed (out of scope; OL${OL_MAJOR_VERSION} uses the default package manager)"
+  elif [[ -n "${AWSCLI_RESOLVED}" ]]; then
+    awscli_summary="v2 ${AWSCLI_RESOLVED} (installed)"
+  else
+    awscli_summary="v2 installed (version unresolved -- host offline)"
+  fi
+  log_info "  AWS CLI:         ${awscli_summary}"
   log_info "=========================================="
 }
 

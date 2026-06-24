@@ -120,6 +120,7 @@ streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
 | `setup-vmimport-role.sh` | AWS VM Import/Export 用の `vmimport` IAM サービスロールを初回のみ作成 |
 | `install-ena-driver.sh` | 指定バージョンの Amazon ENA ドライバを DKMS でビルド/導入する自己完結スクリプト(OL6 → 2.9.1、OL7 → 2.17.0、OL8+ は何もしない)。依存(EPEL・gcc/make・dkms・`kernel-uek-devel`)を自身で導入し、**素の OL6/OL7 インスタンス上で単体実行**して検証可能。ENA ビルド有効時(既定)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
 | `install-ssm-agent.sh` | Amazon SSM Agent の RPM を導入し起動時に有効化する自己完結スクリプト(OL6 → 固定 `3.3.4624.0`、OL7-OL10 → `latest`)。RPM を `curl` で取得し `rpm -Uvh` で導入(EL6 の yum-over-HTTPS 問題を回避)。install+run テストマトリクス(`tests/ssm/`)向けに**単体実行**可能、または SSM 導入有効時(既定)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
+| `install-awscli.sh` | AWS CLI v2 を導入(OL6 → 固定 `2.17.51`、OL7/OL8 → `latest`)し、OL リポジトリの `awscli`(v1)を versionlock で除外する自己完結スクリプト。自己完結の v2 バンドルを展開しバンドル同梱の `aws/install` で導入。install+run テストマトリクス(`tests/awscli/`)向けに**単体実行**可能、または AWS CLI 導入有効時(既定、OL6/OL7/OL8 — OL9/OL10 は既定のパッケージマネージャを利用)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
 | `README.md` | エンドユーザ向けドキュメント(英語、ベースライン) |
 | `README.ja.md` | エンドユーザ向けドキュメント(日本語) |
 | `SPEC.md` | 開発者向け仕様書(英語)— phase contract、ログ規約、設計判断の詳細 |
@@ -365,6 +366,7 @@ vi env.properties.local
 | `--skip-aws-import` | Phase 7〜9 をスキップ(`--build-only` と同等) |
 | `--skip-ena-driver` | ゲスト内で Amazon ENA ドライバをビルド/導入**しない**。既定ではビルド(AWS 最適化 AMI、Nitro v4+/ENAv3 対応)。本スイッチで純粋な(無改変の)OL AMI を生成 |
 | `--skip-ssm-agent` | ゲスト内で Amazon SSM Agent を導入**しない**。既定では導入し起動時に有効化(OL6-OL10)するため、AMI は AWS SSM Run Command 準拠で出荷される。本スイッチでエージェントを除外 |
+| `--skip-awscli` | ゲスト内で AWS CLI v2 を導入**しない**。既定では OL6/OL7/OL8 に導入し(AWS CLI v1 が非サポート化しつつあるため標準 CLI として)、v1 パッケージを versionlock で除外する。本スイッチで導入を除外。OL9/OL10 は対象外(既定のパッケージマネージャで AWS CLI v2 を導入)で本スイッチの影響を受けない |
 | `--imds-support <mode>` | AMI に焼き込む IMDS サポート: `default`(IMDSv1+v2、`HttpTokens=optional`)または `v2.0`(IMDSv2 必須、**OL7+ のみ**)。既定は `default`。OL6 + `v2.0` は拒否(cloud-init 0.7.5 が IMDSv2 非対応のため) |
 | `--log-file <path>` | 実行ログの出力先。既定は `${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log`(いずれの場合もコンソール出力をファイルにも記録。ファイルは ANSI 除去済み) |
 | `--debug` | `[DEBUG]` 行をコンソールにも出力(ファイルには指定有無に関わらず常時記録) |

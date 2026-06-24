@@ -333,6 +333,7 @@ is **non-negotiable**; see D.6.
 | `--build-only` | flag | | Synonym for `--skip-aws-import` |
 | `--skip-ena-driver` | flag | | Do NOT self-build the Amazon ENA driver (default ON for OL6/OL7); produces a pure OL AMI — see B.4 / the ENA self-build section |
 | `--skip-ssm-agent` | flag | | Do NOT install the Amazon SSM Agent (default ON for OL6-OL10); produces an AMI with no SSM Agent — see B.11 |
+| `--skip-awscli` | flag | | Do NOT install AWS CLI v2 (default ON for OL6/OL7/OL8; OL9/OL10 out of scope — use their default package manager); produces an AMI without the wrapper-installed AWS CLI v2 — see B.13 |
 | `-h`, `--help` | flag | | Show help and exit 0 |
 
 ### Mutual exclusion
@@ -378,8 +379,8 @@ bash. Avoid command substitutions in env files (security and reproducibility).
 |-----|--------------|
 | `DISTR` | `ol${OL_MAJOR_VERSION}-slim` |
 | `CLOUD` | `aws` |
-| `AMI_NAME` | `OracleLinux-${MAJOR}-U${UPDATE}-x86_64-$(date +%Y%m%d-%H%M)`; when the ENA self-build is enabled (default), the auto-default also appends `-ena${ENA_BUILD_VERSION}` (the installer's pin); when the SSM Agent install is enabled (default), it further appends `-ssm${version}` (or `-ssmlatest`) so an ENA-self-built / SSM-managed AMI is distinguishable pre-launch. An explicitly set `AMI_NAME` is left untouched. |
-| `AMI_DESCRIPTION` | `Oracle Linux ${MAJOR} Update ${UPDATE} (x86_64) custom AMI built via oracle-linux-image-tools`; the auto-default appends ` with self-built Amazon ENA ${ENA_BUILD_VERSION} (DKMS, AWS-optimized for Nitro)` when self-build is on, or ` (pure OL; ENA self-build skipped)` for `--skip-ena-driver`, and further appends `, Amazon SSM Agent ${version}` when the SSM install is on (omitted for `--skip-ssm-agent`). `ENA_BUILD_VERSION` is read from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` pin and the SSM version from `install-ssm-agent.sh`'s `SSM_AGENT_VERSION_OL<major>` pin (single source of truth). |
+| `AMI_NAME` | `OracleLinux-${MAJOR}-U${UPDATE}-x86_64-$(date +%Y%m%d-%H%M)`; when the ENA self-build is enabled (default), the auto-default also appends `-ena${ENA_BUILD_VERSION}` (the installer's pin); when the SSM Agent install is enabled (default), it further appends `-ssm${version}` (or `-ssmlatest`); and when the AWS CLI v2 install is enabled (default, OL6/OL7/OL8), it further appends `-awscli${version}` — a **concrete** `x.y.z` (the OL6 pin, or the resolved OL7/OL8 `latest`), so an ENA-self-built / SSM-managed / AWS-CLI-bearing AMI is distinguishable pre-launch. The awscli marker carries a concrete version only and is **omitted** rather than ever printing `latest` (resolution failure → no marker; OL9/OL10 → no marker). An explicitly set `AMI_NAME` is left untouched. |
+| `AMI_DESCRIPTION` | `Oracle Linux ${MAJOR} Update ${UPDATE} (x86_64) custom AMI built via oracle-linux-image-tools`; the auto-default appends ` with self-built Amazon ENA ${ENA_BUILD_VERSION} (DKMS, AWS-optimized for Nitro)` when self-build is on, or ` (pure OL; ENA self-build skipped)` for `--skip-ena-driver`, further appends `, Amazon SSM Agent ${version}` when the SSM install is on (omitted for `--skip-ssm-agent`), and further appends `, AWS CLI v2 ${version}` (a concrete `x.y.z`) when the AWS CLI v2 install is on (OL6/OL7/OL8; omitted for `--skip-awscli`, OL9/OL10, or an unresolved version). `ENA_BUILD_VERSION` is read from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` pin, the SSM version from `install-ssm-agent.sh`'s `SSM_AGENT_VERSION_OL<major>` pin, and the AWS CLI version from `install-awscli.sh`'s `AWSCLI_VERSION_OL<major>` pin (single source of truth). |
 | `BOOT_MODE_BUILD` | `bios` (Oracle tool restricts AWS to bios) |
 | `BOOT_MODE` | `legacy-bios` (must match `BOOT_MODE_BUILD`) |
 | `OS_VARIANT` | Auto-detected via `detect_os_variant` |
@@ -1285,6 +1286,7 @@ identifier. All are applied inside `phase3_clone_repository`. Current markers:
 | `[ol-aws-ami-builder PATCH serial-console]` | `cloud/aws/provision.sh` | GRUB2 systems (OL7+; hook self-skips on OL6 GRUB Legacy) | AWS-recommended serial console in 3 layers: (1) `console=tty0 console=ttyS0,115200n8` on all entries via `grubby --update-kernel=ALL` (BLS-aware) + `GRUB_CMDLINE_LINUX`; (2) `GRUB_TERMINAL`/`GRUB_SERIAL_COMMAND` + `grub2-mkconfig`; (3) `serial-getty@ttyS0` enabled — see D.25 |
 | `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; installer is a no-op on OL8+) — logged as `[OLAWS-ENA01]`, see A.7 |
 | `[ol-aws-ami-builder PATCH ssm-agent-install]` | `cloud/aws/provision.sh` | `SSM_AGENT_INSTALL == 1` (default; `--skip-ssm-agent` disables) | Inject the in-guest Amazon SSM Agent install+boot-enable hook (OL6-OL10; OL6 pinned, OL7-OL10 `latest`; non-fatal) — logged as `[OLAWS-SSM01]`, see B.11 |
+| `[ol-aws-ami-builder PATCH awscli-install]` | `cloud/aws/provision.sh` | `AWSCLI_INSTALL == 1` (default) **and** `OL_MAJOR_VERSION` in `6/7/8` (`--skip-awscli` disables; OL9/OL10 out of scope) | Inject the in-guest AWS CLI v2 install hook (OL6 pinned `2.17.51`, OL7/OL8 `latest`; v1 excluded via versionlock; non-fatal) — logged as `[OLAWS-AWSCLI01]`, see B.13 |
 | `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` | `bin/build-image.sh` | host libguestfs lacks the `selinuxrelabel` optgroup | Schedule a first-boot `/.autorelabel` instead of the offline relabel when the build host's libguestfs cannot relabel — see D.17 |
 
 The `sed`-based substitutions (the OL6/OL7 guard removals, `kernel-uek-modules`,
@@ -2247,6 +2249,75 @@ release list (`awscli-releases.json`), ledger (`awscli-installtest-ledger.json`)
 and `RESULTS-ol{6,7,8}.md` are produced by a real maintainer-env matrix run /
 network probe (a long-running clean-core + network task) and are not generated in
 this authoring environment.
+
+## B.13 AWS CLI v2 production install (`--skip-awscli`)
+
+By default (`AWSCLI_INSTALL=1`) the wrapper installs **AWS CLI v2** into the guest
+on **OL6 / OL7 / OL8**: Phase 3 appends a marker-bracketed hook
+(`[ol-aws-ami-builder PATCH awscli-install]`) to `cloud/aws/provision.sh` that
+writes `install-awscli.sh` verbatim into the guest and runs it during
+provisioning, so the AMI boots with AWS CLI v2 as the standard CLI.
+`--skip-awscli` (`AWSCLI_INSTALL=0`) leaves the hook out — the two distinct build
+purposes, parallel to `--skip-ssm-agent`.
+
+**Scope: OL6/OL7/OL8 only.** OL9 and OL10 install AWS CLI v2 from their **default
+package manager** (`dnf`), so the wrapper leaves them out of scope — the hook is
+not injected on OL9/OL10 (an info line is logged) and `--skip-awscli` has no
+effect there. This is narrower than the SSM hook (OL6-OL10) and matches
+`install-awscli.sh`'s own OL6/OL7/OL8 test/pin scope.
+
+**Why this is on by default.** AWS CLI **v1** is increasingly unsupported (it is in
+maintenance and AWS steers users to v2); the OL repos still ship a v1 `awscli`
+package. Shipping v2 by default — and excluding the v1 package via versionlock so
+a later `yum`/`dnf` cannot shadow it — means a freshly built AMI has a current,
+supported AWS CLI out of the box.
+
+**Per-OL version.** `install-awscli.sh` holds the source-of-truth map
+`AWSCLI_VERSION_OL<major>`: **OL6 is pinned to `2.17.51`** (the empirically highest
+install+run build on OL6 glibc 2.12 — the last `GLIBC_2.5` / Python-3.11.9 build;
+see B.12), and **OL7/OL8 follow the moving `latest` bundle**. An explicit
+`AWSCLI_VERSION` overrides the map. The wrapper's `_awscli_pin_for_major()` reads
+the same map for the AMI name/description marker (single source of truth,
+mirroring `_ssm_pin_for_major()`).
+
+**Install mechanism.** The in-guest installer fetches the per-OL bundle zip with a
+plain `curl -fsSL` (normal TLS trust — the same fetch model as the ENA/SSM hooks;
+`-k` is a test-mode-only switch via `INSECURE_TLS`, never used in production),
+installs it with the bundle's own `aws/install`, runs `aws --version` +
+`aws configure list` locally to confirm it loads, and then excludes the OL-repo
+`awscli` (v1) via versionlock (`yum`/`dnf` plugin). AWS CLI v2 is a self-contained
+binary bundle (no service), so unlike SSM there is **no boot-enable** step.
+
+**Non-fatal by design.** Like the SSM Agent (and unlike the Nitro-network-critical
+ENA driver), AWS CLI v2 is utility tooling: an instance with no CLI still boots and
+is reachable. A transient install failure should therefore not abort an
+otherwise-good AMI, so the injected hook traps the installer's failure to a warning
+and provisioning continues.
+
+**AMI naming + version resolution.** When enabled (OL6/OL7/OL8), the AUTO-default
+`AMI_NAME` appends `-awscli${version}` and the description appends
+`, AWS CLI v2 ${version}`, so an AWS-CLI-bearing AMI is distinguishable pre-launch.
+The marker always carries a **concrete `x.y.z`**: for OL6 it is the pin
+(`2.17.51`); for OL7/OL8 the wrapper **resolves the `latest` bundle to a concrete
+version** via `_awscli_resolve_latest()` — it enumerates the v2 tags with
+`git ls-remote --tags` (the same auth-free method as `list-awscli-releases.sh`,
+since aws-cli does not publish GitHub "releases"), walks them newest-first, and
+returns the highest whose bundle zip is actually published on the CDN (a HEAD; the
+newest tag can lead CDN publication). This is **display/identity only**: the
+in-guest install path is unchanged (the OL7/OL8 hook still installs the `latest`
+bundle), so install behaviour does not depend on the build host's network. If
+resolution fails (offline, e.g. a `--build-only` run with no network), the AMI
+identity **omits the awscli marker entirely** rather than printing the
+non-concrete word `latest`; the final report then shows `version unresolved`. The
+final report prints an `AWS CLI:` line (`v2 ${version} (installed)`,
+`not installed (--skip-awscli)`, or `not installed (out of scope; OL9/OL10 use the
+default package manager)`). An explicitly set `AMI_NAME`/`AMI_DESCRIPTION` is left
+untouched (`:=`).
+
+**Validation status.** OL6/OL7/OL8 install+run is matrix-verified (B.12). The
+production hook injection + the AMI name/description identifier are host-gate
+verified (parse / shellcheck / `tests/t007_idempotency.sh` marker count); a real
+AMI build + boot with AWS CLI v2 present is the natural [C]3 follow-up (B-T8).
 
 ---
 
