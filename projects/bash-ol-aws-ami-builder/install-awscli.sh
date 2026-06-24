@@ -29,8 +29,12 @@
 # has no guaranteed compatibility with newer v2 -- the documented escape hatch is
 # to stay on v2 <= 2.17.49. So the real surface is (glibc) x version:
 #   * OL6 glibc 2.12 -- below the 2.17 floor: current v2 will not install/run; only
-#                       an old enough build (<= 2.17.49, older manylinux floor)
-#                       might. The test settles which, empirically.
+#                       an old enough build (older manylinux floor) does. The
+#                       install+run matrix settled this empirically: OL6 runs up
+#                       to 2.17.51 (the last build whose bundled .so's need only
+#                       GLIBC_2.5); 2.17.52 is the first to require GLIBC_2.17 and
+#                       fails. 2.17.51 is the last bundled-Python-3.11.9 build --
+#                       2 patches above AWS's documented <= 2.17.49 boundary.
 #   * OL7 glibc 2.17 -- exactly the floor: current v2 is expected to install + run.
 #   * OL8 glibc 2.28 -- above the floor: current v2 installs + runs.
 # The OL glibc is read authoritatively from the rpm db (`rpm -q glibc`); the OL
@@ -55,10 +59,14 @@ set -euo pipefail
 # ---- pinned version (overridable) ------------------------------------------
 # Per-OL default mirrors install-ssm-agent.sh's *_OL<major> map. OL7/OL8 follow
 # the moving `latest` bundle; OL6 (glibc 2.12) cannot run current v2, so its
-# default is pinned to the documented last-for-old-glibc build (2.17.49) as the
-# best-effort target -- the install-test reports whether even that one runs. An
-# explicit AWSCLI_VERSION overrides (the install-test matrix always sets it).
-AWSCLI_VERSION_OL6="${AWSCLI_VERSION_OL6:-2.17.49}"
+# default is pinned to 2.17.51 -- the highest build the OL6/OL7/OL8 install+run
+# matrix proved actually installs AND runs on OL6 (the last bundled-Python-3.11.9
+# build; 2.17.52 is the first to require GLIBC_2.17 and fails on glibc 2.12). This
+# is 2 patches above AWS's documented <= 2.17.49 boundary, confirmed empirically;
+# both bundle Python 3.11.9 (security-support end 2027-10-31), so the pin gains a
+# newer CLI/botocore at no Python-EOL cost. An explicit AWSCLI_VERSION overrides
+# (the install-test matrix always sets it).
+AWSCLI_VERSION_OL6="${AWSCLI_VERSION_OL6:-2.17.51}"
 AWSCLI_VERSION_OL7="${AWSCLI_VERSION_OL7:-latest}"
 AWSCLI_VERSION_OL8="${AWSCLI_VERSION_OL8:-latest}"
 AWSCLI_VERSION="${AWSCLI_VERSION:-}"

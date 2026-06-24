@@ -21,6 +21,32 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **AWS CLI v2 install+run E2E results committed; OL6 production pin 2.17.49 -> 2.17.51.**
+  Landed the maintainer's real OL6/OL7/OL8 install+run matrix run (a clean-core +
+  network task not reproducible in the authoring env): `tests/awscli/awscli-installtest-ledger.json`
+  (2763 entries = 3 OL x 921 v2 versions, dedup `(osmajor, awscli_version, kver)`
+  kver-PRIMARY, one uniform `test_host_kernel`), `tests/awscli/awscli-releases.json`
+  (921 versions; one unavailable = `2.0.32`, HTTP 404 at the CDN), and
+  `tests/awscli/RESULTS-ol{6,7,8}.md` (which regenerate byte-identically from the
+  ledger via the matrix's own generator; every fail reason verified verbatim against
+  its per-version log). **Empirical glibc axis result:** OL6 (glibc 2.12) installs+runs
+  through **`2.17.51`** -- the last build whose bundled `.so`s need only `GLIBC_2.5`,
+  and the last bundled-Python-3.11.9 build; `2.17.52` is the first to require
+  `GLIBC_2.17` (and the first Python-3.12 bundle) and fails on OL6. OL7 (glibc 2.17)
+  and OL8 (glibc 2.28) install+run current (`latest` = `2.35.6`, Python 3.14.5); the
+  only non-cap fail on either is the same `2.0.32` upstream 404, not an
+  incompatibility. **Ground-truth correction (AGENTS §4):** the documented `<= 2.17.49`
+  boundary (which AWS commits to) understates OL6 by 2 patches, so `install-awscli.sh`
+  `AWSCLI_VERSION_OL6` is bumped **`2.17.49` -> `2.17.51`** (the highest version proven
+  to run; same bundled Python 3.11.9 / security-support end 2027-10-31, so a newer
+  CLI/botocore at no Python-EOL cost). OL7/OL8 stay `latest`. SPEC **B.12**'s three
+  OL6 behavioral/empirical claims are corrected to `2.17.51` (the AWS-documented
+  `<= 2.17.49` citation and the documented manylinux heuristic boundary at `2.17.50`
+  are both unchanged -- the *measured* floor is the separate field that moves at
+  `2.17.52`). Data only on the test side: the deliverables are `.json` / `.md`, so the
+  suite is unchanged at **388/0/0**; production integration into `build-ol-aws-ami.sh`
+  remains deferred (install-test tooling), mirroring SSM.
+
 - **OL6-OL10 clean-core builders: floating-tag builder image with pinned fallback.**
   Adopted the OL5 builder's tag-based container-image acquisition across
   `tests/cleancore/build-cleancore-ol{6,7,8,9,10}.sh`. Each now **pulls its `N-slim`
@@ -117,7 +143,8 @@ This CHANGELOG is **English only** per the repository-wide
   `tests/t019_awscliverdict.sh`. The matrix characterizes, per **OL6/OL7/OL8**,
   which AWS CLI v2 versions install AND run on the **glibc** axis: v2 bundles its
   own Python built against a manylinux glibc, so the OS glibc gates install/run
-  (OL6 glibc 2.12 caps at v2 `<= 2.17.49`; OL7/OL8 run current). Each ledger entry
+  (OL6 glibc 2.12 caps at v2 `<= 2.17.51` empirically — see the E2E entry above;
+  OL7/OL8 run current). Each ledger entry
   records the **bundled CPython** (`bundled_python`, read offline from the bundle
   so a glibc-too-old result still carries it), the **empirical glibc floor**
   (`min_glibc_measured` — the max `GLIBC_x.y` symbol required across the bundle's

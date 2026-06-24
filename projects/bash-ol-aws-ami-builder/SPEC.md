@@ -2194,8 +2194,11 @@ Python**, so it does not use the OS Python — but the bundled interpreter and i
 C-extension `.so`s are built against a **manylinux glibc**, so the OS glibc gates
 whether the bundle installs/runs. Per AWS's *Linux Support Updates for AWS CLI v2*
 (2024-09-16), current v2 is **manylinux2014 (glibc 2.17)** and supports glibc
-≥ 2.17; glibc ≤ 2.16 must pin v2 **≤ 2.17.49**. So OL6 (glibc 2.12) installs/runs
-only ≤ 2.17.49; OL7 (2.17, the floor) and OL8 (2.28) run current. Because the
+≥ 2.17; glibc ≤ 2.16 must pin v2 **≤ 2.17.49**. AWS documents that as the boundary,
+but the install+run matrix settled OL6 empirically: OL6 (glibc 2.12) installs/runs
+through **2.17.51** (the last build whose bundled `.so`s need only `GLIBC_2.5`;
+2.17.52 is the first to require `GLIBC_2.17`); OL7 (2.17, the floor) and OL8 (2.28)
+run current. Because the
 container's real OL glibc (`rpm -q glibc`) is exactly what the bundle links
 against, this install-test is **conclusive for glibc** — unlike the SSM/ENA kernel
 axis. The ledger dedup key is `(osmajor, awscli_version, kver)` with **kver
@@ -2213,8 +2216,8 @@ required across its `.so`s, read with a dependency-free `grep` of the version
 strings embedded in the binaries (no `readelf`/binutils in the clean-core; it
 matches `readelf` exactly). The documented heuristic `min_glibc` (≥ 2.17.50 →
 2.17, else 2.5) is recorded alongside as a cross-check, and `python_eol` records
-the bundled Python's documented end-of-life. Empirically: v2 2.0.x–2.17.49 require
-`GLIBC_2.4`–`2.5` (so OL6 runs them), while current v2 requires `GLIBC_2.17` — the
+the bundled Python's documented end-of-life. Empirically: v2 2.0.x–2.17.51 require
+`GLIBC_2.4`–`2.5` (so OL6 runs them), while v2 ≥ 2.17.52 requires `GLIBC_2.17` — the
 glibc floor tracks AWS's manylinux build base, not the Python version per se.
 
 **Test depth.** `install-awscli.sh` (a) installs with `aws/install` (the bundled
@@ -2229,7 +2232,7 @@ network and is the real-instance confirmation, not container-testable.
 **Lifecycle (the bundled Python is frozen).** The bundled CPython is not
 independently patchable; the only way to a newer (still-supported) Python is a
 newer v2 — and a glibc-capped OS caps the v2 version, hence the bundled Python,
-hence its support horizon. The headline forward risk: OL6 caps at v2 `2.17.49` =
+hence its support horizon. The headline forward risk: OL6 caps at v2 `2.17.51` =
 Python `3.11.9` (security-support end **2027-10-31**); after that OL6 has no
 in-place remediation (newer v2 needs glibc 2.17 the OS lacks). `RESULTS-ol<N>.md`
 therefore opens with the glibc rationale, then a **static**, provenance-stamped
