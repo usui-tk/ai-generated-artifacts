@@ -12,7 +12,6 @@ This is the tool to run BEFORE making changes to any of:
 - ``Resolve-PatchSetFromCatalog``        (S5: narrow filter still passes)
 - ``Get-UpdateIdFromCatalog``            (S1, S2)
 - ``Get-DownloadLinkFromCatalog``        (S4, S6)
-- ``Get-SupersedenceFromCatalog``        (S3)
 - ``Resolve-LanguageSpecificPatchesFromCatalog`` (S9)
 
 Each check writes its observation into ``tests/snapshots/last_probe.json``;

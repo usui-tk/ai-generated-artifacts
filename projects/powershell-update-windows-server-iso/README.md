@@ -519,12 +519,10 @@ the Python standard library (no `pip install` required).
 ```bash
 # Offline tests — safe to run anywhere
 python3 tests/catalog_fixture_test.py        # T2: 13 fixture assertions
-python3 tests/powershell_harness.py          # T3: 10 PS function assertions
+python3 tests/powershell_harness.py          # T3: 8 PS function assertions
 python3 tests/release_info_parser_test.py    # T6: 13 release-info parser assertions
 python3 tests/dotnet_cu_parser_test.py       # T7: 16 .NET CU parser assertions
-python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
-python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
 
 # Schema / format gates (run on every commit that touches data)
@@ -576,7 +574,7 @@ enforces this per repository SPEC.md §12 (SPEC-CI-081).
 | `Workspace preflight failed: ... required Config file(s) missing` | The `data/config-Server<N>.json` files were deleted or not copied | Restore the `data/` directory alongside `Update-WindowsServerIso.ps1` (all four `Server2016/2019/2022/2025.json` must be present) |
 | `Catalogue: no narrowed result for ... / Server2022`; `Resolved 0 patch entries` | Microsoft changed the Catalogue title format (punctuation drift) | Add the new title form to the relevant `TitleTokens` array in `data/config-Server*.json`. See SPEC.md §D.19 |
 | A resolved set violates the OS servicing model after RefreshAllBaselines | the `Lines[]` Kinds do not match the declared `PatchModel` | P06 `Test-PatchModelConsistency` throws with the required/forbidden Kinds; confirm `PatchModel` matches the OS. See SPEC.md §B.19 |
-| .NET CU baseline entry seems to be missing a sub-file | Umbrella KB with multiple `.msu` files; only one was kept | Confirm `Resolve-PatchSetFromCatalog` routes `Type='DotNet'` through `Select-AllCanonicalPatchFiles`. See SPEC.md §D.21 |
+| .NET CU baseline entry seems to be missing a sub-file | Umbrella KB with multiple `.msu` files; only one was kept | Confirm the b3 `Resolve-Net` resolver retains every `.msu` sub-file of the umbrella KB. See SPEC.md §D.21 |
 | `0x800f081e` in Warning lines | Patch not applicable to this SKU | Expected for cross-SKU patch sets; safe to ignore (see SPEC.md §D.8) |
 | `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` mid-P07 | the LCU's prerequisite SSU is missing from the baseline | for `separate-ssu` the P06 `PatchModel` check (SPEC.md §B.19) requires the standalone `SSU` line, so a missing SSU is caught statically; if it still occurs, add the SSU line to `PatchBaseline.Lines[]`. See SPEC.md §D.2 |
 | Mojibake (doubled Japanese characters) in P05 WIM-index banner | DISM mount-cache poisoning from prior aborted runs | Use **one fresh `-WorkRoot` per OS family** (`D:\UpdateWsi_2016`, `D:\UpdateWsi_2019`, …). See SPEC.md §D.25 |

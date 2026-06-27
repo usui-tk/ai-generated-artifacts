@@ -6,7 +6,7 @@ Each parser mirrors a regex used inside ``Update-WindowsServerIso.ps1``:
 - ``extract_titles``:        the Title column on Search.aspx hits
 - ``extract_download_urls``: ``Get-DownloadLinkFromCatalog``
                              (DownloadDialog.aspx files-array)
-- ``extract_supersedes``:    ``Get-SupersedenceFromCatalog``
+- ``extract_supersedes``:    supersedence section parser
                              (ScopedViewInline.aspx supersedence panel)
 - ``extract_kb_id``:         ``Get-KbIdFromUpdateTitle``
 

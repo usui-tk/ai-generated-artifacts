@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.39'
-$Script:ScriptTag     = 'catalog-scrape-retry'
+$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.40'
+$Script:ScriptTag     = 'legacy-resolution-removal'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -574,10 +574,9 @@ $Script:PhaseSummaryShown = $false
 
 # Shared data-contract identity: the single source of truth for cross-cutting
 # data-quality checks. Stamped into every generated data artifact's _meta
-# (the config-Server*.json baselines and the cache-*.json data files) and
-# validated across artifacts by Test-DataContractConsistency, so one
-# comparison validates the whole set instead of reconciling independent
-# per-model schema versions. DataContractVersion is bumped on any breaking
+# (the config-Server*.json baselines and the cache-*.json data files), so a
+# single shared identity spans the whole set instead of reconciling
+# independent per-model schema versions. DataContractVersion is bumped on any breaking
 # shape change to any data model.
 $Script:DataContractId      = '4c173c61-c099-4512-9283-f5d951beda8b'
 $Script:DataContractVersion = 1
@@ -705,10 +704,6 @@ $Script:IsoSha256        = $null
 $Script:ResolvedPatches  = @()
 $Script:PatchPlan        = $null     # hashtable; built by Build-PatchPlan in P02
 $Script:WimIndexInventory = @()
-# Most recent supersedence-dedup exclusions emitted by
-# Resolve-PatchSetFromReleaseInfo. The A01 and P02 callers read this to
-# produce a per-run CSV report. Reset to @() on each new Resolve call.
-$Script:LastSupersedenceExclusions = @()
 $Script:OutputIsoPath    = $null
 
 
@@ -2029,22 +2024,6 @@ function Wait-WithJitter {
 }
 # <<< CANONICAL unit_id=pwsh.helper.wait-withjitter <<<
 
-function Format-MegabyteCount {
-    <#
-    .SYNOPSIS
-        Render a byte count as an "X.X MB" string with one decimal.
-        Used by Invoke-DownloadWithProgress and a few other call
-        sites that want consistent MB formatting.
-    #>
-    [CmdletBinding()]
-    [OutputType([string])]
-    param(
-        [Parameter(Mandatory)] [long]$Bytes
-    )
-    if ($Bytes -lt 0) { return '0.0 MB' }
-    return ('{0:N1} MB' -f ($Bytes / 1MB))
-}
-
 # >>> CANONICAL unit_id=pwsh.helper.invoke-downloadwithprogress version=1.0.0 hash=3b9d3842004a91c2 policy=canonical binding=follow-latest >>>
 function Invoke-DownloadWithProgress {
     <#
@@ -2927,60 +2906,6 @@ function Get-ConfigProfile {
     return $merged
 }
 
-function Get-IsoMetadata {
-    <#
-    .SYNOPSIS
-        Best-effort extraction of OS / build / language from an ISO
-        filename, using the four patterns documented in SPEC Part B.0.
-    .OUTPUTS
-        pscustomobject with Build, Language, Architecture, Pattern; or
-        $null if no pattern matches.
-    #>
-    [CmdletBinding()]
-    [OutputType([pscustomobject])]
-    param([Parameter(Mandatory)] [string]$IsoPath)
-
-    $name = [System.IO.Path]::GetFileName($IsoPath)
-    # Pattern 1: Server 2019/2022/2025 svc_refresh form
-    $p1 = '^(?<build>\d{5})\.(?<rev>\d+)\.(?<date>\d{6}-\d{4})\.(?<branch>\w+)_(SERVER|CLIENT)_EVAL_(?<arch>x64FRE)_(?<lang>[a-z]{2}-[a-z]{2})\.iso$'
-    # psa-disable-next-line PSA2003 -- $p1 is a local string variable, not bare null
-    if ($name -match $p1) {
-        return [pscustomobject]@{
-            Build = [int]$matches['build']; Language = $matches['lang']
-            Architecture = $matches['arch']; Pattern = 'p1_svc_refresh'
-        }
-    }
-    # Pattern 2: Server 2022 initial release
-    $p2 = '^SERVER_EVAL_(?<arch>x64FRE)_(?<lang>[a-z]{2}-[a-z]{2})\.iso$'
-    # psa-disable-next-line PSA2003 -- $p2 is a local string variable, not bare null
-    if ($name -match $p2) {
-        return [pscustomobject]@{
-            Build = 0; Language = $matches['lang']
-            Architecture = $matches['arch']; Pattern = 'p2_initial'
-        }
-    }
-    # Pattern 3: Server 2016 EN refresh form
-    $p3 = '^Windows_Server_2016_Datacenter_EVAL_(?<lang>[a-z]{2}-[a-z]{2})_(?<build>\d+)_refresh\.iso$'
-    # psa-disable-next-line PSA2003 -- $p3 is a local string variable, not bare null
-    if ($name -match $p3) {
-        return [pscustomobject]@{
-            Build = [int]$matches['build']; Language = $matches['lang']
-            Architecture = 'x64'; Pattern = 'p3_ws2016_en'
-        }
-    }
-    # Pattern 4: Server 2016 JA UPPERCASE form
-    $p4 = '^(?<build>\d{5})\.(?<rev>\d+)\.(?<date>\d{6}-\d{4})\.(?<branch>\w+)_SERVER_EVAL_X64FRE_(?<lang>[A-Z]{2}-[A-Z]{2})\.ISO$'
-    # psa-disable-next-line PSA2003 -- $p4 is a local string variable, not bare null
-    if ($name -match $p4) {
-        return [pscustomobject]@{
-            Build = [int]$matches['build']
-            Language = $matches['lang'].ToLower()
-            Architecture = 'x64'; Pattern = 'p4_ws2016_ja'
-        }
-    }
-    return $null
-}
-
 function Resolve-IsoSourceUrl {
     <#
     .SYNOPSIS
@@ -3042,44 +2967,6 @@ function Read-MetalinkManifest {
         }) | Out-Null
     }
     return $files
-}
-
-function Write-MetalinkManifest {
-    <#
-    .SYNOPSIS
-        Emit a Metalink 4 (.meta4) file from an array of pscustomobjects
-        whose shape matches the output of Read-MetalinkManifest. Used
-        by -Action GenerateManifest.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)] [string]$Path,
-        [Parameter(Mandatory)] $Files
-    )
-    $sb = New-Object System.Text.StringBuilder
-    [void]$sb.AppendLine('<?xml version="1.0" encoding="UTF-8"?>')
-    [void]$sb.AppendLine('<metalink xmlns="urn:ietf:params:xml:ns:metalink"')
-    [void]$sb.AppendLine('          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"')
-    [void]$sb.AppendLine('          xsi:noNamespaceSchemaLocation="metalink4.xsd">')
-    foreach ($f in $Files) {
-        [void]$sb.AppendLine(('  <file name="{0}">' -f $f.FileName))
-        foreach ($k in $f.Hashes.Keys) {
-            [void]$sb.AppendLine(('    <hash type="{0}">{1}</hash>' -f $k, $f.Hashes[$k]))
-        }
-        foreach ($u in $f.Urls) {
-            [void]$sb.AppendLine(('    <url priority="1">{0}</url>' -f $u))
-        }
-        [void]$sb.AppendLine('  </file>')
-    }
-    [void]$sb.AppendLine('</metalink>')
-
-    $parent = [System.IO.Path]::GetDirectoryName($Path)
-    if (-not (Test-Path -LiteralPath $parent)) {
-        New-Item -ItemType Directory -Path $parent -Force | Out-Null
-    }
-    # UTF-8 with BOM to match the participating tools (aria2, abbodi1406)
-    $utf8Bom = New-Object System.Text.UTF8Encoding $true
-    [System.IO.File]::WriteAllText($Path, $sb.ToString(), $utf8Bom)
 }
 
 # ============================================================
@@ -3371,9 +3258,9 @@ function Save-ConfigWithBaseline {
         [Parameter(Mandatory)] $OsProfile
     )
     # Stamp the shared data-contract provenance (_meta) so the config is a
-    # contract-bearing artifact classified by Test-DataContractConsistency.
-    # Only dataContractId + dataContractVersion are read by the classifier;
-    # scriptVersion / generatedAt are informational. Refreshed in place on
+    # contract-bearing artifact carrying the shared data-contract identity
+    # (dataContractId + dataContractVersion); scriptVersion / generatedAt are
+    # informational. Refreshed in place on
     # every write (Layer 1 only writes when a verified value actually
     # changed, so unchanged configs are not rewritten). Built with an
     # order-stable [pscustomobject] for canonical-JSON determinism.
@@ -3395,73 +3282,6 @@ function Save-ConfigWithBaseline {
     # atomic-ish rename. Depth 32 covers the deepest known nesting in
     # PatchBaseline.Patches.
     Save-CanonicalJsonFile -InputObject $OsProfile -Path $ConfigPath -Depth 32
-}
-
-function Convert-CatalogPatchToBaselineEntry {
-    <#
-    .SYNOPSIS
-        Convert a Catalog-scraper result tuple into a PatchBaseline entry
-        (the structure stored under PatchBaseline.Patches in the Config).
-    .DESCRIPTION
-        Bridges the Microsoft Update Catalog DTO (UpdateId/Title/DownloadUrl)
-        and our PatchBaseline schema (KbId/Type/ApplyOrder/Sha256/...).
-        Computes Type and ApplyOrder via the existing classifiers.
-
-        Type resolution priority:
-          1. If the caller passes -KnownType (a non-empty string), that
-             value is used verbatim. Callers like Resolve-PatchSetFromCatalog
-             already know the Catalog query's Type bucket
-             (SSU / LCU / DotNet / DynamicUpdate.SafeOs / DynamicUpdate.Setup)
-             and should pass it through to avoid the unreliable filename
-             heuristic in Get-PatchType.
-          2. Otherwise fall back to Get-PatchType -FileName <fn>. This
-             remains the path for older callers that have no contextual
-             Type info (e.g. tests, ad-hoc invocations).
-    #>
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)] [string]$KbId,
-        [Parameter(Mandatory)] [string]$Title,
-        [Parameter(Mandatory)] [string]$UpdateId,
-        [Parameter(Mandatory)] [string]$DownloadUrl,
-        [string]$FileName,
-        [long]$SizeBytes = 0,
-        [string]$Sha256  = '',
-        [string]$ReleaseDate = '',
-        [string[]]$Supersedes  = @(),
-        [string[]]$RequiresKbIds = @(),
-        [string]$ApplicableArchitecture = 'x64',
-        [string[]]$ApplicableLanguages  = @('neutral'),
-        [string]$KnownType = ''
-    )
-    $fn = $FileName
-    if ([string]::IsNullOrEmpty($fn) -and $DownloadUrl) {
-        # Recover filename from URL leaf
-        try { $fn = [System.IO.Path]::GetFileName(([uri]$DownloadUrl).AbsolutePath) }
-        catch { $fn = '' }
-    }
-    if (-not [string]::IsNullOrEmpty($KnownType)) {
-        $pType = $KnownType
-    } else {
-        $pType = Get-PatchType -FileName $fn
-    }
-    $pOrder = Get-PatchApplyOrder -PatchType $pType
-    return [pscustomobject][ordered]@{
-        Type                   = $pType
-        KbId                   = $KbId
-        Title                  = $Title
-        UpdateId               = $UpdateId
-        DownloadUrl            = $DownloadUrl
-        FileName               = $fn
-        SizeBytes              = $SizeBytes
-        Sha256                 = $Sha256
-        ReleaseDate            = $ReleaseDate
-        Supersedes             = $Supersedes
-        RequiresKbIds          = $RequiresKbIds
-        ApplyOrder             = $pOrder
-        ApplicableArchitecture = $ApplicableArchitecture
-        ApplicableLanguages    = $ApplicableLanguages
-    }
 }
 
 function Get-OsConfigPath {
@@ -4063,9 +3883,8 @@ function Get-ReleaseInfoCache {
         Read data/cache-release-info.json and return the deserialised
         object. Throws if the file is missing.
     .DESCRIPTION
-        Refresher consumers (Resolve-PatchSetFromReleaseInfo and its
-        peers, added in a later commit) call this to read the cache
-        without re-parsing the raw Markdown on every build.
+        The b3 producer (Invoke-CatalogPatchSetRefresh) calls this to
+        read the cache without re-parsing the raw Markdown on every build.
     #>
     [OutputType([pscustomobject])]
     param()
@@ -4872,136 +4691,6 @@ function Add-DynamicUpdateCacheEntry {
     return $cache
 }
 
-function ConvertTo-DynamicUpdatePatchMonthSortKey {
-    <#
-    .SYNOPSIS
-        Convert a YYYY-MM PatchMonth string into an integer (yyyy*100 +
-        month) for fast Compare-Object and Sort-Object operations.
-    #>
-    [OutputType([int])]
-    param([Parameter(Mandatory)] [string]$PatchMonth)
-    if (-not (Test-DynamicUpdatePatchMonth -PatchMonth $PatchMonth)) {
-        return -1
-    }
-    $parts = $PatchMonth -split '-'
-    return ([int]$parts[0] * 100 + [int]$parts[1])
-}
-
-function Get-DynamicUpdateWindowEarliestPatchMonth {
-    <#
-    .SYNOPSIS
-        Compute the earliest PatchMonth that still falls inside the
-        36-month window relative to a reference date (defaults to now,
-        UTC). Returns YYYY-MM.
-    .DESCRIPTION
-        Tests pass a fixed -Now to make assertions reproducible. The
-        window includes the reference month; i.e. for Now=2026-05 the
-        earliest in-window month is 2023-06 (35 months earlier),
-        yielding a 36-month inclusive range 2023-06..2026-05.
-    #>
-    [OutputType([string])]
-    param(
-        [datetime]$Now    = [datetime]::UtcNow,
-        [int]     $Months = $Script:DynamicUpdateCacheWindowMonths
-    )
-    # The reference month inclusive plus the prior (Months-1) months.
-    $first = New-Object 'System.DateTime' -ArgumentList $Now.Year, $Now.Month, 1
-    $earliest = $first.AddMonths(-($Months - 1))
-    return ($earliest.ToString('yyyy-MM'))
-}
-
-function Get-LatestDynamicUpdate {
-    <#
-    .SYNOPSIS
-        Return the most-recent successful cache entry for the given
-        (OS, DuType) within the 36-month window. Returns $null when no
-        in-window entry has Success=true.
-    .DESCRIPTION
-        Tests can pass a fixed -Now to anchor the window. By default
-        the window is anchored on the current UTC clock.
-
-        "Most recent" is decided by PatchMonth, not ProbedAt: the
-        cache may have been probed multiple times for the same month,
-        but the publishing month is what matters for ISO-build
-        applicability. Within the same PatchMonth the upsert in
-        Add-DynamicUpdateCacheEntry already keeps only the most
-        recent probe.
-    .EXAMPLE
-        Get-LatestDynamicUpdate -OsVersion Server2025 -DuType DynamicUpdate.SafeOs
-    #>
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)] [string]$OsVersion,
-        [Parameter(Mandatory)] [string]$DuType,
-        [datetime]$Now    = [datetime]::UtcNow,
-        [string]  $DataDir = ''
-    )
-    $cache = Get-DynamicUpdateCache -OsVersion $OsVersion -DataDir $DataDir
-    if ($cache.Entries.Count -eq 0) {
-        return $null
-    }
-    $earliestMonth = Get-DynamicUpdateWindowEarliestPatchMonth -Now $Now
-    $earliestKey   = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth $earliestMonth
-    $nowKey        = [int]$Now.Year * 100 + [int]$Now.Month
-
-    $candidates = @($cache.Entries | Where-Object {
-        $_.DuType  -eq $DuType -and
-        $_.Success -eq $true
-    } | Where-Object {
-        $k = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth ([string]$_.PatchMonth)
-        $k -ge $earliestKey -and $k -le $nowKey
-    })
-    if ($candidates.Count -eq 0) {
-        return $null
-    }
-    # Pick the entry with the highest PatchMonth key.
-    $top = $candidates | Sort-Object -Property @{
-        Expression = { ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth ([string]$_.PatchMonth) }
-        Descending = $true
-    } | Select-Object -First 1
-    return $top
-}
-
-function Remove-DynamicUpdateOutsideWindow {
-    <#
-    .SYNOPSIS
-        Drop cache entries whose PatchMonth is earlier than the 36-month
-        window relative to a reference date (defaults to now, UTC).
-        Persists the trimmed cache. Returns the trimmed cache object.
-    .DESCRIPTION
-        Tests anchor the window with -Now. Production callers should
-        omit -Now and let the current UTC clock apply.
-
-        The function name is singular ("Window") rather than carrying
-        the literal month count ("OlderThan36Months") so the verb-noun
-        convention is respected; the 36-month size is baked into the
-        Get-DynamicUpdateWindowEarliestPatchMonth helper.
-    #>
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)] [string]$OsVersion,
-        [datetime]$Now    = [datetime]::UtcNow,
-        [string]  $DataDir = ''
-    )
-    $cache = Get-DynamicUpdateCache -OsVersion $OsVersion -DataDir $DataDir
-    if ($cache.Entries.Count -eq 0) {
-        return $cache
-    }
-    $earliestMonth = Get-DynamicUpdateWindowEarliestPatchMonth -Now $Now
-    $earliestKey   = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth $earliestMonth
-
-    $kept = @($cache.Entries | Where-Object {
-        (ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth ([string]$_.PatchMonth)) -ge $earliestKey
-    })
-    if ($kept.Count -eq $cache.Entries.Count) {
-        # Nothing to drop; avoid a no-op write.
-        return $cache
-    }
-    $cache | Add-Member -NotePropertyName 'Entries' -NotePropertyValue @($kept) -Force
-    $null = Save-DynamicUpdateCache -Cache $cache -DataDir $DataDir
-    return $cache
-}
-
 # ============================================================
 # ISO Updater specific: Microsoft Update Catalog scraper
 # ============================================================
@@ -5335,512 +5024,6 @@ function Select-CanonicalPatchFile {
     return $best.Link
 }
 
-# psa-disable-next-line PSA6003 -- function intentionally returns multiple files (companion to the singular Select-CanonicalPatchFile); plural noun accurately describes the return contract
-function Select-AllCanonicalPatchFiles {
-    <#
-    .SYNOPSIS
-        From a list of download links returned by
-        Get-DownloadLinkFromCatalog, return ALL files that are full
-        standalone packages suitable for offline image servicing.
-    .DESCRIPTION
-        Companion to Select-CanonicalPatchFile. The single-file picker
-        is appropriate for SSU / LCU / SafeOS DU / Setup DU, which
-        Microsoft publishes as a single .msu or .cab per UpdateId.
-
-        Umbrella .NET CU updates (e.g. Server 2019 KB5088864 which
-        bundles .NET 4.7.2 and 4.8 servicing) attach MULTIPLE files
-        to a single UpdateId. Calling Select-CanonicalPatchFile on
-        such an UpdateId silently drops all but one .msu, leaving
-        whichever runtime corresponds to the dropped file unpatched
-        in install.wim.
-
-        This function applies the same scoring rules (so Express /
-        Delta / PSF / metadata are still rejected) but returns every
-        link that scored > 0, sorted descending by Score for
-        determinism. Callers should iterate the returned array and
-        emit one PatchBaseline entry per file, all keyed off the
-        umbrella KB / UpdateId.
-
-        Returns an empty array when no link survives filtering.
-    #>
-    [OutputType([pscustomobject[]])]
-    param(
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [pscustomobject[]]$Links,
-        [Parameter(Mandatory)] [string]$PatchType,
-        [string]$Architecture  = 'x64'
-    )
-    if (-not $Links -or $Links.Count -eq 0) { return @() }
-
-    $scored = New-Object System.Collections.Generic.List[object]
-    foreach ($lnk in $Links) {
-        if (-not $lnk -or -not $lnk.FileName) { continue }
-        $fn = $lnk.FileName.ToLower()
-        $score = 0
-
-        # Disqualifiers (any one of these makes the file unusable standalone)
-        if ($fn -match 'express') { $score -= 10000 }
-        if ($fn -match 'delta')   { $score -= 10000 }
-        if ($fn -match '\.psf$' -or $fn -match '-psf-') { $score -= 10000 }
-        if ($fn -match 'pkgproperties' -or $fn -match '\.txt$') { $score -= 10000 }
-
-        # Extension preference
-        if ($fn -match '\.msu$') { $score += 200 }
-        elseif ($fn -match '\.cab$') { $score += 100 }
-        elseif ($fn -match '\.wim$' -or $fn -match '\.esd$') { $score -= 200 }
-
-        # Architecture match
-        if ($Architecture) {
-            $archLower = $Architecture.ToLower()
-            if ($fn -match [regex]::Escape($archLower)) { $score += 50 }
-        }
-        if ($Architecture -eq 'x64') {
-            if ($fn -match 'arm64') { $score -= 50 }
-            if ($fn -match 'x86' -and $fn -notmatch 'x86_64') { $score -= 50 }
-        }
-
-        if ($fn -match 'full') { $score += 30 }
-
-        # .NET CU: prefer ndp<version> variant (e.g. ndp48 for .NET 4.8).
-        # Mirrors the same scoring used by Select-CanonicalPatchFile so
-        # the multi-file picker preserves the per-runtime preference
-        # when multiple .NET CU siblings are present under one umbrella
-        # KB.
-        if ($PatchType -eq 'DotNet.Runtime') {
-            if ($fn -match 'ndp\d+') { $score += 100 }
-        }
-
-        $scored.Add([pscustomobject]@{
-            Link  = $lnk
-            Score = $score
-        }) | Out-Null
-    }
-
-    $survivors = @($scored | Where-Object { $_.Score -gt 0 } | Sort-Object Score -Descending)
-    if ($survivors.Count -eq 0) { return @() }
-    return @($survivors | ForEach-Object { $_.Link })
-}
-
-function Test-IsCombinedLcuTitle {
-    <#
-    .SYNOPSIS
-        Returns $true if the LCU title self-identifies as a "combined"
-        package that embeds the servicing stack update.
-    .DESCRIPTION
-        Microsoft started embedding the SSU into the LCU "in rare cases
-        a breaking change ... requires a standalone servicing stack
-        update to be published" (Microsoft Learn). In normal months,
-        a standalone SSU is NOT published; the LCU is the combined
-        package. This function tries to identify explicit combined
-        markers in the title; the orchestrator additionally treats
-        any month where "SSU search returned zero AND LCU search
-        returned non-zero" as a combined-month even if the title
-        does not literally say so.
-    #>
-    [OutputType([bool])]
-    param([Parameter(Mandatory)] [string]$LcuTitle)
-    $t = $LcuTitle.ToLower()
-    if ($t -match 'combined') { return $true }
-    if ($t -match 'servicing stack') { return $true }
-    return $false
-}
-
-function Get-CatalogQueryUrl {
-    <#
-    .SYNOPSIS
-        Build the Catalogue Search.aspx URL with optional Product /
-        Description filters appended via the search syntax. Filters
-        are AND-combined automatically by the Catalogue.
-    .DESCRIPTION
-        The Catalogue does not have a documented advanced-search API,
-        but the public Search.aspx accepts URL-encoded multi-word
-        queries that include filter tokens. Tokens are matched against
-        the Title / Product / Description columns.
-    #>
-    [OutputType([string])]
-    param(
-        [Parameter(Mandatory)] [string]$QueryTemplate,
-        [string[]]$ProductFilter = @(),
-        [string]$DescriptionFilter = ''
-    )
-    $parts = @($QueryTemplate)
-    foreach ($pf in $ProductFilter) {
-        if (-not [string]::IsNullOrWhiteSpace($pf)) { $parts += ('"' + $pf + '"') }
-    }
-    if (-not [string]::IsNullOrWhiteSpace($DescriptionFilter)) {
-        $parts += ('"' + $DescriptionFilter + '"')
-    }
-    $combined = ($parts -join ' ')
-    return 'https://www.catalog.update.microsoft.com/Search.aspx?q=' + [uri]::EscapeDataString($combined)
-}
-
-function ConvertFrom-CatalogSupersedenceSection {
-    <#
-    .SYNOPSIS
-        Parse one ScopedView supersedence section into a deterministic,
-        sorted, deduplicated KB list plus the immediate-predecessor KB.
-    .DESCRIPTION
-        Each section lists the whole chain as repeated
-        <div ...>TITLE (KBxxxx)</div> entries. The Catalog reorders these
-        per request, so document order is not stable. 'Latest' (the
-        immediate predecessor) is the entry carrying the highest yyyy-MM
-        title prefix, breaking ties on the highest KB number, and falling
-        back to the highest KB number when no entry carries a yyyy-MM
-        prefix. See SPEC B.12.
-    #>
-    [OutputType([pscustomobject])]
-    param([string]$Html)
-    $kbPattern = 'KB\d{6,7}'
-    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    $latestKb = ''
-    $latestYm = ''
-    if (-not [string]::IsNullOrEmpty($Html)) {
-        foreach ($entry in [regex]::Matches($Html, '(?is)<div[^>]*>(.*?)</div>')) {
-            $txt = $entry.Groups[1].Value
-            $kbM = [regex]::Match($txt, $kbPattern)
-            if (-not $kbM.Success) { continue }
-            $kb = $kbM.Value
-            [void]$set.Add($kb)
-            $ymM = [regex]::Match($txt, '\d{4}-\d{2}')
-            $ym  = if ($ymM.Success) { $ymM.Value } else { '' }
-            if (($ym -gt $latestYm) -or
-                ($ym -eq $latestYm -and [string]::Compare($kb, $latestKb, [System.StringComparison]::Ordinal) -gt 0)) {
-                $latestYm = $ym
-                $latestKb = $kb
-            }
-        }
-        if ($set.Count -eq 0) {
-            foreach ($k in [regex]::Matches($Html, $kbPattern)) { [void]$set.Add($k.Value) }
-        }
-    }
-    $arr = [string[]]@($set)
-    [array]::Sort($arr, [System.StringComparer]::Ordinal)
-    if ([string]::IsNullOrEmpty($latestKb) -and $arr.Count -gt 0) {
-        $latestKb = ($arr | Sort-Object { [int64]($_ -replace '\D', '') } -Descending | Select-Object -First 1)
-    }
-    return [pscustomobject][ordered]@{ All = @($arr); Latest = $latestKb }
-}
-
-function Get-SupersedenceFromCatalog {
-    <#
-    .SYNOPSIS
-        For an UpdateId, fetch ScopedViewInline.aspx and extract the
-        "supersedes" and "superseded by" KB lists.
-    .DESCRIPTION
-        These two lists drive PatchBaseline.Patches[].Supersedes and
-        the dependency_graph diagnostic export. They are best-effort:
-        the page layout changes occasionally and missing data is not
-        a hard failure.
-    #>
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)] [string]$UpdateId,
-        [int]$MaxRetries = 3
-    )
-    $uri = 'https://www.catalog.update.microsoft.com/ScopedViewInline.aspx?updateid=' + [uri]::EscapeDataString($UpdateId)
-    $headers = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; UpdateWsi/r02)' }
-    $resp = $null
-    $attempt = 0
-    while ($attempt -lt $MaxRetries -and -not $resp) {
-        $attempt++
-        try {
-            $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers $headers `
-                                      -TimeoutSec 60 -ErrorAction Stop
-        } catch {
-            if ($attempt -ge $MaxRetries) {
-                # Supersedence info is best-effort
-                return [pscustomobject][ordered]@{
-                    Supersedes       = @()
-                    SupersedesLatest = ''
-                    SupersededBy     = @()
-                    Error            = $_.Exception.Message
-                }
-            }
-            Wait-WithJitter -BaseSeconds 2 -JitterRange 1
-        }
-    }
-    # Capture the FULL supersedes / superseded-by sections. Each lists the
-    # whole chain as repeated <div>TITLE (KBxxxx)</div> entries and ends at
-    # the next id="..." panel. The previous '(.*?)</div>' boundary stopped at
-    # the first inner entry, capturing a single KB whose identity was
-    # non-deterministic because the Catalog reorders the list per request.
-    # ConvertFrom-CatalogSupersedenceSection returns the full sorted chain
-    # plus the immediate predecessor (Latest). See SPEC B.12.
-    $reSupBy = '(?is)id\s*=\s*["'']supersededbyInfo["''][^>]*>(.*?)(?=\bid\s*=\s*["'']|\z)'
-    $reSup   = '(?is)id\s*=\s*["'']supersedesInfo["''][^>]*>(.*?)(?=\bid\s*=\s*["'']|\z)'
-    $mBy  = [regex]::Match($resp.Content, $reSupBy)
-    $mSup = [regex]::Match($resp.Content, $reSup)
-    $byParsed  = ConvertFrom-CatalogSupersedenceSection -Html $(if ($mBy.Success)  { $mBy.Groups[1].Value }  else { '' })
-    $supParsed = ConvertFrom-CatalogSupersedenceSection -Html $(if ($mSup.Success) { $mSup.Groups[1].Value } else { '' })
-    return [pscustomobject][ordered]@{
-        Supersedes       = $supParsed.All
-        SupersedesLatest = $supParsed.Latest
-        SupersededBy     = $byParsed.All
-        Error            = $null
-    }
-}
-
-function Get-PatchSetFromReleaseInfoDiscovery {
-    <#
-    .SYNOPSIS
-        Pure-cache KB discovery: given an OS and patch month, look up
-        the (LCU, .NET CU, DU.*) KB / UpdateId tuples from the three
-        local cache files written by the Step 2a refresh layer.
-    .DESCRIPTION
-        This is the offline half of `Resolve-PatchSetFromReleaseInfo`.
-        It performs no network I/O; it reads the local caches under
-        data/ (or under -DataDir when tests pass it) and returns a
-        structured list of "discovery records" that the orchestrator
-        then resolves to file URLs via the Microsoft Update Catalog.
-
-        Each discovery record carries enough information for the
-        orchestrator to call the Catalog URL resolver with a KB or an
-        UpdateId, plus the canonical Type so the resulting
-        PatchBaseline entry classification is unambiguous.
-
-        Return shape per record:
-          @{
-            Type           = 'LCU' | 'DotNet.Runtime' |
-                             'DynamicUpdate.Setup' | 'DynamicUpdate.SafeOs'
-            KbId           = 'KB...'              (LCU / .NET CU)
-            UpdateId       = '...guid...'         (DU only; '' otherwise)
-            SourceCache    = 'release-info' | 'dotnet-cu' | 'dynamic-update'
-            SourceRow      = <opaque object from cache, for diagnostics>
-            DiscoveryNote  = string
-          }
-
-        Behaviours:
-        - LCU: read release-info cache, match (OsShortName = OsVersion)
-          AND (UpdateTypeYear*100 + UpdateTypeMonth) == requested month.
-          One LCU row per month per OS in normal operation; the most
-          recently produced row wins when multiples exist (e.g. preview
-          + general-availability variants share a month -- the preview
-          letter sorts later under Microsoft's UpdateType naming so it
-          is preferred).
-        - .NET CU: read .NET CU cache, find Months[] entry matching
-          the requested month (Date or DateText prefix). Emit ONE
-          discovery record per Rows[] entry for the requested OS (per
-          SPEC B.22.5 every release-notes row becomes its own
-          PatchBaseline entry).
-        - DU: read per-OS DU cache, call the in-process
-          Get-LatestDynamicUpdate for each of
-          (DynamicUpdate.Setup, DynamicUpdate.SafeOs) with the request
-          month as -Now anchor. Each successful entry becomes a
-          discovery record carrying the cache's ChosenUpdateId; a
-          null/$null/IsEmptyMarker entry yields no record (DU is
-          legitimately absent for that month, e.g. Server 2025 Setup
-          since 2025-12).
-
-        Missing caches are NOT a fatal error; the function silently
-        skips that source and continues with the others. The caller
-        decides whether to error on empty discovery.
-
-        This discovery step does NOT emit a standalone SSU record.
-        On the combined model (e.g. Server 2022/2025) the monthly LCU
-        embeds the SSU and carries both .msu URLs under one Catalog
-        UpdateId, which the per-file Convert-CatalogPatchToBaselineEntry
-        path classifies via filename heuristic. On the separate model
-        (e.g. Server 2016/2019) the standalone same-month SSU is handled
-        downstream by Resolve-PatchSetFromReleaseInfo.
-    .EXAMPLE
-        Get-PatchSetFromReleaseInfoDiscovery -OsVersion Server2025 `
-            -PatchMonth '2026-05'
-    #>
-    [OutputType([pscustomobject[]])]
-    param(
-        [Parameter(Mandatory)] [string]$OsVersion,
-        [Parameter(Mandatory)] [string]$PatchMonth,
-        [string]$DataDir = ''
-    )
-
-    if (-not (Test-DynamicUpdatePatchMonth -PatchMonth $PatchMonth)) {
-        throw ('Get-PatchSetFromReleaseInfoDiscovery: invalid PatchMonth "{0}"; expected YYYY-MM.' -f $PatchMonth)
-    }
-    $monthKey = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth $PatchMonth
-    $records  = New-Object 'System.Collections.Generic.List[pscustomobject]'
-
-    # ----- LCU from release-info cache -----
-    $relInfoCachePath = if ([string]::IsNullOrEmpty($DataDir)) {
-        Get-ReleaseInfoCachePath
-    } else {
-        (Join-Path $DataDir 'cache-release-info.json')
-    }
-    if (Test-Path -LiteralPath $relInfoCachePath -PathType Leaf) {
-        $relJson  = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($relInfoCachePath))
-        $relCache = $relJson | ConvertFrom-CanonicalJson
-        $monthlyReleases = @()
-        if ($null -ne $relCache -and $relCache.PSObject.Properties.Name -contains 'MonthlyReleases') {
-            $monthlyReleases = @($relCache.MonthlyReleases)
-        }
-        $candidates = @($monthlyReleases | Where-Object {
-            $row = $_
-            if ([string]$row.OsShortName -ne $OsVersion) { return $false }
-            $rowKey = ([int]$row.UpdateTypeYear) * 100 + ([int]$row.UpdateTypeMonth)
-            return ($rowKey -eq $monthKey)
-        })
-        if ($candidates.Count -gt 0) {
-            # When multiple rows share a month (e.g. baseline + preview), prefer the row
-            # with the lexically greatest UpdateType letter, then the latest AvailabilityDate.
-            $pickedLcu = @($candidates | Sort-Object @{
-                Expression = { [string]$_.UpdateTypeLetter }; Descending = $true
-            }, @{
-                Expression = { [string]$_.AvailabilityDate }; Descending = $true
-            }) | Select-Object -First 1
-            if ($null -ne $pickedLcu -and -not [string]::IsNullOrEmpty([string]$pickedLcu.KbId)) {
-                $records.Add([pscustomobject]@{
-                    Type          = 'LCU'
-                    KbId          = [string]$pickedLcu.KbId
-                    UpdateId      = ''
-                    SourceCache   = 'release-info'
-                    SourceRow     = $pickedLcu
-                    DiscoveryNote = ('LCU from release-info: UpdateType={0} {1}{2} AvailabilityDate={3}' -f $pickedLcu.UpdateType, $pickedLcu.UpdateTypeYear, $pickedLcu.UpdateTypeMonth, $pickedLcu.AvailabilityDate)
-                })
-            }
-        }
-    }
-
-    # ----- .NET CU from dotnet-cu cache -----
-    #
-    # Build a case-insensitive set of LCU KbIds already discovered above
-    # so the .NET CU loop can dedup against them. Per SPEC.md,
-    # the Windows 10 1607 / Server 2016 era LCU literally embeds the
-    # .NET 3.5 / 4.6.2 / 4.7.x cumulative-update payload as OS components
-    # ("sliced cumulative update" design): Microsoft's
-    # learn.microsoft.com .NET Framework release-notes consequently
-    # re-lists the LCU KB under the Server 2016 .NET CU section
-    # (e.g. KB5087537 = LCU of 2026-05 appears both in
-    # `windows-server-release-info` and in the .NET release-notes table
-    # row "Windows 10 1607 and Windows Server 2016 / .NET Framework
-    # 3.5, 4.6.2, 4.7, 4.7.1, 4.7.2"). Emitting both records would
-    # cause the resolver to write two Lines entries pointing
-    # at the same .msu file with different Type values. LCU is the
-    # authoritative source, so any .NET CU row whose KbId matches an
-    # already-discovered LCU KbId is skipped here. Server 2019 / 2022
-    # / 2025 split the .NET CU into separate KBs and are unaffected.
-    $lcuKbSet = New-Object 'System.Collections.Generic.HashSet[string]' (
-        [System.StringComparer]::OrdinalIgnoreCase
-    )
-    foreach ($r in $records) {
-        if ([string]$r.Type -eq 'LCU' -and -not [string]::IsNullOrEmpty([string]$r.KbId)) {
-            [void]$lcuKbSet.Add([string]$r.KbId)
-        }
-    }
-    # Carry-forward safety (B.22.5): a .NET CU row can carry a KbId that is
-    # actually an LCU in some month -- e.g. the Server 2016 sliced cumulative
-    # KB5087537, which Microsoft lists under a .NET row. The $records loop
-    # above only sees this month's LCU, so when a prior month's .NET rows are
-    # carried forward below, a prior-month LCU KbId could resurface as a
-    # spurious .NET CU. Seed the dedup set with every LCU KbId release-info
-    # lists for this OS (any in-cache month), so a KB that is an LCU in any
-    # month is never emitted as a .NET CU.
-    if ((Test-Path Variable:monthlyReleases) -and $monthlyReleases) {
-        foreach ($row in $monthlyReleases) {
-            if ([string]$row.OsShortName -eq $OsVersion -and -not [string]::IsNullOrEmpty([string]$row.KbId)) {
-                [void]$lcuKbSet.Add([string]$row.KbId)
-            }
-        }
-    }
-
-    $dotnetCachePath = if ([string]::IsNullOrEmpty($DataDir)) {
-        Get-DotNetCuCachePath
-    } else {
-        (Join-Path $DataDir 'cache-dotnet-cu.json')
-    }
-    if (Test-Path -LiteralPath $dotnetCachePath -PathType Leaf) {
-        $dotnetJson  = [System.Text.Encoding]::UTF8.GetString([System.IO.File]::ReadAllBytes($dotnetCachePath))
-        $dotnetCache = $dotnetJson | ConvertFrom-CanonicalJson
-        $months = @()
-        if ($null -ne $dotnetCache -and $dotnetCache.PSObject.Properties.Name -contains 'Months') {
-            $months = @($dotnetCache.Months)
-        }
-        # Select the .NET CU month: prefer the exact PatchMonth; if that month
-        # published no .NET CU for this OS, carry forward the most-recent .NET
-        # CU month that is <= PatchMonth, still inside the 36-month lookback
-        # window, and that carries a row for this OS. .NET Framework CUs are
-        # cumulative and OS-lifecycle-applicable, so the latest-applicable
-        # build is the correct content for a fully-patched ISO; silently
-        # dropping it on a publication-gap month (a month with no .NET CU)
-        # would ship an ISO with no .NET servicing. Mirrors the Dynamic Update
-        # 36-month recency (Get-LatestDynamicUpdate); see SPEC B.22.5.
-        $dotnetAnchorDate  = [datetime]::ParseExact(($PatchMonth + '-01'), 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
-        $dotnetEarliestKey = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth (Get-DynamicUpdateWindowEarliestPatchMonth -Now $dotnetAnchorDate)
-        $monthEntry      = $null
-        $monthEntryKey   = -1
-        $monthEntryMonth = ''
-        foreach ($m in $months) {
-            $isoDate = [string]$m.Date
-            if ([string]::IsNullOrWhiteSpace($isoDate) -or $isoDate.Length -lt 7) { continue }
-            $mMonth = $isoDate.Substring(0, 7)
-            $mKey   = ConvertTo-DynamicUpdatePatchMonthSortKey -PatchMonth $mMonth
-            if ($mKey -lt 0 -or $mKey -gt $monthKey -or $mKey -lt $dotnetEarliestKey) { continue }
-            $hasOsRow = $false
-            if ($m.PSObject.Properties.Name -contains 'Entries') {
-                $hasOsRow = @($m.Entries | Where-Object { [string]$_.OsNormalised -eq $OsVersion }).Count -gt 0
-            }
-            if (-not $hasOsRow) { continue }
-            if ($mKey -gt $monthEntryKey -or ($mKey -eq $monthEntryKey -and $null -ne $monthEntry -and [string]::Compare($isoDate, [string]$monthEntry.Date) -gt 0)) {
-                $monthEntry      = $m
-                $monthEntryKey   = $mKey
-                $monthEntryMonth = $mMonth
-            }
-        }
-        $dotnetCarriedForward = ($null -ne $monthEntry -and $monthEntryMonth -ne $PatchMonth)
-        if ($dotnetCarriedForward) {
-            Write-Step ('  No .NET CU published for {0} {1}; carried forward the latest in-window .NET CU from {2}.' -f $PatchMonth, $OsVersion, $monthEntryMonth)
-        }
-        if ($null -ne $monthEntry -and $monthEntry.PSObject.Properties.Name -contains 'Entries') {
-            $osBlocks = @($monthEntry.Entries | Where-Object { [string]$_.OsNormalised -eq $OsVersion })
-            foreach ($block in $osBlocks) {
-                $rows = @()
-                if ($block.PSObject.Properties.Name -contains 'Rows') { $rows = @($block.Rows) }
-                foreach ($row in $rows) {
-                    $rowKb = [string]$row.KbId
-                    if ([string]::IsNullOrEmpty($rowKb)) { continue }
-                    # SPEC.md LCU-priority dedup: drop any .NET CU
-                    # row whose KbId duplicates an LCU KbId already in
-                    # $records. See the long comment above the
-                    # $lcuKbSet construction for the Microsoft-side
-                    # rationale (Server 2016 sliced cumulative update).
-                    if ($lcuKbSet.Contains($rowKb)) {
-                        Write-Verbose ('Get-PatchSetFromReleaseInfoDiscovery: skipping .NET CU row {0} for OS={1} Month={2}; duplicates an LCU KbId already discovered (per SPEC.md, LCU is authoritative).' -f $rowKb, $OsVersion, $PatchMonth)
-                        continue
-                    }
-                    $records.Add([pscustomobject]@{
-                        Type          = 'DotNet.Runtime'
-                        KbId          = $rowKb
-                        UpdateId      = ''
-                        SourceCache   = 'dotnet-cu'
-                        SourceRow     = $row
-                        DiscoveryNote = (('DotNet.Runtime from dotnet-cu: OsLabel="{0}" versions="{1}"' -f $block.OsLabel, $row.DotNetVersions) + $(if ($dotnetCarriedForward) { ' (carried forward from {0}; no {1} .NET CU published)' -f $monthEntryMonth, $PatchMonth } else { '' }))
-                    })
-                }
-            }
-        }
-    }
-
-    # ----- DU from per-OS DU cache -----
-    $duAnchor = [datetime]::ParseExact(($PatchMonth + '-15'), 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
-    foreach ($duType in @('DynamicUpdate.Setup', 'DynamicUpdate.SafeOs')) {
-        $latest = $null
-        try {
-            $latest = Get-LatestDynamicUpdate -OsVersion $OsVersion -DuType $duType -Now $duAnchor -DataDir $DataDir
-        } catch {
-            $latest = $null
-        }
-        if ($null -ne $latest -and -not [string]::IsNullOrEmpty([string]$latest.ChosenUpdateId)) {
-            $records.Add([pscustomobject]@{
-                Type          = $duType
-                KbId          = [string]$latest.KbId
-                UpdateId      = [string]$latest.ChosenUpdateId
-                SourceCache   = 'dynamic-update'
-                SourceRow     = $latest
-                DiscoveryNote = ('{0} from dynamic-update: PatchMonth={1} ChosenTitle="{2}"' -f $duType, $latest.PatchMonth, $latest.ChosenTitle)
-            })
-        }
-    }
-
-    return @($records.ToArray())
-}
-
 # ============================================================
 # b3 layer-1 acquisition: seed-only Microsoft Update Catalog resolver
 #   (faithful port of the reference Resolve-CatalogPatchSet.ps1 production
@@ -5910,29 +5093,6 @@ function Invoke-CatalogPost {
     return $r.Content
 }
 
-function Get-HeadSize {
-    param([string]$Url)
-    $cache = Join-Path $script:CatCache 'sizes.json'
-    $sizes = @{}
-    if (Test-Path $cache) {
-        try {
-            $j = Get-Content -LiteralPath $cache -Raw | ConvertFrom-Json
-            foreach ($pr in $j.PSObject.Properties) { $sizes[$pr.Name] = $pr.Value }
-        } catch { $sizes = @{} }
-    }
-    if ($sizes.ContainsKey($Url)) { return $sizes[$Url] }
-    $n = $null
-    try {
-        $r = Invoke-WebRequest -Uri $Url -Method Head -UserAgent $script:CatUA -UseBasicParsing -TimeoutSec 30
-        $cl = $r.Headers['Content-Length']
-        if ($cl) { $n = [long]($cl | Select-Object -First 1) }
-    } catch { $n = $null }
-    $sizes[$Url] = $n
-    ($sizes | ConvertTo-Json -Compress) | Set-Content -LiteralPath $cache -Encoding UTF8
-    Start-Sleep -Milliseconds 300
-    return $n
-}
-
 function Search-Catalog {
     param([string]$Query)
     $slug = [regex]::Replace($Query, '[^A-Za-z0-9]+', '_')
@@ -5989,23 +5149,6 @@ function Resolve-CatalogDownload {
         }
     }
     return , $out
-}
-
-function Get-CatalogScoped {
-    param([string]$Uid)
-    $tag = "scoped.$($Uid.Substring(0,8)).html"
-    $html = Get-CatalogText ($script:CatScopedUrl + '?updateid=' + $Uid) $tag
-    function _grab([string]$anchor) {
-        $m = [regex]::Match($html, ('id="' + $anchor + '"[^>]*>(.*?)</div>'), 'Singleline,IgnoreCase')
-        if ($m.Success) { return (Convert-HtmlToText $m.Groups[1].Value) } else { return $null }
-    }
-    $supersededBy = _grab 'supersededbyInfo'
-    $isLatest = ($null -ne $supersededBy) -and ($supersededBy.ToLower().StartsWith('n/a'))
-    $kbm = [regex]::Match($html, 'KB article numbers:\s*</span>\s*([0-9,\s]+)')
-    [pscustomobject]@{
-        uid = $Uid; is_latest = $isLatest; supersededByText = $supersededBy
-        kb = $(if ($kbm.Success) { $kbm.Groups[1].Value.Trim() } else { $null })
-    }
 }
 
 # ============================================================================
@@ -6520,298 +5663,6 @@ function Invoke-CatalogPatchSetRefresh {
         Write-Caution ("{0}: Catalog LCU not confirmed by release-info (verdict={1}). {2}" -f $OsVersion, $res.Reconcile.Verdict, ($res.Reconcile.Errors -join '; '))
     }
     return @($res.Lines)
-}
-
-function Resolve-PatchSetFromReleaseInfo {
-    <#
-    .SYNOPSIS
-        Orchestrator: for a given OS / month / language, look up the
-        canonical patch set (LCU + embedded SSU + .NET CU per runtime
-        + DU.Setup + DU.SafeOs) by reading the release-info, .NET CU
-        and Dynamic Update caches, then resolves each discovered KB
-        or UpdateId to file URLs via the Microsoft Update Catalog.
-    .DESCRIPTION
-        This function is the r07.0+ replacement for the r05.1-era
-        `Resolve-PatchSetFromCatalog`. The old function performed
-        Title-string discovery against the Catalog (one Search.aspx
-        query per Type with hand-crafted templates); the new one
-        defers discovery to the Step 2a cache layer and uses the
-        Catalog only as a URL resolver. SPEC.md documents the
-        migration; it also covers the per-OS .NET CU multiplicity
-        and the LCU + SSU bundle handling that this function
-        inherits unchanged.
-
-        On the combined model the monthly LCU embeds the SSU; on the
-        separate model some OSes (e.g. Server 2016 today) still publish a *standalone*
-        same-month Servicing Stack Update under a separate Catalog
-        UpdateId. After emitting the per-UpdateId records, this
-        function searches the Catalog for a same-month "Servicing
-        Stack Update" of the OS: when one is found it emits a Type=SSU
-        entry and flips the matching LCU to IsCombined=$false; when
-        none is found the LCU stays IsCombined=$true (combined
-        convention). When an LCU's Catalog UpdateId itself carries
-        multiple .msu files, the per-file
-        Convert-CatalogPatchToBaselineEntry path still classifies them
-        via filename heuristic (Get-PatchType).
-
-        Per SPEC.md, the Catalog narrow-filter consumes
-        `Test-CatalogTitleMatch` and the per-OS Config-driven
-        `CatalogTitleTokens`, so the URL resolver tolerates
-        Microsoft re-naming the Catalog title format by Config
-        edit alone.
-
-        Returns an array of fully-populated PatchBaseline entries
-        (same shape as the old Resolve-PatchSetFromCatalog return).
-        The LCU's IsCombined flag defaults to $true and is set to
-        $false when a standalone same-month SSU is discovered for it.
-    .EXAMPLE
-        Resolve-PatchSetFromReleaseInfo `
-            -OsVersion Server2025 -OsLanguage en-us -PatchMonth '2026-05'
-    #>
-    [OutputType([pscustomobject[]])]
-    param(
-        [Parameter(Mandatory)] [string]$OsVersion,
-        [Parameter(Mandatory)] [string]$OsLanguage,
-        [Parameter(Mandatory)] [string]$PatchMonth,
-        [int]$MaxRetries = 3,
-        [string]$DataDir = ''
-    )
-
-    Write-Step ('Resolving patch set (release-info path): OS={0} Lang={1} Month={2}' -f $OsVersion, $OsLanguage, $PatchMonth)
-
-    $discoveries = @(Get-PatchSetFromReleaseInfoDiscovery -OsVersion $OsVersion -PatchMonth $PatchMonth -DataDir $DataDir)
-    if ($discoveries.Count -eq 0) {
-        Write-Caution ('Discovery returned zero records for OS={0} Month={1}. Ensure data/cache-release-info.json, data/cache-dotnet-cu.json and data/cache-dynamicupdate-{0}.json have been populated by the refresh action.' -f $OsVersion, $PatchMonth)
-        return @()
-    }
-    Write-Step ('  Discovered {0} record(s): {1}' -f $discoveries.Count, (($discoveries | ForEach-Object { $_.Type }) -join ', '))
-
-    $resolved = New-Object 'System.Collections.Generic.List[pscustomobject]'
-    $supersedenceExclusions = New-Object 'System.Collections.Generic.List[object]'
-
-    foreach ($rec in $discoveries) {
-        $isDu  = ($rec.Type -eq 'DynamicUpdate.Setup' -or $rec.Type -eq 'DynamicUpdate.SafeOs')
-        $bestUid = ''
-        $bestTitle = ''
-        # ---- Resolve UpdateId ----
-        if ($isDu) {
-            # DU records carry the UpdateId from the cache directly.
-            $bestUid   = [string]$rec.UpdateId
-            $bestTitle = [string]$rec.SourceRow.ChosenTitle
-        } else {
-            # LCU / .NET CU: KB-only Catalog search, then narrow with the Config-driven helper.
-            $hits = $null
-            try {
-                $hits = Get-UpdateIdFromCatalog -KbId $rec.KbId -MaxRetries $MaxRetries
-            } catch {
-                Write-Caution ('Catalog KB search failed for {0} {1}: {2}' -f $rec.Type, $rec.KbId, $_.Exception.Message)
-                continue
-            }
-            if (-not $hits -or $hits.Count -eq 0) {
-                Write-Caution ('Catalog returned zero hits for {0} {1}.' -f $rec.Type, $rec.KbId)
-                continue
-            }
-            $narrowed = @($hits | Where-Object {
-                Test-CatalogTitleMatch -OsVersion $OsVersion -Title ([string]$_.Title)
-            })
-            if ($narrowed.Count -eq 0) {
-                Write-Caution ('Catalog narrow filter rejected all {0} hit(s) for {1} {2}. Check CatalogTitleTokens in data/config-{3}.json.' -f $hits.Count, $rec.Type, $rec.KbId, $OsVersion)
-                continue
-            }
-            $narrowedNoPreview = @($narrowed | Where-Object { [string]$_.Title -notmatch '(?i)preview' })
-            if ($narrowedNoPreview.Count -eq 0) { $narrowedNoPreview = $narrowed }
-            $bestHit   = $narrowedNoPreview[0]
-            $bestUid   = [string]$bestHit.UpdateId
-            $bestTitle = [string]$bestHit.Title
-        }
-        if ([string]::IsNullOrEmpty($bestUid)) {
-            Write-Caution ('No UpdateId resolved for {0} {1}.' -f $rec.Type, $rec.KbId)
-            continue
-        }
-
-        # ---- Resolve download links ----
-        $links = $null
-        try {
-            $links = Get-DownloadLinkFromCatalog -UpdateId $bestUid -MaxRetries $MaxRetries
-        } catch {
-            Write-Caution ('DownloadDialog failed for {0} UpdateId {1}: {2}' -f $rec.Type, $bestUid, $_.Exception.Message)
-            continue
-        }
-        if (-not $links -or $links.Count -eq 0) {
-            Write-Caution ('No download link for {0} UpdateId {1}.' -f $rec.Type, $bestUid)
-            continue
-        }
-
-        # ---- File selection per Type ----
-        if ($rec.Type -eq 'DotNet.Runtime') {
-            # Umbrella .NET CU UpdateIds carry multiple .msu files; emit each.
-            $primaries = @(Select-AllCanonicalPatchFiles -Links $links -PatchType $rec.Type -Architecture 'x64')
-            $passKnownType = $true
-        }
-        elseif ($rec.Type -eq 'LCU') {
-            # Combined-LCU convention (see SPEC.md): take every canonical file
-            # (LCU + bundled SSU when present) and let the per-file filename
-            # heuristic in Convert-CatalogPatchToBaselineEntry classify Type.
-            $primaries = @(Select-AllCanonicalPatchFiles -Links $links -PatchType $rec.Type -Architecture 'x64')
-            $passKnownType = $false
-        }
-        else {
-            # SSU (shouldn't reach here -- not discovered), DU.Setup, DU.SafeOs:
-            # single canonical file.
-            $single = Select-CanonicalPatchFile -Links $links -PatchType $rec.Type -Architecture 'x64'
-            $primaries = @()
-            if ($null -ne $single) { $primaries = @($single) }
-            $passKnownType = $true
-        }
-        if ($primaries.Count -eq 0) {
-            $names = (($links | ForEach-Object { $_.FileName }) -join ', ')
-            Write-Caution ('No canonical file for {0} UpdateId {1} (only Express/Delta/PSF?). Files: {2}' -f $rec.Type, $bestUid, $names)
-            continue
-        }
-
-        # ---- Supersedence (best-effort, shared across this UpdateId's files) ----
-        $supers = $null
-        try {
-            $supers = Get-SupersedenceFromCatalog -UpdateId $bestUid -MaxRetries $MaxRetries
-        } catch {
-            $supers = $null
-        }
-        $supersList = if ($null -ne $supers -and $supers.SupersedesLatest) { @($supers.SupersedesLatest) } else { @() }
-
-        foreach ($primary in $primaries) {
-            $kbFromFile = Get-KbIdFromPatchFileName -FileName $primary.FileName
-            $entryKbId  = if (-not [string]::IsNullOrEmpty($kbFromFile)) { $kbFromFile } else { $rec.KbId }
-            $knownArg   = if ($passKnownType) { $rec.Type } else { '' }
-
-            $entry = Convert-CatalogPatchToBaselineEntry `
-                -KbId $entryKbId `
-                -Title $bestTitle `
-                -UpdateId $bestUid `
-                -DownloadUrl $primary.Url `
-                -FileName $primary.FileName `
-                -Sha256 '' `
-                -Supersedes $supersList `
-                -ApplicableArchitecture 'x64' `
-                -ApplicableLanguages @('neutral') `
-                -KnownType $knownArg
-
-            if ($entry.Type -eq 'LCU') {
-                # Combined-month convention; see SPEC.md.
-                $entry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $true -Force
-            } else {
-                $entry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $false -Force
-            }
-            $entry | Add-Member -NotePropertyName 'Variant' -NotePropertyValue 'Full' -Force
-
-            $resolved.Add($entry) | Out-Null
-        }
-    }
-
-    # ----- Standalone servicing-stack update (SSU) discovery -----
-    # Some LCUs name a required servicing-stack version that ships as a
-    # *standalone* SSU package under a DIFFERENT Catalog UpdateId than the LCU,
-    # so the per-UpdateId file walk above never surfaces it. For each resolved
-    # LCU, search the Catalog for the same-month "Servicing Stack Update" of this
-    # OS; the search result is itself the discriminator:
-    #   * found  (e.g. Server 2016 KB5088064) -> emit a Type=SSU NeutralPatch and
-    #     flip the LCU to IsCombined=$false (a standalone SSU now accompanies it);
-    #   * none   (e.g. Server 2019 post-2021, whose low SS floor is met by the
-    #     combined/embedded stack, and combined OSes 2022/2025) -> leave the LCU
-    #     IsCombined=$true with no standalone SSU.
-    # The same-month + OS-narrowed title filter keeps this precise; the SS-version
-    # readiness gate and the downstream DISM apply remain the runtime safety net.
-    if (@($resolved | Where-Object { $_.Type -eq 'SSU' }).Count -eq 0) {
-        $osTokens = @(Get-CatalogTitleTokenList -OsVersion $OsVersion)
-        $osSearchToken = if ($osTokens.Count -gt 0) { [string]$osTokens[0] } else { $OsVersion }
-        foreach ($lcu in @($resolved | Where-Object { $_.Type -eq 'LCU' })) {
-            $ssuQuery = '{0} Servicing Stack Update {1}' -f $PatchMonth, $osSearchToken
-            $ssuHits = $null
-            try {
-                $ssuHits = Get-UpdateIdFromCatalog -KbId $ssuQuery -MaxRetries $MaxRetries
-            } catch {
-                Write-Caution ('Standalone SSU search failed for {0} {1}: {2}' -f $OsVersion, $PatchMonth, $_.Exception.Message)
-                $ssuHits = $null
-            }
-            $ssuHits = @($ssuHits | Where-Object {
-                (Test-CatalogTitleMatch -OsVersion $OsVersion -Title ([string]$_.Title)) -and
-                ([string]$_.Title -match '(?i)servicing stack update') -and
-                ([string]$_.Title -notmatch '(?i)preview')
-            })
-            if ($ssuHits.Count -eq 0) {
-                Write-Step ('  No standalone SSU published for {0} {1} (separate-model LCU {2}); leaving IsCombined=$true.' -f $OsVersion, $PatchMonth, $lcu.KbId)
-                continue
-            }
-            $ssuHit = $ssuHits[0]
-            $ssuUid = [string]$ssuHit.UpdateId
-            $ssuLinks = $null
-            try {
-                $ssuLinks = Get-DownloadLinkFromCatalog -UpdateId $ssuUid -MaxRetries $MaxRetries
-            } catch {
-                Write-Caution ('Standalone SSU {0}: DownloadDialog failed: {1}' -f $ssuUid, $_.Exception.Message)
-                continue
-            }
-            if (-not $ssuLinks -or $ssuLinks.Count -eq 0) {
-                Write-Caution ('Standalone SSU {0}: no download link; leaving LCU {1} IsCombined=$true.' -f $ssuUid, $lcu.KbId)
-                continue
-            }
-            $ssuFile = Select-CanonicalPatchFile -Links $ssuLinks -PatchType 'SSU' -Architecture 'x64'
-            if ($null -eq $ssuFile) {
-                Write-Caution ('Standalone SSU {0}: no canonical file; leaving LCU {1} IsCombined=$true.' -f $ssuUid, $lcu.KbId)
-                continue
-            }
-            $ssuKbId = Get-KbIdFromPatchFileName -FileName $ssuFile.FileName
-            if ([string]::IsNullOrEmpty($ssuKbId)) {
-                if ([string]$ssuHit.Title -match '(?i)\b(KB\d{6,})\b') { $ssuKbId = $matches[1] }
-            }
-            $ssuSupers = $null
-            try { $ssuSupers = Get-SupersedenceFromCatalog -UpdateId $ssuUid -MaxRetries $MaxRetries } catch { $ssuSupers = $null }
-            $ssuSupersList = if ($null -ne $ssuSupers -and $ssuSupers.SupersedesLatest) { @($ssuSupers.SupersedesLatest) } else { @() }
-            $ssuEntry = Convert-CatalogPatchToBaselineEntry `
-                -KbId $ssuKbId `
-                -Title ([string]$ssuHit.Title) `
-                -UpdateId $ssuUid `
-                -DownloadUrl $ssuFile.Url `
-                -FileName $ssuFile.FileName `
-                -Sha256 '' `
-                -Supersedes $ssuSupersList `
-                -ApplicableArchitecture 'x64' `
-                -ApplicableLanguages @('neutral') `
-                -KnownType 'SSU'
-            $ssuEntry | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $false -Force
-            $ssuEntry | Add-Member -NotePropertyName 'Variant' -NotePropertyValue 'Full' -Force
-            $lcu | Add-Member -NotePropertyName 'IsCombined' -NotePropertyValue $false -Force
-            $resolved.Add($ssuEntry) | Out-Null
-            Write-Ok ('  Resolved standalone SSU {0} ({1}) for LCU {2}; LCU set IsCombined=$false.' -f $ssuKbId, $ssuUid, $lcu.KbId)
-        }
-    }
-
-    # ----- LCU RequiresKbIds dependency annotation -----
-    # If a standalone SSU emerged from the LCU's bundle (filename heuristic
-    # tagged a file as Type=SSU), link the LCU.RequiresKbIds to it. In
-    # combined-only months the LCU keeps IsCombined=$true and its
-    # RequiresKbIds remains empty (the SSU is internal to the package).
-    $standaloneSsuKbs = @($resolved | Where-Object {
-        ($_.Type -eq 'SSU') -and (
-            -not ($_.PSObject.Properties.Name -contains 'IsCombined') -or
-            (-not $_.IsCombined)
-        )
-    } | ForEach-Object { $_.KbId })
-    if ($standaloneSsuKbs.Count -gt 0) {
-        foreach ($p in $resolved) {
-            if ($p.Type -eq 'LCU' -and -not $p.IsCombined) {
-                $p.RequiresKbIds = $standaloneSsuKbs
-            }
-        }
-    }
-
-    $Script:LastSupersedenceExclusions = $supersedenceExclusions.ToArray()
-
-    if ($resolved.Count -eq 0) {
-        Write-Caution 'Resolve-PatchSetFromReleaseInfo: zero patches resolved.'
-    } else {
-        Write-Ok ('Resolved {0} patch entries via release-info path.' -f $resolved.Count)
-    }
-    return $resolved.ToArray()
 }
 
 # ============================================================
@@ -8800,130 +7651,6 @@ function _CanonicalJson_ParseNull {
 }
 # <<< CANONICAL unit_id=pwsh.helper.canonicaljson-parsenull <<<
 
-function Test-DataContractConsistency {
-    <#
-    .SYNOPSIS
-        Cross-cutting data-quality gate: verify every data artifact carries the
-        Script's shared data-contract identity (Id + Version).
-    .DESCRIPTION
-        The sub-project holds a single source of truth for its data contract in
-        $Script:DataContractId (a stable family GUID) and
-        $Script:DataContractVersion (an epoch bumped on any breaking shape
-        change to any data model). Every generated artifact stamps both into
-        its _meta, so a single pass validates the whole set rather than
-        reconciling independent per-model versions.
-
-        Per-artifact Status:
-          Current - id matches and version equals the Script's epoch.
-          Stale   - id matches but version is older, OR _meta is present but
-                    unstamped (a pre-contract artifact); regenerate via the
-                    relevant Refresh action.
-          Refuse  - version is newer than this Script understands.
-          Foreign - dataContractId is present but is not this family GUID.
-          Unknown - file has no _meta (not a contract-bearing artifact).
-        OverallStatus is the worst status across all inspected artifacts;
-        Unknown does not worsen the overall result.
-    .PARAMETER Path
-        One or more *.json artifact paths to inspect. When omitted, the
-        sub-project data directory is scanned for *.json files.
-    .OUTPUTS
-        [pscustomobject] with OverallStatus, Files (per-artifact detail),
-        and Reasons.
-    #>
-    [CmdletBinding()]
-    [OutputType([pscustomobject])]
-    param(
-        [string[]] $Path = @()
-    )
-
-    $targets = New-Object 'System.Collections.Generic.List[string]'
-    if ($Path -and $Path.Count -gt 0) {
-        foreach ($p in $Path) {
-            # A directory argument expands to its *.json files; a file argument
-            # is taken as-is. This lets callers pass the data root directly.
-            if (Test-Path -LiteralPath $p -PathType Container) {
-                foreach ($f in (Get-ChildItem -LiteralPath $p -Filter '*.json' -File)) {
-                    $targets.Add($f.FullName)
-                }
-            } else {
-                $targets.Add($p)
-            }
-        }
-    } else {
-        $dataDir = Join-Path $Script:ScriptRoot 'data'
-        if (Test-Path -LiteralPath $dataDir) {
-            foreach ($f in (Get-ChildItem -LiteralPath $dataDir -Filter '*.json' -File)) {
-                $targets.Add($f.FullName)
-            }
-        }
-    }
-
-    $rank = @{ 'Current' = 0; 'Unknown' = 0; 'Stale' = 2; 'Refuse' = 3; 'Foreign' = 3 }
-    $files   = New-Object 'System.Collections.Generic.List[object]'
-    $reasons = New-Object 'System.Collections.Generic.List[string]'
-    $worst   = 'Current'
-
-    foreach ($t in $targets) {
-        $status       = 'Unknown'
-        $foundId      = $null
-        $foundVersion = $null
-        $reason       = $null
-        if (-not (Test-Path -LiteralPath $t -PathType Leaf)) {
-            $status = 'Foreign'
-            $reason = 'file not found'
-        } else {
-            $doc = $null
-            try {
-                $doc = Get-Content -LiteralPath $t -Raw -Encoding UTF8 | ConvertFrom-Json
-            } catch {
-                $status = 'Foreign'
-                $reason = 'not valid JSON'
-            }
-            if ($doc -and ($doc.PSObject.Properties.Name -contains '_meta')) {
-                $meta         = $doc._meta
-                $foundId      = $meta.dataContractId
-                $foundVersion = $meta.dataContractVersion
-                if (-not $foundId) {
-                    $status = 'Stale'
-                    $reason = 'unstamped (pre-contract) artifact; regenerate'
-                } elseif ($foundId -ne $Script:DataContractId) {
-                    $status = 'Foreign'
-                    $reason = ('dataContractId {0} is not this family' -f $foundId)
-                } elseif ($null -eq $foundVersion) {
-                    $status = 'Stale'
-                    $reason = 'no dataContractVersion; regenerate'
-                } elseif ([int]$foundVersion -eq $Script:DataContractVersion) {
-                    $status = 'Current'
-                } elseif ([int]$foundVersion -lt $Script:DataContractVersion) {
-                    $status = 'Stale'
-                    $reason = ('dataContractVersion {0} < {1}; regenerate' -f $foundVersion, $Script:DataContractVersion)
-                } else {
-                    $status = 'Refuse'
-                    $reason = ('dataContractVersion {0} > {1}; artifact newer than this script' -f $foundVersion, $Script:DataContractVersion)
-                }
-            } elseif ($doc) {
-                $status = 'Unknown'
-                $reason = 'no _meta (not a contract-bearing artifact)'
-            }
-        }
-        if ($reason) { $reasons.Add(('{0}: {1}' -f (Split-Path -Leaf $t), $reason)) }
-        $files.Add([pscustomobject]@{
-            Path                = $t
-            Status              = $status
-            DataContractId      = $foundId
-            DataContractVersion = $foundVersion
-            Reason              = $reason
-        })
-        if ($rank[$status] -gt $rank[$worst]) { $worst = $status }
-    }
-
-    return [pscustomobject]@{
-        OverallStatus = $worst
-        Files         = $files.ToArray()
-        Reasons       = $reasons.ToArray()
-    }
-}
-
 # ============================================================
 # PatchPlan engine
 # ============================================================
@@ -9556,14 +8283,14 @@ function Invoke-PatchSubPhase {
 # narrowed candidates (typically: preview + final for the same month,
 # or carry-over candidates from an earlier month that the OS-aware
 # query partially matched), we use the per-candidate Supersedes /
-# SupersededBy data already gathered via Get-SupersedenceFromCatalog
-# to keep only the newest survivor.
+# SupersededBy data carried on each candidate entry to keep only the
+# newest survivor.
 #
 # Design notes:
-#   * Get-SupersedenceFromCatalog populates Supersedes (this update
-#     replaces these KB IDs) and SupersededBy (this update is replaced
-#     by these KB IDs) for a given UpdateId via the Catalogue's
-#     ScopedViewInline.aspx page.
+#   * Each candidate may carry Supersedes (KB IDs this update replaces)
+#     and SupersededBy (KB IDs that replace this update); when the b3
+#     path supplies no supersedence data these are empty and the
+#     title-descending fallback below decides the winner.
 #   * We exclude any candidate whose KbId appears in another
 #     candidate's Supersedes list - that candidate is, by definition,
 #     superseded by the other.
@@ -9592,47 +8319,6 @@ function Get-KbIdFromUpdateTitle {
     return ''
 }
 
-function Get-KbIdFromPatchFileName {
-    <#
-    .SYNOPSIS
-        Extract the KB id from a Microsoft patch file name
-        (e.g. "windows10.0-kb5087066-x64-ndp48_086eed6e...msu"
-              -> "KB5087066").
-    .DESCRIPTION
-        Microsoft Update Catalogue often wraps multiple individual KBs
-        under a single "umbrella" Title KB. Example: the May 2026 .NET
-        Framework cumulative update for Server 2019 is exposed as
-        "KB5088864 (umbrella)" with two attached .msu files for
-        .NET 4.8 (KB5087066) and .NET 4.8.1 (KB5087061).
-
-        For the PatchBaseline entry to reflect the actual file content,
-        each entry's KbId must come from the file name, not from the
-        umbrella Title. This helper does exactly that: it scans the
-        file name for the standard "kb#######" token (case-insensitive)
-        and returns it in upper-case canonical form. Returns an empty
-        string if no kb token is present.
-
-        Standard Microsoft file-name patterns this helper recognises:
-          - windows10.0-kb5087537-x64_...msu
-          - windows10.0-kb5087066-x64-ndp48_...msu
-          - windows11.0-kb5043080-x64_...msu
-          - windows11.0-kb5087588-x64_...cab    (SafeOS DU)
-
-        If the file name does not contain a kb token (rare, but
-        possible for some Dynamic Update payloads), the caller should
-        fall back to the umbrella Title KB.
-    #>
-    [CmdletBinding()]
-    [OutputType([string])]
-    param([Parameter(Mandatory)] [AllowEmptyString()] [string]$FileName)
-    if (-not $FileName) { return '' }
-    $m = [regex]::Match($FileName, '(?i)kb(\d{6,7})')
-    if ($m.Success) {
-        return 'KB' + $m.Groups[1].Value
-    }
-    return ''
-}
-
 function Select-LatestPatchBySupersedence {
     <#
     .SYNOPSIS
@@ -9642,7 +8328,8 @@ function Select-LatestPatchBySupersedence {
     .DESCRIPTION
         Input: an array of candidate patch entries, each carrying the
         UpdateId, Title, KbId, Supersedes, and SupersededBy fields
-        populated by Get-SupersedenceFromCatalog.
+        carried on each candidate entry (empty when the b3 path supplies
+        no supersedence data).
 
         Output: a hashtable with two keys:
             Best     : the single surviving candidate
@@ -12080,12 +10767,6 @@ function Get-PatchListForBootWim {
     # Delegate to PatchPlan; preserves legacy call-site signature.
     $plan = Get-OrInitPatchPlan
     return @($plan.Boot)
-}
-
-function Get-PatchListForWinReWim {
-    # WinRE has its own target lane (Safe OS DU and language packs).
-    $plan = Get-OrInitPatchPlan
-    return @($plan.WinRE)
 }
 
 function Resolve-InstallWimTargetIndexes { # psa-disable-line PSA6003 -- "Indexes" is plural by design; returns a filtered list of WIM image indexes

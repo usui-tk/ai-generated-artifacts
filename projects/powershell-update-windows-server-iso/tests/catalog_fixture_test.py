@@ -132,7 +132,7 @@ def test_bug3_dotnet_umbrella_multi_files(patch_month: str) -> TestResult:
 
     Server2019 .NET CU is the canonical umbrella-KB case (e.g.
     KB5088864 bundles 4.7.2 + 4.8). The umbrella search itself
-    returns the multiple parent KBs; ``Select-AllCanonicalPatchFiles``
+    returns the multiple parent KBs; the multi-file picker
     then handles per-KB multi-file expansion downstream. This
     assertion guards the upstream side: that the Catalog still ranks
     multiple .NET CUs in a single search.

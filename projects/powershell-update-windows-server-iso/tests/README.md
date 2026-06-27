@@ -32,9 +32,7 @@ production, this directory ships five tools, summarised below.
 | `eval_iso_probe.py`       (T4) | HTTP Range-GET against each `data/config-Server<N>.json` Iso URL; reports size + Last-Modified | When the Microsoft Evaluation Center publishes a new snapshot; before release | Yes |
 | `release_info_parser_test.py` (T6) | Offline regression test for the PowerShell `ConvertFrom-ReleaseInfoMarkdown` parser against the PoC fixture; asserts row counts and per-OS coverage | After every change to the release-info parser or its helpers; on every CI run | No  |
 | `dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown` against live-captured snapshots under `tests/snapshots/dotnet_cu/` (independent of the PoC fixtures); 16 assertions covering entry counts, date range, per-OS row counts, per-entry deep equality, typo handling, and OS-label mapping | After every change to the .NET CU parsers, the OS-label mapper, or the fetch/cache pipeline; on every CI run | No  |
-| `dynamic_update_cache_test.py` (T8) | Offline regression test for the Dynamic Update 36-month cache subsystem; drives `Add-DynamicUpdateCacheEntry`, `Get-DynamicUpdateCache`, `Get-LatestDynamicUpdate`, `Remove-DynamicUpdateOutsideWindow` through three fixture scenarios (mixing live Catalog probe results from 2026-05-26 with synthetic older months) plus three ad-hoc scenarios (cross-OS isolation, missing-file empty cache, PatchMonth validation); 20 assertions, isolated via `-DataDir` and anchored via `-Now` | After every change to the DU cache functions or the 36-month window logic; on every CI run | No  |
 | `catalog_title_tokens_test.py` (T9) | Offline regression test for the URL-resolver Config-driven narrowing; drives `Get-CatalogTitleTokenList` against all four OS configs (verifies sourcing + missing-Config defensive default) and `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases (positive matches, same-KB client-variant rejection, `arm64` / `Windows 11` negative exclusion); 18 assertions | After every change to `Common.CatalogTitleTokens` in any OS config, or to the narrow-filter helpers; on every CI run | No  |
-| `release_info_resolver_test.py` (T10) | Offline regression test for the Refresher main-path migration; drives `Get-PatchSetFromReleaseInfoDiscovery` through four scenarios (Server 2025/2022/2019 full set + no-match month) plus defensive cases (empty data dir, invalid PatchMonth). Synthetic fixtures derived from live 2026-05-26 captures cover SPEC B.23.5 B-2 multi-row .NET CU per OS and SPEC B.23.6 absence-of-DU; 18 assertions | After every change to `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or any of the three caches it reads; on every CI run | No  |
 | `canonical_json_test.py` (T11) | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell, in `Update-WindowsServerIso.ps1`) and `canonical_json_dumps` / `save_canonical_json_file` (Python, in `tests/common/canonical_json.py`); 26 assertions covering primitives (12), collections (8), Unicode (3), real-world `data/*.json` shapes (2), and file-level save (1). Verifies the SPEC Part B.23 byte-level parity contract for `data/*.json` and `tests/fixtures/*.json` files. | After every change to `ConvertTo-CanonicalJson`, `Save-CanonicalJsonFile`, or `tests/common/canonical_json.py`; on every CI run | No  |
 | `catalog_patchset_builder_test.py` (T27) | Offline b3 config-dataset builder: drives `ConvertTo-ConfigLines` through the TestHarness REPL against the committed layer-1 raw fixture (`fixtures/catalog_raw/resolve-2026-06.json`) to BUILD `PatchBaseline.Lines[]` without live Catalog I/O -- restores the pre-D2 offline construction path. 14 assertions: per-OS Kinds match the `PatchModel` allowed set, every Line carries a `Digest`, the uup-checkpoint OS builds a `SetupDU` Line at `ApplyOrder` 5. | After every change to `ConvertTo-ConfigLines`, the b3 transform, or the raw fixture; on every CI run | No  |
 | `canonical_json_format_check.py` (Part C gate) | Offline format compliance check for every `*.json` file under `data/`, `tests/fixtures/`, and `tests/snapshots/`. Re-serialises each file through `canonical_json_dumps` and fails if the bytes diverge. Implements SPEC §C.3.4. | On every commit that adds or modifies a JSON file in the three scanned directories; on every CI run | No  |
@@ -46,7 +44,7 @@ production, this directory ships five tools, summarised below.
 # Offline tests - safe to run anywhere
 cd tests/
 python3 catalog_fixture_test.py            # T2: 13 assertions on saved HTML
-python3 powershell_harness.py              # T3: 7 PS function-level assertions
+python3 powershell_harness.py              # T3: 8 PS function-level assertions
 python3 canonical_json_test.py             # T11: 26 PS/Python byte-level parity assertions
 python3 removed_live_wua_guard_test.py                 # T20: 21 removed-live-WUA static-guard assertions
 python3 canonical_json_format_check.py     # Part C: every JSON file in canonical format
@@ -201,10 +199,10 @@ Earlier releases hosted a `poc_<topic>_<step>_<verb>.py` family
 here that drove the Phase 2 investigation behind the §B.23
 architecture. As of r07.0 those scripts have been retired: their
 parser / resolver logic was promoted into
-`Update-WindowsServerIso.ps1` (`Get-PatchSetFromReleaseInfoDiscovery`,
-`ConvertFrom-ReleaseInfoMarkdown`, `ConvertFrom-DotNetCuMarkdown`,
-`Resolve-PatchSetFromReleaseInfo`), regression coverage moved to
-T6-T10 above, and the historical reports were moved to
+`Update-WindowsServerIso.ps1` (`ConvertFrom-ReleaseInfoMarkdown`,
+`ConvertFrom-DotNetCuMarkdown`; the release-info discovery/resolver
+pair was later removed in the data-source migration), regression
+coverage moved to T6/T7/T9 above, and the historical reports were moved to
 `docs/history/`. The `poc_<topic>_*` naming convention itself is
 preserved in SPEC.md §B.22.2 as a reserved pattern for any future
 PoC investigation.

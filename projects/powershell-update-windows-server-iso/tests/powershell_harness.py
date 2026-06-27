@@ -13,9 +13,7 @@ What this tool covers that fixture tests (T2) do NOT:
 - ``Get-CatalogQueryTemplate``        the per-OS query/token tables
 - ``Get-LanguagePackQueryTemplate``   the language-pack token tables
 - ``Get-KbIdFromUpdateTitle``         the regex used during dedup
-- ``Select-AllCanonicalPatchFiles``   multi-file picker for umbrella KBs
 - ``Select-CanonicalPatchFile``       single-file picker
-- ``Test-IsCombinedLcuTitle``         combined-LCU detection
 
 Adding a new test = add one function below; each calls
 ``ps.invoke('<FunctionName>', **kwargs)`` and asserts on the return.
@@ -122,29 +120,6 @@ def test_get_kb_id_extraction(ps: PSSession) -> TestOutcome:
     return TestOutcome(name, False, '; '.join(failures))
 
 
-def test_select_all_canonical_patch_files_returns_array(ps: PSSession) -> TestOutcome:
-    """Select-AllCanonicalPatchFiles given 2 viable links should return both."""
-    name = 'Select-AllCanonicalPatchFiles dual-link case (bug 3 regression)'
-    links = [
-        {'Url': 'https://example.com/a/windows10.0-kb5087066-x64-ndp48_xxxx.msu',
-         'FileName': 'windows10.0-kb5087066-x64-ndp48_xxxx.msu'},
-        {'Url': 'https://example.com/a/windows10.0-kb5087061-x64_yyyy.msu',
-         'FileName': 'windows10.0-kb5087061-x64_yyyy.msu'},
-    ]
-    got = ps.invoke('Select-AllCanonicalPatchFiles', Links=links, PatchType='DotNet.Runtime', Architecture='x64')
-    # PS may return a single object if 1 result, or array if multiple.
-    if isinstance(got, dict):
-        got_list = [got]
-    elif isinstance(got, list):
-        got_list = got
-    else:
-        return TestOutcome(name, False, f'unexpected return type: {type(got).__name__}')
-    if len(got_list) == 2:
-        return TestOutcome(name, True, '2 links returned (both .NET runtimes preserved)')
-    return TestOutcome(name, False,
-                       f'returned {len(got_list)} link(s), expected 2 (got: {got_list!r})')
-
-
 def test_select_canonical_patch_file_filters_express(ps: PSSession) -> TestOutcome:
     """Single-file picker must reject Express / Delta packages."""
     name = 'Select-CanonicalPatchFile rejects Express'
@@ -159,28 +134,6 @@ def test_select_canonical_patch_file_filters_express(ps: PSSession) -> TestOutco
         return TestOutcome(name, True, 'picked foo.msu over foo-express.cab')
     return TestOutcome(name, False, f'picked {got.get("FileName")!r}, expected foo.msu')
 
-
-def test_test_is_combined_lcu_title(ps: PSSession) -> TestOutcome:
-    """Test-IsCombinedLcuTitle must recognise the combined marker."""
-    name = 'Test-IsCombinedLcuTitle'
-    cases = [
-        ('2026-05 Cumulative Update (servicing stack) for Server 2019 ...', True),
-        ('2026-05 Combined Cumulative Update for Server 2025 ...',          True),
-        ('2026-05 Cumulative Update for Windows Server 2016 ...',           False),
-    ]
-    failures: List[str] = []
-    for title, want in cases:
-        got = ps.invoke('Test-IsCombinedLcuTitle', LcuTitle=title)
-        if bool(got) != want:
-            failures.append(f'{title[:50]!r} -> got {got!r}, want {want!r}')
-    if not failures:
-        return TestOutcome(name, True, f'{len(cases)} cases passed')
-    return TestOutcome(name, False, '; '.join(failures))
-
-
-# -----------------
-# Stage B (r05.0): SecureBoot / PCA2023 smoke tests
-# -----------------
 
 def test_test_pca2023_authenticode_chain_missing_file(ps: PSSession) -> TestOutcome:
     """Test-Pca2023AuthenticodeChain on a non-existent path returns
@@ -335,13 +288,11 @@ def test_get_pca2023_readiness_snapshot_health_enum(ps: PSSession) -> TestOutcom
 ALL_TESTS: List[Callable[[PSSession], TestOutcome]] = [
     # Get-CatalogQueryTemplate tests removed in r07.0 Step 2b (function deleted;
     # the per-OS Catalog QueryTemplate strings are no longer needed because
-    # discovery moved to the cache-driven Resolve-PatchSetFromReleaseInfo path.
+    # discovery moved to the b3 Catalog path (Invoke-CatalogPatchSetRefresh).
     # TitleTokens coverage is now exercised by T9 (catalog_title_tokens_test.py)
     # against the new Config-driven Get-CatalogTitleTokenList helper.)
     test_get_kb_id_extraction,
-    test_select_all_canonical_patch_files_returns_array,
     test_select_canonical_patch_file_filters_express,
-    test_test_is_combined_lcu_title,
     # r05.0 Stage B - SecureBoot smoke tests
     test_test_pca2023_authenticode_chain_missing_file,
     test_get_lcu_version_missing_mount,

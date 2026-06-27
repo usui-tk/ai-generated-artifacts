@@ -1621,15 +1621,19 @@ maintainer needs at the use-site.
 
 ### B.22.1 Refresher architecture: release-info as canonical source
 
-The release-info parser
-(`Resolve-PatchSetFromReleaseInfo`) is the canonical source for
-which KBs were offered on a given Patch Tuesday. The Microsoft Update
-Catalogue scrape is retained as a **resolver** for KB ID → UpdateId
-→ DownloadUrl, but no longer as the canonical "which KBs?" source.
+The b3 refresher (`Invoke-CatalogPatchSetRefresh` → `Resolve-Os`)
+resolves the patch set directly from a live Microsoft Update Catalog
+scrape; `Resolve-CatalogPatchSetForOs` then reconciles the resolved
+LCU against the Learn release-info oracle and enforces per-`PatchModel`
+consistency (B.19). Release-info is the **verifier** that confirms the
+Catalog LCU matches the month's published KB — not a separate
+"which KBs?" membership source.
 
-**Decision**: release-info Markdown is the single source of truth
-for KB membership in a baseline; Catalogue is the resolver for the
-URL / file metadata of each KB.
+**Decision**: the Catalog scrape resolves KB membership and the
+URL / file metadata in one pass; release-info reconciliation is a
+confirmation gate, not a separate membership source. (The pre-v3.0
+release-info-as-canonical-source model and its `Resolve-PatchSetFromReleaseInfo`
+producer were removed in the data-source migration.)
 
 **Why**: r06.0 PoC showed the release-info Markdown is parseable,
 versioned, and stable. Title-scrape against the Catalogue is fragile
@@ -1676,7 +1680,8 @@ addition is the lighter migration path.
 SSU and LCU are separate `Lines` entries even when shipped
 combined; the loader treats them as independently-trackable units.
 .NET CU umbrella KBs that bundle multiple `.msu` files keep all
-sub-files via §B.15.2 `Select-AllCanonicalPatchFiles`.
+sub-files as independent `Lines` entries (the b3 `Resolve-Net`
+resolver retains every sub-file of the umbrella KB).
 
 **Why**: Independent tracking of SSU and LCU enables P06 servicing-readiness
 (§B.19) to surface SSU-prerequisite failures cleanly; without
@@ -1695,8 +1700,8 @@ so it works on the `RefreshAllBaselines` call path.
 
 **.NET CU publication-gap carry-forward (r11.27)**: .NET Framework CUs
 are not published every month (the release-notes index has gaps), so
-`Get-PatchSetFromReleaseInfoDiscovery` does not require an exact
-PatchMonth match for the .NET CU. When the requested month lists no .NET
+the b3 `Resolve-Net` resolver does not require an exact PatchMonth
+match for the .NET CU. When the requested month lists no .NET
 CU for an OS, discovery carries forward the most-recent .NET CU month
 that is `<= PatchMonth`, that still falls inside the same 36-month window
 as the Dynamic Update lookback (§B.22.6), and that actually lists a row
@@ -2416,9 +2421,7 @@ mirrors that authoritative table.
 | **T4** `eval_iso_probe.py` | Evaluation ISO endpoint check (HTTP Range-GET; 4 OS × 2 lang) | live (4 OS) | Yes | Before release; on Microsoft Evaluation Center snapshot rotation |
 | **T6** `release_info_parser_test.py` | Offline regression for `ConvertFrom-ReleaseInfoMarkdown` against the PoC fixture | 13 | No | Every commit that touches the release-info parser |
 | **T7** `dotnet_cu_parser_test.py` | Offline regression for `ConvertFrom-DotNetCuIndexMarkdown` / `ConvertFrom-DotNetCuMarkdown` against `snapshots/dotnet_cu/` | 16 | No | Every commit touching the .NET CU parsers or the fetch/cache pipeline |
-| **T8** `dynamic_update_cache_test.py` | Offline regression for the Dynamic Update 36-month cache subsystem (`Add-/Get-/Remove-DynamicUpdateCacheEntry`); 3 fixture scenarios + 3 defensive cases | 20 | No | Every commit touching the DU cache functions or the 36-month window logic |
 | **T9** `catalog_title_tokens_test.py` | Offline regression for `Get-CatalogTitleTokenList` against all four OS configs + `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases | 18 | No | Every commit touching `Common.CatalogTitleTokens` in any OS config, or the narrow-filter helpers |
-| **T10** `release_info_resolver_test.py` | Offline regression for `Get-PatchSetFromReleaseInfoDiscovery` (Refresher main-path migration); 4 scenarios + defensive cases | 18 | No | Every commit touching `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or its three caches |
 | **T11** `canonical_json_test.py` | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell) and `canonical_json_dumps` / `save_canonical_json_file` (Python) per SPEC Part B.23 | 26 | No | Every commit touching the canonical JSON helpers (PS or Python) |
 | **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 26 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
 | **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config.schema.json` |
@@ -3181,12 +3184,7 @@ when the original needs an upstream fix.
 | Helper | First shipped | Role |
 |:---|:---|:---|
 | `Build-PatchPlan` | r03 | Target-aware PatchPlan engine (§B.10) |
-| `Resolve-PatchSetFromCatalog` | r03 → rewritten r07.0 Step 2 | Catalogue scrape and supersedence-aware selection |
-| `Resolve-PatchSetFromReleaseInfo` | r07.0 Step 2b | Release-info Markdown-driven baseline membership (§B.22.1) |
 | `Select-LatestPatchBySupersedence` | r04.2 | Multi-candidate supersedence dedup (§B.12) |
-| `Select-AllCanonicalPatchFiles` | r04.3 | Umbrella-KB multi-MSU retention (§B.15.2) |
-| `Test-IsCombinedLcuTitle` | r04.3 | LCU+SSU combined detection (§B.15.3) |
-| `Get-CatalogQueryTemplate` | r04.3 | OS-specific Title-token template loader (§B.22.2) |
 | `Test-PatchServicingReadinessOnMount` | r04 | Mount-time prerequisite check (§B.13); renamed from `Test-PatchDependencyClosureOnMount` in r11.12 |
 | `Get-Pca2023ReadinessSnapshot`, `Show-Pca2023ReadinessSnapshot`, `Format-Pca2023ReadinessForReport` | r05.0 | Health verdict for PCA2023 readiness (§B.17) |
 | `Convert-WimBootToPca2023Signed` | r05.0 | PSA-clean reimplementation of `Make2023BootableMedia.ps1` (§B.17) |
@@ -3273,7 +3271,7 @@ Open at r09.0 inception:
   Build -Execute` with stage 2 verifying). The residual KB5087537
   SSU-prerequisite incident is **resolved on the config side as of
   r11.20**: the standalone Server 2016 SSU (KB5088064) is now
-  auto-discovered by `Resolve-PatchSetFromReleaseInfo` (§B.22.5)
+  auto-discovered by `Resolve-Ssu2016` (§B.22.5)
   instead of being hand-patched into `config-Server2016.json`. The
   runtime dependency-check fleet roll-out itself remains future work.
 
