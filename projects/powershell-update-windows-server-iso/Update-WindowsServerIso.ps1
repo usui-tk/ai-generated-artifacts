@@ -541,7 +541,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.37'
+$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.38'
 $Script:ScriptTag     = 'dism-scratchdir-localisation'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -6158,6 +6158,37 @@ function Resolve-SafeOsDu {
     return (New-Line 'SafeOSDU' $row $files $inScope "Products has 'Safe OS Dynamic Update' + title version token")
 }
 
+function Resolve-SetupDu { # psa-disable-line PSA6003 -- 'Du' is the dynamic-update abbreviation, not a plural; mirrors Resolve-SafeOsDu
+    # Setup Dynamic Update (b3 acquisition, sibling of Resolve-SafeOsDu). Setup DU
+    # updates the media's setup/installer binaries (the sources\ tree, applied by
+    # P09 via expand.exe overlay), NOT a WIM. It is published only for the
+    # UUP-checkpoint OS (Server 2025 / 24H2); the separate-ssu / embedded-ssu /
+    # embedded-ssu-du models FORBID it (Test-PatchModelConsistency Forbid list), so
+    # only the 2025 branch of Resolve-Os requests it. The discriminator mirrors the
+    # SafeOS resolver: it differs only in the Catalog Products string
+    # ('Setup Dynamic Update' vs 'Safe OS Dynamic Update'), per the legacy
+    # @('DynamicUpdate.Setup','DynamicUpdate.SafeOs') discovery pairing.
+    param([string]$OsKey)
+    $info = $script:CatOsDef[$OsKey]
+    if ($OsKey -ne '2025') {
+        return (New-Line 'SetupDU' $null @() $null "${OsKey}: no Setup DU line (Forbid; only uup-checkpoint carries SetupDU)")
+    }
+    $tok = $info.verToken
+    $q = 'Setup Dynamic Update for Microsoft server operating system version 24H2 x64'
+    $rows = Search-Catalog $q
+    $cands = @($rows | Where-Object {
+        $_.products.Contains('Setup Dynamic Update') -and
+        $_.title.Contains($tok) -and
+        $_.title.ToLower().Contains('server operating system') -and
+        ($_.title.ToLower() -notmatch 'arm64')
+    })
+    $row = Get-Newest $cands
+    $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
+    $x64 = @($files | Where-Object { $_.fileName.Contains('x64') -and $_.fileName.EndsWith('.cab') })
+    $inScope = [pscustomobject]@{ files = @($x64 | ForEach-Object { $_.fileName }) }
+    return (New-Line 'SetupDU' $row $files $inScope "Products has 'Setup Dynamic Update' + title version token")
+}
+
 function Resolve-Os { # psa-disable-line PSA6003 -- noun is 'OS' (operating system), not a plural; ported reference contract
     param([string]$OsKey)
     switch ($OsKey) {
@@ -6174,7 +6205,7 @@ function Resolve-Os { # psa-disable-line PSA6003 -- noun is 'OS' (operating syst
             $ssu = New-Line 'SSU' $null $baseline ([pscustomobject]@{ files = @($baseline | ForEach-Object { $_.fileName }) }) `
                 '2025: checkpoint SSU carried by the co-served GA baseline (the non-LCU .msu in the 2-file set)'
             $ssu.kb = $blKb
-            return [pscustomobject]@{ os = 'Server2025'; lines = @($lcu, $ssu, (Resolve-Net '2025'), (Resolve-SafeOsDu '2025')) }
+            return [pscustomobject]@{ os = 'Server2025'; lines = @($lcu, $ssu, (Resolve-Net '2025'), (Resolve-SafeOsDu '2025'), (Resolve-SetupDu '2025')) }
         }
     }
 }
