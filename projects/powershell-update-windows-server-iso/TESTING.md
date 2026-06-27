@@ -31,7 +31,7 @@ This document consolidates everything needed to verify and evaluate
 - [2. Synthetic smoke tests](#2-synthetic-smoke-tests)
 - [3. Live Catalogue verification](#3-live-catalogue-verification)
 - [4. Operator-pending: real ISO integration](#4-operator-pending-real-iso-integration)
-- [5. Self-verification tool suite (T1 – T19)](#5-self-verification-tool-suite-t1--t19)
+- [5. Self-verification tool suite](#5-self-verification-tool-suite)
 - [6. Continuous integration coverage](#6-continuous-integration-coverage)
 - [7. Discovered bugs and fix history](#7-discovered-bugs-and-fix-history)
 - [8. Monthly baseline regeneration — agent/LLM verification procedure](#8-monthly-baseline-regeneration--agentllm-verification-procedure)
@@ -55,7 +55,7 @@ a build identifier plus a calendar date. Pending items are marked
 | P03 RefreshPatchBaseline — Catalogue scrape (live, monthly) | ✓ scrape paths exercised via T1 | CI Stage 4 monthly |
 | P04 FetchAssets — ISO + patch downloads with SHA-256 verify | _pending operator confirmation_ | not yet exercised on a fresh runner |
 | P05 ExpandIso — source ISO mount + WIM enumeration | _pending operator confirmation_ | r09.0 step2b3-real-data-parser-correction build (synthetic mode only) |
-| P06 ValidatePatchServicing — /data Layer 2 servicing-readiness gate (default-ON, blocking) | ✓ implemented; verified offline via T16/T17 and the harness; blocks on `Fail` / Layer-2-absent | r11.19 build / 2026-06-09 |
+| P06 ValidatePatchServicing — pass-through (Catalog-model consistency check pending; real readiness on-mount via §B.13) | ✓ pass-through stub; verified by T20 | migration r11.33 / 2026-06-27 |
 | P07 PatchInstallWim — SSU → LCU → .NET sequence | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P08 PatchBootWim — boot.wim + winre.wim | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P09 AssembleIso — Dynamic Update overlay + `oscdimg` | _pending operator confirmation_ | (requires `oscdimg.exe` on a Windows runner) |
@@ -63,38 +63,26 @@ a build identifier plus a calendar date. Pending items are marked
 | P11 StaticVerify — output ISO mount + KB-package presence check | _pending operator confirmation_ | (requires P07-P09 success) |
 | P12 VerifyPca2023Readiness — `pca2023_readiness.json` + `.md` emission | ✓ structurally validated; runs unconditionally | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
 | P13 FinalReport — end-of-run summary + ISO hash | _pending operator confirmation_ | (requires P07-P11 success) |
-| A01 RefreshAllBaselines — Config baseline regeneration from caches; soft-fail chain into A04 | ✓ exercised in Stage 4 monthly; A04 chain landed, not yet exercised live | CI Stage 4 / 2026-05-15 |
+| A01 RefreshAllBaselines — Config baseline regeneration from caches (Catalog-resolved) | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
 | A02 DumpFieldClassification — field-cadence decision matrix emit | ✓ exercised | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
 | A03 RefreshSnapshots — upstream `data/raw-*` + `data/cache-*` refresh | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
-| A04 RefreshDependencyDatabase — Stages 1-4 chain + Layer 1 writeback (`_DependencyVerifiedUpdateId`/`_DependencyVerifiedRevisionId`/`_DependencyVerifiedCreationDate`/`_DependencyVerifiedAt`); Layer 1 helper verified via T13 | ✓ Layer 1 helper + Stages 3/4 verified offline; Stages 1-2 covered by live monthly CI | 2026-05-28 |
 | T1 catalog_probe.py | ✓ live probe passes (~7 checks) | CI Stage 4 / 2026-05-15 |
 | T2 catalog_fixture_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T3 powershell_harness.py (10 PS function assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T4 eval_iso_probe.py (4 OS × 2 lang Range-GET) | ✓ live probe passes | CI Stage 4 / 2026-05-15 |
-| T5 wsusscn2_probe.py (cab freshness, 60-day warn) | ✓ within 60-day window | CI Stage 4 / 2026-05-15 |
 | T6 release_info_parser_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T7 dotnet_cu_parser_test.py (16 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T8 dynamic_update_cache_test.py (20 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T9 catalog_title_tokens_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T10 release_info_resolver_test.py (22 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| T12 servicing_dependency_parser_test.py (25 assertions, Stage 3 + Stage 4 self-verification against committed fixture per SPEC §B.19.7; includes kbIds-field presence and a build_package_xml() / build_expected_output() freshness guard) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| T13 servicing_dependency_layer1_test.py (15 assertions, `Update-Layer1DependencyVerification` writeback contract per SPEC §B.19.11) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| T14 servicing_dependency_deny_list_test.py (10 assertions, EOS/ESU deny-list warned-exclusion + allow-overrides in the PowerShell scope filter, matching the `classify_scope` reference; SPEC §B.19.4.1) | ✓ all pass | r11.5 wsusscn2-eos-esu-deny-list-warned-exclusion build / 2026-05-29 |
-| T15 servicing_dependency_servicing_stack_test.py (16 assertions, `Resolve-OfflineSyncRevisionToCab` RANGESTART mapping + `Get-OfflineSyncServicingStackInfo` separate/combined/checkpoint derivation from real-cab CBS metadata; SPEC §B.19.9) | ✓ all pass | r11.6 wsusscn2-servicing-stack-extraction build / 2026-05-29 |
-| T16 servicing_dependency_readiness_verdict_test.py (21 assertions, `Test-PatchServicingReadinessFromGraph` three-check verdict: presence / SS-version-comparison (SsTooOld = 0x800f0823) / supersession, with precedence and Unknown/Available handling; SPEC §B.19.10) | ✓ all pass | r11.7 wsusscn2-phase2c-readiness-verdict build / 2026-05-29 |
-| T17 servicing_dependency_recency_fallback_test.py (15 assertions, recency fallback in `Test-PatchServicingReadinessFromGraph`: out-of-scope KB falls back to newest in-scope LCU per OS family -> Superseded, with family resolution from OsKey and NotInDatabase when no fallback target; SPEC §B.19.10) | ✓ all pass | r11.8 wsusscn2-recency-fallback build / 2026-05-29 |
-| T18 servicing_dependency_servicing_stack_populate_test.py (17 assertions, pure halves of the SS populate: `Select-OfflineSyncLcuLeafRevision` leaf choice + `Update-ServicingStackFromMeta` field population from CBS metadata; SPEC §B.19.9) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
-| T19 servicing_dependency_data_contract_test.py (11 assertions, `Test-DataContractConsistency` status classification Current/Stale/Refuse/Foreign/Unknown + directory expansion + roll-up; committed Layer 2 DB classifies Current; SPEC §B.19.13) | ✓ all pass | r11.10 wsusscn2-servicing-stack-populate build / 2026-05-29 |
-| T20 removed_live_wua_guard_test.py (21 assertions, offline static guard: the r11.19-removed live-WUA functions/parameters stay absent and P06 ValidatePatchServicing stays wired + blocking; SPEC §B.19.12) | ✓ all pass | r11.19 remove-live-wua-scan-data-first-servicing-gate build / 2026-06-09 |
+| T20 removed_live_wua_guard_test.py (20 assertions, offline static guard: the r11.19-removed live-WUA functions/parameters stay absent and P06 ValidatePatchServicing stays a pass-through) | ✓ all pass | migration r11.33 / 2026-06-27 |
 | T24 dism_cleanup_args_test.py (6 assertions, `Get-DismCleanupArgumentList`: default three-token `/Cleanup-Image /StartComponentCleanup` vector with no `/ResetBase`, `-IncludeResetBase` appends `/ResetBase`, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the comma/`+` precedence collapse behind exit 1639) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T25 dism_export_args_test.py (6 assertions, `Get-DismExportArgumentList` returns the five-token `/Export-Image ... /Compress:max` vector targeting the requested source index, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the same precedence trap) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T26 defender_exclusion_plan_test.py (13 assertions, the three pure helpers behind `-UseDefenderExclusions`: `Get-DefenderManagedExclusionSet` (WorkRoot path + four servicing process names), `Get-DefenderExclusionPlan` (add-only-absent, case/slash-insensitive), `Get-DefenderExclusionDecision` (fail-closed -- applies only when every prerequisite is positively satisfied; `$null`/unknown -> skip); the `*-MpPreference`/`Get-MpComputerStatus` wrappers are Windows-only and not exercised) | ✓ all pass | r11.26 defender-exclusion-optin build / 2026-06-11 |
-| Part C §C.3.4 — `canonical_json_format_check.py` (27 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
+| Part C §C.3.4 — `canonical_json_format_check.py` (26 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| Scope-invariants gate — `servicing_dependency_scope_invariants_test.py` (23 assertions, EOS/ESU deny-list + allow-overrides over Layer 2 + fixture + synthetic; SPEC §B.19.4/§B.19.4.1) | ✓ all pass | r11.2 wsusscn2-phase2c-eos-esu-scope build / 2026-05-29 |
-| Layer 2 schema gate — `servicing_dependency_layer2_schema_test.py` (16 assertions, committed `data/servicing-dependency-database.json` vs `schema/servicing-dependency-database.schema.json` + data-contract identity, portable provenance, kbIds populate, Microsoft-prose hard rule; SPEC §B.19.5/§B.19.8) | ✓ all pass | r11.9 wsusscn2-layer2-kbids-populate build / 2026-05-29 |
-| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T20 + format gate + config schema gate + scope-invariants gate + Layer 2 schema gate) | ✓ green | CI continuous |
+| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T11/T20/T24-T26 + format gate + config schema gate) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
@@ -165,7 +153,6 @@ Verification checklist:
 - [x] 13 phase IDs P01 – P13 present
 - [x] 13 Actions present (Prepare / Build / Verify / PrepareBuildVerify / BootTest / All / Cleanup / ListPhases / GenerateManifest / RefreshSnapshots / RefreshAllBaselines / DumpFieldClassification / TestHarness)
 - [x] 3 Admin phases A01 – A03 present
-- [x] `RefreshDependencyDatabase` is **not** in the Action list (planned r09.0)
 
 ### 2.2 EnvironmentInfoOnly — environment dump and exit
 
@@ -275,24 +262,13 @@ Expected: 4 OS × 2 languages = 8 HTTP HEAD requests against the
 size + Last-Modified consistent with the values in
 `data/config-Server*.json` `LanguageSpecific.<lang>.Iso`.
 
-### 3.3 T5 — `wsusscn2.cab` freshness
-
-```bash
-python3 tests/wsusscn2_probe.py
-```
-
-Expected: live `wsusscn2.cab` URL responds; size > 0; Last-Modified
-within the last 60 days. A warning is emitted if older than 60 days
-(Microsoft is missing a monthly refresh).
-
-### 3.4 When to run these
+### 3.3 When to run these
 
 | Trigger | Tools to run |
 |---|---|
-| Before a release commit | T1, T4, T5 |
-| Monthly (the 15th, post Patch Tuesday) | T1, T4, T5 (automated by Stage 4) |
+| Before a release commit | T1, T4 |
+| Monthly (the 15th, post Patch Tuesday) | T1, T4 (automated by Stage 4) |
 | When P03 / P04 begin failing in unexpected ways | T1 first to confirm whether Microsoft changed shape |
-| Before running an `-Execute` build | T5 (so the embedded `wsusscn2.cab` step has the right cab to read) |
 
 ---
 
@@ -409,10 +385,10 @@ if ($OsVersion -eq 'Server2025') {
 
 ---
 
-## 5. Self-verification tool suite (T1 – T19)
+## 5. Self-verification tool suite
 
-The `tests/` directory ships nineteen Python tools (T1 – T19) plus the
-data-contract, schema, and format gates. The authoritative inventory
+The `tests/` directory ships the Python self-verification tools listed
+below plus the config-schema and canonical-format gates. The authoritative inventory
 lives in [`tests/README.md`](./tests/README.md); §0 above mirrors their
 current status. The full design rationale is in [SPEC.md](./SPEC.md) §C.9.
 
@@ -428,78 +404,26 @@ python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
 python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
-python3 tests/servicing_dependency_parser_test.py            # T12: 25 parser pipeline assertions (incl. builder freshness guard)
-python3 tests/servicing_dependency_layer1_test.py            # T13: 14 Layer 1 writeback assertions
-python3 tests/servicing_dependency_deny_list_test.py         # T14: 10 EOS/ESU deny-list assertions
-python3 tests/servicing_dependency_servicing_stack_test.py   # T15: 16 servicing-stack extraction assertions
-python3 tests/servicing_dependency_readiness_verdict_test.py # T16: 21 readiness verdict assertions
-python3 tests/servicing_dependency_recency_fallback_test.py  # T17: 15 recency-fallback assertions
-python3 tests/servicing_dependency_servicing_stack_populate_test.py # T18: 17 SS-populate assertions
-python3 tests/servicing_dependency_data_contract_test.py     # T19: 11 data-contract assertions
-python3 tests/servicing_dependency_ssu_prereq_pipeline_test.py   # T21: 20 SSU->LCU end-to-end pipeline assertions (0x800f0823 prediction)
-python3 tests/servicing_dependency_ssu_prereq_readiness_test.py  # T22: 15 SSU->LCU readiness-unit assertions
 python3 tests/config_required_ssu_downloadurl_test.py            # T23: 19 required-SSU consistency-contract assertions (PatchBaseline.NeutralPatches)
 python3 tests/dism_cleanup_args_test.py                          # T24: 6 cleanup-arg-vector assertions (1639 collapse guard + /ResetBase default + /ScratchDir)
 python3 tests/dism_export_args_test.py                           # T25: 6 export-arg-vector assertions (Export-Image /Compress:max + /ScratchDir)
 python3 tests/defender_exclusion_plan_test.py                    # T26: 13 Defender pure-helper assertions (managed set + add-only-absent plan + fail-closed decision)
 
-# Data-contract / schema / format gates (every commit that touches data)
+# Schema / format gates (every commit that touches data)
 python3 tests/config_schema_test.py                          # config schema gate
-python3 tests/servicing_dependency_scope_invariants_test.py  # scope-invariants gate: 23 assertions
-python3 tests/servicing_dependency_layer2_schema_test.py     # Layer 2 schema gate: 16 assertions
 python3 tests/canonical_json_format_check.py                 # JSON canonical-format gate; SPEC §C.3.4
 
 # Live tests — require unrestricted egress
 python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog
 python3 tests/eval_iso_probe.py              # T4: Server<N> ISO CDN
-python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
 ```
 
 ### Determinism categories
 
-- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6 – T23,
-  plus the canonical JSON format gate, the config schema gate, the
-  scope-invariants gate, and the Layer 2 schema gate.
-- **Live-network** (Stage 4 monthly + ad-hoc): T1, T4, T5.
-
-### Servicing-dependency suite (T12 – T19, T21 – T23)
-
-The §B.19 servicing-dependency facility is covered offline by T12 – T19 and
-T21 – T23 plus the scope-invariants and Layer 2 schema gates, all driven from
-Python against committed fixtures and the committed Layer 2 database so
-no live cab is needed on a PR:
-
-- **T12** parser pipeline (`ConvertFrom-OfflineSyncPackage`,
-  `New-ServicingDependencyDatabase`) against
-  `tests/fixtures/servicing-dependency/`.
-- **T13** Layer 1 writeback (`Update-Layer1DependencyVerification`).
-- **T14** EOS/ESU deny-list with allow-overrides.
-- **T15** servicing-stack extraction (RANGESTART map + separate/combined/checkpoint).
-- **T16** readiness verdict (presence / SS-compare / supersession).
-- **T17** recency fallback.
-- **T18** servicing-stack populate (pure halves).
-- **T19** data-contract consistency (Current/Stale/Refuse/Foreign/Unknown).
-- **T21** SSU -> LCU end-to-end pipeline: builds the prerequisite `package.xml`,
-  runs it through the real Stage 3/4 parser and the servicing-stack populate
-  (CBS leaf `leaf-2016-separate.xml`), and asserts the readiness gate predicts
-  the on-host 0x800f0823 (`SsTooOld` / `Fail`) entirely offline; includes a
-  guard that the committed fixture still matches `build_ssu_prereq_package_xml()`.
-- **T22** SSU -> LCU readiness unit: drives `Test-PatchServicingReadinessFromGraph`
-  against a hand-authored Layer 2 fixture across the SS-compare boundary
-  (RTM / one-below / exact / newer) without the parse/populate stages.
-- **T23** required-SSU consistency contract: a static, offline contract over
-  `PatchBaseline.NeutralPatches` that (1) every NeutralPatch of Type `SSU`
-  carries a non-empty DownloadUrl (the config data defect behind the real
-  0x800f0823), (2) any LCU marked `IsCombined=false` is paired with a Type `SSU`
-  entry that has a DownloadUrl, and (3) a config carrying a Type `SSU` has at
-  least one `IsCombined=false` LCU. Locks in the Server 2016 SSU (KB5088064)
-  standalone pairing; covers the bad-config fixture and every committed
-  `data/config-Server*.json` (19 assertions).
-
-The live cab is exercised only by T5 (freshness probe) and the monthly CI
-refresh, consistent with the testability-driven split documented in
-[SPEC.md](./SPEC.md) §B.19.6.
-
+- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6 – T11,
+  T20, T23 – T26, plus the canonical JSON format gate and the config
+  schema gate.
+- **Live-network** (Stage 4 monthly + ad-hoc): T1, T4.
 
 ## 6. Continuous integration coverage
 
@@ -518,10 +442,8 @@ File: `.github/workflows/projects__powershell-update-windows-server-iso__stage1_
 | 4 | T3 | `powershell_harness.py` (10 assertions) |
 | 5 | T6 – T10 | Five offline parser / cache / resolver regression tests |
 | 6 | T11 | `canonical_json_test.py` — PS/Python byte-level parity (26 assertions, SPEC §B.23) |
-| 7 | T12 – T13 | `servicing_dependency_parser_test.py` (25 assertions, Stages 3/4) + `servicing_dependency_layer1_test.py` (15 assertions, Layer 1 writeback) |
-| 8 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
-| 9 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against `schema/config.schema.json` (14 assertions) |
-| 10 | scope-invariants gate | `servicing_dependency_scope_invariants_test.py` — EOS/ESU deny-list + allow-overrides over `data/servicing-dependency-database.json` + fixture + synthetic cases (23 assertions) |
+| 7 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
+| 8 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against `schema/config.schema.json` (14 assertions) |
 
 Triggers: every push, every PR. Required to merge.
 
@@ -560,7 +482,7 @@ File: `.github/workflows/projects__powershell-update-windows-server-iso__stage4_
 |---|---|---|
 | 1 | `-Action RefreshSnapshots` | Refresh upstream `data/raw-*` + `data/cache-*` |
 | 2 | `-Action RefreshAllBaselines` | Regenerate `data/config-Server*.json` from caches |
-| 3 | T1 + T4 + T5 | Live Catalogue / ISO endpoint / wsusscn2 probes |
+| 3 | T1 + T4 | Live Catalogue / ISO endpoint probes |
 | 4 | `peter-evans/create-pull-request` | If `data/config-*.json` changed, open a PR (restricted via `add-paths`) |
 
 Triggers: `cron: 0 2 15 * *` (02:00 UTC on the 15th of each month;
@@ -597,8 +519,9 @@ the current cycle:
   failed with `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` because
   the LCU's prerequisite SSU was not in the baseline. Investigation in
   [`docs/history/r08.0-step4-findings-and-dependency-investigation.md`](./docs/history/r08.0-step4-findings-and-dependency-investigation.md)
-  motivated the r09.0 [`SPEC.md`](./SPEC.md) §B.19 Servicing Dependency
-  Database design.
+  motivated the r09.0 servicing-dependency design (`SPEC.md` §B.19, since
+  reserved in the data-source migration); the prerequisite-SSU contract is
+  now enforced by T23 and the on-mount §B.13 check.
 
 For the full catalogue of pitfalls and fixes, see SPEC.md Part D.
 
@@ -607,8 +530,8 @@ For the full catalogue of pitfalls and fixes, see SPEC.md Part D.
 ## 8. Monthly baseline regeneration — agent/LLM verification procedure
 
 This section records the procedure an operator or coding agent follows
-to regenerate a monthly `/data` baseline (Layer 1 `config-Server*.json`
-plus Layer 2 `servicing-dependency-database.json`) and the verification
+to regenerate a monthly `/data` baseline (`config-Server*.json` plus the
+`data/raw-*` and `data/cache-*` mirrors) and the verification
 gates that decide whether the result is committable. It was distilled
 from the 2026-05 and 2026-06 real runs, and is the LLM-side checklist
 to apply on every monthly rebuild.
@@ -618,14 +541,13 @@ to apply on every monthly rebuild.
 Before any fetch or regeneration, confirm the live truth sources
 actually carry the target month, so the run cannot silently regenerate
 against stale upstream content. All four must PASS; if any fails, **stop
-and defer** (G-pre-1 is the same currency wall as G2 below).
+and defer** (G-pre-1 is the same currency wall as G1 below).
 
 | Gate | Check (target month `<yyyy-MM>`) | Source |
 |---|---|---|
 | **G-pre-1** release-health currency | the page lists `<yyyy-MM> B` for all four OS (the month's LCU KBs) | `learn.microsoft.com/en-us/windows/release-health/windows-server-release-info?accept=text/markdown` (§B.22.1) |
 | **G-pre-2** .NET CU source | index reachable; latest listed month `<= <yyyy-MM>` — when the target is a `.NET` publication gap, this is the month carry-forward resolves (§B.22.5) | `learn.microsoft.com/en-us/dotnet/framework/release-notes/release-notes?accept=text/markdown` |
 | **G-pre-3** Catalog reachable | `Search.aspx?q=<a target LCU KB>` returns HTTP 200 with the KB | `www.catalog.update.microsoft.com` |
-| **G-pre-4** cab available | staged `wsusscn2.cab` present (else A01/A04 downloads ~619 MB) | pre-staged path / Catalog |
 
 Example (bash, same egress path the script uses):
 
@@ -641,33 +563,21 @@ curl -s -o /dev/null -w '%{http_code}\n' -A "$UA" 'https://www.catalog.update.mi
 
 ### 8.1 Regeneration sequence
 
-Run from a clean checkout at the target HEAD, with a pre-staged
-`wsusscn2.cab` for the target month and `-SkipEnvCheck` to bypass the
-100 GB `-Execute` preflight (these admin actions mount no WIM):
+Run from a clean checkout at the target HEAD, with `-SkipEnvCheck` to
+bypass the 100 GB `-Execute` preflight (these admin actions mount no WIM):
 
 1. **A03 `RefreshSnapshots`** — refreshes `data/raw-*` and `data/cache-*`
    (release-info Markdown, .NET CU, Dynamic Update) from the web. Fast
-   (~30 s); network only, no cab.
-2. **A01 `RefreshAllBaselines -Mode Force -PatchMonth <yyyy-MM> -OfflineSyncPackagePath <cab>`**
-   — regenerates Layer 1 from the refreshed caches and soft-chains A04.
-   `-PatchMonth` pins the generated month and (r11.20+) derives
-   `PatchTuesdayOfBaseline` from that month's Patch Tuesday (§B.22.11).
-3. **A04 `RefreshDependencyDatabase`** — runs as the A01 chain, or
-   standalone via `-Action RefreshDependencyDatabase -OfflineSyncPackagePath <cab>`;
-   parses `package.xml` (~114 MB) with a streaming `XmlReader` and
-   rewrites Layer 2 plus the Layer 1 `_DependencyVerified*` stamps.
-   A04's wall time is **~5–7 min**; under an agent/CLI runner that imposes
-   a per-call timeout, run it **detached** and poll (see §8.5) rather than
-   in a synchronous foreground call.
+   (~30 s); network only.
+2. **A01 `RefreshAllBaselines -Mode Force -PatchMonth <yyyy-MM>`**
+   — regenerates the config baseline from the refreshed caches and resolves
+   the month's patch set from the Microsoft Update Catalog. `-PatchMonth`
+   pins the generated month and (r11.20+) derives `PatchTuesdayOfBaseline`
+   from that month's Patch Tuesday (§B.22.11).
 
-**`-Mode Force` A01 is itself the full Layer 1 + Layer 2 regenerator**
-(Stages 1–4): it parses the cab and emits
-`servicing-dependency-database.json` directly, so a separate A04 is the
-*Layer-2-only* refresher, not a required follow-up after a `-Mode Force`
-A01. When `-OfflineSyncPackagePath` is omitted, A01 **downloads** the
-~619 MB cab itself, and that download dominates its runtime. Both A03 and
-A01 can exceed a ~5–6 min foreground runner budget (observed 2026-06:
-**A03 2m28s, A01 6m32s**), so run **both** detached under such a runner.
+Both A03 and A01 can exceed a ~5–6 min foreground runner budget (observed
+2026-06: **A03 2m28s, A01 6m32s**), so run **both** detached under such a
+runner.
 Exit code **2 = manual-fill-only** — the 12 `Common` / per-language `Iso`
 fields (`cadence=IsoRelease`, `decision=Manual`), which ship **empty** in
 the committed baseline — and is **expected**, not a failure.
@@ -676,13 +586,11 @@ the committed baseline — and is **expected**, not a failure.
 
 | Gate | Check | Failure signal |
 |---|---|---|
-| **G1 Cab freshness** | staged cab SHA-256/size differ from the committed Layer 2 `_meta.sourceCab`; `package.xml` carries `CreationDate="<yyyy-MM>…"` rows and the month's KBs | identical hash → no new cab yet |
-| **G2 Discovery-source currency** *(critical)* | the refreshed `data/raw-release-info.md` already lists the target month | A01 logs `Discovery returned zero records for OS=… Month=<yyyy-MM>` |
-| **G3 Stamp / patch-set consistency** | every `config-Server*.json` has `PatchTuesdayOfBaseline` = the target month's Patch Tuesday **and** resolved LCU/SSU KBs belonging to that month | a new-month stamp sitting over previous-month KBs |
-| **G4 Layer 2 provenance** | `servicing-dependency-database.json` `_meta.sourceCab.sha256` matches the staged cab; `generatedAt` is the run date | stale `_meta` |
-| **G5 Standing gates** | `psa.py` 0/0/0, offline suite (T1–T23) green, restamp IN SYNC, `doc_gate` PASS, validator A–G green | any non-green |
+| **G1 Discovery-source currency** *(critical)* | the refreshed `data/raw-release-info.md` already lists the target month | A01 logs `Discovery returned zero records for OS=… Month=<yyyy-MM>` |
+| **G2 Stamp / patch-set consistency** | every `config-Server*.json` has `PatchTuesdayOfBaseline` = the target month's Patch Tuesday **and** resolved LCU/SSU KBs belonging to that month | a new-month stamp sitting over previous-month KBs |
+| **G3 Standing gates** | `psa.py` 0/0/0, offline suite green, restamp IN SYNC, `doc_gate` PASS, validator A–G green | any non-green |
 
-**G2 is the gate that is easy to miss.** The cab and the Microsoft
+**G1 is the gate that is easy to miss.** The cab and the Microsoft
 Update Catalog lead the release-health page by **a day or more after
 Patch Tuesday**. Discovery is release-info-driven (§B.22.1), so a regen
 attempted before release-info catches up yields a wrong-month or empty
@@ -691,7 +599,7 @@ and defer the regen** — never commit a baseline whose
 `PatchTuesdayOfBaseline` is the new month but whose patch entries are
 the previous month's KBs.
 
-**Correctness cross-check (G5 add-on).** After regen, confirm each
+**Correctness cross-check (G3 add-on).** After regen, confirm each
 `config-Server*.json` LCU KbId equals the `<yyyy-MM> B` LCU on the live
 release-health page (G-pre-1), and — when the target is a `.NET` gap
 month — that every OS carries a non-empty `.NET` CU (carried forward from
@@ -711,123 +619,19 @@ SSU assertion ("every `Type=SSU` has a non-empty `DownloadUrl`") is
 data-driven and stays green, so a lone T23 failure on otherwise-green
 gates is the expected signal that only the hard-coded KbId needs bumping.
 
-### 8.3 Resource profile (this environment)
-
-A04's `package.xml` parse completes in ~5 minutes on a 3.9 GB-RAM
-container; the parser streams via `XmlReader` rather than loading the
-document, so peak memory stays well under the limit. The mid-parse
-process exits seen in earlier sessions were **not** environment-transient
-RAM failures: they are the **agent/CLI runner's per-call timeout** (often
-~5–6 min, separate from any `timeout N` inside the command) killing a
-**synchronous foreground** A04 around the "parsed ~100,000 updates" mark,
-before Stage 4 writes Layer 2. A04 is not a local blocker once it is run
-detached; see §8.5 for the pattern.
-
-### 8.4 Real-run log
-
-- **2026-05** — full Layer 1 regen for `2026-05` committed (`b322be1`);
-  the standalone Server 2016 SSU (KB5088064) was auto-discovered (G1–G5
-  all green).
-- **2026-06** — the 2026-06 cab (SHA-256 `5b075a6d…`, 649 MB) was
-  published and validated (G1 ✓: 2026-06 `CreationDate` rows present)
-  and A04 regenerated Layer 2 cleanly (~5 min, G4 ✓). First attempt
-  (2026-06-10, one day after the 2026-06-09 Patch Tuesday) hit **G2**:
-  the release-health page still listed 2026-05, so A01 discovery returned
-  zero records for 2026-06 — the regen was **deferred, not committed**,
-  per the G2 rule above.
-- **2026-06 (completed 2026-06-11)** — re-run once release-health
-  published 2026-06. Full regen succeeded: A03 (~27 s) → A01 `-Mode Force
-  -PatchMonth 2026-06` (Layer 1, all 4 OS) → A04 detached (~7 min, Layer 2
-  + `_DependencyVerified*` stamps, updated=4). **G1–G5 green** (G4
-  `_meta.sourceCab.sha256 = 5b075a6d…`, `generatedAt 2026-06-11`; G3
-  `PatchTuesdayOfBaseline = 2026-06-09` over this-month KBs; G5 servicing-
-  dependency offline gates PASS — run the full T1–T23 + psa + doc_gate +
-  validator before committing). Resolved set: 2016 LCU KB5094122 + SSU
-  KB5094141; 2019 LCU KB5094123; 2022 LCU KB5094128 + DU.SafeOs KB5094157;
-  2025 LCU KB5094125 + DU.SafeOs KB5094150 + DU.Setup KB5095966
-  (+ KB5043080 checkpoint, unchanged). Three findings were surfaced and
-  routed to the maintenance handoff for separate investigation (do NOT
-  silently bake into the baseline): (F1) Server 2019 Layer 1
-  `IsCombined=True` vs Layer 2 `servicingStackModel=separate` divergence;
-  (F2) all `DotNet.Runtime` entries dropped because no June .NET CU was
-  published and discovery is month-pinned (no carry-forward); (F3)
-  Server 2025 DU.Setup (KB5095966) exists in June, contra the report's
-  "discontinued" framing. Per-run work-log recorded (see §8.6).
-- **2026-06 (committed 2026-06-13)** — the 2026-06 baseline was regenerated
-  again on the r11.32 code and **committed** (this is the first committed 2026-06
-  baseline; the 2026-06-11 run above was held back for the findings). Same cab
-  (SHA-256 `5b075a6d…`, 649,341,212 bytes); A03 ~22 s -> A01 `-Mode Force
-  -PatchMonth 2026-06` (Layer 1, all 4 OS) -> A04 detached ~6 min (Layer 2 +
-  `_DependencyVerified*`, updated=4). G1–G5 green; resolved set identical to the
-  2026-06-11 entry (2016 LCU KB5094122 + SSU KB5094141; 2019 KB5094123; 2022
-  KB5094128 + DU.SafeOs KB5094157; 2025 KB5094125 + DU.Setup KB5095966 + DU.SafeOs
-  KB5094150). Two differences from the 2026-06-11 run, both from intervening code:
-  the standalone Server 2016 SSU **KB5094141** was **auto-discovered** on the A01
-  path (r11.20), not hand-filled; and the `DotNet.Runtime` CU is now **carried
-  forward** for all four OS across the June .NET gap (r11.27, §B.22.5) — so the
-  earlier (F2) ".NET dropped" no longer applies. T23's hard-coded Server 2016 SSU
-  KbId was advanced `KB5088064` -> `KB5094141` in the same commit. Findings (F1)
-  2019 L1/L2 label split and (F3) 2025 DU.Setup-present remain routed for separate
-  investigation; not baked.
-
-### 8.5 Agent execution notes (running the long A04 under a timed runner)
-
-The data generation itself is **PowerShell admin actions**, not Python:
-there is no Python orchestrator. The Python layer that "drives the PS
-functions" is the test harness (`powershell_harness.py`, T3, via
-`-Action TestHarness`) and the source-readiness probes
-(`wsusscn2_probe.py` T5, `catalog_probe.py` T1, `eval_iso_probe.py` T4).
-The agent-friendly **first move** is therefore a probe — run
-`python3 tests/wsusscn2_probe.py` to confirm cab reachability/freshness
-(a G1 signal) — and the standing gates (G5) are all Python too. The
-fetch + parse + resolve is pwsh underneath.
-
-Because A04 runs ~5–7 min and the runner's per-call timeout is shorter,
-run the steps like this:
-
-1. Pre-stage the cab once (so retries do not re-download 619 MB):
-   ```bash
-   curl -fsSL 'https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab' \
-     -o /home/<workroot>/wsusscn2.cab
-   ```
-2. A03 (RefreshSnapshots) and A01 (RefreshAllBaselines, Layer 1) finish
-   in seconds / ~1 min — run them in the foreground.
-3. Run A04 **fully detached** so it survives across separate runner
-   calls, then poll:
-   ```bash
-   setsid bash -c 'cd <iso-dir> && PATH=/home/claude/pwsh:$PATH \
-     pwsh -NoProfile -File ./Update-WindowsServerIso.ps1 \
-       -Action RefreshDependencyDatabase \
-       -OfflineSyncPackagePath /home/<workroot>/wsusscn2.cab \
-       -SkipEnvCheck -WorkRoot /home/<workroot> \
-       > /home/<workroot>/a04.log 2>&1' < /dev/null &
-   # poll with short calls:
-   #   pgrep -af RefreshDependencyDatabase
-   #   tail -n 20 /home/<workroot>/a04.log
-   # done when the log prints: "A04 RefreshDependencyDatabase: completed successfully."
-   ```
-   A plain `nohup ... &` was observed **not** to survive across separate
-   runner calls in this environment; `setsid ... < /dev/null &` did.
-   Stage markers to expect: Stage 2 (extract) ~12 s, Stage 3 (parse)
-   ~5 min, Stage 4 (emit Layer 2) + Stage 4b (servicing-stack populate +
-   Layer 1 stamp) ~2 min.
-4. A01 reporting **"PARTIAL / exit code 2 / manual fill still needed"** is
-   normal: the 12 manual items are ISO source URLs + hashes (`Common`,
-   `LanguageSpecific.*.Iso`) the resolver cannot auto-fill.
-
-### 8.6 Work-log convention (compaction resilience)
+### 8.3 Work-log convention (compaction resilience)
 
 An agent's working context can be compacted mid-task, erasing what was
 verified. So **every agent-run regeneration MUST record a per-run
 work-log to a file** as it goes — not only at the end. The log captures:
-the staged cab size + SHA-256, the exact commands and their timings, the
-G1–G5 results, the May→June KB delta, and any findings/anomalies. Then:
+the exact commands and their timings, the G1–G3 results, the month-over-
+month KB delta, and any findings/anomalies. Then:
 
-- the **canonical one-paragraph run summary** is appended to §8.4 above;
+- the **canonical one-paragraph run summary** is recorded in the work-log;
 - any **anomaly / recheck item** (a surprise from the reverse-engineered
-  data, e.g. F1/F2/F3 from the 2026-06 run) is written to the
-  out-of-repo maintenance handoff so the next session sees it at A0 —
-  never silently folded into the committed baseline.
+  data) is written to the out-of-repo maintenance handoff so the next
+  session sees it at A0 — never silently folded into the committed
+  baseline.
 
-This is what lets a later session reconstruct state without re-running
-the ~7 min parse or rediscovering the §8.5 timeout workaround.
+This is what lets a later session reconstruct state without re-running the
+regeneration or rediscovering the detached-run timeout workaround.
