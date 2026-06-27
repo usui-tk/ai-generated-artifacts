@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.38'
-$Script:ScriptTag     = 'setupdu-acquisition'
+$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.39'
+$Script:ScriptTag     = 'catalog-scrape-retry'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -6485,7 +6485,6 @@ function Invoke-CatalogPatchSetRefresh {
     [OutputType([object])]
     param(
         [Parameter(Mandatory)][string]$OsVersion,
-        [string]$OsLanguage = 'neutral',
         [Parameter(Mandatory)][string]$PatchMonth,
         [int]$MaxRetries = 3
     )
@@ -6494,7 +6493,23 @@ function Invoke-CatalogPatchSetRefresh {
     if (-not $osKeyMap.ContainsKey($OsVersion)) { throw ("Invoke-CatalogPatchSetRefresh: unknown OsVersion '{0}'." -f $OsVersion) }
     $osk = $osKeyMap[$OsVersion]; $model = $modelMap[$OsVersion]
     $parts = $PatchMonth.Split('-'); $year = [int]$parts[0]; $month = [int]$parts[1]
-    $raw     = Resolve-Os -OsKey $osk            # layer 1: live seed-only Catalog acquisition
+    # Layer 1: live seed-only Catalog acquisition. Individual HTTP requests
+    # already retry transient network/429/503 inside Invoke-WebRequestWithRetry;
+    # $MaxRetries (AutoRefreshPolicy.ScrapeRetries) adds a coarse scrape-level
+    # retry so a whole-scrape failure is re-attempted with exponential backoff
+    # before giving up.
+    $raw = $null
+    for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
+        try {
+            $raw = Resolve-Os -OsKey $osk
+            break
+        } catch {
+            if ($attempt -ge $MaxRetries) { throw }
+            $backoffSec = [int][math]::Pow(2, $attempt - 1)
+            Write-Caution ("{0}: Catalog scrape attempt {1}/{2} failed ({3}); retrying in {4}s." -f $OsVersion, $attempt, $MaxRetries, $_.Exception.Message, $backoffSec)
+            Start-Sleep -Seconds $backoffSec
+        }
+    }
     $relInfo = Get-ReleaseInfoCache              # layer 2: Catalog-external release-info oracle
     $res = Resolve-CatalogPatchSetForOs -OsShortName $OsVersion -PatchModel $model `
         -RawResolved $raw -ReleaseInfo $relInfo -Year $year -Month $month
@@ -11596,7 +11611,6 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         try {
             $newPatches = Invoke-CatalogPatchSetRefresh `
                             -OsVersion $Script:OsVersion `
-                            -OsLanguage $Script:OsLanguage `
                             -PatchMonth $patchMonth `
                             -MaxRetries $retries
         } catch {
@@ -13598,7 +13612,6 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                             try {
                                 if ($refresher -eq 'Invoke-CatalogPatchSetRefresh') {
                                     $patches = @(Invoke-CatalogPatchSetRefresh -OsVersion $osKey `
-                                                                              -OsLanguage 'neutral' `
                                                                               -PatchMonth $patchMonth `
                                                                               -MaxRetries 3)
                                     $patchCount = $patches.Count

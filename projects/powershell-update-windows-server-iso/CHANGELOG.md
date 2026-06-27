@@ -22,6 +22,15 @@ the script and follows the
 
 ## [Unreleased]
 
+### Wire `AutoRefreshPolicy.ScrapeRetries` into the b3 producer and drop the vestigial `-OsLanguage` refresher parameter (`$Script:ScriptVersion` -> `update-wsi-2026.06.28-r11.39`, tag `catalog-scrape-retry`)
+
+`Invoke-CatalogPatchSetRefresh` carried two body-unused parameters that the static-analysis gate flagged (`PSReviewUnusedParameter`): `-OsLanguage` and `-MaxRetries`. They are different in kind and are resolved differently.
+
+- **`-MaxRetries` wired (not removed).** `ScrapeRetries` is a documented (`README`/`README.ja`) and configured (all four `config-Server*.json` `AutoRefreshPolicy.ScrapeRetries`) policy, but the b3 producer body never consumed it -- the documented scrape-retry was never implemented after the migration. The live `Resolve-Os` scrape is now wrapped in a `$MaxRetries`-bounded retry loop with exponential backoff (1s/2s/4s), re-attempting a whole-scrape failure before rethrowing on the final attempt. Individual HTTP requests already retry transient network/429/503 inside the canonical `Invoke-WebRequestWithRetry`; this is the coarser scrape-level net the policy describes. Config + README unchanged (they were already correct; only the code caught up).
+- **`-OsLanguage` removed.** The neutral `PatchBaseline` is language-independent by Microsoft's design (cumulative SSU/LCU/.NET/DU are language-neutral; language packs are resolved separately by `Resolve-LanguageSpecificPatchesFromCatalog`), so the parameter was genuinely vestigial. Dropped from the signature and both call sites; `Resolve-Os` takes only `-OsKey`.
+- **Result.** `PSScriptAnalyzer` 0/0/0 (the two `PSReviewUnusedParameter` warnings cleared).
+- **Scope.** `.ps1` only (the b3 producer + its two call sites, all outside every canon region); no config/README/schema change. ScriptVersion -> r11.39.
+
 ### Restore offline config-dataset construction for the b3 producer (T27), and reconcile SPEC/TESTING/`tests/README` to the r11.35-r11.38 apply-path completion (docs + `tests/` only, no `$Script:ScriptVersion` change)
 
 The b3 producer (`Resolve-Os`) scrapes the live Catalog and -- unlike the pre-D2 release-info path (T10) -- no Python-drivable offline builder was carried forward, so the v3.0 config baseline could no longer be (re)built without network I/O. This restores that path and documents the r11.35-r11.38 work recorded below.
