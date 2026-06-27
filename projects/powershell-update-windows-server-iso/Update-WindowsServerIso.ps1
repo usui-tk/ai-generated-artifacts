@@ -541,7 +541,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.33'
+$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.34'
 $Script:ScriptTag     = 'dism-scratchdir-localisation'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -628,7 +628,7 @@ $Script:OsConfigFieldGroups = @(
     [pscustomobject]@{
         Path        = 'PatchBaseline'
         Cadence     = 'PatchTuesday'
-        Refresher   = 'Resolve-PatchSetFromReleaseInfo'
+        Refresher   = 'Invoke-CatalogPatchSetRefresh'
         Description = 'Neutral patches (SSU/LCU/.NET CU/DU.*) shared across all languages.'
     }
     [pscustomobject]@{
@@ -672,16 +672,16 @@ $Script:OsConfigFieldGroups = @(
 #   - LXP                    : Install only (LXPs are Store apps; no WinRE)
 #   - DotNet.LangPack        : Install only (.NET satellite assemblies)
 $Script:PatchTargetMap = @{
-    'SSU'                      = @('Install', 'Boot', 'WinRE')
-    'LCU'                      = @('Install', 'Boot')
-    'DotNet.Runtime'           = @('Install')
-    'DotNet.OsLevel'           = @()
-    'DynamicUpdate.Component'  = @('Install')
-    'DynamicUpdate.SafeOs'     = @('WinRE')
-    'DynamicUpdate.Setup'      = @('Setup')
-    'LanguagePack'             = @('Install', 'WinRE')
-    'LXP'                      = @('Install')
-    'DotNet.LangPack'          = @('Install')
+    # Kind -> WIM targets (Config Schema v3.0 / data-source migration). Neutral Kinds:
+    'SSU'             = @('Install', 'Boot', 'WinRE')
+    'LCU'             = @('Install', 'Boot')
+    'DotNet'          = @('Install')
+    'SafeOSDU'        = @('WinRE')
+    'SetupDU'         = @('Setup')
+    # Language-specific Kinds (produced by Resolve-LanguageSpecificPatchesFromCatalog):
+    'LanguagePack'    = @('Install', 'WinRE')
+    'LXP'             = @('Install')
+    'DotNet.LangPack' = @('Install')
 }
 
 # Pre-apply dependency closure check policy.
@@ -2881,22 +2881,6 @@ function Get-ConfigProfile {
     $langNode = $json.LanguageSpecific.$OsLang
     if ($null -eq $langNode) {
         throw ('Config {0} has no LanguageSpecific entry for "{1}".' -f $cfgFile, $OsLang)
-    }
-
-    # PatchBaseline Type-value sanity check: the legacy value 'DotNet'
-    # was split into 'DotNet.Runtime' (per-runtime KB applied to the WIM)
-    # and 'DotNet.OsLevel' (OS-offering KB recorded but not applied).
-    # A config still carrying Type='DotNet' is from an older baseline
-    # and must be regenerated via -Action RefreshAllBaselines under
-    # the current code path. See SPEC.md.
-    if ($json.PatchBaseline -and $json.PatchBaseline.Patches) {
-        $legacyDotNet = @($json.PatchBaseline.Patches | Where-Object {
-            $_.Type -eq 'DotNet'
-        })
-        if ($legacyDotNet.Count -gt 0) {
-            $legacyKbs = ($legacyDotNet | ForEach-Object { $_.KbId }) -join ', '
-            throw ('Config {0} carries {1} legacy Type="DotNet" entry/entries (KBs: {2}). The DotNet type was replaced by DotNet.Runtime + DotNet.OsLevel; re-run -Action RefreshAllBaselines to regenerate the baseline.' -f $cfgFile, $legacyDotNet.Count, $legacyKbs)
-        }
     }
 
     # Build a flat profile object: promote Common fields to top-level
@@ -5726,7 +5710,7 @@ function Get-PatchSetFromReleaseInfoDiscovery {
     # `windows-server-release-info` and in the .NET release-notes table
     # row "Windows 10 1607 and Windows Server 2016 / .NET Framework
     # 3.5, 4.6.2, 4.7, 4.7.1, 4.7.2"). Emitting both records would
-    # cause the resolver to write two NeutralPatches entries pointing
+    # cause the resolver to write two Lines entries pointing
     # at the same .msu file with different Type values. LCU is the
     # authoritative source, so any .NET CU row whose KbId matches an
     # already-discovered LCU KbId is skipped here. Server 2019 / 2022
@@ -5854,6 +5838,641 @@ function Get-PatchSetFromReleaseInfoDiscovery {
     }
 
     return @($records.ToArray())
+}
+
+# ============================================================
+# b3 layer-1 acquisition: seed-only Microsoft Update Catalog resolver
+#   (faithful port of the reference Resolve-CatalogPatchSet.ps1 production
+#    half: OS-seed -> Learn LCU + Catalog Search/DownloadDialog -> raw lines.
+#    Live fidelity confirmed by the captured resolve.json; oracle-verify half
+#    NOT ported. Consumed by ConvertTo-ConfigLines / Resolve-CatalogPatchSetForOs.)
+# ============================================================
+
+# Constants
+# ============================================================================
+$script:CatUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+$script:CatSearchUrl   = 'https://www.catalog.update.microsoft.com/Search.aspx'
+$script:CatDownloadUrl = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
+$script:CatScopedUrl   = 'https://www.catalog.update.microsoft.com/ScopedViewInline.aspx'
+$script:CatLearnUrl = 'https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info?accept=text/markdown'
+$script:CatCache = (Join-Path $Script:WorkRoot 'cache\catalog-findings')
+$script:CatOracleDir = $null
+if (-not (Test-Path $script:CatCache)) { New-Item -ItemType Directory -Path $script:CatCache -Force | Out-Null }
+
+# server Products token + Learn build-major + version token, per OS
+$script:CatOsDef = @{
+    '2016' = @{ products = 'Windows Server 2016';                    buildMajor = '14393'; verToken = $null }
+    '2019' = @{ products = 'Windows Server 2019';                    buildMajor = '17763'; verToken = $null }
+    '2022' = @{ products = 'Microsoft Server operating system-21H2'; buildMajor = '20348'; verToken = '21H2' }
+    '2025' = @{ products = 'Microsoft Server Operating System-24H2'; buildMajor = '26100'; verToken = '24H2' }
+}
+$script:CatNetQuery = @{
+    '2016' = 'Cumulative Update for .NET Framework Windows Server 2016'
+    '2019' = 'Cumulative Update for .NET Framework Windows Server 2019'
+    '2022' = 'Cumulative Update for .NET Framework Microsoft server operating system version 21H2 x64'
+    '2025' = 'Cumulative Update for .NET Framework 4.8.1 Microsoft server operating system version 24H2 x64'
+}
+# 2022 SafeOS DU is out-of-SOAP-scope; digest is the Catalog/cab-verified value.
+$script:CatKnownDuDigest = @{ '2022' = 'w+5dA+5b36FoRspRo6sXEHEmC5Q=' }
+
+# ============================================================================
+
+# ============================================================================
+function Convert-HtmlToText {
+    param([string]$s)
+    if ($null -eq $s) { return '' }
+    $s = [regex]::Replace($s, '<[^>]+>', ' ')
+    $s = [System.Net.WebUtility]::HtmlDecode($s)
+    $s = [regex]::Replace($s, '\s+', ' ')
+    return $s.Trim()
+}
+
+function Get-CatalogText {
+    param([string]$Url, [string]$Tag)
+    $p = Join-Path $script:CatCache $Tag
+    if (Test-Path $p) { return (Get-Content -LiteralPath $p -Raw) }
+    $r = Invoke-WebRequest -Uri $Url -UserAgent $script:CatUA -UseBasicParsing -TimeoutSec 60
+    $r.Content | Set-Content -LiteralPath $p -Encoding UTF8 -NoNewline
+    Start-Sleep -Milliseconds 600
+    return $r.Content
+}
+
+function Invoke-CatalogPost {
+    param([string]$Url, [string]$Body, [string]$Tag)
+    $p = Join-Path $script:CatCache $Tag
+    if (Test-Path $p) { return (Get-Content -LiteralPath $p -Raw) }
+    $r = Invoke-WebRequest -Uri $Url -Method Post -Body $Body `
+        -ContentType 'application/x-www-form-urlencoded' `
+        -UserAgent $script:CatUA -UseBasicParsing -TimeoutSec 60
+    $r.Content | Set-Content -LiteralPath $p -Encoding UTF8 -NoNewline
+    Start-Sleep -Milliseconds 600
+    return $r.Content
+}
+
+function Get-HeadSize {
+    param([string]$Url)
+    $cache = Join-Path $script:CatCache 'sizes.json'
+    $sizes = @{}
+    if (Test-Path $cache) {
+        try {
+            $j = Get-Content -LiteralPath $cache -Raw | ConvertFrom-Json
+            foreach ($pr in $j.PSObject.Properties) { $sizes[$pr.Name] = $pr.Value }
+        } catch { $sizes = @{} }
+    }
+    if ($sizes.ContainsKey($Url)) { return $sizes[$Url] }
+    $n = $null
+    try {
+        $r = Invoke-WebRequest -Uri $Url -Method Head -UserAgent $script:CatUA -UseBasicParsing -TimeoutSec 30
+        $cl = $r.Headers['Content-Length']
+        if ($cl) { $n = [long]($cl | Select-Object -First 1) }
+    } catch { $n = $null }
+    $sizes[$Url] = $n
+    ($sizes | ConvertTo-Json -Compress) | Set-Content -LiteralPath $cache -Encoding UTF8
+    Start-Sleep -Milliseconds 300
+    return $n
+}
+
+function Search-Catalog {
+    param([string]$Query)
+    $slug = [regex]::Replace($Query, '[^A-Za-z0-9]+', '_')
+    if ($slug.Length -gt 60) { $slug = $slug.Substring(0, 60) }
+    $tag = "search.$slug.html"
+    $html = Get-CatalogText ($script:CatSearchUrl + '?q=' + [uri]::EscapeDataString($Query)) $tag
+    $guid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+    $rx = [regex]::new("id=['""]($guid)_link['""][^>]*>(.*?)</a>", 'Singleline,IgnoreCase')
+    $rows = @()
+    foreach ($m in $rx.Matches($html)) {
+        $uid = $m.Groups[1].Value
+        $title = Convert-HtmlToText $m.Groups[2].Value
+        $cells = @{}
+        for ($col = 0; $col -le 7; $col++) {
+            $crx = [regex]::new(('id="' + [regex]::Escape($uid) + '_C' + $col + '_R\d+"[^>]*>(.*?)</td>'), 'Singleline,IgnoreCase')
+            $cm = $crx.Match($html)
+            if ($cm.Success) { $cells[$col] = Convert-HtmlToText $cm.Groups[1].Value } else { $cells[$col] = '' }
+        }
+        $size = $null
+        $smb = [regex]::Match($cells[6], '(\d{4,})')
+        if ($smb.Success) { $size = [long]$smb.Groups[1].Value }
+        $titleOut = if ($title) { $title } else { $cells[1] }
+        $rows += [pscustomobject]@{
+            uid = $uid; title = $titleOut; products = $cells[2]; classification = $cells[3]
+            lastUpdated = $cells[4]; version = $cells[5]; sizeText = $cells[6]; sizeBytes = $size
+        }
+    }
+    return , $rows
+}
+
+function Resolve-CatalogDownload {
+    param([string]$Uid)
+    $body = 'updateIDs=[{"size":0,"languages":"","uidInfo":"' + $Uid + '","updateID":"' + $Uid + '"}]' +
+            '&updateIDsBlockedForImport=&wsusApiPresent=&contentImport=&sku=&serverName=&ssl=&portNumber=&version='
+    $tag = "dl.$($Uid.Substring(0,8)).html"
+    $html = Invoke-CatalogPost $script:CatDownloadUrl $body $tag
+    $files = @{}
+    $rx = [regex]::new("files\[(\d+)\]\.(\w+)\s*=\s*'([^']*)'")
+    foreach ($m in $rx.Matches($html)) {
+        $i = [int]$m.Groups[1].Value; $field = $m.Groups[2].Value; $val = $m.Groups[3].Value
+        if (-not $files.ContainsKey($i)) { $files[$i] = @{} }
+        $files[$i][$field] = $val
+    }
+    $out = @()
+    foreach ($i in ($files.Keys | Sort-Object)) {
+        $f = $files[$i]
+        $out += [pscustomobject]@{
+            idx = $i
+            fileName = $(if ($f.ContainsKey('fileName')) { $f['fileName'] } else { '' })
+            url      = $(if ($f.ContainsKey('url'))      { $f['url'] }      else { '' })
+            digest   = $(if ($f.ContainsKey('digest'))   { $f['digest'] }   else { '' })
+            sha256   = $(if ($f.ContainsKey('sha256'))   { $f['sha256'] }   else { '' })
+            enTitle  = $(if ($f.ContainsKey('enTitle'))  { $f['enTitle'] }  else { '' })
+        }
+    }
+    return , $out
+}
+
+function Get-CatalogScoped {
+    param([string]$Uid)
+    $tag = "scoped.$($Uid.Substring(0,8)).html"
+    $html = Get-CatalogText ($script:CatScopedUrl + '?updateid=' + $Uid) $tag
+    function _grab([string]$anchor) {
+        $m = [regex]::Match($html, ('id="' + $anchor + '"[^>]*>(.*?)</div>'), 'Singleline,IgnoreCase')
+        if ($m.Success) { return (Convert-HtmlToText $m.Groups[1].Value) } else { return $null }
+    }
+    $supersededBy = _grab 'supersededbyInfo'
+    $isLatest = ($null -ne $supersededBy) -and ($supersededBy.ToLower().StartsWith('n/a'))
+    $kbm = [regex]::Match($html, 'KB article numbers:\s*</span>\s*([0-9,\s]+)')
+    [pscustomobject]@{
+        uid = $Uid; is_latest = $isLatest; supersededByText = $supersededBy
+        kb = $(if ($kbm.Success) { $kbm.Groups[1].Value.Trim() } else { $null })
+    }
+}
+
+# ============================================================================
+# SECTION 2 - per-OS resolvers: LCU / SSU / .NET / SafeOS DU
+# ============================================================================
+function Get-LearnLcuKbs { # psa-disable-line PSA6003 -- ported reference contract; returns a build->KB map (collection)
+    $html = Get-CatalogText $script:CatLearnUrl 'learn.release-info.md'
+    $best = @{}
+    $rx = [regex]::new('\|\s*(\d{5})\.(\d+)\s*\|\s*\[KB(\d+)\]')
+    foreach ($m in $rx.Matches($html)) {
+        $major = $m.Groups[1].Value; $minor = [int]$m.Groups[2].Value; $kb = $m.Groups[3].Value
+        if ((-not $best.ContainsKey($major)) -or ($minor -gt $best[$major].minor)) {
+            $best[$major] = [pscustomobject]@{ build = "$major.$minor"; minor = $minor; kb = "KB$kb" }
+        }
+    }
+    return $best
+}
+
+function Get-KbOf {
+    param([string]$Text)
+    $m = [regex]::Match(("$Text"), 'KB(\d+)', 'IgnoreCase')
+    if ($m.Success) { return 'KB' + $m.Groups[1].Value } else { return $null }
+}
+
+function Get-X64Rows { # psa-disable-line PSA6003 -- ported reference contract; returns multiple rows (collection)
+    param($Rows)
+    $out = @($Rows | Where-Object { ($_.title.ToLower() -notmatch 'arm64') -and ($_.title.ToLower() -notmatch 'x86') })
+    $pref = @($out | Where-Object { $_.title.ToLower() -match 'x64' })
+    if ($pref.Count) { return , $pref } else { return , $out }
+}
+
+function Get-ServerRow {
+    param($Rows, [string]$ProductsToken)
+    $pt = $ProductsToken.ToLower()
+    $cands = @($Rows | Where-Object { $_.products.ToLower().Contains($pt) })
+    $x = @($cands | Where-Object { $_.title.ToLower().Contains('x64') -or $_.sizeText.ToLower().Contains('x64') })
+    if ($x.Count) { return $x[0] }
+    if ($cands.Count) { return $cands[0] }
+    return $null
+}
+
+function Get-Newest {
+    param($Rows)
+    @($Rows) | Sort-Object @{ Expression = {
+        $m = [regex]::Match($_.title, '\s*(\d{4})-(\d{2})')
+        if ($m.Success) { [int]$m.Groups[1].Value * 100 + [int]$m.Groups[2].Value } else { 0 }
+    } } -Descending | Select-Object -First 1
+}
+
+function Get-RuntimeCount {
+    param([string]$Title)
+    ([regex]::Matches($Title, '\b\d+\.\d+(\.\d+)?\b')).Count
+}
+
+function New-Line {
+    param([string]$Kind, $Row, $Files, $InScope, [string]$Note)
+    [pscustomobject]@{
+        kind       = $Kind
+        kb         = $(if ($Row) { Get-KbOf $Row.title } else { $null })
+        catalogUid = $(if ($Row) { $Row.uid } else { $null })
+        products   = $(if ($Row) { $Row.products } else { $null })
+        title      = $(if ($Row) { $Row.title } else { $null })
+        sizeBytes  = $(if ($Row) { $Row.sizeBytes } else { $null })
+        files      = $(if ($Files) { @($Files) } else { @() })
+        inScope    = $InScope
+        note       = $Note
+    }
+}
+
+function Resolve-Lcu {
+    param([string]$OsKey)
+    $info = $script:CatOsDef[$OsKey]
+    $lcus = Get-LearnLcuKbs
+    $bk = $lcus[$info.buildMajor]
+    if (-not $bk) { return (New-Line 'LCU' $null @() $null 'LCU not discovered from Learn') }
+    $rows = Search-Catalog $bk.kb
+    $row = Get-ServerRow $rows $info.products
+    $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
+    $inScope = [pscustomobject]@{ build = $bk.build; files = @($files | ForEach-Object { $_.fileName }) }
+    return (New-Line 'LCU' $row $files $inScope ("discovered via Learn (build $($bk.build))"))
+}
+
+function Resolve-Ssu2016 {
+    $rows = Search-Catalog 'Servicing Stack Update Windows Server 2016'
+    $cands = @($rows | Where-Object { $_.title.Contains('Servicing Stack Update') -and $_.products.Contains('Windows Server 2016') })
+    $row = Get-Newest $cands
+    $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
+    $inScope = [pscustomobject]@{ standalone = $true; files = @($files | ForEach-Object { $_.fileName }) }
+    return (New-Line 'SSU' $row $files $inScope '2016 only: standalone SSU row (apply before LCU)')
+}
+
+# in-box / in-scope = the .NET runtime whose payload ships in the base media (BLOCK 0.T).
+# Picks the leaf for the OS's default/shipping runtime; 3.5 rides bundled in that leaf.
+function Test-NetInScope {
+    param([string]$OsKey, [string]$FileName)
+    switch ($OsKey) {
+        '2019' { return (($FileName -notmatch '-ndp48') -and ($FileName -notmatch '-ndp481')) }  # base 4.7.2 (+3.5)
+        '2022' { return (($FileName -match '-ndp48') -and ($FileName -notmatch '-ndp481')) }      # 4.8 (+3.5)
+        '2025' { return ($FileName -match '-ndp481') }                                            # 4.8.1 (+3.5)
+    }
+    return $false
+}
+
+function Resolve-Net {
+    param([string]$OsKey)
+    $info = $script:CatOsDef[$OsKey]
+    if ($OsKey -eq '2016') {
+        return (New-Line '.NET' $null @() $null ('2016: in-box .NET payload (3.5 + 4.6.2/4.7.x) is serviced INSIDE the LCU; ' +
+                'the only standalone WS2016 .NET CU is .NET 4.8 (add-on, NOT in base media) -> out-of-scope. No leaf to fetch.'))
+    }
+    $q = $script:CatNetQuery[$OsKey]
+    $rows = Search-Catalog $q
+    $rows = @($rows | Where-Object { $_.products.ToLower().Contains($info.products.ToLower()) })
+    $rows = Get-X64Rows $rows
+    $nm = Get-Newest $rows
+    if (-not $nm) { return (New-Line '.NET' $null @() $null 'no .NET row matched OS token') }
+    $month = [regex]::Match($nm.title, '\s*(\d{4}-\d{2})').Groups[1].Value
+    $variants = @($rows | Where-Object { $_.title.TrimStart().StartsWith($month) })
+    $row = $variants | Sort-Object @{ Expression = { Get-RuntimeCount $_.title } } -Descending | Select-Object -First 1
+    $files = Resolve-CatalogDownload $row.uid
+    $x64 = @($files | Where-Object { $_.fileName -match '-x64' })
+    $sel = @($x64 | Where-Object { Test-NetInScope $OsKey $_.fileName })
+    $inScope = [pscustomobject]@{
+        inScopeFiles = @($sel | ForEach-Object { $_.fileName })
+        inScopeKb    = @($sel | ForEach-Object { Get-KbOf $_.fileName })
+    }
+    return (New-Line '.NET' $row $files $inScope ("superset rollup; in-scope leaf = $OsKey in-media default .NET runtime (BLOCK 0.T; bundles 3.5)"))
+}
+
+function Resolve-SafeOsDu {
+    param([string]$OsKey)
+    $info = $script:CatOsDef[$OsKey]
+    if ($OsKey -eq '2016' -or $OsKey -eq '2019') {
+        return (New-Line 'SafeOSDU' $null @() $null "${OsKey}: no monthly SafeOS DU line (matches oracle)")
+    }
+    $tok = $info.verToken
+    $q = if ($OsKey -eq '2022') { 'Dynamic Update Microsoft server operating system version 21H2' }
+         else { 'Safe OS Dynamic Update for Microsoft server operating system version 24H2 x64' }
+    $rows = Search-Catalog $q
+    $cands = @($rows | Where-Object {
+        $_.products.Contains('Safe OS Dynamic Update') -and
+        $_.title.Contains($tok) -and
+        $_.title.ToLower().Contains('server operating system') -and
+        ($_.title.ToLower() -notmatch 'arm64')
+    })
+    $row = Get-Newest $cands
+    $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
+    $x64 = @($files | Where-Object { $_.fileName.Contains('x64') -and $_.fileName.EndsWith('.cab') })
+    $inScope = [pscustomobject]@{ files = @($x64 | ForEach-Object { $_.fileName }) }
+    return (New-Line 'SafeOSDU' $row $files $inScope "Products has 'Safe OS Dynamic Update' + title version token")
+}
+
+function Resolve-Os { # psa-disable-line PSA6003 -- noun is 'OS' (operating system), not a plural; ported reference contract
+    param([string]$OsKey)
+    switch ($OsKey) {
+        '2016' { return [pscustomobject]@{ os = 'Server2016'; lines = @((Resolve-Lcu '2016'), (Resolve-Ssu2016), (Resolve-Net '2016'), (Resolve-SafeOsDu '2016')) } }
+        '2019' { return [pscustomobject]@{ os = 'Server2019'; lines = @((Resolve-Lcu '2019'), (New-Line 'SSU' $null @() $null 'embedded in LCU (no standalone row)'), (Resolve-Net '2019'), (Resolve-SafeOsDu '2019')) } }
+        '2022' { return [pscustomobject]@{ os = 'Server2022'; lines = @((Resolve-Lcu '2022'), (New-Line 'SSU' $null @() $null 'embedded in LCU (no standalone row)'), (Resolve-Net '2022'), (Resolve-SafeOsDu '2022')) } }
+        '2025' {
+            $lcu = Resolve-Lcu '2025'
+            $lcuKb = if ($lcu.kb) { $lcu.kb.ToLower() } else { '' }
+            $baseline = @($lcu.files | Where-Object {
+                $_.fileName.ToLower().EndsWith('.msu') -and (($lcuKb -eq '') -or (-not $_.fileName.ToLower().Contains($lcuKb)))
+            })
+            $blKb = if ($baseline.Count) { Get-KbOf $baseline[0].fileName } else { $null }
+            $ssu = New-Line 'SSU' $null $baseline ([pscustomobject]@{ files = @($baseline | ForEach-Object { $_.fileName }) }) `
+                '2025: checkpoint SSU carried by the co-served GA baseline (the non-LCU .msu in the 2-file set)'
+            $ssu.kb = $blKb
+            return [pscustomobject]@{ os = 'Server2025'; lines = @($lcu, $ssu, (Resolve-Net '2025'), (Resolve-SafeOsDu '2025')) }
+        }
+    }
+}
+
+# ============================================================================
+# SECTION 3 - .NET CU full inventory (collect-don't-drop)
+# ============================================================================
+
+# ============================================================
+# b3 Catalog patch-set resolver pipeline (data-source migration)
+#   layer 1 transform : ConvertTo-ConfigLines (raw acquisition -> Lines[])
+#   layer 2 verify     : Get-ReleaseInfoExpectedLcu + Compare-CatalogLcuAgainstReleaseInfo
+#   layer 3 structure  : Test-PatchModelConsistency (P06 runtime mirror of the schema)
+#   orchestrator       : Resolve-CatalogPatchSetForOs (L1 -> transform -> L2 -> L3)
+# Authored + offline-validated against captured real fixtures (see SPEC B.4/B.19).
+# ============================================================
+
+function Test-PatchModelConsistency {
+    <#
+    .SYNOPSIS
+        P06 runtime consistency check: assert a per-OS resolved Lines[] set
+        matches the invariants its PatchModel declares (the runtime mirror of
+        config.schema.json's PatchModel allOf discriminated union, SPEC B.19).
+    .DESCRIPTION
+        Anti-"forced-uniform" contract (D0 design section 5): each PatchModel
+        branch ASSERTS the Kinds it expects and FORBIDS those it must not carry,
+        so a resolver anomaly surfaces as a typed error that names the OS, the
+        PatchModel, and the violated invariant -- never silently normalised.
+        Pure function (no I/O); unit-tested offline against fixture Lines[].
+    .OUTPUTS
+        pscustomobject { OsKey; PatchModel; IsConsistent[bool]; Errors[string[]] }
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$OsKey,
+        [Parameter(Mandatory)][string]$PatchModel,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Lines
+    )
+    $rules = @{
+        'separate-ssu'    = @{ Require = @('SSU','LCU');                    Forbid = @('DotNet','SafeOSDU','SetupDU') }
+        'embedded-ssu'    = @{ Require = @('LCU','DotNet');                 Forbid = @('SSU','SafeOSDU','SetupDU') }
+        'embedded-ssu-du' = @{ Require = @('LCU','DotNet','SafeOSDU');      Forbid = @('SSU','SetupDU') }
+        'uup-checkpoint'  = @{ Require = @('LCU','SSU','DotNet','SafeOSDU'); Forbid = @() }
+    }
+    if (-not $rules.ContainsKey($PatchModel)) {
+        throw "P06 consistency: unknown PatchModel '$PatchModel' for $OsKey (expected: $(($rules.Keys | Sort-Object) -join ', '))."
+    }
+    $rule    = $rules[$PatchModel]
+    $present = @($Lines | ForEach-Object { $_.Kind } | Sort-Object -Unique)
+    $errors  = [System.Collections.Generic.List[string]]::new()
+    foreach ($k in $rule.Require) {
+        if ($present -notcontains $k) { $errors.Add("missing required Kind '$k'") }
+    }
+    foreach ($k in $rule.Forbid) {
+        if ($present -contains $k) { $errors.Add("forbidden Kind '$k' present") }
+    }
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        if ([string]::IsNullOrWhiteSpace([string]$Lines[$i].Digest)) {
+            $errors.Add("Lines[$i] (Kind '$($Lines[$i].Kind)') has empty Digest (integrity key required)")
+        }
+    }
+    return [pscustomobject]@{
+        OsKey        = $OsKey
+        PatchModel   = $PatchModel
+        IsConsistent = ($errors.Count -eq 0)
+        Errors       = $errors.ToArray()
+    }
+}
+
+function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines[] collection; plural noun intentional
+    <#
+    .SYNOPSIS
+        b3 layer-1 transform: turn the seed-only Catalog resolver's raw per-OS output
+        (kind/kb/catalogUid/title/products/files[]/inScope/note) into the config
+        PatchBaseline.Lines[] (one Line per in-scope file, with Kind/Digest/ApplyOrder),
+        applying the per-PatchModel selections:
+          (1) drop placeholder "none" lines (no files);
+          (2) 2025 LCU 2-file split -> keep only the LCU-proper file (the baseline .msu is
+              the separate SSU line);
+          (3) .NET in-scope leaf selection (inScope.inScopeFiles);
+          (4) 2016 .NET line is a placeholder -> dropped by (1) (the D0 "remove 2016 .NET"
+              correction); SetupDU is added by the resolver extension upstream, not here.
+        Pure function; offline-tested against the captured resolve.json.
+    .OUTPUTS
+        System.Collections.Generic.List[object]  (the Lines[] for one OS)
+    #>
+    [OutputType([object])]
+    param(
+        [Parameter(Mandatory)][object]$OsResolved,   # one OS object: { os; lines[] }
+        [Parameter(Mandatory)][string]$PatchModel
+    )
+    $kindMap  = @{ 'LCU'='LCU'; 'SSU'='SSU'; '.NET'='DotNet'; 'SafeOSDU'='SafeOSDU'; 'SetupDU'='SetupDU' }
+    $applyMap = @{
+        'separate-ssu'    = @{ 'SSU'=1; 'LCU'=2 }
+        'embedded-ssu'    = @{ 'LCU'=1; 'DotNet'=2 }
+        'embedded-ssu-du' = @{ 'LCU'=1; 'DotNet'=2; 'SafeOSDU'=3 }
+        'uup-checkpoint'  = @{ 'SSU'=1; 'LCU'=2; 'DotNet'=3; 'SafeOSDU'=4; 'SetupDU'=5 }
+    }
+    if (-not $applyMap.ContainsKey($PatchModel)) {
+        throw "ConvertTo-ConfigLines: unknown PatchModel '$PatchModel' for $($OsResolved.os)."
+    }
+    $orders = $applyMap[$PatchModel]
+    $out = [System.Collections.Generic.List[object]]::new()
+    foreach ($L in $OsResolved.lines) {
+        if (-not $L.files -or @($L.files).Count -eq 0) { continue }          # (1)
+        $kind  = $kindMap[$L.kind]
+        $insc  = $L.inScope
+        $files = @($L.files)
+        $inScopeFiles = if ($insc -and $insc.PSObject.Properties.Name -contains 'inScopeFiles') { @($insc.inScopeFiles) } else { @() }
+        if ($inScopeFiles.Count -gt 0) {                                     # (3) .NET leaf
+            $files = @($files | Where-Object { $inScopeFiles -contains $_.fileName })
+        }
+        elseif ($OsResolved.os -eq 'Server2025' -and $L.kind -eq 'LCU') {    # (2) 2025 LCU split
+            $lcuTok = ([string]$L.kb).ToLower().Replace('kb','')
+            $files = @($files | Where-Object { $_.fileName.ToLower().Contains($lcuTok) })
+        }
+        $order = $orders[$kind]
+        foreach ($f in $files) {
+            $out.Add([pscustomobject]@{
+                Kind        = $kind
+                KbId        = $L.kb
+                UpdateId    = $L.catalogUid
+                Title       = $L.title
+                Products    = $L.products
+                Classification = $null
+                FileName    = $f.fileName
+                DownloadUrl = $f.url
+                Digest      = $f.digest
+                Sha256      = $(if ($f.PSObject.Properties.Name -contains 'sha256') { $f.sha256 } else { '' })
+                SizeBytes   = $null      # per-file HEAD pass refinement
+                ApplyOrder  = $order
+                InScope     = $insc
+                Note        = $L.note
+            })
+        }
+    }
+    $sorted = @($out | Sort-Object { if ($null -ne $_.ApplyOrder) { $_.ApplyOrder } else { 99 } })
+    return ,$sorted
+}
+
+function Get-ReleaseInfoExpectedLcu {
+    <#
+    .SYNOPSIS
+        Verification oracle (b3 hybrid, layer 2): the EXPECTED LCU (KbId + post-update
+        build) for an OS + month, read from the Catalog-EXTERNAL release-info cache
+        (data/cache-release-info.json MonthlyReleases). This is the human/AI-readable
+        published servicing calendar used to VERIFY that the seed-only Catalog acquisition
+        (layer 1) found the right KB -- the two sources mutually complement.
+    .OUTPUTS
+        pscustomobject { OsShortName; ExpectedLcuKb; BuildAfterUpdate; AvailabilityDate } or $null
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][object]$ReleaseInfo,
+        [Parameter(Mandatory)][string]$OsShortName,
+        [Parameter(Mandatory)][int]$Year,
+        [Parameter(Mandatory)][int]$Month
+    )
+    $rows = @($ReleaseInfo.MonthlyReleases | Where-Object {
+        $_.OsShortName -eq $OsShortName -and
+        [int]$_.UpdateTypeYear -eq $Year -and
+        [int]$_.UpdateTypeMonth -eq $Month
+    })
+    if ($rows.Count -eq 0) { return $null }
+    # Prefer the GA row (UpdateTypeLetter 'B') over a later preview (C/D...) of the same month.
+    $row = $rows | Sort-Object UpdateTypeLetter | Select-Object -First 1
+    return [pscustomobject]@{
+        OsShortName      = $OsShortName
+        ExpectedLcuKb    = $row.KbId
+        BuildAfterUpdate = $row.BuildAfterUpdate
+        AvailabilityDate = $row.AvailabilityDate
+    }
+}
+
+function Compare-CatalogLcuAgainstReleaseInfo {
+    <#
+    .SYNOPSIS
+        Reconciliation (b3 hybrid, layer 2): cross-check the Catalog-resolved LCU KB (layer 1
+        acquisition) against the release-info oracle. Because seed-only acquisition derives the
+        KB live from a minimal seed, this independent check confirms the right KB was found.
+    .OUTPUTS
+        pscustomobject { CatalogLcuKb; ExpectedLcuKb; Verdict; IsConfirmed; BuildNote; Errors[] }
+        Verdict in: confirmed | catalog-only | releaseinfo-missing
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$CatalogLcuKb,
+        [Parameter(Mandatory)][AllowEmptyString()][AllowNull()][string]$CatalogBuild,
+        [Parameter(Mandatory)][AllowNull()][object]$Expected
+    )
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $buildNote = $null
+    if ($null -eq $Expected) {
+        if ($CatalogLcuKb) { $verdict = 'catalog-only'; $errors.Add("release-info has no LCU row for this OS/month; Catalog $CatalogLcuKb is UNVERIFIED") }
+        else { $verdict = 'releaseinfo-missing'; $errors.Add("neither release-info nor Catalog produced an LCU") }
+    }
+    elseif (-not $CatalogLcuKb) {
+        $verdict = 'releaseinfo-missing'; $errors.Add("release-info expects $($Expected.ExpectedLcuKb) but Catalog resolved no LCU")
+    }
+    elseif ($CatalogLcuKb -eq $Expected.ExpectedLcuKb) {
+        $verdict = 'confirmed'
+        if ($CatalogBuild -and $Expected.BuildAfterUpdate) {
+            if ($CatalogBuild -eq $Expected.BuildAfterUpdate) { $buildNote = "build MATCH ($CatalogBuild)" }
+            else { $buildNote = "build DIFFERS: catalog=$CatalogBuild releaseinfo=$($Expected.BuildAfterUpdate)" }
+        }
+    }
+    else {
+        $verdict = 'catalog-only'
+        $errors.Add("Catalog LCU $CatalogLcuKb != release-info expected $($Expected.ExpectedLcuKb)")
+    }
+    return [pscustomobject]@{
+        CatalogLcuKb  = $CatalogLcuKb
+        ExpectedLcuKb = $(if ($Expected) { $Expected.ExpectedLcuKb } else { $null })
+        Verdict       = $verdict
+        IsConfirmed   = ($verdict -eq 'confirmed')
+        BuildNote     = $buildNote
+        Errors        = $errors.ToArray()
+    }
+}
+
+function Resolve-CatalogPatchSetForOs { # psa-disable-line PSA6003 -- noun ends 'OS' (operating system); b3 orchestrator
+    <#
+    .SYNOPSIS
+        b3 orchestrator: produce the validated PatchBaseline.Lines[] for one OS by chaining
+        layer 1 (seed-only Catalog acquisition) -> transform -> layer 2 (release-info
+        reconciliation) -> layer 3 (PatchModel consistency). Returns the Lines plus both
+        verdicts so the caller (A01) can apply policy. The -RawResolved parameter lets the
+        acquisition be injected (live Resolve-Os in production; the captured fixture in tests).
+    .OUTPUTS
+        pscustomobject { OsKey; PatchModel; Lines; Reconcile; Consistency; IsValid; Errors[] }
+    #>
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$OsShortName,
+        [Parameter(Mandatory)][string]$PatchModel,
+        [Parameter(Mandatory)][object]$RawResolved,    # layer-1 output { os; lines[] }
+        [Parameter(Mandatory)][object]$ReleaseInfo,     # layer-2 oracle (cache-release-info.json)
+        [Parameter(Mandatory)][int]$Year,
+        [Parameter(Mandatory)][int]$Month
+    )
+    $errors = [System.Collections.Generic.List[string]]::new()
+    # transform (layer 1 shaping)
+    $lines = ConvertTo-ConfigLines -OsResolved $RawResolved -PatchModel $PatchModel
+    # layer 2: reconcile the LCU anchor against the Catalog-external release-info oracle
+    $lcu = @($lines | Where-Object { $_.Kind -eq 'LCU' }) | Select-Object -First 1
+    $exp = Get-ReleaseInfoExpectedLcu -ReleaseInfo $ReleaseInfo -OsShortName $OsShortName -Year $Year -Month $Month
+    $recon = Compare-CatalogLcuAgainstReleaseInfo -CatalogLcuKb $lcu.KbId -CatalogBuild $lcu.InScope.build -Expected $exp
+    foreach ($e in $recon.Errors) { $errors.Add("reconcile: $e") }
+    # layer 3: PatchModel structural consistency
+    $p06 = Test-PatchModelConsistency -OsKey $OsShortName -PatchModel $PatchModel -Lines @($lines)
+    foreach ($e in $p06.Errors) { $errors.Add("consistency: $e") }
+    # policy: structurally consistent AND reconciliation not a hard failure.
+    #   confirmed      -> verified OK
+    #   catalog-only   -> acquired but release-info did not confirm (allow w/ warning; surfaced)
+    #   releaseinfo-missing -> hard fail (expected a KB, acquisition produced none)
+    $reconOk = ($recon.Verdict -ne 'releaseinfo-missing')
+    return [pscustomobject]@{
+        OsKey       = $OsShortName
+        PatchModel  = $PatchModel
+        Lines       = @($lines)
+        Reconcile   = $recon
+        Consistency = $p06
+        IsValid     = ($p06.IsConsistent -and $reconOk)
+        Errors      = $errors.ToArray()
+    }
+}
+
+
+function Invoke-CatalogPatchSetRefresh {
+    <#
+    .SYNOPSIS
+        Refresher-convention producer (b3 data-source migration): bridges A01's
+        -OsVersion/-PatchMonth Refresher call to layer-1 seed-only Catalog acquisition
+        (Resolve-Os) + the b3 orchestrator (acquire -> transform -> release-info verify
+        -> PatchModel consistency). Returns the resolved PatchBaseline.Lines[].
+    #>
+    [OutputType([object])]
+    param(
+        [Parameter(Mandatory)][string]$OsVersion,
+        [string]$OsLanguage = 'neutral',
+        [Parameter(Mandatory)][string]$PatchMonth,
+        [int]$MaxRetries = 3
+    )
+    $osKeyMap = @{ 'Server2016' = '2016'; 'Server2019' = '2019'; 'Server2022' = '2022'; 'Server2025' = '2025' }
+    $modelMap = @{ 'Server2016' = 'separate-ssu'; 'Server2019' = 'embedded-ssu'; 'Server2022' = 'embedded-ssu-du'; 'Server2025' = 'uup-checkpoint' }
+    if (-not $osKeyMap.ContainsKey($OsVersion)) { throw ("Invoke-CatalogPatchSetRefresh: unknown OsVersion '{0}'." -f $OsVersion) }
+    $osk = $osKeyMap[$OsVersion]; $model = $modelMap[$OsVersion]
+    $parts = $PatchMonth.Split('-'); $year = [int]$parts[0]; $month = [int]$parts[1]
+    $raw     = Resolve-Os -OsKey $osk            # layer 1: live seed-only Catalog acquisition
+    $relInfo = Get-ReleaseInfoCache              # layer 2: Catalog-external release-info oracle
+    $res = Resolve-CatalogPatchSetForOs -OsShortName $OsVersion -PatchModel $model `
+        -RawResolved $raw -ReleaseInfo $relInfo -Year $year -Month $month
+    if (-not $res.IsValid) {
+        throw ("Invoke-CatalogPatchSetRefresh: {0} produced an invalid patch set: {1}" -f $OsVersion, ($res.Errors -join '; '))
+    }
+    if ($res.Reconcile.Verdict -ne 'confirmed') {
+        Write-Caution ("{0}: Catalog LCU not confirmed by release-info (verdict={1}). {2}" -f $OsVersion, $res.Reconcile.Verdict, ($res.Reconcile.Errors -join '; '))
+    }
+    return @($res.Lines)
 }
 
 function Resolve-PatchSetFromReleaseInfo {
@@ -6153,7 +6772,7 @@ function Resolve-PatchSetFromReleaseInfo {
 # ============================================================
 # Locates per-language artifacts (Language Pack, LXP, .NET LP)
 # in the Microsoft Update Catalogue. Returns an array of patch
-# entries with shape compatible with PatchBaseline.NeutralPatches
+# entries with shape compatible with PatchBaseline.Lines
 # but additionally annotated with .Type in
 # { LanguagePack, LXP, DotNet.LangPack }.
 #
@@ -8391,9 +9010,9 @@ function Build-PatchPlan {
 function Get-PatchEntryType {
     <#
     .SYNOPSIS
-        Read the patch-type string from a patch entry, accepting either
-        the 'PatchType' field (used by P02 ResolvedPatches entries) or
-        the 'Type' field (used by raw config-* PatchBaseline entries).
+        Read the patch-kind/type string from a patch entry, preferring
+        the 'Kind' field (Config Schema v3.0 Lines[]), then 'PatchType'
+        (P02 ResolvedPatches), then the legacy 'Type' field.
 
         Returns an empty string when neither is set. PatchType takes
         precedence when both are present, mirroring the dual-field
@@ -8411,6 +9030,12 @@ function Get-PatchEntryType {
     [OutputType([string])]
     param([Parameter(Mandatory)] [AllowNull()] $Patch)
     if (-not $Patch) { return '' }
+    # Config Schema v3.0: resolved Lines[] carry 'Kind' (LCU/SSU/DotNet/SafeOSDU/
+    # SetupDU) -- the authoritative field; it takes precedence. 'PatchType'/'Type'
+    # are legacy fallbacks (pre-migration / language-specific entries).
+    if ($Patch.PSObject.Properties['Kind'] -and $Patch.Kind) {
+        return [string]$Patch.Kind
+    }
     if ($Patch.PSObject.Properties['PatchType'] -and $Patch.PatchType) {
         return [string]$Patch.PatchType
     }
@@ -10732,16 +11357,16 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
             }
         } elseif ($Script:AutoDetectLatestPatches -or $Script:UseBaselineOnly -or `
                   ($Script:OsProfile.PatchBaseline -and `
-                   (($Script:OsProfile.PatchBaseline.NeutralPatches -and `
-                     $Script:OsProfile.PatchBaseline.NeutralPatches.Count -gt 0) -or `
+                   (($Script:OsProfile.PatchBaseline.Lines -and `
+                     $Script:OsProfile.PatchBaseline.Lines.Count -gt 0) -or `
                     ($Script:OsProfile.PatchBaseline.Patches -and `
                      $Script:OsProfile.PatchBaseline.Patches.Count -gt 0)))) {
             # PatchBaseline-driven path. The OS-neutral baseline is
-            # stored under PatchBaseline.NeutralPatches[] (committed
+            # stored under PatchBaseline.Lines[] (committed
             # via stage5 / -Action RefreshAllBaselines, see SPEC B.22.5
             # and B.22.8). Legacy schemas used PatchBaseline.Patches[]
             # for the same data; both are honoured here for backward
-            # compatibility, preferring NeutralPatches[] which is the
+            # compatibility, preferring Lines[] which is the
             # current source of truth. P03 (when not skipped via
             # -UseBaselineOnly) may refresh this list from the Microsoft
             # Update Catalog if it is stale or -AutoDetectLatestPatches
@@ -10749,9 +11374,9 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
             $bl = $Script:OsProfile.PatchBaseline
             $baselineSource = $null
             $baselineField  = $null
-            if ($bl.NeutralPatches -and $bl.NeutralPatches.Count -gt 0) {
-                $baselineSource = $bl.NeutralPatches
-                $baselineField  = 'NeutralPatches'
+            if ($bl.Lines -and $bl.Lines.Count -gt 0) {
+                $baselineSource = $bl.Lines
+                $baselineField  = 'Lines'
             } elseif ($bl.Patches -and $bl.Patches.Count -gt 0) {
                 $baselineSource = $bl.Patches
                 $baselineField  = 'Patches (legacy)'
@@ -10795,12 +11420,12 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                     }) | Out-Null
                 }
             } else {
-                Write-Step 'PatchBaseline.NeutralPatches and .Patches both empty; P03 will populate from Microsoft Update Catalog.'
+                Write-Step 'PatchBaseline.Lines and .Patches both empty; P03 will populate from Microsoft Update Catalog.'
             }
         } elseif ($Script:SyntheticTestMode) {
             Write-Step '-SyntheticTestMode is on; no real patches required.'
         } else {
-            throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches, or populate Config PatchBaseline.NeutralPatches (or legacy .Patches).'
+            throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches, or populate Config PatchBaseline.Lines (or legacy .Patches).'
         }
 
         # Order by ApplyOrder, then by KbId. Wrap in @() to guarantee
@@ -10984,7 +11609,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                 LastVerifiedBy = ''
                 VerificationMethod = ''
                 ChecksumAlgorithm = 'SHA256'
-                NeutralPatches = @()
+                Lines = @()
                 ExcludeKbList = @()
             }) -Force
         }
@@ -10995,16 +11620,16 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         # found ... verify that the property exists and can be set"), and this
         # is identical under ConvertFrom-Json and ConvertFrom-CanonicalJson.
         # Ensure every property assigned below is present before assigning.
-        # NOTE: resolved patches are stored under NeutralPatches[] per the
+        # NOTE: resolved patches are stored under Lines[] per the
         # Config Schema v2.1 (SPEC B.4.3); '.Patches' was a legacy field and
         # MUST NOT be (re)introduced here.
         $pb = $Script:OsProfile.PatchBaseline
-        foreach ($propName in @('NeutralPatches','PatchTuesdayOfBaseline','LastVerifiedDate','LastVerifiedBy','VerificationMethod')) {
+        foreach ($propName in @('Lines','PatchTuesdayOfBaseline','LastVerifiedDate','LastVerifiedBy','VerificationMethod')) {
             if (-not $pb.PSObject.Properties[$propName]) {
                 $pb | Add-Member -NotePropertyName $propName -NotePropertyValue $null -Force
             }
         }
-        $Script:OsProfile.PatchBaseline.NeutralPatches         = @($newPatches)
+        $Script:OsProfile.PatchBaseline.Lines         = @($newPatches)
         $Script:OsProfile.PatchBaseline.PatchTuesdayOfBaseline = $latestPT.ToString('yyyy-MM-dd')
         $Script:OsProfile.PatchBaseline.LastVerifiedDate       = (Get-Date).ToString('o')
         $Script:OsProfile.PatchBaseline.LastVerifiedBy         = 'auto-scrape'
@@ -11362,7 +11987,17 @@ function Invoke-PlanPhase06_ValidatePatchServicing {
     param()
     Start-DebugTrace -Context 'Invoke-PlanPhase06_ValidatePatchServicing' -PhaseId 'P06'
     try {
-        Write-Skip 'P06 ValidatePatchServicing: pass-through (wsusscn2 graph check removed in the data-source migration; Catalog-model consistency check pending). On-mount readiness still runs in P07/P08.'
+        # P06: per-PatchModel consistency (runtime mirror of config.schema.json's
+        # PatchModel discriminated union; SPEC B.19). The on-mount servicing
+        # readiness check still runs in P07/P08 (SPEC B.13).
+        $p06OsKey = $Script:OsProfile.OsKey
+        $p06Model = $Script:OsProfile.PatchModel
+        $p06Lines = @($Script:OsProfile.PatchBaseline.Lines)
+        $p06 = Test-PatchModelConsistency -OsKey $p06OsKey -PatchModel $p06Model -Lines $p06Lines
+        if (-not $p06.IsConsistent) {
+            throw ("P06 ValidatePatchServicing FAILED for {0} (PatchModel '{1}'): {2}." -f $p06OsKey, $p06Model, ($p06.Errors -join '; '))
+        }
+        Write-Ok ("P06 ValidatePatchServicing: {0} PatchModel '{1}' consistent ({2} Lines)." -f $p06OsKey, $p06Model, $p06Lines.Count)
         return $true
     } finally {
         Stop-DebugTrace
@@ -12611,7 +13246,7 @@ function Show-RefreshAllBaselinesSummary {
 
     # ---- 2. Per-OS patch composition ---------------------------------
     Write-Host ''
-    Write-Host '  [2] Per-OS patch composition (NeutralPatches after refresh)' -ForegroundColor Yellow
+    Write-Host '  [2] Per-OS patch composition (Lines after refresh)' -ForegroundColor Yellow
     Write-Host ('        {0,-12} {1,-8} {2,-7} {3,-50}' -f 'OS', 'Patches', 'Files', 'Types (count)') -ForegroundColor DarkGray
     Write-Host ('        ' + ('-' * 80)) -ForegroundColor DarkGray
     foreach ($osKey in ($OsSummaries.Keys | Sort-Object)) {
@@ -12831,8 +13466,8 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
         # Per-OS summary collector for the rich end-of-run summary.
         # Key   : OsKey (string)
         # Value : pscustomobject containing:
-        #           BeforePatches    - NeutralPatches list as it was loaded
-        #           AfterPatches     - NeutralPatches list after Refresher runs
+        #           BeforePatches    - Lines list as it was loaded
+        #           AfterPatches     - Lines list after Refresher runs
         #                              (or BeforePatches if nothing changed)
         #           Changed          - $true when at least one writeback would occur
         #           ErrorCount       - count of Refresher failures for this OS
@@ -12860,11 +13495,11 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
             }
 
             # Per-OS summary collector entry. Capture the "before"
-            # state of NeutralPatches (deep clone via JSON round-trip
+            # state of Lines (deep clone via JSON round-trip
             # so subsequent in-place mutations to $raw don't pollute
             # the snapshot) plus the previous LastVerifiedDate and a
             # reference to the Pca2023 block (if any).
-            $beforeJson = ($raw.PatchBaseline.NeutralPatches | ConvertTo-Json -Depth 10 -Compress)
+            $beforeJson = ($raw.PatchBaseline.Lines | ConvertTo-Json -Depth 10 -Compress)
             if ([string]::IsNullOrEmpty($beforeJson) -or $beforeJson -eq 'null') {
                 $beforePatches = @()
             } else {
@@ -12936,14 +13571,14 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                                 break
                             }
                             try {
-                                if ($refresher -eq 'Resolve-PatchSetFromReleaseInfo') {
-                                    $patches = @(Resolve-PatchSetFromReleaseInfo -OsVersion $osKey `
+                                if ($refresher -eq 'Invoke-CatalogPatchSetRefresh') {
+                                    $patches = @(Invoke-CatalogPatchSetRefresh -OsVersion $osKey `
                                                                               -OsLanguage 'neutral' `
                                                                               -PatchMonth $patchMonth `
                                                                               -MaxRetries 3)
                                     $patchCount = $patches.Count
                                     if (-not $Script:DryRun -and $patchCount -gt 0) {
-                                        $raw.PatchBaseline.NeutralPatches = $patches
+                                        $raw.PatchBaseline.Lines = $patches
                                         $osSummaries[$osKey].AfterPatches = @($patches)
                                     }
                                     Set-GroupVerifiedState -ConfigRaw $raw -GroupPath $g.Path -Lang $lang `
@@ -13142,7 +13777,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         first stage of the two-stage refresh (see SPEC.md); the
         complementary second stage (-Action RefreshAllBaselines)
         consumes the populated caches to regenerate
-        data/config-Server*.json NeutralPatches[].
+        data/config-Server*.json Lines[].
     .DESCRIPTION
         Three sub-steps, each independently fault-tolerant:
 
@@ -13480,7 +14115,7 @@ function Show-RefreshSnapshotsSummary {
     if ($OkOverall) {
         Write-Host '        Status: OK (every sub-step reported OK or Skipped).'
         Write-Host '        Next step: run `-Action RefreshAllBaselines` to regenerate'
-        Write-Host '                   data/config-Server*.json NeutralPatches[].'
+        Write-Host '                   data/config-Server*.json Lines[].'
     } else {
         Write-Host '        Status: PARTIAL (one or more sub-steps failed). Check the'
         Write-Host '                error messages above and rerun. Re-running is'

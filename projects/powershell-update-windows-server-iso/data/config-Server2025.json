@@ -1,5 +1,5 @@
 {
-  "Schema": "2.1",
+  "Schema": "3.0",
   "OsKey": "Server2025",
   "Common": {
     "Build": 26100,
@@ -28,122 +28,10 @@
     ]
   },
   "PatchBaseline": {
-    "Schema": "2.0",
+    "Schema": "3.0",
     "TargetBuildAfterUpdate": "26100.32522",
     "VerificationMethod": "",
-    "ChecksumAlgorithm": "SHA256",
-    "NeutralPatches": [
-      {
-        "Type": "LCU",
-        "KbId": "KB5094125",
-        "Title": "2026-06 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5094125) (26100.32995)",
-        "UpdateId": "c108488b-a8ac-4607-899d-7d24cbd504e4",
-        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/7bb8f378-6d48-4161-ac28-0be28444e642/public/windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu",
-        "FileName": "windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu",
-        "SizeBytes": 0,
-        "Sha256": "",
-        "ReleaseDate": "",
-        "Supersedes": [
-          "KB5087539"
-        ],
-        "RequiresKbIds": [],
-        "ApplyOrder": 3,
-        "ApplicableArchitecture": "x64",
-        "ApplicableLanguages": [
-          "neutral"
-        ],
-        "IsCombined": true,
-        "Variant": "Full"
-      },
-      {
-        "Type": "LCU",
-        "KbId": "KB5043080",
-        "Title": "2026-06 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5094125) (26100.32995)",
-        "UpdateId": "c108488b-a8ac-4607-899d-7d24cbd504e4",
-        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
-        "FileName": "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
-        "SizeBytes": 0,
-        "Sha256": "",
-        "ReleaseDate": "",
-        "Supersedes": [
-          "KB5087539"
-        ],
-        "RequiresKbIds": [],
-        "ApplyOrder": 3,
-        "ApplicableArchitecture": "x64",
-        "ApplicableLanguages": [
-          "neutral"
-        ],
-        "IsCombined": true,
-        "Variant": "Full"
-      },
-      {
-        "Type": "DotNet.Runtime",
-        "KbId": "KB5087051",
-        "Title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 24H2 for x64 (KB5087051)",
-        "UpdateId": "d30126cf-e709-45b8-be5c-c102057423ad",
-        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/3e11ae04-442d-4988-8d96-979aa04e7de6/public/windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
-        "FileName": "windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
-        "SizeBytes": 0,
-        "Sha256": "",
-        "ReleaseDate": "",
-        "Supersedes": [
-          "KB5082417"
-        ],
-        "RequiresKbIds": [],
-        "ApplyOrder": 6,
-        "ApplicableArchitecture": "x64",
-        "ApplicableLanguages": [
-          "neutral"
-        ],
-        "IsCombined": false,
-        "Variant": "Full"
-      },
-      {
-        "Type": "DynamicUpdate.Setup",
-        "KbId": "KB5095966",
-        "Title": "2026-06 Setup Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5095966)",
-        "UpdateId": "3401a3ef-ec94-43dd-aed8-b4f832c9eab6",
-        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/2963a8a8-7af5-4044-b911-3c1b6b11f5cc/public/windows11.0-kb5095966-x64_c62ffd613fd7048e9a27157aeae1e832f6543c06.cab",
-        "FileName": "windows11.0-kb5095966-x64_c62ffd613fd7048e9a27157aeae1e832f6543c06.cab",
-        "SizeBytes": 0,
-        "Sha256": "",
-        "ReleaseDate": "",
-        "Supersedes": [
-          "KB5068516"
-        ],
-        "RequiresKbIds": [],
-        "ApplyOrder": 2,
-        "ApplicableArchitecture": "x64",
-        "ApplicableLanguages": [
-          "neutral"
-        ],
-        "IsCombined": false,
-        "Variant": "Full"
-      },
-      {
-        "Type": "DynamicUpdate.SafeOs",
-        "KbId": "KB5094150",
-        "Title": "2026-06 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5094150)",
-        "UpdateId": "ab3e6713-6c89-4db3-bad7-fc18903dfe7c",
-        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/bbb639ee-a802-4cbb-9058-e69216636070/public/windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
-        "FileName": "windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
-        "SizeBytes": 0,
-        "Sha256": "",
-        "ReleaseDate": "",
-        "Supersedes": [
-          "KB5087588"
-        ],
-        "RequiresKbIds": [],
-        "ApplyOrder": 5,
-        "ApplicableArchitecture": "x64",
-        "ApplicableLanguages": [
-          "neutral"
-        ],
-        "IsCombined": false,
-        "Variant": "Full"
-      }
-    ],
+    "ChecksumAlgorithm": "SHA1",
     "ExcludeKbList": [
       {
         "KbId": "KB5043080",
@@ -152,7 +40,94 @@
     ],
     "LastVerifiedDate": "2026-06-13T11:34:34.5307380+00:00",
     "LastVerifiedBy": "auto:RefreshAllBaselines",
-    "PatchTuesdayOfBaseline": "2026-06-09"
+    "PatchTuesdayOfBaseline": "2026-06-09",
+    "Lines": [
+      {
+        "Kind": "SSU",
+        "KbId": "KB5043080",
+        "UpdateId": null,
+        "Title": null,
+        "Products": null,
+        "Classification": null,
+        "FileName": "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+        "Digest": "lTRJZyBz+PuZuttMxtXXhJucg+g=",
+        "Sha256": "gZYyYQoQGvEccpB/sT/wW1+0IiwOJj7poDvMHR1fJqQ=",
+        "SizeBytes": null,
+        "ApplyOrder": 1,
+        "InScope": {
+          "files": [
+            "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu"
+          ]
+        },
+        "Note": "2025: checkpoint SSU carried by the co-served GA baseline (the non-LCU .msu in the 2-file set)"
+      },
+      {
+        "Kind": "LCU",
+        "KbId": "KB5094125",
+        "UpdateId": "c108488b-a8ac-4607-899d-7d24cbd504e4",
+        "Title": "2026-06 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5094125) (26100.32995)",
+        "Products": "Microsoft Server Operating System-24H2",
+        "Classification": null,
+        "FileName": "windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu",
+        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/7bb8f378-6d48-4161-ac28-0be28444e642/public/windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu",
+        "Digest": "jon6SRffMT/hGLn+FQYRl1q5JWU=",
+        "Sha256": "989kXeuFH+u063587IKQFA0qKpdUyFxVYzINJN5or6U=",
+        "SizeBytes": null,
+        "ApplyOrder": 2,
+        "InScope": {
+          "build": "26100.32995",
+          "files": [
+            "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+            "windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu"
+          ]
+        },
+        "Note": "discovered via Learn (build 26100.32995)"
+      },
+      {
+        "Kind": "DotNet",
+        "KbId": "KB5087051",
+        "UpdateId": "d30126cf-e709-45b8-be5c-c102057423ad",
+        "Title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 24H2 for x64 (KB5087051)",
+        "Products": "Microsoft Server Operating System-24H2",
+        "Classification": null,
+        "FileName": "windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
+        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/3e11ae04-442d-4988-8d96-979aa04e7de6/public/windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
+        "Digest": "G16Fopl2fmGG+caTA335cyVGYtk=",
+        "Sha256": "eHWDK0eVBl4W1vYUEyTIpQvcKYpBybBNTgtAbcVsg/o=",
+        "SizeBytes": null,
+        "ApplyOrder": 3,
+        "InScope": {
+          "inScopeFiles": [
+            "windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu"
+          ],
+          "inScopeKb": [
+            "KB5087051"
+          ]
+        },
+        "Note": "superset rollup; in-scope leaf = 2025 in-media default .NET runtime (media-payload def, BLOCK 0.T; bundles 3.5)"
+      },
+      {
+        "Kind": "SafeOSDU",
+        "KbId": "KB5094150",
+        "UpdateId": "ab3e6713-6c89-4db3-bad7-fc18903dfe7c",
+        "Title": "2026-06 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5094150)",
+        "Products": "Windows Safe OS Dynamic Update, Windows 10 and later Dynamic Update",
+        "Classification": null,
+        "FileName": "windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
+        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/bbb639ee-a802-4cbb-9058-e69216636070/public/windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
+        "Digest": "icy52HJkuOfWUaJJUUNgad0dbu0=",
+        "Sha256": "8PImn7lOUvWeDTyOkx6MuNRE3xSN+hdVoCFPBPceWLA=",
+        "SizeBytes": null,
+        "ApplyOrder": 4,
+        "InScope": {
+          "files": [
+            "windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab"
+          ]
+        },
+        "Note": "Products has 'Safe OS Dynamic Update' + title version token"
+      }
+    ]
   },
   "Pca2023": {
     "RequiredByDefault": false,
@@ -220,5 +195,6 @@
     "dataContractVersion": 1,
     "scriptVersion": "update-wsi-2026.06.13-r11.32",
     "generatedAt": "2026-06-13T11:46:33Z"
-  }
+  },
+  "PatchModel": "uup-checkpoint"
 }

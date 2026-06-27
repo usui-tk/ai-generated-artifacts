@@ -1,19 +1,20 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/usui-tk/ai-generated-artifacts/projects/powershell-update-windows-server-iso/schema/config-v2.1.schema.json",
-  "title": "Windows Server ISO Updater - per-OS config profile (Config Schema v2.1)",
-  "description": "Machine-readable contract for data/config-Server<OsKey>.json. This file is the single source of truth that mirrors SPEC section B.4 (OS profile, Config Schema v2.1). It is validated in CI by tests/config_schema_test.py. When SPEC B.4 changes, this schema and the SPEC prose MUST be updated together; tests/config_schema_test.py and the doc cross-check keep them in sync. Rationale: a free-prose spec alone did not prevent code from writing a non-schema 'Patches' property (the P03 r10.3 defect); a machine-checkable schema catches that class of drift before it reaches a real machine.",
+  "$id": "https://github.com/usui-tk/ai-generated-artifacts/projects/powershell-update-windows-server-iso/schema/config-v3.0.schema.json",
+  "title": "Windows Server ISO Updater - per-OS config profile (Config Schema v3.0)",
+  "description": "Machine-readable contract for data/config-Server<OsKey>.json. Mirrors SPEC section B.4. Config Schema v3.0 rebuilds the patch model for the Microsoft Update Catalog data source: PatchBaseline.Lines[] (a common-core item with a Kind field) replaces NeutralPatches[]/Type, and a top-level PatchModel discriminator (separate-ssu/embedded-ssu/embedded-ssu-du/uup-checkpoint) governs which Kinds are required vs forbidden via the allOf if/then blocks. Validated in CI by tests/config_schema_test.py; this schema and the configs are a matched pair.",
   "type": "object",
   "required": [
     "Schema",
     "OsKey",
+    "PatchModel",
     "Common",
     "PatchBaseline"
   ],
   "properties": {
     "Schema": {
       "type": "string",
-      "const": "2.1",
+      "const": "3.0",
       "description": "Top-level config schema version. SPEC B.4."
     },
     "OsKey": {
@@ -25,6 +26,16 @@
         "Server2025"
       ],
       "description": "OS identifier; matches the config filename suffix."
+    },
+    "PatchModel": {
+      "type": "string",
+      "enum": [
+        "separate-ssu",
+        "embedded-ssu",
+        "embedded-ssu-du",
+        "uup-checkpoint"
+      ],
+      "description": "Per-OS servicing model discriminator. 2016 separate-ssu; 2019 embedded-ssu; 2022 embedded-ssu-du; 2025 uup-checkpoint. Drives the required/forbidden Kinds (allOf below) and the script's per-OS apply branch."
     },
     "Common": {
       "$ref": "#/definitions/Common"
@@ -80,6 +91,399 @@
     }
   },
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "PatchModel": {
+            "const": "separate-ssu"
+          }
+        }
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "SSU"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "LCU"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "not": {
+                      "contains": {
+                        "properties": {
+                          "Kind": {
+                            "const": "DotNet"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "not": {
+                      "contains": {
+                        "properties": {
+                          "Kind": {
+                            "const": "SafeOSDU"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "not": {
+                      "contains": {
+                        "properties": {
+                          "Kind": {
+                            "const": "SetupDU"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "PatchModel": {
+            "const": "embedded-ssu"
+          }
+        }
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "LCU"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "DotNet"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "not": {
+                      "contains": {
+                        "properties": {
+                          "Kind": {
+                            "const": "SSU"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "not": {
+                      "contains": {
+                        "properties": {
+                          "Kind": {
+                            "const": "SafeOSDU"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "not": {
+                      "contains": {
+                        "properties": {
+                          "Kind": {
+                            "const": "SetupDU"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "PatchModel": {
+            "const": "embedded-ssu-du"
+          }
+        }
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "LCU"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "DotNet"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "SafeOSDU"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "not": {
+                      "contains": {
+                        "properties": {
+                          "Kind": {
+                            "const": "SSU"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "not": {
+                      "contains": {
+                        "properties": {
+                          "Kind": {
+                            "const": "SetupDU"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "PatchModel": {
+            "const": "uup-checkpoint"
+          }
+        }
+      },
+      "then": {
+        "allOf": [
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "LCU"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "SSU"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "DotNet"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "contains": {
+                      "properties": {
+                        "Kind": {
+                          "const": "SafeOSDU"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
   "definitions": {
     "Common": {
       "type": "object",
@@ -156,14 +560,14 @@
     },
     "PatchBaseline": {
       "type": "object",
-      "description": "Patch Tuesday cadence baseline. SPEC B.4.3. Resolved patches live in NeutralPatches[]; the legacy '.Patches' field is forbidden (see the P03 r10.3 defect: code wrote results to a non-schema 'Patches' property).",
+      "description": "Patch Tuesday cadence baseline. SPEC B.4.3. Resolved patch files live in Lines[] (a common-core item with a Kind field). The legacy 'Patches' and 'NeutralPatches' field names are forbidden (destructive rebuild; the data-source migration to the Microsoft Update Catalog replaced NeutralPatches[]/Type with Lines[]/Kind).",
       "required": [
-        "NeutralPatches"
+        "Lines"
       ],
       "properties": {
         "Schema": {
           "type": "string",
-          "const": "2.0"
+          "const": "3.0"
         },
         "TargetBuildAfterUpdate": {
           "type": "string"
@@ -187,14 +591,15 @@
           ]
         },
         "ChecksumAlgorithm": {
-          "type": "string"
+          "type": "string",
+          "description": "Checksum algorithm for Lines[].Digest. SHA1 (the Catalog Digest is SHA-1 base64 -- the verified cross-source key)."
         },
-        "NeutralPatches": {
+        "Lines": {
           "type": "array",
           "items": {
-            "$ref": "#/definitions/Patch"
+            "$ref": "#/definitions/Line"
           },
-          "description": "Language-neutral resolved patches (SSU/LCU/.NET CU/DynamicUpdate.*). This is the canonical store for resolved patches under Schema v2.1."
+          "description": "Resolved patch files (LCU/SSU/DotNet/SafeOSDU/SetupDU). The canonical store under Config Schema v3.0; replaces the legacy NeutralPatches[]."
         },
         "ExcludeKbList": {
           "type": "array",
@@ -217,10 +622,19 @@
         }
       },
       "not": {
-        "required": [
-          "Patches"
+        "anyOf": [
+          {
+            "required": [
+              "Patches"
+            ]
+          },
+          {
+            "required": [
+              "NeutralPatches"
+            ]
+          }
         ],
-        "description": "FORBIDDEN: 'Patches' is a legacy (pre-v2.1) field name. Resolved patches MUST be stored in 'NeutralPatches'. This constraint exists specifically to catch the class of defect fixed in r10.3, where P03 wrote scrape results to a non-schema 'Patches' property."
+        "description": "FORBIDDEN legacy field names: 'Patches' (pre-v2.1 P03 r10.3 defect) and 'NeutralPatches' (pre-v3.0; replaced by 'Lines' at the Catalog data-source migration)."
       },
       "patternProperties": {
         "^_": {
@@ -229,85 +643,95 @@
       },
       "additionalProperties": false
     },
-    "Patch": {
+    "Line": {
       "type": "object",
-      "description": "A single resolved patch entry. SPEC B.4.3 NeutralPatches[*] and B.15.",
+      "description": "A single resolved patch FILE-with-context (the common-core Lines[] item; mirrors the Catalog reference resolver _line() shape). SPEC B.4.3.",
       "required": [
-        "Type",
-        "KbId"
+        "Kind",
+        "FileName",
+        "DownloadUrl",
+        "Digest",
+        "ApplyOrder"
       ],
       "properties": {
-        "Type": {
+        "Kind": {
           "type": "string",
-          "description": "Patch class per SPEC B.15 (e.g. SSU, LCU, DotNet.Runtime, DotNet.CU, DynamicUpdate.Setup, DynamicUpdate.SafeOs, LanguagePack)."
+          "enum": [
+            "LCU",
+            "SSU",
+            "DotNet",
+            "SafeOSDU",
+            "SetupDU"
+          ],
+          "description": "Patch class. The PatchModel discriminator (top-level) governs which Kinds are required vs forbidden."
         },
         "KbId": {
-          "type": "string"
-        },
-        "Title": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "UpdateId": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Catalog updateID GUID. For UUP (2025) lines this may differ from the SOAP oracle revision; Digest is the cross-source key."
         },
-        "DownloadUrl": {
-          "type": "string"
+        "Title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Products": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Catalog Products column."
+        },
+        "Classification": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "FileName": {
-          "type": "string"
+          "type": "string",
+          "description": "Resolved file name (ends in the 40-hex SHA-1)."
         },
-        "SizeBytes": {
-          "type": "integer"
+        "DownloadUrl": {
+          "type": "string",
+          "description": "Direct CDN download URL."
+        },
+        "Digest": {
+          "type": "string",
+          "minLength": 1,
+          "description": "PRIMARY KEY + integrity: the Catalog Digest (SHA-1, base64). Every downloaded file MUST be verified against this; a mismatch MUST abort the build."
         },
         "Sha256": {
-          "type": "string"
+          "type": "string",
+          "description": "Optional SHA-256 (usually empty; Digest is the load-bearing checksum)."
         },
-        "ReleaseDate": {
-          "type": "string"
-        },
-        "LocalPath": {
-          "type": "string"
-        },
-        "Supersedes": {
+        "SizeBytes": {
           "type": [
-            "array",
+            "integer",
             "null"
-          ],
-          "items": {
-            "type": "string"
-          }
-        },
-        "RequiresKbIds": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "string"
-          }
-        },
-        "RequiresMinimumOsBuild": {
-          "type": "string"
+          ]
         },
         "ApplyOrder": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Per-OS apply sequence (a VARIANT value owned by the PatchModel branch)."
         },
-        "ApplicableArchitecture": {
-          "type": "string"
+        "InScope": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Kind-specific scoping (e.g. LCU {build}; SSU 2016 {standalone:true} / 2025 {checkpointBaseline:true}; DotNet {ndpTag,runtime}; SafeOSDU {target:'winre'})."
         },
-        "ApplicableLanguage": {
-          "type": "string"
-        },
-        "ApplicableLanguages": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "IsCombined": {
-          "type": "boolean"
-        },
-        "Variant": {
+        "Note": {
           "type": "string"
         }
       },

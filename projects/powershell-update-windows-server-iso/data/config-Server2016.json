@@ -1,5 +1,5 @@
 {
-  "Schema": "2.1",
+  "Schema": "3.0",
   "OsKey": "Server2016",
   "Common": {
     "Build": 14393,
@@ -27,84 +27,58 @@
     ]
   },
   "PatchBaseline": {
-    "Schema": "2.0",
+    "Schema": "3.0",
     "TargetBuildAfterUpdate": "14393.8957",
     "VerificationMethod": "",
-    "ChecksumAlgorithm": "SHA256",
-    "NeutralPatches": [
-      {
-        "Type": "LCU",
-        "KbId": "KB5094122",
-        "Title": "2026-06 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5094122)",
-        "UpdateId": "1c551f54-2b38-4a7f-9d36-c52501b521e5",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
-        "FileName": "windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
-        "SizeBytes": 0,
-        "Sha256": "",
-        "ReleaseDate": "",
-        "Supersedes": [
-          "KB5087537"
-        ],
-        "RequiresKbIds": [
-          "KB5094141"
-        ],
-        "ApplyOrder": 3,
-        "ApplicableArchitecture": "x64",
-        "ApplicableLanguages": [
-          "neutral"
-        ],
-        "Variant": "Full",
-        "IsCombined": false
-      },
-      {
-        "Type": "DotNet.Runtime",
-        "KbId": "KB5087065",
-        "Title": "2026-05 Cumulative Update for .NET Framework 4.8 for Windows Server 2016 for x64 (KB5087065)",
-        "UpdateId": "f26eef43-a2bd-42d0-ac18-23c0ca7a8a82",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/05/windows10.0-kb5087065-x64-ndp48_631ce425f7c69cbd26a9345ad20b2deab4c5b049.msu",
-        "FileName": "windows10.0-kb5087065-x64-ndp48_631ce425f7c69cbd26a9345ad20b2deab4c5b049.msu",
-        "SizeBytes": 0,
-        "Sha256": "",
-        "ReleaseDate": "",
-        "Supersedes": [
-          "KB5082411"
-        ],
-        "RequiresKbIds": [],
-        "ApplyOrder": 6,
-        "ApplicableArchitecture": "x64",
-        "ApplicableLanguages": [
-          "neutral"
-        ],
-        "IsCombined": false,
-        "Variant": "Full"
-      },
-      {
-        "Type": "SSU",
-        "KbId": "KB5094141",
-        "Title": "2026-06 Servicing Stack Update for Windows Server 2016 for x64-based Systems (KB5094141)",
-        "UpdateId": "a5501aa9-aad8-4dc4-922b-23b02e4fe0bf",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
-        "FileName": "windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
-        "SizeBytes": 0,
-        "Sha256": "",
-        "ReleaseDate": "",
-        "Supersedes": [
-          "KB5088064"
-        ],
-        "RequiresKbIds": [],
-        "ApplyOrder": 1,
-        "ApplicableArchitecture": "x64",
-        "ApplicableLanguages": [
-          "neutral"
-        ],
-        "IsCombined": false,
-        "Variant": "Full"
-      }
-    ],
+    "ChecksumAlgorithm": "SHA1",
     "ExcludeKbList": [],
     "LastVerifiedDate": "2026-06-13T11:33:29.0165296+00:00",
     "LastVerifiedBy": "auto:RefreshAllBaselines",
-    "PatchTuesdayOfBaseline": "2026-06-09"
+    "PatchTuesdayOfBaseline": "2026-06-09",
+    "Lines": [
+      {
+        "Kind": "SSU",
+        "KbId": "KB5094141",
+        "UpdateId": "a5501aa9-aad8-4dc4-922b-23b02e4fe0bf",
+        "Title": "2026-06 Servicing Stack Update for Windows Server 2016 for x64-based Systems (KB5094141)",
+        "Products": "Windows Server 2016",
+        "Classification": null,
+        "FileName": "windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
+        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
+        "Digest": "hLaSLG6W8mrZGFnQcq7rbfjlq5k=",
+        "Sha256": "",
+        "SizeBytes": null,
+        "ApplyOrder": 1,
+        "InScope": {
+          "standalone": true,
+          "files": [
+            "windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu"
+          ]
+        },
+        "Note": "2016 only: standalone SSU row (apply before LCU)"
+      },
+      {
+        "Kind": "LCU",
+        "KbId": "KB5094122",
+        "UpdateId": "e0284a61-45d3-4e35-8eca-318e41c41331",
+        "Title": "2026-06 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5094122)",
+        "Products": "Windows Server 2016",
+        "Classification": null,
+        "FileName": "windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
+        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
+        "Digest": "Nr3Up4Pt5vYXS4++EEbo46YTrUQ=",
+        "Sha256": "",
+        "SizeBytes": null,
+        "ApplyOrder": 2,
+        "InScope": {
+          "build": "14393.9234",
+          "files": [
+            "windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu"
+          ]
+        },
+        "Note": "discovered via Learn (build 14393.9234)"
+      }
+    ]
   },
   "Pca2023": {
     "RequiredByDefault": true,
@@ -173,5 +147,6 @@
     "dataContractVersion": 1,
     "scriptVersion": "update-wsi-2026.06.13-r11.32",
     "generatedAt": "2026-06-13T11:46:33Z"
-  }
+  },
+  "PatchModel": "separate-ssu"
 }
