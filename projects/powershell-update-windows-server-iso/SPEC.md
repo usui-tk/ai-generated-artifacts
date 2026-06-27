@@ -59,7 +59,7 @@ without breaking on cosmetic edits:
 |:---|:---|:---|
 | **Section reference** | `B.N`, `B.N.M`, `D.NN` | Cross-references inside this document |
 | **Policy identifier** | `SPEC-WSI-NNN` | Repository-wide policy IDs (parallel to `SPEC-CI-NNN` in the repository-level SPEC) |
-| **Phase identifier** | `P01`–`P13`, `A01`–`A04` | Pipeline phases (see §B.5) and stand-alone actions (see §B.6) |
+| **Phase identifier** | `P01`–`P13`, `A01`–`A03` | Pipeline phases (see §B.5) and stand-alone actions (see §B.6) |
 
 A section's identifier is stable across revisions. If a section is
 deleted, its identifier is **never reused** for a different purpose;
@@ -86,7 +86,7 @@ remain unambiguous.
 | SPEC-WSI-017 | Update type matrix per OS generation | §B.15 |
 | SPEC-WSI-018 | PCA2023 boot manager support | §B.17 |
 | SPEC-WSI-019 | Output ISO verification (post-conversion) | §B.18 |
-| SPEC-WSI-020 | Servicing Dependency Database (wsusscn2-derived) | §B.19 |
+| SPEC-WSI-020 | Servicing consistency check (reserved for the Catalog model) | §B.19 |
 | SPEC-WSI-030 | Static analysis gate (psa.py + PSScriptAnalyzer) | §C.1 |
 | SPEC-WSI-031 | Source file format gate | §C.2 |
 | SPEC-WSI-032 | Documentation cross-checks | §C.8 |
@@ -121,7 +121,7 @@ remain unambiguous.
   - [B.16 LCU package format per OS](#b16-lcu-package-format-per-os)
   - [B.17 PCA2023 boot manager support](#b17-pca2023-boot-manager-support)
   - [B.18 Output ISO verification](#b18-output-iso-verification)
-  - [**B.19 Servicing Dependency Database** (r09.0+)](#b19-servicing-dependency-database)
+  - [B.19 Servicing Dependency Database (reserved)](#b19-servicing-dependency-database)
   - [B.20 File organisation and naming conventions](#b20-file-organisation-and-naming-conventions)
   - [B.21 Workspace preflight](#b21-workspace-preflight)
   - [B.22 Phase 3 architecture decisions](#b22-phase-3-architecture-decisions)
@@ -458,7 +458,7 @@ certain parser contexts.
 > `Update-WindowsServerIso.ps1`. Sub-sections are organised by concern:
 > identity / I/O / workspace / configuration in B.1–B.4; the phase
 > pipeline contract in B.5–B.6; per-phase algorithms in B.7–B.18; the
-> r09.0+ Servicing Dependency Database in B.19; cross-cutting file
+> reserved servicing-consistency section in B.19; cross-cutting file
 > organisation, preflight, and architecture decisions in B.20–B.22.
 
 ## B.1 Script identity and entry point
@@ -479,13 +479,11 @@ param(
     [ValidateSet('Build', 'Verify', 'Prepare', 'PrepareBuildVerify',
                  'Cleanup', 'ListPhases', 'TestHarness',
                  'RefreshAllBaselines', 'RefreshSnapshots',
-                 'DumpFieldClassification',
-                 'RefreshDependencyDatabase')]
+                 'DumpFieldClassification')]
     [string]$Action = 'Build',
 
     [Parameter()] [switch]$Execute,
     [Parameter()] [string]$WorkRoot,
-    [Parameter()] [string]$OfflineSyncPackagePath,
     # ... (see script header for the full inventory)
 )
 ```
@@ -511,8 +509,6 @@ change.
 | Microsoft Windows Server evaluation ISO | Microsoft Evaluation Center | Build, Verify |
 | Per-OS configuration profile | `data/config-Server{2016,2019,2022,2025}.json` | All actions |
 | Microsoft Update Catalogue | live HTTPS | RefreshAllBaselines, Build (P03/P04) |
-| `wsusscn2.cab` (offline-scan metadata) | Microsoft CDN | RefreshDependencyDatabase (builds Layer 2) |
-| `data/servicing-dependency-database.json` (layer 2) | committed in repo | P06 servicing-readiness gate (required) |
 
 ### B.2.2 Outputs
 
@@ -549,12 +545,7 @@ per-run state:
 │   └── winre-wim-mount/            (P08 inner mount target)
 ├── patches/Server<N>/              (P04 download cache)
 ├── cache/
-│   ├── catalog/                    (HTML / JSON Catalogue cache)
-│   └── wsusscn2/                   (layer 3 raw cab + extracts, NEW r09.0)
-│       ├── wsusscn2.cab
-│       ├── wsusscn2.cab.meta.json
-│       ├── package.xml             (extracted from cab, may be deleted)
-│       └── audit/                  (rolling 6-month archive)
+│   └── catalog/                    (HTML / JSON Catalogue cache)
 ├── output/<final-iso>.iso          (P09/P10 destination)
 ├── logs/                           (per-phase + transcript)
 └── diag/<timestamp>/               (forensic JSON on failure / verbose)
@@ -628,7 +619,7 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
   "PatchTuesdayOfBaseline":  "2026-05-12",
   "LastVerifiedDate":        "2026-05-24T00:00:00+09:00",
   "LastVerifiedBy":          "auto-scrape:Catalog",
-  "VerificationMethod":      "auto-scrape+wsusscn2",
+  "VerificationMethod":      "auto-scrape",
   "ChecksumAlgorithm":       "SHA256",
   "NeutralPatches": [
     {
@@ -644,22 +635,11 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
       "Sha256":              "...",
       "RequiresKbIds":       ["KB5088064"],         // populated by RefreshAllBaselines
       "Supersedes":          ["KB5082077"],          // populated by RefreshAllBaselines
-      "RequiresMinimumOsBuild": "26100.32000",       // populated by RefreshAllBaselines (r09.0+)
-      "_DependencyVerifiedDate":   "2026-05-27T10:30:00+09:00",
-      "_DependencyVerifiedSource": "wsusscn2.cab@sha256:abc123..."
+      "RequiresMinimumOsBuild": "26100.32000"        // populated by RefreshAllBaselines (r09.0+)
     },
     /* ... SSU, .NET CU, DynamicUpdate.Setup, DynamicUpdate.SafeOs ... */
   ],
-  "ExcludeKbList": [],
-  "OfflineSyncPackage": {
-    "SourceUrl":                "https://catalog.s.download.windowsupdate.com/.../wsusscn2.cab",
-    "LocalCachePath":           "Workspace_UpdateWsi/cache/wsusscn2/wsusscn2.cab",
-    "LastDownloadedDate":       "2026-05-27T10:25:00+09:00",
-    "LastDownloadedSha256":     "...",
-    "LastDownloadedSizeBytes":  1073741824,
-    "DependencyDatabasePath":   "data/servicing-dependency-database.json",
-    "DependencyDatabaseSha256": "..."
-  }
+  "ExcludeKbList": []
 }
 ```
 
@@ -716,7 +696,7 @@ The pipeline consists of 13 phases organised into 5 groups:
 | P03 | Setup | RefreshPatchBaseline: catalogue scrape (skippable) |
 | P04 | Fetch | FetchAssets: download ISO + patches |
 | P05 | Plan | ExpandIso: robocopy expand into workspace |
-| P06 | Plan | ValidatePatchServicing: /data Layer 2 servicing-readiness gate (default-ON, blocking) |
+| P06 | Plan | ValidatePatchServicing: pass-through (Catalog-model consistency check pending; see B.19) |
 | P07 | Build | PatchInstallWim: apply LCU / .NET / DU to install.wim |
 | P08 | Build | PatchBootWim: apply SSU / LP / LCU to boot.wim + WinRE.wim |
 | P09 | Build | AssembleIso: oscdimg re-emit |
@@ -773,19 +753,13 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 | `ListPhases` | (none) | Dump phase + action registry as JSON to stdout |
 | `TestHarness` | (REPL hook at script L12525) | Eval-PS-function mode used by `tests/powershell_harness.py` (T3); not for human invocation |
 
-### B.6.3 Admin Actions (A01 - A03 - A02 - planned A04)
+### B.6.3 Admin Actions (A01 - A03 - A02)
 
 | Action | Admin Phase | Phases run | Description |
 |:---|:-:|:---|:---|
 | `RefreshAllBaselines` | A01 | (`Invoke-AdminPhaseA01_RefreshAllBaselines` at script L586) | Refresh `data/config-Server*.json` baselines from upstream caches |
 | `DumpFieldClassification` | A02 | (`Invoke-AdminPhaseA02_DumpFieldClassification` at script L587) | Emit the field-cadence decision matrix as JSON |
 | `RefreshSnapshots` | A03 | (`Invoke-AdminPhaseA03_RefreshSnapshots` at script L588) | Refresh `data/raw-*` and `data/cache-*` from Microsoft Learn + Catalogue |
-| `RefreshDependencyDatabase` | A04 | implemented; see §B.19.7 (parser pipeline) and §B.19.14 (lifecycle) | Refresh `data/servicing-dependency-database.json` (layer 2) from `wsusscn2.cab` (layer 3) |
-
-A04 (`RefreshDependencyDatabase`) is implemented and admitted by the
-`param()` ValidateSet. It runs the four-stage parser pipeline (§B.19.7)
-and stamps the Layer 1 summary writeback (§B.19.11). See §B.19 for the
-full servicing-dependency facility.
 
 ### B.6.4 Action semantics
 
@@ -1079,11 +1053,12 @@ needed.
 
 **Relationship to §B.19 (Servicing Dependency Database)**: §B.13's
 check operates on a **mounted** WIM and reads the actual installed
-package list. It is runtime-accurate but expensive. The new
-`Test-PatchServicingReadinessFromGraph` (§B.19.10) runs **before**
-the mount in P06, using `Get-WindowsImage` metadata only,
-and uses the layer 2 database as its source of truth. The two are
-complementary; both stay enabled.
+package list. It is runtime-accurate. The earlier pre-mount graph
+readiness check (`Test-PatchServicingReadinessFromGraph`) that read the
+wsusscn2 layer 2 database was removed in the data-source migration (see
+§B.19); §B.13's on-mount check (`Test-PatchServicingReadinessOnMount`) is
+now the sole servicing-readiness check, running during the build in
+P07/P08.
 
 ## B.14 Refresh policy and RefreshAllBaselines decision matrix
 
@@ -1123,11 +1098,6 @@ The full JSON shape of `$Script:OsConfigFieldGroups` is exposed via
 `-Action DumpFieldClassification` (A02) so external tooling (e.g. a
 Python JSON Schema validator) can consume it without parsing
 PowerShell.
-
-**Cross-reference**: r09.0+ extends RefreshAllBaselines with the
-layer 2 sub-phase from §B.19.13 (lifecycle step 1). The Decision
-Matrix above is unchanged; the new sub-phase runs before per-OS
-Catalogue scraping.
 
 ## B.15 Update type matrix per OS generation
 
@@ -1457,667 +1427,22 @@ hoisted to top level next to `Test-Pca2023AuthenticodeChain`.
 
 ## B.19 Servicing Dependency Database
 
-**Status**: normative (specification); implementation status: implemented.
-**Policy ID**: SPEC-WSI-020.
-
-The Servicing Dependency Database is a fact-only, machine-readable model
-of the servicing relationships between Windows Server updates, derived
-from Microsoft's offline-scan catalog (`wsusscn2.cab`). Its purpose is to
-let the script answer, **before mounting any image**, whether a resolved
-patch set will satisfy the servicing-stack prerequisite that CBS enforces
-at install time — the class of failure that otherwise surfaces only as
-`0x800f0823` deep inside an offline servicing run.
-
-### B.19.1 Goals and architecture
-
-The facility predicts one specific, high-cost failure: an LCU that
-requires a newer servicing stack (SSU) than the image carries. On the
-SSU-separate OSes (Server 2016 / 2019) the SSU ships as its own package,
-so a patch set can be assembled that contains an LCU but not the matching
-SSU; CBS then rejects the LCU with `0x800f0823`. The database makes the
-required servicing-stack version visible up front so the check is a cheap
-metadata comparison rather than a late mount-time failure.
-
-The facility is structured into three layers:
-
-| Layer | Artifact | Committed? | Role |
-|:-:|---|:-:|---|
-| **Layer 3** | `wsusscn2.cab` under `<WorkRoot>/cache/wsusscn2/` | No (git-excluded) | Raw Microsoft source; large, volatile, re-downloadable |
-| **Layer 2** | `data/servicing-dependency-database.json` (+ `schema/servicing-dependency-database.schema.json`) | Yes | Distilled fact-only model; the runtime source of truth |
-| **Layer 1** | `data/config-Server*.json` `PatchBaseline.OfflineSyncPackage` + per-patch `_DependencyVerified*` fields | Yes | Per-OS summary stamped back into the baseline |
-
-- **Layer 3 is git-excluded** because the cab is hundreds of MB, changes
-  monthly, and is freely re-downloadable from the CDN; committing it would
-  bloat the repository with no traceability benefit.
-- **Layer 2 is committed** because it is small, diffable, and is what the
-  runtime check and the offline CI read; committing it makes each monthly
-  refresh an auditable diff and lets air-gapped hosts run the check with
-  no network.
-- **Layer 1 carries only a summary** (the latest in-scope LCU identity
-  and the servicing-stack facts per configured patch) so the baseline
-  stays self-contained without duplicating the whole Layer 2 document.
-
-### B.19.2 Data source and extraction dependency
-
-#### B.19.2.1 `wsusscn2.cab`
-
-`wsusscn2.cab` is the offline-scan catalog the Windows Update Agent uses
-to evaluate update applicability without contacting Windows Update. It
-contains a "Master XML" (`package.xml`) describing every update Microsoft
-has ever offered to WSUS, plus per-package CABs holding the CBS metadata
-for each revision.
-
-- **CDN source URL** (normative):
-  `https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab`
-  (the legacy `http://download.windowsupdate.com/...` host remains a
-  fallback). The literal filename `wsusscn2.cab` is Microsoft's, and is
-  retained verbatim wherever the physical file or its URL is named.
-- **Update cadence**: Microsoft refreshes the cab roughly monthly, around
-  Patch Tuesday. Freshness is judged by age; a cab older than the
-  configured threshold is treated as stale and re-downloaded.
-- **Cab internal structure** (observed): a top-level cab whose
-  `index.xml` `<CABLIST>` enumerates per-package cabs, each with a
-  `RANGESTART` (the lowest revision id it stores). `package.xml` is the
-  Master XML; each per-package cab holds `c/<revisionId>` CBS metadata
-  entries.
-
-#### B.19.2.2 7-Zip extraction (normative)
-
-The cab is extracted with 7-Zip rather than the Windows-only shell COM or
-`expand.exe`, so the same path works on the Linux CI. The invocation
-pattern is:
-
-```powershell
-& $sevenZip x $archive ('-o' + $dest) -y -bsp0 -bso0
-# Exit codes: 0 = ok, 1 = warning (non-fatal), >= 2 = fatal
-```
-
-- `x` preserves the archive's internal paths.
-- The `-o<dir>` flag takes no space between flag and value; building it as
-  `('-o' + $dest)` avoids quoting edge cases.
-- `-y` answers prompts non-interactively; `-bsp0 -bso0` suppress progress
-  and stdout so the call site can capture stderr cleanly.
-- Exit 1 is a non-fatal warning (e.g. timestamp collision); exit ≥ 2 is
-  fatal.
-
-`Get-SevenZipPath` resolves the Windows `7z.exe` and the Linux `7z` / `7za`
-binaries, so the extraction helpers run on both platforms. Extraction is
-two-step: the outer cab yields `package.xml` (and `index.xml`); a targeted
-second extraction of one per-package cab yields a single leaf's
-`c/<revisionId>` CBS metadata when servicing-stack facts are needed.
-
-### B.19.3 Master XML schema (observed, normative)
-
-The parser targets the Master XML shape as observed empirically in real
-cabs. Two `<Update>` element kinds matter:
-
-**Bundle `<Update>`** (e.g. an LCU as offered to WSUS) carries
-`IsBundle="true"`, a `<Prerequisites>` list of `<UpdateId>` GUIDs, and a
-`<Categories>` block:
-
-```xml
-<Update CreationDate="2025-05-12T20:45:23Z" UpdateId="..." RevisionNumber="201"
-        RevisionId="43268251" IsLeaf="true" IsBundle="true">
-  <Prerequisites>
-    <UpdateId Id="..." />   <!-- typically 5-10 entries -->
-  </Prerequisites>
-  <Categories>
-    <Category Type="UpdateClassification" Id="0fa1201d-..." />
-    <Category Type="Company"              Id="56309036-..." />
-    <Category Type="ProductFamily"        Id="6964aab4-..." />
-    <Category Type="Product"              Id="569e8e8f-..." />
-  </Categories>
-</Update>
-```
-
-**Standalone `<Update>`** is the per-architecture payload carrier; its
-`<FileLocation Id="<digest>" Url="http://..." />` joins a payload digest
-to a download URL, and `<BundledBy><Revision>` points back to the bundle
-that contains it.
-
-`<Prerequisites><UpdateId>` entries are **applicability / detectoid
-GUIDs, not install-order KB dependencies** — there is no LCU→SSU
-KB-prerequisite edge in the Master XML. `<SupersededBy><Revision>`
-(present on roughly a tenth of updates) references successors by integer
-`RevisionId`, not by `UpdateId`.
-
-### B.19.4 Scope filter (normative)
-
-The parser admits only updates that are in scope for the four supported
-Server OSes within a recency window, using GUID tables held in the script
-(`$Script:OfflineSyncOsCategoryGuids`,
-`$Script:OfflineSyncUpdateClassificationGuids`,
-`$Script:OfflineSyncCategoryGuidNameMap`,
-`$Script:OfflineSyncEosEsuDenyProductGuids`). Scope is an **allow-list**
-of Product and Classification GUIDs plus a recency window
-(`recencyMonths`, default 24); the applied values are recorded in Layer 2
-`_meta.scope`.
-
-The four supported Product GUIDs are:
-
-| OS | Product GUID |
-|:---|:---|
-| Server 2016 | `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` |
-| Server 2019 | `f702a48c-919b-45d6-9aef-ca4248d50397` |
-| Server 2022 | `71718f13-7324-4b0f-8f9e-2ca9dc978e53` |
-| Server 2025 | `b256987d-4693-4c87-955d-dbb9341205eb` |
-
-The Server 2025 GUID is server-specific: it carries the Server 2025 LCU
-(KB5087539 in the 2026-05 cab) but not the Windows 11 24H2 *client* LCU,
-so client updates do not leak into scope. The superseded value
-`ca006cfb-49eb-439b-880a-1312e1fc9713` is a different 24H2-era category
-that stalls at an older month and must not be used. Server 2025 shares OS
-build 26100 with Windows 11 24H2, so its payload URLs use the
-`windows11.0` filename stem; this is expected and is not a scope leak.
-
-#### B.19.4.1 EOS / ESU deny-list (normative)
-
-End-of-support (EOS) and ESU-only Server OS categories are **not**
-removed from the cab when the OS leaves support; they persist with live,
-payload-bearing updates. Exclusion is therefore explicit, via a deny-list
-of four Product GUIDs:
-
-| Server version | Product GUID | State |
-|:---|:---|:---|
-| Server 2008 | `ba0ae9cc-5f01-40b4-ac3f-50192b5d6aaf` | EOS |
-| Server 2008 R2 | `fdfe8200-9d98-44ba-a12a-772282bf60ef` | EOS |
-| Server 2012 | `a105a108-7c9b-4518-bbbe-73f0fe30012b` | ESU |
-| Server 2012 R2 | `d31bd4c3-d872-41c9-a2e7-231f372588cb` | ESU |
-
-Exclusion semantics are **allow-overrides**: an update is excluded **iff
-it carries a deny-list Product GUID AND carries no allow-list Product
-GUID**. ESU-only rollups (which carry only a 2012 / 2012 R2 GUID) are
-excluded; multi-OS overlap updates such as KB890830 (which also carry an
-allow-list GUID) are admitted. A naive deny-overrides rule would wrongly
-drop the overlap updates.
-
-When the parser drops EOS/ESU bundles it counts them into
-`_meta.stats.eosEsuBundlesExcluded` and records the distinct families into
-`eosEsuFamiliesExcluded`, and emits a single operator caution naming the
-count and families — a warned exclusion, not a silent prune.
-
-### B.19.5 Microsoft-prose exclusion rule (normative)
-
-Layer 2 is **fact-only**: it MUST NOT contain Microsoft's
-human-readable prose (update titles, descriptions, KB article text,
-`moreInfoUrl`, etc.). Only structural facts — GUIDs, revision ids,
-payload URLs, digests, category GUIDs, servicing-stack versions — are
-retained. This keeps the committed artifact free of copyrightable text
-and makes its provenance a pure transformation of the cab's structural
-data. The Layer 2 schema gate asserts the absence of prose markers
-(`"title"`, `"description"`, `"moreInfoUrl"`, and similar) in the
-committed file.
-
-### B.19.6 Data-processing strategy (normative)
-
-The source data is large and adversarial to naive processing: a
-~600 MB cab whose Master XML is ~108 MB and indexes ~136,000 updates,
-wrapped one level deep, plus ~73 per-package cabs holding CBS metadata.
-The pipeline is built around the following processing constraints, each
-of which is a normative implementation requirement, not an optimisation.
-
-#### B.19.6.0 Testability-driven design (normative rationale)
-
-The script body MUST be PowerShell because its ultimate targets — DISM,
-Hyper-V, and the offline servicing of `install.wim` — are Windows-only
-and have no cross-platform equivalent. That same constraint, however,
-makes the PowerShell logic expensive to verify: a faithful end-to-end
-test needs a Windows host, a mounted image, and a multi-hundred-MB live
-cab, none of which exist in the development or CI environment where the
-code is authored and reviewed.
-
-The facility is therefore deliberately structured so that the **pure,
-deterministic logic is separable from the Windows-only I/O**, and is
-exercised offline from Python:
-
-- The transform-heavy, side-effect-free units — Master XML parsing
-  (`ConvertFrom-OfflineSyncPackage`), scope classification, the
-  servicing-stack model derivation (`Get-OfflineSyncServicingStackInfo`,
-  `Select-OfflineSyncLcuLeafRevision`, `Update-ServicingStackFromMeta`),
-  the readiness verdict (`Test-PatchServicingReadinessFromGraph`), the
-  data-contract gate, and canonical-JSON serialisation — take text or
-  in-memory input and return values, with no cab download, 7-Zip call, or
-  WIM mount inside them.
-- The unavoidable I/O is quarantined into thin wrappers
-  (`Get-OfflineSyncPackageIfNeeded`, `Invoke-OfflineSyncPackageExtract`,
-  `Invoke-OfflineSyncLeafServicingStackExtract`) that are the only parts
-  needing a real cab or Windows host.
-- The Python test suite drives the pure units through committed fixtures
-  and the script's `TestHarness` action, asserting their behaviour
-  byte-for-byte (the canonical-JSON parity test) and structurally (the
-  parser, scope-invariant, schema, and verdict gates). The Python
-  reference implementations (e.g. `tests/common/canonical_json.py`) pin
-  the PowerShell behaviour from the other side of the language boundary.
-
-The two-language split (PowerShell body + Python verification) and the
-CI's two-stage shape (a Linux stage that runs the offline gates plus a
-Windows stage for the parts that genuinely need Windows) are consequences
-of this principle: they maximise the share of the system that can be
-designed, implemented, and regression-tested without a Windows host or a
-live cab. A useful side effect is that the resulting I/O separation,
-streaming discipline, and canonical-output contract — the rest of this
-section — are not merely good practice but are *forced* by the
-requirement that the logic be exercisable in isolation.
-
-This testability-driven two-language pattern is not specific to this
-subproject; it applies to the PowerShell-body / Python-verification
-scripts in this repository generally, and is a candidate for promotion to
-a shared (Layer 1) convention in a future revision. It is recorded here
-because §B.19 is where its constraints (large binary input, no live cab in
-CI) bite hardest.
-
-#### B.19.6.1 Cab internal structure and size budget
-
-| Member | Size (observed) | Role |
-|:---|:---|:---|
-| `package.cab` (inner wrapper) | ~15 MB | Wraps the Master XML |
-| `package.xml` (Master XML) | ~108 MB | Index of ~136,102 updates |
-| `package2.cab` … `packageNN.cab` | 1–34 MB each, ~650 MB total | Per-package CBS metadata fragments |
-
-The Master XML is wrapped one level deep: `wsusscn2.cab` → `package.cab`
-→ `package.xml`. The per-package cabs are addressed individually (never
-all expanded at once). Peak working set is held under ~50 MB and peak
-disk under a few hundred MB; the full cab is never expanded in one shot.
-
-#### B.19.6.2 CAB extraction: 7-Zip only (normative)
-
-CAB extraction MUST use 7-Zip, never the in-box `expand.exe` or
-`Shell.Application` COM. This is a normative decision grounded in
-concrete in-box-tool failures:
-
-- **`expand.exe` self-overwrite.** When the destination directory holds
-  a file whose basename matches the source cab, `expand.exe` rejects the
-  operation ("Cannot expand a file onto itself") even though the target
-  filename differs.
-- **`expand.exe -F:filter` mis-selection.** The filter flag has been
-  observed writing the cab into the destination under the source cab's
-  name instead of the filtered member.
-- **`Microsoft.Deployment.Compression.Cab.dll`** (the .NET wrapper) needs
-  a fully-qualified destination and is not bundled with PowerShell, so it
-  would expand the install surface.
-
-7-Zip is resolved by `Get-SevenZipPath` across Windows (`7z.exe`) and
-Linux (`7z` / `7za`); the invocation pattern is the §B.19.2.2 form.
-
-#### B.19.6.3 Two-step targeted extraction
-
-A single `7z x` would expand all ~75 inner files. Instead the cab is
-opened in two targeted steps, each selecting only the needed member by
-inclusive basename regex (`-ir!<file>`), into **separate** stage
-directories so the §B.19.6.2 self-overwrite class of failure cannot
-arise:
-
-```powershell
-& $sevenZip x $cab      ('-o' + $stage1) -ir!package.cab -y -bsp0 -bso0
-& $sevenZip x $innerCab ('-o' + $stage2) -ir!package.xml -y -bsp0 -bso0
-```
-
-CBS metadata for a leaf is fetched the same way: rather than expanding
-all per-package cabs, `Resolve-OfflineSyncRevisionToCab` locates the one
-cab whose `index.xml` `<CABLIST>` `RANGESTART` is the greatest ≤ the
-target revision id, and only that cab's single `c/<revisionId>` entry is
-extracted (§B.19.9).
-
-#### B.19.6.4 Large-XML parsing: streaming only (normative)
-
-The ~108 MB Master XML MUST be parsed with a streaming `XmlReader`, never
-loaded as `[xml]` / `XmlDocument`: a DOM load of this file was measured at
-**peak memory +536 MB**, which fails in low-memory CI, whereas the
-streaming walk keeps peak working set under ~50 MB. The streaming parse
-(`ConvertFrom-OfflineSyncPackage`) applies the §B.19.4 scope filter inline
-so only the ~138 in-scope updates are ever materialised in memory, out of
-the ~136,000 observed.
-
-The KB number is not on the `<Update>` element; it is recovered from the
-`kb(\d+)` token (case-insensitive) in the `<FileLocation>` URL during the
-streaming walk, joined back to its update via the payload digest, and
-persisted into `kbIds`. Bundles record their leaf revision ids during the
-walk so the LCU leaf can later be located without re-reading the XML.
-
-#### B.19.6.5 Encoding and output integrity
-
-External tool output is captured under a forced UTF-8 console encoding so
-that a non-UTF-8 host code page (e.g. cp932 on a Japanese host) does not
-mojibake captured bytes. The Layer 2 document is written by
-`Save-CanonicalJsonFile` at `-Depth 32` in byte-canonical form (§B.23):
-stable key order, fixed indentation, single trailing LF, UTF-8 without
-BOM, and an atomic `.tmp` + `Move-Item` replace so a crash mid-write
-never leaves a truncated database.
-
-### B.19.7 Parser pipeline (normative)
-
-The cab is converted to Layer 2 by a four-stage pipeline, driven as one
-Action by `Invoke-AdminPhaseA04_RefreshDependencyDatabase` (the
-`RefreshDependencyDatabase` Action, A04):
-
-| Stage | Function | Role |
-|:-:|---|---|
-| 1 | `Get-OfflineSyncPackageIfNeeded` | Acquire the cab into `<WorkRoot>/cache/wsusscn2/`, or reuse a fresh cached copy; honours an operator-supplied cab via `-OfflineSyncPackagePath` |
-| 2 | `Invoke-OfflineSyncPackageExtract` | Two-step 7-Zip extraction of `package.xml` from the cab (§B.19.6.3) |
-| 3 | `ConvertFrom-OfflineSyncPackage` | XmlReader streaming parse of `package.xml` with the §B.19.4 scope filter applied (§B.19.6.4) |
-| 4 | `New-ServicingDependencyDatabase` | Serialise the in-scope updates to `data/servicing-dependency-database.json` via `Save-CanonicalJsonFile` (§B.19.6.5) |
-
-After Stage 4, the A04 wrapper performs the Layer 1 writeback
-(`Update-Layer1DependencyVerification`, §B.19.11). Stage 4 also attaches
-the servicing-stack facts (§B.19.9) to each in-scope LCU leaf. The
-processing constraints each stage must observe — targeted extraction,
-streaming parse, memory budget, encoding, canonical output — are
-specified in §B.19.6.
-
-### B.19.8 Layer 2 JSON schema (normative)
-
-The authoritative shape is the JSON Schema
-`schema/servicing-dependency-database.schema.json` (Draft-07), parallel
-to the Layer 1 `schema/config.schema.json`. The committed
-`data/servicing-dependency-database.json` is validated against it by the
-Layer 2 schema gate (`tests/servicing_dependency_layer2_schema_test.py`),
-and the scope/contract semantics are additionally pinned by
-`tests/servicing_dependency_scope_invariants_test.py`. The document is a
-flat **`_meta` + `updates`** structure, camelCase throughout.
-
-#### B.19.8.1 Top-level structure
-
-```jsonc
-{
-  "_meta": {
-    "dataContractId":      "<family GUID>",
-    "dataContractVersion": 1,
-    "generator":           "Update-WindowsServerIso.ps1 ...",
-    "scriptVersion":       "update-wsi-<date>-r<NN>",
-    "scriptTag":           "...",
-    "generatedAt":         "<iso-8601>",
-    "sourceCab":  { "sourceUrl": "https://.../wsusscn2.cab", "size": 641849140, "sha256": "..." },
-    "scope":      { "productGuids": [ ... ], "classificationGuids": [ ... ], "recencyMonths": 24, "evaluatedAt": "<iso-8601>" },
-    "stats":      { "updatesObserved": 136102, "updatesInScope": 138, "bundlesObserved": 21149,
-                    "categoryUpdates": 4204, "leafUpdatesWithPayload": 110749,
-                    "fileLocationsObserved": 97051, "fileLocationsRetained": 97051,
-                    "payloadDigestsOrphaned": 0, "eosEsuBundlesExcluded": 4910, "eosEsuFamiliesExcluded": 0 }
-  },
-  "updates": [ /* see B.19.7.2 */ ]
-}
-```
-
-`updates` is a flat array, not a KB-keyed dictionary. `_meta.sourceCab`
-carries a portable `sourceUrl` (the canonical CDN URL) and never a local
-filesystem path; the recency-evaluation timestamp is
-`_meta.scope.evaluatedAt`.
-
-#### B.19.8.2 `updates[]` element
-
-```jsonc
-{
-  "updateId": "...", "revisionId": "42949062", "revisionNumber": "200",
-  "creationDate": "2025-03-10T16:05:49Z",
-  "isBundle": true, "isLeaf": true, "deploymentAction": null,
-  "productGuids": [ "569e8e8f-..." ], "classificationGuids": [ "0fa1201d-..." ],
-  "companyGuids": [ "56309036-..." ], "productFamilyGuids": [ "6964aab4-..." ],
-  "prerequisiteUpdateIds": [ "...", "..." ],
-  "supersededByRevisionIds": [ "44174230", "..." ],
-  "payloadFileDigests": [ "..." ],
-  "payloadUrls": [ "http://download.windowsupdate.com/.../windows10.0-kb5053594-x64.cab" ],
-  "kbIds": [ "5053594" ],
-  "requiredServicingStackVersion": "10.0.14393.7692",
-  "providedServicingStackVersion": null,
-  "servicingStackModel": "separate"
-}
-```
-
-| Field | Meaning |
-|:---|:---|
-| `updateId` / `revisionId` / `revisionNumber` | `<Update>` identity triple (revision values as JSON strings) |
-| `creationDate` | `<Update>` creation timestamp, ISO-8601, verbatim |
-| `isBundle` / `isLeaf` / `deploymentAction` | `<Update>` attributes; `deploymentAction` is `null` when absent |
-| `productGuids` / `classificationGuids` / `companyGuids` / `productFamilyGuids` | `<Categories>` GUID sets; resolve to names via `$Script:OfflineSyncCategoryGuidNameMap` |
-| `prerequisiteUpdateIds` | Raw `<Prerequisites><UpdateId>` GUIDs — applicability/detectoid, not KB install-order deps |
-| `supersededByRevisionIds` | `<SupersededBy><Revision>` integers (JSON strings); a successor counts only when itself in scope |
-| `payloadFileDigests` / `payloadUrls` | `<FileLocation>` digest → URL join |
-| `kbIds` | KB numbers (bare numeric, no `KB` prefix) recovered from `payloadUrls` |
-| `requiredServicingStackVersion` / `providedServicingStackVersion` | SS-version floor from the LCU's CBS metadata, and SS the configured SSU supplies (nullable; `provided` resolved at check time, so the committed file leaves it `null`) |
-| `servicingStackModel` | `separate` (2016/2019) / `combined` (2022/2025) / `checkpoint` (baseline) |
-
-There is no per-update KB key and no `Requires` field: the KB lives in
-`kbIds`, and the SSU dependency is the servicing-stack version, not a KB
-list.
-
-### B.19.9 Servicing-stack extraction (normative)
-
-The servicing-stack facts feeding the §B.19.10 SS-version check are
-extracted by helpers kept free of file/7-Zip I/O so they are unit-testable
-offline:
-
-- **`Resolve-OfflineSyncRevisionToCab`** maps a revision id to the
-  per-package cab holding its `c/<revisionId>` CBS metadata: the revision
-  `R` lives in the cab with the greatest `index.xml` `<CABLIST>`
-  `RANGESTART` ≤ `R`, locating one revision with a single targeted
-  extraction instead of expanding all per-package cabs.
-- **`Get-OfflineSyncServicingStackInfo`** reads a leaf's CBS metadata and
-  derives `requiredServicingStackVersion` and `servicingStackModel`:
-  - **separate** — `installerAssembly` carries a real servicing-stack
-    build (e.g. Server 2016 `10.0.14393.7692`); that value is the
-    `requiredServicingStackVersion`.
-  - **combined** — `installerAssembly` shows the nominal placeholder
-    `6.0.0.0` with an inline `Package_for_ServicingStack_<nnnn>` (Server
-    2022); the SSU travels inside the LCU, so `requiredSs` is null and the
-    SS check is N/A.
-  - **checkpoint** — no CBS rollup/servicing-stack metadata (Server 2025
-    `.msu` baseline leaves); `requiredSs` is null.
-
-The live populate keeps cab/7-Zip I/O isolated:
-`Select-OfflineSyncLcuLeafRevision` (pure) picks the LCU leaf from a
-bundle's leaf revision ids; `Invoke-OfflineSyncLeafServicingStackExtract`
-(the only I/O part) extracts each leaf's `c/<rev>` CBS text;
-`Update-ServicingStackFromMeta` (pure) writes the SS fields onto the
-matching updates, leaving updates with no leaf metadata unchanged. The
-pure halves are covered offline (T15, T18) with committed CBS fixtures;
-only the I/O wrapper needs a real cab.
-
-### B.19.10 Verification API (normative)
-
-Phase 2c verification is `Test-PatchServicingReadinessFromGraph`, a
-pre-mount check over Layer 2 built on **three independent checks**, none
-of which is a KB-prerequisite closure (there is no LCU→SSU KB edge,
-§B.19.3). The real SSU dependency is the minimum servicing-stack version
-in the LCU's CBS metadata, which CBS enforces as a numeric comparison
-(failure = `0x800f0823`).
-
-Signature:
-
-```powershell
-function Test-PatchServicingReadinessFromGraph {
-    [CmdletBinding()]
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)] [pscustomobject[]] $ResolvedPatches,
-        [Parameter(Mandatory)] [pscustomobject]   $WimMountState,
-        [Parameter()]          [string]           $DatabasePath = "$PSScriptRoot/data/servicing-dependency-database.json",
-        [Parameter()]          [hashtable]        $PolicyOverride
-    )
-}
-```
-
-The function MUST NOT mount the WIM; it consumes the static WIM metadata
-(build number, installed packages) captured by `Get-WindowsImage` and
-passed via `$WimMountState`. It indexes Layer 2 updates by KB (`kbIds`,
-else the `kb(\d+)` token from `payloadUrls`) and by `revisionId`, then
-scores each resolved patch:
-
-1. **Presence** — no KB match → `NotInDatabase`.
-2. **SS version comparison** — `separate` only. Provided SS is taken from
-   `$PolicyOverride[OsKey]`, else `$WimMountState.ProvidedServicingStackVersion`,
-   else the matched update's `providedServicingStackVersion`. Provided <
-   required → `SsTooOld` (the `0x800f0823` predictor). `combined` /
-   `checkpoint` skip the check (N/A). If the SS fields are absent, the
-   check is reported as skipped in `Notes` and never fails the patch.
-3. **Supersession** — `Superseded` only when a `supersededByRevisionIds`
-   entry is itself an in-scope update in Layer 2.
-
-Verdict precedence: `NotInDatabase` > `SsTooOld` > `Superseded` > `Pass`.
-`OverallStatus` is `Fail` if any `NotInDatabase` / `SsTooOld`, else
-`Warning` if any `Superseded`, else `Pass`; a missing or unreadable Layer 2
-yields `Available = $false` / `OverallStatus = 'Unknown'`. Layer 2 is read
-with `ConvertFrom-CanonicalJson` so `_meta.generatedAt` survives as its
-canonical ISO-8601 string. T16 and T17 are the executable contracts.
-
-This graph-based check is complementary to the mount-time
-`Test-PatchServicingReadinessOnMount` (§B.13): the graph check is the
-predictive layer (runs before mount, cheap, reads Layer 2 + static WIM
-metadata); the mount check is the runtime safety net (runs after mount,
-reads the live installed-package list).
-
-### B.19.11 Layer 1 integration (normative)
-
-The A04 wrapper stamps a per-OS summary back into `data/config-Server*.json`:
-
-- **`PatchBaseline.OfflineSyncPackage`** records the cab provenance:
-  `SourceUrl`, `LocalCachePath`, `LastDownloadedDate`,
-  `LastDownloadedSha256`, `LastDownloadedSizeBytes`.
-- **`Update-Layer1DependencyVerification`** propagates the latest in-scope
-  LCU identity onto the relevant `PatchBaseline.NeutralPatches[*]` entries
-  as `_DependencyVerifiedUpdateId`, `_DependencyVerifiedRevisionId`,
-  `_DependencyVerifiedCreationDate`, and `_DependencyVerifiedAt`. Entries
-  with no matching in-scope LCU are left unchanged; the writeback is
-  idempotent (a second run with unchanged data writes nothing). T13 is the
-  executable contract.
-
-Automation level is semi-automatic: the writeback runs as part of A04 /
-RefreshAllBaselines, but the operator reviews the resulting Layer 1 / Layer 2
-diff before committing.
-
-### B.19.12 P06 ValidatePatchServicing integration (normative)
-
-P06 is a single, default-ON, blocking servicing-readiness gate. It
-validates the resolved patch set (`$Script:ResolvedPatches`) against the
-pre-generated wsusscn2 Layer 2 dependency database via
-`Test-PatchServicingReadinessFromGraph` (§B.19.10), and:
-
-- **Default-ON** — it runs on every Setup-group run; there is no opt-in
-  switch. It is skipped only under `-UseBaselineOnly` (trust the
-  pre-verified baseline as-is) or `-SyntheticTestMode` (no real patches).
-- **Blocking** — it throws (aborts the build) when the overall status is
-  `Fail`: `SsTooOld` (predicts install error `0x800f0823`) or
-  `NotInDatabase` (an uncovered patch). `Superseded` is logged as a
-  warning and does not block; `Pass` proceeds.
-- **Strict on absence** — when Layer 2 is absent or unreadable it reports
-  `Available = $false` / `OverallStatus = Unknown`, and P06 **blocks**
-  (run `-Action RefreshDependencyDatabase` to build Layer 2, or pass
-  `-UseBaselineOnly` to bypass P06).
-
-P06 only reads whatever Layer 2 is already on disk; it does not acquire
-the cab. Acquiring/refreshing Layer 2 is the separate `RefreshDependencyDatabase`
-(A04) operation, optionally fed a manually-staged cab via
-`-OfflineSyncPackagePath`.
-
-The former Stage 1 — a live Windows Update Agent COM offline scan against
-`wsusscn2.cab` — was removed. WUA evaluates applicability against the
-local host's OS image rather than the mounted target WIM, so it was
-host-relative and returned false negatives on cross-OS-family builds
-(e.g. a Server 2025 host building a Server 2016 image). The removal also
-retired `-IgnorePatchValidation`, `-EnableDependencyCheck`,
-`Invoke-WuaOfflineScan`, `Compare-PatchSetVsWuaScan`,
-`Export-PatchValidationReport`, and the `diag/<timestamp>/`
-patch-validation report set.
-
-### B.19.13 Data contract and versioning (normative)
-
-Versioning is governed by a **shared data-contract identity**, not a
-per-model schema version. The script holds `$Script:DataContractId` (a
-stable family GUID) and `$Script:DataContractVersion` (an integer epoch),
-and stamps both into every data artifact's `_meta`.
-`Test-DataContractConsistency` (T19) classifies each artifact against the
-script's values into one of five verdicts:
-
-| Verdict | Condition |
-|:---|:---|
-| `Current` | `dataContractId` matches and `dataContractVersion` equals the script's |
-| `Stale` | matching id, but `dataContractVersion` older than the script's (regenerate) |
-| `Refuse` | matching id, but `dataContractVersion` newer than the script's (the script must not consume a future artifact) |
-| `Foreign` | `dataContractId` belongs to a different contract family |
-| `Unknown` | no `_meta` contract stamp present |
-
-Both Layer 1 (`config-Server*.json`) and Layer 2 carry the stamp, so both
-classify as `Current`. The directory-level roll-up takes the worst
-verdict, with `Unknown` never worsening the result (a stampless artifact
-is valid, just unclassified).
-
-The epoch is bumped only on a **breaking shape change** to a data model —
-a change that adds, removes, retypes, or re-nests a field such that an
-existing consumer could misread it. An atomic relabel (renaming a field
-across the script, schema, and all committed data in one commit) is not a
-breaking change and does not bump the epoch. The current epoch is `1`.
-
-#### B.19.13.1 Validation gates
-
-Three offline gates enforce the Layer 2 contract on every commit and CI
-run, independent of any live cab:
-
-| Gate | Asserts |
-|:---|:---|
-| `servicing_dependency_layer2_schema_test.py` | The committed Layer 2 validates against `schema/servicing-dependency-database.schema.json` (Draft-07), carries the data-contract stamp, uses portable provenance, and contains no Microsoft prose (§B.19.5) |
-| `servicing_dependency_scope_invariants_test.py` | The scope model holds over the committed Layer 2: allow-list / deny-list disjoint and canonical, allow-overrides classification, no in-scope update is deny-only, the per-OS recency floor (§B.19.4) |
-| `canonical_json_format_check.py` | Every `*.json` under `data/` and `tests/` (Layer 2 included) is in byte-canonical form (§B.23) |
-
-### B.19.14 Lifecycle and operations
-
-#### B.19.14.1 Refresh triggers
-
-Layer 2 is refreshed by two paths: as part of `RefreshAllBaselines`
-(which chains A04 so a monthly baseline refresh also refreshes the
-dependency database), or directly via `-Action RefreshDependencyDatabase`
-(A04) for an ad-hoc refresh. A04 does not modify `config-Server*.json`
-beyond the §B.19.11 summary writeback.
-
-#### B.19.14.2 Cache invalidation
-
-`<WorkRoot>/cache/wsusscn2/wsusscn2.cab` is stale when any of: the file is
-absent; its `.meta.json` `FetchedAt` predates the latest Patch Tuesday by
-more than two days; a HEAD probe of `SourceUrl` returns a newer
-`Last-Modified`; or the recorded `Sha256` mismatches. A stale cache
-triggers re-download, and the previous cab is moved to a timestamped
-`audit/` subdirectory and retained per the audit-retention window.
-
-#### B.19.14.3 Air-gapped operation
-
-A fully air-gapped host runs the check with no network in one of two
-modes: with a committed/copied `data/servicing-dependency-database.json`
-present (full check using the cached Layer 2), or by staging a cab
-manually and running `-Action RefreshDependencyDatabase`
-`-OfflineSyncPackagePath <path>` to parse it to Layer 2. With neither,
-P06 has no Layer 2 to read and blocks (run `-Action RefreshDependencyDatabase`, or pass `-UseBaselineOnly`).
-
-#### B.19.14.4 Monthly refresh procedure
-
-Pre-stage the target month's `wsusscn2.cab`, then:
-
-```powershell
-# 1. Refresh upstream caches (release-info / .NET CU / Dynamic Update)
-.\Update-WindowsServerIso.ps1 -Action RefreshSnapshots -SkipEnvCheck
-# 2. Regenerate Layer 1 for the target month (soft-chains A04 -> Layer 2)
-.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -Mode Force `
-    -PatchMonth <yyyy-MM> -OfflineSyncPackagePath <path-to-wsusscn2.cab> -SkipEnvCheck
-# 3. Review the Layer 2 and Layer 1 diffs
-git diff data/servicing-dependency-database.json data/config-Server*.json
-# 4. Run the offline gates
-python3 tests/servicing_dependency_parser_test.py   # T12
-python3 tests/servicing_dependency_layer2_schema_test.py
-# 5. Commit Layer 1 and Layer 2 together
-git add data/config-Server*.json data/servicing-dependency-database.json
-git commit -m "data: monthly servicing-dependency refresh (<yyyy-MM>)"
-```
-
-A04's `package.xml` parse runs ~5–7 min; under an agent/CLI runner with a
-per-call timeout, run A04 detached and poll instead of in a synchronous
-foreground call. The full agent/LLM procedure, the G1–G5 verification
-gates (G2 — release-health currency — being the easy-to-miss blocker),
-the detached-execution pattern, and the per-run work-log convention are
-in `TESTING.md` §8.
-
-#### B.19.14.5 Current status and future work
-
-In the current revision the servicing-readiness gate is on-by-default
-and blocking; `-UseBaselineOnly` is the bypass. Planned future work: a
-deeper live-cab schema probe and CI automation for the monthly refresh. Cross-OS `-Execute` validation on real
-hardware (Server 2016/2019/2022/2025) is the remaining field-test step
-before the default-on flip.
+> **Status: reserved.** The wsusscn2-derived Servicing Dependency Database
+> facility documented in this section through r11.x was removed in the
+> data-source migration from `wsusscn2.cab` to the Microsoft Update Catalog.
+> The offline applicability graph -- the Layer 2
+> `data/servicing-dependency-database.json` database, the four-stage parser
+> pipeline, the `A04 RefreshDependencyDatabase` action, the scope-filter GUID
+> tables, and the P06 graph readiness check
+> `Test-PatchServicingReadinessFromGraph` -- is no longer built or maintained.
+>
+> This section is reserved for its replacement: a per-`PatchModel` consistency
+> check over the resolved Microsoft Update Catalog patch set (the required and
+> forbidden line `Kind`s for each OS servicing model, plus `Digest` presence on
+> every resolved line). That check is specified here when it is implemented.
+> Until then, P06 `ValidatePatchServicing` is a pass-through (see B.5); real
+> servicing readiness is validated on-mount during the build by
+> `Test-PatchServicingReadinessOnMount` (B.13, phases P07/P08).
 
 ---
 
@@ -2129,7 +1454,7 @@ before the default-on flip.
 
 ```
 projects/powershell-update-windows-server-iso/
-├── Update-WindowsServerIso.ps1     # Main script (§B.19 servicing-dependency facility implemented)
+├── Update-WindowsServerIso.ps1     # Main script
 ├── README.md / README.ja.md         # End-user documentation (bilingual, lock-step)
 ├── SPEC.md                           # This file (English only)
 ├── TESTING.md                        # Verification procedures (English only)
@@ -2149,16 +1474,13 @@ projects/powershell-update-windows-server-iso/
 │   ├── cache-dotnet-cu.json          # Parsed .NET CU cache
 │   ├── cache-dynamicupdate-Server2022.json      # Parsed Dynamic Update cache (Server 2022)
 │   └── cache-dynamicupdate-Server2025.json      # Parsed Dynamic Update cache (Server 2025)
-│   # Planned (r09.0 Step 2+):
-│   # └── servicing-dependency-database.json     # Layer 2, ~2-5 MB (per §B.19)
 │
-├── tests/                            # Python self-verification suite (T1-T13 + gates)
+├── tests/                            # Python self-verification suite (offline + live; see tests/README.md)
 │   ├── README.md                     # Canonical T-numbering and quick-start
 │   ├── catalog_probe.py              # T1 (live)
 │   ├── catalog_fixture_test.py       # T2 (offline)
 │   ├── powershell_harness.py         # T3 (offline; 7 PS assertions)
 │   ├── eval_iso_probe.py             # T4 (live)
-│   ├── wsusscn2_probe.py             # T5 (live)
 │   ├── release_info_parser_test.py   # T6 (offline; 13 assertions)
 │   ├── dotnet_cu_parser_test.py      # T7 (offline; 16 assertions)
 │   ├── dynamic_update_cache_test.py  # T8 (offline; 20 assertions)
@@ -2222,7 +1544,6 @@ of the upstream HTTP fetch so re-runs can skip unchanged content.
 | Filename | Convention | Comment |
 |:---|:---|:---|
 | `data/config-Server2025.json` | Operator config | One per OS |
-| `data/servicing-dependency-database.json` | Tool-generated data | r09.0+, single file |
 | `data/raw-release-info.md` | Mirrored upstream | Refreshed by RefreshSnapshots |
 | `docs/history/r08.0-step2-installwim-symmetry-check.md` | Per-revision investigation | Cycle (r08.0), step (step2), topic kebab-case |
 | `tests/fixtures/2026-05/server2025-lcu.html` | Test fixture | Per-month, per-OS HTML captures |
@@ -2276,8 +1597,8 @@ where the checks are not relevant:
 - `-EnvironmentInfoOnly` (P01-only smoke test)
 - `-SkipEnvCheck` (operator escape hatch)
 
-For `RefreshAllBaselines` / `DumpFieldClassification` /
-`RefreshDependencyDatabase` (which never run P01), the preflight
+For `RefreshAllBaselines` / `DumpFieldClassification`
+(which never run P01), the preflight
 DOES run, because these actions touch `data/config-Server*.json`
 and the config-presence check is exactly what protects against the
 script-relocated-without-data class of misconfiguration.
@@ -2323,18 +1644,18 @@ failure to a config file edit, not a code change.
 
 All persistent inputs go under `data/` (not under sub-directories
 by Type). Files are distinguished by the §B.20.2 three-prefix rule
-(`config-`, `raw-`, `wsusscn2-`). Per-month raw caches live under
+(`config-`, `raw-`, `cache-`). Per-month raw caches live under
 `data/raw-<topic>/<yyyy-MM>/`.
 
 **Why**: A single `data/` directory mirrors operator mental model
 ("the data the script reads"). Type-named sub-directories would
 have proliferated as new data classes were added; the flat layout
-absorbs the new servicing-dependency-database.json in r09.0 without surprise.
+absorbs new data classes without surprise.
 
 ### B.22.4 Schema version: stay at 2.1
 
 `config-Server*.json` Schema field stayed at "2.1" across r07.0 and
-r08.0. r09.0's additions (new optional fields per §B.19.12) do not
+r08.0. r09.0's additions do not
 constitute a breaking change.
 
 **Why**: The new fields are optional and the loader treats absent
@@ -2391,8 +1712,7 @@ Per-OS Dynamic Update caches under `data/raw-dynamic-update/` keep a
 entries are pruned by the next RefreshSnapshots.
 
 **Why**: 36 months covers the longest "operator retains old
-baseline" case (legal-hold scenarios); see §B.19.7 scope-filter
-rationale.
+baseline" case (legal-hold scenarios).
 
 ### B.22.7 Update lifecycle: Patch-Tuesday-triggered, Git-tracked
 
@@ -2448,15 +1768,14 @@ of the generated month -- e.g. regenerating the 2026-05 baseline on the
 
 CI Stage 4 (`...__stage4__monthly-refresh.yml`) runs
 RefreshAllBaselines monthly on the 15th and opens a PR if
-`data/config-Server*.json` changed. r09.0 extends this to also
-include `data/servicing-dependency-database.json` in the auto-PR.
+`data/config-Server*.json` changed.
 
 ### B.22.13 Windows ADK auto-install
 
 When `oscdimg.exe` is not found, P01 Initialize automatically downloads
 and silently installs only the Deployment Tools feature of the Windows
 ADK (~50-80 MB) via `Install-WindowsAdkFallback` (no switch), matching
-the 7-Zip auto-acquire strategy (§B.19.4) and the signtool acquisition
+the 7-Zip auto-acquire strategy and the signtool acquisition
 (§B.22.22). `Install-WindowsAdkFallback` throws an actionable error if
 the install fails or `oscdimg.exe` is still absent. Actions that do not
 need `oscdimg.exe` (`ListPhases`, `GenerateManifest`, `Cleanup`,
@@ -2530,14 +1849,14 @@ was fixed by making `Show-PhaseSummary` idempotent via a
 | Idempotent renderers | §B.22.20 | — | §D.NN |
 | `List[object]` `@()` failure | §B.18.5 | — | §D.26 |
 | DISM mount-cache poisoning | §B.3 (one-WR-per-OS) | — | §D.25 |
-| Sampling-vs-comprehensive search | §B.19.5 / §B.19.6 | — | §D.28 |
-| Microsoft tool dependency avoidance | §B.19.4 | — | §D.27 |
+| Sampling-vs-comprehensive search | — (removed) | — | §D.28 |
+| Microsoft tool dependency avoidance | — (removed) | — | §D.27 |
 | Helper function unification | §B.10 | — | §D.30 |
 
 ### B.22.22 Windows SDK Signing Tools auto-install (signtool.exe)
 
 `signtool.exe` (Windows SDK Signing Tools) is acquired with the same
-install-if-missing idiom this script uses for 7-Zip (§B.19.4) and the
+install-if-missing idiom this script uses for 7-Zip and the
 ADK Deployment Tools (§B.22.13): a resolver locates the tool, and a
 fallback installer fetches it when absent.
 
@@ -2560,7 +1879,7 @@ fallback installer fetches it when absent.
   treated as "already installed"), mirroring `Install-WindowsAdkFallback`.
 
 Acquisition is automatic and requires no switch, matching the 7-Zip
-strategy (§B.19.4). The pinned constants live in one place in the
+strategy. The pinned constants live in one place in the
 global-constants block alongside the ADK pins. The machinery is provided
 for signature-verification consumers (the PCA2023 readiness classifier,
 §B.17.2 / §B.18.1).
@@ -2622,7 +1941,7 @@ even if it parses as valid JSON.
 ### B.23.3 PowerShell reference implementation
 
 Three helpers live in `Update-WindowsServerIso.ps1`, immediately after
-the 7-Zip helper block (§B.19.4):
+the 7-Zip helper block:
 
 | Function | Purpose |
 |:---|:---|
@@ -2664,7 +1983,7 @@ coercion), `[long]`/`[double]` for numbers, `[bool]`, and `$null`. Its
 output shape matches what `ConvertFrom-Json` returned previously
 (dot-access and `.PSObject.Properties` both work), so it is a
 drop-in replacement on every canonical data read path
-(`config-*.json`, `servicing-dependency-database.json`, `cache-*.json`). Internal
+(`config-*.json`, `cache-*.json`). Internal
 JSONL logs and object-clone idioms still use the built-in cmdlets.
 
 `Save-CanonicalJsonFile` wraps the serializer and writes raw bytes
@@ -2907,7 +2226,7 @@ key-presence check in C.3.2, the schema gate also rejects:
 
 - **unknown / mistyped properties**, via `additionalProperties: false` 
   plus an `^_`-prefix allowance for machine-written provenance fields 
-  (Layer 1 `_DependencyVerified*`, `_VerifiedDate`, etc.);
+  (machine-written fields like `_VerifiedDate`, etc.);
 - the **forbidden legacy `PatchBaseline.Patches` field** (the r10.3 
   defect), via `not.required: [Patches]`;
 - **wrong value types** for declared fields.
@@ -2921,19 +2240,15 @@ in the same commit; the two are a matched pair.
 
 ### C.3.3 Cross-field consistency
 
-After r09.0 the layer 1 / layer 2 cross-reference (§B.19.12) adds
-two consistency checks:
+The config baseline carries one cross-field consistency check:
 
-- `PatchBaseline.OfflineSyncPackage.DependencyDatabaseSha256` MUST equal
-  the SHA-256 of `data/servicing-dependency-database.json` (when both are
-  present).
 - Every `NeutralPatches[*].RequiresKbIds` entry MUST be either
   empty or refer to KB IDs present in the same `NeutralPatches[]`
   array (i.e. the dependency must be **in the baseline**, not
   dangling).
 
-`Test-OsConfigConsistency` is the planned implementation; for r09.0
-Step 1 the check is manual at PR review per §B.19.14.
+`Test-OsConfigConsistency` is the planned implementation; the check is
+currently manual at PR review.
 
 ### C.3.4 JSON canonical format compliance
 
@@ -3027,12 +2342,8 @@ each month and after manual `workflow_dispatch`. It:
 
 1. Checks out `main`.
 2. Runs `.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines`.
-3. (r09.0+) The action's A01.0 sub-phase (§B.19.14.1) refreshes
-   `data/servicing-dependency-database.json` first.
-4. If any `data/config-Server*.json` or
-   `data/servicing-dependency-database.json` changed, opens an auto-PR.
-5. The PR is restricted via `add-paths` to `data/config-*.json` and
-   (r09.0+) `data/servicing-dependency-database.json`.
+3. If any `data/config-Server*.json` changed, opens an auto-PR.
+4. The PR is restricted via `add-paths` to `data/config-*.json`.
 
 Stage 4 supports `workflow_dispatch` with four inputs (`mode`,
 `onlyOs`, `onlyLanguage`, `dryRun`) so a maintainer can trigger an
@@ -3096,16 +2407,13 @@ mirrors that authoritative table.
 | **T2** `catalog_fixture_test.py` | Offline HTML fixture regression against `fixtures/<patch-month>/` | 13 | No  | Every commit that touches parsers or TitleTokens |
 | **T3** `powershell_harness.py` | PS function unit tests via `-Action TestHarness` | **7** | No  | Every commit that touches a PS scrape helper |
 | **T4** `eval_iso_probe.py` | Evaluation ISO endpoint check (HTTP Range-GET; 4 OS × 2 lang) | live (4 OS) | Yes | Before release; on Microsoft Evaluation Center snapshot rotation |
-| **T5** `wsusscn2_probe.py` | `wsusscn2.cab` freshness check (existence + size + Last-Modified; 60-day warn threshold) | live | Yes | Before RefreshDependencyDatabase; monthly CI |
 | **T6** `release_info_parser_test.py` | Offline regression for `ConvertFrom-ReleaseInfoMarkdown` against the PoC fixture | 13 | No | Every commit that touches the release-info parser |
 | **T7** `dotnet_cu_parser_test.py` | Offline regression for `ConvertFrom-DotNetCuIndexMarkdown` / `ConvertFrom-DotNetCuMarkdown` against `snapshots/dotnet_cu/` | 16 | No | Every commit touching the .NET CU parsers or the fetch/cache pipeline |
 | **T8** `dynamic_update_cache_test.py` | Offline regression for the Dynamic Update 36-month cache subsystem (`Add-/Get-/Remove-DynamicUpdateCacheEntry`); 3 fixture scenarios + 3 defensive cases | 20 | No | Every commit touching the DU cache functions or the 36-month window logic |
 | **T9** `catalog_title_tokens_test.py` | Offline regression for `Get-CatalogTitleTokenList` against all four OS configs + `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases | 18 | No | Every commit touching `Common.CatalogTitleTokens` in any OS config, or the narrow-filter helpers |
 | **T10** `release_info_resolver_test.py` | Offline regression for `Get-PatchSetFromReleaseInfoDiscovery` (Refresher main-path migration); 4 scenarios + defensive cases | 18 | No | Every commit touching `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or its three caches |
 | **T11** `canonical_json_test.py` | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell) and `canonical_json_dumps` / `save_canonical_json_file` (Python) per SPEC Part B.23 | 26 | No | Every commit touching the canonical JSON helpers (PS or Python) |
-| **T12** `servicing_dependency_parser_test.py` | Offline self-verification of wsusscn2 parser pipeline Stages 3 and 4 against the committed fixture `fixtures/servicing-dependency/package.xml`; structural compare against `expected-output.json` per SPEC §B.19.9.4 | 22 | No | Every commit touching Stage 3 / Stage 4 of the wsusscn2 parser or the scope-filter GUID tables |
-| **T13** `servicing_dependency_layer1_test.py` | Offline self-verification of the Layer 1 writeback helper `Update-Layer1DependencyVerification` (Phase 2b2/2b3) per SPEC §B.19.9.5 | 15 | No | Every commit touching `Update-Layer1DependencyVerification`, the OS-category GUID table, or the A04 Layer 1 callout |
-| **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 27 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
+| **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 26 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
 | **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config.schema.json` |
 
 **Determinism categories**:
@@ -3179,14 +2487,6 @@ changes surface within 30 days even if no PR touches the relevant
 code.
 
 ### C.9.6 Planned T11 (r09.0+)
-
-A new tool — provisionally **T11 `servicing_dependency_parser_test.py`** — is
-planned for r09.0 Step 2+ to provide offline regression coverage for
-the §B.19 Master XML parser (`ConvertFrom-OfflineSyncPackage`,
-`New-ServicingDependencyDatabase`). It will assert the parser's emit
-shape against committed mini-XML fixtures under
-`tests/fixtures/servicing-dependency/`. Implementation tracks the §B.19.7 parser
-stability guarantees.
 
 T11 is **not yet implemented** and is listed for forward traceability
 only. The current canonical T-set ends at T10.
@@ -3442,9 +2742,11 @@ returned the host's installed packages, not the offline WIM's.
 `ServerSelection = ssOthers` points at an alternate metadata
 source.
 
-**Fix / mitigation**: the r09.0 graph-based check (§B.19) reads
-the file-based layer 2 directly, avoiding the COM API entirely.
-This is what makes the offline-WIM use case possible.
+**Fix / mitigation**: the COM-API offline scan was removed (r11.19).
+Servicing readiness is now validated on the mounted WIM by
+`Test-PatchServicingReadinessOnMount` (§B.13), which reads the actual
+installed package list and is therefore inherently WIM-relative,
+avoiding the host-relative COM API entirely.
 
 ### D.19 Catalogue Title comma-form drift (Server 2022)
 
@@ -3694,8 +2996,7 @@ that contain a single nested archive. The bugs are not in this
 script.
 
 **Mitigation**: **prefer well-maintained, independent
-third-party tools for archive extraction**. The §B.19.4 7-Zip
-strategy codifies this for the wsusscn2.cab parser. The same
+third-party tools for archive extraction**. The same
 philosophy underlies:
 
 - `oscdimg` (from Windows ADK Deployment Tools, distinct from
@@ -3713,7 +3014,7 @@ third-party tool actively maintained by an upstream community. The
 generalisation is not "avoid Microsoft tools"; it is "evaluate
 maintenance posture per-tool".
 
-**Related**: §B.19.4 (7-Zip dependency strategy); §B.22.16
+**Related**: §B.22.16
 (robocopy preference).
 
 ### D.28 Sampling versus comprehensive search
@@ -3752,9 +3053,6 @@ exploratory inspection; it is not acceptable for design decisions.
 The transition from "I looked" to "It is absent" requires
 exhaustive evidence or a statistical statement.
 
-**Related**: §B.19.5.2 cites this lesson explicitly when explaining
-why r09.0 limits scope to the Master XML.
-
 ### D.29 Code bug versus configuration problem triage
 
 **Symptom (r08.0 Step 4d, narrowly avoided)**: a P07 `0x800f0823`
@@ -3781,10 +3079,9 @@ formats, or update relationships, the burden is on the config /
 data path until proven otherwise. Reach for code edits only after
 the config / data path has been verified complete.
 
-The §B.19 Servicing Dependency Database is in part the systemic
-mitigation: when the failure is "missing prerequisite KB", layer 2
-makes the config-side gap detectable before the code-side runtime
-failure surfaces.
+The §B.19 servicing-consistency check is in part the systemic
+mitigation: it makes a config-side prerequisite gap detectable before
+the code-side runtime failure surfaces.
 
 **Related**: §B.19 (graph-based dependency closure); §D.24 Pattern 3.
 
@@ -3868,9 +3165,9 @@ when the original needs an upstream fix.
 
 | Helper | Role | Note |
 |:---|:---|:---|
-| `Get-SevenZipPath` | Probe 7-Zip in standard install locations | r09.0+, §B.19.4.2 |
-| `Get-LatestSevenZipUrl` | Three-tier fallback to obtain MSI download URL | r09.0+, §B.19.4.2 |
-| `Install-SevenZipFallback` | Silent MSI install of 7-Zip | r09.0+, §B.19.4.2 |
+| `Get-SevenZipPath` | Probe 7-Zip in standard install locations | r09.0+ |
+| `Get-LatestSevenZipUrl` | Three-tier fallback to obtain MSI download URL | r09.0+ |
+| `Install-SevenZipFallback` | Silent MSI install of 7-Zip | r09.0+ |
 
 ### E.3 New for `Update-WindowsServerIso.ps1`
 
@@ -3889,11 +3186,6 @@ when the original needs an upstream fix.
 | `Get-IsoBootCertReadiness` | r05.0 | INPUT-side boot.wim readiness inspection (§B.17.2) |
 | `Test-OutputIsoPca2023Readiness` | r08.0 Step 3 | OUTPUT-side ISO 5-target check (§B.18) |
 | `Assert-WorkspacePreflight` | r04.3 | Workspace structural readiness (§B.21) |
-| `Test-PatchServicingReadinessFromGraph` | r09.0 | Pre-mount servicing-readiness check over Layer 2 (§B.19.10) |
-| `ConvertFrom-OfflineSyncPackage` | r09.0 | XmlReader-based Master XML parser (§B.19.7) |
-| `New-ServicingDependencyDatabase` | r09.0 | Layer 2 JSON renderer (§B.19.7, §B.19.8) |
-| `Invoke-OfflineSyncPackageExtract` | r09.0 | Two-step 7-Zip extract of package.xml (§B.19.6.3) |
-| `Get-OfflineSyncPackageIfNeeded` | r05.0 → extended r09.0 | Conditional wsusscn2.cab download with cache invalidation (§B.19.14.2) |
 
 ### E.4 Helper unification (r09.0)
 
@@ -3926,14 +3218,14 @@ upstream fix path.
 | OSDBuilder | https://github.com/OSDeploy/OSDBuilder | DISM mount + dismount retry pattern (D.1); 0x800f081e suppression heuristic (D.8) |
 | Win_ISO_Patching_Scripts_zhCN | https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN | Three-tier `etfsboot.com` / `efisys.bin` fallback chain (D.4) |
 | windows-evaluation-isos-scraper | https://github.com/rgl/windows-evaluation-isos-scraper | Canonical Server 2022 SHA-256 hash sourced from this project |
-| 7-Zip (`ip7z/7zip`) | https://www.7-zip.org/ + https://github.com/ip7z/7zip | The CAB extraction backbone (r09.0+, §B.19.4) |
+| 7-Zip (`ip7z/7zip`) | https://www.7-zip.org/ + https://github.com/ip7z/7zip | Archive extraction helper for tool acquisition (r09.0+) |
 
 ### F.3 Companion in-house scripts
 
 | Project | Relationship |
 |:---|:---|
 | `Download-SpeakerDeck.ps1` (sister sub-project under `scripts/powershell/download-speakerdeck-oracle4engineer/`) | Source of the §A inherited common spec body (debug trace, log helpers, env probe, retry primitives). Its SPEC.md is the authoritative copy of the inherited rules. |
-| `Deploy-AMDChipsetDriverOnWindowsServer.ps1` | Source of the 7-Zip helper trio (§B.19.4.2 / Appendix E.2) |
+| `Deploy-AMDChipsetDriverOnWindowsServer.ps1` | Source of the 7-Zip helper trio (Appendix E.2) |
 
 ## Appendix G — Historical revision matrix
 
