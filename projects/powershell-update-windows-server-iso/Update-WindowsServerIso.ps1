@@ -541,7 +541,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.35'
+$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.36'
 $Script:ScriptTag     = 'dism-scratchdir-localisation'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -9011,8 +9011,9 @@ function Get-PatchEntryType {
     <#
     .SYNOPSIS
         Read the patch-kind/type string from a patch entry, preferring
-        the 'Kind' field (Config Schema v3.0 Lines[]), then 'PatchType'
-        (P02 ResolvedPatches), then the legacy 'Type' field.
+        'PatchType' (P02/P03 ResolvedPatches, which reuse 'Kind' as an
+        Iso/Patch input marker), then 'Kind' (raw Config Schema v3.0
+        Lines[]), then the legacy 'Type' field.
 
         Returns an empty string when neither is set. PatchType takes
         precedence when both are present, mirroring the dual-field
@@ -9030,14 +9031,15 @@ function Get-PatchEntryType {
     [OutputType([string])]
     param([Parameter(Mandatory)] [AllowNull()] $Patch)
     if (-not $Patch) { return '' }
-    # Config Schema v3.0: resolved Lines[] carry 'Kind' (LCU/SSU/DotNet/SafeOSDU/
-    # SetupDU) -- the authoritative field; it takes precedence. 'PatchType'/'Type'
-    # are legacy fallbacks (pre-migration / language-specific entries).
-    if ($Patch.PSObject.Properties['Kind'] -and $Patch.Kind) {
-        return [string]$Patch.Kind
-    }
+    # Precedence: 'PatchType' (P02/P03 ResolvedPatches, which reuse 'Kind' as an
+    # Iso/Patch input-source marker, so 'Kind' must NOT win for those) -> 'Kind'
+    # (raw Config Schema v3.0 Lines[]: LCU/SSU/DotNet/SafeOSDU/SetupDU) -> 'Type'
+    # (language-specific entries: LanguagePack/LXP/DotNet.LangPack).
     if ($Patch.PSObject.Properties['PatchType'] -and $Patch.PatchType) {
         return [string]$Patch.PatchType
+    }
+    if ($Patch.PSObject.Properties['Kind'] -and $Patch.Kind) {
+        return [string]$Patch.Kind
     }
     if ($Patch.PSObject.Properties['Type'] -and $Patch.Type) {
         return [string]$Patch.Type
@@ -9094,7 +9096,7 @@ function Build-InstallApplySequence {
     if ($byType.ContainsKey('LXP'))          { $lp += $byType['LXP'] }
     if ($byType.ContainsKey('DotNet.LangPack')) { $lp += $byType['DotNet.LangPack'] }
     $lcu        = @(if ($byType.ContainsKey('LCU')) { $byType['LCU'] } else { @() })
-    $dotnet     = @(if ($byType.ContainsKey('DotNet.Runtime')) { $byType['DotNet.Runtime'] } else { @() })
+    $dotnet     = @(if ($byType.ContainsKey('DotNet')) { $byType['DotNet'] } else { @() })
     $dynUpComp  = @(if ($byType.ContainsKey('DynamicUpdate.Component')) { $byType['DynamicUpdate.Component'] } else { @() })
 
     $hasLp = ($lp.Count -gt 0)
@@ -9209,7 +9211,7 @@ function Build-WinReApplySequence {
     $ssu     = @(if ($byType.ContainsKey('SSU')) { $byType['SSU'] } else { @() })
     $lp      = @()
     if ($byType.ContainsKey('LanguagePack')) { $lp += $byType['LanguagePack'] }
-    $safeOs  = @(if ($byType.ContainsKey('DynamicUpdate.SafeOs')) { $byType['DynamicUpdate.SafeOs'] } else { @() })
+    $safeOs  = @(if ($byType.ContainsKey('SafeOSDU')) { $byType['SafeOSDU'] } else { @() })
 
     $seq = New-Object System.Collections.Generic.List[object]
     $seq.Add([pscustomobject]@{ Name='W1.SSU'; Description='SSU (or combined LCU surrogate)'; Patches=$ssu; RequiresRemount=$false }) | Out-Null
@@ -11414,7 +11416,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                         Kind = 'Patch'; Source = $p.DownloadUrl
                         LocalPath = Join-Path $Script:PatchesDir (Join-Path $Script:OsVersion $pFileName)
                         KbId = $p.KbId
-                        PatchType = $p.Type
+                        PatchType = $p.Kind
                         ApplyOrder = $p.ApplyOrder
                         ExpectedHashes = $expectedHashes
                     }) | Out-Null
@@ -12129,7 +12131,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
                         if (-not $p) { continue }
                         Write-Step ('  [PLAN] {0}: {1} ({2}) -> {3}' -f $sp.Name, $p.KbId, $p.Type, $imgLabel)
                         $rows.Add([pscustomobject]@{
-                            KbId = $p.KbId; PatchType = $p.Type
+                            KbId = $p.KbId; PatchType = $p.Kind
                             FilePath = $p.LocalPath; ApplyOrder = $p.ApplyOrder
                             AppliesTo = $imgLabel; SubPhase = $sp.Name
                             ApplyStatus = 'Planned'; ElapsedSeconds = 0
@@ -12406,7 +12408,7 @@ function Invoke-BuildPhase09_AssembleIso {
     try {
         Write-SubSection 'Step 1: Dynamic Update Setup overlay'
         Set-DebugStep -Step 'dynup-setup-overlay'
-        $setupDuPatches = @($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'DynamicUpdate.Setup' })
+        $setupDuPatches = @($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'SetupDU' })
         if ($setupDuPatches.Count -gt 0 -and -not $Script:SyntheticTestMode) {
             foreach ($p in $setupDuPatches) {
                 Write-Step ('Overlaying {0} onto extracted ISO sources\' -f $p.KbId)
