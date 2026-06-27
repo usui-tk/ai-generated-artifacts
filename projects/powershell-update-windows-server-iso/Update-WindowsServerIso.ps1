@@ -542,7 +542,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
 $Script:ScriptVersion = 'update-wsi-2026.06.27-r11.38'
-$Script:ScriptTag     = 'dism-scratchdir-localisation'
+$Script:ScriptTag     = 'setupdu-acquisition'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
