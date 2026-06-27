@@ -541,7 +541,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.34'
+$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.35'
 $Script:ScriptTag     = 'dism-scratchdir-localisation'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -11569,7 +11569,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         $scrapeOk = $true
         $scrapeErr = $null
         try {
-            $newPatches = Resolve-PatchSetFromReleaseInfo `
+            $newPatches = Invoke-CatalogPatchSetRefresh `
                             -OsVersion $Script:OsVersion `
                             -OsLanguage $Script:OsLanguage `
                             -PatchMonth $patchMonth `
@@ -11592,7 +11592,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
             }
             # UseBaseline (default)
             if (Test-PatchBaselineUsable -Baseline $baseline) {
-                Write-Caution 'P03: scrape failed but existing PatchBaseline.Patches is usable; continuing.'
+                Write-Caution 'P03: scrape failed but existing PatchBaseline.Lines is usable; continuing.'
                 return $true
             }
             throw ('P03 RefreshPatchBaseline failed AND existing PatchBaseline has no usable patches. Cannot proceed.')
@@ -11621,7 +11621,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         # is identical under ConvertFrom-Json and ConvertFrom-CanonicalJson.
         # Ensure every property assigned below is present before assigning.
         # NOTE: resolved patches are stored under Lines[] per the
-        # Config Schema v2.1 (SPEC B.4.3); '.Patches' was a legacy field and
+        # Config Schema v3.0 (SPEC B.4.3); '.Patches' was a legacy field and
         # MUST NOT be (re)introduced here.
         $pb = $Script:OsProfile.PatchBaseline
         foreach ($propName in @('Lines','PatchTuesdayOfBaseline','LastVerifiedDate','LastVerifiedBy','VerificationMethod')) {
