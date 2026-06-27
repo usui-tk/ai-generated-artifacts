@@ -86,7 +86,7 @@ remain unambiguous.
 | SPEC-WSI-017 | Update type matrix per OS generation | §B.15 |
 | SPEC-WSI-018 | PCA2023 boot manager support | §B.17 |
 | SPEC-WSI-019 | Output ISO verification (post-conversion) | §B.18 |
-| SPEC-WSI-020 | Servicing consistency check (reserved for the Catalog model) | §B.19 |
+| SPEC-WSI-020 | Servicing model consistency check (P06) | §B.19 |
 | SPEC-WSI-030 | Static analysis gate (psa.py + PSScriptAnalyzer) | §C.1 |
 | SPEC-WSI-031 | Source file format gate | §C.2 |
 | SPEC-WSI-032 | Documentation cross-checks | §C.8 |
@@ -114,14 +114,14 @@ remain unambiguous.
   - [B.9 Synthetic test mode](#b9-synthetic-test-mode)
   - [B.10 PatchPlan engine and WIM-target mapping](#b10-patchplan-engine-and-wim-target-mapping)
   - [B.11 Media-dynamic-update sub-phase sequences](#b11-media-dynamic-update-sub-phase-sequences)
-  - [B.12 Catalogue scrape and supersedence selection](#b12-catalogue-scrape-and-supersedence-selection)
+  - [B.12 Catalogue scrape and candidate selection](#b12-catalogue-scrape-and-candidate-selection)
   - [B.13 Pre-apply dependency closure check](#b13-pre-apply-dependency-closure-check)
   - [B.14 Refresh policy and RefreshAllBaselines](#b14-refresh-policy-and-refreshallbaselines)
   - [B.15 Update type matrix per OS generation](#b15-update-type-matrix-per-os-generation)
   - [B.16 LCU package format per OS](#b16-lcu-package-format-per-os)
   - [B.17 PCA2023 boot manager support](#b17-pca2023-boot-manager-support)
   - [B.18 Output ISO verification](#b18-output-iso-verification)
-  - [B.19 Servicing Dependency Database (reserved)](#b19-servicing-dependency-database)
+  - [B.19 Servicing model consistency check (P06)](#b19-servicing-model-consistency-check-p06)
   - [B.20 File organisation and naming conventions](#b20-file-organisation-and-naming-conventions)
   - [B.21 Workspace preflight](#b21-workspace-preflight)
   - [B.22 Phase 3 architecture decisions](#b22-phase-3-architecture-decisions)
@@ -458,7 +458,7 @@ certain parser contexts.
 > `Update-WindowsServerIso.ps1`. Sub-sections are organised by concern:
 > identity / I/O / workspace / configuration in B.1–B.4; the phase
 > pipeline contract in B.5–B.6; per-phase algorithms in B.7–B.18; the
-> reserved servicing-consistency section in B.19; cross-cutting file
+> servicing model consistency check in B.19; cross-cutting file
 > organisation, preflight, and architecture decisions in B.20–B.22.
 
 ## B.1 Script identity and entry point
@@ -556,13 +556,13 @@ family** (e.g. `D:\UpdateWsi_2016`, `D:\UpdateWsi_2019`, …). This
 side-steps the DISM mount-cache poisoning class of failure
 documented in §D.25.
 
-## B.4 OS profile (Config Schema v2.1)
+## B.4 OS profile (Config Schema v3.0)
 
 **Status**: normative. **Policy ID**: SPEC-WSI-011 (Patch integrity
 three-layer is built on this schema).
 
 Each `data/config-Server<OsKey>.json` file is a per-OS configuration
-profile that the script reads at P02 (ResolveInputs). Schema 2.1 is
+profile that the script reads at P02 (ResolveInputs). Schema 3.0 is
 the current shape; older revisions are documented in §B.22 for
 historical reference.
 
@@ -570,8 +570,9 @@ historical reference.
 
 ```jsonc
 {
-  "Schema":  "2.1",
-  "OsKey":   "Server2025",
+  "Schema":     "3.0",
+  "OsKey":      "Server2025",
+  "PatchModel": "uup-checkpoint",   /* discriminated-union tag; see B.4.3 / B.19 */
 
   "Common":  { /* OS-wide constants, see B.4.2 */ },
   "PatchBaseline": { /* Patch Tuesday cadence, see B.4.3 */ },
@@ -614,48 +615,46 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
 
 ```jsonc
 "PatchBaseline": {
-  "Schema":                  "2.0",
+  "Schema":                  "3.0",
   "TargetBuildAfterUpdate":  "26100.32522",
   "PatchTuesdayOfBaseline":  "2026-05-12",
   "LastVerifiedDate":        "2026-05-24T00:00:00+09:00",
   "LastVerifiedBy":          "auto-scrape:Catalog",
   "VerificationMethod":      "auto-scrape",
   "ChecksumAlgorithm":       "SHA256",
-  "NeutralPatches": [
+  "Lines": [
     {
-      "Type":                "LCU",
+      "Kind":                "LCU",
       "KbId":                "KB5087539",
       "UpdateId":            "...",
       "Title":               "...",
-      "ApplyOrder":          2,
-      "IsCombined":          false,
       "FileName":            "...",
       "DownloadUrl":         "...",
-      "LocalPath":           "patches/Server2025/...",
-      "Sha256":              "...",
-      "RequiresKbIds":       ["KB5088064"],         // populated by RefreshAllBaselines
-      "Supersedes":          ["KB5082077"],          // populated by RefreshAllBaselines
-      "RequiresMinimumOsBuild": "26100.32000"        // populated by RefreshAllBaselines (r09.0+)
+      "Digest":              "8v6Qwu...",     // SHA-1, base64: Catalog primary key
+      "Sha256":              "...",           // recorded for reference (R5 verify target)
+      "SizeBytes":           null,            // HEAD Content-Length (fill pending)
+      "ApplyOrder":          2,
+      "InScope":             { /* media-payload applicability annotation */ }
     },
-    /* ... SSU, .NET CU, DynamicUpdate.Setup, DynamicUpdate.SafeOs ... */
+    /* one Line per Kind: LCU, SSU, DotNet, SafeOSDU (and SetupDU for uup-checkpoint) */
   ],
   "ExcludeKbList": []
 }
 ```
 
-Patch `Type` values follow the inventory in §B.15. Field cadence and
-who is allowed to mutate each field is the §B.14 decision matrix.
+Patch `Kind` values are `LCU`, `SSU`, `DotNet`, `SafeOSDU`, and
+`SetupDU`; which Kinds are required or forbidden for each `PatchModel`
+is the discriminated-union contract in §B.19. Field cadence and who is
+allowed to mutate each field is the §B.14 decision matrix.
 
-**Resolved patches live in `NeutralPatches[]`.** The field name 
-`PatchBaseline.Patches` is a **legacy (pre-v2.1) name and is forbidden** 
-in current configs. Code that resolves a patch set (e.g. P03 
-RefreshPatchBaseline) MUST write to `NeutralPatches`, never to `Patches`. 
-This is enforced mechanically by the machine-readable schema 
-`schema/config.schema.json` (which declares `not.required: 
-[Patches]` on `PatchBaseline`) and the CI gate in §C.3.2a. Background: 
-the r10.3 P03 defect wrote scrape results to a non-schema `Patches` 
-property; the schema gate exists so that class of drift fails in CI 
-rather than on a real machine.
+**Resolved patches live in `PatchBaseline.Lines[]`** (Config Schema
+v3.0, the data-source migration from `wsusscn2.cab` to the Microsoft
+Update Catalog). Each Line carries a `Kind` and is keyed by its `Digest`
+(SHA-1, base64 - the Catalog DownloadDialog primary key). The legacy
+field names `PatchBaseline.Patches` and `PatchBaseline.NeutralPatches`
+are **both forbidden** in current configs: `schema/config.schema.json`
+forbids them via `not.anyOf` and requires `Lines`, and the CI gate in
+§C.3.2a fails that class of drift in CI rather than on a real machine.
 
 ### B.4.4 `Pca2023` block (Schema 2.1+)
 
@@ -804,7 +803,7 @@ sources of truth**:
 | Layer | Source | Field |
 |:---:|:---|:---|
 | 1 | The Microsoft Update Catalogue download link | server-reported `Content-Length` |
-| 2 | The config-Server*.json `NeutralPatches[]` entry | recorded `Sha256` |
+| 2 | The config-Server*.json `Lines[]` entry | recorded `Sha256` |
 | 3 | The downloaded file on disk | freshly-computed SHA-256 |
 
 A patch passes integrity check when all three layers agree. Layer 2's
@@ -972,59 +971,41 @@ recorded to `<WorkRoot>\state\defender-exclusions.json`; only recorded entries
 are removed (in the top-level `finally` and via a startup self-heal of a
 crashed run), never pre-existing user exclusions.
 
-## B.12 Catalogue scrape and supersedence selection
+## B.12 Catalogue scrape and candidate selection
 
-**Status**: normative. **Policy ID**: SPEC-WSI-015.
+**Status**: normative (r11.34+). **Policy ID**: SPEC-WSI-015.
 
-When the OS-aware Catalogue query for a single patch Type leaves
-2 or more narrowed candidates after the Title-token / x64 filter,
-the resolver enriches each candidate with the `Supersedes` and
-`SupersededBy` arrays from `Get-SupersedenceFromCatalog`, then calls
-`Select-LatestPatchBySupersedence` to keep only the latest.
+Layer 1 of the b3 resolver (the producer, B.19) acquires each `Kind`'s
+files from the Microsoft Update Catalog from an OS *seed* alone, with no
+local applicability graph:
 
-**Match rule**: candidate `C` is "superseded by" candidate `D` when
-`C.KbId` OR `C.UpdateId` is found (as a substring, case-insensitive)
-anywhere in `D.Supersedes`. Substring match is used because
-Catalogue Supersedes entries are inconsistent: some contain only the
-KB number, some the full UpdateId GUID, some a free-form
-`Package_for_KBnnnn~...` package identifier.
+1. the authoritative LCU KB is read from the Microsoft Learn
+   `windows-server-release-info` markdown (`Get-LearnLcuKbs`, keyed by
+   the OS build-major), so the *latest* LCU is fixed by Microsoft's
+   published servicing calendar rather than inferred locally;
+2. that KB (for the LCU) or a per-`Kind` Title query (SSU / .NET / DU)
+   is run through `Search-Catalog` (Search.aspx);
+3. `Get-ServerRow` narrows the result rows to the OS `Products` token
+   and x64;
+4. `Resolve-CatalogDownload` (DownloadDialog.aspx) returns the file set
+   - each file as a SHA-1 base64 `Digest` + URL, with no download.
 
-| Input | Outcome |
-|:---|:---|
-| 0 candidates | `Best = $null`, `Excluded = @()` |
-| 1 candidate  | `Best = that one`, `Excluded = @()` |
-| 2+ with clear supersedence | `Best = single survivor`, `Excluded = (the rest)` with `Reason = "Superseded by <title>"` |
-| 2+ with no supersedence relation | `Best = first by Title desc`, `Excluded = (the rest)` with `Reason = "Ambiguous; chose newest by title"` |
-| Pathological (all candidates supersede each other) | `Best = first input`, warning logged |
+Because the LCU is pinned by the Learn release-info, candidate
+selection collapses to "the row whose `Products` token matches the OS";
+there is no supersedence-chain walk. The acquired set is then reconciled
+against the release-info expected KB + post-update build by Layer 2
+(B.19), and shaped into `PatchBaseline.Lines[]` by `ConvertTo-ConfigLines`.
 
-Supersedence lookup is a per-candidate HTTP call, so it only fires
-when the narrowed count exceeds 1; the single-candidate path keeps
-the HTTP cost at zero.
-
-This protects the WIM-target-aware sequence against neighbouring KBs
-that match the OS Title token by accident, e.g. a ".NET Framework
-3.5 and 4.8.1 Cumulative Update" appearing in a search for the OS
-LCU. Without supersedence-aware selection, the wrong KB could enter
-the I3.LCU.FirstPass sub-phase and produce a botched install.wim.
-The original r04.2 incident that motivated this section is
-documented in §D.NN (umbrella KBs and supersedence drift).
-
-**Deterministic supersedence extraction (r11.28).** The ScopedView
-`supersedesInfo` section lists the *entire* supersedence chain as
-repeated `<div>TITLE (KBxxxx)</div>` entries, and the Catalogue reorders
-those entries per request. An earlier non-greedy `...</div>` boundary
-captured only the first entry, so the recorded value depended on the
-Catalogue's per-request ordering and was not byte-reproducible across
-regenerations. `Get-SupersedenceFromCatalog` now captures the full
-section (bounded by the next `id="..."` panel) and
-`ConvertFrom-CatalogSupersedenceSection` returns the complete chain as an
-ordinal-sorted, de-duplicated list plus a single `Latest` — the immediate
-predecessor, defined as the entry with the highest `yyyy-MM` title prefix
-(ties broken on the highest KB number; falling back to the highest KB
-number when no entry carries a `yyyy-MM`). `PatchBaseline.NeutralPatches[].Supersedes`
-persists only that single immediate-predecessor KB, which keeps the field
-deterministic and the baseline byte-reproducible while remaining the most
-informative single value.
+> **Removed in the data-source migration.** The pre-v3.0 model resolved
+> the latest patch by enriching each narrowed candidate with
+> `Supersedes`/`SupersededBy` from `Get-SupersedenceFromCatalog` and
+> running `Select-LatestPatchBySupersedence` over a per-candidate
+> ScopedView supersedence walk. That selection mechanism is no longer
+> used: the Learn release-info fixes the latest LCU directly, and the
+> `Lines[]` shape carries no `Supersedes` field
+> (`schema/config.schema.json` sets `additionalProperties: false`). The
+> r04.2 umbrella-KB incident that motivated the old walk is preserved in
+> §D for historical reference.
 
 ## B.13 Pre-apply dependency closure check
 
@@ -1122,23 +1103,24 @@ resolution.
 | `LanguagePack`            | bundled in eval ISO | bundled in eval ISO | bundled in eval ISO | bundled in eval ISO |
 | `LXP`                     | n/a (no LXP for Server SKU) | n/a | n/a | n/a |
 
-The `IsCombined` flag on each LCU entry distinguishes the standalone
-form (KB5087537 for Server 2016, 2026-05) from the combined SSU+LCU
-form. The flag MUST be set by `RefreshAllBaselines` based on
-authoritative metadata; manual entries should default to `false`
-unless explicitly verified. The historical defect on
-`config-Server2016.json` where `IsCombined: true` was mis-recorded
-and later corrected by r08.0 Step 4 is referenced from §D.NN.
+Whether an OS ships its servicing stack as a standalone SSU or folds it
+into the combined LCU is, in Config Schema v3.0, declared by the
+top-level `PatchModel` (B.4.1 / B.19), not by a per-entry flag:
+`separate-ssu` (Server 2016) carries a standalone `SSU` line beside the
+`LCU`; `embedded-ssu` / `embedded-ssu-du` (Server 2019 / 2022) fold the
+SSU into the combined LCU; `uup-checkpoint` (Server 2025) carries the
+checkpoint SSU from the co-served baseline. The v3.0 `Lines[]` shape has
+no `IsCombined` field; the pre-v3.0 flag and the r08.0 mis-record defect
+on `config-Server2016.json` are referenced from §D.
 
 ### B.15.2 .NET CU multiplicity per OS
 
 The .NET Framework Cumulative Update is delivered as an **umbrella
 KB** that bundles N "ndp" runtime variants (e.g. `ndp48`, `ndp481`)
 in separate `.msu` files but under one Catalogue UpdateId. The
-resolver retains all surviving `.msu` files via
-`Select-AllCanonicalPatchFiles`, so the `NeutralPatches[]` entries
-share `KbId` / `Title` / `UpdateId` / `Supersedes` from the umbrella
-KB but each carries its own `FileName` / `Sha256` / `LocalPath`.
+resolver retains all surviving `.msu` files, so the `Lines[]` entries
+share `KbId` / `Title` / `UpdateId` from the umbrella KB but each
+carries its own `FileName` / `Digest` / `Sha256`.
 
 | OS family | Expected .NET CU sub-file count |
 |:---|:---:|
@@ -1155,18 +1137,13 @@ N-1 sub-files were dropped, and the r04.3 fix via
 
 ### B.15.3 Combined LCU package detection
 
-For Server 2019+, `Test-IsCombinedLcuTitle` identifies a combined
-SSU+LCU MSU by matching the Catalogue Title against:
-
-```
-'cumulative update.*servicing stack'
-'cumulative.*combined'
-'rollup.*servicing stack'
-```
-
-A combined package's `IsCombined` field is set to `true`, which
-informs `Build-PatchPlan` to skip the standalone SSU lookup for that
-month.
+In Config Schema v3.0 the standalone-vs-combined SSU question is
+answered by the declared `PatchModel` (B.19), not by title heuristics:
+`separate-ssu` requires a standalone `SSU` line, while the `embedded-*`
+models forbid one (`Test-PatchModelConsistency` enforces this at P06).
+The pre-v3.0 `Test-IsCombinedLcuTitle` Title-matching helper that set a
+per-entry `IsCombined` flag is legacy and no longer drives
+`Build-PatchPlan`.
 
 ### B.15.4 Hotpatch is out of scope
 
@@ -1425,24 +1402,56 @@ hoisted to top level next to `Test-Pca2023AuthenticodeChain`.
 ---
 
 
-## B.19 Servicing Dependency Database
+## B.19 Servicing model consistency check (P06)
 
-> **Status: reserved.** The wsusscn2-derived Servicing Dependency Database
-> facility documented in this section through r11.x was removed in the
-> data-source migration from `wsusscn2.cab` to the Microsoft Update Catalog.
-> The offline applicability graph -- the Layer 2
-> `data/servicing-dependency-database.json` database, the four-stage parser
-> pipeline, the `A04 RefreshDependencyDatabase` action, the scope-filter GUID
-> tables, and the P06 graph readiness check
-> `Test-PatchServicingReadinessFromGraph` -- is no longer built or maintained.
->
-> This section is reserved for its replacement: a per-`PatchModel` consistency
-> check over the resolved Microsoft Update Catalog patch set (the required and
-> forbidden line `Kind`s for each OS servicing model, plus `Digest` presence on
-> every resolved line). That check is specified here when it is implemented.
-> Until then, P06 `ValidatePatchServicing` is a pass-through (see B.5); real
-> servicing readiness is validated on-mount during the build by
-> `Test-PatchServicingReadinessOnMount` (B.13, phases P07/P08).
+**Status**: normative (r11.34+). **Policy ID**: SPEC-WSI-020.
+
+The wsusscn2-derived Servicing Dependency Database documented in this
+section through r11.x was removed in the data-source migration from
+`wsusscn2.cab` to the Microsoft Update Catalog: the Layer 2
+`data/servicing-dependency-database.json` database, its four-stage parser
+pipeline, the `A04 RefreshDependencyDatabase` action, the scope-filter
+GUID tables, and the graph readiness check
+`Test-PatchServicingReadinessFromGraph` are no longer built or
+maintained. Its replacement is a per-`PatchModel` consistency check over
+the resolved Catalog patch set, implemented as `Test-PatchModelConsistency`
+and run by P06 `ValidatePatchServicing` (B.5). It is the runtime mirror
+of the discriminated union encoded in `schema/config.schema.json`.
+
+### B.19.1 The discriminated union
+
+Every config declares a top-level `PatchModel` (B.4.1). Each model fixes
+which line `Kind`s are required and which are forbidden:
+
+| `PatchModel` | OS | Required Kinds | Forbidden Kinds |
+|:---|:---|:---|:---|
+| `separate-ssu` | Server 2016 | `SSU`, `LCU` | `DotNet`, `SafeOSDU`, `SetupDU` |
+| `embedded-ssu` | Server 2019 | `LCU`, `DotNet` | `SSU`, `SafeOSDU`, `SetupDU` |
+| `embedded-ssu-du` | Server 2022 | `LCU`, `DotNet`, `SafeOSDU` | `SSU`, `SetupDU` |
+| `uup-checkpoint` | Server 2025 | `LCU`, `SSU`, `DotNet`, `SafeOSDU` | (none; `SetupDU` allowed) |
+
+Rationale: 2016 ships its servicing stack as a standalone SSU paired
+with a standalone LCU; 2019 and 2022 embed the SSU in the combined LCU
+(2022 additionally carries a Safe OS DU for WinRE); 2025 is the UUP
+checkpoint model whose co-served GA baseline carries the checkpoint SSU.
+
+### B.19.2 The check
+
+`Test-PatchModelConsistency` enforces, over the resolved
+`PatchBaseline.Lines[]`:
+
+1. every Required Kind for the model is present at least once;
+2. no Forbidden Kind appears;
+3. every line carries a non-empty `Digest` (the Catalog primary key);
+4. an unknown `PatchModel` raises a typed error.
+
+P06 throws on any violation - the build stops before any WIM is mounted
+- and on success logs the model and line count. This is a static shape
+contract over the resolved set. (Note: the pre-v3.0 on-mount
+dependency-closure check `Test-PatchServicingReadinessOnMount` (B.13)
+keys on a `RequiresKbIds` field that the v3.0 `Lines[]` no longer carry,
+so it is inert for Catalog-resolved sets; a real servicing-stack
+precondition failure now surfaces from DISM during P07/P08.)
 
 ---
 
@@ -1664,7 +1673,7 @@ addition is the lighter migration path.
 
 ### B.22.5 SSU separation and .NET CU multiplicity
 
-SSU and LCU are separate `NeutralPatches` entries even when shipped
+SSU and LCU are separate `Lines` entries even when shipped
 combined; the loader treats them as independently-trackable units.
 .NET CU umbrella KBs that bundle multiple `.msu` files keep all
 sub-files via §B.15.2 `Select-AllCanonicalPatchFiles`.
@@ -1674,17 +1683,15 @@ sub-files via §B.15.2 `Select-AllCanonicalPatchFiles`.
 separation, the prerequisite chain would not be representable in
 layer 1.
 
-**Discovery (r11.20+)**: `Resolve-PatchSetFromReleaseInfo` finds the
-standalone SSU by a same-month Catalog title search -- for each resolved
-LCU it queries the Microsoft Update Catalog for the OS's `<yyyy-MM>
-Servicing Stack Update` and keeps the non-preview hit matching
-`(?i)servicing stack update`. The search result is itself the
-SSU-separate-vs-combined discriminator: 2026-05 returned one SSU for
-Server 2016 (KB5088064, Catalog UpdateId
-`d0f1761f-c762-4764-8443-8c567f6929a2`) and none for Server 2019 / 2022 /
-2025, so the 2016 LCU is emitted with `IsCombined=false` alongside the
-SSU while the others stay `IsCombined=true`. The search needs no layer 2
-/ `-DataDir` input, so it works on the `RefreshAllBaselines` call path.
+**Discovery (b3, r11.34+)**: for the `separate-ssu` model, layer 1
+(`Resolve-Ssu2016`) finds the standalone SSU by a same-month Catalog
+title search for the OS's `<yyyy-MM> Servicing Stack Update`, keeping the
+non-preview hit matching `(?i)servicing stack update` (2026-05 returns
+one SSU for Server 2016, KB5088064). The `embedded-ssu` /
+`embedded-ssu-du` models resolve no standalone SSU line (it is folded
+into the combined LCU); `uup-checkpoint` derives its SSU line from the
+co-served GA baseline. The search needs no layer 2 / `-DataDir` input,
+so it works on the `RefreshAllBaselines` call path.
 
 **.NET CU publication-gap carry-forward (r11.27)**: .NET Framework CUs
 are not published every month (the release-notes index has gaps), so
@@ -1930,7 +1937,7 @@ ten rules:
 | 4 | **Key-value separator**: `": "` (colon + 1 space) | PS 7 / Python natural default |
 | 5 | **Array item separator**: `",\n<indent>"` (comma + newline + indent) | PS 7 / Python natural default |
 | 6 | **Non-ASCII characters**: literal (no `\uXXXX` escape) | Japanese / emoji readability; round-trippable through Python `ensure_ascii=False` and PS 7's default |
-| 7 | **Key order**: insertion order preserved (no sort) | Operator-meaningful field ordering (e.g. `KbId` before `Title` in `NeutralPatches`) |
+| 7 | **Key order**: insertion order preserved (no sort) | Operator-meaningful field ordering (e.g. `KbId` before `Title` in `Lines`) |
 | 8 | **Trailing newline**: exactly one LF at end of file | POSIX convention; `cat`, `git diff`, and most editors expect it |
 | 9 | **Null values**: emitted as `"key": null` (no field omission) | Schema explicitness; absence of a key means "field not declared", not "field is null" |
 | 10 | **Depth limit**: caller-controlled, default 20 | Prevents accidental infinite recursion; 20 is well above the deepest known schema (currently 6) |
@@ -2240,15 +2247,15 @@ in the same commit; the two are a matched pair.
 
 ### C.3.3 Cross-field consistency
 
-The config baseline carries one cross-field consistency check:
+The config baseline's cross-field consistency is the per-`PatchModel`
+check in B.19 (`Test-PatchModelConsistency`, run at P06): for the
+declared `PatchModel`, every required `Kind` is present, no forbidden
+`Kind` appears, and every `Lines[]` entry carries a non-empty `Digest`.
 
-- Every `NeutralPatches[*].RequiresKbIds` entry MUST be either
-  empty or refer to KB IDs present in the same `NeutralPatches[]`
-  array (i.e. the dependency must be **in the baseline**, not
-  dangling).
-
-`Test-OsConfigConsistency` is the planned implementation; the check is
-currently manual at PR review.
+(The pre-v3.0 `RequiresKbIds` "dependency must be in the baseline" check
+was removed with the `wsusscn2` dependency graph; the v3.0 `Lines[]`
+shape carries no `RequiresKbIds` field - `schema/config.schema.json`
+sets `additionalProperties: false`.)
 
 ### C.3.4 JSON canonical format compliance
 
@@ -2789,7 +2796,7 @@ two ndp-runtime variants of the same umbrella KB.
 
 **Fix / mitigation**: r04.3 added `Select-AllCanonicalPatchFiles`
 and routed `Type='DotNet'` queries through it. Each surviving
-MSU gets its own `NeutralPatches` entry sharing
+MSU gets its own `Lines` entry sharing
 `KbId / Title / UpdateId / Supersedes` from the umbrella KB. See
 §B.15.2.
 

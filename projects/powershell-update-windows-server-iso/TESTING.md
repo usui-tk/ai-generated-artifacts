@@ -404,7 +404,7 @@ python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
 python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
-python3 tests/config_required_ssu_downloadurl_test.py            # T23: 19 required-SSU consistency-contract assertions (PatchBaseline.NeutralPatches)
+python3 tests/config_required_ssu_downloadurl_test.py            # T23: 20 required-SSU consistency-contract assertions (PatchBaseline.Lines)
 python3 tests/dism_cleanup_args_test.py                          # T24: 6 cleanup-arg-vector assertions (1639 collapse guard + /ResetBase default + /ScratchDir)
 python3 tests/dism_export_args_test.py                           # T25: 6 export-arg-vector assertions (Export-Image /Compress:max + /ScratchDir)
 python3 tests/defender_exclusion_plan_test.py                    # T26: 13 Defender pure-helper assertions (managed set + add-only-absent plan + fail-closed decision)
@@ -519,9 +519,9 @@ the current cycle:
   failed with `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` because
   the LCU's prerequisite SSU was not in the baseline. Investigation in
   [`docs/history/r08.0-step4-findings-and-dependency-investigation.md`](./docs/history/r08.0-step4-findings-and-dependency-investigation.md)
-  motivated the r09.0 servicing-dependency design (`SPEC.md` §B.19, since
-  reserved in the data-source migration); the prerequisite-SSU contract is
-  now enforced by T23 and the on-mount §B.13 check.
+  motivated the r09.0 servicing-dependency design (`SPEC.md` §B.19, now the
+  per-`PatchModel` consistency check); the prerequisite-SSU contract is
+  enforced statically by T23 and the P06 PatchModel check.
 
 For the full catalogue of pitfalls and fixes, see SPEC.md Part D.
 

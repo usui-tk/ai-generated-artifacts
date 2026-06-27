@@ -256,7 +256,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 できます。**更新は 2 段階** で行います：`RefreshSnapshots` が Microsoft Learn と
 Microsoft Update Catalog から上流の `data/raw-*` / `data/cache-*` を取得し、
 `RefreshAllBaselines` が各 `data/config-Server*.json` の
-`PatchBaseline.NeutralPatches[]` をそれらキャッシュから再生成します。この分離は
+`PatchBaseline.Lines[]` をそれらキャッシュから再生成します。この分離は
 SPEC §B.22.1 の Refresher アーキテクチャに対応します。
 
 | Action | Admin Phase | 説明 |
@@ -437,13 +437,13 @@ P03 RefreshPatchBaseline（ベースラインが古いとき、または -AutoDe
         - Config 駆動の title-token 絞り込みで SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
           + .NET CU を識別
         - ScopedViewInline.aspx を取得して Supersedes / SupersededBy を確認
-        - PatchBaseline.NeutralPatches を Config JSON にアトミックに書き戻し
+        - PatchBaseline.Lines を Config JSON にアトミックに書き戻し
 P04   FetchAssets（新しく解決された URL と SHA-256 を使用）
 P05   ExpandIso
 P06 ValidatePatchServicing
-        - パススルー：wsusscn2 の Layer 2 サービシング準備性ゲートは
-          データソース移行で削除されました。これを置き換える Catalog
-          モデル整合チェックは保留中です（SPEC.md §B.19）。
+        - PatchModel 別整合チェック（Test-PatchModelConsistency）を実行します。
+          これが置き換えた wsusscn2 の Layer 2 グラフゲートは
+          データソース移行で削除されました（SPEC.md §B.19）。
         - 実際のサービシング準備性はビルド中にマウント済み WIM 上で
           Test-PatchServicingReadinessOnMount が検証します（SPEC.md §B.13、P07/P08）。
         - 旧来のライブ Windows Update Agent オフラインスキャンは削除
@@ -562,10 +562,10 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` ドライブの空き容量が 100 GB 未満 | `-WorkRoot` をより大きなボリュームへ移動するか、空きを確保する（100 GB は 1 OS 分の PrepareBuildVerify エンドツーエンドに必要な最低量）|
 | `Workspace preflight failed: ... required Config file(s) missing` | `data/config-Server<N>.json` ファイル群が削除またはコピー漏れ | `Update-WindowsServerIso.ps1` と同階層に `data/` ディレクトリを復元（`Server2016/2019/2022/2025.json` の 4 ファイルすべてが必須）|
 | `Catalogue: no narrowed result for ... / Server2022`、`Resolved 0 patch entries` | Microsoft が Catalogue のタイトル形式を変更（句読点ドリフト）| 該当 `data/config-Server*.json` の `TitleTokens` 配列に新形式を追加（SPEC.md §D.19 参照）|
-| RefreshAllBaselines 後の `NeutralPatches[]` エントリの `Type` が誤っている | `Convert-CatalogPatchToBaselineEntry` の新規呼び出し側で `-KnownType` 未渡し | Catalogue 検索コンテキストから `-KnownType $q.Type` を渡す（SPEC.md §D.20 参照）|
+| RefreshAllBaselines 後に解決済みセットが OS サービシングモデルに違反 | `Lines[]` の Kind が宣言された `PatchModel` と不一致 | P06 `Test-PatchModelConsistency` が必須/禁止 Kind と共に throw します。`PatchModel` が OS と一致するか確認（SPEC.md §B.19 参照）|
 | .NET CU ベースラインエントリのサブファイルが欠落しているように見える | 複数 `.msu` を持つアンブレラ KB で 1 つしか保持されなかった | `Resolve-PatchSetFromCatalog` が `Type='DotNet'` を `Select-AllCanonicalPatchFiles` 経由でルーティングしているか確認（SPEC.md §D.21 参照）|
 | Warning 行に `0x800f081e` が表示 | このパッチは当該 SKU には適用不能 | クロス SKU のパッチセットでは想定内、無視して問題なし（SPEC.md §D.8 参照）|
-| P07 の途中で `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` | LCU が前提とする SSU がベースラインから欠落 | `RefreshAllBaselines` が同月のスタンドアロン SSU を自動発見するようになった（SPEC.md §B.22.5）ため、SSU の欠落は稀です。なお欠落する場合は前提 SSU を `NeutralPatches[]` に追加。マウント時のサービシングチェック（SPEC.md §B.13）がビルド中に前提欠落を検出します（SPEC.md §D.2 参照）|
+| P07 の途中で `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` | LCU が前提とする SSU がベースラインから欠落 | `separate-ssu` では P06 `PatchModel` チェック（SPEC.md §B.19）が標準の `SSU` 行を要求するため、SSU 欠落は静的に検出されます。なお欠落する場合は `PatchBaseline.Lines[]` に SSU 行を追加（SPEC.md §D.2 参照）|
 | P05 の WIM インデックスバナーで文字化け（日本語が二重）| 過去の中断ランによる DISM マウントキャッシュ汚染 | **OS ファミリごとに新しい `-WorkRoot` を使用**（`D:\UpdateWsi_2016`、`D:\UpdateWsi_2019`、…）（SPEC.md §D.25 参照）|
 | 古い WIM マウントが新規実行を阻害 | 過去の実行がマウント途中でクラッシュ | `dism /Get-MountedImageInfo` 実行後に `dism /Cleanup-Mountpoints` を実行（SPEC.md §D.1 参照）|
 | ダウンロード後の ISO SHA-256 不一致 | Microsoft が Evaluation Center スナップショット URL を更新 | `data/config-<OsKey>.json` の `LanguageSpecific.<lang>.Iso.Sha256` を新しい値に更新（SPEC.md §D.11 参照）|

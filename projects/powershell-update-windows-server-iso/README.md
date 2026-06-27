@@ -264,7 +264,7 @@ uses. Four Admin Actions let you refresh and inspect that data without
 touching any ISO. **The refresh path is two-stage**: `RefreshSnapshots`
 populates the upstream `data/raw-*` / `data/cache-*` files from
 Microsoft Learn + Microsoft Update Catalog, then `RefreshAllBaselines`
-regenerates each `data/config-Server*.json` `PatchBaseline.NeutralPatches[]`
+regenerates each `data/config-Server*.json` `PatchBaseline.Lines[]`
 from those caches. This split follows the SPEC §B.22.1 refresher architecture.
 
 | Action | Admin Phase | Description |
@@ -451,13 +451,13 @@ P03 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
         - Identify SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
           + .NET CU using config-driven title-token narrowing
         - Fetch ScopedViewInline.aspx for Supersedes / SupersededBy lists
-        - Write back PatchBaseline.NeutralPatches to Config JSON (atomically)
+        - Write back PatchBaseline.Lines to Config JSON (atomically)
 P04   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
 P05   ExpandIso
 P06 ValidatePatchServicing
-        - Pass-through: the wsusscn2 Layer 2 servicing-readiness gate was
-          removed in the data-source migration; the Catalog-model
-          consistency check that replaces it is pending (SPEC.md §B.19).
+        - Runs the per-PatchModel consistency check (Test-PatchModelConsistency);
+          the wsusscn2 Layer 2 graph gate it replaced was removed in the
+          data-source migration (SPEC.md §B.19).
         - Real servicing readiness is validated on-mount during the build
           by Test-PatchServicingReadinessOnMount (SPEC.md §B.13, P07/P08).
         - The former live Windows Update Agent offline scan was removed
@@ -575,10 +575,10 @@ enforces this per repository SPEC.md §12 (SPEC-CI-081).
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` drive has less than 100 GB free | Move `-WorkRoot` to a larger volume, or free up space (the 100 GB minimum covers an end-to-end PrepareBuildVerify run for one OS) |
 | `Workspace preflight failed: ... required Config file(s) missing` | The `data/config-Server<N>.json` files were deleted or not copied | Restore the `data/` directory alongside `Update-WindowsServerIso.ps1` (all four `Server2016/2019/2022/2025.json` must be present) |
 | `Catalogue: no narrowed result for ... / Server2022`; `Resolved 0 patch entries` | Microsoft changed the Catalogue title format (punctuation drift) | Add the new title form to the relevant `TitleTokens` array in `data/config-Server*.json`. See SPEC.md §D.19 |
-| Wrong `Type` on `NeutralPatches[]` entries after RefreshAllBaselines | A new caller of `Convert-CatalogPatchToBaselineEntry` did not pass `-KnownType` | Pass `-KnownType $q.Type` from the Catalogue search context. See SPEC.md §D.20 |
+| A resolved set violates the OS servicing model after RefreshAllBaselines | the `Lines[]` Kinds do not match the declared `PatchModel` | P06 `Test-PatchModelConsistency` throws with the required/forbidden Kinds; confirm `PatchModel` matches the OS. See SPEC.md §B.19 |
 | .NET CU baseline entry seems to be missing a sub-file | Umbrella KB with multiple `.msu` files; only one was kept | Confirm `Resolve-PatchSetFromCatalog` routes `Type='DotNet'` through `Select-AllCanonicalPatchFiles`. See SPEC.md §D.21 |
 | `0x800f081e` in Warning lines | Patch not applicable to this SKU | Expected for cross-SKU patch sets; safe to ignore (see SPEC.md §D.8) |
-| `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` mid-P07 | LCU's prerequisite SSU is missing from the baseline | `RefreshAllBaselines` now auto-discovers the same-month standalone SSU (SPEC.md §B.22.5), so a missing SSU is rare; if it still occurs, add the prerequisite SSU to `NeutralPatches[]`; the on-mount servicing check (SPEC.md §B.13) catches a missing prerequisite during the build. See SPEC.md §D.2 |
+| `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` mid-P07 | the LCU's prerequisite SSU is missing from the baseline | for `separate-ssu` the P06 `PatchModel` check (SPEC.md §B.19) requires the standalone `SSU` line, so a missing SSU is caught statically; if it still occurs, add the SSU line to `PatchBaseline.Lines[]`. See SPEC.md §D.2 |
 | Mojibake (doubled Japanese characters) in P05 WIM-index banner | DISM mount-cache poisoning from prior aborted runs | Use **one fresh `-WorkRoot` per OS family** (`D:\UpdateWsi_2016`, `D:\UpdateWsi_2019`, …). See SPEC.md §D.25 |
 | Stale WIM mount blocks new run | Previous run crashed mid-mount | Run `dism /Get-MountedImageInfo` then `dism /Cleanup-Mountpoints`. See SPEC.md §D.1 |
 | ISO SHA-256 mismatch on download | Microsoft rotated the Evaluation Center snapshot URL | Update `data/config-<OsKey>.json` `LanguageSpecific.<lang>.Iso.Sha256` to the new value. See SPEC.md §D.11 |
