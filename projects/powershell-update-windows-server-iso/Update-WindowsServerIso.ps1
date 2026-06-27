@@ -541,7 +541,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.36'
+$Script:ScriptVersion = 'update-wsi-2026.06.27-r11.37'
 $Script:ScriptTag     = 'dism-scratchdir-localisation'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -2820,7 +2820,7 @@ function Assert-WorkspacePreflight {
 function Get-ConfigProfile {
     <#
     .SYNOPSIS
-        Load the OS profile JSON (Schema v2.0 or v2.1) for the given OsKey
+        Load the OS profile JSON (Config Schema v3.0) for the given OsKey
         and resolve the language sub-profile for OsLang.
     .DESCRIPTION
         v2.0 layout: top-level keys are Schema, OsKey, Common,
@@ -2861,7 +2861,7 @@ function Get-ConfigProfile {
     $json = $raw | ConvertFrom-CanonicalJson
 
     # Schema validation (v2.0 and v2.1 both accepted)
-    $acceptedSchemas = @('2.0','2.1')
+    $acceptedSchemas = @('3.0')
     if (-not $json.Schema -or ($acceptedSchemas -notcontains $json.Schema)) {
         throw ('Config {0} has Schema="{1}"; expected one of: {2}. Legacy schemas are not supported.' -f $cfgFile, $json.Schema, ($acceptedSchemas -join ', '))
     }
@@ -2875,8 +2875,8 @@ function Get-ConfigProfile {
     # feature documented in SPEC.md B.18). v2.0 configs without
     # Pca2023 are accepted with a soft warning so older installations
     # can still load while migration to v2.1 is in flight.
-    if ($json.Schema -eq '2.1' -and -not $json.Pca2023) {
-        throw ('Config {0} declares Schema="2.1" but has no Pca2023 block. v2.1 requires Pca2023; see SPEC.md B.10.' -f $cfgFile)
+    if (-not $json.Pca2023) {
+        throw ('Config {0} declares Schema="3.0" but has no Pca2023 block. v3.0 requires Pca2023; see SPEC.md B.10.' -f $cfgFile)
     }
     $langNode = $json.LanguageSpecific.$OsLang
     if ($null -eq $langNode) {
@@ -2890,6 +2890,7 @@ function Get-ConfigProfile {
     $merged = [pscustomobject]@{
         Schema                 = $json.Schema
         OsKey                  = $json.OsKey
+        PatchModel             = $json.PatchModel
         Build                  = $json.Common.Build
         OsShortName            = $json.Common.OsShortName
         Edition                = $json.Common.Edition
@@ -3316,7 +3317,7 @@ function Test-PatchBaselineFresh {
         Returns $false when either:
           - PatchTuesdayOfBaseline is empty (uninitialised), or
           - PatchTuesdayOfBaseline < latest Patch Tuesday, or
-          - PatchBaseline.Patches has zero usable entries
+          - PatchBaseline.Lines has zero usable entries
         Returns $true otherwise.
     #>
     [OutputType([bool])]
@@ -3331,9 +3332,9 @@ function Test-PatchBaselineFresh {
     $baselineDate = [datetime]::ParseExact($ptStr, 'yyyy-MM-dd', $null)
     if ($baselineDate -lt $LatestPatchTuesday) { return $false }
     # Also require at least one usable patch entry
-    if (-not $Baseline.Patches -or $Baseline.Patches.Count -eq 0) { return $false }
-    $usable = @($Baseline.Patches | Where-Object {
-        $_.KbId -and $_.DownloadUrl -and $_.Sha256 -and ($_.Sha256 -ne '')
+    if (-not $Baseline.Lines -or $Baseline.Lines.Count -eq 0) { return $false }
+    $usable = @($Baseline.Lines | Where-Object {
+        $_.KbId -and $_.DownloadUrl -and $_.Digest -and ($_.Digest -ne '')
     })
     return ($usable.Count -gt 0)
 }
@@ -3341,15 +3342,15 @@ function Test-PatchBaselineFresh {
 function Test-PatchBaselineUsable {
     <#
     .SYNOPSIS
-        Returns $true if PatchBaseline.Patches has any usable entry.
+        Returns $true if PatchBaseline.Lines has any usable entry.
         Distinct from Test-PatchBaselineFresh: this one ignores age.
         Used by the fallback-on-scrape-failure path (SPEC C.3).
     #>
     [OutputType([bool])]
     param([Parameter(Mandatory)] [AllowNull()] $Baseline)
-    if (-not $Baseline -or -not $Baseline.Patches) { return $false }
-    $usable = @($Baseline.Patches | Where-Object {
-        $_.KbId -and $_.DownloadUrl -and $_.Sha256 -and ($_.Sha256 -ne '')
+    if (-not $Baseline -or -not $Baseline.Lines) { return $false }
+    $usable = @($Baseline.Lines | Where-Object {
+        $_.KbId -and $_.DownloadUrl -and $_.Digest -and ($_.Digest -ne '')
     })
     return ($usable.Count -gt 0)
 }
@@ -11359,29 +11360,20 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
             }
         } elseif ($Script:AutoDetectLatestPatches -or $Script:UseBaselineOnly -or `
                   ($Script:OsProfile.PatchBaseline -and `
-                   (($Script:OsProfile.PatchBaseline.Lines -and `
-                     $Script:OsProfile.PatchBaseline.Lines.Count -gt 0) -or `
-                    ($Script:OsProfile.PatchBaseline.Patches -and `
-                     $Script:OsProfile.PatchBaseline.Patches.Count -gt 0)))) {
+                   $Script:OsProfile.PatchBaseline.Lines -and `
+                   $Script:OsProfile.PatchBaseline.Lines.Count -gt 0)) {
             # PatchBaseline-driven path. The OS-neutral baseline is
-            # stored under PatchBaseline.Lines[] (committed
-            # via stage5 / -Action RefreshAllBaselines, see SPEC B.22.5
-            # and B.22.8). Legacy schemas used PatchBaseline.Patches[]
-            # for the same data; both are honoured here for backward
-            # compatibility, preferring Lines[] which is the
-            # current source of truth. P03 (when not skipped via
-            # -UseBaselineOnly) may refresh this list from the Microsoft
-            # Update Catalog if it is stale or -AutoDetectLatestPatches
-            # was passed.
+            # stored under PatchBaseline.Lines[] (Config Schema v3.0;
+            # committed via -Action RefreshAllBaselines, see SPEC B.22.5
+            # and B.22.8). P03 (when not skipped via -UseBaselineOnly)
+            # may refresh this list from the Microsoft Update Catalog if
+            # it is stale or -AutoDetectLatestPatches was passed.
             $bl = $Script:OsProfile.PatchBaseline
             $baselineSource = $null
             $baselineField  = $null
             if ($bl.Lines -and $bl.Lines.Count -gt 0) {
                 $baselineSource = $bl.Lines
                 $baselineField  = 'Lines'
-            } elseif ($bl.Patches -and $bl.Patches.Count -gt 0) {
-                $baselineSource = $bl.Patches
-                $baselineField  = 'Patches (legacy)'
             }
             if ($baselineSource) {
                 Write-Step ('Seeding ResolvedPatches from PatchBaseline.{0}: {1} entries.' -f $baselineField, $baselineSource.Count)
@@ -11422,12 +11414,12 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                     }) | Out-Null
                 }
             } else {
-                Write-Step 'PatchBaseline.Lines and .Patches both empty; P03 will populate from Microsoft Update Catalog.'
+                Write-Step 'PatchBaseline.Lines is empty; P03 will populate from Microsoft Update Catalog.'
             }
         } elseif ($Script:SyntheticTestMode) {
             Write-Step '-SyntheticTestMode is on; no real patches required.'
         } else {
-            throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches, or populate Config PatchBaseline.Lines (or legacy .Patches).'
+            throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches, or populate Config PatchBaseline.Lines.'
         }
 
         # Order by ApplyOrder, then by KbId. Wrap in @() to guarantee
@@ -13490,7 +13482,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
             }
             Write-SubSection ('Refreshing {0}' -f $osKey)
             $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson
-            $acceptedSchemas = @('2.0','2.1')
+            $acceptedSchemas = @('3.0')
             if ($acceptedSchemas -notcontains $raw.Schema) {
                 Write-Caution ('Skipping {0}: Schema is "{1}", expected one of: {2}.' -f $osKey, $raw.Schema, ($acceptedSchemas -join ', '))
                 continue
