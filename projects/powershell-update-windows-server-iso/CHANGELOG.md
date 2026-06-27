@@ -22,6 +22,16 @@ the script and follows the
 
 ## [Unreleased]
 
+### Migrate the servicing-readiness data source from `wsusscn2.cab` to the Microsoft Update Catalog: remove the offline dependency-database facility (`$Script:ScriptVersion` -> `update-wsi-2026.06.27-r11.33`, tag `wsusscn2-catalog-migration-d1`)
+
+Retires the wsusscn2-derived Servicing Dependency Database (the offline applicability-graph "Layer 2" facility) in favour of the Microsoft Update Catalog as the production data source. This is the removal half (D1) of the migration; the Catalog-model consistency check that replaces the graph readiness gate is a separate follow-up. There are no downstream consumers, so the removal is destructive with no compatibility shim.
+
+- **Tests.** Remove the 12 `tests/servicing_dependency_*.py` files (T12-T19, T21-T22, the scope-invariants gate, the Layer-2 schema gate), `tests/wsusscn2_probe.py` (T5), and the `tests/common/` + `tests/fixtures/servicing-dependency/` support; `tests/README.md` updated. T20 (`removed_live_wua_guard`) and T23 (`config_required_ssu_downloadurl`) are model-neutral and stay.
+- **Script.** Remove 15 functions (the OfflineSync / ServicingDependency parser pipeline, `Invoke-AdminPhaseA04_RefreshDependencyDatabase`, `Update-Layer1DependencyVerification`, `Test-PatchServicingReadinessFromGraph`), the four OfflineSync GUID tables, the `RefreshDependencyDatabase` action (A04) and its ValidateSet member, the `-OfflineSyncPackagePath` parameter, and the A01->A04 chain. P06 `ValidatePatchServicing` becomes a pass-through; real servicing readiness is validated on-mount by `Test-PatchServicingReadinessOnMount` (SPEC B.13). The 7-Zip helper trio, the CanonicalJson group, the DataContract mechanism, and `Build-PatchPlan` are retained.
+- **Data / schema / config.** Delete `data/servicing-dependency-database.json` and `schema/servicing-dependency-database.schema.json`; remove `PatchBaseline.OfflineSyncPackage` and the root-level `_DependencyVerified*` fields from all four `config-Server*.json` (re-serialised canonically) and from `config.schema.json`.
+- **Docs.** SPEC B.19 is reserved with a placeholder pointing at the Catalog-model replacement; the scattered current-state references across SPEC, TESTING, and README (EN + JA) are reconciled in bilingual lock-step; the D.18 lesson and the r09.0 release history are preserved as historical record.
+- **Scope.** `projects/powershell-update-windows-server-iso/` only; no vendored Part A / canon region touched. ScriptVersion -> r11.33.
+
 ### Data: regenerate the 2026-06 monthly `/data` baseline (Layer 1 + Layer 2 + caches) and advance the T23 Server 2016 SSU KbId (no `$Script:ScriptVersion` change)
 
 Regenerates the shipped monthly baseline from 2026-05 to **2026-06** via the TESTING §8 procedure (A03 `RefreshSnapshots` -> A01 `RefreshAllBaselines -Mode Force -PatchMonth 2026-06 -OfflineSyncPackagePath <cab>` -> A04 `RefreshDependencyDatabase`) against the published 2026-06 `wsusscn2.cab` (SHA-256 `5b075a6d9fdaa1751b8c70bf164531163e6750444e9100453f96dce3a4eec122`, 649,341,212 bytes). Data-only; the script is untouched, so **no `$Script:ScriptVersion` bump**.
