@@ -574,12 +574,11 @@ $Script:PhaseSummaryShown = $false
 
 # Shared data-contract identity: the single source of truth for cross-cutting
 # data-quality checks. Stamped into every generated data artifact's _meta
-# (Layer 1 config-Server*.json and the Layer 2 dependency database) and
+# (the config-Server*.json baselines and the cache-*.json data files) and
 # validated across artifacts by Test-DataContractConsistency, so one
 # comparison validates the whole set instead of reconciling independent
 # per-model schema versions. DataContractVersion is bumped on any breaking
-# shape change to any data model. See schema/servicing-dependency-database.schema.json
-# and SPEC section B.19.10.
+# shape change to any data model.
 $Script:DataContractId      = '4c173c61-c099-4512-9283-f5d951beda8b'
 $Script:DataContractVersion = 1
 
@@ -7707,7 +7706,7 @@ function Install-SevenZipFallback {
 # To get a single canonical byte stream across all three runtimes, both the
 # writer and the reader are implemented from scratch here and used in place
 # of the built-in cmdlets for all canonical data files (config-*.json,
-# servicing-dependency-database.json, cache-*.json, etc.).
+# cache-*.json, etc.).
 #
 # Canonical format (SPEC Part B.23):
 #   1. UTF-8 (no BOM)              6. Literal non-ASCII (no \uXXXX)

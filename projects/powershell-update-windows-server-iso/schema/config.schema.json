@@ -43,7 +43,7 @@
     },
     "_meta": {
       "type": "object",
-      "description": "Data-contract provenance stamp (shared cross-cutting contract; mirrors the stamp subset of schema/servicing-dependency-database.schema.json _meta). Its presence classifies this config as a contract-bearing artifact for Test-DataContractConsistency; absence leaves it 'Unknown' (still valid). Written by Save-ConfigWithBaseline.",
+      "description": "Data-contract provenance stamp (shared cross-cutting contract). Its presence classifies this config as a contract-bearing artifact for Test-DataContractConsistency; absence leaves it 'Unknown' (still valid). Written by Save-ConfigWithBaseline.",
       "required": [
         "dataContractId",
         "dataContractVersion",
@@ -60,7 +60,7 @@
         "dataContractVersion": {
           "type": "integer",
           "minimum": 1,
-          "description": "Shared cross-cutting data-contract epoch (see servicing-dependency-database.schema.json). Held in lockstep across every data artifact; one comparison validates the whole set."
+          "description": "Shared cross-cutting data-contract epoch. Held in lockstep across every data artifact; one comparison validates the whole set."
         },
         "scriptVersion": {
           "type": "string",
@@ -76,7 +76,7 @@
   },
   "patternProperties": {
     "^_": {
-      "description": "Provenance / verification fields written by the script at runtime (e.g. Layer 1 _DependencyVerified* fields, SPEC B.19). Underscore-prefixed keys are reserved for machine-written metadata and are allowed anywhere."
+      "description": "Provenance / verification fields written by the script at runtime. Underscore-prefixed keys are reserved for machine-written metadata and are allowed anywhere."
     }
   },
   "additionalProperties": false,
@@ -214,9 +214,6 @@
             "additionalProperties": false
           },
           "description": "KBs to exclude, each with a KbId and human Reason."
-        },
-        "OfflineSyncPackage": {
-          "$ref": "#/definitions/OfflineSyncPackage"
         }
       },
       "not": {
@@ -311,39 +308,6 @@
           "type": "boolean"
         },
         "Variant": {
-          "type": "string"
-        }
-      },
-      "patternProperties": {
-        "^_": {
-          "description": "Machine-written provenance (e.g. _DependencyVerifiedDate, _DependencyVerifiedSource)."
-        }
-      },
-      "additionalProperties": false
-    },
-    "OfflineSyncPackage": {
-      "type": "object",
-      "description": "Offline-scan catalog metadata. SPEC B.4.3.",
-      "properties": {
-        "SourceUrl": {
-          "type": "string"
-        },
-        "LocalCachePath": {
-          "type": "string"
-        },
-        "LastDownloadedDate": {
-          "type": "string"
-        },
-        "LastDownloadedSha256": {
-          "type": "string"
-        },
-        "LastDownloadedSizeBytes": {
-          "type": "integer"
-        },
-        "DependencyDatabasePath": {
-          "type": "string"
-        },
-        "DependencyDatabaseSha256": {
           "type": "string"
         }
       },
