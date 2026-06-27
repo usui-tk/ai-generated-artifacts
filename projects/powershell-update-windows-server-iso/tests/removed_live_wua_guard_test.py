@@ -1,14 +1,14 @@
 """
 T20: Removed-live-WUA static guard (offline).
 
-r11.19 retired P06's live Windows Update Agent (WUA) offline scan and
-repurposed P06 into a single, default-ON, blocking servicing-readiness
-gate against the wsusscn2 Layer 2 database. This static guard scans the
-script text and fails if any of the removed symbols are reintroduced, or
-if the new gate loses its blocking wiring. It complements T16
-(servicing_dependency_readiness_verdict_test.py), which exercises the
-verdict -> block mapping at the Test-PatchServicingReadinessFromGraph
-level (block-on-absence, block-on-Fail, warn-on-Superseded, pass).
+r11.19 retired P06's live Windows Update Agent (WUA) offline scan. The
+data-source migration (wsusscn2.cab -> Microsoft Update Catalog) then
+removed P06's wsusscn2 Layer 2 dependency-graph servicing-readiness check
+and turned P06 into a pass-through pending the Catalog-model consistency
+check. This static guard scans the script text and fails if any of the
+removed symbols (the live-WUA functions/params, the wsusscn2 graph
+function, the RefreshDependencyDatabase action) are reintroduced, or if
+P06 regains readiness-verdict internals.
 
 Pure text scan: no pwsh, no network, no fixtures.
 
@@ -114,19 +114,19 @@ def main() -> int:
         r.check("P06 row Func='Invoke-PlanPhase06_ValidatePatchServicing'",
                 "Func='Invoke-PlanPhase06_ValidatePatchServicing'" in row, row.strip())
 
-    # 6. New gate is actually wired and blocking (not a no-op).
-    r.check("gate calls Test-PatchServicingReadinessFromGraph",
-            "Test-PatchServicingReadinessFromGraph -ResolvedPatches" in text,
-            "readiness call missing")
-    r.check("gate sources $Script:ResolvedPatches",
-            "$Script:ResolvedPatches" in text,
-            "resolved-patches source missing")
-    r.check("gate blocks on Layer 2 absence (-not $readiness.Available throw path)",
-            text.count("-not $readiness.Available") == 1,
-            "absence block path missing or duplicated")
-    r.check("gate blocks on OverallStatus Fail",
-            text.count("$readiness.OverallStatus -eq 'Fail'") == 1,
-            "Fail block path missing or duplicated")
+    # 6. P06 is now a pass-through. The wsusscn2 Layer 2 dependency-graph
+    #    servicing-readiness check was removed in the data-source migration;
+    #    guard that the removed graph function, the RefreshDependencyDatabase
+    #    action, and P06's readiness-verdict internals are not reintroduced.
+    r.check("removed: Test-PatchServicingReadinessFromGraph",
+            "Test-PatchServicingReadinessFromGraph" not in text,
+            f"{text.count('Test-PatchServicingReadinessFromGraph')} occurrence(s) remain")
+    r.check("removed: RefreshDependencyDatabase action",
+            "RefreshDependencyDatabase" not in text,
+            f"{text.count('RefreshDependencyDatabase')} occurrence(s) remain")
+    r.check("P06 has no readiness-verdict internals (pass-through)",
+            "$readiness.OverallStatus" not in text and "-not $readiness.Available" not in text,
+            "P06 readiness-check internals still present")
 
     # 7. Diagnostic report files no longer emitted by the script.
     for f in REMOVED_DIAG_FILES:
