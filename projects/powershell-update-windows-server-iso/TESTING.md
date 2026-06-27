@@ -13,7 +13,7 @@ This document consolidates everything needed to verify and evaluate
 2. **Synthetic smoke tests** — read-only Actions executable in CI
 3. **Live Catalogue verification** — probes that catch Microsoft-side schema drift
 4. **Operator-pending verification** — full `-Execute` builds (requires Windows + ADK + ≥ 100 GB disk + admin)
-5. **Self-verification tool suite** — T1 through T20 (canonical inventory in [`tests/README.md`](./tests/README.md))
+5. **Self-verification tool suite** — T1 through T27 (canonical inventory in [`tests/README.md`](./tests/README.md))
 6. **Continuous integration** — four GitHub Actions stages
 
 > **Documentation language policy**: This document is maintained in
@@ -55,7 +55,7 @@ a build identifier plus a calendar date. Pending items are marked
 | P03 RefreshPatchBaseline — Catalogue scrape (live, monthly) | ✓ scrape paths exercised via T1 | CI Stage 4 monthly |
 | P04 FetchAssets — ISO + patch downloads with SHA-256 verify | _pending operator confirmation_ | not yet exercised on a fresh runner |
 | P05 ExpandIso — source ISO mount + WIM enumeration | _pending operator confirmation_ | r09.0 step2b3-real-data-parser-correction build (synthetic mode only) |
-| P06 ValidatePatchServicing — pass-through (Catalog-model consistency check pending; real readiness on-mount via §B.13) | ✓ pass-through stub; verified by T20 | migration r11.33 / 2026-06-27 |
+| P06 ValidatePatchServicing — per-`PatchModel` consistency check (`Test-PatchModelConsistency` reads the promoted `PatchModel` and throws on mismatch; real readiness on-mount via §B.13) | ✓ consistency check active (`PatchModel` promoted r11.37); gate-wired guard via T20 | r11.37 / 2026-06-28 |
 | P07 PatchInstallWim — SSU → LCU → .NET sequence | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P08 PatchBootWim — boot.wim + winre.wim | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P09 AssembleIso — Dynamic Update overlay + `oscdimg` | _pending operator confirmation_ | (requires `oscdimg.exe` on a Windows runner) |
@@ -80,9 +80,10 @@ a build identifier plus a calendar date. Pending items are marked
 | T24 dism_cleanup_args_test.py (6 assertions, `Get-DismCleanupArgumentList`: default three-token `/Cleanup-Image /StartComponentCleanup` vector with no `/ResetBase`, `-IncludeResetBase` appends `/ResetBase`, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the comma/`+` precedence collapse behind exit 1639) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T25 dism_export_args_test.py (6 assertions, `Get-DismExportArgumentList` returns the five-token `/Export-Image ... /Compress:max` vector targeting the requested source index, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the same precedence trap) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T26 defender_exclusion_plan_test.py (13 assertions, the three pure helpers behind `-UseDefenderExclusions`: `Get-DefenderManagedExclusionSet` (WorkRoot path + four servicing process names), `Get-DefenderExclusionPlan` (add-only-absent, case/slash-insensitive), `Get-DefenderExclusionDecision` (fail-closed -- applies only when every prerequisite is positively satisfied; `$null`/unknown -> skip); the `*-MpPreference`/`Get-MpComputerStatus` wrappers are Windows-only and not exercised) | ✓ all pass | r11.26 defender-exclusion-optin build / 2026-06-11 |
+| T27 catalog_patchset_builder_test.py (14 assertions, offline b3 config-dataset builder: drives `ConvertTo-ConfigLines` through the TestHarness REPL against the committed layer-1 raw fixture `tests/fixtures/catalog_raw/resolve-2026-06.json` to BUILD `PatchBaseline.Lines[]` without live Catalog I/O -- restores the pre-D2 offline construction path for the b3 producer; asserts per-OS Kinds match the `PatchModel` allowed set, every Line carries a `Digest`, and the uup-checkpoint OS builds a `SetupDU` Line at `ApplyOrder` 5) | ✓ all pass | r11.38 setupdu-acquisition / 2026-06-28 |
 | Part C §C.3.4 — `canonical_json_format_check.py` (26 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T11/T20/T24-T26 + format gate + config schema gate) | ✓ green | CI continuous |
+| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T11/T20/T24-T27 + format gate + config schema gate) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
@@ -408,6 +409,7 @@ python3 tests/config_required_ssu_downloadurl_test.py            # T23: 20 requi
 python3 tests/dism_cleanup_args_test.py                          # T24: 6 cleanup-arg-vector assertions (1639 collapse guard + /ResetBase default + /ScratchDir)
 python3 tests/dism_export_args_test.py                           # T25: 6 export-arg-vector assertions (Export-Image /Compress:max + /ScratchDir)
 python3 tests/defender_exclusion_plan_test.py                    # T26: 13 Defender pure-helper assertions (managed set + add-only-absent plan + fail-closed decision)
+python3 tests/catalog_patchset_builder_test.py                   # T27: 14 offline b3 dataset-builder assertions (ConvertTo-ConfigLines from captured raw; SetupDU @ ApplyOrder 5)
 
 # Schema / format gates (every commit that touches data)
 python3 tests/config_schema_test.py                          # config schema gate

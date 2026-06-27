@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""T12: Offline b3 config-dataset builder / regression test.
+"""T27: Offline b3 config-dataset builder / regression test.
 
 Restores the offline initial-dataset construction capability for the
 Catalog (b3) data-source. Before the b3 migration, the release-info

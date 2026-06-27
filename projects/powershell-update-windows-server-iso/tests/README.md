@@ -36,6 +36,7 @@ production, this directory ships five tools, summarised below.
 | `catalog_title_tokens_test.py` (T9) | Offline regression test for the URL-resolver Config-driven narrowing; drives `Get-CatalogTitleTokenList` against all four OS configs (verifies sourcing + missing-Config defensive default) and `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases (positive matches, same-KB client-variant rejection, `arm64` / `Windows 11` negative exclusion); 18 assertions | After every change to `Common.CatalogTitleTokens` in any OS config, or to the narrow-filter helpers; on every CI run | No  |
 | `release_info_resolver_test.py` (T10) | Offline regression test for the Refresher main-path migration; drives `Get-PatchSetFromReleaseInfoDiscovery` through four scenarios (Server 2025/2022/2019 full set + no-match month) plus defensive cases (empty data dir, invalid PatchMonth). Synthetic fixtures derived from live 2026-05-26 captures cover SPEC B.23.5 B-2 multi-row .NET CU per OS and SPEC B.23.6 absence-of-DU; 18 assertions | After every change to `Resolve-PatchSetFromReleaseInfo`, the discovery helper, or any of the three caches it reads; on every CI run | No  |
 | `canonical_json_test.py` (T11) | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell, in `Update-WindowsServerIso.ps1`) and `canonical_json_dumps` / `save_canonical_json_file` (Python, in `tests/common/canonical_json.py`); 26 assertions covering primitives (12), collections (8), Unicode (3), real-world `data/*.json` shapes (2), and file-level save (1). Verifies the SPEC Part B.23 byte-level parity contract for `data/*.json` and `tests/fixtures/*.json` files. | After every change to `ConvertTo-CanonicalJson`, `Save-CanonicalJsonFile`, or `tests/common/canonical_json.py`; on every CI run | No  |
+| `catalog_patchset_builder_test.py` (T27) | Offline b3 config-dataset builder: drives `ConvertTo-ConfigLines` through the TestHarness REPL against the committed layer-1 raw fixture (`fixtures/catalog_raw/resolve-2026-06.json`) to BUILD `PatchBaseline.Lines[]` without live Catalog I/O -- restores the pre-D2 offline construction path. 14 assertions: per-OS Kinds match the `PatchModel` allowed set, every Line carries a `Digest`, the uup-checkpoint OS builds a `SetupDU` Line at `ApplyOrder` 5. | After every change to `ConvertTo-ConfigLines`, the b3 transform, or the raw fixture; on every CI run | No  |
 | `canonical_json_format_check.py` (Part C gate) | Offline format compliance check for every `*.json` file under `data/`, `tests/fixtures/`, and `tests/snapshots/`. Re-serialises each file through `canonical_json_dumps` and fails if the bytes diverge. Implements SPEC §C.3.4. | On every commit that adds or modifies a JSON file in the three scanned directories; on every CI run | No  |
 | `config_schema_test.py` (config schema gate) | Offline schema-conformance check. A stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json` (forbids the legacy `Patches` property, requires `NeutralPatches`), with a targeted r10.4 regression guard against `Patches` reappearing. 14 assertions. No T number — schema gate, mirroring the format-gate convention. | On every commit that touches `data/config-Server*.json` or `schema/config.schema.json`; on every CI run | No  |
 
@@ -159,6 +160,7 @@ tests/
   powershell_harness.py      T3
   eval_iso_probe.py          T4
   removed_live_wua_guard_test.py         T20 (removed-live-WUA static guard: functions/params absent + P06 gate wired, 21 assertions)
+  catalog_patchset_builder_test.py       T27 (offline b3 dataset builder: ConvertTo-ConfigLines from captured raw -> PatchBaseline.Lines incl. SetupDU @ ApplyOrder 5, 14 assertions)
   common/
     __init__.py              package marker
     catalog_client.py        urllib HTTP fetcher with retry-jitter
@@ -177,6 +179,8 @@ tests/
       expected.json                  # parsed expectations for T2
     config-guard/
       bad-config-ssu-empty-url.json  # Type=SSU with empty DownloadUrl: the T23 negative fixture
+    catalog_raw/
+      resolve-2026-06.json           # captured layer-1 { os; lines[] } incl. a SetupDU line: T27 offline-build input
   snapshots/
     .gitkeep
     last_probe.json          (written by T1 --snapshot)

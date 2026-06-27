@@ -22,6 +22,44 @@ the script and follows the
 
 ## [Unreleased]
 
+### Restore offline config-dataset construction for the b3 producer (T27), and reconcile SPEC/TESTING/`tests/README` to the r11.35-r11.38 apply-path completion (docs + `tests/` only, no `$Script:ScriptVersion` change)
+
+The b3 producer (`Resolve-Os`) scrapes the live Catalog and -- unlike the pre-D2 release-info path (T10) -- no Python-drivable offline builder was carried forward, so the v3.0 config baseline could no longer be (re)built without network I/O. This restores that path and documents the r11.35-r11.38 work recorded below.
+
+- **Offline builder (T27, `catalog_patchset_builder_test.py`).** Drives `ConvertTo-ConfigLines` through the TestHarness REPL -- the `-RawResolved` injection point the orchestrator documents ("live `Resolve-Os` in production; the captured fixture in tests") -- against a committed layer-1 raw fixture (`tests/fixtures/catalog_raw/resolve-2026-06.json`: the four-OS `{ os; lines[] }` capture plus a Server 2025 `SetupDU` raw line) to BUILD `PatchBaseline.Lines[]` offline. 14 assertions: per-OS Kinds match the `PatchModel` allowed set, every Line carries a `Digest`, the uup-checkpoint OS builds a `SetupDU` Line at `ApplyOrder` 5. `T27` is the next free tier (the `T12`-`T22` servicing-dependency block was retired in D1). Live acquisition is unchanged and remains the T1 probe's / UAT's job.
+- **Docs reconciled.** SPEC B.4 `EnableInstallWimUpdate` corrected to `true` for all four OS (the Server 2025 placeholder `false` was flipped in r11.37). TESTING P06 row: `ValidatePatchServicing` now runs the per-`PatchModel` consistency check (`Test-PatchModelConsistency`, fed by the promoted `PatchModel`) instead of a pass-through stub. TESTING + `tests/README` tier inventory extended with T27.
+- **Scope.** `projects/powershell-update-windows-server-iso/` only; docs + `tests/` + fixture; no `.ps1` change. (Pre-existing: the in-code `$Script:ScriptTag` is stale at `dism-scratchdir-localisation` -- unchanged since before r11.35 -- and is flagged for separate alignment.)
+
+### SetupDU acquisition: add `Resolve-SetupDu` to the b3 producer (`$Script:ScriptVersion` -> `update-wsi-2026.06.27-r11.38`, tag `setupdu-acquisition`)
+
+`SetupDU` was the one `Kind` with no producer in the b3 data-source: the migration ported resolvers for `LCU`/`SSU`/`DotNet`/`SafeOSDU` but deferred the Setup Dynamic Update one ("added by the resolver extension upstream, not here"). The consumer side was already complete after r11.36 (P09 overlay filters `SetupDU`; `$Script:PatchTargetMap` routes it to `Setup`; the `uup-checkpoint` applyMap gives `ApplyOrder` 5), so only acquisition was missing.
+
+- `Resolve-SetupDu` mirrors `Resolve-SafeOsDu`, differing only by the Catalog Products discriminator (`Setup Dynamic Update` vs `Safe OS Dynamic Update`) -- the same pairing the legacy data-source discovered together via `@('DynamicUpdate.Setup','DynamicUpdate.SafeOs')`. Setup DU is published only for the UUP-checkpoint OS (Server 2025/24H2); the other models Forbid it, so it is wired into the 2025 branch of `Resolve-Os` only and returns an empty placeholder elsewhere.
+- **Verification.** Offline FT (mocked Catalog rows incl. the real KB5095966 title plus SafeOS/arm64/21H2 decoys): the resolver selects the x64 Setup DU and rejects the decoys; downstream the line transforms to a `SetupDU` Line (`ApplyOrder` 5), passes consistency, classifies as `SetupDU`, routes to `Setup`, and is selected by P09's filter. 10 assertions. Live acquisition + the `expand.exe` overlay of the real CAB remain UAT scope.
+- **Scope.** `.ps1` only; the b3 acquisition region (outside all canon regions). ScriptVersion -> r11.38.
+
+### Complete the v3.0 config-loader and apply-path gating (`$Script:ScriptVersion` -> `update-wsi-2026.06.27-r11.37`, tag `v3-config-loader-completion`)
+
+The D2 migration moved configs to Config Schema v3.0 (`PatchBaseline.Lines[]`) but the loader and several gates still assumed the v2.x shape, so a v3.0 build failed to start or silently skipped apply phases. Four fixes, all reproduced offline against the four landed configs:
+
+- **Schema gate (blocker).** `Get-ConfigProfile` (and the admin RefreshAllBaselines loop) accepted only `2.0`/`2.1` and threw on `3.0`; both `acceptedSchemas` sets -> `@('3.0')`, the `Pca2023`-required check keyed on the single v3.0 schema.
+- **`PatchModel` promotion.** The flat profile omitted `PatchModel`, so `$OsProfile.PatchModel` was `$null` and P06 could not run; `PatchModel` is now promoted into the profile.
+- **`Enable*` flags.** Only `EnableInstallWimUpdate` was present; `EnableBootWimUpdate`/`EnableWinREUpdate` were absent from every config, so P08 (boot.wim) and the WinRE sub-block skipped (`-not $null`). Both flags added (`true`) to all four configs' `Common`. The Server 2025 `EnableInstallWimUpdate` placeholder `false` was set `true` so the monthly LCU integrates into install.wim like the other OS.
+- **Baseline freshness/usability.** `Test-PatchBaselineFresh`/`Test-PatchBaselineUsable` read `PatchBaseline.Patches` (v2.x) and gated usability on `.Sha256` (empty on most v3.0 Lines -- e.g. every Server 2016 Line); both now read `.Lines` and gate on `.Digest` (the v3.0 primary key). The legacy `.Patches` branch in P02's baseline-seeding is removed (no shim).
+- **Scope.** `.ps1` + the four `config-Server*.json`. ScriptVersion -> r11.37.
+
+### Fix v3.0 apply-path patch-type routing (Kind taxonomy reconciliation, `$Script:ScriptVersion` -> `update-wsi-2026.06.27-r11.36`, tag `apply-path-kind-taxonomy`)
+
+After D2 the apply path still bucketed patches by the v2.x `Type` / legacy names while v3.0 Lines carry `Kind`, so every patch mis-classified.
+
+- P02/P03 build `ResolvedPatch.PatchType` from `.Kind` (was `.Type`, empty under v3.0); `Get-PatchEntryType` precedence reordered to `PatchType` -> `Kind` -> `Type`.
+- The apply sub-phase builders rekeyed to the v3.0 Kinds: install-apply `DotNet` (was `DotNet.Runtime`), WinRE-apply `SafeOSDU` (was `DynamicUpdate.SafeOs`), P09 `SetupDU` (was `DynamicUpdate.Setup`).
+- **Verification.** Offline FT (function-level, AST-extracted): `SSU` -> I1.SSU, `LCU` -> I3.LCU.FirstPass, `DotNet` -> I4.DotNet, `SafeOSDU` -> W3.SafeOsDU. ScriptVersion -> r11.36.
+
+### Complete the b3 integration: rewire P03 RefreshPatchBaseline to the Catalog producer (`$Script:ScriptVersion` -> `update-wsi-2026.06.27-r11.35`, tag `b3-p03-rewire`)
+
+Completes the D2 acquisition wiring: P03 `Invoke-SetupPhase03_RefreshPatchBaseline` calls `Invoke-CatalogPatchSetRefresh` (the b3 L1->L3 chain) as its refresh producer; the legacy release-info producer `Resolve-PatchSetFromReleaseInfo` is left in place with no live callers, pending removal in a later cleanup. ScriptVersion -> r11.35.
+
 ### Wire the Microsoft Update Catalog as the production data source: replace the wsusscn2 `NeutralPatches[]`/`Type` model with the Catalog-driven `Lines[]`/`Kind` model (`$Script:ScriptVersion` -> `update-wsi-2026.06.27-r11.34`, tag `catalog-data-source-d2`)
 
 The acquisition half (D2) of the `wsusscn2` -> Microsoft Update Catalog migration: wires the b3 hybrid resolver into the script and moves the config/schema to Config Schema v3.0. There are no downstream consumers, so the old patch model is removed with no compatibility shim.

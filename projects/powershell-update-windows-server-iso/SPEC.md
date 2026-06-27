@@ -600,7 +600,7 @@ base ISO:
 | `SupportedLanguages` | `["en-us", "ja-jp"]` | Languages configured for this OS |
 | `DefaultLanguage` | `en-us` | Used when `-OsLang` is not specified |
 | `LCUExpandViaMum` | `true` | Use `update.mum`-based LCU expansion (true for r02+) |
-| `EnableInstallWimUpdate` | `true` (2016/2019/2022) / `false` (2025) | Whether P07 applies LCU to install.wim |
+| `EnableInstallWimUpdate` | `true` | Whether P07 applies LCU to install.wim (r11.37: Server 2025 placeholder `false` corrected to `true`) |
 | `EnableBootWimUpdate` | `true` | Whether P08 applies LCU to boot.wim |
 | `EnableWinREUpdate` | `true` | Whether P08 applies Safe OS DU to WinRE.wim |
 | `_VerifiedDate` / `_VerifiedBy` | `2026-05-24T00:00:00+09:00` / `manual:initial-r03` | Human verification record |
