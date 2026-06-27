@@ -1,0 +1,404 @@
+{
+  "2016": {
+    "os": "Server2016",
+    "lines": [
+      {
+        "kind": "LCU",
+        "kb": "KB5094122",
+        "catalogUid": "e0284a61-45d3-4e35-8eca-318e41c41331",
+        "products": "Windows Server 2016",
+        "title": "2026-06 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5094122)",
+        "sizeBytes": 1744,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
+            "url": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
+            "digest": "Nr3Up4Pt5vYXS4++EEbo46YTrUQ=",
+            "sha256": "",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "build": "14393.9234",
+          "files": [
+            "windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu"
+          ]
+        },
+        "note": "discovered via Learn (build 14393.9234)"
+      },
+      {
+        "kind": "SSU",
+        "kb": "KB5094141",
+        "catalogUid": "a5501aa9-aad8-4dc4-922b-23b02e4fe0bf",
+        "products": "Windows Server 2016",
+        "title": "2026-06 Servicing Stack Update for Windows Server 2016 for x64-based Systems (KB5094141)",
+        "sizeBytes": 12759332,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
+            "url": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
+            "digest": "hLaSLG6W8mrZGFnQcq7rbfjlq5k=",
+            "sha256": "",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "standalone": true,
+          "files": [
+            "windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu"
+          ]
+        },
+        "note": "2016 only: standalone SSU row (apply before LCU)"
+      },
+      {
+        "kind": ".NET",
+        "kb": null,
+        "catalogUid": null,
+        "products": null,
+        "title": null,
+        "sizeBytes": null,
+        "files": [],
+        "inScope": null,
+        "note": "2016: in-box .NET payload (3.5 + 4.6.2/4.7.x; media-payload def, BLOCK 0.T) is serviced INSIDE the LCU -- no standalone in-box .NET package exists. The only standalone WS2016 .NET CU is .NET 4.8 (KB5087065), an add-on NOT in base media -> out-of-scope. No leaf to fetch (matches oracle)."
+      },
+      {
+        "kind": "SafeOSDU",
+        "kb": null,
+        "catalogUid": null,
+        "products": null,
+        "title": null,
+        "sizeBytes": null,
+        "files": [],
+        "inScope": null,
+        "note": "2016: no monthly SafeOS DU line (matches oracle)"
+      }
+    ]
+  },
+  "2019": {
+    "os": "Server2019",
+    "lines": [
+      {
+        "kind": "LCU",
+        "kb": "KB5094123",
+        "catalogUid": "786110c1-2c99-4c75-aab1-841c9347d87b",
+        "products": "Windows Server 2019",
+        "title": "2026-06 Cumulative Update for Windows Server 2019 for x64-based Systems (KB5094123)",
+        "sizeBytes": 860495482,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows10.0-kb5094123-x64_150ef9e518c1e534d2d255a558c4d2bdefe54073.msu",
+            "url": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094123-x64_150ef9e518c1e534d2d255a558c4d2bdefe54073.msu",
+            "digest": "FQ755RjB5TTS0lWlWMTSve/lQHM=",
+            "sha256": "",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "build": "17763.8880",
+          "files": [
+            "windows10.0-kb5094123-x64_150ef9e518c1e534d2d255a558c4d2bdefe54073.msu"
+          ]
+        },
+        "note": "discovered via Learn (build 17763.8880)"
+      },
+      {
+        "kind": "SSU",
+        "kb": null,
+        "catalogUid": null,
+        "products": null,
+        "title": null,
+        "sizeBytes": null,
+        "files": [],
+        "inScope": null,
+        "note": "embedded in LCU (no standalone row)"
+      },
+      {
+        "kind": ".NET",
+        "kb": "KB5088864",
+        "catalogUid": "a57cf2ba-286e-46dc-b15a-a0fc3ec5dbe2",
+        "products": "Windows Server 2019",
+        "title": "2026-05 Cumulative Update for .NET Framework 3.5, 4.7.2 and 4.8 for Windows Server 2019 for x64 (KB5088864)",
+        "sizeBytes": 181976634,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows10.0-kb5087061-x64_25b4ce6e32862a6288609b4471ff1cd8e07d8e3f.msu",
+            "url": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5087061-x64_25b4ce6e32862a6288609b4471ff1cd8e07d8e3f.msu",
+            "digest": "JbTObjKGKmKIYJtEcf8c2OB9jj8=",
+            "sha256": "",
+            "enTitle": ""
+          },
+          {
+            "idx": 1,
+            "fileName": "windows10.0-kb5087066-x64-ndp48_086eed6e068d65a3e098311b5c742d745048d5fd.msu",
+            "url": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5087066-x64-ndp48_086eed6e068d65a3e098311b5c742d745048d5fd.msu",
+            "digest": "CG7tbgaNZaPgmDEbXHQtdFBI1f0=",
+            "sha256": "",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "inScopeFiles": [
+            "windows10.0-kb5087061-x64_25b4ce6e32862a6288609b4471ff1cd8e07d8e3f.msu"
+          ],
+          "inScopeKb": [
+            "KB5087061"
+          ]
+        },
+        "note": "superset rollup; in-scope leaf = 2019 in-media default .NET runtime (media-payload def, BLOCK 0.T; bundles 3.5)"
+      },
+      {
+        "kind": "SafeOSDU",
+        "kb": null,
+        "catalogUid": null,
+        "products": null,
+        "title": null,
+        "sizeBytes": null,
+        "files": [],
+        "inScope": null,
+        "note": "2019: no monthly SafeOS DU line (matches oracle)"
+      }
+    ]
+  },
+  "2022": {
+    "os": "Server2022",
+    "lines": [
+      {
+        "kind": "LCU",
+        "kb": "KB5094128",
+        "catalogUid": "522273b0-daa7-4f44-8562-2046a18b5e0a",
+        "products": "Microsoft Server operating system-21H2",
+        "title": "2026-06 Cumulative Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5094128)",
+        "sizeBytes": 567747281,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows10.0-kb5094128-x64_f2fe90c2e70536da77dcb1d08e40a554e4e2df6c.msu",
+            "url": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094128-x64_f2fe90c2e70536da77dcb1d08e40a554e4e2df6c.msu",
+            "digest": "8v6QwucFNtp33LHQjkClVOTi32w=",
+            "sha256": "",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "build": "20348.5256",
+          "files": [
+            "windows10.0-kb5094128-x64_f2fe90c2e70536da77dcb1d08e40a554e4e2df6c.msu"
+          ]
+        },
+        "note": "discovered via Learn (build 20348.5256)"
+      },
+      {
+        "kind": "SSU",
+        "kb": null,
+        "catalogUid": null,
+        "products": null,
+        "title": null,
+        "sizeBytes": null,
+        "files": [],
+        "inScope": null,
+        "note": "embedded in LCU (no standalone row)"
+      },
+      {
+        "kind": ".NET",
+        "kb": "KB5088862",
+        "catalogUid": "0ae6f8d8-5a5a-4551-a0cc-ca97524fc415",
+        "products": "Microsoft Server operating system-21H2",
+        "title": "2026-05 Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Microsoft server operating system version 21H2 for x64 (KB5088862)",
+        "sizeBytes": 156378567,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
+            "url": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
+            "digest": "54h3GkEZ4Bp4QN0cE6HiWyI74So=",
+            "sha256": "",
+            "enTitle": ""
+          },
+          {
+            "idx": 1,
+            "fileName": "windows10.0-kb5087059-x64-ndp481_429d8898a3beb6753b62ab9570ab5a06c1ada069.msu",
+            "url": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5087059-x64-ndp481_429d8898a3beb6753b62ab9570ab5a06c1ada069.msu",
+            "digest": "Qp2ImKO+tnU7YquVcKtaBsGtoGk=",
+            "sha256": "",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "inScopeFiles": [
+            "windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu"
+          ],
+          "inScopeKb": [
+            "KB5087068"
+          ]
+        },
+        "note": "superset rollup; in-scope leaf = 2022 in-media default .NET runtime (media-payload def, BLOCK 0.T; bundles 3.5)"
+      },
+      {
+        "kind": "SafeOSDU",
+        "kb": "KB5094157",
+        "catalogUid": "c6476311-8656-4c9e-89cc-5f4b8000205c",
+        "products": "Windows 10 and later Dynamic Update, Windows Safe OS Dynamic Update",
+        "title": "2026-06 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5094157)",
+        "sizeBytes": 132521197,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows10.0-kb5094157-x64_c3ee5d03ee5bdfa16846ca51a3ab171071260b94.cab",
+            "url": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/crup/2026/06/windows10.0-kb5094157-x64_c3ee5d03ee5bdfa16846ca51a3ab171071260b94.cab",
+            "digest": "w+5dA+5b36FoRspRo6sXEHEmC5Q=",
+            "sha256": "1idumQ3jZu6Qemgk5VQqQL1Ea8Ynvm3Yd6a5biWQJLI=",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "files": [
+            "windows10.0-kb5094157-x64_c3ee5d03ee5bdfa16846ca51a3ab171071260b94.cab"
+          ]
+        },
+        "note": "Products has 'Safe OS Dynamic Update' + title version token"
+      }
+    ]
+  },
+  "2025": {
+    "os": "Server2025",
+    "lines": [
+      {
+        "kind": "LCU",
+        "kb": "KB5094125",
+        "catalogUid": "c108488b-a8ac-4607-899d-7d24cbd504e4",
+        "products": "Microsoft Server Operating System-24H2",
+        "title": "2026-06 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5094125) (26100.32995)",
+        "sizeBytes": 2435,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+            "url": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+            "digest": "lTRJZyBz+PuZuttMxtXXhJucg+g=",
+            "sha256": "gZYyYQoQGvEccpB/sT/wW1+0IiwOJj7poDvMHR1fJqQ=",
+            "enTitle": ""
+          },
+          {
+            "idx": 1,
+            "fileName": "windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu",
+            "url": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/7bb8f378-6d48-4161-ac28-0be28444e642/public/windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu",
+            "digest": "jon6SRffMT/hGLn+FQYRl1q5JWU=",
+            "sha256": "989kXeuFH+u063587IKQFA0qKpdUyFxVYzINJN5or6U=",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "build": "26100.32995",
+          "files": [
+            "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+            "windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu"
+          ]
+        },
+        "note": "discovered via Learn (build 26100.32995)"
+      },
+      {
+        "kind": "SSU",
+        "kb": "KB5043080",
+        "catalogUid": null,
+        "products": null,
+        "title": null,
+        "sizeBytes": null,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+            "url": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/d8b7f92b-bd35-4b4c-96e5-46ce984b31e0/public/windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+            "digest": "lTRJZyBz+PuZuttMxtXXhJucg+g=",
+            "sha256": "gZYyYQoQGvEccpB/sT/wW1+0IiwOJj7poDvMHR1fJqQ=",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "files": [
+            "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu"
+          ]
+        },
+        "note": "2025: checkpoint SSU carried by the co-served GA baseline (the non-LCU .msu in the 2-file set)"
+      },
+      {
+        "kind": ".NET",
+        "kb": "KB5087051",
+        "catalogUid": "d30126cf-e709-45b8-be5c-c102057423ad",
+        "products": "Microsoft Server Operating System-24H2",
+        "title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 24H2 for x64 (KB5087051)",
+        "sizeBytes": 96302586,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
+            "url": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/3e11ae04-442d-4988-8d96-979aa04e7de6/public/windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
+            "digest": "G16Fopl2fmGG+caTA335cyVGYtk=",
+            "sha256": "eHWDK0eVBl4W1vYUEyTIpQvcKYpBybBNTgtAbcVsg/o=",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "inScopeFiles": [
+            "windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu"
+          ],
+          "inScopeKb": [
+            "KB5087051"
+          ]
+        },
+        "note": "superset rollup; in-scope leaf = 2025 in-media default .NET runtime (media-payload def, BLOCK 0.T; bundles 3.5)"
+      },
+      {
+        "kind": "SafeOSDU",
+        "kb": "KB5094150",
+        "catalogUid": "ab3e6713-6c89-4db3-bad7-fc18903dfe7c",
+        "products": "Windows Safe OS Dynamic Update, Windows 10 and later Dynamic Update",
+        "title": "2026-06 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5094150)",
+        "sizeBytes": 137605226,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
+            "url": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/bbb639ee-a802-4cbb-9058-e69216636070/public/windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
+            "digest": "icy52HJkuOfWUaJJUUNgad0dbu0=",
+            "sha256": "8PImn7lOUvWeDTyOkx6MuNRE3xSN+hdVoCFPBPceWLA=",
+            "enTitle": ""
+          }
+        ],
+        "inScope": {
+          "files": [
+            "windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab"
+          ]
+        },
+        "note": "Products has 'Safe OS Dynamic Update' + title version token"
+      },
+      {
+        "kind": "SetupDU",
+        "kb": "KB5095966",
+        "catalogUid": "00000000-setup-du-2026-06-fixture-000000000000",
+        "products": "Setup Dynamic Update, Windows 10 and later Dynamic Update",
+        "title": "2026-06 Setup Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5095966)",
+        "sizeBytes": 4194304,
+        "files": [
+          {
+            "idx": 0,
+            "fileName": "windows11.0-kb5095966-x64_setupdu_fixture0000000000000000000000000.cab",
+            "url": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/00000000-setup-du-fixture/public/windows11.0-kb5095966-x64_setupdu.cab",
+            "digest": "RklYVFVSRS1TRVRVUERVLURJR0VTVC1QTEFDRUhPTERFUg==",
+            "sha256": "",
+            "enTitle": "2026-06 Setup Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5095966)"
+          }
+        ],
+        "inScope": {
+          "files": [
+            "windows11.0-kb5095966-x64_setupdu_fixture0000000000000000000000000.cab"
+          ]
+        },
+        "note": "FIXTURE: representative Setup DU raw line. Title/KB are the real 24H2 Setup DU; url+digest are placeholders for offline transform exercise (real values come from a live refresh). Mirrors the SafeOSDU 2025 line shape."
+      }
+    ]
+  }
+}
