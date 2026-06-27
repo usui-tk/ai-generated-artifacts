@@ -62,7 +62,7 @@ solve well on its own:
 | Cloud consultants who need repeatable evaluation-ISO deliverables | Hotpatch in-memory patching (Azure Edition SKU only) |
 | Anyone testing PCA2023 readiness against revoked-firmware hardware | Client SKUs (Windows 10 / 11) — out of scope |
 | Forensic / compliance replay of past patch baselines (`-PatchMonth`) | ARM64 (x64 only at present) |
-| Pre-Patch-Tuesday dry runs against `wsusscn2.cab` (r09.0+) | Driver / FOD / LXP / Appx customization |
+| Pre-Patch-Tuesday dry runs (`-Action Prepare`) | Driver / FOD / LXP / Appx customization |
 
 ### Reader's roadmap
 
@@ -272,7 +272,6 @@ from those caches. This split follows the SPEC §B.22.1 refresher architecture.
 | `RefreshSnapshots` | A03 | Fetch upstream caches (release-info, .NET CU, Dynamic Update) |
 | `RefreshAllBaselines` | A01 | Regenerate `data/config-Server*.json` from the caches |
 | `DumpFieldClassification` | A02 | Emit the field-cadence decision matrix as JSON |
-| `RefreshDependencyDatabase` | A04 | Refresh `data/servicing-dependency-database.json` (layer 2) from `wsusscn2.cab` via the four-stage parser pipeline (SPEC §B.19.7) |
 
 ```powershell
 # ---- Stage 1: populate the upstream caches ----
@@ -293,13 +292,6 @@ from those caches. This split follows the SPEC §B.22.1 refresher architecture.
 
 # Dump the field classification metadata as JSON (used by external validators)
 .\Update-WindowsServerIso.ps1 -Action DumpFieldClassification
-
-# Refresh the Servicing Dependency Database (layer 2) from wsusscn2.cab
-#   Full pipeline: Stage 1 cab acquire -> Stage 2 7-Zip extract ->
-#   Stage 3 XmlReader stream-parse -> Stage 4 emit
-#   data/servicing-dependency-database.json -> Layer 1 config writeback.
-#   (Windows + 7-Zip required; Stage 3 parse takes ~4-5 min on the live cab.)
-.\Update-WindowsServerIso.ps1 -Action RefreshDependencyDatabase
 ```
 
 `RefreshSnapshots` exit codes: `0` = every sub-step OK; non-zero =
@@ -347,7 +339,7 @@ Pipeline of thirteen phases:
 | P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue scrape; writeback to `data/config-<OsKey>.json` |
 | P04 | FetchAssets | Fetch | ISO + patch downloads with hash verification |
 | P05 | ExpandIso | Plan | Mount source ISO; copy to workspace; enumerate WIM indexes |
-| P06 | ValidatePatchServicing | Plan | Servicing-readiness gate vs the `data/` Layer 2 database (default-ON, blocking) |
+| P06 | ValidatePatchServicing | Plan | Pass-through (Catalog-model consistency check pending; on-mount readiness via P07/P08) |
 | P07 | PatchInstallWim | Build | For each install.wim index: SSU → LCU → .NET → DISM cleanup |
 | P08 | PatchBootWim | Build | boot.wim (PE + Setup) and winre.wim |
 | P09 | AssembleIso | Build | Dynamic Update Setup overlay; Export-WindowsImage; oscdimg ISO build |
@@ -416,7 +408,6 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-PatchMonth` | patch | current month | Target patch month for refresh, e.g. `2026-06` |
 | `-SkipDynamicPatchRefresh` | patch | switch (OFF) | Skip P03 even if baseline is stale (offline runs) |
 | `-UseBaselineOnly` | patch | switch (OFF) | Use PatchBaseline strictly as-is; no Catalog access |
-| `-OfflineSyncPackagePath` | patch | (none) | Pre-staged `wsusscn2.cab` path (skips download) |
 | `-EnablePca2023BootManager` | secure-boot | switch (OFF) | Opt-in P10 PCA2023 boot-manager conversion |
 | `-ForcePca2023OnServer2025` | secure-boot | switch (OFF) | Override the Server 2025 default-skip for P10 |
 | `-Pca2023OnlyMode` | secure-boot | switch (OFF) | Standalone P12 inspection of an existing ISO (`-IsoPath` required) |
@@ -464,15 +455,11 @@ P03 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
 P04   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
 P05   ExpandIso
 P06 ValidatePatchServicing
-        - Servicing-readiness gate (default-ON, blocking) using
-          data/servicing-dependency-database.json (see SPEC.md §B.19.10).
-          Validates the resolved patch set against the pre-generated
-          Layer 2 dependency database and logs each verdict
-          (SsTooOld / NotInDatabase / Superseded / Pass).
-        - Blocks on OverallStatus Fail (SsTooOld predicts 0x800f0823, or
-          NotInDatabase); warns on Superseded; passes otherwise.
-        - Blocks if Layer 2 is absent/unreadable (run -Action
-          RefreshDependencyDatabase, or pass -UseBaselineOnly to skip P06).
+        - Pass-through: the wsusscn2 Layer 2 servicing-readiness gate was
+          removed in the data-source migration; the Catalog-model
+          consistency check that replaces it is pending (SPEC.md §B.19).
+        - Real servicing readiness is validated on-mount during the build
+          by Test-PatchServicingReadinessOnMount (SPEC.md §B.13, P07/P08).
         - The former live Windows Update Agent offline scan was removed
           (host-relative; produced false negatives on cross-OS builds).
 P07+  Build / Verify / Report
@@ -539,25 +526,14 @@ python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
 python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
 python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
-python3 tests/servicing_dependency_parser_test.py            # T12: 22 wsusscn2 parser pipeline assertions
-python3 tests/servicing_dependency_layer1_test.py            # T13: 14 Layer 1 writeback assertions
-python3 tests/servicing_dependency_deny_list_test.py         # T14: 10 EOS/ESU deny-list assertions
-python3 tests/servicing_dependency_servicing_stack_test.py   # T15: 16 servicing-stack extraction assertions
-python3 tests/servicing_dependency_readiness_verdict_test.py # T16: 21 readiness verdict assertions
-python3 tests/servicing_dependency_recency_fallback_test.py  # T17: 15 recency-fallback assertions
-python3 tests/servicing_dependency_servicing_stack_populate_test.py # T18: 17 SS-populate assertions
-python3 tests/servicing_dependency_data_contract_test.py     # T19: 11 data-contract assertions
 
-# Data-contract / schema / format gates (run on every commit that touches data)
+# Schema / format gates (run on every commit that touches data)
 python3 tests/config_schema_test.py                       # config schema gate
-python3 tests/servicing_dependency_scope_invariants_test.py # scope-invariants gate: 23 assertions
-python3 tests/servicing_dependency_layer2_schema_test.py  # Layer 2 schema gate: 16 assertions
 python3 tests/canonical_json_format_check.py              # JSON canonical-format gate; SPEC §C.3.4
 
 # Live tests — require unrestricted network egress
 python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog
 python3 tests/eval_iso_probe.py              # T4: Server<N> ISO CDN
-python3 tests/wsusscn2_probe.py              # T5: wsusscn2.cab freshness
 ```
 
 See [`tests/README.md`](./tests/README.md) for the canonical
@@ -583,8 +559,7 @@ change history lives in this project's [`CHANGELOG.md`](./CHANGELOG.md)
 Stage 4 supports `workflow_dispatch` with four inputs (`mode`,
 `onlyOs`, `onlyLanguage`, `dryRun`) so maintainers can trigger an
 ad-hoc refresh or limit the scope without editing the workflow. The
-opened PR is restricted via `add-paths` to `data/config-*.json` (and
-in r09.0+, `data/servicing-dependency-database.json`).
+opened PR is restricted via `add-paths` to `data/config-*.json`.
 
 CRITICAL: Stage 3 NEVER uploads an ISO artifact. The evaluation
 licence forbids public distribution of Microsoft binaries; the
@@ -603,7 +578,7 @@ enforces this per repository SPEC.md §12 (SPEC-CI-081).
 | Wrong `Type` on `NeutralPatches[]` entries after RefreshAllBaselines | A new caller of `Convert-CatalogPatchToBaselineEntry` did not pass `-KnownType` | Pass `-KnownType $q.Type` from the Catalogue search context. See SPEC.md §D.20 |
 | .NET CU baseline entry seems to be missing a sub-file | Umbrella KB with multiple `.msu` files; only one was kept | Confirm `Resolve-PatchSetFromCatalog` routes `Type='DotNet'` through `Select-AllCanonicalPatchFiles`. See SPEC.md §D.21 |
 | `0x800f081e` in Warning lines | Patch not applicable to this SKU | Expected for cross-SKU patch sets; safe to ignore (see SPEC.md §D.8) |
-| `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` mid-P07 | LCU's prerequisite SSU is missing from the baseline | `RefreshAllBaselines` now auto-discovers the same-month standalone SSU (SPEC.md §B.22.5), so a missing SSU is rare; if it still occurs, add the prerequisite SSU to `NeutralPatches[]`. The Servicing Dependency Database (SPEC.md §B.19) catches this at P06, a blocking gate, before any DISM mount. See SPEC.md §D.2 |
+| `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` mid-P07 | LCU's prerequisite SSU is missing from the baseline | `RefreshAllBaselines` now auto-discovers the same-month standalone SSU (SPEC.md §B.22.5), so a missing SSU is rare; if it still occurs, add the prerequisite SSU to `NeutralPatches[]`; the on-mount servicing check (SPEC.md §B.13) catches a missing prerequisite during the build. See SPEC.md §D.2 |
 | Mojibake (doubled Japanese characters) in P05 WIM-index banner | DISM mount-cache poisoning from prior aborted runs | Use **one fresh `-WorkRoot` per OS family** (`D:\UpdateWsi_2016`, `D:\UpdateWsi_2019`, …). See SPEC.md §D.25 |
 | Stale WIM mount blocks new run | Previous run crashed mid-mount | Run `dism /Get-MountedImageInfo` then `dism /Cleanup-Mountpoints`. See SPEC.md §D.1 |
 | ISO SHA-256 mismatch on download | Microsoft rotated the Evaluation Center snapshot URL | Update `data/config-<OsKey>.json` `LanguageSpecific.<lang>.Iso.Sha256` to the new value. See SPEC.md §D.11 |
@@ -636,8 +611,4 @@ issues that motivated each Pitfall entry in SPEC.md Part D.
   output-verification facility (P12 `Test-OutputIsoPca2023Readiness`)
   is a quality extension not present in the Microsoft original.
 
-This script was generated and iteratively refined with Anthropic Claude
-(Opus 4.7 era). The script source file currently carries
-`$Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'`; the next
-revision (r09.0) will implement the §B.19 Servicing Dependency
-Database specified in [SPEC.md](./SPEC.md).
+This script was generated and iteratively refined with Anthropic Claude.

@@ -60,7 +60,7 @@ Windows Update は稼働中サーバーを最新状態に保つ標準的な手�
 | 再現可能な評価版 ISO 成果物を必要とするクラウドコンサルタント | Hotpatch によるメモリパッチ（Azure Edition SKU 限定）|
 | 失効済みファームウェア機器に対する PCA2023 readiness 検証 | クライアント SKU（Windows 10 / 11）—対象外 |
 | 過去パッチベースラインのフォレンジック再現（`-PatchMonth`）| ARM64（現在は x64 のみ）|
-| Patch Tuesday 前の `wsusscn2.cab` を用いた事前ドライラン（r09.0+）| ドライバー／FOD／LXP／Appx のカスタマイズ |
+| Patch Tuesday 前のドライラン（`-Action Prepare`）| ドライバー／FOD／LXP／Appx のカスタマイズ |
 
 ### 読者向けナビゲーション
 
@@ -264,7 +264,6 @@ SPEC §B.22.1 の Refresher アーキテクチャに対応します。
 | `RefreshSnapshots` | A03 | 上流キャッシュの取得（release-info、.NET CU、Dynamic Update）|
 | `RefreshAllBaselines` | A01 | キャッシュから `data/config-Server*.json` を再生成 |
 | `DumpFieldClassification` | A02 | フィールドのカデンス決定マトリックスを JSON で出力 |
-| `RefreshDependencyDatabase` | A04 | `wsusscn2.cab` から 4 ステージの parser パイプライン（SPEC §B.19.7）で `data/servicing-dependency-database.json`（layer 2）を更新 |
 
 ```powershell
 # ---- 第 1 段：上流キャッシュの populate ----
@@ -285,13 +284,6 @@ SPEC §B.22.1 の Refresher アーキテクチャに対応します。
 
 # フィールド分類メタデータを JSON で出力（外部バリデータが利用）
 .\Update-WindowsServerIso.ps1 -Action DumpFieldClassification
-
-# Servicing Dependency Database（layer 2）を wsusscn2.cab から更新
-#   本実装：Stage 1 cab 取得 → Stage 2 7-Zip 抽出 → Stage 3 XmlReader
-#   ストリームパース → Stage 4 data/servicing-dependency-database.json 出力 →
-#   Layer 1 config 書き戻し。
-#   （Windows + 7-Zip が必要。実 cab では Stage 3 の解析に約 4〜5 分）
-.\Update-WindowsServerIso.ps1 -Action RefreshDependencyDatabase
 ```
 
 `RefreshSnapshots` の終了コード：`0` = すべてのサブステップが OK、
@@ -337,7 +329,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue スクレイプ、`data/config-<OsKey>.json` への書き戻し |
 | P04 | FetchAssets | Fetch | ISO + パッチのダウンロード（ハッシュ検証付き）|
 | P05 | ExpandIso | Plan | ソース ISO のマウント、ワークスペースへのコピー、WIM インデックスの列挙 |
-| P06 | ValidatePatchServicing | Plan | `data/` Layer 2 データベースに対するサービシング準備性ゲート（既定 ON、ブロック）|
+| P06 | ValidatePatchServicing | Plan | パススルー（Catalog モデル整合チェックは保留中。準備性はマウント時 P07/P08 で検証）|
 | P07 | PatchInstallWim | Build | install.wim 各インデックスに対し SSU → LCU → .NET → DISM クリーンアップ |
 | P08 | PatchBootWim | Build | boot.wim（PE + Setup）と winre.wim |
 | P09 | AssembleIso | Build | Dynamic Update Setup オーバーレイ、Export-WindowsImage、oscdimg による ISO ビルド |
@@ -402,7 +394,6 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-PatchMonth` | patch | 当月 | 更新対象パッチ月（例 `2026-06`）|
 | `-SkipDynamicPatchRefresh` | patch | switch（OFF）| ベースライン陳腐でも P03 をスキップ（オフライン）|
 | `-UseBaselineOnly` | patch | switch（OFF）| PatchBaseline をそのまま使用。Catalog アクセスなし |
-| `-OfflineSyncPackagePath` | patch | （なし）| ステージ済み `wsusscn2.cab` パス（ダウンロード省略）|
 | `-EnablePca2023BootManager` | secure-boot | switch（OFF）| P10 PCA2023 ブートマネージャ変換をオプトイン |
 | `-ForcePca2023OnServer2025` | secure-boot | switch（OFF）| Server 2025 の P10 既定スキップを上書き |
 | `-Pca2023OnlyMode` | secure-boot | switch（OFF）| 既存 ISO の P12 単独検査（`-IsoPath` 必須）|
@@ -450,15 +441,11 @@ P03 RefreshPatchBaseline（ベースラインが古いとき、または -AutoDe
 P04   FetchAssets（新しく解決された URL と SHA-256 を使用）
 P05   ExpandIso
 P06 ValidatePatchServicing
-        - サービシング準備性ゲート（既定 ON、ブロック）：
-          data/servicing-dependency-database.json を用いて解決済みパッチ
-          セットを事前生成 Layer 2 依存性データベースに照合し、各判定
-          （SsTooOld / NotInDatabase / Superseded / Pass）をログ出力
-          （SPEC.md §B.19.10 参照）。
-        - OverallStatus が Fail（SsTooOld は 0x800f0823 を予測、または
-          NotInDatabase）のときブロック、Superseded は警告、それ以外は通過。
-        - Layer 2 が無い/読めない場合もブロック（-Action
-          RefreshDependencyDatabase を実行するか、-UseBaselineOnly で P06 を省略）。
+        - パススルー：wsusscn2 の Layer 2 サービシング準備性ゲートは
+          データソース移行で削除されました。これを置き換える Catalog
+          モデル整合チェックは保留中です（SPEC.md §B.19）。
+        - 実際のサービシング準備性はビルド中にマウント済み WIM 上で
+          Test-PatchServicingReadinessOnMount が検証します（SPEC.md §B.13、P07/P08）。
         - 旧来のライブ Windows Update Agent オフラインスキャンは削除
           （ホスト相対で、クロス OS ビルドで偽陰性を生じたため）。
 P07+  Build / Verify / Report
@@ -524,25 +511,14 @@ python3 tests/dynamic_update_cache_test.py   # T8：20 個の DU キャッシュ
 python3 tests/catalog_title_tokens_test.py   # T9：18 個の Title-token アサーション
 python3 tests/release_info_resolver_test.py  # T10：22 個の resolver アサーション
 python3 tests/canonical_json_test.py         # T11：26 個の PS/Python バイトレベル パリティアサーション
-python3 tests/servicing_dependency_parser_test.py            # T12：22 個の wsusscn2 パーサーパイプラインアサーション
-python3 tests/servicing_dependency_layer1_test.py            # T13：14 個の Layer 1 書き戻しアサーション
-python3 tests/servicing_dependency_deny_list_test.py         # T14：10 個の EOS/ESU deny-list アサーション
-python3 tests/servicing_dependency_servicing_stack_test.py   # T15：16 個の servicing-stack 抽出アサーション
-python3 tests/servicing_dependency_readiness_verdict_test.py # T16：21 個の readiness verdict アサーション
-python3 tests/servicing_dependency_recency_fallback_test.py  # T17：15 個の recency-fallback アサーション
-python3 tests/servicing_dependency_servicing_stack_populate_test.py # T18：17 個の SS-populate アサーション
-python3 tests/servicing_dependency_data_contract_test.py     # T19：11 個のデータ契約アサーション
 
-# データ契約 / スキーマ / フォーマットゲート（データを触るコミットごとに実行）
+# スキーマ / フォーマットゲート（データを触るコミットごとに実行）
 python3 tests/config_schema_test.py                       # config スキーマゲート
-python3 tests/servicing_dependency_scope_invariants_test.py # scope-invariants ゲート：23 アサーション
-python3 tests/servicing_dependency_layer2_schema_test.py  # Layer 2 スキーマゲート：16 アサーション
 python3 tests/canonical_json_format_check.py              # JSON canonical 形式ゲート（SPEC §C.3.4）
 
 # ライブテスト — 制限のないネットワーク出口が必要
 python3 tests/catalog_probe.py --check all   # T1：Microsoft Update Catalog
 python3 tests/eval_iso_probe.py              # T4：Server<N> ISO CDN
-python3 tests/wsusscn2_probe.py              # T5：wsusscn2.cab 鮮度
 ```
 
 「いつ何を実行すべきか」の正規ガイドは
@@ -569,7 +545,7 @@ CI マッピングは SPEC.md §C.9 にあります。
 Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage`、
 `dryRun`）に対応しており、ワークフローを編集することなくアドホックな更新
 実行やスコープ限定が可能です。生成される PR は `add-paths` で
-`data/config-*.json`（r09.0+ では `data/servicing-dependency-database.json` も）に
+`data/config-*.json` に
 限定されます。
 
 重要：Stage 3 は ISO アーティファクトを **絶対にアップロードしません**。
@@ -589,7 +565,7 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 | RefreshAllBaselines 後の `NeutralPatches[]` エントリの `Type` が誤っている | `Convert-CatalogPatchToBaselineEntry` の新規呼び出し側で `-KnownType` 未渡し | Catalogue 検索コンテキストから `-KnownType $q.Type` を渡す（SPEC.md §D.20 参照）|
 | .NET CU ベースラインエントリのサブファイルが欠落しているように見える | 複数 `.msu` を持つアンブレラ KB で 1 つしか保持されなかった | `Resolve-PatchSetFromCatalog` が `Type='DotNet'` を `Select-AllCanonicalPatchFiles` 経由でルーティングしているか確認（SPEC.md §D.21 参照）|
 | Warning 行に `0x800f081e` が表示 | このパッチは当該 SKU には適用不能 | クロス SKU のパッチセットでは想定内、無視して問題なし（SPEC.md §D.8 参照）|
-| P07 の途中で `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` | LCU が前提とする SSU がベースラインから欠落 | `RefreshAllBaselines` が同月のスタンドアロン SSU を自動発見するようになった（SPEC.md §B.22.5）ため、SSU の欠落は稀です。なお欠落する場合は前提 SSU を `NeutralPatches[]` に追加。Servicing Dependency Database（SPEC.md §B.19）はブロックゲートである P06 で DISM マウント前にこれを検出します（SPEC.md §D.2 参照）|
+| P07 の途中で `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` | LCU が前提とする SSU がベースラインから欠落 | `RefreshAllBaselines` が同月のスタンドアロン SSU を自動発見するようになった（SPEC.md §B.22.5）ため、SSU の欠落は稀です。なお欠落する場合は前提 SSU を `NeutralPatches[]` に追加。マウント時のサービシングチェック（SPEC.md §B.13）がビルド中に前提欠落を検出します（SPEC.md §D.2 参照）|
 | P05 の WIM インデックスバナーで文字化け（日本語が二重）| 過去の中断ランによる DISM マウントキャッシュ汚染 | **OS ファミリごとに新しい `-WorkRoot` を使用**（`D:\UpdateWsi_2016`、`D:\UpdateWsi_2019`、…）（SPEC.md §D.25 参照）|
 | 古い WIM マウントが新規実行を阻害 | 過去の実行がマウント途中でクラッシュ | `dism /Get-MountedImageInfo` 実行後に `dism /Cleanup-Mountpoints` を実行（SPEC.md §D.1 参照）|
 | ダウンロード後の ISO SHA-256 不一致 | Microsoft が Evaluation Center スナップショット URL を更新 | `data/config-<OsKey>.json` の `LanguageSpecific.<lang>.Iso.Sha256` を新しい値に更新（SPEC.md §D.11 参照）|
@@ -623,8 +599,4 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
   上流互換の出力検証機能（P12 `Test-OutputIsoPca2023Readiness`）は、
   Microsoft オリジナルにはない品質向上のための拡張です。
 
-本スクリプトは Anthropic Claude（Opus 4.7 期）で生成・反復的に洗練されました。
-スクリプトソースの現在の識別子は
-`$Script:ScriptVersion = 'update-wsi-2026.05.27-r08.0'` です。次リビジョン
-（r09.0）では、[SPEC.md](./SPEC.md) に仕様化された §B.19 Servicing
-Dependency Database を実装する予定です。
+本スクリプトは Anthropic Claude で生成・反復的に洗練されました。
