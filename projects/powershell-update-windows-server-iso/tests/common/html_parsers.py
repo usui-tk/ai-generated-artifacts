@@ -8,7 +8,6 @@ Each parser mirrors a regex used inside ``Update-WindowsServerIso.ps1``:
                              (DownloadDialog.aspx files-array)
 - ``extract_supersedes``:    supersedence section parser
                              (ScopedViewInline.aspx supersedence panel)
-- ``extract_kb_id``:         ``Get-KbIdFromUpdateTitle``
 
 Keeping these in a single Python module lets the probes assert that the
 parser still recognises what the live Catalog emits AND that the same
@@ -148,20 +147,6 @@ def extract_supersedes(html: str) -> List[str]:
         return []
     items = [re.sub(r'\s+', ' ', m.group(1)).strip() for m in _RX_INNER_HREF.finditer(block)]
     return [i for i in items if i]
-
-
-# -----------------
-# Title -> KB extraction (mirrors Get-KbIdFromUpdateTitle)
-# -----------------
-
-def extract_kb_id(title: str) -> str:
-    """Return the canonical KB id from a Catalog title, or '' if absent.
-
-    Match pattern: ``(KB######)`` or ``(KB#######)`` - same as the
-    PowerShell regex.
-    """
-    m = re.search(r'\((KB\d{6,7})\)', title)
-    return m.group(1) if m else ''
 
 
 def title_mentions_kb(title: str) -> Optional[str]:

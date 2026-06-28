@@ -114,7 +114,7 @@ def head(
 ) -> CatalogResponse:
     """Issue a HEAD request, following one redirect if present.
 
-    Used by the Eval-ISO and wsusscn2 probes to inspect Last-Modified
+    Used by the Eval-ISO and Catalog probes to inspect Last-Modified
     / Content-Length without downloading the body.
     """
     return fetch(url, method='HEAD', timeout=timeout, user_agent=user_agent, max_retries=2)

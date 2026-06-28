@@ -22,6 +22,23 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed — complete the stale-reference cleanup the `2eb6d7e` changelog claimed (test helpers; no script change, no version bump)
+
+The `2eb6d7e` entry claimed it "Cleaned stale docstring/probe references (...,
+common/html_parsers.py)", but two stale references to removed symbols survived:
+
+- `tests/common/html_parsers.py` still carried the dead `extract_kb_id` helper —
+  a parser-parity mirror of the **removed** `Get-KbIdFromUpdateTitle` PowerShell
+  function, with no remaining caller (verified: not in `__init__.__all__`, not
+  imported by `catalog_probe.py` / `eval_iso_probe.py`, which use
+  `extract_update_ids` / `extract_search_hits` / `extract_supersedes`). Removed
+  the function, its section comment, and its module-docstring list entry. `re`
+  stays used by the other parsers.
+- `tests/common/catalog_client.py` `head_request` docstring said "Used by the
+  Eval-ISO and **wsusscn2** probes"; the wsusscn2 probe was removed in the
+  data-source migration. Corrected to "Eval-ISO and Catalog probes" (the two
+  live probes).
+
 ### Fixed — TESTING.md reconciled to the `A00 RebuildDataset` data pipeline (docs/tests only, no script change, no version bump)
 
 `TESTING.md` had not been propagated when `A00 RebuildDataset` landed (r11.42),
