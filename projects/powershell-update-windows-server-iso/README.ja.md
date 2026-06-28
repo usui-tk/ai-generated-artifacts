@@ -370,7 +370,7 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 
 ## パラメーター（全件）
 
-全 35 パラメーターを用途別にまとめます。この表はドキュメント時点の
+全 34 パラメーターを用途別にまとめます。この表はドキュメント時点の
 スナップショットです。常に最新の正規一覧は
 `Get-Help .\Update-WindowsServerIso.ps1 -Full` を参照してください。
 
@@ -393,6 +393,8 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-OnlyPhases` | advanced | （なし）| アクション既定を上書きするフェーズ ID 配列（例 `'P04','P07'`）|
 | `-OnlyInstallWimIndexes` | advanced | （なし）| install.wim 更新を限定するインデックス一覧（例 `'2,4'`）|
 | `-UseDefenderExclusions` | advanced | switch（OFF）| オプトイン: 実行中だけ WorkRoot ツリー ＋ dism/DismHost/TiWorker/TrustedInstaller を Defender 除外（fail-closed・LCU 適用が約 35% 高速化）|
+| `-SkipResetBaseOnCleanup` | advanced | switch（OFF）| クリーンアップで DISM `/ResetBase` を省略し、`/StartComponentCleanup` のみ実施（置換済みコンポーネントストアを reset 可能なまま保持）|
+| `-SkipExportCompress` | advanced | switch（OFF）| `Export-Image /Compress:max` を省略（ビルド高速・`install.wim` は大容量）|
 | `-AutoDetectLatestPatches` | patch | switch（OFF）| Catalog から P03 PatchBaseline 更新を強制 |
 | `-PatchMonth` | patch | 当月 | 更新対象パッチ月（例 `2026-06`）|
 | `-SkipDynamicPatchRefresh` | patch | switch（OFF）| ベースライン陳腐でも P03 をスキップ（オフライン）|

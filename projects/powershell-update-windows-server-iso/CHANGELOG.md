@@ -22,6 +22,19 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed — README parameter table parity: add 2 missing live params, correct the count (docs-only, no version bump)
+
+The "Parameters (complete)" table claimed "All 35 parameters" but listed 32 and
+omitted two live `param()` switches. Reconciled against the `param()` ground
+truth (34 parameters) in both READMEs, in lock-step:
+
+- Added `-SkipResetBaseOnCleanup` (omit DISM `/ResetBase` on cleanup;
+  `/StartComponentCleanup`-only scavenging) and `-SkipExportCompress` (skip
+  `Export-Image /Compress:max`; faster build, larger `install.wim`) to the
+  `advanced` group in `README.md` and `README.ja.md`.
+- Corrected the table-intro count `35` -> `34` in both READMEs (now 34 rows
+  each, matching the 34-parameter `param()` block).
+
 ### Removed — retire the write-only data-contract machinery (`r11.42` -> `r11.43`, tag `retire-dead-data-contract`)
 
 The shared data-contract stamp had become a write-only orphan: its sole

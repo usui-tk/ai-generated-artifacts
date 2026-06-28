@@ -384,7 +384,7 @@ manager support) and §B.18 (Output ISO verification).
 
 ## Parameters (complete)
 
-All 35 parameters are listed below, grouped by typical use. The table is
+All 34 parameters are listed below, grouped by typical use. The table is
 a documentation-time snapshot; the authoritative, always-current list is
 `Get-Help .\Update-WindowsServerIso.ps1 -Full`.
 
@@ -407,6 +407,8 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-OnlyPhases` | advanced | (none) | Phase-ID array (e.g. `'P04','P07'`) overriding the Action's phase set |
 | `-OnlyInstallWimIndexes` | advanced | (none) | Comma-separated index list (e.g. `'2,4'`) limiting install.wim updates |
 | `-UseDefenderExclusions` | advanced | switch (OFF) | Opt-in: temporarily exclude the WorkRoot tree + dism/DismHost/TiWorker/TrustedInstaller from Defender for the run (fail-closed; ~35% faster LCU apply) |
+| `-SkipResetBaseOnCleanup` | advanced | switch (OFF) | Omit DISM `/ResetBase` on cleanup; do `/StartComponentCleanup`-only scavenging (keeps the superseded component store resettable) |
+| `-SkipExportCompress` | advanced | switch (OFF) | Skip `Export-Image /Compress:max`; faster build, larger `install.wim` |
 | `-AutoDetectLatestPatches` | patch | switch (OFF) | Force a P03 PatchBaseline refresh from the Catalog |
 | `-PatchMonth` | patch | current month | Target patch month for refresh, e.g. `2026-06` |
 | `-SkipDynamicPatchRefresh` | patch | switch (OFF) | Skip P03 even if baseline is stale (offline runs) |
