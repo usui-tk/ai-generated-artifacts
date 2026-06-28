@@ -22,6 +22,33 @@ the script and follows the
 
 ## [Unreleased]
 
+### Removed — retire the write-only data-contract machinery (`r11.42` -> `r11.43`, tag `retire-dead-data-contract`)
+
+The shared data-contract stamp had become a write-only orphan: its sole
+consumer `Test-DataContractConsistency` was removed in `79e7ad7`, but the
+`_meta.dataContractId` / `dataContractVersion` keys were still stamped into
+every config, still REQUIRED by `config.schema.json`, and the schema
+description still named the removed function. Confirmed inert (zero readers in
+the live script) and, consistent with the project's no-dead-code stance,
+removed end to end rather than kept:
+
+- Script: dropped `$Script:DataContractId` / `$Script:DataContractVersion` and
+  their comment block; the `_meta` stamp now writes only `scriptVersion` /
+  `generatedAt` (the informational provenance), and its local builder was
+  renamed `$contractMeta` -> `$metaStamp` to match. `$Script:ScriptVersion`
+  bumped to `r11.43` (behavioural change).
+- `config.schema.json`: removed `dataContractId` / `dataContractVersion` from
+  `_meta.required` and from `properties`, and reworded the `_meta` description
+  to drop the data-contract / removed-function framing.
+- `data/config-Server*.json` (all four): dropped the two `_meta` keys via the
+  canonical-JSON writer (each diff is exactly `-2` lines; all four still
+  validate against the updated schema). `_meta.scriptVersion` is left at the
+  generating version (`r11.42`) since only dead metadata was stripped, not the
+  data.
+- A stale claim in the script comment that the stamp was also written into the
+  `cache-*.json` files was incorrect (those files never carried it) and is gone
+  with the comment.
+
 ### Fixed — resolve the 7 unfilled `§D.NN` cross-references in SPEC.md (doc-only, no version bump)
 
 Seven SPEC cross-references were left as the literal placeholder `§D.NN`

@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.42'
-$Script:ScriptTag     = 'data-pipeline-rebuilddataset'
+$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.43'
+$Script:ScriptTag     = 'retire-dead-data-contract'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -571,15 +571,6 @@ $Script:PhaseTimings      = New-Object System.Collections.Generic.List[object]
 # safety net for runs that abort before P13. This flag stops the
 # safety-net call from printing a duplicate table on a happy-path run.
 $Script:PhaseSummaryShown = $false
-
-# Shared data-contract identity: the single source of truth for cross-cutting
-# data-quality checks. Stamped into every generated data artifact's _meta
-# (the config-Server*.json baselines and the cache-*.json data files), so a
-# single shared identity spans the whole set instead of reconciling
-# independent per-model schema versions. DataContractVersion is bumped on any breaking
-# shape change to any data model.
-$Script:DataContractId      = '4c173c61-c099-4512-9283-f5d951beda8b'
-$Script:DataContractVersion = 1
 
 # Phase Registry: declared up front so -Action ListPhases can work
 # without running any phase functions. Func names are bound by
@@ -3258,23 +3249,19 @@ function Save-ConfigWithBaseline {
         [Parameter(Mandatory)] [string]$ConfigPath,
         [Parameter(Mandatory)] $OsProfile
     )
-    # Stamp the shared data-contract provenance (_meta) so the config is a
-    # contract-bearing artifact carrying the shared data-contract identity
-    # (dataContractId + dataContractVersion); scriptVersion / generatedAt are
-    # informational. Refreshed in place on
-    # every write (Layer 1 only writes when a verified value actually
-    # changed, so unchanged configs are not rewritten). Built with an
-    # order-stable [pscustomobject] for canonical-JSON determinism.
-    $contractMeta = [pscustomobject]@{
-        dataContractId      = $Script:DataContractId
-        dataContractVersion = $Script:DataContractVersion
-        scriptVersion       = $Script:ScriptVersion
-        generatedAt         = ([datetime]::UtcNow).ToString('yyyy-MM-ddTHH:mm:ssZ')
+    # Stamp informational provenance (_meta): the script version that last
+    # wrote this config and the UTC write time. Refreshed in place on every
+    # write (Layer 1 only writes when a verified value actually changed, so
+    # unchanged configs are not rewritten). Built with an order-stable
+    # [pscustomobject] for canonical-JSON determinism.
+    $metaStamp = [pscustomobject]@{
+        scriptVersion = $Script:ScriptVersion
+        generatedAt   = ([datetime]::UtcNow).ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
     if ($OsProfile.PSObject.Properties['_meta']) {
-        $OsProfile._meta = $contractMeta
+        $OsProfile._meta = $metaStamp
     } else {
-        $OsProfile | Add-Member -NotePropertyName '_meta' -NotePropertyValue $contractMeta
+        $OsProfile | Add-Member -NotePropertyName '_meta' -NotePropertyValue $metaStamp
     }
 
     # Persist the OS profile in canonical JSON format (SPEC Part B.23).
