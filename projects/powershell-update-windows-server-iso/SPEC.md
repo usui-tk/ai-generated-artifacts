@@ -59,7 +59,7 @@ without breaking on cosmetic edits:
 |:---|:---|:---|
 | **Section reference** | `B.N`, `B.N.M`, `D.NN` | Cross-references inside this document |
 | **Policy identifier** | `SPEC-WSI-NNN` | Repository-wide policy IDs (parallel to `SPEC-CI-NNN` in the repository-level SPEC) |
-| **Phase identifier** | `P01`–`P13`, `A01`–`A03` | Pipeline phases (see §B.5) and stand-alone actions (see §B.6) |
+| **Phase identifier** | `P01`–`P13`, `A00`–`A03` | Pipeline phases (see §B.5) and stand-alone actions (see §B.6) |
 
 A section's identifier is stable across revisions. If a section is
 deleted, its identifier is **never reused** for a different purpose;
@@ -479,7 +479,7 @@ param(
     [ValidateSet('Build', 'Verify', 'Prepare', 'PrepareBuildVerify',
                  'Cleanup', 'ListPhases', 'TestHarness',
                  'RefreshAllBaselines', 'RefreshSnapshots',
-                 'DumpFieldClassification')]
+                 'RebuildDataset', 'DumpFieldClassification')]
     [string]$Action = 'Build',
 
     [Parameter()] [switch]$Execute,
@@ -508,7 +508,7 @@ change.
 |:---|:---|:---|
 | Microsoft Windows Server evaluation ISO | Microsoft Evaluation Center | Build, Verify |
 | Per-OS configuration profile | `data/config-Server{2016,2019,2022,2025}.json` | All actions |
-| Microsoft Update Catalogue | live HTTPS | RefreshAllBaselines, Build (P03/P04) |
+| Microsoft Update Catalogue | live HTTPS | RefreshAllBaselines, RebuildDataset, Build (P03/P04) |
 
 ### B.2.2 Outputs
 
@@ -752,10 +752,11 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 | `ListPhases` | (none) | Dump phase + action registry as JSON to stdout |
 | `TestHarness` | (REPL hook at script L12525) | Eval-PS-function mode used by `tests/powershell_harness.py` (T3); not for human invocation |
 
-### B.6.3 Admin Actions (A01 - A03 - A02)
+### B.6.3 Admin Actions (A00 - A01 - A03 - A02)
 
 | Action | Admin Phase | Phases run | Description |
 |:---|:-:|:---|:---|
+| `RebuildDataset` | A00 | (`Invoke-AdminPhaseA00_RebuildDataset`) | Rebuild every `data/config-Server*.json` from `data/seed/seed-Server*.json` + caches (validate seeds, A03 snapshots, build skeletons, A01 Force fill, verify); runnable from empty |
 | `RefreshAllBaselines` | A01 | (`Invoke-AdminPhaseA01_RefreshAllBaselines` at script L586) | Refresh `data/config-Server*.json` baselines from upstream caches |
 | `DumpFieldClassification` | A02 | (`Invoke-AdminPhaseA02_DumpFieldClassification` at script L587) | Emit the field-cadence decision matrix as JSON |
 | `RefreshSnapshots` | A03 | (`Invoke-AdminPhaseA03_RefreshSnapshots` at script L588) | Refresh `data/raw-*` and `data/cache-*` from Microsoft Learn + Catalogue |
@@ -763,8 +764,8 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 ### B.6.4 Action semantics
 
 - The `osLessActions` set (script L392) — `ListPhases`, `Cleanup`,
-  `RefreshSnapshots`, `RefreshAllBaselines`, `DumpFieldClassification`,
-  `TestHarness` — does not require `-OsVersion`. All other Actions
+  `RefreshSnapshots`, `RefreshAllBaselines`, `RebuildDataset`,
+  `DumpFieldClassification`, `TestHarness` — does not require `-OsVersion`. All other Actions
   REQUIRE `-OsVersion` (script L398-L400).
 - `Verify` running standalone presumes the output ISO was produced by
   a prior `Build -Execute`; if missing, P11 reports `Critical`.
@@ -1052,7 +1053,7 @@ SEED/DERIVED boundary that makes a from-empty build possible (B.14.2), and
 the field-cadence matrix that governs an incremental in-place refresh
 (B.14.3).
 
-### B.14.1 Execution entry point — `A00 RebuildDataset` [PLANNED — implemented at P2]
+### B.14.1 Execution entry point — `A00 RebuildDataset`
 
 The dataset has exactly one canonical rebuild entry point. It regenerates
 `data/` from the committed seed and upstream sources and is runnable from
@@ -1080,12 +1081,12 @@ long-running / hang-prone and MUST be run detached + polled, never
 synchronous-foreground (data-generation hazard policy, handoff B.2.9). A00
 carries no `-OsVersion` (an `osLessAction`, script L383).
 
-**Evidence**: [WORKING] design — no code yet. A00 formalizes a sequence
+**Evidence**: [WORKING] implemented at P2 (`Invoke-AdminPhaseA00_RebuildDataset` + `Build-ConfigSkeletonFromSeed`). A00 formalizes a sequence
 that today exists ONLY as the manual A03→A01 procedure in TESTING.md §8.
 The absence of an explicit, gate-checked entry point — the orchestration
 living only in prose — is the documented root cause this section corrects.
-Until P2 lands A00, the live Admin Actions remain A01/A02/A03 (B.6.3) and
-the A03→A01 order is run by hand.
+A00 is now the live entry point (B.6.3); it runs the A03→A01 order
+internally, so the rebuild no longer depends on a hand-run procedure.
 
 ### B.14.2 SEED vs DERIVED boundary
 
@@ -1128,7 +1129,9 @@ The seed contract is realized by `schema/config-seed.schema.json` and
 `data/seed/seed-Server*.json` — a projection of `schema/config.schema.json`
 that carries every SEED region and forbids the DERIVED ones (`PatchBaseline`,
 `LanguageSpecific.<lang>.LanguageSpecificPatches`, `_meta`). The `A00`
-builder that assembles a full config from them is [PLANNED — P2].
+builder that assembles a full config from them is `Build-ConfigSkeletonFromSeed`
+(lays the seed into the config shape with empty DERIVED placeholders), with
+`Invoke-AdminPhaseA00_RebuildDataset` orchestrating the rebuild (B.14.1).
 
 ### B.14.3 Field-cadence decision matrix
 

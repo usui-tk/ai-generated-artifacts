@@ -220,7 +220,7 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','DumpFieldClassification','TestHarness')]
+    [ValidateSet('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','RebuildDataset','DumpFieldClassification','TestHarness')]
     [string]   $Action               = 'PrepareBuildVerify',
 
     [string[]] $OnlyPhases,
@@ -380,7 +380,7 @@ if ($PatchMonth -and ($PatchMonth -notmatch '^\d{4}-\d{2}$')) {
 # and the Admin actions (RefreshSnapshots, RefreshAllBaselines,
 # DumpFieldClassification) operate on the
 # on-disk Config files or the script itself.
-$osLessActions = @('ListPhases','Cleanup','RefreshSnapshots','RefreshAllBaselines','DumpFieldClassification','TestHarness')
+$osLessActions = @('ListPhases','Cleanup','RefreshSnapshots','RefreshAllBaselines','RebuildDataset','DumpFieldClassification','TestHarness')
 $needsOsVersion = ($Action -notin $osLessActions) -and (-not $EnvironmentInfoOnly)
 if ($needsOsVersion -and [string]::IsNullOrEmpty($OsVersion)) {
     throw '-OsVersion is required for action "' + $Action + '". Specify Server2016 / Server2019 / Server2022 / Server2025.'
@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.41'
-$Script:ScriptTag     = 'dynamic-update-cache-removal'
+$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.42'
+$Script:ScriptTag     = 'data-pipeline-rebuilddataset'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -598,6 +598,7 @@ $Script:PhaseRegistry = @(
     [pscustomobject]@{ Id='P11';   Name='StaticVerify';              Group='Verify'; Func='Invoke-VerifyPhase11_StaticVerify' }
     [pscustomobject]@{ Id='P12';   Name='VerifyPca2023Readiness';    Group='Verify'; Func='Invoke-VerifyPhase12_VerifyPca2023Readiness' }
     [pscustomobject]@{ Id='P13';   Name='FinalReport';               Group='Report'; Func='Invoke-ReportPhase13_FinalReport' }
+    [pscustomobject]@{ Id='A00';   Name='RebuildDataset';           Group='Admin';  Func='Invoke-AdminPhaseA00_RebuildDataset' }
     [pscustomobject]@{ Id='A01';   Name='RefreshAllBaselines';       Group='Admin';  Func='Invoke-AdminPhaseA01_RefreshAllBaselines' }
     [pscustomobject]@{ Id='A02';   Name='DumpFieldClassification';   Group='Admin';  Func='Invoke-AdminPhaseA02_DumpFieldClassification' }
     [pscustomobject]@{ Id='A03';   Name='RefreshSnapshots';          Group='Admin';  Func='Invoke-AdminPhaseA03_RefreshSnapshots' }
@@ -11589,6 +11590,187 @@ function Set-GroupVerifiedState {
     }
 }
 
+function Build-ConfigSkeletonFromSeed {
+    <#
+    .SYNOPSIS
+        Lay a SEED profile (data/seed/seed-Server<os>.json) into the full
+        config shape, with the DERIVED regions as empty placeholders in
+        their canonical key positions.
+    .DESCRIPTION
+        The single new structural step of A00 RebuildDataset (SPEC B.14.1).
+        The seed carries every SEED region (Schema/OsKey/PatchModel, Common,
+        the PatchBaseline envelope, Pca2023, AutoRefreshPolicy, and each
+        language's DisplayName/Iso/VolumeLabelPrefix). This function copies
+        those through and adds empty placeholders for the DERIVED regions --
+        PatchBaseline.Lines and its refresh stamps, every
+        LanguageSpecificPatches block, and _meta -- positioned so the normal
+        refresh path fills them in place: A01 RefreshAllBaselines (Force)
+        populates Lines / LanguageSpecificPatches / stamps, and
+        Save-ConfigWithBaseline fills _meta. Building the placeholders in
+        canonical order keeps the rebuilt config byte-aligned with the
+        committed structure (only the regenerated content differs).
+    #>
+    [CmdletBinding()]
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    param([Parameter(Mandatory)] $Seed)
+
+    $patchBaseline = [ordered]@{
+        Schema                 = $Seed.PatchBaseline.Schema
+        TargetBuildAfterUpdate = $Seed.PatchBaseline.TargetBuildAfterUpdate
+        VerificationMethod     = $Seed.PatchBaseline.VerificationMethod
+        ChecksumAlgorithm      = $Seed.PatchBaseline.ChecksumAlgorithm
+        ExcludeKbList          = $Seed.PatchBaseline.ExcludeKbList
+        LastVerifiedDate       = ''
+        LastVerifiedBy         = ''
+        PatchTuesdayOfBaseline = ''
+        Lines                  = @()
+    }
+
+    $languageSpecific = [ordered]@{}
+    foreach ($entry in $Seed.LanguageSpecific.PSObject.Properties) {
+        $languageSpecific[$entry.Name] = [ordered]@{
+            DisplayName             = $entry.Value.DisplayName
+            Iso                     = $entry.Value.Iso
+            VolumeLabelPrefix       = $entry.Value.VolumeLabelPrefix
+            LanguageSpecificPatches = [ordered]@{
+                LanguagePacks          = @()
+                LxpUpdates             = @()
+                DotNetLanguagePacks    = @()
+                LastVerifiedDate       = ''
+                LastVerifiedBy         = ''
+                PatchTuesdayOfBaseline = ''
+            }
+        }
+    }
+
+    return [ordered]@{
+        Schema            = $Seed.Schema
+        OsKey             = $Seed.OsKey
+        Common            = $Seed.Common
+        PatchBaseline     = $patchBaseline
+        Pca2023           = $Seed.Pca2023
+        AutoRefreshPolicy = $Seed.AutoRefreshPolicy
+        LanguageSpecific  = $languageSpecific
+        _meta             = ''
+        PatchModel        = $Seed.PatchModel
+    }
+}
+
+function Invoke-AdminPhaseA00_RebuildDataset {
+    <#
+    .SYNOPSIS
+        Canonical rebuild entry point for the data/ dataset (SPEC B.14.1).
+        Rebuilds data/config-Server*.json from the committed seeds
+        (data/seed/seed-Server*.json) plus upstream caches, runnable from
+        empty (no pre-existing config required). Honours -PatchMonth and
+        -OnlyOs. An osLessAction (takes no -OsVersion).
+    .DESCRIPTION
+        Stages, in order:
+          0. Validate seeds -- each in-scope seed exists, parses, and its
+             OsKey matches the filename.
+          1. Snapshots      -- Invoke-AdminPhaseA03_RefreshSnapshots fills
+             the upstream caches under data/.
+          2. Build config   -- Build-ConfigSkeletonFromSeed lays each seed
+             into the config shape with empty DERIVED placeholders, written
+             to data/config-Server<os>.json.
+          3. Fill DERIVED   -- Invoke-AdminPhaseA01_RefreshAllBaselines runs
+             in Force mode, populating PatchBaseline.Lines, every
+             LanguageSpecificPatches, the refresh stamps and _meta in place.
+          4. Verify         -- each built config exists and carries a
+             non-empty PatchBaseline.Lines.
+        This action is a pure orchestrator: it owns no DebugTrace of its own
+        (A03 and A01 each manage theirs sequentially). Stage 1/3 perform
+        network acquisition, so the whole action is long-running and is run
+        detached + polled per the data-generation hazard policy, never
+        synchronously inside an interactive turn.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    Write-SubSection 'A00 RebuildDataset'
+
+    if ([string]::IsNullOrEmpty($Script:PatchMonth)) {
+        throw 'RebuildDataset requires -PatchMonth <yyyy-MM>: the rebuild is pinned to a patch month.'
+    }
+    $dataRoot = Join-Path $Script:ScriptRoot 'data'
+    $seedRoot = Join-Path $dataRoot 'seed'
+    if (-not (Test-Path -LiteralPath $seedRoot)) {
+        throw ('Seed root not found: {0}' -f $seedRoot)
+    }
+
+    $allOsKeys = @('Server2016', 'Server2019', 'Server2022', 'Server2025')
+    $targetOsKeys = $allOsKeys
+    if ($Script:OnlyOs) { $targetOsKeys = @($Script:OnlyOs) }
+
+    # ---- Stage 0: validate seeds ----
+    Write-SubSection 'Stage 0: Validate seeds'
+    $seeds = [ordered]@{}
+    foreach ($osKey in $targetOsKeys) {
+        $seedFile = Join-Path $seedRoot ('seed-' + $osKey + '.json')
+        if (-not (Test-Path -LiteralPath $seedFile)) {
+            throw ('Seed not found: {0} (the dataset cannot be rebuilt without it).' -f $seedFile)
+        }
+        $seed = Get-Content -LiteralPath $seedFile -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson
+        if ($seed.OsKey -ne $osKey) {
+            throw ('Seed OsKey mismatch in {0}: OsKey="{1}" expected "{2}".' -f $seedFile, $seed.OsKey, $osKey)
+        }
+        $seeds[$osKey] = $seed
+        Write-Ok ('Seed OK: {0}' -f $seedFile)
+    }
+
+    # ---- Stage 1: snapshots (caches) ----
+    Write-SubSection 'Stage 1: RefreshSnapshots (caches)'
+    Invoke-AdminPhaseA03_RefreshSnapshots
+
+    # ---- Stage 2: build config skeletons from seeds ----
+    Write-SubSection 'Stage 2: Build config from seed'
+    foreach ($osKey in $targetOsKeys) {
+        $cfgPath  = Join-Path $dataRoot ('config-' + $osKey + '.json')
+        $skeleton = Build-ConfigSkeletonFromSeed -Seed $seeds[$osKey]
+        Save-CanonicalJsonFile -InputObject $skeleton -Path $cfgPath -Depth 32
+        Write-Ok ('Config skeleton written: {0}' -f $cfgPath)
+    }
+
+    # ---- Stage 3: fill DERIVED groups via the normal refresh (Force) ----
+    Write-SubSection 'Stage 3: RefreshAllBaselines (Force)'
+    $previousMode = $Script:Mode
+    $Script:Mode = 'Force'
+    try {
+        $refreshOk = Invoke-AdminPhaseA01_RefreshAllBaselines
+    } finally {
+        $Script:Mode = $previousMode
+    }
+    if (-not $refreshOk) {
+        throw 'RebuildDataset: RefreshAllBaselines reported unresolved groups; dataset is incomplete.'
+    }
+
+    # ---- Stage 4: verify ----
+    Write-SubSection 'Stage 4: Verify'
+    $allOk = $true
+    foreach ($osKey in $targetOsKeys) {
+        $cfgPath = Join-Path $dataRoot ('config-' + $osKey + '.json')
+        if (-not (Test-Path -LiteralPath $cfgPath)) {
+            Write-Caution ('Missing built config: {0}' -f $cfgPath)
+            $allOk = $false
+            continue
+        }
+        $built = Get-Content -LiteralPath $cfgPath -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson
+        $lineCount = @($built.PatchBaseline.Lines).Count
+        if ($lineCount -lt 1) {
+            Write-Caution ('{0}: PatchBaseline.Lines is empty after rebuild.' -f $osKey)
+            $allOk = $false
+        } else {
+            Write-Ok ('{0}: {1} PatchBaseline Line(s).' -f $osKey, $lineCount)
+        }
+    }
+    if (-not $allOk) {
+        throw 'RebuildDataset: one or more configs did not rebuild cleanly (see cautions above).'
+    }
+    Write-Ok 'RebuildDataset complete.'
+    return $true
+}
+
     # psa-disable-next-line PSA6003 -- intentional plural: function refreshes ALL baselines across multiple OS x language combinations
 function Invoke-AdminPhaseA01_RefreshAllBaselines {
     <#
@@ -12166,6 +12348,7 @@ function Get-PhaseListByAction {
         'Cleanup'                 { return [string[]]@() }
         'ListPhases'              { return [string[]]@() }
         'GenerateManifest'        { return [string[]]@('P01','P02','P03') }
+        'RebuildDataset'           { return [string[]]@('A00') }
         'RefreshAllBaselines'      { return [string[]]@('A01') }
         'DumpFieldClassification'  { return [string[]]@('A02') }
         'RefreshSnapshots'         { return [string[]]@('A03') }

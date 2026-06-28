@@ -251,20 +251,24 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 ### Admin アクション（Config ベースライン管理）
 
 `data/config-<OsKey>.json` ファイル群がスクリプトの利用するベースラインデータを
-保持します。4 つの Admin Action により、ISO に触れずにこのデータを更新・点検
+保持します。5 つの Admin Action により、ISO に触れずにこのデータを更新・点検
 できます。**更新は 2 段階** で行います：`RefreshSnapshots` が Microsoft Learn と
 Microsoft Update Catalog から上流の `data/raw-*` / `data/cache-*` を取得し、
 `RefreshAllBaselines` が各 `data/config-Server*.json` の
 `PatchBaseline.Lines[]` をそれらキャッシュから再生成します。この分離は
-SPEC §B.22.1 の Refresher アーキテクチャに対応します。
+SPEC §B.22.1 の Refresher アーキテクチャに対応します。`RebuildDataset`（A00）は、コミット済みの `data/seed/seed-Server*.json` からデータセット全体を一括で再構築します（シード検証 -> `RefreshSnapshots` -> 各 config をシードから構築 -> `RefreshAllBaselines`（Force） -> 検証）。空の状態からでも実行できます。
 
 | Action | Admin Phase | 説明 |
 |:---|:-:|:---|
+| `RebuildDataset` | A00 | シード + キャッシュから `data/config-Server*.json` を全体再構築（空の状態からも可）|
 | `RefreshSnapshots` | A03 | 上流キャッシュの取得（release-info、.NET CU、Dynamic Update）|
 | `RefreshAllBaselines` | A01 | キャッシュから `data/config-Server*.json` を再生成 |
 | `DumpFieldClassification` | A02 | フィールドのカデンス決定マトリックスを JSON で出力 |
 
 ```powershell
+# ---- コミット済みシードからの一括再構築（検証 -> snapshots -> 構築 -> fill -> 検証）----
+.\Update-WindowsServerIso.ps1 -Action RebuildDataset -PatchMonth 2025-06
+
 # ---- 第 1 段：上流キャッシュの populate ----
 .\Update-WindowsServerIso.ps1 -Action RefreshSnapshots
 

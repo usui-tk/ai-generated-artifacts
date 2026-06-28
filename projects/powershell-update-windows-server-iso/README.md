@@ -259,20 +259,24 @@ by purpose. The default is `PrepareBuildVerify`.
 ### Admin Actions (Config baseline management)
 
 The `data/config-<OsKey>.json` files hold the baseline data the script
-uses. Four Admin Actions let you refresh and inspect that data without
+uses. Five Admin Actions let you refresh and inspect that data without
 touching any ISO. **The refresh path is two-stage**: `RefreshSnapshots`
 populates the upstream `data/raw-*` / `data/cache-*` files from
 Microsoft Learn + Microsoft Update Catalog, then `RefreshAllBaselines`
 regenerates each `data/config-Server*.json` `PatchBaseline.Lines[]`
-from those caches. This split follows the SPEC §B.22.1 refresher architecture.
+from those caches. This split follows the SPEC §B.22.1 refresher architecture. `RebuildDataset` (A00) runs the whole rebuild end-to-end from the committed `data/seed/seed-Server*.json` (validate seeds -> `RefreshSnapshots` -> build each config from its seed -> `RefreshAllBaselines` Force -> verify) and is runnable from empty.
 
 | Action | Admin Phase | Description |
 |:---|:-:|:---|
+| `RebuildDataset` | A00 | Rebuild every `data/config-Server*.json` from the seeds + caches; runnable from empty |
 | `RefreshSnapshots` | A03 | Fetch upstream caches (release-info, .NET CU, Dynamic Update) |
 | `RefreshAllBaselines` | A01 | Regenerate `data/config-Server*.json` from the caches |
 | `DumpFieldClassification` | A02 | Emit the field-cadence decision matrix as JSON |
 
 ```powershell
+# ---- One-shot rebuild from the committed seeds (validate -> snapshots -> build -> fill -> verify) ----
+.\Update-WindowsServerIso.ps1 -Action RebuildDataset -PatchMonth 2025-06
+
 # ---- Stage 1: populate the upstream caches ----
 .\Update-WindowsServerIso.ps1 -Action RefreshSnapshots
 
