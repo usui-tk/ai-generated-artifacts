@@ -23,10 +23,7 @@
     "EnableBootWimUpdate": true,
     "EnableWinREUpdate": true,
     "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy": "manual:initial-r03",
-    "CatalogTitleTokens": [
-      "Windows Server 2019"
-    ]
+    "_VerifiedBy": "manual:initial-r03"
   },
   "PatchBaseline": {
     "Schema": "3.0",

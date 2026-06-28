@@ -12,7 +12,6 @@ What this tool covers that fixture tests (T2) do NOT:
 
 - ``Get-CatalogQueryTemplate``        the per-OS query/token tables
 - ``Get-LanguagePackQueryTemplate``   the language-pack token tables
-- ``Get-KbIdFromUpdateTitle``         the regex used during dedup
 - ``Select-CanonicalPatchFile``       single-file picker
 
 Adding a new test = add one function below; each calls
@@ -99,25 +98,6 @@ def test_query_template_server2022_no_comma_in_query_template(ps: PSSession) -> 
     if not bad:
         return TestOutcome(name, True, 'all 5 queries use the comma-less form')
     return TestOutcome(name, False, f'{len(bad)} query/queries still have comma: {bad[0]!r}')
-
-
-def test_get_kb_id_extraction(ps: PSSession) -> TestOutcome:
-    """Get-KbIdFromUpdateTitle should match (KB######) and skip non-matches."""
-    name = 'Get-KbIdFromUpdateTitle'
-    cases = [
-        ('2026-05 Cumulative Update (KB5037591)',                   'KB5037591'),
-        ('SSU for ... (KB5043050)',                                 'KB5043050'),
-        ('Something without a kb reference',                         ''),
-        ('', ''),
-    ]
-    failures: List[str] = []
-    for title, want in cases:
-        got = ps.invoke('Get-KbIdFromUpdateTitle', Title=title)
-        if got != want:
-            failures.append(f'{title!r} -> got {got!r}, want {want!r}')
-    if not failures:
-        return TestOutcome(name, True, f'{len(cases)} cases passed')
-    return TestOutcome(name, False, '; '.join(failures))
 
 
 def test_select_canonical_patch_file_filters_express(ps: PSSession) -> TestOutcome:
@@ -286,12 +266,9 @@ def test_get_pca2023_readiness_snapshot_health_enum(ps: PSSession) -> TestOutcom
 # -----------------
 
 ALL_TESTS: List[Callable[[PSSession], TestOutcome]] = [
-    # Get-CatalogQueryTemplate tests removed in r07.0 Step 2b (function deleted;
-    # the per-OS Catalog QueryTemplate strings are no longer needed because
-    # discovery moved to the b3 Catalog path (Invoke-CatalogPatchSetRefresh).
-    # TitleTokens coverage is now exercised by T9 (catalog_title_tokens_test.py)
-    # against the new Config-driven Get-CatalogTitleTokenList helper.)
-    test_get_kb_id_extraction,
+    # The pre-b3 Catalog query-template / title-token helpers were removed
+    # with the legacy resolution path; b3 OS-scoping uses the Catalog
+    # Products column (Get-ServerRow), not Config title tokens.
     test_select_canonical_patch_file_filters_express,
     # r05.0 Stage B - SecureBoot smoke tests
     test_test_pca2023_authenticode_chain_missing_file,

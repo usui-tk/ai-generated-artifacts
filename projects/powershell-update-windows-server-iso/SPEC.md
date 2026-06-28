@@ -1481,8 +1481,6 @@ projects/powershell-update-windows-server-iso/
 │   ├── raw-dotnet-cu.json            # Aggregated .NET CU index mirror
 │   ├── cache-release-info.json       # Parsed release-info cache
 │   ├── cache-dotnet-cu.json          # Parsed .NET CU cache
-│   ├── cache-dynamicupdate-Server2022.json      # Parsed Dynamic Update cache (Server 2022)
-│   └── cache-dynamicupdate-Server2025.json      # Parsed Dynamic Update cache (Server 2025)
 │
 ├── tests/                            # Python self-verification suite (offline + live; see tests/README.md)
 │   ├── README.md                     # Canonical T-numbering and quick-start
@@ -1492,9 +1490,6 @@ projects/powershell-update-windows-server-iso/
 │   ├── eval_iso_probe.py             # T4 (live)
 │   ├── release_info_parser_test.py   # T6 (offline; 13 assertions)
 │   ├── dotnet_cu_parser_test.py      # T7 (offline; 16 assertions)
-│   ├── dynamic_update_cache_test.py  # T8 (offline; 20 assertions)
-│   ├── catalog_title_tokens_test.py  # T9 (offline; 18 assertions)
-│   ├── release_info_resolver_test.py # T10 (offline; 18 assertions)
 │   ├── common/                       # Shared Python utilities
 │   │   ├── catalog_client.py
 │   │   ├── html_parsers.py
@@ -1522,8 +1517,8 @@ projects/powershell-update-windows-server-iso/
 **Notable layout invariants**:
 
 - `data/` is **flat** (no sub-directories). Per-month or per-OS data
-  is encoded into the filename (`cache-dynamicupdate-Server2025.json`, not
-  `cache-du/Server2025.json`).
+  is encoded into the filename (`cache-dotnet-cu.json` and the per-OS
+  `config-Server2025.json`, not nested `cache-du/Server2025.json`).
 - `tests/common/` is the shared-utility location; it is NOT a tool
   itself.
 - The `r08.0-step4-findings-and-dependency-investigation.md` cycle
@@ -1640,18 +1635,20 @@ versioned, and stable. Title-scrape against the Catalogue is fragile
 (comma-form drift in 2026-04 dropped Server 2022 to zero results;
 see §D.NN).
 
-### B.22.2 Catalog Title token matching: config-driven
+### B.22.2 Catalog OS-scoping: Products column
 
-`Get-CatalogQueryTemplate` reads OS-specific Title-token arrays
-from `data/config-Server*.json` rather than hard-coding them in
-.ps1. Multi-form arrays accommodate Microsoft's punctuation drift
-(comma vs comma-less).
+The b3 producer scopes Catalog hits to an OS by the Catalog **Products**
+column (`Get-ServerRow` keeps rows whose Products field contains the
+per-OS token in `$script:CatOsDef`, e.g. `Windows Server 2016`,
+`Microsoft Server operating system-21H2`), not by parsing the update
+Title string.
 
-**Why**: r04.2 dropped Server 2022 to zero results after Microsoft
-removed a comma from one OS title; the hard-coded TitleToken did a
-`[regex]::Escape` literal match and no longer matched. A
-config-driven multi-form array isolates the cosmetic-drift class of
-failure to a config file edit, not a code change.
+**Why**: the Products column is structured metadata, immune to the Title
+punctuation drift that broke the pre-b3 Title-token scrape (r04.2 dropped
+Server 2022 to zero results when Microsoft removed a comma from one OS
+title). The earlier config-driven Title-token mechanism
+(`Common.CatalogTitleTokens` + `Get-CatalogTitleTokenList` /
+`Test-CatalogTitleMatch`) was removed with the legacy resolution path.
 
 ### B.22.3 Data directory: flat with 3-prefix naming
 
@@ -1698,33 +1695,26 @@ into the combined LCU); `uup-checkpoint` derives its SSU line from the
 co-served GA baseline. The search needs no layer 2 / `-DataDir` input,
 so it works on the `RefreshAllBaselines` call path.
 
-**.NET CU publication-gap carry-forward (r11.27)**: .NET Framework CUs
-are not published every month (the release-notes index has gaps), so
-the b3 `Resolve-Net` resolver does not require an exact PatchMonth
-match for the .NET CU. When the requested month lists no .NET
-CU for an OS, discovery carries forward the most-recent .NET CU month
-that is `<= PatchMonth`, that still falls inside the same 36-month window
-as the Dynamic Update lookback (§B.22.6), and that actually lists a row
-for that OS (the choice is per-OS, because .NET CU coverage varies by
-month). The carried record's `DiscoveryNote` records the source month.
-.NET CUs are cumulative and OS-lifecycle-applicable, so the latest-
-applicable build is the correct content for a fully-patched ISO; silently
-dropping it on a gap month would ship an ISO with no .NET servicing. To
-keep the LCU-priority dedup correct across months, the dedup set is seeded
-from *every* release-info LCU KbId for the OS (any in-cache month), not
-just the requested month's LCU, so a prior-month LCU that Microsoft lists
-under a .NET row (e.g. the Server 2016 sliced cumulative `KB5087537`) is
-never resurfaced as a spurious .NET CU when a later month carries it
-forward.
+**.NET CU latest-applicable selection**: .NET Framework CUs are
+cumulative and OS-lifecycle-applicable, so the b3 `Resolve-Net` resolver
+takes the latest applicable .NET CU for the OS -- the newest Catalog row
+matching the OS Products token, chosen by month prefix and runtime count
+(`Get-RuntimeCount`). The latest-applicable build is the correct content
+for a fully-patched ISO. (The pre-b3 release-info publication-gap
+carry-forward, which bounded the search by the Dynamic Update 36-month
+window, was removed with the legacy resolution path.)
 
-### B.22.6 Dynamic Update lookback: 36-month cache
+### B.22.6 Dynamic Update: always-latest resolution
 
-Per-OS Dynamic Update caches under `data/raw-dynamic-update/` keep a
-36-month lookback window (~3 years of monthly snapshots). Older
-entries are pruned by the next RefreshSnapshots.
+Setup and Safe OS Dynamic Updates are resolved live at build time by
+`Resolve-SetupDu` / `Resolve-SafeOsDu` (a same-month Catalog search via
+`Get-Newest` / `Search-Catalog`), always taking the latest applicable
+package. There is no Dynamic Update cache or lookback window.
 
-**Why**: 36 months covers the longest "operator retains old
-baseline" case (legal-hold scenarios).
+**Why**: the build only needs the current applicable DU, and the live
+resolvers return it directly. The pre-b3 36-month per-OS DU cache
+(`cache-dynamicupdate-Server*.json`, populated by an A03 probe) had no
+build-time consumer after the migration and was removed.
 
 ### B.22.7 Update lifecycle: Patch-Tuesday-triggered, Git-tracked
 
@@ -2421,7 +2411,6 @@ mirrors that authoritative table.
 | **T4** `eval_iso_probe.py` | Evaluation ISO endpoint check (HTTP Range-GET; 4 OS × 2 lang) | live (4 OS) | Yes | Before release; on Microsoft Evaluation Center snapshot rotation |
 | **T6** `release_info_parser_test.py` | Offline regression for `ConvertFrom-ReleaseInfoMarkdown` against the PoC fixture | 13 | No | Every commit that touches the release-info parser |
 | **T7** `dotnet_cu_parser_test.py` | Offline regression for `ConvertFrom-DotNetCuIndexMarkdown` / `ConvertFrom-DotNetCuMarkdown` against `snapshots/dotnet_cu/` | 16 | No | Every commit touching the .NET CU parsers or the fetch/cache pipeline |
-| **T9** `catalog_title_tokens_test.py` | Offline regression for `Get-CatalogTitleTokenList` against all four OS configs + `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases | 18 | No | Every commit touching `Common.CatalogTitleTokens` in any OS config, or the narrow-filter helpers |
 | **T11** `canonical_json_test.py` | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell) and `canonical_json_dumps` / `save_canonical_json_file` (Python) per SPEC Part B.23 | 26 | No | Every commit touching the canonical JSON helpers (PS or Python) |
 | **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 26 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
 | **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config.schema.json` |
@@ -2769,9 +2758,11 @@ update title:
 version 21H2". The TitleToken was a `[regex]::Escape` literal
 match.
 
-**Fix / mitigation**: per §B.22.2, `TitleTokens` is a multi-form
-array accommodating both the comma and comma-less variants. The
-live `Search.aspx` query strings were updated to the current form.
+**Fix / mitigation**: OS-scoping moved off the update Title entirely to
+the Catalog Products column (§B.22.2), which is structured metadata and
+immune to Title punctuation drift. The interim config-driven multi-form
+`TitleTokens` array (the original mitigation) was removed with the legacy
+resolution path.
 
 ### D.20 `Get-PatchType` filename heuristic is not authoritative
 
@@ -3184,7 +3175,6 @@ when the original needs an upstream fix.
 | Helper | First shipped | Role |
 |:---|:---|:---|
 | `Build-PatchPlan` | r03 | Target-aware PatchPlan engine (§B.10) |
-| `Select-LatestPatchBySupersedence` | r04.2 | Multi-candidate supersedence dedup (§B.12) |
 | `Test-PatchServicingReadinessOnMount` | r04 | Mount-time prerequisite check (§B.13); renamed from `Test-PatchDependencyClosureOnMount` in r11.12 |
 | `Get-Pca2023ReadinessSnapshot`, `Show-Pca2023ReadinessSnapshot`, `Format-Pca2023ReadinessForReport` | r05.0 | Health verdict for PCA2023 readiness (§B.17) |
 | `Convert-WimBootToPca2023Signed` | r05.0 | PSA-clean reimplementation of `Make2023BootableMedia.ps1` (§B.17) |

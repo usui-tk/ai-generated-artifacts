@@ -546,9 +546,6 @@
         },
         "EnableWinREUpdate": {
           "type": "boolean"
-        },
-        "CatalogTitleTokens": {
-          "description": "Per-OS title-narrowing tokens for the Catalog URL resolver (r07.0 Step 2b)."
         }
       },
       "patternProperties": {

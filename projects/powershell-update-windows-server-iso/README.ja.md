@@ -134,8 +134,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── raw-release-info.md (+ .meta.json)
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
-│   ├── cache-dotnet-cu.json
-│   └── cache-dynamicupdate-Server{2022,2025}.json
+│   └── cache-dotnet-cu.json
 ├── tests/                            # 自己検証スイート（T1-T19 + ゲート）
 └── docs/history/                     # サイクル別の調査レポート
 ```
@@ -504,10 +503,9 @@ Python 標準ライブラリのみを利用するため、`pip install` は不�
 ```bash
 # オフラインテスト — どこでも安全に実行可能
 python3 tests/catalog_fixture_test.py        # T2：13 個の fixture アサーション
-python3 tests/powershell_harness.py          # T3：8 個の PS 関数アサーション
+python3 tests/powershell_harness.py          # T3：7 個の PS 関数アサーション
 python3 tests/release_info_parser_test.py    # T6：13 個の release-info パーサーアサーション
 python3 tests/dotnet_cu_parser_test.py       # T7：16 個の .NET CU パーサーアサーション
-python3 tests/catalog_title_tokens_test.py   # T9：18 個の Title-token アサーション
 python3 tests/canonical_json_test.py         # T11：26 個の PS/Python バイトレベル パリティアサーション
 
 # スキーマ / フォーマットゲート（データを触るコミットごとに実行）
@@ -559,7 +557,7 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 | `oscdimg.exe not found` | Windows ADK Deployment Tools 未インストール | `oscdimg.exe` 不在時に P01 が約 50-80 MB の Deployment Tools 機能を自動インストール（スイッチ不要）。失敗した場合は [Windows ADK インストーラ](https://go.microsoft.com/fwlink/?linkid=2289980) から手動インストール（SPEC.md §B.22.13 参照）|
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` ドライブの空き容量が 100 GB 未満 | `-WorkRoot` をより大きなボリュームへ移動するか、空きを確保する（100 GB は 1 OS 分の PrepareBuildVerify エンドツーエンドに必要な最低量）|
 | `Workspace preflight failed: ... required Config file(s) missing` | `data/config-Server<N>.json` ファイル群が削除またはコピー漏れ | `Update-WindowsServerIso.ps1` と同階層に `data/` ディレクトリを復元（`Server2016/2019/2022/2025.json` の 4 ファイルすべてが必須）|
-| `Catalogue: no narrowed result for ... / Server2022`、`Resolved 0 patch entries` | Microsoft が Catalogue のタイトル形式を変更（句読点ドリフト）| 該当 `data/config-Server*.json` の `TitleTokens` 配列に新形式を追加（SPEC.md §D.19 参照）|
+| `Catalogue: no narrowed result for ... / Server2022`、`Resolved 0 patch entries` | `$script:CatOsDef` の OS Products トークンが Catalogue の Products カラムと一致しなくなった（例: Microsoft が製品名を変更）、またはパッチ未公開 | ライブ Catalogue 検索で OS Products トークンを確認。OS スコープは Title ではなく Products カラムによる（SPEC.md §B.22.2 参照）|
 | RefreshAllBaselines 後に解決済みセットが OS サービシングモデルに違反 | `Lines[]` の Kind が宣言された `PatchModel` と不一致 | P06 `Test-PatchModelConsistency` が必須/禁止 Kind と共に throw します。`PatchModel` が OS と一致するか確認（SPEC.md §B.19 参照）|
 | .NET CU ベースラインエントリのサブファイルが欠落しているように見える | 複数 `.msu` を持つアンブレラ KB で 1 つしか保持されなかった | b3 の `Resolve-Net` リゾルバがアンブレラ KB の全 `.msu` サブファイルを保持しているか確認（SPEC.md §D.21 参照）|
 | Warning 行に `0x800f081e` が表示 | このパッチは当該 SKU には適用不能 | クロス SKU のパッチセットでは想定内、無視して問題なし（SPEC.md §D.8 参照）|

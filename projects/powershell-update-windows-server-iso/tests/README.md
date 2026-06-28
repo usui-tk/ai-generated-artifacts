@@ -27,12 +27,11 @@ production, this directory ships five tools, summarised below.
 | Tool | What it does | When to run | Network? |
 |---|---|---|:---:|
 | `catalog_probe.py`        (T1) | Live Microsoft Update Catalog probe; asserts each known scrape pattern still yields > 0 hits, diffs against snapshot | Before / after editing any Catalogue-related helper; in CI monthly | Yes |
-| `catalog_fixture_test.py` (T2) | Offline regression test against saved HTML fixtures under `fixtures/<patch-month>/`; deterministic | After every parser or TitleToken change; on every CI run | No  |
+| `catalog_fixture_test.py` (T2) | Offline regression test against saved HTML fixtures under `fixtures/<patch-month>/`; deterministic | After every parser change; on every CI run | No  |
 | `powershell_harness.py`   (T3) | Drives `Update-WindowsServerIso.ps1 -Action TestHarness` to unit-test PowerShell functions from Python | After every PS function change in the catalog / patch-selection layers | No  |
 | `eval_iso_probe.py`       (T4) | HTTP Range-GET against each `data/config-Server<N>.json` Iso URL; reports size + Last-Modified | When the Microsoft Evaluation Center publishes a new snapshot; before release | Yes |
 | `release_info_parser_test.py` (T6) | Offline regression test for the PowerShell `ConvertFrom-ReleaseInfoMarkdown` parser against the PoC fixture; asserts row counts and per-OS coverage | After every change to the release-info parser or its helpers; on every CI run | No  |
 | `dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown` against live-captured snapshots under `tests/snapshots/dotnet_cu/` (independent of the PoC fixtures); 16 assertions covering entry counts, date range, per-OS row counts, per-entry deep equality, typo handling, and OS-label mapping | After every change to the .NET CU parsers, the OS-label mapper, or the fetch/cache pipeline; on every CI run | No  |
-| `catalog_title_tokens_test.py` (T9) | Offline regression test for the URL-resolver Config-driven narrowing; drives `Get-CatalogTitleTokenList` against all four OS configs (verifies sourcing + missing-Config defensive default) and `Test-CatalogTitleMatch` through 13 live-captured Catalog title cases (positive matches, same-KB client-variant rejection, `arm64` / `Windows 11` negative exclusion); 18 assertions | After every change to `Common.CatalogTitleTokens` in any OS config, or to the narrow-filter helpers; on every CI run | No  |
 | `canonical_json_test.py` (T11) | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell, in `Update-WindowsServerIso.ps1`) and `canonical_json_dumps` / `save_canonical_json_file` (Python, in `tests/common/canonical_json.py`); 26 assertions covering primitives (12), collections (8), Unicode (3), real-world `data/*.json` shapes (2), and file-level save (1). Verifies the SPEC Part B.23 byte-level parity contract for `data/*.json` and `tests/fixtures/*.json` files. | After every change to `ConvertTo-CanonicalJson`, `Save-CanonicalJsonFile`, or `tests/common/canonical_json.py`; on every CI run | No  |
 | `catalog_patchset_builder_test.py` (T27) | Offline b3 config-dataset builder: drives `ConvertTo-ConfigLines` through the TestHarness REPL against the committed layer-1 raw fixture (`fixtures/catalog_raw/resolve-2026-06.json`) to BUILD `PatchBaseline.Lines[]` without live Catalog I/O -- restores the pre-D2 offline construction path. 14 assertions: per-OS Kinds match the `PatchModel` allowed set, every Line carries a `Digest`, the uup-checkpoint OS builds a `SetupDU` Line at `ApplyOrder` 5. | After every change to `ConvertTo-ConfigLines`, the b3 transform, or the raw fixture; on every CI run | No  |
 | `canonical_json_format_check.py` (Part C gate) | Offline format compliance check for every `*.json` file under `data/`, `tests/fixtures/`, and `tests/snapshots/`. Re-serialises each file through `canonical_json_dumps` and fails if the bytes diverge. Implements SPEC §C.3.4. | On every commit that adds or modifies a JSON file in the three scanned directories; on every CI run | No  |
@@ -44,7 +43,7 @@ production, this directory ships five tools, summarised below.
 # Offline tests - safe to run anywhere
 cd tests/
 python3 catalog_fixture_test.py            # T2: 13 assertions on saved HTML
-python3 powershell_harness.py              # T3: 8 PS function-level assertions
+python3 powershell_harness.py              # T3: 7 PS function-level assertions
 python3 canonical_json_test.py             # T11: 26 PS/Python byte-level parity assertions
 python3 removed_live_wua_guard_test.py                 # T20: 21 removed-live-WUA static-guard assertions
 python3 canonical_json_format_check.py     # Part C: every JSON file in canonical format
@@ -68,17 +67,6 @@ python3 eval_iso_probe.py                  # T4: hits 4 OS Iso CDN URLs
 4. Run `python3 catalog_probe.py --check all` - confirm the new
    regex still works against live Microsoft HTML.
 5. If steps 3 and 4 both pass, the change is safe.
-
-### "I want to change `Get-CatalogQueryTemplate` (TitleTokens or query
-strings)"
-
-1. Run `python3 powershell_harness.py` - confirm current tests pass.
-2. Edit the template.
-3. Re-run `python3 powershell_harness.py`.
-4. Add a new test case in `powershell_harness.py` covering the new
-   token/query if the change is non-trivial.
-5. Run `python3 catalog_probe.py --check title-format` - confirm
-   live Catalog still narrows correctly.
 
 ### "I want to verify the Server 2025 evaluation ISO is still hosted"
 
@@ -202,7 +190,7 @@ parser / resolver logic was promoted into
 `Update-WindowsServerIso.ps1` (`ConvertFrom-ReleaseInfoMarkdown`,
 `ConvertFrom-DotNetCuMarkdown`; the release-info discovery/resolver
 pair was later removed in the data-source migration), regression
-coverage moved to T6/T7/T9 above, and the historical reports were moved to
+coverage moved to T6/T7 above, and the historical reports were moved to
 `docs/history/`. The `poc_<topic>_*` naming convention itself is
 preserved in SPEC.md §B.22.2 as a reserved pattern for any future
 PoC investigation.

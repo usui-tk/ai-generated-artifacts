@@ -141,8 +141,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── raw-release-info.md (+ .meta.json)
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
-│   ├── cache-dotnet-cu.json
-│   └── cache-dynamicupdate-Server{2022,2025}.json
+│   └── cache-dotnet-cu.json
 ├── tests/                            # Self-verification suite (T1-T19 + gates)
 └── docs/history/                     # Per-cycle investigation reports
 ```
@@ -519,10 +518,9 @@ the Python standard library (no `pip install` required).
 ```bash
 # Offline tests — safe to run anywhere
 python3 tests/catalog_fixture_test.py        # T2: 13 fixture assertions
-python3 tests/powershell_harness.py          # T3: 8 PS function assertions
+python3 tests/powershell_harness.py          # T3: 7 PS function assertions
 python3 tests/release_info_parser_test.py    # T6: 13 release-info parser assertions
 python3 tests/dotnet_cu_parser_test.py       # T7: 16 .NET CU parser assertions
-python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
 
 # Schema / format gates (run on every commit that touches data)
@@ -572,7 +570,7 @@ enforces this per repository SPEC.md §12 (SPEC-CI-081).
 | `oscdimg.exe not found` | Windows ADK Deployment Tools not installed | P01 auto-installs the ~50-80 MB Deployment Tools feature when `oscdimg.exe` is missing (no switch); if that fails, install manually from the [Windows ADK installer](https://go.microsoft.com/fwlink/?linkid=2289980). See SPEC.md §B.22.13 |
 | `Workspace preflight failed: drive ... has only NN GB free` | `-WorkRoot` drive has less than 100 GB free | Move `-WorkRoot` to a larger volume, or free up space (the 100 GB minimum covers an end-to-end PrepareBuildVerify run for one OS) |
 | `Workspace preflight failed: ... required Config file(s) missing` | The `data/config-Server<N>.json` files were deleted or not copied | Restore the `data/` directory alongside `Update-WindowsServerIso.ps1` (all four `Server2016/2019/2022/2025.json` must be present) |
-| `Catalogue: no narrowed result for ... / Server2022`; `Resolved 0 patch entries` | Microsoft changed the Catalogue title format (punctuation drift) | Add the new title form to the relevant `TitleTokens` array in `data/config-Server*.json`. See SPEC.md §D.19 |
+| `Catalogue: no narrowed result for ... / Server2022`; `Resolved 0 patch entries` | The OS Products token in `$script:CatOsDef` no longer matches the Catalogue Products column (e.g. Microsoft renamed the product), or the patch is not yet published | Verify the per-OS Products token against a live Catalogue search. OS-scoping is by the Products column, not the Title (SPEC.md §B.22.2). |
 | A resolved set violates the OS servicing model after RefreshAllBaselines | the `Lines[]` Kinds do not match the declared `PatchModel` | P06 `Test-PatchModelConsistency` throws with the required/forbidden Kinds; confirm `PatchModel` matches the OS. See SPEC.md §B.19 |
 | .NET CU baseline entry seems to be missing a sub-file | Umbrella KB with multiple `.msu` files; only one was kept | Confirm the b3 `Resolve-Net` resolver retains every `.msu` sub-file of the umbrella KB. See SPEC.md §D.21 |
 | `0x800f081e` in Warning lines | Patch not applicable to this SKU | Expected for cross-SKU patch sets; safe to ignore (see SPEC.md §D.8) |

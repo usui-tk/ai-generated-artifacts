@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.40'
-$Script:ScriptTag     = 'legacy-resolution-removal'
+$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.41'
+$Script:ScriptTag     = 'dynamic-update-cache-removal'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -4459,239 +4459,6 @@ function Get-DotNetCuCache {
 }
 
 # ============================================================
-# ISO Updater specific: Dynamic Update 36-month per-OS cache
-# ============================================================
-#
-# Microsoft does not publish Setup and Safe OS Dynamic Update packages
-# in a strict monthly cadence. Server 2025 Setup DU was published in
-# 2025-09, -10 and -11 and has been absent every month since (live
-# Catalog probes on 2026-05-26 confirmed 0 hits for 2026-05, -04 and
-# -03). Server 2019 and Server 2016 do not publish DU monthly at all.
-# An ISO-build run that searches the Catalog for "the current month"
-# and errors when zero hits come back is incompatible with both
-# observations.
-#
-# This section maintains, for each in-scope OS, a 36-month rolling
-# Catalog probe history in data/cache-dynamicupdate-Server<NNNN>.json. At
-# ISO-build time the Refresher consults the cache and selects, for
-# each DU type, the most recent publish within the 36-month window. If
-# the window contains zero entries, the Refresher logs a warning and
-# proceeds without that DU type; if it contains at least one entry,
-# the latest is used.
-#
-# The cache is populated by an out-of-band, Patch-Tuesday-triggered
-# refresh action (scheduled for a later commit); ISO-build runs read
-# the cache and never hit the Catalog for DU discovery.
-#
-# Files this section reads or writes:
-#   data/cache-dynamicupdate-Server2016.json
-#   data/cache-dynamicupdate-Server2019.json
-#   data/cache-dynamicupdate-Server2022.json
-#   data/cache-dynamicupdate-Server2025.json
-#
-# See SPEC.md for the design rationale and the cadence
-# table that grounded these observations.
-
-$Script:DynamicUpdateCacheWindowMonths = 36
-$Script:DynamicUpdateCacheSchema       = '1.0'
-
-function Get-DynamicUpdateCachePath {
-    <#
-    .SYNOPSIS
-        Resolve the on-disk path of data/cache-dynamicupdate-Server<NNNN>.json for
-        the given OS.
-    .DESCRIPTION
-        Tests can override the directory by passing -DataDir; production
-        callers omit it and let the default Get-DataDirectoryPath apply.
-    .EXAMPLE
-        Get-DynamicUpdateCachePath -OsVersion Server2025
-        # -> /.../data/cache-dynamicupdate-Server2025.json
-    #>
-    [OutputType([string])]
-    param(
-        [Parameter(Mandatory)] [string]$OsVersion,
-        [string]$DataDir = ''
-    )
-    if ([string]::IsNullOrEmpty($DataDir)) {
-        $DataDir = Get-DataDirectoryPath
-    }
-    return (Join-Path $DataDir ('cache-dynamicupdate-' + $OsVersion + '.json'))
-}
-
-function New-EmptyDynamicUpdateCache {
-    <#
-    .SYNOPSIS
-        Return a fresh, empty cache object for an OS that has no
-        persisted cache file yet.
-    #>
-    [OutputType([pscustomobject])]
-    param([Parameter(Mandatory)] [string]$OsVersion)
-    return [pscustomobject]@{
-        Schema          = $Script:DynamicUpdateCacheSchema
-        OsVersion       = $OsVersion
-        LastRefreshedAt = ''
-        WindowMonths    = $Script:DynamicUpdateCacheWindowMonths
-        Entries         = @()
-    }
-}
-
-function Get-DynamicUpdateCache {
-    <#
-    .SYNOPSIS
-        Read data/cache-dynamicupdate-Server<NNNN>.json and return the deserialised
-        object. Returns a fresh empty cache when the file does not
-        exist; never throws on missing-file (matches the "latest known
-        good" stance documented in SPEC.md).
-    #>
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)] [string]$OsVersion,
-        [string]$DataDir = ''
-    )
-    $cachePath = Get-DynamicUpdateCachePath -OsVersion $OsVersion -DataDir $DataDir
-    if (-not (Test-Path -LiteralPath $cachePath -PathType Leaf)) {
-        return (New-EmptyDynamicUpdateCache -OsVersion $OsVersion)
-    }
-    $bytes = [System.IO.File]::ReadAllBytes($cachePath)
-    $json  = [System.Text.Encoding]::UTF8.GetString($bytes)
-    $obj   = ($json | ConvertFrom-CanonicalJson)
-    # Defensive: ensure Entries serialises back as an array even if the
-    # file recorded a single object due to old ConvertTo-Json behaviour.
-    if ($null -eq $obj.Entries) {
-        $obj | Add-Member -NotePropertyName 'Entries' -NotePropertyValue @() -Force
-    }
-    elseif ($obj.Entries -isnot [System.Collections.IEnumerable] -or $obj.Entries -is [string]) {
-        $obj.Entries = @($obj.Entries)
-    }
-    else {
-        $obj.Entries = @($obj.Entries)
-    }
-    return $obj
-}
-
-function Save-DynamicUpdateCache {
-    <#
-    .SYNOPSIS
-        Persist a cache object to data/cache-dynamicupdate-Server<NNNN>.json with
-        UTF-8 + LF + no-BOM, matching the project-wide cache file
-        conventions.
-    #>
-    [OutputType([string])]
-    param(
-        [Parameter(Mandatory)] [pscustomobject]$Cache,
-        [string]$DataDir = ''
-    )
-    $cachePath = Get-DynamicUpdateCachePath -OsVersion $Cache.OsVersion -DataDir $DataDir
-    $dir = Split-Path -Parent $cachePath
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
-        New-Item -Path $dir -ItemType Directory -Force | Out-Null
-    }
-    Save-CanonicalJsonFile -InputObject $Cache -Path $cachePath -Depth 12
-    return $cachePath
-}
-
-function Test-DynamicUpdatePatchMonth {
-    <#
-    .SYNOPSIS
-        Validate that a PatchMonth string matches the YYYY-MM convention
-        used throughout this subproject. Returns $true / $false.
-    #>
-    [OutputType([bool])]
-    param([Parameter(Mandatory)] [string]$PatchMonth)
-    return ($PatchMonth -match '^\d{4}-(0[1-9]|1[0-2])$')
-}
-
-function Add-DynamicUpdateCacheEntry {
-    <#
-    .SYNOPSIS
-        Append (or upsert) one Catalog-probe result into the per-OS
-        cache file. If an entry with the same (PatchMonth, DuType)
-        already exists, it is replaced in place. The file is persisted
-        before the function returns.
-    .DESCRIPTION
-        The Entry parameter accepts a hashtable / PSCustomObject with
-        the following recognised properties (extra properties are
-        preserved verbatim, so the cache can carry forensic data
-        without schema bumps):
-
-          PatchMonth        string  YYYY-MM (mandatory)
-          DuType            string  e.g. DynamicUpdate.Setup (mandatory)
-          ProbedAt          string  ISO 8601 UTC timestamp
-          Query             string  Search.aspx query the probe used
-          SearchHitCount    int     total Search.aspx hits
-          MatchingHitCount  int     hits that survived Title filtering
-          MatchingHits      array   [{UpdateId,Title},...]
-          ChosenUpdateId    string  the selected UpdateId
-          ChosenTitle       string  the selected Title
-          KbId              string  "KB<digits>" extracted from Title
-          Success           bool    publish present (true) or absent (false)
-          IsEmptyMarker     bool    Catalog 'noResultText' marker present
-          Notes             string  free-form annotation
-
-        The cache's LastRefreshedAt is updated to the entry's ProbedAt
-        (or the current UTC time if ProbedAt was not supplied).
-    .EXAMPLE
-        Add-DynamicUpdateCacheEntry -OsVersion Server2025 -Entry @{
-            PatchMonth='2026-05'; DuType='DynamicUpdate.SafeOs';
-            ChosenUpdateId='3d3a4626-...'; KbId='KB5087588'; Success=$true
-        }
-    #>
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)] [string]$OsVersion,
-        [Parameter(Mandatory)]            $Entry,
-        [string]$DataDir = ''
-    )
-
-    # Normalise Entry to a PSCustomObject so we can access its props uniformly.
-    $entryObj = $null
-    if ($Entry -is [hashtable]) {
-        $entryObj = [pscustomobject]$Entry
-    }
-    elseif ($Entry -is [pscustomobject]) {
-        $entryObj = $Entry
-    }
-    else {
-        # ConvertFrom-Json result (from the TestHarness path) is also
-        # PSCustomObject, but bare values are not. Re-roundtrip to normalise.
-        $entryObj = ($Entry | ConvertTo-Json -Depth 12 | ConvertFrom-Json)
-    }
-
-    # Validate the two mandatory fields.
-    $patchMonth = [string]$entryObj.PatchMonth
-    $duType     = [string]$entryObj.DuType
-    if ([string]::IsNullOrEmpty($patchMonth)) {
-        throw 'Add-DynamicUpdateCacheEntry: Entry.PatchMonth is required.'
-    }
-    if (-not (Test-DynamicUpdatePatchMonth -PatchMonth $patchMonth)) {
-        throw ('Add-DynamicUpdateCacheEntry: invalid PatchMonth "{0}"; expected YYYY-MM.' -f $patchMonth)
-    }
-    if ([string]::IsNullOrEmpty($duType)) {
-        throw 'Add-DynamicUpdateCacheEntry: Entry.DuType is required.'
-    }
-
-    # If ProbedAt is missing, stamp it now.
-    $probedAt = [string]$entryObj.ProbedAt
-    if ([string]::IsNullOrEmpty($probedAt)) {
-        $probedAt = (Get-Date).ToUniversalTime().ToString('o')
-        $entryObj | Add-Member -NotePropertyName 'ProbedAt' -NotePropertyValue $probedAt -Force
-    }
-
-    $cache = Get-DynamicUpdateCache -OsVersion $OsVersion -DataDir $DataDir
-
-    # Upsert: drop any existing entry with the same (PatchMonth, DuType).
-    $kept = @($cache.Entries | Where-Object {
-        -not ($_.PatchMonth -eq $patchMonth -and $_.DuType -eq $duType)
-    })
-    $kept = $kept + $entryObj
-    $cache | Add-Member -NotePropertyName 'Entries'         -NotePropertyValue @($kept)  -Force
-    $cache | Add-Member -NotePropertyName 'LastRefreshedAt' -NotePropertyValue $probedAt -Force
-
-    $null = Save-DynamicUpdateCache -Cache $cache -DataDir $DataDir
-    return $cache
-}
-
-# ============================================================
 # ISO Updater specific: Microsoft Update Catalog scraper
 # ============================================================
 #
@@ -4720,110 +4487,6 @@ function Add-DynamicUpdateCacheEntry {
 #     to pick the right one and reject Express/Delta/PSF variants.
 #   * Microsoft Update Catalog requires User-Agent and basic-parsing
 #     mode on Windows PowerShell 5.1; we set both unconditionally.
-
-$Script:CatalogTitleNegativeTokens = @(
-    'Windows 11',
-    'arm64'
-)
-
-function Get-CatalogTitleTokenList {
-    <#
-    .SYNOPSIS
-        Return the per-OS positive title-token list from
-        data/config-<OsVersion>.json that is used to narrow Microsoft
-        Update Catalog responses to the right OS variant.
-    .DESCRIPTION
-        SPEC.md specifies that the disambiguating token
-        list is Config-driven, not hardcoded in PowerShell. This helper
-        is the single read path: it parses the OS Config and returns
-        the `Common.CatalogTitleTokens` array. When the field is
-        absent the function returns an empty array (callers then
-        accept the first matching hit, per the SPEC default).
-
-        Companion script-level variable
-        `$Script:CatalogTitleNegativeTokens` carries the OS-uniform
-        negative exclusion list (e.g. 'Windows 11', 'arm64'). The
-        positive and negative lists together form the narrow filter.
-    .EXAMPLE
-        Get-CatalogTitleTokenList -OsVersion Server2025
-        # -> @('Microsoft server operating system version 24H2', 'Windows Server 2025')
-    #>
-    [OutputType([string[]])]
-    param([Parameter(Mandatory)] [string]$OsVersion)
-
-    $configPath = Get-OsConfigPath -OsKey $OsVersion
-    if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
-        return @()
-    }
-    $bytes  = [System.IO.File]::ReadAllBytes($configPath)
-    $json   = [System.Text.Encoding]::UTF8.GetString($bytes)
-    $config = $json | ConvertFrom-CanonicalJson
-    if ($null -eq $config -or $null -eq $config.Common) {
-        return @()
-    }
-    $common = $config.Common
-    if (-not ($common.PSObject.Properties.Name -contains 'CatalogTitleTokens')) {
-        return @()
-    }
-    $value = $common.CatalogTitleTokens
-    if ($null -eq $value) {
-        return @()
-    }
-    return @($value | ForEach-Object { [string]$_ })
-}
-
-function Test-CatalogTitleMatch {
-    <#
-    .SYNOPSIS
-        Decide whether a Microsoft Update Catalog hit title belongs to
-        the given OS, based on the Config-driven positive tokens and
-        the hardcoded negative exclusion list.
-    .DESCRIPTION
-        Matching is case-insensitive substring. A title passes when it
-        contains ANY positive token AND contains NONE of the negative
-        tokens. Empty positive list is permissive (the function then
-        returns $true unless the title contains a negative token), to
-        match the SPEC default of "accept the first matching hit when
-        no per-OS tokens are configured".
-    .EXAMPLE
-        Test-CatalogTitleMatch -OsVersion Server2019 `
-            -Title '2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows Server 2019 for x64 (KB5087066)'
-        # -> True
-
-        Test-CatalogTitleMatch -OsVersion Server2019 `
-            -Title '2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows 10 Version 1809 for x64 (KB5087066)'
-        # -> False (no positive token match)
-    #>
-    [OutputType([bool])]
-    param(
-        [Parameter(Mandatory)] [string]$OsVersion,
-        [Parameter(Mandatory)] [string]$Title
-    )
-
-    if ([string]::IsNullOrEmpty($Title)) { return $false }
-    $titleLower = $Title.ToLowerInvariant()
-
-    # Negative exclusion first: a single negative hit disqualifies regardless of positive matches.
-    foreach ($neg in $Script:CatalogTitleNegativeTokens) {
-        if ([string]::IsNullOrEmpty($neg)) { continue }
-        if ($titleLower.Contains($neg.ToLowerInvariant())) {
-            return $false
-        }
-    }
-
-    $positives = @(Get-CatalogTitleTokenList -OsVersion $OsVersion)
-    if ($positives.Count -eq 0) {
-        # SPEC default: no Config-side narrowing -> permissive accept.
-        return $true
-    }
-    foreach ($pos in $positives) {
-        if ([string]::IsNullOrEmpty($pos)) { continue }
-        if ($titleLower.Contains($pos.ToLowerInvariant())) {
-            return $true
-        }
-    }
-    return $false
-}
 
 function Get-UpdateIdFromCatalog {
     <#
@@ -8274,203 +7937,6 @@ function Invoke-PatchSubPhase {
         }) | Out-Null
     }
     return $rows.ToArray()
-}
-
-# ============================================================
-# Supersedence-based patch deduplication
-# ============================================================
-# When the Catalogue search for a single patch Type returns multiple
-# narrowed candidates (typically: preview + final for the same month,
-# or carry-over candidates from an earlier month that the OS-aware
-# query partially matched), we use the per-candidate Supersedes /
-# SupersededBy data carried on each candidate entry to keep only the
-# newest survivor.
-#
-# Design notes:
-#   * Each candidate may carry Supersedes (KB IDs this update replaces)
-#     and SupersededBy (KB IDs that replace this update); when the b3
-#     path supplies no supersedence data these are empty and the
-#     title-descending fallback below decides the winner.
-#   * We exclude any candidate whose KbId appears in another
-#     candidate's Supersedes list - that candidate is, by definition,
-#     superseded by the other.
-#   * If after the exclusion pass we still have multiple survivors
-#     (Microsoft's Catalogue is occasionally inconsistent), we sort
-#     descending by Title and pick the first - Catalogue titles begin
-#     with the year-month prefix (e.g. "2026-05 Cumulative Update for
-#     ...") so lexicographic descending sort correlates with newest.
-#     The remaining non-winners are emitted with "Ambiguous; chose
-#     newest by title" so the operator sees what happened.
-
-function Get-KbIdFromUpdateTitle {
-    <#
-    .SYNOPSIS
-        Extract the KB id (e.g. "KB5037591") from a Catalogue update
-        title. Returns an empty string if no KB id pattern is found.
-    #>
-    [CmdletBinding()]
-    [OutputType([string])]
-    param([Parameter(Mandatory)] [AllowEmptyString()] [string]$Title)
-    if (-not $Title) { return '' }
-    $m = [regex]::Match($Title, '\((KB\d{6,7})\)')
-    if ($m.Success) {
-        return $m.Groups[1].Value
-    }
-    return ''
-}
-
-function Select-LatestPatchBySupersedence {
-    <#
-    .SYNOPSIS
-        Apply supersedence-based deduplication to a list of candidate
-        patches.
-
-    .DESCRIPTION
-        Input: an array of candidate patch entries, each carrying the
-        UpdateId, Title, KbId, Supersedes, and SupersededBy fields
-        carried on each candidate entry (empty when the b3 path supplies
-        no supersedence data).
-
-        Output: a hashtable with two keys:
-            Best     : the single surviving candidate
-            Excluded : array of pscustomobjects, one per excluded
-                       candidate, with Type / Candidate / SupersededBy
-                       / Reason fields suitable for CSV emission.
-
-        When Candidates has 0 entries:
-            Best = $null, Excluded = @()
-        When Candidates has 1 entry:
-            Best = that one, Excluded = @()
-        When Candidates has 2+:
-            Exclusion pass first (drop candidates that appear in
-            another candidate's Supersedes). If exactly one survivor:
-            Best = survivor. If multiple survivors: sort descending
-            by Title and pick first; mark the rest as ambiguous.
-
-        Matching: a candidate C is considered "superseded by" another
-        candidate D if C's KbId OR C's UpdateId is found (as a
-        substring) in D's Supersedes array. We accept substring match
-        because Catalogue Supersedes entries sometimes contain only
-        the KB number, sometimes the full UpdateId, and sometimes a
-        free-form "Package_for_KBnnnn~..." identifier.
-    #>
-    [CmdletBinding()]
-    [OutputType([hashtable])]
-    param(
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$Candidates,
-        [string]$TypeLabel = '<unspecified>'
-    )
-
-    $result = @{
-        Best     = $null
-        Excluded = @()
-    }
-
-    if (-not $Candidates -or $Candidates.Count -eq 0) {
-        return $result
-    }
-    if ($Candidates.Count -eq 1) {
-        $result.Best = $Candidates[0]
-        return $result
-    }
-
-    $excluded = New-Object System.Collections.Generic.List[object]
-    $remaining = New-Object System.Collections.Generic.List[object]
-
-    foreach ($c in $Candidates) {
-        $cKbId   = if ($c.PSObject.Properties['KbId'] -and $c.KbId) {
-            [string]$c.KbId
-        } else {
-            Get-KbIdFromUpdateTitle -Title ([string]$c.Title)
-        }
-        $cUpdateId = if ($c.PSObject.Properties['UpdateId']) { [string]$c.UpdateId } else { '' }
-
-        $isSuperseded  = $false
-        $supersededBy  = $null
-        $matchedToken  = ''
-
-        foreach ($other in $Candidates) {
-            if ([Object]::ReferenceEquals($other, $c)) { continue }
-            $otherSupersedes = @()
-            if ($other.PSObject.Properties['Supersedes'] -and $other.Supersedes) {
-                $otherSupersedes = @($other.Supersedes)
-            }
-            foreach ($supItem in $otherSupersedes) {
-                $supStr = [string]$supItem
-                if ([string]::IsNullOrWhiteSpace($supStr)) { continue }
-                # Match either by KbId or by UpdateId (substring)
-                $hit = $false
-                if (-not [string]::IsNullOrEmpty($cKbId)   -and $supStr.IndexOf($cKbId,   [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true; $matchedToken = $cKbId }
-                if (-not $hit -and -not [string]::IsNullOrEmpty($cUpdateId) -and $supStr.IndexOf($cUpdateId, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { $hit = $true; $matchedToken = $cUpdateId }
-                if ($hit) {
-                    $isSuperseded = $true
-                    $supersededBy = $other
-                    break
-                }
-            }
-            if ($isSuperseded) { break }
-        }
-
-        if ($isSuperseded) {
-            $excluded.Add([pscustomobject]@{
-                Type             = $TypeLabel
-                Candidate        = $c
-                ExcludedKbId     = $cKbId
-                ExcludedTitle    = [string]$c.Title
-                SupersededByKbId = if ($supersededBy.PSObject.Properties['KbId']) { [string]$supersededBy.KbId } else { Get-KbIdFromUpdateTitle -Title ([string]$supersededBy.Title) }
-                SupersededByTitle = [string]$supersededBy.Title
-                MatchedToken     = $matchedToken
-                Reason           = ('Superseded by ' + [string]$supersededBy.Title)
-            }) | Out-Null
-        } else {
-            $remaining.Add($c) | Out-Null
-        }
-    }
-
-    if ($remaining.Count -eq 1) {
-        $result.Best = $remaining[0]
-        $result.Excluded = $excluded.ToArray()
-        return $result
-    }
-    if ($remaining.Count -gt 1) {
-        # Ambiguous: sort by Title desc (Catalogue titles begin with
-        # YYYY-MM so lexicographic desc correlates with newest).
-        $sorted = @($remaining | Sort-Object @{ Expression = { [string]$_.Title } } -Descending)
-        $best = $sorted[0]
-        for ($i = 1; $i -lt $sorted.Count; $i++) {
-            $loser = $sorted[$i]
-            $loserKbId = if ($loser.PSObject.Properties['KbId'] -and $loser.KbId) {
-                [string]$loser.KbId
-            } else {
-                Get-KbIdFromUpdateTitle -Title ([string]$loser.Title)
-            }
-            $bestKbId = if ($best.PSObject.Properties['KbId'] -and $best.KbId) {
-                [string]$best.KbId
-            } else {
-                Get-KbIdFromUpdateTitle -Title ([string]$best.Title)
-            }
-            $excluded.Add([pscustomobject]@{
-                Type             = $TypeLabel
-                Candidate        = $loser
-                ExcludedKbId     = $loserKbId
-                ExcludedTitle    = [string]$loser.Title
-                SupersededByKbId = $bestKbId
-                SupersededByTitle = [string]$best.Title
-                MatchedToken     = ''
-                Reason           = 'Ambiguous; chose newest by title'
-            }) | Out-Null
-        }
-        $result.Best = $best
-        $result.Excluded = $excluded.ToArray()
-        return $result
-    }
-
-    # All candidates excluded each other (shouldn't normally happen).
-    # Fall back to the first input candidate and log a warning.
-    Write-Caution ('Supersedence dedup: all {0} {1} candidates marked superseded; falling back to first input.' -f $Candidates.Count, $TypeLabel)
-    $result.Best = $Candidates[0]
-    $result.Excluded = $excluded.ToArray()
-    return $result
 }
 
 # ============================================================
@@ -12430,62 +11896,6 @@ function Invoke-AdminPhaseA02_DumpFieldClassification {
     }
 }
 
-function Get-DynamicUpdateProbePlan {
-    <#
-    .SYNOPSIS
-        Return the per-OS Dynamic Update probe plan used by
-        Invoke-AdminPhaseA03_RefreshSnapshots. Each entry describes one
-        (OsVersion, DuType, QueryTemplate) probe to issue against the
-        Microsoft Update Catalog Search.aspx endpoint.
-    .DESCRIPTION
-        Server 2019 is intentionally absent: per SPEC.md, Microsoft
-        does not publish Setup / Safe OS Dynamic Update packages for the
-        Server 2019 (1809) baseline, and T10's resolver test asserts
-        this absence. Server 2016 (1607) is likewise absent because the
-        modern "Dynamic Update" naming convention starts with the 21H2
-        generation; any 2016-era servicing media is delivered through
-        the standard LCU channel and is already covered by the
-        release-info cache.
-
-        The query template uses Microsoft Learn's media-dynamic-update
-        guidance: month + DU label + OS descriptor. The OS descriptor
-        deliberately matches the long-form "Microsoft server operating
-        system version <NNH>" name that Microsoft has standardised on
-        since the 21H2 era; tests/catalog_title_tokens_test.py (T9)
-        covers the title narrowing applied to the resulting search
-        hits.
-    #>
-    [OutputType([pscustomobject[]])]
-    param()
-
-    return @(
-        [pscustomobject]@{
-            OsVersion = 'Server2022'
-            DuType    = 'DynamicUpdate.Setup'
-            Label     = 'Setup Dynamic Update'
-            OsToken   = 'Microsoft server operating system version 21H2'
-        }
-        [pscustomobject]@{
-            OsVersion = 'Server2022'
-            DuType    = 'DynamicUpdate.SafeOs'
-            Label     = 'Safe OS Dynamic Update'
-            OsToken   = 'Microsoft server operating system version 21H2'
-        }
-        [pscustomobject]@{
-            OsVersion = 'Server2025'
-            DuType    = 'DynamicUpdate.Setup'
-            Label     = 'Setup Dynamic Update'
-            OsToken   = 'Microsoft server operating system version 24H2'
-        }
-        [pscustomobject]@{
-            OsVersion = 'Server2025'
-            DuType    = 'DynamicUpdate.SafeOs'
-            Label     = 'Safe OS Dynamic Update'
-            OsToken   = 'Microsoft server operating system version 24H2'
-        }
-    )
-}
-
 # psa-disable-next-line PSA6003 -- intentional plural: function refreshes multiple snapshot caches (release-info, dotnet-cu, dynamic-update) in one phase
 function Invoke-AdminPhaseA03_RefreshSnapshots {
     <#
@@ -12498,7 +11908,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         consumes the populated caches to regenerate
         data/config-Server*.json Lines[].
     .DESCRIPTION
-        Three sub-steps, each independently fault-tolerant:
+        Two sub-steps, each independently fault-tolerant:
 
         1. release-info: fetch
            learn.microsoft.com/.../windows-server-release-info as
@@ -12512,17 +11922,6 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
            aggregate into data/raw-dotnet-cu.json and the parsed form
            into data/cache-dotnet-cu.json. This is the .NET Framework
            CU source used by the discovery layer.
-
-        3. Dynamic Update: probe Microsoft Update Catalog for the
-           current Patch Tuesday's Setup DU and Safe OS DU per
-           supported OS (Server 2022 and Server 2025 only; Server 2019
-           per SPEC.md and Server 2016 per the modern-DU naming
-           convention have no DU and are skipped). Each probe is
-           recorded into data/cache-dynamicupdate-Server<N>.json via
-           Add-DynamicUpdateCacheEntry, including the "empty-marker"
-           case so the resolver can distinguish "Microsoft has not
-           published a DU for this month" from "we have not yet
-           probed for this month".
 
         On step failure the function logs the error, marks the
         sub-step Failed, and continues to the next sub-step. The
@@ -12553,7 +11952,6 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         EntryCount = 0
         Error      = ''
     }
-    $duResults = New-Object 'System.Collections.Generic.List[pscustomobject]'
 
     try {
         # Resolve the Patch Month under refresh. -PatchMonth override is
@@ -12577,7 +11975,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         # ============================================================
         # Sub-step 1: release-info
         # ============================================================
-        Write-SubSection '[1/3] release-info (Microsoft Learn)'
+        Write-SubSection '[1/2] release-info (Microsoft Learn)'
         Set-DebugStep -Step 'release-info'
         if ($Script:DryRun) {
             Write-Skip 'release-info refresh skipped (-DryRun).'
@@ -12604,7 +12002,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         # ============================================================
         # Sub-step 2: .NET CU release-notes
         # ============================================================
-        Write-SubSection '[2/3] .NET Framework CU (Microsoft Learn)'
+        Write-SubSection '[2/2] .NET Framework CU (Microsoft Learn)'
         Set-DebugStep -Step 'dotnet-cu'
         if ($Script:DryRun) {
             Write-Skip '.NET CU refresh skipped (-DryRun).'
@@ -12637,121 +12035,11 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         }
 
         # ============================================================
-        # Sub-step 3: Dynamic Update probes (per OS x DuType)
-        # ============================================================
-        Write-SubSection '[3/3] Dynamic Update probes (Microsoft Update Catalog)'
-        Set-DebugStep -Step 'dynamic-update'
-        $plan = Get-DynamicUpdateProbePlan
-        Write-Step ('Probe targets: {0} (OS x DuType combinations)' -f $plan.Count)
-
-        foreach ($p in $plan) {
-            $probeKey = ('{0} / {1}' -f $p.OsVersion, $p.DuType)
-            $probeRes = [pscustomobject]@{
-                OsVersion        = $p.OsVersion
-                DuType           = $p.DuType
-                Query            = ''
-                SearchHitCount   = 0
-                MatchingHitCount = 0
-                ChosenUpdateId   = ''
-                ChosenTitle      = ''
-                KbId             = ''
-                Status           = 'Pending'
-                Note             = ''
-            }
-            if ($Script:DryRun) {
-                Write-Skip ('  {0,-40} -> skipped (-DryRun).' -f $probeKey)
-                $probeRes.Status = 'Skipped'
-                $duResults.Add($probeRes) | Out-Null
-                continue
-            }
-            try {
-                # Build the Catalog query string per Microsoft Learn's
-                # media-dynamic-update guidance: month + DU label + OS
-                # descriptor.
-                $query = ('{0} {1} for {2}' -f $patchMonth, $p.Label, $p.OsToken)
-                $probeRes.Query = $query
-                Write-Step ('  Probe: {0,-40} q="{1}"' -f $probeKey, $query)
-
-                # Get-UpdateIdFromCatalog's -KbId param accepts any query
-                # text; internally it URL-encodes it into Search.aspx's
-                # 'q=' parameter, which Catalog interprets as a free-text
-                # search. The parameter name reflects the function's
-                # primary KB-ID use case, but is not narrowed to that.
-                $hits = @(Get-UpdateIdFromCatalog -KbId $query)
-                $probeRes.SearchHitCount = $hits.Count
-
-                # Title-narrow with the per-OS positive token list + the
-                # hardcoded negative list (Windows 11 / arm64).
-                $matching = @($hits | Where-Object {
-                    Test-CatalogTitleMatch -Title ([string]$_.Title) -OsVersion $p.OsVersion
-                })
-                $probeRes.MatchingHitCount = $matching.Count
-
-                $entry = @{
-                    PatchMonth       = $patchMonth
-                    DuType           = $p.DuType
-                    ProbedAt         = (Get-Date).ToUniversalTime().ToString('o')
-                    Query            = $query
-                    SearchHitCount   = $hits.Count
-                    MatchingHitCount = $matching.Count
-                    MatchingHits     = @($matching | ForEach-Object {
-                        @{ UpdateId = [string]$_.UpdateId; Title = [string]$_.Title }
-                    })
-                }
-                if ($matching.Count -eq 0) {
-                    $entry.Success       = $false
-                    $entry.IsEmptyMarker = $true
-                    $entry.Notes         = 'No Catalog hits survived title-narrow filter.'
-                    $probeRes.Status     = 'Empty'
-                    $probeRes.Note       = $entry.Notes
-                    Write-Caution ('    -> Empty: no hits after title-narrow (recorded as IsEmptyMarker).')
-                } else {
-                    # Deduplicate via Supersedes/SupersededBy when >1 hit.
-                    $chosen = $null
-                    if ($matching.Count -gt 1) {
-                        $sup = Select-LatestPatchBySupersedence -Entries @($matching | ForEach-Object {
-                            [pscustomobject]@{ Title=[string]$_.Title; UpdateId=[string]$_.UpdateId }
-                        })
-                        if ($sup -and $sup.Survivor) {
-                            $chosen = $sup.Survivor
-                        }
-                    }
-                    if (-not $chosen) {
-                        $chosen = $matching | Select-Object -First 1
-                    }
-                    $kbId = [string](Get-KbIdFromUpdateTitle -Title ([string]$chosen.Title))
-                    $entry.ChosenUpdateId = [string]$chosen.UpdateId
-                    $entry.ChosenTitle    = [string]$chosen.Title
-                    $entry.KbId           = $kbId
-                    $entry.Success        = $true
-                    $entry.IsEmptyMarker  = $false
-                    $probeRes.ChosenUpdateId = $entry.ChosenUpdateId
-                    $probeRes.ChosenTitle    = $entry.ChosenTitle
-                    $probeRes.KbId           = $kbId
-                    $probeRes.Status         = 'OK'
-                    Write-Ok ('    -> {0}  UpdateId={1}  Title="{2}"' -f $kbId, $entry.ChosenUpdateId, $entry.ChosenTitle)
-                }
-
-                # Persist to per-OS cache (Add-DynamicUpdateCacheEntry
-                # upserts by (PatchMonth, DuType) so re-probing the same
-                # month replaces in place rather than duplicating).
-                $null = Add-DynamicUpdateCacheEntry -OsVersion $p.OsVersion -Entry $entry
-            } catch {
-                $okOverall = $false
-                $probeRes.Status = 'FAIL'
-                $probeRes.Note   = [string]$_.Exception.Message
-                Write-Fail ('    -> FAIL: {0}' -f $_.Exception.Message)
-            }
-            $duResults.Add($probeRes) | Out-Null
-        }
-
-        # ============================================================
         # Summary block (mirrors A01's "Summary" rendering for parity)
         # ============================================================
         Show-RefreshSnapshotsSummary `
             -ReleaseInfo $releaseInfoResult `
             -DotNetCu    $dotnetResult `
-            -DuResults   @($duResults.ToArray()) `
             -PatchMonth  $patchMonth `
             -LatestPt    $latestPt `
             -OkOverall   $okOverall
@@ -12770,14 +12058,6 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
                 Status=$dotnetResult.Status; Detail=('months={0};entries={1}' -f $dotnetResult.MonthCount,$dotnetResult.EntryCount)
                 Error=$dotnetResult.Error
             }) | Out-Null
-            foreach ($r in $duResults) {
-                $reportRows.Add([pscustomobject]@{
-                    Section='dynamic-update'; OsVersion=$r.OsVersion; DuType=$r.DuType
-                    Status=$r.Status
-                    Detail=('search={0};matching={1};kb={2};updateid={3}' -f $r.SearchHitCount,$r.MatchingHitCount,$r.KbId,$r.ChosenUpdateId)
-                    Error=$r.Note
-                }) | Out-Null
-            }
             $reportRows | Export-Csv -LiteralPath $reportPath -NoTypeInformation -Encoding UTF8
             Write-Ok ('Report: {0}' -f $reportPath)
         } catch {
@@ -12805,7 +12085,6 @@ function Show-RefreshSnapshotsSummary {
     param(
         [Parameter(Mandatory)] $ReleaseInfo,
         [Parameter(Mandatory)] $DotNetCu,
-        [Parameter(Mandatory)] [pscustomobject[]] $DuResults,
         [Parameter(Mandatory)] [string] $PatchMonth,
         [Parameter(Mandatory)] [string] $LatestPt,
         [Parameter(Mandatory)] [bool]   $OkOverall
@@ -12819,18 +12098,10 @@ function Show-RefreshSnapshotsSummary {
     Write-Host ('        release-info     : {0,-8} (monthly={1}, hotpatch={2}, raw {3} bytes)' -f $ReleaseInfo.Status, $ReleaseInfo.Monthly, $ReleaseInfo.Hotpatch, $ReleaseInfo.Bytes)
     Write-Host ('        dotnet-cu        : {0,-8} (months={1}, entries={2})' -f $DotNetCu.Status, $DotNetCu.MonthCount, $DotNetCu.EntryCount)
     Write-Host ''
-    Write-Host '  [2] Dynamic Update probes (Catalog search.aspx)'
-    Write-Host '        OS           DuType                   Status   KbId            UpdateId'
-    Write-Host '        --------------------------------------------------------------------------------'
-    foreach ($r in $DuResults) {
-        $uid = if ($r.ChosenUpdateId) { ($r.ChosenUpdateId.Substring(0,[math]::Min(12,$r.ChosenUpdateId.Length))) + '...' } else { '' }
-        Write-Host ('        {0,-12} {1,-23}  {2,-7}  {3,-14}  {4}' -f $r.OsVersion, $r.DuType, $r.Status, $r.KbId, $uid)
-    }
-    Write-Host ''
-    Write-Host '  [3] Patch Tuesday timeline'
+    Write-Host '  [2] Patch Tuesday timeline'
     Write-Host ('        This run baseline   : {0}  (Patch Month = {1})' -f $LatestPt, $PatchMonth)
     Write-Host ''
-    Write-Host '  [4] Run outcome'
+    Write-Host '  [3] Run outcome'
     if ($OkOverall) {
         Write-Host '        Status: OK (every sub-step reported OK or Skipped).'
         Write-Host '        Next step: run `-Action RefreshAllBaselines` to regenerate'
@@ -13144,8 +12415,8 @@ if ($Script:LogFile) {
 #
 # This is the entry point for the Python-side test harness in
 # `tests/powershell_harness.py`, which uses it to assert PowerShell-level
-# invariants (e.g. that `Get-CatalogQueryTemplate -OsVersion Server2022`
-# returns TitleTokens with both comma forms). It is intentionally a
+# invariants (e.g. that `Select-CanonicalPatchFile` filters out the
+# Express LCU variant). It is intentionally a
 # separate Action rather than a side effect of -EnvironmentInfoOnly or
 # -DryRun, because the harness must NOT emit the entry banner or any
 # Phase activity: every byte on stdout must be machine-readable JSON.
