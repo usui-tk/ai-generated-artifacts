@@ -22,6 +22,19 @@ the script and follows the
 
 ## [Unreleased]
 
+### Added — T28: direct offline unit test for `Resolve-SetupDu`'s Forbid branch (tests-only, no version bump)
+
+`Resolve-SetupDu` had no direct test; its 2025 happy path is covered offline by
+T27 (against a captured fixture), but the deterministic Forbid branch that every
+non-2025 OS must hit was only exercised indirectly. Added
+`tests/setup_du_forbid_test.py` (T28): for each of Server 2016 / 2019 / 2022 it
+calls `Resolve-SetupDu` through the TestHarness REPL and asserts the empty
+SetupDU "no line" marker (`kind == 'SetupDU'`, no files, no Catalog row, and a
+`note` recording the Forbid reason + OS key). Needs no network and no fixture
+(the function returns before any Catalog call when `-OsKey != '2025'`). 12
+assertions; listed in the TESTING.md offline catalog. Offline `*_test.py` suite
+is now 13/13.
+
 ### Fixed — README parameter table parity: add 2 missing live params, correct the count (docs-only, no version bump)
 
 The "Parameters (complete)" table claimed "All 35 parameters" but listed 32 and

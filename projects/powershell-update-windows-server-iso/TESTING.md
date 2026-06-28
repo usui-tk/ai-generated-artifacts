@@ -410,6 +410,7 @@ python3 tests/dism_cleanup_args_test.py                          # T24: 6 cleanu
 python3 tests/dism_export_args_test.py                           # T25: 6 export-arg-vector assertions (Export-Image /Compress:max + /ScratchDir)
 python3 tests/defender_exclusion_plan_test.py                    # T26: 13 Defender pure-helper assertions (managed set + add-only-absent plan + fail-closed decision)
 python3 tests/catalog_patchset_builder_test.py                   # T27: 14 offline b3 dataset-builder assertions (ConvertTo-ConfigLines from captured raw; SetupDU @ ApplyOrder 5)
+python3 tests/setup_du_forbid_test.py                            # T28: 12 Resolve-SetupDu Forbid-branch assertions (non-2025 -> empty SetupDU "no line"; offline, no fixture)
 
 # Schema / format gates (every commit that touches data)
 python3 tests/config_schema_test.py                          # config schema gate
