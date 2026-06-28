@@ -22,6 +22,26 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed — TESTING.md reconciled to the `A00 RebuildDataset` data pipeline (docs/tests only, no script change, no version bump)
+
+`TESTING.md` had not been propagated when `A00 RebuildDataset` landed (r11.42),
+and it contradicted this changelog's own claim that A00 "replac[es] the manual
+A03 -> A01 prose procedure in TESTING.md §8". Reconciled against the live script
+(no `.ps1` change, so no `$Script:ScriptVersion` bump):
+
+- **§8.1** rewritten to lead with the single entry point `-Action RebuildDataset
+  -PatchMonth <yyyy-MM>`, documenting A00's five stages (seed validation -> A03 ->
+  `Build-ConfigSkeletonFromSeed` -> A01 Force -> non-empty `Lines` verify); the
+  manual A03 -> A01 two-step is retained as the equivalent pre-r11.42 path.
+- **§2.1 verification checklist** corrected: **14** Actions present (was 13 —
+  `RebuildDataset` was missing) and **4** Admin phases **A00 – A03** (was 3,
+  `A01 – A03`), matching the `-Action` ValidateSet and the phase registry.
+- **§8.1 A03 timing** made self-consistent: step 1 previously read "~30 s" while
+  the same section's note recorded the observed "A03 2m28s"; unified to the
+  observed value.
+- CI Stage-4 (§6.4) is unchanged — that workflow invokes the existing
+  `RefreshAllBaselines` action, not A00, so its description stays accurate.
+
 ### Regenerate `data/config-Server*.json` from the committed seeds via `A00 RebuildDataset` (data refresh; no script change, tag `data-pipeline-regenerate`)
 
 First end-to-end run of the A00 pipeline (previous entry): rebuild the dataset from `data/seed/seed-Server*.json` + live upstream (Microsoft Learn release-info / .NET CU, Microsoft Update Catalog) for PatchMonth `2026-06`, from empty. A00 Stage 4 reports a non-empty `PatchBaseline.Lines` for all four OS (Server2016=2, 2019=2, 2022=3, 2025=4). The diff against the prior (r11.32-generated) configs is code evolution, not data drift:

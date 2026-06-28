@@ -152,8 +152,8 @@ Action registries. Exits 0. No filesystem writes.
 Verification checklist:
 
 - [x] 13 phase IDs P01 – P13 present
-- [x] 13 Actions present (Prepare / Build / Verify / PrepareBuildVerify / BootTest / All / Cleanup / ListPhases / GenerateManifest / RefreshSnapshots / RefreshAllBaselines / DumpFieldClassification / TestHarness)
-- [x] 3 Admin phases A01 – A03 present
+- [x] 14 Actions present (Prepare / Build / Verify / PrepareBuildVerify / BootTest / All / Cleanup / ListPhases / GenerateManifest / RefreshSnapshots / RefreshAllBaselines / RebuildDataset / DumpFieldClassification / TestHarness)
+- [x] 4 Admin phases A00 – A03 present
 
 ### 2.2 EnvironmentInfoOnly — environment dump and exit
 
@@ -566,20 +566,35 @@ curl -s -o /dev/null -w '%{http_code}\n' -A "$UA" 'https://www.catalog.update.mi
 ### 8.1 Regeneration sequence
 
 Run from a clean checkout at the target HEAD, with `-SkipEnvCheck` to
-bypass the 100 GB `-Execute` preflight (these admin actions mount no WIM):
+bypass the 100 GB `-Execute` preflight (these admin actions mount no WIM).
 
-1. **A03 `RefreshSnapshots`** — refreshes `data/raw-*` and `data/cache-*`
-   (release-info Markdown, .NET CU, Dynamic Update) from the web. Fast
-   (~30 s); network only.
-2. **A01 `RefreshAllBaselines -Mode Force -PatchMonth <yyyy-MM>`**
-   — regenerates the config baseline from the refreshed caches and resolves
-   the month's patch set from the Microsoft Update Catalog. `-PatchMonth`
-   pins the generated month and (r11.20+) derives `PatchTuesdayOfBaseline`
-   from that month's Patch Tuesday (§B.22.11).
+**Single entry point (r11.42+): `A00 RebuildDataset`.** One command rebuilds
+the whole `/data` baseline from the committed seeds
+(`data/seed/seed-Server*.json`) plus live upstream, runnable from empty:
 
-Both A03 and A01 can exceed a ~5–6 min foreground runner budget (observed
-2026-06: **A03 2m28s, A01 6m32s**), so run **both** detached under such a
-runner.
+```powershell
+.\Update-WindowsServerIso.ps1 -Action RebuildDataset -PatchMonth <yyyy-MM> -SkipEnvCheck
+```
+
+`A00` is a pure orchestrator over the existing stages: **(0)** validate each
+in-scope seed (exists, parses, `OsKey` matches filename); **(1) A03
+`RefreshSnapshots`** — refresh `data/raw-*` and `data/cache-*` (release-info
+Markdown, .NET CU, Dynamic Update) from the web; **(2)**
+`Build-ConfigSkeletonFromSeed` — lay each seed into the full config shape with
+empty DERIVED placeholders; **(3) A01 `RefreshAllBaselines -Mode Force`** — fill
+`Lines` / `LanguageSpecificPatches` / refresh stamps / `_meta` from the refreshed
+caches and the Microsoft Update Catalog; **(4)** verify every config carries a
+non-empty `PatchBaseline.Lines`. `-PatchMonth` (required) pins the month and
+(r11.20+) derives `PatchTuesdayOfBaseline` from that month's Patch Tuesday
+(§B.22.11); `-OnlyOs` narrows scope.
+
+Running A03 then A01 by hand (the pre-r11.42 two-step) still works and is
+equivalent for an already-seeded `/data`; `A00` is preferred because it is the
+single gate-checked entry point and is runnable from empty.
+
+`A00` chains A03 (observed 2026-06: ~2m28s) + A01 (~6m32s), so it exceeds a
+~5–6 min foreground runner budget: run it **detached + polled** with a per-run
+work-log (§8.3), never synchronously in the foreground.
 Exit code **2 = manual-fill-only** — the 12 `Common` / per-language `Iso`
 fields (`cadence=IsoRelease`, `decision=Manual`), which ship **empty** in
 the committed baseline — and is **expected**, not a failure.
