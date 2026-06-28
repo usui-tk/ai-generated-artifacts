@@ -22,6 +22,20 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed — mark the abandoned r09.0 dependency-database roadmap as superseded in SPEC §G.2 (docs-only, no version bump)
+
+SPEC §G.2 ("Open at r09.0 inception") still listed the wsusscn2-derived
+Servicing Dependency Database work -- the `RefreshDependencyDatabase` action and
+the `-EnableDependencyCheck` opt-in (r09.0 Steps 1-3) -- as pending / future
+work, contradicting §B.19, which already records that the whole approach was
+removed in the data-source migration and replaced by `Test-PatchModelConsistency`
+(P06 `ValidatePatchServicing`). Reworded the §G.2 block to mark Steps 1-3
+**superseded** (retained for historical context, will not be implemented) and
+pointed to §B.19 as the authoritative record. The still-accurate Step 4 note --
+the KB5087537 SSU-prerequisite incident resolved on the config side as of r11.20
+via `Resolve-Ssu2016` -- is preserved. SPEC-only (Part G appendix, not a vendored
+Part A region).
+
 ### Fixed — reconcile the TESTING.md test inventory to the actual test set (docs-only, no version bump)
 
 The TESTING.md test inventories (both the status matrix and the run-command

@@ -3346,21 +3346,20 @@ and the per-cycle finding documents, the active follow-up tasks are
 tracked there with P0/P1/P2 priority tags. Roadmap-level
 forward-looking content lives in those documents, not in this SPEC.
 
-Open at r09.0 inception:
+Open at r09.0 inception (Steps 1-3 SUPERSEDED -- see below):
 
-- r09.0 Step 1: Implement the §B.19 Servicing Dependency Database
-  (parser, layer 2 schema, P06 Stage 2 wiring, `RefreshDependencyDatabase`
-  action). Currently SPEC-only; implementation begins in a subsequent
-  session.
-- r09.0 Step 2: Wire `-EnableDependencyCheck` opt-in; default OFF.
-- r09.0 Step 3: Default-ON for `-EnableDependencyCheck`.
-- r09.0 Step 4+: Fleet roll-out (Server 2019 / 2022 / 2025 `-Action
-  Build -Execute` with stage 2 verifying). The residual KB5087537
-  SSU-prerequisite incident is **resolved on the config side as of
-  r11.20**: the standalone Server 2016 SSU (KB5088064) is now
-  auto-discovered by `Resolve-Ssu2016` (§B.22.5)
-  instead of being hand-patched into `config-Server2016.json`. The
-  runtime dependency-check fleet roll-out itself remains future work.
+- r09.0 Steps 1-3 (the §B.19 Servicing Dependency Database + its parser /
+  layer-2 schema / P06 Stage 2 wiring / `RefreshDependencyDatabase` action, and
+  the `-EnableDependencyCheck` opt-in) were **superseded by the data-source
+  migration** from `wsusscn2.cab` to the Microsoft Update Catalog. That whole
+  `wsusscn2`-derived approach was removed and replaced by the per-`PatchModel`
+  consistency check `Test-PatchModelConsistency` (run by P06
+  `ValidatePatchServicing`); see §B.19 for the authoritative record. These steps
+  are retained here for historical context only and will not be implemented.
+- The KB5087537 SSU-prerequisite incident (originally tracked under Step 4) is
+  **resolved on the config side as of r11.20**: the standalone Server 2016 SSU
+  (KB5088064) is now auto-discovered by `Resolve-Ssu2016` (§B.22.5) instead of
+  being hand-patched into `config-Server2016.json`.
 
 ### G.3 Deprecation list (kept for context)
 
