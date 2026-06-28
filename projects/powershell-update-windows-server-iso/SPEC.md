@@ -606,8 +606,9 @@ base ISO:
 | `_VerifiedDate` / `_VerifiedBy` | `2026-05-24T00:00:00+09:00` / `manual:initial-r03` | Human verification record |
 
 The three `Enable*Update` flags MUST be promoted from `Common` to
-top-level by `Get-ConfigProfile`. The r08.0 Step 2 dead-code path
-defect (flags read but not promoted) is documented in §D.NN.
+top-level by `Get-ConfigProfile`. An earlier dead-code path defect
+(the flags were read but never promoted) has since been corrected, so
+the promotion is enforced.
 
 ### B.4.3 `PatchBaseline` block
 
@@ -1229,7 +1230,7 @@ The Server 2016 entry is intentionally a single MSU because earlier
 .NET versions reached end-of-support before this script's baseline.
 The umbrella-KB pattern, the historical r04.2 regression where
 N-1 sub-files were dropped, and the r04.3 fix via
-`Select-AllCanonicalPatchFiles` are recorded in §D.NN.
+`Select-AllCanonicalPatchFiles` are recorded in §D.21.
 
 ### B.15.3 Combined LCU package detection
 
@@ -1729,7 +1730,7 @@ producer were removed in the data-source migration.)
 **Why**: r06.0 PoC showed the release-info Markdown is parseable,
 versioned, and stable. Title-scrape against the Catalogue is fragile
 (comma-form drift in 2026-04 dropped Server 2022 to zero results;
-see §D.NN).
+see §D.19).
 
 ### B.22.2 Catalog OS-scoping: Products column
 
@@ -1941,10 +1942,10 @@ was fixed by making `Show-PhaseSummary` idempotent via a
 | Type field naming → `PatchType` | §B.10 | — | §D.30 |
 | .NET CU multi-MSU | §B.15.2 | — | §D.21 |
 | Catalogue Title comma-form drift | §B.22.2 | — | §D.19 |
-| `$Script:` typo class | §B.22.17 | PSA2013 | §D.NN |
-| `Write-PhaseHeader` positional | §B.22.18 | PSA2012 | §D.NN |
-| `(if …)` subexpression | §B.22.19 | PSA1004 | §D.NN |
-| Idempotent renderers | §B.22.20 | — | §D.NN |
+| `$Script:` typo class | §B.22.17 | PSA2013 | §B.22.17 |
+| `Write-PhaseHeader` positional | §B.22.18 | PSA2012 | §B.22.18 |
+| `(if …)` subexpression | §B.22.19 | PSA1004 | §B.22.19 |
+| Idempotent renderers | §B.22.20 | — | §B.22.20 |
 | `List[object]` `@()` failure | §B.18.5 | — | §D.26 |
 | DISM mount-cache poisoning | §B.3 (one-WR-per-OS) | — | §D.25 |
 | Sampling-vs-comprehensive search | — (removed) | — | §D.28 |

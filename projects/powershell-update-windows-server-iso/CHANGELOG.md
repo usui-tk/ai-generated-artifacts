@@ -22,6 +22,28 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed — resolve the 7 unfilled `§D.NN` cross-references in SPEC.md (doc-only, no version bump)
+
+Seven SPEC cross-references were left as the literal placeholder `§D.NN`
+(an incomplete-refactoring residue) instead of a concrete target. Resolved
+against the live §D section (which runs D.1-D.30 under two group headers).
+SPEC-only; the edits are internal cross-references in Part B (not a vendored
+Part A region), so no README/TESTING propagation and no `$Script:ScriptVersion`
+bump:
+
+- L1232 (umbrella-KB / `Select-AllCanonicalPatchFiles` r04.3 fix) -> **§D.21**
+  (Umbrella KBs attach multiple files to one UpdateId).
+- L1732 (Catalogue Title comma-form drift, Server 2022) -> **§D.19** (the
+  matching pitfall entry).
+- The four B.22.21 cross-reference-matrix rows (`$Script:` typo PSA2013 /
+  `Write-PhaseHeader` positional PSA2012 / `(if ...)` subexpression PSA1004 /
+  idempotent renderers) -> their **§B.22.17 - §B.22.20** sections, where the
+  r07.0 incidents are already recorded inline (no separate §D entry exists, so
+  pointing to the §B record is the non-duplicative resolution).
+- L610 (the `Enable*Update` promotion note) reworded to drop the dangling
+  `§D.NN` pointer; the earlier read-but-not-promoted defect has since been
+  corrected and the promotion is enforced.
+
 ### Fixed — complete the stale-reference cleanup the `2eb6d7e` changelog claimed (test helpers; no script change, no version bump)
 
 The `2eb6d7e` entry claimed it "Cleaned stale docstring/probe references (...,
