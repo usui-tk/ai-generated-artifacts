@@ -1,0 +1,82 @@
+{
+  "Schema": "3.0",
+  "OsKey": "Server2022",
+  "Common": {
+    "Build": 20348,
+    "OsShortName": "WS2022",
+    "Edition": "Datacenter",
+    "Architecture": "x64",
+    "WimEdition": "Windows Server 2022 Datacenter (Desktop Experience)",
+    "InstallWimIndex": 4,
+    "BootWimIndexes": [
+      1,
+      2
+    ],
+    "WinReWimPath": "Windows\\System32\\Recovery\\Winre.wim",
+    "SupportedLanguages": [
+      "en-us",
+      "ja-jp"
+    ],
+    "DefaultLanguage": "en-us",
+    "LCUExpandViaMum": false,
+    "EnableInstallWimUpdate": true,
+    "EnableBootWimUpdate": true,
+    "EnableWinREUpdate": true,
+    "_VerifiedDate": "2026-05-24T00:00:00+09:00",
+    "_VerifiedBy": "manual:initial-r03"
+  },
+  "PatchBaseline": {
+    "Schema": "3.0",
+    "TargetBuildAfterUpdate": "20348.4893",
+    "VerificationMethod": "",
+    "ChecksumAlgorithm": "SHA1",
+    "ExcludeKbList": []
+  },
+  "Pca2023": {
+    "RequiredByDefault": true,
+    "RequiredUpdateLevelKb": "2025-2B (February 2025 LCU, 20348.2227 baseline) or later",
+    "RequiredUpdateLevelMinDate": "2025-02-11",
+    "NotesSource": [
+      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
+      "https://lenovopress.lenovo.com/lp2353.pdf"
+    ],
+    "Notes": "Per Lenovo lp2353.pdf, Server 2022 build 20348.2227 or earlier requires 2025-2B LCU before Make2023BootableMedia.ps1 succeeds. Newer builds (post 2025-02) generally already include the required EFI_EX binaries."
+  },
+  "AutoRefreshPolicy": {
+    "Mode": "OnNewPatchTuesday",
+    "WritebackToConfig": true,
+    "FallbackOnScrapeFailure": "UseBaseline",
+    "ScrapeRetries": 3
+  },
+  "LanguageSpecific": {
+    "en-us": {
+      "DisplayName": "English (United States)",
+      "Iso": {
+        "FileName": "SERVER_EVAL_x64FRE_en-us.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
+        "FwlinkUrl": "https://go.microsoft.com/fwlink/p/?LinkID=2195280&clcid=0x409&culture=en-us&country=US",
+        "Sha256": "",
+        "SizeBytes": 0,
+        "ReleaseDate": "",
+        "_VerifiedDate": "2026-05-26",
+        "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
+      },
+      "VolumeLabelPrefix": "WS2022EN"
+    },
+    "ja-jp": {
+      "DisplayName": "Japanese",
+      "Iso": {
+        "FileName": "SERVER_EVAL_x64FRE_ja-jp.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_ja-jp.iso",
+        "FwlinkUrl": "https://go.microsoft.com/fwlink/p/?LinkID=2195280&clcid=0x411&culture=ja-jp&country=JP",
+        "Sha256": "",
+        "SizeBytes": 0,
+        "ReleaseDate": "",
+        "_VerifiedDate": "2026-05-26",
+        "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
+      },
+      "VolumeLabelPrefix": "WS2022JA"
+    }
+  },
+  "PatchModel": "embedded-ssu-du"
+}

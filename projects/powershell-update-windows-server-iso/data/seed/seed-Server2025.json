@@ -1,0 +1,86 @@
+{
+  "Schema": "3.0",
+  "OsKey": "Server2025",
+  "Common": {
+    "Build": 26100,
+    "OsShortName": "WS2025",
+    "Edition": "Datacenter",
+    "Architecture": "x64",
+    "WimEdition": "Windows Server 2025 Datacenter (Desktop Experience)",
+    "InstallWimIndex": 4,
+    "BootWimIndexes": [
+      1,
+      2
+    ],
+    "WinReWimPath": "Windows\\System32\\Recovery\\Winre.wim",
+    "SupportedLanguages": [
+      "en-us",
+      "ja-jp"
+    ],
+    "DefaultLanguage": "en-us",
+    "LCUExpandViaMum": true,
+    "EnableInstallWimUpdate": true,
+    "EnableBootWimUpdate": true,
+    "EnableWinREUpdate": true,
+    "_VerifiedDate": "2026-05-24T00:00:00+09:00",
+    "_VerifiedBy": "manual:initial-r03"
+  },
+  "PatchBaseline": {
+    "Schema": "3.0",
+    "TargetBuildAfterUpdate": "26100.32522",
+    "VerificationMethod": "",
+    "ChecksumAlgorithm": "SHA1",
+    "ExcludeKbList": [
+      {
+        "KbId": "KB5043080",
+        "Reason": "Checkpoint Cumulative Update for Win11 24H2 / Server 2025; not required for OS install (per Microsoft Learn)."
+      }
+    ]
+  },
+  "Pca2023": {
+    "RequiredByDefault": false,
+    "RequiredUpdateLevelKb": "n/a (firmware-provided 2023 certs)",
+    "RequiredUpdateLevelMinDate": "",
+    "NotesSource": [
+      "https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789"
+    ],
+    "Notes": "Microsoft-certified Server 2025 server platforms include the 2023 certificates in firmware. Make2023BootableMedia.ps1 is NOT in the official supported-OS list for KB5053484. P10 ConvertPca2023BootManager is skipped by default for Server 2025; pass -EnablePca2023BootManager -ForcePca2023OnServer2025 to override (advanced operator only)."
+  },
+  "AutoRefreshPolicy": {
+    "Mode": "OnNewPatchTuesday",
+    "WritebackToConfig": true,
+    "FallbackOnScrapeFailure": "UseBaseline",
+    "ScrapeRetries": 3
+  },
+  "LanguageSpecific": {
+    "en-us": {
+      "DisplayName": "English (United States)",
+      "Iso": {
+        "FileName": "26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/dbazure/998969d5-f34g-4e03-ac9d-1f9786c66749/26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "FwlinkUrl": "https://go.microsoft.com/fwlink/?linkid=2345730&clcid=0x409&culture=en-us&country=US",
+        "Sha256": "",
+        "SizeBytes": 0,
+        "ReleaseDate": "",
+        "_VerifiedDate": "2026-05-26",
+        "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
+      },
+      "VolumeLabelPrefix": "WS2025EN"
+    },
+    "ja-jp": {
+      "DisplayName": "Japanese",
+      "Iso": {
+        "FileName": "26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/dbazure/998969d5-f34g-4e03-ac9d-1f9786c66749/26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
+        "FwlinkUrl": "https://go.microsoft.com/fwlink/?linkid=2345828&clcid=0x411&culture=ja-jp&country=jp",
+        "Sha256": "",
+        "SizeBytes": 0,
+        "ReleaseDate": "",
+        "_VerifiedDate": "2026-05-26",
+        "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
+      },
+      "VolumeLabelPrefix": "WS2025JA"
+    }
+  },
+  "PatchModel": "uup-checkpoint"
+}

@@ -1,0 +1,273 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/usui-tk/ai-generated-artifacts/projects/powershell-update-windows-server-iso/schema/config-seed-v1.0.schema.json",
+  "title": "Windows Server ISO Updater - per-OS SEED profile (config-seed v1.0)",
+  "description": "Machine-readable contract for data/seed/seed-Server<OsKey>.json. The seed is the committed, hand-maintained input to the data pipeline (SPEC B.14.1/B.14.2): it carries every SEED-class region (including the PatchBaseline envelope -- static servicing-policy fields) and NONE of the DERIVED regions (PatchBaseline.Lines + refresh stamps, LanguageSpecific.<lang>.LanguageSpecificPatches, _meta). A00 RebuildDataset builds a full config as seed + DERIVED. The SEED definitions are a projection of schema/config.schema.json and MUST stay consistent with it.",
+  "type": "object",
+  "required": [
+    "Schema",
+    "OsKey",
+    "PatchModel",
+    "Common",
+    "PatchBaseline"
+  ],
+  "properties": {
+    "Schema": {
+      "type": "string",
+      "const": "3.0",
+      "description": "Top-level config schema version. SPEC B.4."
+    },
+    "OsKey": {
+      "type": "string",
+      "enum": [
+        "Server2016",
+        "Server2019",
+        "Server2022",
+        "Server2025"
+      ],
+      "description": "OS identifier; matches the config filename suffix."
+    },
+    "PatchModel": {
+      "type": "string",
+      "enum": [
+        "separate-ssu",
+        "embedded-ssu",
+        "embedded-ssu-du",
+        "uup-checkpoint"
+      ],
+      "description": "Per-OS servicing model discriminator. 2016 separate-ssu; 2019 embedded-ssu; 2022 embedded-ssu-du; 2025 uup-checkpoint. Drives the required/forbidden Kinds (allOf below) and the script's per-OS apply branch."
+    },
+    "Common": {
+      "$ref": "#/definitions/Common"
+    },
+    "PatchBaseline": {
+      "$ref": "#/definitions/PatchBaselineSeed"
+    },
+    "Pca2023": {
+      "$ref": "#/definitions/Pca2023"
+    },
+    "AutoRefreshPolicy": {
+      "$ref": "#/definitions/AutoRefreshPolicy"
+    },
+    "LanguageSpecific": {
+      "$ref": "#/definitions/SeedLanguageSpecific"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Common": {
+      "type": "object",
+      "description": "OS-wide constants. SPEC B.4.2.",
+      "required": [
+        "Build",
+        "OsShortName",
+        "Edition",
+        "Architecture"
+      ],
+      "properties": {
+        "Build": {
+          "type": "integer"
+        },
+        "OsShortName": {
+          "type": "string"
+        },
+        "Edition": {
+          "type": "string"
+        },
+        "Architecture": {
+          "type": "string",
+          "enum": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "WimEdition": {
+          "type": "string"
+        },
+        "InstallWimIndex": {
+          "type": "integer"
+        },
+        "BootWimIndexes": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "WinReWimPath": {
+          "type": "string"
+        },
+        "SupportedLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "DefaultLanguage": {
+          "type": "string"
+        },
+        "LCUExpandViaMum": {
+          "type": "boolean"
+        },
+        "EnableInstallWimUpdate": {
+          "type": "boolean"
+        },
+        "EnableBootWimUpdate": {
+          "type": "boolean"
+        },
+        "EnableWinREUpdate": {
+          "type": "boolean"
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance (e.g. _VerifiedDate, _VerifiedBy)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "PatchBaselineSeed": {
+      "type": "object",
+      "description": "SEED envelope of PatchBaseline: static servicing-policy fields. The DERIVED Lines[] and the refresh stamps (LastVerifiedDate/LastVerifiedBy/PatchTuesdayOfBaseline) are regenerated and MUST NOT appear here.",
+      "required": [
+        "Schema",
+        "TargetBuildAfterUpdate",
+        "VerificationMethod",
+        "ChecksumAlgorithm",
+        "ExcludeKbList"
+      ],
+      "properties": {
+        "Schema": {
+          "type": "string",
+          "const": "3.0"
+        },
+        "TargetBuildAfterUpdate": {
+          "type": "string"
+        },
+        "VerificationMethod": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ChecksumAlgorithm": {
+          "type": "string",
+          "description": "Checksum algorithm for Lines[].Digest. SHA1 (the Catalog Digest is SHA-1 base64 -- the verified cross-source key)."
+        },
+        "ExcludeKbList": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "KbId": {
+                "type": "string"
+              },
+              "Reason": {
+                "type": "string"
+              }
+            },
+            "patternProperties": {
+              "^_": {}
+            },
+            "additionalProperties": false
+          },
+          "description": "KBs to exclude, each with a KbId and human Reason."
+        }
+      },
+      "additionalProperties": false
+    },
+    "Pca2023": {
+      "type": "object",
+      "description": "Per-OS Secure Boot (PCA2023) conversion defaults. SPEC B.4.4.",
+      "properties": {
+        "RequiredByDefault": {
+          "type": "boolean"
+        },
+        "RequiredUpdateLevelKb": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "RequiredUpdateLevelMinDate": {
+          "type": "string"
+        },
+        "NotesSource": {
+          "type": [
+            "string",
+            "array"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "Notes": {
+          "type": "string"
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance."
+        }
+      },
+      "additionalProperties": false
+    },
+    "AutoRefreshPolicy": {
+      "type": "object",
+      "description": "Baseline auto-refresh policy. SPEC B.14.",
+      "properties": {
+        "Mode": {
+          "type": "string"
+        },
+        "WritebackToConfig": {
+          "type": "boolean"
+        },
+        "FallbackOnScrapeFailure": {
+          "type": [
+            "string",
+            "boolean"
+          ]
+        },
+        "ScrapeRetries": {
+          "type": "integer"
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance."
+        }
+      },
+      "additionalProperties": false
+    },
+    "SeedLanguageSpecific": {
+      "type": "object",
+      "description": "Per-language SEED entries. Keys are BCP-47 tags. Excludes DERIVED LanguageSpecificPatches.",
+      "patternProperties": {
+        "^[a-z]{2}-[a-z]{2}$": {
+          "$ref": "#/definitions/SeedLanguageEntry"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SeedLanguageEntry": {
+      "type": "object",
+      "properties": {
+        "DisplayName": {
+          "type": "string"
+        },
+        "Iso": {
+          "type": "object"
+        },
+        "VolumeLabelPrefix": {
+          "type": "string"
+        }
+      },
+      "patternProperties": {
+        "^_": {
+          "description": "Machine-written provenance."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Per-language SEED block: stable label + ISO source. The DERIVED LanguageSpecificPatches is regenerated and MUST NOT appear here."
+    }
+  }
+}

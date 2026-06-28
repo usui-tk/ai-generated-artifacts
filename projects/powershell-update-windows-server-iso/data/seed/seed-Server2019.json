@@ -1,0 +1,81 @@
+{
+  "Schema": "3.0",
+  "OsKey": "Server2019",
+  "Common": {
+    "Build": 17763,
+    "OsShortName": "WS2019",
+    "Edition": "Datacenter",
+    "Architecture": "x64",
+    "WimEdition": "Windows Server 2019 Datacenter (Desktop Experience)",
+    "InstallWimIndex": 4,
+    "BootWimIndexes": [
+      1,
+      2
+    ],
+    "WinReWimPath": "Windows\\System32\\Recovery\\Winre.wim",
+    "SupportedLanguages": [
+      "en-us",
+      "ja-jp"
+    ],
+    "DefaultLanguage": "en-us",
+    "LCUExpandViaMum": false,
+    "EnableInstallWimUpdate": true,
+    "EnableBootWimUpdate": true,
+    "EnableWinREUpdate": true,
+    "_VerifiedDate": "2026-05-24T00:00:00+09:00",
+    "_VerifiedBy": "manual:initial-r03"
+  },
+  "PatchBaseline": {
+    "Schema": "3.0",
+    "TargetBuildAfterUpdate": "17763.8511",
+    "VerificationMethod": "",
+    "ChecksumAlgorithm": "SHA1",
+    "ExcludeKbList": []
+  },
+  "Pca2023": {
+    "RequiredByDefault": true,
+    "RequiredUpdateLevelKb": "2024-4B (April 2024 LCU) or later",
+    "RequiredUpdateLevelMinDate": "2024-04-09",
+    "NotesSource": [
+      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f"
+    ],
+    "Notes": "Make2023BootableMedia.ps1 is officially supported for Server 2019. Required source media must include 2024-4B LCU."
+  },
+  "AutoRefreshPolicy": {
+    "Mode": "OnNewPatchTuesday",
+    "WritebackToConfig": true,
+    "FallbackOnScrapeFailure": "UseBaseline",
+    "ScrapeRetries": 3
+  },
+  "LanguageSpecific": {
+    "en-us": {
+      "DisplayName": "English (United States)",
+      "Iso": {
+        "FileName": "17763.3650.221105-1748.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66749/17763.3650.221105-1748.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "FwlinkUrl": "https://go.microsoft.com/fwlink/p/?LinkID=2195167&clcid=0x409&culture=en-us&country=US",
+        "Sha256": "",
+        "SizeBytes": 0,
+        "ReleaseDate": "",
+        "_VerifiedDate": "2026-05-26",
+        "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
+      },
+      "VolumeLabelPrefix": "WS2019EN"
+    },
+    "ja-jp": {
+      "DisplayName": "Japanese",
+      "Iso": {
+        "FileName": "17763.3650.221105-1748.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
+        "Url": "https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66749/17763.3650.221105-1748.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
+        "FwlinkUrl": "https://go.microsoft.com/fwlink/p/?LinkID=2195167&clcid=0x411&culture=ja-jp&country=JP",
+        "Sha256": "",
+        "SizeBytes": 0,
+        "ReleaseDate": "",
+        "_VerifiedDate": "2026-05-26",
+        "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
+      },
+      "VolumeLabelPrefix": "WS2019JA"
+    }
+  },
+  "PatchModel": "embedded-ssu"
+}

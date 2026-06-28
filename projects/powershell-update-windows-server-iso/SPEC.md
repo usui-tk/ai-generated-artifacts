@@ -1098,8 +1098,9 @@ dependency on a prior config.
 | `Schema` / `OsKey` / `PatchModel` | SEED | committed (static identity) |
 | `Common` (B.4.2) | SEED | committed; ISO-structural, optionally discovered via `Get-WimIndexInventory` (script L6201) |
 | `Pca2023` / `AutoRefreshPolicy` | SEED | committed (policy) |
-| `LanguageSpecific.<lang>.Iso` | SEED | committed (ISO source) |
-| `PatchBaseline` (B.4.3) | DERIVED | `Invoke-CatalogPatchSetRefresh` (script L5283) ← `data/cache-*` |
+| `LanguageSpecific.<lang>` (`DisplayName` / `Iso` / `VolumeLabelPrefix`) | SEED | committed (per-language label + ISO source) |
+| `PatchBaseline` envelope (`Schema` / `TargetBuildAfterUpdate` / `VerificationMethod` / `ChecksumAlgorithm` / `ExcludeKbList`) | SEED | committed (static servicing policy) |
+| `PatchBaseline.Lines` (B.4.3) | DERIVED | `Invoke-CatalogPatchSetRefresh` (script L5283) ← `data/cache-*` |
 | `LanguageSpecific.<lang>.LanguageSpecificPatches` | DERIVED | `Resolve-LanguageSpecificPatchesFromCatalog` (script L5406) ← Catalogue |
 | `_meta` | DERIVED | generated (provenance) |
 
@@ -1108,11 +1109,19 @@ caches; they do NOT read the existing config (`Invoke-CatalogPatchSetRefresh`
 resolves `OsKey`/`PatchModel` from internal maps and reads
 `Get-ReleaseInfoCache`, script L5283+). This is precisely what makes a
 from-empty build possible: the SEED supplies everything the Refreshers
-cannot derive, and the Refreshers supply everything the SEED omits.
+cannot derive, and the Refreshers supply everything the SEED omits. The
+per-group refresh stamps (`LastVerifiedDate` / `LastVerifiedBy` /
+`PatchTuesdayOfBaseline`, on `PatchBaseline` and each
+`LanguageSpecificPatches`) and `_meta` are likewise generated at rebuild
+time, not carried in the seed.
 
 **Evidence**: script-body ground truth — `$Script:OsConfigFieldGroups`
 (field-classification constant) and `Invoke-CatalogPatchSetRefresh` (L5283).
-The seed schema and seed files are [PLANNED — P1].
+The seed contract is realized by `schema/config-seed.schema.json` and
+`data/seed/seed-Server*.json` — a projection of `schema/config.schema.json`
+that carries every SEED region and forbids the DERIVED ones (`PatchBaseline`,
+`LanguageSpecific.<lang>.LanguageSpecificPatches`, `_meta`). The `A00`
+builder that assembles a full config from them is [PLANNED — P2].
 
 ### B.14.3 Field-cadence decision matrix
 
