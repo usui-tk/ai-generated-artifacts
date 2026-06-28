@@ -116,7 +116,7 @@ remain unambiguous.
   - [B.11 Media-dynamic-update sub-phase sequences](#b11-media-dynamic-update-sub-phase-sequences)
   - [B.12 Catalogue scrape and candidate selection](#b12-catalogue-scrape-and-candidate-selection)
   - [B.13 Pre-apply dependency closure check](#b13-pre-apply-dependency-closure-check)
-  - [B.14 Refresh policy and RefreshAllBaselines](#b14-refresh-policy-and-refreshallbaselines)
+  - [B.14 Data pipeline and refresh policy](#b14-data-pipeline-and-refresh-policy)
   - [B.15 Update type matrix per OS generation](#b15-update-type-matrix-per-os-generation)
   - [B.16 LCU package format per OS](#b16-lcu-package-format-per-os)
   - [B.17 PCA2023 boot manager support](#b17-pca2023-boot-manager-support)
@@ -1041,30 +1041,101 @@ wsusscn2 layer 2 database was removed in the data-source migration (see
 now the sole servicing-readiness check, running during the build in
 P07/P08.
 
-## B.14 Refresh policy and RefreshAllBaselines decision matrix
+## B.14 Data pipeline and refresh policy
 
 **Status**: normative. **Policy ID**: SPEC-WSI-016.
 
-The `$Script:OsConfigFieldGroups` constant maps each logical field
-group to a Cadence and an optional Refresher function. The constant
-drives the `-Action RefreshAllBaselines` (A01) decision matrix.
+The `data/` dataset is a pure function of a committed **SEED** plus a set
+of **DERIVED** fields regenerated from authoritative upstream sources.
+This section defines the single rebuild entry point (B.14.1), the
+SEED/DERIVED boundary that makes a from-empty build possible (B.14.2), and
+the field-cadence matrix that governs an incremental in-place refresh
+(B.14.3).
+
+### B.14.1 Execution entry point — `A00 RebuildDataset` [PLANNED — implemented at P2]
+
+The dataset has exactly one canonical rebuild entry point. It regenerates
+`data/` from the committed seed and upstream sources and is runnable from
+empty (no pre-existing `data/config-Server*.json` required):
+
+```
+update-windows-server-iso.ps1 -Action RebuildDataset -PatchMonth <yyyy-MM> [-OnlyOs <key>] [-SkipEnvCheck]
+```
+
+Stages, in order:
+
+1. **Seed validation** — validate `data/seed/seed-Server*.json` against
+   `schema/config-seed.schema.json`; an absent or invalid seed is a hard
+   failure (the dataset cannot be built without it).
+2. **Snapshots** — `RefreshSnapshots` (A03): acquire `data/raw-*` /
+   `data/cache-*` from upstream.
+3. **Config build** — for each seed, assemble the full
+   `data/config-Server*.json` = seed + DERIVED (B.14.2) + generated
+   `_meta`.
+4. **Verification** — validate each built config against
+   `schema/config.schema.json` and run the currency gates.
+
+Because stage 2 performs network acquisition, the whole action is
+long-running / hang-prone and MUST be run detached + polled, never
+synchronous-foreground (data-generation hazard policy, handoff B.2.9). A00
+carries no `-OsVersion` (an `osLessAction`, script L383).
+
+**Evidence**: [WORKING] design — no code yet. A00 formalizes a sequence
+that today exists ONLY as the manual A03→A01 procedure in TESTING.md §8.
+The absence of an explicit, gate-checked entry point — the orchestration
+living only in prose — is the documented root cause this section corrects.
+Until P2 lands A00, the live Admin Actions remain A01/A02/A03 (B.6.3) and
+the A03→A01 order is run by hand.
+
+### B.14.2 SEED vs DERIVED boundary
+
+The SEED is the only hand-maintained input; everything DERIVED is
+reproducible from {seed, `-PatchMonth`, caches/Catalogue} with no
+dependency on a prior config.
+
+| Config region | Class | Source |
+|:---|:---|:---|
+| `Schema` / `OsKey` / `PatchModel` | SEED | committed (static identity) |
+| `Common` (B.4.2) | SEED | committed; ISO-structural, optionally discovered via `Get-WimIndexInventory` (script L6201) |
+| `Pca2023` / `AutoRefreshPolicy` | SEED | committed (policy) |
+| `LanguageSpecific.<lang>.Iso` | SEED | committed (ISO source) |
+| `PatchBaseline` (B.4.3) | DERIVED | `Invoke-CatalogPatchSetRefresh` (script L5283) ← `data/cache-*` |
+| `LanguageSpecific.<lang>.LanguageSpecificPatches` | DERIVED | `Resolve-LanguageSpecificPatchesFromCatalog` (script L5406) ← Catalogue |
+| `_meta` | DERIVED | generated (provenance) |
+
+Both DERIVED Refreshers take only `-OsVersion` / `-PatchMonth` and read the
+caches; they do NOT read the existing config (`Invoke-CatalogPatchSetRefresh`
+resolves `OsKey`/`PatchModel` from internal maps and reads
+`Get-ReleaseInfoCache`, script L5283+). This is precisely what makes a
+from-empty build possible: the SEED supplies everything the Refreshers
+cannot derive, and the Refreshers supply everything the SEED omits.
+
+**Evidence**: script-body ground truth — `$Script:OsConfigFieldGroups`
+(field-classification constant) and `Invoke-CatalogPatchSetRefresh` (L5283).
+The seed schema and seed files are [PLANNED — P1].
+
+### B.14.3 Field-cadence decision matrix
+
+The `$Script:OsConfigFieldGroups` constant maps each logical field group to
+a Cadence and an optional Refresher. It drives the incremental
+`-Action RefreshAllBaselines` (A01) refresh of an EXISTING config:
 
 | Group Path | Cadence | Refresher |
 |:---|:---|:---|
 | `Common` | Stable | (none) |
-| `PatchBaseline` | PatchTuesday | `Resolve-PatchSetFromCatalog` |
+| `PatchBaseline` | PatchTuesday | `Invoke-CatalogPatchSetRefresh` |
 | `LanguageSpecific.<lang>.Iso` | IsoRelease | (none) |
 | `LanguageSpecific.<lang>.LanguageSpecificPatches` | PatchTuesday | `Resolve-LanguageSpecificPatchesFromCatalog` |
 
 Cadence semantics:
 
-- **Stable**: once verified, never auto-refresh.
+- **Stable**: once verified, never auto-refresh (SEED; B.14.2).
 - **PatchTuesday**: refresh when recorded `PatchTuesdayOfBaseline` is
   older than the latest Patch Tuesday.
 - **IsoRelease**: only refresh when Microsoft re-releases the ISO;
-  not auto-refreshed in the current implementation (manual).
+  not auto-refreshed in the current implementation (manual; SEED).
 
-Decision matrix (returned by `Get-RefreshDecision`):
+Decision matrix (returned by `Get-RefreshDecision`, script L11239):
 
 | Cadence \\ State | `_VerifiedDate` empty | recorded < latest PT | up-to-date |
 |:---|:---|:---|:---|
@@ -1079,6 +1150,12 @@ The full JSON shape of `$Script:OsConfigFieldGroups` is exposed via
 `-Action DumpFieldClassification` (A02) so external tooling (e.g. a
 Python JSON Schema validator) can consume it without parsing
 PowerShell.
+
+> **Relationship between A00 and A01.** A01 refreshes the DERIVED groups of
+> an EXISTING config in place (this matrix). A00 (B.14.1) builds the whole
+> config from the SEED, so it depends on no prior config and is the
+> from-empty entry point. Once A00 lands (P2), A01 is the incremental
+> monthly refresh and A00 the canonical full rebuild.
 
 ## B.15 Update type matrix per OS generation
 
