@@ -22,6 +22,16 @@ the script and follows the
 
 ## [Unreleased]
 
+### Regenerate `data/config-Server*.json` from the committed seeds via `A00 RebuildDataset` (data refresh; no script change, tag `data-pipeline-regenerate`)
+
+First end-to-end run of the A00 pipeline (previous entry): rebuild the dataset from `data/seed/seed-Server*.json` + live upstream (Microsoft Learn release-info / .NET CU, Microsoft Update Catalog) for PatchMonth `2026-06`, from empty. A00 Stage 4 reports a non-empty `PatchBaseline.Lines` for all four OS (Server2016=2, 2019=2, 2022=3, 2025=4). The diff against the prior (r11.32-generated) configs is code evolution, not data drift:
+
+- **`Lines` content unchanged** (same `KbId` / `UpdateId` / `DownloadUrl` / `Digest` / `ApplyOrder` per line) EXCEPT one `.NET` leaf `Note` on Server2019/2022/2025 (`superset rollup; in-scope leaf = <os> in-media default .NET runtime (BLOCK 0.T; bundles 3.5)`), which now matches the current `New-Line` text in the script; the older committed `Note` carried a `media-payload def, ` prefix no longer emitted by any code path.
+- **Refresh-stamp key order**: `Set-GroupVerifiedState` (`Add-Member -Force`) positions `LastVerifiedDate` / `LastVerifiedBy` / `PatchTuesdayOfBaseline` after `Lines` (the refresher canonical position); the older committed configs had them before `Lines`. Both orders pass `canonical_json_format_check` (key order is not gate-enforced).
+- **Stamps + `_meta`**: `LastVerifiedDate` -> `2026-06-28`; `_meta.scriptVersion` -> `update-wsi-2026.06.28-r11.42`; `_meta.generatedAt` refreshed.
+- **Upstream caches refreshed in lock-step**: `data/raw-dotnet-cu.json`, `data/cache-dotnet-cu.json`, `data/cache-release-info.json`, `data/raw-release-info.meta.json` re-fetched.
+- **Verification**: `canonical_json_format_check` 29/0, `config_schema_test` 14/0, `canonical_json_test` 26/0, `seed_contract_test` 17/0; canon-restamp 58 IN SYNC; governance A-G PASS; doc-gate 0/17. No `.ps1` changed, so no `$Script:ScriptVersion` bump.
+
 ### Implement the `A00 RebuildDataset` data-pipeline entry point (`Invoke-AdminPhaseA00_RebuildDataset` + `Build-ConfigSkeletonFromSeed`); rebuild `data/config-Server*.json` from the committed seeds (P2; `$Script:ScriptVersion` set to `update-wsi-2026.06.28-r11.42`, tag `data-pipeline-rebuilddataset`)
 
 P2 of the data-pipeline restoration (design at P0/B.14, SEED contract + gate at P1). Adds the single, gate-checked rebuild entry point the SPEC named but the script lacked: a full `data/` regeneration that is runnable from empty, replacing the manual A03→A01 prose procedure in TESTING.md §8.

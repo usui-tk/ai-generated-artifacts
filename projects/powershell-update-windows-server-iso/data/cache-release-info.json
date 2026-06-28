@@ -1,19 +1,19 @@
 {
   "Schema": "1.0",
-  "GeneratedAt": "2026-06-13T11:29:40.3697204Z",
+  "GeneratedAt": "2026-06-28T06:11:08.7516644Z",
   "SourceUrl": "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info?accept=text/markdown",
   "RawMarkdownPath": "raw-release-info.md",
   "MonthlyRowCount": 475,
   "HotpatchRowCount": 62,
   "PerOsMonthlyCounts": {
-    "Server2019": 166,
-    "Server2022": 90,
+    "Server2025": 31,
     "Server2016": 188,
-    "Server2025": 31
+    "Server2022": 90,
+    "Server2019": 166
   },
   "PerOsHotpatchCounts": {
-    "Server2022": 36,
-    "Server2025": 26
+    "Server2025": 26,
+    "Server2022": 36
   },
   "MonthlyReleases": [
     {
