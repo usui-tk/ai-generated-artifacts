@@ -72,18 +72,17 @@ a build identifier plus a calendar date. Pending items are marked
 | T4 eval_iso_probe.py (4 OS × 2 lang Range-GET) | ✓ live probe passes | CI Stage 4 / 2026-05-15 |
 | T6 release_info_parser_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T7 dotnet_cu_parser_test.py (16 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| T8 dynamic_update_cache_test.py (20 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| T9 catalog_title_tokens_test.py (18 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| T10 release_info_resolver_test.py (22 assertions) | ✓ all pass | CI Stage 1 (continuous) |
 | T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | T20 removed_live_wua_guard_test.py (20 assertions, offline static guard: the r11.19-removed live-WUA functions/parameters stay absent and P06 ValidatePatchServicing stays a pass-through) | ✓ all pass | migration r11.33 / 2026-06-27 |
 | T24 dism_cleanup_args_test.py (6 assertions, `Get-DismCleanupArgumentList`: default three-token `/Cleanup-Image /StartComponentCleanup` vector with no `/ResetBase`, `-IncludeResetBase` appends `/ResetBase`, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the comma/`+` precedence collapse behind exit 1639) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T25 dism_export_args_test.py (6 assertions, `Get-DismExportArgumentList` returns the five-token `/Export-Image ... /Compress:max` vector targeting the requested source index, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the same precedence trap) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T26 defender_exclusion_plan_test.py (13 assertions, the three pure helpers behind `-UseDefenderExclusions`: `Get-DefenderManagedExclusionSet` (WorkRoot path + four servicing process names), `Get-DefenderExclusionPlan` (add-only-absent, case/slash-insensitive), `Get-DefenderExclusionDecision` (fail-closed -- applies only when every prerequisite is positively satisfied; `$null`/unknown -> skip); the `*-MpPreference`/`Get-MpComputerStatus` wrappers are Windows-only and not exercised) | ✓ all pass | r11.26 defender-exclusion-optin build / 2026-06-11 |
 | T27 catalog_patchset_builder_test.py (14 assertions, offline b3 config-dataset builder: drives `ConvertTo-ConfigLines` through the TestHarness REPL against the committed layer-1 raw fixture `tests/fixtures/catalog_raw/resolve-2026-06.json` to BUILD `PatchBaseline.Lines[]` without live Catalog I/O -- restores the pre-D2 offline construction path for the b3 producer; asserts per-OS Kinds match the `PatchModel` allowed set, every Line carries a `Digest`, and the uup-checkpoint OS builds a `SetupDU` Line at `ApplyOrder` 5) | ✓ all pass | r11.38 setupdu-acquisition / 2026-06-28 |
+| T28 setup_du_forbid_test.py (12 assertions, offline `Resolve-SetupDu` Forbid-branch guard: every non-uup-checkpoint OS (2016/2019/2022) returns the empty `SetupDU` "no line" marker -- no files, no Catalog row, Forbid note -- with no network or fixture; complements T27 which covers the 2025 happy path) | ✓ all pass | r11.43 retire-dead-data-contract / 2026-06-28 |
 | Part C §C.3.4 — `canonical_json_format_check.py` (26 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6-T11/T20/T24-T27 + format gate + config schema gate) | ✓ green | CI continuous |
+| Seed contract gate — `seed_contract_test.py` (17 assertions, `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules; the SEED contract for the offline dataset rebuild) | ✓ all pass | r11.42 data-pipeline-rebuilddataset / 2026-06-28 |
+| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6/T7/T11/T20/T24-T27 + format gate + config schema gate) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
@@ -401,9 +400,6 @@ python3 tests/catalog_fixture_test.py        # T2: 13 fixture assertions
 python3 tests/powershell_harness.py          # T3: 10 PS function assertions
 python3 tests/release_info_parser_test.py    # T6: 13 release-info parser assertions
 python3 tests/dotnet_cu_parser_test.py       # T7: 16 .NET CU parser assertions
-python3 tests/dynamic_update_cache_test.py   # T8: 20 DU cache assertions
-python3 tests/catalog_title_tokens_test.py   # T9: 18 Title-token assertions
-python3 tests/release_info_resolver_test.py  # T10: 22 resolver assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
 python3 tests/config_required_ssu_downloadurl_test.py            # T23: 20 required-SSU consistency-contract assertions (PatchBaseline.Lines)
 python3 tests/dism_cleanup_args_test.py                          # T24: 6 cleanup-arg-vector assertions (1639 collapse guard + /ResetBase default + /ScratchDir)
@@ -414,6 +410,7 @@ python3 tests/setup_du_forbid_test.py                            # T28: 12 Resol
 
 # Schema / format gates (every commit that touches data)
 python3 tests/config_schema_test.py                          # config schema gate
+python3 tests/seed_contract_test.py                          # seed contract gate (data/seed/* vs config-seed.schema.json)
 python3 tests/canonical_json_format_check.py                 # JSON canonical-format gate; SPEC §C.3.4
 
 # Live tests — require unrestricted egress

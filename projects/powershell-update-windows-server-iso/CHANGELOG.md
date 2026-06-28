@@ -22,6 +22,23 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed — reconcile the TESTING.md test inventory to the actual test set (docs-only, no version bump)
+
+The TESTING.md test inventories (both the status matrix and the run-command
+catalog) still listed three tests removed by the dead-code cleanups, and omitted
+two current ones:
+
+- Removed the phantom entries `T8 dynamic_update_cache_test.py`,
+  `T9 catalog_title_tokens_test.py`, `T10 release_info_resolver_test.py` (their
+  subsystems and files were deleted in `2eb6d7e` / `79e7ad7`) from both the
+  matrix and the catalog, and corrected the Stage 1 summary span `T6-T11` ->
+  `T6/T7/T11` (it spanned the deleted tests).
+- Added `seed_contract_test.py` (the SEED contract gate, landed in `b340ead` but
+  never cataloged) to both inventories, and added the `T28 setup_du_forbid_test.py`
+  row to the matrix to match the catalog entry added with T28.
+- Verified: every `tests/*.py` referenced in TESTING.md now exists, and every
+  offline `*_test.py` is cataloged.
+
 ### Added — T28: direct offline unit test for `Resolve-SetupDu`'s Forbid branch (tests-only, no version bump)
 
 `Resolve-SetupDu` had no direct test; its 2025 happy path is covered offline by
