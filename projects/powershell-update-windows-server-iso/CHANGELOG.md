@@ -22,6 +22,14 @@ the script and follows the
 
 ## [Unreleased]
 
+### Add the seed contract gate (`tests/seed_contract_test.py`): mechanically coordinate the SEED/DERIVED boundary with the schema (tests + doc; no `$Script:ScriptVersion` change, tag `seed-contract-gate`)
+
+Hardens the foundation before the `A00` builder (P2). The SEED/DERIVED boundary had been hand-derived from the coarse group classification, which let the `PatchBaseline` envelope be silently dropped from the seed (corrected in the preceding entry). This gate makes the boundary a *mechanical* property checked against the schema, so that class of defect cannot recur.
+
+- **`tests/seed_contract_test.py` (new, 17 assertions, no T number — schema gate).** Asserts: (1) **coverage** — every field in `schema/config.schema.json` (top-level and inside `Common` / `PatchBaseline` / `Pca2023` / `AutoRefreshPolicy` / `LanguageEntry`) is classified as exactly one of SEED (admitted by `schema/config-seed.schema.json`) or DERIVED (a declared table whose basis is what the refreshers / `Save-ConfigWithBaseline` actually generate), with no unclassified field, no overlap, and no seed-extra; (2) **projection consistency** — the reused SEED definitions are byte-equal to the config schema's and `PatchBaselineSeed` equals the `PatchBaseline` envelope; (3) **conformance** — every `data/seed/seed-Server*.json` validates against the seed schema (reusing the `config_schema_test` stdlib validator, no new dependency).
+- **Efficacy demonstrated.** Injecting an unclassified field into the config schema's `PatchBaseline` fails `coverage[PatchBaseline]` (`unclassified=['NewMysteryField']`); injecting `Lines` into a seed file fails conformance (`PatchBaseline.Lines: additional property not allowed`). Both are exactly the defect classes the gate exists to stop.
+- **Docs.** `tests/README.md` inventory + quick-start updated in step (AGENTS §9 AP-3); SPEC B.14.2 gains a sentence recording that the boundary is enforced by this gate, not by prose. No `.ps1` touched, so no `$Script:ScriptVersion` bump.
+
 ### Add the SEED contract: `schema/config-seed.schema.json` + `data/seed/seed-Server*.json` (4), extracted from the current configs; reconcile SPEC B.14.2 (data + schema + doc; no `$Script:ScriptVersion` change, tag `data-pipeline-seed`)
 
 P1 of the data-pipeline restoration (design documented at P0, B.14). Makes the SEED — the committed, hand-maintained half of the dataset (SPEC B.14.2) — an explicit, validated artifact, so a full config can later be built from `seed + DERIVED` by `A00` (P2). No behavioural script change.

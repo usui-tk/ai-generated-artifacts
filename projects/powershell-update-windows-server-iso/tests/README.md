@@ -36,6 +36,7 @@ production, this directory ships five tools, summarised below.
 | `catalog_patchset_builder_test.py` (T27) | Offline b3 config-dataset builder: drives `ConvertTo-ConfigLines` through the TestHarness REPL against the committed layer-1 raw fixture (`fixtures/catalog_raw/resolve-2026-06.json`) to BUILD `PatchBaseline.Lines[]` without live Catalog I/O -- restores the pre-D2 offline construction path. 14 assertions: per-OS Kinds match the `PatchModel` allowed set, every Line carries a `Digest`, the uup-checkpoint OS builds a `SetupDU` Line at `ApplyOrder` 5. | After every change to `ConvertTo-ConfigLines`, the b3 transform, or the raw fixture; on every CI run | No  |
 | `canonical_json_format_check.py` (Part C gate) | Offline format compliance check for every `*.json` file under `data/`, `tests/fixtures/`, and `tests/snapshots/`. Re-serialises each file through `canonical_json_dumps` and fails if the bytes diverge. Implements SPEC §C.3.4. | On every commit that adds or modifies a JSON file in the three scanned directories; on every CI run | No  |
 | `config_schema_test.py` (config schema gate) | Offline schema-conformance check. A stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json` (forbids the legacy `Patches` property, requires `NeutralPatches`), with a targeted r10.4 regression guard against `Patches` reappearing. 14 assertions. No T number — schema gate, mirroring the format-gate convention. | On every commit that touches `data/config-Server*.json` or `schema/config.schema.json`; on every CI run | No  |
+| `seed_contract_test.py` (seed contract gate) | Offline SEED/DERIVED-boundary gate (SPEC B.14.2). Mechanically coordinates the data pipeline with the schema: asserts every `schema/config.schema.json` field is classified as exactly one of SEED (admitted by `schema/config-seed.schema.json`) or DERIVED (a declared table grounded in what the refreshers generate), with no unclassified field, no overlap, and no seed-extra; checks the seed schema is a faithful projection (shared definitions byte-equal; `PatchBaselineSeed` = the `PatchBaseline` envelope); and validates every `data/seed/seed-Server*.json` against the seed schema (reusing the `config_schema_test` validator). 17 assertions. No T number — schema gate. Guards against a config-schema field being silently dropped from the seed. | On every commit that touches `schema/config*.json` or `data/seed/`; on every CI run | No  |
 
 ## Quick start
 
@@ -48,6 +49,7 @@ python3 canonical_json_test.py             # T11: 26 PS/Python byte-level parity
 python3 removed_live_wua_guard_test.py                 # T20: 21 removed-live-WUA static-guard assertions
 python3 canonical_json_format_check.py     # Part C: every JSON file in canonical format
 python3 config_schema_test.py              # config schema gate: data/config-Server*.json vs v2.1 schema
+python3 seed_contract_test.py              # seed contract gate: SEED/DERIVED boundary coordinated with the schema
 
 # Live tests - require network access to Microsoft endpoints
 python3 catalog_probe.py --check all       # T1: hits live Catalog (~7 checks)

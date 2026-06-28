@@ -1115,6 +1115,13 @@ per-group refresh stamps (`LastVerifiedDate` / `LastVerifiedBy` /
 `LanguageSpecificPatches`) and `_meta` are likewise generated at rebuild
 time, not carried in the seed.
 
+This SEED/DERIVED boundary is enforced mechanically, not by prose: the
+`seed_contract_test` gate asserts that every field in
+`schema/config.schema.json` is classified as exactly one of SEED (admitted
+by `schema/config-seed.schema.json`) or DERIVED, so a config-schema field
+can never be silently dropped from the seed (the defect class that the
+coarse `PatchBaseline`-as-one-unit reading first produced).
+
 **Evidence**: script-body ground truth — `$Script:OsConfigFieldGroups`
 (field-classification constant) and `Invoke-CatalogPatchSetRefresh` (L5283).
 The seed contract is realized by `schema/config-seed.schema.json` and
