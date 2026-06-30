@@ -246,7 +246,7 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref out line ran iv
+  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref out line ran iv status bpy mgl
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
     while IFS= read -r ver; do
@@ -262,9 +262,12 @@ run_matrix() {
 ' "${out}" | grep -F '[aws_awscli-v2][installtest][result]' | tail -1)"
       ran="$(result_field "${line}" ran)"; [ "${ran}" = "true" ] || ran=false
       iv="$(result_field "${line}" installed_version)"
-      printf '{"osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"installed_version":"%s","verdict":"%s"}
+      status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+      bpy="$(result_field "${line}" bundled_python)"
+      mgl="$(result_field "${line}" min_glibc_measured)"
+      printf '{"status":"%s","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"installed_version":"%s","bundled_python":"%s","min_glibc_measured":"%s","verdict":"%s"}
 ' \
-        "${major}" "${ver}" "$(rhel_glibc "${major}")" "${ran}" "${iv}" \
+        "${status}" "${major}" "${ver}" "$(rhel_glibc "${major}")" "${ran}" "${iv}" "${bpy}" "${mgl}" \
         "$(awscli_verdict "$(rhel_glibc "${major}")" "$(awscli_min_glibc "${ver}")" "${ran}")"
     done < <(releases_versions || true)
   done

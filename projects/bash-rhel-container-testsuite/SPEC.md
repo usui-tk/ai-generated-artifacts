@@ -188,6 +188,11 @@ Each tool folder `tests/<vendor>_<tool>/` implements the same five-part contract
   `<TOOL>_VERSION` wins; the matrix passes one in test mode). Initial pins: AWS CLI
   RHEL 6 `2.17.49` (below the v2 glibc-2.17 floor) else latest; SSM RHEL 6
   `3.3.3598.0` (compliance floor) else latest; ENA RHEL 6 `2.9.1` else `2.17.0`.
+  Every failure path emits a structured `{"status":"fail",...,"reason":...}` result
+  (`die`), so the matrix always records a parseable, reasoned row; the AWS CLI
+  installer additionally records the bundle's empirical `min_glibc_measured` +
+  `bundled_python` and verifies the landed version, and the ENA installer verifies
+  the built `ena.ko`'s modinfo version (`ko_version`) as a false-success guard.
 * **(a)** `list-<tool>-releases.sh` -> `<tool>-releases.json`.
 * **(b)** `run-<tool>-{install,build}test-matrix.sh` - per `(OS major, version[, init_mode])`
   acquire/reuse, **kick the install script** in its test mode, parse the `[result]`,

@@ -40,7 +40,10 @@ then answers "what happens anonymously?" in one call.
   **per-RHEL-major version pins** (the validated version per major) resolved in
   `resolve_version` as the production default; an explicit `<TOOL>_VERSION` wins,
   and the matrix passes one in test mode. Add a `<TOOL>_LIB_ONLY=1` guard so the
-  pins are unit-testable (see `tests/t015_installpins.sh`).
+  pins/helpers are unit-testable (see `tests/t015_installpins.sh`,
+  `tests/t016_installintrospect.sh`). Use a `die` that emits a structured
+  `{"status":"fail",...,"reason":...}` `[result]` in test mode, so every failure
+  path still produces a parseable, reasoned ledger row.
 
 Create `tests/<vendor>_<tool>/` with:
 

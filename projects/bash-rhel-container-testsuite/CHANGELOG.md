@@ -11,6 +11,46 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r09] - 2026-07-01 - install-script parity with the model project (B1-B6)
+
+Closes six robustness/feature gaps between the root install scripts and the model
+project's installers - found in a follow-up audit, not yet visible to the matrices.
+
+### Changed
+- **B1 structured-fail emitter (`die`)** - all three install scripts now switch to
+  `set -uo pipefail` + an `ERR` trap, and every failure path emits a single
+  `[<tool>][installtest][result] {"status":"fail",...,"reason":...}` line (once,
+  guarded by `RESULT_EMITTED`) before exiting, so an unexpected failure still
+  yields a parseable, reasoned ledger row instead of an empty default.
+- **B2 `status` field** - the `[result]` JSON now carries `"status":"ok"|"fail"`;
+  the matrices parse and record it alongside the verdict.
+- **B3 AWS CLI bundle introspection + landed-version check** - offline
+  `detect_bundled_python` (from the libpython filename) and `measure_min_glibc`
+  (max `GLIBC_x.y` symbol across the bundle .so's, dependency-free) are recorded as
+  `bundled_python` / `min_glibc_measured`; install verifies the landed version
+  matches the request (dies on mismatch unless `latest`).
+- **B4 AWS CLI versionlock** - production path blocks the repo `awscli` (v1) via
+  dnf/yum versionlock exclude so it never shadows the v2 bundle (best-effort).
+- **B5 SSM init integration** - `enable_for_boot` enables `amazon-ssm-agent` via
+  whichever init system is present: systemd -> chkconfig/SysV -> upstart (so
+  RHEL 6's SysV/upstart is handled, not just systemd).
+- **B6 ENA build diagnostics + false-success guard** - the build captures a
+  `make.log` (surfaced by `dump_build_diag` on failure), and the built `ena.ko`'s
+  modinfo version is verified to match the request (`ko_version`); a build that
+  silently produced no/old module now fails instead of reporting success.
+- The three matrices' `run_matrix` parse and record the new fields (`status`,
+  `bundled_python`, `min_glibc_measured`, `ko_version`).
+
+### Added
+- `tests/t016_installintrospect.sh` - L1: hermetically tests `measure_min_glibc`,
+  `detect_bundled_python`, `ko_module_version`, that `die` emits exactly one
+  `status:fail` result (with the reason) in test mode and is silent in production,
+  and that the B4/B5/B6 helpers are defined. 13 assertions.
+
+### Verified
+- Full suite green: **16 tiers, 430 passed, 0 skipped, 0 failed**. L0 covers
+  **37 shell files**, all ShellCheck-`style`-clean. All LF. Contract: 3 tools, 3 ok.
+
 ## [r08] - 2026-07-01 - root install-script layer with per-OS version pins (matrices kick parameterized installers)
 
 Restores the model project's two-layer structure, which r01-r07 had diverged from:

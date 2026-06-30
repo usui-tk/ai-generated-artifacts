@@ -2,46 +2,58 @@
 #==============================================================================
 # install-aws_ssm-agent.sh - install the AWS SSM Agent on a RHEL-family host,
 # and - in test mode - decide whether a given version installs and runs, and
-# (systemd) whether the unit is enable-able. Self-contained. Named to match
-# tests/aws_ssm-agent/; run-ssm-installtest-matrix.sh kicks it with parameters.
+# (per the init system) whether the unit is enable-able. Self-contained. Named to
+# match tests/aws_ssm-agent/; run-ssm-installtest-matrix.sh kicks it with params.
 #
 # Two modes:
-#   1. Production (SSM_INSTALLTEST=0): install the requested SSM RPM; if
-#      SSM_INIT_MODE=systemd, enable + start amazon-ssm-agent.
+#   1. Production (SSM_INSTALLTEST=0): install the pinned/requested SSM RPM, then
+#      enable amazon-ssm-agent for boot via whichever init system is present
+#      (systemd -> chkconfig/SysV -> upstart).
 #   2. Test (SSM_INSTALLTEST=1): install the RPM, run `amazon-ssm-agent -version`;
-#      if SSM_INIT_MODE=systemd, `systemctl enable amazon-ssm-agent`; emit one
-#      [aws_ssm-agent][installtest][result] {json} line for the matrix ledger.
+#      if SSM_INIT_MODE=systemd, enable the unit; emit one
+#      [aws_ssm-agent][installtest][result] {json} line.
 #
-# Axes glibc + init_mode (the design plan sec 11.2). The matrix applies the
-# verdict; this script emits the raw observation (installed/ran/service_enabled).
+# Every failure path still emits {"status":"fail",...} (die). Axes glibc +
+# init_mode. The matrix applies the verdict; this script emits raw facts.
 #
-# Env:  SSM_VERSION       (e.g. 3.3.4793.0; required in test mode)
+# Env:  SSM_VERSION       (default: per-major pin below)
 #       SSM_INSTALLTEST   (0|1; default 0)
 #       SSM_INIT_MODE     (none|systemd; default none)
 #       SSM_RPM_BASEURL   (default https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent)
 #       INSECURE_TLS      (0|1; default 0)
-# Requires: curl, rpm, dnf|yum. Network: the S3 RPM over *.amazonaws.com.
 #==============================================================================
-set -euo pipefail
+set -uo pipefail
 
 SSM_VERSION="${SSM_VERSION:-}"
 SSM_INSTALLTEST="${SSM_INSTALLTEST:-0}"
+SSM_INIT_MODE="${SSM_INIT_MODE:-none}"
+RPM_BASEURL="${SSM_RPM_BASEURL:-https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent}"
+INSECURE_TLS="${INSECURE_TLS:-0}"
 
-# Per-RHEL-major pins: the SSM Agent version the test matrix validated for each
-# major. RHEL 6 (EOL; the EL6 NSS/glibc combo is fragile) is pinned to a known-
-# good full-feature build at the compliance floor (>= 3.3.3598.0 separates full-
-# feature agents from ec2messages-only ones); RHEL 7-10 track the latest alias.
-# An explicit SSM_VERSION overrides these (the matrix passes one in test mode).
+# Per-RHEL-major pins (production default; matrix passes one in test mode). RHEL 6
+# (EOL; fragile EL6 NSS/glibc combo) is pinned to a known-good full-feature build
+# at the compliance floor (>= 3.3.3598.0 separates full-feature agents from
+# ec2messages-only ones); RHEL 7-10 track the latest alias.
 SSM_VERSION_RHEL6="${SSM_VERSION_RHEL6:-3.3.3598.0}"
 SSM_VERSION_RHEL7="${SSM_VERSION_RHEL7:-latest}"
 SSM_VERSION_RHEL8="${SSM_VERSION_RHEL8:-latest}"
 SSM_VERSION_RHEL9="${SSM_VERSION_RHEL9:-latest}"
 SSM_VERSION_RHEL10="${SSM_VERSION_RHEL10:-latest}"
-SSM_INIT_MODE="${SSM_INIT_MODE:-none}"
-RPM_BASEURL="${SSM_RPM_BASEURL:-https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent}"
-INSECURE_TLS="${INSECURE_TLS:-0}"
+
+OSMAJOR=""; GLIBC=""; INSTALLED="false"; RAN="false"; SVC="false"; RESULT_EMITTED=0
 
 log() { printf '%s [install-aws_ssm-agent] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+die() {
+  log "ERROR: $*"
+  if [ "${SSM_INSTALLTEST}" = "1" ] && [ "${RESULT_EMITTED}" = "0" ]; then
+    RESULT_EMITTED=1
+    printf '[aws_ssm-agent][installtest][result] {"status":"fail","tool":"aws_ssm-agent","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"reason":"%s"}\n' \
+      "${OSMAJOR}" "${SSM_VERSION}" "${SSM_INIT_MODE}" "${GLIBC}" "${INSTALLED}" "${RAN}" "${SVC}" "$(json_escape "$*")"
+  fi
+  exit 1
+}
 
 os_major() {
   if [ -r /etc/os-release ]; then
@@ -51,47 +63,55 @@ os_major() {
     sed -n 's/.*release \([0-9]\+\).*/\1/p' /etc/redhat-release | head -1
   fi
 }
-
 host_glibc() {
   rpm -q --qf '%{VERSION}\n' glibc 2>/dev/null | head -1 && return 0
   ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+$'
 }
-
 pkgmgr() { for m in dnf yum; do command -v "${m}" >/dev/null 2>&1 && { printf '%s' "${m}"; return 0; }; done; printf 'none'; }
 
 rpm_url() {
-  if [ "${SSM_VERSION}" = "latest" ]; then
-    printf '%s/latest/linux_amd64/amazon-ssm-agent.rpm' "${RPM_BASEURL}"
-  else
-    printf '%s/%s/linux_amd64/amazon-ssm-agent.rpm' "${RPM_BASEURL}" "${SSM_VERSION}"
-  fi
+  if [ "${SSM_VERSION}" = "latest" ]; then printf '%s/latest/linux_amd64/amazon-ssm-agent.rpm' "${RPM_BASEURL}"
+  else printf '%s/%s/linux_amd64/amazon-ssm-agent.rpm' "${RPM_BASEURL}" "${SSM_VERSION}"; fi
 }
 
-install_rpm() { # rc 0 on install (dep closure resolved)
+install_rpm() {
   local url tmp mgr
   local -a opts
   url="$(rpm_url)"; tmp="$(mktemp -d)"; mgr="$(pkgmgr)"
   local -a copts=(-fsSL --retry 2 -o "${tmp}/ssm.rpm")
   [ "${INSECURE_TLS}" = "1" ] && copts+=(-k)
   log "fetching ${url}"
-  curl "${copts[@]}" "${url}" || { rm -rf "${tmp}"; return 1; }
+  curl "${copts[@]}" "${url}" || { rm -rf "${tmp}"; die "fetch failed: ${url}"; }
   opts=(-y install "${tmp}/ssm.rpm")
   [ "${INSECURE_TLS}" = "1" ] && opts+=(--setopt=sslverify=0)
   if [ "${mgr}" != "none" ]; then
-    "${mgr}" "${opts[@]}" >/dev/null 2>&1 || { rm -rf "${tmp}"; return 1; }
+    "${mgr}" "${opts[@]}" >/dev/null 2>&1 || { rm -rf "${tmp}"; die "rpm install failed (dependency closure) via ${mgr}"; }
   else
-    rpm -i "${tmp}/ssm.rpm" >/dev/null 2>&1 || { rm -rf "${tmp}"; return 1; }
+    rpm -i "${tmp}/ssm.rpm" >/dev/null 2>&1 || { rm -rf "${tmp}"; die "rpm -i failed (no dnf/yum; unresolved deps?)"; }
   fi
   rm -rf "${tmp}"
 }
 
-emit_result() { # <installed> <ran> <service_enabled> <reason>
-  printf '[aws_ssm-agent][installtest][result] {"tool":"aws_ssm-agent","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"reason":"%s"}\n' \
-    "$(os_major)" "${SSM_VERSION}" "${SSM_INIT_MODE}" "$(host_glibc)" "$1" "$2" "$3" "$4"
+# enable_for_boot : enable amazon-ssm-agent via the available init system.
+# echoes true if enabled, false otherwise. systemd -> chkconfig/SysV -> upstart.
+enable_for_boot() {
+  if command -v systemctl >/dev/null 2>&1; then
+    if systemctl enable amazon-ssm-agent >/dev/null 2>&1; then printf 'true'; return 0; fi
+    log "WARNING: systemctl enable amazon-ssm-agent failed; the RPM preset may still enable it"
+  elif command -v chkconfig >/dev/null 2>&1 && [ -f /etc/init.d/amazon-ssm-agent ]; then
+    if chkconfig amazon-ssm-agent on >/dev/null 2>&1; then
+      log "enabled amazon-ssm-agent via chkconfig (SysV)"; printf 'true'; return 0
+    fi
+    log "WARNING: chkconfig amazon-ssm-agent on failed"
+  elif [ -f /etc/init/amazon-ssm-agent.conf ]; then
+    log "amazon-ssm-agent ships an upstart job; it starts on boot via its 'start on' stanza"
+    printf 'true'; return 0
+  else
+    log "WARNING: no recognized init integration for amazon-ssm-agent"
+  fi
+  printf 'false'
 }
 
-# resolve_version : explicit SSM_VERSION wins; else the per-major pin (production
-# default), resolved against the running OS before install.
 resolve_version() {
   [ -n "${SSM_VERSION}" ] && return 0
   case "$(os_major)" in
@@ -108,28 +128,29 @@ resolve_version() {
 # SSM_LIB_ONLY=1 stops here, after the helpers + per-major pins are defined.
 [ "${SSM_LIB_ONLY:-0}" = "1" ] && return 0 2>/dev/null
 
+trap 'die "unexpected error (line ${LINENO})"' ERR
+
+OSMAJOR="$(os_major)"
+GLIBC="$(host_glibc)"
 resolve_version
 
 if [ "${SSM_INSTALLTEST}" = "1" ]; then
-  if ! install_rpm; then
-    emit_result false false false "rpm install failed (dependency closure or fetch error)"
-    exit 0
-  fi
-  if amazon-ssm-agent -version >/dev/null 2>&1; then ran=true; else ran=false; fi
-  svc=false
-  if [ "${SSM_INIT_MODE}" = "systemd" ]; then
-    if systemctl enable amazon-ssm-agent >/dev/null 2>&1; then svc=true; fi
-  fi
-  emit_result true "${ran}" "${svc}" ""
+  install_rpm
+  INSTALLED="true"
+  if amazon-ssm-agent -version >/dev/null 2>&1; then RAN="true"; else RAN="false"; fi
+  if [ "${SSM_INIT_MODE}" = "systemd" ]; then SVC="$(enable_for_boot)"; fi
+  RESULT_EMITTED=1
+  printf '[aws_ssm-agent][installtest][result] {"status":"ok","tool":"aws_ssm-agent","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s}\n' \
+    "${OSMAJOR}" "${SSM_VERSION}" "${SSM_INIT_MODE}" "${GLIBC}" "${INSTALLED}" "${RAN}" "${SVC}"
   exit 0
 fi
 
 # --- production mode ----------------------------------------------------------
 log "installing SSM Agent (${SSM_VERSION}); init mode ${SSM_INIT_MODE}"
-install_rpm || { log "ERROR: SSM Agent install failed"; exit 1; }
-if [ "${SSM_INIT_MODE}" = "systemd" ]; then
-  systemctl enable amazon-ssm-agent || true
+install_rpm
+SVC="$(enable_for_boot)"
+if [ "${SSM_INIT_MODE}" = "systemd" ] && command -v systemctl >/dev/null 2>&1; then
   systemctl start amazon-ssm-agent || true
 fi
 amazon-ssm-agent -version || true
-log "done"
+log "done (service_enabled=${SVC})"

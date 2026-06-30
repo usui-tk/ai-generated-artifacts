@@ -223,7 +223,7 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref out line built
+  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref out line built status kov
   for major in ${majors}; do
     ver="$(releases_max)"
     repo="$(ena_kdevel_repo "${major}")"
@@ -233,7 +233,7 @@ run_matrix() {
       # KICK install-aws_ena-driver.sh in ENA_INSTALLTEST mode. anonymous -> the
       # script does not build and emits built=false (verdict needs-entitlement);
       # entitled -> it installs kernel-devel from "${repo}", fetches ena_linux_<ver>,
-      # and builds ena.ko out of tree. Load is never attempted (L4).
+      # builds ena.ko out of tree, and verifies its modinfo version. Load is L4.
       out="$(podman run --rm \
               -v "${INSTALL_SCRIPT}:/install-aws_ena-driver.sh:ro" \
               -e ENA_INSTALLTEST=1 -e "ENA_VERSION=${ver}" -e "ENA_ENTITLEMENT=${ent}" \
@@ -242,9 +242,11 @@ run_matrix() {
       line="$(printf '%s
 ' "${out}" | grep -F '[aws_ena-driver][installtest][result]' | tail -1)"
       built="$(result_field "${line}" built)"; [ "${built}" = "true" ] || built=false
-      printf '{"osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"verdict":"%s","load_tier":"%s"}
+      status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+      kov="$(result_field "${line}" ko_version)"
+      printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s"}
 ' \
-        "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" \
+        "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" \
         "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)"
     done
   done

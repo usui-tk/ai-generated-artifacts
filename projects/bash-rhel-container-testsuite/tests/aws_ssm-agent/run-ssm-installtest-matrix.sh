@@ -216,7 +216,7 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" modes="${INITMODES:-none systemd}" major mode ref ver out line installed ran svc
+  local majors="${OSMAJORS:-10 9 8 7 6}" modes="${INITMODES:-none systemd}" major mode ref ver out line installed ran svc status
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}"; continue; }
     ver="$(releases_max)"
@@ -224,7 +224,7 @@ run_matrix() {
       # KICK install-aws_ssm-agent.sh in SSM_INSTALLTEST mode. For systemd the
       # container must boot /sbin/init first; acq_init_run_args (Phase 2) builds
       # that invocation. The install script installs the RPM, runs
-      # `amazon-ssm-agent -version`, and (systemd) `systemctl enable`.
+      # `amazon-ssm-agent -version`, and (systemd) enables for boot.
       out="$(podman run --rm \
               -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro" \
               -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
@@ -234,9 +234,10 @@ run_matrix() {
       installed="$(result_field "${line}" installed)"; [ "${installed}" = "true" ] || installed=false
       ran="$(result_field "${line}" ran)";             [ "${ran}" = "true" ] || ran=false
       svc="$(result_field "${line}" service_enabled)"; [ "${svc}" = "true" ] || svc=false
-      printf '{"osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"verdict":"%s"}
+      status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+      printf '{"status":"%s","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"verdict":"%s"}
 ' \
-        "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" "${svc}" \
+        "${status}" "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" "${svc}" \
         "$(ssm_verdict "${installed}" "${ran}" "${mode}")"
     done
   done

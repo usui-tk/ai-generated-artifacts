@@ -175,7 +175,7 @@ This is the final **Phase 7 (generalization)** drop — all seven phases complet
   `tests/conformance/check-tool-contract.sh` machine-enforces the SPEC §10 (a–e)
   contract (tier `t013`), `lib/pkg-availability.sh` is the §12 classification
   canon (tier `t014`), and [ADDING-A-TOOL.md](./ADDING-A-TOOL.md) is the bilingual
-  guide for tool #2. **Suite green: 15 tiers, 415 passed, 0 failed.**
+  guide for tool #2. **Suite green: 16 tiers, 430 passed, 0 failed.**
 
 **All seven implementation phases are complete** (plus r08, which restored the
 model's two-layer structure: project-root `install-aws_*.sh` installers - each with

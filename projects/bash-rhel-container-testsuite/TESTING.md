@@ -164,6 +164,10 @@ so results are host-independent and deterministic.
   `resolve_version` resolves to the validated pin (RHEL 6: awscli `2.17.49`, ssm
   `3.3.3598.0`, ena `2.9.1`; RHEL 7-10 latest/`2.17.0`) and that an explicit
   `<TOOL>_VERSION` overrides it.
+* **`t016_installintrospect.sh`** (r09) - the install scripts' introspection +
+  structured-result machinery: `measure_min_glibc`, `detect_bundled_python`,
+  `ko_module_version`, and that `die` emits exactly one `status:fail` `[result]`
+  (with the reason) in test mode and is silent in production.
 
 ---
 
@@ -191,8 +195,8 @@ The full suite is green in the planning sandbox:
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
   podman:     (not installed - L3 uses the curl-only OCI fallback or SKIP)
----- t001_parse.sh ----            ## RESULT pass=36 fail=0 skip=0
----- t002_shellcheck.sh ----       ## RESULT pass=36 fail=0 skip=0
+---- t001_parse.sh ----            ## RESULT pass=37 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=37 fail=0 skip=0
 ---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
 ---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
@@ -206,10 +210,11 @@ The full suite is green in the planning sandbox:
 ---- t013_toolcontract.sh ----     ## RESULT pass=18 fail=0 skip=0
 ---- t014_pkgavail.sh ----         ## RESULT pass=33 fail=0 skip=0
 ---- t015_installpins.sh ----      ## RESULT pass=17 fail=0 skip=0
-SUITE: 415 passed, 0 skipped, 0 failed  (15 tiers, 0 tier-failure(s))
+---- t016_installintrospect.sh ----## RESULT pass=13 fail=0 skip=0
+SUITE: 430 passed, 0 skipped, 0 failed  (16 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 36 shell files** (incl. the 3 root `install-aws_*.sh`), each `bash -n`-clean and
+**L0 fixed count = 37 shell files** (incl. the 3 root `install-aws_*.sh`), each `bash -n`-clean and
 ShellCheck-`style`-clean: the 6 Phase-1 files, the 5 libraries
 (`lib/{acquire-rootfs,ubi-pkgmgr,epel,os-profile,pkg-availability}.sh`), the 5
 Phase-2 unit tiers (`tests/t003`-`t007`), the seven verdict/verify/profile/contract

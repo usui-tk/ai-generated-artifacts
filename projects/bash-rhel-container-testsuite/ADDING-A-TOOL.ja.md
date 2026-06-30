@@ -39,7 +39,9 @@
   インストール。**RHEL メジャー別のバージョンピン**（各メジャーの検証済み版）を持ち、
   `resolve_version` が本番既定として解決（明示の `<TOOL>_VERSION` が優先、テスト時は
   マトリクスが明示指定）。ピンを単体検証できるよう `<TOOL>_LIB_ONLY=1` ガードを付与
-  （`tests/t015_installpins.sh` 参照）。
+  （`tests/t015_installpins.sh`、`tests/t016_installintrospect.sh` 参照）。失敗時は
+  テストモードで構造化結果 `{"status":"fail",...,"reason":...}` を出す `die` を使い、
+  どの失敗経路でもパース可能で理由付きの ledger 行を残すこと。
 
 `tests/<vendor>_<tool>/` を作成します:
 
