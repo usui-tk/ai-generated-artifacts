@@ -14,6 +14,12 @@
 | Newest version | 3.3.4793.0 |
 | Feature compliance | **compliant-capable** (min 3.3.3598.0) |
 
+## Why this matters - AWS Systems Manager Run Command deprecation
+
+Starting **2026-06-16**, SSM Run Command stops executing commands on managed instances that still use the legacy **ec2messages** (Amazon Message Delivery Service) endpoints - endpoints used only by SSM Agents too old to support the newer **ssmmessages** (Amazon Message Gateway Service) endpoints. The remediation is to update the SSM Agent to **3.3.3598.0 or newer** and grant the instance role the ssmmessages channel permissions (`CreateControlChannel` / `CreateDataChannel` / `OpenControlChannel` / `OpenDataChannel`); affected instances are listed in the AWS Health Dashboard. This report characterizes, per RHEL major, which agent versions install+run - i.e. whether a RHEL 8 image can be brought to a **compliant (>= 3.3.3598.0)** agent.
+
+References (AWS docs): [Run Command](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command.html); [message service endpoints](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-setting-up-messageAPIs.html#message-services); [update SSM Agent](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command-tutorial-update-software.html); [ssmmessages IAM actions](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonmessagegatewayservice.html); [check agent version with Fleet Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/ssm-agent-get-version.html).
+
 ## init_mode grid (the SSM-specific axis)
 
 | init_mode | acquire form | demonstrates | expected | empirical | verdict |

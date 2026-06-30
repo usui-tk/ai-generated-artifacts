@@ -11,6 +11,18 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r10] - 2026-07-01 - SSM RESULTS: restore the Run Command deprecation rationale
+
+### Fixed
+- The SSM `RESULTS-rhel<N>.md` reports omitted the **"Why this matters - AWS
+  Systems Manager Run Command deprecation"** rationale that the model project's SSM
+  reports carry - the very context that justifies the `3.3.3598.0` compliance floor
+  (and the r08 SSM pin). `generate_results_for` now emits it: the 2026-06-16
+  ec2messages cutoff, the ssmmessages remediation (update to >= 3.3.3598.0 + grant
+  the ssmmessages channel IAM actions), the AWS Health Dashboard, and the AWS doc
+  references. Regenerated all five reports (RHEL 6/7/8/9/10); regeneration is
+  idempotent. Suite still **16 tiers, 430 passed**.
+
 ## [r09] - 2026-07-01 - install-script parity with the model project (B1-B6)
 
 Closes six robustness/feature gaps between the root install scripts and the model
