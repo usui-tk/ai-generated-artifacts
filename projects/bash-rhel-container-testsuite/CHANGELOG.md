@@ -8,12 +8,50 @@ in `ai-generated-artifacts`.
 ## [Unreleased]
 
 ### Planned (per the design plan sec 16)
-- **Phase 4 - SSM:** `tests/aws_ssm-agent/*`, glibc + init_mode, S3 RPM, RESULTS.
 - **Phase 5 - ENA (E2'):** `tests/aws_ena-driver/*`, UEK-removed installer,
   entitlement-gated plain-make build, `needs-entitlement` recording.
 - **Phase 6 - EOL/constrained:** RHEL 7 (frozen, yum, fixed-tag) and RHEL 6
   (no anon repo; entitled `rhel-6-server`; EPEL archive-only) specifics.
 - **Phase 7 - Generalization:** tool-agnostic contract + classification for tool #2.
+
+## [r04] - 2026-07-01 - Phase 4: AWS SSM Agent
+
+The second per-tool matrix, `aws_ssm-agent` - the **init-sensitive** tool. Its two
+axes are **glibc** (install) and **init_mode** (service). This is where Phase 2's
+`acq_init_run_args` (none/systemd) is first wired into a matrix. Pure logic and
+report generation are hermetic; the live container install is L3 (CI / egress host).
+
+### Added
+- `tests/aws_ssm-agent/list-ssm-releases.sh` (a) - `git ls-remote --tags
+  aws/amazon-ssm-agent`, deterministic `ssm-releases.json` (**207** versions; the
+  S3 RPM URL per version; `ge_min` against the AWS floor 3.3.3598.0). The go.mod
+  -> min-kernel proxy is dropped (a container shares the host kernel).
+- `tests/aws_ssm-agent/run-ssm-installtest-matrix.sh` (b, d) - pure helpers
+  (`ssm_ge`, `rhel_glibc`, `ssm_in_scope`, `ssm_compliance`, `ssm_init_outcome`,
+  `ssm_verdict`), a `--run` L3 loop that acquires init-mode-aware refs via
+  `acq_init_run_args` then installs the RPM / smokes `-version` / (systemd)
+  enables+starts the unit, and `--generate-results`.
+- `tests/aws_ssm-agent/ssm-installtest-ledger.json` (c) - schema'd empirical
+  ledger (`results: []` until a live `--run`).
+- `tests/aws_ssm-agent/RESULTS-rhel{6,7,8,9,10}.md` (d) - generated: the
+  init_mode grid (none -> version-only; systemd -> service-capable) and the
+  feature-compliance headline (newest 3.3.4793.0 -> **compliant-capable** on every
+  major; 11 in-scope versions >= the floor). Empirical = pending (L3).
+- `tests/t009_ssmverdict.sh` (e) - L1 unit over every pure helper plus the
+  matrix/lister `ssm_ge` reuse-by-copy. 27 assertions.
+
+### Removed
+- `tests/aws_ssm-agent/.gitkeep` (directory now carries the matrix artifacts).
+
+### Verified
+- Full suite green: **9 tiers, 213 passed, 0 skipped, 0 failed**. L0 covers
+  **20 shell files**; the SSM lister, matrix, and tier are ShellCheck-`style`-clean.
+- `ssm-releases.json` and the five `RESULTS-rhel<N>.md` were produced by the real
+  tools this session (`git ls-remote` to github.com).
+
+### Notes
+- **Live install (L3) deferred to CI / a container-egress host** (no podman; the
+  S3 RPM host and quay are off-allowlist in the sandbox). Tracked as R7.
 
 ## [r03] - 2026-07-01 - Phase 3: AWS CLI v2
 

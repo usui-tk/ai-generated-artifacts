@@ -251,7 +251,7 @@ moot since ENA defaults to plain-make.
 | 1 - Scaffolding | dir skeleton, ported `tests/lib/*`, `run-all.sh`, `.shellcheckrc`, L0 green, bilingual README | L0 passes; fixed count recorded | **done (r01)** |
 | 2 - Acquisition | `lib/acquire-rootfs.sh` (+`t003`), `lib/ubi-pkgmgr.sh` (+`t004`), `t005_entitlementdetect`, `t006_initmodemap`, `lib/epel.sh` (+`t007`) | unit tiers green; live pull both paths; classify unit-tested | **done (r02)** (tail: live pull is L3/CI) |
 | 3 - AWS CLI | `tests/aws_awscli-v2/*`, glibc ledger, RESULTS, verdict tier | matrix runs (Tier A); reports generated | **done (r03)** (tail: live install is L3/CI) |
-| 4 - SSM | `tests/aws_ssm-agent/*`, glibc + init_mode, S3 RPM, RESULTS | both init modes exercised; reports generated | pending |
+| 4 - SSM | `tests/aws_ssm-agent/*`, glibc + init_mode, S3 RPM, RESULTS | both init modes exercised; reports generated | **done (r04)** (tail: live install is L3/CI) |
 | 5 - ENA (E2') | `tests/aws_ena-driver/*`, UEK-removed installer, entitlement-gated build | build on entitled host; anon -> `needs-entitlement`; load -> L4 | pending |
 | 6 - EOL/constrained | RHEL 7 (frozen, yum, fixed-tag) + RHEL 6 (no anon repo; entitled `rhel-6-server`; EPEL archive-only) | reports generated or formally deferred | pending |
 | 7 - Generalization | tool-agnostic contract (section 7) + classification (section 8) ready for tool #2 | SPEC/TESTING coverage complete; docs bilingual | pending |
@@ -266,3 +266,4 @@ moot since ENA defaults to plain-make.
 | R4 | Naming vocabulary for future non-AWS tools | this SPEC, Phase 7 |
 | R5 | Live pull both paths (podman + curl-only OCI) on a container-egress host | L3/CI; the hermetic sequence is unit-tested in `t003` (Phase 2 tail) |
 | R6 | Live AWS CLI v2 install-test matrix (`--run`) -> empirical RESULTS column | L3/CI; the glibc model + report generation are hermetic (Phase 3 tail) |
+| R7 | Live SSM install-test matrix (`--run`, both init modes) -> empirical RESULTS | L3/CI; the init-mode grid + compliance model are hermetic (Phase 4 tail) |

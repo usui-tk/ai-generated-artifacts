@@ -99,12 +99,16 @@ bash-rhel-container-testsuite/
     run-all.sh                     # L0-L2 を一括実行するランナー
     t001_parse.sh  t002_shellcheck.sh             # L0（実装済み）
     t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2（Phase 2 ✅）
-    t008_awscliverdict.sh                         # L1 AWS CLI 判定（Phase 3 ✅）
+    t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM 判定（Phase 3-4 ✅）
     aws_awscli-v2/                                # AWS CLI マトリクス（Phase 3 ✅）
       list-awscli-releases.sh  awscli-releases.json
       run-awscli-installtest-matrix.sh  awscli-installtest-ledger.json
       RESULTS-rhel{6,7,8,9,10}.md
-    aws_ssm-agent/  aws_ena-driver/               # ツール別マトリクス (Phase 4-5)
+    aws_ssm-agent/                                # SSM マトリクス（Phase 4 ✅）
+      list-ssm-releases.sh  ssm-releases.json
+      run-ssm-installtest-matrix.sh  ssm-installtest-ledger.json
+      RESULTS-rhel{6,7,8,9,10}.md
+    aws_ena-driver/                               # ENA マトリクス (Phase 5)
 ```
 
 *(Phase N)* と記したファイルは**まだ存在しません**（下記「ステータス」参照）。
@@ -130,7 +134,7 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 
 ## ステータス
 
-これは **Phase 3（AWS CLI v2）** のドロップです。ここまでの完了状況:
+これは **Phase 4（AWS SSM Agent）** のドロップです。ここまでの完了状況:
 
 * ✅ **Phase 0 — 実現可能性調査** — 実測した基礎事実（メジャー別 glibc、匿名リポジトリ
   集合、匿名プル、5 メジャー全体の entitled パススルー、RHEL 7 の固定タグ署名、EPEL
@@ -142,11 +146,15 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 * ✅ **Phase 3 — AWS CLI v2** — 最初のツール別マトリクス `tests/aws_awscli-v2/*`
   （リリース収集＋927 バージョンの `awscli-releases.json`、install-test マトリクス、
   glibc ledger、生成済み `RESULTS-rhel{6,7,8,9,10}.md`）と判定階層 `t008`。
-  **スイート緑: 8 階層、180 件成功、0 件失敗。** 残課題は **ライブインストール（L3）** で、
-  egress 可能なホストで empirical 列を埋めます。
+* ✅ **Phase 4 — AWS SSM Agent** — init 感応のマトリクス `tests/aws_ssm-agent/*`
+  （207 バージョンの `ssm-releases.json`、Phase 2 の `acq_init_run_args` を組み込んだ
+  **glibc ＋ init_mode** の install-test マトリクス、生成済み `RESULTS`）と判定階層
+  `t009`。**スイート緑: 9 階層、213 件成功、0 件失敗。** 残課題は **ライブインストール
+  （L3）** で、egress 可能なホストで empirical 列を埋めます。
 
-次は **Phase 4 — AWS SSM Agent**（`tests/aws_ssm-agent/*`: glibc **＋ init_mode**、
-S3 RPM、RESULTS）です。フェーズ計画の全体は [SPEC.md](./SPEC.md) §10 にあります。
+次は **Phase 5 — AWS ENA Driver**（`tests/aws_ena-driver/*`: カーネルモジュールの
+**buildtest**、entitlement ゲート付き plain-make、`needs-entitlement` 記録）です。
+フェーズ計画の全体は [SPEC.md](./SPEC.md) §10 にあります。
 
 ---
 

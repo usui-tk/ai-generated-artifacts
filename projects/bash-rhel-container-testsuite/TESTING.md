@@ -131,6 +131,10 @@ so results are host-independent and deterministic.
   `python_eol`, `rhel_glibc`, `awscli_band`, `awscli_expected`), loaded by
   extracting each function body from `run-awscli-installtest-matrix.sh`, plus the
   reuse-by-copy consistency between the matrix and `list-awscli-releases.sh`.
+* **`t009_ssmverdict.sh`** (Phase 4) - the SSM matrix's pure helpers (`ssm_ge`,
+  `rhel_glibc`, `ssm_in_scope`, `ssm_compliance`, `ssm_init_outcome`,
+  `ssm_verdict`) and the matrix/lister `ssm_ge` reuse-by-copy. Covers the
+  init_mode axis (none -> version-only, systemd -> service-capable).
 
 ---
 
@@ -149,7 +153,7 @@ banner so each run records the environment it ran under.
 
 ---
 
-## Recorded baseline (Phase 3, r03)
+## Recorded baseline (Phase 4, r04)
 
 The full suite is green in the planning sandbox:
 
@@ -158,23 +162,25 @@ The full suite is green in the planning sandbox:
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
   podman:     (not installed - L3 uses the curl-only OCI fallback or SKIP)
----- t001_parse.sh ----            ## RESULT pass=17 fail=0 skip=0
----- t002_shellcheck.sh ----       ## RESULT pass=17 fail=0 skip=0
+---- t001_parse.sh ----            ## RESULT pass=20 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=20 fail=0 skip=0
 ---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
 ---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
 ---- t006_initmodemap.sh ----      ## RESULT pass=7  fail=0 skip=0
 ---- t007_epelresolve.sh ----      ## RESULT pass=34 fail=0 skip=0
 ---- t008_awscliverdict.sh ----    ## RESULT pass=45 fail=0 skip=0
-SUITE: 180 passed, 0 skipped, 0 failed  (8 tiers, 0 tier-failure(s))
+---- t009_ssmverdict.sh ----       ## RESULT pass=27 fail=0 skip=0
+SUITE: 213 passed, 0 skipped, 0 failed  (9 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 17 shell files**, each `bash -n`-clean and
+**L0 fixed count = 20 shell files**, each `bash -n`-clean and
 ShellCheck-`style`-clean: the 6 Phase-1 files, the 3 Phase-2 libraries
 (`lib/{acquire-rootfs,ubi-pkgmgr,epel}.sh`), the 5 Phase-2 unit tiers
-(`tests/t003`-`t007`), the Phase-3 verdict tier (`tests/t008`), and the two
-Phase-3 AWS CLI scripts (`tests/aws_awscli-v2/{list-awscli-releases,
-run-awscli-installtest-matrix}.sh`).
+(`tests/t003`-`t007`), the two verdict tiers (`tests/t008`, `tests/t009`), the
+two Phase-3 AWS CLI scripts (`tests/aws_awscli-v2/{list-awscli-releases,
+run-awscli-installtest-matrix}.sh`), and the two Phase-4 SSM scripts
+(`tests/aws_ssm-agent/{list-ssm-releases,run-ssm-installtest-matrix}.sh`).
 
 **Residuals (run on CI / a container-egress host):**
 - the live pull (L3) is not exercisable in the sandbox (no podman; the quay blob
@@ -182,3 +188,6 @@ run-awscli-installtest-matrix}.sh`).
 - the live AWS CLI install matrix (`run-awscli-installtest-matrix.sh --run`)
   fills the empirical RESULTS column; the glibc model and `--generate-results`
   are hermetic and were run this session to produce the committed reports.
+- the live SSM install matrix (`run-ssm-installtest-matrix.sh --run`, both init
+  modes) fills the empirical column; the init-mode grid + compliance model and
+  `--generate-results` are hermetic and were run this session.

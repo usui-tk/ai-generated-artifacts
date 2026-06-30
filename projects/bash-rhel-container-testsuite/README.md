@@ -99,12 +99,16 @@ bash-rhel-container-testsuite/
     run-all.sh                     # single-entry L0-L2 runner
     t001_parse.sh  t002_shellcheck.sh             # L0 (present)
     t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2 (Phase 2 ✅)
-    t008_awscliverdict.sh                         # L1 AWS CLI verdict (Phase 3 ✅)
+    t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM verdicts (Phase 3-4 ✅)
     aws_awscli-v2/                                # AWS CLI matrix (Phase 3 ✅)
       list-awscli-releases.sh  awscli-releases.json
       run-awscli-installtest-matrix.sh  awscli-installtest-ledger.json
       RESULTS-rhel{6,7,8,9,10}.md
-    aws_ssm-agent/  aws_ena-driver/               # per-tool matrices (Phase 4-5)
+    aws_ssm-agent/                                # SSM matrix (Phase 4 ✅)
+      list-ssm-releases.sh  ssm-releases.json
+      run-ssm-installtest-matrix.sh  ssm-installtest-ledger.json
+      RESULTS-rhel{6,7,8,9,10}.md
+    aws_ena-driver/                               # ENA matrix (Phase 5)
 ```
 
 Files marked *(Phase N)* are **not present yet** — see *Status* below. The
@@ -129,7 +133,7 @@ host with container egress, once they land in Phases 3-5. See
 
 ## Status
 
-This is the **Phase 3 (AWS CLI v2)** drop. Completed so far:
+This is the **Phase 4 (AWS SSM Agent)** drop. Completed so far:
 
 * ✅ **Phase 0 — feasibility** — measured base facts (per-major glibc, anon repo
   sets, anon pull, entitled passthrough across all five majors, RHEL 7 fixed-tag
@@ -140,12 +144,16 @@ This is the **Phase 3 (AWS CLI v2)** drop. Completed so far:
   `lib/epel.sh` and their hermetic unit tiers `t003`-`t007`.
 * ✅ **Phase 3 — AWS CLI v2** — the first per-tool matrix `tests/aws_awscli-v2/*`
   (release lister + `awscli-releases.json` of 927 versions, install-test matrix,
-  glibc ledger, generated `RESULTS-rhel{6,7,8,9,10}.md`) and the verdict tier
-  `t008`. **Suite green: 8 tiers, 180 passed, 0 failed.** Residual: the live
+  glibc ledger, generated `RESULTS-rhel{6,7,8,9,10}.md`) and the verdict tier `t008`.
+* ✅ **Phase 4 — AWS SSM Agent** — the init-sensitive matrix `tests/aws_ssm-agent/*`
+  (`ssm-releases.json` of 207 versions, the **glibc + init_mode** install-test
+  matrix wiring Phase 2's `acq_init_run_args`, generated `RESULTS`) and the verdict
+  tier `t009`. **Suite green: 9 tiers, 213 passed, 0 failed.** Residual: the live
   install (L3) fills the empirical column on a container-egress host.
 
-Next: **Phase 4 — AWS SSM Agent** (`tests/aws_ssm-agent/*`: glibc **+ init_mode**,
-the S3 RPM, RESULTS). The full phase plan is in [SPEC.md](./SPEC.md) §10.
+Next: **Phase 5 — AWS ENA Driver** (`tests/aws_ena-driver/*`: a kernel-module
+**buildtest**, entitlement-gated plain-make, `needs-entitlement` recording). The
+full phase plan is in [SPEC.md](./SPEC.md) §10.
 
 ---
 
