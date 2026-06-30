@@ -90,7 +90,7 @@ bash-rhel-container-testsuite/
   README.md  README.ja.md          # bilingual, kept in sync
   SPEC.md  TESTING.md              # developer spec + testing guide
   CHANGELOG.md  .shellcheckrc
-  lib/                             # acquisition libraries        (Phase 2)
+  lib/                             # acquisition libraries        (Phase 2 ✅)
     acquire-rootfs.sh  ubi-pkgmgr.sh  epel.sh
   install-awscli.sh                # RHEL-adapted install scripts (Phase 3-5)
   install-ssm-agent.sh  install-ena-driver.sh
@@ -98,7 +98,7 @@ bash-rhel-container-testsuite/
     lib/{assert,mock,heredoc}.sh   # ported harness
     run-all.sh                     # single-entry L0-L2 runner
     t001_parse.sh  t002_shellcheck.sh             # L0 (present)
-    t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2 (Phase 2)
+    t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2 (Phase 2 ✅)
     aws_awscli-v2/  aws_ssm-agent/  aws_ena-driver/   # per-tool matrices (Phase 3-5)
 ```
 
@@ -124,17 +124,21 @@ host with container egress, once they land in Phases 3-5. See
 
 ## Status
 
-This is the **Phase 1 (scaffolding)** drop. Completed so far:
+This is the **Phase 2 (acquisition)** drop. Completed so far:
 
 * ✅ **Phase 0 — feasibility** — measured base facts (per-major glibc, anon repo
   sets, anon pull, entitled passthrough across all five majors, RHEL 7 fixed-tag
   signature, EPEL endpoints). measured during Phase 0.
 * ✅ **Phase 1 — scaffolding** — directory skeleton, ported `tests/lib/*`,
-  `run-all.sh`, `.shellcheckrc`, bilingual docs, and a **green L0 gate**
-  (2 tiers, 12 passed, 0 failed).
+  `run-all.sh`, `.shellcheckrc`, bilingual docs, and a green L0 gate.
+* ✅ **Phase 2 — acquisition** — `lib/acquire-rootfs.sh`, `lib/ubi-pkgmgr.sh`,
+  `lib/epel.sh` and their hermetic unit tiers `t003`-`t007`. **Suite green:
+  7 tiers, 129 passed, 0 failed.** The only residual is the **live pull (L3)**,
+  which runs in CI / on a container-egress host (the curl-only pull sequence is
+  unit-tested end-to-end with mocks).
 
-Next: **Phase 2 — acquisition** (`lib/acquire-rootfs.sh`, `lib/ubi-pkgmgr.sh`,
-`lib/epel.sh` and their hermetic unit tiers). The full phase plan is in
+Next: **Phase 3 — AWS CLI** (`tests/aws_awscli-v2/*`: release list, install-test
+matrix, glibc ledger, RESULTS, and the verdict tier). The full phase plan is in
 [SPEC.md](./SPEC.md) §10.
 
 ---

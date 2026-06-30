@@ -63,14 +63,15 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 12 passed, 0 skipped, 0 failed  (2 tiers, 0 tier-failure(s))
+SUITE: 129 passed, 0 skipped, 0 failed  (7 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
 
 ```bash
-bash tests/t001_parse.sh
-bash tests/t002_shellcheck.sh
+bash tests/t001_parse.sh        # L0 parse
+bash tests/t003_acquireunit.sh  # L1 acquisition unit
+bash tests/t007_epelresolve.sh  # L1 EPEL resolution unit
 ```
 
 The L3 integration matrices are **not** invoked by `run-all.sh`; run them
@@ -98,7 +99,33 @@ suppression must be a narrow, documented inline
 `# shellcheck disable=`/`source=` directive at the relevant statement, decided
 once in the diff with a rationale. `external-sources=true` +
 `source-path=SCRIPTDIR` make ShellCheck follow the `# shellcheck source=lib/...`
-directives rather than suppress SC1091.
+directives rather than suppress SC1091. As of r02 the **only** functional
+exemptions are: `# shellcheck disable=SC2016` on PATH-shadow mock behaviour
+strings (literal `$1`, expanded at the fake's runtime) and
+`# shellcheck disable=SC2317` on the two indirectly-invoked `epel_head_ok` test
+stubs in `t007`.
+
+---
+
+## L1 contract (current, r02)
+
+The Phase-2 unit tiers are hermetic: each sources the library under test (sourcing
+is side-effect-free) and drives every external command with a PATH-shadow mock,
+so results are host-independent and deterministic.
+
+* **`t003_acquireunit.sh`** - acquisition pure helpers (image/tag/ref maps,
+  `acq_select_amd64_digest`, OCI URL builders, init-mode args, secrets presence,
+  entitlement classification) plus one end-to-end curl-only pull with curl/tar
+  mocked (sequencing + spying).
+* **`t004_pkgmgrdetect.sh`** - the `dnf -> microdnf -> yum -> none` ladder driven
+  under a PATH restricted to the mock bin, the command-string builders, and
+  `pkgmgr_is_available` (asserts `dnf list --available`, never a bare repoquery).
+* **`t005_entitlementdetect.sh`** - the 3-step entitlement flow, including the
+  invariant that no classification grep runs before the makecache trigger.
+* **`t006_initmodemap.sh`** - the `none | systemd` invocation-arg mapping.
+* **`t007_epelresolve.sh`** - EPEL baseurl/gpgkey/repo-body resolution across all
+  majors, the EPEL 10 minor HEAD-probe branch (stubbed), and the RHEL 6 archive
+  special-case.
 
 ---
 
@@ -117,19 +144,31 @@ banner so each run records the environment it ran under.
 
 ---
 
-## Phase-1 recorded baseline
+## Recorded baseline (Phase 2, r02)
 
-The Phase-1 scaffold's L0 gate is green in the planning sandbox:
+The full suite is green in the planning sandbox:
 
 ```
 == bash-rhel-container-testsuite test suite ==
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
----- t001_parse.sh ----      ## RESULT pass=6 fail=0 skip=0
----- t002_shellcheck.sh ---- ## RESULT pass=6 fail=0 skip=0
-SUITE: 12 passed, 0 skipped, 0 failed  (2 tiers, 0 tier-failure(s))
+  podman:     (not installed - L3 uses the curl-only OCI fallback or SKIP)
+---- t001_parse.sh ----            ## RESULT pass=14 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=14 fail=0 skip=0
+---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
+---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
+---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
+---- t006_initmodemap.sh ----      ## RESULT pass=7  fail=0 skip=0
+---- t007_epelresolve.sh ----      ## RESULT pass=34 fail=0 skip=0
+SUITE: 129 passed, 0 skipped, 0 failed  (7 tiers, 0 tier-failure(s))
 ```
 
-**Fixed count = 6 shell files**, each `bash -n`-clean and ShellCheck-`style`-clean
-(`tests/lib/{assert,mock,heredoc}.sh`, `tests/run-all.sh`,
-`tests/t001_parse.sh`, `tests/t002_shellcheck.sh`).
+**L0 fixed count = 14 shell files**, each `bash -n`-clean and
+ShellCheck-`style`-clean: the 6 Phase-1 files (`tests/lib/{assert,mock,heredoc}.sh`,
+`tests/run-all.sh`, `tests/t001_parse.sh`, `tests/t002_shellcheck.sh`), the 3
+Phase-2 libraries (`lib/{acquire-rootfs,ubi-pkgmgr,epel}.sh`), and the 5 Phase-2
+unit tiers (`tests/t003`-`t007`).
+
+**Residual:** the live pull (L3) is not exercisable in the sandbox (no podman; the
+quay blob CDN is off-allowlist); it runs in CI / on a container-egress host. The
+curl-only pull *sequence* is unit-tested end-to-end with mocks in `t003`.

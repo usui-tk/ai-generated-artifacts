@@ -90,7 +90,7 @@ bash-rhel-container-testsuite/
   README.md  README.ja.md          # バイリンガル（常に同期）
   SPEC.md  TESTING.md              # 開発者向け仕様 + テストガイド
   CHANGELOG.md  .shellcheckrc
-  lib/                             # 取得用ライブラリ            (Phase 2)
+  lib/                             # 取得用ライブラリ            (Phase 2 ✅)
     acquire-rootfs.sh  ubi-pkgmgr.sh  epel.sh
   install-awscli.sh                # RHEL 適応版インストールスクリプト (Phase 3-5)
   install-ssm-agent.sh  install-ena-driver.sh
@@ -98,7 +98,7 @@ bash-rhel-container-testsuite/
     lib/{assert,mock,heredoc}.sh   # 移植済みハーネス
     run-all.sh                     # L0-L2 を一括実行するランナー
     t001_parse.sh  t002_shellcheck.sh             # L0（実装済み）
-    t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2（Phase 2）
+    t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2（Phase 2 ✅）
     aws_awscli-v2/  aws_ssm-agent/  aws_ena-driver/   # ツール別マトリクス (Phase 3-5)
 ```
 
@@ -125,18 +125,22 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 
 ## ステータス
 
-これは **Phase 1（スキャフォールディング）** のドロップです。ここまでの完了状況:
+これは **Phase 2（取得）** のドロップです。ここまでの完了状況:
 
 * ✅ **Phase 0 — 実現可能性調査** — 実測した基礎事実（メジャー別 glibc、匿名リポジトリ
   集合、匿名プル、5 メジャー全体の entitled パススルー、RHEL 7 の固定タグ署名、EPEL
   エンドポイント）。Phase 0 で実測。
 * ✅ **Phase 1 — スキャフォールディング** — ディレクトリ骨格、`tests/lib/*` の移植、
-  `run-all.sh`、`.shellcheckrc`、バイリンガル文書、そして**緑の L0 ゲート**
-  （2 階層、12 件成功、0 件失敗）。
+  `run-all.sh`、`.shellcheckrc`、バイリンガル文書、そして緑の L0 ゲート。
+* ✅ **Phase 2 — 取得（acquisition）** — `lib/acquire-rootfs.sh`、
+  `lib/ubi-pkgmgr.sh`、`lib/epel.sh` と、それらのハーミティックな単体階層
+  `t003`〜`t007`。**スイート緑: 7 階層、129 件成功、0 件失敗。** 唯一の残課題は
+  **ライブプル（L3）** で、これは CI / コンテナ egress 可能なホストで実行します
+  （curl-only プルの手順は mock で end-to-end に単体テスト済み）。
 
-次は **Phase 2 — 取得（acquisition）**（`lib/acquire-rootfs.sh`、
-`lib/ubi-pkgmgr.sh`、`lib/epel.sh` と、それらのハーミティックな単体階層）です。
-フェーズ計画の全体は [SPEC.md](./SPEC.md) §10 にあります。
+次は **Phase 3 — AWS CLI**（`tests/aws_awscli-v2/*`: リリース一覧、インストール検証
+マトリクス、glibc 台帳、RESULTS、判定階層）です。フェーズ計画の全体は
+[SPEC.md](./SPEC.md) §10 にあります。
 
 ---
 

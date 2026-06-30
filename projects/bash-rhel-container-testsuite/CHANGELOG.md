@@ -8,10 +8,6 @@ in `ai-generated-artifacts`.
 ## [Unreleased]
 
 ### Planned (per the design plan sec 16)
-- **Phase 2 - Acquisition:** `lib/acquire-rootfs.sh` (podman + curl-only OCI v2
-  anonymous fallback, 3-step entitlement detection, init-mode invocation, RHEL 7
-  fixed-tag), `lib/ubi-pkgmgr.sh`, `lib/epel.sh`, and the hermetic unit tiers
-  `t003`-`t007`.
 - **Phase 3 - AWS CLI:** `tests/aws_awscli-v2/*`, glibc ledger, RESULTS, verdict tier.
 - **Phase 4 - SSM:** `tests/aws_ssm-agent/*`, glibc + init_mode, S3 RPM, RESULTS.
 - **Phase 5 - ENA (E2'):** `tests/aws_ena-driver/*`, UEK-removed installer,
@@ -19,6 +15,53 @@ in `ai-generated-artifacts`.
 - **Phase 6 - EOL/constrained:** RHEL 7 (frozen, yum, fixed-tag) and RHEL 6
   (no anon repo; entitled `rhel-6-server`; EPEL archive-only) specifics.
 - **Phase 7 - Generalization:** tool-agnostic contract + classification for tool #2.
+
+## [r02] - 2026-07-01 - Phase 2: Acquisition
+
+Acquisition libraries and their hermetic unit tiers. All logic is unit-tested
+off-network; the actual live pulls (podman and curl-only OCI) are L3 and run in
+CI / on a container-egress host (see *Notes*).
+
+### Added
+- `lib/ubi-pkgmgr.sh` - package-manager detection (`dnf -> microdnf -> yum ->
+  none`), the makecache trigger / repolist / availability command builders, and
+  `pkgmgr_is_available` using `dnf list --available` / `repoquery
+  --latest-limit=1` (never a bare `repoquery`, per the sec 3.4 artifact).
+- `lib/acquire-rootfs.sh` - pure helpers (image/tag/ref maps with the RHEL 7
+  fixed-tag `7.9-88`, `acq_select_amd64_digest`, OCI v2 URL builders, init-mode
+  invocation args, entitlement classification by the `rhel-*` prefix) plus the
+  I/O wrappers: podman pull, the curl-only anonymous OCI v2 fallback (no token
+  step; `INSECURE_TLS` switch), and the 3-step entitlement detector. Sources
+  `ubi-pkgmgr.sh`.
+- `lib/epel.sh` - `dl.fedoraproject.org`-pinned EPEL (method B): baseurl / gpgkey
+  resolvers per major, EPEL 10 minor resolution with a rolling fallback, the
+  RHEL 6 archive special-case, the pinned `.repo` body emitter, and mockable
+  import/write/cleanup wrappers.
+- Unit tiers: `t003_acquireunit.sh` (acquisition pure helpers + a fully mocked
+  curl-only pull sequence), `t004_pkgmgrdetect.sh` (detection ladder via a
+  PATH-restricted shadow bin + availability mocks), `t005_entitlementdetect.sh`
+  (the 3-step flow, incl. the "no premature grep before the trigger" invariant),
+  `t006_initmodemap.sh` (init-mode arg mapping), `t007_epelresolve.sh` (EPEL
+  resolution incl. the 10-minor HEAD-probe branch, stubbed).
+
+### Removed
+- `lib/.gitkeep` (the directory now carries real libraries).
+
+### Verified
+- Full suite green in the planning sandbox: **7 tiers, 129 passed, 0 skipped,
+  0 failed**. L0 now covers **14 shell files** (6 + 3 libs + 5 tiers), each
+  `bash -n`-clean and ShellCheck-`style`-clean.
+- New L1 coverage: t003=33, t004=19, t005=8, t006=7, t007=34 assertions.
+
+### Notes
+- **Live pull (L3) is deferred to CI / a container-egress host.** The sandbox has
+  no podman and cannot reach the quay blob CDN, so both pull paths are validated
+  *hermetically* (the curl-only path end-to-end with curl/tar mocked); the real
+  pulls run where `*.quay.io` is reachable. This is the only residual of the
+  Phase-2 exit criterion and is tracked as the live-pull tail.
+- One documented inline exemption was added: `# shellcheck disable=SC2317` on the
+  two `epel_head_ok` test stubs in `t007` (indirectly invoked; SC2317's
+  reachability heuristic can't see the indirection).
 
 ## [r01] - 2026-07-01 - Phase 1: Scaffolding
 
