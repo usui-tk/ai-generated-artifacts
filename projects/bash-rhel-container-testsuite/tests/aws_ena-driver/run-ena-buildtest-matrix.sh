@@ -31,6 +31,7 @@ PROJ_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RELEASES="${SCRIPT_DIR}/ena-driver-releases.json"
 LEDGER="${SCRIPT_DIR}/buildtest-ledger.json"
 RESULTS_DIR="${SCRIPT_DIR}"
+INSTALL_SCRIPT="${PROJ_DIR}/install-aws_ena-driver.sh"   # kicked by run_matrix (--run)
 ENA_MIN="3.3.0"   # overridden below from releases.json min_version if present
 
 log() { printf '%s [ena-matrix] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -205,26 +206,45 @@ generate_results() {
 }
 
 # --- (b) L3 build loop (entitled container egress required) ------------------
+# result_field <result-json-line> <key> : extract a value from an install
+# script's single-line [installtest][result] JSON (string, bool, or number).
+# Pure, jq-free. Reuse-by-copy across the tool matrices.
+result_field() {
+  local line="$1" key="$2" v
+  v="$(printf '%s' "${line}" | grep -oE "\"${key}\":\"[^\"]*\"" | head -1 | sed 's/^[^:]*://; s/\"//g')"
+  if [ -z "${v}" ]; then
+    v="$(printf '%s' "${line}" | grep -oE "\"${key}\":(true|false|[0-9]+)" | head -1 | sed 's/^[^:]*://')"
+  fi
+  printf '%s' "${v}"
+}
+
 run_matrix() {
   command -v podman >/dev/null 2>&1 || { log "ERROR: --run needs podman (L3)"; return 2; }
+  [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver built repo
-  local mn; mn="$(releases_min)"
+  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref out line built
   for major in ${majors}; do
     ver="$(releases_max)"
     repo="$(ena_kdevel_repo "${major}")"
+    ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
     for ent in ${ents}; do
-      if [ "${ent}" = "anonymous" ]; then
-        built=false   # no kernel-devel -> needs-entitlement (no build attempted)
-      else
-        # entitled: acquire rootfs with secrets, install kernel-devel/gcc/make from "${repo}",
-        # fetch ena_linux_<ver> source, then:
-        #   make -C /usr/src/kernels/$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-devel) M=<src> modules
-        built=false   # filled by the live build on an entitled host
-      fi
-      printf '{"osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"verdict":"%s","load_tier":"%s"}\n' \
-        "${major}" "${ver}" "${ent}" "${repo}" "$(ena_build_plan "${ent}" 0)" "${built}" \
+      plan="$(ena_build_plan "${ent}" 0)"
+      # KICK install-aws_ena-driver.sh in ENA_INSTALLTEST mode. anonymous -> the
+      # script does not build and emits built=false (verdict needs-entitlement);
+      # entitled -> it installs kernel-devel from "${repo}", fetches ena_linux_<ver>,
+      # and builds ena.ko out of tree. Load is never attempted (L4).
+      out="$(podman run --rm \
+              -v "${INSTALL_SCRIPT}:/install-aws_ena-driver.sh:ro" \
+              -e ENA_INSTALLTEST=1 -e "ENA_VERSION=${ver}" -e "ENA_ENTITLEMENT=${ent}" \
+              -e "ENA_BUILD_PLAN=${plan}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
+              "${ref}" /bin/bash /install-aws_ena-driver.sh 2>/dev/null || true)"
+      line="$(printf '%s
+' "${out}" | grep -F '[aws_ena-driver][installtest][result]' | tail -1)"
+      built="$(result_field "${line}" built)"; [ "${built}" = "true" ] || built=false
+      printf '{"osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"verdict":"%s","load_tier":"%s"}
+' \
+        "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" \
         "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)"
     done
   done

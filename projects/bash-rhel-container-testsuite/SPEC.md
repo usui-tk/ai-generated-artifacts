@@ -178,9 +178,20 @@ units and prints one `## RESULT pass/fail/skip` summary. **L3 is manual / CI.**
 
 Each tool folder `tests/<vendor>_<tool>/` implements the same five-part contract:
 
+* **(0)** a project-root `install-<vendor>_<tool>.sh` - real-host-usable installer
+  with a test mode (`<TOOL>_INSTALLTEST=1`) that installs/builds in a disposable
+  rootfs, smoke-checks, and emits one `[<vendor>_<tool>][installtest][result] {json}`
+  line of raw facts. The matrix **kicks this script with parameters**; install
+  logic is never inlined in the matrix. (Name matches the test folder.) It also
+  carries **per-RHEL-major version pins** - the version validated for each major,
+  used as the production default and resolved in `resolve_version` (an explicit
+  `<TOOL>_VERSION` wins; the matrix passes one in test mode). Initial pins: AWS CLI
+  RHEL 6 `2.17.49` (below the v2 glibc-2.17 floor) else latest; SSM RHEL 6
+  `3.3.3598.0` (compliance floor) else latest; ENA RHEL 6 `2.9.1` else `2.17.0`.
 * **(a)** `list-<tool>-releases.sh` -> `<tool>-releases.json`.
 * **(b)** `run-<tool>-{install,build}test-matrix.sh` - per `(OS major, version[, init_mode])`
-  acquire/reuse, install/build in a test mode, smoke-check, record.
+  acquire/reuse, **kick the install script** in its test mode, parse the `[result]`,
+  apply the verdict, record.
 * **(c)** `<tool>-…-ledger.json` - append/dedup; `env_*` measured fields (glibc,
   kernel, **entitlement**, **init_mode**) kept separate from `compat_*` derived
   fields.
@@ -192,12 +203,13 @@ ENA -> kernel + entitlement.
 
 **Contract enforcement (Phase 7).** The five-part contract is machine-checked:
 `tests/conformance/check-tool-contract.sh` walks every `tests/<vendor>_<tool>/`
-and verifies (a)-(e) are present (lister + `*-releases.json`; a matrix with
-`--generate-results` and a `*_verdict()` helper; a `"results"` ledger; the five
-`RESULTS-rhel<N>.md`; and a tier that sources the matrix). `tests/t013_toolcontract.sh`
-fails the suite if any tool is non-conformant. Adding a non-AWS tool #2 is then a
-fill-in-the-blanks exercise - see [`ADDING-A-TOOL.md`](./ADDING-A-TOOL.md)
-([日本語](./ADDING-A-TOOL.ja.md)).
+and verifies (0)-(e) are present (the **root `install-<vendor>_<tool>.sh` exists,
+is executable, and is kicked by the matrix**; lister + `*-releases.json`; a matrix
+with `--generate-results` and a `*_verdict()` helper; a `"results"` ledger; the
+five `RESULTS-rhel<N>.md`; and a tier that sources the matrix).
+`tests/t013_toolcontract.sh` fails the suite if any tool is non-conformant. Adding
+a non-AWS tool #2 is then a fill-in-the-blanks exercise - see
+[`ADDING-A-TOOL.md`](./ADDING-A-TOOL.md) ([日本語](./ADDING-A-TOOL.ja.md)).
 
 ### 7.1 Per-tool notes (initial three)
 

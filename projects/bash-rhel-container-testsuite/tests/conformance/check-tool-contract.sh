@@ -57,11 +57,29 @@ contract_dir_missing() {
   printf '%s' "${miss# }"
 }
 
+# contract_install_missing <install_script> <matrix> : tokens for the root
+# install-script layer (Phase 8). The project-root install-<vendor>_<tool>.sh
+# must exist and be executable, and the matrix must KICK it (reference its
+# basename). Empty result = conformant. Pure file/grep checks.
+contract_install_missing() {
+  local inst="${1:-}" matrix="${2:-}" miss=""
+  if [ ! -f "${inst}" ]; then
+    miss="${miss} install-script"
+  elif [ ! -x "${inst}" ]; then
+    miss="${miss} install-script-exec"
+  fi
+  if [ -f "${matrix}" ] && [ -f "${inst}" ]; then
+    grep -q "$(basename "${inst}")" "${matrix}" || miss="${miss} matrix-kick"
+  fi
+  printf '%s' "${miss# }"
+}
+
 # ---- the rest runs only when executed (not when sourced for unit tests) ------
 [ "${CONTRACT_LIB_ONLY:-0}" = "1" ] && return 0 2>/dev/null
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJ_ROOT="$(cd "${TESTS_DIR}/.." && pwd)"
 
 n_tools=0 n_ok=0 n_bad=0
 for d in "${TESTS_DIR}"/*_*/; do
@@ -77,6 +95,9 @@ for d in "${TESTS_DIR}"/*_*/; do
     if grep -lqs -- "${mbase}" "${TESTS_DIR}"/t*.sh 2>/dev/null; then tier_ok=yes; fi
   fi
   [ "${tier_ok}" = "yes" ] || missing="${missing:+${missing} }verdict-tier"
+  # the root install-script layer: install-<tool>.sh exists + the matrix kicks it
+  imiss="$(contract_install_missing "${PROJ_ROOT}/install-${tool}.sh" "${matrix}")"
+  [ -n "${imiss}" ] && missing="${missing:+${missing} }${imiss}"
   if [ -z "${missing}" ]; then
     printf '[contract][result] {"tool":"%s","status":"ok"}\n' "${tool}"
     printf '  %-18s OK\n' "${tool}" >&2

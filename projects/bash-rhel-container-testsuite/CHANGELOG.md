@@ -11,6 +11,58 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r08] - 2026-07-01 - root install-script layer with per-OS version pins (matrices kick parameterized installers)
+
+Restores the model project's two-layer structure, which r01-r07 had diverged from:
+the **install logic now lives in project-root `install-<vendor>_<tool>.sh` scripts**
+(real-host usable, with a test mode), and each matrix is a thin driver that **kicks
+the install script with parameters** and records the `[installtest][result]` it
+emits - instead of inlining the install in the matrix. Verdict logic stays
+single-source in the matrices (the install scripts emit raw facts only).
+
+### Added
+- `install-aws_awscli-v2.sh` - install AWS CLI v2 (production + `AWSCLI_INSTALLTEST`).
+  Env: `AWSCLI_VERSION`, `INSECURE_TLS`. Emits `[aws_awscli-v2][installtest][result]`.
+- `install-aws_ssm-agent.sh` - install the SSM S3 RPM (production + `SSM_INSTALLTEST`),
+  init-mode aware. Env: `SSM_VERSION`, `SSM_INIT_MODE`, `INSECURE_TLS`. Emits
+  `[aws_ssm-agent][installtest][result]`.
+- `install-aws_ena-driver.sh` - E2' entitlement-gated `ena.ko` build (production
+  `modules_install`/`depmod` + `ENA_INSTALLTEST`). UEK removed; stock kernel;
+  load never attempted (L4). Env: `ENA_VERSION`, `ENA_ENTITLEMENT`,
+  `ENA_BUILD_PLAN`, `INSECURE_TLS`. Emits `[aws_ena-driver][installtest][result]`.
+- Script names **match the test folders** (`tests/aws_awscli-v2/` ->
+  `install-aws_awscli-v2.sh`, etc.).
+- **Per-RHEL-major version pins** (mirrors the model project): each install script
+  pins the version the matrix validated for each major as the **production
+  default** (an explicit `<TOOL>_VERSION`, which the matrix passes in test mode,
+  overrides it), resolved against the running OS in `resolve_version`:
+  - AWS CLI v2: RHEL 6 -> `2.17.49` (last build below the v2 glibc-2.17 floor;
+    RHEL 6 glibc 2.12); RHEL 7-10 -> `latest`.
+  - SSM Agent: RHEL 6 -> `3.3.3598.0` (full-feature compliance floor; EL6 known-
+    good); RHEL 7-10 -> `latest`.
+  - ENA driver: RHEL 6 -> `2.9.1` (builds on the old EL6 kernel/toolchain);
+    RHEL 7-10 -> `2.17.0`.
+- `tests/t015_installpins.sh` - L1: sources each install script with
+  `<TOOL>_LIB_ONLY=1` (defines helpers + pins, installs nothing), fakes the OS
+  major, and asserts `resolve_version` picks the right pin and that an explicit
+  version overrides it. A dropped/wrong pin fails the suite. 17 assertions.
+
+### Changed
+- The three matrices' `run_matrix` (`--run`, L3) now bind-mount and **kick the
+  install script** in the rootfs (`podman run -v ... -e <TOOL>_INSTALLTEST=1 ...`),
+  parse the `[result]` line with a new pure `result_field` helper, apply the
+  unchanged verdict helper, and record. The pure helpers and `--generate-results`
+  are untouched (t008-t010 still green).
+- The tool contract now **gates the install-script layer**: a new pure
+  `contract_install_missing` in `check-tool-contract.sh` requires
+  `install-<tool>.sh` to exist, be executable, and be referenced (kicked) by the
+  matrix. `t013_toolcontract.sh` asserts it; a non-conformant tool fails the suite.
+
+### Verified
+- Full suite green: **15 tiers, 415 passed, 0 skipped, 0 failed**. L0 covers
+  **36 shell files** (the 3 install scripts auto-globbed and ShellCheck-`style`-clean).
+  All LF. `check-tool-contract.sh`: 3 tools, 3 ok.
+
 ## [r07] - 2026-07-01 - Phase 7: generalization (tool-agnostic contract + classification)
 
 Phase 7 makes the framework **tool-agnostic** and ready for a non-AWS tool #2: the

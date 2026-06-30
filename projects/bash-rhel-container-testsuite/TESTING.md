@@ -148,14 +148,22 @@ so results are host-independent and deterministic.
   single source of truth: `osp_image == acq_image_for_major`,
   `osp_pull_tag == acq_tag_for_major`, `osp_epel_is_live` inverse of
   `epel_is_archive`, and `osp_kdevel_repo == ena_kdevel_repo`.
-* **`t013_toolcontract.sh`** (Phase 7) - L2: loads `contract_dir_missing` from
-  `tests/conformance/check-tool-contract.sh` (`CONTRACT_LIB_ONLY=1`), asserts the
-  three shipped tools conform to the §10 (a-e) contract, that a synthetic
-  incomplete dir reports its gaps, and that the checker exits 0.
+* **`t013_toolcontract.sh`** (Phase 7) - L2: loads `contract_dir_missing` and
+  `contract_install_missing` from `tests/conformance/check-tool-contract.sh`
+  (`CONTRACT_LIB_ONLY=1`), asserts the three shipped tools conform to the §10
+  (0)+(a-e) contract - including the **root `install-<tool>.sh` exists and the
+  matrix kicks it** - that synthetic incomplete cases report their gaps, and that
+  the checker exits 0.
 * **`t014_pkgavail.sh`** (Phase 7) - the `lib/pkg-availability.sh` classification
   canon (`pkgavail_class`, `pkgavail_needs_entitlement`, `pkgavail_anonymous_status`,
   `pkgavail_over_network`, `pkgavail_tool_source`) incl. the end-to-end
   source -> class -> anonymous-status chain per tool.
+* **`t015_installpins.sh`** (r08) - the per-RHEL-major version pins in the root
+  install scripts. Sources each `install-aws_<tool>.sh` with `<TOOL>_LIB_ONLY=1`
+  (defines helpers + pins, installs nothing), fakes the OS major, and asserts
+  `resolve_version` resolves to the validated pin (RHEL 6: awscli `2.17.49`, ssm
+  `3.3.3598.0`, ena `2.9.1`; RHEL 7-10 latest/`2.17.0`) and that an explicit
+  `<TOOL>_VERSION` overrides it.
 
 ---
 
@@ -174,7 +182,7 @@ banner so each run records the environment it ran under.
 
 ---
 
-## Recorded baseline (Phase 7, r07)
+## Recorded baseline (r08)
 
 The full suite is green in the planning sandbox:
 
@@ -183,8 +191,8 @@ The full suite is green in the planning sandbox:
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
   podman:     (not installed - L3 uses the curl-only OCI fallback or SKIP)
----- t001_parse.sh ----            ## RESULT pass=32 fail=0 skip=0
----- t002_shellcheck.sh ----       ## RESULT pass=32 fail=0 skip=0
+---- t001_parse.sh ----            ## RESULT pass=36 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=36 fail=0 skip=0
 ---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
 ---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
@@ -195,12 +203,13 @@ The full suite is green in the planning sandbox:
 ---- t010_enaverdict.sh ----       ## RESULT pass=27 fail=0 skip=0
 ---- t011_enaverify.sh ----        ## RESULT pass=17 fail=0 skip=0
 ---- t012_osprofile.sh ----        ## RESULT pass=58 fail=0 skip=0
----- t013_toolcontract.sh ----     ## RESULT pass=13 fail=0 skip=0
+---- t013_toolcontract.sh ----     ## RESULT pass=18 fail=0 skip=0
 ---- t014_pkgavail.sh ----         ## RESULT pass=33 fail=0 skip=0
-SUITE: 385 passed, 0 skipped, 0 failed  (14 tiers, 0 tier-failure(s))
+---- t015_installpins.sh ----      ## RESULT pass=17 fail=0 skip=0
+SUITE: 415 passed, 0 skipped, 0 failed  (15 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 32 shell files**, each `bash -n`-clean and
+**L0 fixed count = 36 shell files** (incl. the 3 root `install-aws_*.sh`), each `bash -n`-clean and
 ShellCheck-`style`-clean: the 6 Phase-1 files, the 5 libraries
 (`lib/{acquire-rootfs,ubi-pkgmgr,epel,os-profile,pkg-availability}.sh`), the 5
 Phase-2 unit tiers (`tests/t003`-`t007`), the seven verdict/verify/profile/contract

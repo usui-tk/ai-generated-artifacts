@@ -95,8 +95,10 @@ bash-rhel-container-testsuite/
     acquire-rootfs.sh  ubi-pkgmgr.sh  epel.sh
     os-profile.sh                    # canonical per-major OS profile (Phase 6 ✅)
     pkg-availability.sh              # package-availability classification (Phase 7 ✅)
-  install-awscli.sh                # RHEL-adapted install scripts (Phase 3-5)
-  install-ssm-agent.sh  install-ena-driver.sh
+  install-aws_awscli-v2.sh         # root install scripts: real-host usable +    (r08 ✅)
+  install-aws_ssm-agent.sh         #   a test mode; named to match the test folders;
+  install-aws_ena-driver.sh        #   the matrices kick these with parameters;
+                                   #   each pins the per-RHEL-major validated version
   tests/
     lib/{assert,mock,heredoc}.sh   # ported harness
     run-all.sh                     # single-entry L0-L2 runner
@@ -173,9 +175,11 @@ This is the final **Phase 7 (generalization)** drop — all seven phases complet
   `tests/conformance/check-tool-contract.sh` machine-enforces the SPEC §10 (a–e)
   contract (tier `t013`), `lib/pkg-availability.sh` is the §12 classification
   canon (tier `t014`), and [ADDING-A-TOOL.md](./ADDING-A-TOOL.md) is the bilingual
-  guide for tool #2. **Suite green: 14 tiers, 385 passed, 0 failed.**
+  guide for tool #2. **Suite green: 15 tiers, 415 passed, 0 failed.**
 
-**All seven implementation phases are complete.** What remains is the live
+**All seven implementation phases are complete** (plus r08, which restored the
+model's two-layer structure: project-root `install-aws_*.sh` installers - each with
+per-RHEL-major validated version pins - that the matrices kick with parameters). What remains is the live
 empirical fill — R5 (live pull), R6 (AWS CLI install), R7 (SSM install, both init
 modes), R8 (ENA build on an entitled host; load is L4) — which runs on a
 container-egress / entitled / Nitro host. The models, generators, verifiers, and

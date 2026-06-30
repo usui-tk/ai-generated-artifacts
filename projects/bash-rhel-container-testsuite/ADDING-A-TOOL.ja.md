@@ -30,15 +30,27 @@
 `pkgavail_anonymous_status "$(pkgavail_class "$(pkgavail_tool_source <name>)")"`
 で「匿名時に何が起きるか」を一発で判定できます。
 
-## 3. 契約を実装（SPEC §10 a〜e）
+## 3. 契約を実装（SPEC §10、(0) ＋ a〜e）
+
+- **(0)** プロジェクト直下の **`install-<vendor>_<tool>.sh`**（test フォルダ名と一致）
+  … 実ホストでも使えるインストーラ。テストモード（`<TOOL>_INSTALLTEST=1`）では
+  使い捨て rootfs で install/build → smoke → `[<vendor>_<tool>][installtest][result]`
+  JSON を1行出力（**生の事実**: ran／installed／built＋文脈）。本番モードは実ホストに
+  インストール。**RHEL メジャー別のバージョンピン**（各メジャーの検証済み版）を持ち、
+  `resolve_version` が本番既定として解決（明示の `<TOOL>_VERSION` が優先、テスト時は
+  マトリクスが明示指定）。ピンを単体検証できるよう `<TOOL>_LIB_ONLY=1` ガードを付与
+  （`tests/t015_installpins.sh` 参照）。
 
 `tests/<vendor>_<tool>/` を作成します:
 
 - **(a)** `list-<tool>-releases.sh` → 決定的な `<tool>-releases.json`
   （認証不要のソースからバージョン列挙。reuse-by-copy のヘルパーを持たせる）。
 - **(b)** `run-<tool>-{install,build}test-matrix.sh`。**カラム 0 の純粋ヘルパー**
-  （バージョン比較・メジャー別マップ・スコープ判定・`*_verdict()`）、`--run`(L3:
-  acquire → install/build → smoke → record)、ハーミティックな `--generate-results`。
+  （バージョン比較・メジャー別マップ・スコープ判定・`*_verdict()`）、`--run`(L3) は
+  **直下の install スクリプトをキック**（`podman run -v <install-script>:... -e
+  <TOOL>_INSTALLTEST=1 -e <PARAMS> <ref> ...`）、`result_field` で `[result]` を
+  パース → verdict 適用 → 記録。ハーミティックな `--generate-results`。install
+  ロジックをマトリクスに直書きしないこと。
 - **(c)** `<tool>-…-ledger.json`。スキーマ付きで初期は `"results": []`。
 - **(d)** `RESULTS-rhel{6,7,8,9,10}.md`。`--generate-results` で生成（手編集禁止）。
 - **(e)** `tests/t0NN_<tool>verdict.sh`。マトリクスの純粋ヘルパーを名前で読み込み、
@@ -55,6 +67,7 @@ bash tests/run-all.sh                              # 新階層を含む全階層
 bash tests/conformance/check-tool-contract.sh      # 契約適合
 ```
 
-`check-tool-contract.sh` が新ツールを `ok` と表示し、`t013` が緑のままであること。
-各スクリプトは ShellCheck `style` クリーン（`printf` 内の Markdown バックティックは
-`\140`）、全ファイル LF を維持します。
+`check-tool-contract.sh` が新ツールを `ok` と表示し（直下の
+`install-<vendor>_<tool>.sh` が存在・実行可能で、マトリクスが**キック**することを要求）、
+`t013` が緑のままであること。各スクリプトは ShellCheck `style` クリーン
+（`printf` 内の Markdown バックティックは `\140`）、全ファイル LF を維持します。

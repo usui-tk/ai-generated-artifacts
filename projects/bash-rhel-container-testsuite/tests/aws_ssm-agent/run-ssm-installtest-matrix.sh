@@ -30,7 +30,7 @@ PROJ_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RELEASES="${SCRIPT_DIR}/ssm-releases.json"
 LEDGER="${SCRIPT_DIR}/ssm-installtest-ledger.json"
 RESULTS_DIR="${SCRIPT_DIR}"
-RPM_BASEURL="${SSM_RPM_BASEURL:-https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent}"
+INSTALL_SCRIPT="${PROJ_DIR}/install-aws_ssm-agent.sh"   # kicked by run_matrix (--run)
 SSM_MIN="3.3.3598.0"
 
 log() { printf '%s [ssm-matrix] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -199,31 +199,44 @@ generate_results() {
 }
 
 # --- (b) L3 install-test loop (container egress required) ---------------------
+# result_field <result-json-line> <key> : extract a value from an install
+# script's single-line [installtest][result] JSON (string, bool, or number).
+# Pure, jq-free. Reuse-by-copy across the tool matrices.
+result_field() {
+  local line="$1" key="$2" v
+  v="$(printf '%s' "${line}" | grep -oE "\"${key}\":\"[^\"]*\"" | head -1 | sed 's/^[^:]*://; s/\"//g')"
+  if [ -z "${v}" ]; then
+    v="$(printf '%s' "${line}" | grep -oE "\"${key}\":(true|false|[0-9]+)" | head -1 | sed 's/^[^:]*://')"
+  fi
+  printf '%s' "${v}"
+}
+
 run_matrix() {
   command -v podman >/dev/null 2>&1 || { log "ERROR: --run needs podman (L3)"; return 2; }
+  [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" modes="${INITMODES:-none systemd}" major mode ref ver rpm out installed ran
+  local majors="${OSMAJORS:-10 9 8 7 6}" modes="${INITMODES:-none systemd}" major mode ref ver out line installed ran svc
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}"; continue; }
     ver="$(releases_max)"
-    rpm="${RPM_BASEURL}/${ver}/linux_amd64/amazon-ssm-agent.rpm"
     for mode in ${modes}; do
-      # acq_init_run_args builds the engine invocation for this init mode (Phase 2)
-      if [ "${mode}" = "systemd" ]; then
-        out="$(podman run -d "${ref}" 2>/dev/null || true)"   # boots /sbin/init
-        # (install + systemctl enable/start would exec into the container here)
-        installed=false; ran=false
-      else
-        out="$(podman run --rm "${ref}" /bin/bash -lc "
-          curl -fsSL '${rpm}' -o /tmp/ssm.rpm && (rpm -i /tmp/ssm.rpm || dnf -y install /tmp/ssm.rpm || yum -y install /tmp/ssm.rpm) >/dev/null 2>&1
-          amazon-ssm-agent -version 2>/dev/null && echo RAN=yes || echo RAN=no
-        " 2>/dev/null || true)"
-        installed=true
-        if printf '%s' "${out}" | grep -q 'RAN=yes'; then ran=true; else ran=false; fi
-      fi
-      printf '{"osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"verdict":"%s"}\n' \
-        "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" \
+      # KICK install-aws_ssm-agent.sh in SSM_INSTALLTEST mode. For systemd the
+      # container must boot /sbin/init first; acq_init_run_args (Phase 2) builds
+      # that invocation. The install script installs the RPM, runs
+      # `amazon-ssm-agent -version`, and (systemd) `systemctl enable`.
+      out="$(podman run --rm \
+              -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro" \
+              -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
+              "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>/dev/null || true)"
+      line="$(printf '%s
+' "${out}" | grep -F '[aws_ssm-agent][installtest][result]' | tail -1)"
+      installed="$(result_field "${line}" installed)"; [ "${installed}" = "true" ] || installed=false
+      ran="$(result_field "${line}" ran)";             [ "${ran}" = "true" ] || ran=false
+      svc="$(result_field "${line}" service_enabled)"; [ "${svc}" = "true" ] || svc=false
+      printf '{"osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"verdict":"%s"}
+' \
+        "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" "${svc}" \
         "$(ssm_verdict "${installed}" "${ran}" "${mode}")"
     done
   done

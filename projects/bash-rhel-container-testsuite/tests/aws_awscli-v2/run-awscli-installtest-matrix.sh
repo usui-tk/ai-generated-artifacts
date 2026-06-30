@@ -32,8 +32,7 @@ PROJ_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 RELEASES="${SCRIPT_DIR}/awscli-releases.json"
 LEDGER="${SCRIPT_DIR}/awscli-installtest-ledger.json"
 RESULTS_DIR="${SCRIPT_DIR}"
-ZIP_BASEURL="${AWSCLI_ZIP_BASEURL:-https://awscli.amazonaws.com}"
-ZIP_NAME="awscli-exe-linux-x86_64"
+INSTALL_SCRIPT="${PROJ_DIR}/install-aws_awscli-v2.sh"   # kicked by run_matrix (--run)
 
 log() { printf '%s [awscli-matrix] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
@@ -229,28 +228,44 @@ generate_results() {
 # One disposable container per (major,version): acquire rootfs, install the AWS
 # CLI v2 bundle, smoke `aws --version`, emit a [result] JSON, append to LEDGER.
 # Deferred to CI / a podman+egress host (no podman or bundle CDN in the sandbox).
+# result_field <result-json-line> <key> : extract a value from an install
+# script's single-line [installtest][result] JSON (string, bool, or number).
+# Pure, jq-free; the matrix uses it to read the raw facts the install script
+# emits, then applies the verdict helper. Reuse-by-copy across the tool matrices.
+result_field() {
+  local line="$1" key="$2" v
+  v="$(printf '%s' "${line}" | grep -oE "\"${key}\":\"[^\"]*\"" | head -1 | sed 's/^[^:]*://; s/\"//g')"
+  if [ -z "${v}" ]; then
+    v="$(printf '%s' "${line}" | grep -oE "\"${key}\":(true|false|[0-9]+)" | head -1 | sed 's/^[^:]*://')"
+  fi
+  printf '%s' "${v}"
+}
+
 run_matrix() {
   command -v podman >/dev/null 2>&1 || { log "ERROR: --run needs podman (L3)"; return 2; }
+  [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref zip out ran rjson
+  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref out line ran iv
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
     while IFS= read -r ver; do
       [ -n "${ver}" ] || continue
       awscli_in_scope "${ver}" 0 || continue
-      zip="${ZIP_BASEURL}/${ZIP_NAME}-${ver}.zip"
-      out="$(podman run --rm "${ref}" /bin/bash -lc "
-        set -e
-        curl -fsSL '${zip}' -o /tmp/a.zip && cd /tmp && (unzip -q a.zip || tar xf a.zip) 2>/dev/null
-        ./aws/install -i /tmp/awscli -b /tmp/bin >/dev/null 2>&1 || true
-        /tmp/bin/aws --version 2>/dev/null && echo RAN=yes || echo RAN=no
-      " 2>/dev/null || true)"
-      if printf '%s' "${out}" | grep -q 'RAN=yes'; then ran=true; else ran=false; fi
-      rjson="$(printf '{"osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"verdict":"%s"}' \
-        "${major}" "${ver}" "$(rhel_glibc "${major}")" "${ran}" \
-        "$(awscli_verdict "$(rhel_glibc "${major}")" "$(awscli_min_glibc "${ver}")" "${ran}")")"
-      printf '%s\n' "${rjson}"   # the appender/dedup into LEDGER runs in CI
+      # KICK install-aws_awscli-v2.sh in AWSCLI_INSTALLTEST mode inside the rootfs;
+      # it installs + smokes `aws --version` and emits one [result] line we parse.
+      out="$(podman run --rm \
+              -v "${INSTALL_SCRIPT}:/install-aws_awscli-v2.sh:ro" \
+              -e AWSCLI_INSTALLTEST=1 -e "AWSCLI_VERSION=${ver}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
+              "${ref}" /bin/bash /install-aws_awscli-v2.sh 2>/dev/null || true)"
+      line="$(printf '%s
+' "${out}" | grep -F '[aws_awscli-v2][installtest][result]' | tail -1)"
+      ran="$(result_field "${line}" ran)"; [ "${ran}" = "true" ] || ran=false
+      iv="$(result_field "${line}" installed_version)"
+      printf '{"osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"installed_version":"%s","verdict":"%s"}
+' \
+        "${major}" "${ver}" "$(rhel_glibc "${major}")" "${ran}" "${iv}" \
+        "$(awscli_verdict "$(rhel_glibc "${major}")" "$(awscli_min_glibc "${ver}")" "${ran}")"
     done < <(releases_versions || true)
   done
 }

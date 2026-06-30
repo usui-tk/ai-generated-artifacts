@@ -94,8 +94,10 @@ bash-rhel-container-testsuite/
     acquire-rootfs.sh  ubi-pkgmgr.sh  epel.sh
     os-profile.sh                    # メジャー別 OS プロファイルの正典（Phase 6 ✅）
     pkg-availability.sh              # パッケージ可用性分類（Phase 7 ✅）
-  install-awscli.sh                # RHEL 適応版インストールスクリプト (Phase 3-5)
-  install-ssm-agent.sh  install-ena-driver.sh
+  install-aws_awscli-v2.sh         # 直下のインストールスクリプト: 実ホストでも使用可＋  (r08 ✅)
+  install-aws_ssm-agent.sh         #   テストモード付き。test フォルダ名と一致し、
+  install-aws_ena-driver.sh        #   マトリクスがパラメータ付きでキックする。
+                                   #   各々が RHEL メジャー別の検証済みバージョンをピン留め
   tests/
     lib/{assert,mock,heredoc}.sh   # 移植済みハーネス
     run-all.sh                     # L0-L2 を一括実行するランナー
@@ -173,9 +175,11 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
   `tests/conformance/check-tool-contract.sh` が SPEC §10 (a〜e) 契約を機械的に強制し
   （階層 `t013`）、`lib/pkg-availability.sh` が §12 分類の正典（階層 `t014`）、
   [ADDING-A-TOOL.md](./ADDING-A-TOOL.md) が 2 つ目のツール向けのバイリンガル手順です。
-  **スイート緑: 14 階層、385 件成功、0 件失敗。**
+  **スイート緑: 15 階層、415 件成功、0 件失敗。**
 
-**全 7 実装フェーズが完了しました。** 残るはライブの実測埋め — R5（ライブプル）、
+**全 7 実装フェーズが完了しました**（さらに r08 でモデルの2層構成を復元: 直下の
+`install-aws_*.sh` インストーラ（各々が RHEL メジャー別の検証済みバージョンをピン留め）を
+マトリクスがパラメータ付きでキック）。残るはライブの実測埋め — R5（ライブプル）、
 R6（AWS CLI install）、R7（SSM install、両 init モード）、R8（entitled ホストでの ENA
 ビルド。load は L4）— で、egress 可能／entitled／Nitro ホストで実行します。モデル・
 生成器・verifier・ツール契約はサンドボックス内でハーミティックに緑です。詳細は

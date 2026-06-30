@@ -30,7 +30,17 @@ Decide where the tool's primary input comes from and add it to
 `pkgavail_anonymous_status "$(pkgavail_class "$(pkgavail_tool_source <name>)")"`
 then answers "what happens anonymously?" in one call.
 
-## 3. Implement the contract (SPEC §10 a–e)
+## 3. Implement the contract (SPEC §10, (0) + a–e)
+
+- **(0)** a project-root **`install-<vendor>_<tool>.sh`** (name matches the test
+  folder) — a real-host-usable installer with a test mode (`<TOOL>_INSTALLTEST=1`)
+  that installs/builds in a disposable rootfs, smoke-checks, and emits one
+  `[<vendor>_<tool>][installtest][result] {json}` line of **raw facts** (ran /
+  installed / built + context). Production mode installs on the real host. Carry
+  **per-RHEL-major version pins** (the validated version per major) resolved in
+  `resolve_version` as the production default; an explicit `<TOOL>_VERSION` wins,
+  and the matrix passes one in test mode. Add a `<TOOL>_LIB_ONLY=1` guard so the
+  pins are unit-testable (see `tests/t015_installpins.sh`).
 
 Create `tests/<vendor>_<tool>/` with:
 
@@ -38,8 +48,10 @@ Create `tests/<vendor>_<tool>/` with:
   (enumerate versions from an auth-free source; carry reuse-by-copy helpers).
 - **(b)** `run-<tool>-{install,build}test-matrix.sh` with **column-0 pure helpers**
   (a version compare, a per-major map, an in-scope filter, and a `*_verdict()`),
-  a `--run` L3 loop (acquire → install/build → smoke → record), and a hermetic
-  `--generate-results`.
+  a `--run` L3 loop that **kicks the root install script** (`podman run -v
+  <install-script>:... -e <TOOL>_INSTALLTEST=1 -e <PARAMS> <ref> ...`), parses the
+  `[result]` with `result_field`, applies the verdict, and records; plus a
+  hermetic `--generate-results`. Install logic is never inlined here.
 - **(c)** `<tool>-…-ledger.json` with a schema'd, initially-empty `"results": []`.
 - **(d)** `RESULTS-rhel{6,7,8,9,10}.md` produced by `--generate-results`
   (never hand-edited).
@@ -57,6 +69,7 @@ bash tests/run-all.sh                              # all tiers incl. the new one
 bash tests/conformance/check-tool-contract.sh      # contract conformance
 ```
 
-`check-tool-contract.sh` must list the new tool as `ok`, and `t013` must stay
-green. Keep every script ShellCheck-`style`-clean (markdown backticks in `printf`
-formats as `\140`) and all files LF.
+`check-tool-contract.sh` must list the new tool as `ok` (it requires the root
+`install-<vendor>_<tool>.sh` to exist, be executable, and be **kicked** by the
+matrix), and `t013` must stay green. Keep every script ShellCheck-`style`-clean
+(markdown backticks in `printf` formats as `\140`) and all files LF.

@@ -29,6 +29,26 @@ for tool in aws_awscli-v2 aws_ssm-agent aws_ena-driver; do
   assert_eq "" "${miss}" "${tool} conforms to the framework contract (no missing artifacts)"
 done
 
+# --- the root install-script layer: install-<tool>.sh exists + matrix kicks it
+for tool in aws_awscli-v2 aws_ssm-agent aws_ena-driver; do
+  inst="${PROJ}/install-${tool}.sh"
+  matrix="$(find "${PROJ}/tests/${tool}" -maxdepth 1 -name 'run-*test-matrix.sh' -type f | head -1)"
+  assert_eq "" "$(contract_install_missing "${inst}" "${matrix}")" \
+    "install-${tool}.sh exists, is executable, and the matrix kicks it"
+done
+
+# install-script layer: a missing install script is reported
+assert_eq "install-script" \
+  "$(contract_install_missing "${PROJ}/install-aws_nope.sh" "${PROJ}/tests/aws_awscli-v2/run-awscli-installtest-matrix.sh")" \
+  "missing install script -> 'install-script'"
+
+# install-script layer: a matrix that does NOT kick its install script is reported
+nokick="$(mktemp)"; printf 'echo no kick here\n' > "${nokick}"
+assert_eq "matrix-kick" \
+  "$(contract_install_missing "${PROJ}/install-aws_awscli-v2.sh" "${nokick}")" \
+  "matrix that does not reference the install script -> 'matrix-kick'"
+rm -f "${nokick}"
+
 # --- a non-existent dir is reported, not crashed ----------------------------
 assert_eq "no-such-dir" "$(contract_dir_missing "${PROJ}/tests/aws_does-not-exist")" \
   "missing dir -> 'no-such-dir'"
