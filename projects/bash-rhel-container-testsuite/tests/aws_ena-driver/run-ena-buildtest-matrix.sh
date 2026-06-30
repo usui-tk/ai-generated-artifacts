@@ -187,7 +187,7 @@ generate_results_for() {
       esac
     done
     printf '\n_Module load + device attach is always **%s** (impossible in a container).' "$(ena_load_tier)"
-    printf ' The optional DKMS path is EPEL-only (lib/epel.sh)._\n\n'
+    printf ' A build verdict of **ok** means the requested version compiled out of tree (necessary, not sufficient); real module load + device attach are proven separately on real Nitro. The optional DKMS path is EPEL-only (lib/epel.sh)._\n\n'
 
     printf '## per-version expectation (entitled; empirical filled by L3)\n\n'
     printf '| version | >= min | build plan (entitled) | expected verdict |\n|:--|:--|:--|:--|\n'

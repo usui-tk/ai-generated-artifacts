@@ -12,6 +12,12 @@
 | AWS CLI v2 axis | glibc only (self-contained bundle) |
 | In-scope v2 versions | 927 |
 
+## Why this matters - AWS CLI v2 glibc support
+
+AWS CLI v2 ships a self-contained zip bundle that BUNDLES its own Python, so it does not use the OS Python - but the bundled interpreter and its shared objects are built against a **manylinux glibc**, so the OS **glibc** gates whether the bundle installs and runs. Per AWS *Linux Support Updates for AWS CLI v2* (2024-09-16), current v2 is built on **manylinux2014 (glibc 2.17)** and supports glibc >= 2.17; systems on glibc <= 2.16 should pin v2 **<= 2.17.49**. This report characterizes, per RHEL 7 environment, which v2 versions install + run - i.e. the newest AWS CLI v2 a RHEL 7 image can actually use.
+
+References (AWS): [Linux support updates](https://aws.amazon.com/blogs/developer/linux-support-updates-for-aws-cli-v2/); [install AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html); [a specific version](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-version.html).
+
 ## glibc model (AWS policy 2024-09-16)
 
 - `>= 2.17.50` -> manylinux2014, needs glibc **2.17**
@@ -34,3 +40,29 @@ On RHEL 7 (glibc 2.17): current versions (>= 2.17.50) are **runs**; the legacy b
 | 2.27.0 | manylinux2014 | 2.17 | 2.17 | runs | pending | pending |
 
 _Boundary set is illustrative; the L3 run records every in-scope version into the ledger._
+
+## Bundled Python runtime support
+
+AWS CLI v2 BUNDLES its own CPython; that interpreter is **frozen** and not independently patchable - the only way to move to a newer (still-supported) Python is to move to a newer AWS CLI v2 version. On a glibc-capped OS the AWS CLI version is capped, so the bundled Python is capped too, and at its end-of-life there is no in-place remediation. The r09 installer records each tested bundle as `bundled_python` (with the empirical `min_glibc_measured`); the L3 run fills them per version.
+
+Python end-of-life (security-support end) - STATIC table, **verified 2026-06-17** from endoflife.date/python, eosl.date, eol.wiki/python. Compare against today to read supported vs EOL:
+
+| Python | EOL (security-support end) |
+|---|---|
+| 3.6 | 2021-12-23 |
+| 3.7 | 2023-06-27 |
+| 3.8 | 2024-10-07 |
+| 3.9 | 2025-10-31 |
+| 3.10 | 2026-10-31 |
+| 3.11 | 2027-10-31 |
+| 3.12 | 2028-10-31 |
+| 3.13 | 2029-10-31 |
+| 3.14 | 2030-10-31 |
+
+## RHEL 7 support (the OS itself)
+
+STATIC, **verified 2026-07-01** from the Red Hat Customer Portal RHEL Life Cycle / errata-policy pages. The OS may itself be past regular support, which is independent of whether AWS CLI v2 installs/runs:
+
+- Maintenance Support ended **2024-06-30**; ELS Add-On available through **2029-05-31** (last minor 7.9).
+
+_Lifecycle is independent of AWS CLI compatibility: a supported OS can still cap the AWS CLI via glibc, and an out-of-support OS may still run a pinned bundle._

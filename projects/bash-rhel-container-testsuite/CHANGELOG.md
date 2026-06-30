@@ -11,6 +11,30 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r11] - 2026-07-01 - RESULTS message-level parity (awscli + ena rationale)
+
+Comprehensive sweep for the same class of omission as r10 (model rationale prose
+absent from the RHEL reports), across all three tools' generators.
+
+### Fixed
+- **AWS CLI** `RESULTS-rhel<N>.md` gained the three rationale sections the model's
+  awscli reports carry and the RHEL ones lacked: **"Why this matters - AWS CLI v2
+  glibc support"** (the manylinux glibc gate, the 2024-09-16 AWS policy, the pin
+  `<= 2.17.49` for glibc `<= 2.16`, doc references); **"Bundled Python runtime
+  support"** (the frozen bundled CPython, no in-place remediation, the static
+  Python EOL table - tying the r09 `bundled_python` / `min_glibc_measured` fields
+  to a support horizon); and **"RHEL <N> support (the OS itself)"** (per-major OS
+  lifecycle, verified 2026-07-01 against the Red Hat Customer Portal Life Cycle).
+- **ENA** `RESULTS-rhel<N>.md` entitlement-grid note now states a build verdict of
+  **ok** means the version compiled out of tree (necessary, not sufficient) and
+  that real module load + device attach are proven separately on real Nitro -
+  matching the model's framing.
+- Regenerated all ten reports (awscli + ena, RHEL 6/7/8/9/10); regeneration is
+  idempotent. SSM reports unchanged (covered by r10).
+
+### Verified
+- Suite green: **16 tiers, 430 passed**. ShellCheck-`style`-clean. All LF.
+
 ## [r10] - 2026-07-01 - SSM RESULTS: restore the Run Command deprecation rationale
 
 ### Fixed

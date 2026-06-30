@@ -193,6 +193,10 @@ generate_results_for() {
     printf '| AWS CLI v2 axis | glibc only (self-contained bundle) |\n'
     printf '| In-scope v2 versions | %s |\n\n' "$(releases_versions 2>/dev/null | grep -c . || printf '0')"
 
+    printf '## Why this matters - AWS CLI v2 glibc support\n\n'
+    printf 'AWS CLI v2 ships a self-contained zip bundle that BUNDLES its own Python, so it does not use the OS Python - but the bundled interpreter and its shared objects are built against a **manylinux glibc**, so the OS **glibc** gates whether the bundle installs and runs. Per AWS *Linux Support Updates for AWS CLI v2* (2024-09-16), current v2 is built on **manylinux2014 (glibc 2.17)** and supports glibc >= 2.17; systems on glibc <= 2.16 should pin v2 **<= 2.17.49**. This report characterizes, per RHEL %s environment, which v2 versions install + run - i.e. the newest AWS CLI v2 a RHEL %s image can actually use.\n\n' "${major}" "${major}"
+    printf 'References (AWS): [Linux support updates](https://aws.amazon.com/blogs/developer/linux-support-updates-for-aws-cli-v2/); [install AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html); [a specific version](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-version.html).\n\n'
+
     printf '## glibc model (AWS policy 2024-09-16)\n\n'
     printf -- '- \140>= 2.17.50\140 -> manylinux2014, needs glibc **2.17**\n'
     printf -- '- \140<= 2.17.49\140 -> manylinux1, needs glibc **2.5**\n\n'
@@ -214,7 +218,25 @@ generate_results_for() {
       printf '| %s | %s | %s | %s | %s | %s | %s |\n' \
         "${v}" "$(awscli_band "${v}")" "${ming}" "${osg}" "${exp}" "${ran}" "${verdict}"
     done
-    printf '\n_Boundary set is illustrative; the L3 run records every in-scope version into the ledger._\n'
+    printf '\n_Boundary set is illustrative; the L3 run records every in-scope version into the ledger._\n\n'
+
+    printf '## Bundled Python runtime support\n\n'
+    printf 'AWS CLI v2 BUNDLES its own CPython; that interpreter is **frozen** and not independently patchable - the only way to move to a newer (still-supported) Python is to move to a newer AWS CLI v2 version. On a glibc-capped OS the AWS CLI version is capped, so the bundled Python is capped too, and at its end-of-life there is no in-place remediation. The r09 installer records each tested bundle as \140bundled_python\140 (with the empirical \140min_glibc_measured\140); the L3 run fills them per version.\n\n'
+    printf 'Python end-of-life (security-support end) - STATIC table, **verified 2026-06-17** from endoflife.date/python, eosl.date, eol.wiki/python. Compare against today to read supported vs EOL:\n\n'
+    printf '| Python | EOL (security-support end) |\n|---|---|\n'
+    printf '| 3.6 | 2021-12-23 |\n| 3.7 | 2023-06-27 |\n| 3.8 | 2024-10-07 |\n| 3.9 | 2025-10-31 |\n| 3.10 | 2026-10-31 |\n| 3.11 | 2027-10-31 |\n| 3.12 | 2028-10-31 |\n| 3.13 | 2029-10-31 |\n| 3.14 | 2030-10-31 |\n'
+
+    printf '\n## RHEL %s support (the OS itself)\n\n' "${major}"
+    printf 'STATIC, **verified 2026-07-01** from the Red Hat Customer Portal RHEL Life Cycle / errata-policy pages. The OS may itself be past regular support, which is independent of whether AWS CLI v2 installs/runs:\n\n'
+    case "${major}" in
+      6)  printf -- '- Maintenance Support ended **2020-11-30**; the ELS Add-On ended **2024-06-30** - now in the Extended Life Phase (no security/bug fixes).\n' ;;
+      7)  printf -- '- Maintenance Support ended **2024-06-30**; ELS Add-On available through **2029-05-31** (last minor 7.9).\n' ;;
+      8)  printf -- '- Full Support ended **2024-05-31**; Maintenance Support through **2029-05-31** (last minor 8.10).\n' ;;
+      9)  printf -- '- Full Support through **2027-05-31**; Maintenance Support through **2032-05-31**.\n' ;;
+      10) printf -- '- GA **2025-05-20**; Full Support through ~**2030-05-31**; Maintenance Support through ~**2035-05-31**.\n' ;;
+      *)  printf -- '- (lifecycle unknown)\n' ;;
+    esac
+    printf '\n_Lifecycle is independent of AWS CLI compatibility: a supported OS can still cap the AWS CLI via glibc, and an out-of-support OS may still run a pinned bundle._\n'
   } > "${out}"
   log "wrote ${out}"
 }

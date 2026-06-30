@@ -21,7 +21,7 @@
 | entitled | make (plain-make; dkms if EPEL) | ok / build-fail | pending | pending |
 | anonymous | skip (no kernel-devel) | needs-entitlement | n/a | needs-entitlement |
 
-_Module load + device attach is always **L4** (impossible in a container). The optional DKMS path is EPEL-only (lib/epel.sh)._
+_Module load + device attach is always **L4** (impossible in a container). A build verdict of **ok** means the requested version compiled out of tree (necessary, not sufficient); real module load + device attach are proven separately on real Nitro. The optional DKMS path is EPEL-only (lib/epel.sh)._
 
 ## per-version expectation (entitled; empirical filled by L3)
 
