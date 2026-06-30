@@ -100,6 +100,7 @@ bash-rhel-container-testsuite/
     t001_parse.sh  t002_shellcheck.sh             # L0（実装済み）
     t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2（Phase 2 ✅）
     t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM 判定（Phase 3-4 ✅）
+    t010_enaverdict.sh  t011_enaverify.sh         # L1 ENA 判定 + verifier（Phase 5 ✅）
     aws_awscli-v2/                                # AWS CLI マトリクス（Phase 3 ✅）
       list-awscli-releases.sh  awscli-releases.json
       run-awscli-installtest-matrix.sh  awscli-installtest-ledger.json
@@ -108,7 +109,10 @@ bash-rhel-container-testsuite/
       list-ssm-releases.sh  ssm-releases.json
       run-ssm-installtest-matrix.sh  ssm-installtest-ledger.json
       RESULTS-rhel{6,7,8,9,10}.md
-    aws_ena-driver/                               # ENA マトリクス (Phase 5)
+    aws_ena-driver/                               # ENA buildtest マトリクス（Phase 5 ✅）
+      list-ena-releases.sh  ena-driver-releases.json
+      run-ena-buildtest-matrix.sh  buildtest-ledger.json
+      verify-ena-buildresults.sh  RESULTS-rhel{6,7,8,9,10}.md
 ```
 
 *(Phase N)* と記したファイルは**まだ存在しません**（下記「ステータス」参照）。
@@ -134,7 +138,7 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 
 ## ステータス
 
-これは **Phase 4（AWS SSM Agent）** のドロップです。ここまでの完了状況:
+これは **Phase 5（AWS ENA driver）** のドロップです。ここまでの完了状況:
 
 * ✅ **Phase 0 — 実現可能性調査** — 実測した基礎事実（メジャー別 glibc、匿名リポジトリ
   集合、匿名プル、5 メジャー全体の entitled パススルー、RHEL 7 の固定タグ署名、EPEL
@@ -149,12 +153,16 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 * ✅ **Phase 4 — AWS SSM Agent** — init 感応のマトリクス `tests/aws_ssm-agent/*`
   （207 バージョンの `ssm-releases.json`、Phase 2 の `acq_init_run_args` を組み込んだ
   **glibc ＋ init_mode** の install-test マトリクス、生成済み `RESULTS`）と判定階層
-  `t009`。**スイート緑: 9 階層、213 件成功、0 件失敗。** 残課題は **ライブインストール
-  （L3）** で、egress 可能なホストで empirical 列を埋めます。
+  `t009`。
+* ✅ **Phase 5 — AWS ENA driver** — entitlement ゲート付きの **buildtest** マトリクス
+  `tests/aws_ena-driver/*`（70 バージョンの `ena-driver-releases.json`、E2' ビルド
+  マトリクス、read-only の load-readiness verifier `verify-ena-buildresults.sh`、
+  生成済み `RESULTS`）と階層 `t010`/`t011`。**スイート緑: 11 階層、267 件成功、0 件失敗。**
+  残課題は **ライブビルド（L3、entitled ホスト）** で、モジュールのロードは L4 です。
 
-次は **Phase 5 — AWS ENA Driver**（`tests/aws_ena-driver/*`: カーネルモジュールの
-**buildtest**、entitlement ゲート付き plain-make、`needs-entitlement` 記録）です。
-フェーズ計画の全体は [SPEC.md](./SPEC.md) §10 にあります。
+次は **Phase 6 — EOL／制約付きメジャー**（RHEL 7 は凍結 yum＋固定タグ、RHEL 6 は匿名
+リポジトリ無し・entitled `rhel-6-server`・EPEL アーカイブのみ）です。フェーズ計画の全体は
+[SPEC.md](./SPEC.md) §10 にあります。
 
 ---
 

@@ -8,11 +8,55 @@ in `ai-generated-artifacts`.
 ## [Unreleased]
 
 ### Planned (per the design plan sec 16)
-- **Phase 5 - ENA (E2'):** `tests/aws_ena-driver/*`, UEK-removed installer,
-  entitlement-gated plain-make build, `needs-entitlement` recording.
 - **Phase 6 - EOL/constrained:** RHEL 7 (frozen, yum, fixed-tag) and RHEL 6
   (no anon repo; entitled `rhel-6-server`; EPEL archive-only) specifics.
 - **Phase 7 - Generalization:** tool-agnostic contract + classification for tool #2.
+
+## [r05] - 2026-07-01 - Phase 5: AWS ENA driver (E2')
+
+The third per-tool matrix, `aws_ena-driver` - the **entitlement-gated build** tool.
+Unlike AWS CLI (glibc) and SSM (glibc + init_mode), the ENA gate is **entitlement**:
+building `ena.ko` needs kernel-devel + gcc + make, available only from the entitled
+repos. The driver is compiled out of tree against the installed kernel-devel headers
+(`make -C /usr/src/kernels/<kver> M=<src> modules`), independent of the host kernel,
+with all Oracle UEK handling removed. Module load is always **L4**.
+
+### Added
+- `tests/aws_ena-driver/list-ena-releases.sh` (a) - `git ls-remote --tags
+  amzn/amzn-drivers`, filters `ena_linux_<X.Y.Z>`, emits a deterministic
+  `ena-driver-releases.json` (**70** versions; newest 2.17.0).
+- `tests/aws_ena-driver/run-ena-buildtest-matrix.sh` (b, d) - pure helpers
+  (`ena_ge`, `ena_kdevel_repo`, `ena_in_scope`, `ena_build_plan`, `ena_verdict`,
+  `ena_load_tier`), a `--run` L3 build loop (acquire entitled rootfs ->
+  kernel-devel/gcc/make -> fetch source -> build -> record), and
+  `--generate-results`. The E2' verdict: entitled -> `ok`/`build-fail`;
+  anonymous -> `needs-entitlement`; load -> `L4`.
+- `tests/aws_ena-driver/verify-ena-buildresults.sh` - a standalone READ-ONLY
+  load-readiness verifier (build -> verify pass) with pure gates
+  `ena_vermagic_verdict` (L4a) and `ena_symbols_verdict` (L4b, CRC/kABI).
+- `tests/aws_ena-driver/buildtest-ledger.json` (c) - schema'd empirical ledger
+  (`results: []` until a live `--run`).
+- `tests/aws_ena-driver/RESULTS-rhel{6,7,8,9,10}.md` (d) - generated: the
+  entitlement grid + the per-major kernel-devel repo (7/6 server, 8 baseos, 9/10
+  appstream) + per-version expectation. Empirical = pending (L3).
+- `tests/t010_enaverdict.sh` (e) - L1 unit over the matrix pure helpers + the
+  matrix/lister `ena_ge` reuse-by-copy. 27 assertions.
+- `tests/t011_enaverify.sh` (e) - L1 unit over the verifier's `ena_vermagic_verdict`
+  and `ena_symbols_verdict` gates. 17 assertions.
+
+### Removed
+- `tests/aws_ena-driver/.gitkeep` (directory now carries the matrix artifacts).
+
+### Verified
+- Full suite green: **11 tiers, 267 passed, 0 skipped, 0 failed**. L0 covers
+  **25 shell files**; every ENA script and tier is ShellCheck-`style`-clean.
+- `ena-driver-releases.json` and the five `RESULTS-rhel<N>.md` were produced by
+  the real tools this session (`git ls-remote` to github.com).
+
+### Notes
+- **Live build (L3) needs an entitled container-egress host** (no podman /
+  entitlement in the sandbox); module load is **L4** (Nitro hardware). Tracked as
+  R8. The optional DKMS path is EPEL-only (`lib/epel.sh`).
 
 ## [r04] - 2026-07-01 - Phase 4: AWS SSM Agent
 

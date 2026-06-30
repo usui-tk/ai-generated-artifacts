@@ -135,6 +135,14 @@ so results are host-independent and deterministic.
   `rhel_glibc`, `ssm_in_scope`, `ssm_compliance`, `ssm_init_outcome`,
   `ssm_verdict`) and the matrix/lister `ssm_ge` reuse-by-copy. Covers the
   init_mode axis (none -> version-only, systemd -> service-capable).
+* **`t010_enaverdict.sh`** (Phase 5) - the ENA build-test matrix's pure helpers
+  (`ena_ge`, `ena_kdevel_repo`, `ena_in_scope`, `ena_build_plan`, `ena_verdict`,
+  `ena_load_tier`) and the matrix/lister `ena_ge` reuse-by-copy. Covers the E2'
+  entitlement verdict (entitled -> ok/build-fail; anonymous -> needs-entitlement;
+  load -> L4).
+* **`t011_enaverify.sh`** (Phase 5) - the read-only verifier's load-readiness
+  gates `ena_vermagic_verdict` (L4a) and `ena_symbols_verdict` (L4b CRC/kABI),
+  loaded with `ENA_LIB_ONLY=1` so only the pure helpers run.
 
 ---
 
@@ -153,7 +161,7 @@ banner so each run records the environment it ran under.
 
 ---
 
-## Recorded baseline (Phase 4, r04)
+## Recorded baseline (Phase 5, r05)
 
 The full suite is green in the planning sandbox:
 
@@ -162,8 +170,8 @@ The full suite is green in the planning sandbox:
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
   podman:     (not installed - L3 uses the curl-only OCI fallback or SKIP)
----- t001_parse.sh ----            ## RESULT pass=20 fail=0 skip=0
----- t002_shellcheck.sh ----       ## RESULT pass=20 fail=0 skip=0
+---- t001_parse.sh ----            ## RESULT pass=25 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=25 fail=0 skip=0
 ---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
 ---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
@@ -171,23 +179,26 @@ The full suite is green in the planning sandbox:
 ---- t007_epelresolve.sh ----      ## RESULT pass=34 fail=0 skip=0
 ---- t008_awscliverdict.sh ----    ## RESULT pass=45 fail=0 skip=0
 ---- t009_ssmverdict.sh ----       ## RESULT pass=27 fail=0 skip=0
-SUITE: 213 passed, 0 skipped, 0 failed  (9 tiers, 0 tier-failure(s))
+---- t010_enaverdict.sh ----       ## RESULT pass=27 fail=0 skip=0
+---- t011_enaverify.sh ----        ## RESULT pass=17 fail=0 skip=0
+SUITE: 267 passed, 0 skipped, 0 failed  (11 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 20 shell files**, each `bash -n`-clean and
-ShellCheck-`style`-clean: the 6 Phase-1 files, the 3 Phase-2 libraries
-(`lib/{acquire-rootfs,ubi-pkgmgr,epel}.sh`), the 5 Phase-2 unit tiers
-(`tests/t003`-`t007`), the two verdict tiers (`tests/t008`, `tests/t009`), the
-two Phase-3 AWS CLI scripts (`tests/aws_awscli-v2/{list-awscli-releases,
-run-awscli-installtest-matrix}.sh`), and the two Phase-4 SSM scripts
-(`tests/aws_ssm-agent/{list-ssm-releases,run-ssm-installtest-matrix}.sh`).
+**L0 fixed count = 25 shell files**, each `bash -n`-clean and
+ShellCheck-`style`-clean: the 6 Phase-1 files, the 3 Phase-2 libraries, the 5
+Phase-2 unit tiers (`tests/t003`-`t007`), the four verdict/verify tiers
+(`tests/t008`-`t011`), the two Phase-3 AWS CLI scripts, the two Phase-4 SSM
+scripts, and the three Phase-5 ENA scripts (`tests/aws_ena-driver/{list-ena-releases,
+run-ena-buildtest-matrix,verify-ena-buildresults}.sh`).
 
 **Residuals (run on CI / a container-egress host):**
 - the live pull (L3) is not exercisable in the sandbox (no podman; the quay blob
   CDN is off-allowlist); the curl-only pull *sequence* is unit-tested in `t003`.
-- the live AWS CLI install matrix (`run-awscli-installtest-matrix.sh --run`)
-  fills the empirical RESULTS column; the glibc model and `--generate-results`
-  are hermetic and were run this session to produce the committed reports.
-- the live SSM install matrix (`run-ssm-installtest-matrix.sh --run`, both init
-  modes) fills the empirical column; the init-mode grid + compliance model and
-  `--generate-results` are hermetic and were run this session.
+- the live AWS CLI install matrix (`--run`) fills its empirical column; the glibc
+  model and `--generate-results` are hermetic and were run this session.
+- the live SSM install matrix (`--run`, both init modes) fills its empirical
+  column; the init-mode grid + compliance model and `--generate-results` are
+  hermetic and were run this session.
+- the live ENA build (`--run`) needs an **entitled** host; module load is **L4**
+  (Nitro hardware). The E2' grid, the verifier gates, and `--generate-results`
+  are hermetic and were run this session.

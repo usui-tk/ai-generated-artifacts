@@ -1,0 +1,16 @@
+{
+  "tool": "aws_ena-driver",
+  "note": "Empirical build-test ledger. Regenerated/appended by run-ena-buildtest-matrix.sh --run on an ENTITLED container-egress host (L3); never hand-edited. 'results' is empty until a live build populates it.",
+  "row_schema": {
+    "osmajor": "RHEL major as a string, e.g. \"9\"",
+    "ena_version": "ENA driver version, e.g. \"2.13.0\"",
+    "entitlement": "entitled | anonymous",
+    "kdevel_repo": "repo providing kernel-devel when entitled (server|baseos|appstream)",
+    "build_plan": "make | dkms | skip (ena_build_plan)",
+    "kver": "the kernel-devel tree version the module was built against",
+    "built": "boolean - did ena.ko compile",
+    "verdict": "ok | build-fail | needs-entitlement (ena_verdict)",
+    "load_tier": "always L4 (module load is impossible in a container)"
+  },
+  "results": []
+}

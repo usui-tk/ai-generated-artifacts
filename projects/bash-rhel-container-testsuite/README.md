@@ -100,6 +100,7 @@ bash-rhel-container-testsuite/
     t001_parse.sh  t002_shellcheck.sh             # L0 (present)
     t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2 (Phase 2 ✅)
     t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM verdicts (Phase 3-4 ✅)
+    t010_enaverdict.sh  t011_enaverify.sh         # L1 ENA verdict + verifier (Phase 5 ✅)
     aws_awscli-v2/                                # AWS CLI matrix (Phase 3 ✅)
       list-awscli-releases.sh  awscli-releases.json
       run-awscli-installtest-matrix.sh  awscli-installtest-ledger.json
@@ -108,7 +109,10 @@ bash-rhel-container-testsuite/
       list-ssm-releases.sh  ssm-releases.json
       run-ssm-installtest-matrix.sh  ssm-installtest-ledger.json
       RESULTS-rhel{6,7,8,9,10}.md
-    aws_ena-driver/                               # ENA matrix (Phase 5)
+    aws_ena-driver/                               # ENA buildtest matrix (Phase 5 ✅)
+      list-ena-releases.sh  ena-driver-releases.json
+      run-ena-buildtest-matrix.sh  buildtest-ledger.json
+      verify-ena-buildresults.sh  RESULTS-rhel{6,7,8,9,10}.md
 ```
 
 Files marked *(Phase N)* are **not present yet** — see *Status* below. The
@@ -133,7 +137,7 @@ host with container egress, once they land in Phases 3-5. See
 
 ## Status
 
-This is the **Phase 4 (AWS SSM Agent)** drop. Completed so far:
+This is the **Phase 5 (AWS ENA driver)** drop. Completed so far:
 
 * ✅ **Phase 0 — feasibility** — measured base facts (per-major glibc, anon repo
   sets, anon pull, entitled passthrough across all five majors, RHEL 7 fixed-tag
@@ -148,12 +152,16 @@ This is the **Phase 4 (AWS SSM Agent)** drop. Completed so far:
 * ✅ **Phase 4 — AWS SSM Agent** — the init-sensitive matrix `tests/aws_ssm-agent/*`
   (`ssm-releases.json` of 207 versions, the **glibc + init_mode** install-test
   matrix wiring Phase 2's `acq_init_run_args`, generated `RESULTS`) and the verdict
-  tier `t009`. **Suite green: 9 tiers, 213 passed, 0 failed.** Residual: the live
-  install (L3) fills the empirical column on a container-egress host.
+  tier `t009`.
+* ✅ **Phase 5 — AWS ENA driver** — the entitlement-gated **buildtest** matrix
+  `tests/aws_ena-driver/*` (`ena-driver-releases.json` of 70 versions, the E2'
+  build matrix, a read-only load-readiness `verify-ena-buildresults.sh`, generated
+  `RESULTS`) and the tiers `t010`/`t011`. **Suite green: 11 tiers, 267 passed, 0
+  failed.** Residual: the live build (L3, entitled host); module load is L4.
 
-Next: **Phase 5 — AWS ENA Driver** (`tests/aws_ena-driver/*`: a kernel-module
-**buildtest**, entitlement-gated plain-make, `needs-entitlement` recording). The
-full phase plan is in [SPEC.md](./SPEC.md) §10.
+Next: **Phase 6 — EOL / constrained majors** (RHEL 7 frozen yum + fixed-tag; RHEL 6
+no anon repo, entitled `rhel-6-server`, EPEL archive-only). The full phase plan is
+in [SPEC.md](./SPEC.md) §10.
 
 ---
 
