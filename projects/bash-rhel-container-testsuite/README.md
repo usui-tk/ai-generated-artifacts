@@ -92,6 +92,7 @@ bash-rhel-container-testsuite/
   CHANGELOG.md  .shellcheckrc
   lib/                             # acquisition libraries        (Phase 2 ✅)
     acquire-rootfs.sh  ubi-pkgmgr.sh  epel.sh
+    os-profile.sh                    # canonical per-major OS profile (Phase 6 ✅)
   install-awscli.sh                # RHEL-adapted install scripts (Phase 3-5)
   install-ssm-agent.sh  install-ena-driver.sh
   tests/
@@ -101,6 +102,7 @@ bash-rhel-container-testsuite/
     t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2 (Phase 2 ✅)
     t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM verdicts (Phase 3-4 ✅)
     t010_enaverdict.sh  t011_enaverify.sh         # L1 ENA verdict + verifier (Phase 5 ✅)
+    t012_osprofile.sh                             # L1 OS profile + cross-checks (Phase 6 ✅)
     aws_awscli-v2/                                # AWS CLI matrix (Phase 3 ✅)
       list-awscli-releases.sh  awscli-releases.json
       run-awscli-installtest-matrix.sh  awscli-installtest-ledger.json
@@ -113,6 +115,8 @@ bash-rhel-container-testsuite/
       list-ena-releases.sh  ena-driver-releases.json
       run-ena-buildtest-matrix.sh  buildtest-ledger.json
       verify-ena-buildresults.sh  RESULTS-rhel{6,7,8,9,10}.md
+    os-coverage/                                  # OS coverage matrix (Phase 6 ✅)
+      generate-os-coverage.sh  RESULTS-coverage.md
 ```
 
 Files marked *(Phase N)* are **not present yet** — see *Status* below. The
@@ -137,7 +141,7 @@ host with container egress, once they land in Phases 3-5. See
 
 ## Status
 
-This is the **Phase 5 (AWS ENA driver)** drop. Completed so far:
+This is the **Phase 6 (EOL / constrained majors)** drop. Completed so far:
 
 * ✅ **Phase 0 — feasibility** — measured base facts (per-major glibc, anon repo
   sets, anon pull, entitled passthrough across all five majors, RHEL 7 fixed-tag
@@ -156,12 +160,17 @@ This is the **Phase 5 (AWS ENA driver)** drop. Completed so far:
 * ✅ **Phase 5 — AWS ENA driver** — the entitlement-gated **buildtest** matrix
   `tests/aws_ena-driver/*` (`ena-driver-releases.json` of 70 versions, the E2'
   build matrix, a read-only load-readiness `verify-ena-buildresults.sh`, generated
-  `RESULTS`) and the tiers `t010`/`t011`. **Suite green: 11 tiers, 267 passed, 0
-  failed.** Residual: the live build (L3, entitled host); module load is L4.
+  `RESULTS`) and the tiers `t010`/`t011`.
+* ✅ **Phase 6 — EOL / constrained majors** — `lib/os-profile.sh`, the canonical
+  per-major OS profile (tier, image, pull constraint, anon/entitled repos,
+  lifecycle, EPEL status, kernel-devel repo), the cross-consistency tier `t012`
+  (the canon must agree with the acquisition libraries + the ENA matrix), and a
+  generated `tests/os-coverage/RESULTS-coverage.md`. **Suite green: 12 tiers,
+  331 passed, 0 failed.**
 
-Next: **Phase 6 — EOL / constrained majors** (RHEL 7 frozen yum + fixed-tag; RHEL 6
-no anon repo, entitled `rhel-6-server`, EPEL archive-only). The full phase plan is
-in [SPEC.md](./SPEC.md) §10.
+Next: **Phase 7 — generalization** (a tool-agnostic contract + package-availability
+classification, ready for a non-AWS tool #2). The full phase plan is in
+[SPEC.md](./SPEC.md) §10.
 
 ---
 

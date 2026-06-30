@@ -253,7 +253,7 @@ moot since ENA defaults to plain-make.
 | 3 - AWS CLI | `tests/aws_awscli-v2/*`, glibc ledger, RESULTS, verdict tier | matrix runs (Tier A); reports generated | **done (r03)** (tail: live install is L3/CI) |
 | 4 - SSM | `tests/aws_ssm-agent/*`, glibc + init_mode, S3 RPM, RESULTS | both init modes exercised; reports generated | **done (r04)** (tail: live install is L3/CI) |
 | 5 - ENA (E2') | `tests/aws_ena-driver/*`, UEK-removed installer, entitlement-gated build | build on entitled host; anon -> `needs-entitlement`; load -> L4 | **done (r05)** (tail: live build L3, load L4) |
-| 6 - EOL/constrained | RHEL 7 (frozen, yum, fixed-tag) + RHEL 6 (no anon repo; entitled `rhel-6-server`; EPEL archive-only) | reports generated or formally deferred | pending |
+| 6 - EOL/constrained | RHEL 7 (frozen, yum, fixed-tag) + RHEL 6 (no anon repo; entitled `rhel-6-server`; EPEL archive-only) | reports generated or formally deferred | **done (r06)** (canon `lib/os-profile.sh` + coverage matrix) |
 | 7 - Generalization | tool-agnostic contract (section 7) + classification (section 8) ready for tool #2 | SPEC/TESTING coverage complete; docs bilingual | pending |
 
 ### Open items

@@ -8,9 +8,39 @@ in `ai-generated-artifacts`.
 ## [Unreleased]
 
 ### Planned (per the design plan sec 16)
-- **Phase 6 - EOL/constrained:** RHEL 7 (frozen, yum, fixed-tag) and RHEL 6
-  (no anon repo; entitled `rhel-6-server`; EPEL archive-only) specifics.
 - **Phase 7 - Generalization:** tool-agnostic contract + classification for tool #2.
+
+## [r06] - 2026-07-01 - Phase 6: EOL / constrained majors
+
+Phase 6 makes the EOL/constrained-major dimension first-class. The facts the
+design plan measured for RHEL 7 (frozen; `ubi7/ubi-init` pulled by **fixed tag
+`7.9-88`** because the floating-tag signature is rejected; yum; anon repos incl
+RHSCL) and RHEL 6 (Tier C: **no anonymous repo**; entitled `rhel-6-server-rpms`
+passes through; EPEL **archive-only**, OL6-style) - previously scattered across
+the acquisition libraries and the ENA matrix - are consolidated into one canon.
+
+### Added
+- `lib/os-profile.sh` - the canonical per-major OS profile (pure, sourceable):
+  `osp_tier`, `osp_image`, `osp_pkgmgr`, `osp_pull_tag`, `osp_pull_constraint`,
+  `osp_anon_repos`, `osp_has_anon_repo`, `osp_entitled_repo`, `osp_kdevel_repo`,
+  `osp_lifecycle`, `osp_epel_status`, `osp_epel_is_live`. Tiers A (10/9/8) /
+  B (7) / C (6).
+- `tests/t012_osprofile.sh` - L1 unit over every profile helper **and** the
+  cross-consistency invariants that make it a single source of truth:
+  `osp_image == acq_image_for_major`, `osp_pull_tag == acq_tag_for_major`,
+  `osp_epel_is_live` is the inverse of `epel_is_archive`, and
+  `osp_kdevel_repo == ena_kdevel_repo`. 58 assertions.
+- `tests/os-coverage/generate-os-coverage.sh` + `RESULTS-coverage.md` - a
+  deterministic, hermetic render of the design plan sec 6 coverage matrix,
+  derived purely from the profile canon (never hand-edited).
+
+### Verified
+- Full suite green: **12 tiers, 331 passed, 0 skipped, 0 failed**. L0 covers
+  **28 shell files**; `lib/os-profile.sh`, the tier, and the generator are
+  ShellCheck-`style`-clean.
+- The cross-consistency asserts guarantee the scattered per-fact maps cannot
+  drift from `lib/os-profile.sh`; this canon is the basis for Phase 7
+  generalization.
 
 ## [r05] - 2026-07-01 - Phase 5: AWS ENA driver (E2')
 
