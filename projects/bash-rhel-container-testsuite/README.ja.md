@@ -93,6 +93,7 @@ bash-rhel-container-testsuite/
   lib/                             # 取得用ライブラリ            (Phase 2 ✅)
     acquire-rootfs.sh  ubi-pkgmgr.sh  epel.sh
     os-profile.sh                    # メジャー別 OS プロファイルの正典（Phase 6 ✅）
+    pkg-availability.sh              # パッケージ可用性分類（Phase 7 ✅）
   install-awscli.sh                # RHEL 適応版インストールスクリプト (Phase 3-5)
   install-ssm-agent.sh  install-ena-driver.sh
   tests/
@@ -103,6 +104,7 @@ bash-rhel-container-testsuite/
     t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM 判定（Phase 3-4 ✅）
     t010_enaverdict.sh  t011_enaverify.sh         # L1 ENA 判定 + verifier（Phase 5 ✅）
     t012_osprofile.sh                             # L1 OS プロファイル + 整合検証（Phase 6 ✅）
+    t013_toolcontract.sh  t014_pkgavail.sh        # 契約 + 分類（Phase 7 ✅）
     aws_awscli-v2/                                # AWS CLI マトリクス（Phase 3 ✅）
       list-awscli-releases.sh  awscli-releases.json
       run-awscli-installtest-matrix.sh  awscli-installtest-ledger.json
@@ -117,6 +119,8 @@ bash-rhel-container-testsuite/
       verify-ena-buildresults.sh  RESULTS-rhel{6,7,8,9,10}.md
     os-coverage/                                  # OS カバレッジ表（Phase 6 ✅）
       generate-os-coverage.sh  RESULTS-coverage.md
+    conformance/                                  # ツール契約チェッカ（Phase 7 ✅）
+      check-tool-contract.sh
 ```
 
 *(Phase N)* と記したファイルは**まだ存在しません**（下記「ステータス」参照）。
@@ -142,7 +146,7 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 
 ## ステータス
 
-これは **Phase 6（EOL／制約付きメジャー）** のドロップです。ここまでの完了状況:
+これは最終フェーズ **Phase 7（一般化）** のドロップです。全 7 フェーズ完了:
 
 * ✅ **Phase 0 — 実現可能性調査** — 実測した基礎事実（メジャー別 glibc、匿名リポジトリ
   集合、匿名プル、5 メジャー全体の entitled パススルー、RHEL 7 の固定タグ署名、EPEL
@@ -163,13 +167,19 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
   マトリクス、read-only の load-readiness verifier `verify-ena-buildresults.sh`、
   生成済み `RESULTS`）と階層 `t010`/`t011`。
 * ✅ **Phase 6 — EOL／制約付きメジャー** — `lib/os-profile.sh`（メジャー別 OS
-  プロファイルの正典: tier・image・pull 制約・匿名/entitled リポ・ライフサイクル・
-  EPEL 状態・kernel-devel リポ）、整合検証の階層 `t012`（正典が取得ライブラリ＋ENA
-  マトリクスと一致することを保証）、生成済み `tests/os-coverage/RESULTS-coverage.md`。
-  **スイート緑: 12 階層、331 件成功、0 件失敗。**
+  プロファイルの正典）、整合検証の階層 `t012`、生成済み
+  `tests/os-coverage/RESULTS-coverage.md`。
+* ✅ **Phase 7 — 一般化** — フレームワークが**ツール非依存**になりました:
+  `tests/conformance/check-tool-contract.sh` が SPEC §10 (a〜e) 契約を機械的に強制し
+  （階層 `t013`）、`lib/pkg-availability.sh` が §12 分類の正典（階層 `t014`）、
+  [ADDING-A-TOOL.md](./ADDING-A-TOOL.md) が 2 つ目のツール向けのバイリンガル手順です。
+  **スイート緑: 14 階層、385 件成功、0 件失敗。**
 
-次は **Phase 7 — 一般化**（ツール非依存の契約＋パッケージ可用性分類。非 AWS の 2 つ目の
-ツールに対応可能に）です。フェーズ計画の全体は [SPEC.md](./SPEC.md) §10 にあります。
+**全 7 実装フェーズが完了しました。** 残るはライブの実測埋め — R5（ライブプル）、
+R6（AWS CLI install）、R7（SSM install、両 init モード）、R8（entitled ホストでの ENA
+ビルド。load は L4）— で、egress 可能／entitled／Nitro ホストで実行します。モデル・
+生成器・verifier・ツール契約はサンドボックス内でハーミティックに緑です。詳細は
+[SPEC.md](./SPEC.md) §10。
 
 ---
 

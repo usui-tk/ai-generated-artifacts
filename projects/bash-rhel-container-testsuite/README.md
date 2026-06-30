@@ -11,6 +11,7 @@ English | [日本語](./README.ja.md)
 > 📂 Part of [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) → [`projects/bash-rhel-container-testsuite/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/bash-rhel-container-testsuite)
 > ⚠️ **AI-generated content** — review the source before executing. See the [scripts directory policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) for the full disclaimer.
 > 📐 **Developer specification**: [SPEC.md](./SPEC.md) (English only) — locked decisions, the two axes, test tiers, the tool-compatibility framework, and the phase contract.
+> ➕ **Adding a tool**: [ADDING-A-TOOL.md](./ADDING-A-TOOL.md) ([日本語](./ADDING-A-TOOL.ja.md)) — the tool-agnostic contract, fill-in-the-blanks for tool #2.
 
 A **container-based compatibility test suite for the RHEL family**. For each RHEL
 major (**10 / 9 / 8 / 7 / 6**) it measures which versions of a tool **install** and
@@ -93,6 +94,7 @@ bash-rhel-container-testsuite/
   lib/                             # acquisition libraries        (Phase 2 ✅)
     acquire-rootfs.sh  ubi-pkgmgr.sh  epel.sh
     os-profile.sh                    # canonical per-major OS profile (Phase 6 ✅)
+    pkg-availability.sh              # package-availability classification (Phase 7 ✅)
   install-awscli.sh                # RHEL-adapted install scripts (Phase 3-5)
   install-ssm-agent.sh  install-ena-driver.sh
   tests/
@@ -103,6 +105,7 @@ bash-rhel-container-testsuite/
     t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM verdicts (Phase 3-4 ✅)
     t010_enaverdict.sh  t011_enaverify.sh         # L1 ENA verdict + verifier (Phase 5 ✅)
     t012_osprofile.sh                             # L1 OS profile + cross-checks (Phase 6 ✅)
+    t013_toolcontract.sh  t014_pkgavail.sh        # contract + classification (Phase 7 ✅)
     aws_awscli-v2/                                # AWS CLI matrix (Phase 3 ✅)
       list-awscli-releases.sh  awscli-releases.json
       run-awscli-installtest-matrix.sh  awscli-installtest-ledger.json
@@ -117,6 +120,8 @@ bash-rhel-container-testsuite/
       verify-ena-buildresults.sh  RESULTS-rhel{6,7,8,9,10}.md
     os-coverage/                                  # OS coverage matrix (Phase 6 ✅)
       generate-os-coverage.sh  RESULTS-coverage.md
+    conformance/                                  # tool-contract checker (Phase 7 ✅)
+      check-tool-contract.sh
 ```
 
 Files marked *(Phase N)* are **not present yet** — see *Status* below. The
@@ -141,7 +146,7 @@ host with container egress, once they land in Phases 3-5. See
 
 ## Status
 
-This is the **Phase 6 (EOL / constrained majors)** drop. Completed so far:
+This is the final **Phase 7 (generalization)** drop — all seven phases complete:
 
 * ✅ **Phase 0 — feasibility** — measured base facts (per-major glibc, anon repo
   sets, anon pull, entitled passthrough across all five majors, RHEL 7 fixed-tag
@@ -162,15 +167,19 @@ This is the **Phase 6 (EOL / constrained majors)** drop. Completed so far:
   build matrix, a read-only load-readiness `verify-ena-buildresults.sh`, generated
   `RESULTS`) and the tiers `t010`/`t011`.
 * ✅ **Phase 6 — EOL / constrained majors** — `lib/os-profile.sh`, the canonical
-  per-major OS profile (tier, image, pull constraint, anon/entitled repos,
-  lifecycle, EPEL status, kernel-devel repo), the cross-consistency tier `t012`
-  (the canon must agree with the acquisition libraries + the ENA matrix), and a
-  generated `tests/os-coverage/RESULTS-coverage.md`. **Suite green: 12 tiers,
-  331 passed, 0 failed.**
+  per-major OS profile, the cross-consistency tier `t012`, and a generated
+  `tests/os-coverage/RESULTS-coverage.md`.
+* ✅ **Phase 7 — generalization** — the framework is now **tool-agnostic**:
+  `tests/conformance/check-tool-contract.sh` machine-enforces the SPEC §10 (a–e)
+  contract (tier `t013`), `lib/pkg-availability.sh` is the §12 classification
+  canon (tier `t014`), and [ADDING-A-TOOL.md](./ADDING-A-TOOL.md) is the bilingual
+  guide for tool #2. **Suite green: 14 tiers, 385 passed, 0 failed.**
 
-Next: **Phase 7 — generalization** (a tool-agnostic contract + package-availability
-classification, ready for a non-AWS tool #2). The full phase plan is in
-[SPEC.md](./SPEC.md) §10.
+**All seven implementation phases are complete.** What remains is the live
+empirical fill — R5 (live pull), R6 (AWS CLI install), R7 (SSM install, both init
+modes), R8 (ENA build on an entitled host; load is L4) — which runs on a
+container-egress / entitled / Nitro host. The models, generators, verifiers, and
+the tool contract are hermetic and green in-sandbox. See [SPEC.md](./SPEC.md) §10.
 
 ---
 

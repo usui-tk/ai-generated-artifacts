@@ -7,8 +7,44 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
-### Planned (per the design plan sec 16)
-- **Phase 7 - Generalization:** tool-agnostic contract + classification for tool #2.
+All seven implementation phases are complete. The remaining work is the live
+empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
+generators, verifiers, and the tool contract are hermetic and green in-sandbox.
+
+## [r07] - 2026-07-01 - Phase 7: generalization (tool-agnostic contract + classification)
+
+Phase 7 makes the framework **tool-agnostic** and ready for a non-AWS tool #2: the
+SPEC §10 (a-e) contract is now machine-enforced, and the SPEC §12 package
+classification is a queryable canon. No new AWS tool - this phase generalizes.
+
+### Added
+- `lib/pkg-availability.sh` - the canonical package-availability taxonomy (pure):
+  `pkgavail_class`, `pkgavail_known`, `pkgavail_needs_entitlement`,
+  `pkgavail_anonymous_status`, `pkgavail_over_network`, `pkgavail_tool_source`.
+  Classes: anonymous-ubi / entitled-only / epel / vendor-hosted / base-image. A
+  tool's anonymous story is one call:
+  `pkgavail_anonymous_status "$(pkgavail_class "$(pkgavail_tool_source <name>)")"`.
+- `tests/conformance/check-tool-contract.sh` - a standalone read-only conformance
+  checker that walks every `tests/<vendor>_<tool>/` and asserts the (a)-(e)
+  contract (lister + releases.json; matrix with `--generate-results` and a
+  `*_verdict()`; a `"results"` ledger; the five `RESULTS-rhel<N>.md`; a tier that
+  sources the matrix). `CONTRACT_LIB_ONLY=1` exposes the pure `contract_dir_missing`.
+- `tests/t013_toolcontract.sh` - L2: the three shipped tools conform, a synthetic
+  incomplete dir reports its gaps, and the checker exits 0. 13 assertions.
+- `tests/t014_pkgavail.sh` - L1 over the classification canon, incl. the
+  end-to-end source->class->anonymous-status chain per tool. 33 assertions.
+- `ADDING-A-TOOL.md` / `ADDING-A-TOOL.ja.md` - bilingual "add tool #2" guide
+  (name -> classify -> implement (a)-(e) -> verify).
+
+### Docs
+- SPEC §7 documents contract enforcement; §8 documents the classification canon;
+  the Phase contract marks Phase 7 done. README(.ja) status -> all 7 phases done.
+
+### Verified
+- Full suite green: **14 tiers, 385 passed, 0 skipped, 0 failed**. L0 covers
+  **32 shell files**; every Phase-7 file is ShellCheck-`style`-clean. All LF.
+- `check-tool-contract.sh` reports all three tools `ok`; the contract is now a
+  suite-failing gate, so a non-conformant tool #2 cannot land silently.
 
 ## [r06] - 2026-07-01 - Phase 6: EOL / constrained majors
 

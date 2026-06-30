@@ -148,6 +148,14 @@ so results are host-independent and deterministic.
   single source of truth: `osp_image == acq_image_for_major`,
   `osp_pull_tag == acq_tag_for_major`, `osp_epel_is_live` inverse of
   `epel_is_archive`, and `osp_kdevel_repo == ena_kdevel_repo`.
+* **`t013_toolcontract.sh`** (Phase 7) - L2: loads `contract_dir_missing` from
+  `tests/conformance/check-tool-contract.sh` (`CONTRACT_LIB_ONLY=1`), asserts the
+  three shipped tools conform to the §10 (a-e) contract, that a synthetic
+  incomplete dir reports its gaps, and that the checker exits 0.
+* **`t014_pkgavail.sh`** (Phase 7) - the `lib/pkg-availability.sh` classification
+  canon (`pkgavail_class`, `pkgavail_needs_entitlement`, `pkgavail_anonymous_status`,
+  `pkgavail_over_network`, `pkgavail_tool_source`) incl. the end-to-end
+  source -> class -> anonymous-status chain per tool.
 
 ---
 
@@ -166,7 +174,7 @@ banner so each run records the environment it ran under.
 
 ---
 
-## Recorded baseline (Phase 6, r06)
+## Recorded baseline (Phase 7, r07)
 
 The full suite is green in the planning sandbox:
 
@@ -175,8 +183,8 @@ The full suite is green in the planning sandbox:
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
   podman:     (not installed - L3 uses the curl-only OCI fallback or SKIP)
----- t001_parse.sh ----            ## RESULT pass=28 fail=0 skip=0
----- t002_shellcheck.sh ----       ## RESULT pass=28 fail=0 skip=0
+---- t001_parse.sh ----            ## RESULT pass=32 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=32 fail=0 skip=0
 ---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
 ---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
@@ -187,25 +195,28 @@ The full suite is green in the planning sandbox:
 ---- t010_enaverdict.sh ----       ## RESULT pass=27 fail=0 skip=0
 ---- t011_enaverify.sh ----        ## RESULT pass=17 fail=0 skip=0
 ---- t012_osprofile.sh ----        ## RESULT pass=58 fail=0 skip=0
-SUITE: 331 passed, 0 skipped, 0 failed  (12 tiers, 0 tier-failure(s))
+---- t013_toolcontract.sh ----     ## RESULT pass=13 fail=0 skip=0
+---- t014_pkgavail.sh ----         ## RESULT pass=33 fail=0 skip=0
+SUITE: 385 passed, 0 skipped, 0 failed  (14 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 28 shell files**, each `bash -n`-clean and
-ShellCheck-`style`-clean: the 6 Phase-1 files, the 4 libraries
-(`lib/{acquire-rootfs,ubi-pkgmgr,epel,os-profile}.sh`), the 5 Phase-2 unit tiers
-(`tests/t003`-`t007`), the five verdict/verify/profile tiers (`tests/t008`-`t012`),
-the two Phase-3 AWS CLI scripts, the two Phase-4 SSM scripts, the three Phase-5
-ENA scripts, and the Phase-6 coverage generator
-(`tests/os-coverage/generate-os-coverage.sh`).
+**L0 fixed count = 32 shell files**, each `bash -n`-clean and
+ShellCheck-`style`-clean: the 6 Phase-1 files, the 5 libraries
+(`lib/{acquire-rootfs,ubi-pkgmgr,epel,os-profile,pkg-availability}.sh`), the 5
+Phase-2 unit tiers (`tests/t003`-`t007`), the seven verdict/verify/profile/contract
+tiers (`tests/t008`-`t014`), the two Phase-3 AWS CLI scripts, the two Phase-4 SSM
+scripts, the three Phase-5 ENA scripts, the Phase-6 coverage generator, and the
+Phase-7 contract checker (`tests/conformance/check-tool-contract.sh`).
 
-**Residuals (run on CI / a container-egress host):**
+**Residuals (run on CI / a container-egress / entitled / Nitro host):**
 - the live pull (L3) is not exercisable in the sandbox (no podman; the quay blob
   CDN is off-allowlist); the curl-only pull *sequence* is unit-tested in `t003`.
 - the live AWS CLI install matrix (`--run`) fills its empirical column; the glibc
   model and `--generate-results` are hermetic and were run this session.
 - the live SSM install matrix (`--run`, both init modes) fills its empirical
-  column; the init-mode grid + compliance model and `--generate-results` are
-  hermetic and were run this session.
+  column; the init-mode grid + compliance model are hermetic.
 - the live ENA build (`--run`) needs an **entitled** host; module load is **L4**.
-  The E2' grid, the verifier gates, and `--generate-results` are hermetic and
-  were run this session.
+  The E2' grid, the verifier gates, and `--generate-results` are hermetic.
+
+All seven implementation phases are complete; the tool contract is a suite-failing
+gate, so a non-conformant tool #2 cannot land silently.

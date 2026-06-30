@@ -190,6 +190,15 @@ Each tool folder `tests/<vendor>_<tool>/` implements the same five-part contract
 **Dominant axis per tool:** AWS CLI -> glibc; SSM -> glibc (+ init_mode);
 ENA -> kernel + entitlement.
 
+**Contract enforcement (Phase 7).** The five-part contract is machine-checked:
+`tests/conformance/check-tool-contract.sh` walks every `tests/<vendor>_<tool>/`
+and verifies (a)-(e) are present (lister + `*-releases.json`; a matrix with
+`--generate-results` and a `*_verdict()` helper; a `"results"` ledger; the five
+`RESULTS-rhel<N>.md`; and a tier that sources the matrix). `tests/t013_toolcontract.sh`
+fails the suite if any tool is non-conformant. Adding a non-AWS tool #2 is then a
+fill-in-the-blanks exercise - see [`ADDING-A-TOOL.md`](./ADDING-A-TOOL.md)
+([日本語](./ADDING-A-TOOL.ja.md)).
+
 ### 7.1 Per-tool notes (initial three)
 
 * **`aws_awscli-v2`** - self-contained bundle, not repo-installed, so the only
@@ -217,6 +226,14 @@ Every repo-installed input is classified:
 * **Entitled-only** (`rhel-N-*`, e.g. `kernel`, `kernel-devel`) -> entitled mode only; else `needs-entitlement`.
 * **EPEL** (e.g. `dkms`) -> out of base; pinned, transient, OFF by default.
 * **Vendor-hosted** (AWS CLI bundle, SSM S3 RPM) -> outside repos; over `*.amazonaws.com`.
+
+**Classification canon (Phase 7).** `lib/pkg-availability.sh` encodes this taxonomy
+as pure helpers (`pkgavail_class`, `pkgavail_needs_entitlement`,
+`pkgavail_anonymous_status`, `pkgavail_over_network`, `pkgavail_tool_source`), so a
+tool declares its acquisition source and the suite derives its anonymous story in
+one call - e.g. `aws_ena-driver` -> `kernel-devel` -> `entitled-only` ->
+`needs-entitlement` (matching `ena_verdict`); `aws_awscli-v2` -> `awscli-bundle`
+-> `vendor-hosted` -> `installable`. Covered by `tests/t014_pkgavail.sh`.
 
 **EPEL (`lib/epel.sh`).** RHEL has no vendor EPEL, and Fedora's default metalink
 is non-deterministic (returns off-allow-list mirrors). Therefore pin to
@@ -254,7 +271,7 @@ moot since ENA defaults to plain-make.
 | 4 - SSM | `tests/aws_ssm-agent/*`, glibc + init_mode, S3 RPM, RESULTS | both init modes exercised; reports generated | **done (r04)** (tail: live install is L3/CI) |
 | 5 - ENA (E2') | `tests/aws_ena-driver/*`, UEK-removed installer, entitlement-gated build | build on entitled host; anon -> `needs-entitlement`; load -> L4 | **done (r05)** (tail: live build L3, load L4) |
 | 6 - EOL/constrained | RHEL 7 (frozen, yum, fixed-tag) + RHEL 6 (no anon repo; entitled `rhel-6-server`; EPEL archive-only) | reports generated or formally deferred | **done (r06)** (canon `lib/os-profile.sh` + coverage matrix) |
-| 7 - Generalization | tool-agnostic contract (section 7) + classification (section 8) ready for tool #2 | SPEC/TESTING coverage complete; docs bilingual | pending |
+| 7 - Generalization | tool-agnostic contract (sec 7) + classification (sec 8) ready for tool #2 | SPEC/TESTING coverage complete; docs bilingual | **done (r07)** (contract checker + pkg-availability canon + ADDING-A-TOOL) |
 
 ### Open items
 
