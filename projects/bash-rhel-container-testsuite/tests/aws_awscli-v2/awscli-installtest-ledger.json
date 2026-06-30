@@ -1,0 +1,12 @@
+{
+  "tool": "aws_awscli-v2",
+  "note": "Empirical install-test ledger. Regenerated/appended by run-awscli-installtest-matrix.sh --run on a container-egress host (L3); never hand-edited. 'results' is empty until a live run populates it.",
+  "row_schema": {
+    "osmajor": "RHEL major as a string, e.g. \"9\"",
+    "awscli_version": "AWS CLI v2 version, e.g. \"2.27.0\"",
+    "glibc": "measured OS glibc in-container, e.g. \"2.34\"",
+    "ran": "boolean - did `aws --version` run after install",
+    "verdict": "runs | glibc-too-old | unexpected-fail (awscli_verdict)"
+  },
+  "results": []
+}

@@ -8,13 +8,57 @@ in `ai-generated-artifacts`.
 ## [Unreleased]
 
 ### Planned (per the design plan sec 16)
-- **Phase 3 - AWS CLI:** `tests/aws_awscli-v2/*`, glibc ledger, RESULTS, verdict tier.
 - **Phase 4 - SSM:** `tests/aws_ssm-agent/*`, glibc + init_mode, S3 RPM, RESULTS.
 - **Phase 5 - ENA (E2'):** `tests/aws_ena-driver/*`, UEK-removed installer,
   entitlement-gated plain-make build, `needs-entitlement` recording.
 - **Phase 6 - EOL/constrained:** RHEL 7 (frozen, yum, fixed-tag) and RHEL 6
   (no anon repo; entitled `rhel-6-server`; EPEL archive-only) specifics.
 - **Phase 7 - Generalization:** tool-agnostic contract + classification for tool #2.
+
+## [r03] - 2026-07-01 - Phase 3: AWS CLI v2
+
+The first per-tool matrix (framework steps a-e) for `aws_awscli-v2`. The dominant
+axis is **glibc** only (self-contained bundle). Pure logic and report generation
+are verified hermetically; the live container install is L3 (CI / egress host).
+
+### Added
+- `tests/aws_awscli-v2/list-awscli-releases.sh` (a) - collects the AWS CLI v2
+  release list via `git ls-remote --tags aws/aws-cli` (auth-free), computes each
+  version's `min_glibc` (reuse-by-copy of the matrix helpers), emits a
+  deterministic `awscli-releases.json`. Optional per-zip HEAD probe.
+- `tests/aws_awscli-v2/awscli-releases.json` - generated snapshot (**927** v2
+  versions; boundary 2.17.49->2.5, 2.17.50->2.17).
+- `tests/aws_awscli-v2/run-awscli-installtest-matrix.sh` (b, d) - the matrix:
+  pure helpers (`awscli_ge`, `awscli_min_glibc`, `awscli_in_scope`,
+  `awscli_verdict`, `python_eol`, `rhel_glibc`, `awscli_band`, `awscli_expected`),
+  a `--run` L3 install-test loop (acquire -> install bundle -> smoke -> ledger),
+  and `--generate-results` that writes `RESULTS-rhel<N>.md` from the release list
+  and the measured per-major glibc.
+- `tests/aws_awscli-v2/awscli-installtest-ledger.json` (c) - schema'd empirical
+  ledger; `results: []` until a live `--run` populates it.
+- `tests/aws_awscli-v2/RESULTS-rhel{6,7,8,9,10}.md` (d) - generated. The glibc
+  model resolves: RHEL 6 (2.12) -> current band **glibc-too-old**, legacy band
+  runs; RHEL 7 (2.17, at the floor) / 8 / 9 / 10 -> **runs** for both bands
+  (435 current + 492 legacy = 927). Empirical column = pending (filled by L3).
+- `tests/t008_awscliverdict.sh` (e) - L1 unit over every pure helper plus the
+  reuse-by-copy consistency (lister vs matrix). 45 assertions.
+
+### Removed
+- `tests/aws_awscli-v2/.gitkeep` (directory now carries the matrix artifacts).
+
+### Verified
+- Full suite green: **8 tiers, 180 passed, 0 skipped, 0 failed**. L0 now covers
+  **17 shell files**; the lister and matrix are ShellCheck-`style`-clean (markdown
+  backticks emitted as `\140` in printf formats to keep the gate strict, no
+  blanket SC2016 disable).
+- `awscli-releases.json` and the five `RESULTS-rhel<N>.md` were produced by the
+  real tools in this session (network: `git ls-remote` to github.com).
+
+### Notes
+- **Live install (L3) deferred to CI / a container-egress host** (no podman; the
+  AWS bundle CDN and quay are off-allowlist in the sandbox). `--generate-results`
+  is fully hermetic; `--run` records the empirical column where egress exists.
+  Tracked as the Phase-3 tail (analogous to the Phase-2 live-pull tail).
 
 ## [r02] - 2026-07-01 - Phase 2: Acquisition
 

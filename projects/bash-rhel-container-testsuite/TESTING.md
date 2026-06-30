@@ -126,6 +126,11 @@ so results are host-independent and deterministic.
 * **`t007_epelresolve.sh`** - EPEL baseurl/gpgkey/repo-body resolution across all
   majors, the EPEL 10 minor HEAD-probe branch (stubbed), and the RHEL 6 archive
   special-case.
+* **`t008_awscliverdict.sh`** (Phase 3) - the AWS CLI v2 matrix's pure helpers
+  (`awscli_ge`, `awscli_min_glibc`, `awscli_in_scope`, `awscli_verdict`,
+  `python_eol`, `rhel_glibc`, `awscli_band`, `awscli_expected`), loaded by
+  extracting each function body from `run-awscli-installtest-matrix.sh`, plus the
+  reuse-by-copy consistency between the matrix and `list-awscli-releases.sh`.
 
 ---
 
@@ -144,7 +149,7 @@ banner so each run records the environment it ran under.
 
 ---
 
-## Recorded baseline (Phase 2, r02)
+## Recorded baseline (Phase 3, r03)
 
 The full suite is green in the planning sandbox:
 
@@ -153,22 +158,27 @@ The full suite is green in the planning sandbox:
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
   podman:     (not installed - L3 uses the curl-only OCI fallback or SKIP)
----- t001_parse.sh ----            ## RESULT pass=14 fail=0 skip=0
----- t002_shellcheck.sh ----       ## RESULT pass=14 fail=0 skip=0
+---- t001_parse.sh ----            ## RESULT pass=17 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=17 fail=0 skip=0
 ---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
 ---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
 ---- t006_initmodemap.sh ----      ## RESULT pass=7  fail=0 skip=0
 ---- t007_epelresolve.sh ----      ## RESULT pass=34 fail=0 skip=0
-SUITE: 129 passed, 0 skipped, 0 failed  (7 tiers, 0 tier-failure(s))
+---- t008_awscliverdict.sh ----    ## RESULT pass=45 fail=0 skip=0
+SUITE: 180 passed, 0 skipped, 0 failed  (8 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 14 shell files**, each `bash -n`-clean and
-ShellCheck-`style`-clean: the 6 Phase-1 files (`tests/lib/{assert,mock,heredoc}.sh`,
-`tests/run-all.sh`, `tests/t001_parse.sh`, `tests/t002_shellcheck.sh`), the 3
-Phase-2 libraries (`lib/{acquire-rootfs,ubi-pkgmgr,epel}.sh`), and the 5 Phase-2
-unit tiers (`tests/t003`-`t007`).
+**L0 fixed count = 17 shell files**, each `bash -n`-clean and
+ShellCheck-`style`-clean: the 6 Phase-1 files, the 3 Phase-2 libraries
+(`lib/{acquire-rootfs,ubi-pkgmgr,epel}.sh`), the 5 Phase-2 unit tiers
+(`tests/t003`-`t007`), the Phase-3 verdict tier (`tests/t008`), and the two
+Phase-3 AWS CLI scripts (`tests/aws_awscli-v2/{list-awscli-releases,
+run-awscli-installtest-matrix}.sh`).
 
-**Residual:** the live pull (L3) is not exercisable in the sandbox (no podman; the
-quay blob CDN is off-allowlist); it runs in CI / on a container-egress host. The
-curl-only pull *sequence* is unit-tested end-to-end with mocks in `t003`.
+**Residuals (run on CI / a container-egress host):**
+- the live pull (L3) is not exercisable in the sandbox (no podman; the quay blob
+  CDN is off-allowlist); the curl-only pull *sequence* is unit-tested in `t003`.
+- the live AWS CLI install matrix (`run-awscli-installtest-matrix.sh --run`)
+  fills the empirical RESULTS column; the glibc model and `--generate-results`
+  are hermetic and were run this session to produce the committed reports.

@@ -99,7 +99,12 @@ bash-rhel-container-testsuite/
     run-all.sh                     # L0-L2 を一括実行するランナー
     t001_parse.sh  t002_shellcheck.sh             # L0（実装済み）
     t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2（Phase 2 ✅）
-    aws_awscli-v2/  aws_ssm-agent/  aws_ena-driver/   # ツール別マトリクス (Phase 3-5)
+    t008_awscliverdict.sh                         # L1 AWS CLI 判定（Phase 3 ✅）
+    aws_awscli-v2/                                # AWS CLI マトリクス（Phase 3 ✅）
+      list-awscli-releases.sh  awscli-releases.json
+      run-awscli-installtest-matrix.sh  awscli-installtest-ledger.json
+      RESULTS-rhel{6,7,8,9,10}.md
+    aws_ssm-agent/  aws_ena-driver/               # ツール別マトリクス (Phase 4-5)
 ```
 
 *(Phase N)* と記したファイルは**まだ存在しません**（下記「ステータス」参照）。
@@ -125,7 +130,7 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 
 ## ステータス
 
-これは **Phase 2（取得）** のドロップです。ここまでの完了状況:
+これは **Phase 3（AWS CLI v2）** のドロップです。ここまでの完了状況:
 
 * ✅ **Phase 0 — 実現可能性調査** — 実測した基礎事実（メジャー別 glibc、匿名リポジトリ
   集合、匿名プル、5 メジャー全体の entitled パススルー、RHEL 7 の固定タグ署名、EPEL
@@ -133,14 +138,15 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 * ✅ **Phase 1 — スキャフォールディング** — ディレクトリ骨格、`tests/lib/*` の移植、
   `run-all.sh`、`.shellcheckrc`、バイリンガル文書、そして緑の L0 ゲート。
 * ✅ **Phase 2 — 取得（acquisition）** — `lib/acquire-rootfs.sh`、
-  `lib/ubi-pkgmgr.sh`、`lib/epel.sh` と、それらのハーミティックな単体階層
-  `t003`〜`t007`。**スイート緑: 7 階層、129 件成功、0 件失敗。** 唯一の残課題は
-  **ライブプル（L3）** で、これは CI / コンテナ egress 可能なホストで実行します
-  （curl-only プルの手順は mock で end-to-end に単体テスト済み）。
+  `lib/ubi-pkgmgr.sh`、`lib/epel.sh` と単体階層 `t003`〜`t007`。
+* ✅ **Phase 3 — AWS CLI v2** — 最初のツール別マトリクス `tests/aws_awscli-v2/*`
+  （リリース収集＋927 バージョンの `awscli-releases.json`、install-test マトリクス、
+  glibc ledger、生成済み `RESULTS-rhel{6,7,8,9,10}.md`）と判定階層 `t008`。
+  **スイート緑: 8 階層、180 件成功、0 件失敗。** 残課題は **ライブインストール（L3）** で、
+  egress 可能なホストで empirical 列を埋めます。
 
-次は **Phase 3 — AWS CLI**（`tests/aws_awscli-v2/*`: リリース一覧、インストール検証
-マトリクス、glibc 台帳、RESULTS、判定階層）です。フェーズ計画の全体は
-[SPEC.md](./SPEC.md) §10 にあります。
+次は **Phase 4 — AWS SSM Agent**（`tests/aws_ssm-agent/*`: glibc **＋ init_mode**、
+S3 RPM、RESULTS）です。フェーズ計画の全体は [SPEC.md](./SPEC.md) §10 にあります。
 
 ---
 
