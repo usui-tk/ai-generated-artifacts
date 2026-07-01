@@ -17,10 +17,12 @@
 #   anonymous -> skip (no kernel-devel)                  -> needs-entitlement
 #   any       -> load / runtime                          -> L4 (impossible in a container)
 #
-# Surfaces: --generate-results (DEFAULT, hermetic) writes RESULTS-rhel<N>.md from
-# ena-driver-releases.json + the per-major kernel-devel repo + the entitlement
-# grid; --run (L3, entitled container egress) acquires an entitled rootfs,
-# installs kernel-devel/gcc/make, fetches the ENA source, builds, and records.
+# Surfaces: NO-ARG (DEFAULT) runs the build matrix (all majors x entitlement),
+# persists the ledger, then regenerates RESULTS-rhel<N>.md (mirrors the OL model's
+# one-script workflow). Module load-readiness is a SEPARATE verify pass.
+#   --run              : run the build matrix + persist the ledger only (podman/L3)
+#   --generate-results : (re)generate the reports only, hermetic (no containers)
+# Knobs: OSMAJORS, ENTITLEMENTS, INSECURE_TLS. Then: ./verify-ena-buildresults.sh
 #
 # The column-0 pure helpers carry the unit coverage in tests/t010_enaverdict.sh.
 #==============================================================================
@@ -218,12 +220,56 @@ result_field() {
   printf '%s' "${v}"
 }
 
+# ensure_ledger : create the ledger skeleton if missing (e.g. after `rm -rf *.json`),
+# so a from-scratch `list -> run` produces the baseline evidence file.
+ensure_ledger() {
+  [ -f "${LEDGER}" ] && return 0
+  cat > "${LEDGER}" <<'JSON'
+{
+  "tool": "aws_ena-driver",
+  "note": "Empirical build-test ledger. Created/appended by run-ena-buildtest-matrix.sh on an ENTITLED container-egress host (L3); never hand-edited.",
+  "results": []
+}
+JSON
+  log "created ledger skeleton: ${LEDGER}"
+}
+
+# persist_ledger <rows-file> : fold the swept JSONL rows into ${LEDGER}'s results[]
+# (dedup by osmajor+ena_version+entitlement; last write wins). Atomic tmp+replace.
+persist_ledger() {
+  local rows="$1"
+  [ -f "${LEDGER}" ] || { log "no ledger at ${LEDGER}; skipping persist"; return 0; }
+  python3 - "${LEDGER}" "${rows}" <<'PY2' 2>/dev/null || { log "WARNING: ledger persist failed"; return 0; }
+import json,sys,os,tempfile
+led,rowsfile=sys.argv[1],sys.argv[2]
+try: d=json.load(open(led))
+except Exception: sys.exit(1)
+rows=[]
+for ln in open(rowsfile):
+    ln=ln.strip()
+    if not ln: continue
+    try: rows.append(json.loads(ln))
+    except Exception: pass
+def key(r): return (str(r.get("osmajor")), r.get("ena_version"), r.get("entitlement"))
+merged={}
+for r in d.get("results",[]): merged[key(r)]=r
+for r in rows: merged[key(r)]=r
+d["results"]=[merged[k] for k in sorted(merged, key=lambda k:(int(k[0]) if str(k[0]).isdigit() else 0, k[1] or "", k[2] or ""))]
+fd,tmp=tempfile.mkstemp(dir=os.path.dirname(led) or ".")
+with os.fdopen(fd,"w") as fh: json.dump(d,fh,indent=2); fh.write("\n")
+os.replace(tmp,led)
+PY2
+  log "ledger updated: ${LEDGER} ($(grep -c '"ena_version"' "${rows}") rows)"
+}
+
 run_matrix() {
+  ensure_ledger
   command -v podman >/dev/null 2>&1 || { log "ERROR: --run needs podman (L3)"; return 2; }
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref out line built status kov
+  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref out line built status kov row rows_tmp
+  rows_tmp="$(mktemp)"
   for major in ${majors}; do
     ver="$(releases_max)"
     repo="$(ena_kdevel_repo "${major}")"
@@ -244,16 +290,27 @@ run_matrix() {
       built="$(result_field "${line}" built)"; [ "${built}" = "true" ] || built=false
       status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
       kov="$(result_field "${line}" ko_version)"
-      printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s"}
-' \
+      row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s"}' \
         "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" \
-        "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)"
+        "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)")"
+      printf '%s
+' "${row}"
+      printf '%s
+' "${row}" >> "${rows_tmp}"
     done
   done
+  persist_ledger "${rows_tmp}"
+  rm -f "${rows_tmp}"
 }
 
 # --- arg parsing -------------------------------------------------------------
-ACTION="generate-results"
+# No-arg default = the full build-test: run the matrix (all majors x entitlement),
+# persist the ledger, then regenerate RESULTS. Mirrors the OL model's one-script
+# workflow. Module LOAD is L4 (Nitro); load-readiness is a SEPARATE verify pass
+# (./verify-ena-buildresults.sh).
+#   --run              : run the build matrix + persist the ledger only (needs podman/L3)
+#   --generate-results : (re)generate the reports only, hermetic (no containers)
+ACTION="all"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --run)              ACTION="run" ;;
@@ -268,6 +325,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "${ACTION}" in
-  generate-results) generate_results ;;
+  all)              run_matrix || log "run step did not complete (see above); writing reports from the current ledger"; generate_results ;;
   run)              run_matrix ;;
+  generate-results) generate_results ;;
 esac

@@ -11,14 +11,12 @@
 # manylinux2014 (glibc 2.17 floor); <= 2.17.49 the older manylinux1 floor (2.5).
 #
 # Two run surfaces:
-#   * --generate-results (DEFAULT, hermetic): from awscli-releases.json + the
-#     measured per-major glibc, write RESULTS-rhel<N>.md - the glibc-model
-#     expectation per major, with the empirical column read from the ledger if a
-#     live run has populated it (else "pending"). Runs anywhere; no container.
-#   * --run (L3, container egress required): for each (major, version) acquire a
-#     rootfs via lib/acquire-rootfs.sh, install the bundle in a disposable
-#     container, smoke `aws --version`, emit a [result] JSON, and append it to the
-#     dedup ledger. Deferred to CI / a podman+egress host.
+#   * NO-ARG (DEFAULT): run the matrix (all majors x every in-scope version),
+#     persist the ledger, then regenerate RESULTS-rhel<N>.md - one shot (mirrors
+#     the OL model's one-script workflow).
+#   * --run: run the matrix + persist the ledger only (needs podman/L3).
+#   * --generate-results: (re)generate the reports only, hermetic (no container),
+#     empirical columns read from the ledger if a live run has populated it.
 #
 # The pure helpers below (awscli_ge / awscli_min_glibc / awscli_in_scope /
 # awscli_verdict / python_eol / rhel_glibc / awscli_band / awscli_expected) carry
@@ -263,12 +261,56 @@ result_field() {
   printf '%s' "${v}"
 }
 
+# ensure_ledger : create the ledger skeleton if missing (e.g. after `rm -rf *.json`),
+# so a from-scratch `list -> run` produces the baseline evidence file.
+ensure_ledger() {
+  [ -f "${LEDGER}" ] && return 0
+  cat > "${LEDGER}" <<'JSON'
+{
+  "tool": "aws_awscli-v2",
+  "note": "Empirical install-test ledger. Created/appended by run-awscli-installtest-matrix.sh on a container-egress host (L3); never hand-edited.",
+  "results": []
+}
+JSON
+  log "created ledger skeleton: ${LEDGER}"
+}
+
+# persist_ledger <rows-file> : fold the swept JSONL rows into ${LEDGER}'s results[]
+# (dedup by osmajor+awscli_version; last write wins). Atomic tmp+replace.
+persist_ledger() {
+  local rows="$1"
+  [ -f "${LEDGER}" ] || { log "no ledger at ${LEDGER}; skipping persist"; return 0; }
+  python3 - "${LEDGER}" "${rows}" <<'PY2' 2>/dev/null || { log "WARNING: ledger persist failed"; return 0; }
+import json,sys,os,tempfile
+led,rowsfile=sys.argv[1],sys.argv[2]
+try: d=json.load(open(led))
+except Exception: sys.exit(1)
+rows=[]
+for ln in open(rowsfile):
+    ln=ln.strip()
+    if not ln: continue
+    try: rows.append(json.loads(ln))
+    except Exception: pass
+def key(r): return (str(r.get("osmajor")), r.get("awscli_version"))
+merged={}
+for r in d.get("results",[]): merged[key(r)]=r
+for r in rows: merged[key(r)]=r
+d["results"]=[merged[k] for k in sorted(merged, key=lambda k:(int(k[0]) if str(k[0]).isdigit() else 0, k[1] or ""))]
+fd,tmp=tempfile.mkstemp(dir=os.path.dirname(led) or ".")
+with os.fdopen(fd,"w") as fh: json.dump(d,fh,indent=2); fh.write("\n")
+os.replace(tmp,led)
+PY2
+  log "ledger updated: ${LEDGER} ($(grep -c '"awscli_version"' "${rows}") rows)"
+}
+
 run_matrix() {
+  ensure_ledger
   command -v podman >/dev/null 2>&1 || { log "ERROR: --run needs podman (L3)"; return 2; }
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref out line ran iv status bpy mgl
+  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref out line ran iv status bpy mgl row rows_tmp
+  rows_tmp="$(mktemp)"
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
     while IFS= read -r ver; do
@@ -287,16 +329,26 @@ run_matrix() {
       status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
       bpy="$(result_field "${line}" bundled_python)"
       mgl="$(result_field "${line}" min_glibc_measured)"
-      printf '{"status":"%s","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"installed_version":"%s","bundled_python":"%s","min_glibc_measured":"%s","verdict":"%s"}
-' \
+      row="$(printf '{"status":"%s","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"installed_version":"%s","bundled_python":"%s","min_glibc_measured":"%s","verdict":"%s"}' \
         "${status}" "${major}" "${ver}" "$(rhel_glibc "${major}")" "${ran}" "${iv}" "${bpy}" "${mgl}" \
-        "$(awscli_verdict "$(rhel_glibc "${major}")" "$(awscli_min_glibc "${ver}")" "${ran}")"
+        "$(awscli_verdict "$(rhel_glibc "${major}")" "$(awscli_min_glibc "${ver}")" "${ran}")")"
+      printf '%s
+' "${row}"
+      printf '%s
+' "${row}" >> "${rows_tmp}"
     done < <(releases_versions || true)
   done
+  persist_ledger "${rows_tmp}"
+  rm -f "${rows_tmp}"
 }
 
 # --- arg parsing -------------------------------------------------------------
-ACTION="generate-results"
+# No-arg default = the full install-test: run the matrix (all majors x every
+# in-scope version), persist the ledger, then regenerate RESULTS. Mirrors the OL
+# model's one-script workflow.
+#   --run              : run the matrix + persist the ledger only (needs podman/L3)
+#   --generate-results : (re)generate the reports only, hermetic (no containers)
+ACTION="all"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --run)              ACTION="run" ;;
@@ -311,6 +363,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "${ACTION}" in
-  generate-results) generate_results ;;
+  all)              run_matrix || log "run step did not complete (see above); writing reports from the current ledger"; generate_results ;;
   run)              run_matrix ;;
+  generate-results) generate_results ;;
 esac

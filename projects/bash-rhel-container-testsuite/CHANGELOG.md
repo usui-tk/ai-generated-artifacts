@@ -11,6 +11,33 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r13] - 2026-07-01 - ENA + AWS CLI: one-shot E2E (parity with r12/SSM)
+
+Extends the r12 one-script model to the other two tools, so all three follow the
+OL model's `rm -rf *.md *.json; ./list-...; ./run-...` workflow.
+
+### Changed
+- **ENA + AWS CLI `run-...-matrix.sh` no-arg default is now the full E2E**
+  (`ACTION=all`): run the matrix, persist the ledger, then regenerate RESULTS in
+  one invocation. `--run` (matrix + ledger only) and `--generate-results`
+  (hermetic reports only) remain as explicit sub-actions.
+- **Ledger auto-create + persist** (`ensure_ledger` / `persist_ledger`): a skeleton
+  is written if the ledger is missing (so a from-scratch `list -> run` works after
+  `rm *.json`); each run's rows are folded into `results[]` (ENA dedup key
+  osmajor+ena_version+entitlement; AWS CLI osmajor+awscli_version; atomic write).
+  If podman is absent, the run step is skipped with a clear message and the reports
+  are still regenerated.
+- **ENA `verify-ena-buildresults.sh` runs with no args**: `--ledger` defaults to the
+  local `buildtest-ledger.json`, `--bundle` to `./build-bundle`; when no bundle is
+  present yet it reports load-readiness *pending* and exits 0 (instead of a hard
+  error), so `./run-... ; ./verify-...` composes cleanly. Verify stays a separate
+  step (module load is L4 / real Nitro).
+
+### Verified
+- Each flow (`rm; list; run` [+ `verify` for ENA]) produces the ledger skeleton +
+  all five reports; suite green (**16 tiers, 430 passed**); ShellCheck-`style`-clean;
+  no-arg run and `--generate-results` idempotent.
+
 ## [r12] - 2026-07-01 - SSM: one-shot E2E (no-arg run + version sweep + evidence)
 
 Makes the SSM matrix a single-command E2E, matching the OL model's workflow:

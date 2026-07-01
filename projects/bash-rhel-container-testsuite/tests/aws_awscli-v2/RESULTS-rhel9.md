@@ -10,7 +10,7 @@
 | Image (measured) | `ubi9/ubi-init (9.8)` |
 | OS glibc (measured) | **2.34** |
 | AWS CLI v2 axis | glibc only (self-contained bundle) |
-| In-scope v2 versions | 927 |
+| In-scope v2 versions | 928 |
 
 ## Why this matters - AWS CLI v2 glibc support
 
@@ -27,7 +27,7 @@ On RHEL 9 (glibc 2.34): current versions (>= 2.17.50) are **runs**; the legacy b
 
 | Band | min glibc | expected on RHEL 9 | in-scope count |
 |:--|:--|:--|--:|
-| current `>=2.17.50` | 2.17 | runs | 435 |
+| current `>=2.17.50` | 2.17 | runs | 436 |
 | legacy `<=2.17.49` | 2.5 | runs | 492 |
 
 ## boundary versions (empirical = filled by L3)

@@ -64,7 +64,8 @@ EOF
 # ---- the rest runs only when executed (not when sourced for unit tests) ------
 [ "${ENA_LIB_ONLY:-0}" = "1" ] && return 0 2>/dev/null
 
-LEDGER=""; BUNDLE=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LEDGER="${SCRIPT_DIR}/buildtest-ledger.json"; BUNDLE="${SCRIPT_DIR}/build-bundle"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --ledger) LEDGER="${2:-}"; shift 2 ;;
@@ -73,8 +74,12 @@ while [ "$#" -gt 0 ]; do
     *) printf 'unknown arg: %s\n' "$1" >&2; exit 2 ;;
   esac
 done
-if [ -z "${LEDGER}" ] || [ ! -f "${LEDGER}" ]; then printf 'ledger not found: %s\n' "${LEDGER:-(unset)}" >&2; exit 2; fi
-if [ -z "${BUNDLE}" ] || [ ! -d "${BUNDLE}" ]; then printf 'bundle dir not found: %s\n' "${BUNDLE:-(unset)}" >&2; exit 2; fi
+if [ -z "${LEDGER}" ] || [ ! -f "${LEDGER}" ]; then printf 'ledger not found: %s (run ./run-ena-buildtest-matrix.sh first)\n' "${LEDGER:-(unset)}" >&2; exit 2; fi
+if [ -z "${BUNDLE}" ] || [ ! -d "${BUNDLE}" ]; then
+  printf 'no build bundle at %s -> nothing to verify yet (load-readiness pending).\n' "${BUNDLE:-(unset)}" >&2
+  printf 'Run the entitled build first (./run-ena-buildtest-matrix.sh on an entitled/Nitro-adjacent host); it preserves the ko + Module.symvers + vermagic bundle, then re-run verify.\n' >&2
+  exit 0
+fi
 
 # Stream OK rows (built=true) from the ledger as TSV: osmajor<TAB>ena_version<TAB>kver
 rows="$(python3 - "${LEDGER}" <<'PY'
