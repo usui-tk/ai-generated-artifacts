@@ -160,6 +160,20 @@ PY
 
 # --- (d) RESULTS generation (hermetic) ---------------------------------------
 
+# ledger_host_line : format the ledger's 'host' meta as a one-line summary for
+# the RESULTS header (or a placeholder if a live run has not populated it yet).
+ledger_host_line() {
+  [ -f "${LEDGER}" ] || { printf '(not yet run)'; return 0; }
+  python3 - "${LEDGER}" <<'PY2' 2>/dev/null || printf '(not yet run)'
+import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: print("(not yet run)"); sys.exit(0)
+h=d.get("host")
+if not h: print("(not yet run)"); sys.exit(0)
+print("%s, kernel %s %s, SELinux: %s, %s" % (h.get("os","?"),h.get("kernel","?"),h.get("arch","?"),h.get("selinux","?"),h.get("runtime","?")))
+PY2
+}
+
 generate_results_for() {
   local major="$1" osg img out v ming exp ran verdict n_current n_legacy
   osg="$(rhel_glibc "${major}")"
@@ -191,6 +205,7 @@ generate_results_for() {
     printf '| AWS CLI v2 axis | glibc only (self-contained bundle) |\n'
     printf '| In-scope v2 versions | %s |\n\n' "$(releases_versions 2>/dev/null | grep -c . || printf '0')"
 
+    printf '_Collected on (this run): %s_\n\n' "$(ledger_host_line)"
     printf '## Why this matters - AWS CLI v2 glibc support\n\n'
     printf 'AWS CLI v2 ships a self-contained zip bundle that BUNDLES its own Python, so it does not use the OS Python - but the bundled interpreter and its shared objects are built against a **manylinux glibc**, so the OS **glibc** gates whether the bundle installs and runs. Per AWS *Linux Support Updates for AWS CLI v2* (2024-09-16), current v2 is built on **manylinux2014 (glibc 2.17)** and supports glibc >= 2.17; systems on glibc <= 2.16 should pin v2 **<= 2.17.49**. This report characterizes, per RHEL %s environment, which v2 versions install + run - i.e. the newest AWS CLI v2 a RHEL %s image can actually use.\n\n' "${major}" "${major}"
     printf 'References (AWS): [Linux support updates](https://aws.amazon.com/blogs/developer/linux-support-updates-for-aws-cli-v2/); [install AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html); [a specific version](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-version.html).\n\n'
@@ -309,49 +324,71 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
+  host_banner
+  record_host_meta "${LEDGER}"
   acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
-  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref out err_tmp line ran iv status bpy mgl reason row rows_tmp
+  local LOG_DIR="${SCRIPT_DIR}/logs"
+  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref rows_tmp
   rows_tmp="$(mktemp)"
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
     while IFS= read -r ver; do
       [ -n "${ver}" ] || continue
       awscli_in_scope "${ver}" 0 || continue
-      # KICK install-aws_awscli-v2.sh in AWSCLI_INSTALLTEST mode. The bind-mount uses
-      # ':z' so the container can read the script under SELinux; stderr is captured
-      # so a podman/container error is reported (not hidden as a false install-fail).
-      err_tmp="$(mktemp)"
-      out="$(podman run --rm \
-              -v "${INSTALL_SCRIPT}:/install-aws_awscli-v2.sh:ro,z" \
-              -e AWSCLI_INSTALLTEST=1 -e "AWSCLI_VERSION=${ver}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-              "${ref}" /bin/bash /install-aws_awscli-v2.sh 2>"${err_tmp}" || true)"
-      line="$(printf '%s
-' "${out}" | grep -F '[aws_awscli-v2][installtest][result]' | tail -1)"
-      if [ -z "${line}" ]; then
-        reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
-        [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
-        log "RHEL${major} ${ver}: harness-error -> ${reason}"
-        row="$(printf '{"status":"error","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":false,"installed_version":"","bundled_python":"","min_glibc_measured":"","verdict":"harness-error","reason":"%s"}' \
-          "${major}" "${ver}" "$(rhel_glibc "${major}")" "${reason}")"
-      else
-        ran="$(result_field "${line}" ran)"; [ "${ran}" = "true" ] || ran=false
-        iv="$(result_field "${line}" installed_version)"
-        status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
-        bpy="$(result_field "${line}" bundled_python)"
-        mgl="$(result_field "${line}" min_glibc_measured)"
-        row="$(printf '{"status":"%s","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"installed_version":"%s","bundled_python":"%s","min_glibc_measured":"%s","verdict":"%s"}' \
-          "${status}" "${major}" "${ver}" "$(rhel_glibc "${major}")" "${ran}" "${iv}" "${bpy}" "${mgl}" \
-          "$(awscli_verdict "$(rhel_glibc "${major}")" "$(awscli_min_glibc "${ver}")" "${ran}")")"
-      fi
-      rm -f "${err_tmp}"
-      printf '%s
-' "${row}"
-      printf '%s
-' "${row}" >> "${rows_tmp}"
+      awscli_kick "${major}" "${ver}" "${ref}" "${LOG_DIR}" "${rows_tmp}"
     done < <(releases_versions || true)
   done
   persist_ledger "${rows_tmp}"
   rm -f "${rows_tmp}"
+}
+
+# awscli_kick <major> <ver> <ref> <log_dir> <rows_file> : install-test one
+# (major, version) in a container, record the row (+reason), and on non-ok
+# preserve the container output to <log_dir> (fail/error only).
+awscli_kick() {
+  local major="$1" ver="$2" ref="$3" log_dir="$4" rows="$5"
+  local err_tmp out line ran iv status bpy mgl reason row logf
+  err_tmp="$(mktemp)"
+  out="$(podman run --rm \
+          -v "${INSTALL_SCRIPT}:/install-aws_awscli-v2.sh:ro,z" \
+          -e AWSCLI_INSTALLTEST=1 -e "AWSCLI_VERSION=${ver}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
+          "${ref}" /bin/bash /install-aws_awscli-v2.sh 2>"${err_tmp}" || true)"
+  line="$(printf '%s
+' "${out}" | grep -F '[aws_awscli-v2][installtest][result]' | tail -1)"
+  logf="${log_dir}/installtest-rhel${major}-awscli_${ver}.log"
+  if [ -z "${line}" ]; then
+    reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
+    [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
+    status=error
+    log "RHEL${major} ${ver}: harness-error -> ${reason}"
+    row="$(printf '{"status":"error","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":false,"installed_version":"","bundled_python":"","min_glibc_measured":"","verdict":"harness-error","reason":"%s"}' \
+      "${major}" "${ver}" "$(rhel_glibc "${major}")" "${reason}")"
+  else
+    ran="$(result_field "${line}" ran)"; [ "${ran}" = "true" ] || ran=false
+    iv="$(result_field "${line}" installed_version)"
+    status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+    bpy="$(result_field "${line}" bundled_python)"
+    mgl="$(result_field "${line}" min_glibc_measured)"
+    reason="$(jesc "$(result_field "${line}" reason)")"
+    row="$(printf '{"status":"%s","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"installed_version":"%s","bundled_python":"%s","min_glibc_measured":"%s","verdict":"%s","reason":"%s"}' \
+      "${status}" "${major}" "${ver}" "$(rhel_glibc "${major}")" "${ran}" "${iv}" "${bpy}" "${mgl}" \
+      "$(awscli_verdict "$(rhel_glibc "${major}")" "$(awscli_min_glibc "${ver}")" "${ran}")" "${reason}")"
+  fi
+  if [ "${status}" != "ok" ]; then
+    mkdir -p "${log_dir}"
+    { printf '=== podman stdout ===
+%s
+=== podman stderr ===
+' "${out}"; cat "${err_tmp}" 2>/dev/null; } > "${logf}" 2>/dev/null || true
+    log "  log preserved: ${logf}"
+  else
+    rm -f "${logf}" 2>/dev/null || true
+  fi
+  rm -f "${err_tmp}"
+  printf '%s
+' "${row}"
+  printf '%s
+' "${row}" >> "${rows}"
 }
 
 # --- arg parsing -------------------------------------------------------------

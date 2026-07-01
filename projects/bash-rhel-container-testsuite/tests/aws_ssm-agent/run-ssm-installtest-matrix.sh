@@ -146,6 +146,20 @@ PY
 
 # --- (d) RESULTS generation (hermetic) ---------------------------------------
 
+# ledger_host_line : format the ledger's 'host' meta as a one-line summary for
+# the RESULTS header (or a placeholder if a live run has not populated it yet).
+ledger_host_line() {
+  [ -f "${LEDGER}" ] || { printf '(not yet run)'; return 0; }
+  python3 - "${LEDGER}" <<'PY2' 2>/dev/null || printf '(not yet run)'
+import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: print("(not yet run)"); sys.exit(0)
+h=d.get("host")
+if not h: print("(not yet run)"); sys.exit(0)
+print("%s, kernel %s %s, SELinux: %s, %s" % (h.get("os","?"),h.get("kernel","?"),h.get("arch","?"),h.get("selinux","?"),h.get("runtime","?")))
+PY2
+}
+
 generate_results_for() {
   local major="$1" osg img out maxver compliance mode v cell installed ran verdict exp
   osg="$(rhel_glibc "${major}")"
@@ -171,6 +185,7 @@ generate_results_for() {
     printf '| In-scope versions (>= %s) | %s |\n' "${SSM_MIN}" "$(releases_versions 2>/dev/null | while read -r v; do ssm_ge "${v}" "${SSM_MIN}" && echo x; done | grep -c x || printf '0')"
     printf '| Newest version | %s |\n' "${maxver:-unknown}"
     printf '| Feature compliance | **%s** (min %s) |\n\n' "${compliance}" "${SSM_MIN}"
+    printf '_Collected on (this run): %s_\n\n' "$(ledger_host_line)"
 
     printf '## Why this matters - AWS Systems Manager Run Command deprecation\n\n'
     # shellcheck disable=SC2016  # backticks are literal Markdown code spans in the single-quoted format
@@ -197,8 +212,8 @@ generate_results_for() {
     done
     printf '\n_The acquire forms come from lib/acquire-rootfs.sh acq_init_run_args (Phase 2)._\n\n'
 
-    printf '## E2E sweep evidence (min %s -> latest, per version x init_mode)\n\n' "${SSM_MIN}"
-    printf '%s\n\n' "On RHEL ${major}, the newest agent (${maxver:-unknown}) is **${compliance}**. Cells are filled from the ledger by the run (\`ran/installed\`); \`pending\` = not yet run. Agents below ${SSM_MIN} are out of scope (ec2messages-only)."
+    printf '## E2E sweep evidence (min %s -> latest)\n\n' "${SSM_MIN}"
+    printf '%s\n\n' "On RHEL ${major}, the newest agent (${maxver:-unknown}) is **${compliance}**. \`none\` (install + \`-version\`) is swept for every in-scope version; \`systemd\` (service enable) is verified on the representative version (${maxver:-latest}) only - install/run do not depend on init_mode, so other systemd cells read \`n/a\`. \`pending\` = not yet run; agents below ${SSM_MIN} are out of scope (ec2messages-only)."
     printf '| version | >= min | none (ran/installed) | systemd (ran/installed) | verdict |\n|:--|:--|:--|:--|:--|\n'
     for v in $(ssm_inscope_versions); do
       [ -n "${v}" ] || continue
@@ -209,8 +224,10 @@ generate_results_for() {
       if [ -n "${c_sys}" ]; then
         s_inst="${c_sys%%|*}"; s_ran="${c_sys##*|}"; scell="${s_ran}/${s_inst}"
         vdt="$(ssm_verdict "${s_inst}" "${s_ran}" systemd)"
-      else
+      elif [ "${v}" = "${maxver}" ]; then
         scell="pending"; vdt="pending"
+      else
+        scell="n/a"; vdt="n/a"
       fi
       printf '| %s | %s | %s | %s | %s |\n' "${v}" "${ge}" "${ncell}" "${scell}" "${vdt}"
     done
@@ -289,57 +306,77 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
+  host_banner
+  record_host_meta "${LEDGER}"
   acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
-  local majors="${OSMAJORS:-10 9 8 7 6}" modes="${INITMODES:-none systemd}"
-  # E2E sweep set: default = every in-scope version (min SSM_MIN -> latest),
-  # ascending. Override with SSM_VERSIONS="3.3.3598.0 3.3.4793.0" to narrow.
+  local LOG_DIR="${SCRIPT_DIR}/logs"
+  local majors="${OSMAJORS:-10 9 8 7 6}"
+  # Case A: install/ran do NOT depend on init_mode, only service_enabled does.
+  # So sweep every in-scope version in 'none' (install/run evidence per version),
+  # and test 'systemd' (service enablement) only on a representative version per
+  # major. Override the none set with SSM_VERSIONS, the systemd set with
+  # SSM_SYSTEMD_VERSIONS (default = the latest in-scope version).
   local versions="${SSM_VERSIONS:-$(ssm_inscope_versions | tr '
 ' ' ')}"
-  local major mode ref ver out err_tmp line installed ran svc status reason row rows_tmp
+  local systemd_versions="${SSM_SYSTEMD_VERSIONS:-$(releases_max)}"
+  local major ref ver rows_tmp
   rows_tmp="$(mktemp)"
-  log "sweep: majors=[${majors}] modes=[${modes}] versions=[${versions}]"
+  log "sweep (Case A): majors=[${majors}] none=[${versions}] systemd-rep=[${systemd_versions}]"
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}"; continue; }
-    for ver in ${versions}; do
-      for mode in ${modes}; do
-        # KICK install-aws_ssm-agent.sh in SSM_INSTALLTEST mode: install the RPM,
-        # run `amazon-ssm-agent -version`, and (systemd) enable for boot. The
-        # bind-mount uses ':z' so the container can read the script under SELinux;
-        # stderr is captured so a podman/container error is reported, not hidden.
-        err_tmp="$(mktemp)"
-        out="$(podman run --rm \
-                -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro,z" \
-                -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-                "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>"${err_tmp}" || true)"
-        line="$(printf '%s
-' "${out}" | grep -F '[aws_ssm-agent][installtest][result]' | tail -1)"
-        if [ -z "${line}" ]; then
-          # No [result] emitted -> the container/harness failed (podman, pull, SELinux,
-          # auth), NOT a genuine install-fail. Record status=error + the real reason.
-          reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
-          [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
-          log "RHEL${major} ${ver}/${mode}: harness-error -> ${reason}"
-          row="$(printf '{"status":"error","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":false,"ran":false,"service_enabled":false,"verdict":"harness-error","reason":"%s"}' \
-            "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${reason}")"
-        else
-          installed="$(result_field "${line}" installed)"; [ "${installed}" = "true" ] || installed=false
-          ran="$(result_field "${line}" ran)";             [ "${ran}" = "true" ] || ran=false
-          svc="$(result_field "${line}" service_enabled)"; [ "${svc}" = "true" ] || svc=false
-          status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
-          row="$(printf '{"status":"%s","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"verdict":"%s"}' \
-            "${status}" "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" "${svc}" \
-            "$(ssm_verdict "${installed}" "${ran}" "${mode}")")"
-        fi
-        rm -f "${err_tmp}"
-        printf '%s
-' "${row}"
-        printf '%s
-' "${row}" >> "${rows_tmp}"
-      done
-    done
+    for ver in ${versions}; do ssm_kick "${major}" "${ver}" none "${ref}" "${LOG_DIR}" "${rows_tmp}"; done
+    for ver in ${systemd_versions}; do ssm_kick "${major}" "${ver}" systemd "${ref}" "${LOG_DIR}" "${rows_tmp}"; done
   done
   persist_ledger "${rows_tmp}"
   rm -f "${rows_tmp}"
+}
+
+# ssm_kick <major> <ver> <mode> <ref> <log_dir> <rows_file> : run one install-test
+# in a container, parse the [result], record the row (+reason), and on non-ok
+# preserve the container output to <log_dir> (fail/error only).
+ssm_kick() {
+  local major="$1" ver="$2" mode="$3" ref="$4" log_dir="$5" rows="$6"
+  local err_tmp out line installed ran svc status verdict reason row logf
+  err_tmp="$(mktemp)"
+  out="$(podman run --rm \
+          -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro,z" \
+          -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
+          "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>"${err_tmp}" || true)"
+  line="$(printf '%s
+' "${out}" | grep -F '[aws_ssm-agent][installtest][result]' | tail -1)"
+  logf="${log_dir}/installtest-rhel${major}-ssm_${ver}_${mode}.log"
+  if [ -z "${line}" ]; then
+    reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
+    [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
+    status=error; verdict=harness-error
+    log "RHEL${major} ${ver}/${mode}: harness-error -> ${reason}"
+    row="$(printf '{"status":"error","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":false,"ran":false,"service_enabled":false,"verdict":"harness-error","reason":"%s"}' \
+      "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${reason}")"
+  else
+    installed="$(result_field "${line}" installed)"; [ "${installed}" = "true" ] || installed=false
+    ran="$(result_field "${line}" ran)";             [ "${ran}" = "true" ] || ran=false
+    svc="$(result_field "${line}" service_enabled)"; [ "${svc}" = "true" ] || svc=false
+    status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+    verdict="$(ssm_verdict "${installed}" "${ran}" "${mode}")"
+    reason="$(jesc "$(result_field "${line}" reason)")"
+    row="$(printf '{"status":"%s","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"verdict":"%s","reason":"%s"}' \
+      "${status}" "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" "${svc}" "${verdict}" "${reason}")"
+  fi
+  if [ "${status}" != "ok" ]; then
+    mkdir -p "${log_dir}"
+    { printf '=== podman stdout ===
+%s
+=== podman stderr ===
+' "${out}"; cat "${err_tmp}" 2>/dev/null; } > "${logf}" 2>/dev/null || true
+    log "  log preserved: ${logf}"
+  else
+    rm -f "${logf}" 2>/dev/null || true
+  fi
+  rm -f "${err_tmp}"
+  printf '%s
+' "${row}"
+  printf '%s
+' "${row}" >> "${rows}"
 }
 
 # --- arg parsing -------------------------------------------------------------

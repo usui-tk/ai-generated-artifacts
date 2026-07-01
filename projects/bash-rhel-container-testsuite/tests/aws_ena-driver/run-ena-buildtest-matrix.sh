@@ -146,6 +146,20 @@ PY
 
 # --- (d) RESULTS generation (hermetic) ---------------------------------------
 
+# ledger_host_line : format the ledger's 'host' meta as a one-line summary for
+# the RESULTS header (or a placeholder if a live run has not populated it yet).
+ledger_host_line() {
+  [ -f "${LEDGER}" ] || { printf '(not yet run)'; return 0; }
+  python3 - "${LEDGER}" <<'PY2' 2>/dev/null || printf '(not yet run)'
+import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: print("(not yet run)"); sys.exit(0)
+h=d.get("host")
+if not h: print("(not yet run)"); sys.exit(0)
+print("%s, kernel %s %s, SELinux: %s, %s" % (h.get("os","?"),h.get("kernel","?"),h.get("arch","?"),h.get("selinux","?"),h.get("runtime","?")))
+PY2
+}
+
 generate_results_for() {
   local major="$1" repo img out maxver mn ent plan built verdict cell v
   repo="$(ena_kdevel_repo "${major}")"
@@ -172,6 +186,7 @@ generate_results_for() {
     printf '| Newest ENA version | %s |\n' "${maxver:-unknown}"
     printf '| In-scope versions (>= %s) | %s |\n\n' "${mn}" "$(releases_versions 2>/dev/null | while read -r v; do ena_ge "${v}" "${mn}" && echo x; done | grep -c x || printf '0')"
 
+    printf '_Collected on (this run): %s_\n\n' "$(ledger_host_line)"
     printf '## E2%s entitlement grid (the ENA axis)\n\n' "'"
     printf '| entitlement | build plan | expected | empirical | verdict |\n'
     printf '|:--|:--|:--|:--|:--|\n'
@@ -268,8 +283,11 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
+  host_banner
+  record_host_meta "${LEDGER}"
   acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
-  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref out err_tmp line built status kov reason row rows_tmp
+  local LOG_DIR="${SCRIPT_DIR}/logs"
+  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref rows_tmp
   rows_tmp="$(mktemp)"
   for major in ${majors}; do
     ver="$(releases_max)"
@@ -277,40 +295,59 @@ run_matrix() {
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
     for ent in ${ents}; do
       plan="$(ena_build_plan "${ent}" 0)"
-      # KICK install-aws_ena-driver.sh in ENA_INSTALLTEST mode. The bind-mount uses
-      # ':z' so the container can read the script under SELinux; stderr is captured
-      # so a podman/container error is reported (not hidden as a false build-fail).
-      err_tmp="$(mktemp)"
-      out="$(podman run --rm \
-              -v "${INSTALL_SCRIPT}:/install-aws_ena-driver.sh:ro,z" \
-              -e ENA_INSTALLTEST=1 -e "ENA_VERSION=${ver}" -e "ENA_ENTITLEMENT=${ent}" \
-              -e "ENA_BUILD_PLAN=${plan}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-              "${ref}" /bin/bash /install-aws_ena-driver.sh 2>"${err_tmp}" || true)"
-      line="$(printf '%s
-' "${out}" | grep -F '[aws_ena-driver][installtest][result]' | tail -1)"
-      if [ -z "${line}" ]; then
-        reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
-        [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
-        log "RHEL${major} ${ver}/${ent}: harness-error -> ${reason}"
-        row="$(printf '{"status":"error","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":false,"ko_version":"","verdict":"harness-error","load_tier":"%s","reason":"%s"}' \
-          "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "$(ena_load_tier)" "${reason}")"
-      else
-        built="$(result_field "${line}" built)"; [ "${built}" = "true" ] || built=false
-        status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
-        kov="$(result_field "${line}" ko_version)"
-        row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s"}' \
-          "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" \
-          "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)")"
-      fi
-      rm -f "${err_tmp}"
-      printf '%s
-' "${row}"
-      printf '%s
-' "${row}" >> "${rows_tmp}"
+      ena_kick "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${ref}" "${LOG_DIR}" "${rows_tmp}"
     done
   done
   persist_ledger "${rows_tmp}"
   rm -f "${rows_tmp}"
+}
+
+# ena_kick <major> <ver> <ent> <repo> <plan> <ref> <log_dir> <rows_file> : build-test
+# one (major, entitlement) in a container, record the row (+reason), and on non-ok
+# preserve the container output to <log_dir> (fail/error only).
+ena_kick() {
+  local major="$1" ver="$2" ent="$3" repo="$4" plan="$5" ref="$6" log_dir="$7" rows="$8"
+  local err_tmp out line built status kov reason row logf
+  err_tmp="$(mktemp)"
+  out="$(podman run --rm \
+          -v "${INSTALL_SCRIPT}:/install-aws_ena-driver.sh:ro,z" \
+          -e ENA_INSTALLTEST=1 -e "ENA_VERSION=${ver}" -e "ENA_ENTITLEMENT=${ent}" \
+          -e "ENA_BUILD_PLAN=${plan}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
+          "${ref}" /bin/bash /install-aws_ena-driver.sh 2>"${err_tmp}" || true)"
+  line="$(printf '%s
+' "${out}" | grep -F '[aws_ena-driver][installtest][result]' | tail -1)"
+  logf="${log_dir}/buildtest-rhel${major}-ena_${ver}_${ent}.log"
+  if [ -z "${line}" ]; then
+    reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
+    [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
+    status=error
+    log "RHEL${major} ${ver}/${ent}: harness-error -> ${reason}"
+    row="$(printf '{"status":"error","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":false,"ko_version":"","verdict":"harness-error","load_tier":"%s","reason":"%s"}' \
+      "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "$(ena_load_tier)" "${reason}")"
+  else
+    built="$(result_field "${line}" built)"; [ "${built}" = "true" ] || built=false
+    status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+    kov="$(result_field "${line}" ko_version)"
+    reason="$(jesc "$(result_field "${line}" reason)")"
+    row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s","reason":"%s"}' \
+      "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" \
+      "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)" "${reason}")"
+  fi
+  if [ "${status}" != "ok" ]; then
+    mkdir -p "${log_dir}"
+    { printf '=== podman stdout ===
+%s
+=== podman stderr ===
+' "${out}"; cat "${err_tmp}" 2>/dev/null; } > "${logf}" 2>/dev/null || true
+    log "  log preserved: ${logf}"
+  else
+    rm -f "${logf}" 2>/dev/null || true
+  fi
+  rm -f "${err_tmp}"
+  printf '%s
+' "${row}"
+  printf '%s
+' "${row}" >> "${rows}"
 }
 
 # --- arg parsing -------------------------------------------------------------

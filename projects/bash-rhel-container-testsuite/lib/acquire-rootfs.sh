@@ -240,3 +240,83 @@ acq_preflight() {
   rm -f "${err}"
   return 1
 }
+
+# ---- host environment banner (troubleshooting basics) -----------------------
+# Emitted once per --run to: (1) the log, (2) the ledger 'host' meta, (3) one
+# line in each RESULTS. Fields: OS, kernel+arch, SELinux (or 'absent' + AppArmor
+# note on non-RHEL), container runtime (podman version, rootful/rootless, cgroup).
+# No timestamp (by spec). host_json prints a compact JSON object; host_banner
+# logs human-readable lines; record_host_meta folds it into the ledger.
+
+host_selinux() {
+  if command -v getenforce >/dev/null 2>&1; then getenforce 2>/dev/null; return 0; fi
+  if [ -f /sys/fs/selinux/enforce ]; then
+    case "$(cat /sys/fs/selinux/enforce 2>/dev/null)" in 1) printf 'Enforcing' ;; 0) printf 'Permissive' ;; *) printf 'unknown' ;; esac
+    return 0
+  fi
+  # no SELinux on this host (e.g. Ubuntu/Debian): note AppArmor if present
+  if [ -d /sys/kernel/security/apparmor ] || command -v aa-status >/dev/null 2>&1; then
+    printf 'absent (AppArmor present)'
+  else
+    printf 'absent'
+  fi
+}
+
+host_runtime() {
+  local ver root cg
+  ver="$(podman --version 2>/dev/null | head -1)"; [ -n "${ver}" ] || ver="podman: not found"
+  if [ "$(id -u 2>/dev/null)" = "0" ]; then root="rootful"; else root="rootless"; fi
+  if [ -f /sys/fs/cgroup/cgroup.controllers ]; then cg="cgroup v2"; else cg="cgroup v1"; fi
+  printf '%s (%s, %s)' "${ver}" "${root}" "${cg}"
+}
+
+# host_json : one compact JSON object of host facts (no timestamp, by spec).
+host_json() {
+  local pretty id verid kern arch selinux runtime
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    pretty="$( . /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-}" )"
+    id="$( . /etc/os-release 2>/dev/null; printf '%s' "${ID:-}" )"
+    verid="$( . /etc/os-release 2>/dev/null; printf '%s' "${VERSION_ID:-}" )"
+  fi
+  [ -n "${pretty}" ] || pretty="$(uname -s 2>/dev/null || printf 'unknown')"
+  kern="$(uname -r 2>/dev/null || printf 'unknown')"
+  arch="$(uname -m 2>/dev/null || printf 'unknown')"
+  selinux="$(host_selinux)"
+  runtime="$(host_runtime)"
+  python3 - "${pretty}" "${id}" "${verid}" "${kern}" "${arch}" "${selinux}" "${runtime}" <<'PY' 2>/dev/null
+import json,sys
+p,i,v,k,a,s,r=sys.argv[1:8]
+print(json.dumps({"os":p,"os_id":i,"os_version_id":v,"kernel":k,"arch":a,"selinux":s,"runtime":r}))
+PY
+}
+
+# host_banner : log the host facts as a readable banner (uses the caller's log()).
+host_banner() {
+  local h; h="$(host_json)"
+  log "host: $(printf '%s' "${h}" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("%s | kernel %s %s | SELinux: %s | %s" % (d["os"], d["kernel"], d["arch"], d["selinux"], d["runtime"]))' 2>/dev/null || printf '%s' "${h}")"
+}
+
+# record_host_meta <ledger> : fold the host object into the ledger's top-level
+# "host" key (created if the ledger exists). persist_ledger preserves it.
+record_host_meta() {
+  local led="$1" h; [ -f "${led}" ] || return 0
+  h="$(host_json)"; [ -n "${h}" ] || return 0
+  python3 - "${led}" "${h}" <<'PY' 2>/dev/null || true
+import json,sys,os,tempfile
+led,hj=sys.argv[1],sys.argv[2]
+try: d=json.load(open(led))
+except Exception: sys.exit(0)
+try: d["host"]=json.loads(hj)
+except Exception: sys.exit(0)
+fd,tmp=tempfile.mkstemp(dir=os.path.dirname(led) or ".")
+with os.fdopen(fd,"w") as f: json.dump(d,f,indent=2); f.write("\n")
+os.replace(tmp,led)
+PY
+}
+
+# jesc <string> : JSON-escape a string for safe embedding inside a "..." value
+# (no surrounding quotes). Used for the ledger 'reason' field.
+jesc() {
+  printf '%s' "${1:-}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read())[1:-1])' 2>/dev/null || printf '%s' "${1:-}"
+}

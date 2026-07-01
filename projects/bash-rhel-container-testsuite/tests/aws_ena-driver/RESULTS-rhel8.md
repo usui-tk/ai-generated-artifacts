@@ -14,6 +14,8 @@
 | Newest ENA version | 2.17.0 |
 | In-scope versions (>= 2.8.0) | 29 |
 
+_Collected on (this run): (not yet run)_
+
 ## E2' entitlement grid (the ENA axis)
 
 | entitlement | build plan | expected | empirical | verdict |

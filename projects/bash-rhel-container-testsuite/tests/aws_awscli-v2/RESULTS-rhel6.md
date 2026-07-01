@@ -10,7 +10,9 @@
 | Image (measured) | `rhel6/rhel (6.10)` |
 | OS glibc (measured) | **2.12** |
 | AWS CLI v2 axis | glibc only (self-contained bundle) |
-| In-scope v2 versions | 928 |
+| In-scope v2 versions | 929 |
+
+_Collected on (this run): (not yet run)_
 
 ## Why this matters - AWS CLI v2 glibc support
 
@@ -27,7 +29,7 @@ On RHEL 6 (glibc 2.12): current versions (>= 2.17.50) are **glibc-too-old**; the
 
 | Band | min glibc | expected on RHEL 6 | in-scope count |
 |:--|:--|:--|--:|
-| current `>=2.17.50` | 2.17 | glibc-too-old | 436 |
+| current `>=2.17.50` | 2.17 | glibc-too-old | 437 |
 | legacy `<=2.17.49` | 2.5 | runs | 492 |
 
 ## boundary versions (empirical = filled by L3)

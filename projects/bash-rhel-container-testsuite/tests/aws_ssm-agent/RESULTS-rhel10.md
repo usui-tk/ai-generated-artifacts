@@ -14,6 +14,8 @@
 | Newest version | 3.3.4793.0 |
 | Feature compliance | **compliant-capable** (min 3.3.3598.0) |
 
+_Collected on (this run): (not yet run)_
+
 ## Why this matters - AWS Systems Manager Run Command deprecation
 
 Starting **2026-06-16**, SSM Run Command stops executing commands on managed instances that still use the legacy **ec2messages** (Amazon Message Delivery Service) endpoints - endpoints used only by SSM Agents too old to support the newer **ssmmessages** (Amazon Message Gateway Service) endpoints. The remediation is to update the SSM Agent to **3.3.3598.0 or newer** and grant the instance role the ssmmessages channel permissions (`CreateControlChannel` / `CreateDataChannel` / `OpenControlChannel` / `OpenDataChannel`); affected instances are listed in the AWS Health Dashboard. This report characterizes, per RHEL major, which agent versions install+run - i.e. whether a RHEL 10 image can be brought to a **compliant (>= 3.3.3598.0)** agent.
@@ -29,22 +31,22 @@ References (AWS docs): [Run Command](https://docs.aws.amazon.com/systems-manager
 
 _The acquire forms come from lib/acquire-rootfs.sh acq_init_run_args (Phase 2)._
 
-## E2E sweep evidence (min 3.3.3598.0 -> latest, per version x init_mode)
+## E2E sweep evidence (min 3.3.3598.0 -> latest)
 
-On RHEL 10, the newest agent (3.3.4793.0) is **compliant-capable**. Cells are filled from the ledger by the run (`ran/installed`); `pending` = not yet run. Agents below 3.3.3598.0 are out of scope (ec2messages-only).
+On RHEL 10, the newest agent (3.3.4793.0) is **compliant-capable**. `none` (install + `-version`) is swept for every in-scope version; `systemd` (service enable) is verified on the representative version (3.3.4793.0) only - install/run do not depend on init_mode, so other systemd cells read `n/a`. `pending` = not yet run; agents below 3.3.3598.0 are out of scope (ec2messages-only).
 
 | version | >= min | none (ran/installed) | systemd (ran/installed) | verdict |
 |:--|:--|:--|:--|:--|
-| 3.3.3598.0 | yes | pending | pending | pending |
-| 3.3.3797.0 | yes | pending | pending | pending |
-| 3.3.3883.0 | yes | pending | pending | pending |
-| 3.3.4108.0 | yes | pending | pending | pending |
-| 3.3.4121.0 | yes | pending | pending | pending |
-| 3.3.4177.0 | yes | pending | pending | pending |
-| 3.3.4268.0 | yes | pending | pending | pending |
-| 3.3.4364.0 | yes | pending | pending | pending |
-| 3.3.4515.0 | yes | pending | pending | pending |
-| 3.3.4624.0 | yes | pending | pending | pending |
+| 3.3.3598.0 | yes | pending | n/a | n/a |
+| 3.3.3797.0 | yes | pending | n/a | n/a |
+| 3.3.3883.0 | yes | pending | n/a | n/a |
+| 3.3.4108.0 | yes | pending | n/a | n/a |
+| 3.3.4121.0 | yes | pending | n/a | n/a |
+| 3.3.4177.0 | yes | pending | n/a | n/a |
+| 3.3.4268.0 | yes | pending | n/a | n/a |
+| 3.3.4364.0 | yes | pending | n/a | n/a |
+| 3.3.4515.0 | yes | pending | n/a | n/a |
+| 3.3.4624.0 | yes | pending | n/a | n/a |
 | 3.3.4793.0 | yes | pending | pending | pending |
 
 _Install is empirically gated by the RPM dep closure + glibc; 11 versions in scope. Regenerate this evidence with a single run: `OSMAJORS=10 ./run-ssm-installtest-matrix.sh`._

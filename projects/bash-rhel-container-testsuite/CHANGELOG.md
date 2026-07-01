@@ -11,6 +11,39 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r16] - 2026-07-02 - host banner, SSM init_mode Case A, fail/error logs
+
+Three operator-driven improvements, agreed as a spec before implementation.
+
+### Added
+- **Host environment banner (all three tools).** Each `--run` collects host basics
+  once - OS (`PRETTY_NAME`/`ID`/`VERSION_ID`), kernel + arch, SELinux mode (or
+  `absent` + an AppArmor note on non-RHEL), and the container runtime
+  (`podman --version`, rootful/rootless, cgroup v1/v2) - and emits them to (1) the
+  run log banner, (2) the ledger `host` meta object, and (3) a `Collected on:` line
+  in each RESULTS. No timestamp (by spec). Makes SELinux/runtime issues diagnosable
+  on any distro. (`host_json`/`host_banner`/`record_host_meta` in lib.)
+- **Per-case fail/error logs (all three tools).** On a non-`ok` case the container's
+  stdout+stderr is preserved to `./logs/` (fail/error only; `ok` clears any stale
+  log). Names: `installtest-rhel<N>-ssm_<ver>_<mode>.log`,
+  `buildtest-rhel<N>-ena_<ver>_<ent>.log`, `installtest-rhel<N>-awscli_<ver>.log`.
+  `logs/` is git-ignored.
+- **Ledger `reason` (all three tools).** Every row carries a `reason` (the OL-model
+  "simple analysis"): the install script's own reason on `fail`, the podman/SELinux
+  reason on `error`, empty on `ok`.
+
+### Changed
+- **SSM init_mode = Case A** (110 -> 60 cases). `install`/`ran` do not depend on
+  init_mode, only `service_enabled` does; so `none` is swept for every in-scope
+  version and `systemd` is verified on a representative version per major (latest;
+  override via `SSM_SYSTEMD_VERSIONS`). The RESULTS E2E table shows `n/a` for the
+  non-representative `systemd` cells. AWS CLI and ENA case counts are unchanged.
+
+### Verified
+- Stub-driven: Case A row counts (none=all, systemd=1/major), host meta + banner,
+  fail/error log capture, `reason` propagation. Suite green (**16 tiers, 430
+  passed**); contract ok; ShellCheck-`style`-clean; generate idempotent.
+
 ## [r15] - 2026-07-02 - fix: SELinux bind-mount + surfaced harness errors (--run)
 
 A live `--run` on a real RHEL/KVM host failed **every** case (`status:"unknown"`,

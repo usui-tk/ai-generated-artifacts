@@ -1,0 +1,2 @@
+# Runtime fail/error logs written by run-*-matrix.sh (--run); never committed.
+tests/aws_*/logs/
