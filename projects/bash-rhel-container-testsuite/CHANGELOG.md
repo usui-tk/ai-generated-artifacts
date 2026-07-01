@@ -11,6 +11,34 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r15] - 2026-07-02 - fix: SELinux bind-mount + surfaced harness errors (--run)
+
+A live `--run` on a real RHEL/KVM host failed **every** case (`status:"unknown"`,
+`verdict:"install-fail"`, ~0.3s each) - a systemic harness bug, not a per-version
+result.
+
+### Fixed
+- **SELinux bind-mount (root cause).** The matrices bind-mounted the install script
+  with `:ro` and **no relabel**, so on an SELinux-enforcing host (the RHEL-family
+  default - exactly this suite's target) the container could not read it and
+  `/bin/bash /install-...sh` failed instantly, emitting no `[result]`. All three
+  matrices now mount with **`:ro,z`** (shared relabel; a no-op where SELinux is off).
+- **Errors are surfaced, not hidden.** The `podman run` stderr was sent to
+  `/dev/null`; a container/pull/SELinux/auth failure was indistinguishable from a
+  genuine tool failure and was mis-recorded as `install-fail`. Now stderr is
+  captured; when no `[result]` is emitted the row is recorded as
+  `status:"error"`, `verdict:"harness-error"` with the real `reason`, so the
+  operator sees *why*.
+- **Preflight.** Before a sweep, `acq_preflight` (lib/acquire-rootfs.sh) runs the
+  ubi9 canary with the script bind-mounted and confirms a container can read it;
+  on failure it prints the podman error + SELinux/pull/subscription hints and the
+  run aborts cleanly (no misleading rows) instead of writing a whole failed sweep.
+
+### Verified
+- All three matrices: error path records `harness-error` + reason; success path
+  records the real verdict; preflight aborts with hints. Suite green
+  (**16 tiers, 430 passed**); ShellCheck-`style`-clean.
+
 ## [r14] - 2026-07-01 - docs: consolidated per-target run guide (TESTING.md)
 
 ### Added

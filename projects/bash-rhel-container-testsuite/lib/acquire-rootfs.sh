@@ -210,3 +210,33 @@ acq_pull_curl() {
     acq_curl "$(acq_blob_url "${image}" "${d}")" | tar -C "${dest}" -xz || return 1
   done <<<"${layers}"
 }
+
+# acq_preflight <install_script> : one-time sanity check before a --run sweep.
+# Runs the ubi9 canary with the install script bind-mounted (:ro,z) and confirms a
+# container can actually READ it - catching the two systemic failure modes that
+# otherwise produce a whole sweep of misleading "install-fail" rows:
+#   * SELinux: a bind-mount without relabeling is unreadable inside the container
+#     (host RHEL/Fedora default to enforcing) - the mount now uses ':z'.
+#   * image pull / egress / auth (rhel6 needs a subscription).
+# Prints the real podman error + actionable hints on failure. Returns non-zero so
+# the caller can abort with one clear message instead of N bad rows.
+acq_preflight() {
+  local script="$1" ref err out
+  command -v podman >/dev/null 2>&1 || { log "PREFLIGHT: podman not found on PATH"; return 2; }
+  ref="$(acq_ref_for_major 9 2>/dev/null || true)"   # ubi9 canary: public, no auth
+  [ -n "${ref}" ] || return 0
+  err="$(mktemp)"
+  out="$(podman run --rm -v "${script}:/probe.sh:ro,z" "${ref}" \
+           /bin/sh -c 'cat /probe.sh >/dev/null 2>&1 && echo READABLE' 2>"${err}" || true)"
+  if [ "${out}" = "READABLE" ]; then rm -f "${err}"; return 0; fi
+  log "PREFLIGHT FAILED: a container could not run/read the mounted install script."
+  log "  canary image : ${ref}"
+  log "  podman error : $(tail -3 "${err}" | tr '\n' ' ' | sed 's/  */ /g' | cut -c1-400)"
+  log "  hints:"
+  log "    1) SELinux  - bind-mounts now use ':z'; ensure podman is allowed to relabel"
+  log "                  (getenforce; or run once with 'sudo setenforce 0' to confirm the cause)."
+  log "    2) pull     - check egress to registry.access.redhat.com; 'podman pull ${ref}' by hand."
+  log "    3) rhel6    - registry.access.redhat.com/rhel6/rhel needs a subscription (podman login)."
+  rm -f "${err}"
+  return 1
+}

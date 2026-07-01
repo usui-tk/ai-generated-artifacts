@@ -268,7 +268,8 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref out line built status kov row rows_tmp
+  acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
+  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref out err_tmp line built status kov reason row rows_tmp
   rows_tmp="$(mktemp)"
   for major in ${majors}; do
     ver="$(releases_max)"
@@ -276,23 +277,32 @@ run_matrix() {
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
     for ent in ${ents}; do
       plan="$(ena_build_plan "${ent}" 0)"
-      # KICK install-aws_ena-driver.sh in ENA_INSTALLTEST mode. anonymous -> the
-      # script does not build and emits built=false (verdict needs-entitlement);
-      # entitled -> it installs kernel-devel from "${repo}", fetches ena_linux_<ver>,
-      # builds ena.ko out of tree, and verifies its modinfo version. Load is L4.
+      # KICK install-aws_ena-driver.sh in ENA_INSTALLTEST mode. The bind-mount uses
+      # ':z' so the container can read the script under SELinux; stderr is captured
+      # so a podman/container error is reported (not hidden as a false build-fail).
+      err_tmp="$(mktemp)"
       out="$(podman run --rm \
-              -v "${INSTALL_SCRIPT}:/install-aws_ena-driver.sh:ro" \
+              -v "${INSTALL_SCRIPT}:/install-aws_ena-driver.sh:ro,z" \
               -e ENA_INSTALLTEST=1 -e "ENA_VERSION=${ver}" -e "ENA_ENTITLEMENT=${ent}" \
               -e "ENA_BUILD_PLAN=${plan}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-              "${ref}" /bin/bash /install-aws_ena-driver.sh 2>/dev/null || true)"
+              "${ref}" /bin/bash /install-aws_ena-driver.sh 2>"${err_tmp}" || true)"
       line="$(printf '%s
 ' "${out}" | grep -F '[aws_ena-driver][installtest][result]' | tail -1)"
-      built="$(result_field "${line}" built)"; [ "${built}" = "true" ] || built=false
-      status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
-      kov="$(result_field "${line}" ko_version)"
-      row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s"}' \
-        "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" \
-        "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)")"
+      if [ -z "${line}" ]; then
+        reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
+        [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
+        log "RHEL${major} ${ver}/${ent}: harness-error -> ${reason}"
+        row="$(printf '{"status":"error","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":false,"ko_version":"","verdict":"harness-error","load_tier":"%s","reason":"%s"}' \
+          "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "$(ena_load_tier)" "${reason}")"
+      else
+        built="$(result_field "${line}" built)"; [ "${built}" = "true" ] || built=false
+        status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+        kov="$(result_field "${line}" ko_version)"
+        row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s"}' \
+          "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" \
+          "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)")"
+      fi
+      rm -f "${err_tmp}"
       printf '%s
 ' "${row}"
       printf '%s

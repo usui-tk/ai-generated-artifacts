@@ -289,12 +289,13 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
+  acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
   local majors="${OSMAJORS:-10 9 8 7 6}" modes="${INITMODES:-none systemd}"
   # E2E sweep set: default = every in-scope version (min SSM_MIN -> latest),
   # ascending. Override with SSM_VERSIONS="3.3.3598.0 3.3.4793.0" to narrow.
   local versions="${SSM_VERSIONS:-$(ssm_inscope_versions | tr '
 ' ' ')}"
-  local major mode ref ver out line installed ran svc status row rows_tmp
+  local major mode ref ver out err_tmp line installed ran svc status reason row rows_tmp
   rows_tmp="$(mktemp)"
   log "sweep: majors=[${majors}] modes=[${modes}] versions=[${versions}]"
   for major in ${majors}; do
@@ -302,21 +303,34 @@ run_matrix() {
     for ver in ${versions}; do
       for mode in ${modes}; do
         # KICK install-aws_ssm-agent.sh in SSM_INSTALLTEST mode: install the RPM,
-        # run `amazon-ssm-agent -version`, and (systemd) enable for boot. One
-        # [result] line per (major, version, init_mode) is parsed and recorded.
+        # run `amazon-ssm-agent -version`, and (systemd) enable for boot. The
+        # bind-mount uses ':z' so the container can read the script under SELinux;
+        # stderr is captured so a podman/container error is reported, not hidden.
+        err_tmp="$(mktemp)"
         out="$(podman run --rm \
-                -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro" \
+                -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro,z" \
                 -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-                "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>/dev/null || true)"
+                "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>"${err_tmp}" || true)"
         line="$(printf '%s
 ' "${out}" | grep -F '[aws_ssm-agent][installtest][result]' | tail -1)"
-        installed="$(result_field "${line}" installed)"; [ "${installed}" = "true" ] || installed=false
-        ran="$(result_field "${line}" ran)";             [ "${ran}" = "true" ] || ran=false
-        svc="$(result_field "${line}" service_enabled)"; [ "${svc}" = "true" ] || svc=false
-        status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
-        row="$(printf '{"status":"%s","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"verdict":"%s"}' \
-          "${status}" "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" "${svc}" \
-          "$(ssm_verdict "${installed}" "${ran}" "${mode}")")"
+        if [ -z "${line}" ]; then
+          # No [result] emitted -> the container/harness failed (podman, pull, SELinux,
+          # auth), NOT a genuine install-fail. Record status=error + the real reason.
+          reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
+          [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
+          log "RHEL${major} ${ver}/${mode}: harness-error -> ${reason}"
+          row="$(printf '{"status":"error","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":false,"ran":false,"service_enabled":false,"verdict":"harness-error","reason":"%s"}' \
+            "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${reason}")"
+        else
+          installed="$(result_field "${line}" installed)"; [ "${installed}" = "true" ] || installed=false
+          ran="$(result_field "${line}" ran)";             [ "${ran}" = "true" ] || ran=false
+          svc="$(result_field "${line}" service_enabled)"; [ "${svc}" = "true" ] || svc=false
+          status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+          row="$(printf '{"status":"%s","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"verdict":"%s"}' \
+            "${status}" "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" "${svc}" \
+            "$(ssm_verdict "${installed}" "${ran}" "${mode}")")"
+        fi
+        rm -f "${err_tmp}"
         printf '%s
 ' "${row}"
         printf '%s

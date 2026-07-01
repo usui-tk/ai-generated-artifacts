@@ -309,29 +309,41 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref out line ran iv status bpy mgl row rows_tmp
+  acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
+  local majors="${OSMAJORS:-10 9 8 7 6}" major ver ref out err_tmp line ran iv status bpy mgl reason row rows_tmp
   rows_tmp="$(mktemp)"
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
     while IFS= read -r ver; do
       [ -n "${ver}" ] || continue
       awscli_in_scope "${ver}" 0 || continue
-      # KICK install-aws_awscli-v2.sh in AWSCLI_INSTALLTEST mode inside the rootfs;
-      # it installs + smokes `aws --version` and emits one [result] line we parse.
+      # KICK install-aws_awscli-v2.sh in AWSCLI_INSTALLTEST mode. The bind-mount uses
+      # ':z' so the container can read the script under SELinux; stderr is captured
+      # so a podman/container error is reported (not hidden as a false install-fail).
+      err_tmp="$(mktemp)"
       out="$(podman run --rm \
-              -v "${INSTALL_SCRIPT}:/install-aws_awscli-v2.sh:ro" \
+              -v "${INSTALL_SCRIPT}:/install-aws_awscli-v2.sh:ro,z" \
               -e AWSCLI_INSTALLTEST=1 -e "AWSCLI_VERSION=${ver}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-              "${ref}" /bin/bash /install-aws_awscli-v2.sh 2>/dev/null || true)"
+              "${ref}" /bin/bash /install-aws_awscli-v2.sh 2>"${err_tmp}" || true)"
       line="$(printf '%s
 ' "${out}" | grep -F '[aws_awscli-v2][installtest][result]' | tail -1)"
-      ran="$(result_field "${line}" ran)"; [ "${ran}" = "true" ] || ran=false
-      iv="$(result_field "${line}" installed_version)"
-      status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
-      bpy="$(result_field "${line}" bundled_python)"
-      mgl="$(result_field "${line}" min_glibc_measured)"
-      row="$(printf '{"status":"%s","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"installed_version":"%s","bundled_python":"%s","min_glibc_measured":"%s","verdict":"%s"}' \
-        "${status}" "${major}" "${ver}" "$(rhel_glibc "${major}")" "${ran}" "${iv}" "${bpy}" "${mgl}" \
-        "$(awscli_verdict "$(rhel_glibc "${major}")" "$(awscli_min_glibc "${ver}")" "${ran}")")"
+      if [ -z "${line}" ]; then
+        reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
+        [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
+        log "RHEL${major} ${ver}: harness-error -> ${reason}"
+        row="$(printf '{"status":"error","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":false,"installed_version":"","bundled_python":"","min_glibc_measured":"","verdict":"harness-error","reason":"%s"}' \
+          "${major}" "${ver}" "$(rhel_glibc "${major}")" "${reason}")"
+      else
+        ran="$(result_field "${line}" ran)"; [ "${ran}" = "true" ] || ran=false
+        iv="$(result_field "${line}" installed_version)"
+        status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+        bpy="$(result_field "${line}" bundled_python)"
+        mgl="$(result_field "${line}" min_glibc_measured)"
+        row="$(printf '{"status":"%s","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":%s,"installed_version":"%s","bundled_python":"%s","min_glibc_measured":"%s","verdict":"%s"}' \
+          "${status}" "${major}" "${ver}" "$(rhel_glibc "${major}")" "${ran}" "${iv}" "${bpy}" "${mgl}" \
+          "$(awscli_verdict "$(rhel_glibc "${major}")" "$(awscli_min_glibc "${ver}")" "${ran}")")"
+      fi
+      rm -f "${err_tmp}"
       printf '%s
 ' "${row}"
       printf '%s
