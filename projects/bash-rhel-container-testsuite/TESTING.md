@@ -74,13 +74,83 @@ bash tests/t003_acquireunit.sh  # L1 acquisition unit
 bash tests/t007_epelresolve.sh  # L1 EPEL resolution unit
 ```
 
-The L3 integration matrices are **not** invoked by `run-all.sh`; run them
-explicitly when container egress is available (added in Phases 3-5):
+The L3 integration matrices are **not** invoked by `run-all.sh`. Run them per
+target with the one-script workflow below when container egress is available.
+
+---
+
+## Running the end-to-end tests (per target)
+
+Each tool is a self-contained target under `tests/aws_<tool>/`. After clearing the
+generated files and rebuilding the release baseline, a **single no-arg invocation**
+of the matrix does everything: run the live matrix, persist the ledger, and
+regenerate the `RESULTS-rhel<N>.md` reports (this mirrors the OL model project).
+
+**Prerequisites (shared).** The live run (L3) needs `podman` + network egress to
+the AWS endpoints and the RHEL/UBI registries. If `podman` is absent the run step
+is skipped with a clear message and the reports are still regenerated (all cells
+`pending`). For a MITM/dev TLS proxy, add `INSECURE_TLS=1`. Module **load** is
+always **L4** (a real Nitro/Graviton host) and is never attempted here.
+
+**Sub-actions (all three matrices).** No argument = the full E2E (run + persist +
+generate). `--run` runs the matrix and persists the ledger only (no report).
+`--generate-results` (re)generates the reports only - hermetic, no containers,
+empirical cells read from the ledger if a run has populated it.
+
+**Evidence produced.** `RESULTS-rhel{6,7,8,9,10}.md` (human-readable, per major) +
+the tool's `*-ledger.json` (the durable machine record, `results[]`). A cell reads
+`pending` until a live run fills it; `ran/installed` (or `built`) once it has.
+
+### Quick reference
+
+| Target | From `tests/<dir>/` | Live axes swept by one run |
+|:--|:--|:--|
+| AWS SSM Agent | `aws_ssm-agent` | all majors x **min->latest (11 versions)** x init_mode {none, systemd} |
+| ENA driver | `aws_ena-driver` | all majors x entitlement {entitled, anonymous}; then `verify` |
+| AWS CLI v2 | `aws_awscli-v2` | all majors x every in-scope v2 version (glibc axis) |
+
+### AWS SSM Agent (install + service)
 
 ```bash
-# example shape (Phase 3+)
-bash tests/aws_awscli-v2/run-awscli-installtest-matrix.sh
+cd tests/aws_ssm-agent
+rm -rf ./*.md ./*.json          # clear generated reports + ledger + releases
+./list-ssm-releases.sh          # rebuild the release baseline (ssm-releases.json)
+./run-ssm-installtest-matrix.sh # E2E: sweep + persist ledger + regenerate RESULTS
 ```
+
+One run sweeps every in-scope version (min `3.3.3598.0` -> latest) x all majors x
+both init modes, installs the RPM, runs `amazon-ssm-agent -version`, and (systemd)
+enables the unit. Knobs: `OSMAJORS="9 8"`, `INITMODES="systemd"`,
+`SSM_VERSIONS="3.3.3598.0 3.3.4793.0"` (narrow the sweep).
+
+### ENA driver (self-build; verify is a separate step)
+
+```bash
+cd tests/aws_ena-driver
+rm -rf ./*.md ./*.json
+./list-ena-releases.sh
+./run-ena-buildtest-matrix.sh   # E2E build matrix + persist ledger + regenerate RESULTS
+./verify-ena-buildresults.sh    # read-only load-readiness (vermagic + symbol/CRC)
+```
+
+The build is **entitlement-gated**: `kernel-devel`/`gcc`/`make` come only from the
+entitled repos, so the `entitled` column needs a **subscribed** host; `anonymous`
+records `needs-entitlement`. `verify` reads the ledger + `./build-bundle` (the ko +
+`Module.symvers` + vermagic the build side preserved); with no bundle yet it reports
+load-readiness **pending** and exits 0. Knobs: `OSMAJORS`, `ENTITLEMENTS="entitled"`.
+
+### AWS CLI v2 (install)
+
+```bash
+cd tests/aws_awscli-v2
+rm -rf ./*.md ./*.json
+./list-awscli-releases.sh
+./run-awscli-installtest-matrix.sh  # E2E: sweep all in-scope versions + ledger + RESULTS
+```
+
+One run acquires each RHEL major, installs the v2 bundle for every in-scope version,
+smokes `aws --version`, and records the empirical min glibc + bundled Python. The
+single axis is **glibc** (the bundle's manylinux floor). Knob: `OSMAJORS`.
 
 ---
 

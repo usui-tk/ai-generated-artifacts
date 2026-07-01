@@ -141,8 +141,11 @@ bash tests/run-all.sh
 ```
 
 The L3 integration matrices (real pulls and installs) are run explicitly, on a
-host with container egress, once they land in Phases 3-5. See
-[TESTING.md](./TESTING.md) for the full tier model and environment dependencies.
+host with container egress, per target with the one-script workflow
+(`rm -rf *.md *.json; ./list-...; ./run-...`, plus `./verify-...` for ENA). See
+**[TESTING.md](./TESTING.md) → "Running the end-to-end tests (per target)"** for
+the consolidated per-tool run guide, the full tier model, and environment
+dependencies.
 
 ---
 

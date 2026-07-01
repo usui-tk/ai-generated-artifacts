@@ -11,6 +11,19 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r14] - 2026-07-01 - docs: consolidated per-target run guide (TESTING.md)
+
+### Added
+- **TESTING.md gains "Running the end-to-end tests (per target)"** - a single,
+  consolidated operational guide (not scattered) with a quick-reference table and
+  per-tool subsections (AWS SSM Agent / ENA driver / AWS CLI v2). Each documents the
+  one-script flow (`rm -rf *.md *.json; ./list-...; ./run-...`, plus `./verify-...`
+  for ENA), the shared prerequisites (podman + egress; ENA needs an entitled host;
+  load is L4), the sub-actions (`--run` / `--generate-results`), the evidence
+  produced (RESULTS + ledger; `pending` semantics), and the per-tool knobs
+  (`OSMAJORS`, `INITMODES`/`ENTITLEMENTS`, `SSM_VERSIONS`, `INSECURE_TLS`).
+- README.md / README.ja.md now point to that section (single source; no duplication).
+
 ## [r13] - 2026-07-01 - ENA + AWS CLI: one-shot E2E (parity with r12/SSM)
 
 Extends the r12 one-script model to the other two tools, so all three follow the

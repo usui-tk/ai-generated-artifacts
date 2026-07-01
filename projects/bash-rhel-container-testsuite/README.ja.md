@@ -141,8 +141,10 @@ bash tests/run-all.sh
 ```
 
 L3 統合マトリクス（実際のプルとインストール）は、コンテナのアウトバウンド通信が可能な
-ホストで明示的に実行します（Phase 3-5 で追加）。階層モデルと環境依存の全体像は
-[TESTING.md](./TESTING.md) を参照してください。
+ホストで、ツール別の一括ワークフロー（`rm -rf *.md *.json; ./list-...; ./run-...`、ENA は
+さらに `./verify-...`）で実行します。ツール別の実行ガイドは
+**[TESTING.md](./TESTING.md) の「Running the end-to-end tests (per target)」**に一箇所へ
+まとめてあります。階層モデルと環境依存の全体像もそちらを参照してください。
 
 ---
 
