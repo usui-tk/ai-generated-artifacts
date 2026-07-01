@@ -16,10 +16,12 @@
 # the OL VM matrix is intentionally dropped. A documented minimum VERSION
 # (>= 3.3.3598.0) separates full-feature agents from ec2messages-only ones.
 #
-# Surfaces: --generate-results (DEFAULT, hermetic) writes RESULTS-rhel<N>.md from
-# ssm-releases.json + the measured per-major glibc + the init-mode grid; --run
-# (L3, container egress) acquires init-mode-aware refs via lib/acquire-rootfs.sh,
-# installs the RPM, smokes -version, and (systemd) enables/starts the unit.
+# Surfaces: NO-ARG (DEFAULT) runs the full E2E in one shot - sweep every in-scope
+# version (min SSM_MIN -> latest) x major x init_mode, persist the ledger, then
+# regenerate RESULTS-rhel<N>.md (mirrors the OL model's one-script workflow).
+#   --run              : run the sweep + persist the ledger only (needs podman/L3)
+#   --generate-results : (re)generate the reports only, hermetic (no containers)
+# Knobs: OSMAJORS, INITMODES, SSM_VERSIONS, INSECURE_TLS.
 #
 # The column-0 pure helpers carry the unit coverage in tests/t009_ssmverdict.sh.
 #==============================================================================
@@ -58,6 +60,15 @@ ssm_in_scope() {
   local v="${1:-}" min="${2:-}" full="${3:-0}"
   [ "${full}" = "1" ] && return 0
   ssm_ge "${v}" "${min}"
+}
+
+# ssm_inscope_versions : the in-scope SSM versions (>= SSM_MIN) in ASCENDING order
+# (min first, latest last) - the default sweep set for --run and the E2E table.
+ssm_inscope_versions() {
+  releases_versions 2>/dev/null | while IFS= read -r v; do
+    [ -n "${v}" ] || continue
+    ssm_ge "${v}" "${SSM_MIN}" && printf '%s\n' "${v}"
+  done | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n
 }
 
 # ssm_compliance <maxver> <min> : headline feature verdict for a major.
@@ -186,14 +197,26 @@ generate_results_for() {
     done
     printf '\n_The acquire forms come from lib/acquire-rootfs.sh acq_init_run_args (Phase 2)._\n\n'
 
-    printf '## version compliance (informational)\n\n'
-    printf '%s\n\n' "On RHEL ${major}, the newest agent (${maxver:-unknown}) is **${compliance}**. Agents below ${SSM_MIN} install but are ec2messages-only (no full Systems Manager)."
-    printf '| version | >= min | glibc (os) | install (empirical) |\n|:--|:--|:--|:--|\n'
-    for v in "${maxver:-3.3.4624.0}" "${SSM_MIN}" 3.0.1479.0; do
+    printf '## E2E sweep evidence (min %s -> latest, per version x init_mode)\n\n' "${SSM_MIN}"
+    printf '%s\n\n' "On RHEL ${major}, the newest agent (${maxver:-unknown}) is **${compliance}**. Cells are filled from the ledger by the run (\`ran/installed\`); \`pending\` = not yet run. Agents below ${SSM_MIN} are out of scope (ec2messages-only)."
+    printf '| version | >= min | none (ran/installed) | systemd (ran/installed) | verdict |\n|:--|:--|:--|:--|:--|\n'
+    for v in $(ssm_inscope_versions); do
       [ -n "${v}" ] || continue
-      if ssm_ge "${v}" "${SSM_MIN}"; then printf '| %s | yes | %s | pending |\n' "${v}" "${osg}"; else printf '| %s | no | %s | pending |\n' "${v}" "${osg}"; fi
+      ge=no; ssm_ge "${v}" "${SSM_MIN}" && ge=yes
+      c_none="$(ledger_cell "${major}" "${v}" none)"
+      c_sys="$(ledger_cell "${major}" "${v}" systemd)"
+      if [ -n "${c_none}" ]; then ncell="${c_none##*|}/${c_none%%|*}"; else ncell="pending"; fi
+      if [ -n "${c_sys}" ]; then
+        s_inst="${c_sys%%|*}"; s_ran="${c_sys##*|}"; scell="${s_ran}/${s_inst}"
+        vdt="$(ssm_verdict "${s_inst}" "${s_ran}" systemd)"
+      else
+        scell="pending"; vdt="pending"
+      fi
+      printf '| %s | %s | %s | %s | %s |\n' "${v}" "${ge}" "${ncell}" "${scell}" "${vdt}"
     done
-    printf '\n_Install is empirically gated by the RPM dep closure + glibc; the L3 run records it._\n'
+    # shellcheck disable=SC2016  # backticks are literal Markdown code spans in the single-quoted format
+    printf '\n_Install is empirically gated by the RPM dep closure + glibc; %s versions in scope. Regenerate this evidence with a single run: `OSMAJORS=%s ./run-ssm-installtest-matrix.sh`._\n' \
+      "$(ssm_inscope_versions | grep -c .)" "${major}"
   } > "${out}"
   log "wrote ${out}"
 }
@@ -216,40 +239,102 @@ result_field() {
   printf '%s' "${v}"
 }
 
+# ensure_ledger : create the ledger skeleton if it is missing (e.g. right after
+# `rm -rf *.json`), so a from-scratch `list -> run` still produces the baseline
+# evidence file that the report reads. persist_ledger then folds rows into it.
+ensure_ledger() {
+  [ -f "${LEDGER}" ] && return 0
+  cat > "${LEDGER}" <<'JSON'
+{
+  "tool": "aws_ssm-agent",
+  "note": "Empirical install-test ledger. Created/appended by run-ssm-installtest-matrix.sh on a container-egress host (L3); never hand-edited.",
+  "results": []
+}
+JSON
+  log "created ledger skeleton: ${LEDGER}"
+}
+
+# persist_ledger <rows-file> : fold the swept JSONL rows into ${LEDGER}'s results[]
+# (dedup by osmajor+ssm_version+init_mode; last write wins). Atomic tmp+replace.
+# This is what turns a --run sweep into durable evidence the report reads.
+persist_ledger() {
+  local rows="$1"
+  [ -f "${LEDGER}" ] || { log "no ledger at ${LEDGER}; skipping persist"; return 0; }
+  python3 - "${LEDGER}" "${rows}" <<'PY2' 2>/dev/null || { log "WARNING: ledger persist failed"; return 0; }
+import json,sys,os,tempfile
+led,rowsfile=sys.argv[1],sys.argv[2]
+try: d=json.load(open(led))
+except Exception: sys.exit(1)
+rows=[]
+for ln in open(rowsfile):
+    ln=ln.strip()
+    if not ln: continue
+    try: rows.append(json.loads(ln))
+    except Exception: pass
+def key(r): return (str(r.get("osmajor")), r.get("ssm_version"), r.get("init_mode"))
+merged={}
+for r in d.get("results",[]): merged[key(r)]=r
+for r in rows: merged[key(r)]=r
+d["results"]=[merged[k] for k in sorted(merged, key=lambda k:(int(k[0]) if str(k[0]).isdigit() else 0, k[1] or "", k[2] or ""))]
+fd,tmp=tempfile.mkstemp(dir=os.path.dirname(led) or ".")
+with os.fdopen(fd,"w") as fh: json.dump(d,fh,indent=2); fh.write("\n")
+os.replace(tmp,led)
+PY2
+  log "ledger updated: ${LEDGER} ($(grep -c '"ssm_version"' "${rows}") rows swept)"
+}
+
 run_matrix() {
+  ensure_ledger
   command -v podman >/dev/null 2>&1 || { log "ERROR: --run needs podman (L3)"; return 2; }
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
-  local majors="${OSMAJORS:-10 9 8 7 6}" modes="${INITMODES:-none systemd}" major mode ref ver out line installed ran svc status
+  local majors="${OSMAJORS:-10 9 8 7 6}" modes="${INITMODES:-none systemd}"
+  # E2E sweep set: default = every in-scope version (min SSM_MIN -> latest),
+  # ascending. Override with SSM_VERSIONS="3.3.3598.0 3.3.4793.0" to narrow.
+  local versions="${SSM_VERSIONS:-$(ssm_inscope_versions | tr '
+' ' ')}"
+  local major mode ref ver out line installed ran svc status row rows_tmp
+  rows_tmp="$(mktemp)"
+  log "sweep: majors=[${majors}] modes=[${modes}] versions=[${versions}]"
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}"; continue; }
-    ver="$(releases_max)"
-    for mode in ${modes}; do
-      # KICK install-aws_ssm-agent.sh in SSM_INSTALLTEST mode. For systemd the
-      # container must boot /sbin/init first; acq_init_run_args (Phase 2) builds
-      # that invocation. The install script installs the RPM, runs
-      # `amazon-ssm-agent -version`, and (systemd) enables for boot.
-      out="$(podman run --rm \
-              -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro" \
-              -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-              "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>/dev/null || true)"
-      line="$(printf '%s
+    for ver in ${versions}; do
+      for mode in ${modes}; do
+        # KICK install-aws_ssm-agent.sh in SSM_INSTALLTEST mode: install the RPM,
+        # run `amazon-ssm-agent -version`, and (systemd) enable for boot. One
+        # [result] line per (major, version, init_mode) is parsed and recorded.
+        out="$(podman run --rm \
+                -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro" \
+                -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
+                "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>/dev/null || true)"
+        line="$(printf '%s
 ' "${out}" | grep -F '[aws_ssm-agent][installtest][result]' | tail -1)"
-      installed="$(result_field "${line}" installed)"; [ "${installed}" = "true" ] || installed=false
-      ran="$(result_field "${line}" ran)";             [ "${ran}" = "true" ] || ran=false
-      svc="$(result_field "${line}" service_enabled)"; [ "${svc}" = "true" ] || svc=false
-      status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
-      printf '{"status":"%s","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"verdict":"%s"}
-' \
-        "${status}" "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" "${svc}" \
-        "$(ssm_verdict "${installed}" "${ran}" "${mode}")"
+        installed="$(result_field "${line}" installed)"; [ "${installed}" = "true" ] || installed=false
+        ran="$(result_field "${line}" ran)";             [ "${ran}" = "true" ] || ran=false
+        svc="$(result_field "${line}" service_enabled)"; [ "${svc}" = "true" ] || svc=false
+        status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
+        row="$(printf '{"status":"%s","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"verdict":"%s"}' \
+          "${status}" "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${installed}" "${ran}" "${svc}" \
+          "$(ssm_verdict "${installed}" "${ran}" "${mode}")")"
+        printf '%s
+' "${row}"
+        printf '%s
+' "${row}" >> "${rows_tmp}"
+      done
     done
   done
+  persist_ledger "${rows_tmp}"
+  rm -f "${rows_tmp}"
 }
 
 # --- arg parsing -------------------------------------------------------------
-ACTION="generate-results"
+# No-arg default = the full E2E: run the sweep (all in-scope versions x majors x
+# init modes), persist the ledger, then regenerate the RESULTS. This mirrors the
+# Oracle Linux model project (`./run-...-matrix.sh` does everything in one shot).
+#   --run               : run the sweep + persist the ledger only (no report)
+#   --generate-results  : (re)generate the reports only, hermetic (no containers)
+ACTION="all"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --run)              ACTION="run" ;;
@@ -264,6 +349,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "${ACTION}" in
-  generate-results) generate_results ;;
+  all)              run_matrix || log "run step did not complete (see above); writing reports from the current ledger"; generate_results ;;
   run)              run_matrix ;;
+  generate-results) generate_results ;;
 esac

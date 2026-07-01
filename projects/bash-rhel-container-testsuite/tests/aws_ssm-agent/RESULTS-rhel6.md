@@ -29,14 +29,22 @@ References (AWS docs): [Run Command](https://docs.aws.amazon.com/systems-manager
 
 _The acquire forms come from lib/acquire-rootfs.sh acq_init_run_args (Phase 2)._
 
-## version compliance (informational)
+## E2E sweep evidence (min 3.3.3598.0 -> latest, per version x init_mode)
 
-On RHEL 6, the newest agent (3.3.4793.0) is **compliant-capable**. Agents below 3.3.3598.0 install but are ec2messages-only (no full Systems Manager).
+On RHEL 6, the newest agent (3.3.4793.0) is **compliant-capable**. Cells are filled from the ledger by the run (`ran/installed`); `pending` = not yet run. Agents below 3.3.3598.0 are out of scope (ec2messages-only).
 
-| version | >= min | glibc (os) | install (empirical) |
-|:--|:--|:--|:--|
-| 3.3.4793.0 | yes | 2.12 | pending |
-| 3.3.3598.0 | yes | 2.12 | pending |
-| 3.0.1479.0 | no | 2.12 | pending |
+| version | >= min | none (ran/installed) | systemd (ran/installed) | verdict |
+|:--|:--|:--|:--|:--|
+| 3.3.3598.0 | yes | pending | pending | pending |
+| 3.3.3797.0 | yes | pending | pending | pending |
+| 3.3.3883.0 | yes | pending | pending | pending |
+| 3.3.4108.0 | yes | pending | pending | pending |
+| 3.3.4121.0 | yes | pending | pending | pending |
+| 3.3.4177.0 | yes | pending | pending | pending |
+| 3.3.4268.0 | yes | pending | pending | pending |
+| 3.3.4364.0 | yes | pending | pending | pending |
+| 3.3.4515.0 | yes | pending | pending | pending |
+| 3.3.4624.0 | yes | pending | pending | pending |
+| 3.3.4793.0 | yes | pending | pending | pending |
 
-_Install is empirically gated by the RPM dep closure + glibc; the L3 run records it._
+_Install is empirically gated by the RPM dep closure + glibc; 11 versions in scope. Regenerate this evidence with a single run: `OSMAJORS=6 ./run-ssm-installtest-matrix.sh`._

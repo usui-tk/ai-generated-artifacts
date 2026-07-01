@@ -11,6 +11,33 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r12] - 2026-07-01 - SSM: one-shot E2E (no-arg run + version sweep + evidence)
+
+Makes the SSM matrix a single-command E2E, matching the OL model's workflow:
+`rm -rf *.md *.json; ./list-ssm-releases.sh; ./run-ssm-installtest-matrix.sh`.
+
+### Changed
+- **No-arg default is now the full E2E** (`ACTION=all`): run the sweep, persist the
+  ledger, then regenerate the RESULTS - one invocation, no flags. `--run`
+  (sweep+ledger only) and `--generate-results` (hermetic reports only) remain as
+  explicit sub-actions.
+- **Version sweep**: `run_matrix` now iterates every in-scope version (min
+  `3.3.3598.0` -> latest, 11 versions) x major x init_mode, instead of only the
+  latest. Override with `SSM_VERSIONS="..."`; `OSMAJORS` / `INITMODES` still apply.
+- **Ledger auto-create + persist**: `ensure_ledger` writes a skeleton if the ledger
+  is missing (so a from-scratch `list -> run` works after `rm *.json`); the sweep's
+  rows are folded into `results[]` (dedup by osmajor+version+init_mode, atomic
+  write) - the durable evidence the report reads.
+- **RESULTS**: the informational 3-row table is replaced by a full
+  **E2E sweep evidence** table (every in-scope version x both init modes, empirical
+  cells from the ledger, `pending` until run). If podman is absent, the run step is
+  skipped with a clear message and the reports are still regenerated (pending).
+
+### Verified
+- The exact flow (`rm; list; run`) produces the ledger skeleton + all five reports;
+  suite green (**16 tiers, 430 passed**); ShellCheck-`style`-clean; no-arg run and
+  `--generate-results` both idempotent.
+
 ## [r11] - 2026-07-01 - RESULTS message-level parity (awscli + ena rationale)
 
 Comprehensive sweep for the same class of omission as r10 (model rationale prose

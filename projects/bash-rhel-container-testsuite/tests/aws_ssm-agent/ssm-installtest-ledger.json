@@ -1,14 +1,5 @@
 {
   "tool": "aws_ssm-agent",
-  "note": "Empirical install-test ledger. Regenerated/appended by run-ssm-installtest-matrix.sh --run on a container-egress host (L3); never hand-edited. 'results' is empty until a live run populates it.",
-  "row_schema": {
-    "osmajor": "RHEL major as a string, e.g. \"9\"",
-    "ssm_version": "SSM Agent version, e.g. \"3.3.4624.0\"",
-    "init_mode": "none | systemd",
-    "glibc": "measured OS glibc in-container, e.g. \"2.34\"",
-    "installed": "boolean - did the RPM install (dep closure + glibc)",
-    "ran": "boolean - did `amazon-ssm-agent -version` run",
-    "verdict": "install-fail | installed-no-run | runs-no-init | runs-service (ssm_verdict)"
-  },
+  "note": "Empirical install-test ledger. Created/appended by run-ssm-installtest-matrix.sh on a container-egress host (L3); never hand-edited.",
   "results": []
 }
