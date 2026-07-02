@@ -253,9 +253,11 @@ tests/probe-env.sh --majors "6"    # just RHEL 6
 
 It runs one short-lived container per major and reports common checks - does the
 image run here (`exec`; covers pull, arch, and old-userspace glibc/vsyscall),
-package manager present, `yum`/`dnf` usable without the RHSM plugin stall
-(`yum_ok`), egress to S3 and EPEL, and the entitlement state - then a `verdict`
-of **ready** / **degraded** (runs but an egress/yum gap) / **blocked** (image
+package manager present, and whether that manager can reach repositories
+(`repos`: reachable / no-access [command ran, repos unreachable] / no-cmd /
+unknown) - run without the RHSM plugin stall - plus egress to S3 and EPEL and
+the entitlement state, then a `verdict` of **ready** / **degraded** (runs but
+an egress/repo gap) / **blocked** (image
 won't run here). Output goes to the log, a readiness table, and `ENV-PROBE.json`
 (git-ignored). The probe never modifies the host.
 

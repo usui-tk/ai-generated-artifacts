@@ -12,12 +12,14 @@
 #   exec         - does the image run at all here? (/bin/true; covers pull, arch,
 #                  and the glibc/vsyscall compatibility of old userspace)
 #   pkgmgr       - dnf|yum|none detected inside the image
-#   yum_ok       - does `<mgr> --disableplugin=subscription-manager,product-id
+#   repos        - can `<mgr> --disableplugin=subscription-manager,product-id
 #                  repolist` complete promptly (bounded by PKG_TIMEOUT)? i.e. the
 #                  RHSM plugin stall is not present
 #   egress_s3    - reach the SSM RPM host (s3.amazonaws.com)
 #   egress_epel  - reach the EPEL host (dl.fedoraproject.org)
 #   entitlement  - anonymous|entitled, from host-side entitlement-cert presence
+#                  repolist` reach repositories: reachable | no-access
+#                  (command ran, repos unreachable) | no-cmd (no pkgmgr) | unknown
 #   verdict      - ready | degraded | blocked (pure classifier: probe_verdict)
 #
 # Output: a run-log banner, a readiness table, and ENV-PROBE.json (host + probes).
@@ -37,15 +39,15 @@ MAJORS="${OSMAJORS:-10 9 8 7 6}"
 
 log() { printf '%s [probe-env] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
-# probe_verdict EXEC S3 EPEL YUMOK : pure readiness classifier (unit-tested).
+# probe_verdict EXEC S3 EPEL REPOS : pure readiness classifier (unit-tested).
 #   blocked  - the image will not even run here (exec != ok)
 #   degraded - runs, but a common prerequisite a --run relies on is missing
 #              (no S3 or EPEL egress, or yum still stalls)
 #   ready    - runs and every common prerequisite holds
 probe_verdict() {
-  local exec_ok="$1" s3="$2" epel="$3" yumok="$4"
+  local exec_ok="$1" s3="$2" epel="$3" repos="$4"
   [ "${exec_ok}" = "ok" ] || { printf 'blocked'; return 0; }
-  if [ "${s3}" != "ok" ] || [ "${epel}" != "ok" ] || [ "${yumok}" = "no" ]; then
+  if [ "${s3}" != "ok" ] || [ "${epel}" != "ok" ] || [ "${repos}" = "no-access" ]; then
     printf 'degraded'; return 0
   fi
   printf 'ready'
@@ -58,7 +60,7 @@ probe_field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 # JSON object for that major. Bounded by RUN_TIMEOUT; the in-container yum step is
 # bounded by PKG_TIMEOUT (passed in as an env var).
 probe_one() {
-  local major="$1" host_mode="${2:-none}" ref out rc=0 exec_ok arch redhat pkgmgr yumok s3 epel ent verdict
+  local major="$1" host_mode="${2:-none}" ref out rc=0 exec_ok arch redhat pkgmgr repos s3 epel ent verdict
   ref="$(acq_ref_for_major "${major}")" || { printf '{"major":"%s","error":"no image ref"}' "${major}"; return 0; }
   # shellcheck disable=SC2016  # $mgr/$m expand inside the container's /bin/sh, not here
   out="$(timeout "${RUN_TIMEOUT:-600}" podman run --rm \
@@ -71,8 +73,8 @@ probe_one() {
             echo "PKGMGR=${mgr:-none}"
             if [ -n "$mgr" ]; then
               if timeout "${PKG_TIMEOUT:-300}" "$mgr" --disableplugin=subscription-manager,product-id repolist >/dev/null 2>&1; then
-                echo "YUMOK=yes"; else echo "YUMOK=no"; fi
-            else echo "YUMOK=na"; fi
+                echo "REPOS=reachable"; else echo "REPOS=no-access"; fi
+            else echo "REPOS=no-cmd"; fi
             # NOTE: --retry/--retry-delay only. --retry-connrefused needs curl
             # >= 7.52; RHEL 6/7 ship curl 7.19/7.29 and would abort on it.
             if command -v curl >/dev/null 2>&1; then
@@ -82,7 +84,7 @@ probe_one() {
           ' 2>/dev/null)" || rc=$?
   ent="${host_mode}"
   if [ "${rc}" = "124" ]; then
-    printf '{"major":"%s","image":"%s","exec":"timeout","pkgmgr":"unknown","yum_ok":"unknown","egress_s3":"unknown","egress_epel":"unknown","entitlement":"%s","verdict":"blocked","reason":"probe timed out after %ss"}' \
+    printf '{"major":"%s","image":"%s","exec":"timeout","pkgmgr":"unknown","repos":"unknown","egress_s3":"unknown","egress_epel":"unknown","entitlement":"%s","verdict":"blocked","reason":"probe timed out after %ss"}' \
       "${major}" "${ref}" "${ent}" "${RUN_TIMEOUT:-600}"
     return 0
   fi
@@ -90,12 +92,12 @@ probe_one() {
   arch="$(probe_field "${out}" ARCH)"
   redhat="$(probe_field "${out}" REDHAT)"
   pkgmgr="$(probe_field "${out}" PKGMGR)"; [ -n "${pkgmgr}" ] || pkgmgr="unknown"
-  yumok="$(probe_field "${out}" YUMOK)"; [ -n "${yumok}" ] || yumok="unknown"
+  repos="$(probe_field "${out}" REPOS)"; [ -n "${repos}" ] || repos="unknown"
   s3="$(probe_field "${out}" S3)"; [ -n "${s3}" ] || s3="unknown"
   epel="$(probe_field "${out}" EPEL)"; [ -n "${epel}" ] || epel="unknown"
-  verdict="$(probe_verdict "${exec_ok}" "${s3}" "${epel}" "${yumok}")"
-  printf '{"major":"%s","image":"%s","arch":"%s","redhat_release":"%s","exec":"%s","pkgmgr":"%s","yum_ok":"%s","egress_s3":"%s","egress_epel":"%s","entitlement":"%s","verdict":"%s"}' \
-    "${major}" "${ref}" "${arch}" "$(jesc "${redhat}")" "${exec_ok}" "${pkgmgr}" "${yumok}" "${s3}" "${epel}" "${ent}" "${verdict}"
+  verdict="$(probe_verdict "${exec_ok}" "${s3}" "${epel}" "${repos}")"
+  printf '{"major":"%s","image":"%s","arch":"%s","redhat_release":"%s","exec":"%s","pkgmgr":"%s","repos":"%s","egress_s3":"%s","egress_epel":"%s","entitlement":"%s","verdict":"%s"}' \
+    "${major}" "${ref}" "${arch}" "$(jesc "${redhat}")" "${exec_ok}" "${pkgmgr}" "${repos}" "${s3}" "${epel}" "${ent}" "${verdict}"
 }
 
 main() {
@@ -119,7 +121,7 @@ main() {
       log "RHEL${major}: $(printf '%s' "${j}" | python3 -c 'import sys,json
 try:
     d=json.load(sys.stdin)
-    print("%s | exec=%s yum=%s s3=%s epel=%s ent=%s -> %s" % (d.get("image","?"),d.get("exec","?"),d.get("yum_ok","?"),d.get("egress_s3","?"),d.get("egress_epel","?"),d.get("entitlement","?"),d.get("verdict","?")))
+    print("%s | exec=%s repos=%s s3=%s epel=%s ent=%s -> %s" % (d.get("image","?"),d.get("exec","?"),d.get("repos","?"),d.get("egress_s3","?"),d.get("egress_epel","?"),d.get("entitlement","?"),d.get("verdict","?")))
 except Exception:
     print("(unparseable)")' 2>/dev/null || printf '(row)')"
     done
@@ -130,14 +132,14 @@ except Exception:
   python3 - "${OUT_JSON}" <<'PY' 2>/dev/null || cat "${OUT_JSON}"
 import json,sys
 d=json.load(open(sys.argv[1]))
-hdr=("major","pkgmgr","exec","yum","s3","epel","entitle","verdict")
-print("%-6s %-8s %-8s %-6s %-6s %-6s %-10s %s" % hdr)
+hdr=("major","pkgmgr","exec","repos","s3","epel","entitle","verdict")
+print("%-6s %-8s %-8s %-10s %-6s %-6s %-10s %s" % hdr)
 for p in d.get("probes",[]):
-    print("%-6s %-8s %-8s %-6s %-6s %-6s %-10s %s" % (
+    print("%-6s %-8s %-8s %-10s %-6s %-6s %-10s %s" % (
         "RHEL"+str(p.get("major","?")), p.get("pkgmgr","?"), p.get("exec","?"),
-        p.get("yum_ok","?"), p.get("egress_s3","?"), p.get("egress_epel","?"),
+        p.get("repos","?"), p.get("egress_s3","?"), p.get("egress_epel","?"),
         p.get("entitlement","?"), p.get("verdict","?")))
-print("\nverdict: ready = all common prerequisites hold; degraded = runs but egress/yum gap; blocked = image will not run here.")
+print("\nverdict: ready = all common prerequisites hold; degraded = runs but egress/repo gap; blocked = image will not run here.")
 PY
 }
 

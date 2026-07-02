@@ -22,16 +22,17 @@ if ! declare -F probe_verdict >/dev/null 2>&1; then
 fi
 
 # blocked: the image does not run here (exec != ok), regardless of the rest.
-assert_eq "blocked"  "$(probe_verdict fail ok ok yes)"        "exec fail -> blocked"
-assert_eq "blocked"  "$(probe_verdict timeout ok ok yes)"     "exec timeout -> blocked"
+assert_eq "blocked"  "$(probe_verdict fail ok ok reachable)"        "exec fail -> blocked"
+assert_eq "blocked"  "$(probe_verdict timeout ok ok reachable)"     "exec timeout -> blocked"
 
 # ready: runs + both egress ok + yum not stalling.
-assert_eq "ready"    "$(probe_verdict ok ok ok yes)"          "all ok -> ready"
-assert_eq "ready"    "$(probe_verdict ok ok ok unknown)"      "yum unknown (not 'no') still ready"
+assert_eq "ready"    "$(probe_verdict ok ok ok reachable)"    "all ok -> ready"
+assert_eq "ready"    "$(probe_verdict ok ok ok unknown)"      "repos unknown (not no-access) still ready"
+assert_eq "ready"    "$(probe_verdict ok ok ok no-cmd)"       "repos no-cmd (no pkgmgr) still ready"
 
 # degraded: runs, but a common prerequisite is missing.
-assert_eq "degraded" "$(probe_verdict ok fail ok yes)"        "no S3 egress -> degraded"
-assert_eq "degraded" "$(probe_verdict ok ok fail yes)"        "no EPEL egress -> degraded"
-assert_eq "degraded" "$(probe_verdict ok ok ok no)"           "yum stalls (no) -> degraded"
+assert_eq "degraded" "$(probe_verdict ok fail ok reachable)"  "no S3 egress -> degraded"
+assert_eq "degraded" "$(probe_verdict ok ok fail reachable)"  "no EPEL egress -> degraded"
+assert_eq "degraded" "$(probe_verdict ok ok ok no-access)"    "repos no-access -> degraded"
 
 t_done

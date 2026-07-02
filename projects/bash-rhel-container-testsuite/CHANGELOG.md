@@ -11,6 +11,27 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r21] - 2026-07-02 - probe: rename the repolist column/field (repos) + clearer states
+
+Cosmetic/reporting only - no behavioural change to the sweep or classification.
+
+### Changed
+- The `--probe-env` column that used to read `yum` (and JSON field `yum_ok`) is
+  renamed to **`repos`** so it is no longer confused with the `pkgmgr` value
+  `yum`. It reports whether the in-container package manager can reach
+  repositories (`<mgr> ... repolist`).
+- Values are no longer `yes`/`no`; they now name what was observed:
+  **`reachable`** (repolist succeeded), **`no-access`** (command ran but repos
+  unreachable), **`no-cmd`** (no package manager), **`unknown`** (undetermined /
+  probe timed out). The banner key changes `yum=` -> `repos=`, and the readiness
+  legend now says "egress/repo gap".
+- `probe_verdict` consumes the new token (`no-access` triggers `degraded`, as
+  `no` did before); t017 updated and extended (adds the `no-cmd -> ready` case).
+
+### Verified
+- Suite green (**18 tiers, 458 passed**); ShellCheck-style-clean; LF-only.
+  Table/banner/JSON reviewed on a stub run.
+
 ## [r20] - 2026-07-02 - probe: old-curl compatibility (drop --retry-connrefused)
 
 ### Fixed
