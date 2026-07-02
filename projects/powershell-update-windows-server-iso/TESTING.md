@@ -297,8 +297,9 @@ procedure is below; results from past real runs are recorded in
 1. Provision a Windows 11 / Windows Server 2022 host with ≥ 200 GB
    free disk on the working volume.
 2. Install Windows ADK Deployment Tools (or let P01 auto-install them when `oscdimg.exe` is missing).
-3. Pre-stage an evaluation ISO (e.g. via `-EvalIsoMode -IsoUrl
-   <fwlink>` or place it manually and pass `-IsoPath`).
+3. Pre-stage a source ISO (let P04 download it via the config's
+   `Iso.Url` or an explicit `-IsoUrl`, or place one manually and pass
+   `-IsoPath`).
 4. Run, using a per-OS `-WorkRoot`, an auto-timestamped `-LogFile`, and
    the opt-in servicing-readiness check:
 

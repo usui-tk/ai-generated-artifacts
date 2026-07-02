@@ -386,7 +386,6 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-CleanWorkRoot` | common | switch（OFF）| 実行前にワークスペースを掃除 |
 | `-IsoPath` | input | （なし）| ローカル ソース ISO パス（`-IsoUrl` と排他）|
 | `-IsoUrl` | input | （なし）| ソース ISO ダウンロード URL（`-IsoPath` と排他）|
-| `-EvalIsoMode` | input | switch（OFF）| Microsoft 評価版センターの fwlink ダウンロードを許可 |
 | `-PatchDirectory` | input | （なし）| ローカル MSU/CAB パッチのディレクトリ |
 | `-PatchUrls` | input | （なし）| 明示的なパッチ URL の配列 |
 | `-ManifestPath` | input | （なし）| ハッシュ付き Metalink `.meta4` マニフェスト |
@@ -418,7 +417,6 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 - `-IsoUrl` / `-IsoPath`
 - `-EnvironmentInfoOnly` / `-SkipEnvCheck`
 - `-Action BootTest` / `-SyntheticTestMode`
-- `-SyntheticTestMode` / `-EvalIsoMode`
 - `-SkipDynamicPatchRefresh` / `-AutoDetectLatestPatches`
 - `-UseBaselineOnly` / `-AutoDetectLatestPatches`
 

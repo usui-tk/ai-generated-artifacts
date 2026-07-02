@@ -224,7 +224,27 @@
           "type": "string"
         },
         "Iso": {
-          "type": "object"
+          "type": "object",
+          "description": "Per-language source-ISO record. Url is the download source (consumed by Resolve-IsoSourceUrl); Sha256 is the expected image hash (consumed by the P04 integrity check). Underscore keys are human provenance stamps. Reader-less fields (FileName / FwlinkUrl / SizeBytes / ReleaseDate) were retired; additionalProperties=false keeps them from creeping back.",
+          "properties": {
+            "Url": {
+              "type": "string"
+            },
+            "Sha256": {
+              "type": "string"
+            },
+            "_VerifiedDate": {
+              "type": "string"
+            },
+            "_VerifiedBy": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "Url",
+            "Sha256"
+          ],
+          "additionalProperties": false
         },
         "VolumeLabelPrefix": {
           "type": "string"

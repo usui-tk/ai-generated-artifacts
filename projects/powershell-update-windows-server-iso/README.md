@@ -400,7 +400,6 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-CleanWorkRoot` | common | switch (OFF) | Clean the workspace before running |
 | `-IsoPath` | input | (none) | Local source ISO path (mutually exclusive with `-IsoUrl`) |
 | `-IsoUrl` | input | (none) | Explicit source ISO download URL (mutually exclusive with `-IsoPath`) |
-| `-EvalIsoMode` | input | switch (OFF) | Allow Microsoft Evaluation Center fwlink download |
 | `-PatchDirectory` | input | (none) | Directory of local MSU/CAB patches |
 | `-PatchUrls` | input | (none) | Array of explicit patch URLs |
 | `-ManifestPath` | input | (none) | Metalink `.meta4` manifest with hashes |
@@ -432,7 +431,6 @@ The script enforces several mutual-exclusion constraints:
 - `-IsoUrl` / `-IsoPath`
 - `-EnvironmentInfoOnly` / `-SkipEnvCheck`
 - `-Action BootTest` / `-SyntheticTestMode`
-- `-SyntheticTestMode` / `-EvalIsoMode`
 - `-SkipDynamicPatchRefresh` / `-AutoDetectLatestPatches`
 - `-UseBaselineOnly` / `-AutoDetectLatestPatches`
 

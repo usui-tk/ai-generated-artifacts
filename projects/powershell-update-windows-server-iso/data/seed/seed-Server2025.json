@@ -48,12 +48,8 @@
     "en-us": {
       "DisplayName": "English (United States)",
       "Iso": {
-        "FileName": "26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
         "Url": "https://software-static.download.prss.microsoft.com/dbazure/998969d5-f34g-4e03-ac9d-1f9786c66749/26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
-        "FwlinkUrl": "https://go.microsoft.com/fwlink/?linkid=2345730&clcid=0x409&culture=en-us&country=US",
         "Sha256": "",
-        "SizeBytes": 0,
-        "ReleaseDate": "",
         "_VerifiedDate": "2026-05-26",
         "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
       },
@@ -62,12 +58,8 @@
     "ja-jp": {
       "DisplayName": "Japanese",
       "Iso": {
-        "FileName": "26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
         "Url": "https://software-static.download.prss.microsoft.com/dbazure/998969d5-f34g-4e03-ac9d-1f9786c66749/26100.32230.260111-0550.lt_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
-        "FwlinkUrl": "https://go.microsoft.com/fwlink/?linkid=2345828&clcid=0x411&culture=ja-jp&country=jp",
         "Sha256": "",
-        "SizeBytes": 0,
-        "ReleaseDate": "",
         "_VerifiedDate": "2026-05-26",
         "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
       },

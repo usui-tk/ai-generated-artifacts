@@ -168,11 +168,6 @@
     CI-friendly mode S: build a synthetic non-bootable ISO from a tiny
     in-memory WIM. No Microsoft assets are downloaded.
 
-.PARAMETER EvalIsoMode
-    Opt-in mode E: download Microsoft Evaluation Center ISO via fwlink and
-    run the full pipeline. Output ISO is NOT uploaded as a CI artifact
-    (evaluation licence forbids redistribution).
-
 .PARAMETER Execute
     Required for Build phases to actually mount and modify WIMs. Without it,
     Build phases run in Sandbox mode (plan only, no DISM writes).
@@ -200,19 +195,18 @@
         -Action PrepareBuildVerify `
         -OsVersion Server2025 -OsLanguage en-us `
         -AutoDetectLatestPatches `
-        -EvalIsoMode `
         -WorkRoot 'D:\UpdateWsi' `
         -Execute
-    Eval mode: download Microsoft Eval Center ISO via fwlink, auto-detect
-    latest patches, run the full pipeline.
+    Download the source ISO from the config's LanguageSpecific Iso.Url,
+    auto-detect the latest patches, run the full pipeline.
 
 .EXAMPLE
     .\Update-WindowsServerIso.ps1 `
         -Action PrepareBuildVerify `
         -OsVersion Server2016 -OsLanguage ja-jp `
-        -EvalIsoMode -UseBaselineOnly -EnablePca2023BootManager `
+        -UseBaselineOnly -EnablePca2023BootManager `
         -WorkRoot 'D:\UpdateWsi'
-    Server 2016 ja-jp eval ISO build, dry-run mode (no -Execute). On hosts
+    Server 2016 ja-jp build, dry-run mode (no -Execute). On hosts
     that do not yet have Windows ADK Deployment Tools installed, P01 will
     download and silently install OptionId.DeploymentTools before continuing.
     Add -Execute on a subsequent run to perform the real ISO assembly.
@@ -289,7 +283,6 @@ param(
     [switch]   $EnvironmentInfoOnly,
 
     [switch]   $SyntheticTestMode,
-    [switch]   $EvalIsoMode,
     [switch]   $Execute,
 
     # ---- Secure Boot / PCA2023 ----
@@ -352,9 +345,6 @@ if ($EnvironmentInfoOnly -and $SkipEnvCheck) {
 }
 if ($Action -eq 'BootTest' -and $SyntheticTestMode) {
     throw 'BootTest requires Hyper-V and is incompatible with -SyntheticTestMode.'
-}
-if ($SyntheticTestMode -and $EvalIsoMode) {
-    throw '-SyntheticTestMode and -EvalIsoMode are mutually exclusive.'
 }
 if ($PSBoundParameters.ContainsKey('OnlyPhases') -and -not $OnlyPhases) {
     throw '-OnlyPhases was specified but the array is empty.'
@@ -541,8 +531,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.48'
-$Script:ScriptTag     = 'psa-canon-conformance'
+$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.49'
+$Script:ScriptTag     = 'evaliso-retirement'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -2904,8 +2894,8 @@ function Resolve-IsoSourceUrl {
     <#
     .SYNOPSIS
         Pick the final ISO download URL according to the priority
-        described in SPEC Part B.4 (explicit -IsoUrl, then Iso.Url
-        from the per-language v2.0 config).
+        described in SPEC Part B.4: explicit -IsoUrl first, then the
+        config's LanguageSpecific.<lang>.Iso.Url.
     #>
     [CmdletBinding()]
     [OutputType([string])]
@@ -2916,7 +2906,7 @@ function Resolve-IsoSourceUrl {
     if (-not [string]::IsNullOrEmpty($ExplicitUrl)) {
         return $ExplicitUrl
     }
-    # v2.0: per-language ISO source is at .Iso.Url; legacy keys removed.
+    # The per-language ISO source lives at .Iso.Url.
     if ($LanguageProfile.Iso -and -not [string]::IsNullOrEmpty($LanguageProfile.Iso.Url)) {
         return $LanguageProfile.Iso.Url
     }

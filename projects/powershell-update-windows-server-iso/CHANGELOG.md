@@ -22,6 +22,36 @@ the script and follows the
 
 ## [Unreleased]
 
+### Removed -- retire the dead `-EvalIsoMode` switch and the reader-less `Iso.*` config/seed fields; rewrite SPEC B.7 to the real source-ISO resolution (r11.48 -> r11.49, tag `evaliso-retirement`; audit G2)
+
+The 2026-07-02 final inspection found the evaluation-ISO mechanism had
+lost its wiring on every level: the `-EvalIsoMode` switch was declared and
+mutual-exclusion-checked but consumed nowhere (the READMEs advertised a
+"permit fwlink download" gate that does not exist -- `Resolve-IsoSourceUrl`
+uses `Iso.Url` unconditionally); the per-language `Iso.FileName` /
+`FwlinkUrl` / `SizeBytes` / `ReleaseDate` fields had zero readers across
+the script and the test suite (and were already rotting: `SizeBytes` was
+`0` and `ReleaseDate` empty in every committed block); and SPEC B.7
+documented a four-pattern ISO filename auto-detection (including an
+`EvalIsoBaseName` config key) that has no implementation and no such key.
+
+Retired accordingly: the switch, its help block and both help examples,
+the exclusivity check, the four fields in all 16 `LanguageSpecific.*.Iso`
+blocks (4 configs + 4 seeds), and the fictional B.7 table. B.7 now
+documents the actual three-branch resolution (SyntheticTestMode /
+`-IsoPath` / download from `-IsoUrl`-or-`Iso.Url` to
+`<OsShortName>_<lang>.iso`) plus the P04 `Iso.Sha256` verification, and
+notes that evaluation ISOs remain fully usable via `-IsoPath` / `-IsoUrl`.
+Both schemas pin the surviving `Iso` shape (`Url` + `Sha256` +
+`_Verified*` provenance, `additionalProperties: false`) so the retired
+fields cannot creep back -- the same structural-guard pattern as the
+r10.3 legacy-`Patches` guard. `Resolve-IsoSourceUrl` prose also loses its
+last "v2.0 config" wording (audit G6, partial). Both READMEs drop the
+`-EvalIsoMode` row and exclusivity bullet in lockstep; TESTING's E2E
+prep step now stages the ISO via `Iso.Url` / `-IsoUrl` / `-IsoPath`. One
+line-number straggler in SPEC that the G3 sweep missed (a reference
+wrapped across a line break) is also converted to symbol wording.
+
 ### Fixed -- SPEC: replace all raw script line-number references with symbol references (docs-only, no version bump; audit G3)
 
 The 2026-07-02 final inspection mechanically verified all 18 `script L<n>`

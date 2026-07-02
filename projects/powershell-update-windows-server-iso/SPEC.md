@@ -793,27 +793,28 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 - `Prepare` produces a workspace ready for a later `Build` invocation;
   it MAY be used as a dry-run for staging correctness without the cost
   of DISM mount.
-- `-OnlyPhases <phase[]>` overrides the Action's phase set (script
-  L246) — useful for forensic re-runs of a single phase.
+- `-OnlyPhases <phase[]>` overrides the Action's phase set — useful
+  for forensic re-runs of a single phase.
 
-## B.7 ISO filename detection patterns
+## B.7 Source-ISO resolution
 
 **Status**: normative.
 
-P02 ResolveInputs picks the input ISO from `<WorkRoot>/source/iso/`
-by trying the following filename patterns in order:
+P02 ResolveInputs resolves the source ISO through exactly three
+mutually exclusive branches (no directory scanning or filename-pattern
+auto-detection exists):
 
-| Order | Pattern | Origin |
+| Branch | Condition | Resulting `IsoLocalPath` |
 |:---:|:---|:---|
-| 1 | `WS<OS>_<lang>.iso` | This script's recommended name |
-| 2 | `<EvalIsoBaseName from config>.iso` | Per-config explicit name |
-| 3 | `*server*evaluation*<lang>*.iso` (case-insensitive) | Microsoft Evaluation Center default |
-| 4 | first `*.iso` in the directory | Last-resort fallback |
+| 1 | `-SyntheticTestMode` | `<WorkRoot>/source/iso/synthetic.iso`, generated in P04 |
+| 2 | `-IsoPath <file>` | The given local file (must exist; resolved relative to the script) |
+| 3 | otherwise | `<WorkRoot>/source/iso/<OsShortName>_<lang>.iso`, downloaded in P04 from `Resolve-IsoSourceUrl` (`-IsoUrl` if given, else the config's `LanguageSpecific.<lang>.Iso.Url`) |
 
-For multilingual workspaces, the per-language sub-pattern uses the
-config's `LanguageSpecific.<lang>.Iso.FileName` value directly. The
-fallback path emits a warning so the operator can tell whether
-auto-detect succeeded.
+P04 verifies the staged ISO against the config's
+`LanguageSpecific.<lang>.Iso.Sha256` when present. To use a
+pre-downloaded ISO (for example a Microsoft Evaluation Center image),
+pass it via `-IsoPath`; to point at a different download source, pass
+`-IsoUrl`.
 
 ## B.8 Patch integrity check (three-layer)
 
