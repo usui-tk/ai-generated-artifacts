@@ -34,10 +34,15 @@ Runtime: python3 (stdlib only). The validator subprocess additionally needs json
 Usage:
     python3 tool.py --root <repo-root> register   --unit-id <id> --kind <k> --location <p> \
         --version <v> --change-policy <cp> --binding <bm> --platform-scope <ps> \
-        [--tested true|false] [--consumer consumer=<c>,path=<p> ...]
+        [--tested true|false] [--maturity <m>] [--consumer consumer=<c>,path=<p> ...]
+    python3 tool.py --root <repo-root> register   --unit-id <id> --kind project \
+        --location <projects/dir> --maturity sandbox|incubating|governed|archived
+        (kind=project is a lifecycle record, ADR 0024: maturity replaces the
+        region-unit fields; --version/--change-policy/--binding/--platform-scope
+        are rejected)
     python3 tool.py --root <repo-root> update     --unit-id <id> [--tested true|false] \
         [--version <v>] [--change-policy <cp>] [--binding <bm>] [--platform-scope <ps>] \
-        [--location <p>] [--add-consumer consumer=<c>,path=<p> ...] [--clear-consumers]
+        [--location <p>] [--maturity <m>] [--add-consumer consumer=<c>,path=<p> ...] [--clear-consumers]
     python3 tool.py --root <repo-root> deregister --unit-id <id>
     python3 tool.py --root <repo-root> list
 
@@ -56,7 +61,8 @@ import tempfile
 
 # --- enums / pattern mirrored from governance/schema/manifest.schema.json -------------
 KINDS = ("powershell-helper", "spec-region", "governance-doc", "bash-region",
-         "tool", "python-helper", "python-tool", "template")
+         "tool", "python-helper", "python-tool", "template", "project")
+MATURITIES = ("sandbox", "incubating", "governed", "archived")
 CHANGE_POLICIES = ("canonical", "vendored-upstream-first", "forked")
 BINDING_MODES = ("follow-latest", "pin")
 PLATFORM_SCOPES = ("cross-platform", "windows-enhanced", "windows-only")
@@ -64,6 +70,10 @@ UNIT_ID_RE = re.compile(r"^[a-z0-9]+(\.[a-z0-9-]+)+$")
 REQUIRED = ("schema_version", "unit_id", "kind", "canonical_location",
             "canonical_version", "change_policy", "binding_mode", "consumers",
             "tested", "platform_scope")
+# kind=project rows (ADR 0024) are lifecycle records: maturity replaces the
+# region-unit fields (mirrors the manifest.schema.json allOf branch).
+PROJECT_REQUIRED = ("schema_version", "unit_id", "kind", "canonical_location",
+                    "consumers", "maturity")
 SCHEMA_VERSION = "1"
 
 
@@ -121,7 +131,8 @@ def write_manifest_atomic(path, text):
 def precheck_record(record, existing, *, is_new):
     """Return a list of human-readable problems (empty list == ok)."""
     problems = []
-    for field in REQUIRED:
+    is_project = record.get("kind") == "project"
+    for field in (PROJECT_REQUIRED if is_project else REQUIRED):
         if field not in record:
             problems.append("missing required field: %s" % field)
     uid = record.get("unit_id", "")
@@ -129,17 +140,27 @@ def precheck_record(record, existing, *, is_new):
         problems.append("unit_id %r does not match the schema pattern" % uid)
     if record.get("kind") not in KINDS:
         problems.append("kind %r not in %s" % (record.get("kind"), KINDS))
-    if record.get("change_policy") not in CHANGE_POLICIES:
-        problems.append("change_policy %r not in %s"
-                        % (record.get("change_policy"), CHANGE_POLICIES))
-    if record.get("binding_mode") not in BINDING_MODES:
-        problems.append("binding_mode %r not in %s"
-                        % (record.get("binding_mode"), BINDING_MODES))
-    if record.get("platform_scope") not in PLATFORM_SCOPES:
-        problems.append("platform_scope %r not in %s"
-                        % (record.get("platform_scope"), PLATFORM_SCOPES))
-    if not isinstance(record.get("tested"), bool):
-        problems.append("tested must be a boolean")
+    if "maturity" in record and record.get("maturity") not in MATURITIES:
+        problems.append("maturity %r not in %s" % (record.get("maturity"), MATURITIES))
+    if is_project:
+        # lifecycle record (ADR 0024): the region-unit fields must be ABSENT
+        for field in ("canonical_version", "change_policy", "binding_mode",
+                      "tested", "platform_scope"):
+            if field in record:
+                problems.append("kind=project row must not carry %s "
+                                "(lifecycle record, ADR 0024)" % field)
+    else:
+        if record.get("change_policy") not in CHANGE_POLICIES:
+            problems.append("change_policy %r not in %s"
+                            % (record.get("change_policy"), CHANGE_POLICIES))
+        if record.get("binding_mode") not in BINDING_MODES:
+            problems.append("binding_mode %r not in %s"
+                            % (record.get("binding_mode"), BINDING_MODES))
+        if record.get("platform_scope") not in PLATFORM_SCOPES:
+            problems.append("platform_scope %r not in %s"
+                            % (record.get("platform_scope"), PLATFORM_SCOPES))
+        if not isinstance(record.get("tested"), bool):
+            problems.append("tested must be a boolean")
     if not isinstance(record.get("consumers"), list):
         problems.append("consumers must be an array")
     if is_new:
@@ -203,18 +224,50 @@ def transact(root, validator, new_records, *, dry_run):
 # --- operations ------------------------------------------------------------------------
 def op_register(root, validator, args):
     records = load_manifest(manifest_path(root))
-    record = {
-        "schema_version": SCHEMA_VERSION,
-        "unit_id": args.unit_id,
-        "kind": args.kind,
-        "canonical_location": args.location,
-        "canonical_version": args.version,
-        "change_policy": args.change_policy,
-        "binding_mode": args.binding,
-        "consumers": [parse_consumer(c) for c in (args.consumer or [])],
-        "tested": (args.tested == "true"),
-        "platform_scope": args.platform_scope,
-    }
+    if args.kind == "project":
+        # lifecycle record (ADR 0024): maturity replaces the region-unit fields.
+        rejected = [f for f, v in (("--version", args.version),
+                                   ("--change-policy", args.change_policy),
+                                   ("--binding", args.binding),
+                                   ("--platform-scope", args.platform_scope))
+                    if v is not None]
+        if rejected:
+            return (False, "register pre-check failed:\n  - kind=project takes no %s "
+                    "(lifecycle record, ADR 0024)" % ", ".join(rejected))
+        if args.maturity is None:
+            return (False, "register pre-check failed:\n  - kind=project requires "
+                    "--maturity (ADR 0024)")
+        record = {
+            "schema_version": SCHEMA_VERSION,
+            "unit_id": args.unit_id,
+            "kind": args.kind,
+            "canonical_location": args.location,
+            "maturity": args.maturity,
+            "consumers": [parse_consumer(c) for c in (args.consumer or [])],
+        }
+    else:
+        missing = [f for f, v in (("--version", args.version),
+                                  ("--change-policy", args.change_policy),
+                                  ("--binding", args.binding),
+                                  ("--platform-scope", args.platform_scope))
+                   if v is None]
+        if missing:
+            return (False, "register pre-check failed:\n  - kind=%s requires %s"
+                    % (args.kind, ", ".join(missing)))
+        record = {
+            "schema_version": SCHEMA_VERSION,
+            "unit_id": args.unit_id,
+            "kind": args.kind,
+            "canonical_location": args.location,
+            "canonical_version": args.version,
+            "change_policy": args.change_policy,
+            "binding_mode": args.binding,
+            "consumers": [parse_consumer(c) for c in (args.consumer or [])],
+            "tested": (args.tested == "true"),
+            "platform_scope": args.platform_scope,
+        }
+        if args.maturity is not None:
+            record["maturity"] = args.maturity
     problems = precheck_record(record, records, is_new=True)
     if problems:
         return (False, "register pre-check failed:\n  - " + "\n  - ".join(problems))
@@ -241,6 +294,8 @@ def op_update(root, validator, args):
         record["platform_scope"] = args.platform_scope
     if args.location is not None:
         record["canonical_location"] = args.location
+    if args.maturity is not None:
+        record["maturity"] = args.maturity
     if args.clear_consumers:
         record["consumers"] = []
     for spec in (args.add_consumer or []):
@@ -283,11 +338,14 @@ def build_parser():
     p_reg.add_argument("--unit-id", required=True)
     p_reg.add_argument("--kind", required=True, choices=KINDS)
     p_reg.add_argument("--location", required=True)
-    p_reg.add_argument("--version", required=True)
-    p_reg.add_argument("--change-policy", required=True, choices=CHANGE_POLICIES)
-    p_reg.add_argument("--binding", required=True, choices=BINDING_MODES)
-    p_reg.add_argument("--platform-scope", required=True, choices=PLATFORM_SCOPES)
+    p_reg.add_argument("--version", default=None,
+                       help="required for every kind except project (ADR 0024)")
+    p_reg.add_argument("--change-policy", choices=CHANGE_POLICIES, default=None)
+    p_reg.add_argument("--binding", choices=BINDING_MODES, default=None)
+    p_reg.add_argument("--platform-scope", choices=PLATFORM_SCOPES, default=None)
     p_reg.add_argument("--tested", choices=("true", "false"), default="false")
+    p_reg.add_argument("--maturity", choices=MATURITIES, default=None,
+                       help="required for kind=project; optional elsewhere (ADR 0024)")
     p_reg.add_argument("--consumer", action="append",
                        help="consumer=<id>,path=<file> (repeatable)")
     p_reg.set_defaults(func=op_register)
@@ -300,6 +358,7 @@ def build_parser():
     p_upd.add_argument("--binding", choices=BINDING_MODES, default=None)
     p_upd.add_argument("--platform-scope", choices=PLATFORM_SCOPES, default=None)
     p_upd.add_argument("--location", default=None)
+    p_upd.add_argument("--maturity", choices=MATURITIES, default=None)
     p_upd.add_argument("--add-consumer", action="append",
                        help="consumer=<id>,path=<file> (repeatable)")
     p_upd.add_argument("--clear-consumers", action="store_true")

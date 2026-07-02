@@ -255,6 +255,60 @@ def run_tests():
                   rc == 1 and read_bytes(mpath(root)) == before))
     shutil.rmtree(root)
 
+    # 13. register a kind=project lifecycle row (ADR 0024) -> OK; row carries
+    #     maturity and NO region-unit fields; validator (real schema) green.
+    root = build_repo()
+    os.makedirs(os.path.join(root, "projects", "demo-project"))
+    rc = run(["--root", root, "register", "--unit-id", "project.demo-project",
+              "--kind", "project", "--location", "projects/demo-project",
+              "--maturity", "sandbox"])
+    after = tool.load_manifest(mpath(root))
+    prow = next((r for r in after if r["unit_id"] == "project.demo-project"), None)
+    cases.append(("register kind=project (lifecycle row) succeeds",
+                  rc == 0 and prow is not None and prow["maturity"] == "sandbox"
+                  and "canonical_version" not in prow and "tested" not in prow))
+    # 13b. update --maturity promotes the stage -> OK, validator green.
+    rc = run(["--root", root, "update", "--unit-id", "project.demo-project",
+              "--maturity", "incubating"])
+    after = tool.load_manifest(mpath(root))
+    prow = next(r for r in after if r["unit_id"] == "project.demo-project")
+    cases.append(("update --maturity promotes the stage",
+                  rc == 0 and prow["maturity"] == "incubating"))
+    shutil.rmtree(root)
+
+    # 14. register kind=project WITHOUT --maturity -> refused at pre-check.
+    root = build_repo()
+    os.makedirs(os.path.join(root, "projects", "demo-project"))
+    before = read_bytes(mpath(root))
+    rc = run(["--root", root, "register", "--unit-id", "project.demo-project",
+              "--kind", "project", "--location", "projects/demo-project"])
+    cases.append(("register kind=project without --maturity is refused",
+                  rc == 1 and read_bytes(mpath(root)) == before))
+    shutil.rmtree(root)
+
+    # 15. register kind=project WITH region-unit flags -> refused (lifecycle
+    #     record must not carry them; mirrors the schema allOf branch).
+    root = build_repo()
+    os.makedirs(os.path.join(root, "projects", "demo-project"))
+    before = read_bytes(mpath(root))
+    rc = run(["--root", root, "register", "--unit-id", "project.demo-project",
+              "--kind", "project", "--location", "projects/demo-project",
+              "--maturity", "sandbox", "--version", "0.1.0"])
+    cases.append(("register kind=project with region-unit flags is refused",
+                  rc == 1 and read_bytes(mpath(root)) == before))
+    shutil.rmtree(root)
+
+    # 16. register a NON-project kind now missing --version -> refused in-code
+    #     (the argparse-required flags moved to the op for the project branch).
+    root = build_repo()
+    os.makedirs(os.path.join(root, "quality-tools", "nv"))
+    open(os.path.join(root, "quality-tools", "nv", "n.py"), "w").write("# n\n")
+    rc = run(["--root", root, "register", "--unit-id", "tool.nv",
+              "--kind", "tool", "--location", "quality-tools/nv/n.py"])
+    cases.append(("register non-project kind without --version is refused",
+                  rc == 1 and "tool.nv" not in ids(root)))
+    shutil.rmtree(root)
+
     passed = 0
     for name, ok in cases:
         print("[%s] %s" % ("PASS" if ok else "FAIL", name))

@@ -110,6 +110,29 @@ def run():
     cases.append(("happy-path green", findings == [], findings))
     shutil.rmtree(root)
 
+    # A + C: a kind=project lifecycle row (ADR 0024; maturity, no region fields,
+    # canonical_location = a directory) passes cleanly alongside a region row.
+    project_row = {
+        "schema_version": "1", "unit_id": "project.demo-project",
+        "kind": "project", "canonical_location": "projects/demo-project",
+        "maturity": "governed", "consumers": [],
+    }
+    root = build_root([_canonical_line(BASE_RECORD), _canonical_line(project_row)])
+    os.makedirs(os.path.join(root, "projects", "demo-project"))
+    findings, _, _ = validate(root, quiet=True)
+    cases.append(("A+C kind=project lifecycle row green (dir location, no region fields)",
+                  findings == [], findings))
+    shutil.rmtree(root)
+
+    # A: kind=project with an out-of-enum maturity -> schema violation caught.
+    bad_project = dict(project_row, maturity="alpha")
+    root = build_root([_canonical_line(BASE_RECORD), _canonical_line(bad_project)])
+    os.makedirs(os.path.join(root, "projects", "demo-project"))
+    findings, _, _ = validate(root, quiet=True)
+    cases.append(("A kind=project out-of-enum maturity caught",
+                  "A" in checks_present(findings), findings))
+    shutil.rmtree(root)
+
     # A: schema violation (change_policy not in enum).
     bad = dict(BASE_RECORD, change_policy="bogus")
     root = build_root([_canonical_line(bad)])
