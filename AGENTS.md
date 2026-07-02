@@ -272,6 +272,12 @@ are English-only vs bilingual); the rules here fix *which characters* may appear
   as does Japanese held as *data* (e.g. locale error-message detection strings in
   `psa.py`, non-ASCII canonical-JSON test fixtures, a documented mojibake example). These
   are not leaks and are not to be "cleaned".
+- **Navigational labels in English-only artifacts are English.** A cross-link to a `.ja`
+  companion inside an English-only file (SPEC, TESTING, CHANGELOG, governance docs) is
+  labelled "Japanese", never with CJK text: the label is navigation, not quoted data, so
+  the intentional-Japanese exception does not cover it. Inside the bilingual `README`
+  pair itself, the top-of-file language switcher may carry the native-language label —
+  that pair is bilingual by design.
 - **Selection / option labels are English letters or numerals** — `(A)` / `(B)` / `(C)`
   or `1` / `2` / `3` — in conversation **and** in artifacts. **Never** kana labels
   (parenthesized hiragana, e.g. a Japanese "i"/"ro"/"ha" sequence) and never katakana
@@ -355,12 +361,15 @@ once **>=2** consumers share observed common content:
 - **PowerShell**: spec home `governance/spec/powershell.md` exists
   (Part A regions A.1-A.14, unit `spec.powershell.part-a`). New
   PowerShell consumers vendor from it.
-- **Bash**: **no spec home yet** - the canon currently has a single
-  Bash consumer, so extraction would be premature (§2). Until a
-  second Bash consumer triggers extraction,
-  `projects/bash-ol-aws-ami-builder/SPEC.md` Part A is the **de-facto
-  Bash reference** (§7). Do NOT manufacture a Bash spec home from one
-  project.
+- **Bash**: spec home `governance/spec/bash.md` exists (Part A regions
+  A.1-A.8, unit `spec.bash.part-a`), extracted at the rule-of-two
+  trigger when the second Bash consumer
+  (`projects/bash-rhel-container-testsuite`) joined
+  `projects/bash-ol-aws-ami-builder`. Regions are distilled from
+  conventions **observed in both consumers**; single-observer
+  conventions (phase registries, env-property schemas, OS
+  auto-detection) stay in the owning consumer's SPEC as `A.x`
+  extensions. New Bash consumers vendor from the home.
 
 A consumer's Part A MAY still carry a project-specific extensions
 subsection (`A.x`) recording ONLY deviations or additions; this is
@@ -408,8 +417,7 @@ because:
 To prevent recurrence:
 
 - BEFORE touching Part A of any Layer 3 SPEC, read the family **spec
-  home** Part A in full (for Bash, the de-facto reference SPEC until a
-  spec home exists)
+  home** Part A in full
 - BEFORE "improving" Part A by adding content, classify it: if it is
   generic, propose it to the **spec home** (and re-sync the vendored
   copies); if it is project-specific, record it under `A.x` (extensions)
@@ -455,11 +463,11 @@ text lives in the files listed.
 
 The canonical Part A common conventions are **vendored from the family
 spec home** (§6): for **PowerShell**, `governance/spec/powershell.md`
-(unit `spec.powershell.part-a`, gate-verified); for **Bash**, no spec
-home yet (rule-of-two, §2) - `projects/bash-ol-aws-ami-builder/SPEC.md`
-Part A is the de-facto reference until extraction. The two Layer 3
-SPECs below remain useful **worked examples** (concrete idioms), not
-the canonical Part A source for PowerShell.
+(unit `spec.powershell.part-a`, gate-verified); for **Bash**,
+`governance/spec/bash.md` (unit `spec.bash.part-a`, gate-verified;
+extracted at the rule-of-two trigger). The Layer 3 SPECs below remain
+useful **worked examples** (concrete idioms), not the canonical Part A
+source for their family.
 
 **PowerShell reference** — [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md):
 
@@ -470,7 +478,8 @@ the canonical Part A source for PowerShell.
 - §A.14 Debug Trace Facility — operation-level diagnostic facility,
   designed to be reused verbatim across PowerShell scripts in this style
 
-**Bash / AWS canonical** — [`projects/bash-ol-aws-ami-builder/SPEC.md`](./projects/bash-ol-aws-ami-builder/SPEC.md):
+**Bash reference** — [`projects/bash-ol-aws-ami-builder/SPEC.md`](./projects/bash-ol-aws-ami-builder/SPEC.md)
+(worked example; the canonical Part A source is the spec home `governance/spec/bash.md`):
 
 - §A.5 Shell Options and Defensive Coding — the `set -euo pipefail`
   discipline and equivalent Bash idioms for safe error propagation

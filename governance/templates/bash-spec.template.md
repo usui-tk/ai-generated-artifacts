@@ -2,56 +2,53 @@
   bash- SPEC skeleton template (English only, strictly ASCII). Renders into the
   project SPEC.md. SPEC is English-only per the canonical doc-language-policy
   (there is NO SPEC.ja twin).
-  STRUCTURAL-ONLY (no vendored Part A): bash currently has a single consumer, so
-  per the rule-of-two (AGENTS.md §2) NO bash spec home is extracted and NO Part A
-  regions are vendored. Part A is authored INLINE in the consumer SPEC and is
-  "canonical-in-principle" - canonical-quality common content that is simply not yet
-  hoisted to a Layer-1 home. When a 2nd bash consumer appears, rule-of-two triggers:
-  extract Part A to governance/spec/bash.md and switch this template's Part A to a
-  vendored (L2 -> L3) region set, exactly as the powershell- SPEC template does.
+  Part A is NOT restated here: the rule-of-two triggered when the second Bash
+  consumer appeared, so per the AGENTS.md par.6 Part A Inheritance Rule (ABSOLUTE)
+  the 8 canonical Part A regions are vendored (L2 -> L3) from the spec home
+  governance/spec/bash.md at L3 reconstruction (cross-L2 copy is forbidden).
   Parts B/C/D are the script-specific structural skeleton (canonical heading + role +
-  FILL). The doc-region marker/policy contract is owned by ADR 0020 / doc_gate.
+  FILL). The doc-region marker/hash contract is owned by ADR 0020 / doc_gate.
   Tokens: {{PROJECT_TITLE}} {{REPO_ROOT_RELPATH}}
 -->
 # Bash Script Specification (SPEC) — {{PROJECT_TITLE}}
 
 > This SPEC documents `{{PROJECT_TITLE}}`. **Part A** is the repository-wide common
-> specification, authored inline below (canonical-in-principle: there is no shared bash
-> spec home yet, per the rule-of-two); **Parts B-D** are specific to this script.
-> History lives in `CHANGELOG.md`; current and forward design lives here.
+> specification, inherited by vendoring from the canonical spec home; **Parts B-D**
+> are specific to this script. History lives in `CHANGELOG.md`; current and forward
+> design lives here.
 
 ## Table of Contents
 
-- Part A — Common Specification (authored inline; canonical-in-principle)
+- Part A — Common Specification (vendored from the spec home)
 - Part B — Script-Specific Specification
 - Part C — Quality Gates & Validation Checklist
 - Part D — Known Pitfalls & Lessons Learned
 
-# Part A — Common Specification (authored inline; canonical-in-principle)
+# Part A — Common Specification (vendored; reusable across all scripts)
 
-> **Status: authored inline — NOT vendored, NOT inherited by reference.** Bash has a
-> single consumer today, so per the [`AGENTS.md` rule-of-two]({{REPO_ROOT_RELPATH}}/AGENTS.md)
-> no bash spec home exists and Part A is not a vendored region. The common conventions
-> below are written directly in this SPEC and are canonical-in-principle; when a second
-> bash subproject appears they are hoisted to `governance/spec/bash.md` and vendored.
+> **Status: vendored from the spec home — do NOT restate or hand-edit.** Per the
+> [`AGENTS.md` par.6 Part A Inheritance Rule (ABSOLUTE)]({{REPO_ROOT_RELPATH}}/AGENTS.md),
+> this Part A is never free-hand copied into a script's SPEC. The canonical text is the
+> spec home `governance/spec/bash.md`; this SPEC carries it as gate-managed vendored
+> regions (marker + doc-region hash, verified by `doc_gate.py`). A project-specific
+> extensions subsection (`A.x`) MAY follow the vendored regions, recording ONLY
+> deviations or additions owned by this consumer.
 
-<!-- AUTHOR Part A INLINE: write the repository-wide common conventions that apply to
-     this (and any future) bash script, in canonical order. Until a bash spec home is
-     extracted these sections carry NO doc-region marker (they are not a vendored
-     region). Suggested canonical sections (include those that apply):
-       A.1  Reference assets (canonical scripts, companion files, workspace paths)
-       A.2  Source file format (shebang, set -euo pipefail, encoding/LF, layout)
-       A.3  Banner / version convention
-       A.4  Pipeline / phase architecture (numbering, registry, entry/exit, skip)
-       A.5  Logging conventions (markers, line format, banners)
-       A.6  Path handling
-       A.7  Parameter / environment-property handling
-       A.8  Error / diagnostic conventions and exit codes
-       A.9  CSV / JSONL data conventions (if the script emits data contracts)
-       A.10 Environment evaluation
-       A.11 Static analysis (shellcheck clean; any documented suppressions)
-       A.12 Documentation language policy (README bilingual; SPEC English-only)
-       A.13 Development workflow -->
+<!-- ASSEMBLE: Part A = vendor the 8 canonical regions (L2 -> L3) from the spec home
+     governance/spec/bash.md at reconstruction (doc_gate.py owns the doc-region
+     marker/hash contract and the stamp/verify path). Region unit_ids, in canonical
+     order:
+       A.1  spec.bash.part-a.reference-assets
+       A.2  spec.bash.part-a.source-file-format
+       A.3  spec.bash.part-a.logging
+       A.4  spec.bash.part-a.parameter-handling
+       A.5  spec.bash.part-a.error-diagnostic
+       A.6  spec.bash.part-a.static-analysis
+       A.7  spec.bash.part-a.doc-language-policy
+       A.8  spec.bash.part-a.development-workflow
+     Conventions observed in only one consumer (phase/pipeline registries,
+     env-property schemas, OS auto-detection, data-contract specifics) are NOT in the
+     home; record them as A.x extensions or Part B sections owned by the consumer. -->
 
 <!-- >>> CANONICAL unit_id=spec.bash.part-b.identity-io-phases version=0.1.0 hash=NONE policy=structural binding=follow-latest >>> -->
 # Part B — Script-Specific Specification
@@ -126,7 +123,8 @@
 <!-- <<< CANONICAL unit_id=spec.bash.part-d.pitfalls <<< -->
 ## Appendix: How to seed a new script from this SPEC
 
-<!-- FILL: the short procedure to start a new script from this template - author Part A
-     inline (canonical-in-principle), copy the Part B section headings, and wire up the
-     Part C gates. When a second bash subproject appears, hoist Part A to a bash spec
-     home and switch to vendoring (rule-of-two). -->
+<!-- FILL: the short procedure to start a new script from this template - vendor the
+     8 Part A regions from governance/spec/bash.md (doc_gate stamp/verify), copy the
+     Part B section headings, wire up the Part C gates, and record any deviations from
+     the vendored Part A as consumer-owned A.x extensions (never edit a vendored
+     region in place). -->

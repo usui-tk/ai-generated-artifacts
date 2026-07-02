@@ -5,7 +5,7 @@
      rationale and history. Never reconstruct current truth by replaying ADRs. -->
 
 > **Scope.** Family-independent, cross-cutting governance only. Family-specific specs
-> live in `governance/spec/common.<family>.md`; subproject specs in
+> live in `governance/spec/<family>.md`; subproject specs in
 > `projects/<lang>-<name>/SPEC.md`. English-only (no `.ja` twin). Each section below is
 > **governed by an ADR** and links back to it (bidirectional `governs` ↔ back-reference);
 > the ADR is the immutable decision log, this section is the mutable current-truth view.
