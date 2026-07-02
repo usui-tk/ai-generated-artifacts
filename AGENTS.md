@@ -49,8 +49,8 @@ LLM agents MUST recognise and respect this structure.
 |:-:|---|---|---|
 | **Layer 0** | Repository root | Cross-cutting policies | `README.md`, `SPEC.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, this `AGENTS.md` |
 | **Layer 1** | Top-level category directories | Category-wide rules | `scripts/README.md`, `documents/research/README.md`, etc. |
-| **Layer 2** | Subcategory directories | Subcategory conventions (currently sparse) | `scripts/powershell/`, `scripts/python/` |
-| **Layer 3** | Subproject directories | Project-specific files | `scripts/powershell/<project>/{README.md,SPEC.md,TESTING.md,CHANGELOG.md}` |
+| **Layer 2** | Category directories | Category conventions (currently sparse) | `projects/`, `quality-tools/`, `reference-code/` |
+| **Layer 3** | Subproject directories | Project-specific files | `projects/<lang>-<name>/{README.md,SPEC.md,TESTING.md,CHANGELOG.md}` |
 
 ### Inheritance flow
 
@@ -68,8 +68,8 @@ marker+hash regions (ADR 0019 / 0020), NOT free-hand restated. See §6.
 
 ### Sibling-isolation policy
 
-Subprojects at the same level (e.g. `scripts/powershell/A/` and
-`scripts/powershell/B/`) MUST NOT modify each other's files. If a
+Subprojects at the same level (e.g. `projects/powershell-a/` and
+`projects/powershell-b/`) MUST NOT modify each other's files. If a
 useful pattern observed in one subproject should apply to another,
 the agent MUST propose the change at Layer 0 or Layer 1 so all
 siblings benefit equally — DO NOT silently fork the convention into
@@ -515,7 +515,7 @@ extracted at the rule-of-two trigger). The Layer 3 SPECs below remain
 useful **worked examples** (concrete idioms), not the canonical Part A
 source for their family.
 
-**PowerShell reference** — [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](./scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md):
+**PowerShell reference** — [`projects/powershell-download-speakerdeck-oracle4engineer/SPEC.md`](./projects/powershell-download-speakerdeck-oracle4engineer/SPEC.md):
 
 - §A.13 Development Workflow — iteration cycle, revision discipline,
   and the "reuse before invention" principle

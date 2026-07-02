@@ -2,6 +2,21 @@
 
 > 🇺🇸 English / 🇯🇵 日本語
 
+> **EN — Canonical policy home (D5, 2026-07-03):** the repository-wide AI-content and
+> execution-risk policies live in the root [`README.md`](../README.md) — see
+> "AI-Generated Content Disclaimer" and "Use at Your Own Risk". This directory README
+> remains only for the content still under `scripts/` during the incremental migration
+> to `projects/`; per-project doc-sets re-point their disclaimer references at their
+> next reconstruction (never hand-edited), and this file is removed with the `scripts/`
+> tree (P7a/P8).
+>
+> **JA — 正規ポリシーホーム（D5、2026-07-03）:** リポジトリ全体のAIコンテンツ・実行リスク
+> ポリシーの正規ホームはルートの [`README.md`](../README.md)（「AI-Generated Content
+> Disclaimer」「Use at Your Own Risk」節）です。本READMEは `scripts/` 配下に残る内容の
+> 移行完了までの暫定的な案内であり、各プロジェクト文書の参照は次回の再構成時に
+> 張り替えられます（手編集はしません）。本ファイルは `scripts/` ツリーの削除（P7a/P8）と
+> ともに撤去されます。
+
 ## Purpose / 目的
 
 **EN:** Contains AI-generated or AI-assisted **scripts** — automation scripts, utilities, and code samples.

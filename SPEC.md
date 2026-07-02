@@ -4,7 +4,7 @@
 > sub-project. Sub-project specifications live in each sub-project's own
 > `SPEC.md` (for example,
 > `quality-tools/powershell-static-analyzer/SPEC.md` and
-> `scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`).
+> `projects/powershell-download-speakerdeck-oracle4engineer/SPEC.md`).
 >
 > This file is **English only**, per the repository-wide documentation
 > language policy declared in [`README.md`](./README.md#language-policy).
@@ -83,7 +83,7 @@ The specification does NOT cover:
 - Behaviour of the scripts that CI exercises. Those live in each
   script's own `SPEC.md` (for example, Speaker Deck downloader
   invariants are in
-  `scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`).
+  `projects/powershell-download-speakerdeck-oracle4engineer/SPEC.md`).
 - Non-CI policies such as the repository-wide language policy or
   revision-history conventions, which are anchored in the root
   `README.md`.
@@ -110,7 +110,7 @@ runner family or with a fundamental change of trigger event (for
 example, `release/published` vs `push`).
 
 **Practical consequence.** The
-`scripts/powershell/download-speakerdeck-oracle4engineer/` sub-project
+`projects/powershell-download-speakerdeck-oracle4engineer/` sub-project
 has three logical checks: Linux static analysis, Windows static
 analysis, and Windows release verification. These are realised as three
 workflows (`stage1__linux`, `stage2__windows`, `stage3__windows-release`)
@@ -164,10 +164,10 @@ Examples (mapped to their target sub-project):
 
 | Workflow filename | Target |
 |:---|:---|
-| `scripts__python__powershell-static-analyzer.yml` | `quality-tools/powershell-static-analyzer/` |
-| `scripts__powershell__download-speakerdeck-oracle4engineer__stage1__linux.yml` | `scripts/powershell/download-speakerdeck-oracle4engineer/` (STAGE 1) |
-| `scripts__powershell__download-speakerdeck-oracle4engineer__stage2__windows.yml` | `scripts/powershell/download-speakerdeck-oracle4engineer/` (STAGE 2) |
-| `scripts__powershell__download-speakerdeck-oracle4engineer__stage3__windows-release.yml` | `scripts/powershell/download-speakerdeck-oracle4engineer/` (STAGE 3) |
+| `quality-tools__powershell-static-analyzer.yml` | `quality-tools/powershell-static-analyzer/` |
+| `projects__powershell-download-speakerdeck-oracle4engineer__stage1__linux.yml` | `projects/powershell-download-speakerdeck-oracle4engineer/` (STAGE 1) |
+| `projects__powershell-download-speakerdeck-oracle4engineer__stage2__windows.yml` | `projects/powershell-download-speakerdeck-oracle4engineer/` (STAGE 2) |
+| `projects__powershell-download-speakerdeck-oracle4engineer__stage3__windows-release.yml` | `projects/powershell-download-speakerdeck-oracle4engineer/` (STAGE 3) |
 
 **Rationale.** GitHub Actions does not support nested directories under
 `.github/workflows/`. Folding the path into the filename keeps the
@@ -184,7 +184,7 @@ GitHub Actions' native nouns are **Workflow**, **Job**, and **Step**.
 This repository uses the additional concept **STAGE** to refer to a
 distinct point in the `workflow_run` chain for a single sub-project.
 
-For `scripts/powershell/download-speakerdeck-oracle4engineer/`:
+For `projects/powershell-download-speakerdeck-oracle4engineer/`:
 
 - **STAGE 1** = Linux checks (psa.py + PSScriptAnalyzer on pwsh 7).
 - **STAGE 2** = Windows checks (PSScriptAnalyzer on Windows PS 5.1 +
@@ -364,7 +364,7 @@ GitHub Actions enforces a maximum chain depth of **three hops** for
 finished may itself trigger a third workflow; a fourth hop is
 suppressed.
 
-The current chain for `scripts/powershell/download-speakerdeck-oracle4engineer/`
+The current chain for `projects/powershell-download-speakerdeck-oracle4engineer/`
 is:
 
 ```
@@ -467,7 +467,8 @@ content from external sources that could surface tokens.
 
 CodeQL Analysis is currently configured via GitHub's **Default setup**
 (see §11.2). Migrating to **Advanced setup** would mean replacing the
-UI-managed default with a `.github/workflows/codeql.yml` pinned to a
+UI-managed default with a hand-authored CodeQL workflow (a `codeql.yml`
+under `.github/workflows/`) pinned to a
 commit SHA, using query suites such as `security-extended` and
 `security-and-quality`, with explicit `matrix.language` entries for
 `python` and `actions`.
@@ -508,12 +509,12 @@ CI workflow changes MUST be recorded in the CI-target script's own
 `CHANGELOG.md`. There is no separate CI changelog. Specifically:
 
 - A change to
-  `.github/workflows/scripts__python__powershell-static-analyzer.yml`
+  `.github/workflows/quality-tools__powershell-static-analyzer.yml`
   is recorded in
   `quality-tools/powershell-static-analyzer/CHANGELOG.md`.
 - A change to any of the three Download-SpeakerDeck STAGE workflows is
   recorded in
-  `scripts/powershell/download-speakerdeck-oracle4engineer/CHANGELOG.md`.
+  `projects/powershell-download-speakerdeck-oracle4engineer/CHANGELOG.md`.
 - A change to this `SPEC.md` is recorded in the CHANGELOG of whichever
   sub-project the change primarily affects. If a `SPEC.md` change is
   cross-cutting (e.g., adjusting the Timeout Policy across all
@@ -621,7 +622,8 @@ and is not subject to a configuration toggle.
 
 Code scanning is currently configured using GitHub's **Default
 setup**. This decision is recorded explicitly because the alternative
-(Advanced setup with a hand-authored `.github/workflows/codeql.yml`)
+(Advanced setup with a hand-authored `codeql.yml` under
+`.github/workflows/`)
 is a known migration path and is documented as a Future Consideration
 in §8.1.G.
 
