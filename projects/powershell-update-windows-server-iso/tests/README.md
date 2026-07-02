@@ -33,9 +33,20 @@ production, this directory ships five tools, summarised below.
 | `release_info_parser_test.py` (T6) | Offline regression test for the PowerShell `ConvertFrom-ReleaseInfoMarkdown` parser against the PoC fixture; asserts row counts and per-OS coverage | After every change to the release-info parser or its helpers; on every CI run | No  |
 | `dotnet_cu_parser_test.py` (T7) | Offline regression test for `ConvertFrom-DotNetCuIndexMarkdown` and `ConvertFrom-DotNetCuMarkdown` against live-captured snapshots under `tests/snapshots/dotnet_cu/` (independent of the PoC fixtures); 16 assertions covering entry counts, date range, per-OS row counts, per-entry deep equality, typo handling, and OS-label mapping | After every change to the .NET CU parsers, the OS-label mapper, or the fetch/cache pipeline; on every CI run | No  |
 | `canonical_json_test.py` (T11) | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell, in `Update-WindowsServerIso.ps1`) and `canonical_json_dumps` / `save_canonical_json_file` (Python, in `tests/common/canonical_json.py`); 26 assertions covering primitives (12), collections (8), Unicode (3), real-world `data/*.json` shapes (2), and file-level save (1). Verifies the SPEC Part B.23 byte-level parity contract for `data/*.json` and `tests/fixtures/*.json` files. | After every change to `ConvertTo-CanonicalJson`, `Save-CanonicalJsonFile`, or `tests/common/canonical_json.py`; on every CI run | No  |
-| `catalog_patchset_builder_test.py` (T27) | Offline b3 config-dataset builder: drives `ConvertTo-ConfigLines` through the TestHarness REPL against the committed layer-1 raw fixture (`fixtures/catalog_raw/resolve-2026-06.json`) to BUILD `PatchBaseline.Lines[]` without live Catalog I/O -- restores the pre-D2 offline construction path. 14 assertions: per-OS Kinds match the `PatchModel` allowed set, every Line carries a `Digest`, the uup-checkpoint OS builds a `SetupDU` Line at `ApplyOrder` 5. | After every change to `ConvertTo-ConfigLines`, the b3 transform, or the raw fixture; on every CI run | No  |
+| `catalog_patchset_builder_test.py` (T27) | Offline b3 config-dataset builder: drives `ConvertTo-ConfigLines` through the TestHarness REPL against the committed layer-1 raw fixture (`fixtures/catalog_raw/resolve-2026-06.json`) to BUILD `PatchBaseline.Lines[]` without live Catalog I/O -- restores the pre-D2 offline construction path. 16 assertions: per-OS Kinds match the `PatchModel` allowed set, every Line carries a `Digest`, the uup-checkpoint OS builds a `SetupDU` Line at `ApplyOrder` 5. | After every change to `ConvertTo-ConfigLines`, the b3 transform, or the raw fixture; on every CI run | No  |
+| `removed_live_wua_guard_test.py` (T20) | Offline static guard: the removed live-WUA functions/parameters stay absent and the P06 gate stays wired; 20 assertions | After every change to P06 or the WUA-adjacent surface | No |
+| `config_required_ssu_downloadurl_test.py` (T23) | Offline data-contract guard on the committed configs: every `SSU` Line carries a non-empty `DownloadUrl`, `PatchModel` ⇔ SSU-line presence stays consistent per OS, negative fixture (`fixtures/config-guard/`) rejected; 20 assertions | After every change to `data/config-Server*.json` | No |
+| `dism_cleanup_args_test.py` (T24) | `Get-DismCleanupArgumentList` argument-vector unit test (ResetBase / ScratchDir variants); 6 assertions | After every change to the P07 cleanup path | No |
+| `dism_export_args_test.py` (T25) | `Get-DismExportArgumentList` argument-vector unit test; 6 assertions | After every change to the P07 export path | No |
+| `defender_exclusion_plan_test.py` (T26) | The three pure helpers behind `-UseDefenderExclusions` (managed set / plan / fail-closed decision); 13 assertions | After every change to the Defender-exclusion feature | No |
+| `setup_du_forbid_test.py` (T28) | `Resolve-SetupDu` Forbid-branch guard for the non-uup-checkpoint OSes (2016/2019/2022); 12 assertions | After every change to the SetupDU resolver | No |
+| `patch_integrity_digest_test.py` (T29) | Digest-format boundary: `ConvertTo-HexDigestString` base64↔hex vs an independent Python implementation, live-captured KB5095966 vector, static wiring guards; 11 assertions | After every change to the integrity layer | No |
+| `setup_du_discriminator_test.py` (T30) | `Select-SetupDuCandidate` against verbatim live-Catalog rows (title discriminator; Products-filter resurrection guard); 8 assertions | After every change to the SetupDU discriminator | No |
+| `lcu_target_verify_test.py` (T31) | `TargetBuildAfterUpdate` derived-field contract: comparator, committed-data consistency, single-writer wiring, P11 hard-Fail row; 24 assertions | After every change to the TBAU derivation or P11 | No |
+| `seed_contract_test.py` (seed contract gate) | `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules; 17 assertions. No T number — gate convention. | After every change to seeds or the seed schema | No |
+| `canonical_json_format_check.py` (canonical JSON format gate) | Re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence (29 files); implements SPEC §C.3.4. No T number — format gate. | After every change that adds or modifies a JSON file in the scanned directories | No |
 | `canonical_json_format_check.py` (Part C gate) | Offline format compliance check for every `*.json` file under `data/`, `tests/fixtures/`, and `tests/snapshots/`. Re-serialises each file through `canonical_json_dumps` and fails if the bytes diverge. Implements SPEC §C.3.4. | On every commit that adds or modifies a JSON file in the three scanned directories; on every CI run | No  |
-| `config_schema_test.py` (config schema gate) | Offline schema-conformance check. A stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json` (forbids the legacy `Patches` property, requires `NeutralPatches`), with a targeted r10.4 regression guard against `Patches` reappearing. 14 assertions. No T number — schema gate, mirroring the format-gate convention. | On every commit that touches `data/config-Server*.json` or `schema/config.schema.json`; on every CI run | No  |
+| `config_schema_test.py` (config schema gate) | Offline schema-conformance check. A stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json` (Config Schema v3.0: requires `PatchBaseline.Lines`; the legacy `Patches` / `NeutralPatches` shapes are forbidden), with a targeted r10.4 regression guard against `Patches` reappearing. 14 assertions. No T number — schema gate, mirroring the format-gate convention. | On every commit that touches `data/config-Server*.json` or `schema/config.schema.json`; on every CI run | No  |
 | `seed_contract_test.py` (seed contract gate) | Offline SEED/DERIVED-boundary gate (SPEC B.14.2). Mechanically coordinates the data pipeline with the schema: asserts every `schema/config.schema.json` field is classified as exactly one of SEED (admitted by `schema/config-seed.schema.json`) or DERIVED (a declared table grounded in what the refreshers generate), with no unclassified field, no overlap, and no seed-extra; checks the seed schema is a faithful projection (shared definitions byte-equal; `PatchBaselineSeed` = the `PatchBaseline` envelope); and validates every `data/seed/seed-Server*.json` against the seed schema (reusing the `config_schema_test` validator). 17 assertions. No T number — schema gate. Guards against a config-schema field being silently dropped from the seed. | On every commit that touches `schema/config*.json` or `data/seed/`; on every CI run | No  |
 
 ## Quick start
@@ -46,7 +57,10 @@ cd tests/
 python3 catalog_fixture_test.py            # T2: 13 assertions on saved HTML
 python3 powershell_harness.py              # T3: 7 PS function-level assertions
 python3 canonical_json_test.py             # T11: 26 PS/Python byte-level parity assertions
-python3 removed_live_wua_guard_test.py                 # T20: 21 removed-live-WUA static-guard assertions
+python3 removed_live_wua_guard_test.py     # T20: 20 removed-live-WUA static-guard assertions
+
+# ...or run the whole offline suite (every *_test.py is offline-deterministic):
+for t in *_test.py canonical_json_format_check.py; do python3 "$t" || break; done
 python3 canonical_json_format_check.py     # Part C: every JSON file in canonical format
 python3 config_schema_test.py              # config schema gate: data/config-Server*.json vs v2.1 schema
 python3 seed_contract_test.py              # seed contract gate: SEED/DERIVED boundary coordinated with the schema
@@ -143,12 +157,26 @@ on Linux; `powershell` (Windows 5.1) works on Windows hosts.
 ```
 tests/
   README.md                  this file
-  catalog_probe.py           T1
-  catalog_fixture_test.py    T2
-  powershell_harness.py      T3
-  eval_iso_probe.py          T4
-  removed_live_wua_guard_test.py         T20 (removed-live-WUA static guard: functions/params absent + P06 gate wired, 21 assertions)
-  catalog_patchset_builder_test.py       T27 (offline b3 dataset builder: ConvertTo-ConfigLines from captured raw -> PatchBaseline.Lines incl. SetupDU @ ApplyOrder 5, 14 assertions)
+  catalog_probe.py           T1  (live Catalog probe)
+  catalog_fixture_test.py    T2  (offline HTML fixture regression, 13)
+  powershell_harness.py      T3  (PS function unit tests via TestHarness, 7)
+  eval_iso_probe.py          T4  (live ISO endpoint Range-GET probe)
+  release_info_parser_test.py            T6  (release-info parser, 13)
+  dotnet_cu_parser_test.py               T7  (.NET CU parsers, 16)
+  canonical_json_test.py                 T11 (PS/Python canonical-JSON parity, 26)
+  removed_live_wua_guard_test.py         T20 (removed-live-WUA static guard, 20)
+  config_required_ssu_downloadurl_test.py T23 (config SSU data contract, 20)
+  dism_cleanup_args_test.py              T24 (DISM cleanup argument vector, 6)
+  dism_export_args_test.py               T25 (DISM export argument vector, 6)
+  defender_exclusion_plan_test.py        T26 (Defender-exclusion pure helpers, 13)
+  catalog_patchset_builder_test.py       T27 (offline b3 dataset builder incl. SetupDU @ ApplyOrder 5 + starvation hard-fail, 16)
+  setup_du_forbid_test.py                T28 (SetupDU Forbid-branch guard, 12)
+  patch_integrity_digest_test.py         T29 (digest-format boundary, 11)
+  setup_du_discriminator_test.py         T30 (SetupDU title discriminator, 8)
+  lcu_target_verify_test.py              T31 (TargetBuildAfterUpdate contract, 24)
+  config_schema_test.py                  config schema gate (14)
+  seed_contract_test.py                  seed contract gate (17)
+  canonical_json_format_check.py         canonical JSON format gate (29 files)
   common/
     __init__.py              package marker
     catalog_client.py        urllib HTTP fetcher with retry-jitter
@@ -169,19 +197,25 @@ tests/
       bad-config-ssu-empty-url.json  # Type=SSU with empty DownloadUrl: the T23 negative fixture
     catalog_raw/
       resolve-2026-06.json           # captured layer-1 { os; lines[] } incl. a SetupDU line: T27 offline-build input
+    dotnet_cu/                       # .NET CU parser fixtures (T7 adjunct)
+    release_info/                    # release-info parser fixture (T6)
   snapshots/
     .gitkeep
     last_probe.json          (written by T1 --snapshot)
+    dotnet_cu/               live-captured .NET CU snapshots (T7 input)
+    release_info/            live-captured release-info snapshot
 ```
 
 ## How these tools relate to CI
 
-T2 (offline) is the only tool that runs reliably in CI without
-external dependencies; it should be the gate for every PR. T1, T4,
-T5 are appropriate for the monthly CI workflow
-(`stage4__monthly-refresh.yml`) where they catch Microsoft-side
-drift early. T3 requires a `pwsh`-capable runner, which CI Stage 1
-already has, so T3 also belongs in that workflow.
+CI Stage 1 currently runs the BOM/CRLF/ASCII format check, the
+config schema gate, psa.py (text + SARIF) and PSScriptAnalyzer; the
+rest of the offline suite (every `*_test.py` here, all
+offline-deterministic and stdlib-only) is run as the local gate
+battery on every change and is a natural candidate for a future
+Stage 1 extension. T1 and T4 are live probes and belong to the
+monthly workflow (`stage4__monthly-refresh.yml`), where they catch
+Microsoft-side drift early.
 
 ## Retired r06 Phase 2 PoC (r07.0)
 

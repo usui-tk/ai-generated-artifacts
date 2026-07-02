@@ -22,6 +22,45 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed -- documentation currency sweep: reconcile README (EN/JA) / SPEC / TESTING / tests/README with the r11.51 implementation (docs-only, no version bump)
+
+A doc-vs-implementation reconciliation pass (mechanical: counts, T-table
+vs `tests/` directory, CI workflow steps vs their description) found and
+fixed the following stale content:
+
+- **SPEC**: "thirteen Actions" -> fourteen (the actual `ValidateSet`);
+  C.9 still described "thirteen numbered tools (T1 through T13)" and its
+  determinism list cited the retired/never-shipped T5/T8/T9/T10/T12/T13
+  -- rewritten to the real sparse inventory (seventeen numbered tools,
+  T1-T31, retired numbers never reused, plus three gates) with eleven
+  missing rows added (T20, T23-T31, seed gate) and the format-gate file
+  count corrected 26 -> 29; the Part G revision-history table, which
+  stopped at "r09.0 (planned implementation)", gains compact rows
+  covering r10.x through the r11.44-r11.51 audit-remediation arc.
+- **TESTING**: T3 assertion count 10 -> 7; format-gate count 26 -> 29;
+  the missing T23 row added; the Stage 1 summary row overstated CI (it
+  claimed T2/T3/T6/T7/T11/T20/T24-T27 run in Stage 1 -- the workflow
+  actually runs the BOM/CRLF/ASCII check, the config schema gate,
+  psa.py and PSScriptAnalyzer) and now states reality, with the full
+  offline suite attributed to the local gate battery; the psa /
+  encoding / PSAP0005 header rows and the offline-suite rows re-run
+  this session are re-stamped "r11.51 audit-residue-sweep / 2026-07-02".
+- **tests/README**: the tool inventory and file-layout listings were
+  missing ten tests (T20 was listed with a wrong count, T23-T31 and the
+  seed/format gates absent); the config-schema-gate description still
+  said the validator "requires `NeutralPatches`" (v3.0 requires
+  `PatchBaseline.Lines`; both legacy shapes are forbidden); T27's count
+  14 -> 16; the CI-relations paragraph referenced the retired T5 and
+  claimed T2 is the only CI-runnable tool -- rewritten to the actual
+  Stage 1 contents, noting the offline suite as a future Stage 1
+  extension candidate.
+- **README (EN/JA, lockstep)**: "nineteen tools (T1-T19)" -> the sparse
+  T1-T31 inventory (T12-T19 were retired with the wsusscn2 D1 removal),
+  in both the directory-tree comment and the self-verification section.
+
+No normative behavior statements changed except where the document
+contradicted the shipped implementation.
+
 ### Fixed -- eval_iso_probe (T4): replace the URL substring host check with a parsed-hostname exact match (CodeQL alert #52, `py/incomplete-url-substring-sanitization`, CWE-20; tool-only, no script version bump)
 
 The HTTP-400 "unprobable, not broken" special case for Server 2016's

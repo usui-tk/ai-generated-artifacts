@@ -135,7 +135,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
 │   └── cache-dotnet-cu.json
-├── tests/                            # 自己検証スイート（T1-T19 + ゲート）
+├── tests/                            # 自己検証スイート（疎番号 T1-T31 + ゲート）
 └── docs/history/                     # サイクル別の調査レポート
 ```
 
@@ -495,8 +495,9 @@ python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.p
 
 ## 自己検証ツール
 
-`tests/` サブディレクトリには 19 個の Python 自己検証ツール（T1 – T19）
-に加え、データ契約ゲートとフォーマットゲートが同梱されています。これらは
+`tests/` サブディレクトリには 17 個の Python 自己検証ツール（疎番号
+T1 – T31。退役したツールの番号は再利用しません）に加え、
+フォーマット／スキーマ／シードの 3 ゲートが同梱されています。これらは
 スクリプトの外部依存をプローブし、PowerShell 関数をユニットテストし、
 さらに SPEC §B.23 の JSON canonical 形式を強制します。オフラインツールは
 Python 標準ライブラリのみを利用するため、`pip install` は不要です。

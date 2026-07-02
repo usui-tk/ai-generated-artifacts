@@ -46,9 +46,9 @@ a build identifier plus a calendar date. Pending items are marked
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r11.1 cross-repo-canon-iso-encoding-tls-rename build (`psa.py` 4.2.0; re-verified) / 2026-05-29 |
-| File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r11.1 cross-repo-canon-iso-encoding-tls-rename build / 2026-05-29 |
-| `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r11.1 cross-repo-canon-iso-encoding-tls-rename build / 2026-05-29 |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 0 warnings / 0 info** ✓ (both text and SARIF modes exit 0) | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r11.51 audit-residue-sweep build (re-verified; also gated per-push by CI Stage 1) / 2026-07-02 |
+| `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r11.51 audit-residue-sweep build (re-verified after the r11.48 canon-conformance fix) / 2026-07-02 |
 | PSScriptAnalyzer on Windows PowerShell 5.1 (Stage 2) | ✓ pass | CI Stage 2 (continuous) |
 | P01 Initialize — PowerShell env / admin / ADK / disk / Hyper-V probe | ✓ pass on Windows 11 + PS 5.1 | _pending operator confirmation_ |
 | P02 ResolveInputs — Config JSON load + ISO / patch source resolution | ✓ structurally validated via T3 harness | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
@@ -67,13 +67,14 @@ a build identifier plus a calendar date. Pending items are marked
 | A02 DumpFieldClassification — field-cadence decision matrix emit | ✓ exercised | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
 | A03 RefreshSnapshots — upstream `data/raw-*` + `data/cache-*` refresh | ✓ exercised in Stage 4 monthly | CI Stage 4 / 2026-05-15 |
 | T1 catalog_probe.py | ✓ live probe passes (~7 checks) | CI Stage 4 / 2026-05-15 |
-| T2 catalog_fixture_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| T3 powershell_harness.py (10 PS function assertions) | ✓ all pass | CI Stage 1 (continuous) |
+| T2 catalog_fixture_test.py (13 assertions) | ✓ all pass | local gate battery (offline suite) / 2026-06-28 |
+| T3 powershell_harness.py (7 PS function assertions) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
 | T4 eval_iso_probe.py (4 OS × 2 lang Range-GET) | ✓ live probe passes | CI Stage 4 / 2026-05-15 |
-| T6 release_info_parser_test.py (13 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| T7 dotnet_cu_parser_test.py (16 assertions) | ✓ all pass | CI Stage 1 (continuous) |
-| T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| T20 removed_live_wua_guard_test.py (20 assertions, offline static guard: the r11.19-removed live-WUA functions/parameters stay absent and P06 ValidatePatchServicing stays a pass-through) | ✓ all pass | migration r11.33 / 2026-06-27 |
+| T6 release_info_parser_test.py (13 assertions) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| T7 dotnet_cu_parser_test.py (16 assertions) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| T20 removed_live_wua_guard_test.py (20 assertions, offline static guard: the r11.19-removed live-WUA functions/parameters stay absent and P06 ValidatePatchServicing stays a pass-through) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| T23 config_required_ssu_downloadurl_test.py (20 assertions, offline data-contract guard on the committed configs: every `SSU` Line carries a non-empty `DownloadUrl`, `PatchModel` ⇔ SSU-line presence stays consistent per OS, plus the negative fixture `fixtures/config-guard/bad-config-ssu-empty-url.json` is rejected; predates the v3.0 migration and was migrated to `Lines`/`Kind`/`PatchModel`) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
 | T24 dism_cleanup_args_test.py (6 assertions, `Get-DismCleanupArgumentList`: default three-token `/Cleanup-Image /StartComponentCleanup` vector with no `/ResetBase`, `-IncludeResetBase` appends `/ResetBase`, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the comma/`+` precedence collapse behind exit 1639) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T25 dism_export_args_test.py (6 assertions, `Get-DismExportArgumentList` returns the five-token `/Export-Image ... /Compress:max` vector targeting the requested source index, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the same precedence trap) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T26 defender_exclusion_plan_test.py (13 assertions, the three pure helpers behind `-UseDefenderExclusions`: `Get-DefenderManagedExclusionSet` (WorkRoot path + four servicing process names), `Get-DefenderExclusionPlan` (add-only-absent, case/slash-insensitive), `Get-DefenderExclusionDecision` (fail-closed -- applies only when every prerequisite is positively satisfied; `$null`/unknown -> skip); the `*-MpPreference`/`Get-MpComputerStatus` wrappers are Windows-only and not exercised) | ✓ all pass | r11.26 defender-exclusion-optin build / 2026-06-11 |
@@ -82,10 +83,10 @@ a build identifier plus a calendar date. Pending items are marked
 | T29 patch_integrity_digest_test.py (11 assertions, digest-format boundary: `ConvertTo-HexDigestString` base64->hex round-trip vs an independent Python implementation for SHA-1/SHA-256, the live-captured KB5095966 Catalog vector, hex pass-through, garbage/wrong-length rejection, plus static wiring guards -- both `Test-PatchIntegrity` expectations normalized through the boundary and P04 seeds BOTH `Digest`->`sha-1` and `Sha256`->`sha-256`; pins the fix for the base64-vs-hex mismatch that failed every real download verification) | ✓ all pass | r11.44 digest-format-boundary / 2026-07-02 |
 | T30 setup_du_discriminator_test.py (8 assertions, `Select-SetupDuCandidate` against rows captured verbatim from the live Catalog 2026-07-02: server 24H2 Setup-DU rows selected, Windows 11 client / arm64 / SafeOS rows excluded, empty input safe, 21H2 selects nothing (2022 has no Setup DU), plus the pinned F1 fact -- the real Setup-DU Products value contains NO 'Setup Dynamic Update' -- and a code-line static guard that the products-based filter cannot resurface) | ✓ all pass | r11.45 setupdu-discriminator-hardfail / 2026-07-02 |
 | T31 lcu_target_verify_test.py (24 assertions, TargetBuildAfterUpdate derived-field contract: `Test-LcuTargetApplied` comparator behavior (present/absent/case-insensitive/empty, build annotation), committed configs have `TargetBuildAfterUpdate == <LCU Line>.InScope.build` with no retired fields, seeds reduced to `Schema`+`ChecksumAlgorithm`, both schemas reconciled, and static wiring -- BOTH Lines writers (refresh writeback + the A00/A01 config-object loop) derive TBAU via the single pure `Get-TargetBuildFromLines`, P11 calls the comparator as a hard-Fail row, and no code line touches `VerificationMethod`/`ExcludeKbList`) | ✓ all pass | r11.46 tbau-derived-lcu-verify / 2026-07-02 |
-| Part C §C.3.4 — `canonical_json_format_check.py` (26 JSON files canonicalised, format gate) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.1 cross-repo-canon-iso-encoding-tls-rename build (re-verified) / 2026-05-29 |
-| Seed contract gate — `seed_contract_test.py` (17 assertions, `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules; the SEED contract for the offline dataset rebuild) | ✓ all pass | r11.42 data-pipeline-rebuilddataset / 2026-06-28 |
-| Stage 1 (Linux psa.py + PSScriptAnalyzer + T2/T3/T6/T7/T11/T20/T24-T27 + format gate + config schema gate) | ✓ green | CI continuous |
+| Part C §C.3.4 — `canonical_json_format_check.py` (29 JSON files canonicalised, format gate) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| Seed contract gate — `seed_contract_test.py` (17 assertions, `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules; the SEED contract for the offline dataset rebuild) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| Stage 1 (Linux: BOM/CRLF/ASCII format check + config schema gate + psa.py text/SARIF + PSScriptAnalyzer/SARIF; the full offline T-suite runs in the local gate battery, not in Stage 1) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |

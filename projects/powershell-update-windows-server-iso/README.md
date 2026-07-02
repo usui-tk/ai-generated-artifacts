@@ -143,7 +143,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
 │   └── cache-dotnet-cu.json
-├── tests/                            # Self-verification suite (T1-T19 + gates)
+├── tests/                            # Self-verification suite (sparse T1-T31 + gates)
 └── docs/history/                     # Per-cycle investigation reports
 ```
 
@@ -511,8 +511,9 @@ last-verified row.
 
 ## Self-verification tools
 
-The `tests/` subdirectory ships nineteen Python-based self-verification
-tools (T1 – T19) plus the data-contract and format gates. They probe the
+The `tests/` subdirectory ships seventeen Python-based self-verification
+tools (sparse T-numbering, T1 – T31; numbers of retired tools are never
+reused) plus three format / schema / seed gates. They probe the
 script's external dependencies, unit-test its PowerShell functions, and
 enforce the SPEC §B.23 JSON canonical format. All offline tools use only
 the Python standard library (no `pip install` required).

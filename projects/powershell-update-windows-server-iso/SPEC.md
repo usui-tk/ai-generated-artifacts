@@ -750,7 +750,7 @@ script exit.
 
 **Status**: normative.
 
-The `param()` `ValidateSet` on `-Action` declares thirteen Actions.
+The `param()` `ValidateSet` on `-Action` declares fourteen Actions.
 The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 
 ### B.6.1 Standard pipeline Actions
@@ -2532,16 +2532,17 @@ candidate Future enhancement. Today, the gate is a manual review.
 **Status**: normative. **Policy ID**: SPEC-WSI-033.
 
 The `tests/` subdirectory ships a Python-based self-verification
-suite of **thirteen numbered tools (T1 through T13)** plus two
-unnumbered format / schema gates (the canonical JSON format gate and
-the config schema gate). They probe the script's
+suite of **seventeen numbered tools (sparse T-numbering, T1 through
+T31; numbers of retired tools are never reused)** plus three
+unnumbered gates (the canonical JSON format gate, the config schema
+gate and the seed contract gate). They probe the script's
 external dependencies and unit-test its PowerShell functions. They
 use only the Python standard library — no `pip install` required.
 The canonical T-numbering is maintained in
 [`tests/README.md`](./tests/README.md) "Tool inventory"; this section
 mirrors that authoritative table.
 
-### C.9.1 Tool inventory (T1 – T13 + format / schema gates)
+### C.9.1 Tool inventory (T1 – T31, sparse + format / schema / seed gates)
 
 | Tool | Type | Assertions | Network | Run when |
 |:---|:---|:---|:---:|:---|
@@ -2552,13 +2553,24 @@ mirrors that authoritative table.
 | **T6** `release_info_parser_test.py` | Offline regression for `ConvertFrom-ReleaseInfoMarkdown` against the PoC fixture | 13 | No | Every commit that touches the release-info parser |
 | **T7** `dotnet_cu_parser_test.py` | Offline regression for `ConvertFrom-DotNetCuIndexMarkdown` / `ConvertFrom-DotNetCuMarkdown` against `snapshots/dotnet_cu/` | 16 | No | Every commit touching the .NET CU parsers or the fetch/cache pipeline |
 | **T11** `canonical_json_test.py` | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell) and `canonical_json_dumps` / `save_canonical_json_file` (Python) per SPEC Part B.23 | 26 | No | Every commit touching the canonical JSON helpers (PS or Python) |
-| **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 26 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
+| **T20** `removed_live_wua_guard_test.py` | Offline static guard: the removed live-WUA functions / parameters stay absent and the P06 gate stays wired | 20 | No | Every commit touching P06 or the WUA-adjacent surface |
+| **T23** `config_required_ssu_downloadurl_test.py` | Offline data-contract guard on the committed configs: SSU `DownloadUrl` non-empty, `PatchModel` ⇔ SSU-line consistency, negative fixture rejected | 20 | No | Every commit touching `data/config-Server*.json` |
+| **T24** `dism_cleanup_args_test.py` | `Get-DismCleanupArgumentList` argument-vector unit test (ResetBase / ScratchDir variants) | 6 | No | Every commit touching the P07 cleanup path |
+| **T25** `dism_export_args_test.py` | `Get-DismExportArgumentList` argument-vector unit test | 6 | No | Every commit touching the P07 export path |
+| **T26** `defender_exclusion_plan_test.py` | The three pure helpers behind `-UseDefenderExclusions` (managed set / plan / fail-closed decision) | 13 | No | Every commit touching the Defender-exclusion feature |
+| **T27** `catalog_patchset_builder_test.py` | Offline b3 dataset builder: `ConvertTo-ConfigLines` from the committed raw capture to `PatchBaseline.Lines[]`, incl. the SetupDU line and the in-model starvation hard-fail | 16 | No | Every commit touching `ConvertTo-ConfigLines` or the raw fixture |
+| **T28** `setup_du_forbid_test.py` | `Resolve-SetupDu` Forbid-branch guard for the non-uup-checkpoint OSes | 12 | No | Every commit touching the SetupDU resolver |
+| **T29** `patch_integrity_digest_test.py` | Digest-format boundary: `ConvertTo-HexDigestString` base64↔hex vs an independent Python implementation + static wiring guards | 11 | No | Every commit touching the integrity layer |
+| **T30** `setup_du_discriminator_test.py` | `Select-SetupDuCandidate` against verbatim live-Catalog rows (title discriminator; Products-filter resurrection guard) | 8 | No | Every commit touching the SetupDU discriminator |
+| **T31** `lcu_target_verify_test.py` | `TargetBuildAfterUpdate` derived-field contract: comparator behavior, committed-data consistency, single-writer wiring, P11 hard-Fail row | 24 | No | Every commit touching the TBAU derivation or P11 |
+| **seed contract gate** `seed_contract_test.py` | `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules (the SEED contract for the offline dataset rebuild). (No T number; gate convention.) | 17 | No | Every commit touching seeds or the seed schema |
+| **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 29 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
 | **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config.schema.json` |
 
 **Determinism categories**:
 
-- **Offline-deterministic** (run on every PR): T2, T3, T6, T7, T8, T9, T10, T11, T12, T13, plus the canonical JSON format gate and the config schema gate.
-- **Live-network** (monthly CI + ad-hoc): T1, T4, T5.
+- **Offline-deterministic** (the local gate battery for every change; CI Stage 1 runs the config schema gate): T2, T3, T6, T7, T11, T20, T23, T24, T25, T26, T27, T28, T29, T30, T31, plus the canonical JSON format gate, the config schema gate and the seed contract gate.
+- **Live-network** (monthly CI + ad-hoc): T1, T4.
 
 ### C.9.2 Adjunct: retired r06 Phase 2 PoCs
 
@@ -3380,6 +3392,10 @@ upstream fix path.
 | r07.0 Step 1 – Step 19 | 2026-05-25 → 2026-05-26 | Release-info migration; config-driven token matching; data/ flat layout; numerous polish steps and parser hardening |
 | r08.0 Step 1 – Step 4 | 2026-05-27 | Server 2016 EVAL PCA2023 viability confirmed; install.wim symmetry; `Test-OutputIsoPca2023Readiness`; KB5087537 SSU-prerequisite incident |
 | r09.0 Step 1 (this SPEC) | 2026-05-27 (planned implementation) | Servicing Dependency Database (§B.19); new D.24-D.30 lessons; SPEC restructure to Part A/B/C/D standard form |
+| r10.x | 2026-05-28 → 2026-05-29 | Schema hardening (legacy `Patches` forbidden + regression guard); canonical JSON parity (T11) |
+| r11.1 – r11.33 | 2026-05-29 → 2026-06-27 | Cross-repo canon vendoring; live-WUA removal (on-mount readiness, T20); P07 cleanup/export hardening (T24/T25); Defender exclusions (T26); wsusscn2 Servicing Dependency Database retired (D1) |
+| r11.34 – r11.43 | 2026-06-27 → 2026-06-28 | Data-source migration to the Microsoft Update Catalog (D2): Config Schema v3.0 `Lines[]`/`Kind`/`PatchModel`, b3 builder (T27/T28), A00 `RebuildDataset`, seed contract (seed gate) |
+| r11.44 – r11.51 | 2026-07-02 | Audit-remediation arc: digest-format boundary (T29); SetupDU discriminator hard-fail (T30); TBAU SEED→DERIVED + P11 hard check (T31); legacy input paths + `-EvalIsoMode` retired; post-refresh re-derivation defects fixed; SPEC vocabulary reconciled to v3.0 Kinds |
 
 ### G.2 Roadmap (next cycles)
 
