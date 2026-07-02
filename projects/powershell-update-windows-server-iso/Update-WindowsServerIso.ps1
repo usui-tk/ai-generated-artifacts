@@ -522,8 +522,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.50'
-$Script:ScriptTag     = 'legacy-input-retirement'
+$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.51'
+$Script:ScriptTag     = 'audit-residue-sweep'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -9921,8 +9921,8 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             }
         }
 
-        # Optional integrity check against config-recorded SHA-256
-        # (v2.0: per-language Iso.Sha256 from LanguageSpecific.<lang>.Iso)
+        # Optional integrity check against the config-recorded SHA-256
+        # (per-language LanguageSpecific.<lang>.Iso.Sha256)
         $configSha = $null
         if ($Script:OsLangProfile.Iso -and $Script:OsLangProfile.Iso.Sha256) {
             $configSha = $Script:OsLangProfile.Iso.Sha256

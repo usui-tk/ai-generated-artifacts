@@ -874,18 +874,16 @@ from patch `Type` to target lanes lives in `$Script:PatchTargetMap`.
 The default mapping follows Microsoft's media-dynamic-update
 guidance:
 
-| Patch Type | Target lanes | Microsoft rationale |
+| Patch Type (Config Schema v3.0 `Kind`) | Target lanes | Microsoft rationale |
 |:---|:---|:---|
-| `SSU`                     | Install + Boot + WinRE   | Every serviced WIM needs the latest servicing stack |
-| `LCU`                     | Install + Boot           | WinRE uses Safe OS DU instead |
-| `DotNet.Runtime`          | Install                  | .NET 4.x runtime KB lives in install.wim |
-| `DotNet.OsLevel`          | (none)                   | OS-offering KB; recorded for traceability, not applied to WIM |
-| `DynamicUpdate.Component` | Install                  | Component-store updates |
-| `DynamicUpdate.SafeOs`    | WinRE                    | WinRE is the "Safe OS" |
-| `DynamicUpdate.Setup`     | Setup                    | Setup binaries (pending.xml) |
-| `LanguagePack`            | Install + WinRE          | User-facing UI + recovery UI |
-| `LXP`                     | Install                  | LXPs are Store apps; no WinRE |
-| `DotNet.LangPack`         | Install                  | .NET satellite assemblies |
+| `SSU`             | Install + Boot + WinRE | Every serviced WIM needs the latest servicing stack |
+| `LCU`             | Install + Boot         | WinRE uses the SafeOS DU instead |
+| `DotNet`          | Install                | .NET 4.x runtime KB lives in install.wim |
+| `SafeOSDU`        | WinRE                  | WinRE is the "Safe OS" |
+| `SetupDU`         | Setup                  | Setup binaries; P09 expands the CAB with `expand.exe` and overlays the files onto the extracted ISO `sources\` tree (never WIM-mounted) |
+| `LanguagePack`    | Install + WinRE        | User-facing UI + recovery UI |
+| `LXP`             | Install                | LXPs are Store apps; no WinRE |
+| `DotNet.LangPack` | Install                | .NET satellite assemblies |
 
 Within each lane, patches are ordered by ascending `ApplyOrder`
 (secondary key: `KbId`). Phase workers iterate the lane that matches
@@ -902,7 +900,8 @@ back to `[Install]` with a one-time warning per unique Type per run.
 addition to the fields in §B.4.3):
 
 ```
-PatchType : 'SSU' | 'LCU' | 'DotNet.Runtime' | ...   ← authoritative
+PatchType : 'SSU' | 'LCU' | 'DotNet' | 'SafeOSDU' | 'SetupDU'
+            | 'LanguagePack' | 'LXP' | 'DotNet.LangPack'   ← authoritative
 ApplyOrder: 1..N
 KbId      : 'KB...'
 ```
@@ -936,8 +935,8 @@ install, B = boot, W = winre). Each sub-phase carries:
 | 1 | `I1.SSU`                     | Servicing stack first |
 | 2 | `I2.LanguagePack`            | UI before LCU's resource files |
 | 3 | `I3.LCU.FirstPass`           | LCU after LP per Microsoft doc |
-| 4 | `I4.DotNet`                  | .NET 4.x cumulative (DotNet.Runtime only) |
-| 5 | `I5.DynamicUpdate.Component` | Component-store DU |
+| 4 | `I4.DotNet`                  | .NET 4.x cumulative (Kind `DotNet` only) |
+| 5 | `I5.DynamicUpdate.Component` | Reserved slot mirroring Microsoft's documented sequence; the baseline Kind vocabulary does not currently produce this type, so it is normally empty |
 | 6 | `I6.CleanupAndExport`        | DISM /Cleanup + Export |
 | 7 | `I7.LCU.SecondPass`          | Emitted ONLY when LP was injected; `RequiresRemount = $true`; the LP injected in I2 can shadow files delivered by the I3 LCU, so the LCU is re-applied on a freshly-exported image |
 
@@ -1210,17 +1209,20 @@ generations supported by this script. The matrix below records the
 per-OS / per-Type stance the script enforces during baseline
 resolution.
 
-| Type | Server 2016 | Server 2019 | Server 2022 | Server 2025 |
+| Kind | Server 2016 (`separate-ssu`) | Server 2019 (`embedded-ssu`) | Server 2022 (`embedded-ssu-du`) | Server 2025 (`uup-checkpoint`) |
 |:---|:---:|:---:|:---:|:---:|
-| `SSU`                     | required (standalone) | required (combined LCU+SSU since 2024-4B) | required (combined LCU+SSU) | required (combined LCU+SSU) |
-| `LCU`                     | required (standalone) | required (combined LCU+SSU since 2024-4B) | required (combined LCU+SSU) | required (combined LCU+SSU, WIM-format MSU) |
-| `DotNet.Runtime`          | applicable | applicable | applicable | applicable |
-| `DotNet.OsLevel`          | applicable (recorded only) | applicable (recorded only) | applicable (recorded only) | applicable (recorded only) |
-| `DynamicUpdate.Component` | not shipped | not shipped | applicable | applicable |
-| `DynamicUpdate.SafeOs`    | not shipped | not shipped | applicable | applicable |
-| `DynamicUpdate.Setup`     | not shipped | not shipped | applicable | applicable |
-| `LanguagePack`            | bundled in eval ISO | bundled in eval ISO | bundled in eval ISO | bundled in eval ISO |
-| `LXP`                     | n/a (no LXP for Server SKU) | n/a | n/a | n/a |
+| `SSU`          | required line (standalone) | in-model forbidden as a line (embedded in the combined LCU since 2024-4B) | in-model forbidden as a line (embedded in the combined LCU) | required line (UUP checkpoint SSU) |
+| `LCU`          | required line | required line (combined LCU+SSU) | required line (combined LCU+SSU) | required line (WIM-format MSU) |
+| `DotNet`       | in-model forbidden as a line | required line | required line | required line |
+| `SafeOSDU`     | in-model forbidden as a line | in-model forbidden as a line | required line | required line |
+| `SetupDU`      | in-model forbidden as a line | in-model forbidden as a line | in-model forbidden as a line | optional line (the only model that carries it) |
+| `LanguagePack` | bundled in the source ISO | bundled in the source ISO | bundled in the source ISO | bundled in the source ISO |
+| `LXP`          | n/a (no LXP for Server SKU) | n/a | n/a | n/a |
+
+"Required / forbidden line" refers to the in-model Require / Forbid
+contract enforced by `ConvertTo-ConfigLines` per `PatchModel` (B.19);
+it is a statement about the committed baseline `Lines[]`, not about
+what Microsoft ships in general.
 
 Whether an OS ships its servicing stack as a standalone SSU or folds it
 into the combined LCU is, in Config Schema v3.0, declared by the
@@ -1862,16 +1864,18 @@ review unit.
 **Why**: A monthly cadence aligns with Microsoft's servicing rhythm;
 git tracking gives auditability and rollback at the file boundary.
 
-### B.22.8 `PatchBaseline.NeutralPatches[].Type`: subdivided DotNet
+### B.22.8 Subdivided DotNet types (superseded by the v3.0 migration)
 
-`Type='DotNet'` was subdivided into `DotNet.Runtime`, `DotNet.OsLevel`,
-`DotNet.LangPack` in r07.0 Step 1. The OS-level "offering" KB is
-recorded for traceability but not applied to any WIM target.
-
-**Why**: The original flat `DotNet` lost the OS-level KB through
-the I4.DotNet sub-phase filter. Subdivision keeps the OS-level KB
-visible in the baseline for human review while preventing it from
-entering the apply lane.
+**Status**: superseded. An earlier revision subdivided the flat
+`DotNet` type of the pre-v3.0 `PatchBaseline.NeutralPatches[]`
+structure into runtime / OS-offering / language-pack subtypes so the
+OS-offering KB stayed visible in the baseline without entering the
+apply lane. The v3.0 `Lines[]` migration retired both the structure
+and the subdivision: the neutral baseline carries a single `DotNet`
+Kind (the runtime CU with an on-disk payload), the OS-offering KB is
+not recorded, and the language axis lives in
+`LanguageSpecific.<lang>.LanguageSpecificPatches` (`DotNet.LangPack`).
+Kept for the rationale trail only.
 
 ### B.22.9 release-info vs Catalog: release-info is the truth source
 

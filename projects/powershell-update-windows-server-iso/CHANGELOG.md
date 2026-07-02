@@ -22,6 +22,39 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed / Removed -- final audit residue sweep: SPEC vocabulary tables to v3.0 Kinds, orphaned fixtures deleted, dead-function finding re-dispositioned (r11.50 -> r11.51, tag `audit-residue-sweep`; audit G4 + G5 + G6)
+
+**G6 (vocabulary residue).** Three SPEC tables still presented the
+retired pre-migration type vocabulary as normative after the r11.50
+retirement: the B.10 target-lane table (now the v3.0 Kind mapping; the
+`SetupDU` rationale also corrects "pending.xml" to the real P09
+mechanism -- `expand.exe` extraction overlaid onto the extracted ISO
+`sources\` tree), the B.10 authoritative `PatchType` enum, and the
+per-OS applicability matrix (now expressed as the in-model
+Require/Forbid line contract per `PatchModel`, fixing among others the
+claim that Server 2022 carries a Setup DU line -- `embedded-ssu-du`
+forbids it; only `uup-checkpoint` carries `SetupDU`). B.22.8 is marked
+superseded (it described subdividing the retired
+`NeutralPatches[].Type` field). The last "v2.0" comment in the script
+(P04 `Iso.Sha256` check) is reworded timelessly.
+
+**G5 (orphaned fixtures).** `tests/fixtures/dynamic_update_cache/`
+(relic of the retired DU 36-month cache probe),
+`tests/fixtures/release_info_resolver/` and
+`tests/fixtures/catalog_title_tokens/` had zero referencing tests;
+deleted (history stays in git).
+
+**G4 (re-dispositioned, no change).** `Disable-DebugTraceFileOutput`
+was flagged as a dead function (zero call sites). Closer inspection
+shows it is one third of the documented debug-trace operator API
+(`Enable-...` / `Disable-...` / `Get-...Status`, SPEC debug-trace
+table), reachable interactively via `-Action TestHarness`, and a
+CANONICAL vendored unit (`pwsh.helper.disable-debugtracefileoutput`)
+whose body is hash-pinned by the canon drift scanner -- deleting or
+even annotating it in place would break canon conformance for no
+functional gain. Disposition: keep as-is; recorded here so the next
+audit does not re-flag it.
+
 ### Removed / Fixed -- retire the three legacy patch-input paths (`-PatchUrls` / `-PatchDirectory` / `-ManifestPath`) and their pre-migration classifier; fix two defects in the post-refresh re-derivation (r11.49 -> r11.50, tag `legacy-input-retirement`; audit G1 + new finding G7)
 
 **Retired (G1).** The three operator patch-input paths predated the
