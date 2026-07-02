@@ -11,6 +11,21 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r25] - 2026-07-02 - test infra: make mock argv-spy recording a single atomic append (fixes flaky spy counts)
+
+### Fixed
+- **Intermittent `extracted 2 layers via tar (expected 2, got 1)` in t003.** The
+  mock recorded each invocation with several `printf`s sharing one `>>` redirect,
+  so two mocks running concurrently in a pipeline (`acq_curl ... | tar -xz`)
+  interleaved their writes and occasionally corrupted a spy line. The mock now
+  builds the whole line first and appends it with a single `printf` (one write,
+  atomic under O_APPEND for these short lines), eliminating the race for every
+  mock-based test. Test-infra only; no production code affected.
+
+### Verified
+- `run-all.sh` green 20/20 consecutive runs (**18 tiers, 458 passed**);
+  ShellCheck-style-clean; LF-only.
+
 ## [r24] - 2026-07-02 - ENA entitled: build against the container's OWN kernel-devel, not the host kernel
 
 ### Fixed

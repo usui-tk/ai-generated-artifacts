@@ -36,7 +36,10 @@ mock_cmd() {
   local name="$1" behaviour="${2:-exit 0}"
   cat > "${MOCK_BIN}/${name}" <<MOCK_EOF
 #!/usr/bin/env bash
-{ printf '%s' '${name}'; for __a in "\$@"; do printf ' %s' "\${__a}"; done; printf '\n'; } >> '${MOCK_LOG}'
+# Record the whole invocation as ONE atomic append: build the line first, then a
+# single printf. Multiple appends from concurrent mocks in a pipeline (curl | tar)
+# would otherwise interleave and corrupt a line (flaky spy counts).
+__rec='${name}'; for __a in "\$@"; do __rec="\${__rec} \${__a}"; done; printf '%s\n' "\${__rec}" >> '${MOCK_LOG}'
 ${behaviour}
 MOCK_EOF
   chmod +x "${MOCK_BIN}/${name}"
