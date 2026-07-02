@@ -11,6 +11,33 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r27] - 2026-07-02 - quality pass: unit coverage for the ENA build-dep hot path + cross-script helper drift guard
+
+### Added (test-only; zero production change)
+- **`tests/t019_enabuilddeps.sh`** - hermetic unit for `ensure_build_deps`, the
+  function that regressed three times (r22 host-kernel `kernel-devel-$(uname -r)`,
+  r23 ERR-trap masking, r24 same host-kernel tie). Loads only that function with
+  `run_pm`/`ena_pm`/`log` stubbed and pins: rc 0 on success, rc 1 on toolchain
+  failure, rc 3 on kernel-devel unavailable, dkms failure stays best-effort (rc 0),
+  and - the key regression guard - it installs **plain `kernel-devel`, never a
+  host-kernel-versioned `kernel-devel-<kver>`**. Verified this guard fails when the
+  r22/r24 bug is re-injected.
+- **`tests/t020_helperidentity.sh`** - pins the four copy-pasted helpers
+  (`entitlement_certs_present`, `pm_neutralize_rhsm_if_anonymous`, `run_pm`,
+  `os_major`) byte-identical across all three install scripts, so a fix applied to
+  one copy that drifts from the others fails the suite instead of shipping.
+
+### Notes
+- Part of an explicit suite-wide UT/FT quality pass (audit results and the remaining
+  gaps - hermetic coverage of `acq_entitlement_mount_args`, `acq_platform`,
+  `acq_repo_access` - are tracked in the handoff plan). Suite audit confirmed no
+  latent r23-class ERR-trap bugs, no helper drift, ShellCheck-clean at default
+  severity, and flaky-free (30/30).
+
+### Verified
+- Suite green (**20 tiers, 478 passed**), 20/20 consecutive runs; ShellCheck-style
+  clean across all scripts; LF-only.
+
 ## [r26] - 2026-07-02 - probe egress: retry the whole request in-shell (version-agnostic), replacing curl --retry
 
 ### Fixed
