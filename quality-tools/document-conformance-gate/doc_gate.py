@@ -21,6 +21,13 @@ Implements the ADR 0020 doc-region contract over the documentation doc-set
     back-references the ADR; superseded/deprecated ADRs are not live governing
     refs; supersedes/superseded_by are symmetric. governs=[] is a carve-out for
     process/meta ADRs. Runs on a full manifest verify (not for --path subsets).
+  * C9 version coupling (ADR 0022): for a HASH-model doc-region whose unit_id
+    resolves (longest dotted prefix) to a manifest doc-region unit, a
+    binding=follow-latest marker's version= MUST equal that unit's manifest
+    canonical_version; a binding=pin marker may lag but must never exceed it.
+    Closes the proven 2026-06-11 spec-region promotion hole (a manifest-only
+    version write passed every gate silently). Runs in both the default
+    (manifest) mode and --path mode (consumer SPECs carry the vendored copies).
 
 Design (ADR 0003): single-file, stdlib-only, no cross-reference. Tool boundary
 (ADR 0020 step 4): this gate owns ALL doc-region inspection; the governance-state
@@ -215,7 +222,7 @@ def check_reconstructed(paths, root):
 
 
 # ---- per-file check ------------------------------------------------------------
-def check_file(path, l1, rel):
+def check_file(path, l1, rel, units=None):
     findings = []
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
@@ -256,6 +263,8 @@ def check_file(path, l1, rel):
         else:
             findings.append("%s: %s L1 content_model=%s is not classified by ADR 0020"
                             % (rel, r.unit_id, cm))
+            continue
+        findings += check_version_coupling(r, item, units, rel)
     return findings
 
 
@@ -307,6 +316,86 @@ def discover_files(root):
                 if loc and loc.endswith(".md"):
                     paths.append(loc)
     return sorted(set(paths))
+
+
+# ---- C9: doc-region version coupling (ADR 0022) ---------------------------------
+# The 2026-06-11 throwaway-clone experiment proved that NO gate coupled a
+# doc-region marker's version= to the manifest canonical_version for the
+# spec-region kind: `canon-manifest-tool update --version 1.0.0` on
+# spec.powershell.part-a returned OK, validator A-G reported 0 findings and this
+# gate PASSED, leaving manifest 1.0.0 vs 42 markers 0.1.0. The governance-state
+# validator's D/G stay reference-code-scoped (ADR 0020), so this gate owns the
+# doc-side coupling. Rule (ADR 0022): for a HASH-model region whose unit_id
+# resolves to a manifest doc-region unit, binding=follow-latest -> marker
+# version == manifest canonical_version; binding=pin -> marker version may lag
+# but must not exceed it (the pin branch is encoded even though no doc-region
+# uses pin today).
+DOC_REGION_KINDS = ("spec-region",)
+
+
+def load_manifest_units(root):
+    """unit_id -> row for manifest units that own doc-regions. None when the
+    manifest is absent (fixture / non-repo roots): C9 then degrades to a no-op."""
+    mpath = os.path.join(root, "governance", "state", "manifest.jsonl")
+    if not os.path.exists(mpath):
+        return None
+    units = {}
+    with open(mpath, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                rec = json.loads(line)
+                if rec.get("kind") in DOC_REGION_KINDS:
+                    units[rec["unit_id"]] = rec
+    return units
+
+
+def _resolve_unit(unit_id, units):
+    """Longest dotted-prefix match: spec.powershell.part-a.logging resolves to
+    the manifest row spec.powershell.part-a. None when no prefix is registered
+    (e.g. template-internal L1 markers such as readme.disclaimer)."""
+    segs = unit_id.split(".")
+    for n in range(len(segs), 0, -1):
+        cand = ".".join(segs[:n])
+        if cand in units:
+            return units[cand]
+    return None
+
+
+def _semver_tuple(v):
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return None
+
+
+def check_version_coupling(region, item, units, rel):
+    """C9 findings for one parsed region (already L1-resolved as `item`)."""
+    if units is None or item["content_model"] not in HASH_MODELS:
+        return []
+    row = _resolve_unit(region.unit_id, units)
+    if row is None:
+        return []
+    want = row["canonical_version"]
+    have = region.version
+    if region.binding == "follow-latest":
+        if have != want:
+            return ["%s: %s version coupling broken (marker=%s manifest=%s, "
+                    "binding=follow-latest requires equality; ADR 0022)"
+                    % (rel, region.unit_id, have, want)]
+        return []
+    if region.binding == "pin":
+        ht, wt = _semver_tuple(have), _semver_tuple(want)
+        if ht is None or wt is None:
+            return ["%s: %s version not SemVer-comparable (marker=%s manifest=%s)"
+                    % (rel, region.unit_id, have, want)]
+        if ht > wt:
+            return ["%s: %s pinned marker version exceeds the manifest "
+                    "canonical_version (marker=%s manifest=%s; a pin may lag, "
+                    "never lead; ADR 0022)" % (rel, region.unit_id, have, want)]
+        return []
+    return ["%s: %s unknown binding=%s (expected follow-latest|pin)"
+            % (rel, region.unit_id, region.binding)]
 
 
 # ---- C6: ADR <-> SPEC cross-reference integrity (LIVE corpus) ------------------
@@ -467,8 +556,9 @@ def main(argv=None):
         return 0
 
     findings = []
+    units = load_manifest_units(root)
     for rel in rels:
-        findings += check_file(os.path.join(root, rel), l1, rel)
+        findings += check_file(os.path.join(root, rel), l1, rel, units)
     if args.path is None:
         # C6: ADR<->SPEC integrity over the live corpus (ADR 0014 §4.10), run on a
         # full manifest verify (not when an explicit --path subset is given).

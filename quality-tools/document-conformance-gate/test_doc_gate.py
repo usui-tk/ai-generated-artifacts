@@ -216,6 +216,38 @@ _wf3("CRLF.md", (_PROV + "\nx\n").replace("\n", "\r\n").encode("utf-8"), raw=Tru
 check("L3 CRLF -> finding",
       any("CRLF" in f for f in G.check_reconstructed(["CRLF.md"], _L3)))
 
+# 22) C9 version coupling (ADR 0022) - closes the proven spec-region hole
+_UNITS = {"spec.powershell.part-a": {"unit_id": "spec.powershell.part-a",
+                                     "kind": "spec-region",
+                                     "canonical_version": "1.0.0"}}
+_VOK = _region("spec.powershell.part-a.logging", "1.0.0",
+               G.doc_region_norm_hash("Body."), "canonical", "follow-latest", "Body.")
+p = _write(_VOK)
+check("C9 follow-latest equal -> pass",
+      G.check_file(p, L1, "f.md", _UNITS) == [])
+_VNG = _region("spec.powershell.part-a.logging", "0.1.0",
+               G.doc_region_norm_hash("Body."), "canonical", "follow-latest", "Body.")
+p = _write(_VNG)
+check("C9 follow-latest mismatch -> version-coupling finding (the 2026-06-11 hole)",
+      any("version coupling broken" in f for f in G.check_file(p, L1, "f.md", _UNITS)))
+check("C9 without a manifest map (units=None) -> no coupling finding",
+      G.check_file(p, L1, "f.md", None) == [] and G.check_file(p, L1, "f.md") == [])
+_VPINLAG = _region("spec.powershell.part-a.logging", "0.1.0",
+                   G.doc_region_norm_hash("Body."), "canonical", "pin", "Body.")
+p = _write(_VPINLAG)
+check("C9 pin lagging behind manifest -> pass (a pin may lag)",
+      G.check_file(p, L1, "f.md", _UNITS) == [])
+_VPINAHEAD = _region("spec.powershell.part-a.logging", "2.0.0",
+                     G.doc_region_norm_hash("Body."), "canonical", "pin", "Body.")
+p = _write(_VPINAHEAD)
+check("C9 pin ahead of manifest -> finding (a pin may lag, never lead)",
+      any("exceeds the manifest" in f for f in G.check_file(p, L1, "f.md", _UNITS)))
+_VUNREG = _region("readme.disclaimer", "0.1.0",
+                  G.doc_region_norm_hash("Body."), "canonical", "follow-latest", "Body.")
+p = _write(_VUNREG)
+check("C9 unit_id with no registered manifest prefix -> skipped (template-internal L1 marker)",
+      G.check_file(p, L1, "f.md", _UNITS) == [])
+
 passed = sum(1 for _, ok in _checks if ok)
 total = len(_checks)
 for name, ok in _checks:
