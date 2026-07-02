@@ -44,7 +44,7 @@ fi
 echo "shellcheck $(shellcheck --version 2>/dev/null | awk '/^version:/ {print $2}'), severity=${SEVERITY}"
 
 while IFS= read -r f; do
-  findings="$(shellcheck -S "${SEVERITY}" "${f}" 2>/dev/null | grep -c '^In ' || true)"
+  findings="$(shellcheck -S "${SEVERITY}" -P "${PROJ}" "${f}" 2>/dev/null | grep -c '^In ' || true)"
   assert_eq 0 "${findings}" "shellcheck -S ${SEVERITY} ${f#"${PROJ}"/} (0 findings)"
 done < <(find "${PROJ}" -name '*.sh' -type f | sort)
 

@@ -7,6 +7,23 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r29] - 2026-07-02 - fix: t002 ShellCheck source-path is CWD-independent
+
+### Fixed
+- **t002 failed with exactly 2 findings when the suite was invoked from the
+  repository root** (e.g. `bash projects/.../tests/run-all.sh`) and passed from
+  the project directory - masquerading as a rare flake because the two
+  invocation habits were split across environments. Root cause: ShellCheck
+  resolves `# shellcheck source=` paths against the CWD and the file's own
+  directory, so `source=lib/os-profile.sh` (t012) and
+  `source=lib/pkg-availability.sh` (t014) - the only two directives that point
+  at the PROJECT lib/ rather than tests/lib/ - raised SC1091 (info, counted at
+  `-S style`) whenever the CWD was not the project root. t002 now passes
+  `-P "${PROJ}"` so directives resolve identically from any CWD.
+  **Pre-existing since the tiers were added** (reproduced verbatim on the r27
+  base); surfaced by the B2 fresh-clone verification which runs from the repo
+  root. Verified 3x green from the repo root AND 3x from the project dir.
+
 ## [r28] - 2026-07-02 - canon alignment: errexit on production scripts + Layer-1 headers (B2 code pass)
 
 Code half of the B2 canon-alignment arc (docs reconstruction follows as its own
