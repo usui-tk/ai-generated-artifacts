@@ -86,3 +86,4 @@
 {"canonical_location":"projects/powershell-download-speakerdeck-oracle4engineer","consumers":[],"kind":"project","maturity":"governed","schema_version":"1","unit_id":"project.powershell-download-speakerdeck-oracle4engineer"}
 {"canonical_location":"projects/bash-ol-aws-ami-builder","consumers":[],"kind":"project","maturity":"governed","schema_version":"1","unit_id":"project.bash-ol-aws-ami-builder"}
 {"canonical_location":"projects/bash-rhel-container-testsuite","consumers":[],"kind":"project","maturity":"governed","schema_version":"1","unit_id":"project.bash-rhel-container-testsuite"}
+{"binding_mode":"follow-latest","canonical_location":"quality-tools/reference-health-gate/refcheck.py","canonical_version":"1.0.0","change_policy":"canonical","consumers":[],"kind":"tool","platform_scope":"cross-platform","schema_version":"1","tested":true,"unit_id":"tool.reference-health-gate"}

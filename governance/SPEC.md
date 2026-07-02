@@ -189,6 +189,25 @@ manifest+marker write) belongs to the deferred `unit-record coupled write`.
 Governed by [ADR 0022](./adr/0022-doc-region-version-coupling-gate.md) (doc-region
 version-coupling gate; records and closes the proven 2026-06-11 spec-region promotion hole).
 
+### Reference-health gate
+
+`quality-tools/reference-health-gate/refcheck.py` (whole-tool, stdlib-only, offline) owns
+**Layer-0 reference integrity** — the plane no other gate covers (doc_gate owns
+manifest-registered md units and consumer doc-sets; the validator and scanner own
+reference-code). Scope: the repo-root `*.md` files + `.github/*.md` only. Checks: **R1**
+relative Markdown link/image targets exist (fragments stripped; absolute links out of
+scope); **R2** every referenced GitHub Actions workflow filename (repo paths and
+`actions/workflows/` badge URLs, offline-decidable by filename) exists under
+`.github/workflows/`; **R5** the row-count claims inside STATUS.md's two current-truth
+zones (the `| Current phase |` table row and the `Gates green` paragraph) equal the actual
+`manifest.jsonl` count — the machine probe for the index==body divergence class.
+Authoring constraint (prose-shape rule): a hypothetical, non-existent-by-design workflow
+is never written as a contiguous `.github/workflows/<name>.yml` path. Scope claims,
+limitations, and the full gate inventory live in `governance/gate-coverage.md`.
+
+Governed by [ADR 0026](./adr/0026-reference-health-gate.md) (reference-health gate;
+Layer-0 scope, R1/R2/R5 check set, gate-then-fix closure of the 2026-07-03 residue).
+
 ### Scanner output-contract pins
 
 The P3 consumer-drift scanner's sole output contract is `observation.schema.json`. Three of its
