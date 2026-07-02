@@ -307,6 +307,8 @@ run_matrix() {
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
   host_banner
+  local ent_mounts; ent_mounts="$(acq_entitlement_mount_args "")"
+  [ -n "${ent_mounts}" ] && log "entitlement passthrough: ${ent_mounts% }"
   record_host_meta "${LEDGER}"
   acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
   local LOG_DIR="${SCRIPT_DIR}/logs"
@@ -338,8 +340,10 @@ ssm_kick() {
   local major="$1" ver="$2" mode="$3" ref="$4" log_dir="$5" rows="$6"
   local err_tmp out line installed ran svc status verdict reason row logf rc=0
   err_tmp="$(mktemp)"
+  # shellcheck disable=SC2086  # ent_mounts is intentionally word-split into -v/--network args
   out="$(timeout "${RUN_TIMEOUT:-600}" podman run --rm \
           -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro,z" \
+          ${ent_mounts:-} \
           -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
           "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>"${err_tmp}")" || rc=$?
   line="$(printf '%s

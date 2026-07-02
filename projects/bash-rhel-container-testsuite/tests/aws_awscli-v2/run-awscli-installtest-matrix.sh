@@ -325,6 +325,8 @@ run_matrix() {
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
   host_banner
+  local ent_mounts; ent_mounts="$(acq_entitlement_mount_args "")"
+  [ -n "${ent_mounts}" ] && log "entitlement passthrough: ${ent_mounts% }"
   record_host_meta "${LEDGER}"
   acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
   local LOG_DIR="${SCRIPT_DIR}/logs"
@@ -349,8 +351,10 @@ awscli_kick() {
   local major="$1" ver="$2" ref="$3" log_dir="$4" rows="$5"
   local err_tmp out line ran iv status bpy mgl reason row logf rc=0
   err_tmp="$(mktemp)"
+  # shellcheck disable=SC2086  # ent_mounts is intentionally word-split into -v/--network args
   out="$(timeout "${RUN_TIMEOUT:-600}" podman run --rm \
           -v "${INSTALL_SCRIPT}:/install-aws_awscli-v2.sh:ro,z" \
+          ${ent_mounts:-} \
           -e AWSCLI_INSTALLTEST=1 -e "AWSCLI_VERSION=${ver}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
           "${ref}" /bin/bash /install-aws_awscli-v2.sh 2>"${err_tmp}")" || rc=$?
   line="$(printf '%s

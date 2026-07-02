@@ -272,6 +272,42 @@ no entitlement certs are present (kept ON when certs are present, since entitled
 repos need them) - so `yum` works normally against the pinned EPEL repo and other
 reachable repos. The host is never changed.
 
+## Entitlement passthrough (RHSM / RHUI) and platform classification
+
+`--run` can pass the host's repo access into each container so entitled content
+(e.g. `kernel-devel`, or DKMS from a base repo) is reachable. The decision lives
+in one place - `lib/acquire-rootfs.sh` - and both the sweep and `--probe-env`
+consume it, so there is no duplicated logic.
+
+`acq_repo_access` classifies the host (multi-signal, `>= 2` cues agree where
+possible) into one of:
+
+- **rhsm** - subscription-manager entitlement certs at `/etc/pki/entitlement/*.pem`
+  (physical/VM registered, or cloud BYOS). Passthrough is *feasible*.
+- **rhui:aws | rhui:azure | rhui:gcp | rhui:other** - cloud Red Hat Update
+  Infrastructure, detected from the client RPM (`rh-amazon-rhui-client`,
+  `rhui-azure-rhel*`, `google-rhui-client-*`), the repo baseurl host
+  (`aws.ce.redhat.com`, `*.microsoft.com`, `googlecloud`), and the platform
+  (DMI). Passthrough is *conditional* - RHUI endpoints are reachable only from
+  the cloud instance's network, so the run shares host networking and degrades
+  with a clear reason if unreachable.
+- **oci-ol** - Oracle Cloud's Oracle Linux regional yum (`ociregion`/`ocidomain`,
+  `oci.oraclecloud.com`). This is Oracle Linux content, not RHEL, so RHEL
+  entitled passthrough is *n/a* (reported for visibility only). OCI does not
+  offer a Red Hat RHUI for RHEL; RHEL on OCI is BYOS -> rhsm.
+- **none** - anonymous (no mounts added; behaviour unchanged).
+
+`acq_entitlement_mount_args` emits the `-v`/`--network` set. For RHUI it is
+*derived from the repo files* (the `sslclientcert`/`sslclientkey`/`sslcacert`/
+`gpgkey` paths plus the repo files themselves, `/etc/pki/rhui`, the `amazon-id`
+plugin config, and `--network host`), so a new or unknown RHUI provider works as
+`rhui:other` with no code change. On an anonymous host the args are empty, so the
+sweep is byte-for-byte unchanged. The host is never modified.
+
+`--probe-env` reports `platform` (`physical` / `vm:<hv>` / `cloud:aws|azure|gcp|oci`),
+the `repo_access` mode + confidence + matched signals, and the entitled-passthrough
+feasibility, in the banner and in `ENV-PROBE.json`.
+
 ## Timeouts
 
 Two nested guards (both overridable) keep a stall from ever hanging a run:

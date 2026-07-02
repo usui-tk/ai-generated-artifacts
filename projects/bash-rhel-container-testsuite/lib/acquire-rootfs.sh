@@ -320,3 +320,131 @@ PY
 jesc() {
   printf '%s' "${1:-}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read())[1:-1])' 2>/dev/null || printf '%s' "${1:-}"
 }
+
+# ---- host repo-access classification & entitlement passthrough --------------
+# Single source of truth for "what repo access does this host have, and what must
+# be bind-mounted to pass it into a container". Consumed by both the sweep
+# matrices (actual -v/--network args) and probe-env.sh (reporting). RHSM and RHUI
+# are treated as equal first-class sources; the RHUI mount set is DERIVED from the
+# repo files (ssl*/gpgkey paths), so new/unknown RHUI providers work unchanged.
+
+# acq_platform : physical | vm:<hv> | cloud:aws|azure|gcp|oci  (host-side).
+acq_platform() {
+  local v="" vendor="" asset=""
+  command -v systemd-detect-virt >/dev/null 2>&1 && v="$(systemd-detect-virt 2>/dev/null || true)"
+  [ -r /sys/class/dmi/id/sys_vendor ]        && vendor="$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null || true)"
+  [ -r /sys/class/dmi/id/chassis_asset_tag ] && asset="$(cat /sys/class/dmi/id/chassis_asset_tag 2>/dev/null || true)"
+  case "${asset}" in *OracleCloud.com*) printf 'cloud:oci'; return 0 ;; esac
+  case "${vendor}" in
+    *Amazon\ EC2*)          printf 'cloud:aws';   return 0 ;;
+    Microsoft\ Corporation*) printf 'cloud:azure'; return 0 ;;
+    Google*)                printf 'cloud:gcp';   return 0 ;;
+  esac
+  case "${asset}" in *7783-7084-3265-9085-8269-3286-77*) printf 'cloud:azure'; return 0 ;; esac
+  case "${v}" in
+    amazon)    printf 'cloud:aws' ;;
+    microsoft) printf 'cloud:azure' ;;
+    google)    printf 'cloud:gcp' ;;
+    ""|none)   printf 'physical' ;;
+    *)         printf 'vm:%s' "${v}" ;;
+  esac
+}
+
+# acq_classify_repo_access HAS_RHSM RHUI_PROVIDER IS_OCI_OL : PURE classifier.
+# HAS_RHSM=yes|no, RHUI_PROVIDER=aws|azure|gcp|other|"", IS_OCI_OL=yes|no.
+# Priority: rhsm > rhui:<provider> > oci-ol > none.
+acq_classify_repo_access() {
+  local rhsm="$1" prov="$2" ociol="$3"
+  [ "${rhsm}" = "yes" ] && { printf 'rhsm'; return 0; }
+  [ -n "${prov}" ]      && { printf 'rhui:%s' "${prov}"; return 0; }
+  [ "${ociol}" = "yes" ] && { printf 'oci-ol'; return 0; }
+  printf 'none'
+}
+
+# acq_entitlement_feasible MODE : PURE. feasible|conditional|na.
+acq_entitlement_feasible() {
+  case "$1" in
+    rhsm)    printf 'feasible' ;;
+    rhui:*)  printf 'conditional' ;;
+    *)       printf 'na' ;;
+  esac
+}
+
+_acq_rhui_baseurls() {
+  cat /etc/yum.repos.d/redhat-rhui*.repo /etc/yum.repos.d/rh-cloud.repo 2>/dev/null \
+    | sed -n 's/^[[:space:]]*baseurl=//p'
+}
+
+# acq_repo_access : echo "MODE|CONFIDENCE|SIGNALS" (host-side, multi-signal).
+# CONFIDENCE high|medium|low|na; SIGNALS is a comma list of matched cues.
+acq_repo_access() {
+  local rhsm=no ociol=no plat sig="" conf=na mode
+  ls /etc/pki/entitlement/*.pem >/dev/null 2>&1 && { rhsm=yes; sig="rhsm-certs"; }
+  plat="$(acq_platform)"
+  local base; base="$(_acq_rhui_baseurls)"
+  # per-provider signal scoring: rpm-client + baseurl-host + platform-dmi
+  local best="" bestn=0 p n s
+  for p in aws azure gcp; do
+    n=0; s=""
+    case "${p}" in
+      aws)   command -v rpm >/dev/null 2>&1 && rpm -q rh-amazon-rhui-client >/dev/null 2>&1 && { n=$((n+1)); s="${s},rpm:rh-amazon-rhui-client"; }
+             printf '%s' "${base}" | grep -q 'aws\.ce\.redhat\.com'   && { n=$((n+1)); s="${s},baseurl:aws.ce.redhat.com"; }
+             [ "${plat}" = "cloud:aws" ]                              && { n=$((n+1)); s="${s},dmi:aws"; } ;;
+      azure) command -v rpm >/dev/null 2>&1 && rpm -qa 'rhui-azure-rhel*' 2>/dev/null | grep -q . && { n=$((n+1)); s="${s},rpm:rhui-azure-rhel"; }
+             printf '%s' "${base}" | grep -q 'microsoft\.com'         && { n=$((n+1)); s="${s},baseurl:microsoft.com"; }
+             [ "${plat}" = "cloud:azure" ]                            && { n=$((n+1)); s="${s},dmi:azure"; } ;;
+      gcp)   command -v rpm >/dev/null 2>&1 && { rpm -qa 'google-rhui-client*' 2>/dev/null | grep -q . || rpm -qa 'gce-google-rhui-client*' 2>/dev/null | grep -q .; } && { n=$((n+1)); s="${s},rpm:google-rhui-client"; }
+             printf '%s' "${base}" | grep -qi 'googlecloud'           && { n=$((n+1)); s="${s},baseurl:googlecloud"; }
+             [ "${plat}" = "cloud:gcp" ]                              && { n=$((n+1)); s="${s},dmi:gcp"; } ;;
+    esac
+    [ "${n}" -gt "${bestn}" ] && { bestn="${n}"; best="${p}"; sig="${sig}${s}"; }
+  done
+  local prov=""
+  if [ "${rhsm}" = "no" ]; then
+    if [ "${bestn}" -ge 1 ]; then
+      prov="${best}"
+      case "${bestn}" in 3) conf=high ;; 2) conf=medium ;; *) conf=low ;; esac
+    elif ls /etc/pki/rhui/*.pem /etc/pki/rhui/product/*.crt >/dev/null 2>&1 \
+         || cat /etc/yum.repos.d/*.repo 2>/dev/null | grep -q -- '-rhui-rpms'; then
+      prov="other"; conf=low; sig="${sig},generic-rhui"
+    fi
+  fi
+  # OCI Oracle-Linux regional yum (distinct; not RHEL RHUI)
+  if [ "${rhsm}" = "no" ] && [ -z "${prov}" ]; then
+    if [ -s /etc/yum/vars/ociregion ] || [ -s /etc/dnf/vars/ociregion ] \
+       || printf '%s' "$(cat /etc/yum.repos.d/*.repo 2>/dev/null)" | grep -q 'oci\.oraclecloud\.com' \
+       || { command -v rpm >/dev/null 2>&1 && rpm -qa 'oraclelinux-release*' 2>/dev/null | grep -q .; }; then
+      ociol=yes; sig="${sig},oci-ol"
+    fi
+  fi
+  [ "${rhsm}" = "yes" ] && conf=high
+  mode="$(acq_classify_repo_access "${rhsm}" "${prov}" "${ociol}")"
+  sig="${sig#,}"
+  printf '%s|%s|%s' "${mode}" "${conf}" "${sig:-none}"
+}
+
+# acq_entitlement_mount_args [MODE] : echo the podman -v/--network args to pass the
+# host's repo access into a container. DERIVES the RHUI mount set from the repo
+# files' ssl*/gpgkey paths (provider-agnostic). Empty for oci-ol/none.
+acq_entitlement_mount_args() {
+  local mode="${1:-$(acq_repo_access | cut -d'|' -f1)}" f p paths
+  case "${mode}" in
+    rhsm)
+      [ -d /etc/pki/entitlement ] && printf -- '-v /etc/pki/entitlement:/etc/pki/entitlement:ro '
+      [ -d /etc/rhsm ]            && printf -- '-v /etc/rhsm:/etc/rhsm:ro '
+      ;;
+    rhui:*)
+      for f in /etc/yum.repos.d/redhat-rhui*.repo /etc/yum.repos.d/rh-cloud.repo; do
+        [ -f "${f}" ] && printf -- '-v %s:%s:ro ' "${f}" "${f}"
+      done
+      paths="$(cat /etc/yum.repos.d/redhat-rhui*.repo /etc/yum.repos.d/rh-cloud.repo 2>/dev/null \
+                | sed -nE 's#^[[:space:]]*(sslclientcert|sslclientkey|sslcacert|gpgkey)=(file://)?(/[^[:space:]]+).*#\3#p' | sort -u)"
+      # shellcheck disable=SC2086  # intentional word-split of newline/space-separated paths
+      for p in ${paths}; do [ -e "${p}" ] && printf -- '-v %s:%s:ro ' "${p}" "${p}"; done
+      [ -d /etc/pki/rhui ]                       && printf -- '-v /etc/pki/rhui:/etc/pki/rhui:ro '
+      [ -f /etc/dnf/plugins/amazon-id.conf ]     && printf -- '-v /etc/dnf/plugins/amazon-id.conf:/etc/dnf/plugins/amazon-id.conf:ro '
+      printf -- '--network host '
+      ;;
+    *) : ;;
+  esac
+}

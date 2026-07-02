@@ -284,6 +284,8 @@ run_matrix() {
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
   host_banner
+  local ent_mounts; ent_mounts="$(acq_entitlement_mount_args "")"
+  [ -n "${ent_mounts}" ] && log "entitlement passthrough: ${ent_mounts% }"
   record_host_meta "${LEDGER}"
   acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
   local LOG_DIR="${SCRIPT_DIR}/logs"
@@ -309,8 +311,10 @@ ena_kick() {
   local major="$1" ver="$2" ent="$3" repo="$4" plan="$5" ref="$6" log_dir="$7" rows="$8"
   local err_tmp out line built status kov reason row logf rc=0
   err_tmp="$(mktemp)"
+  # shellcheck disable=SC2086  # ent_mounts is intentionally word-split into -v/--network args
   out="$(timeout "${RUN_TIMEOUT:-600}" podman run --rm \
           -v "${INSTALL_SCRIPT}:/install-aws_ena-driver.sh:ro,z" \
+          ${ent_mounts:-} \
           -e ENA_INSTALLTEST=1 -e "ENA_VERSION=${ver}" -e "ENA_ENTITLEMENT=${ent}" \
           -e "ENA_BUILD_PLAN=${plan}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
           "${ref}" /bin/bash /install-aws_ena-driver.sh 2>"${err_tmp}")" || rc=$?

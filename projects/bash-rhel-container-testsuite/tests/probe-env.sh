@@ -58,7 +58,7 @@ probe_field() { printf '%s\n' "$1" | sed -n "s/^$2=//p" | head -1; }
 # JSON object for that major. Bounded by RUN_TIMEOUT; the in-container yum step is
 # bounded by PKG_TIMEOUT (passed in as an env var).
 probe_one() {
-  local major="$1" ref out rc=0 exec_ok arch redhat pkgmgr yumok s3 epel ent verdict
+  local major="$1" host_mode="${2:-none}" ref out rc=0 exec_ok arch redhat pkgmgr yumok s3 epel ent verdict
   ref="$(acq_ref_for_major "${major}")" || { printf '{"major":"%s","error":"no image ref"}' "${major}"; return 0; }
   # shellcheck disable=SC2016  # $mgr/$m expand inside the container's /bin/sh, not here
   out="$(timeout "${RUN_TIMEOUT:-600}" podman run --rm \
@@ -74,11 +74,11 @@ probe_one() {
                 echo "YUMOK=yes"; else echo "YUMOK=no"; fi
             else echo "YUMOK=na"; fi
             if command -v curl >/dev/null 2>&1; then
-              curl -fsS --max-time 20 -o /dev/null https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm 2>/dev/null && echo "S3=ok" || echo "S3=fail"
-              curl -fsS --max-time 20 -o /dev/null https://dl.fedoraproject.org/pub/epel/ 2>/dev/null && echo "EPEL=ok" || echo "EPEL=fail"
+              curl -fsS --retry 2 --retry-connrefused --retry-delay 1 --max-time 20 -o /dev/null https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm 2>/dev/null && echo "S3=ok" || echo "S3=fail"
+              curl -fsS --retry 2 --retry-connrefused --retry-delay 1 --max-time 20 -o /dev/null https://dl.fedoraproject.org/pub/epel/ 2>/dev/null && echo "EPEL=ok" || echo "EPEL=fail"
             else echo "S3=unknown"; echo "EPEL=unknown"; fi
           ' 2>/dev/null)" || rc=$?
-  ent="anonymous"; acq_secrets_present >/dev/null 2>&1 && ent="entitled"
+  ent="${host_mode}"
   if [ "${rc}" = "124" ]; then
     printf '{"major":"%s","image":"%s","exec":"timeout","pkgmgr":"unknown","yum_ok":"unknown","egress_s3":"unknown","egress_epel":"unknown","entitlement":"%s","verdict":"blocked","reason":"probe timed out after %ss"}' \
       "${major}" "${ref}" "${ent}" "${RUN_TIMEOUT:-600}"
@@ -102,9 +102,15 @@ main() {
   log "probing majors: [${MAJORS}] (RUN_TIMEOUT=${RUN_TIMEOUT:-600}s, PKG_TIMEOUT=${PKG_TIMEOUT:-300}s)"
   local first=1 major j
   {
-    printf '{\n  "host": %s,\n  "probes": [\n' "$(host_json)"
+    local plat ra mode conf sig feas mounts
+    plat="$(acq_platform)"; ra="$(acq_repo_access)"
+    mode="${ra%%|*}"; conf="$(printf '%s' "${ra}" | cut -d'|' -f2)"; sig="${ra##*|}"
+    feas="$(acq_entitlement_feasible "${mode}")"; mounts="$(acq_entitlement_mount_args "${mode}")"
+    log "platform: ${plat} | repo_access: ${mode} (confidence=${conf}; ${sig}) | entitled_passthrough: ${feas}"
+    printf '{\n  "host": %s,\n  "platform": "%s",\n  "repo_access": {"mode":"%s","confidence":"%s","signals":"%s","entitled_passthrough":"%s","mount_args":"%s"},\n  "probes": [\n' \
+      "$(host_json)" "${plat}" "${mode}" "${conf}" "$(jesc "${sig}")" "${feas}" "$(jesc "$(printf '%s' "${mounts}" | sed 's/ *$//')")"
     for major in ${MAJORS}; do
-      j="$(probe_one "${major}")"
+      j="$(probe_one "${major}" "${mode}")"
       [ "${first}" = 1 ] || printf ',\n'
       first=0
       printf '    %s' "${j}"

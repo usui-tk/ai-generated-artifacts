@@ -11,6 +11,47 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r19] - 2026-07-02 - probe egress retry + centralized RHSM/RHUI entitlement passthrough
+
+Adds a deterministic egress check to the probe (fixes a flaky `s3=fail`) and a
+single, centralized entitlement-passthrough layer covering RHSM and all major
+cloud RHUI providers, consumed identically by the sweep and the probe.
+
+### Fixed
+- **Probe egress retry.** The `--probe-env` S3/EPEL checks now use
+  `curl --retry 2 --retry-connrefused --retry-delay 1`, so a transient blip no
+  longer flips a target to `degraded` (as RHEL 8 `s3=fail` did on one run).
+
+### Added (all in lib/acquire-rootfs.sh - one source of truth)
+- **`acq_platform`** - `physical` / `vm:<hv>` / `cloud:aws|azure|gcp|oci` (DMI +
+  systemd-detect-virt).
+- **`acq_repo_access`** - multi-signal classifier -> `rhsm` | `rhui:aws|azure|gcp|other`
+  | `oci-ol` | `none`, with confidence and matched signals. RHUI providers are
+  distinguished by client RPM + repo baseurl host + platform DMI (>= 2 agree).
+  OCI is classified as rhsm (BYOS) or the distinct `oci-ol` (Oracle Linux yum,
+  not RHEL RHUI); OCI has no Red Hat RHUI for RHEL.
+- **`acq_entitlement_mount_args`** - emits the `-v`/`--network` set, DERIVED from
+  the RHUI repo files' `sslclientcert/sslclientkey/sslcacert/gpgkey` paths (plus
+  `/etc/pki/rhui`, the `amazon-id` plugin, and `--network host`). Provider-agnostic:
+  an unknown RHUI works as `rhui:other` with no code change. rhsm mounts
+  `/etc/pki/entitlement` + `/etc/rhsm`. Empty for oci-ol/none.
+- **`acq_entitlement_feasible`** - feasible (rhsm) / conditional (rhui) / na.
+- Pure helpers `acq_classify_repo_access` + `acq_entitlement_feasible` unit-tested
+  in **t018**.
+
+### Changed (thin consumers, no duplicated logic)
+- The three matrices inject `$(acq_entitlement_mount_args "")` into the container
+  run (computed once per sweep). On an anonymous host the args are empty, so the
+  run is unchanged.
+- `--probe-env` reports platform + repo_access (mode/confidence/signals) +
+  entitled-passthrough feasibility in the banner and ENV-PROBE.json; the per-target
+  `entitlement` field now carries the classified mode.
+
+### Verified
+- Suite green (**18 tiers, 457 passed**); ShellCheck-style-clean; LF-only. Stub:
+  anonymous host adds no entitlement args (sweep unchanged); probe emits the new
+  fields; repo ssl*/gpgkey/baseurl extraction validated on AWS+Azure samples.
+
 ## [r18] - 2026-07-02 - permanent yum fix (RHSM plugin gating) + timeouts + --probe-env
 
 Supersedes the unreleased interim r17. Fixes the RHEL 6 live-host hang *properly*
