@@ -11,6 +11,23 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r26] - 2026-07-02 - probe egress: retry the whole request in-shell (version-agnostic), replacing curl --retry
+
+### Fixed
+- **Intermittent `s3=fail` flipping a single major to `degraded`** (seen on RHEL 8,
+  then RHEL 10 - not major-specific, always transient). `curl --retry` only retries
+  errors curl classifies as transient, so a TLS/DNS/connection blip slipped through;
+  `--retry-all-errors` would cover it but is curl 7.71+ and RHEL 6/7 ship 7.19/7.29
+  (the same old-curl trap as r19/r20). The S3/EPEL checks now retry the *whole* curl
+  in a small POSIX shell loop (up to 3 tries, 1s apart, retrying on ANY failure),
+  which is curl-version-agnostic and robust to transient egress blips. Supersedes
+  the `--retry 2 --retry-delay 1` flags from r19/r20.
+
+### Verified
+- Suite green (**18 tiers, 458 passed**); ShellCheck-style-clean; LF-only. egress
+  retry loop unit-checked in POSIX sh (fail-twice-then-succeed -> ok in 3 tries;
+  always-fail -> fail after 3).
+
 ## [r25] - 2026-07-02 - test infra: make mock argv-spy recording a single atomic append (fixes flaky spy counts)
 
 ### Fixed
