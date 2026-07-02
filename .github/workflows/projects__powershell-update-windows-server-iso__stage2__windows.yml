@@ -58,7 +58,7 @@ jobs:
     env:
       CI: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # --- Pre-flight: runner environment diagnostics ---
       # The GitHub-hosted windows-latest image is rolled weekly and is not

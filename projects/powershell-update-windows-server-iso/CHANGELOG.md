@@ -22,6 +22,23 @@ the script and follows the
 
 ## [Unreleased]
 
+### Changed -- CI: actions/checkout bumped v6 -> v7 across the four stage workflows (workflows-only, no version bump)
+
+Live-verified against the upstream repositories on 2026-07-02:
+actions/checkout's latest major is v7.0.0 (2026-06-17); the remaining pins
+are already current majors (setup-python v6, upload-artifact v7, cache v5,
+codeql-action v4 -- the upstream-recommended major-tag reference --
+create-pull-request v8) and are left unchanged. checkout v7's notable
+behavior change -- refusing FORK pull-request code checkouts under
+`pull_request_target` / `workflow_run` triggers unless
+`allow-unsafe-pr-checkout: true` -- does not affect these workflows: stage 2
+is `workflow_run`-triggered but this repository's flow is same-repo
+push/PR, and the refusal targets fork PRs only (it is a desirable
+supply-chain guardrail here, not a regression risk). Older pins found
+OUTSIDE this project (checkout@v5 / upload-artifact@v5 in the speakerdeck
+and quality-tools workflows) are out of this project's blast radius and are
+reported for a separate decision.
+
 ### Fixed -- sweep the v2-era schema residue left by the D1/D2 migration (r11.46 -> r11.47, tag `schema-v2-residue-sweep`)
 
 Audit F3. The v3.0 migration updated the loader's CODE (`$acceptedSchemas =
