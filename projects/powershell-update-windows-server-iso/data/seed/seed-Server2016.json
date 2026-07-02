@@ -27,10 +27,7 @@
   },
   "PatchBaseline": {
     "Schema": "3.0",
-    "TargetBuildAfterUpdate": "14393.8957",
-    "VerificationMethod": "",
-    "ChecksumAlgorithm": "SHA1",
-    "ExcludeKbList": []
+    "ChecksumAlgorithm": "SHA1"
   },
   "Pca2023": {
     "RequiredByDefault": true,

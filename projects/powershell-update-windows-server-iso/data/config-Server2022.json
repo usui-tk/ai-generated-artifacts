@@ -27,10 +27,8 @@
   },
   "PatchBaseline": {
     "Schema": "3.0",
-    "TargetBuildAfterUpdate": "20348.4893",
-    "VerificationMethod": "",
+    "TargetBuildAfterUpdate": "20348.5256",
     "ChecksumAlgorithm": "SHA1",
-    "ExcludeKbList": [],
     "Lines": [
       {
         "Kind": "LCU",

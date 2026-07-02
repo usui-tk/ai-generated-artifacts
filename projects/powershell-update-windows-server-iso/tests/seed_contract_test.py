@@ -32,6 +32,7 @@ The DERIVED table is the single hand-maintained half of the classification;
 its basis is what the script actually *generates* at rebuild, not opinion:
   * ``PatchBaseline.Lines``                    <- Invoke-CatalogPatchSetRefresh
   * ``PatchBaseline`` refresh stamps           <- written at refresh
+  * ``PatchBaseline.TargetBuildAfterUpdate``   <- the LCU Line InScope.build (r11.46)
         (LastVerifiedDate / LastVerifiedBy / PatchTuesdayOfBaseline)
   * ``LanguageEntry.LanguageSpecificPatches``  <- Resolve-LanguageSpecificPatchesFromCatalog
   * top-level ``_meta``                        <- Save-ConfigWithBaseline
@@ -68,7 +69,9 @@ FAIL = "FAIL"
 # regenerated and therefore MUST NOT appear in the seed.
 DERIVED = {
     "(top-level)": {"_meta"},
-    "PatchBaseline": {"Lines", "PatchTuesdayOfBaseline", "LastVerifiedDate", "LastVerifiedBy"},
+    # TargetBuildAfterUpdate moved SEED -> DERIVED at r11.46 (refresh
+    # writeback derives it from the LCU Line InScope.build; audit F2).
+    "PatchBaseline": {"Lines", "PatchTuesdayOfBaseline", "LastVerifiedDate", "LastVerifiedBy", "TargetBuildAfterUpdate"},
     "LanguageEntry": {"LanguageSpecificPatches"},
     "Common": set(),
     "Pca2023": set(),

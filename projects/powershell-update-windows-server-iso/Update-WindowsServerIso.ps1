@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.45'
-$Script:ScriptTag     = 'setupdu-discriminator-hardfail'
+$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.46'
+$Script:ScriptTag     = 'tbau-derived-lcu-verify'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5240,6 +5240,36 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
     return ,$sorted
 }
 
+function Get-TargetBuildFromLines {
+    <#
+    .SYNOPSIS
+        Pure derivation: PatchBaseline.TargetBuildAfterUpdate from Lines[].
+    .DESCRIPTION
+        The LCU Line's Catalog-captured InScope.build IS the post-update OS
+        build. This is the SINGLE derivation point [r11.46]; both writers --
+        the in-memory refresh writeback and the A00/A01 config-object
+        refresh loop -- must call it (the derivation was first wired only
+        into the former, and the very first A00 run produced configs with an
+        empty TargetBuildAfterUpdate; T31's data contract caught it).
+        Returns '' when no LCU Line carries an InScope.build.
+    .OUTPUTS
+        System.String
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyCollection()] [object[]]$Lines = @()
+    )
+    foreach ($ln in @($Lines)) {
+        if ($ln.Kind -ne 'LCU') { continue }
+        if (-not $ln.PSObject.Properties['InScope'] -or -not $ln.InScope) { continue }
+        if (-not $ln.InScope.PSObject.Properties['build']) { continue }
+        $b = [string]$ln.InScope.build
+        if ($b) { return $b }
+    }
+    return ''
+}
+
 function Get-ReleaseInfoExpectedLcu {
     <#
     .SYNOPSIS
@@ -9893,10 +9923,8 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                 PatchTuesdayOfBaseline = ''
                 LastVerifiedDate = ''
                 LastVerifiedBy = ''
-                VerificationMethod = ''
                 ChecksumAlgorithm = 'SHA256'
                 Lines = @()
-                ExcludeKbList = @()
             }) -Force
         }
 
@@ -9910,7 +9938,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         # Config Schema v3.0 (SPEC B.4.3); '.Patches' was a legacy field and
         # MUST NOT be (re)introduced here.
         $pb = $Script:OsProfile.PatchBaseline
-        foreach ($propName in @('Lines','PatchTuesdayOfBaseline','LastVerifiedDate','LastVerifiedBy','VerificationMethod')) {
+        foreach ($propName in @('Lines','PatchTuesdayOfBaseline','LastVerifiedDate','LastVerifiedBy','TargetBuildAfterUpdate')) {
             if (-not $pb.PSObject.Properties[$propName]) {
                 $pb | Add-Member -NotePropertyName $propName -NotePropertyValue $null -Force
             }
@@ -9919,8 +9947,15 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         $Script:OsProfile.PatchBaseline.PatchTuesdayOfBaseline = $latestPT.ToString('yyyy-MM-dd')
         $Script:OsProfile.PatchBaseline.LastVerifiedDate       = (Get-Date).ToString('o')
         $Script:OsProfile.PatchBaseline.LastVerifiedBy         = 'auto-scrape'
-        $Script:OsProfile.PatchBaseline.VerificationMethod     = 'auto-scrape'
-        Write-Ok ('PatchBaseline updated in memory: {0} patches.' -f $newPatches.Count)
+        # TargetBuildAfterUpdate is DERIVED [r11.46]: the LCU Line's Catalog-
+        # captured InScope.build IS the post-update OS build. The seed-era
+        # hand-maintained value had gone stale on all four OSes (audit F2);
+        # deriving it here makes staleness structurally impossible.
+        # (VerificationMethod was retired in the same pass: it was written
+        # here but read nowhere.)
+        $tbau = Get-TargetBuildFromLines -Lines @($newPatches)
+        $Script:OsProfile.PatchBaseline.TargetBuildAfterUpdate = $tbau
+        Write-Ok ('PatchBaseline updated in memory: {0} patches (TargetBuildAfterUpdate={1}).' -f $newPatches.Count, $(if ($tbau) { $tbau } else { '(none)' }))
 
         # ---- Writeback ----
         if ($writeback) {
@@ -10977,6 +11012,49 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
 # Phase P11: Static verification (Verify group)
 # ============================================================
 
+function Test-LcuTargetApplied {
+    <#
+    .SYNOPSIS
+        Pure comparator: did the serviced image reach the baseline LCU
+        (and therefore TargetBuildAfterUpdate)? Offline-testable (T31).
+    .DESCRIPTION
+        The applied LCU package IS the build-attainment marker: integrating
+        LCU KBnnnnnnn takes the image to the build recorded in that Line's
+        InScope.build (= PatchBaseline.TargetBuildAfterUpdate, derived).
+        This function only compares -- no DISM, no host writes -- so the
+        decision logic is testable on Linux; P11 supplies the package list
+        from the mounted output ISO (Windows-only acquisition).
+        Mismatch is a HARD verification failure [DECIDED 2026-07-02, user].
+    .OUTPUTS
+        pscustomobject: Applied / Check / Expected / Actual / Status / Notes
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$ExpectedKbId,
+        [AllowEmptyString()] [string]$ExpectedBuild = '',
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$PackageNames
+    )
+    $kbPattern = [regex]::Escape($ExpectedKbId)
+    $found = $false
+    foreach ($pn in $PackageNames) {
+        if ($pn -match $kbPattern) { $found = $true; break }
+    }
+    $buildNote = if ($ExpectedBuild) {
+        ('TargetBuildAfterUpdate={0}' -f $ExpectedBuild)
+    } else {
+        '(no TargetBuildAfterUpdate recorded)'
+    }
+    return [pscustomobject]@{
+        Applied  = $found
+        Check    = 'LcuTargetApplied'
+        Expected = ('LCU {0} present' -f $ExpectedKbId)
+        Actual   = $(if ($found) { 'Present' } else { 'Absent' })
+        Status   = $(if ($found) { 'Pass' } else { 'Fail' })
+        Notes    = $buildNote
+    }
+}
+
 function Invoke-VerifyPhase11_StaticVerify {
     <#
     .SYNOPSIS
@@ -11087,6 +11165,36 @@ function Invoke-VerifyPhase11_StaticVerify {
                             Add-VRow -Check ('Kb_' + $kb) -Expected 'Present' `
                                 -Actual $actualStr -Status $st `
                                 -Notes ('install.wim idx ' + $firstIdx)
+                        }
+                        # TargetBuildAfterUpdate hard check [r11.46]: the
+                        # baseline LCU is THE build-attainment marker. The
+                        # per-Kind rows above stay Warn; this row is a hard
+                        # Fail (P11 throws on any Fail row) [DECIDED
+                        # 2026-07-02, user]. Runs only when the resolved
+                        # patch set actually intended the baseline LCU (a
+                        # custom -PatchUrls run must not fail against a
+                        # baseline it never tried to apply).
+                        $pbLcu = @()
+                        if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['PatchBaseline'] -and
+                            $Script:OsProfile.PatchBaseline -and
+                            $Script:OsProfile.PatchBaseline.PSObject.Properties['Lines']) {
+                            $pbLcu = @($Script:OsProfile.PatchBaseline.Lines |
+                                Where-Object { $_.Kind -eq 'LCU' -and $_.KbId })
+                        }
+                        if ($pbLcu.Count -ge 1 -and ($expectedKbs -contains $pbLcu[0].KbId)) {
+                            $tbauExpected = ''
+                            if ($Script:OsProfile.PatchBaseline.PSObject.Properties['TargetBuildAfterUpdate']) {
+                                $tbauExpected = [string]$Script:OsProfile.PatchBaseline.TargetBuildAfterUpdate
+                            }
+                            $tbauRow = Test-LcuTargetApplied -ExpectedKbId $pbLcu[0].KbId `
+                                -ExpectedBuild $tbauExpected -PackageNames $pkgNames
+                            Add-VRow -Check $tbauRow.Check -Expected $tbauRow.Expected `
+                                -Actual $tbauRow.Actual -Status $tbauRow.Status -Notes $tbauRow.Notes
+                            if ($tbauRow.Status -eq 'Pass') {
+                                Write-Ok ('Baseline LCU {0} applied ({1}).' -f $pbLcu[0].KbId, $tbauRow.Notes)
+                            } else {
+                                Write-Fail ('Baseline LCU {0} NOT applied ({1}).' -f $pbLcu[0].KbId, $tbauRow.Notes)
+                            }
                         }
                     }
                 } catch {
@@ -11707,12 +11815,16 @@ function Build-ConfigSkeletonFromSeed {
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param([Parameter(Mandatory)] $Seed)
 
+    # TargetBuildAfterUpdate is DERIVED [r11.46] (the LCU Line's
+    # InScope.build, filled by the refresh) and is therefore initialized
+    # empty here, not copied from seed. VerificationMethod / ExcludeKbList
+    # were retired in the same pass: reader-less seed fields (the 2025
+    # ExcludeKbList even mis-described the checkpoint SSU KB5043080 as
+    # unnecessary while Lines[] applies it at ApplyOrder 1).
     $patchBaseline = [ordered]@{
         Schema                 = $Seed.PatchBaseline.Schema
-        TargetBuildAfterUpdate = $Seed.PatchBaseline.TargetBuildAfterUpdate
-        VerificationMethod     = $Seed.PatchBaseline.VerificationMethod
+        TargetBuildAfterUpdate = ''
         ChecksumAlgorithm      = $Seed.PatchBaseline.ChecksumAlgorithm
-        ExcludeKbList          = $Seed.PatchBaseline.ExcludeKbList
         LastVerifiedDate       = ''
         LastVerifiedBy         = ''
         PatchTuesdayOfBaseline = ''
@@ -12039,6 +12151,11 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                                     $patchCount = $patches.Count
                                     if (-not $Script:DryRun -and $patchCount -gt 0) {
                                         $raw.PatchBaseline.Lines = $patches
+                                        # DERIVED TargetBuildAfterUpdate [r11.46]: must be set
+                                        # wherever Lines are (re)written -- this A00/A01 path
+                                        # AND the in-memory refresh writeback both derive via
+                                        # the single pure helper.
+                                        $raw.PatchBaseline.TargetBuildAfterUpdate = Get-TargetBuildFromLines -Lines $patches
                                         $osSummaries[$osKey].AfterPatches = @($patches)
                                     }
                                     Set-GroupVerifiedState -ConfigRaw $raw -GroupPath $g.Path -Lang $lang `

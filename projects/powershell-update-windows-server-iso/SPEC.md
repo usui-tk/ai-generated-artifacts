@@ -617,11 +617,10 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
 ```jsonc
 "PatchBaseline": {
   "Schema":                  "3.0",
-  "TargetBuildAfterUpdate":  "26100.32522",
+  "TargetBuildAfterUpdate":  "26100.32995",  // DERIVED (r11.46): the LCU Line's InScope.build
   "PatchTuesdayOfBaseline":  "2026-05-12",
   "LastVerifiedDate":        "2026-05-24T00:00:00+09:00",
   "LastVerifiedBy":          "auto-scrape:Catalog",
-  "VerificationMethod":      "auto-scrape",
   "ChecksumAlgorithm":       "SHA256",
   "Lines": [
     {
@@ -638,10 +637,23 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
       "InScope":             { /* media-payload applicability annotation */ }
     },
     /* one Line per Kind: LCU, SSU, DotNet, SafeOSDU (and SetupDU for uup-checkpoint) */
-  ],
-  "ExcludeKbList": []
+  ]
 }
 ```
+
+**Field retirement + derivation [r11.46].** `TargetBuildAfterUpdate`
+moved SEED -> DERIVED: the refresh writeback sets it from the LCU Line's
+Catalog-captured `InScope.build` (the seed-era hand-maintained value had
+gone stale on all four OSes), and its consumer is the P11 StaticVerify
+hard check `LcuTargetApplied` (pure comparator `Test-LcuTargetApplied`,
+offline gate T31): the applied LCU package is the build-attainment
+marker, and a missing baseline LCU is a hard verification FAILURE
+[DECIDED 2026-07-02, user]. `VerificationMethod` (written, never read)
+and `ExcludeKbList` (never read; the 2025 entry mis-described the
+checkpoint SSU KB5043080 as unnecessary while `Lines[]` applies it at
+ApplyOrder 1) were retired from the schemas, seeds, and configs in the
+same pass; the seed `PatchBaseline` envelope is now `Schema` +
+`ChecksumAlgorithm` only.
 
 Patch `Kind` values are `LCU`, `SSU`, `DotNet`, `SafeOSDU`, and
 `SetupDU`; which Kinds are required or forbidden for each `PatchModel`
@@ -1109,7 +1121,8 @@ dependency on a prior config.
 | `Common` (B.4.2) | SEED | committed; ISO-structural, optionally discovered via `Get-WimIndexInventory` (script L6201) |
 | `Pca2023` / `AutoRefreshPolicy` | SEED | committed (policy) |
 | `LanguageSpecific.<lang>` (`DisplayName` / `Iso` / `VolumeLabelPrefix`) | SEED | committed (per-language label + ISO source) |
-| `PatchBaseline` envelope (`Schema` / `TargetBuildAfterUpdate` / `VerificationMethod` / `ChecksumAlgorithm` / `ExcludeKbList`) | SEED | committed (static servicing policy) |
+| `PatchBaseline` envelope (`Schema` / `ChecksumAlgorithm`) | SEED | committed (static servicing policy; `VerificationMethod` / `ExcludeKbList` retired r11.46) |
+| `PatchBaseline.TargetBuildAfterUpdate` | DERIVED | refresh writeback: the LCU Line's `InScope.build` (r11.46; consumed by P11 `LcuTargetApplied`) |
 | `PatchBaseline.Lines` (B.4.3) | DERIVED | `Invoke-CatalogPatchSetRefresh` (script L5283) ← `data/cache-*` |
 | `LanguageSpecific.<lang>.LanguageSpecificPatches` | DERIVED | `Resolve-LanguageSpecificPatchesFromCatalog` (script L5406) ← Catalogue |
 | `_meta` | DERIVED | generated (provenance) |

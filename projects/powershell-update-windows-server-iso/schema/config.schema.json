@@ -569,12 +569,6 @@
             "null"
           ]
         },
-        "VerificationMethod": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "ChecksumAlgorithm": {
           "type": "string",
           "description": "Checksum algorithm for Lines[].Digest. SHA1 (the Catalog Digest is SHA-1 base64 -- the verified cross-source key)."
@@ -585,25 +579,6 @@
             "$ref": "#/definitions/Line"
           },
           "description": "Resolved patch files (LCU/SSU/DotNet/SafeOSDU/SetupDU). The canonical store under Config Schema v3.0; replaces the legacy NeutralPatches[]."
-        },
-        "ExcludeKbList": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "KbId": {
-                "type": "string"
-              },
-              "Reason": {
-                "type": "string"
-              }
-            },
-            "patternProperties": {
-              "^_": {}
-            },
-            "additionalProperties": false
-          },
-          "description": "KBs to exclude, each with a KbId and human Reason."
         }
       },
       "not": {

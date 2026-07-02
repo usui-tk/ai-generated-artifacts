@@ -27,15 +27,7 @@
   },
   "PatchBaseline": {
     "Schema": "3.0",
-    "TargetBuildAfterUpdate": "26100.32522",
-    "VerificationMethod": "",
-    "ChecksumAlgorithm": "SHA1",
-    "ExcludeKbList": [
-      {
-        "KbId": "KB5043080",
-        "Reason": "Checkpoint Cumulative Update for Win11 24H2 / Server 2025; not required for OS install (per Microsoft Learn)."
-      }
-    ]
+    "ChecksumAlgorithm": "SHA1"
   },
   "Pca2023": {
     "RequiredByDefault": false,

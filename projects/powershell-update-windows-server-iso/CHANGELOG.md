@@ -22,6 +22,43 @@ the script and follows the
 
 ## [Unreleased]
 
+### Changed -- TargetBuildAfterUpdate becomes DERIVED with a real consumer; VerificationMethod / ExcludeKbList retired (r11.45 -> r11.46, tag `tbau-derived-lcu-verify`)
+
+Audit F2 found three PatchBaseline fields with zero runtime readers.
+`TargetBuildAfterUpdate` was hand-maintained in the seeds and stale on all
+four OSes (2025: `26100.32522`, the May build, against a resolved June LCU
+of `26100.32995`). `VerificationMethod` was written (`'auto-scrape'`) but
+never read. `ExcludeKbList` was never read, and its 2025 entry mis-described
+the checkpoint SSU KB5043080 as unnecessary while `Lines[]` applies it at
+ApplyOrder 1.
+
+TargetBuildAfterUpdate is now DERIVED: every Lines writer (the in-memory
+refresh writeback AND the A00/A01 config-object refresh loop -- the very
+first A00 run shipped an empty value because only the former was wired,
+caught by T31's data contract) sets it via the single pure helper
+`Get-TargetBuildFromLines` from the LCU Line's Catalog-captured
+`InScope.build` (staleness becomes
+structurally impossible; the value is Catalog-sourced per the data-source
+policy), and it gains a consumer -- the new pure comparator
+`Test-LcuTargetApplied`, wired into P11 StaticVerify as a HARD Fail row
+(`LcuTargetApplied`): the applied LCU package IS the build-attainment
+marker, so a serviced image missing the baseline LCU now fails verification
+instead of warning [DECIDED 2026-07-02, user]. The check runs only when the
+resolved patch set actually intended the baseline LCU, so custom
+`-PatchUrls` runs are unaffected. The comparator is pure (no DISM) and
+offline-gated by the new T31 `tests/lcu_target_verify_test.py`
+(24 assertions: comparator + derivation-helper behavior, data contract,
+schema contract, static wiring over both writers).
+
+The two dead fields are retired end-to-end: dropped from the RebuildDataset
+placeholder and refresh writer, removed from `schema/config-seed.schema.json`
+(the seed `PatchBaseline` envelope is now `Schema` + `ChecksumAlgorithm`
+only, `additionalProperties: false` making stale seeds fail loudly) and from
+`schema/config.schema.json`, and deleted from all four seeds and configs
+(the configs' `TargetBuildAfterUpdate` is set to its derived value in the
+same commit). SPEC B.4.3 example + the B.14 SEED/DERIVED matrix reconciled;
+TESTING gains the T31 row + run line.
+
 ### Fixed -- the 2025 SetupDU line could never resolve on the live Catalog; discriminate by title, recapture the fixture verbatim, and hard-fail silent starvation (r11.44 -> r11.45, tag `setupdu-discriminator-hardfail`)
 
 `Resolve-SetupDu` (introduced r11.38, a production-side invention with no
