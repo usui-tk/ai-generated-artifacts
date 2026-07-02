@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.06.28-r11.43'
-$Script:ScriptTag     = 'retire-dead-data-contract'
+$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.44'
+$Script:ScriptTag     = 'digest-format-boundary'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -2965,6 +2965,50 @@ function Read-MetalinkManifest {
 # ISO Updater specific: patch integrity verification
 # ============================================================
 
+function ConvertTo-HexDigestString {
+    <#
+    .SYNOPSIS
+        Normalize an expected digest (Catalog base64 or hex) to lowercase hex.
+    .DESCRIPTION
+        Config Schema v3.0 stores Line.Digest (SHA-1) and Line.Sha256 exactly  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+        as the Microsoft Update Catalog DownloadDialog serves them: BASE64.
+        That at-rest format is deliberate (raw Catalog truth; the Digest is
+        the cross-surface primary key per the reference architecture memo).
+        Get-FileHash yields HEX. This function is the SINGLE conversion
+        boundary: expected values are normalized here, at comparison time.
+        Hex input passes through unchanged so filename-embedded SHA-1 values  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+        and legacy hex metadata keep working.
+        Cross-verified 2026-07-02 on a live Catalog file: the base64 digest
+        of KB5095966 decodes to exactly its filename-embedded SHA-1  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+        (c62ffd61...543c06).
+    .OUTPUTS
+        System.String (lowercase hex, HashBits/4 characters)
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [string]$Value,
+        [Parameter(Mandatory)] [ValidateSet(160, 256)] [int]$HashBits
+    )
+    $v = $Value.Trim()
+    $hexLen = [int]($HashBits / 4)
+    if ($v -match ('^[0-9a-fA-F]{' + $hexLen + '}$')) {
+        return $v.ToLower()
+    }
+    $bytes = $null
+    try {
+        $bytes = [System.Convert]::FromBase64String($v)
+    } catch {
+        throw ('Expected digest is neither {0}-char hex nor valid base64: "{1}"' -f $hexLen, $Value)
+    }
+    if ($bytes.Length -ne [int]($HashBits / 8)) {
+        throw ('Expected digest base64 decodes to {0} byte(s); a {1}-bit hash needs {2}: "{3}"' -f $bytes.Length, $HashBits, [int]($HashBits / 8), $Value)
+    }
+    $sb = [System.Text.StringBuilder]::new($hexLen)
+    foreach ($b in $bytes) { [void]$sb.Append($b.ToString('x2')) }
+    return $sb.ToString()
+}
+
 function Test-PatchIntegrity {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSAvoidUsingBrokenHashAlgorithms', '',
@@ -2975,9 +3019,15 @@ function Test-PatchIntegrity {
         Three-layer integrity check on a downloaded MSU/CAB patch.
     .DESCRIPTION
         L1: existence + non-zero size
-        L2a: SHA-1 in filename matches Metalink SHA-1 (if both present)  # psa-disable-line PSA5003 -- MS Catalog SHA-1
-        L2b: actual content SHA-1 matches Metalink SHA-1  # psa-disable-line PSA5003 -- MS Catalog SHA-1
-        L2c: actual content SHA-256 matches Metalink SHA-256 (if present)
+        L2a: SHA-1 in filename matches the expected SHA-1 (if both present)  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+        L2b: actual content SHA-1 matches the expected SHA-1  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+        L2c: actual content SHA-256 matches the expected SHA-256 (if present)
+        Expected values come from the config PatchBaseline.Lines[] fields
+        Digest / Sha256, stored BASE64 exactly as the Microsoft Update
+        Catalog DownloadDialog serves them; ConvertTo-HexDigestString
+        normalizes them to hex at this comparison boundary. (The prior
+        wording named "Metalink", the pre-migration source; the base64-vs-
+        hex format gap it hid failed EVERY real download verification.)
         L3:  Authenticode signature is Valid and signer is Microsoft
         Throws on any hard failure; returns the verification report
         otherwise.
@@ -3017,7 +3067,7 @@ function Test-PatchIntegrity {
     # those upstream-published values, with SHA-256 (below) and the
     # Authenticode signature (L3) as the actual trust anchors.
     if ($ExpectedHashes.ContainsKey('sha-1')) {  # psa-disable-line PSA5003 -- MS Catalog SHA-1
-        $expSha1 = $ExpectedHashes['sha-1'].ToLower()  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+        $expSha1 = ConvertTo-HexDigestString -Value ([string]$ExpectedHashes['sha-1']) -HashBits 160  # psa-disable-line PSA5003 -- MS Catalog SHA-1
         if ($sha1InName -and ($sha1InName -ne $expSha1)) {  # psa-disable-line PSA5003 -- MS Catalog SHA-1
             throw ('Filename SHA-1 mismatch on {0}: expected {1}, got {2}' -f $fileName, $expSha1, $sha1InName)  # psa-disable-line PSA5003 -- MS Catalog SHA-1
         }
@@ -3033,7 +3083,7 @@ function Test-PatchIntegrity {
 
     # L2c: SHA-256 if provided
     if ($ExpectedHashes.ContainsKey('sha-256')) {
-        $expSha256 = $ExpectedHashes['sha-256'].ToLower()
+        $expSha256 = ConvertTo-HexDigestString -Value ([string]$ExpectedHashes['sha-256']) -HashBits 256
         $actualSha256 = (Get-FileHash -LiteralPath $FilePath -Algorithm SHA256).Hash.ToLower()
         $report.Sha256 = $actualSha256
         if ($actualSha256 -ne $expSha256) {
@@ -9588,6 +9638,12 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                     # evaluate true and force Test-PatchIntegrity into
                     # comparing against ''.
                     $expectedHashes = @{}
+                    if ($p.PSObject.Properties['Digest'] -and $p.Digest) {
+                        # Line.Digest = the Catalog SHA-1 base64 (the cross-  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+                        # surface primary key); Test-PatchIntegrity normalizes
+                        # base64->hex via ConvertTo-HexDigestString.
+                        $expectedHashes['sha-1'] = [string]$p.Digest  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+                    }
                     if ($p.Sha256) {
                         $expectedHashes['sha-256'] = $p.Sha256
                     }

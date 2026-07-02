@@ -651,7 +651,15 @@ allowed to mutate each field is the §B.14 decision matrix.
 **Resolved patches live in `PatchBaseline.Lines[]`** (Config Schema
 v3.0, the data-source migration from `wsusscn2.cab` to the Microsoft
 Update Catalog). Each Line carries a `Kind` and is keyed by its `Digest`
-(SHA-1, base64 - the Catalog DownloadDialog primary key). The legacy
+(SHA-1, base64 - the Catalog DownloadDialog primary key). **Digest
+format rule [r11.44]**: `Digest` and `Sha256` are stored BASE64 exactly
+as the Catalog DownloadDialog serves them (never re-encoded at rest);
+`Get-FileHash` yields hex, so `Test-PatchIntegrity` normalizes the
+expected values through the single conversion boundary
+`ConvertTo-HexDigestString` at comparison time (offline gate: T29
+`patch_integrity_digest_test.py`, incl. a live-captured KB5095966
+vector). Both fields are wired into P04 verification: `Digest` as the
+`sha-1` expectation (the primary key), `Sha256` as `sha-256`. The legacy
 field names `PatchBaseline.Patches` and `PatchBaseline.NeutralPatches`
 are **both forbidden** in current configs: `schema/config.schema.json`
 forbids them via `not.anyOf` and requires `Lines`, and the CI gate in

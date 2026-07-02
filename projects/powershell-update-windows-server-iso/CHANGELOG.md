@@ -22,6 +22,34 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed -- patch verification compared Catalog base64 digests against hex; normalize at a single boundary and wire the SHA-1 primary key (r11.43 -> r11.44, tag `digest-format-boundary`)
+
+Config Schema v3.0 stores `PatchBaseline.Lines[].Digest` (SHA-1) and `.Sha256`
+exactly as the Microsoft Update Catalog DownloadDialog serves them: base64.
+`Test-PatchIntegrity` compared those expected values directly against
+`Get-FileHash` output (hex), so EVERY real download failed verification with
+"SHA-256 content mismatch" -- the D2 migration rewired the data source without
+reconciling the verifier's expected format (its help still said "Metalink",
+the pre-migration source). This was the F4 finding of the 2026-07-02
+re-evaluation audit and a hard End-to-End blocker.
+
+Fix: (1) new `ConvertTo-HexDigestString` -- the SINGLE conversion boundary;
+expected digests stay base64 at rest (raw Catalog truth; the Digest is the
+cross-surface primary key per the reference architecture memo) and are
+normalized to hex at comparison time; hex passes through for the
+filename-embedded SHA-1 path. (2) Both `Test-PatchIntegrity` expectations
+(`sha-1`/`sha-256`) now route through the boundary. (3) P04 ExpectedHashes
+seeding now wires `Line.Digest` as the `sha-1` expectation (previously only
+`Sha256` was wired; the primary key was never checked). (4) Help text
+reconciled from "Metalink" to the Catalog model. Cross-verified on a live
+Catalog file (KB5095966): the base64 digest decodes to exactly the
+filename-embedded SHA-1. New offline gate T29
+`tests/patch_integrity_digest_test.py` (11 assertions) pins the round-trip
+against an independent Python implementation, the live vector, the rejection
+paths, and the wiring (a bare `.ToLower()` comparison can no longer resurface
+silently). SPEC B.4.3 records the digest-format rule; TESTING gains the T29
+row + Stage-1 run line.
+
 ### Fixed — mark the abandoned r09.0 dependency-database roadmap as superseded in SPEC §G.2 (docs-only, no version bump)
 
 SPEC §G.2 ("Open at r09.0 inception") still listed the wsusscn2-derived
