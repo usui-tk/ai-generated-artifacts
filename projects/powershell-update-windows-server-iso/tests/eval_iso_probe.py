@@ -30,6 +30,7 @@ import argparse
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -117,7 +118,12 @@ def probe_endpoint(os_key: str, url: str, *, min_size_mb: int = 100) -> ProbeRes
     except urllib.error.HTTPError as he:
         # Server 2016's host returns 400 for Range and HEAD alike;
         # treat that as "unprobable, not broken" to keep CI green.
-        if he.code == 400 and 'software-download.microsoft.com' in url:
+        # Compare the parsed hostname exactly (not a substring of the
+        # URL): a substring match would also accept the allowed host
+        # embedded anywhere in an attacker-chosen URL (CodeQL
+        # py/incomplete-url-substring-sanitization, CWE-20).
+        host = urllib.parse.urlparse(url).hostname or ''
+        if he.code == 400 and host.lower() == 'software-download.microsoft.com':
             return ProbeResult(os_key, True,
                                'HTTP 400 (host does not support Range/HEAD; cannot verify size)',
                                final_url=url)

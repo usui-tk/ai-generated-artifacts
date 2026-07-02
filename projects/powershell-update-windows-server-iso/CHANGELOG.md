@@ -22,6 +22,23 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed -- eval_iso_probe (T4): replace the URL substring host check with a parsed-hostname exact match (CodeQL alert #52, `py/incomplete-url-substring-sanitization`, CWE-20; tool-only, no script version bump)
+
+The HTTP-400 "unprobable, not broken" special case for Server 2016's
+download host tested `'software-download.microsoft.com' in url`. As a
+substring check it also matches the allowed host embedded anywhere in
+an arbitrary URL (`https://evil.example/software-download.microsoft.com/...`,
+`https://software-download.microsoft.com.evil.example/...`), which is
+exactly the CodeQL finding. The check now parses the URL and compares
+`urllib.parse.urlparse(url).hostname` (lower-cased) exactly against the
+allowed host. Verified: the legitimate host still matches; three bypass
+shapes (path-embedded, subdomain-suffix, query-embedded) are rejected.
+In this probe the URL comes from the committed config rather than an
+untrusted source, so the practical exposure was low -- but the check is
+also simply more correct: any future URL whose *path* happened to
+contain the host string would no longer be mis-classified as the
+known-quirky endpoint.
+
 ### Fixed / Removed -- final audit residue sweep: SPEC vocabulary tables to v3.0 Kinds, orphaned fixtures deleted, dead-function finding re-dispositioned (r11.50 -> r11.51, tag `audit-residue-sweep`; audit G4 + G5 + G6)
 
 **G6 (vocabulary residue).** Three SPEC tables still presented the
