@@ -57,9 +57,9 @@ class ProbeResult:
 def _load_iso_endpoints() -> Dict[str, List[str]]:
     """Return {os_key: [fwlink-urls]} extracted from data/config-<OsKey>.json.
 
-    Schema v2.0 stores per-language Iso URL under
-    ``LanguageSpecific.<lang>.Iso.Url``. We collect all unique URLs
-    per OS for the probe.
+    Config Schema v2.0+ (unchanged through v3.0) stores the
+    per-language Iso URL under ``LanguageSpecific.<lang>.Iso.Url``.
+    We collect all unique URLs per OS for the probe.
     """
     endpoints: Dict[str, List[str]] = {}
     for cfg_path in sorted(_CONFIG_DIR.glob('Server*.json')):

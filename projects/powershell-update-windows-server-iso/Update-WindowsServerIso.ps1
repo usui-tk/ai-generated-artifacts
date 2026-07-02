@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.46'
-$Script:ScriptTag     = 'tbau-derived-lcu-verify'
+$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.47'
+$Script:ScriptTag     = 'schema-v2-residue-sweep'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -2794,12 +2794,12 @@ function Get-ConfigProfile {
         Load the OS profile JSON (Config Schema v3.0) for the given OsKey
         and resolve the language sub-profile for OsLang.
     .DESCRIPTION
-        v2.0 layout: top-level keys are Schema, OsKey, Common,
-        PatchBaseline, AutoRefreshPolicy, LanguageSpecific.<lang>.
-        v2.1 (r05.0+) adds an optional top-level Pca2023 block
-        between PatchBaseline and AutoRefreshPolicy.
+        v3.0 layout (the Catalog data-source generation): top-level keys
+        are Schema, OsKey, PatchModel, Common, PatchBaseline, Pca2023,
+        AutoRefreshPolicy, LanguageSpecific.<lang>; resolved patches
+        live in PatchBaseline.Lines[] (SPEC B.4.3).
 
-        This loader accepts Schema "2.0" or "2.1" and returns a flat
+        This loader accepts Schema "3.0" ONLY and returns a flat
         pscustomobject for backward-compatible access patterns used by
         downstream phases: properties from Common are promoted to the
         top level of the returned object, PatchBaseline / Pca2023 (if
@@ -2809,8 +2809,10 @@ function Get-ConfigProfile {
         'LanguageSpecific' for Action workers (RefreshAllBaselines)
         that need cross-language access.
 
-        Legacy v1.0 configs are NOT supported; the loader throws
-        immediately if the Schema field is missing or unrecognised.
+        Legacy schemas (v1.x / v2.x) are NOT supported; the loader
+        throws immediately if the Schema field is missing or
+        unrecognised. (The docstring long claimed "2.0 or 2.1" while
+        the code accepted only 3.0 -- v2-era residue swept at r11.47.)
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -2831,7 +2833,7 @@ function Get-ConfigProfile {
     $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8
     $json = $raw | ConvertFrom-CanonicalJson
 
-    # Schema validation (v2.0 and v2.1 both accepted)
+    # Schema validation (v3.0 only; legacy schemas rejected)
     $acceptedSchemas = @('3.0')
     if (-not $json.Schema -or ($acceptedSchemas -notcontains $json.Schema)) {
         throw ('Config {0} has Schema="{1}"; expected one of: {2}. Legacy schemas are not supported.' -f $cfgFile, $json.Schema, ($acceptedSchemas -join ', '))
@@ -2842,10 +2844,10 @@ function Get-ConfigProfile {
     if (-not $json.LanguageSpecific) {
         throw ('Config {0} has no LanguageSpecific section.' -f $cfgFile)
     }
-    # v2.1 specifically requires the Pca2023 block (the SecureBoot
-    # feature documented in SPEC.md B.18). v2.0 configs without
-    # Pca2023 are accepted with a soft warning so older installations
-    # can still load while migration to v2.1 is in flight.
+    # v3.0 REQUIRES the Pca2023 block (the SecureBoot feature,
+    # SPEC.md B.10/B.18 lineage); there is no soft-warning path --
+    # the v2-era migration grace described here previously no longer
+    # exists in the code.
     if (-not $json.Pca2023) {
         throw ('Config {0} declares Schema="3.0" but has no Pca2023 block. v3.0 requires Pca2023; see SPEC.md B.10.' -f $cfgFile)
     }
@@ -9918,7 +9920,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         Set-DebugStep -Step 'update-in-memory-profile'
         if (-not $Script:OsProfile.PatchBaseline) {
             $Script:OsProfile | Add-Member -NotePropertyName 'PatchBaseline' -NotePropertyValue ([pscustomobject][ordered]@{
-                Schema = '2.0'
+                Schema = '3.0'
                 TargetBuildAfterUpdate = ''
                 PatchTuesdayOfBaseline = ''
                 LastVerifiedDate = ''
@@ -11699,7 +11701,7 @@ function Show-RefreshAllBaselinesSummary {
     foreach ($osKey in ($OsSummaries.Keys | Sort-Object)) {
         $pca = $OsSummaries[$osKey].Pca2023
         if ($null -eq $pca) {
-            Write-Host ('        {0,-12} {1,-20} {2}' -f $osKey, '(Schema 2.0)', '(no Pca2023 block)') -ForegroundColor DarkGray
+            Write-Host ('        {0,-12} {1,-20} {2}' -f $osKey, '(missing)', '(no Pca2023 block)') -ForegroundColor DarkGray
             continue
         }
         $req = [string]$pca.RequiredByDefault
@@ -12046,7 +12048,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
         #           ErrorCount       - count of Refresher failures for this OS
         #           ManualGroups     - list of group paths flagged Manual fill
         #           Pca2023          - pass-through reference to the Pca2023 block
-        #                              (or $null when running against a Schema 2.0 Config)
+        #                              (or $null when the Config lacks a Pca2023 block)
         #           PreviousVerified - $raw.PatchBaseline.LastVerifiedDate as
         #                              read before refresh, so the summary can
         #                              show "last refresh" vs "this refresh".
@@ -12268,7 +12270,9 @@ function Invoke-AdminPhaseA02_DumpFieldClassification {
         }
         $outPath = Join-Path $outDir 'A02_FieldClassification.json'
         $payload = [ordered]@{
-            Schema       = '2.0'
+            # Tracks the config-schema generation this classification
+            # describes (v3.0, the Catalog data-source generation).
+            Schema       = '3.0'
             GeneratedAt  = (Get-Date).ToString('o')
             ScriptVersion = $Script:ScriptVersion
             FieldGroups  = @($Script:OsConfigFieldGroups | ForEach-Object {

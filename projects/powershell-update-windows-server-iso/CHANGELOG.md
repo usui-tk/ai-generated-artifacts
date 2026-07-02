@@ -22,6 +22,21 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed -- sweep the v2-era schema residue left by the D1/D2 migration (r11.46 -> r11.47, tag `schema-v2-residue-sweep`)
+
+Audit F3. The v3.0 migration updated the loader's CODE (`$acceptedSchemas =
+@('3.0')`) but left the surrounding prose and stamps in the v2 era, i.e.
+comments actively contradicting the code: the loader docstring claimed it
+"accepts Schema 2.0 or 2.1" and described a v2.0-grace soft-warning path
+that no longer exists (the code hard-throws); the in-memory PatchBaseline
+stub and the A02 FieldClassification payload still stamped `Schema = '2.0'`;
+the A01 summary labeled a missing Pca2023 block "(Schema 2.0)"; and
+`tests/eval_iso_probe.py` attributed the Iso-URL layout to "Schema v2.0".
+All swept to the v3.0 reality (comment-and-stamp changes only; no behavior
+change -- the loader accepted only 3.0 before and after). The residue class
+is the same one that produced C1: prose/duplicates drifting from the single
+authoritative implementation.
+
 ### Fixed -- CI: stage1's duplicated inline config validator (hardcoded Schema 2.0/2.1) removed; stage4's stale pre-graduation script path corrected (workflows-only, no version bump)
 
 The 2026-07-02 audit's C1/C2 findings. Stage 1 carried an INLINE Python
