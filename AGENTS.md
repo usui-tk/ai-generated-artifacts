@@ -116,7 +116,11 @@ operational state under [`governance/state/`](./governance/state/) (manifest /
 observations / ledger / reports). Session-to-session handoff follows
 **[ADR 0005](./governance/adr/0005-session-handoff-protocol.md)**: the Tier-P
 design docs stay unmanaged (out of repo), `STATUS.md` is the entry, and each
-static-point ships as one bundle — never piecemeal.
+static-point ships as one bundle — never piecemeal. **Durable decisions always
+land in-repo as ADRs — even from sessions that ship no other patch — with
+`STATUS.md` reflected in the same patch
+([ADR 0023](./governance/adr/0023-durable-decisions-land-in-repo-regardless-of-patch.md));
+the Tier-P bundle is reference, never the sole home of anything durable.**
 
 Before authoring ANY change, an LLM agent MUST:
 
