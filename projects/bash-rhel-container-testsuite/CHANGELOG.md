@@ -11,6 +11,27 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r23] - 2026-07-02 - ENA entitled: stop the ERR trap from masking the real dep-install reason + surface pm log
+
+### Fixed
+- **`unexpected error (line 216)` on every entitled ENA run.** r22 called
+  `ensure_build_deps` as a bare command, so its non-zero return (rc 1/3) tripped
+  the script's `trap ... ERR`, which fired *before* the `case` could emit the real
+  reason - both same-major and cross-major runs collapsed to the generic
+  "unexpected error". The call is now guarded (`edc=0; ensure_build_deps || edc=$?`),
+  which suppresses the ERR trap on a handled non-zero return, so the intended
+  reason (`kernel-devel ... not available` for cross-major, or toolchain failure)
+  is reported.
+- **Diagnosis.** `ensure_build_deps` now tees the package-manager output to a log
+  and `dump_pm_diag` prints its tail on failure (captured into the per-run
+  buildtest log), so a failed entitled dep install shows *why* - missing NVR,
+  disabled repo, or a TLS/entitlement error - instead of an opaque rc.
+
+### Verified
+- Suite green (**18 tiers, 458 passed**); ShellCheck-style-clean; LF-only.
+  ERR-trap suppression semantics confirmed (`|| edc=$?` does not fire the trap;
+  a bare call does).
+
 ## [r22] - 2026-07-02 - entitled path: complete the rhsm mount set + build ENA deps from entitled repos
 
 Makes the entitlement passthrough actually functional end to end for every test

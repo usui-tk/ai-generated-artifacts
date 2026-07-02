@@ -49,6 +49,7 @@ ENA_VERSION_RHEL9="${ENA_VERSION_RHEL9:-2.17.0}"
 ENA_VERSION_RHEL10="${ENA_VERSION_RHEL10:-2.17.0}"
 
 OSMAJOR=""; BUILT="false"; KVER=""; KO_VERSION=""; RESULT_EMITTED=0
+ENA_PM_LOG=""
 BUILT_SRC=""; BUILT_DEST=""; MAKE_LOG=""
 
 # --- container package-manager safety (RHEL6 RHSM stall + timeouts) -----------
@@ -91,13 +92,26 @@ ena_pm() { command -v dnf >/dev/null 2>&1 && printf 'dnf' || printf 'yum'; }
 # kernel-devel. Requires the entitled repo passthrough (redhat.repo + certs).
 ensure_build_deps() {
   local mgr krel; mgr="$(ena_pm)"; krel="$(uname -r)"
+  ENA_PM_LOG="$(mktemp)"
   log "entitled: installing build deps (gcc make kernel-devel-${krel}) via ${mgr}"
-  run_pm "${mgr}" -y install gcc make >/dev/null 2>&1 || return 1
-  run_pm "${mgr}" -y install "kernel-devel-${krel}" >/dev/null 2>&1 || return 3
+  run_pm "${mgr}" -y install gcc make >>"${ENA_PM_LOG}" 2>&1 || return 1
+  run_pm "${mgr}" -y install "kernel-devel-${krel}" >>"${ENA_PM_LOG}" 2>&1 || return 3
   if [ "${ENA_BUILD_PLAN}" = "dkms" ]; then
-    run_pm "${mgr}" -y install dkms >/dev/null 2>&1 || true   # dkms is EPEL-only; best-effort
+    run_pm "${mgr}" -y install dkms >>"${ENA_PM_LOG}" 2>&1 || true   # dkms is EPEL-only; best-effort
   fi
   return 0
+}
+
+# dump_pm_diag : surface the tail of the package-manager log so a failed entitled
+# dep install shows WHY (missing NVR, disabled repo, TLS/entitlement error, ...).
+dump_pm_diag() {
+  local pfx="[install-aws_ena-driver][ERROR]"
+  if [ -n "${ENA_PM_LOG}" ] && [ -s "${ENA_PM_LOG}" ]; then
+    printf '%s package-manager log (last 20 lines):\n' "${pfx}" >&2
+    tail -n 20 "${ENA_PM_LOG}" | sed "s/^/${pfx}   /" >&2
+  else
+    printf '%s   (no package-manager log captured)\n' "${pfx}" >&2
+  fi
 }
 
 log() { printf '%s [install-aws_ena-driver] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -213,11 +227,13 @@ fi
 
 # entitled: install the toolchain + matching kernel-devel from the entitled repos,
 # then build out of tree and verify the module reports the requested version
-ensure_build_deps; edc=$?
+# NB: guard with || so a non-zero return does NOT trip the ERR trap (which would
+# mask the real reason with a generic "unexpected error").
+edc=0; ensure_build_deps || edc=$?
 case "${edc}" in
   0) : ;;
-  3) die "kernel-devel-$(uname -r) not available in RHEL${OSMAJOR} entitled repos (a loadable module needs an exact match to the running kernel; a cross-major container cannot build here)" ;;
-  *) die "entitled build dependencies failed to install (gcc/make) on RHEL${OSMAJOR}" ;;
+  3) dump_pm_diag; die "kernel-devel-$(uname -r) not available/installable from RHEL${OSMAJOR} entitled repos (a loadable module needs an exact match to the running kernel; a cross-major container cannot build here)" ;;
+  *) dump_pm_diag; die "entitled build dependencies failed to install (gcc/make/kernel-devel) on RHEL${OSMAJOR}" ;;
 esac
 if build_ko; then
   KO_VERSION="$(ko_module_version "${BUILT_SRC}/ena.ko")"
