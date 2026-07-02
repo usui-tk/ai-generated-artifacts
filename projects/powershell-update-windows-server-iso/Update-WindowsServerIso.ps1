@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.47'
-$Script:ScriptTag     = 'schema-v2-residue-sweep'
+$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.48'
+$Script:ScriptTag     = 'psa-canon-conformance'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5242,7 +5242,7 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
     return ,$sorted
 }
 
-function Get-TargetBuildFromLines {
+function Get-TargetBuildFromLines { # psa-disable-line PSA6003 -- "Lines" is the Config Schema v3.0 field name (PatchBaseline.Lines[]), not a plural noun choice
     <#
     .SYNOPSIS
         Pure derivation: PatchBaseline.TargetBuildAfterUpdate from Lines[].
@@ -9949,12 +9949,11 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
         $Script:OsProfile.PatchBaseline.PatchTuesdayOfBaseline = $latestPT.ToString('yyyy-MM-dd')
         $Script:OsProfile.PatchBaseline.LastVerifiedDate       = (Get-Date).ToString('o')
         $Script:OsProfile.PatchBaseline.LastVerifiedBy         = 'auto-scrape'
-        # TargetBuildAfterUpdate is DERIVED [r11.46]: the LCU Line's Catalog-
-        # captured InScope.build IS the post-update OS build. The seed-era
-        # hand-maintained value had gone stale on all four OSes (audit F2);
-        # deriving it here makes staleness structurally impossible.
-        # (VerificationMethod was retired in the same pass: it was written
-        # here but read nowhere.)
+        # TargetBuildAfterUpdate is DERIVED: the LCU Line's Catalog-captured
+        # InScope.build IS the post-update OS build. Hand-maintained seed
+        # values proved to go stale silently; deriving at every Lines write
+        # makes staleness structurally impossible (history: CHANGELOG,
+        # tag 'tbau-derived-lcu-verify').
         $tbau = Get-TargetBuildFromLines -Lines @($newPatches)
         $Script:OsProfile.PatchBaseline.TargetBuildAfterUpdate = $tbau
         Write-Ok ('PatchBaseline updated in memory: {0} patches (TargetBuildAfterUpdate={1}).' -f $newPatches.Count, $(if ($tbau) { $tbau } else { '(none)' }))
@@ -11040,6 +11039,7 @@ function Test-LcuTargetApplied {
     $kbPattern = [regex]::Escape($ExpectedKbId)
     $found = $false
     foreach ($pn in $PackageNames) {
+        # psa-disable-next-line PSA2003 -- $kbPattern = [regex]::Escape of a Mandatory non-empty string; never $null
         if ($pn -match $kbPattern) { $found = $true; break }
     }
     $buildNote = if ($ExpectedBuild) {
@@ -11168,7 +11168,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                                 -Actual $actualStr -Status $st `
                                 -Notes ('install.wim idx ' + $firstIdx)
                         }
-                        # TargetBuildAfterUpdate hard check [r11.46]: the
+                        # TargetBuildAfterUpdate hard check: the
                         # baseline LCU is THE build-attainment marker. The
                         # per-Kind rows above stay Warn; this row is a hard
                         # Fail (P11 throws on any Fail row) [DECIDED
@@ -11817,12 +11817,12 @@ function Build-ConfigSkeletonFromSeed {
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param([Parameter(Mandatory)] $Seed)
 
-    # TargetBuildAfterUpdate is DERIVED [r11.46] (the LCU Line's
-    # InScope.build, filled by the refresh) and is therefore initialized
-    # empty here, not copied from seed. VerificationMethod / ExcludeKbList
-    # were retired in the same pass: reader-less seed fields (the 2025
-    # ExcludeKbList even mis-described the checkpoint SSU KB5043080 as
-    # unnecessary while Lines[] applies it at ApplyOrder 1).
+    # TargetBuildAfterUpdate is DERIVED (the LCU Line's InScope.build,
+    # filled wherever Lines are written) and is therefore initialized
+    # empty here, never copied from seed. The seed PatchBaseline envelope
+    # deliberately carries ONLY Schema + ChecksumAlgorithm: reader-less
+    # seed fields rot silently (history: CHANGELOG, tag
+    # 'tbau-derived-lcu-verify').
     $patchBaseline = [ordered]@{
         Schema                 = $Seed.PatchBaseline.Schema
         TargetBuildAfterUpdate = ''
@@ -12153,10 +12153,11 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                                     $patchCount = $patches.Count
                                     if (-not $Script:DryRun -and $patchCount -gt 0) {
                                         $raw.PatchBaseline.Lines = $patches
-                                        # DERIVED TargetBuildAfterUpdate [r11.46]: must be set
-                                        # wherever Lines are (re)written -- this A00/A01 path
-                                        # AND the in-memory refresh writeback both derive via
-                                        # the single pure helper.
+                                        # DERIVED TargetBuildAfterUpdate: must be set wherever
+                                        # Lines are (re)written -- this A00/A01 path AND the
+                                        # in-memory refresh writeback both derive via the
+                                        # single pure helper (a writer that skips this ships
+                                        # an empty value; T31 pins both call sites).
                                         $raw.PatchBaseline.TargetBuildAfterUpdate = Get-TargetBuildFromLines -Lines $patches
                                         $osSummaries[$osKey].AfterPatches = @($patches)
                                     }

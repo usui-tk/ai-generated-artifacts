@@ -22,6 +22,27 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed -- clear the six psa.py canon findings that broke stage-1 CI; unmask the text step's exit code (r11.47 -> r11.48, tag `psa-canon-conformance`)
+
+The r11.46 edits introduced six psa.py canon findings that failed the CI
+run for that push: four PSAP0005 hits (comments carrying revision-anchored
+`[r11.46]` wording -- the canon requires timeless script-body prose, with
+history living in CHANGELOG/SPEC), one PSA6003 (the new
+`Get-TargetBuildFromLines` noun reads as plural -- justified-disabled, as
+"Lines" is the Config Schema v3.0 field name), and one PSA2003 (`-match`
+against a bare `$kbPattern` -- justified-disabled; the pattern is
+`[regex]::Escape` of a Mandatory string, never null). All four comments are
+reworded timelessly (pointing at the CHANGELOG tag instead of the revision
+number); behavior is unchanged.
+
+Two process failures let this reach CI and are also fixed: (1) the stage-1
+text-analysis step piped psa.py into `tee`, masking the exit code -- the
+step stayed green on findings and the run died later at the SARIF step
+with no readable finding list; `set -o pipefail` added with a comment.
+(2) The local gate runs truncated psa.py output (`tail -1`) and never
+checked the exit code -- the session's gate discipline is corrected to
+full-output + exit-code checks.
+
 ### Changed -- CI: actions/checkout bumped v6 -> v7 across the four stage workflows (workflows-only, no version bump)
 
 Live-verified against the upstream repositories on 2026-07-02:

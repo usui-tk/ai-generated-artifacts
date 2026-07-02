@@ -159,7 +159,12 @@ jobs:
       - name: '[psa.py] Run text analysis'
         if: ${{ inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch' }}
         working-directory: projects/powershell-update-windows-server-iso
-        run: python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1 | tee psa.log
+        run: |
+          # pipefail: without it the pipe into tee masks psa.py's exit code and
+          # this step stays green on findings -- the run then dies later at the
+          # SARIF step with no readable finding list (observed 2026-07-02).
+          set -o pipefail
+          python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1 | tee psa.log
 
       - name: '[psa.py] Generate SARIF'
         if: ${{ inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch' }}
