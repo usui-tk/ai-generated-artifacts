@@ -21,6 +21,21 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
+### Changed -- CI: bump actions/checkout v5 -> v7 and actions/upload-artifact v5 -> v7 across the three stage workflows (workflows-only, no script version bump)
+
+Live-verified against the upstream repositories on 2026-07-02 during a
+repo-wide pin audit: actions/checkout's latest major is v7.0.0
+(2026-06-17) and actions/upload-artifact's is v7. Both jumps are
+non-breaking for these workflows: the upload steps use only `name` /
+`path` (unchanged inputs; v7's new `archive` input defaults to the old
+zipping behavior), and checkout v7's fork-PR refusal under
+`pull_request_target` / `workflow_run` triggers does not affect this
+repository's same-repo push/PR flow (stage 2 is `workflow_run`-chained
+from stage 1, but the refusal targets fork pull requests only -- a
+desirable supply-chain guardrail here). The remaining pins are already
+current (setup-python v6, codeql-action upload-sarif v4,
+microsoft/psscriptanalyzer-action v1.1 -- the newest upstream tag).
+
 ### CI / build — Complete the scripts -> projects migration for this project's workflows
 
 The `scripts/powershell/download-speakerdeck-oracle4engineer/` -> `projects/powershell-download-speakerdeck-oracle4engineer/` migration moved the project tree but left this project's three CI workflows pointing at the old path (the same omission fixed earlier for `update-windows-server-iso`). No script change.

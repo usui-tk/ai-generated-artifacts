@@ -63,7 +63,7 @@ jobs:
     # Buffer for transient PSGallery latency and runner warm-up.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -156,7 +156,7 @@ jobs:
       # checkout including hidden files and potentially secrets.
       - name: '[Artifacts] Upload logs'
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: dsd-stage1-${{ github.run_id }}
           path: |

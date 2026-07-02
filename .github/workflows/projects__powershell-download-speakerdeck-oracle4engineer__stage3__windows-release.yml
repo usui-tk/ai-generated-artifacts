@@ -47,7 +47,7 @@ jobs:
     # back-off can extend any single run substantially.
     timeout-minutes: 240
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: '[Release-verify] Full DryRun execution (Phase 1-5)'
         shell: powershell
@@ -76,7 +76,7 @@ jobs:
 
       - name: '[Artifacts] Upload logs'
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: dsd-stage3-${{ github.run_id }}
           path: |

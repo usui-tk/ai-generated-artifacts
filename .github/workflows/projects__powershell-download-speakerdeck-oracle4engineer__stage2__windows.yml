@@ -45,7 +45,7 @@ jobs:
     # for transient PSGallery latency and runner warm-up.
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # --- Tool group: PSScriptAnalyzer (Windows PowerShell 5.1) ---
       # The Marketplace action runs PSScriptAnalyzer; the analyzed script
@@ -121,7 +121,7 @@ jobs:
       # and potentially secrets.
       - name: '[Artifacts] Upload logs'
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: dsd-stage2-${{ github.run_id }}
           path: |
