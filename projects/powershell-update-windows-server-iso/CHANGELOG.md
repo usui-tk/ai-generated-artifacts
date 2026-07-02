@@ -22,6 +22,28 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed -- CI: stage1's duplicated inline config validator (hardcoded Schema 2.0/2.1) removed; stage4's stale pre-graduation script path corrected (workflows-only, no version bump)
+
+The 2026-07-02 audit's C1/C2 findings. Stage 1 carried an INLINE Python
+copy of config validation that hardcoded `Schema must be '2.0' or '2.1'`,
+so every CI run failed after the v3.0 data-source migration -- while the
+correct gate (`tests/config_schema_test.py`, schema-file-driven) ran green
+in the very same workflow a step later. The duplicate is deleted; the
+schema test is now the single config-validation authority in CI, with a
+workflow comment forbidding re-inlining (validation logic lives once, in
+the test + `schema/config.schema.json`). Stage 4's monthly-refresh job
+still pointed at the pre-graduation path
+(`scripts\powershell\update-windows-server-iso\...`), so every cron run
+since graduation failed on a missing script; the path now targets
+`projects\powershell-update-windows-server-iso\`. The stage-4 PR
+checklist is reconciled to v3.0 (`Lines[]` + `Digest`; Server 2025
+`SetupDU` Line + derived `TargetBuildAfterUpdate`, replacing the retired
+`NeutralPatches[]` / `IsCombined` items), and stale `wsusscn2 scan`
+comments in stages 2/3 now name the current P03/P06 roles. Root cause
+recorded: the D1/D2 migration's blast radius never included
+`.github/workflows/` (the Doc-Touching Matrix has no CI row -- a
+governance gap deferred to a separate `[AUTH]` session).
+
 ### Changed -- TargetBuildAfterUpdate becomes DERIVED with a real consumer; VerificationMethod / ExcludeKbList retired (r11.45 -> r11.46, tag `tbau-derived-lcu-verify`)
 
 Audit F2 found three PatchBaseline fields with zero runtime readers.

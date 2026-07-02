@@ -164,7 +164,10 @@ jobs:
           Write-Host '=== Splat passed to Update-WindowsServerIso.ps1 ==='
           $splat | Format-Table -AutoSize | Out-String | Write-Host
 
-          $script = Join-Path $env:GITHUB_WORKSPACE 'scripts\powershell\update-windows-server-iso\Update-WindowsServerIso.ps1'
+          # Project graduated from scripts\powershell\... to projects\... --
+          # this path went stale at graduation and every monthly cron run
+          # failed on a missing script (2026-07-02 audit C2).
+          $script = Join-Path $env:GITHUB_WORKSPACE 'projects\powershell-update-windows-server-iso\Update-WindowsServerIso.ps1'
           & $script @splat
           $exitCode = $LASTEXITCODE
           Write-Host "Update-WindowsServerIso.ps1 exit code: $exitCode"
@@ -265,8 +268,8 @@ jobs:
             ${{ steps.diff.outputs.file-list }}
 
             **Reviewer checklist**
-            - [ ] Confirm that each modified `PatchBaseline.NeutralPatches[]` entry has a populated `DownloadUrl` and a sensible `Title` (Microsoft Update Catalog UI [https://www.catalog.update.microsoft.com](https://www.catalog.update.microsoft.com))
-            - [ ] Confirm that combined-LCU months are correctly flagged (`IsCombined: true`) for Server 2022 / 2025
+            - [ ] Confirm that each modified `PatchBaseline.Lines[]` entry has a populated `DownloadUrl` and `Digest` (Microsoft Update Catalog UI [https://www.catalog.update.microsoft.com](https://www.catalog.update.microsoft.com))
+            - [ ] Confirm Server 2025 carries its `SetupDU` Line (ApplyOrder 5) and every config's `TargetBuildAfterUpdate` equals its LCU `InScope.build` (derived, r11.46)
             - [ ] Confirm that `PatchTuesdayOfBaseline` matches the second Tuesday of the target month
             - [ ] Spot-check the `A01_RefreshAllBaselines_report.csv` workflow artifact
 

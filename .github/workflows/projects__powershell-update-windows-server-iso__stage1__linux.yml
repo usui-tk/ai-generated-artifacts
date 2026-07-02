@@ -139,75 +139,14 @@ jobs:
           print(f'OK: BOM + CRLF + ASCII-only ({len(data):,} bytes)')
           PY
 
-      # --- Config JSON parse guard (Schema 2.1+, r05.0+) ---
-      # Schema 2.0 (r03) introduced the Common/PatchBaseline/LanguageSpecific
-      # hierarchy. Schema 2.1 (r05.0) added the Pca2023 section. The validator
-      # below recognises both, requires v2.0 or higher, and warns on the older
-      # v2.0 (preserved for back-compat readers).
-      - name: '[Format] Validate Config JSON files'
-        run: |
-          python3 - <<'PY'
-          import json
-          import sys
-          from pathlib import Path
-
-          d = Path('projects/powershell-update-windows-server-iso/data')
-          required = {'config-Server2016.json', 'config-Server2019.json', 'config-Server2022.json', 'config-Server2025.json'}
-          present = {p.name for p in d.glob('config-Server*.json')}
-          missing = required - present
-          if missing:
-              print(f'FAIL: missing OS config files under data/: {sorted(missing)}', file=sys.stderr)
-              sys.exit(1)
-
-          # Schema 2.x top-level required keys
-          required_top = ('Schema', 'OsKey', 'Common', 'PatchBaseline',
-                          'AutoRefreshPolicy', 'LanguageSpecific')
-          # Common block required keys (lifted from old v1 top-level keys)
-          required_common = ('Build', 'OsShortName', 'Architecture',
-                             'SupportedLanguages')
-          # Languages we expect every Config to support (both)
-          required_langs = ('en-us', 'ja-jp')
-          # Schema 2.1+ adds a top-level Pca2023 block (optional in 2.0)
-          for f in sorted(d.glob('config-Server*.json')):
-              with open(f) as fp:
-                  data = json.load(fp)
-              schema = str(data.get('Schema', ''))
-              if schema not in ('2.0', '2.1'):
-                  print(f'FAIL: {f.name} Schema="{schema}" - must be 2.0 or 2.1', file=sys.stderr)
-                  sys.exit(1)
-              for key in required_top:
-                  if key not in data:
-                      print(f'FAIL: {f.name} missing top-level "{key}"', file=sys.stderr)
-                      sys.exit(1)
-              common = data['Common']
-              for key in required_common:
-                  if key not in common:
-                      print(f'FAIL: {f.name} missing Common.{key}', file=sys.stderr)
-                      sys.exit(1)
-              for lang in required_langs:
-                  if lang not in common['SupportedLanguages']:
-                      print(f'FAIL: {f.name} Common.SupportedLanguages missing "{lang}"', file=sys.stderr)
-                      sys.exit(1)
-                  if lang not in data['LanguageSpecific']:
-                      print(f'FAIL: {f.name} missing LanguageSpecific.{lang}', file=sys.stderr)
-                      sys.exit(1)
-              # Pca2023 block (Schema 2.1+) - warn on 2.0, require on 2.1
-              if schema == '2.1':
-                  if 'Pca2023' not in data:
-                      print(f'FAIL: {f.name} Schema 2.1 declared but Pca2023 block missing', file=sys.stderr)
-                      sys.exit(1)
-                  for key in ('RequiredByDefault', 'RequiredUpdateLevelKb'):
-                      if key not in data['Pca2023']:
-                          print(f'FAIL: {f.name} Pca2023.{key} missing', file=sys.stderr)
-                          sys.exit(1)
-              print(f'OK: {f.name} Schema={schema} Build={common["Build"]} langs={common["SupportedLanguages"]}')
-          PY
-
       # --- Tool group: config schema conformance ---
-      # Validates data/config-Server*.json against schema/config-v2.1.schema.json
-      # (the machine-readable mirror of SPEC B.4). Complements the positive
-      # key-presence check above with structural / additional-property / forbidden-
-      # field checks (e.g. the legacy PatchBaseline.Patches field, r10.3 defect).
+      # Validates data/config-Server*.json against schema/config.schema.json
+      # (the machine-readable mirror of SPEC B.4). This test is the SINGLE
+      # config-validation authority in CI: an earlier inline duplicate of this
+      # logic hardcoded Schema 2.0/2.1 and failed every run after the v3.0
+      # data-source migration while this correct gate sat right below it
+      # (2026-07-02 audit C1). Validation logic must live once, in
+      # tests/config_schema_test.py + the schema file -- never inlined here.
       - name: '[Schema] Validate config against JSON Schema (SPEC B.4)'
         working-directory: projects/powershell-update-windows-server-iso
         run: python3 tests/config_schema_test.py

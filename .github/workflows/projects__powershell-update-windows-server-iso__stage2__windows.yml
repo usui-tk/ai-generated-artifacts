@@ -312,7 +312,7 @@ jobs:
       # --- Smoke test 3: Synthetic + DryRun (no DISM writes, no Catalog) ---
       # Exercises the registry-driven dispatcher and the P02/P04/P05
       # planning paths without mounting any WIM. -SyntheticTestMode also
-      # implicitly skips P03 (Catalog scrape) and P06 (wsusscn2 scan)
+      # implicitly skips P03 (Catalog refresh) and P06 (patch-servicing validation)
       # in r05.0+ phase numbering (was P02.5/P04.5 in r04.x).
       - name: '[Smoke3] Synthetic + DryRun'
         shell: powershell

@@ -152,12 +152,13 @@ jobs:
           }
 
       # --- Full -SyntheticTestMode pipeline ---
-      # -SyntheticTestMode implicitly skips P03 (Catalog scrape) and
-      # P06 (wsusscn2 scan) in r05.0+ phase numbering (was P02.5/P04.5
-      # in r04.x). This keeps Stage 3 self-contained: it
-      # does not require Catalog connectivity and does not download
-      # the ~1 GB wsusscn2.cab file. Real-world dependency validation
-      # is exercised in production runs, not in CI.
+      # -SyntheticTestMode implicitly skips P03 (Catalog refresh) and
+      # P06 (patch-servicing validation) in r05.0+ phase numbering (was
+      # P02.5/P04.5 in r04.x; the P06 wsusscn2.cab scan was retired with
+      # the D1/D2 migration to the Microsoft Update Catalog). This keeps
+      # Stage 3 self-contained: no Catalog connectivity and no patch
+      # downloads. Real-world dependency validation is exercised in
+      # production runs, not in CI.
       - name: '[Synthetic] Run Update-WindowsServerIso.ps1 in -SyntheticTestMode (full)'
         shell: powershell
         timeout-minutes: 60
