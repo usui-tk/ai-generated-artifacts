@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Build (and optionally install) the Amazon ENA network driver from source
+#   against the container/host kernel-devel tree; in test mode, emit a
+#   single-line [result] JSON (ok / build-fail / needs-entitlement).
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+, curl, tar; gcc/make + kernel-devel (entitled repos in containers);
+#   network to github.com for the ENA source archive.
+# ----- Usage examples -------------------------------------------------------
+#   sudo bash install-aws_ena-driver.sh                      # build + install
+#   ENA_BUILDTEST=1 ENA_VERSION=2.13.0 bash install-aws_ena-driver.sh
+# ----- Known limitations ----------------------------------------------------
+#   Module LOAD cannot be exercised in a container (shared host kernel) - load
+#   is L4; anonymous UBI has no kernel-devel -> verdict needs-entitlement.
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #==============================================================================
 # install-aws_ena-driver.sh - build (and in production, install) the AWS ENA
 # driver on a RHEL-family host. E2': the build is entitlement-gated. In entitled
@@ -30,7 +48,7 @@
 #       ENA_SRC_BASEURL (default https://github.com/amzn/amzn-drivers)
 #       INSECURE_TLS    (0|1; default 0)
 #==============================================================================
-set -uo pipefail
+set -euo pipefail
 
 ENA_VERSION="${ENA_VERSION:-}"
 ENA_INSTALLTEST="${ENA_INSTALLTEST:-0}"

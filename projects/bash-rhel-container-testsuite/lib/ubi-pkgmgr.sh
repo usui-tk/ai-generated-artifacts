@@ -1,3 +1,18 @@
+# ----- Purpose --------------------------------------------------------------
+#   Detect and drive the image package manager (dnf -> microdnf -> yum -> none)
+#   with availability queries that survive the lazy redhat.repo generation.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+; sourced library (no side effects at source time).
+# ----- Usage examples -------------------------------------------------------
+#   source lib/ubi-pkgmgr.sh   # from a matrix runner / probe / test tier
+# ----- Known limitations ----------------------------------------------------
+#   Not a standalone executable; functions assume the caller handles logging
+#   and error policy (spec home A.5).
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 # shellcheck shell=bash
 #==============================================================================
 # lib/ubi-pkgmgr.sh - package-manager detection + availability queries

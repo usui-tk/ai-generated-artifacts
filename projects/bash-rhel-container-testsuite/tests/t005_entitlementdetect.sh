@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   L1 unit: 3-step entitlement detection
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+; hermetic (no network); shellcheck only for t002.
+# ----- Usage examples -------------------------------------------------------
+#   bash tests/t005_entitlementdetect.sh
+#   bash tests/run-all.sh   # runs every tier
+# ----- Known limitations ----------------------------------------------------
+#   Asserts count failures and continue (harness scope, spec home A.5).
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #==============================================================================
 # tests/t005_entitlementdetect.sh - L1 unit: 3-step entitlement detection
 #

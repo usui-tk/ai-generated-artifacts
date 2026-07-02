@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Opt-in environment probe: classify the host (platform, container engine,
+#   registry/S3/EPEL egress, entitlement) into tests/ENV-PROBE.json + a verdict.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+, curl; probes are best-effort and degrade to reasoned states.
+# ----- Usage examples -------------------------------------------------------
+#   bash tests/probe-env.sh --probe-env
+#   bash tests/probe-env.sh --majors "9 8"
+# ----- Known limitations ----------------------------------------------------
+#   Network states are point-in-time; output is regenerated, not committed.
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #==============================================================================
 # tests/probe-env.sh - opt-in environment probe (--probe-env)
 #
@@ -27,6 +42,8 @@
 #   RUN_TIMEOUT (whole probe container, default 600s), PKG_TIMEOUT (in-container
 #   yum/dnf, default 300s) - both overridable.
 #==============================================================================
+# errexit deliberately omitted: environment probe must keep going on individual failures
+# and report them (self-test harness scope, spec home A.5).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Install the AWS CLI v2 on a RHEL-family host or container; in test mode,
+#   decide whether a given v2 version INSTALLS and RUNS here (glibc gate) and
+#   emit a single-line [result] JSON for the matrix ledger.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+, curl, unzip; root (or a writable prefix in test mode); network to
+#   awscli.amazonaws.com (INSECURE_TLS=1 for a MITM dev proxy).
+# ----- Usage examples -------------------------------------------------------
+#   sudo bash install-aws_awscli-v2.sh                       # production install
+#   AWSCLI_INSTALLTEST=1 AWSCLI_VERSION=2.27.0 bash install-aws_awscli-v2.sh
+# ----- Known limitations ----------------------------------------------------
+#   RHEL 6 (glibc 2.12) is pinned to v2 <= 2.17.49 (AWS glibc-2.17 floor);
+#   test mode never touches system paths and needs no AWS credentials/IMDS.
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #==============================================================================
 # install-aws_awscli-v2.sh - install the AWS CLI v2 on a RHEL-family host, and -
 # in test mode - decide whether a given version INSTALLS and RUNS on this
@@ -24,7 +42,7 @@
 #       AWSCLI_ZIP_BASEURL (default https://awscli.amazonaws.com)
 #       INSECURE_TLS     (0|1; default 0 -> curl -k for a MITM dev proxy)
 #==============================================================================
-set -uo pipefail
+set -euo pipefail
 
 AWSCLI_VERSION="${AWSCLI_VERSION:-}"
 AWSCLI_INSTALLTEST="${AWSCLI_INSTALLTEST:-0}"

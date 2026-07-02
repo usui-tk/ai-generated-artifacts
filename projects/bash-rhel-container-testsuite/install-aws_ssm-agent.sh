@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Install the AWS SSM Agent from the AWS S3 RPM on a RHEL-family host or
+#   container; in test mode, record install/run/enable facts per init mode
+#   (none|systemd) and emit a single-line [result] JSON for the matrix ledger.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+, curl, rpm + yum/dnf; root for production; network to
+#   *.amazonaws.com (INSECURE_TLS=1 for a MITM dev proxy).
+# ----- Usage examples -------------------------------------------------------
+#   sudo bash install-aws_ssm-agent.sh                       # production install
+#   SSM_INSTALLTEST=1 SSM_INIT_MODE=systemd bash install-aws_ssm-agent.sh
+# ----- Known limitations ----------------------------------------------------
+#   Service activation is only observable under systemd PID1 (ubi-init booted);
+#   RHEL 6 anonymous mode depends on base-image dependency closure (Tier C).
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #==============================================================================
 # install-aws_ssm-agent.sh - install the AWS SSM Agent on a RHEL-family host,
 # and - in test mode - decide whether a given version installs and runs, and
@@ -22,7 +40,7 @@
 #       SSM_RPM_BASEURL   (default https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent)
 #       INSECURE_TLS      (0|1; default 0)
 #==============================================================================
-set -uo pipefail
+set -euo pipefail
 
 SSM_VERSION="${SSM_VERSION:-}"
 SSM_INSTALLTEST="${SSM_INSTALLTEST:-0}"

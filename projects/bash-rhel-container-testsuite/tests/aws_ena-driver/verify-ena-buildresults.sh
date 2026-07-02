@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   READ-ONLY verifier over the preserved ENA build bundle (ena.ko +
+#   Module.symvers + vermagic): load-readiness gates ahead of the L4 test.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+; a build bundle produced by run-ena-buildtest-matrix.sh --run.
+# ----- Usage examples -------------------------------------------------------
+#   bash tests/aws_ena-driver/verify-ena-buildresults.sh
+# ----- Known limitations ----------------------------------------------------
+#   Verifies artifacts only - never builds, never loads a module (load is L4).
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 # verify-ena-buildresults.sh - standalone, READ-ONLY verification of the ENA
 # build-test matrix's results. It NEVER builds and NEVER touches the build path:
 # it reads the matrix ledger (buildtest-ledger.json) plus a small verification
@@ -19,6 +33,8 @@
 #
 # The pure verdict helpers below are unit-tested in tests/t011_enaverify.sh; the
 # tier sources this file with ENA_LIB_ONLY=1 so only the helpers load.
+# errexit deliberately omitted: read-only verifier must keep going on individual failures
+# and report them (self-test harness scope, spec home A.5).
 set -uo pipefail
 
 # ---- pure verdict helpers (no I/O; column-0 for sed extraction) --------------

@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Refresh ssm-releases.json: enumerate upstream releases into the pinned
+#   in-scope version set the install/build-test matrix consumes.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+, curl; network to the vendor endpoint (GitHub/AWS).
+# ----- Usage examples -------------------------------------------------------
+#   bash tests/aws_ssm-agent/list-ssm-releases.sh
+#   bash tests/aws_ssm-agent/list-ssm-releases.sh --help
+# ----- Known limitations ----------------------------------------------------
+#   Network-dependent (L3); the committed JSON is the reproducible input.
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #------------------------------------------------------------------------------
 # list-ssm-releases.sh - AWS SSM Agent release-list collector (matrix input (a))
 #

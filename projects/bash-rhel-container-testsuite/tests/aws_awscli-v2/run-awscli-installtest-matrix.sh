@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Run the AWS CLI v2 install test matrix per RHEL major; append
+#   measured rows to the JSON ledger and regenerate RESULTS-rhel<N>.md.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+, python3; report mode: none beyond the repo. --run: podman (or the
+#   curl-only OCI fallback) + container egress; entitled host for rhel-* repos.
+# ----- Usage examples -------------------------------------------------------
+#   bash run-awscli-installtest-matrix.sh              # regenerate reports from the ledger
+#   OSMAJORS="9 8" bash run-awscli-installtest-matrix.sh --run   # live matrix
+# ----- Known limitations ----------------------------------------------------
+#   --run is L3 (manual/CI); RESULTS files are generated - never hand-edited.
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #==============================================================================
 # tests/aws_awscli-v2/run-awscli-installtest-matrix.sh
 #   AWS CLI v2 install-test matrix (framework step (b)+(d)) for the RHEL family.
@@ -23,7 +39,7 @@
 # the unit coverage in tests/t008_awscliverdict.sh, which loads each by name -
 # so each MUST stay defined at column 0 from `name()` to the first column-0 `}`.
 #==============================================================================
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -358,7 +374,7 @@ awscli_kick() {
           -e AWSCLI_INSTALLTEST=1 -e "AWSCLI_VERSION=${ver}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
           "${ref}" /bin/bash /install-aws_awscli-v2.sh 2>"${err_tmp}")" || rc=$?
   line="$(printf '%s
-' "${out}" | grep -F '[aws_awscli-v2][installtest][result]' | tail -1)"
+' "${out}" | grep -F '[aws_awscli-v2][installtest][result]' | tail -1)" || true  # tolerated-empty probe: no result line = reasoned error row (A.5 asymmetry)
   logf="${log_dir}/installtest-rhel${major}-awscli_${ver}.log"
   if [ "${rc}" = "124" ]; then
     reason="timed out after ${RUN_TIMEOUT:-600}s (container stalled; possible repo/network wait)"

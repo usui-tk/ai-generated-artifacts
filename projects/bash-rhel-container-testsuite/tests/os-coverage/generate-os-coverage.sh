@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Regenerate tests/os-coverage/RESULTS-coverage.md from lib/os-profile.sh:
+#   the per-major image/tier/pkg-mgr/glibc coverage matrix.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+; repo checkout only (hermetic).
+# ----- Usage examples -------------------------------------------------------
+#   bash tests/os-coverage/generate-os-coverage.sh
+# ----- Known limitations ----------------------------------------------------
+#   Output is generated - never hand-edited.
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #------------------------------------------------------------------------------
 # generate-os-coverage.sh - render the per-major OS coverage matrix (Phase 6).
 #
@@ -9,7 +23,7 @@
 # Usage:   bash tests/os-coverage/generate-os-coverage.sh [output.md]
 #   default output: tests/os-coverage/RESULTS-coverage.md (beside this script)
 #------------------------------------------------------------------------------
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"

@@ -1,3 +1,16 @@
+# ----- Purpose --------------------------------------------------------------
+#   Test-harness library: PATH-shim command mocking with an argv spy log.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+; sourced by tests/tNNN_*.sh tiers (no side effects at source).
+# ----- Usage examples -------------------------------------------------------
+#   source tests/lib/mock.sh
+# ----- Known limitations ----------------------------------------------------
+#   Harness scope: counts failures and continues (errexit-free, spec home A.5).
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 # shellcheck shell=bash
 #==============================================================================
 # tests/lib/mock.sh - command mocking + call spying (dependency class:

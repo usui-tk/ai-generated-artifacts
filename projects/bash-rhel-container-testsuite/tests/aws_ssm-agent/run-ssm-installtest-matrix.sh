@@ -1,4 +1,20 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Run the SSM Agent install (both init modes) test matrix per RHEL major; append
+#   measured rows to the JSON ledger and regenerate RESULTS-rhel<N>.md.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+, python3; report mode: none beyond the repo. --run: podman (or the
+#   curl-only OCI fallback) + container egress; entitled host for rhel-* repos.
+# ----- Usage examples -------------------------------------------------------
+#   bash run-ssm-installtest-matrix.sh              # regenerate reports from the ledger
+#   OSMAJORS="9 8" bash run-ssm-installtest-matrix.sh --run   # live matrix
+# ----- Known limitations ----------------------------------------------------
+#   --run is L3 (manual/CI); RESULTS files are generated - never hand-edited.
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #==============================================================================
 # tests/aws_ssm-agent/run-ssm-installtest-matrix.sh
 #   AWS SSM Agent install-test matrix (framework (b)+(d)) for the RHEL family.
@@ -25,7 +41,7 @@
 #
 # The column-0 pure helpers carry the unit coverage in tests/t009_ssmverdict.sh.
 #==============================================================================
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJ_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -347,7 +363,7 @@ ssm_kick() {
           -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
           "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>"${err_tmp}")" || rc=$?
   line="$(printf '%s
-' "${out}" | grep -F '[aws_ssm-agent][installtest][result]' | tail -1)"
+' "${out}" | grep -F '[aws_ssm-agent][installtest][result]' | tail -1)" || true  # tolerated-empty probe: no result line = reasoned error row (A.5 asymmetry)
   logf="${log_dir}/installtest-rhel${major}-ssm_${ver}_${mode}.log"
   if [ "${rc}" = "124" ]; then
     reason="timed out after ${RUN_TIMEOUT:-600}s (container stalled; possible repo/network wait)"

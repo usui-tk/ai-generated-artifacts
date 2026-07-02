@@ -1,3 +1,18 @@
+# ----- Purpose --------------------------------------------------------------
+#   Classify package availability per (major, entitlement): anonymous-UBI /
+#   entitled-only / EPEL / vendor-hosted, per SPEC section 8.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+; sourced library (no side effects at source time).
+# ----- Usage examples -------------------------------------------------------
+#   source lib/pkg-availability.sh   # from a matrix runner / probe / test tier
+# ----- Known limitations ----------------------------------------------------
+#   Not a standalone executable; functions assume the caller handles logging
+#   and error policy (spec home A.5).
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 # shellcheck shell=bash
 #==============================================================================
 # lib/pkg-availability.sh - the package-availability classification (Phase 7).

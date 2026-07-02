@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Suite runner: L0 static tiers + every hermetic tests/tNNN_*.sh, printing
+#   per-tier "## RESULT" lines and the suite summary.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+; shellcheck optional (t002 SKIPs without it); no network.
+# ----- Usage examples -------------------------------------------------------
+#   bash tests/run-all.sh
+# ----- Known limitations ----------------------------------------------------
+#   Aggregates L0-L2 only; the L3 matrices are run manually / in CI.
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #==============================================================================
 # tests/run-all.sh - single entry runner for the bash-rhel-container-testsuite
 #
@@ -19,6 +33,8 @@
 # Environment / version dependencies are recorded here at run time (see
 # TESTING.md "Environment & version dependencies").
 #==============================================================================
+# errexit deliberately omitted: suite runner must keep going on individual failures
+# and report them (self-test harness scope, spec home A.5).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

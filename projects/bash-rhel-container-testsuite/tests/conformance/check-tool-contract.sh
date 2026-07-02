@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# ----- Purpose --------------------------------------------------------------
+#   Check every tests/<vendor>_<tool>/ folder against the tool contract
+#   (SPEC section 7 (0)-(e)): installer, lister, releases JSON, matrix, ledger,
+#   RESULTS set; emits one [contract][result] JSON per tool.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+; repo checkout only (hermetic).
+# ----- Usage examples -------------------------------------------------------
+#   bash tests/conformance/check-tool-contract.sh
+# ----- Known limitations ----------------------------------------------------
+#   Structural conformance only; it does not run the matrices.
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 #==============================================================================
 # check-tool-contract.sh - conformance checker for the tool-compatibility
 # framework (Phase 7). Walks every per-tool directory tests/<vendor>_<tool>/ and
@@ -15,7 +30,7 @@
 # conforms. The pure helper contract_dir_missing is unit-tested by
 # tests/t013_toolcontract.sh (sourced with CONTRACT_LIB_ONLY=1).
 #==============================================================================
-set -uo pipefail
+set -euo pipefail
 
 # ---- pure helper (no I/O beyond the dir it is handed; column-0) --------------
 

@@ -7,6 +7,46 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r28] - 2026-07-02 - canon alignment: errexit on production scripts + Layer-1 headers (B2 code pass)
+
+Code half of the B2 canon-alignment arc (docs reconstruction follows as its own
+revision). Aligns the suite with the bash spec home (`governance/spec/bash.md`)
+extracted at B0.
+
+### Changed
+- **`set -euo pipefail` on all production/operational scripts** (spec home A.5
+  two-tier scope): the 3 install scripts, the 3 matrix runners,
+  `generate-os-coverage.sh`, and `check-tool-contract.sh` (8 files; the 3
+  list scripts were already `-euo`). The self-test harness (`run-all.sh`,
+  `tNNN_*` tiers, `probe-env.sh`, `verify-ena-buildresults.sh`) deliberately
+  stays `-uo` - assertions/probes count failures and continue - now with an
+  explicit rationale comment on the kept files.
+- **3 tolerated-empty probe guards** (`|| true`) on the result-line extraction
+  in each matrix's kick function: `pipefail` is inherited into command
+  substitutions while `errexit` is not (spec home A.5 asymmetry), so a
+  container that crashes before emitting its result line must yield the
+  reasoned `harness-error` ledger row, not abort the matrix. Grounded by the
+  empirical `-e` audit (statement-level, all 8 files; the substitution-invoked
+  probes - `result_field`, `kdevel_kver`, `ko_module_version`, `host_glibc` -
+  were proven inert under default bash and left untouched).
+- **Layer-1 five-section header banners on all 42 `.sh` files** (Purpose /
+  Prerequisites / Usage examples / Known limitations / AI generation info),
+  per `scripts/README.md` "Required Header Convention" and spec home A.2.
+  Existing header prose is preserved below the banner; sourced libraries
+  (no shebang) carry the banner at file top.
+
+### Notes
+- Logging intentionally NOT changed: at ground truth the OL reference's
+  auxiliary scripts (installers/matrices) use the same minimal tagged `log()`
+  shape this suite uses; the spec home A.3 gained an explicit role-scoping
+  paragraph in the same patch series, so the minimal form is canon-conformant
+  (stdout here is the machine channel, so human logs stay on stderr).
+
+### Verified
+- Suite green (20 tiers / 478 passed), 3/3 consecutive; ShellCheck clean at
+  default severity and -S style; all report-mode entry paths green
+  (3 matrices, conformance, os-coverage, verify); LF-only.
+
 All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.

@@ -1,3 +1,18 @@
+# ----- Purpose --------------------------------------------------------------
+#   Deterministic EPEL access: dl.fedoraproject.org pinned baseurl (method B,
+#   metalink disabled), EPEL 10 minor resolution, RHEL 6 archive special case.
+# ----- Prerequisites --------------------------------------------------------
+#   bash 4+; sourced library (no side effects at source time).
+# ----- Usage examples -------------------------------------------------------
+#   source lib/epel.sh   # from a matrix runner / probe / test tier
+# ----- Known limitations ----------------------------------------------------
+#   Not a standalone executable; functions assume the caller handles logging
+#   and error policy (spec home A.5).
+# ----- AI generation info -------------------------------------------------
+#   AI tool: Anthropic Claude (Claude Fable 5), claude.ai sessions
+#   Generation date: 2026-07-02 (r28 header-conformance pass; script logic
+#   authored incrementally across the r01-r27 sessions, see CHANGELOG.md)
+# ---------------------------------------------------------------------------
 # shellcheck shell=bash
 #==============================================================================
 # lib/epel.sh - EPEL pinned-repo handling (the design plan sec 12.1)
