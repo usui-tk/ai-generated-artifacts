@@ -1,8 +1,8 @@
 ---
 doc-provenance:
   layer-1-format: 1.0.0
-  layer-2-template: 1.0.0
-  rendered: 2026-06-06
+  layer-2-template: 1.1.0
+  rendered: 2026-07-02
 ---
 # Bash Script Specification (SPEC) — build-ol-aws-ami.sh
 
@@ -31,18 +31,17 @@ doc-provenance:
 
 ## Table of Contents
 
-- [Part A — Common Specification](#part-a--common-specification)
-  - [A.1 Reference Assets](#a1-reference-assets)
-  - [A.2 Source File Format](#a2-source-file-format)
-  - [A.3 Pipeline Architecture (9 phases)](#a3-pipeline-architecture-9-phases)
-  - [A.4 Logging Conventions](#a4-logging-conventions)
-  - [A.5 Shell Options and Defensive Coding](#a5-shell-options-and-defensive-coding)
-  - [A.6 Parameter Conventions](#a6-parameter-conventions)
-  - [A.7 Env Property File Conventions](#a7-env-property-file-conventions)
-  - [A.8 Oracle Linux Version Auto-detection](#a8-oracle-linux-version-auto-detection)
-  - [A.9 Error & Diagnostic Conventions](#a9-error--diagnostic-conventions)
-  - [A.10 Documentation Language Policy](#a10-documentation-language-policy)
-  - [A.11 Development Workflow](#a11-development-workflow)
+- [Part A — Common Specification](#part-a--common-specification-vendored-from-the-spec-home)
+  - [A.1–A.8 vendored from the spec home](#a1-reference-assets) — reference assets, source file format, logging, parameter handling, error/diagnostics & shell options, static analysis, documentation language policy, development workflow
+  - [A.9 Reference assets (project)](#a9-reference-assets-project)
+  - [A.10 Script layout (project)](#a10-script-layout-project)
+  - [A.11 Pipeline architecture (9 phases)](#a11-pipeline-architecture-9-phases)
+  - [A.12 Extended log markers (project)](#a12-extended-log-markers-project)
+  - [A.13 Env property file conventions (project)](#a13-env-property-file-conventions-project)
+  - [A.14 Oracle Linux version auto-detection (project)](#a14-oracle-linux-version-auto-detection-project)
+  - [A.15 libguestfs caller pattern and project diagnostics](#a15-libguestfs-caller-pattern-and-project-diagnostics)
+  - [A.16 Documentation and revision specifics (project)](#a16-documentation-and-revision-specifics-project)
+  - [A.17 Parameter inventory (project)](#a17-parameter-inventory-project)
 - [Part B — Script-specific Specifications](#part-b--script-specific-specifications)
   - [B.1 build-ol-aws-ami.sh](#b1-build-ol-aws-amish)
   - [B.2 setup-vmimport-role.sh](#b2-setup-vmimport-rolesh)
@@ -53,41 +52,174 @@ doc-provenance:
   - [B.7 Guest OS package-manager matrix](#b7-guest-os-package-manager-matrix)
 - [Part C — Quality Gates & Validation Checklist](#part-c--quality-gates--validation-checklist)
 - [Part D — Known Pitfalls & Lessons Learned](#part-d--known-pitfalls--lessons-learned)
+- [Part E — Logging & Diagnostics](#part-e--logging--diagnostics)
 - [Appendix: How to add support for a new OL major release](#appendix-how-to-add-support-for-a-new-ol-major-release)
 
 ---
 
-# Part A — Common Specification
+# Part A — Common Specification (vendored from the spec home)
 
-> **Status: Canonical inheritance source (Bash / AWS scripts).**
-> This Part A is the repository's canonical Part A for the
-> **Bash / AWS scripting family** — the source of truth for any
-> future Bash / shell-based AWS build pipeline SPEC authored in
-> this style. It is the parallel of the PowerShell canonical SPEC
-> at
-> [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../../powershell/download-speakerdeck-oracle4engineer/SPEC.md);
-> the two canonicals overlap conceptually (reference assets,
-> logging, error handling, dev workflow) but diverge in concrete
-> form (Bash idioms vs PowerShell idioms, `env.properties` files
-> vs `param()` blocks, `shellcheck` vs `psa.py`).
->
-> Modifications to this Part A propagate to any future sibling
-> Bash / AWS SPEC that inherits it; review cross-script impact
-> before committing changes. The Part A inheritance rule, its
-> rationale, and the forensic record of past inheritance violations
-> (notably the `c40755c` Part A bloat regression in a sibling
-> PowerShell SPEC) are recorded in the repository-wide
-> [`AGENTS.md` §6 Part A Inheritance Rule (ABSOLUTE)](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md#6-part-a-inheritance-rule-absolute)
-> and
-> [`AGENTS.md` §9 AP-1](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md#9-anti-patterns-forensically-documented).
-> LLM agents authoring or revising any Layer 3 Part A MUST consult
-> both references before touching the inherited surface.
+> **Status: inherited — vendored from the spec home.** Per the
+> [`AGENTS.md` §6 Part A Inheritance Rule (ABSOLUTE)](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md#6-part-a-inheritance-rule-absolute),
+> the 8 canonical Part A regions below (A.1–A.8) are vendored from
+> [`governance/spec/bash.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/governance/spec/bash.md)
+> as marker+hash regions verified against the spec home by the document-conformance
+> gate; they are never hand-edited. Sections **A.9–A.17** are this consumer's
+> project-specific extensions (not vendored): conventions observed only in this
+> project, kept out of the family home per the rule-of-two. Before B0 this Part A
+> carried the family common text inline as the pre-extraction de-facto reference;
+> that text now lives in the spec home and is inherited from it.
 
-## A.1 Reference Assets
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.reference-assets version=0.1.0 hash=f3c69969142a70bd policy=canonical binding=follow-latest >>> -->
+### A.1 Reference assets
+
+Every Bash script in the canon draws on a shared set of reference assets: (1) the
+static-analysis configuration and gate (see A.6); (2) the companion specification
+documents that make up the doc-set (README + README.ja, SPEC, and where applicable
+TESTING and CHANGELOG); (3) the family's worked-example consumer
+(`{{REFERENCE_PROJECT}}`), the concrete demonstration of these conventions; and (4) the
+self-test harness (`tests/run-all.sh` plus the `tests/lib/` assertion/mock/heredoc
+helpers), reused by porting rather than re-invention. The specific reference assets a
+consumer uses are recorded in that consumer's own SPEC; this region only fixes that the
+assets exist and where their conventions are defined.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.reference-assets <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.source-file-format version=0.1.0 hash=5d0d2c65bbb3c52b policy=canonical binding=follow-latest >>> -->
+### A.2 Source file format
+
+Script source files are encoded **UTF-8 without BOM** and use **LF** line endings
+(repository File Format Policy). Every executable script starts with the shebang
+`#!/usr/bin/env bash` and follows the canonical top-to-bottom layout: shebang; header
+comment banner; shell options (A.5); constants; execution-mode globals; logging helpers
+(A.3); argument/environment parsing (A.4); domain functions; `main()`; and a
+bottom-of-file `main "$@"` invocation (single-purpose helper scripts may omit `main()`
+but keep the remaining order). The header banner MUST carry the five sections required
+by the Layer-1 `scripts/README.md` header convention: **Purpose**, **Prerequisites**,
+**Usage examples**, **Known limitations**, and **AI generation info** (tool and
+generation date). Non-ASCII characters are confined to intentional data/string literals;
+identifiers and code are ASCII.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.source-file-format <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.logging version=0.1.0 hash=4f85ed77ecdf29dd policy=canonical binding=follow-latest >>> -->
+### A.3 Logging conventions
+
+Operator-facing logging uses a **curated, append-only marker set**: a phase/step banner
+helper (no literal severity tag, the one channel with no timestamp), `[INFO]` to stdout
+for routine progress, `[WARN]` to **stderr** for degraded-but-continuing advisories, and
+`[ERROR]` to **stderr** for failures (usually followed by `die`, A.5). Extended markers
+(for example `[BUILD]`, `[DEBUG]`, `[EXTERNAL]`) are consumer-defined additions for a
+genuine new severity or source - never ad-hoc one-offs such as `[OK]` - and are catalogued
+in the consumer's SPEC. Timestamped lines use the unified form
+`YYYY-MM-DD HH:MM:SS  [SEVERITY]  [{{PROJECT_CODE}}-<AREA><NN>]  <message>` where the
+logic-code tag is **optional** and appears only on curated decision points. Colour is
+enabled only on an interactive stdout so captured output parses cleanly.
+**Machine-consumed output channels** (for example a single-line result-JSON contract
+parsed by a harness) are a separate per-consumer contract defined in Part B; log markers
+MUST NOT interleave into a machine channel, and machine lines MUST NOT depend on log
+formatting.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.logging <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.parameter-handling version=0.1.0 hash=88917cb6d61bc732 policy=canonical binding=follow-latest >>> -->
+### A.4 Parameter handling
+
+Command-line switches use long-form kebab-case (`--skip-prereq`, `--env <file>`); `-h` /
+`--help` prints usage and exits 0. The argument parser MUST `die "Unknown option: $1"`
+on any unrecognised switch - silently ignored options are how typos slip into CI
+configurations and disable safety checks. Mutually exclusive or synonymous switches are
+documented in the consumer's SPEC and enforced in the parser (synonym duplication logs a
+notice, contradictions die). Environment-variable configuration follows the
+`${VAR:-default}` override pattern; any `${VAR:?...}` / `${VAR:=...}` resolution MUST be
+paired with an `[INFO]` line confirming the resolved value so operators can verify
+configuration from the log. The concrete switch and environment-variable inventory is
+per-consumer (Part B).
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.parameter-handling <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.error-diagnostic version=0.1.0 hash=e395575128fdec10 policy=canonical binding=follow-latest >>> -->
+### A.5 Error, diagnostics, and shell options
+
+Output is three-tier: **fatal** `die "message"` (emits `[ERROR]`, exits 1; where a
+machine channel exists, `die` also emits the structured failure record so every failure
+stays parseable); **degraded** `log_warn` (continues, used when a fallback applies);
+**informational** `log_info`. A `die` on a recoverable misconfiguration MUST be
+actionable: what went wrong, why it matters, and how to fix it (concrete commands or
+keys) - never a bare `Invalid X`.
+
+Shell options are scoped by script role, a distinction observed in both consumers and
+canonical here (it corrects the first consumer's earlier blanket "every script" text):
+
+* **Production and operational scripts** - installers, builders, matrix runners,
+  generators, checkers - MUST use `set -euo pipefail`.
+* **The self-test harness** - the suite runner, `tNNN_*` tiers, and read-only verifiers -
+  uses `set -uo pipefail` **deliberately**: assertion helpers count failures and must
+  continue to the suite summary, so `errexit` is omitted there and failure propagation is
+  explicit.
+
+Defensive rules under these options: use `${VAR:-}` for any variable that may
+legitimately be unset; trailing `|| true` is acceptable only when the failure is
+genuinely tolerated (an optional probe) and is followed by an empty-result check; a
+function whose final statement is a `[[ ... ]] && ...` list MUST end with an explicit
+`return 0` so the success branch does not leak exit 1 to an `errexit` caller. Know the
+**substitution-inheritance asymmetry**: `pipefail` IS inherited into command
+substitutions while `errexit` is NOT (default Bash, `inherit_errexit` unset) - therefore
+`x="$(probe | filter)"` inside a bare-called function is the recurring abort hazard
+under `-e`, and every tolerated-empty probe of that shape MUST carry `|| true` on the
+assignment. Do not enable `shopt -s inherit_errexit` casually: it re-arms every probe
+that the asymmetry currently leaves inert.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.error-diagnostic <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.static-analysis version=0.1.0 hash=034f640d941dedee policy=canonical binding=follow-latest >>> -->
+### A.6 Static analysis
+
+Two static gates apply to every `.sh` file and run as the self-test suite's L0 tiers:
+(1) `bash -n` syntax validation, and (2) **ShellCheck**, clean at **default severity
+and at `-S style`** (the canonical gate severity). Project-sanctioned suppressions live
+in the per-project `.shellcheckrc`; an inline `# shellcheck disable=SCnnnn` requires an
+adjacent justifying comment stating why the finding is intentional. A change is not
+gate-clean unless the whole suite (`tests/run-all.sh`) reports zero failures with the
+static tiers green.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.static-analysis <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.doc-language-policy version=0.1.0 hash=ae89cf1a97795729 policy=canonical binding=follow-latest >>> -->
+### A.7 Documentation language policy
+
+The repository-wide root `README.md` Language Policy applies: the project `README.md`
+(English master) and `README.ja.md` (Japanese translation) are maintained in
+**bilingual lock-step** - same commit, matching section structure, tables, and code
+blocks; `SPEC.md`, `TESTING.md`, and `CHANGELOG.md` are **English only**. In
+English-only artifacts, Japanese may appear **only as quoted data** (for example a
+documented Japanese section title or punctuation rule); navigational labels - including
+the cross-link to a `.ja` companion - are written in English ("Japanese"), per the
+AGENTS.md authoring-language rules. `README.ja.md` style: preserve technical terms in
+English, use full-width Japanese punctuation, and keep code spans verbatim. Each README
+carries the language-switcher banner at the top and a Provenance section (AI tool,
+generation date, AS-IS disclaimer) at the bottom.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.doc-language-policy <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.development-workflow version=0.1.0 hash=e4be8f1484f5d2f4 policy=canonical binding=follow-latest >>> -->
+### A.8 Development workflow
+
+The iteration cycle is: reproduce the issue (or write the unit tier first); modify the
+code; `bash -n` (syntax gate); `tests/run-all.sh` with **zero failures** (static +
+hermetic gate); exercise the affected functional path; update `README.md` +
+`README.ja.md` in lock-step if behaviour or contract changed; commit. **Revision
+discipline** follows the root Revision History Policy: per-revision release notes live
+**exclusively** in the project `CHANGELOG.md` (revision tags such as `rNN`, or the commit
+hash where a consumer records that choice in Part B) - never as inline revision comments
+in script bodies, never in the README beyond a pointer, and never in the SPEC, which
+describes *current* behaviour only. Root-cause analyses of closed defects belong in the
+SPEC's **Part D - Known Pitfalls**, cross-referenced from CHANGELOG entries.
+**Reuse before invention**: before adding a helper, search the existing script and the
+family reference assets (A.1) for an equivalent, extend it if found, and place genuinely
+new helpers near their functional relatives rather than at file end.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.development-workflow <<< -->
+
+---
+
+### A.9 Reference assets (project)
 
 These are the canonical sources of truth. **Pull from these directly; do not re-implement.**
 
-### A.1.1 Canonical scripts
+#### A.9.1 Canonical scripts
 
 ```
 build-ol-aws-ami.sh         the main orchestrator; all 9 phases
@@ -102,7 +234,7 @@ These scripts are the canonical source for:
 - `parse_ol_version_from_iso` / `detect_os_variant` (OL version inference)
 - `derive_oracle_checksum_url` (ISO checksum URL fallback chain)
 
-### A.1.2 Upstream dependency
+#### A.9.2 Upstream dependency
 
 The script is a wrapper around Oracle's official tool:
 
@@ -115,7 +247,7 @@ repository. Behavior changes upstream (e.g. supported `BOOT_MODE` values,
 distribution slug naming, environment variable keys) must be tracked here
 and reflected in `load_env` validation.
 
-### A.1.3 Companion files
+#### A.9.3 Companion files
 
 ```
 env.properties.aws-ol10     Oracle Linux 10 Update 1 template
@@ -127,19 +259,21 @@ README.md / README.ja.md    end-user documentation (bilingual)
 SPEC.md                     this developer specification (English only)
 ```
 
-### A.1.4 Workspace path convention
+#### A.9.4 Workspace path convention
 
 `WORKSPACE` defaults to `/tmp/ol{N}-build-ws` (where `{N}` is the OL major
 version). The path is chosen specifically because `/tmp` is world-traversable
 by FHS convention, which avoids libvirt's qemu user (uid 107) being unable
-to reach files placed under `/root` or other restricted parents. See A.7
+to reach files placed under `/root` or other restricted parents. See A.13
 and D.3 for the full rationale.
 
 ---
 
-## A.2 Source File Format
+---
 
-### File structure (top-to-bottom)
+### A.10 Script layout (project)
+
+#### File structure (top-to-bottom)
 
 ```
 1. Shebang                            #!/usr/bin/env bash
@@ -157,8 +291,8 @@ and D.3 for the full rationale.
 13. Bottom-of-file invocation         main "$@"
 ```
 
-The header banner MUST contain the five sections required by the
-repository-level `scripts/README.md` policy:
+The five header-banner sections required by the common A.2 are realized with the
+following project-specific required content:
 
 | Section | Required content |
 |---------|------------------|
@@ -170,15 +304,17 @@ repository-level `scripts/README.md` policy:
 
 ---
 
-## A.3 Pipeline Architecture (9 phases)
+---
 
-### Numbering rules
+### A.11 Pipeline architecture (9 phases)
+
+#### Numbering rules
 
 - Phases are numbered **0 through 9 with no gaps** (no `Phase 5.5`).
 - Phase function names follow `phase{N}_<verb>_<noun>()` (snake_case).
 - Phase 0 is preflight; subsequent phases assume Phase 0 passed.
 
-### Phase registry
+#### Phase registry
 
 | ID | Function | Group | Responsibility |
 |---:|----------|-------|----------------|
@@ -193,14 +329,14 @@ repository-level `scripts/README.md` policy:
 | 8 | `phase8_import_snapshot` | AWS | `import-snapshot` + polling loop |
 | 9 | `phase9_register_ami` | AWS | `register-image` (name/description pre-validated; `--dry-run` pre-flight gates the real call) with conditional `--tpm-support` |
 
-### Phase groups (semantic)
+#### Phase groups (semantic)
 
 - **Validation** (0, 6): Read-only diagnostics / offline image inspection; never mutates state.
 - **Provisioning** (1, 2): Requires sudo; idempotent (skip if already done).
 - **Build** (3, 4, 5): Operates inside `WORKSPACE`; produces a VMDK.
 - **AWS** (7, 8, 9): Network operations against the configured `AWS_REGION`.
 
-### Phase entry/exit contract
+#### Phase entry/exit contract
 
 Every phase MUST:
 
@@ -211,7 +347,7 @@ Every phase MUST:
 4. Export any state needed by later phases as plain shell variables
    (e.g. `VMDK_PATH`, `S3_KEY`, `SNAPSHOT_ID`).
 
-### Skip / partial-execution semantics
+#### Skip / partial-execution semantics
 
 - `--skip-prereq` → Skip Phase 1 only (Phase 2 still runs, since ACLs may
   need refreshing even when packages are installed).
@@ -220,9 +356,12 @@ Every phase MUST:
 
 ---
 
-## A.4 Logging Conventions
+---
 
-### Markers (color-coded)
+### A.12 Extended log markers (project)
+
+The common A.3 marker set is realized in this script with the following concrete
+helpers, colours, and extended markers (`[BUILD]`, `[DEBUG]`, `[EXTERNAL]`):
 
 | Marker | Helper | ANSI Color | Destination | Semantic |
 |--------|--------|------------|-------------|----------|
@@ -239,120 +378,21 @@ description** of the three logging axes (severity / source / logic-code) and the
 file-logging behaviour. Do not duplicate Part E here — extend Part E when the
 logging model changes.
 
-### Line format
+Timestamped lines take the concrete form (common A.3):
 
 ```
 YYYY-MM-DD HH:MM:SS  [SEVERITY]  [OLAWS-CODE]  <message>
 ```
 
-- The timestamp is local wall-clock time (`date '+%Y-%m-%d %H:%M:%S'`), **unified
-  to this `YYYY-MM-DD HH:MM:SS` form on every timestamped channel** (including the
-  `[BUILD]` heartbeat and the `[EXTERNAL]` re-emission). The phase banner
-  (`log_step`) is the one channel with no timestamp.
 - The `[OLAWS-<AREA><NN>]` logic-code tag is **optional**: it appears only on
   curated decision points and the Phase-6 assurance checks, never on every line
   (catalogue in Part E.4).
-- Markers are a **curated, append-only** set (Part E): add a new marker only for a
-  genuine new severity or source, never an ad-hoc one-off (`[OK]`, `[!]`), so the
-  visual scan pattern operators rely on across many runs stays stable.
-- `[WARN]` and `[ERROR]` go to `>&2` (stderr); `[INFO]`, the phase banner, and
-  `[BUILD]` go to stdout; `[DEBUG]` goes to the log file always and to the console
-  only with `--debug`.
-
-### Banner blocks
-
-Phase headers use `log_step`, which prepends a 60-character `=` rule:
-
-```
-========== Phase 5: Running oracle-linux-image-tools to build the VMDK ==========
-```
-
-This is the only acceptable phase banner format. Do not add box-drawing
-characters or vary the width; many users grep on `^==========` to navigate
-long logs.
 
 ---
 
-## A.5 Shell Options and Defensive Coding
+### A.13 Env property file conventions (project)
 
-### Mandatory `set -euo pipefail`
-
-Every script in this directory MUST use `set -euo pipefail`. The options
-catch the three most common bash failure modes:
-
-- `-e` (`errexit`): abort on any non-zero exit.
-- `-u` (`nounset`): abort on undefined variable reference.
-- `-o pipefail`: propagate failures through pipelines.
-
-### Defensive coding rules
-
-1. **Every `${VAR:?...}` or `${VAR:=...}` assignment** must be paired with
-   a `log_info` line confirming the resolved value, so operators can
-   verify config in the log.
-2. **Use `${VAR:-}` form** for any variable that may legitimately be
-   unset (env-file optionals); never bare `${VAR}` under `-u`.
-3. **Functions whose last statement is `[[ ... ]] && die`** must end
-   with an explicit `return 0` to avoid leaking exit 1 to the caller.
-   See D.1 for the historical bug.
-4. **Trailing `|| true`** is acceptable only when the failure path is
-   genuinely informational (e.g. `curl ... | head -1 || true`) and
-   followed by an empty-result check.
-
-### `&& die` pattern
-
-Pattern:
-
-```bash
-[[ -f "${REQUIRED_FILE}" ]] || die "Missing required file: ${REQUIRED_FILE}"
-```
-
-This is fine **when it is not the final statement of a function** under
-`set -e`. When used as the final statement, the function returns 1 on the
-success branch (because `[[ ]]` returned 0, but the `||` expression
-returned the right-hand-side's exit code... actually returned 0, but bash's
-treatment of `&& die` final-statement is well-documented as a footgun).
-See D.1 for the real-world incident.
-
-### Caller pattern for libguestfs
-
-Phase 5 sets `LIBGUESTFS_BACKEND=direct` before invoking
-`bin/build-image.sh` to bypass libvirt's qemu user permission model. This
-is **non-negotiable**; see D.6.
-
----
-
-## A.6 Parameter Conventions
-
-### Command-line switches
-
-| Switch | Type | Required | Description |
-|--------|------|----------|-------------|
-| `--env <file>` | path | ✓ | Path to env.properties file |
-| `--skip-prereq` | flag | | Skip Phase 1 (package installation) |
-| `--skip-aws-import` | flag | | Skip Phases 6–8 (build VMDK only) |
-| `--build-only` | flag | | Synonym for `--skip-aws-import` |
-| `--skip-ena-driver` | flag | | Do NOT self-build the Amazon ENA driver (default ON for OL6/OL7); produces a pure OL AMI — see B.4 / the ENA self-build section |
-| `--skip-ssm-agent` | flag | | Do NOT install the Amazon SSM Agent (default ON for OL6-OL10); produces an AMI with no SSM Agent — see B.11 |
-| `--skip-awscli` | flag | | Do NOT install AWS CLI v2 (default ON for OL6/OL7/OL8; OL9/OL10 out of scope — use their default package manager); produces an AMI without the wrapper-installed AWS CLI v2 — see B.13 |
-| `-h`, `--help` | flag | | Show help and exit 0 |
-
-### Mutual exclusion
-
-- `--skip-aws-import` and `--build-only` are synonyms; either may be
-  passed but combining them is redundant (no error, but log a notice).
-- `--skip-prereq` is independent and may combine with the others.
-
-### Unknown switches
-
-`parse_args` MUST `die "Unknown option: $1"` on any unrecognized switch.
-Do NOT silently ignore unknown options; this is how typos slip into CI
-configurations and silently disable safety checks.
-
----
-
-## A.7 Env Property File Conventions
-
-### File format
+#### File format
 
 ```
 KEY="value"     # bash assignment, quoted to allow spaces
@@ -362,7 +402,7 @@ KEY="value"     # bash assignment, quoted to allow spaces
 The file is `source`'d into the script's environment, so it must be valid
 bash. Avoid command substitutions in env files (security and reproducibility).
 
-### Required keys
+#### Required keys
 
 | Key | Required | Default | Notes |
 |-----|----------|---------|-------|
@@ -373,7 +413,7 @@ bash. Avoid command substitutions in env files (security and reproducibility).
 
 \* Required only when AWS-import phases will run.
 
-### Optional / auto-derived keys
+#### Optional / auto-derived keys
 
 | Key | Auto-default |
 |-----|--------------|
@@ -386,7 +426,7 @@ bash. Avoid command substitutions in env files (security and reproducibility).
 | `OS_VARIANT` | Auto-detected via `detect_os_variant` |
 | `ISO_CHECKSUM` | Auto-resolved via `derive_oracle_checksum_url` |
 
-### Pass-through keys (consumed by `oracle-linux-image-tools`)
+#### Pass-through keys (consumed by `oracle-linux-image-tools`)
 
 These keys are not interpreted by `build-ol-aws-ami.sh` itself; they are
 written through to the upstream `env.properties.local` that the
@@ -541,7 +581,7 @@ only on failure). The
 ENAv3-tier `signal` line continues to reflect the **effective** module (depmod
 precedence `updates` > `extra` > `kernel`).
 
-### Nitro initramfs drivers (nvme/ena)
+#### Nitro initramfs drivers (nvme/ena)
 
 Independently of the ENA driver *version*, the **initramfs must contain `nvme`
 (and `ena`)** — on Nitro the root filesystem is NVMe-backed, so without nvme in
@@ -558,7 +598,7 @@ kernel updates) and regenerates the initramfs for the installed kernel
 CHECK 1 verifies the result. OL6 already shipped nvme in its UEK4 initramfs, so
 the step is a harmless refresh there.
 
-### ENA driver self-build (`--skip-ena-driver`)
+#### ENA driver self-build (`--skip-ena-driver`)
 
 **Rationale — baseline in-distro ENA drivers (measured).** The default OL images
 ship an ENA driver bundled in `kernel-uek` that is too old for ENAv3 (Nitro
@@ -678,7 +718,7 @@ when `KERNEL=uek`. It is meaningful for OL7 (UEK6 is the only viable
 release for OL7) and harmless to set (or omit) on OL8/9/10 where the
 upstream distr-level default is preferred.
 
-### Container compile-test (`ENA_BUILDTEST`)
+#### Container compile-test (`ENA_BUILDTEST`)
 
 `ENA_BUILDTEST=1` runs `install-ena-driver.sh` as a self-checking compile-test
 inside a disposable, kernel-less clean-core container (see TESTING, "ENA driver
@@ -736,7 +776,7 @@ pipeline keeps OL8 on its in-distro ENA driver — `build-ol-aws-ami.sh` gates t
 provision.sh self-build hook (and the `-ena<ver>` AMI naming) to OL6/OL7, so OL8+
 AMIs are produced unmodified. OL9+ remain a no-op in the installer.
 
-### File naming convention
+#### File naming convention
 
 ```
 env.properties.aws-ol{N}   where N = 6, 7, 8, 9, or 10
@@ -751,7 +791,9 @@ the OL6-specific pitfalls.
 
 ---
 
-## A.8 Oracle Linux Version Auto-detection
+---
+
+### A.14 Oracle Linux version auto-detection (project)
 
 `load_env` calls `parse_ol_version_from_iso` to extract `OL_MAJOR_VERSION`
 and `OL_UPDATE_VERSION` from the `ISO_URL`. The regex is:
@@ -775,7 +817,7 @@ prefix-anchored and not full-match). Detected values propagate to:
 If the regex fails (custom ISO URL, mirror site, etc.), the user MUST set
 `OL_MAJOR_VERSION` and `OL_UPDATE_VERSION` explicitly in their env file.
 
-### `detect_os_variant` priority list
+#### `detect_os_variant` priority list
 
 Generated dynamically from `OL_MAJOR_VERSION` / `OL_UPDATE_VERSION`:
 
@@ -794,41 +836,27 @@ is `rhel7.9` (or `centos7` on older osinfo-db packages).
 
 ---
 
-## A.9 Error & Diagnostic Conventions
+---
 
-### Three-tier output
+### A.15 libguestfs caller pattern and project diagnostics
 
-1. **Fatal**: `die "message"` → `log_error` + `exit 1`. Used for any
-   condition that prevents pipeline progress.
-2. **Degraded**: `log_warn "message"` → continues execution. Used when
-   a fallback is being applied (e.g. `rhel10.1` selected because no
-   `oraclelinux10` entry exists in osinfo-db).
-3. **Informational**: `log_info "message"` → routine progress.
+#### Caller pattern for libguestfs
 
-### Required actionable error format
+Phase 5 sets `LIBGUESTFS_BACKEND=direct` before invoking
+`bin/build-image.sh` to bypass libvirt's qemu user permission model. This
+is **non-negotiable**; see D.6.
 
-When `die`'ing on a recoverable misconfiguration, the message MUST include:
-
-1. **What** went wrong (one sentence).
-2. **Why** it matters (one sentence; cause if non-obvious).
-3. **How** to fix (one or more concrete commands or env keys).
+#### Actionable-error examples (common A.5, concrete)
 
 Example (good):
 
-```
-2026-06-08 07:32:35 [ERROR] BOOT_MODE_BUILD='uefi' is not supported for CLOUD=aws.
-2026-06-08 07:32:35 [ERROR]   oracle-linux-image-tools only accepts BOOT_MODE=bios for AWS targets.
-2026-06-08 07:32:35 [ERROR]   Set BOOT_MODE_BUILD="bios" in env.properties.local (or remove the line
-2026-06-08 07:32:35 [ERROR]   to use the default).
 ```
 
 Example (bad):
 
 ```
-2026-06-08 07:32:35 [ERROR] Invalid BOOT_MODE_BUILD
-```
 
-### Diagnostic categories
+#### Diagnostic categories
 
 | Category | Phase typically affected | Recovery hint |
 |----------|--------------------------|---------------|
@@ -843,34 +871,12 @@ Example (bad):
 
 ---
 
-## A.10 Documentation Language Policy
+### A.16 Documentation and revision specifics (project)
 
-This project follows the repository-wide documentation language policy
-documented in the `ai-generated-artifacts` root [`README.md`](../../../README.md)
-"Language Policy" section.
+The common A.7 documentation-language policy and the common A.8 revision
+discipline apply; this section records only the project-owned specifics.
 
-### File set
-
-| File | Languages maintained | Notes |
-|------|----------------------|-------|
-| `README.md` | English **and** Japanese (`README.ja.md`) | English is the master. `README.ja.md` is its translation, kept in sync. |
-| `SPEC.md` (this document) | **English only** | |
-| Other repository-policy files (CONTRIBUTING.md, etc.) | **English only** | Maintained at the repository root, not per-project. |
-
-**Policy rationale**: Only `README.md` is duplicated into Japanese because it is the primary entry point for new readers. Specifications are maintained in English only to avoid drift — a problem that LLM-assisted maintenance is especially vulnerable to. Japanese readers should use `README.ja.md` for orientation and then refer to the English source-of-truth documents for technical detail.
-
-### Synchronization rule (README only)
-
-Whenever `README.md` is updated, `README.ja.md` must be updated in the
-same commit (or in an immediate follow-up commit referencing the
-English commit hash). Maintain parity of:
-
-- Section structure (same H2 / H3 headings)
-- Tables (same columns)
-- Code blocks (same content; Japanese files may use bilingual comments)
-- Examples (same commands; localize the prose around them)
-
-### Style for `README.ja.md`
+#### Style for `README.ja.md`
 
 - Technical terms in English are preserved in their English form (do not
   translate "phase", "qemu user", "libvirt", "WORKSPACE", "BOOT_MODE",
@@ -878,7 +884,7 @@ English commit hash). Maintain parity of:
 - Punctuation: 「、」 「。」「・」 (full-width); not "," "."
 - Brackets: 「」 for emphasized terms, ` `` ` for code spans.
 
-### Mandatory header and footer sections
+#### Mandatory header and footer sections
 
 Each README must include:
 
@@ -891,37 +897,12 @@ This SPEC must include:
 1. Top-of-file purpose block referencing the "single most important rule".
 2. Documentation language policy notice (this section).
 
----
-
-## A.11 Development Workflow
-
-### Iteration cycle
-
-```
-1. Reproduce the issue against a real AWS build, or write a unit test
-   for the relevant function (parse_ol_version_from_iso, detect_os_variant)
-2. Modify code in build-ol-aws-ami.sh
-3. bash -n build-ol-aws-ami.sh                  ← syntax gate: must pass
-4. bash tests/run-all.sh                        ← static+test gate: B-T1 parse,
-                                                   B-T2 shellcheck -S style, ...; 0 failures
-5. Re-run the affected phase against AWS        ← functional gate
-6. Update README.md + README.ja.md if behavior or contract changed
-   (per A.10, only the README is bilingual; SPEC.md is English only).
-7. Commit
-```
-
-### Revision discipline
-
-This project follows the repository-wide
-[Revision History Policy](../../../README.md#revision-history-policy)
-documented at the root of `ai-generated-artifacts`.
-
 #### Version identifier
 
-Unlike `Deploy-Drivers-For-WindowsServer`'s `r47`-style numbering, this
-script does not embed a revision number in the source. Instead, the
-commit hash in the `ai-generated-artifacts` repository is the canonical
-revision identifier.
+This script does not embed a revision number in the source: the repository
+commit hash is the canonical revision identifier, and per-release notes are
+recorded in `CHANGELOG.md` (present in this directory; tracking under
+`[Unreleased]` until the first numbered release is cut).
 
 Bump the AI-generation date stamp in the script header on any commit
 that changes:
@@ -933,35 +914,32 @@ that changes:
 Cosmetic-only changes (typo fixes in messages, README rewording) do not
 require a header date bump.
 
-#### Where revision history lives
-
-Per-version release notes for this script — when this project starts
-producing numbered releases — belong **exclusively** in a `CHANGELOG.md`
-file alongside `build-ol-aws-ami.sh` in this directory (not yet
-created; will be added when the first formal release is cut). Such
-release notes do NOT belong in:
-
-- `build-ol-aws-ami.sh` source comments (no inline revision tags, no
-  end-of-file `# REVISION HISTORY` block)
-- `README.md` (other than a brief pointer to `CHANGELOG.md` when one
-  exists)
-- This `SPEC.md` (which describes *current* behaviour)
-
-Architectural rationale (root-cause analyses of past pitfalls) belongs
-in **Part D — Known Pitfalls** of this SPEC. When a `CHANGELOG.md`
-exists, it cross-references back to Part D where applicable.
-
-### Reuse before invention
-
-Before writing any new helper function:
-
-1. Search the existing script for an equivalent
-   (`grep -n '^[a-z_]*()' build-ol-aws-ami.sh`).
-2. If found, extend the existing one rather than adding a parallel helper.
-3. If genuinely new, place it near related helpers (output / detection /
-   AWS) rather than at the bottom of the file.
-
 ---
+
+### A.17 Parameter inventory (project)
+
+The common A.4 parameter-handling rules apply (long-form switches, help exit 0,
+die on unknown options); the concrete inventory is:
+
+#### Command-line switches
+
+| Switch | Type | Required | Description |
+|--------|------|----------|-------------|
+| `--env <file>` | path | ✓ | Path to env.properties file |
+| `--skip-prereq` | flag | | Skip Phase 1 (package installation) |
+| `--skip-aws-import` | flag | | Skip Phases 6–8 (build VMDK only) |
+| `--build-only` | flag | | Synonym for `--skip-aws-import` |
+| `--skip-ena-driver` | flag | | Do NOT self-build the Amazon ENA driver (default ON for OL6/OL7); produces a pure OL AMI — see B.4 / the ENA self-build section |
+| `--skip-ssm-agent` | flag | | Do NOT install the Amazon SSM Agent (default ON for OL6-OL10); produces an AMI with no SSM Agent — see B.11 |
+| `--skip-awscli` | flag | | Do NOT install AWS CLI v2 (default ON for OL6/OL7/OL8; OL9/OL10 out of scope — use their default package manager); produces an AMI without the wrapper-installed AWS CLI v2 — see B.13 |
+| `-h`, `--help` | flag | | Show help and exit 0 |
+
+### Mutual exclusion
+
+- `--skip-aws-import` and `--build-only` are synonyms; either may be
+  passed but combining them is redundant (no error, but log a notice).
+- `--skip-prereq` is independent and may combine with the others.
+
 
 # Part B — Script-specific Specifications
 
@@ -1284,7 +1262,7 @@ identifier. All are applied inside `phase3_clone_repository`. Current markers:
 | `[ol-aws-ami-builder PATCH ol6-cloud-user]` | `cloud/aws/provision.sh` | `OL_MAJOR_VERSION == 6` | Wrap `cloud::cloud_init` so the OL6 cloud-init default user becomes `ec2-user` (strips the absent `systemd-journal` group; runs after the configs are written) — see D.26 |
 | `[ol-aws-ami-builder PATCH nitro-initramfs]` | `cloud/aws/provision.sh` | always (AWS cloud path) | Drop an `/etc/dracut.conf.d` `add_drivers` file forcing `nvme`/`ena` into the initramfs and regenerate it (Nitro boot requirement; Phase 6 CHECK 1 verifies the result) |
 | `[ol-aws-ami-builder PATCH serial-console]` | `cloud/aws/provision.sh` | GRUB2 systems (OL7+; hook self-skips on OL6 GRUB Legacy) | AWS-recommended serial console in 3 layers: (1) `console=tty0 console=ttyS0,115200n8` on all entries via `grubby --update-kernel=ALL` (BLS-aware) + `GRUB_CMDLINE_LINUX`; (2) `GRUB_TERMINAL`/`GRUB_SERIAL_COMMAND` + `grub2-mkconfig`; (3) `serial-getty@ttyS0` enabled — see D.25 |
-| `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; installer is a no-op on OL8+) — logged as `[OLAWS-ENA01]`, see A.7 |
+| `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; installer is a no-op on OL8+) — logged as `[OLAWS-ENA01]`, see A.13 |
 | `[ol-aws-ami-builder PATCH ssm-agent-install]` | `cloud/aws/provision.sh` | `SSM_AGENT_INSTALL == 1` (default; `--skip-ssm-agent` disables) | Inject the in-guest Amazon SSM Agent install+boot-enable hook (OL6-OL10; OL6 pinned, OL7-OL10 `latest`; non-fatal) — logged as `[OLAWS-SSM01]`, see B.11 |
 | `[ol-aws-ami-builder PATCH awscli-install]` | `cloud/aws/provision.sh` | `AWSCLI_INSTALL == 1` (default) **and** `OL_MAJOR_VERSION` in `6/7/8` (`--skip-awscli` disables; OL9/OL10 out of scope) | Inject the in-guest AWS CLI v2 install hook (OL6 pinned `2.17.51`, OL7/OL8 `latest`; v1 excluded via versionlock; non-fatal) — logged as `[OLAWS-AWSCLI01]`, see B.13 |
 | `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` | `bin/build-image.sh` | host libguestfs lacks the `selinuxrelabel` optgroup | Schedule a first-boot `/.autorelabel` instead of the offline relabel when the build host's libguestfs cannot relabel — see D.17 |
@@ -1441,7 +1419,7 @@ RHEL 10.0 with libvirt 11.5.0-2.el10, qemu-kvm 10.0.0-13.el10.
    `cloud-init-0.7.5-8.el6_9.2`. (The `ol6_addons` repo additionally offers a
    newer `cloud-init-18.4-2.0.9.el6.x86_64`, but the OL6 path does not rely on
    it — the handling is written against 0.7.5's `cloud.cfg.d` merge semantics
-   and IMDSv1-only metadata; see A.7 / D.27.) `cloud-utils-growpart-0.27-9.el6.x86_64`
+   and IMDSv1-only metadata; see A.13 / D.27.) `cloud-utils-growpart-0.27-9.el6.x86_64`
    confirmed in `ol6_addons`.
 
 **Phase B — Dynamic checks (2 items, all PASS):**
@@ -1810,7 +1788,7 @@ the matrix **input**.
 `run-ena-buildtest-matrix.sh` drives, for each target OL major (6/7/8 — where
 `ENA_BUILDTEST` is wired) and each target ENA version, the existing pieces **as
 separate executables**: `tests/cleancore/build-cleancore.sh` (B.8) for the
-per-OL clean-core rootfs, then `install-ena-driver.sh ENA_BUILDTEST=1` (A.7) for
+per-OL clean-core rootfs, then `install-ena-driver.sh ENA_BUILDTEST=1` (A.13) for
 the per-version compile-test. The ENA version set defaults to the full release
 list and is narrowable (`--ena-versions`, `--pinned-only`) so a few cases can run
 locally while the **full** matrix is meant for the user's environment / CI.
@@ -1892,7 +1870,7 @@ recorded per-run canary, so the pin is built twice by design — the un-recorded
 QA build, then the recorded run.
 
 A container is kernel-less, so `ENA_BUILDTEST` provisions a full `kernel-uek` +
-headers up front (A.7); the matrix inherits that and the B.8 host requirements
+headers up front (A.13); the matrix inherits that and the B.8 host requirements
 (root + `unshare`/`chroot` + network). The committed ledger and
 `RESULTS-ol{6,7,8}.md` are a **real** full-release-list run on the maintainer's
 host (210 rows = 70 ENA versions x OL6/OL7/OL8): OL6 UEK4
@@ -2078,7 +2056,7 @@ Before any commit to this directory, all of the following must pass.
 - [ ] The `tests/cleancore/` clean-core builders (B.8) parse (`bash -n`) and lint (`shellcheck -S style`) cleanly — they are covered by B-T1/B-T2 (every `.sh`), though not executed by `run-all.sh`
 - [ ] The script starts with `#!/usr/bin/env bash` followed by the header banner with all five required sections (Purpose / Prerequisites / Usage / Limitations / AI info — see A.2)
 - [ ] `set -euo pipefail` appears at the top of every shell script in this directory
-- [ ] Every new `${VAR:?...}` / `${VAR:=...}` assignment is paired with a `log_info` line confirming the resolved value (per A.5)
+- [ ] Every new `${VAR:?...}` / `${VAR:=...}` assignment is paired with a `log_info` line confirming the resolved value (per A.4)
 
 ### Functional checks
 
@@ -2088,14 +2066,14 @@ Before any commit to this directory, all of the following must pass.
 - [ ] Phase 0 self-diagnosis (`detect_ec2_environment` / `guide_ec2_kvm_issue`) emits the appropriate Case A/B/C message on a non-KVM host (per B.1)
 - [ ] When `ISO_URL` references OL7, the OL7 warning banner appears in `load_env` output
 - [ ] When `ISO_URL` references OL6, the OL6 warning banner appears in `load_env` output and the three runtime modifications (Patch #1, Patch #2, synthesized `distr/ol6-slim/`) are applied in Phase 3
-- [ ] Phase 6 Nitro readiness pre-check (`NITRO_PRECHECK`, default `enforce`) runs after the VMDK is produced: it `die`s on a blocking finding (NVMe host / ENA / fstab / bootloader) before the upload phases, is fail-open when inspection tools are absent, and is suppressible via `warn`/`off` (see A.7). Verified against a known-good image (e.g. OL10 PASS)
+- [ ] Phase 6 Nitro readiness pre-check (`NITRO_PRECHECK`, default `enforce`) runs after the VMDK is produced: it `die`s on a blocking finding (NVMe host / ENA / fstab / bootloader) before the upload phases, is fail-open when inspection tools are absent, and is suppressible via `warn`/`off` (see A.13). Verified against a known-good image (e.g. OL10 PASS)
 
 ### Documentation checks
 
 - [ ] `README.md` mentions every new env-property key, command-line switch, and output artifact
 - [ ] `README.ja.md` is line-for-line equivalent in structure (table layout and section order match)
-- [ ] `README.md` carries the **Disclaimer** section near the top (per A.10)
-- [ ] `README.md` carries the **License** section near the top (per A.10)
+- [ ] `README.md` carries the **Disclaimer** section near the top (per A.16)
+- [ ] `README.md` carries the **License** section near the top (per A.16)
 - [ ] `README.ja.md` carries equivalent **免責事項** and **ライセンス** sections
 - [ ] `SPEC.md` reflects the change in the relevant Part A / Part B section
 - [ ] If a new pitfall was discovered during development, it is added as a new `D.NN` entry in Part D
@@ -2105,7 +2083,7 @@ Before any commit to this directory, all of the following must pass.
 
 - [ ] All five `env.properties.aws-ol{6,7,8,9,10}` templates share the same key set (no orphan keys; documented optional keys are explicitly absent only when intentional — see B.3)
 - [ ] `S3_BUCKET` matches across every template (`my-oracle-linux-ami-import-bucket` — single bucket / single `vmimport` IAM role across all OL versions, per B.3 §3 and §9.4a)
-- [ ] `AWS_REGION=""` is consistent across templates (resolution chain documented in A.7 / B.3)
+- [ ] `AWS_REGION=""` is consistent across templates (resolution chain documented in A.13 / B.3)
 - [ ] `UPDATE_TO_LATEST="yes"` is consistent across templates (CVE-coverage default per B.3)
 - [ ] Every template's `ISO_CHECKSUM` value matches `https://linux.oracle.com/security/gpg/checksum/` for the corresponding ISO
 
@@ -2338,7 +2316,7 @@ entire `&&` expression's exit code (1) became the function's return
 value. Combined with `set -e` in the caller, this aborted the script.
 
 **Fix**: Append an explicit `return 0` to `parse_args`. The defensive
-coding rule in A.5 #3 was added in response to this incident.
+coding rule in A.5 (explicit `return 0` after a final `[[ ... ]] &&` list) was added in response to this incident.
 
 ## D.2 Oracle moved ISO checksums to a new URL
 
@@ -2840,7 +2818,7 @@ relabelling` step takes the same fallback, so `/.autorelabel` is typically
 already present — the explicit touch makes it certain). On SELinux-capable
 hosts (RHEL / OL / Fedora) the optgroup **is** available, the probe passes, and
 the original host-side relabel runs unchanged — so the patch is applied
-unconditionally and is a no-op there. See A.5 "Caller pattern for libguestfs"
+unconditionally and is a no-op there. See A.15 "Caller pattern for libguestfs"
 and B.6.
 
 > **Why standalone sessions (lesson from the first attempt)**: the initial fix
@@ -2943,7 +2921,7 @@ runtime failure that syntax validation cannot catch.
    the OL6/7 install live, but it is a **debug-only opt-in**: it makes upstream
    wait on `virsh console`, which may not return when the install VM ends and
    can hang `build-image.sh` until the watchdog (default reverted to `no` — see
-   A.7).
+   A.13).
 3. The Phase-5 `BUILD_TIMEOUT_MIN` watchdog is an outer safety bound on the
    build (in addition to upstream's own install timeout, which applies under the
    default `SERIAL_CONSOLE=no`); on expiry it reaps the transient build VM.
@@ -3073,7 +3051,7 @@ whether *any* of them could read the archive. When nvme.ko exists in the on-disk
 module tree but no method can read the initramfs on the host, CHECK 1 reports
 `INDETERMINATE` (fail-open: warn + continue) instead of `FAIL`. A hard `FAIL` is
 reserved for nvme.ko being absent from both the kernel and an inspectable
-initramfs. See A.7.
+initramfs. See A.13.
 
 **Prevention.** Detection robustness only; it does not change the produced image.
 If CHECK 1 is `INDETERMINATE`, confirm the AMI boots on a Nitro instance (the
@@ -3109,7 +3087,7 @@ even with `--skip-ena-driver`, because booting on Nitro is not optional) that
 writes `/etc/dracut.conf.d/02-ol-aws-nitro.conf` with
 `add_drivers+=" nvme nvme-core ena "` and regenerates the initramfs for the
 installed kernel with `dracut -f`. The drop-in also makes future in-instance
-kernel updates keep nvme/ena. See A.7 ("Nitro initramfs drivers").
+kernel updates keep nvme/ena. See A.13 ("Nitro initramfs drivers").
 
 **Prevention.** The hook targets the highest UEK under `/lib/modules` (not the
 appliance `uname -r`) and is idempotent and best-effort; CHECK 1 then verifies
@@ -3132,7 +3110,7 @@ A host-side inspection then shows `ena.ko` **is** present on disk, but under
 
 **Cause.** The Phase 6 module inventory listed only the `/kernel` subtree
 (`virt-ls -R /lib/modules/<kver>/kernel`). DKMS — which the in-guest ENA
-self-build (D + A.7) uses — installs the built module into `/extra` (or
+self-build (D + A.13) uses — installs the built module into `/extra` (or
 `/updates/dkms`) and depmod ranks those **above** `/kernel`, so the self-built
 driver is exactly the one the running kernel loads. Because the scan stopped at
 `/kernel`, CHECK 2's `ena.ko` match (and the assurance report's `modinfo`
@@ -3150,7 +3128,7 @@ OL-version-independent**: it finds the driver whether it is stock in-tree or
 DKMS-built, on any OL. The report also annotates the driver **provenance**
 (`stock in-tree /kernel` vs `self-built, DKMS /extra|/updates`) so an operator
 can confirm the self-build took effect and that CHECK 1-4 still pass (no
-boot-readiness regression). See A.7 ("Nitro initramfs drivers" / ENA self-build).
+boot-readiness regression). See A.13 ("Nitro initramfs drivers" / ENA self-build).
 
 **Provenance is now also enforced (defense-in-depth).** CHECK 2 no longer passes
 on mere presence when a self-build was performed: if `ENA_BUILD_VERSION` is set

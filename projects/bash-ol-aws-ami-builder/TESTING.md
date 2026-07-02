@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.1.0
+  rendered: 2026-07-02
+---
 # TESTING
 
 Operational tests for `bash-ol-aws-ami-builder`. These are maintainer-facing
@@ -396,7 +402,7 @@ bash tests/ena/list-ena-releases.sh out.json             # explicit output path
 Proves the pinned ENA driver actually **compiles + installs** for a given OL
 major / UEK kernel without a full AMI build or a live Nitro instance, by running
 `install-ena-driver.sh` with `ENA_BUILDTEST=1` inside a disposable clean-core
-container (above). SPEC A.7 "Container compile-test (`ENA_BUILDTEST`)" defines
+container (above). SPEC A.13 "Container compile-test (`ENA_BUILDTEST`)" defines
 the switch and the result contract; this is the operator recipe.
 
 Because a container is kernel-less, the test mode installs a full `kernel-uek` +
@@ -708,7 +714,7 @@ These are confirmed only by a **live build** — for a runtime failure, reproduc
 the install in isolation with a bare `virt-install` (text mode, explicit
 `console=ttyS0`) so the anaconda output is fully visible. (`SERIAL_CONSOLE=yes`
 can stream the OL6/7 install too, but it is a debug-only opt-in that can hang
-the build at install-VM end — the default is `no`; see SPEC A.7 / D.18.)
+the build at install-VM end — the default is `no`; see SPEC A.13 / D.18.)
 
 ## Serial console verification (CHECK 5 + on-instance)
 

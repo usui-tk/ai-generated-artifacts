@@ -11,13 +11,32 @@ All notable changes to `build-ol-aws-ami.sh` are documented in this file.
 The format is based on
 [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 
-This project's revision identifier is the `rNN` linear counter encoded in the
-script banner.
+This project's canonical revision identifier is currently the repository commit
+hash (the script embeds no revision number; see SPEC A.16); numbered `rNN`
+releases will be recorded here when the first formal release is cut.
 
 This CHANGELOG is **English only** per the repository-wide
 [documentation language policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md).
 
 ## [Unreleased]
+
+### Changed (B1 - docs only, zero script change)
+- **SPEC Part A migrated to the vendored model.** The inline Part A (old A.1-A.11,
+  the pre-extraction de-facto family reference) is replaced by the **8 canonical
+  regions vendored from the bash spec home** `governance/spec/bash.md` (marker+hash,
+  verified by the document-conformance gate) plus project-specific extensions
+  **A.9-A.17** carrying the content observed only in this project (reference assets,
+  script layout, 9-phase pipeline registry, extended log markers, env-property
+  conventions, OL version auto-detection, libguestfs caller pattern + diagnostics,
+  documentation/revision specifics, parameter inventory). Old->new section map:
+  A.1->A.9, A.2->A.2(common)+A.10, A.3->A.11, A.4->A.3(common)+A.12,
+  A.5->A.5(common)+A.15, A.6->A.4(common)+A.17, A.7->A.13, A.8->A.14,
+  A.9->A.5(common)+A.15, A.10->A.7(common)+A.16, A.11->A.8(common)+A.16.
+  Cross-references in Parts B-E and TESTING.md updated to the map (historical
+  CHANGELOG entries keep their as-of-then numbering); SPEC front-matter re-pinned
+  to template canon 1.1.0. TESTING.md gains its doc-provenance pin (was the one
+  doc-set member without one). This CHANGELOG's revision-identifier note corrected
+  to the ground truth (commit hash; no in-script `rNN` banner exists).
 
 ### Added
 

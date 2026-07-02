@@ -479,16 +479,16 @@ source for their family.
   designed to be reused verbatim across PowerShell scripts in this style
 
 **Bash reference** — [`projects/bash-ol-aws-ami-builder/SPEC.md`](./projects/bash-ol-aws-ami-builder/SPEC.md)
-(worked example; the canonical Part A source is the spec home `governance/spec/bash.md`):
+(worked example; the canonical Part A source is the spec home `governance/spec/bash.md`,
+and this consumer's A.9-A.17 extensions show how project-only conventions sit beside
+the vendored regions):
 
-- §A.5 Shell Options and Defensive Coding — the `set -euo pipefail`
-  discipline and equivalent Bash idioms for safe error propagation
-- §A.7 Env Property File Conventions — `env.properties.<context>-<variant>`
+- §A.11 Pipeline architecture (9 phases) — phase registry / entry-exit
+  contract pattern for variant-based Bash builders
+- §A.13 Env property file conventions — `env.properties.<context>-<variant>`
   schema for variant-based Bash builders (one file per release target)
-- §A.8 Oracle Linux Version Auto-detection — runtime detection pattern
+- §A.14 Oracle Linux version auto-detection — runtime detection pattern
   that other variant-based Bash builders can reuse
-- §A.11 Development Workflow — Bash-idiom iteration cycle (the
-  parallel of §A.13 in the PowerShell canonical)
 
 ---
 
