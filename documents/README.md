@@ -41,13 +41,13 @@ Domain subdirectories live **under** a purpose subfolder, created on demand — 
 
 ## What NOT to Include / 収録対象外
 
-- Code or scripts → `scripts/` (governed subprojects → `projects/`)
+- Code or scripts → `projects/`
 - Reusable templates / scaffolds (ADR, marker, WBS) → `governance/templates/`
 - Governance ADRs, specs, schema, state → `governance/`
 - Verification tooling → `quality-tools/`
 - Real client/project confidential information → **nowhere in this repo**
 
-- コード／スクリプト → `scripts/`（被管理サブプロジェクトは `projects/`）
+- コード／スクリプト → `projects/`
 - 再利用可能なひな型・スキャフォールド（ADR、マーカー、WBS）→ `governance/templates/`
 - ガバナンス ADR・spec・schema・state → `governance/`
 - 検証ツール → `quality-tools/`

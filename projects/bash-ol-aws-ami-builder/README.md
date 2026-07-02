@@ -9,7 +9,7 @@ doc-provenance:
 English | [日本語](./README.ja.md)
 
 > 📂 Part of [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) → [`projects/bash-ol-aws-ami-builder/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/bash-ol-aws-ami-builder)
-> ⚠️ **AI-generated content** — review the source before executing. See the [scripts directory policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) for the full disclaimer.
+> ⚠️ **AI-generated content** — review the source before executing. See the [repository AI-content policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md) for the full disclaimer.
 > 📐 **Developer specification**: [SPEC.md](./SPEC.md) (English only) — phase contract, log conventions, env property keys, and the historical pitfalls already accounted for in the current implementation.
 
 A set of wrapper scripts that build AWS AMIs for **Oracle Linux 8, 9, or 10** (x86_64) using the official Oracle [`oracle-linux-image-tools`](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) project.
@@ -101,7 +101,7 @@ one-file change.
   that this script's `SPEC.md` Part A serves as the **canonical
   inheritance source for sibling Bash / AWS scripts** in this
   repository — the parallel role to the canonical PowerShell SPEC
-  at [`scripts/powershell/download-speakerdeck-oracle4engineer/SPEC.md`](../../powershell/download-speakerdeck-oracle4engineer/SPEC.md).
+  at [`projects/powershell-download-speakerdeck-oracle4engineer/SPEC.md`](../powershell-download-speakerdeck-oracle4engineer/SPEC.md).
 
 ---
 

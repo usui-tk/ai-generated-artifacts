@@ -30,7 +30,6 @@ ai-generated-artifacts/
 ├── quality-tools/            # 検証機械（psa.py・ドリフトスキャナ）— 被管理資産ではない
 ├── reference-code/           # 共有コード正本（region-vendoring ヘルパ／言語別）
 ├── projects/                 # 卒業可能なサブプロジェクト（<lang>-<name>）— 移行中
-├── scripts/                  # 自動化スクリプト（サブプロジェクトは順次 projects/ へ移行）
 └── documents/                # 横断的ナレッジ資産
     ├── research/             #   比較・調査・分析（「どんな選択肢があるか」）
     ├── guides/               #   ハウツー／設計／エンジニアリングガイド（「こうすべき」）
@@ -110,7 +109,7 @@ Update Catalogue の現在状態と乖離している場合、 更新された�
 | アーティファクトが主として… | 配置先 |
 |:---|:---|
 | 「**どんな選択肢があるか**」に答える比較・調査・分析 | `documents/research/` |
-| 言語を問わない**実行可能なコード** | `scripts/`（被管理サブプロジェクトは `projects/`） |
+| 言語を問わない**実行可能なコード** | `projects/` |
 | **具体的な計画・設計・推奨事項**（「こうすべき」） | `documents/guides/` |
 | 発表用の**スライドデック** | `documents/presentations/` |
 | コピーして記入して使う**骨組み・スキャフォールド・フォーム** | `governance/templates/` |
@@ -126,7 +125,7 @@ Update Catalogue の現在状態と乖離している場合、 更新された�
 ### ディレクトリ
 
 - 小文字、ハイフン区切り、**複数形**（コレクションであることを示す）
-  - ✅ `documents/research/`, `scripts/`, `documents/study-notes/`
+  - ✅ `documents/research/`, `projects/`, `documents/study-notes/`
   - ❌ `Research/`, `script/`, `study_notes/`
 
 ### サブディレクトリ

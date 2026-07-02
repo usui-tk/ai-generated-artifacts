@@ -9,7 +9,7 @@ doc-provenance:
 [English](./README.md) | 日本語
 
 > 📂 [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) の一部 → [`projects/bash-rhel-container-testsuite/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/bash-rhel-container-testsuite)
-> ⚠️ **AI 生成コンテンツ** — 実行前にソースを確認してください。免責の全文は [scripts ディレクトリのポリシー](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) を参照。
+> ⚠️ **AI 生成コンテンツ** — 実行前にソースを確認してください。免責の全文は [リポジトリのAIコンテンツポリシー](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md) を参照。
 > 📐 **開発者向け仕様**: [SPEC.md](./SPEC.md)（英語のみ）— 確定済みの設計判断、2 つの軸、テスト階層、ツール互換性フレームワーク、フェーズ契約。
 > ➕ **ツールの追加**: 下記の [ツールの追加](#ツールの追加) 節を参照 — ツール非依存の契約と、2つ目のツール向けの穴埋め手順。
 

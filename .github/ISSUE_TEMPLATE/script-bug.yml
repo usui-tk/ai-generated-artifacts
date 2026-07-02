@@ -15,7 +15,7 @@ body:
     attributes:
       label: Script path
       description: Full path within the repository.
-      placeholder: scripts/aws/ol-aws-ami-builder/build-ol-aws-ami.sh
+      placeholder: projects/bash-ol-aws-ami-builder/build-ol-aws-ami.sh
     validations:
       required: true
 

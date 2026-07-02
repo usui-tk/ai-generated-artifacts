@@ -13,9 +13,9 @@ for the full guidelines.
 
 <!--
 e.g.
-- scripts/aws/ol-aws-ami-builder/SPEC.md §A.7
-- scripts/aws/ol-aws-ami-builder/SPEC.md §A.7
-- scripts/aws/ol-aws-ami-builder/README.md  (cross-reference update)
+- projects/bash-ol-aws-ami-builder/SPEC.md §A.7
+- projects/bash-ol-aws-ami-builder/SPEC.md §A.7
+- projects/bash-ol-aws-ami-builder/README.md  (cross-reference update)
 -->
 
 ## Why

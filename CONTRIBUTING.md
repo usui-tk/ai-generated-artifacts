@@ -60,9 +60,9 @@ Pull requests are accepted but reviewed on a best-effort basis with no guarantee
   ```bash
   python3 quality-tools/powershell-static-analyzer/psa.py <script>.ps1
   ```
-  See [`scripts/README.md`](./scripts/README.md) → "Static Analysis for PowerShell Scripts". `psa.py` rules `PSA7001` (UTF-8 BOM presence) and `PSA7002` (LF-only / mixed line endings, new in v3.7.0) enforce the file-format policy at lint time.
+  See [`quality-tools/powershell-static-analyzer/README.md`](./quality-tools/powershell-static-analyzer/README.md) → "Usage". `psa.py` rules `PSA7001` (UTF-8 BOM presence) and `PSA7002` (LF-only / mixed line endings, new in v3.7.0) enforce the file-format policy at lint time.
 - [ ] **For PowerShell changes: verify `psa.py` is at the latest mainline version before validating.** Compare the mainline `VERSION` against your local copy and refresh both `psa.py` + `VERSION` together if they differ. See [`README.md`](./README.md) → "psa.py Versioning Policy" for the full workflow.
-- [ ] If you touch a project under `scripts/<lang>/<project>/` that ships a `SPEC.md`, verify the corresponding **Part C — Quality Gates & Validation Checklist** before committing.
+- [ ] If you touch a project under `projects/<lang>-<project>/` that ships a `SPEC.md`, verify the corresponding **Part C — Quality Gates & Validation Checklist** before committing.
 - [ ] **For CI workflow changes (anything under `.github/workflows/`, the `PSScriptAnalyzerSettings.psd1` files, or the root [`SPEC.md`](./SPEC.md)): read [`SPEC.md`](./SPEC.md) first, then record the change in the CI-target script's `CHANGELOG.md` — never in a separate location ([`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9 forbids `.github/workflows/CHANGELOG.md` and similar).**
 - [ ] Never commit real secrets (API keys, account IDs you wish to keep private, passwords, tokens). See [`README.md`](./README.md) → "No credentials in artifacts".
 - [ ] **For doc changes that describe implementation behaviour (`SPEC.md` / `README.md` / `TESTING.md`):** verify factual claims against the script body, `param()` declarations, function inventory, and `tests/` contents BEFORE authoring. Do not rely on prior documentation as ground truth — prior docs may themselves be stale or drifted. See [`AGENTS.md` §4](./AGENTS.md#4-implementation-ground-truth-extraction) for the canonical extraction procedure.
@@ -94,7 +94,7 @@ projects/bash-ol-aws-ami-builder: update OL10 ISO checksum for U2 release
 research/cloud-infrastructure: correct CPU SKU naming in EPYC Bergamo section
 ```
 
-`<area>` is typically a top-level directory (`docs`, `scripts/...`, `documents/...`) or a project name.
+`<area>` is typically a top-level directory (`docs`, `projects/...`, `documents/...`) or a project name.
 
 ---
 
@@ -168,9 +168,9 @@ PR はベストエフォートで受け付けます(レビュー期限は保証�
   ```bash
   python3 quality-tools/powershell-static-analyzer/psa.py <script>.ps1
   ```
-  詳細は [`scripts/README.md`](./scripts/README.md) の「PowerShell スクリプトの静的解析」を参照。 `psa.py` の `PSA7001`（UTF-8 BOM の存在チェック）と `PSA7002`（LF-only / 改行コード混在、 v3.7.0 新規）がファイル形式ポリシーを lint 時に強制する
+  詳細は [`quality-tools/powershell-static-analyzer/README.ja.md`](./quality-tools/powershell-static-analyzer/README.ja.md) の「使い方」を参照。 `psa.py` の `PSA7001`（UTF-8 BOM の存在チェック）と `PSA7002`（LF-only / 改行コード混在、 v3.7.0 新規）がファイル形式ポリシーを lint 時に強制する
 - [ ] **PowerShell 変更時: 検証前に `psa.py` が latest mainline バージョンであることを確認する。** mainline の `VERSION` をローカルコピーと比較し、 異なる場合は `psa.py` と `VERSION` の両方を一緒に更新する。 詳細ワークフローは [`README.ja.md`](./README.ja.md) の「psa.py のバージョニングポリシー」セクションを参照
-- [ ] `scripts/<lang>/<project>/` 配下で `SPEC.md` を持つプロジェクトを変更する場合、コミット前に対応する **Part C — 品質ゲートと検証チェックリスト** を確認する
+- [ ] `projects/<lang>-<project>/` 配下で `SPEC.md` を持つプロジェクトを変更する場合、コミット前に対応する **Part C — 品質ゲートと検証チェックリスト** を確認する
 - [ ] **CI ワークフローの変更 (`.github/workflows/` 配下、 `PSScriptAnalyzerSettings.psd1` ファイル、 ルート [`SPEC.md`](./SPEC.md) のいずれか) を行う場合: まず [`SPEC.md`](./SPEC.md) を読み、 変更内容を CI 対象スクリプトの `CHANGELOG.md` に記録する — 別の場所に記録してはならない ([`SPEC.md`](./SPEC.md#9-spec-ci-070-ci-change-history-location) §9 が `.github/workflows/CHANGELOG.md` 等の作成を禁止している)。**
 - [ ] 実在の機密情報(API キー、非公開アカウント ID、パスワード、トークン)を **絶対にコミットしない**。[`README.ja.md`](./README.ja.md) の「アーティファクトに認証情報を埋め込まないでください」を参照
 - [ ] **実装挙動を記述するドキュメント変更時(`SPEC.md` / `README.md` / `TESTING.md`):** 執筆 **前** に、スクリプト本体、`param()` 宣言、関数一覧、`tests/` 内容に照らして事実関係を検証する。過去のドキュメントを ground truth として信用しないこと(過去ドキュメント自体が陳腐化・乖離している可能性がある)。 抽出手順の正典は [`AGENTS.md` §4](./AGENTS.md#4-implementation-ground-truth-extraction) を参照
@@ -202,7 +202,7 @@ projects/bash-ol-aws-ami-builder: update OL10 ISO checksum for U2 release
 research/cloud-infrastructure: correct CPU SKU naming in EPYC Bergamo section
 ```
 
-`<area>` は通常、トップレベルディレクトリ名(`docs`、`scripts/...`、`documents/...` 等)、またはプロジェクト名とします。
+`<area>` は通常、トップレベルディレクトリ名(`docs`、`projects/...`、`documents/...` 等)、またはプロジェクト名とします。
 
 ---
 

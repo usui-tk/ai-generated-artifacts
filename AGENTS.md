@@ -48,7 +48,7 @@ LLM agents MUST recognise and respect this structure.
 | Layer | Location | Role | Examples |
 |:-:|---|---|---|
 | **Layer 0** | Repository root | Cross-cutting policies | `README.md`, `SPEC.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, this `AGENTS.md` |
-| **Layer 1** | Top-level category directories | Category-wide rules | `scripts/README.md`, `documents/research/README.md`, etc. |
+| **Layer 1** | Top-level category directories | Category-wide rules | `documents/README.md`, `documents/research/README.md`, etc. |
 | **Layer 2** | Category directories | Category conventions (currently sparse) | `projects/`, `quality-tools/`, `reference-code/` |
 | **Layer 3** | Subproject directories | Project-specific files | `projects/<lang>-<name>/{README.md,SPEC.md,TESTING.md,CHANGELOG.md}` |
 
@@ -126,7 +126,8 @@ Before authoring ANY change, an LLM agent MUST:
 
 ```
 [ ] 1. Read the relevant Layer 0 governance (root README.md, CONTRIBUTING.md, AGENTS.md)
-[ ] 2. Read the relevant Layer 1 README (e.g., scripts/README.md)
+[ ] 2. Read the relevant Layer 1 README (e.g., documents/README.md)
+       or, for projects/, the target project's own doc-set
 [ ] 3. Read the immediately target Layer 3 README + SPEC + TESTING
 [ ] 4. If touching PowerShell code: stand up the gate runtime (pwsh 7 +
        PSScriptAnalyzer, baseline §8.2) and verify psa.py is at latest mainline
@@ -379,11 +380,13 @@ agent that authored this document during the SPEC rewrite of
 
 ### The rule
 
-Per [`scripts/README.md`](./scripts/README.md) "Standard SPEC
-Structure":
+Per the canonical Part A sources — the family spec homes under
+[`governance/spec/`](./governance/spec/) (e.g.
+[`governance/spec/powershell.md`](./governance/spec/powershell.md)):
 
-> Part A — Common Specification: Cross-project conventions inherited
-> by every script in this style.
+> Part A — Common Specification: cross-project conventions inherited
+> by every script in the family; consumer SPECs **vendor** the Part A
+> regions from the family home (they do not restate them).
 
 Part A of a Layer 3 SPEC is the **inherited** common-conventions
 layer. Its canonical text lives in **exactly one place - the family

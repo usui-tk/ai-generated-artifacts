@@ -30,7 +30,6 @@ ai-generated-artifacts/
 ├── quality-tools/            # Verification machinery (psa.py, drift scanner) — not a governed asset
 ├── reference-code/           # Shared-code canon (region-vendored helpers; per-language)
 ├── projects/                 # Graduatable subprojects (<lang>-<name>) — migration in progress
-├── scripts/                  # Automation scripts (subprojects migrate to projects/ incrementally)
 └── documents/                # Cross-cutting knowledge assets
     ├── research/             #   Comparisons, surveys, analyses ("what are the options?")
     ├── guides/               #   How-to / design / engineering guides ("here is what to do")
@@ -115,7 +114,7 @@ When unsure which directory to use, follow this decision rule:
 | The artifact is primarily... | Place it in |
 |:---|:---|
 | A **comparison, survey, or analysis** answering "what are the options?" | `documents/research/` |
-| **Executable code** in any language | `scripts/` (governed subprojects: `projects/`) |
+| **Executable code** in any language | `projects/` |
 | A **specific plan, design, or recommendation** ("here is what to do") | `documents/guides/` |
 | A **slide deck** intended to be presented | `documents/presentations/` |
 | A **skeleton, scaffold, or form** designed to be copied and filled in | `governance/templates/` |
@@ -131,7 +130,7 @@ For composite artifacts (e.g., a template paired with explanatory commentary), s
 ### Directories
 
 - Lowercase, hyphen-separated, **plural** form (denotes a collection)
-  - ✅ `documents/research/`, `scripts/`, `documents/study-notes/`
+  - ✅ `documents/research/`, `projects/`, `documents/study-notes/`
   - ❌ `Research/`, `script/`, `study_notes/`
 
 ### Subdirectories

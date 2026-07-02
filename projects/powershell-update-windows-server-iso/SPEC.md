@@ -3371,7 +3371,7 @@ upstream fix path.
 
 | Project | Relationship |
 |:---|:---|
-| `Download-SpeakerDeck.ps1` (sister sub-project under `scripts/powershell/download-speakerdeck-oracle4engineer/`) | Source of the §A inherited common spec body (debug trace, log helpers, env probe, retry primitives). Its SPEC.md is the authoritative copy of the inherited rules. |
+| `Download-SpeakerDeck.ps1` (sister sub-project under `projects/powershell-download-speakerdeck-oracle4engineer/`) | Source of the §A inherited common spec body (debug trace, log helpers, env probe, retry primitives). Its SPEC.md is the authoritative copy of the inherited rules. |
 | `Deploy-AMDChipsetDriverOnWindowsServer.ps1` | Source of the 7-Zip helper trio (Appendix E.2) |
 
 ## Appendix G — Historical revision matrix

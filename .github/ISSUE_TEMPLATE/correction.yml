@@ -15,7 +15,7 @@ body:
     attributes:
       label: Affected artifact path
       description: Full path within the repository. Include a section anchor or line range if known.
-      placeholder: scripts/aws/ol-aws-ami-builder/SPEC.md §B.3.2
+      placeholder: projects/bash-ol-aws-ami-builder/SPEC.md §B.3.2
     validations:
       required: true
 

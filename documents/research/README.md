@@ -26,13 +26,13 @@
 
 ## What NOT to Include / 収録対象外
 
-- Executable code or scripts → `scripts/`
+- Executable code or scripts → `projects/`
 - Design documents, proposals, plans → `documents/`
 - Slide decks → `presentations/`
 - Reusable templates → `templates/`
 - Certification study materials → `study-notes/`
 
-- 実行可能なコード／スクリプト → `scripts/`
+- 実行可能なコード／スクリプト → `projects/`
 - 設計書・提案書・計画書 → `documents/`
 - スライド資料 → `presentations/`
 - 再利用可能なひな型 → `templates/`

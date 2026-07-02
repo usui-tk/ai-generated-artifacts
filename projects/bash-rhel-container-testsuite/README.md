@@ -9,7 +9,7 @@ doc-provenance:
 English | [日本語](./README.ja.md)
 
 > 📂 Part of [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) → [`projects/bash-rhel-container-testsuite/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/bash-rhel-container-testsuite)
-> ⚠️ **AI-generated content** — review the source before executing. See the [scripts directory policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) for the full disclaimer.
+> ⚠️ **AI-generated content** — review the source before executing. See the [repository AI-content policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md) for the full disclaimer.
 > 📐 **Developer specification**: [SPEC.md](./SPEC.md) (English only) — locked decisions, the two axes, test tiers, the tool-compatibility framework, and the phase contract.
 > ➕ **Adding a tool**: see the [Adding a tool](#adding-a-tool) section below — the tool-agnostic contract, fill-in-the-blanks for tool #2.
 

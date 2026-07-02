@@ -3,7 +3,7 @@
 This directory holds Python-based self-verification tools that exist
 specifically to support **`Update-WindowsServerIso.ps1`**. They are
 not generic test tools and are not part of the wider repository's
-`scripts/python/` tooling - they belong with the PowerShell script
+`quality-tools/` machinery - they belong with the PowerShell script
 they verify and live in the same directory tree.
 
 The tools exist because three of the bugs fixed in r04.3 (see
