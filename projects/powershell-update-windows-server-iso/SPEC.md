@@ -750,7 +750,7 @@ script exit.
 
 **Status**: normative.
 
-The `param() ValidateSet` (script L242-L243) declares thirteen Actions.
+The `param()` `ValidateSet` on `-Action` declares thirteen Actions.
 The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 
 ### B.6.1 Standard pipeline Actions
@@ -760,34 +760,34 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 | `Prepare` | P01-P06 | Stage only (no patching, no DISM mount) |
 | `Build` | P07-P10 | Patch and assemble; presumes Prepare already staged the workspace |
 | `Verify` | P11-P13 | Verify an existing output ISO (presumes a prior Build -Execute produced it) |
-| `PrepareBuildVerify` (default) | P01-P13 | Combined full pipeline (the standardFull sequence per script L12262) |
-| `All` | P01-P13 + post-pipeline extras | StandardFull plus the additional steps gated by `if ($Action -in @('BootTest','All'))` (script L9088 / L12707) |
+| `PrepareBuildVerify` (default) | P01-P13 | Combined full pipeline (the standardFull sequence in `Get-PhaseListByAction`) |
+| `All` | P01-P13 + post-pipeline extras | StandardFull plus the additional steps gated by `if ($Action -in @('BootTest','All'))` |
 
 ### B.6.2 Specialty Actions
 
 | Action | Phases run | Description |
 |:---|:---|:---|
-| `BootTest` | (empty Phase array; Hyper-V smoke test) | Stand-alone Hyper-V Gen2 boot smoke test against the output ISO. Mutually exclusive with `-SyntheticTestMode` (script L358) |
-| `GenerateManifest` | P01-P03 | Compute a manifest of resolved patches without proceeding to Fetch / Build / Verify (script L12271) |
-| `Cleanup` | (custom; `Invoke-CleanupAction` at script L12361) | Clean up workspace and stale DISM mounts |
+| `BootTest` | (empty Phase array; Hyper-V smoke test) | Stand-alone Hyper-V Gen2 boot smoke test against the output ISO. Mutually exclusive with `-SyntheticTestMode` (parameter-exclusivity guard block) |
+| `GenerateManifest` | P01-P03 | Compute a manifest of resolved patches without proceeding to Fetch / Build / Verify |
+| `Cleanup` | (custom; `Invoke-CleanupAction`) | Clean up workspace and stale DISM mounts |
 | `ListPhases` | (none) | Dump phase + action registry as JSON to stdout |
-| `TestHarness` | (REPL hook at script L12525) | Eval-PS-function mode used by `tests/powershell_harness.py` (T3); not for human invocation |
+| `TestHarness` | (JSON-over-stdin REPL hook, the `TestHarness` short-circuit before phase dispatch) | Eval-PS-function mode used by `tests/powershell_harness.py` (T3); not for human invocation |
 
 ### B.6.3 Admin Actions (A00 - A01 - A03 - A02)
 
 | Action | Admin Phase | Phases run | Description |
 |:---|:-:|:---|:---|
 | `RebuildDataset` | A00 | (`Invoke-AdminPhaseA00_RebuildDataset`) | Rebuild every `data/config-Server*.json` from `data/seed/seed-Server*.json` + caches (validate seeds, A03 snapshots, build skeletons, A01 Force fill, verify); runnable from empty |
-| `RefreshAllBaselines` | A01 | (`Invoke-AdminPhaseA01_RefreshAllBaselines` at script L586) | Refresh `data/config-Server*.json` baselines from upstream caches |
-| `DumpFieldClassification` | A02 | (`Invoke-AdminPhaseA02_DumpFieldClassification` at script L587) | Emit the field-cadence decision matrix as JSON |
-| `RefreshSnapshots` | A03 | (`Invoke-AdminPhaseA03_RefreshSnapshots` at script L588) | Refresh `data/raw-*` and `data/cache-*` from Microsoft Learn + Catalogue |
+| `RefreshAllBaselines` | A01 | (`Invoke-AdminPhaseA01_RefreshAllBaselines`) | Refresh `data/config-Server*.json` baselines from upstream caches |
+| `DumpFieldClassification` | A02 | (`Invoke-AdminPhaseA02_DumpFieldClassification`) | Emit the field-cadence decision matrix as JSON |
+| `RefreshSnapshots` | A03 | (`Invoke-AdminPhaseA03_RefreshSnapshots`) | Refresh `data/raw-*` and `data/cache-*` from Microsoft Learn + Catalogue |
 
 ### B.6.4 Action semantics
 
-- The `osLessActions` set (script L392) — `ListPhases`, `Cleanup`,
+- The `$osLessActions` set — `ListPhases`, `Cleanup`,
   `RefreshSnapshots`, `RefreshAllBaselines`, `RebuildDataset`,
   `DumpFieldClassification`, `TestHarness` — does not require `-OsVersion`. All other Actions
-  REQUIRE `-OsVersion` (script L398-L400).
+  REQUIRE `-OsVersion` (the `$osLessActions` gate before workspace init).
 - `Verify` running standalone presumes the output ISO was produced by
   a prior `Build -Execute`; if missing, P11 reports `Critical`.
 - `Prepare` produces a workspace ready for a later `Build` invocation;
@@ -1100,7 +1100,7 @@ Stages, in order:
 Because stage 2 performs network acquisition, the whole action is
 long-running / hang-prone and MUST be run detached + polled, never
 synchronous-foreground (data-generation hazard policy, handoff B.2.9). A00
-carries no `-OsVersion` (an `osLessAction`, script L383).
+carries no `-OsVersion` (a member of `$osLessActions`).
 
 **Evidence**: [WORKING] implemented at P2 (`Invoke-AdminPhaseA00_RebuildDataset` + `Build-ConfigSkeletonFromSeed`). A00 formalizes a sequence
 that today exists ONLY as the manual A03→A01 procedure in TESTING.md §8.
@@ -1118,19 +1118,19 @@ dependency on a prior config.
 | Config region | Class | Source |
 |:---|:---|:---|
 | `Schema` / `OsKey` / `PatchModel` | SEED | committed (static identity) |
-| `Common` (B.4.2) | SEED | committed; ISO-structural, optionally discovered via `Get-WimIndexInventory` (script L6201) |
+| `Common` (B.4.2) | SEED | committed; ISO-structural, optionally discovered via `Get-WimIndexInventory` |
 | `Pca2023` / `AutoRefreshPolicy` | SEED | committed (policy) |
 | `LanguageSpecific.<lang>` (`DisplayName` / `Iso` / `VolumeLabelPrefix`) | SEED | committed (per-language label + ISO source) |
 | `PatchBaseline` envelope (`Schema` / `ChecksumAlgorithm`) | SEED | committed (static servicing policy; `VerificationMethod` / `ExcludeKbList` retired r11.46) |
 | `PatchBaseline.TargetBuildAfterUpdate` | DERIVED | refresh writeback: the LCU Line's `InScope.build` (r11.46; consumed by P11 `LcuTargetApplied`) |
-| `PatchBaseline.Lines` (B.4.3) | DERIVED | `Invoke-CatalogPatchSetRefresh` (script L5283) ← `data/cache-*` |
-| `LanguageSpecific.<lang>.LanguageSpecificPatches` | DERIVED | `Resolve-LanguageSpecificPatchesFromCatalog` (script L5406) ← Catalogue |
+| `PatchBaseline.Lines` (B.4.3) | DERIVED | `Invoke-CatalogPatchSetRefresh` ← `data/cache-*` |
+| `LanguageSpecific.<lang>.LanguageSpecificPatches` | DERIVED | `Resolve-LanguageSpecificPatchesFromCatalog` ← Catalogue |
 | `_meta` | DERIVED | generated (provenance) |
 
 Both DERIVED Refreshers take only `-OsVersion` / `-PatchMonth` and read the
 caches; they do NOT read the existing config (`Invoke-CatalogPatchSetRefresh`
 resolves `OsKey`/`PatchModel` from internal maps and reads
-`Get-ReleaseInfoCache`, script L5283+). This is precisely what makes a
+`Get-ReleaseInfoCache`). This is precisely what makes a
 from-empty build possible: the SEED supplies everything the Refreshers
 cannot derive, and the Refreshers supply everything the SEED omits. The
 per-group refresh stamps (`LastVerifiedDate` / `LastVerifiedBy` /
@@ -1176,7 +1176,7 @@ Cadence semantics:
 - **IsoRelease**: only refresh when Microsoft re-releases the ISO;
   not auto-refreshed in the current implementation (manual; SEED).
 
-Decision matrix (returned by `Get-RefreshDecision`, script L11239):
+Decision matrix (returned by `Get-RefreshDecision`):
 
 | Cadence \\ State | `_VerifiedDate` empty | recorded < latest PT | up-to-date |
 |:---|:---|:---|:---|

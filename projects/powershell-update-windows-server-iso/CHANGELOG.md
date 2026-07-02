@@ -22,6 +22,19 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed -- SPEC: replace all raw script line-number references with symbol references (docs-only, no version bump; audit G3)
+
+The 2026-07-02 final inspection mechanically verified all 18 `script L<n>`
+references in SPEC against the current source and found the majority stale
+(the r11.44-r11.48 edits shifted lines; e.g. a reference to the mutual-
+exclusivity guard pointed at a closing brace). Raw line numbers in a
+normative document rot on every edit by construction. All 18 are replaced
+with stable symbol references (function names such as
+`Get-PhaseListByAction`, `Invoke-CleanupAction`, `Get-RefreshDecision`,
+`Get-WimIndexInventory`, or named structures such as `$osLessActions`),
+each verified to exist in the current source. No behavioral statements
+changed.
+
 ### Fixed -- clear the six psa.py canon findings that broke stage-1 CI; unmask the text step's exit code (r11.47 -> r11.48, tag `psa-canon-conformance`)
 
 The r11.46 edits introduced six psa.py canon findings that failed the CI
