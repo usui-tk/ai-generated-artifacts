@@ -171,6 +171,24 @@ normalized-hash contract + document-conformance gate boundary), complementing AD
 hash) and [ADR 0019](./adr/0019-document-vendor-model-and-provenance-embedding.md) (document
 vendor model).
 
+### Doc-region version coupling
+
+For a **HASH-model** doc-region (`common-fixed` / `vendored`) whose marker `unit_id` resolves
+by longest dotted prefix to a manifest doc-region unit (`spec-region`; e.g.
+`spec.powershell.part-a.logging` → the row `spec.powershell.part-a`), the document-conformance
+gate's **check C9** couples the marker `version=` to the manifest `canonical_version`:
+`binding=follow-latest` requires **equality**; `binding=pin` may **lag but never lead**
+(SemVer comparison; the pin branch is encoded although no doc-region uses it today). Markers
+with no registered manifest prefix (template-internal L1 markers) and structural-model regions
+are out of scope. C9 runs in both the default (manifest) mode and `--path` mode, so the spec
+homes **and** the consumers' vendored copies are covered; it degrades to a no-op when no
+manifest exists at the root. Consequence: a manifest-only spec-region version write fails the
+gate battery — the write-time refusal (doc_gate as a subprocess gate of the coupled
+manifest+marker write) belongs to the deferred `unit-record coupled write`.
+
+Governed by [ADR 0022](./adr/0022-doc-region-version-coupling-gate.md) (doc-region
+version-coupling gate; records and closes the proven 2026-06-11 spec-region promotion hole).
+
 ### Scanner output-contract pins
 
 The P3 consumer-drift scanner's sole output contract is `observation.schema.json`. Three of its
