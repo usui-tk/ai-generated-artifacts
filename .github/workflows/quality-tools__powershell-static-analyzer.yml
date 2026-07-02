@@ -61,7 +61,7 @@ jobs:
       run:
         working-directory: quality-tools/powershell-static-analyzer
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v6
         with:
@@ -143,7 +143,7 @@ jobs:
 
       - name: '[Artifacts] Upload logs'
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: psa-py-${{ github.run_id }}
           path: |

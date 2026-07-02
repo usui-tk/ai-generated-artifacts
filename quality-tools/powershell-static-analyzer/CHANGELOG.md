@@ -15,6 +15,19 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
+### Changed
+
+- CI: bump `actions/checkout` v5 -> v7 and `actions/upload-artifact` v5 -> v7
+  in `quality-tools__powershell-static-analyzer.yml` (workflow-only; no
+  `psa.py` change, no version bump). Live-verified against the upstream
+  repositories on 2026-07-02 during a repo-wide pin audit: checkout's latest
+  major is v7.0.0 (2026-06-17), upload-artifact's is v7. Non-breaking here:
+  the upload step uses only `name`/`path` (v7's new `archive` input defaults
+  to the old zipping behavior), and the workflow's push/PR triggers are
+  unaffected by checkout v7's fork-PR refusal (it applies to
+  `pull_request_target`/`workflow_run` fork checkouts only). The remaining
+  pin (setup-python v6) is already current.
+
 ## [4.3.0] - 2026-06-01
 
 ### Added - `psa2013_known_script_vars` configuration key
