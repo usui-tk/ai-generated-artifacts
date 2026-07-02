@@ -11,11 +11,14 @@ This tool owns the *manifest write path* only: it creates / updates / deletes ro
 governance/state/manifest.jsonl. It does NOT write the in-code markers (a region unit's
 version / policy / binding / hash in reference-code/.../*.ps1). The coordinated
 "manifest row + its marker" write -- the named-deferred `unit-record coupled write` --
-is investigated and built when the first real marker-coupled change flows through the
-process (P6/P7 reconcile-back / vendoring), per ADR 0017 (do not finalize a design
-against no real artifact). Until then, a marker-coupled change requested here is REFUSED
-by self-validation (the validator's checks D/G/E catch the resulting marker drift and the
-op is rolled back) -- the boundary is enforced by the existing gate, not by a special case.
+was deferred per ADR 0017 (do not finalize a design against no real artifact) and is
+NOW BUILT for doc-region kinds as the `promote` op (R-3.1; the real artifact was the
+spec-region 1.0.0 promotion, ADR 0022): manifest row + every marker version= in one
+snapshot transaction, gated by the validator AND doc_gate (incl. C9) as subprocesses,
+byte-identical rollback on any finding. A marker-coupled change requested through
+`update` is still REFUSED by self-validation (validator D/G/E for code markers;
+doc_gate C9 for doc markers) -- update stays a pure manifest write; promote is the
+coupled path. Code-marker (powershell-helper) promotions keep the restamp path (D11).
 
 DISCIPLINE.
   * Every mutation is transactional: snapshot the file bytes, apply, write atomically,
@@ -43,6 +46,12 @@ Usage:
     python3 tool.py --root <repo-root> update     --unit-id <id> [--tested true|false] \
         [--version <v>] [--change-policy <cp>] [--binding <bm>] [--platform-scope <ps>] \
         [--location <p>] [--maturity <m>] [--add-consumer consumer=<c>,path=<p> ...] [--clear-consumers]
+    python3 tool.py --root <repo-root> promote    --unit-id <id> --version <v>
+        (doc-region kinds only: the `unit-record coupled write` - updates the
+        manifest row AND every marker version= across the spec home + all
+        consumers[] files in one snapshot transaction, gated by the validator +
+        doc_gate incl. C9; byte-identical rollback on any finding; >= 1.0.0
+        also sets tested=true. No hash recompute - bodies are untouched.)
     python3 tool.py --root <repo-root> deregister --unit-id <id>
     python3 tool.py --root <repo-root> list
 
@@ -75,6 +84,37 @@ REQUIRED = ("schema_version", "unit_id", "kind", "canonical_location",
 PROJECT_REQUIRED = ("schema_version", "unit_id", "kind", "canonical_location",
                     "consumers", "maturity")
 SCHEMA_VERSION = "1"
+# kinds whose doc-region markers the coupled promotion (R-3.1, ADR 0022) may rewrite.
+DOC_REGION_KINDS = ("spec-region",)
+# doc-marker BEGIN frame: reuse-by-copy of doc_gate's _OPEN (ADR 0003 standalone-tool
+# principle - copied, never imported), re-grouped so version= is replaceable in place.
+_DOC_OPEN = re.compile(
+    r"(<!--\s*>>>\s*CANONICAL\s+unit_id=(?P<unit_id>\S+)\s+version=)(?P<version>\S+)"
+    r"(\s+hash=\S+\s+policy=\S+\s+binding=\S+\s*>>>\s*-->)")
+
+
+def _semver_tuple(v):
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except (AttributeError, ValueError):
+        return None
+
+
+def _rewrite_marker_versions(text, unit_id, new_version):
+    """(new_text, n): set version= on every BEGIN marker whose unit_id equals
+    unit_id or is a dotted child of it (spec.bash.part-a -> spec.bash.part-a.*).
+    Only the marker line changes; region bodies are untouched (no hash recompute
+    - a version-only promotion leaves bodies byte-identical, ADR 0022)."""
+    count = [0]
+
+    def repl(match):
+        mid = match.group("unit_id")
+        if mid == unit_id or mid.startswith(unit_id + "."):
+            count[0] += 1
+            return match.group(1) + new_version + match.group(4)
+        return match.group(0)
+
+    return _DOC_OPEN.sub(repl, text), count[0]
 
 
 # --- canonical-JSON line: reuse-by-copy of scanner.py _canonical_line (ADR 0003) -------
@@ -198,6 +238,26 @@ def run_validator(validator, root):
     return (proc.returncode, proc.stdout + proc.stderr)
 
 
+def default_doc_gate(root):
+    return os.path.join(root, "quality-tools", "document-conformance-gate",
+                        "doc_gate.py")
+
+
+def run_doc_gate(root, paths=None):
+    """Run the document-conformance gate (default mode, or --path over the given
+    repo-relative files). Fail-safe if absent - the coupled write refuses rather
+    than committing unverified (the gate-then-write premise, ADR 0022)."""
+    gate = default_doc_gate(root)
+    if not os.path.isfile(gate):
+        return (127, "doc_gate not found at %s -- refusing the coupled write "
+                "unverified (fail-safe)" % gate)
+    cmd = [sys.executable, gate, "--root", root]
+    if paths:
+        cmd += ["--path"] + list(paths)
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return (proc.returncode, proc.stdout + proc.stderr)
+
+
 # --- transactional apply ---------------------------------------------------------------
 def transact(root, validator, new_records, *, dry_run):
     """Write new_records, validate, roll back on any finding. Return (ok, message)."""
@@ -315,6 +375,105 @@ def op_deregister(root, validator, args):
     return transact(root, validator, kept, dry_run=args.dry_run)
 
 
+def op_promote(root, validator, args):
+    """R-3.1 `unit-record coupled write` (ADR 0022 consequence; the write path the
+    P3a.1 boundary deferred): promote a doc-region unit's canonical_version by
+    updating the manifest row AND every marker version= carrying the unit's
+    regions (the spec home + every consumers[] file) in ONE snapshot transaction,
+    gated by the validator + doc_gate (incl. C9) as subprocesses, with
+    byte-identical rollback on any finding."""
+    records = load_manifest(manifest_path(root))
+    idx = next((i for i, r in enumerate(records)
+                if r["unit_id"] == args.unit_id), None)
+    if idx is None:
+        return (False, "promote: no row with unit_id %r" % args.unit_id)
+    record = dict(records[idx])
+    if record.get("kind") not in DOC_REGION_KINDS:
+        return (False, "promote: kind=%s is out of scope (doc-region kinds only: %s; "
+                "code-marker promotions keep the restamp path - D11/ADR 0022)"
+                % (record.get("kind"), ", ".join(DOC_REGION_KINDS)))
+    old_ver, new_ver = record.get("canonical_version"), args.version
+    ot, nt = _semver_tuple(old_ver), _semver_tuple(new_ver)
+    if ot is None or nt is None:
+        return (False, "promote: versions must be dotted-integer SemVer "
+                "(current=%r requested=%r)" % (old_ver, new_ver))
+    if nt <= ot:
+        return (False, "promote: requested version %s does not advance the current "
+                "%s (a promotion only moves forward)" % (new_ver, old_ver))
+
+    targets = [record["canonical_location"]] + [c["path"]
+                                                for c in record.get("consumers", [])]
+    plan = []   # (rel, marker_count, original_bytes, new_bytes)
+    for rel in targets:
+        abspath = os.path.join(root, rel)
+        if not os.path.isfile(abspath):
+            return (False, "promote: target file missing on disk: %s (refusing - "
+                    "incoherent state)" % rel)
+        with open(abspath, "rb") as handle:
+            raw = handle.read()
+        new_text, n = _rewrite_marker_versions(raw.decode("utf-8"), args.unit_id,
+                                               new_ver)
+        if n == 0:
+            return (False, "promote: %s carries no %s.* markers (refusing - "
+                    "incoherent state; nothing was written)" % (rel, args.unit_id))
+        plan.append((rel, n, raw, new_text.encode("utf-8")))
+
+    record["canonical_version"] = new_ver
+    if nt >= (1, 0, 0):
+        # D12: the coupled op's own gate set (validator + doc_gate incl. C9 over the
+        # home AND every consumer) IS the exercised-contract proof (ADR 0008 analog).
+        record["tested"] = True
+    new_records = list(records)
+    new_records[idx] = record
+
+    total = sum(n for _, n, _, _ in plan)
+    if args.dry_run:
+        lines = ["[dry-run] coupled promotion %s: %s -> %s" % (args.unit_id, old_ver,
+                                                               new_ver),
+                 "[dry-run] manifest row: canonical_version%s" %
+                 (" + tested=true" if nt >= (1, 0, 0) else "")]
+        lines += ["[dry-run] %s: %d marker(s)" % (rel, n) for rel, n, _, _ in plan]
+        lines.append("[dry-run] total: 1 manifest row + %d marker(s) across %d "
+                     "file(s); not writing, not validating" % (total, len(plan)))
+        return (True, "\n".join(lines))
+
+    # snapshot ALL touched files, apply ALL edits, gate, roll back ALL on findings.
+    mpath = manifest_path(root)
+    with open(mpath, "rb") as handle:
+        manifest_snapshot = handle.read()
+    write_manifest_atomic(mpath, render_manifest(new_records))
+    for rel, _, _, new_bytes in plan:
+        with open(os.path.join(root, rel), "wb") as handle:
+            handle.write(new_bytes)
+
+    def rollback():
+        with open(mpath, "wb") as handle:
+            handle.write(manifest_snapshot)
+        for rel_, _, raw_, _ in plan:
+            with open(os.path.join(root, rel_), "wb") as handle:
+                handle.write(raw_)
+
+    gate_runs = [("validator", run_validator(validator, root)),
+                 ("doc_gate (default)", run_doc_gate(root))]
+    consumer_paths = [c["path"] for c in record.get("consumers", [])]
+    if consumer_paths:
+        gate_runs.append(("doc_gate --path (consumers)",
+                          run_doc_gate(root, consumer_paths)))
+    for name, (rc, out) in gate_runs:
+        if rc != 0:
+            rollback()
+            tail = "\n".join(out.strip().splitlines()[-12:])
+            return (False, "REFUSED: %s reported findings, so the coupled write was "
+                    "rolled back byte-identically (master + all %d marker files "
+                    "unchanged).\n--- gate output (tail) ---\n%s"
+                    % (name, len(plan), tail))
+    return (True, "OK: coupled promotion applied and validated - %s %s -> %s "
+            "(1 manifest row%s + %d marker(s) across %d file(s); validator + "
+            "doc_gate incl. C9 green)."
+            % (args.unit_id, old_ver, new_ver,
+               " + tested=true" if nt >= (1, 0, 0) else "", total, len(plan)))
+
+
 def op_list(root, validator, args):
     records = load_manifest(manifest_path(root))
     for r in records:
@@ -363,6 +522,13 @@ def build_parser():
                        help="consumer=<id>,path=<file> (repeatable)")
     p_upd.add_argument("--clear-consumers", action="store_true")
     p_upd.set_defaults(func=op_update)
+
+    p_pro = sub.add_parser("promote", help="coupled version promotion for a "
+                           "doc-region unit: manifest row + every marker in one "
+                           "gated transaction (R-3.1, ADR 0022)")
+    p_pro.add_argument("--unit-id", required=True)
+    p_pro.add_argument("--version", required=True)
+    p_pro.set_defaults(func=op_promote)
 
     p_dereg = sub.add_parser("deregister", help="remove a row by unit_id")
     p_dereg.add_argument("--unit-id", required=True)

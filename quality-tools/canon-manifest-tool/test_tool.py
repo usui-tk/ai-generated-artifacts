@@ -309,6 +309,148 @@ def run_tests():
                   rc == 1 and "tool.nv" not in ids(root)))
     shutil.rmtree(root)
 
+    # ---- promote (R-3.1 coupled write) test set: a doc mini-repo fixture ----
+    import hashlib
+
+    def _doc_hash(body):
+        # reuse-by-copy of doc_gate.doc_region_norm_hash (ADR 0003/0020)
+        import re as _re
+        text = _re.sub(r"<!--.*?-->", "", body, flags=_re.DOTALL)
+        norm = _re.sub(r"\s+", " ", text).strip()
+        return hashlib.sha256(norm.encode("utf-8")).hexdigest()[:16]
+
+    def _doc_marker(unit_region, ver, body):
+        return ("<!-- >>> CANONICAL unit_id=%s version=%s hash=%s policy=canonical "
+                "binding=follow-latest >>> -->\n%s\n"
+                "<!-- <<< CANONICAL unit_id=%s <<< -->\n"
+                % (unit_region, ver, _doc_hash(body), body, unit_region))
+
+    def build_doc_repo(consumer_ver="0.1.0"):
+        """build_repo + a spec-region unit: L1 item, spec home, one consumer,
+        doc_gate copied in (the promote op's subprocess gate), manifest row."""
+        root = build_repo()
+        # doc_gate (sibling subprocess gate)
+        dg = os.path.join(root, "quality-tools", "document-conformance-gate")
+        os.makedirs(dg)
+        shutil.copy(os.path.join(os.path.dirname(VALIDATOR_SRC), "..",
+                                 "document-conformance-gate", "doc_gate.py"),
+                    os.path.join(dg, "doc_gate.py"))
+        # L1 doc-format item (family segment stripped by map_unit_to_l1)
+        dfd = os.path.join(root, "governance", "doc-format")
+        os.makedirs(dfd)
+        with open(os.path.join(dfd, "doc-format.jsonl"), "w", newline="\n") as fh:
+            fh.write(json.dumps({"item_id": "spec.part-a.demo",
+                                 "content_model": "vendored",
+                                 "schema_version": "1"}, sort_keys=True,
+                                separators=(",", ":")) + "\n")
+        # spec home + one consumer, both carrying the region at 0.1.0
+        body = "Demo Part A body."
+        os.makedirs(os.path.join(root, "governance", "spec"))
+        with open(os.path.join(root, "governance", "spec", "demo.md"), "w",
+                  newline="\n") as fh:
+            fh.write("# demo spec home\n\n"
+                     + _doc_marker("spec.bash.part-a.demo", "0.1.0", body))
+        os.makedirs(os.path.join(root, "projects", "demo"))
+        with open(os.path.join(root, "projects", "demo", "SPEC.md"), "w",
+                  newline="\n") as fh:
+            fh.write("# demo consumer\n\n"
+                     + _doc_marker("spec.bash.part-a.demo", consumer_ver, body))
+        # register the spec-region row (direct append, then re-canonicalize)
+        row_sr = {"schema_version": "1", "unit_id": "spec.bash.part-a",
+                  "kind": "spec-region",
+                  "canonical_location": "governance/spec/demo.md",
+                  "canonical_version": "0.1.0", "change_policy": "canonical",
+                  "binding_mode": "follow-latest",
+                  "consumers": [{"consumer": "demo",
+                                 "path": "projects/demo/SPEC.md"}],
+                  "tested": False, "platform_scope": "cross-platform"}
+        with open(mpath(root), "a", newline="\n") as fh:
+            fh.write(tool._canonical_line(row_sr) + "\n")
+        return root
+
+    def _snap(root):
+        return {rel: read_bytes(os.path.join(root, rel)) for rel in
+                ("governance/state/manifest.jsonl", "governance/spec/demo.md",
+                 "projects/demo/SPEC.md")}
+
+    # 17. promote succeeds: row 1.0.0 + tested=true, BOTH files' markers rewritten,
+    #     bodies untouched, validator + doc_gate (incl. C9) green.
+    root = build_doc_repo()
+    rc = run(["--root", root, "promote", "--unit-id", "spec.bash.part-a",
+              "--version", "1.0.0"])
+    after = tool.load_manifest(mpath(root))
+    row = next(r for r in after if r["unit_id"] == "spec.bash.part-a")
+    home = read_bytes(os.path.join(root, "governance/spec/demo.md")).decode()
+    cons = read_bytes(os.path.join(root, "projects/demo/SPEC.md")).decode()
+    cases.append(("promote: coupled 0.1.0 -> 1.0.0 succeeds (row + tested + 2 markers)",
+                  rc == 0 and row["canonical_version"] == "1.0.0"
+                  and row["tested"] is True
+                  and "version=1.0.0" in home and "version=1.0.0" in cons
+                  and "Demo Part A body." in home))
+    # 17b. C9 equality holds through the write: doc_gate default green afterwards.
+    rc2, _ = tool.run_doc_gate(root)
+    cases.append(("promote: doc_gate green after the coupled write (C9 equality)",
+                  rc2 == 0))
+    shutil.rmtree(root)
+
+    # 18. dry-run: plan printed, nothing written.
+    root = build_doc_repo()
+    before = _snap(root)
+    rc = run(["--root", root, "--dry-run", "promote", "--unit-id",
+              "spec.bash.part-a", "--version", "1.0.0"])
+    cases.append(("promote --dry-run writes nothing",
+                  rc == 0 and _snap(root) == before))
+    shutil.rmtree(root)
+
+    # 19. non-doc-region kind -> refused (D11 scope), master unchanged.
+    root = build_doc_repo()
+    before = _snap(root)
+    rc = run(["--root", root, "promote", "--unit-id", "pwsh.helper.get-foo",
+              "--version", "1.1.0"])
+    cases.append(("promote: non-doc-region kind refused (D11)",
+                  rc == 1 and _snap(root) == before))
+    shutil.rmtree(root)
+
+    # 20. version must advance: equal/backward refused.
+    root = build_doc_repo()
+    rc_eq = run(["--root", root, "promote", "--unit-id", "spec.bash.part-a",
+                 "--version", "0.1.0"])
+    rc_back = run(["--root", root, "promote", "--unit-id", "spec.bash.part-a",
+                   "--version", "0.0.9"])
+    cases.append(("promote: non-advancing version refused", rc_eq == 1 and rc_back == 1))
+    shutil.rmtree(root)
+
+    # 21. a consumer file without the unit's markers -> refused BEFORE any write.
+    root = build_doc_repo()
+    with open(os.path.join(root, "projects", "demo", "SPEC.md"), "w",
+              newline="\n") as fh:
+        fh.write("# no markers here\n")
+    before = _snap(root)
+    rc = run(["--root", root, "promote", "--unit-id", "spec.bash.part-a",
+              "--version", "1.0.0"])
+    cases.append(("promote: marker-less target refused pre-write (incoherent state)",
+                  rc == 1 and _snap(root) == before))
+    shutil.rmtree(root)
+
+    # 22. gate failure -> byte-identical rollback of ALL touched files: the
+    #     consumer's marker version is pre-desynced (0.2.0 vs manifest 0.1.0);
+    #     the baseline default gate does not scan consumer files, but the
+    #     promote op's doc_gate --path leg sees the 0.2.0 -> 1.0.0 rewrite is
+    #     fine... so instead corrupt the consumer HASH: post-write doc_gate
+    #     --path reports hash drift -> the whole transaction must roll back.
+    root = build_doc_repo()
+    cpath = os.path.join(root, "projects", "demo", "SPEC.md")
+    corrupted = read_bytes(cpath).decode().replace("Demo Part A body.",
+                                                   "Tampered body.")
+    with open(cpath, "w", newline="\n") as fh:
+        fh.write(corrupted)
+    before = _snap(root)
+    rc = run(["--root", root, "promote", "--unit-id", "spec.bash.part-a",
+              "--version", "1.0.0"])
+    cases.append(("promote: gate failure -> byte-identical rollback of all files",
+                  rc == 1 and _snap(root) == before))
+    shutil.rmtree(root)
+
     passed = 0
     for name, ok in cases:
         print("[%s] %s" % ("PASS" if ok else "FAIL", name))
