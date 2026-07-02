@@ -2,8 +2,9 @@
 #==============================================================================
 # install-aws_ena-driver.sh - build (and in production, install) the AWS ENA
 # driver on a RHEL-family host. E2': the build is entitlement-gated. In entitled
-# mode the script installs gcc + make + kernel-devel-$(uname -r) from the entitled
-# repos (via the redhat.repo/cert passthrough) before building. Self-contained;
+# mode the script installs gcc + make + kernel-devel from the entitled repos (via
+# the redhat.repo/cert passthrough) and builds against THAT kernel-devel tree -
+# each RHEL major compiles against its own kernel headers. Self-contained;
 # tests/aws_ena-driver/; run-ena-buildtest-matrix.sh kicks it with parameters.
 #
 # Compiles ena.ko OUT OF TREE against the installed kernel-devel headers
@@ -83,19 +84,19 @@ run_pm() {
 # ena_pm : the package manager available in this image (dnf on 8+, yum on 6/7).
 ena_pm() { command -v dnf >/dev/null 2>&1 && printf 'dnf' || printf 'yum'; }
 
-# ensure_build_deps : ENTITLED path. Install the build toolchain and the
-# kernel-devel that MATCHES the running (host) kernel from the entitled repos so
-# build_ko finds /usr/src/kernels/$(uname -r). A loadable module must match the
-# running kernel exactly; when the container major differs from the host kernel
-# (cross-major) that kernel-devel NVR is absent from the container repos and the
-# module cannot be built here. rc: 0 ready | 1 toolchain failed | 3 no matching
-# kernel-devel. Requires the entitled repo passthrough (redhat.repo + certs).
+# ensure_build_deps : ENTITLED path. Install the build toolchain and kernel-devel
+# from the CONTAINER's OWN entitled repos, then build against that installed
+# kernel-devel tree (build_ko uses the newest /usr/src/kernels/<kver>). This is a
+# COMPILE test - each RHEL major builds against its own kernel headers, independent
+# of the running host kernel; module LOAD is never attempted in a container (L4).
+# rc: 0 ready | 1 toolchain failed | 3 kernel-devel unavailable in the repos.
+# Requires the entitled repo passthrough (redhat.repo + certs).
 ensure_build_deps() {
-  local mgr krel; mgr="$(ena_pm)"; krel="$(uname -r)"
+  local mgr; mgr="$(ena_pm)"
   ENA_PM_LOG="$(mktemp)"
-  log "entitled: installing build deps (gcc make kernel-devel-${krel}) via ${mgr}"
+  log "entitled: installing build deps (gcc make kernel-devel) via ${mgr}"
   run_pm "${mgr}" -y install gcc make >>"${ENA_PM_LOG}" 2>&1 || return 1
-  run_pm "${mgr}" -y install "kernel-devel-${krel}" >>"${ENA_PM_LOG}" 2>&1 || return 3
+  run_pm "${mgr}" -y install kernel-devel >>"${ENA_PM_LOG}" 2>&1 || return 3
   if [ "${ENA_BUILD_PLAN}" = "dkms" ]; then
     run_pm "${mgr}" -y install dkms >>"${ENA_PM_LOG}" 2>&1 || true   # dkms is EPEL-only; best-effort
   fi
@@ -232,7 +233,7 @@ fi
 edc=0; ensure_build_deps || edc=$?
 case "${edc}" in
   0) : ;;
-  3) dump_pm_diag; die "kernel-devel-$(uname -r) not available/installable from RHEL${OSMAJOR} entitled repos (a loadable module needs an exact match to the running kernel; a cross-major container cannot build here)" ;;
+  3) dump_pm_diag; die "kernel-devel not available/installable from RHEL${OSMAJOR} entitled repos (see the package-manager log above)" ;;
   *) dump_pm_diag; die "entitled build dependencies failed to install (gcc/make/kernel-devel) on RHEL${OSMAJOR}" ;;
 esac
 if build_ko; then

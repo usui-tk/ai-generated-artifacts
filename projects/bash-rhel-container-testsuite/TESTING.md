@@ -305,11 +305,13 @@ gives the container the entitled baseurls (UBI ships only the public ubi repos),
 so entitled-only packages such as `kernel-devel` become reachable.
 
 With that passthrough in place, the **ENA** build test's entitled path installs
-`gcc`, `make`, and `kernel-devel-$(uname -r)` from the entitled repos, then builds
-`ena.ko` out of tree. Because a loadable module must match the running kernel
-exactly and containers share the host kernel, the entitled build succeeds when the
-container major matches the host kernel and reports `build-fail` (with a kernel-devel
-reason) cross-major - a real, recorded finding. SSM (local RPM, repo-free) and
+`gcc`, `make`, and `kernel-devel` from the container's own entitled repos, then
+compiles `ena.ko` out of tree against that installed kernel-devel tree. This is a
+*compile* test: each RHEL major builds against its own kernel headers, independent
+of the running host kernel (module LOAD is never attempted in a container - L4), so
+the same RHEL 10 host can build-test RHEL 6/7/8/9/10 by running each major's image.
+A major reports `build-fail` only if its entitled repos cannot provide kernel-devel
+or the pinned driver does not compile on that kernel. SSM (local RPM, repo-free) and
 AWS CLI v2 (self-contained S3 zip) are entitlement-independent and unaffected.
 
 `acq_entitlement_mount_args` emits the `-v`/`--network` set. For RHUI it is

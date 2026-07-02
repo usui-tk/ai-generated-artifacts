@@ -11,6 +11,27 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r24] - 2026-07-02 - ENA entitled: build against the container's OWN kernel-devel, not the host kernel
+
+### Fixed
+- **The entitled ENA build was tied to the host kernel.** r22 installed
+  `kernel-devel-$(uname -r)`; since containers share the host kernel, on a RHEL 10
+  host every non-10 container asked for an el10 kernel-devel that its own repos do
+  not carry, so RHEL 6/7/8/9 always failed - an artificial "same-major only"
+  limitation. The ENA build test is a *compile* test (module LOAD is L4, never in a
+  container), and the script is designed to build against the installed kernel-devel
+  headers "independent of the running host kernel".
+- **Fix:** `ensure_build_deps` now installs plain `kernel-devel` (plus `gcc`/`make`)
+  from the container's own entitled repos; `build_ko` compiles against the newest
+  installed `/usr/src/kernels/<kver>`. Each RHEL major builds against its own kernel
+  headers, so a single RHEL 10 host can build-test RHEL 6, 7, 8, 9, and 10. A major
+  reports `build-fail` only if its repos cannot provide kernel-devel or the pinned
+  driver does not compile there. Comments, the rc-3 reason, and TESTING.md updated
+  to drop the incorrect host-kernel/cross-major framing introduced in r22.
+
+### Verified
+- Suite green (**18 tiers, 458 passed**); ShellCheck-style-clean; LF-only.
+
 ## [r23] - 2026-07-02 - ENA entitled: stop the ERR trap from masking the real dep-install reason + surface pm log
 
 ### Fixed
