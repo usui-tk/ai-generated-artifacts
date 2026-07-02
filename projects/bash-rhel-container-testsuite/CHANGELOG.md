@@ -11,6 +11,38 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r22] - 2026-07-02 - entitled path: complete the rhsm mount set + build ENA deps from entitled repos
+
+Makes the entitlement passthrough actually functional end to end for every test
+case across every OS. r19 wired the mounts and r18 gated the RHSM plugins, but two
+pieces were missing: the entitled repo *definitions* were not passed in, and the
+ENA build assumed kernel-devel/gcc/make were already present.
+
+### Fixed / Added
+- **rhsm mount set completed** (`acq_entitlement_mount_args`): now also mounts
+  `/etc/yum.repos.d/redhat.repo` and `/etc/pki/product` alongside the entitlement
+  certs and `/etc/rhsm`. Without `redhat.repo` the container had no entitled
+  baseurls (UBI ships only the public ubi repos), so entitled-only packages were
+  unreachable.
+- **ENA entitled build now installs its dependencies** (`ensure_build_deps`):
+  installs `gcc`, `make`, and `kernel-devel-$(uname -r)` from the entitled repos
+  before building `ena.ko`. rc-mapped: toolchain-fail and "no matching kernel-devel"
+  (cross-major, where the container major differs from the host kernel) each die
+  with a clear reason. Same-major builds succeed; cross-major reports `build-fail`
+  with a kernel-devel reason - a real, recorded finding, since a loadable module
+  must match the running (host) kernel and containers share it.
+
+### Unchanged (already entitlement-correct)
+- **SSM** installs a local RPM with an empty non-rpmlib Requires (repo-free) and
+  **AWS CLI v2** installs from the self-contained S3 zip; both are
+  entitlement-independent on every major and needed no change. The passthrough is
+  still applied harmlessly and helps only where a repo op is actually needed.
+
+### Verified
+- Suite green (**18 tiers, 458 passed**); ShellCheck-style-clean; LF-only.
+  `ensure_build_deps` rc paths (0/1/3 + dkms best-effort) unit-checked; ENA matrix
+  plumbing exercised via stub (entitled build emits, schema unchanged).
+
 ## [r21] - 2026-07-02 - probe: rename the repolist column/field (repos) + clearer states
 
 Cosmetic/reporting only - no behavioural change to the sweep or classification.

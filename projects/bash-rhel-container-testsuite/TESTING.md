@@ -299,6 +299,19 @@ possible) into one of:
   offer a Red Hat RHUI for RHEL; RHEL on OCI is BYOS -> rhsm.
 - **none** - anonymous (no mounts added; behaviour unchanged).
 
+For **rhsm** the mount set is the entitlement certs, `/etc/rhsm`, the product
+certs, and the subscription-manager-generated `redhat.repo` - the last is what
+gives the container the entitled baseurls (UBI ships only the public ubi repos),
+so entitled-only packages such as `kernel-devel` become reachable.
+
+With that passthrough in place, the **ENA** build test's entitled path installs
+`gcc`, `make`, and `kernel-devel-$(uname -r)` from the entitled repos, then builds
+`ena.ko` out of tree. Because a loadable module must match the running kernel
+exactly and containers share the host kernel, the entitled build succeeds when the
+container major matches the host kernel and reports `build-fail` (with a kernel-devel
+reason) cross-major - a real, recorded finding. SSM (local RPM, repo-free) and
+AWS CLI v2 (self-contained S3 zip) are entitlement-independent and unaffected.
+
 `acq_entitlement_mount_args` emits the `-v`/`--network` set. For RHUI it is
 *derived from the repo files* (the `sslclientcert`/`sslclientkey`/`sslcacert`/
 `gpgkey` paths plus the repo files themselves, `/etc/pki/rhui`, the `amazon-id`

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #==============================================================================
 # install-aws_ena-driver.sh - build (and in production, install) the AWS ENA
-# driver on a RHEL-family host. E2': the build is entitlement-gated (kernel-devel
-# + gcc + make come from the entitled repos). Self-contained. Named to match
+# driver on a RHEL-family host. E2': the build is entitlement-gated. In entitled
+# mode the script installs gcc + make + kernel-devel-$(uname -r) from the entitled
+# repos (via the redhat.repo/cert passthrough) before building. Self-contained;
 # tests/aws_ena-driver/; run-ena-buildtest-matrix.sh kicks it with parameters.
 #
 # Compiles ena.ko OUT OF TREE against the installed kernel-devel headers
@@ -76,6 +77,27 @@ pm_neutralize_rhsm_if_anonymous() {
 # is somehow absent.
 run_pm() {
   if command -v timeout >/dev/null 2>&1; then timeout "${PKG_TIMEOUT:-300}" "$@"; else "$@"; fi
+}
+
+# ena_pm : the package manager available in this image (dnf on 8+, yum on 6/7).
+ena_pm() { command -v dnf >/dev/null 2>&1 && printf 'dnf' || printf 'yum'; }
+
+# ensure_build_deps : ENTITLED path. Install the build toolchain and the
+# kernel-devel that MATCHES the running (host) kernel from the entitled repos so
+# build_ko finds /usr/src/kernels/$(uname -r). A loadable module must match the
+# running kernel exactly; when the container major differs from the host kernel
+# (cross-major) that kernel-devel NVR is absent from the container repos and the
+# module cannot be built here. rc: 0 ready | 1 toolchain failed | 3 no matching
+# kernel-devel. Requires the entitled repo passthrough (redhat.repo + certs).
+ensure_build_deps() {
+  local mgr krel; mgr="$(ena_pm)"; krel="$(uname -r)"
+  log "entitled: installing build deps (gcc make kernel-devel-${krel}) via ${mgr}"
+  run_pm "${mgr}" -y install gcc make >/dev/null 2>&1 || return 1
+  run_pm "${mgr}" -y install "kernel-devel-${krel}" >/dev/null 2>&1 || return 3
+  if [ "${ENA_BUILD_PLAN}" = "dkms" ]; then
+    run_pm "${mgr}" -y install dkms >/dev/null 2>&1 || true   # dkms is EPEL-only; best-effort
+  fi
+  return 0
 }
 
 log() { printf '%s [install-aws_ena-driver] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -189,7 +211,14 @@ if [ "${ENA_ENTITLEMENT}" = "anonymous" ]; then
   die "anonymous: kernel-devel unavailable; cannot build (needs entitlement)"
 fi
 
-# entitled: build out of tree, then verify the module reports the requested version
+# entitled: install the toolchain + matching kernel-devel from the entitled repos,
+# then build out of tree and verify the module reports the requested version
+ensure_build_deps; edc=$?
+case "${edc}" in
+  0) : ;;
+  3) die "kernel-devel-$(uname -r) not available in RHEL${OSMAJOR} entitled repos (a loadable module needs an exact match to the running kernel; a cross-major container cannot build here)" ;;
+  *) die "entitled build dependencies failed to install (gcc/make) on RHEL${OSMAJOR}" ;;
+esac
 if build_ko; then
   KO_VERSION="$(ko_module_version "${BUILT_SRC}/ena.ko")"
   if [ -n "${KO_VERSION}" ] && [ "${KO_VERSION}" != "${ENA_VERSION}" ]; then

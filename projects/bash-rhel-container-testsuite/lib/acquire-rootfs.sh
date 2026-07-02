@@ -430,8 +430,13 @@ acq_entitlement_mount_args() {
   local mode="${1:-$(acq_repo_access | cut -d'|' -f1)}" f p paths
   case "${mode}" in
     rhsm)
-      [ -d /etc/pki/entitlement ] && printf -- '-v /etc/pki/entitlement:/etc/pki/entitlement:ro '
-      [ -d /etc/rhsm ]            && printf -- '-v /etc/rhsm:/etc/rhsm:ro '
+      # certs + rhsm config + the subscription-manager-generated entitled repo
+      # definitions. Without redhat.repo the container has no entitled baseurls
+      # (UBI ships only the public ubi repos), so kernel-devel etc. are unreachable.
+      [ -d /etc/pki/entitlement ]       && printf -- '-v /etc/pki/entitlement:/etc/pki/entitlement:ro '
+      [ -d /etc/rhsm ]                  && printf -- '-v /etc/rhsm:/etc/rhsm:ro '
+      [ -d /etc/pki/product ]           && printf -- '-v /etc/pki/product:/etc/pki/product:ro '
+      [ -f /etc/yum.repos.d/redhat.repo ] && printf -- '-v /etc/yum.repos.d/redhat.repo:/etc/yum.repos.d/redhat.repo:ro '
       ;;
     rhui:*)
       for f in /etc/yum.repos.d/redhat-rhui*.repo /etc/yum.repos.d/rh-cloud.repo; do
