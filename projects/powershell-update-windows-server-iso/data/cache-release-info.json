@@ -1,13 +1,13 @@
 {
   "Schema": "1.0",
-  "GeneratedAt": "2026-06-28T06:11:08.7516644Z",
+  "GeneratedAt": "2026-07-02T13:05:32.9257950Z",
   "SourceUrl": "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info?accept=text/markdown",
   "RawMarkdownPath": "raw-release-info.md",
   "MonthlyRowCount": 475,
   "HotpatchRowCount": 62,
   "PerOsMonthlyCounts": {
-    "Server2025": 31,
     "Server2016": 188,
+    "Server2025": 31,
     "Server2022": 90,
     "Server2019": 166
   },

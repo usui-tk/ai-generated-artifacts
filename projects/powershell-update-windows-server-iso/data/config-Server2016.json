@@ -73,7 +73,7 @@
         "Note": "discovered via Learn (build 14393.9234)"
       }
     ],
-    "LastVerifiedDate": "2026-06-28T06:11:31.1246194+00:00",
+    "LastVerifiedDate": "2026-07-02T13:05:46.2726749+00:00",
     "LastVerifiedBy": "auto:RefreshAllBaselines",
     "PatchTuesdayOfBaseline": "2026-06-09"
   },
@@ -111,7 +111,7 @@
         "LanguagePacks": [],
         "LxpUpdates": [],
         "DotNetLanguagePacks": [],
-        "LastVerifiedDate": "2026-06-28T06:11:31.9113445+00:00",
+        "LastVerifiedDate": "2026-07-02T13:05:51.0371355+00:00",
         "LastVerifiedBy": "auto:RefreshAllBaselines",
         "PatchTuesdayOfBaseline": "2026-06-09"
       }
@@ -133,15 +133,15 @@
         "LanguagePacks": [],
         "LxpUpdates": [],
         "DotNetLanguagePacks": [],
-        "LastVerifiedDate": "2026-06-28T06:11:32.7339273+00:00",
+        "LastVerifiedDate": "2026-07-02T13:05:51.7212942+00:00",
         "LastVerifiedBy": "auto:RefreshAllBaselines",
         "PatchTuesdayOfBaseline": "2026-06-09"
       }
     }
   },
   "_meta": {
-    "scriptVersion": "update-wsi-2026.06.28-r11.42",
-    "generatedAt": "2026-06-28T06:11:32Z"
+    "scriptVersion": "update-wsi-2026.07.02-r11.46",
+    "generatedAt": "2026-07-02T13:05:51Z"
   },
   "PatchModel": "separate-ssu"
 }

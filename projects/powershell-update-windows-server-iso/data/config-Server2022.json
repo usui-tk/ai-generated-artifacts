@@ -95,7 +95,7 @@
         "Note": "Products has 'Safe OS Dynamic Update' + title version token"
       }
     ],
-    "LastVerifiedDate": "2026-06-28T06:11:49.5145837+00:00",
+    "LastVerifiedDate": "2026-07-02T13:05:57.0751698+00:00",
     "LastVerifiedBy": "auto:RefreshAllBaselines",
     "PatchTuesdayOfBaseline": "2026-06-09"
   },
@@ -133,7 +133,7 @@
         "LanguagePacks": [],
         "LxpUpdates": [],
         "DotNetLanguagePacks": [],
-        "LastVerifiedDate": "2026-06-28T06:11:50.2635399+00:00",
+        "LastVerifiedDate": "2026-07-02T13:05:57.8217888+00:00",
         "LastVerifiedBy": "auto:RefreshAllBaselines",
         "PatchTuesdayOfBaseline": "2026-06-09"
       }
@@ -155,15 +155,15 @@
         "LanguagePacks": [],
         "LxpUpdates": [],
         "DotNetLanguagePacks": [],
-        "LastVerifiedDate": "2026-06-28T06:11:50.9550916+00:00",
+        "LastVerifiedDate": "2026-07-02T13:05:58.4256647+00:00",
         "LastVerifiedBy": "auto:RefreshAllBaselines",
         "PatchTuesdayOfBaseline": "2026-06-09"
       }
     }
   },
   "_meta": {
-    "scriptVersion": "update-wsi-2026.06.28-r11.42",
-    "generatedAt": "2026-06-28T06:11:50Z"
+    "scriptVersion": "update-wsi-2026.07.02-r11.46",
+    "generatedAt": "2026-07-02T13:05:58Z"
   },
   "PatchModel": "embedded-ssu-du"
 }
