@@ -307,17 +307,23 @@ run_matrix() {
 # preserve the container output to <log_dir> (fail/error only).
 ena_kick() {
   local major="$1" ver="$2" ent="$3" repo="$4" plan="$5" ref="$6" log_dir="$7" rows="$8"
-  local err_tmp out line built status kov reason row logf
+  local err_tmp out line built status kov reason row logf rc=0
   err_tmp="$(mktemp)"
-  out="$(podman run --rm \
+  out="$(timeout "${RUN_TIMEOUT:-600}" podman run --rm \
           -v "${INSTALL_SCRIPT}:/install-aws_ena-driver.sh:ro,z" \
           -e ENA_INSTALLTEST=1 -e "ENA_VERSION=${ver}" -e "ENA_ENTITLEMENT=${ent}" \
           -e "ENA_BUILD_PLAN=${plan}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-          "${ref}" /bin/bash /install-aws_ena-driver.sh 2>"${err_tmp}" || true)"
+          "${ref}" /bin/bash /install-aws_ena-driver.sh 2>"${err_tmp}")" || rc=$?
   line="$(printf '%s
 ' "${out}" | grep -F '[aws_ena-driver][installtest][result]' | tail -1)"
   logf="${log_dir}/buildtest-rhel${major}-ena_${ver}_${ent}.log"
-  if [ -z "${line}" ]; then
+  if [ "${rc}" = "124" ]; then
+    reason="timed out after ${RUN_TIMEOUT:-600}s (container stalled; possible repo/network wait)"
+    status=error
+    log "RHEL${major} ${ver}/${ent}: TIMEOUT -> ${reason}"
+    row="$(printf '{"status":"error","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":false,"ko_version":"","verdict":"harness-error","load_tier":"%s","reason":"%s"}' \
+      "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "$(ena_load_tier)" "$(jesc "${reason}")")"
+  elif [ -z "${line}" ]; then
     reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
     [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
     status=error

@@ -67,6 +67,34 @@ host_glibc() {
   rpm -q --qf '%{VERSION}\n' glibc 2>/dev/null | head -1 && return 0
   ldd --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+$'
 }
+# --- container package-manager safety (RHEL6 RHSM stall + timeouts) -----------
+# entitlement_certs_present : rc 0 iff >=1 entitlement cert is visible in-container.
+entitlement_certs_present() {
+  ls /etc/pki/entitlement/*.pem >/dev/null 2>&1 \
+    || ls /run/secrets/etc-pki-entitlement/*.pem >/dev/null 2>&1
+}
+# pm_neutralize_rhsm_if_anonymous : when NO entitlement certs are present, disable
+# the subscription-manager/product-id yum|dnf plugins for THIS container only.
+# They otherwise contact RHSM and hang indefinitely on unentitled hosts (notably
+# bare RHEL6). With certs present (entitled) they are left ON - they work and are
+# needed for entitled repos. Container-local; the host is never modified.
+pm_neutralize_rhsm_if_anonymous() {
+  entitlement_certs_present && return 0
+  local d p
+  for d in /etc/yum/pluginconf.d /etc/dnf/plugins; do
+    [ -d "${d}" ] || continue
+    for p in subscription-manager product-id; do
+      printf '[main]\nenabled=0\n' > "${d}/${p}.conf" 2>/dev/null || true
+    done
+  done
+}
+# run_pm : run a package-manager command bounded by PKG_TIMEOUT (default 300s) so a
+# stalled repo/plugin op can never hang the run. No-timeout fallback if 'timeout'
+# is somehow absent.
+run_pm() {
+  if command -v timeout >/dev/null 2>&1; then timeout "${PKG_TIMEOUT:-300}" "$@"; else "$@"; fi
+}
+
 pkgmgr() { for m in dnf yum; do command -v "${m}" >/dev/null 2>&1 && { printf '%s' "${m}"; return 0; }; done; printf 'none'; }
 
 rpm_url() {
@@ -78,6 +106,7 @@ install_rpm() {
   local url tmp mgr
   local -a opts
   url="$(rpm_url)"; tmp="$(mktemp -d)"; mgr="$(pkgmgr)"
+  pm_neutralize_rhsm_if_anonymous
   local -a copts=(-fsSL --retry 2 -o "${tmp}/ssm.rpm")
   [ "${INSECURE_TLS}" = "1" ] && copts+=(-k)
   log "fetching ${url}"
@@ -85,7 +114,7 @@ install_rpm() {
   opts=(-y install "${tmp}/ssm.rpm")
   [ "${INSECURE_TLS}" = "1" ] && opts+=(--setopt=sslverify=0)
   if [ "${mgr}" != "none" ]; then
-    "${mgr}" "${opts[@]}" >/dev/null 2>&1 || { rm -rf "${tmp}"; die "rpm install failed (dependency closure) via ${mgr}"; }
+    run_pm "${mgr}" "${opts[@]}" >/dev/null 2>&1 || { rm -rf "${tmp}"; die "rpm install failed (dependency closure) via ${mgr}"; }
   else
     rpm -i "${tmp}/ssm.rpm" >/dev/null 2>&1 || { rm -rf "${tmp}"; die "rpm -i failed (no dnf/yum; unresolved deps?)"; }
   fi

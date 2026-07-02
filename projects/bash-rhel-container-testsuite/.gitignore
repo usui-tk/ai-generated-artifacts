@@ -1,2 +1,4 @@
 # Runtime fail/error logs written by run-*-matrix.sh (--run); never committed.
 tests/aws_*/logs/
+# Environment probe output (tests/probe-env.sh --probe-env); regenerated, not committed.
+tests/ENV-PROBE.json

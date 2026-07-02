@@ -336,16 +336,22 @@ run_matrix() {
 # preserve the container output to <log_dir> (fail/error only).
 ssm_kick() {
   local major="$1" ver="$2" mode="$3" ref="$4" log_dir="$5" rows="$6"
-  local err_tmp out line installed ran svc status verdict reason row logf
+  local err_tmp out line installed ran svc status verdict reason row logf rc=0
   err_tmp="$(mktemp)"
-  out="$(podman run --rm \
+  out="$(timeout "${RUN_TIMEOUT:-600}" podman run --rm \
           -v "${INSTALL_SCRIPT}:/install-aws_ssm-agent.sh:ro,z" \
           -e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e "SSM_INIT_MODE=${mode}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-          "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>"${err_tmp}" || true)"
+          "${ref}" /bin/bash /install-aws_ssm-agent.sh 2>"${err_tmp}")" || rc=$?
   line="$(printf '%s
 ' "${out}" | grep -F '[aws_ssm-agent][installtest][result]' | tail -1)"
   logf="${log_dir}/installtest-rhel${major}-ssm_${ver}_${mode}.log"
-  if [ -z "${line}" ]; then
+  if [ "${rc}" = "124" ]; then
+    reason="timed out after ${RUN_TIMEOUT:-600}s (container stalled; possible repo/network wait)"
+    status=error; verdict=harness-error
+    log "RHEL${major} ${ver}/${mode}: TIMEOUT -> ${reason}"
+    row="$(printf '{"status":"error","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":false,"ran":false,"service_enabled":false,"verdict":"harness-error","reason":"%s"}' \
+      "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "$(jesc "${reason}")")"
+  elif [ -z "${line}" ]; then
     reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
     [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
     status=error; verdict=harness-error

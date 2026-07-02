@@ -11,6 +11,43 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r18] - 2026-07-02 - permanent yum fix (RHSM plugin gating) + timeouts + --probe-env
+
+Supersedes the unreleased interim r17. Fixes the RHEL 6 live-host hang *properly*
+(so yum actually works, which the ENA dkms/EPEL path needs) instead of bypassing
+repos, and adds an opt-in environment probe.
+
+### Root cause (recap)
+RHEL 7-10 use UBI images (public repos); RHEL 6 uses the bare rhel6/rhel image,
+whose subscription-manager/product-id yum plugins reach out to RHSM and hang with
+no entitlement/route. r17's stopgap (`--disablerepo='*'`) unblocked SSM only
+because the SSM RPM has no deps - but it would break ENA's dkms plan, which must
+install DKMS from EPEL via yum. So the permanent fix must keep yum working.
+
+### Fixed (permanent)
+- **RHSM plugin gating (all install scripts).** When NO entitlement certs are
+  present in the container, the subscription-manager/product-id yum|dnf plugins
+  are disabled for that run (they only stall); when certs ARE present (entitled)
+  they are left on, since entitled repos need them. yum/dnf then work normally
+  against the pinned EPEL repo and any reachable repos - including RHEL 6. Entirely
+  script + container-local; the host is never modified.
+- **Two nested timeouts.** `RUN_TIMEOUT` (default 600s) wraps each `podman run`
+  (a stall becomes a harness-error row + preserved log, sweep continues);
+  `PKG_TIMEOUT` (default 300s) bounds each in-container yum/dnf op. Both overridable.
+
+### Added
+- **`tests/probe-env.sh` (opt-in `--probe-env`).** Probes all five majors with a
+  common check set - image runs here (exec/glibc/vsyscall), pkgmgr, yum usable
+  without the RHSM stall, S3 + EPEL egress, entitlement - and prints a readiness
+  table (ready/degraded/blocked) + ENV-PROBE.json (git-ignored). Never modifies
+  the host. Pure classifier `probe_verdict` is unit-tested (t017).
+- TESTING.md: `--probe-env`, RHEL 6 assumptions, and the timeout knobs.
+
+### Verified
+- Suite green (**17 tiers, 441 passed**); ShellCheck-style-clean; LF-only.
+  Stub: RUN_TIMEOUT path -> harness-error+reason+log; probe -> ready/degraded per
+  egress; install-script wiring (plugin gating + run_pm) present in all three.
+
 ## [r16] - 2026-07-02 - host banner, SSM init_mode Case A, fail/error logs
 
 Three operator-driven improvements, agreed as a spec before implementation.

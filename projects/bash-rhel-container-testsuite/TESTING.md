@@ -241,6 +241,48 @@ so results are host-independent and deterministic.
 
 ---
 
+## Environment probe (opt-in): `--probe-env`
+
+Before a full `--run`, you can probe whether the host + container runtime can
+actually exercise each RHEL major:
+
+```
+tests/probe-env.sh                 # probes 10 9 8 7 6 (override with OSMAJORS)
+tests/probe-env.sh --majors "6"    # just RHEL 6
+```
+
+It runs one short-lived container per major and reports common checks - does the
+image run here (`exec`; covers pull, arch, and old-userspace glibc/vsyscall),
+package manager present, `yum`/`dnf` usable without the RHSM plugin stall
+(`yum_ok`), egress to S3 and EPEL, and the entitlement state - then a `verdict`
+of **ready** / **degraded** (runs but an egress/yum gap) / **blocked** (image
+won't run here). Output goes to the log, a readiness table, and `ENV-PROBE.json`
+(git-ignored). The probe never modifies the host.
+
+## RHEL 6 assumptions, and why yum can stall
+
+RHEL 7-10 use public UBI images; **RHEL 6 uses the bare `rhel6/rhel` image**
+(non-UBI, amd64-only, on an EOL/ELS-ended distro). For RHEL 6 to be testable the
+host must run amd64 and be able to execute glibc-2.12 userspace, and the container
+must reach `s3.amazonaws.com` (SSM RPM) and `dl.fedoraproject.org` (EPEL, archive
+tree). The bare image also ships the `subscription-manager`/`product-id` yum
+plugins: **without an entitlement they try to reach RHSM and hang indefinitely**.
+The install scripts therefore disable those two plugins for the container run when
+no entitlement certs are present (kept ON when certs are present, since entitled
+repos need them) - so `yum` works normally against the pinned EPEL repo and other
+reachable repos. The host is never changed.
+
+## Timeouts
+
+Two nested guards (both overridable) keep a stall from ever hanging a run:
+
+- `RUN_TIMEOUT` (default 600s) wraps each whole `podman run`; on expiry the case
+  is recorded as a `harness-error` (`reason: "timed out after Ns ..."`) with a
+  preserved log, and the sweep continues.
+- `PKG_TIMEOUT` (default 300s) bounds each in-container `yum`/`dnf` operation.
+
+Raise both on slow-mirror links (e.g. `PKG_TIMEOUT=360 RUN_TIMEOUT=900`).
+
 ## Environment & version dependencies
 
 | Component | Role | Notes |

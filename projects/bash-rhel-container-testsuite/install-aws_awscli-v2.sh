@@ -48,6 +48,34 @@ AWSCLI_VERSION_RHEL10="${AWSCLI_VERSION_RHEL10:-latest}"
 OSMAJOR=""; GLIBC=""; INSTALLED_VERSION=""; RAN="false"; RUN_METHOD=""
 BUNDLED_PYTHON=""; MIN_GLIBC_MEASURED=""; RESULT_EMITTED=0
 
+# --- container package-manager safety (RHEL6 RHSM stall + timeouts) -----------
+# entitlement_certs_present : rc 0 iff >=1 entitlement cert is visible in-container.
+entitlement_certs_present() {
+  ls /etc/pki/entitlement/*.pem >/dev/null 2>&1 \
+    || ls /run/secrets/etc-pki-entitlement/*.pem >/dev/null 2>&1
+}
+# pm_neutralize_rhsm_if_anonymous : when NO entitlement certs are present, disable
+# the subscription-manager/product-id yum|dnf plugins for THIS container only.
+# They otherwise contact RHSM and hang indefinitely on unentitled hosts (notably
+# bare RHEL6). With certs present (entitled) they are left ON - they work and are
+# needed for entitled repos. Container-local; the host is never modified.
+pm_neutralize_rhsm_if_anonymous() {
+  entitlement_certs_present && return 0
+  local d p
+  for d in /etc/yum/pluginconf.d /etc/dnf/plugins; do
+    [ -d "${d}" ] || continue
+    for p in subscription-manager product-id; do
+      printf '[main]\nenabled=0\n' > "${d}/${p}.conf" 2>/dev/null || true
+    done
+  done
+}
+# run_pm : run a package-manager command bounded by PKG_TIMEOUT (default 300s) so a
+# stalled repo/plugin op can never hang the run. No-timeout fallback if 'timeout'
+# is somehow absent.
+run_pm() {
+  if command -v timeout >/dev/null 2>&1; then timeout "${PKG_TIMEOUT:-300}" "$@"; else "$@"; fi
+}
+
 log() { printf '%s [install-aws_awscli-v2] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -128,13 +156,14 @@ fetch_unzip() {
 block_awscli_v1() {
   local -a so=()
   [ "${INSECURE_TLS}" = "1" ] && so=(--setopt=sslverify=0)
+  pm_neutralize_rhsm_if_anonymous
   if command -v dnf >/dev/null 2>&1; then
-    if dnf -y "${so[@]}" install python3-dnf-plugin-versionlock >/dev/null 2>&1 \
+    if run_pm dnf -y "${so[@]}" install python3-dnf-plugin-versionlock >/dev/null 2>&1 \
        && dnf "${so[@]}" versionlock exclude 'awscli' >/dev/null 2>&1; then
       log "v1-block: dnf versionlock excludes awscli (v1)"; return 0
     fi
   elif command -v yum >/dev/null 2>&1; then
-    if yum -y "${so[@]}" install yum-plugin-versionlock >/dev/null 2>&1 \
+    if run_pm yum -y "${so[@]}" install yum-plugin-versionlock >/dev/null 2>&1 \
        && yum "${so[@]}" versionlock exclude 'awscli' >/dev/null 2>&1; then
       log "v1-block: yum versionlock excludes awscli (v1)"; return 0
     fi

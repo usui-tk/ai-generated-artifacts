@@ -347,16 +347,22 @@ run_matrix() {
 # preserve the container output to <log_dir> (fail/error only).
 awscli_kick() {
   local major="$1" ver="$2" ref="$3" log_dir="$4" rows="$5"
-  local err_tmp out line ran iv status bpy mgl reason row logf
+  local err_tmp out line ran iv status bpy mgl reason row logf rc=0
   err_tmp="$(mktemp)"
-  out="$(podman run --rm \
+  out="$(timeout "${RUN_TIMEOUT:-600}" podman run --rm \
           -v "${INSTALL_SCRIPT}:/install-aws_awscli-v2.sh:ro,z" \
           -e AWSCLI_INSTALLTEST=1 -e "AWSCLI_VERSION=${ver}" -e "INSECURE_TLS=${INSECURE_TLS:-0}" \
-          "${ref}" /bin/bash /install-aws_awscli-v2.sh 2>"${err_tmp}" || true)"
+          "${ref}" /bin/bash /install-aws_awscli-v2.sh 2>"${err_tmp}")" || rc=$?
   line="$(printf '%s
 ' "${out}" | grep -F '[aws_awscli-v2][installtest][result]' | tail -1)"
   logf="${log_dir}/installtest-rhel${major}-awscli_${ver}.log"
-  if [ -z "${line}" ]; then
+  if [ "${rc}" = "124" ]; then
+    reason="timed out after ${RUN_TIMEOUT:-600}s (container stalled; possible repo/network wait)"
+    status=error
+    log "RHEL${major} ${ver}: TIMEOUT -> ${reason}"
+    row="$(printf '{"status":"error","osmajor":"%s","awscli_version":"%s","glibc":"%s","ran":false,"installed_version":"","bundled_python":"","min_glibc_measured":"","verdict":"harness-error","reason":"%s"}' \
+      "${major}" "${ver}" "$(rhel_glibc "${major}")" "$(jesc "${reason}")")"
+  elif [ -z "${line}" ]; then
     reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
     [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
     status=error
