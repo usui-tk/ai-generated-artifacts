@@ -45,7 +45,7 @@ Windows Update は稼働中サーバーを最新状態に保つ標準的な手�
   ハードウェアで起動できる ISO を生成します。
 - **エアギャップ／オフラインラボ**：インターネット出口を持たないラボ
   ネットワークでは Windows Update を利用できません。本スクリプトは事前配置済みの
-  MSU / CAB ファイルを `-PatchDirectory` 経由で受け入れるため、ビルド全体を
+  MSU / CAB ファイルを `<WorkRoot>/patches/<OsVersion>/` への事前配置で受け入れる（P04 は検証済みファイルをスキップ）ため、ビルド全体を
   オフラインで実行できます。
 - **再現可能なパッチベースライン**：コンプライアンスやフォレンジック再現
   シナリオでは「この ISO にビルド時点で何が含まれていたか」の監査記録が
@@ -162,7 +162,7 @@ OS ごとに `-WorkRoot` を分け、同時実行や再実行で DISM マウン�
 ファイルにします（日付の手入力は不要）。`data/` に同梱されたパッチベース
 ラインを使う前提では、スクリプトが OS プロファイルからソース ISO のダウン
 ロード URL を解決し、パッチ一式も配布ベースラインから取得するため、
-**`-IsoPath` や `-PatchDirectory` は不要**です。`-UseBaselineOnly` を付けると
+**`-IsoPath` やパッチ系パラメータは不要**です。`-UseBaselineOnly` を付けると
 同梱ベースラインに固定され、Catalog / release-info の公開タイミングに依存
 しません。
 
@@ -306,7 +306,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | Windows ADK | Deployment Tools 機能（`oscdimg.exe` を提供）。不在時に自動インストール（スイッチ不要）|
 | Windows SDK Signing Tools | 埋め込み PCA2023/PCA2011 ブート署名検証用の `signtool.exe` を提供（P10/P12 readiness）。不在時に自動インストール（スイッチ不要）|
 | ディスク空き容量 | `-WorkRoot` ドライブに 100 GB 以上（最低 60 GB、Workspace プリフライトが 100 GB を強制チェック）|
-| ネットワーク | ISO とパッチのダウンロード用インターネットアクセス（`-IsoPath` + `-PatchDirectory` 利用時は不要）|
+| ネットワーク | ISO とパッチのダウンロード用インターネットアクセス（オフライン時は `-IsoPath` + `<WorkRoot>/patches/<OsVersion>/` へのパッチ事前配置）|
 | 静的解析 | `python3` + 正規配置の `psa.py`（後述「静的解析」を参照）|
 
 ## 対応 OS と言語
@@ -386,9 +386,6 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-CleanWorkRoot` | common | switch（OFF）| 実行前にワークスペースを掃除 |
 | `-IsoPath` | input | （なし）| ローカル ソース ISO パス（`-IsoUrl` と排他）|
 | `-IsoUrl` | input | （なし）| ソース ISO ダウンロード URL（`-IsoPath` と排他）|
-| `-PatchDirectory` | input | （なし）| ローカル MSU/CAB パッチのディレクトリ |
-| `-PatchUrls` | input | （なし）| 明示的なパッチ URL の配列 |
-| `-ManifestPath` | input | （なし）| ハッシュ付き Metalink `.meta4` マニフェスト |
 | `-OnlyPhases` | advanced | （なし）| アクション既定を上書きするフェーズ ID 配列（例 `'P04','P07'`）|
 | `-OnlyInstallWimIndexes` | advanced | （なし）| install.wim 更新を限定するインデックス一覧（例 `'2,4'`）|
 | `-UseDefenderExclusions` | advanced | switch（OFF）| オプトイン: 実行中だけ WorkRoot ツリー ＋ dism/DismHost/TiWorker/TrustedInstaller を Defender 除外（fail-closed・LCU 適用が約 35% 高速化）|

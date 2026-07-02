@@ -48,7 +48,8 @@ solve well on its own:
   chain so the resulting ISO boots on revoked-firmware hardware.
 - **Air-gapped / offline labs**. Lab networks with no internet egress
   cannot use Windows Update. The script accepts pre-staged MSU / CAB
-  files via `-PatchDirectory` so the entire build can run offline.
+  files pre-staged under `<WorkRoot>/patches/<OsVersion>/` (P04 skips
+  verified files) so the entire build can run offline.
 - **Reproducible patch baselines**. Compliance and forensic-replay
   scenarios require an audited "what was inside this ISO at build time"
   record. The Config baseline (`data/config-Server*.json`) and the
@@ -169,7 +170,7 @@ DISM mount cache, and auto-timestamp the log so each run is its own file
 (no manual date typing). With the patch baseline shipped in `data/`, the
 script resolves the source ISO download URL from the OS profile and takes
 its patch set from the distributed baseline, so **no `-IsoPath` or
-`-PatchDirectory` is needed**; `-UseBaselineOnly` pins the run to that
+patch parameter is needed**; `-UseBaselineOnly` pins the run to that
 shipped baseline, so it never depends on live Catalog / release-info
 publication timing:
 
@@ -315,7 +316,7 @@ groups for newly-added languages).
 | Windows ADK | Deployment Tools feature (provides `oscdimg.exe`); auto-installed when missing (no switch) |
 | Windows SDK Signing Tools | Provides `signtool.exe` for embedded PCA2023/PCA2011 boot-signature verification (P10/P12 readiness); auto-installed when missing (no switch) |
 | Disk space | 100 GB free on the `-WorkRoot` drive (60 GB minimum, 100 GB enforced by Workspace preflight) |
-| Network | Internet access for ISO / patch downloads (when not using `-IsoPath` + `-PatchDirectory`) |
+| Network | Internet access for ISO / patch downloads (offline: `-IsoPath` + pre-staged patch files under `<WorkRoot>/patches/<OsVersion>/`) |
 | Static analysis | `python3` + the canonical `psa.py` for static analysis (see "Static analysis" below) |
 
 ## Supported target OS and languages
@@ -400,9 +401,6 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-CleanWorkRoot` | common | switch (OFF) | Clean the workspace before running |
 | `-IsoPath` | input | (none) | Local source ISO path (mutually exclusive with `-IsoUrl`) |
 | `-IsoUrl` | input | (none) | Explicit source ISO download URL (mutually exclusive with `-IsoPath`) |
-| `-PatchDirectory` | input | (none) | Directory of local MSU/CAB patches |
-| `-PatchUrls` | input | (none) | Array of explicit patch URLs |
-| `-ManifestPath` | input | (none) | Metalink `.meta4` manifest with hashes |
 | `-OnlyPhases` | advanced | (none) | Phase-ID array (e.g. `'P04','P07'`) overriding the Action's phase set |
 | `-OnlyInstallWimIndexes` | advanced | (none) | Comma-separated index list (e.g. `'2,4'`) limiting install.wim updates |
 | `-UseDefenderExclusions` | advanced | switch (OFF) | Opt-in: temporarily exclude the WorkRoot tree + dism/DismHost/TiWorker/TrustedInstaller from Defender for the run (fail-closed; ~35% faster LCU apply) |

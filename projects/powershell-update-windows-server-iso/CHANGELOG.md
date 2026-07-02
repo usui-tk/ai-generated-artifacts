@@ -22,6 +22,49 @@ the script and follows the
 
 ## [Unreleased]
 
+### Removed / Fixed -- retire the three legacy patch-input paths (`-PatchUrls` / `-PatchDirectory` / `-ManifestPath`) and their pre-migration classifier; fix two defects in the post-refresh re-derivation (r11.49 -> r11.50, tag `legacy-input-retirement`; audit G1 + new finding G7)
+
+**Retired (G1).** The three operator patch-input paths predated the
+data-source migration and were unsound against today's pipeline on two
+independent counts, both proven in the 2026-07-02 final inspection:
+(1) their filename classifier `Get-PatchType` emitted a vocabulary
+(`DotNet.Runtime` / `DynamicUpdate.*` / `Defender` / `Edge` / `Other`)
+that exists neither in `$Script:PatchTargetMap` nor in any
+`Build-*ApplySequence` bucket -- unknown types fell to install.wim-only
+with a warning and `DotNet.Runtime` silently vanished from every
+sub-phase; (2) run against real Catalog filenames (which carry no type
+tokens), the heuristic misclassified SSU, SafeOSDU and SetupDU all as
+`LCU` (`kb\d+` fires first), so an SSU would apply at LCU order
+(0x800f0823 risk) and a SafeOS DU to the wrong images. Removed: the
+three parameters, their help blocks, the three P02 Step-3 branches, the
+`.meta4` side-car probing, `Read-MetalinkManifest`,
+`Get-PatchType`, `Get-PatchApplyOrder` (taking the orphaned
+`DotNet.OsLevel` / `Defender` / `Edge` order rows with them -- audit
+G6), and the now-constant `$userProvidedPatches` guard. The
+PatchTargetMap preamble now documents the real v3.0 Kind mapping
+instead of the pre-migration vocabulary (G6); an unreachable
+`DotNet.Runtime` comparison in `Select-CanonicalPatchFile` becomes
+`-like 'DotNet*'`; the I5 `DynamicUpdate.Component` sub-phase is kept
+as an explicitly-annotated reserved slot mirroring Microsoft's
+documented sequence. Baseline-driven runs are unaffected; offline runs
+remain supported by pre-staging the baseline files under
+`<WorkRoot>/patches/<OsVersion>/` (P04 skips verified files), now
+documented in both READMEs and the TESTING E2E procedures
+(`-UseBaselineOnly` replaces `-PatchDirectory` throughout).
+
+**Fixed (G7, found during this retirement).** The post-refresh
+re-derivation block projected `PatchType = $p.Type`, but refreshed Line
+objects carry the type under `Kind` (and the script does not run under
+Set-StrictMode), so every entry silently got a `$null` PatchType --
+after an in-run P03 refresh, all patches dropped out of the apply
+sub-phases. It now projects `$p.Kind`, matching the P02 seeding path.
+The same block also declared only a `sha-256` expected hash, missing
+the `sha-1` Catalog `Digest` wiring the P02 path received under the
+`digest-format-boundary` fix; both writers now declare the same
+two-layer expectation. (Follow-up candidate: extract the two duplicated
+Line->ResolvedPatch projections into one pure helper, the same
+single-writer treatment TargetBuildAfterUpdate received.)
+
 ### Removed -- retire the dead `-EvalIsoMode` switch and the reader-less `Iso.*` config/seed fields; rewrite SPEC B.7 to the real source-ISO resolution (r11.48 -> r11.49, tag `evaliso-retirement`; audit G2)
 
 The 2026-07-02 final inspection found the evaluation-ISO mechanism had

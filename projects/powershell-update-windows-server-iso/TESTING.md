@@ -195,7 +195,7 @@ Verification checklist:
     -Action PrepareBuildVerify `
     -OsVersion Server2019 -OsLanguage ja-jp `
     -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
-    -PatchDirectory 'D:\Patches\Server2019\2026-05' `
+    -UseBaselineOnly `
     -WorkRoot 'D:\UpdateWsi' `
     -DryRun
 ```
@@ -313,7 +313,7 @@ procedure is below; results from past real runs are recorded in
        -Action PrepareBuildVerify `
        -OsVersion $OsVersion -OsLanguage ja-jp `
        -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
-       -PatchDirectory 'D:\Patches\Server2019\2026-05' `
+       -UseBaselineOnly `
        -WorkRoot $WorkRoot -LogFile $LogFile `
        -Execute
    ```
@@ -362,7 +362,7 @@ $common = @{
     OsVersion             = $OsVersion
     OsLanguage            = $OsLanguage
     IsoPath               = "D:\ISO\WS$($OsVersion -replace 'Server','')_$OsLanguage.iso"
-    PatchDirectory        = "D:\Patches\$OsVersion\2026-05"
+    UseBaselineOnly       = $true
     WorkRoot              = $WorkRoot
     LogFile               = $LogFile
     Execute               = $true

@@ -21,8 +21,9 @@
       - Administrator (DISM Mount requires elevation)
       - Windows ADK Deployment Tools (for oscdimg.exe)
       - 60 GB free disk space on the WorkRoot drive (30 GB minimum)
-      - Internet access for ISO/patch downloads (when not using -IsoPath +
-        -PatchDirectory)
+      - Internet access for ISO/patch downloads (offline runs: pass
+        -IsoPath and pre-stage the baseline patch files under
+        <WorkRoot>/patches/<OsVersion>/ -- P04 skips verified files)
       - Optional: python3 + quality-tools/powershell-static-analyzer/psa.py
         from usui-tk/ai-generated-artifacts (latest mainline) for static
         analysis (rule families PSA1001..PSA9002 plus opt-in
@@ -80,15 +81,6 @@
 
 .PARAMETER IsoPath
     Local path of the source ISO. Mutually exclusive with -IsoUrl.
-
-.PARAMETER PatchUrls
-    Array of explicit patch URLs (MSU or CAB).
-
-.PARAMETER PatchDirectory
-    Directory containing local MSU/CAB patches.
-
-.PARAMETER ManifestPath
-    Path to a Metalink (.meta4) manifest file describing the patch set.
 
 .PARAMETER AutoDetectLatestPatches
     Force a refresh of the patch baseline by scraping Microsoft Update
@@ -185,10 +177,12 @@
         -Action PrepareBuildVerify `
         -OsVersion Server2019 -OsLanguage ja-jp `
         -IsoPath 'D:\ISO\WS2019_ja-jp.iso' `
-        -PatchDirectory 'D:\Patches\Server2019\2026-05' `
+        -UseBaselineOnly `
         -WorkRoot 'D:\UpdateWsi' `
         -Execute
-    Full local build with explicit ISO and patch directory inputs.
+    Full local build: explicit ISO, patch set pinned to the committed
+    PatchBaseline.Lines (pre-stage the files under
+    <WorkRoot>/patches/Server2019/ to run offline; P04 skips verified files).
 
 .EXAMPLE
     .\Update-WindowsServerIso.ps1 `
@@ -228,9 +222,6 @@ param(
     [string]   $IsoUrl,
     [string]   $IsoPath,
 
-    [string[]] $PatchUrls,
-    [string]   $PatchDirectory,
-    [string]   $ManifestPath,
     [switch]   $AutoDetectLatestPatches,
 
     # ---- dynamic baseline / validation parameters ----
@@ -531,8 +522,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.49'
-$Script:ScriptTag     = 'evaliso-retirement'
+$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.50'
+$Script:ScriptTag     = 'legacy-input-retirement'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -642,16 +633,14 @@ $Script:OsConfigFieldGroups = @(
 # target. Unknown Types are treated as Install-only with a warning.
 #
 # Microsoft public guidance behind this mapping:
-#   - SSU                    : required on every serviced WIM
-#   - LCU                    : Install + Boot (WinRE uses SafeOS DU instead)
-#   - DotNet.Runtime         : Install only (.NET 4.x runtime KB lives in install.wim)
-#   - DotNet.OsLevel         : recorded only; OS-offering KB not applied to any WIM
-#   - DynamicUpdate.Component: Install only (component-store updates)
-#   - DynamicUpdate.SafeOs   : WinRE only (WinRE is the "Safe OS")
-#   - DynamicUpdate.Setup    : Setup binaries (handled via pending.xml)
-#   - LanguagePack           : Install + WinRE (user-facing UI + recovery UI)
-#   - LXP                    : Install only (LXPs are Store apps; no WinRE)
-#   - DotNet.LangPack        : Install only (.NET satellite assemblies)
+#   - SSU             : required on every serviced WIM
+#   - LCU             : Install + Boot (WinRE uses the SafeOS DU instead)
+#   - DotNet          : Install only (.NET 4.x runtime KB lives in install.wim)
+#   - SafeOSDU        : WinRE only (WinRE is the "Safe OS")
+#   - SetupDU         : Setup binaries (sources overlay; not WIM-mounted)
+#   - LanguagePack    : Install + WinRE (user-facing UI + recovery UI)
+#   - LXP             : Install only (LXPs are Store apps; no WinRE)
+#   - DotNet.LangPack : Install only (.NET satellite assemblies)
 $Script:PatchTargetMap = @{
     # Kind -> WIM targets (Config Schema v3.0 / data-source migration). Neutral Kinds:
     'SSU'             = @('Install', 'Boot', 'WinRE')
@@ -2914,46 +2903,6 @@ function Resolve-IsoSourceUrl {
 }
 
 # ============================================================
-# ISO Updater specific: Metalink (.meta4) IO
-# ============================================================
-
-function Read-MetalinkManifest {
-    <#
-    .SYNOPSIS
-        Parse a Metalink 4 (.meta4) manifest into a list of
-        pscustomobjects with FileName, Urls (array), Hashes (hashtable).
-    #>
-    [CmdletBinding()]
-    [OutputType([System.Collections.Generic.List[object]])]
-    param([Parameter(Mandatory)] [string]$Path)
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        throw ('Manifest not found: {0}' -f $Path)
-    }
-    [xml]$ml = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
-    $ns = New-Object System.Xml.XmlNamespaceManager $ml.NameTable
-    $ns.AddNamespace('ml', 'urn:ietf:params:xml:ns:metalink')
-
-    $files = New-Object System.Collections.Generic.List[object]
-    foreach ($node in $ml.SelectNodes('//ml:file', $ns)) {
-        $hashes = @{}
-        foreach ($h in $node.SelectNodes('ml:hash', $ns)) {
-            $hashes[$h.type] = ([string]$h.'#text').Trim()
-        }
-        $urls = @()
-        foreach ($u in $node.SelectNodes('ml:url', $ns)) {
-            $urls += ([string]$u.'#text').Trim()
-        }
-        $files.Add([pscustomobject]@{
-            FileName = $node.name
-            Urls     = $urls
-            Hashes   = $hashes
-        }) | Out-Null
-    }
-    return $files
-}
-
-# ============================================================
 # ISO Updater specific: patch integrity verification
 # ============================================================
 
@@ -3017,9 +2966,9 @@ function Test-PatchIntegrity {
         Expected values come from the config PatchBaseline.Lines[] fields
         Digest / Sha256, stored BASE64 exactly as the Microsoft Update
         Catalog DownloadDialog serves them; ConvertTo-HexDigestString
-        normalizes them to hex at this comparison boundary. (The prior
-        wording named "Metalink", the pre-migration source; the base64-vs-
-        hex format gap it hid failed EVERY real download verification.)
+        normalizes them to hex at this comparison boundary (the base64-vs-
+        hex format gap, when hidden, failed EVERY real download
+        verification -- see CHANGELOG, tag 'digest-format-boundary').
         L3:  Authenticode signature is Valid and signer is Microsoft
         Throws on any hard failure; returns the verification report
         otherwise.
@@ -3116,50 +3065,6 @@ function Get-PatchKbId {
     if ($FileName -match 'KB(\d{6,8})') { return ('KB' + $matches[1]) }
     if ($FileName -match 'kb(\d{6,8})') { return ('KB' + $matches[1]) }
     return 'Unknown'
-}
-
-function Get-PatchType {
-    <#
-    .SYNOPSIS
-        Heuristic classification of a patch file as SSU / LCU /
-        DotNet.Runtime / DynamicUpdate.* / Defender / Edge / Other.
-    .DESCRIPTION
-        Microsoft does not embed the patch type in the filename in a
-        machine-readable way, so the classifier matches against
-        well-known token patterns documented in the Update History
-        pages. A .NET-bearing filename always classifies as
-        DotNet.Runtime because the OS-offering KB (DotNet.OsLevel)
-        has no on-disk payload -- it is recorded in the PatchBaseline
-        for traceability only and never reaches this function.
-    #>
-    param([Parameter(Mandatory)] [string]$FileName)
-    $n = $FileName.ToLower()
-    if ($n -match 'servicingstack' -or $n -match 'ssu')         { return 'SSU' }
-    if ($n -match 'ndp[0-9]+'      -or $n -match '\.net')       { return 'DotNet.Runtime' }
-    if ($n -match 'safeos')                                     { return 'DynamicUpdate.SafeOs' }
-    if ($n -match 'setupdynamic'   -or $n -match 'setup.*dynamic') { return 'DynamicUpdate.Setup' }
-    if ($n -match 'dynamicupdate')                              { return 'DynamicUpdate.Component' }
-    if ($n -match 'defender')                                   { return 'Defender' }
-    if ($n -match 'edge')                                       { return 'Edge' }
-    if ($n -match 'kb\d+' -or $n -match 'cumulative')           { return 'LCU' }
-    return 'Other'
-}
-
-function Get-PatchApplyOrder {
-    # Numeric apply order, lower applies first.
-    param([Parameter(Mandatory)] [string]$PatchType)
-    switch ($PatchType) {
-        'SSU'                       { return 1 }
-        'DynamicUpdate.Setup'       { return 2 }
-        'LCU'                       { return 3 }
-        'DynamicUpdate.Component'   { return 4 }
-        'DynamicUpdate.SafeOs'      { return 5 }
-        'DotNet.Runtime'            { return 6 }
-        'DotNet.OsLevel'            { return 99 }
-        'Defender'                  { return 7 }
-        'Edge'                      { return 8 }
-        default                     { return 99 }
-    }
 }
 
 
@@ -4700,8 +4605,9 @@ function Select-CanonicalPatchFile {
         # Token "full" is a positive signal for standalone packages
         if ($fn -match 'full') { $score += 30 }
 
-        # .NET CU: prefer ndp<version> variant (e.g. ndp48 for .NET 4.8)
-        if ($PatchType -eq 'DotNet.Runtime' -and $DotNetVersion) {
+        # .NET packages: prefer the ndp<version> variant (e.g. ndp48 for
+        # .NET 4.8). Matches every DotNet* Kind (Config Schema v3.0).
+        if ($PatchType -like 'DotNet*' -and $DotNetVersion) {
             $ndpTok = 'ndp' + ($DotNetVersion -replace '\.', '')
             if ($fn -match [regex]::Escape($ndpTok)) { $score += 100 }
         }
@@ -7644,6 +7550,9 @@ function Build-InstallApplySequence {
     if ($byType.ContainsKey('DotNet.LangPack')) { $lp += $byType['DotNet.LangPack'] }
     $lcu        = @(if ($byType.ContainsKey('LCU')) { $byType['LCU'] } else { @() })
     $dotnet     = @(if ($byType.ContainsKey('DotNet')) { $byType['DotNet'] } else { @() })
+    # Reserved slot mirroring Microsoft's documented sequence; the
+    # baseline Kind vocabulary (LCU/SSU/DotNet/SafeOSDU/SetupDU) does not
+    # currently produce this type, so the bucket is normally empty.
     $dynUpComp  = @(if ($byType.ContainsKey('DynamicUpdate.Component')) { $byType['DynamicUpdate.Component'] } else { @() })
 
     $hasLp = ($lp.Count -gt 0)
@@ -9613,61 +9522,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         Set-DebugStep -Step 'resolve-patch-list'
         Write-SubSection 'Step 3: Resolve patch list'
         $resolved = New-Object System.Collections.Generic.List[object]
-        if ($Script:PatchUrls -and $Script:PatchUrls.Count -gt 0) {
-            Write-Step ('Using {0} explicit -PatchUrls.' -f $Script:PatchUrls.Count)
-            foreach ($u in $Script:PatchUrls) {
-                $fn = ([System.IO.Path]::GetFileName($u))
-                $resolved.Add([pscustomobject]@{
-                    Kind = 'Patch'; Source = $u
-                    LocalPath = Join-Path $Script:PatchesDir (Join-Path $Script:OsVersion $fn)
-                    KbId = (Get-PatchKbId -FileName $fn)
-                    PatchType = (Get-PatchType -FileName $fn)
-                    ApplyOrder = 99
-                    ExpectedHashes = @{}
-                }) | Out-Null
-            }
-        } elseif ($Script:ManifestPath) {
-            Write-Step ('Reading Metalink manifest: {0}' -f $Script:ManifestPath)
-            $entries = Read-MetalinkManifest -Path (Resolve-RelativeToScript $Script:ManifestPath)
-            foreach ($e in $entries) {
-                $resolved.Add([pscustomobject]@{
-                    Kind = 'Patch'; Source = ($e.Urls | Select-Object -First 1)
-                    LocalPath = Join-Path $Script:PatchesDir (Join-Path $Script:OsVersion $e.FileName)
-                    KbId = (Get-PatchKbId -FileName $e.FileName)
-                    PatchType = (Get-PatchType -FileName $e.FileName)
-                    ApplyOrder = (Get-PatchApplyOrder -PatchType (Get-PatchType -FileName $e.FileName))
-                    ExpectedHashes = $e.Hashes
-                }) | Out-Null
-            }
-        } elseif ($Script:PatchDirectory) {
-            $dir = Resolve-RelativeToScript $Script:PatchDirectory
-            if (-not (Test-Path -LiteralPath $dir)) {
-                throw ('PatchDirectory does not exist: {0}' -f $dir)
-            }
-            Write-Step ('Enumerating patches under: {0}' -f $dir)
-            $local = Get-ChildItem -LiteralPath $dir -File -Recurse -Include '*.msu','*.cab' -ErrorAction SilentlyContinue
-            foreach ($f in $local) {
-                $hashes = @{}
-                # Look for a side-car .meta4 in the same folder
-                $sideCar = Join-Path $f.DirectoryName ([System.IO.Path]::GetFileNameWithoutExtension($f.FullName) + '.meta4')
-                if (Test-Path -LiteralPath $sideCar) {
-                    try {
-                        $meta = Read-MetalinkManifest -Path $sideCar
-                        foreach ($m in $meta) {
-                            if ($m.FileName -eq $f.Name) { $hashes = $m.Hashes; break }
-                        }
-                    } catch { $null = $_ }
-                }
-                $resolved.Add([pscustomobject]@{
-                    Kind = 'Patch'; Source = $f.FullName
-                    LocalPath = $f.FullName
-                    KbId = (Get-PatchKbId -FileName $f.Name)
-                    PatchType = (Get-PatchType -FileName $f.Name)
-                    ApplyOrder = (Get-PatchApplyOrder -PatchType (Get-PatchType -FileName $f.Name))
-                    ExpectedHashes = $hashes
-                }) | Out-Null
-            }
-        } elseif ($Script:AutoDetectLatestPatches -or $Script:UseBaselineOnly -or `
+        if ($Script:AutoDetectLatestPatches -or $Script:UseBaselineOnly -or `
                   ($Script:OsProfile.PatchBaseline -and `
                    $Script:OsProfile.PatchBaseline.Lines -and `
                    $Script:OsProfile.PatchBaseline.Lines.Count -gt 0)) {
@@ -9734,7 +9589,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         } elseif ($Script:SyntheticTestMode) {
             Write-Step '-SyntheticTestMode is on; no real patches required.'
         } else {
-            throw 'No patch source specified. Provide one of: -PatchUrls / -PatchDirectory / -ManifestPath / -AutoDetectLatestPatches, or populate Config PatchBaseline.Lines.'
+            throw 'No patch source available. Pass -AutoDetectLatestPatches, or populate Config PatchBaseline.Lines (-Action RefreshAllBaselines).'
         }
 
         # Order by ApplyOrder, then by KbId. Wrap in @() to guarantee
@@ -9964,12 +9819,8 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
 
         # ---- Re-derive $Script:ResolvedPatches from new baseline ----
         Set-DebugStep -Step 'derive-resolved-patches'
-        # If the user did not provide an explicit patch source, use the
-        # refreshed baseline as the source of truth for P04.
-        $userProvidedPatches = ($Script:PatchUrls -and $Script:PatchUrls.Count -gt 0) `
-                               -or ($Script:PatchDirectory -and (Test-Path -LiteralPath $Script:PatchDirectory)) `
-                               -or ($Script:ManifestPath -and (Test-Path -LiteralPath $Script:ManifestPath))
-        if (-not $userProvidedPatches) {
+        # The refreshed baseline is the source of truth for P04.
+        if ($true) {
             $derived = New-Object System.Collections.Generic.List[object]
             foreach ($p in $newPatches) {
                 # Same LocalPath / ExpectedHashes derivation as the P02
@@ -9988,6 +9839,12 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                     $pFileName = ('{0}.msu' -f $p.KbId)
                 }
                 $expectedHashes = @{}
+                if ($p.PSObject.Properties['Digest'] -and $p.Digest) {
+                    # Line.Digest = the Catalog SHA-1 base64 primary key;  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+                    # same wiring as the P02 baseline-seeding path
+                    # (Test-PatchIntegrity normalizes base64->hex).
+                    $expectedHashes['sha-1'] = [string]$p.Digest  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+                }
                 if ($p.Sha256) {
                     $expectedHashes['sha-256'] = $p.Sha256
                 }
@@ -9996,7 +9853,11 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                     Source          = $p.DownloadUrl
                     LocalPath       = Join-Path $Script:PatchesDir (Join-Path $Script:OsVersion $pFileName)
                     KbId            = $p.KbId
-                    PatchType       = $p.Type
+                    # Line objects carry the type under 'Kind' (Config
+                    # Schema v3.0); reading a non-existent 'Type' here
+                    # yielded $null PatchType and dropped every refreshed
+                    # patch from the apply sub-phases.
+                    PatchType       = $p.Kind
                     ApplyOrder      = $p.ApplyOrder
                     ExpectedHashes  = $expectedHashes
                 }) | Out-Null
@@ -11163,9 +11024,9 @@ function Invoke-VerifyPhase11_StaticVerify {
                         # per-Kind rows above stay Warn; this row is a hard
                         # Fail (P11 throws on any Fail row) [DECIDED
                         # 2026-07-02, user]. Runs only when the resolved
-                        # patch set actually intended the baseline LCU (a
-                        # custom -PatchUrls run must not fail against a
-                        # baseline it never tried to apply).
+                        # patch set actually intended the baseline LCU
+                        # (defensive: a run whose resolved set never
+                        # included that KB must not fail against it).
                         $pbLcu = @()
                         if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['PatchBaseline'] -and
                             $Script:OsProfile.PatchBaseline -and
