@@ -1,3 +1,9 @@
+---
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.1.0
+  rendered: 2026-07-02
+---
 # Changelog
 
 All notable changes to **bash-rhel-container-testsuite** are documented here.
@@ -6,6 +12,43 @@ this project versions by **revision tag (`rNN`)** to match the sibling projects
 in `ai-generated-artifacts`.
 
 ## [Unreleased]
+
+## [r30] - 2026-07-02 - docs: doc-set reconstruction to the template canon (B2 docs pass)
+
+Docs half of the B2 canon-alignment arc (code half: r28; the CWD fix: r29).
+Zero script change.
+
+### Changed
+- **SPEC.md reconstructed to the repository template canon (1.1.0).** Part A is
+  now the **8 canonical regions vendored from the bash spec home**
+  `governance/spec/bash.md` (marker+hash, verified by the document-conformance
+  gate) plus two project extensions: **A.9** result-JSON machine channel and
+  **A.10** duplicated-helper identity discipline. The former sections 1-10 are
+  re-homed as **Part B** (B.1 identification, B.2 inputs, B.3 outputs, B.4
+  phase map, B.5 locked decisions, B.6 acquisition, B.7 axes, B.8 tiers, B.9
+  architecture, B.10 framework, B.11 packages/EPEL, B.12 naming, B.13 adding a
+  tool); the quality gates + **open items** move to **Part C** (R5-R8 kept
+  verbatim as the live empirical fill; **Q1/Q2** added for the pending hermetic
+  coverage of `acquire-rootfs` internals via an `ACQ_ROOT` refactor; **Q3**
+  recorded as superseded by the r28 errexit conversion); and the forensic
+  lessons become **Part D** (D.1-D.8, incl. the r29 CWD-dependent SC1091
+  finding). Old->new section references remapped across README/TESTING.
+- **ADDING-A-TOOL.md / ADDING-A-TOOL.ja.md folded into the READMEs** as the
+  bilingual "Adding a tool" section (files deleted; all references updated;
+  SPEC B.13 points at the README section). This also removes the SPEC's only
+  Japanese navigation label (English-only policy).
+- **README.md / README.ja.md**: stale status corrected (16 tiers / 430 ->
+  **20 tiers / 478**, r29 state), SPEC section references updated to Part
+  B/C, and **Known limitations** + **Provenance** sections added (bilingual
+  lock-step preserved: matching heading counts).
+- **TESTING.md**: t017-t020 tier documentation added, the run-example block
+  and the L0 fixed count (37 -> **42** files) brought to ground truth, and the
+  front-matter re-pinned to template canon 1.1.0.
+- **CHANGELOG.md**: doc-provenance pin added (the last doc-set member without
+  one).
+
+### Governance
+- Manifest: `consumers[]` on `spec.bash.part-a` += `bash-rhel-container-testsuite`.
 
 ## [r29] - 2026-07-02 - fix: t002 ShellCheck source-path is CWD-independent
 

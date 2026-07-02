@@ -11,7 +11,7 @@ English | [日本語](./README.ja.md)
 > 📂 Part of [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) → [`projects/bash-rhel-container-testsuite/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/bash-rhel-container-testsuite)
 > ⚠️ **AI-generated content** — review the source before executing. See the [scripts directory policy](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) for the full disclaimer.
 > 📐 **Developer specification**: [SPEC.md](./SPEC.md) (English only) — locked decisions, the two axes, test tiers, the tool-compatibility framework, and the phase contract.
-> ➕ **Adding a tool**: [ADDING-A-TOOL.md](./ADDING-A-TOOL.md) ([日本語](./ADDING-A-TOOL.ja.md)) — the tool-agnostic contract, fill-in-the-blanks for tool #2.
+> ➕ **Adding a tool**: see the [Adding a tool](#adding-a-tool) section below — the tool-agnostic contract, fill-in-the-blanks for tool #2.
 
 A **container-based compatibility test suite for the RHEL family**. For each RHEL
 major (**10 / 9 / 8 / 7 / 6**) it measures which versions of a tool **install** and
@@ -175,10 +175,11 @@ This is the final **Phase 7 (generalization)** drop — all seven phases complet
   per-major OS profile, the cross-consistency tier `t012`, and a generated
   `tests/os-coverage/RESULTS-coverage.md`.
 * ✅ **Phase 7 — generalization** — the framework is now **tool-agnostic**:
-  `tests/conformance/check-tool-contract.sh` machine-enforces the SPEC §10 (a–e)
+  `tests/conformance/check-tool-contract.sh` machine-enforces the SPEC B.10 (a–e)
   contract (tier `t013`), `lib/pkg-availability.sh` is the §12 classification
-  canon (tier `t014`), and [ADDING-A-TOOL.md](./ADDING-A-TOOL.md) is the bilingual
-  guide for tool #2. **Suite green: 16 tiers, 430 passed, 0 failed.**
+  canon (tier `t014`), and the [Adding a tool](#adding-a-tool) section below is the
+  bilingual guide for tool #2. **Suite green: 20 tiers, 478 passed, 0 failed**
+  (r29; ShellCheck clean at default severity and `-S style`, CWD-independent).
 
 **All seven implementation phases are complete** (plus r08, which restored the
 model's two-layer structure: project-root `install-aws_*.sh` installers - each with
@@ -186,7 +187,107 @@ per-RHEL-major validated version pins - that the matrices kick with parameters).
 empirical fill — R5 (live pull), R6 (AWS CLI install), R7 (SSM install, both init
 modes), R8 (ENA build on an entitled host; load is L4) — which runs on a
 container-egress / entitled / Nitro host. The models, generators, verifiers, and
-the tool contract are hermetic and green in-sandbox. See [SPEC.md](./SPEC.md) §10.
+the tool contract are hermetic and green in-sandbox. See [SPEC.md](./SPEC.md) Part C (open items R5-R8).
+
+---
+
+## Adding a tool
+
+### 1. Name it (SPEC §14)
+
+`<vendor>_<tool>`: vendor boundary is `_`, within-tool words are `-`. Examples:
+`azure_az-cli`, `gcp_gcloud-cli`, `hashicorp_terraform`, `util_jq`, `k8s_kubectl`.
+Record the new name in SPEC.md's naming vocabulary.
+
+### 2. Classify the acquisition source (SPEC §12, `lib/pkg-availability.sh`)
+
+Decide where the tool's primary input comes from and add it to
+`pkgavail_tool_source` / `pkgavail_class`:
+
+| class | meaning | anonymous story |
+|:--|:--|:--|
+| `anonymous-ubi` | the `ubi-*` repos (7 also optional/extras/RHSCL) | installable |
+| `entitled-only` | `rhel-*` repos (kernel-devel, …) | `needs-entitlement` |
+| `epel` | Fedora EPEL (dkms, …), pinned, off by default | `epel-optional` |
+| `vendor-hosted` | outside any repo (a bundle / S3 RPM) over the vendor CDN | installable |
+| `base-image` | already present in the base image | installable |
+
+`pkgavail_anonymous_status "$(pkgavail_class "$(pkgavail_tool_source <name>)")"`
+then answers "what happens anonymously?" in one call.
+
+### 3. Implement the contract (SPEC §10, (0) + a–e)
+
+- **(0)** a project-root **`install-<vendor>_<tool>.sh`** (name matches the test
+  folder) — a real-host-usable installer with a test mode (`<TOOL>_INSTALLTEST=1`)
+  that installs/builds in a disposable rootfs, smoke-checks, and emits one
+  `[<vendor>_<tool>][installtest][result] {json}` line of **raw facts** (ran /
+  installed / built + context). Production mode installs on the real host. Carry
+  **per-RHEL-major version pins** (the validated version per major) resolved in
+  `resolve_version` as the production default; an explicit `<TOOL>_VERSION` wins,
+  and the matrix passes one in test mode. Add a `<TOOL>_LIB_ONLY=1` guard so the
+  pins/helpers are unit-testable (see `tests/t015_installpins.sh`,
+  `tests/t016_installintrospect.sh`). Use a `die` that emits a structured
+  `{"status":"fail",...,"reason":...}` `[result]` in test mode, so every failure
+  path still produces a parseable, reasoned ledger row.
+
+Create `tests/<vendor>_<tool>/` with:
+
+- **(a)** `list-<tool>-releases.sh` → a deterministic `<tool>-releases.json`
+  (enumerate versions from an auth-free source; carry reuse-by-copy helpers).
+- **(b)** `run-<tool>-{install,build}test-matrix.sh` with **column-0 pure helpers**
+  (a version compare, a per-major map, an in-scope filter, and a `*_verdict()`),
+  a `--run` L3 loop that **kicks the root install script** (`podman run -v
+  <install-script>:... -e <TOOL>_INSTALLTEST=1 -e <PARAMS> <ref> ...`), parses the
+  `[result]` with `result_field`, applies the verdict, and records; plus a
+  hermetic `--generate-results`. Install logic is never inlined here.
+- **(c)** `<tool>-…-ledger.json` with a schema'd, initially-empty `"results": []`.
+- **(d)** `RESULTS-rhel{6,7,8,9,10}.md` produced by `--generate-results`
+  (never hand-edited).
+- **(e)** `tests/t0NN_<tool>verdict.sh` that loads the matrix's pure helpers by
+  name and asserts them table-driven, plus the matrix/lister reuse-by-copy.
+
+Reuse the canon: `lib/os-profile.sh` for per-major facts (glibc via the tool's
+own table, image, pull constraint, repos, lifecycle, EPEL) and
+`lib/acquire-rootfs.sh` for init-mode-aware acquisition.
+
+### 4. Verify
+
+```sh
+bash tests/run-all.sh                              # all tiers incl. the new one
+bash tests/conformance/check-tool-contract.sh      # contract conformance
+```
+
+`check-tool-contract.sh` must list the new tool as `ok` (it requires the root
+`install-<vendor>_<tool>.sh` to exist, be executable, and be **kicked** by the
+matrix), and `t013` must stay green. Keep every script ShellCheck-`style`-clean
+(markdown backticks in `printf` formats as `\140`) and all files LF.
+
+---
+
+## Known limitations
+
+* The hermetic suite (L0–L2) proves the models, generators, and contracts; the
+  live matrices (`--run`) need a container-egress host — and an
+  entitlement-registered RHEL host for the `rhel-*` repo paths — tracked as
+  open items R5–R8 in [SPEC.md](./SPEC.md) Part C.
+* Kernel-module **load** can never be exercised in a container (shared host
+  kernel): ENA load/runtime is always the L4 tier on a real RHEL host.
+* RHEL 6 is Tier C: no anonymous repos (base-image contents only); entitled
+  mode restores `rhel-6-server-rpms`. EPEL 6/7 are archive-only.
+* RHEL 7 `ubi-init` must be pulled by fixed tag or digest (host signature
+  policy rejects the floating tag; SPEC D.7).
+
+---
+
+## Provenance
+
+* **AI tool**: Anthropic Claude (Claude Fable 5), claude.ai sessions; revision
+  history in [CHANGELOG.md](./CHANGELOG.md) (`rNN` linear counter).
+* **Generated / maintained**: 2026-06 – 2026-07 (r01–r30); doc-set rendered
+  against the repository template canon (see the front-matter
+  `doc-provenance` pin).
+* **AS-IS**: provided as-is, without warranty; see the Disclaimer above and the
+  repository [LICENSE](https://github.com/usui-tk/ai-generated-artifacts/blob/main/LICENSE).
 
 ---
 

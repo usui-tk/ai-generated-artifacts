@@ -11,6 +11,7 @@ doc-provenance:
 > 📂 [`ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts) の一部 → [`projects/bash-rhel-container-testsuite/`](https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/bash-rhel-container-testsuite)
 > ⚠️ **AI 生成コンテンツ** — 実行前にソースを確認してください。免責の全文は [scripts ディレクトリのポリシー](https://github.com/usui-tk/ai-generated-artifacts/blob/main/scripts/README.md) を参照。
 > 📐 **開発者向け仕様**: [SPEC.md](./SPEC.md)（英語のみ）— 確定済みの設計判断、2 つの軸、テスト階層、ツール互換性フレームワーク、フェーズ契約。
+> ➕ **ツールの追加**: 下記の [ツールの追加](#ツールの追加) 節を参照 — ツール非依存の契約と、2つ目のツール向けの穴埋め手順。
 
 **RHEL ファミリー向けのコンテナベース互換性テストスイート**です。RHEL の各メジャー
 （**10 / 9 / 8 / 7 / 6**）について、あるツールのどのバージョンが Red Hat のコンテナ
@@ -176,8 +177,8 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 * ✅ **Phase 7 — 一般化** — フレームワークが**ツール非依存**になりました:
   `tests/conformance/check-tool-contract.sh` が SPEC §10 (a〜e) 契約を機械的に強制し
   （階層 `t013`）、`lib/pkg-availability.sh` が §12 分類の正典（階層 `t014`）、
-  [ADDING-A-TOOL.md](./ADDING-A-TOOL.md) が 2 つ目のツール向けのバイリンガル手順です。
-  **スイート緑: 16 階層、430 件成功、0 件失敗。**
+  下記の [ツールの追加](#ツールの追加) 節が 2 つ目のツール向けの手順です。
+  **スイート緑: 20 階層、478 件成功、0 件失敗**(r29; ShellCheck はデフォルト重大度と `-S style` の両方でクリーン、CWD 非依存)。
 
 **全 7 実装フェーズが完了しました**（さらに r08 でモデルの2層構成を復元: 直下の
 `install-aws_*.sh` インストーラ（各々が RHEL メジャー別の検証済みバージョンをピン留め）を
@@ -185,7 +186,101 @@ L3 統合マトリクス（実際のプルとインストール）は、コン�
 R6（AWS CLI install）、R7（SSM install、両 init モード）、R8（entitled ホストでの ENA
 ビルド。load は L4）— で、egress 可能／entitled／Nitro ホストで実行します。モデル・
 生成器・verifier・ツール契約はサンドボックス内でハーミティックに緑です。詳細は
-[SPEC.md](./SPEC.md) §10。
+[SPEC.md](./SPEC.md) Part C(オープン項目 R5-R8)。
+
+---
+
+## ツールの追加
+
+### 1. 命名（SPEC §14）
+
+`<vendor>_<tool>`: ベンダ境界は `_`、ツール内の語は `-`。例:
+`azure_az-cli`、`gcp_gcloud-cli`、`hashicorp_terraform`、`util_jq`、`k8s_kubectl`。
+新しい名前は SPEC.md の命名語彙に記録します。
+
+### 2. 取得元を分類（SPEC §12、`lib/pkg-availability.sh`）
+
+ツールの主要な入力がどこから来るかを決め、`pkgavail_tool_source` /
+`pkgavail_class` に追加します:
+
+| class | 意味 | 匿名時の挙動 |
+|:--|:--|:--|
+| `anonymous-ubi` | `ubi-*` リポジトリ（7 は optional/extras/RHSCL も） | installable |
+| `entitled-only` | `rhel-*` リポジトリ（kernel-devel 等） | `needs-entitlement` |
+| `epel` | Fedora EPEL（dkms 等、ピン留め・既定オフ） | `epel-optional` |
+| `vendor-hosted` | リポジトリ外（bundle / S3 RPM）をベンダ CDN 経由 | installable |
+| `base-image` | ベースイメージに同梱済み | installable |
+
+`pkgavail_anonymous_status "$(pkgavail_class "$(pkgavail_tool_source <name>)")"`
+で「匿名時に何が起きるか」を一発で判定できます。
+
+### 3. 契約を実装（SPEC §10、(0) ＋ a〜e）
+
+- **(0)** プロジェクト直下の **`install-<vendor>_<tool>.sh`**（test フォルダ名と一致）
+  … 実ホストでも使えるインストーラ。テストモード（`<TOOL>_INSTALLTEST=1`）では
+  使い捨て rootfs で install/build → smoke → `[<vendor>_<tool>][installtest][result]`
+  JSON を1行出力（**生の事実**: ran／installed／built＋文脈）。本番モードは実ホストに
+  インストール。**RHEL メジャー別のバージョンピン**（各メジャーの検証済み版）を持ち、
+  `resolve_version` が本番既定として解決（明示の `<TOOL>_VERSION` が優先、テスト時は
+  マトリクスが明示指定）。ピンを単体検証できるよう `<TOOL>_LIB_ONLY=1` ガードを付与
+  （`tests/t015_installpins.sh`、`tests/t016_installintrospect.sh` 参照）。失敗時は
+  テストモードで構造化結果 `{"status":"fail",...,"reason":...}` を出す `die` を使い、
+  どの失敗経路でもパース可能で理由付きの ledger 行を残すこと。
+
+`tests/<vendor>_<tool>/` を作成します:
+
+- **(a)** `list-<tool>-releases.sh` → 決定的な `<tool>-releases.json`
+  （認証不要のソースからバージョン列挙。reuse-by-copy のヘルパーを持たせる）。
+- **(b)** `run-<tool>-{install,build}test-matrix.sh`。**カラム 0 の純粋ヘルパー**
+  （バージョン比較・メジャー別マップ・スコープ判定・`*_verdict()`）、`--run`(L3) は
+  **直下の install スクリプトをキック**（`podman run -v <install-script>:... -e
+  <TOOL>_INSTALLTEST=1 -e <PARAMS> <ref> ...`）、`result_field` で `[result]` を
+  パース → verdict 適用 → 記録。ハーミティックな `--generate-results`。install
+  ロジックをマトリクスに直書きしないこと。
+- **(c)** `<tool>-…-ledger.json`。スキーマ付きで初期は `"results": []`。
+- **(d)** `RESULTS-rhel{6,7,8,9,10}.md`。`--generate-results` で生成（手編集禁止）。
+- **(e)** `tests/t0NN_<tool>verdict.sh`。マトリクスの純粋ヘルパーを名前で読み込み、
+  テーブル駆動で検証。さらにマトリクス／lister の reuse-by-copy も検証。
+
+正典を再利用します: メジャー別の事実は `lib/os-profile.sh`（glibc はツール固有表、
+image・pull 制約・リポジトリ・ライフサイクル・EPEL）、init-mode 対応の取得は
+`lib/acquire-rootfs.sh`。
+
+### 4. 検証
+
+```sh
+bash tests/run-all.sh                              # 新階層を含む全階層
+bash tests/conformance/check-tool-contract.sh      # 契約適合
+```
+
+`check-tool-contract.sh` が新ツールを `ok` と表示し（直下の
+`install-<vendor>_<tool>.sh` が存在・実行可能で、マトリクスが**キック**することを要求）、
+`t013` が緑のままであること。各スクリプトは ShellCheck `style` クリーン
+（`printf` 内の Markdown バックティックは `\140`）、全ファイル LF を維持します。
+
+---
+
+## 既知の制約
+
+* ハーメティックなスイート(L0–L2)はモデル・生成器・契約を証明しますが、ライブマトリクス(`--run`)には
+  コンテナ egress ホスト(`rhel-*` リポジトリ経路にはサブスクリプション登録済み RHEL ホスト)が必要です
+  — [SPEC.md](./SPEC.md) Part C のオープン項目 R5–R8 として追跡。
+* カーネルモジュールの **load** はコンテナでは検証不能(ホストカーネル共有)のため、ENA の load/runtime は
+  常に実 RHEL ホスト上の L4 層です。
+* RHEL 6 は Tier C: 匿名リポジトリなし(ベースイメージ内容のみ)。entitled で `rhel-6-server-rpms` が有効化。
+  EPEL 6/7 はアーカイブのみ。
+* RHEL 7 の `ubi-init` は固定タグまたはダイジェストで pull すること(浮動タグはホスト署名ポリシーが拒否、SPEC D.7)。
+
+---
+
+## 来歴(Provenance)
+
+* **AI ツール**: Anthropic Claude (Claude Fable 5)、claude.ai セッション。改訂履歴は
+  [CHANGELOG.md](./CHANGELOG.md)(`rNN` 連番)。
+* **生成・保守**: 2026-06 – 2026-07(r01–r30)。doc-set はリポジトリのテンプレート正典から
+  レンダリング(front-matter の `doc-provenance` ピン参照)。
+* **AS-IS**: 無保証で現状のまま提供。上部の免責事項とリポジトリの
+  [LICENSE](https://github.com/usui-tk/ai-generated-artifacts/blob/main/LICENSE) を参照。
 
 ---
 

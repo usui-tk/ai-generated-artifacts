@@ -1,24 +1,224 @@
 ---
 doc-provenance:
   layer-1-format: 1.0.0
-  layer-2-template: 1.0.0
-  rendered: 2026-07-01
+  layer-2-template: 1.1.0
+  rendered: 2026-07-02
 ---
-# SPEC - bash-rhel-container-testsuite
+# Bash Script Specification (SPEC) — bash-rhel-container-testsuite
 
-> **Developer specification (English only).** Authoritative contract for the
-> project's structure, axes, test tiers, tool-compatibility framework, and the
-> phase plan. The narrative rationale and the measured Phase-0 findings are kept
-> in the maintainer's design notes (out of repo); this document is the stable
-> contract those findings justify. End-user instructions live in
-> [`README.md`](./README.md) / [`README.ja.md`](./README.ja.md).
+> This SPEC documents `bash-rhel-container-testsuite`. **Part A** is the
+> repository-wide common specification, inherited by vendoring from the
+> canonical spec home; **Parts B-D** are specific to this suite. History lives
+> in `CHANGELOG.md`; current and forward design lives here. End-user
+> instructions live in [`README.md`](./README.md) / [`README.ja.md`](./README.ja.md).
 
-> ⚠️ **AI-generated content** - review the source before executing. See the
-> repository's `scripts/README.md` policy for the full disclaimer.
+## Table of Contents
+
+- Part A — Common Specification (vendored from the spec home; extensions A.9-A.10)
+- Part B — Script-Specific Specification (B.1 identification · B.2 inputs · B.3 outputs · B.4 phase map · B.5 locked decisions · B.6 acquisition · B.7 axes · B.8 tiers · B.9 architecture · B.10 framework · B.11 packages/EPEL · B.12 naming · B.13 adding a tool)
+- Part C — Quality Gates & Validation Checklist (+ open items R5-R8, Q1-Q3)
+- Part D — Known Pitfalls & Lessons Learned (D.1-D.8)
+
+# Part A — Common Specification (vendored from the spec home)
+
+> **Status: inherited — vendored from the spec home.** Per the
+> [`AGENTS.md` §6 Part A Inheritance Rule (ABSOLUTE)](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md#6-part-a-inheritance-rule-absolute),
+> the 8 canonical Part A regions below are vendored from
+> [`governance/spec/bash.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/governance/spec/bash.md)
+> as marker+hash regions verified against the spec home by the
+> document-conformance gate; they are never hand-edited. **A.9-A.10** are this
+> consumer's project-specific extensions (not vendored).
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.reference-assets version=0.1.0 hash=f3c69969142a70bd policy=canonical binding=follow-latest >>> -->
+### A.1 Reference assets
+
+Every Bash script in the canon draws on a shared set of reference assets: (1) the
+static-analysis configuration and gate (see A.6); (2) the companion specification
+documents that make up the doc-set (README + README.ja, SPEC, and where applicable
+TESTING and CHANGELOG); (3) the family's worked-example consumer
+(`{{REFERENCE_PROJECT}}`), the concrete demonstration of these conventions; and (4) the
+self-test harness (`tests/run-all.sh` plus the `tests/lib/` assertion/mock/heredoc
+helpers), reused by porting rather than re-invention. The specific reference assets a
+consumer uses are recorded in that consumer's own SPEC; this region only fixes that the
+assets exist and where their conventions are defined.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.reference-assets <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.source-file-format version=0.1.0 hash=5d0d2c65bbb3c52b policy=canonical binding=follow-latest >>> -->
+### A.2 Source file format
+
+Script source files are encoded **UTF-8 without BOM** and use **LF** line endings
+(repository File Format Policy). Every executable script starts with the shebang
+`#!/usr/bin/env bash` and follows the canonical top-to-bottom layout: shebang; header
+comment banner; shell options (A.5); constants; execution-mode globals; logging helpers
+(A.3); argument/environment parsing (A.4); domain functions; `main()`; and a
+bottom-of-file `main "$@"` invocation (single-purpose helper scripts may omit `main()`
+but keep the remaining order). The header banner MUST carry the five sections required
+by the Layer-1 `scripts/README.md` header convention: **Purpose**, **Prerequisites**,
+**Usage examples**, **Known limitations**, and **AI generation info** (tool and
+generation date). Non-ASCII characters are confined to intentional data/string literals;
+identifiers and code are ASCII.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.source-file-format <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.logging version=0.1.0 hash=9e85866ab961f01a policy=canonical binding=follow-latest >>> -->
+### A.3 Logging conventions
+
+Operator-facing logging uses a **curated, append-only marker set**: a phase/step banner
+helper (no literal severity tag, the one channel with no timestamp), `[INFO]` to stdout
+for routine progress, `[WARN]` to **stderr** for degraded-but-continuing advisories, and
+`[ERROR]` to **stderr** for failures (usually followed by `die`, A.5). Extended markers
+(for example `[BUILD]`, `[DEBUG]`, `[EXTERNAL]`) are consumer-defined additions for a
+genuine new severity or source - never ad-hoc one-offs such as `[OK]` - and are catalogued
+in the consumer's SPEC. Timestamped lines use the unified form
+`YYYY-MM-DD HH:MM:SS  [SEVERITY]  [{{PROJECT_CODE}}-<AREA><NN>]  <message>` where the
+logic-code tag is **optional** and appears only on curated decision points. Colour is
+enabled only on an interactive stdout so captured output parses cleanly.
+**Machine-consumed output channels** (for example a single-line result-JSON contract
+parsed by a harness) are a separate per-consumer contract defined in Part B; log markers
+MUST NOT interleave into a machine channel, and machine lines MUST NOT depend on log
+formatting.
+**Role scoping (observed).** The full marker set is realized by a family's primary
+operator-facing pipeline script(s). Auxiliary scripts - self-contained installers,
+matrix runners, generators, checkers - MAY instead use a minimal `log()` helper
+(timestamped for long-running scripts, carrying a `[<script>]` source tag, single
+stream) plus `die` (A.5) for the fatal path. When a script's stdout is itself a
+machine channel, ALL human-facing log lines are routed to **stderr** so the machine
+channel stays clean.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.logging <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.parameter-handling version=0.1.0 hash=88917cb6d61bc732 policy=canonical binding=follow-latest >>> -->
+### A.4 Parameter handling
+
+Command-line switches use long-form kebab-case (`--skip-prereq`, `--env <file>`); `-h` /
+`--help` prints usage and exits 0. The argument parser MUST `die "Unknown option: $1"`
+on any unrecognised switch - silently ignored options are how typos slip into CI
+configurations and disable safety checks. Mutually exclusive or synonymous switches are
+documented in the consumer's SPEC and enforced in the parser (synonym duplication logs a
+notice, contradictions die). Environment-variable configuration follows the
+`${VAR:-default}` override pattern; any `${VAR:?...}` / `${VAR:=...}` resolution MUST be
+paired with an `[INFO]` line confirming the resolved value so operators can verify
+configuration from the log. The concrete switch and environment-variable inventory is
+per-consumer (Part B).
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.parameter-handling <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.error-diagnostic version=0.1.0 hash=e395575128fdec10 policy=canonical binding=follow-latest >>> -->
+### A.5 Error, diagnostics, and shell options
+
+Output is three-tier: **fatal** `die "message"` (emits `[ERROR]`, exits 1; where a
+machine channel exists, `die` also emits the structured failure record so every failure
+stays parseable); **degraded** `log_warn` (continues, used when a fallback applies);
+**informational** `log_info`. A `die` on a recoverable misconfiguration MUST be
+actionable: what went wrong, why it matters, and how to fix it (concrete commands or
+keys) - never a bare `Invalid X`.
+
+Shell options are scoped by script role, a distinction observed in both consumers and
+canonical here (it corrects the first consumer's earlier blanket "every script" text):
+
+* **Production and operational scripts** - installers, builders, matrix runners,
+  generators, checkers - MUST use `set -euo pipefail`.
+* **The self-test harness** - the suite runner, `tNNN_*` tiers, and read-only verifiers -
+  uses `set -uo pipefail` **deliberately**: assertion helpers count failures and must
+  continue to the suite summary, so `errexit` is omitted there and failure propagation is
+  explicit.
+
+Defensive rules under these options: use `${VAR:-}` for any variable that may
+legitimately be unset; trailing `|| true` is acceptable only when the failure is
+genuinely tolerated (an optional probe) and is followed by an empty-result check; a
+function whose final statement is a `[[ ... ]] && ...` list MUST end with an explicit
+`return 0` so the success branch does not leak exit 1 to an `errexit` caller. Know the
+**substitution-inheritance asymmetry**: `pipefail` IS inherited into command
+substitutions while `errexit` is NOT (default Bash, `inherit_errexit` unset) - therefore
+`x="$(probe | filter)"` inside a bare-called function is the recurring abort hazard
+under `-e`, and every tolerated-empty probe of that shape MUST carry `|| true` on the
+assignment. Do not enable `shopt -s inherit_errexit` casually: it re-arms every probe
+that the asymmetry currently leaves inert.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.error-diagnostic <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.static-analysis version=0.1.0 hash=034f640d941dedee policy=canonical binding=follow-latest >>> -->
+### A.6 Static analysis
+
+Two static gates apply to every `.sh` file and run as the self-test suite's L0 tiers:
+(1) `bash -n` syntax validation, and (2) **ShellCheck**, clean at **default severity
+and at `-S style`** (the canonical gate severity). Project-sanctioned suppressions live
+in the per-project `.shellcheckrc`; an inline `# shellcheck disable=SCnnnn` requires an
+adjacent justifying comment stating why the finding is intentional. A change is not
+gate-clean unless the whole suite (`tests/run-all.sh`) reports zero failures with the
+static tiers green.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.static-analysis <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.doc-language-policy version=0.1.0 hash=ae89cf1a97795729 policy=canonical binding=follow-latest >>> -->
+### A.7 Documentation language policy
+
+The repository-wide root `README.md` Language Policy applies: the project `README.md`
+(English master) and `README.ja.md` (Japanese translation) are maintained in
+**bilingual lock-step** - same commit, matching section structure, tables, and code
+blocks; `SPEC.md`, `TESTING.md`, and `CHANGELOG.md` are **English only**. In
+English-only artifacts, Japanese may appear **only as quoted data** (for example a
+documented Japanese section title or punctuation rule); navigational labels - including
+the cross-link to a `.ja` companion - are written in English ("Japanese"), per the
+AGENTS.md authoring-language rules. `README.ja.md` style: preserve technical terms in
+English, use full-width Japanese punctuation, and keep code spans verbatim. Each README
+carries the language-switcher banner at the top and a Provenance section (AI tool,
+generation date, AS-IS disclaimer) at the bottom.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.doc-language-policy <<< -->
+
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.development-workflow version=0.1.0 hash=e4be8f1484f5d2f4 policy=canonical binding=follow-latest >>> -->
+### A.8 Development workflow
+
+The iteration cycle is: reproduce the issue (or write the unit tier first); modify the
+code; `bash -n` (syntax gate); `tests/run-all.sh` with **zero failures** (static +
+hermetic gate); exercise the affected functional path; update `README.md` +
+`README.ja.md` in lock-step if behaviour or contract changed; commit. **Revision
+discipline** follows the root Revision History Policy: per-revision release notes live
+**exclusively** in the project `CHANGELOG.md` (revision tags such as `rNN`, or the commit
+hash where a consumer records that choice in Part B) - never as inline revision comments
+in script bodies, never in the README beyond a pointer, and never in the SPEC, which
+describes *current* behaviour only. Root-cause analyses of closed defects belong in the
+SPEC's **Part D - Known Pitfalls**, cross-referenced from CHANGELOG entries.
+**Reuse before invention**: before adding a helper, search the existing script and the
+family reference assets (A.1) for an equivalent, extend it if found, and place genuinely
+new helpers near their functional relatives rather than at file end.
+<!-- <<< CANONICAL unit_id=spec.bash.part-a.development-workflow <<< -->
 
 ---
 
-## 1. Purpose & scope
+<!-- Consumer extensions: project-owned additions to the vendored common regions
+     (AGENTS.md par.6: extensions record ONLY deviations or additions). -->
+### A.9 Result-JSON machine channel (project)
+
+Every installer emits exactly one single-line
+`[<vendor>_<tool>][installtest][result] {json}` record on **stdout** per run —
+including on every failure path (`die` emits a structured
+`{"status":"fail",...}` record) — so the matrix always ingests a parseable,
+reasoned row. Because stdout is this machine channel, ALL human-facing log lines
+route to stderr (common A.3 role scoping). Field names are per-tool raw facts
+(e.g. `osmajor`, `glibc`, `entitlement`, `init_mode`); verdicts are derived by
+the matrix, never by the installer.
+
+### A.10 Duplicated-helper identity discipline (project)
+
+The installers are deliberately self-contained (no sourced library at run time),
+so four helpers are maintained as byte-identical copies across all three
+(`entitlement_certs_present`, `pm_neutralize_rhsm_if_anonymous`, `run_pm`,
+`os_major`). Tier `t020` pins the copies byte-identical, so a fix applied to one
+copy that drifts from the others fails the suite instead of shipping. The
+per-script `log()` helper intentionally differs only in its source tag and is
+not pinned.
+
+---
+
+# Part B — Script-Specific Specification
+
+## B.1 Identification
+
+**Project:** `bash-rhel-container-testsuite` — a container-based compatibility
+test suite for the RHEL family (v10/v9/v8/v7/v6). Entry points: the suite runner
+`tests/run-all.sh` (L0–L2), the three root installers `install-aws_*.sh`
+(production + `*_INSTALLTEST=1` test mode, single-line result-JSON channel per
+Part A A.9), the three matrix runners `tests/aws_*/run-*-matrix.sh` (report mode
+by default, `--run` for the live L3 matrix), and the utilities
+`tests/probe-env.sh`, `tests/conformance/check-tool-contract.sh`,
+`tests/os-coverage/generate-os-coverage.sh`,
+`tests/aws_ena-driver/verify-ena-buildresults.sh`.
 
 A **container-based compatibility test suite for the RHEL family**. For each RHEL
 major (**v10 / v9 / v8 / v7 / v6**) it evaluates which versions of a tool
@@ -28,7 +228,7 @@ SSM Agent / ENA matrices proven in the sibling project
 `projects/bash-ol-aws-ami-builder`.
 
 **Initial tool scope:** AWS CLI v2, AWS SSM Agent, AWS ENA Driver. Further tools
-are added under the naming taxonomy in section 9.
+are added under the naming taxonomy in B.12.
 
 **Out of scope (deferred):** authenticated `registry.redhat.io`; for any
 kernel-module tool, the in-container module **load** test (impossible in a
@@ -36,24 +236,57 @@ container that shares the host kernel - that is always an L4 concern).
 
 ---
 
-## 2. Locked decisions (contract)
+## B.2 Inputs
+
+Per-script environment knobs (each script's header banner documents its own set):
+`OSMAJORS`, `ENTITLEMENTS`, `INSECURE_TLS`, `RUN_TIMEOUT`, the per-tool
+`*_INSTALLTEST` / `*_VERSION` / `SSM_INIT_MODE` / `ENA_BUILDTEST` variables, and
+the per-major version pins in the installers. Data inputs: the committed
+`*-releases.json` sets (refreshed by the `list-*-releases.sh` scripts, L3),
+`lib/os-profile.sh` (the per-major canon), and — live mode only — the container
+registry / vendor endpoints per B.6.
+
+## B.3 Outputs
+
+The append/dedup JSON ledgers (`*-ledger.json`), the generated
+`RESULTS-rhel<N>.md` reports (never hand-edited), the coverage matrix
+`tests/os-coverage/RESULTS-coverage.md`, the opt-in probe output
+`tests/ENV-PROBE.json` (gitignored), per-run failure logs under
+`tests/aws_*/logs/` (gitignored), and the per-script single-line result-JSON
+machine channel (Part A A.9). Exit codes: 0 on success; installers `die` with a
+structured failure record; the suite runner exits non-zero on any tier failure.
+
+## B.4 Phase Map (implementation contract)
+
+| Phase | Deliverable | Exit criterion | Status |
+|:--|:--|:--|:--|
+| 0 - Feasibility | measured base facts, anon pull, entitled passthrough, signatures, EPEL endpoints | findings measured in Phase 0 | **done** (tail: one real `ena.ko` plain-make build, R1) |
+| 1 - Scaffolding | dir skeleton, ported `tests/lib/*`, `run-all.sh`, `.shellcheckrc`, L0 green, bilingual README | L0 passes; fixed count recorded | **done (r01)** |
+| 2 - Acquisition | `lib/acquire-rootfs.sh` (+`t003`), `lib/ubi-pkgmgr.sh` (+`t004`), `t005_entitlementdetect`, `t006_initmodemap`, `lib/epel.sh` (+`t007`) | unit tiers green; live pull both paths; classify unit-tested | **done (r02)** (tail: live pull is L3/CI) |
+| 3 - AWS CLI | `tests/aws_awscli-v2/*`, glibc ledger, RESULTS, verdict tier | matrix runs (Tier A); reports generated | **done (r03)** (tail: live install is L3/CI) |
+| 4 - SSM | `tests/aws_ssm-agent/*`, glibc + init_mode, S3 RPM, RESULTS | both init modes exercised; reports generated | **done (r04)** (tail: live install is L3/CI) |
+| 5 - ENA (E2') | `tests/aws_ena-driver/*`, UEK-removed installer, entitlement-gated build | build on entitled host; anon -> `needs-entitlement`; load -> L4 | **done (r05)** (tail: live build L3, load L4) |
+| 6 - EOL/constrained | RHEL 7 (frozen, yum, fixed-tag) + RHEL 6 (no anon repo; entitled `rhel-6-server`; EPEL archive-only) | reports generated or formally deferred | **done (r06)** (canon `lib/os-profile.sh` + coverage matrix) |
+| 7 - Generalization | tool-agnostic contract (B.10) + classification (B.11) ready for tool #2 | SPEC/TESTING coverage complete; docs bilingual | **done (r07)** (contract checker + pkg-availability canon + the adding-a-tool guide, now the README "Adding a tool" section) |
+
+## B.5 Locked decisions (contract)
 
 | # | Decision | Resolution |
 |:--|:--|:--|
 | A1 | Project name | `bash-rhel-container-testsuite` |
-| A2 | Install-script placement & test-folder naming | install scripts at **project root**; test folders carry a **`<vendor>_`** prefix (`aws_…`) from day one (section 9). |
-| A3 | Image variant | **`ubi-init` is the single baseline.** Init-dependence is an invocation axis (`env_init_mode`), not a second image (section 4b). Standard `ubi` is not carried. |
+| A2 | Install-script placement & test-folder naming | install scripts at **project root**; test folders carry a **`<vendor>_`** prefix (`aws_…`) from day one (B.12). |
+| A3 | Image variant | **`ubi-init` is the single baseline.** Init-dependence is an invocation axis (`env_init_mode`), not a second image (B.7b). Standard `ubi` is not carried. |
 | A4/A5 | Initial tool scope | AWS CLI v2 + SSM Agent + ENA Driver. |
 | ACQ | Acquisition premise | **Anonymous UBI by default + auto-detected `entitled` mode** when the harness runs on a subscription-registered RHEL host. |
 | ENA | Kernel-module range | **E2'**: run the ENA **build** test when entitled (kernel-devel available); record `needs-entitlement` when anonymous. Module **load** is always L4. |
-| EPEL | Community repo handling | **Pin to `dl.fedoraproject.org`** (no metalink/mirrorlist); default = transient baseurl-pinned repo; EPEL 10 minor-versioned; RHEL 6 archive-only special case (section 8). |
+| EPEL | Community repo handling | **Pin to `dl.fedoraproject.org`** (no metalink/mirrorlist); default = transient baseurl-pinned repo; EPEL 10 minor-versioned; RHEL 6 archive-only special case (B.11). |
 
 These decisions are settled. Changing one is a SPEC revision, not an
 implementation detail.
 
 ---
 
-## 3. Acquisition & environment contract
+## B.6 Acquisition & environment contract
 
 1. Acquisition source = `registry.access.redhat.com`, **anonymous by default**.
    Package set = the UBI subset unless the host passes entitlement through.
@@ -69,7 +302,7 @@ implementation detail.
    `bats`/`shunit2`; it reuses `tests/lib/*` + `tests/run-all.sh`.
 5. Tool-centric and multi-tool; the initial set is the three AWS tools.
 
-### 3.1 Per-major base facts (measured Phase 0, anonymous)
+#### 3.1 Per-major base facts (measured Phase 0, anonymous)
 
 | RHEL | Baseline image | Release | glibc | pkg mgr | Anonymous repos | Anon fetch |
 |:--|:--|:--|:--|:--|:--|:--|
@@ -85,9 +318,9 @@ switch (sandbox = 1, trusted host = 0).
 
 ---
 
-## 4. The two first-class axes
+## B.7 The two first-class axes
 
-### 4a. Entitlement axis - `env_entitlement = anonymous | entitled`
+#### 4a. Entitlement axis - `env_entitlement = anonymous | entitled`
 
 | Mode | Condition | Repos in container | kernel-devel / ENA build | AWS CLI / SSM |
 |:--|:--|:--|:--|:--|
@@ -114,7 +347,7 @@ every major (anonymous and entitled). The AWS packages
 (`awscli`/`awscli2`/`amazon-ssm-agent`) are absent from every repo, which is why
 bundle / S3-RPM acquisition is the correct path.
 
-### 4b. Init-mode axis - `env_init_mode = none | systemd`
+#### 4b. Init-mode axis - `env_init_mode = none | systemd`
 
 `ubi-init` is a **strict superset** of standard `ubi`: run it with an explicit
 command and systemd is not PID 1 (equivalent to `ubi` for install/binary tests);
@@ -129,7 +362,7 @@ invocation:
 
 ---
 
-## 5. OS / image coverage tiers
+## B.8 OS / image coverage tiers
 
 | RHEL | Baseline image | Tier | Anonymous | Entitled |
 |:--|:--|:--|:--|:--|
@@ -139,11 +372,11 @@ invocation:
 
 RHEL 6 is Tier C because it has **no anonymous repo**, not because it is
 unbuildable when entitled. EPEL on RHEL 6 is archive-only and special-cased
-(section 8).
+(B.11).
 
 ---
 
-## 6. Layered architecture & test tiers
+## B.9 Layered architecture & test tiers
 
 ```
 L1  RHEL-family base image (baseline: ubi-init)   <- podman (preferred) /
@@ -174,7 +407,7 @@ units and prints one `## RESULT pass/fail/skip` summary. **L3 is manual / CI.**
 
 ---
 
-## 7. Tool-compatibility matrix framework (generalized, a-e)
+## B.10 Tool-compatibility matrix framework (generalized, a-e)
 
 Each tool folder `tests/<vendor>_<tool>/` implements the same five-part contract:
 
@@ -214,9 +447,9 @@ with `--generate-results` and a `*_verdict()` helper; a `"results"` ledger; the
 five `RESULTS-rhel<N>.md`; and a tier that sources the matrix).
 `tests/t013_toolcontract.sh` fails the suite if any tool is non-conformant. Adding
 a non-AWS tool #2 is then a fill-in-the-blanks exercise - see
-[`ADDING-A-TOOL.md`](./ADDING-A-TOOL.md) ([日本語](./ADDING-A-TOOL.ja.md)).
+the README section [Adding a tool](./README.md#adding-a-tool).
 
-### 7.1 Per-tool notes (initial three)
+#### 7.1 Per-tool notes (initial three)
 
 * **`aws_awscli-v2`** - self-contained bundle, not repo-installed, so the only
   gate is **glibc**. AWS rule (2024-09-16): glibc <= 2.16 pins v2 <= 2.17.49;
@@ -235,7 +468,7 @@ a non-AWS tool #2 is then a fill-in-the-blanks exercise - see
 
 ---
 
-## 8. Package-availability classification & EPEL handling
+## B.11 Package-availability classification & EPEL handling
 
 Every repo-installed input is classified:
 
@@ -265,7 +498,7 @@ moot since ENA defaults to plain-make.
 
 ---
 
-## 9. Naming taxonomy (`<vendor>_<tool>`)
+## B.12 Naming taxonomy (`<vendor>_<tool>`)
 
 * Vendor boundary = underscore `_`; within-tool words = hyphen `-`.
 * Initial: `aws_awscli-v2`, `aws_ssm-agent`, `aws_ena-driver` (mild redundancy
@@ -277,28 +510,125 @@ moot since ENA defaults to plain-make.
 
 ---
 
-## 10. Phase contract
+## B.13 Adding a tool
 
-| Phase | Deliverable | Exit criterion | Status |
-|:--|:--|:--|:--|
-| 0 - Feasibility | measured base facts, anon pull, entitled passthrough, signatures, EPEL endpoints | findings measured in Phase 0 | **done** (tail: one real `ena.ko` plain-make build, R1) |
-| 1 - Scaffolding | dir skeleton, ported `tests/lib/*`, `run-all.sh`, `.shellcheckrc`, L0 green, bilingual README | L0 passes; fixed count recorded | **done (r01)** |
-| 2 - Acquisition | `lib/acquire-rootfs.sh` (+`t003`), `lib/ubi-pkgmgr.sh` (+`t004`), `t005_entitlementdetect`, `t006_initmodemap`, `lib/epel.sh` (+`t007`) | unit tiers green; live pull both paths; classify unit-tested | **done (r02)** (tail: live pull is L3/CI) |
-| 3 - AWS CLI | `tests/aws_awscli-v2/*`, glibc ledger, RESULTS, verdict tier | matrix runs (Tier A); reports generated | **done (r03)** (tail: live install is L3/CI) |
-| 4 - SSM | `tests/aws_ssm-agent/*`, glibc + init_mode, S3 RPM, RESULTS | both init modes exercised; reports generated | **done (r04)** (tail: live install is L3/CI) |
-| 5 - ENA (E2') | `tests/aws_ena-driver/*`, UEK-removed installer, entitlement-gated build | build on entitled host; anon -> `needs-entitlement`; load -> L4 | **done (r05)** (tail: live build L3, load L4) |
-| 6 - EOL/constrained | RHEL 7 (frozen, yum, fixed-tag) + RHEL 6 (no anon repo; entitled `rhel-6-server`; EPEL archive-only) | reports generated or formally deferred | **done (r06)** (canon `lib/os-profile.sh` + coverage matrix) |
-| 7 - Generalization | tool-agnostic contract (sec 7) + classification (sec 8) ready for tool #2 | SPEC/TESTING coverage complete; docs bilingual | **done (r07)** (contract checker + pkg-availability canon + ADDING-A-TOOL) |
+The fill-in-the-blanks procedure for tool #2 lives in the README section
+[Adding a tool](./README.md#adding-a-tool) (Japanese mirror in
+[README.ja.md](./README.ja.md)); the machine-enforced contract it fills is B.10
+(checked by `tests/conformance/check-tool-contract.sh`, tier `t013`).
+
+---
+
+# Part C — Quality Gates & Validation Checklist
+
+### Static checks
+
+- `bash -n` over every `.sh` (tier `t001`); ShellCheck **clean at default
+  severity and `-S style`** with the checked-in `.shellcheckrc` (tier `t002`,
+  CWD-independent via `-P` since r29); UTF-8, LF-only, no BOM.
+
+### CI gates
+
+- None wired yet (parity with the sibling Bash project); the suite runner is the
+  CI candidate stage.
+
+### Functional checks
+
+- `tests/run-all.sh` green — currently **20 tiers / 478 assertions, 0 failures**
+  — from ANY working directory; the report-mode entry paths (3 matrices,
+  contract checker, coverage generator, verifier) run green; RESULTS
+  regeneration is byte-stable.
+
+### Documentation checks
+
+- `README.md` / `README.ja.md` in bilingual lock-step (matching `##`/`###`
+  counts); SPEC / TESTING / CHANGELOG English-only; doc-provenance pins present
+  on every doc-set member; generated reports never hand-edited.
+
+### Cross-data checks
+
+- Tool-contract conformance (`t013` + `check-tool-contract.sh`: B.10 (0)-(e)
+  per tool); ledger guards and per-tool verdict tiers (`t008`-`t011`);
+  installer pin/introspection tiers (`t015`/`t016`).
 
 ### Open items
 
 | # | Item | Disposition |
 |:--|:--|:--|
-| R1 | One real `ena.ko` plain-make build in an entitled container | Phase 5 / Phase 0 tail |
-| R2 | EPEL/DKMS-managed ENA vs plain-make only | Phase 5; default plain-make, EPEL optional |
-| R3 | RHEL 6 SSM S3-RPM dependency closure vs base-image-only contents | Phase 6 probe |
-| R4 | Naming vocabulary for future non-AWS tools | this SPEC, Phase 7 |
 | R5 | Live pull both paths (podman + curl-only OCI) on a container-egress host | L3/CI; the hermetic sequence is unit-tested in `t003` (Phase 2 tail) |
 | R6 | Live AWS CLI v2 install-test matrix (`--run`) -> empirical RESULTS column | L3/CI; the glibc model + report generation are hermetic (Phase 3 tail) |
 | R7 | Live SSM install-test matrix (`--run`, both init modes) -> empirical RESULTS | L3/CI; the init-mode grid + compliance model are hermetic (Phase 4 tail) |
-| R8 | Live ENA build on an entitled host (`--run`) -> empirical RESULTS; module load | L3 build / L4 load; the E2' grid + verifier gates are hermetic (Phase 5 tail) |
+| R8 | Live ENA build on an entitled host (`--run`) -> empirical RESULTS; module load | L3 build / L4 load; the E2' grid + verifier gates are hermetic (Phase 5 tail); doubles as the r28 errexit field check |
+| Q1 | Hermetic coverage of `acq_entitlement_mount_args` (rhsm mount set; RHUI ssl-path parse) | Quality pass; needs a small `ACQ_ROOT`-prefix refactor of `lib/acquire-rootfs.sh` so paths are injectable (touches production lib) |
+| Q2 | Hermetic coverage of `acq_platform` / `acq_repo_access` (host DMI/rpm/repo detection) | Quality pass; enabled by the same `ACQ_ROOT` refactor as Q1 |
+| Q3 | Defensive hardening of bare function calls under the ERR trap | **Superseded at r28**: `set -e` on the production scripts makes a silently-reintroduced non-zero return abort loudly (see D.2) |
+
+---
+
+# Part D — Known Pitfalls & Lessons Learned
+
+### D.1 Host-kernel-versioned kernel-devel tie (r22, regressed r24)
+
+**Symptom**: the ENA build-dep step installed `kernel-devel-$(uname -r)` — tying
+the container build to the HOST kernel, which the container repos do not carry.
+**Cause**: conflating "build against a kernel-devel tree" with "the running
+kernel". **Resolution**: install plain `kernel-devel` and build against the
+container's own tree (`make -C /usr/src/kernels/<kver>`); guarded by `t019`,
+which fails if the bug is re-injected.
+
+### D.2 ERR-trap masking of a designed non-zero return (r23)
+
+**Symptom**: `ensure_build_deps` returning rc 3 (kernel-devel unavailable) fired
+the installer's ERR trap and died as "unexpected error" instead of recording
+`needs-entitlement`. **Cause**: a bare call of a function that returns non-zero
+by design, under a `trap die ERR`. **Resolution**: `edc=0; ensure_build_deps ||
+edc=$?` at the call site (r23) + `t019` rc pins; **r28's `set -euo pipefail`**
+now makes any future bare-call regression abort loudly at the call site instead
+of being masked (Q3 superseded).
+
+### D.3 RHEL 6 RHSM plugin hang on the bare image (r18)
+
+**Symptom**: `yum` hung indefinitely inside `rhel6/rhel` containers.
+**Cause**: the subscription-manager/product-id plugins reach out to RHSM on the
+bare (non-UBI) image. **Resolution**: entitlement-cert detection gates the
+plugins (`pm_neutralize_rhsm_if_anonymous`), fixing yum properly instead of
+bypassing repos; helper pinned identical across installers (`t020`).
+
+### D.4 Old-curl option traps on EOL majors (r20, r26)
+
+**Symptom**: probe egress checks failed or under-retried on RHEL 6/7.
+**Cause**: `--retry-connrefused` (7.52+) and `--retry-all-errors` (7.71+) do not
+exist on curl 7.19/7.29. **Resolution**: version-agnostic in-shell retry loop
+around the whole request (r26); treat curl options as per-major capabilities.
+
+### D.5 Mock argv-spy count flakiness (r25)
+
+**Symptom**: intermittent wrong spy counts in mock-heavy tiers.
+**Cause**: non-atomic appends to the spy log. **Resolution**: atomic append in
+`tests/lib/mock.sh`; suite proven 30/30 consecutive after the fix.
+
+### D.6 `repoquery` prints nothing for an existing package
+
+**Symptom**: dnf-bundled `repoquery` with a bare query returned empty even when
+the package existed (mis-read as "kernel-devel absent" on 8/9/10).
+**Cause**: repoquery output-selection artifact. **Resolution**: availability
+queries use `dnf list --available <pkg>` or `repoquery --latest-limit=1`
+(`lib/ubi-pkgmgr.sh`).
+
+### D.7 RHEL 7 `ubi-init` floating-tag signature rejection
+
+**Symptom**: `podman pull ubi7/ubi-init:latest` rejected by the host signature
+policy on a registered RHEL host. **Cause**: floating-tag signature not accepted
+by the default policy. **Resolution**: pull RHEL 7 `ubi-init` by fixed tag or
+digest (B.6); other majors may float.
+
+### D.8 CWD-dependent SC1091 masquerading as a suite flake (r29)
+
+**Symptom**: `run-all.sh` failed 476/2 when invoked from the repository root and
+passed from the project directory — observed twice as an apparent
+"unreproducible flake" during the B2 fresh-clone verifications.
+**Cause**: ShellCheck resolves `# shellcheck source=` against the CWD/file dir;
+the only two directives pointing at the project `lib/` (t012, t014) raised
+SC1091 (info, counted at `-S style`) from any other CWD. **Resolution**: `t002`
+passes `-P "${PROJ}"` (r29); the gate is now CWD-independent (Part C). Lesson:
+before recording a flake, difference the *invocation*, not just the tree.

@@ -1,8 +1,8 @@
 ---
 doc-provenance:
   layer-1-format: 1.0.0
-  layer-2-template: 1.0.0
-  rendered: 2026-07-01
+  layer-2-template: 1.1.0
+  rendered: 2026-07-02
 ---
 # TESTING - bash-rhel-container-testsuite
 
@@ -37,7 +37,7 @@ non-zero if any tier fails or produces no result line.
 
 ## Tiers (L0-L4)
 
-See [`SPEC.md`](./SPEC.md) section 6 for the authoritative table. In short:
+See [`SPEC.md`](./SPEC.md) B.9 for the authoritative table. In short:
 
 | Tier | What | Run by | Network |
 |:--|:--|:--|:--|
@@ -220,7 +220,7 @@ so results are host-independent and deterministic.
   `epel_is_archive`, and `osp_kdevel_repo == ena_kdevel_repo`.
 * **`t013_toolcontract.sh`** (Phase 7) - L2: loads `contract_dir_missing` and
   `contract_install_missing` from `tests/conformance/check-tool-contract.sh`
-  (`CONTRACT_LIB_ONLY=1`), asserts the three shipped tools conform to the §10
+  (`CONTRACT_LIB_ONLY=1`), asserts the three shipped tools conform to the B.10
   (0)+(a-e) contract - including the **root `install-<tool>.sh` exists and the
   matrix kicks it** - that synthetic incomplete cases report their gaps, and that
   the checker exits 0.
@@ -238,6 +238,27 @@ so results are host-independent and deterministic.
   structured-result machinery: `measure_min_glibc`, `detect_bundled_python`,
   `ko_module_version`, and that `die` emits exactly one `status:fail` `[result]`
   (with the reason) in test mode and is silent in production.
+
+* **`t017_probeverdict.sh`** (r10) - `tests/probe-env.sh` verdict derivation:
+  the platform / engine / egress / entitlement facts fold into the documented
+  `ready | degraded | not-ready` classification, including the reasoned
+  degraded states for partial egress.
+
+* **`t018_repoaccess.sh`** (r12) - the per-(major, entitlement) repo-access
+  model: anonymous-UBI vs entitled repo-id sets, the RHEL 6 Tier-C anonymous
+  gap, and the EPEL 6/7 archive-only endpoints (`lib/epel.sh` +
+  `lib/pkg-availability.sh` cross-checks).
+
+* **`t019_enabuilddeps.sh`** (r22-r24) - the ENA build-dep hot path pinned
+  hermetically: plain `kernel-devel` (never `kernel-devel-$(uname -r)` - the
+  host-kernel tie regression guard), the designed non-zero `ensure_build_deps`
+  rc contract at the call site, and the `needs-entitlement` verdict wiring.
+
+* **`t020_helperidentity.sh`** (r27) - the duplicated-helper identity
+  discipline (SPEC Part A A.10): the four self-contained-installer helpers
+  (`entitlement_certs_present`, `pm_neutralize_rhsm_if_anonymous`, `run_pm`,
+  `os_major`) are byte-identical across all three install scripts, so a fix
+  applied to one copy that drifts from the others fails the suite.
 
 ---
 
@@ -376,16 +397,22 @@ The full suite is green in the planning sandbox:
 ---- t014_pkgavail.sh ----         ## RESULT pass=33 fail=0 skip=0
 ---- t015_installpins.sh ----      ## RESULT pass=17 fail=0 skip=0
 ---- t016_installintrospect.sh ----## RESULT pass=13 fail=0 skip=0
-SUITE: 430 passed, 0 skipped, 0 failed  (16 tiers, 0 tier-failure(s))
+---- t017_probeverdict.sh ----     ## RESULT pass=8 fail=0 skip=0
+---- t018_repoaccess.sh ----       ## RESULT pass=14 fail=0 skip=0
+---- t019_enabuilddeps.sh ----     ## RESULT pass=8 fail=0 skip=0
+---- t020_helperidentity.sh ----   ## RESULT pass=8 fail=0 skip=0
+SUITE: 478 passed, 0 skipped, 0 failed  (20 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 37 shell files** (incl. the 3 root `install-aws_*.sh`), each `bash -n`-clean and
-ShellCheck-`style`-clean: the 6 Phase-1 files, the 5 libraries
-(`lib/{acquire-rootfs,ubi-pkgmgr,epel,os-profile,pkg-availability}.sh`), the 5
-Phase-2 unit tiers (`tests/t003`-`t007`), the seven verdict/verify/profile/contract
-tiers (`tests/t008`-`t014`), the two Phase-3 AWS CLI scripts, the two Phase-4 SSM
-scripts, the three Phase-5 ENA scripts, the Phase-6 coverage generator, and the
-Phase-7 contract checker (`tests/conformance/check-tool-contract.sh`).
+**L0 fixed count = 42 shell files** (every `.sh` in the project, incl. the 3 root
+`install-aws_*.sh`), each `bash -n`-clean and ShellCheck-clean at **default
+severity and `-S style`** (t002 passes `-P` so the gate is CWD-independent,
+r29): the 5 libraries, the 20 `tests/t001`-`t020` tiers, the harness
+(`run-all.sh`, `probe-env.sh`, `tests/lib/*`), the three per-tool folders
+(lister + matrix each, plus the ENA verifier), the coverage generator, and the
+contract checker. Since r28 every file carries the Layer-1 five-section header
+banner and the production scripts run `set -euo pipefail` (the self-test
+harness stays `-uo` by design; SPEC Part A A.5 / D.8).
 
 **Residuals (run on CI / a container-egress / entitled / Nitro host):**
 - the live pull (L3) is not exercisable in the sandbox (no podman; the quay blob
