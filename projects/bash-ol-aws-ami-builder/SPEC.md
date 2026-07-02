@@ -70,7 +70,7 @@ doc-provenance:
 > carried the family common text inline as the pre-extraction de-facto reference;
 > that text now lives in the spec home and is inherited from it.
 
-<!-- >>> CANONICAL unit_id=spec.bash.part-a.reference-assets version=0.1.0 hash=f3c69969142a70bd policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.reference-assets version=1.0.0 hash=f3c69969142a70bd policy=canonical binding=follow-latest >>> -->
 ### A.1 Reference assets
 
 Every Bash script in the canon draws on a shared set of reference assets: (1) the
@@ -84,7 +84,7 @@ consumer uses are recorded in that consumer's own SPEC; this region only fixes t
 assets exist and where their conventions are defined.
 <!-- <<< CANONICAL unit_id=spec.bash.part-a.reference-assets <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.bash.part-a.source-file-format version=0.1.0 hash=5d0d2c65bbb3c52b policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.source-file-format version=1.0.0 hash=5d0d2c65bbb3c52b policy=canonical binding=follow-latest >>> -->
 ### A.2 Source file format
 
 Script source files are encoded **UTF-8 without BOM** and use **LF** line endings
@@ -100,7 +100,7 @@ generation date). Non-ASCII characters are confined to intentional data/string l
 identifiers and code are ASCII.
 <!-- <<< CANONICAL unit_id=spec.bash.part-a.source-file-format <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.bash.part-a.logging version=0.1.0 hash=9e85866ab961f01a policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.logging version=1.0.0 hash=9e85866ab961f01a policy=canonical binding=follow-latest >>> -->
 ### A.3 Logging conventions
 
 Operator-facing logging uses a **curated, append-only marker set**: a phase/step banner
@@ -126,7 +126,7 @@ machine channel, ALL human-facing log lines are routed to **stderr** so the mach
 channel stays clean.
 <!-- <<< CANONICAL unit_id=spec.bash.part-a.logging <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.bash.part-a.parameter-handling version=0.1.0 hash=88917cb6d61bc732 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.parameter-handling version=1.0.0 hash=88917cb6d61bc732 policy=canonical binding=follow-latest >>> -->
 ### A.4 Parameter handling
 
 Command-line switches use long-form kebab-case (`--skip-prereq`, `--env <file>`); `-h` /
@@ -141,7 +141,7 @@ configuration from the log. The concrete switch and environment-variable invento
 per-consumer (Part B).
 <!-- <<< CANONICAL unit_id=spec.bash.part-a.parameter-handling <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.bash.part-a.error-diagnostic version=0.1.0 hash=e395575128fdec10 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.error-diagnostic version=1.0.0 hash=e395575128fdec10 policy=canonical binding=follow-latest >>> -->
 ### A.5 Error, diagnostics, and shell options
 
 Output is three-tier: **fatal** `die "message"` (emits `[ERROR]`, exits 1; where a
@@ -174,7 +174,7 @@ assignment. Do not enable `shopt -s inherit_errexit` casually: it re-arms every 
 that the asymmetry currently leaves inert.
 <!-- <<< CANONICAL unit_id=spec.bash.part-a.error-diagnostic <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.bash.part-a.static-analysis version=0.1.0 hash=034f640d941dedee policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.static-analysis version=1.0.0 hash=034f640d941dedee policy=canonical binding=follow-latest >>> -->
 ### A.6 Static analysis
 
 Two static gates apply to every `.sh` file and run as the self-test suite's L0 tiers:
@@ -186,7 +186,7 @@ gate-clean unless the whole suite (`tests/run-all.sh`) reports zero failures wit
 static tiers green.
 <!-- <<< CANONICAL unit_id=spec.bash.part-a.static-analysis <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.bash.part-a.doc-language-policy version=0.1.0 hash=ae89cf1a97795729 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.doc-language-policy version=1.0.0 hash=ae89cf1a97795729 policy=canonical binding=follow-latest >>> -->
 ### A.7 Documentation language policy
 
 The repository-wide root `README.md` Language Policy applies: the project `README.md`
@@ -202,7 +202,7 @@ carries the language-switcher banner at the top and a Provenance section (AI too
 generation date, AS-IS disclaimer) at the bottom.
 <!-- <<< CANONICAL unit_id=spec.bash.part-a.doc-language-policy <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.bash.part-a.development-workflow version=0.1.0 hash=e4be8f1484f5d2f4 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.development-workflow version=1.0.0 hash=e4be8f1484f5d2f4 policy=canonical binding=follow-latest >>> -->
 ### A.8 Development workflow
 
 The iteration cycle is: reproduce the issue (or write the unit tier first); modify the

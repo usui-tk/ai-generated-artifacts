@@ -37,7 +37,7 @@ doc-provenance:
 > drift scanner; they are never hand-edited. The A.14 slot below is this consumer's
 > project-specific cross-script feature (not vendored).
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.reference-assets version=0.1.0 hash=d1f03d5c548d4f3f policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.reference-assets version=1.0.0 hash=d1f03d5c548d4f3f policy=canonical binding=follow-latest >>> -->
 ### A.1 Reference assets
 
 Every PowerShell script in the canon draws on a shared set of reference assets: (1) the
@@ -50,7 +50,7 @@ are recorded in that consumer's own SPEC; this region only fixes that the assets
 where their conventions are defined.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.reference-assets <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.source-file-format version=0.1.0 hash=f7105ebfe3d202ff policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.source-file-format version=1.0.0 hash=f7105ebfe3d202ff policy=canonical binding=follow-latest >>> -->
 ### A.2 Source file format
 
 Script source files are encoded **UTF-8 with BOM** and use **CRLF** line endings. Non-ASCII
@@ -60,7 +60,7 @@ enforced by the static-analysis gate (A.11); files that are not BOM+CRLF, or tha
 non-ASCII outside sanctioned literals, fail the gate.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.source-file-format <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.banner-version version=0.1.0 hash=9821c85a0e065145 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.banner-version version=1.0.0 hash=9821c85a0e065145 policy=canonical binding=follow-latest >>> -->
 ### A.3 Banner and version
 
 Each script carries a single canonical **version string** and emits a **startup banner** that
@@ -70,7 +70,7 @@ recorded in CHANGELOG. The banner format and the fingerprint computation are com
 concrete version value is per-consumer.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.banner-version <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.phase-architecture version=0.1.0 hash=9af42a0010ff6f52 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.phase-architecture version=1.0.0 hash=9af42a0010ff6f52 policy=canonical binding=follow-latest >>> -->
 ### A.4 Phase architecture
 
 Scripts are organised into **numbered phases**. The numbering convention (monotonic integer
@@ -80,7 +80,7 @@ phase number, title, and elapsed tag) is common. The **phase count and the phase
 B**, not here.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.phase-architecture <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.logging version=0.1.0 hash=8e1353694d8216fa policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.logging version=1.0.0 hash=8e1353694d8216fa policy=canonical binding=follow-latest >>> -->
 ### A.5 Logging conventions
 
 Logging goes through the shared logging helper family (vendored from the code canon). Messages
@@ -90,7 +90,7 @@ network operations use TLS. Scripts do not write ad-hoc colour or bypass the hel
 helper set is fixed by the code canon; this region fixes the *conventions* for using it.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.logging <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.path-handling version=0.1.0 hash=1526d2dbb85bb58f policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.path-handling version=1.0.0 hash=1526d2dbb85bb58f policy=canonical binding=follow-latest >>> -->
 ### A.6 Path handling
 
 Paths are handled defensively: prefer **`-LiteralPath`** over wildcard-expanding parameters;
@@ -100,7 +100,7 @@ current directory or a shared temp location. These rules are common; the specifi
 location is per-consumer.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.path-handling <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.parameter-handling version=0.1.0 hash=9969ad954a28fc39 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.parameter-handling version=1.0.0 hash=9969ad954a28fc39 policy=canonical binding=follow-latest >>> -->
 ### A.7 Parameter conventions
 
 Scripts expose the canonical **standard parameter set** (the shared switches every consumer
@@ -110,7 +110,7 @@ The standard switch set and the validation discipline are common; the consumer-s
 parameter list is defined in the consumer's SPEC.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.parameter-handling <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.error-diagnostic version=0.1.0 hash=0d472879675b224b policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.error-diagnostic version=1.0.0 hash=0d472879675b224b policy=canonical binding=follow-latest >>> -->
 ### A.8 Error and diagnostic model
 
 Diagnostics are **three-layered**: (1) human-readable console output; (2) a per-run detail log
@@ -122,7 +122,7 @@ A.14 / project section), the per-failure records and the operation-level trace c
 region does not require such a facility.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.error-diagnostic <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.csv-conventions version=0.1.0 hash=38cb631efd9af8a9 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.csv-conventions version=1.0.0 hash=38cb631efd9af8a9 policy=canonical binding=follow-latest >>> -->
 ### A.9 CSV conventions
 
 Tabular outputs and state files share common **column-naming** and **file-naming** conventions:
@@ -130,7 +130,7 @@ stable snake/Pascal column names, a per-phase output-file naming scheme, and a d
 file for resumable runs. CSV is the baseline tabular format every consumer supports.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.csv-conventions <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.jsonl-conventions version=0.1.0 hash=3d605116d9e9b33c policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.jsonl-conventions version=1.0.0 hash=3d605116d9e9b33c policy=canonical binding=follow-latest >>> -->
 ### A.9 (cont.) JSONL conventions - optional feature
 
 A consumer **may** additionally emit JSONL (one JSON object per line) for machine consumption -
@@ -139,7 +139,7 @@ notably the per-failure records of A.8. When present, JSONL files follow the can
 **optional feature**: a consumer that emits only CSV omits it.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.jsonl-conventions <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.environment-eval version=0.1.0 hash=669c9ba612d6f35b policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.environment-eval version=1.0.0 hash=669c9ba612d6f35b policy=canonical binding=follow-latest >>> -->
 ### A.10 Environment evaluation
 
 The **environment-evaluation phase (the first phase of the run)** assesses the host before any
@@ -150,7 +150,7 @@ fail-fast compatibility assertion are common; the specific phase number/name and
 checks are consumer-specific (Part B).
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.environment-eval <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.static-analysis version=0.1.0 hash=a9e9c8d44b702ac2 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.static-analysis version=1.0.0 hash=a9e9c8d44b702ac2 policy=canonical binding=follow-latest >>> -->
 ### A.11 Static analysis
 
 `psa.py` (the canon's PowerShell static analyzer; canonical home in the tool canon) is the
@@ -165,7 +165,7 @@ required); Stage 3 - release / packaging. The three-stage model is common; the c
 workflow filenames are path-encoded per consumer (A.13 / the dotfile conventions).
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.static-analysis <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.doc-language-policy version=0.1.0 hash=8e392c54780c4a7f policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.doc-language-policy version=1.0.0 hash=8e392c54780c4a7f policy=canonical binding=follow-latest >>> -->
 ### A.12 Documentation language policy
 
 Code, configuration, and the SPEC/TESTING/CHANGELOG doc-set are authored in **English / ASCII**.
@@ -181,7 +181,7 @@ sections are defined by the canonical README format (the `readme.disclaimer` / `
 items) and are **not restated here**.
 <!-- <<< CANONICAL unit_id=spec.powershell.part-a.doc-language-policy <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.powershell.part-a.development-workflow version=0.1.0 hash=fdadacb9bf023186 policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.powershell.part-a.development-workflow version=1.0.0 hash=fdadacb9bf023186 policy=canonical binding=follow-latest >>> -->
 ### A.13 Development workflow
 
 Changes follow an **iterate-to-green** cycle: edit; run the static-analysis gate (A.11) to
