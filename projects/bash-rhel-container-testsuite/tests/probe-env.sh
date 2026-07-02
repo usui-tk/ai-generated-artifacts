@@ -73,9 +73,11 @@ probe_one() {
               if timeout "${PKG_TIMEOUT:-300}" "$mgr" --disableplugin=subscription-manager,product-id repolist >/dev/null 2>&1; then
                 echo "YUMOK=yes"; else echo "YUMOK=no"; fi
             else echo "YUMOK=na"; fi
+            # NOTE: --retry/--retry-delay only. --retry-connrefused needs curl
+            # >= 7.52; RHEL 6/7 ship curl 7.19/7.29 and would abort on it.
             if command -v curl >/dev/null 2>&1; then
-              curl -fsS --retry 2 --retry-connrefused --retry-delay 1 --max-time 20 -o /dev/null https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm 2>/dev/null && echo "S3=ok" || echo "S3=fail"
-              curl -fsS --retry 2 --retry-connrefused --retry-delay 1 --max-time 20 -o /dev/null https://dl.fedoraproject.org/pub/epel/ 2>/dev/null && echo "EPEL=ok" || echo "EPEL=fail"
+              curl -fsS --retry 2 --retry-delay 1 --max-time 20 -o /dev/null https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm 2>/dev/null && echo "S3=ok" || echo "S3=fail"
+              curl -fsS --retry 2 --retry-delay 1 --max-time 20 -o /dev/null https://dl.fedoraproject.org/pub/epel/ 2>/dev/null && echo "EPEL=ok" || echo "EPEL=fail"
             else echo "S3=unknown"; echo "EPEL=unknown"; fi
           ' 2>/dev/null)" || rc=$?
   ent="${host_mode}"

@@ -11,6 +11,22 @@ All seven implementation phases are complete. The remaining work is the live
 empirical fill (R5-R8) on a container-egress / entitled / Nitro host; the models,
 generators, verifiers, and the tool contract are hermetic and green in-sandbox.
 
+## [r20] - 2026-07-02 - probe: old-curl compatibility (drop --retry-connrefused)
+
+### Fixed
+- **RHEL 7/6 probe false `s3=fail` + `epel=fail`.** r19 added
+  `--retry-connrefused` to the `--probe-env` egress checks, but that option
+  requires curl >= 7.52.0. RHEL 7 (curl 7.29) and RHEL 6 (curl 7.19) reject it,
+  so curl aborted immediately and both S3 and EPEL reported `fail` (flipping
+  those targets to `degraded`) even though the endpoints were reachable. The
+  egress checks now use `--retry 2 --retry-delay 1` only (both supported since
+  curl 7.12.3), which keeps the transient-blip protection while working on the
+  old images. RHEL 10/9/8 are unaffected. A compat note is inlined at the check.
+
+### Verified
+- Suite green (**18 tiers, 457 passed**); ShellCheck-style-clean; LF-only.
+  Delta is `tests/probe-env.sh` + `CHANGELOG.md` only.
+
 ## [r19] - 2026-07-02 - probe egress retry + centralized RHSM/RHUI entitlement passthrough
 
 Adds a deterministic egress check to the probe (fixes a flaky `s3=fail`) and a
