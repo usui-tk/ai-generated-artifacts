@@ -811,6 +811,68 @@ never again be silent.
 
 ---
 
+## 10. New Project Bootstrap (Lifecycle Maturity Model)
+
+Every project under `projects/` carries a lifecycle stage — `sandbox` →
+`incubating` → `governed` (+ terminal `archived`) — with stage-scoped
+governance obligations. The normative model is
+[ADR 0024](./governance/adr/0024-project-lifecycle-maturity-model.md)
+(stage × obligation table, promotion triggers) and
+[ADR 0025](./governance/adr/0025-exploration-mode.md) (the sandbox
+default working discipline); `governance/SPEC.md §Execution framework`
+is the current-truth view. This section is the operating procedure —
+reference, don't restate.
+
+### Birth (sandbox — day one, every new project)
+
+1. Render the doc-set from the template canon
+   (`governance/templates/`, provenance pins included): `README.md` +
+   `README.ja.md` + `SPEC.md` + `CHANGELOG.md` (+ `TESTING.md` once
+   tests exist). Use
+   `governance/templates/scaffold-project-bootstrap-prompt.template.md`
+   to start the session.
+2. Always-on obligations from r01: AI disclaimer + language policy
+   (English/ASCII code and commits; bilingual README pair), the
+   encoding contract, and syntax gates (`bash -n` /
+   `Parser::ParseFile` / `py_compile`).
+3. Everything else is EXEMPT at sandbox: no manifest row, no STATUS
+   tracking, no full static-analysis gate, no vendoring, no per-phase
+   loop. Default working discipline is **exploration mode** (ADR
+   0025) — stream-style commits, light gates, and the HARD boundary:
+   canon bodies, vendored regions, `governance/`, and Layer-0 root
+   docs are untouchable from inside the mode.
+
+### Promotion
+
+- **sandbox → incubating** (at the user's continue/publish decision):
+  register the lifecycle record via the CRUD tool —
+  `python3 quality-tools/canon-manifest-tool/tool.py register
+  --unit-id project.<dir> --kind project --location projects/<dir>
+  --maturity incubating` — add the project to STATUS tracking and the
+  doc_gate `--reconstructed` battery list, and turn on full static
+  analysis + bilingual lock-step enforcement.
+- **incubating → governed** (by a conformance pass — one
+  reconciliation turning every governed-column obligation green at
+  once; the rhel-testsuite B2 pass is the precedent): vendored Part A
+  where a family spec home exists, `consumers[]`, offline tests + CI
+  workflows, per-phase loop for governance-relevant changes.
+  Stage changes are one-flag updates:
+  `... update --unit-id project.<dir> --maturity governed`.
+- **Graduation (separate-repo spin-out) is NOT a stage** — it is a
+  distinct physical event with `maturity=governed` as its
+  prerequisite.
+
+### Spikes inside existing projects
+
+A time-boxed exploration inside an incubating/governed project is
+declared as an `[EXPLORATION]` entry in the project `CHANGELOG.md`
+(scope, goal, timebox), quarantines its working artifacts, and exits
+by folding keepers through the project's full gates (ADR 0025 §5).
+By-products: knowledge → `documents/research/<topic>/`; runnable
+tools/scripts → a new `projects/` entry at sandbox stage.
+
+---
+
 ## When this guide should be updated
 
 Update `AGENTS.md` when:
@@ -820,6 +882,8 @@ Update `AGENTS.md` when:
   Layer 0 — cross-reference in §7
 - The hierarchical model evolves — §2
 - The Doc-Touching Matrix (§5) needs new rows for added document categories
+- The lifecycle maturity model (stages, obligations, triggers) evolves
+  via a superseding ADR — §10 cross-references only
 
 DO NOT update `AGENTS.md` to restate rules that already live in their
 canonical locations (root `README.md`, `CONTRIBUTING.md`, per-project
