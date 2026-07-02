@@ -208,6 +208,33 @@ correction in the relevant `CHANGELOG.md` entry, explicitly naming
 the field(s) that were drifted (e.g. "Action ValidateSet had 13
 items; README listed 10; corrected to 13").
 
+### Fixture provenance (external-system truth)
+
+A committed test fixture that stands in for an external system's
+output (Microsoft Update Catalog HTML / JSON rows, Microsoft Learn
+pages, DownloadDialog responses, registry snapshots, and the like)
+MUST be a **verbatim capture** of that system's real output — never
+hand-authored from the implementation's own assumptions. A fixture
+composed to match what the code expects is circular evidence: the
+test then confirms the assumption instead of the reality, and every
+gate stays green while both are wrong (forensic instance: AP-10).
+
+- **Capture, don't compose.** Produce the fixture from the live
+  system (probe tool, collector script, saved response) and commit
+  it unedited apart from documented redactions.
+- **Record provenance with the fixture.** The fixture itself, its
+  side-car (`expected.json` or a fixture note), or the owning
+  `tests/README.md` row MUST state the source (system + query), the
+  capture date, and the capture method. The established phrasing is
+  "VERBATIM <date> live capture, never authored".
+- **Authored fixtures are the labelled exception.** Negative /
+  malformed-input fixtures MAY be hand-authored and MUST be labelled
+  as authored, so nobody mistakes them for captured truth.
+- **Re-capture on contradiction, never patch.** When a
+  fixture-backed test contradicts observed live behaviour,
+  re-capture from the live system first; editing the fixture until
+  the test passes is the anti-pattern this rule exists to prevent.
+
 ---
 
 ## 5. SPEC ↔ README ↔ TESTING Doc-Touching Matrix
@@ -241,6 +268,25 @@ skipping each one.
 |---|---|
 | New test tool added (T11+) | SPEC §C.9 inventory updated |
 | Operator-confirmed real-run results | Optional `CHANGELOG.md` entry; SPEC unchanged |
+
+### CI workflow dependencies (workflows → docs)
+
+`.github/workflows/` files are code with no version number of their
+own; their only change record is the owning project's `CHANGELOG.md`.
+When a workflow file is touched:
+
+| Change in `.github/workflows/` | Required downstream updates |
+|---|---|
+| Any change to a `projects__<project>__*.yml` workflow | The owning project's `CHANGELOG.md` entry (mandatory — the workflow has no other change record) |
+| Any change to a `quality-tools__*.yml` workflow | The owning tool's `CHANGELOG.md` entry (e.g. the psa.py workflow records in `quality-tools/powershell-static-analyzer/CHANGELOG.md`) |
+| The set of checks a stage runs changes (step added / removed / re-scoped) | The project's `TESTING.md` CI / stage status rows reconciled in the same commit |
+| The local-vs-CI gate split changes | Any doc that enumerates the gate battery (PR checklist under `.github/`, `TESTING.md` §0) reconciled |
+
+Forensic grounding (2026-07-02, iso project): `TESTING.md`'s Stage 1
+row claimed the offline T-suite ran in CI long after the workflow
+only ran the format check, the config schema gate, psa.py and
+PSScriptAnalyzer — drift that persisted precisely because this
+matrix had no CI row requiring workflow ↔ TESTING reconciliation.
 
 ### Bilingual lock-step (always)
 
@@ -580,8 +626,13 @@ change.
     Selection/option labels are English/numeric, never kana. Intentional Japanese
     (the `README.ja.md` pair, `<slug>.ja.md` docs, Japanese *data* strings) is exempt.
 12. Did I update `CHANGELOG.md` with the change?
-13. Did the change touch a `SPEC.md`? Did I check the Doc-Touching
-    Matrix (§5) for downstream impact?
+13. Did the change touch a `SPEC.md` or a `.github/workflows/` file?
+    Did I check the Doc-Touching Matrix (§5) for downstream impact
+    (for workflows: owning `CHANGELOG.md` + `TESTING.md` CI rows)?
+13a. If `tests/fixtures/` content was added or modified: does every
+    external-truth fixture carry capture provenance (source, date,
+    method) per §4, and is every hand-authored fixture labelled as
+    authored?
 14. If `governance/state/*.jsonl` or `governance/schema/*` was touched,
     OR a **canonical marker** (a `# >>> CANONICAL …` line in a
     `reference-code/<family>/` unit) was touched:
@@ -736,6 +787,27 @@ references in each of the bilingual TOP README files (repository
 structure tree, convention-file list, Language Policy table). This
 AP-9 entry itself is part of the corrective commit, preserving the
 incident as a permanent lesson.
+
+### AP-10. Fabricated fixture confirming a wrong implementation
+
+Forensically documented in the iso project's 2026-07-02 audit arc
+(project `CHANGELOG.md`, tag `setupdu-discriminator-hardfail`; audit
+finding F1). **Symptom**: a resolver passes its offline fixture test
+yet can never match on the live system — a Setup-DU filter keyed on a
+`Products` value (`'Setup Dynamic Update'`) that real Microsoft
+Update Catalog rows never carry; the resolved line came back empty,
+was silently dropped, and the committed config shipped without its
+SetupDU line **while every gate stayed green**, because the fixture
+had FABRICATED the assumed `Products` string. **Root cause**: the
+fixture was composed from the same assumption the code encoded, so
+test and code confirmed each other (circular evidence); compounded
+by a silent-drop path with no starvation guard. **Prevention**: the
+§4 fixture-provenance rule (external-truth fixtures are verbatim
+live captures with recorded provenance; the replacement fixture is
+labelled "VERBATIM 2026-07-02 live-Catalog capture, never
+authored"), a pinned discriminator regression test against verbatim
+rows, and an in-model empty-resolution HARD-FAIL so starvation can
+never again be silent.
 
 ---
 
