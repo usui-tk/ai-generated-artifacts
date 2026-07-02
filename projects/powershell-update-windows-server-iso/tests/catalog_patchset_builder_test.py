@@ -31,10 +31,19 @@ For each OS the harness:
      (the v3.0 primary integrity key), and -- for the UUP-checkpoint OS
      (Server 2025) -- a SetupDU Line is produced at ApplyOrder 5.
 
-The fixture's SetupDU raw line carries the real 24H2 Setup DU title/KB
-(KB5095966) with placeholder download url/digest; the real values are
-filled by a live refresh. The purpose here is to prove the transform
-builds the dataset offline, including the SetupDU Kind.
+The fixture's SetupDU raw line is a VERBATIM 2026-07-02 live-Catalog
+capture of the 2026-06 Setup DU (KB5095966, uid 3401a3ef-...), including
+the real Products value ``Windows 10 and later Dynamic Update`` -- the
+prior fixture fabricated a ``Setup Dynamic Update`` products string that
+does not exist on the live surface, which is exactly what certified the
+never-matching resolver filter (audit F1). Fixture fields are captured,
+never authored.
+
+This test also pins the r11.45 silent-starvation guard: rule (1) of
+``ConvertTo-ConfigLines`` drops an empty (0-file) line ONLY when its
+Kind is outside the PatchModel's apply map; an empty IN-MODEL Kind
+(e.g. a starved 2025 SetupDU) must HARD-FAIL instead of silently
+producing a degraded dataset [DECIDED 2026-07-02, user].
 
 Run from the project root:
 
@@ -50,7 +59,7 @@ from typing import Any, Dict, List
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 
 sys.path.insert(0, str(TESTS_DIR))
-from common.ps_invoke import PSSession  # type: ignore  # noqa: E402
+from common.ps_invoke import PSSession, PSHarnessError  # type: ignore  # noqa: E402
 
 FIXTURE_PATH = TESTS_DIR / "fixtures" / "catalog_raw" / "resolve-2026-06.json"
 SCRIPT_PATH  = TESTS_DIR.parent / "Update-WindowsServerIso.ps1"
@@ -151,6 +160,40 @@ def main() -> int:
                         f"ApplyOrder={setup[0].get('ApplyOrder')} (expected 5), "
                         f"KbId={setup[0].get('KbId')}", passed, failed)
             print()
+
+        # 5. Silent-starvation guard (r11.45): an EMPTY in-model Kind must
+        #    HARD-FAIL; an empty out-of-model Kind still drops silently.
+        print("=== Guard: empty in-model Kind hard-fails ===")
+        import copy
+        starved = copy.deepcopy(raw["2025"])
+        for ln in starved["lines"]:
+            if ln["kind"] == "SetupDU":
+                ln["files"] = []
+                ln["inScope"] = {"files": []}
+        try:
+            ps.invoke("ConvertTo-ConfigLines",
+                      OsResolved=starved, PatchModel="uup-checkpoint")
+            passed, failed = check(
+                "2025 starved SetupDU hard-fails", False,
+                "no exception raised (silent drop resurfaced)", passed, failed)
+        except PSHarnessError as exc:
+            msg = str(exc)
+            passed, failed = check(
+                "2025 starved SetupDU hard-fails",
+                "resolved 0 files" in msg and "SetupDU" in msg,
+                f"error={msg[:140]!r}", passed, failed)
+
+        # 2016's raw carries empty .NET / SafeOSDU lines (by-design absences,
+        # OUT of separate-ssu's apply map) -- those must STILL drop silently.
+        built_2016 = normalize_list(
+            ps.invoke("ConvertTo-ConfigLines",
+                      OsResolved=raw["2016"], PatchModel="separate-ssu"))
+        passed, failed = check(
+            "2016 out-of-model empties still drop silently",
+            {ln.get("Kind") for ln in built_2016} == EXPECTED_KINDS["2016"],
+            f"Kinds={sorted({ln.get('Kind') for ln in built_2016})}",
+            passed, failed)
+        print()
 
     print(f"==== RESULT: {passed} passed, {failed} failed ====")
     return 1 if failed else 0

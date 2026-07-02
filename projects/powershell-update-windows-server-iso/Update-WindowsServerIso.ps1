@@ -541,8 +541,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.44'
-$Script:ScriptTag     = 'digest-format-boundary'
+$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.45'
+$Script:ScriptTag     = 'setupdu-discriminator-hardfail'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5002,16 +5002,57 @@ function Resolve-SafeOsDu {
     return (New-Line 'SafeOSDU' $row $files $inScope "Products has 'Safe OS Dynamic Update' + title version token")
 }
 
+function Select-SetupDuCandidate {
+    <#
+    .SYNOPSIS
+        Pure discriminator: pick the server-OS Setup Dynamic Update candidate
+        rows from Catalog search rows (title/products). Offline-testable (T30).
+    .DESCRIPTION
+        FACT (reference architecture memo, resolution-recipes section;
+        re-verified against the live Catalog 2026-07-02): a Setup Dynamic
+        Update row's Products column carries ONLY 'Windows 10 and later
+        Dynamic Update' -- there is NO 'Setup Dynamic Update' product
+        category. Only the SafeOS DU has a dedicated product string
+        ('Windows Safe OS Dynamic Update'). The Setup-DU discriminator is
+        therefore the TITLE: 'Setup Dynamic Update' + the version token +
+        'server operating system' (excludes the same-month Windows 11
+        client rows), excluding arm64. Products membership in the Dynamic
+        Update family is kept as a sanity net against the Catalog's fuzzy
+        search relevance, never as the discriminator.
+    .OUTPUTS
+        System.Object[] (candidate rows; possibly empty)
+    #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Rows,
+        [Parameter(Mandatory)] [string]$VersionToken
+    )
+    $cands = @($Rows | Where-Object {
+        $_.title.Contains('Setup Dynamic Update') -and
+        $_.title.Contains($VersionToken) -and
+        $_.title.ToLower().Contains('server operating system') -and
+        ($_.title.ToLower() -notmatch 'arm64') -and
+        $_.products.Contains('Dynamic Update')
+    })
+    return ,$cands
+}
+
 function Resolve-SetupDu { # psa-disable-line PSA6003 -- 'Du' is the dynamic-update abbreviation, not a plural; mirrors Resolve-SafeOsDu
     # Setup Dynamic Update (b3 acquisition, sibling of Resolve-SafeOsDu). Setup DU
     # updates the media's setup/installer binaries (the sources\ tree, applied by
     # P09 via expand.exe overlay), NOT a WIM. It is published only for the
     # UUP-checkpoint OS (Server 2025 / 24H2); the separate-ssu / embedded-ssu /
     # embedded-ssu-du models FORBID it (Test-PatchModelConsistency Forbid list), so
-    # only the 2025 branch of Resolve-Os requests it. The discriminator mirrors the
-    # SafeOS resolver: it differs only in the Catalog Products string
-    # ('Setup Dynamic Update' vs 'Safe OS Dynamic Update'), per the legacy
-    # @('DynamicUpdate.Setup','DynamicUpdate.SafeOs') discovery pairing.
+    # only the 2025 branch of Resolve-Os requests it. DISCRIMINATOR (corrected
+    # 2026-07-02, live-Catalog-verified): unlike the SafeOS DU, a Setup DU row
+    # has NO dedicated Products category -- its Products column is only
+    # 'Windows 10 and later Dynamic Update' (reference memo, resolution-recipes
+    # section). The prior products.Contains('Setup Dynamic Update') filter could
+    # therefore NEVER match a live row, and the 2025 SetupDU line silently
+    # starved for weeks while every gate stayed green (the T27 fixture had
+    # fabricated the assumed Products string). Selection is now by TITLE via the
+    # pure, offline-tested Select-SetupDuCandidate (T30).
     param([string]$OsKey)
     $info = $script:CatOsDef[$OsKey]
     if ($OsKey -ne '2025') {
@@ -5020,17 +5061,12 @@ function Resolve-SetupDu { # psa-disable-line PSA6003 -- 'Du' is the dynamic-upd
     $tok = $info.verToken
     $q = 'Setup Dynamic Update for Microsoft server operating system version 24H2 x64'
     $rows = Search-Catalog $q
-    $cands = @($rows | Where-Object {
-        $_.products.Contains('Setup Dynamic Update') -and
-        $_.title.Contains($tok) -and
-        $_.title.ToLower().Contains('server operating system') -and
-        ($_.title.ToLower() -notmatch 'arm64')
-    })
+    $cands = Select-SetupDuCandidate -Rows @($rows) -VersionToken $tok
     $row = Get-Newest $cands
     $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
     $x64 = @($files | Where-Object { $_.fileName.Contains('x64') -and $_.fileName.EndsWith('.cab') })
     $inScope = [pscustomobject]@{ files = @($x64 | ForEach-Object { $_.fileName }) }
-    return (New-Line 'SetupDU' $row $files $inScope "Products has 'Setup Dynamic Update' + title version token")
+    return (New-Line 'SetupDU' $row $files $inScope "Title has 'Setup Dynamic Update' + version token (no Setup-DU Products discriminator exists)")
 }
 
 function Resolve-Os { # psa-disable-line PSA6003 -- noun is 'OS' (operating system), not a plural; ported reference contract
@@ -5126,7 +5162,9 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
         (kind/kb/catalogUid/title/products/files[]/inScope/note) into the config
         PatchBaseline.Lines[] (one Line per in-scope file, with Kind/Digest/ApplyOrder),
         applying the per-PatchModel selections:
-          (1) drop placeholder "none" lines (no files);
+          (1) drop placeholder "none" lines (no files) ONLY for Kinds outside
+              the PatchModel's apply map; an in-model Kind with 0 files
+              HARD-FAILS (silent-starvation guard, r11.45);
           (2) 2025 LCU 2-file split -> keep only the LCU-proper file (the baseline .msu is
               the separate SSU line);
           (3) .NET in-scope leaf selection (inScope.inScopeFiles);
@@ -5154,8 +5192,20 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
     $orders = $applyMap[$PatchModel]
     $out = [System.Collections.Generic.List[object]]::new()
     foreach ($L in $OsResolved.lines) {
-        if (-not $L.files -or @($L.files).Count -eq 0) { continue }          # (1)
-        $kind  = $kindMap[$L.kind]
+        $kind = $kindMap[$L.kind]
+        if (-not $L.files -or @($L.files).Count -eq 0) {                     # (1)
+            # Rule (1) drops a placeholder line ONLY when its Kind is OUTSIDE
+            # the PatchModel's apply map (by-design absences: 2016 .NET /
+            # SafeOSDU, 2019/2022 SSU). An EMPTY line for an IN-MODEL Kind
+            # means the live Catalog resolution silently failed (forensic:
+            # the 2025 SetupDU line starved for weeks behind a never-matching
+            # Products filter while all gates stayed green) -- HARD FAIL,
+            # never a silent drop [DECIDED 2026-07-02, user].
+            if ($kind -and $orders.ContainsKey($kind)) {
+                throw ("ConvertTo-ConfigLines: Kind '{0}' resolved 0 files for {1}, but PatchModel '{2}' expects it. Refusing to build a silently-degraded dataset -- investigate the resolver/discriminator against the live Catalog. (If a month legitimately lacks this Kind, make an explicit skip decision + flag first.)" -f $kind, $OsResolved.os, $PatchModel)
+            }
+            continue
+        }
         $insc  = $L.inScope
         $files = @($L.files)
         $inScopeFiles = if ($insc -and $insc.PSObject.Properties.Name -contains 'inScopeFiles') { @($insc.inScopeFiles) } else { @() }

@@ -378,26 +378,26 @@
       {
         "kind": "SetupDU",
         "kb": "KB5095966",
-        "catalogUid": "00000000-setup-du-2026-06-fixture-000000000000",
-        "products": "Setup Dynamic Update, Windows 10 and later Dynamic Update",
+        "catalogUid": "3401a3ef-ec94-43dd-aed8-b4f832c9eab6",
+        "products": "Windows 10 and later Dynamic Update",
         "title": "2026-06 Setup Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5095966)",
-        "sizeBytes": 4194304,
+        "sizeBytes": 16891086,
         "files": [
           {
             "idx": 0,
-            "fileName": "windows11.0-kb5095966-x64_setupdu_fixture0000000000000000000000000.cab",
-            "url": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/00000000-setup-du-fixture/public/windows11.0-kb5095966-x64_setupdu.cab",
-            "digest": "RklYVFVSRS1TRVRVUERVLURJR0VTVC1QTEFDRUhPTERFUg==",
-            "sha256": "",
+            "fileName": "windows11.0-kb5095966-x64_c62ffd613fd7048e9a27157aeae1e832f6543c06.cab",
+            "url": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/2963a8a8-7af5-4044-b911-3c1b6b11f5cc/public/windows11.0-kb5095966-x64_c62ffd613fd7048e9a27157aeae1e832f6543c06.cab",
+            "digest": "xi/9YT/XBI6aJxV66uHoMvZUPAY=",
+            "sha256": "dNyzFGCnMdIUXhbFlTPiROgELkaCUxeUASIjlHiE0Ks=",
             "enTitle": "2026-06 Setup Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5095966)"
           }
         ],
         "inScope": {
           "files": [
-            "windows11.0-kb5095966-x64_setupdu_fixture0000000000000000000000000.cab"
+            "windows11.0-kb5095966-x64_c62ffd613fd7048e9a27157aeae1e832f6543c06.cab"
           ]
         },
-        "note": "FIXTURE: representative Setup DU raw line. Title/KB are the real 24H2 Setup DU; url+digest are placeholders for offline transform exercise (real values come from a live refresh). Mirrors the SafeOSDU 2025 line shape."
+        "note": "CAPTURED 2026-07-02 from the live Microsoft Update Catalog (Search.aspx + DownloadDialog.aspx, uid 3401a3ef-ec94-43dd-aed8-b4f832c9eab6): the 2026-06 Setup DU KB5095966 row verbatim. NOTE the real Products value is ONLY 'Windows 10 and later Dynamic Update' -- the previous fixture fabricated a 'Setup Dynamic Update' products string that does not exist on the live surface, certifying the never-matching resolver filter (audit F1). Fixture fields must be captured, never authored."
       }
     ]
   }

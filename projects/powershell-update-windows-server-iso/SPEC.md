@@ -1816,6 +1816,23 @@ Setup and Safe OS Dynamic Updates are resolved live at build time by
 `Get-Newest` / `Search-Catalog`), always taking the latest applicable
 package. There is no Dynamic Update cache or lookback window.
 
+**Setup-DU discriminator correction [r11.45, live-Catalog-verified
+2026-07-02].** Unlike the SafeOS DU, a Setup DU row has NO dedicated
+Products category: its Products column is only `Windows 10 and later
+Dynamic Update` (only the SafeOS DU carries `Windows Safe OS Dynamic
+Update`) -- per the reference architecture memo's resolution recipes.
+The r11.38 filter `products.Contains('Setup Dynamic Update')` assumed
+SafeOS/Setup symmetry, could never match a live row, and silently
+starved the 2025 SetupDU line (rule (1) of `ConvertTo-ConfigLines`
+dropped the empty line) while every gate stayed green -- the T27
+fixture had fabricated the assumed Products string. Selection is now by
+TITLE via the pure `Select-SetupDuCandidate` (offline gate T30 against
+verbatim-captured rows), and rule (1) now **hard-fails** when a Kind
+inside the PatchModel's apply map resolves to 0 files (silent drops are
+reserved for by-design absences: 2016 .NET/SafeOSDU, 2019/2022 SSU;
+if a month legitimately lacks an in-model Kind, an explicit skip
+decision + flag is required first).
+
 **Why**: the build only needs the current applicable DU, and the live
 resolvers return it directly. The pre-b3 36-month per-OS DU cache
 (`cache-dynamicupdate-Server*.json`, populated by an A03 probe) had no

@@ -22,6 +22,39 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed -- the 2025 SetupDU line could never resolve on the live Catalog; discriminate by title, recapture the fixture verbatim, and hard-fail silent starvation (r11.44 -> r11.45, tag `setupdu-discriminator-hardfail`)
+
+`Resolve-SetupDu` (introduced r11.38, a production-side invention with no
+counterpart in the validated reference resolver set) filtered candidates with
+`products.Contains('Setup Dynamic Update')`, assuming SafeOS/Setup symmetry.
+The live Catalog has no such product category: a Setup DU row's Products
+column is only `Windows 10 and later Dynamic Update` (the reference
+architecture memo's resolution-recipes section already recorded this -- only
+the SafeOS DU carries a dedicated product string). The filter could never
+match; the resolved line came back empty; rule (1) of `ConvertTo-ConfigLines`
+silently dropped it; and the committed `config-Server2025.json` shipped
+without its SetupDU line while every gate stayed green -- because the T27
+fixture had FABRICATED the assumed Products string (audit F1, 2026-07-02;
+live probe confirmed the 2026-06 Setup DU KB5095966 exists and is the top
+hit for the exact query the script sends).
+
+Fix, three parts: (1) selection is now by TITLE via the new pure
+`Select-SetupDuCandidate` ('Setup Dynamic Update' + version token +
+'server operating system', not arm64; Products kept only as a
+Dynamic-Update-family sanity net), offline-gated by the new T30
+`tests/setup_du_discriminator_test.py` (8 assertions) against rows captured
+verbatim from the live Catalog. (2) The T27 fixture's SetupDU row is replaced
+with the VERBATIM 2026-07-02 capture (uid `3401a3ef-...`, real Products, real
+url/digest/sha256/size from DownloadDialog; the fixture note now states the
+capture provenance and the never-author rule). (3) Rule (1) of
+`ConvertTo-ConfigLines` now HARD-FAILS when a Kind inside the PatchModel's
+apply map resolves to 0 files [DECIDED 2026-07-02, user] -- silent drops stay
+only for by-design absences (2016 .NET/SafeOSDU, 2019/2022 SSU); T27 gains
+the starvation-guard assertions (14 -> 16). SPEC B.22.6 records the corrected
+discriminator + the guard; TESTING gains the T30 row and refreshed T27 row.
+The committed `config-Server2025.json` still lacks its SetupDU line until the
+next `A00 RebuildDataset` run regenerates the dataset with this fix.
+
 ### Fixed -- patch verification compared Catalog base64 digests against hex; normalize at a single boundary and wire the SHA-1 primary key (r11.43 -> r11.44, tag `digest-format-boundary`)
 
 Config Schema v3.0 stores `PatchBaseline.Lines[].Digest` (SHA-1) and `.Sha256`
