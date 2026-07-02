@@ -60,7 +60,7 @@ generation date). Non-ASCII characters are confined to intentional data/string l
 identifiers and code are ASCII.
 <!-- <<< CANONICAL unit_id=spec.bash.part-a.source-file-format <<< -->
 
-<!-- >>> CANONICAL unit_id=spec.bash.part-a.logging version=0.1.0 hash=4f85ed77ecdf29dd policy=canonical binding=follow-latest >>> -->
+<!-- >>> CANONICAL unit_id=spec.bash.part-a.logging version=0.1.0 hash=9e85866ab961f01a policy=canonical binding=follow-latest >>> -->
 ### A.3 Logging conventions
 
 Operator-facing logging uses a **curated, append-only marker set**: a phase/step banner
@@ -77,6 +77,13 @@ enabled only on an interactive stdout so captured output parses cleanly.
 parsed by a harness) are a separate per-consumer contract defined in Part B; log markers
 MUST NOT interleave into a machine channel, and machine lines MUST NOT depend on log
 formatting.
+**Role scoping (observed).** The full marker set is realized by a family's primary
+operator-facing pipeline script(s). Auxiliary scripts - self-contained installers,
+matrix runners, generators, checkers - MAY instead use a minimal `log()` helper
+(timestamped for long-running scripts, carrying a `[<script>]` source tag, single
+stream) plus `die` (A.5) for the fatal path. When a script's stdout is itself a
+machine channel, ALL human-facing log lines are routed to **stderr** so the machine
+channel stays clean.
 <!-- <<< CANONICAL unit_id=spec.bash.part-a.logging <<< -->
 
 <!-- >>> CANONICAL unit_id=spec.bash.part-a.parameter-handling version=0.1.0 hash=88917cb6d61bc732 policy=canonical binding=follow-latest >>> -->
