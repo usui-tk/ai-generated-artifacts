@@ -232,3 +232,46 @@ analysis, and split now-decisions from items deferrable until implementation/the
 (naming, for each deferral, what to decide and how to investigate it).
 
 Governed by [ADR 0017](./adr/0017-structure-first-review-methodology.md).
+
+### Project-lifecycle maturity model
+
+Every project under `projects/` carries one lifecycle stage — **`sandbox` → `incubating` →
+`governed`**, plus terminal **`archived`** — recorded as a `kind=project` manifest row
+(`unit_id = project.<dir>`, `canonical_location = projects/<dir>`, `maturity`; the region-unit
+fields are absent by contract via the schema's allOf branch, and the CRUD tool enforces the
+same shape). The axis applies at **project/tool granularity only**; asset-level release
+readiness stays SemVer (ADR 0008/0018). Obligations accumulate by stage: **sandbox** (no
+manifest row yet) owes only the birth-kit — template-canon doc-set + provenance pins, AI
+disclaimer + language policy, encoding + syntax gates; **incubating** (registered at the
+user's continue/publish decision) adds the manifest lifecycle record, STATUS tracking, full
+static analysis, doc_gate battery membership and bilingual lock-step enforcement;
+**governed** (reached by a B2-style conformance pass) adds vendored Part A where a family
+spec home exists, `consumers[]`, offline tests + CI, and the per-phase loop for
+governance-relevant changes. **Graduation (separate-repo spin-out) stays a distinct physical
+event, orthogonal to maturity, prerequisite `maturity=governed`.** The stage label
+`governed` is an explicit ADR 0024 supersession of the TF.1 `graduated` domain pin; the four
+live projects are registered `maturity=governed` retroactively. Bootstrap procedure:
+AGENTS.md §10 + `governance/templates/scaffold-project-bootstrap-prompt.template.md`.
+
+Governed by [ADR 0024](./adr/0024-project-lifecycle-maturity-model.md) (project-lifecycle
+maturity model; stage × obligation table, promotion triggers, the kind=project lifecycle
+record).
+
+### Exploration/RE mode
+
+Empirical exploration (probes, reverse engineering, spikes) runs in an official
+light-discipline lane: the **default discipline of a sandbox-stage project**, and a
+**declarable, time-boxed mode inside an incubating/governed project** (an `[EXPLORATION]`
+CHANGELOG entry stating scope, goal, timebox; working artifacts quarantined until exit). In
+the mode the per-phase loop is not applied and only the always-on sandbox gates run; the
+**hard boundary** is that canon bodies, vendored regions, `governance/`, and Layer-0 root
+docs are untouchable from inside the mode — a discovered canon/governance need exits into
+the normal `[AUTH]` loop. Genchi-genbutsu narrative may stay in Tier-P notes (ADR 0005); the
+SPEC carries the distilled stable contract. **Exit is a conformance pass** (the ADR 0024
+promotion triggers, or folding a spike's keepers through the project's full gates).
+By-products: knowledge → `documents/research/<topic>/`; runnable tools/scripts → a new
+`projects/` entry at sandbox stage (frozen-evidence one-shots may stay as marked research
+adjuncts; when in doubt, `projects/` sandbox).
+
+Governed by [ADR 0025](./adr/0025-exploration-mode.md) (exploration/RE mode; entry forms,
+light gates, hard boundary, exit criteria, by-product homing).
