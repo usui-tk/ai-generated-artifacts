@@ -115,6 +115,39 @@ run_pm() {
 
 pkgmgr() { for m in dnf yum; do command -v "${m}" >/dev/null 2>&1 && { printf '%s' "${m}"; return 0; }; done; printf 'none'; }
 
+# pm_install_local_rpm <mgr> <rpm> : install a LOCAL rpm whose dependency closure
+# is self-contained. The SSM Agent is a static Go binary; its only Requires are
+# /bin/sh + rtld(GNU_HASH), always present in any RHEL/UBI base (verified with
+# `rpm -qpR amazon-ssm-agent.rpm`). dnf/yum would otherwise refresh EVERY enabled
+# repo's metadata before even a local install, so a single unreachable or
+# major-mismatched repo (a host redhat.repo bind-mounted into a different-major
+# UBI container, an unentitled anonymous base, or a transient CDN error) fails
+# the transaction for reasons unrelated to this rpm - historically mislabelled
+# "dependency closure". So install OFFLINE first (--disablerepo='*', which needs
+# no repo metadata for a dep-free rpm) and only fall back to a repo-enabled
+# resolve if that genuinely fails (a future rpm growing a real dependency). The
+# package manager's real stderr is captured into PM_INSTALL_ERR, never masked.
+PM_INSTALL_ERR=""
+pm_install_local_rpm() {
+  local mgr="$1" rpm_path="$2" errf
+  local -a cmd=("${mgr}" -y)   # never empty -> "${cmd[@]}" is set -u safe on bash 4.1+ (RHEL6/7)
+  [ "${INSECURE_TLS}" = "1" ] && cmd+=(--setopt=sslverify=0)
+  errf="$(mktemp)"
+  # Tier 1: offline - a dependency-free rpm needs no repo metadata at all.
+  if run_pm "${cmd[@]}" --disablerepo='*' install "${rpm_path}" >/dev/null 2>"${errf}"; then
+    rm -f "${errf}"; PM_INSTALL_ERR=""; return 0
+  fi
+  # Tier 2: repo-enabled resolve - only reached if Tier 1 failed (e.g. an unmet
+  # real dependency in some future agent build); append its stderr too.
+  if run_pm "${cmd[@]}" install "${rpm_path}" >/dev/null 2>>"${errf}"; then
+    rm -f "${errf}"; PM_INSTALL_ERR=""; return 0
+  fi
+  # Surface the actual package-manager error (last ~200 chars), never a guess.
+  PM_INSTALL_ERR="$(tr '\n' ' ' < "${errf}" | sed 's/  */ /g; s/^ *//; s/ *$//' | tail -c 200)"
+  rm -f "${errf}"
+  return 1
+}
+
 rpm_url() {
   if [ "${SSM_VERSION}" = "latest" ]; then printf '%s/latest/linux_amd64/amazon-ssm-agent.rpm' "${RPM_BASEURL}"
   else printf '%s/%s/linux_amd64/amazon-ssm-agent.rpm' "${RPM_BASEURL}" "${SSM_VERSION}"; fi
@@ -122,19 +155,22 @@ rpm_url() {
 
 install_rpm() {
   local url tmp mgr
-  local -a opts
   url="$(rpm_url)"; tmp="$(mktemp -d)"; mgr="$(pkgmgr)"
   pm_neutralize_rhsm_if_anonymous
   local -a copts=(-fsSL --retry 2 -o "${tmp}/ssm.rpm")
   [ "${INSECURE_TLS}" = "1" ] && copts+=(-k)
   log "fetching ${url}"
   curl "${copts[@]}" "${url}" || { rm -rf "${tmp}"; die "fetch failed: ${url}"; }
-  opts=(-y install "${tmp}/ssm.rpm")
-  [ "${INSECURE_TLS}" = "1" ] && opts+=(--setopt=sslverify=0)
   if [ "${mgr}" != "none" ]; then
-    run_pm "${mgr}" "${opts[@]}" >/dev/null 2>&1 || { rm -rf "${tmp}"; die "rpm install failed (dependency closure) via ${mgr}"; }
+    pm_install_local_rpm "${mgr}" "${tmp}/ssm.rpm" \
+      || { local reason="${PM_INSTALL_ERR}"; rm -rf "${tmp}"; die "rpm install via ${mgr} failed${reason:+: ${reason}}"; }
   else
-    rpm -i "${tmp}/ssm.rpm" >/dev/null 2>&1 || { rm -rf "${tmp}"; die "rpm -i failed (no dnf/yum; unresolved deps?)"; }
+    local rpmerr
+    if ! rpmerr="$(rpm -i "${tmp}/ssm.rpm" 2>&1 1>/dev/null)"; then
+      rpmerr="$(printf '%s' "${rpmerr}" | tr '\n' ' ' | sed 's/  */ /g; s/^ *//; s/ *$//' | tail -c 200)"
+      rm -rf "${tmp}"
+      die "rpm -i failed (no dnf/yum)${rpmerr:+: ${rpmerr}}"
+    fi
   fi
   rm -rf "${tmp}"
 }

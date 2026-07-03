@@ -13,6 +13,42 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r32] - 2026-07-03 - fix: SSM Agent install robustness (offline-first local rpm; real error surfacing)
+
+### Fixed
+- **`install-aws_ssm-agent.sh`: the local-rpm install no longer hinges on a full
+  enabled-repo metadata refresh.** A real E2E run on an entitled RHEL 10.2 KVM
+  host had every SSM version across RHEL 9/10 fail as `install-fail` with reason
+  "rpm install failed (dependency closure) via dnf". Root cause: the SSM Agent
+  rpm is dependency-free (`rpm -qpR` shows only `/bin/sh`, `rtld(GNU_HASH)`,
+  rpmlib features, and its own `config(...)`), yet the installer ran
+  `dnf -y install <local.rpm>` with repos enabled - and dnf refreshes EVERY
+  enabled repo's metadata before even a local transaction. A single unreachable
+  or major-mismatched repo (a host `redhat.repo` bind-mounted into a
+  different-major UBI container, an unentitled anonymous base, or a transient CDN
+  error) therefore failed the transaction for reasons unrelated to the package.
+  The new `pm_install_local_rpm` helper installs OFFLINE first
+  (`--disablerepo='*'`, which needs no repo metadata for a dep-free rpm) and only
+  falls back to a repo-enabled resolve if that genuinely fails (a future rpm
+  growing a real dependency). Verified genchi-genbutsu: the fixed installer
+  returns `{"status":"ok","installed":true,"ran":true}` inside `ubi9/ubi`, where
+  the unfixed path failed at repo-metadata download.
+- **The failure reason is now the real package-manager stderr, not a guess.** The
+  old path masked the pm output with `>/dev/null 2>&1` and hardcoded
+  "dependency closure" regardless of the actual error. `pm_install_local_rpm`
+  captures pm stderr into `PM_INSTALL_ERR` and `die` surfaces its last ~200
+  characters, so a failing row in the ledger / `RESULTS-rhel<N>.md` now records
+  why it failed (the `rpm -i` no-dnf/yum fallback captures its stderr likewise).
+- **RHEL 6/7 `set -u` safety.** The package-manager argument list is built as a
+  never-empty array (`("${mgr}" -y)`), so `"${cmd[@]}"` cannot trip the empty
+  `"${arr[@]}"` unbound-variable behaviour of bash 4.1/4.2 (RHEL 6/7).
+
+### Changed
+- Suite green: 20 tiers, **504 passed** (up from 499; +5 in
+  `t016_installintrospect.sh` B7: offline-first strategy + real-error surfacing,
+  hermetic via a `run_pm` override so no real dnf/yum/network is touched).
+  `README.md` / `README.ja.md` counts updated in lock-step.
+
 ## [r31] - 2026-07-03 - feat: ENA Express driver-version-floor readiness (aws_ena-driver)
 
 ### Added

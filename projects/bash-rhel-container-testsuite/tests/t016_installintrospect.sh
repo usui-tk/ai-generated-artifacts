@@ -85,4 +85,23 @@ assert_eq yes "$(AWSCLI_LIB_ONLY=1 bash -c "${SRC} declare -F block_awscli_v1 >/
 assert_eq yes "$(SSM_LIB_ONLY=1 bash -c "${SRC} declare -F enable_for_boot >/dev/null && printf yes || printf no" _ "${SSM}")" "ssm defines enable_for_boot (B5 systemd/chkconfig/upstart)"
 assert_eq yes "$(ENA_LIB_ONLY=1 bash -c "${SRC} declare -F dump_build_diag >/dev/null && printf yes || printf no" _ "${ENA}")" "ena defines dump_build_diag (B6 build diagnostics)"
 
+# --- B7 (r32): SSM install strategy - offline-first + real-error surfacing ----
+# The SSM Agent rpm is dependency-free (Requires: /bin/sh + rtld(GNU_HASH) only),
+# so install must NOT hinge on a full enabled-repo metadata refresh. Assert
+# pm_install_local_rpm (1) installs with all repos disabled FIRST (offline), and
+# (2) on a package-manager failure surfaces the REAL pm stderr via PM_INSTALL_ERR
+# instead of the historical hardcoded "dependency closure" guess. run_pm is
+# overridden after sourcing so no real dnf/yum/network is touched (hermetic).
+assert_eq yes "$(SSM_LIB_ONLY=1 bash -c "${SRC} declare -F pm_install_local_rpm >/dev/null && printf yes || printf no" _ "${SSM}")" "ssm defines pm_install_local_rpm (offline-first local rpm install)"
+
+b7_argf="$(mktemp)"
+b7_ok="$(SSM_LIB_ONLY=1 bash -c "${SRC} run_pm() { printf '%s\\n' \"\$*\" >>\"${b7_argf}\"; return 0; }; pm_install_local_rpm dnf /tmp/x.rpm && printf INSTALLED" _ "${SSM}")"
+assert_eq "INSTALLED" "${b7_ok}" "pm_install_local_rpm returns 0 when the package manager succeeds"
+assert_match "$(head -1 "${b7_argf}")" '--disablerepo' "first install attempt disables all repos (offline-first; no metadata refresh for a dep-free rpm)"
+rm -f "${b7_argf}"
+
+b7_reason="$(SSM_LIB_ONLY=1 bash -c "${SRC} run_pm() { printf 'DISTINCTIVE_METADATA_ERR\\n' >&2; return 1; }; pm_install_local_rpm dnf /tmp/x.rpm || printf '%s' \"\$PM_INSTALL_ERR\"" _ "${SSM}")"
+assert_match "${b7_reason}" 'DISTINCTIVE_METADATA_ERR' "pm failure surfaces the real pm stderr via PM_INSTALL_ERR"
+assert_eq 0 "$(printf '%s' "${b7_reason}" | grep -c 'dependency closure')" "surfaced reason drops the old hardcoded 'dependency closure' guess"
+
 t_done
