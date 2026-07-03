@@ -229,6 +229,24 @@ Governed by [ADR 0027](./adr/0027-decision-gate-and-ai-trigger-implementation.md
 (decision gate + AI trigger: tier confirmation, machine impact, contract pinning,
 heavy-path refusal semantics).
 
+### Reconciliation cold loop
+
+`quality-tools/reconciliation-loop/coldloop.py` (1.0.0) + the daily workflow
+`governance__reconciliation-cold-loop.yml` implement the **cold path**: scheduled
+scan → **DuckDB aggregation** (the repository's sole DuckDB consumer; version
+stamped; disposable) → **append-only proposals ledger**
+(`governance/state/reconciliation/proposals.jsonl`; proposals wrap the pinned
+change-request contract 1.0.0; **skip-key = content hash**, so unchanged
+re-observed drift is not re-proposed) → regenerated `report.json`/`report.md`/
+`summary.md`. Human decisions are **appended** records (`decide` — never edits);
+**no canonical mutation happens in the cold path** — accepted proposals go through
+the normal `[AUTH]` + promote/restamp + battery flow. Hot/cold discipline: hot-path
+scanner runs stay transient (never staged); ONLY the cold scheduled run auto-commits
+observations + ledger + reports (`[skip ci]`, schedule/dispatch-only triggers).
+
+Governed by [ADR 0028](./adr/0028-reconciliation-cold-loop.md) (cold loop:
+hot/cold boundary, DuckDB scope, append-only ledger semantics, scope v1).
+
 ### Scanner output-contract pins
 
 The P3 consumer-drift scanner's sole output contract is `observation.schema.json`. Three of its
