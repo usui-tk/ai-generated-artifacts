@@ -107,8 +107,10 @@ forkfields = ("forwarded", "applied_upstream", "change_reason", "reason_class")
 check(all(k not in fr for k in forkfields),
       "5: DEP-3 fork fields not reflected in the request")
 
-# 6. kind/impact are null (maturity clause, not computed)
-check(fr["kind"] is None and fr["impact"] is None, "6: kind/impact left null")
+# 6. drift payloads carry no top-level kind/impact placeholders (P7a: the
+#    decision block owns them; without a root there is no decision block)
+check("kind" not in fr and "impact" not in fr and "decision" not in fr,
+      "6: no stale placeholders; decision block only with a root")
 
 # 7. determinism + stable sort
 many = [region_obs(unit_id="ps.helper.z", consumer="c2"),
@@ -122,13 +124,15 @@ check(order == sorted(order), "7: output sorted by (unit_id, consumer)")
 
 # 8. classification + routing = marker-coupled / deferred path (boundary check)
 check(r["classification"] == "marker-coupled", "8: classification = marker-coupled")
-check("decision-gate(P7a)" in r["proposed_route"] and "coupled write" in r["proposed_route"],
-      "8: proposed_route points to the deferred path (no immediate CRUD op)")
+check("decision-gate" in r["proposed_route"] and
+      ("promote" in r["proposed_route"] or "coupled write" in r["proposed_route"]),
+      "8: proposed_route = decision gate -> gates -> coupled write path")
 
-# 9. tracked-deferral markers present (keep the deferral detectable)
-check(r["contract_status"] == "provisional-unpinned"
-      and r["consumer_status"] == "none-until-P7a-decision-gate",
-      "9: tracked-deferral markers present")
+# 9. contract markers reflect the P7a resolution (pinned by its owner)
+check(r["contract_status"] == "pinned-P7a"
+      and r["consumer_status"] == "decision-gate(P7a)"
+      and r["request_version"] == "1.0.0",
+      "9: contract pinned at P7a (request_version 1.0.0)")
 
 # 10. canonical-JSON conformance (round-trip + stable key order)
 line = T._canonical_line(r)
@@ -159,6 +163,108 @@ multi = [region_obs(unit_id="ps.helper.shared", consumer="proj-a"),
 mr = T.build_requests(multi)
 check(len(mr) == 2 and {x["consumer"] for x in mr} == {"proj-a", "proj-b"},
       "12: one request per (unit, consumer) drift")
+
+# ---- P7a: impact measurement + the decision gate (ADR 0011 3-AI/4; ADR 0027) ----
+import os, shutil, tempfile
+
+def build_impact_root():
+    """Minimal repo fixture: one doc-region unit (home + 2 consumers) and one
+    code unit (home + 1 consumer) with countable markers."""
+    root = tempfile.mkdtemp(prefix="trigger_impact_")
+    os.makedirs(os.path.join(root, "governance", "state"))
+    os.makedirs(os.path.join(root, "governance", "spec"))
+    os.makedirs(os.path.join(root, "projects", "pa"))
+    os.makedirs(os.path.join(root, "projects", "pb"))
+    doc_mark = ("<!-- >>> CANONICAL unit_id=spec.bash.part-a.x version=1.0.0 "
+                "hash=0123456789abcdef policy=canonical binding=follow-latest >>> -->\n"
+                "body\n<!-- <<< CANONICAL unit_id=spec.bash.part-a.x <<< -->\n")
+    code_mark = ("# >>> CANONICAL unit_id=ps.helper.get-x version=1.0.0 "
+                 "hash=0123456789abcdef policy=canonical binding=follow-latest >>>\n"
+                 "# body\n")
+    with open(os.path.join(root, "governance", "spec", "d.md"), "w") as fh:
+        fh.write(doc_mark * 2)   # 2 regions at home
+    for proj in ("pa", "pb"):
+        with open(os.path.join(root, "projects", proj, "SPEC.md"), "w") as fh:
+            fh.write(doc_mark * 2)
+    with open(os.path.join(root, "projects", "pa", "s.ps1"), "w") as fh:
+        fh.write(code_mark)
+    rows = [
+        {"unit_id": "spec.demo.part-a", "kind": "spec-region",
+         "canonical_location": "governance/spec/d.md", "canonical_version": "1.0.0",
+         "consumers": [{"consumer": "pa", "path": "projects/pa/SPEC.md"},
+                       {"consumer": "pb", "path": "projects/pb/SPEC.md"}]},
+        {"unit_id": "ps.helper.get-x", "kind": "powershell-helper",
+         "canonical_location": "projects/pa/s.ps1", "canonical_version": "1.0.0",
+         "consumers": [{"consumer": "pa", "path": "projects/pa/s.ps1"}]},
+    ]
+    # the doc unit's markers use the unit prefix spec.bash.part-a.x on purpose?
+    # No - align the fixture: rewrite home/consumers with the registered prefix.
+    doc_mark2 = doc_mark.replace("spec.bash.part-a.x", "spec.demo.part-a.x")
+    with open(os.path.join(root, "governance", "spec", "d.md"), "w") as fh:
+        fh.write(doc_mark2 * 2)
+    for proj in ("pa", "pb"):
+        with open(os.path.join(root, "projects", proj, "SPEC.md"), "w") as fh:
+            fh.write(doc_mark2 * 2)
+    with open(os.path.join(root, "governance", "state", "manifest.jsonl"), "w") as fh:
+        for rec in rows:
+            fh.write(T._canonical_line(rec) + "\n")
+    return root
+
+root = build_impact_root()
+
+# 12. impact: doc unit -> 2 consumers, home+consumer placements, marker totals
+imp = T.measure_impact(root, "spec.demo.part-a")
+check(imp["consumer_count"] == 2 and imp["consumers"] == ["pa", "pb"]
+      and imp["total_markers"] == 6
+      and [p["role"] for p in imp["placements"]] == ["home", "consumer", "consumer"],
+      "12: impact machine-measured from consumers[] + marker placements")
+
+# 13. impact: code-frame markers are counted too; unknown unit raises
+imp2 = T.measure_impact(root, "ps.helper.get-x")
+check(imp2["total_markers"] >= 1, "13a: code-frame placements counted")
+try:
+    T.measure_impact(root, "no.such.unit")
+    check(False, "13b: unknown unit raises")
+except KeyError:
+    check(True, "13b: unknown unit raises")
+
+# 14. decision tiers: kind -> SemVer -> tier (ADR 0011 4, confirmed P7a.1)
+d, e = T.build_decision("bug-fix", imp)
+check(e is None and d["semver_level"] == "patch" and d["tier"] == "trivial",
+      "14a: bug-fix -> patch -> trivial")
+d, e = T.build_decision("enhancement", imp)
+check(e is None and d["tier"] == "medium", "14b: enhancement -> minor -> medium")
+
+# 15. heavy tier REFUSED without migration+ADR; accepted with both (+ consumers)
+d, e = T.build_decision("breaking", imp)
+check(d is None and "REFUSED" in e and "--migration" in e and "--adr" in e,
+      "15a: breaking without migration/ADR refused")
+d, e = T.build_decision("breaking", imp, migration="steps...", adr="0099")
+check(e is None and d["tier"] == "heavy" and d["impact"]["consumers"] == ["pa", "pb"]
+      and d["migration"] == "steps..." and d["adr"] == "0099",
+      "15b: heavy path carries enumerated consumers + migration + ADR")
+
+# 16. propose: emits ONE decision-gated reconcile-back request; bad kind refused
+req, e = T.build_proposal(root, "spec.demo.part-a", "bug-fix", "fix wording",
+                          auth="session-2026-07-03")
+check(e is None and req["request_kind"] == "reconcile-back"
+      and req["decision"]["status"] == "decided"
+      and req["decision"]["tier"] == "trivial"
+      and req["request_version"] == "1.0.0"
+      and req["decision"]["auth_ref"] == "session-2026-07-03",
+      "16a: propose emits a decided reconcile-back request")
+req, e = T.build_proposal(root, "spec.demo.part-a", "weird-kind", "x")
+check(req is None and "unknown change kind" in e, "16b: unknown kind refused")
+
+# 17. machine drift requests with a root carry computed impact, kind pending
+obs = region_obs(unit_id="spec.demo.part-a", consumer="pa")
+mr = T.build_requests([obs], root=root)[0]
+check(mr["decision"]["status"] == "pending-decision"
+      and mr["decision"]["kind"] is None
+      and mr["decision"]["impact"]["consumer_count"] == 2,
+      "17: drift request = computed impact + kind pending human decision")
+
+shutil.rmtree(root)
 
 print("\n%d/%d checks passed" % (_checks - _fail, _checks))
 sys.exit(1 if _fail else 0)
