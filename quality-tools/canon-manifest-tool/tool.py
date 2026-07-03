@@ -45,7 +45,7 @@ Usage:
         are rejected)
     python3 tool.py --root <repo-root> update     --unit-id <id> [--tested true|false] \
         [--version <v>] [--change-policy <cp>] [--binding <bm>] [--platform-scope <ps>] \
-        [--location <p>] [--maturity <m>] [--add-consumer consumer=<c>,path=<p> ...] [--clear-consumers]
+        [--location <p>] [--maturity <m>] [--add-consumer consumer=<c>,path=<p>[,repo=<r>] ...] [--clear-consumers]
     python3 tool.py --root <repo-root> promote    --unit-id <id> --version <v>
         (doc-region kinds only: the `unit-record coupled write` - updates the
         manifest row AND every marker version= across the spec home + all
@@ -215,11 +215,21 @@ def precheck_record(record, existing, *, is_new):
 
 
 def parse_consumer(spec):
-    """Parse 'consumer=<c>,path=<p>' into {'consumer': c, 'path': p}."""
+    """Parse 'consumer=<c>,path=<p>[,repo=<r>]' into a consumers[] entry.
+    `repo` is OPTIONAL (ADR 0030): absent means this central repository;
+    present names the satellite repository holding the inlined instance."""
     parts = dict(kv.split("=", 1) for kv in spec.split(",") if "=" in kv)
     if "consumer" not in parts or "path" not in parts:
-        raise SystemExit("--consumer expects 'consumer=<id>,path=<file>' (got %r)" % spec)
-    return {"consumer": parts["consumer"], "path": parts["path"]}
+        raise SystemExit("--add-consumer expects "
+                         "'consumer=<id>,path=<file>[,repo=<name>]' (got %r)" % spec)
+    unknown = sorted(set(parts) - {"consumer", "path", "repo"})
+    if unknown:
+        raise SystemExit("--add-consumer: unknown key(s) %s in %r "
+                         "(allowed: consumer, path, repo)" % (unknown, spec))
+    entry = {"consumer": parts["consumer"], "path": parts["path"]}
+    if "repo" in parts:
+        entry["repo"] = parts["repo"]
+    return entry
 
 
 # --- self-validation (subprocess; authoritative) ---------------------------------------
@@ -506,7 +516,7 @@ def build_parser():
     p_reg.add_argument("--maturity", choices=MATURITIES, default=None,
                        help="required for kind=project; optional elsewhere (ADR 0024)")
     p_reg.add_argument("--consumer", action="append",
-                       help="consumer=<id>,path=<file> (repeatable)")
+                       help="consumer=<id>,path=<file>[,repo=<name>] (repeatable; repo per ADR 0030)")
     p_reg.set_defaults(func=op_register)
 
     p_upd = sub.add_parser("update", help="modify fields of an existing row")
@@ -519,7 +529,7 @@ def build_parser():
     p_upd.add_argument("--location", default=None)
     p_upd.add_argument("--maturity", choices=MATURITIES, default=None)
     p_upd.add_argument("--add-consumer", action="append",
-                       help="consumer=<id>,path=<file> (repeatable)")
+                       help="consumer=<id>,path=<file>[,repo=<name>] (repeatable; repo per ADR 0030)")
     p_upd.add_argument("--clear-consumers", action="store_true")
     p_upd.set_defaults(func=op_update)
 

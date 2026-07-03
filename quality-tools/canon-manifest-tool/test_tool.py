@@ -184,6 +184,36 @@ def run_tests():
                   and foo["consumers"][0]["consumer"] == "demo-consumer"))
     shutil.rmtree(root)
 
+    # 5b. update: add a CROSS-REPO consumer (repo=..., ADR 0030) -> OK, the
+    #     entry carries the repo key and the validator (schema A) stays green.
+    root = build_repo()
+    rc = run(["--root", root, "update", "--unit-id", "pwsh.helper.get-foo",
+              "--add-consumer",
+              "consumer=deploy-demo,path=Deploy-Demo.ps1,"
+              "repo=Deploy-Drivers-For-WindowsServer"])
+    after = tool.load_manifest(mpath(root))
+    foo = next(r for r in after if r["unit_id"] == "pwsh.helper.get-foo")
+    cases.append(("update add-consumer with repo= (ADR 0030) succeeds",
+                  rc == 0 and foo["consumers"]
+                  and foo["consumers"][0].get("repo")
+                  == "Deploy-Drivers-For-WindowsServer"))
+    shutil.rmtree(root)
+
+    # 5c. update: an UNKNOWN --add-consumer key is refused (previously it was
+    #     silently dropped - a latent footgun closed with the repo addition).
+    root = build_repo()
+    before = read_bytes(mpath(root))
+    try:
+        rc = run(["--root", root, "update", "--unit-id", "pwsh.helper.get-foo",
+                  "--add-consumer",
+                  "consumer=deploy-demo,path=Deploy-Demo.ps1,repository=typo"])
+        refused = rc != 0
+    except SystemExit:
+        refused = True
+    cases.append(("update add-consumer with unknown key is refused (no write)",
+                  refused and read_bytes(mpath(root)) == before))
+    shutil.rmtree(root)
+
     # 6. update: bump canonical_version on a REGION unit -> REFUSED (marker drift,
     #    check D); master rolled back byte-identical. (The boundary, enforced by gate.)
     root = build_repo()
