@@ -24,6 +24,11 @@ This gate closes it with three offline, machine-decidable checks:
                                class (2026-07-02: the table said 83 while the header
                                narrative said 84). Historical zones (History /
                                Phase-progress / prose) are deliberately NOT probed.
+  R6. STATUS kind-breakdown  - inside the SAME zones, every backticked
+                               kind-breakdown claim (N `<kind>`) and project-
+                               maturity claim (N `project` [<maturity>]) equals
+                               the actual manifest (ADR 0031; probe what is
+                               written, as R5 does).
 
 Scope (D7): the repo-root `*.md` files + `.github/*.md`. Project-level docs are owned
 by doc_gate (--path/--reconstructed) and the per-project streams; ALL-md scanning was
@@ -53,6 +58,11 @@ _REL_LINK = re.compile(r"\]\((?!https?://|mailto:)([^)#\s]+)")
 _WORKFLOW = re.compile(r"(?:\.github/workflows|actions/workflows)/([A-Za-z0-9_.\-]+\.ya?ml)")
 # "<N> rows" / "<N> manifest rows" claims (markdown bold tolerated between parts).
 _ROWS_CLAIM = re.compile(r"(\d+)(?:\*\*)?\s+(?:manifest\s+)?rows\b")
+# R6 (ADR 0031): backticked kind-breakdown claims, e.g. "58 `powershell-helper`",
+# and project-maturity claims, e.g. "4 `project` [governed]".
+_KIND_CLAIM = re.compile(
+    r"(\d+)\s+`(powershell-helper|tool|spec-region|template|project)`")
+_PROJECT_MATURITY_CLAIM = re.compile(r"(\d+)\s+`project`\s*\[(\w+)\]")
 
 STATUS_REL = os.path.join("governance", "project-management", "STATUS.md")
 MANIFEST_REL = os.path.join("governance", "state", "manifest.jsonl")
@@ -100,6 +110,25 @@ def _manifest_row_count(root):
     return count
 
 
+def _manifest_kind_facts(root):
+    """(kind -> row count, maturity -> project-row count) or None (no manifest)."""
+    path = os.path.join(root, MANIFEST_REL)
+    if not os.path.isfile(path):
+        return None
+    kinds, maturities = {}, {}
+    with open(path, encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            kind = row.get("kind")
+            kinds[kind] = kinds.get(kind, 0) + 1
+            if kind == "project":
+                mat = row.get("maturity")
+                maturities[mat] = maturities.get(mat, 0) + 1
+    return kinds, maturities
+
+
 def _current_truth_zones(status_text):
     """Yield (zone_name, zone_text): the `| Current phase |` table row and the
     `Gates green` paragraph (up to the next blank line)."""
@@ -136,6 +165,39 @@ def check_status_currency(root):
     return findings
 
 
+def check_status_kind_breakdown(root):
+    """R6 (ADR 0031): inside the same current-truth zones, every backticked
+    kind-breakdown claim (N `<kind>`) and every project-maturity claim
+    (N `project` [<maturity>]) equals the actual manifest. Claims that do
+    not appear are not required (probe what is written, as R5 does)."""
+    status_path = os.path.join(root, STATUS_REL)
+    if not os.path.isfile(status_path):
+        return []
+    facts = _manifest_kind_facts(root)
+    if facts is None:
+        return []
+    kinds, maturities = facts
+    rel = os.path.normpath(STATUS_REL).replace(os.sep, "/")
+    findings = []
+    with open(status_path, encoding="utf-8") as handle:
+        text = handle.read()
+    for zone, zone_text in _current_truth_zones(text):
+        for claim, kind in _KIND_CLAIM.findall(zone_text):
+            actual = kinds.get(kind, 0)
+            if int(claim) != actual:
+                findings.append(
+                    "R6 %s: %s claims %s `%s` rows but the manifest has %d"
+                    % (rel, zone, claim, kind, actual))
+        for claim, maturity in _PROJECT_MATURITY_CLAIM.findall(zone_text):
+            actual = maturities.get(maturity, 0)
+            if int(claim) != actual:
+                findings.append(
+                    "R6 %s: %s claims %s `project` [%s] rows but the manifest "
+                    "has %d at that maturity"
+                    % (rel, zone, claim, maturity, actual))
+    return findings
+
+
 def run(root, quiet=False):
     findings = []
     files = scoped_files(root)
@@ -145,6 +207,7 @@ def run(root, quiet=False):
         findings += check_relative_links(root, rel, text)
         findings += check_workflow_refs(root, rel, text)
     findings += check_status_currency(root)
+    findings += check_status_kind_breakdown(root)
     if not quiet:
         for finding in findings:
             print("FINDING: %s" % finding)

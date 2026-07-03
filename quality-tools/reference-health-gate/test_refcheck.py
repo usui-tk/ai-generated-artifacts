@@ -127,6 +127,31 @@ write(root, "README.md", "ok\n")
 check("R5 no-op without manifest", refcheck.run(root, quiet=True) == [])
 shutil.rmtree(root)
 
+# 9b) R6 (ADR 0031): matching kind-breakdown + project-maturity claims -> green.
+root = build_root()
+write(root, os.path.join("governance", "state", "manifest.jsonl"),
+      json.dumps({"unit_id": "t1", "kind": "tool"}) + "\n"
+      + json.dumps({"unit_id": "t2", "kind": "tool"}) + "\n"
+      + json.dumps({"unit_id": "p1", "kind": "project",
+                    "maturity": "governed"}) + "\n")
+write(root, refcheck.STATUS_REL,
+      "| Current phase | Manifest **3 rows** = 2 `tool` + 1 `project` "
+      "[governed]. |\n\nGates green: 3 manifest rows ok.\n")
+write(root, "README.md", "ok\n")
+check("R6 matching kind-breakdown + maturity claims green",
+      refcheck.run(root, quiet=True) == [])
+
+# 9c) R6: stale kind count AND stale maturity claim -> one finding each
+#     (the 2026-07-03 stale-breakdown class, now machine-probed).
+write(root, refcheck.STATUS_REL,
+      "| Current phase | Manifest **3 rows** = 3 `tool` + 1 `project` "
+      "[sandbox]. |\n\nGates green: 3 manifest rows ok.\n")
+f = refcheck.run(root, quiet=True)
+check("R6 stale kind count + stale maturity claim caught",
+      len(f) == 2 and any("`tool`" in x and x.startswith("R6") for x in f)
+      and any("[sandbox]" in x and x.startswith("R6") for x in f))
+shutil.rmtree(root)
+
 # 10) exit-code contract: main() returns 1 on findings, 0 when clean.
 root = build_root()
 write(root, "README.md", "[bad](./docs/missing.md)\n")
