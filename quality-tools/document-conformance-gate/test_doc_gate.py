@@ -216,6 +216,54 @@ _wf3("CRLF.md", (_PROV + "\nx\n").replace("\n", "\r\n").encode("utf-8"), raw=Tru
 check("L3 CRLF -> finding",
       any("CRLF" in f for f in G.check_reconstructed(["CRLF.md"], _L3)))
 
+# 21b) Derived L3 mode (ADR 0031): the file set derives from the manifest's
+#      kind=project rows (maturity incubating+), pinned-*.md discovery.
+import json as _json  # noqa: E402
+_DRV = tempfile.mkdtemp()
+os.makedirs(os.path.join(_DRV, "governance", "state"))
+os.makedirs(os.path.join(_DRV, "projects", "alpha", "sub"))
+os.makedirs(os.path.join(_DRV, "projects", "beta"))
+os.makedirs(os.path.join(_DRV, "projects", "hollow"))
+
+
+def _prow(uid, loc, mat):
+    return _json.dumps({"schema_version": "1", "unit_id": uid,
+                        "kind": "project", "canonical_location": loc,
+                        "maturity": mat, "consumers": []})
+
+
+def _wdrv(rel, text):
+    p = os.path.join(_DRV, rel)
+    with open(p, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+
+
+with open(os.path.join(_DRV, "governance", "state", "manifest.jsonl"), "w",
+          encoding="utf-8", newline="") as fh:
+    fh.write(_prow("project.alpha", "projects/alpha", "governed") + "\n")
+    fh.write(_prow("project.beta", "projects/beta", "sandbox") + "\n")
+_wdrv("projects/alpha/README.md", _PROV + "\nSee [g](https://example.com).\n")
+_wdrv("projects/alpha/README.ja.md", _PROV + "\n\u30ac\u30a4\u30c9\u3002\n")
+_wdrv("projects/alpha/sub/NOTES.md", _PROV + "\npinned subdir doc\n")
+_wdrv("projects/alpha/RESULTS.md", "no front matter - stream-local artifact\n")
+_wdrv("projects/beta/README.md", _PROV + "\nsandbox doc - exempt\n")
+_files, _finds, _np = G.derive_reconstructed(_DRV)
+check("derived L3: pinned *.md discovered (incl. subdir), unpinned excluded",
+      _files == ["projects/alpha/README.ja.md", "projects/alpha/README.md",
+                 "projects/alpha/sub/NOTES.md"] and _finds == [])
+check("derived L3: sandbox project rows are exempt (ADR 0024 gate table)",
+      _np == 1 and not any("beta" in f for f in _files))
+check("derived L3 end-to-end: main() with no FILE args scans the derived set",
+      G.main(["--root", _DRV, "--reconstructed"]) == 0)
+with open(os.path.join(_DRV, "governance", "state", "manifest.jsonl"), "a",
+          encoding="utf-8", newline="") as fh:
+    fh.write(_prow("project.hollow", "projects/hollow", "governed") + "\n")
+_files2, _finds2, _np2 = G.derive_reconstructed(_DRV)
+check("derived L3: covered project with zero pinned docs -> finding "
+      "(the old zero-file-PASS footgun is closed)",
+      _np2 == 2 and any("project.hollow" in f for f in _finds2)
+      and G.main(["--root", _DRV, "--reconstructed"]) == 1)
+
 # 22) C9 version coupling (ADR 0022) - closes the proven spec-region hole
 _UNITS = {"spec.powershell.part-a": {"unit_id": "spec.powershell.part-a",
                                      "kind": "spec-region",

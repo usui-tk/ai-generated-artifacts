@@ -37,7 +37,10 @@ Usage:
   doc_gate.py --root . [--check]     verify; exit 1 if any finding
   doc_gate.py --root . --stamp       rewrite hash=PENDING -> real / structural
   doc_gate.py --path FILE [...]      operate on explicit files instead of manifest
-  doc_gate.py --reconstructed FILE [...]   L3 light structural conformance (ADR 0019 |7)
+  doc_gate.py --reconstructed [FILE ...]  L3 light structural conformance (ADR 0019 |7);
+                                          with NO files: derived mode (ADR 0031) - the
+                                          set derives from manifest kind=project rows
+                                          (maturity incubating+, doc-provenance-pinned *.md)
 """
 import argparse
 import hashlib
@@ -192,6 +195,71 @@ def check_front_matter(text):
 # the marker/hash machinery, which is vendored-region-only (ADR 0019 |88). A
 # reconstructed class-(B) doc-set carries NO markers, so it is verified HERE rather
 # than by the per-region check_file path.
+RECONSTRUCTED_MATURITIES = ("incubating", "governed")
+
+
+def _has_provenance_pin(path):
+    """True when the file opens with a YAML front-matter block that carries the
+    ADR 0019 doc-provenance pin. Byte-cheap probe; tolerant of a UTF-8 BOM."""
+    try:
+        with open(path, encoding="utf-8-sig") as fh:
+            if fh.readline().strip() != "---":
+                return False
+            for _ in range(40):
+                line = fh.readline()
+                if not line or line.strip() == "---":
+                    return False
+                if line.strip().startswith("doc-provenance:"):
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def derive_reconstructed(root):
+    """ADR 0031: derive the L3 file set from the manifest `kind=project` rows.
+
+    Scope = rows whose maturity is in RECONSTRUCTED_MATURITIES (the ADR 0024
+    gate table: `--reconstructed` is REQUIRED from incubating up; sandbox is
+    exempt). A covered project's set = every `*.md` under its
+    canonical_location whose front matter carries the doc-provenance pin
+    (ground truth, ADR 0019; hidden directories skipped). Returns
+    (rel_paths, findings, n_projects); a covered project with ZERO pinned
+    docs is a finding - its REQUIRED reconstructed doc-set is missing."""
+    mpath = os.path.join(root, "governance", "state", "manifest.jsonl")
+    rels, findings, nproj = [], [], 0
+    if not os.path.exists(mpath):
+        return rels, ["derived L3: manifest.jsonl not found under --root "
+                      "(the derived mode needs the project registry)"], 0
+    with open(mpath, encoding="utf-8") as fh:
+        rows = [json.loads(line) for line in fh if line.strip()]
+    for row in rows:
+        if row.get("kind") != "project":
+            continue
+        if row.get("maturity") not in RECONSTRUCTED_MATURITIES:
+            continue
+        nproj += 1
+        loc = row.get("canonical_location", "")
+        base = os.path.join(root, loc)
+        found = []
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in sorted(dirnames) if not d.startswith(".")]
+            for name in sorted(filenames):
+                if name.lower().endswith(".md"):
+                    full = os.path.join(dirpath, name)
+                    if _has_provenance_pin(full):
+                        found.append(os.path.relpath(full, root)
+                                     .replace(os.sep, "/"))
+        if not found:
+            findings.append(
+                "derived L3: project %s (maturity=%s) has no "
+                "doc-provenance-pinned *.md under %s - its REQUIRED "
+                "reconstructed doc-set is missing (ADR 0024 / ADR 0031)"
+                % (row.get("unit_id"), row.get("maturity"), loc))
+        rels.extend(found)
+    return rels, findings, nproj
+
+
 def check_reconstructed(paths, root):
     findings = []
     prov_by_name = {}
@@ -529,19 +597,32 @@ def main(argv=None):
                          "+ absolute governance links); files relative to --root")
     args = ap.parse_args(argv)
     root = args.root
-    l1 = load_l1(root)
-    rels = args.path if args.path is not None else discover_files(root)
 
     if args.reconstructed is not None:
-        findings = check_reconstructed(args.reconstructed, root)
-        n = len(args.reconstructed)
+        files = args.reconstructed
+        findings = []
+        derived_note = ""
+        if not files:
+            # ADR 0031 derived mode: no FILE args -> the set derives from the
+            # manifest kind=project rows (this REPLACED the former footgun
+            # where zero args scanned zero files and printed PASS).
+            files, findings, nproj = derive_reconstructed(root)
+            derived_note = (" [derived from the manifest: %d project(s), "
+                            "ADR 0031]" % nproj)
+        findings += check_reconstructed(files, root)
+        n = len(files)
         if findings:
             for f in findings:
                 print("FINDING: " + f)
-            print("doc-gate: %d L3 finding(s) across %d file(s)." % (len(findings), n))
+            print("doc-gate: %d L3 finding(s) across %d file(s).%s"
+                  % (len(findings), n, derived_note))
             return 1
-        print("doc-gate: L3 PASS - 0 findings across %d file(s)." % n)
+        print("doc-gate: L3 PASS - 0 findings across %d file(s).%s"
+              % (n, derived_note))
         return 0
+
+    l1 = load_l1(root)
+    rels = args.path if args.path is not None else discover_files(root)
 
     if args.stamp:
         total = 0
