@@ -4,7 +4,9 @@
 # The COLD path: observe -> aggregate (DuckDB, sole consumer) -> propose
 # (append-only ledger). It NEVER mutates the canonical - accepted proposals
 # follow the normal human-gated flow (promote / restamp + the full battery)
-# in a governance session. The HOT path (per-PR gates) stays stdlib-only and
+# in a governance session. Since ADR 0030 the observe step also clones the
+# dd satellite read-only and scans its registered cross-repo consumers
+# (observations land in the central ledger under repo=<satellite>). The HOT path (per-PR gates) stays stdlib-only and
 # untouched; this boundary is load-bearing (DESIGN P8 / ADR 0028).
 #
 # Loop-safety (double guard):
@@ -54,9 +56,24 @@ jobs:
           python -m pip install --quiet jsonschema duckdb
           python -c "import duckdb; print('duckdb', duckdb.__version__)"
 
-      - name: Scan (managed marker-bearing units only; central repo scope v1)
+      - name: Clone the dd satellite (read-only; ADR 0030 D35)
+        # Shallow, read-only, OUTSIDE the working tree ($RUNNER_TEMP) so the
+        # auto-commit paths can never pick it up. Inert until consumers[] rows
+        # carrying repo=Deploy-Drivers-For-WindowsServer are registered (D36
+        # step 3): with none, the mapping simply matches nothing.
         run: |
-          python3 quality-tools/canonical-drift-scanner/scanner.py --root .
+          git clone --depth 1 \
+            https://github.com/usui-tk/Deploy-Drivers-For-WindowsServer \
+            "$RUNNER_TEMP/dd-satellite"
+          echo "DD_SHA=$(git -C "$RUNNER_TEMP/dd-satellite" rev-parse HEAD)" \
+            >> "$GITHUB_ENV"
+
+      - name: Scan (central + the dd satellite; ADR 0030)
+        run: |
+          python3 quality-tools/canonical-drift-scanner/scanner.py --root . \
+            --commit "$GITHUB_SHA" \
+            --satellite "Deploy-Drivers-For-WindowsServer=$RUNNER_TEMP/dd-satellite" \
+            --satellite-commit "Deploy-Drivers-For-WindowsServer=$DD_SHA"
 
       - name: Aggregate + propose (append-only; regenerate reports)
         run: |
