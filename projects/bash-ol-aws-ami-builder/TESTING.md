@@ -9,13 +9,14 @@ doc-provenance:
 Operational tests for `bash-ol-aws-ami-builder`. These are maintainer-facing
 checks, not part of the build pipeline itself.
 
-> **Governance note.** This is a subproject-local maintenance document. The
-> bash documentation-template family (including a TESTING template) is not yet
-> extracted into the governance canon — by the rule-of-two it stays deferred
-> until a second bash consumer exists. So this file intentionally carries **no
-> canon doc-provenance front-matter** and is **not** part of the reconstructed
-> doc-set verified by `doc_gate --reconstructed`. When a bash TESTING template
-> is later canonised, this file can be reconstructed/pinned to it.
+> **Governance note.** This is a subproject-local maintenance document. Since
+> B1 it carries the standard doc-provenance front-matter pin and **is part of
+> the reconstructed doc-set** verified by `doc_gate --reconstructed` (derived
+> from the manifest project registry per ADR 0031). A dedicated **bash**
+> TESTING template is still not extracted into the governance canon (only a
+> PowerShell one exists, `template.powershell.testing`), so the section
+> structure below remains subproject-local content under the pin; if a bash
+> TESTING template is later canonised, this file can be reconstructed to it.
 
 ## 0. Test model (top-down baseline)
 
