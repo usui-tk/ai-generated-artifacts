@@ -13,6 +13,16 @@ This CHANGELOG covers `psa.py` only. For higher-level repository-wide
 changes (documentation policy, sister scripts, etc.), see the root
 [`README.md`](../../../README.md) of `ai-generated-artifacts`.
 
+## [unreleased CI note] - 2026-07-03
+
+### Fixed (CI only; no tool change)
+
+- Workflow self-reference: the `quality-tools__powershell-static-analyzer.yml`
+  path filters still watched the pre-rename filename
+  (`scripts__python__powershell-static-analyzer.yml`) - a dead trigger line
+  left over from the workflow rename. Both filters (push / pull_request) now
+  watch the current filename. Recorded here per /SPEC.md §9 [SPEC-CI-070].
+
 ## [Unreleased]
 
 ### Changed

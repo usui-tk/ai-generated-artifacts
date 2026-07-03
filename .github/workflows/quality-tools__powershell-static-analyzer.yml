@@ -29,7 +29,7 @@ on:
       - 'quality-tools/powershell-static-analyzer/test_psa_rules.py'
       - 'quality-tools/powershell-static-analyzer/SPEC.md'
       - 'quality-tools/powershell-static-analyzer/.psa.config.json.template'
-      - '.github/workflows/scripts__python__powershell-static-analyzer.yml'
+      - '.github/workflows/quality-tools__powershell-static-analyzer.yml'
   pull_request:
     branches: [main]
     paths:
@@ -38,7 +38,7 @@ on:
       - 'quality-tools/powershell-static-analyzer/test_psa_rules.py'
       - 'quality-tools/powershell-static-analyzer/SPEC.md'
       - 'quality-tools/powershell-static-analyzer/.psa.config.json.template'
-      - '.github/workflows/scripts__python__powershell-static-analyzer.yml'
+      - '.github/workflows/quality-tools__powershell-static-analyzer.yml'
   workflow_dispatch:
 
 permissions:

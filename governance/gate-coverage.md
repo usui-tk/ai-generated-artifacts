@@ -26,6 +26,7 @@
 | 9 | **reference-health gate** | `python3 quality-tools/reference-health-gate/refcheck.py` (+ `test_refcheck.py` 10) | **Layer-0 root docs only** (repo-root `*.md` + `.github/*.md`): R1 relative link/image targets exist; R2 referenced workflow filenames exist (paths + badge URLs); R5 STATUS current-truth zones' row-count claims == actual manifest count (ADR 0026) |
 | 10 | PSScriptAnalyzer + Pester canon suite | `Invoke-ScriptAnalyzer` (3-cell matrix, ADR 0013) + `reference-code/powershell/tests/Invoke-CanonTests.ps1` | Canon-scoped; **carry-over rule**: when `reference-code/powershell` is byte-identical (subtree hash) to the last fully-verified HEAD, results carry (P4 determinism fact) — re-run otherwise |
 | 11 | syntax gates (per project) | `bash -n` / `Parser::ParseFile` / `py_compile` | Stream-owned; the only code gates a **sandbox**-stage project owes (ADR 0024) |
+| 12 | reconciliation-loop self-test | `python3 quality-tools/reconciliation-loop/test_coldloop.py` | 12 cases (needs `pip install duckdb`): DuckDB aggregation (schema-probe for absent columns), proposals wrap the pinned request contract 1.0.0, **skip-key dedup** (unchanged re-observed drift not re-proposed; changed evidence = new proposal), **append-only ledger byte-verified** (decide = appended decision record; double/unknown refused), write surface limited to `governance/state/reconciliation/`, zero-observation path. Cold path only - the hot battery stays stdlib-only |
 
 ## Named limitations & footguns (the honest edges)
 

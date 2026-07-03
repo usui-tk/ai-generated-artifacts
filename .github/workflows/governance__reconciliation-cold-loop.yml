@@ -1,0 +1,78 @@
+# ============================================================================
+# Governance cold loop (P8, ADR 0028): scheduled drift reconciliation.
+#
+# The COLD path: observe -> aggregate (DuckDB, sole consumer) -> propose
+# (append-only ledger). It NEVER mutates the canonical - accepted proposals
+# follow the normal human-gated flow (promote / restamp + the full battery)
+# in a governance session. The HOT path (per-PR gates) stays stdlib-only and
+# untouched; this boundary is load-bearing (DESIGN P8 / ADR 0028).
+#
+# Loop-safety (double guard):
+#   1. This workflow triggers ONLY on schedule + manual dispatch (no push
+#      trigger), so its own auto-commit cannot retrigger it.
+#   2. The auto-commit message carries [skip ci] and touches ONLY
+#      governance/state/{observations,reconciliation}/ - paths no project
+#      workflow watches.
+#
+# Cadence: daily (the [OPEN-exec] cadence confirmed in the design substrate);
+# 18:17 UTC = 03:17 JST (off-peak for the maintainer's timezone).
+#
+# Change history for this workflow is recorded in:
+#   quality-tools/reconciliation-loop/CHANGELOG-pointer: none - per /SPEC.md
+#   §9 [SPEC-CI-070] CI changes are recorded in the CI-target's CHANGELOG;
+#   this workflow's target is the cold-loop tool, whose history lives in the
+#   repository CHANGELOG discipline via commits (tool has no per-dir
+#   CHANGELOG; the governance STATUS/ADR 0028 carry the record).
+# ============================================================================
+name: 'governance — reconciliation cold loop'
+
+on:
+  schedule:
+    - cron: '17 18 * * *'   # daily 18:17 UTC (03:17 JST)
+  workflow_dispatch:
+
+permissions:
+  contents: write   # the auto-commit of observations + ledger + reports
+
+concurrency:
+  group: reconciliation-cold-loop
+  cancel-in-progress: false
+
+jobs:
+  cold-loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # T1 — Light (see /SPEC.md §4 [SPEC-CI-020])
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install cold-path dependencies (DuckDB enters ONLY here)
+        run: |
+          python -m pip install --quiet jsonschema duckdb
+          python -c "import duckdb; print('duckdb', duckdb.__version__)"
+
+      - name: Scan (managed marker-bearing units only; central repo scope v1)
+        run: |
+          python3 quality-tools/canonical-drift-scanner/scanner.py --root .
+
+      - name: Aggregate + propose (append-only; regenerate reports)
+        run: |
+          python3 quality-tools/reconciliation-loop/coldloop.py --root . run \
+            --observations 'governance/state/observations/repo=*/date=*/*.jsonl'
+
+      - name: Auto-commit the cold-path outputs ([skip ci]; loop-safe)
+        run: |
+          git config user.name "governance-cold-loop[bot]"
+          git config user.email "cold-loop@invalid.local"
+          git add governance/state/observations/ governance/state/reconciliation/
+          if git diff --cached --quiet; then
+            echo "no cold-path changes to commit"
+          else
+            git commit \
+              -m "governance(cold-loop): scheduled observation + ledger update [skip ci]" \
+              -m "Automated append by the P8 reconciliation cold loop (ADR 0028): observation master (append-only, hive-partitioned) + proposals ledger (append-only, skip-key deduplicated) + regenerated report/summary. Machine proposes; humans decide - no canonical mutation happens here."
+            git push
+          fi
