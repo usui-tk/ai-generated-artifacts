@@ -13,6 +13,36 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r34] - 2026-07-03 - feat: SSM Agent "unavailable" status for versions whose rpm is unpublished at S3
+
+### Added
+- **A version whose agent rpm is UNPUBLISHED at S3 is now recorded as a distinct
+  `unavailable` status, not `install-fail`.** A real E2E run found versions
+  (e.g. 3.3.3883.0, 3.3.4364.0) whose git tag exists but whose
+  `.../SSMAgent/<ver>/linux_amd64/amazon-ssm-agent.rpm` returns HTTP 403 on every
+  RHEL major - the artifact was never distributed. Recording that as an install
+  failure is wrong: the correct terminal status is "the rpm is not available",
+  matching how the Oracle-Linux sibling records undistributed versions. The
+  `--run` sweep now HEAD-checks each in-scope version's rpm once (the artifact is
+  version-global, so one check covers every major) and, on a 403/404, writes an
+  `unavailable` ledger row (`status` / `verdict` = `unavailable`, `installed` /
+  `ran` = false, the reason carrying the HTTP status) WITHOUT running the doomed
+  container. New helpers: `ssm_rpm_url`, `ssm_rpm_unavailable` (403/404 only -
+  000/5xx stay transient errors to surface, not "unavailable"),
+  `ssm_rpm_http_status` (network HEAD, `--run` only), `ssm_unavail_row`, and
+  `ledger_verdict`.
+- **`tests/t022_ssmunavailable.sh`: L1/L2 coverage** - the 403/404 classifier,
+  the version-global rpm URL, the `unavailable` ledger row shape (valid JSON),
+  and end-to-end report rendering via the hermetic `--generate-results` path.
+  Suite: 22 tiers, 539 passed.
+
+### Changed
+- **The hermetic RESULTS report renders `unavailable` cells.** The report reads
+  the stored verdict from the ledger (`ledger_verdict`) and, for an `unavailable`
+  version, shows `unavailable` in the init_mode grid and the E2E sweep table
+  rather than recomputing `install-fail` from installed/ran - so an unpublished
+  version is visibly distinct from one that genuinely failed to install.
+
 ## [r33] - 2026-07-03 - feat: test-env provisioning step (per-OS "test-ready" image; mirrors the OL clean-core approach)
 
 ### Added

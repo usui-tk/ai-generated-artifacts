@@ -50,6 +50,9 @@ LEDGER="${SCRIPT_DIR}/ssm-installtest-ledger.json"
 RESULTS_DIR="${SCRIPT_DIR}"
 INSTALL_SCRIPT="${PROJ_DIR}/install-aws_ssm-agent.sh"   # kicked by run_matrix (--run)
 SSM_MIN="3.3.3598.0"
+# S3 base for the per-version agent rpm (mirrors install-aws_ssm-agent.sh and
+# list-ssm-releases.sh); used by the availability pre-scan (ssm_rpm_http_status).
+RPM_BASEURL="${SSM_RPM_BASEURL:-https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent}"
 
 log() { printf '%s [ssm-matrix] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 
@@ -120,6 +123,17 @@ ssm_verdict() {
   esac
 }
 
+# ssm_rpm_url <ver> : the S3 URL of the agent rpm for a version (rpm is version-
+# global - the same artifact for every RHEL major).
+ssm_rpm_url() { printf '%s/%s/linux_amd64/amazon-ssm-agent.rpm' "${RPM_BASEURL}" "$1"; }
+
+# ssm_rpm_unavailable <http_status> : true when the rpm is DEFINITIVELY not
+# published at S3 - the version tag exists (git ls-remote) but the artifact was
+# never distributed. 403/404 = unpublished (a correct terminal status, distinct
+# from install-fail). 000/2xx/5xx are NOT unavailable: 000/5xx are transient
+# fetch errors to surface as errors, 2xx means the rpm is present.
+ssm_rpm_unavailable() { case "${1:-}" in 403|404) return 0 ;; *) return 1 ;; esac; }
+
 # --- releases.json + ledger readers ------------------------------------------
 
 releases_versions() {
@@ -158,6 +172,35 @@ for r in d.get("results",[]):
     if str(r.get("osmajor"))==maj and r.get("ssm_version")==ver and r.get("init_mode")==mode:
         print("%s|%s"%(str(r.get("installed")).lower(),str(r.get("ran")).lower())); break
 PY
+}
+
+ledger_verdict() { # <major> <version> <init_mode> -> the stored verdict (e.g.
+  # 'unavailable') or empty. Lets the (hermetic) report honour a TERMINAL status
+  # recorded in the ledger instead of recomputing it from installed/ran.
+  local major="$1" ver="$2" mode="$3"
+  [ -f "${LEDGER}" ] || return 0
+  python3 - "${LEDGER}" "${major}" "${ver}" "${mode}" <<'PY' 2>/dev/null || true
+import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: sys.exit(0)
+maj,ver,mode=sys.argv[2],sys.argv[3],sys.argv[4]
+for r in d.get("results",[]):
+    if str(r.get("osmajor"))==maj and r.get("ssm_version")==ver and r.get("init_mode")==mode:
+        print(r.get("verdict","")); break
+PY
+}
+
+# ssm_rpm_http_status <ver> : final HTTP status of the agent rpm HEAD (200/403/
+# 404/000). NETWORK - used only by the --run availability pre-scan, never by the
+# hermetic report. Mirrors list-ssm-releases.sh url_check_status.
+ssm_rpm_http_status() {
+  local url code
+  url="$(ssm_rpm_url "$1")"
+  local -a opts=(-sS -I -L -o /dev/null -w '%{http_code}' --max-time "${URL_CHECK_TIMEOUT:-25}")
+  [ "${INSECURE_TLS:-0}" = "1" ] && opts+=(-k)
+  code="$(curl "${opts[@]}" "${url}" 2>/dev/null || true)"
+  [ -n "${code}" ] || code="000"
+  printf '%s' "${code}"
 }
 
 # --- (d) RESULTS generation (hermetic) ---------------------------------------
@@ -213,13 +256,17 @@ generate_results_for() {
     printf '|:--|:--|:--|:--|:--|:--|\n'
     for mode in none systemd; do
       exp="$(ssm_init_outcome "${mode}")"
-      cell="$(ledger_cell "${major}" "${maxver}" "${mode}")"
-      if [ -n "${cell}" ]; then
-        installed="${cell%%|*}"; ran="${cell##*|}"
-        verdict="$(ssm_verdict "${installed}" "${ran}" "${mode}")"
-        ran="${ran}/${installed}"
+      if [ "$(ledger_verdict "${major}" "${maxver}" "${mode}")" = "unavailable" ]; then
+        ran="unavailable"; verdict="unavailable"
       else
-        ran="pending"; verdict="pending"
+        cell="$(ledger_cell "${major}" "${maxver}" "${mode}")"
+        if [ -n "${cell}" ]; then
+          installed="${cell%%|*}"; ran="${cell##*|}"
+          verdict="$(ssm_verdict "${installed}" "${ran}" "${mode}")"
+          ran="${ran}/${installed}"
+        else
+          ran="pending"; verdict="pending"
+        fi
       fi
       case "${mode}" in
         none)    printf '| none | run --rm REF -version | binary smoke | %s | %s | %s |\n' "${exp}" "${ran}" "${verdict}" ;;
@@ -234,6 +281,10 @@ generate_results_for() {
     for v in $(ssm_inscope_versions); do
       [ -n "${v}" ] || continue
       ge=no; ssm_ge "${v}" "${SSM_MIN}" && ge=yes
+      if [ "$(ledger_verdict "${major}" "${v}" none)" = "unavailable" ]; then
+        printf '| %s | %s | %s | %s | %s |\n' "${v}" "${ge}" "unavailable" "unavailable" "unavailable"
+        continue
+      fi
       c_none="$(ledger_cell "${major}" "${v}" none)"
       c_sys="$(ledger_cell "${major}" "${v}" systemd)"
       if [ -n "${c_none}" ]; then ncell="${c_none##*|}/${c_none%%|*}"; else ncell="pending"; fi
@@ -339,9 +390,17 @@ run_matrix() {
   local versions="${SSM_VERSIONS:-$(ssm_inscope_versions | tr '
 ' ' ')}"
   local systemd_versions="${SSM_SYSTEMD_VERSIONS:-$(releases_max)}"
-  local major ref ver rows_tmp
+  local major ref ver rows_tmp avail_map st
   rows_tmp="$(mktemp)"
   log "sweep (Case A): majors=[${majors}] none=[${versions}] systemd-rep=[${systemd_versions}]"
+  # Availability pre-scan (once per in-scope version): the agent rpm is version-
+  # global, so a version whose S3 rpm is unpublished (403/404) is 'unavailable'
+  # on every major - a correct terminal status, recorded directly (no container).
+  avail_map="$(mktemp)"
+  for ver in ${versions} ${systemd_versions}; do
+    grep -q "^${ver} " "${avail_map}" 2>/dev/null && continue
+    printf '%s %s\n' "${ver}" "$(ssm_rpm_http_status "${ver}")" >> "${avail_map}"
+  done
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}"; continue; }
     # Prepare the test environment: base image + the common package manifest,
@@ -350,11 +409,31 @@ run_matrix() {
     ref="$(provision_test_image "${major}" "${ref}" "${ent_mounts}")" \
       || { log "skip RHEL${major}: test-env provisioning failed${PROVISION_LAST_ERR:+ - ${PROVISION_LAST_ERR}}"; continue; }
     log "RHEL${major}: test-ready image ${ref}"
-    for ver in ${versions}; do ssm_kick "${major}" "${ver}" none "${ref}" "${LOG_DIR}" "${rows_tmp}"; done
-    for ver in ${systemd_versions}; do ssm_kick "${major}" "${ver}" systemd "${ref}" "${LOG_DIR}" "${rows_tmp}"; done
+    for ver in ${versions}; do
+      st="$(grep -m1 "^${ver} " "${avail_map}" | cut -d' ' -f2)"
+      if ssm_rpm_unavailable "${st}"; then ssm_unavail_row "${major}" "${ver}" none "${st}" "${rows_tmp}"
+      else ssm_kick "${major}" "${ver}" none "${ref}" "${LOG_DIR}" "${rows_tmp}"; fi
+    done
+    for ver in ${systemd_versions}; do
+      st="$(grep -m1 "^${ver} " "${avail_map}" | cut -d' ' -f2)"
+      if ssm_rpm_unavailable "${st}"; then ssm_unavail_row "${major}" "${ver}" systemd "${st}" "${rows_tmp}"
+      else ssm_kick "${major}" "${ver}" systemd "${ref}" "${LOG_DIR}" "${rows_tmp}"; fi
+    done
   done
+  rm -f "${avail_map}"
   persist_ledger "${rows_tmp}"
   rm -f "${rows_tmp}"
+}
+
+# ssm_unavail_row <major> <ver> <mode> <http> <rows> : record a version whose S3
+# rpm is unpublished (403/404) as a distinct 'unavailable' status - a correct
+# terminal state, NOT install-fail - and append it to <rows>. No container runs
+# (the fetch is doomed); mirrors the OL sibling's 'unavailable' handling.
+ssm_unavail_row() {
+  local major="$1" ver="$2" mode="$3" http="$4" rows="$5"
+  log "RHEL${major} ${ver}/${mode}: unavailable (rpm unpublished at s3, HTTP ${http})"
+  printf '{"status":"unavailable","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":false,"ran":false,"service_enabled":false,"verdict":"unavailable","reason":"rpm not published at s3 (HTTP %s)"}\n' \
+    "${major}" "${ver}" "${mode}" "$(rhel_glibc "${major}")" "${http}" >> "${rows}"
 }
 
 # ssm_kick <major> <ver> <mode> <ref> <log_dir> <rows_file> : run one install-test
