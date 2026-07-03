@@ -880,6 +880,37 @@ tools/scripts → a new `projects/` entry at sandbox stage.
 
 ---
 
+## 11. Two-Speed Operation (Maintenance Stream vs Governance Stream)
+
+Canonical decision: [ADR 0029](./governance/adr/0029-two-speed-operating-model.md).
+This section is a thin summary — do not restate details here.
+
+One `main`, two commit streams at different speeds:
+
+- **Maintenance stream** — project/product work (a project's own doc-set,
+  code, CI, CHANGELOG). Advances anytime, ordinary commits/PRs.
+  Project doc-sets are maintenance-owned.
+- **Governance stream** — Layer-0 / canon / manifest / gates / ADRs.
+  Advances ONLY as arc-shaped patch series: grounding → design presented
+  for adjudication → `[AUTH]` → implement → full gate battery →
+  `format-patch` → fresh-clone `git am` + tree-hash equality → hand-off.
+  The AI author never pushes; the human pushes, the AI re-clones and
+  re-verifies.
+
+Load-bearing session rules (ADR 0029 §Decision):
+
+1. If `main` advanced under you (maintenance commits, or the cold loop's
+   auto-commits per ADR 0028) — **rebase and re-run the full battery**
+   before hand-off. A stale-parent series is never handed off.
+2. Governance touches to maintenance-owned files: mechanical +
+   explicitly-flagged fixes only; never content decisions. `[DECIDED]`
+   items are never silently overridden.
+3. Hot/cold observation split: hot-path scanner runs stay transient
+   (never staged); only the cold scheduled loop commits observations /
+   ledger / reports (`[skip ci]`, schedule-only triggers).
+
+---
+
 ## When this guide should be updated
 
 Update `AGENTS.md` when:
@@ -891,6 +922,8 @@ Update `AGENTS.md` when:
 - The Doc-Touching Matrix (§5) needs new rows for added document categories
 - The lifecycle maturity model (stages, obligations, triggers) evolves
   via a superseding ADR — §10 cross-references only
+- The two-speed operating model evolves via a superseding ADR — §11
+  cross-references only
 
 DO NOT update `AGENTS.md` to restate rules that already live in their
 canonical locations (root `README.md`, `CONTRIBUTING.md`, per-project
