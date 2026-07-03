@@ -316,7 +316,7 @@ The TLS-interception caveat (`INSECURE_TLS=1` -> `--setopt=sslverify=0`) is
 **sandbox-specific** and unnecessary on a real host; the helpers expose it as a
 switch (sandbox = 1, trusted host = 0).
 
-#### B.6.1 Test-environment provisioning (acquisition -> provision -> test, r33)
+#### B.6.1 Test-environment provisioning (acquisition -> provision -> test, r33/r36)
 
 Acquisition yields a *base* image; it is **not assumed test-ready**. The minimal
 vendor images are curated but not complete for every major - notably RHEL 6
@@ -335,14 +335,32 @@ reused across the whole sweep. The tag embeds a fingerprint of the manifest, so 
 changed manifest rebuilds automatically while an unchanged one reuses the commit
 (idempotent). The manifest is **COMMON across all tools** - one image per OS, not
 one per test - so every matrix (SSM / AWS CLI v2 / ENA) resolves its base ref,
-then swaps in the provisioned ref before its sweep. Provisioning installs from
-the container's own repos: public UBI for RHEL 7-10; the **entitled `rhel-6`
-repos (via the passthrough) for EL6**, per the B.6 §3.1 "no anonymous repos"
-fact - so an EL6 provision needs an EL6-entitled subscription. On failure the
-caller skips that major with the real package-manager error (`PROVISION_LAST_ERR`),
-never a masked one. This is the RHEL analogue of the OL sibling's clean-core
-builder (see B.9), and the common manifest is the extension point for future
-tests (B.13). Covered by `tests/t021_provisionenv.sh`.
+then swaps in the provisioned ref before its sweep. The manifest install is
+**repo-access-agnostic** (r36): it neutralizes the subscription-manager /
+product-id plugins when no entitlement is present (anonymous), and installs with
+`*.skip_if_unavailable=1` so a mismatched / unreachable ENABLED repo is *skipped*
+rather than failing the transaction. The mounted host `redhat.repo` carries the
+HOST major's entitled repos - wrong-major inside a different-major container, and
+unusable from a cert-only (unregistered) container - and leaving it fatal was the
+r33 defect that skipped RHEL 8/9/10. `skip_if_unavailable` lets the package
+resolve from whatever working repo has it (public UBI / entitled `rhel-*` /
+RHUI), so the SAME code covers anonymous, RHSM-entitled and RHUI hosts without
+hardcoding repo ids. On failure the caller sees the real package-manager error
+(`PROVISION_LAST_ERR`), never a masked one.
+
+**Pre-flight, and provisioning as a test prerequisite (r36).** Each matrix
+prepares the test-ready image for EVERY requested major *before* running any test
+(`provision_prepare_majors`). A test-env image that cannot be created means the
+test **prerequisite is not met**: the run **fails fast** - it aborts (non-zero)
+WITHOUT executing any test, so a broken environment is never silently
+half-tested. The one exception is `PROVISION_OPTIONAL_MAJORS` (**RHEL 6** by
+default): EL6 is non-UBI and needs its own `rhel-6` entitlement that the host's
+`redhat.repo` cannot supply, so an EL6 that cannot be prepared is **skipped**
+(no tests for EL6) and the run continues for the rest.
+
+This is the RHEL analogue of the OL sibling's clean-core builder (see B.9), and
+the common manifest is the extension point for future tests (B.13). Covered by
+`tests/t021_provisionenv.sh`.
 
 ---
 

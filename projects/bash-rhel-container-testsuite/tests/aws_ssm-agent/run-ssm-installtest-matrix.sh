@@ -390,9 +390,19 @@ run_matrix() {
   local versions="${SSM_VERSIONS:-$(ssm_inscope_versions | tr '
 ' ' ')}"
   local systemd_versions="${SSM_SYSTEMD_VERSIONS:-$(releases_max)}"
-  local major ref ver rows_tmp avail_map st
+  local major ref ver rows_tmp avail_map st prep_map prepared
   rows_tmp="$(mktemp)"
-  log "sweep (Case A): majors=[${majors}] none=[${versions}] systemd-rep=[${systemd_versions}]"
+  # PRE-FLIGHT: create a test-ready image for every requested major BEFORE any
+  # test runs. A non-optional major that cannot be prepared is a missing test
+  # prerequisite -> abort the whole run (no tests). EL6 (PROVISION_OPTIONAL_MAJORS)
+  # may be unprovisionable and is then skipped, not fatal.
+  prep_map="$(mktemp)"
+  provision_prepare_majors "${majors}" "${ent_mounts}" "${prep_map}" || {
+    log "aborting --run: test-env prerequisite not met (no tests run)"
+    rm -f "${prep_map}" "${rows_tmp}"; return 2
+  }
+  prepared="$(cut -d' ' -f1 "${prep_map}" | tr '\n' ' ')"
+  log "sweep (Case A): prepared majors=[${prepared}] none=[${versions}] systemd-rep=[${systemd_versions}]"
   # Availability pre-scan (once per in-scope version): the agent rpm is version-
   # global, so a version whose S3 rpm is unpublished (403/404) is 'unavailable'
   # on every major - a correct terminal status, recorded directly (no container).
@@ -401,14 +411,9 @@ run_matrix() {
     grep -q "^${ver} " "${avail_map}" 2>/dev/null && continue
     printf '%s %s\n' "${ver}" "$(ssm_rpm_http_status "${ver}")" >> "${avail_map}"
   done
-  for major in ${majors}; do
-    ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}"; continue; }
-    # Prepare the test environment: base image + the common package manifest,
-    # committed once per OS (mirrors the OL clean-core approach; e.g. gawk, which
-    # the minimal RHEL 6 base lacks and the ssm rpm %pretrans guard needs).
-    ref="$(provision_test_image "${major}" "${ref}" "${ent_mounts}")" \
-      || { log "skip RHEL${major}: test-env provisioning failed${PROVISION_LAST_ERR:+ - ${PROVISION_LAST_ERR}}"; continue; }
-    log "RHEL${major}: test-ready image ${ref}"
+  # Sweep only the successfully prepared majors (EL6 absent if it could not be built).
+  for major in ${prepared}; do
+    ref="$(grep -m1 "^${major} " "${prep_map}" | cut -d' ' -f2-)"
     for ver in ${versions}; do
       st="$(grep -m1 "^${ver} " "${avail_map}" | cut -d' ' -f2)"
       if ssm_rpm_unavailable "${st}"; then ssm_unavail_row "${major}" "${ver}" none "${st}" "${rows_tmp}"
@@ -420,7 +425,7 @@ run_matrix() {
       else ssm_kick "${major}" "${ver}" systemd "${ref}" "${LOG_DIR}" "${rows_tmp}"; fi
     done
   done
-  rm -f "${avail_map}"
+  rm -f "${avail_map}" "${prep_map}"
   persist_ledger "${rows_tmp}"
   rm -f "${rows_tmp}"
 }

@@ -13,6 +13,44 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r36] - 2026-07-04 - fix: provisioning is repo-access-agnostic + a fail-fast test prerequisite
+
+### Fixed
+- **Test-env provisioning no longer fails RHEL 8/9/10 on an entitled host.** A
+  real SSM run on an entitled RHEL 10 host skipped RHEL 10/9/8 with "test-env
+  provisioning failed" (RHEL 7 happened to pass). Root cause: the r33 install ran
+  `dnf/yum install gawk` with ALL repos enabled, and the entitlement passthrough
+  mounts the HOST major's `redhat.repo` into every container - wrong-major inside
+  a RHEL 8/9 container and unusable from a cert-only (unregistered) container, so
+  dnf failed the whole transaction on its metadata refresh (the same class of
+  failure r32 fixed for the SSM local-rpm install). The provisioning install is
+  now **repo-access-agnostic**: it neutralizes the RHSM / product-id plugins when
+  anonymous (mirroring the install scripts) and installs with
+  `*.skip_if_unavailable=1` so a mismatched / unreachable enabled repo is skipped,
+  not fatal - the package resolves from any working repo (public UBI / entitled
+  `rhel-*` / RHUI) with no hardcoded repo ids. Verified genchi-genbutsu on a ubi8
+  image carrying a broken wrong-major repo: the fixed helper installs `gawk` and
+  commits (rc 0), where the old path failed. The provisioning error is now also
+  captured from combined stdout+stderr (the old path lost dnf's stdout errors,
+  leaving an empty reason).
+
+### Changed
+- **Provisioning is a PRE-FLIGHT test prerequisite (fail-fast).** Each matrix now
+  prepares the test-ready image for every requested major *before* any test
+  (`provision_prepare_majors`); a major that cannot be prepared aborts the whole
+  run (non-zero, no tests) instead of silently skipping and running a partial
+  sweep. The exception is `PROVISION_OPTIONAL_MAJORS` (**RHEL 6** by default): EL6
+  is non-UBI and needs its own `rhel-6` entitlement the host cannot supply, so an
+  unprovisionable EL6 is skipped (no EL6 tests) and the run continues for 7-10.
+- **`tests/t021_provisionenv.sh`** gains coverage for the repo tolerance
+  (`skip_if_unavailable`) and the pre-flight policy (all-prepared; a non-optional
+  major aborts; EL6 tolerated and absent from the sweep). Suite: 22 tiers, 546.
+
+### Notes
+- EL6 provisioning itself (a real `rhel-6` entitlement path) remains a separate,
+  tracked item; with this change EL6 now fails cleanly (skipped, run continues)
+  with a real surfaced reason instead of an empty one.
+
 ## [r35] - 2026-07-03 - docs: document the test-env provisioning foundation in SPEC + TESTING
 
 ### Documentation

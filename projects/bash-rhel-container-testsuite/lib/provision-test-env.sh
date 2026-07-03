@@ -47,6 +47,13 @@
 #          guard; absent from the minimal RHEL 6 (rhel6/rhel) base image.
 PROVISION_PKGS="${PROVISION_PKGS:-gawk}"
 
+# Majors whose provisioning failure is TOLERATED (skipped, not fatal) in the
+# pre-flight (provision_prepare_majors). RHEL 6 (rhel6/rhel) is non-UBI and has
+# no public repos; the host's redhat.repo cannot supply rhel-6 content, so EL6
+# needs its own rhel-6 entitlement path (tracked separately). Every OTHER major
+# that cannot be prepared is a missing test prerequisite -> the run aborts.
+PROVISION_OPTIONAL_MAJORS="${PROVISION_OPTIONAL_MAJORS:-6}"
+
 # Local image namespace for the committed test-ready images.
 PROVISION_IMG_PREFIX="${PROVISION_IMG_PREFIX:-localhost/rhel-testsuite-provisioned}"
 
@@ -82,20 +89,42 @@ provision_test_image() {
   cname="provision-rhel${major}-$$"
   podman rm -f "${cname}" >/dev/null 2>&1 || true
   errf="$(mktemp)"
-  # Install the common manifest onto the base image. Packages already present
-  # are a fast no-op; missing ones come from the image's native repos (public
-  # UBI for 7-10) or the entitled repos (rhel-6 via the passthrough).
+  # Install the common manifest onto the base image, ROBUST to the repo-access
+  # mode (anonymous UBI / RHSM-entitled / RHUI). Two measures, mirroring the
+  # install scripts' conventions rather than hardcoding repo ids:
+  #  1. neutralize the subscription-manager/product-id plugins when NO
+  #     entitlement certs are present (anonymous) - they otherwise hang/err
+  #     contacting RHSM; entitled keeps them ON (needed for entitled repos).
+  #  2. install with *.skip_if_unavailable=1 so an unreachable/mismatched ENABLED
+  #     repo (the host redhat.repo is the HOST major, wrong-major and/or
+  #     unregistered inside the container) is SKIPPED, not fatal - the package
+  #     resolves from whatever working repo has it (public UBI / entitled rhel-*
+  #     / RHUI). This is the same class of failure r32 fixed for the SSM install.
+  #  Combined stdout+stderr is captured so a real failure surfaces the pm error.
   # shellcheck disable=SC2086,SC2016  # ent word-split is intentional; the -c body expands in-container
   if timeout "${PROVISION_TIMEOUT:-600}" podman run --name "${cname}" ${ent} \
        -e "PROVISION_PKGS=${PROVISION_PKGS}" -e "PROVISION_SETOPT=${setopt}" \
        "${base_ref}" /bin/bash -c '
          set -e
+         set -f  # keep the *.skip_if_unavailable=1 glob literal (no pathname expansion)
+         entitlement_certs_present() {
+           ls /etc/pki/entitlement/*.pem >/dev/null 2>&1 \
+             || ls /run/secrets/etc-pki-entitlement/*.pem >/dev/null 2>&1
+         }
+         if ! entitlement_certs_present; then
+           for d in /etc/yum/pluginconf.d /etc/dnf/plugins; do
+             [ -d "$d" ] || continue
+             for p in subscription-manager product-id; do
+               printf "[main]\nenabled=0\n" > "$d/$p.conf" 2>/dev/null || true
+             done
+           done
+         fi
          mgr=""
-         for m in dnf yum; do command -v "${m}" >/dev/null 2>&1 && { mgr="${m}"; break; }; done
-         [ -n "${mgr}" ] || { echo "provision: no dnf/yum in base image" >&2; exit 3; }
+         for m in dnf yum; do command -v "$m" >/dev/null 2>&1 && { mgr="$m"; break; }; done
+         [ -n "$mgr" ] || { echo "provision: no dnf/yum in base image" >&2; exit 3; }
          # shellcheck disable=SC2086
-         "${mgr}" -y ${PROVISION_SETOPT} install ${PROVISION_PKGS}
-       ' >/dev/null 2>"${errf}"; then
+         "$mgr" -y --setopt=*.skip_if_unavailable=1 $PROVISION_SETOPT install $PROVISION_PKGS
+       ' >"${errf}" 2>&1; then
     rc=0
   else
     rc=$?
@@ -113,5 +142,50 @@ provision_test_image() {
   fi
   podman rm -f "${cname}" >/dev/null 2>&1 || true
   printf '%s' "${tag}"
+  return 0
+}
+
+# provision_log <msg...> : log via the caller's log() when present (matrix banner),
+# else a plain stderr line (keeps this lib usable stand-alone / in hermetic tests).
+provision_log() {
+  if declare -F log >/dev/null 2>&1; then log "$@"; else printf '%s\n' "$*" >&2; fi
+}
+
+# provision_prepare_majors <majors> <ent_mounts> <out_map> : PRE-FLIGHT. Prepare a
+# test-ready image for EVERY requested major BEFORE any test runs, and write
+# "<major> <ref>" lines for the successfully prepared majors to <out_map>.
+#
+# Policy: a test-env image that cannot be created means the test PREREQUISITE is
+# not met. For such a major the function FAILS FAST (returns non-zero) so the
+# caller aborts the whole run WITHOUT executing any test - EXCEPT majors listed
+# in PROVISION_OPTIONAL_MAJORS (RHEL 6 by default), which are permitted to be
+# unprovisionable: they are skipped (no map entry, hence no tests) and the run
+# continues for the rest. Relies on acq_ref_for_major + provision_test_image
+# being in scope (both sourced by the matrices alongside this lib).
+provision_prepare_majors() {
+  local majors="$1" ent="${2:-}" out_map="$3" major ref optional
+  : > "${out_map}"
+  for major in ${majors}; do
+    optional=no
+    case " ${PROVISION_OPTIONAL_MAJORS} " in *" ${major} "*) optional=yes ;; esac
+    if ! ref="$(acq_ref_for_major "${major}")"; then
+      if [ "${optional}" = "yes" ]; then
+        provision_log "skip RHEL${major}: base image unavailable (optional major) - continuing without it"
+        continue
+      fi
+      provision_log "ABORT: RHEL${major} base image unavailable - test prerequisite not met"
+      return 2
+    fi
+    if ! ref="$(provision_test_image "${major}" "${ref}" "${ent}")"; then
+      if [ "${optional}" = "yes" ]; then
+        provision_log "skip RHEL${major}: test-env image not created${PROVISION_LAST_ERR:+ (${PROVISION_LAST_ERR})} - optional major; continuing without it (no tests run for RHEL${major})"
+        continue
+      fi
+      provision_log "ABORT: RHEL${major} test-env image could not be created - test prerequisite not met${PROVISION_LAST_ERR:+: ${PROVISION_LAST_ERR}}"
+      return 2
+    fi
+    printf '%s %s\n' "${major}" "${ref}" >> "${out_map}"
+    provision_log "RHEL${major}: test-ready image ${ref}"
+  done
   return 0
 }

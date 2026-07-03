@@ -53,7 +53,7 @@ deferred.
 
 ---
 
-## Test-environment provisioning (L2, r33)
+## Test-environment provisioning (L2, r33/r36)
 
 The vendor base image is a *starting point*, not a ready-made test platform.
 Between acquisition (L1) and the test (L3), the harness provisions a per-OS
@@ -67,10 +67,21 @@ the provisioned ref.
 
 It exists because the minimal images are not complete for every major: RHEL 6
 (`rhel6/rhel`) ships without `awk`, which the amazon-ssm-agent rpm's `%pretrans`
-guard calls, so a bare EL6 install fails before it starts. Provisioning pulls the
-package from the container's own repos (public UBI for 7-10; the entitled
-`rhel-6` repos for EL6, so EL6 needs an entitled subscription); on failure the
-major is skipped with the real package-manager error.
+guard calls, so a bare EL6 install fails before it starts. The manifest install
+is **repo-access-agnostic** (r36): it neutralizes the RHSM plugins when anonymous
+and installs with `*.skip_if_unavailable=1`, so the mounted host `redhat.repo`
+(the HOST major's entitled repos - wrong-major / unregistered inside a container)
+is skipped instead of failing the transaction; the package resolves from any
+working repo (public UBI / entitled `rhel-*` / RHUI). Leaving that fatal was the
+r33 defect that skipped RHEL 8/9/10 on an entitled host.
+
+**Provisioning is a test prerequisite (r36).** Each matrix prepares every
+requested major's image *before* any test runs (a pre-flight). If a major cannot
+be prepared, the prerequisite is not met and the run **fails fast** - it aborts
+(non-zero) without running any test. The exception is `PROVISION_OPTIONAL_MAJORS`
+(RHEL 6 by default): EL6 needs its own `rhel-6` entitlement the host cannot
+supply, so an unprovisionable EL6 is skipped (no EL6 tests) and the run continues
+for 7-10.
 
 This is the base point for **future test expansion**: a new test that needs
 another base package extends `PROVISION_PKGS`, not a production installer.
@@ -91,7 +102,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 539 passed, 0 skipped, 0 failed  (22 tiers, 0 tier-failure(s))
+SUITE: 546 passed, 0 skipped, 0 failed  (22 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -293,11 +304,13 @@ so results are host-independent and deterministic.
   `os_major`) are byte-identical across all three install scripts, so a fix
   applied to one copy that drifts from the others fails the suite.
 
-* **`t021_provisionenv.sh`** (r33) - the test-env provisioning helper
+* **`t021_provisionenv.sh`** (r33, r36) - the test-env provisioning helper
   `lib/provision-test-env.sh` under a PATH-mock `podman`: the `PROVISION_PKGS`
   default, manifest-tag determinism + per-major / per-manifest fingerprinting,
-  idempotent reuse of an existing image, build+commit success, and the real
-  package-manager stderr surfaced on failure (`PROVISION_LAST_ERR`).
+  idempotent reuse, build+commit, the repo tolerance (`skip_if_unavailable`), the
+  real package-manager stderr surfaced on failure (`PROVISION_LAST_ERR`), and the
+  PRE-FLIGHT policy (`provision_prepare_majors`: all majors prepared; a
+  non-optional major aborts the run; EL6 tolerated and absent from the sweep).
 
 * **`t022_ssmunavailable.sh`** (r34) - the SSM "unpublished at S3" status: the
   403/404 classifier `ssm_rpm_unavailable` (000/5xx stay transient), the
@@ -446,9 +459,9 @@ The full suite is green in the planning sandbox:
 ---- t018_repoaccess.sh ----       ## RESULT pass=14 fail=0 skip=0
 ---- t019_enabuilddeps.sh ----     ## RESULT pass=8  fail=0 skip=0
 ---- t020_helperidentity.sh ----   ## RESULT pass=8  fail=0 skip=0
----- t021_provisionenv.sh ----     ## RESULT pass=12 fail=0 skip=0
+---- t021_provisionenv.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t022_ssmunavailable.sh ----   ## RESULT pass=17 fail=0 skip=0
-SUITE: 539 passed, 0 skipped, 0 failed  (22 tiers, 0 tier-failure(s))
+SUITE: 546 passed, 0 skipped, 0 failed  (22 tiers, 0 tier-failure(s))
 ```
 
 **L0 fixed count = 45 shell files** (every `.sh` in the project, incl. the 3 root

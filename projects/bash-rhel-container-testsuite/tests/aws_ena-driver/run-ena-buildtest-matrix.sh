@@ -340,21 +340,28 @@ run_matrix() {
   record_host_meta "${LEDGER}"
   acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
   local LOG_DIR="${SCRIPT_DIR}/logs"
-  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref rows_tmp
+  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref rows_tmp prep_map prepared
   rows_tmp="$(mktemp)"
-  for major in ${majors}; do
+  # PRE-FLIGHT: create a test-ready image for every requested major BEFORE any
+  # test runs. A non-optional major that cannot be prepared is a missing test
+  # prerequisite -> abort the whole run (no tests). EL6 (PROVISION_OPTIONAL_MAJORS)
+  # may be unprovisionable and is then skipped, not fatal.
+  prep_map="$(mktemp)"
+  provision_prepare_majors "${majors}" "${ent_mounts}" "${prep_map}" || {
+    log "aborting --run: test-env prerequisite not met (no tests run)"
+    rm -f "${prep_map}" "${rows_tmp}"; return 2
+  }
+  prepared="$(cut -d' ' -f1 "${prep_map}" | tr '\n' ' ')"
+  for major in ${prepared}; do
+    ref="$(grep -m1 "^${major} " "${prep_map}" | cut -d' ' -f2-)"
     ver="$(releases_max)"
     repo="$(ena_kdevel_repo "${major}")"
-    ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
-    # Prepare the test environment (base + common package manifest, once per OS).
-    ref="$(provision_test_image "${major}" "${ref}" "${ent_mounts}")" \
-      || { log "skip RHEL${major}: test-env provisioning failed${PROVISION_LAST_ERR:+ - ${PROVISION_LAST_ERR}}"; continue; }
-    log "RHEL${major}: test-ready image ${ref}"
     for ent in ${ents}; do
       plan="$(ena_build_plan "${ent}" 0)"
       ena_kick "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${ref}" "${LOG_DIR}" "${rows_tmp}"
     done
   done
+  rm -f "${prep_map}"
   persist_ledger "${rows_tmp}"
   rm -f "${rows_tmp}"
 }
