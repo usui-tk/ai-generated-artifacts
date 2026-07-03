@@ -21,6 +21,20 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
+### Changed -- CI: migrate stage1/stage2 PSScriptAnalyzer off the unmaintained Marketplace action (workflows-only, no script version bump)
+
+`microsoft/psscriptanalyzer-action@v1.1` is unmaintained; the iso sibling
+project migrated off it at r07.0 Step 11 and this project now follows the
+same precedent (found during the central TF-d2w grounding, 2026-07-03).
+Both stage workflows now install PSScriptAnalyzer + ConvertToSARIF inline
+(PSGallery trust preflight, `Install-Module` with retry/backoff, then
+`Invoke-ScriptAnalyzer | ConvertTo-SARIF`) - the blocks are a faithful port
+of the iso stage1/stage2 implementations with only the project path and
+script name adapted. Step ids (`pssa-linux` / `pssa-windows`), the
+`pssa.sarif` output contract, the SARIF upload categories
+(`pssa-pwsh7` / `pssa-pwsh51`), and the downstream text-log/artifact steps
+are unchanged. No script change; no behavior change to what is analyzed.
+
 ### Changed -- CI: bump actions/checkout v5 -> v7 and actions/upload-artifact v5 -> v7 across the three stage workflows (workflows-only, no script version bump)
 
 Live-verified against the upstream repositories on 2026-07-02 during a

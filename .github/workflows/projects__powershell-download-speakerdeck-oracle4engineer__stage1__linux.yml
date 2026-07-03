@@ -5,8 +5,10 @@
 # This is the first stage of the Download-SpeakerDeck.ps1 CI chain.
 # On success it triggers STAGE 2 (Windows checks) via workflow_run.
 #
-# PSScriptAnalyzer is run via microsoft/psscriptanalyzer-action (Marketplace),
-# which natively produces SARIF output suitable for Code Scanning upload.
+# PSScriptAnalyzer is run inline (Install-Module + Invoke-ScriptAnalyzer
+# + ConvertTo-SARIF) rather than via the unmaintained Marketplace action
+# microsoft/psscriptanalyzer-action - the same migration the iso sibling
+# made at r07.0 Step 11; see this project's CHANGELOG [Unreleased] entry.
 #
 # Governance: /SPEC.md
 # Change history: projects/powershell-download-speakerdeck-oracle4engineer/CHANGELOG.md
@@ -57,8 +59,8 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     # T2 — Medium (extended): 90 minutes (see /SPEC.md §4 [SPEC-CI-020])
-    # Rationale: microsoft/psscriptanalyzer-action installs the
-    # PSScriptAnalyzer module from PSGallery (~2-3 min on Linux pwsh 7)
+    # Rationale: inline Install-Module pulls PSScriptAnalyzer +
+    # ConvertToSARIF from PSGallery (~2-3 min on Linux pwsh 7, with retry)
     # plus analysis of a 5000+ LOC PowerShell script (~5-10 min).
     # Buffer for transient PSGallery latency and runner warm-up.
     timeout-minutes: 90
@@ -94,18 +96,114 @@ jobs:
           sarif_file: projects/powershell-download-speakerdeck-oracle4engineer/psa.sarif
           category: psa-py
 
-      # --- Tool group: PSScriptAnalyzer (PowerShell 7.x via Marketplace action) ---
-      # The action handles: pwsh setup, PSScriptAnalyzer install, run, SARIF emission.
-      # See https://github.com/microsoft/psscriptanalyzer-action for action contract.
-      - name: '[PSSA-pwsh7] Run microsoft/psscriptanalyzer-action'
+      # --- Tool group: PSScriptAnalyzer (PowerShell 7.x, inline) ---
+      # We invoke PSScriptAnalyzer inline rather than through the
+      # microsoft/psscriptanalyzer-action Marketplace action because that
+      # action's Install-Module ConvertToSARIF step is a known flaky
+      # dependency on PSGallery (observed failing intermittently even on
+      # Microsoft's own CI). Inlining lets us add TLS 1.2 enforcement,
+      # NuGet provider preflight, PSGallery trust, and exponential-backoff
+      # retry around each install, eliminating the third-party action
+      # while preserving the same pssa.sarif output for the downstream
+      # github/codeql-action/upload-sarif@v4 step.
+      - name: '[PSSA-pwsh7] Install PowerShell modules (PSScriptAnalyzer + ConvertToSARIF)'
+        if: ${{ inputs.scope == 'all' || inputs.scope == 'pssa-only' || github.event_name != 'workflow_dispatch' }}
+        id: pssa-linux-install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          [Net.ServicePointManager]::SecurityProtocol =
+              [Net.ServicePointManager]::SecurityProtocol -bor `
+              [Net.SecurityProtocolType]::Tls12
+
+          Write-Host '===== NuGet provider preflight ====='
+          $needNuget = $true
+          try {
+              $nuget = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
+              if ($nuget -and $nuget.Version -ge [Version]'2.8.5.201') { $needNuget = $false }
+          } catch { }
+          if ($needNuget) {
+              try {
+                  Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
+                      -Force -Scope CurrentUser | Out-Null
+              } catch {
+                  Write-Warning "  NuGet provider install failed (non-fatal on Linux pwsh 7): $($_.Exception.Message)"
+              }
+          }
+          try {
+              $nv = (Get-PackageProvider -Name NuGet).Version
+              Write-Host "  NuGet provider: $nv"
+          } catch {
+              Write-Host '  NuGet provider: (not available; relying on PowerShellGet built-in)'
+          }
+
+          Write-Host '===== PSGallery preflight ====='
+          try {
+              $repo = Get-PSRepository -Name PSGallery -ErrorAction Stop
+              if ($repo.InstallationPolicy -ne 'Trusted') {
+                  Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+              }
+          } catch {
+              Register-PSRepository -Default
+              Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          }
+          Get-PSRepository | Format-Table -AutoSize | Out-String | Write-Host
+
+          function Install-ModuleWithRetry {
+              param([Parameter(Mandatory)][string]$Name, [int]$MaxAttempts = 3)
+              if (Get-Module -ListAvailable -Name $Name) {
+                  Write-Host "  ${Name}: already installed"
+                  return
+              }
+              for ($i = 1; $i -le $MaxAttempts; $i++) {
+                  try {
+                      Install-Module -Name $Name -Force -Scope CurrentUser `
+                          -Repository PSGallery -AllowClobber -ErrorAction Stop
+                      Write-Host "  ${Name}: installed (attempt $i/$MaxAttempts)"
+                      return
+                  } catch {
+                      $msg = $_.Exception.Message
+                      Write-Warning ("  {0}: install attempt {1}/{2} failed: {3}" -f $Name, $i, $MaxAttempts, $msg)
+                      if ($i -eq $MaxAttempts) { throw }
+                      Start-Sleep -Seconds ([Math]::Pow(2, $i))
+                  }
+              }
+          }
+
+          Write-Host '===== PSScriptAnalyzer install ====='
+          Install-ModuleWithRetry -Name PSScriptAnalyzer
+
+          Write-Host '===== ConvertToSARIF install ====='
+          Install-ModuleWithRetry -Name ConvertToSARIF
+
+          Import-Module -Name ConvertToSARIF -Force
+          Write-Host '===== Installed modules ====='
+          Get-Module -ListAvailable PSScriptAnalyzer, ConvertToSARIF |
+              Sort-Object Name, Version |
+              Format-Table Name, Version, Path -AutoSize |
+              Out-String | Write-Host
+
+      - name: '[PSSA-pwsh7] Run PSScriptAnalyzer + ConvertToSARIF'
         if: ${{ inputs.scope == 'all' || inputs.scope == 'pssa-only' || github.event_name != 'workflow_dispatch' }}
         id: pssa-linux
-        uses: microsoft/psscriptanalyzer-action@v1.1
-        with:
-          path: ./projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
-          settings: ./projects/powershell-download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1
-          recurse: false
-          output: pssa.sarif
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module -Name ConvertToSARIF -Force
+
+          $scriptPath   = './projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1'
+          $settingsPath = './projects/powershell-download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1'
+
+          Invoke-ScriptAnalyzer -Path $scriptPath -Settings $settingsPath |
+              ConvertTo-SARIF -FilePath ./pssa.sarif
+
+          if (-not (Test-Path ./pssa.sarif)) {
+              Write-Error 'pssa.sarif was not produced'
+              exit 1
+          }
+          $sz = (Get-Item ./pssa.sarif).Length
+          Write-Host ("Wrote pssa.sarif ({0:N0} bytes)" -f $sz)
 
       - name: '[PSSA-pwsh7] Upload SARIF to Code Scanning'
         if: ${{ always() && (inputs.scope == 'all' || inputs.scope == 'pssa-only' || github.event_name != 'workflow_dispatch') }}

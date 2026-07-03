@@ -4,8 +4,10 @@
 # Phase 1 Step 0 smoke test via -EnvironmentInfoOnly).
 #
 # Triggered by STAGE 1 success (workflow_run chain, 1 hop).
-# PSScriptAnalyzer is run via microsoft/psscriptanalyzer-action on
-# Windows PowerShell 5.1 (the action supports both pwsh 7 and Windows PS 5.1).
+# PSScriptAnalyzer is run inline (Install-Module + Invoke-ScriptAnalyzer
+# + ConvertTo-SARIF) rather than via the unmaintained Marketplace action
+# microsoft/psscriptanalyzer-action - the same migration the iso sibling
+# made at r07.0 Step 11; see this project's CHANGELOG [Unreleased] entry.
 #
 # Governance: /SPEC.md
 # Change history: projects/powershell-download-speakerdeck-oracle4engineer/CHANGELOG.md
@@ -48,17 +50,129 @@ jobs:
       - uses: actions/checkout@v7
 
       # --- Tool group: PSScriptAnalyzer (Windows PowerShell 5.1) ---
-      # The Marketplace action runs PSScriptAnalyzer; the analyzed script
-      # ('Download-SpeakerDeck.ps1') targets Windows PS 5.1 — so the smoke
-      # test below explicitly uses 'powershell' shell.
-      - name: '[PSSA-pwsh51] Run microsoft/psscriptanalyzer-action'
+      # We invoke PSScriptAnalyzer inline rather than through the
+      # microsoft/psscriptanalyzer-action Marketplace action because that
+      # action's Install-Module ConvertToSARIF step is a known flaky
+      # dependency on PSGallery: Microsoft's own CI of the action has
+      # been observed failing intermittently, and a fresh windows-latest
+      # runner sometimes lacks a current NuGet provider / trusted
+      # PSGallery policy. Inlining the four real commands (install,
+      # import, analyze, convert) lets us add TLS 1.2 enforcement, NuGet
+      # provider preflight, PSGallery trust, and exponential-backoff
+      # retry around each install, eliminating the third-party dependency
+      # while preserving the same pssa.sarif output for the downstream
+      # github/codeql-action/upload-sarif@v4 step.
+      - name: '[PSSA-pwsh51] Install PowerShell modules (PSScriptAnalyzer + ConvertToSARIF)'
+        id: pssa-windows-install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Force TLS 1.2 explicitly. Some windows-latest images start with
+          # a SecurityProtocol value that excludes Tls12, which makes the
+          # PSGallery handshake fail before the package search can run.
+          [Net.ServicePointManager]::SecurityProtocol =
+              [Net.ServicePointManager]::SecurityProtocol -bor `
+              [Net.SecurityProtocolType]::Tls12
+
+          Write-Host '===== NuGet provider preflight ====='
+          $needNuget = $true
+          try {
+              $nuget = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
+              if ($nuget -and $nuget.Version -ge [Version]'2.8.5.201') { $needNuget = $false }
+          } catch { }
+          if ($needNuget) {
+              Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
+                  -Force -Scope CurrentUser | Out-Null
+          }
+          $nv = (Get-PackageProvider -Name NuGet).Version
+          Write-Host "  NuGet provider: $nv"
+
+          Write-Host '===== PSGallery preflight ====='
+          # On the windows-latest = Windows Server 2025 image, PSGallery is not
+          # pre-registered for Windows PowerShell 5.1, and `Register-PSRepository
+          # -Default` fails against the image's bundled NuGet provider (observed:
+          # "NuGet.Commands.CommandException: Missing option value for: '-source'"),
+          # which then left PSGallery unregistered and aborted the job. Register the
+          # source explicitly instead, with a PackageManagement-layer fallback;
+          # neither path goes through the failing -Default bootstrap.
+          $gallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
+          if (-not $gallery) {
+              $registered = $false
+              try {
+                  Register-PSRepository -Name PSGallery `
+                      -SourceLocation 'https://www.powershellgallery.com/api/v2' `
+                      -PublishLocation 'https://www.powershellgallery.com/api/v2/package/' `
+                      -InstallationPolicy Trusted -ErrorAction Stop
+                  $registered = $true
+              } catch {
+                  Write-Warning "  explicit Register-PSRepository failed: $($_.Exception.Message)"
+              }
+              if (-not $registered) {
+                  Register-PackageSource -Name PSGallery `
+                      -Location 'https://www.powershellgallery.com/api/v2' `
+                      -ProviderName PowerShellGet -Trusted -Force -ErrorAction Stop | Out-Null
+              }
+          }
+          if ((Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue).InstallationPolicy -ne 'Trusted') {
+              Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+          }
+          Get-PSRepository | Format-Table -AutoSize | Out-String | Write-Host
+
+          function Install-ModuleWithRetry {
+              param([Parameter(Mandatory)][string]$Name, [int]$MaxAttempts = 3)
+              if (Get-Module -ListAvailable -Name $Name) {
+                  Write-Host "  ${Name}: already installed"
+                  return
+              }
+              for ($i = 1; $i -le $MaxAttempts; $i++) {
+                  try {
+                      Install-Module -Name $Name -Force -Scope CurrentUser `
+                          -Repository PSGallery -AllowClobber -ErrorAction Stop
+                      Write-Host "  ${Name}: installed (attempt $i/$MaxAttempts)"
+                      return
+                  } catch {
+                      $msg = $_.Exception.Message
+                      Write-Warning ("  {0}: install attempt {1}/{2} failed: {3}" -f $Name, $i, $MaxAttempts, $msg)
+                      if ($i -eq $MaxAttempts) { throw }
+                      Start-Sleep -Seconds ([Math]::Pow(2, $i))
+                  }
+              }
+          }
+
+          Write-Host '===== PSScriptAnalyzer install ====='
+          Install-ModuleWithRetry -Name PSScriptAnalyzer
+
+          Write-Host '===== ConvertToSARIF install ====='
+          Install-ModuleWithRetry -Name ConvertToSARIF
+
+          Import-Module -Name ConvertToSARIF -Force
+          Write-Host '===== Installed modules ====='
+          Get-Module -ListAvailable PSScriptAnalyzer, ConvertToSARIF |
+              Sort-Object Name, Version |
+              Format-Table Name, Version, Path -AutoSize |
+              Out-String | Write-Host
+
+      - name: '[PSSA-pwsh51] Run PSScriptAnalyzer + ConvertToSARIF'
         id: pssa-windows
-        uses: microsoft/psscriptanalyzer-action@v1.1
-        with:
-          path: ./projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
-          settings: ./projects/powershell-download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1
-          recurse: false
-          output: pssa.sarif
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module -Name ConvertToSARIF -Force
+
+          $scriptPath   = './projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1'
+          $settingsPath = './projects/powershell-download-speakerdeck-oracle4engineer/PSScriptAnalyzerSettings.psd1'
+
+          Invoke-ScriptAnalyzer -Path $scriptPath -Settings $settingsPath |
+              ConvertTo-SARIF -FilePath ./pssa.sarif
+
+          if (-not (Test-Path ./pssa.sarif)) {
+              Write-Error 'pssa.sarif was not produced'
+              exit 1
+          }
+          $sz = (Get-Item ./pssa.sarif).Length
+          Write-Host ("Wrote pssa.sarif ({0:N0} bytes)" -f $sz)
 
       - name: '[PSSA-pwsh51] Upload SARIF to Code Scanning'
         if: always()
