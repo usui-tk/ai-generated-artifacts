@@ -210,6 +210,25 @@ limitations, and the full gate inventory live in `governance/gate-coverage.md`.
 Governed by [ADR 0026](./adr/0026-reference-health-gate.md) (reference-health gate;
 Layer-0 scope, R1/R2/R5 check set, gate-then-fix closure of the 2026-07-03 residue).
 
+### Decision gate + AI-driven trigger
+
+`quality-tools/canon-drift-trigger/trigger.py` (1.1.0) implements ADR 0011 §3-AI/§4
+end-to-end: **`impact --unit-id <id>`** = the machine-measured consumer blast radius
+(manifest `consumers[]` + marker placements over both frames — never estimated);
+**`propose`** = the AI/human reconcile-back trigger emitting ONE decision-gated change
+request; the machine drift path attaches a computed-impact decision block with
+`kind=null` (`pending-decision`). Tier rules (confirmed at P7a.1 against the realized
+topology): patch→trivial, minor→medium, major→**heavy** — heavy is REFUSED without
+enumerated consumers + a migration plan + a full-ADR reference. Approval act = `[AUTH]`
++ the Git commit; emit-only, **no new state store** (the proposals ledger is P8's).
+Change-request contract **pinned**: `request_version 1.0.0` / `contract_status
+pinned-P7a`. Series order is normative: trigger → decision gate → quality gates →
+CRUD/coupled write → commit + CHANGELOG.
+
+Governed by [ADR 0027](./adr/0027-decision-gate-and-ai-trigger-implementation.md)
+(decision gate + AI trigger: tier confirmation, machine impact, contract pinning,
+heavy-path refusal semantics).
+
 ### Scanner output-contract pins
 
 The P3 consumer-drift scanner's sole output contract is `observation.schema.json`. Three of its
