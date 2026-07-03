@@ -1,0 +1,90 @@
+# =============================================================================
+# GitHub Actions workflow - canonical structural template
+# =============================================================================
+# Purpose:
+#   The starting point for EVERY new workflow in this repository (and in
+#   repositories bootstrapped from this canon). It codifies the house
+#   conventions that all 9 live workflows already follow (measured 2026-07-03):
+#
+#     1. NAMING    - the file is `<area>__<name>.yml` with `__` separators
+#                    (`governance__...`, `projects__<project>__<stage>__...`,
+#                    `quality-tools__<tool>.yml`); the workflow `name:` mirrors
+#                    the owning path (`<area>/<name> - <short purpose>`).
+#     2. BANNER    - this comment banner: purpose, trigger topology, and the
+#                    governance + change-history pointers, at the top of file.
+#     3. POINTERS  - `Governance:` names the owning SPEC/ADR; `Change history:`
+#                    names the owning CHANGELOG. A workflow with no owner is
+#                    not mergeable.
+#     4. PERMISSIONS - explicit least-privilege `permissions:` at the top
+#                    level (start from `contents: read`; widen per job only
+#                    with a comment saying WHY).
+#     5. CONCURRENCY - a `concurrency:` guard keyed on the workflow + ref so
+#                    superseded runs cancel (or queue, for schedulers).
+#     6. PINNING   - every `uses:` is version-pinned (`@vN` minimum). No
+#                    floating `@main`/`@master`. Marketplace actions need a
+#                    maintenance check first - see the dsd stage1 lesson
+#                    (microsoft/psscriptanalyzer-action went unmaintained;
+#                    the iso sibling migrated to inline execution, r07.0).
+#
+#   Loop safety (only for workflows that PUSH to the repository): commit with
+#   `[skip ci]` in the subject AND keep the trigger set schedule/dispatch-only
+#   (double guard) - the pattern proven by the reconciliation cold loop.
+#
+# Rule-of-two exemplars this template distills:
+#   - .github/workflows/quality-tools__powershell-static-analyzer.yml
+#   - .github/workflows/governance__reconciliation-cold-loop.yml
+#
+# Consumer instructions: copy to `.github/workflows/<area>__<name>.yml`,
+# replace every <ANGLE-BRACKET> placeholder, delete the placeholder jobs you
+# do not need, and KEEP conventions 1-6. This template is structural (no
+# vendored region markers; ADR 0014 masterless-dotfile class does not apply -
+# the copy is consumer-owned from birth and maintained by its stream).
+#
+# Governance: governance/SPEC.md (template canon; ADR 0014/0018)
+# Change history: governance/templates/ (Axis-2 VERSION) + repo CHANGELOG
+# =============================================================================
+
+name: '<area>/<name> - <short purpose>'
+
+on:
+  # Pick the trigger topology and DELETE the rest:
+  # (a) per-PR / per-push gate:
+  pull_request:
+    paths:
+      - '<owning-path>/**'
+  push:
+    branches: [main]
+    paths:
+      - '<owning-path>/**'
+  # (b) scheduled job (add loop safety if it pushes - see banner):
+  # schedule:
+  #   - cron: '<MIN> <HOUR> * * *'
+  # (c) always keep manual dispatch available:
+  workflow_dispatch:
+
+# Convention 4: least privilege. Widen per job only with a WHY comment.
+permissions:
+  contents: read
+
+# Convention 5: superseded runs cancel. For schedulers that must not overlap
+# but also must not lose a run, set `cancel-in-progress: false` (queue).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  '<job-name>':
+    runs-on: ubuntu-latest   # or windows-latest; pin an LTS tag if behavior matters
+    steps:
+      # Convention 6: every `uses:` is version-pinned.
+      - uses: actions/checkout@v7
+
+      # Delete if the job needs no Python; the governance gates are
+      # python3-stdlib-first (cold-path extras like duckdb install HERE only).
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: '<step: run the gate / build / check>'
+        run: |
+          <command>

@@ -54,10 +54,14 @@
 - **R5 probes exactly two STATUS zones** (`| Current phase |` row, `Gates green`
   paragraph). Other numeric claims (History, prose) are unprobed by design.
 - **CI-side (GitHub Actions) coverage is a separate axis** from this local battery:
-  the 8 workflows run the per-project stage suites + psa self-quality; the governance
-  battery above is local/per-phase. The github-workflows template question (TF d2w)
-  stays deferred; the reference-health gate now machine-checks workflow-name truth in
-  Layer-0 docs, which was its main prerequisite.
+  the 9 workflows run the per-project stage suites + psa self-quality + the scheduled
+  cold loop; the governance battery above is local/per-phase. **TF d2w is RESOLVED**:
+  `governance/templates/repo-github-workflow.template.yml` (structural; the starting
+  point for every new workflow) codifies the six house conventions all 9 live
+  workflows already follow - existing workflows are NOT retrofitted (stream-owned,
+  already conformant). Known sibling divergence handed to the dsd stream: stage1
+  still uses the unmaintained `microsoft/psscriptanalyzer-action` that the iso
+  sibling migrated off (r07.0 Step 11).
 - **Index==body beyond row counts** (phase labels, ADR indices, version strings in
   STATUS prose) is review-owned: sweep header + Current-phase table + Gates line +
   Next-action together on every STATUS touch (the 2026-07-03 rule).
