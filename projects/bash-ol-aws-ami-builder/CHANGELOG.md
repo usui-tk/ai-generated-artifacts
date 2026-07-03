@@ -40,6 +40,58 @@ This CHANGELOG is **English only** per the repository-wide
 
 ### Added
 
+- **ENA driver self-build test infrastructure extended to OL9/OL10 (evaluation
+  only; `tests/ena/run-ena-buildtest-matrix.sh`, `install-ena-driver.sh`).**
+  In support of an ENA Express readiness investigation, `ENA_BUILDTEST` is now
+  wired for OL9/OL10 in addition to OL6/7/8, and the matrix gained a new
+  `--ena-min-version <x.y.z>` floor (e.g. `2.8.0`, the AWS-documented ENA
+  Express metrics-reporting threshold) applied as a hard filter regardless of
+  version source. `install-ena-driver.sh` gained `_ena_resolve_latest()`
+  (mirrors `_awscli_resolve_latest()`: `git ls-remote --tags` against
+  `amzn/amzn-drivers`, HEAD-verifies the tarball, falls back to
+  `ENA_LATEST_FALLBACK_PIN` on failure) so `ENA_VERSION_OL8/OL9/OL10` default
+  to **latest** rather than a fixed pin, overridable via `ENA_DRIVER_VERSION`
+  or the per-OS `ENA_VERSION_OL<N>` variables. **Real buildtest-matrix runs
+  (2026-07-03) against clean-core OL9/OL10 containers established:**
+  - **OL9 and OL10 both build successfully with amzn-drivers latest (2.17.0)
+    against UEKR8 (6.12 kernel)** — the confirmed-working QA-preflight canary
+    for both (`pin_for()` updated accordingly).
+  - **ENA 2.8.0 (the ENA Express metrics floor) fails to compile against
+    UEKR8 on BOTH OL9 and OL10** with an identical error: `ena_netdev.c`
+    calls `xdp_do_flush_map()`, which upstream Linux renamed to
+    `xdp_do_flush()` before the 6.12 baseline; 2.8.0's `kcompat.h` predates
+    the rename. So "use the minimum version that meets ENA Express's stated
+    driver-version floor" is the wrong strategy on UEKR8 -- latest is
+    required there regardless of the nominal floor.
+  - **OL9/UEKR8 also needs a newer build-time gcc.** OL9's base-OS gcc
+    (11.5.0) cannot compile against UEKR8's `kernel-uek-devel` (built with gcc
+    14.2.1): DKMS aborts on an unrecognized flag
+    (`-fmin-function-alignment=16`) before any driver-code issue is reached.
+    Oracle's `kernel-uek-devel` package for UEKR8 already declares an RPM
+    dependency on `gcc-toolset-14` (confirmed via a real `yum install`
+    transaction), so `install-ena-driver.sh` now prepends
+    `/opt/rh/gcc-toolset-14/root/usr/bin` to `PATH` when
+    `osmajor=9 && kver=6.*uek*` -- no separate package install needed, and
+    OL9/UEKR7, OL10, and OL6/7/8 are untouched.
+  - **OL9 defaults to UEKR8, not UEKR7** (`uekr_for()`, `bt_uek_repo`,
+    `ensure_kernel_devel()`'s `--enablerepo` pattern) -- OL9 ships both tracks
+    (UEKR7 enabled by default, UEKR8 present but disabled, per a real
+    `uek-ol9.repo`), and there is no reason to keep testing the older track
+    now that UEKR8 builds successfully. Override via
+    `BT_UEK_REPO_OVERRIDE=ol9_UEKR7` for a UEKR7-specific regression check.
+  - **OL10's EPEL section name is `ol10_u1_developer_EPEL`, not
+    `ol10_developer_EPEL`** (confirmed from a real `oracle-epel-ol10.repo`):
+    OL10's developer/EPEL path is versioned per OL10 update point release
+    (`.../OL10/1/developer/EPEL/...`), unlike OL8/OL9's unversioned path.
+  - All of the above findings are load-bearing for -- but do **not** yet
+    change -- the **production** AMI pipeline: `build-ol-aws-ami.sh` still
+    gates the self-build hook to OL6/OL7 only; OL8/9/10 remain on their
+    in-distro ENA driver. Wiring OL9/OL10's confirmed-working `latest`
+    combination into the production pipeline (name/description marker,
+    `--skip-ena-driver` interaction, Phase 3 hook) is tracked as follow-up
+    work, alongside a full (non-`--ena-min-version`-narrowed) matrix run in
+    the maintainer's own environment.
+
 - **AWS CLI v2 production install integrated into `build-ol-aws-ami.sh` (OL6/OL7/OL8; default ON).**
   By default (`AWSCLI_INSTALL=1`) the wrapper now installs **AWS CLI v2** into the
   guest on **OL6/OL7/OL8**, so a built AMI ships v2 as the standard CLI (AWS CLI v1

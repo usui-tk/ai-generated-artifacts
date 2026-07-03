@@ -118,7 +118,7 @@ streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
 | `env.properties.aws-ol7` | **Oracle Linux 7 Update 9**(x86_64)用パラメータ — **実験的・アップストリーム非推奨**。重要な注意事項はセクション 9.6 および 10 を参照 |
 | `env.properties.aws-ol6` | **Oracle Linux 6 Update 10**(x86_64)用パラメータ — **実験的・アップストリームに `distr/ol6-slim/` 自体が無い**。重要な注意事項はセクション 9.7 および 10 を参照 |
 | `setup-vmimport-role.sh` | AWS VM Import/Export 用の `vmimport` IAM サービスロールを初回のみ作成 |
-| `install-ena-driver.sh` | 指定バージョンの Amazon ENA ドライバを DKMS でビルド/導入する自己完結スクリプト(OL6 → 2.9.1、OL7 → 2.17.0、OL8+ は何もしない)。依存(EPEL・gcc/make・dkms・`kernel-uek-devel`)を自身で導入し、**素の OL6/OL7 インスタンス上で単体実行**して検証可能。ENA ビルド有効時(既定)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
+| `install-ena-driver.sh` | 指定バージョン(OL6 → 2.9.1、OL7 → 2.17.0)または latest 自動解決(OL8/9/10、評価/単体実行専用 — SPEC B.9参照)の Amazon ENA ドライバを DKMS でビルド/導入する自己完結スクリプト。依存(EPEL・gcc/make・dkms・`kernel-uek-devel`)を自身で導入し、**素の OL インスタンス上で単体実行**して検証可能。ENA ビルド有効時(既定、OL6/OL7 のみ — OL8/9/10 は AMI パイプラインでは引き続き in-distro ドライバのまま)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
 | `install-ssm-agent.sh` | Amazon SSM Agent の RPM を導入し起動時に有効化する自己完結スクリプト(OL6 → 固定 `3.3.4624.0`、OL7-OL10 → `latest`)。RPM を `curl` で取得し `rpm -Uvh` で導入(EL6 の yum-over-HTTPS 問題を回避)。install+run テストマトリクス(`tests/ssm/`)向けに**単体実行**可能、または SSM 導入有効時(既定)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
 | `install-awscli.sh` | AWS CLI v2 を導入(OL6 → 固定 `2.17.51`、OL7/OL8 → `latest`)し、OL リポジトリの `awscli`(v1)を versionlock で除外する自己完結スクリプト。自己完結の v2 バンドルを展開しバンドル同梱の `aws/install` で導入。install+run テストマトリクス(`tests/awscli/`)向けに**単体実行**可能、または AWS CLI 導入有効時(既定、OL6/OL7/OL8 — OL9/OL10 は既定のパッケージマネージャを利用)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
 | `README.md` | エンドユーザ向けドキュメント(英語、ベースライン) |

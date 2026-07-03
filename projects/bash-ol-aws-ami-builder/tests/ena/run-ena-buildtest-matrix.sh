@@ -30,6 +30,27 @@
 # --pinned-only. Narrowing to a few versions is the supported way to run "a few
 # cases" locally; the FULL matrix is meant for the user's environment / CI.
 #
+# OL9 / OL10 (evaluation). ENA_BUILDTEST is wired for OL6/7/8/9/10. OL9/OL10 are
+# EVALUATION ONLY: install-ena-driver.sh's ENA_VERSION_OL9/OL10 resolve to
+# amzn-drivers "latest" at runtime (see _ena_resolve_latest), and
+# build-ol-aws-ami.sh does NOT yet self-build ENA on OL9/OL10 (both stay on
+# their in-distro driver in the AMI pipeline until this matrix confirms a safe
+# combination, mirroring how OL6's [2.8.6, 2.9.1] window was established).
+# OL9 has two UEK tracks in its default repo config (verified from a real
+# clean-core image's uek-ol9.repo): UEKR7 (5.15, enabled by default) and UEKR8
+# (6.12, present but disabled by default). This script targets UEKR8 -- there
+# is no reason to keep testing against the older UEKR7 track now that UEKR8 is
+# available. Override via BT_UEK_REPO_OVERRIDE=ol9_UEKR7 (passed through to
+# install-ena-driver.sh) only for a UEKR7-specific regression check. OL10 only
+# has UEKR8.
+#
+# --ena-min-version (floor). ENA Express requires ENA driver >= 2.2.9 for full
+# bandwidth and >= 2.8 to produce ena_srd_* metrics (AWS ENA Express docs). Pass
+# --ena-min-version 2.8.0 to test only releases at/above that floor -- applied
+# as a hard filter regardless of version source (release-list JSON,
+# --ena-versions, or --pinned-only), so a narrowed --ena-versions list can't
+# silently slip below the floor.
+#
 # QA PREFLIGHT (mandatory, every mode). Before the matrix, each OL first builds
 # ONLY its pinned ENA version as a smoke test that the clean-core rootfs +
 # install-ena-driver.sh are healthy. This is QA only -- it is NOT recorded in the
@@ -54,9 +75,14 @@
 # Usage:
 #   bash tests/ena/run-ena-buildtest-matrix.sh [options]
 # Options:
-#   --ol <list>            OL majors to test, comma/space (default: 6,7,8)
+#   --ol <list>            OL majors to test, comma/space (default: 6,7,8;
+#                          9,10 are wired but EVALUATION ONLY -- see above)
 #   --ena-versions <list>  ENA versions to test, comma/space (default: all in the
 #                          release-list JSON) -- the "few cases" knob
+#   --ena-min-version <v>  floor: only test ENA releases >= v (e.g. 2.8.0, the
+#                          ENA Express metrics-reporting threshold). Applies on
+#                          top of --ena-versions / --pinned-only / the release
+#                          list -- see "--ena-min-version (floor)" above.
 #   --pinned-only          test only each OL's pinned ENA version
 #   --ledger <path>        ledger JSON (default: tests/ena/buildtest-ledger.json)
 #   --results-dir <dir>    where RESULTS-ol<N>.md are written (default: tests/ena)
@@ -91,6 +117,7 @@ INSTALL_SCRIPT="${PROJ_DIR}/install-ena-driver.sh"
 
 OL_LIST="6 7 8"
 ENA_VERSIONS=""
+ENA_MIN_VERSION=""
 PINNED_ONLY=0
 LEDGER="${SCRIPT_DIR}/buildtest-ledger.json"
 RESULTS_DIR="${SCRIPT_DIR}"
@@ -110,13 +137,22 @@ die()  { log "ERROR: $*" >&2; exit 1; }
 hr()   { log "================================================================"; }
 
 # pinned ENA version per OL major (mirrors install-ena-driver.sh's defaults).
-pin_for() { case "$1" in 6) echo 2.9.1 ;; 7) echo 2.17.0 ;; 8) echo 2.17.0 ;; *) echo "" ;; esac; }
+# pinned ENA version per OL major (mirrors install-ena-driver.sh's defaults).
+# OL9/OL10 both pin to latest (2.17.0): a real buildtest run confirmed 2.8.0
+# fails to compile against UEKR8 (6.12) on BOTH OSes with an IDENTICAL error
+# (xdp_do_flush_map was renamed to xdp_do_flush in a mainline kernel these
+# drivers predate) -- so 2.8.0 is not just "unconfirmed", it is a confirmed
+# non-starter on UEKR8, and using it as the QA preflight canary would block
+# the matrix from ever reaching a version that CAN build. 2.17.0 is the
+# confirmed-working canary (OL10 built it successfully on UEKR8).
+pin_for() { case "$1" in 6) echo 2.9.1 ;; 7) echo 2.17.0 ;; 8) echo 2.17.0 ;; 9) echo 2.17.0 ;; 10) echo 2.17.0 ;; *) echo "" ;; esac; }
 
 # ---- args ------------------------------------------------------------------
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --ol)               OL_LIST="${2:-}"; shift ;;
     --ena-versions)     ENA_VERSIONS="${2:-}"; shift ;;
+    --ena-min-version)  ENA_MIN_VERSION="${2:-}"; shift ;;
     --pinned-only)      PINNED_ONLY=1 ;;
     --ledger)           LEDGER="${2:-}"; shift ;;
     --results-dir)      RESULTS_DIR="${2:-}"; shift ;;
@@ -160,13 +196,39 @@ case "${WORK_BASE}" in ""|/|//) die "refusing to run: --work-dir resolves to '${
 mkdir -p "${WORK_BASE}"; WORK_BASE="$(cd "${WORK_BASE}" && pwd)"
 [ "${WORK_BASE}" = "/" ] && die "refusing to run: --work-dir resolved to '/'."
 
-# Resolve the ENA version set for an OL (echo space-separated, ascending).
+# True if dotted-numeric version $1 >= $2 (e.g. ver_ge 2.17.0 2.8.0). Pure
+# string/sort comparison (matches install-ena-driver.sh's highest_modules_dir
+# pattern) -- no external version-compare tool required.
+ver_ge() {
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+}
+
+# Filter a space-separated version list to only those >= ENA_MIN_VERSION (a
+# no-op passthrough when ENA_MIN_VERSION is unset). Applied as a hard floor
+# regardless of source (release-list JSON, --ena-versions, or --pinned-only),
+# so a caller can't accidentally test below the floor by narrowing --ena-versions.
+apply_min_version() {
+  local raw="$1" v out=""
+  if [ -z "${ENA_MIN_VERSION}" ]; then printf '%s' "${raw}"; return 0; fi
+  for v in ${raw}; do
+    ver_ge "${v}" "${ENA_MIN_VERSION}" && out="${out} ${v}"
+  done
+  printf '%s' "${out# }"
+}
+
+# Resolve the ENA version set for an OL (echo space-separated, ascending),
+# then apply the ENA_MIN_VERSION floor (see apply_min_version above).
 versions_for_ol() {
-  local ol="$1"
-  if [ "${PINNED_ONLY}" = "1" ]; then pin_for "${ol}"; return 0; fi
-  if [ -n "${ENA_VERSIONS}" ]; then printf '%s' "${ENA_VERSIONS}"; return 0; fi
-  [ -f "${RELEASES}" ] || die "release list not found: ${RELEASES} (run list-ena-releases.sh, or pass --ena-versions)"
-  python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(' '.join(v['version'] for v in d['versions']))" "${RELEASES}"
+  local ol="$1" raw
+  if [ "${PINNED_ONLY}" = "1" ]; then
+    raw="$(pin_for "${ol}")"
+  elif [ -n "${ENA_VERSIONS}" ]; then
+    raw="${ENA_VERSIONS}"
+  else
+    [ -f "${RELEASES}" ] || die "release list not found: ${RELEASES} (run list-ena-releases.sh, or pass --ena-versions)"
+    raw="$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(' '.join(v['version'] for v in d['versions']))" "${RELEASES}")"
+  fi
+  apply_min_version "${raw}"
 }
 
 # 0017: emit the load-readiness verification bundle that the SEPARATE, read-only
@@ -348,7 +410,7 @@ preflight_qa() {
 # ---- update gate -----------------------------------------------------------
 # Fixed OL -> UEKR repo (matches install-ena-driver.sh and SPEC D.11/D.12).
 # Dynamic "follow the latest UEKR" is deferred to a whole-project cleanup.
-uekr_for() { case "$1" in 6) echo UEKR4 ;; 7|8) echo UEKR6 ;; *) echo "" ;; esac; }
+uekr_for() { case "$1" in 6) echo UEKR4 ;; 7|8) echo UEKR6 ;; 9|10) echo UEKR8 ;; *) echo "" ;; esac; }
 
 # UEK probe: the latest kernel-uek kver (x86_64) for this OL, from yum.oracle.com
 # via repomd.xml -> primary.xml.gz, parsed with python3 stdlib only (gzip +
@@ -472,7 +534,7 @@ ol_total="$(echo "${OL_LIST}" | wc -w)"
 ol_pos=0
 for ol in ${OL_LIST}; do
   ol_pos=$(( ol_pos + 1 ))
-  case "${ol}" in 6|7|8) : ;; *) warn "OL${ol}: ENA_BUILDTEST is wired for OL6/7/8 only; skipping."; g_ol_skipped=$(( g_ol_skipped + 1 )); continue ;; esac
+  case "${ol}" in 6|7|8|9|10) : ;; *) warn "OL${ol}: ENA_BUILDTEST is wired for OL6/7/8/9/10 only; skipping."; g_ol_skipped=$(( g_ol_skipped + 1 )); continue ;; esac
 
   # Update gate (default ON; --force bypasses): skip this OL unless the live
   # upstream has a kernel-uek or ENA the ledger has not covered -- before any

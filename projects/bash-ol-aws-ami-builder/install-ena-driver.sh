@@ -35,8 +35,20 @@
 #              STANDALONE ONLY: the AMI pipeline keeps OL8 on its in-distro ENA
 #              (build-ol-aws-ami.sh gates the self-build hook to OL6/OL7). This
 #              script builds OL8 when run on its own (VM or container test).
-#   OL9+ ship a current in-distro ENA driver, so this script no-ops there.
-#   Override per run with ENA_DRIVER_VERSION (single pin) for evaluation.
+#     - OL9  -> ena_linux_2.17.0 (EVALUATION PIN, same placeholder as OL7/OL8,
+#                pending tests/ena/run-ena-buildtest-matrix.sh results). OL9's
+#                in-distro ENA already ships LLQ, but has no exposed driver
+#                version string (in-tree, not amzn-drivers-tagged) -- see the
+#                ENA Express investigation notes in the project handoff.
+#                STANDALONE / ENA_BUILDTEST ONLY: the AMI pipeline still keeps
+#                OL9 on its in-distro ENA until the matrix confirms a safe pin.
+#     - OL10 -> ena_linux_2.17.0 (EVALUATION PIN, same as OL9; OL10's in-distro
+#                ena.ko moved to the kernel-uek-modules-core sub-package as of
+#                UEKR8, confirmed via kernel-uek.spec %changelog). STANDALONE /
+#                ENA_BUILDTEST ONLY, same caveat as OL9.
+#   Override per run with ENA_DRIVER_VERSION (single pin) for evaluation -- this
+#   is how tests/ena/run-ena-buildtest-matrix.sh drives ENA_BUILDTEST=1 across
+#   the release list without editing this file per version.
 #
 # Target kernel:
 #   Standalone on a running instance -> the LIVE kernel (its /lib/modules dir
@@ -68,9 +80,22 @@ set -euo pipefail
 ENA_VERSION_OL6="${ENA_VERSION_OL6:-2.9.1}"
 ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.0}"
 # OL8 self-build is standalone-only (the AMI pipeline keeps OL8 on its in-distro
-# ENA -- see build-ol-aws-ami.sh, hook gated to OL6/OL7). Pinned to the OL7
-# version (newest ENA release) since OL8 runs the same UEK6 family.
-ENA_VERSION_OL8="${ENA_VERSION_OL8:-2.17.0}"
+# ENA -- see build-ol-aws-ami.sh, hook gated to OL6/OL7).
+# OL8/OL9/OL10 resolve to the amzn-drivers LATEST tag at runtime (see
+# _ena_resolve_latest below) unless explicitly pinned here or via
+# ENA_DRIVER_VERSION. Left empty by default = "resolve latest"; set a concrete
+# x.y.z to pin (e.g. once tests/ena/run-ena-buildtest-matrix.sh identifies a
+# buildable ceiling for one of these OSes, mirroring how OL6's [2.8.6, 2.9.1]
+# window was established).
+ENA_VERSION_OL8="${ENA_VERSION_OL8:-}"
+# OL9/OL10 self-build is EVALUATION-ONLY (standalone / ENA_BUILDTEST): the AMI
+# pipeline still keeps both on their in-distro ENA. Same latest-resolution /
+# pin-override rule as OL8 above.
+ENA_VERSION_OL9="${ENA_VERSION_OL9:-}"
+ENA_VERSION_OL10="${ENA_VERSION_OL10:-}"
+# Last-known-good fallback pin if _ena_resolve_latest cannot reach GitHub (no
+# network / rate-limited) -- keeps OL8/9/10 buildable rather than hard-failing.
+ENA_LATEST_FALLBACK_PIN="${ENA_LATEST_FALLBACK_PIN:-2.17.0}"
 EPEL6_ARCHIVE_BASEURL="${EPEL6_ARCHIVE_BASEURL:-https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/}"
 
 # ---- execution-environment switch (default = production) -------------------
@@ -112,7 +137,37 @@ die() {
   exit 1
 }
 
-# On a failed build, surface the DKMS diagnostics to stderr so the actual
+# Resolve the amzn-drivers "latest" ENA tag via `git ls-remote --tags` -- the
+# same ground-truth method tests/ena/list-ena-releases.sh uses (git protocol,
+# not the GitHub REST API, which is unauthenticated-rate-limited on shared-IP
+# CI runners / sandboxes -- see that script's header for the full rationale).
+# Ensures `git` is present (installs it if missing; every target OS ships it in
+# its base/AppStream repos, so this never needs EPEL). Verifies the resolved
+# tag's source tarball is actually fetchable (a HEAD) before returning it, so a
+# tag that exists but has no published archive yet is never selected. Echoes
+# the concrete version (e.g. 2.17.0), or "" on any failure -- the caller then
+# falls back to ENA_LATEST_FALLBACK_PIN rather than hard-failing the build.
+_ena_resolve_latest() {
+  local repo="https://github.com/amzn/amzn-drivers.git"
+  if ! command -v git >/dev/null 2>&1; then
+    (command -v dnf >/dev/null 2>&1 && dnf -y install git >/dev/null 2>&1) \
+      || (command -v yum >/dev/null 2>&1 && yum -y install git >/dev/null 2>&1) \
+      || true
+  fi
+  command -v git >/dev/null 2>&1 || return 0
+  local ver
+  ver="$(git ls-remote --tags "${repo}" 'ena_linux_*' 2>/dev/null \
+           | sed -E 's#.*refs/tags/ena_linux_##; s/\^\{\}$//' \
+           | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+$' \
+           | sort -t. -k1,1n -k2,2n -k3,3n -u | tail -1)"
+  [[ -n "${ver}" ]] || return 0
+  if command -v curl >/dev/null 2>&1 && curl -fsIL --max-time 15 \
+       "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_${ver}.tar.gz" \
+       >/dev/null 2>&1; then
+    printf '%s' "${ver}"
+  fi
+}
+
 # compiler error is captured in the parent build log. This matters because
 # oracle-linux-image-tools (libguestfs virt-customize) only echoes a guest
 # provisioning script's output to the host when the script FAILS; on success it
@@ -215,9 +270,29 @@ fi
 log "Oracle Linux major version: ${osmajor}"
 
 case "${osmajor}" in
-  6) ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL6}}" ;;
-  7) ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL7}}" ;;
-  8) ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL8}}" ;;
+  6)  ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL6}}" ;;
+  7)  ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL7}}" ;;
+  8|9|10)
+    if [[ -n "${ENA_DRIVER_VERSION:-}" ]]; then
+      ena_version="${ENA_DRIVER_VERSION}"
+    else
+      case "${osmajor}" in
+        8)  ena_version="${ENA_VERSION_OL8}" ;;
+        9)  ena_version="${ENA_VERSION_OL9}" ;;
+        10) ena_version="${ENA_VERSION_OL10}" ;;
+      esac
+      if [[ -z "${ena_version}" ]]; then
+        stage "resolving amzn-drivers latest ENA tag for OL${osmajor}"
+        ena_version="$(_ena_resolve_latest)"
+        if [[ -z "${ena_version}" ]]; then
+          log "could not resolve amzn-drivers latest tag (no network / rate-limited); falling back to ${ENA_LATEST_FALLBACK_PIN}"
+          ena_version="${ENA_LATEST_FALLBACK_PIN}"
+        else
+          log "resolved amzn-drivers latest ENA tag: ${ena_version}"
+        fi
+      fi
+    fi
+    ;;
   *) log "OL${osmajor} ships a current in-distro ENA driver; no rebuild needed. Skipping."; exit 0 ;;
 esac
 log "Target ENA driver version: ${ena_version}"
@@ -252,6 +327,38 @@ if [[ "${ENA_BUILDTEST}" == "1" ]]; then
         dnf -y install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL8"
       fi
       bt_uek_repo="ol8_UEKR6" ;;
+    9)
+      sed -i '/^\[ol9_developer_EPEL\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/oracle-epel-ol9.repo
+      # Same dnf-only bootstrap as OL8; a real OL9 VM already has yum.
+      if [[ "${INSECURE_TLS}" == "1" ]]; then
+        dnf -y --setopt=sslverify=false install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL9"
+      else
+        dnf -y install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL9"
+      fi
+      # OL9 ships two UEK tracks in its default repo config (verified from a real
+      # clean-core image's uek-ol9.repo): ol9_UEKR7 (5.15, enabled=1 by default)
+      # and ol9_UEKR8 (6.12, enabled=0 by default). UEKR8 is the target here --
+      # UEKR7 is the older/legacy track and there is no reason to keep testing
+      # against it now that UEKR8 is available. Override with
+      # BT_UEK_REPO_OVERRIDE=ol9_UEKR7 only if a UEKR7-specific regression check
+      # is ever needed.
+      bt_uek_repo="${BT_UEK_REPO_OVERRIDE:-ol9_UEKR8}" ;;
+    10)
+      # Section name confirmed from a real clean-core OL10 image's
+      # /etc/yum.repos.d/oracle-epel-ol10.repo: [ol10_u1_developer_EPEL] --
+      # OL10's developer/EPEL path is versioned per OL10 update (.../OL10/1/...
+      # for the 10.1 point release), unlike OL8/OL9's unversioned path, so the
+      # section is "ol10_u1_..." not "ol10_...". (Corrected after a real
+      # buildtest-matrix run showed "No match for argument: dkms" -- the
+      # earlier "ol10_developer_EPEL" guess silently matched nothing.)
+      sed -i '/^\[ol10_u1_developer_EPEL\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/oracle-epel-ol10.repo
+      if [[ "${INSECURE_TLS}" == "1" ]]; then
+        dnf -y --setopt=sslverify=false install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL10"
+      else
+        dnf -y install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL10"
+      fi
+      # OL10 only ships a UEKR8 (6.12) track today.
+      bt_uek_repo="ol10_UEKR8" ;;
     *) die "ENA_BUILDTEST: OS major ${osmajor} not wired for the container test" ;;
   esac
   if [[ "${INSECURE_TLS}" == "1" ]]; then
@@ -328,6 +435,25 @@ setup_epel() {
         yum-config-manager --enable ol8_developer_EPEL >/dev/null 2>&1 || true
       fi
       ;;
+    9|10)
+      # Section names confirmed from real clean-core images' repo files:
+      # OL9  -> /etc/yum.repos.d/oracle-epel-ol9.repo  [ol9_developer_EPEL]
+      # OL10 -> /etc/yum.repos.d/oracle-epel-ol10.repo [ol10_u1_developer_EPEL]
+      # (OL10's developer/EPEL path is versioned per OL10 update point release
+      # -- .../OL10/1/... -- unlike OL8/OL9's unversioned path, hence "u1".)
+      # The repo file ships pre-configured (disabled) in the base image, so
+      # enabling it directly is the primary path; the oracle-epel-release
+      # package install is a best-effort fallback for images that lack the
+      # file (never the cause of a new failure -- `|| true`).
+      local _epel_section="ol${osmajor}_developer_EPEL"
+      [[ "${osmajor}" == "10" ]] && _epel_section="ol10_u1_developer_EPEL"
+      if command -v dnf >/dev/null 2>&1; then
+        dnf config-manager --set-enabled "${_epel_section}" >/dev/null 2>&1 || true
+      elif command -v yum-config-manager >/dev/null 2>&1; then
+        yum-config-manager --enable "${_epel_section}" >/dev/null 2>&1 || true
+      fi
+      yum install -y "oracle-epel-release-el${osmajor}" 2>/dev/null || true
+      ;;
     6)
       # Oracle does NOT provide EPEL 6; point at the Fedora archive directly.
       cat > /etc/yum.repos.d/epel-archive.repo <<EOF
@@ -352,9 +478,11 @@ EOF
 ensure_kernel_devel() {
   local -a yk=(-y)
   case "${osmajor}" in
-    6) yk+=("--enablerepo=*UEKR4*") ;;
-    7) yk+=("--enablerepo=*UEKR6*") ;;
-    8) yk+=("--enablerepo=*UEKR6*") ;;
+    6)  yk+=("--enablerepo=*UEKR4*") ;;
+    7)  yk+=("--enablerepo=*UEKR6*") ;;
+    8)  yk+=("--enablerepo=*UEKR6*") ;;
+    9)  yk+=("--enablerepo=*UEKR8*") ;;
+    10) yk+=("--enablerepo=*UEKR8*") ;;
   esac
   yum "${yk[@]}" install "kernel-uek-devel-${kver}" 2>/dev/null || true
   if [[ -e "/lib/modules/${kver}/build" ]]; then
@@ -381,6 +509,24 @@ if [[ "${kver}" == *uek* ]]; then
 else
   yum install -y "${develpkg}" || die "failed to install ${develpkg}"
   [[ -e "/lib/modules/${kver}/build" ]] || die "kernel headers for ${kver} not present after install"
+fi
+
+# ---- OL9/UEKR8: match the kernel's build-time gcc -------------------------
+# OL9's base OS gcc (11.5.0, baseos) is older than the compiler UEKR8's 6.12
+# kernel was actually built with (14.2.1) -- confirmed by a real buildtest run:
+# the mismatch aborts the DKMS build on an unrecognized flag
+# (-fmin-function-alignment=16) before any driver-code issue is even reached.
+# Oracle's kernel-uek-devel-<ver> package for UEKR8 ALREADY declares an RPM
+# dependency on gcc-toolset-14 (confirmed via a real `yum install` transaction
+# log: gcc-toolset-14-gcc 14.2.1-13.el9 pulled in automatically alongside
+# kernel-uek-devel) -- so no separate gcc-toolset install is needed here, only
+# putting it ahead of the base gcc on PATH for the rest of this script's build
+# steps. Only OL9/UEKR8 (kver 6.x) hits this; OL9/UEKR7 (5.15) and OL10 (also
+# 6.12, but its base gcc already matched in testing) are left untouched. The
+# base /usr/bin/gcc symlink is never modified.
+if [[ "${osmajor}" == "9" && "${kver}" == 6.*uek* && -x /opt/rh/gcc-toolset-14/root/usr/bin/gcc ]]; then
+  export PATH="/opt/rh/gcc-toolset-14/root/usr/bin:${PATH}"
+  log "OL9/UEKR8: using $(/opt/rh/gcc-toolset-14/root/usr/bin/gcc --version | head -1) (pulled in by kernel-uek-devel)"
 fi
 
 use_dkms=1

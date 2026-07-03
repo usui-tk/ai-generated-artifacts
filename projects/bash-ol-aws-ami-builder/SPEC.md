@@ -637,10 +637,22 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
 
 - **Self-gates by OS major**: builds for **OL6** (pinned `ena_linux_2.9.1`) and
   **OL7** (pinned `ena_linux_2.17.0`, the newest release confirmed to support
-  RHEL7 as of 2026-06); on **OL8+** it is a no-op because those ship a current
-  in-distro driver. Pins are chosen as the newest release that **builds** on each
-  target OS (the ENA driver is a kernel module; newer releases assume newer
-  kernels/toolchains). Override per run with `ENA_DRIVER_VERSION`.
+  RHEL7 as of 2026-06). On **OL8/OL9/OL10** it is **not** a no-op: it resolves
+  `ena_linux` **latest** at runtime via `_ena_resolve_latest()` (`git
+  ls-remote --tags` against `amzn/amzn-drivers`, HEAD-verifies the tarball,
+  falls back to `ENA_LATEST_FALLBACK_PIN` — default `2.17.0` — on failure),
+  overridable via `ENA_DRIVER_VERSION` or the per-OS `ENA_VERSION_OL8/9/10`
+  variables. This is **evaluation/standalone only** — `build-ol-aws-ami.sh`'s
+  AMI-pipeline hook still gates to OL6/OL7 only (see "ENA driver self-build
+  (`--skip-ena-driver`)" gating in B.1 / B.4), so OL8/OL9/OL10 stay on their
+  in-distro driver in a built AMI regardless of what a standalone run
+  resolves. On **OL9/UEKR8 and OL10/UEKR8**, `latest` is confirmed to build
+  (B.9's 2026-07-03 evaluation findings); the ENA Express metrics floor
+  `2.8.0` is confirmed to **fail** on both (an upstream XDP symbol rename
+  `2.8.0`'s `kcompat.h` predates) — see B.9 for the full findings and the
+  OL9-specific `gcc-toolset-14` compiler requirement. Pins are chosen as the
+  newest release that **builds** on each target OS (the ENA driver is a
+  kernel module; newer releases assume newer kernels/toolchains).
   - **OL6/UEK4 buildable window (`ena_linux` ≈ `[2.8.6, 2.9.1]`).** Validated on a
     real Nitro OL6.10 instance (kernel `4.1.12-124.48.6.el6uek`, gcc 4.4.7).
     *Floor:* below ~`2.8.6` the driver's `kcompat.h` redefines `page_ref_count`,
@@ -1793,12 +1805,18 @@ version pre-checked for tarball fetchability (`tarball_available` +
 the matrix **input**.
 
 `run-ena-buildtest-matrix.sh` drives, for each target OL major (6/7/8 — where
-`ENA_BUILDTEST` is wired) and each target ENA version, the existing pieces **as
-separate executables**: `tests/cleancore/build-cleancore.sh` (B.8) for the
-per-OL clean-core rootfs, then `install-ena-driver.sh ENA_BUILDTEST=1` (A.13) for
-the per-version compile-test. The ENA version set defaults to the full release
-list and is narrowable (`--ena-versions`, `--pinned-only`) so a few cases can run
-locally while the **full** matrix is meant for the user's environment / CI.
+`ENA_BUILDTEST` is wired for the **production-track** self-build — plus 9/10,
+wired for **evaluation only**: `build-ol-aws-ami.sh` does not yet self-build
+ENA on OL9/OL10, both stay on their in-distro driver until this matrix's
+findings are wired into the pipeline) and each target ENA version, the
+existing pieces **as separate executables**: `tests/cleancore/build-cleancore.sh`
+(B.8) for the per-OL clean-core rootfs, then `install-ena-driver.sh
+ENA_BUILDTEST=1` (A.13) for the per-version compile-test. The ENA version set
+defaults to the full release list and is narrowable (`--ena-versions`,
+`--pinned-only`, and **`--ena-min-version <x.y.z>`** — a hard floor applied on
+top of any of the above, e.g. `2.8.0` for AWS's documented ENA Express
+metrics-reporting threshold) so a few cases can run locally while the **full**
+matrix is meant for the user's environment / CI.
 
 ### Dedup ledger + per-OS reports
 
@@ -1842,9 +1860,14 @@ version order used elsewhere:
 
 - **kernel-uek** — the latest `kernel-uek` (x86_64) for the OL is read from
   `yum.oracle.com` (`repomd.xml` → `primary.xml.gz`, parsed with the python3
-  standard library only — `gzip` + `xml.etree`, no extra package) under the fixed
-  `OL → UEKR` map (OL6 → `UEKR4`, OL7/8 → `UEKR6`; source RPMs are ignored). A kver
-  greater than the ledger's max for that OL is a **new kernel**.
+  standard library only — `gzip` + `xml.etree`, no extra package) under the
+  fixed `OL → UEKR` map (`uekr_for()`: OL6 → `UEKR4`, OL7/8 → `UEKR6`, OL9/OL10
+  → `UEKR8`; source RPMs are ignored). OL9 ships two UEK tracks in its default
+  repo config — `UEKR7` (5.15, enabled by default) and `UEKR8` (6.12, present
+  but disabled) — and this project targets `UEKR8` (see the evaluation
+  findings below); `BT_UEK_REPO_OVERRIDE=ol9_UEKR7` (passed through to
+  `install-ena-driver.sh`) runs a UEKR7-specific check instead. A kver greater
+  than the ledger's max for that OL is a **new kernel**.
 - **ENA** — the highest upstream `ena_linux` tag (`git ls-remote`, rate-limit-
   immune; falls back to the release-list JSON if the remote is unreachable). ENA
   is judged on the **latest version only** (releases are incremental); a latest
@@ -1891,6 +1914,50 @@ sufficient**: real module load and device attach are proven separately on real
 Nitro (B-T7/B-T8), and the read-only load-readiness verifier below adds the
 vermagic / KABI gates. A later run grows the ledger as a clean append
 (kver-primary dedup).
+
+### OL9/OL10 evaluation findings (2026-07-03, ENA Express readiness)
+
+A narrowed (`--ena-min-version`-scoped) run against fresh clean-core OL9/OL10
+containers, done in support of an ENA Express readiness investigation,
+established the following (not yet a full-release-list run — that is
+follow-up work for the maintainer's environment):
+
+- **OL9 and OL10 both build amzn-drivers latest (`2.17.0`) successfully
+  against UEKR8** (kernel `6.12.0-203.76.7.6.el{9,10}uek.x86_64`). `pin_for()`
+  therefore pins both to `2.17.0` (the confirmed-working QA-preflight canary),
+  not the ENA Express metrics floor `2.8.0`.
+- **`2.8.0` fails to compile against UEKR8 on both OSes**, with an identical
+  error: `ena_netdev.c` calls `xdp_do_flush_map()`, which upstream Linux
+  renamed to `xdp_do_flush()` before the 6.12 baseline, and `2.8.0`'s
+  `kcompat.h` predates the rename. The lesson: on UEKR8, "the minimum version
+  that meets ENA Express's stated driver-version floor" is not a safe
+  strategy — kcompat coverage for a *newer* kernel generally requires a
+  *newer* driver release, the opposite of the naive "smaller is safer"
+  intuition. `latest` is the correct default for OL9/OL10.
+- **OL9/UEKR8 additionally needs a newer build-time gcc.** OL9's base-OS gcc
+  (`11.5.0`) cannot compile against UEKR8's `kernel-uek-devel` (built with gcc
+  `14.2.1`): DKMS aborts on an unrecognized flag
+  (`-fmin-function-alignment=16`) before any driver-code issue is reached.
+  Oracle's `kernel-uek-devel` for UEKR8 already declares an RPM dependency on
+  `gcc-toolset-14` (confirmed via a real `yum install` transaction log), so
+  `install-ena-driver.sh` prepends `/opt/rh/gcc-toolset-14/root/usr/bin` to
+  `PATH` whenever `osmajor=9` and the target kernel is `6.x` — no separate
+  package install, and OL9/UEKR7, OL10, and OL6/7/8 are untouched (their base
+  gcc already matches).
+- **OL10's EPEL section is `ol10_u1_developer_EPEL`, not
+  `ol10_developer_EPEL`** (confirmed from a real `oracle-epel-ol10.repo`
+  shipped in the clean-core image): OL10's developer/EPEL path is versioned
+  per OL10 update point release (`.../OL10/1/developer/EPEL/...`), unlike
+  OL8/OL9's unversioned path. An earlier guess at the unversioned section name
+  silently matched nothing and left `dkms` unresolvable ("No match for
+  argument: dkms").
+
+None of this is wired into the **production** pipeline yet: `build-ol-aws-ami.sh`
+still gates the self-build hook to OL6/OL7 only, so OL8/OL9/OL10 stay on their
+in-distro ENA driver in a built AMI regardless of these findings. Wiring OL9/OL10's
+confirmed `latest`-on-UEKR8 combination into production (name/description
+marker, `--skip-ena-driver` interaction, Phase 3 hook) and running a full
+(non-narrowed) matrix are tracked as follow-up work.
 
 ### Load-readiness verification (external, read-only)
 

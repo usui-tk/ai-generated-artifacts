@@ -442,8 +442,13 @@ code agrees with `status` (`0` = ok, non-zero = fail):
 
 Validated: OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`), OL7
 (`ena.ko.xz` 2.17.0g, UEK6 `5.4.17-2136.338.4.2.el7uek`), and OL8 (`ena.ko.xz`
-2.17.0g, UEK6 `5.4.17-2136.356.4.2.el8uek`). OL8 self-build is standalone-only;
-the AMI pipeline keeps OL8 on its in-distro ENA driver. OL9+ no-op.
+2.17.0g, UEK6 `5.4.17-2136.356.4.2.el8uek`). OL8/OL9/OL10 self-build is
+standalone/evaluation-only; the AMI pipeline keeps all three on their
+in-distro ENA driver (see SPEC "ENA driver self-build" gating). OL9 (UEKR8,
+`gcc-toolset-14` compiler requirement) and OL10 (UEKR8) were additionally
+validated 2026-07-03 building amzn-drivers latest (`2.17.0`) — see SPEC B.9
+"OL9/OL10 evaluation findings" for the full writeup, including why the ENA
+Express metrics floor (`2.8.0`) is confirmed to fail on both.
 
 ## ENA self-build test matrix (`tests/ena/run-ena-buildtest-matrix.sh`)
 
@@ -453,8 +458,14 @@ both the evidence store and the dedup state (SPEC B.9). It is self-contained
 (inline helpers, no shared library) and drives the existing pieces as separate
 executables — `tests/cleancore/build-cleancore.sh` for the per-OL rootfs and
 `install-ena-driver.sh ENA_BUILDTEST=1` for each version. Targets **OL6/7/8**
-(where `ENA_BUILDTEST` is wired); like the builders it is **manual / on-demand**
-(root + network + multi-hundred-MB builds) and **not** a `run-all.sh` tier.
+(production-track self-build) **plus OL9/OL10** (evaluation-track; wired for
+`ENA_BUILDTEST` but not yet wired into `build-ol-aws-ami.sh`'s AMI pipeline);
+like the builders it is **manual / on-demand** (root + network + multi-hundred-MB
+builds) and **not** a `run-all.sh` tier. A new `--ena-min-version <x.y.z>` floor
+filters the version set (from `--ena-versions`, `--pinned-only`, or the release
+list) to only releases at/above it, regardless of source — e.g.
+`--ena-min-version 2.8.0` for AWS's documented ENA Express metrics-reporting
+threshold.
 
 Two evidence layers, both committed so the state persists across runs:
 
@@ -499,7 +510,8 @@ Two evidence layers, both committed so the state persists across runs:
 
 By default each OL is first **update-gated** (turn off with `--force`): before any
 build, the matrix probes the latest `kernel-uek` for the OL (`yum.oracle.com`
-`repomd.xml` → `primary.xml.gz`, python3 stdlib parse, fixed `OL → UEKR` map) and
+`repomd.xml` → `primary.xml.gz`, python3 stdlib parse, fixed `OL → UEKR` map:
+OL6→`UEKR4`, OL7/8→`UEKR6`, OL9/10→`UEKR8`) and
 the latest upstream ENA (`git ls-remote`), and runs the OL only if either is newer
 than what the ledger covers (or the OL has no ledger entry); otherwise it is
 skipped with no build. A probe that cannot determine the latest is fail-open (the
@@ -530,6 +542,8 @@ result + summary style).
 bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --ena-versions "2.9.1 2.2.0"
 bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --pinned-only   # just the pin
 bash tests/ena/run-ena-buildtest-matrix.sh                        # OL6/7/8 x all releases
+# OL9/OL10 evaluation, floored to the ENA Express metrics threshold:
+bash tests/ena/run-ena-buildtest-matrix.sh --ol 9,10 --ena-min-version 2.8.0
 ```
 
 The committed `buildtest-ledger.json` / `RESULTS-ol{6,7,8}.md` are a **real**
