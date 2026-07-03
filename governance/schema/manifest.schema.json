@@ -93,6 +93,13 @@
           "path": {
             "type": "string",
             "description": "Repo-relative file holding the inlined instance of this unit."
+          },
+          "repo": {
+            "type": "string",
+            "description": "OPTIONAL repository holding this consumer; ABSENT means this central repository (ADR 0030). Cross-repo instances are scanned by the cold loop via the scanner's --satellite mapping; the hot battery skips them by design.",
+            "examples": [
+              "Deploy-Drivers-For-WindowsServer"
+            ]
           }
         }
       }

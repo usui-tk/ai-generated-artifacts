@@ -209,6 +209,96 @@ def run():
     ok, detail = all_conform(rows)
     cases.append(("emitted rows are schema-valid + canonical-JSON (#3 gate)", ok))
 
+    # --- cross-repo consumers (ADR 0030) --------------------------------------
+    # A satellite checkout carrying the SAME framed body as the canon, plus a
+    # central manifest whose consumers[] entry names the satellite repo.
+    def build_satellite_pair():
+        central = build_root(consumer_body=None, whole_tool=False)
+        sat = tempfile.mkdtemp(prefix="scanner-sat-")
+        spath = "Deploy-Demo.ps1"
+        content = (
+            "\ufeff# >>> CANONICAL unit_id=pwsh.helper.foo version=1.0.0 "
+            "hash=%s policy=canonical binding=follow-latest >>>\r\n"
+            "function Foo {\r\n    param($X)\r\n    $X\r\n}\r\n"
+            "# <<< CANONICAL unit_id=pwsh.helper.foo <<<\r\n" % CANON_HASH)
+        with open(os.path.join(sat, spath), "wb") as h:
+            h.write(content.encode("utf-8"))
+        manifest = os.path.join(central, "governance", "state", "manifest.jsonl")
+        line = _manifest_line(
+            "pwsh.helper.foo", "powershell-helper",
+            "reference-code/powershell/Public/Foo.ps1",
+            [{"consumer": "deploy-demo", "path": spath, "repo": "sat-repo"}])
+        with open(manifest, "w", newline="\n") as h:
+            h.write(line + "\n")
+        return central, sat
+
+    # mapped satellite -> scanned there; record stamped with ITS repo/commit.
+    central, sat = build_satellite_pair()
+    try:
+        skipped = []
+        rows = list(scan(central, "central-repo", "cafecafe",
+                         satellites={"sat-repo": sat},
+                         satellite_commits={"sat-repo": "beefbeef"},
+                         skipped_out=skipped))
+        region = [r for r in rows if r["granularity"] == "region"]
+        ok, _ = all_conform(rows)
+        cases.append(("satellite mapped -> drift=match, repo/commit stamped "
+                      "(schema-valid)",
+                      len(region) == 1 and not skipped
+                      and region[0]["drift"] == "match"
+                      and region[0]["repo"] == "sat-repo"
+                      and region[0]["commit"] == "beefbeef" and ok))
+    finally:
+        shutil.rmtree(central); shutil.rmtree(sat)
+
+    # unmapped satellite -> SKIPPED (no region row, never drift/unknown).
+    central, sat = build_satellite_pair()
+    try:
+        skipped = []
+        rows = list(scan(central, "central-repo", "cafecafe",
+                         skipped_out=skipped))
+        region = [r for r in rows if r["granularity"] == "region"]
+        cases.append(("satellite unmapped -> skipped (no row, skip recorded)",
+                      len(region) == 0 and len(skipped) == 1
+                      and skipped[0]["repo"] == "sat-repo"
+                      and skipped[0]["unit_id"] == "pwsh.helper.foo"))
+    finally:
+        shutil.rmtree(central); shutil.rmtree(sat)
+
+    # a consumers[] entry whose repo EQUALS the scanned repo behaves exactly
+    # like a repo-less entry (resolved against root, default stamps).
+    central, sat = build_satellite_pair()
+    try:
+        manifest = os.path.join(central, "governance", "state", "manifest.jsonl")
+        cpath = "local/Use-Foo.ps1"
+        absc = os.path.join(central, cpath)
+        os.makedirs(os.path.dirname(absc), exist_ok=True)
+        content = (
+            "\ufeff# >>> CANONICAL unit_id=pwsh.helper.foo version=1.0.0 "
+            "hash=%s policy=canonical binding=follow-latest >>>\r\n"
+            "function Foo {\r\n    param($X)\r\n    $X\r\n}\r\n"
+            "# <<< CANONICAL unit_id=pwsh.helper.foo <<<\r\n" % CANON_HASH)
+        with open(absc, "wb") as h:
+            h.write(content.encode("utf-8"))
+        line = _manifest_line(
+            "pwsh.helper.foo", "powershell-helper",
+            "reference-code/powershell/Public/Foo.ps1",
+            [{"consumer": "self-consumer", "path": cpath,
+              "repo": "central-repo"}])
+        with open(manifest, "w", newline="\n") as h:
+            h.write(line + "\n")
+        skipped = []
+        rows = list(scan(central, "central-repo", "cafecafe",
+                         skipped_out=skipped))
+        region = [r for r in rows if r["granularity"] == "region"]
+        cases.append(("repo == scanned repo -> local resolution, default stamps",
+                      len(region) == 1 and not skipped
+                      and region[0]["drift"] == "match"
+                      and region[0]["repo"] == "central-repo"
+                      and region[0]["commit"] == "cafecafe"))
+    finally:
+        shutil.rmtree(central); shutil.rmtree(sat)
+
     # Golden vectors.
     for name, body, expected in GOLDEN_VECTORS:
         cases.append(("golden vector %s" % name, canon_norm_hash(body) == expected))

@@ -124,6 +124,31 @@ def run():
                   findings == [], findings))
     shutil.rmtree(root)
 
+    # A: a consumers[] entry carrying the OPTIONAL repo field (ADR 0030
+    # cross-repo consumer) validates green; the consumer path is NOT
+    # existence-checked by design (it lives in the satellite).
+    xrepo_row = dict(BASE_RECORD)
+    xrepo_row["consumers"] = [{"consumer": "deploy-demo",
+                               "path": "Deploy-Demo.ps1",
+                               "repo": "Deploy-Drivers-For-WindowsServer"}]
+    root = build_root([_canonical_line(xrepo_row)])
+    findings, _, _ = validate(root, quiet=True)
+    cases.append(("A consumers[].repo (cross-repo, ADR 0030) green",
+                  findings == [], findings))
+    shutil.rmtree(root)
+
+    # A: an UNKNOWN extra property on a consumers[] entry is still caught
+    # (additionalProperties stays false; repo was an enumerated addition).
+    badc_row = dict(BASE_RECORD)
+    badc_row["consumers"] = [{"consumer": "deploy-demo",
+                              "path": "Deploy-Demo.ps1",
+                              "repository": "typo-field"}]
+    root = build_root([_canonical_line(badc_row)])
+    findings, _, _ = validate(root, quiet=True)
+    cases.append(("A unknown consumers[] property still caught",
+                  "A" in checks_present(findings), findings))
+    shutil.rmtree(root)
+
     # A: kind=project with an out-of-enum maturity -> schema violation caught.
     bad_project = dict(project_row, maturity="alpha")
     root = build_root([_canonical_line(BASE_RECORD), _canonical_line(bad_project)])

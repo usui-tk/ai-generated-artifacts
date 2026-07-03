@@ -33,6 +33,15 @@ whole-tool rows (the registered tools) and is expected at P3.
 
 Usage:
     python3 scanner.py --root <repo-root> --repo <name> [--out <dir>] [--stdout]
+        [--satellite NAME=PATH]... [--satellite-commit NAME=SHA]...
+
+Cross-repo consumers (ADR 0030): a consumers[] entry may carry `repo`. With a
+--satellite mapping for that repo, the instance is resolved against the mapped
+checkout and its observation is stamped repo=NAME / commit=SHA (partitioned to
+its own repo=<NAME> output directory). WITHOUT a mapping the instance is
+SKIPPED and reported - deliberately not drift/unknown, so satellite
+unreachability can never fail a local (hot) gate; the scheduled cold loop
+supplies the mapping.
 """
 
 import argparse
@@ -44,7 +53,13 @@ import os
 import re
 import sys
 
-SCANNER_VERSION = "0.1.0"
+# 1.1.0: cross-repo consumer scanning (--satellite; ADR 0030). This constant is
+# the tool's governed SemVer and MUST match the manifest row
+# tool.canonical-drift-scanner (the prior constant "0.1.0" predated the
+# whole-tool convention, ADR 0021, and had drifted from the row's "1.0.0";
+# realigned here so runtime.scanner_version in observations is the governed
+# version).
+SCANNER_VERSION = "1.1.0"
 
 # kind -> granularity derivation (ADR 0016 F3). "region" => body-hash-drift path;
 # "whole-tool" => whole-tool null convention (baseline §4.4). governance-doc is
@@ -255,11 +270,18 @@ def _run_id(now=None):
     return now.strftime("%Y%m%dT%H%M%SZ")
 
 
-def scan(root, repo, commit, now=None):
+def scan(root, repo, commit, now=None, satellites=None, satellite_commits=None,
+         skipped_out=None):
     """Yield observation records (dicts) for the repo at root. P3 behavior:
     iterate manifest units; for each region unit, walk its consumers[] and emit a
     region observation per inlined instance; emit a whole-tool row per whole-tool
-    unit. With empty consumers[] (pre-P6) only whole-tool rows are produced."""
+    unit. With empty consumers[] (pre-P6) only whole-tool rows are produced.
+
+    Cross-repo consumers (ADR 0030): `satellites` maps a consumer `repo` name to
+    a local checkout root and `satellite_commits` maps it to the checked-out
+    commit; a mapped instance is resolved there and stamped with ITS repo/commit.
+    An UNMAPPED cross-repo instance is skipped (appended to `skipped_out` when a
+    list is given) - never emitted as drift/unknown."""
     manifest_path = os.path.join(root, "governance", "state", "manifest.jsonl")
     records = []
     if os.path.exists(manifest_path):
@@ -277,10 +299,12 @@ def scan(root, repo, commit, now=None):
         "scanner_version": SCANNER_VERSION,
     }
 
-    def base(unit_id, kind, granularity, consumer, path):
+    def base(unit_id, kind, granularity, consumer, path, obs_repo=None,
+             obs_commit=None):
         return {
             "schema_version": "1", "run_id": run_id, "observed_at": observed_at,
-            "runtime": runtime, "repo": repo, "commit": commit,
+            "runtime": runtime, "repo": obs_repo or repo,
+            "commit": obs_commit or commit,
             "unit_id": unit_id, "granularity": granularity, "kind": kind,
             "consumer": consumer, "path": path,
             "change_policy": by_id[unit_id].get("change_policy"),
@@ -310,8 +334,26 @@ def scan(root, repo, commit, now=None):
         canon_norm = canonical_norm_hash_of_unit(root, by_id, unit_id)
         for c in rec.get("consumers", []):
             consumer, cpath = c.get("consumer"), c.get("path")
-            abs_path = os.path.join(root, cpath) if cpath else None
-            obs = base(unit_id, kind, "region", consumer, cpath)
+            crepo = c.get("repo")
+            if crepo and crepo != repo:
+                # cross-repo consumer (ADR 0030): resolve against a --satellite
+                # mapping, or SKIP - deliberately not drift/unknown, so
+                # satellite unreachability can never fail a local (hot) gate.
+                sat_root = (satellites or {}).get(crepo)
+                if sat_root is None:
+                    if skipped_out is not None:
+                        skipped_out.append({"unit_id": unit_id,
+                                            "consumer": consumer,
+                                            "repo": crepo, "path": cpath})
+                    continue
+                inst_root = sat_root
+                obs_repo = crepo
+                obs_commit = (satellite_commits or {}).get(crepo, "WORKTREE")
+            else:
+                inst_root, obs_repo, obs_commit = root, None, None
+            abs_path = os.path.join(inst_root, cpath) if cpath else None
+            obs = base(unit_id, kind, "region", consumer, cpath, obs_repo,
+                       obs_commit)
             if not abs_path or not os.path.exists(abs_path):
                 # located the registration but not the file -> indeterminate (F4).
                 obs.update(_unknown_region(canon_norm))
@@ -370,10 +412,34 @@ def main(argv=None):
                         help="observations dir root (default: <root>/governance/state/observations)")
     parser.add_argument("--stdout", action="store_true",
                         help="print observations to stdout instead of writing files")
+    parser.add_argument("--satellite", action="append", default=[],
+                        metavar="NAME=PATH",
+                        help="map a cross-repo consumer repo NAME to a local "
+                             "checkout PATH (repeatable; ADR 0030). Unmapped "
+                             "cross-repo consumers are skipped, not scanned.")
+    parser.add_argument("--satellite-commit", action="append", default=[],
+                        metavar="NAME=SHA",
+                        help="commit stamped on NAME's observations "
+                             "(repeatable; default WORKTREE)")
     args = parser.parse_args(argv)
     root = os.path.abspath(args.root)
 
-    rows = list(scan(root, args.repo, args.commit))
+    def _pairs(values, what):
+        out = {}
+        for v in values:
+            if "=" not in v:
+                parser.error("%s expects NAME=VALUE, got: %s" % (what, v))
+            name, val = v.split("=", 1)
+            out[name] = val
+        return out
+
+    satellites = {name: os.path.abspath(path) for name, path
+                  in _pairs(args.satellite, "--satellite").items()}
+    satellite_commits = _pairs(args.satellite_commit, "--satellite-commit")
+
+    skipped = []
+    rows = list(scan(root, args.repo, args.commit, satellites=satellites,
+                     satellite_commits=satellite_commits, skipped_out=skipped))
     lines = [_canonical_line(r) for r in rows]
 
     if args.stdout:
@@ -384,14 +450,26 @@ def main(argv=None):
         date = run_id[:4] + "-" + run_id[4:6] + "-" + run_id[6:8]
         out_root = args.out or os.path.join(root, "governance", "state",
                                             "observations")
-        out_dir = os.path.join(out_root, "repo=%s" % args.repo, "date=%s" % date)
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, "run-%s.jsonl" % run_id)
-        with open(out_path, "w", newline="\n") as handle:
-            for line in lines:
-                handle.write(line + "\n")
-        print("wrote %d observation(s) -> %s"
-              % (len(rows), os.path.relpath(out_path, root)))
+        # one file per observation repo (hive partition repo=<name>); a
+        # central-only run writes exactly the single file it always wrote.
+        by_repo = {}
+        for r, line in zip(rows, lines):
+            by_repo.setdefault(r["repo"], []).append(line)
+        for repo_name in sorted(by_repo):
+            out_dir = os.path.join(out_root, "repo=%s" % repo_name,
+                                   "date=%s" % date)
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, "run-%s.jsonl" % run_id)
+            with open(out_path, "w", newline="\n") as handle:
+                for line in by_repo[repo_name]:
+                    handle.write(line + "\n")
+            print("wrote %d observation(s) -> %s"
+                  % (len(by_repo[repo_name]), os.path.relpath(out_path, root)))
+
+    if skipped:
+        print("skipped %d cross-repo consumer instance(s) with no --satellite "
+              "mapping (repos: %s)"
+              % (len(skipped), ", ".join(sorted({s["repo"] for s in skipped}))))
 
     from collections import Counter
     counts = Counter(r["drift"] for r in rows)
