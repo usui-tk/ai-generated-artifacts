@@ -322,6 +322,8 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
+  # shellcheck source=../../lib/provision-test-env.sh
+  . "${PROJ_DIR}/lib/provision-test-env.sh"
   host_banner
   local ent_mounts; ent_mounts="$(acq_entitlement_mount_args "")"
   [ -n "${ent_mounts}" ] && log "entitlement passthrough: ${ent_mounts% }"
@@ -342,6 +344,12 @@ run_matrix() {
   log "sweep (Case A): majors=[${majors}] none=[${versions}] systemd-rep=[${systemd_versions}]"
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}"; continue; }
+    # Prepare the test environment: base image + the common package manifest,
+    # committed once per OS (mirrors the OL clean-core approach; e.g. gawk, which
+    # the minimal RHEL 6 base lacks and the ssm rpm %pretrans guard needs).
+    ref="$(provision_test_image "${major}" "${ref}" "${ent_mounts}")" \
+      || { log "skip RHEL${major}: test-env provisioning failed${PROVISION_LAST_ERR:+ - ${PROVISION_LAST_ERR}}"; continue; }
+    log "RHEL${major}: test-ready image ${ref}"
     for ver in ${versions}; do ssm_kick "${major}" "${ver}" none "${ref}" "${LOG_DIR}" "${rows_tmp}"; done
     for ver in ${systemd_versions}; do ssm_kick "${major}" "${ver}" systemd "${ref}" "${LOG_DIR}" "${rows_tmp}"; done
   done

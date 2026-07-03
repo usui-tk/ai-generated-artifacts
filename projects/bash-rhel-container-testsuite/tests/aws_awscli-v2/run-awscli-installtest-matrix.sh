@@ -340,6 +340,8 @@ run_matrix() {
   [ -f "${INSTALL_SCRIPT}" ] || { log "ERROR: install script missing: ${INSTALL_SCRIPT}"; return 2; }
   # shellcheck source=../../lib/acquire-rootfs.sh
   . "${PROJ_DIR}/lib/acquire-rootfs.sh"
+  # shellcheck source=../../lib/provision-test-env.sh
+  . "${PROJ_DIR}/lib/provision-test-env.sh"
   host_banner
   local ent_mounts; ent_mounts="$(acq_entitlement_mount_args "")"
   [ -n "${ent_mounts}" ] && log "entitlement passthrough: ${ent_mounts% }"
@@ -350,6 +352,10 @@ run_matrix() {
   rows_tmp="$(mktemp)"
   for major in ${majors}; do
     ref="$(acq_ref_for_major "${major}")" || { log "skip RHEL${major}: no ref"; continue; }
+    # Prepare the test environment (base + common package manifest, once per OS).
+    ref="$(provision_test_image "${major}" "${ref}" "${ent_mounts}")" \
+      || { log "skip RHEL${major}: test-env provisioning failed${PROVISION_LAST_ERR:+ - ${PROVISION_LAST_ERR}}"; continue; }
+    log "RHEL${major}: test-ready image ${ref}"
     while IFS= read -r ver; do
       [ -n "${ver}" ] || continue
       awscli_in_scope "${ver}" 0 || continue

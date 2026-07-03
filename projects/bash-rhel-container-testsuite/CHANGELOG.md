@@ -13,6 +13,44 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r33] - 2026-07-03 - feat: test-env provisioning step (per-OS "test-ready" image; mirrors the OL clean-core approach)
+
+### Added
+- **`lib/provision-test-env.sh`: a test-environment provisioning step, run
+  BETWEEN image acquisition and test execution across every L3 matrix.** A real
+  E2E run on an entitled host showed every SSM version failing on RHEL 6: the
+  minimal `rhel6/rhel` base image ships without `awk`, and the amazon-ssm-agent
+  rpm's `%pretrans` kernel-version guard calls `awk`, so the guard dies and the
+  install fails - a test-ENVIRONMENT gap, not a defect in the production
+  installer. Rather than patch the installer, the harness now prepares the
+  environment first, exactly like the Oracle-Linux sibling's clean-core pipeline
+  (build a curated image, then run the tests on it). `provision_test_image
+  <major> <base_ref> <ent_mounts>` installs a COMMON package manifest
+  (`PROVISION_PKGS`, default `gawk`) onto the base image and commits ONE
+  "test-ready" image per OS major
+  (`localhost/rhel-testsuite-provisioned:rhel<N>-<fingerprint>`), reused across
+  the whole version sweep. Idempotent: the tag embeds a fingerprint of the
+  manifest, so changing `PROVISION_PKGS` rebuilds automatically while an
+  unchanged manifest reuses the committed image. On failure the caller skips that
+  OS major with the real package-manager stderr (`PROVISION_LAST_ERR`), never a
+  masked one. Verified genchi-genbutsu on an OL6 base (an EL6 proxy): base ->
+  install `gawk` -> commit -> the SSM install then returns
+  `{"status":"ok","osmajor":"6","installed":true,"ran":true}`, where the bare
+  base died at the `%pretrans` awk guard.
+- **`tests/t021_provisionenv.sh`: L1 unit coverage** for the provisioning helper
+  (manifest-tag determinism + per-major / per-manifest fingerprinting, idempotent
+  reuse of an existing image, build+commit success, and real-stderr surfacing on
+  failure) via a hermetic PATH-mock `podman`. Suite: 21 tiers, 520 passed.
+
+### Changed
+- **All three L3 matrices (SSM Agent / AWS CLI v2 / ENA driver) now run against
+  the provisioned "test-ready" image**, not the raw vendor base: each resolves
+  its base ref via `acq_ref_for_major`, then swaps in `provision_test_image`
+  before its sweep. One COMMON image per OS serves every test case (not one image
+  per test), so a package any test needs is provisioned once and shared - and the
+  step is in place for RHEL 10/9/8/7/6 uniformly, ready for future manifest
+  additions (e.g. ENA build tooling) without touching a production installer.
+
 ## [r32] - 2026-07-03 - fix: SSM Agent install robustness (offline-first local rpm; real error surfacing)
 
 ### Fixed
