@@ -33,6 +33,17 @@
 #   anonymous -> skip (no kernel-devel)                  -> needs-entitlement
 #   any       -> load / runtime                          -> L4 (impossible in a container)
 #
+# ENA EXPRESS READINESS (driver-version floor only). Each ledger row and the
+# RESULTS-rhel<N>.md report additionally carry ena_express, the AWS-documented
+# driver-version floor classification (ena_express_verdict; ena-express.html:
+# >= 2.2.9 full bandwidth, >= 2.8.0 ena_srd_* metrics -> "express-ready"). This
+# is a pure function of ena_version, independent of the entitlement/build
+# axis - it is NOT an eligibility check. ENA Express is enabled per
+# network-interface attachment via the AWS API EnaSrdEnabled attribute
+# (unrelated to the guest OS) and gated by instance type; "meets the floor" is
+# necessary, not sufficient for a given kernel to actually compile against it
+# (see the OL sibling project's UEKR8 findings in its SPEC.md).
+#
 # Surfaces: NO-ARG (DEFAULT) runs the build matrix (all majors x entitlement),
 # persists the ledger, then regenerates RESULTS-rhel<N>.md (mirrors the OL model's
 # one-script workflow). Module load-readiness is a SEPARATE verify pass.
@@ -110,6 +121,26 @@ ena_verdict() {
 
 # ena_load_tier : module load is impossible in a container -> always L4.
 ena_load_tier() { printf 'L4'; }
+
+# ena_express_verdict <version> : classify a driver version against AWS's
+# documented ENA Express driver-version floors (ena-express.html): full
+# bandwidth potential at driver >= 2.2.9; ena_srd_* metrics reporting at
+# driver >= 2.8.0. Self-contained (no ena_ge dependency) so the unit
+# extracts and REUSE-BY-COPIES cleanly across this matrix, the lister, and
+# the installer - kept identical, verified by tests/t010_enaverdict.sh.
+# Pure function of the version only - NOT an eligibility check: ENA
+# Express itself is enabled via the AWS API EnaSrdEnabled ENI-attachment
+# attribute and gated by instance type (SPEC.md); a driver meeting the
+# floor is necessary, not sufficient (same caveat as ena_verdict's "ok").
+ena_express_verdict() {
+  local v="${1:-}" hi
+  [ -n "${v}" ] || { printf 'unknown'; return 0; }
+  hi="$(printf '%s\n2.8.0\n' "${v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+  if [ "${v}" = "2.8.0" ] || [ "${hi}" = "${v}" ]; then printf 'express-ready'; return 0; fi
+  hi="$(printf '%s\n2.2.9\n' "${v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+  if [ "${v}" = "2.2.9" ] || [ "${hi}" = "${v}" ]; then printf 'bandwidth-only'; return 0; fi
+  printf 'not-ready'
+}
 
 # --- releases.json + ledger readers ------------------------------------------
 
@@ -200,7 +231,8 @@ generate_results_for() {
     printf '| kernel-devel repo (entitled) | %s%s%s |\n' '`' "${repo}" '`'
     printf '| Build | %smake -C /usr/src/kernels/<kver> M=<src> modules%s (UEK removed) |\n' '`' '`'
     printf '| Newest ENA version | %s |\n' "${maxver:-unknown}"
-    printf '| In-scope versions (>= %s) | %s |\n\n' "${mn}" "$(releases_versions 2>/dev/null | while read -r v; do ena_ge "${v}" "${mn}" && echo x; done | grep -c x || printf '0')"
+    printf '| In-scope versions (>= %s) | %s |\n' "${mn}" "$(releases_versions 2>/dev/null | while read -r v; do ena_ge "${v}" "${mn}" && echo x; done | grep -c x || printf '0')"
+    printf '| ENA Express readiness (newest, driver capability only) | %s |\n\n' "$(ena_express_verdict "${maxver:-}")"
 
     printf '_Collected on (this run): %s_\n\n' "$(ledger_host_line)"
     printf '## E2%s entitlement grid (the ENA axis)\n\n' "'"
@@ -223,12 +255,13 @@ generate_results_for() {
     printf ' A build verdict of **ok** means the requested version compiled out of tree (necessary, not sufficient); real module load + device attach are proven separately on real Nitro. The optional DKMS path is EPEL-only (lib/epel.sh)._\n\n'
 
     printf '## per-version expectation (entitled; empirical filled by L3)\n\n'
-    printf '| version | >= min | build plan (entitled) | expected verdict |\n|:--|:--|:--|:--|\n'
+    printf '| version | >= min | ENA Express readiness | build plan (entitled) | expected verdict |\n|:--|:--|:--|:--|:--|\n'
     for v in "${maxver:-2.17.0}" "${mn}"; do
       [ -n "${v}" ] || continue
-      if ena_ge "${v}" "${mn}"; then printf '| %s | yes | make | ok (if compiles) |\n' "${v}"; else printf '| %s | no | make | ok (if compiles) |\n' "${v}"; fi
+      if ena_ge "${v}" "${mn}"; then printf '| %s | yes | %s | make | ok (if compiles) |\n' "${v}" "$(ena_express_verdict "${v}")"; else printf '| %s | no | %s | make | ok (if compiles) |\n' "${v}" "$(ena_express_verdict "${v}")"; fi
     done
     printf '\n_The entitled build target is the installed kernel-devel tree, not the host kernel._\n'
+    printf '\n_**ENA Express readiness** describes only the driver-version floor (AWS ena-express.html: >= 2.2.9 full bandwidth, >= 2.8.0 ena_srd_* metrics) - it is a driver-capability signal, necessary but not sufficient. ENA Express itself is enabled per network-interface attachment via the AWS API %sEnaSrdEnabled%s attribute, independent of the guest OS, and is further restricted to supported (Nitro) instance types. A build verdict of **ok** on a kernel this repository has not tested is not guaranteed - see the OL sibling project'"'"'s UEKR8 findings (SPEC.md) for why "meets the floor" and "compiles on this kernel" are separate questions._\n' '`' '`'
   } > "${out}"
   log "wrote ${out}"
 }
@@ -341,23 +374,23 @@ ena_kick() {
     reason="timed out after ${RUN_TIMEOUT:-600}s (container stalled; possible repo/network wait)"
     status=error
     log "RHEL${major} ${ver}/${ent}: TIMEOUT -> ${reason}"
-    row="$(printf '{"status":"error","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":false,"ko_version":"","verdict":"harness-error","load_tier":"%s","reason":"%s"}' \
-      "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "$(ena_load_tier)" "$(jesc "${reason}")")"
+    row="$(printf '{"status":"error","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":false,"ko_version":"","verdict":"harness-error","load_tier":"%s","ena_express":"%s","reason":"%s"}' \
+      "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "$(ena_load_tier)" "$(ena_express_verdict "${ver}")" "$(jesc "${reason}")")"
   elif [ -z "${line}" ]; then
     reason="$(python3 -c 'import sys,json; print(json.dumps(" ".join(open(sys.argv[1]).read().split()))[1:-1][:300])' "${err_tmp}" 2>/dev/null || true)"
     [ -n "${reason}" ] || reason="container produced no [result] and no stderr"
     status=error
     log "RHEL${major} ${ver}/${ent}: harness-error -> ${reason}"
-    row="$(printf '{"status":"error","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":false,"ko_version":"","verdict":"harness-error","load_tier":"%s","reason":"%s"}' \
-      "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "$(ena_load_tier)" "${reason}")"
+    row="$(printf '{"status":"error","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":false,"ko_version":"","verdict":"harness-error","load_tier":"%s","ena_express":"%s","reason":"%s"}' \
+      "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "$(ena_load_tier)" "$(ena_express_verdict "${ver}")" "${reason}")"
   else
     built="$(result_field "${line}" built)"; [ "${built}" = "true" ] || built=false
     status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
     kov="$(result_field "${line}" ko_version)"
     reason="$(jesc "$(result_field "${line}" reason)")"
-    row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s","reason":"%s"}' \
+    row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s","ena_express":"%s","reason":"%s"}' \
       "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" \
-      "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)" "${reason}")"
+      "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)" "$(ena_express_verdict "${ver}")" "${reason}")"
   fi
   if [ "${status}" != "ok" ]; then
     mkdir -p "${log_dir}"

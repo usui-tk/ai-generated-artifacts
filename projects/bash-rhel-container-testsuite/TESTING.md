@@ -205,11 +205,15 @@ so results are host-independent and deterministic.
   `rhel_glibc`, `ssm_in_scope`, `ssm_compliance`, `ssm_init_outcome`,
   `ssm_verdict`) and the matrix/lister `ssm_ge` reuse-by-copy. Covers the
   init_mode axis (none -> version-only, systemd -> service-capable).
-* **`t010_enaverdict.sh`** (Phase 5) - the ENA build-test matrix's pure helpers
-  (`ena_ge`, `ena_kdevel_repo`, `ena_in_scope`, `ena_build_plan`, `ena_verdict`,
-  `ena_load_tier`) and the matrix/lister `ena_ge` reuse-by-copy. Covers the E2'
-  entitlement verdict (entitled -> ok/build-fail; anonymous -> needs-entitlement;
-  load -> L4).
+* **`t010_enaverdict.sh`** (Phase 5, r31) - the ENA build-test matrix's pure
+  helpers (`ena_ge`, `ena_kdevel_repo`, `ena_in_scope`, `ena_build_plan`,
+  `ena_verdict`, `ena_load_tier`, `ena_express_verdict`) and the reuse-by-copy
+  consistency of `ena_ge` (matrix/lister) and `ena_express_verdict`
+  (matrix/lister/installer). Covers the E2' entitlement verdict (entitled ->
+  ok/build-fail; anonymous -> needs-entitlement; load -> L4) and the ENA
+  Express driver-version-floor readiness (`< 2.2.9` -> not-ready, `>= 2.2.9`
+  -> bandwidth-only, `>= 2.8.0` -> express-ready; AWS ena-express.html - a
+  driver-capability signal only, independent of the entitlement axis).
 * **`t011_enaverify.sh`** (Phase 5) - the read-only verifier's load-readiness
   gates `ena_vermagic_verdict` (L4a) and `ena_symbols_verdict` (L4b CRC/kABI),
   loaded with `ENA_LIB_ONLY=1` so only the pure helpers run.

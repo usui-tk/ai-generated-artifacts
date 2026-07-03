@@ -13,6 +13,51 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r31] - 2026-07-03 - feat: ENA Express driver-version-floor readiness (aws_ena-driver)
+
+### Added
+- **`ena_express_verdict()` - ENA Express driver-version-floor classification.**
+  A new pure, entitlement-independent verdict helper classifying a given ENA
+  driver version against AWS's documented ENA Express driver-version floors
+  (`ena-express.html`): `< 2.2.9` -> `not-ready`, `>= 2.2.9` -> `bandwidth-only`
+  (full bandwidth, no `ena_srd_*` metrics), `>= 2.8.0` -> `express-ready` (both).
+  REUSE-BY-COPY, kept identical across the three producers (verified by an
+  extended `tests/t010_enaverdict.sh`, now covering the matrix/lister/installer
+  triple, not just matrix/lister as before):
+  - `tests/aws_ena-driver/run-ena-buildtest-matrix.sh` (source of truth) - the
+    matrix computes the verdict itself from the requested version (never
+    trusting a container's self-report); the ledger row gains an `ena_express`
+    field, and `RESULTS-rhel<N>.md` gains a header field and a per-version
+    expectation column (regenerated for real via `--generate-results`; all
+    five reports currently show `express-ready` at each major's pinned/newest
+    version).
+  - `tests/aws_ena-driver/list-ena-releases.sh` - each entry in
+    `ena-driver-releases.json` gains `express_verdict` alongside the existing
+    `ge_min` (regenerated for real via a live `git ls-remote`; the 70-version,
+    `ge_min`-only content is otherwise byte-identical to the prior commit).
+  - `install-aws_ena-driver.sh` (production script) - the same helper is
+    carried into the production installer itself, so a real build (or its
+    `[result]` JSON in test mode, across the ok / anonymous / `die` fail
+    paths) reports `ena_express` directly, and the production-mode install
+    log line states the readiness alongside the installed `ena.ko` version.
+- **Explicit necessary-not-sufficient caveat.** `ena_express_verdict` is a
+  driver-capability signal only: ENA Express itself is enabled per
+  network-interface attachment via the AWS API `EnaSrdEnabled` attribute
+  (unrelated to the guest OS or this repository) and gated by instance type;
+  "meets the floor" does not guarantee a given kernel actually compiles
+  against that driver version (the OL sibling project's UEKR8 findings -
+  `2.8.0` failing to compile against a newer kernel baseline - are cited in
+  both `SPEC.md` and the generated `RESULTS-rhel<N>.md` as the cautionary
+  precedent). Applies uniformly across all five RHEL majors (6-10): the
+  verdict is a pure function of the version only and does not gate on OS
+  major, since ENA Express eligibility is an instance-type property, not a
+  RHEL-major property.
+
+### Changed
+- Suite green: 20 tiers, **499 passed** (up from 478; +21 in `t010_enaverdict.sh`
+  for the new boundary-value and reuse-by-copy-triple coverage), 0 failed.
+  `README.md`/`README.ja.md` counts updated in lock-step.
+
 ## [r30] - 2026-07-02 - docs: doc-set reconstruction to the template canon (B2 docs pass)
 
 Docs half of the B2 canon-alignment arc (code half: r28; the CWD fix: r29).

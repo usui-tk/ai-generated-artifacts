@@ -13,6 +13,7 @@
 | Build | `make -C /usr/src/kernels/<kver> M=<src> modules` (UEK removed) |
 | Newest ENA version | 2.17.0 |
 | In-scope versions (>= 2.8.0) | 29 |
+| ENA Express readiness (newest, driver capability only) | express-ready |
 
 _Collected on (this run): (not yet run)_
 
@@ -27,9 +28,11 @@ _Module load + device attach is always **L4** (impossible in a container). A bui
 
 ## per-version expectation (entitled; empirical filled by L3)
 
-| version | >= min | build plan (entitled) | expected verdict |
-|:--|:--|:--|:--|
-| 2.17.0 | yes | make | ok (if compiles) |
-| 2.8.0 | yes | make | ok (if compiles) |
+| version | >= min | ENA Express readiness | build plan (entitled) | expected verdict |
+|:--|:--|:--|:--|:--|
+| 2.17.0 | yes | express-ready | make | ok (if compiles) |
+| 2.8.0 | yes | express-ready | make | ok (if compiles) |
 
 _The entitled build target is the installed kernel-devel tree, not the host kernel._
+
+_**ENA Express readiness** describes only the driver-version floor (AWS ena-express.html: >= 2.2.9 full bandwidth, >= 2.8.0 ena_srd_* metrics) - it is a driver-capability signal, necessary but not sufficient. ENA Express itself is enabled per network-interface attachment via the AWS API `EnaSrdEnabled` attribute, independent of the guest OS, and is further restricted to supported (Nitro) instance types. A build verdict of **ok** on a kernel this repository has not tested is not guaranteed - see the OL sibling project's UEKR8 findings (SPEC.md) for why "meets the floor" and "compiles on this kernel" are separate questions._

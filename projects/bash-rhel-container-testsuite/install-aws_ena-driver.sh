@@ -2,7 +2,10 @@
 # ----- Purpose --------------------------------------------------------------
 #   Build (and optionally install) the Amazon ENA network driver from source
 #   against the container/host kernel-devel tree; in test mode, emit a
-#   single-line [result] JSON (ok / build-fail / needs-entitlement).
+#   single-line [result] JSON (ok / build-fail / needs-entitlement). The
+#   result also reports the ENA Express driver-version-floor readiness
+#   (express-ready / bandwidth-only / not-ready) - a driver-capability
+#   signal only; see the ena_express_verdict() helper for the full caveat.
 # ----- Prerequisites --------------------------------------------------------
 #   bash 4+, curl, tar; gcc/make + kernel-devel (entitled repos in containers);
 #   network to github.com for the ENA source archive.
@@ -47,6 +50,17 @@
 #       ENA_BUILD_PLAN  (make|dkms; default make)
 #       ENA_SRC_BASEURL (default https://github.com/amzn/amzn-drivers)
 #       INSECURE_TLS    (0|1; default 0)
+#
+# ENA EXPRESS READINESS ("ena_express" in the [result] JSON, and in the
+# production-mode install log line). Pure function of ENA_VERSION via
+# ena_express_verdict() (AWS ena-express.html: >= 2.2.9 full bandwidth,
+# >= 2.8.0 ena_srd_* metrics -> "express-ready"). REUSE-BY-COPY of
+# tests/aws_ena-driver/run-ena-buildtest-matrix.sh's helper, kept identical
+# (tests/t010_enaverdict.sh). NOT an eligibility check: ENA Express is
+# enabled via the AWS API EnaSrdEnabled ENI-attachment attribute, unrelated
+# to this script, and gated by instance type - meeting the floor is
+# necessary, not sufficient (a "built":true build already carries the same
+# necessary-not-sufficient caveat for module load, which is always L4 here).
 #==============================================================================
 set -euo pipefail
 
@@ -153,8 +167,8 @@ die() {
   log "ERROR: $*"
   if [ "${ENA_INSTALLTEST}" = "1" ] && [ "${RESULT_EMITTED}" = "0" ]; then
     RESULT_EMITTED=1
-    printf '[aws_ena-driver][installtest][result] {"status":"fail","tool":"aws_ena-driver","osmajor":"%s","ena_version":"%s","entitlement":"%s","build_plan":"%s","kver":"%s","built":%s,"ko_version":"%s","reason":"%s"}\n' \
-      "${OSMAJOR}" "${ENA_VERSION}" "${ENA_ENTITLEMENT}" "${ENA_BUILD_PLAN}" "${KVER}" "${BUILT}" "${KO_VERSION}" "$(json_escape "$*")"
+    printf '[aws_ena-driver][installtest][result] {"status":"fail","tool":"aws_ena-driver","osmajor":"%s","ena_version":"%s","entitlement":"%s","build_plan":"%s","kver":"%s","built":%s,"ko_version":"%s","ena_express":"%s","reason":"%s"}\n' \
+      "${OSMAJOR}" "${ENA_VERSION}" "${ENA_ENTITLEMENT}" "${ENA_BUILD_PLAN}" "${KVER}" "${BUILT}" "${KO_VERSION}" "$(ena_express_verdict "${ENA_VERSION}")" "$(json_escape "$*")"
   fi
   exit 1
 }
@@ -223,6 +237,24 @@ resolve_version() {
   esac
 }
 
+# ena_express_verdict <version> : AWS ENA Express driver-version floor
+# (ena-express.html: >= 2.2.9 full bandwidth, >= 2.8.0 ena_srd_* metrics).
+# REUSE-BY-COPY of the tests/aws_ena-driver/run-ena-buildtest-matrix.sh
+# helper; kept identical - verified by tests/t010_enaverdict.sh. Pure
+# function of ENA_VERSION only - NOT an eligibility check: ENA Express is
+# enabled via the AWS API EnaSrdEnabled ENI-attachment attribute (unrelated
+# to this script) and gated by instance type; meeting the floor is
+# necessary, not sufficient (a build "ok" already carries the same caveat).
+ena_express_verdict() {
+  local v="${1:-}" hi
+  [ -n "${v}" ] || { printf 'unknown'; return 0; }
+  hi="$(printf '%s\n2.8.0\n' "${v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+  if [ "${v}" = "2.8.0" ] || [ "${hi}" = "${v}" ]; then printf 'express-ready'; return 0; fi
+  hi="$(printf '%s\n2.2.9\n' "${v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+  if [ "${v}" = "2.2.9" ] || [ "${hi}" = "${v}" ]; then printf 'bandwidth-only'; return 0; fi
+  printf 'not-ready'
+}
+
 # Tests source this script for the pure pin/resolver/introspection logic without
 # building: ENA_LIB_ONLY=1 stops here, after the helpers + per-major pins.
 [ "${ENA_LIB_ONLY:-0}" = "1" ] && return 0 2>/dev/null
@@ -237,8 +269,8 @@ resolve_version
 if [ "${ENA_ENTITLEMENT}" = "anonymous" ]; then
   if [ "${ENA_INSTALLTEST}" = "1" ]; then
     RESULT_EMITTED=1
-    printf '[aws_ena-driver][installtest][result] {"status":"ok","tool":"aws_ena-driver","osmajor":"%s","ena_version":"%s","entitlement":"anonymous","build_plan":"%s","kver":"","built":false,"ko_version":"","reason":"no kernel-devel (anonymous) -> needs-entitlement"}\n' \
-      "${OSMAJOR}" "${ENA_VERSION}" "${ENA_BUILD_PLAN}"
+    printf '[aws_ena-driver][installtest][result] {"status":"ok","tool":"aws_ena-driver","osmajor":"%s","ena_version":"%s","entitlement":"anonymous","build_plan":"%s","kver":"","built":false,"ko_version":"","ena_express":"%s","reason":"no kernel-devel (anonymous) -> needs-entitlement"}\n' \
+      "${OSMAJOR}" "${ENA_VERSION}" "${ENA_BUILD_PLAN}" "$(ena_express_verdict "${ENA_VERSION}")"
     exit 0
   fi
   die "anonymous: kernel-devel unavailable; cannot build (needs entitlement)"
@@ -271,14 +303,14 @@ fi
 
 if [ "${ENA_INSTALLTEST}" = "1" ]; then
   RESULT_EMITTED=1
-  printf '[aws_ena-driver][installtest][result] {"status":"ok","tool":"aws_ena-driver","osmajor":"%s","ena_version":"%s","entitlement":"%s","build_plan":"%s","kver":"%s","built":%s,"ko_version":"%s"}\n' \
-    "${OSMAJOR}" "${ENA_VERSION}" "${ENA_ENTITLEMENT}" "${ENA_BUILD_PLAN}" "${KVER}" "${BUILT}" "${KO_VERSION}"
+  printf '[aws_ena-driver][installtest][result] {"status":"ok","tool":"aws_ena-driver","osmajor":"%s","ena_version":"%s","entitlement":"%s","build_plan":"%s","kver":"%s","built":%s,"ko_version":"%s","ena_express":"%s"}\n' \
+    "${OSMAJOR}" "${ENA_VERSION}" "${ENA_ENTITLEMENT}" "${ENA_BUILD_PLAN}" "${KVER}" "${BUILT}" "${KO_VERSION}" "$(ena_express_verdict "${ENA_VERSION}")"
   [ -n "${BUILT_DEST}" ] && rm -rf "${BUILT_DEST}"
   exit 0
 fi
 
 # --- production mode: install the freshly built module ------------------------
-log "installing ena.ko ${KO_VERSION:-?} for kernel ${KVER}"
+log "installing ena.ko ${KO_VERSION:-?} for kernel ${KVER} (ENA Express: $(ena_express_verdict "${ENA_VERSION}"))"
 make -C "/usr/src/kernels/${KVER}" "M=${BUILT_SRC}" modules_install >/dev/null 2>&1 || die "modules_install failed"
 depmod -a "${KVER}" || true
 [ -n "${BUILT_DEST}" ] && rm -rf "${BUILT_DEST}"

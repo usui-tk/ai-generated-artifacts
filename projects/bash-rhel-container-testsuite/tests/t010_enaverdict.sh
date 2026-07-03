@@ -19,8 +19,9 @@
 # Loads ONLY the matrix's pure helpers (each extracted from its column-0
 # definition to the first column-0 `}`) and asserts the E2' logic:
 #   ena_ge / ena_kdevel_repo / ena_in_scope / ena_build_plan / ena_verdict /
-#   ena_load_tier
-# Plus the reuse-by-copy invariant: list-ena-releases.sh carries its own ena_ge,
+#   ena_load_tier / ena_express_verdict
+# Plus the reuse-by-copy invariant: list-ena-releases.sh and
+# install-aws_ena-driver.sh each carry their own ena_ge / ena_express_verdict,
 # which must match the matrix's.
 #==============================================================================
 set -uo pipefail
@@ -31,14 +32,16 @@ PROJ="$(cd "${HERE}/.." && pwd)"
 . "${HERE}/lib/assert.sh"
 MATRIX="${PROJ}/tests/aws_ena-driver/run-ena-buildtest-matrix.sh"
 LISTER="${PROJ}/tests/aws_ena-driver/list-ena-releases.sh"
+INSTALLER="${PROJ}/install-aws_ena-driver.sh"
 
-for fn in ena_ge ena_kdevel_repo ena_in_scope ena_build_plan ena_verdict ena_load_tier; do
+for fn in ena_ge ena_kdevel_repo ena_in_scope ena_build_plan ena_verdict ena_load_tier ena_express_verdict; do
   # shellcheck disable=SC1090
   . <(sed -n "/^${fn}()/,/^}/p" "${MATRIX}")
 done
 
 if ! declare -F ena_ge >/dev/null 2>&1 || ! declare -F ena_verdict >/dev/null 2>&1 \
-   || ! declare -F ena_build_plan >/dev/null 2>&1 || ! declare -F ena_kdevel_repo >/dev/null 2>&1; then
+   || ! declare -F ena_build_plan >/dev/null 2>&1 || ! declare -F ena_kdevel_repo >/dev/null 2>&1 \
+   || ! declare -F ena_express_verdict >/dev/null 2>&1; then
   t_fail "could not load the pure helpers from run-ena-buildtest-matrix.sh"
   t_done; exit
 fi
@@ -78,7 +81,17 @@ assert_eq "build-fail"        "$(ena_verdict entitled false)"  "entitled + not b
 # --- ena_load_tier: load is always L4 ---------------------------------------
 assert_eq "L4" "$(ena_load_tier)" "module load -> always L4"
 
-# --- reuse-by-copy: list-ena-releases.sh ena_ge matches the matrix ----------
+# --- ena_express_verdict: AWS ENA Express driver-version floors -------------
+# (ena-express.html: >= 2.2.9 full bandwidth, >= 2.8.0 ena_srd_* metrics)
+assert_eq "not-ready"      "$(ena_express_verdict 2.2.8)"  "express: 2.2.8 -> not-ready"
+assert_eq "bandwidth-only" "$(ena_express_verdict 2.2.9)"  "express: 2.2.9 -> bandwidth-only (boundary)"
+assert_eq "bandwidth-only" "$(ena_express_verdict 2.7.9)"  "express: 2.7.9 -> bandwidth-only"
+assert_eq "express-ready"  "$(ena_express_verdict 2.8.0)"  "express: 2.8.0 -> express-ready (boundary)"
+assert_eq "express-ready"  "$(ena_express_verdict 2.17.0)" "express: 2.17.0 -> express-ready"
+assert_eq "not-ready"      "$(ena_express_verdict 1.6.0)"  "express: 1.6.0 -> not-ready"
+assert_eq "unknown"        "$(ena_express_verdict '')"     "express: empty -> unknown"
+
+# --- reuse-by-copy: list-ena-releases.sh ena_ge / ena_express_verdict ------
 if [ -f "${LISTER}" ]; then
   # shellcheck disable=SC1090
   . <(sed -n '/^ena_ge()/,/^}/p' "${LISTER}" | sed 's/^ena_ge()/ena_ge_list()/')
@@ -91,6 +104,28 @@ if [ -f "${LISTER}" ]; then
     done
   else
     t_fail "could not load ena_ge from list-ena-releases.sh"
+  fi
+  # shellcheck disable=SC1090
+  . <(sed -n '/^ena_express_verdict()/,/^}/p' "${LISTER}" | sed 's/^ena_express_verdict()/ena_express_verdict_list()/')
+  if declare -F ena_express_verdict_list >/dev/null 2>&1; then
+    for v in 2.2.8 2.2.9 2.7.9 2.8.0 2.17.0 1.6.0 ""; do
+      assert_eq "$(ena_express_verdict "${v}")" "$(ena_express_verdict_list "${v}")" "lister ena_express_verdict matches matrix for '${v}'"
+    done
+  else
+    t_fail "could not load ena_express_verdict from list-ena-releases.sh"
+  fi
+fi
+
+# --- reuse-by-copy: install-aws_ena-driver.sh ena_express_verdict ----------
+if [ -f "${INSTALLER}" ]; then
+  # shellcheck disable=SC1090
+  . <(sed -n '/^ena_express_verdict()/,/^}/p' "${INSTALLER}" | sed 's/^ena_express_verdict()/ena_express_verdict_install()/')
+  if declare -F ena_express_verdict_install >/dev/null 2>&1; then
+    for v in 2.2.8 2.2.9 2.7.9 2.8.0 2.17.0 1.6.0 ""; do
+      assert_eq "$(ena_express_verdict "${v}")" "$(ena_express_verdict_install "${v}")" "installer ena_express_verdict matches matrix for '${v}'"
+    done
+  else
+    t_fail "could not load ena_express_verdict from install-aws_ena-driver.sh"
   fi
 fi
 

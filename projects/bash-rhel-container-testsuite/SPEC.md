@@ -464,7 +464,16 @@ the README section [Adding a tool](./README.md#adding-a-tool).
   major when entitled). Default is the plain-`make` fallback
   (`make -C /usr/src/kernels/<kver> M=$PWD modules`); DKMS is an optional EPEL
   path. All Oracle **UEK** detection is removed; target is the stock RHEL kernel.
-  Anonymous -> `needs-entitlement`; load/runtime -> L4.
+  Anonymous -> `needs-entitlement`; load/runtime -> L4. **ENA Express readiness**
+  (r31, `ena_express_verdict`) additionally classifies `ena_version` against
+  AWS's documented driver-version floors (`ena-express.html`: `>= 2.2.9` full
+  bandwidth, `>= 2.8.0` `ena_srd_*` metrics) - a pure, entitlement-independent
+  driver-capability signal carried on the ledger row, the RESULTS report, and
+  the installer's `[result]` JSON. It is **not** an eligibility check: ENA
+  Express is enabled per network-interface attachment via the AWS API
+  `EnaSrdEnabled` attribute (outside this repository's scope) and gated by
+  instance type, and "meets the floor" does not guarantee the driver compiles
+  against an untested kernel (see the OL sibling project's UEKR8 findings).
 
 ---
 

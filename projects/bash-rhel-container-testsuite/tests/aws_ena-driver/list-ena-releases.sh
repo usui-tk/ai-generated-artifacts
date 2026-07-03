@@ -35,6 +35,12 @@
 # window; --full (in the matrix) covers all. Computed locally by ena_ge() - a
 # REUSE-BY-COPY of the matrix helper, kept identical, verified by t010_enaverdict.sh.
 #
+# ENA EXPRESS READINESS: each version entry also carries express_verdict, the
+# AWS-documented driver-version floor classification (ena_express_verdict();
+# ena-express.html: >= 2.2.9 full bandwidth, >= 2.8.0 ena_srd_* metrics ->
+# "express-ready"). Driver-capability signal only, independent of ge_min -
+# NOT an eligibility check (see the matrix header for the full caveat).
+#
 # DETERMINISTIC OUTPUT: no timestamp embedded.
 #
 # Usage:   bash tests/aws_ena-driver/list-ena-releases.sh [output.json]
@@ -62,6 +68,20 @@ ena_ge() {
   [ "${a}" = "${b}" ] && return 0
   hi="$(printf '%s\n%s\n' "${a}" "${b}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
   [ "${hi}" = "${a}" ]
+}
+
+# ena_express_verdict <version> : AWS ENA Express driver-version floor
+# (ena-express.html: >= 2.2.9 full bandwidth, >= 2.8.0 ena_srd_* metrics).
+# REUSE-BY-COPY of the matrix helper; kept identical - verified by
+# tests/t010_enaverdict.sh. See the matrix for the full rationale/caveat.
+ena_express_verdict() {
+  local v="${1:-}" hi
+  [ -n "${v}" ] || { printf 'unknown'; return 0; }
+  hi="$(printf '%s\n2.8.0\n' "${v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+  if [ "${v}" = "2.8.0" ] || [ "${hi}" = "${v}" ]; then printf 'express-ready'; return 0; fi
+  hi="$(printf '%s\n2.2.9\n' "${v}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)"
+  if [ "${v}" = "2.2.9" ] || [ "${hi}" = "${v}" ]; then printf 'bandwidth-only'; return 0; fi
+  printf 'not-ready'
 }
 
 log "fetching ENA driver tags from ${ENA_REPO_URL} (git ls-remote --tags)"
@@ -93,7 +113,8 @@ TMP="$(mktemp)"; trap 'rm -f "${TMP}"' EXIT
     if ena_ge "${v}" "${ENA_MIN}"; then ge='true'; else ge='false'; fi
     [ "${first}" = "1" ] || printf ',\n'
     first=0
-    printf '    {"version": "%s", "tag": "ena_linux_%s", "ge_min": %s}' "${v}" "${v}" "${ge}"
+    printf '    {"version": "%s", "tag": "ena_linux_%s", "ge_min": %s, "express_verdict": "%s"}' \
+      "${v}" "${v}" "${ge}" "$(ena_express_verdict "${v}")"
   done <<< "${versions}"
   printf '\n  ]\n}\n'
 } > "${TMP}"
