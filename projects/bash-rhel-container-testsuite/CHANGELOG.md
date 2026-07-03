@@ -13,6 +13,28 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r35] - 2026-07-03 - docs: document the test-env provisioning foundation in SPEC + TESTING
+
+### Documentation
+- **SPEC.md now specifies the test-env provisioning step (r33) as a first-class
+  part of the environment contract.** New **B.6.1** (acquisition -> provision ->
+  test; the common per-OS "test-ready" image; `PROVISION_PKGS`; EL6 needs the
+  entitled `rhel-6` repos). **B.9** is corrected: the OL clean-core idea is not
+  simply dropped - L2 now adds a minimal provisioning step
+  (`lib/provision-test-env.sh`) on top of the L1 pull, a targeted port rather
+  than a from-scratch rootfs build. **B.13** records the growth path - a tool
+  needing a base package the vendor image lacks extends the common
+  `PROVISION_PKGS` manifest, not a production installer.
+- **SPEC.md B.11 documents the r34 `unavailable` status** for versions whose S3
+  rpm is unpublished (403/404) - a distinct terminal state, not `install-fail`.
+- **TESTING.md gains a "Test-environment provisioning" section** (the L2
+  methodology + why EL6 needs it) and adds the two new tiers `t021` (provisioning)
+  and `t022` (unavailable) to the L1/L2 contract. The recorded baseline is
+  refreshed to the current suite (22 tiers, 539 passed; 45 shell files, 6
+  libraries).
+
+No code or test change; suite unchanged at 22 tiers / 539 passed.
+
 ## [r34] - 2026-07-03 - feat: SSM Agent "unavailable" status for versions whose rpm is unpublished at S3
 
 ### Added

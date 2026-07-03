@@ -316,6 +316,34 @@ The TLS-interception caveat (`INSECURE_TLS=1` -> `--setopt=sslverify=0`) is
 **sandbox-specific** and unnecessary on a real host; the helpers expose it as a
 switch (sandbox = 1, trusted host = 0).
 
+#### B.6.1 Test-environment provisioning (acquisition -> provision -> test, r33)
+
+Acquisition yields a *base* image; it is **not assumed test-ready**. The minimal
+vendor images are curated but not complete for every major - notably RHEL 6
+(`rhel6/rhel`) ships without `awk`, which the amazon-ssm-agent rpm's `%pretrans`
+kernel guard calls, so a bare EL6 install dies before it starts. The harness
+therefore inserts a **provisioning step between acquisition and test**:
+
+```
+acquire base image (L1) -> provision a "test-ready" image (L2) -> run tests (L3)
+```
+
+`lib/provision-test-env.sh` installs a **common package manifest**
+(`PROVISION_PKGS`, default `gawk`) onto the base and commits ONE "test-ready"
+image per OS major (`localhost/rhel-testsuite-provisioned:rhel<N>-<fingerprint>`),
+reused across the whole sweep. The tag embeds a fingerprint of the manifest, so a
+changed manifest rebuilds automatically while an unchanged one reuses the commit
+(idempotent). The manifest is **COMMON across all tools** - one image per OS, not
+one per test - so every matrix (SSM / AWS CLI v2 / ENA) resolves its base ref,
+then swaps in the provisioned ref before its sweep. Provisioning installs from
+the container's own repos: public UBI for RHEL 7-10; the **entitled `rhel-6`
+repos (via the passthrough) for EL6**, per the B.6 §3.1 "no anonymous repos"
+fact - so an EL6 provision needs an EL6-entitled subscription. On failure the
+caller skips that major with the real package-manager error (`PROVISION_LAST_ERR`),
+never a masked one. This is the RHEL analogue of the OL sibling's clean-core
+builder (see B.9), and the common manifest is the extension point for future
+tests (B.13). Covered by `tests/t021_provisionenv.sh`.
+
 ---
 
 ## B.7 The two first-class axes
@@ -390,9 +418,14 @@ L3  Tool under test                               <- AWS CLI v2 / SSM Agent / EN
     Compatibility matrix runner                   <- ledger (JSON) + RESULTS-rhel<N>.md
 ```
 
-Red Hat ships the curated base, so **L1 is a pull, not a build**: the model
-project's `tests/cleancore/` does not port; it is replaced by
-`lib/acquire-rootfs.sh`.
+Red Hat ships a curated base, so **L1 is a pull, not a build**
+(`lib/acquire-rootfs.sh` replaces the model project's from-scratch
+`tests/cleancore/` builder). The base is **not assumed complete**, however: as of
+r33 **L2 adds a minimal provisioning step** (`lib/provision-test-env.sh`) that
+installs a common package manifest onto the pulled base and commits a per-OS
+"test-ready" image - a targeted port of the clean-core idea ("prepare the image
+before testing", e.g. `gawk` for the EL6 ssm `%pretrans` guard) rather than a
+whole-rootfs build. See B.6.1.
 
 | Tier | Checks | Where | Run by |
 |:--|:--|:--|:--|
@@ -494,6 +527,15 @@ one call - e.g. `aws_ena-driver` -> `kernel-devel` -> `entitled-only` ->
 `needs-entitlement` (matching `ena_verdict`); `aws_awscli-v2` -> `awscli-bundle`
 -> `vendor-hosted` -> `installable`. Covered by `tests/t014_pkgavail.sh`.
 
+**Unpublished vendor artifacts (r34).** A vendor-hosted artifact can be *listed*
+yet *undistributed*: some SSM Agent versions carry a git tag but their S3 rpm
+returns HTTP 403/404 (never published). The matrix HEAD-checks each in-scope
+version once (the rpm is version-global) and records a 403/404 as a distinct
+`unavailable` status/verdict in the ledger and RESULTS - a correct terminal
+state, **not `install-fail`** (000/5xx stay transient errors to surface). This
+mirrors the OL sibling's undistributed-version handling. Covered by
+`tests/t022_ssmunavailable.sh`.
+
 **EPEL (`lib/epel.sh`).** RHEL has no vendor EPEL, and Fedora's default metalink
 is non-deterministic (returns off-allow-list mirrors). Therefore pin to
 `dl.fedoraproject.org` with an explicit `baseurl`, metalink/mirrorlist disabled,
@@ -525,6 +567,11 @@ The fill-in-the-blanks procedure for tool #2 lives in the README section
 [Adding a tool](./README.md#adding-a-tool) (Japanese mirror in
 [README.ja.md](./README.ja.md)); the machine-enforced contract it fills is B.10
 (checked by `tests/conformance/check-tool-contract.sh`, tier `t013`).
+
+A tool that needs a base package the vendor image lacks extends the **common
+`PROVISION_PKGS` manifest** (B.6.1) rather than touching a production installer:
+the per-OS "test-ready" image is shared, so the package is provisioned once for
+every tool. This is the intended growth path as the tool set expands.
 
 ---
 

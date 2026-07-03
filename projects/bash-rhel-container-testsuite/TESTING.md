@@ -53,6 +53,34 @@ deferred.
 
 ---
 
+## Test-environment provisioning (L2, r33)
+
+The vendor base image is a *starting point*, not a ready-made test platform.
+Between acquisition (L1) and the test (L3), the harness provisions a per-OS
+"test-ready" image: `lib/provision-test-env.sh` installs a **common package
+manifest** (`PROVISION_PKGS`, default `gawk`) onto the base and commits ONE image
+per OS major, reused across the sweep (idempotent - the image tag embeds a
+fingerprint of the manifest, so a changed manifest rebuilds and an unchanged one
+reuses the commit). The manifest is common to every tool - one image per OS, not
+one per test - so the three L3 matrices resolve their base ref, then run against
+the provisioned ref.
+
+It exists because the minimal images are not complete for every major: RHEL 6
+(`rhel6/rhel`) ships without `awk`, which the amazon-ssm-agent rpm's `%pretrans`
+guard calls, so a bare EL6 install fails before it starts. Provisioning pulls the
+package from the container's own repos (public UBI for 7-10; the entitled
+`rhel-6` repos for EL6, so EL6 needs an entitled subscription); on failure the
+major is skipped with the real package-manager error.
+
+This is the base point for **future test expansion**: a new test that needs
+another base package extends `PROVISION_PKGS`, not a production installer.
+Hermetically unit-covered by `tests/t021_provisionenv.sh` (a PATH-mock `podman`:
+tag/fingerprint determinism, idempotent reuse, build+commit, real stderr on
+failure); the real `podman commit` flow runs in the L3 matrices on an entitled
+host. Spec: SPEC.md B.6.1 / B.9.
+
+---
+
 ## Running the suite
 
 ```bash
@@ -63,7 +91,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 129 passed, 0 skipped, 0 failed  (7 tiers, 0 tier-failure(s))
+SUITE: 539 passed, 0 skipped, 0 failed  (22 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -72,6 +100,7 @@ Run a single tier directly (its exit status reflects pass/fail):
 bash tests/t001_parse.sh        # L0 parse
 bash tests/t003_acquireunit.sh  # L1 acquisition unit
 bash tests/t007_epelresolve.sh  # L1 EPEL resolution unit
+bash tests/t021_provisionenv.sh # L1 test-env provisioning unit
 ```
 
 The L3 integration matrices are **not** invoked by `run-all.sh`. Run them per
@@ -264,6 +293,18 @@ so results are host-independent and deterministic.
   `os_major`) are byte-identical across all three install scripts, so a fix
   applied to one copy that drifts from the others fails the suite.
 
+* **`t021_provisionenv.sh`** (r33) - the test-env provisioning helper
+  `lib/provision-test-env.sh` under a PATH-mock `podman`: the `PROVISION_PKGS`
+  default, manifest-tag determinism + per-major / per-manifest fingerprinting,
+  idempotent reuse of an existing image, build+commit success, and the real
+  package-manager stderr surfaced on failure (`PROVISION_LAST_ERR`).
+
+* **`t022_ssmunavailable.sh`** (r34) - the SSM "unpublished at S3" status: the
+  403/404 classifier `ssm_rpm_unavailable` (000/5xx stay transient), the
+  version-global `ssm_rpm_url`, the `unavailable` ledger row shape (valid JSON),
+  and end-to-end report rendering of the `unavailable` cells via the hermetic
+  `--generate-results` path.
+
 ---
 
 ## Environment probe (opt-in): `--probe-env`
@@ -376,7 +417,7 @@ banner so each run records the environment it ran under.
 
 ---
 
-## Recorded baseline (r08)
+## Recorded baseline (r35)
 
 The full suite is green in the planning sandbox:
 
@@ -384,9 +425,9 @@ The full suite is green in the planning sandbox:
 == bash-rhel-container-testsuite test suite ==
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
-  podman:     (not installed - L3 uses the curl-only OCI fallback or SKIP)
----- t001_parse.sh ----            ## RESULT pass=37 fail=0 skip=0
----- t002_shellcheck.sh ----       ## RESULT pass=37 fail=0 skip=0
+  podman:     (hermetic L0-L2 need none; t021 uses a PATH-mock podman)
+---- t001_parse.sh ----            ## RESULT pass=45 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=45 fail=0 skip=0
 ---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
 ---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
@@ -394,24 +435,26 @@ The full suite is green in the planning sandbox:
 ---- t007_epelresolve.sh ----      ## RESULT pass=34 fail=0 skip=0
 ---- t008_awscliverdict.sh ----    ## RESULT pass=45 fail=0 skip=0
 ---- t009_ssmverdict.sh ----       ## RESULT pass=27 fail=0 skip=0
----- t010_enaverdict.sh ----       ## RESULT pass=27 fail=0 skip=0
+---- t010_enaverdict.sh ----       ## RESULT pass=48 fail=0 skip=0
 ---- t011_enaverify.sh ----        ## RESULT pass=17 fail=0 skip=0
 ---- t012_osprofile.sh ----        ## RESULT pass=58 fail=0 skip=0
 ---- t013_toolcontract.sh ----     ## RESULT pass=18 fail=0 skip=0
 ---- t014_pkgavail.sh ----         ## RESULT pass=33 fail=0 skip=0
 ---- t015_installpins.sh ----      ## RESULT pass=17 fail=0 skip=0
----- t016_installintrospect.sh ----## RESULT pass=13 fail=0 skip=0
----- t017_probeverdict.sh ----     ## RESULT pass=8 fail=0 skip=0
+---- t016_installintrospect.sh ----## RESULT pass=18 fail=0 skip=0
+---- t017_probeverdict.sh ----     ## RESULT pass=8  fail=0 skip=0
 ---- t018_repoaccess.sh ----       ## RESULT pass=14 fail=0 skip=0
----- t019_enabuilddeps.sh ----     ## RESULT pass=8 fail=0 skip=0
----- t020_helperidentity.sh ----   ## RESULT pass=8 fail=0 skip=0
-SUITE: 478 passed, 0 skipped, 0 failed  (20 tiers, 0 tier-failure(s))
+---- t019_enabuilddeps.sh ----     ## RESULT pass=8  fail=0 skip=0
+---- t020_helperidentity.sh ----   ## RESULT pass=8  fail=0 skip=0
+---- t021_provisionenv.sh ----     ## RESULT pass=12 fail=0 skip=0
+---- t022_ssmunavailable.sh ----   ## RESULT pass=17 fail=0 skip=0
+SUITE: 539 passed, 0 skipped, 0 failed  (22 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 42 shell files** (every `.sh` in the project, incl. the 3 root
+**L0 fixed count = 45 shell files** (every `.sh` in the project, incl. the 3 root
 `install-aws_*.sh`), each `bash -n`-clean and ShellCheck-clean at **default
 severity and `-S style`** (t002 passes `-P` so the gate is CWD-independent,
-r29): the 5 libraries, the 20 `tests/t001`-`t020` tiers, the harness
+r29): the 6 libraries, the 22 `tests/t001`-`t022` tiers, the harness
 (`run-all.sh`, `probe-env.sh`, `tests/lib/*`), the three per-tool folders
 (lister + matrix each, plus the ENA verifier), the coverage generator, and the
 contract checker. Since r28 every file carries the Layer-1 five-section header
