@@ -318,6 +318,52 @@ so results are host-independent and deterministic.
   and end-to-end report rendering of the `unavailable` cells via the hermetic
   `--generate-results` path.
 
+* **`t023_probeentitlement.sh`** (r37) - the entitlement fact-probe's pure
+  layer (`lib/probe-common.sh` + the collector emitted by
+  `tests/probe-entitlement.sh`): the per-major manager map, the yum
+  `repolist enabled` SUBCOMMAND form (yum has no `--enabled`), the
+  variable-tolerant repo-id pattern (expanded id vs a literal-`$basearch`
+  section header), product-cert tag/id extraction from OID
+  `1.3.6.1.4.1.2312.9.1.<id>.4` (mocked `openssl`), the deep-resolve
+  (`--downloadonly`) command forms, the 5-column `facts.tsv` row shape, and
+  that the emitted collector keeps subscription-manager plugins ENABLED and
+  passes `bash -n` for both managers.
+
+---
+
+## Entitlement fact-probe (Phase A): `tests/probe-entitlement.sh`
+
+The reproducible collector behind the entitlement re-investigation: one run
+gathers, per major x condition, the repo/entitlement facts (enabled repos and
+their defining files, `/run/secrets` contents, `redhat.repo` pre/post a
+`makecache` trigger, product-cert tags, build/install package resolution via a
+real `--downloadonly` fetch, CRB/optional enablement attempts, and the
+installed subscription-manager package set):
+
+```
+tests/probe-entitlement.sh                        # majors 10 9 8 7 6, conds auto+mounts
+tests/probe-entitlement.sh --majors "9" --conds auto
+tests/probe-entitlement.sh --outdir /tmp/probe --shallow
+```
+
+Conditions: `auto` = a PLAIN run (whatever the runtime injects by itself);
+`mounts` = the suite's current rhsm passthrough as the A/B comparison arm.
+Engine: podman preferred (required for `mounts` and entitled hosts); on a
+rootful sandbox without podman it falls back to a curl-pulled rootfs + chroot
+(anonymous facts only). Read-only by design: containers are `--rm` and the
+only host writes land under the output directory
+(`tests/ENTITLEMENT-PROBE-<ts>/`, never committed). Analysis is a separate,
+artifact-only step - `tools/analyze-entitlement.sh <outdir>` rebuilds
+`ANALYSIS.md` (F1-F7 tables) from the collected raw logs, so any conclusion is
+reproducible from the run itself. Known reading note: EL6 `yum install` exits
+0 on "No package X available" ("Nothing to do"), so resolution verdicts come
+from the transaction content, not the step's rc alone.
+
+Unlike `tests/probe-env.sh`'s repolist check (which disables the
+subscription-manager plugin - the very component that materializes entitled
+repos, a defect recorded for the Phase C redesign), the fact-probe collector
+runs with plugins enabled.
+
 ---
 
 ## Environment probe (opt-in): `--probe-env`

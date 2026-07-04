@@ -213,10 +213,14 @@ acq_pull_curl() {
   [ -n "${amd64}" ] || return 1
 
   # 2) platform manifest -> layer digests (the layers[] array only; the config
-  #    blob digest precedes "layers" in an OCI image manifest and is not a layer)
+  #    blob digest precedes "layers" and, on newer images (ubi10 10.2), an
+  #    "annotations" object FOLLOWS the array carrying non-layer sha256 digests
+  #    (org.opencontainers.image.base.digest) - so cut at the array's closing
+  #    bracket, not just after the key, or a non-layer blob gets fetched and
+  #    the gzip/tar extraction fails)
   plat="$(acq_curl -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
              "$(acq_manifest_url "${image}" "${amd64}")")" || return 1
-  section="$(printf '%s' "${plat}" | tr -d '\n\r\t' | sed 's/.*"layers"//')"
+  section="$(printf '%s' "${plat}" | tr -d '\n\r\t' | sed 's/.*"layers"//; s/\].*//')"
   layers="$(printf '%s' "${section}" | grep -Eo '"sha256:[^"]+"' | tr -d '"')"
   [ -n "${layers}" ] || return 1
 

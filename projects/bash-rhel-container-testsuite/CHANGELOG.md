@@ -13,6 +13,39 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r37] - 2026-07-04 - feat: reproducible entitlement fact-probe (Phase A) + ubi10 curl-pull fix
+
+### Added
+- **Entitlement fact-probe** (`tests/probe-entitlement.sh` +
+  `lib/probe-common.sh` + `tools/analyze-entitlement.sh`): the reproducible
+  collector/analyzer pair behind the Phase A entitlement re-investigation. One
+  run collects, per major (10/9/8/7/6) x condition (`auto` = plain run /
+  `mounts` = the current rhsm passthrough as the A/B arm), the F1-F7 facts:
+  enabled repos + defining files, `/run/secrets`, `redhat.repo` pre/post a
+  `makecache` trigger, product-cert tags (OID `...2312.9.1.<id>.4` via
+  asn1parse), real `--downloadonly` resolution of the build/install package
+  sets, CRB/optional enablement, and the installed subscription-manager
+  package set. Collection and analysis are separated: `ANALYSIS.md` is rebuilt
+  from the run's artifacts only. The collector keeps subscription-manager
+  plugins ENABLED - `tests/probe-env.sh`'s `--disableplugin` repolist cannot
+  observe entitled repos by construction (defect recorded for the Phase C
+  redesign). Engine: podman preferred; rootful curl+chroot fallback for
+  anonymous sandboxes.
+- **`tests/t023_probeentitlement.sh`** - hermetic unit tier pinning the syntax
+  pitfalls that corrupted the prior ad-hoc investigation: yum's
+  `repolist enabled` subcommand form (no `--enabled`), literal-`$basearch`
+  section-id matching, mocked-openssl tag extraction, downloadonly command
+  forms, `facts.tsv` shape, and `bash -n` validity of both emitted collectors.
+
+### Fixed
+- **`acq_pull_curl` fetched a non-layer blob on ubi10 and failed.** ubi10
+  10.2's platform manifest carries an `annotations` object AFTER the
+  `layers` array (`org.opencontainers.image.base.digest`, a sha256 that is
+  not a layer); the extraction cut only at the `"layers"` key, so the
+  annotation digest was fetched as a layer and the gzip/tar extraction
+  failed. The digest scan now stops at the array's closing bracket.
+  (Measured directly against `registry.access.redhat.com` on 2026-07-04.)
+
 ## [r36] - 2026-07-04 - fix: provisioning is repo-access-agnostic + a fail-fast test prerequisite
 
 ### Fixed
