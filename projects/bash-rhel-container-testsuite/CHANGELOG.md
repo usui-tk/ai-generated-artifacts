@@ -13,6 +13,25 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r41] - 2026-07-04 - feat: RHUI cross-major authorization check + auto-packed probe output
+
+### Added
+- **RHUI cross-major authorization fact** (`host/rhui-crossmajor.txt`, AWS
+  RHUI hosts only): read-only HTTPS status checks of per-major RHUI content
+  URLs synthesized from the host's own `redhat-rhui.repo` baseos template
+  (`pc_rhui_major_url`, unit-tested), using the host's client cert/key IN
+  PLACE (never copied), REGION resolved via IMDS(v2 with v1 fallback), and
+  `rhel99` as the expected-non-200 control. This answers the Step 4 design
+  question: does one host's RHUI client certificate authorize OTHER majors'
+  content paths? The analyzer renders it inside `RF0`. Background fact from
+  the 2026-07-04 AWS run: the mirrorlist hostname carries a LITERAL `REGION`
+  token that only the host-side RHUI client machinery resolves, so mounted
+  host repo files cannot work in containers as-is (DNS failure) even before
+  any major or certificate question.
+- **`--facts` auto-packs its output**: on completion the probe creates
+  `<outdir>.tar.gz` next to the output directory and logs it, so the
+  round-trip attachment no longer needs manual zipping.
+
 ## [r40] - 2026-07-04 - feat: RHUI-aware fact probe (support-matrix grounding)
 
 ### Changed

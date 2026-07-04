@@ -94,6 +94,14 @@ assert_eq "rhel-9,rhel-9-x86_64" "$(pc_product_tags /dev/null)" \
 assert_eq 479 "$(pc_product_id /dev/null)" "product id extraction -> 479"
 unset -f openssl
 
+# --- pc_rhui_major_url: per-major RHUI URL synthesis (r41) ---------------------
+# shellcheck disable=SC2016  # the template intentionally holds literal yum variables
+tmpl='https://rhui.REGION.aws.ce.redhat.com/pulp/mirror/content/dist/rhel10/rhui/$releasever/$basearch/baseos/os'
+assert_eq 'https://rhui.REGION.aws.ce.redhat.com/pulp/mirror/content/dist/rhel8/rhui/8/x86_64/baseos/os' \
+  "$(pc_rhui_major_url "${tmpl}" 8)" "rhel10 template -> rhel8 URL (path + releasever + basearch)"
+assert_eq 'https://rhui.REGION.aws.ce.redhat.com/pulp/mirror/content/dist/rhel9/rhui/9/x86_64/baseos/os' \
+  "$(pc_rhui_major_url "${tmpl}" 9)" "rhel10 template -> rhel9 URL"
+
 # --- pe_emit_collector: emitted syntax per major --------------------------------
 c_el7="$(pe_emit_collector 7 1 300)"
 c_el6="$(pe_emit_collector 6 1 300)"

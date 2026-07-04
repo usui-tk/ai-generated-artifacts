@@ -357,9 +357,13 @@ subscription-manager hosts, the RHUI file/cert set on AWS/Azure RHUI hosts;
 `MANIFEST.txt` records `repo_access=`). A host-side inventory lands in
 `OUTDIR/host/` (repo files, installed RHUI/subscription-manager packages,
 certificate metadata only - never private keys), rendered by the analyzer as
-`RF0`. Engine: podman preferred (required for `mounts` and entitled
-hosts); on a rootful sandbox without podman it falls back to a curl-pulled
-rootfs + chroot (anonymous facts only). Read-only by design: containers are
+`RF0`; on AWS RHUI hosts a read-only cross-major authorization check
+(`host/rhui-crossmajor.txt`) probes per-major content URLs with the host's
+client certificate used in place. Engine: podman preferred (required for
+`mounts` and entitled hosts); on a rootful sandbox without podman it falls
+back to a curl-pulled rootfs + chroot (anonymous facts only). On completion
+the output directory is auto-packed as `<outdir>.tar.gz` for the analysis
+round-trip. Read-only by design: containers are
 `--rm` and the only host writes land under the output directory
 (`tests/ENTITLEMENT-PROBE-<ts>/`, never committed). Analysis is a separate,
 artifact-only step - `tools/analyze-entitlement.sh <outdir>` rebuilds

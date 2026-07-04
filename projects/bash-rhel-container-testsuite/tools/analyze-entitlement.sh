@@ -90,6 +90,10 @@ an_txn_pairs() {
     ls "${OUT}/host/yum.repos.d/" 2>/dev/null
     echo '-- host certificates (metadata only) --'
     cat "${OUT}/host/certs.txt" 2>/dev/null
+    if [ -f "${OUT}/host/rhui-crossmajor.txt" ]; then
+      echo '-- RHUI cross-major authorization check (r41; rhel99 = control) --'
+      cat "${OUT}/host/rhui-crossmajor.txt"
+    fi
     echo '```'
     echo
   fi

@@ -109,6 +109,18 @@ pc_tsv_row() {
   printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$(printf '%s' "$5" | tr '\t\n' '  ')"
 }
 
+# pc_rhui_major_url TEMPLATE MAJOR - synthesize another major's RHUI content
+# URL from a host repo template: the /rhelN/ path segment, the literal
+# $releasever and $basearch are all re-targeted. Pure (REGION substitution is
+# the caller's job). Grounded on the AWS redhat-rhui.repo shape observed on
+# 2026-07-04 (mirrorlist=.../content/dist/rhel10/rhui/$releasever/$basearch/...).
+pc_rhui_major_url() {
+  printf '%s\n' "$1" | sed -E \
+    -e "s#/rhel[0-9]+/#/rhel$2/#" \
+    -e "s#\\\$releasever#$2#g" \
+    -e "s#\\\$basearch#x86_64#g"
+}
+
 # pc_build_pkgset / pc_install_pkgset - the fact-probe package sets, derived
 # from the PROJECT PURPOSE (Q-BUILD: ENA-class driver builds need the kernel
 # headers + toolchain; Q-INSTALL: the provisioning manifest + tool

@@ -290,6 +290,51 @@ pe_host_inventory() {
   done
 }
 
+# pe_rhui_crossmajor_check OUTDIR - AWS-RHUI host-side fact: does THIS host's
+# RHUI client certificate authorize OTHER majors' content paths? Read-only
+# HTTPS status checks against per-major URLs synthesized from the host's own
+# redhat-rhui.repo template (REGION resolved via IMDS); rhel99 is the
+# calibration control (expected non-200). Certs/keys are used IN PLACE on the
+# host and never copied. Answers the Phase A question that decides whether a
+# per-major synthesized-repo design is viable on RHUI (Step 4 input).
+pe_rhui_crossmajor_check() {
+  local out="$1/host/rhui-crossmajor.txt" repo=/etc/yum.repos.d/redhat-rhui.repo
+  local sec tmpl cert key ca tok region url m code caarg=()
+  [ -f "${repo}" ] || return 0
+  sec="$(awk '/^\[rhel-[0-9]+-baseos-rhui-rpms\]/{f=1;next} /^\[/{f=0} f' "${repo}")"
+  tmpl="$(printf '%s\n' "${sec}" | sed -n 's/^mirrorlist=//p' | head -1)"
+  cert="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientcert=//p' | head -1)"
+  key="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientkey=//p' | head -1)"
+  ca="$(printf '%s\n' "${sec}" | sed -n 's/^sslcacert=//p' | head -1)"
+  if [ -z "${tmpl}" ] || [ ! -f "${cert}" ] || [ ! -f "${key}" ]; then
+    echo "skipped: baseos template or client cert/key unavailable" > "${out}"; return 0
+  fi
+  tok="$(curl -sS -m 5 -X PUT http://169.254.169.254/latest/api/token \
+          -H 'X-aws-ec2-metadata-token-ttl-seconds: 120' 2>/dev/null)"
+  region="$(curl -sS -m 5 -H "X-aws-ec2-metadata-token: ${tok}" \
+          http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null)"
+  [ -n "${region}" ] || region="$(curl -sS -m 5 \
+          http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null)"
+  {
+    echo "region=${region:-unresolved}"; echo "template=${tmpl}"
+    echo "cert=${cert}"; echo "key=(used in place, not recorded)"
+  } > "${out}"
+  [ -n "${region}" ] || { echo "skipped: region unresolved via IMDS" >> "${out}"; return 0; }
+  [ -n "${ca}" ] && [ -f "${ca}" ] && caarg=(--cacert "${ca}")
+  for m in 10 9 8 99; do
+    url="$(pc_rhui_major_url "${tmpl}" "${m}" | sed "s/REGION/${region}/")"
+    code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+             --cert "${cert}" --key "${key}" "${caarg[@]}" "${url}" 2>/dev/null)"
+    echo "major=${m} http=${code:-000} url=${url}" >> "${out}"
+  done
+  for m in 7 6; do
+    url="https://rhui.${region}.aws.ce.redhat.com/pulp/mirror/content/dist/rhel/rhui/server/${m}/${m}Server/x86_64/os"
+    code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+             --cert "${cert}" --key "${key}" "${caarg[@]}" "${url}" 2>/dev/null)"
+    echo "major=${m} http=${code:-000} url=${url} (legacy path scheme)" >> "${out}"
+  done
+}
+
 pe_facts() {
   local engine major cond dir rc pem tags pid ts mode=none
   if command -v podman >/dev/null 2>&1; then engine=podman
@@ -306,6 +351,7 @@ pe_facts() {
     echo "host=$(uname -sr)"
   } > "${OUTDIR}/MANIFEST.txt"
   pe_host_inventory "${OUTDIR}"
+  case "${mode}" in rhui:aws) pe_rhui_crossmajor_check "${OUTDIR}" ;; esac
   : > "${OUTDIR}/facts.tsv"
   for major in ${MAJORS}; do
     for cond in ${CONDS}; do
@@ -330,6 +376,9 @@ pe_facts() {
     done
   done
   log "done -> ${OUTDIR}"
+  if tar czf "${OUTDIR}.tar.gz" -C "$(dirname "${OUTDIR}")" "$(basename "${OUTDIR}")" 2>/dev/null; then
+    log "packed -> ${OUTDIR}.tar.gz (attach this file for analysis)"
+  fi
   log "analyze: bash tools/analyze-entitlement.sh ${OUTDIR}"
 }
 
