@@ -318,51 +318,52 @@ so results are host-independent and deterministic.
   and end-to-end report rendering of the `unavailable` cells via the hermetic
   `--generate-results` path.
 
-* **`t023_probeentitlement.sh`** (r37) - the entitlement fact-probe's pure
-  layer (`lib/probe-common.sh` + the collector emitted by
-  `tests/probe-entitlement.sh`): the per-major manager map, the yum
-  `repolist enabled` SUBCOMMAND form (yum has no `--enabled`), the
+* **`t023_probeentitlement.sh`** (r37, r39) - the unified probe's pure layer
+  (`lib/probe-common.sh` + the collector emitted by
+  `tests/probe-env.sh --facts`): the per-major manager map, the yum
+  `repolist enabled` SUBCOMMAND form (yum has no `--enabled`), the EL6 form
+  dropping `-q` (EL6's `-q` suppresses the whole repolist table), the
   variable-tolerant repo-id pattern (expanded id vs a literal-`$basearch`
   section header), product-cert tag/id extraction from OID
   `1.3.6.1.4.1.2312.9.1.<id>.4` (mocked `openssl`), the deep-resolve
-  (`--downloadonly`) command forms, the 5-column `facts.tsv` row shape, and
-  that the emitted collector keeps subscription-manager plugins ENABLED and
-  passes `bash -n` for both managers.
+  (`--downloadonly`) command forms, the 5-column `facts.tsv` row shape, that
+  the emitted collector keeps subscription-manager plugins ENABLED, that no
+  collector step pipes its exit code into `tail`, `bash -n` validity for all
+  three emitted collectors, and that `probe_verdict` still loads.
 
 ---
 
-## Entitlement fact-probe (Phase A): `tests/probe-entitlement.sh`
+## Entitlement fact-probe (Phase A): `tests/probe-env.sh --facts`
 
-The reproducible collector behind the entitlement re-investigation: one run
-gathers, per major x condition, the repo/entitlement facts (enabled repos and
-their defining files, `/run/secrets` contents, `redhat.repo` pre/post a
-`makecache` trigger, product-cert tags, build/install package resolution via a
-real `--downloadonly` fetch, CRB/optional enablement attempts, and the
+The reproducible collector behind the entitlement re-investigation (a
+standalone `tests/probe-entitlement.sh` in r37, unified into the probe as
+`--facts` in r39): one run gathers, per major x condition, the
+repo/entitlement facts (enabled repos and their defining files,
+`/run/secrets` contents, `redhat.repo` pre/post a `makecache` trigger,
+product-cert tags, build/install package resolution via a real
+`--downloadonly` fetch, CRB/optional enablement attempts, and the
 installed subscription-manager package set):
 
 ```
-tests/probe-entitlement.sh                        # majors 10 9 8 7 6, conds auto+mounts
-tests/probe-entitlement.sh --majors "9" --conds auto
-tests/probe-entitlement.sh --outdir /tmp/probe --shallow
+tests/probe-env.sh --facts                        # majors 10 9 8 7 6, conds auto+mounts
+tests/probe-env.sh --facts --majors "9" --conds auto
+tests/probe-env.sh --facts --outdir /tmp/probe --shallow
 ```
 
 Conditions: `auto` = a PLAIN run (whatever the runtime injects by itself);
-`mounts` = the suite's current rhsm passthrough as the A/B comparison arm.
-Engine: podman preferred (required for `mounts` and entitled hosts); on a
-rootful sandbox without podman it falls back to a curl-pulled rootfs + chroot
-(anonymous facts only). Read-only by design: containers are `--rm` and the
-only host writes land under the output directory
+`mounts` = the suite's legacy rhsm passthrough, kept ONLY as the A/B
+comparison arm. Engine: podman preferred (required for `mounts` and entitled
+hosts); on a rootful sandbox without podman it falls back to a curl-pulled
+rootfs + chroot (anonymous facts only). Read-only by design: containers are
+`--rm` and the only host writes land under the output directory
 (`tests/ENTITLEMENT-PROBE-<ts>/`, never committed). Analysis is a separate,
 artifact-only step - `tools/analyze-entitlement.sh <outdir>` rebuilds
 `ANALYSIS.md` (F1-F7 tables) from the collected raw logs, so any conclusion is
-reproducible from the run itself. Known reading note: EL6 `yum install` exits
-0 on "No package X available" ("Nothing to do"), so resolution verdicts come
-from the transaction content, not the step's rc alone.
-
-Unlike `tests/probe-env.sh`'s repolist check (which disables the
-subscription-manager plugin - the very component that materializes entitled
-repos, a defect recorded for the Phase C redesign), the fact-probe collector
-runs with plugins enabled.
+reproducible from the run itself. Known reading notes: EL6 `yum install`
+exits 0 on "No package X available" ("Nothing to do"), so resolution verdicts
+come from the transaction content, not the step's rc alone; and no collector
+step pipes its exit code into `tail` (the r37 collector masked the s06/s12
+rc that way - `| tail` findings from that run are unreliable).
 
 ---
 
@@ -380,8 +381,12 @@ It runs one short-lived container per major and reports common checks - does the
 image run here (`exec`; covers pull, arch, and old-userspace glibc/vsyscall),
 package manager present, and whether that manager can reach repositories
 (`repos`: reachable / no-access [command ran, repos unreachable] / no-cmd /
-unknown) - run without the RHSM plugin stall - plus egress to S3 and EPEL and
-the entitlement state, then a `verdict` of **ready** / **degraded** (runs but
+unknown) - with the subscription-manager plugins ENABLED and no manual mounts,
+so the observed state is the auto-injected one (r39 correction; the pre-r39
+probe disabled the very plugin that materializes entitled repos) - plus egress
+to S3 and EPEL and the per-container `entitlement` observation
+(auto-injected = `/run/secrets/redhat.repo` present / anonymous), then a
+`verdict` of **ready** / **degraded** (runs but
 an egress/repo gap) / **blocked** (image
 won't run here). Output goes to the log, a readiness table, and `ENV-PROBE.json`
 (git-ignored). The probe never modifies the host.
@@ -403,8 +408,9 @@ reachable repos. The host is never changed.
 
 `--run` can pass the host's repo access into each container so entitled content
 (e.g. `kernel-devel`, or DKMS from a base repo) is reachable. The decision lives
-in one place - `lib/acquire-rootfs.sh` - and both the sweep and `--probe-env`
-consume it, so there is no duplicated logic.
+in one place - `lib/acquire-rootfs.sh` - and the sweep consumes it (the probe
+stopped consuming the mount decision in r39; its readiness checks observe the
+plain, auto-injected state instead), so there is no duplicated logic.
 
 `acq_repo_access` classifies the host (multi-signal, `>= 2` cues agree where
 possible) into one of:

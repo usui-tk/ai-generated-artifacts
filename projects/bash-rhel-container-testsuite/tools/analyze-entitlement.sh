@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # ----- Purpose --------------------------------------------------------------
-#   Phase A analyzer: rebuild the F1-F7 fact tables from a probe-entitlement
+#   Phase A analyzer: rebuild the F1-F7 fact tables from a probe --facts
 #   output directory - deterministically, from the collected artifacts ONLY
 #   (no live system access), so any analysis is reproducible from the run.
 # ----- Prerequisites --------------------------------------------------------
-#   bash 4+. Input: an ENTITLEMENT-PROBE-* dir from tests/probe-entitlement.sh.
+#   bash 4+. Input: an ENTITLEMENT-PROBE-* dir from tests/probe-env.sh --facts.
 # ----- Usage examples -------------------------------------------------------
 #   bash tools/analyze-entitlement.sh tests/ENTITLEMENT-PROBE-<ts>
 # ----- Known limitations ----------------------------------------------------
@@ -115,6 +115,7 @@ an_txn_pairs() {
     post="absent"; [ -e "${d}files-post/redhat.repo" ] && post="$(sha256sum "${d}files-post/redhat.repo" | cut -c1-8)"
     tags="$(awk -F'\t' -v m="${major}" -v c="${cond}" \
             '$1=="cert"&&$2==m&&$3==c{printf "%s; ",$5}' "${OUT}/facts.tsv")"
+    tags="${tags%; }"
     echo "| ${major} | ${cond} | ${sec} | ${pre} -> ${post} | ${tags:-?} |"
   done
   echo

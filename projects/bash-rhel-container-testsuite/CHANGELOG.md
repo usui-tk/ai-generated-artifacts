@@ -13,6 +13,33 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r39] - 2026-07-04 - feat: unified probe (readiness + --facts) and observation fixes
+
+### Changed
+- **`tests/probe-env.sh` is now the single probe entry point.** The default
+  (`--probe-env`) readiness mode keeps the exec/pkgmgr/repos/egress checks and
+  the `probe_verdict` classifier, with two corrections: the repolist check
+  runs with the subscription-manager plugins ENABLED and no manual mounts
+  (the pre-r39 probe disabled the very plugin that materializes entitled
+  repos, and premised entitlement on host-side mounts), and the per-major
+  `entitlement` field is now OBSERVED inside each container
+  (auto-injected = `/run/secrets/redhat.repo` present / anonymous).
+  `--facts` absorbs the r37 `tests/probe-entitlement.sh` fact collection
+  unchanged in output format; that file is removed.
+
+### Fixed
+- **Collector steps no longer pipe their exit code into `tail`** (the r37
+  collector masked the s06 makecache and s12 CRB-enable rc behind `| tail`,
+  so those rc values from the 2026-07-04 runs are unreliable; the raw logs
+  remain valid). `t023` now pins that no emitted step contains `| tail`.
+- **EL6 repolist is now observable**: EL6's `yum -q repolist` suppresses the
+  entire table (observed on the entitled run: an empty capture while
+  `rhel-6-server-rpms` was enabled and resolving), so `pc_repolist_cmd` is
+  major-aware and drops `-q` for EL6; the analyzer already filters the
+  resulting noise by only accepting count-bearing table rows.
+- Analyzer polish: probe references updated to `probe-env.sh --facts`; the
+  F2 product-tags cell no longer carries a trailing separator.
+
 ## [r38] - 2026-07-04 - chore: executable bit on the r37 probe scripts
 
 ### Fixed

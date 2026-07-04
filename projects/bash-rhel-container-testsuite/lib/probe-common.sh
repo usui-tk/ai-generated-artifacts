@@ -6,7 +6,7 @@
 #   bash 4+; sourced library (no side effects at source time). openssl
 #   only inside pc_product_tags/pc_product_id (I/O surface, mockable).
 # ----- Usage examples -------------------------------------------------------
-#   source lib/probe-common.sh   # from tests/probe-entitlement.sh / t023
+#   source lib/probe-common.sh   # from tests/probe-env.sh / t023
 # ----- Known limitations ----------------------------------------------------
 #   Not a standalone executable; callers own logging and error policy
 #   (spec home A.5). Syntax maps cover RHEL 6-10 only.
@@ -42,15 +42,20 @@ pc_pm_for_major() {
   esac
 }
 
-# pc_repolist_cmd MGR SCOPE - the CORRECT repolist argv for the manager.
-# SCOPE = enabled|all. yum needs the subcommand form (no leading --enabled).
+# pc_repolist_cmd MAJOR SCOPE - the CORRECT repolist argv for the major.
+# SCOPE = enabled|all. yum needs the subcommand form (no leading --enabled),
+# and EL6's yum suppresses the WHOLE repolist table under -q (observed on the
+# 2026-07-04 entitled run: s08 came back empty while repos were enabled), so
+# the EL6 form drops -q and the analyzer filters the extra noise instead.
 pc_repolist_cmd() {
   case "$1:$2" in
-    dnf:enabled) printf '%s\n' 'dnf -q repolist --enabled' ;;
-    dnf:all)     printf '%s\n' 'dnf -q repolist --all' ;;
-    yum:enabled) printf '%s\n' 'yum -q repolist enabled' ;;
-    yum:all)     printf '%s\n' 'yum -q repolist all' ;;
-    *)           return 1 ;;
+    10:enabled|9:enabled|8:enabled) printf '%s\n' 'dnf -q repolist --enabled' ;;
+    10:all|9:all|8:all)             printf '%s\n' 'dnf -q repolist --all' ;;
+    7:enabled)                      printf '%s\n' 'yum -q repolist enabled' ;;
+    7:all)                          printf '%s\n' 'yum -q repolist all' ;;
+    6:enabled)                      printf '%s\n' 'yum repolist enabled' ;;
+    6:all)                          printf '%s\n' 'yum repolist all' ;;
+    *)                              return 1 ;;
   esac
 }
 
