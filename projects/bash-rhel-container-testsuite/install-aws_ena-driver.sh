@@ -93,9 +93,11 @@ entitlement_certs_present() {
 }
 # pm_neutralize_rhsm_if_anonymous : when NO entitlement certs are present, disable
 # the subscription-manager/product-id yum|dnf plugins for THIS container only.
-# They otherwise contact RHSM and hang indefinitely on unentitled hosts (notably
-# bare RHEL6). With certs present (entitled) they are left ON - they work and are
-# needed for entitled repos. Container-local; the host is never modified.
+# DEFENSIVE (D-S4, r46): the historically observed RHSM-contact hang did NOT
+# reproduce in the 2026-07-04 probe runs (EL6 included); disabling in a
+# certless container is harmless and guards unknown environments. With certs
+# present (RHSM auto-injection) they stay ON - they generate the per-major
+# entitled redhat.repo. Container-local; the host is never modified.
 pm_neutralize_rhsm_if_anonymous() {
   entitlement_certs_present && return 0
   local d p

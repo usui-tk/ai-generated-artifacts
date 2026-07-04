@@ -335,8 +335,11 @@ run_matrix() {
   # shellcheck source=../../lib/provision-test-env.sh
   . "${PROJ_DIR}/lib/provision-test-env.sh"
   host_banner
-  local ent_mounts; ent_mounts="$(acq_entitlement_mount_args "")"
-  [ -n "${ent_mounts}" ] && log "entitlement passthrough: ${ent_mounts% }"
+  # r46 (D-S1/D-S2): containers run PLAIN. RHSM hosts auto-inject entitled
+  # repos per container; the entitled RHUI container path is pending.
+  local repo_mode; repo_mode="$(acq_repo_access | cut -d'|' -f1)"
+  log "repo access mode: ${repo_mode} (containers run plain; RHSM auto-injection provides entitled repos; RHUI entitled path pending)"
+  local ent_mounts=""
   record_host_meta "${LEDGER}"
   acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
   local LOG_DIR="${SCRIPT_DIR}/logs"

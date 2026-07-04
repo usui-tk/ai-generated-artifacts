@@ -90,23 +90,24 @@ provision_test_image() {
   podman rm -f "${cname}" >/dev/null 2>&1 || true
   errf="$(mktemp)"
   # Install the common manifest onto the base image, ROBUST to the repo-access
-  # mode (anonymous UBI / RHSM-entitled / RHUI). Two measures, mirroring the
-  # install scripts' conventions rather than hardcoding repo ids:
+  # mode (anonymous UBI / RHSM-entitled). One measure, mirroring the install
+  # scripts' convention:
   #  1. neutralize the subscription-manager/product-id plugins when NO
-  #     entitlement certs are present (anonymous) - they otherwise hang/err
-  #     contacting RHSM; entitled keeps them ON (needed for entitled repos).
-  #  2. install with *.skip_if_unavailable=1 so an unreachable/mismatched ENABLED
-  #     repo (the host redhat.repo is the HOST major, wrong-major and/or
-  #     unregistered inside the container) is SKIPPED, not fatal - the package
-  #     resolves from whatever working repo has it (public UBI / entitled rhel-*
-  #     / RHUI). This is the same class of failure r32 fixed for the SSM install.
+  #     entitlement certs are present (anonymous) - a DEFENSIVE measure kept
+  #     by decision D-S4: the historically observed RHSM-contact hang did NOT
+  #     reproduce in the 2026-07-04 probe runs (sandbox and AWS, EL6 included),
+  #     but disabling the plugins in a certless container is harmless and
+  #     guards unknown environments. With certs present (RHSM auto-injection)
+  #     the plugins stay ON - they generate the per-major entitled redhat.repo.
+  #  (r36's *.skip_if_unavailable=1 was removed in r46, D-S3: it papered over
+  #   the wrong-major HOST-file mounts removed by D-S1, and would now only
+  #   hide real repo failures.)
   #  Combined stdout+stderr is captured so a real failure surfaces the pm error.
   # shellcheck disable=SC2086,SC2016  # ent word-split is intentional; the -c body expands in-container
   if timeout "${PROVISION_TIMEOUT:-600}" podman run --name "${cname}" ${ent} \
        -e "PROVISION_PKGS=${PROVISION_PKGS}" -e "PROVISION_SETOPT=${setopt}" \
        "${base_ref}" /bin/bash -c '
          set -e
-         set -f  # keep the *.skip_if_unavailable=1 glob literal (no pathname expansion)
          entitlement_certs_present() {
            ls /etc/pki/entitlement/*.pem >/dev/null 2>&1 \
              || ls /run/secrets/etc-pki-entitlement/*.pem >/dev/null 2>&1
@@ -123,7 +124,7 @@ provision_test_image() {
          for m in dnf yum; do command -v "$m" >/dev/null 2>&1 && { mgr="$m"; break; }; done
          [ -n "$mgr" ] || { echo "provision: no dnf/yum in base image" >&2; exit 3; }
          # shellcheck disable=SC2086
-         "$mgr" -y --setopt=*.skip_if_unavailable=1 $PROVISION_SETOPT install $PROVISION_PKGS
+         "$mgr" -y $PROVISION_SETOPT install $PROVISION_PKGS
        ' >"${errf}" 2>&1; then
     rc=0
   else

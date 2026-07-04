@@ -181,6 +181,8 @@ acq_trigger_redhat_repo() {
 }
 
 # acq_detect_entitlement MGR [SECRETS_DIR] - echo anonymous|entitled via the
+# NOTE (r46): unit-covered (t005) but NOT wired into the run flow; kept as the
+# in-container detection primitive for the pending RHUI per-container work.
 # 3-step probe (secrets present -> trigger redhat.repo -> classify by rhel-*
 # prefix + kernel-devel resolution). All external commands are mockable, so the
 # whole flow is exercised hermetically in tests/t005_entitlementdetect.sh.
@@ -381,14 +383,9 @@ acq_classify_repo_access() {
   printf 'none'
 }
 
-# acq_entitlement_feasible MODE : PURE. feasible|conditional|na.
-acq_entitlement_feasible() {
-  case "$1" in
-    rhsm)    printf 'feasible' ;;
-    rhui:*)  printf 'conditional' ;;
-    *)       printf 'na' ;;
-  esac
-}
+# (acq_entitlement_feasible was removed in r46: its premise - that entitled
+# repo access is delivered by mounting host files - was disproved by the
+# 2026-07-04 probe runs. Host classification lives in acq_repo_access.)
 
 _acq_rhui_baseurls() {
   cat /etc/yum.repos.d/redhat-rhui*.repo /etc/yum.repos.d/rh-cloud.repo 2>/dev/null \
@@ -443,33 +440,30 @@ acq_repo_access() {
   printf '%s|%s|%s' "${mode}" "${conf}" "${sig:-none}"
 }
 
-# acq_entitlement_mount_args [MODE] : echo the podman -v/--network args to pass the
-# host's repo access into a container. DERIVES the RHUI mount set from the repo
-# files' ssl*/gpgkey paths (provider-agnostic). Empty for oci-ol/none.
+# acq_entitlement_mount_args [MODE] : echo the podman args that pass the host's
+# repo access into a container. r46: EMPTY for every mode.
+#   rhsm  - REMOVED (D-S1). Measured on 2026-07-04 (ENTITLEMENT-PROBE runs):
+#           Red Hat hosts' podman AUTO-INJECTS /run/secrets into every
+#           container and the subscription-manager plugin generates a correct
+#           per-major redhat.repo from the container's own product cert -
+#           while the old host-file mounts were actively harmful (wrong-major
+#           repos in 8/9, sslclientcert Permission denied even same-major,
+#           the per-container generation blocked by the :ro host file, and
+#           EL7's auto-entitled repo LOST). Plain containers work on every
+#           major 6-10.
+#   rhui  - PENDING (D-S2, user decision). The legacy host-file mounts were
+#           measured non-functional (literal REGION hostname resolvable only
+#           by the host-side amazon-id dnf plugin; authorization additionally
+#           needs the SIGNED instance-identity headers and is host-major
+#           scoped). Until the entitled RHUI container path is designed,
+#           RHUI hosts run containers PLAIN (anonymous / needs-entitlement).
+# The function and its callers are kept so the pending RHUI implementation
+# has a single place to land.
 acq_entitlement_mount_args() {
-  local mode="${1:-$(acq_repo_access | cut -d'|' -f1)}" f p paths
+  local mode="${1:-$(acq_repo_access | cut -d'|' -f1)}"
   case "${mode}" in
-    rhsm)
-      # certs + rhsm config + the subscription-manager-generated entitled repo
-      # definitions. Without redhat.repo the container has no entitled baseurls
-      # (UBI ships only the public ubi repos), so kernel-devel etc. are unreachable.
-      [ -d /etc/pki/entitlement ]       && printf -- '-v /etc/pki/entitlement:/etc/pki/entitlement:ro '
-      [ -d /etc/rhsm ]                  && printf -- '-v /etc/rhsm:/etc/rhsm:ro '
-      [ -d /etc/pki/product ]           && printf -- '-v /etc/pki/product:/etc/pki/product:ro '
-      [ -f /etc/yum.repos.d/redhat.repo ] && printf -- '-v /etc/yum.repos.d/redhat.repo:/etc/yum.repos.d/redhat.repo:ro '
-      ;;
-    rhui:*)
-      for f in /etc/yum.repos.d/redhat-rhui*.repo /etc/yum.repos.d/rh-cloud.repo; do
-        [ -f "${f}" ] && printf -- '-v %s:%s:ro ' "${f}" "${f}"
-      done
-      paths="$(cat /etc/yum.repos.d/redhat-rhui*.repo /etc/yum.repos.d/rh-cloud.repo 2>/dev/null \
-                | sed -nE 's#^[[:space:]]*(sslclientcert|sslclientkey|sslcacert|gpgkey)=(file://)?(/[^[:space:]]+).*#\3#p' | sort -u)"
-      # shellcheck disable=SC2086  # intentional word-split of newline/space-separated paths
-      for p in ${paths}; do [ -e "${p}" ] && printf -- '-v %s:%s:ro ' "${p}" "${p}"; done
-      [ -d /etc/pki/rhui ]                       && printf -- '-v /etc/pki/rhui:/etc/pki/rhui:ro '
-      [ -f /etc/dnf/plugins/amazon-id.conf ]     && printf -- '-v /etc/dnf/plugins/amazon-id.conf:/etc/dnf/plugins/amazon-id.conf:ro '
-      printf -- '--network host '
-      ;;
-    *) : ;;
+    rhsm)   : ;;  # auto-injection covers it; no mounts (r46, D-S1)
+    rhui:*) : ;;  # entitled RHUI containers pending; run plain (r46, D-S2)
+    *)      : ;;
   esac
 }

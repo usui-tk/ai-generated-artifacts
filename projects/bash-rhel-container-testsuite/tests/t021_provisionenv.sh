@@ -76,12 +76,16 @@ out="$(PATH="${mockdir}:${PATH}" MOCK_IMG_EXISTS=0 MOCK_RUN_RC=0 MOCK_COMMIT_RC=
 assert_eq 0 "${rc}" "provision_test_image returns 0 when run+commit succeed"
 assert_match "${out}" 'rhel6-' "provision_test_image echoes the provisioned tag on success"
 
-# (1a) the provisioning install tolerates a broken/mismatched enabled repo (the
-# mounted host redhat.repo) by installing with *.skip_if_unavailable=1
+# (1a) r46 (D-S3) regression pin: the provisioning install must NOT hide repo
+# failures behind *.skip_if_unavailable=1 (that setopt papered over the
+# wrong-major host-file mounts removed by D-S1).
 rlog="$(mktemp)"
 PATH="${mockdir}:${PATH}" MOCK_PODMAN_LOG="${rlog}" MOCK_IMG_EXISTS=0 MOCK_RUN_RC=0 MOCK_COMMIT_RC=0 \
   bash -c '. "$1"; provision_test_image 8 base:img "" >/dev/null' _ "${LIB}"
-assert_match "$(cat "${rlog}")" 'skip_if_unavailable=1' "provisioning install tolerates a broken repo (skip_if_unavailable)"
+case "$(cat "${rlog}")" in
+  *skip_if_unavailable*) t_fail "provisioning must not mask repo failures (skip_if_unavailable found)" ;;
+  *)                     t_pass "provisioning does not mask repo failures (no skip_if_unavailable)" ;;
+esac
 rm -f "${rlog}"
 
 # (2) idempotent: image exists -> echoes tag, never runs/commits a container

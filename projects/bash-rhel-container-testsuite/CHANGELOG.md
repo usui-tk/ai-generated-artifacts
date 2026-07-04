@@ -13,6 +13,29 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r46] - 2026-07-04 - fix: containers run PLAIN - the harmful rhsm mounts are gone (Step 4, D-S1..S6)
+
+### Changed
+- **`acq_entitlement_mount_args` returns nothing for every mode (D-S1/D-S2).**
+  rhsm: the host-file mounts were measured actively harmful on 2026-07-04
+  (wrong-major repos in 8/9, sslclientcert Permission denied even same-major,
+  per-container generation blocked, EL7's auto-entitled repo lost) while
+  plain containers get correct per-major entitled repos on every major 6-10
+  via podman's auto-injection. rhui: the legacy mounts were measured
+  non-functional; the entitled RHUI container path is PENDING (user
+  decision) and RHUI hosts run containers plain (needs-entitlement). The
+  three matrices now log the host's repo-access mode instead of mount args.
+- **Provisioning no longer masks repo failures (D-S3)**: r36's
+  `*.skip_if_unavailable=1` papered over the wrong-major mounts and is
+  removed with them; `t021` pins its absence.
+- **Plugin neutralization is kept as a DEFENSIVE measure (D-S4)** with its
+  rationale corrected in-code: the historically observed RHSM-contact hang
+  did not reproduce in the probe runs (EL6 included).
+- **`acq_entitlement_feasible` removed (D-S6)** - its mounting premise was
+  disproved; host classification lives in `acq_repo_access`.
+  `acq_detect_entitlement` stays unit-covered but is marked as not wired
+  into the run flow (kept for the pending RHUI per-container work).
+
 ## [r45] - 2026-07-04 - fix: cross-major check sends the RHUI identity headers (403 mystery solved)
 
 ### Fixed

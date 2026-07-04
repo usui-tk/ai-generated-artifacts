@@ -31,10 +31,9 @@ LIB="${PROJ}/lib/acquire-rootfs.sh"
 # shellcheck disable=SC1090
 . <(sed -n "/^acq_classify_repo_access()/,/^}/p" "${LIB}")
 # shellcheck disable=SC1090
-. <(sed -n "/^acq_entitlement_feasible()/,/^}/p" "${LIB}")
 
 if ! declare -F acq_classify_repo_access >/dev/null 2>&1 \
-   || ! declare -F acq_entitlement_feasible >/dev/null 2>&1; then
+; then
   t_fail "could not load classifier/feasibility from acquire-rootfs.sh"
   t_done; exit
 fi
@@ -54,11 +53,6 @@ assert_eq "rhui:aws"   "$(acq_classify_repo_access no  aws   yes)" "rhui beats o
 # none when nothing detected.
 assert_eq "none"       "$(acq_classify_repo_access no  ''    no)"  "anonymous"
 
-# --- acq_entitlement_feasible MODE ------------------------------------------
-assert_eq "feasible"    "$(acq_entitlement_feasible rhsm)"       "rhsm feasible"
-assert_eq "conditional" "$(acq_entitlement_feasible rhui:aws)"   "rhui aws conditional"
-assert_eq "conditional" "$(acq_entitlement_feasible rhui:other)" "rhui other conditional"
-assert_eq "na"          "$(acq_entitlement_feasible oci-ol)"     "oci-ol na"
-assert_eq "na"          "$(acq_entitlement_feasible none)"       "none na"
+# (acq_entitlement_feasible was removed in r46 - see lib/acquire-rootfs.sh)
 
 t_done
