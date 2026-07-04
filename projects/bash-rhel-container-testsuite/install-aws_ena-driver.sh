@@ -76,7 +76,7 @@ INSECURE_TLS="${INSECURE_TLS:-0}"
 # kernel/toolchain. RHEL 6 (old EL6 kernel + gcc) is pinned to an older driver
 # that still compiles there; RHEL 7-10 take the current 2.17.0. Explicit
 # ENA_VERSION overrides (the matrix passes one in test mode).
-ENA_VERSION_RHEL6="${ENA_VERSION_RHEL6:-2.9.1}"
+ENA_VERSION_RHEL6="${ENA_VERSION_RHEL6:-2.1.3}"
 ENA_VERSION_RHEL7="${ENA_VERSION_RHEL7:-2.17.0}"
 ENA_VERSION_RHEL8="${ENA_VERSION_RHEL8:-2.17.0}"
 ENA_VERSION_RHEL9="${ENA_VERSION_RHEL9:-2.17.0}"
@@ -234,6 +234,14 @@ build_ko() {
   src="$(fetch_src "${BUILT_DEST}")" || return 3   # r49: fetch/extract/locate, NOT make
   [ -n "${src}" ] || return 3
   BUILT_SRC="${src}"; MAKE_LOG="${BUILT_DEST}/make.log"
+  # r55: containers have no /lib/modules/<kver>/build symlink. Old-style ENA
+  # Makefiles (1.x through ~2.8.x) resolve BUILD_KERNEL through that path;
+  # creating it lets the same `make -C <src>` invocation work for both the
+  # old kbuild-delegation Makefile AND the modern vendored build system.
+  if [ ! -e "/lib/modules/${KVER}/build" ] && [ -d "/usr/src/kernels/${KVER}" ]; then
+    mkdir -p "/lib/modules/${KVER}"
+    ln -sf "/usr/src/kernels/${KVER}" "/lib/modules/${KVER}/build"
+  fi
   # r52: build through the driver's VENDORED build system, never raw kbuild.
   # Modern ENA sources require a generated config.h (feature-detection via
   # the bundled configure.sh, run by the vendored Makefile's config.h rule);

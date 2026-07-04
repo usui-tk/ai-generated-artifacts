@@ -72,8 +72,8 @@ assert_eq "latest"     "$(resolve_pin "${SSM}" SSM_LIB_ONLY SSM_VERSION 8)"  "ss
 assert_eq "latest"     "$(resolve_pin "${SSM}" SSM_LIB_ONLY SSM_VERSION 10)" "ssm RHEL10 -> latest"
 assert_eq "3.3.4001.0" "$(resolve_pin "${SSM}" SSM_LIB_ONLY SSM_VERSION 6 3.3.4001.0)" "ssm explicit version overrides the pin"
 
-# --- ENA: RHEL 6 older buildable driver; 7-10 current 2.17.0 ----------------
-assert_eq "2.9.1"  "$(resolve_pin "${ENA}" ENA_LIB_ONLY ENA_VERSION 6)"  "ena RHEL6 -> 2.9.1 (old EL6 kernel/toolchain)"
+# --- ENA: RHEL 6 user-verified 2.1.3 (last 2.6.32-compatible); 7-10 current ---
+assert_eq "2.1.3"  "$(resolve_pin "${ENA}" ENA_LIB_ONLY ENA_VERSION 6)"  "ena RHEL6 -> 2.1.3 (user-verified, kernel 2.6.32)"
 assert_eq "2.17.0" "$(resolve_pin "${ENA}" ENA_LIB_ONLY ENA_VERSION 7)"  "ena RHEL7 -> 2.17.0"
 assert_eq "2.17.0" "$(resolve_pin "${ENA}" ENA_LIB_ONLY ENA_VERSION 8)"  "ena RHEL8 -> 2.17.0"
 assert_eq "2.17.0" "$(resolve_pin "${ENA}" ENA_LIB_ONLY ENA_VERSION 9)"  "ena RHEL9 -> 2.17.0"

@@ -547,13 +547,17 @@ PYEOF
 
 # pe_smoke_pin TOOL MAJOR - adjudicated TRACK-RECORD pins for smoke sampling:
 # versions the user verified working on that major where the data-driven pick
-# cannot know it (r50). ssm/EL6 = 3.0.1479.0 (user-verified on real RHEL 6,
-# 2026-07-04; below the in-scope/compliance floor 3.3.3598.0 - the smoke goal
-# is SCRIPT health, and the pin is marked in the verdict table). Pins affect
-# ONLY smoke sampling, never the matrices' in-scope filtering.
+# cannot know it (r50). Pins affect ONLY smoke sampling, never the matrices'
+# in-scope filtering.
+#   ssm/EL6 = 3.0.1479.0 (user-verified on real RHEL 6, 2026-07-04; below the
+#     in-scope/compliance floor 3.3.3598.0).
+#   ena/EL6 = 2.1.3 (user-verified build+production on real RHEL 6; the last
+#     ENA version with explicit kernel 2.6.32 + RHEL 6.7-6.9 verification in
+#     upstream RELEASENOTES; modern versions >= ~2.9 dropped 2.6.32 support).
 pe_smoke_pin() {
   case "$1:$2" in
     ssm:6) printf '3.0.1479.0' ;;
+    ena:6) printf '2.1.3' ;;
     *)     : ;;
   esac
 }
