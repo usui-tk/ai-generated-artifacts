@@ -351,8 +351,13 @@ tests/probe-env.sh --facts --outdir /tmp/probe --shallow
 ```
 
 Conditions: `auto` = a PLAIN run (whatever the runtime injects by itself);
-`mounts` = the suite's legacy rhsm passthrough, kept ONLY as the A/B
-comparison arm. Engine: podman preferred (required for `mounts` and entitled
+`mounts` = the suite's legacy passthrough as the A/B comparison arm - the
+mount set follows the host's repo-access classification (rhsm on
+subscription-manager hosts, the RHUI file/cert set on AWS/Azure RHUI hosts;
+`MANIFEST.txt` records `repo_access=`). A host-side inventory lands in
+`OUTDIR/host/` (repo files, installed RHUI/subscription-manager packages,
+certificate metadata only - never private keys), rendered by the analyzer as
+`RF0`. Engine: podman preferred (required for `mounts` and entitled
 hosts); on a rootful sandbox without podman it falls back to a curl-pulled
 rootfs + chroot (anonymous facts only). Read-only by design: containers are
 `--rm` and the only host writes land under the output directory

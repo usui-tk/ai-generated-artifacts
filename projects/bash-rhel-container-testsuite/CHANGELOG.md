@@ -13,6 +13,24 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r40] - 2026-07-04 - feat: RHUI-aware fact probe (support-matrix grounding)
+
+### Changed
+- **`--facts` probes RHUI hosts as a first-class environment.** The `mounts`
+  A/B arm now selects the legacy mount set by the host's repo-access
+  classification (`acq_repo_access`): rhsm on subscription-manager hosts,
+  the RHUI repo-file/cert set on AWS/Azure RHUI hosts (previously hardcoded
+  to rhsm). `MANIFEST.txt` records the classification (`repo_access=`).
+
+### Added
+- **Host-side inventory** (`OUTDIR/host/`): repo-access classification, OS,
+  installed subscription-manager / RHUI client packages, the host's
+  `/etc/yum.repos.d/*.repo` files, and certificate METADATA only
+  (subject/issuer/dates; private keys and PEM bodies are deliberately not
+  collected - the output directory travels between machines). The analyzer
+  renders it as a new `RF0` section. The in-container collector additionally
+  records `/etc/pki/rhui` visibility (s03).
+
 ## [r39] - 2026-07-04 - feat: unified probe (readiness + --facts) and observation fixes
 
 ### Changed

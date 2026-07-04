@@ -117,6 +117,11 @@ case "${c_dnf}${c_el7}${c_el6}" in
   *)          t_pass "no collector step masks its rc behind a pipe" ;;
 esac
 assert_match "${c_dnf}" '/probe-out' "collector writes only under /probe-out"
+assert_match "${c_dnf}" '/etc/pki/rhui' "collector records in-container RHUI cert visibility (r40)"
+case "$(declare -f pe_host_inventory)" in
+  *'-key.pem'*) t_pass "host inventory skips private keys (metadata only)" ;;
+  *)            t_fail "host inventory must skip private keys" ;;
+esac
 # shellcheck disable=SC2016  # asserting the literal $c inside the EMITTED script
 assert_match "${c_dnf}" 'echo repo=\$c; dnf -q --enablerepo=\$c makecache' \
   "s12 records the candidate AND keeps makecache as the rc source"

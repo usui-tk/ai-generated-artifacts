@@ -197,7 +197,7 @@ r s02-files-pre 'ls -la /etc/yum.repos.d/ 2>&1; sha256sum /etc/yum.repos.d/*.rep
 mkdir -p "$O/files-pre" "$O/files-post" "$O/certs"
 cp -p /etc/yum.repos.d/*.repo "$O/files-pre/" 2>/dev/null
 cp -p /etc/pki/product-default/*.pem /etc/pki/product/*.pem "$O/certs/" 2>/dev/null
-r s03-secrets   'ls -laR /run/secrets/ 2>&1; sha256sum /run/secrets/redhat.repo 2>&1'
+r s03-secrets   'ls -laR /run/secrets/ 2>&1; sha256sum /run/secrets/redhat.repo 2>&1; ls -laR /etc/pki/rhui/ 2>&1'
 PART1
   printf "r s04-repolist-enabled-pre '%s'\n" "$(pc_repolist_cmd "${major}" enabled)"
   printf "r s05-repolist-all         '%s'\n" "$(pc_repolist_cmd "${major}" all)"
@@ -228,11 +228,15 @@ PART4
 # pe_record OUT MAJOR COND KEY VALUE - append one facts.tsv row.
 pe_record() { pc_tsv_row "$2" "$3" "$4" "$5" "$6" >> "$1/facts.tsv"; }
 
-# pe_collect_podman MAJOR COND DIR - one podman run executes the collector.
+# pe_collect_podman MAJOR COND DIR MODE - one podman run executes the
+# collector. MODE (rhsm | rhui:<provider> | oci-ol | none, from
+# acq_repo_access) selects which legacy mount set the `mounts` A/B arm
+# applies - rhsm on subscription-manager hosts, the RHUI file/cert set on
+# AWS/Azure RHUI hosts (r40: RHUI is now a first-class probed environment).
 pe_collect_podman() {
-  local major="$1" cond="$2" dir="$3" ref margs=""
+  local major="$1" cond="$2" dir="$3" mode="$4" ref margs=""
   ref="$(acq_ref_for_major "${major}")" || return 1
-  [ "${cond}" = mounts ] && margs="$(acq_entitlement_mount_args rhsm)"
+  [ "${cond}" = mounts ] && margs="$(acq_entitlement_mount_args "${mode}")"
   pe_emit_collector "${major}" "${DEEP}" "${PKG_TIMEOUT}" > "${dir}/collector.sh"
   # shellcheck disable=SC2086  # margs is an intentional argv fragment
   timeout "${RUN_TIMEOUT}" podman run --rm ${margs} \
@@ -259,26 +263,55 @@ pe_collect_chroot() {
   return "${rc}"
 }
 
+# pe_host_inventory OUTDIR - host-side facts the container-side collection
+# cannot see: the repo-access classification, the host's repo definition
+# files, and CERTIFICATE METADATA ONLY (subject/issuer/dates via openssl;
+# private keys and PEM bodies are deliberately NOT collected - the output
+# directory travels between machines).
+pe_host_inventory() {
+  local h="$1/host" f
+  mkdir -p "${h}/yum.repos.d"
+  { uname -a; cat /etc/redhat-release 2>/dev/null; } > "${h}/host-os.txt" 2>&1
+  acq_repo_access > "${h}/repo-access.txt" 2>/dev/null
+  rpm -qa 'subscription-manager*' 'rh-amazon-rhui-client*' 'rhui-azure-rhel*' \
+          'google-rhui-client*' 2>/dev/null | sort > "${h}/host-packages.txt"
+  for f in /etc/yum.repos.d/*.repo; do
+    [ -f "${f}" ] && cp -p "${f}" "${h}/yum.repos.d/" 2>/dev/null
+  done
+  : > "${h}/certs.txt"
+  for f in /etc/pki/entitlement/*.pem /etc/pki/rhui/*.pem /etc/pki/rhui/*.crt \
+           /etc/pki/rhui/product/*.pem /etc/pki/rhui/product/*.crt; do
+    [ -e "${f}" ] || continue
+    case "${f}" in *-key.pem|*key*) continue ;; esac
+    {
+      printf '== %s ==\n' "${f}"
+      openssl x509 -in "${f}" -noout -subject -issuer -dates 2>&1
+    } >> "${h}/certs.txt"
+  done
+}
+
 pe_facts() {
-  local engine major cond dir rc pem tags pid ts
+  local engine major cond dir rc pem tags pid ts mode=none
   if command -v podman >/dev/null 2>&1; then engine=podman
   elif [ "$(id -u)" = 0 ] && command -v chroot >/dev/null 2>&1; then engine=chroot
   else log "--facts needs podman, or root+chroot"; return 2; fi
+  mode="$(acq_repo_access | cut -d'|' -f1)"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   OUTDIR="${OUTDIR:-${HERE}/ENTITLEMENT-PROBE-${ts}}"
   mkdir -p "${OUTDIR}"
   {
     echo "engine=${engine}"; echo "date_utc=${ts}"; echo "majors=${MAJORS}"
-    echo "conds=${CONDS}"; echo "deep=${DEEP}"
+    echo "conds=${CONDS}"; echo "deep=${DEEP}"; echo "repo_access=${mode}"
     echo "build_pkgs=$(pc_build_pkgset)"; echo "install_pkgs=$(pc_install_pkgset)"
     echo "host=$(uname -sr)"
   } > "${OUTDIR}/MANIFEST.txt"
+  pe_host_inventory "${OUTDIR}"
   : > "${OUTDIR}/facts.tsv"
   for major in ${MAJORS}; do
     for cond in ${CONDS}; do
       dir="${OUTDIR}/raw/${major}/${cond}"; mkdir -p "${dir}"
-      log "collect major=${major} cond=${cond} engine=${engine}"
-      if [ "${engine}" = podman ]; then pe_collect_podman "${major}" "${cond}" "${dir}"
+      log "collect major=${major} cond=${cond} engine=${engine} mode=${mode}"
+      if [ "${engine}" = podman ]; then pe_collect_podman "${major}" "${cond}" "${dir}" "${mode}"
       else pe_collect_chroot "${major}" "${cond}" "${dir}"; fi
       rc=$?
       pe_record "${OUTDIR}" meta "${major}" "${cond}" collect_rc "${rc}"

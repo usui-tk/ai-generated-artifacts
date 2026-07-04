@@ -78,6 +78,21 @@ an_txn_pairs() {
   cat "${OUT}/MANIFEST.txt"
   echo '```'
   echo
+  if [ -d "${OUT}/host" ]; then
+    echo "## RF0 - host inventory (r40: RHSM/RHUI support-matrix grounding)"
+    echo
+    echo '```'
+    cat "${OUT}/host/host-os.txt" 2>/dev/null
+    printf 'repo_access: '; cat "${OUT}/host/repo-access.txt" 2>/dev/null; echo
+    echo '-- host packages (subscription-manager / RHUI clients) --'
+    cat "${OUT}/host/host-packages.txt" 2>/dev/null
+    echo '-- host repo files --'
+    ls "${OUT}/host/yum.repos.d/" 2>/dev/null
+    echo '-- host certificates (metadata only) --'
+    cat "${OUT}/host/certs.txt" 2>/dev/null
+    echo '```'
+    echo
+  fi
   echo "## F1 - enabled repos per major x condition (post-trigger)"
   echo
   echo "| major | cond | status | enabled repo id | defining file |"
