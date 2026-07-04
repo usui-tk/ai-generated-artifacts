@@ -13,6 +13,20 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r43] - 2026-07-04 - feat: capture the RHUI client implementation (authorization is server-side)
+
+### Added
+- **RHUI client implementation capture** (`host/rhui-client-files-*.txt`,
+  `host/rhui-client-src/`, `host/dnf-vars.txt`): the client package's file
+  list, its dnf plugin / config / repo / vars sources, and the host's dnf
+  vars. Code and config only - no secrets. Motivation, from the 2026-07-04
+  third AWS round: `rct cat-cert` shows the AWS RHUI client certificates are
+  content-set-LESS identity certificates (authorization is SERVER-side, not
+  in-cert), and the repomd-layer check returned 403 for every path
+  INCLUDING the host's own major - so whatever dnf sends beyond the bare
+  TLS client certificate must live in this client machinery, and reading it
+  is the prerequisite for a correct authorization probe.
+
 ## [r42] - 2026-07-04 - fix: RHUI authorization probed at the repomd layer + certificate content sets
 
 ### Fixed

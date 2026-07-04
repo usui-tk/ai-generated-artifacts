@@ -291,6 +291,8 @@ pe_host_inventory() {
   # r42: the AUTHORITATIVE authorization list lives inside the certificates
   # themselves - rct cat-cert (ships with subscription-manager) decodes the
   # content-set extension into readable paths. Text only; no key material.
+  # (r43 finding: AWS RHUI client certs are content-set-LESS identity certs,
+  # so authorization is server-side - see the client-implementation capture.)
   if command -v rct >/dev/null 2>&1; then
     : > "${h}/content-sets.txt"
     for f in /etc/pki/rhui/product/*.crt /etc/pki/rhui/product/*.pem \
@@ -302,6 +304,28 @@ pe_host_inventory() {
         rct cat-cert "${f}" 2>&1
       } >> "${h}/content-sets.txt"
     done
+  fi
+  # r43: capture the RHUI client IMPLEMENTATION (package file list, dnf
+  # plugin/config sources, dnf vars). Motivation: with identity-only certs
+  # AND repomd_http=403 even for the host's own major, whatever dnf sends
+  # beyond the bare TLS client cert must live in this client machinery.
+  # Code and config only - no secrets.
+  local pkg
+  for pkg in rh-amazon-rhui-client rhui-azure-rhel10 rhui-azure-rhel9 \
+             rhui-azure-rhel8 google-rhui-client; do
+    rpm -q "${pkg}" >/dev/null 2>&1 || continue
+    rpm -ql "${pkg}" > "${h}/rhui-client-files-${pkg}.txt" 2>/dev/null
+    mkdir -p "${h}/rhui-client-src"
+    while IFS= read -r f; do
+      case "${f}" in
+        *.py|*.conf|*.repo|*/dnf/vars/*|*/yum/vars/*)
+          [ -f "${f}" ] && cp -p "${f}" "${h}/rhui-client-src/" 2>/dev/null ;;
+      esac
+    done < "${h}/rhui-client-files-${pkg}.txt"
+  done
+  if [ -d /etc/dnf/vars ]; then
+    { ls -la /etc/dnf/vars/; grep -r . /etc/dnf/vars/ 2>/dev/null; } \
+      > "${h}/dnf-vars.txt" 2>&1
   fi
 }
 
