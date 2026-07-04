@@ -478,24 +478,114 @@ pe_facts() {
   log "analyze: bash tools/analyze-entitlement.sh ${OUTDIR}"
 }
 
+# ---------------------------------------------------------------------------
+# --smoke mode (r47, user requirement): ONE command, EVERY major, ONE sample
+# per tool - a quick suite-health signal without the full matrix sweeps.
+# Reuses the tested pipeline as-is (provision_prepare_majors + the install
+# scripts' test mode) and touches NO ledgers/RESULTS files.
+# ---------------------------------------------------------------------------
+
+# pe_smoke_latest RELEASES_JSON - the newest version in the tool's releases
+# file (numeric-component sort; the matrices' in-scope filtering is not
+# needed for a single-latest smoke sample).
+pe_smoke_latest() {
+  python3 - "$1" <<'PYEOF'
+import json,re,sys
+d=json.load(open(sys.argv[1]))
+vs=[(x.get("version") if isinstance(x,dict) else x) for x in (d.get("versions") or [])]
+vs=[v for v in vs if v]
+key=lambda v:[int(x) for x in re.findall(r"\d+", str(v))]
+print(sorted(vs,key=key)[-1] if vs else "")
+PYEOF
+}
+
+# pe_result_field TEXT FIELD - pull FIELD out of the single-line
+# "[...][result] {json}" an install script emits ("" if absent/unparsable).
+pe_result_field() {
+  PE_RESULT_TEXT="$1" python3 - "$2" <<'PYEOF'
+import json,os,sys
+field=sys.argv[1]
+val=""
+for line in os.environ.get("PE_RESULT_TEXT","").splitlines():
+    i=line.find("[result] ")
+    if i<0: continue
+    try: val=str(json.loads(line[i+9:]).get(field,""))
+    except Exception: pass
+print(val)
+PYEOF
+}
+
+# pe_smoke - provision every major once, then run the latest version of each
+# tool's install script in test mode, one container per (major, tool).
+pe_smoke() {
+  command -v podman >/dev/null 2>&1 || { log "--smoke needs podman (L3)"; return 2; }
+  # shellcheck source=../lib/provision-test-env.sh
+  . "${PROJ}/lib/provision-test-env.sh"
+  host_banner
+  local mode ena_ent prep_map major ref tool script ver envs out rc status reason fails=0 rows=""
+  mode="$(acq_repo_access | cut -d'|' -f1)"
+  case "${mode}" in rhsm) ena_ent=entitled ;; *) ena_ent=anonymous ;; esac
+  log "smoke: majors [${MAJORS}] x tools [${SMOKE_TOOLS:-awscli ssm ena}] (mode=${mode}, latest version each)"
+  prep_map="$(mktemp)"
+  provision_prepare_majors "${MAJORS}" "" "${prep_map}" || { rm -f "${prep_map}"; return 2; }
+  while IFS=' ' read -r major ref; do
+    [ -n "${major}" ] || continue
+    for tool in ${SMOKE_TOOLS:-awscli ssm ena}; do
+      case "${tool}" in
+        awscli) script="${PROJ}/install-aws_awscli-v2.sh"
+                ver="$(pe_smoke_latest "${PROJ}/tests/aws_awscli-v2/awscli-releases.json")"
+                envs=(-e AWSCLI_INSTALLTEST=1 -e "AWSCLI_VERSION=${ver}") ;;
+        ssm)    script="${PROJ}/install-aws_ssm-agent.sh"
+                ver="$(pe_smoke_latest "${PROJ}/tests/aws_ssm-agent/ssm-releases.json")"
+                envs=(-e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e SSM_INIT_MODE=none) ;;
+        ena)    script="${PROJ}/install-aws_ena-driver.sh"
+                ver="$(pe_smoke_latest "${PROJ}/tests/aws_ena-driver/ena-driver-releases.json")"
+                envs=(-e ENA_INSTALLTEST=1 -e "ENA_VERSION=${ver}" -e "ENA_ENTITLEMENT=${ena_ent}" -e ENA_BUILD_PLAN=make) ;;
+        *)      log "smoke: unknown tool '${tool}'"; continue ;;
+      esac
+      out="$(timeout "${RUN_TIMEOUT}" podman run --rm -v "${script}:/smoke.sh:ro,z"               -e "INSECURE_TLS=${INSECURE_TLS:-0}" "${envs[@]}"               "${ref}" /bin/bash /smoke.sh 2>&1)"; rc=$?
+      status="$(pe_result_field "${out}" status)"
+      reason="$(pe_result_field "${out}" reason)"
+      if [ "${status}" != ok ]; then
+        fails=$((fails+1))
+        [ -n "${status}" ] || { status="error"; reason="rc=${rc}, no [result] line"; }
+      fi
+      rows="${rows}$(printf '%-7s %-7s %-14s %-6s %s' "RHEL${major}" "${tool}" "${ver}" "${status}" "${reason:--}")
+"
+      log "RHEL${major} ${tool} ${ver}: ${status}${reason:+ (${reason})}"
+    done
+  done < "${prep_map}"
+  rm -f "${prep_map}"
+  printf '\n== smoke (1 sample/tool, every major; mode=%s) ==\n' "${mode}"
+  printf '%-7s %-7s %-14s %-6s %s\n' major tool version status note
+  printf '%s' "${rows}"
+  printf '\nsmoke: %s\n' "$( [ "${fails}" -eq 0 ] && echo 'ALL OK' || echo "${fails} non-ok cell(s)" )"
+  [ "${fails}" -eq 0 ]
+}
+
 pe_main() {
   local action=readiness
   while [ $# -gt 0 ]; do
     case "$1" in
       --probe-env) action=readiness; shift ;;
       --facts)     action=facts; shift ;;
+      --smoke)     action=smoke; shift ;;
       --majors)    MAJORS="$2"; shift 2 ;;
       --conds)     CONDS="$2"; shift 2 ;;
       --outdir)    OUTDIR="$2"; shift 2 ;;
       --json)      OUT_JSON="$2"; shift 2 ;;
       --shallow)   DEEP=0; shift ;;
-      -h|--help)   printf 'usage: probe-env.sh [--probe-env|--facts] [--majors "10 9 8 7 6"]\n'
+      -h|--help)   printf 'usage: probe-env.sh [--probe-env|--facts|--smoke] [--majors "10 9 8 7 6"]\n'
                    printf '       readiness: [--json PATH]\n'
                    printf '       facts:     [--conds "auto mounts"] [--outdir DIR] [--shallow]\n'; return 0 ;;
       *)           log "unknown arg: $1"; return 2 ;;
     esac
   done
-  if [ "${action}" = facts ]; then pe_facts; else probe_readiness; fi
+  case "${action}" in
+    facts) pe_facts ;;
+    smoke) pe_smoke ;;
+    *)     probe_readiness ;;
+  esac
 }
 
 # t017/t023 source this file with PE_SOURCED=1 to unit-test the pure layer.

@@ -148,6 +148,21 @@ assert_rc 0 "$?" "collector(6) passes bash -n"
 printf '%s\n' "${c_dnf}" | bash -n 2>/dev/null
 assert_rc 0 "$?" "collector(10) passes bash -n"
 
+# --- --smoke helpers (r47): latest-version pick + [result] field parse ---------
+smoketmp="$(mktemp)"
+cat > "${smoketmp}" <<'JSONEOF'
+{"versions": [{"version": "2.9.1"}, {"version": "2.10.0"}, {"version": "2.2.3"}]}
+JSONEOF
+assert_eq "2.10.0" "$(pe_smoke_latest "${smoketmp}")" \
+  "smoke picks the numerically newest version (2.10.0 > 2.9.1)"
+printf '{"versions": ["1.2", "1.10"]}\n' > "${smoketmp}"
+assert_eq "1.10" "$(pe_smoke_latest "${smoketmp}")" "string-list versions also work"
+rm -f "${smoketmp}"
+res='[aws_ssm-agent][installtest][result] {"status":"ok","reason":"r1"}'
+assert_eq ok "$(pe_result_field "${res}" status)" "result field: status"
+assert_eq r1 "$(pe_result_field "${res}" reason)" "result field: reason"
+assert_eq "" "$(pe_result_field "no result line" status)" "missing [result] -> empty"
+
 # --- probe_verdict still loads and classifies (integration guard) --------------
 assert_eq blocked "$(probe_verdict fail ok ok reachable)" "verdict: exec fail -> blocked"
 assert_eq ready   "$(probe_verdict ok ok ok reachable)"   "verdict: all ok -> ready"

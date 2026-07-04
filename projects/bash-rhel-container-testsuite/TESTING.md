@@ -333,6 +333,15 @@ so results are host-independent and deterministic.
 
 ---
 
+## Suite smoke: `tests/probe-env.sh --smoke`
+
+One command, every major, one sample per tool - the quick health signal
+between full matrix sweeps: provisions each target major once, runs the
+LATEST version of each install script (awscli / ssm / ena; subset with
+`SMOKE_TOOLS="awscli ssm"`) in its test mode, one `--rm` container per
+(major, tool), and prints a major x tool verdict table. Ledgers and
+RESULTS files are never touched; exit 0 means every cell reported `ok`.
+
 ## Entitlement fact-probe (Phase A): `tests/probe-env.sh --facts`
 
 The reproducible collector behind the entitlement re-investigation (a

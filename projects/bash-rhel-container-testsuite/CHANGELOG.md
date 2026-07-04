@@ -13,6 +13,20 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r47] - 2026-07-04 - feat: `--smoke` - one command, every major, one sample per tool
+
+### Added
+- **`tests/probe-env.sh --smoke`** (user requirement): a quick suite-health
+  signal - provision every target major once, then run the LATEST version of
+  each tool's install script (awscli / ssm / ena, override with
+  `SMOKE_TOOLS`) in test mode, one `--rm` container per (major, tool),
+  and print a major x tool verdict table. Reuses the tested pipeline
+  (`provision_prepare_majors` + the install scripts' `[result]` contract)
+  and never touches ledgers/RESULTS files. Exit 0 only if every cell is
+  `ok`. ENA's entitlement declaration follows the host mode (rhsm ->
+  entitled, otherwise anonymous -> the needs-entitlement path). Helpers
+  (`pe_smoke_latest`, `pe_result_field`) are unit-covered in t023.
+
 ## [r46] - 2026-07-04 - fix: containers run PLAIN - the harmful rhsm mounts are gone (Step 4, D-S1..S6)
 
 ### Changed
