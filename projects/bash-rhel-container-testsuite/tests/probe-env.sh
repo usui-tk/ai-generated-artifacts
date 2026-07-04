@@ -515,52 +515,139 @@ print(val)
 PYEOF
 }
 
-# pe_smoke - provision every major once, then run the latest version of each
-# tool's install script in test mode, one container per (major, tool).
+# pe_smoke_expected STATUS - rc0 iff STATUS is a healthy/EXPECTED
+# classification: ok, unsupported (measured platform incompatibility, e.g.
+# EL6+latest agent), unavailable (artifact not published). ENA's anonymous
+# needs-entitlement path reports status=ok with a reason, so it is covered.
+pe_smoke_expected() {
+  case "$1" in ok|unsupported|unavailable) return 0 ;; *) return 1 ;; esac
+}
+
+# pe_smoke_tool_spec TOOL ENA_ENT - set SMK_SCRIPT / SMK_VER / SMK_ENVS for a
+# tool sample (latest released version, the install script's test mode).
+pe_smoke_tool_spec() {
+  local tool="$1" ena_ent="$2"
+  case "${tool}" in
+    awscli) SMK_SCRIPT="${PROJ}/install-aws_awscli-v2.sh"
+            SMK_VER="$(pe_smoke_latest "${PROJ}/tests/aws_awscli-v2/awscli-releases.json")"
+            SMK_ENVS=(AWSCLI_INSTALLTEST=1 "AWSCLI_VERSION=${SMK_VER}") ;;
+    ssm)    SMK_SCRIPT="${PROJ}/install-aws_ssm-agent.sh"
+            SMK_VER="$(pe_smoke_latest "${PROJ}/tests/aws_ssm-agent/ssm-releases.json")"
+            SMK_ENVS=(SSM_INSTALLTEST=1 "SSM_VERSION=${SMK_VER}" SSM_INIT_MODE=none) ;;
+    ena)    SMK_SCRIPT="${PROJ}/install-aws_ena-driver.sh"
+            SMK_VER="$(pe_smoke_latest "${PROJ}/tests/aws_ena-driver/ena-driver-releases.json")"
+            SMK_ENVS=(ENA_INSTALLTEST=1 "ENA_VERSION=${SMK_VER}" "ENA_ENTITLEMENT=${ena_ent}" ENA_BUILD_PLAN=make) ;;
+    *) log "smoke: unknown tool '${tool}'"; return 1 ;;
+  esac
+}
+
+# pe_smoke_record MAJOR TOOL VER STATUS REASON OUT RC - classify one cell,
+# save the full container/chroot output for NON-expected cells (r48: the
+# first smoke E2E could not diagnose its failures for lack of logs).
+pe_smoke_record() {
+  local major="$1" tool="$2" ver="$3" status="$4" reason="$5" out="$6" rc="$7"
+  if [ -z "${status}" ]; then status="error"; reason="rc=${rc}, no [result] line"; fi
+  if ! pe_smoke_expected "${status}"; then
+    SMK_FAILS=$((SMK_FAILS+1))
+    mkdir -p "${SMK_LOGDIR}"
+    printf '%s\n' "${out}" > "${SMK_LOGDIR}/rhel${major}-${tool}.log"
+  fi
+  SMK_ROWS="${SMK_ROWS}$(printf '%-7s %-7s %-14s %-12s %s' "RHEL${major}" "${tool}" "${ver}" "${status}" "${reason:--}")
+"
+  log "RHEL${major} ${tool} ${ver}: ${status}${reason:+ (${reason})}"
+}
+
+# pe_smoke_umount_all - undo the chroot-engine mounts; trap-wired so failures
+# and interrupts never leave /proc//dev bind mounts behind.
+pe_smoke_umount_all() {
+  local d
+  for d in ${SMK_MOUNTED}; do
+    umount "${d}/dev" 2>/dev/null || true
+    umount "${d}/proc" 2>/dev/null || true
+  done
+  SMK_MOUNTED=""
+}
+
+# pe_smoke - one command, every major, one latest sample per tool. Engines:
+# podman (provisioned image per major; images removed on exit per the r48
+# cleanup requirement) or, on a rootless/podman-less ROOT sandbox, a chroot
+# fallback (curl-pulled rootfs + best-effort anonymous provisioning) so the
+# suite can self-verify smoke-level behavior before user evaluation.
 pe_smoke() {
-  command -v podman >/dev/null 2>&1 || { log "--smoke needs podman (L3)"; return 2; }
+  local engine major ref tool out rc status reason mode ena_ent prep_map d mgr so eargs kv
+  if command -v podman >/dev/null 2>&1; then engine=podman
+  elif [ "$(id -u)" = 0 ] && command -v chroot >/dev/null 2>&1; then engine=chroot
+  else log "--smoke needs podman, or root+chroot"; return 2; fi
   # shellcheck source=../lib/provision-test-env.sh
   . "${PROJ}/lib/provision-test-env.sh"
   host_banner
-  local mode ena_ent prep_map major ref tool script ver envs out rc status reason fails=0 rows=""
   mode="$(acq_repo_access | cut -d'|' -f1)"
   case "${mode}" in rhsm) ena_ent=entitled ;; *) ena_ent=anonymous ;; esac
-  log "smoke: majors [${MAJORS}] x tools [${SMOKE_TOOLS:-awscli ssm ena}] (mode=${mode}, latest version each)"
-  prep_map="$(mktemp)"
-  provision_prepare_majors "${MAJORS}" "" "${prep_map}" || { rm -f "${prep_map}"; return 2; }
-  while IFS=' ' read -r major ref; do
-    [ -n "${major}" ] || continue
-    for tool in ${SMOKE_TOOLS:-awscli ssm ena}; do
-      case "${tool}" in
-        awscli) script="${PROJ}/install-aws_awscli-v2.sh"
-                ver="$(pe_smoke_latest "${PROJ}/tests/aws_awscli-v2/awscli-releases.json")"
-                envs=(-e AWSCLI_INSTALLTEST=1 -e "AWSCLI_VERSION=${ver}") ;;
-        ssm)    script="${PROJ}/install-aws_ssm-agent.sh"
-                ver="$(pe_smoke_latest "${PROJ}/tests/aws_ssm-agent/ssm-releases.json")"
-                envs=(-e SSM_INSTALLTEST=1 -e "SSM_VERSION=${ver}" -e SSM_INIT_MODE=none) ;;
-        ena)    script="${PROJ}/install-aws_ena-driver.sh"
-                ver="$(pe_smoke_latest "${PROJ}/tests/aws_ena-driver/ena-driver-releases.json")"
-                envs=(-e ENA_INSTALLTEST=1 -e "ENA_VERSION=${ver}" -e "ENA_ENTITLEMENT=${ena_ent}" -e ENA_BUILD_PLAN=make) ;;
-        *)      log "smoke: unknown tool '${tool}'"; continue ;;
-      esac
-      out="$(timeout "${RUN_TIMEOUT}" podman run --rm -v "${script}:/smoke.sh:ro,z"               -e "INSECURE_TLS=${INSECURE_TLS:-0}" "${envs[@]}"               "${ref}" /bin/bash /smoke.sh 2>&1)"; rc=$?
-      status="$(pe_result_field "${out}" status)"
-      reason="$(pe_result_field "${out}" reason)"
-      if [ "${status}" != ok ]; then
-        fails=$((fails+1))
-        [ -n "${status}" ] || { status="error"; reason="rc=${rc}, no [result] line"; }
+  SMK_FAILS=0; SMK_ROWS=""; SMK_MOUNTED=""
+  SMK_LOGDIR="${HERE}/SMOKE-LOGS-$(date -u +%Y%m%dT%H%M%SZ)"
+  log "smoke: engine=${engine} majors [${MAJORS}] x tools [${SMOKE_TOOLS:-awscli ssm ena}] (mode=${mode}, latest version each)"
+  if [ "${engine}" = podman ]; then
+    # r48 (user requirement): provisioned test-env images are removed on
+    # EVERY exit path; KEEP_TEST_IMAGES=1 opts out. Base images stay.
+    trap provision_cleanup_images EXIT
+    prep_map="$(mktemp)"
+    provision_prepare_majors "${MAJORS}" "" "${prep_map}" || { rm -f "${prep_map}"; return 2; }
+    while IFS=' ' read -r major ref; do
+      [ -n "${major}" ] || continue
+      for tool in ${SMOKE_TOOLS:-awscli ssm ena}; do
+        pe_smoke_tool_spec "${tool}" "${ena_ent}" || continue
+        eargs=(); for kv in "${SMK_ENVS[@]}"; do eargs+=(-e "${kv}"); done
+        out="$(timeout "${RUN_TIMEOUT}" podman run --rm -v "${SMK_SCRIPT}:/smoke.sh:ro,z" \
+                -e "INSECURE_TLS=${INSECURE_TLS:-0}" -e "PKG_TIMEOUT=${PKG_TIMEOUT}" "${eargs[@]}" \
+                "${ref}" /bin/bash /smoke.sh 2>&1)"; rc=$?
+        status="$(pe_result_field "${out}" status)"
+        reason="$(pe_result_field "${out}" reason)"
+        pe_smoke_record "${major}" "${tool}" "${SMK_VER}" "${status}" "${reason}" "${out}" "${rc}"
+      done
+    done < "${prep_map}"
+    rm -f "${prep_map}"
+  else
+    trap pe_smoke_umount_all EXIT
+    for major in ${MAJORS}; do
+      d="${TMPDIR:-/tmp}/probe-smoke-$$/rhel${major}"
+      rm -rf "${d}"; mkdir -p "${d}"
+      if ! acq_pull_curl "${major}" "${d}" >/dev/null 2>&1; then
+        pe_smoke_record "${major}" "-" "-" "error" "rootfs pull failed" "" 1
+        rm -rf "${d}"; continue
       fi
-      rows="${rows}$(printf '%-7s %-7s %-14s %-6s %s' "RHEL${major}" "${tool}" "${ver}" "${status}" "${reason:--}")
-"
-      log "RHEL${major} ${tool} ${ver}: ${status}${reason:+ (${reason})}"
+      cp /etc/resolv.conf "${d}/etc/" 2>/dev/null || true
+      mount -t proc proc "${d}/proc" 2>/dev/null || true
+      mount --bind /dev "${d}/dev" 2>/dev/null || true
+      SMK_MOUNTED="${SMK_MOUNTED} ${d}"
+      mgr=dnf; chroot "${d}" /bin/sh -c 'command -v dnf' >/dev/null 2>&1 || mgr=yum
+      so=""; [ "${INSECURE_TLS:-0}" = "1" ] && so="--setopt=sslverify=0"
+      # shellcheck disable=SC2086  # so/PROVISION_PKGS word-split intentionally
+      timeout "${PKG_TIMEOUT}" chroot "${d}" "${mgr}" -y -q ${so} install ${PROVISION_PKGS} >/dev/null 2>&1 \
+        || log "RHEL${major}: chroot provisioning failed (anonymous rootfs; continuing best-effort)"
+      for tool in ${SMOKE_TOOLS:-awscli ssm ena}; do
+        pe_smoke_tool_spec "${tool}" "${ena_ent}" || continue
+        cp "${SMK_SCRIPT}" "${d}/tmp/smoke.sh"
+        out="$(timeout "${RUN_TIMEOUT}" chroot "${d}" /usr/bin/env "${SMK_ENVS[@]}" \
+                "INSECURE_TLS=${INSECURE_TLS:-0}" "PKG_TIMEOUT=${PKG_TIMEOUT}" \
+                bash /tmp/smoke.sh 2>&1)"; rc=$?
+        status="$(pe_result_field "${out}" status)"
+        reason="$(pe_result_field "${out}" reason)"
+        pe_smoke_record "${major}" "${tool}" "${SMK_VER}" "${status}" "${reason}" "${out}" "${rc}"
+      done
+      umount "${d}/dev" 2>/dev/null || true
+      umount "${d}/proc" 2>/dev/null || true
+      SMK_MOUNTED="${SMK_MOUNTED/ ${d}/}"
+      rm -rf "${d}"
     done
-  done < "${prep_map}"
-  rm -f "${prep_map}"
-  printf '\n== smoke (1 sample/tool, every major; mode=%s) ==\n' "${mode}"
-  printf '%-7s %-7s %-14s %-6s %s\n' major tool version status note
-  printf '%s' "${rows}"
-  printf '\nsmoke: %s\n' "$( [ "${fails}" -eq 0 ] && echo 'ALL OK' || echo "${fails} non-ok cell(s)" )"
-  [ "${fails}" -eq 0 ]
+    rm -rf "${TMPDIR:-/tmp}/probe-smoke-$$"
+  fi
+  printf '\n== smoke (1 sample/tool, every major; engine=%s, mode=%s) ==\n' "${engine}" "${mode}"
+  printf '%-7s %-7s %-14s %-12s %s\n' major tool version status note
+  printf '%s' "${SMK_ROWS}"
+  printf '\nexpected statuses: ok / unsupported / unavailable (needs-entitlement rides on ok)\n'
+  [ -d "${SMK_LOGDIR}" ] && printf 'failure logs: %s\n' "${SMK_LOGDIR}"
+  printf 'smoke: %s\n' "$( [ "${SMK_FAILS}" -eq 0 ] && echo 'ALL OK / EXPECTED' || echo "${SMK_FAILS} unexpected cell(s)" )"
+  [ "${SMK_FAILS}" -eq 0 ]
 }
 
 pe_main() {

@@ -335,6 +335,10 @@ run_matrix() {
   # shellcheck source=../../lib/provision-test-env.sh
   . "${PROJ_DIR}/lib/provision-test-env.sh"
   host_banner
+  # r48 (user requirement): the provisioned test-env images are removed on
+  # EVERY exit path - normal completion, failure, or interrupt. Base images
+  # (UBI/RHEL) are untouched; KEEP_TEST_IMAGES=1 opts out.
+  trap provision_cleanup_images EXIT
   # r46 (D-S1/D-S2): containers run PLAIN. RHSM hosts auto-inject entitled
   # repos per container; the entitled RHUI container path is pending.
   local repo_mode; repo_mode="$(acq_repo_access | cut -d'|' -f1)"

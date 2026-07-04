@@ -34,7 +34,7 @@ LIB="${PROJ}/lib/provision-test-env.sh"
 
 # --- the common manifest + tag logic (pure) ---------------------------------
 def="$(. "${LIB}"; printf '%s' "${PROVISION_PKGS}")"
-assert_eq "gawk" "${def}" "PROVISION_PKGS defaults to gawk (common per-OS manifest)"
+assert_eq "gawk unzip tar" "${def}" "PROVISION_PKGS defaults to gawk unzip tar (r48: awscli needs unzip)"
 
 tag_a="$(. "${LIB}"; PROVISION_PKGS='gawk'       provision_manifest_tag 6)"
 tag_b="$(. "${LIB}"; PROVISION_PKGS='gawk'       provision_manifest_tag 6)"

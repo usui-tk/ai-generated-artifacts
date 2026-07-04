@@ -158,6 +158,13 @@ assert_eq "2.10.0" "$(pe_smoke_latest "${smoketmp}")" \
 printf '{"versions": ["1.2", "1.10"]}\n' > "${smoketmp}"
 assert_eq "1.10" "$(pe_smoke_latest "${smoketmp}")" "string-list versions also work"
 rm -f "${smoketmp}"
+# pe_smoke_expected: the r48 expected-status classification
+for st in ok unsupported unavailable; do
+  if pe_smoke_expected "${st}"; then t_pass "expected status: ${st}"; else t_fail "expected status: ${st}"; fi
+done
+for st in fail error ""; do
+  if pe_smoke_expected "${st}"; then t_fail "non-expected status: '${st}'"; else t_pass "non-expected status: '${st}'"; fi
+done
 res='[aws_ssm-agent][installtest][result] {"status":"ok","reason":"r1"}'
 assert_eq ok "$(pe_result_field "${res}" status)" "result field: status"
 assert_eq r1 "$(pe_result_field "${res}" reason)" "result field: reason"

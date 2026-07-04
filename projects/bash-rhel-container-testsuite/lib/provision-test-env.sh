@@ -45,7 +45,11 @@
 # per test. Extend this list (space-separated) as tests reveal new needs.
 #   gawk : provides `awk`, required by the amazon-ssm-agent rpm %pretrans kernel
 #          guard; absent from the minimal RHEL 6 (rhel6/rhel) base image.
-PROVISION_PKGS="${PROVISION_PKGS:-gawk}"
+# r48: unzip + tar joined the manifest after the 2026-07-04 smoke E2E - the
+# awscli install needs unzip (its failure on every major traced to exactly
+# this gap; the image tag embeds the manifest fingerprint, so this change
+# auto-rebuilds stale images), and tar defensively covers source unpacking.
+PROVISION_PKGS="${PROVISION_PKGS:-gawk unzip tar}"
 
 # Majors whose provisioning failure is TOLERATED (skipped, not fatal) in the
 # pre-flight (provision_prepare_majors). RHEL 6 (rhel6/rhel) is non-UBI and has
@@ -68,6 +72,22 @@ provision_manifest_tag() {
   local major="$1" fp
   fp="$(printf '%s' "${PROVISION_PKGS}" | cksum | cut -d' ' -f1)"
   printf '%s:rhel%s-%s' "${PROVISION_IMG_PREFIX}" "${major}" "${fp}"
+}
+
+# provision_cleanup_images : remove every provisioned test-env image
+# (${PROVISION_IMG_PREFIX}:*), keeping base images (UBI/RHEL) untouched.
+# r48, user requirement: wired via `trap ... EXIT` in the matrix sweeps and
+# --smoke so normal completion, failures and interrupts ALL clean up.
+# KEEP_TEST_IMAGES=1 opts out (debugging / faster reruns).
+provision_cleanup_images() {
+  [ "${KEEP_TEST_IMAGES:-0}" = "1" ] && { provision_log "KEEP_TEST_IMAGES=1 - provisioned test-env images kept"; return 0; }
+  command -v podman >/dev/null 2>&1 || return 0
+  local imgs
+  imgs="$(podman images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep "^${PROVISION_IMG_PREFIX}:" || true)"
+  [ -n "${imgs}" ] || return 0
+  provision_log "cleanup: removing provisioned test-env images (KEEP_TEST_IMAGES=1 keeps them)"
+  # shellcheck disable=SC2086  # one image ref per word by construction
+  podman rmi -f ${imgs} >/dev/null 2>&1 || true
 }
 
 # provision_test_image <major> <base_ref> [ent_mounts] : ensure a per-OS

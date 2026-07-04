@@ -13,6 +13,37 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r48] - 2026-07-04 - fix: first smoke E2E findings + guaranteed test-image cleanup + smoke hardening
+
+### Fixed
+- **awscli failed on every major because the provisioning manifest lacked
+  unzip** (the image tag `...-970560763` is the fingerprint of the old
+  `gawk`-only manifest). `PROVISION_PKGS` now defaults to `gawk unzip tar`;
+  the fingerprint change auto-rebuilds stale images. Verified in a ubi9
+  chroot: awscli 2.35.14 reaches `status=ok`.
+- **ENA build deps gained `elfutils-libelf-devel`** - EL8+ kbuild
+  (objtool/resolve_btfids) needs libelf for external module builds; the
+  probe's measured build set already included it. (Entitled-build
+  confirmation needs the Step 5 rerun; smoke now preserves make logs.)
+- **EL6 x latest SSM agent is now classified `unsupported`, not `fail`**:
+  measured (smoke E2E + el6 chroot repro) - the 3.3.x rpm installs its files
+  but its `%posttrans` scriptlet requires systemd, impossible on
+  EL6/upstart. First-ever empirical EL6 SSM data point (RESULTS-rhel6 was
+  "not yet run").
+
+### Added
+- **Guaranteed test-image cleanup** (user requirement):
+  `provision_cleanup_images` removes every `rhel-testsuite-provisioned:*`
+  image, wired via `trap ... EXIT` into the three matrices and `--smoke`,
+  so normal completion, failures and interrupts all clean up. Base images
+  (UBI/RHEL) are untouched; `KEEP_TEST_IMAGES=1` opts out.
+- **Smoke hardening**: non-expected cells save the full container/chroot
+  output under `SMOKE-LOGS-<ts>/`; `unsupported` / `unavailable` (and
+  ENA's needs-entitlement, which rides on `ok`) count as EXPECTED, not
+  failures; and a root+chroot fallback engine lets a podman-less sandbox
+  self-verify smoke behavior before user evaluation (used for this
+  release: RHEL9 all-ok and EL6 ssm=unsupported were verified in-sandbox).
+
 ## [r47] - 2026-07-04 - feat: `--smoke` - one command, every major, one sample per tool
 
 ### Added

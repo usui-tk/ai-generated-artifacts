@@ -340,7 +340,14 @@ between full matrix sweeps: provisions each target major once, runs the
 LATEST version of each install script (awscli / ssm / ena; subset with
 `SMOKE_TOOLS="awscli ssm"`) in its test mode, one `--rm` container per
 (major, tool), and prints a major x tool verdict table. Ledgers and
-RESULTS files are never touched; exit 0 means every cell reported `ok`.
+RESULTS files are never touched. `ok`, `unsupported` and `unavailable`
+are EXPECTED statuses (ENA's anonymous needs-entitlement rides on `ok`);
+exit 0 means no unexpected cell. Non-expected cells preserve their full
+output under `tests/SMOKE-LOGS-<timestamp>/`. Provisioned test-env images
+are removed on every exit path (trap; `KEEP_TEST_IMAGES=1` keeps them) -
+this also applies to the three matrix sweeps. Without podman, a
+root+chroot fallback (curl-pulled rootfs, best-effort anonymous
+provisioning) runs the same samples for sandbox self-verification.
 
 ## Entitlement fact-probe (Phase A): `tests/probe-env.sh --facts`
 

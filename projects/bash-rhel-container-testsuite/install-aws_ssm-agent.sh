@@ -73,6 +73,18 @@ die() {
   exit 1
 }
 
+# die_unsupported : like die, but the outcome is a MEASURED platform
+# incompatibility, not a failure of this run - status "unsupported" (r48).
+die_unsupported() {
+  log "UNSUPPORTED: $*"
+  if [ "${SSM_INSTALLTEST}" = "1" ] && [ "${RESULT_EMITTED}" = "0" ]; then
+    RESULT_EMITTED=1
+    printf '[aws_ssm-agent][installtest][result] {"status":"unsupported","tool":"aws_ssm-agent","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"reason":"%s"}\n' \
+      "${OSMAJOR}" "${SSM_VERSION}" "${SSM_INIT_MODE}" "${GLIBC}" "${INSTALLED}" "${RAN}" "${SVC}" "$(json_escape "$*")"
+  fi
+  exit 1
+}
+
 os_major() {
   if [ -r /etc/os-release ]; then
     # shellcheck disable=SC1091
@@ -165,7 +177,17 @@ install_rpm() {
   curl "${copts[@]}" "${url}" || { rm -rf "${tmp}"; die "fetch failed: ${url}"; }
   if [ "${mgr}" != "none" ]; then
     pm_install_local_rpm "${mgr}" "${tmp}/ssm.rpm" \
-      || { local reason="${PM_INSTALL_ERR}"; rm -rf "${tmp}"; die "rpm install via ${mgr} failed${reason:+: ${reason}}"; }
+      || { local reason="${PM_INSTALL_ERR}"; rm -rf "${tmp}"
+           # r48, measured 2026-07-04 (smoke E2E + el6 chroot repro): the 3.3.x
+           # agent rpm INSTALLS its files on EL6 but its %posttrans scriptlet
+           # requires systemd, so yum reports a POSTTRANS scriptlet error
+           # (retries then see "does not update installed package"). That is a
+           # platform incompatibility (EL6 = upstart), not a run failure.
+           case "${OSMAJOR}:${reason}" in
+             6:*"POSTTRANS scriptlet"*|6:*"does not update installed package"*)
+               die_unsupported "agent %posttrans requires systemd; EL6/upstart cannot run this agent${reason:+: ${reason}}" ;;
+           esac
+           die "rpm install via ${mgr} failed${reason:+: ${reason}}"; }
   else
     local rpmerr
     if ! rpmerr="$(rpm -i "${tmp}/ssm.rpm" 2>&1 1>/dev/null)"; then

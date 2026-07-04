@@ -128,8 +128,12 @@ ena_pm() { command -v dnf >/dev/null 2>&1 && printf 'dnf' || printf 'yum'; }
 ensure_build_deps() {
   local mgr; mgr="$(ena_pm)"
   ENA_PM_LOG="$(mktemp)"
-  log "entitled: installing build deps (gcc make kernel-devel) via ${mgr}"
-  run_pm "${mgr}" -y install gcc make >>"${ENA_PM_LOG}" 2>&1 || return 1
+  # r48: elfutils-libelf-devel added - EL8+ kbuild (objtool/resolve_btfids)
+  # needs libelf headers for external module builds; harmless on 6/7. The
+  # 2026-07-04 smoke E2E showed make failing on every major without it (the
+  # probe's measured build package set already included it).
+  log "entitled: installing build deps (gcc make elfutils-libelf-devel kernel-devel) via ${mgr}"
+  run_pm "${mgr}" -y install gcc make elfutils-libelf-devel >>"${ENA_PM_LOG}" 2>&1 || return 1
   run_pm "${mgr}" -y install kernel-devel >>"${ENA_PM_LOG}" 2>&1 || return 3
   if [ "${ENA_BUILD_PLAN}" = "dkms" ]; then
     run_pm "${mgr}" -y install dkms >>"${ENA_PM_LOG}" 2>&1 || true   # dkms is EPEL-only; best-effort
