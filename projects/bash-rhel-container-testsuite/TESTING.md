@@ -58,22 +58,25 @@ deferred.
 The vendor base image is a *starting point*, not a ready-made test platform.
 Between acquisition (L1) and the test (L3), the harness provisions a per-OS
 "test-ready" image: `lib/provision-test-env.sh` installs a **common package
-manifest** (`PROVISION_PKGS`, default `gawk`) onto the base and commits ONE image
-per OS major, reused across the sweep (idempotent - the image tag embeds a
-fingerprint of the manifest, so a changed manifest rebuilds and an unchanged one
-reuses the commit). The manifest is common to every tool - one image per OS, not
-one per test - so the three L3 matrices resolve their base ref, then run against
-the provisioned ref.
+manifest** (`PROVISION_PKGS`, default `gawk unzip tar`) onto the base and
+commits ONE image per OS major, reused across the run (the tag is a
+human-readable run timestamp, `rhel<N>-YYYYMMDDhhmmss`). The manifest is
+common to every tool - one image per OS, not one per test - so the three L3
+matrices resolve their base ref, then run against the provisioned ref. The
+images are **run-scoped**: a `trap ... EXIT` in every matrix and in `--smoke`
+removes all provisioned images on completion, failure and interrupt alike
+(`KEEP_TEST_IMAGES=1` keeps them for debugging; base images stay).
 
 It exists because the minimal images are not complete for every major: RHEL 6
 (`rhel6/rhel`) ships without `awk`, which the amazon-ssm-agent rpm's `%pretrans`
-guard calls, so a bare EL6 install fails before it starts. The manifest install
-is **repo-access-agnostic** (r36): it neutralizes the RHSM plugins when anonymous
-and installs with `*.skip_if_unavailable=1`, so the mounted host `redhat.repo`
-(the HOST major's entitled repos - wrong-major / unregistered inside a container)
-is skipped instead of failing the transaction; the package resolves from any
-working repo (public UBI / entitled `rhel-*` / RHUI). Leaving that fatal was the
-r33 defect that skipped RHEL 8/9/10 on an entitled host.
+guard calls, so a bare EL6 install fails before it starts; `unzip`/`tar` serve
+the AWS CLI bundle and source unpacking. The install runs in a **plain
+container** (r46): entitled hosts auto-inject the per-major repos, anonymous
+hosts resolve the manifest from UBI (measured on 7-10). The RHSM plugins are
+neutralized only when no entitlement certs are visible (defensive; the
+historical hang did not reproduce in the 2026-07-04 probes). `skip_if_unavailable`
+is gone (r46) - it existed to paper over the removed host-file mounts and
+would now only hide real repo failures.
 
 **Provisioning is a test prerequisite (r36).** Each matrix prepares every
 requested major's image *before* any test runs (a pre-flight). If a major cannot
@@ -304,10 +307,11 @@ so results are host-independent and deterministic.
   `os_major`) are byte-identical across all three install scripts, so a fix
   applied to one copy that drifts from the others fails the suite.
 
-* **`t021_provisionenv.sh`** (r33, r36) - the test-env provisioning helper
-  `lib/provision-test-env.sh` under a PATH-mock `podman`: the `PROVISION_PKGS`
-  default, manifest-tag determinism + per-major / per-manifest fingerprinting,
-  idempotent reuse, build+commit, the repo tolerance (`skip_if_unavailable`), the
+* **`t021_provisionenv.sh`** (r33, r36, r48-r53) - the test-env provisioning
+  helper `lib/provision-test-env.sh` under a PATH-mock `podman`: the
+  `PROVISION_PKGS` default, the per-run timestamp tag contract,
+  idempotent reuse, build+commit, the no-repo-masking pin (absence of
+  `skip_if_unavailable`, r48), the
   real package-manager stderr surfaced on failure (`PROVISION_LAST_ERR`), and the
   PRE-FLIGHT policy (`provision_prepare_majors`: all majors prepared; a
   non-optional major aborts the run; EL6 tolerated and absent from the sweep).
@@ -372,7 +376,8 @@ tests/probe-env.sh --facts --outdir /tmp/probe --shallow
 ```
 
 Conditions: `auto` = a PLAIN run (whatever the runtime injects by itself);
-`mounts` = the suite's legacy passthrough as the A/B comparison arm - the
+`mounts` = the suite's REMOVED legacy mount set, kept in the probe purely as
+the A/B comparison arm that proved its harm - the
 `docmounts` arm (added by default on RHUI hosts) probes the whole-directory
 recipe from a user-provided AWS-RHUI article (`/etc/yum.repos.d`,
 `/etc/pki/rhui`, plugin config dirs) as a hypothesis under test; the
@@ -434,64 +439,52 @@ RHEL 7-10 use public UBI images; **RHEL 6 uses the bare `rhel6/rhel` image**
 host must run amd64 and be able to execute glibc-2.12 userspace, and the container
 must reach `s3.amazonaws.com` (SSM RPM) and `dl.fedoraproject.org` (EPEL, archive
 tree). The bare image also ships the `subscription-manager`/`product-id` yum
-plugins: **without an entitlement they try to reach RHSM and hang indefinitely**.
-The install scripts therefore disable those two plugins for the container run when
+plugins: a hang was observed historically (r18) and attributed to them
+reaching RHSM without an entitlement, but it did **not reproduce** in the
+2026-07-04 probe runs (anonymous EL6 completes with rc=0).
+The install scripts still disable those two plugins for the container run when
 no entitlement certs are present (kept ON when certs are present, since entitled
 repos need them) - so `yum` works normally against the pinned EPEL repo and other
 reachable repos. The host is never changed.
 
-## Entitlement passthrough (RHSM / RHUI) and platform classification
+## Repo access: auto-injection (RHSM), anonymous, and RHUI (pending)
 
-`--run` can pass the host's repo access into each container so entitled content
-(e.g. `kernel-devel`, or DKMS from a base repo) is reachable. The decision lives
-in one place - `lib/acquire-rootfs.sh` - and the sweep consumes it (the probe
-stopped consuming the mount decision in r39; its readiness checks observe the
-plain, auto-injected state instead), so there is no duplicated logic.
+Containers run **PLAIN - no mounts of any kind** (r46). On a
+subscription-registered RHEL host, rootful podman auto-injects `/run/secrets`
+(a `redhat.repo` template, the rhsm config, the entitlement certs) into every
+container, and the first `makecache` makes the subscription-manager plugin
+generate a correct **per-major** `redhat.repo` from the container's own
+product cert - an EL8 container gets `rhel-8-*`, an EL9 container `rhel-9-*`,
+on the same host (measured for all majors 6-10; the EL6 image participates
+via its shipped `-host` symlinks). The former host-file mounts were measured
+actively harmful (wrong-major repos, cert permission failures, blocked
+generation, EL7's entitled repo lost) and were removed; the matrices log the
+host's repo-access mode instead.
 
-`acq_repo_access` classifies the host (multi-signal, `>= 2` cues agree where
-possible) into one of:
+`acq_repo_access` still classifies the host (multi-signal) into
+**rhsm / rhui:aws|azure|gcp|other / oci-ol / none** - for logging and for the
+RHUI safety decision below; it no longer drives any mounts.
 
-- **rhsm** - subscription-manager entitlement certs at `/etc/pki/entitlement/*.pem`
-  (physical/VM registered, or cloud BYOS). Passthrough is *feasible*.
-- **rhui:aws | rhui:azure | rhui:gcp | rhui:other** - cloud Red Hat Update
-  Infrastructure, detected from the client RPM (`rh-amazon-rhui-client`,
-  `rhui-azure-rhel*`, `google-rhui-client-*`), the repo baseurl host
-  (`aws.ce.redhat.com`, `*.microsoft.com`, `googlecloud`), and the platform
-  (DMI). Passthrough is *conditional* - RHUI endpoints are reachable only from
-  the cloud instance's network, so the run shares host networking and degrades
-  with a clear reason if unreachable.
-- **oci-ol** - Oracle Cloud's Oracle Linux regional yum (`ociregion`/`ocidomain`,
-  `oci.oraclecloud.com`). This is Oracle Linux content, not RHEL, so RHEL
-  entitled passthrough is *n/a* (reported for visibility only). OCI does not
-  offer a Red Hat RHUI for RHEL; RHEL on OCI is BYOS -> rhsm.
-- **none** - anonymous (no mounts added; behaviour unchanged).
+With auto-injection in place, the **ENA** build test's entitled path installs
+`gcc`, `make`, `elfutils-libelf-devel` and `kernel-devel` from the container's
+own entitled repos, then compiles `ena.ko` through the driver's **vendored
+build system** (`make -C <src> KERNEL_BUILD_DIR=/usr/src/kernels/<kver>
+BUILD_KERNEL=<kver>` - the bundled `configure.sh` generates the required
+`config.h`; raw kbuild does not work for modern ENA sources). This is a
+*compile* test: each major builds against its own kernel headers, independent
+of the running host kernel (module LOAD is never attempted in a container -
+L4). SSM (local RPM) and AWS CLI v2 (self-contained S3 zip) are
+entitlement-independent.
 
-For **rhsm** the mount set is the entitlement certs, `/etc/rhsm`, the product
-certs, and the subscription-manager-generated `redhat.repo` - the last is what
-gives the container the entitled baseurls (UBI ships only the public ubi repos),
-so entitled-only packages such as `kernel-devel` become reachable.
-
-With that passthrough in place, the **ENA** build test's entitled path installs
-`gcc`, `make`, and `kernel-devel` from the container's own entitled repos, then
-compiles `ena.ko` out of tree against that installed kernel-devel tree. This is a
-*compile* test: each RHEL major builds against its own kernel headers, independent
-of the running host kernel (module LOAD is never attempted in a container - L4), so
-the same RHEL 10 host can build-test RHEL 6/7/8/9/10 by running each major's image.
-A major reports `build-fail` only if its entitled repos cannot provide kernel-devel
-or the pinned driver does not compile on that kernel. SSM (local RPM, repo-free) and
-AWS CLI v2 (self-contained S3 zip) are entitlement-independent and unaffected.
-
-`acq_entitlement_mount_args` emits the `-v`/`--network` set. For RHUI it is
-*derived from the repo files* (the `sslclientcert`/`sslclientkey`/`sslcacert`/
-`gpgkey` paths plus the repo files themselves, `/etc/pki/rhui`, the `amazon-id`
-plugin config, and `--network host`), so a new or unknown RHUI provider works as
-`rhui:other` with no code change. On an anonymous host the args are empty, so the
-sweep is byte-for-byte unchanged. The host is never modified.
-
-`--probe-env` reports `platform` (`physical` / `vm:<hv>` / `cloud:aws|azure|gcp|oci`),
-the `repo_access` mode + confidence + matched signals, and the entitled-passthrough
-feasibility, in the banner and in `ENV-PROBE.json`.
-
+**RHUI hosts (AWS/Azure): entitled containers are PENDING.** Measured on AWS
+(2026-07-04): no auto-injection exists (plain containers are anonymous), the
+legacy mounts cannot work (a literal `REGION` hostname only the host-side
+`amazon-id` dnf plugin resolves; authorization additionally requires the
+SIGNED EC2 instance-identity headers `X-RHUI-ID`/`X-RHUI-SIGNATURE` and is
+host-major scoped - the RHEL 10 host's credentials reach rhel10 content only).
+Until the entitled RHUI path is designed, RHUI hosts run containers plain
+(`needs-entitlement` for build tests). Azure RHUI: untested. Verified support
+overall: **rootful podman** (rootless untested).
 ## Timeouts
 
 Two nested guards (both overridable) keep a stall from ever hanging a run:

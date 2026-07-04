@@ -260,7 +260,7 @@ structured failure record; the suite runner exits non-zero on any tier failure.
 
 | Phase | Deliverable | Exit criterion | Status |
 |:--|:--|:--|:--|
-| 0 - Feasibility | measured base facts, anon pull, entitled passthrough, signatures, EPEL endpoints | findings measured in Phase 0 | **done** (tail: one real `ena.ko` plain-make build, R1) |
+| 0 - Feasibility | measured base facts, anon pull, entitled access, signatures, EPEL endpoints | findings measured in Phase 0 | **done** (tail: one real `ena.ko` plain-make build, R1) |
 | 1 - Scaffolding | dir skeleton, ported `tests/lib/*`, `run-all.sh`, `.shellcheckrc`, L0 green, bilingual README | L0 passes; fixed count recorded | **done (r01)** |
 | 2 - Acquisition | `lib/acquire-rootfs.sh` (+`t003`), `lib/ubi-pkgmgr.sh` (+`t004`), `t005_entitlementdetect`, `t006_initmodemap`, `lib/epel.sh` (+`t007`) | unit tiers green; live pull both paths; classify unit-tested | **done (r02)** (tail: live pull is L3/CI) |
 | 3 - AWS CLI | `tests/aws_awscli-v2/*`, glibc ledger, RESULTS, verdict tier | matrix runs (Tier A); reports generated | **done (r03)** (tail: live install is L3/CI) |
@@ -310,7 +310,7 @@ implementation detail.
 | 9 | `ubi9/ubi-init` | 9.8 | 2.34 | dnf | `ubi-9-{baseos,appstream,codeready-builder}` | yes |
 | 8 | `ubi8/ubi-init` | 8.10 | 2.28 | dnf | `ubi-8-{baseos,appstream,codeready-builder}` | yes |
 | 7 | `ubi7/ubi-init` (fixed tag) | 7.9 | 2.17 | yum | `ubi-7`, `-optional`, `-extras`, `ubi-server-rhscl-7` | yes (GPG-verified) |
-| 6 | `rhel6/rhel` | 6.10 | 2.12 | yum | none (`redhat.repo` empty) | no (subscription required) |
+| 6 | `rhel6/rhel` | 6.10 | 2.12 | yum | none anonymously; `rhel-6-server-rpms` via auto-injection on entitled hosts | no (subscription required) |
 
 The TLS-interception caveat (`INSECURE_TLS=1` -> `--setopt=sslverify=0`) is
 **sandbox-specific** and unnecessary on a real host; the helpers expose it as a
@@ -329,24 +329,30 @@ acquire base image (L1) -> provision a "test-ready" image (L2) -> run tests (L3)
 ```
 
 `lib/provision-test-env.sh` installs a **common package manifest**
-(`PROVISION_PKGS`, default `gawk`) onto the base and commits ONE "test-ready"
-image per OS major (`localhost/rhel-testsuite-provisioned:rhel<N>-<fingerprint>`),
-reused across the whole sweep. The tag embeds a fingerprint of the manifest, so a
-changed manifest rebuilds automatically while an unchanged one reuses the commit
-(idempotent). The manifest is **COMMON across all tools** - one image per OS, not
-one per test - so every matrix (SSM / AWS CLI v2 / ENA) resolves its base ref,
-then swaps in the provisioned ref before its sweep. The manifest install is
-**repo-access-agnostic** (r36): it neutralizes the subscription-manager /
-product-id plugins when no entitlement is present (anonymous), and installs with
-`*.skip_if_unavailable=1` so a mismatched / unreachable ENABLED repo is *skipped*
-rather than failing the transaction. The mounted host `redhat.repo` carries the
-HOST major's entitled repos - wrong-major inside a different-major container, and
-unusable from a cert-only (unregistered) container - and leaving it fatal was the
-r33 defect that skipped RHEL 8/9/10. `skip_if_unavailable` lets the package
-resolve from whatever working repo has it (public UBI / entitled `rhel-*` /
-RHUI), so the SAME code covers anonymous, RHSM-entitled and RHUI hosts without
-hardcoding repo ids. On failure the caller sees the real package-manager error
-(`PROVISION_LAST_ERR`), never a masked one.
+(`PROVISION_PKGS`, default `gawk unzip tar` - unzip is required by the AWS CLI
+bundle, r48) onto the base and commits ONE "test-ready" image per OS major
+(`localhost/rhel-testsuite-provisioned:rhel<N>-YYYYMMDDhhmmss`; one timestamp
+per run, r53). The manifest is **COMMON across all tools** - one image per OS,
+not one per test - so every matrix (SSM / AWS CLI v2 / ENA) resolves its base
+ref, then swaps in the provisioned ref before its sweep. **The images are
+run-scoped** (r48, user requirement): a `trap ... EXIT` in every matrix and in
+`--smoke` removes all `rhel-testsuite-provisioned:*` images on normal
+completion, failure and interrupt alike (`KEEP_TEST_IMAGES=1` opts out for
+debugging; base UBI/RHEL images are untouched).
+
+The manifest install runs in a **PLAIN container** (r46; see B.7): on
+subscription-registered hosts podman's auto-injection supplies the per-major
+entitled repos, and on anonymous hosts the UBI repos suffice (measured: the
+whole manifest resolves from UBI on 7-10). The subscription-manager /
+product-id plugins are neutralized ONLY when no entitlement certs are visible -
+a DEFENSIVE measure (D-S4): the historically reported RHSM-contact hang did
+not reproduce in the 2026-07-04 probe runs (EL6 included), but disabling the
+plugins in a certless container is harmless and guards unknown environments.
+With certs present the plugins stay ON - they are what generates the
+per-major entitled `redhat.repo`. `skip_if_unavailable` is GONE (D-S3): it
+papered over the harmful host-file mounts removed by D-S1 and would now only
+hide real repo failures (`t021` pins its absence). On failure the caller sees
+the real package-manager error (`PROVISION_LAST_ERR`), never a masked one.
 
 **Pre-flight, and provisioning as a test prerequisite (r36).** Each matrix
 prepares the test-ready image for EVERY requested major *before* running any test
@@ -354,8 +360,9 @@ prepares the test-ready image for EVERY requested major *before* running any tes
 test **prerequisite is not met**: the run **fails fast** - it aborts (non-zero)
 WITHOUT executing any test, so a broken environment is never silently
 half-tested. The one exception is `PROVISION_OPTIONAL_MAJORS` (**RHEL 6** by
-default): EL6 is non-UBI and needs its own `rhel-6` entitlement that the host's
-`redhat.repo` cannot supply, so an EL6 that cannot be prepared is **skipped**
+default): EL6 is non-UBI (`rhel6/rhel`, a subscription-gated registry image);
+on an entitled host the auto-injection provides its `rhel-6-server-rpms`, but
+an anonymous host has no EL6 repos at all - an EL6 that cannot be prepared is **skipped**
 (no tests for EL6) and the run continues for the rest.
 
 This is the RHEL analogue of the OL sibling's clean-core builder (see B.9), and
@@ -370,8 +377,27 @@ the common manifest is the extension point for future tests (B.13). Covered by
 
 | Mode | Condition | Repos in container | kernel-devel / ENA build | AWS CLI / SSM |
 |:--|:--|:--|:--|:--|
-| `anonymous` | Fedora/Ubuntu/Debian/unregistered RHEL host | `ubi-N-*` only | no -> `needs-entitlement` | yes (both) |
-| `entitled` | subscription-registered RHEL host, secrets bind-mounted | `rhel-N-*` passthrough (+ `ubi-N-*`) | yes (build feasible, all majors) | yes (both) |
+| `anonymous` | non-RH host / unregistered RHEL / RHUI host (pending) | `ubi-N-*` only (EL6: none) | no -> `needs-entitlement` | yes (both; EL6 per its own gates) |
+| `entitled` | subscription-registered RHEL host, **rootful podman, NO mounts** | per-major `rhel-*` repos via **auto-injection** (+ `ubi-N-*`) | yes (measured, all majors 6-10) | yes (both) |
+
+**Measured mechanism (2026-07-04 probe runs; the ground truth this SPEC is
+rebuilt on).** On a subscription-registered RHEL host, rootful podman
+auto-injects `/run/secrets` (a `redhat.repo` template, the rhsm config and the
+entitlement certs) into EVERY container - no mounts, no flags. The first
+`makecache`/repoquery makes the subscription-manager plugin generate a correct
+**per-major** `redhat.repo` from the CONTAINER's own product cert: an EL8
+container gets `rhel-8-*`, an EL9 container `rhel-9-*`, on the same host. The
+EL6 image participates through its shipped `-host` symlinks
+(`/etc/rhsm-host`, `/etc/pki/entitlement-host`) into `/run/secrets`. This was
+verified for all majors 6-10, both build and install package sets.
+
+**The former host-file mounts (r15..r45 era) were measured actively harmful
+and are REMOVED (r46, D-S1)**: the host `redhat.repo` is the HOST major's -
+wrong-major inside 8/9 containers, `sslclientcert` Permission denied even
+same-major, the read-only mount blocked the per-container generation, and EL7
+lost the entitled repo it gets automatically when run plain.
+`acq_entitlement_mount_args` returns nothing for every mode and is kept only
+as the single landing point for the pending RHUI implementation (D-S2).
 
 **Detection is three steps** (the suite handles no secrets itself):
 
@@ -387,8 +413,35 @@ the common manifest is the extension point for future tests (B.13). Covered by
    the owning repo per major. RHEL 6 `repolist` formatting differs - judge by the
    repoquery result, not a repolist string match.
 
-The passthrough mechanism is **identical across all five majors and both image
-variants**; it does not depend on the init variant. `dkms` is **EPEL-only** in
+The auto-injection mechanism is **identical across all five majors and both
+image variants**; it does not depend on the init variant.
+
+#### RHUI hosts (AWS/Azure) - measured facts, implementation PENDING
+
+There is **no auto-injection on RHUI hosts** (measured on AWS EC2 RHEL 10,
+2026-07-04): plain containers are anonymous (UBI-only). The legacy host-file
+mounts are non-functional there for two independent reasons: the repo files
+carry a literal `REGION` hostname token that only the host-side `amazon-id`
+dnf plugin resolves (from the EC2 instance-identity document), and
+authorization requires MORE than the TLS client certificate - every request
+must carry the SIGNED instance-identity document
+(`X-RHUI-ID` / `X-RHUI-SIGNATURE`, urlsafe base64; the client certs are
+content-set-less identity certs, authorization is server-side). Authorization
+is **host-major scoped**: the RHEL 10 host's credentials reach only
+`rhel10/...` content paths (own major HTTP 200; 9/8/7/6 and the `rhel99`
+control all 403). A published mount-the-host-files recipe was probed as its
+own A/B arm and does not work as written. Consequence: RHUI hosts run
+containers PLAIN (anonymous / `needs-entitlement`) until the entitled RHUI
+container path is designed - the working model is one instance per major,
+pending verification on a non-RHEL-10 host. Azure RHUI: untested (no host
+available). `tests/probe-env.sh --facts` re-collects all of this
+reproducibly.
+
+#### Support declaration
+
+Verified support: **rootful podman** on subscription-registered RHEL
+(SELinux enforcing) and anonymous hosts. Rootless podman: untested.
+RHUI hosts: supported in anonymous mode only (entitled path pending, above). `dkms` is **EPEL-only** in
 every major (anonymous and entitled). The AWS packages
 (`awscli`/`awscli2`/`amazon-ssm-agent`) are absent from every repo, which is why
 bundle / S3-RPM acquisition is the correct path.
@@ -633,7 +686,7 @@ every tool. This is the intended growth path as the tool set expands.
 | R6 | Live AWS CLI v2 install-test matrix (`--run`) -> empirical RESULTS column | L3/CI; the glibc model + report generation are hermetic (Phase 3 tail) |
 | R7 | Live SSM install-test matrix (`--run`, both init modes) -> empirical RESULTS | L3/CI; the init-mode grid + compliance model are hermetic (Phase 4 tail) |
 | R8 | Live ENA build on an entitled host (`--run`) -> empirical RESULTS; module load | L3 build / L4 load; the E2' grid + verifier gates are hermetic (Phase 5 tail); doubles as the r28 errexit field check |
-| Q1 | Hermetic coverage of `acq_entitlement_mount_args` (rhsm mount set; RHUI ssl-path parse) | Quality pass; needs a small `ACQ_ROOT`-prefix refactor of `lib/acquire-rootfs.sh` so paths are injectable (touches production lib) |
+| Q1 | ~~Hermetic coverage of the rhsm/RHUI mount sets~~ **OBSOLETE (r46)**: the mount sets are gone (D-S1/D-S2); the function is an empty landing point for the pending RHUI work | Closed by the 2026-07-04 remediation |
 | Q2 | Hermetic coverage of `acq_platform` / `acq_repo_access` (host DMI/rpm/repo detection) | Quality pass; enabled by the same `ACQ_ROOT` refactor as Q1 |
 | Q3 | Defensive hardening of bare function calls under the ERR trap | **Superseded at r28**: `set -e` on the production scripts makes a silently-reintroduced non-zero return abort loudly (see D.2) |
 
@@ -647,8 +700,9 @@ every tool. This is the intended growth path as the tool set expands.
 the container build to the HOST kernel, which the container repos do not carry.
 **Cause**: conflating "build against a kernel-devel tree" with "the running
 kernel". **Resolution**: install plain `kernel-devel` and build against the
-container's own tree (`make -C /usr/src/kernels/<kver>`); guarded by `t019`,
-which fails if the bug is re-injected.
+container's own tree (through the driver's vendored build system since r52:
+`make -C <src> KERNEL_BUILD_DIR=/usr/src/kernels/<kver> BUILD_KERNEL=<kver>`);
+guarded by `t019`, which fails if the bug is re-injected.
 
 ### D.2 ERR-trap masking of a designed non-zero return (r23)
 
@@ -660,13 +714,16 @@ edc=$?` at the call site (r23) + `t019` rc pins; **r28's `set -euo pipefail`**
 now makes any future bare-call regression abort loudly at the call site instead
 of being masked (Q3 superseded).
 
-### D.3 RHEL 6 RHSM plugin hang on the bare image (r18)
+### D.3 RHEL 6 RHSM plugin hang on the bare image (r18; unreproduced since)
 
-**Symptom**: `yum` hung indefinitely inside `rhel6/rhel` containers.
-**Cause**: the subscription-manager/product-id plugins reach out to RHSM on the
-bare (non-UBI) image. **Resolution**: entitlement-cert detection gates the
-plugins (`pm_neutralize_rhsm_if_anonymous`), fixing yum properly instead of
-bypassing repos; helper pinned identical across installers (`t020`).
+**Symptom (historical, r18)**: `yum` was observed hanging inside `rhel6/rhel`
+containers, attributed to the subscription-manager/product-id plugins reaching
+out to RHSM. **Status (2026-07-04, D-S4)**: the hang did NOT reproduce in the
+probe runs (sandbox and AWS, EL6 included; anonymous EL6 completes with rc=0).
+The plugin gating (`pm_neutralize_rhsm_if_anonymous`) is KEPT as a defensive
+measure - disabling the plugins in a certless container is harmless and guards
+unknown environments - but the "hangs indefinitely" claim is demoted to a
+historical observation. Helper pinned identical across installers (`t020`).
 
 ### D.4 Old-curl option traps on EOL majors (r20, r26)
 

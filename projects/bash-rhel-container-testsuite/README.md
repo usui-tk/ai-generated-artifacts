@@ -34,13 +34,14 @@ direct or indirect — arising from using, modifying, or distributing it.
 By running this suite you acknowledge that:
 
 * You are solely responsible for complying with **Red Hat's subscription terms**
-  (especially for entitlement passthrough and `registry.redhat.io`), **AWS's
+  (especially for entitled content access and `registry.redhat.io`), **AWS's
   Service Terms**, and any applicable laws.
 * L3 integration runs **pull container images** and **download tool artifacts**
   (AWS CLI bundle, SSM S3 RPM) over the network and may incur transfer costs.
-* **Entitled mode** uses your host's Red Hat entitlement (bind-mounted secrets);
-  the suite never handles your secrets itself — it only detects whether your host
-  is passing them through.
+* **Entitled mode** relies on podman's own auto-injection on
+  subscription-registered hosts (`/run/secrets`); the suite mounts nothing and
+  never handles your secrets itself — containers run plain, and the per-major
+  entitled repos appear (or not) by the host's doing.
 * You will review the source (or [SPEC.md](./SPEC.md)) before running it in any
   environment.
 
@@ -54,7 +55,7 @@ Prefer official, supported channels for production work. This suite targets
 Operators who run RHEL-family containers repeatedly hit the same question: *does
 version X of this tool actually install and run on RHEL N?* The answer varies by
 glibc, by package manager (dnf vs yum), by init model (plain shell vs systemd
-PID 1), and by whether the host passes Red Hat entitlement through to the
+PID 1), and by whether the host provides Red Hat entitlement to the
 container. This suite turns that question into a **reproducible matrix**: for each
 RHEL major and each tool version it records the measured environment
 (glibc / kernel / entitlement / init-mode) and the derived verdict, and
@@ -65,10 +66,13 @@ It is built on two facts established by direct measurement (Phase 0):
 1. Red Hat's UBI images can be pulled **anonymously** (no token step) and used
    for install/run tests across RHEL 7-10; RHEL 6 uses the legacy `rhel6/rhel`
    base.
-2. When the suite runs on a **subscription-registered RHEL host**, entitlement
-   passes through to the container, the `rhel-*` repos enable, and `kernel-devel`
-   becomes obtainable — enabling the ENA kernel-module **build** test. The suite
-   **auto-detects** this and otherwise records `needs-entitlement`.
+2. When the suite runs on a **subscription-registered RHEL host** (rootful
+   podman), the host **auto-injects** entitlement into every container
+   (`/run/secrets`; no mounts, measured 2026-07-04 on all majors 6-10): each
+   container generates its own per-major `rhel-*` repos and `kernel-devel`
+   becomes obtainable — enabling the ENA kernel-module **build** test.
+   Anonymous hosts (and RHUI cloud hosts, whose entitled container path is
+   pending) record `needs-entitlement` instead. Rootless podman is untested.
 
 ---
 
@@ -140,6 +144,14 @@ The static + hermetic-unit tiers (L0-L2) run on any host with no network:
 bash tests/run-all.sh
 ```
 
+For a quick suite-health signal on an egress-capable host, one command runs
+one sample per tool on every major and prints a verdict table (provisioned
+test images are removed on exit):
+
+```bash
+bash tests/probe-env.sh --smoke
+```
+
 The L3 integration matrices (real pulls and installs) are run explicitly, on a
 host with container egress, per target with the one-script workflow
 (`rm -rf *.md *.json; ./list-...; ./run-...`, plus `./verify-...` for ENA). See
@@ -154,7 +166,7 @@ dependencies.
 This is the final **Phase 7 (generalization)** drop — all seven phases complete:
 
 * ✅ **Phase 0 — feasibility** — measured base facts (per-major glibc, anon repo
-  sets, anon pull, entitled passthrough across all five majors, RHEL 7 fixed-tag
+  sets, anon pull, entitled access across all five majors, RHEL 7 fixed-tag
   signature, EPEL endpoints). measured during Phase 0.
 * ✅ **Phase 1 — scaffolding** — directory skeleton, ported `tests/lib/*`,
   `run-all.sh`, `.shellcheckrc`, bilingual docs, and a green L0 gate.
@@ -268,7 +280,7 @@ matrix), and `t013` must stay green. Keep every script ShellCheck-`style`-clean
 
 * The hermetic suite (L0–L2) proves the models, generators, and contracts; the
   live matrices (`--run`) need a container-egress host — and an
-  entitlement-registered RHEL host for the `rhel-*` repo paths — tracked as
+  subscription-registered RHEL host for the `rhel-*` repo paths — tracked as
   open items R5–R8 in [SPEC.md](./SPEC.md) Part C.
 * Kernel-module **load** can never be exercised in a container (shared host
   kernel): ENA load/runtime is always the L4 tier on a real RHEL host.

@@ -13,6 +13,27 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r54] - 2026-07-04 - docs: full reconstruction on the measured ground truth (Step 6)
+
+### Changed
+- **SPEC.md / TESTING.md / README.md / README.ja.md rebuilt against the
+  2026-07-04 probe-run facts** (the adjudicated Step 6; the pre-reset
+  narrative was untrustworthy). The new ground truth throughout:
+  containers run PLAIN - podman auto-injection provides per-major entitled
+  repos on subscription-registered hosts (all majors 6-10, measured); the
+  former host-file mounts were measured harmful and are gone, along with
+  `skip_if_unavailable`; provisioning manifest is `gawk unzip tar` with
+  run-scoped timestamp-tagged images and exit cleanup; ENA builds through
+  the driver's vendored build system; the EL6 "hang" is demoted to an
+  unreproduced historical observation (plugin gating kept as defensive);
+  a dedicated RHUI section records the measured AWS facts (no
+  auto-injection; literal REGION; signed instance-identity headers;
+  host-major-scoped authorization; article recipe disproved; entitled
+  path PENDING; Azure untested); support declaration: rootful podman
+  (rootless untested). READMEs additionally document `--smoke`.
+  `SPEC` Part A (vendored) untouched per the inheritance rule;
+  obsolete open item Q1 closed.
+
 ## [r53] - 2026-07-04 - fix: accurate smoke wording + human-readable test-image tags
 
 ### Changed
