@@ -13,6 +13,14 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r38] - 2026-07-04 - chore: executable bit on the r37 probe scripts
+
+### Fixed
+- `tests/probe-entitlement.sh`, `tests/t023_probeentitlement.sh` and
+  `tools/analyze-entitlement.sh` were committed `100644` in r37; executables
+  with shebangs are `100755` in this repository (sourced libraries such as
+  `lib/probe-common.sh` stay `100644`). Mode-only change; no content diff.
+
 ## [r37] - 2026-07-04 - feat: reproducible entitlement fact-probe (Phase A) + ubi10 curl-pull fix
 
 ### Added
