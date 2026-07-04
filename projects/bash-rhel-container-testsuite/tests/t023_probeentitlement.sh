@@ -94,6 +94,12 @@ assert_eq "rhel-9,rhel-9-x86_64" "$(pc_product_tags /dev/null)" \
 assert_eq 479 "$(pc_product_id /dev/null)" "product id extraction -> 479"
 unset -f openssl
 
+# --- pc_b64url: python urlsafe_b64encode compatibility (r45) -------------------
+assert_eq 'YWI_fg==' "$(printf 'ab?~' | pc_b64url)" \
+  "urlsafe base64: / -> _ with padding kept"
+assert_eq 'Pz8-Pg==' "$(printf '??>>' | pc_b64url)" \
+  "urlsafe base64: + -> -"
+
 # --- pc_rhui_major_url: per-major RHUI URL synthesis (r41) ---------------------
 # shellcheck disable=SC2016  # the template intentionally holds literal yum variables
 tmpl='https://rhui.REGION.aws.ce.redhat.com/pulp/mirror/content/dist/rhel10/rhui/$releasever/$basearch/baseos/os'

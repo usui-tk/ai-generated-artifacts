@@ -377,6 +377,23 @@ pe_rhui_crossmajor_check() {
   } > "${out}"
   [ -n "${region}" ] || { echo "skipped: region unresolved via IMDS" >> "${out}"; return 0; }
   [ -n "${ca}" ] && [ -f "${ca}" ] && caarg=(--cacert "${ca}")
+  # r45: the amazon-id dnf plugin (captured r43, read from source) shows AWS
+  # RHUI authorization = TLS client cert AND the SIGNED instance-identity
+  # document, sent as X-RHUI-ID / X-RHUI-SIGNATURE (urlsafe base64) on every
+  # request - which is why bare-cert curl got 403 even for the host's own
+  # major. Replicate exactly that here.
+  local id_doc id_sig hdrid=() hdrsig=()
+  id_doc="$(curl -sS -m 5 -H "X-aws-ec2-metadata-token: ${tok}" \
+            http://169.254.169.254/latest/dynamic/instance-identity/document 2>/dev/null)"
+  id_sig="$(curl -sS -m 5 -H "X-aws-ec2-metadata-token: ${tok}" \
+            http://169.254.169.254/latest/dynamic/instance-identity/signature 2>/dev/null)"
+  if [ -n "${id_doc}" ] && [ -n "${id_sig}" ]; then
+    hdrid=(-H "X-RHUI-ID: $(printf '%s' "${id_doc}" | pc_b64url)")
+    hdrsig=(-H "X-RHUI-SIGNATURE: $(printf '%s' "${id_sig}" | pc_b64url)")
+    echo "identity_headers=present" >> "${out}"
+  else
+    echo "identity_headers=UNAVAILABLE (expect 403s)" >> "${out}"
+  fi
   # r42: the mirrorlist endpoint answers 200 regardless of path validity
   # (measured 2026-07-04: even the rhel99 control got 200), so authorization
   # must be probed one layer deeper - follow the mirrorlist BODY to the first
@@ -384,12 +401,14 @@ pe_rhui_crossmajor_check() {
   pe_rhui_check_one() {
     local label="$1" url="$2" body mlst first rstat
     body="$(curl -sS -m 20 --cert "${cert}" --key "${key}" "${caarg[@]}" \
+             "${hdrid[@]}" "${hdrsig[@]}" \
              -w '\n__HTTP__%{http_code}' "${url}" 2>/dev/null)"
     mlst="${body##*__HTTP__}"
     first="$(printf '%s\n' "${body}" | grep -Eo 'https?://[^[:space:]]+' | grep -v '__HTTP__' | head -1)"
     if [ -n "${first}" ]; then
       rstat="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
                 --cert "${cert}" --key "${key}" "${caarg[@]}" \
+                "${hdrid[@]}" "${hdrsig[@]}" \
                 "${first%/}/repodata/repomd.xml" 2>/dev/null)"
     else
       rstat="no-mirror"

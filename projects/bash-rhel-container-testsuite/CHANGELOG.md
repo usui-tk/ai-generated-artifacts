@@ -13,6 +13,21 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r45] - 2026-07-04 - fix: cross-major check sends the RHUI identity headers (403 mystery solved)
+
+### Fixed
+- **The 403-for-everything mystery is solved by the captured plugin source.**
+  `amazon-id.py` (r43 capture) shows AWS RHUI authorization is TLS client
+  cert AND the SIGNED EC2 instance-identity document, attached to every
+  request as `X-RHUI-ID` / `X-RHUI-SIGNATURE` (urlsafe base64); the plugin
+  also substitutes the literal `REGION` in repo URLs from that document.
+  The cross-major check now replicates exactly that (`pc_b64url`,
+  unit-tested against python's `urlsafe_b64encode`), and records whether
+  the identity headers were obtainable. Fourth-round verdicts recorded in
+  passing: the article-recipe `docmounts` arm does NOT work as written
+  (plugin CODE is not under `/etc/dnf/plugins`, so REGION stays literal),
+  and `/etc/dnf/plugins` carries config only.
+
 ## [r44] - 2026-07-04 - feat: `docmounts` condition - the AWS-RHUI article recipe as an A/B/C arm
 
 ### Added

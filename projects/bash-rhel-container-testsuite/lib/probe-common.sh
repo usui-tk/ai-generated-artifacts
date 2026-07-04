@@ -109,6 +109,11 @@ pc_tsv_row() {
   printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$(printf '%s' "$5" | tr '\t\n' '  ')"
 }
 
+# pc_b64url - urlsafe base64 of stdin (RFC 4648 §5: + -> -, / -> _, padding
+# kept), matching python's base64.urlsafe_b64encode used by the AWS RHUI
+# amazon-id dnf plugin for the X-RHUI-ID / X-RHUI-SIGNATURE headers.
+pc_b64url() { base64 -w0 | tr '+/' '-_'; }
+
 # pc_rhui_major_url TEMPLATE MAJOR - synthesize another major's RHUI content
 # URL from a host repo template: the /rhelN/ path segment, the literal
 # $releasever and $basearch are all re-targeted. Pure (REGION substitution is
