@@ -29,7 +29,8 @@
 # tests/aws_ena-driver/; run-ena-buildtest-matrix.sh kicks it with parameters.
 #
 # Compiles ena.ko OUT OF TREE against the installed kernel-devel headers
-#   make -C /usr/src/kernels/<kver> M=<src> modules
+#   make -C <src> KERNEL_BUILD_DIR=/usr/src/kernels/<kver> BUILD_KERNEL=<kver>
+# (the driver's vendored build system, which generates config.h first),
 # independent of the running host kernel. All Oracle UEK handling is removed
 # (stock RHEL kernel: `rpm -q kernel`). Module LOAD is never attempted (L4).
 #
@@ -202,7 +203,11 @@ ko_module_version() {
   if command -v modinfo >/dev/null 2>&1; then
     v="$(modinfo -F version "${ko}" 2>/dev/null | head -1)"
   fi
-  [ -n "${v}" ] || v="$(strings "${ko}" 2>/dev/null | sed -n 's/^version=\([0-9][0-9.]*\)$/\1/p' | head -1)"
+  [ -n "${v}" ] || v="$(strings "${ko}" 2>/dev/null | sed -n 's/^version=\([0-9][0-9.]*\)/\1/p' | head -1)"
+  # r52: the built module reports a suffixed version (measured: 2.17.0 builds
+  # as "2.17.0g") - normalize to the numeric prefix so the false-success
+  # guard compares like with like.
+  v="${v%%[!0-9.]*}"
   printf '%s' "${v}"
 }
 
@@ -229,7 +234,17 @@ build_ko() {
   src="$(fetch_src "${BUILT_DEST}")" || return 3   # r49: fetch/extract/locate, NOT make
   [ -n "${src}" ] || return 3
   BUILT_SRC="${src}"; MAKE_LOG="${BUILT_DEST}/make.log"
-  if make -C "/usr/src/kernels/${KVER}" "M=${src}" modules >"${MAKE_LOG}" 2>&1 && [ -f "${src}/ena.ko" ]; then
+  # r52: build through the driver's VENDORED build system, never raw kbuild.
+  # Modern ENA sources require a generated config.h (feature-detection via
+  # the bundled configure.sh, run by the vendored Makefile's config.h rule);
+  # the old direct `make -C <kernel> M=<src> modules` bypassed it and every
+  # real entitled build died with `fatal error: config.h` (reproduced and
+  # fixed-form verified in a ubi9 chroot against RHCK 5.14 headers). This is
+  # also how the OL original built it (make -C <src> BUILD_KERNEL=...).
+  # KERNEL_BUILD_DIR is pinned to /usr/src/kernels/<kver> because containers
+  # have no /lib/modules/<kver>/build symlink (the vendored default).
+  if make -C "${src}" "KERNEL_BUILD_DIR=/usr/src/kernels/${KVER}" "BUILD_KERNEL=${KVER}" >"${MAKE_LOG}" 2>&1 \
+     && [ -f "${src}/ena.ko" ]; then
     return 0
   fi
   return 1

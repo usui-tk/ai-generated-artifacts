@@ -13,6 +13,26 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r52] - 2026-07-04 - fix: ENA builds through the driver's vendored build system (config.h)
+
+### Fixed
+- **Every real entitled ENA build failed with `fatal error: config.h`** -
+  the make logs (first captured this round) show the root cause: modern ENA
+  sources require a generated `config.h` (kernel feature detection via the
+  bundled `configure.sh`, driven by the driver's own Makefile), and the old
+  direct-kbuild call (`make -C <kernel> M=<src> modules`) bypassed it. The
+  OL original built correctly through the vendored Makefile
+  (`make -C <src> BUILD_KERNEL=...`); the RHEL port had rewritten it. Now:
+  `make -C <src> KERNEL_BUILD_DIR=/usr/src/kernels/<kver> BUILD_KERNEL=<kver>`
+  (KERNEL_BUILD_DIR pinned - containers have no /lib/modules/<kver>/build).
+  Reproduced and fix-verified in a ubi9 chroot against RHCK 5.14 headers:
+  the old form reproduces the config.h fatal, the new form produces ena.ko.
+  The latest driver (2.17.0) is therefore a FINE sample - the logic, not
+  the version, was wrong.
+- **False-success guard normalized**: the built module reports a suffixed
+  version (measured: `2.17.0g`), so the guard now compares the numeric
+  prefix.
+
 ## [r51] - 2026-07-04 - feat: SSM matrix - EL6 legacy track-record versions + init generalization
 
 ### Added
