@@ -628,7 +628,7 @@ pe_smoke() {
   case "${mode}" in rhsm) ena_ent=entitled ;; *) ena_ent=anonymous ;; esac
   SMK_FAILS=0; SMK_ROWS=""; SMK_MOUNTED=""; SMK_PIN_SEEN=0
   SMK_LOGDIR="${HERE}/SMOKE-LOGS-$(date -u +%Y%m%dT%H%M%SZ)"
-  log "smoke: engine=${engine} majors [${MAJORS}] x tools [${SMOKE_TOOLS:-awscli ssm ena}] (mode=${mode}, latest version each)"
+  log "smoke: engine=${engine} majors [${MAJORS}] x tools [${SMOKE_TOOLS:-awscli ssm ena}] (mode=${mode}, newest major-compatible sample per tool; pinned cells marked *)"
   if [ "${engine}" = podman ]; then
     # r48 (user requirement): provisioned test-env images are removed on
     # EVERY exit path; KEEP_TEST_IMAGES=1 opts out. Base images stay.
@@ -684,7 +684,7 @@ pe_smoke() {
     done
     rm -rf "${TMPDIR:-/tmp}/probe-smoke-$$"
   fi
-  printf '\n== smoke (1 sample/tool, every major; engine=%s, mode=%s) ==\n' "${engine}" "${mode}"
+  printf '\n== smoke (newest major-compatible sample per tool, every major; engine=%s, mode=%s) ==\n' "${engine}" "${mode}"
   printf '%-7s %-7s %-14s %-12s %s\n' major tool version status note
   printf '%s' "${SMK_ROWS}"
   printf '\nexpected statuses: ok / unsupported / unavailable (needs-entitlement rides on ok)\n'

@@ -13,6 +13,21 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r53] - 2026-07-04 - fix: accurate smoke wording + human-readable test-image tags
+
+### Changed
+- **Smoke wording**: "latest version each" claimed too much - EL6 samples
+  differ (glibc-compatible pick, adjudicated pins). Now: "newest
+  major-compatible sample per tool; pinned cells marked *".
+- **Provisioned test-image tags are human-readable timestamps**
+  (`rhel<major>-YYYYMMDDhhmmss`, one stamp per run/process; user request).
+  The former numeric fingerprint (cksum of `PROVISION_PKGS`, e.g.
+  `2177264010`) auto-invalidated stale caches, but r48's exit-cleanup made
+  the images run-scoped, so cross-run staleness can no longer occur and
+  the fingerprint lost its purpose. `KEEP_TEST_IMAGES=1` leftovers are
+  debug artifacts and are intentionally not reused. `PROVISION_RUN_STAMP`
+  can be preset (tests/reproducibility).
+
 ## [r52] - 2026-07-04 - fix: ENA builds through the driver's vendored build system (config.h)
 
 ### Fixed

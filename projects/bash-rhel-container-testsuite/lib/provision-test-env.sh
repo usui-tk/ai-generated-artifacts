@@ -65,13 +65,18 @@ PROVISION_IMG_PREFIX="${PROVISION_IMG_PREFIX:-localhost/rhel-testsuite-provision
 # package-manager stderr, for the caller to include in its skip reason.
 PROVISION_LAST_ERR=""
 
-# provision_manifest_tag <major> : the deterministic tag for this OS major and
-# manifest. Embeds a short fingerprint of PROVISION_PKGS so that changing the
-# manifest yields a new tag (auto-rebuild) rather than reusing a stale image.
+# provision_manifest_tag <major> : the per-run tag for this OS major.
+# r53 (user request): a human-readable run timestamp (YYYYMMDDhhmmss), ONE
+# stamp per process so a run reuses its own images across majors/calls.
+# The former manifest fingerprint (cksum of PROVISION_PKGS) lost its purpose
+# when r48 made the images run-scoped (removed on every exit path):
+# cross-run staleness can no longer occur. KEEP_TEST_IMAGES leftovers are
+# debug artifacts and are intentionally NOT reused (their stamp differs).
+# PROVISION_RUN_STAMP can be preset (tests / reproducibility).
 provision_manifest_tag() {
-  local major="$1" fp
-  fp="$(printf '%s' "${PROVISION_PKGS}" | cksum | cut -d' ' -f1)"
-  printf '%s:rhel%s-%s' "${PROVISION_IMG_PREFIX}" "${major}" "${fp}"
+  local major="$1"
+  : "${PROVISION_RUN_STAMP:=$(date +%Y%m%d%H%M%S)}"
+  printf '%s:rhel%s-%s' "${PROVISION_IMG_PREFIX}" "${major}" "${PROVISION_RUN_STAMP}"
 }
 
 # provision_cleanup_images : remove every provisioned test-env image

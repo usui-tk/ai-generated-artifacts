@@ -36,16 +36,22 @@ LIB="${PROJ}/lib/provision-test-env.sh"
 def="$(. "${LIB}"; printf '%s' "${PROVISION_PKGS}")"
 assert_eq "gawk unzip tar" "${def}" "PROVISION_PKGS defaults to gawk unzip tar (r48: awscli needs unzip)"
 
-tag_a="$(. "${LIB}"; PROVISION_PKGS='gawk'       provision_manifest_tag 6)"
-tag_b="$(. "${LIB}"; PROVISION_PKGS='gawk'       provision_manifest_tag 6)"
-tag_c="$(. "${LIB}"; PROVISION_PKGS='gawk unzip' provision_manifest_tag 6)"
-tag_9="$(. "${LIB}"; PROVISION_PKGS='gawk'       provision_manifest_tag 9)"
-assert_eq "${tag_a}" "${tag_b}" "provision_manifest_tag is deterministic for a given (major, manifest)"
-assert_match "${tag_a}" 'rhel6-' "provision_manifest_tag embeds the OS major"
-if [ "${tag_a}" != "${tag_c}" ]; then t_pass "manifest fingerprint changes when PROVISION_PKGS changes (auto-rebuild)"
-else t_fail "manifest fingerprint changes when PROVISION_PKGS changes (auto-rebuild)"; fi
+# r53: the tag is a per-run human-readable timestamp (one stamp per process;
+# r48's exit-cleanup made images run-scoped, so fingerprinting is obsolete).
+tag_a="$(. "${LIB}"; PROVISION_RUN_STAMP=20260704120000 provision_manifest_tag 6)"
+tag_b="$(. "${LIB}"; PROVISION_RUN_STAMP=20260704120000 provision_manifest_tag 6)"
+tag_9="$(. "${LIB}"; PROVISION_RUN_STAMP=20260704120000 provision_manifest_tag 9)"
+tag_n="$(. "${LIB}"; provision_manifest_tag 6)"
+assert_eq "${tag_a}" "${tag_b}" "tag is deterministic within a run (same stamp)"
+assert_eq "rhel-testsuite-provisioned:rhel6-20260704120000" "${tag_a#localhost/}" \
+  "tag = prefix:rhel<major>-YYYYMMDDhhmmss (human-readable)"
 if [ "${tag_a}" != "${tag_9}" ]; then t_pass "tag differs per OS major"
 else t_fail "tag differs per OS major"; fi
+case "${tag_n}" in
+  *rhel6-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+    t_pass "auto stamp is a 14-digit timestamp" ;;
+  *) t_fail "auto stamp is a 14-digit timestamp (got ${tag_n})" ;;
+esac
 
 # --- build/idempotency/failure via a PATH-mock podman -----------------------
 # The mock records its argv (MOCK_PODMAN_LOG) and is steered by env:
