@@ -76,7 +76,7 @@ INSECURE_TLS="${INSECURE_TLS:-0}"
 # kernel/toolchain. RHEL 6 (old EL6 kernel + gcc) is pinned to an older driver
 # that still compiles there; RHEL 7-10 take the current 2.17.0. Explicit
 # ENA_VERSION overrides (the matrix passes one in test mode).
-ENA_VERSION_RHEL6="${ENA_VERSION_RHEL6:-2.1.3}"
+ENA_VERSION_RHEL6="${ENA_VERSION_RHEL6:-2.9.1}"
 ENA_VERSION_RHEL7="${ENA_VERSION_RHEL7:-2.17.0}"
 ENA_VERSION_RHEL8="${ENA_VERSION_RHEL8:-2.17.0}"
 ENA_VERSION_RHEL9="${ENA_VERSION_RHEL9:-2.17.0}"

@@ -551,13 +551,13 @@ PYEOF
 # in-scope filtering.
 #   ssm/EL6 = 3.0.1479.0 (user-verified on real RHEL 6, 2026-07-04; below the
 #     in-scope/compliance floor 3.3.3598.0).
-#   ena/EL6 = 2.1.3 (user-verified build+production on real RHEL 6; the last
-#     ENA version with explicit kernel 2.6.32 + RHEL 6.7-6.9 verification in
-#     upstream RELEASENOTES; modern versions >= ~2.9 dropped 2.6.32 support).
+#   ena/EL6 = 2.9.1 (E2E verified max in-scope buildable on kernel 2.6.32;
+#     r60 sweep confirmed 2.8.0-2.9.1 all build, >= 2.10.0 fail; in-scope and
+#     express-ready).
 pe_smoke_pin() {
   case "$1:$2" in
     ssm:6) printf '3.0.1479.0' ;;
-    ena:6) printf '2.1.3' ;;
+    ena:6) printf '2.9.1' ;;
     *)     : ;;
   esac
 }
