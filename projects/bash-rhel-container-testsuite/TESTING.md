@@ -352,6 +352,9 @@ tests/probe-env.sh --facts --outdir /tmp/probe --shallow
 
 Conditions: `auto` = a PLAIN run (whatever the runtime injects by itself);
 `mounts` = the suite's legacy passthrough as the A/B comparison arm - the
+`docmounts` arm (added by default on RHUI hosts) probes the whole-directory
+recipe from a user-provided AWS-RHUI article (`/etc/yum.repos.d`,
+`/etc/pki/rhui`, plugin config dirs) as a hypothesis under test; the
 mount set follows the host's repo-access classification (rhsm on
 subscription-manager hosts, the RHUI file/cert set on AWS/Azure RHUI hosts;
 `MANIFEST.txt` records `repo_access=`). A host-side inventory lands in

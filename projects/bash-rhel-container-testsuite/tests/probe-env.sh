@@ -228,15 +228,32 @@ PART4
 # pe_record OUT MAJOR COND KEY VALUE - append one facts.tsv row.
 pe_record() { pc_tsv_row "$2" "$3" "$4" "$5" "$6" >> "$1/facts.tsv"; }
 
+# pe_docmount_args - the mount set from the user-provided AWS-RHUI article
+# (2026-07-04): whole /etc/yum.repos.d + /etc/pki/rhui + the dnf/yum plugin
+# CONFIG dirs, all :ro. Treated as a HYPOTHESIS to verify (the article claims
+# this makes RHUI repos work in UBI containers; our r41/r42 runs saw literal
+# REGION DNS failures and repomd 403 with a narrower set) - hence its own
+# probe condition, `docmounts`, for the A/B/C comparison.
+pe_docmount_args() {
+  local d
+  for d in /etc/yum.repos.d /etc/pki/rhui /etc/dnf/plugins /etc/yum/pluginconf.d; do
+    [ -d "${d}" ] && printf -- '-v %s:%s:ro ' "${d}" "${d}"
+  done
+}
+
 # pe_collect_podman MAJOR COND DIR MODE - one podman run executes the
 # collector. MODE (rhsm | rhui:<provider> | oci-ol | none, from
 # acq_repo_access) selects which legacy mount set the `mounts` A/B arm
 # applies - rhsm on subscription-manager hosts, the RHUI file/cert set on
 # AWS/Azure RHUI hosts (r40: RHUI is now a first-class probed environment).
+# The `docmounts` arm (r44) applies pe_docmount_args instead.
 pe_collect_podman() {
   local major="$1" cond="$2" dir="$3" mode="$4" ref margs=""
   ref="$(acq_ref_for_major "${major}")" || return 1
-  [ "${cond}" = mounts ] && margs="$(acq_entitlement_mount_args "${mode}")"
+  case "${cond}" in
+    mounts)    margs="$(acq_entitlement_mount_args "${mode}")" ;;
+    docmounts) margs="$(pe_docmount_args)" ;;
+  esac
   pe_emit_collector "${major}" "${DEEP}" "${PKG_TIMEOUT}" > "${dir}/collector.sh"
   # shellcheck disable=SC2086  # margs is an intentional argv fragment
   timeout "${RUN_TIMEOUT}" podman run --rm ${margs} \
@@ -247,7 +264,7 @@ pe_collect_podman() {
 # bind /proc,/dev + the out dir, run the collector via chroot. Root required.
 pe_collect_chroot() {
   local major="$1" cond="$2" dir="$3" work rc
-  if [ "${cond}" = mounts ]; then return 90; fi
+  if [ "${cond}" != auto ]; then return 90; fi
   work="$(mktemp -d /tmp/probe-ent.XXXXXX)"
   if ! acq_pull_curl "${major}" "${work}/root"; then rm -rf "${work}"; return 91; fi
   cp /etc/resolv.conf "${work}/root/etc/resolv.conf" 2>/dev/null
@@ -396,6 +413,11 @@ pe_facts() {
   elif [ "$(id -u)" = 0 ] && command -v chroot >/dev/null 2>&1; then engine=chroot
   else log "--facts needs podman, or root+chroot"; return 2; fi
   mode="$(acq_repo_access | cut -d'|' -f1)"
+  # r44: on RHUI hosts, add the article-recipe arm to the DEFAULT condition
+  # set (explicit --conds always wins).
+  if [ "${CONDS}" = "auto mounts" ]; then
+    case "${mode}" in rhui:*) CONDS="auto mounts docmounts" ;; esac
+  fi
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   OUTDIR="${OUTDIR:-${HERE}/ENTITLEMENT-PROBE-${ts}}"
   mkdir -p "${OUTDIR}"

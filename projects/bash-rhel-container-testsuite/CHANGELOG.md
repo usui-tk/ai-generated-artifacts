@@ -13,6 +13,20 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r44] - 2026-07-04 - feat: `docmounts` condition - the AWS-RHUI article recipe as an A/B/C arm
+
+### Added
+- **`docmounts` probe condition**: the mount set from a user-provided
+  AWS-RHUI article (whole `/etc/yum.repos.d` + `/etc/pki/rhui` + the
+  `/etc/dnf/plugins` and `/etc/yum/pluginconf.d` CONFIG dirs, all `:ro`) as
+  its own `--facts` arm. The article claims this makes RHUI repos usable
+  inside UBI containers; our r41/r42 measurements saw literal-`REGION` DNS
+  failures and repomd 403 with a narrower mount set - so the claim is
+  treated as a hypothesis and probed side by side. On RHUI hosts the
+  DEFAULT condition set expands to `auto mounts docmounts` (an explicit
+  `--conds` always wins); the chroot fallback reports `requires-podman`
+  for every non-`auto` condition.
+
 ## [r43] - 2026-07-04 - feat: capture the RHUI client implementation (authorization is server-side)
 
 ### Added
