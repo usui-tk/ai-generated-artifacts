@@ -58,7 +58,7 @@ SSM_VERSION_RHEL8="${SSM_VERSION_RHEL8:-latest}"
 SSM_VERSION_RHEL9="${SSM_VERSION_RHEL9:-latest}"
 SSM_VERSION_RHEL10="${SSM_VERSION_RHEL10:-latest}"
 
-OSMAJOR=""; GLIBC=""; INSTALLED="false"; RAN="false"; SVC="false"; RESULT_EMITTED=0
+OSMAJOR=""; GLIBC=""; INSTALLED="false"; RAN="false"; SVC="false"; RESULT_EMITTED=0; PTWARN=0
 
 log() { printf '%s [install-aws_ssm-agent] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -177,17 +177,34 @@ install_rpm() {
   curl "${copts[@]}" "${url}" || { rm -rf "${tmp}"; die "fetch failed: ${url}"; }
   if [ "${mgr}" != "none" ]; then
     pm_install_local_rpm "${mgr}" "${tmp}/ssm.rpm" \
-      || { local reason="${PM_INSTALL_ERR}"; rm -rf "${tmp}"
-           # r48, measured 2026-07-04 (smoke E2E + el6 chroot repro): the 3.3.x
-           # agent rpm INSTALLS its files on EL6 but its %posttrans scriptlet
-           # requires systemd, so yum reports a POSTTRANS scriptlet error
-           # (retries then see "does not update installed package"). That is a
-           # platform incompatibility (EL6 = upstart), not a run failure.
-           case "${OSMAJOR}:${reason}" in
-             6:*"POSTTRANS scriptlet"*|6:*"does not update installed package"*)
-               die_unsupported "agent %posttrans requires systemd; EL6/upstart cannot run this agent${reason:+: ${reason}}" ;;
+      || { local reason="${PM_INSTALL_ERR}" have=""
+           # r50 (measured 2026-07-04, el6 chroot): a %posttrans scriptlet
+           # error does NOT mean the agent is unusable - the rpm's files land
+           # and the binary runs (user-verified track record: 3.0.1479.0 on
+           # real RHEL 6). The scriptlet only registers the service, which
+           # cannot work without a RUNNING init (absent in containers/chroots).
+           # So MEASURE instead of assuming: if the requested version is now
+           # installed, continue with a warning and let the run check decide;
+           # classify unsupported only when the package did not land (r48's
+           # el6 signature) - never on a mere service-registration failure.
+           # NB: yum prints "does not update installed package" on STDOUT
+           # (discarded); stderr carries only "Error: Nothing to do" - match
+           # that too. The rpm -q version check below is the real guard.
+           case "${reason}" in
+             *"POSTTRANS scriptlet"*|*"does not update installed package"*|*"Nothing to do"*)
+               have="$(rpm -q --qf '%{VERSION}' amazon-ssm-agent 2>/dev/null || true)" ;;
            esac
-           die "rpm install via ${mgr} failed${reason:+: ${reason}}"; }
+           if [ -n "${have}" ] && { [ "${SSM_VERSION}" = "latest" ] || [ "${have}" = "${SSM_VERSION}" ]; }; then
+             PTWARN=1
+             log "WARNING: %posttrans scriptlet failed (no running init in this container/chroot); package ${have} installed - continuing to the run check"
+           else
+             rm -rf "${tmp}"
+             case "${OSMAJOR}:${reason}" in
+               6:*"POSTTRANS scriptlet"*|6:*"does not update installed package"*|6:*"Nothing to do"*)
+                 die_unsupported "agent %posttrans requires systemd; EL6/upstart cannot run this agent${reason:+: ${reason}}" ;;
+             esac
+             die "rpm install via ${mgr} failed${reason:+: ${reason}}"
+           fi; }
   else
     local rpmerr
     if ! rpmerr="$(rpm -i "${tmp}/ssm.rpm" 2>&1 1>/dev/null)"; then
@@ -245,10 +262,16 @@ if [ "${SSM_INSTALLTEST}" = "1" ]; then
   install_rpm
   INSTALLED="true"
   if amazon-ssm-agent -version >/dev/null 2>&1; then RAN="true"; else RAN="false"; fi
+  # r50: after a tolerated %posttrans warning, the run check is the judge -
+  # a binary that does not even run on EL6 IS a platform incompatibility.
+  if [ "${RAN}" != "true" ] && [ "${PTWARN}" = "1" ] && [ "${OSMAJOR}" = "6" ]; then
+    die_unsupported "agent ${SSM_VERSION} installed but its binary does not run on EL6 (glibc ${GLIBC})"
+  fi
   if [ "${SSM_INIT_MODE}" = "systemd" ]; then SVC="$(enable_for_boot)"; fi
   RESULT_EMITTED=1
-  printf '[aws_ssm-agent][installtest][result] {"status":"ok","tool":"aws_ssm-agent","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s}\n' \
-    "${OSMAJOR}" "${SSM_VERSION}" "${SSM_INIT_MODE}" "${GLIBC}" "${INSTALLED}" "${RAN}" "${SVC}"
+  _note=""; [ "${PTWARN}" = "1" ] && _note="%posttrans scriptlet warning tolerated (no running init in this container/chroot; service registration not performed)"
+  printf '[aws_ssm-agent][installtest][result] {"status":"ok","tool":"aws_ssm-agent","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"reason":"%s"}\n' \
+    "${OSMAJOR}" "${SSM_VERSION}" "${SSM_INIT_MODE}" "${GLIBC}" "${INSTALLED}" "${RAN}" "${SVC}" "$(json_escape "${_note}")"
   exit 0
 fi
 

@@ -13,6 +13,31 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r50] - 2026-07-04 - fix: measure %posttrans outcomes + EL6 SSM track-record pin
+
+### Fixed
+- **The EL6 SSM "unsupported" classification (r48/r49) was an
+  over-classification** - superseded by measurement. The %posttrans
+  scriptlet failure is an artifact of init-LESS containers/chroots (it only
+  registers the service); the rpm's files land and the binaries RUN on EL6
+  (measured: 3.0.1479.0 installed+ran; the 3.3.4793.0 binary also runs).
+  `install_rpm` now MEASURES instead of assuming: on a
+  POSTTRANS/"Nothing to do" failure it checks whether the requested version
+  actually installed - if yes, it continues with a tolerated warning
+  (recorded in the ok-result's `reason`) and lets the run check judge; only
+  a landed-but-not-running EL6 binary or a genuinely absent package
+  classifies as `unsupported`. (yum prints "does not update installed
+  package" on STDOUT, so the stderr signature match includes
+  "Nothing to do"; the rpm version check is the real guard.)
+
+### Added
+- **Smoke track-record pin** (`pe_smoke_pin`, unit-tested; user decision):
+  ssm/EL6 samples **3.0.1479.0** - the version the user verified on real
+  RHEL 6 (with a live upstart, i.e. including service registration). It is
+  below the in-scope/compliance floor (3.3.3598.0), so the verdict table
+  marks pinned cells with `*` and a footnote. Pins affect ONLY smoke
+  sampling, never the matrices' in-scope filtering.
+
 ## [r49] - 2026-07-04 - fix: ENA source-locate bug + awscli glibc gate + per-major smoke sampling
 
 ### Fixed

@@ -339,7 +339,9 @@ One command, every major, one sample per tool - the quick health signal
 between full matrix sweeps: provisions each target major once, runs the
 newest MAJOR-COMPATIBLE version of each install script (per-version
 constraints such as `min_glibc` are honored, so RHEL6 samples the newest
-EL6-capable awscli; awscli / ssm / ena; subset with
+EL6-capable awscli; adjudicated track-record pins override the pick and
+are marked `*` in the table - ssm/EL6 is pinned to the user-verified
+3.0.1479.0; awscli / ssm / ena; subset with
 `SMOKE_TOOLS="awscli ssm"`) in its test mode, one `--rm` container per
 (major, tool), and prints a major x tool verdict table. On completion the
 failure-log directory is packed as `SMOKE-LOGS-<ts>.tar.gz`. Ledgers and

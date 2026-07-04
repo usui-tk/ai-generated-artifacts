@@ -170,6 +170,11 @@ printf '{"versions": [{"version":"3.1.0"},{"version":"3.2.0"}]}
 assert_eq "3.2.0" "$(pe_smoke_pick "${picktmp}" 6)" "no constraint fields -> newest everywhere"
 rm -f "${picktmp}"
 
+# pe_smoke_pin: r50 adjudicated track-record pins
+assert_eq "3.0.1479.0" "$(pe_smoke_pin ssm 6)" "ssm/EL6 pin = user-verified 3.0.1479.0"
+assert_eq "" "$(pe_smoke_pin ssm 9)"  "no pin for ssm/9"
+assert_eq "" "$(pe_smoke_pin awscli 6)" "no pin for awscli/6 (data-driven pick covers it)"
+
 # pe_smoke_expected: the r48 expected-status classification
 for st in ok unsupported unavailable; do
   if pe_smoke_expected "${st}"; then t_pass "expected status: ${st}"; else t_fail "expected status: ${st}"; fi

@@ -545,22 +545,41 @@ print(pick)
 PYEOF
 }
 
+# pe_smoke_pin TOOL MAJOR - adjudicated TRACK-RECORD pins for smoke sampling:
+# versions the user verified working on that major where the data-driven pick
+# cannot know it (r50). ssm/EL6 = 3.0.1479.0 (user-verified on real RHEL 6,
+# 2026-07-04; below the in-scope/compliance floor 3.3.3598.0 - the smoke goal
+# is SCRIPT health, and the pin is marked in the verdict table). Pins affect
+# ONLY smoke sampling, never the matrices' in-scope filtering.
+pe_smoke_pin() {
+  case "$1:$2" in
+    ssm:6) printf '3.0.1479.0' ;;
+    *)     : ;;
+  esac
+}
+
 # pe_smoke_tool_spec TOOL ENA_ENT MAJOR - set SMK_SCRIPT / SMK_VER / SMK_ENVS
-# for a tool sample (newest major-compatible version, test mode).
+# for a tool sample (adjudicated pin if one exists, else the newest
+# major-compatible version; test mode). A pin sets SMK_PINNED=1 so the table
+# can flag the cell.
 pe_smoke_tool_spec() {
-  local tool="$1" ena_ent="$2" major="$3"
+  local tool="$1" ena_ent="$2" major="$3" pin
+  SMK_PINNED=0
+  pin="$(pe_smoke_pin "${tool}" "${major}")"
   case "${tool}" in
     awscli) SMK_SCRIPT="${PROJ}/install-aws_awscli-v2.sh"
-            SMK_VER="$(pe_smoke_pick "${PROJ}/tests/aws_awscli-v2/awscli-releases.json" "${major}")"
+            SMK_VER="${pin:-$(pe_smoke_pick "${PROJ}/tests/aws_awscli-v2/awscli-releases.json" "${major}")}"
             SMK_ENVS=(AWSCLI_INSTALLTEST=1 "AWSCLI_VERSION=${SMK_VER}") ;;
     ssm)    SMK_SCRIPT="${PROJ}/install-aws_ssm-agent.sh"
-            SMK_VER="$(pe_smoke_pick "${PROJ}/tests/aws_ssm-agent/ssm-releases.json" "${major}")"
+            SMK_VER="${pin:-$(pe_smoke_pick "${PROJ}/tests/aws_ssm-agent/ssm-releases.json" "${major}")}"
             SMK_ENVS=(SSM_INSTALLTEST=1 "SSM_VERSION=${SMK_VER}" SSM_INIT_MODE=none) ;;
     ena)    SMK_SCRIPT="${PROJ}/install-aws_ena-driver.sh"
-            SMK_VER="$(pe_smoke_pick "${PROJ}/tests/aws_ena-driver/ena-driver-releases.json" "${major}")"
+            SMK_VER="${pin:-$(pe_smoke_pick "${PROJ}/tests/aws_ena-driver/ena-driver-releases.json" "${major}")}"
             SMK_ENVS=(ENA_INSTALLTEST=1 "ENA_VERSION=${SMK_VER}" "ENA_ENTITLEMENT=${ena_ent}" ENA_BUILD_PLAN=make) ;;
     *) log "smoke: unknown tool '${tool}'"; return 1 ;;
   esac
+  [ -n "${pin}" ] && SMK_PINNED=1
+  return 0
 }
 
 # pe_smoke_record MAJOR TOOL VER STATUS REASON OUT RC - classify one cell,
@@ -574,9 +593,11 @@ pe_smoke_record() {
     mkdir -p "${SMK_LOGDIR}"
     printf '%s\n' "${out}" > "${SMK_LOGDIR}/rhel${major}-${tool}.log"
   fi
-  SMK_ROWS="${SMK_ROWS}$(printf '%-7s %-7s %-14s %-12s %s' "RHEL${major}" "${tool}" "${ver}" "${status}" "${reason:--}")
+  local vdisp="${ver}"
+  if [ "${SMK_PINNED:-0}" = "1" ]; then vdisp="${ver}*"; SMK_PIN_SEEN=1; fi
+  SMK_ROWS="${SMK_ROWS}$(printf '%-7s %-7s %-14s %-12s %s' "RHEL${major}" "${tool}" "${vdisp}" "${status}" "${reason:--}")
 "
-  log "RHEL${major} ${tool} ${ver}: ${status}${reason:+ (${reason})}"
+  log "RHEL${major} ${tool} ${vdisp}: ${status}${reason:+ (${reason})}"
 }
 
 # pe_smoke_umount_all - undo the chroot-engine mounts; trap-wired so failures
@@ -605,7 +626,7 @@ pe_smoke() {
   host_banner
   mode="$(acq_repo_access | cut -d'|' -f1)"
   case "${mode}" in rhsm) ena_ent=entitled ;; *) ena_ent=anonymous ;; esac
-  SMK_FAILS=0; SMK_ROWS=""; SMK_MOUNTED=""
+  SMK_FAILS=0; SMK_ROWS=""; SMK_MOUNTED=""; SMK_PIN_SEEN=0
   SMK_LOGDIR="${HERE}/SMOKE-LOGS-$(date -u +%Y%m%dT%H%M%SZ)"
   log "smoke: engine=${engine} majors [${MAJORS}] x tools [${SMOKE_TOOLS:-awscli ssm ena}] (mode=${mode}, latest version each)"
   if [ "${engine}" = podman ]; then
@@ -667,6 +688,7 @@ pe_smoke() {
   printf '%-7s %-7s %-14s %-12s %s\n' major tool version status note
   printf '%s' "${SMK_ROWS}"
   printf '\nexpected statuses: ok / unsupported / unavailable (needs-entitlement rides on ok)\n'
+  [ "${SMK_PIN_SEEN}" = "1" ] && printf '*  pinned track-record version (user-verified; below the in-scope/compliance floor)\n'
   if [ -d "${SMK_LOGDIR}" ]; then
     # r49 (user requirement): auto-pack the failure logs like --facts does.
     if tar czf "${SMK_LOGDIR}.tar.gz" -C "$(dirname "${SMK_LOGDIR}")" "$(basename "${SMK_LOGDIR}")" 2>/dev/null; then
