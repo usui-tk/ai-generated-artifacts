@@ -335,9 +335,24 @@ if [ "${bko_rc}" = "0" ]; then
   fi
   BUILT="true"
 else
+  # r61: extract the FIRST compiler error from make.log so the ledger reason
+  # carries the specific kernel-API error (e.g. "implicit declaration of
+  # function 'from_timer'") instead of the generic "build failed" message.
+  local first_error=""
+  if [ -f "${MAKE_LOG}" ]; then
+    first_error="$(grep -m1 ' error:' "${MAKE_LOG}" \
+      | sed 's/^.*error: //' | head -c 200 || true)"
+  fi
   case "${bko_rc}" in
     2) die "kernel-devel not installed (cannot build)" ;;
-    *) dump_build_diag; die "build failed (make returned non-zero or produced no ena.ko)" ;;
+    *)
+      dump_build_diag
+      if [ -n "${first_error}" ]; then
+        die "build failed (${first_error})"
+      else
+        die "build failed (make returned non-zero or produced no ena.ko)"
+      fi
+      ;;
   esac
 fi
 

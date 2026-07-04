@@ -334,6 +334,45 @@ for major in sorted(by_major, key=lambda m: int(m) if m.isdigit() else 99):
             row["version"], row["status"], row["ko_version"],
             row["dkms"], row["tested_at"], row["note"]))
     lines.append("")
+
+    # r61: fail pattern analysis - group consecutive fail versions by error
+    fail_rows = [(r["version"], r["note"]) for r in table_rows if r["status"] == "fail"]
+    if fail_rows:
+        lines.append("## Fail pattern analysis")
+        lines.append("")
+        def extract_api_error(reason):
+            if not reason: return "(unknown)"
+            if reason.startswith("build failed (") and reason.endswith(")"):
+                inner = reason[len("build failed ("):-1]
+                if inner and inner != "make returned non-zero or produced no ena.ko":
+                    return inner
+            return reason
+
+        groups = []
+        for ver, note in fail_rows:
+            err = extract_api_error(note)
+            if groups and groups[-1]["error"] == err:
+                groups[-1]["versions"].append(ver)
+            else:
+                groups.append({"error": err, "versions": [ver]})
+
+        kver = next((str(r.get("kver","")) for r in rows_raw if r.get("kver")), "?")
+        lines.append("The container's kernel-devel (`%s`) determines which "
+                     "ENA releases can compile. Older ENA releases lack kcompat.h "
+                     "coverage for newer kernel APIs; newer ENA releases drop "
+                     "support for older kernels. Each group below shares the same "
+                     "root cause." % kver)
+        lines.append("")
+        lines.append("| ENA versions | root cause |")
+        lines.append("|:--|:--|")
+        for g in groups:
+            vs = g["versions"]
+            if len(vs) == 1:
+                vrange = vs[0]
+            else:
+                vrange = "%s -- %s (%d versions)" % (vs[0], vs[-1], len(vs))
+            lines.append("| %s | %s |" % (vrange, g["error"]))
+        lines.append("")
     lines.append("_Sweep: %d version(s) tested, %d ok. "
                  "Regenerate: `OSMAJORS=%s ./run-ena-buildtest-matrix.sh`._" % (
                      n_total, n_ok, major))
@@ -543,9 +582,10 @@ ena_kick() {
     built="$(result_field "${line}" built)"; [ "${built}" = "true" ] || built=false
     status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
     kov="$(result_field "${line}" ko_version)"
+    local kver_got; kver_got="$(result_field "${line}" kver)"
     reason="$(jesc "$(result_field "${line}" reason)")"
-    row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","verdict":"%s","load_tier":"%s","ena_express":"%s","reason":"%s"}' \
-      "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" \
+    row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","kver":"%s","verdict":"%s","load_tier":"%s","ena_express":"%s","reason":"%s"}' \
+      "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" "${kver_got}" \
       "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)" "$(ena_express_verdict "${ver}")" "${reason}")"
   fi
   if [ "${status}" != "ok" ]; then

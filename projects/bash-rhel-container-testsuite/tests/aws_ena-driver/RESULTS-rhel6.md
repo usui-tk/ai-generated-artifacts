@@ -42,4 +42,12 @@ _ENA Express readiness (driver-version floor only): >= 2.2.9 full bandwidth, >= 
 | 2.8.1 | ok | 2.8.1 | - | 2026-07-04T19:49:06Z |  |
 | 2.8.0 | ok | 2.8.0 | - | 2026-07-04T19:49:06Z |  |
 
+## Fail pattern analysis
+
+The container's kernel-devel (`?`) determines which ENA releases can compile. Older ENA releases lack kcompat.h coverage for newer kernel APIs; newer ENA releases drop support for older kernels. Each group below shares the same root cause.
+
+| ENA versions | root cause |
+|:--|:--|
+| 2.17.0 -- 2.10.0 (17 versions) | build failed (make returned non-zero or produced no ena.ko) |
+
 _Sweep: 29 version(s) tested, 12 ok. Regenerate: `OSMAJORS=6 ./run-ena-buildtest-matrix.sh`._
