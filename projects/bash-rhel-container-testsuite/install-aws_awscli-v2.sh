@@ -209,6 +209,26 @@ resolve_version() {
 
 trap 'die "unexpected error (line ${LINENO})"' ERR
 
+# die_unsupported : like die, but the outcome is a MEASURED platform
+# incompatibility (bundle needs newer glibc than this OS has) - status
+# "unsupported", not "fail" (r49; the EL6 crash at the old line 227 was this
+# gate missing: aws --version failed under pipefail and hit the ERR trap).
+die_unsupported() {
+  log "UNSUPPORTED: $*"
+  if [ "${AWSCLI_INSTALLTEST}" = "1" ] && [ "${RESULT_EMITTED}" = "0" ]; then
+    RESULT_EMITTED=1
+    printf '[aws_awscli-v2][installtest][result] {"status":"unsupported","tool":"aws_awscli-v2","osmajor":"%s","awscli_version":"%s","glibc":"%s","installed_version":"","ran":false,"run_method":"","bundled_python":"%s","min_glibc_measured":"%s","reason":"%s"}\n' \
+      "${OSMAJOR}" "${AWSCLI_VERSION}" "${GLIBC}" "${BUNDLED_PYTHON:-}" "${MIN_GLIBC_MEASURED:-}" "$(json_escape "$*")"
+  fi
+  exit 1
+}
+
+# glibc_lt A B : rc0 iff version A < B (numeric, sort -V; EL6 coreutils ok).
+glibc_lt() {
+  [ "$1" = "$2" ] && return 1
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
+}
+
 OSMAJOR="$(os_major)"
 GLIBC="$(host_glibc)"
 resolve_version
@@ -221,6 +241,11 @@ if [ "${AWSCLI_INSTALLTEST}" = "1" ]; then
   BUNDLED_PYTHON="$(detect_bundled_python "${workdir}")"
   MIN_GLIBC_MEASURED="$(measure_min_glibc "${workdir}")"
   log "bundle: Python ${BUNDLED_PYTHON:-?} | empirical min glibc ${MIN_GLIBC_MEASURED:-?}"
+  # r49: the measured requirement gates the attempt - an OS glibc below the
+  # bundle's empirical minimum is a platform incompatibility, not a failure.
+  if [ -n "${MIN_GLIBC_MEASURED}" ] && [ -n "${GLIBC}" ] && glibc_lt "${GLIBC}" "${MIN_GLIBC_MEASURED}"; then
+    die_unsupported "bundle needs glibc >= ${MIN_GLIBC_MEASURED}, OS has ${GLIBC} (RHEL${OSMAJOR})"
+  fi
   prefix="${workdir}/prefix"
   "${workdir}/aws/install" -i "${prefix}/aws-cli" -b "${prefix}/bin" >/dev/null 2>&1 \
     || die "bundle install failed (glibc too old or installer error)"

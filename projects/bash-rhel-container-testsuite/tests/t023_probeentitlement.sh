@@ -158,6 +158,18 @@ assert_eq "2.10.0" "$(pe_smoke_latest "${smoketmp}")" \
 printf '{"versions": ["1.2", "1.10"]}\n' > "${smoketmp}"
 assert_eq "1.10" "$(pe_smoke_latest "${smoketmp}")" "string-list versions also work"
 rm -f "${smoketmp}"
+# pe_smoke_pick: r49 per-major constrained version selection
+picktmp="$(mktemp)"
+cat > "${picktmp}" <<'JSONEOF'
+{"versions": [{"version":"2.30.0","min_glibc":"2.17"},{"version":"2.17.49","min_glibc":"2.5"},{"version":"2.10.0","min_glibc":"2.5"}]}
+JSONEOF
+assert_eq "2.30.0"  "$(pe_smoke_pick "${picktmp}" 10)" "major 10 takes the newest version"
+assert_eq "2.17.49" "$(pe_smoke_pick "${picktmp}" 6)"  "major 6 takes the newest glibc-2.12-capable version"
+printf '{"versions": [{"version":"3.1.0"},{"version":"3.2.0"}]}
+' > "${picktmp}"
+assert_eq "3.2.0" "$(pe_smoke_pick "${picktmp}" 6)" "no constraint fields -> newest everywhere"
+rm -f "${picktmp}"
+
 # pe_smoke_expected: the r48 expected-status classification
 for st in ok unsupported unavailable; do
   if pe_smoke_expected "${st}"; then t_pass "expected status: ${st}"; else t_fail "expected status: ${st}"; fi

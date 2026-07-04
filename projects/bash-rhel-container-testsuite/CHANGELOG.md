@@ -13,6 +13,37 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r49] - 2026-07-04 - fix: ENA source-locate bug + awscli glibc gate + per-major smoke sampling
+
+### Fixed
+- **Every real ENA build failed on a latent source-LOCATE bug, not make**:
+  the tarball root is `amzn-drivers-<tag>/`, putting `kernel/linux/ena` at
+  depth 4, and `fetch_src`'s `find -maxdepth 3` never found it (verified by
+  reproducing the tarball layout). The legacy mounts had kept entitled
+  builds from ever running, so the bug stayed hidden until the second smoke
+  E2E. Depth fixed (5, with headroom) and fetch/extract/locate failures now
+  report distinctly instead of masquerading as
+  "build failed (make ...)".
+- **awscli gained the missing glibc gate**: the bundle's measured minimum
+  is compared against the OS glibc BEFORE installing; below-minimum is
+  `unsupported` (measured platform incompatibility). This was the EL6
+  "unexpected error (line 227)" - `aws --version` failing under
+  `pipefail` into the ERR trap because no gate existed. Verified in an el6
+  chroot: 2.35.14 -> `unsupported`, 2.17.49 -> `ok` (installs and runs).
+
+### Changed
+- **Smoke samples a per-major COMPATIBLE version** (`pe_smoke_pick`,
+  unit-tested; user requirement - the smoke goal is script health, so each
+  cell should be able to complete normally): the newest version whose
+  per-version constraints the major satisfies (today: `min_glibc` vs the
+  measured per-major glibc). RHEL6 therefore samples awscli 2.17.49 (ok)
+  instead of the latest (unsupported). SSM has no per-version constraint
+  data and EL6 was measured incompatible across the in-scope range (floor
+  3.3.3598.0 shows the same installs-but-does-not-update pattern as
+  3.3.4793.0), so its EL6 cell correctly reports `unsupported`.
+- **Smoke packs its failure logs** as `SMOKE-LOGS-<ts>.tar.gz` on
+  completion (user requirement, mirroring `--facts`).
+
 ## [r48] - 2026-07-04 - fix: first smoke E2E findings + guaranteed test-image cleanup + smoke hardening
 
 ### Fixed

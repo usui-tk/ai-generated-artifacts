@@ -523,19 +523,41 @@ pe_smoke_expected() {
   case "$1" in ok|unsupported|unavailable) return 0 ;; *) return 1 ;; esac
 }
 
-# pe_smoke_tool_spec TOOL ENA_ENT - set SMK_SCRIPT / SMK_VER / SMK_ENVS for a
-# tool sample (latest released version, the install script's test mode).
+# pe_smoke_pick RELEASES_JSON MAJOR - the newest version whose per-version
+# constraints THIS major satisfies (today: min_glibc vs the measured per-major
+# glibc, same table as the ssm matrix's rhel_glibc). r49, user requirement:
+# the smoke goal is SCRIPT health, so each cell samples a version that CAN
+# complete normally on that major (RHEL6 gets the newest glibc-2.12-capable
+# awscli instead of the latest). Versions without constraint fields are
+# always candidates; no candidate -> newest overall (the script's own gate
+# then classifies cleanly).
+pe_smoke_pick() {
+  python3 - "$1" "$2" <<'PYEOF'
+import json,re,sys
+glibc={"10":"2.39","9":"2.34","8":"2.28","7":"2.17","6":"2.12"}
+key=lambda v:[int(x) for x in re.findall(r"\d+", str(v))]
+d=json.load(open(sys.argv[1])); have=key(glibc.get(sys.argv[2],"99"))
+vs=[x for x in (d.get("versions") or []) if isinstance(x,dict) and x.get("version")]
+ok=[x["version"] for x in vs if not x.get("min_glibc") or key(x["min_glibc"])<=have]
+allv=[x["version"] for x in vs]
+pick=sorted(ok or allv,key=key)[-1] if (ok or allv) else ""
+print(pick)
+PYEOF
+}
+
+# pe_smoke_tool_spec TOOL ENA_ENT MAJOR - set SMK_SCRIPT / SMK_VER / SMK_ENVS
+# for a tool sample (newest major-compatible version, test mode).
 pe_smoke_tool_spec() {
-  local tool="$1" ena_ent="$2"
+  local tool="$1" ena_ent="$2" major="$3"
   case "${tool}" in
     awscli) SMK_SCRIPT="${PROJ}/install-aws_awscli-v2.sh"
-            SMK_VER="$(pe_smoke_latest "${PROJ}/tests/aws_awscli-v2/awscli-releases.json")"
+            SMK_VER="$(pe_smoke_pick "${PROJ}/tests/aws_awscli-v2/awscli-releases.json" "${major}")"
             SMK_ENVS=(AWSCLI_INSTALLTEST=1 "AWSCLI_VERSION=${SMK_VER}") ;;
     ssm)    SMK_SCRIPT="${PROJ}/install-aws_ssm-agent.sh"
-            SMK_VER="$(pe_smoke_latest "${PROJ}/tests/aws_ssm-agent/ssm-releases.json")"
+            SMK_VER="$(pe_smoke_pick "${PROJ}/tests/aws_ssm-agent/ssm-releases.json" "${major}")"
             SMK_ENVS=(SSM_INSTALLTEST=1 "SSM_VERSION=${SMK_VER}" SSM_INIT_MODE=none) ;;
     ena)    SMK_SCRIPT="${PROJ}/install-aws_ena-driver.sh"
-            SMK_VER="$(pe_smoke_latest "${PROJ}/tests/aws_ena-driver/ena-driver-releases.json")"
+            SMK_VER="$(pe_smoke_pick "${PROJ}/tests/aws_ena-driver/ena-driver-releases.json" "${major}")"
             SMK_ENVS=(ENA_INSTALLTEST=1 "ENA_VERSION=${SMK_VER}" "ENA_ENTITLEMENT=${ena_ent}" ENA_BUILD_PLAN=make) ;;
     *) log "smoke: unknown tool '${tool}'"; return 1 ;;
   esac
@@ -595,7 +617,7 @@ pe_smoke() {
     while IFS=' ' read -r major ref; do
       [ -n "${major}" ] || continue
       for tool in ${SMOKE_TOOLS:-awscli ssm ena}; do
-        pe_smoke_tool_spec "${tool}" "${ena_ent}" || continue
+        pe_smoke_tool_spec "${tool}" "${ena_ent}" "${major}" || continue
         eargs=(); for kv in "${SMK_ENVS[@]}"; do eargs+=(-e "${kv}"); done
         out="$(timeout "${RUN_TIMEOUT}" podman run --rm -v "${SMK_SCRIPT}:/smoke.sh:ro,z" \
                 -e "INSECURE_TLS=${INSECURE_TLS:-0}" -e "PKG_TIMEOUT=${PKG_TIMEOUT}" "${eargs[@]}" \
@@ -625,7 +647,7 @@ pe_smoke() {
       timeout "${PKG_TIMEOUT}" chroot "${d}" "${mgr}" -y -q ${so} install ${PROVISION_PKGS} >/dev/null 2>&1 \
         || log "RHEL${major}: chroot provisioning failed (anonymous rootfs; continuing best-effort)"
       for tool in ${SMOKE_TOOLS:-awscli ssm ena}; do
-        pe_smoke_tool_spec "${tool}" "${ena_ent}" || continue
+        pe_smoke_tool_spec "${tool}" "${ena_ent}" "${major}" || continue
         cp "${SMK_SCRIPT}" "${d}/tmp/smoke.sh"
         out="$(timeout "${RUN_TIMEOUT}" chroot "${d}" /usr/bin/env "${SMK_ENVS[@]}" \
                 "INSECURE_TLS=${INSECURE_TLS:-0}" "PKG_TIMEOUT=${PKG_TIMEOUT}" \
@@ -645,7 +667,14 @@ pe_smoke() {
   printf '%-7s %-7s %-14s %-12s %s\n' major tool version status note
   printf '%s' "${SMK_ROWS}"
   printf '\nexpected statuses: ok / unsupported / unavailable (needs-entitlement rides on ok)\n'
-  [ -d "${SMK_LOGDIR}" ] && printf 'failure logs: %s\n' "${SMK_LOGDIR}"
+  if [ -d "${SMK_LOGDIR}" ]; then
+    # r49 (user requirement): auto-pack the failure logs like --facts does.
+    if tar czf "${SMK_LOGDIR}.tar.gz" -C "$(dirname "${SMK_LOGDIR}")" "$(basename "${SMK_LOGDIR}")" 2>/dev/null; then
+      printf 'failure logs: %s (packed: %s)\n' "${SMK_LOGDIR}" "${SMK_LOGDIR}.tar.gz"
+    else
+      printf 'failure logs: %s\n' "${SMK_LOGDIR}"
+    fi
+  fi
   printf 'smoke: %s\n' "$( [ "${SMK_FAILS}" -eq 0 ] && echo 'ALL OK / EXPECTED' || echo "${SMK_FAILS} unexpected cell(s)" )"
   [ "${SMK_FAILS}" -eq 0 ]
 }

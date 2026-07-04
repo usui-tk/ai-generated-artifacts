@@ -214,7 +214,11 @@ fetch_src() {
   [ "${INSECURE_TLS}" = "1" ] && opts+=(-k)
   curl "${opts[@]}" "${url}" || return 1
   tar -xzf "${tar}" -C "${dest}" || return 1
-  find "${dest}" -maxdepth 3 -type d -path '*/kernel/linux/ena' | head -1
+  # r49: the tarball root is amzn-drivers-<tag>/, so the ena dir sits at
+  # depth 4 from dest - the old -maxdepth 3 NEVER found it and every real
+  # entitled build failed with a misleading "build failed (make ...)" (the
+  # bug stayed latent while the legacy mounts kept builds from running).
+  find "${dest}" -maxdepth 5 -type d -path '*/kernel/linux/ena' | head -1
 }
 
 build_ko() {
@@ -222,8 +226,8 @@ build_ko() {
   KVER="$(kdevel_kver)"
   [ -n "${KVER}" ] && [ -d "/usr/src/kernels/${KVER}" ] || return 2   # no kernel-devel
   BUILT_DEST="$(mktemp -d)"
-  src="$(fetch_src "${BUILT_DEST}")" || return 1
-  [ -n "${src}" ] || return 1
+  src="$(fetch_src "${BUILT_DEST}")" || return 3   # r49: fetch/extract/locate, NOT make
+  [ -n "${src}" ] || return 3
   BUILT_SRC="${src}"; MAKE_LOG="${BUILT_DEST}/make.log"
   if make -C "/usr/src/kernels/${KVER}" "M=${src}" modules >"${MAKE_LOG}" 2>&1 && [ -f "${src}/ena.ko" ]; then
     return 0
@@ -292,7 +296,11 @@ case "${edc}" in
   3) dump_pm_diag; die "kernel-devel not available/installable from RHEL${OSMAJOR} entitled repos (see the package-manager log above)" ;;
   *) dump_pm_diag; die "entitled build dependencies failed to install (gcc/make/kernel-devel) on RHEL${OSMAJOR}" ;;
 esac
-if build_ko; then
+bko_rc=0; build_ko || bko_rc=$?
+if [ "${bko_rc}" = "3" ]; then
+  die "source fetch/extract failed (github reachable? tar/gzip present? tag ena_linux_${ENA_VERSION} published?)"
+fi
+if [ "${bko_rc}" = "0" ]; then
   KO_VERSION="$(ko_module_version "${BUILT_SRC}/ena.ko")"
   if [ -n "${KO_VERSION}" ] && [ "${KO_VERSION}" != "${ENA_VERSION}" ]; then
     dump_build_diag
@@ -300,8 +308,7 @@ if build_ko; then
   fi
   BUILT="true"
 else
-  rc=$?
-  case "${rc}" in
+  case "${bko_rc}" in
     2) die "kernel-devel not installed (cannot build)" ;;
     *) dump_build_diag; die "build failed (make returned non-zero or produced no ena.ko)" ;;
   esac
