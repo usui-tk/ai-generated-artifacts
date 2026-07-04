@@ -50,6 +50,33 @@ LEDGER="${SCRIPT_DIR}/ssm-installtest-ledger.json"
 RESULTS_DIR="${SCRIPT_DIR}"
 INSTALL_SCRIPT="${PROJ_DIR}/install-aws_ssm-agent.sh"   # kicked by run_matrix (--run)
 SSM_MIN="3.3.3598.0"
+# r51 (user decision, 2026-07-04): EL6 additionally sweeps adjudicated
+# TRACK-RECORD versions below the compliance floor - versions the user
+# verified working on real RHEL 6. They are reported in a dedicated
+# "legacy" RESULTS section, clearly marked as below the floor.
+SSM_LEGACY_VERSIONS_EL6="${SSM_LEGACY_VERSIONS_EL6:-3.0.1479.0}"
+
+# rhel_init <major> : the per-major init system (RESULTS wording; the
+# install script MEASURES the branch it used and reports init_system).
+rhel_init() {
+  case "${1:-}" in
+    10|9|8|7) printf 'systemd' ;;
+    6)        printf 'upstart' ;;
+    *)        printf 'unknown' ;;
+  esac
+}
+
+# ssm_major_versions <major> <base...> : the sweep set for MAJOR - the base
+# (in-scope) set plus, on EL6 only, the legacy track-record versions.
+# upstart/EL6 is a legitimate target, not an exception (r51).
+ssm_major_versions() {
+  local m="$1"; shift
+  printf '%s' "$*"
+  if [ "${m}" = "6" ] && [ -n "${SSM_LEGACY_VERSIONS_EL6}" ]; then
+    printf ' %s' "${SSM_LEGACY_VERSIONS_EL6}"
+  fi
+  printf '\n'
+}
 # S3 base for the per-version agent rpm (mirrors install-aws_ssm-agent.sh and
 # list-ssm-releases.sh); used by the availability pre-scan (ssm_rpm_http_status).
 RPM_BASEURL="${SSM_RPM_BASEURL:-https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent}"
@@ -270,13 +297,13 @@ generate_results_for() {
       fi
       case "${mode}" in
         none)    printf '| none | run --rm REF -version | binary smoke | %s | %s | %s |\n' "${exp}" "${ran}" "${verdict}" ;;
-        systemd) printf '| systemd | run -d REF (/sbin/init) | enable/start unit | %s | %s | %s |\n' "${exp}" "${ran}" "${verdict}" ;;
+        systemd) printf '| systemd (init: %s) | run --rm REF (throwaway) | boot-enable via the OS init (measured: init_system) | %s | %s | %s |\n' "$(rhel_init "${major}")" "${exp}" "${ran}" "${verdict}" ;;
       esac
     done
     printf '\n_The acquire forms come from lib/acquire-rootfs.sh acq_init_run_args (Phase 2)._\n\n'
 
     printf '## E2E sweep evidence (min %s -> latest)\n\n' "${SSM_MIN}"
-    printf '%s\n\n' "On RHEL ${major}, the newest agent (${maxver:-unknown}) is **${compliance}**. \`none\` (install + \`-version\`) is swept for every in-scope version; \`systemd\` (service enable) is verified on the representative version (${maxver:-latest}) only - install/run do not depend on init_mode, so other systemd cells read \`n/a\`. \`pending\` = not yet run; agents below ${SSM_MIN} are out of scope (ec2messages-only)."
+    printf '%s\n\n' "On RHEL ${major}, the newest agent (${maxver:-unknown}) is **${compliance}**. \`none\` (install + \`-version\`) is swept for every in-scope version; \`systemd\` (boot enablement via the OS init - $(rhel_init "${major}") here; the install script records the measured \`init_system\`) is verified on the representative version (${maxver:-latest}) only - install/run do not depend on init_mode, so other systemd cells read \`n/a\`. \`pending\` = not yet run; agents below ${SSM_MIN} are out of scope (ec2messages-only)$( [ "${major}" = "6" ] && printf ', except the adjudicated legacy track-record versions below' )."
     printf '| version | >= min | none (ran/installed) | systemd (ran/installed) | verdict |\n|:--|:--|:--|:--|:--|\n'
     for v in $(ssm_inscope_versions); do
       [ -n "${v}" ] || continue
@@ -301,6 +328,25 @@ generate_results_for() {
     # shellcheck disable=SC2016  # backticks are literal Markdown code spans in the single-quoted format
     printf '\n_Install is empirically gated by the RPM dep closure + glibc; %s versions in scope. Regenerate this evidence with a single run: `OSMAJORS=%s ./run-ssm-installtest-matrix.sh`._\n' \
       "$(ssm_inscope_versions | grep -c .)" "${major}"
+
+    if [ "${major}" = "6" ] && [ -n "${SSM_LEGACY_VERSIONS_EL6}" ]; then
+      printf '\n## Legacy track-record versions (below the compliance floor %s)\n\n' "${SSM_MIN}"
+      printf '%s\n\n' "_These versions are NOT fully supported by AWS (ec2messages-only) and sit below the ${SSM_MIN} floor. They are swept on EL6 only because the user verified them working on real RHEL 6 (adjudicated 2026-07-04); boot enablement on EL6 goes through upstart (the agent rpm ships an upstart job)._"
+      printf '| version | none (ran/installed) | verdict |\n|:--|:--|:--|\n'
+      for v in ${SSM_LEGACY_VERSIONS_EL6}; do
+        if [ "$(ledger_verdict "${major}" "${v}" none)" = "unavailable" ]; then
+          printf '| %s | unavailable | unavailable |\n' "${v}"
+        else
+          c_leg="$(ledger_cell "${major}" "${v}" none)"
+          if [ -n "${c_leg}" ]; then
+            l_inst="${c_leg%%|*}"; l_ran="${c_leg##*|}"
+            printf '| %s | %s/%s | %s |\n' "${v}" "${l_ran}" "${l_inst}" "$(ssm_verdict "${l_inst}" "${l_ran}" none)"
+          else
+            printf '| %s | pending | pending |\n' "${v}"
+          fi
+        fi
+      done
+    fi
   } > "${out}"
   log "wrote ${out}"
 }
@@ -414,14 +460,16 @@ run_matrix() {
   # global, so a version whose S3 rpm is unpublished (403/404) is 'unavailable'
   # on every major - a correct terminal status, recorded directly (no container).
   avail_map="$(mktemp)"
-  for ver in ${versions} ${systemd_versions}; do
+  # shellcheck disable=SC2086  # the version lists are word-split by design
+  for ver in ${versions} ${systemd_versions} ${SSM_LEGACY_VERSIONS_EL6}; do
     grep -q "^${ver} " "${avail_map}" 2>/dev/null && continue
     printf '%s %s\n' "${ver}" "$(ssm_rpm_http_status "${ver}")" >> "${avail_map}"
   done
   # Sweep only the successfully prepared majors (EL6 absent if it could not be built).
   for major in ${prepared}; do
     ref="$(grep -m1 "^${major} " "${prep_map}" | cut -d' ' -f2-)"
-    for ver in ${versions}; do
+    # shellcheck disable=SC2086  # per-major set is word-split by design
+    for ver in $(ssm_major_versions "${major}" ${versions}); do
       st="$(grep -m1 "^${ver} " "${avail_map}" | cut -d' ' -f2)"
       if ssm_rpm_unavailable "${st}"; then ssm_unavail_row "${major}" "${ver}" none "${st}" "${rows_tmp}"
       else ssm_kick "${major}" "${ver}" none "${ref}" "${LOG_DIR}" "${rows_tmp}"; fi

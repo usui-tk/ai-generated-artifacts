@@ -13,6 +13,31 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r51] - 2026-07-04 - feat: SSM matrix - EL6 legacy track-record versions + init generalization
+
+### Added
+- **EL6 sweeps adjudicated legacy track-record versions**
+  (`SSM_LEGACY_VERSIONS_EL6`, default `3.0.1479.0` - user-verified on real
+  RHEL 6) in addition to the in-scope set (`ssm_major_versions`,
+  unit-tested in t009); the availability pre-scan covers them, and
+  RESULTS-rhel6 gains a dedicated "Legacy track-record versions (below the
+  compliance floor)" section that marks them as not fully supported.
+- **The measured init system is recorded** (`init_system`:
+  systemd|sysv|upstart|none in the result JSON): upstart is a legitimate
+  init, not an exception (user decision) - an EL6 service cell is
+  truthfully recorded as verified via upstart (the agent rpm ships BOTH the
+  upstart job and the systemd unit, and on upstart the job file IS the boot
+  enablement, exactly as the OL original handled it). The install script
+  accepts `service` as a forward-compatible alias of the `systemd` mode
+  value.
+
+### Fixed
+- **RESULTS wording matched the implementation**: the init_mode grid
+  claimed `run -d REF (/sbin/init)` + unit activation, but `ssm_kick` runs
+  one throwaway container and records the enable outcome; the grid and
+  narrative now say so and name the per-major init (`rhel_init`:
+  systemd 10-7 / upstart 6).
+
 ## [r50] - 2026-07-04 - fix: measure %posttrans outcomes + EL6 SSM track-record pin
 
 ### Fixed

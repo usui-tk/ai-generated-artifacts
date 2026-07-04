@@ -58,7 +58,7 @@ SSM_VERSION_RHEL8="${SSM_VERSION_RHEL8:-latest}"
 SSM_VERSION_RHEL9="${SSM_VERSION_RHEL9:-latest}"
 SSM_VERSION_RHEL10="${SSM_VERSION_RHEL10:-latest}"
 
-OSMAJOR=""; GLIBC=""; INSTALLED="false"; RAN="false"; SVC="false"; RESULT_EMITTED=0; PTWARN=0
+OSMAJOR=""; GLIBC=""; INSTALLED="false"; RAN="false"; SVC="false"; RESULT_EMITTED=0; PTWARN=0; INIT_SYSTEM=""
 
 log() { printf '%s [install-aws_ssm-agent] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
@@ -218,19 +218,30 @@ install_rpm() {
 
 # enable_for_boot : enable amazon-ssm-agent via the available init system.
 # echoes true if enabled, false otherwise. systemd -> chkconfig/SysV -> upstart.
+# r51: upstart is a legitimate init, not an exception (user decision) - the
+# measured branch is recorded in INIT_SYSTEM (systemd|sysv|upstart|none) and
+# surfaced in the result JSON, so an EL6 service cell is truthfully recorded
+# as verified via upstart. (Measured: the agent rpm ships BOTH the upstart
+# job and the systemd unit; on upstart the job file's 'start on' stanza IS
+# the boot enablement - no enable command exists or is needed, exactly as
+# the OL original handled it.)
 enable_for_boot() {
   if command -v systemctl >/dev/null 2>&1; then
+    INIT_SYSTEM=systemd
     if systemctl enable amazon-ssm-agent >/dev/null 2>&1; then printf 'true'; return 0; fi
     log "WARNING: systemctl enable amazon-ssm-agent failed; the RPM preset may still enable it"
   elif command -v chkconfig >/dev/null 2>&1 && [ -f /etc/init.d/amazon-ssm-agent ]; then
+    INIT_SYSTEM=sysv
     if chkconfig amazon-ssm-agent on >/dev/null 2>&1; then
       log "enabled amazon-ssm-agent via chkconfig (SysV)"; printf 'true'; return 0
     fi
     log "WARNING: chkconfig amazon-ssm-agent on failed"
   elif [ -f /etc/init/amazon-ssm-agent.conf ]; then
+    INIT_SYSTEM=upstart
     log "amazon-ssm-agent ships an upstart job; it starts on boot via its 'start on' stanza"
     printf 'true'; return 0
   else
+    INIT_SYSTEM=none
     log "WARNING: no recognized init integration for amazon-ssm-agent"
   fi
   printf 'false'
@@ -267,11 +278,11 @@ if [ "${SSM_INSTALLTEST}" = "1" ]; then
   if [ "${RAN}" != "true" ] && [ "${PTWARN}" = "1" ] && [ "${OSMAJOR}" = "6" ]; then
     die_unsupported "agent ${SSM_VERSION} installed but its binary does not run on EL6 (glibc ${GLIBC})"
   fi
-  if [ "${SSM_INIT_MODE}" = "systemd" ]; then SVC="$(enable_for_boot)"; fi
+  case "${SSM_INIT_MODE}" in systemd|service) SVC="$(enable_for_boot)" ;; esac
   RESULT_EMITTED=1
   _note=""; [ "${PTWARN}" = "1" ] && _note="%posttrans scriptlet warning tolerated (no running init in this container/chroot; service registration not performed)"
-  printf '[aws_ssm-agent][installtest][result] {"status":"ok","tool":"aws_ssm-agent","osmajor":"%s","ssm_version":"%s","init_mode":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"reason":"%s"}\n' \
-    "${OSMAJOR}" "${SSM_VERSION}" "${SSM_INIT_MODE}" "${GLIBC}" "${INSTALLED}" "${RAN}" "${SVC}" "$(json_escape "${_note}")"
+  printf '[aws_ssm-agent][installtest][result] {"status":"ok","tool":"aws_ssm-agent","osmajor":"%s","ssm_version":"%s","init_mode":"%s","init_system":"%s","glibc":"%s","installed":%s,"ran":%s,"service_enabled":%s,"reason":"%s"}\n' \
+    "${OSMAJOR}" "${SSM_VERSION}" "${SSM_INIT_MODE}" "${INIT_SYSTEM}" "${GLIBC}" "${INSTALLED}" "${RAN}" "${SVC}" "$(json_escape "${_note}")"
   exit 0
 fi
 

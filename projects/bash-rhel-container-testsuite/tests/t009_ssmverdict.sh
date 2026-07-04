@@ -97,4 +97,13 @@ if [ -f "${LISTER}" ]; then
   fi
 fi
 
+# --- r51: per-major sweep set + per-major init ---------------------------------
+# shellcheck disable=SC1090  # sed-extracted functions from the matrix under test
+. <(sed -n '/^SSM_LEGACY_VERSIONS_EL6=/p; /^rhel_init()/,/^}/p; /^ssm_major_versions()/,/^}/p' "${MATRIX}")
+assert_eq "3.3.9 3.3.8 3.0.1479.0" "$(ssm_major_versions 6 3.3.9 3.3.8)" \
+  "EL6 sweep set = base + legacy track-record versions"
+assert_eq "3.3.9 3.3.8" "$(ssm_major_versions 9 3.3.9 3.3.8)" "other majors unchanged"
+assert_eq "upstart" "$(rhel_init 6)" "EL6 init = upstart (legitimate, not an exception)"
+assert_eq "systemd" "$(rhel_init 10)" "EL10 init = systemd"
+
 t_done
