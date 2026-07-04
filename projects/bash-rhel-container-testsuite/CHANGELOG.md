@@ -13,6 +13,24 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r42] - 2026-07-04 - fix: RHUI authorization probed at the repomd layer + certificate content sets
+
+### Fixed
+- **The r41 cross-major check measured the wrong layer.** The AWS RHUI
+  mirrorlist endpoint answers 200 regardless of path validity or
+  authorization (measured 2026-07-04: even the `rhel99` control got 200), so
+  its status proves nothing. The check now follows the mirrorlist BODY to
+  the first real mirror and GETs `repodata/repomd.xml` with the client
+  certificate - the layer where authorization is enforced. Both statuses
+  and the first mirror URL are recorded per major.
+
+### Added
+- **Certificate content sets** (`host/content-sets.txt`): `rct cat-cert`
+  (ships with subscription-manager) decodes each RHUI product / entitlement
+  certificate's content-set extension into readable authorized paths - the
+  AUTHORITATIVE authorization list, independent of any network probe. Text
+  only; no key material. Rendered inside `RF0`.
+
 ## [r41] - 2026-07-04 - feat: RHUI cross-major authorization check + auto-packed probe output
 
 ### Added

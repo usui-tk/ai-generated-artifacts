@@ -91,8 +91,12 @@ an_txn_pairs() {
     echo '-- host certificates (metadata only) --'
     cat "${OUT}/host/certs.txt" 2>/dev/null
     if [ -f "${OUT}/host/rhui-crossmajor.txt" ]; then
-      echo '-- RHUI cross-major authorization check (r41; rhel99 = control) --'
+      echo '-- RHUI cross-major authorization check (r42: repomd layer; rhel99 = control) --'
       cat "${OUT}/host/rhui-crossmajor.txt"
+    fi
+    if [ -f "${OUT}/host/content-sets.txt" ]; then
+      echo '-- certificate content sets (rct cat-cert; the authoritative authorization list) --'
+      cat "${OUT}/host/content-sets.txt"
     fi
     echo '```'
     echo

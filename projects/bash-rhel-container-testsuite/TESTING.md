@@ -359,7 +359,10 @@ subscription-manager hosts, the RHUI file/cert set on AWS/Azure RHUI hosts;
 certificate metadata only - never private keys), rendered by the analyzer as
 `RF0`; on AWS RHUI hosts a read-only cross-major authorization check
 (`host/rhui-crossmajor.txt`) probes per-major content URLs with the host's
-client certificate used in place. Engine: podman preferred (required for
+client certificate used in place, following the mirrorlist body to the
+first mirror's `repodata/repomd.xml` (the mirrorlist status alone is
+meaningless - it answers 200 even for invalid paths), and `rct cat-cert`
+dumps each certificate's content sets (`host/content-sets.txt`). Engine: podman preferred (required for
 `mounts` and entitled hosts); on a rootful sandbox without podman it falls
 back to a curl-pulled rootfs + chroot (anonymous facts only). On completion
 the output directory is auto-packed as `<outdir>.tar.gz` for the analysis

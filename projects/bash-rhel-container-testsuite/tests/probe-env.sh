@@ -288,6 +288,21 @@ pe_host_inventory() {
       openssl x509 -in "${f}" -noout -subject -issuer -dates 2>&1
     } >> "${h}/certs.txt"
   done
+  # r42: the AUTHORITATIVE authorization list lives inside the certificates
+  # themselves - rct cat-cert (ships with subscription-manager) decodes the
+  # content-set extension into readable paths. Text only; no key material.
+  if command -v rct >/dev/null 2>&1; then
+    : > "${h}/content-sets.txt"
+    for f in /etc/pki/rhui/product/*.crt /etc/pki/rhui/product/*.pem \
+             /etc/pki/entitlement/*.pem; do
+      [ -e "${f}" ] || continue
+      case "${f}" in *-key.pem|*key*) continue ;; esac
+      {
+        printf '== rct cat-cert %s ==\n' "${f}"
+        rct cat-cert "${f}" 2>&1
+      } >> "${h}/content-sets.txt"
+    done
+  fi
 }
 
 # pe_rhui_crossmajor_check OUTDIR - AWS-RHUI host-side fact: does THIS host's
@@ -299,7 +314,7 @@ pe_host_inventory() {
 # per-major synthesized-repo design is viable on RHUI (Step 4 input).
 pe_rhui_crossmajor_check() {
   local out="$1/host/rhui-crossmajor.txt" repo=/etc/yum.repos.d/redhat-rhui.repo
-  local sec tmpl cert key ca tok region url m code caarg=()
+  local sec tmpl cert key ca tok region url m caarg=()
   [ -f "${repo}" ] || return 0
   sec="$(awk '/^\[rhel-[0-9]+-baseos-rhui-rpms\]/{f=1;next} /^\[/{f=0} f' "${repo}")"
   tmpl="$(printf '%s\n' "${sec}" | sed -n 's/^mirrorlist=//p' | head -1)"
@@ -321,17 +336,33 @@ pe_rhui_crossmajor_check() {
   } > "${out}"
   [ -n "${region}" ] || { echo "skipped: region unresolved via IMDS" >> "${out}"; return 0; }
   [ -n "${ca}" ] && [ -f "${ca}" ] && caarg=(--cacert "${ca}")
+  # r42: the mirrorlist endpoint answers 200 regardless of path validity
+  # (measured 2026-07-04: even the rhel99 control got 200), so authorization
+  # must be probed one layer deeper - follow the mirrorlist BODY to the first
+  # real mirror and GET its repodata/repomd.xml with the client cert.
+  pe_rhui_check_one() {
+    local label="$1" url="$2" body mlst first rstat
+    body="$(curl -sS -m 20 --cert "${cert}" --key "${key}" "${caarg[@]}" \
+             -w '\n__HTTP__%{http_code}' "${url}" 2>/dev/null)"
+    mlst="${body##*__HTTP__}"
+    first="$(printf '%s\n' "${body}" | grep -Eo 'https?://[^[:space:]]+' | grep -v '__HTTP__' | head -1)"
+    if [ -n "${first}" ]; then
+      rstat="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+                --cert "${cert}" --key "${key}" "${caarg[@]}" \
+                "${first%/}/repodata/repomd.xml" 2>/dev/null)"
+    else
+      rstat="no-mirror"
+    fi
+    printf '%s mirrorlist_http=%s repomd_http=%s first_mirror=%s\n' \
+      "${label}" "${mlst:-000}" "${rstat}" "${first:-none}" >> "${out}"
+  }
   for m in 10 9 8 99; do
     url="$(pc_rhui_major_url "${tmpl}" "${m}" | sed "s/REGION/${region}/")"
-    code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-             --cert "${cert}" --key "${key}" "${caarg[@]}" "${url}" 2>/dev/null)"
-    echo "major=${m} http=${code:-000} url=${url}" >> "${out}"
+    pe_rhui_check_one "major=${m}" "${url}"
   done
   for m in 7 6; do
     url="https://rhui.${region}.aws.ce.redhat.com/pulp/mirror/content/dist/rhel/rhui/server/${m}/${m}Server/x86_64/os"
-    code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
-             --cert "${cert}" --key "${key}" "${caarg[@]}" "${url}" 2>/dev/null)"
-    echo "major=${m} http=${code:-000} url=${url} (legacy path scheme)" >> "${out}"
+    pe_rhui_check_one "major=${m}(legacy)" "${url}"
   done
 }
 
