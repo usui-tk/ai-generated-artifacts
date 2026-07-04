@@ -50,7 +50,9 @@ set -euo pipefail
 SSM_REPO_URL="${SSM_REPO_URL:-https://github.com/aws/amazon-ssm-agent.git}"
 SOURCE_REPO="https://github.com/aws/amazon-ssm-agent"
 RPM_BASEURL="${SSM_RPM_BASEURL:-https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent}"
+GOMOD_URL_TMPL="https://raw.githubusercontent.com/aws/amazon-ssm-agent/<ver>/go.mod"
 SKIP_RPM_CHECK="${SKIP_RPM_CHECK:-1}"
+SKIP_GO_VERSION="${SKIP_GO_VERSION:-0}"
 SSM_MIN="3.3.3598.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,6 +79,36 @@ url_check_status() {
   printf '%s' "${code}"
 }
 
+# probe_gomod <version> : fetch go.mod from GitHub and extract the `go X.Y`
+# directive. Prints "http_status\tgo_version" (tab-separated). REUSE-BY-COPY
+# from the OL sibling.
+probe_gomod() {
+  local ver="$1" url to resp status body
+  url="${GOMOD_URL_TMPL//<ver>/${ver}}"
+  to="${URL_CHECK_TIMEOUT:-25}"
+  local -a opts=(-sS --max-time "${to}" -w '\n%{http_code}')
+  if [ "${INSECURE_TLS:-0}" = "1" ]; then opts+=(-k); fi
+  resp="$(curl "${opts[@]}" "${url}" 2>/dev/null || true)"
+  status="$(printf '%s' "${resp}" | tail -n1)"
+  body="$(printf '%s' "${resp}" | sed '$d')"
+  printf '%s\t%s\n' "${status:-000}" \
+    "$(printf '%s\n' "${body}" | grep -oE '^go [0-9]+\.[0-9]+' | head -1 | awk '{print $2}' || true)"
+}
+
+# go_min_kernel <go_version> : the minimum Linux kernel for the Go toolchain.
+# REUSE-BY-COPY from the matrix script and OL sibling.
+go_min_kernel() {
+  local gov="${1:-}" maj min
+  [ -n "${gov}" ] || { printf 'unknown'; return 0; }
+  maj="${gov%%.*}"; min="${gov#*.}"; min="${min%%.*}"
+  case "${maj}" in ''|*[!0-9]*) printf 'unknown'; return 0 ;; esac
+  case "${min}" in ''|*[!0-9]*) min=0 ;; esac
+  if [ "${maj}" -gt 1 ]; then printf '3.2'; return 0; fi
+  if   [ "${min}" -ge 21 ]; then printf '3.2'
+  elif [ "${min}" -ge 18 ]; then printf '2.6.32'
+  else printf '2.6.23'; fi
+}
+
 log "fetching SSM Agent tags from ${SSM_REPO_URL} (git ls-remote --tags)"
 versions="$(
   git ls-remote --tags "${SSM_REPO_URL}" 2>/dev/null \
@@ -86,7 +118,7 @@ versions="$(
 )"
 [ -n "${versions}" ] || { log "ERROR: no 4-part SSM tags found (network down or tag scheme moved)"; exit 1; }
 count="$(printf '%s\n' "${versions}" | grep -c .)"
-log "found ${count} SSM versions; SKIP_RPM_CHECK=${SKIP_RPM_CHECK}"
+log "found ${count} SSM versions; SKIP_RPM_CHECK=${SKIP_RPM_CHECK} SKIP_GO_VERSION=${SKIP_GO_VERSION}"
 
 TMP="$(mktemp)"; trap 'rm -f "${TMP}"' EXIT
 {
@@ -98,11 +130,13 @@ TMP="$(mktemp)"; trap 'rm -f "${TMP}"' EXIT
   printf '  "min_version_note": "AWS floor for full Systems Manager features; below it agents are ec2messages-only",\n'
   printf '  "axes": "glibc (install) + init_mode (service); container kernel is the host kernel, so no kernel gate",\n'
   printf '  "rpm_checked": %s,\n' "$( [ "${SKIP_RPM_CHECK}" = "1" ] && printf 'false' || printf 'true' )"
+  printf '  "go_version_check": "%s",\n' "$( [ "${SKIP_GO_VERSION}" = "1" ] && printf 'skipped' || printf 'performed' )"
   printf '  "count": %s,\n' "${count}"
   printf '  "versions": [\n'
-  first=1
+  first=1; i=0
   while IFS= read -r v; do
     [ -n "${v}" ] || continue
+    i=$((i + 1))
     url="${RPM_BASEURL}/${v}/linux_amd64/amazon-ssm-agent.rpm"
     if ssm_ge "${v}" "${SSM_MIN}"; then ge='true'; else ge='false'; fi
     if [ "${SKIP_RPM_CHECK}" = "1" ]; then
@@ -111,10 +145,19 @@ TMP="$(mktemp)"; trap 'rm -f "${TMP}"' EXIT
       st="$(url_check_status "${url}")"; rs="\"${st}\""
       [ "${st}" = "200" ] && ra='true' || ra='false'
     fi
+    if [ "${SKIP_GO_VERSION}" = "1" ]; then
+      gov='null'; gv_avail='null'; gomod_status='null'; mink='unknown'
+    else
+      gv="$(probe_gomod "${v}")"
+      gomod_status="${gv%%$'\t'*}"; gv="${gv#*$'\t'}"
+      if [ -n "${gv}" ]; then gov="\"${gv}\""; gv_avail='true'; else gov='null'; gv_avail='false'; fi
+      mink="$(go_min_kernel "${gv}")"
+      if [ $((i % 20)) -eq 0 ]; then log "  ...go.mod checked ${i}/${count}"; fi
+    fi
     [ "${first}" = "1" ] || printf ',\n'
     first=0
-    printf '    {"version": "%s", "rpm_url": "%s", "ge_min": %s, "rpm_available": %s, "rpm_http_status": %s}' \
-      "${v}" "${url}" "${ge}" "${ra}" "${rs}"
+    printf '    {"version": "%s", "rpm_url": "%s", "ge_min": %s, "rpm_available": %s, "rpm_http_status": %s, "go_version": %s, "go_version_available": %s, "go_mod_http_status": %s, "min_kernel": "%s"}' \
+      "${v}" "${url}" "${ge}" "${ra}" "${rs}" "${gov}" "${gv_avail}" "${gomod_status}" "${mink}"
   done <<< "${versions}"
   printf '\n  ]\n}\n'
 } > "${TMP}"
