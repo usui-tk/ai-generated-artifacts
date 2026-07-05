@@ -13,6 +13,125 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r62] - 2026-07-05 - fix: ENA EL6 pin 2.1.3 -> 2.9.1 (E2E verified)
+
+### Changed
+- **ENA_VERSION_RHEL6 updated 2.1.3 → 2.9.1** based on r60 E2E evidence:
+  all in-scope versions 2.8.0–2.9.1 build successfully on RHEL 6 kernel
+  2.6.32, while >= 2.10.0 fail. 2.9.1 is in-scope (>= 2.8.0) and
+  express-ready. Aligns the code with SPEC.md and TESTING.md which
+  already referenced 2.9.1 as the EL6 default.
+- **pe_smoke_pin ena:6 updated 2.1.3 → 2.9.1** (same rationale).
+- Comment updated from "user track-record" to "E2E verified".
+- t015 / t023 assertions updated to match.
+
+## [r61] - 2026-07-05 - feat: ENA report - auto fail-pattern analysis + kver + specific errors
+
+### Added
+- **Fail pattern analysis section** auto-generated in RESULTS-rhel*.md for
+  majors with build failures. Groups consecutive fail versions by their
+  compiler error pattern and displays root-cause labels in a summary table.
+  Omitted for majors with zero fails (e.g. RHEL 7).
+- **install-aws_ena-driver.sh**: on build failure, extracts the FIRST
+  compiler error from make.log (e.g. `implicit declaration of function
+  'from_timer'`) and embeds it in the die() reason instead of the generic
+  message. Populates on next `--force` re-run.
+- **ena_kick**: now extracts and forwards the `kver` field from the install
+  script's [result] JSON into the ledger row (previously dropped, leaving
+  all rows with kver="").
+
+## [r60] - 2026-07-04 - docs: ENA E2E results - all 5 majors swept
+
+### Added
+- **First complete ENA build-test matrix run** (r58 OL-parity refactoring).
+  29 in-scope versions (>= 2.8.0) x 5 majors x 2 entitlements = 290 cells.
+  RHEL 7: 29/29 ok; RHEL 8: 22/29 ok (2.8.7–2.17.0); RHEL 6: 12/29 ok
+  (2.8.0–2.9.1); RHEL 9: 4/29 ok (2.15.0–2.17.0); RHEL 10: 4/29 ok
+  (2.15.0–2.17.0). All ok rows have matching ko_version (false-ok guard
+  verified). All rows carry tested_at timestamps.
+- buildtest-ledger.json (290 rows) + RESULTS-rhel{6..10}.md committed.
+
+## [r59] - 2026-07-04 - feat: AWS CLI matrix - OL parity refactoring
+
+### Changed
+- **Report format**: replaced bash-printf 3-section format with OL-style
+  Python-based flat table from ledger. Columns: awscli_version | status |
+  ran | bundled_python | python_eol | compat_min_glibc (measured/heuristic)
+  | note. Verdict at top ("current" / "capped" / "none"). Newest first.
+- **Sweep UX**: descending order (newest first), [idx/total] progress per
+  version, per-major sweep-done summary with ok/fail/skip counts.
+- **Ledger-based skip**: existing (major, version) entries skipped unless
+  --force (critical for AWS CLI's 929 versions — re-runs take minutes
+  instead of 15–20 hours).
+- **--force / --full options** added.
+- **persist_ledger**: added tested_at timestamp to each row.
+
+## [r58] - 2026-07-04 - feat: ENA matrix - OL parity refactoring
+
+### Fixed
+- **Sweep: only tested LATEST version per major** (releases_max), not all
+  in-scope versions. Now sweeps all in-scope versions (>= min_version)
+  newest-first (descending). This was a critical degrade from the OL
+  reference implementation.
+
+### Changed
+- **Report format**: replaced bash-printf 2-section format with OL-style
+  Python-based flat table from ledger. Columns: ENA version | status |
+  ko_version | dkms | tested (UTC) | notes. Verdict summary at top
+  (N/M ok + buildable version list). Newest first.
+- **Sweep UX**: descending order, [idx/total] per version, per-major
+  sweep-done summary with ok/fail/skip counts.
+- **Ledger-based skip**: existing (major, version, entitlement) entries
+  skipped unless --force.
+- **persist_ledger**: added tested_at timestamp, defense-in-depth false-ok
+  guard (ko_version mismatch → downgrade to fail).
+- **--force / --full options** added.
+
+## [r57] - 2026-07-04 - feat: SSM matrix - OL-aligned report format + sweep UX
+
+### Changed
+- **Report format**: replaced bash-printf report generator with Python-based
+  renderer from ledger JSON, producing OL-aligned columns: ssm_version |
+  status | ran | agent_go_version | compat_min_kernel | note. Versions
+  listed newest-first (descending). Clear top-level Verdict line:
+  "compliant-capable" / "ec2messages-only".
+- **Removed init_mode grid and separate Legacy section**: all versions
+  (including EL6 track-record pins) appear in one flat table.
+- **Sweep UX**: ssm_inscope_versions now returns descending order; added
+  ssm_all_versions for --full sweeps; sweep loop logs RHEL<N> [idx/total]
+  per version; per-major "sweep done" summary.
+- **--full option**: sweeps ALL 207 versions (not just >= 3.3.3598.0).
+- **list-ssm-releases.sh**: added go_version enrichment (probe_gomod +
+  go_min_kernel, mirroring the OL sibling). SKIP_GO_VERSION=1 opts out.
+- **ssm-releases.json**: regenerated with go_version/min_kernel fields.
+- **RESULTS-rhel{6..10}.md**: regenerated from user's ledger in new format.
+
+## [r56] - 2026-07-04 - fix: add perl to ENA build deps for EL6 kbuild
+
+### Fixed
+- **RHEL 6 ENA build failed with `/bin/sh: perl: command not found`**.
+  The ENA 2.1.3 source compiled correctly (CC started on ena_netdev.o),
+  but RHEL 6 kernel 2.6.32 kbuild calls `recordmcount.pl` (a perl script)
+  during module builds. Kernel 3.x+ replaced this with a C implementation,
+  so only EL6 needs perl. Added `perl` to ensure_build_deps alongside
+  gcc, make, elfutils-libelf-devel. Harmless on RHEL 7–10.
+
+## [r55] - 2026-07-04 - fix: EL6 ENA pin 2.1.3 + old-style Makefile compat
+
+### Changed
+- **ENA_VERSION_RHEL6 default 2.9.1 → 2.1.3** (user-verified build +
+  production on real RHEL 6; the last ENA version with explicit kernel
+  2.6.32 + RHEL 6.7–6.9 verification in upstream RELEASENOTES).
+- **pe_smoke_pin ena:6 → 2.1.3** (same rationale as above).
+
+### Fixed
+- **build_ko()**: containers lack `/lib/modules/<kver>/build` symlink.
+  Old-style ENA Makefiles (1.x through ~2.8.x) resolve BUILD_KERNEL
+  through that path. Added symlink creation
+  `/lib/modules/<kver>/build → /usr/src/kernels/<kver>` when absent;
+  both old kbuild-delegation Makefile AND modern vendored build system
+  now work.
+
 ## [r54] - 2026-07-04 - docs: full reconstruction on the measured ground truth (Step 6)
 
 ### Changed
