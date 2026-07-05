@@ -241,17 +241,24 @@ if [ "${AWSCLI_INSTALLTEST}" = "1" ]; then
   BUNDLED_PYTHON="$(detect_bundled_python "${workdir}")"
   MIN_GLIBC_MEASURED="$(measure_min_glibc "${workdir}")"
   log "bundle: Python ${BUNDLED_PYTHON:-?} | empirical min glibc ${MIN_GLIBC_MEASURED:-?}"
-  # r49: the measured requirement gates the attempt - an OS glibc below the
-  # bundle's empirical minimum is a platform incompatibility, not a failure.
-  if [ -n "${MIN_GLIBC_MEASURED}" ] && [ -n "${GLIBC}" ] && glibc_lt "${GLIBC}" "${MIN_GLIBC_MEASURED}"; then
-    die_unsupported "bundle needs glibc >= ${MIN_GLIBC_MEASURED}, OS has ${GLIBC} (RHEL${OSMAJOR})"
-  fi
+  # r65 (OL parity): NO pre-check glibc gate. Let the install attempt run and
+  # fail naturally if the OS glibc is below the bundle's manylinux floor - the
+  # loader will report "GLIBC_2.NN not found". This is the faithful test: the
+  # same outcome a real operator would see on this OS.
   prefix="${workdir}/prefix"
-  "${workdir}/aws/install" -i "${prefix}/aws-cli" -b "${prefix}/bin" >/dev/null 2>&1 \
-    || die "bundle install failed (glibc too old or installer error)"
+  if ! "${workdir}/aws/install" -i "${prefix}/aws-cli" -b "${prefix}/bin" >/dev/null 2>&1; then
+    die "install-fail: bundle install failed on RHEL${OSMAJOR} (glibc ${GLIBC}; bundle needs >= ${MIN_GLIBC_MEASURED:-?})"
+  fi
   INSTALLED_VERSION="$("${prefix}/bin/aws" --version 2>&1 | sed -n 's#aws-cli/\([0-9.]*\).*#\1#p')"
   [ -n "${INSTALLED_VERSION}" ] || die "installs-but-wont-run: aws installed but --version did not run on RHEL${OSMAJOR} (glibc ${GLIBC})"
   RAN="true"; RUN_METHOD="aws --version"
+  # r65 (OL parity): also run `aws configure list` - exercises session init +
+  # command dispatch, not just the bundled interpreter load.
+  if AWS_PAGER='' "${prefix}/bin/aws" configure list >/dev/null 2>&1; then
+    RUN_METHOD="aws --version + aws configure list"
+  else
+    log "WARNING: aws --version succeeded but aws configure list failed"
+  fi
   _bp="$(bundled_python_running "${prefix}/bin/aws")"; [ -n "${_bp}" ] && BUNDLED_PYTHON="${_bp}"
   if [ "${AWSCLI_VERSION}" != "latest" ] && [ "${INSTALLED_VERSION}" != "${AWSCLI_VERSION}" ]; then
     die "version-mismatch: requested ${AWSCLI_VERSION} but installed ${INSTALLED_VERSION}"

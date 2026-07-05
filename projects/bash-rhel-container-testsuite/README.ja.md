@@ -219,7 +219,7 @@ R6（AWS CLI install）、R7（SSM install、両 init モード）、R8（entitl
 |:--|:--|:--|
 | `anonymous-ubi` | `ubi-*` リポジトリ（7 は optional/extras/RHSCL も） | installable |
 | `entitled-only` | `rhel-*` リポジトリ（kernel-devel 等） | `needs-entitlement` |
-| `epel` | Fedora EPEL（dkms 等、ピン留め・既定オフ） | `epel-optional` |
+| `epel` | Fedora EPEL（dkms 等、イメージビルド時にプロビジョニング; r65） | installable |
 | `vendor-hosted` | リポジトリ外（bundle / S3 RPM）をベンダ CDN 経由 | installable |
 | `base-image` | ベースイメージに同梱済み | installable |
 

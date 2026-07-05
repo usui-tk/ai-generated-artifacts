@@ -220,7 +220,7 @@ Decide where the tool's primary input comes from and add it to
 |:--|:--|:--|
 | `anonymous-ubi` | the `ubi-*` repos (7 also optional/extras/RHSCL) | installable |
 | `entitled-only` | `rhel-*` repos (kernel-devel, …) | `needs-entitlement` |
-| `epel` | Fedora EPEL (dkms, …), pinned, off by default | `epel-optional` |
+| `epel` | Fedora EPEL (dkms, …), provisioned at image build (r65) | installable |
 | `vendor-hosted` | outside any repo (a bundle / S3 RPM) over the vendor CDN | installable |
 | `base-image` | already present in the base image | installable |
 

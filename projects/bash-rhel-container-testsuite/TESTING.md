@@ -192,8 +192,11 @@ rm -rf ./*.md ./*.json
 ```
 
 One run acquires each RHEL major, installs the v2 bundle for every in-scope version,
-smokes `aws --version`, and records the empirical min glibc + bundled Python. The
-single axis is **glibc** (the bundle's manylinux floor). Knob: `OSMAJORS`.
+runs `aws --version` + `aws configure list` (OL parity, r65), and records the
+empirical min glibc + bundled Python. The install is attempted unconditionally
+(no glibc pre-check; the loader fails naturally if the OS glibc is below the
+bundle's manylinux floor). The single axis is **glibc** (the bundle's manylinux
+floor). Knob: `OSMAJORS`.
 
 ---
 

@@ -273,10 +273,10 @@ if [ "${SSM_INSTALLTEST}" = "1" ]; then
   install_rpm
   INSTALLED="true"
   if amazon-ssm-agent -version >/dev/null 2>&1; then RAN="true"; else RAN="false"; fi
-  # r50: after a tolerated %posttrans warning, the run check is the judge -
-  # a binary that does not even run on EL6 IS a platform incompatibility.
-  if [ "${RAN}" != "true" ] && [ "${PTWARN}" = "1" ] && [ "${OSMAJOR}" = "6" ]; then
-    die_unsupported "agent ${SSM_VERSION} installed but its binary does not run on EL6 (glibc ${GLIBC})"
+  # r65 (OL parity): if the binary does not run, it is a platform incompatibility
+  # regardless of the major or %posttrans warning state. OL always dies here.
+  if [ "${RAN}" != "true" ]; then
+    die "installs-but-wont-run: agent ${SSM_VERSION} installed but its binary does not run on RHEL${OSMAJOR} (glibc ${GLIBC})"
   fi
   case "${SSM_INIT_MODE}" in systemd|service) SVC="$(enable_for_boot)" ;; esac
   RESULT_EMITTED=1

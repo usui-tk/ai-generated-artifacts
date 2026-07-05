@@ -583,10 +583,11 @@ ena_kick() {
     status="$(result_field "${line}" status)"; [ -n "${status}" ] || status=unknown
     kov="$(result_field "${line}" ko_version)"
     local kver_got; kver_got="$(result_field "${line}" kver)"
+    local dkms_got; dkms_got="$(result_field "${line}" dkms)"
     reason="$(jesc "$(result_field "${line}" reason)")"
-    row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","kver":"%s","verdict":"%s","load_tier":"%s","ena_express":"%s","reason":"%s"}' \
+    row="$(printf '{"status":"%s","osmajor":"%s","ena_version":"%s","entitlement":"%s","kdevel_repo":"%s","build_plan":"%s","built":%s,"ko_version":"%s","kver":"%s","dkms":%s,"verdict":"%s","load_tier":"%s","ena_express":"%s","reason":"%s"}' \
       "${status}" "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${built}" "${kov}" "${kver_got}" \
-      "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)" "$(ena_express_verdict "${ver}")" "${reason}")"
+      "${dkms_got:-null}" "$(ena_verdict "${ent}" "${built}")" "$(ena_load_tier)" "$(ena_express_verdict "${ver}")" "${reason}")"
   fi
   if [ "${status}" != "ok" ]; then
     mkdir -p "${log_dir}"

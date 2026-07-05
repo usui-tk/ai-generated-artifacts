@@ -68,7 +68,7 @@ set -euo pipefail
 ENA_VERSION="${ENA_VERSION:-}"
 ENA_INSTALLTEST="${ENA_INSTALLTEST:-0}"
 ENA_ENTITLEMENT="${ENA_ENTITLEMENT:-entitled}"
-ENA_BUILD_PLAN="${ENA_BUILD_PLAN:-make}"
+ENA_BUILD_PLAN="${ENA_BUILD_PLAN:-dkms}"
 ENA_SRC_BASEURL="${ENA_SRC_BASEURL:-https://github.com/amzn/amzn-drivers}"
 INSECURE_TLS="${INSECURE_TLS:-0}"
 
@@ -238,25 +238,49 @@ build_ko() {
   src="$(fetch_src "${BUILT_DEST}")" || return 3   # r49: fetch/extract/locate, NOT make
   [ -n "${src}" ] || return 3
   BUILT_SRC="${src}"; MAKE_LOG="${BUILT_DEST}/make.log"
-  # r55: containers have no /lib/modules/<kver>/build symlink. Old-style ENA
-  # Makefiles (1.x through ~2.8.x) resolve BUILD_KERNEL through that path;
-  # creating it lets the same `make -C <src>` invocation work for both the
-  # old kbuild-delegation Makefile AND the modern vendored build system.
   if [ ! -e "/lib/modules/${KVER}/build" ] && [ -d "/usr/src/kernels/${KVER}" ]; then
     mkdir -p "/lib/modules/${KVER}"
     ln -sf "/usr/src/kernels/${KVER}" "/lib/modules/${KVER}/build"
   fi
-  # r52: build through the driver's VENDORED build system, never raw kbuild.
-  # Modern ENA sources require a generated config.h (feature-detection via
-  # the bundled configure.sh, run by the vendored Makefile's config.h rule);
-  # the old direct `make -C <kernel> M=<src> modules` bypassed it and every
-  # real entitled build died with `fatal error: config.h` (reproduced and
-  # fixed-form verified in a ubi9 chroot against RHCK 5.14 headers). This is
-  # also how the OL original built it (make -C <src> BUILD_KERNEL=...).
-  # KERNEL_BUILD_DIR is pinned to /usr/src/kernels/<kver> because containers
-  # have no /lib/modules/<kver>/build symlink (the vendored default).
+  # r65: DKMS-first build (OL parity). dkms add/build/install is the production
+  # method; plain-make is a fallback when dkms is unavailable.
+  if [ "${ENA_BUILD_PLAN}" = "dkms" ] && command -v dkms >/dev/null 2>&1; then
+    log "ENA ${ENA_VERSION}: DKMS build for kernel ${KVER}"
+    local dkms_src="/usr/src/amzn-drivers-${ENA_VERSION}"
+    rm -rf "${dkms_src}"
+    cp -a "$(dirname "$(dirname "$(dirname "${src}")")")" "${dkms_src}"
+    cat > "${dkms_src}/dkms.conf" <<DKMSEOF
+PACKAGE_NAME="ena"
+PACKAGE_VERSION="${ENA_VERSION}"
+CLEAN="make -C kernel/linux/ena clean"
+MAKE="make -C kernel/linux/ena/ BUILD_KERNEL=\${kernelver}"
+BUILT_MODULE_NAME[0]="ena"
+BUILT_MODULE_LOCATION="kernel/linux/ena"
+DEST_MODULE_LOCATION[0]="/updates"
+DEST_MODULE_NAME[0]="ena"
+REMAKE_INITRD="no"
+AUTOINSTALL="yes"
+DKMSEOF
+    dkms remove -m amzn-drivers -v "${ENA_VERSION}" --all >/dev/null 2>&1 || true
+    if dkms add -m amzn-drivers -v "${ENA_VERSION}" >"${MAKE_LOG}" 2>&1 \
+       && dkms build -m amzn-drivers -v "${ENA_VERSION}" -k "${KVER}" >>"${MAKE_LOG}" 2>&1 \
+       && dkms install -m amzn-drivers -v "${ENA_VERSION}" -k "${KVER}" --force >>"${MAKE_LOG}" 2>&1; then
+      local dkms_ko
+      dkms_ko="$(find /lib/modules/"${KVER}" -name 'ena.ko' -path '*/updates/*' 2>/dev/null | head -1)"
+      if [ -n "${dkms_ko}" ]; then
+        cp -f "${dkms_ko}" "${src}/ena.ko"
+        ENA_BUILD_PLAN_USED="dkms"
+        return 0
+      fi
+      log "WARNING: dkms returned 0 but no ena.ko in /lib/modules/${KVER}/updates"
+    fi
+    log "DKMS build failed; falling back to plain-make"
+    ENA_BUILD_PLAN="${ENA_BUILD_PLAN}_fallback_make"
+  fi
+  # Plain-make fallback (or ENA_BUILD_PLAN=make)
   if make -C "${src}" "KERNEL_BUILD_DIR=/usr/src/kernels/${KVER}" "BUILD_KERNEL=${KVER}" >"${MAKE_LOG}" 2>&1 \
      && [ -f "${src}/ena.ko" ]; then
+    ENA_BUILD_PLAN_USED="make"
     return 0
   fi
   return 1
@@ -358,8 +382,10 @@ fi
 
 if [ "${ENA_INSTALLTEST}" = "1" ]; then
   RESULT_EMITTED=1
-  printf '[aws_ena-driver][installtest][result] {"status":"ok","tool":"aws_ena-driver","osmajor":"%s","ena_version":"%s","entitlement":"%s","build_plan":"%s","kver":"%s","built":%s,"ko_version":"%s","ena_express":"%s"}\n' \
-    "${OSMAJOR}" "${ENA_VERSION}" "${ENA_ENTITLEMENT}" "${ENA_BUILD_PLAN}" "${KVER}" "${BUILT}" "${KO_VERSION}" "$(ena_express_verdict "${ENA_VERSION}")"
+  local _dkms_used="false"
+  [ "${ENA_BUILD_PLAN_USED:-make}" = "dkms" ] && _dkms_used="true"
+  printf '[aws_ena-driver][installtest][result] {"status":"ok","tool":"aws_ena-driver","osmajor":"%s","ena_version":"%s","entitlement":"%s","build_plan":"%s","kver":"%s","built":%s,"ko_version":"%s","dkms":%s,"ena_express":"%s"}\n' \
+    "${OSMAJOR}" "${ENA_VERSION}" "${ENA_ENTITLEMENT}" "${ENA_BUILD_PLAN}" "${KVER}" "${BUILT}" "${KO_VERSION}" "${_dkms_used}" "$(ena_express_verdict "${ENA_VERSION}")"
   [ -n "${BUILT_DEST}" ] && rm -rf "${BUILT_DEST}"
   exit 0
 fi

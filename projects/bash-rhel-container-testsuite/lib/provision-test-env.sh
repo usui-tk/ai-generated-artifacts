@@ -150,6 +150,35 @@ provision_test_image() {
          [ -n "$mgr" ] || { echo "provision: no dnf/yum in base image" >&2; exit 3; }
          # shellcheck disable=SC2086
          "$mgr" -y $PROVISION_SETOPT install $PROVISION_PKGS
+         # r65: EPEL + dkms provisioning (OL parity for ENA DKMS builds).
+         osmajor=""
+         if [ -r /etc/os-release ]; then
+           osmajor="$(. /etc/os-release; printf "%s" "${VERSION_ID%%.*}")"
+         elif [ -r /etc/redhat-release ]; then
+           osmajor="$(sed -n "s/.*release \([0-9]\+\).*/\1/p" /etc/redhat-release | head -1)"
+         fi
+         case "${osmajor}" in
+           6)
+             # RHEL 6: EPEL 6 is archived (EOL)
+             rpm -Uvh https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/epel-release-6-8.noarch.rpm 2>/dev/null || true
+             if [ -f /etc/yum.repos.d/epel.repo ]; then
+               sed -i "s|^mirrorlist=|#mirrorlist=|g" /etc/yum.repos.d/epel.repo
+               sed -i "s|^#baseurl=.*|baseurl=https://archives.fedoraproject.org/pub/archive/epel/6/\$basearch|g" /etc/yum.repos.d/epel.repo
+             fi
+             ;;
+           7)
+             # RHEL 7: EPEL 7 is archived (EOL)
+             rpm -Uvh https://archives.fedoraproject.org/pub/archive/epel/7/x86_64/Packages/e/epel-release-7-14.noarch.rpm 2>/dev/null || true
+             if [ -f /etc/yum.repos.d/epel.repo ]; then
+               sed -i "s|^metalink=|#metalink=|g" /etc/yum.repos.d/epel.repo
+               sed -i "s|^#baseurl=.*|baseurl=https://archives.fedoraproject.org/pub/archive/epel/7/\$basearch|g" /etc/yum.repos.d/epel.repo
+             fi
+             ;;
+           8|9|10)
+             rpm -Uvh "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${osmajor}.noarch.rpm" 2>/dev/null || true
+             ;;
+         esac
+         "$mgr" -y $PROVISION_SETOPT install dkms 2>/dev/null || true
        ' >"${errf}" 2>&1; then
     rc=0
   else

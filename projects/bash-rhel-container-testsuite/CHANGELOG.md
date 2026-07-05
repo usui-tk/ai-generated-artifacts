@@ -13,6 +13,34 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r65] - 2026-07-05 - fix: OL parity - faithful E2E tests + EPEL/DKMS provisioning
+
+### Fixed
+- **AWS CLI v2 (C1)**: removed the glibc pre-check (`glibc_lt` →
+  `die_unsupported`) that short-circuited install on glibc-capped OSes.
+  Now the install is attempted and fails naturally (OL parity).
+- **AWS CLI v2 (C2)**: added `aws configure list` functional test after
+  `aws --version` (OL parity).
+- **SSM (M1)**: `RAN=false` now always dies with `installs-but-wont-run`
+  instead of emitting `status:ok, ran:false` (OL parity).
+- **ENA (C3)**: DKMS is now the default build plan (`ENA_BUILD_PLAN=dkms`).
+  `build_ko()` performs `dkms add/build/install` when dkms is available,
+  with plain-make as fallback (OL parity).
+
+### Added
+- **EPEL + dkms provisioning** (`lib/provision-test-env.sh`): test
+  container images now install EPEL and dkms during provisioning.
+  RHEL 6: `epel-release` RPM from Fedora archive + repo URL rewrite.
+  RHEL 7-10: `epel-release-latest-N` from dl.fedoraproject.org.
+
+### Changed (documentation)
+- **SPEC.md**: ENA build method updated (DKMS default, not optional);
+  EPEL section rewritten (epel-release package install at provisioning).
+- **TESTING.md**: AWS CLI test methodology updated (`aws configure list`
+  added; glibc pre-check removal noted).
+- **README.md / README.ja.md**: EPEL row updated (provisioned at image
+  build, not off by default).
+
 ## [r64] - 2026-07-05 - docs: AWS CLI v2 E2E results - all 5 majors swept
 
 ### Added

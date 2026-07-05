@@ -565,9 +565,9 @@ the README section [Adding a tool](./README.md#adding-a-tool).
   creds -> L4).
 * **`aws_ena-driver`** - **E2'**, entitlement-gated **build** test (compile
   `ena.ko`), never a load test. Build needs `kernel-devel` (obtainable in every
-  major when entitled). Default is the plain-`make` fallback
-  (`make -C /usr/src/kernels/<kver> M=$PWD modules`); DKMS is an optional EPEL
-  path. All Oracle **UEK** detection is removed; target is the stock RHEL kernel.
+  major when entitled). Default build method is **DKMS** (`dkms add/build/install`,
+  OL parity; r65); plain-`make` is the fallback when dkms is unavailable.
+  All Oracle **UEK** detection is removed; target is the stock RHEL kernel.
   Anonymous -> `needs-entitlement`; load/runtime -> L4. **ENA Express readiness**
   (r31, `ena_express_verdict`) additionally classifies `ena_version` against
   AWS's documented driver-version floors (`ena-express.html`: `>= 2.2.9` full
@@ -607,16 +607,15 @@ state, **not `install-fail`** (000/5xx stay transient errors to surface). This
 mirrors the OL sibling's undistributed-version handling. Covered by
 `tests/t022_ssmunavailable.sh`.
 
-**EPEL (`lib/epel.sh`).** RHEL has no vendor EPEL, and Fedora's default metalink
-is non-deterministic (returns off-allow-list mirrors). Therefore pin to
-`dl.fedoraproject.org` with an explicit `baseurl`, metalink/mirrorlist disabled,
-and use a transient pinned repo (method B), not the `epel-release` package
-(method A). Per-major baseurls (measured): 8/9 current
-(`/pub/epel/<N>/Everything/x86_64/`); 10 minor-versioned with a rolling fallback;
-7 and 6 archive (`/pub/archive/epel/<N>/x86_64/`). GPG keys for all majors live
-under `/pub/epel/RPM-GPG-KEY-EPEL-<N>` (live tree) even where content is
-archived. RHEL 6 EPEL is archive-only and OL6-style special-cased; practically
-moot since ENA defaults to plain-make.
+**EPEL (`lib/provision-test-env.sh`).** EPEL and dkms are provisioned at
+test container image build time (r65, OL parity):
+RHEL 6/7 -> `epel-release` RPM from `archives.fedoraproject.org` + repo URL
+rewrite to the archive site (both are EOL/archived);
+RHEL 8-10 -> `epel-release-latest-N` from `dl.fedoraproject.org`.
+dkms is installed best-effort after EPEL setup.
+This is the production-equivalent method (OL also installs `epel-release`
+then enables the repo). The former transient pinned-repo approach
+(`lib/epel.sh`, method B) is superseded for the provisioning path.
 
 ---
 
