@@ -13,6 +13,23 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r64] - 2026-07-05 - docs: AWS CLI v2 E2E results - all 5 majors swept
+
+### Added
+- **First complete AWS CLI v2 install-test matrix run** (r59 OL-parity
+  refactoring). 930 v2 versions x 5 majors = 4,650 cells.
+  RHEL 10: 929/930 ok, verdict **current** (max 2.35.15);
+  RHEL 9: 929/930 ok, verdict **current** (max 2.35.15);
+  RHEL 8: 929/930 ok, verdict **current** (max 2.35.15);
+  RHEL 7: 929/930 ok, verdict **current** (max 2.35.15);
+  RHEL 6: 493/930 ok, verdict **capped** (max 2.17.51; >= 2.17.52
+  require glibc 2.17, RHEL 6 has glibc 2.12 → unsupported).
+  Each major has exactly 1 fail (version-specific install issue).
+  All rows carry tested_at timestamps.  Ledger-based skip (r59) means
+  future re-runs test only newly added versions.
+- awscli-installtest-ledger.json (4,650 rows) + RESULTS-rhel{6..10}.md
+  committed.
+
 ## [r62] - 2026-07-05 - fix: ENA EL6 pin 2.1.3 -> 2.9.1 (E2E verified)
 
 ### Changed
