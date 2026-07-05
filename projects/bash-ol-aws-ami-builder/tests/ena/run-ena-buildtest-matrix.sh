@@ -30,12 +30,12 @@
 # --pinned-only. Narrowing to a few versions is the supported way to run "a few
 # cases" locally; the FULL matrix is meant for the user's environment / CI.
 #
-# OL9 / OL10 (evaluation). ENA_BUILDTEST is wired for OL6/7/8/9/10. OL9/OL10 are
-# EVALUATION ONLY: install-ena-driver.sh's ENA_VERSION_OL9/OL10 resolve to
-# amzn-drivers "latest" at runtime (see _ena_resolve_latest), and
-# build-ol-aws-ami.sh does NOT yet self-build ENA on OL9/OL10 (both stay on
-# their in-distro driver in the AMI pipeline until this matrix confirms a safe
-# combination, mirroring how OL6's [2.8.6, 2.9.1] window was established).
+# OL COVERAGE. All five majors (OL6-OL10) are FIRST-CLASS targets of this
+# matrix (recorded in the ledger; default --ol set), matching the RHEL sibling
+# project's five-major coverage. install-ena-driver.sh's ENA_VERSION_OL8/9/10
+# resolve to amzn-drivers "latest" at runtime (see _ena_resolve_latest);
+# build-ol-aws-ami.sh self-builds ENA on OL6-OL10 by default (ENA Express
+# generation: the AMI must ship an express-capable driver -- see SPEC B.9).
 # OL9 has two UEK tracks in its default repo config (verified from a real
 # clean-core image's uek-ol9.repo): UEKR7 (5.15, enabled by default) and UEKR8
 # (6.12, present but disabled by default). This script targets UEKR8 -- there
@@ -44,12 +44,18 @@
 # install-ena-driver.sh) only for a UEKR7-specific regression check. OL10 only
 # has UEKR8.
 #
-# --ena-min-version (floor). ENA Express requires ENA driver >= 2.2.9 for full
-# bandwidth and >= 2.8 to produce ena_srd_* metrics (AWS ENA Express docs). Pass
-# --ena-min-version 2.8.0 to test only releases at/above that floor -- applied
-# as a hard filter regardless of version source (release-list JSON,
-# --ena-versions, or --pinned-only), so a narrowed --ena-versions list can't
-# silently slip below the floor.
+# DEFAULT SWEEP SCOPE (ENA Express; v2/RHEL-sibling parity). ENA Express
+# requires ENA driver >= 2.2.9 for full bandwidth and >= 2.8.0 to produce
+# ena_srd_* metrics (AWS ENA Express docs). The DEFAULT sweep floor is the
+# release list's `min_version` (2.8.0 = the express-ready floor; ~29 of 70
+# releases), because the ENA generation update makes ENA Express support a
+# hard requirement for the produced AMIs -- sweeping express-incapable
+# releases no longer informs the product. `--full` lifts the floor (all
+# releases); `--ena-min-version <v>` overrides it explicitly. The floor is a
+# hard filter regardless of version source (release-list JSON, --ena-versions,
+# or --pinned-only), so a narrowed --ena-versions list can't silently slip
+# below it. Pre-floor evidence (the retired 210-row all-release ledger) lives
+# in git history; the working-tree ledger records the express era only.
 #
 # QA PREFLIGHT (mandatory, every mode). Before the matrix, each OL first builds
 # ONLY its pinned ENA version as a smoke test that the clean-core rootfs +
@@ -75,14 +81,19 @@
 # Usage:
 #   bash tests/ena/run-ena-buildtest-matrix.sh [options]
 # Options:
-#   --ol <list>            OL majors to test, comma/space (default: 6,7,8;
-#                          9,10 are wired but EVALUATION ONLY -- see above)
-#   --ena-versions <list>  ENA versions to test, comma/space (default: all in the
-#                          release-list JSON) -- the "few cases" knob
-#   --ena-min-version <v>  floor: only test ENA releases >= v (e.g. 2.8.0, the
-#                          ENA Express metrics-reporting threshold). Applies on
-#                          top of --ena-versions / --pinned-only / the release
-#                          list -- see "--ena-min-version (floor)" above.
+#   --ol <list>            OL majors to test, comma/space (default: 6,7,8,9,10)
+#   --ena-versions <list>  ENA versions to test, comma/space (default: the
+#                          in-scope set of the release-list JSON) -- the "few
+#                          cases" knob. The default floor still applies.
+#   --ena-min-version <v>  explicit floor override: only test ENA releases >= v.
+#                          Default: the release list's min_version (2.8.0, the
+#                          ENA Express express-ready floor) -- see "DEFAULT
+#                          SWEEP SCOPE" above.
+#   --full                 lift the floor: sweep every release in the list
+#                          (pre-express releases included)
+#   --report-only          no builds: regenerate RESULTS-ol<N>.md (and the
+#                          ledger's derived fields) from the existing ledger.
+#                          Needs only python3 (no root / containers / network).
 #   --pinned-only          test only each OL's pinned ENA version
 #   --ledger <path>        ledger JSON (default: tests/ena/buildtest-ledger.json)
 #   --results-dir <dir>    where RESULTS-ol<N>.md are written (default: tests/ena)
@@ -103,7 +114,8 @@
 #   -h | --help
 # Env (passed through): INSECURE_TLS (default 1 here, for the sandbox; set 0 on a
 #   trusted host). Requires: root, unshare, chroot, tar, curl, python3, and the
-#   clean-core builder toolchain. ENA_BUILDTEST is wired for OL6/OL7/OL8 only.
+#   clean-core builder toolchain (--report-only needs python3 only).
+#   ENA_BUILDTEST is wired for OL6-OL10.
 # Exit: 0 = the matrix ran and the ledger/reports were written (individual build
 #   pass/fail is recorded as evidence, NOT a harness error); non-zero = a harness
 #   / infrastructure failure (missing tool, clean-core build failed, etc.).
@@ -115,7 +127,9 @@ PROJ_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ORCHESTRATOR="${SCRIPT_DIR}/../cleancore/build-cleancore.sh"
 INSTALL_SCRIPT="${PROJ_DIR}/install-ena-driver.sh"
 
-OL_LIST="6 7 8"
+OL_LIST="6 7 8 9 10"
+FULL=0
+REPORT_ONLY=0
 ENA_VERSIONS=""
 ENA_MIN_VERSION=""
 PINNED_ONLY=0
@@ -164,6 +178,8 @@ while [ "$#" -gt 0 ]; do
     --preflight-retries) PREFLIGHT_RETRIES="${2:-}"; shift ;;
     --strict)           STRICT=1 ;;
     --force)            FORCE=1 ;;
+    --full)             FULL=1 ;;
+    --report-only)      REPORT_ONLY=1 ;;
     -h|--help)          sed -n '2,/^# ---.*$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                  die "unknown argument: $1 (-h for help)" ;;
   esac
@@ -175,26 +191,51 @@ ENA_VERSIONS="${ENA_VERSIONS//,/ }"
 BUNDLE_DIR="${BUNDLE_DIR:-${CLEANCORE_DIR}/verify-bundle}"
 
 # ---- pre-flight ------------------------------------------------------------
-[ "$(id -u)" -eq 0 ] || die "must run as root (clean-core build + unshare/chroot need it)."
-# Irregular-placement guard: a script resolving to '/' (or empty) would make the
-# clean-core build scratch root-level, and the builder does `rm -rf` on it -- refuse.
-case "${SCRIPT_DIR}" in
-  ""|/) die "refusing to run: matrix script resolves to '${SCRIPT_DIR:-<empty>}' (irregular placement; destructive clean-core cleanup could hit the OS root)." ;;
-esac
-for t in unshare chroot tar curl python3; do
-  command -v "${t}" >/dev/null 2>&1 || die "missing required host tool: ${t}"
-done
-[ -f "${ORCHESTRATOR}" ]   || die "orchestrator not found: ${ORCHESTRATOR}"
-[ -f "${INSTALL_SCRIPT}" ] || die "install-ena-driver.sh not found: ${INSTALL_SCRIPT}"
-mkdir -p "${CLEANCORE_DIR}"; CLEANCORE_DIR="$(cd "${CLEANCORE_DIR}" && pwd)"
-mkdir -p "${RESULTS_DIR}";   RESULTS_DIR="$(cd "${RESULTS_DIR}" && pwd)"
-# Explicit, per-driver clean-core BUILD scratch base (NOT the source tree, NOT the
-# shared /tmp/cleancore-ol<N>): so concurrent ENA/SSM runs never collide. The
-# builder rm -rf's <base>/cleancore-ol<N>, so refuse any root-level resolution.
-WORK_BASE="${WORK_BASE:-${TMPDIR:-/tmp}/cleancore-work-ena-buildtest}"
-case "${WORK_BASE}" in ""|/|//) die "refusing to run: --work-dir resolves to '${WORK_BASE:-<empty>}' (would risk destructive cleanup)." ;; esac
-mkdir -p "${WORK_BASE}"; WORK_BASE="$(cd "${WORK_BASE}" && pwd)"
-[ "${WORK_BASE}" = "/" ] && die "refusing to run: --work-dir resolved to '/'."
+if [ "${REPORT_ONLY}" = "1" ]; then
+  # Report-only: regenerate RESULTS-ol<N>.md (and the ledger's derived fields)
+  # from the existing ledger. No builds run, so this path needs only python3 --
+  # no root, no containers, no network. Emptying OL_LIST makes the build loop
+  # below a no-op while the merge/report block (which always runs) does the work.
+  command -v python3 >/dev/null 2>&1 || die "missing required host tool: python3"
+  [ -f "${LEDGER}" ] || die "no ledger at ${LEDGER} (nothing to report)"
+  mkdir -p "${RESULTS_DIR}"; RESULTS_DIR="$(cd "${RESULTS_DIR}" && pwd)"
+  OL_LIST=""
+  log "report-only: no builds; regenerating reports from ${LEDGER}"
+else
+  [ "$(id -u)" -eq 0 ] || die "must run as root (clean-core build + unshare/chroot need it)."
+  # Irregular-placement guard: a script resolving to '/' (or empty) would make the
+  # clean-core build scratch root-level, and the builder does `rm -rf` on it -- refuse.
+  case "${SCRIPT_DIR}" in
+    ""|/) die "refusing to run: matrix script resolves to '${SCRIPT_DIR:-<empty>}' (irregular placement; destructive clean-core cleanup could hit the OS root)." ;;
+  esac
+  for t in unshare chroot tar curl python3; do
+    command -v "${t}" >/dev/null 2>&1 || die "missing required host tool: ${t}"
+  done
+  [ -f "${ORCHESTRATOR}" ]   || die "orchestrator not found: ${ORCHESTRATOR}"
+  [ -f "${INSTALL_SCRIPT}" ] || die "install-ena-driver.sh not found: ${INSTALL_SCRIPT}"
+  mkdir -p "${CLEANCORE_DIR}"; CLEANCORE_DIR="$(cd "${CLEANCORE_DIR}" && pwd)"
+  mkdir -p "${RESULTS_DIR}";   RESULTS_DIR="$(cd "${RESULTS_DIR}" && pwd)"
+  # Explicit, per-driver clean-core BUILD scratch base (NOT the source tree, NOT the
+  # shared /tmp/cleancore-ol<N>): so concurrent ENA/SSM runs never collide. The
+  # builder rm -rf's <base>/cleancore-ol<N>, so refuse any root-level resolution.
+  WORK_BASE="${WORK_BASE:-${TMPDIR:-/tmp}/cleancore-work-ena-buildtest}"
+  case "${WORK_BASE}" in ""|/|//) die "refusing to run: --work-dir resolves to '${WORK_BASE:-<empty>}' (would risk destructive cleanup)." ;; esac
+  mkdir -p "${WORK_BASE}"; WORK_BASE="$(cd "${WORK_BASE}" && pwd)"
+  [ "${WORK_BASE}" = "/" ] && die "refusing to run: --work-dir resolved to '/'."
+
+  # Default sweep floor (ENA Express scope; see the header). --full lifts the
+  # floor entirely; an explicit --ena-min-version overrides the JSON default.
+  if [ "${FULL}" = "1" ]; then
+    ENA_MIN_VERSION=""
+    log "--full: sweep floor lifted (every release in the list)"
+  elif [ -z "${ENA_MIN_VERSION}" ]; then
+    if [ -f "${RELEASES}" ]; then
+      ENA_MIN_VERSION="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('min_version','2.8.0'))" "${RELEASES}" 2>/dev/null || true)"
+    fi
+    ENA_MIN_VERSION="${ENA_MIN_VERSION:-2.8.0}"
+    log "default sweep floor: ENA >= ${ENA_MIN_VERSION} (ENA Express express-ready scope; --full lifts it)"
+  fi
+fi
 
 # True if dotted-numeric version $1 >= $2 (e.g. ver_ge 2.17.0 2.8.0). Pure
 # string/sort comparison (matches install-ena-driver.sh's highest_modules_dir
@@ -636,8 +677,12 @@ def load_ledger(p):
     if os.path.exists(p):
         try: return json.load(open(p))
         except Exception: pass
-    return {"schema_version": "1.0", "ledger_type": "ena-buildtest-matrix",
+    return {"schema_version": "1.1", "ledger_type": "ena-buildtest-matrix",
             "generated_by": "tests/ena/run-ena-buildtest-matrix.sh",
+            "note": "ENA Express era (2026-07): records the express-scoped sweeps "
+                    "(default floor min_version from ena-driver-releases.json). The "
+                    "retired pre-express all-release ledger (210 rows, OL6/7/8 x 70) "
+                    "lives in git history.",
             "dedup_key": ["osmajor", "ena_version", "kver"], "entries": []}
 
 led = load_ledger(ledger_path)
@@ -658,6 +703,7 @@ if os.path.exists(tsv_path):
              "dkms": r.get("dkms", None),
              "ko": r.get("ko", None),
              "ko_version": r.get("ko_version", None),
+             "ena_express": r.get("ena_express", None),
              "reason": r.get("reason", None),
              "tested_at": now}
         # Defense-in-depth (independent of install-ena-driver.sh): an "ok" whose
@@ -676,6 +722,21 @@ def vkey(s):
     for part in str(s).replace("-", ".").split("."):
         out.append((1, int(part)) if part.isdigit() else (0, part))
     return out
+
+def express_verdict(v):
+    # Python duplicate of install-ena-driver.sh's ena_express_verdict()
+    # (reuse-by-copy; tests/t021_enaexpress.sh keeps the classifications in
+    # agreement). Driver-version floor only; see the bash helper's caveat.
+    if not v: return "unknown"
+    if vkey(v) >= vkey("2.8.0"): return "express-ready"
+    if vkey(v) >= vkey("2.2.9"): return "bandwidth-only"
+    return "not-ready"
+
+# Derived-field enrichment: every entry (new AND pre-existing) carries the
+# ena_express classification -- a pure function of ena_version, so a
+# --report-only run back-fills it across the whole ledger deterministically.
+for e in idx.values():
+    e["ena_express"] = e.get("ena_express") or express_verdict(e.get("ena_version"))
 
 entries = sorted(idx.values(), key=lambda e: (int(e["osmajor"]) if e["osmajor"].isdigit() else 0,
                                               vkey(e["kver"]), vkey(e["ena_version"])))
@@ -708,6 +769,9 @@ for ol, es in sorted(by_ol.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit()
                    else "No ENA version builds on this kernel yet.")
         lines += [f"## Latest kernel `{latest}`  -  {len(lok)}/{len(lrows)} ok", "",
                   summary, "",
+                  "_ENA Express readiness (driver-version floor only): "
+                  ">= 2.2.9 full bandwidth, >= 2.8.0 express-ready (ena_srd_* metrics). "
+                  "ENA Express itself is an ENI attribute (AWS API), not a guest OS setting._", "",
                   "_Full per-kernel history below, newest first._", ""]
     for kv in kvers:
         rows = sorted([e for e in es if e["kver"] == kv], key=lambda e: vkey(e["ena_version"]), reverse=True)
@@ -717,10 +781,37 @@ for ol, es in sorted(by_ol.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit()
                   "|:--|:--|:--|:--|:--|:--|"]
         for e in rows:
             dkms = {True: "yes", False: "no", None: "-"}.get(e.get("dkms"), str(e.get("dkms")))
-            note = e.get("reason") or ""
+            note = (e.get("reason") or "").replace("|", "\\|")
             lines.append(f"| {e['ena_version']} | {e['status']} | {e.get('ko_version') or '-'} | "
                          f"{dkms} | {e.get('tested_at','')} | {note} |")
         lines.append("")
+        # Fail-pattern analysis (RHEL-sibling r61 port): group CONSECUTIVE fail
+        # versions (the table's descending order) by their recorded reason, so a
+        # kernel-API breakpoint reads as one row with a version range instead of
+        # N identical table notes. The installer embeds the make.log first error
+        # in the reason ("[make.log first error: ...]"), giving each group a
+        # specific root cause. Omitted when the kernel has zero fails.
+        fail_rows = [(e["ena_version"], (e.get("reason") or "").replace("|", "\\|"))
+                     for e in rows if e["status"] == "fail"]
+        if fail_rows:
+            groups = []
+            for ver, note in fail_rows:
+                err = note or "(no recorded reason)"
+                if groups and groups[-1]["error"] == err:
+                    groups[-1]["versions"].append(ver)
+                else:
+                    groups.append({"error": err, "versions": [ver]})
+            lines += ["### Fail pattern analysis", "",
+                      "The kernel's headers determine which ENA releases can compile: "
+                      "older ENA releases lack kcompat.h coverage for newer kernel APIs; "
+                      "newer ENA releases drop support for older kernels. Each group below "
+                      "shares the same recorded root cause.", "",
+                      "| ENA versions | root cause |", "|:--|:--|"]
+            for g in groups:
+                vs = g["versions"]
+                vrange = vs[0] if len(vs) == 1 else f"{vs[0]} -- {vs[-1]} ({len(vs)} versions)"
+                lines.append(f"| {vrange} | {g['error']} |")
+            lines.append("")
     open(os.path.join(results_dir, f"RESULTS-ol{ol}.md"), "w").write("\n".join(lines).rstrip("\n") + "\n")
 
 print(f"ledger entries: {len(entries)}; reports for OL: {','.join(sorted(by_ol))}")

@@ -39,9 +39,18 @@
 # `git diff` after a refresh shows exactly the newly released ENA versions -- the
 # "test the diff on a new ENA release" signal the matrix is built around.
 #
+# ENA EXPRESS SCOPE + READINESS (schema 1.2, mirrors the RHEL sibling's lister).
+# The snapshot carries `min_version` (default 2.8.0 -- the ENA Express
+# express-ready floor: ena_srd_* metrics require driver >= 2.8.0 per AWS
+# ena-express.html) and each version entry carries `ge_min` (in the matrix's
+# DEFAULT sweep scope) plus `express_verdict` (ena_express_verdict() below:
+# < 2.2.9 not-ready, >= 2.2.9 bandwidth-only, >= 2.8.0 express-ready). The
+# matrix reads `min_version` as its default floor; `--full` sweeps everything.
+#
 # Usage:   bash tests/ena/list-ena-releases.sh [output.json]
 #   default output: tests/ena/ena-driver-releases.json (beside this script)
 #   env:   ENA_REPO_URL        (default https://github.com/amzn/amzn-drivers.git)
+#          ENA_MIN_VERSION     (default 2.8.0; the recorded min_version floor)
 #          SKIP_TARBALL_CHECK  (default 0; 1 = list only, no per-tarball probe)
 #          INSECURE_TLS        (default 0; 1 = curl -k, for a MITM dev proxy)
 #          URL_CHECK_TIMEOUT   (default 25; per-probe timeout in seconds)
@@ -55,6 +64,7 @@ SOURCE_REPO="https://github.com/amzn/amzn-drivers"
 TAG_PREFIX="ena_linux_"
 TARBALL_TMPL="${SOURCE_REPO}/archive/refs/tags/${TAG_PREFIX}<ver>.tar.gz"
 SKIP_TARBALL_CHECK="${SKIP_TARBALL_CHECK:-0}"
+ENA_MIN="${ENA_MIN_VERSION:-2.8.0}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="${1:-${SCRIPT_DIR}/ena-driver-releases.json}"
@@ -83,6 +93,27 @@ url_check_status() {
   printf '%s' "${code}"
 }
 # --- end reuse-by-copy block -------------------------------------------------
+
+# ver_ge <a> <b> : dotted version compare (a >= b). REUSE-BY-COPY of the matrix
+# helper (tests/t021_enaexpress.sh guards the copies against drift).
+ver_ge() {
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+}
+
+# ena_express_verdict <version> : AWS ENA Express driver-version floor
+# (ena-express.html: >= 2.2.9 full bandwidth, >= 2.8.0 ena_srd_* metrics).
+# REUSE-BY-COPY of the install-ena-driver.sh helper (the source of truth);
+# kept identical -- verified by tests/t021_enaexpress.sh. Pure function of the
+# version only -- NOT an eligibility check: ENA Express itself is enabled via
+# the AWS API EnaSrdEnabled ENI-attachment attribute and gated by instance
+# type; meeting the floor is necessary, not sufficient.
+ena_express_verdict() {
+  local v="${1:-}"
+  [ -n "${v}" ] || { printf 'unknown'; return 0; }
+  if ver_ge "${v}" "2.8.0"; then printf 'express-ready'; return 0; fi
+  if ver_ge "${v}" "2.2.9"; then printf 'bandwidth-only'; return 0; fi
+  printf 'not-ready'
+}
 
 log "fetching ENA driver tags from ${ENA_REPO_URL} (git ls-remote --tags)"
 # refs/tags/ena_linux_X.Y.Z -> X.Y.Z. The `^{}` annotated-tag peel lines and any
@@ -117,7 +148,8 @@ avail=0
 unavail=0
 {
   printf '{\n'
-  printf '  "schema_version": "1.1",\n'
+  printf '  "schema_version": "1.2",\n'
+  printf '  "min_version": "%s",\n' "${ENA_MIN}"
   printf '  "list_type": "ena-driver-releases",\n'
   printf '  "source_repo": "%s",\n' "${SOURCE_REPO}"
   printf '  "source_method": "git ls-remote --tags",\n'
@@ -143,8 +175,9 @@ unavail=0
       if [ $((i % 10)) -eq 0 ]; then log "  ...checked ${i}/${count}"; fi
     fi
     if [ "${i}" -eq "${count}" ]; then sep=""; else sep=","; fi
-    body+="$(printf '    { "version": "%s", "tag": "%s%s", "tarball_url": "%s", "tarball_available": %s, "tarball_http_status": "%s" }%s\n' \
-      "${v}" "${TAG_PREFIX}" "${v}" "${url}" "${av}" "${status}" "${sep}")"
+    if ver_ge "${v}" "${ENA_MIN}"; then ge="true"; else ge="false"; fi
+    body+="$(printf '    { "version": "%s", "tag": "%s%s", "tarball_url": "%s", "tarball_available": %s, "tarball_http_status": "%s", "ge_min": %s, "express_verdict": "%s" }%s\n' \
+      "${v}" "${TAG_PREFIX}" "${v}" "${url}" "${av}" "${status}" "${ge}" "$(ena_express_verdict "${v}")" "${sep}")"
     body+=$'\n'
   done <<< "${versions}"
   printf '  "available_count": %s,\n' "${avail}"

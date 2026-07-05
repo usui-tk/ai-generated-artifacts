@@ -130,8 +130,9 @@ die() {
   if [[ "${ENA_BUILDTEST}" == "1" ]]; then
     # structured fail result for the test harness (reason JSON-escaped). The exit
     # code (non-zero, below) agrees with status=fail. Test mode only.
-    printf '[ena-driver][buildtest][result] {"status":"fail","osmajor":"%s","ena_version":"%s","kver":"%s","reason":"%s"}\n' \
+    printf '[ena-driver][buildtest][result] {"status":"fail","osmajor":"%s","ena_version":"%s","kver":"%s","ena_express":"%s","reason":"%s"}\n' \
       "${osmajor:-}" "${ena_version:-}" "${kver:-}" \
+      "$(ena_express_verdict "${ena_version:-}" 2>/dev/null || printf 'unknown')" \
       "$(printf '%s' "$*" | sed 's/\\/\\\\/g; s/"/\\"/g')"
   fi
   exit 1
@@ -166,6 +167,29 @@ _ena_resolve_latest() {
        >/dev/null 2>&1; then
     printf '%s' "${ver}"
   fi
+}
+
+# _ena_ver_ge <a> <b> : dotted version compare (a >= b). Support helper for
+# ena_express_verdict below; the matrix/lister carry their own copies
+# (reuse-by-copy, ADR 0003) -- tests/t021_enaexpress.sh guards against drift.
+_ena_ver_ge() {
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+}
+
+# ena_express_verdict <version> : AWS ENA Express driver-version floor
+# classification (ena-express.html: >= 2.2.9 full bandwidth, >= 2.8.0 ena_srd_*
+# metrics). This is the project's SOURCE OF TRUTH copy; the lister and the
+# matrix report duplicate it (reuse-by-copy) and tests/t021_enaexpress.sh keeps
+# the copies identical. Pure function of the version only -- NOT an eligibility
+# check: ENA Express itself is enabled via the AWS API EnaSrdEnabled
+# ENI-attachment attribute and gated by instance type; meeting the floor is
+# necessary, not sufficient (a build "ok" already carries the same caveat).
+ena_express_verdict() {
+  local v="${1:-}"
+  [ -n "${v}" ] || { printf 'unknown'; return 0; }
+  if _ena_ver_ge "${v}" "2.8.0"; then printf 'express-ready'; return 0; fi
+  if _ena_ver_ge "${v}" "2.2.9"; then printf 'bandwidth-only'; return 0; fi
+  printf 'not-ready'
 }
 
 # compiler error is captured in the parent build log. This matters because
@@ -219,6 +243,19 @@ ena_buildtest_verdict() {
   printf 'no installed ena.ko matches the requested ENA version %s (found only: %s) -- the dkms build did not produce a module matching the request (the installed module version, not the build exit status, is authoritative) and only the stock in-tree module remains' \
     "${want}" "${found}"
   return 1
+}
+
+# _ena_first_make_error : the FIRST compiler error line from the DKMS make.log
+# (e.g. "implicit declaration of function 'from_timer'"), truncated to 200
+# chars, or "" when no make.log / no error line exists. Ported from the RHEL
+# sibling (r61): embedding the specific kernel-API error in the failure reason
+# lets the matrix report's fail-pattern analysis group failures by ROOT CAUSE
+# instead of a generic "build failed" message. Best-effort, read-only.
+_ena_first_make_error() {
+  local ml
+  ml="$(find "/var/lib/dkms/amzn-drivers/${ena_version:-}" -name 'make.log' 2>/dev/null | head -1 || true)"
+  [[ -n "${ml}" && -f "${ml}" ]] || return 0
+  grep -m1 ' error:' "${ml}" 2>/dev/null | sed 's/^.*error: //' | head -c 200 || true
 }
 
 # On a SUCCESSFUL build the guest provisioning output is swallowed by
@@ -645,7 +682,7 @@ build_install_plain() {
 if [[ "${use_dkms}" -eq 1 ]]; then
   log "Building & installing ENA ${ena_version} via DKMS for ${kver}"
   report_inbox_ena
-  build_install_dkms || { dump_build_diag; die "DKMS build/install failed (compiler output dumped above; in-guest make.log)"; }
+  build_install_dkms || { dump_build_diag; _e="$(_ena_first_make_error)"; die "DKMS build/install failed (${_e:-compiler output dumped above; in-guest make.log})"; }
   record_make_log
 else
   log "Building & installing ENA ${ena_version} via plain make for ${kver}"
@@ -681,11 +718,21 @@ while IFS= read -r _k; do
 done < <(find "/lib/modules/${kver}" -type f -name 'ena.ko*' 2>/dev/null)
 if [[ -z "${ko}" ]]; then
   dump_build_diag
+  # The verdict names the mismatch; the make.log first error (when present)
+  # names the ROOT CAUSE the dkms exit code masked (EL6 dkms exits 0 on a
+  # failed compile) -- both travel in the recorded reason (r61 port).
+  _e="$(_ena_first_make_error)"
   # Intentional word-splitting of the space-separated version list into args.
   # shellcheck disable=SC2086
-  die "$(ena_buildtest_verdict "${ena_version}" ${_found_vers})"
+  _verdict="$(ena_buildtest_verdict "${ena_version}" ${_found_vers})" || true
+  if [[ -n "${_e}" ]]; then
+    die "${_verdict} [make.log first error: ${_e}]"
+  else
+    die "${_verdict}"
+  fi
 fi
 log "Installed ENA driver: ${ko} (version ${newver})"
+log "ENA Express readiness (driver-version floor only): $(ena_express_verdict "${newver%%g*}") -- ENA Express itself is an ENI attribute (AWS API EnaSrdEnabled), not a guest OS setting"
 
 # ---- AMI hygiene: drop stale persistent-net rules --------------------------
 rm -f /etc/udev/rules.d/70-persistent-net.rules 2>/dev/null || true
@@ -697,6 +744,7 @@ log "ENA driver build complete (OL${osmajor}, kernel ${kver}, version ${ena_vers
 # status=ok. Carries the {OS x ena_linux x kernel} facts a build ledger needs.
 # Test mode only; production emits nothing here.
 if [[ "${ENA_BUILDTEST}" == "1" ]]; then
-  printf '[ena-driver][buildtest][result] {"status":"ok","osmajor":"%s","ena_version":"%s","kver":"%s","dkms":%s,"ko":"%s","ko_version":"%s"}\n' \
-    "${osmajor}" "${ena_version}" "${kver}" "${use_dkms}" "${ko}" "${newver}"
+  printf '[ena-driver][buildtest][result] {"status":"ok","osmajor":"%s","ena_version":"%s","kver":"%s","dkms":%s,"ko":"%s","ko_version":"%s","ena_express":"%s"}\n' \
+    "${osmajor}" "${ena_version}" "${kver}" "${use_dkms}" "${ko}" "${newver}" \
+    "$(ena_express_verdict "${ena_version}")"
 fi

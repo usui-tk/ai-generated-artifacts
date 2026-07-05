@@ -168,6 +168,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (ssm verdict) | L0/L1 | implemented | `tests/t018_ssmverdict.sh`: loads the four pure helpers of `tests/ssm/run-ssm-installtest-matrix.sh` — `ssm_ge` (dotted 4-part compare), `go_min_kernel` (go.mod `go` directive → min-kernel proxy), `ssm_in_scope` (default `>=min` vs `--full` filter), `ssm_compliance` (headline verdict vs AWS min `>= 3.3.3598.0`) — and asserts them across the matrix's shapes; no container/network/clean-core; 32 asserts |
 | B-T (awscli verdict) | L0/L1 | implemented | `tests/t019_awscliverdict.sh`: loads the five pure helpers of `tests/awscli/run-awscli-installtest-matrix.sh` — `awscli_ge` (dotted compare, versions + glibc), `awscli_min_glibc` (documented manylinux floor 2.17/2.5), `awscli_in_scope` (v2-major filter), `awscli_verdict` (`runs`/`glibc-too-old`/`unexpected-fail`), `python_eol` (bundled CPython minor → documented EOL date) — and verifies the reuse-by-copy consistency of `awscli_min_glibc` with `tests/awscli/list-awscli-releases.sh`; no container/network/clean-core; 43 asserts |
 | B-T (register validation) | L1 | implemented | `tests/t020_register.sh`: sources the wrapper (guarded `main`) and exercises the two pure validators that guard `aws ec2 register-image` — `validate_ami_name` (`--name`: length 3-128 + allowed set alphanumerics and `()[]` space `. / - ' @ _`) and `validate_ami_description` (`--description`: length 0-255) — across length boundaries (2/3/128/129/0), realistic auto names (ENA/SSM markers), the full allowed special set, and a battery of disallowed characters (`# * , : + = % !`, braces, tab, multibyte); argument-only, no network; 23 asserts. The Phase-9 `--dry-run` pre-flight that also gates the real call is a live AWS interaction, proved by B-T8 (E2E) |
+| B-T (ena express) | L0/L1 | implemented | `tests/t021_enaexpress.sh`: the ENA Express readiness classification `ena_express_verdict` (`< 2.2.9` not-ready, `>= 2.2.9` bandwidth-only, `>= 2.8.0` express-ready; AWS ena-express.html floors) is a reuse-by-copy family of three — `install-ena-driver.sh` (the source of truth), `tests/ena/list-ena-releases.sh`, and the matrix's ledger-merge Python duplicate — kept in behavioural agreement across a boundary-version set (both floor edges, mid-range members, the stock 1.1.2, a far-future major proving numeric compare); also asserts the release-list 1.2 schema invariants (`min_version` + per-entry `ge_min`/`express_verdict`, mutually consistent) and the matrix's default-scope plumbing (`--full`, `min_version` floor, `--report-only`); python3-only, no container/network/build; 33 asserts |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
 | clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{5,6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below), plus `tests/cleancore/build-cleancore.sh` (the `--all`/`--ol` orchestrator wrapping them). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |
@@ -364,11 +365,17 @@ parse- and lint-check it like any `.sh`.
 
 `tests/ena/list-ena-releases.sh` collects the Amazon ENA Linux driver release
 list from the `amzn-drivers` GitHub repository and writes the static snapshot
-`tests/ena/ena-driver-releases.json`. This snapshot is the **input** to the ENA
-self-build test matrix: "test every ENA version" iterates the `versions[]`
-array, and each entry carries the deterministic source `tarball_url`
+`tests/ena/ena-driver-releases.json` (schema 1.2). This snapshot is the **input** to the ENA
+self-build test matrix: the matrix's default sweep iterates the `versions[]`
+entries whose `ge_min` is true (the ENA Express scope; `--full` sweeps all),
+and each entry carries the deterministic source `tarball_url`
 (`…/archive/refs/tags/ena_linux_<ver>.tar.gz`) that `install-ena-driver.sh`
-fetches. Each entry ALSO carries an explicit availability pre-check of that
+fetches. The snapshot's top-level `min_version` (default `2.8.0`, the ENA
+Express express-ready floor; `ENA_MIN_VERSION` overrides at generation time)
+is what the matrix reads as its default floor, and each entry also carries
+`express_verdict` (the `ena_express_verdict()` classification — a
+reuse-by-copy of the installer's source-of-truth helper, agreement-tested by
+B-T21). Each entry ALSO carries an explicit availability pre-check of that
 tarball URL — `tarball_available` (bool) + `tarball_http_status` — so the matrix
 can gate on whether a given version is actually fetchable before it tries to
 build it. The probe is a self-contained `url_check_status()` function **inlined**
@@ -539,18 +546,22 @@ plus a final `ENA matrix complete -- ...` summary (the clean-core builder's
 result + summary style).
 
 ```sh
-# a few cases locally (the full matrix is for the user's env / CI):
-bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --ena-versions "2.9.1 2.2.0"
+# a few cases locally (the full in-scope sweep is for the user's env / CI):
+bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --ena-versions "2.9.1 2.8.6"
 bash tests/ena/run-ena-buildtest-matrix.sh --ol 6 --pinned-only   # just the pin
-bash tests/ena/run-ena-buildtest-matrix.sh                        # OL6/7/8 x all releases
-# OL9/OL10 evaluation, floored to the ENA Express metrics threshold:
-bash tests/ena/run-ena-buildtest-matrix.sh --ol 9,10 --ena-min-version 2.8.0
+bash tests/ena/run-ena-buildtest-matrix.sh          # OL6-10 x ENA Express scope (>= min_version)
+bash tests/ena/run-ena-buildtest-matrix.sh --full   # OL6-10 x ALL releases (pre-express included)
+bash tests/ena/run-ena-buildtest-matrix.sh --report-only  # no builds: regenerate reports from the ledger
 ```
 
-The committed `buildtest-ledger.json` / `RESULTS-ol{6,7,8}.md` are a **real**
-full-release-list run on the maintainer's host (210 rows = 70 ENA versions x
-OL6/OL7/OL8): OL6 UEK4 `4.1.12-124.48.6.el6uek` builds 6/70 (the `[2.8.6,
-2.9.1]` window), OL7/OL8 UEK6 build 35/70 each. An `ok` is compile + DKMS-install
+The working-tree `buildtest-ledger.json` is the **ENA Express era reset
+skeleton** (2026-07; empty, awaiting the first express-scoped five-major sweep
+on the maintainer's host — the AWS ENA generation update makes ENA Express
+support a hard requirement, so express-incapable releases no longer inform the
+product). The retired pre-express evidence — a real full-release-list run (210
+rows = 70 ENA versions x OL6/OL7/OL8: OL6 UEK4 builds 6/70, the `[2.8.6,
+2.9.1]` window, entirely inside the express scope; OL7/OL8 UEK6 build 35/70
+each) — lives in git history only. An `ok` is compile + DKMS-install
 (necessary, not sufficient; real load/device is B-T7/B-T8). A later run in the
 user's environment / CI grows the ledger (the dedup makes that a clean append).
 

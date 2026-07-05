@@ -20,6 +20,51 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (ENA Express era: matrix scope + reporting migrate to the RHEL-sibling v2 spec)
+- **The ENA build-test evidence is RESET for the ENA Express era.** The AWS ENA
+  generation update makes ENA Express support a hard requirement for the
+  produced AMIs, so express-incapable driver releases no longer inform the
+  product: `tests/ena/buildtest-ledger.json` is reset to an empty schema-1.1
+  skeleton and `RESULTS-ol{6,7,8}.md` are removed. The retired pre-express
+  evidence (a real 210-row all-release run, 70 versions x OL6/7/8) remains in
+  git history only. OL6's known buildable window `[2.8.6, 2.9.1]` sits inside
+  the express scope, so no OL6-relevant signal is lost.
+- **Default sweep scope = the ENA Express floor (v2 parity).**
+  `list-ena-releases.sh` now emits schema 1.2: top-level `min_version`
+  (default `2.8.0`, the express-ready / `ena_srd_*` metrics floor) plus
+  per-entry `ge_min` and `express_verdict`; the snapshot was regenerated for
+  real (live `git ls-remote` + 70 tarball HEAD probes; 29 of 70 releases in
+  scope, `2.8.0`..`2.17.0` — identical to the RHEL sibling's scope). The
+  matrix reads `min_version` as its default floor (hard filter over every
+  version source), `--full` lifts it, and the explicit `--ena-min-version`
+  override is retained.
+- **All five OL majors are first-class matrix targets.** `--ol` defaults to
+  `6,7,8,9,10` and OL9/OL10 results are recorded in the ledger like any other
+  major (the former "evaluation only" framing is retired; the pipeline-side
+  wiring is the next change).
+- **`ena_express_verdict()` lands as a reuse-by-copy family (RHEL-sibling r31
+  port).** The source of truth lives in `install-ena-driver.sh` (production
+  log line states the readiness next to the installed `ena.ko`; both
+  `ENA_BUILDTEST` result JSONs carry `ena_express`), copied into
+  `list-ena-releases.sh` and duplicated in the matrix's ledger-merge Python
+  (which back-fills `ena_express` across every ledger entry on each write).
+  `tests/t021_enaexpress.sh` (new, 33 asserts) keeps the three
+  implementations in behavioural agreement over a boundary set and asserts
+  the 1.2 schema + scope plumbing.
+- **Reporting upgrades (RHEL-sibling r61 port).** `install-ena-driver.sh`
+  embeds the DKMS make.log's FIRST compiler error in both build-failure
+  reasons (the plain-failure die and the false-ok verdict path), so ledger
+  reasons carry the specific kernel-API root cause; each per-kernel report
+  section gains an automatic **Fail pattern analysis** table grouping
+  consecutive fail versions by recorded reason (omitted when a kernel has no
+  fails); the latest-kernel summary gains a standing ENA Express readiness
+  note. Report `notes` cells now escape `|`.
+- **`--report-only` mode (v2 report-mode parity).** Regenerates
+  `RESULTS-ol<N>.md` and the ledger's derived fields from the existing ledger
+  with no builds — python3 only, no root / containers / network (rehearsed
+  in-session against a synthetic ledger; grouping, note, and enrichment all
+  verified).
+
 ### Changed (B1 - docs only, zero script change)
 - **SPEC Part A migrated to the vendored model.** The inline Part A (old A.1-A.11,
   the pre-extraction de-facto family reference) is replaced by the **8 canonical

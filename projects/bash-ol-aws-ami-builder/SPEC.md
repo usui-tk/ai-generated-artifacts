@@ -1799,24 +1799,33 @@ library — the user-run-script policy):
 
 `list-ena-releases.sh` collects the upstream ENA version list (the
 `ena_linux_<ver>` git tags read via `git ls-remote --tags`, not the rate-limited
-REST API) into the deterministic snapshot `ena-driver-releases.json`, each
-version pre-checked for tarball fetchability (`tarball_available` +
-`tarball_http_status`, via the inline reuse-by-copy `url_check_status`). This is
-the matrix **input**.
+REST API) into the deterministic snapshot `ena-driver-releases.json` (schema
+**1.2**), each version pre-checked for tarball fetchability (`tarball_available`
++ `tarball_http_status`, via the inline reuse-by-copy `url_check_status`). The
+snapshot additionally carries the **ENA Express scope**: a top-level
+`min_version` (default `2.8.0` — the express-ready floor, overridable via
+`ENA_MIN_VERSION`) and, per version, `ge_min` (in the matrix's default sweep
+scope) and `express_verdict` (`ena_express_verdict()`: `< 2.2.9` →
+`not-ready`, `>= 2.2.9` → `bandwidth-only`, `>= 2.8.0` → `express-ready`; a
+reuse-by-copy of the installer's source-of-truth helper, kept in agreement by
+`tests/t021_enaexpress.sh`). This is the matrix **input**.
 
-`run-ena-buildtest-matrix.sh` drives, for each target OL major (6/7/8 — where
-`ENA_BUILDTEST` is wired for the **production-track** self-build — plus 9/10,
-wired for **evaluation only**: `build-ol-aws-ami.sh` does not yet self-build
-ENA on OL9/OL10, both stay on their in-distro driver until this matrix's
-findings are wired into the pipeline) and each target ENA version, the
-existing pieces **as separate executables**: `tests/cleancore/build-cleancore.sh`
+`run-ena-buildtest-matrix.sh` drives, for each target OL major (**6–10, all
+first-class** and recorded in the ledger; the default `--ol` set — matching
+the RHEL sibling project's five-major coverage) and each target ENA version,
+the existing pieces **as separate executables**: `tests/cleancore/build-cleancore.sh`
 (B.8) for the per-OL clean-core rootfs, then `install-ena-driver.sh
-ENA_BUILDTEST=1` (A.13) for the per-version compile-test. The ENA version set
-defaults to the full release list and is narrowable (`--ena-versions`,
-`--pinned-only`, and **`--ena-min-version <x.y.z>`** — a hard floor applied on
-top of any of the above, e.g. `2.8.0` for AWS's documented ENA Express
-metrics-reporting threshold) so a few cases can run locally while the **full**
-matrix is meant for the user's environment / CI.
+ENA_BUILDTEST=1` (A.13) for the per-version compile-test. The **default sweep
+scope is the ENA Express era**: the release list's `min_version` (`2.8.0`, the
+express-ready floor — ~29 of 70 releases) is applied as a hard floor
+regardless of version source, because the AWS ENA generation update makes ENA
+Express support a hard requirement for the produced AMIs. `--full` lifts the
+floor (all releases), `--ena-min-version <x.y.z>` overrides it explicitly, and
+the set stays narrowable (`--ena-versions`, `--pinned-only`) so a few cases
+can run locally while the full in-scope sweep is meant for the user's
+environment / CI. `--report-only` regenerates the reports (and the ledger's
+derived fields) from the existing ledger with **no builds** — python3 only, no
+root / containers / network.
 
 ### Dedup ledger + per-OS reports
 
@@ -1824,8 +1833,11 @@ Evidence is two layers, **both committed** so the state persists (a commit *is*
 the dedup state):
 
 - **`buildtest-ledger.json`** — one entry per `(osmajor, ena_version, kver)`
-  carrying `status` (`ok`/`fail`), `dkms`, `ko`, `ko_version`, `reason`,
-  `tested_at`. The triple is the **dedup key**, with **kver primary**: a combo
+  carrying `status` (`ok`/`fail`), `dkms`, `ko`, `ko_version`, `ena_express`
+  (the ENA Express readiness classification — a derived pure function of
+  `ena_version`, back-filled across the whole ledger on every write incl.
+  `--report-only`), `reason`, `tested_at`. The triple is the **dedup key**,
+  with **kver primary**: a combo
   already present (pass **or** fail) is skipped; a **new kernel** (kver changes)
   shares no key with the old rows so the whole set re-tests; a **new ENA
   release** is the only missing key so only the diff tests. The live kver per OL
@@ -1837,12 +1849,23 @@ the dedup state):
   match the requested `ena_version` (the build did not produce the requested
   module — e.g. an older installer that fell back to the stock in-tree `ena.ko`),
   so a masked build failure cannot enter the ledger as `ok` and silence the
-  dedup gate. (Tested by `tests/t013_enaledgerguard.sh`.)
+  dedup gate. (Tested by `tests/t013_enaledgerguard.sh`.) **ENA Express era
+  reset (2026-07)**: the working-tree ledger was reset to an empty schema-1.1
+  skeleton — the retired pre-express all-release evidence (210 rows = 70
+  versions × OL6/7/8) lives in git history only, since express-incapable
+  releases no longer inform the product.
 - **`RESULTS-ol<N>.md`** — a per-OS human report regenerated from the ledger,
   **newest kernel first** and opening with a `## Latest kernel <kver>` summary of
   the ENA versions that build on the newest kernel tested (so the latest result
-  stays visible as kernels accumulate); each kernel is a section with an
-  `ok`/total headline and a per-version table. A `fail` is recorded evidence (e.g. an ENA release too
+  stays visible as kernels accumulate), followed by a standing ENA Express
+  readiness note (the driver-version floors and the "ENI attribute, not a
+  guest OS setting" caveat); each kernel is a section with an
+  `ok`/total headline, a per-version table, and — when the kernel has any
+  `fail` rows — a **Fail pattern analysis** subsection (RHEL-sibling r61 port)
+  that groups consecutive fail versions sharing the same recorded reason into
+  version-range rows, so a kernel-API breakpoint reads as one root cause
+  instead of N identical table notes (the installer embeds the make.log first
+  compiler error in the reason, giving each group a specific cause). A `fail` is recorded evidence (e.g. an ENA release too
   old for that kernel's kcompat), **not** a harness error, so the run exits 0;
   the harness fails non-zero only on an infrastructure error (missing tool, a
   clean-core build that will not produce a rootfs, ...). A build that emits no
@@ -1901,14 +1924,18 @@ QA build, then the recorded run.
 
 A container is kernel-less, so `ENA_BUILDTEST` provisions a full `kernel-uek` +
 headers up front (A.13); the matrix inherits that and the B.8 host requirements
-(root + `unshare`/`chroot` + network). The committed ledger and
-`RESULTS-ol{6,7,8}.md` are a **real** full-release-list run on the maintainer's
-host (210 rows = 70 ENA versions x OL6/OL7/OL8): OL6 UEK4
-`4.1.12-124.48.6.el6uek` builds **6/70** — exactly the `[2.8.6, 2.9.1]`
+(root + `unshare`/`chroot` + network). The working-tree ledger is currently the
+**ENA Express era reset skeleton** (empty; awaiting the first express-scoped
+five-major sweep on the maintainer's host). The **retired** pre-express
+evidence — a real full-release-list run (210 rows = 70 ENA versions x
+OL6/OL7/OL8) — lives in git history (pre-reset commits) and established: OL6
+UEK4 `4.1.12-124.48.6.el6uek` builds **6/70** — exactly the `[2.8.6, 2.9.1]`
 buildable window (D.11/D.12; `2.10.0`+ fail on the ECC build-time autodetect,
 older releases predate the `BUILD_KERNEL` UEK-detect patch site or the
 `page_ref_count` floor); OL7 UEK6 `5.4.17-2136.338.4.2.el7uek` and OL8 UEK6
-`5.4.17-2136.356.4.2.el8uek` build **35/70** each. An `ok` row means the
+`5.4.17-2136.356.4.2.el8uek` build **35/70** each. OL6's window sits entirely
+inside the express scope (`>= 2.8.0`), so the reset loses no OL6-relevant
+signal. An `ok` row means the
 requested version compiled and DKMS-installed on that kernel — **necessary, not
 sufficient**: real module load and device attach are proven separately on real
 Nitro (B-T7/B-T8), and the read-only load-readiness verifier below adds the
