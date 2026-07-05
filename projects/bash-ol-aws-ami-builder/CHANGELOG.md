@@ -20,6 +20,39 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (ENA self-build goes production on OL6-OL10)
+- **`build-ol-aws-ami.sh` injects the ENA self-build hook on all five majors
+  by default** (`--skip-ena-driver` still opts out to a pure OL AMI). The
+  former OL6/OL7-only gates — hook injection, `-ena<ver>` AMI naming, and the
+  final-summary ENA line — are retired; the driving requirement is the AWS
+  ENA generation update (the produced AMI must ship an ENA-Express-capable
+  driver).
+- **Host-side latest resolution (`[OLAWS-ENA02]`, new log marker).** For the
+  latest-resolving majors (OL8/9/10, empty installer pins) `load_env` resolves
+  amzn-drivers latest on the build host via `_ena_resolve_latest_host()`
+  (mirrors `_awscli_resolve_latest`: `git ls-remote --tags` newest-first +
+  tarball HEAD verification; live-verified in-session -> `2.17.0`) and falls
+  back to the installer's concrete `ENA_LATEST_FALLBACK_PIN`
+  (`_ena_fallback_pin()`) when offline — the AMI identity always carries a
+  concrete x.y.z, never the word "latest". The resolved version is passed
+  into the guest hook as `ENA_DRIVER_VERSION`, so the AMI name/description
+  and the actually-built module can never drift (the installer's own runtime
+  resolution remains the standalone / container-test path). OL6/OL7 keep
+  reading the installer pins (`_ena_pin_for_major`, unchanged).
+- **Caveat carried in the docs (SSM-integration precedent):** real AMI boot
+  with an OL8/9/10 self-built driver is not yet E2E-verified — container
+  compile + DKMS-install proof only. The `[C]3` real-build E2E remains the
+  standing follow-up.
+- **`tests/t011_enareporting.sh` grows an OL6-10 wiring section** (+6
+  asserts): host resolver + fallback reader defined, `[OLAWS-ENA02]` marker
+  present, `ENA_DRIVER_VERSION` pass-through line present, the old "hook not
+  injected for OL" branch gone, and no residual OL6/OL7-only
+  `ENA_DRIVER_BUILD` gate anywhere in the wrapper.
+- Docs lock-step: SPEC (installer self-gating + validated-E2E paragraphs, the
+  Phase-3 hook table, the log-marker table, B.9's follow-up paragraph),
+  TESTING.md, README.md/README.ja.md (installer + `--skip-ena-driver` rows),
+  installer header/variable comments.
+
 ### Changed (ENA Express era: matrix scope + reporting migrate to the RHEL-sibling v2 spec)
 - **The ENA build-test evidence is RESET for the ENA Express era.** The AWS ENA
   generation update makes ENA Express support a hard requirement for the

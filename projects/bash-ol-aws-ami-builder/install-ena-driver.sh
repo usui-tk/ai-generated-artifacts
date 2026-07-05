@@ -31,21 +31,23 @@
 #              compile. 2.9.1 is the last pre-ECC release -> the ceiling.)
 #     - OL7 -> ena_linux_2.17.0 (newest release supporting RHEL7 confirmed as of
 #              2026-06; RHEL7 remains in the driver's supported-distros list)
-#     - OL8 -> ena_linux_2.17.0 (same as OL7; OL8 runs the same UEK6 family).
-#              STANDALONE ONLY: the AMI pipeline keeps OL8 on its in-distro ENA
-#              (build-ol-aws-ami.sh gates the self-build hook to OL6/OL7). This
-#              script builds OL8 when run on its own (VM or container test).
-#     - OL9  -> ena_linux_2.17.0 (EVALUATION PIN, same placeholder as OL7/OL8,
-#                pending tests/ena/run-ena-buildtest-matrix.sh results). OL9's
-#                in-distro ENA already ships LLQ, but has no exposed driver
-#                version string (in-tree, not amzn-drivers-tagged) -- see the
-#                ENA Express investigation notes in the project handoff.
-#                STANDALONE / ENA_BUILDTEST ONLY: the AMI pipeline still keeps
-#                OL9 on its in-distro ENA until the matrix confirms a safe pin.
-#     - OL10 -> ena_linux_2.17.0 (EVALUATION PIN, same as OL9; OL10's in-distro
-#                ena.ko moved to the kernel-uek-modules-core sub-package as of
-#                UEKR8, confirmed via kernel-uek.spec %changelog). STANDALONE /
-#                ENA_BUILDTEST ONLY, same caveat as OL9.
+#     - OL8 -> amzn-drivers LATEST resolved at runtime (same UEK6 family as
+#              OL7; 2.17.0 confirmed building in the container matrix).
+#              PRODUCTION: build-ol-aws-ami.sh injects the self-build hook on
+#              OL6-OL10 by default (ENA Express generation). Real AMI boot on
+#              OL8 self-build is not yet E2E-verified (container compile +
+#              DKMS-install proof only; the SSM-integration precedent).
+#     - OL9  -> amzn-drivers LATEST resolved at runtime. Confirmed building
+#                against UEKR8 (6.12) in the container matrix (2026-07-03),
+#                incl. the gcc-toolset-14 PATH requirement. OL9's in-distro
+#                ENA already ships LLQ, but has no exposed driver version
+#                string (in-tree, not amzn-drivers-tagged). PRODUCTION, same
+#                real-AMI-boot caveat as OL8.
+#     - OL10 -> amzn-drivers LATEST resolved at runtime. Confirmed building
+#                against UEKR8 in the container matrix (2026-07-03; OL10's
+#                in-distro ena.ko moved to kernel-uek-modules-core as of
+#                UEKR8, confirmed via kernel-uek.spec %changelog). PRODUCTION,
+#                same real-AMI-boot caveat as OL8.
 #   Override per run with ENA_DRIVER_VERSION (single pin) for evaluation -- this
 #   is how tests/ena/run-ena-buildtest-matrix.sh drives ENA_BUILDTEST=1 across
 #   the release list without editing this file per version.
@@ -79,18 +81,16 @@ set -euo pipefail
 # ---- pinned versions (overridable) -----------------------------------------
 ENA_VERSION_OL6="${ENA_VERSION_OL6:-2.9.1}"
 ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.0}"
-# OL8 self-build is standalone-only (the AMI pipeline keeps OL8 on its in-distro
-# ENA -- see build-ol-aws-ami.sh, hook gated to OL6/OL7).
 # OL8/OL9/OL10 resolve to the amzn-drivers LATEST tag at runtime (see
 # _ena_resolve_latest below) unless explicitly pinned here or via
 # ENA_DRIVER_VERSION. Left empty by default = "resolve latest"; set a concrete
-# x.y.z to pin (e.g. once tests/ena/run-ena-buildtest-matrix.sh identifies a
+# x.y.z to pin (e.g. if tests/ena/run-ena-buildtest-matrix.sh identifies a
 # buildable ceiling for one of these OSes, mirroring how OL6's [2.8.6, 2.9.1]
-# window was established).
+# window was established). In the AMI pipeline, build-ol-aws-ami.sh resolves
+# latest HOST-SIDE ([OLAWS-ENA02]) and passes the concrete version in via
+# ENA_DRIVER_VERSION, so the AMI identity and the built module always agree;
+# the runtime resolution below is the standalone / container-test path.
 ENA_VERSION_OL8="${ENA_VERSION_OL8:-}"
-# OL9/OL10 self-build is EVALUATION-ONLY (standalone / ENA_BUILDTEST): the AMI
-# pipeline still keeps both on their in-distro ENA. Same latest-resolution /
-# pin-override rule as OL8 above.
 ENA_VERSION_OL9="${ENA_VERSION_OL9:-}"
 ENA_VERSION_OL10="${ENA_VERSION_OL10:-}"
 # Last-known-good fallback pin if _ena_resolve_latest cannot reach GitHub (no

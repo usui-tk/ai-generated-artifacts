@@ -77,4 +77,25 @@ pin7="$(grep -E "^ENA_VERSION_OL7=" "${INST}" | sed -E 's/.*:-([^}"]+)\}.*/\1/' 
 assert_eq "2.9.1"  "${pin6}" "ena-report: pin reader resolves OL6 default (2.9.1) from the live installer"
 assert_eq "2.17.0" "${pin7}" "ena-report: pin reader resolves OL7 default (2.17.0) from the live installer"
 
+# ---- (5) OL6-10 production wiring (ENA Express generation) ------------------
+# The self-build hook, the AMI identity, and the final summary all follow the
+# plain ENA_DRIVER_BUILD knob for every major (the former OL6/OL7-only gates
+# are retired); OL8/9/10 resolve amzn-drivers latest HOST-SIDE and pass the
+# concrete version into the guest so the AMI name and artifact cannot drift.
+assert_in "${WRAP}" '_ena_resolve_latest_host\(\) \{' \
+  "ena-wiring: host-side amzn-drivers latest resolver defined"
+assert_in "${WRAP}" '_ena_fallback_pin\(\) \{' \
+  "ena-wiring: installer ENA_LATEST_FALLBACK_PIN reader defined"
+assert_in "${WRAP}" 'OLAWS-ENA02' \
+  "ena-wiring: [OLAWS-ENA02] load_env resolution log marker present"
+assert_in "${WRAP}" 'ENA_DRIVER_VERSION=\$\{ENA_BUILD_VERSION\} /usr/local/sbin/ol-aws-install-ena-driver\.sh' \
+  "ena-wiring: latest-resolving majors pass the host-resolved version into the guest hook"
+assert_not_in "${WRAP}" 'ENA driver self-build hook not injected for OL' \
+  "ena-wiring: the OL6/OL7-only hook gate is retired (hook injects on OL6-10)"
+if grep -Eq 'ENA_DRIVER_BUILD.*-eq 1 && \( .OL_MAJOR_VERSION.*== .6.*\|\|.*== .7. \)' "${WRAP}"; then
+  t_fail "ena-wiring: a residual OL6/OL7-only ENA_DRIVER_BUILD gate remains in the wrapper"
+else
+  t_pass "ena-wiring: no residual OL6/OL7-only ENA_DRIVER_BUILD gate remains"
+fi
+
 t_done

@@ -92,8 +92,9 @@
 #                           check), then exit without the AWS import phases
 #                           (Phases 7-9). Equivalent to --skip-aws-import.
 #   --skip-ena-driver     : Do NOT build/install the Amazon ENA driver in the
-#                           guest. Default is to build it (AWS-optimized AMI);
-#                           this switch produces a pure, unmodified OL AMI.
+#                           guest. Default is to build it on OL6-OL10 (AWS-
+#                           optimized, ENA-Express-capable AMI); this switch
+#                           produces a pure, unmodified OL AMI.
 #   --skip-ssm-agent      : Do NOT install the Amazon SSM Agent in the guest.
 #                           Default is to install + enable it for boot (OL6-OL10),
 #                           so the AMI is SSM Run Command compliant out of the box;
@@ -518,6 +519,31 @@ load_env() {
     fi
   fi
 
+  # Resolve the ENA self-build target version for the AMI identity + the guest
+  # hook. Runs for every build (incl. --build-only) when the self-build is on
+  # (default, OL6-OL10; --skip-ena-driver leaves it empty -> pure OL AMI).
+  # OL6/OL7 read the installer's concrete pins (_ena_pin_for_major -- the
+  # single source of truth); OL8/9/10 have empty pins (latest-resolving), so
+  # the host resolves amzn-drivers latest (_ena_resolve_latest_host) and, if
+  # that fails (offline), falls back to the installer's concrete
+  # ENA_LATEST_FALLBACK_PIN -- the AMI identity always carries a concrete
+  # x.y.z, never the word "latest". For the latest-resolving majors the
+  # resolved version is also PASSED INTO the guest hook (ENA_DRIVER_VERSION),
+  # so the AMI name and the actually-built module can never drift.
+  if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
+    ENA_BUILD_VERSION="$(_ena_pin_for_major "${OL_MAJOR_VERSION}")"
+    if [[ -z "${ENA_BUILD_VERSION}" ]]; then
+      local _ena_latest; _ena_latest="$(_ena_resolve_latest_host)"
+      if [[ -n "${_ena_latest}" ]]; then
+        ENA_BUILD_VERSION="${_ena_latest}"
+        log_info "[OLAWS-ENA02] resolved amzn-drivers latest -> ${ENA_BUILD_VERSION} for OL${OL_MAJOR_VERSION} (AMI identity + guest hook target)"
+      else
+        ENA_BUILD_VERSION="$(_ena_fallback_pin)"
+        log_warn "[OLAWS-ENA02] could not resolve amzn-drivers latest (host offline?); falling back to the installer's pin ${ENA_BUILD_VERSION:-<unknown>} for OL${OL_MAJOR_VERSION}"
+      fi
+    fi
+  fi
+
   # Required parameters for AWS import (unless skipped)
   if [[ ${SKIP_AWS_IMPORT} -eq 0 && ${BUILD_ONLY} -eq 0 ]]; then
     : "${S3_BUCKET:?S3_BUCKET is not defined}"
@@ -528,15 +554,15 @@ load_env() {
     : "${AWS_REGION:?AWS_REGION could not be resolved (this should not happen)}"
     # ENA self-build identity, folded into the AMI name (brief) and description
     # (full) so a self-built-ENA AMI is distinguishable from a pure OL AMI BEFORE
-    # launch. ENA_BUILD_VERSION is the installer's pin (single source of truth);
-    # it stays empty for --skip-ena-driver. Wired for OL6/OL7 only -- OL8+ keep
-    # their in-distro ENA driver in the AMI pipeline (the standalone
-    # install-ena-driver.sh can still build OL8 on demand). Only the AUTO
-    # defaults gain the marker -- an explicitly set AMI_NAME/AMI_DESCRIPTION is
-    # left untouched (:=).
+    # launch. ENA_BUILD_VERSION was resolved above ([OLAWS-ENA02]: the
+    # installer's pin for OL6/OL7, host-resolved amzn-drivers latest -- or the
+    # installer's concrete fallback pin -- for OL8/9/10); it stays empty for
+    # --skip-ena-driver. Wired for OL6-OL10 (ENA Express generation: the AMI
+    # ships an express-capable driver by default). Only the AUTO defaults gain
+    # the marker -- an explicitly set AMI_NAME/AMI_DESCRIPTION is left
+    # untouched (:=).
     local _ena_name_sfx="" _ena_desc_sfx=" (pure OL; ENA self-build skipped)"
-    if [[ "${ENA_DRIVER_BUILD}" -eq 1 && ( "${OL_MAJOR_VERSION}" == "6" || "${OL_MAJOR_VERSION}" == "7" ) ]]; then
-      ENA_BUILD_VERSION="$(_ena_pin_for_major "${OL_MAJOR_VERSION}")"
+    if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
       _ena_name_sfx="-ena${ENA_BUILD_VERSION:-}"
       _ena_desc_sfx=" with self-built Amazon ENA ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized for Nitro)"
     fi
@@ -1720,8 +1746,6 @@ OLAWS_OL6_CLOUD_USER_BODY
   # Idempotent via the wrapper marker so a Phase 3 re-run does not double-append.
   if [[ "${ENA_DRIVER_BUILD}" -ne 1 ]]; then
     log_info "ENA driver self-build disabled (--skip-ena-driver); producing a pure OL AMI"
-  elif [[ "${OL_MAJOR_VERSION}" != "6" && "${OL_MAJOR_VERSION}" != "7" ]]; then
-    log_info "ENA driver self-build hook not injected for OL${OL_MAJOR_VERSION} (AMI keeps its in-distro ENA driver; the standalone install-ena-driver.sh can build it on demand)"
   else
     local aws_provision_ena="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
     local ena_installer="${SCRIPT_DIR}/install-ena-driver.sh"
@@ -1737,6 +1761,16 @@ OLAWS_OL6_CLOUD_USER_BODY
     if grep -Fq '[ol-aws-ami-builder PATCH ena-driver-build]' "${aws_provision_ena}"; then
       log_info "  -> ENA driver hook already present (idempotent skip)"
     else
+      # On the latest-resolving majors (OL8/9/10 -- empty installer pin) the
+      # host-resolved ENA_BUILD_VERSION ([OLAWS-ENA02]) is passed into the guest
+      # as ENA_DRIVER_VERSION, so the guest builds exactly the version the AMI
+      # name/description declares (no name<->artifact drift, and no second
+      # in-guest latest resolution). The pinned majors (OL6/OL7) run the
+      # installer bare -- its own pin IS the resolved version.
+      local _ena_hook_invoke='/usr/local/sbin/ol-aws-install-ena-driver.sh'
+      if [[ -z "$(_ena_pin_for_major "${OL_MAJOR_VERSION}")" && -n "${ENA_BUILD_VERSION}" ]]; then
+        _ena_hook_invoke="ENA_DRIVER_VERSION=${ENA_BUILD_VERSION} /usr/local/sbin/ol-aws-install-ena-driver.sh"
+      fi
       {
         printf '\n# >>> [ol-aws-ami-builder PATCH ena-driver-build] >>>\n'
         printf '# Build & install a pinned Amazon ENA driver in the guest (AWS-optimized AMI).\n'
@@ -1745,12 +1779,12 @@ OLAWS_OL6_CLOUD_USER_BODY
         cat "${ena_installer}"
         printf 'OLAWS_ENA_INSTALLER_EOF\n'
         printf 'chmod +x /usr/local/sbin/ol-aws-install-ena-driver.sh\n'
-        printf '/usr/local/sbin/ol-aws-install-ena-driver.sh\n'
+        printf '%s\n' "${_ena_hook_invoke}"
         printf '# <<< [ol-aws-ami-builder PATCH ena-driver-build] <<<\n'
       } >> "${aws_provision_ena}"
 
       if grep -Fq '[ol-aws-ami-builder PATCH ena-driver-build]' "${aws_provision_ena}"; then
-        log_info "  [OLAWS-ENA01] ENA driver hook injected (pin: OL${OL_MAJOR_VERSION} $(_ena_pin_for_major "${OL_MAJOR_VERSION}"); in-guest DKMS build)"
+        log_info "  [OLAWS-ENA01] ENA driver hook injected (target: OL${OL_MAJOR_VERSION} ${ENA_BUILD_VERSION:-$(_ena_pin_for_major "${OL_MAJOR_VERSION}")}; in-guest DKMS build)"
       else
         die "Failed to inject ENA driver hook into ${aws_provision_ena}"
       fi
@@ -3043,6 +3077,45 @@ _ena_pin_for_major() {
     | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
 }
 
+# Resolve the amzn-drivers "latest" ENA tag to a concrete, published version --
+# for the persistent AMI name/description + the guest hook's target on the
+# latest-resolving majors (OL8/9/10, whose installer pins are empty). Mirrors
+# _awscli_resolve_latest (git ls-remote tags newest-first, then HEAD-verify the
+# artifact -- here the source tarball -- so a tag that leads archive publication
+# is never selected) and the installer's own _ena_resolve_latest ground-truth
+# method. Echoes the concrete version, or "" on any failure (the caller then
+# falls back to the installer's ENA_LATEST_FALLBACK_PIN -- the AMI identity
+# always carries a concrete x.y.z, never the word "latest"). git + curl are
+# already build-host dependencies.
+_ena_resolve_latest_host() {
+  local repo="https://github.com/amzn/amzn-drivers"
+  local tags v i=0
+  tags="$(git ls-remote --tags "${repo}" 'ena_linux_*' 2>/dev/null \
+            | sed -E 's#.*refs/tags/ena_linux_##; s/\^\{\}$//' \
+            | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            | sort -t. -k1,1n -k2,2n -k3,3n -u | tac)"
+  [[ -n "${tags}" ]] || return 0
+  while IFS= read -r v; do
+    [[ -n "${v}" ]] || continue
+    i=$((i+1)); [[ ${i} -gt 12 ]] && break   # bounded probe window (archive lag is small)
+    if curl -fsIL --max-time 15 "${repo}/archive/refs/tags/ena_linux_${v}.tar.gz" >/dev/null 2>&1; then
+      printf '%s' "${v}"; return 0
+    fi
+  done <<< "${tags}"
+  return 0
+}
+
+# Read the installer's ENA_LATEST_FALLBACK_PIN default (a concrete x.y.z) --
+# the single source of truth for the offline fallback, so the AMI identity and
+# the guest build agree even when the host cannot reach GitHub. Mirrors
+# _ena_pin_for_major.
+_ena_fallback_pin() {
+  local inst="${SCRIPT_DIR}/install-ena-driver.sh"
+  [[ -f "${inst}" ]] || return 0
+  grep -E "^ENA_LATEST_FALLBACK_PIN=" "${inst}" \
+    | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
+}
+
 # Resolve the SSM Agent version for an OL major from install-ssm-agent.sh's
 # per-OL map (SSM_AGENT_VERSION_OL<major>); echoes "latest" or a pin. Mirrors
 # _ena_pin_for_major. Used only for the AMI name/description marker.
@@ -3756,9 +3829,9 @@ phase9_register_ami() {
   log_info "  AMI build completed successfully"
   log_info "=========================================="
   local ena_summary
-  # Mirror the AMI-description gate: the self-build hook is injected for OL6/OL7
-  # only, so OL8+ keep their in-distro ENA driver even when ENA_DRIVER_BUILD=1.
-  if [[ "${ENA_DRIVER_BUILD}" -eq 1 && ( "${OL_MAJOR_VERSION}" == "6" || "${OL_MAJOR_VERSION}" == "7" ) ]]; then
+  # Mirror the AMI-description gate: the self-build hook is injected for
+  # OL6-OL10 whenever ENA_DRIVER_BUILD=1 (--skip-ena-driver produces pure OL).
+  if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
     ena_summary="self-built ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized)"
   else
     ena_summary="stock in-box (pure OL AMI)"

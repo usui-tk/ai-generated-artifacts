@@ -637,16 +637,21 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
 
 - **Self-gates by OS major**: builds for **OL6** (pinned `ena_linux_2.9.1`) and
   **OL7** (pinned `ena_linux_2.17.0`, the newest release confirmed to support
-  RHEL7 as of 2026-06). On **OL8/OL9/OL10** it is **not** a no-op: it resolves
+  RHEL7 as of 2026-06). On **OL8/OL9/OL10** it resolves
   `ena_linux` **latest** at runtime via `_ena_resolve_latest()` (`git
   ls-remote --tags` against `amzn/amzn-drivers`, HEAD-verifies the tarball,
   falls back to `ENA_LATEST_FALLBACK_PIN` — default `2.17.0` — on failure),
   overridable via `ENA_DRIVER_VERSION` or the per-OS `ENA_VERSION_OL8/9/10`
-  variables. This is **evaluation/standalone only** — `build-ol-aws-ami.sh`'s
-  AMI-pipeline hook still gates to OL6/OL7 only (see "ENA driver self-build
-  (`--skip-ena-driver`)" gating in B.1 / B.4), so OL8/OL9/OL10 stay on their
-  in-distro driver in a built AMI regardless of what a standalone run
-  resolves. On **OL9/UEKR8 and OL10/UEKR8**, `latest` is confirmed to build
+  variables. This is **production** (ENA Express generation: the produced AMI
+  must ship an express-capable driver): `build-ol-aws-ami.sh` injects the
+  self-build hook on **OL6–OL10 by default**, resolving latest **host-side**
+  (`[OLAWS-ENA02]`, mirroring the AWS CLI resolver) and passing the concrete
+  version into the guest via `ENA_DRIVER_VERSION` on the latest-resolving
+  majors, so the AMI identity and the built module always agree (the in-guest
+  runtime resolution is the standalone / container-test path). Real AMI boot
+  with an OL8/9/10 self-built driver is **not yet E2E-verified** (container
+  compile + DKMS-install proof only — the same caveat model as the SSM Agent
+  integration). On **OL9/UEKR8 and OL10/UEKR8**, `latest` is confirmed to build
   (B.9's 2026-07-03 evaluation findings); the ENA Express metrics floor
   `2.8.0` is confirmed to **fail** on both (an upstream XDP symbol rename
   `2.8.0`'s `kcompat.h` predates) — see B.9 for the full findings and the
@@ -790,10 +795,13 @@ all inert.
 Validated end-to-end (the driver actually compiles, installs, and verifies) on
 OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`), OL7 (`ena.ko.xz` 2.17.0g,
 UEK6 `5.4.17-2136.338.4.2.el7uek`), and OL8 (`ena.ko.xz` 2.17.0g, UEK6
-`5.4.17-2136.356.4.2.el8uek`). OL8 self-build is **standalone-only**: the AMI
-pipeline keeps OL8 on its in-distro ENA driver — `build-ol-aws-ami.sh` gates the
-provision.sh self-build hook (and the `-ena<ver>` AMI naming) to OL6/OL7, so OL8+
-AMIs are produced unmodified. OL9+ remain a no-op in the installer.
+`5.4.17-2136.356.4.2.el8uek`); OL9/OL10 (UEKR8) build latest in the container
+matrix (B.9, 2026-07-03). The AMI pipeline now self-builds ENA on **OL6–OL10
+by default** (ENA Express generation): `build-ol-aws-ami.sh` injects the
+provision.sh hook — and the `-ena<ver>` AMI naming — for every major, with the
+OL8/9/10 target resolved host-side (`[OLAWS-ENA02]`) and passed into the guest.
+Real AMI boot with an OL8/9/10 self-built driver remains to be E2E-verified
+(the standing `[C]3` follow-up).
 
 #### File naming convention
 
@@ -1281,7 +1289,7 @@ identifier. All are applied inside `phase3_clone_repository`. Current markers:
 | `[ol-aws-ami-builder PATCH ol6-cloud-user]` | `cloud/aws/provision.sh` | `OL_MAJOR_VERSION == 6` | Wrap `cloud::cloud_init` so the OL6 cloud-init default user becomes `ec2-user` (strips the absent `systemd-journal` group; runs after the configs are written) — see D.26 |
 | `[ol-aws-ami-builder PATCH nitro-initramfs]` | `cloud/aws/provision.sh` | always (AWS cloud path) | Drop an `/etc/dracut.conf.d` `add_drivers` file forcing `nvme`/`ena` into the initramfs and regenerate it (Nitro boot requirement; Phase 6 CHECK 1 verifies the result) |
 | `[ol-aws-ami-builder PATCH serial-console]` | `cloud/aws/provision.sh` | GRUB2 systems (OL7+; hook self-skips on OL6 GRUB Legacy) | AWS-recommended serial console in 3 layers: (1) `console=tty0 console=ttyS0,115200n8` on all entries via `grubby --update-kernel=ALL` (BLS-aware) + `GRUB_CMDLINE_LINUX`; (2) `GRUB_TERMINAL`/`GRUB_SERIAL_COMMAND` + `grub2-mkconfig`; (3) `serial-getty@ttyS0` enabled — see D.25 |
-| `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; installer is a no-op on OL8+) — logged as `[OLAWS-ENA01]`, see A.13 |
+| `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default, OL6-OL10; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; OL8/9/10 receive the host-resolved target via `ENA_DRIVER_VERSION`) — logged as `[OLAWS-ENA01]`, see A.13 |
 | `[ol-aws-ami-builder PATCH ssm-agent-install]` | `cloud/aws/provision.sh` | `SSM_AGENT_INSTALL == 1` (default; `--skip-ssm-agent` disables) | Inject the in-guest Amazon SSM Agent install+boot-enable hook (OL6-OL10; OL6 pinned, OL7-OL10 `latest`; non-fatal) — logged as `[OLAWS-SSM01]`, see B.11 |
 | `[ol-aws-ami-builder PATCH awscli-install]` | `cloud/aws/provision.sh` | `AWSCLI_INSTALL == 1` (default) **and** `OL_MAJOR_VERSION` in `6/7/8` (`--skip-awscli` disables; OL9/OL10 out of scope) | Inject the in-guest AWS CLI v2 install hook (OL6 pinned `2.17.51`, OL7/OL8 `latest`; v1 excluded via versionlock; non-fatal) — logged as `[OLAWS-AWSCLI01]`, see B.13 |
 | `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` | `bin/build-image.sh` | host libguestfs lacks the `selinuxrelabel` optgroup | Schedule a first-boot `/.autorelabel` instead of the offline relabel when the build host's libguestfs cannot relabel — see D.17 |
@@ -1979,12 +1987,13 @@ follow-up work for the maintainer's environment):
   silently matched nothing and left `dkms` unresolvable ("No match for
   argument: dkms").
 
-None of this is wired into the **production** pipeline yet: `build-ol-aws-ami.sh`
-still gates the self-build hook to OL6/OL7 only, so OL8/OL9/OL10 stay on their
-in-distro ENA driver in a built AMI regardless of these findings. Wiring OL9/OL10's
-confirmed `latest`-on-UEKR8 combination into production (name/description
-marker, `--skip-ena-driver` interaction, Phase 3 hook) and running a full
-(non-narrowed) matrix are tracked as follow-up work.
+These findings are now **wired into the production pipeline**:
+`build-ol-aws-ami.sh` injects the self-build hook on OL6–OL10 by default
+(host-side latest resolution `[OLAWS-ENA02]`, `ENA_DRIVER_VERSION`
+pass-through, `-ena<x.y.z>` AMI naming — see B.1/B.4 and A.13). Remaining
+follow-up: the first express-scoped five-major matrix sweep (the ledger was
+reset for the ENA Express era), and a real AMI build/boot E2E with an
+OL8/9/10 self-built driver (`[C]3`).
 
 ### Load-readiness verification (external, read-only)
 
@@ -3528,6 +3537,7 @@ the line is specific to one generation (e.g. `[OLAWS-USR01/OL6]`).
 | `OLAWS-CFG01` | resolved feature knobs (`[DEBUG]`: ENA/IMDS/skip flags) |
 | `OLAWS-NVM01` | Nitro initramfs-drivers hook injected (nvme/ena into initramfs) |
 | `OLAWS-ENA01` | in-guest ENA driver self-build hook injected |
+| `OLAWS-ENA02` | ENA self-build target resolved for the AMI identity + guest hook (installer pin, or host-resolved amzn-drivers latest / concrete fallback pin on OL8-10) |
 | `OLAWS-CON01` | serial-console (`ttyS0`) hook injected (GRUB2 / OL7+) |
 | `OLAWS-USR01` | OL6 cloud-init default-user alignment hook injected (→ `ec2-user`) |
 | `OLAWS-IMD01` | AMI IMDS support mode chosen at `register-image` |

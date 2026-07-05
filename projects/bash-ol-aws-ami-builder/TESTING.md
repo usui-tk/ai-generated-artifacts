@@ -450,9 +450,11 @@ code agrees with `status` (`0` = ok, non-zero = fail):
 
 Validated: OL6 (`ena.ko` 2.9.1g, UEK4 `4.1.12-124.48.6.el6uek`), OL7
 (`ena.ko.xz` 2.17.0g, UEK6 `5.4.17-2136.338.4.2.el7uek`), and OL8 (`ena.ko.xz`
-2.17.0g, UEK6 `5.4.17-2136.356.4.2.el8uek`). OL8/OL9/OL10 self-build is
-standalone/evaluation-only; the AMI pipeline keeps all three on their
-in-distro ENA driver (see SPEC "ENA driver self-build" gating). OL9 (UEKR8,
+2.17.0g, UEK6 `5.4.17-2136.356.4.2.el8uek`). The AMI pipeline now self-builds
+ENA on **OL6-OL10 by default** (ENA Express generation; see SPEC "ENA driver
+self-build"): OL8/9/10 receive the host-resolved amzn-drivers latest via
+`ENA_DRIVER_VERSION` (`[OLAWS-ENA02]`), and real AMI boot with an OL8/9/10
+self-built driver remains to be E2E-verified. OL9 (UEKR8,
 `gcc-toolset-14` compiler requirement) and OL10 (UEKR8) were additionally
 validated 2026-07-03 building amzn-drivers latest (`2.17.0`) — see SPEC B.9
 "OL9/OL10 evaluation findings" for the full writeup, including why the ENA
