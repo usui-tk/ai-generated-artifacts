@@ -556,14 +556,15 @@ bash tests/ena/run-ena-buildtest-matrix.sh --full   # OL6-10 x ALL releases (pre
 bash tests/ena/run-ena-buildtest-matrix.sh --report-only  # no builds: regenerate reports from the ledger
 ```
 
-The working-tree `buildtest-ledger.json` is the **ENA Express era reset
-skeleton** (2026-07; empty, awaiting the first express-scoped five-major sweep
-on the maintainer's host — the AWS ENA generation update makes ENA Express
-support a hard requirement, so express-incapable releases no longer inform the
-product). The retired pre-express evidence — a real full-release-list run (210
-rows = 70 ENA versions x OL6/OL7/OL8: OL6 UEK4 builds 6/70, the `[2.8.6,
-2.9.1]` window, entirely inside the express scope; OL7/OL8 UEK6 build 35/70
-each) — lives in git history only. An `ok` is compile + DKMS-install
+The committed `buildtest-ledger.json` / `RESULTS-ol{6,7,8,9,10}.md` are the
+**first express-scoped five-major sweep** on the maintainer's host (2026-07-05;
+145 rows = 29 in-scope versions x OL6-OL10): OL6 UEK4 builds 6/29 (the known
+`[2.8.6, 2.9.1]` window), OL7 UEK6 builds 12/29 (`[2.12.2, 2.17.0]`,
+byte-reproducing the retired run's `>= 2.8.0` subset on the same kernel), OL8
+UEK6 (new kernel `.4.3`; full re-test via the kver-primary dedup) builds 12/29
+(same window), and OL9/OL10 UEKR8 build 8/29 each (`[2.13.2, 2.17.0]` — the
+precise UEKR8 floor). The retired pre-express evidence (210 rows = 70 versions
+x OL6/7/8) lives in git history only. An `ok` is compile + DKMS-install
 (necessary, not sufficient; real load/device is B-T7/B-T8). A later run in the
 user's environment / CI grows the ledger (the dedup makes that a clean append).
 

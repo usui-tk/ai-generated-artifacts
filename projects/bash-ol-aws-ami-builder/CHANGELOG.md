@@ -20,6 +20,32 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added (first express-scoped five-major ENA sweep - E2E evidence)
+- **`tests/ena/buildtest-ledger.json` + `RESULTS-ol{6,7,8,9,10}.md`**: the
+  first ENA-Express-era sweep on the maintainer's host (2026-07-05), 145 rows
+  = 29 in-scope versions x OL6-OL10. Integrity checks performed before
+  commit: zero cells below the `2.8.0` floor, all rows `express-ready`, zero
+  `ko_version` mismatches (the false-ok guard clean), all five RESULTS
+  byte-reproduced from the ledger by the committed `--report-only` path, and
+  the run used byte-identical committed scripts + release snapshot.
+- Windows established: OL6 UEK4 `4.1.12-124.48.6` -> 6/29 (`[2.8.6, 2.9.1]`,
+  the known window; `2.8.0`-`2.8.5` fail on the UEK-detect patch site); OL7
+  UEK6 `.338.4.2` -> 12/29 (`[2.12.2, 2.17.0]`, byte-reproducing the retired
+  run's `>= 2.8.0` subset on the same kernel - UEK6 has a `2.8.0`-`2.12.1`
+  kcompat gap); OL8 UEK6 `.356.4.3` (kernel advanced from `.4.2`; the
+  kver-primary dedup re-tested the full set as designed) -> 12/29 (same
+  window as OL7); OL9/OL10 UEKR8 `6.12.0-203.76.7.6` -> 8/29 each
+  (`[2.13.2, 2.17.0]` - consistent with the 2026-07-03 evaluation on the same
+  kernel and now precise: the UEKR8 buildable floor is `2.13.2`).
+- The r61 reporting ports are confirmed working in production: fail reasons
+  carry the make.log first compiler error, and the per-kernel Fail pattern
+  analysis tables group the failures by root cause.
+- Clean-core SBOMs verified byte-identical to the committed six (the
+  clean-core rootfs excludes the kernel, so the OL8/OL9/OL10 kernel updates
+  do not touch them) - no SBOM change needed.
+- Docs lock-step: SPEC B.9 and TESTING.md sweep-evidence paragraphs updated
+  from "reset skeleton awaiting the first sweep" to the recorded results.
+
 ### Changed (ENA self-build goes production on OL6-OL10)
 - **`build-ol-aws-ami.sh` injects the ENA self-build hook on all five majors
   by default** (`--skip-ena-driver` still opts out to a pure OL AMI). The

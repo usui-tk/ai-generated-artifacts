@@ -1932,23 +1932,28 @@ QA build, then the recorded run.
 
 A container is kernel-less, so `ENA_BUILDTEST` provisions a full `kernel-uek` +
 headers up front (A.13); the matrix inherits that and the B.8 host requirements
-(root + `unshare`/`chroot` + network). The working-tree ledger is currently the
-**ENA Express era reset skeleton** (empty; awaiting the first express-scoped
-five-major sweep on the maintainer's host). The **retired** pre-express
-evidence — a real full-release-list run (210 rows = 70 ENA versions x
-OL6/OL7/OL8) — lives in git history (pre-reset commits) and established: OL6
-UEK4 `4.1.12-124.48.6.el6uek` builds **6/70** — exactly the `[2.8.6, 2.9.1]`
-buildable window (D.11/D.12; `2.10.0`+ fail on the ECC build-time autodetect,
-older releases predate the `BUILD_KERNEL` UEK-detect patch site or the
-`page_ref_count` floor); OL7 UEK6 `5.4.17-2136.338.4.2.el7uek` and OL8 UEK6
-`5.4.17-2136.356.4.2.el8uek` build **35/70** each. OL6's window sits entirely
-inside the express scope (`>= 2.8.0`), so the reset loses no OL6-relevant
-signal. An `ok` row means the
-requested version compiled and DKMS-installed on that kernel — **necessary, not
-sufficient**: real module load and device attach are proven separately on real
-Nitro (B-T7/B-T8), and the read-only load-readiness verifier below adds the
-vermagic / KABI gates. A later run grows the ledger as a clean append
-(kver-primary dedup).
+(root + `unshare`/`chroot` + network). The committed ledger and
+`RESULTS-ol{6,7,8,9,10}.md` are the **first express-scoped five-major sweep** on
+the maintainer's host (2026-07-05; 145 rows = 29 in-scope versions x OL6-OL10,
+zero cells below the floor, zero `ko_version` mismatches): **OL6** UEK4
+`4.1.12-124.48.6.el6uek` builds **6/29** — exactly the known `[2.8.6, 2.9.1]`
+window (`2.8.0`–`2.8.5` fail on the UEK-detect patch site, D.11/D.12); **OL7**
+UEK6 `5.4.17-2136.338.4.2.el7uek` builds **12/29** (`[2.12.2, 2.17.0]`) —
+byte-reproducing the retired all-release run's `>= 2.8.0` subset on the same
+kernel (UEK6 has a `2.8.0`–`2.12.1` kcompat gap); **OL8** UEK6
+`5.4.17-2136.356.4.3.el8uek` (kernel advanced from the retired run's `.4.2` —
+the kver-primary dedup re-tested the whole set as designed) builds **12/29**,
+the same window as OL7; **OL9/OL10** UEKR8 `6.12.0-203.76.7.6.el{9,10}uek`
+build **8/29** each (`[2.13.2, 2.17.0]`) — consistent with the 2026-07-03
+evaluation on the same kernel (`latest` ok, `2.8.0` fail) and now precise: the
+UEKR8 buildable floor is `2.13.2`. Fail reasons carry the make.log first
+compiler error (the r61 port working in production). The retired pre-express
+evidence (210 rows = 70 versions x OL6/7/8) lives in git history. An `ok` row
+means the requested version compiled and DKMS-installed on that kernel —
+**necessary, not sufficient**: real module load and device attach are proven
+separately on real Nitro (B-T7/B-T8), and the read-only load-readiness verifier
+below adds the vermagic / KABI gates. A later run grows the ledger as a clean
+append (kver-primary dedup).
 
 ### OL9/OL10 evaluation findings (2026-07-03, ENA Express readiness)
 
