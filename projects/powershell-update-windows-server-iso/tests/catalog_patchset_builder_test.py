@@ -82,7 +82,7 @@ EXPECTED_KINDS: Dict[str, set] = {
     "2016": {"SSU", "LCU"},
     "2019": {"LCU", "DotNet"},
     "2022": {"LCU", "DotNet", "SafeOSDU"},
-    "2025": {"SSU", "LCU", "DotNet", "SafeOSDU", "SetupDU"},
+    "2025": {"Checkpoint", "LCU", "DotNet", "SafeOSDU", "SetupDU"},
 }
 
 

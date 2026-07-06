@@ -167,11 +167,14 @@ def main() -> int:
     # The decision of which OS actually gets an SSU is made at generation time by
     # Catalog discovery + the servicing-stack-version check, not asserted statically.
     # Config Schema v3.0: the standalone-SSU case is the PatchModel 'separate-ssu'
-    # (2016). 'uup-checkpoint' (2025) also carries an SSU Kind (the checkpoint
-    # baseline). The offline invariant is CONSISTENCY:
+    # (2016). 'uup-checkpoint' (2025) carries its checkpoint baseline as
+    # Kind='Checkpoint' (r11.52; the prior Kind='SSU' labelling of KB5043080
+    # force-applied the GA checkpoint to boot.wim and broke the 2026-07-05
+    # E2E with 0x80073712) -- SSU is now FORBIDDEN for uup-checkpoint.
+    # The offline invariant is CONSISTENCY:
     #   * every Kind=SSU Line has a non-empty DownloadUrl;
     #   * a 'separate-ssu' config carries a Kind=SSU (with URL) and an LCU;
-    #   * a config carrying a Kind=SSU has PatchModel in {separate-ssu, uup-checkpoint}.
+    #   * a config carrying a Kind=SSU has PatchModel == separate-ssu.
     for cfg_path in configs:
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
         model = (cfg.get("PatchModel") or "").strip()
@@ -187,8 +190,8 @@ def main() -> int:
                 f"separate-ssu but ssus_with_url={len(ssus_with_url)} lcus={len(lcus)}")
         if ssus_with_url:
             r.assert_true(
-                f"12 {cfg_path.name}: a config with a Kind=SSU has PatchModel in {{separate-ssu, uup-checkpoint}}",
-                model in ("separate-ssu", "uup-checkpoint"),
+                f"12 {cfg_path.name}: a config with a Kind=SSU has PatchModel == separate-ssu",
+                model == "separate-ssu",
                 f"has SSU {[s.get('KbId') for s in ssus_with_url]} but PatchModel={model!r}")
 
     return r.summary()

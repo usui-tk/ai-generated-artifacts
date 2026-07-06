@@ -522,8 +522,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.02-r11.51'
-$Script:ScriptTag     = 'audit-residue-sweep'
+$Script:ScriptVersion = 'update-wsi-2026.07.06-r11.52'
+$Script:ScriptTag     = 'checkpoint-model'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -645,6 +645,18 @@ $Script:PatchTargetMap = @{
     # Kind -> WIM targets (Config Schema v3.0 / data-source migration). Neutral Kinds:
     'SSU'             = @('Install', 'Boot', 'WinRE')
     'LCU'             = @('Install', 'Boot')
+    # Checkpoint cumulative baseline (uup-checkpoint model, 24H2+): NEVER
+    # applied standalone. It is downloaded and co-located with the target
+    # LCU (same folder); DISM uses the Add-WindowsPackage PackagePath
+    # folder to discover and install prerequisite checkpoint MSUs only
+    # when the image actually needs them. Force-applying the (older) GA
+    # checkpoint onto a newer image is what broke the 2026-07-05 E2E on
+    # boot.wim (0x80073712). Basis: MS Learn 'Checkpoint cumulative
+    # updates and the Microsoft Update Catalog' + the per-KB DISM
+    # guidance (e.g. the KB5094126 page: 'DISM will use the folder
+    # specified in PackagePath to discover and install one or more
+    # prerequisite MSU files as needed').
+    'Checkpoint'      = @()
     'DotNet'          = @('Install')
     'SafeOSDU'        = @('WinRE')
     'SetupDU'         = @('Setup')
@@ -4980,10 +4992,10 @@ function Resolve-Os { # psa-disable-line PSA6003 -- noun is 'OS' (operating syst
                 $_.fileName.ToLower().EndsWith('.msu') -and (($lcuKb -eq '') -or (-not $_.fileName.ToLower().Contains($lcuKb)))
             })
             $blKb = if ($baseline.Count) { Get-KbOf $baseline[0].fileName } else { $null }
-            $ssu = New-Line 'SSU' $null $baseline ([pscustomobject]@{ files = @($baseline | ForEach-Object { $_.fileName }) }) `
-                '2025: checkpoint SSU carried by the co-served GA baseline (the non-LCU .msu in the 2-file set)'
-            $ssu.kb = $blKb
-            return [pscustomobject]@{ os = 'Server2025'; lines = @($lcu, $ssu, (Resolve-Net '2025'), (Resolve-SafeOsDu '2025'), (Resolve-SetupDu '2025')) }
+            $checkpoint = New-Line 'Checkpoint' $null $baseline ([pscustomobject]@{ files = @($baseline | ForEach-Object { $_.fileName }) }) `
+                '2025: checkpoint cumulative baseline (the co-served GA .msu in the 2-file set); co-located with the LCU for DISM folder discovery, never applied standalone'
+            $checkpoint.kb = $blKb
+            return [pscustomobject]@{ os = 'Server2025'; lines = @($lcu, $checkpoint, (Resolve-Net '2025'), (Resolve-SafeOsDu '2025'), (Resolve-SetupDu '2025')) }
         }
     }
 }
@@ -5026,7 +5038,7 @@ function Test-PatchModelConsistency {
         'separate-ssu'    = @{ Require = @('SSU','LCU');                    Forbid = @('DotNet','SafeOSDU','SetupDU') }
         'embedded-ssu'    = @{ Require = @('LCU','DotNet');                 Forbid = @('SSU','SafeOSDU','SetupDU') }
         'embedded-ssu-du' = @{ Require = @('LCU','DotNet','SafeOSDU');      Forbid = @('SSU','SetupDU') }
-        'uup-checkpoint'  = @{ Require = @('LCU','SSU','DotNet','SafeOSDU'); Forbid = @() }
+        'uup-checkpoint'  = @{ Require = @('LCU','Checkpoint','DotNet','SafeOSDU'); Forbid = @('SSU') }
     }
     if (-not $rules.ContainsKey($PatchModel)) {
         throw "P06 consistency: unknown PatchModel '$PatchModel' for $OsKey (expected: $(($rules.Keys | Sort-Object) -join ', '))."
@@ -5064,7 +5076,7 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
               the PatchModel's apply map; an in-model Kind with 0 files
               HARD-FAILS (silent-starvation guard, r11.45);
           (2) 2025 LCU 2-file split -> keep only the LCU-proper file (the baseline .msu is
-              the separate SSU line);
+              the separate Checkpoint line);
           (3) .NET in-scope leaf selection (inScope.inScopeFiles);
           (4) 2016 .NET line is a placeholder -> dropped by (1) (the D0 "remove 2016 .NET"
               correction); SetupDU is added by the resolver extension upstream, not here.
@@ -5077,12 +5089,12 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
         [Parameter(Mandatory)][object]$OsResolved,   # one OS object: { os; lines[] }
         [Parameter(Mandatory)][string]$PatchModel
     )
-    $kindMap  = @{ 'LCU'='LCU'; 'SSU'='SSU'; '.NET'='DotNet'; 'SafeOSDU'='SafeOSDU'; 'SetupDU'='SetupDU' }
+    $kindMap  = @{ 'LCU'='LCU'; 'SSU'='SSU'; 'Checkpoint'='Checkpoint'; '.NET'='DotNet'; 'SafeOSDU'='SafeOSDU'; 'SetupDU'='SetupDU' }
     $applyMap = @{
         'separate-ssu'    = @{ 'SSU'=1; 'LCU'=2 }
         'embedded-ssu'    = @{ 'LCU'=1; 'DotNet'=2 }
         'embedded-ssu-du' = @{ 'LCU'=1; 'DotNet'=2; 'SafeOSDU'=3 }
-        'uup-checkpoint'  = @{ 'SSU'=1; 'LCU'=2; 'DotNet'=3; 'SafeOSDU'=4; 'SetupDU'=5 }
+        'uup-checkpoint'  = @{ 'Checkpoint'=1; 'LCU'=2; 'DotNet'=3; 'SafeOSDU'=4; 'SetupDU'=5 }
     }
     if (-not $applyMap.ContainsKey($PatchModel)) {
         throw "ConvertTo-ConfigLines: unknown PatchModel '$PatchModel' for $($OsResolved.os)."
@@ -7347,6 +7359,40 @@ function _CanonicalJson_ParseNull {
 # This module establishes the structural contract; a later release
 # fills in the WinRE worker and the LP-injection sequencing.
 
+function Get-PatchLocalPath {
+    <#
+    .SYNOPSIS
+        Compute the on-disk landing path for one resolved patch file
+        under <WorkRoot>\patches\<OS>\.
+    .DESCRIPTION
+        Kind 'LCU' and 'Checkpoint' land in the dedicated 'cu'
+        subfolder (patches\<OS>\cu\); every other Kind stays in the
+        flat per-OS folder. Rationale (MS checkpoint-cumulative
+        contract): Add-WindowsPackage is invoked with the TARGET
+        cumulative update only, and DISM uses the PackagePath FOLDER
+        to discover prerequisite checkpoint MSUs -- Microsoft requires
+        that ONLY the target cumulative update and its checkpoint
+        cumulative updates be present in that folder (MS Learn
+        'Checkpoint cumulative updates and the Microsoft Update
+        Catalog'; per-KB pages, e.g. KB5094126). Isolating the CU
+        family keeps .NET / SafeOS / SetupDU / SSU files out of the
+        discovery folder. Offline pre-place contract follows the same
+        layout: LCU + Checkpoint under patches\<OS>\cu\, everything
+        else under patches\<OS>\.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$Kind,
+        [Parameter(Mandatory)] [string]$FileName
+    )
+    $osDir = Join-Path $Script:PatchesDir $Script:OsVersion
+    if ($Kind -in @('LCU', 'Checkpoint')) {
+        return (Join-Path (Join-Path $osDir 'cu') $FileName)
+    }
+    return (Join-Path $osDir $FileName)
+}
+
 function Get-PatchTargetsForType {
     <#
     .SYNOPSIS
@@ -9576,7 +9622,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
                     }
                     $resolved.Add([pscustomobject]@{
                         Kind = 'Patch'; Source = $p.DownloadUrl
-                        LocalPath = Join-Path $Script:PatchesDir (Join-Path $Script:OsVersion $pFileName)
+                        LocalPath = Get-PatchLocalPath -Kind ([string]$p.Kind) -FileName $pFileName
                         KbId = $p.KbId
                         PatchType = $p.Kind
                         ApplyOrder = $p.ApplyOrder
@@ -9851,7 +9897,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                 $derived.Add([pscustomobject][ordered]@{
                     Kind            = 'Patch'
                     Source          = $p.DownloadUrl
-                    LocalPath       = Join-Path $Script:PatchesDir (Join-Path $Script:OsVersion $pFileName)
+                    LocalPath       = Get-PatchLocalPath -Kind ([string]$p.Kind) -FileName $pFileName
                     KbId            = $p.KbId
                     # Line objects carry the type under 'Kind' (Config
                     # Schema v3.0); reading a non-existent 'Type' here
@@ -9954,6 +10000,13 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
         foreach ($p in $Script:ResolvedPatches) {
             $idx++
             $leaf = [System.IO.Path]::GetFileName($p.LocalPath)
+            # Per-patch landing directory: LCU/Checkpoint land in the
+            # cu\ discovery subfolder (Get-PatchLocalPath), so the
+            # parent may not exist yet on a fresh WorkRoot.
+            $patchParent = [System.IO.Path]::GetDirectoryName($p.LocalPath)
+            if ($patchParent -and -not (Test-Path -LiteralPath $patchParent)) {
+                New-Item -ItemType Directory -Path $patchParent -Force | Out-Null
+            }
             Write-Step ('[{0}/{1}] {2}' -f $idx, $Script:ResolvedPatches.Count, $leaf)
 
             $isUrl = $p.Source -match '^https?://'

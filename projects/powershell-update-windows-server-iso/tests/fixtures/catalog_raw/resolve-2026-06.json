@@ -301,7 +301,7 @@
         "note": "discovered via Learn (build 26100.32995)"
       },
       {
-        "kind": "SSU",
+        "kind": "Checkpoint",
         "kb": "KB5043080",
         "catalogUid": null,
         "products": null,
@@ -322,7 +322,7 @@
             "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu"
           ]
         },
-        "note": "2025: checkpoint SSU carried by the co-served GA baseline (the non-LCU .msu in the 2-file set)"
+        "note": "2025: checkpoint cumulative baseline (the co-served GA .msu in the 2-file set); internal kind label migrated with the r11.52 Checkpoint model -- Catalog-truth fields (files/urls/digests/titles) verbatim from the 2026-07-02 capture"
       },
       {
         "kind": ".NET",

@@ -22,6 +22,58 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.06-r11.52] - 2026-07-06
+
+Tag: `checkpoint-model`. First fix of the 2026-07-05 4-OS E2E failure
+batch (Server 2025 axis): the 24H2 checkpoint cumulative baseline
+KB5043080 was modelled as Kind `SSU` and force-applied FIRST to every
+targeted WIM; on the (newer, 2026-01-refresh) boot.wim this failed with
+`0x80073712 ERROR_SXS_COMPONENT_STORE_CORRUPT` and aborted P08.
+Microsoft's checkpoint contract is the opposite: `Add-WindowsPackage`
+is invoked with the TARGET cumulative update only, and DISM uses the
+PackagePath FOLDER to discover and install prerequisite checkpoint MSUs
+only when the image actually needs them (MS Learn "Checkpoint
+cumulative updates and the Microsoft Update Catalog"; per-KB DISM
+guidance, e.g. the KB5094126 page).
+
+### Changed
+
+- **Config Schema: new Line Kind `Checkpoint`; `uup-checkpoint` now
+  REQUIRES it and FORBIDS `SSU`.** The 2025 anchor line (KB5043080) is
+  re-labelled `Kind: "Checkpoint"` in `data/config-Server2025.json`;
+  `Resolve-Os`/`ConvertTo-ConfigLines`/`Test-PatchModelConsistency`
+  emit/accept the new Kind (the schema `allOf` discriminated union and
+  its runtime mirror updated in lock-step).
+- **Checkpoint entries are never applied standalone.**
+  `$Script:PatchTargetMap['Checkpoint'] = @()` -- the checkpoint is
+  downloaded and co-located, not routed to any WIM target. The former
+  `B1.SSU`/`I1.SSU` force-apply of KB5043080 disappears for 2025.
+- **CU discovery folder.** New `Get-PatchLocalPath` lands Kind
+  `LCU`/`Checkpoint` under `patches\<OS>\cu\` and every other Kind in
+  the flat per-OS folder, satisfying the MS requirement that ONLY the
+  target cumulative update and its checkpoints be present in the
+  `-PackagePath` discovery folder. Both `LocalPath` writers (P02
+  baseline seeding + the post-refresh re-derivation) route through the
+  helper; P04 creates the per-patch landing directory. Offline
+  pre-place contract moves with it: LCU + Checkpoint under
+  `patches\<OS>\cu\`, everything else under `patches\<OS>\`.
+
+### Added
+
+- **T32 `checkpoint_placement_test.py`** (11 assertions): pins the
+  landing-folder split, the no-target routing (and that `Checkpoint`
+  is a known Type), and the uup-checkpoint Require/Forbid rules.
+
+### Fixed
+
+- T27 expected-Kind set and T23 SSU-consistency rule updated to the
+  Checkpoint model (a config carrying Kind `SSU` now implies
+  `separate-ssu` only). The T27 raw fixture's 2025 anchor had its
+  resolver-owned `kind` label migrated `SSU`->`Checkpoint`; every
+  Catalog-truth field (files/urls/digests/titles) stays VERBATIM from
+  the 2026-07-02 live capture.
+
+
 ### Fixed -- documentation currency sweep: reconcile README (EN/JA) / SPEC / TESTING / tests/README with the r11.51 implementation (docs-only, no version bump)
 
 A doc-vs-implementation reconciliation pass (mechanical: counts, T-table

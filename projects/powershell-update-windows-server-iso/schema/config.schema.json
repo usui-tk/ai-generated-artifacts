@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/usui-tk/ai-generated-artifacts/projects/powershell-update-windows-server-iso/schema/config-v3.0.schema.json",
   "title": "Windows Server ISO Updater - per-OS config profile (Config Schema v3.0)",
-  "description": "Machine-readable contract for data/config-Server<OsKey>.json. Mirrors SPEC section B.4. Config Schema v3.0 rebuilds the patch model for the Microsoft Update Catalog data source: PatchBaseline.Lines[] (a common-core item with a Kind field) replaces NeutralPatches[]/Type, and a top-level PatchModel discriminator (separate-ssu/embedded-ssu/embedded-ssu-du/uup-checkpoint) governs which Kinds are required vs forbidden via the allOf if/then blocks. Validated in CI by tests/config_schema_test.py; this schema and the configs are a matched pair.",
+  "description": "Machine-readable contract for data/config-Server<OsKey>.json. Mirrors SPEC section B.4. Config Schema v3.0 rebuilds the patch model for the Microsoft Update Catalog data source: PatchBaseline.Lines[] (a common-core item with a Kind field) replaces NeutralPatches[]/Type, and a top-level PatchModel discriminator (separate-ssu/embedded-ssu/embedded-ssu-du/uup-checkpoint) governs which Kinds are required vs forbidden via the allOf if/then blocks. The uup-checkpoint model carries the checkpoint cumulative baseline as Kind 'Checkpoint' (co-located with the target LCU for DISM PackagePath-folder discovery; never applied standalone) and forbids Kind 'SSU'. Validated in CI by tests/config_schema_test.py; this schema and the configs are a matched pair.",
   "type": "object",
   "required": [
     "Schema",
@@ -425,7 +425,7 @@
                     "contains": {
                       "properties": {
                         "Kind": {
-                          "const": "SSU"
+                          "const": "Checkpoint"
                         }
                       }
                     }
@@ -460,6 +460,25 @@
                       "properties": {
                         "Kind": {
                           "const": "SafeOSDU"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "PatchBaseline": {
+                "properties": {
+                  "Lines": {
+                    "not": {
+                      "contains": {
+                        "properties": {
+                          "Kind": {
+                            "const": "SSU"
+                          }
                         }
                       }
                     }
@@ -619,6 +638,7 @@
           "enum": [
             "LCU",
             "SSU",
+            "Checkpoint",
             "DotNet",
             "SafeOSDU",
             "SetupDU"

@@ -43,6 +43,7 @@ production, this directory ships five tools, summarised below.
 | `patch_integrity_digest_test.py` (T29) | Digest-format boundary: `ConvertTo-HexDigestString` base64↔hex vs an independent Python implementation, live-captured KB5095966 vector, static wiring guards; 11 assertions | After every change to the integrity layer | No |
 | `setup_du_discriminator_test.py` (T30) | `Select-SetupDuCandidate` against verbatim live-Catalog rows (title discriminator; Products-filter resurrection guard); 8 assertions | After every change to the SetupDU discriminator | No |
 | `lcu_target_verify_test.py` (T31) | `TargetBuildAfterUpdate` derived-field contract: comparator, committed-data consistency, single-writer wiring, P11 hard-Fail row; 24 assertions | After every change to the TBAU derivation or P11 | No |
+| `checkpoint_placement_test.py` (T32) | Checkpoint placement + routing contract (r11.52 `checkpoint-model`): `Get-PatchLocalPath` lands LCU/Checkpoint in the `cu` discovery subfolder and every other Kind flat; `Build-PatchPlan` routes Kind=`Checkpoint` to NO WIM target (never applied standalone; DISM discovers checkpoints from the Add-WindowsPackage PackagePath folder per the MS checkpoint contract); `Test-PatchModelConsistency` requires Checkpoint / forbids SSU for `uup-checkpoint`; 11 assertions | After every change to the patch landing layout, `PatchTargetMap`, or the uup-checkpoint model rules | No |
 | `seed_contract_test.py` (seed contract gate) | `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules; 17 assertions. No T number — gate convention. | After every change to seeds or the seed schema | No |
 | `canonical_json_format_check.py` (canonical JSON format gate) | Re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence (29 files); implements SPEC §C.3.4. No T number — format gate. | After every change that adds or modifies a JSON file in the scanned directories | No |
 | `canonical_json_format_check.py` (Part C gate) | Offline format compliance check for every `*.json` file under `data/`, `tests/fixtures/`, and `tests/snapshots/`. Re-serialises each file through `canonical_json_dumps` and fails if the bytes diverge. Implements SPEC §C.3.4. | On every commit that adds or modifies a JSON file in the three scanned directories; on every CI run | No  |
@@ -174,6 +175,7 @@ tests/
   patch_integrity_digest_test.py         T29 (digest-format boundary, 11)
   setup_du_discriminator_test.py         T30 (SetupDU title discriminator, 8)
   lcu_target_verify_test.py              T31 (TargetBuildAfterUpdate contract, 24)
+  checkpoint_placement_test.py           T32 (Checkpoint placement + routing, 11)
   config_schema_test.py                  config schema gate (14)
   seed_contract_test.py                  seed contract gate (17)
   canonical_json_format_check.py         canonical JSON format gate (29 files)
@@ -196,7 +198,11 @@ tests/
     config-guard/
       bad-config-ssu-empty-url.json  # Type=SSU with empty DownloadUrl: the T23 negative fixture
     catalog_raw/
-      resolve-2026-06.json           # captured layer-1 { os; lines[] } incl. a SetupDU line: T27 offline-build input
+      resolve-2026-06.json           # captured layer-1 { os; lines[] } incl. a SetupDU line: T27 offline-build input.
+                                     # Catalog-truth fields (files/urls/digests/titles) VERBATIM from the 2026-07-02
+                                     # live capture; the 2025 anchor's INTERNAL kind label was mechanically migrated
+                                     # SSU->Checkpoint with the r11.52 checkpoint-model (a resolver-owned label, not
+                                     # external truth -- no captured Catalog byte was altered)
     dotnet_cu/                       # .NET CU parser fixtures (T7 adjunct)
     release_info/                    # release-info parser fixture (T6)
   snapshots/
