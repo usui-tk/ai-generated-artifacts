@@ -565,8 +565,18 @@ the README section [Adding a tool](./README.md#adding-a-tool).
   creds -> L4).
 * **`aws_ena-driver`** - **E2'**, entitlement-gated **build** test (compile
   `ena.ko`), never a load test. Build needs `kernel-devel` (obtainable in every
-  major when entitled). Default build method is **DKMS** (`dkms add/build/install`,
-  OL parity; r65); plain-`make` is the fallback when dkms is unavailable.
+  major when entitled). The sweep measures the PRODUCTION method only: a
+  **DKMS one-shot** (`dkms add/build/install`, OL parity; r65/r68) - a dkms
+  build failure is terminal (no plain-make retry), and a dkms binary missing
+  from the test image is a **provisioning failure** (per-major preflight
+  abort; in-container defense exits without a `[result]` row so environment
+  failures never enter version statistics). In PRODUCTION mode (non-
+  INSTALLTEST) plain-`make` remains the OL-parity fallback when dkms is NOT
+  INSTALLABLE (with a loud no-auto-rebuild warning) - mirroring the OL
+  installer's operational semantics. The sweep runs exactly ONE entitlement
+  mode, matched to the host's measured repo access (`rhsm` -> `entitled`;
+  RHUI/other -> `anonymous` until the entitled RHUI container path lands);
+  `ENTITLEMENTS` is an explicit override (r68).
   All Oracle **UEK** detection is removed; target is the stock RHEL kernel.
   Anonymous -> `needs-entitlement`; load/runtime -> L4. **ENA Express readiness**
   (r31, `ena_express_verdict`) additionally classifies `ena_version` against
@@ -578,6 +588,22 @@ the README section [Adding a tool](./README.md#adding-a-tool).
   `EnaSrdEnabled` attribute (outside this repository's scope) and gated by
   instance type, and "meets the floor" does not guarantee the driver compiles
   against an untested kernel (see the OL sibling project's UEKR8 findings).
+
+### Matrix cardinality rule (r68)
+
+The value of this project is sweeping MANY versions across MANY majors in
+containers, so the cell count is the primary cost driver. Therefore any design
+change that **multiplies the matrix cardinality** - adding an axis (e.g. an
+entitlement or init-mode cross-product), introducing per-cell retries or
+multiple build attempts inside one cell, or repeating versions - REQUIRES a
+design proposal stating the cardinality formula (`versions x axes = cells`)
+and a runtime estimate, decided by the user BEFORE implementation. One
+version = one container = one build attempt is the baseline shape. Each
+matrix runner declares its cardinality at sweep start (the
+`sweep: ... versions=NN entitlements=[...]` log line) as the runtime
+manifestation of this rule. Rationale: the r58 entitled x anonymous
+cross-product doubled every ENA sweep without a prior decision and was only
+noticed during a full E2E run (2026-07-06).
 
 ---
 

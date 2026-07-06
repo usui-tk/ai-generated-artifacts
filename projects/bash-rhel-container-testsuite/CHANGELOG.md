@@ -13,6 +13,59 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r68] - 2026-07-06 - test spec rework: DKMS one-shot, environment-matched entitlement, cardinality rule
+
+User decisions (2026-07-06 design discussion) implemented:
+
+### Changed
+- **ENA sweep: ONE entitlement mode per run** (`run-ena-buildtest-matrix.sh`):
+  the default is derived from the host's measured repo access via the new
+  pure helper `ena_default_entitlements` (`rhsm` -> `entitled`; RHUI/other ->
+  `anonymous` until the entitled RHUI container path lands). The r58
+  entitled x anonymous cross-product is gone - anonymous rows were
+  version-independent constants whose harness behaviour is covered by the
+  sandbox FT layer. `ENTITLEMENTS` stays as an explicit override.
+  Cell count per major: 58 -> 29.
+- **ENA INSTALLTEST: DKMS one-shot** (`install-aws_ena-driver.sh`): the
+  sweep measures the production method only. A dkms BUILD failure is
+  terminal (the r65 plain-make retry is removed - OL parity: the OL
+  installer dies on dkms failure; its make path is only the
+  dkms-not-installable environment fallback). Failing cells no longer
+  compile twice.
+- **dkms-less test image = provisioning failure, never a version verdict**:
+  per-major dkms PREFLIGHT in the runner (fail-fast; the major is dropped,
+  no rows are written, and the run exits non-zero as INCOMPLETE), plus an
+  in-container defense (`build_ko` rc 4): the installer exits WITHOUT a
+  `[result]` row, which the runner records as a harness-error row.
+- **Production mode (non-INSTALLTEST) keeps OL parity** (user decision):
+  when dkms is NOT INSTALLABLE, plain-`make` remains the fallback with a
+  loud no-auto-rebuild warning - mirroring the OL installer's operational
+  semantics for real-host installs.
+
+### Added
+- **SPEC.md B.10 "Matrix cardinality rule"** (project spec, user decision):
+  any design change that multiplies the matrix cardinality (new axis,
+  per-cell retries/multiple builds, version repetition) requires a prior
+  user decision with the cardinality formula (`versions x axes = cells`)
+  and a runtime estimate. One version = one container = one build attempt
+  is the baseline. The runner's sweep-start declaration line is the rule's
+  runtime manifestation.
+- **TESTING.md "sandbox FT layer" section**: the AI-side harness FT is now
+  specified - dummy kernel-devel tree with the mandatory `-ft` NVR marker,
+  stubbed toolchain, a leading `[FT-STUB]` banner on every run, and the
+  hard rule that FT output is never written to any ledger. Non-RHEL-kernel
+  dependency analysis (Fedora/CentOS Stream) was considered and rejected.
+- **t010: `ena_default_entitlements` coverage** (6 asserts,
+  mutation-checked against an always-entitled mutant).
+
+### Notes
+- SSM / AWS CLI runners were surveyed: neither has an entitlement axis
+  (SSM's second axis is `INITMODES`), so this rework is ENA-only.
+- Expected E2E effect: ledger 290 -> 145 rows; failing cells build once
+  instead of twice; verdicts are unchanged for the 2026-07-06 sweep data
+  (no ok ever came from the removed make retry - all ok rows were
+  `dkms:true`).
+
 ## [r67] - 2026-07-06 - fix: rpm -q stdout-pollution hardening (kdevel_kver + SSM have=)
 
 ### Fixed

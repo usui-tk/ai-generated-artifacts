@@ -34,7 +34,7 @@ MATRIX="${PROJ}/tests/aws_ena-driver/run-ena-buildtest-matrix.sh"
 LISTER="${PROJ}/tests/aws_ena-driver/list-ena-releases.sh"
 INSTALLER="${PROJ}/install-aws_ena-driver.sh"
 
-for fn in ena_ge ena_kdevel_repo ena_in_scope ena_build_plan ena_verdict ena_load_tier ena_express_verdict; do
+for fn in ena_ge ena_kdevel_repo ena_in_scope ena_build_plan ena_verdict ena_load_tier ena_express_verdict ena_default_entitlements; do
   # shellcheck disable=SC1090
   . <(sed -n "/^${fn}()/,/^}/p" "${MATRIX}")
 done
@@ -71,6 +71,16 @@ assert_eq "skip" "$(ena_build_plan anonymous 0)" "anonymous -> skip"
 assert_eq "make" "$(ena_build_plan entitled 0)"  "entitled, no EPEL -> make"
 assert_eq "dkms" "$(ena_build_plan entitled 1)"  "entitled + EPEL -> dkms"
 assert_eq "unknown" "$(ena_build_plan bogus 0)"  "bogus -> unknown"
+
+# --- ena_default_entitlements: r68 environment-matched single mode ------------
+# The sweep runs exactly ONE entitlement mode derived from acq_repo_access;
+# rhui:* stays anonymous until the entitled RHUI container path lands.
+assert_eq "entitled"  "$(ena_default_entitlements rhsm)"       "rhsm host -> entitled sweep"
+assert_eq "anonymous" "$(ena_default_entitlements rhui:aws)"   "rhui:aws -> anonymous (entitled RHUI pending)"
+assert_eq "anonymous" "$(ena_default_entitlements rhui:azure)" "rhui:azure -> anonymous"
+assert_eq "anonymous" "$(ena_default_entitlements oci-ol)"     "oci-ol -> anonymous"
+assert_eq "anonymous" "$(ena_default_entitlements none)"       "no repo access -> anonymous"
+assert_eq "anonymous" "$(ena_default_entitlements '')"         "empty mode -> anonymous (safe default)"
 
 # --- ena_verdict: the E2' headline ------------------------------------------
 assert_eq "needs-entitlement" "$(ena_verdict anonymous false)" "anonymous -> needs-entitlement"

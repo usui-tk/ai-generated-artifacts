@@ -47,6 +47,27 @@ See [`SPEC.md`](./SPEC.md) B.9 for the authoritative table. In short:
 | **L3 Integration** | real pull + install/build, both init modes | `tests/aws_*/run-*-matrix.sh` | `*.quay.io`, `*.amazonaws.com`, RHEL repos |
 | **L4 E2E** | module **load**, real ENA/SSM on a genuine RHEL host | manual | full |
 
+### The sandbox FT layer (harness verification - not a tier, never a ledger)
+
+Between L2 and the user's E2E sits a **sandbox FT layer** run by the AI
+assistant in its own environment (podman + UBI images + a stub toolchain).
+Its ONLY purpose is verifying **harness behaviour** (result emission, error
+extraction, branch selection) before a patch reaches the user:
+
+* kernel-devel is a **dummy tree** (`/usr/src/kernels/9.9.9-ft.x86_64` - the
+  `-ft` marker is part of the spec: a NVR guaranteed not to exist on any real
+  host), and `dnf`/`yum`/`rpm`/`make`/`dkms` are PATH stubs that mimic the
+  real tools' observable shapes (e.g. `rpm -q <missing>` printing
+  "not installed" on stdout).
+* Every FT run prints a leading **`[FT-STUB]` banner** stating that the run
+  verifies harness behaviour, NOT driver buildability.
+* **FT output must never be written to any ledger** (`buildtest-ledger.json`
+  or any other). Ledgers carry ONLY real-kernel-header measurements from
+  entitled hosts. Version-dependency analysis on non-RHEL kernels
+  (Fedora/CentOS Stream) was considered and REJECTED (user decision
+  2026-07-06): it departs from this project's evidentiary core, which is
+  "measured against the real RHEL kernel headers".
+
 **L0-L2 are hermetic** and run on any host (Fedora/Ubuntu/Debian/macOS/RHEL) or
 in CI. **L3 needs container egress**; **L4 needs a real RHEL instance** and is
 deferred.
@@ -105,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 621 passed, 0 skipped, 0 failed  (24 tiers, 0 tier-failure(s))
+SUITE: 627 passed, 0 skipped, 0 failed  (24 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -177,10 +198,16 @@ rm -rf ./*.md ./*.json
 ```
 
 The build is **entitlement-gated**: `kernel-devel`/`gcc`/`make` come only from the
-entitled repos, so the `entitled` column needs a **subscribed** host; `anonymous`
-records `needs-entitlement`. `verify` reads the ledger + `./build-bundle` (the ko +
-`Module.symvers` + vermagic the build side preserved); with no bundle yet it reports
-load-readiness **pending** and exits 0. Knobs: `OSMAJORS`, `ENTITLEMENTS="entitled"`.
+entitled repos, so the `entitled` sweep needs a **subscribed** host; `anonymous`
+records `needs-entitlement`. r68: the sweep runs exactly ONE entitlement mode,
+derived from the host's measured repo access (`rhsm` -> `entitled`, everything
+else -> `anonymous`); `ENTITLEMENTS` is an explicit override. The entitled build
+is a **DKMS one-shot** (production method; a dkms build failure is terminal, no
+make retry; a dkms-less image fails the per-major preflight as a provisioning
+error). See SPEC.md B.10 "Matrix cardinality rule". `verify` reads the ledger +
+`./build-bundle` (the ko + `Module.symvers` + vermagic the build side preserved);
+with no bundle yet it reports load-readiness **pending** and exits 0. Knobs:
+`OSMAJORS`, `ENTITLEMENTS` (override).
 
 ### AWS CLI v2 (install)
 
@@ -524,7 +551,7 @@ banner so each run records the environment it ran under.
 
 ---
 
-## Recorded baseline (r67)
+## Recorded baseline (r68)
 
 The full suite is green in the planning sandbox:
 
@@ -542,7 +569,7 @@ The full suite is green in the planning sandbox:
 ---- t007_epelresolve.sh ----      ## RESULT pass=34 fail=0 skip=0
 ---- t008_awscliverdict.sh ----    ## RESULT pass=45 fail=0 skip=0
 ---- t009_ssmverdict.sh ----       ## RESULT pass=31 fail=0 skip=0
----- t010_enaverdict.sh ----       ## RESULT pass=48 fail=0 skip=0
+---- t010_enaverdict.sh ----       ## RESULT pass=54 fail=0 skip=0
 ---- t011_enaverify.sh ----        ## RESULT pass=17 fail=0 skip=0
 ---- t012_osprofile.sh ----        ## RESULT pass=58 fail=0 skip=0
 ---- t013_toolcontract.sh ----     ## RESULT pass=18 fail=0 skip=0
@@ -557,7 +584,7 @@ The full suite is green in the planning sandbox:
 ---- t022_ssmunavailable.sh ----   ## RESULT pass=17 fail=0 skip=0
 ---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
-SUITE: 621 passed, 0 skipped, 0 failed  (24 tiers, 0 tier-failure(s))
+SUITE: 627 passed, 0 skipped, 0 failed  (24 tiers, 0 tier-failure(s))
 ```
 
 **L0 fixed count = 49 shell files** (every `.sh` in the project, incl. the 3 root

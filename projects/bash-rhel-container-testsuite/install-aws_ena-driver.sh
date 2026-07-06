@@ -48,7 +48,12 @@
 # Env:  ENA_VERSION     (default: per-major pin below)
 #       ENA_INSTALLTEST (0|1; default 0)
 #       ENA_ENTITLEMENT (entitled|anonymous; default entitled)
-#       ENA_BUILD_PLAN  (make|dkms; default dkms since r65 - OL parity)
+#       ENA_BUILD_PLAN  (make|dkms; default dkms since r65 - OL parity.
+#                        r68: under INSTALLTEST the dkms plan is ONE-SHOT -
+#                        a dkms build failure is terminal (no make retry) and
+#                        a missing dkms binary is a harness error (no result
+#                        row). In production mode, plain make remains the
+#                        OL-parity fallback when dkms is NOT INSTALLABLE.)
 #       ENA_SRC_BASEURL (default https://github.com/amzn/amzn-drivers)
 #       INSECURE_TLS    (0|1; default 0)
 #
@@ -247,6 +252,15 @@ build_ko() {
   local src
   KVER="$(kdevel_kver)"
   [ -n "${KVER}" ] && [ -d "/usr/src/kernels/${KVER}" ] || return 2   # no kernel-devel
+  # r68: INSTALLTEST measures the PRODUCTION method only (DKMS one-shot).
+  # A missing dkms binary under the dkms plan is a provisioning failure of
+  # the test image (r65 bakes EPEL + dkms into every image), not a version
+  # verdict -> rc 4: the caller reports a harness error and emits NO
+  # [result] row, so environment failures never pollute version statistics.
+  if [ "${ENA_INSTALLTEST}" = "1" ] && [ "${ENA_BUILD_PLAN}" = "dkms" ] \
+     && ! command -v dkms >/dev/null 2>&1; then
+    return 4
+  fi
   BUILT_DEST="$(mktemp -d)"
   src="$(fetch_src "${BUILT_DEST}")" || return 3   # r49: fetch/extract/locate, NOT make
   [ -n "${src}" ] || return 3
@@ -287,10 +301,20 @@ DKMSEOF
       fi
       log "WARNING: dkms returned 0 but no ena.ko in /lib/modules/${KVER}/updates"
     fi
-    log "DKMS build failed; falling back to plain-make"
-    ENA_BUILD_PLAN="${ENA_BUILD_PLAN}_fallback_make"
+    # r68: a dkms BUILD failure is terminal - NO plain-make retry (OL parity:
+    # install-ena-driver.sh dies on dkms failure; its make path is only the
+    # dkms-NOT-INSTALLABLE environment fallback, never a second build
+    # attempt). Re-compiling via make would double the work per failing cell
+    # and could report "ok" for a version the production method cannot build.
+    return 1
   fi
-  # Plain-make fallback (or ENA_BUILD_PLAN=make)
+  # dkms unavailable (or explicit ENA_BUILD_PLAN=make override): OL-parity
+  # PRODUCTION fallback - the driver still installs, but will NOT auto-rebuild
+  # across kernel upgrades. INSTALLTEST never reaches here under the dkms plan
+  # (rc-4 guard above); in production mode this mirrors install-ena-driver.sh.
+  if [ "${ENA_BUILD_PLAN}" = "dkms" ]; then
+    log "WARNING: dkms not available; falling back to a plain make build (no auto-rebuild on kernel upgrade)"
+  fi
   if make -C "${src}" "KERNEL_BUILD_DIR=/usr/src/kernels/${KVER}" "BUILD_KERNEL=${KVER}" >"${MAKE_LOG}" 2>&1 \
      && [ -f "${src}/ena.ko" ]; then
     ENA_BUILD_PLAN_USED="make"
@@ -363,6 +387,17 @@ esac
 bko_rc=0; build_ko || bko_rc=$?
 if [ "${bko_rc}" = "3" ]; then
   die "source fetch/extract failed (github reachable? tar/gzip present? tag ena_linux_${ENA_VERSION} published?)"
+fi
+if [ "${bko_rc}" = "4" ]; then
+  # r68: dkms missing from the test image = PROVISIONING failure, not a
+  # version verdict. Deliberately emit NO [result] row (RESULT_EMITTED=1
+  # suppresses die()'s emission too): the matrix runner records a no-result
+  # exit as a harness-error row, keeping environment failures out of the
+  # per-version statistics. The runner's per-major dkms preflight normally
+  # catches this before any cell runs; this is the in-container defense.
+  RESULT_EMITTED=1
+  log "ERROR: dkms is not available in this test image (r65 provisioning bakes EPEL + dkms in) - provisioning failure, not a version verdict; exiting without a [result] row"
+  exit 1
 fi
 if [ "${bko_rc}" = "0" ]; then
   KO_VERSION="$(ko_module_version "${BUILT_SRC}/ena.ko")"

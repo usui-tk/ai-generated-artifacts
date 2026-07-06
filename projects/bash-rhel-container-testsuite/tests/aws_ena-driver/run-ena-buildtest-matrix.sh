@@ -28,11 +28,15 @@
 # independent of the running host kernel. All Oracle UEK handling is removed
 # (stock RHEL kernel: `rpm -q kernel`). env_init_mode = none (build is init-agnostic).
 #
-# E2' behaviour:
-#   entitled  -> build ena.ko (DKMS-first since r66 - images ship EPEL+dkms
-#                per r65 provisioning; plain-make fallback) -> ok | build-fail
-#   anonymous -> skip (no kernel-devel)                  -> needs-entitlement
-#   any       -> load / runtime                          -> L4 (impossible in a container)
+# E2' behaviour (r68: ONE entitlement mode per run, matched to the host's
+# measured repo access - rhsm -> entitled, everything else -> anonymous;
+# ENTITLEMENTS is an explicit override. 1 version = 1 container = 1 compile):
+#   entitled  -> build ena.ko (DKMS ONE-SHOT: the production method; a dkms
+#                build failure is terminal, no make retry) -> ok | build-fail
+#                dkms missing from the image -> per-major PREFLIGHT abort
+#                (provisioning failure; never a version verdict)
+#   anonymous -> skip (no kernel-devel)      -> needs-entitlement
+#   any       -> load / runtime              -> L4 (impossible in a container)
 #
 # ENA EXPRESS READINESS (driver-version floor only). Each ledger row and the
 # RESULTS-rhel<N>.md report additionally carry ena_express, the AWS-documented
@@ -45,12 +49,17 @@
 # necessary, not sufficient for a given kernel to actually compile against it
 # (see the OL sibling project's UEKR8 findings in its SPEC.md).
 #
-# Surfaces: NO-ARG (DEFAULT) runs the build matrix (all majors x entitlement),
+# Surfaces: NO-ARG (DEFAULT) runs the build matrix (all majors, one
+# environment-matched entitlement mode),
 # persists the ledger, then regenerates RESULTS-rhel<N>.md (mirrors the OL model's
 # one-script workflow). Module load-readiness is a SEPARATE verify pass.
 #   --run              : run the build matrix + persist the ledger only (podman/L3)
 #   --generate-results : (re)generate the reports only, hermetic (no containers)
-# Knobs: OSMAJORS, ENTITLEMENTS, INSECURE_TLS. Then: ./verify-ena-buildresults.sh
+# Knobs: OSMAJORS, ENTITLEMENTS (override; default = environment-matched),
+# INSECURE_TLS. Then: ./verify-ena-buildresults.sh
+# SPEC.md "Matrix cardinality rule": multiplying the cell count (new axis,
+# per-cell retries, version repetition) requires a prior user decision with
+# the cardinality formula (versions x axes = cells) and a runtime estimate.
 #
 # The column-0 pure helpers carry the unit coverage in tests/t010_enaverdict.sh.
 #==============================================================================
@@ -106,6 +115,23 @@ ena_build_plan() {
     anonymous) printf 'skip' ;;
     entitled)  [ "${epel}" = "1" ] && printf 'dkms' || printf 'make' ;;
     *)         printf 'unknown' ;;
+  esac
+}
+
+# ena_default_entitlements <repo_mode> : the entitlement mode the sweep runs
+# by DEFAULT, derived from the host's measured repo access (acq_repo_access).
+# r68 (user decision 2026-07-06): the sweep runs exactly ONE entitlement mode
+# matching the environment - the entitled/anonymous cross-product is gone
+# (anonymous rows were version-independent constants; the anonymous harness
+# behaviour is covered by the sandbox FT layer, see TESTING.md). ENTITLEMENTS
+# stays available as an explicit override for special runs.
+#   rhsm    -> entitled   (RHSM auto-injection provides entitled repos)
+#   rhui:*  -> anonymous  (the entitled RHUI container path is still pending)
+#   oci-ol / none / anything else -> anonymous
+ena_default_entitlements() {
+  case "${1:-}" in
+    rhsm)   printf 'entitled' ;;
+    *)      printf 'anonymous' ;;
   esac
 }
 
@@ -485,7 +511,13 @@ run_matrix() {
   record_host_meta "${LEDGER}"
   acq_preflight "${INSTALL_SCRIPT}" || { log "aborting --run (preflight failed; no rows written)"; return 2; }
   local LOG_DIR="${SCRIPT_DIR}/logs"
-  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-entitled anonymous}" major ent ver repo plan ref rows_tmp prep_map prepared
+  # r68: ONE entitlement mode per run, matched to the measured host repo
+  # access (rhsm -> entitled; everything else -> anonymous). ENTITLEMENTS
+  # remains an explicit override. SPEC.md "Matrix cardinality rule": any
+  # change that multiplies the cell count (a new axis, per-cell retries,
+  # version repetition) requires a design proposal with the cardinality
+  # formula and a runtime estimate, decided by the user BEFORE implementation.
+  local majors="${OSMAJORS:-10 9 8 7 6}" ents="${ENTITLEMENTS:-$(ena_default_entitlements "${repo_mode}")}" major ent ver repo plan ref rows_tmp prep_map prepared
   local versions idx total g_ok=0 g_fail=0 g_skip=0 g_builds=0 ol_ok ol_fail ol_skip
   rows_tmp="$(mktemp)"
   # r58: sweep ALL in-scope versions (not just latest) - OL parity.
@@ -510,6 +542,27 @@ run_matrix() {
     rm -f "${prep_map}" "${rows_tmp}"; return 2
   }
   prepared="$(cut -d' ' -f1 "${prep_map}" | tr '\n' ' ')"
+  # r68 dkms PREFLIGHT (entitled sweeps only): the dkms plan is the production
+  # method and r65 bakes EPEL + dkms into every test image. A major whose image
+  # lacks dkms is a PROVISIONING failure - fail fast BEFORE any cell runs so we
+  # never mass-produce 29 harness-error rows (and never let an environment
+  # failure look like version data). The failing major is dropped from the
+  # sweep and the run exits non-zero at the end.
+  local pf_failed=""
+  case " ${ents} " in *" entitled "*)
+    local pf_ok=""
+    for major in ${prepared}; do
+      ref="$(grep -m1 "^${major} " "${prep_map}" | cut -d' ' -f2-)"
+      if podman run --rm "${ref}" /bin/bash -c 'command -v dkms' >/dev/null 2>&1; then
+        pf_ok="${pf_ok}${major} "
+      else
+        pf_failed="${pf_failed}${major} "
+        log "RHEL${major}: PROVISIONING ERROR - dkms missing from test image ${ref}; sweep for this major ABORTED (no rows written; fix lib/provision-test-env.sh / EPEL reachability)"
+      fi
+    done
+    prepared="${pf_ok}"
+    [ -n "${prepared}" ] || { log "aborting --run: dkms preflight failed for every prepared major"; rm -f "${prep_map}" "${rows_tmp}"; return 2; }
+  ;; esac
   total=0; for _v in ${versions}; do total=$(( total + 1 )); done
   log "sweep: prepared majors=[${prepared}] versions=${total} entitlements=[${ents}] full=${FULL} force=${FORCE}"
   for major in ${prepared}; do
@@ -551,6 +604,13 @@ sys.exit(0 if any((str(e.get('osmajor')),e.get('ena_version'),e.get('entitlement
   log "ENA matrix complete -- ${g_ok} ok, ${g_fail} fail, ${g_skip} skipped across ${g_builds} build(s)"
   persist_ledger "${rows_tmp}"
   rm -f "${rows_tmp}"
+  # r68: a preflight-dropped major means the run is INCOMPLETE - collected
+  # rows are persisted (they are valid), but the run itself must not look
+  # green. Non-zero so CI / the operator cannot miss it.
+  if [ -n "${pf_failed}" ]; then
+    log "ENA matrix INCOMPLETE -- dkms preflight dropped major(s): ${pf_failed}(provisioning must be fixed and the run repeated)"
+    return 2
+  fi
 }
 
 # ena_kick <major> <ver> <ent> <repo> <plan> <ref> <log_dir> <rows_file> : build-test
