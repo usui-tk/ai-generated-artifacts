@@ -198,7 +198,7 @@
     .\Update-WindowsServerIso.ps1 `
         -Action PrepareBuildVerify `
         -OsVersion Server2016 -OsLanguage ja-jp `
-        -UseBaselineOnly -EnablePca2023BootManager `
+        -UseBaselineOnly `
         -WorkRoot 'D:\UpdateWsi'
     Server 2016 ja-jp build, dry-run mode (no -Execute). On hosts
     that do not yet have Windows ADK Deployment Tools installed, P01 will
@@ -280,17 +280,21 @@ param(
     # When set, enables P10 ConvertPca2023BootManager which rewrites the
     # output ISO's boot manager to the 'Windows UEFI CA 2023'-signed form
     # (Microsoft KB5053484 / Make2023BootableMedia.ps1 equivalent). Default
-    # OFF: the default pipeline produces a PCA2011-signed boot manager,
-    # which still boots on Secure Boot firmware that trusts the 2011 CA
-    # set (i.e. virtually all hardware shipped before 2026-06 cert expiry).
-    [switch]   $EnablePca2023BootManager,
+    # P10 ConvertPca2023BootManager runs BY DEFAULT (readiness-driven:
+    # it converts only when the pre-flight snapshot says the media is
+    # ready and not already signed; Critical/Healthy states skip). The
+    # PCA2011 signing CA expired 2026-06, so a PCA2011-only boot manager
+    # is the exception now, not the norm. Set this switch to keep the
+    # shipped (PCA2011-signed) boot manager and skip P10 entirely.
+    [switch]   $SkipPca2023BootManager,
 
     # When set, P10 ConvertPca2023BootManager still runs against Server
     # 2025 output ISOs (default-skipped because Server 2025 certified
     # server platforms already include the 2023 certs in firmware per
     # Microsoft; the boot-manager conversion is documented as not
-    # required). Takes effect only with -EnablePca2023BootManager (P10
-    # is opt-in); both are needed to convert on Server 2025. Advanced use.
+    # required). P10 now runs by default, but the Server 2025 gate is
+    # kept: conversion on 2025 requires this switch (and no
+    # -SkipPca2023BootManager). Advanced use.
     [switch]   $ForcePca2023OnServer2025,
 
     # When set, the script enters a special mode that takes an existing
@@ -315,7 +319,7 @@ param(
 # the auto-bound parameter scope, which psa.py's PSA2001 cannot
 # reason about reliably). Mirrors how P09 AssembleIso etc. reach
 # operator-supplied options.
-$Script:EnablePca2023BootManager  = [bool]$EnablePca2023BootManager
+$Script:SkipPca2023BootManager    = [bool]$SkipPca2023BootManager
 $Script:ForcePca2023OnServer2025  = [bool]$ForcePca2023OnServer2025
 $Script:Pca2023OnlyMode           = [bool]$Pca2023OnlyMode
 $Script:Pca2023ScriptPath         = $Pca2023ScriptPath
@@ -522,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.06-r11.54'
-$Script:ScriptTag     = 'bootwim-policy'
+$Script:ScriptVersion = 'update-wsi-2026.07.06-r11.55'
+$Script:ScriptTag     = 'pca2023-default-auto'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -9092,7 +9096,7 @@ function Get-Pca2023ReadinessSnapshot {
 
     # Add Server2025-specific advisory
     if ($OsKey -eq 'Server2025') {
-        $reasons.Add('NOTE: Server 2025 certified server platforms include the 2023 certificates in firmware. P10 is skipped by default for this OS unless -EnablePca2023BootManager -ForcePca2023OnServer2025 are BOTH set.') | Out-Null
+        $reasons.Add('NOTE: Server 2025 certified server platforms include the 2023 certificates in firmware. P10 (default-on elsewhere) still skips this OS unless -ForcePca2023OnServer2025 is set.') | Out-Null
     }
 
     [pscustomobject]@{
@@ -10848,11 +10852,13 @@ function Invoke-BuildPhase09_AssembleIso {
 # ============================================================
 # Phase P10: Convert boot manager to PCA2023-signed (Build group, OPTIONAL)
 # ============================================================
-# This phase is OPT-IN. It runs only when -EnablePca2023BootManager
-# is specified, AND (for Server 2025 specifically) when
-# -ForcePca2023OnServer2025 is also specified. Default behaviour
-# leaves the ISO with PCA2011-signed boot manager, which still
-# boots on every Secure Boot firmware shipped before 2026-06.
+# This phase runs BY DEFAULT (readiness-driven; opt-OUT via
+# -SkipPca2023BootManager). The PCA2011 signing CA expired 2026-06,
+# so leaving the shipped PCA2011-signed boot manager is now the
+# exception (older firmware without the 2023 certs), not the norm.
+# Server 2025 specifically still requires -ForcePca2023OnServer2025
+# (certified 2025 platforms carry the 2023 certs in firmware; the
+# conversion is documented as not required there).
 #
 # Group classification note: P10 lives inside the Build group as
 # a Build-group OPTIONAL phase (the only Build-group phase that
@@ -10880,7 +10886,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         conversion so P11/P12/P13 see the updated state.
 
         Skip conditions (all silent skip, recorded in result):
-          - -EnablePca2023BootManager not set
+          - -SkipPca2023BootManager set (operator opt-out)
           - OsKey == 'Server2025' AND -ForcePca2023OnServer2025 not set
           - Pre-flight readiness Health == 'Critical' (LCU prereq
             not met; we would only produce a corrupted ISO -- this
@@ -10892,10 +10898,10 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
     Start-DebugTrace -Context 'Invoke-BuildPhase10_ConvertPca2023BootManager' -PhaseId 'P10'
     try {
         Write-SubSection 'Step 1: Pre-flight gates'
-        Set-DebugStep -Step 'gate-EnablePca2023BootManager'
+        Set-DebugStep -Step 'gate-SkipPca2023BootManager'
 
-        if (-not $Script:EnablePca2023BootManager) {
-            Write-Step 'Skipped: -EnablePca2023BootManager not specified (default OFF).'
+        if ($Script:SkipPca2023BootManager) {
+            Write-Step 'Skipped: -SkipPca2023BootManager specified (operator opt-out; boot manager left as shipped).'
             New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
             return
         }
@@ -11288,7 +11294,7 @@ function Invoke-VerifyPhase11_StaticVerify {
 # Phase P12: Verify PCA2023 readiness (Verify group, ALWAYS-RUNS)
 # ============================================================
 # This phase ALWAYS runs as part of the Verify group, regardless of
-# whether -EnablePca2023BootManager was specified for P10. The
+# whether P10 ran or was skipped (-SkipPca2023BootManager). The
 # rationale: even when the operator is not converting to PCA2023
 # right now, they still want to know whether the resulting ISO
 # would boot on PCA2023-only firmware (post 2026-06).
@@ -12614,10 +12620,10 @@ function Get-PhaseListByAction {
     # Phases used by the standard build pipeline. When SyntheticTestMode
     # is set, the P05 / P06 pair is removed - synthetic ISOs cannot
     # round-trip through Mount-DiskImage.
-    # P10 is listed but is default-skip inside the phase function unless
-    # -EnablePca2023BootManager is specified; including it in the
-    # standard pipeline ensures the pipeline-level wiring is consistent
-    # and the operator's explicit opt-in actually reaches the phase.
+    # P10 runs by default (readiness-driven) and self-skips on
+    # -SkipPca2023BootManager or the Server 2025 gate; keeping it in
+    # the standard pipeline keeps the pipeline-level wiring consistent
+    # with the phase-level gates.
     $standardFull = if ($Script:SyntheticTestMode) {
         [string[]]@('P01','P02','P03','P04','P07','P08','P09','P10','P11','P12','P13')
     } else {

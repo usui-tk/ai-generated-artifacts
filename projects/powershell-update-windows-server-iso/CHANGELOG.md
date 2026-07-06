@@ -22,6 +22,37 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.06-r11.55] - 2026-07-06
+
+Tag: `pca2023-default-auto`. Fourth change of the 2026-07-05 E2E batch
+(policy axis) [DECIDED 2026-07-06]: every E2E run left P10 skipped
+(default OFF) and every P12 readiness verdict was Warning --
+PCA2011-signed boot managers on media built AFTER the 2026-06 PCA2011
+signing-CA expiry. The opt-in default made the wrong outcome the easy
+one. P10 is already readiness-driven (pre-flight snapshot: Critical =>
+skip with warning, Healthy => nothing to do), so running it by default
+is safe by construction.
+
+### Changed
+
+- **P10 ConvertPca2023BootManager now runs BY DEFAULT** (readiness-
+  driven). The opt-in `-EnablePca2023BootManager` is retired
+  (destructive rename, no shim); the new opt-out
+  `-SkipPca2023BootManager` keeps the shipped PCA2011-signed boot
+  manager for operators targeting older firmware without the 2023
+  certs.
+- **The Server 2025 gate is KEPT**: conversion on 2025 still requires
+  `-ForcePca2023OnServer2025` (certified 2025 platforms carry the
+  2023 certificates in firmware; Microsoft documents the conversion
+  as not required there). P12's 2025 advisory text updated to match.
+
+### Added
+
+- **T35 `pca2023_default_auto_test.py`** (7 assertions): retired-token
+  absence, parameter surface, P10 opt-out + 2025 force gates, default
+  falsy opt-out (P10 default-on).
+
+
 ## [update-wsi-2026.07.06-r11.54] - 2026-07-06
 
 Tag: `bootwim-policy`. Third fix of the 2026-07-05 E2E batch (Server
