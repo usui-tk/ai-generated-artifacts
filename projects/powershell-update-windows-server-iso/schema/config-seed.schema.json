@@ -140,6 +140,48 @@
         "ChecksumAlgorithm": {
           "type": "string",
           "description": "Checksum algorithm for Lines[].Digest. SHA1 (the Catalog Digest is SHA-1 base64 -- the verified cross-source key)."
+        },
+        "BridgeLcu": {
+          "type": "object",
+          "description": "OPTIONAL static per-OS bridge LCU (SEED; servicing-policy). Present only when the OS's committed source media ships a servicing stack OLDER than the floor the current combined LCU requires (axis 3: image-side servicing-stack floor). Basis (MS primary, per-KB pages, e.g. KB5094128 for Server 2022): 'Make sure that your image includes KB5030216 (09/12/2023) or a later LCU. If not, install it on your offline media before you install the latest update.' -- the floor that prevents 0x800f0823 (CBS_E_NEW_SERVICING_STACK_REQUIRED). P02 materialises this envelope as a ResolvedPatches entry (PatchType 'BridgeLcu', Install-only) and P07 applies it FIRST (sub-phase I0) on every targeted index, unconditionally when present [DECIDED 2026-07-06, A1]. It is NOT a Lines[] member (Lines are DERIVED; the bridge is static policy) and lands in the flat patches folder, never in the cu discovery subfolder.",
+          "required": [
+            "KbId",
+            "FileName",
+            "DownloadUrl",
+            "Digest",
+            "MinimumImageServicingStack",
+            "EvidenceUrl"
+          ],
+          "properties": {
+            "KbId": {
+              "type": "string"
+            },
+            "FileName": {
+              "type": "string"
+            },
+            "DownloadUrl": {
+              "type": "string"
+            },
+            "Digest": {
+              "type": "string",
+              "description": "Catalog SHA-1 base64 of the bridge .msu (same key convention as Lines[].Digest)."
+            },
+            "Sha256": {
+              "type": "string"
+            },
+            "MinimumImageServicingStack": {
+              "type": "string",
+              "description": "The documented minimum image servicing-stack version the bridge satisfies (e.g. '20348.1960')."
+            },
+            "EvidenceUrl": {
+              "type": "string",
+              "description": "MS primary source documenting the floor + bridge requirement."
+            },
+            "Note": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

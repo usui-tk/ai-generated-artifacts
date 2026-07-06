@@ -156,9 +156,10 @@ def main() -> int:
         d = json.loads(seed.read_text(encoding="utf-8"))
         pbs = d.get("PatchBaseline", {})
         passed, failed = check(
-            f"{seed.name} PatchBaseline is Schema+ChecksumAlgorithm only",
-            sorted(pbs.keys()) == ["ChecksumAlgorithm", "Schema"],
-            f"keys={sorted(pbs.keys())}", passed, failed)
+            f"{seed.name} PatchBaseline envelope carries only reader-backed members",
+            sorted(set(pbs.keys()) - {"BridgeLcu"}) == ["ChecksumAlgorithm", "Schema"],
+            f"keys={sorted(pbs.keys())} (BridgeLcu optional since r11.53; "
+            f"reader: ConvertTo-BridgeLcuResolvedPatch)", passed, failed)
 
     # 3. schema contract
     seed_schema = json.loads(
@@ -167,7 +168,7 @@ def main() -> int:
     pbs_def = seed_schema["definitions"]["PatchBaselineSeed"]
     passed, failed = check(
         "seed schema PatchBaselineSeed reduced + closed",
-        sorted(pbs_def["properties"].keys()) == ["ChecksumAlgorithm", "Schema"]
+        sorted(pbs_def["properties"].keys()) == ["BridgeLcu", "ChecksumAlgorithm", "Schema"]
         and pbs_def.get("additionalProperties") is False,
         f"props={sorted(pbs_def['properties'].keys())} "
         f"addProps={pbs_def.get('additionalProperties')}", passed, failed)

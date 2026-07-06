@@ -29,6 +29,15 @@
     "Schema": "3.0",
     "TargetBuildAfterUpdate": "20348.5256",
     "ChecksumAlgorithm": "SHA1",
+    "BridgeLcu": {
+      "KbId": "KB5030216",
+      "FileName": "windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
+      "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2023/09/windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
+      "Digest": "y+WHFV+YGFSLdfZdXNQdNB7S/GE=",
+      "MinimumImageServicingStack": "20348.1960",
+      "EvidenceUrl": "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
+      "Note": "2023-09 LCU (20348.1970); raises the image servicing stack to 20348.1960, the documented minimum for current combined LCUs (prevents 0x800f0823 on the 20348.587-era EVAL media; observed 2026-07-06 00:19 JST E2E, P07). Applied FIRST (I0) on every install.wim index, unconditionally when present [A1]. Catalog UpdateId (21H2 row): ea350b1b-b22f-4657-aae6-a75cb7ece1eb; the 22H2 row serves the identical file."
+    },
     "Lines": [
       {
         "Kind": "LCU",

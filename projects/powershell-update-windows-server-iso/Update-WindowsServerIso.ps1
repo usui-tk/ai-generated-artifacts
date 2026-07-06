@@ -522,8 +522,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.06-r11.52'
-$Script:ScriptTag     = 'checkpoint-model'
+$Script:ScriptVersion = 'update-wsi-2026.07.06-r11.53'
+$Script:ScriptTag     = 'bridge-lcu'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -657,6 +657,13 @@ $Script:PatchTargetMap = @{
     # specified in PackagePath to discover and install one or more
     # prerequisite MSU files as needed').
     'Checkpoint'      = @()
+    # Static per-OS bridge LCU (PatchBaseline.BridgeLcu envelope, SEED):
+    # raises an out-of-floor image servicing stack BEFORE the current
+    # combined LCU (axis 3; prevents 0x800f0823). Install-only: feeding
+    # an extra LCU-class package to boot.wim would re-enter the
+    # WinPE-servicing constraints for zero gain, and WinRE is serviced
+    # by SSU + SafeOS DU, never an LCU.
+    'BridgeLcu'       = @('Install')
     'DotNet'          = @('Install')
     'SafeOSDU'        = @('WinRE')
     'SetupDU'         = @('Setup')
@@ -7359,6 +7366,54 @@ function _CanonicalJson_ParseNull {
 # This module establishes the structural contract; a later release
 # fills in the WinRE worker and the LP-injection sequencing.
 
+function ConvertTo-BridgeLcuResolvedPatch {
+    <#
+    .SYNOPSIS
+        Materialise the PatchBaseline.BridgeLcu SEED envelope as one
+        ResolvedPatches entry (PatchType 'BridgeLcu', ApplyOrder 0).
+    .DESCRIPTION
+        The bridge LCU exists for one documented reason (axis 3,
+        image-side servicing-stack floor; MS per-KB pages, e.g.
+        KB5094128 for Server 2022): a source medium whose in-image
+        servicing stack is OLDER than the floor the current combined
+        LCU requires cannot even open that LCU's CBS payload
+        (0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED -- observed
+        on the 20348.587-era Server 2022 EVAL media, 2026-07-06 E2E).
+        Microsoft's remedy is to install a bridge LCU (KB5030216 or
+        later for 2022) on the offline media FIRST. Applied
+        unconditionally when the envelope is present [DECIDED
+        2026-07-06, A1]: DISM supersedence makes a re-apply on an
+        already-current image a cheap no-op relative to the failure
+        mode it prevents. Both ResolvedPatches writers (P02 baseline
+        seeding + the post-refresh re-derivation) call this helper.
+        LocalPath goes through Get-PatchLocalPath with the 'BridgeLcu'
+        Kind, i.e. the FLAT per-OS folder -- deliberately OUTSIDE the
+        cu discovery subfolder (only the target CU + checkpoints may
+        live there).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [object]$BridgeLcu
+    )
+    $expectedHashes = @{}
+    if ($BridgeLcu.PSObject.Properties['Digest'] -and $BridgeLcu.Digest) {
+        $expectedHashes['sha-1'] = [string]$BridgeLcu.Digest  # psa-disable-line PSA5003 -- MS Catalog SHA-1
+    }
+    if ($BridgeLcu.PSObject.Properties['Sha256'] -and $BridgeLcu.Sha256) {
+        $expectedHashes['sha-256'] = [string]$BridgeLcu.Sha256
+    }
+    return [pscustomobject]@{
+        Kind           = 'Patch'
+        Source         = [string]$BridgeLcu.DownloadUrl
+        LocalPath      = Get-PatchLocalPath -Kind 'BridgeLcu' -FileName ([string]$BridgeLcu.FileName)
+        KbId           = [string]$BridgeLcu.KbId
+        PatchType      = 'BridgeLcu'
+        ApplyOrder     = 0
+        ExpectedHashes = $expectedHashes
+    }
+}
+
 function Get-PatchLocalPath {
     <#
     .SYNOPSIS
@@ -7550,7 +7605,8 @@ function Build-InstallApplySequence {
     <#
     .SYNOPSIS
         Convert the install.wim patch slice into Microsoft's official
-        media-dynamic-update servicing sequence (7 sub-phases).
+        media-dynamic-update servicing sequence, prefixed by the
+        optional I0 bridge-LCU sub-phase (axis-3 servicing-stack floor).
     .DESCRIPTION
         Per Microsoft's media-dynamic-update doc, install.wim is
         serviced in this order (mount once, traverse, dismount):
@@ -7589,6 +7645,7 @@ function Build-InstallApplySequence {
         if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
         $byType[$t].Add($p) | Out-Null
     }
+    $bridge     = @(if ($byType.ContainsKey('BridgeLcu')) { $byType['BridgeLcu'] } else { @() })
     $ssu        = @(if ($byType.ContainsKey('SSU')) { $byType['SSU'] } else { @() })
     $lp         = @()
     if ($byType.ContainsKey('LanguagePack')) { $lp += $byType['LanguagePack'] }
@@ -7604,6 +7661,16 @@ function Build-InstallApplySequence {
     $hasLp = ($lp.Count -gt 0)
 
     $sequence = New-Object System.Collections.Generic.List[object]
+    # I0: static bridge LCU (axis-3 image-side servicing-stack floor;
+    # MS per-KB guidance, e.g. KB5094128: install KB5030216-or-later on
+    # the offline media BEFORE the latest update). Unconditionally first
+    # when present [A1]; supersedence no-ops it on already-current images.
+    $sequence.Add([pscustomobject]@{
+        Name             = 'I0.BridgeLcu'
+        Description      = 'Bridge LCU (image servicing-stack floor; applied before everything)'
+        Patches          = $bridge
+        RequiresRemount  = $false
+    }) | Out-Null
     $sequence.Add([pscustomobject]@{
         Name             = 'I1.SSU'
         Description      = 'Servicing Stack Update (must come first)'
@@ -9632,6 +9699,14 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
             } else {
                 Write-Step 'PatchBaseline.Lines is empty; P03 will populate from Microsoft Update Catalog.'
             }
+            # Static bridge LCU (SEED envelope; independent of Lines).
+            # See ConvertTo-BridgeLcuResolvedPatch for the axis-3 basis.
+            if ($bl.PSObject.Properties['BridgeLcu'] -and $bl.BridgeLcu) {
+                $bridgeEntry = ConvertTo-BridgeLcuResolvedPatch -BridgeLcu $bl.BridgeLcu
+                $resolved.Add($bridgeEntry) | Out-Null
+                Write-Step ('Bridge LCU staged: {0} (floor {1}; applied first, I0).' -f `
+                    $bridgeEntry.KbId, [string]$bl.BridgeLcu.MinimumImageServicingStack)
+            }
         } elseif ($Script:SyntheticTestMode) {
             Write-Step '-SyntheticTestMode is on; no real patches required.'
         } else {
@@ -9907,6 +9982,13 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                     ApplyOrder      = $p.ApplyOrder
                     ExpectedHashes  = $expectedHashes
                 }) | Out-Null
+            }
+            # Static bridge LCU (SEED envelope): re-derivation must carry
+            # it exactly like the P02 baseline-seeding path, or a P03
+            # refresh would silently drop the axis-3 floor bridge.
+            $blRefreshed = $Script:OsProfile.PatchBaseline
+            if ($blRefreshed -and $blRefreshed.PSObject.Properties['BridgeLcu'] -and $blRefreshed.BridgeLcu) {
+                $derived.Add((ConvertTo-BridgeLcuResolvedPatch -BridgeLcu $blRefreshed.BridgeLcu)) | Out-Null
             }
             $Script:ResolvedPatches = $derived | Sort-Object ApplyOrder, KbId
             Write-Ok ('Derived {0} patch entries from refreshed baseline.' -f $Script:ResolvedPatches.Count)
@@ -11724,9 +11806,9 @@ function Build-ConfigSkeletonFromSeed {
     # TargetBuildAfterUpdate is DERIVED (the LCU Line's InScope.build,
     # filled wherever Lines are written) and is therefore initialized
     # empty here, never copied from seed. The seed PatchBaseline envelope
-    # deliberately carries ONLY Schema + ChecksumAlgorithm: reader-less
-    # seed fields rot silently (history: CHANGELOG, tag
-    # 'tbau-derived-lcu-verify').
+    # carries Schema + ChecksumAlgorithm + (optionally) BridgeLcu; every
+    # envelope member must have a live reader -- reader-less seed fields
+    # rot silently (history: CHANGELOG, tag 'tbau-derived-lcu-verify').
     $patchBaseline = [ordered]@{
         Schema                 = $Seed.PatchBaseline.Schema
         TargetBuildAfterUpdate = ''
@@ -11735,6 +11817,21 @@ function Build-ConfigSkeletonFromSeed {
         LastVerifiedBy         = ''
         PatchTuesdayOfBaseline = ''
         Lines                  = @()
+    }
+    # BridgeLcu is a SEED envelope member (static servicing policy,
+    # axis-3 floor bridge; reader: ConvertTo-BridgeLcuResolvedPatch
+    # via both P02 ResolvedPatches writers). Copied through verbatim,
+    # positioned after ChecksumAlgorithm to match the committed
+    # canonical key order; omitted entirely when the seed lacks it.
+    if ($Seed.PatchBaseline.PSObject.Properties['BridgeLcu'] -and $Seed.PatchBaseline.BridgeLcu) {
+        $withBridge = [ordered]@{}
+        foreach ($k in $patchBaseline.Keys) {
+            $withBridge[$k] = $patchBaseline[$k]
+            if ($k -eq 'ChecksumAlgorithm') {
+                $withBridge['BridgeLcu'] = $Seed.PatchBaseline.BridgeLcu
+            }
+        }
+        $patchBaseline = $withBridge
     }
 
     $languageSpecific = [ordered]@{}

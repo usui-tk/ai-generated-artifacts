@@ -22,6 +22,50 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.06-r11.53] - 2026-07-06
+
+Tag: `bridge-lcu`. Second fix of the 2026-07-05 E2E batch (Server 2022
+axis): P07 failed after 2m33s with `0x800f0823
+CBS_E_NEW_SERVICING_STACK_REQUIRED` -- the EVAL media's in-image
+servicing stack (20348.587, loaded from WinSxS for offline servicing)
+cannot even OPEN the current combined LCU's CBS payload. This is the
+long-identified axis 3 (image-side servicing-stack floor), previously
+only a reserved schema seat. Microsoft's documented remedy (per-KB
+pages, e.g. KB5094128): "Make sure that your image includes KB5030216
+(09/12/2023) or a later LCU. If not, install it on your offline media
+before you install the latest update" -- the floor is SSU 20348.1960.
+
+### Added
+
+- **SEED envelope `PatchBaseline.BridgeLcu`** (config + seed schema,
+  identical subschema; optional): static per-OS bridge LCU with
+  `MinimumImageServicingStack` + `EvidenceUrl` (the floor and its MS
+  primary source travel with the data). `data/seed/seed-Server2022.json`
+  and `data/config-Server2022.json` carry KB5030216 (Catalog-resolved
+  2026-07-06: file `windows10.0-kb5030216-x64_cbe5...fc61.msu`, Digest
+  = the FileName-embedded SHA-1 in base64). No other OS needs a bridge
+  today (2016/2019/2025 media floors verified satisfied by the same
+  E2E run).
+- **`ConvertTo-BridgeLcuResolvedPatch`**: single materialisation point
+  for the envelope (PatchType `BridgeLcu`, ApplyOrder 0, sha-1
+  ExpectedHashes, FLAT landing folder -- deliberately outside the `cu`
+  checkpoint-discovery subfolder). Both ResolvedPatches writers (P02
+  baseline seeding + post-refresh re-derivation) call it, so a P03
+  refresh cannot silently drop the bridge.
+- **Sub-phase `I0.BridgeLcu`**: `Build-InstallApplySequence` now emits
+  it FIRST; applied unconditionally when present [DECIDED 2026-07-06,
+  A1] -- DISM supersedence no-ops it on already-current images.
+  Routing is Install-only (`PatchTargetMap['BridgeLcu']`): boot.wim
+  would re-enter the WinPE LCU-servicing constraints, and WinRE is
+  serviced by SSU + SafeOS DU.
+- **`Build-ConfigSkeletonFromSeed`** copies the envelope through in
+  canonical key position (after `ChecksumAlgorithm`), so an A00
+  rebuild preserves it byte-aligned.
+- **T33 `bridge_lcu_contract_test.py`** (17 assertions): envelope
+  shape/identity/floor/evidence, Digest/FileName SHA-1 cross-encoding,
+  Install-only routing, I0-first ordering, scope pin.
+
+
 ## [update-wsi-2026.07.06-r11.52] - 2026-07-06
 
 Tag: `checkpoint-model`. First fix of the 2026-07-05 4-OS E2E failure
