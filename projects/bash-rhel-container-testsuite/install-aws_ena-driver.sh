@@ -293,13 +293,30 @@ DKMSEOF
        && dkms build -m amzn-drivers -v "${ENA_VERSION}" -k "${KVER}" >>"${MAKE_LOG}" 2>&1 \
        && dkms install -m amzn-drivers -v "${ENA_VERSION}" -k "${KVER}" --force >>"${MAKE_LOG}" 2>&1; then
       local dkms_ko
-      dkms_ko="$(find /lib/modules/"${KVER}" -name 'ena.ko' -path '*/updates/*' 2>/dev/null | head -1)"
+      # r69: dkms's install destination differs by dkms GENERATION - EL10's
+      # dkms 3.x honours dkms.conf's /updates, while the older dkms on
+      # EL6-9 installs to extra/ (2026-07-06 E2E evidence: RHEL 7/9 logged
+      # "Installing to /lib/modules/<kver>/extra/" and the updates/-only
+      # lookup missed it, false-failing 116 cells across four majors).
+      # Search both; the KO_VERSION guard downstream keeps the
+      # installed-version-is-authoritative principle (OL parity).
+      dkms_ko="$(find /lib/modules/"${KVER}" -name 'ena.ko' \( -path '*/updates/*' -o -path '*/extra/*' \) 2>/dev/null | head -1)"
       if [ -n "${dkms_ko}" ]; then
         cp -f "${dkms_ko}" "${src}/ena.ko"
         ENA_BUILD_PLAN_USED="dkms"
         return 0
       fi
-      log "WARNING: dkms returned 0 but no ena.ko in /lib/modules/${KVER}/updates"
+      log "WARNING: dkms returned 0 but no ena.ko under /lib/modules/${KVER}/{updates,extra}"
+    fi
+    # r69 (OL parity: _ena_first_make_error): on a dkms build failure the
+    # compiler output lives in the DKMS tree's make.log - dkms stdout only
+    # carries the generic "Error! Bad return status" line. Fold that
+    # make.log into the captured log so the r61 first-error extraction
+    # reports the real compiler error instead of the generic fallback.
+    local dkms_ml
+    dkms_ml="$(find "/var/lib/dkms/amzn-drivers/${ENA_VERSION}" -name 'make.log' 2>/dev/null | head -1)"
+    if [ -n "${dkms_ml}" ]; then
+      cat "${dkms_ml}" >>"${MAKE_LOG}" 2>/dev/null || true
     fi
     # r68: a dkms BUILD failure is terminal - NO plain-make retry (OL parity:
     # install-ena-driver.sh dies on dkms failure; its make path is only the

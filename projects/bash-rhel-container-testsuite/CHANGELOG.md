@@ -13,6 +13,44 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r69] - 2026-07-07 - fix: dkms install-destination generations + OL-parity error extraction
+
+Root-caused from the first r68-shape E2E sweep (2026-07-06, 145 cells):
+the r68 harness shape was correct (entitled-only, all-dkms, zero error
+rows), but RHEL 6/7/8/9 reported 0 ok - 116 false negatives.
+
+### Fixed
+- **dkms install-destination generation gap** (`install-aws_ena-driver.sh`):
+  EL10's dkms 3.x honours dkms.conf's `/updates`, but the older dkms on
+  EL6-9 installs to `extra/` (E2E logs: RHEL 7/9 printed
+  "Installing to /lib/modules/<kver>/extra/" - the build actually
+  SUCCEEDED). The updates/-only ko lookup missed it and false-failed
+  every buildable version on four majors. The lookup now searches both
+  `updates/` and `extra/`; the downstream KO_VERSION guard keeps the
+  installed-version-is-authoritative principle (OL parity). The r65-r67
+  make fallback had been masking this bug by covering the false negative
+  with a second successful compile - the r68 one-shot correctly exposed it.
+- **fail reasons degraded to the generic fallback** (OL parity gap): on a
+  dkms build failure the compiler output lives in the DKMS tree's
+  make.log; dkms stdout only carries "Error! Bad return status". The
+  captured-stdout grep therefore found nothing once the make retry (which
+  used to regenerate the same errors into the captured log) was removed.
+  Ported the OL `_ena_first_make_error` semantics: the DKMS tree make.log
+  is folded into the captured log before the failure returns, so the r61
+  extraction reports the real compiler error (the `' error:'` pattern
+  ignores dkms's own "Error!" banner line).
+
+### Notes
+- The 2026-07-06 ledger was NOT committed (user decision): 116 of its 145
+  cells are false negatives. The E2E will be re-run on r69 and the ledger
+  regenerated (keyed merge overwrites in place).
+- FT (podman, UBI 7/8/9/10): the reworked dkms stub now mirrors the real
+  generation difference (`FT_DKMS_DEST=updates|extra`) and the real
+  failure shape (compiler errors in the tree make.log, generic line on
+  stdout). Both bugs REPRODUCE against the r68 script with these stubs
+  (mutation-style validation) and pass on r69: 48/48 asserts across
+  12 scenarios x 4 majors. RHEL 6 has no UBI image - covered by host E2E.
+
 ## [r68] - 2026-07-06 - test spec rework: DKMS one-shot, environment-matched entitlement, cardinality rule
 
 User decisions (2026-07-06 design discussion) implemented:
