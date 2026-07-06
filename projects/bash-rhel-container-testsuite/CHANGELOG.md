@@ -13,6 +13,50 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r66] - 2026-07-06 - fix: ENA E2E harness - top-level 'local' crash + DKMS plan wiring
+
+### Fixed
+- **install-aws_ena-driver.sh**: two top-level `local` declarations
+  (`first_error`, introduced r61; `_dkms_used`, introduced r65 C3) are
+  invalid outside a function. Bash raised "local: can only be used in a
+  function", tripping the ERR trap on **every entitled cell** of the
+  2026-07-06 E2E sweep (145/145):
+  - build-**fail** cells crashed at the r61 error-extraction line, masking
+    the real compile error behind `unexpected error (line 365)`
+    (recorded as status `fail` with a useless reason);
+  - build-**ok** cells crashed after `RESULT_EMITTED=1`, so `die()`
+    emitted **no** `[result]` line and the runner recorded a
+    harness-error (status `error`) instead of `ok`.
+  Both are now plain top-level assignments. Cross-check: the sweep's
+  error/fail counts per major exactly match the r60 ok/fail counts
+  (6: 12/17, 7: 29/0, 8: 22/7, 9: 4/25, 10: 4/25), proving the build
+  outcomes were unchanged and only the reporting layer was broken.
+- **run-ena-buildtest-matrix.sh**: the sweep call site passed `epel=0`
+  to `ena_build_plan`, forcing `ENA_BUILD_PLAN=make` into every
+  container - the r65 DKMS-first default (C3) was **never exercised**
+  even though the r65 provisioning bakes EPEL + dkms into every test
+  image (ledger evidence: `build_plan=make`, `dkms=null` on all 145
+  entitled rows). The call site now passes `epel=1`.
+- **SC2086 (pre-existing, info)**: quoted `${ents}` in the ENA runner
+  sweep summary and `${versions}` in the SSM runner (behavior-identical:
+  `wc -w` output and `"$*"` re-join are unchanged). Surfaced once the
+  L0 ShellCheck tier actually ran (see Notes).
+- **Stale header comment** (`install-aws_ena-driver.sh`): `ENA_BUILD_PLAN`
+  documented as `default make`; the actual default is `dkms` since r65.
+
+### Notes (process)
+- The L0 ShellCheck tier **SKIPs silently** when shellcheck is not
+  installed. The r61/r65 authoring sessions ran the gate without
+  shellcheck, so SC2168 - which flags both `local` bugs at *error*
+  severity - never fired and the gate showed green (565/1/0; the lone
+  skip WAS the ShellCheck tier). Installing shellcheck before the gate
+  is now a mandatory session-preparation step (tracked in the Tier-P
+  slot document, outside this repository).
+- The r66 fixes were function-tested in podman on UBI 7/8/9/10 (both
+  the build-fail and build-ok top-level branches, stubbed toolchain,
+  real source fetch); RHEL 6 has no UBI image and is covered by the
+  host E2E re-run.
+
 ## [r65] - 2026-07-05 - fix: OL parity - faithful E2E tests + EPEL/DKMS provisioning
 
 ### Fixed

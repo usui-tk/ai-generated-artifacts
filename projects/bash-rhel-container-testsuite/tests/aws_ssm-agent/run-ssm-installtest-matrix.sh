@@ -571,7 +571,7 @@ run_matrix() {
   for major in ${prepared}; do
     ref="$(grep -m1 "^${major} " "${prep_map}" | cut -d' ' -f2-)"
     # r57: count total versions for this major and display progress [idx/total]
-    local major_versions; major_versions="$(ssm_major_versions "${major}" ${versions})"
+    local major_versions; major_versions="$(ssm_major_versions "${major}" "${versions}")"
     total=0; for _v in ${major_versions}; do total=$(( total + 1 )); done
     idx=0
     # shellcheck disable=SC2086  # per-major set is word-split by design

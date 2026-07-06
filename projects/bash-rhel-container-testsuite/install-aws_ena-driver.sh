@@ -48,7 +48,7 @@
 # Env:  ENA_VERSION     (default: per-major pin below)
 #       ENA_INSTALLTEST (0|1; default 0)
 #       ENA_ENTITLEMENT (entitled|anonymous; default entitled)
-#       ENA_BUILD_PLAN  (make|dkms; default make)
+#       ENA_BUILD_PLAN  (make|dkms; default dkms since r65 - OL parity)
 #       ENA_SRC_BASEURL (default https://github.com/amzn/amzn-drivers)
 #       INSECURE_TLS    (0|1; default 0)
 #
@@ -362,7 +362,10 @@ else
   # r61: extract the FIRST compiler error from make.log so the ledger reason
   # carries the specific kernel-API error (e.g. "implicit declaration of
   # function 'from_timer'") instead of the generic "build failed" message.
-  local first_error=""
+  # r66: this runs at TOP LEVEL (not in a function) - 'local' here is a bash
+  # error ("local: can only be used in a function") that trips the ERR trap
+  # and masked every real compile error as "unexpected error (line NNN)".
+  first_error=""
   if [ -f "${MAKE_LOG}" ]; then
     first_error="$(grep -m1 ' error:' "${MAKE_LOG}" \
       | sed 's/^.*error: //' | head -c 200 || true)"
@@ -382,7 +385,10 @@ fi
 
 if [ "${ENA_INSTALLTEST}" = "1" ]; then
   RESULT_EMITTED=1
-  local _dkms_used="false"
+  # r66: top-level code - no 'local' (same class of bug as the fail branch;
+  # this one fired AFTER RESULT_EMITTED=1, so die() emitted NO [result] line
+  # and every successful build was recorded as a harness-error).
+  _dkms_used="false"
   [ "${ENA_BUILD_PLAN_USED:-make}" = "dkms" ] && _dkms_used="true"
   printf '[aws_ena-driver][installtest][result] {"status":"ok","tool":"aws_ena-driver","osmajor":"%s","ena_version":"%s","entitlement":"%s","build_plan":"%s","kver":"%s","built":%s,"ko_version":"%s","dkms":%s,"ena_express":"%s"}\n' \
     "${OSMAJOR}" "${ENA_VERSION}" "${ENA_ENTITLEMENT}" "${ENA_BUILD_PLAN}" "${KVER}" "${BUILT}" "${KO_VERSION}" "${_dkms_used}" "$(ena_express_verdict "${ENA_VERSION}")"

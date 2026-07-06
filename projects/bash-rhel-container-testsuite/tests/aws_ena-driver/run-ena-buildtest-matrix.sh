@@ -29,7 +29,8 @@
 # (stock RHEL kernel: `rpm -q kernel`). env_init_mode = none (build is init-agnostic).
 #
 # E2' behaviour:
-#   entitled  -> build ena.ko (plain-make; DKMS if EPEL) -> ok | build-fail
+#   entitled  -> build ena.ko (DKMS-first since r66 - images ship EPEL+dkms
+#                per r65 provisioning; plain-make fallback) -> ok | build-fail
 #   anonymous -> skip (no kernel-devel)                  -> needs-entitlement
 #   any       -> load / runtime                          -> L4 (impossible in a container)
 #
@@ -532,14 +533,18 @@ sys.exit(0 if any((str(e.get('osmajor')),e.get('ena_version'),e.get('entitlement
             ol_skip=$(( ol_skip + 1 )); continue
           fi
         fi
-        plan="$(ena_build_plan "${ent}" 0)"
+        # r66: epel=1 - the r65 image provisioning bakes EPEL + dkms into every
+        # test image, but this call site still passed epel=0, so the sweep
+        # forced ENA_BUILD_PLAN=make and the r65 DKMS-first path (C3) was
+        # never exercised (ledger: build_plan=make on all 145 entitled rows).
+        plan="$(ena_build_plan "${ent}" 1)"
         log "RHEL${major} [${idx}/${total}] ENA ${ver}/${ent}: build test..."
         ena_kick "${major}" "${ver}" "${ent}" "${repo}" "${plan}" "${ref}" "${LOG_DIR}" "${rows_tmp}"
         local st; st="$(tail -1 "${rows_tmp}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || true)"
         if [ "${st}" = "ok" ]; then ol_ok=$(( ol_ok + 1 )); else ol_fail=$(( ol_fail + 1 )); fi
       done
     done
-    log "---- RHEL${major}: sweep done -- ${ol_ok} ok, ${ol_fail} fail, ${ol_skip} skipped (of ${total} versions x $(echo ${ents} | wc -w) ents) ----"
+    log "---- RHEL${major}: sweep done -- ${ol_ok} ok, ${ol_fail} fail, ${ol_skip} skipped (of ${total} versions x $(echo "${ents}" | wc -w) ents) ----"
     g_ok=$(( g_ok + ol_ok )); g_fail=$(( g_fail + ol_fail )); g_skip=$(( g_skip + ol_skip ))
   done
   g_builds=$(( g_ok + g_fail ))
