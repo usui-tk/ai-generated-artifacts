@@ -12,42 +12,48 @@ _ENA Express readiness (driver-version floor only): >= 2.2.9 full bandwidth, >= 
 
 | ENA version | status | ko_version | dkms | tested (UTC) | notes |
 |:--|:--|:--|:--|:--|:--|
-| 2.17.0 | ok | 2.17.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.16.1 | ok | 2.16.1 | - | 2026-07-04T19:49:06Z |  |
-| 2.16.0 | ok | 2.16.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.15.0 | ok | 2.15.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.14.1 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.14.0 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.13.3 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.13.2 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.13.1 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.13.0 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.12.3 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.12.2 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.12.1 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.12.0 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.11.1 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.11.0 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.10.0 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.9.1 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.9.0 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.9 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.8 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.7 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.6 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.5 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.4 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.3 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.2 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.1 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.0 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
+| 2.17.0 | ok | 2.17.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.16.1 | ok | 2.16.1 | yes | 2026-07-06T19:26:51Z |  |
+| 2.16.0 | ok | 2.16.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.15.0 | ok | 2.15.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.14.1 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'from_timer'; did you mean 'mod_timer'? [-Werror=implicit-function-declaration]) |
+| 2.14.0 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'from_timer'; did you mean 'mod_timer'? [-Werror=implicit-function-declaration]) |
+| 2.13.3 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'from_timer'; did you mean 'mod_timer'? [-Werror=implicit-function-declaration]) |
+| 2.13.2 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'from_timer'; did you mean 'mod_timer'? [-Werror=implicit-function-declaration]) |
+| 2.13.1 | fail | - | - | 2026-07-06T19:26:51Z | build failed (incompatible type for argument 2 of 'net_dim') |
+| 2.13.0 | fail | - | - | 2026-07-06T19:26:51Z | build failed (incompatible type for argument 2 of 'net_dim') |
+| 2.12.3 | fail | - | - | 2026-07-06T19:26:51Z | build failed (incompatible type for argument 2 of 'net_dim') |
+| 2.12.2 | fail | - | - | 2026-07-06T19:26:51Z | build failed (initialization of 'int (*)(struct net_device *, struct kernel_ethtool_ts_info *)' from incompatible pointer type 'int (*)(struct net_device *, struct ethtool_ts_info *)' [-Werror=incompatible-pointer-) |
+| 2.12.1 | fail | - | - | 2026-07-06T19:26:51Z | build failed (initialization of 'int (*)(struct net_device *, struct kernel_ethtool_ts_info *)' from incompatible pointer type 'int (*)(struct net_device *, struct ethtool_ts_info *)' [-Werror=incompatible-pointer-) |
+| 2.12.0 | fail | - | - | 2026-07-06T19:26:51Z | build failed (initialization of 'int (*)(struct net_device *, struct kernel_ethtool_ts_info *)' from incompatible pointer type 'int (*)(struct net_device *, struct ethtool_ts_info *)' [-Werror=incompatible-pointer-) |
+| 2.11.1 | fail | - | - | 2026-07-06T19:26:51Z | build failed (initialization of 'int (*)(struct net_device *, struct ethtool_rxfh_param *)' from incompatible pointer type 'int (*)(struct net_device *, u32 *, u8 *, u8 *)' {aka 'int (*)(struct net_device *, unsign) |
+| 2.11.0 | fail | - | - | 2026-07-06T19:26:51Z | build failed (incompatible type for argument 2 of 'net_dim') |
+| 2.10.0 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.9.1 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.9.0 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.9 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.8 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.7 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.6 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.5 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.4 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.3 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.2 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.1 | fail | - | - | 2026-07-06T19:26:51Z | build failed (implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration]) |
+| 2.8.0 | fail | - | - | 2026-07-06T19:26:51Z | build failed (incompatible type for argument 2 of 'net_dim') |
 
 ## Fail pattern analysis
 
-The container's kernel-devel (`?`) determines which ENA releases can compile. Older ENA releases lack kcompat.h coverage for newer kernel APIs; newer ENA releases drop support for older kernels. Each group below shares the same root cause.
+The container's kernel-devel (`5.14.0-687.20.1.el9_8.x86_64`) determines which ENA releases can compile. Older ENA releases lack kcompat.h coverage for newer kernel APIs; newer ENA releases drop support for older kernels. Each group below shares the same root cause.
 
 | ENA versions | root cause |
 |:--|:--|
-| 2.14.1 -- 2.8.0 (25 versions) | build failed (make returned non-zero or produced no ena.ko) |
+| 2.14.1 -- 2.13.2 (4 versions) | implicit declaration of function 'from_timer'; did you mean 'mod_timer'? [-Werror=implicit-function-declaration] |
+| 2.13.1 -- 2.12.3 (3 versions) | incompatible type for argument 2 of 'net_dim' |
+| 2.12.2 -- 2.12.0 (3 versions) | initialization of 'int (*)(struct net_device *, struct kernel_ethtool_ts_info *)' from incompatible pointer type 'int (*)(struct net_device *, struct ethtool_ts_info *)' [-Werror=incompatible-pointer- |
+| 2.11.1 | initialization of 'int (*)(struct net_device *, struct ethtool_rxfh_param *)' from incompatible pointer type 'int (*)(struct net_device *, u32 *, u8 *, u8 *)' {aka 'int (*)(struct net_device *, unsign |
+| 2.11.0 | incompatible type for argument 2 of 'net_dim' |
+| 2.10.0 -- 2.8.1 (12 versions) | implicit declaration of function 'u64_stats_fetch_retry_irq'; did you mean 'u64_stats_fetch_retry'? [-Werror=implicit-function-declaration] |
+| 2.8.0 | incompatible type for argument 2 of 'net_dim' |
 
 _Sweep: 29 version(s) tested, 4 ok. Regenerate: `OSMAJORS=9 ./run-ena-buildtest-matrix.sh`._

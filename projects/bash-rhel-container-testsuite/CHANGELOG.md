@@ -13,6 +13,22 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r70] - 2026-07-07 - docs: ENA E2E results - DKMS one-shot, all 5 majors (r69 sweep)
+
+### Changed
+- **`tests/aws_ena-driver/buildtest-ledger.json` + `RESULTS-rhel{6,7,8,9,10}.md`**:
+  full re-sweep on r69 (145 cells = 29 versions x 5 majors, entitled-only,
+  all `build_plan=dkms`, zero harness-error rows). Per-major ok counts
+  **exactly match the make-era baseline** (6: 12/29, 7: 29/29, 8: 22/29,
+  9: 4/29, 10: 4/29) - every version that compiled via plain make also
+  builds and installs via the production DKMS method, and all 71 ok rows
+  carry `dkms:true` with `ko_version` == requested version. All 74 fail
+  rows carry specific compiler errors (zero generic fallbacks) and the
+  Fail pattern analysis sections group them by root cause - the r61
+  feature operating on real dkms-tree make.log data for the first time
+  (r69 extraction). Pin integrity: `ena:6 = 2.9.1 -> ok / ko 2.9.1`.
+  Host: RHEL 10.2, podman 5.8.2 rootful, SELinux Enforcing, RHSM.
+
 ## [r69] - 2026-07-07 - fix: dkms install-destination generations + OL-parity error extraction
 
 Root-caused from the first r68-shape E2E sweep (2026-07-06, 145 cells):

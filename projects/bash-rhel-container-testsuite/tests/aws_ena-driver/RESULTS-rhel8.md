@@ -12,42 +12,43 @@ _ENA Express readiness (driver-version floor only): >= 2.2.9 full bandwidth, >= 
 
 | ENA version | status | ko_version | dkms | tested (UTC) | notes |
 |:--|:--|:--|:--|:--|:--|
-| 2.17.0 | ok | 2.17.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.16.1 | ok | 2.16.1 | - | 2026-07-04T19:49:06Z |  |
-| 2.16.0 | ok | 2.16.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.15.0 | ok | 2.15.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.14.1 | ok | 2.14.1 | - | 2026-07-04T19:49:06Z |  |
-| 2.14.0 | ok | 2.14.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.13.3 | ok | 2.13.3 | - | 2026-07-04T19:49:06Z |  |
-| 2.13.2 | ok | 2.13.2 | - | 2026-07-04T19:49:06Z |  |
-| 2.13.1 | ok | 2.13.1 | - | 2026-07-04T19:49:06Z |  |
-| 2.13.0 | ok | 2.13.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.12.3 | ok | 2.12.3 | - | 2026-07-04T19:49:06Z |  |
-| 2.12.2 | ok | 2.12.2 | - | 2026-07-04T19:49:06Z |  |
-| 2.12.1 | ok | 2.12.1 | - | 2026-07-04T19:49:06Z |  |
-| 2.12.0 | ok | 2.12.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.11.1 | ok | 2.11.1 | - | 2026-07-04T19:49:06Z |  |
-| 2.11.0 | ok | 2.11.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.10.0 | ok | 2.10.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.9.1 | ok | 2.9.1 | - | 2026-07-04T19:49:06Z |  |
-| 2.9.0 | ok | 2.9.0 | - | 2026-07-04T19:49:06Z |  |
-| 2.8.9 | ok | 2.8.9 | - | 2026-07-04T19:49:06Z |  |
-| 2.8.8 | ok | 2.8.8 | - | 2026-07-04T19:49:06Z |  |
-| 2.8.7 | ok | 2.8.7 | - | 2026-07-04T19:49:06Z |  |
-| 2.8.6 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.5 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.4 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.3 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.2 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.1 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
-| 2.8.0 | fail | - | - | 2026-07-04T19:49:06Z | build failed (make returned non-zero or produced no ena.ko) |
+| 2.17.0 | ok | 2.17.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.16.1 | ok | 2.16.1 | yes | 2026-07-06T19:26:51Z |  |
+| 2.16.0 | ok | 2.16.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.15.0 | ok | 2.15.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.14.1 | ok | 2.14.1 | yes | 2026-07-06T19:26:51Z |  |
+| 2.14.0 | ok | 2.14.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.13.3 | ok | 2.13.3 | yes | 2026-07-06T19:26:51Z |  |
+| 2.13.2 | ok | 2.13.2 | yes | 2026-07-06T19:26:51Z |  |
+| 2.13.1 | ok | 2.13.1 | yes | 2026-07-06T19:26:51Z |  |
+| 2.13.0 | ok | 2.13.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.12.3 | ok | 2.12.3 | yes | 2026-07-06T19:26:51Z |  |
+| 2.12.2 | ok | 2.12.2 | yes | 2026-07-06T19:26:51Z |  |
+| 2.12.1 | ok | 2.12.1 | yes | 2026-07-06T19:26:51Z |  |
+| 2.12.0 | ok | 2.12.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.11.1 | ok | 2.11.1 | yes | 2026-07-06T19:26:51Z |  |
+| 2.11.0 | ok | 2.11.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.10.0 | ok | 2.10.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.9.1 | ok | 2.9.1 | yes | 2026-07-06T19:26:51Z |  |
+| 2.9.0 | ok | 2.9.0 | yes | 2026-07-06T19:26:51Z |  |
+| 2.8.9 | ok | 2.8.9 | yes | 2026-07-06T19:26:51Z |  |
+| 2.8.8 | ok | 2.8.8 | yes | 2026-07-06T19:26:51Z |  |
+| 2.8.7 | ok | 2.8.7 | yes | 2026-07-06T19:26:51Z |  |
+| 2.8.6 | fail | - | - | 2026-07-06T19:26:51Z | build failed (macro \ |
+| 2.8.5 | fail | - | - | 2026-07-06T19:26:51Z | build failed (macro \ |
+| 2.8.4 | fail | - | - | 2026-07-06T19:26:51Z | build failed (macro \ |
+| 2.8.3 | fail | - | - | 2026-07-06T19:26:51Z | build failed (macro \ |
+| 2.8.2 | fail | - | - | 2026-07-06T19:26:51Z | build failed (macro \ |
+| 2.8.1 | fail | - | - | 2026-07-06T19:26:51Z | build failed (macro \ |
+| 2.8.0 | fail | - | - | 2026-07-06T19:26:51Z | build failed (initialization of 'void (*)(struct net_device *, struct ethtool_ringparam *, struct kernel_ethtool_ringparam *, struct netlink_ext_ack *)' from incompatible pointer type 'void (*)(struct net_device *,) |
 
 ## Fail pattern analysis
 
-The container's kernel-devel (`?`) determines which ENA releases can compile. Older ENA releases lack kcompat.h coverage for newer kernel APIs; newer ENA releases drop support for older kernels. Each group below shares the same root cause.
+The container's kernel-devel (`4.18.0-553.139.1.el8_10.x86_64`) determines which ENA releases can compile. Older ENA releases lack kcompat.h coverage for newer kernel APIs; newer ENA releases drop support for older kernels. Each group below shares the same root cause.
 
 | ENA versions | root cause |
 |:--|:--|
-| 2.8.6 -- 2.8.0 (7 versions) | build failed (make returned non-zero or produced no ena.ko) |
+| 2.8.6 -- 2.8.1 (6 versions) | build failed (macro \ |
+| 2.8.0 | initialization of 'void (*)(struct net_device *, struct ethtool_ringparam *, struct kernel_ethtool_ringparam *, struct netlink_ext_ack *)' from incompatible pointer type 'void (*)(struct net_device *, |
 
 _Sweep: 29 version(s) tested, 22 ok. Regenerate: `OSMAJORS=8 ./run-ena-buildtest-matrix.sh`._
