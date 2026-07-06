@@ -48,8 +48,10 @@ solve well on its own:
   chain so the resulting ISO boots on revoked-firmware hardware.
 - **Air-gapped / offline labs**. Lab networks with no internet egress
   cannot use Windows Update. The script accepts pre-staged MSU / CAB
-  files pre-staged under `<WorkRoot>/patches/<OsVersion>/` (P04 skips
-  verified files) so the entire build can run offline.
+  files under `<WorkRoot>/patches/<OsVersion>/` -- with the LCU and any
+  checkpoint MSUs under the `cu/` subfolder
+  (`<WorkRoot>/patches/<OsVersion>/cu/`), everything else flat -- and
+  P04 skips verified files, so the entire build can run offline.
 - **Reproducible patch baselines**. Compliance and forensic-replay
   scenarios require an audited "what was inside this ISO at build time"
   record. The Config baseline (`data/config-Server*.json`) and the
@@ -199,10 +201,12 @@ $LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify
 
 ### Worked example: Server 2016 vs Server 2025
 
-The two OSes differ in the PCA2023 boot-manager switches. Server 2016
-needs no PCA2023 handling; Server 2025 skips P10 by default and needs
-both `-EnablePca2023BootManager` and `-ForcePca2023OnServer2025` to opt
-in.
+P10 (PCA2023 boot-manager conversion) now runs by default,
+readiness-driven, so Server 2016 needs no PCA2023 switches at all.
+Server 2025 is the exception: it still skips P10 unless
+`-ForcePca2023OnServer2025` is set (certified 2025 platforms carry the
+2023 certificates in firmware). To keep the shipped PCA2011-signed
+boot manager on any OS, opt out with `-SkipPca2023BootManager`.
 
 ```powershell
 # Server 2016 (no PCA2023 switches)
@@ -215,14 +219,14 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     -UseBaselineOnly `
     -Execute
 
-# Server 2025 (opt in to PCA2023 conversion)
+# Server 2025 (override the 2025-specific P10 skip)
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion Server2025 -OsLanguage ja-jp `
     -WorkRoot 'D:\UpdateWsi-Server2025' `
     -LogFile ('D:\UpdateWsi-Server2025\logs\build-2025-{0}.log' -f $stamp) `
-    -EnablePca2023BootManager -ForcePca2023OnServer2025 `
+    -ForcePca2023OnServer2025 `
     -UseBaselineOnly `
     -Execute
 ```
@@ -316,7 +320,7 @@ groups for newly-added languages).
 | Windows ADK | Deployment Tools feature (provides `oscdimg.exe`); auto-installed when missing (no switch) |
 | Windows SDK Signing Tools | Provides `signtool.exe` for embedded PCA2023/PCA2011 boot-signature verification (P10/P12 readiness); auto-installed when missing (no switch) |
 | Disk space | 100 GB free on the `-WorkRoot` drive (60 GB minimum, 100 GB enforced by Workspace preflight) |
-| Network | Internet access for ISO / patch downloads (offline: `-IsoPath` + pre-staged patch files under `<WorkRoot>/patches/<OsVersion>/`) |
+| Network | Internet access for ISO / patch downloads (offline: `-IsoPath` + pre-staged patch files under `<WorkRoot>/patches/<OsVersion>/`, LCU + checkpoint MSUs in the `cu/` subfolder) |
 | Static analysis | `python3` + the canonical `psa.py` for static analysis (see "Static analysis" below) |
 
 ## Supported target OS and languages
@@ -347,7 +351,7 @@ Pipeline of thirteen phases:
 | P07 | PatchInstallWim | Build | For each install.wim index: SSU → LCU → .NET → DISM cleanup |
 | P08 | PatchBootWim | Build | boot.wim (PE + Setup) and winre.wim |
 | P09 | AssembleIso | Build | Dynamic Update Setup overlay; Export-WindowsImage; oscdimg ISO build |
-| P10 | ConvertPca2023BootManager | Build | **Opt-in** PCA2023 Secure Boot conversion (`-EnablePca2023BootManager`) |
+| P10 | ConvertPca2023BootManager | Build | **Default-on**, readiness-driven PCA2023 Secure Boot conversion (opt-out: `-SkipPca2023BootManager`; Server 2025 additionally requires `-ForcePca2023OnServer2025`) |
 | P11 | StaticVerify | Verify | Mount output ISO; confirm KB packages are present |
 | P12 | VerifyPca2023Readiness | Verify | **Always runs** — emits `pca2023_readiness.json` + `.md` |
 | P13 | FinalReport | Report | End-of-run summary; ISO hash; log paths |
@@ -366,16 +370,20 @@ SPEC.md §B.17 and §B.18.
 
 Common operator decisions:
 
-- **Server 2016 / 2019 / 2022**: P10 is required if you target firmware
-  that has revoked PCA2011 from DBX. Enable with
-  `-EnablePca2023BootManager`. The source ISO's `install.wim` LCU month
-  must be 2024-4B (April 2024) or later (Server 2022 specifically
-  needs 2025-2B per Lenovo lp2353.pdf).
-- **Server 2025**: P10 is default-skipped (Microsoft-certified Server
-  2025 platforms ship the 2023 certificates in firmware; KB5053484
-  does not list Server 2025 as needing the procedure). Override with
-  `-ForcePca2023OnServer2025` only when running on non-certified
-  hardware that requires PCA2023 conversion.
+- **Server 2016 / 2019 / 2022**: P10 runs automatically (the PCA2011
+  signing CA expired 2026-06, so conversion is the norm). The
+  pre-flight readiness snapshot still gates it: Critical (LCU prereq
+  not met) skips with a warning, Healthy (already signed) is a no-op.
+  The source ISO's `install.wim` LCU month must be 2024-4B (April
+  2024) or later (Server 2022 specifically needs 2025-2B per Lenovo
+  lp2353.pdf). Pass `-SkipPca2023BootManager` to keep the shipped
+  PCA2011-signed boot manager for older-firmware targets.
+- **Server 2025**: P10 is still default-skipped for this OS
+  (Microsoft-certified Server 2025 platforms ship the 2023
+  certificates in firmware; KB5053484 does not list Server 2025 as
+  needing the procedure). Override with `-ForcePca2023OnServer2025`
+  only when running on non-certified hardware that requires PCA2023
+  conversion.
 - **Forensic inspection** of an existing ISO: pass `-Pca2023OnlyMode
   -IsoPath <existing.iso>` to skip the entire build pipeline and run
   ONLY P12 against the ISO.
@@ -410,7 +418,7 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-PatchMonth` | patch | current month | Target patch month for refresh, e.g. `2026-06` |
 | `-SkipDynamicPatchRefresh` | patch | switch (OFF) | Skip P03 even if baseline is stale (offline runs) |
 | `-UseBaselineOnly` | patch | switch (OFF) | Use PatchBaseline strictly as-is; no Catalog access |
-| `-EnablePca2023BootManager` | secure-boot | switch (OFF) | Opt-in P10 PCA2023 boot-manager conversion |
+| `-SkipPca2023BootManager` | secure-boot | switch (OFF) | Opt OUT of the default-on P10 PCA2023 boot-manager conversion (keep the shipped PCA2011-signed boot manager) |
 | `-ForcePca2023OnServer2025` | secure-boot | switch (OFF) | Override the Server 2025 default-skip for P10 |
 | `-Pca2023OnlyMode` | secure-boot | switch (OFF) | Standalone P12 inspection of an existing ISO (`-IsoPath` required) |
 | `-Pca2023ScriptPath` | secure-boot | (none) | External `Make2023BootableMedia.ps1` instead of the internal helper |

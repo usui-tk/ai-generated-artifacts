@@ -45,7 +45,10 @@ Windows Update は稼働中サーバーを最新状態に保つ標準的な手�
   ハードウェアで起動できる ISO を生成します。
 - **エアギャップ／オフラインラボ**：インターネット出口を持たないラボ
   ネットワークでは Windows Update を利用できません。本スクリプトは事前配置済みの
-  MSU / CAB ファイルを `<WorkRoot>/patches/<OsVersion>/` への事前配置で受け入れる（P04 は検証済みファイルをスキップ）ため、ビルド全体を
+  MSU / CAB ファイルを `<WorkRoot>/patches/<OsVersion>/` で受け入れます
+  —— LCU とチェックポイント MSU は `cu/` サブフォルダ
+  （`<WorkRoot>/patches/<OsVersion>/cu/`）、それ以外はフラット配置です
+  （P04 は検証済みファイルをスキップ）。これによりビルド全体を
   オフラインで実行できます。
 - **再現可能なパッチベースライン**：コンプライアンスやフォレンジック再現
   シナリオでは「この ISO にビルド時点で何が含まれていたか」の監査記録が
@@ -191,10 +194,12 @@ $LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify
 
 ### 実例：Server 2016 と Server 2025
 
-両 OS は PCA2023 ブートマネージャのスイッチが異なります。Server 2016 は
-PCA2023 処理が不要、Server 2025 は既定で P10 をスキップするため、オプトイン
-には `-EnablePca2023BootManager` と `-ForcePca2023OnServer2025` の両方が
-必要です。
+P10（PCA2023 ブートマネージャ変換）は現在、既定で（readiness 駆動により）
+実行されるため、Server 2016 には PCA2023 関連スイッチが一切不要です。
+Server 2025 は例外で、`-ForcePca2023OnServer2025` を指定しない限り P10 を
+スキップします（認証済み 2025 プラットフォームはファームウェアに 2023
+証明書を同梱）。出荷時の PCA2011 署名 boot manager を維持したい場合は、
+どの OS でも `-SkipPca2023BootManager` でオプトアウトできます。
 
 ```powershell
 # Server 2016（PCA2023 スイッチなし）
@@ -207,14 +212,14 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     -UseBaselineOnly `
     -Execute
 
-# Server 2025（PCA2023 変換をオプトイン）
+# Server 2025（2025 固有の P10 スキップを上書き）
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion Server2025 -OsLanguage ja-jp `
     -WorkRoot 'D:\UpdateWsi-Server2025' `
     -LogFile ('D:\UpdateWsi-Server2025\logs\build-2025-{0}.log' -f $stamp) `
-    -EnablePca2023BootManager -ForcePca2023OnServer2025 `
+    -ForcePca2023OnServer2025 `
     -UseBaselineOnly `
     -Execute
 ```
@@ -306,7 +311,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | Windows ADK | Deployment Tools 機能（`oscdimg.exe` を提供）。不在時に自動インストール（スイッチ不要）|
 | Windows SDK Signing Tools | 埋め込み PCA2023/PCA2011 ブート署名検証用の `signtool.exe` を提供（P10/P12 readiness）。不在時に自動インストール（スイッチ不要）|
 | ディスク空き容量 | `-WorkRoot` ドライブに 100 GB 以上（最低 60 GB、Workspace プリフライトが 100 GB を強制チェック）|
-| ネットワーク | ISO とパッチのダウンロード用インターネットアクセス（オフライン時は `-IsoPath` + `<WorkRoot>/patches/<OsVersion>/` へのパッチ事前配置）|
+| ネットワーク | ISO とパッチのダウンロード用インターネットアクセス（オフライン時は `-IsoPath` + `<WorkRoot>/patches/<OsVersion>/` へのパッチ事前配置。LCU とチェックポイント MSU は `cu/` サブフォルダへ）|
 | 静的解析 | `python3` + 正規配置の `psa.py`（後述「静的解析」を参照）|
 
 ## 対応 OS と言語
@@ -336,7 +341,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | P07 | PatchInstallWim | Build | install.wim 各インデックスに対し SSU → LCU → .NET → DISM クリーンアップ |
 | P08 | PatchBootWim | Build | boot.wim（PE + Setup）と winre.wim |
 | P09 | AssembleIso | Build | Dynamic Update Setup オーバーレイ、Export-WindowsImage、oscdimg による ISO ビルド |
-| P10 | ConvertPca2023BootManager | Build | **オプトイン** PCA2023 Secure Boot 変換（`-EnablePca2023BootManager`）|
+| P10 | ConvertPca2023BootManager | Build | **既定で実行**（readiness 駆動）の PCA2023 Secure Boot 変換（オプトアウト：`-SkipPca2023BootManager`。Server 2025 のみ追加で `-ForcePca2023OnServer2025` が必要）|
 | P11 | StaticVerify | Verify | 出力 ISO をマウントし、KB パッケージが含まれるか確認 |
 | P12 | VerifyPca2023Readiness | Verify | **常時実行** — `pca2023_readiness.json` + `.md` を出力 |
 | P13 | FinalReport | Report | 実行終了サマリ、ISO ハッシュ、ログパス |
@@ -354,14 +359,18 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 
 代表的な運用判断：
 
-- **Server 2016 / 2019 / 2022**：PCA2011 を DBX に追加済みのファームウェアを
-  ターゲットにする場合、P10 が必要。`-EnablePca2023BootManager` で有効化。
-  ソース ISO の `install.wim` の LCU 月は 2024-4B（2024 年 4 月）以降が必要
-  （Server 2022 は Lenovo lp2353.pdf に従い、2025-2B が必要）。
-- **Server 2025**：P10 はデフォルトでスキップ（Microsoft 認証済み Server 2025
-  プラットフォームはファームウェアに 2023 証明書を同梱、KB5053484 は Server
-  2025 を手順対象としていない）。PCA2023 変換が必要な非認証ハードウェアで
-  運用する場合のみ `-ForcePca2023OnServer2025` で上書き。
+- **Server 2016 / 2019 / 2022**：P10 は自動で実行されます（PCA2011 署名 CA は
+  2026-06 に失効済みで、変換が標準の姿になったため）。事前 readiness
+  スナップショットが引き続きゲートします：Critical（LCU 前提未達）は警告付き
+  スキップ、Healthy（署名済み）は no-op。ソース ISO の `install.wim` の LCU 月
+  は 2024-4B（2024 年 4 月）以降が必要（Server 2022 は Lenovo lp2353.pdf に
+  従い、2025-2B が必要）。旧ファームウェア向けに出荷時の PCA2011 署名 boot
+  manager を維持する場合は `-SkipPca2023BootManager` を指定。
+- **Server 2025**：この OS のみ P10 は引き続きデフォルトでスキップ
+  （Microsoft 認証済み Server 2025 プラットフォームはファームウェアに 2023
+  証明書を同梱、KB5053484 は Server 2025 を手順対象としていない）。PCA2023
+  変換が必要な非認証ハードウェアで運用する場合のみ
+  `-ForcePca2023OnServer2025` で上書き。
 - **既存 ISO のフォレンジック検査**：`-Pca2023OnlyMode -IsoPath <existing.iso>`
   で全ビルドパイプラインをスキップし、P12 のみを ISO に対して実行。
 
@@ -395,7 +404,7 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-PatchMonth` | patch | 当月 | 更新対象パッチ月（例 `2026-06`）|
 | `-SkipDynamicPatchRefresh` | patch | switch（OFF）| ベースライン陳腐でも P03 をスキップ（オフライン）|
 | `-UseBaselineOnly` | patch | switch（OFF）| PatchBaseline をそのまま使用。Catalog アクセスなし |
-| `-EnablePca2023BootManager` | secure-boot | switch（OFF）| P10 PCA2023 ブートマネージャ変換をオプトイン |
+| `-SkipPca2023BootManager` | secure-boot | switch（OFF）| 既定で実行される P10 PCA2023 ブートマネージャ変換をオプトアウト（出荷時の PCA2011 署名 boot manager を維持）|
 | `-ForcePca2023OnServer2025` | secure-boot | switch（OFF）| Server 2025 の P10 既定スキップを上書き |
 | `-Pca2023OnlyMode` | secure-boot | switch（OFF）| 既存 ISO の P12 単独検査（`-IsoPath` 必須）|
 | `-Pca2023ScriptPath` | secure-boot | （なし）| 内部ヘルパーの代わりに外部 `Make2023BootableMedia.ps1` を使用 |

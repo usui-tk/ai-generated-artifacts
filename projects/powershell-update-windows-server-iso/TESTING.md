@@ -13,7 +13,7 @@ This document consolidates everything needed to verify and evaluate
 2. **Synthetic smoke tests** — read-only Actions executable in CI
 3. **Live Catalogue verification** — probes that catch Microsoft-side schema drift
 4. **Operator-pending verification** — full `-Execute` builds (requires Windows + ADK + ≥ 100 GB disk + admin)
-5. **Self-verification tool suite** — T1 through T27 (canonical inventory in [`tests/README.md`](./tests/README.md))
+5. **Self-verification tool suite** — T1 through T35 (canonical inventory in [`tests/README.md`](./tests/README.md))
 6. **Continuous integration** — four GitHub Actions stages
 
 > **Documentation language policy**: This document is maintained in
@@ -74,7 +74,7 @@ a build identifier plus a calendar date. Pending items are marked
 | T7 dotnet_cu_parser_test.py (16 assertions) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
 | T11 canonical_json_test.py (26 assertions, PS/Python byte-level parity per SPEC §B.23) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
 | T20 removed_live_wua_guard_test.py (20 assertions, offline static guard: the r11.19-removed live-WUA functions/parameters stay absent and P06 ValidatePatchServicing stays a pass-through) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
-| T23 config_required_ssu_downloadurl_test.py (20 assertions, offline data-contract guard on the committed configs: every `SSU` Line carries a non-empty `DownloadUrl`, `PatchModel` ⇔ SSU-line presence stays consistent per OS, plus the negative fixture `fixtures/config-guard/bad-config-ssu-empty-url.json` is rejected; predates the v3.0 migration and was migrated to `Lines`/`Kind`/`PatchModel`) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| T23 config_required_ssu_downloadurl_test.py (19 assertions, offline data-contract guard on the committed configs: every `SSU` Line carries a non-empty `DownloadUrl`, `PatchModel` ⇔ SSU-line presence stays consistent per OS -- since r11.52 a Kind `SSU` line implies `separate-ssu` ONLY (the uup-checkpoint baseline is Kind `Checkpoint`) -- plus the negative fixture `fixtures/config-guard/bad-config-ssu-empty-url.json` is rejected; predates the v3.0 migration and was migrated to `Lines`/`Kind`/`PatchModel`) | ✓ all pass | r11.52 checkpoint-model / 2026-07-06 |
 | T24 dism_cleanup_args_test.py (6 assertions, `Get-DismCleanupArgumentList`: default three-token `/Cleanup-Image /StartComponentCleanup` vector with no `/ResetBase`, `-IncludeResetBase` appends `/ResetBase`, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the comma/`+` precedence collapse behind exit 1639) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T25 dism_export_args_test.py (6 assertions, `Get-DismExportArgumentList` returns the five-token `/Export-Image ... /Compress:max` vector targeting the requested source index, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the same precedence trap) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T26 defender_exclusion_plan_test.py (13 assertions, the three pure helpers behind `-UseDefenderExclusions`: `Get-DefenderManagedExclusionSet` (WorkRoot path + four servicing process names), `Get-DefenderExclusionPlan` (add-only-absent, case/slash-insensitive), `Get-DefenderExclusionDecision` (fail-closed -- applies only when every prerequisite is positively satisfied; `$null`/unknown -> skip); the `*-MpPreference`/`Get-MpComputerStatus` wrappers are Windows-only and not exercised) | ✓ all pass | r11.26 defender-exclusion-optin build / 2026-06-11 |
@@ -82,8 +82,12 @@ a build identifier plus a calendar date. Pending items are marked
 | T28 setup_du_forbid_test.py (12 assertions, offline `Resolve-SetupDu` Forbid-branch guard: every non-uup-checkpoint OS (2016/2019/2022) returns the empty `SetupDU` "no line" marker -- no files, no Catalog row, Forbid note -- with no network or fixture; complements T27 which covers the 2025 happy path) | ✓ all pass | r11.43 retire-dead-data-contract / 2026-06-28 |
 | T29 patch_integrity_digest_test.py (11 assertions, digest-format boundary: `ConvertTo-HexDigestString` base64->hex round-trip vs an independent Python implementation for SHA-1/SHA-256, the live-captured KB5095966 Catalog vector, hex pass-through, garbage/wrong-length rejection, plus static wiring guards -- both `Test-PatchIntegrity` expectations normalized through the boundary and P04 seeds BOTH `Digest`->`sha-1` and `Sha256`->`sha-256`; pins the fix for the base64-vs-hex mismatch that failed every real download verification) | ✓ all pass | r11.44 digest-format-boundary / 2026-07-02 |
 | T30 setup_du_discriminator_test.py (8 assertions, `Select-SetupDuCandidate` against rows captured verbatim from the live Catalog 2026-07-02: server 24H2 Setup-DU rows selected, Windows 11 client / arm64 / SafeOS rows excluded, empty input safe, 21H2 selects nothing (2022 has no Setup DU), plus the pinned F1 fact -- the real Setup-DU Products value contains NO 'Setup Dynamic Update' -- and a code-line static guard that the products-based filter cannot resurface) | ✓ all pass | r11.45 setupdu-discriminator-hardfail / 2026-07-02 |
-| T31 lcu_target_verify_test.py (24 assertions, TargetBuildAfterUpdate derived-field contract: `Test-LcuTargetApplied` comparator behavior (present/absent/case-insensitive/empty, build annotation), committed configs have `TargetBuildAfterUpdate == <LCU Line>.InScope.build` with no retired fields, seeds reduced to `Schema`+`ChecksumAlgorithm`, both schemas reconciled, and static wiring -- BOTH Lines writers (refresh writeback + the A00/A01 config-object loop) derive TBAU via the single pure `Get-TargetBuildFromLines`, P11 calls the comparator as a hard-Fail row, and no code line touches `VerificationMethod`/`ExcludeKbList`) | ✓ all pass | r11.46 tbau-derived-lcu-verify / 2026-07-02 |
-| Part C §C.3.4 — `canonical_json_format_check.py` (29 JSON files canonicalised, format gate) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
+| T31 lcu_target_verify_test.py (24 assertions, TargetBuildAfterUpdate derived-field contract: `Test-LcuTargetApplied` comparator behavior (present/absent/case-insensitive/empty, build annotation), committed configs have `TargetBuildAfterUpdate == <LCU Line>.InScope.build` with no retired fields, seed envelopes carry only reader-backed members (`Schema`+`ChecksumAlgorithm`, plus the optional r11.53 `BridgeLcu`), both schemas reconciled, and static wiring -- BOTH Lines writers (refresh writeback + the A00/A01 config-object loop) derive TBAU via the single pure `Get-TargetBuildFromLines`, P11 calls the comparator as a hard-Fail row, and no code line touches `VerificationMethod`/`ExcludeKbList`) | ✓ all pass | r11.53 bridge-lcu / 2026-07-06 |
+| T32 checkpoint_placement_test.py (11 assertions, r11.52 checkpoint-model contract: `Get-PatchLocalPath` lands LCU/Checkpoint in the `cu` discovery subfolder and every other Kind flat; `Build-PatchPlan` routes Kind `Checkpoint` to NO WIM target (co-located for DISM PackagePath discovery, never applied standalone); `Test-PatchModelConsistency` requires `Checkpoint` / forbids `SSU` for uup-checkpoint) | ✓ all pass | r11.52 checkpoint-model / 2026-07-06 |
+| T33 bridge_lcu_contract_test.py (17 assertions, r11.53 bridge-lcu axis-3 contract: `ConvertTo-BridgeLcuResolvedPatch` shape (PatchType `BridgeLcu`, ApplyOrder 0, flat LocalPath outside `cu`, sha-1 from Digest), Install-only routing, `I0.BridgeLcu` FIRST in the install sequence, seed/config-Server2022 envelope identity + KB5030216 floor `20348.1960` + MS evidence URL + Digest/FileName SHA-1 cross-encoding, scope pin) | ✓ all pass | r11.53 bridge-lcu / 2026-07-06 |
+| T34 bootwim_policy_test.py (16 assertions, r11.54 bootwim-policy contract: per-OS `BootWimLcuPolicy` matrix in every config + seed (2016 enabled / 2019 disabled / 2022 tolerate / 2025 enabled) with the retired `EnableBootWimUpdate` absent, `Common` enum in both schemas, and `Resolve-BootWimLcuPolicyValue` REPL behaviour (pass-through, case-fold, empty->disabled default, typed error on unknown)) | ✓ all pass | r11.54 bootwim-policy / 2026-07-06 |
+| T35 pca2023_default_auto_test.py (7 assertions, r11.55 pca2023-default-auto surface: retired `-EnablePca2023BootManager` token absent, `-SkipPca2023BootManager` + `-ForcePca2023OnServer2025` declared, P10 opt-out gate + Server 2025 force-gate present, script-scope default falsy (P10 default-on)) | ✓ all pass | r11.55 pca2023-default-auto / 2026-07-06 |
+| Part C §C.3.4 — `canonical_json_format_check.py` (24 JSON files canonicalised, format gate) | ✓ all pass | r11.55 pca2023-default-auto build (re-verified) / 2026-07-06 |
 | Config schema gate — `config_schema_test.py` (14 assertions, `data/config-Server*.json` vs `schema/config.schema.json`; r10.4) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
 | Seed contract gate — `seed_contract_test.py` (17 assertions, `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules; the SEED contract for the offline dataset rebuild) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
 | Stage 1 (Linux: BOM/CRLF/ASCII format check + config schema gate + psa.py text/SARIF + PSScriptAnalyzer/SARIF; the full offline T-suite runs in the local gate battery, not in Stage 1) | ✓ green | CI continuous |
@@ -369,9 +373,9 @@ $common = @{
     Execute               = $true
 }
 
-# Server 2025 additionally opts in to the PCA2023 boot-manager conversion
+# P10 runs by default (readiness-driven); Server 2025 alone still needs the force switch
 if ($OsVersion -eq 'Server2025') {
-    .\Update-WindowsServerIso.ps1 @common -EnablePca2023BootManager -ForcePca2023OnServer2025
+    .\Update-WindowsServerIso.ps1 @common -ForcePca2023OnServer2025
 } else {
     .\Update-WindowsServerIso.ps1 @common
 }
@@ -406,7 +410,7 @@ python3 tests/powershell_harness.py          # T3: 10 PS function assertions
 python3 tests/release_info_parser_test.py    # T6: 13 release-info parser assertions
 python3 tests/dotnet_cu_parser_test.py       # T7: 16 .NET CU parser assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
-python3 tests/config_required_ssu_downloadurl_test.py            # T23: 20 required-SSU consistency-contract assertions (PatchBaseline.Lines)
+python3 tests/config_required_ssu_downloadurl_test.py            # T23: 19 required-SSU consistency-contract assertions (PatchBaseline.Lines; SSU => separate-ssu only since r11.52)
 python3 tests/dism_cleanup_args_test.py                          # T24: 6 cleanup-arg-vector assertions (1639 collapse guard + /ResetBase default + /ScratchDir)
 python3 tests/dism_export_args_test.py                           # T25: 6 export-arg-vector assertions (Export-Image /Compress:max + /ScratchDir)
 python3 tests/defender_exclusion_plan_test.py                    # T26: 13 Defender pure-helper assertions (managed set + add-only-absent plan + fail-closed decision)
@@ -415,6 +419,10 @@ python3 tests/setup_du_forbid_test.py                            # T28: 12 Resol
 python3 tests/patch_integrity_digest_test.py                     # T29: 11 digest-format boundary assertions (Catalog base64 -> hex at Test-PatchIntegrity; Digest+Sha256 wiring)
 python3 tests/setup_du_discriminator_test.py                     # T30: 8 Setup-DU discriminator assertions (title-based selection over verbatim-captured live rows)
 python3 tests/lcu_target_verify_test.py                          # T31: 24 TargetBuildAfterUpdate derived-field assertions (comparator + derivation helper + data/schema contract + P11 wiring)
+python3 tests/checkpoint_placement_test.py                       # T32: 11 checkpoint-model assertions (cu/ landing split; Checkpoint never applied standalone; uup-checkpoint Require/Forbid)
+python3 tests/bridge_lcu_contract_test.py                        # T33: 17 bridge-LCU assertions (I0-first, Install-only, 2022 envelope + floor 20348.1960, Digest cross-encoding)
+python3 tests/bootwim_policy_test.py                             # T34: 16 BootWimLcuPolicy assertions (per-OS matrix; schema enum; Resolve-BootWimLcuPolicyValue REPL)
+python3 tests/pca2023_default_auto_test.py                       # T35: 7 PCA2023 default-auto surface assertions (retired token absent; opt-out + 2025 force gates)
 
 # Schema / format gates (every commit that touches data)
 python3 tests/config_schema_test.py                          # config schema gate

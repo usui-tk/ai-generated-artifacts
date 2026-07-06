@@ -543,7 +543,11 @@ per-run state:
 │   ├── install-wim-mount/          (P07 mount target)
 │   ├── boot-wim-mount/             (P08 mount target)
 │   └── winre-wim-mount/            (P08 inner mount target)
-├── patches/Server<N>/              (P04 download cache)
+├── patches/Server<N>/              (P04 download cache; flat for SSU /
+│   │                                DotNet / SafeOSDU / SetupDU / BridgeLcu)
+│   └── cu/                         (LCU + Checkpoint discovery subfolder --
+│                                    only the target CU family may live here;
+│                                    offline pre-place follows the same split)
 ├── cache/
 │   └── catalog/                    (HTML / JSON Catalogue cache)
 ├── output/<final-iso>.iso          (P09/P10 destination)
@@ -601,14 +605,16 @@ base ISO:
 | `DefaultLanguage` | `en-us` | Used when `-OsLang` is not specified |
 | `LCUExpandViaMum` | `true` | Use `update.mum`-based LCU expansion (true for r02+) |
 | `EnableInstallWimUpdate` | `true` | Whether P07 applies LCU to install.wim (r11.37: Server 2025 placeholder `false` corrected to `true`) |
-| `EnableBootWimUpdate` | `true` | Whether P08 applies LCU to boot.wim |
+| `BootWimLcuPolicy` | `enabled` | Per-OS boot.wim LCU policy: `enabled` (strict) / `disabled` (leave as shipped; WinRE servicing still runs) / `tolerate` (attempt; downgrade failure to Caution, dismount `-Discard`, continue). Replaced the boolean `EnableBootWimUpdate` at r11.54 -- the 2026-07-05 4-OS E2E proved boot.wim LCU-serviceability is a per-media property (matrix: 2016 `enabled`, 2019 `disabled`, 2022 `tolerate`, 2025 `enabled`) |
 | `EnableWinREUpdate` | `true` | Whether P08 applies Safe OS DU to WinRE.wim |
 | `_VerifiedDate` / `_VerifiedBy` | `2026-05-24T00:00:00+09:00` / `manual:initial-r03` | Human verification record |
 
-The three `Enable*Update` flags MUST be promoted from `Common` to
-top-level by `Get-ConfigProfile`. An earlier dead-code path defect
-(the flags were read but never promoted) has since been corrected, so
-the promotion is enforced.
+The `Enable*Update` flags and `BootWimLcuPolicy` MUST be promoted from
+`Common` to top-level by `Get-ConfigProfile` (`BootWimLcuPolicy` is
+validated + defaulted to `disabled` through the pure
+`Resolve-BootWimLcuPolicyValue` during promotion). An earlier dead-code
+path defect (the flags were read but never promoted) has since been
+corrected, so the promotion is enforced.
 
 ### B.4.3 `PatchBaseline` block
 
@@ -636,7 +642,8 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
       "ApplyOrder":          2,
       "InScope":             { /* media-payload applicability annotation */ }
     },
-    /* one Line per Kind: LCU, SSU, DotNet, SafeOSDU (and SetupDU for uup-checkpoint) */
+    /* one Line per Kind: LCU, SSU (separate-ssu), Checkpoint (uup-checkpoint),
+       DotNet, SafeOSDU (and SetupDU for uup-checkpoint) */
   ]
 }
 ```
@@ -650,14 +657,47 @@ offline gate T31): the applied LCU package is the build-attainment
 marker, and a missing baseline LCU is a hard verification FAILURE
 [DECIDED 2026-07-02, user]. `VerificationMethod` (written, never read)
 and `ExcludeKbList` (never read; the 2025 entry mis-described the
-checkpoint SSU KB5043080 as unnecessary while `Lines[]` applies it at
-ApplyOrder 1) were retired from the schemas, seeds, and configs in the
-same pass; the seed `PatchBaseline` envelope is now `Schema` +
-`ChecksumAlgorithm` only.
+checkpoint baseline KB5043080 as unnecessary while `Lines[]` then
+applied it at ApplyOrder 1 -- since r11.52 that line is Kind
+`Checkpoint` and is never applied standalone) were retired from the
+schemas, seeds, and configs in the same pass; the seed `PatchBaseline`
+envelope became `Schema` + `ChecksumAlgorithm` only (r11.53 adds the
+optional reader-backed `BridgeLcu` member below).
 
-Patch `Kind` values are `LCU`, `SSU`, `DotNet`, `SafeOSDU`, and
-`SetupDU`; which Kinds are required or forbidden for each `PatchModel`
-is the discriminated-union contract in §B.19. Field cadence and who is
+**BridgeLcu envelope [r11.53].** `PatchBaseline.BridgeLcu` (optional,
+SEED; identical subschema in `config.schema.json` and
+`config-seed.schema.json`) is the static per-OS bridge LCU for axis 3
+(image-side servicing-stack floor): a source medium whose in-image
+servicing stack is older than the floor the current combined LCU
+requires fails with `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED`
+(observed on the 20348.587-era Server 2022 EVAL media, 2026-07-06 E2E).
+Microsoft's documented remedy (per-KB pages, e.g. KB5094128) is to
+install a bridge LCU on the offline media FIRST; for Server 2022 that
+is KB5030216 (floor `20348.1960`). Fields: `KbId` / `FileName` /
+`DownloadUrl` / `Digest` (Catalog SHA-1 base64) + required
+`MinimumImageServicingStack` and `EvidenceUrl` (the floor and its MS
+primary source travel with the data), optional `Sha256` / `Note`.
+`ConvertTo-BridgeLcuResolvedPatch` materialises the envelope
+(PatchType `BridgeLcu`, ApplyOrder 0, FLAT landing folder -- outside
+the `cu` discovery subfolder) via both ResolvedPatches writers; P07
+applies it as sub-phase `I0.BridgeLcu` on every targeted install.wim
+index, unconditionally when present [DECIDED 2026-07-06, A1] (DISM
+supersedence no-ops it on already-current images). Routing is
+Install-only. Only `seed/config-Server2022` carry a bridge today
+(offline gate T33).
+
+Patch `Kind` values are `LCU`, `SSU`, `Checkpoint`, `DotNet`,
+`SafeOSDU`, and `SetupDU`; which Kinds are required or forbidden for
+each `PatchModel` is the discriminated-union contract in §B.19.
+`Checkpoint` [r11.52] is the uup-checkpoint model's checkpoint
+cumulative baseline (2025: KB5043080): it is downloaded and co-located
+with the target LCU in the `cu` discovery subfolder but NEVER applied
+standalone -- `Add-WindowsPackage` targets the latest CU only and DISM
+discovers prerequisite checkpoint MSUs from the `PackagePath` folder
+when the image needs them (MS Learn 'Checkpoint cumulative updates and
+the Microsoft Update Catalog'; per-KB DISM guidance, e.g. KB5094126).
+The prior `Kind: "SSU"` labelling force-applied the GA checkpoint first
+and broke the 2026-07-05 Server 2025 E2E on boot.wim (`0x80073712`). Field cadence and who is
 allowed to mutate each field is the §B.14 decision matrix.
 
 **Resolved patches live in `PatchBaseline.Lines[]`** (Config Schema
@@ -734,8 +774,12 @@ P03:  -UseBaselineOnly        OR  -SyntheticTestMode
 P04:  -SyntheticTestMode      (uses New-SyntheticTestIso)
 P06:  -UseBaselineOnly  OR  -SyntheticTestMode
 P07:  -not Common.EnableInstallWimUpdate
-P08:  -not Common.EnableBootWimUpdate (per-target sub-checks)
-P10:  opt-in; runs only when -EnablePca2023BootManager is set (default OFF)
+P08:  Common.BootWimLcuPolicy governs the boot.wim loop only
+      (disabled => boot.wim left as shipped, WinRE servicing still
+      runs; tolerate => per-index failure downgraded to Caution +
+      dismount -Discard); WinRE gated by Common.EnableWinREUpdate
+P10:  default-ON, readiness-driven; -SkipPca2023BootManager opts out;
+      Server 2025 additionally requires -ForcePca2023OnServer2025
 P12:  none (always runs)
 P13:  none (always runs)
 ```
@@ -1211,7 +1255,8 @@ resolution.
 
 | Kind | Server 2016 (`separate-ssu`) | Server 2019 (`embedded-ssu`) | Server 2022 (`embedded-ssu-du`) | Server 2025 (`uup-checkpoint`) |
 |:---|:---:|:---:|:---:|:---:|
-| `SSU`          | required line (standalone) | in-model forbidden as a line (embedded in the combined LCU since 2024-4B) | in-model forbidden as a line (embedded in the combined LCU) | required line (UUP checkpoint SSU) |
+| `SSU`          | required line (standalone) | in-model forbidden as a line (embedded in the combined LCU since 2024-4B) | in-model forbidden as a line (embedded in the combined LCU) | in-model forbidden as a line (r11.52; the checkpoint baseline is Kind `Checkpoint`, not an SSU) |
+| `Checkpoint`   | in-model forbidden as a line | in-model forbidden as a line | in-model forbidden as a line | required line (checkpoint cumulative baseline; co-located, never applied standalone) |
 | `LCU`          | required line | required line (combined LCU+SSU) | required line (combined LCU+SSU) | required line (WIM-format MSU) |
 | `DotNet`       | in-model forbidden as a line | required line | required line | required line |
 | `SafeOSDU`     | in-model forbidden as a line | in-model forbidden as a line | required line | required line |
@@ -1230,7 +1275,8 @@ top-level `PatchModel` (B.4.1 / B.19), not by a per-entry flag:
 `separate-ssu` (Server 2016) carries a standalone `SSU` line beside the
 `LCU`; `embedded-ssu` / `embedded-ssu-du` (Server 2019 / 2022) fold the
 SSU into the combined LCU; `uup-checkpoint` (Server 2025) carries the
-checkpoint SSU from the co-served baseline. The v3.0 `Lines[]` shape has
+checkpoint cumulative baseline from the co-served 2-file set as Kind
+`Checkpoint` (r11.52). The v3.0 `Lines[]` shape has
 no `IsCombined` field; the pre-v3.0 flag and the r08.0 mis-record defect
 on `config-Server2016.json` are referenced from §D.
 
@@ -1549,12 +1595,13 @@ which line `Kind`s are required and which are forbidden:
 | `separate-ssu` | Server 2016 | `SSU`, `LCU` | `DotNet`, `SafeOSDU`, `SetupDU` |
 | `embedded-ssu` | Server 2019 | `LCU`, `DotNet` | `SSU`, `SafeOSDU`, `SetupDU` |
 | `embedded-ssu-du` | Server 2022 | `LCU`, `DotNet`, `SafeOSDU` | `SSU`, `SetupDU` |
-| `uup-checkpoint` | Server 2025 | `LCU`, `SSU`, `DotNet`, `SafeOSDU` | (none; `SetupDU` allowed) |
+| `uup-checkpoint` | Server 2025 | `LCU`, `Checkpoint`, `DotNet`, `SafeOSDU` | `SSU` (`SetupDU` allowed) |
 
 Rationale: 2016 ships its servicing stack as a standalone SSU paired
 with a standalone LCU; 2019 and 2022 embed the SSU in the combined LCU
 (2022 additionally carries a Safe OS DU for WinRE); 2025 is the UUP
-checkpoint model whose co-served GA baseline carries the checkpoint SSU.
+checkpoint model whose co-served GA baseline is the `Checkpoint` line
+(r11.52; `SSU` is forbidden for this model).
 
 ### B.19.2 The check
 
@@ -1812,8 +1859,8 @@ title search for the OS's `<yyyy-MM> Servicing Stack Update`, keeping the
 non-preview hit matching `(?i)servicing stack update` (2026-05 returns
 one SSU for Server 2016, KB5088064). The `embedded-ssu` /
 `embedded-ssu-du` models resolve no standalone SSU line (it is folded
-into the combined LCU); `uup-checkpoint` derives its SSU line from the
-co-served GA baseline. The search needs no layer 2 / `-DataDir` input,
+into the combined LCU); `uup-checkpoint` derives its `Checkpoint` line
+from the co-served GA baseline (the non-LCU `.msu` in the 2-file set). The search needs no layer 2 / `-DataDir` input,
 so it works on the `RefreshAllBaselines` call path.
 
 **.NET CU latest-applicable selection**: .NET Framework CUs are
