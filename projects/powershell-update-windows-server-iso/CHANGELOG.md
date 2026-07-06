@@ -22,6 +22,46 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.06-r11.54] - 2026-07-06
+
+Tag: `bootwim-policy`. Third fix of the 2026-07-05 E2E batch (Server
+2019 axis, generalised): P08 failed with `0x80070032
+ERROR_NOT_SUPPORTED` at CBS finalize when applying the LCU to the 2019
+EVAL media's boot.wim -- the same structural closure the 2026-06-12 D1
+probe established across all 6 apply variants. The E2E showed boot.wim
+LCU-serviceability is a PER-OS property of the committed source media
+(2016 succeeds and even materialises the PCA2023 staging set; 2019 is
+closed; 2022 is unmeasured; 2025 was broken by the checkpoint
+mislabel, fixed in r11.52), so a single boolean cannot express it.
+
+### Changed
+
+- **`Common.EnableBootWimUpdate` (boolean) retired; new per-OS
+  tri-state `Common.BootWimLcuPolicy`** (destructive rename, no shim;
+  both schemas' Common definitions updated byte-equal). Values:
+  `enabled` (strict; failure aborts), `disabled` (boot.wim left as
+  shipped), `tolerate` (attempt; on failure downgrade to a Caution,
+  dismount the index with `-Discard` -- never commit a partial CBS
+  transaction -- log a `bootwim-tolerated-failure` errors.jsonl row,
+  and continue). Committed matrix: 2016 `enabled`, 2019 `disabled`,
+  2022 `tolerate`, 2025 `enabled`.
+- **P08 gate rework: `disabled` no longer skips WinRE.** The old
+  boolean gate returned from ALL of P08, silently dropping WinRE
+  SSU/SafeOS-DU servicing whenever boot.wim servicing was off. The
+  policy now governs only the boot.wim loop; the WinRE section runs
+  under its own `EnableWinREUpdate` as designed.
+- New pure validator **`Resolve-BootWimLcuPolicyValue`** (case-fold,
+  empty defaults to `disabled` -- the safe floor -- and unknown values
+  are a typed error, never coerced); profile hydration routes through
+  it.
+
+### Added
+
+- **T34 `bootwim_policy_test.py`** (16 assertions): per-OS policy
+  matrix in configs + seeds, schema enum + retired-flag absence, and
+  the validator's REPL behaviour.
+
+
 ## [update-wsi-2026.07.06-r11.53] - 2026-07-06
 
 Tag: `bridge-lcu`. Second fix of the 2026-07-05 E2E batch (Server 2022

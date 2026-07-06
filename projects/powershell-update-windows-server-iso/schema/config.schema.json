@@ -548,8 +548,14 @@
         "EnableInstallWimUpdate": {
           "type": "boolean"
         },
-        "EnableBootWimUpdate": {
-          "type": "boolean"
+        "BootWimLcuPolicy": {
+          "type": "string",
+          "enum": [
+            "enabled",
+            "disabled",
+            "tolerate"
+          ],
+          "description": "Per-OS boot.wim LCU-servicing policy (r11.54; replaces the boolean EnableBootWimUpdate -- destructive rename, no shim). The 2026-07-05 4-OS E2E proved boot.wim LCU-serviceability is a per-media property: enabled = strict apply (2016: WinPE 1607 accepts the LCU and materialises the PCA2023 EFI_EX/FONTS_EX/DVD_EX staging set; 2025: r11.52 checkpoint-model target-only apply); disabled = leave boot.wim as shipped, WinRE servicing still runs (2019 EVAL media: structurally closed, 0x80070032 at CBS finalize, D1 probe 2026-06-12); tolerate = attempt, downgrade failure to a Caution, dismount -Discard, continue (2022: serviceability unmeasured). Missing value defaults to disabled at profile hydration."
         },
         "EnableWinREUpdate": {
           "type": "boolean"

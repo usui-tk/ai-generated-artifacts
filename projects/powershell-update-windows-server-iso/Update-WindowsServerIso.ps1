@@ -522,8 +522,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.06-r11.53'
-$Script:ScriptTag     = 'bridge-lcu'
+$Script:ScriptVersion = 'update-wsi-2026.07.06-r11.54'
+$Script:ScriptTag     = 'bootwim-policy'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -2882,7 +2882,11 @@ function Get-ConfigProfile {
         # property receive $null and the corresponding phase becomes
         # unconditionally skipped regardless of profile content.
         EnableInstallWimUpdate = $json.Common.EnableInstallWimUpdate
-        EnableBootWimUpdate    = $json.Common.EnableBootWimUpdate
+        # Per-OS boot.wim LCU policy (tri-state; the retired boolean
+        # EnableBootWimUpdate had no per-media expressiveness).
+        # Validated + defaulted ('disabled') by the pure helper so
+        # P08 reads a trustworthy value.
+        BootWimLcuPolicy       = (Resolve-BootWimLcuPolicyValue -RawValue $json.Common.BootWimLcuPolicy)
         EnableWinREUpdate      = $json.Common.EnableWinREUpdate
         Common                 = $json.Common
         PatchBaseline          = $json.PatchBaseline
@@ -7366,6 +7370,44 @@ function _CanonicalJson_ParseNull {
 # This module establishes the structural contract; a later release
 # fills in the WinRE worker and the LP-injection sequencing.
 
+function Resolve-BootWimLcuPolicyValue {
+    <#
+    .SYNOPSIS
+        Validate + default the per-OS boot.wim LCU policy
+        (Common.BootWimLcuPolicy: 'enabled' | 'disabled' | 'tolerate').
+    .DESCRIPTION
+        Replaces the boolean Common.EnableBootWimUpdate (destructive
+        rename, no compatibility shim). The 2026-07-05 4-OS E2E proved
+        LCU-serviceability of the in-media boot.wim is a PER-OS
+        property of the committed source media, not a global truth:
+          - 2016 (WinPE 1607): LCU applies cleanly AND materialises
+            the EFI_EX/FONTS_EX/DVD_EX PCA2023 staging set -> enabled.
+          - 2019 EVAL media: structurally closed (0x80070032 at CBS
+            finalize; the 2026-06-12 D1 probe closed all 6 variants)
+            -> disabled.
+          - 2022: never reached P08 in the E2E (P07 axis-3 failure);
+            serviceability UNKNOWN -> tolerate (attempt, downgrade
+            failure to Caution, discard the index, continue).
+          - 2025 (26100 WinPE): expected serviceable via the r11.52
+            checkpoint-model target-only apply -> enabled.
+        Missing/empty defaults to 'disabled' (the safe floor: a
+        boot.wim left as shipped still boots; a corrupted one does
+        not). Unknown values are a typed error, never coerced.
+    .OUTPUTS
+        System.String -- one of 'enabled' | 'disabled' | 'tolerate'.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowNull()] [AllowEmptyString()] [object]$RawValue
+    )
+    $v = [string]$RawValue
+    if ([string]::IsNullOrWhiteSpace($v)) { return 'disabled' }
+    $v = $v.Trim().ToLowerInvariant()
+    if ($v -in @('enabled', 'disabled', 'tolerate')) { return $v }
+    throw ("Common.BootWimLcuPolicy has unknown value '{0}' (expected enabled | disabled | tolerate)." -f $RawValue)
+}
+
 function ConvertTo-BridgeLcuResolvedPatch {
     <#
     .SYNOPSIS
@@ -10558,15 +10600,25 @@ function Invoke-BuildPhase07_PatchInstallWim {
 function Invoke-BuildPhase08_PatchBootWim {
     <#
     .SYNOPSIS
-        P08: Apply SSU/LCU/SafeOs DU to boot.wim indexes (PE + Setup)
-        and to winre.wim (extracted from install.wim).
+        P08: Service boot.wim indexes (PE + Setup) under the per-OS
+        Common.BootWimLcuPolicy (enabled | disabled | tolerate), and
+        winre.wim (extracted from install.wim) under EnableWinREUpdate.
+    .DESCRIPTION
+        BootWimLcuPolicy governs ONLY the boot.wim loop:
+          enabled  -- current strict behaviour (a failure aborts P08).
+          disabled -- boot.wim left as shipped; WinRE servicing below
+                      STILL RUNS (the old boolean gate skipped both,
+                      which silently dropped SafeOS DU servicing).
+          tolerate -- attempt; on failure Write-Caution, dismount the
+                      index with -Discard (never commit a partial CBS
+                      transaction), continue with the next index and
+                      the WinRE section. Purpose: measure per-media
+                      LCU-serviceability (2022) without losing the run.
     #>
     Start-DebugTrace -Context 'Invoke-BuildPhase08_PatchBootWim' -PhaseId 'P08'
     try {
-        if (-not $Script:OsProfile.EnableBootWimUpdate) {
-            Write-Skip 'EnableBootWimUpdate is false in profile; skipping P08.'
-            return
-        }
+        $bootPolicy = Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
+        Write-Step ('boot.wim LCU policy: {0}' -f $bootPolicy)
         $bootWim = Join-Path $Script:ExtractedDir 'sources\boot.wim'
         if (-not (Test-Path -LiteralPath $bootWim)) {
             if ($Script:SyntheticTestMode) {
@@ -10581,6 +10633,9 @@ function Invoke-BuildPhase08_PatchBootWim {
             return
         }
 
+        if ($bootPolicy -eq 'disabled') {
+            Write-Skip 'BootWimLcuPolicy=disabled; boot.wim left as shipped (2019 EVAL media: LCU-on-WinPE is structurally closed). WinRE servicing below still runs.'
+        } else {
         $patches = Get-PatchListForBootWim
         Write-Step ('boot.wim-targeted patches: {0}' -f $patches.Count)
 
@@ -10604,25 +10659,45 @@ function Invoke-BuildPhase08_PatchBootWim {
 
             Invoke-WimMountSafe -ImagePath $bootWim -Index $idx `
                 -Path $mountDir -LogDir $Script:LogsDir | Out-Null
+            $idxFailed = $false
             try {
-                # Dependency closure check on the union of all sub-phase patches
-                $allBootPatches = @($bootSequence | Where-Object {
-                    -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
-                } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
-                Test-PatchServicingReadinessOnMount -MountPath $mountDir `
-                    -PatchesToApply $allBootPatches `
-                    -ImageLabel $imgLabel | Out-Null
+                try {
+                    # Dependency closure check on the union of all sub-phase patches
+                    $allBootPatches = @($bootSequence | Where-Object {
+                        -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
+                    } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
+                    Test-PatchServicingReadinessOnMount -MountPath $mountDir `
+                        -PatchesToApply $allBootPatches `
+                        -ImageLabel $imgLabel | Out-Null
 
-                foreach ($sp in $bootSequence) {
-                    if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) {
-                        Invoke-DismCleanup -MountPath $mountDir
-                        continue
+                    foreach ($sp in $bootSequence) {
+                        if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) {
+                            Invoke-DismCleanup -MountPath $mountDir
+                            continue
+                        }
+                        Invoke-PatchSubPhase -SubPhase $sp -MountPath $mountDir -ImageLabel $imgLabel | Out-Null
                     }
-                    Invoke-PatchSubPhase -SubPhase $sp -MountPath $mountDir -ImageLabel $imgLabel | Out-Null
+                } catch {
+                    if ($bootPolicy -ne 'tolerate') { throw }
+                    # tolerate: downgrade to Caution, discard this index's
+                    # half-applied state (never commit a partial CBS
+                    # transaction), record for the final report, move on.
+                    $idxFailed = $true
+                    Write-Caution ('{0}: boot.wim servicing failed under BootWimLcuPolicy=tolerate; DISCARDING this index and continuing. Error: {1}' -f $imgLabel, $_.Exception.Message)
+                    Add-ErrorJsonlEntry -Phase 'P08' -Kind 'bootwim-tolerated-failure' -Properties @{
+                        exType = $_.Exception.GetType().FullName
+                        msg    = $_.Exception.Message
+                        image  = $imgLabel
+                    }
                 }
             } finally {
-                Invoke-WimDismountSafe -Path $mountDir -LogDir $Script:LogsDir
+                if ($idxFailed) {
+                    Invoke-WimDismountSafe -Path $mountDir -Discard -LogDir $Script:LogsDir
+                } else {
+                    Invoke-WimDismountSafe -Path $mountDir -LogDir $Script:LogsDir
+                }
             }
+        }
         }
 
         # winre.wim (extracted from install.wim)
