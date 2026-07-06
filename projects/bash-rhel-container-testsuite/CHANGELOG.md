@@ -13,6 +13,45 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r67] - 2026-07-06 - fix: rpm -q stdout-pollution hardening (kdevel_kver + SSM have=)
+
+### Fixed
+- **`kdevel_kver()`** (`install-aws_ena-driver.sh`): `rpm -q <missing>`
+  prints "package kernel-devel is not installed" on **STDOUT** with
+  rc != 0; the old pipeline captured that message as the kver, so the
+  directory fallback never ran and the garbage text leaked into the
+  `[result]` kver field (observed in the r66 FT: the original-bug
+  scenario emitted `"kver":"package kernel-devel is not installed"`).
+  Hardened: the capture is rc-gated, the newest rpmdb NVR is validated
+  against the tree the build actually uses (`/usr/src/kernels/<kver>` is
+  the ground truth for make/dkms), and the directory scan is the
+  fallback whenever the rpmdb answer is empty or has no matching tree.
+  Correct however kernel-devel arrived - RHSM repos, **RHUI repos**
+  (planned entitled-path work), or pre-baked into an image/AMI with a
+  stale rpmdb.
+- **SSM `have=` capture** (`install-aws_ssm-agent.sh`): same
+  stdout-pollution class - the `|| true` form let the "not installed"
+  message flow into `have`; with `SSM_VERSION=latest` the non-empty
+  garbage then passed the `[ -n ]` check and took the false
+  "package installed - continuing" path. Now rc-gated (`|| have=""`).
+  Surveyed every other `rpm -q` in the project: all are rc-gated or
+  `>/dev/null`-discarded (incl. the RHUI-client detection in
+  `lib/acquire-rootfs.sh`); the two glibc probes cannot hit the pattern
+  (rpm cannot run where glibc is absent).
+
+### Added
+- **`tests/t024_kdevelkver.sh`** (L1, 6 asserts): hermetic regression
+  guard for the hardened `kdevel_kver()` (awk function extraction +
+  shell-function rpm/find stubs, t019 style). Mutation-checked: the
+  guard FAILs against the pre-r67 function.
+
+### Changed (documentation)
+- **TESTING.md**: recorded baseline refreshed r35 -> r67 (the tier table
+  had been stale since t023 landed: 546 passed / 22 tiers vs the actual
+  621 / 24); the "green run ends with" example and the L0 fixed count
+  (45 -> 49 shell files, t001-t022 -> t001-t024) updated to match;
+  t024 tier entry added.
+
 ## [r66] - 2026-07-06 - fix: ENA E2E harness - top-level 'local' crash + DKMS plan wiring
 
 ### Fixed

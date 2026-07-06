@@ -105,7 +105,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 546 passed, 0 skipped, 0 failed  (22 tiers, 0 tier-failure(s))
+SUITE: 621 passed, 0 skipped, 0 failed  (24 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -337,6 +337,16 @@ so results are host-independent and deterministic.
   the emitted collector keeps subscription-manager plugins ENABLED, that no
   collector step pipes its exit code into `tail`, `bash -n` validity for all
   three emitted collectors, and that `probe_verdict` still loads.
+* **`t024_kdevelkver.sh`** (r67) - `kdevel_kver()` rpm stdout-pollution
+  regression guard: `rpm -q <missing>` prints "package ... is not installed"
+  on STDOUT with rc != 0, which the pre-r67 pipeline captured as the kver
+  (the directory fallback never ran and the garbage leaked into the
+  `[result]` kver field). Pins the rc-gated capture, the
+  `/usr/src/kernels/<kver>` ground-truth validation of the rpmdb answer,
+  and the directory-scan fallback (rpm missing, rpmdb NVR without a build
+  tree, multi-version rpmdb answers) - robust however kernel-devel arrived
+  (RHSM repo, RHUI repo, or pre-baked into an image). The rpm-NVR-with-tree
+  happy path needs real `/usr/src/kernels` directories -> podman FT, not L1.
 
 ---
 
@@ -514,7 +524,7 @@ banner so each run records the environment it ran under.
 
 ---
 
-## Recorded baseline (r35)
+## Recorded baseline (r67)
 
 The full suite is green in the planning sandbox:
 
@@ -523,15 +533,15 @@ The full suite is green in the planning sandbox:
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
   podman:     (hermetic L0-L2 need none; t021 uses a PATH-mock podman)
----- t001_parse.sh ----            ## RESULT pass=45 fail=0 skip=0
----- t002_shellcheck.sh ----       ## RESULT pass=45 fail=0 skip=0
+---- t001_parse.sh ----            ## RESULT pass=49 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=49 fail=0 skip=0
 ---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
 ---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
 ---- t006_initmodemap.sh ----      ## RESULT pass=7  fail=0 skip=0
 ---- t007_epelresolve.sh ----      ## RESULT pass=34 fail=0 skip=0
 ---- t008_awscliverdict.sh ----    ## RESULT pass=45 fail=0 skip=0
----- t009_ssmverdict.sh ----       ## RESULT pass=27 fail=0 skip=0
+---- t009_ssmverdict.sh ----       ## RESULT pass=31 fail=0 skip=0
 ---- t010_enaverdict.sh ----       ## RESULT pass=48 fail=0 skip=0
 ---- t011_enaverify.sh ----        ## RESULT pass=17 fail=0 skip=0
 ---- t012_osprofile.sh ----        ## RESULT pass=58 fail=0 skip=0
@@ -540,18 +550,20 @@ The full suite is green in the planning sandbox:
 ---- t015_installpins.sh ----      ## RESULT pass=17 fail=0 skip=0
 ---- t016_installintrospect.sh ----## RESULT pass=18 fail=0 skip=0
 ---- t017_probeverdict.sh ----     ## RESULT pass=8  fail=0 skip=0
----- t018_repoaccess.sh ----       ## RESULT pass=14 fail=0 skip=0
+---- t018_repoaccess.sh ----       ## RESULT pass=9  fail=0 skip=0
 ---- t019_enabuilddeps.sh ----     ## RESULT pass=8  fail=0 skip=0
 ---- t020_helperidentity.sh ----   ## RESULT pass=8  fail=0 skip=0
 ---- t021_provisionenv.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t022_ssmunavailable.sh ----   ## RESULT pass=17 fail=0 skip=0
-SUITE: 546 passed, 0 skipped, 0 failed  (22 tiers, 0 tier-failure(s))
+---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
+---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
+SUITE: 621 passed, 0 skipped, 0 failed  (24 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 45 shell files** (every `.sh` in the project, incl. the 3 root
+**L0 fixed count = 49 shell files** (every `.sh` in the project, incl. the 3 root
 `install-aws_*.sh`), each `bash -n`-clean and ShellCheck-clean at **default
 severity and `-S style`** (t002 passes `-P` so the gate is CWD-independent,
-r29): the 6 libraries, the 22 `tests/t001`-`t022` tiers, the harness
+r29): the 6 libraries, the 24 `tests/t001`-`t024` tiers, the harness
 (`run-all.sh`, `probe-env.sh`, `tests/lib/*`), the three per-tool folders
 (lister + matrix each, plus the ENA verifier), the coverage generator, and the
 contract checker. Since r28 every file carries the Layer-1 five-section header

@@ -194,9 +194,22 @@ os_major() {
 }
 
 kdevel_kver() {
-  local k
-  k="$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-devel 2>/dev/null | sort -V | tail -1)"
-  [ -n "${k}" ] || k="$(find /usr/src/kernels -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V | tail -1)"
+  # r67: `rpm -q` prints "package kernel-devel is not installed" on STDOUT
+  # (rc != 0) - the old pipeline captured that message as the kver, so the
+  # directory fallback never ran and the garbage text leaked into the
+  # [result] kver field. Gate on rpm's exit code instead, then validate the
+  # newest NVR against the tree the build actually uses
+  # (/usr/src/kernels/<kver> is the ground truth for make/dkms); if the
+  # rpmdb answer has no matching tree, fall back to the directory scan.
+  # This keeps the helper correct however kernel-devel arrived - RHSM
+  # repos, RHUI repos (planned entitled-path work), or pre-baked into an
+  # image/AMI with a stale rpmdb.
+  local k rpmq
+  rpmq="$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-devel 2>/dev/null)" || rpmq=""
+  k="$(printf '%s\n' "${rpmq}" | sort -V | tail -1)"
+  if [ -z "${k}" ] || [ ! -d "/usr/src/kernels/${k}" ]; then
+    k="$(find /usr/src/kernels -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V | tail -1)"
+  fi
   printf '%s' "${k}"
 }
 

@@ -192,7 +192,12 @@ install_rpm() {
            # that too. The rpm -q version check below is the real guard.
            case "${reason}" in
              *"POSTTRANS scriptlet"*|*"does not update installed package"*|*"Nothing to do"*)
-               have="$(rpm -q --qf '%{VERSION}' amazon-ssm-agent 2>/dev/null || true)" ;;
+               # r67: rc-gate the capture - on a missing package `rpm -q`
+               # prints "package ... is not installed" on STDOUT, which the
+               # old `|| true` form let flow into `have` (with
+               # SSM_VERSION=latest the non-empty garbage then passed the
+               # [ -n ] check below -> false "installed - continuing" path).
+               have="$(rpm -q --qf '%{VERSION}' amazon-ssm-agent 2>/dev/null)" || have="" ;;
            esac
            if [ -n "${have}" ] && { [ "${SSM_VERSION}" = "latest" ] || [ "${have}" = "${SSM_VERSION}" ]; }; then
              PTWARN=1
