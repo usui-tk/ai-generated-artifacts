@@ -15,11 +15,13 @@ Assertions:
      ResolvedPatches entry: PatchType 'BridgeLcu', ApplyOrder 0, sha-1
      ExpectedHashes from Digest, LocalPath in the FLAT per-OS folder
      (outside the `cu` checkpoint-discovery subfolder).
-  2. `Build-PatchPlan` routes 'BridgeLcu' to Install ONLY (never Boot /
-     WinRE -- WinPE re-enters the LCU-servicing constraints; WinRE is
-     serviced by SSU + SafeOS DU).
-  3. `Build-InstallApplySequence` emits `I0.BridgeLcu` FIRST, carrying
-     the bridge, with the target LCU still in I3.
+  2. `Build-PatchPlan` routes 'BridgeLcu' to Install AND Boot (r11.57:
+     the 2026-07-07 Server 2022 E2E measured the same 0x800f0823 floor
+     failure on boot.wim; never WinRE -- WinRE is serviced by SSU +
+     SafeOS DU).
+  3. `Build-InstallApplySequence` emits `I0.BridgeLcu` FIRST (target
+     LCU still in I3); `Build-BootApplySequence` emits `B0.BridgeLcu`
+     FIRST (target LCU still in B3).
   4. Committed data: seed-Server2022 + config-Server2022 carry an
      identical BridgeLcu envelope (KB5030216, floor 20348.1960, MS
      evidence URL); Digest is the base64 form of the SHA-1 hex embedded
@@ -139,8 +141,8 @@ def main() -> int:
         plan = ps.invoke("Build-PatchPlan", Patches=patches)
         counts = plan.get("_TargetCounts") or {}
         passed, failed = check(
-            "BridgeLcu routed to Install only",
-            counts.get("Install") == 2 and counts.get("Boot") == 1
+            "BridgeLcu routed to Install AND Boot (r11.57; never WinRE)",
+            counts.get("Install") == 2 and counts.get("Boot") == 2
             and counts.get("WinRE") == 0,
             f"_TargetCounts={counts}", passed, failed)
         passed, failed = check(
@@ -167,6 +169,21 @@ def main() -> int:
             "target LCU stays in I3.LCU.FirstPass",
             i3_kbs == ["KB5094128"],
             f"I3 patches={i3_kbs}", passed, failed)
+
+        boot_seq = plan.get("BootSequence") or []
+        boot_names = [sp.get("Name") for sp in boot_seq]
+        passed, failed = check(
+            "B0.BridgeLcu is the FIRST boot sub-phase (r11.57)",
+            bool(boot_names) and boot_names[0] == "B0.BridgeLcu",
+            f"boot sequence={boot_names}", passed, failed)
+        b0 = boot_seq[0] if boot_seq else {}
+        b0_kbs = [p.get("KbId") for p in (b0.get("Patches") or [])]
+        b3 = next((sp for sp in boot_seq if sp.get("Name") == "B3.LCU"), {})
+        b3_kbs = [p.get("KbId") for p in (b3.get("Patches") or [])]
+        passed, failed = check(
+            "B0 carries the bridge; target LCU stays in B3.LCU",
+            b0_kbs == ["KB5030216"] and b3_kbs == ["KB5094128"],
+            f"B0={b0_kbs} B3={b3_kbs}", passed, failed)
 
     print()
     print(f"  Summary: {passed} passed, {failed} failed, {passed + failed} total")

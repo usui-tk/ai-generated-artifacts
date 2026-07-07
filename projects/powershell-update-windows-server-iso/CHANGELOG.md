@@ -22,6 +22,41 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.07-r11.57] - 2026-07-07
+
+Tag: `boot-bridge`. Second fix of the 2026-07-07 E2E (run 2) batch:
+Server 2022's boot.wim rejected the target LCU on both indexes. The
+surface message was "An error occurred applying the Unattend.xml file
+from the .msu package", but the WARNING line carries the real code:
+`0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` -- the IDENTICAL
+axis-3 image-side servicing-stack floor that I0.BridgeLcu fixed on
+install.wim in the same run (install.wim: bridge first, then LCU,
+status=Ok on all 4 indexes; boot.wim: no bridge wired, target LCU
+head-on, 0x800f0823). This overturns the r11.53 Install-only routing
+rationale ("boot.wim would re-enter WinPE constraints for zero gain")
+by measurement, and it is DISTINCT from the Server 2019 closure
+(0x80070032 at CBS finalize; D1 probe closed all 6 variants).
+
+### Changed
+
+- **`PatchTargetMap['BridgeLcu']` = Install + Boot** (never WinRE).
+- **New sub-phase `B0.BridgeLcu`**: `Build-BootApplySequence` emits it
+  FIRST (mirrors I0); applied unconditionally when present [A1],
+  supersedence no-ops it on already-current images. For OSes without
+  a bridge envelope B0 is empty and skips.
+- **Server 2022 `BootWimLcuPolicy` stays `tolerate`**
+  [user-adjudicated 2026-07-07]: the next E2E measures whether the
+  bridged boot.wim accepts the target LCU. Success => flip to
+  `enabled`; a distinct failure code => true closure, flip to
+  `disabled`. No spec-shortfall is accepted for 2022 without that
+  measurement.
+
+### Tests
+
+- T33 extended to 19 assertions: Install+Boot routing, B0-first
+  ordering, bridge in B0 / target LCU in B3.
+
+
 ## [update-wsi-2026.07.07-r11.56] - 2026-07-07
 
 Tag: `p08-plan-scope`. First fix of the 2026-07-07 4-OS E2E (run 2)

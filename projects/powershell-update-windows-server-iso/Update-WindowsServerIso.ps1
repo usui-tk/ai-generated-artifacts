@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.56'
-$Script:ScriptTag     = 'p08-plan-scope'
+$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.57'
+$Script:ScriptTag     = 'boot-bridge'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -663,11 +663,15 @@ $Script:PatchTargetMap = @{
     'Checkpoint'      = @()
     # Static per-OS bridge LCU (PatchBaseline.BridgeLcu envelope, SEED):
     # raises an out-of-floor image servicing stack BEFORE the current
-    # combined LCU (axis 3; prevents 0x800f0823). Install-only: feeding
-    # an extra LCU-class package to boot.wim would re-enter the
-    # WinPE-servicing constraints for zero gain, and WinRE is serviced
+    # combined LCU (axis 3; prevents 0x800f0823). Routed to Install AND
+    # Boot: the Server 2022 E2E measured the SAME 0x800f0823 on
+    # boot.wim (surface message 'An error occurred applying the
+    # Unattend.xml file from the .msu package', WARNING line carries
+    # the code) once install.wim was bridged -- WinPE shares the
+    # image-side floor, so the bridge must precede the target LCU
+    # there too (sub-phase B0). NOT routed to WinRE: WinRE is serviced
     # by SSU + SafeOS DU, never an LCU.
-    'BridgeLcu'       = @('Install')
+    'BridgeLcu'       = @('Install', 'Boot')
     'DotNet'          = @('Install')
     'SafeOSDU'        = @('WinRE')
     'SetupDU'         = @('Setup')
@@ -7806,7 +7810,8 @@ function Build-BootApplySequence {
     <#
     .SYNOPSIS
         Convert the boot.wim patch slice into the documented servicing
-        sub-phases (SSU -> LP -> LCU).
+        sub-phases, prefixed by the optional B0 bridge-LCU sub-phase
+        (axis-3 servicing-stack floor; mirrors I0 on install.wim).
     #>
     [CmdletBinding()]
     [OutputType([array])]
@@ -7819,12 +7824,19 @@ function Build-BootApplySequence {
         if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
         $byType[$t].Add($p) | Out-Null
     }
+    $bridge = @(if ($byType.ContainsKey('BridgeLcu')) { $byType['BridgeLcu'] } else { @() })
     $ssu = @(if ($byType.ContainsKey('SSU')) { $byType['SSU'] } else { @() })
     $lp  = @()
     if ($byType.ContainsKey('LanguagePack')) { $lp += $byType['LanguagePack'] }
     $lcu = @(if ($byType.ContainsKey('LCU')) { $byType['LCU'] } else { @() })
 
     $seq = New-Object System.Collections.Generic.List[object]
+    # B0: static bridge LCU. Measured basis (2026-07-07 Server 2022
+    # E2E): boot.wim rejected the target LCU with 0x800f0823 -- the
+    # identical image-side servicing-stack floor that I0 bridges on
+    # install.wim. Unconditionally first when present [A1];
+    # supersedence no-ops it on already-current images.
+    $seq.Add([pscustomobject]@{ Name='B0.BridgeLcu'; Description='Bridge LCU (image servicing-stack floor; applied before everything)'; Patches=$bridge; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='B1.SSU'; Description='SSU'; Patches=$ssu; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='Language Pack'; Patches=$lp; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='B3.LCU'; Description='LCU'; Patches=$lcu; RequiresRemount=$false }) | Out-Null
@@ -10686,7 +10698,7 @@ function Invoke-BuildPhase08_PatchBootWim {
             $bootIndexes = @(1, 2)
         }
 
-        # Pull boot.wim apply sequence (B1.SSU -> B2.LP -> B3.LCU -> B4.cleanup)
+        # Pull boot.wim apply sequence (B0.BridgeLcu -> B1.SSU -> B2.LP -> B3.LCU -> B4.cleanup)
         $bootSequence = @($plan.BootSequence)
         Write-Step ('boot.wim apply sequence: {0} sub-phase(s)' -f $bootSequence.Count)
 
