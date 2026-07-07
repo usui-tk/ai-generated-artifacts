@@ -22,6 +22,42 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.07-r11.61] - 2026-07-07
+
+Tag: `inspect-install-ex`. First half of the Server 2019 PCA2023
+rescue [user-adjudicated 2026-07-07]. Delivery-goal analysis: 2019's
+boot.wim is structurally unserviceable (0x80070032, D1-probed), the
+PCA2023 conversion sourced its payloads from boot.wim ONLY, so the
+2019 output ISO would stay PCA2011-signed -- unbootable on firmware
+that revoked the 2011 CA (the post-2026-06 world this project
+targets). The earlier "the only impact is a stale installer
+environment" assessment was WRONG against that goal. The LCU stages
+the `_EX` payloads into ANY serviced image, and 2019's install.wim IS
+serviced: this patch makes that fallback source MEASURED end to end
+before the conversion patch consumes it.
+
+### Changed
+
+- **`Get-WimIndexInspection`: `_EX` census on BOTH kinds** (was
+  boot-only). `Compare-MediaInspection` reports `ExPayloadAppeared`
+  for both WIM slots.
+- **Readiness inventory records the install.wim `_EX` census**
+  (`InstallHasEfiExDir` / `InstallHasBootMgrFwEx` / `InstallHasFontsEx`
+  / `InstallHasDvdEx` / `InstallHasEfisysExBin`) in the SAME mount
+  session as the existing hive reads (no extra mount cost).
+- **Health classification recognizes the fallback**: PCA2011 signer +
+  no boot.wim `_EX` + install.wim `_EX` present is now its own
+  Warning ("P10 sources from install.wim"); the neither-image case
+  states plainly that P10 has no conversion source. Display + report
+  gain an install-side `_EX` line.
+
+### Tests
+
+- T38 extended to 26 (both-kinds census fixture, install-slot
+  appearance, readiness wiring pin); T3 harness schema re-pinned with
+  the five new inventory fields.
+
+
 ## [update-wsi-2026.07.07-r11.60] - 2026-07-07
 
 Tag: `kb-alias`. Resolves the DotNet KbId/FileName divergence flagged

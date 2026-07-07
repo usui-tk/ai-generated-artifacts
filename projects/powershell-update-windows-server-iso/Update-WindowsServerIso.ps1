@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.60'
-$Script:ScriptTag     = 'kb-alias'
+$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.61'
+$Script:ScriptTag     = 'inspect-install-ex'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -8531,6 +8531,21 @@ function Get-WimIndexInspection {
             default { throw ("Get-WimIndexInspection: unknown OsKey '{0}'." -f $OsKey) }
         }
 
+        # PCA2023 _EX payload census -- BOTH kinds. The LCU stages
+        # these into any serviced image; install.wim is the fallback
+        # source for the boot-manager conversion when boot.wim is
+        # unserviceable (Server 2019: 0x80070032 closure), so its
+        # census is as load-bearing as boot.wim's.
+        $exBins  = Join-Path $MountDir 'Windows\Boot\EFI_EX'
+        $exFonts = Join-Path $MountDir 'Windows\Boot\FONTS_EX'
+        $exDvd   = Join-Path $MountDir 'Windows\Boot\DVD_EX'
+        $rec.HasEfiExDir    = Test-Path -LiteralPath $exBins
+        $rec.HasFontsEx     = Test-Path -LiteralPath $exFonts
+        $rec.HasDvdEx       = Test-Path -LiteralPath $exDvd
+        $rec.HasBootMgrFwEx = if ($rec.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgfw_EX.efi') } else { $false }
+        $rec.HasBootMgrEx   = if ($rec.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgr_EX.efi')   } else { $false }
+        $rec.HasEfisysExBin = if ($rec.HasDvdEx) { Test-Path -LiteralPath (Join-Path $exDvd 'EFI\en-US\efisys_EX.bin') } else { $false }
+
         if ($Kind -eq 'install') {
             $winRe = Join-Path $MountDir 'Windows\System32\Recovery\Winre.wim'
             $rec.WinRePresent = Test-Path -LiteralPath $winRe
@@ -8544,16 +8559,6 @@ function Get-WimIndexInspection {
             $rec.UEFICA2023Error  = Get-WimOfflineHiveValue -WimMountPath $MountDir -HiveFile 'SYSTEM' -RelativeRegPath $servPath -ValueName 'UEFICA2023Error'
             $au = Get-WimOfflineHiveValue -WimMountPath $MountDir -HiveFile 'SYSTEM' -RelativeRegPath 'ControlSet001\Control\SecureBoot' -ValueName 'AvailableUpdates'
             if ($null -ne $au) { $rec.AvailableUpdates = ('0x{0:x}' -f [int]$au) }
-        } else {
-            $exBins  = Join-Path $MountDir 'Windows\Boot\EFI_EX'
-            $exFonts = Join-Path $MountDir 'Windows\Boot\FONTS_EX'
-            $exDvd   = Join-Path $MountDir 'Windows\Boot\DVD_EX'
-            $rec.HasEfiExDir    = Test-Path -LiteralPath $exBins
-            $rec.HasFontsEx     = Test-Path -LiteralPath $exFonts
-            $rec.HasDvdEx       = Test-Path -LiteralPath $exDvd
-            $rec.HasBootMgrFwEx = if ($rec.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgfw_EX.efi') } else { $false }
-            $rec.HasBootMgrEx   = if ($rec.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgr_EX.efi')   } else { $false }
-            $rec.HasEfisysExBin = if ($rec.HasDvdEx) { Test-Path -LiteralPath (Join-Path $exDvd 'EFI\en-US\efisys_EX.bin') } else { $false }
         }
     } catch {
         $rec.ErrorMessage = $_.Exception.Message
@@ -8723,10 +8728,7 @@ function Compare-MediaInspection {
             $postRec = $postByIdx[$i]
             $preB  = ConvertFrom-InspectionBuildValue -Value $(if ($preRec.Evidence) { $preRec.Evidence.Build } else { $null })
             $postB = ConvertFrom-InspectionBuildValue -Value $(if ($postRec -and $postRec.Evidence) { $postRec.Evidence.Build } else { $null })
-            $exAppeared = $null
-            if ($slotName -eq 'BootWim') {
-                $exAppeared = [bool](($postRec -and $postRec.HasEfiExDir) -and -not $preRec.HasEfiExDir)
-            }
+            $exAppeared = [bool](($postRec -and $postRec.HasEfiExDir) -and -not $preRec.HasEfiExDir)
             $indexDiffs += [pscustomobject]@{
                 Index              = $i
                 BuildBefore        = $preB
@@ -9196,6 +9198,13 @@ function Get-IsoBootCertReadiness {
         UEFICA2023Status           = $null
         UEFICA2023Error            = $null
         AvailableUpdatesHex        = $null
+        # PCA2023 _EX payload census inside install.wim (fallback
+        # conversion source when boot.wim is unserviceable)
+        InstallHasEfiExDir         = $null
+        InstallHasBootMgrFwEx      = $null
+        InstallHasFontsEx          = $null
+        InstallHasDvdEx            = $null
+        InstallHasEfisysExBin      = $null
     }
 
     # ---- File-existence checks ----
@@ -9334,6 +9343,20 @@ function Get-IsoBootCertReadiness {
                 if ($null -ne $auRaw) {
                     $inv.AvailableUpdatesHex = ('0x{0:X}' -f [int]$auRaw)
                 }
+
+                # PCA2023 _EX census inside install.wim (same mount
+                # session -- no extra mount cost). This is the
+                # fallback conversion source when boot.wim is
+                # unserviceable (Server 2019).
+                $iwExBins  = Join-Path $installMount 'Windows\Boot\EFI_EX'
+                $iwExFonts = Join-Path $installMount 'Windows\Boot\FONTS_EX'
+                $iwExDvd   = Join-Path $installMount 'Windows\Boot\DVD_EX'
+                $inv.InstallHasEfiExDir    = Test-Path -LiteralPath $iwExBins
+                $inv.InstallHasFontsEx     = Test-Path -LiteralPath $iwExFonts
+                $inv.InstallHasDvdEx       = Test-Path -LiteralPath $iwExDvd
+                $inv.InstallHasBootMgrFwEx = if ($inv.InstallHasEfiExDir) { Test-Path -LiteralPath (Join-Path $iwExBins 'bootmgfw_EX.efi') } else { $false }
+                $inv.InstallHasEfisysExBin = if ($inv.InstallHasDvdEx) { Test-Path -LiteralPath (Join-Path $iwExDvd 'EFI\en-US\efisys_EX.bin') } else { $false }
+                Write-Step ('         install.wim _EX census: EFI_EX={0} bootmgfw_EX={1} DVD_EX={2}' -f $inv.InstallHasEfiExDir, $inv.InstallHasBootMgrFwEx, $inv.InstallHasDvdEx)
             } finally {
                 if ($iwMounted) {
                     Write-Step '  [4/4] Dismounting install.wim (discard) ...'
@@ -9730,6 +9753,7 @@ function Get-Pca2023ReadinessSnapshot {
     $isPca2011 = ($emb.BootX64IsPca2011 -eq $true)
     $meetsPrereq = ($emb.InstallWimMeetsPca2023Prereq -eq $true) -or ($emb.BootWimMeetsPca2023Prereq -eq $true)
     $hasEfiEx = ($emb.HasEfiExDir -eq $true) -and ($emb.HasBootMgrFwEx -eq $true)
+    $hasInstallEfiEx = ($emb.InstallHasEfiExDir -eq $true) -and ($emb.InstallHasBootMgrFwEx -eq $true)
 
     if (-not $meetsPrereq) {
         $health = 'Critical'
@@ -9747,9 +9771,12 @@ function Get-Pca2023ReadinessSnapshot {
     } elseif ($isPca2011 -and $hasEfiEx) {
         $health = 'Warning'
         $reasons.Add('bootx64.efi is still PCA2011-signed, BUT EFI_EX staging directory is present in boot.wim. P10 ConvertPca2023BootManager (or external Make2023BootableMedia.ps1) can promote this ISO to PCA2023 in one pass.') | Out-Null
+    } elseif ($isPca2011 -and $hasInstallEfiEx) {
+        $health = 'Warning'
+        $reasons.Add('bootx64.efi is still PCA2011-signed and boot.wim carries no EFI_EX staging (unserviceable boot.wim), BUT the serviced install.wim carries the _EX payloads. P10 sources the PCA2023 boot manager from install.wim (fallback; MS-Q&A-confirmed direct workaround for revoked firmware).') | Out-Null
     } elseif ($isPca2011) {
         $health = 'Warning'
-        $reasons.Add('bootx64.efi is still PCA2011-signed and no EFI_EX staging directory was found. boot.wim may have been built from a source older than 2024-4B; P10 will refuse to operate even though install.wim claims prereq is met.') | Out-Null
+        $reasons.Add('bootx64.efi is still PCA2011-signed and NEITHER boot.wim NOR install.wim carries the EFI_EX staging payloads. Both images predate 2024-4B; P10 has no conversion source and will refuse to operate.') | Out-Null
     } else {
         # neither flag was set - we could not read the signature at all
         $health = 'Unknown'
@@ -9840,6 +9867,7 @@ function Show-Pca2023ReadinessSnapshot {
     Write-Step ('  bootmgr_EX.efi         : {0}' -f $(if ($null -eq $emb.HasBootMgrEx) { 'n/a' } elseif ($emb.HasBootMgrEx) { 'present' } else { 'NOT present' }))
     Write-Step ('  FONTS_EX               : {0}' -f $(if ($null -eq $emb.HasFontsEx) { 'n/a' } elseif ($emb.HasFontsEx) { 'present' } else { 'NOT present' }))
     Write-Step ('  DVD_EX/EFI/en-US/efisys_EX.bin : {0}' -f $(if ($null -eq $emb.HasEfisysExBin) { 'n/a' } elseif ($emb.HasEfisysExBin) { 'present' } else { 'NOT present' }))
+    Write-Step ('  install.wim EFI_EX (fallback)  : {0}' -f $(if ($null -eq $emb.InstallHasEfiExDir) { 'n/a' } elseif ($emb.InstallHasEfiExDir) { 'present' } else { 'NOT present' }))
     Write-Step ''
     Write-Step '[bootx64.efi signer]'
     Write-Step ('  Signer subject  : {0}' -f $(if ($emb.BootX64SignerName) { $emb.BootX64SignerName } else { 'n/a' }))
@@ -9919,6 +9947,7 @@ function Format-Pca2023ReadinessForReport {
     [void]$sb.AppendLine(('  bootmgr_EX.efi              : {0}' -f $(if ($null -eq $emb.HasBootMgrEx) { 'n/a' } elseif ($emb.HasBootMgrEx) { 'present' } else { 'NOT present' })))
     [void]$sb.AppendLine(('  FONTS_EX                    : {0}' -f $(if ($null -eq $emb.HasFontsEx) { 'n/a' } elseif ($emb.HasFontsEx) { 'present' } else { 'NOT present' })))
     [void]$sb.AppendLine(('  efisys_EX.bin (DVD_EX)      : {0}' -f $(if ($null -eq $emb.HasEfisysExBin) { 'n/a' } elseif ($emb.HasEfisysExBin) { 'present' } else { 'NOT present' })))
+    [void]$sb.AppendLine(('install.wim EFI_EX (fallback src) : {0}' -f $(if ($null -eq $emb.InstallHasEfiExDir) { 'n/a' } elseif ($emb.InstallHasEfiExDir) { 'present' } else { 'NOT present' })))
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('-- bootx64.efi signer ' + ('-' * 56))
     [void]$sb.AppendLine(('Signer subject  : {0}' -f $(if ($emb.BootX64SignerName) { $emb.BootX64SignerName } else { 'n/a' })))

@@ -65,16 +65,14 @@ def vstr(v):
 
 
 def mk_index(idx, build, pkg_count, prereq, kind="install", efi_ex=False, error=None):
-    rec = {
+    return {
         "Kind": kind,
         "Index": idx,
         "Evidence": {"Build": build, "MeetsPca2023Prereq": prereq},
         "PackageNames": [f"pkg{n}" for n in range(pkg_count)],
+        "HasEfiExDir": efi_ex,
         "ErrorMessage": error,
     }
-    if kind == "boot":
-        rec["HasEfiExDir"] = efi_ex
-    return rec
 
 
 def mk_inspection(label, install_idx, boot_idx, install_sha, boot_sha):
@@ -114,7 +112,7 @@ def main() -> int:
             "aaa", "bbb")
         post = mk_inspection(
             "post",
-            [mk_index(1, "20348.5256", 14, True)],  # idx 2 missing post
+            [mk_index(1, "20348.5256", 14, True, efi_ex=True)],  # idx 2 missing post
             [mk_index(1, "20348.5256", 7, True, kind="boot", efi_ex=True)],
             "ccc", "ddd")
         diff = ps.invoke("Compare-MediaInspection", Pre=pre, Post=post)
@@ -138,6 +136,10 @@ def main() -> int:
             "boot idx1: _EX payload appearance detected",
             boot[1]["ExPayloadAppeared"] is True,
             f"ExPayloadAppeared={boot[1]['ExPayloadAppeared']!r}", p, f)
+        p, f = check(
+            "install idx1: _EX payload appearance detected too (r11.61 both-kinds census)",
+            inst[1]["ExPayloadAppeared"] is True,
+            f"ExPayloadAppeared={inst[1]['ExPayloadAppeared']!r}", p, f)
         p, f = check(
             "WIM SHA change surfaced",
             wims["InstallWim"]["ShaChanged"] is True and wims["BootWim"]["ShaChanged"] is True,
@@ -226,6 +228,9 @@ def main() -> int:
     p, f = check("P13 diffs + observe-first wired",
                  "inspection_diff.json" in code
                  and re.search(r"Get-InspectionCrossChecks\s+-BootWimLcuPolicy", code) is not None,
+                 "wired", p, f)
+    p, f = check("readiness inventory records the install.wim _EX census (fallback source)",
+                 "InstallHasEfiExDir" in code and "InstallHasBootMgrFwEx" in code,
                  "wired", p, f)
     p, f = check("P11 Kb rows accept the Catalog child-KB alias",
                  re.search(r"Get-KbAliasFromPatchPath\s+-KbId", code) is not None,

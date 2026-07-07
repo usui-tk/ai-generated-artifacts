@@ -222,6 +222,8 @@ def test_get_iso_boot_cert_readiness_schema_completeness(ps: PSSession) -> TestO
         'BootX64SignerName', 'BootX64IsPca2023', 'BootX64IsPca2011',
         'BootX64ChainTokens', 'BootX64Available',
         'InstallWimHighestKb', 'InstallWimBuild', 'InstallWimBuildAgree',
+        'InstallHasEfiExDir', 'InstallHasBootMgrFwEx', 'InstallHasFontsEx',
+        'InstallHasDvdEx', 'InstallHasEfisysExBin',
         'InstallWimMeetsPca2023Prereq',
         'BootWimHighestKb', 'BootWimBuild', 'BootWimBuildAgree',
         'BootWimMeetsPca2023Prereq',
