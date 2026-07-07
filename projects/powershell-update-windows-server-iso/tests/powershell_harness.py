@@ -136,23 +136,28 @@ def test_test_pca2023_authenticode_chain_missing_file(ps: PSSession) -> TestOutc
 
 
 def test_get_lcu_version_missing_mount(ps: PSSession) -> TestOutcome:
-    """Get-LcuVersionFromInstallWim on a non-existent mount path
-    returns .Available=$false with the Get-WindowsPackage error
-    surfaced via .ErrorMessage. Smoke-checks that the function
-    exists and obeys its documented contract."""
-    name = 'Get-LcuVersionFromInstallWim missing-mount error path'
+    """Get-ImageLcuEvidence (r11.58 per-OS engine) on a non-existent
+    mount path is best-effort on every acquisition source: it must NOT
+    throw, and must return an evidence object with a null Build and
+    MeetsPca2023Prereq=False for the requested OsKey."""
+    name = 'Get-ImageLcuEvidence missing-mount best-effort path'
     bogus = '/tmp/nonexistent_wim_mount_for_t3_test'
     try:
-        result = ps.invoke('Get-LcuVersionFromInstallWim', MountPath=bogus)
+        result = ps.invoke('Get-ImageLcuEvidence', OsKey='Server2022', MountPath=bogus)
     except PSHarnessError as exc:
         return TestOutcome(name, False, f'invoke raised: {exc}')
-    available = result.get('Available') if isinstance(result, dict) else None
-    err = result.get('ErrorMessage') if isinstance(result, dict) else None
-    if available is False and err and 'get-windowspackage' in err.lower():
+    if not isinstance(result, dict):
+        return TestOutcome(name, False, f'unexpected shape: {result!r}')
+    ok = (result.get('OsKey') == 'Server2022'
+          and result.get('Build') is None
+          and result.get('MeetsPca2023Prereq') is False)
+    if ok:
         return TestOutcome(name, True,
-                           f'.Available=False, ErrorMessage surfaced from DISM API')
+                           'evidence object with null Build, prereq False, no throw')
     return TestOutcome(name, False,
-                       f'unexpected shape: Available={available!r} ErrorMessage={err!r}')
+                       f"unexpected shape: OsKey={result.get('OsKey')!r} "
+                       f"Build={result.get('Build')!r} "
+                       f"prereq={result.get('MeetsPca2023Prereq')!r}")
 
 
 def test_format_pca2023_readiness_for_report_empty_snapshot(ps: PSSession) -> TestOutcome:
@@ -216,9 +221,9 @@ def test_get_iso_boot_cert_readiness_schema_completeness(ps: PSSession) -> TestO
         'HasFontsEx', 'HasDvdEx', 'HasEfisysExBin',
         'BootX64SignerName', 'BootX64IsPca2023', 'BootX64IsPca2011',
         'BootX64ChainTokens', 'BootX64Available',
-        'InstallWimHighestKb', 'InstallWimHighestKbDate',
+        'InstallWimHighestKb', 'InstallWimBuild', 'InstallWimBuildAgree',
         'InstallWimMeetsPca2023Prereq',
-        'BootWimHighestKb', 'BootWimHighestKbDate',
+        'BootWimHighestKb', 'BootWimBuild', 'BootWimBuildAgree',
         'BootWimMeetsPca2023Prereq',
         'UEFICA2023Status', 'UEFICA2023Error', 'AvailableUpdatesHex',
     }

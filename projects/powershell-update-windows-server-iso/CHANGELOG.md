@@ -22,6 +22,55 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.07-r11.58] - 2026-07-07
+
+Tag: `per-os-evidence`. Third fix of the 2026-07-07 E2E (run 2) batch,
+and the core of the per-OS inspection arc [user-adjudicated
+2026-07-07]: LCU-level detection was a single shared function
+(`Get-LcuVersionFromInstallWim`) that matched ONLY
+`Package_for_KB######` names. That naming exists on Server 2016 alone;
+2019/2022/2025 name their cumulative package
+`Package_for_RollupFix~...~~<build>.<rev>` with NO KB id, so the
+detector returned '(none)' on media whose LCU had in fact applied
+status=Ok -- P10 mis-skipped (Critical false-skip) and P12 mis-failed
+on 2022/2025 in the same run that proved the servicing worked.
+
+### Changed
+
+- **Judgment forked per OS** (never shared again): four independent
+  resolvers `Resolve-LcuEvidence_Server2016/2019/2022/2025`, each
+  owning its LCU package-naming rule and its documented 2024-4B build
+  floor (MS primary sources, verified 2026-07-07: 2016 KB5036899 =
+  14393.6897; 2019 KB5036896 = 17763.5696; 2022 KB5036909 =
+  20348.2402; 2025: the 26100 GA itself postdates 2024-04, floor
+  26100.1). Server 2025 resolvers the checkpoint model: multiple
+  RollupFix packages visible, highest build wins.
+- **Three independent build sources, one mount session**
+  (`Get-ImageLcuEvidence` acquisition shell + dispatcher): package
+  names (Get-WindowsPackage), SOFTWARE hive CurrentBuildNumber+UBR,
+  and ntoskrnl.exe file version -- consensus arithmetic
+  (registry > packages > kernel; `BuildSourcesAgree` requires >= 2
+  matching sources) in the judgment-free `New-LcuEvidenceObject`.
+  Unknown OsKey is a typed throw: silently mis-inspecting an OS is
+  the exact failure this engine replaces.
+- **`Get-WimSystemHiveValue` -> `Get-WimOfflineHiveValue`**
+  (destructive rename): the offline hive reader now takes
+  `-HiveFile SYSTEM|SOFTWARE`; all call sites updated.
+- **Readiness/P12 fields re-based on builds**: `InstallWimBuild` /
+  `BootWimBuild` + `...BuildAgree` replace the retired
+  `...HighestKbDate` (an InstallTime-derived value with no per-OS
+  meaning); `MeetsPca2023Prereq` is now a measured-build >= floor
+  comparison. Displays and the P12 report updated accordingly.
+
+### Tests
+
+- **T37 `per_os_evidence_test.py`** (16 assertions): build
+  normalisation, all four resolvers against real package-name shapes
+  (including the exact 2026-07 E2E 20348.5256.1.13), floor
+  boundaries, checkpoint highest-build-wins, source consensus, and
+  the dispatcher throw.
+
+
 ## [update-wsi-2026.07.07-r11.57] - 2026-07-07
 
 Tag: `boot-bridge`. Second fix of the 2026-07-07 E2E (run 2) batch:

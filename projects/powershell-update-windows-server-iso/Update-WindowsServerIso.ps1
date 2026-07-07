@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.57'
-$Script:ScriptTag     = 'boot-bridge'
+$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.58'
+$Script:ScriptTag     = 'per-os-evidence'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -8166,8 +8166,8 @@ function Invoke-PatchSubPhase {
 # These helpers underpin P10 ConvertPca2023BootManager and P12
 # VerifyPca2023Readiness. They are organised as:
 #
-#   1. Get-LcuVersionFromInstallWim         - which LCU level is in the WIM
-#   2. Get-WimSystemHiveValue               - read SOFTWARE/SYSTEM hive
+#   1. Get-ImageLcuEvidence (+ 4 per-OS resolvers) - which LCU level is in the WIM
+#   2. Get-WimOfflineHiveValue              - read SOFTWARE/SYSTEM hive
 #                                             offline via 'reg load'
 #   3. Test-Pca2023AuthenticodeChain        - verify bootx64.efi signer
 #   4. Get-IsoBootCertReadiness             - assemble per-ISO inventory
@@ -8197,75 +8197,295 @@ function Invoke-PatchSubPhase {
 # ja-JP Windows (see SPEC.md D.22 for the design background).
 # ============================================================
 
-function Get-LcuVersionFromInstallWim {
+function ConvertTo-TwoPartBuild {
     <#
     .SYNOPSIS
-        Determine which LCU month an install.wim or boot.wim image carries.
+        Judgment-free utility: normalise a dotted build string to its
+        first two numeric components as [version] (e.g.
+        '20348.5256.1.13' -> [version]'20348.5256'). $null/unparsable
+        input returns $null; never throws.
+    #>
+    [CmdletBinding()]
+    [OutputType([version])]
+    param(
+        [AllowNull()] [AllowEmptyString()] [string]$BuildString
+    )
+    if ([string]::IsNullOrWhiteSpace($BuildString)) { return $null }
+    $m = [regex]::Match($BuildString.Trim(), '^(\d+)\.(\d+)')
+    if (-not $m.Success) { return $null }
+    return [version]('{0}.{1}' -f $m.Groups[1].Value, $m.Groups[2].Value)
+}
 
-        Returns a pscustomobject with:
-          .Available     - $true if Get-WindowsPackage succeeded
-          .ErrorMessage  - reason string when not available
-          .HighestKbId   - newest detected LCU KB id (e.g. "KB5043050")
-          .HighestKbDate - ISO date of that KB (best-effort parse of
-                           KB metadata; may be $null)
-          .MeetsPca2023Prereq - $true if any LCU date >= 2024-04-09
-                                (the Make2023BootableMedia.ps1 prereq)
+function New-LcuEvidenceObject {
+    <#
+    .SYNOPSIS
+        Judgment-free utility: assemble the common evidence shape from
+        per-OS resolver inputs. The JUDGMENT (which package names count
+        as the LCU, which build floor applies) lives in the four
+        per-OS resolvers; this helper only performs the mechanical
+        source-consensus arithmetic every resolver shares:
+          Build            = registry > packages > kernel (first non-null)
+          BuildSourcesAgree = every non-null source equal (2-part), and
+                              at least two sources present
+          MeetsPca2023Prereq = Build >= FloorBuild (null build = $false)
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
-        [Parameter(Mandatory)] [string]$MountPath
+        [Parameter(Mandatory)] [string]$OsKey,
+        [AllowNull()] [string]$LcuPackageName,
+        [AllowNull()] [string]$LcuKbId,
+        [AllowNull()] [version]$BuildFromPackages,
+        [AllowNull()] [version]$BuildFromRegistry,
+        [AllowNull()] [version]$BuildFromKernel,
+        [Parameter(Mandatory)] [version]$FloorBuild,
+        [int]$PackageCount = 0,
+        [string]$Notes = ''
     )
-
-    $result = [pscustomobject]@{
-        Available           = $false
-        ErrorMessage        = $null
-        HighestKbId         = $null
-        HighestKbDate       = $null
-        MeetsPca2023Prereq  = $null
+    $sources = @(@($BuildFromRegistry, $BuildFromPackages, $BuildFromKernel) | Where-Object { $null -ne $_ })
+    $build = if ($sources.Count -gt 0) { $sources[0] } else { $null }
+    $agree = $false
+    if ($sources.Count -ge 2) {
+        $agree = @($sources | Sort-Object -Unique).Count -eq 1
     }
-
-    # The PCA2023 prereq date (2024-4B = Microsoft April 2024 LCU
-    # release, which Microsoft published on 2024-04-09).
-    $prereqDate = [DateTime]::Parse('2024-04-09')
-
-    try {
-        $packages = Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ Path = $MountPath; ErrorAction = 'Stop' }
-    } catch {
-        $result.ErrorMessage = ('Get-WindowsPackage failed: {0}' -f $_.Exception.Message)
-        return $result
+    return [pscustomobject]@{
+        OsKey              = $OsKey
+        LcuPackageName     = $(if ([string]::IsNullOrEmpty($LcuPackageName)) { $null } else { $LcuPackageName })
+        LcuKbId            = $(if ([string]::IsNullOrEmpty($LcuKbId)) { $null } else { $LcuKbId })
+        BuildFromPackages  = $BuildFromPackages
+        BuildFromRegistry  = $BuildFromRegistry
+        BuildFromKernel    = $BuildFromKernel
+        Build              = $build
+        BuildSourcesAgree  = $agree
+        Pca2023FloorBuild  = $FloorBuild
+        MeetsPca2023Prereq = $(if ($null -ne $build) { $build -ge $FloorBuild } else { $false })
+        PackageCount       = $PackageCount
+        Notes              = $Notes
     }
-
-    # Filter for "Package_for_KB######" entries, which are the LCU
-    # packages. We track the highest install-date timestamp.
-    $highestDate = $null
-    $highestKb   = $null
-    foreach ($pkg in $packages) {
-        $name = "$($pkg.PackageName)"
-        if ($name -match 'Package_for_KB(\d{6,7})') {
-            $kbId = ('KB{0}' -f $matches[1])
-            $installTime = $pkg.InstallTime
-            if ($installTime -and ($null -eq $highestDate -or $installTime -gt $highestDate)) {
-                $highestDate = $installTime
-                $highestKb   = $kbId
-            }
-        }
-    }
-    $result.HighestKbId   = $highestKb
-    $result.HighestKbDate = $highestDate
-    $result.MeetsPca2023Prereq = if ($highestDate) { $highestDate -ge $prereqDate } else { $false }
-    $result.Available = $true
-    return $result
 }
 
-function Get-WimSystemHiveValue {
+# ---- Per-OS LCU evidence resolvers (FORKED JUDGMENT) -----------------
+# One resolver per OS [user-adjudicated 2026-07-07]: each OS owns its
+# LCU package-naming rule and its documented 2024-4B build floor. The
+# 2026-07-07 E2E proved the judgment must not be shared: a KB-name-only
+# detector worked on 2016 and was structurally blind on every
+# RollupFix-named OS (2019/2022/2025 -> false '(none)' verdicts that
+# mis-skipped P10 and mis-failed P12 on media whose LCU had in fact
+# applied status=Ok). Shared code below is judgment-free I/O only.
+
+function Resolve-LcuEvidence_Server2016 {
     <#
     .SYNOPSIS
-        Load an offline SYSTEM hive from a mounted WIM and read one value.
+        Server 2016 (1607 / 14393) LCU evidence. LCU packages carry the
+        KB id AND the build in the package name:
+        'Package_for_KB5094141~31bf3856ad364e35~amd64~~14393.9234.1.x'.
+        2024-4B floor: KB5036899 = 14393.6897 (MS, April 9 2024 page).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]]$PackageNames,
+        [AllowNull()] [string]$RegistryBuild,
+        [AllowNull()] [string]$KernelBuild
+    )
+    $floor = [version]'14393.6897'
+    $bestBuild = $null; $bestName = $null; $bestKb = $null
+    foreach ($pn in @($PackageNames)) {
+        if ([string]::IsNullOrWhiteSpace($pn)) { continue }
+        $m = [regex]::Match($pn, '^Package_for_KB(\d{6,7})~31bf3856ad364e35~amd64~~(14393\.[0-9.]+)$')
+        if (-not $m.Success) { continue }
+        $b = ConvertTo-TwoPartBuild -BuildString $m.Groups[2].Value
+        if ($null -ne $b -and ($null -eq $bestBuild -or $b -gt $bestBuild)) {
+            $bestBuild = $b
+            $bestName  = $pn
+            $bestKb    = ('KB{0}' -f $m.Groups[1].Value)
+        }
+    }
+    return New-LcuEvidenceObject -OsKey 'Server2016' -LcuPackageName $bestName -LcuKbId $bestKb `
+        -BuildFromPackages $bestBuild `
+        -BuildFromRegistry (ConvertTo-TwoPartBuild -BuildString $RegistryBuild) `
+        -BuildFromKernel (ConvertTo-TwoPartBuild -BuildString $KernelBuild) `
+        -FloorBuild $floor -PackageCount @($PackageNames).Count `
+        -Notes 'LCU naming: Package_for_KB<id>~~14393.<rev> (KB id present in name)'
+}
+
+function Resolve-LcuEvidence_Server2019 {
+    <#
+    .SYNOPSIS
+        Server 2019 (1809 / 17763) LCU evidence. The cumulative update
+        package is named 'Package_for_RollupFix~31bf3856ad364e35~amd64~
+        ~17763.<rev>.1.x' -- NO KB id in the name; the build number IS
+        the identity. 2024-4B floor: KB5036896 = 17763.5696 (MS, April
+        9 2024 page).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]]$PackageNames,
+        [AllowNull()] [string]$RegistryBuild,
+        [AllowNull()] [string]$KernelBuild
+    )
+    $floor = [version]'17763.5696'
+    $bestBuild = $null; $bestName = $null
+    foreach ($pn in @($PackageNames)) {
+        if ([string]::IsNullOrWhiteSpace($pn)) { continue }
+        $m = [regex]::Match($pn, '^Package_for_RollupFix~31bf3856ad364e35~amd64~~(17763\.[0-9.]+)$')
+        if (-not $m.Success) { continue }
+        $b = ConvertTo-TwoPartBuild -BuildString $m.Groups[1].Value
+        if ($null -ne $b -and ($null -eq $bestBuild -or $b -gt $bestBuild)) {
+            $bestBuild = $b
+            $bestName  = $pn
+        }
+    }
+    return New-LcuEvidenceObject -OsKey 'Server2019' -LcuPackageName $bestName -LcuKbId $null `
+        -BuildFromPackages $bestBuild `
+        -BuildFromRegistry (ConvertTo-TwoPartBuild -BuildString $RegistryBuild) `
+        -BuildFromKernel (ConvertTo-TwoPartBuild -BuildString $KernelBuild) `
+        -FloorBuild $floor -PackageCount @($PackageNames).Count `
+        -Notes 'LCU naming: Package_for_RollupFix~~17763.<rev> (no KB id in name; build is the identity)'
+}
+
+function Resolve-LcuEvidence_Server2022 {
+    <#
+    .SYNOPSIS
+        Server 2022 (21H2/22H2 / 20348) LCU evidence. Same
+        RollupFix naming as 2019 (no KB id in the name). 2024-4B
+        floor: KB5036909 = 20348.2402 (MS, April 9 2024 page).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]]$PackageNames,
+        [AllowNull()] [string]$RegistryBuild,
+        [AllowNull()] [string]$KernelBuild
+    )
+    $floor = [version]'20348.2402'
+    $bestBuild = $null; $bestName = $null
+    foreach ($pn in @($PackageNames)) {
+        if ([string]::IsNullOrWhiteSpace($pn)) { continue }
+        $m = [regex]::Match($pn, '^Package_for_RollupFix~31bf3856ad364e35~amd64~~(20348\.[0-9.]+)$')
+        if (-not $m.Success) { continue }
+        $b = ConvertTo-TwoPartBuild -BuildString $m.Groups[1].Value
+        if ($null -ne $b -and ($null -eq $bestBuild -or $b -gt $bestBuild)) {
+            $bestBuild = $b
+            $bestName  = $pn
+        }
+    }
+    return New-LcuEvidenceObject -OsKey 'Server2022' -LcuPackageName $bestName -LcuKbId $null `
+        -BuildFromPackages $bestBuild `
+        -BuildFromRegistry (ConvertTo-TwoPartBuild -BuildString $RegistryBuild) `
+        -BuildFromKernel (ConvertTo-TwoPartBuild -BuildString $KernelBuild) `
+        -FloorBuild $floor -PackageCount @($PackageNames).Count `
+        -Notes 'LCU naming: Package_for_RollupFix~~20348.<rev> (no KB id in name; build is the identity)'
+}
+
+function Resolve-LcuEvidence_Server2025 {
+    <#
+    .SYNOPSIS
+        Server 2025 (24H2 / 26100) LCU evidence. RollupFix naming (no
+        KB id); the uup-checkpoint model may leave MULTIPLE RollupFix
+        packages visible (checkpoint baselines + target CU) -- the
+        HIGHEST build is the serviced level. 2024-4B floor: the 26100
+        GA (2024-11) itself postdates April 2024, so ANY 26100 build
+        satisfies the prerequisite; floor pinned to 26100.1.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [string[]]$PackageNames,
+        [AllowNull()] [string]$RegistryBuild,
+        [AllowNull()] [string]$KernelBuild
+    )
+    $floor = [version]'26100.1'
+    $bestBuild = $null; $bestName = $null; $rollupCount = 0
+    foreach ($pn in @($PackageNames)) {
+        if ([string]::IsNullOrWhiteSpace($pn)) { continue }
+        $m = [regex]::Match($pn, '^Package_for_RollupFix~31bf3856ad364e35~amd64~~(26100\.[0-9.]+)$')
+        if (-not $m.Success) { continue }
+        $rollupCount++
+        $b = ConvertTo-TwoPartBuild -BuildString $m.Groups[1].Value
+        if ($null -ne $b -and ($null -eq $bestBuild -or $b -gt $bestBuild)) {
+            $bestBuild = $b
+            $bestName  = $pn
+        }
+    }
+    return New-LcuEvidenceObject -OsKey 'Server2025' -LcuPackageName $bestName -LcuKbId $null `
+        -BuildFromPackages $bestBuild `
+        -BuildFromRegistry (ConvertTo-TwoPartBuild -BuildString $RegistryBuild) `
+        -BuildFromKernel (ConvertTo-TwoPartBuild -BuildString $KernelBuild) `
+        -FloorBuild $floor -PackageCount @($PackageNames).Count `
+        -Notes ('LCU naming: Package_for_RollupFix~~26100.<rev>; {0} RollupFix package(s) visible (checkpoint model), highest build wins' -f $rollupCount)
+}
+
+function Get-ImageLcuEvidence {
+    <#
+    .SYNOPSIS
+        Acquisition shell (judgment-free) + per-OS dispatch: gather the
+        three independent build sources from a mounted image in ONE
+        mount session -- package names (Get-WindowsPackage), the
+        SOFTWARE hive (CurrentBuildNumber + UBR), and the kernel file
+        version (ntoskrnl.exe) -- then hand ALL of it to the OS's own
+        resolver, which owns the judgment.
+    .DESCRIPTION
+        Never throws on acquisition failures: each source is
+        best-effort $null and the resolver's consensus logic reports
+        what it actually had (BuildSourcesAgree). Unknown OsKey IS a
+        typed error -- silently mis-inspecting an OS is the exact
+        failure this engine replaces.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$OsKey,
+        [Parameter(Mandatory)] [string]$MountPath
+    )
+    $pkgNames = @()
+    try {
+        $pkgs = Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ Path = $MountPath; ErrorAction = 'Stop' }
+        $pkgNames = @($pkgs | ForEach-Object { [string]$_.PackageName })
+    } catch {
+        Write-Caution ('Get-ImageLcuEvidence: package enumeration failed on {0}: {1}' -f $MountPath, $_.Exception.Message)
+    }
+    $regBuild = $null
+    try {
+        $cb  = Get-WimOfflineHiveValue -WimMountPath $MountPath -HiveFile 'SOFTWARE' `
+            -RelativeRegPath 'Microsoft\Windows NT\CurrentVersion' -ValueName 'CurrentBuildNumber'
+        $ubr = Get-WimOfflineHiveValue -WimMountPath $MountPath -HiveFile 'SOFTWARE' `
+            -RelativeRegPath 'Microsoft\Windows NT\CurrentVersion' -ValueName 'UBR'
+        if ($cb -and ($null -ne $ubr)) { $regBuild = ('{0}.{1}' -f $cb, $ubr) }
+        elseif ($cb) { $regBuild = [string]$cb }
+    } catch { $null = $_ }
+    $kernBuild = $null
+    try {
+        $ntos = Join-Path $MountPath 'Windows\System32\ntoskrnl.exe'
+        if (Test-Path -LiteralPath $ntos) {
+            $fv = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($ntos)
+            # ProductVersion form: 10.0.20348.5256 -> take build.revision
+            $pv = [string]$fv.ProductVersion
+            $m = [regex]::Match($pv, '(\d+)\.(\d+)$')
+            if ($m.Success) { $kernBuild = ('{0}.{1}' -f $m.Groups[1].Value, $m.Groups[2].Value) }
+        }
+    } catch { $null = $_ }
+
+    switch ($OsKey) {
+        'Server2016' { return Resolve-LcuEvidence_Server2016 -PackageNames $pkgNames -RegistryBuild $regBuild -KernelBuild $kernBuild }
+        'Server2019' { return Resolve-LcuEvidence_Server2019 -PackageNames $pkgNames -RegistryBuild $regBuild -KernelBuild $kernBuild }
+        'Server2022' { return Resolve-LcuEvidence_Server2022 -PackageNames $pkgNames -RegistryBuild $regBuild -KernelBuild $kernBuild }
+        'Server2025' { return Resolve-LcuEvidence_Server2025 -PackageNames $pkgNames -RegistryBuild $regBuild -KernelBuild $kernBuild }
+        default {
+            throw ("Get-ImageLcuEvidence: unknown OsKey '{0}' (expected Server2016|Server2019|Server2022|Server2025)." -f $OsKey)
+        }
+    }
+}
+function Get-WimOfflineHiveValue {
+    <#
+    .SYNOPSIS
+        Load an offline registry hive (SYSTEM or SOFTWARE) from a
+        mounted WIM and read one value. Judgment-free I/O primitive.
 
         Uses 'reg.exe load' to mount the WIM's
-        \Windows\System32\config\SYSTEM file under
-        HKLM\WIMSYSTEM_$Tag (a transient hive name), reads the
+        \Windows\System32\config\<HiveFile> file under
+        HKLM\WIMHIVE_$Tag (a transient hive name), reads the
         named value with Get-ItemProperty, then unloads the hive.
 
         Returns $null if the hive could not be loaded OR the value
@@ -8285,16 +8505,17 @@ function Get-WimSystemHiveValue {
         [Parameter(Mandatory)] [string]$WimMountPath,
         [Parameter(Mandatory)] [string]$RelativeRegPath,  # e.g. 'ControlSet001\Control\SecureBoot\Servicing'
         [Parameter(Mandatory)] [string]$ValueName,
+        [ValidateSet('SYSTEM', 'SOFTWARE')] [string]$HiveFile = 'SYSTEM',
         [string]$Tag = ('UPDWSI{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
     )
 
-    $hivePath = Join-Path $WimMountPath 'Windows\System32\config\SYSTEM'
+    $hivePath = Join-Path $WimMountPath ('Windows\System32\config\{0}' -f $HiveFile)
     if (-not (Test-Path -LiteralPath $hivePath)) {
         return $null
     }
 
-    $mountKey = ('HKLM\WIMSYSTEM_{0}' -f $Tag)
-    $psPath   = ('HKLM:\WIMSYSTEM_{0}\{1}' -f $Tag, $RelativeRegPath)
+    $mountKey = ('HKLM\WIMHIVE_{0}' -f $Tag)
+    $psPath   = ('HKLM:\WIMHIVE_{0}\{1}' -f $Tag, $RelativeRegPath)
 
     $loaded = $false
     try {
@@ -8577,11 +8798,13 @@ function Get-IsoBootCertReadiness {
         BootX64Available           = $false
         # LCU level integrated in install.wim (read via Get-WindowsPackage)
         InstallWimHighestKb        = $null
-        InstallWimHighestKbDate    = $null
+        InstallWimBuild            = $null
+        InstallWimBuildAgree       = $null
         InstallWimMeetsPca2023Prereq = $null
         # LCU level integrated in boot.wim
         BootWimHighestKb           = $null
-        BootWimHighestKbDate       = $null
+        BootWimBuild               = $null
+        BootWimBuildAgree          = $null
         BootWimMeetsPca2023Prereq  = $null
         # SecureBoot servicing keys read from install.wim's SYSTEM hive
         UEFICA2023Status           = $null
@@ -8632,11 +8855,16 @@ function Get-IsoBootCertReadiness {
             # boot.wim level (LCU month detection)
             Write-Step '         enumerating boot.wim installed packages (Get-WindowsPackage) ...'
             $pkgStart = Get-Date
-            $bootLcu = Get-LcuVersionFromInstallWim -MountPath $bootMount
+            $bootLcu = Get-ImageLcuEvidence -OsKey $Script:OsVersion -MountPath $bootMount
             $pkgElapsed = [int](New-TimeSpan -Start $pkgStart -End (Get-Date)).TotalSeconds
-            Write-Step ('         boot.wim LCU level resolved ({0}s): highest KB = {1}' -f $pkgElapsed, $(if ($bootLcu.HighestKbId) { $bootLcu.HighestKbId } else { '(none)' }))
-            $inv.BootWimHighestKb         = $bootLcu.HighestKbId
-            $inv.BootWimHighestKbDate     = $bootLcu.HighestKbDate
+            Write-Step ('         boot.wim LCU evidence ({0}s): build={1} (pkg={2} reg={3} kern={4}; agree={5})' -f $pkgElapsed, `
+                $(if ($bootLcu.Build) { $bootLcu.Build } else { '(none)' }), `
+                $(if ($bootLcu.BuildFromPackages) { $bootLcu.BuildFromPackages } else { '-' }), `
+                $(if ($bootLcu.BuildFromRegistry) { $bootLcu.BuildFromRegistry } else { '-' }), `
+                $(if ($bootLcu.BuildFromKernel) { $bootLcu.BuildFromKernel } else { '-' }), $bootLcu.BuildSourcesAgree)
+            $inv.BootWimHighestKb         = $bootLcu.LcuKbId
+            $inv.BootWimBuild             = $bootLcu.Build
+            $inv.BootWimBuildAgree        = $bootLcu.BuildSourcesAgree
             $inv.BootWimMeetsPca2023Prereq = $bootLcu.MeetsPca2023Prereq
         } finally {
             if ($mountedRo) {
@@ -8699,19 +8927,24 @@ function Get-IsoBootCertReadiness {
                 $iwMountElapsed = [int](New-TimeSpan -Start $iwMountStart -End (Get-Date)).TotalSeconds
                 Write-Step ('         install.wim mounted ({0}s); enumerating installed packages ...' -f $iwMountElapsed)
                 $iwPkgStart = Get-Date
-                $installLcu = Get-LcuVersionFromInstallWim -MountPath $installMount
+                $installLcu = Get-ImageLcuEvidence -OsKey $Script:OsVersion -MountPath $installMount
                 $iwPkgElapsed = [int](New-TimeSpan -Start $iwPkgStart -End (Get-Date)).TotalSeconds
-                Write-Step ('         install.wim LCU level resolved ({0}s): highest KB = {1}' -f $iwPkgElapsed, $(if ($installLcu.HighestKbId) { $installLcu.HighestKbId } else { '(none)' }))
-                $inv.InstallWimHighestKb         = $installLcu.HighestKbId
-                $inv.InstallWimHighestKbDate     = $installLcu.HighestKbDate
+                Write-Step ('         install.wim LCU evidence ({0}s): build={1} (pkg={2} reg={3} kern={4}; agree={5})' -f $iwPkgElapsed, `
+                    $(if ($installLcu.Build) { $installLcu.Build } else { '(none)' }), `
+                    $(if ($installLcu.BuildFromPackages) { $installLcu.BuildFromPackages } else { '-' }), `
+                    $(if ($installLcu.BuildFromRegistry) { $installLcu.BuildFromRegistry } else { '-' }), `
+                    $(if ($installLcu.BuildFromKernel) { $installLcu.BuildFromKernel } else { '-' }), $installLcu.BuildSourcesAgree)
+                $inv.InstallWimHighestKb         = $installLcu.LcuKbId
+                $inv.InstallWimBuild             = $installLcu.Build
+                $inv.InstallWimBuildAgree        = $installLcu.BuildSourcesAgree
                 $inv.InstallWimMeetsPca2023Prereq = $installLcu.MeetsPca2023Prereq
 
                 # SYSTEM hive servicing keys
                 Write-Step '         reading SYSTEM hive SecureBoot servicing keys ...'
                 $servPath = 'ControlSet001\Control\SecureBoot\Servicing'
-                $inv.UEFICA2023Status = Get-WimSystemHiveValue -WimMountPath $installMount -RelativeRegPath $servPath -ValueName 'UEFICA2023Status'
-                $inv.UEFICA2023Error  = Get-WimSystemHiveValue -WimMountPath $installMount -RelativeRegPath $servPath -ValueName 'UEFICA2023Error'
-                $auRaw = Get-WimSystemHiveValue -WimMountPath $installMount -RelativeRegPath 'ControlSet001\Control\SecureBoot' -ValueName 'AvailableUpdates'
+                $inv.UEFICA2023Status = Get-WimOfflineHiveValue -WimMountPath $installMount -HiveFile 'SYSTEM' -RelativeRegPath $servPath -ValueName 'UEFICA2023Status'
+                $inv.UEFICA2023Error  = Get-WimOfflineHiveValue -WimMountPath $installMount -HiveFile 'SYSTEM' -RelativeRegPath $servPath -ValueName 'UEFICA2023Error'
+                $auRaw = Get-WimOfflineHiveValue -WimMountPath $installMount -HiveFile 'SYSTEM' -RelativeRegPath 'ControlSet001\Control\SecureBoot' -ValueName 'AvailableUpdates'
                 if ($null -ne $auRaw) {
                     $inv.AvailableUpdatesHex = ('0x{0:X}' -f [int]$auRaw)
                 }
@@ -9115,8 +9348,8 @@ function Get-Pca2023ReadinessSnapshot {
     if (-not $meetsPrereq) {
         $health = 'Critical'
         $reasons.Add('install.wim / boot.wim LCU level is BELOW 2024-04-09 (the Make2023BootableMedia.ps1 prerequisite). P10 ConvertPca2023BootManager would refuse to operate.') | Out-Null
-        if ($emb.InstallWimHighestKb) {
-            $reasons.Add(('Highest install.wim KB: {0} (date: {1})' -f $emb.InstallWimHighestKb, $emb.InstallWimHighestKbDate)) | Out-Null
+        if ($emb.InstallWimBuild) {
+            $reasons.Add(('Measured install.wim build: {0}' -f $emb.InstallWimBuild)) | Out-Null
         }
     } elseif ($isPca2023) {
         $health = 'Healthy'
@@ -9179,7 +9412,7 @@ function Show-Pca2023ReadinessSnapshot {
 
     if ($Compact) {
         $cn = if ($emb.BootX64IsPca2023) { 'PCA2023' } elseif ($emb.BootX64IsPca2011) { 'PCA2011' } else { 'unknown' }
-        $kb = if ($emb.InstallWimHighestKb) { $emb.InstallWimHighestKb } else { 'n/a' }
+        $kb = if ($emb.InstallWimBuild) { [string]$emb.InstallWimBuild } elseif ($emb.InstallWimHighestKb) { $emb.InstallWimHighestKb } else { 'n/a' }
         Write-Step ('Pca2023 readiness: signer={0,-7} install_lcu={1,-10} health={2}' -f $cn, $kb, $health)
         if ($OutputCheck) {
             $passCount    = @($OutputCheck.TargetChecks | Where-Object { $_.Status -eq 'Pass' }).Count
@@ -9228,9 +9461,9 @@ function Show-Pca2023ReadinessSnapshot {
     Write-Step ('  PCA2011 chain   : {0}' -f $emb.BootX64IsPca2011)
     Write-Step ''
     Write-Step '[LCU integration level]'
-    Write-Step ('  install.wim KB  : {0} (date: {1})' -f $(if ($emb.InstallWimHighestKb) { $emb.InstallWimHighestKb } else { 'n/a' }), $(if ($emb.InstallWimHighestKbDate) { $emb.InstallWimHighestKbDate } else { 'n/a' }))
+    Write-Step ('  install.wim build : {0} (KB: {1}; sources agree: {2})' -f $(if ($emb.InstallWimBuild) { $emb.InstallWimBuild } else { 'n/a' }), $(if ($emb.InstallWimHighestKb) { $emb.InstallWimHighestKb } else { 'n/a' }), $(if ($null -ne $emb.InstallWimBuildAgree) { $emb.InstallWimBuildAgree } else { 'n/a' }))
     Write-Step ('  install.wim 2024-4B prereq : {0}' -f $emb.InstallWimMeetsPca2023Prereq)
-    Write-Step ('  boot.wim    KB  : {0} (date: {1})' -f $(if ($emb.BootWimHighestKb) { $emb.BootWimHighestKb } else { 'n/a' }), $(if ($emb.BootWimHighestKbDate) { $emb.BootWimHighestKbDate } else { 'n/a' }))
+    Write-Step ('  boot.wim    build : {0} (KB: {1}; sources agree: {2})' -f $(if ($emb.BootWimBuild) { $emb.BootWimBuild } else { 'n/a' }), $(if ($emb.BootWimHighestKb) { $emb.BootWimHighestKb } else { 'n/a' }), $(if ($null -ne $emb.BootWimBuildAgree) { $emb.BootWimBuildAgree } else { 'n/a' }))
     Write-Step ('  boot.wim    2024-4B prereq : {0}' -f $emb.BootWimMeetsPca2023Prereq)
     Write-Step ''
     Write-Step '[SecureBoot servicing keys (from install.wim SYSTEM hive)]'
@@ -9313,11 +9546,11 @@ function Format-Pca2023ReadinessForReport {
     }
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('-- LCU integration level ' + ('-' * 53))
-    [void]$sb.AppendLine(('install.wim highest KB           : {0}' -f $(if ($emb.InstallWimHighestKb) { $emb.InstallWimHighestKb } else { 'n/a' })))
-    [void]$sb.AppendLine(('install.wim highest KB date      : {0}' -f $(if ($emb.InstallWimHighestKbDate) { $emb.InstallWimHighestKbDate } else { 'n/a' })))
+    [void]$sb.AppendLine(('install.wim measured build       : {0}' -f $(if ($emb.InstallWimBuild) { $emb.InstallWimBuild } else { 'n/a' })))
+    [void]$sb.AppendLine(('install.wim build sources agree  : {0}' -f $(if ($null -ne $emb.InstallWimBuildAgree) { $emb.InstallWimBuildAgree } else { 'n/a' })))
     [void]$sb.AppendLine(('install.wim meets 2024-4B prereq : {0}' -f $emb.InstallWimMeetsPca2023Prereq))
-    [void]$sb.AppendLine(('boot.wim    highest KB           : {0}' -f $(if ($emb.BootWimHighestKb) { $emb.BootWimHighestKb } else { 'n/a' })))
-    [void]$sb.AppendLine(('boot.wim    highest KB date      : {0}' -f $(if ($emb.BootWimHighestKbDate) { $emb.BootWimHighestKbDate } else { 'n/a' })))
+    [void]$sb.AppendLine(('boot.wim    measured build       : {0}' -f $(if ($emb.BootWimBuild) { $emb.BootWimBuild } else { 'n/a' })))
+    [void]$sb.AppendLine(('boot.wim    build sources agree  : {0}' -f $(if ($null -ne $emb.BootWimBuildAgree) { $emb.BootWimBuildAgree } else { 'n/a' })))
     [void]$sb.AppendLine(('boot.wim    meets 2024-4B prereq : {0}' -f $emb.BootWimMeetsPca2023Prereq))
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('-- SecureBoot servicing (from install.wim SYSTEM hive) ' + ('-' * 23))
