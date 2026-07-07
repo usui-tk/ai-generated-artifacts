@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.61'
-$Script:ScriptTag     = 'inspect-install-ex'
+$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.62'
+$Script:ScriptTag     = 'pca2023-fallback-source'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -10065,6 +10065,7 @@ function Convert-WimBootToPca2023Signed {
     $result = [pscustomobject]@{
         Success      = $false
         FilesUpdated = @()
+        SourceWim    = $null
         ErrorMessage = $null
     }
 
@@ -10085,21 +10086,59 @@ function Convert-WimBootToPca2023Signed {
         return $result
     }
 
+    # Source-candidate order: boot.wim first (aligned with MS's
+    # Make2023BootableMedia.ps1, which mounts boot.wim), then the
+    # serviced install.wim as fallback. Fallback basis [user-
+    # adjudicated 2026-07-07]: firmware Secure Boot verifies the
+    # MEDIA's boot manager (not the WinPE behind it); MS Q&A
+    # confirms a 2023-signed bootmgfw_EX taken from an updated image
+    # boots old media on revoked firmware; and the LCU stages the
+    # same _EX payloads into any serviced image. Needed because an
+    # unserviceable boot.wim (Server 2019, 0x80070032) never
+    # receives the payloads while its install.wim does.
+    $installWimPath = Join-Path $ExtractedMediaPath 'sources\install.wim'
+    $candidates = New-Object System.Collections.Generic.List[object]
+    $candidates.Add([pscustomobject]@{ Label = 'boot.wim'; Path = $bootWimPath; Index = 1 }) | Out-Null
+    if (Test-Path -LiteralPath $installWimPath) {
+        $fbIdx = 1
+        try {
+            $fbInv = Get-WimIndexInventory -WimPath $installWimPath
+            if (@($fbInv).Count -ge 1 -and $fbInv[0].ImageIndex) { $fbIdx = [int]$fbInv[0].ImageIndex }
+        } catch { $null = $_ }
+        $candidates.Add([pscustomobject]@{ Label = 'install.wim'; Path = $installWimPath; Index = $fbIdx }) | Out-Null
+    }
+
     $updated = New-Object System.Collections.Generic.List[string]
     $mounted = $false
     try {
-        Write-Step ('Mounting boot.wim (read-only, for PCA2023 source extraction): {0}' -f $bootWimPath)
-        $null = Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ ImagePath = $bootWimPath; Index = 1; Path = $mount; ReadOnly = $true; ErrorAction = 'Stop' }
-        $mounted = $true
+        $exBins = $null; $exFonts = $null; $exDvd = $null
+        foreach ($cand in $candidates) {
+            Write-Step ('Mounting {0} idx {1} (read-only, for PCA2023 source extraction): {2}' -f $cand.Label, $cand.Index, $cand.Path)
+            $null = Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ ImagePath = $cand.Path; Index = $cand.Index; Path = $mount; ReadOnly = $true; ErrorAction = 'Stop' }
+            $mounted = $true
 
-        $exBins  = Join-Path $mount 'Windows\Boot\EFI_EX'
-        $exFonts = Join-Path $mount 'Windows\Boot\FONTS_EX'
-        $exDvd   = Join-Path $mount 'Windows\Boot\DVD_EX'
+            $candBins  = Join-Path $mount 'Windows\Boot\EFI_EX'
+            $candFonts = Join-Path $mount 'Windows\Boot\FONTS_EX'
+            $candDvd   = Join-Path $mount 'Windows\Boot\DVD_EX'
+            if ((Test-Path -LiteralPath $candBins) -and `
+                (Test-Path -LiteralPath $candFonts) -and `
+                (Test-Path -LiteralPath $candDvd)) {
+                $exBins = $candBins; $exFonts = $candFonts; $exDvd = $candDvd
+                $result.SourceWim = $cand.Label
+                if ($cand.Label -ne 'boot.wim') {
+                    Write-Caution ('PCA2023 source FALLBACK: boot.wim carries no _EX staging; sourcing from the serviced {0} idx {1} instead (measured-evidence path; boot test on PCA2023-only firmware is the final proof).' -f $cand.Label, $cand.Index)
+                }
+                Write-Step ('PCA2023 source selected: {0} (EFI_EX/FONTS_EX/DVD_EX all present)' -f $cand.Label)
+                break
+            }
 
-        if (-not (Test-Path -LiteralPath $exBins) -or `
-            -not (Test-Path -LiteralPath $exFonts) -or `
-            -not (Test-Path -LiteralPath $exDvd)) {
-            $result.ErrorMessage = 'boot.wim does not contain EFI_EX/FONTS_EX/DVD_EX staging directories. Source media must include 2024-4B (April 2024 LCU) or later. This matches the Make2023BootableMedia.ps1 error "Make sure all required updates (2024-4B or later) have been applied".'
+            Write-Step ('{0} idx {1} carries no complete _EX staging set; dismounting and trying the next candidate.' -f $cand.Label, $cand.Index)
+            $null = Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path = $mount; Discard = $true; ErrorAction = 'Stop' }
+            $mounted = $false
+        }
+
+        if (-not $result.SourceWim) {
+            $result.ErrorMessage = 'Neither boot.wim nor install.wim contains the EFI_EX/FONTS_EX/DVD_EX staging directories. Both images predate 2024-4B (April 2024 LCU); there is no PCA2023 conversion source on this media. This matches the Make2023BootableMedia.ps1 error "Make sure all required updates (2024-4B or later) have been applied".'
             return $result
         }
 
@@ -11739,7 +11778,8 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             }
         }
 
-        Write-Step ('PCA2023 conversion succeeded. Files updated: {0}' -f $convResult.FilesUpdated.Count)
+        $convSrc = if ($convResult.PSObject.Properties['SourceWim'] -and $convResult.SourceWim) { $convResult.SourceWim } else { '(external script)' }
+        Write-Step ('PCA2023 conversion succeeded. Source: {0}; files updated: {1}' -f $convSrc, $convResult.FilesUpdated.Count)
         foreach ($f in $convResult.FilesUpdated) {
             Write-Step ('  - {0}' -f $f)
         }

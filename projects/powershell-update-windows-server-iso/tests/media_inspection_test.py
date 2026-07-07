@@ -235,6 +235,14 @@ def main() -> int:
     p, f = check("P11 Kb rows accept the Catalog child-KB alias",
                  re.search(r"Get-KbAliasFromPatchPath\s+-KbId", code) is not None,
                  "alias wired", p, f)
+    p, f = check("PCA2023 conversion carries the install.wim fallback source (r11.62)",
+                 "PCA2023 source FALLBACK" in code
+                 and re.search(r"Label\s*=\s*'install\.wim'", code) is not None
+                 and "SourceWim" in code,
+                 "candidate loop + SourceWim wired", p, f)
+    p, f = check("boot.wim stays the PRIMARY conversion source (MS alignment)",
+                 re.search(r"Label\s*=\s*'boot\.wim'.*?Label\s*=\s*'install\.wim'", code, re.S) is not None,
+                 "candidate order pinned", p, f)
     p, f = check("the invalid Get-WindowsPackage -ImagePath call is gone",
                  re.search(r"Get-WindowsPackage'\s+-Parameters\s+@\{\s*ImagePath", code) is None,
                  "dead path buried", p, f)

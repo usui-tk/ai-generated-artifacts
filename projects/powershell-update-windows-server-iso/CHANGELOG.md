@@ -22,6 +22,42 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.07-r11.62] - 2026-07-07
+
+Tag: `pca2023-fallback-source`. Second half of the Server 2019
+PCA2023 rescue [user-adjudicated 2026-07-07]:
+`Convert-WimBootToPca2023Signed` now selects its `_EX` payload source
+from an ordered candidate list -- boot.wim idx 1 first (aligned with
+Microsoft's Make2023BootableMedia.ps1, which mounts boot.wim), then
+the serviced install.wim's primary index as FALLBACK when boot.wim
+carries no `_EX` staging set.
+
+Evidence basis for the fallback: (1) firmware Secure Boot verifies
+the MEDIA's boot manager, not the WinPE payload behind it; (2) a
+Microsoft Q&A response confirms that replacing a revoked media boot
+manager with a 2023-signed `bootmgfw_EX.efi` taken from an updated
+image is a working direct workaround (old WinPE boots fine behind the
+new boot manager); (3) the LCU stages identical `_EX` payloads into
+any serviced image, and Server 2019's install.wim IS serviced while
+its boot.wim is structurally unserviceable (0x80070032). This
+combination is NOT a Microsoft-supported configuration; the final
+proof is a boot test on PCA2023-only firmware (2011 CA revoked),
+tracked as a follow-up (real hardware or a QEMU/OVMF rig with the
+2023 CA alone in db and the 2011 CA in dbx).
+
+### Changed
+
+- **Ordered source candidates + `SourceWim` in the result**: a
+  fallback selection logs a Caution naming the source and the
+  evidence path; P10's success line reports the source. When NEITHER
+  image carries the staging set the error message says so plainly.
+
+### Tests
+
+- T38 extended to 28: fallback wiring pin (candidate loop +
+  `SourceWim`) and a candidate-ORDER pin (boot.wim stays primary).
+
+
 ## [update-wsi-2026.07.07-r11.61] - 2026-07-07
 
 Tag: `inspect-install-ex`. First half of the Server 2019 PCA2023
