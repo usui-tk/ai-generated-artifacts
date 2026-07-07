@@ -652,10 +652,14 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
 moved SEED -> DERIVED: the refresh writeback sets it from the LCU Line's
 Catalog-captured `InScope.build` (the seed-era hand-maintained value had
 gone stale on all four OSes), and its consumer is the P11 StaticVerify
-hard check `LcuTargetApplied` (pure comparator `Test-LcuTargetApplied`,
-offline gate T31): the applied LCU package is the build-attainment
-marker, and a missing baseline LCU is a hard verification FAILURE
-[DECIDED 2026-07-02, user]. `VerificationMethod` (written, never read)
+hard check `LcuTargetApplied` (pure per-OS comparator
+`Test-LcuTargetApplied`, offline gate T31): Server 2016 judges by the
+KB id carried in package names (with a measured-build fallback);
+the RollupFix-named OSes (2019/2022/2025) carry no KB id in package
+names, so the measured image build vs `TargetBuildAfterUpdate` IS the
+attainment marker (a missing TBAU there is an INDETERMINATE Warn,
+never a silent Pass). A failed comparison is a hard verification
+FAILURE [DECIDED 2026-07-02, user]. `VerificationMethod` (written, never read)
 and `ExcludeKbList` (never read; the 2025 entry mis-described the
 checkpoint baseline KB5043080 as unnecessary while `Lines[]` then
 applied it at ApplyOrder 1 -- since r11.52 that line is Kind
@@ -683,8 +687,13 @@ the `cu` discovery subfolder) via both ResolvedPatches writers; P07
 applies it as sub-phase `I0.BridgeLcu` on every targeted install.wim
 index, unconditionally when present [DECIDED 2026-07-06, A1] (DISM
 supersedence no-ops it on already-current images). Routing is
-Install-only. Only `seed/config-Server2022` carry a bridge today
-(offline gate T33).
+Install AND Boot (never WinRE): the 2026-07-07 Server 2022 E2E
+measured the identical `0x800f0823` on boot.wim (surface message
+"An error occurred applying the Unattend.xml file from the .msu
+package"; the WARNING line carries the code) after install.wim was
+bridged successfully, so P08 applies the bridge as sub-phase
+`B0.BridgeLcu` (see B.11.2). Only `seed/config-Server2022` carry a
+bridge today (offline gate T33).
 
 Patch `Kind` values are `LCU`, `SSU`, `Checkpoint`, `DotNet`,
 `SafeOSDU`, and `SetupDU`; which Kinds are required or forbidden for
@@ -756,14 +765,14 @@ The pipeline consists of 13 phases organised into 5 groups:
 | P03 | Setup | RefreshPatchBaseline: catalogue scrape (skippable) |
 | P04 | Fetch | FetchAssets: download ISO + patches |
 | P05 | Plan | ExpandIso: robocopy expand into workspace |
-| P06 | Plan | ValidatePatchServicing: pass-through (Catalog-model consistency check pending; see B.19) |
+| P06 | Plan | ValidatePatchServicing: PatchModel consistency (B.19) + pre-servicing media inspection of every WIM index -> `logs/inspection_pre.json` |
 | P07 | Build | PatchInstallWim: apply LCU / .NET / DU to install.wim |
 | P08 | Build | PatchBootWim: apply SSU / LP / LCU to boot.wim + WinRE.wim |
 | P09 | Build | AssembleIso: oscdimg re-emit |
 | P10 | Build | ConvertPca2023BootManager (optional, see §B.17) |
-| P11 | Verify | StaticVerify: hash, size, structure |
+| P11 | Verify | StaticVerify: hash, size, structure; ISO/extracted WIM SHA-256 content identity (hard); post-servicing media inspection -> `logs/inspection_post.json`; measured Kb + TargetBuildAfterUpdate checks |
 | P12 | Verify | VerifyPca2023Readiness: input + output snapshot |
-| P13 | Report | FinalReport: aggregate Health verdict |
+| P13 | Report | FinalReport: aggregate Health verdict; inspection diff -> `logs/inspection_diff.json` + observe-first declared-vs-measured cross-checks (Warning + errors.jsonl, never gated) |
 
 Each phase function carries one of the following skip conditions
 which MUST be checked at the top of the function before any side
@@ -986,8 +995,13 @@ install, B = boot, W = winre). Each sub-phase carries:
 
 ### B.11.2 boot.wim (P08)
 
-`B1.SSU` → `B2.LanguagePack` → `B3.LCU` → `B4.CleanupAndExport`. No
-twice-apply needed.
+`B0.BridgeLcu` → `B1.SSU` → `B2.LanguagePack` → `B3.LCU` →
+`B4.CleanupAndExport`. No twice-apply needed. `B0` mirrors `I0` on
+install.wim (bridge LCU first, unconditionally when present; empty +
+skipped for OSes without a `BridgeLcu` envelope): the 2026-07-07
+Server 2022 E2E measured the SAME `0x800f0823` floor failure on
+boot.wim once install.wim was bridged, overturning the earlier
+Install-only routing by measurement.
 
 ### B.11.3 WinRE.wim (P08 inner block)
 
