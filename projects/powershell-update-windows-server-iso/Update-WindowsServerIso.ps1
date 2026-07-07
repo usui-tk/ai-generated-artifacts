@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.58'
-$Script:ScriptTag     = 'per-os-evidence'
+$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.59'
+$Script:ScriptTag     = 'media-inspection'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -8417,6 +8417,415 @@ function Resolve-LcuEvidence_Server2025 {
         -Notes ('LCU naming: Package_for_RollupFix~~26100.<rev>; {0} RollupFix package(s) visible (checkpoint model), highest build wins' -f $rollupCount)
 }
 
+function Get-WimBuildSources { # psa-disable-line PSA6003 -- "Sources" is plural by design; returns the set of independent build sources
+    <#
+    .SYNOPSIS
+        Judgment-free acquisition: gather the three independent build
+        sources from ONE already-mounted image -- package names
+        (Get-WindowsPackage), SOFTWARE hive CurrentBuildNumber+UBR, and
+        the ntoskrnl.exe file version. Every source is best-effort
+        $null/empty; never throws.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$MountPath
+    )
+    $pkgNames = @()
+    try {
+        $pkgs = Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ Path = $MountPath; ErrorAction = 'Stop' }
+        $pkgNames = @($pkgs | ForEach-Object { [string]$_.PackageName })
+    } catch {
+        Write-Caution ('Get-WimBuildSources: package enumeration failed on {0}: {1}' -f $MountPath, $_.Exception.Message)
+    }
+    $regBuild = $null
+    try {
+        $cb  = Get-WimOfflineHiveValue -WimMountPath $MountPath -HiveFile 'SOFTWARE' `
+            -RelativeRegPath 'Microsoft\Windows NT\CurrentVersion' -ValueName 'CurrentBuildNumber'
+        $ubr = Get-WimOfflineHiveValue -WimMountPath $MountPath -HiveFile 'SOFTWARE' `
+            -RelativeRegPath 'Microsoft\Windows NT\CurrentVersion' -ValueName 'UBR'
+        if ($cb -and ($null -ne $ubr)) { $regBuild = ('{0}.{1}' -f $cb, $ubr) }
+        elseif ($cb) { $regBuild = [string]$cb }
+    } catch { $null = $_ }
+    $kernBuild = $null
+    try {
+        $ntos = Join-Path $MountPath 'Windows\System32\ntoskrnl.exe'
+        if (Test-Path -LiteralPath $ntos) {
+            $fv = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($ntos)
+            # ProductVersion form: 10.0.20348.5256 -> take build.revision
+            $pv = [string]$fv.ProductVersion
+            $m = [regex]::Match($pv, '(\d+)\.(\d+)$')
+            if ($m.Success) { $kernBuild = ('{0}.{1}' -f $m.Groups[1].Value, $m.Groups[2].Value) }
+        }
+    } catch { $null = $_ }
+    return [pscustomobject]@{
+        PackageNames  = $pkgNames
+        RegistryBuild = $regBuild
+        KernelBuild   = $kernBuild
+    }
+}
+
+function Get-WimIndexInspection {
+    <#
+    .SYNOPSIS
+        Inspect ONE WIM index in ONE read-only mount session
+        [user-adjudicated 2026-07-07: acquire everything, once].
+    .DESCRIPTION
+        Per index: the three build sources + the per-OS LCU evidence,
+        the FULL installed-package name list, and kind-specific
+        artifacts -- install.wim: winre.wim presence/size/SHA-256 and
+        the SYSTEM-hive SecureBoot servicing values; boot.wim: the
+        PCA2023 _EX payload directories and files. A failed index
+        records ErrorMessage and never throws (inspection must not
+        kill a build; its absence must stay visible).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$OsKey,
+        [Parameter(Mandatory)] [string]$WimPath,
+        [Parameter(Mandatory)] [int]$Index,
+        [Parameter(Mandatory)] [ValidateSet('install', 'boot')] [string]$Kind,
+        [Parameter(Mandatory)] [string]$MountDir,
+        [Parameter(Mandatory)] [string]$LogDir
+    )
+    $rec = [ordered]@{
+        Kind          = $Kind
+        Index         = $Index
+        Evidence      = $null
+        PackageNames  = @()
+        WinRePresent  = $null
+        WinReSizeBytes = $null
+        WinReSha256   = $null
+        UEFICA2023Status = $null
+        UEFICA2023Error  = $null
+        AvailableUpdates = $null
+        HasEfiExDir   = $null
+        HasFontsEx    = $null
+        HasDvdEx      = $null
+        HasBootMgrFwEx = $null
+        HasBootMgrEx  = $null
+        HasEfisysExBin = $null
+        ErrorMessage  = $null
+    }
+    $mounted = $false
+    try {
+        if (Test-Path -LiteralPath $MountDir) {
+            Remove-Item -LiteralPath $MountDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        New-Item -ItemType Directory -Path $MountDir -Force | Out-Null
+        $null = Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{
+            ImagePath = $WimPath; Index = $Index; Path = $MountDir
+            ReadOnly = $true; ErrorAction = 'Stop'
+            LogPath = (Join-Path $LogDir ('inspect_mount_{0}_idx{1}.log' -f $Kind, $Index))
+        }
+        $mounted = $true
+
+        $src = Get-WimBuildSources -MountPath $MountDir
+        $rec.PackageNames = @($src.PackageNames)
+        switch ($OsKey) {
+            'Server2016' { $rec.Evidence = Resolve-LcuEvidence_Server2016 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
+            'Server2019' { $rec.Evidence = Resolve-LcuEvidence_Server2019 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
+            'Server2022' { $rec.Evidence = Resolve-LcuEvidence_Server2022 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
+            'Server2025' { $rec.Evidence = Resolve-LcuEvidence_Server2025 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
+            default { throw ("Get-WimIndexInspection: unknown OsKey '{0}'." -f $OsKey) }
+        }
+
+        if ($Kind -eq 'install') {
+            $winRe = Join-Path $MountDir 'Windows\System32\Recovery\Winre.wim'
+            $rec.WinRePresent = Test-Path -LiteralPath $winRe
+            if ($rec.WinRePresent) {
+                $wr = Get-Item -LiteralPath $winRe
+                $rec.WinReSizeBytes = $wr.Length
+                try { $rec.WinReSha256 = (Get-FileHash -LiteralPath $winRe -Algorithm SHA256).Hash.ToLower() } catch { $null = $_ }
+            }
+            $servPath = 'ControlSet001\Control\SecureBoot\Servicing'
+            $rec.UEFICA2023Status = Get-WimOfflineHiveValue -WimMountPath $MountDir -HiveFile 'SYSTEM' -RelativeRegPath $servPath -ValueName 'UEFICA2023Status'
+            $rec.UEFICA2023Error  = Get-WimOfflineHiveValue -WimMountPath $MountDir -HiveFile 'SYSTEM' -RelativeRegPath $servPath -ValueName 'UEFICA2023Error'
+            $au = Get-WimOfflineHiveValue -WimMountPath $MountDir -HiveFile 'SYSTEM' -RelativeRegPath 'ControlSet001\Control\SecureBoot' -ValueName 'AvailableUpdates'
+            if ($null -ne $au) { $rec.AvailableUpdates = ('0x{0:x}' -f [int]$au) }
+        } else {
+            $exBins  = Join-Path $MountDir 'Windows\Boot\EFI_EX'
+            $exFonts = Join-Path $MountDir 'Windows\Boot\FONTS_EX'
+            $exDvd   = Join-Path $MountDir 'Windows\Boot\DVD_EX'
+            $rec.HasEfiExDir    = Test-Path -LiteralPath $exBins
+            $rec.HasFontsEx     = Test-Path -LiteralPath $exFonts
+            $rec.HasDvdEx       = Test-Path -LiteralPath $exDvd
+            $rec.HasBootMgrFwEx = if ($rec.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgfw_EX.efi') } else { $false }
+            $rec.HasBootMgrEx   = if ($rec.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgr_EX.efi')   } else { $false }
+            $rec.HasEfisysExBin = if ($rec.HasDvdEx) { Test-Path -LiteralPath (Join-Path $exDvd 'EFI\en-US\efisys_EX.bin') } else { $false }
+        }
+    } catch {
+        $rec.ErrorMessage = $_.Exception.Message
+    } finally {
+        if ($mounted) {
+            try {
+                $null = Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path = $MountDir; Discard = $true; ErrorAction = 'Stop' }
+            } catch {
+                Write-Caution ('Get-WimIndexInspection: dismount failed for {0} idx {1}: {2}' -f $Kind, $Index, $_.Exception.Message)
+            } # psa-disable-line PSA3004 -- best-effort dismount; a leaked RO mount is reported, not fatal
+        }
+    }
+    return [pscustomobject]$rec
+}
+
+function Get-MediaInspection {
+    <#
+    .SYNOPSIS
+        Full media inspection: EVERY index of install.wim and boot.wim
+        under <MediaRoot>\sources, one mount each, plus media-level
+        artifacts (boot.stl locations -- required for Secure Boot
+        validation when deploying dynamic updates to media, per the MS
+        LCU pages (error 0xc0430001 when missing); WIM sizes + SHA-256
+        for content-identity proofs).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$OsKey,
+        [Parameter(Mandatory)] [string]$MediaRoot,
+        [Parameter(Mandatory)] [ValidateSet('pre', 'post')] [string]$Label,
+        [Parameter(Mandatory)] [string]$MountDir,
+        [Parameter(Mandatory)] [string]$LogDir
+    )
+    $installWim = Join-Path $MediaRoot 'sources\install.wim'
+    $bootWim    = Join-Path $MediaRoot 'sources\boot.wim'
+    $insp = [ordered]@{
+        Label        = $Label
+        OsKey        = $OsKey
+        MediaRoot    = $MediaRoot
+        Timestamp    = (Get-Date).ToString('o')
+        InstallWim   = [ordered]@{ Path = $installWim; Present = $false; SizeBytes = $null; Sha256 = $null; Indexes = @() }
+        BootWim      = [ordered]@{ Path = $bootWim; Present = $false; SizeBytes = $null; Sha256 = $null; Indexes = @() }
+        BootStlPaths = @()
+        ErrorMessage = $null
+    }
+    try {
+        try {
+            $stl = @(Get-ChildItem -LiteralPath $MediaRoot -Recurse -Filter 'boot.stl' -File -ErrorAction SilentlyContinue)
+            $insp.BootStlPaths = @($stl | ForEach-Object { $_.FullName.Substring($MediaRoot.Length).TrimStart('\', '/') })
+        } catch { $null = $_ }
+
+        foreach ($entry in @(
+            @{ Slot = 'InstallWim'; Path = $installWim; Kind = 'install' },
+            @{ Slot = 'BootWim';    Path = $bootWim;    Kind = 'boot' }
+        )) {
+            $slot = $insp[$entry.Slot]
+            if (-not (Test-Path -LiteralPath $entry.Path)) { continue }
+            $slot.Present = $true
+            $fi = Get-Item -LiteralPath $entry.Path
+            $slot.SizeBytes = $fi.Length
+            try { $slot.Sha256 = (Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash.ToLower() } catch { $null = $_ }
+            $idxList = @()
+            try {
+                $idxList = @((Get-WimIndexInventory -WimPath $entry.Path) | ForEach-Object { [int]$_.ImageIndex })
+            } catch {
+                Write-Caution ('Get-MediaInspection: index enumeration failed for {0}: {1}' -f $entry.Path, $_.Exception.Message)
+            }
+            $records = @()
+            foreach ($idx in $idxList) {
+                Write-Step ('  inspecting {0}.wim idx {1} ({2}) ...' -f $entry.Kind, $idx, $Label)
+                $t0 = Get-Date
+                $rec = Get-WimIndexInspection -OsKey $OsKey -WimPath $entry.Path -Index $idx `
+                    -Kind $entry.Kind -MountDir $MountDir -LogDir $LogDir
+                $secs = [int](New-TimeSpan -Start $t0 -End (Get-Date)).TotalSeconds
+                $b = if ($rec.Evidence -and $rec.Evidence.Build) { $rec.Evidence.Build } else { '(none)' }
+                if ($rec.ErrorMessage) {
+                    Write-Caution ('    idx {0}: inspection error ({1}s): {2}' -f $idx, $secs, $rec.ErrorMessage)
+                } else {
+                    Write-Step ('    idx {0}: build={1} packages={2} ({3}s)' -f $idx, $b, @($rec.PackageNames).Count, $secs)
+                }
+                $records += $rec
+            }
+            $slot.Indexes = $records
+        }
+    } catch {
+        $insp.ErrorMessage = $_.Exception.Message
+    }
+    return [pscustomobject]$insp
+}
+
+function Write-MediaInspectionJson {
+    <#
+    .SYNOPSIS
+        Serialize an inspection object to <LogDir>\inspection_<label>.json
+        (runtime artifact; NOT canonical-JSON governed). Returns the path.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [pscustomobject]$Inspection,
+        [Parameter(Mandatory)] [string]$LogDir
+    )
+    $path = Join-Path $LogDir ('inspection_{0}.json' -f $Inspection.Label)
+    $Inspection | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding UTF8
+    return $path
+}
+
+function ConvertFrom-InspectionBuildValue {
+    <#
+    .SYNOPSIS
+        Judgment-free utility: normalise ANY build-value shape the
+        inspection pipeline can hand us into a two-part [version] --
+        a live [version], a string, or the {Major, Minor, ...} object
+        a [version] becomes after a ConvertTo-Json/ConvertFrom-Json
+        round trip. $null/unparsable returns $null; never throws.
+    #>
+    [CmdletBinding()]
+    [OutputType([version])]
+    param(
+        [AllowNull()] [object]$Value
+    )
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [version]) { return (ConvertTo-TwoPartBuild -BuildString ([string]$Value)) }
+    if ($Value -is [string]) { return (ConvertTo-TwoPartBuild -BuildString $Value) }
+    if ($Value -is [System.Collections.IDictionary]) {
+        if ($Value.Contains('Major') -and $Value.Contains('Minor')) {
+            if (([int]$Value['Major']) -lt 0 -or ([int]$Value['Minor']) -lt 0) { return $null }
+            return [version]('{0}.{1}' -f [int]$Value['Major'], [int]$Value['Minor'])
+        }
+        return $null
+    }
+    if ($Value.PSObject.Properties['Major'] -and $Value.PSObject.Properties['Minor']) {
+        if (([int]$Value.Major) -lt 0 -or ([int]$Value.Minor) -lt 0) { return $null }
+        return [version]('{0}.{1}' -f [int]$Value.Major, [int]$Value.Minor)
+    }
+    return $null
+}
+
+function Compare-MediaInspection {
+    <#
+    .SYNOPSIS
+        Pure diff over two media-inspection objects (live or
+        JSON-deserialized): per WIM, per index -- build movement,
+        package-count delta, 2024-4B prerequisite flips, and (boot)
+        the appearance of the PCA2023 _EX payload. No I/O; offline-
+        testable (T38).
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [object]$Pre,
+        [Parameter(Mandatory)] [object]$Post
+    )
+    $wims = @()
+    foreach ($slotName in @('InstallWim', 'BootWim')) {
+        $preSlot  = $Pre.$slotName
+        $postSlot = $Post.$slotName
+        $postByIdx = @{}
+        foreach ($r in @($postSlot.Indexes)) {
+            if ($null -ne $r) { $postByIdx[[int]$r.Index] = $r }
+        }
+        $indexDiffs = @()
+        foreach ($preRec in @($preSlot.Indexes)) {
+            if ($null -eq $preRec) { continue }
+            $i = [int]$preRec.Index
+            $postRec = $postByIdx[$i]
+            $preB  = ConvertFrom-InspectionBuildValue -Value $(if ($preRec.Evidence) { $preRec.Evidence.Build } else { $null })
+            $postB = ConvertFrom-InspectionBuildValue -Value $(if ($postRec -and $postRec.Evidence) { $postRec.Evidence.Build } else { $null })
+            $exAppeared = $null
+            if ($slotName -eq 'BootWim') {
+                $exAppeared = [bool](($postRec -and $postRec.HasEfiExDir) -and -not $preRec.HasEfiExDir)
+            }
+            $indexDiffs += [pscustomobject]@{
+                Index              = $i
+                BuildBefore        = $preB
+                BuildAfter         = $postB
+                BuildAdvanced      = [bool]($preB -and $postB -and ($postB -gt $preB))
+                PackageCountBefore = @($preRec.PackageNames).Count
+                PackageCountAfter  = $(if ($postRec) { @($postRec.PackageNames).Count } else { $null })
+                PrereqBefore       = $(if ($preRec.Evidence) { [bool]$preRec.Evidence.MeetsPca2023Prereq } else { $null })
+                PrereqAfter        = $(if ($postRec -and $postRec.Evidence) { [bool]$postRec.Evidence.MeetsPca2023Prereq } else { $null })
+                ExPayloadAppeared  = $exAppeared
+                PostMissing        = [bool]($null -eq $postRec)
+            }
+        }
+        $wims += [pscustomobject]@{
+            Wim        = $slotName
+            ShaChanged = [bool]($preSlot.Sha256 -and $postSlot.Sha256 -and ($preSlot.Sha256 -ne $postSlot.Sha256))
+            Indexes    = $indexDiffs
+        }
+    }
+    return [pscustomobject]@{
+        OsKey         = $Pre.OsKey
+        PreTimestamp  = $Pre.Timestamp
+        PostTimestamp = $Post.Timestamp
+        Wims          = $wims
+    }
+}
+
+function Get-InspectionCrossChecks { # psa-disable-line PSA6003 -- "CrossChecks" is plural by design; returns the full findings list
+    <#
+    .SYNOPSIS
+        Pure observe-first comparator: measured state vs config
+        declarations. Emits findings only -- Level 'Warning' means the
+        declaration and the measurement disagree (recorded, NEVER
+        gated in this arc; measurement-driven gating is a next-arc
+        step after the inspection survives one E2E cycle
+        [user-adjudicated 2026-07-07]). Level 'Info' documents
+        consistency or an expected tolerate-path outcome.
+    .OUTPUTS
+        Array of pscustomobject: Level / Kind / Message
+    #>
+    [CmdletBinding()]
+    [OutputType([array])]
+    param(
+        [Parameter(Mandatory)] [string]$BootWimLcuPolicy,
+        [AllowNull()] [object]$BridgeMinimumStack,
+        [AllowNull()] [object]$PreInstallBuild,
+        [AllowNull()] [object]$PreBootBuild,
+        [AllowNull()] [object]$PostBootBuild
+    )
+    $findings = New-Object System.Collections.Generic.List[object]
+    $add = {
+        param($Level, $Kind, $Message)
+        $findings.Add([pscustomobject]@{ Level = $Level; Kind = $Kind; Message = $Message }) | Out-Null
+    }
+    $preB  = ConvertFrom-InspectionBuildValue -Value $PreBootBuild
+    $postB = ConvertFrom-InspectionBuildValue -Value $PostBootBuild
+    $bootAdvanced = [bool]($preB -and $postB -and ($postB -gt $preB))
+    $preS  = if ($preB)  { [string]$preB }  else { '(none)' }
+    $postS = if ($postB) { [string]$postB } else { '(none)' }
+    switch ($BootWimLcuPolicy) {
+        'disabled' {
+            if ($bootAdvanced) {
+                & $add 'Warning' 'boot-policy' ('BootWimLcuPolicy=disabled but the measured boot.wim build ADVANCED ({0} -> {1}); declaration and measurement disagree.' -f $preS, $postS)
+            } else {
+                & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=disabled and boot.wim build unchanged ({0}); declaration consistent with measurement.' -f $preS)
+            }
+        }
+        'enabled' {
+            if (-not $bootAdvanced) {
+                & $add 'Warning' 'boot-policy' ('BootWimLcuPolicy=enabled but the measured boot.wim build did NOT advance ({0} -> {1}); declaration and measurement disagree.' -f $preS, $postS)
+            } else {
+                & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=enabled and boot.wim build advanced ({0} -> {1}); declaration consistent with measurement.' -f $preS, $postS)
+            }
+        }
+        'tolerate' {
+            if ($bootAdvanced) {
+                & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=tolerate and boot.wim servicing SUCCEEDED ({0} -> {1}); measurement supports flipping this OS to enabled (user adjudication).' -f $preS, $postS)
+            } else {
+                & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=tolerate and boot.wim build did not advance ({0} -> {1}); the tolerated-failure path was taken, boot.wim ships as-is.' -f $preS, $postS)
+            }
+        }
+        default {
+            & $add 'Warning' 'boot-policy' ('Unknown BootWimLcuPolicy value {0}; cannot cross-check.' -f $BootWimLcuPolicy)
+        }
+    }
+    if ($BridgeMinimumStack) {
+        $floor = ConvertTo-TwoPartBuild -BuildString ([string]$BridgeMinimumStack)
+        $preI  = ConvertFrom-InspectionBuildValue -Value $PreInstallBuild
+        if ($floor -and $preI) {
+            if ($preI -ge $floor) {
+                & $add 'Warning' 'bridge-need' ('BridgeLcu is declared but the PRE-measured install.wim build {0} already meets MinimumImageServicingStack {1}; the bridge may be redundant on this media (supersedence will no-op it) -- config-drift signal.' -f $preI, $floor)
+            } else {
+                & $add 'Info' 'bridge-need' ('BridgeLcu need CONFIRMED by measurement: pre-measured install.wim build {0} is below MinimumImageServicingStack {1}.' -f $preI, $floor)
+            }
+        }
+    }
+    return $findings.ToArray()
+}
+
 function Get-ImageLcuEvidence {
     <#
     .SYNOPSIS
@@ -8439,33 +8848,10 @@ function Get-ImageLcuEvidence {
         [Parameter(Mandatory)] [string]$OsKey,
         [Parameter(Mandatory)] [string]$MountPath
     )
-    $pkgNames = @()
-    try {
-        $pkgs = Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ Path = $MountPath; ErrorAction = 'Stop' }
-        $pkgNames = @($pkgs | ForEach-Object { [string]$_.PackageName })
-    } catch {
-        Write-Caution ('Get-ImageLcuEvidence: package enumeration failed on {0}: {1}' -f $MountPath, $_.Exception.Message)
-    }
-    $regBuild = $null
-    try {
-        $cb  = Get-WimOfflineHiveValue -WimMountPath $MountPath -HiveFile 'SOFTWARE' `
-            -RelativeRegPath 'Microsoft\Windows NT\CurrentVersion' -ValueName 'CurrentBuildNumber'
-        $ubr = Get-WimOfflineHiveValue -WimMountPath $MountPath -HiveFile 'SOFTWARE' `
-            -RelativeRegPath 'Microsoft\Windows NT\CurrentVersion' -ValueName 'UBR'
-        if ($cb -and ($null -ne $ubr)) { $regBuild = ('{0}.{1}' -f $cb, $ubr) }
-        elseif ($cb) { $regBuild = [string]$cb }
-    } catch { $null = $_ }
-    $kernBuild = $null
-    try {
-        $ntos = Join-Path $MountPath 'Windows\System32\ntoskrnl.exe'
-        if (Test-Path -LiteralPath $ntos) {
-            $fv = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($ntos)
-            # ProductVersion form: 10.0.20348.5256 -> take build.revision
-            $pv = [string]$fv.ProductVersion
-            $m = [regex]::Match($pv, '(\d+)\.(\d+)$')
-            if ($m.Success) { $kernBuild = ('{0}.{1}' -f $m.Groups[1].Value, $m.Groups[2].Value) }
-        }
-    } catch { $null = $_ }
+    $src = Get-WimBuildSources -MountPath $MountPath
+    $pkgNames  = @($src.PackageNames)
+    $regBuild  = $src.RegistryBuild
+    $kernBuild = $src.KernelBuild
 
     switch ($OsKey) {
         'Server2016' { return Resolve-LcuEvidence_Server2016 -PackageNames $pkgNames -RegistryBuild $regBuild -KernelBuild $kernBuild }
@@ -10628,6 +11014,34 @@ function Invoke-PlanPhase06_ValidatePatchServicing {
             throw ("P06 ValidatePatchServicing FAILED for {0} (PatchModel '{1}'): {2}." -f $p06OsKey, $p06Model, ($p06.Errors -join '; '))
         }
         Write-Ok ("P06 ValidatePatchServicing: {0} PatchModel '{1}' consistent ({2} Lines)." -f $p06OsKey, $p06Model, $p06Lines.Count)
+
+        # ---- Pre-servicing media inspection [user-adjudicated 2026-07-07] ----
+        # Records the state of EVERY WIM index BEFORE any patch is
+        # applied (one mount per index, everything in one pass), so
+        # P13 can diff before/after and observe-first cross-checks
+        # have a measured baseline. Failure here is a Warning + an
+        # errors.jsonl entry, never a phase failure: the build must
+        # not die because the microscope broke.
+        $preWim = Join-Path $Script:ExtractedDir 'sources\install.wim'
+        if ($Script:Execute -and -not $Script:SyntheticTestMode -and (Test-Path -LiteralPath $preWim)) {
+            Set-DebugStep -Step 'pre-inspection'
+            Write-SubSection 'Pre-servicing media inspection'
+            try {
+                $preMount = Join-Path $Script:WorkRoot 'work\inspect_mount'
+                $preInsp = Get-MediaInspection -OsKey $Script:OsVersion -MediaRoot $Script:ExtractedDir `
+                    -Label 'pre' -MountDir $preMount -LogDir $Script:LogsDir
+                $preJson = Write-MediaInspectionJson -Inspection $preInsp -LogDir $Script:LogsDir
+                Write-Ok ('Pre-servicing inspection written: {0}' -f $preJson)
+            } catch {
+                Write-Caution ('Pre-servicing inspection failed: {0}' -f $_.Exception.Message)
+                Add-ErrorJsonlEntry -Phase 'P06' -Kind 'warning' -Properties @{
+                    subsystem = 'media-inspection'; label = 'pre'
+                    message = $_.Exception.Message
+                }
+            }
+        } elseif ($Script:Execute -and -not $Script:SyntheticTestMode) {
+            Write-Step 'Pre-servicing inspection skipped (extracted media not present yet in this run shape).'
+        }
         return $true
     } finally {
         Stop-DebugTrace
@@ -11365,44 +11779,73 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
 function Test-LcuTargetApplied {
     <#
     .SYNOPSIS
-        Pure comparator: did the serviced image reach the baseline LCU
-        (and therefore TargetBuildAfterUpdate)? Offline-testable (T31).
+        Pure per-OS comparator: did the serviced image reach the
+        baseline LCU / TargetBuildAfterUpdate? Offline-testable (T31).
     .DESCRIPTION
-        The applied LCU package IS the build-attainment marker: integrating
-        LCU KBnnnnnnn takes the image to the build recorded in that Line's
-        InScope.build (= PatchBaseline.TargetBuildAfterUpdate, derived).
-        This function only compares -- no DISM, no host writes -- so the
-        decision logic is testable on Linux; P11 supplies the package list
-        from the mounted output ISO (Windows-only acquisition).
-        Mismatch is a HARD verification failure [DECIDED 2026-07-02, user].
+        Judgment is per-OS [user-adjudicated 2026-07-07], fed by the
+        r11.58 evidence object instead of raw package names (the
+        KB-name-only predecessor was structurally blind on the
+        RollupFix-named OSes and would have hard-failed 2019/2022/2025
+        media whose LCU HAD applied):
+          - Server2016: the LCU package name carries the KB id --
+            applied when Evidence.LcuKbId equals the expected KB, or
+            the measured build reaches the expected build.
+          - Server2019/2022/2025: no KB id exists in package names;
+            applied when the measured build reaches the expected
+            TargetBuildAfterUpdate (two-part compare). Without an
+            expected build the verdict is INDETERMINATE (Warn), never
+            a silent Pass.
+        Mismatch stays a HARD verification failure [DECIDED
+        2026-07-02, user].
     .OUTPUTS
         pscustomobject: Applied / Check / Expected / Actual / Status / Notes
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
+        [Parameter(Mandatory)] [string]$OsKey,
         [Parameter(Mandatory)] [string]$ExpectedKbId,
         [AllowEmptyString()] [string]$ExpectedBuild = '',
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$PackageNames
+        [Parameter(Mandatory)] [object]$Evidence
     )
-    $kbPattern = [regex]::Escape($ExpectedKbId)
-    $found = $false
-    foreach ($pn in $PackageNames) {
-        # psa-disable-next-line PSA2003 -- $kbPattern = [regex]::Escape of a Mandatory non-empty string; never $null
-        if ($pn -match $kbPattern) { $found = $true; break }
-    }
-    $buildNote = if ($ExpectedBuild) {
-        ('TargetBuildAfterUpdate={0}' -f $ExpectedBuild)
+    $expB = ConvertTo-TwoPartBuild -BuildString $ExpectedBuild
+    # Normalise: live [version], JSON {Major,Minor} object, REPL hashtable,
+    # or string all become a two-part [version].
+    $measured = ConvertFrom-InspectionBuildValue -Value $Evidence.Build
+    $applied = $false
+    $indeterminate = $false
+    if ($OsKey -eq 'Server2016') {
+        $kbHit = ($Evidence.LcuKbId -and ($Evidence.LcuKbId -eq $ExpectedKbId))
+        $buildHit = ($expB -and $measured -and ($measured -ge $expB))
+        $applied = ($kbHit -or $buildHit)
     } else {
-        '(no TargetBuildAfterUpdate recorded)'
+        if ($expB) {
+            $applied = [bool]($measured -and ($measured -ge $expB))
+        } else {
+            $indeterminate = $true
+        }
+    }
+    $measStr = if ($measured) { [string]$measured } else { '(none)' }
+    $notes = ('OsKey={0}; measured build={1}; TargetBuildAfterUpdate={2}; evidence KB={3}' -f `
+        $OsKey, $measStr, $(if ($ExpectedBuild) { $ExpectedBuild } else { '(none)' }), `
+        $(if ($Evidence.LcuKbId) { $Evidence.LcuKbId } else { '(none)' }))
+    if ($indeterminate) {
+        return [pscustomobject]@{
+            Applied  = $false
+            Check    = 'LcuTargetApplied'
+            Expected = ('LCU {0} at TargetBuildAfterUpdate' -f $ExpectedKbId)
+            Actual   = 'Indeterminate'
+            Status   = 'Warn'
+            Notes    = ($notes + '; no TargetBuildAfterUpdate recorded and this OS has no KB id in package names')
+        }
     }
     return [pscustomobject]@{
-        Applied  = $found
+        Applied  = $applied
         Check    = 'LcuTargetApplied'
-        Expected = ('LCU {0} present' -f $ExpectedKbId)
-        Actual   = $(if ($found) { 'Present' } else { 'Absent' })
-        Status   = $(if ($found) { 'Pass' } else { 'Fail' })
-        Notes    = $buildNote
+        Expected = ('LCU {0} applied (build >= {1})' -f $ExpectedKbId, $(if ($ExpectedBuild) { $ExpectedBuild } else { 'n/a' }))
+        Actual   = $(if ($applied) { 'Applied' } else { 'NotApplied' })
+        Status   = $(if ($applied) { 'Pass' } else { 'Fail' })
+        Notes    = $notes
     }
 }
 
@@ -11410,10 +11853,14 @@ function Invoke-VerifyPhase11_StaticVerify {
     <#
     .SYNOPSIS
         P11: Verify the output ISO without booting it. Mounts the ISO,
-        verifies presence of install.wim/boot.wim/setup.exe, runs
-        Get-WindowsImage and Get-WindowsPackage to check that the
-        expected KB packages have been integrated. Emits
-        P11_verification.csv.
+        verifies presence of install.wim/boot.wim/setup.exe, proves
+        content identity between the shipped ISO's WIMs and the
+        extracted tree (SHA-256, hard), then runs the FULL post
+        media inspection over the extracted tree (every index, one
+        mount each) and derives the Kb rows and the
+        TargetBuildAfterUpdate hard check from the measured
+        evidence. Emits P11_verification.csv +
+        logs/inspection_post.json.
     #>
     Start-DebugTrace -Context 'Invoke-VerifyPhase11_StaticVerify' -PhaseId 'P11'
     try {
@@ -11489,72 +11936,110 @@ function Invoke-VerifyPhase11_StaticVerify {
             Write-Step ('setup.exe present  : {0}' -f $hasSetup)
 
             if ($hasInst -and -not $Script:SyntheticTestMode) {
-                # Confirm WIM is enumerable and the configured KBs are present
-                try {
-                    Set-DebugStep -Step 'wim-enum-verify'
-                    $inv = Get-WimIndexInventory -WimPath $installWim
-                    if ($inv.Count -ge 1) { $enumStatus = 'Pass' } else { $enumStatus = 'Fail' }
-                    Add-VRow -Check 'WimEnumerable' -Expected '>=1' `
-                        -Actual ($inv.Count).ToString() -Status $enumStatus -Notes ''
-                    Write-Ok ('install.wim has {0} index(es).' -f $inv.Count)
-
-                    # For each index, run Get-WindowsPackage to confirm KBs
-                    $expectedKbs = @($Script:ResolvedPatches | Where-Object { $_.KbId -ne 'Unknown' } | ForEach-Object { $_.KbId })
-                    if ($expectedKbs.Count -gt 0 -and $Script:Execute) {
-                        $firstIdx = $inv[0].ImageIndex
-                        Set-DebugStep -Step ('verify-pkg-idx-' + $firstIdx)
-                        $pkgs = Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ ImagePath = $installWim; Index = $firstIdx }
-                        $pkgNames = @($pkgs | ForEach-Object { $_.PackageName })
-                        foreach ($kb in $expectedKbs) {
-                            $found = $false
-                            foreach ($pn in $pkgNames) {
-                                # psa-disable-next-line PSA2003 -- $kb is a non-null string from $expectedKbs
-                                if ($pn -match $kb) { $found = $true; break }
-                            }
-                            if ($found) { $st = 'Pass'; $actualStr = 'Present' }
-                            else        { $st = 'Warn'; $actualStr = 'Absent' }
-                            Add-VRow -Check ('Kb_' + $kb) -Expected 'Present' `
-                                -Actual $actualStr -Status $st `
-                                -Notes ('install.wim idx ' + $firstIdx)
-                        }
-                        # TargetBuildAfterUpdate hard check: the
-                        # baseline LCU is THE build-attainment marker. The
-                        # per-Kind rows above stay Warn; this row is a hard
-                        # Fail (P11 throws on any Fail row) [DECIDED
-                        # 2026-07-02, user]. Runs only when the resolved
-                        # patch set actually intended the baseline LCU
-                        # (defensive: a run whose resolved set never
-                        # included that KB must not fail against it).
-                        $pbLcu = @()
-                        if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['PatchBaseline'] -and
-                            $Script:OsProfile.PatchBaseline -and
-                            $Script:OsProfile.PatchBaseline.PSObject.Properties['Lines']) {
-                            $pbLcu = @($Script:OsProfile.PatchBaseline.Lines |
-                                Where-Object { $_.Kind -eq 'LCU' -and $_.KbId })
-                        }
-                        if ($pbLcu.Count -ge 1 -and ($expectedKbs -contains $pbLcu[0].KbId)) {
-                            $tbauExpected = ''
-                            if ($Script:OsProfile.PatchBaseline.PSObject.Properties['TargetBuildAfterUpdate']) {
-                                $tbauExpected = [string]$Script:OsProfile.PatchBaseline.TargetBuildAfterUpdate
-                            }
-                            $tbauRow = Test-LcuTargetApplied -ExpectedKbId $pbLcu[0].KbId `
-                                -ExpectedBuild $tbauExpected -PackageNames $pkgNames
-                            Add-VRow -Check $tbauRow.Check -Expected $tbauRow.Expected `
-                                -Actual $tbauRow.Actual -Status $tbauRow.Status -Notes $tbauRow.Notes
-                            if ($tbauRow.Status -eq 'Pass') {
-                                Write-Ok ('Baseline LCU {0} applied ({1}).' -f $pbLcu[0].KbId, $tbauRow.Notes)
-                            } else {
-                                Write-Fail ('Baseline LCU {0} NOT applied ({1}).' -f $pbLcu[0].KbId, $tbauRow.Notes)
-                            }
-                        }
+                # Content-identity proof: the deep inspection below runs
+                # over the EXTRACTED tree (DISM cannot mount a WIM living
+                # on read-only ISO media); these rows prove byte identity
+                # between what we inspect and what we ship. Hard Fail on
+                # mismatch.
+                Set-DebugStep -Step 'iso-wim-hash-equivalence'
+                foreach ($pair in @(
+                    @{ Name = 'install'; Iso = $installWim; Ext = (Join-Path $Script:ExtractedDir 'sources\install.wim') },
+                    @{ Name = 'boot';    Iso = $bootWim;    Ext = (Join-Path $Script:ExtractedDir 'sources\boot.wim') }
+                )) {
+                    if (-not (Test-Path -LiteralPath $pair.Ext)) {
+                        Add-VRow -Check ('IsoWimHashMatch_' + $pair.Name) -Expected 'match' `
+                            -Actual 'extracted-missing' -Status 'Fail' -Notes $pair.Ext
+                        continue
                     }
-                } catch {
-                    Write-Caution ('WIM enumeration failed: {0}' -f $_.Exception.Message)
+                    $hIso = (Get-FileHash -LiteralPath $pair.Iso -Algorithm SHA256).Hash.ToLower()
+                    $hExt = (Get-FileHash -LiteralPath $pair.Ext -Algorithm SHA256).Hash.ToLower()
+                    if ($hIso -eq $hExt) { $hs = 'Pass' } else { $hs = 'Fail' }
+                    Add-VRow -Check ('IsoWimHashMatch_' + $pair.Name) -Expected 'match' `
+                        -Actual $(if ($hIso -eq $hExt) { 'match' } else { 'MISMATCH' }) `
+                        -Status $hs -Notes ('iso=' + $hIso.Substring(0, 12) + ' extracted=' + $hExt.Substring(0, 12))
+                    Write-Step ('{0}.wim ISO/extracted SHA-256: {1}' -f $pair.Name, $(if ($hIso -eq $hExt) { 'match' } else { 'MISMATCH' }))
                 }
             }
         }
         if ($img) {
             try { Dismount-DiskImage -ImagePath $Script:OutputIsoPath -ErrorAction SilentlyContinue | Out-Null } catch { $null = $_ }
+        }
+
+        # Step 3: full post-servicing media inspection (extracted tree;
+        # content identity to the ISO proven above). The Kb rows and the
+        # TargetBuildAfterUpdate hard check are derived from MEASURED
+        # evidence -- the former -ImagePath enumeration was an invalid
+        # Get-WindowsPackage parameter set that threw on every OS and was
+        # swallowed by a catch, so those rows had never actually run.
+        if (-not $Script:SyntheticTestMode -and $Script:Execute) {
+            Set-DebugStep -Step 'post-inspection'
+            Write-SubSection 'Step 3: Post-servicing media inspection'
+            $postInsp = $null
+            try {
+                $postMount = Join-Path $Script:WorkRoot 'work\inspect_mount'
+                $postInsp = Get-MediaInspection -OsKey $Script:OsVersion -MediaRoot $Script:ExtractedDir `
+                    -Label 'post' -MountDir $postMount -LogDir $Script:LogsDir
+                $postJson = Write-MediaInspectionJson -Inspection $postInsp -LogDir $Script:LogsDir
+                Write-Ok ('Post-servicing inspection written: {0}' -f $postJson)
+            } catch {
+                Write-Caution ('Post-servicing inspection failed: {0}' -f $_.Exception.Message)
+            }
+            if (-not $postInsp -or $postInsp.ErrorMessage -or -not $postInsp.InstallWim.Present) {
+                Add-VRow -Check 'PostInspection' -Expected 'available' -Actual 'unavailable' `
+                    -Status 'Fail' -Notes $(if ($postInsp -and $postInsp.ErrorMessage) { $postInsp.ErrorMessage } else { 'inspection did not produce install.wim records' })
+            } else {
+                Add-VRow -Check 'PostInspection' -Expected 'available' -Actual 'available' `
+                    -Status 'Pass' -Notes ('install idx: {0}; boot idx: {1}' -f @($postInsp.InstallWim.Indexes).Count, @($postInsp.BootWim.Indexes).Count)
+                $primaryRec = @($postInsp.InstallWim.Indexes) | Select-Object -First 1
+                if ($primaryRec -and -not $primaryRec.ErrorMessage) {
+                    $pkgNames = @($primaryRec.PackageNames)
+                    $expectedKbs = @($Script:ResolvedPatches | Where-Object { $_.KbId -ne 'Unknown' } | ForEach-Object { $_.KbId })
+                    foreach ($kb in $expectedKbs) {
+                        $found = $false
+                        foreach ($pn in $pkgNames) {
+                            # psa-disable-next-line PSA2003 -- $kb is a non-null string from $expectedKbs
+                            if ($pn -match $kb) { $found = $true; break }
+                        }
+                        if ($found) { $st = 'Pass'; $actualStr = 'Present' }
+                        else        { $st = 'Warn'; $actualStr = 'Absent' }
+                        Add-VRow -Check ('Kb_' + $kb) -Expected 'Present' `
+                            -Actual $actualStr -Status $st `
+                            -Notes ('install.wim idx ' + $primaryRec.Index + '; note: RollupFix-named OSes never carry KB ids in package names')
+                    }
+                    # TargetBuildAfterUpdate hard check [DECIDED 2026-07-02,
+                    # user]: per-OS evidence comparator. Runs only
+                    # when the resolved set actually intended the baseline
+                    # LCU (defensive, unchanged).
+                    $pbLcu = @()
+                    if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['PatchBaseline'] -and
+                        $Script:OsProfile.PatchBaseline -and
+                        $Script:OsProfile.PatchBaseline.PSObject.Properties['Lines']) {
+                        $pbLcu = @($Script:OsProfile.PatchBaseline.Lines |
+                            Where-Object { $_.Kind -eq 'LCU' -and $_.KbId })
+                    }
+                    if ($pbLcu.Count -ge 1 -and ($expectedKbs -contains $pbLcu[0].KbId)) {
+                        $tbauExpected = ''
+                        if ($Script:OsProfile.PatchBaseline.PSObject.Properties['TargetBuildAfterUpdate']) {
+                            $tbauExpected = [string]$Script:OsProfile.PatchBaseline.TargetBuildAfterUpdate
+                        }
+                        $tbauRow = Test-LcuTargetApplied -OsKey $Script:OsVersion `
+                            -ExpectedKbId $pbLcu[0].KbId -ExpectedBuild $tbauExpected `
+                            -Evidence $primaryRec.Evidence
+                        Add-VRow -Check $tbauRow.Check -Expected $tbauRow.Expected `
+                            -Actual $tbauRow.Actual -Status $tbauRow.Status -Notes $tbauRow.Notes
+                        if ($tbauRow.Status -eq 'Pass') {
+                            Write-Ok ('Baseline LCU {0} applied ({1}).' -f $pbLcu[0].KbId, $tbauRow.Notes)
+                        } elseif ($tbauRow.Status -eq 'Warn') {
+                            Write-Caution ('Baseline LCU {0}: {1}.' -f $pbLcu[0].KbId, $tbauRow.Notes)
+                        } else {
+                            Write-Fail ('Baseline LCU {0} NOT applied ({1}).' -f $pbLcu[0].KbId, $tbauRow.Notes)
+                        }
+                    }
+                } else {
+                    Add-VRow -Check 'PostInspectionPrimaryIndex' -Expected 'inspectable' -Actual 'error' `
+                        -Status 'Fail' -Notes $(if ($primaryRec) { $primaryRec.ErrorMessage } else { 'no index records' })
+                }
+            }
         }
 
         $csvPath = Join-Path $Script:LogsDir 'P11_verification.csv'
@@ -11768,6 +12253,61 @@ function Invoke-ReportPhase13_FinalReport {
             }
             if (Test-Path -LiteralPath $mdPath) {
                 Write-Step ('Detail (Markdown): {0}' -f $mdPath)
+            }
+        }
+
+        # ---- Media inspection diff + observe-first cross-checks ----
+        # Requires both artifacts of the same run: P06 wrote
+        # inspection_pre.json, P11 wrote inspection_post.json.
+        $preJsonPath  = Join-Path $Script:LogsDir 'inspection_pre.json'
+        $postJsonPath = Join-Path $Script:LogsDir 'inspection_post.json'
+        if ((Test-Path -LiteralPath $preJsonPath) -and (Test-Path -LiteralPath $postJsonPath)) {
+            Set-DebugStep -Step 'inspection-diff'
+            Write-SubSection 'Media Inspection Diff (pre -> post)'
+            try {
+                $preObj  = Get-Content -LiteralPath $preJsonPath -Raw | ConvertFrom-Json
+                $postObj = Get-Content -LiteralPath $postJsonPath -Raw | ConvertFrom-Json
+                $diff = Compare-MediaInspection -Pre $preObj -Post $postObj
+                $diffPath = Join-Path $Script:LogsDir 'inspection_diff.json'
+                $diff | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $diffPath -Encoding UTF8
+                foreach ($w in @($diff.Wims)) {
+                    foreach ($ix in @($w.Indexes)) {
+                        $bb = if ($ix.BuildBefore) { $ix.BuildBefore } else { '(none)' }
+                        $ba = if ($ix.BuildAfter)  { $ix.BuildAfter }  else { '(none)' }
+                        Write-Step ('  {0} idx {1}: build {2} -> {3}; packages {4} -> {5}; 2024-4B prereq {6} -> {7}' -f `
+                            $w.Wim, $ix.Index, $bb, $ba, $ix.PackageCountBefore, $ix.PackageCountAfter, $ix.PrereqBefore, $ix.PrereqAfter)
+                    }
+                }
+                Write-Ok ('Inspection diff written: {0}' -f $diffPath)
+
+                # observe-first: measured vs declared. Warnings are
+                # RECORDED (console + errors.jsonl), never gated here.
+                $obsPolicy = Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
+                $obsBridgeMin = $null
+                if ($Script:OsProfile.PSObject.Properties['PatchBaseline'] -and $Script:OsProfile.PatchBaseline -and
+                    $Script:OsProfile.PatchBaseline.PSObject.Properties['BridgeLcu'] -and $Script:OsProfile.PatchBaseline.BridgeLcu -and
+                    $Script:OsProfile.PatchBaseline.BridgeLcu.PSObject.Properties['MinimumImageServicingStack']) {
+                    $obsBridgeMin = [string]$Script:OsProfile.PatchBaseline.BridgeLcu.MinimumImageServicingStack
+                }
+                $preInstall0 = @($preObj.InstallWim.Indexes) | Select-Object -First 1
+                $preBoot0    = @($preObj.BootWim.Indexes) | Select-Object -First 1
+                $postBoot0   = @($postObj.BootWim.Indexes) | Select-Object -First 1
+                $findings = Get-InspectionCrossChecks -BootWimLcuPolicy $obsPolicy -BridgeMinimumStack $obsBridgeMin `
+                    -PreInstallBuild $(if ($preInstall0 -and $preInstall0.Evidence) { $preInstall0.Evidence.Build } else { $null }) `
+                    -PreBootBuild $(if ($preBoot0 -and $preBoot0.Evidence) { $preBoot0.Evidence.Build } else { $null }) `
+                    -PostBootBuild $(if ($postBoot0 -and $postBoot0.Evidence) { $postBoot0.Evidence.Build } else { $null })
+                foreach ($fd in @($findings)) {
+                    if ($fd.Level -eq 'Warning') {
+                        Write-Caution ('observe-first [{0}]: {1}' -f $fd.Kind, $fd.Message)
+                        Add-ErrorJsonlEntry -Phase 'P13' -Kind 'warning' -Properties @{
+                            subsystem = 'observe-first'; check = $fd.Kind; message = $fd.Message
+                        }
+                    } else {
+                        Write-Step ('observe-first [{0}]: {1}' -f $fd.Kind, $fd.Message)
+                    }
+                }
+            } catch {
+                Write-Caution ('Inspection diff failed: {0}' -f $_.Exception.Message)
             }
         }
 

@@ -22,6 +22,67 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.07-r11.59] - 2026-07-07
+
+Tag: `media-inspection`. The inspection arc proper [user-adjudicated
+2026-07-07]: record the FULL measured state of the media before and
+after servicing (every WIM index, exactly one read-only mount per
+index, everything gathered in that one pass -- time cost explicitly
+accepted), and cross-check measurement against config declarations
+without gating on it yet (observe-first; measurement-driven gating is
+a next-arc step after the inspection survives one E2E cycle).
+
+### Added
+
+- **Inspection engine**: `Get-WimBuildSources` (acquisition refactored
+  out of `Get-ImageLcuEvidence`), `Get-WimIndexInspection` (one mount:
+  three build sources + per-OS evidence + full package-name list +
+  install: winre.wim presence/size/SHA-256 + SecureBoot servicing hive
+  values / boot: `_EX` payload census), `Get-MediaInspection` (all
+  indexes of install.wim + boot.wim, WIM sizes + SHA-256, and
+  `boot.stl` locations -- the MS LCU pages require boot.stl on
+  media serviced with dynamic updates; missing => 0xc0430001 at
+  Secure Boot validation), `Write-MediaInspectionJson`.
+- **P06**: pre-servicing inspection => `logs/inspection_pre.json`
+  (failure = Warning + errors.jsonl entry, never a phase failure).
+- **P13**: `Compare-MediaInspection` pure diff =>
+  `logs/inspection_diff.json` + per-index console summary, and
+  `Get-InspectionCrossChecks` observe-first findings: declared
+  `BootWimLcuPolicy` vs measured boot.wim build movement (tolerate +
+  measured success is the recorded evidence for flipping an OS to
+  `enabled`), and declared `BridgeLcu` vs the pre-measured floor
+  (redundancy = config-drift Warning). Warnings go to the console AND
+  errors.jsonl; nothing gates.
+- **T38 `media_inspection_test.py`** (19 assertions).
+
+### Fixed
+
+- **P11's package verification had never run**: `Get-WindowsPackage`
+  was invoked with `-ImagePath`/`-Index` -- an invalid parameter set
+  that threw on every OS, and the surrounding catch downgraded it to
+  a Caution. The Kb rows and the TargetBuildAfterUpdate hard-Fail row
+  [DECIDED 2026-07-02] were dead code from birth (proven by the
+  2026-07-07 E2E logs on all four OSes). P11 now: (1) proves ISO/
+  extracted content identity per WIM by SHA-256 (hard Fail on
+  mismatch; DISM cannot mount a WIM on read-only ISO media, so the
+  deep inspection runs over the extracted tree and these rows anchor
+  it to the shipped bytes), (2) runs the full post inspection =>
+  `logs/inspection_post.json` (hard Fail row if unavailable), and
+  (3) derives the Kb rows and the TBAU check from measured evidence.
+- **`Test-LcuTargetApplied` forked per OS** (destructive signature
+  change: `-OsKey`/`-Evidence` replace `-PackageNames`): the KB-name
+  comparator would have hard-failed 2019/2022/2025 media whose LCU
+  HAD applied (no KB id exists in RollupFix package names).
+  Server2016 judges by KB id with build fallback; RollupFix OSes by
+  measured build vs TargetBuildAfterUpdate; a missing TBAU on a
+  RollupFix OS is INDETERMINATE (Warn), never a silent Pass. Hard-
+  Fail semantics on mismatch retained [DECIDED 2026-07-02].
+
+### Tests
+
+- T31 re-pinned to the per-OS comparator (26 assertions); T38 added.
+
+
 ## [update-wsi-2026.07.07-r11.58] - 2026-07-07
 
 Tag: `per-os-evidence`. Third fix of the 2026-07-07 E2E (run 2) batch,

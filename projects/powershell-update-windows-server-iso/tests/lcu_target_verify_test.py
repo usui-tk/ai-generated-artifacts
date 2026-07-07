@@ -18,9 +18,12 @@ build-attainment marker) [DECIDED 2026-07-02, user].
 
 This test pins four layers:
 
-1. **Comparator behavior** (TestHarness REPL): present / absent /
-   case-insensitive matching over realistic ``Package_for_KB...`` names,
-   empty package list, and the build annotation in ``Notes``.
+1. **Comparator behavior** (TestHarness REPL): per-OS judgment over
+   r11.58 evidence objects (r11.59) -- Server2016 KB-id hit and
+   build-fallback hit; RollupFix-named OSes judged by measured build vs
+   TargetBuildAfterUpdate (below-floor -> hard Fail; no expected build ->
+   INDETERMINATE Warn, never a silent Pass); measured build annotated
+   in ``Notes``.
 2. **Data contract**: every committed ``data/config-Server*.json`` has
    ``TargetBuildAfterUpdate == <LCU Line>.InScope.build``, and neither
    config nor seed files carry the retired fields.
@@ -77,43 +80,67 @@ def main() -> int:
     passed = 0
     failed = 0
 
-    # 1. comparator behavior
+    # 1. comparator behavior (per-OS evidence judgment, r11.59)
     with PSSession(SCRIPT_PATH) as ps:
-        r = ps.invoke("Test-LcuTargetApplied", ExpectedKbId="KB5095960",
-                      ExpectedBuild="26100.32995", PackageNames=PKGS_WITH_LCU)
+        ev = {"LcuKbId": "KB5095960", "Build": {"Major": 26100, "Minor": 32995}}
+        r = ps.invoke("Test-LcuTargetApplied", OsKey="Server2025",
+                      ExpectedKbId="KB5095960", ExpectedBuild="26100.32995",
+                      Evidence=ev)
         passed, failed = check(
-            "LCU present -> Pass",
+            "RollupFix OS: measured build reaches TBAU -> Pass",
             r.get("Applied") is True and r.get("Status") == "Pass"
-            and r.get("Actual") == "Present",
+            and r.get("Actual") == "Applied",
             f"Status={r.get('Status')!r} Actual={r.get('Actual')!r}",
             passed, failed)
         passed, failed = check(
-            "build annotated in Notes",
+            "measured build annotated in Notes",
             "26100.32995" in (r.get("Notes") or ""),
             f"Notes={r.get('Notes')!r}", passed, failed)
 
-        r = ps.invoke("Test-LcuTargetApplied", ExpectedKbId="KB5095960",
-                      ExpectedBuild="26100.32995", PackageNames=PKGS_WITHOUT_LCU)
+        ev_low = {"LcuKbId": None, "Build": {"Major": 26100, "Minor": 32522}}
+        r = ps.invoke("Test-LcuTargetApplied", OsKey="Server2025",
+                      ExpectedKbId="KB5095960", ExpectedBuild="26100.32995",
+                      Evidence=ev_low)
         passed, failed = check(
-            "LCU absent -> Fail",
+            "RollupFix OS: measured build BELOW TBAU -> hard Fail",
             r.get("Applied") is False and r.get("Status") == "Fail"
-            and r.get("Actual") == "Absent",
+            and r.get("Actual") == "NotApplied",
             f"Status={r.get('Status')!r} Actual={r.get('Actual')!r}",
             passed, failed)
 
-        r = ps.invoke("Test-LcuTargetApplied", ExpectedKbId="kb5095960",
-                      ExpectedBuild="", PackageNames=PKGS_WITH_LCU)
+        r = ps.invoke("Test-LcuTargetApplied", OsKey="Server2022",
+                      ExpectedKbId="KB5094128", ExpectedBuild="",
+                      Evidence={"LcuKbId": None,
+                                "Build": {"Major": 20348, "Minor": 5256}})
         passed, failed = check(
-            "case-insensitive KB match; empty build annotated",
-            r.get("Status") == "Pass"
+            "RollupFix OS without TBAU -> INDETERMINATE Warn (never a silent Pass)",
+            r.get("Status") == "Warn" and r.get("Actual") == "Indeterminate"
             and "no TargetBuildAfterUpdate" in (r.get("Notes") or ""),
             f"Status={r.get('Status')!r} Notes={r.get('Notes')!r}",
             passed, failed)
 
-        r = ps.invoke("Test-LcuTargetApplied", ExpectedKbId="KB5095960",
-                      ExpectedBuild="26100.32995", PackageNames=[])
+        r = ps.invoke("Test-LcuTargetApplied", OsKey="Server2016",
+                      ExpectedKbId="KB5094141", ExpectedBuild="14393.9234",
+                      Evidence={"LcuKbId": "KB5094141", "Build": None})
         passed, failed = check(
-            "empty package list -> Fail",
+            "Server2016: KB-id hit alone suffices (build source absent)",
+            r.get("Status") == "Pass",
+            f"Status={r.get('Status')!r}", passed, failed)
+
+        r = ps.invoke("Test-LcuTargetApplied", OsKey="Server2016",
+                      ExpectedKbId="KB5094141", ExpectedBuild="14393.9234",
+                      Evidence={"LcuKbId": None,
+                                "Build": {"Major": 14393, "Minor": 9234}})
+        passed, failed = check(
+            "Server2016: build fallback when the KB id is missing",
+            r.get("Status") == "Pass",
+            f"Status={r.get('Status')!r}", passed, failed)
+
+        r = ps.invoke("Test-LcuTargetApplied", OsKey="Server2016",
+                      ExpectedKbId="KB5094141", ExpectedBuild="14393.9234",
+                      Evidence={"LcuKbId": None, "Build": None})
+        passed, failed = check(
+            "Server2016: no evidence at all -> Fail",
             r.get("Status") == "Fail",
             f"Status={r.get('Status')!r}", passed, failed)
 
@@ -202,8 +229,8 @@ def main() -> int:
         passed, failed)
 
     passed, failed = check(
-        "P11 calls Test-LcuTargetApplied",
-        re.search(r"Test-LcuTargetApplied\s+-ExpectedKbId", code) is not None,
+        "P11 calls Test-LcuTargetApplied with the per-OS signature",
+        re.search(r"Test-LcuTargetApplied\s+-OsKey", code) is not None,
         "call site present", passed, failed)
 
     offenders = [ln.strip()[:90] for ln in code_lines
