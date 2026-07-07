@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.06-r11.55'
-$Script:ScriptTag     = 'pca2023-default-auto'
+$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.56'
+$Script:ScriptTag     = 'p08-plan-scope'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -7374,6 +7374,37 @@ function _CanonicalJson_ParseNull {
 # This module establishes the structural contract; a later release
 # fills in the WinRE worker and the LP-injection sequencing.
 
+function Test-WimSequenceHasWork {
+    <#
+    .SYNOPSIS
+        Pure decision: does an apply-sequence carry at least one
+        real patch (ignoring cleanup markers and null slots)?
+    .DESCRIPTION
+        P08 uses this to decide whether servicing a WIM is worth
+        mounting anything at all. Null-safe by construction: a
+        $null sequence, a $null element (e.g. @($null) produced by
+        wrapping an undefined property), and an empty Patches list
+        all mean 'no work'. History: the 2026-07-07 Server 2019 E2E
+        died inside an inline Where-Object doing
+        $_.PSObject.Properties['IsCleanupMarker'] on a $null element
+        ('Cannot index into a null array'); a pure, null-hardened,
+        REPL-testable helper is the structural fix for that class.
+    .OUTPUTS
+        System.Boolean
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [AllowNull()] [AllowEmptyCollection()] [object[]]$Sequence
+    )
+    foreach ($sp in @($Sequence)) {
+        if ($null -eq $sp) { continue }
+        if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) { continue }
+        if (@($sp.Patches).Count -gt 0) { return $true }
+    }
+    return $false
+}
+
 function Resolve-BootWimLcuPolicyValue {
     <#
     .SYNOPSIS
@@ -10637,6 +10668,13 @@ function Invoke-BuildPhase08_PatchBootWim {
             return
         }
 
+        # The patch plan is shared state for BOTH the boot.wim loop
+        # and the WinRE section below; it must exist on every policy
+        # path. (History: assigning it only inside the non-disabled
+        # branch left the WinRE section dereferencing an undefined
+        # variable on the disabled path -- 2026-07-07 Server 2019 E2E.)
+        $plan = Get-OrInitPatchPlan
+
         if ($bootPolicy -eq 'disabled') {
             Write-Skip 'BootWimLcuPolicy=disabled; boot.wim left as shipped (2019 EVAL media: LCU-on-WinPE is structurally closed). WinRE servicing below still runs.'
         } else {
@@ -10649,7 +10687,6 @@ function Invoke-BuildPhase08_PatchBootWim {
         }
 
         # Pull boot.wim apply sequence (B1.SSU -> B2.LP -> B3.LCU -> B4.cleanup)
-        $plan = Get-OrInitPatchPlan
         $bootSequence = @($plan.BootSequence)
         Write-Step ('boot.wim apply sequence: {0} sub-phase(s)' -f $bootSequence.Count)
 
@@ -10708,6 +10745,15 @@ function Invoke-BuildPhase08_PatchBootWim {
         if ($Script:OsProfile.EnableWinREUpdate) {
             Write-SubSection 'winre.wim (extracted from install.wim)'
             Set-DebugStep -Step 'winre-extract'
+            # Decide BEFORE mounting anything: a no-work WinRE pass
+            # used to mount + dismount install.wim (60-100s) just to
+            # discover there was nothing to apply.
+            # Pull WinRE apply sequence (W1.SSU -> W2.LP -> W3.SafeOsDU -> W4.cleanup)
+            $winReSequence = @($plan.WinReSequence)
+            $winReHasWork = Test-WimSequenceHasWork -Sequence $winReSequence
+            if (-not $winReHasWork) {
+                Write-Step 'WinRE sequence has no patches; skipping install.wim mount + WinRE servicing.'
+            } else {
             $installWim = Join-Path $Script:ExtractedDir 'sources\install.wim'
             $primaryIdx = ($Script:WimIndexInventory | Select-Object -First 1).ImageIndex
             if (-not $primaryIdx) { $primaryIdx = 1 }
@@ -10720,15 +10766,6 @@ function Invoke-BuildPhase08_PatchBootWim {
                 if (-not (Test-Path -LiteralPath $winReInside)) {
                     Write-Caution 'Winre.wim not found inside install.wim; skipping winre update.'
                 } else {
-                    # Pull WinRE apply sequence (W1.SSU -> W2.LP -> W3.SafeOsDU -> W4.cleanup)
-                    $winReSequence = @($plan.WinReSequence)
-                    $winReHasWork = ($winReSequence | Where-Object {
-                        -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker) -and
-                        @($_.Patches).Count -gt 0
-                    } | Measure-Object).Count -gt 0
-                    if (-not $winReHasWork) {
-                        Write-Step 'WinRE sequence has no patches; skipping WinRE mount.'
-                    } else {
                         Write-Step ('winre.wim apply sequence: {0} sub-phase(s)' -f $winReSequence.Count)
                         Copy-Item -LiteralPath $winReInside -Destination $winReWork -Force
                         # winre.wim is typically a single-index image
@@ -10760,10 +10797,10 @@ function Invoke-BuildPhase08_PatchBootWim {
                         # open at this point, so the file write commits when
                         # the install.wim dismount in our finally block runs.
                         Copy-Item -LiteralPath $winReWork -Destination $winReInside -Force
-                    }
                 }
             } finally {
                 Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir
+            }
             }
         }
 

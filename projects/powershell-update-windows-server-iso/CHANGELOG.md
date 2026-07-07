@@ -22,6 +22,40 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.07-r11.56] - 2026-07-07
+
+Tag: `p08-plan-scope`. First fix of the 2026-07-07 4-OS E2E (run 2)
+batch: Server 2019 P08 failed with "Cannot index into a null array"
+inside the WinRE section's inline Where-Object (script line 10726).
+Root cause is an r11.54 regression: the policy-branch restructure
+captured `$plan = Get-OrInitPatchPlan` inside the NON-disabled branch,
+so the `disabled` path (2019) reached the WinRE section with `$plan`
+undefined; `@($plan.WinReSequence)` produced `@($null)` and the
+scriptblock indexed into `$null.PSObject`. The disabled-skip and
+WinRE-decoupling semantics of r11.54 were correct; the variable scoping
+was not.
+
+### Fixed
+
+- **`$plan = Get-OrInitPatchPlan` hoisted above the policy branch**
+  (single assignment, shared by the boot.wim loop and the WinRE
+  section on every policy path).
+- **WinRE has-work decision moved BEFORE the install.wim mount.** A
+  no-work WinRE pass (e.g. 2019: no SSU / no SafeOS DU lines) used to
+  mount + dismount install.wim (60-100s) just to discover there was
+  nothing to apply; it now skips the mount entirely.
+
+### Added
+
+- **`Test-WimSequenceHasWork`**: pure, null-hardened, REPL-testable
+  replacement for the inline has-work pipeline ($null sequence, $null
+  elements, cleanup markers, and empty Patches all mean "no work").
+- **T36 `p08_plan_scope_test.py`** (10 assertions): the helper's
+  null-hardening matrix (including the exact `@($null)` crash shape)
+  plus P08 structure pins (hoisted single plan assignment; has-work
+  before mount; inline pipeline gone).
+
+
 ## [update-wsi-2026.07.06-r11.55] - 2026-07-06
 
 Tag: `pca2023-default-auto`. Fourth change of the 2026-07-05 E2E batch
