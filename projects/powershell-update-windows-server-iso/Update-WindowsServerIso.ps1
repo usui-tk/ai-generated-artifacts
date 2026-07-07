@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.59'
-$Script:ScriptTag     = 'media-inspection'
+$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.60'
+$Script:ScriptTag     = 'kb-alias'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -11776,6 +11776,37 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
 # Phase P11: Static verification (Verify group)
 # ============================================================
 
+function Get-KbAliasFromPatchPath {
+    <#
+    .SYNOPSIS
+        Pure extractor: the CHILD KB id embedded in a patch's file
+        path/name, when it differs from the Line's declared KbId.
+    .DESCRIPTION
+        Microsoft Update Catalog uses a parent/child KB structure for
+        .NET Framework monthly updates: the OS-level KB exists for
+        update-offering only, the downloadable MSU carries the
+        .NET-version-specific child KB, and per Microsoft the OS-level
+        KB "is not expected to be listed as an installed update on the
+        device". Verification against installed package names must
+        therefore also accept the child KB. Returns $null when the
+        path carries no KB id or it equals the declared one.
+    .OUTPUTS
+        System.String (e.g. 'KB5087068') or $null
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [string]$KbId,
+        [AllowNull()] [AllowEmptyString()] [string]$Path
+    )
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    $m = [regex]::Match($Path, '(?i)kb(\d{6,7})')
+    if (-not $m.Success) { return $null }
+    $child = ('KB{0}' -f $m.Groups[1].Value)
+    if ($child -ieq $KbId) { return $null }
+    return $child
+}
+
 function Test-LcuTargetApplied {
     <#
     .SYNOPSIS
@@ -11993,18 +12024,34 @@ function Invoke-VerifyPhase11_StaticVerify {
                 $primaryRec = @($postInsp.InstallWim.Indexes) | Select-Object -First 1
                 if ($primaryRec -and -not $primaryRec.ErrorMessage) {
                     $pkgNames = @($primaryRec.PackageNames)
-                    $expectedKbs = @($Script:ResolvedPatches | Where-Object { $_.KbId -ne 'Unknown' } | ForEach-Object { $_.KbId })
-                    foreach ($kb in $expectedKbs) {
-                        $found = $false
+                    $expectedPairs = @($Script:ResolvedPatches | Where-Object { $_.KbId -ne 'Unknown' } | ForEach-Object {
+                        $aliasSrc = if ($_.PSObject.Properties['LocalPath'] -and $_.LocalPath) { [string]$_.LocalPath } else { [string]$_.Source }
+                        [pscustomobject]@{
+                            KbId  = $_.KbId
+                            Alias = (Get-KbAliasFromPatchPath -KbId $_.KbId -Path $aliasSrc)
+                        }
+                    })
+                    foreach ($pair in $expectedPairs) {
+                        $kb = $pair.KbId
+                        $found = $false; $matchedBy = $null
                         foreach ($pn in $pkgNames) {
-                            # psa-disable-next-line PSA2003 -- $kb is a non-null string from $expectedKbs
-                            if ($pn -match $kb) { $found = $true; break }
+                            # psa-disable-next-line PSA2003 -- $kb is a non-null string from the resolved set
+                            if ($pn -match $kb) { $found = $true; $matchedBy = $kb; break }
+                            if ($pair.Alias -and ($pn -match $pair.Alias)) { $found = $true; $matchedBy = $pair.Alias; break } # psa-disable-line PSA2003 -- $pair.Alias is null-guarded by the preceding -and
                         }
                         if ($found) { $st = 'Pass'; $actualStr = 'Present' }
                         else        { $st = 'Warn'; $actualStr = 'Absent' }
+                        $kbNotes = 'install.wim idx ' + $primaryRec.Index + '; note: RollupFix-named OSes never carry KB ids in package names'
+                        if ($pair.Alias) {
+                            # Catalog parent/child structure (.NET): the OS-level
+                            # KB is offering-only; the installed package carries
+                            # the child KB from the MSU file name.
+                            $kbNotes += ('; child KB alias {0} accepted' -f $pair.Alias)
+                            if ($matchedBy -and $matchedBy -eq $pair.Alias) { $kbNotes += ' (matched via alias)' }
+                        }
                         Add-VRow -Check ('Kb_' + $kb) -Expected 'Present' `
                             -Actual $actualStr -Status $st `
-                            -Notes ('install.wim idx ' + $primaryRec.Index + '; note: RollupFix-named OSes never carry KB ids in package names')
+                            -Notes $kbNotes
                     }
                     # TargetBuildAfterUpdate hard check [DECIDED 2026-07-02,
                     # user]: per-OS evidence comparator. Runs only
@@ -12017,7 +12064,8 @@ function Invoke-VerifyPhase11_StaticVerify {
                         $pbLcu = @($Script:OsProfile.PatchBaseline.Lines |
                             Where-Object { $_.Kind -eq 'LCU' -and $_.KbId })
                     }
-                    if ($pbLcu.Count -ge 1 -and ($expectedKbs -contains $pbLcu[0].KbId)) {
+                    $expectedKbIds = @($expectedPairs | ForEach-Object { $_.KbId })
+                    if ($pbLcu.Count -ge 1 -and ($expectedKbIds -contains $pbLcu[0].KbId)) {
                         $tbauExpected = ''
                         if ($Script:OsProfile.PatchBaseline.PSObject.Properties['TargetBuildAfterUpdate']) {
                             $tbauExpected = [string]$Script:OsProfile.PatchBaseline.TargetBuildAfterUpdate

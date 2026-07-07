@@ -19,7 +19,13 @@ Layers:
      advanced -> Warning; enabled+unchanged -> Warning; tolerate+
      advanced -> Info (flip-to-enabled evidence); tolerate+unchanged
      -> Info (tolerated path); bridge-need confirmed vs redundant.
-  4. Structure pins: P06 writes inspection_pre.json; P11 emits the
+  4. REPL `Get-KbAliasFromPatchPath`: Catalog parent/child KB alias
+     extraction (.NET offering KB vs installed child KB).
+  5. Data audit: across all four committed configs, a KbId that
+     differs from the KB embedded in FileName occurs ONLY on
+     Kind=DotNet Lines (the verified parent/child structure); any
+     other divergence fails the audit and forces investigation.
+  6. Structure pins: P06 writes inspection_pre.json; P11 emits the
      SHA-256 content-identity rows, writes inspection_post.json, and
      derives Kb/TBAU from measured evidence; P13 diffs + cross-checks;
      the invalid `ImagePath = $installWim` Get-WindowsPackage call is
@@ -180,7 +186,35 @@ def main() -> int:
                      fdb.get("Level") == "Warning" and "redundant" in fdb.get("Message", ""),
                      f"{fdb.get('Message','')[:90]!r}", p, f)
 
-    print("=== 4. Structure pins ===")
+        print("=== 4. Get-KbAliasFromPatchPath (Catalog parent/child KB) ===")
+        got = ps.invoke("Get-KbAliasFromPatchPath", KbId="KB5088862",
+                        Path="D:\\patches\\Server2022\\dotnet\\windows10.0-kb5087068-x64-ndp48_abc.msu")
+        p, f = check("parent KbId + child file -> child alias",
+                     got == "KB5087068", f"got={got!r}", p, f)
+        got = ps.invoke("Get-KbAliasFromPatchPath", KbId="KB5094128",
+                        Path="windows10.0-kb5094128-x64_f2fe.msu")
+        p, f = check("matching KB ids -> no alias", got is None, f"got={got!r}", p, f)
+        got = ps.invoke("Get-KbAliasFromPatchPath", KbId="KB5094128", Path="")
+        p, f = check("empty path -> no alias", got is None, f"got={got!r}", p, f)
+
+    print("=== 5. Data audit: KbId/FileName divergence is DotNet-only ===")
+    import glob as _glob
+    import json as _json
+    offenders = []
+    for cf in sorted(_glob.glob(str(SUBPROJECT_ROOT / "data" / "config-Server*.json"))):
+        cfg = _json.load(open(cf, encoding="utf-8-sig"))
+        for ln in cfg["PatchBaseline"]["Lines"]:
+            kb = ln.get("KbId", "") or ""
+            fn = ln.get("FileName", "") or ""
+            m = re.search(r"(?i)kb(\d{6,7})", fn)
+            if m and ("KB" + m.group(1)).lower() != kb.lower() and ln.get("Kind") != "DotNet":
+                offenders.append(f"{pathlib.Path(cf).name}:{ln.get('Kind')}:{kb}/{fn[:40]}")
+    p, f = check(
+        "non-DotNet Lines never diverge (parent/child KB is a .NET Catalog structure)",
+        offenders == [],
+        "clean" if not offenders else f"offenders={offenders!r}", p, f)
+
+    print("=== 6. Structure pins ===")
     code = SCRIPT_PATH.read_text(encoding="utf-8-sig")
     p, f = check("P06 writes inspection_pre.json (pre inspection wired)",
                  "-Label 'pre'" in code and "inspection_pre.json" in code,
@@ -193,6 +227,9 @@ def main() -> int:
                  "inspection_diff.json" in code
                  and re.search(r"Get-InspectionCrossChecks\s+-BootWimLcuPolicy", code) is not None,
                  "wired", p, f)
+    p, f = check("P11 Kb rows accept the Catalog child-KB alias",
+                 re.search(r"Get-KbAliasFromPatchPath\s+-KbId", code) is not None,
+                 "alias wired", p, f)
     p, f = check("the invalid Get-WindowsPackage -ImagePath call is gone",
                  re.search(r"Get-WindowsPackage'\s+-Parameters\s+@\{\s*ImagePath", code) is None,
                  "dead path buried", p, f)

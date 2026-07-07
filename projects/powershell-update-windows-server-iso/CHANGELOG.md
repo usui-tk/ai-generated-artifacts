@@ -22,6 +22,36 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.07-r11.60] - 2026-07-07
+
+Tag: `kb-alias`. Resolves the DotNet KbId/FileName divergence flagged
+during the 2026-07-07 E2E analysis (Server 2022 Line: KbId KB5088862
+vs file kb5087068; Server 2019: KB5088864 vs kb5087061).
+Investigation against Microsoft primary sources confirmed this is the
+Catalog's parent/child KB structure for .NET Framework monthly
+updates -- the OS-level KB exists for update-OFFERING, the installed
+artifact is the .NET-version-specific child MSU, and per Microsoft
+the OS-level KB "is not expected to be listed as an installed update
+on the device". NOT a data defect; but P11's Kb_<parent> row could
+never match an installed package name -- a structural false Absent.
+
+### Changed
+
+- **P11 Kb rows accept the child-KB alias**: new pure extractor
+  `Get-KbAliasFromPatchPath` derives the child KB from the resolved
+  patch's file path when it differs from the declared KbId; a package
+  name matching EITHER id counts as Present, and the row's Notes
+  records the alias (and when the match came via it).
+
+### Tests
+
+- T38 extended to 24 assertions: alias extraction matrix, P11 alias
+  wiring pin, and a data audit across all four committed configs
+  pinning that KbId/FileName divergence occurs ONLY on Kind=DotNet
+  Lines -- any other divergence fails the audit and forces
+  investigation.
+
+
 ## [update-wsi-2026.07.07-r11.59] - 2026-07-07
 
 Tag: `media-inspection`. The inspection arc proper [user-adjudicated
