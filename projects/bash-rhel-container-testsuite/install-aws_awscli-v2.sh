@@ -249,8 +249,16 @@ if [ "${AWSCLI_INSTALLTEST}" = "1" ]; then
   if ! "${workdir}/aws/install" -i "${prefix}/aws-cli" -b "${prefix}/bin" >/dev/null 2>&1; then
     die "install-fail: bundle install failed on RHEL${OSMAJOR} (glibc ${GLIBC}; bundle needs >= ${MIN_GLIBC_MEASURED:-?})"
   fi
-  INSTALLED_VERSION="$("${prefix}/bin/aws" --version 2>&1 | sed -n 's#aws-cli/\([0-9.]*\).*#\1#p')"
-  [ -n "${INSTALLED_VERSION}" ] || die "installs-but-wont-run: aws installed but --version did not run on RHEL${OSMAJOR} (glibc ${GLIBC})"
+  # r71: the aws binary EXITS NON-ZERO when the OS glibc is below the bundle's
+  # floor (dynamic-loader error) - under `set -o pipefail` the capture pipeline
+  # then fails, and because the pipeline is the substitution's direct command
+  # the assignment itself fails and the ERR trap fires HERE, masking the
+  # intended "installs-but-wont-run" die below behind "unexpected error
+  # (line NNN)" (2026-07-07 E2E: all 437 RHEL6 glibc-capped rows; same
+  # masking class as ENA r66). Tolerate the rc - the [ -n ] guard below is
+  # the real check.
+  INSTALLED_VERSION="$("${prefix}/bin/aws" --version 2>&1 | sed -n 's#aws-cli/\([0-9.]*\).*#\1#p' || true)"
+  [ -n "${INSTALLED_VERSION}" ] || die "installs-but-wont-run: aws installed but --version did not run on RHEL${OSMAJOR} (glibc ${GLIBC}; bundle needs >= ${MIN_GLIBC_MEASURED:-?})"
   RAN="true"; RUN_METHOD="aws --version"
   # r65 (OL parity): also run `aws configure list` - exercises session init +
   # command dispatch, not just the bundled interpreter load.

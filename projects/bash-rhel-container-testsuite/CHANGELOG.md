@@ -13,6 +13,43 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r71] - 2026-07-07 - fix: AWS CLI glibc-capped rows - pipefail masked the installs-but-wont-run reason
+
+### Fixed
+- **`install-aws_awscli-v2.sh`**: when the OS glibc is below the bundle's
+  floor, the installed `aws` binary exits non-zero (dynamic-loader error);
+  under `set -o pipefail` the `INSTALLED_VERSION` capture pipeline is the
+  substitution's direct command, so the assignment failed and the ERR trap
+  fired THERE - masking the intended `installs-but-wont-run` die behind
+  `unexpected error (line 252)` (2026-07-07 E2E: all 437 RHEL 6
+  glibc-capped rows; same masking class as ENA r66). The capture is now
+  rc-tolerant (`|| true`; the `[ -n ]` guard is the real check) and the
+  `installs-but-wont-run` reason carries the empirical floor
+  (`glibc X.Y; bundle needs >= Z.W`) for parity with the `install-fail`
+  message. Analytical fields (`verdict: glibc-too-old`,
+  `min_glibc_measured`) were already correct; only the reason string was
+  masked. Note: the similar-looking captures inside `ko_module_version`
+  (ENA) do NOT trap - `$(...)` bodies run with errexit disabled
+  (`inherit_errexit` unset), verified empirically; the awscli line was the
+  only live instance of this class (project-wide sweep).
+
+### Notes
+- The 2026-07-07 AWS CLI ledger was NOT committed: RHEL 7-10 rows
+  (3,724) are valid, but the 437 RHEL 6 capped rows carry the masked
+  reason. Re-run plan (user decision): `OSMAJORS=6 --force` only - the
+  bug can only fire where the binary cannot run, so RHEL 7-10 results
+  are unaffected by this fix; the keyed ledger merge replaces the RHEL 6
+  rows in place. The 2.0.32 fetch-fail rows (all majors) were verified
+  as a persistent upstream gap (HTTP 404; 2.0.31/2.0.33 are 200) and are
+  legitimate evidence.
+- FT (podman, UBI 7/8/9/10, crafted fake bundle whose `aws` binary
+  reproduces the loader-failure shape): the r70 script reproduces the
+  E2E masking byte-for-byte (`unexpected error (line 252)`,
+  `min_glibc_measured 2.17`); the r71 script yields the descriptive
+  reason with the measured floor. 24/24 asserts green incl. the ok-path
+  control (`installed_version` captured, `aws configure list` ran).
+  RHEL 6 has no UBI image - covered by the host E2E re-run.
+
 ## [r70] - 2026-07-07 - docs: ENA E2E results - DKMS one-shot, all 5 majors (r69 sweep)
 
 ### Changed
