@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.65'
-$Script:ScriptTag     = 'kind-verify'
+$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.66'
+$Script:ScriptTag     = 'evidence-kb-set'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -8240,6 +8240,7 @@ function New-LcuEvidenceObject {
         [AllowNull()] [version]$BuildFromKernel,
         [Parameter(Mandatory)] [version]$FloorBuild,
         [int]$PackageCount = 0,
+        [AllowEmptyCollection()] [string[]]$KbIdsAtBuild = @(),
         [string]$Notes = ''
     )
     $sources = @(@($BuildFromRegistry, $BuildFromPackages, $BuildFromKernel) | Where-Object { $null -ne $_ })
@@ -8252,6 +8253,7 @@ function New-LcuEvidenceObject {
         OsKey              = $OsKey
         LcuPackageName     = $(if ([string]::IsNullOrEmpty($LcuPackageName)) { $null } else { $LcuPackageName })
         LcuKbId            = $(if ([string]::IsNullOrEmpty($LcuKbId)) { $null } else { $LcuKbId })
+        KbIdsAtBuild       = @($KbIdsAtBuild)
         BuildFromPackages  = $BuildFromPackages
         BuildFromRegistry  = $BuildFromRegistry
         BuildFromKernel    = $BuildFromKernel
@@ -8289,24 +8291,34 @@ function Resolve-LcuEvidence_Server2016 {
         [AllowNull()] [string]$KernelBuild
     )
     $floor = [version]'14393.6897'
-    $bestBuild = $null; $bestName = $null; $bestKb = $null
+    # SSU and LCU are BOTH KB-named on 2016 and can land at the SAME
+    # build (2026-07-08 E2E: KB5094141 SSU and KB5094122 LCU at
+    # 14393.9234), so single-KB selection misidentifies the LCU.
+    # Collect every match; the evidence carries ALL KB ids at the
+    # top build and the comparator matches by membership.
+    $matches16 = @()
     foreach ($pn in @($PackageNames)) {
         if ([string]::IsNullOrWhiteSpace($pn)) { continue }
         $m = [regex]::Match($pn, '^Package_for_KB(\d{6,7})~31bf3856ad364e35~amd64~~(14393\.[0-9.]+)$')
         if (-not $m.Success) { continue }
         $b = ConvertTo-TwoPartBuild -BuildString $m.Groups[2].Value
-        if ($null -ne $b -and ($null -eq $bestBuild -or $b -gt $bestBuild)) {
-            $bestBuild = $b
-            $bestName  = $pn
-            $bestKb    = ('KB{0}' -f $m.Groups[1].Value)
-        }
+        if ($null -eq $b) { continue }
+        $matches16 += [pscustomobject]@{ KbId = ('KB{0}' -f $m.Groups[1].Value); Build = $b; Name = $pn }
+    }
+    $bestBuild = $null; $bestName = $null; $bestKb = $null; $kbsAtBest = @()
+    if ($matches16.Count -gt 0) {
+        $bestBuild = ($matches16 | ForEach-Object { $_.Build } | Sort-Object -Descending)[0]
+        $atBest    = @($matches16 | Where-Object { $_.Build -eq $bestBuild })
+        $bestName  = $atBest[0].Name
+        $bestKb    = $atBest[0].KbId
+        $kbsAtBest = @($atBest | ForEach-Object { $_.KbId })
     }
     return New-LcuEvidenceObject -OsKey 'Server2016' -LcuPackageName $bestName -LcuKbId $bestKb `
         -BuildFromPackages $bestBuild `
         -BuildFromRegistry (ConvertTo-TwoPartBuild -BuildString $RegistryBuild) `
         -BuildFromKernel (ConvertTo-TwoPartBuild -BuildString $KernelBuild) `
-        -FloorBuild $floor -PackageCount @($PackageNames).Count `
-        -Notes 'LCU naming: Package_for_KB<id>~~14393.<rev> (KB id present in name)'
+        -FloorBuild $floor -PackageCount @($PackageNames).Count -KbIdsAtBuild $kbsAtBest `
+        -Notes 'LCU naming: Package_for_KB<id>~~14393.<rev>; SSU and LCU can share the top build, all KB ids at that build are carried'
 }
 
 function Resolve-LcuEvidence_Server2019 {
@@ -11965,7 +11977,10 @@ function Test-LcuTargetApplied {
     $applied = $false
     $indeterminate = $false
     if ($OsKey -eq 'Server2016') {
-        $kbHit = ($Evidence.LcuKbId -and ($Evidence.LcuKbId -eq $ExpectedKbId))
+        # Membership match: SSU and LCU can share the top build, so
+        # the evidence carries a KB SET (KbIdsAtBuild), not one id.
+        $evKbs = @($Evidence.KbIdsAtBuild)
+        $kbHit = (($Evidence.LcuKbId -and ($Evidence.LcuKbId -eq $ExpectedKbId)) -or ($evKbs -contains $ExpectedKbId))
         $buildHit = ($expB -and $measured -and ($measured -ge $expB))
         $applied = ($kbHit -or $buildHit)
     } else {
@@ -11976,9 +11991,10 @@ function Test-LcuTargetApplied {
         }
     }
     $measStr = if ($measured) { [string]$measured } else { '(none)' }
+    $evKbSet = @($Evidence.KbIdsAtBuild) -join ','
+    $evKbStr = if ($evKbSet) { $evKbSet } elseif ($Evidence.LcuKbId) { [string]$Evidence.LcuKbId } else { '(none)' }
     $notes = ('OsKey={0}; measured build={1}; TargetBuildAfterUpdate={2}; evidence KB={3}' -f `
-        $OsKey, $measStr, $(if ($ExpectedBuild) { $ExpectedBuild } else { '(none)' }), `
-        $(if ($Evidence.LcuKbId) { $Evidence.LcuKbId } else { '(none)' }))
+        $OsKey, $measStr, $(if ($ExpectedBuild) { $ExpectedBuild } else { '(none)' }), $evKbStr)
     if ($indeterminate) {
         return [pscustomobject]@{
             Applied  = $false

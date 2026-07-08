@@ -22,6 +22,29 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.08-r11.66] - 2026-07-08
+
+Tag: `evidence-kb-set`. The 2026-07-08 E2E showed the Server 2016 SSU
+(KB5094141) and LCU (KB5094122) landing at the SAME build
+(14393.9234): single-KB evidence selection displayed the SSU as "the
+LCU package", and the comparator's kb-hit missed the expected LCU
+(the verdict survived only via the build fallback).
+
+### Changed
+
+- **Server 2016 evidence carries `KbIdsAtBuild`** -- ALL KB-named
+  packages at the top build (New-LcuEvidenceObject passthrough;
+  other-OS resolvers leave it empty).
+- **`Test-LcuTargetApplied` (2016) matches by membership** against
+  that set (LcuKbId equality retained), and its Notes display the
+  full KB set instead of one arbitrary id.
+
+### Tests
+
+- T37 -> 17 (same-build SSU+LCU shape carries both ids);
+  T31 -> 27 (membership match when the SSU shades the single slot).
+
+
 ## [update-wsi-2026.07.08-r11.65] - 2026-07-08
 
 Tag: `kind-verify`. The 2026-07-08 E2E measured the premise of P11's

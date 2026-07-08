@@ -87,6 +87,16 @@ def main() -> int:
         p, f = check("floor boundary: 14393.6897 meets", ev.get("MeetsPca2023Prereq") is True,
                      f"prereq={ev.get('MeetsPca2023Prereq')}", p, f)
         ev = ps.invoke("Resolve-LcuEvidence_Server2016",
+                       PackageNames=[f"Package_for_KB5094141~{WSUS}~amd64~~14393.9234.1.2",
+                                     f"Package_for_KB5094122~{WSUS}~amd64~~14393.9234.1.8"])
+        kbs = ev.get("KbIdsAtBuild") or []
+        if isinstance(kbs, str):
+            kbs = [kbs]
+        p, f = check(
+            "SSU + LCU at the SAME build (the 2026-07-08 E2E shape): BOTH KB ids carried",
+            sorted(kbs) == ["KB5094122", "KB5094141"] and vstr(ev.get("Build")) == "14393.9234",
+            f"KbIdsAtBuild={kbs!r}", p, f)
+        ev = ps.invoke("Resolve-LcuEvidence_Server2016",
                        PackageNames=[f"Package_for_KB5035855~{WSUS}~amd64~~14393.6796.1.1"])
         p, f = check("floor boundary: 14393.6796 does NOT meet", ev.get("MeetsPca2023Prereq") is False,
                      f"prereq={ev.get('MeetsPca2023Prereq')}", p, f)

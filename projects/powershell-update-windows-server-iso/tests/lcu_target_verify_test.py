@@ -128,6 +128,17 @@ def main() -> int:
             f"Status={r.get('Status')!r}", passed, failed)
 
         r = ps.invoke("Test-LcuTargetApplied", OsKey="Server2016",
+                      ExpectedKbId="KB5094122", ExpectedBuild="",
+                      Evidence={"LcuKbId": "KB5094141",
+                                "KbIdsAtBuild": ["KB5094141", "KB5094122"],
+                                "Build": None})
+        passed, failed = check(
+            "Server2016: expected LCU found via KbIdsAtBuild membership (r11.66)",
+            r.get("Status") == "Pass" and "KB5094122" in (r.get("Notes") or ""),
+            f"Status={r.get('Status')!r} Notes={r.get('Notes')!r}"[:140],
+            passed, failed)
+
+        r = ps.invoke("Test-LcuTargetApplied", OsKey="Server2016",
                       ExpectedKbId="KB5094141", ExpectedBuild="14393.9234",
                       Evidence={"LcuKbId": None,
                                 "Build": {"Major": 14393, "Minor": 9234}})
