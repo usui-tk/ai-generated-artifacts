@@ -69,7 +69,7 @@ assert_eq ""     "$(rc_chain_list 10)" "chain: 10 -> '' (no downstream)"
 assert_eq "8 9 10" "$(rc_chain_list 7)" "chain: 7 -> '8 9 10' (three hops)"
 
 # --- r74 collectors/helpers are wired ----------------------------------------
-for fn in rc_collect_chain rc_curl_repo_enum rc_count_packages rc_run_long; do
+for fn in rc_collect_chain rc_curl_repo_enum rc_count_packages rc_run_long rc_curl_fetch_pkg rc_decompress rc_builddep_scan; do
   if declare -F "${fn}" >/dev/null 2>&1; then t_pass "defined: ${fn}"; else t_fail "missing: ${fn}"; fi
 done
 
@@ -106,12 +106,12 @@ assert_eq "ok" "${hits}" "safety: no 'leapp upgrade' invocation in the collector
 # And the dry-run call is present.
 grep -Eq 'leapp preupgrade' "${COLLECT}"; assert_eq 0 "$?" "safety: 'leapp preupgrade' dry-run is present"
 
-# --- REGRESSION GUARD (r75): chain repo IDs must carry the 'rhui-' token -------
-# The amazon-id plugin injects the IMDS identity only into repos whose id
-# matches 'rhui-' (_rhui_repos). r74 named them chain-<t>-* (no 'rhui-'), so dnf
-# got 403. If a future edit drops the token, dnf cross-major access silently
-# breaks again.
-grep -q 'chain-rhel%s-baseos-rhui-rpms' "${COLLECT}"; assert_eq 0 "$?" "r75: chain baseos repo id carries 'rhui-' (amazon-id identity injection)"
-grep -q 'chain-rhel%s-appstream-rhui-rpms' "${COLLECT}"; assert_eq 0 "$?" "r75: chain appstream repo id carries 'rhui-'"
+# --- REGRESSION GUARD (r78): the chain probe is curl-native (no dnf) ----------
+# The chain must acquire/measure via curl only. If a future edit reintroduces a
+# dnf-driven chain step, cross-major breaks again (dnf failed three ways: 403,
+# already-installed, modular platform). Assert the chain's acquisition uses the
+# curl fetch helper and writes no /etc/yum.repos.d chain repo file.
+grep -q 'fetch-leapp-rhui-aws-el' "${COLLECT}"; assert_eq 0 "$?" "r78: chain acquires the next cert via curl (rc_curl_fetch_pkg)"
+if grep -Eq '/etc/yum\.repos\.d/chain-' "${COLLECT}"; then t_fail "r78: chain must not write dnf repo files (curl-native)"; else t_pass "r78: chain writes no dnf repo files (curl-native)"; fi
 
 t_done

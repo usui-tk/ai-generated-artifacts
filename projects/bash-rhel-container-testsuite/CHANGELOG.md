@@ -13,6 +13,78 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r78] - 2026-07-08 - refactor: chain probe is now CURL-NATIVE, dnf removed (collector v1.2.0)
+
+The chain probe was rebuilt to use curl + the client cert end-to-end, as
+originally proposed. Introducing dnf for the chain (r74) was a wrong call: it
+does not work cross-major on a mismatched host and it forced three successive
+workarounds (r75 `rhui-` repo naming for identity injection; r76 `dnf download`
+for the already-installed package; r77 curl-fetch after a modular-platform
+abort). curl worked cleanly at every step, so the whole chain is now curl-only.
+
+### Changed
+- **`rc_collect_chain` rewritten curl-native.** Each hop is uniform: (a) curl-
+  fetch the current major's `leapp-rhui-aws` from its appstream (it bundles the
+  next major's cert) with the current cert and extract - hop 1 uses the host's
+  OWN cert (no more `dnf install leapp-upgrade`); (b) measure the next major's
+  baseos+appstream via `rc_curl_repo_enum` (repomd status + package_count);
+  (c) `rc_builddep_scan` greps the curl-fetched primary for
+  kernel-devel/gcc/make/elfutils-libelf-devel. No dnf, no `/etc/yum.repos.d`
+  chain files, no amazon-id-plugin dependency, no modular/dep resolution.
+- New helper `rc_builddep_scan`. `dnf-plugins-core` ensure step removed. Bump
+  collector to v1.2.0.
+
+### Removed
+- All dnf from the chain: the `chain-rhel<t>-*` repo files, the `dnf download`
+  acquisition and build-dep steps, and the r75 dnf-repo-id regression guards.
+
+### Notes
+- The r75 finding stands as documented knowledge for a FUTURE, separate probe:
+  dnf CAN drive cross-major RHUI, but only from inside a matching-major container
+  (native platform) and only when the repo id carries `rhui-`; testing dnf on a
+  mismatched host is the wrong place and was the source of the churn.
+- t025: r75 repo-id guards replaced with r78 curl-native invariants (chain
+  acquires via curl; writes no dnf repo files); +`rc_builddep_scan` presence
+  (37 assertions). TESTING.md baseline 668 passed. Gate 668/0/0, shellcheck
+  clean, doc-gate PASS. FT: `--chain` smoke (v1.2.0, curl-native) and
+  `rc_builddep_scan` validated locally; `rc_curl_fetch_pkg` validated end-to-end
+  (r77). Re-run `sudo bash collect-aws-rhui-facts.sh --chain` on a disposable
+  el8 host for the non-adjacent (8->10) verdict.
+
+## [r77] - 2026-07-08 - fix: chain cert acquisition via curl, not dnf (collector v1.1.3)
+
+### Findings (el8 --chain re-run, r76 build)
+- The r76 `dnf download` avoided the "already installed" trap but hit a third dnf
+  failure: **modular metadata platform mismatch** - reading rhel9 module metadata
+  on an el8 host, dnf reported `nothing provides module(platform:el8)` from
+  `@modulefailsafe` and then `No package leapp-rhui-aws available`, so
+  content-rhel10 was still not acquired. dnf has now failed cross-major three
+  distinct ways (403 pre-r75, nothing-to-do r76, modular r77); **curl has worked
+  every time**.
+
+### Fixed
+- **hop2+ cert acquisition is now curl-based** (`rc_curl_fetch_pkg` +
+  `rc_decompress`): using the previous hop's cert, follow the rhel<src> appstream
+  mirrorlist -> repomd -> primary, locate the previous major's `leapp-rhui-aws`
+  RPM by its `<location href>`, curl it, and `rpm2cpio | cpio` out the next
+  major's cert. curl carries the identity header manually and touches no dnf
+  modular/dep/install machinery. This should finally let hop2 acquire
+  content-rhel10 and reach the decisive non-adjacent (8->10) curl verdict.
+- The dnf build-dep download (a secondary signal) gains
+  `--setopt=module_platform_id=platform:el<t> --setopt=strict=0` so the modular
+  mismatch no longer aborts it. Bump collector to v1.1.3.
+
+### Changed
+- **`tests/t025_awsrhuicollect.sh`** - +2 presence guards
+  (`rc_curl_fetch_pkg`/`rc_decompress`); 36 assertions total.
+- **`TESTING.md`** - Recorded baseline refreshed to **667 passed** (25 tiers).
+
+### Notes
+- FT: shellcheck clean, bash -n clean, gate 667/0/0, `--chain` smoke (v1.1.3),
+  and `rc_curl_fetch_pkg` validated end-to-end against a local fake repo
+  (mirrorlist -> repomd -> primary -> located + fetched the RPM). Re-run
+  `sudo bash collect-aws-rhui-facts.sh --chain` on a disposable el8 host.
+
 ## [r76] - 2026-07-08 - fix: chain acquisition/build-dep use `dnf download`, not install (collector v1.1.2)
 
 ### Findings (el8 --chain re-run, r75 build)
