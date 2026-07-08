@@ -126,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 627 passed, 0 skipped, 0 failed  (24 tiers, 0 tier-failure(s))
+SUITE: 655 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -374,6 +374,17 @@ so results are host-independent and deterministic.
   tree, multi-version rpmdb answers) - robust however kernel-devel arrived
   (RHSM repo, RHUI repo, or pre-baked into an image). The rpm-NVR-with-tree
   happy path needs real `/usr/src/kernels` directories -> podman FT, not L1.
+* **`t025_awsrhuicollect.sh`** (r73) - unit tier for the standalone AWS-RHUI fact
+  collector `tests/collect-aws-rhui-facts.sh`. Sources the collector with
+  `RHUI_COLLECT_SOURCED=1` (its `main` is source-guarded) and pins the pure
+  helpers: package-manager-per-major, repolist command forms, the cross-major
+  RHUI URL synthesis (`/rhelN/` + `$releasever`/`$basearch` retarget), the
+  leapp N+1 target map (7->8, 8->9, 9->10; none for 6/10), urlsafe base64, and
+  the `RC_RELEASE_FILE`-seamed major detection. The final block is a STATIC
+  MUTATION GUARD asserting the collector never invokes `leapp upgrade` (only
+  `preupgrade`) - the non-destructive dry-run promise is machine-enforced. The
+  side-effecting collectors, cert/key copy, and tar.gz packing are operator
+  E2E on a real RHUI EC2 host, not L1.
 
 ---
 
@@ -584,14 +595,16 @@ The full suite is green in the planning sandbox:
 ---- t022_ssmunavailable.sh ----   ## RESULT pass=17 fail=0 skip=0
 ---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
-SUITE: 627 passed, 0 skipped, 0 failed  (24 tiers, 0 tier-failure(s))
+---- t025_awsrhuicollect.sh ----   ## RESULT pass=24 fail=0 skip=0
+SUITE: 655 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 49 shell files** (every `.sh` in the project, incl. the 3 root
+**L0 fixed count = 51 shell files** (every `.sh` in the project, incl. the 3 root
 `install-aws_*.sh`), each `bash -n`-clean and ShellCheck-clean at **default
 severity and `-S style`** (t002 passes `-P` so the gate is CWD-independent,
-r29): the 6 libraries, the 24 `tests/t001`-`t024` tiers, the harness
-(`run-all.sh`, `probe-env.sh`, `tests/lib/*`), the three per-tool folders
+r29): the 6 libraries, the 25 `tests/t001`-`t025` tiers, the harness
+(`run-all.sh`, `probe-env.sh`, the AWS-RHUI collector `collect-aws-rhui-facts.sh`,
+`tests/lib/*`), the three per-tool folders
 (lister + matrix each, plus the ENA verifier), the coverage generator, and the
 contract checker. Since r28 every file carries the Layer-1 five-section header
 banner and the production scripts run `set -euo pipefail` (the self-test

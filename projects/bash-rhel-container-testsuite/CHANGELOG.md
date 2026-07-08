@@ -13,6 +13,65 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r73] - 2026-07-08 - feat: standalone AWS-RHUI fact collector (RHUI-entitlement investigation)
+
+### Added
+- **`tests/collect-aws-rhui-facts.sh`** - a self-contained (ADR 0003), root-runnable
+  collector for a real AWS EC2 RHEL host (majors 6-10). The name carries the
+  cloud (`aws`) on purpose: the RHUI endpoint shape, the IMDS-signed identity
+  authorization, and `leapp-rhui-aws` are AWS-specific, and Azure/GCP will get
+  sibling collectors (`collect-azure-rhui-facts.sh` etc.) rather than overloading
+  this one. It gathers the raw
+  material needed to decide whether the suite's RHSM-entitled tests can instead
+  run under AWS RHUI - i.e. whether RHUI authorizes by OS major or purely by
+  configuration/parameters. One host = one major = one **tar.gz**. Categories:
+  - `base/` - OS identity, full `/etc/yum.repos.d`, the RHUI-client RPMs deeply
+    (`rpm -qi`/`-ql`/`--scripts`), `repolist` enabled+all + `repoinfo`, the
+    dnf/yum plugin + vars machinery, the RHUI-client implementation sources
+    (py/conf/repo/vars), and IMDS region/identity presence.
+  - `certs/` - the **FULL `/etc/pki/rhui` tree INCLUDING PRIVATE KEYS** (operator
+    decision: metadata-only would force partial design judgements) plus
+    `openssl x509 -text`, private-key `openssl pkey -text`, and `rct cat-cert`
+    content-set decodes. **The archive is therefore a secret** (RHUI
+    entitlement credential) - MANIFEST carries the warning; never commit it.
+  - `crossmajor/` - reuse-by-copy of `probe-env.sh` `pe_rhui_crossmajor_check`:
+    does THIS host's client cert (+ signed IMDS identity, sent as
+    `X-RHUI-ID`/`X-RHUI-SIGNATURE`) reach OTHER majors' content paths? rhel99
+    is the calibration control.
+  - `eus/` - EUS/ELS/AUS/E4S repo enumeration (the extended-lifecycle axis; the
+    only cross-version signal for RHEL 6, which has no leapp).
+  - `leapp/` - a **NON-DESTRUCTIVE** `leapp preupgrade --no-rhsm` dry-run for
+    majors 7/8/9. Installing `leapp-rhui-aws` (+deps) materializes the N+1
+    major's repos on the running host - the cross-major "straddle" state that
+    proves config-driven (not OS-bound) authorization. The script NEVER runs
+    `leapp upgrade`; t025 enforces this statically.
+  - Pure helpers (pm-per-major, repolist forms, urlsafe base64, cross-major URL
+    synthesis, leapp N+1 target map, `RC_RELEASE_FILE`-seamed major detection)
+    are reuse-by-copy of `lib/probe-common.sh`, kept faithful for unit testing.
+  - Rationale for a **separate** script rather than extending `probe-env.sh`:
+    ADR 0003 - a user-runnable script copied to a disposable EC2 host must be
+    single-file and source no library; `probe-env.sh` is a container/sandbox
+    test harness that sources `lib/*`. Blast radius stays inside `tests/`.
+- **`tests/t025_awsrhuicollect.sh`** - L1 unit tier (24 assertions) for the
+  collector's pure layer + the static "no `leapp upgrade`" mutation guard.
+  Mutation-verified: the guard fires on a `preupgrade`->`upgrade` mutant and
+  passes on HEAD.
+
+### Changed
+- **`TESTING.md`** - Recorded baseline refreshed to the current suite (**25
+  tiers, 655 passed**; **L0 fixed count = 51 shell files**), t025 tier
+  description added, and the RHUI collector listed in the harness enumeration.
+- **`README.md` / `README.ja.md`** - repository layout gains
+  `collect-aws-rhui-facts.sh` (bilingual lock-step).
+
+### Notes
+- FT (sandbox): shellcheck `-S style` 0 findings, `bash -n` clean, full gate
+  green (655/0/0, 25 tiers), an end-to-end collector run producing a
+  well-formed tar.gz with `.cmd/.out/.rc` triples and graceful skips on a
+  non-RHUI host, and the leapp-upgrade mutation check. Real-RHUI collection on
+  the EC2 fleet (majors 6-10) is operator E2E - this environment cannot
+  reproduce RHUI responses. Analysis of the collected archives is a follow-up.
+
 ## [r72] - 2026-07-08 - docs: AWS CLI v2 E2E results - r65-faithful tests, all 5 majors
 
 ### Changed

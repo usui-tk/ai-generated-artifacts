@@ -106,6 +106,7 @@ bash-rhel-container-testsuite/
   tests/
     lib/{assert,mock,heredoc}.sh   # ported harness
     run-all.sh                     # single-entry L0-L2 runner
+    collect-aws-rhui-facts.sh      # standalone AWS-RHUI fact collector -> tar.gz (r73)
     t001_parse.sh  t002_shellcheck.sh             # L0 (present)
     t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2 (Phase 2 ✅)
     t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM verdicts (Phase 3-4 ✅)
