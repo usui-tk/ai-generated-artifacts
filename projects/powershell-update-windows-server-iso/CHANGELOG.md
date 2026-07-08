@@ -22,6 +22,53 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.08-r11.67] - 2026-07-08
+
+Tag: `boot-verification-tools`. Boot verification arc (design
+adjudicated 2026-07-08): the project's target world -- firmware where
+PCA2011 is REVOKED (in DBX) -- can be reproduced faithfully in a
+Hyper-V Gen2 VM by applying the KB5025885 mitigations inside a guest
+(db/dbx are per-VM NVRAM). Certificate EXPIRY alone blocks nothing;
+only the revocation does, so the revoked-rig cells are the substance
+and the standard-firmware cells are lightweight regression records.
+
+### Added
+
+- **`tools/boot-verification/`**: matrix harness
+  (`Invoke-IsoBootVerification.ps1`, cells T1-T12: standard +
+  revoked rigs, screenshot capture at 30/90/180 s, expectation-aware
+  `ledger.jsonl`; install-depth cells auto-verdict via the EVIDENCE
+  VHDX), `New-EvidenceDataVhdx.ps1` (tokenised `autounattend.xml` +
+  collector on a data VHDX; the target ISO is never modified),
+  `Export-InstalledSystemEvidence.ps1` (guest evidence JSON aligned
+  with `inspection_post.json` vocabulary),
+  `Test-SecureBootRigState.ps1` (RIG READY gate: db has the 2023 CA
+  AND dbx carries PCA2011), `BootVerification.Common.ps1` (pure ESL
+  parser, RGB565->BMP converter, cell map, ledger), README (rig
+  recipe with KB5025885 values 0x40/0x100/0x80/0x200, the
+  expiry-vs-revocation explainer, T9-first rule, checkpoint-rollback
+  experiment, boot.stl triage, adjudication mapping).
+
+### Changed
+
+- **`-Action BootTest` rebuilt** after two measured defects: it used
+  the third-party `MicrosoftUEFICertificateAuthority` Secure Boot
+  template (Windows media must verify against `MicrosoftWindows`),
+  and it graded `VM State = Running` as a pass although a VM sits at
+  a firmware failure screen in the Running state. It now boots with
+  the correct template, saves console screenshots (GDI-free
+  RGB565->BMP), reports State as context only, and requires the
+  operator's verdict; old logic is not retained.
+
+### Tests
+
+- **T39** `boot_verification_tools_test.py` (17 assertions): tool-set
+  ParseFile, BMP/ESL/subject/cell-map/ledger pure-function REPL
+  matrix, template well-formedness + tokens + explicit disk-0 wipe,
+  template/verdict/README structure pins. Added to the standard gate
+  battery.
+
+
 ## [update-wsi-2026.07.08-r11.66] - 2026-07-08
 
 Tag: `evidence-kb-set`. The 2026-07-08 E2E showed the Server 2016 SSU

@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.66'
-$Script:ScriptTag     = 'evidence-kb-set'
+$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.67'
+$Script:ScriptTag     = 'boot-verification-tools'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -13799,14 +13799,62 @@ function Invoke-CleanupAction {
 # BootTest action (Hyper-V)
 # ============================================================
 
+function Convert-Rgb565ThumbnailToBmp {
+    <#
+    .SYNOPSIS
+        Pure: RGB565 thumbnail bytes (Msvm GetVirtualSystemThumbnailImage)
+        -> 16bpp BI_BITFIELDS .bmp bytes. GDI-free. Mirror of the
+        boot-verification tool set's converter, kept local so this
+        script stays single-file.
+    #>
+    [CmdletBinding()]
+    [OutputType([byte[]])]
+    param(
+        [Parameter(Mandatory)] [byte[]]$PixelData,
+        [Parameter(Mandatory)] [int]$Width,
+        [Parameter(Mandatory)] [int]$Height
+    )
+    $rowBytes = $Width * 2
+    $stride   = [int]([math]::Ceiling($rowBytes / 4.0) * 4)
+    $imgSize  = $stride * $Height
+    $hdr = 14 + 40 + 12
+    $ms = New-Object System.IO.MemoryStream
+    $w  = New-Object System.IO.BinaryWriter($ms)
+    $w.Write([byte[]](0x42, 0x4D)); $w.Write([uint32]($hdr + $imgSize)); $w.Write([uint32]0); $w.Write([uint32]$hdr)
+    $w.Write([uint32]40); $w.Write([int32]$Width); $w.Write([int32]$Height); $w.Write([uint16]1); $w.Write([uint16]16)
+    $w.Write([uint32]3); $w.Write([uint32]$imgSize); $w.Write([int32]2835); $w.Write([int32]2835); $w.Write([uint32]0); $w.Write([uint32]0)
+    $w.Write([uint32]0xF800); $w.Write([uint32]0x07E0); $w.Write([uint32]0x001F)
+    $pad = New-Object byte[] ($stride - $rowBytes)
+    for ($y = $Height - 1; $y -ge 0; $y--) {
+        $w.Write($PixelData, $y * $rowBytes, $rowBytes)
+        if ($pad.Length -gt 0) { $w.Write($pad) }
+    }
+    $w.Flush()
+    return $ms.ToArray()
+}
+
 function Invoke-HyperVBootTest {
     <#
     .SYNOPSIS
-        Smoke test the output ISO by creating a Hyper-V Gen2 VM,
-        attaching the ISO as a virtual DVD, booting it for a short
-        window, then tearing the VM down.
+        Smoke-boot the output ISO on a Gen2 Secure Boot VM and save
+        console screenshots for OPERATOR review.
+
+        Rebuilt (r11.67) after two measured defects in the original:
+        1. It selected SecureBootTemplate MicrosoftUEFICertificateAuthority
+           (the third-party UEFI CA template); Windows media must be
+           verified against the MicrosoftWindows template.
+        2. It graded 'VM State = Running after 60s' as a pass. A VM
+           sits at a firmware Secure Boot failure screen in the
+           Running state, so that check passes on boot FAILURES too.
+           State is now reported as context only; the verdict is the
+           operator's, from the saved screenshots.
+
+        The full test matrix (revoked-firmware rig, negative control,
+        unattended install + evidence collection) lives in
+        tools/boot-verification/ -- this action is only the quick
+        default-firmware smoke pass.
     #>
-    Write-SubSection 'Hyper-V BootTest'
+    Write-SubSection 'Hyper-V BootTest (default Secure Boot firmware; screenshots for operator review)'
     if (-not $Script:OutputIsoPath -or -not (Test-Path -LiteralPath $Script:OutputIsoPath)) {
         throw 'No output ISO is available to BootTest.'
     }
@@ -13817,27 +13865,44 @@ function Invoke-HyperVBootTest {
     }
     $vhdPath = Join-Path $vmDir ($vmName + '.vhdx')
 
-    Set-DebugStep -Step 'create-vhdx'
-    New-VHD -Path $vhdPath -SizeBytes 64GB -Dynamic | Out-Null
-
     Set-DebugStep -Step 'create-vm'
+    New-VHD -Path $vhdPath -SizeBytes 64GB -Dynamic | Out-Null
     New-VM -Name $vmName -Generation 2 -MemoryStartupBytes 4GB -VHDPath $vhdPath -Path $vmDir | Out-Null
     Set-VMProcessor -VMName $vmName -Count 2 | Out-Null
-    Set-VMMemory -VMName $vmName -DynamicMemoryEnabled $true -MinimumBytes 1GB -MaximumBytes 8GB -StartupBytes 4GB | Out-Null
     Add-VMDvdDrive -VMName $vmName -Path $Script:OutputIsoPath | Out-Null
     $dvd = Get-VMDvdDrive -VMName $vmName
-    Set-VMFirmware -VMName $vmName -FirstBootDevice $dvd -EnableSecureBoot On -SecureBootTemplate MicrosoftUEFICertificateAuthority | Out-Null
+    Set-VMFirmware -VMName $vmName -FirstBootDevice $dvd -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows | Out-Null
     Get-VMNetworkAdapter -VMName $vmName | Remove-VMNetworkAdapter | Out-Null
 
-    Set-DebugStep -Step 'start-vm'
+    Set-DebugStep -Step 'boot-and-observe'
     Start-VM -Name $vmName | Out-Null
-    Write-Step 'VM started; waiting 60 seconds for setup to come up...'
-    Start-Sleep -Seconds 60
-
+    $shots = New-Object System.Collections.Generic.List[string]
+    $t0 = Get-Date
+    foreach ($sec in @(30, 90, 180)) {
+        $wait = $sec - [int](New-TimeSpan -Start $t0 -End (Get-Date)).TotalSeconds
+        if ($wait -gt 0) { Start-Sleep -Seconds $wait }
+        try {
+            $ns = 'root\virtualization\v2'
+            $vm = Get-CimInstance -Namespace $ns -ClassName Msvm_ComputerSystem -Filter ("ElementName='{0}'" -f $vmName)
+            $svc = Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemManagementService
+            $r = Invoke-CimMethod -InputObject $svc -MethodName GetVirtualSystemThumbnailImage -Arguments @{
+                HeightPixels = [uint16]480; WidthPixels = [uint16]640; TargetSystem = $vm
+            }
+            if ($r -and $r.ReturnValue -eq 0 -and $r.ImageData) {
+                $bmp = Convert-Rgb565ThumbnailToBmp -PixelData ([byte[]]$r.ImageData) -Width 640 -Height 480
+                $shotPath = Join-Path $Script:LogsDir ('boottest_console_{0}s.bmp' -f $sec)
+                [System.IO.File]::WriteAllBytes($shotPath, $bmp)
+                $shots.Add($shotPath) | Out-Null
+                Write-Step ('Console screenshot at {0}s: {1}' -f $sec, $shotPath)
+            } else {
+                Write-Caution ('Console screenshot at {0}s unavailable.' -f $sec)
+            }
+        } catch {
+            Write-Caution ('Console screenshot at {0}s failed: {1}' -f $sec, $_.Exception.Message)
+        }
+    }
     $state = (Get-VM -Name $vmName).State
-    $heartbeat = (Get-VM -Name $vmName).Heartbeat
-    Write-Step ('VM state    : {0}' -f $state)
-    Write-Step ('VM heartbeat: {0}' -f $heartbeat)
+    Write-Step ('VM state after 180s: {0} (context only -- Running is NOT a boot verdict; a VM sits at a Secure Boot failure screen in the Running state)' -f $state)
 
     Set-DebugStep -Step 'cleanup-vm'
     try { Stop-VM -Name $vmName -TurnOff -Force | Out-Null } catch { $null = $_ }
@@ -13846,17 +13911,13 @@ function Invoke-HyperVBootTest {
         Remove-Item -LiteralPath $vhdPath -Force -ErrorAction SilentlyContinue
     }
 
-    if ($state -eq 'Running') {
-        Write-Ok 'BootTest passed: VM reached Running state within 60s.'
+    if ($shots.Count -gt 0) {
+        Write-Ok ('BootTest observation complete: {0} screenshot(s) saved. OPERATOR VERDICT REQUIRED: Setup UI = boot OK; firmware/Secure Boot error screen = boot failure.' -f $shots.Count)
+        Write-Step 'For the full Secure Boot matrix (revoked-firmware rig, negative control, unattended install + evidence), see tools/boot-verification/README.md.'
     } else {
-        throw ('BootTest failed: VM state was {0}.' -f $state)
+        throw 'BootTest could not capture any console screenshot; no boot observation was recorded.'
     }
 }
-
-# ============================================================
-# Top-level orchestration
-# ============================================================
-
 function Show-EntryBanner {
     $line = '=' * 72
     Write-Host ''
