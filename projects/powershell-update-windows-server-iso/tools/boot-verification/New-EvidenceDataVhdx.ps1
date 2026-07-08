@@ -15,7 +15,11 @@
 param(
     [Parameter(Mandatory)] [string]$Path,
     [Parameter(Mandatory)] [int]$ImageIndex,
-    [Parameter(Mandatory)] [string]$AdminPassword,
+    # Deliberate plain text: the value is written verbatim into
+    # autounattend.xml (Setup requires it in clear) for a disposable
+    # verification VM's documented test credential; SecureString here
+    # would only pretend to protect it.
+    [Parameter(Mandatory)] [string]$AdminPassword, # psa-disable-line PSA5001 -- plain text required by autounattend; disposable test credential
     [string]$UiLanguage = 'ja-JP',
     [string]$InputLocale = '0411:00000411',
     [uint64]$SizeBytes = 2GB
