@@ -13,6 +13,37 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r72] - 2026-07-08 - docs: AWS CLI v2 E2E results - r65-faithful tests, all 5 majors
+
+### Changed
+- **`tests/aws_awscli-v2/awscli-installtest-ledger.json` +
+  `RESULTS-rhel{6,7,8,9,10}.md`**: full five-major evidence, 4,650 rows
+  (930 versions x 5 majors), every row measured with r65+ semantics
+  (real install attempt, `aws --version` + `aws configure list`).
+  - RHEL 7/8/9/10: **current** - 929/930 ok each (tested 2026-07-07,
+    r65-era sweep); the single fail per major is the persistent upstream
+    2.0.32 bundle gap (HTTP 404; neighbours 200).
+  - RHEL 6: **capped at 2.17.51** (493 ok) - the 436 versions above the
+    cap now carry the faithful `installs-but-wont-run` reason with the
+    empirical floor (`glibc 2.12; bundle needs >= 2.17`) and
+    `verdict: glibc-too-old` + `min_glibc_measured: 2.17` (tested
+    2026-07-08 on r71; the old ledger's pre-r65 `unsupported` rows and
+    the 2026-07-07 masked-reason rows are both superseded).
+  - Ledger provenance (transparent): the committed ledger is the keyed
+    merge (persist_ledger rule, `(osmajor, awscli_version)`) of the
+    2026-07-07 five-major sweep (RHEL 7-10 rows) and the 2026-07-08
+    RHEL6-only r71 re-sweep - the RHEL6-only run had started from a
+    fresh clone, so its 7-10 rows were the stale r64-era repo rows and
+    were discarded. Row-level provenance is preserved in `tested_at`.
+    **2.35.16** appears in neither: AWS withdrew it upstream between the
+    two sweeps (delisted; bundle URL now HTTP 503) - the ledger tracks
+    the current installable catalogue (930 versions).
+  - RESULTS were regenerated hermetically from the merged ledger
+    (`--generate-results`); the RHEL6 report is byte-identical to the
+    host-generated one.
+  - Host: RHEL 10.2 (Coughlan), podman 5.8.2 rootful, SELinux
+    Enforcing, RHSM-entitled.
+
 ## [r71] - 2026-07-07 - fix: AWS CLI glibc-capped rows - pipefail masked the installs-but-wont-run reason
 
 ### Fixed
