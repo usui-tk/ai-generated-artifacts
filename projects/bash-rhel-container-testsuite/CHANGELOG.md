@@ -13,6 +13,48 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r79] - 2026-07-08 - refactor: data-grounded curl-native FORWARD chain (own + newer majors) (collector v1.3.0)
+
+Rebuilt the chain probe from the collected archives (r73 el8/el9/el10 full
+collections), not assumptions - correcting two real defects the earlier chain
+had: it fetched leapp-rhui-aws from a repo it isn't in (appstream), and it
+skipped the client-config path that makes the chain non-circular.
+
+### Evidence derived from the archives
+- content repos (baseos/appstream/codeready/supplementary/extensions) are gated
+  by `content-rhel<M>.crt`; the client-config repo
+  (`.../protected/rhui-client-config/rhel/server/<M>/`) is gated by a SEPARATE
+  `rhui-client-config-server-<M>.crt`.
+- each installed `leapp-rhui-aws` (built for major M) bundles the NEXT major's
+  certs - BOTH `content-rhel<M+1>` AND `rhui-client-config-server-<M+1>` - plus a
+  `leapp-aws.repo` that itself defines the rhel(M+1) content repos and the
+  rhel(M+1) client-config repo. So the config cert obtained at one hop unlocks
+  the next major's client-config repo, which hosts the next `leapp-rhui-aws`:
+  the forward chain is non-circular.
+
+### Changed
+- **`rc_collect_chain` rewritten curl-native + data-grounded.** Verifies how many
+  majors a host of major N can reach - its own plus every newer one, matching the
+  expected el8->3 / el9->2 / el10->1. Flow: measure the OWN major (own content
+  cert), then for each newer major T walk forward - SEARCH major-(T-1) repos for
+  `leapp-rhui-aws` (client-config with the config cert, then baseos/appstream with
+  the content cert, recording where it was hosted), curl-fetch + extract
+  content-rhel<T> AND config-server-<T>, measure rhel<T> content reachability
+  (repomd + package_count + build-dep scan), then chain forward using the
+  extracted config cert. Never dnf, never leapp; curl + client cert + IMDS
+  identity only. `chain/SUMMARY.txt` gives the per-major verdict.
+- New helper `rc_rhui_config_url` (retarget a client-config URL to another major).
+  Bump collector to v1.3.0.
+
+### Notes
+- t025 -> 39 assertions (adds `rc_rhui_config_url` presence + r79 curl-native /
+  non-circular invariants). TESTING.md baseline 670. Gate 670/0/0 (25 tiers),
+  shellcheck -S style clean, bash -n clean, doc-gate PASS. The RPM extraction
+  runs on the RHEL host (rpm2cpio/cpio); the curl helpers, URL synthesis and
+  build-dep scan are validated in the sandbox. Run
+  `sudo bash collect-aws-rhui-facts.sh --chain` on el8 (and, to confirm the 2/1
+  cases, el9/el10); `chain/SUMMARY.txt` reports reachable majors.
+
 ## [r78] - 2026-07-08 - refactor: chain probe is now CURL-NATIVE, dnf removed (collector v1.2.0)
 
 The chain probe was rebuilt to use curl + the client cert end-to-end, as

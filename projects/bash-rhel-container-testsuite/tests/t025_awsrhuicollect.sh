@@ -69,7 +69,7 @@ assert_eq ""     "$(rc_chain_list 10)" "chain: 10 -> '' (no downstream)"
 assert_eq "8 9 10" "$(rc_chain_list 7)" "chain: 7 -> '8 9 10' (three hops)"
 
 # --- r74 collectors/helpers are wired ----------------------------------------
-for fn in rc_collect_chain rc_curl_repo_enum rc_count_packages rc_run_long rc_curl_fetch_pkg rc_decompress rc_builddep_scan; do
+for fn in rc_collect_chain rc_curl_repo_enum rc_count_packages rc_run_long rc_curl_fetch_pkg rc_decompress rc_builddep_scan rc_rhui_config_url; do
   if declare -F "${fn}" >/dev/null 2>&1; then t_pass "defined: ${fn}"; else t_fail "missing: ${fn}"; fi
 done
 
@@ -111,7 +111,8 @@ grep -Eq 'leapp preupgrade' "${COLLECT}"; assert_eq 0 "$?" "safety: 'leapp preup
 # dnf-driven chain step, cross-major breaks again (dnf failed three ways: 403,
 # already-installed, modular platform). Assert the chain's acquisition uses the
 # curl fetch helper and writes no /etc/yum.repos.d chain repo file.
-grep -q 'fetch-leapp-rhui-aws-el' "${COLLECT}"; assert_eq 0 "$?" "r78: chain acquires the next cert via curl (rc_curl_fetch_pkg)"
-if grep -Eq '/etc/yum\.repos\.d/chain-' "${COLLECT}"; then t_fail "r78: chain must not write dnf repo files (curl-native)"; else t_pass "r78: chain writes no dnf repo files (curl-native)"; fi
+grep -q '"leapp-rhui-aws"' "${COLLECT}"; assert_eq 0 "$?" "r79: chain fetches leapp-rhui-aws via curl (rc_curl_fetch_pkg)"
+grep -q 'rc_rhui_config_url' "${COLLECT}"; assert_eq 0 "$?" "r79: chain reaches the client-config repo (config-cert path, non-circular)"
+if grep -Eq '/etc/yum\.repos\.d/chain-' "${COLLECT}"; then t_fail "r79: chain must not write dnf repo files (curl-native)"; else t_pass "r79: chain writes no dnf repo files (curl-native)"; fi
 
 t_done

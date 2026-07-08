@@ -59,7 +59,7 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.2.0"
+RC_TOOL_VERSION="1.3.0"
 RC_CLOUD="aws"   # this collector is AWS-specific; other clouds get sibling scripts
 RC_CMD_TIMEOUT="${RC_CMD_TIMEOUT:-120}"
 
@@ -536,44 +536,64 @@ rc_builddep_scan() {
   done
 }
 
-# rc_collect_chain OUTDIR MAJOR - the r74 experiment, CURL-NATIVE (r78). Walk the
-# leapp acquire-chain (8 -> 9 -> 10) using ONLY internal resources and ONLY curl
-# + the client cert. No dnf, no /etc/yum.repos.d files, no amazon-id plugin, no
-# modular/dependency resolution - dnf failed cross-major three ways (403 pre-r75,
-# nothing-to-do r76, modular platform r77); curl never did. At each hop:
-#   (a) curl-fetch the CURRENT major's leapp-rhui-aws from ITS appstream (that
-#       rpm bundles the NEXT major's cert) and extract the cert. hop 1 uses the
-#       host's OWN cert; later hops use the cert extracted the hop before.
-#   (b) measure the NEXT major's baseos+appstream reachability from THIS
-#       billing-<MAJOR> host (repomd status + package_count; the file list is
-#       built by curl alone).
-#   (c) scan the fetched primary for the build deps (kernel-devel/gcc/make/
-#       elfutils-libelf-devel).
-# Runs no leapp and no dnf at all. The decisive datum is the NON-ADJACENT hop
-# (billing-8 -> rhel10): repomd 200 => one host serves every major's build
-# material; 403 => RHUI binds authorization to the instance's own major.
+# rc_rhui_config_url TEMPLATE MAJOR - retarget a client-config mirrorlist
+# template to another major: /server/<n>/ -> /server/<MAJOR>/ ; $basearch fixed.
+# (REGION substitution is the caller's job.) Grounded on the observed shape
+# .../protected/rhui-client-config/rhel/server/<N>/$basearch/os.
+rc_rhui_config_url() {
+  printf '%s\n' "$1" | sed -E \
+    -e "s#/server/[0-9]+/#/server/$2/#" \
+    -e "s#\\\$basearch#x86_64#g"
+}
+
+# rc_collect_chain OUTDIR MAJOR - CURL-NATIVE, DATA-GROUNDED forward chain (r79).
+# Verifies how many majors a host of MAJOR N can reach: its own + every newer
+# major (el8 -> 8,9,10 ; el9 -> 9,10 ; el10 -> 10). Derived entirely from the
+# collected archives, NOT assumptions:
+#   * content repos (baseos/appstream/...) are gated by content-rhel<M>.crt;
+#     the client-config repo (.../protected/rhui-client-config/rhel/server/<M>/)
+#     is gated by a SEPARATE rhui-client-config-server-<M>.crt.
+#   * each leapp-rhui-aws (built for major M) bundles the NEXT major's certs -
+#     BOTH content-rhel<M+1> AND rhui-client-config-server-<M+1> - so the chain
+#     is non-circular: the config cert obtained at one hop unlocks the next
+#     major's client-config repo, which hosts the next leapp-rhui-aws.
+# Every step is curl + client cert only (+ IMDS identity header). Never dnf,
+# never leapp. leapp-rhui-aws is not assumed to live in a specific repo: each
+# hop SEARCHES client-config, then baseos, then appstream, and records where it
+# was actually hosted.
 rc_collect_chain() {
   local out="$1/chain" major="$2"
-  local repo=/etc/yum.repos.d/redhat-rhui.repo
-  local chain sec tmpl ca region caarg=() hdr=() id_doc id_sig host_cert host_key
+  local crepo=/etc/yum.repos.d/redhat-rhui.repo
+  local cfgrepo=/etc/yum.repos.d/redhat-rhui-client-config.repo
+  local csec c_tmpl ca c_cert_own c_key_own
+  local cfgsec cfg_tmpl cfg_cert_own cfg_key_own
+  local region caarg=() hdr=() id_doc id_sig
   local bdir_default=/usr/share/leapp-repository/repositories/system_upgrade/common/files/rhui/aws
-  local src t hop=0 hd bdir certT keyT url_t_base url_t_app url_src_app adjacent verdict _chain=()
-  local cur_cert cur_key rpmfile
+  local chain _chain=() src t hop=0 hd ohd bdir verdict
+  local cur_c_cert cur_c_key cur_cfg_cert cur_cfg_key
+  local cand where rest u cc ck rpmfile certT keyT cfgT cfgkeyT cfg_url base_url app_url
   mkdir -p "${out}"
   chain="$(rc_chain_list "${major}")"
-  if [ -z "${chain}" ]; then
-    echo "skipped: no downstream chain for RHEL ${major}" > "${out}/SKIPPED.txt"; return 0
+
+  [ -f "${crepo}" ] || { echo "skipped: ${crepo} absent" > "${out}/SKIPPED.txt"; return 0; }
+  csec="$(awk '/^\[rhel-[0-9]+-baseos-rhui-rpms\]/{f=1;next} /^\[/{f=0} f' "${crepo}")"
+  c_tmpl="$(printf '%s\n' "${csec}" | sed -n 's/^mirrorlist=//p' | head -1)"
+  ca="$(printf '%s\n' "${csec}" | sed -n 's/^sslcacert=//p' | head -1)"
+  c_cert_own="$(printf '%s\n' "${csec}" | sed -n 's/^sslclientcert=//p' | head -1)"
+  c_key_own="$(printf '%s\n' "${csec}" | sed -n 's/^sslclientkey=//p' | head -1)"
+  if [ -f "${cfgrepo}" ]; then
+    cfgsec="$(awk '/^\[rhui-client-config-server-[0-9]+\]/{f=1;next} /^\[/{f=0} f' "${cfgrepo}")"
+    cfg_tmpl="$(printf '%s\n' "${cfgsec}" | sed -n 's/^mirrorlist=//p' | head -1)"
+    cfg_cert_own="$(printf '%s\n' "${cfgsec}" | sed -n 's/^sslclientcert=//p' | head -1)"
+    cfg_key_own="$(printf '%s\n' "${cfgsec}" | sed -n 's/^sslclientkey=//p' | head -1)"
   fi
-  printf 'source_major=%s acquire_chain=%s mode=curl-native\n' "${major}" "${chain}" > "${out}/chain.txt"
-  [ -f "${repo}" ] || { echo "skipped: ${repo} absent" >> "${out}/chain.txt"; return 0; }
-  sec="$(awk '/^\[rhel-[0-9]+-baseos-rhui-rpms\]/{f=1;next} /^\[/{f=0} f' "${repo}")"
-  tmpl="$(printf '%s\n' "${sec}" | sed -n 's/^mirrorlist=//p' | head -1)"
-  ca="$(printf '%s\n' "${sec}" | sed -n 's/^sslcacert=//p' | head -1)"
-  host_cert="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientcert=//p' | head -1)"
-  host_key="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientkey=//p' | head -1)"
   region="$(rc_imds_get meta-data/placement/region)"
-  if [ -z "${tmpl}" ] || [ -z "${region}" ] || [ ! -f "${host_cert}" ] || [ ! -f "${host_key}" ]; then
-    echo "skipped: baseos template / region / host cert unavailable" >> "${out}/chain.txt"; return 0
+  {
+    printf 'source_major=%s downstream_chain=%s mode=curl-native-datagrounded\n' "${major}" "${chain:-<none>}"
+    printf 'own_content_cert=%s\nown_config_cert=%s\n' "${c_cert_own}" "${cfg_cert_own:-<none>}"
+  } > "${out}/chain.txt"
+  if [ -z "${c_tmpl}" ] || [ -z "${region}" ] || [ ! -f "${c_cert_own}" ]; then
+    echo "skipped: content template / region / own content cert unavailable" >> "${out}/chain.txt"; return 0
   fi
   [ -n "${ca}" ] && [ -f "${ca}" ] && caarg=(--cacert "${ca}")
   id_doc="$(rc_imds_get dynamic/instance-identity/document)"
@@ -582,45 +602,80 @@ rc_collect_chain() {
     -H "X-RHUI-ID: $(printf '%s' "${id_doc}" | rc_b64url)"
     -H "X-RHUI-SIGNATURE: $(printf '%s' "${id_sig}" | rc_b64url)")
 
+  : > "${out}/SUMMARY.txt"
+
+  # ---- measure the OWN major (baseline; expected 200) ----
+  ohd="${out}/own-rhel${major}"; mkdir -p "${ohd}"
+  base_url="$(rc_rhui_major_url "${c_tmpl}" "${major}" | sed "s/REGION/${region}/")"
+  app_url="$(printf '%s' "${base_url}" | sed 's#/baseos/#/appstream/#')"
+  rc_curl_repo_enum "${ohd}" "curl-rhel${major}-baseos" "${c_cert_own}" "${c_key_own}" "${base_url}" "${caarg[@]}" "${hdr[@]}"
+  rc_curl_repo_enum "${ohd}" "curl-rhel${major}-appstream" "${c_cert_own}" "${c_key_own}" "${app_url}" "${caarg[@]}" "${hdr[@]}"
+  rc_builddep_scan "${ohd}" "${major}" kernel-devel gcc make elfutils-libelf-devel
+  verdict="$(sed -n 's/^repomd_http=//p' "${ohd}/curl-rhel${major}-baseos-curl-enum.txt" 2>/dev/null | head -1)"
+  printf 'target=%s (own) curl_baseos_repomd_http=%s\n' "${major}" "${verdict:-none}" > "${ohd}/RESULT.txt"
+  printf 'rhel%s: repomd=%s (own major, own content cert)\n' "${major}" "${verdict:-none}" >> "${out}/SUMMARY.txt"
+
+  if [ -z "${chain}" ]; then
+    printf 'reachable_majors=1 (rhel%s only; top of the line, no downstream)\n' "${major}" >> "${out}/SUMMARY.txt"
+    return 0
+  fi
+
+  # ---- downstream forward chain ----
+  cur_c_cert="${c_cert_own}"; cur_c_key="${c_key_own}"
+  cur_cfg_cert="${cfg_cert_own}"; cur_cfg_key="${cfg_key_own}"
   src="${major}"
-  cur_cert="${host_cert}"; cur_key="${host_key}"   # hop 1 uses the host's own cert
   read -ra _chain <<< "${chain}"
   for t in "${_chain[@]}"; do
     hop=$((hop + 1))
     hd="${out}/hop${hop}-src${src}-to${t}"; mkdir -p "${hd}"
-    [ "${t}" = "$(rc_leapp_target "${src}")" ] && adjacent=yes || adjacent=no
-    printf 'hop=%s source_major=%s target_major=%s adjacent=%s\n' "${hop}" "${src}" "${t}" "${adjacent}" > "${hd}/hop.txt"
+    printf 'hop=%s source_major=%s target_major=%s\n' "${hop}" "${src}" "${t}" > "${hd}/hop.txt"
 
-    # (a) ACQUIRE content-rhel<t>: curl-fetch rhel<src>'s leapp-rhui-aws (bundles
-    #     content-rhel<t>) from rhel<src> appstream with the current cert.
-    url_src_app="$(rc_rhui_major_url "${tmpl}" "${src}" | sed "s/REGION/${region}/" | sed 's#/baseos/#/appstream/#')"
-    rpmfile="$(rc_curl_fetch_pkg "${hd}" "fetch-leapp-rhui-aws-el${src}" "leapp-rhui-aws" "${cur_cert}" "${cur_key}" "${url_src_app}" "${caarg[@]}" "${hdr[@]}")"
+    # ACQUIRE major-<t> certs: SEARCH major-<src> repos for leapp-rhui-aws (built
+    # for src; it bundles content-rhel<t> + config-server-<t>). Try client-config
+    # (config cert), then baseos, then appstream (content cert). Record where.
+    cfg_url=""
+    [ -n "${cfg_tmpl}" ] && cfg_url="$(rc_rhui_config_url "${cfg_tmpl}" "${src}" | sed "s/REGION/${region}/")"
+    base_url="$(rc_rhui_major_url "${c_tmpl}" "${src}" | sed "s/REGION/${region}/")"
+    app_url="$(printf '%s' "${base_url}" | sed 's#/baseos/#/appstream/#')"
+    rpmfile=""
+    for cand in "clientconfig|${cfg_url}|${cur_cfg_cert}|${cur_cfg_key}" \
+                "baseos|${base_url}|${cur_c_cert}|${cur_c_key}" \
+                "appstream|${app_url}|${cur_c_cert}|${cur_c_key}"; do
+      where="${cand%%|*}"; rest="${cand#*|}"; u="${rest%%|*}"; rest="${rest#*|}"; cc="${rest%%|*}"; ck="${rest##*|}"
+      { [ -n "${u}" ] && [ -n "${cc}" ] && [ -f "${cc}" ]; } || continue
+      rpmfile="$(rc_curl_fetch_pkg "${hd}" "fetch-${where}-el${src}" "leapp-rhui-aws" "${cc}" "${ck}" "${u}" "${caarg[@]}" "${hdr[@]}")"
+      if [ -n "${rpmfile}" ] && [ -f "${rpmfile}" ]; then
+        printf 'leapp-rhui-aws hosted in: %s\n  url=%s\n' "${where}" "${u}" > "${hd}/acquired-from.txt"; break
+      fi
+    done
     if [ -n "${rpmfile}" ] && [ -f "${rpmfile}" ]; then
-      rc_run "${hd}" a01-extract-bundle "cd '${hd}' && rpm2cpio '${rpmfile}' | cpio -idmu 2>&1"
+      rc_run "${hd}" a01-extract "cd '${hd}' && rpm2cpio '${rpmfile}' | cpio -idmu 2>&1"
     fi
     bdir="${hd}${bdir_default}"
-    rc_run "${hd}" a02-cert-range "ls -la '${bdir}' 2>&1; echo '--- content certs present ---'; ls '${bdir}'/content-rhel*.crt 2>&1"
+    rc_run "${hd}" a02-bundle-contents "ls -la '${bdir}' 2>&1"
     certT="${bdir}/content-rhel${t}.crt"; keyT="${bdir}/content-rhel${t}.key"
-    if [ ! -f "${certT}" ] || [ ! -f "${keyT}" ]; then
-      printf 'STOP: content-rhel%s cert was not acquired via curl (chain cannot proceed)\n' "${t}" > "${hd}/RESULT.txt"; break
-    fi
-
-    # (b) MEASURE rhel<t> reachability from this billing-<major> host (curl only).
-    url_t_base="$(rc_rhui_major_url "${tmpl}" "${t}" | sed "s/REGION/${region}/")"
-    url_t_app="$(printf '%s' "${url_t_base}" | sed 's#/baseos/#/appstream/#')"
-    rc_curl_repo_enum "${hd}" "curl-rhel${t}-baseos" "${certT}" "${keyT}" "${url_t_base}" "${caarg[@]}" "${hdr[@]}"
-    rc_curl_repo_enum "${hd}" "curl-rhel${t}-appstream" "${certT}" "${keyT}" "${url_t_app}" "${caarg[@]}" "${hdr[@]}"
-
-    # (c) BUILD-MATERIAL scan of the curl-fetched primary (no extra network).
-    rc_builddep_scan "${hd}" "${t}" kernel-devel gcc make elfutils-libelf-devel
-
-    verdict="$(sed -n 's/^repomd_http=//p' "${hd}/curl-rhel${t}-baseos-curl-enum.txt" 2>/dev/null | head -1)"
-    printf 'target=%s adjacent=%s curl_baseos_repomd_http=%s\n' "${t}" "${adjacent}" "${verdict:-none}" > "${hd}/RESULT.txt"
-    if [ "${verdict}" != 200 ]; then
-      printf 'STOP: rhel%s content NOT authorized from billing-%s host.\n' "${t}" "${major}" >> "${hd}/RESULT.txt"
+    cfgT="${bdir}/rhui-client-config-server-${t}.crt"; cfgkeyT="${bdir}/rhui-client-config-server-${t}.key"
+    if [ ! -f "${certT}" ]; then
+      printf 'STOP: content-rhel%s not acquired via curl from any major-%s repo (chain caps here)\n' "${t}" "${src}" > "${hd}/RESULT.txt"
+      printf 'rhel%s: NOT-ACQUIRED (content-rhel%s carrier unreachable from major-%s)\n' "${t}" "${t}" "${src}" >> "${out}/SUMMARY.txt"
       break
     fi
-    cur_cert="${certT}"; cur_key="${keyT}"   # next hop fetches via this cert
+
+    # MEASURE major-<t> content reachability from THIS billing-<major> host.
+    base_url="$(rc_rhui_major_url "${c_tmpl}" "${t}" | sed "s/REGION/${region}/")"
+    app_url="$(printf '%s' "${base_url}" | sed 's#/baseos/#/appstream/#')"
+    rc_curl_repo_enum "${hd}" "curl-rhel${t}-baseos" "${certT}" "${keyT}" "${base_url}" "${caarg[@]}" "${hdr[@]}"
+    rc_curl_repo_enum "${hd}" "curl-rhel${t}-appstream" "${certT}" "${keyT}" "${app_url}" "${caarg[@]}" "${hdr[@]}"
+    rc_builddep_scan "${hd}" "${t}" kernel-devel gcc make elfutils-libelf-devel
+    verdict="$(sed -n 's/^repomd_http=//p' "${hd}/curl-rhel${t}-baseos-curl-enum.txt" 2>/dev/null | head -1)"
+    printf 'target=%s curl_baseos_repomd_http=%s content_cert=%s\n' "${t}" "${verdict:-none}" "${certT}" > "${hd}/RESULT.txt"
+    printf 'rhel%s: repomd=%s (content-rhel%s acquired from major-%s)\n' "${t}" "${verdict:-none}" "${t}" "${src}" >> "${out}/SUMMARY.txt"
+    if [ "${verdict}" != 200 ]; then
+      printf 'STOP: rhel%s content NOT authorized from billing-%s host.\n' "${t}" "${major}" >> "${hd}/RESULT.txt"; break
+    fi
+    # advance: next hop sources from major-<t> with the certs just extracted.
+    cur_c_cert="${certT}"; cur_c_key="${keyT}"
+    [ -f "${cfgT}" ] && { cur_cfg_cert="${cfgT}"; cur_cfg_key="${cfgkeyT}"; }
     src="${t}"
   done
 }
@@ -645,7 +700,8 @@ rc_write_manifest() {
     printf '  crossmajor/ host-cert HTTPS reachability of other majors (rhel99=control)\n'
     printf '  eus/        EUS/ELS/AUS/E4S repo enumeration\n'
     printf '  leapp/      non-destructive "leapp preupgrade --no-rhsm" straddle (7/8/9)\n'
-    printf '  chain/      leapp cert-chain probe (8->9->10), curl-only: per-hop reachability + build-dep scan (--chain)\n'
+    printf '  chain/      curl-native forward chain: own major + every newer major reachable\n'
+    printf '              (el8->3, el9->2, el10->1); SUMMARY.txt has the verdicts (--chain)\n'
   } > "${out}/MANIFEST.txt"
 }
 
@@ -655,9 +711,10 @@ Usage: sudo bash collect-aws-rhui-facts.sh [options]
   --major N        RHEL major (6-10); default: auto-detect from /etc/redhat-release
   --outdir DIR     working directory; default: a mktemp dir
   --no-leapp       skip the leapp preupgrade dry-run (majors 7/8/9)
-  --chain          run the leapp cert-chain probe (8->9->10) measuring whether
-                   non-adjacent majors are authorized from this host, using
-                   curl + the client cert only (no dnf). Heavy; implies --no-leapp.
+  --chain          curl-native forward-chain probe: how many majors this host
+                   can reach (its own + every newer one: el8->8,9,10 ; el9->9,10
+                   ; el10->10). curl + client cert only, no dnf. See chain/
+                   SUMMARY.txt. Heavy; implies --no-leapp.
   --no-crossmajor  skip the cross-major HTTPS reachability probe
   --no-eus         skip EUS/ELS repo enumeration
   --keep-outdir    do not delete the working dir after packing
