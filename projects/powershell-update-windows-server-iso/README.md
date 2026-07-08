@@ -255,7 +255,7 @@ by purpose. The default is `PrepareBuildVerify`.
 
 | Action | Description |
 |:---|:---|
-| `BootTest` | Hyper-V Gen2 boot smoke test against the output ISO (mutually exclusive with `-SyntheticTestMode`) |
+| `BootTest` | Hyper-V Gen2 Secure Boot smoke test against the output ISO: console screenshots for operator review (mutually exclusive with `-SyntheticTestMode`; the full revoked-firmware matrix lives in `tools/boot-verification/`) |
 | `GenerateManifest` | Compute a manifest of resolved patches (P01-P03 only) |
 | `Cleanup` | Clean up workspace and stale DISM mounts |
 | `ListPhases` | Dump phase + action registry as JSON |

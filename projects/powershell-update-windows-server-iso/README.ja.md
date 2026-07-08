@@ -247,7 +247,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 | Action | 説明 |
 |:---|:---|
-| `BootTest` | 出力 ISO に対する Hyper-V Gen2 起動スモークテスト（`-SyntheticTestMode` と排他）|
+| `BootTest` | 出力 ISO に対する Hyper-V Gen2 セキュアブート起動スモークテスト。コンソールのスクリーンショットを保存しオペレータが合否判定（`-SyntheticTestMode` と排他。失効ファームウェアを含む本格マトリクスは `tools/boot-verification/` 参照）|
 | `GenerateManifest` | 解決済みパッチのマニフェストを算出（P01-P03 のみ）|
 | `Cleanup` | ワークスペースと残留 DISM マウントの清掃 |
 | `ListPhases` | フェーズとアクションのレジストリを JSON で出力 |
