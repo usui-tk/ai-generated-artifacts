@@ -352,7 +352,7 @@ Pipeline of thirteen phases:
 | P08 | PatchBootWim | Build | boot.wim (PE + Setup) and winre.wim |
 | P09 | AssembleIso | Build | Dynamic Update Setup overlay; Export-WindowsImage; oscdimg ISO build |
 | P10 | ConvertPca2023BootManager | Build | **Default-on**, readiness-driven PCA2023 Secure Boot conversion (opt-out: `-SkipPca2023BootManager`; Server 2025 additionally requires `-ForcePca2023OnServer2025`) |
-| P11 | StaticVerify | Verify | Mount output ISO; SHA-256 content identity vs the extracted tree; full post-servicing inspection (`logs/inspection_post.json`); measured KB / target-build verification |
+| P11 | StaticVerify | Verify | Mount output ISO; SHA-256 content identity vs the extracted tree; full post-servicing inspection (`logs/inspection_post.json`); per-Kind measured verification (target build, .NET rollup census; KB-name rows on Server 2016 only) |
 | P12 | VerifyPca2023Readiness | Verify | **Always runs** — emits `pca2023_readiness.json` + `.md` |
 | P13 | FinalReport | Report | End-of-run summary; ISO hash; log paths; pre/post inspection diff + observe-first declared-vs-measured cross-checks |
 

@@ -770,7 +770,7 @@ The pipeline consists of 13 phases organised into 5 groups:
 | P08 | Build | PatchBootWim: apply SSU / LP / LCU to boot.wim + WinRE.wim |
 | P09 | Build | AssembleIso: oscdimg re-emit |
 | P10 | Build | ConvertPca2023BootManager (optional, see §B.17) |
-| P11 | Verify | StaticVerify: hash, size, structure; ISO/extracted WIM SHA-256 content identity (hard); post-servicing media inspection -> `logs/inspection_post.json`; measured Kb + TargetBuildAfterUpdate checks |
+| P11 | Verify | StaticVerify: hash, size, structure; ISO/extracted WIM SHA-256 content identity (hard); post-servicing media inspection -> `logs/inspection_post.json`; per-Kind measured verification (LCU via TargetBuildAfterUpdate; DotNet via the DotNetRollup census; KB-name rows on Server 2016 only) |
 | P12 | Verify | VerifyPca2023Readiness: input + output snapshot |
 | P13 | Report | FinalReport: aggregate Health verdict; inspection diff -> `logs/inspection_diff.json` + observe-first declared-vs-measured cross-checks (Warning + errors.jsonl, never gated) |
 

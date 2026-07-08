@@ -342,7 +342,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | P08 | PatchBootWim | Build | boot.wim（PE + Setup）と winre.wim |
 | P09 | AssembleIso | Build | Dynamic Update Setup オーバーレイ、Export-WindowsImage、oscdimg による ISO ビルド |
 | P10 | ConvertPca2023BootManager | Build | **既定で実行**（readiness 駆動）の PCA2023 Secure Boot 変換（オプトアウト：`-SkipPca2023BootManager`。Server 2025 のみ追加で `-ForcePca2023OnServer2025` が必要）|
-| P11 | StaticVerify | Verify | 出力 ISO をマウントし、展開ツリーとの SHA-256 内容同一性を検証。適用後の全インデックス検査（`logs/inspection_post.json`）から KB／到達ビルドを実測で確認 |
+| P11 | StaticVerify | Verify | 出力 ISO をマウントし、展開ツリーとの SHA-256 内容同一性を検証。適用後の全インデックス検査（`logs/inspection_post.json`）から種別ごとに実測検証（到達ビルド、.NET ロールアップ実在確認。KB 名照合は Server 2016 のみ）|
 | P12 | VerifyPca2023Readiness | Verify | **常時実行** — `pca2023_readiness.json` + `.md` を出力 |
 | P13 | FinalReport | Report | 実行終了サマリ、ISO ハッシュ、ログパス。適用前後の検査差分と、宣言値と実測値の突き合わせ（observe-first）|
 
