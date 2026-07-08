@@ -13,6 +13,35 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r76] - 2026-07-08 - fix: chain acquisition/build-dep use `dnf download`, not install (collector v1.1.2)
+
+### Findings (el8 --chain re-run, r75 build)
+- **The r75 identity fix worked**: dnf no longer gets 403 on the cross-major
+  `chain-rhel9-*` repos (the amazon-id plugin now injects the IMDS identity).
+  Adjacent curl stays 200 (rhel9 baseos/appstream reachable).
+- **New blockers, both from using an INSTALL transaction**: (a) hop2's
+  `dnf install --downloadonly leapp-rhui-aws` returned "nothing to do" because
+  the el8 leapp-rhui-aws is already installed (pulled by hop1's
+  `leapp-upgrade-el8toel9`), so content-rhel10 was never fetched; (b) the
+  build-dep `install --downloadonly` conflicted with the host's own el8 packages
+  (python3-jwt, `module(platform:el8)`). Both are transaction-resolution
+  artifacts of running on the el8 host - irrelevant to the real target-major
+  container install, but they blocked the probe.
+
+### Fixed
+- Acquisition and the build-dep check now use **`dnf download`** (via
+  dnf-plugins-core, ensured up front), which fetches a repo's RPM regardless of
+  installed state and without a full install transaction. This should let hop2
+  actually pull rhel9's leapp-rhui-aws (bundling content-rhel10) and download the
+  rhel10 build deps, so the re-run reaches the decisive non-adjacent (8->10)
+  curl verdict. Bump collector to v1.1.2.
+
+### Notes
+- No test/count change (665 passed, 25 tiers). shellcheck clean, bash -n clean,
+  doc-gate PASS. Re-run `sudo bash collect-aws-rhui-facts.sh --chain` on a
+  disposable el8 host; the datum is `chain/hop2-src9-to10/RESULT.txt` +
+  `curl-rhel10-baseos-curl-enum.txt` (repomd_http).
+
 ## [r75] - 2026-07-08 - fix: chain repo IDs need the 'rhui-' token for dnf identity (collector v1.1.1)
 
 ### Findings (el8 --chain run, ip-172-31-12-134, ap-northeast-1)

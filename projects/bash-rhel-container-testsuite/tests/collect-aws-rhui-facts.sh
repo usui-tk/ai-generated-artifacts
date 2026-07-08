@@ -59,7 +59,7 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.1.1"
+RC_TOOL_VERSION="1.1.2"
 RC_CLOUD="aws"   # this collector is AWS-specific; other clouds get sibling scripts
 RC_CMD_TIMEOUT="${RC_CMD_TIMEOUT:-120}"
 
@@ -512,6 +512,13 @@ rc_collect_chain() {
     -H "X-RHUI-ID: $(printf '%s' "${id_doc}" | rc_b64url)"
     -H "X-RHUI-SIGNATURE: $(printf '%s' "${id_sig}" | rc_b64url)")
 
+  # 'dnf download' (dnf-plugins-core) fetches a repo's RPM regardless of what is
+  # installed and without a full install transaction - avoids the r76 traps:
+  # (a) leapp-rhui-aws already installed -> `install --downloadonly` = "nothing
+  # to do"; (b) cross-major build deps conflicting with the host's own el<N>
+  # packages. The real install happens in a clean target-major container.
+  rc_run_long "${out}" chain00-ensure-dnf-download 'dnf -y install dnf-plugins-core 2>&1; command -v dnf 2>&1'
+
   src="${major}"
   read -ra _chain <<< "${chain}"
   for t in "${_chain[@]}"; do
@@ -532,7 +539,7 @@ rc_collect_chain() {
       # attaches the IMDS identity (r75: without it dnf gets 403 - only curl,
       # which sets the header manually, worked in r74).
       rc_run_long "${hd}" a01-fetch-next-bundle \
-        "dnf -y --releasever ${src} --disablerepo='*' --enablerepo='chain-rhel${src}-*' install --downloadonly --destdir='${hd}/dl' leapp-rhui-aws 2>&1; for r in '${hd}'/dl/*.rpm; do rpm2cpio \"\${r}\" | (cd '${hd}' && cpio -idmu); done 2>&1"
+        "dnf -y --releasever ${src} --disablerepo='*' --enablerepo='chain-rhel${src}-*' download --destdir='${hd}/dl' leapp-rhui-aws 2>&1; for r in '${hd}'/dl/*.rpm; do rpm2cpio \"\${r}\" | (cd '${hd}' && cpio -idmu); done 2>&1"
       bdir="${hd}${bdir_default}"
     fi
     rc_run "${hd}" a02-cert-range "ls -la '${bdir}' 2>&1; echo '--- content certs present ---'; ls '${bdir}'/content-rhel*.crt 2>&1"
@@ -563,8 +570,8 @@ rc_collect_chain() {
       [ -n "${ca}" ] && printf 'sslcacert=%s\n' "${ca}"
     } > "${rf}" 2>/dev/null
     cp -p "${rf}" "${hd}/chain-rhel${t}.repo" 2>/dev/null
-    rc_run_long "${hd}" d01-dnf-downloadonly \
-      "dnf -y --releasever ${t} --disablerepo='*' --enablerepo='chain-rhel${t}-*' install --downloadonly --destdir='${hd}/builddeps' kernel-devel gcc make elfutils-libelf-devel 2>&1; ls -la '${hd}/builddeps' 2>&1"
+    rc_run_long "${hd}" d01-dnf-download \
+      "dnf -y --releasever ${t} --disablerepo='*' --enablerepo='chain-rhel${t}-*' download --destdir='${hd}/builddeps' kernel-devel gcc make elfutils-libelf-devel 2>&1; ls -la '${hd}/builddeps' 2>&1"
 
     verdict="$(sed -n 's/^repomd_http=//p' "${hd}/curl-rhel${t}-baseos-curl-enum.txt" 2>/dev/null | head -1)"
     printf 'target=%s adjacent=%s curl_baseos_repomd_http=%s\n' "${t}" "${adjacent}" "${verdict:-none}" > "${hd}/RESULT.txt"
