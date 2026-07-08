@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.63'
-$Script:ScriptTag     = 'fallback-health-wording'
+$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.64'
+$Script:ScriptTag     = 'skip-aware-output-check'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -9388,6 +9388,24 @@ function Get-IsoBootCertReadiness {
     return $inv
 }
 
+function Get-P10SkipReason {
+    <#
+    .SYNOPSIS
+        Read the reason text recorded in the P10.skipped marker.
+        Returns '' when the marker is absent or empty (P10 ran, or a
+        pre-r11.64 empty marker).
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $marker = Join-Path $Script:MarkersDir 'P10.skipped'
+    if (-not (Test-Path -LiteralPath $marker)) { return '' }
+    try {
+        $txt = [string](Get-Content -LiteralPath $marker -Raw -ErrorAction Stop)
+        return $txt.Trim()
+    } catch { return '' }
+}
+
 function Test-OutputIsoPca2023Readiness {
     <#
     .SYNOPSIS
@@ -9466,15 +9484,19 @@ function Test-OutputIsoPca2023Readiness {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
-        [Parameter(Mandatory)] [string]$ExtractedMediaPath
+        [Parameter(Mandatory)] [string]$ExtractedMediaPath,
+        [AllowEmptyString()] [string]$ConversionSkipReason = ''
     )
 
+    $skippedByPolicy = $ConversionSkipReason.StartsWith('skipped-by-policy')
     $result = [pscustomobject]@{
         Generated     = (Get-Date)
         Available     = $false
         ErrorMessage  = $null
         ExtractedMediaPath = $ExtractedMediaPath
         OverallStatus = 'Unknown'
+        ConversionSkippedByPolicy = $skippedByPolicy
+        ConversionSkipReason      = $ConversionSkipReason
         TargetChecks  = @()
         Reasons       = @()
     }
@@ -9519,6 +9541,12 @@ function Test-OutputIsoPca2023Readiness {
         if ($chain1.IsPca2023) {
             $status1 = 'Pass'
             $notes1  = 'UEFI Secure Boot critical path is signed via the "Windows UEFI CA 2023" chain.'
+        } elseif ($chain1.IsPca2011 -and $skippedByPolicy) {
+            # An ADJUDICATED skip is not a build failure: grade it
+            # Warning and name the policy, so the operator sees the
+            # consequence without the run being marked broken.
+            $status1 = 'Warning'
+            $notes1  = ('UEFI Secure Boot critical path is PCA2011-signed BY POLICY ({0}). The ISO will not boot on firmware where PCA2011 has been revoked from DBX; conversion was intentionally skipped.' -f $ConversionSkipReason)
         } elseif ($chain1.IsPca2011) {
             $notes1  = 'UEFI Secure Boot critical path is still PCA2011-signed. ISO will not boot on firmware where PCA2011 has been revoked from DBX.'
         } else {
@@ -11676,7 +11704,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
 
         if ($Script:SkipPca2023BootManager) {
             Write-Step 'Skipped: -SkipPca2023BootManager specified (operator opt-out; boot manager left as shipped).'
-            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'skipped-by-policy: operator opt-out (-SkipPca2023BootManager)' -Encoding UTF8
             return
         }
 
@@ -11686,7 +11714,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         if ($osKey -eq 'Server2025' -and -not $Script:ForcePca2023OnServer2025) {
             Write-Step ('Skipped: OsKey={0}. Server 2025 firmware already includes 2023 certs.' -f $osKey)
             Write-Step '         Pass -ForcePca2023OnServer2025 to override (advanced use only).'
-            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'skipped-by-policy: Server2025 default (use -ForcePca2023OnServer2025 to convert)' -Encoding UTF8
             return
         }
 
@@ -11734,12 +11762,12 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             Write-Caution '  2. Patch baseline must include the 2024-4B LCU (KB5036899) or a later LCU'
             Write-Caution '     Server 2016/2019/2022 EVAL ISOs ship with 2016/2019/2022-era builds and need years of LCUs first.'
             Write-Caution 'P11 StaticVerify, P12 VerifyPca2023Readiness, and P13 FinalReport will still run and record this state.'
-            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'prereq-critical: media below the 2024-4B floor; no conversion source' -Encoding UTF8
             return
         }
         if ($pre.Health -eq 'Healthy') {
             Write-Step 'Skipped: ISO is ALREADY PCA2023-signed (Health=Healthy). No conversion needed.'
-            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.skipped') -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'already-healthy: bootx64.efi is already PCA2023-signed' -Encoding UTF8
             return
         }
         Write-Step ('Pre-flight OK: Health={0}. Proceeding with conversion.' -f $pre.Health)
@@ -11838,7 +11866,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         Set-DebugStep -Step 'post-flight-output-check'
         Write-Step 'Running output-ISO PCA2023 readiness check (5-target file inspection)...'
         $ocStart = Get-Date
-        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath
+        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason)
         $ocElapsed = [int](New-TimeSpan -Start $ocStart -End (Get-Date)).TotalSeconds
         $post.OutputCheck = $outputCheck
         Write-Step ('Output ISO check OverallStatus = {0} (computed in {1}s)' -f $outputCheck.OverallStatus, $ocElapsed)
@@ -12248,7 +12276,7 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         Set-DebugStep -Step 'output-check'
         Write-Step 'Running output-ISO PCA2023 readiness check (5-target file inspection)...'
         $ocStart = Get-Date
-        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath
+        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason)
         $ocElapsed = [int](New-TimeSpan -Start $ocStart -End (Get-Date)).TotalSeconds
         $snapshot.OutputCheck = $outputCheck  # psa-disable-line PSA2009 -- $snapshot is returned by Get-OrEnsurePca2023Snapshot, which initialises OutputCheck = $null in its [pscustomobject]@{...} return; flow-insensitive analysis cannot trace this.
         Write-Step ('Output ISO check OverallStatus = {0} (computed in {1}s; {2} targets inspected)' -f `

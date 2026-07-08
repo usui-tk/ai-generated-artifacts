@@ -243,6 +243,11 @@ def main() -> int:
     p, f = check("boot.wim stays the PRIMARY conversion source (MS alignment)",
                  re.search(r"Label\s*=\s*'boot\.wim'.*?Label\s*=\s*'install\.wim'", code, re.S) is not None,
                  "candidate order pinned", p, f)
+    p, f = check("P10 skip markers carry a reason; the output check consumes it (r11.64)",
+                 "skipped-by-policy: Server2025 default" in code
+                 and code.count("-ConversionSkipReason (Get-P10SkipReason)") == 2
+                 and "PCA2011-signed BY POLICY" in code,
+                 "marker reasons + both call sites wired", p, f)
     p, f = check("the invalid Get-WindowsPackage -ImagePath call is gone",
                  re.search(r"Get-WindowsPackage'\s+-Parameters\s+@\{\s*ImagePath", code) is None,
                  "dead path buried", p, f)

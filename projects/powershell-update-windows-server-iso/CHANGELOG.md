@@ -22,6 +22,34 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.08-r11.64] - 2026-07-08
+
+Tag: `skip-aware-output-check`. The 2026-07-08 Server 2025 E2E ended
+with `Output ISO check OverallStatus = Fail` although P10 was skipped
+BY THE ADJUDICATED DEFAULT (r11.55: Server 2025 converts only with
+`-ForcePca2023OnServer2025`) -- an intentional outcome graded as a
+build failure [adjudicated 2026-07-08, option (a): fix the grading;
+whether Server 2025 should convert by default is deferred to the
+Secure Boot boot-test results].
+
+### Changed
+
+- **P10 skip markers now record WHY**: `P10.skipped` carries a reason
+  string (`skipped-by-policy: operator opt-out` / `skipped-by-policy:
+  Server2025 default` / `prereq-critical` / `already-healthy`).
+- **`Test-OutputIsoPca2023Readiness` is skip-aware**
+  (`-ConversionSkipReason`, fed by the new `Get-P10SkipReason` at
+  both call sites): a PCA2011 critical path under a
+  `skipped-by-policy` reason grades **Warning** with the policy named
+  and the consequence stated (will not boot on 2011-revoked
+  firmware); a genuine conversion shortfall stays **Fail**; the
+  result carries `ConversionSkippedByPolicy` / `ConversionSkipReason`.
+
+### Tests
+
+- T38 extended (marker reasons + both call sites + policy wording pin).
+
+
 ## [update-wsi-2026.07.08-r11.63] - 2026-07-08
 
 Tag: `fallback-health-wording`. The 2026-07-08 4-OS E2E proved the
