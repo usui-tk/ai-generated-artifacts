@@ -106,4 +106,12 @@ assert_eq "ok" "${hits}" "safety: no 'leapp upgrade' invocation in the collector
 # And the dry-run call is present.
 grep -Eq 'leapp preupgrade' "${COLLECT}"; assert_eq 0 "$?" "safety: 'leapp preupgrade' dry-run is present"
 
+# --- REGRESSION GUARD (r75): chain repo IDs must carry the 'rhui-' token -------
+# The amazon-id plugin injects the IMDS identity only into repos whose id
+# matches 'rhui-' (_rhui_repos). r74 named them chain-<t>-* (no 'rhui-'), so dnf
+# got 403. If a future edit drops the token, dnf cross-major access silently
+# breaks again.
+grep -q 'chain-rhel%s-baseos-rhui-rpms' "${COLLECT}"; assert_eq 0 "$?" "r75: chain baseos repo id carries 'rhui-' (amazon-id identity injection)"
+grep -q 'chain-rhel%s-appstream-rhui-rpms' "${COLLECT}"; assert_eq 0 "$?" "r75: chain appstream repo id carries 'rhui-'"
+
 t_done

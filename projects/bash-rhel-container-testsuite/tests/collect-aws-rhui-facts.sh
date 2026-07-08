@@ -59,7 +59,7 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.1.0"
+RC_TOOL_VERSION="1.1.1"
 RC_CLOUD="aws"   # this collector is AWS-specific; other clouds get sibling scripts
 RC_CMD_TIMEOUT="${RC_CMD_TIMEOUT:-120}"
 
@@ -528,8 +528,11 @@ rc_collect_chain() {
     else
       # CHAIN: use the previous (verified-reachable) target repos to fetch that
       # major's leapp-rhui-aws, extract it, and read the NEXT major's cert out.
+      # The chain-rhel<N>-* repos carry the 'rhui-' token so the amazon-id plugin
+      # attaches the IMDS identity (r75: without it dnf gets 403 - only curl,
+      # which sets the header manually, worked in r74).
       rc_run_long "${hd}" a01-fetch-next-bundle \
-        "dnf -y --releasever ${src} --disablerepo='*' --enablerepo='chain-${src}-*' install --downloadonly --destdir='${hd}/dl' leapp-rhui-aws 2>&1; for r in '${hd}'/dl/*.rpm; do rpm2cpio \"\${r}\" | (cd '${hd}' && cpio -idmu); done 2>&1"
+        "dnf -y --releasever ${src} --disablerepo='*' --enablerepo='chain-rhel${src}-*' install --downloadonly --destdir='${hd}/dl' leapp-rhui-aws 2>&1; for r in '${hd}'/dl/*.rpm; do rpm2cpio \"\${r}\" | (cd '${hd}' && cpio -idmu); done 2>&1"
       bdir="${hd}${bdir_default}"
     fi
     rc_run "${hd}" a02-cert-range "ls -la '${bdir}' 2>&1; echo '--- content certs present ---'; ls '${bdir}'/content-rhel*.crt 2>&1"
@@ -546,18 +549,22 @@ rc_collect_chain() {
     rc_curl_repo_enum "${hd}" "curl-rhel${t}-appstream" "${certT}" "${keyT}" "${url_app}" "${caarg[@]}" "${hdr[@]}"
 
     # --- (2) DNF verification: build-material downloadability -------------------
-    rf="/etc/yum.repos.d/chain-${t}.repo"
+    # r75: the repo IDs MUST contain 'rhui-' - the amazon-id plugin only attaches
+    # the IMDS identity (X-RHUI-ID/SIGNATURE) to repos whose id matches 'rhui-'
+    # (see its _rhui_repos filter). r74 used chain-<t>-* ids without it, so dnf
+    # got 403 while curl (manual headers) got 200.
+    rf="/etc/yum.repos.d/chain-rhel${t}.repo"
     {
-      printf '[chain-%s-baseos]\nname=chain rhel%s baseos\nmirrorlist=%s\nenabled=0\ngpgcheck=0\nsslverify=1\nsslclientcert=%s\nsslclientkey=%s\n' \
+      printf '[chain-rhel%s-baseos-rhui-rpms]\nname=chain rhel%s baseos\nmirrorlist=%s\nenabled=0\ngpgcheck=0\nsslverify=1\nsslclientcert=%s\nsslclientkey=%s\n' \
         "${t}" "${t}" "$(printf '%s' "${tmpl}" | sed -e "s#/rhel[0-9]*/#/rhel${t}/#" -e "s/REGION/${region}/")" "${certT}" "${keyT}"
       [ -n "${ca}" ] && printf 'sslcacert=%s\n' "${ca}"
-      printf '\n[chain-%s-appstream]\nname=chain rhel%s appstream\nmirrorlist=%s\nenabled=0\ngpgcheck=0\nsslverify=1\nsslclientcert=%s\nsslclientkey=%s\n' \
+      printf '\n[chain-rhel%s-appstream-rhui-rpms]\nname=chain rhel%s appstream\nmirrorlist=%s\nenabled=0\ngpgcheck=0\nsslverify=1\nsslclientcert=%s\nsslclientkey=%s\n' \
         "${t}" "${t}" "$(printf '%s' "${tmpl}" | sed -e "s#/rhel[0-9]*/#/rhel${t}/#" -e 's#/baseos/#/appstream/#' -e "s/REGION/${region}/")" "${certT}" "${keyT}"
       [ -n "${ca}" ] && printf 'sslcacert=%s\n' "${ca}"
     } > "${rf}" 2>/dev/null
-    cp -p "${rf}" "${hd}/chain-${t}.repo" 2>/dev/null
+    cp -p "${rf}" "${hd}/chain-rhel${t}.repo" 2>/dev/null
     rc_run_long "${hd}" d01-dnf-downloadonly \
-      "dnf -y --releasever ${t} --disablerepo='*' --enablerepo='chain-${t}-*' install --downloadonly --destdir='${hd}/builddeps' kernel-devel gcc make elfutils-libelf-devel 2>&1; ls -la '${hd}/builddeps' 2>&1"
+      "dnf -y --releasever ${t} --disablerepo='*' --enablerepo='chain-rhel${t}-*' install --downloadonly --destdir='${hd}/builddeps' kernel-devel gcc make elfutils-libelf-devel 2>&1; ls -la '${hd}/builddeps' 2>&1"
 
     verdict="$(sed -n 's/^repomd_http=//p' "${hd}/curl-rhel${t}-baseos-curl-enum.txt" 2>/dev/null | head -1)"
     printf 'target=%s adjacent=%s curl_baseos_repomd_http=%s\n' "${t}" "${adjacent}" "${verdict:-none}" > "${hd}/RESULT.txt"

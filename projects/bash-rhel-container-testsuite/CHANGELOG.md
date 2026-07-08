@@ -13,6 +13,41 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r75] - 2026-07-08 - fix: chain repo IDs need the 'rhui-' token for dnf identity (collector v1.1.1)
+
+### Findings (el8 --chain run, ip-172-31-12-134, ap-northeast-1)
+- **Adjacent cross-major (billing-8 host -> rhel9) content IS authorized.** With
+  content-rhel9 (acquired internally from `leapp-upgrade-el8toel9`) + the IMDS
+  identity headers, curl reached rhel9 baseos (repomd 200, 15384 pkgs) and
+  appstream (repomd 200, 35357 pkgs) - a full package file list built with curl
+  alone, no dnf.
+- **The `amazon-id` plugin injects the IMDS identity ONLY into repos whose id
+  contains `rhui-`** (its `_rhui_repos` filter yields `if 'rhui-' in repo_name`).
+  r74 named the synthesized repos `chain-<t>-*` (no token), so dnf got 403 on the
+  exact repomd that curl (manual headers) got 200 on. This also broke the hop2
+  acquisition (dnf-download of rhel9's leapp-rhui-aws), so content-rhel10 was
+  never obtained and the non-adjacent (8->10) verdict is still open.
+- **The leapp cert chain yields N+1 only** per hop (content-rhel9 on el8),
+  confirmed by the cert-range enumeration - as expected from `el8toel9`.
+
+### Fixed
+- **chain repo IDs now carry `rhui-`** (`chain-rhel<t>-baseos-rhui-rpms`,
+  `chain-rhel<t>-appstream-rhui-rpms`) and the `--enablerepo` globs match, so the
+  amazon-id plugin attaches the identity and dnf cross-major access works. This
+  unblocks both the hop2 content-rhel10 acquisition and the dnf build-dep
+  downloadonly, so a re-run should reach the decisive non-adjacent measurement.
+
+### Changed
+- **`tests/t025_awsrhuicollect.sh`** - +2 regression guards asserting the chain
+  repo IDs keep the `rhui-` token (34 assertions total).
+- **`TESTING.md`** - Recorded baseline refreshed to **665 passed** (25 tiers).
+
+### Notes
+- Practical import for the suite: dnf CAN drive cross-major RHUI repos as long as
+  the repo id contains `rhui-` - no curl-based downloader needed; the existing
+  dnf/yum install path fits. Re-run `sudo bash collect-aws-rhui-facts.sh --chain`
+  on a disposable el8 host to close the non-adjacent (8->10) question.
+
 ## [r74] - 2026-07-08 - feat: leapp cert-chain probe + curl-only repo enumeration (collector v1.1.0)
 
 Motivated by the r73 archive analysis (RHEL 8/9/10, ap-northeast-1): AWS RHUI
