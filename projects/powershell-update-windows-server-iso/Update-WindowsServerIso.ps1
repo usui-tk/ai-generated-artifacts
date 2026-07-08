@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.64'
-$Script:ScriptTag     = 'skip-aware-output-check'
+$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.65'
+$Script:ScriptTag     = 'kind-verify'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -11883,35 +11883,47 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
 # Phase P11: Static verification (Verify group)
 # ============================================================
 
-function Get-KbAliasFromPatchPath {
+function Get-DotNetRollupEvidence {
     <#
     .SYNOPSIS
-        Pure extractor: the CHILD KB id embedded in a patch's file
-        path/name, when it differs from the Line's declared KbId.
+        Pure census: the .NET cumulative package inside a serviced
+        image, from its installed-package name list.
     .DESCRIPTION
-        Microsoft Update Catalog uses a parent/child KB structure for
-        .NET Framework monthly updates: the OS-level KB exists for
-        update-offering only, the downloadable MSU carries the
-        .NET-version-specific child KB, and per Microsoft the OS-level
-        KB "is not expected to be listed as an installed update on the
-        device". Verification against installed package names must
-        therefore also accept the child KB. Returns $null when the
-        path carries no KB id or it equals the declared one.
+        E2E-measured naming (2026-07-08): the .NET monthly cumulative
+        surfaces as 'Package_for_DotNetRollup~...~~10.0.4802.1'
+        (Server 2019/2022) or with a framework suffix
+        'Package_for_DotNetRollup_481~...~~10.0.9335.3' (Server 2025,
+        .NET 4.8.1). NO KB id appears in the name (neither the
+        Catalog's offering KB nor the child MSU KB), so presence +
+        measured version IS the media-level verification for the
+        DotNet Kind. Highest version wins when several match.
     .OUTPUTS
-        System.String (e.g. 'KB5087068') or $null
+        pscustomobject: Present / PackageName / Version (raw string)
     #>
     [CmdletBinding()]
-    [OutputType([string])]
+    [OutputType([pscustomobject])]
     param(
-        [Parameter(Mandatory)] [string]$KbId,
-        [AllowNull()] [AllowEmptyString()] [string]$Path
+        [AllowNull()] [AllowEmptyCollection()] [string[]]$PackageNames
     )
-    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
-    $m = [regex]::Match($Path, '(?i)kb(\d{6,7})')
-    if (-not $m.Success) { return $null }
-    $child = ('KB{0}' -f $m.Groups[1].Value)
-    if ($child -ieq $KbId) { return $null }
-    return $child
+    $best = $null
+    $bestVer = $null
+    foreach ($pn in @($PackageNames)) {
+        if ([string]::IsNullOrWhiteSpace($pn)) { continue }
+        $m = [regex]::Match($pn, '^Package_for_DotNetRollup(_\d+)?~31bf3856ad364e35~amd64~~([0-9.]+)$')
+        if (-not $m.Success) { continue }
+        $vRaw = $m.Groups[2].Value
+        $v = $null
+        try { $v = [version]$vRaw } catch { $null = $_ }
+        if ($null -eq $best -or ($v -and $bestVer -and $v -gt $bestVer) -or ($v -and -not $bestVer)) {
+            $best = $pn
+            $bestVer = $v
+        }
+    }
+    return [pscustomobject]@{
+        Present     = [bool]$best
+        PackageName = $best
+        Version     = $(if ($best) { ($best -split '~~')[-1] } else { $null })
+    }
 }
 
 function Test-LcuTargetApplied {
@@ -12131,34 +12143,50 @@ function Invoke-VerifyPhase11_StaticVerify {
                 $primaryRec = @($postInsp.InstallWim.Indexes) | Select-Object -First 1
                 if ($primaryRec -and -not $primaryRec.ErrorMessage) {
                     $pkgNames = @($primaryRec.PackageNames)
-                    $expectedPairs = @($Script:ResolvedPatches | Where-Object { $_.KbId -ne 'Unknown' } | ForEach-Object {
-                        $aliasSrc = if ($_.PSObject.Properties['LocalPath'] -and $_.LocalPath) { [string]$_.LocalPath } else { [string]$_.Source }
-                        [pscustomobject]@{
-                            KbId  = $_.KbId
-                            Alias = (Get-KbAliasFromPatchPath -KbId $_.KbId -Path $aliasSrc)
+                    # ---- Per-Kind verification [adjudicated 2026-07-08] ----
+                    # E2E-measured (2026-07-08, all 4 OSes): KB ids appear in
+                    # installed package names ONLY on Server 2016. Generic
+                    # Kb_<id> presence rows were structurally Warn-locked on
+                    # the RollupFix-named OSes; verification is per Kind:
+                    #   LCU / Checkpoint -> LcuTargetApplied (measured build)
+                    #   DotNet           -> DotNetRollupApplied (census below)
+                    #   SafeOSDU / SetupDU -> not install.wim idx-1 packages
+                    #                         (WinRE payload / sources files);
+                    #                         excluded here, stated in scope.
+                    Add-VRow -Check 'KindVerificationScope' -Expected 'documented' `
+                        -Actual 'documented' -Status 'Pass' `
+                        -Notes 'LCU/Checkpoint via LcuTargetApplied (measured build); DotNet via DotNetRollupApplied; SafeOSDU (WinRE payload) and SetupDU (sources files) are not verifiable as install.wim packages; Server2016 additionally verifies KB-named packages.'
+
+                    if ($Script:OsVersion -eq 'Server2016') {
+                        # 2016 alone carries KB ids in package names -- the
+                        # presence rows are real signal there and stay.
+                        $expectedKbList = @($Script:ResolvedPatches | Where-Object { $_.KbId -ne 'Unknown' } | ForEach-Object { $_.KbId })
+                        foreach ($kb in $expectedKbList) {
+                            $found = $false
+                            foreach ($pn in $pkgNames) {
+                                # psa-disable-next-line PSA2003 -- $kb is a non-null string from the resolved set
+                                if ($pn -match $kb) { $found = $true; break }
+                            }
+                            if ($found) { $st = 'Pass'; $actualStr = 'Present' }
+                            else        { $st = 'Warn'; $actualStr = 'Absent' }
+                            Add-VRow -Check ('Kb_' + $kb) -Expected 'Present' `
+                                -Actual $actualStr -Status $st `
+                                -Notes ('install.wim idx ' + $primaryRec.Index + '; Server2016 packages are KB-named')
                         }
-                    })
-                    foreach ($pair in $expectedPairs) {
-                        $kb = $pair.KbId
-                        $found = $false; $matchedBy = $null
-                        foreach ($pn in $pkgNames) {
-                            # psa-disable-next-line PSA2003 -- $kb is a non-null string from the resolved set
-                            if ($pn -match $kb) { $found = $true; $matchedBy = $kb; break }
-                            if ($pair.Alias -and ($pn -match $pair.Alias)) { $found = $true; $matchedBy = $pair.Alias; break } # psa-disable-line PSA2003 -- $pair.Alias is null-guarded by the preceding -and
+                    }
+
+                    $dotNetExpected = @($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'DotNet' })
+                    if ($dotNetExpected.Count -ge 1) {
+                        $dotNetEv = Get-DotNetRollupEvidence -PackageNames $pkgNames
+                        if ($dotNetEv.Present) {
+                            Add-VRow -Check 'DotNetRollupApplied' -Expected 'Present' `
+                                -Actual 'Present' -Status 'Pass' `
+                                -Notes ('install.wim idx ' + $primaryRec.Index + '; ' + $dotNetEv.PackageName + ' (version ' + $dotNetEv.Version + '); NOTE: .NET cumulative package names carry no KB id')
+                        } else {
+                            Add-VRow -Check 'DotNetRollupApplied' -Expected 'Present' `
+                                -Actual 'Absent' -Status 'Warn' `
+                                -Notes ('install.wim idx ' + $primaryRec.Index + '; a DotNet Line was resolved but no Package_for_DotNetRollup* package is visible; P07 apply status is the authoritative failure signal')
                         }
-                        if ($found) { $st = 'Pass'; $actualStr = 'Present' }
-                        else        { $st = 'Warn'; $actualStr = 'Absent' }
-                        $kbNotes = 'install.wim idx ' + $primaryRec.Index + '; note: RollupFix-named OSes never carry KB ids in package names'
-                        if ($pair.Alias) {
-                            # Catalog parent/child structure (.NET): the OS-level
-                            # KB is offering-only; the installed package carries
-                            # the child KB from the MSU file name.
-                            $kbNotes += ('; child KB alias {0} accepted' -f $pair.Alias)
-                            if ($matchedBy -and $matchedBy -eq $pair.Alias) { $kbNotes += ' (matched via alias)' }
-                        }
-                        Add-VRow -Check ('Kb_' + $kb) -Expected 'Present' `
-                            -Actual $actualStr -Status $st `
-                            -Notes $kbNotes
                     }
                     # TargetBuildAfterUpdate hard check [DECIDED 2026-07-02,
                     # user]: per-OS evidence comparator. Runs only
@@ -12171,7 +12199,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                         $pbLcu = @($Script:OsProfile.PatchBaseline.Lines |
                             Where-Object { $_.Kind -eq 'LCU' -and $_.KbId })
                     }
-                    $expectedKbIds = @($expectedPairs | ForEach-Object { $_.KbId })
+                    $expectedKbIds = @($Script:ResolvedPatches | Where-Object { $_.KbId -ne 'Unknown' } | ForEach-Object { $_.KbId })
                     if ($pbLcu.Count -ge 1 -and ($expectedKbIds -contains $pbLcu[0].KbId)) {
                         $tbauExpected = ''
                         if ($Script:OsProfile.PatchBaseline.PSObject.Properties['TargetBuildAfterUpdate']) {

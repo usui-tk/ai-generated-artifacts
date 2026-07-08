@@ -22,6 +22,42 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.08-r11.65] - 2026-07-08
+
+Tag: `kind-verify`. The 2026-07-08 E2E measured the premise of P11's
+generic Kb_<id> presence rows out of existence: KB ids appear in
+installed package names ONLY on Server 2016. The .NET cumulative
+surfaces as `Package_for_DotNetRollup~~10.0.4802.1` (2019/2022) /
+`Package_for_DotNetRollup_481~~10.0.9335.3` (2025) -- no KB id,
+neither the offering KB nor the child MSU KB -- so the r11.60 alias
+mechanism had no name to match, and SafeOSDU/SetupDU/Checkpoint never
+surface as install.wim idx-1 packages at all. The rows were
+structurally Warn-locked on 3 of 4 OSes [adjudicated 2026-07-08].
+
+### Changed
+
+- **P11 verifies per Kind**: a `KindVerificationScope` row documents
+  the mapping (LCU/Checkpoint via `LcuTargetApplied` measured build;
+  DotNet via the new census; SafeOSDU = WinRE payload and SetupDU =
+  sources files are not verifiable as install.wim packages and are
+  excluded); new pure `Get-DotNetRollupEvidence` census (suffix-aware,
+  highest version wins) feeds a `DotNetRollupApplied` row (Pass with
+  package name + measured version / Warn when a DotNet Line resolved
+  but no package is visible); generic `Kb_<id>` rows survive ONLY on
+  Server 2016, where package names are KB-named and the rows are real
+  signal.
+- **`Get-KbAliasFromPatchPath` removed entirely** (no shims): with
+  name-based KB matching retired on RollupFix OSes it had no caller.
+  The DotNet-only KbId/FileName divergence audit REMAINS in T38 as a
+  committed-data fact guard (the Catalog parent/child structure).
+
+### Tests
+
+- T38 reworked to 31 assertions: DotNet census REPL matrix (plain +
+  `_481` + absent), scope/census wiring pins, Kb_ rows pinned behind
+  the Server2016 guard, alias-extractor-gone pin.
+
+
 ## [update-wsi-2026.07.08-r11.64] - 2026-07-08
 
 Tag: `skip-aware-output-check`. The 2026-07-08 Server 2025 E2E ended

@@ -23,8 +23,9 @@ Layers:
      extraction (.NET offering KB vs installed child KB).
   5. Data audit: across all four committed configs, a KbId that
      differs from the KB embedded in FileName occurs ONLY on
-     Kind=DotNet Lines (the verified parent/child structure); any
-     other divergence fails the audit and forces investigation.
+     Kind=DotNet Lines (the verified Catalog parent/child structure --
+     a documented data fact even though name-based KB matching was
+     retired in r11.65); any other divergence forces investigation.
   6. Structure pins: P06 writes inspection_pre.json; P11 emits the
      SHA-256 content-identity rows, writes inspection_post.json, and
      derives Kb/TBAU from measured evidence; P13 diffs + cross-checks;
@@ -188,16 +189,24 @@ def main() -> int:
                      fdb.get("Level") == "Warning" and "redundant" in fdb.get("Message", ""),
                      f"{fdb.get('Message','')[:90]!r}", p, f)
 
-        print("=== 4. Get-KbAliasFromPatchPath (Catalog parent/child KB) ===")
-        got = ps.invoke("Get-KbAliasFromPatchPath", KbId="KB5088862",
-                        Path="D:\\patches\\Server2022\\dotnet\\windows10.0-kb5087068-x64-ndp48_abc.msu")
-        p, f = check("parent KbId + child file -> child alias",
-                     got == "KB5087068", f"got={got!r}", p, f)
-        got = ps.invoke("Get-KbAliasFromPatchPath", KbId="KB5094128",
-                        Path="windows10.0-kb5094128-x64_f2fe.msu")
-        p, f = check("matching KB ids -> no alias", got is None, f"got={got!r}", p, f)
-        got = ps.invoke("Get-KbAliasFromPatchPath", KbId="KB5094128", Path="")
-        p, f = check("empty path -> no alias", got is None, f"got={got!r}", p, f)
+        print("=== 4. Get-DotNetRollupEvidence (per-Kind census, r11.65) ===")
+        wsus = "31bf3856ad364e35"
+        got = ps.invoke("Get-DotNetRollupEvidence",
+                        PackageNames=[f"Package_for_DotNetRollup~{wsus}~amd64~~10.0.4802.1",
+                                      f"Package_for_RollupFix~{wsus}~amd64~~20348.5256.1.13"])
+        p, f = check("plain DotNetRollup name (2019/2022 shape) detected",
+                     got.get("Present") is True and got.get("Version") == "10.0.4802.1",
+                     f"got={got!r}"[:100], p, f)
+        got = ps.invoke("Get-DotNetRollupEvidence",
+                        PackageNames=[f"Package_for_DotNetRollup_481~{wsus}~amd64~~10.0.9335.3"])
+        p, f = check("suffixed _481 name (Server 2025 shape) detected",
+                     got.get("Present") is True and got.get("Version") == "10.0.9335.3",
+                     f"got={got!r}"[:100], p, f)
+        got = ps.invoke("Get-DotNetRollupEvidence",
+                        PackageNames=[f"Package_for_RollupFix~{wsus}~amd64~~26100.4652.1.24"])
+        p, f = check("no DotNetRollup package -> Present False",
+                     got.get("Present") is False and got.get("Version") is None,
+                     f"got={got!r}"[:100], p, f)
 
     print("=== 5. Data audit: KbId/FileName divergence is DotNet-only ===")
     import glob as _glob
@@ -232,9 +241,18 @@ def main() -> int:
     p, f = check("readiness inventory records the install.wim _EX census (fallback source)",
                  "InstallHasEfiExDir" in code and "InstallHasBootMgrFwEx" in code,
                  "wired", p, f)
-    p, f = check("P11 Kb rows accept the Catalog child-KB alias",
-                 re.search(r"Get-KbAliasFromPatchPath\s+-KbId", code) is not None,
-                 "alias wired", p, f)
+    p, f = check("P11 verifies per Kind (r11.65): scope row + DotNet census wired",
+                 "KindVerificationScope" in code
+                 and re.search(r"Get-DotNetRollupEvidence\s+-PackageNames", code) is not None
+                 and "DotNetRollupApplied" in code,
+                 "wired", p, f)
+    p, f = check("generic Kb_ rows survive ONLY behind the Server2016 guard",
+                 re.search(r"OsVersion -eq 'Server2016'[\s\S]{0,900}Add-VRow -Check \('Kb_' \+ \$kb\)", code) is not None
+                 and code.count("Add-VRow -Check ('Kb_' + $kb)") == 1,
+                 "2016-only", p, f)
+    p, f = check("the alias extractor is fully removed (no shims)",
+                 "Get-KbAliasFromPatchPath" not in code,
+                 "gone", p, f)
     p, f = check("PCA2023 conversion carries the install.wim fallback source (r11.62)",
                  "PCA2023 source FALLBACK" in code
                  and re.search(r"Label\s*=\s*'install\.wim'", code) is not None
