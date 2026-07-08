@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.07-r11.62'
-$Script:ScriptTag     = 'pca2023-fallback-source'
+$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.63'
+$Script:ScriptTag     = 'fallback-health-wording'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -9764,9 +9764,19 @@ function Get-Pca2023ReadinessSnapshot {
     } elseif ($isPca2023) {
         $health = 'Healthy'
         $reasons.Add('bootx64.efi is signed via the "Windows UEFI CA 2023" certificate chain. ISO can boot under PCA2023-only Secure Boot firmware (post 2026-06 cert refresh).') | Out-Null
-        if (-not $hasEfiEx) {
+        if (-not $hasEfiEx -and $hasInstallEfiEx) {
+            # The install.wim-fallback configuration (2026-07-08 E2E,
+            # Server 2019): the media was converted from the serviced
+            # install.wim because boot.wim is unserviceable on this OS
+            # and never receives the _EX staging. Expected shape, not a
+            # custom build. Stays Warning until the mixed configuration
+            # (2023 boot manager + as-shipped WinPE) is proven by a
+            # Secure Boot boot test [deferred adjudication 2026-07-08].
             $health = 'Warning'
-            $reasons.Add('PCA2023 signer detected but EFI_EX staging directory is missing - boot.wim may be a custom media build. Future maintenance flows may not detect the EFI_EX scaffolding.') | Out-Null
+            $reasons.Add('PCA2023 signer present; boot.wim carries no EFI_EX staging (unserviceable on this OS) while install.wim does -- the install.wim-FALLBACK conversion shape. Boot-manager signing is done; the 2023-bootmgr + as-shipped-WinPE combination awaits a Secure Boot boot test for final proof.') | Out-Null
+        } elseif (-not $hasEfiEx) {
+            $health = 'Warning'
+            $reasons.Add('PCA2023 signer detected but neither boot.wim nor install.wim carries the EFI_EX staging - the media may be a custom build. Future maintenance flows may not detect the EFI_EX scaffolding.') | Out-Null
         }
     } elseif ($isPca2011 -and $hasEfiEx) {
         $health = 'Warning'

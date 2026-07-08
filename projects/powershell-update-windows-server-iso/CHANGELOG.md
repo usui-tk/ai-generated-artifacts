@@ -22,6 +22,26 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.08-r11.63] - 2026-07-08
+
+Tag: `fallback-health-wording`. The 2026-07-08 4-OS E2E proved the
+Server 2019 rescue end to end (P10 fallback converted from
+install.wim; the output ISO's bootx64.efi verifies against the
+"Windows UEFI CA 2023" chain), but the readiness health text then
+described that exact shape as "boot.wim may be a custom media build".
+
+### Changed
+
+- Health classification gains a dedicated branch for the
+  install.wim-fallback shape (PCA2023 signer + no boot.wim `_EX` +
+  install.wim `_EX` present): the reason now states the fallback
+  conversion accurately. Health stays **Warning** by adjudication
+  (2026-07-08): the 2023-boot-manager + as-shipped-WinPE combination
+  is upgraded to Healthy only after a Secure Boot boot test proves
+  it; the neither-image wording is kept for the genuine custom-build
+  case.
+
+
 ## [update-wsi-2026.07.07-r11.62] - 2026-07-07
 
 Tag: `pca2023-fallback-source`. Second half of the Server 2019
