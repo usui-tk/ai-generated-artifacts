@@ -62,6 +62,17 @@ assert_eq "8"  "$(rc_leapp_target 7)" "leapp target: 7 -> 8"
 rc_leapp_target 10 >/dev/null 2>&1; assert_eq 1 "$?" "leapp target: 10 has no N+1 -> rc 1"
 rc_leapp_target 6  >/dev/null 2>&1; assert_eq 1 "$?" "leapp target: 6 has no leapp -> rc 1"
 
+# --- rc_chain_list (the r74 downstream acquire-chain) -------------------------
+assert_eq "9 10" "$(rc_chain_list 8)" "chain: 8 -> '9 10' (two hops)"
+assert_eq "10"   "$(rc_chain_list 9)" "chain: 9 -> '10' (one hop)"
+assert_eq ""     "$(rc_chain_list 10)" "chain: 10 -> '' (no downstream)"
+assert_eq "8 9 10" "$(rc_chain_list 7)" "chain: 7 -> '8 9 10' (three hops)"
+
+# --- r74 collectors/helpers are wired ----------------------------------------
+for fn in rc_collect_chain rc_curl_repo_enum rc_count_packages rc_run_long; do
+  if declare -F "${fn}" >/dev/null 2>&1; then t_pass "defined: ${fn}"; else t_fail "missing: ${fn}"; fi
+done
+
 # --- rc_rhui_major_url (cross-major URL synthesis) ----------------------------
 # shellcheck disable=SC2016  # $releasever/$basearch are literal template tokens the helper rewrites
 TMPL='https://rhui.REGION.aws.ce.redhat.com/pulp/mirror/content/dist/rhel10/rhui/$releasever/$basearch/os'

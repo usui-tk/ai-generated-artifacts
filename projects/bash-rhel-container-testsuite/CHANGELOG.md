@@ -13,6 +13,58 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r74] - 2026-07-08 - feat: leapp cert-chain probe + curl-only repo enumeration (collector v1.1.0)
+
+Motivated by the r73 archive analysis (RHEL 8/9/10, ap-northeast-1): AWS RHUI
+authorizes per-major - each host ships ONLY its own major's cert, and that cert
+returns repomd 200 for its own major and 403 for every other (rhel99 control
+403). The RHUI certs/keys are generic package content (`rh-amazon-rhui-client`),
+not customer secrets; and `leapp-rhui-aws` bundles the N+1 major's cert. Open
+question: does a billing-N host authorize NON-adjacent content when presenting
+that major's cert? This release adds the probe to measure it.
+
+### Added
+- **`collect-aws-rhui-facts.sh --chain`** - walks the leapp acquire-chain
+  (8 -> 9 -> 10) using ONLY internal resources: install `leapp-upgrade-elNtoelT`
+  (host repos serve it; it bundles content-rhelT), then at each hop use the
+  previous, verified-reachable target repos to fetch that major's
+  `leapp-rhui-aws` and extract the NEXT major's cert - no self-managed keys, no
+  external material. At every hop it measures whether that major's content is
+  authorized from THIS billing-<major> host, two independent ways:
+  - **curl + cert only** (`rc_curl_repo_enum`): follow mirrorlist -> repomd.xml
+    -> primary metadata and BUILD the package file list without dnf, recording
+    the HTTP status at each layer and the package count. The repomd_http field
+    is the authorization verdict; the non-adjacent hop (billing-8 -> rhel10) is
+    the decisive datum.
+  - **dnf --downloadonly** of the build deps (`kernel-devel gcc make
+    elfutils-libelf-devel`) against a synthesized `chain-<t>-*` repo, with the
+    amazon-libdnf plugin adding the IMDS identity.
+  Pure helper `rc_chain_list` (8 -> "9 10", etc.) and `rc_run_long`/
+  `rc_count_packages` support it. `--chain` implies `--no-leapp` (it subsumes
+  the leapp work) and NEVER runs `leapp upgrade` (t025 static guard unchanged).
+- **`tests/t025_awsrhuicollect.sh`** - +8 assertions: `rc_chain_list` for all
+  majors and presence of the r74 collectors/helpers (now 32 assertions).
+
+### Fixed
+- **leapp preupgrade install gap (r73)** - r73 installed only `leapp-rhui-aws`,
+  so the `leapp` CLI was absent and `leapp preupgrade` returned rc 127 (observed
+  in the el8/el9 archives). The install now pulls `leapp-upgrade-el<N>toel<N+1>`,
+  which brings the engine and the RHUI integration together.
+
+### Changed
+- **`TESTING.md`** - Recorded baseline refreshed to **663 passed** (25 tiers
+  unchanged; no new files); t025 description notes the chain assertions.
+
+### Notes
+- FT (sandbox): shellcheck `-S style` 0 findings, `bash -n` clean, full gate
+  green (663/0/0, 25 tiers), `--chain` end-to-end run (graceful skip + tar.gz on
+  a non-RHUI host, `--chain` correctly suppresses the leapp section), and the
+  curl-only enumeration validated end-to-end against a local fake repo
+  (mirrorlist -> repomd -> primary -> package_count=3). The real measurement -
+  run `sudo bash collect-aws-rhui-facts.sh --chain` on a disposable el8 host -
+  is operator E2E; the non-adjacent repomd verdict decides whether one host can
+  serve every major's build material.
+
 ## [r73] - 2026-07-08 - feat: standalone AWS-RHUI fact collector (RHUI-entitlement investigation)
 
 ### Added

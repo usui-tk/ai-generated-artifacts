@@ -126,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 655 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 663 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -384,7 +384,10 @@ so results are host-independent and deterministic.
   MUTATION GUARD asserting the collector never invokes `leapp upgrade` (only
   `preupgrade`) - the non-destructive dry-run promise is machine-enforced. The
   side-effecting collectors, cert/key copy, and tar.gz packing are operator
-  E2E on a real RHUI EC2 host, not L1.
+  E2E on a real RHUI EC2 host, not L1. r74 adds `rc_chain_list` assertions
+  (8 -> "9 10", etc.) and presence checks for the `--chain` probe helpers
+  (`rc_collect_chain`/`rc_curl_repo_enum`/`rc_count_packages`/`rc_run_long`);
+  32 assertions total.
 
 ---
 
@@ -595,8 +598,8 @@ The full suite is green in the planning sandbox:
 ---- t022_ssmunavailable.sh ----   ## RESULT pass=17 fail=0 skip=0
 ---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
----- t025_awsrhuicollect.sh ----   ## RESULT pass=24 fail=0 skip=0
-SUITE: 655 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+---- t025_awsrhuicollect.sh ----   ## RESULT pass=32 fail=0 skip=0
+SUITE: 663 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 **L0 fixed count = 51 shell files** (every `.sh` in the project, incl. the 3 root
