@@ -13,6 +13,61 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r83] - 2026-07-11 - feat: collector v1.7.0 - E0-follow paired host<->container auth matrix + signature TTL; absolute archive path
+
+The first E0 run (r82, three hosts) settled the authorization model but
+exposed one gap and one operator request:
+- U1: RHUI requires the TLS client cert AND the signed instance-identity
+  headers (cert-only = 403, all three majors identical).
+- U2: a bridged container cannot reach IMDS (hop limit 1) - it timed out.
+- U3: the container's dnf failed, but the in-container cert-only diagnostic
+  curl returned 200 while the SAME cert-only curl from the host returned
+  403. That host<->container discrepancy was never measured deliberately -
+  the probes took host and container readings in separate sections, never
+  as a pair.
+Design direction chosen by the operator: pursue B" (host generates the
+identity headers ONCE, injects them statically into the container's dnf),
+and add a host<->container comparison axis to EVERY authorization reading
+so the containerization delta is legible. Explicitly NOT simplified: the
+chain-reachable majors are still measured; whether to narrow the design to
+same-major-only is deferred to the collected data.
+
+### Added
+- **`--hostvscontainer`** (`rc_collect_hostvscontainer` / `rc_hvc_container_cell`)
+  - the SAME four credential cells (cert+headers / cert-only / headers-only /
+  none) measured FROM THE HOST and FROM A UBI CONTAINER, per major (own +
+  every chain major), written adjacent in `PAIRED-rhel<N>.txt`. The headers
+  are generated once on the host and passed to the container as a static
+  `-H` file (`bundle/headers.curl`) - the exact B" injection the suite would
+  use, measured here for feasibility. Chain-major certs come from the proven
+  forward chain (`rc_acquire_forward_certs`). This resolves the r82 cert-only
+  discrepancy by putting both readings in one table.
+- **`--sigttl`** (`rc_collect_sigttl`) - freezes ONE host-generated signature
+  and re-tests own-major repomd acceptance at t=0/5/15/30/60m
+  (`RC_SIGTTL_OFFSETS` overrides). This is the one parameter B" hinges on:
+  how long a reused signature stays accepted. Long-running (~60m default),
+  hence its own flag.
+
+### Changed
+- **The emitted archive path is now ABSOLUTE** (operator request): the final
+  stdout line and the "done:" log resolve `./name.tar.gz` to a full path via
+  `cd "$(dirname)"`+`pwd`, copy-paste ready for scp. Falls back to the
+  relative form only if the directory cannot be resolved.
+- Collector v1.6.0 -> **v1.7.0**.
+
+### Notes
+- t025 -> 118 assertions (23 new r83, incl. hermetic skip checks and the
+  abs-path emission). TESTING.md baseline 749. Gate 749/0/0 (25 tiers),
+  shellcheck -S style clean, bash -n clean, doc-gate PASS. FT this session:
+  the in-container cell script assembly (stubbed podman) and the abs-path
+  emission were exercised in the sandbox; the paired matrix and TTL run on
+  a real RHUI host (operator).
+- Operator next step: on disposable el8/el9/el10 hosts run
+  `sudo bash collect-aws-rhui-facts.sh --hostvscontainer` (and, on at least
+  one, `--sigttl`). Verdicts: `hostvscontainer/PAIRED-rhel<N>.txt` (host row
+  vs container row per cell), `sigttl/SIGTTL.txt` (acceptance vs age). The
+  same-major-vs-chain design decision follows from these.
+
 ## [r82] - 2026-07-11 - feat: collector v1.6.0 - phase-E E0 probes (auth matrix + in-container synthesized-repo dnf)
 
 Phase E opened (operator-adjudicated design, 2026-07-11): run the suite's

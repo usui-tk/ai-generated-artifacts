@@ -126,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 726 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 749 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -411,8 +411,12 @@ so results are host-independent and deterministic.
   container), the four authmatrix credential cells + the RPM-body layer, a
   hermetic cell-record shape check, containerprobe scoping
   (`--disablerepo=* --enablerepo=rhui-e0-*`, in-container IMDS token PUT,
-  ENA build-dep payload), and the E0 flags being off by default;
-  95 assertions total.
+  ENA build-dep payload), and the E0 flags being off by default; r83 adds
+  the E0-follow invariants: the paired host<->container four-cell auth matrix
+  (both sides measured, own major AND every chain major - not simplified),
+  the B" static header-injection file (host-generated, container-consumed),
+  the signature-TTL freeze/re-test schedule, hermetic skip on non-RHUI
+  hosts, and the absolute archive-path emission; 118 assertions total.
 
 ---
 
@@ -624,7 +628,7 @@ The full suite is green in the planning sandbox:
 ---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
 ---- t025_awsrhuicollect.sh ----   ## RESULT pass=39 fail=0 skip=0
-SUITE: 726 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 749 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 **L0 fixed count = 51 shell files** (every `.sh` in the project, incl. the 3 root

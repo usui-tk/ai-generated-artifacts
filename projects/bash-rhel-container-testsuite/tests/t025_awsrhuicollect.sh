@@ -284,6 +284,61 @@ grep -q 'do_authmx=0 do_ctr=0' "${COLLECT}"; assert_eq 0 "$?" "r82 flags: E0 pro
 grep -q -- '--authmatrix)    do_authmx=1' "${COLLECT}"; assert_eq 0 "$?" "r82 flags: --authmatrix wired"
 grep -q -- '--containerprobe) do_ctr=1' "${COLLECT}"; assert_eq 0 "$?" "r82 flags: --containerprobe wired"
 
+# --- r83: E0-follow probes wired (hostvscontainer + sigttl) --------------------
+for fn in rc_collect_hostvscontainer rc_hvc_container_cell rc_collect_sigttl; do
+  if declare -F "${fn}" >/dev/null 2>&1; then t_pass "r83 defined: ${fn}"; else t_fail "r83 missing: ${fn}"; fi
+done
+
+# --- r83: hostvscontainer measures the SAME four cells on BOTH sides ----------
+for cell in 'cert+headers' 'cert-only' 'headers-only' 'none'; do
+  if grep -q "rc_authmatrix_cell \"\${paired}\" \"host ${cell}" "${COLLECT}"; then
+    t_pass "r83 hvc: host '${cell}' cell present"
+  else
+    t_fail "r83 hvc: host '${cell}' cell missing"
+  fi
+  if grep -q "rc_hvc_container_cell \"\${img}\" \"\${paired}\" \"${cell}" "${COLLECT}"; then
+    t_pass "r83 hvc: container '${cell}' cell present"
+  else
+    t_fail "r83 hvc: container '${cell}' cell missing"
+  fi
+done
+
+# --- r83: chain-reachable majors are STILL measured (no simplification) --------
+# shellcheck disable=SC2016  # the loop expression is asserted LITERALLY in the source
+grep -q 'for t in ${major} $(rc_chain_list "${major}")' "${COLLECT}"
+assert_eq 0 "$?" "r83 hvc: own major AND every chain major measured (network not simplified)"
+
+# --- r83: B" static header injection - headers generated on HOST, fed by file --
+grep -q 'headers.curl' "${COLLECT}"; assert_eq 0 "$?" "r83 hvc: static header file (host-generated, container-consumed)"
+grep -q 'X-RHUI-ID' "${COLLECT}";   assert_eq 0 "$?" "r83 hvc: identity headers assembled"
+
+# --- r83: sigttl freezes ONE generation and re-tests over offsets -------------
+grep -q 'RC_SIGTTL_OFFSETS:-0 300 900 1800 3600' "${COLLECT}"
+assert_eq 0 "$?" "r83 sigttl: default offset schedule 0/5/15/30/60m"
+grep -q 'frozen_at=' "${COLLECT}"; assert_eq 0 "$?" "r83 sigttl: single frozen generation re-tested (TTL measurement)"
+
+# --- r83: hvc/sigttl on a non-RHUI host skip cleanly (hermetic) ---------------
+hvcd="$(mktemp -d)"
+rc_collect_hostvscontainer "${hvcd}" 8 2>/dev/null
+grep -q 'redhat-rhui.repo absent' "${hvcd}/hostvscontainer/SKIPPED.txt"
+assert_eq 0 "$?" "r83 hvc: clean skip when not an RHUI host"
+rc_collect_sigttl "${hvcd}" 8 2>/dev/null
+grep -q 'redhat-rhui.repo absent' "${hvcd}/sigttl/SKIPPED.txt"
+assert_eq 0 "$?" "r83 sigttl: clean skip when not an RHUI host"
+rm -rf "${hvcd}"
+
+# --- r83: flags wired, off by default -----------------------------------------
+grep -q 'do_hvc=0 do_sigttl=0' "${COLLECT}"; assert_eq 0 "$?" "r83 flags: E0-follow probes OFF by default"
+grep -q -- '--hostvscontainer) do_hvc=1' "${COLLECT}"; assert_eq 0 "$?" "r83 flags: --hostvscontainer wired"
+grep -q -- '--sigttl)        do_sigttl=1' "${COLLECT}"; assert_eq 0 "$?" "r83 flags: --sigttl wired"
+
+# --- r83: the emitted archive path is ABSOLUTE (operator request) -------------
+# shellcheck disable=SC2016  # asserting the literal source line, not expanding here
+grep -q 'abs_archive="$(cd "$(dirname "${archive}")"' "${COLLECT}"
+assert_eq 0 "$?" "r83 emit: archive path resolved to absolute"
+grep -q 'abs_archive}"$' "${COLLECT}"
+assert_eq 0 "$?" "r83 emit: absolute path is what's printed to stdout"
+
 # --- REGRESSION GUARD (r78): the chain probe is curl-native (no dnf) ----------
 # The chain must acquire/measure via curl only. If a future edit reintroduces a
 # dnf-driven chain step, cross-major breaks again (dnf failed three ways: 403,

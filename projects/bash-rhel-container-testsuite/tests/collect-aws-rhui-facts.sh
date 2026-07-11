@@ -77,7 +77,7 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.6.0"
+RC_TOOL_VERSION="1.7.0"
 # Packages whose <package> XML slices survive the primary-blob slimming
 # (alternation for one POSIX-awk pass; fixed names, no regex metacharacters).
 RC_SLIM_WL="kernel-devel|gcc|make|elfutils-libelf-devel|leapp-rhui-aws"
@@ -1191,6 +1191,184 @@ rc_collect_containerprobe() {
 }
 
 #------------------------------------------------------------------------------
+# E0-follow probes (r83): the phase-E design turns on ONE comparison the prior
+# probes never made side by side - the SAME authorization question asked from
+# the HOST and from a CONTAINER, per major, so the delta introduced by
+# containerization is legible in a single table. It also measures the one
+# parameter the B" static-injection design hinges on: how long a
+# host-generated instance-identity signature stays accepted (TTL). Nothing is
+# simplified here - the chain-reachable majors are still measured; the
+# host-vs-container axis is ADDED, and the simplification decision is left to
+# the collected data.
+#------------------------------------------------------------------------------
+
+# rc_hvc_container_cell IMG OUT LABEL URL CERTDIR CERTBASE SEND_CERT HDRFILE -
+# run ONE auth-matrix cell INSIDE a UBI container: mirrorlist GET then repomd
+# GET, with the credential combination selected by SEND_CERT (1=present) and
+# HDRFILE (a file of curl -H args to include, empty=none). The bundle dir is
+# mounted read-only at /run/rhui-e0; HDRFILE lives there too. One line to OUT.
+rc_hvc_container_cell() {
+  local img="$1" out="$2" label="$3" url="$4" send_cert="$5" hdrfile="$6"
+  local cargs='' hargs=''
+  [ "${send_cert}" = 1 ] && cargs='--cert /run/rhui-e0/CERT.crt --key /run/rhui-e0/CERT.key --cacert /run/rhui-e0/cdn.redhat.com-chain.crt'
+  [ -n "${hdrfile}" ] && hargs="$(cat "${hdrfile}" 2>/dev/null)"
+  # The whole measurement runs in-container; only the two HTTP codes escape.
+  # shellcheck disable=SC2016  # $-expansions are for the in-container shell
+  local script='
+    ml="$(curl -sS -m 20 '"${cargs} ${hargs}"' -w "\n__H__%{http_code}" "'"${url}"'" 2>/dev/null)"
+    mlc="${ml##*__H__}"
+    first="$(printf "%s\n" "${ml}" | grep -Eo "https?://[^[:space:]]+" | grep -v __H__ | head -1)"
+    if [ -n "${first}" ]; then
+      rmc="$(curl -sS -m 20 -o /dev/null -w "%{http_code}" '"${cargs} ${hargs}"' "${first%/}/repodata/repomd.xml" 2>/dev/null)"
+    else rmc="no-mirror"; fi
+    printf "container %s: mirrorlist_http=%s repomd_http=%s\n" "'"${label}"'" "${mlc:-000}" "${rmc}"
+  '
+  podman run --rm -v "${RC_HVC_BUNDLE}:/run/rhui-e0:ro,Z" "${img}" sh -c "${script}" >> "${out}" 2>/dev/null
+}
+
+# rc_collect_hostvscontainer OUTDIR MAJOR - the paired host<->container auth
+# matrix. For the own major AND every chain-reachable major: measure the four
+# credential cells FROM THE HOST (reusing rc_authmatrix_cell) and the SAME four
+# cells FROM A UBI CONTAINER (rc_hvc_container_cell), writing them adjacent in
+# one PAIRED.txt per major so the container delta is a one-line read. The
+# headers are generated ONCE on the host (the container cannot reach IMDS - U2,
+# r82) and passed in as a static -H file: this is exactly the B" injection the
+# suite would use, measured here for feasibility. Chain-major certs come from
+# the proven forward chain (rc_acquire_forward_certs).
+rc_collect_hostvscontainer() {
+  local out="$1/hostvscontainer" major="$2"
+  local repo=/etc/yum.repos.d/redhat-rhui.repo sec tmpl ca region caarg=()
+  local id_doc id_sig hdrfile bundle img t url paired ca_src
+  local cert_own key_own
+  mkdir -p "${out}"
+  [ -f "${repo}" ] || { echo "skipped: ${repo} absent" > "${out}/SKIPPED.txt"; return 0; }
+  sec="$(awk '/^\[rhel-[0-9]+-baseos-rhui-rpms\]/{f=1;next} /^\[/{f=0} f' "${repo}")"
+  tmpl="$(printf '%s\n' "${sec}" | sed -n 's/^mirrorlist=//p' | head -1)"
+  cert_own="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientcert=//p' | head -1)"
+  key_own="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientkey=//p' | head -1)"
+  ca="$(printf '%s\n' "${sec}" | sed -n 's/^sslcacert=//p' | head -1)"
+  region="$(rc_imds_get meta-data/placement/region)"
+  { [ -n "${tmpl}" ] && [ -n "${region}" ] && [ -f "${cert_own}" ]; } \
+    || { echo "skipped: template/region/cert unavailable" > "${out}/SKIPPED.txt"; return 0; }
+  [ -n "${ca}" ] && [ -f "${ca}" ] && caarg=(--cacert "${ca}")
+
+  # preflight podman (disposable host contract).
+  command -v podman >/dev/null 2>&1 \
+    || rc_run_long "${out}" h00-install-podman 'dnf -y install podman 2>&1 || yum -y install podman 2>&1'
+  command -v podman >/dev/null 2>&1 || { echo "podman unavailable" > "${out}/ABORTED.txt"; return 0; }
+
+  # Generate the identity headers ONCE on the host -> a static -H file the
+  # container consumes (B" injection). Also record the raw doc/sig for TTL.
+  id_doc="$(rc_imds_get dynamic/instance-identity/document)"
+  id_sig="$(rc_imds_get dynamic/instance-identity/signature)"
+  bundle="${out}/bundle"; mkdir -p "${bundle}"; RC_HVC_BUNDLE="${bundle}"
+  hdrfile="${bundle}/headers.curl"
+  if [ -n "${id_doc}" ] && [ -n "${id_sig}" ]; then
+    printf -- '-H "X-RHUI-ID: %s" -H "X-RHUI-SIGNATURE: %s"' \
+      "$(printf '%s' "${id_doc}" | rc_b64url)" \
+      "$(printf '%s' "${id_sig}" | rc_b64url)" > "${hdrfile}"
+    printf '%s' "${id_doc}" > "${bundle}/identity-document.json"
+    printf 'headers_generated_at=%s\n' "$(date -u '+%Y%m%dT%H%M%SZ')" > "${out}/headers-meta.txt"
+  else
+    : > "${hdrfile}"
+    printf 'identity_headers=UNAVAILABLE (expect 403s)\n' > "${out}/headers-meta.txt"
+  fi
+  # cdn chain into the bundle for the container cert cells.
+  ca_src="${ca}"; [ -f "${ca_src}" ] && cp -p "${ca_src}" "${bundle}/cdn.redhat.com-chain.crt"
+
+  # own-major certs verbatim; chain majors via the proven forward chain.
+  cp -p "${cert_own}" "${bundle}/content-rhel${major}.crt" 2>/dev/null
+  cp -p "${key_own}"  "${bundle}/content-rhel${major}.key" 2>/dev/null
+  for t in $(rc_chain_list "${major}"); do
+    rc_acquire_forward_certs "${bundle}" "${major}" "${t}" \
+      || { printf 'acquire failed for rhel%s\n' "${t}" >> "${out}/bundle-acquire.txt"; break; }
+  done
+
+  # Build the host-side header args once (array) for the host cells.
+  local hdr=()
+  [ -s "${hdrfile}" ] && hdr=(
+    -H "X-RHUI-ID: $(printf '%s' "${id_doc}" | rc_b64url)"
+    -H "X-RHUI-SIGNATURE: $(printf '%s' "${id_sig}" | rc_b64url)")
+
+  for t in ${major} $(rc_chain_list "${major}"); do
+    [ -f "${bundle}/content-rhel${t}.crt" ] || { printf 'rhel%s: no-cert (chain capped)\n' "${t}" >> "${out}/SUMMARY.txt"; continue; }
+    paired="${out}/PAIRED-rhel${t}.txt"
+    url="$(rc_rhui_major_url "${tmpl}" "${t}" | sed "s/REGION/${region}/")"
+    printf 'major=%s url=%s\n' "${t}" "${url}" > "${paired}"
+    # HOST side (four cells).
+    rc_authmatrix_cell "${paired}" "host cert+headers" "${url}" "${bundle}/content-rhel${t}.crt" "${bundle}/content-rhel${t}.key" "${caarg[@]}" "${hdr[@]}"
+    rc_authmatrix_cell "${paired}" "host cert-only   " "${url}" "${bundle}/content-rhel${t}.crt" "${bundle}/content-rhel${t}.key" "${caarg[@]}"
+    rc_authmatrix_cell "${paired}" "host headers-only" "${url}" "" "" "${caarg[@]}" "${hdr[@]}"
+    rc_authmatrix_cell "${paired}" "host none        " "${url}" "" "" "${caarg[@]}"
+    # CONTAINER side (same four cells). The bundle mounts content-rhel<t>.* as
+    # CERT.* via a per-major copy so the in-container path is stable.
+    cp -p "${bundle}/content-rhel${t}.crt" "${bundle}/CERT.crt" 2>/dev/null
+    cp -p "${bundle}/content-rhel${t}.key" "${bundle}/CERT.key" 2>/dev/null
+    img="registry.access.redhat.com/ubi${t}/ubi"
+    rc_run_long "${out}" "h10-pull-rhel${t}" "podman pull ${img} 2>&1"
+    rc_hvc_container_cell "${img}" "${paired}" "cert+headers" "${url}" 1 "${hdrfile}"
+    rc_hvc_container_cell "${img}" "${paired}" "cert-only   " "${url}" 1 ""
+    rc_hvc_container_cell "${img}" "${paired}" "headers-only" "${url}" 0 "${hdrfile}"
+    rc_hvc_container_cell "${img}" "${paired}" "none        " "${url}" 0 ""
+    rm -f "${bundle}/CERT.crt" "${bundle}/CERT.key"
+    # one-line delta digest.
+    {
+      printf 'rhel%s:\n' "${t}"
+      grep -E 'cert\+headers|cert-only' "${paired}" | sed 's/^/  /'
+    } >> "${out}/SUMMARY.txt"
+  done
+}
+
+# rc_collect_sigttl OUTDIR MAJOR - the B" feasibility parameter: how long does
+# a host-generated identity signature stay accepted? Sends cert + the SAME
+# static headers to the own-major repomd at t=0, then re-sends after a series
+# of sleeps, recording the http code at each offset. RC_SIGTTL_OFFSETS
+# (space-separated seconds; default '0 300 900 1800 3600') controls the
+# schedule; the operator can shorten it. Long-running by nature (default ~60m);
+# gated behind --sigttl so the main run stays fast.
+rc_collect_sigttl() {
+  local out="$1/sigttl" major="$2"
+  local repo=/etc/yum.repos.d/redhat-rhui.repo sec tmpl ca region caarg=()
+  local id_doc id_sig hdr=() url first rmc off prev=0 delta
+  mkdir -p "${out}"
+  [ -f "${repo}" ] || { echo "skipped: ${repo} absent" > "${out}/SKIPPED.txt"; return 0; }
+  sec="$(awk '/^\[rhel-[0-9]+-baseos-rhui-rpms\]/{f=1;next} /^\[/{f=0} f' "${repo}")"
+  tmpl="$(printf '%s\n' "${sec}" | sed -n 's/^mirrorlist=//p' | head -1)"
+  local cert key
+  cert="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientcert=//p' | head -1)"
+  key="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientkey=//p' | head -1)"
+  ca="$(printf '%s\n' "${sec}" | sed -n 's/^sslcacert=//p' | head -1)"
+  region="$(rc_imds_get meta-data/placement/region)"
+  { [ -n "${tmpl}" ] && [ -n "${region}" ] && [ -f "${cert}" ]; } \
+    || { echo "skipped: template/region/cert unavailable" > "${out}/SKIPPED.txt"; return 0; }
+  [ -n "${ca}" ] && [ -f "${ca}" ] && caarg=(--cacert "${ca}")
+  # Freeze the headers ONCE - the whole point is to reuse a single generation.
+  id_doc="$(rc_imds_get dynamic/instance-identity/document)"
+  id_sig="$(rc_imds_get dynamic/instance-identity/signature)"
+  { [ -n "${id_doc}" ] && [ -n "${id_sig}" ]; } \
+    || { echo "skipped: identity doc/sig unavailable" > "${out}/SKIPPED.txt"; return 0; }
+  hdr=(
+    -H "X-RHUI-ID: $(printf '%s' "${id_doc}" | rc_b64url)"
+    -H "X-RHUI-SIGNATURE: $(printf '%s' "${id_sig}" | rc_b64url)")
+  url="$(rc_rhui_major_url "${tmpl}" "${major}" | sed "s/REGION/${region}/")"
+  first="$(curl -sS -m 20 --cert "${cert}" --key "${key}" "${caarg[@]}" "${hdr[@]}" "${url}" 2>/dev/null \
+    | grep -Eo 'https?://[^[:space:]]+' | head -1)"
+  {
+    printf 'frozen_at=%s major=%s\n' "$(date -u '+%Y%m%dT%H%M%SZ')" "${major}"
+    printf 'first_mirror=%s\n' "${first:-none}"
+    printf 'offsets=%s\n' "${RC_SIGTTL_OFFSETS:-0 300 900 1800 3600}"
+  } > "${out}/SIGTTL.txt"
+  [ -n "${first}" ] || { echo "skipped: no mirror" >> "${out}/SIGTTL.txt"; return 0; }
+  for off in ${RC_SIGTTL_OFFSETS:-0 300 900 1800 3600}; do
+    delta=$((off - prev)); [ "${delta}" -gt 0 ] && sleep "${delta}"; prev="${off}"
+    rmc="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+      --cert "${cert}" --key "${key}" "${caarg[@]}" "${hdr[@]}" \
+      "${first%/}/repodata/repomd.xml" 2>/dev/null)"
+    printf 't+%ss: repomd_http=%s (at %s)\n' "${off}" "${rmc}" "$(date -u '+%H:%M:%SZ')" >> "${out}/SIGTTL.txt"
+  done
+}
+
+#------------------------------------------------------------------------------
 # Orchestration + packaging.
 #------------------------------------------------------------------------------
 rc_write_manifest() {
@@ -1222,6 +1400,9 @@ rc_write_manifest() {
     printf '  authmatrix/ U1: cert/headers 2x2 auth matrix + RPM-body layer (--authmatrix)\n'
     printf '  containerprobe/ U2+U3: in-container IMDS + synthesized-repo dnf trials\n'
     printf '              per major, ENA build deps as the payload (--containerprobe)\n'
+    printf '  hostvscontainer/ paired host<->container 4-cell auth matrix per major\n'
+    printf '              (PAIRED-rhel<N>.txt; static B" header injection) (--hostvscontainer)\n'
+    printf '  sigttl/     host-generated signature acceptance over time (--sigttl)\n'
   } > "${out}/MANIFEST.txt"
 }
 
@@ -1251,6 +1432,13 @@ Usage: sudo bash collect-aws-rhui-facts.sh [options]
                    container's OWN dnf against SYNTHESIZED repo files + the
                    per-major cert bundle (own major + every chain major).
                    DESTRUCTIVE-ish; disposable instances only
+  --hostvscontainer E0-follow: the SAME four-cell auth matrix measured from the
+                   HOST and from a CONTAINER, per major (own + chain), adjacent
+                   in PAIRED-rhel<N>.txt - the host<->container delta in one
+                   read. Uses static host-generated headers (B" injection).
+  --sigttl         E0-follow: how long a host-generated identity signature
+                   stays accepted (repomd GET at t=0/5/15/30/60m by default;
+                   RC_SIGTTL_OFFSETS overrides). Long-running (~60m default)
   --no-pkgs        skip the download-only RPM package analysis (pkgs/)
   --no-crossmajor  skip the cross-major HTTPS reachability probe
   --no-eus         skip EUS/ELS repo enumeration
@@ -1261,7 +1449,7 @@ EOF
 }
 
 rc_main() {
-  local major="" outdir="" do_leapp=0 do_cross=1 do_eus=1 do_chain=0 do_pkgs=1 keep=0 do_authmx=0 do_ctr=0
+  local major="" outdir="" do_leapp=0 do_cross=1 do_eus=1 do_chain=0 do_pkgs=1 keep=0 do_authmx=0 do_ctr=0 do_hvc=0 do_sigttl=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --major)        major="$2"; shift 2 ;;
@@ -1273,6 +1461,8 @@ rc_main() {
       --keep-metadata) RC_KEEP_METADATA=1; shift ;;
       --authmatrix)    do_authmx=1; shift ;;
       --containerprobe) do_ctr=1; shift ;;
+      --hostvscontainer) do_hvc=1; shift ;;
+      --sigttl)        do_sigttl=1; shift ;;
       --no-pkgs)      do_pkgs=0; shift ;;
       --no-crossmajor) do_cross=0; shift ;;
       --no-eus)       do_eus=0; shift ;;
@@ -1308,14 +1498,22 @@ rc_main() {
   [ "${do_chain}" = 1 ] && { rc_collect_chain "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
   [ "${do_authmx}" = 1 ] && { rc_collect_authmatrix "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
   [ "${do_ctr}" = 1 ] && { rc_collect_containerprobe "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
+  [ "${do_hvc}" = 1 ] && { rc_collect_hostvscontainer "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
+  [ "${do_sigttl}" = 1 ] && { rc_collect_sigttl "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
 
-  local archive
+  local archive abs_archive
   archive="./aws-rhui-facts_${host}_rhel${major}_${ts}.tar.gz"
   tar -czf "${archive}" -C "$(dirname "${outdir}")" "$(basename "${outdir}")" 2>>"${outdir}/collect.log" \
     || { rc_log "ERROR: tar failed"; return 1; }
   [ "${keep}" = 1 ] || rm -rf "${outdir}"
-  rc_log "done: ${archive}"
-  printf '%s\n' "${archive}"
+  # Emit an ABSOLUTE path (operator request r83): a relative './name' is
+  # ambiguous once the caller cd's elsewhere; the absolute path is copy-paste
+  # ready for scp/transfer. Fall back to the relative form only if the
+  # directory cannot be resolved.
+  abs_archive="$(cd "$(dirname "${archive}")" 2>/dev/null && printf '%s/%s' "$(pwd)" "$(basename "${archive}")")"
+  [ -n "${abs_archive}" ] || abs_archive="${archive}"
+  rc_log "done: ${abs_archive}"
+  printf '%s\n' "${abs_archive}"
 }
 
 # t025 sources this file with RHUI_COLLECT_SOURCED=1 to unit-test the pure layer.
