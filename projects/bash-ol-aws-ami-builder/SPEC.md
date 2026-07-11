@@ -1360,6 +1360,14 @@ identifier. All are applied inside `phase3_clone_repository`. Current markers:
 | `[ol-aws-ami-builder PATCH amazon-time-sync]` | `cloud/aws/provision.sh` | `AMAZON_TIME_SYNC == "yes"` (OPT-IN; default OFF — env key or `--enable-amazon-time-sync`) | Append a guest-side block that adds 169.254.169.123 as the preferred time source (`/etc/chrony.conf` on OL7-OL10, `/etc/ntp.conf` on OL6; the guest block detects which file exists and re-checks before appending) — logged as `[OLAWS-TIMESYNC01]`, see B.14 |
 | `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` | `bin/build-image.sh` | host libguestfs lacks the `selinuxrelabel` optgroup | Schedule a first-boot `/.autorelabel` instead of the offline relabel when the build host's libguestfs cannot relabel — see D.17 |
 
+Phase 3 ends with two compensating controls for the tracked-at-HEAD upstream
+(user decision 2026-07-11: always latest, never pinned): the
+`[OLAWS-UPSTREAM01]` provenance record and the `[OLAWS-P3GATE01]` exit gate --
+see the OLAWS code registry for their full contracts. Commissioned from the
+OL7 2026-07-11 failure, where a build died ~30 minutes in with an opaque
+"no operating systems were found" and left NO record of which upstream state
+or patched-artifact bytes it had built from.
+
 The `sed`-based substitutions (the OL6/OL7 guard removals, `kernel-uek-modules`,
 `declare-g-ol6`) leave a `.bak` backup next to the modified file; the
 marker-bracketed hook injections (`ol6-cloud-user`, `nitro-initramfs`,
@@ -3647,6 +3655,8 @@ the line is specific to one generation (e.g. `[OLAWS-USR01/OL6]`).
 | Code | Meaning |
 |:--|:--|
 | `OLAWS-LOG01` | build-log location (and whether `--debug` console output is on) |
+| `OLAWS-UPSTREAM01` | upstream oracle-linux provenance on every build: full HEAD SHA + commit date/subject on the console, and `${WORKSPACE}/upstream-provenance.txt` with the applied wrapper patch markers + sha256 of every patched artifact (upstream is tracked at HEAD by design, so a failing build must always leave behind exactly what it built from) |
+| `OLAWS-P3GATE01` | Phase-3 exit gate over the ACTUALLY patched artifacts on the real build host, before any install work: structural kickstart conformance (single `%packages`, single in-section `sos`, marker uniqueness, `%end` balance, bootloader/part shape), hook-bracket pairing + heredoc termination + `bash -n` on `cloud/aws/provision.sh` and `image-scripts.sh`. Any finding dies in seconds (with the provenance file cited) instead of ~30 opaque minutes in anaconda. ksvalidator, when installed, runs ADVISORY-only (it exits 1 even on the pristine upstream kickstart -- the pre-existing `--nobase` deprecation is counted -- so its rc cannot gate) |
 | `OLAWS-CFG01` | resolved feature knobs (`[DEBUG]`: ENA/IMDS/skip flags) |
 | `OLAWS-NVM01` | Nitro initramfs-drivers hook injected (nvme/ena into initramfs) |
 | `OLAWS-ENA01` | in-guest ENA driver self-build hook injected |

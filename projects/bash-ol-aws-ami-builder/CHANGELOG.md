@@ -20,6 +20,40 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added (upstream provenance on every build + Phase-3 exit gate over the patched artifacts)
+- Commissioned from the OL7 2026-07-11 investigation: a build died ~30
+  minutes in with an opaque "no operating systems were found" and left no
+  record of which upstream state or patched-artifact bytes it had built
+  from. Upstream stays tracked at HEAD by design (user decision: always
+  latest, never pinned); these are the compensating controls.
+- **`[OLAWS-UPSTREAM01]` upstream provenance (every build, success or
+  failure)**: the exact upstream HEAD (full SHA + commit date/subject) is
+  logged right after the Phase-3 clone AND written to
+  `${WORKSPACE}/upstream-provenance.txt`; after patching, the file gains the
+  applied wrapper patch-marker list and the sha256 of every patched artifact
+  (kickstart, cloud/aws/provision.sh, image-scripts.sh). A failing build now
+  always leaves behind exactly what it built from, byte-for-byte.
+- **`[OLAWS-P3GATE01]` Phase-3 exit gate (real host, pre-install,
+  fail=die)**: validates the ACTUALLY patched artifacts at the end of
+  Phase 3 - kickstart structure (exactly one `%packages`; exactly one `sos`
+  and inside the section; marker uniqueness on OL7-10; `%end` balance;
+  bootloader/part shape; NUL scan) and provisioning scripts (hook `>>>`/`<<<`
+  bracket pairing per marker, `OLAWS_*` heredoc termination, `bash -n`, also
+  on image-scripts.sh). Any finding dies in seconds with the provenance file
+  cited - a wrong artifact must cost seconds, not ~30 opaque minutes in
+  anaconda. Verified live against the real upstream (OL7 patched ks: PASS;
+  %packages removed: 3 findings + die; unpaired hook bracket: caught).
+- **ksvalidator is ADVISORY-only** (logged, never gates): it exits 1 even on
+  the pristine upstream kickstart (the pre-existing `--nobase` deprecation is
+  counted), so its rc cannot gate without failing every build. Phase 1
+  best-effort installs pykickstart (dnf/apt); absence degrades the gate to
+  structural-only with an explicit log line.
+- Tests: t003 gains fixture units for the gate validators (finding-count
+  contract; sound artifacts pass, corrupted ones are caught); 50 -> 55
+  asserts. Suite: 482 -> 487 (488 with 0 skips where pykickstart is
+  installed: the previously-skipped ksvalidator-dependent t005 assert now
+  runs too - and R3 makes Phase 1 install pykickstart on build hosts).
+
 ### Fixed (OL8 matrix fidelity: the container tests and the update gate targeted UEKR6 while real AMIs run UEKR7)
 - **Reliability finding (three-source audit)**: the buildtest ledger (all OL8
   rows = 5.4.17 UEK6-era kvers), the installer code (hardcoded

@@ -222,4 +222,52 @@ assert_eq "" "${p9}"  "ena-pin(real): OL9 (latest-resolving) extracts to empty, 
 assert_eq "" "${p10}" "ena-pin(real): OL10 (latest-resolving) extracts to empty, not the raw line"
 assert_match "${pfb}" '^[0-9]+\.[0-9]+\.[0-9]+$' "ena-pin(real): fallback pin is a concrete x.y.z"
 
+# --- _p3_validate_ks / _p3_validate_provision : Phase-3 exit-gate validators ---
+# Structural conformance of the FINAL patched artifacts, on fixtures shaped
+# like the real ones. The validators RETURN a finding count (never die), so
+# they are directly unit-testable; the gate driver owns the die.
+p3tmp="$(mktemp -d)"
+cat > "${p3tmp}/good.cfg" <<'GOODKS'
+bootloader --append="console=tty0" --location=mbr
+part /boot --fstype="xfs" --size=500
+part / --fstype="xfs" --grow --size=4096
+%packages --nobase
+# [ol-aws-ami-builder PATCH sos-package] sosreport tooling baked into every AMI
+sos
+yum
+%end
+%post --log=/root/ks-post.log
+echo done
+%end
+GOODKS
+sed 's/^%packages --nobase/#gone/'      "${p3tmp}/good.cfg" > "${p3tmp}/nopkg.cfg"
+sed 's/^yum$/sos/'                      "${p3tmp}/good.cfg" > "${p3tmp}/dupsos.cfg"
+cat > "${p3tmp}/good-prov.sh" <<'GOODPROV'
+#!/usr/bin/env bash
+echo provisioning
+# >>> [ol-aws-ami-builder PATCH demo-hook] >>>
+cat > /usr/local/sbin/demo.sh <<'OLAWS_DEMO_EOF'
+echo demo
+OLAWS_DEMO_EOF
+# <<< [ol-aws-ami-builder PATCH demo-hook] <<<
+GOODPROV
+grep -v '^# <<<' "${p3tmp}/good-prov.sh" > "${p3tmp}/broken-prov.sh"
+
+run_p3() { # <fn> <args...> -> echoes rc
+  (
+    # shellcheck source=/dev/null
+    . "${MAIN}" >/dev/null 2>&1
+    if "$@" >/dev/null 2>&1; then echo 0; else echo "$?"; fi
+  ) </dev/null
+}
+assert_eq 0 "$(run_p3 _p3_validate_ks "${p3tmp}/good.cfg" 7)"        "p3-gate: sound patched ks passes (0 findings)"
+rc="$(run_p3 _p3_validate_ks "${p3tmp}/nopkg.cfg" 7)"
+if [ "${rc}" -ge 1 ]; then t_pass "p3-gate: missing %packages is caught (${rc} findings)"; else t_fail "p3-gate: missing %packages is caught"; fi
+rc="$(run_p3 _p3_validate_ks "${p3tmp}/dupsos.cfg" 7)"
+if [ "${rc}" -ge 1 ]; then t_pass "p3-gate: duplicated sos line is caught (${rc} findings)"; else t_fail "p3-gate: duplicated sos line is caught"; fi
+assert_eq 0 "$(run_p3 _p3_validate_provision "${p3tmp}/good-prov.sh")" "p3-gate: sound provision.sh passes (paired markers + terminated heredoc)"
+rc="$(run_p3 _p3_validate_provision "${p3tmp}/broken-prov.sh")"
+if [ "${rc}" -ge 1 ]; then t_pass "p3-gate: unpaired hook bracket is caught (${rc} findings)"; else t_fail "p3-gate: unpaired hook bracket is caught"; fi
+rm -rf "${p3tmp}"
+
 t_done

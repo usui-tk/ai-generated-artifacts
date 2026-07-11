@@ -1107,6 +1107,11 @@ phase1_install_prerequisites() {
         libosinfo osinfo-db osinfo-db-tools \
         acl \
         || die "Failed to install build host packages via dnf"
+      # Best-effort: pykickstart provides ksvalidator for the Phase-3 exit
+      # gate's ADVISORY pass. Its absence only degrades the gate to
+      # structural-only (logged), never fails the build host provisioning.
+      sudo dnf install -y pykickstart \
+        || log_warn "pykickstart unavailable; the Phase-3 exit gate runs structural-only (no ksvalidator advisory)"
       ;;
     apt)
       log_info "Build host: ${host_id} ${host_ver} (apt family). Installing KVM/libguestfs packages (qemu: ${qemu_pkg})."
@@ -1118,6 +1123,8 @@ phase1_install_prerequisites() {
         libosinfo-bin osinfo-db osinfo-db-tools \
         acl \
         || die "Failed to install build host packages via apt"
+      sudo apt-get install -y pykickstart \
+        || log_warn "pykickstart unavailable; the Phase-3 exit gate runs structural-only (no ksvalidator advisory)"
       ;;
   esac
 
@@ -1286,6 +1293,198 @@ sos
   fi
 }
 
+# ---- upstream provenance + Phase-3 exit gate ---------------------------------
+# The pipeline tracks upstream oracle-linux at HEAD by design (user decision
+# 2026-07-11: always latest, no pin). The compensating controls are:
+#   (1) [OLAWS-UPSTREAM01] -- the upstream HEAD (full SHA, date, subject) is
+#       logged on every build AND written to ${WORKSPACE}/upstream-provenance.txt
+#       together with the applied wrapper patch markers and the sha256 of every
+#       patched artifact, so ANY later failure is reproducible byte-for-byte.
+#   (2) [OLAWS-P3GATE01] -- a pre-install exit gate validates the ACTUALLY
+#       patched artifacts on the real build host at the end of Phase 3, so an
+#       upstream shape change or a mis-applied patch fails in seconds with a
+#       precise finding instead of ~30 minutes later with an opaque
+#       "no operating systems were found" (the OL7 2026-07-11 failure mode
+#       this machinery was commissioned from).
+
+_upstream_provenance_file() { printf '%s/upstream-provenance.txt' "${WORKSPACE}"; }
+
+_record_upstream_provenance_clone() {
+  local sha cdate subj f
+  sha="$(git -C "${WORK_REPO_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
+  cdate="$(git -C "${WORK_REPO_DIR}" show -s --format=%ci HEAD 2>/dev/null || echo unknown)"
+  subj="$(git -C "${WORK_REPO_DIR}" show -s --format=%s HEAD 2>/dev/null || echo unknown)"
+  log_info "[OLAWS-UPSTREAM01] oracle-linux @ ${sha} (${cdate}; \"${subj}\")"
+  f="$(_upstream_provenance_file)"
+  {
+    echo "# upstream provenance -- written by build-ol-aws-ami.sh on every build"
+    echo "# (reproducibility record: upstream is tracked at HEAD by design, so a"
+    echo "#  failing build must always leave behind WHAT it actually built from)"
+    echo "generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "ol_major=${OL_MAJOR_VERSION}"
+    echo "upstream_url=${OL_REPO_URL}"
+    echo "upstream_head=${sha}"
+    echo "upstream_head_date=${cdate}"
+    echo "upstream_head_subject=${subj}"
+  } > "${f}"
+  log_info "  provenance file: ${f}"
+}
+
+_record_upstream_provenance_patched() {
+  local f base a
+  f="$(_upstream_provenance_file)"
+  base="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}"
+  {
+    # Applied wrapper markers, gathered from exactly the files this wrapper
+    # patches (regex kept '['-anchored after PATCH so the t007 marker census
+    # cannot pick this source line up as a phantom marker).
+    echo "applied_patch_markers=$(grep -hoE 'ol-aws-ami-builder[^]]* PATCH [a-z0-9-]+' \
+      "${base}/cloud/aws/provision.sh" "${base}/cloud/aws/image-scripts.sh" \
+      "${base}"/distr/ol"${OL_MAJOR_VERSION}"-slim/* 2>/dev/null | sort -u | tr '\n' ';' || true)"
+    for a in "${base}/distr/ol${OL_MAJOR_VERSION}-slim/ol${OL_MAJOR_VERSION}-ks.cfg" \
+             "${base}/cloud/aws/provision.sh" \
+             "${base}/distr/ol${OL_MAJOR_VERSION}-slim/image-scripts.sh"; do
+      [[ -f "${a}" ]] && echo "artifact_sha256 $(sha256sum "${a}" 2>/dev/null || echo "unreadable  ${a}")"
+    done
+  } >> "${f}"
+}
+
+# _p3_validate_ks <ks_file> <ol_major>
+# Structural conformance of the FINAL (patched / synthesized) kickstart.
+# Returns the number of findings (0 = pass); logs each finding. Never dies --
+# the gate driver decides. Self-contained bash (ADR 0003 spirit): this is the
+# always-on gate; ksvalidator (when present) is ADVISORY ONLY because it exits
+# 1 even on the pristine upstream kickstart (the pre-existing '--nobase'
+# deprecation is counted), so its rc cannot gate without failing every build.
+_p3_validate_ks() {
+  local ks="$1" major="$2" fails=0 n
+  if [[ ! -s "${ks}" ]]; then
+    log_error "  [P3GATE] kickstart missing or empty: ${ks}"
+    return 1
+  fi
+  if [[ "$(tr -d '\0' < "${ks}" | wc -c)" -ne "$(wc -c < "${ks}")" ]]; then
+    log_error "  [P3GATE] kickstart contains NUL bytes (corrupt): ${ks}"
+    fails=$((fails+1))
+  fi
+  n="$(grep -cE '^%packages' "${ks}" || true)"
+  if [[ "${n}" -ne 1 ]]; then
+    log_error "  [P3GATE] expected exactly 1 '%packages' section, found ${n}: ${ks}"
+    fails=$((fails+1))
+  fi
+  n="$(grep -cE '^sos$' "${ks}" || true)"
+  if [[ "${n}" -ne 1 ]]; then
+    log_error "  [P3GATE] expected exactly 1 'sos' package line, found ${n}: ${ks}"
+    fails=$((fails+1))
+  elif ! awk '/^%packages/{inp=1;next} /^%/{inp=0} inp && $0=="sos"{ok=1} END{exit !ok}' "${ks}"; then
+    log_error "  [P3GATE] 'sos' line is OUTSIDE the %packages section: ${ks}"
+    fails=$((fails+1))
+  fi
+  if [[ "${major}" -ge 7 ]]; then
+    n="$(grep -cF '[ol-aws-ami-builder PATCH sos-package]' "${ks}" || true)"
+    if [[ "${n}" -ne 1 ]]; then
+      log_error "  [P3GATE] expected exactly 1 sos-package marker, found ${n} (patch mis-applied?): ${ks}"
+      fails=$((fails+1))
+    fi
+  fi
+  local n_sec n_end
+  n_sec="$(grep -cE '^%(packages|pre|post)' "${ks}" || true)"
+  n_end="$(grep -cE '^%end$' "${ks}" || true)"
+  if [[ "${n_sec}" -ne "${n_end}" ]]; then
+    log_error "  [P3GATE] unbalanced kickstart sections: ${n_sec} openers vs ${n_end} '%end': ${ks}"
+    fails=$((fails+1))
+  fi
+  n="$(grep -cE '^bootloader' "${ks}" || true)"
+  if [[ "${n}" -ne 1 ]]; then
+    log_error "  [P3GATE] expected exactly 1 'bootloader' line, found ${n}: ${ks}"
+    fails=$((fails+1))
+  fi
+  n="$(grep -cE '^part ' "${ks}" || true)"
+  if [[ "${n}" -lt 1 ]]; then
+    log_error "  [P3GATE] no 'part' lines found (partitioning missing): ${ks}"
+    fails=$((fails+1))
+  fi
+  return "${fails}"
+}
+
+# _p3_validate_provision <provision_sh>
+# The injected hooks must leave provision.sh syntactically valid, every
+# '>>> [marker] >>>' bracket paired with its '<<<' twin, and every OLAWS_*
+# single-quoted heredoc terminated. Returns the finding count; never dies.
+_p3_validate_provision() {
+  local prov="$1" fails=0 id n_open n_close tok
+  if [[ ! -s "${prov}" ]]; then
+    log_error "  [P3GATE] provision.sh missing or empty: ${prov}"
+    return 1
+  fi
+  if ! bash -n "${prov}" 2>/dev/null; then
+    log_error "  [P3GATE] provision.sh fails bash -n after hook injection: ${prov}"
+    fails=$((fails+1))
+  fi
+  while IFS= read -r id; do
+    [[ -n "${id}" ]] || continue
+    n_open="$(grep -cF ">>> [${id}] >>>" "${prov}" || true)"
+    n_close="$(grep -cF "<<< [${id}] <<<" "${prov}" || true)"
+    if [[ "${n_open}" -ne "${n_close}" ]]; then
+      log_error "  [P3GATE] unpaired hook brackets for '${id}': ${n_open} openers vs ${n_close} closers: ${prov}"
+      fails=$((fails+1))
+    fi
+  done < <(grep -oE '>>> \[ol-aws-ami-builder[^]]* PATCH [a-z0-9-]+\] >>>' "${prov}" 2>/dev/null \
+             | sed -E 's/^>>> \[//; s/\] >>>$//' | sort -u || true)
+  while IFS= read -r tok; do
+    [[ -n "${tok}" ]] || continue
+    if ! grep -qE "^${tok}\$" "${prov}"; then
+      log_error "  [P3GATE] heredoc '${tok}' has no terminator line: ${prov}"
+      fails=$((fails+1))
+    fi
+  done < <(grep -oE "<<'OLAWS_[A-Z0-9_]+'" "${prov}" 2>/dev/null | sed -E "s/^<<'//; s/'$//" | sort -u || true)
+  return "${fails}"
+}
+
+# _p3_exit_gate -- run at the very end of Phase 3, BEFORE any install work.
+# Dies on any structural finding (a wrong artifact must cost seconds, not the
+# ~30 minutes an opaque anaconda death costs); the die message carries the
+# provenance file so the failing input is fully reproducible.
+_p3_exit_gate() {
+  local base ks prov imgs fails=0 advisory="ksvalidator not installed (structural-only)"
+  base="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}"
+  ks="${base}/distr/ol${OL_MAJOR_VERSION}-slim/ol${OL_MAJOR_VERSION}-ks.cfg"
+  prov="${base}/cloud/aws/provision.sh"
+  imgs="${base}/distr/ol${OL_MAJOR_VERSION}-slim/image-scripts.sh"
+  log_info "[OLAWS-P3GATE01] validating patched build artifacts (pre-install exit gate)"
+
+  _p3_validate_ks "${ks}" "${OL_MAJOR_VERSION}" || fails=$((fails+$?))
+  _p3_validate_provision "${prov}" || fails=$((fails+$?))
+  if [[ -f "${imgs}" ]] && ! bash -n "${imgs}" 2>/dev/null; then
+    log_error "  [P3GATE] image-scripts.sh fails bash -n: ${imgs}"
+    fails=$((fails+1))
+  fi
+
+  # ADVISORY ksvalidator pass (never gates -- see _p3_validate_ks rationale).
+  if command -v ksvalidator >/dev/null 2>&1; then
+    local prof out
+    case "${OL_MAJOR_VERSION}" in
+      6) prof="RHEL6" ;; 7) prof="RHEL7" ;; 8) prof="RHEL8" ;; 9) prof="RHEL9" ;; 10) prof="RHEL10" ;;
+    esac
+    out="$(ksvalidator -v "${prof}" "${ks}" 2>&1 || true)"
+    if printf '%s' "${out}" | grep -qiE 'unknown.*version|invalid.*version'; then
+      prof="RHEL9"
+      out="$(ksvalidator -v "${prof}" "${ks}" 2>&1 || true)"
+    fi
+    advisory="ksvalidator advisory @ ${prof}"
+    if [[ -n "${out}" ]]; then
+      log_info "  [P3GATE][ksvalidator ${prof}] $(printf '%s' "${out}" | grep -vE '^\s*$|^Checking kickstart' | head -3 | tr '\n' ' | ')"
+    fi
+  fi
+
+  if [[ "${fails}" -gt 0 ]]; then
+    die "Phase-3 exit gate FAILED with ${fails} finding(s) -- the patched build
+     artifacts are not sound, so the install is not started (a wrong artifact
+     must cost seconds here, not ~30 opaque minutes in anaconda).
+     Reproducibility record: $(_upstream_provenance_file)"
+  fi
+  log_info "[OLAWS-P3GATE01] PASS (structural; ${advisory})"
+}
+
 phase3_clone_repository() {
   log_step "Phase 3: Cloning oracle/oracle-linux repository"
 
@@ -1300,6 +1499,10 @@ phase3_clone_repository() {
 
   [[ -d "${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}" ]] \
     || die "Directory ${OL_TOOLS_SUBDIR} not found in the clone"
+
+  # Reproducibility record FIRST (upstream tracked at HEAD by design): even a
+  # build that dies later must leave behind exactly what it built from.
+  _record_upstream_provenance_clone
 
   # SELinux relabel resilience patch (host-OS-independent; applies to every OL
   # target). See SPEC Part D "SELinux relabel fails on a non-SELinux build
@@ -2700,6 +2903,11 @@ EOF_OL6_PROV
     chmod +x "${ol6_slim_dir}/image-scripts.sh" "${ol6_slim_dir}/provision.sh"
     log_info "  -> Generated 4 files in ${ol6_slim_dir}/"
   fi
+
+  # Finalize the reproducibility record with the applied markers + artifact
+  # hashes, THEN gate: a gate failure references a complete provenance file.
+  _record_upstream_provenance_patched
+  _p3_exit_gate
 
   log_info "Repository ready"
 }

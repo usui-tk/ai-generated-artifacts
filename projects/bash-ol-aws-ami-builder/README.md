@@ -375,6 +375,8 @@ Expected total time: **40–90 minutes** (depends on bandwidth and instance perf
 
 In addition to the switch-controlled components above, every AMI bakes in the `sos` package (sosreport tooling) via the kickstart — OL6 through its wrapper-synthesized kickstart, OL7-10 through the `sos-package` kickstart patch — so a diagnostic `sosreport` can be produced out of the box on any instance (always on; no switch).
 
+Every build also records **upstream provenance** and self-checks its patched artifacts before installing. The upstream `oracle-linux` tools are tracked at their latest commit by design; as the compensating control, each run logs the exact upstream HEAD (`[OLAWS-UPSTREAM01]`) and writes `${WORKSPACE}/upstream-provenance.txt` (upstream SHA/date/subject, the applied wrapper patch markers, and the sha256 of every patched artifact), then runs a Phase-3 exit gate (`[OLAWS-P3GATE01]`) that validates the actually patched kickstart and provisioning scripts on the build host — a mis-applied patch or an unexpected upstream shape change fails in seconds with a precise finding (and the provenance file for reproduction) instead of tens of minutes later inside the installer.
+
 ### 6.3 Phase 0 self-diagnosis
 
 Phase 0 inspects the runtime environment and emits targeted guidance when something is wrong.
