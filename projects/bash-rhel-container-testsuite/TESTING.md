@@ -126,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 688 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 702 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -397,7 +397,14 @@ so results are host-independent and deterministic.
   (own major + every hop), default RPM-blob deletion, a hermetic fixture pass
   of the fetch helper (NOT-FOUND scan -> `ok=0`, absent scan -> recorded skip),
   and leapp preupgrade being OPT-IN (`do_leapp=0` default, `--leapp` flag);
-  57 assertions total.
+  r81 adds the real-run regression set: a large-stream fixture proving the
+  r79 `grep -q` scan MISSES under pipefail (SIGPIPE, rc 141) while the shipped
+  `grep -c` form finds the same match; boundary-safe location matching
+  (`make` never selects automake; automake-only primary -> rc 1); the primary
+  slimming contract (blob deleted by default, names list, interest-only
+  `<package>` slices surviving the real `</package><package` joined-line
+  format, origin sha256, `RC_KEEP_METADATA=1` keep path); and the
+  primary-reuse wiring of the material fetches; 71 assertions total.
 
 ---
 
@@ -609,7 +616,7 @@ The full suite is green in the planning sandbox:
 ---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
 ---- t025_awsrhuicollect.sh ----   ## RESULT pass=39 fail=0 skip=0
-SUITE: 688 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 702 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 **L0 fixed count = 51 shell files** (every `.sh` in the project, incl. the 3 root

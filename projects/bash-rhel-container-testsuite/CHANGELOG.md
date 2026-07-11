@@ -13,6 +13,62 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r81] - 2026-07-11 - fix: collector v1.5.0 - SIGPIPE-safe scan, primary slimming, metadata reuse
+
+Grounded on the first real three-host `--chain` run (el8/el9/el10,
+ap-northeast-1, 2026-07-11). The chain hypothesis is CONFIRMED at the
+repomd + metadata layer: reachable majors el8->3 / el9->2 / el10->1 exactly
+as predicted, leapp-rhui-aws actually curl-fetched from the client-config
+repo at every hop, hop-2 unlocked by the config cert extracted at hop-1
+(non-circularity proven), COVERAGE verdict=OK on all three hosts, and
+el10's lack of leapp-rhui-aws recorded as a fact. Two defects surfaced,
+both fixed here; the corrected scan applied offline to the collected
+archives locates all 24 build-dep cells (4 packages x 6 measurement
+points; generation note: kernel-devel is baseos on rhel8, appstream on
+rhel9/10).
+
+### Fixed
+- **`rc_builddep_scan` missed every match on real hosts (pipefail x
+  SIGPIPE)** - `grep -q` exits at the first match, SIGPIPEs the
+  decompressor (rc 141), and under pipefail the `if` sees FALSE even
+  though the match exists. Only large streams (80MB+ gz) open the SIGPIPE
+  window, which is how the -q form passed every small-fixture gate and
+  produced `build-materials ok=0` with all four packages present. Now
+  `grep -c` (whole-stream read, same idiom as the proven package_count).
+  t025 pins the bug with a large-stream fixture: the old form is asserted
+  to MISS, the shipped form to FIND, on the same data.
+- **Boundary-unsafe location match (latent, r79)** - `<location
+  href="[^"]*PKG-[0-9]` lets `make` select automake/cmake/gcc-toolset-N-make
+  (alphabetically earlier + `head -1`). Now the name must start a path
+  component (`([^"]*/)?PKG-[0-9]`); verified positive and negative on the
+  real el8 metadata. Fixed in `rc_curl_fetch_pkg` too.
+
+### Changed
+- **Primary blobs are slimmed after use** (operator request: the r80 el8
+  archive was 307MB, 294MB of it four primary.xml.gz blobs). After the scan
+  and the material fetches each blob is replaced by its sha256, the sorted
+  unique package NAME list (gz), and the `<package>` XML slices of the
+  interest set (`RC_SLIM_WL`) - location/NVR evidence survives, the bulk
+  does not. `--keep-metadata` retains the raw blobs. Real createrepo output
+  packs `</package><package type=...>` on ONE line; the slicer splits those
+  first (found on the real el8 appstream primary, not on hand-written
+  fixtures). Expected next archives: single-digit MB.
+- **Material fetches reuse the on-disk primary + first mirror**
+  (`rc_fetch_pkg_from_prim`; `rc_fetch_build_materials` signature drops the
+  URL args) - r80 re-downloaded the 81-115MB primary once per package.
+- Collector v1.4.0 -> **v1.5.0**.
+
+### Notes
+- t025 -> 71 assertions (14 new r81). TESTING.md baseline 702. Gate
+  702/0/0 (25 tiers), shellcheck -S style clean, bash -n clean, doc-gate
+  PASS. FT this session ran against the REAL collected archives (the fixed
+  scan on the actual el8/hop2 primaries; slice extraction validated on the
+  real appstream metadata), honoring the fixture-fidelity lesson the -q
+  bug re-taught.
+- Operator next step: re-run `sudo bash collect-aws-rhui-facts.sh --chain`
+  on disposable el8/el9/el10 hosts; expected `build-materials ok=4` for
+  every reachable major and archives of a few MB.
+
 ## [r80] - 2026-07-11 - feat: collector v1.4.0 - pkgs analysis, coverage self-check, build-material acquisition proof
 
 Session goal (operator-adjudicated design): decide whether the suite's

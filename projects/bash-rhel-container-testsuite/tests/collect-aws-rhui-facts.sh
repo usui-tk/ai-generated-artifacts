@@ -43,6 +43,9 @@
 #   * Build-material RPMs fetched by --chain are verified (HTTP status, sha256,
 #     rpm -qip) and then DELETED to keep the archive small; --keep-rpms keeps
 #     the blobs. leapp-rhui-aws carrier RPMs are always kept (chain evidence).
+#   * Raw primary metadata blobs (81-115MB gz each; 294MB of the 307MB r80 el8
+#     archive) are slimmed after use to sha256 + package-name list + <package>
+#     slices of the interest set; --keep-metadata retains the raw blobs.
 #   * Network states are point-in-time. Real-RHUI E2E is the operator's task
 #     (this sandbox cannot reproduce RHUI responses).
 #   * AWS-SPECIFIC: the RHUI endpoint shape, the IMDS-signed instance-identity
@@ -74,7 +77,10 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.4.0"
+RC_TOOL_VERSION="1.5.0"
+# Packages whose <package> XML slices survive the primary-blob slimming
+# (alternation for one POSIX-awk pass; fixed names, no regex metacharacters).
+RC_SLIM_WL="kernel-devel|gcc|make|elfutils-libelf-devel|leapp-rhui-aws"
 RC_CLOUD="aws"   # this collector is AWS-specific; other clouds get sibling scripts
 RC_CMD_TIMEOUT="${RC_CMD_TIMEOUT:-120}"
 
@@ -617,7 +623,11 @@ rc_curl_fetch_pkg() {
   [ -n "${href}" ] || { printf 'result=no-primary\n' >> "${sum}"; return 1; }
   prim="${dir}/${tag}-$(basename "${href}")"
   curl -sS -m 90 --cert "${cert}" --key "${key}" "$@" -o "${prim}" "${first%/}/${href}" 2>/dev/null
-  loc="$(rc_decompress "${prim}" | grep -oE '<location href="[^"]*'"${pkg}"'-[0-9][^"]*\.rpm"' | head -1 | sed 's/.*href="//; s/"$//')"
+  # Boundary-safe location match: the name must start a path component
+  # (`.../make-4...`), or `make` grabs automake/cmake/gcc-toolset-N-make and
+  # `head -1` ships the wrong package (latent in r79; caught on real el8
+  # metadata before it could fire). `-[0-9]` excludes kernel-devel-matched.
+  loc="$(rc_decompress "${prim}" | grep -oE '<location href="([^"]*/)?'"${pkg}"'-[0-9][^"]*\.rpm"' | head -1 | sed 's/.*href="//; s/"$//')"
   printf 'location=%s\n' "${loc:-none}" >> "${sum}"
   [ -n "${loc}" ] || { printf 'result=pkg-not-in-primary\n' >> "${sum}"; return 1; }
   rpmpath="${dir}/rpms/$(basename "${loc}")"
@@ -633,13 +643,19 @@ rc_curl_fetch_pkg() {
 # each was found. Pure read of local files - no network, no dnf.
 rc_builddep_scan() {
   local hd="$1" t="$2"; shift 2
-  local out="${hd}/builddep-scan.txt" p f where
+  local out="${hd}/builddep-scan.txt" p f n where
   : > "${out}"
   for p in "$@"; do
     where=""
     for f in "${hd}/curl-rhel${t}-baseos-"*primary* "${hd}/curl-rhel${t}-appstream-"*primary*; do
       [ -e "${f}" ] || continue
-      if rc_decompress "${f}" | grep -qE "<name>${p}</name>"; then
+      # grep -c consumes the WHOLE stream. grep -q exits at the first match,
+      # SIGPIPEs the decompressor (rc 141), and under pipefail the `if` sees
+      # FALSE even though the match EXISTS. Only large real metadata (80MB+)
+      # opens the SIGPIPE window - small fixtures never reproduce it, which is
+      # how the -q form passed the sandbox and failed on every real host (r81).
+      n="$(rc_decompress "${f}" | grep -cE "<name>${p}</name>" || true)"
+      if [ "${n:-0}" -gt 0 ]; then
         where="${f##*/curl-rhel"${t}"-}"; where="${where%%-*}"
         break
       fi
@@ -658,17 +674,76 @@ rc_rhui_config_url() {
     -e "s#\\\$basearch#x86_64#g"
 }
 
-# rc_fetch_build_materials HD T BASE_URL APP_URL CERT KEY EXTRA... - prove
-# OBTAINABILITY, not just reachability: for every build-dep the scan located,
-# curl-download the actual RPM, record HTTP status + sha256 + rpm -qip, then
-# delete the blob (RC_KEEP_RPMS=1 keeps it). A 200 on repomd and a 200 on the
-# RPM body are separate authorization layers; only the download closes the gap
-# between "listed in primary" and "the suite could really build from here".
-# Prints 'ok=X total=Y' for the caller's SUMMARY line.
+# rc_fetch_pkg_from_prim DIR TAG PKG PRIM MIRROR CERT KEY EXTRA... - fetch one
+# RPM using an ALREADY-DOWNLOADED primary + first mirror. A 115MB primary must
+# be transferred ONCE per repo, not once per package (r80 re-downloaded it for
+# every material - 4x waste). Prints the fetched rpm path on success.
+rc_fetch_pkg_from_prim() {
+  local dir="$1" tag="$2" pkg="$3" prim="$4" mirror="$5" cert="$6" key="$7"; shift 7
+  local sum="${dir}/${tag}-fetch.txt" loc rpmrc rpmpath
+  mkdir -p "${dir}/rpms"
+  { printf 'tag=%s pkg=%s\n' "${tag}" "${pkg}"
+    printf 'prim=%s\nmirror=%s\n' "${prim}" "${mirror}"; } > "${sum}"
+  # Boundary-safe: name must start a path component (see rc_curl_fetch_pkg).
+  # Any one version proves obtainability; head -1 is deliberate.
+  loc="$({ rc_decompress "${prim}" || true; } \
+    | grep -oE '<location href="([^"]*/)?'"${pkg}"'-[0-9][^"]*\.rpm"' \
+    | head -1 | sed 's/.*href="//; s/"$//')"
+  printf 'location=%s\n' "${loc:-none}" >> "${sum}"
+  [ -n "${loc}" ] || { printf 'result=pkg-not-in-primary\n' >> "${sum}"; return 1; }
+  rpmpath="${dir}/rpms/$(basename "${loc}")"
+  rpmrc="$(curl -sS -m 120 --cert "${cert}" --key "${key}" "$@" -o "${rpmpath}" -w '%{http_code}' "${mirror%/}/${loc}" 2>/dev/null)"
+  printf 'rpm_http=%s\nrpm=%s\n' "${rpmrc}" "${rpmpath}" >> "${sum}"
+  [ "${rpmrc}" = 200 ] || { printf 'result=rpm-denied(%s)\n' "${rpmrc}" >> "${sum}"; return 1; }
+  printf 'result=OK\n' >> "${sum}"
+  printf '%s\n' "${rpmpath}"
+}
+
+# rc_slim_primary HD PKGREGEX GLOB... - the raw primary blobs are the size bomb
+# (81-115MB gz each; 294MB of the 307MB el8 r80 archive). After the scan and
+# the material fetches they have served their purpose: replace each blob with
+# (a) its sha256, (b) the sorted unique package NAME list, (c) the <package>
+# XML slices of the packages of interest (location/NVR evidence survives, the
+# bulk does not). RC_KEEP_METADATA=1 keeps the blobs (--keep-metadata).
+rc_slim_primary() {
+  local hd="$1" wl="$2"; shift 2
+  local f base
+  for f in "$@"; do
+    [ -e "${f}" ] || continue
+    base="${f%%.xml*}"
+    sha256sum "${f}" > "${base}-primary.sha256" 2>/dev/null
+    { rc_decompress "${f}" || true; } \
+      | grep -oE '<name>[^<]+</name>' | sed 's/<name>//; s#</name>##' \
+      | sort -u | gzip > "${base}-names.txt.gz"
+    # One POSIX-awk pass: keep the full <package>..</package> element of every
+    # package on the interest list (fixed names, no regex metacharacters).
+    # Real createrepo output packs '</package><package type=...>' on ONE line;
+    # split those first or the next package's reset swallows the flush (found
+    # on the real el8 appstream primary, not on hand-written fixtures).
+    { rc_decompress "${f}" || true; } | sed 's#><package #>\
+<package #g' | awk -v wl="${wl}" '
+      index($0, "<package ") { inp=1; buf=""; hit=0 }
+      inp {
+        buf = buf $0 "\n"
+        if ($0 ~ ("<name>(" wl ")</name>")) hit=1
+      }
+      index($0, "</package>") { if (inp && hit) printf "%s", buf; inp=0 }
+    ' > "${base}-slices.xml"
+    [ "${RC_KEEP_METADATA:-0}" = 1 ] || rm -f "${f}"
+  done
+}
+
+# rc_fetch_build_materials HD T CERT KEY EXTRA... - prove OBTAINABILITY, not
+# just reachability: for every build-dep the scan located, download the actual
+# RPM (reusing the repo primary + first mirror already on disk), record HTTP
+# status + sha256 + rpm -qip, then delete the blob (RC_KEEP_RPMS=1 keeps it).
+# repomd-200 and RPM-body-200 are separate authorization layers; only the
+# download closes the gap between "listed in primary" and "the suite could
+# really build from here". Prints 'ok=X total=Y' for the caller's SUMMARY line.
 rc_fetch_build_materials() {
-  local hd="$1" t="$2" base_url="$3" app_url="$4" cert="$5" key="$6"; shift 6
+  local hd="$1" t="$2" cert="$3" key="$4"; shift 4
   local out="${hd}/build-materials.txt" scan="${hd}/builddep-scan.txt"
-  local line p where u rpmf sum nvr ok=0 total=0
+  local line p where prim mirror rpmf sum nvr ok=0 total=0
   : > "${out}"
   if [ ! -f "${scan}" ]; then
     printf 'skipped: builddep-scan.txt absent\n' >> "${out}"
@@ -678,12 +753,17 @@ rc_fetch_build_materials() {
     p="${line%%:*}"; where="$(printf '%s' "${line#*: }" | tr -d '[:space:]')"
     total=$((total + 1))
     case "${where}" in
-      baseos)    u="${base_url}" ;;
-      appstream) u="${app_url}" ;;
+      baseos|appstream) ;;
       *) printf '%s: SKIP (scan=%s)\n' "${p}" "${where}" >> "${out}"; continue ;;
     esac
-    rpmf="$(rc_curl_fetch_pkg "${hd}/materials" "mat-rhel${t}-${p}" "${p}" \
-             "${cert}" "${key}" "${u}" "$@")" || true
+    prim="$(find "${hd}" -maxdepth 1 -name "curl-rhel${t}-${where}-*primary*" 2>/dev/null | head -1)"
+    mirror="$(sed -n 's/^first_mirror=//p' "${hd}/curl-rhel${t}-${where}-curl-enum.txt" 2>/dev/null | head -1)"
+    if [ -z "${prim}" ] || [ -z "${mirror}" ] || [ "${mirror}" = none ]; then
+      printf '%s: FETCH-FAILED (no local primary/mirror for %s)\n' "${p}" "${where}" >> "${out}"
+      continue
+    fi
+    rpmf="$(rc_fetch_pkg_from_prim "${hd}/materials" "mat-rhel${t}-${p}" "${p}" \
+             "${prim}" "${mirror}" "${cert}" "${key}" "$@")" || true
     if [ -z "${rpmf}" ] || [ ! -f "${rpmf}" ]; then
       printf '%s: FETCH-FAILED (repo=%s; see materials/mat-rhel%s-%s-fetch.txt)\n' \
         "${p}" "${where}" "${t}" "${p}" >> "${out}"
@@ -765,8 +845,10 @@ rc_collect_chain() {
   rc_curl_repo_enum "${ohd}" "curl-rhel${major}-baseos" "${c_cert_own}" "${c_key_own}" "${base_url}" "${caarg[@]}" "${hdr[@]}"
   rc_curl_repo_enum "${ohd}" "curl-rhel${major}-appstream" "${c_cert_own}" "${c_key_own}" "${app_url}" "${caarg[@]}" "${hdr[@]}"
   rc_builddep_scan "${ohd}" "${major}" kernel-devel gcc make elfutils-libelf-devel
-  mats="$(rc_fetch_build_materials "${ohd}" "${major}" "${base_url}" "${app_url}" \
+  mats="$(rc_fetch_build_materials "${ohd}" "${major}" \
            "${c_cert_own}" "${c_key_own}" "${caarg[@]}" "${hdr[@]}")"
+  rc_slim_primary "${ohd}" "${RC_SLIM_WL}" \
+    "${ohd}/curl-rhel${major}-baseos-"*primary* "${ohd}/curl-rhel${major}-appstream-"*primary*
   verdict="$(sed -n 's/^repomd_http=//p' "${ohd}/curl-rhel${major}-baseos-curl-enum.txt" 2>/dev/null | head -1)"
   printf 'target=%s (own) curl_baseos_repomd_http=%s build_materials=%s\n' \
     "${major}" "${verdict:-none}" "${mats}" > "${ohd}/RESULT.txt"
@@ -825,6 +907,7 @@ rc_collect_chain() {
     if [ ! -f "${certT}" ] || [ ! -f "${keyT}" ]; then
       printf 'STOP: content-rhel%s not acquired via curl from any major-%s repo (chain caps here)\n' "${t}" "${src}" > "${hd}/RESULT.txt"
       printf 'rhel%s: NOT-ACQUIRED (content-rhel%s carrier unreachable from major-%s)\n' "${t}" "${t}" "${src}" >> "${out}/SUMMARY.txt"
+      rc_slim_primary "${hd}" "${RC_SLIM_WL}" "${hd}/fetch-"*primary*
       break
     fi
 
@@ -834,8 +917,11 @@ rc_collect_chain() {
     rc_curl_repo_enum "${hd}" "curl-rhel${t}-baseos" "${certT}" "${keyT}" "${base_url}" "${caarg[@]}" "${hdr[@]}"
     rc_curl_repo_enum "${hd}" "curl-rhel${t}-appstream" "${certT}" "${keyT}" "${app_url}" "${caarg[@]}" "${hdr[@]}"
     rc_builddep_scan "${hd}" "${t}" kernel-devel gcc make elfutils-libelf-devel
-    mats="$(rc_fetch_build_materials "${hd}" "${t}" "${base_url}" "${app_url}" \
+    mats="$(rc_fetch_build_materials "${hd}" "${t}" \
              "${certT}" "${keyT}" "${caarg[@]}" "${hdr[@]}")"
+    rc_slim_primary "${hd}" "${RC_SLIM_WL}" \
+      "${hd}/curl-rhel${t}-baseos-"*primary* "${hd}/curl-rhel${t}-appstream-"*primary* \
+      "${hd}/fetch-"*primary*
     verdict="$(sed -n 's/^repomd_http=//p' "${hd}/curl-rhel${t}-baseos-curl-enum.txt" 2>/dev/null | head -1)"
     printf 'target=%s curl_baseos_repomd_http=%s build_materials=%s content_cert=%s\n' \
       "${t}" "${verdict:-none}" "${mats}" "${certT}" > "${hd}/RESULT.txt"
@@ -877,7 +963,9 @@ rc_write_manifest() {
     printf '  leapp/      OPT-IN non-destructive "leapp preupgrade --no-rhsm" straddle (7/8/9)\n'
     printf '  chain/      curl-native forward chain: own major + every newer major reachable\n'
     printf '              (el8->3, el9->2, el10->1) + per-major build-material RPM\n'
-    printf '              acquisition proof; SUMMARY.txt has the verdicts (--chain)\n'
+    printf '              acquisition proof; SUMMARY.txt has the verdicts (--chain).\n'
+    printf '              primary blobs slimmed to sha256 + name list + slices\n'
+    printf '              (--keep-metadata retains the raw blobs)\n'
   } > "${out}/MANIFEST.txt"
 }
 
@@ -897,6 +985,9 @@ Usage: sudo bash collect-aws-rhui-facts.sh [options]
                    deleted). curl + client cert only, no dnf. See chain/
                    SUMMARY.txt.
   --keep-rpms      keep the downloaded build-material RPM blobs in the archive
+  --keep-metadata  keep the raw primary metadata blobs (default: replaced by
+                   sha256 + package-name list + <package> slices of the
+                   packages of interest; the blobs are 81-115MB gz each)
   --no-pkgs        skip the download-only RPM package analysis (pkgs/)
   --no-crossmajor  skip the cross-major HTTPS reachability probe
   --no-eus         skip EUS/ELS repo enumeration
@@ -916,6 +1007,7 @@ rc_main() {
       --no-leapp)     do_leapp=0; shift ;;
       --chain)        do_chain=1; shift ;;
       --keep-rpms)    RC_KEEP_RPMS=1; shift ;;
+      --keep-metadata) RC_KEEP_METADATA=1; shift ;;
       --no-pkgs)      do_pkgs=0; shift ;;
       --no-crossmajor) do_cross=0; shift ;;
       --no-eus)       do_eus=0; shift ;;

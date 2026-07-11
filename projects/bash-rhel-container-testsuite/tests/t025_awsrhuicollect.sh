@@ -142,7 +142,7 @@ grep -q 'RC_KEEP_RPMS:-0' "${COLLECT}"; assert_eq 0 "$?" "r80 chain: RPM blobs d
 # --- r80: rc_fetch_build_materials fixture (hermetic; no network) --------------
 fbd="$(mktemp -d)"
 printf 'kernel-devel: NOT-FOUND\ngcc: NOT-FOUND\n' > "${fbd}/builddep-scan.txt"
-res="$(rc_fetch_build_materials "${fbd}" 9 http://unused http://unused /no/cert /no/key)"
+res="$(rc_fetch_build_materials "${fbd}" 9 /no/cert /no/key)"
 assert_eq "ok=0 total=2" "${res}" "r80 fetch: NOT-FOUND scan -> ok=0 total=2, nothing fetched"
 grep -q 'kernel-devel: SKIP' "${fbd}/build-materials.txt"
 assert_eq 0 "$?" "r80 fetch: NOT-FOUND entries recorded as SKIP facts"
@@ -153,6 +153,81 @@ rm -rf "${fbd}"
 # --- r80: leapp preupgrade is OPT-IN (default off) ------------------------------
 grep -q 'do_leapp=0 do_cross=1' "${COLLECT}"; assert_eq 0 "$?" "r80 leapp: default OFF in rc_main"
 grep -q -- '--leapp)        do_leapp=1' "${COLLECT}"; assert_eq 0 "$?" "r80 leapp: --leapp opt-in flag present"
+
+# --- r81: v1.5.0 helpers are wired ---------------------------------------------
+for fn in rc_fetch_pkg_from_prim rc_slim_primary; do
+  if declare -F "${fn}" >/dev/null 2>&1; then t_pass "r81 defined: ${fn}"; else t_fail "r81 missing: ${fn}"; fi
+done
+
+# --- r81 REGRESSION: the scan survives large streams (pipefail x SIGPIPE) ------
+# grep -q exits at the first match and SIGPIPEs the decompressor; under
+# pipefail the `if` sees FALSE even though the match EXISTS. Only large
+# streams (>> the 64KB pipe buffer) open the window - which is why the -q
+# form passed every small-fixture gate and failed on every real host (r80
+# evidence: all 24 builddep cells NOT-FOUND with the packages present).
+sig="$(mktemp -d)"
+{ printf '<package type="rpm">\n  <name>kernel-devel</name>\n</package>\n'
+  i=0; while [ "${i}" -lt 300000 ]; do printf '<package type="rpm"><name>filler</name></package>\n'; i=$((i+1)); done
+} | gzip > "${sig}/curl-rhel9-baseos-fixture-primary.xml.gz"
+# (a) MUTATION DEMO: the r79 -q form misses on this stream under pipefail.
+if rc_decompress "${sig}/curl-rhel9-baseos-fixture-primary.xml.gz" | grep -qE '<name>kernel-devel</name>'; then
+  old_form=matched
+else
+  old_form=missed
+fi
+assert_eq "missed" "${old_form}" "r81 sigpipe: the old grep -q form misses on a large stream (bug reproduced)"
+# (b) the shipped scan finds it.
+rc_builddep_scan "${sig}" 9 kernel-devel
+grep -q '^kernel-devel: baseos$' "${sig}/builddep-scan.txt"
+assert_eq 0 "$?" "r81 sigpipe: rc_builddep_scan (grep -c form) finds the match on the same stream"
+rm -rf "${sig}"
+
+# --- r81: boundary-safe location match (make must never fetch automake) --------
+bnd="$(mktemp -d)"
+printf '<package type="rpm"><name>automake</name><location href="Packages/a/automake-1.16.1-6.el8.noarch.rpm"/></package>\n<package type="rpm"><name>make</name><location href="Packages/m/make-4.2.1-11.el8.x86_64.rpm"/></package>\n' \
+  | gzip > "${bnd}/prim.gz"
+out="$(rc_fetch_pkg_from_prim "${bnd}" bt make "${bnd}/prim.gz" http://127.0.0.1:1 /no/c /no/k 2>/dev/null)" || true
+grep -q '^location=Packages/m/make-4.2.1-11.el8.x86_64.rpm$' "${bnd}/bt-fetch.txt"
+assert_eq 0 "$?" "r81 boundary: 'make' selects plain make, never automake (r79 pattern would have)"
+printf '<package type="rpm"><name>automake</name><location href="Packages/a/automake-1.16.1-6.el8.noarch.rpm"/></package>\n' \
+  | gzip > "${bnd}/prim2.gz"
+rc_fetch_pkg_from_prim "${bnd}" bt2 make "${bnd}/prim2.gz" http://127.0.0.1:1 /no/c /no/k >/dev/null 2>&1
+assert_eq 1 "$?" "r81 boundary: automake-only primary -> pkg-not-in-primary (rc 1)"
+rm -rf "${bnd}"
+
+# --- r81: primary slimming (real one-line-joined element format) ---------------
+slm="$(mktemp -d)"
+printf '<metadata packages="2"><package type="rpm">\n  <name>gcc</name>\n  <location href="Packages/g/gcc-8.2.1-3.5.el8.x86_64.rpm"/>\n</package><package type="rpm">\n  <name>filler</name>\n  <location href="Packages/f/filler-1-1.rpm"/>\n</package></metadata>\n' \
+  | gzip > "${slm}/curl-rhel8-appstream-fx-primary.xml.gz"
+rc_slim_primary "${slm}" "kernel-devel|gcc|make|elfutils-libelf-devel|leapp-rhui-aws" "${slm}/curl-rhel8-appstream-fx-primary.xml.gz"
+if [ -e "${slm}/curl-rhel8-appstream-fx-primary.xml.gz" ]; then
+  t_fail "r81 slim: blob must be deleted by default"
+else
+  t_pass "r81 slim: blob deleted by default"
+fi
+n="$(gzip -dc "${slm}/curl-rhel8-appstream-fx-primary-names.txt.gz" | wc -l)"
+assert_eq 2 "${n}" "r81 slim: names list has both packages (sorted unique)"
+grep -q '<name>gcc</name>' "${slm}/curl-rhel8-appstream-fx-primary-slices.xml"
+assert_eq 0 "$?" "r81 slim: interest package slice survives ('</package><package' joined line handled)"
+if grep -q '<name>filler</name>' "${slm}/curl-rhel8-appstream-fx-primary-slices.xml"; then
+  t_fail "r81 slim: non-interest packages must not be sliced"
+else
+  t_pass "r81 slim: non-interest packages excluded from slices"
+fi
+[ -s "${slm}/curl-rhel8-appstream-fx-primary-primary.sha256" ]
+assert_eq 0 "$?" "r81 slim: origin blob sha256 recorded"
+printf 'x\n' | gzip > "${slm}/keep-primary.xml.gz"
+RC_KEEP_METADATA=1 rc_slim_primary "${slm}" "gcc" "${slm}/keep-primary.xml.gz"
+[ -e "${slm}/keep-primary.xml.gz" ]
+assert_eq 0 "$?" "r81 slim: RC_KEEP_METADATA=1 keeps the raw blob (--keep-metadata)"
+rm -rf "${slm}"
+
+# --- r81: materials fetch reuses the on-disk primary (no re-download) ----------
+# shellcheck disable=SC2016  # the ${hd} token is asserted LITERALLY in the collector source
+grep -q 'rc_fetch_pkg_from_prim "\${hd}/materials"' "${COLLECT}"
+assert_eq 0 "$?" "r81 reuse: build materials fetched via the already-downloaded primary"
+grep -q -- '--keep-metadata) RC_KEEP_METADATA=1' "${COLLECT}"
+assert_eq 0 "$?" "r81 reuse: --keep-metadata flag wired"
 
 # --- REGRESSION GUARD (r78): the chain probe is curl-native (no dnf) ----------
 # The chain must acquire/measure via curl only. If a future edit reintroduces a
