@@ -106,9 +106,10 @@ bash-rhel-container-testsuite/
   tests/
     lib/{assert,mock,heredoc}.sh   # ported harness
     run-all.sh                     # single-entry L0-L2 runner
-    collect-aws-rhui-facts.sh      # standalone AWS-RHUI fact collector -> tar.gz (r73; v1.5.0
+    collect-aws-rhui-facts.sh      # standalone AWS-RHUI fact collector -> tar.gz (r73; v1.6.0
                                    #   r80: pkgs analysis, coverage self-check, build-material proof
-                                   #   r81: SIGPIPE-safe scan, primary slimming, metadata reuse)
+                                   #   r81: SIGPIPE-safe scan, primary slimming, metadata reuse
+                                   #   r82: E0 probes - auth matrix + in-container synthesized-repo dnf)
     t001_parse.sh  t002_shellcheck.sh             # L0 (present)
     t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2 (Phase 2 ✅)
     t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM verdicts (Phase 3-4 ✅)

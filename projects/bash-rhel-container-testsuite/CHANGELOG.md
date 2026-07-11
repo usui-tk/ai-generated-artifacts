@@ -13,6 +13,64 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r82] - 2026-07-11 - feat: collector v1.6.0 - phase-E E0 probes (auth matrix + in-container synthesized-repo dnf)
+
+Phase E opened (operator-adjudicated design, 2026-07-11): run the suite's
+entitled tests under AWS RHUI. Architecture decision: container-direct dnf
+(option B) as the primary design - the host stages a per-major cert bundle
+plus a SYNTHESIZED repo file (REGION pre-substituted, correct-major paths),
+the container's own dnf resolves and installs, mirroring the RHSM shape.
+Three empirical unknowns gate the implementation; E0 measures all three in
+one disposable-EC2 run:
+
+- **U1 `--authmatrix`** - is the TLS client cert ALONE sufficient, or does
+  RHUI also require the X-RHUI-ID/SIGNATURE identity headers? Every probe so
+  far always sent the headers. Four credential cells (cert+headers /
+  cert-only / headers-only / none) at the repomd layer, plus the RPM-BODY
+  layer for the two cert cells (the layers can be authorized differently).
+  Decides whether containers need any IMDS machinery at all.
+- **U2 `--containerprobe`** - can a podman container reach IMDS (IMDSv2 hop
+  limit 1 drops bridged containers by default)? One in-container token PUT.
+- **U3 `--containerprobe`** - does a container's OWN dnf work against the
+  synthesized repo + mounted certs, scoped to ONLY those repos
+  (`--disablerepo='*' --enablerepo='rhui-e0-*'`), with the ENA build deps as
+  the payload (makecache -> `--downloadonly kernel-devel gcc make
+  elfutils-libelf-devel`)? This is the July-4 mount failure re-measured with
+  both root causes (REGION literal, wrong-major host repo files) removed.
+  Own major + every chain major (bundle certs acquired via the proven r81
+  forward chain, `rc_acquire_forward_certs`, measurement-free reuse-by-copy).
+  A curl diagnostic separates authorization from networking on failure.
+
+### Added
+- `rc_synth_repo_file` (pure; unit-tested) - emits the container repo file
+  with both amazon-id plugin jobs done ahead of time: REGION substituted and
+  identity headers simply absent (whether that suffices is exactly U1).
+- `rc_collect_authmatrix` / `rc_authmatrix_cell` (U1), `rc_collect_containerprobe`
+  (U2+U3), `rc_acquire_forward_certs` (chain-cert plumbing for the bundle).
+- Flags `--authmatrix`, `--containerprobe` (both OFF by default;
+  containerprobe is destructive-ish: installs podman, pulls UBI images -
+  disposable instances only, consistent with the existing contract).
+
+### Notes
+- Scope decisions recorded for phase E (design discussion 2026-07-11):
+  RHUI mode covers majors 8/9/10 only (the chain is forward-only and RHEL
+  6/7 standard AMIs are gone); 6/7 rows become explicit
+  "rhui-major-unavailable" skips, full 6-10 coverage stays with the RHSM
+  host. No new matrix axis (SPEC B.10): rhui:aws will be the single
+  environment-matched entitlement mode, cells = 3 majors x versions x 1.
+  Mechanism is bundle-source-agnostic: single el8 host (chain) and per-major
+  hosts (own certs) use the same machinery.
+- t025 -> 95 assertions (24 new r82). TESTING.md baseline 726. Gate 726/0/0
+  (25 tiers), shellcheck -S style clean, bash -n clean, doc-gate PASS.
+- Operator next step: on a disposable el8 host run
+  `sudo bash collect-aws-rhui-facts.sh --authmatrix --containerprobe`
+  and share the tar.gz. Verdict files: `authmatrix/AUTHMATRIX.txt`,
+  `containerprobe/CONTAINERPROBE.txt` (expected shape: makecache_rc=0
+  builddeps_rc=0 per major if cert-only authorization holds). E1 (suite
+  wiring: `acq_entitlement_mount_args` rhui:aws branch,
+  `ena_default_entitlements` rhui:aws -> entitled, 6/7 skip semantics)
+  follows the E0 verdicts.
+
 ## [r81] - 2026-07-11 - fix: collector v1.5.0 - SIGPIPE-safe scan, primary slimming, metadata reuse
 
 Grounded on the first real three-host `--chain` run (el8/el9/el10,

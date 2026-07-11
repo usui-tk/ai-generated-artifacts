@@ -77,7 +77,7 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.5.0"
+RC_TOOL_VERSION="1.6.0"
 # Packages whose <package> XML slices survive the primary-blob slimming
 # (alternation for one POSIX-awk pass; fixed names, no regex metacharacters).
 RC_SLIM_WL="kernel-devel|gcc|make|elfutils-libelf-devel|leapp-rhui-aws"
@@ -938,6 +938,259 @@ rc_collect_chain() {
 }
 
 #------------------------------------------------------------------------------
+# E0 probes (r82): the three empirical unknowns that decide the SUITE's
+# entitled-RHUI container design (phase E, operator-adjudicated 2026-07-11):
+#   U1 --authmatrix      is the TLS client cert ALONE enough, or does RHUI also
+#                        require the X-RHUI-ID/SIGNATURE identity headers?
+#                        Every probe so far ALWAYS sent the headers.
+#   U2 --containerprobe  can a podman container reach IMDS at all (IMDSv2 hop
+#                        limit 1 drops bridged containers by default)?
+#   U3 --containerprobe  does a container's OWN dnf work against a SYNTHESIZED
+#                        repo file (REGION pre-substituted, correct-major path)
+#                        + mounted per-major certs - the July-4 mount failure
+#                        with both root causes removed?
+#------------------------------------------------------------------------------
+
+# rc_synth_repo_file MAJOR REGION CONTENT_TMPL CERTDIR - emit (stdout) a repo
+# file a CONTAINER can use directly: mirrorlist synthesized for MAJOR with
+# REGION already substituted (the amazon-id plugin is absent in containers -
+# both of its jobs must be done ahead of time or proven unnecessary), ssl
+# paths pointing at the mounted bundle. Pure: no filesystem access.
+rc_synth_repo_file() {
+  local major="$1" region="$2" tmpl="$3" certdir="$4"
+  local base_url app_url
+  base_url="$(rc_rhui_major_url "${tmpl}" "${major}" | sed "s/REGION/${region}/")"
+  app_url="$(printf '%s' "${base_url}" | sed 's#/baseos/#/appstream/#')"
+  cat <<EOF
+[rhui-e0-rhel${major}-baseos]
+name=RHEL ${major} BaseOS from RHUI (E0 synthesized)
+mirrorlist=${base_url}
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+sslverify=1
+sslclientcert=${certdir}/content-rhel${major}.crt
+sslclientkey=${certdir}/content-rhel${major}.key
+sslcacert=${certdir}/cdn.redhat.com-chain.crt
+
+[rhui-e0-rhel${major}-appstream]
+name=RHEL ${major} AppStream from RHUI (E0 synthesized)
+mirrorlist=${app_url}
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+sslverify=1
+sslclientcert=${certdir}/content-rhel${major}.crt
+sslclientkey=${certdir}/content-rhel${major}.key
+sslcacert=${certdir}/cdn.redhat.com-chain.crt
+EOF
+}
+
+# rc_authmatrix_cell OUT LABEL URL CERT KEY EXTRA... - one auth-matrix
+# measurement: mirrorlist GET then repomd GET with the selected credential
+# combination (cert empty = no client cert; headers travel in EXTRA... or
+# not at all); append one verdict line to OUT.
+rc_authmatrix_cell() {
+  local out="$1" label="$2" url="$3" cert="$4" key="$5"; shift 5
+  # remaining args: extra curl args (--cacert ... and optionally -H ...)
+  local certarg=() body mlrc first rmrc
+  [ -n "${cert}" ] && certarg=(--cert "${cert}" --key "${key}")
+  body="$(curl -sS -m 20 "${certarg[@]}" "$@" -w '\n__HTTP__%{http_code}' "${url}" 2>/dev/null)"
+  mlrc="${body##*__HTTP__}"
+  first="$(printf '%s\n' "${body}" | grep -Eo 'https?://[^[:space:]]+' | grep -v '__HTTP__' | head -1)"
+  if [ -n "${first}" ]; then
+    rmrc="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "${certarg[@]}" "$@" \
+      "${first%/}/repodata/repomd.xml" 2>/dev/null)"
+  else
+    rmrc="no-mirror"
+  fi
+  printf '%s: mirrorlist_http=%s repomd_http=%s\n' "${label}" "${mlrc:-000}" "${rmrc}" >> "${out}"
+}
+
+# rc_collect_authmatrix OUTDIR MAJOR - U1. Own-major baseos, four credential
+# cells (cert+headers / cert-only / headers-only / none), then the RPM-BODY
+# layer for the two cert cells (repomd and RPM GET can be authorized
+# differently; only both layers close the question). rhel99 is not needed
+# here - the cells themselves are each other's controls.
+rc_collect_authmatrix() {
+  local out="$1/authmatrix" major="$2" repo=/etc/yum.repos.d/redhat-rhui.repo
+  local sec tmpl cert key ca region url caarg=() hdr=() id_doc id_sig
+  local am rpmurl loc rc1 rc2
+  mkdir -p "${out}"; am="${out}/AUTHMATRIX.txt"
+  [ -f "${repo}" ] || { echo "skipped: ${repo} absent" > "${am}"; return 0; }
+  sec="$(awk '/^\[rhel-[0-9]+-baseos-rhui-rpms\]/{f=1;next} /^\[/{f=0} f' "${repo}")"
+  tmpl="$(printf '%s\n' "${sec}" | sed -n 's/^mirrorlist=//p' | head -1)"
+  cert="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientcert=//p' | head -1)"
+  key="$(printf '%s\n' "${sec}" | sed -n 's/^sslclientkey=//p' | head -1)"
+  ca="$(printf '%s\n' "${sec}" | sed -n 's/^sslcacert=//p' | head -1)"
+  region="$(rc_imds_get meta-data/placement/region)"
+  if [ -z "${tmpl}" ] || [ -z "${region}" ] || [ ! -f "${cert}" ]; then
+    echo "skipped: template/region/cert unavailable" > "${am}"; return 0
+  fi
+  [ -n "${ca}" ] && [ -f "${ca}" ] && caarg=(--cacert "${ca}")
+  id_doc="$(rc_imds_get dynamic/instance-identity/document)"
+  id_sig="$(rc_imds_get dynamic/instance-identity/signature)"
+  [ -n "${id_doc}" ] && [ -n "${id_sig}" ] && hdr=(
+    -H "X-RHUI-ID: $(printf '%s' "${id_doc}" | rc_b64url)"
+    -H "X-RHUI-SIGNATURE: $(printf '%s' "${id_sig}" | rc_b64url)")
+  url="$(rc_rhui_major_url "${tmpl}" "${major}" | sed "s/REGION/${region}/")"
+  {
+    printf 'major=%s (own) url=%s\n' "${major}" "${url}"
+    printf 'identity_headers=%s\n' "$([ "${#hdr[@]}" -gt 0 ] && echo available || echo UNAVAILABLE)"
+  } > "${am}"
+  # --- repomd layer: the four cells ---
+  rc_authmatrix_cell "${am}" "cert+headers" "${url}" "${cert}" "${key}" "${caarg[@]}" "${hdr[@]}"
+  rc_authmatrix_cell "${am}" "cert-only   " "${url}" "${cert}" "${key}" "${caarg[@]}"
+  rc_authmatrix_cell "${am}" "headers-only" "${url}" "" "" "${caarg[@]}" "${hdr[@]}"
+  rc_authmatrix_cell "${am}" "none        " "${url}" "" "" "${caarg[@]}"
+  # --- RPM-body layer for the two cert cells ---
+  rc_curl_repo_enum "${out}" "am-rhel${major}-baseos" "${cert}" "${key}" "${url}" "${caarg[@]}" "${hdr[@]}"
+  loc="$({ rc_decompress "${out}/am-rhel${major}-baseos-"*primary* 2>/dev/null || true; } \
+    | grep -oE '<location href="([^"]*/)?make-[0-9][^"]*\.rpm"' \
+    | head -1 | sed 's/.*href="//; s/"$//')"
+  if [ -n "${loc}" ]; then
+    rpmurl="$(sed -n 's/^first_mirror=//p' "${out}/am-rhel${major}-baseos-curl-enum.txt" | head -1)"
+    rpmurl="${rpmurl%/}/${loc}"
+    rc1="$(curl -sS -m 60 -o /dev/null -w '%{http_code}' --cert "${cert}" --key "${key}" "${caarg[@]}" "${hdr[@]}" "${rpmurl}" 2>/dev/null)"
+    rc2="$(curl -sS -m 60 -o /dev/null -w '%{http_code}' --cert "${cert}" --key "${key}" "${caarg[@]}" "${rpmurl}" 2>/dev/null)"
+    {
+      printf 'rpm-body cert+headers: http=%s\n' "${rc1}"
+      printf 'rpm-body cert-only   : http=%s\n' "${rc2}"
+      printf 'rpm-body url=%s\n' "${rpmurl}"
+    } >> "${am}"
+  else
+    printf 'rpm-body: skipped (no make location in primary)\n' >> "${am}"
+  fi
+  rc_slim_primary "${out}" "${RC_SLIM_WL}" "${out}/am-rhel${major}-baseos-"*primary*
+}
+
+# rc_acquire_forward_certs BUNDLE MAJOR TARGET - walk the proven forward chain
+# from MAJOR to TARGET collecting each hop's content/config certs into BUNDLE.
+# Reuse-by-copy of the r79/r81 chain acquisition, measurement-free: the chain
+# itself is already proven (r81 evidence, 2026-07-11); here it is plumbing.
+rc_acquire_forward_certs() {
+  local bundle="$1" major="$2" target="$3"
+  local crepo=/etc/yum.repos.d/redhat-rhui.repo cfgrepo=/etc/yum.repos.d/redhat-rhui-client-config.repo
+  local csec c_tmpl ca cfgsec cfg_tmpl region caarg=() hdr=() id_doc id_sig
+  local cur_c_cert cur_c_key cur_cfg_cert cur_cfg_key src t hd rpmfile u
+  local certT keyT cfgT cfgkeyT
+  [ -f "${crepo}" ] || return 1
+  csec="$(awk '/^\[rhel-[0-9]+-baseos-rhui-rpms\]/{f=1;next} /^\[/{f=0} f' "${crepo}")"
+  c_tmpl="$(printf '%s\n' "${csec}" | sed -n 's/^mirrorlist=//p' | head -1)"
+  ca="$(printf '%s\n' "${csec}" | sed -n 's/^sslcacert=//p' | head -1)"
+  cur_c_cert="$(printf '%s\n' "${csec}" | sed -n 's/^sslclientcert=//p' | head -1)"
+  cur_c_key="$(printf '%s\n' "${csec}" | sed -n 's/^sslclientkey=//p' | head -1)"
+  if [ -f "${cfgrepo}" ]; then
+    cfgsec="$(awk '/^\[rhui-client-config-server-[0-9]+\]/{f=1;next} /^\[/{f=0} f' "${cfgrepo}")"
+    cfg_tmpl="$(printf '%s\n' "${cfgsec}" | sed -n 's/^mirrorlist=//p' | head -1)"
+    cur_cfg_cert="$(printf '%s\n' "${cfgsec}" | sed -n 's/^sslclientcert=//p' | head -1)"
+    cur_cfg_key="$(printf '%s\n' "${cfgsec}" | sed -n 's/^sslclientkey=//p' | head -1)"
+  fi
+  region="$(rc_imds_get meta-data/placement/region)"
+  [ -n "${c_tmpl}" ] && [ -n "${region}" ] && [ -f "${cur_c_cert}" ] || return 1
+  [ -n "${ca}" ] && [ -f "${ca}" ] && caarg=(--cacert "${ca}")
+  id_doc="$(rc_imds_get dynamic/instance-identity/document)"
+  id_sig="$(rc_imds_get dynamic/instance-identity/signature)"
+  [ -n "${id_doc}" ] && [ -n "${id_sig}" ] && hdr=(
+    -H "X-RHUI-ID: $(printf '%s' "${id_doc}" | rc_b64url)"
+    -H "X-RHUI-SIGNATURE: $(printf '%s' "${id_sig}" | rc_b64url)")
+  src="${major}"
+  for t in $(rc_chain_list "${major}"); do
+    [ "${t}" -le "${target}" ] || break
+    hd="${bundle}/.hop-src${src}-to${t}"; mkdir -p "${hd}"
+    rpmfile=""
+    if [ -n "${cfg_tmpl}" ] && [ -f "${cur_cfg_cert:-}" ]; then
+      u="$(rc_rhui_config_url "${cfg_tmpl}" "${src}" | sed "s/REGION/${region}/")"
+      rpmfile="$(rc_curl_fetch_pkg "${hd}" "acq-clientconfig-el${src}" "leapp-rhui-aws" "${cur_cfg_cert}" "${cur_cfg_key}" "${u}" "${caarg[@]}" "${hdr[@]}")"
+    fi
+    if [ -z "${rpmfile}" ] || [ ! -f "${rpmfile}" ]; then
+      u="$(rc_rhui_major_url "${c_tmpl}" "${src}" | sed "s/REGION/${region}/")"
+      rpmfile="$(rc_curl_fetch_pkg "${hd}" "acq-baseos-el${src}" "leapp-rhui-aws" "${cur_c_cert}" "${cur_c_key}" "${u}" "${caarg[@]}" "${hdr[@]}")"
+    fi
+    { [ -n "${rpmfile}" ] && [ -f "${rpmfile}" ]; } || return 1
+    ( cd "${hd}" && rpm2cpio "${rpmfile}" | cpio -idmu ) >/dev/null 2>&1
+    certT="$(find "${hd}" -type f -name "content-rhel${t}.crt" | head -1)"
+    keyT="$(find "${hd}" -type f -name "content-rhel${t}.key" | head -1)"
+    cfgT="$(find "${hd}" -type f -name "rhui-client-config-server-${t}.crt" | head -1)"
+    cfgkeyT="$(find "${hd}" -type f -name "rhui-client-config-server-${t}.key" | head -1)"
+    { [ -f "${certT}" ] && [ -f "${keyT}" ]; } || return 1
+    cp -p "${certT}" "${bundle}/content-rhel${t}.crt"
+    cp -p "${keyT}"  "${bundle}/content-rhel${t}.key"
+    cur_c_cert="${certT}"; cur_c_key="${keyT}"
+    [ -f "${cfgT}" ] && { cur_cfg_cert="${cfgT}"; cur_cfg_key="${cfgkeyT}"; }
+    src="${t}"
+  done
+  return 0
+}
+
+# rc_collect_containerprobe OUTDIR MAJOR - U2 + U3. DESTRUCTIVE-ish on the
+# (disposable) host: installs podman if absent, pulls UBI images. For the own
+# major and every newer major it stages a cert bundle + a SYNTHESIZED repo
+# file (rc_synth_repo_file), then measures the container's OWN dnf against
+# ONLY those repos (--disablerepo='*' --enablerepo='rhui-e0-*'): makecache,
+# then --downloadonly of the ENA build deps - exactly what the suite's
+# entitled container will have to do. On failure a curl diagnostic separates
+# authorization from networking. U2 = an in-container IMDS token PUT.
+rc_collect_containerprobe() {
+  local out="$1/containerprobe" major="$2"
+  local repo=/etc/yum.repos.d/redhat-rhui.repo sec tmpl region t img bundle rfile ubimaj
+  mkdir -p "${out}"
+  [ -f "${repo}" ] || { echo "skipped: ${repo} absent" > "${out}/SKIPPED.txt"; return 0; }
+  sec="$(awk '/^\[rhel-[0-9]+-baseos-rhui-rpms\]/{f=1;next} /^\[/{f=0} f' "${repo}")"
+  tmpl="$(printf '%s\n' "${sec}" | sed -n 's/^mirrorlist=//p' | head -1)"
+  region="$(rc_imds_get meta-data/placement/region)"
+  { [ -n "${tmpl}" ] && [ -n "${region}" ]; } || { echo "skipped: template/region unavailable" > "${out}/SKIPPED.txt"; return 0; }
+
+  # preflight: podman (host mutation; the instance is disposable by contract).
+  command -v podman >/dev/null 2>&1 \
+    || rc_run_long "${out}" c00-install-podman 'dnf -y install podman 2>&1 || yum -y install podman 2>&1'
+  command -v podman >/dev/null 2>&1 || { echo "podman unavailable" > "${out}/ABORTED.txt"; return 0; }
+
+  # U2: can a container reach IMDS at all? (IMDSv2 hop limit 1 drops bridged
+  # containers; this single number decides whether any in-container header
+  # generation is even possible.)
+  img="registry.access.redhat.com/ubi${major}/ubi"
+  rc_run_long "${out}" c01-pull-own "podman pull ${img} 2>&1"
+  # shellcheck disable=SC2016  # single quotes: the curl runs INSIDE the container
+  rc_run "${out}" c02-imds-from-container \
+    "podman run --rm ${img} curl -sS -m 5 -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' -o /dev/null -w '%{http_code}' http://169.254.169.254/latest/api/token 2>&1"
+
+  # bundle: own-major certs verbatim; newer majors via the proven forward chain.
+  bundle="${out}/bundle"; mkdir -p "${bundle}"
+  cp -p /etc/pki/rhui/cdn.redhat.com-chain.crt "${bundle}/" 2>/dev/null
+  cp -p "/etc/pki/rhui/product/content-rhel${major}.crt" "${bundle}/content-rhel${major}.crt" 2>/dev/null
+  cp -p "/etc/pki/rhui/content-rhel${major}.key" "${bundle}/content-rhel${major}.key" 2>/dev/null
+  for t in $(rc_chain_list "${major}"); do
+    rc_acquire_forward_certs "${bundle}" "${major}" "${t}" \
+      || { printf 'acquire failed for rhel%s\n' "${t}" >> "${out}/bundle-acquire.txt"; break; }
+  done
+  find "${bundle}" -maxdepth 1 -type f | sort > "${out}/bundle-contents.txt"
+
+  # U3: per-major container trial against ONLY the synthesized RHUI repos.
+  : > "${out}/CONTAINERPROBE.txt"
+  for t in ${major} $(rc_chain_list "${major}"); do
+    [ -f "${bundle}/content-rhel${t}.crt" ] || { printf 'rhel%s: no-cert (bundle acquire capped)\n' "${t}" >> "${out}/CONTAINERPROBE.txt"; continue; }
+    rfile="${bundle}/rhui-e0-rhel${t}.repo"
+    rc_synth_repo_file "${t}" "${region}" "${tmpl}" /run/rhui-e0 > "${rfile}"
+    ubimaj="${t}"; img="registry.access.redhat.com/ubi${ubimaj}/ubi"
+    rc_run_long "${out}" "c10-pull-rhel${t}" "podman pull ${img} 2>&1"
+    rc_run_long "${out}" "c11-makecache-rhel${t}" \
+      "podman run --rm -v '${bundle}:/run/rhui-e0:ro,Z' ${img} sh -c 'cp /run/rhui-e0/rhui-e0-rhel${t}.repo /etc/yum.repos.d/ && dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache 2>&1'"
+    rc_run_long "${out}" "c12-builddeps-rhel${t}" \
+      "podman run --rm -v '${bundle}:/run/rhui-e0:ro,Z' ${img} sh -c 'cp /run/rhui-e0/rhui-e0-rhel${t}.repo /etc/yum.repos.d/ && dnf -y --disablerepo=* --enablerepo=rhui-e0-* install --downloadonly --destdir=/tmp/dl kernel-devel gcc make elfutils-libelf-devel 2>&1'"
+    # diagnostic on failure: cert-only curl from INSIDE the container.
+    if [ "$(cat "${out}/c11-makecache-rhel${t}.rc" 2>/dev/null)" != 0 ]; then
+      # shellcheck disable=SC2016  # $releasever-free URL; curl runs inside the container
+      rc_run "${out}" "c13-diag-curl-rhel${t}" \
+        "podman run --rm -v '${bundle}:/run/rhui-e0:ro,Z' ${img} sh -c 'u=\$(sed -n s/^mirrorlist=//p /run/rhui-e0/rhui-e0-rhel${t}.repo | head -1); curl -sS -m 20 --cert /run/rhui-e0/content-rhel${t}.crt --key /run/rhui-e0/content-rhel${t}.key --cacert /run/rhui-e0/cdn.redhat.com-chain.crt -o /dev/null -w %{http_code} \"\$u\" 2>&1'"
+    fi
+    printf 'rhel%s: makecache_rc=%s builddeps_rc=%s\n' "${t}" \
+      "$(cat "${out}/c11-makecache-rhel${t}.rc" 2>/dev/null)" \
+      "$(cat "${out}/c12-builddeps-rhel${t}.rc" 2>/dev/null)" >> "${out}/CONTAINERPROBE.txt"
+  done
+}
+
+#------------------------------------------------------------------------------
 # Orchestration + packaging.
 #------------------------------------------------------------------------------
 rc_write_manifest() {
@@ -966,6 +1219,9 @@ rc_write_manifest() {
     printf '              acquisition proof; SUMMARY.txt has the verdicts (--chain).\n'
     printf '              primary blobs slimmed to sha256 + name list + slices\n'
     printf '              (--keep-metadata retains the raw blobs)\n'
+    printf '  authmatrix/ U1: cert/headers 2x2 auth matrix + RPM-body layer (--authmatrix)\n'
+    printf '  containerprobe/ U2+U3: in-container IMDS + synthesized-repo dnf trials\n'
+    printf '              per major, ENA build deps as the payload (--containerprobe)\n'
   } > "${out}/MANIFEST.txt"
 }
 
@@ -988,6 +1244,13 @@ Usage: sudo bash collect-aws-rhui-facts.sh [options]
   --keep-metadata  keep the raw primary metadata blobs (default: replaced by
                    sha256 + package-name list + <package> slices of the
                    packages of interest; the blobs are 81-115MB gz each)
+  --authmatrix     E0/U1: own-major auth matrix - repomd + RPM-body GETs with
+                   cert+headers / cert-only / headers-only / none, answering
+                   whether the identity headers are required at all
+  --containerprobe E0/U2+U3: installs podman, pulls UBI images, and measures a
+                   container's OWN dnf against SYNTHESIZED repo files + the
+                   per-major cert bundle (own major + every chain major).
+                   DESTRUCTIVE-ish; disposable instances only
   --no-pkgs        skip the download-only RPM package analysis (pkgs/)
   --no-crossmajor  skip the cross-major HTTPS reachability probe
   --no-eus         skip EUS/ELS repo enumeration
@@ -998,7 +1261,7 @@ EOF
 }
 
 rc_main() {
-  local major="" outdir="" do_leapp=0 do_cross=1 do_eus=1 do_chain=0 do_pkgs=1 keep=0
+  local major="" outdir="" do_leapp=0 do_cross=1 do_eus=1 do_chain=0 do_pkgs=1 keep=0 do_authmx=0 do_ctr=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --major)        major="$2"; shift 2 ;;
@@ -1008,6 +1271,8 @@ rc_main() {
       --chain)        do_chain=1; shift ;;
       --keep-rpms)    RC_KEEP_RPMS=1; shift ;;
       --keep-metadata) RC_KEEP_METADATA=1; shift ;;
+      --authmatrix)    do_authmx=1; shift ;;
+      --containerprobe) do_ctr=1; shift ;;
       --no-pkgs)      do_pkgs=0; shift ;;
       --no-crossmajor) do_cross=0; shift ;;
       --no-eus)       do_eus=0; shift ;;
@@ -1041,6 +1306,8 @@ rc_main() {
   [ "${do_eus}" = 1 ]   && { rc_collect_eus "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
   [ "${do_leapp}" = 1 ] && { rc_collect_leapp "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
   [ "${do_chain}" = 1 ] && { rc_collect_chain "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
+  [ "${do_authmx}" = 1 ] && { rc_collect_authmatrix "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
+  [ "${do_ctr}" = 1 ] && { rc_collect_containerprobe "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
 
   local archive
   archive="./aws-rhui-facts_${host}_rhel${major}_${ts}.tar.gz"

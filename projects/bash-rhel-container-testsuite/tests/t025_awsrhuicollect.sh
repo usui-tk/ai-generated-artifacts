@@ -229,6 +229,61 @@ assert_eq 0 "$?" "r81 reuse: build materials fetched via the already-downloaded 
 grep -q -- '--keep-metadata) RC_KEEP_METADATA=1' "${COLLECT}"
 assert_eq 0 "$?" "r81 reuse: --keep-metadata flag wired"
 
+# --- r82: E0 probes are wired (authmatrix + containerprobe) --------------------
+for fn in rc_synth_repo_file rc_authmatrix_cell rc_collect_authmatrix \
+          rc_acquire_forward_certs rc_collect_containerprobe; do
+  if declare -F "${fn}" >/dev/null 2>&1; then t_pass "r82 defined: ${fn}"; else t_fail "r82 missing: ${fn}"; fi
+done
+
+# --- r82: rc_synth_repo_file - both amazon-id plugin jobs done ahead of time ---
+# shellcheck disable=SC2016  # the template tokens are literal inputs the helper rewrites
+E0TMPL='https://rhui.REGION.aws.ce.redhat.com/pulp/mirror/content/dist/rhel8/rhui/$releasever/$basearch/baseos/os'
+synth="$(rc_synth_repo_file 9 ap-northeast-1 "${E0TMPL}" /run/rhui-e0)"
+case "${synth}" in *REGION*) t_fail "r82 synth: REGION literal must be substituted" ;; *) t_pass "r82 synth: REGION substituted (containers have no amazon-id plugin)" ;; esac
+# shellcheck disable=SC2016  # asserting the literal token is ABSENT
+case "${synth}" in *'$releasever'*) t_fail "r82 synth: \$releasever must be expanded" ;; *) t_pass "r82 synth: \$releasever expanded" ;; esac
+printf '%s\n' "${synth}" | grep -q 'dist/rhel9/rhui/9/x86_64/baseos/os'
+assert_eq 0 "$?" "r82 synth: target-major baseos path (rhel8 template -> rhel9)"
+printf '%s\n' "${synth}" | grep -q 'dist/rhel9/rhui/9/x86_64/appstream/os'
+assert_eq 0 "$?" "r82 synth: appstream section synthesized from the baseos template"
+n="$(printf '%s\n' "${synth}" | grep -c '^\[rhui-e0-rhel9-')"
+assert_eq 2 "${n}" "r82 synth: exactly two sections (baseos + appstream)"
+printf '%s\n' "${synth}" | grep -q '^sslclientcert=/run/rhui-e0/content-rhel9.crt$'
+assert_eq 0 "$?" "r82 synth: ssl paths point at the mounted bundle"
+printf '%s\n' "${synth}" | grep -q '^gpgcheck=1$'
+assert_eq 0 "$?" "r82 synth: gpgcheck stays ON (UBI ships the Red Hat GPG key)"
+
+# --- r82: authmatrix covers the full credential square + the RPM-body layer ----
+for cell in 'cert+headers' 'cert-only' 'headers-only' 'none'; do
+  if grep -q "rc_authmatrix_cell \"\${am}\" \"${cell}" "${COLLECT}"; then
+    t_pass "r82 authmatrix: cell '${cell}' measured"
+  else
+    t_fail "r82 authmatrix: cell '${cell}' missing"
+  fi
+done
+grep -q 'rpm-body cert-only' "${COLLECT}"
+assert_eq 0 "$?" "r82 authmatrix: RPM-body layer measured for the cert-only cell"
+
+# --- r82: authmatrix cell record shape (hermetic: unreachable endpoint) --------
+amx="$(mktemp -d)"
+rc_authmatrix_cell "${amx}/o.txt" "cert-only" http://127.0.0.1:1/ml "" ""
+grep -q '^cert-only: mirrorlist_http=000 repomd_http=no-mirror$' "${amx}/o.txt"
+assert_eq 0 "$?" "r82 authmatrix: unreachable endpoint recorded as 000/no-mirror"
+rm -rf "${amx}"
+
+# --- r82: containerprobe measures ONLY the synthesized repos -------------------
+grep -q -- '--disablerepo=\* --enablerepo=rhui-e0-\*' "${COLLECT}"
+assert_eq 0 "$?" "r82 containerprobe: dnf scoped to the synthesized repos only"
+grep -q 'latest/api/token' "${COLLECT}"
+assert_eq 0 "$?" "r82 containerprobe: U2 in-container IMDS token PUT present"
+grep -q 'kernel-devel gcc make elfutils-libelf-devel 2>&1' "${COLLECT}"
+assert_eq 0 "$?" "r82 containerprobe: payload is the ENA build-dep set"
+
+# --- r82: flags wired, off by default ------------------------------------------
+grep -q 'do_authmx=0 do_ctr=0' "${COLLECT}"; assert_eq 0 "$?" "r82 flags: E0 probes OFF by default"
+grep -q -- '--authmatrix)    do_authmx=1' "${COLLECT}"; assert_eq 0 "$?" "r82 flags: --authmatrix wired"
+grep -q -- '--containerprobe) do_ctr=1' "${COLLECT}"; assert_eq 0 "$?" "r82 flags: --containerprobe wired"
+
 # --- REGRESSION GUARD (r78): the chain probe is curl-native (no dnf) ----------
 # The chain must acquire/measure via curl only. If a future edit reintroduces a
 # dnf-driven chain step, cross-major breaks again (dnf failed three ways: 403,
