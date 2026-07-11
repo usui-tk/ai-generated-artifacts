@@ -6,28 +6,43 @@
 #   whether the suite's RHSM-entitled tests can run under RHUI instead. Output
 #   is a SINGLE tar.gz for offline analysis by Claude.
 #     Categories: (base) OS/repos/RHUI-client RPM/plugins/dnf-vars/repolist;
+#     (pkgs) RPM-file analysis of the RHUI/leapp packages WITHOUT installing
+#     them (download-only + rpm -q*p + payload extraction - answers "does
+#     leapp-rhui-aws ship certs or only repo files?" non-destructively);
 #     (certs) the FULL /etc/pki/rhui tree INCLUDING PRIVATE KEYS + openssl/rct
-#     decodes; (crossmajor) host-cert HTTPS reachability of OTHER majors'
-#     content paths; (eus) EUS/ELS/AUS/E4S repo enumeration; (leapp) a
-#     NON-DESTRUCTIVE `leapp preupgrade --no-rhsm` dry-run that materializes the
-#     N+1 major's repos (majors 7/8/9 only).
+#     decodes + a COVERAGE self-check (origin sha256 manifest vs the copies,
+#     plus every ssl* path referenced by any .repo checked for presence);
+#     (crossmajor) host-cert HTTPS reachability of OTHER majors' content paths;
+#     (eus) EUS/ELS/AUS/E4S repo enumeration; (leapp) an OPT-IN NON-DESTRUCTIVE
+#     `leapp preupgrade --no-rhsm` dry-run (majors 7/8/9); (chain) curl-native
+#     forward chain INCLUDING actual build-material RPM acquisition per
+#     reachable major (proof of obtainability, not just reachability).
 # ----- Prerequisites --------------------------------------------------------
 #   bash 4+, run as root on the target RHEL EC2 instance, curl, tar, openssl.
 #   Network egress to the region RHUI endpoint + IMDS. The instance is expected
 #   to be DISPOSABLE: --leapp installs packages and writes /var/log/leapp.
 # ----- Usage examples -------------------------------------------------------
-#   sudo bash collect-rhui-facts.sh                 # auto-detect major, full run
-#   sudo bash collect-aws-rhui-facts.sh --no-leapp      # skip the preupgrade dry-run
-#   sudo bash collect-aws-rhui-facts.sh --chain         # r74: 8->9->10 cert-chain probe
-#   sudo bash collect-rhui-facts.sh --major 8 --outdir /tmp/rhui
-#   sudo bash collect-rhui-facts.sh --no-crossmajor --no-eus
+#   sudo bash collect-aws-rhui-facts.sh             # auto-detect major, base collection
+#   sudo bash collect-aws-rhui-facts.sh --chain         # multi-hop cert-chain probe
+#   sudo bash collect-aws-rhui-facts.sh --chain --keep-rpms  # keep fetched RPM blobs
+#   sudo bash collect-aws-rhui-facts.sh --leapp         # opt-in preupgrade dry-run
+#   sudo bash collect-aws-rhui-facts.sh --major 8 --outdir /tmp/rhui
+#   sudo bash collect-aws-rhui-facts.sh --no-crossmajor --no-eus --no-pkgs
 # ----- Known limitations ----------------------------------------------------
 #   * The output tar.gz CONTAINS PRIVATE KEYS (RHUI entitlement credential).
 #     Treat it as a secret: never commit it, transfer over a secure channel.
-#   * leapp preupgrade is dry-run only; this script NEVER runs `leapp upgrade`.
-#     The EUS `--channel eus` preupgrade variant is out of scope here (base+eus
-#     enumeration captures the EUS repo shape; a dedicated channel preupgrade is
-#     a follow-up if the analysis needs it).
+#     (The keys are collected UNPROCESSED by explicit operator decision: the
+#     repository only ever receives this script, never a collected archive.)
+#   * leapp preupgrade (opt-in --leapp) is dry-run only; this script NEVER runs
+#     `leapp upgrade`. The EUS `--channel eus` preupgrade variant is out of
+#     scope here (base+eus enumeration captures the EUS repo shape).
+#   * The multi-hop chain (--chain) rides the in-spec N->N+1 leapp-rhui-aws
+#     cert bundling REPEATEDLY, which is OUT OF SPEC beyond N+1. It may work
+#     today and be closed by an RHUI-side change tomorrow; every archive is a
+#     point-in-time record, never a durability promise.
+#   * Build-material RPMs fetched by --chain are verified (HTTP status, sha256,
+#     rpm -qip) and then DELETED to keep the archive small; --keep-rpms keeps
+#     the blobs. leapp-rhui-aws carrier RPMs are always kept (chain evidence).
 #   * Network states are point-in-time. Real-RHUI E2E is the operator's task
 #     (this sandbox cannot reproduce RHUI responses).
 #   * AWS-SPECIFIC: the RHUI endpoint shape, the IMDS-signed instance-identity
@@ -59,7 +74,7 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.3.0"
+RC_TOOL_VERSION="1.4.0"
 RC_CLOUD="aws"   # this collector is AWS-specific; other clouds get sibling scripts
 RC_CMD_TIMEOUT="${RC_CMD_TIMEOUT:-120}"
 
@@ -191,9 +206,10 @@ rc_collect_base() {
   for pkg in rh-amazon-rhui-client rh-amazon-rhui-client-ha leapp-rhui-aws \
              amazon-libdnf-plugin subscription-manager; do
     rpm -q "${pkg}" >/dev/null 2>&1 || continue
-    rc_run "${out}" "s04-rpm-qi-${pkg}"      "rpm -qi ${pkg}"
-    rc_run "${out}" "s05-rpm-ql-${pkg}"      "rpm -ql ${pkg}"
-    rc_run "${out}" "s06-rpm-scripts-${pkg}" "rpm -q --scripts ${pkg}"
+    rc_run "${out}" "s04-rpm-qi-${pkg}"       "rpm -qi ${pkg}"
+    rc_run "${out}" "s05-rpm-ql-${pkg}"       "rpm -ql ${pkg}"
+    rc_run "${out}" "s06-rpm-scripts-${pkg}"  "rpm -q --scripts ${pkg}"
+    rc_run "${out}" "s06-rpm-triggers-${pkg}" "rpm -q --triggers ${pkg}"
   done
 
   # repolist (enabled + all) and per-repo info.
@@ -230,19 +246,115 @@ rc_collect_base() {
     printf 'instance-id=%s\n' "$(rc_imds_get meta-data/instance-id)"
     printf 'ami-id=%s\n' "$(rc_imds_get meta-data/ami-id)"
   } > "${out}/s12-imds.txt" 2>&1
+
+  # Dynamic plugin discovery: the fixed package list above can miss a
+  # generation-specific plugin shape. Reverse-map (rpm -qf) every file that
+  # actually lives in the pm plugin directories, so an unexpected owner shows
+  # up as a fact instead of a silent hole.
+  # shellcheck disable=SC2016  # $f expands inside rc_run's bash -c, not here
+  rc_run "${out}" s13-plugin-owners \
+    'for f in /usr/lib/python*/site-packages/dnf-plugins/* /usr/share/dnf-plugins/* /usr/lib/yum-plugins/* /usr/lib64/libdnf/plugins/* /etc/dnf/plugins/* /etc/yum/pluginconf.d/*; do [ -e "$f" ] || continue; printf "%s -> %s\n" "$f" "$(rpm -qf "$f" 2>&1)"; done'
+  rc_run "${out}" s14-rhui-pkg-sweep 'rpm -qa 2>/dev/null | grep -iE "amazon|rhui|leapp" | sort; true'
+}
+
+# rc_collect_pkgs OUTDIR MAJOR - RPM-FILE analysis WITHOUT installing anything:
+# download-only acquisition of the RHUI/leapp packages, then rpm -qip / -qlp /
+# -qp --scripts / -qp --triggers on the FILES, then payload extraction
+# (rpm2cpio) so the exact shipped .repo/cert/plugin material is in the archive.
+# This answers the memo's item 7 ("does leapp-rhui-aws update certs, or only
+# repo files?") with zero mutation of the host. Keys inside payloads are kept
+# unprocessed (same operator decision as certs/).
+rc_collect_pkgs() {
+  local out="$1/pkgs" major="$2" pm pkg dl rpmf name
+  pm="$(rc_pm_for_major "${major}")" || pm=dnf
+  mkdir -p "${out}/rpms"
+  for pkg in rh-amazon-rhui-client rh-amazon-rhui-client-ha leapp-rhui-aws \
+             amazon-libdnf-plugin; do
+    dl="${out}/rpms"
+    # Download-only, two ladders per pm family; every rung's rc is recorded.
+    if [ "${pm}" = dnf ]; then
+      rc_run "${out}" "p01-download-${pkg}" \
+        "dnf -y download --destdir '${dl}' ${pkg} 2>&1 || dnf -y install --downloadonly --destdir='${dl}' ${pkg} 2>&1"
+    else
+      rc_run "${out}" "p01-download-${pkg}" \
+        "yumdownloader --destdir '${dl}' ${pkg} 2>&1 || yum -y install --downloadonly --downloaddir='${dl}' ${pkg} 2>&1"
+    fi
+    # Analyze exactly the file(s) matching this package name (deps that
+    # --downloadonly may have pulled are left in rpms/ as-is - more facts).
+    for rpmf in "${dl}/${pkg}"-[0-9]*.rpm; do
+      [ -e "${rpmf}" ] || continue
+      name="$(basename "${rpmf}" .rpm)"
+      rc_run "${out}" "p02-rpm-qip-${name}"      "rpm -qip '${rpmf}'"
+      rc_run "${out}" "p03-rpm-qlp-${name}"      "rpm -qlp '${rpmf}'"
+      rc_run "${out}" "p04-rpm-scripts-${name}"  "rpm -qp --scripts '${rpmf}'"
+      rc_run "${out}" "p05-rpm-triggers-${name}" "rpm -qp --triggers '${rpmf}'"
+      rc_run "${out}" "p06-rpm-sha256-${name}"   "sha256sum '${rpmf}'"
+      mkdir -p "${out}/payload/${name}"
+      rc_run "${out}" "p07-extract-${name}" \
+        "cd '${out}/payload/${name}' && rpm2cpio '${rpmf}' | cpio -idmu 2>&1"
+      rc_run "${out}" "p08-payload-find-${name}" \
+        "find '${out}/payload/${name}' -type f | sort"
+    done
+  done
 }
 
 # rc_collect_certs OUTDIR - FULL /etc/pki/rhui tree INCLUDING PRIVATE KEYS
 # (operator decision) plus openssl x509 / rct decodes. The archive is a secret.
 rc_collect_certs() {
-  local out="$1/certs" d f
+  local out="$1/certs" d f cov rel osum csum miss=0 mism=0 total=0 p
   mkdir -p "${out}/pki"
-  # Verbatim copy (keys included). --parents keeps the /etc/pki/... layout.
+  cov="${out}/COVERAGE.txt"
+  # 1) ORIGIN manifest FIRST: what exists on the host, with sha256, before any
+  #    copy. "Unprocessed data" is only claimable if the archive itself can
+  #    prove the copies match the origin.
+  : > "${out}/origin-sha256.txt"
   for d in /etc/pki/rhui /etc/pki/entitlement /etc/pki/product \
            /etc/pki/product-default; do
     [ -d "${d}" ] || continue
-    cp -rp --parents "${d}" "${out}/pki/" 2>/dev/null
+    find "${d}" -type f -print0 2>/dev/null | sort -z \
+      | xargs -0 -r sha256sum >> "${out}/origin-sha256.txt" 2>>"${out}/origin-errors.txt"
   done
+  # 2) Verbatim copy (keys included) with the rc RECORDED, not swallowed.
+  : > "${cov}"
+  for d in /etc/pki/rhui /etc/pki/entitlement /etc/pki/product \
+           /etc/pki/product-default; do
+    [ -d "${d}" ] || { printf 'ABSENT-DIR: %s\n' "${d}" >> "${cov}"; continue; }
+    cp -rp --parents "${d}" "${out}/pki/" 2>>"${out}/origin-errors.txt"
+    printf 'COPY: %s rc=%s\n' "${d}" "$?" >> "${cov}"
+  done
+  # 3) Coverage diff: every origin file must exist in the copy with the SAME
+  #    sha256. missing=0 mismatch=0 is the only healthy verdict.
+  while IFS= read -r rel; do
+    osum="${rel%%  *}"; p="${rel#*  }"
+    total=$((total + 1))
+    if [ ! -f "${out}/pki${p}" ]; then
+      printf 'MISSING: %s\n' "${p}" >> "${cov}"; miss=$((miss + 1)); continue
+    fi
+    csum="$(sha256sum "${out}/pki${p}" 2>/dev/null)"; csum="${csum%%  *}"
+    if [ "${osum}" != "${csum}" ]; then
+      printf 'MISMATCH: %s origin=%s copy=%s\n' "${p}" "${osum}" "${csum}" >> "${cov}"
+      mism=$((mism + 1))
+    fi
+  done < "${out}/origin-sha256.txt"
+  local cverdict=INCOMPLETE
+  if [ "${total}" = 0 ]; then cverdict=EMPTY
+  elif [ "${miss}" = 0 ] && [ "${mism}" = 0 ]; then cverdict=OK; fi
+  printf 'coverage: total=%s missing=%s mismatch=%s verdict=%s\n' \
+    "${total}" "${miss}" "${mism}" "${cverdict}" >> "${cov}"
+  # 4) Repo-reference closure: every ssl* path any .repo points at must exist
+  #    on the host AND be inside the collected set - a referenced-but-uncollected
+  #    credential is exactly the hole this check exists to catch.
+  while IFS= read -r p; do
+    [ -n "${p}" ] || continue
+    if [ ! -e "${p}" ]; then
+      printf 'REPO-REF-DANGLING: %s (referenced by a .repo, absent on host)\n' "${p}" >> "${cov}"
+    elif [ -f "${out}/pki${p}" ]; then
+      printf 'REPO-REF-OK: %s\n' "${p}" >> "${cov}"
+    else
+      printf 'REPO-REF-UNCOLLECTED: %s (exists on host, outside collected dirs)\n' "${p}" >> "${cov}"
+    fi
+  done < <(sed -n 's/^ssl\(clientcert\|clientkey\|cacert\)=//p' \
+             /etc/yum.repos.d/*.repo 2>/dev/null | sort -u)
   # x509 decode (full -text: subject/issuer/serial/validity/SAN/keyusage/EKU).
   : > "${out}/x509-decode.txt"
   for f in /etc/pki/rhui/*.pem /etc/pki/rhui/*.crt \
@@ -546,6 +658,49 @@ rc_rhui_config_url() {
     -e "s#\\\$basearch#x86_64#g"
 }
 
+# rc_fetch_build_materials HD T BASE_URL APP_URL CERT KEY EXTRA... - prove
+# OBTAINABILITY, not just reachability: for every build-dep the scan located,
+# curl-download the actual RPM, record HTTP status + sha256 + rpm -qip, then
+# delete the blob (RC_KEEP_RPMS=1 keeps it). A 200 on repomd and a 200 on the
+# RPM body are separate authorization layers; only the download closes the gap
+# between "listed in primary" and "the suite could really build from here".
+# Prints 'ok=X total=Y' for the caller's SUMMARY line.
+rc_fetch_build_materials() {
+  local hd="$1" t="$2" base_url="$3" app_url="$4" cert="$5" key="$6"; shift 6
+  local out="${hd}/build-materials.txt" scan="${hd}/builddep-scan.txt"
+  local line p where u rpmf sum nvr ok=0 total=0
+  : > "${out}"
+  if [ ! -f "${scan}" ]; then
+    printf 'skipped: builddep-scan.txt absent\n' >> "${out}"
+    printf 'ok=0 total=0'; return 0
+  fi
+  while IFS= read -r line; do
+    p="${line%%:*}"; where="$(printf '%s' "${line#*: }" | tr -d '[:space:]')"
+    total=$((total + 1))
+    case "${where}" in
+      baseos)    u="${base_url}" ;;
+      appstream) u="${app_url}" ;;
+      *) printf '%s: SKIP (scan=%s)\n' "${p}" "${where}" >> "${out}"; continue ;;
+    esac
+    rpmf="$(rc_curl_fetch_pkg "${hd}/materials" "mat-rhel${t}-${p}" "${p}" \
+             "${cert}" "${key}" "${u}" "$@")" || true
+    if [ -z "${rpmf}" ] || [ ! -f "${rpmf}" ]; then
+      printf '%s: FETCH-FAILED (repo=%s; see materials/mat-rhel%s-%s-fetch.txt)\n' \
+        "${p}" "${where}" "${t}" "${p}" >> "${out}"
+      continue
+    fi
+    sum="$(sha256sum "${rpmf}" 2>/dev/null)"; sum="${sum%% *}"
+    nvr="$(rpm -qp "${rpmf}" 2>/dev/null)" || true
+    rpm -qip "${rpmf}" > "${hd}/materials/mat-rhel${t}-${p}-qip.txt" 2>&1
+    printf '%s: OK repo=%s nvr=%s sha256=%s\n' \
+      "${p}" "${where}" "${nvr:-unreadable}" "${sum:-none}" >> "${out}"
+    ok=$((ok + 1))
+    [ "${RC_KEEP_RPMS:-0}" = 1 ] || rm -f "${rpmf}"
+  done < "${scan}"
+  printf 'summary: ok=%s total=%s keep_rpms=%s\n' "${ok}" "${total}" "${RC_KEEP_RPMS:-0}" >> "${out}"
+  printf 'ok=%s total=%s' "${ok}" "${total}"
+}
+
 # rc_collect_chain OUTDIR MAJOR - CURL-NATIVE, DATA-GROUNDED forward chain (r79).
 # Verifies how many majors a host of MAJOR N can reach: its own + every newer
 # major (el8 -> 8,9,10 ; el9 -> 9,10 ; el10 -> 10). Derived entirely from the
@@ -568,8 +723,7 @@ rc_collect_chain() {
   local csec c_tmpl ca c_cert_own c_key_own
   local cfgsec cfg_tmpl cfg_cert_own cfg_key_own
   local region caarg=() hdr=() id_doc id_sig
-  local bdir_default=/usr/share/leapp-repository/repositories/system_upgrade/common/files/rhui/aws
-  local chain _chain=() src t hop=0 hd ohd bdir verdict
+  local chain _chain=() src t hop=0 hd ohd verdict mats
   local cur_c_cert cur_c_key cur_cfg_cert cur_cfg_key
   local cand where rest u cc ck rpmfile certT keyT cfgT cfgkeyT cfg_url base_url app_url
   mkdir -p "${out}"
@@ -611,9 +765,13 @@ rc_collect_chain() {
   rc_curl_repo_enum "${ohd}" "curl-rhel${major}-baseos" "${c_cert_own}" "${c_key_own}" "${base_url}" "${caarg[@]}" "${hdr[@]}"
   rc_curl_repo_enum "${ohd}" "curl-rhel${major}-appstream" "${c_cert_own}" "${c_key_own}" "${app_url}" "${caarg[@]}" "${hdr[@]}"
   rc_builddep_scan "${ohd}" "${major}" kernel-devel gcc make elfutils-libelf-devel
+  mats="$(rc_fetch_build_materials "${ohd}" "${major}" "${base_url}" "${app_url}" \
+           "${c_cert_own}" "${c_key_own}" "${caarg[@]}" "${hdr[@]}")"
   verdict="$(sed -n 's/^repomd_http=//p' "${ohd}/curl-rhel${major}-baseos-curl-enum.txt" 2>/dev/null | head -1)"
-  printf 'target=%s (own) curl_baseos_repomd_http=%s\n' "${major}" "${verdict:-none}" > "${ohd}/RESULT.txt"
-  printf 'rhel%s: repomd=%s (own major, own content cert)\n' "${major}" "${verdict:-none}" >> "${out}/SUMMARY.txt"
+  printf 'target=%s (own) curl_baseos_repomd_http=%s build_materials=%s\n' \
+    "${major}" "${verdict:-none}" "${mats}" > "${ohd}/RESULT.txt"
+  printf 'rhel%s: repomd=%s build-materials %s (own major, own content cert)\n' \
+    "${major}" "${verdict:-none}" "${mats}" >> "${out}/SUMMARY.txt"
 
   if [ -z "${chain}" ]; then
     printf 'reachable_majors=1 (rhel%s only; top of the line, no downstream)\n' "${major}" >> "${out}/SUMMARY.txt"
@@ -651,11 +809,20 @@ rc_collect_chain() {
     if [ -n "${rpmfile}" ] && [ -f "${rpmfile}" ]; then
       rc_run "${hd}" a01-extract "cd '${hd}' && rpm2cpio '${rpmfile}' | cpio -idmu 2>&1"
     fi
-    bdir="${hd}${bdir_default}"
-    rc_run "${hd}" a02-bundle-contents "ls -la '${bdir}' 2>&1"
-    certT="${bdir}/content-rhel${t}.crt"; keyT="${bdir}/content-rhel${t}.key"
-    cfgT="${bdir}/rhui-client-config-server-${t}.crt"; cfgkeyT="${bdir}/rhui-client-config-server-${t}.key"
-    if [ ! -f "${certT}" ]; then
+    # Discover the bundled certs by SEARCHING the extracted payload, not by
+    # trusting a hardcoded path: a packaging-layout change must surface as a
+    # NOT-ACQUIRED fact, not as a silent miss at a stale path.
+    rc_run "${hd}" a02-bundle-contents \
+      "find '${hd}' -type f \\( -name '*.crt' -o -name '*.key' -o -name '*.repo' \\) | sort"
+    certT="$(find "${hd}" -type f -name "content-rhel${t}.crt" 2>/dev/null | head -1)"
+    keyT="$(find "${hd}" -type f -name "content-rhel${t}.key" 2>/dev/null | head -1)"
+    cfgT="$(find "${hd}" -type f -name "rhui-client-config-server-${t}.crt" 2>/dev/null | head -1)"
+    cfgkeyT="$(find "${hd}" -type f -name "rhui-client-config-server-${t}.key" 2>/dev/null | head -1)"
+    {
+      printf 'discovered content_cert=%s\ndiscovered content_key=%s\n' "${certT:-<none>}" "${keyT:-<none>}"
+      printf 'discovered config_cert=%s\ndiscovered config_key=%s\n' "${cfgT:-<none>}" "${cfgkeyT:-<none>}"
+    } >> "${hd}/hop.txt"
+    if [ ! -f "${certT}" ] || [ ! -f "${keyT}" ]; then
       printf 'STOP: content-rhel%s not acquired via curl from any major-%s repo (chain caps here)\n' "${t}" "${src}" > "${hd}/RESULT.txt"
       printf 'rhel%s: NOT-ACQUIRED (content-rhel%s carrier unreachable from major-%s)\n' "${t}" "${t}" "${src}" >> "${out}/SUMMARY.txt"
       break
@@ -667,9 +834,13 @@ rc_collect_chain() {
     rc_curl_repo_enum "${hd}" "curl-rhel${t}-baseos" "${certT}" "${keyT}" "${base_url}" "${caarg[@]}" "${hdr[@]}"
     rc_curl_repo_enum "${hd}" "curl-rhel${t}-appstream" "${certT}" "${keyT}" "${app_url}" "${caarg[@]}" "${hdr[@]}"
     rc_builddep_scan "${hd}" "${t}" kernel-devel gcc make elfutils-libelf-devel
+    mats="$(rc_fetch_build_materials "${hd}" "${t}" "${base_url}" "${app_url}" \
+             "${certT}" "${keyT}" "${caarg[@]}" "${hdr[@]}")"
     verdict="$(sed -n 's/^repomd_http=//p' "${hd}/curl-rhel${t}-baseos-curl-enum.txt" 2>/dev/null | head -1)"
-    printf 'target=%s curl_baseos_repomd_http=%s content_cert=%s\n' "${t}" "${verdict:-none}" "${certT}" > "${hd}/RESULT.txt"
-    printf 'rhel%s: repomd=%s (content-rhel%s acquired from major-%s)\n' "${t}" "${verdict:-none}" "${t}" "${src}" >> "${out}/SUMMARY.txt"
+    printf 'target=%s curl_baseos_repomd_http=%s build_materials=%s content_cert=%s\n' \
+      "${t}" "${verdict:-none}" "${mats}" "${certT}" > "${hd}/RESULT.txt"
+    printf 'rhel%s: repomd=%s build-materials %s (content-rhel%s acquired from major-%s)\n' \
+      "${t}" "${verdict:-none}" "${mats}" "${t}" "${src}" >> "${out}/SUMMARY.txt"
     if [ "${verdict}" != 200 ]; then
       printf 'STOP: rhel%s content NOT authorized from billing-%s host.\n' "${t}" "${major}" >> "${hd}/RESULT.txt"; break
     fi
@@ -695,13 +866,18 @@ rc_write_manifest() {
     printf '\n*** SECURITY: this archive contains PRIVATE KEYS (RHUI entitlement\n'
     printf '    credential). Treat as a secret - do NOT commit; transfer securely. ***\n\n'
     printf 'sections:\n'
-    printf '  base/       OS, repos, RHUI-client RPM (-qi/-ql/--scripts), plugins, dnf vars, IMDS\n'
-    printf '  certs/      FULL /etc/pki/rhui incl. keys + openssl/rct decodes\n'
+    printf '  base/       OS, repos, RHUI-client RPM (-qi/-ql/--scripts/--triggers),\n'
+    printf '              plugin owners (rpm -qf sweep), dnf vars, IMDS\n'
+    printf '  pkgs/       download-only RPM-file analysis (rpm -q*p) + extracted payloads\n'
+    printf '              of the RHUI/leapp packages - nothing installed\n'
+    printf '  certs/      FULL /etc/pki/rhui incl. keys + openssl/rct decodes +\n'
+    printf '              COVERAGE.txt (origin sha256 vs copies; .repo ssl* closure)\n'
     printf '  crossmajor/ host-cert HTTPS reachability of other majors (rhel99=control)\n'
     printf '  eus/        EUS/ELS/AUS/E4S repo enumeration\n'
-    printf '  leapp/      non-destructive "leapp preupgrade --no-rhsm" straddle (7/8/9)\n'
+    printf '  leapp/      OPT-IN non-destructive "leapp preupgrade --no-rhsm" straddle (7/8/9)\n'
     printf '  chain/      curl-native forward chain: own major + every newer major reachable\n'
-    printf '              (el8->3, el9->2, el10->1); SUMMARY.txt has the verdicts (--chain)\n'
+    printf '              (el8->3, el9->2, el10->1) + per-major build-material RPM\n'
+    printf '              acquisition proof; SUMMARY.txt has the verdicts (--chain)\n'
   } > "${out}/MANIFEST.txt"
 }
 
@@ -710,11 +886,18 @@ rc_usage() {
 Usage: sudo bash collect-aws-rhui-facts.sh [options]
   --major N        RHEL major (6-10); default: auto-detect from /etc/redhat-release
   --outdir DIR     working directory; default: a mktemp dir
-  --no-leapp       skip the leapp preupgrade dry-run (majors 7/8/9)
+  --leapp          OPT-IN: run the leapp preupgrade dry-run (majors 7/8/9;
+                   installs the leapp engine packages - default is OFF because
+                   pkgs/ already analyzes leapp-rhui-aws without installing)
+  --no-leapp       explicit off (accepted for compatibility; off is the default)
   --chain          curl-native forward-chain probe: how many majors this host
                    can reach (its own + every newer one: el8->8,9,10 ; el9->9,10
-                   ; el10->10). curl + client cert only, no dnf. See chain/
-                   SUMMARY.txt. Heavy; implies --no-leapp.
+                   ; el10->10), INCLUDING actual build-material RPM downloads
+                   per reachable major (verified sha256 + rpm -qip, blobs then
+                   deleted). curl + client cert only, no dnf. See chain/
+                   SUMMARY.txt.
+  --keep-rpms      keep the downloaded build-material RPM blobs in the archive
+  --no-pkgs        skip the download-only RPM package analysis (pkgs/)
   --no-crossmajor  skip the cross-major HTTPS reachability probe
   --no-eus         skip EUS/ELS repo enumeration
   --keep-outdir    do not delete the working dir after packing
@@ -724,13 +907,16 @@ EOF
 }
 
 rc_main() {
-  local major="" outdir="" do_leapp=1 do_cross=1 do_eus=1 do_chain=0 keep=0
+  local major="" outdir="" do_leapp=0 do_cross=1 do_eus=1 do_chain=0 do_pkgs=1 keep=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --major)        major="$2"; shift 2 ;;
       --outdir)       outdir="$2"; shift 2 ;;
+      --leapp)        do_leapp=1; shift ;;
       --no-leapp)     do_leapp=0; shift ;;
-      --chain)        do_chain=1; do_leapp=0; shift ;;
+      --chain)        do_chain=1; shift ;;
+      --keep-rpms)    RC_KEEP_RPMS=1; shift ;;
+      --no-pkgs)      do_pkgs=0; shift ;;
       --no-crossmajor) do_cross=0; shift ;;
       --no-eus)       do_eus=0; shift ;;
       --keep-outdir)  keep=1; shift ;;
@@ -757,6 +943,7 @@ rc_main() {
   rc_imds_token
   rc_write_manifest "${outdir}" "${major}" "${host}" "${ts}"
   { rc_collect_base "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
+  [ "${do_pkgs}" = 1 ]  && { rc_collect_pkgs "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
   { rc_collect_certs "${outdir}"; } 2>> "${outdir}/collect.log"
   [ "${do_cross}" = 1 ] && { rc_collect_crossmajor "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"
   [ "${do_eus}" = 1 ]   && { rc_collect_eus "${outdir}" "${major}"; } 2>> "${outdir}/collect.log"

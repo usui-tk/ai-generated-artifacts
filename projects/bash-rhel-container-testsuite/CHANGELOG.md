@@ -13,6 +13,78 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r80] - 2026-07-11 - feat: collector v1.4.0 - pkgs analysis, coverage self-check, build-material acquisition proof
+
+Session goal (operator-adjudicated design): decide whether the suite's
+RHSM-entitled tests can run under AWS RHUI instead. The reachability model is
+now explicit: RHUI authorizes ONLY the host's own major; leapp-rhui-aws for
+major N bundles N+1's certs (in-spec); chaining that bundling repeatedly
+(N+2 and beyond, OUT OF SPEC) may let one el8 host reach 8/9/10 - enough
+scope to source the suite's build materials from a single host. The collector
+must therefore prove OBTAINABILITY (actual RPM downloads), not just
+reachability, and its archives must be self-verifying (the operator shares
+them as unprocessed primary data).
+
+### Added
+- **`pkgs/` section (`rc_collect_pkgs`)** - download-only RPM-FILE analysis of
+  `rh-amazon-rhui-client(-ha)` / `leapp-rhui-aws` / `amazon-libdnf-plugin`:
+  `rpm -qip / -qlp / -qp --scripts / -qp --triggers` + sha256 + full payload
+  extraction (rpm2cpio). Answers "does leapp-rhui-aws ship certs or only repo
+  files?" with ZERO host mutation - `leapp-rhui-aws` is analyzed even though
+  it is never installed by default (the r73-r79 collector silently skipped
+  not-installed packages).
+- **certs COVERAGE self-verification** - origin `find`+sha256 manifest taken
+  BEFORE the copy, `cp` exit status RECORDED (was swallowed by `2>/dev/null`),
+  per-file origin-vs-copy sha256 diff (`MISSING:`/`MISMATCH:` lines,
+  `verdict=OK|INCOMPLETE|EMPTY`), and a `.repo` ssl* closure check: every
+  `sslclientcert/sslclientkey/sslcacert` path any repo references is
+  classified `REPO-REF-OK` / `REPO-REF-DANGLING` / `REPO-REF-UNCOLLECTED`.
+  An archive can now prove, by itself, that it is a faithful copy. Mutation-
+  verified in the sandbox (a shadowed `cp` dropping / tampering one file is
+  caught as INCOMPLETE).
+- **build-material acquisition proof (`rc_fetch_build_materials`)** - for the
+  own major and every chain hop, the build deps the scan located (kernel-devel
+  / gcc / make / elfutils-libelf-devel) are ACTUALLY curl-downloaded and
+  verified (HTTP status, sha256, `rpm -qip`); repomd-200 and RPM-body-200 are
+  separate authorization layers and only the download closes the gap. Blobs
+  are deleted after verification (`--keep-rpms` keeps them); `SUMMARY.txt`
+  now carries `build-materials ok=X total=Y` per major.
+- **base/**: `rpm -q --triggers` per installed package (the memo's Trigger
+  item was uncovered) + dynamic plugin discovery (`rpm -qf` reverse map of
+  every file physically present in the dnf/yum/libdnf plugin directories +
+  an `rpm -qa` amazon/rhui/leapp sweep) - a generation-specific plugin shape
+  now surfaces as a fact instead of a fixed-list hole.
+
+### Changed
+- **chain bundle-cert discovery is find-based** - the hardcoded
+  `/usr/share/leapp-repository/.../rhui/aws` payload path is gone; certs are
+  discovered by searching the extracted tree and the discovered paths are
+  recorded in `hop.txt`. A packaging-layout change now yields NOT-ACQUIRED,
+  not a silent miss. The STOP condition requires cert AND key.
+- **leapp preupgrade dry-run is OPT-IN** (`--leapp`; default OFF, was ON) -
+  pkgs/ analyzes leapp-rhui-aws non-destructively, so installing the leapp
+  engine is now an explicit operator decision. `--no-leapp` kept for
+  compatibility. `--chain` no longer implies anything about leapp.
+- Collector v1.3.0 -> **v1.4.0**; MANIFEST/usage/header rewritten (including
+  the explicit operator decision on unprocessed private-key collection and
+  the out-of-spec durability caveat on the multi-hop chain).
+
+### Notes
+- t025 -> 57 assertions (18 new r80 invariants incl. a hermetic
+  `rc_fetch_build_materials` fixture pass). TESTING.md baseline 688.
+  Gate 688/0/0 (25 tiers), shellcheck -S style clean, bash -n clean,
+  doc-gate PASS.
+- Grounded on the operator's 2026-07-04 ENTITLEMENT-PROBE archive (RHEL 10.2
+  RHUI host + UBI 6-10 x auto/mounts/docmounts): own-cert 403 on every other
+  major, the `REGION`-literal DNS failure class in mount modes, and the
+  `amazon-id.py` header/substitution behavior were all re-verified from the
+  primary data this session (r73-r79 conclusions treated as untrusted until
+  re-evidenced).
+- Operator next step: run `sudo bash collect-aws-rhui-facts.sh --chain` on
+  disposable el8/el9/el10 hosts (ap-northeast-1) and share the three tar.gz
+  archives; expected reachable-major counts 3/2/1 with per-major
+  build-material `ok=4`.
+
 ## [r79] - 2026-07-08 - refactor: data-grounded curl-native FORWARD chain (own + newer majors) (collector v1.3.0)
 
 Rebuilt the chain probe from the collected archives (r73 el8/el9/el10 full

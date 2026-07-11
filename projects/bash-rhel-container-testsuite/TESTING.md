@@ -126,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 670 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 688 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -389,7 +389,15 @@ so results are host-independent and deterministic.
   (`rc_collect_chain`/`rc_curl_repo_enum`/`rc_count_packages`/`rc_run_long`);
   r75 adds guards that the synthesized chain repo ids keep the `rhui-` token
   (the amazon-id plugin injects the IMDS identity only for `rhui-` repos);
-  39 assertions total.
+  r80 adds the v1.4.0 invariants: `rc_collect_pkgs` / `rc_fetch_build_materials`
+  presence, RPM-FILE analysis (`rpm -qip` / `--triggers`) instead of install
+  state, the certs COVERAGE machinery (origin sha256 manifest, recorded `cp`
+  rc, `.repo` ssl* closure), find-based bundle-cert discovery (the hardcoded
+  payload path is asserted GONE), two `rc_fetch_build_materials` call sites
+  (own major + every hop), default RPM-blob deletion, a hermetic fixture pass
+  of the fetch helper (NOT-FOUND scan -> `ok=0`, absent scan -> recorded skip),
+  and leapp preupgrade being OPT-IN (`do_leapp=0` default, `--leapp` flag);
+  57 assertions total.
 
 ---
 
@@ -601,7 +609,7 @@ The full suite is green in the planning sandbox:
 ---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
 ---- t025_awsrhuicollect.sh ----   ## RESULT pass=39 fail=0 skip=0
-SUITE: 670 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 688 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 **L0 fixed count = 51 shell files** (every `.sh` in the project, incl. the 3 root

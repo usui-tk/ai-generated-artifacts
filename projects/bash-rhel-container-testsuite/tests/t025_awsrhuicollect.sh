@@ -106,6 +106,54 @@ assert_eq "ok" "${hits}" "safety: no 'leapp upgrade' invocation in the collector
 # And the dry-run call is present.
 grep -Eq 'leapp preupgrade' "${COLLECT}"; assert_eq 0 "$?" "safety: 'leapp preupgrade' dry-run is present"
 
+# --- r80: v1.4.0 collectors are wired -----------------------------------------
+for fn in rc_collect_pkgs rc_fetch_build_materials; do
+  if declare -F "${fn}" >/dev/null 2>&1; then t_pass "r80 defined: ${fn}"; else t_fail "r80 missing: ${fn}"; fi
+done
+
+# --- r80: pkgs/ analyzes RPM FILES, never the install state -------------------
+grep -q 'rpm -qip' "${COLLECT}";           assert_eq 0 "$?" "r80 pkgs: rpm -qip on downloaded files"
+grep -q 'rpm -qp --triggers' "${COLLECT}"; assert_eq 0 "$?" "r80 pkgs: --triggers captured from files"
+grep -q 'rpm -q --triggers' "${COLLECT}";  assert_eq 0 "$?" "r80 base: --triggers captured from installed pkgs"
+
+# --- r80: certs/ coverage self-verification (origin manifest vs copies) --------
+grep -q 'origin-sha256.txt' "${COLLECT}"; assert_eq 0 "$?" "r80 coverage: origin sha256 manifest exists"
+grep -q 'COVERAGE.txt' "${COLLECT}";      assert_eq 0 "$?" "r80 coverage: COVERAGE.txt verdict file exists"
+grep -q 'REPO-REF-UNCOLLECTED' "${COLLECT}"; assert_eq 0 "$?" "r80 coverage: .repo ssl* closure check exists"
+# The cp rc must be RECORDED, not swallowed into /dev/null-only.
+grep -q "printf 'COPY: %s rc=%s" "${COLLECT}"; assert_eq 0 "$?" "r80 coverage: cp exit status recorded"
+
+# --- r80: chain discovers bundle certs by find, never a hardcoded path ---------
+if grep -q 'bdir_default' "${COLLECT}"; then
+  t_fail "r80 chain: hardcoded bundle path must be gone (find-based discovery)"
+else
+  t_pass "r80 chain: hardcoded bundle path removed (find-based discovery)"
+fi
+# shellcheck disable=SC2016  # the ${hd}/${t} tokens are asserted LITERALLY in the collector source
+grep -q 'find "${hd}" -type f -name "content-rhel${t}.crt"' "${COLLECT}"
+assert_eq 0 "$?" "r80 chain: content cert discovered via find in extracted payload"
+
+# --- r80: chain proves OBTAINABILITY (build-material RPM downloads) ------------
+# shellcheck disable=SC2016  # literal '${' distinguishes call sites from the definition line
+n="$(grep -c 'rc_fetch_build_materials "\${' "${COLLECT}")"
+assert_eq 2 "${n}" "r80 chain: build materials fetched for own major AND every hop (2 call sites)"
+grep -q 'RC_KEEP_RPMS:-0' "${COLLECT}"; assert_eq 0 "$?" "r80 chain: RPM blobs deleted by default (--keep-rpms opt-in)"
+
+# --- r80: rc_fetch_build_materials fixture (hermetic; no network) --------------
+fbd="$(mktemp -d)"
+printf 'kernel-devel: NOT-FOUND\ngcc: NOT-FOUND\n' > "${fbd}/builddep-scan.txt"
+res="$(rc_fetch_build_materials "${fbd}" 9 http://unused http://unused /no/cert /no/key)"
+assert_eq "ok=0 total=2" "${res}" "r80 fetch: NOT-FOUND scan -> ok=0 total=2, nothing fetched"
+grep -q 'kernel-devel: SKIP' "${fbd}/build-materials.txt"
+assert_eq 0 "$?" "r80 fetch: NOT-FOUND entries recorded as SKIP facts"
+res="$(rc_fetch_build_materials "${fbd}/nodir" 9 u u c k 2>/dev/null)"
+assert_eq "ok=0 total=0" "${res}" "r80 fetch: absent scan file -> recorded skip, rc 0"
+rm -rf "${fbd}"
+
+# --- r80: leapp preupgrade is OPT-IN (default off) ------------------------------
+grep -q 'do_leapp=0 do_cross=1' "${COLLECT}"; assert_eq 0 "$?" "r80 leapp: default OFF in rc_main"
+grep -q -- '--leapp)        do_leapp=1' "${COLLECT}"; assert_eq 0 "$?" "r80 leapp: --leapp opt-in flag present"
+
 # --- REGRESSION GUARD (r78): the chain probe is curl-native (no dnf) ----------
 # The chain must acquire/measure via curl only. If a future edit reintroduces a
 # dnf-driven chain step, cross-major breaks again (dnf failed three ways: 403,
