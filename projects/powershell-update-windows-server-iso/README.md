@@ -350,6 +350,7 @@ Pipeline of thirteen phases:
 | P06 | ValidatePatchServicing | Plan | PatchModel consistency + pre-servicing inspection of every WIM index (`logs/inspection_pre.json`; on-mount readiness still via P07/P08) |
 | P07 | PatchInstallWim | Build | For each install.wim index: SSU → LCU → .NET → DISM cleanup |
 | P08 | PatchBootWim | Build | boot.wim (PE + Setup) and winre.wim |
+| P08S | SyncSetupBinaries | Build | Explicit sync of setup.exe / setuphost.exe from the serviced boot.wim idx2 to media `sources\` (size/timestamp/SHA-256 recorded before and after; MS media-dynamic-update mandate) |
 | P09 | AssembleIso | Build | Dynamic Update Setup overlay; Export-WindowsImage; oscdimg ISO build |
 | P10 | ConvertPca2023BootManager | Build | **Default-on**, readiness-driven PCA2023 Secure Boot conversion (opt-out: `-SkipPca2023BootManager`; Server 2025 additionally requires `-ForcePca2023OnServer2025`) |
 | P11 | StaticVerify | Verify | Mount output ISO; SHA-256 content identity vs the extracted tree; full post-servicing inspection (`logs/inspection_post.json`); per-Kind measured verification (target build, .NET rollup census; KB-name rows on Server 2016 only) |

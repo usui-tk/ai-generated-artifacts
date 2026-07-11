@@ -340,6 +340,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | P06 | ValidatePatchServicing | Plan | PatchModel 整合チェック＋適用前の全 WIM インデックス検査（`logs/inspection_pre.json`。マウント時の準備性検証は引き続き P07/P08）|
 | P07 | PatchInstallWim | Build | install.wim 各インデックスに対し SSU → LCU → .NET → DISM クリーンアップ |
 | P08 | PatchBootWim | Build | boot.wim（PE + Setup）と winre.wim |
+| P08S | SyncSetupBinaries | Build | servicing済み boot.wim idx2 の setup.exe / setuphost.exe をメディア `sources\` へ明示同期（前後のサイズ/タイムスタンプ/SHA-256 を記録。MS のメディア更新手順の必須要件）|
 | P09 | AssembleIso | Build | Dynamic Update Setup オーバーレイ、Export-WindowsImage、oscdimg による ISO ビルド |
 | P10 | ConvertPca2023BootManager | Build | **既定で実行**（readiness 駆動）の PCA2023 Secure Boot 変換（オプトアウト：`-SkipPca2023BootManager`。Server 2025 のみ追加で `-ForcePca2023OnServer2025` が必要）|
 | P11 | StaticVerify | Verify | 出力 ISO をマウントし、展開ツリーとの SHA-256 内容同一性を検証。適用後の全インデックス検査（`logs/inspection_post.json`）から種別ごとに実測検証（到達ビルド、.NET ロールアップ実在確認。KB 名照合は Server 2016 のみ）|

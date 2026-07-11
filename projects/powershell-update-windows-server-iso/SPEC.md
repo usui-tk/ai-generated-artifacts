@@ -768,7 +768,8 @@ The pipeline consists of 13 phases organised into 5 groups:
 | P06 | Plan | ValidatePatchServicing: PatchModel consistency (B.19) + pre-servicing media inspection of every WIM index -> `logs/inspection_pre.json` |
 | P07 | Build | PatchInstallWim: apply LCU / .NET / DU to install.wim |
 | P08 | Build | PatchBootWim: apply SSU / LP / LCU to boot.wim + WinRE.wim |
-| P09 | Build | AssembleIso: oscdimg re-emit |
+| P08S | Build | SyncSetupBinaries: explicit sync of the Setup binaries from the serviced boot.wim idx2 to media `sources\` (B.24) |
+| P09 | Build | AssembleIso: Setup DU overlay + post-overlay reapply of the P08S stash; oscdimg re-emit |
 | P10 | Build | ConvertPca2023BootManager (optional, see §B.17) |
 | P11 | Verify | StaticVerify: hash, size, structure; ISO/extracted WIM SHA-256 content identity (hard); post-servicing media inspection -> `logs/inspection_post.json`; per-Kind measured verification (LCU via TargetBuildAfterUpdate; DotNet via the DotNetRollup census; KB-name rows on Server 2016 only) |
 | P12 | Verify | VerifyPca2023Readiness: input + output snapshot |
@@ -787,6 +788,9 @@ P08:  Common.BootWimLcuPolicy governs the boot.wim loop only
       (disabled => boot.wim left as shipped, WinRE servicing still
       runs; tolerate => per-index failure downgraded to Caution +
       dismount -Discard); WinRE gated by Common.EnableWinREUpdate
+P08S: -SyntheticTestMode (boot.wim absent) OR sandbox mode (no
+      -Execute); otherwise always runs (identical files are recorded
+      as already-identical, never blindly copied)
 P10:  default-ON, readiness-driven; -SkipPca2023BootManager opts out;
       Server 2025 additionally requires -ForcePca2023OnServer2025
 P12:  none (always runs)
@@ -2294,6 +2298,81 @@ rule. Notable exceptions intentionally left out of scope:
   consumption (one event per line, no human-readable indentation).
 - `.psa.config.json` (psa.py configuration; managed by the
   cross-script convention rather than this subproject's contract).
+
+## B.24 Setup binary consistency (P08S)
+
+**Status**: normative. **Origin**: measured failure, 2026-07-11.
+
+### B.24.1 Requirement
+
+After boot.wim is serviced (P08), the media `sources\setup.exe` MUST
+be byte-identical to the serviced boot.wim index 2's
+`sources\setup.exe`; on images of build 10.0.26100 or later,
+`sources\setuphost.exe` MUST match likewise. This is Microsoft's
+media-dynamic-update mandate: "If these binaries aren't identical,
+Windows Setup will fail during installation."
+(learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update)
+
+### B.24.2 Measured failure record
+
+Output ISOs of Server 2016/2022/2025 (boot.wim serviced to the
+2026-06 level) failed on the Hyper-V rig BEFORE edition selection
+("a media driver your computer needs is missing"). Falsified
+alternatives, measured in the failing WinPE session: the 8.4 GB
+`install.wim` was readable from the DVD (`dir D:\sources\install.wim`
+-> 8,446,618,712 bytes; UDF/oscdimg exonerated) and `diskpart` saw
+disk 0 online (storage drivers exonerated). The binary mismatch was
+observed directly: `X:\sources\setup.exe` 333,304 B (2026-07-08)
+vs `D:\sources\setup.exe` 333,184 B (2026-01-15);
+`setuphost.exe` 910,824 B vs 910,800 B. Server 2019 was the only
+working OS -- its boot.wim is pinned at 17763.3650 (0x80070032
+closure), keeping engine and media accidentally consistent. The E2E
+inspection previously had no check on this axis (blind spot, closed
+by B.24.4).
+
+### B.24.3 Mechanism (P08S)
+
+P08S (`SyncSetupBinaries`, Build; registered between P08 and P09 in
+every pipeline list) mounts boot.wim idx2 read-only and syncs the
+planned files to media `sources\` as an EXPLICIT, recorded
+operation (user requirement, 2026-07-11 -- never an implicit side
+effect):
+
+- Plan gate (`Get-SetupBinarySyncPlan`, pure): `setup.exe` always;
+  `setuphost.exe` when the idx2 build number >= 26100; an unknown
+  build degrades to `setup.exe` only with a stated reason.
+- Per file, three evidence points (presence, size, last-write UTC,
+  SHA-256) are captured -- the boot.wim side, the media BEFORE, and
+  the media AFTER -- printed to the console and persisted to
+  `logs/P08S_setup_binaries_sync.csv` and
+  `logs/setup_binaries_sync.json`.
+- SHA-256-identical files are recorded `already-identical` and never
+  copied; differing files are copied (the ISO-extracted ReadOnly
+  attribute is cleared first) and post-verified by SHA-256 -- a
+  verification mismatch is a hard phase failure.
+- A missing `setup.exe` inside boot.wim idx2 is a hard failure; a
+  planned-but-absent `setuphost.exe` is recorded `source-missing`.
+- The boot.wim-side binaries are stashed to
+  `work/p08s_setup_binaries/`; P09 reapplies the stash after its
+  Setup DU overlay step (MS ordering: Setup DU updates `sources\`,
+  then the boot.wim copies win). The reapply is dormant while no
+  SetupDU resolves (B.15) but prevents a future SetupDU from
+  silently undoing the sync.
+- For Server 2016, where no Setup Dynamic Update exists at all, the
+  serviced boot.wim is the only in-band source of matching Setup
+  binaries; P08S is therefore the working closure of the V3 gap.
+
+### B.24.4 Verification (P11)
+
+The media inspection records the Setup-binary identity of every boot
+image (`SetupExe` / `SetupHostExe` fields) and of the media root
+(`MediaSetupBinaries`). P11 emits `SetupBinarySync_<file>` rows per
+the plan gate: SHA-256 identity is **Pass**; a mismatch is **Fail**
+(the ISO will fail before edition selection); a
+planned-but-source-absent `setuphost.exe` is **Warn**; an
+uninspectable boot.wim idx2 is **Warn**. Both sides' size, timestamp
+and SHA-256 prefix are recorded in the row notes. Offline contract:
+T40.
 
 ---
 
