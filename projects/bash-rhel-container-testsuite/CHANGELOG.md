@@ -13,6 +13,70 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r87] - 2026-07-11 - feat: E1a - AWS-RHUI entitled-container materials library (B" injection, productionized)
+
+E1 (RHUI-entitled suite runs) begins. This revision ships the MATERIALS
+layer only - `lib/rhui-entitlement.sh` + its unit tier; the wiring
+(`acq_entitlement_mount_args` rhui:aws branch, `ena_default_entitlements`
+rhui:aws -> entitled, the 6/7 explicit-skip semantics) is E1b.
+
+### Added
+- **`lib/rhui-entitlement.sh`** - productionizes the E0-proven B" method
+  (r80-r86; final evidence archive
+  `aws-rhui-facts_ip-172-31-2-135_rhel8_20260711T072944Z`: cert+headers=200 /
+  cert-only=403 on ALL of rhel8/9/10, host and container, and in-container
+  dnf `Complete!` on the ENA build deps). Surface:
+  `rhui_headers_write` (IMDSv2 identity doc + signature -> two-line
+  urlsafe-b64 headers file; assert-all-then-write - an empty IMDS answer
+  leaves NO partial file), `rhui_write_inject_plugin` (the ONE shared
+  python dnf plugin, r86 discipline), `rhui_write_plugin_conf`,
+  `rhui_repo_template_from_host` (extracts mirrorlist template + ssl paths
+  from the host's own `redhat-rhui.repo` baseos section),
+  `rhui_major_url` / `rhui_write_repo` (synthesized
+  `rhui-suite-rhel<N>-{baseos,appstream}` repos - together covering
+  kernel-devel on 8/9/10; REGION/releasever/basearch substituted; ssl
+  material at the fixed `/run/rhui-suite` container mount; gpgcheck ON),
+  `rhui_host_major`, and `rhui_bundle_prepare` (all-or-nothing assembly of
+  the 7-artifact runtime bundle: headers, CERT.crt/CERT.key/ca.crt,
+  rhui-suite.repo, rhuisuite.py, rhuisuite.conf).
+- **`tests/t026_rhuientitle.sh`** - hermetic L1 tier, 43 assertions; the
+  `redhat-rhui.repo` fixture reproduces the REAL el8 host file shape from
+  the evidence archive (genchi-genbutsu); IMDS exercised via curl
+  PATH-mocks; failure paths pin the no-partial-file / no-half-bundle
+  contracts.
+- **SPEC B.6.2** - the E1a materials contract: adjudicated self-major-only
+  topology (no forward-chain in production), per-container-start signature
+  re-fetch, the fixed `/run/rhui-suite` mount contract, and the B.10
+  no-new-axis note (rhui:aws -> entitled REPLACES anonymous; cell count
+  unchanged).
+
+### Changed (design delta from E0, adjudicated this session)
+- The injection plugin is the **FILE-READ variant**: it reads
+  `/run/rhui-suite/headers` at dnf runtime instead of embedding the values.
+  Rationale: the plugin must land in the per-major
+  `python*/site-packages/dnf-plugins` dir (glob-resolved IN-container -
+  unreachable by bind-mount), so it gets baked into the provisioned image
+  once, while the signature stays per-container-start via the mounted file.
+  The r86 UBI8 lessons carry over verbatim (glob pdir, no python3-command
+  dependency, single shared writer, load-bearing "setHttpHeaders OK" print).
+
+### Notes
+- Sandbox FT (real `ubi8/ubi`, shipped writers, r86 process): (1) plugin
+  loads at the glob-resolved python3.6 pdir and fires
+  (`setHttpHeaders OK` x2 for the rhui-suite- repos; dnf rc read before any
+  pipe); (2) missing headers file is VOICED
+  (`headers file unreadable ... FileNotFoundError`), not silent; (3)
+  MUTATION: a wrong-prefix plugin produces 0 OK markers - the marker
+  detection discriminates. No new outbound URLs introduced (the mirrorlist
+  comes from the host's own repo file at runtime).
+- Gate: **827 passed / 0 skipped / 0 failed (26 tiers)**; shellcheck
+  `-S style` clean (53 shell files); TESTING baseline + example listing
+  refreshed to the measured values; README.md/README.ja.md updated in
+  lock-step (lib tree + RHUI status passage).
+- Next (E1b): the three wiring points + rhui-major-unavailable /
+  foreign-major explicit-skip semantics; then E1c real-EC2 ENA sweep
+  ([C]3 protocol).
+
 ## [r86] - 2026-07-11 - fix: collector v1.10.0 - container-execution correctness (glob pdir, rc-before-pipe, shared plugin); UBI8-verified in-sandbox
 
 The r85 el8 diagnostic did not read cleanly, and rather than ship another

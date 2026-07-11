@@ -71,8 +71,9 @@ It is built on two facts established by direct measurement (Phase 0):
    (`/run/secrets`; no mounts, measured 2026-07-04 on all majors 6-10): each
    container generates its own per-major `rhel-*` repos and `kernel-devel`
    becomes obtainable — enabling the ENA kernel-module **build** test.
-   Anonymous hosts (and RHUI cloud hosts, whose entitled container path is
-   pending) record `needs-entitlement` instead. Rootless podman is untested.
+   Anonymous hosts (and RHUI cloud hosts, whose entitled container WIRING is
+   still pending - the materials layer landed r87, `lib/rhui-entitlement.sh`)
+   record `needs-entitlement` instead. Rootless podman is untested.
 
 ---
 
@@ -99,6 +100,7 @@ bash-rhel-container-testsuite/
     acquire-rootfs.sh  ubi-pkgmgr.sh  epel.sh
     os-profile.sh                    # canonical per-major OS profile (Phase 6 ✅)
     pkg-availability.sh              # package-availability classification (Phase 7 ✅)
+    rhui-entitlement.sh              # AWS-RHUI entitled-container materials - B" injection (E1a, r87 ✅)
   install-aws_awscli-v2.sh         # root install scripts: real-host usable +    (r08 ✅)
   install-aws_ssm-agent.sh         #   a test mode; named to match the test folders;
   install-aws_ena-driver.sh        #   the matrices kick these with parameters;

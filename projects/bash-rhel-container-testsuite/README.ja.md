@@ -71,7 +71,8 @@ RHEL ファミリーのコンテナを運用していると、同じ問いに繰
    不要。2026-07-04 に全メジャー 6-10 で実測）。各コンテナは自分のメジャーに合った
    `rhel-*` リポジトリを自ら生成し、`kernel-devel` が取得可能になる — これにより
    ENA カーネルモジュールの**ビルド**テストが可能になる。匿名ホスト（および
-   entitled コンテナ経路が保留中の RHUI クラウドホスト）では代わりに
+   entitled コンテナの配線が保留中の RHUI クラウドホスト — 部材層は r87 の
+   `lib/rhui-entitlement.sh` で導入済み）では代わりに
    `needs-entitlement` を記録する。rootless podman は未検証。
 
 ---
@@ -99,6 +100,7 @@ bash-rhel-container-testsuite/
     acquire-rootfs.sh  ubi-pkgmgr.sh  epel.sh
     os-profile.sh                    # メジャー別 OS プロファイルの正典（Phase 6 ✅）
     pkg-availability.sh              # パッケージ可用性分類（Phase 7 ✅）
+    rhui-entitlement.sh              # AWS RHUI entitled コンテナ用部材 - B″ 注入（E1a、r87 ✅）
   install-aws_awscli-v2.sh         # 直下のインストールスクリプト: 実ホストでも使用可＋  (r08 ✅)
   install-aws_ssm-agent.sh         #   テストモード付き。test フォルダ名と一致し、
   install-aws_ena-driver.sh        #   マトリクスがパラメータ付きでキックする。

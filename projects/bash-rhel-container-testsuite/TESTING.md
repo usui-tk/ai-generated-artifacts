@@ -126,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 780 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 827 passed, 0 skipped, 0 failed  (26 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -433,6 +433,24 @@ so results are host-independent and deterministic.
   shared plugin printing the OK marker the harness greps for, and the
   body-based plugin_fired/403 verdicts; 149 assertions total.
 
+* **`t026_rhuientitle.sh`** (r87) - unit tier for `lib/rhui-entitlement.sh`,
+  the E1a production library carrying the E0-proven B" static-header
+  injection into the suite. Pins: urlsafe base64; the
+  `$releasever`/`$basearch` template substitution; `rhui_headers_write`'s
+  two-line `Name: value` format and its assert-all-then-write contract (an
+  empty IMDS answer leaves NO partial headers file); the FILE-READ injection
+  plugin (valid python, fixed `/run/rhui-suite/headers` path, `rhui-suite-`
+  prefix scoping, the load-bearing "setHttpHeaders OK" marker, voiced
+  unreadable-headers failure, parameterizable prefix/path); host-template
+  extraction from a fixture reproducing the REAL el8 `redhat-rhui.repo`
+  shape (archive `aws-rhui-facts_ip-172-31-2-135_rhel8_20260711T072944Z`);
+  the synthesized baseos+appstream repo (REGION/major substituted, ssl
+  material at the fixed container mount, gpgcheck ON); the major-detection
+  seams; and `rhui_bundle_prepare`'s all-seven-artifacts assembly +
+  no-half-bundle failure contract. The IMDS surface runs through curl
+  PATH-mocks; the real-UBI8 plugin load/fire + wrong-prefix mutation checks
+  are the podman FT layer, not L1. 43 assertions.
+
 ---
 
 ## Suite smoke: `tests/probe-env.sh --smoke`
@@ -618,8 +636,8 @@ The full suite is green in the planning sandbox:
   bash:       GNU bash, version 5.2.21(1)-release
   shellcheck: 0.9.0
   podman:     (hermetic L0-L2 need none; t021 uses a PATH-mock podman)
----- t001_parse.sh ----            ## RESULT pass=49 fail=0 skip=0
----- t002_shellcheck.sh ----       ## RESULT pass=49 fail=0 skip=0
+---- t001_parse.sh ----            ## RESULT pass=53 fail=0 skip=0
+---- t002_shellcheck.sh ----       ## RESULT pass=53 fail=0 skip=0
 ---- t003_acquireunit.sh ----      ## RESULT pass=33 fail=0 skip=0
 ---- t004_pkgmgrdetect.sh ----     ## RESULT pass=19 fail=0 skip=0
 ---- t005_entitlementdetect.sh ----## RESULT pass=8  fail=0 skip=0
@@ -642,14 +660,15 @@ The full suite is green in the planning sandbox:
 ---- t022_ssmunavailable.sh ----   ## RESULT pass=17 fail=0 skip=0
 ---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
----- t025_awsrhuicollect.sh ----   ## RESULT pass=39 fail=0 skip=0
-SUITE: 780 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+---- t025_awsrhuicollect.sh ----   ## RESULT pass=149 fail=0 skip=0
+---- t026_rhuientitle.sh ----      ## RESULT pass=43 fail=0 skip=0
+SUITE: 827 passed, 0 skipped, 0 failed  (26 tiers, 0 tier-failure(s))
 ```
 
-**L0 fixed count = 51 shell files** (every `.sh` in the project, incl. the 3 root
+**L0 fixed count = 53 shell files** (every `.sh` in the project, incl. the 3 root
 `install-aws_*.sh`), each `bash -n`-clean and ShellCheck-clean at **default
 severity and `-S style`** (t002 passes `-P` so the gate is CWD-independent,
-r29): the 6 libraries, the 25 `tests/t001`-`t025` tiers, the harness
+r29): the 7 libraries, the 26 `tests/t001`-`t026` tiers, the harness
 (`run-all.sh`, `probe-env.sh`, the AWS-RHUI collector `collect-aws-rhui-facts.sh`,
 `tests/lib/*`), the three per-tool folders
 (lister + matrix each, plus the ENA verifier), the coverage generator, and the

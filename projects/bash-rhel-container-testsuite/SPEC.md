@@ -398,6 +398,42 @@ same-major, the read-only mount blocked the per-container generation, and EL7
 lost the entitled repo it gets automatically when run plain.
 `acq_entitlement_mount_args` returns nothing for every mode and is kept only
 as the single landing point for the pending RHUI implementation (D-S2).
+The MATERIALS for that landing point exist since r87
+(`lib/rhui-entitlement.sh`, the E1a layer below); only the wiring (the
+`rhui:aws` branch itself + the entitled default) remains pending (E1b).
+
+#### B.6.2 AWS-RHUI entitled-container materials (E1a, r87)
+
+The E0 investigation (r80-r86; real EC2 el8/el9/el10 + real UBI containers;
+archive `aws-rhui-facts_ip-172-31-2-135_rhel8_20260711T072944Z` is the final
+evidence set) established the **B" injection method**: RHUI authorization is
+**TLS client cert AND signed instance-identity headers** (`X-RHUI-ID` /
+`X-RHUI-SIGNATURE`, urlsafe base64) enforced at the repomd/RPM layer; a
+container cannot reach IMDS, so the HOST fetches the identity document +
+signature and passes them in as a static file, and a python `dnf.Plugin`
+inside the container injects them via `repo._repo.setHttpHeaders()`. Verified
+end-to-end on all three RHUI majors (makecache rc=0, ENA build deps
+"Complete!").
+
+`lib/rhui-entitlement.sh` productionizes exactly that, under the adjudicated
+E1 topology (**self-major only**: each RHUI host tests its own major with its
+own `/etc/pki/rhui` credential - no forward-chain acquisition in the
+production path) and the adjudicated signature policy (**re-fetch per
+container start** - `rhui_headers_write` is cheap, so TTL bookkeeping never
+exists). Fixed container-side contract the E1b wiring mounts at
+`/run/rhui-suite`: `headers` (one `Name: value` per line), `CERT.crt` /
+`CERT.key` / `ca.crt`, plus the synthesized `rhui-suite.repo`
+(baseos+appstream - together covering `kernel-devel` on 8/9/10) and the
+injection plugin `rhuisuite.py` + `rhuisuite.conf`. The plugin is the
+FILE-READ variant (E1a delta from the E0 embedded-header plugin): it is
+static, so provisioning can glob-resolve the per-major
+`python*/site-packages/dnf-plugins` dir in-container ONCE and bake it into
+the test-ready image, while the headers stay per-start. The r86 UBI8 lessons
+are carried over verbatim: glob pdir (no `python3` command dependency), one
+shared plugin definition, and the load-bearing `setHttpHeaders OK` print.
+RHUI mode is majors 8/9/10 only (6/7 have no RHUI AMI -> explicit skip,
+E1b); no new matrix axis (B.10: `rhui:aws -> entitled` replaces `anonymous`
+in the existing environment-matched single mode - cell count unchanged).
 
 **Detection is three steps** (the suite handles no secrets itself):
 
