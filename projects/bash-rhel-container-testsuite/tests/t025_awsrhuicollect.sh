@@ -400,6 +400,41 @@ grep -q 'startswith("rhui-e0-")' "${RC_HVC_BUNDLE}/captured.py"
 assert_eq 0 "$?" "r84 plugin: injection scoped to the synthesized rhui-e0 repos"
 rm -rf "${RC_HVC_BUNDLE}"; unset RC_HVC_BUNDLE
 
+# --- r85: el8 injection-path diagnostic ---------------------------------------
+if declare -F rc_hvc_el8_diag >/dev/null 2>&1; then t_pass "r85 defined: rc_hvc_el8_diag"; else t_fail "r85 missing: rc_hvc_el8_diag"; fi
+
+# el8 diag must be a no-op for non-8 majors (guard).
+d85="$(mktemp -d)"; RC_HVC_BUNDLE="${d85}"
+printf 'mirrorlist=https://rhui.ap-northeast-1.aws.ce.redhat.com/pulp/mirror/content/dist/rhel9/rhui/9/x86_64/baseos/os\n' > "${d85}/rhui-e0-rhel9.repo"
+printf -- '-H "X-RHUI-ID: D" -H "X-RHUI-SIGNATURE: S"' > "${d85}/headers.curl"
+: > "${d85}/o9.txt"
+rc_hvc_el8_diag fake/img "${d85}/o9.txt" 9 "${d85}/headers.curl"
+[ ! -s "${d85}/o9.txt" ]
+assert_eq 0 "$?" "r85 el8diag: no-op for non-8 majors"
+
+# el8 diag builds a baseurl-direct repo whose URL EXACTLY matches the content
+# URL the mirrorlist returns (the r84 403 target) - not a triple-content typo.
+printf 'mirrorlist=https://rhui.ap-northeast-1.aws.ce.redhat.com/pulp/mirror/content/dist/rhel8/rhui/8/x86_64/baseos/os\n' > "${d85}/rhui-e0-rhel8.repo"
+# shellcheck disable=SC2329  # invoked indirectly by rc_hvc_el8_diag
+podman() { cp "${RC_HVC_BUNDLE}/rhui-e0b-rhel8.repo" "${d85}/captured.repo" 2>/dev/null; :; }
+rc_hvc_el8_diag fake/img "${d85}/o8.txt" 8 "${d85}/headers.curl"
+unset -f podman
+grep -q '^baseurl=https://rhui.ap-northeast-1.aws.ce.redhat.com/pulp/content/content/dist/rhel8/rhui/8/x86_64/baseos/os$' "${d85}/captured.repo"
+assert_eq 0 "$?" "r85 el8diag: baseurl-direct matches the real content URL (no triple-content)"
+grep -q 'appstream' "${d85}/captured.repo"
+assert_eq 0 "$?" "r85 el8diag: baseurl-direct includes the appstream section"
+# temp files cleaned after the run.
+[ ! -e "${d85}/rhui-e0b-rhel8.repo" ] && [ ! -e "${d85}/e0inject.py" ]
+assert_eq 0 "$?" "r85 el8diag: diagnostic temp files cleaned up"
+rm -rf "${d85}"; unset RC_HVC_BUNDLE
+
+# the native .so is staged from pkgs/ payload into the bundle.
+grep -q 'amazon-libdnf-plugin.so' "${COLLECT}"
+assert_eq 0 "$?" "r85 el8diag: native libdnf .so staged for path C"
+# shellcheck disable=SC2016
+grep -q 'rc_hvc_el8_diag "${img}"' "${COLLECT}"
+assert_eq 0 "$?" "r85 el8diag: wired into the paired flow"
+
 # --- REGRESSION GUARD (r78): the chain probe is curl-native (no dnf) ----------
 # The chain must acquire/measure via curl only. If a future edit reintroduces a
 # dnf-driven chain step, cross-major breaks again (dnf failed three ways: 403,

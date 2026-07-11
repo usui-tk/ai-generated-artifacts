@@ -13,6 +13,52 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r85] - 2026-07-11 - feat: collector v1.9.0 - el8 injection-path diagnostic (baseurl / python-shim / native .so / versions)
+
+The r84 run closed most of E0: the paired host<->container matrix is
+identical on both sides (cert+headers=200, everything else 403), the
+static host-generated signature is accepted for at least 60 minutes
+(sigttl, all three hosts, t+3600s=200), and the container RPM-body layer
+is 200 for rhel8/9/10. The real dnf makecache with the static-header python
+plugin succeeded on rhel9/10 but returned 403 on rhel8 - while raw curl to
+the same RPM body was 200. Root-cause hypothesis from the pkgs/ payload:
+rhel8 ships `amazon-libdnf-plugin` as a NATIVE .so (libdnf C plugin), not a
+python `dnf.Plugin`, so the r84 python `setHttpHeaders` shim is a no-op on
+el8 and dnf issues the mirrorlist-resolved repomd GET without the identity
+headers. The operator approved finishing the el8 investigation before
+design; the RHEL 9/10 test instances are retired, so el8 is now
+self-contained.
+
+### Added
+- **`rc_hvc_el8_diag`** - runs only for major 8, measuring four isolated
+  injection paths in the el8 container so the generational claim is proven,
+  not asserted:
+  - **A baseurl-direct** - a synth repo using `baseurl` (mirrorlist bypassed)
+    + the python shim. The baseurl is the exact content URL the mirrorlist
+    returns (`/pulp/content/content/dist/...`), so a 200 here isolates the
+    mirrorlist round-trip as where the headers are lost.
+  - **B mirrorlist + python shim** - the r84 path verbatim, the known 403 as
+    the control.
+  - **C native .so** - the real `amazon-libdnf-plugin.so` (from the pkgs/
+    payload in this same archive) dropped into `/usr/lib64/libdnf/plugins`
+    with a static identity conf, python shim removed. A 200 here means the
+    native plugin is el8's supported injection path and the suite must ship
+    it.
+  - **D versions** - `dnf --version`, `rpm -q python3-dnf libdnf dnf`.
+- The native `.so` is staged into the bundle from `pkgs/payload` when present.
+
+### Notes
+- Collector v1.8.0 -> **v1.9.0**. t025 -> 138 assertions (7 new r85,
+  including a regression guard that the baseurl-direct URL matches the real
+  content URL - an FT this session caught a triple-`content` typo in the
+  first cut, fixed before commit). TESTING.md baseline 769. Gate 769/0/0
+  (25 tiers), shellcheck -S style clean, bash -n clean, doc-gate PASS.
+- Operator next step (el8 only): `sudo bash collect-aws-rhui-facts.sh
+  --hostvscontainer` and share the archive; the new
+  `PAIRED-rhel8.txt` tail carries the A/B/C/D diagnosis. Its outcome picks
+  the el8 injection path for E1 (native .so vs baseurl-direct) and informs
+  the same-major-vs-chain simplification decision.
+
 ## [r84] - 2026-07-11 - fix: collector v1.8.0 - paired-matrix measurement bug (--cacert + env passing) and in-container RPM-body + real dnf makecache
 
 The first `--hostvscontainer` run (r83) confirmed the design's key point -

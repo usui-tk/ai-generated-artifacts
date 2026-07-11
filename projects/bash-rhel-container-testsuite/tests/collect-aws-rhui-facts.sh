@@ -77,7 +77,7 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.8.0"
+RC_TOOL_VERSION="1.9.0"
 # Packages whose <package> XML slices survive the primary-blob slimming
 # (alternation for one POSIX-awk pass; fixed names, no regex metacharacters).
 RC_SLIM_WL="kernel-devel|gcc|make|elfutils-libelf-devel|leapp-rhui-aws"
@@ -1230,6 +1230,125 @@ rc_hvc_container_rpmbody() {
     "${img}" sh -c "${script}" >> "${out}" 2>/dev/null
 }
 
+# rc_hvc_el8_diag IMG OUT T HDRFILE - EL8-specific injection-path diagnosis.
+# r84's dnf makecache succeeded on rhel9/10 but failed 403 on rhel8, while the
+# raw-curl RPM-body layer got 200 on all three. The difference is the plugin
+# API: rhel8 ships amazon-libdnf-plugin as a NATIVE .so (libdnf C plugin),
+# not a python dnf.Plugin, so the r84 python setHttpHeaders shim is a no-op
+# there - dnf resolves the mirrorlist and then issues the repomd GET WITHOUT
+# the identity headers -> 403. This probe pins that by measuring four distinct
+# injection paths in the el8 container, each isolating one hypothesis:
+#   A baseurl-direct  - synth repo with baseurl (mirrorlist bypassed) + python
+#                       shim. If 200: the shim works but only once the
+#                       mirrorlist round-trip is removed (the resolved mirror
+#                       URL differs and loses the headers).
+#   B python-shim-ml  - the r84 path verbatim (mirrorlist + python shim). The
+#                       known 403, re-measured here as the control.
+#   C so-plugin       - the REAL amazon-libdnf-plugin.so dropped in, its .conf
+#                       pointing at a static identity file (no IMDS). If 200:
+#                       the native plugin is the supported injection path on
+#                       el8 and the suite must ship it, not a python shim.
+#   D versions        - dnf/libdnf/plugin versions, so the generational claim
+#                       is evidenced, not asserted.
+# The .so and the real conf come from the pkgs/ payload already in this archive
+# (rh-amazon-rhui-client / amazon-libdnf-plugin), copied into the bundle.
+rc_hvc_el8_diag() {
+  local img="$1" out="$2" t="$3" hdrfile="$4"
+  local id_hdr sig_hdr base_url app_url
+  [ "${t}" = 8 ] || return 0
+  id_hdr="$(grep -oE 'X-RHUI-ID: [^"]*' "${hdrfile}" 2>/dev/null | sed 's/X-RHUI-ID: //')"
+  sig_hdr="$(grep -oE 'X-RHUI-SIGNATURE: [^"]*' "${hdrfile}" 2>/dev/null | sed 's/X-RHUI-SIGNATURE: //')"
+  # Derive baseurl from the synth repo's mirrorlist. The mirrorlist path is
+  # /pulp/mirror/content/dist/...; the content URL the mirrorlist RETURNS (and
+  # that the r84 403 hit) is /pulp/content/content/dist/... - replace the
+  # '/pulp/mirror/content/dist/' segment with '/pulp/content/content/dist/'.
+  base_url="$(sed -n 's/^mirrorlist=//p' "${RC_HVC_BUNDLE}/rhui-e0-rhel${t}.repo" | head -1 | sed 's#/pulp/mirror/content/dist/#/pulp/content/content/dist/#')"
+  app_url="$(printf '%s' "${base_url}" | sed 's#/baseos/#/appstream/#')"
+  cat > "${RC_HVC_BUNDLE}/rhui-e0b-rhel${t}.repo" <<EOF
+[rhui-e0-rhel${t}-baseos]
+name=RHEL ${t} BaseOS baseurl-direct (E0 diag A)
+baseurl=${base_url}
+enabled=1
+gpgcheck=0
+sslverify=1
+sslclientcert=/run/rhui-e0/content-rhel${t}.crt
+sslclientkey=/run/rhui-e0/content-rhel${t}.key
+sslcacert=/run/rhui-e0/cdn.redhat.com-chain.crt
+
+[rhui-e0-rhel${t}-appstream]
+name=RHEL ${t} AppStream baseurl-direct (E0 diag A)
+baseurl=${app_url}
+enabled=1
+gpgcheck=0
+sslverify=1
+sslclientcert=/run/rhui-e0/content-rhel${t}.crt
+sslclientkey=/run/rhui-e0/content-rhel${t}.key
+sslcacert=/run/rhui-e0/cdn.redhat.com-chain.crt
+EOF
+  # python shim (path A/B share it) - a no-op on el8 if the API is absent.
+  cat > "${RC_HVC_BUNDLE}/e0inject.py" <<PYEOF
+import dnf
+class E0Inject(dnf.Plugin):
+    name = "e0inject"
+    def config(self):
+        hdrs = ["X-RHUI-ID: ${id_hdr}", "X-RHUI-SIGNATURE: ${sig_hdr}"]
+        for name, repo in self.base.repos.items():
+            if name.startswith("rhui-e0-"):
+                try:
+                    repo._repo.setHttpHeaders(hdrs)
+                    print("e0inject: setHttpHeaders OK for %s" % name)
+                except Exception as e:
+                    print("e0inject: setHttpHeaders FAILED for %s: %r" % (name, e))
+PYEOF
+  printf '[main]\nenabled=1\n' > "${RC_HVC_BUNDLE}/e0inject.conf"
+  # The real native .so + a static identity conf for path C. amazon-libdnf's
+  # conf key set varies by version; we write the id/signature the plugin reads
+  # and also expose the raw identity document (some builds read a doc path).
+  printf 'id=%s\nsignature=%s\n' "${id_hdr}" "${sig_hdr}" > "${RC_HVC_BUNDLE}/amazon-id-static.conf"
+
+  # shellcheck disable=SC2016  # runs in the container
+  local script='
+    echo "=== D: versions ==="
+    (rpm -q python3-dnf libdnf dnf 2>&1 | sed "s/^/  /")
+    dnf --version 2>/dev/null | head -1 | sed "s/^/  dnf: /"
+    pdir="$(python3 -c "import dnf,os;print(os.path.dirname(dnf.__file__))" 2>/dev/null)/../dnf-plugins"
+    pdir="$(cd "${pdir}" 2>/dev/null && pwd || echo /usr/lib/python3.6/site-packages/dnf-plugins)"
+    mkdir -p "${pdir}" /etc/dnf/plugins
+    cp /run/rhui-e0/e0inject.py "${pdir}/" 2>/dev/null
+    cp /run/rhui-e0/e0inject.conf /etc/dnf/plugins/e0inject.conf 2>/dev/null
+
+    echo "=== A: baseurl-direct + python shim ==="
+    cp /run/rhui-e0/rhui-e0b-rhel'"${t}"'.repo /etc/yum.repos.d/
+    dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache 2>&1 | tail -4 | sed "s/^/  /"
+    echo "  A_makecache_rc=$?"
+    rm -f /etc/yum.repos.d/rhui-e0b-rhel'"${t}"'.repo
+
+    echo "=== B: mirrorlist + python shim (r84 control) ==="
+    cp /run/rhui-e0/rhui-e0-rhel'"${t}"'.repo /etc/yum.repos.d/
+    dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache 2>&1 | tail -4 | sed "s/^/  /"
+    echo "  B_makecache_rc=$?"
+
+    echo "=== C: native amazon-libdnf-plugin.so ==="
+    if [ -f /run/rhui-e0/amazon-libdnf-plugin.so ]; then
+      mkdir -p /usr/lib64/libdnf/plugins
+      cp /run/rhui-e0/amazon-libdnf-plugin.so /usr/lib64/libdnf/plugins/ 2>/dev/null
+      # remove the python shim so C is isolated
+      rm -f "${pdir}/e0inject.py" /etc/dnf/plugins/e0inject.conf
+      cp /run/rhui-e0/amazon-id-static.conf /etc/dnf/plugins/amazon-id.conf 2>/dev/null
+      dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache 2>&1 | tail -4 | sed "s/^/  /"
+      echo "  C_makecache_rc=$?"
+    else
+      echo "  C: amazon-libdnf-plugin.so not staged"
+    fi
+  '
+  {
+    printf 'el8 injection-path diagnosis (rhel%s):\n' "${t}"
+    podman run --rm -v "${RC_HVC_BUNDLE}:/run/rhui-e0:ro,Z" "${img}" sh -c "${script}" 2>/dev/null | sed 's/^/  /'
+  } >> "${out}"
+  rm -f "${RC_HVC_BUNDLE}/rhui-e0b-rhel${t}.repo" "${RC_HVC_BUNDLE}/e0inject.py" \
+        "${RC_HVC_BUNDLE}/e0inject.conf" "${RC_HVC_BUNDLE}/amazon-id-static.conf"
+}
+
 # rc_hvc_container_makecache IMG OUT T HDRFILE - the real dnf path with static
 # B" injection: a MINIMAL dnf plugin (written into the bundle) injects the
 # host-generated headers into every rhui-e0 repo, mirroring what amazon-id
@@ -1362,6 +1481,10 @@ rc_collect_hostvscontainer() {
 
   # own-major certs verbatim; chain majors via the proven forward chain.
   cp -p "${cert_own}" "${bundle}/content-rhel${major}.crt" 2>/dev/null
+  # r85: stage the real el8 native libdnf plugin from the pkgs/ payload (if
+  # collected) so the el8 injection-path diagnostic can test path C.
+  { find "${outdir}/pkgs/payload" -name "amazon-libdnf-plugin.so" 2>/dev/null | head -1 \
+      | xargs -r -I{} cp -p {} "${bundle}/amazon-libdnf-plugin.so"; } 2>/dev/null
   cp -p "${key_own}"  "${bundle}/content-rhel${major}.key" 2>/dev/null
   for t in $(rc_chain_list "${major}"); do
     rc_acquire_forward_certs "${bundle}" "${major}" "${t}" \
@@ -1402,6 +1525,7 @@ rc_collect_hostvscontainer() {
     rc_synth_repo_file "${t}" "${region}" "${tmpl}" /run/rhui-e0 > "${bundle}/rhui-e0-rhel${t}.repo"
     rc_hvc_container_rpmbody "${img}" "${paired}" "${t}" "${url}" "${hdrfile}"
     rc_hvc_container_makecache "${img}" "${paired}" "${t}" "${hdrfile}"
+    rc_hvc_el8_diag "${img}" "${paired}" "${t}" "${hdrfile}"
     rm -f "${bundle}/CERT.crt" "${bundle}/CERT.key"
     # one-line delta digest.
     {
