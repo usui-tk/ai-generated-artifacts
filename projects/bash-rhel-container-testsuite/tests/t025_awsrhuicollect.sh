@@ -435,6 +435,51 @@ assert_eq 0 "$?" "r85 el8diag: native libdnf .so staged for path C"
 grep -q 'rc_hvc_el8_diag "${img}"' "${COLLECT}"
 assert_eq 0 "$?" "r85 el8diag: wired into the paired flow"
 
+# --- r86: pdir resolution must NOT depend on a "python3" command ---------------
+# UBI8 has no "python3" (dnf uses platform-python3.6); the old python3 -c
+# fallback dropped the plugin into a nonexistent python3.9 dir and dnf never
+# loaded it - the real el8 403 cause (verified in a real UBI8 container this
+# session). The resolution must be a glob.
+if grep -q 'python3 -c "import dnf' "${COLLECT}"; then
+  t_fail "r86 pdir: still depends on a python3 command (breaks on UBI8)"
+else
+  t_pass "r86 pdir: no python3-command dependency"
+fi
+grep -q 'ls -d /usr/lib/python\*/site-packages/dnf-plugins' "${COLLECT}"
+assert_eq 0 "$?" "r86 pdir: dnf-plugins dir resolved by glob (major-independent)"
+
+# --- r86: dnf rc captured BEFORE any pipe (a pipe returns tail's rc) -----------
+# The makecache/builddeps and the A/B/C diag must redirect to a file and read
+# $? directly, never "dnf ... | tail; echo $?".
+if grep -qE 'makecache 2>&1 \| tail' "${COLLECT}"; then
+  t_fail "r86 rc: makecache rc still taken after a pipe (tail's rc)"
+else
+  t_pass "r86 rc: makecache rc captured before any pipe"
+fi
+grep -q 'makecache > /tmp/mc.txt 2>&1' "${COLLECT}"
+assert_eq 0 "$?" "r86 rc: makecache output redirected to a file, rc read directly"
+
+# --- r86: ONE shared plugin definition (makecache and diag cannot diverge) -----
+# They HAD diverged: only the diag plugin printed "setHttpHeaders OK", so the
+# makecache path's plugin_fired detection always read "no".
+if declare -F rc_write_e0_plugin >/dev/null 2>&1; then t_pass "r86 plugin: shared writer rc_write_e0_plugin defined"; else t_fail "r86 plugin: shared writer missing"; fi
+n="$(grep -c 'rc_write_e0_plugin "' "${COLLECT}")"
+assert_eq 2 "${n}" "r86 plugin: both call sites use the shared writer (no inline heredoc)"
+# the shared plugin MUST print the OK marker the harness greps for.
+d86="$(mktemp -d)"; RC_HVC_BUNDLE="${d86}"
+rc_write_e0_plugin "DOCV" "SIGV"
+grep -q 'setHttpHeaders OK' "${d86}/e0inject.py"
+assert_eq 0 "$?" "r86 plugin: shared plugin prints the OK marker (plugin_fired detection)"
+python3 -c "import ast; ast.parse(open('${d86}/e0inject.py').read())" 2>/dev/null
+assert_eq 0 "$?" "r86 plugin: shared plugin is valid python"
+grep -q 'X-RHUI-ID: DOCV' "${d86}/e0inject.py"
+assert_eq 0 "$?" "r86 plugin: header values embedded"
+rm -rf "${d86}"; unset RC_HVC_BUNDLE
+
+# --- r86: body-based verdicts (plugin_fired / 403) are emitted ----------------
+grep -q 'plugin_fired=yes' "${COLLECT}"; assert_eq 0 "$?" "r86 verdict: plugin_fired emitted"
+grep -q 'makecache_403=yes' "${COLLECT}"; assert_eq 0 "$?" "r86 verdict: 403 body-detection emitted"
+
 # --- REGRESSION GUARD (r78): the chain probe is curl-native (no dnf) ----------
 # The chain must acquire/measure via curl only. If a future edit reintroduces a
 # dnf-driven chain step, cross-major breaks again (dnf failed three ways: 403,

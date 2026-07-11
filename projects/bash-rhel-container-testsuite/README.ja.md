@@ -106,13 +106,14 @@ bash-rhel-container-testsuite/
   tests/
     lib/{assert,mock,heredoc}.sh   # 移植済みハーネス
     run-all.sh                     # L0-L2 を一括実行するランナー
-    collect-aws-rhui-facts.sh      # AWS RHUI 情報の単体収集ツール -> tar.gz（r73; v1.9.0
+    collect-aws-rhui-facts.sh      # AWS RHUI 情報の単体収集ツール -> tar.gz（r73; v1.10.0
                                    #   r80: pkgs 解析・収集カバレッジ自己検証・ビルド材料の実取得証明
                                    #   r81: SIGPIPE 安全なスキャン・primary 圧縮・メタデータ再利用
                                    #   r82: E0 プローブ - 認可マトリクス + コンテナ内合成 repo dnf 試験
                                    #   r83: E0-follow - ホスト対コンテナ対比・署名 TTL・絶対パス出力
                                    #   r84: 対比マトリクスの CA/env 修正 + コンテナ内 RPM 本体・dnf makecache
-                                   #   r85: el8 注入経路診断 - baseurl/python-shim/native-.so/バージョン）
+                                   #   r85: el8 注入経路診断 - baseurl/python-shim/native-.so/バージョン
+                                   #   r86: コンテナ実行修正 - glob pdir・rc捕捉・共有プラグイン（UBI8実機検証済み））
     t001_parse.sh  t002_shellcheck.sh             # L0（実装済み）
     t003_acquireunit.sh … t007_epelresolve.sh     # L1/L2（Phase 2 ✅）
     t008_awscliverdict.sh  t009_ssmverdict.sh    # L1 AWS CLI + SSM 判定（Phase 3-4 ✅）

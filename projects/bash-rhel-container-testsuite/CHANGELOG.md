@@ -13,6 +13,55 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r86] - 2026-07-11 - fix: collector v1.10.0 - container-execution correctness (glob pdir, rc-before-pipe, shared plugin); UBI8-verified in-sandbox
+
+The r85 el8 diagnostic did not read cleanly, and rather than ship another
+guess this session pulled a real UBI8 container in the sandbox and ran the
+SHIPPED helpers against it. That surfaced three defects - all mine, all
+container-execution correctness, not RHUI behavior:
+
+### Fixed
+- **Plugin dropped into a nonexistent dir (THE el8 403 cause).** The plugin
+  dir was resolved with `python3 -c "import dnf..."`, but UBI8 has NO
+  `python3` command (dnf runs on platform-python3.6). The command failed, the
+  fallback pointed at a nonexistent `python3.9` dir, and dnf never loaded the
+  header-injection plugin -> the mirrorlist-resolved repomd GET went out
+  without the identity headers -> 403. This, not RHUI or a libdnf generation
+  gap, is why r84's rhel8 makecache 403'd. Now resolved by glob
+  (`ls -d /usr/lib/python*/site-packages/dnf-plugins`), verified in a real
+  UBI8 container to land at python3.6 and load the plugin.
+- **dnf rc taken after a pipe (tail's rc).** `dnf ... | tail; echo $?`
+  reported tail's 0, masking the real dnf result - the CORE "pipes hide exit
+  codes" lesson, in my own diagnostic. Every dnf now redirects to a file and
+  `$?` is read directly.
+- **Two divergent plugin definitions.** The makecache plugin had no print; the
+  diag plugin did. So the makecache path's `plugin_fired` detection (which
+  greps for "setHttpHeaders OK") always read "no". Unified into one shared
+  writer `rc_write_e0_plugin` (with the print), used by both call sites.
+
+### Added
+- Body-based verdicts in the container dnf output: `plugin_fired=yes|no`,
+  `makecache_403=yes|no`, and the A/B/C diag verdicts, so the result no longer
+  depends on a single (previously wrong) rc number.
+
+### Notes
+- Collector v1.9.0 -> **v1.10.0**. All three fixes were verified by running
+  the actual shipped helpers against a real `registry.access.redhat.com/ubi8/ubi`
+  container in the sandbox (podman, unified-cgroup unmount workaround per
+  TESTING): plugin_fired flips to yes, pdir lands at python3.6, rc reflects
+  the real dnf outcome. t025 -> 149 assertions (11 new r86 regression guards).
+  TESTING.md baseline 780. Gate 780/0/0 (25 tiers), shellcheck -S style clean,
+  bash -n clean, doc-gate PASS.
+- Interpretation for design: the el8 403 was a harness bug, not an RHUI/libdnf
+  limitation - the python header-injection shim DOES work on el8 once the
+  plugin actually loads (confirmed: the shared plugin fires on both the
+  baseurl-direct and mirrorlist paths in a real UBI8 container). The native
+  .so path (C) is therefore not required. Full RHUI confirmation still needs
+  one real-EC2 run, but the code is now correct independent of that.
+- Operator next step (el8 only): `sudo bash collect-aws-rhui-facts.sh
+  --hostvscontainer`; expect `plugin_fired=yes` and, over real RHUI,
+  `makecache_403=no` with `builddeps_rc=0`. That closes E0.
+
 ## [r85] - 2026-07-11 - feat: collector v1.9.0 - el8 injection-path diagnostic (baseurl / python-shim / native .so / versions)
 
 The r84 run closed most of E0: the paired host<->container matrix is

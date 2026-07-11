@@ -126,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 769 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 780 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -425,7 +425,13 @@ so results are host-independent and deterministic.
   injection-path diagnostic invariants (no-op for non-8 majors; baseurl-direct
   URL matches the real content URL with no triple-content typo; appstream
   section present; temp-file cleanup; native .so staged from pkgs/ payload;
-  wired into the paired flow); 138 assertions total.
+  wired into the paired flow); r86 adds the container-execution correctness
+  invariants, all verified against a real UBI8 container this session: pdir
+  resolved by glob (no python3-command dependency - UBI8 has none), dnf rc
+  captured before any pipe (not tail's rc), a single shared plugin writer
+  (rc_write_e0_plugin) so the makecache and diag plugins cannot diverge, the
+  shared plugin printing the OK marker the harness greps for, and the
+  body-based plugin_fired/403 verdicts; 149 assertions total.
 
 ---
 
@@ -637,7 +643,7 @@ The full suite is green in the planning sandbox:
 ---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
 ---- t025_awsrhuicollect.sh ----   ## RESULT pass=39 fail=0 skip=0
-SUITE: 769 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 780 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 **L0 fixed count = 51 shell files** (every `.sh` in the project, incl. the 3 root

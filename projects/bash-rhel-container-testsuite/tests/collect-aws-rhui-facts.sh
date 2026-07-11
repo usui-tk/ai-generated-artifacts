@@ -77,7 +77,7 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.9.0"
+RC_TOOL_VERSION="1.10.0"
 # Packages whose <package> XML slices survive the primary-blob slimming
 # (alternation for one POSIX-awk pass; fixed names, no regex metacharacters).
 RC_SLIM_WL="kernel-devel|gcc|make|elfutils-libelf-devel|leapp-rhui-aws"
@@ -1230,6 +1230,31 @@ rc_hvc_container_rpmbody() {
     "${img}" sh -c "${script}" >> "${out}" 2>/dev/null
 }
 
+# rc_write_e0_plugin ID_HDR SIG_HDR - write the ONE static-header dnf plugin
+# (+ its enabling conf) into the bundle. Single definition shared by the
+# makecache path and the el8 diagnostic so they can never diverge (r86: they
+# HAD diverged - only the diag printed "setHttpHeaders OK", so the makecache
+# path's plugin_fired detection always read "no"). The print is load-bearing:
+# it is how the harness confirms the plugin actually fired.
+rc_write_e0_plugin() {
+  local id_hdr="$1" sig_hdr="$2"
+  cat > "${RC_HVC_BUNDLE}/e0inject.py" <<PYEOF
+import dnf
+class E0Inject(dnf.Plugin):
+    name = "e0inject"
+    def config(self):
+        hdrs = ["X-RHUI-ID: ${id_hdr}", "X-RHUI-SIGNATURE: ${sig_hdr}"]
+        for name, repo in self.base.repos.items():
+            if name.startswith("rhui-e0-"):
+                try:
+                    repo._repo.setHttpHeaders(hdrs)
+                    print("e0inject: setHttpHeaders OK for %s" % name)
+                except Exception as e:
+                    print("e0inject: setHttpHeaders FAILED for %s: %r" % (name, e))
+PYEOF
+  printf '[main]\nenabled=1\n' > "${RC_HVC_BUNDLE}/e0inject.conf"
+}
+
 # rc_hvc_el8_diag IMG OUT T HDRFILE - EL8-specific injection-path diagnosis.
 # r84's dnf makecache succeeded on rhel9/10 but failed 403 on rhel8, while the
 # raw-curl RPM-body layer got 200 on all three. The difference is the plugin
@@ -1286,21 +1311,7 @@ sslclientkey=/run/rhui-e0/content-rhel${t}.key
 sslcacert=/run/rhui-e0/cdn.redhat.com-chain.crt
 EOF
   # python shim (path A/B share it) - a no-op on el8 if the API is absent.
-  cat > "${RC_HVC_BUNDLE}/e0inject.py" <<PYEOF
-import dnf
-class E0Inject(dnf.Plugin):
-    name = "e0inject"
-    def config(self):
-        hdrs = ["X-RHUI-ID: ${id_hdr}", "X-RHUI-SIGNATURE: ${sig_hdr}"]
-        for name, repo in self.base.repos.items():
-            if name.startswith("rhui-e0-"):
-                try:
-                    repo._repo.setHttpHeaders(hdrs)
-                    print("e0inject: setHttpHeaders OK for %s" % name)
-                except Exception as e:
-                    print("e0inject: setHttpHeaders FAILED for %s: %r" % (name, e))
-PYEOF
-  printf '[main]\nenabled=1\n' > "${RC_HVC_BUNDLE}/e0inject.conf"
+  rc_write_e0_plugin "${id_hdr}" "${sig_hdr}"
   # The real native .so + a static identity conf for path C. amazon-libdnf's
   # conf key set varies by version; we write the id/signature the plugin reads
   # and also expose the raw identity document (some builds read a doc path).
@@ -1311,32 +1322,42 @@ PYEOF
     echo "=== D: versions ==="
     (rpm -q python3-dnf libdnf dnf 2>&1 | sed "s/^/  /")
     dnf --version 2>/dev/null | head -1 | sed "s/^/  dnf: /"
-    pdir="$(python3 -c "import dnf,os;print(os.path.dirname(dnf.__file__))" 2>/dev/null)/../dnf-plugins"
-    pdir="$(cd "${pdir}" 2>/dev/null && pwd || echo /usr/lib/python3.6/site-packages/dnf-plugins)"
+    # Glob-resolve the plugin dir; do NOT depend on a python3 command (UBI8
+    # has none) - the python3-fallback bug is exactly what this diag chases.
+    pdir="$(ls -d /usr/lib/python*/site-packages/dnf-plugins 2>/dev/null | head -1)"
+    [ -n "${pdir}" ] || pdir=/usr/lib/python3.6/site-packages/dnf-plugins
+    echo "  pdir=${pdir}"
     mkdir -p "${pdir}" /etc/dnf/plugins
     cp /run/rhui-e0/e0inject.py "${pdir}/" 2>/dev/null
     cp /run/rhui-e0/e0inject.conf /etc/dnf/plugins/e0inject.conf 2>/dev/null
 
     echo "=== A: baseurl-direct + python shim ==="
     cp /run/rhui-e0/rhui-e0b-rhel'"${t}"'.repo /etc/yum.repos.d/
-    dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache 2>&1 | tail -4 | sed "s/^/  /"
+    dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache > /tmp/a.txt 2>&1
     echo "  A_makecache_rc=$?"
+    grep -qE "setHttpHeaders OK" /tmp/a.txt && echo "  A_plugin_fired=yes" || echo "  A_plugin_fired=no"
+    grep -qE "403|Failed to download|All mirrors" /tmp/a.txt && echo "  A_403=yes" || echo "  A_403=no"
+    tail -2 /tmp/a.txt | sed "s/^/  A| /"
     rm -f /etc/yum.repos.d/rhui-e0b-rhel'"${t}"'.repo
 
     echo "=== B: mirrorlist + python shim (r84 control) ==="
     cp /run/rhui-e0/rhui-e0-rhel'"${t}"'.repo /etc/yum.repos.d/
-    dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache 2>&1 | tail -4 | sed "s/^/  /"
+    dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache > /tmp/b.txt 2>&1
     echo "  B_makecache_rc=$?"
+    grep -qE "setHttpHeaders OK" /tmp/b.txt && echo "  B_plugin_fired=yes" || echo "  B_plugin_fired=no"
+    grep -qE "403|Failed to download|All mirrors" /tmp/b.txt && echo "  B_403=yes" || echo "  B_403=no"
+    tail -2 /tmp/b.txt | sed "s/^/  B| /"
 
     echo "=== C: native amazon-libdnf-plugin.so ==="
     if [ -f /run/rhui-e0/amazon-libdnf-plugin.so ]; then
       mkdir -p /usr/lib64/libdnf/plugins
       cp /run/rhui-e0/amazon-libdnf-plugin.so /usr/lib64/libdnf/plugins/ 2>/dev/null
-      # remove the python shim so C is isolated
       rm -f "${pdir}/e0inject.py" /etc/dnf/plugins/e0inject.conf
       cp /run/rhui-e0/amazon-id-static.conf /etc/dnf/plugins/amazon-id.conf 2>/dev/null
-      dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache 2>&1 | tail -4 | sed "s/^/  /"
+      dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache > /tmp/c.txt 2>&1
       echo "  C_makecache_rc=$?"
+      grep -qE "403|Failed to download|All mirrors" /tmp/c.txt && echo "  C_403=yes" || echo "  C_403=no"
+      tail -2 /tmp/c.txt | sed "s/^/  C| /"
     else
       echo "  C: amazon-libdnf-plugin.so not staged"
     fi
@@ -1362,32 +1383,28 @@ rc_hvc_container_makecache() {
   # Extract the two header VALUES from the curl -H file for the plugin.
   id_hdr="$(grep -oE 'X-RHUI-ID: [^"]*' "${hdrfile}" 2>/dev/null | sed 's/X-RHUI-ID: //')"
   sig_hdr="$(grep -oE 'X-RHUI-SIGNATURE: [^"]*' "${hdrfile}" 2>/dev/null | sed 's/X-RHUI-SIGNATURE: //')"
-  # A tiny dnf plugin: set the two headers on every rhui-e0 repo. Static values
-  # (no IMDS). Written into the bundle so it mounts read-only in the container.
-  cat > "${RC_HVC_BUNDLE}/e0inject.py" <<PYEOF
-import dnf
-class E0Inject(dnf.Plugin):
-    name = "e0inject"
-    def config(self):
-        hdrs = ["X-RHUI-ID: ${id_hdr}", "X-RHUI-SIGNATURE: ${sig_hdr}"]
-        for name, repo in self.base.repos.items():
-            if name.startswith("rhui-e0-"):
-                repo._repo.setHttpHeaders(hdrs)
-PYEOF
-  printf '[main]\nenabled=1\n' > "${RC_HVC_BUNDLE}/e0inject.conf"
+  rc_write_e0_plugin "${id_hdr}" "${sig_hdr}"
   # shellcheck disable=SC2016  # runs in the container
   local script='
     cp /run/rhui-e0/rhui-e0-rhel'"${t}"'.repo /etc/yum.repos.d/
-    pdir="$(python3 -c "import dnf,os;print(os.path.dirname(dnf.__file__))" 2>/dev/null)/../dnf-plugins"
-    pdir="$(cd "${pdir}" 2>/dev/null && pwd || echo /usr/lib/python3.9/site-packages/dnf-plugins)"
-    mkdir -p "${pdir}"
+    # Resolve the dnf-plugins dir by GLOB, major-independent. Do NOT depend on
+    # a "python3" command: UBI8 has no "python3" (dnf uses platform-python3.6),
+    # so the old python3 -c fallback silently dropped the plugin into a
+    # nonexistent python3.9 path and dnf never loaded it - THE el8 403 cause.
+    pdir="$(ls -d /usr/lib/python*/site-packages/dnf-plugins 2>/dev/null | head -1)"
+    [ -n "${pdir}" ] || pdir=/usr/lib/python3.6/site-packages/dnf-plugins
+    mkdir -p "${pdir}" /etc/dnf/plugins
     cp /run/rhui-e0/e0inject.py "${pdir}/" 2>/dev/null
-    mkdir -p /etc/dnf/plugins
     cp /run/rhui-e0/e0inject.conf /etc/dnf/plugins/e0inject.conf 2>/dev/null
-    dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache 2>&1 | tail -3
+    # Capture rc BEFORE any pipe (a pipe returns the LAST command rc = tail).
+    dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache > /tmp/mc.txt 2>&1
     echo "makecache_rc=$?"
-    dnf -y --disablerepo=* --enablerepo=rhui-e0-* install --downloadonly --destdir=/tmp/dl kernel-devel gcc make elfutils-libelf-devel 2>&1 | tail -3
+    grep -qE "setHttpHeaders OK" /tmp/mc.txt && echo "plugin_fired=yes" || echo "plugin_fired=no"
+    grep -qE "403|Failed to download|All mirrors" /tmp/mc.txt && echo "makecache_403=yes" || echo "makecache_403=no"
+    tail -3 /tmp/mc.txt | sed "s/^/  mc| /"
+    dnf -y --disablerepo=* --enablerepo=rhui-e0-* install --downloadonly --destdir=/tmp/dl kernel-devel gcc make elfutils-libelf-devel > /tmp/bd.txt 2>&1
     echo "builddeps_rc=$?"
+    tail -3 /tmp/bd.txt | sed "s/^/  bd| /"
   '
   {
     printf 'container dnf rhel%s (static-header plugin injection):\n' "${t}"
