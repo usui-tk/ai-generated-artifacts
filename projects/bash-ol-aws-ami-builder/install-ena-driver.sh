@@ -641,9 +641,17 @@ fi
 report_inbox_ena() {
   command -v modinfo >/dev/null 2>&1 || { log "[in-box ENA] modinfo unavailable; skipping pre-build report"; return 0; }
   local ver src fn
-  ver="$(modinfo -k "${kver}" -F version ena 2>/dev/null | head -1)"
-  src="$(modinfo -k "${kver}" -F srcversion ena 2>/dev/null | head -1)"
-  fn="$(modinfo -k "${kver}" -F filename ena 2>/dev/null | head -1)"
+  # '|| true' is LOAD-BEARING (matches every other such pipeline in this file):
+  # when the target kernel has NO in-box ena module (observed on a fresh OL8
+  # UEK7 guest before kernel-uek-modules lands), modinfo exits non-zero and,
+  # under this script's set -euo pipefail, an unguarded substitution kills the
+  # WHOLE install silently -- the first real OL8 AMI build (2026-07-11) died
+  # exactly here, between the "Building & installing" log line and dkms add,
+  # with /usr/src staged and /var/lib/dkms untouched. This function is purely
+  # informational and must never be able to abort a build.
+  ver="$(modinfo -k "${kver}" -F version ena 2>/dev/null | head -1 || true)"
+  src="$(modinfo -k "${kver}" -F srcversion ena 2>/dev/null | head -1 || true)"
+  fn="$(modinfo -k "${kver}" -F filename ena 2>/dev/null | head -1 || true)"
   log "[in-box ENA] before self-build: version=${ver:-<none; in-tree, no version field>} srcversion=${src:-?} file=${fn:-<not found>}"
 }
 

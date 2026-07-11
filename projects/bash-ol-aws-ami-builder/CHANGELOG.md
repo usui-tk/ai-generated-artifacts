@@ -20,6 +20,37 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (in-guest install died silently before dkms add - second first-real-build catch)
+- **`report_inbox_ena()` (install-ena-driver.sh) could abort the whole guest
+  provisioning.** On a guest kernel with NO in-box ena module (observed on the
+  first real OL8 build: fresh UEK7 5.15.0-322 before kernel-uek-modules lands;
+  the nitro-initramfs hook's "dracut-install: Failed to find module 'ena'" in
+  the same log was the visible symptom of the same absence), the three
+  unguarded `modinfo | head -1` substitutions failed under the installer's
+  `set -euo pipefail` and killed provisioning SILENTLY - after the "Building &
+  installing ENA 2.17.2 via DKMS" line, before `dkms add` (image forensics:
+  `/usr/src/amzn-drivers-2.17.2` staged, `/var/lib/dkms/` untouched, no
+  make.log). Every other such pipeline in the file already carried `|| true`;
+  these three were the omission (introduced with the reporting improvements in
+  8d08286). Fix: `|| true` on all three - the function is purely informational
+  and can now never abort a build. Root cause reproduced and the fix verified
+  mechanically in isolation (old form rc=1 + no output; fixed form rc=0 +
+  report line).
+- **Why the container matrix (B.9) never caught it**: clean-core lacks
+  kmod/modinfo, so the function's `command -v modinfo` guard took the skip
+  branch in every matrix cell. The new t010 regression runs the SHIPPED
+  function text under the real-guest condition (modinfo present, module
+  absent) and fails on the old form (negative control verified).
+- Same-class hardening (one token): the build heartbeat's
+  `virsh domstate | head` gains `|| true` so a domain disappearing between
+  polls (normal at install end) can no longer silently kill the background
+  progress reporter.
+- NOTE: this fix removes the silent death only. Whether ENA 2.17.2 actually
+  COMPILES against UEK7 5.15.0-322 on OL8 is a separate, still-open question -
+  the (8, x, UEK7) ledger keys are all untested (prior OL8 rows are UEK6-era);
+  the running single-cell buildtest answers it.
+- Tests: t010 9 -> 12 asserts. Suite: 469 -> 472.
+
 ### Fixed (AMI name leaked the raw installer pin line on OL8-10 - first-real-build catch)
 - **`_ena_pin_for_major()` / `_ena_fallback_pin()` are now shape-guarded.**
   The original sed pattern (`[^}"]+`, one-or-more) did not match the EMPTY

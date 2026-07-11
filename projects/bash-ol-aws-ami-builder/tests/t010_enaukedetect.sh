@@ -70,4 +70,39 @@ assert_eq "0" "${residual}" \
   "ena-uek-detect: no 'uname -r |' pipe remains after retarget"
 
 rm -f "${fix}"
+
+# --- report_inbox_ena : must NEVER abort the install (errexit/pipefail safe) --
+# BUG HISTORY (2026-07-11, first real OL8 AMI build): on a guest kernel with NO
+# in-box ena module, the unguarded 'modinfo | head' substitutions failed under
+# the installer's set -euo pipefail and killed the whole provisioning silently,
+# between the "Building & installing" log line and 'dkms add' (/usr/src staged,
+# /var/lib/dkms untouched). The container matrix never caught it because
+# clean-core lacks modinfo, so the function's guard took the skip branch.
+# This test extracts the SHIPPED function text and runs it under the same shell
+# options with modinfo present and the module ABSENT (the real-guest condition).
+if ! command -v modinfo >/dev/null 2>&1; then
+  t_skip "inbox-report: modinfo (kmod) not installed on this host"
+else
+  fnbody="$(mktemp)"
+  awk '/^report_inbox_ena\(\) \{/,/^\}/' "${INST}" > "${fnbody}"
+  if ! grep -q 'report_inbox_ena()' "${fnbody}"; then
+    t_fail "inbox-report: could not extract report_inbox_ena from the installer"
+  else
+    out="$(
+      bash -c '
+        set -euo pipefail
+        kver="0.0.0-nonexistent.kver.x86_64"
+        log() { printf "%s\n" "$*"; }
+        . "'"${fnbody}"'"
+        report_inbox_ena
+        printf "SURVIVED\n"
+      ' 2>/dev/null
+    )"; rc=$?
+    assert_eq 0 "${rc}" "inbox-report: absent in-box module does NOT kill the installer (rc 0 under set -euo pipefail)"
+    assert_match "${out}" 'SURVIVED' "inbox-report: execution continues past the report"
+    assert_match "${out}" 'in-box ENA.*<not found>' "inbox-report: the informational line itself is still emitted"
+  fi
+  rm -f "${fnbody}"
+fi
+
 t_done

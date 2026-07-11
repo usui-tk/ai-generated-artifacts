@@ -3033,7 +3033,7 @@ phase5_progress_heartbeat() {
       used_kb=$(du -k "${img}" 2>/dev/null | awk '{print $1}')
       used_h=$(du -h "${img}" 2>/dev/null | awk '{print $1}')
       name=$(basename "${img}" .qcow2)
-      state=$(virsh --connect qemu:///system domstate "${name}" 2>/dev/null | head -n 1)
+      state=$(virsh --connect qemu:///system domstate "${name}" 2>/dev/null | head -n 1 || true)
       [[ -z "${state}" ]] && state="(no domain)"
       delta_mb=$(( (${used_kb:-0} - prev_kb) / 1024 ))
       msg="elapsed ${elapsed}m | disk ${used_h} ($(printf '%+d' "${delta_mb}")MB) | vm ${state}${stage}"

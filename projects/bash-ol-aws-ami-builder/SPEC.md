@@ -658,7 +658,15 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
   `NAME="${NAME:-}"`, so the raw assignment line leaked into `AMI_NAME` and
   the `[OLAWS-ENA02]` branch never ran — caught by the first real OL8-10
   build (2026-07-11), fixed with `[^}"]*` + the x.y.z guard, and pinned by
-  t003 (fixture + real-file shape regression). Real AMI boot
+  t003 (fixture + real-file shape regression). A second first-real-build catch
+  (same day): `report_inbox_ena()` -- the purely informational pre-build
+  in-box-module report -- lacked the `|| true` guard every sibling pipeline in
+  the installer carries, so on a guest kernel with no in-box ena module its
+  `modinfo | head` substitutions killed provisioning silently under
+  `set -euo pipefail`, before `dkms add`. Fixed (guarded) and pinned by a t010
+  behavioural regression that runs the shipped function text under the
+  real-guest condition (the container matrix never hits it: clean-core lacks
+  modinfo, so the guard branch skips). Real AMI boot
   with an OL8/9/10 self-built driver is **not yet E2E-verified** (container
   compile + DKMS-install proof only — the same caveat model as the SSM Agent
   integration). On **OL9/UEKR8 and OL10/UEKR8**, `latest` is confirmed to build
