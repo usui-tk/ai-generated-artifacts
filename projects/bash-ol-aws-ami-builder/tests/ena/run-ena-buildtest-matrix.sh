@@ -71,7 +71,7 @@
 # OL is gated on whether the live upstream has something the ledger has not
 # covered: the latest kernel-uek for that OL (yum.oracle.com repomd.xml ->
 # primary.xml.gz, parsed with python3 stdlib only; fixed OL->UEKR map: OL6=UEKR4,
-# OL7/8=UEKR6) and the latest ENA release (git ls-remote). A new kernel OR a new
+# OL7=UEKR6, OL8=UEKR7) and the latest ENA release (git ls-remote). A new kernel OR a new
 # ENA (or no ledger entry for the OL) runs that OL; otherwise it is skipped with
 # no clean-core build and the ledger untouched. A probe that cannot determine the
 # latest is fail-open (the OL runs) by default, or fail-closed (skipped) under
@@ -451,7 +451,13 @@ preflight_qa() {
 # ---- update gate -----------------------------------------------------------
 # Fixed OL -> UEKR repo (matches install-ena-driver.sh and SPEC D.11/D.12).
 # Dynamic "follow the latest UEKR" is deferred to a whole-project cleanup.
-uekr_for() { case "$1" in 6) echo UEKR4 ;; 7|8) echo UEKR6 ;; 9|10) echo UEKR8 ;; *) echo "" ;; esac; }
+# Per-OL LATEST UEK track (verified against yum.oracle.com repomd.xml,
+# 2026-07-11: OL6=UEKR4 only; OL7=UEKR5/6; OL8=UEKR6/7; OL9=UEKR7/8;
+# OL10=UEKR8 only). Must stay in lock-step with install-ena-driver.sh's
+# bt_uek_repo defaults (pinned by t011) -- BUG HISTORY: OL8 said UEKR6 here
+# AND in the installer while real OL8 AMIs run UEKR7, so both the update
+# gate and every matrix cell watched/tested a track the AMIs do not ship.
+uekr_for() { case "$1" in 6) echo UEKR4 ;; 7) echo UEKR6 ;; 8) echo UEKR7 ;; 9|10) echo UEKR8 ;; *) echo "" ;; esac; }
 
 # UEK probe: the latest kernel-uek kver (x86_64) for this OL, from yum.oracle.com
 # via repomd.xml -> primary.xml.gz, parsed with python3 stdlib only (gzip +

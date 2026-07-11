@@ -449,6 +449,7 @@ and should usually be left alone.
 | `ROOT_FS` | `xfs` | Root filesystem of the resulting AMI |
 | `DISK_SIZE_GB` | `7` | Root volume size of the AMI; uniform 7 GB across OL6-10 — see B.3.4 "Disk sizing" |
 | `AMAZON_TIME_SYNC` | `no` | OPT-IN. `yes` (or `--enable-amazon-time-sync`) makes guest provisioning add the link-local Amazon Time Sync Service (169.254.169.123) as the preferred time source — see B.14 |
+| `ENA_DRIVER_VERSION` | (unset) | OPTIONAL user pin (emergency lever). A concrete `x.y.z` becomes the highest-priority self-built ENA version on every major: it enters the AMI identity AND the guest hook (no drift). Non-`x.y.z` values die in `load_env`. Unset = installer pin → latest → fallback chain |
 | `SERIAL_CONSOLE_RUNTIME` | `Yes` | Required for EC2 Serial Console |
 | `SERIAL_CONSOLE` | `no` | Install-time anaconda console; **debug opt-in** (`yes` can hang the build at install-VM end) — see note + D.18 |
 | `CLOUD_INIT` | `Yes` | Enable cloud-init in the AMI |
@@ -645,9 +646,15 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
   overridable via `ENA_DRIVER_VERSION` or the per-OS `ENA_VERSION_OL8/9/10`
   variables. This is **production** (ENA Express generation: the produced AMI
   must ship an express-capable driver): `build-ol-aws-ami.sh` injects the
-  self-build hook on **OL6–OL10 by default**, resolving latest **host-side**
-  (`[OLAWS-ENA02]`, mirroring the AWS CLI resolver) and passing the concrete
-  version into the guest via `ENA_DRIVER_VERSION` on the latest-resolving
+  self-build hook on **OL6–OL10 by default**. The wrapper-side version chain
+  is: **env-file user pin `ENA_DRIVER_VERSION`** (highest priority; must be a
+  concrete `x.y.z`, else `load_env` dies; logged under `[OLAWS-ENA02]` and
+  passed into the guest hook on EVERY major — pinned-installer majors
+  included — so the AMI name and the built module cannot drift) → installer
+  pin (OL6/7) → amzn-drivers **latest** resolved **host-side**
+  (`[OLAWS-ENA02]`, mirroring the AWS CLI resolver) → fallback pin. The
+  resolved concrete version is passed into the guest via
+  `ENA_DRIVER_VERSION` on the latest-resolving
   majors, so the AMI identity and the built module always agree (the in-guest
   runtime resolution is the standalone / container-test path). The pin
   extractors (`_ena_pin_for_major` / `_ena_fallback_pin`) are **shape-guarded**
@@ -782,7 +789,8 @@ all inert.
   commands, by detected `OL_MAJOR`): OL6 enables the shipped Fedora-archive EPEL
   + `ol6_UEKR4`; OL7 enables `ol7_developer_EPEL` + `ol7_UEKR6`; OL8 (whose slim
   base ships `dnf` only) bootstraps the `yum` compat via `dnf`, then enables
-  `ol8_developer_EPEL` + `ol8_UEKR6`. The shipped (disabled) EPEL is enabled
+  `ol8_developer_EPEL` + `ol8_UEKR7` (default; `BT_UEK_REPO_OVERRIDE=ol8_UEKR6`
+  runs a UEKR6-specific regression check instead). The shipped (disabled) EPEL is enabled
   persistently so the production `setup_epel` finds it already enabled and does
   not create a second repo.
 - **`INSECURE_TLS`.** `INSECURE_TLS=1` (default `0`) drops TLS peer verification
@@ -1950,8 +1958,23 @@ version order used elsewhere:
 - **kernel-uek** — the latest `kernel-uek` (x86_64) for the OL is read from
   `yum.oracle.com` (`repomd.xml` → `primary.xml.gz`, parsed with the python3
   standard library only — `gzip` + `xml.etree`, no extra package) under the
-  fixed `OL → UEKR` map (`uekr_for()`: OL6 → `UEKR4`, OL7/8 → `UEKR6`, OL9/OL10
-  → `UEKR8`; source RPMs are ignored). OL9 ships two UEK tracks in its default
+  fixed `OL → UEKR` map (`uekr_for()`: OL6 → `UEKR4`, OL7 → `UEKR6`,
+  OL8 → `UEKR7`, OL9/OL10 → `UEKR8`; source RPMs are ignored). The map pins
+  the LATEST track each major ships (verified against `yum.oracle.com`
+  repomd.xml, 2026-07-11: OL6=UEKR4 only, OL7=UEKR5/6, OL8=UEKR6/7,
+  OL9=UEKR7/8, OL10=UEKR8 only) and must stay in lock-step with
+  `install-ena-driver.sh`'s `bt_uek_repo` defaults — both are pinned by t011,
+  so a track change is always a conscious, test-visible decision.
+  **Maintenance rule**: when Oracle ships a new UEK track for a major, verify
+  it on `yum.oracle.com`, then update the installer default, this map, the
+  t011 pins, and this section together (the kernel-primary ledger makes every
+  key on the new track a fresh, untested combination). **Bug history
+  (2026-07-11)**: OL8 said `UEKR6` here AND in the installer while real OL8
+  AMIs run UEKR7 (5.15) — the update gate watched, and 145 matrix cells
+  tested, a track the AMIs do not ship; the divergence surfaced when the
+  first real OL8 build targeted 5.15 and the "matrix ok / E2E path differs"
+  contradiction was investigated. Prior OL8 ledger rows (UEK6-era kvers)
+  remain as history. OL9 ships two UEK tracks in its default
   repo config — `UEKR7` (5.15, enabled by default) and `UEKR8` (6.12, present
   but disabled) — and this project targets `UEKR8` (see the evaluation
   findings below); `BT_UEK_REPO_OVERRIDE=ol9_UEKR7` (passed through to

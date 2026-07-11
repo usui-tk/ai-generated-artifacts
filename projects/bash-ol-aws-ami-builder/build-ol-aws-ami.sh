@@ -166,6 +166,7 @@ readonly SCRIPT_DIR
 # Execution mode flags
 SKIP_PREREQ=0
 AMAZON_TIME_SYNC_CLI=0
+ENA_USER_PIN=0
 SKIP_AWS_IMPORT=0
 BUILD_ONLY=0
 # ENA driver self-build (default ON -> AWS-optimized AMI; --skip-ena-driver
@@ -542,15 +543,31 @@ load_env() {
   # resolved version is also PASSED INTO the guest hook (ENA_DRIVER_VERSION),
   # so the AMI name and the actually-built module can never drift.
   if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
-    ENA_BUILD_VERSION="$(_ena_pin_for_major "${OL_MAJOR_VERSION}")"
-    if [[ -z "${ENA_BUILD_VERSION}" ]]; then
-      local _ena_latest; _ena_latest="$(_ena_resolve_latest_host)"
-      if [[ -n "${_ena_latest}" ]]; then
-        ENA_BUILD_VERSION="${_ena_latest}"
-        log_info "[OLAWS-ENA02] resolved amzn-drivers latest -> ${ENA_BUILD_VERSION} for OL${OL_MAJOR_VERSION} (AMI identity + guest hook target)"
-      else
-        ENA_BUILD_VERSION="$(_ena_fallback_pin)"
-        log_warn "[OLAWS-ENA02] could not resolve amzn-drivers latest (host offline?); falling back to the installer's pin ${ENA_BUILD_VERSION:-<unknown>} for OL${OL_MAJOR_VERSION}"
+    if [[ -n "${ENA_DRIVER_VERSION:-}" ]]; then
+      # USER PIN (highest priority; env-file key ENA_DRIVER_VERSION). Must be
+      # a concrete x.y.z so the AMI identity invariant holds; the same value
+      # is passed into the guest hook unconditionally (see the hook injection),
+      # so name and artifact cannot drift on ANY major, pinned-installer
+      # majors (OL6/OL7) included.
+      if [[ ! "${ENA_DRIVER_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        die "ENA_DRIVER_VERSION must be a concrete x.y.z version (got '${ENA_DRIVER_VERSION}').
+     Use e.g. ENA_DRIVER_VERSION=\"2.17.0\" in your env file, or leave it unset
+     for the default chain (installer pin -> amzn-drivers latest -> fallback pin)."
+      fi
+      ENA_BUILD_VERSION="${ENA_DRIVER_VERSION}"
+      ENA_USER_PIN=1
+      log_info "[OLAWS-ENA02] user pin ENA_DRIVER_VERSION=${ENA_BUILD_VERSION} for OL${OL_MAJOR_VERSION} (AMI identity + guest hook target; overrides installer pin / latest resolution)"
+    else
+      ENA_BUILD_VERSION="$(_ena_pin_for_major "${OL_MAJOR_VERSION}")"
+      if [[ -z "${ENA_BUILD_VERSION}" ]]; then
+        local _ena_latest; _ena_latest="$(_ena_resolve_latest_host)"
+        if [[ -n "${_ena_latest}" ]]; then
+          ENA_BUILD_VERSION="${_ena_latest}"
+          log_info "[OLAWS-ENA02] resolved amzn-drivers latest -> ${ENA_BUILD_VERSION} for OL${OL_MAJOR_VERSION} (AMI identity + guest hook target)"
+        else
+          ENA_BUILD_VERSION="$(_ena_fallback_pin)"
+          log_warn "[OLAWS-ENA02] could not resolve amzn-drivers latest (host offline?); falling back to the installer's pin ${ENA_BUILD_VERSION:-<unknown>} for OL${OL_MAJOR_VERSION}"
+        fi
       fi
     fi
   fi
@@ -1816,7 +1833,10 @@ OLAWS_OL6_CLOUD_USER_BODY
       # in-guest latest resolution). The pinned majors (OL6/OL7) run the
       # installer bare -- its own pin IS the resolved version.
       local _ena_hook_invoke='/usr/local/sbin/ol-aws-install-ena-driver.sh'
-      if [[ -z "$(_ena_pin_for_major "${OL_MAJOR_VERSION}")" && -n "${ENA_BUILD_VERSION}" ]]; then
+      # A USER PIN (ENA_USER_PIN, load_env) is passed on EVERY major -- it
+      # must override even the pinned installers on OL6/OL7, or the name
+      # would carry the user pin while the guest built the installer pin.
+      if [[ "${ENA_USER_PIN}" -eq 1 || ( -z "$(_ena_pin_for_major "${OL_MAJOR_VERSION}")" && -n "${ENA_BUILD_VERSION}" ) ]]; then
         _ena_hook_invoke="ENA_DRIVER_VERSION=${ENA_BUILD_VERSION} /usr/local/sbin/ol-aws-install-ena-driver.sh"
       fi
       {

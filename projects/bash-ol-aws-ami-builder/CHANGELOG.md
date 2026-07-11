@@ -20,6 +20,39 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (OL8 matrix fidelity: the container tests and the update gate targeted UEKR6 while real AMIs run UEKR7)
+- **Reliability finding (three-source audit)**: the buildtest ledger (all OL8
+  rows = 5.4.17 UEK6-era kvers), the installer code (hardcoded
+  `bt_uek_repo="ol8_UEKR6"`), and live yum.oracle.com repomd.xml probes
+  (OL8 ships UEKR6 AND UEKR7; UEKR7 is the latest) agree: the OL8 matrix
+  validated, and the update-gate `uekr_for()` map watched, a kernel track
+  the produced AMIs do not ship (every booted/built OL8 guest runs
+  UEKR7 5.15). The other four majors are on their latest available track
+  (OL6=UEKR4 only, OL7=UEKR6, OL9=UEKR8, OL10=UEKR8 only). This is why the
+  single-cell buildtest "(8, 2.17.2) ok" did not contradict the real build:
+  it was a different kernel (kver 5.4.17 vs 5.15.0-322) - the ledger's
+  kernel-primary design kept the results honest.
+- **Fix**: OL8 buildtest default moves to `ol8_UEKR7` with
+  `BT_UEK_REPO_OVERRIDE=ol8_UEKR6` for legacy regression checks (mirrors the
+  OL9 two-track pattern), and the update-gate `uekr_for()` map moves OL8 to
+  UEKR7 in lock-step. Prior UEK6-era OL8 ledger rows remain as history;
+  every (8, x, UEKR7-kver) key is a fresh, untested combination.
+- **NEW: identity-consistent user pin `ENA_DRIVER_VERSION`** (env-file key,
+  optional, unset by default - the adjudicated pin lever). A concrete x.y.z
+  becomes the HIGHEST-priority source in the wrapper chain (user pin ->
+  installer pin -> latest -> fallback): it enters the AMI name/description
+  AND is passed into the guest hook on EVERY major (pinned-installer majors
+  included), so identity and artifact cannot drift. Non-x.y.z values die in
+  load_env with a pointed message. Documented (commented) in all five env
+  templates; the active common core stays at 21 keys.
+- **Guards**: t011 now pins the per-major installer tracks AND the uekr_for()
+  map (a track change must be a conscious, test-visible decision) and the
+  user-pin wiring; t011 is 31 asserts (count in TESTING.md corrected - the
+  stale "15" predated the production-wiring additions). Suite: 472 -> 482.
+- **Maintenance rule (SPEC B.9)**: when Oracle ships a new UEK track for a
+  major, verify on yum.oracle.com, then update the installer default, the
+  uekr_for() map, the t011 pins, and the SPEC track table together.
+
 ### Fixed (in-guest install died silently before dkms add - second first-real-build catch)
 - **`report_inbox_ena()` (install-ena-driver.sh) could abort the whole guest
   provisioning.** On a guest kernel with NO in-box ena module (observed on the

@@ -331,6 +331,7 @@ The script auto-detects the OL major and update version from `ISO_URL`, so switc
 | `UPDATE_TO_LATEST` | Defaults to `yes` — runs `dnf/yum update` inside the guest after install, addressing kernel and userspace CVEs published after the ISO date. Override with `security` or `no` only when you understand the trade-off. |
 | `DISK_SIZE_GB` | Defaults to `7` (uniform across OL6-10, aligned with Oracle's own AWS AMIs). The root partition auto-grows and `cloud-utils-growpart` is baked in, so instances launched with a larger EBS volume expand automatically — this is a floor, not a ceiling. See SPEC B.3.4. |
 | `AMAZON_TIME_SYNC` | Defaults to `no` (time configuration is left to the AMI's end user). Set `yes` — or pass `--enable-amazon-time-sync` — to prefer the link-local Amazon Time Sync Service (`169.254.169.123`) in the guest. |
+| `ENA_DRIVER_VERSION` | Optional user pin (emergency lever; leave unset normally). A concrete `x.y.z` becomes the highest-priority self-built ENA driver version on every OL major — it enters the AMI name AND the guest build, so identity and artifact stay in lock-step. Unset = installer pin (OL6/7) → amzn-drivers latest (OL8-10) → fallback pin. |
 | `AMI_NAME` | Optional; auto-generates with timestamp if unset |
 
 ---

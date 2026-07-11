@@ -363,7 +363,16 @@ if [[ "${ENA_BUILDTEST}" == "1" ]]; then
       else
         dnf -y install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL8"
       fi
-      bt_uek_repo="ol8_UEKR6" ;;
+      # OL8 ships two UEK tracks (verified against yum.oracle.com repomd.xml,
+      # 2026-07-11): ol8_UEKR6 (5.4) and ol8_UEKR7 (5.15). UEKR7 is the target
+      # here -- it is what real OL8.10 AMIs from this pipeline actually run
+      # (boot-E2E evidence: 5.15.0-32x.el8uek on every booted/built guest),
+      # so testing UEKR6 by default no longer informs the product. The old
+      # hardcoded ol8_UEKR6 default meant the matrix validated a kernel the
+      # AMIs do not ship (caught by the first real OL8 build vs matrix
+      # divergence, 2026-07-11). Override with BT_UEK_REPO_OVERRIDE=ol8_UEKR6
+      # only for a UEKR6-specific regression check.
+      bt_uek_repo="${BT_UEK_REPO_OVERRIDE:-ol8_UEKR7}" ;;
     9)
       sed -i '/^\[ol9_developer_EPEL\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/oracle-epel-ol9.repo
       # Same dnf-only bootstrap as OL8; a real OL9 VM already has yum.

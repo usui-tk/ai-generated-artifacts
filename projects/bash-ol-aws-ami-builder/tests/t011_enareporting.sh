@@ -98,4 +98,51 @@ else
   t_pass "ena-wiring: no residual OL6/OL7-only ENA_DRIVER_BUILD gate remains"
 fi
 
+# --- buildtest UEK track pins (matrix fidelity) --------------------------------
+# The container matrix must provision the LATEST UEK track each OL major ships
+# (verified against yum.oracle.com repomd.xml, 2026-07-11) -- the track real
+# AMIs from this pipeline actually run. BUG HISTORY: OL8 was hardcoded to
+# ol8_UEKR6 while real OL8 AMIs run UEKR7 (5.15), so 145 matrix cells validated
+# a kernel the AMIs do not ship; the divergence surfaced when the first real
+# OL8 build targeted 5.15 (2026-07-11). These pins make any track change a
+# conscious, test-visible decision (update them together with the installer
+# and the SPEC B.9 track table when Oracle ships a new UEK track).
+INST_ENA="${PROJ}/install-ena-driver.sh"
+# The single-quoted '${BT_UEK_REPO_OVERRIDE:-...}' entries are deliberate:
+# we are literally matching the installer's own source text, not expanding.
+# shellcheck disable=SC2016
+for want in 'bt_uek_repo="ol6_UEKR4"' \
+            'bt_uek_repo="ol7_UEKR6"' \
+            'bt_uek_repo="${BT_UEK_REPO_OVERRIDE:-ol8_UEKR7}"' \
+            'bt_uek_repo="${BT_UEK_REPO_OVERRIDE:-ol9_UEKR8}"' \
+            'bt_uek_repo="ol10_UEKR8"'; do
+  if grep -Fq "${want}" "${INST_ENA}"; then
+    t_pass "ena-track: installer pins ${want}"
+  else
+    t_fail "ena-track: installer pins ${want}"
+  fi
+done
+
+# The update-gate probe's uekr_for() map must agree with the installer pins
+# above (BUG HISTORY: OL8 diverged in BOTH places at once -- pin both).
+MATRIX_RUNNER="${PROJ}/tests/ena/run-ena-buildtest-matrix.sh"
+if grep -Fq '6) echo UEKR4 ;; 7) echo UEKR6 ;; 8) echo UEKR7 ;; 9|10) echo UEKR8' "${MATRIX_RUNNER}"; then
+  t_pass "ena-track: update-gate uekr_for() map matches the installer tracks (OL8=UEKR7)"
+else
+  t_fail "ena-track: update-gate uekr_for() map matches the installer tracks (OL8=UEKR7)"
+fi
+
+# --- user pin (ENA_DRIVER_VERSION) wiring --------------------------------------
+# The env-file user pin is the HIGHEST-priority identity source and must be
+# passed into the guest on EVERY major (pinned-installer majors included), or
+# the AMI name and the built module would drift.
+assert_in "${WRAP}" 'ENA_USER_PIN=1' \
+  "ena-userpin: load_env records an accepted user pin (ENA_USER_PIN=1)"
+assert_in "${WRAP}" 'ENA_DRIVER_VERSION must be a concrete x\.y\.z version' \
+  "ena-userpin: a non-x.y.z user pin dies with a pointed message"
+assert_in "${WRAP}" '\[OLAWS-ENA02\] user pin ENA_DRIVER_VERSION=' \
+  "ena-userpin: accepted user pin is logged under the [OLAWS-ENA02] marker"
+assert_in "${WRAP}" '"\$\{ENA_USER_PIN\}" -eq 1 \|\|' \
+  "ena-userpin: the guest hook passes the pinned version on every major when user-pinned"
+
 t_done
