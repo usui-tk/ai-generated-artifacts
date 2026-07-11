@@ -167,4 +167,59 @@ assert_match "${err}" "no %packages section" "_ks_add_sos_package: die message n
 assert_eq 0 "$(grep -c 'sos' "${kstmp}/bad.cfg")" "_ks_add_sos_package: assert-then-write leaves the file untouched on die"
 rm -rf "${kstmp}"
 
+# --- _ena_pin_for_major / _ena_fallback_pin : shape-guarded extraction ---------
+# BUG HISTORY (2026-07-11, first real OL8-10 build): the original sed used
+# '[^}"]+' which does not match the empty default of the latest-resolving
+# majors' pins (NAME="${NAME:-}"), so the WHOLE assignment line passed through
+# and leaked into the AMI name. The extractors are now shape-guarded: only a
+# concrete x.y.z is ever emitted; empty defaults and unrecognized pin forms
+# both yield "".
+#
+# (a) Fixture-driven: SCRIPT_DIR is readonly and derived from BASH_SOURCE, so
+# the fixture installer is planted next to a SYMLINK of the wrapper and the
+# symlink is sourced (SCRIPT_DIR then resolves to the fixture dir).
+pintmp="$(mktemp -d)"
+ln -s "${MAIN}" "${pintmp}/build-ol-aws-ami.sh"
+cat > "${pintmp}/install-ena-driver.sh" <<'PIN_FIXTURE'
+ENA_VERSION_OL6="${ENA_VERSION_OL6:-1.2.3}"
+ENA_VERSION_OL8="${ENA_VERSION_OL8:-}"
+ENA_VERSION_OL9="9.9.9"
+ENA_VERSION_OL10=not-a-pin-form
+ENA_LATEST_FALLBACK_PIN="${ENA_LATEST_FALLBACK_PIN:-}"
+PIN_FIXTURE
+out="$(
+  (
+    # shellcheck source=/dev/null
+    . "${pintmp}/build-ol-aws-ami.sh" >/dev/null 2>&1
+    printf '6=[%s] 8=[%s] 9=[%s] 10=[%s] fb=[%s]' \
+      "$(_ena_pin_for_major 6)" "$(_ena_pin_for_major 8)" \
+      "$(_ena_pin_for_major 9)" "$(_ena_pin_for_major 10)" \
+      "$(_ena_fallback_pin)"
+  ) 2>/dev/null
+)"
+assert_eq '6=[1.2.3] 8=[] 9=[] 10=[] fb=[]' "${out}" \
+  "ena-pin: concrete pin extracted; empty default, non-:- form, garbage, empty fallback ALL yield '' (no raw-line leak)"
+rm -rf "${pintmp}"
+
+# (b) Real-file shape regression against the shipped installer: OL6/OL7 pins
+# must be concrete x.y.z; the latest-resolving majors (OL8/9/10) must be
+# EXACTLY empty (this is the line the AMI-name leak rode in on); the fallback
+# pin must be concrete x.y.z. Shape-only (no hardcoded versions) so routine
+# pin bumps do not break the tier.
+out="$(
+  (
+    # shellcheck source=/dev/null
+    . "${MAIN}" >/dev/null 2>&1
+    for m in 6 7 8 9 10; do printf '%s|' "$(_ena_pin_for_major "${m}")"; done
+    printf '%s' "$(_ena_fallback_pin)"
+  ) 2>/dev/null
+)"
+IFS='|' read -r p6 p7 p8 p9 p10 pfb <<<"${out}"
+assert_match "${p6}"  '^[0-9]+\.[0-9]+\.[0-9]+$' "ena-pin(real): OL6 pin is a concrete x.y.z"
+assert_match "${p7}"  '^[0-9]+\.[0-9]+\.[0-9]+$' "ena-pin(real): OL7 pin is a concrete x.y.z"
+assert_eq "" "${p8}"  "ena-pin(real): OL8 (latest-resolving) extracts to empty, not the raw line"
+assert_eq "" "${p9}"  "ena-pin(real): OL9 (latest-resolving) extracts to empty, not the raw line"
+assert_eq "" "${p10}" "ena-pin(real): OL10 (latest-resolving) extracts to empty, not the raw line"
+assert_match "${pfb}" '^[0-9]+\.[0-9]+\.[0-9]+$' "ena-pin(real): fallback pin is a concrete x.y.z"
+
 t_done

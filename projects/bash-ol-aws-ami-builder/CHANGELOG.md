@@ -20,6 +20,36 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (AMI name leaked the raw installer pin line on OL8-10 - first-real-build catch)
+- **`_ena_pin_for_major()` / `_ena_fallback_pin()` are now shape-guarded.**
+  The original sed pattern (`[^}"]+`, one-or-more) did not match the EMPTY
+  default of the latest-resolving majors' pins
+  (`ENA_VERSION_OL8/9/10="${...:-}"`), so sed passed the whole assignment
+  line through: the raw text leaked into `AMI_NAME`
+  (`...-enaENA_VERSION_OL10="${ENA_VERSION_OL10:-}"-...` -> register-image
+  charset validation correctly refused), and - the silent half of the bug -
+  the non-empty return also suppressed the `[OLAWS-ENA02]` host-side latest
+  resolution branch AND the `ENA_DRIVER_VERSION` guest passing on OL8-10.
+  Caught by the very first real OL8/9/10 build attempt (2026-07-11); the
+  container/static tiers never exercised the extractor against the real
+  installer's empty-default form. Fix: `[^}"]*` (zero-or-more) + `sed -n..p`
+  + an x.y.z shape guard, so ONLY a concrete version is ever emitted - empty
+  defaults and any unrecognized pin form yield "" (= resolve latest / use
+  fallback); a parser miss can never reach the AMI identity again. Verified
+  live: pins now extract 2.9.1 / 2.17.0 / "" / "" / "" for OL6-10, the
+  host-side resolver returns a concrete latest (2.17.2 at fix time), and the
+  resulting name passes `validate_ami_name` (62 chars).
+- Deliberately NOT touched: the sibling `_ssm_pin_for_major` /
+  `_awscli_pin_for_major` extractors share the old pattern but their pin
+  maps structurally never use an empty default (the "latest" sentinel fills
+  that role), so they are not affected; hardening them would need different
+  accepted shapes (`latest` | 4-component SSM versions) and is out of this
+  fix's scope.
+- Tests: t003 43 -> 50 asserts (fixture-driven extractor matrix via a
+  symlinked-wrapper SCRIPT_DIR redirect, plus a real-file shape regression
+  that pins OL8-10 extraction to EXACTLY empty - the line the leak rode in
+  on). Suite: 462 -> 469.
+
 ### Changed (boot-E2E feedback: 7 GB disks, sos baked in, opt-in Amazon Time Sync)
 - **`DISK_SIZE_GB` 10 -> 7, uniform across OL6-10** (user decision 2026-07-11,
   aligned with Oracle's own AWS AMIs). Safe by construction: every root

@@ -3186,10 +3186,23 @@ _ena_module_version() {
 # messages, the AMI name/description, and the hook log never drift from the
 # installer's actual pins. Echoes empty if it cannot be determined.
 _ena_pin_for_major() {
-  local major="$1" inst="${SCRIPT_DIR}/install-ena-driver.sh"
+  local major="$1" inst="${SCRIPT_DIR}/install-ena-driver.sh" pin
   [[ -f "${inst}" ]] || return 0
-  grep -E "^ENA_VERSION_OL${major}=" "${inst}" \
-    | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
+  # The installer's canonical pin form is NAME="${NAME:-<pin>}" where <pin> is
+  # empty on the latest-resolving majors (OL8/9/10). '[^}"]*' (zero-or-more)
+  # matches that empty default; 'sed -n ... p' prints nothing when the line
+  # does not have the ':-...}' shape at all. BUG HISTORY: the original
+  # '[^}"]+' (one-or-more) did not match the empty default, so sed passed the
+  # whole assignment line through and the raw text leaked into the AMI name
+  # (caught by the first real OL8-10 build, 2026-07-11).
+  pin="$(grep -E "^ENA_VERSION_OL${major}=" "${inst}" | head -1 \
+           | sed -nE 's/.*:-([^}"]*)\}.*/\1/p')"
+  # Emit only a concrete x.y.z. Empty (latest-resolving majors) and any
+  # unrecognized pin form both yield "": callers treat "" as "resolve latest /
+  # use fallback", so a parser miss can never reach the AMI identity again.
+  if [[ "${pin}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s\n' "${pin}"
+  fi
 }
 
 # Resolve the amzn-drivers "latest" ENA tag to a concrete, published version --
@@ -3225,10 +3238,15 @@ _ena_resolve_latest_host() {
 # the guest build agree even when the host cannot reach GitHub. Mirrors
 # _ena_pin_for_major.
 _ena_fallback_pin() {
-  local inst="${SCRIPT_DIR}/install-ena-driver.sh"
+  local inst="${SCRIPT_DIR}/install-ena-driver.sh" pin
   [[ -f "${inst}" ]] || return 0
-  grep -E "^ENA_LATEST_FALLBACK_PIN=" "${inst}" \
-    | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1
+  # Same shape-guarded parser as _ena_pin_for_major (see the BUG HISTORY
+  # note there): only a concrete x.y.z is ever emitted.
+  pin="$(grep -E "^ENA_LATEST_FALLBACK_PIN=" "${inst}" | head -1 \
+           | sed -nE 's/.*:-([^}"]*)\}.*/\1/p')"
+  if [[ "${pin}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s\n' "${pin}"
+  fi
 }
 
 # Resolve the SSM Agent version for an OL major from install-ssm-agent.sh's

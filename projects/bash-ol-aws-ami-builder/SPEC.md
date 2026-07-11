@@ -649,7 +649,16 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
   (`[OLAWS-ENA02]`, mirroring the AWS CLI resolver) and passing the concrete
   version into the guest via `ENA_DRIVER_VERSION` on the latest-resolving
   majors, so the AMI identity and the built module always agree (the in-guest
-  runtime resolution is the standalone / container-test path). Real AMI boot
+  runtime resolution is the standalone / container-test path). The pin
+  extractors (`_ena_pin_for_major` / `_ena_fallback_pin`) are **shape-guarded**
+  (only a concrete `x.y.z` is ever emitted; the empty defaults of the
+  latest-resolving majors and any unrecognized pin form both yield `""`,
+  which callers treat as "resolve latest / use fallback"). Bug history: the
+  original sed (`[^}"]+`, one-or-more) did not match the empty default
+  `NAME="${NAME:-}"`, so the raw assignment line leaked into `AMI_NAME` and
+  the `[OLAWS-ENA02]` branch never ran — caught by the first real OL8-10
+  build (2026-07-11), fixed with `[^}"]*` + the x.y.z guard, and pinned by
+  t003 (fixture + real-file shape regression). Real AMI boot
   with an OL8/9/10 self-built driver is **not yet E2E-verified** (container
   compile + DKMS-install proof only — the same caveat model as the SSM Agent
   integration). On **OL9/UEKR8 and OL10/UEKR8**, `latest` is confirmed to build
