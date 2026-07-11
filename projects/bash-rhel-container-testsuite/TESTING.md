@@ -126,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 749 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 762 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -416,7 +416,13 @@ so results are host-independent and deterministic.
   (both sides measured, own major AND every chain major - not simplified),
   the B" static header-injection file (host-generated, container-consumed),
   the signature-TTL freeze/re-test schedule, hermetic skip on non-RHUI
-  hosts, and the absolute archive-path emission; 118 assertions total.
+  hosts, and the absolute archive-path emission; r84 adds the measurement-bug
+  fix invariants: --cacert independent of the client cert (all container cells
+  complete TLS, not just cert cells), credentials passed as env vars (header
+  metacharacters survive), and the paired flow's added container RPM-body +
+  real dnf makecache layers with a generated static-header dnf plugin (valid
+  python, host-generated values, scoped to rhui-e0 repos); 131 assertions
+  total.
 
 ---
 
@@ -628,7 +634,7 @@ The full suite is green in the planning sandbox:
 ---- t023_probeentitlement.sh ---- ## RESULT pass=62 fail=0 skip=0
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
 ---- t025_awsrhuicollect.sh ----   ## RESULT pass=39 fail=0 skip=0
-SUITE: 749 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
+SUITE: 762 passed, 0 skipped, 0 failed  (25 tiers, 0 tier-failure(s))
 ```
 
 **L0 fixed count = 51 shell files** (every `.sh` in the project, incl. the 3 root

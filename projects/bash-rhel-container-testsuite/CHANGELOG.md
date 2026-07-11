@@ -13,6 +13,53 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r84] - 2026-07-11 - fix: collector v1.8.0 - paired-matrix measurement bug (--cacert + env passing) and in-container RPM-body + real dnf makecache
+
+The first `--hostvscontainer` run (r83) confirmed the design's key point -
+the container reaches repomd=200 with the STATIC host-generated headers
+(B" injection works, own major and every chain major, all three hosts) and
+resolved the earlier cert-only discrepancy (host and container both 403).
+But two container cells read 000 instead of the true 403, and the paired
+table stopped at the repomd layer. Both are measurement gaps, fixed here so
+the next run is complete in one pass (operator: no repeats).
+
+### Fixed
+- **`--cacert` was gated by the client-cert branch (r83 bug).** The RHUI CA
+  is TLS trust, INDEPENDENT of the client cert; putting it inside the
+  `send_cert=1` branch meant headers-only/none couldn't complete the TLS
+  handshake in the container (UBI lacks the RHUI CA in its trust store) and
+  returned 000 instead of 403. The CA is now always passed. Confirmed against
+  the r83 host data: host headers-only completed TLS (200 mirrorlist / 403
+  repomd) because the host DID pass --cacert - the container simply wasn't.
+- **Credentials were string-spliced into the in-container script.** A header
+  value with shell metacharacters could break the command. Credentials now
+  travel as ENV VARS (`-e URL/LBL/HDRS`); the script builds curl's argv from
+  them. Regression-guarded with a metacharacter-bearing header fixture.
+
+### Added
+- **Container RPM-body + real dnf makecache in the paired flow.** repomd=200
+  does not imply RPM-body=200 (separately gated), and neither implies dnf
+  works. `rc_hvc_container_rpmbody` follows mirrorlist -> repomd -> primary ->
+  make's RPM with the static headers; `rc_hvc_container_makecache` writes a
+  MINIMAL dnf plugin into the bundle that injects the host-generated headers
+  into the synthesized rhui-e0 repos (mirroring amazon-id, but static since
+  the container can't reach IMDS - U2), then runs makecache + a downloadonly
+  of the ENA build deps. This measures the B" design end to end in one run:
+  rc=0 means the suite can build in that container. The generated plugin is
+  unit-verified (valid python, correct header values, scoped to rhui-e0).
+
+### Notes
+- Collector v1.7.0 -> **v1.8.0**. t025 -> 131 assertions (13 new r84,
+  including hermetic CA-in-every-cell and metacharacter-survival checks and
+  the plugin validity check). TESTING.md baseline 762. Gate 762/0/0
+  (25 tiers), shellcheck -S style clean, bash -n clean, doc-gate PASS.
+- Operator next step (one pass, no repeat): on disposable el8/el9/el10 run
+  `sudo bash collect-aws-rhui-facts.sh --hostvscontainer --sigttl`. The
+  paired tables now carry all four cells with true codes on both sides, plus
+  the container RPM-body and dnf makecache lines; `sigttl/SIGTTL.txt` gives
+  the signature acceptance-vs-age curve. These close the E0 investigation and
+  feed the same-major-vs-chain design decision.
+
 ## [r83] - 2026-07-11 - feat: collector v1.7.0 - E0-follow paired host<->container auth matrix + signature TTL; absolute archive path
 
 The first E0 run (r82, three hosts) settled the authorization model but

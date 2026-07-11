@@ -77,7 +77,7 @@
 #==============================================================================
 set -uo pipefail
 
-RC_TOOL_VERSION="1.7.0"
+RC_TOOL_VERSION="1.8.0"
 # Packages whose <package> XML slices survive the primary-blob slimming
 # (alternation for one POSIX-awk pass; fixed names, no regex metacharacters).
 RC_SLIM_WL="kernel-devel|gcc|make|elfutils-libelf-devel|leapp-rhui-aws"
@@ -1202,28 +1202,112 @@ rc_collect_containerprobe() {
 # the collected data.
 #------------------------------------------------------------------------------
 
-# rc_hvc_container_cell IMG OUT LABEL URL CERTDIR CERTBASE SEND_CERT HDRFILE -
-# run ONE auth-matrix cell INSIDE a UBI container: mirrorlist GET then repomd
-# GET, with the credential combination selected by SEND_CERT (1=present) and
-# HDRFILE (a file of curl -H args to include, empty=none). The bundle dir is
-# mounted read-only at /run/rhui-e0; HDRFILE lives there too. One line to OUT.
-rc_hvc_container_cell() {
-  local img="$1" out="$2" label="$3" url="$4" send_cert="$5" hdrfile="$6"
-  local cargs='' hargs=''
-  [ "${send_cert}" = 1 ] && cargs='--cert /run/rhui-e0/CERT.crt --key /run/rhui-e0/CERT.key --cacert /run/rhui-e0/cdn.redhat.com-chain.crt'
-  [ -n "${hdrfile}" ] && hargs="$(cat "${hdrfile}" 2>/dev/null)"
-  # The whole measurement runs in-container; only the two HTTP codes escape.
+# rc_hvc_container_rpmbody IMG OUT T URL HDRFILE - the RPM-body layer INSIDE
+# the container with static headers: follow mirrorlist -> repomd -> primary,
+# find make's <location>, GET the RPM, record its HTTP code. repomd-200 does
+# not imply RPM-200 (separately gated), so this is measured explicitly.
+rc_hvc_container_rpmbody() {
+  local img="$1" out="$2" t="$3" url="$4" hdrfile="$5"
+  local hdrs=''; [ -n "${hdrfile}" ] && hdrs="$(cat "${hdrfile}" 2>/dev/null)"
   # shellcheck disable=SC2016  # $-expansions are for the in-container shell
   local script='
-    ml="$(curl -sS -m 20 '"${cargs} ${hargs}"' -w "\n__H__%{http_code}" "'"${url}"'" 2>/dev/null)"
+    set -- --cacert /run/rhui-e0/cdn.redhat.com-chain.crt --cert /run/rhui-e0/CERT.crt --key /run/rhui-e0/CERT.key
+    eval "set -- \"\$@\" ${HDRS}"
+    ml="$(curl -sS -m 20 "$@" "${URL}" 2>/dev/null)"
+    first="$(printf "%s\n" "${ml}" | grep -Eo "https?://[^[:space:]]+" | head -1)"
+    [ -n "${first}" ] || { printf "container rpm-body rhel%s: repomd=no-mirror rpm=skip\n" "${T}"; exit 0; }
+    rmc="$(curl -sS -m 20 -o /tmp/repomd.xml -w "%{http_code}" "$@" "${first%/}/repodata/repomd.xml" 2>/dev/null)"
+    href="$(grep -oE "href=\"[^\"]*primary[^\"]*\"" /tmp/repomd.xml 2>/dev/null | head -1 | sed "s/^href=\"//; s/\"$//")"
+    [ -n "${href}" ] || { printf "container rpm-body rhel%s: repomd=%s rpm=no-primary\n" "${T}" "${rmc}"; exit 0; }
+    curl -sS -m 60 "$@" -o /tmp/primary "${first%/}/${href}" 2>/dev/null
+    loc="$( (gzip -dc /tmp/primary 2>/dev/null || xz -dc /tmp/primary 2>/dev/null || cat /tmp/primary) | grep -oE "<location href=\"([^\"]*/)?make-[0-9][^\"]*\.rpm\"" | head -1 | sed "s/.*href=\"//; s/\"$//")"
+    [ -n "${loc}" ] || { printf "container rpm-body rhel%s: repomd=%s rpm=no-location\n" "${T}" "${rmc}"; exit 0; }
+    rpmc="$(curl -sS -m 60 -o /dev/null -w "%{http_code}" "$@" "${first%/}/${loc}" 2>/dev/null)"
+    printf "container rpm-body rhel%s: repomd=%s rpm=%s\n" "${T}" "${rmc}" "${rpmc}"
+  '
+  podman run --rm -v "${RC_HVC_BUNDLE}:/run/rhui-e0:ro,Z" \
+    -e "T=${t}" -e "URL=${url}" -e "HDRS=${hdrs}" \
+    "${img}" sh -c "${script}" >> "${out}" 2>/dev/null
+}
+
+# rc_hvc_container_makecache IMG OUT T HDRFILE - the real dnf path with static
+# B" injection: a MINIMAL dnf plugin (written into the bundle) injects the
+# host-generated headers into every rhui-e0 repo, mirroring what amazon-id
+# does from IMDS - except the headers are static (the container cannot reach
+# IMDS, U2). Then dnf makecache + a downloadonly of the ENA build deps,
+# scoped to the synthesized repos only. This is the B" design measured end to
+# end: if this is rc=0, the suite can build here.
+rc_hvc_container_makecache() {
+  local img="$1" out="$2" t="$3" hdrfile="$4"
+  local id_hdr sig_hdr
+  # Extract the two header VALUES from the curl -H file for the plugin.
+  id_hdr="$(grep -oE 'X-RHUI-ID: [^"]*' "${hdrfile}" 2>/dev/null | sed 's/X-RHUI-ID: //')"
+  sig_hdr="$(grep -oE 'X-RHUI-SIGNATURE: [^"]*' "${hdrfile}" 2>/dev/null | sed 's/X-RHUI-SIGNATURE: //')"
+  # A tiny dnf plugin: set the two headers on every rhui-e0 repo. Static values
+  # (no IMDS). Written into the bundle so it mounts read-only in the container.
+  cat > "${RC_HVC_BUNDLE}/e0inject.py" <<PYEOF
+import dnf
+class E0Inject(dnf.Plugin):
+    name = "e0inject"
+    def config(self):
+        hdrs = ["X-RHUI-ID: ${id_hdr}", "X-RHUI-SIGNATURE: ${sig_hdr}"]
+        for name, repo in self.base.repos.items():
+            if name.startswith("rhui-e0-"):
+                repo._repo.setHttpHeaders(hdrs)
+PYEOF
+  printf '[main]\nenabled=1\n' > "${RC_HVC_BUNDLE}/e0inject.conf"
+  # shellcheck disable=SC2016  # runs in the container
+  local script='
+    cp /run/rhui-e0/rhui-e0-rhel'"${t}"'.repo /etc/yum.repos.d/
+    pdir="$(python3 -c "import dnf,os;print(os.path.dirname(dnf.__file__))" 2>/dev/null)/../dnf-plugins"
+    pdir="$(cd "${pdir}" 2>/dev/null && pwd || echo /usr/lib/python3.9/site-packages/dnf-plugins)"
+    mkdir -p "${pdir}"
+    cp /run/rhui-e0/e0inject.py "${pdir}/" 2>/dev/null
+    mkdir -p /etc/dnf/plugins
+    cp /run/rhui-e0/e0inject.conf /etc/dnf/plugins/e0inject.conf 2>/dev/null
+    dnf -q --disablerepo=* --enablerepo=rhui-e0-* makecache 2>&1 | tail -3
+    echo "makecache_rc=$?"
+    dnf -y --disablerepo=* --enablerepo=rhui-e0-* install --downloadonly --destdir=/tmp/dl kernel-devel gcc make elfutils-libelf-devel 2>&1 | tail -3
+    echo "builddeps_rc=$?"
+  '
+  {
+    printf 'container dnf rhel%s (static-header plugin injection):\n' "${t}"
+    podman run --rm -v "${RC_HVC_BUNDLE}:/run/rhui-e0:ro,Z" "${img}" sh -c "${script}" 2>/dev/null | sed 's/^/  /'
+  } >> "${out}"
+  rm -f "${RC_HVC_BUNDLE}/e0inject.py" "${RC_HVC_BUNDLE}/e0inject.conf"
+}
+
+# rc_hvc_container_cell IMG OUT LABEL URL SEND_CERT HDRFILE - run ONE auth
+# matrix cell INSIDE a UBI container: mirrorlist GET then repomd GET. SEND_CERT
+# (1=present) selects the client cert; HDRFILE (empty=none) supplies the static
+# -H args. The RHUI CA is ALWAYS passed - it is TLS trust, INDEPENDENT of the
+# client cert (r83 bug: --cacert lived inside the cert branch, so headers-only
+# and none couldn't even complete the TLS handshake -> 000 instead of the true
+# 403). Credentials travel as ENV VARS, not string-spliced into the script, so
+# a header value with shell metacharacters can't break the command (r84).
+rc_hvc_container_cell() {
+  local img="$1" out="$2" label="$3" url="$4" send_cert="$5" hdrfile="$6"
+  local hdrs=''
+  [ -n "${hdrfile}" ] && hdrs="$(cat "${hdrfile}" 2>/dev/null)"
+  # In-container script: builds the curl argv from env vars. CACERT always;
+  # CERT/KEY only when SEND_CERT=1; HDRS eval'd (it is a trusted -H string we
+  # generated on the host from IMDS - not user input).
+  # shellcheck disable=SC2016  # $-expansions are for the in-container shell
+  local script='
+    set -- --cacert /run/rhui-e0/cdn.redhat.com-chain.crt
+    [ "${SC}" = 1 ] && set -- "$@" --cert /run/rhui-e0/CERT.crt --key /run/rhui-e0/CERT.key
+    eval "set -- \"\$@\" ${HDRS}"
+    ml="$(curl -sS -m 20 "$@" -w "\n__H__%{http_code}" "${URL}" 2>/dev/null)"
     mlc="${ml##*__H__}"
     first="$(printf "%s\n" "${ml}" | grep -Eo "https?://[^[:space:]]+" | grep -v __H__ | head -1)"
     if [ -n "${first}" ]; then
-      rmc="$(curl -sS -m 20 -o /dev/null -w "%{http_code}" '"${cargs} ${hargs}"' "${first%/}/repodata/repomd.xml" 2>/dev/null)"
+      rmc="$(curl -sS -m 20 -o /dev/null -w "%{http_code}" "$@" "${first%/}/repodata/repomd.xml" 2>/dev/null)"
     else rmc="no-mirror"; fi
-    printf "container %s: mirrorlist_http=%s repomd_http=%s\n" "'"${label}"'" "${mlc:-000}" "${rmc}"
+    printf "container %s: mirrorlist_http=%s repomd_http=%s\n" "${LBL}" "${mlc:-000}" "${rmc}"
   '
-  podman run --rm -v "${RC_HVC_BUNDLE}:/run/rhui-e0:ro,Z" "${img}" sh -c "${script}" >> "${out}" 2>/dev/null
+  podman run --rm -v "${RC_HVC_BUNDLE}:/run/rhui-e0:ro,Z" \
+    -e "SC=${send_cert}" -e "URL=${url}" -e "LBL=${label}" -e "HDRS=${hdrs}" \
+    "${img}" sh -c "${script}" >> "${out}" 2>/dev/null
 }
 
 # rc_collect_hostvscontainer OUTDIR MAJOR - the paired host<->container auth
@@ -1310,6 +1394,14 @@ rc_collect_hostvscontainer() {
     rc_hvc_container_cell "${img}" "${paired}" "cert-only   " "${url}" 1 ""
     rc_hvc_container_cell "${img}" "${paired}" "headers-only" "${url}" 0 "${hdrfile}"
     rc_hvc_container_cell "${img}" "${paired}" "none        " "${url}" 0 ""
+    # Container RPM-body + dnf makecache with the STATIC headers - the layers
+    # that actually decide "can the suite's dnf build here". repomd-200 alone
+    # is not enough (RPM body is separately gated); makecache exercises the
+    # real dnf path with the synthesized repo + injected headers. A synthesized
+    # repo carrying the headers is written so dnf (not just curl) uses them.
+    rc_synth_repo_file "${t}" "${region}" "${tmpl}" /run/rhui-e0 > "${bundle}/rhui-e0-rhel${t}.repo"
+    rc_hvc_container_rpmbody "${img}" "${paired}" "${t}" "${url}" "${hdrfile}"
+    rc_hvc_container_makecache "${img}" "${paired}" "${t}" "${hdrfile}"
     rm -f "${bundle}/CERT.crt" "${bundle}/CERT.key"
     # one-line delta digest.
     {

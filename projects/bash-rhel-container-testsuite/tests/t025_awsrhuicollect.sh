@@ -339,6 +339,67 @@ assert_eq 0 "$?" "r83 emit: archive path resolved to absolute"
 grep -q 'abs_archive}"$' "${COLLECT}"
 assert_eq 0 "$?" "r83 emit: absolute path is what's printed to stdout"
 
+# --- r84: measurement-bug fix - --cacert is INDEPENDENT of the client cert ----
+# r83 put --cacert inside the send_cert branch, so headers-only/none couldn't
+# complete TLS in the container (000 instead of the true 403). This regression
+# guard pins that the CA is always present and lives OUTSIDE any cert branch.
+sedblk="$(sed -n '/^rc_hvc_container_cell/,/^}/p' "${COLLECT}")"
+# shellcheck disable=SC2016
+case "${sedblk}" in
+  *'[ "${send_cert}" = 1 ] && cargs='*'--cacert'*) t_fail "r84 cacert: still inside the cert branch (r83 bug)" ;;
+  *) t_pass "r84 cacert: not gated by the cert branch" ;;
+esac
+printf '%s\n' "${sedblk}" | grep -q 'cacert /run/rhui-e0/cdn.redhat.com-chain.crt'
+assert_eq 0 "$?" "r84 cacert: CA passed to the container curl (all cells)"
+
+# --- r84: credentials travel as ENV VARS, not string-spliced into the script --
+# String-splicing broke on header values with shell metacharacters; env vars
+# don't. Assert the podman invocation passes -e URL/LBL/HDRS and the script
+# reads them, and that HDRS is eval'd (trusted host-generated -H string).
+# shellcheck disable=SC2016
+printf '%s\n' "${sedblk}" | grep -q -- '-e "URL=${url}"'
+assert_eq 0 "$?" "r84 envpass: URL passed as env, not spliced"
+# shellcheck disable=SC2016
+printf '%s\n' "${sedblk}" | grep -q -- '-e "HDRS=${hdrs}"'
+assert_eq 0 "$?" "r84 envpass: HDRS passed as env, not spliced"
+
+# --- r84: hermetic - cell script carries CA for a no-cert cell ----------------
+RC_HVC_BUNDLE="$(mktemp -d)"
+printf -- '-H "X-RHUI-ID: A&B" -H "X-RHUI-SIGNATURE: C%%D"' > "${RC_HVC_BUNDLE}/headers.curl"
+podman() { printf 'PODMAN: %s\n' "$*"; }
+rc_hvc_container_cell fake/img "${RC_HVC_BUNDLE}/cell.txt" "headers-only" "https://x/ml" 0 "${RC_HVC_BUNDLE}/headers.curl"
+grep -q 'cacert /run/rhui-e0/cdn.redhat.com-chain.crt' "${RC_HVC_BUNDLE}/cell.txt"
+assert_eq 0 "$?" "r84 hermetic: headers-only cell still carries --cacert"
+grep -q 'HDRS=-H "X-RHUI-ID: A&B"' "${RC_HVC_BUNDLE}/cell.txt"
+assert_eq 0 "$?" "r84 hermetic: header metacharacters survive via env (not spliced)"
+unset -f podman
+rm -rf "${RC_HVC_BUNDLE}"; unset RC_HVC_BUNDLE
+
+# --- r84: paired flow now measures the RPM-body + real dnf makecache layers ----
+for fn in rc_hvc_container_rpmbody rc_hvc_container_makecache; do
+  if declare -F "${fn}" >/dev/null 2>&1; then t_pass "r84 defined: ${fn}"; else t_fail "r84 missing: ${fn}"; fi
+done
+# shellcheck disable=SC2016
+grep -q 'rc_hvc_container_rpmbody "${img}"' "${COLLECT}"
+assert_eq 0 "$?" "r84 paired: RPM-body layer measured in-container"
+# shellcheck disable=SC2016
+grep -q 'rc_hvc_container_makecache "${img}"' "${COLLECT}"
+assert_eq 0 "$?" "r84 paired: real dnf makecache measured in-container (B\" end to end)"
+
+# --- r84: the static-header dnf plugin is valid and scoped ---------------------
+RC_HVC_BUNDLE="$(mktemp -d)"
+printf -- '-H "X-RHUI-ID: DOCVAL" -H "X-RHUI-SIGNATURE: SIGVAL"' > "${RC_HVC_BUNDLE}/headers.curl"
+podman() { cp "${RC_HVC_BUNDLE}/e0inject.py" "${RC_HVC_BUNDLE}/captured.py" 2>/dev/null; :; }
+rc_hvc_container_makecache fake/img /dev/null 9 "${RC_HVC_BUNDLE}/headers.curl"
+unset -f podman
+python3 -c "import ast,sys; ast.parse(open('${RC_HVC_BUNDLE}/captured.py').read())" 2>/dev/null
+assert_eq 0 "$?" "r84 plugin: generated dnf plugin is valid python"
+grep -q 'X-RHUI-ID: DOCVAL' "${RC_HVC_BUNDLE}/captured.py"
+assert_eq 0 "$?" "r84 plugin: host-generated header value embedded"
+grep -q 'startswith("rhui-e0-")' "${RC_HVC_BUNDLE}/captured.py"
+assert_eq 0 "$?" "r84 plugin: injection scoped to the synthesized rhui-e0 repos"
+rm -rf "${RC_HVC_BUNDLE}"; unset RC_HVC_BUNDLE
+
 # --- REGRESSION GUARD (r78): the chain probe is curl-native (no dnf) ----------
 # The chain must acquire/measure via curl only. If a future edit reintroduces a
 # dnf-driven chain step, cross-major breaks again (dnf failed three ways: 403,
