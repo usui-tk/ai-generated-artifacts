@@ -140,6 +140,20 @@ the container.
 **B-T7 / B-T8 are integration / E2E** and require a real KVM builder host and an
 AWS account; they are documented, not run by `run-all.sh`.
 
+> **Boot-E2E evidence note (2026-07-11).** The 2026-06-16 build generation
+> (pre-self-build for OL8-10) was boot-verified on real EC2 (ap-northeast-1)
+> across ALL five majors; sosreports were collected on every instance. What it
+> proves: OL6-10 AMIs from this pipeline boot and run cleanly (0 failed units
+> on OL7-10); the OL6 self-built ENA 2.9.1g actually drives the NIC
+> (`ethtool -i` = 2.9.1g, on an ENA-capable Xen-generation instance — the
+> OL6 Nitro/NVMe path remains untraveled); the OL7 DKMS-signed self-built
+> 2.17.0g is the loaded `/extra` module. What it does NOT prove: the OL8-10
+> self-build generation (`ethtool -i` showed the in-tree driver), the baked-in
+> SSM Agent / AWS CLI v2 (both were absent from that generation; the SSM Agent
+> found running was hand-installed minutes before the sosreports), and the
+> 7 GB `DISK_SIZE_GB` (that generation was built at 10 GB). Those remain the
+> open [C]3 / B-T8 items for the current tree.
+
 ## Coverage ledger
 
 Tracks which tiers exist so gaps are visible top-down (the bash analogue of the
@@ -149,11 +163,11 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 |:--|:--|:--|:--|
 | B-T1 parse | L0 | implemented | `bash -n` every `.sh` in the project (incl. `tests/cleancore/`, `tests/ena/`, `tests/ssm/`, `tests/awscli/`) + 5 shell-bodied heredoc bodies; 47 asserts |
 | B-T2 ShellCheck | L0 | implemented | canonical `-S style` over every `.sh` in the project (incl. `tests/cleancore/`, `tests/ena/`, `tests/ssm/`, `tests/awscli/`) via `.shellcheckrc`; 3 documented inline exemptions in the wrapper/helpers + per-script inline exemptions in the clean-core builders (SC2086 mknod word-split, SC2016 literal yum-variable text); SKIPs if shellcheck absent; 42 asserts |
-| B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract; 25 asserts |
+| B-T3 pure-function unit | L1 | implemented | sources the wrapper (tail `main` is guarded by `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` so sourcing has no side effects); table-driven `parse_ol_version_from_iso` + `parse_args` contract (incl. the opt-in `--enable-amazon-time-sync` flag) + `_ks_add_sos_package` behavioural unit (insert-once / idempotent second call / marker position / missing-`%packages` dies with the file untouched); 43 asserts |
 | B-T (command mock) | L1 | implemented | `tests/t004_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t003_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
-| B-T5 env parity | L2 | implemented | `tests/t006_envparity.sh`: 20 common-core keys, OL6/OL7-only KERNEL/UEK_RELEASE extras, S3_BUCKET/AWS_REGION/UPDATE_TO_LATEST/CLOUD invariants, per-OS DISTR; plus release-agnostic maintenance invariants (every template sets `ISO_URL` — a required key with no wrapper-side default; OL9/OL10 carry the `SINGLE-TOUCH MAINTENANCE POINT` marker and no release-pinned checksum comments; the wrapper has no `DEFAULT_ISO_URL` and `load_env` rejects an unset `ISO_URL`); 42 asserts |
-| B-T6 idempotency | L2 | implemented | `tests/t007_idempotency.sh` (structural): each of the 9 `[ol-aws-ami-builder PATCH ...]` markers (incl. the OL6/OL7/OL8 `awscli-install` hook) is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
+| B-T5 env parity | L2 | implemented | `tests/t006_envparity.sh`: 20 common-core keys, OL6/OL7-only KERNEL/UEK_RELEASE extras, S3_BUCKET/AWS_REGION/UPDATE_TO_LATEST/CLOUD invariants, per-OS DISTR; plus release-agnostic maintenance invariants (every template sets `ISO_URL` — a required key with no wrapper-side default; OL9/OL10 carry the `SINGLE-TOUCH MAINTENANCE POINT` marker and no release-pinned checksum comments; the wrapper has no `DEFAULT_ISO_URL` and `load_env` rejects an unset `ISO_URL`); plus the uniform `DISK_SIZE_GB="7"` and opt-in `AMAZON_TIME_SYNC="no"` values (21 common-core keys) and the sos-in-every-kickstart wiring (OL6 heredoc lists `sos`; phase3 wires `_ks_add_sos_package` for OL7-10); 54 asserts |
+| B-T6 idempotency | L2 | implemented | `tests/t007_idempotency.sh` (structural): each of the 11 `[ol-aws-ami-builder PATCH ...]` markers (incl. the `sos-package` kickstart patch and the opt-in `amazon-time-sync` hook) is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
 | B-T4 kickstart | L2 | implemented | `tests/validate-kickstart.sh`, **wired into the runner** via `tests/t005_kickstart.sh` (SKIPs without `ksvalidator`); see below |
 | B-T9 hook timing | L1/L2 | implemented | `tests/t008_hooktiming.sh`: the OL6 cloud-user hook must run *after* `cloud::cloud_init` (configs exist), never at source time; static wrapper-wiring + no-top-level-`sh` guards, plus a behavioural order/edit check; 8 asserts |
 | B-T (log format) | L1 | implemented | `tests/t009_logformat.sh`: every timestamped channel emits **date-first** (`YYYY-MM-DD HH:MM:SS` leads, `[SEVERITY]`/source tag follows; SPEC E.1); colour-stripped match across info/warn/error/build/debug/external + a negative guard against the old tag-first order; 12 asserts |

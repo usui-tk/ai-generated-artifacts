@@ -329,6 +329,8 @@ The script auto-detects the OL major and update version from `ISO_URL`, so switc
 | `S3_BUCKET` | `my-oracle-linux-ami-import-bucket` (shared across all OL versions; must match `setup-vmimport-role.sh`) |
 | `AWS_REGION` | Leave empty for auto-detection via EC2 IMDSv2/v1 (falls back to `ap-northeast-1` outside EC2). Set explicitly to override. |
 | `UPDATE_TO_LATEST` | Defaults to `yes` — runs `dnf/yum update` inside the guest after install, addressing kernel and userspace CVEs published after the ISO date. Override with `security` or `no` only when you understand the trade-off. |
+| `DISK_SIZE_GB` | Defaults to `7` (uniform across OL6-10, aligned with Oracle's own AWS AMIs). The root partition auto-grows and `cloud-utils-growpart` is baked in, so instances launched with a larger EBS volume expand automatically — this is a floor, not a ceiling. See SPEC B.3.4. |
+| `AMAZON_TIME_SYNC` | Defaults to `no` (time configuration is left to the AMI's end user). Set `yes` — or pass `--enable-amazon-time-sync` — to prefer the link-local Amazon Time Sync Service (`169.254.169.123`) in the guest. |
 | `AMI_NAME` | Optional; auto-generates with timestamp if unset |
 
 ---
@@ -365,9 +367,12 @@ Expected total time: **40–90 minutes** (depends on bandwidth and instance perf
 | `--skip-ena-driver` | Do **not** build/install the Amazon ENA driver in the guest. The default builds it on OL6-OL10 (AWS-optimized, ENA-Express-capable AMI; Nitro v4+/ENAv3); this switch produces a pure, unmodified OL AMI. |
 | `--skip-ssm-agent` | Do **not** install the Amazon SSM Agent in the guest. The default installs and boot-enables it (OL6-OL10), so the AMI is AWS SSM Run Command compliant out of the box; this switch leaves the agent out. |
 | `--skip-awscli` | Do **not** install AWS CLI v2 in the guest. The default installs it on OL6/OL7/OL8 (the standard CLI, since AWS CLI v1 is increasingly unsupported) and excludes the v1 package via versionlock; this switch leaves it out. OL9/OL10 are out of scope (they install AWS CLI v2 from their default package manager) and unaffected by this switch. |
+| `--enable-amazon-time-sync` | **OPT-IN (default OFF).** Configure the link-local Amazon Time Sync Service (`169.254.169.123`) as the *preferred* guest time source (chrony on OL7-OL10, ntpd on OL6), keeping the distribution pool as fallback. By default the builder leaves time configuration to the end user of the AMI. Equivalent to `AMAZON_TIME_SYNC="yes"` in the env file. |
 | `--imds-support <mode>` | IMDS support baked into the AMI: `default` (IMDSv1+v2, `HttpTokens=optional`) or `v2.0` (IMDSv2-required, **OL7+ only**). Default `default`. OL6 + `v2.0` is rejected (its cloud-init 0.7.5 cannot use IMDSv2). |
 | `--log-file <path>` | Write the full run log here. Default: `${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log` (console output is mirrored to the file either way; the file is ANSI-stripped). |
 | `--debug` | Also print `[DEBUG]` lines to the console (they are always written to the log file regardless). |
+
+In addition to the switch-controlled components above, every AMI bakes in the `sos` package (sosreport tooling) via the kickstart — OL6 through its wrapper-synthesized kickstart, OL7-10 through the `sos-package` kickstart patch — so a diagnostic `sosreport` can be produced out of the box on any instance (always on; no switch).
 
 ### 6.3 Phase 0 self-diagnosis
 

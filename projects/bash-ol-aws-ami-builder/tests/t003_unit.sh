@@ -124,4 +124,47 @@ bogus|9|DIE:Invalid IMDS_SUPPORT
 v2.0|6|DIE:not supported for OL6
 TABLE
 
+# --- parse_args : --enable-amazon-time-sync (opt-in flag, Axis 2) -------------
+fix="$(mktemp)"; printf '# fixture env\n' > "${fix}"
+out="$(
+  (
+    # shellcheck source=/dev/null
+    . "${MAIN}" >/dev/null 2>&1
+    if parse_args --env "${fix}" --enable-amazon-time-sync; then
+      printf 'CLI=%s' "${AMAZON_TIME_SYNC_CLI:-unset}"
+    else exit "$?"; fi
+  ) 2>/dev/null
+)"; rc=$?
+rm -f "${fix}"
+assert_eq 0 "${rc}" "parse_args: --enable-amazon-time-sync accepted (rc 0)"
+assert_eq "CLI=1" "${out}" "parse_args: --enable-amazon-time-sync sets AMAZON_TIME_SYNC_CLI=1"
+
+# --- _ks_add_sos_package : insertion / idempotency / assert-then-write --------
+# Pure function over a file path; exercised on synthetic kickstarts shaped like
+# the real upstream distr files (both '%packages' and '%packages --nobase').
+kstmp="$(mktemp -d)"
+printf 'install\n%%packages --nobase\nyum\n%%end\n' > "${kstmp}/ks.cfg"
+(
+  # shellcheck source=/dev/null
+  . "${MAIN}" >/dev/null 2>&1
+  _ks_add_sos_package "${kstmp}/ks.cfg" >/dev/null 2>&1
+  _ks_add_sos_package "${kstmp}/ks.cfg" >/dev/null 2>&1   # second call: idempotent
+) </dev/null
+assert_eq 1 "$(grep -c '^sos$' "${kstmp}/ks.cfg")" "_ks_add_sos_package: exactly one sos line after two calls (idempotent)"
+assert_eq 1 "$(grep -c 'ol-aws-ami-builder PATCH sos-package' "${kstmp}/ks.cfg")" "_ks_add_sos_package: wrapper marker present exactly once"
+assert_eq "sos" "$(grep -A2 '^%packages' "${kstmp}/ks.cfg" | sed -n '3p')" "_ks_add_sos_package: sos inserted directly under %packages"
+
+printf 'install\nreboot\n' > "${kstmp}/bad.cfg"
+err="$(
+  (
+    # shellcheck source=/dev/null
+    . "${MAIN}" >/dev/null 2>&1
+    _ks_add_sos_package "${kstmp}/bad.cfg"
+  ) 2>&1 >/dev/null
+)"; rc=$?
+assert_eq 1 "${rc}" "_ks_add_sos_package: missing %packages section dies (rc 1)"
+assert_match "${err}" "no %packages section" "_ks_add_sos_package: die message names the missing section"
+assert_eq 0 "$(grep -c 'sos' "${kstmp}/bad.cfg")" "_ks_add_sos_package: assert-then-write leaves the file untouched on die"
+rm -rf "${kstmp}"
+
 t_done

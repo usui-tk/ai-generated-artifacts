@@ -104,6 +104,13 @@
 #                           AWS CLI v1 is increasingly unsupported); this switch
 #                           leaves it out. OL9/OL10 are out of scope (use their
 #                           default package manager) and unaffected by this switch.
+#   --enable-amazon-time-sync : OPT-IN. Configure the link-local Amazon Time
+#                           Sync Service (169.254.169.123) as the PREFERRED
+#                           time source in the guest (chrony on OL7-OL10,
+#                           ntpd on OL6), keeping the distribution pool as
+#                           fallback. Default OFF: time configuration is
+#                           left to the end user of the AMI. Equivalent to
+#                           AMAZON_TIME_SYNC="yes" in the env file.
 #   --imds-support <mode> : IMDS support baked into the AMI. 'default'
 #                           (IMDSv1+v2; HttpTokens=optional) or 'v2.0'
 #                           (IMDSv2-required, OL7+ only). Default: 'default'.
@@ -158,6 +165,7 @@ readonly SCRIPT_DIR
 
 # Execution mode flags
 SKIP_PREREQ=0
+AMAZON_TIME_SYNC_CLI=0
 SKIP_AWS_IMPORT=0
 BUILD_ONLY=0
 # ENA driver self-build (default ON -> AWS-optimized AMI; --skip-ena-driver
@@ -273,6 +281,7 @@ parse_args() {
       --skip-ena-driver)  ENA_DRIVER_BUILD=0;  shift ;;
       --skip-ssm-agent)   SSM_AGENT_INSTALL=0; shift ;;
       --skip-awscli)      AWSCLI_INSTALL=0; shift ;;
+      --enable-amazon-time-sync) AMAZON_TIME_SYNC_CLI=1; shift ;;
       --imds-support)     IMDS_SUPPORT="$2";   shift 2 ;;
       --log-file)         LOG_FILE="$2";       shift 2 ;;
       --debug)            DEBUG=1;             shift ;;
@@ -619,7 +628,11 @@ load_env() {
   : "${SETUP_SWAP:=No}"
   : "${SELINUX:=enforcing}"
   : "${ROOT_FS:=xfs}"
-  : "${DISK_SIZE_GB:=10}"
+  : "${DISK_SIZE_GB:=7}"
+  : "${AMAZON_TIME_SYNC:=no}"
+  if [[ "${AMAZON_TIME_SYNC_CLI:-0}" -eq 1 ]]; then
+    AMAZON_TIME_SYNC="yes"
+  fi
   : "${SERIAL_CONSOLE_RUNTIME:=Yes}"
   # Install-time serial console (upstream SERIAL_CONSOLE). Default "no"
   # (headless): upstream detects install completion via the domain lifecycle
@@ -1223,6 +1236,39 @@ phase2_grant_qemu_access() {
 
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------
+# _ks_add_sos_package <ks_file>
+# Insert the 'sos' package (sosreport tooling) into the first %packages
+# section of an upstream distr kickstart (OL7-OL10). The OL6 kickstart is
+# synthesized by this wrapper (distr::kickstart heredoc) and lists sos
+# directly, so it never comes through here. Idempotent via the wrapper
+# marker; asserts before writing (missing file / missing %packages section
+# both die, so a half-patched kickstart can never be produced).
+_ks_add_sos_package() {
+  local ks_file="$1"
+
+  if [[ ! -f "${ks_file}" ]]; then
+    die "Cannot add sos package: kickstart not found at ${ks_file}"
+  fi
+  if grep -Fq '[ol-aws-ami-builder PATCH sos-package]' "${ks_file}"; then
+    log_info "  -> sos package already present in $(basename "${ks_file}") (idempotent skip)"
+    return 0
+  fi
+  if ! grep -Eq '^%packages' "${ks_file}"; then
+    die "Cannot add sos package: no %packages section in ${ks_file}"
+  fi
+
+  sed -i.sos-package.bak -e '0,/^%packages/{/^%packages/a\
+# [ol-aws-ami-builder PATCH sos-package] sosreport tooling baked into every AMI\
+sos
+}' "${ks_file}"
+
+  if grep -Fq '[ol-aws-ami-builder PATCH sos-package]' "${ks_file}"; then
+    log_info "  [OLAWS-SOS01] sos package added to $(basename "${ks_file}") (backup at ${ks_file}.sos-package.bak)"
+  else
+    die "Failed to add sos package to ${ks_file}"
+  fi
+}
+
 phase3_clone_repository() {
   log_step "Phase 3: Cloning oracle/oracle-linux repository"
 
@@ -1793,6 +1839,16 @@ OLAWS_OL6_CLOUD_USER_BODY
     fi
   fi
 
+  # distr/ol{N}-slim kickstart: bake sosreport tooling (sos) into %packages
+  # (OL7-OL10; every AMI can produce a sosreport out of the box instead of
+  # needing a manual install on each instance first). OL6 is skipped here:
+  # its kickstart is synthesized by this wrapper and already lists sos.
+  if [[ "${OL_MAJOR_VERSION}" -ge 7 ]]; then
+    local distr_ks="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/distr/ol${OL_MAJOR_VERSION}-slim/ol${OL_MAJOR_VERSION}-ks.cfg"
+    log_info "Adding sos package to upstream kickstart (OL${OL_MAJOR_VERSION})"
+    _ks_add_sos_package "${distr_ks}"
+  fi
+
   # cloud/aws/provision.sh SSM Agent install hook (default ON; OL6-OL10).
   #
   # Writes our install-ssm-agent.sh verbatim into the guest and runs it during
@@ -1903,6 +1959,61 @@ OLAWS_OL6_CLOUD_USER_BODY
         log_info "  [OLAWS-AWSCLI01] AWS CLI v2 hook injected (version: OL${OL_MAJOR_VERSION} ${AWSCLI_RESOLVED:-latest})"
       else
         die "Failed to inject AWS CLI v2 hook into ${aws_provision_cli}"
+      fi
+    fi
+  fi
+
+  # cloud/aws/provision.sh Amazon Time Sync hook (OPT-IN; default OFF).
+  #
+  # Enabled by AMAZON_TIME_SYNC="yes" in the env file or the
+  # --enable-amazon-time-sync switch. The guest-side block appends the
+  # link-local Amazon Time Sync Service (169.254.169.123) as the PREFERRED
+  # time source -- /etc/chrony.conf on OL7-OL10, /etc/ntp.conf on OL6; the
+  # block detects which file exists, so there is no per-OL branching here --
+  # and keeps the distribution pool lines as fallback (minimal diff).
+  # DEFAULT OFF by design: time configuration belongs to the end user of the
+  # AMI, so the builder does not change the distribution default unless
+  # explicitly asked. Idempotent via the wrapper marker (both wrapper-side
+  # and guest-side: the guest block re-checks before appending).
+  if [[ "${AMAZON_TIME_SYNC,,}" == "yes" ]]; then
+    local aws_provision_ts="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
+    log_info "Injecting Amazon Time Sync hook into cloud/aws/provision.sh (opt-in; --enable-amazon-time-sync / AMAZON_TIME_SYNC=yes)"
+
+    if [[ ! -f "${aws_provision_ts}" ]]; then
+      die "Cannot inject Amazon Time Sync hook: ${aws_provision_ts} not found"
+    fi
+
+    if grep -Fq '[ol-aws-ami-builder PATCH amazon-time-sync]' "${aws_provision_ts}"; then
+      log_info "  -> Amazon Time Sync hook already present (idempotent skip)"
+    else
+      cat >> "${aws_provision_ts}" <<'OLAWS_TIMESYNC_EOF'
+
+# >>> [ol-aws-ami-builder PATCH amazon-time-sync] >>>
+# Prefer the link-local Amazon Time Sync Service (opt-in via --enable-amazon-time-sync).
+if [ -f /etc/chrony.conf ]; then
+  if ! grep -q '169\.254\.169\.123' /etc/chrony.conf; then
+    {
+      echo ''
+      echo '# [ol-aws-ami-builder] Amazon Time Sync Service (opt-in via --enable-amazon-time-sync)'
+      echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4'
+    } >> /etc/chrony.conf
+  fi
+elif [ -f /etc/ntp.conf ]; then
+  if ! grep -q '169\.254\.169\.123' /etc/ntp.conf; then
+    {
+      echo ''
+      echo '# [ol-aws-ami-builder] Amazon Time Sync Service (opt-in via --enable-amazon-time-sync)'
+      echo 'server 169.254.169.123 prefer iburst'
+    } >> /etc/ntp.conf
+  fi
+fi
+# <<< [ol-aws-ami-builder PATCH amazon-time-sync] <<<
+OLAWS_TIMESYNC_EOF
+
+      if grep -Fq '[ol-aws-ami-builder PATCH amazon-time-sync]' "${aws_provision_ts}"; then
+        log_info "  [OLAWS-TIMESYNC01] Amazon Time Sync hook injected (169.254.169.123 preferred; distro pool kept as fallback)"
+      else
+        die "Failed to inject Amazon Time Sync hook into ${aws_provision_ts}"
       fi
     fi
   fi
@@ -2170,6 +2281,8 @@ openssh-clients
 dhclient
 chkconfig
 rootfiles
+# sosreport tooling baked in (parity with the OL7-10 sos-package KS patch)
+sos
 policycoreutils
 checkpolicy
 selinux-policy

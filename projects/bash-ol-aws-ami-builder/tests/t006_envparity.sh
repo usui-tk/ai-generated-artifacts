@@ -33,7 +33,7 @@ for n in "${ENVS[@]}"; do
   mv "${tmp}/core.next" "${tmp}/core"
 done
 core_count="$(wc -l < "${tmp}/core" | tr -d ' ')"
-assert_eq 20 "${core_count}" "env parity: 20 common-core keys across all templates"
+assert_eq 21 "${core_count}" "env parity: 21 common-core keys across all templates (AMAZON_TIME_SYNC added)"
 
 # extras beyond core: allowed only as {KERNEL, UEK_RELEASE} and only for OL6/OL7
 for n in "${ENVS[@]}"; do
@@ -51,6 +51,8 @@ for n in "${ENVS[@]}"; do
   assert_eq "${ref_bucket}" "$(val_of "${f}" S3_BUCKET)" "env parity: ${n} S3_BUCKET matches the shared bucket"
   assert_eq '""'    "$(val_of "${f}" AWS_REGION)"       "env parity: ${n} AWS_REGION empty (runtime-resolved)"
   assert_eq '"yes"' "$(val_of "${f}" UPDATE_TO_LATEST)" "env parity: ${n} UPDATE_TO_LATEST=yes"
+  assert_eq '"7"'   "$(val_of "${f}" DISK_SIZE_GB)"     "env parity: ${n} DISK_SIZE_GB=7 (uniform; SPEC B.3 Disk sizing)"
+  assert_eq '"no"'  "$(val_of "${f}" AMAZON_TIME_SYNC)" "env parity: ${n} AMAZON_TIME_SYNC=no (opt-in feature, default OFF)"
   assert_eq '"aws"' "$(val_of "${f}" CLOUD)"            "env parity: ${n} CLOUD=aws"
   assert_eq "\"${n}-slim\"" "$(val_of "${f}" DISTR)"    "env parity: ${n} DISTR=${n}-slim (per-OS)"
 done
@@ -87,6 +89,29 @@ if grep -Fq 'ISO_URL is not defined' "${PROJ}/build-ol-aws-ami.sh"; then
   t_pass "release-agnostic: load_env rejects an unset ISO_URL explicitly"
 else
   t_fail "release-agnostic: load_env rejects an unset ISO_URL explicitly"
+fi
+
+# --- sos-in-every-kickstart invariants ----------------------------------------
+# OL6: the wrapper-synthesized kickstart heredoc must list sos directly.
+# OL7-10: covered at build time by _ks_add_sos_package (unit-tested in t003);
+# here we pin the wrapper-side wiring so neither half can silently regress.
+# NOTE: single awk process on purpose. An `awk ... | grep -q` pipe here is the
+# documented SIGPIPE/pipefail race (see tests/lib/assert.sh, assert_match):
+# grep -q exits at the first match while awk is still writing the large
+# haystack, awk takes SIGPIPE (141), and pipefail misreads a genuine match as
+# failure. awk matching + `exit !found` has no downstream reader at all.
+if awk '/EOF_OL6_KS/,/^EOF_OL6_KS$/ { if ($0 == "sos") found = 1 } END { exit !found }' "${PROJ}/build-ol-aws-ami.sh"; then
+  t_pass "sos baked in: OL6 synthesized kickstart %packages lists sos"
+else
+  t_fail "sos baked in: OL6 synthesized kickstart %packages lists sos"
+fi
+# The single-quoted '${distr_ks}' is deliberate: we are literally matching the
+# wrapper's own source text, not expanding a variable here.
+# shellcheck disable=SC2016
+if grep -Fq '_ks_add_sos_package "${distr_ks}"' "${PROJ}/build-ol-aws-ami.sh"; then
+  t_pass "sos baked in: phase3 wires _ks_add_sos_package for the upstream (OL7-10) kickstarts"
+else
+  t_fail "sos baked in: phase3 wires _ks_add_sos_package for the upstream (OL7-10) kickstarts"
 fi
 
 t_done

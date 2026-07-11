@@ -447,7 +447,8 @@ and should usually be left alone.
 | `SETUP_SWAP` | `No` | Skip swap configuration on cloud VMs |
 | `SELINUX` | `enforcing` | SELinux mode of the resulting AMI |
 | `ROOT_FS` | `xfs` | Root filesystem of the resulting AMI |
-| `DISK_SIZE_GB` | `10` | Root volume size of the AMI |
+| `DISK_SIZE_GB` | `7` | Root volume size of the AMI; uniform 7 GB across OL6-10 — see B.3.4 "Disk sizing" |
+| `AMAZON_TIME_SYNC` | `no` | OPT-IN. `yes` (or `--enable-amazon-time-sync`) makes guest provisioning add the link-local Amazon Time Sync Service (169.254.169.123) as the preferred time source — see B.14 |
 | `SERIAL_CONSOLE_RUNTIME` | `Yes` | Required for EC2 Serial Console |
 | `SERIAL_CONSOLE` | `no` | Install-time anaconda console; **debug opt-in** (`yes` can hang the build at install-VM end) — see note + D.18 |
 | `CLOUD_INIT` | `Yes` | Enable cloud-init in the AMI |
@@ -959,6 +960,7 @@ die on unknown options); the concrete inventory is:
 | `--skip-ena-driver` | flag | | Do NOT self-build the Amazon ENA driver (default ON for OL6/OL7); produces a pure OL AMI — see B.4 / the ENA self-build section |
 | `--skip-ssm-agent` | flag | | Do NOT install the Amazon SSM Agent (default ON for OL6-OL10); produces an AMI with no SSM Agent — see B.11 |
 | `--skip-awscli` | flag | | Do NOT install AWS CLI v2 (default ON for OL6/OL7/OL8; OL9/OL10 out of scope — use their default package manager); produces an AMI without the wrapper-installed AWS CLI v2 — see B.13 |
+| `--enable-amazon-time-sync` | flag | | OPT-IN (default OFF). Configure the link-local Amazon Time Sync Service (169.254.169.123) as the preferred guest time source (chrony on OL7-OL10, ntpd on OL6), keeping the distribution pool as fallback. Equivalent to `AMAZON_TIME_SYNC="yes"` — see B.14 |
 | `-h`, `--help` | flag | | Show help and exit 0 |
 
 ### Mutual exclusion
@@ -1259,6 +1261,36 @@ When the upstream rewrites the OL7 cloud=aws check:
    to be redesigned — update the section here and the comments in
    `phase3_clone_repository` together.
 
+### B.3.4 Disk sizing (`DISK_SIZE_GB` = 7, uniform)
+
+`DISK_SIZE_GB` is a uniform **7 GB** across OL6-10 (user decision 2026-07-11,
+aligned with Oracle’s own AWS AMIs), down from the previous 10 GB. Why this is
+safe and what bounds it:
+
+- **The value is a floor, not a ceiling.** Every distr kickstart creates the
+  root partition with `--grow` (boot partitions are kickstart-fixed: 500 MB on
+  OL6/OL7, 1 MB BIOS-boot + 1 GB `/boot` on OL8-10; no swap — `SETUP_SWAP=no`
+  makes the upstream framework strip the OL6 template’s swap line), and
+  `cloud-utils-growpart` is baked into every image, so an instance launched
+  with a larger EBS volume expands its root filesystem automatically on first
+  boot. AWS does not allow launching with a volume *smaller* than the AMI’s
+  registered size, so a smaller `DISK_SIZE_GB` strictly widens the launch
+  envelope (and shrinks the build image / S3 upload).
+- **The hard limit is build-time**: the anaconda install plus the in-guest
+  `UPDATE_TO_LATEST` transaction peak must fit. Measured post-build root usage
+  from the 2026-06-16 E2E generation (sosreports, 2026-07-11): OL6 1.4 G /
+  OL7 3.4 G / OL8 3.6 G / OL9 2.3 G / OL10 2.0 G — 7 GB leaves ≥ 2.4 G of
+  root headroom on the heaviest major (OL8).
+- **No runtime floor guard** (same philosophy as the rejected ENA installer
+  floor guard): the true floor depends on the `%packages` set and the update
+  stream at build time, so the knowledge lives here and in the parity test
+  (`t006` pins every template to `DISK_SIZE_GB="7"`), not in wrapper logic.
+  If a build does outgrow the disk, anaconda / the in-guest update fails fast
+  and visibly in the build log.
+- **Validation status**: the 7 GB value is gate-verified (parity + docs); the
+  first real AMI build at 7 GB is part of the next E2E cycle ([C]3, B-T8) and
+  will confirm the build-time peak empirically.
+
 ---
 
 ## B.4 OL6 runtime synthesis (`distr/ol6-slim/` + `cloud/aws/` patches)
@@ -1299,6 +1331,8 @@ identifier. All are applied inside `phase3_clone_repository`. Current markers:
 | `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default, OL6-OL10; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; OL8/9/10 receive the host-resolved target via `ENA_DRIVER_VERSION`) — logged as `[OLAWS-ENA01]`, see A.13 |
 | `[ol-aws-ami-builder PATCH ssm-agent-install]` | `cloud/aws/provision.sh` | `SSM_AGENT_INSTALL == 1` (default; `--skip-ssm-agent` disables) | Inject the in-guest Amazon SSM Agent install+boot-enable hook (OL6-OL10; OL6 pinned, OL7-OL10 `latest`; non-fatal) — logged as `[OLAWS-SSM01]`, see B.11 |
 | `[ol-aws-ami-builder PATCH awscli-install]` | `cloud/aws/provision.sh` | `AWSCLI_INSTALL == 1` (default) **and** `OL_MAJOR_VERSION` in `6/7/8` (`--skip-awscli` disables; OL9/OL10 out of scope) | Inject the in-guest AWS CLI v2 install hook (OL6 pinned `2.17.51`, OL7/OL8 `latest`; v1 excluded via versionlock; non-fatal) — logged as `[OLAWS-AWSCLI01]`, see B.13 |
+| `[ol-aws-ami-builder PATCH sos-package]` | `distr/ol${N}-slim/ol${N}-ks.cfg` | `OL_MAJOR_VERSION >= 7` (always on; OL6 lists `sos` directly in its synthesized kickstart) | `_ks_add_sos_package`: insert `sos` (sosreport tooling) directly under the first `%packages` line, so every AMI can produce a sosreport out of the box — logged as `[OLAWS-SOS01]`; dies when the kickstart has no `%packages` section (assert-then-write) |
+| `[ol-aws-ami-builder PATCH amazon-time-sync]` | `cloud/aws/provision.sh` | `AMAZON_TIME_SYNC == "yes"` (OPT-IN; default OFF — env key or `--enable-amazon-time-sync`) | Append a guest-side block that adds 169.254.169.123 as the preferred time source (`/etc/chrony.conf` on OL7-OL10, `/etc/ntp.conf` on OL6; the guest block detects which file exists and re-checks before appending) — logged as `[OLAWS-TIMESYNC01]`, see B.14 |
 | `[ol-aws-ami-builder PATCH selinux-relabel-fallback]` | `bin/build-image.sh` | host libguestfs lacks the `selinuxrelabel` optgroup | Schedule a first-boot `/.autorelabel` instead of the offline relabel when the build host's libguestfs cannot relabel — see D.17 |
 
 The `sed`-based substitutions (the OL6/OL7 guard removals, `kernel-uek-modules`,
@@ -2418,6 +2452,33 @@ untouched (`:=`).
 production hook injection + the AMI name/description identifier are host-gate
 verified (parse / shellcheck / `tests/t007_idempotency.sh` marker count); a real
 AMI build + boot with AWS CLI v2 present is the natural [C]3 follow-up (B-T8).
+
+---
+
+## B.14 Amazon Time Sync opt-in (`--enable-amazon-time-sync`)
+
+DEFAULT OFF. Time configuration belongs to the end user of the AMI, so the
+builder ships the distribution defaults (`pool 2.pool.ntp.org` via chrony on
+OL7-10, ntpd on OL6) untouched unless explicitly asked.
+
+When enabled — `AMAZON_TIME_SYNC="yes"` in the env file or the
+`--enable-amazon-time-sync` switch (the switch wins; it forces `yes` after
+`load_env`) — Phase 3 appends a marker-bracketed guest block
+(`[ol-aws-ami-builder PATCH amazon-time-sync]`, logged as
+`[OLAWS-TIMESYNC01]`) to `cloud/aws/provision.sh` that adds the link-local
+**Amazon Time Sync Service (169.254.169.123)** as the *preferred* time
+source: `server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4` in
+`/etc/chrony.conf` (OL7-10) or `server 169.254.169.123 prefer iburst` in
+`/etc/ntp.conf` (OL6). The guest block detects which config file exists (no
+per-OL branching in the wrapper) and re-checks for `169.254.169.123` before
+appending, so it is idempotent on both the wrapper side and the guest side.
+The distribution pool lines are deliberately kept as fallback (minimal diff);
+the AMI name/description are NOT affected (this is a config toggle, not an
+identity-bearing component).
+
+Origin: the 2026-06-16 E2E generation’s sosreports showed the public NTP pool
+as the only time source; AWS best practice on EC2 is the link-local service.
+Kept opt-in per user decision (2026-07-11).
 
 ---
 

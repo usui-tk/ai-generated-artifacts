@@ -331,6 +331,8 @@ vi env.properties.local
 | `S3_BUCKET` | `my-oracle-linux-ami-import-bucket`(全 OL バージョン共通。`setup-vmimport-role.sh` と一致) |
 | `AWS_REGION` | 空のままにすると EC2 IMDSv2/v1 から自動取得(EC2 外では `ap-northeast-1` にフォールバック)。明示的に指定するとオーバーライドされます。 |
 | `UPDATE_TO_LATEST` | デフォルト `yes`。ゲスト VM 内でインストール後に `dnf/yum update` を実行し、ISO リリース以降に発見された kernel および userspace の CVE を解消します。トレードオフを理解した上でのみ `security` や `no` に変更してください。 |
+| `DISK_SIZE_GB` | デフォルト `7`(OL6-10 一律。Oracle 公式 AWS AMI と同水準)。ルートパーティションは自動拡張(`--grow`)かつ `cloud-utils-growpart` 焼き込み済みのため、より大きい EBS ボリュームで起動すれば自動で広がります — この値は下限であって上限ではありません。SPEC B.3.4 参照。 |
+| `AMAZON_TIME_SYNC` | デフォルト `no`(時刻設定は AMI のエンドユーザーに委ねる)。`yes` を指定するか `--enable-amazon-time-sync` を渡すと、link-local の Amazon Time Sync Service(`169.254.169.123`)をゲストの優先時刻ソースとして構成します。 |
 | `AMI_NAME` | 任意。未指定なら日時付きで自動生成 |
 
 ---
@@ -367,9 +369,12 @@ vi env.properties.local
 | `--skip-ena-driver` | ゲスト内で Amazon ENA ドライバをビルド/導入**しない**。既定では OL6〜OL10 でビルド(AWS 最適化・ENA Express 対応 AMI、Nitro v4+/ENAv3)。本スイッチで純粋な(無改変の)OL AMI を生成 |
 | `--skip-ssm-agent` | ゲスト内で Amazon SSM Agent を導入**しない**。既定では導入し起動時に有効化(OL6-OL10)するため、AMI は AWS SSM Run Command 準拠で出荷される。本スイッチでエージェントを除外 |
 | `--skip-awscli` | ゲスト内で AWS CLI v2 を導入**しない**。既定では OL6/OL7/OL8 に導入し(AWS CLI v1 が非サポート化しつつあるため標準 CLI として)、v1 パッケージを versionlock で除外する。本スイッチで導入を除外。OL9/OL10 は対象外(既定のパッケージマネージャで AWS CLI v2 を導入)で本スイッチの影響を受けない |
+| `--enable-amazon-time-sync` | **オプトイン(既定は無効)。** link-local の Amazon Time Sync Service(`169.254.169.123`)をゲストの*優先*時刻ソースとして構成する(OL7-OL10 は chrony、OL6 は ntpd。ディストリビューション既定の pool はフォールバックとして温存)。既定では時刻設定は AMI 利用者(エンドユーザー)に委ねる。env ファイルの `AMAZON_TIME_SYNC="yes"` と等価 |
 | `--imds-support <mode>` | AMI に焼き込む IMDS サポート: `default`(IMDSv1+v2、`HttpTokens=optional`)または `v2.0`(IMDSv2 必須、**OL7+ のみ**)。既定は `default`。OL6 + `v2.0` は拒否(cloud-init 0.7.5 が IMDSv2 非対応のため) |
 | `--log-file <path>` | 実行ログの出力先。既定は `${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log`(いずれの場合もコンソール出力をファイルにも記録。ファイルは ANSI 除去済み) |
 | `--debug` | `[DEBUG]` 行をコンソールにも出力(ファイルには指定有無に関わらず常時記録) |
+
+上記のスイッチ制御コンポーネントに加えて、すべての AMI にはキックスタート経由で `sos` パッケージ(sosreport 採取ツール)が焼き込まれます — OL6 はラッパー合成キックスタート、OL7-10 は `sos-package` キックスタートパッチ経由。これにより、どのインスタンスでも追加インストールなしで `sosreport` を採取できます(常時有効・スイッチなし)。
 
 ### 6.3 Phase 0 の自動診断機能
 

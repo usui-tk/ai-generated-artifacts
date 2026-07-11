@@ -20,6 +20,52 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (boot-E2E feedback: 7 GB disks, sos baked in, opt-in Amazon Time Sync)
+- **`DISK_SIZE_GB` 10 -> 7, uniform across OL6-10** (user decision 2026-07-11,
+  aligned with Oracle's own AWS AMIs). Safe by construction: every root
+  partition is `--grow` and `cloud-utils-growpart` is baked into the image,
+  so the value is a floor, not a ceiling (larger launch volumes auto-expand);
+  AWS forbids launching below the AMI's registered size, so smaller strictly
+  widens the launch envelope. Measured post-build root usage from the
+  2026-06-16 E2E generation: OL6 1.4G / OL7 3.4G / OL8 3.6G / OL9 2.3G /
+  OL10 2.0G - 7 GB keeps >= 2.4G headroom on the heaviest major. No runtime
+  floor guard (same philosophy as the rejected ENA installer guard); the
+  knowledge lives in SPEC B.3.4 and the t006 parity pin. The wrapper-side
+  `load_env` fallback moves 10 -> 7 in lock-step. First real build at 7 GB
+  is part of the next [C]3 / B-T8 cycle.
+- **`sos` (sosreport tooling) baked into every AMI via kickstart.** OL6: the
+  wrapper-synthesized kickstart lists `sos` directly. OL7-10: new
+  `_ks_add_sos_package()` inserts `sos` under the first `%packages` line of
+  the upstream `distr/ol{N}-slim/ol{N}-ks.cfg` (marker
+  `[ol-aws-ami-builder PATCH sos-package]`, logged `[OLAWS-SOS01]`;
+  idempotent; dies on a missing `%packages` section with the file untouched
+  - assert-then-write). Verified against the real upstream kickstarts of all
+  four majors (insert-once + idempotent second run + die path). Package name
+  confirmed from the E2E sosreports: plain `sos` (noarch) on every major.
+- **NEW opt-in switch `--enable-amazon-time-sync` / env key
+  `AMAZON_TIME_SYNC` (default `"no"`).** DEFAULT OFF by user decision: time
+  configuration belongs to the AMI's end user, so distribution defaults are
+  never changed unless explicitly asked. When enabled, phase3 appends a
+  guest-side block (`[ol-aws-ami-builder PATCH amazon-time-sync]`, logged
+  `[OLAWS-TIMESYNC01]`) that adds the link-local Amazon Time Sync Service
+  (169.254.169.123) as the PREFERRED source - /etc/chrony.conf on OL7-10,
+  /etc/ntp.conf on OL6, guest-side file detection, distro pool kept as
+  fallback, idempotent on both sides. Origin: the E2E sosreports showed the
+  public NTP pool as the only time source. AMI name/description unaffected.
+  The env key joins the common core (20 -> 21 keys, all five templates in
+  lock-step).
+- **Boot-E2E evidence recorded (TESTING.md note, 2026-07-11)**: the
+  2026-06-16 generation booted on real EC2 across ALL five majors (0 failed
+  units on OL7-10; OL6 self-built ENA 2.9.1g actually driving the NIC on an
+  ENA-capable Xen-generation instance - OL6 Nitro path still untraveled;
+  OL7 DKMS 2.17.0g loaded). Explicitly NOT proven by that generation:
+  OL8-10 self-build, baked SSM/CLI, and the 7 GB disks - these remain the
+  open [C]3 / B-T8 items.
+- Tests: t003 25 -> 43 asserts (`--enable-amazon-time-sync` contract +
+  `_ks_add_sos_package` behavioural unit), t006 42 -> 54 (21 core keys,
+  `DISK_SIZE_GB="7"`, `AMAZON_TIME_SYNC="no"`, sos wiring invariants),
+  t007 marker pin 9 -> 11. Suite: 440 -> 462 (measured).
+
 ### Changed (release-agnostic maintenance: ISO_URL becomes the single touch point)
 - **OL9 template moved to Oracle Linux 9.8** (`OracleLinux-R9-U8-x86_64-dvd.iso`,
   released 2026-07). With the changes below, this is - by design - a

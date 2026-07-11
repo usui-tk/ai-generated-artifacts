@@ -23,7 +23,7 @@ MAIN="${PROJ}/build-ol-aws-ami.sh"
 
 mapfile -t markers < <(grep -oE 'ol-aws-ami-builder PATCH [a-z0-9-]+' "${MAIN}" | sort -u)
 
-assert_eq 9 "${#markers[@]}" "idempotency: expected number of distinct PATCH markers"
+assert_eq 11 "${#markers[@]}" "idempotency: expected number of distinct PATCH markers"
 
 for m in "${markers[@]}"; do
   guards="$(grep -Fc "grep -Fq '[${m}]'" "${MAIN}" || true)"
