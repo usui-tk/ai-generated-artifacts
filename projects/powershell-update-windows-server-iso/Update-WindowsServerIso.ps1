@@ -526,8 +526,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.08-r11.67'
-$Script:ScriptTag     = 'boot-verification-tools'
+$Script:ScriptVersion = 'update-wsi-2026.07.11-r11.68'
+$Script:ScriptTag     = 'setup-binaries-sync'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -569,6 +569,7 @@ $Script:PhaseRegistry = @(
     [pscustomobject]@{ Id='P06';   Name='ValidatePatchServicing'; Group='Plan';   Func='Invoke-PlanPhase06_ValidatePatchServicing' }
     [pscustomobject]@{ Id='P07';   Name='PatchInstallWim';           Group='Build';  Func='Invoke-BuildPhase07_PatchInstallWim' }
     [pscustomobject]@{ Id='P08';   Name='PatchBootWim';              Group='Build';  Func='Invoke-BuildPhase08_PatchBootWim' }
+    [pscustomobject]@{ Id='P08S';  Name='SyncSetupBinaries';         Group='Build';  Func='Invoke-BuildPhase08S_SyncSetupBinaries' }
     [pscustomobject]@{ Id='P09';   Name='AssembleIso';               Group='Build';  Func='Invoke-BuildPhase09_AssembleIso' }
     [pscustomobject]@{ Id='P10';   Name='ConvertPca2023BootManager'; Group='Build';  Func='Invoke-BuildPhase10_ConvertPca2023BootManager' }
     [pscustomobject]@{ Id='P11';   Name='StaticVerify';              Group='Verify'; Func='Invoke-VerifyPhase11_StaticVerify' }
@@ -8518,6 +8519,8 @@ function Get-WimIndexInspection {
         HasBootMgrFwEx = $null
         HasBootMgrEx  = $null
         HasEfisysExBin = $null
+        SetupExe      = $null
+        SetupHostExe  = $null
         ErrorMessage  = $null
     }
     $mounted = $false
@@ -8557,6 +8560,13 @@ function Get-WimIndexInspection {
         $rec.HasBootMgrFwEx = if ($rec.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgfw_EX.efi') } else { $false }
         $rec.HasBootMgrEx   = if ($rec.HasEfiExDir) { Test-Path -LiteralPath (Join-Path $exBins 'bootmgr_EX.efi')   } else { $false }
         $rec.HasEfisysExBin = if ($rec.HasDvdEx) { Test-Path -LiteralPath (Join-Path $exDvd 'EFI\en-US\efisys_EX.bin') } else { $false }
+        if ($Kind -eq 'boot') {
+            # Setup-binary identity of THIS image: the P11
+            # SetupBinarySync check compares these against the media
+            # \sources copies (must be byte-identical per MS).
+            $rec.SetupExe     = Get-SetupBinaryFileEvidence -Path (Join-Path $MountDir 'sources\setup.exe')
+            $rec.SetupHostExe = Get-SetupBinaryFileEvidence -Path (Join-Path $MountDir 'sources\setuphost.exe')
+        }
 
         if ($Kind -eq 'install') {
             $winRe = Join-Path $MountDir 'Windows\System32\Recovery\Winre.wim'
@@ -8615,6 +8625,7 @@ function Get-MediaInspection {
         InstallWim   = [ordered]@{ Path = $installWim; Present = $false; SizeBytes = $null; Sha256 = $null; Indexes = @() }
         BootWim      = [ordered]@{ Path = $bootWim; Present = $false; SizeBytes = $null; Sha256 = $null; Indexes = @() }
         BootStlPaths = @()
+        MediaSetupBinaries = [ordered]@{ SetupExe = $null; SetupHostExe = $null }
         ErrorMessage = $null
     }
     try {
@@ -8622,6 +8633,8 @@ function Get-MediaInspection {
             $stl = @(Get-ChildItem -LiteralPath $MediaRoot -Recurse -Filter 'boot.stl' -File -ErrorAction SilentlyContinue)
             $insp.BootStlPaths = @($stl | ForEach-Object { $_.FullName.Substring($MediaRoot.Length).TrimStart('\', '/') })
         } catch { $null = $_ }
+        $insp.MediaSetupBinaries.SetupExe     = Get-SetupBinaryFileEvidence -Path (Join-Path $MediaRoot 'sources\setup.exe')
+        $insp.MediaSetupBinaries.SetupHostExe = Get-SetupBinaryFileEvidence -Path (Join-Path $MediaRoot 'sources\setuphost.exe')
 
         foreach ($entry in @(
             @{ Slot = 'InstallWim'; Path = $installWim; Kind = 'install' },
@@ -11588,6 +11601,274 @@ function Invoke-BuildPhase08_PatchBootWim {
 }
 
 # ============================================================
+# ============================================================
+# Phase P08S: Sync Setup binaries from serviced boot.wim to media
+# ============================================================
+# Root cause record [measured 2026-07-11]: P08 services boot.wim
+# (the Setup engine) but the media \sources setup binaries stayed at
+# their shipped versions. Microsoft's media-dynamic-update guidance
+# is explicit: setup.exe (and setuphost.exe on 10.0.26100+) from the
+# serviced boot.wim must match \sources\setup.exe /
+# \sources\setuphost.exe -- "If these binaries aren't identical,
+# Windows Setup will fail during installation." Measured on the
+# Hyper-V rig: Server 2016/2022/2025 output ISOs failed before
+# edition selection ("a media driver ... is missing"; WinPE could dir
+# the 8.4 GB install.wim and diskpart saw the disk, eliminating the
+# media-read and storage-driver hypotheses); the failing VM showed
+# X:\sources\setup.exe 333,304 B (2026-07-08) vs D:\sources\
+# setup.exe 333,184 B (2026-01-15). Server 2019 escaped only because
+# its boot.wim is pinned at 17763.3650 (0x80070032 closure).
+# This phase is the EXPLICIT sync [user requirement 2026-07-11]:
+# before/after size + timestamp + SHA-256 of every file are recorded
+# to the console, to logs\P08S_setup_binaries_sync.csv and to
+# logs\setup_binaries_sync.json -- never an implicit side effect.
+# For Server 2016 this doubles as the working closure of the V3
+# SetupDU gap (no Setup DU exists for 14393; the serviced boot.wim
+# is the only in-band source of matching Setup binaries).
+
+function Get-SetupBinarySyncPlan {
+    <#
+    .SYNOPSIS
+        Pure: which Setup binaries must be synced for a given boot.wim
+        idx2 build number. setup.exe always; setuphost.exe on
+        10.0.26100+ (Windows Server 2025 / 24H2 era), per the MS
+        media-dynamic-update procedure.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowNull()] [object]$BuildNumber
+    )
+    $n = $null
+    if ($null -ne $BuildNumber) {
+        try { $n = [int]$BuildNumber } catch { $n = $null }
+    }
+    if ($null -eq $n) {
+        return [pscustomobject]@{
+            Files  = @('setup.exe')
+            Reason = 'boot.wim idx2 build unknown; syncing setup.exe only (setuphost.exe is a 26100+ requirement)'
+        }
+    }
+    if ($n -ge 26100) {
+        return [pscustomobject]@{
+            Files  = @('setup.exe', 'setuphost.exe')
+            Reason = ('build {0} >= 26100: setup.exe + setuphost.exe (MS: required starting with 24H2/Server 2025)' -f $n)
+        }
+    }
+    return [pscustomobject]@{
+        Files  = @('setup.exe')
+        Reason = ('build {0} < 26100: setup.exe only' -f $n)
+    }
+}
+
+function Get-SetupBinaryFileEvidence {
+    <#
+    .SYNOPSIS
+        Measured identity of one file: presence, size, last-write time
+        (UTC, ISO 8601) and SHA-256. The unit of evidence this phase
+        records before and after every copy.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [pscustomobject]@{ Path = $Path; Present = $false; SizeBytes = $null; LastWriteTimeUtc = $null; Sha256 = $null }
+    }
+    $fi = Get-Item -LiteralPath $Path
+    $sha = $null
+    try { $sha = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLower() } catch { $null = $_ }
+    return [pscustomobject]@{
+        Path             = $Path
+        Present          = $true
+        SizeBytes        = [int64]$fi.Length
+        LastWriteTimeUtc = $fi.LastWriteTimeUtc.ToString('o')
+        Sha256           = $sha
+    }
+}
+
+function New-SetupBinarySyncRecord {
+    <#
+    .SYNOPSIS
+        Pure: one per-file sync record -- source (boot.wim idx2 side),
+        media before, media after, the action taken and why.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$FileName,
+        [Parameter(Mandatory)] [ValidateSet('copied', 'already-identical', 'source-missing')] [string]$Action,
+        [Parameter(Mandatory)] [pscustomobject]$Source,
+        [Parameter(Mandatory)] [pscustomobject]$MediaBefore,
+        [AllowNull()] [pscustomobject]$MediaAfter = $null,
+        [string]$Notes = ''
+    )
+    return [pscustomobject]@{
+        FileName    = $FileName
+        Action      = $Action
+        Source      = $Source
+        MediaBefore = $MediaBefore
+        MediaAfter  = $MediaAfter
+        Notes       = $Notes
+    }
+}
+
+function Invoke-BuildPhase08S_SyncSetupBinaries { # psa-disable-line PSA6003 -- the phase syncs the SET of Setup binaries (setup.exe + setuphost.exe); the plural is the accurate contract (exemption style mirrors Resolve-SetupDu)
+    <#
+    .SYNOPSIS
+        P08S: copy the serviced boot.wim idx2 Setup binaries over the
+        media \sources copies, recording before/after evidence
+        (size, timestamp, SHA-256) for every file -- an explicit,
+        verifiable sync, not an implicit side effect.
+    .DESCRIPTION
+        Mounts boot.wim idx2 read-only, plans the file set from the
+        image build (Get-SetupBinarySyncPlan), then per file: record
+        media BEFORE -> compare SHA-256 -> copy only on difference ->
+        record media AFTER -> verify media SHA-256 now equals the
+        boot.wim side (hard failure if not). Artifacts:
+        logs\P08S_setup_binaries_sync.csv and
+        logs\setup_binaries_sync.json.
+    #>
+    Start-DebugTrace -Context 'Invoke-BuildPhase08S_SyncSetupBinaries' -PhaseId 'P08S'
+    try {
+        $bootWim = Join-Path $Script:ExtractedDir 'sources\boot.wim'
+        if (-not (Test-Path -LiteralPath $bootWim)) {
+            if ($Script:SyntheticTestMode) {
+                Write-Skip 'boot.wim absent in -SyntheticTestMode; skipping P08S.'
+                return
+            }
+            throw ('boot.wim missing: {0}' -f $bootWim)
+        }
+        if (-not $Script:Execute -and -not $Script:SyntheticTestMode) {
+            Write-Caution 'Running in Sandbox mode (no -Execute); skipping Setup-binary sync.'
+            return
+        }
+
+        Set-DebugStep -Step 'plan'
+        $buildNumber = $null
+        try {
+            $img = Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ ImagePath = $bootWim; Index = 2 }
+            if ($img -and $img.Version) { $buildNumber = ([version][string]$img.Version).Build }
+        } catch {
+            Write-Caution ('boot.wim idx2 version query failed: {0}' -f $_.Exception.Message)
+        }
+        $plan = Get-SetupBinarySyncPlan -BuildNumber $buildNumber
+        Write-Step ('Sync plan: {0} -- {1}' -f (@($plan.Files) -join ', '), $plan.Reason)
+
+        $mountDir = Join-Path $Script:WorkRoot 'work\p08s_mount'
+        if (Test-Path -LiteralPath $mountDir) {
+            Remove-Item -LiteralPath $mountDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        New-Item -ItemType Directory -Path $mountDir -Force | Out-Null
+
+        $records = New-Object System.Collections.Generic.List[object]
+        $mounted = $false
+        Set-DebugStep -Step 'mount-boot-idx2'
+        try {
+            $null = Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{
+                ImagePath = $bootWim; Index = 2; Path = $mountDir
+                ReadOnly = $true; ErrorAction = 'Stop'
+                LogPath = (Join-Path $Script:LogsDir 'p08s_mount_boot_idx2.log')
+            }
+            $mounted = $true
+
+            foreach ($fileName in @($plan.Files)) {
+                Set-DebugStep -Step ('sync-' + $fileName)
+                $srcPath   = Join-Path $mountDir ('sources\' + $fileName)
+                $mediaPath = Join-Path $Script:ExtractedDir ('sources\' + $fileName)
+                $srcEv   = Get-SetupBinaryFileEvidence -Path $srcPath
+                $beforeEv = Get-SetupBinaryFileEvidence -Path $mediaPath
+                Write-Step ('{0}: boot.wim idx2 side : Present={1} Size={2} LastWriteUtc={3} Sha256={4}' -f $fileName, $srcEv.Present, $srcEv.SizeBytes, $srcEv.LastWriteTimeUtc, $srcEv.Sha256)
+                Write-Step ('{0}: media BEFORE       : Present={1} Size={2} LastWriteUtc={3} Sha256={4}' -f $fileName, $beforeEv.Present, $beforeEv.SizeBytes, $beforeEv.LastWriteTimeUtc, $beforeEv.Sha256)
+
+                if (-not $srcEv.Present) {
+                    if ($fileName -eq 'setup.exe') {
+                        throw ('boot.wim idx2 carries no sources\setup.exe; the serviced Setup image is not usable as a sync source.')
+                    }
+                    Write-Caution ('{0}: absent in boot.wim idx2; recording and continuing (nothing to sync).' -f $fileName)
+                    $records.Add((New-SetupBinarySyncRecord -FileName $fileName -Action 'source-missing' `
+                        -Source $srcEv -MediaBefore $beforeEv -Notes 'planned by build gate but not present in the image')) | Out-Null
+                    continue
+                }
+
+                # Stash the boot.wim-side binary (MS media-dynamic-update
+                # order: after a Setup DU overlay, THESE copies win; P09
+                # reapplies the stash after its overlay step).
+                $stashDir = Join-Path $Script:WorkRoot 'work\p08s_setup_binaries'
+                if (-not (Test-Path -LiteralPath $stashDir)) {
+                    New-Item -ItemType Directory -Path $stashDir -Force | Out-Null
+                }
+                Copy-Item -LiteralPath $srcPath -Destination (Join-Path $stashDir $fileName) -Force
+
+                if ($beforeEv.Present -and $beforeEv.Sha256 -and $beforeEv.Sha256 -eq $srcEv.Sha256) {
+                    Write-Ok ('{0}: media already identical to boot.wim idx2 (SHA-256 match); no copy.' -f $fileName)
+                    $records.Add((New-SetupBinarySyncRecord -FileName $fileName -Action 'already-identical' `
+                        -Source $srcEv -MediaBefore $beforeEv -MediaAfter $beforeEv -Notes 'SHA-256 equal before sync')) | Out-Null
+                    continue
+                }
+
+                if ($beforeEv.Present) {
+                    $mediaItem = Get-Item -LiteralPath $mediaPath
+                    if ($mediaItem.IsReadOnly) {
+                        # ISO-extracted files commonly carry the ReadOnly
+                        # attribute; clear it or Copy-Item -Force fails.
+                        $mediaItem.IsReadOnly = $false
+                    }
+                }
+                Copy-Item -LiteralPath $srcPath -Destination $mediaPath -Force
+                $afterEv = Get-SetupBinaryFileEvidence -Path $mediaPath
+                Write-Step ('{0}: media AFTER        : Present={1} Size={2} LastWriteUtc={3} Sha256={4}' -f $fileName, $afterEv.Present, $afterEv.SizeBytes, $afterEv.LastWriteTimeUtc, $afterEv.Sha256)
+                if (-not $afterEv.Present -or $afterEv.Sha256 -ne $srcEv.Sha256) {
+                    throw ('{0}: post-copy verification FAILED (media SHA-256 {1} != boot.wim side {2}).' -f $fileName, $afterEv.Sha256, $srcEv.Sha256)
+                }
+                Write-Ok ('{0}: synced and verified (media SHA-256 now equals boot.wim idx2 side).' -f $fileName)
+                $records.Add((New-SetupBinarySyncRecord -FileName $fileName -Action 'copied' `
+                    -Source $srcEv -MediaBefore $beforeEv -MediaAfter $afterEv -Notes 'copied; post-copy SHA-256 verified')) | Out-Null
+            }
+        } finally {
+            if ($mounted) {
+                try {
+                    $null = Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path = $mountDir; Discard = $true; ErrorAction = 'Stop' }
+                } catch {
+                    Write-Caution ('P08S: boot.wim dismount failed: {0}' -f $_.Exception.Message)
+                }
+            }
+        }
+
+        Set-DebugStep -Step 'persist-evidence'
+        $csvRows = @($records | ForEach-Object {
+            [pscustomobject]@{
+                File                    = $_.FileName
+                Action                  = $_.Action
+                SourceSizeBytes         = $_.Source.SizeBytes
+                SourceLastWriteUtc      = $_.Source.LastWriteTimeUtc
+                SourceSha256            = $_.Source.Sha256
+                MediaBeforeSizeBytes    = $_.MediaBefore.SizeBytes
+                MediaBeforeLastWriteUtc = $_.MediaBefore.LastWriteTimeUtc
+                MediaBeforeSha256       = $_.MediaBefore.Sha256
+                MediaAfterSizeBytes     = if ($_.MediaAfter) { $_.MediaAfter.SizeBytes } else { $null }
+                MediaAfterLastWriteUtc  = if ($_.MediaAfter) { $_.MediaAfter.LastWriteTimeUtc } else { $null }
+                MediaAfterSha256        = if ($_.MediaAfter) { $_.MediaAfter.Sha256 } else { $null }
+                Notes                   = $_.Notes
+            }
+        })
+        $csvPath = Join-Path $Script:LogsDir 'P08S_setup_binaries_sync.csv'
+        $csvRows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+        $jsonPath = Join-Path $Script:LogsDir 'setup_binaries_sync.json'
+        [pscustomobject]@{
+            Schema         = 'setup-binaries-sync/1'
+            Timestamp      = (Get-Date).ToString('o')
+            OsKey          = $Script:OsVersion
+            BootWimPath    = $bootWim
+            BootWimIdx2Build = $buildNumber
+            Plan           = $plan
+            Records        = @($records)
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+        Write-Ok ('Setup-binary sync evidence written: {0} / {1}' -f $csvPath, $jsonPath)
+    } finally {
+        Stop-DebugTrace
+    }
+}
+
 # Phase P09: Assemble updated ISO (Build group)
 # ============================================================
 
@@ -11627,6 +11908,33 @@ function Invoke-BuildPhase09_AssembleIso {
             }
         } else {
             Write-Skip 'No Dynamic Update Setup patches to overlay.'
+        }
+
+        # Post-overlay reapply of the boot.wim-side Setup binaries (MS
+        # media-dynamic-update order: the Setup DU overlay updates
+        # sources\, THEN setup.exe/setuphost.exe saved from the
+        # serviced boot.wim are copied over -- the boot.wim copies must
+        # win or Setup fails on the binary mismatch). Dormant while no
+        # SetupDU resolves; wired so a future SetupDU cannot silently
+        # undo the P08S sync.
+        if ($setupDuPatches.Count -gt 0 -and -not $Script:SyntheticTestMode) {
+            Set-DebugStep -Step 'reapply-setup-binaries'
+            $stashDir = Join-Path $Script:WorkRoot 'work\p08s_setup_binaries'
+            if (Test-Path -LiteralPath $stashDir) {
+                foreach ($stashed in @(Get-ChildItem -LiteralPath $stashDir -File)) {
+                    $dest = Join-Path $Script:ExtractedDir ('sources\' + $stashed.Name)
+                    $beforeEv = Get-SetupBinaryFileEvidence -Path $dest
+                    if (Test-Path -LiteralPath $dest) {
+                        $destItem = Get-Item -LiteralPath $dest
+                        if ($destItem.IsReadOnly) { $destItem.IsReadOnly = $false }
+                    }
+                    Copy-Item -LiteralPath $stashed.FullName -Destination $dest -Force
+                    $afterEv = Get-SetupBinaryFileEvidence -Path $dest
+                    Write-Step ('{0}: reapplied boot.wim copy after Setup DU overlay (before sha={1} -> after sha={2}).' -f $stashed.Name, $beforeEv.Sha256, $afterEv.Sha256)
+                }
+            } else {
+                Write-Caution 'Setup DU overlay ran but no P08S stash exists; media setup binaries may not match the serviced boot.wim (run the full pipeline including P08S).'
+            }
         }
 
         # Step 2: Build output ISO
@@ -12238,6 +12546,48 @@ function Invoke-VerifyPhase11_StaticVerify {
                     Add-VRow -Check 'PostInspectionPrimaryIndex' -Expected 'inspectable' -Actual 'error' `
                         -Status 'Fail' -Notes $(if ($primaryRec) { $primaryRec.ErrorMessage } else { 'no index records' })
                 }
+            }
+        }
+
+        # SetupBinarySync: media \sources setup binaries must
+        # be byte-identical to the serviced boot.wim idx2's (MS
+        # media-dynamic-update: "If these binaries aren't identical,
+        # Windows Setup will fail during installation"). Measured
+        # failure 2026-07-11 (2016/2022/2025 pre-edition "media
+        # driver missing"); P08S is the fix, this row proves it held.
+        if ((Test-Path -Path variable:postInsp) -and $postInsp -and -not $postInsp.ErrorMessage -and $postInsp.BootWim.Present) {
+            $sbIdx2 = @($postInsp.BootWim.Indexes) | Where-Object { $_.Index -eq 2 } | Select-Object -First 1
+            if ($sbIdx2 -and -not $sbIdx2.ErrorMessage) {
+                $sbBuild = $null
+                if ($sbIdx2.Evidence -and $sbIdx2.Evidence.Build) {
+                    $sbV = ConvertFrom-InspectionBuildValue -Value $sbIdx2.Evidence.Build
+                    if ($sbV) { $sbBuild = $sbV.Major }
+                }
+                $sbPlan = Get-SetupBinarySyncPlan -BuildNumber $sbBuild
+                foreach ($sbFile in @($sbPlan.Files)) {
+                    $sbSlot  = if ($sbFile -eq 'setup.exe') { 'SetupExe' } else { 'SetupHostExe' }
+                    $sbWim   = $sbIdx2.$sbSlot
+                    $sbMedia = $postInsp.MediaSetupBinaries.$sbSlot
+                    $sbNotes = ('boot.wim idx2: size={0} time={1} sha={2}; media: size={3} time={4} sha={5}' -f `
+                        $(if ($sbWim) { $sbWim.SizeBytes } else { 'n/a' }), $(if ($sbWim) { $sbWim.LastWriteTimeUtc } else { 'n/a' }), $(if ($sbWim -and $sbWim.Sha256) { $sbWim.Sha256.Substring(0, 12) } else { 'n/a' }), `
+                        $(if ($sbMedia) { $sbMedia.SizeBytes } else { 'n/a' }), $(if ($sbMedia) { $sbMedia.LastWriteTimeUtc } else { 'n/a' }), $(if ($sbMedia -and $sbMedia.Sha256) { $sbMedia.Sha256.Substring(0, 12) } else { 'n/a' }))
+                    if ($sbWim -and $sbWim.Present -and $sbMedia -and $sbMedia.Present -and $sbWim.Sha256 -and $sbWim.Sha256 -eq $sbMedia.Sha256) {
+                        Add-VRow -Check ('SetupBinarySync_' + $sbFile) -Expected 'media SHA-256 == boot.wim idx2' `
+                            -Actual 'identical' -Status 'Pass' -Notes $sbNotes
+                        Write-Ok ('SetupBinarySync {0}: media is byte-identical to boot.wim idx2.' -f $sbFile)
+                    } elseif ($sbWim -and -not $sbWim.Present -and $sbFile -eq 'setuphost.exe') {
+                        Add-VRow -Check ('SetupBinarySync_' + $sbFile) -Expected 'media SHA-256 == boot.wim idx2' `
+                            -Actual 'source-absent' -Status 'Warn' -Notes ('planned by build gate but absent in boot.wim idx2; ' + $sbNotes)
+                        Write-Caution ('SetupBinarySync {0}: absent in boot.wim idx2.' -f $sbFile)
+                    } else {
+                        Add-VRow -Check ('SetupBinarySync_' + $sbFile) -Expected 'media SHA-256 == boot.wim idx2' `
+                            -Actual 'MISMATCH' -Status 'Fail' -Notes ('Setup will fail during installation per MS media-dynamic-update; ' + $sbNotes)
+                        Write-Fail ('SetupBinarySync {0}: media does NOT match boot.wim idx2 -- the output ISO will fail before edition selection.' -f $sbFile)
+                    }
+                }
+            } else {
+                Add-VRow -Check 'SetupBinarySync' -Expected 'boot.wim idx2 inspectable' -Actual 'not inspectable' `
+                    -Status 'Warn' -Notes 'sync could not be verified; see BootWim index records'
             }
         }
 
@@ -13646,9 +13996,9 @@ function Get-PhaseListByAction {
     # the standard pipeline keeps the pipeline-level wiring consistent
     # with the phase-level gates.
     $standardFull = if ($Script:SyntheticTestMode) {
-        [string[]]@('P01','P02','P03','P04','P07','P08','P09','P10','P11','P12','P13')
+        [string[]]@('P01','P02','P03','P04','P07','P08','P08S','P09','P10','P11','P12','P13')
     } else {
-        [string[]]@('P01','P02','P03','P04','P05','P06','P07','P08','P09','P10','P11','P12','P13')
+        [string[]]@('P01','P02','P03','P04','P05','P06','P07','P08','P08S','P09','P10','P11','P12','P13')
     }
     $standardPrepare = if ($Script:SyntheticTestMode) {
         [string[]]@('P01','P02','P03','P04')
@@ -13658,7 +14008,7 @@ function Get-PhaseListByAction {
 
     switch ($ActionName) {
         'Prepare'                 { return $standardPrepare }
-        'Build'                   { return [string[]]@('P07','P08','P09','P10') }
+        'Build'                   { return [string[]]@('P07','P08','P08S','P09','P10') }
         'Verify'                  { return [string[]]@('P11','P12','P13') }
         'PrepareBuildVerify'      { return $standardFull }
         'All'                     { return $standardFull }

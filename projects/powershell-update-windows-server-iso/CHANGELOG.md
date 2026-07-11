@@ -22,6 +22,58 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.11-r11.68] - 2026-07-11
+
+Tag: `setup-binaries-sync`. Root cause closed [measured 2026-07-11]:
+P08 services boot.wim (the Setup engine) but the media `\sources`
+Setup binaries stayed at shipped versions; per Microsoft's
+media-dynamic-update guidance, setup.exe (and setuphost.exe on
+10.0.26100+) from the serviced boot.wim must be identical to the
+media copies or "Windows Setup will fail during installation" -- and
+it did: the 2016/2022/2025 output ISOs failed before edition
+selection ("a media driver ... is missing") while WinPE could read
+the 8.4 GB install.wim and diskpart saw the disk; the failing rig
+showed X:\sources\setup.exe 333,304 B (2026-07-08) vs
+D:\sources\setup.exe 333,184 B (2026-01-15). Server 2019 escaped
+only because its boot.wim is pinned old (17763.3650). The E2E
+inspection had a blind spot: it never compared these binaries.
+
+### Added
+
+- **P08S `SyncSetupBinaries`** (Build; between P08 and P09): mounts
+  boot.wim idx2 read-only, plans the file set from the image build
+  (`Get-SetupBinarySyncPlan`: setup.exe always; setuphost.exe on
+  26100+), and syncs the media copies as an EXPLICIT, recorded
+  operation [user requirement 2026-07-11]: per file, size + UTC
+  timestamp + SHA-256 are captured for the boot.wim side and for the
+  media BEFORE and AFTER, printed to the console and persisted to
+  `logs/P08S_setup_binaries_sync.csv` +
+  `logs/setup_binaries_sync.json`; identical files are recorded as
+  `already-identical` (no blind copy); every copy is post-verified
+  by SHA-256 (hard failure on mismatch); the ISO-extracted ReadOnly
+  attribute is cleared before copying. The boot.wim-side binaries
+  are stashed to `work/p08s_setup_binaries/`, and P09 reapplies the
+  stash after its Setup DU overlay step (MS order: the boot.wim
+  copies win) -- dormant while no SetupDU resolves, wired so a
+  future SetupDU cannot silently undo the sync. For Server 2016
+  this doubles as the working closure of the V3 SetupDU gap.
+- **P11 `SetupBinarySync_*` rows**: the inspection now records the
+  Setup-binary identity (presence/size/timestamp/SHA-256) of every
+  boot image and of the media root (`MediaSetupBinaries`), and P11
+  compares them per the plan gate: mismatch grades **Fail** with
+  both sides' evidence in the notes. Closes the blind spot.
+
+### Tests
+
+- **T40** `setup_binaries_sync_test.py` (16 assertions): plan build
+  gates (26100 boundary; unknown-build degradation), file-evidence
+  measurement (exact size/SHA-256/ISO-8601 UTC; missing-path shape),
+  record vocabulary, and structure pins (phase wiring between
+  P08/P09 across all three pipeline lists; SHA-verified copy;
+  ReadOnly clearing; CSV/JSON artifacts; console before/after lines;
+  stash + P09 post-overlay reapply; P11 Fail grading; version bump).
+
+
 ## [update-wsi-2026.07.08-r11.67] - 2026-07-08
 
 Tag: `boot-verification-tools`. Boot verification arc (design
