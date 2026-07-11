@@ -112,8 +112,8 @@ streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
 | ファイル | 用途 |
 |---------|------|
 | `build-ol-aws-ami.sh` | メインのビルドオーケストレータ。前提準備〜AMI 登録までを 9 フェーズに分けて実行。バージョン非依存で、`--env` で OL バージョンを指定 |
-| `env.properties.aws-ol10` | **Oracle Linux 10 Update 1**(x86_64)用パラメータ |
-| `env.properties.aws-ol9` | **Oracle Linux 9 Update 7**(x86_64)用パラメータ |
+| `env.properties.aws-ol10` | **Oracle Linux 10**(x86_64)用パラメータ。対象マイナーリリースはテンプレート内の `ISO_URL` のみで決まる |
+| `env.properties.aws-ol9` | **Oracle Linux 9**(x86_64)用パラメータ。対象マイナーリリースはテンプレート内の `ISO_URL` のみで決まる |
 | `env.properties.aws-ol8` | **Oracle Linux 8 Update 10**(x86_64)用パラメータ |
 | `env.properties.aws-ol7` | **Oracle Linux 7 Update 9**(x86_64)用パラメータ — **実験的・アップストリーム非推奨**。重要な注意事項はセクション 9.6 および 10 を参照 |
 | `env.properties.aws-ol6` | **Oracle Linux 6 Update 10**(x86_64)用パラメータ — **実験的・アップストリームに `distr/ol6-slim/` 自体が無い**。重要な注意事項はセクション 9.7 および 10 を参照 |
@@ -303,10 +303,10 @@ aws sts get-caller-identity
 ターゲットの Oracle Linux バージョンに合わせてテンプレートを選択します。
 
 ```bash
-# Oracle Linux 10 Update 1
+# Oracle Linux 10 (マイナーリリースはテンプレート内 ISO_URL で指定)
 cp env.properties.aws-ol10 env.properties.local
 
-# Oracle Linux 9 Update 7
+# Oracle Linux 9 (マイナーリリースはテンプレート内 ISO_URL で指定)
 cp env.properties.aws-ol9 env.properties.local
 
 # Oracle Linux 8 Update 10
@@ -508,7 +508,7 @@ ssh -i your-keypair.pem ec2-user@<public-ip>
 
 ### 9.4c `UPDATE_TO_LATEST` とカーネルレベル CVE 対策
 
-すべての env テンプレートで `UPDATE_TO_LATEST="yes"` がデフォルトです。この設定は Phase 4 を経由して上位の `distr/ol{N}-slim/provision.sh` 内 `distr::configure` 関数に伝達され、ISO ベースのインストール完了後にゲスト VM 内で `dnf update -y`(OL8/9/10)または `yum update -y`(OL6/7)が実行されます。このステップが無いと、生成 AMI には ISO 同梱のパッケージしか含まれず、その後に公開された kernel や userspace の修正がすべて取り込まれません。特に OL10 U1 では Linux Kernel CVE の発見頻度が高く、無視できない露出となります。バイト単位の再現性が必要などの理由で ISO 後の更新を明示的に行いたくない場合は、`env.properties.local` で `UPDATE_TO_LATEST="no"` を指定してください。セキュリティ識別済みのエラータのみに限定する `"security"` も指定可能です。
+すべての env テンプレートで `UPDATE_TO_LATEST="yes"` がデフォルトです。この設定は Phase 4 を経由して上位の `distr/ol{N}-slim/provision.sh` 内 `distr::configure` 関数に伝達され、ISO ベースのインストール完了後にゲスト VM 内で `dnf update -y`(OL8/9/10)または `yum update -y`(OL6/7)が実行されます。このステップが無いと、生成 AMI には ISO 同梱のパッケージしか含まれず、その後に公開された kernel や userspace の修正がすべて取り込まれません。特に OL10 では Linux Kernel CVE の発見頻度が高く、無視できない露出となります。バイト単位の再現性が必要などの理由で ISO 後の更新を明示的に行いたくない場合は、`env.properties.local` で `UPDATE_TO_LATEST="no"` を指定してください。セキュリティ識別済みのエラータのみに限定する `"security"` も指定可能です。
 
 ### 9.5 ネスト仮想化を主推奨にする理由
 

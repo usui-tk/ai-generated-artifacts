@@ -151,13 +151,10 @@ readonly OL_TOOLS_SUBDIR="oracle-linux-image-tools"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 
-# Default ISO information.
-# DEFAULT_ISO_URL is consumed in load_env() as the fallback when the user
-# has not set ISO_URL in their env.properties. The default points to the
-# latest OL10 release; users targeting OL9, OL8, or OL7 must set ISO_URL in
-# their env file (see env.properties.aws-ol9 / env.properties.aws-ol8 /
-# env.properties.aws-ol7).
-readonly DEFAULT_ISO_URL="https://yum.oracle.com/ISOS/OracleLinux/OL10/u1/x86_64/OracleLinux-R10-U1-x86_64-dvd.iso"
+# NOTE on ISO selection: there is deliberately no built-in default ISO URL.
+# ISO_URL is a required env-file key (validated in load_env). Embedding a
+# concrete release URL here would go stale on every Oracle update release;
+# the env templates are the single maintenance point instead.
 
 # Execution mode flags
 SKIP_PREREQ=0
@@ -393,7 +390,12 @@ load_env() {
 
   # Required parameters (build)
   : "${WORKSPACE:?WORKSPACE is not defined}"
-  : "${ISO_URL:=${DEFAULT_ISO_URL}}"
+  if [[ -z "${ISO_URL:-}" ]]; then
+    die "ISO_URL is not defined. Set it in your env file to the Oracle Linux
+     DVD ISO URL (see the SINGLE-TOUCH MAINTENANCE POINT marker in the
+     env.properties.aws-ol* templates; latest releases:
+     https://yum.oracle.com/oracle-linux-isos.html)."
+  fi
   : "${CLOUD:=aws}"
 
   # Auto-detect Oracle Linux version from the ISO URL.

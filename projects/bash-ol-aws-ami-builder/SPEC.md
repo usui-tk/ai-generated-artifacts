@@ -257,8 +257,8 @@ and reflected in `load_env` validation.
 #### A.9.3 Companion files
 
 ```
-env.properties.aws-ol10     Oracle Linux 10 Update 1 template
-env.properties.aws-ol9      Oracle Linux 9  Update 7 template
+env.properties.aws-ol10     Oracle Linux 10 template (update release pinned by ISO_URL)
+env.properties.aws-ol9      Oracle Linux 9  template (update release pinned by ISO_URL)
 env.properties.aws-ol8      Oracle Linux 8  Update 10 template
 env.properties.aws-ol7      Oracle Linux 7  Update 9 template (experimental — see B.3, D.10)
 env.properties.aws-ol6      Oracle Linux 6  Update 10 template (experimental — see B.4, B.5, D.11–D.16)
@@ -286,7 +286,7 @@ and D.3 for the full rationale.
 1. Shebang                            #!/usr/bin/env bash
 2. Header banner (BoxArt block)       Purpose / Prerequisites / Usage / Limitations / AI info
 3. set -euo pipefail                  Mandatory; see A.5
-4. Constants (readonly)               OL_REPO_URL, OL_TOOLS_SUBDIR, DEFAULT_ISO_URL
+4. Constants (readonly)               OL_REPO_URL, OL_TOOLS_SUBDIR
 5. Execution mode globals             SKIP_PREREQ, SKIP_AWS_IMPORT, BUILD_ONLY, ENV_FILE
 6. Logging helpers                    log_step, log_info, log_warn, log_error, die
 7. Argument parsing                   usage, parse_args
@@ -416,7 +416,7 @@ bash. Avoid command substitutions in env files (security and reproducibility).
 | `WORKSPACE` | ✓ | (none) | Must be world-traversable; see D.3 |
 | `S3_BUCKET` | ✓\* | (none) | Required unless `--build-only` |
 | `AWS_REGION` | ✓\* | (none) | Required unless `--build-only` |
-| `ISO_URL` | | OL10 default | OL version auto-detected from this URL |
+| `ISO_URL` | ✓ | (none) | Required; OL version auto-detected from this URL. No built-in default (a hard-coded release URL would go stale; the env templates are the single maintenance point) |
 
 \* Required only when AWS-import phases will run.
 
@@ -1115,9 +1115,9 @@ for design rationale, and B.5 for the overall OL6 architecture.
 |-----|------|-----|-----|-----|-----|
 | `WORKSPACE` | `/tmp/ol10-build-ws` | `/tmp/ol9-build-ws` | `/tmp/ol8-build-ws` | `/tmp/ol7-build-ws` | `/tmp/ol6-build-ws` |
 | `DISTR` | `ol10-slim` | `ol9-slim` | `ol8-slim` | `ol7-slim` | `ol6-slim` (synthesized) |
-| `ISO_URL` | OL10 U1 | OL9 U7 | OL8 U10 | OL7 U9 (with `Server-` infix) | OL6 U10 (with `Server-` infix) |
-| `# OS_VARIANT` example | `rhel10.1` | `rhel9.7` | `rhel8.10` | `rhel7.9` | `ol6.10` |
-| `# AMI_NAME` example | `OracleLinux-10-U1-...` | `OracleLinux-9-U7-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` | `OracleLinux-6-U10-...` |
+| `ISO_URL` | OL10 latest `u<N>` (single-touch maintenance point) | OL9 latest `u<N>` (single-touch maintenance point) | OL8 U10 (final OL8 release; frozen) | OL7 U9 (final; with `Server-` infix) | OL6 U10 (final; with `Server-` infix) |
+| `# OS_VARIANT` example | `rhel10.<N>` | `rhel9.<N>` | `rhel8.10` | `rhel7.9` | `ol6.10` |
+| `# AMI_NAME` example | `OracleLinux-10-U<N>-...` | `OracleLinux-9-U<N>-...` | `OracleLinux-8-U10-...` | `OracleLinux-7-U9-...` | `OracleLinux-6-U10-...` |
 | `KERNEL` | unset (use distr default) | unset | unset | `uek` (required — see D.10) | `uek` (required — see D.12) |
 | `UEK_RELEASE` | unset | unset | unset | `6` (the only viable UEK for OL7) | `4` (the only viable UEK for OL6) |
 | `ROOT_FS` | unset (xfs default) | unset | unset | `xfs` (only xfs/btrfs/lvm valid in upstream OL7+) | `ext4` (required; anaconda-13 refuses an xfs/lvm/btrfs root — see D.16) |
@@ -1226,12 +1226,19 @@ upstream default of `yes` produces the same `dnf update -y` execution).
 
 ### Maintenance rule
 
-When a new Oracle Linux update release ships (e.g. OL10 U2):
+When a new Oracle Linux update release ships (e.g. a new OL9 or OL10
+`u<N>`):
 
-1. Update the OL10 template's `ISO_URL` to the new release.
-2. Update the example values in `# OS_VARIANT` and `# AMI_NAME` comments.
-3. No script changes required — `parse_ol_version_from_iso` and
-   `detect_os_variant` adapt automatically.
+1. Update the target template's `ISO_URL` to the new release (the line is
+   marked `>>> SINGLE-TOUCH MAINTENANCE POINT <<<` in the template).
+2. That is the only change. All surrounding comments, the documentation,
+   and the runtime (version detection, `OS_VARIANT`, AMI naming, checksum
+   resolution via `parse_ol_version_from_iso` / `detect_os_variant` /
+   `derive_oracle_checksum_url`) are written release-agnostically and
+   adapt automatically.
+
+OL6 / OL7 / OL8 templates are frozen at their terminal update releases
+(U10 / U9 / U10 respectively) and never require this maintenance.
 
 When a new Oracle Linux major release ships (e.g. OL11):
 

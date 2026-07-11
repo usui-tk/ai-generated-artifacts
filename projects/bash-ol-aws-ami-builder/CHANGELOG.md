@@ -20,6 +20,34 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (release-agnostic maintenance: ISO_URL becomes the single touch point)
+- **OL9 template moved to Oracle Linux 9.8** (`OracleLinux-R9-U8-x86_64-dvd.iso`,
+  released 2026-07). With the changes below, this is - by design - a
+  one-line diff in `env.properties.aws-ol9`.
+- **All release-bound example text removed from the living templates
+  (OL9/OL10)**: the ISO section heading, the checksum route #3 URL example,
+  the `# OS_VARIANT` / `# AMI_NAME` / `# AMI_DESCRIPTION` examples, and the
+  `DISTR` annotation now use the release-agnostic `<N>` placeholder form.
+  The stale-prone "Verified-good SHA256 (as of ...)" pinned-hash comments
+  are dropped in favor of the existing automatic checksum resolution
+  (route #3, `derive_oracle_checksum_url`). The `ISO_URL` line is now
+  marked `>>> SINGLE-TOUCH MAINTENANCE POINT <<<` in both templates.
+- **`DEFAULT_ISO_URL` removed; `ISO_URL` is now a required env key**
+  (`load_env` dies with a pointed message when unset). The built-in
+  fallback was a hard-coded OL10 release URL that would go stale on every
+  Oracle update release; every documented invocation path already supplies
+  `--env` with a template that sets `ISO_URL`, so no supported workflow
+  changes behavior.
+- **Docs de-versioned in lock-step** (README.md / README.ja.md tables and
+  section-7 examples, SPEC A.9.3 / A.9.x constants list / B.3 required-keys
+  and per-template tables): OL9/OL10 rows no longer name a concrete update
+  release; OL6/OL7/OL8 rows are explicitly marked frozen at their terminal
+  releases (U10 / U9 / U10). The B.3 maintenance rule now reads "update the
+  `ISO_URL` line; that is the only change".
+- Historical records (this CHANGELOG, README development-history notes) and
+  parser test fixtures (`t003`) intentionally keep their concrete versions;
+  they describe past states, not the current release.
+
 ### Added (first express-scoped five-major ENA sweep - E2E evidence)
 - **`tests/ena/buildtest-ledger.json` + `RESULTS-ol{6,7,8,9,10}.md`**: the
   first ENA-Express-era sweep on the maintainer's host (2026-07-05), 145 rows

@@ -55,4 +55,38 @@ for n in "${ENVS[@]}"; do
   assert_eq "\"${n}-slim\"" "$(val_of "${f}" DISTR)"    "env parity: ${n} DISTR=${n}-slim (per-OS)"
 done
 
+# --- release-agnostic maintenance invariants ---------------------------------
+# ISO_URL is a required env key (no wrapper-side default), so every template
+# must set it non-empty; the living majors (OL9/OL10, which still receive
+# update releases) must carry the SINGLE-TOUCH MAINTENANCE POINT marker and
+# must not carry release-pinned "Verified-good SHA256" comments; the wrapper
+# must not regrow a hard-coded DEFAULT_ISO_URL fallback.
+for n in "${ENVS[@]}"; do
+  iso="$(val_of "${PROJ}/env.properties.aws-${n}" ISO_URL)"
+  assert_match "${iso}" '^"https://.+\.iso"$' "env parity: ${n} ISO_URL set (required key, no wrapper default)"
+done
+for n in ol9 ol10; do
+  f="${PROJ}/env.properties.aws-${n}"
+  if grep -Fq '>>> SINGLE-TOUCH MAINTENANCE POINT <<<' "${f}"; then
+    t_pass "release-agnostic: ${n} carries the single-touch ISO_URL marker"
+  else
+    t_fail "release-agnostic: ${n} carries the single-touch ISO_URL marker"
+  fi
+  if grep -Fq 'Verified-good SHA256' "${f}"; then
+    t_fail "release-agnostic: ${n} has no release-pinned checksum comment"
+  else
+    t_pass "release-agnostic: ${n} has no release-pinned checksum comment"
+  fi
+done
+if grep -Fq 'DEFAULT_ISO_URL' "${PROJ}/build-ol-aws-ami.sh"; then
+  t_fail "release-agnostic: wrapper carries no DEFAULT_ISO_URL fallback"
+else
+  t_pass "release-agnostic: wrapper carries no DEFAULT_ISO_URL fallback"
+fi
+if grep -Fq 'ISO_URL is not defined' "${PROJ}/build-ol-aws-ami.sh"; then
+  t_pass "release-agnostic: load_env rejects an unset ISO_URL explicitly"
+else
+  t_fail "release-agnostic: load_env rejects an unset ISO_URL explicitly"
+fi
+
 t_done

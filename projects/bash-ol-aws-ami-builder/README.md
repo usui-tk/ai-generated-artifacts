@@ -110,8 +110,8 @@ one-file change.
 | File | Purpose |
 |------|---------|
 | `build-ol-aws-ami.sh` | Main build orchestrator. Runs the entire pipeline (prep through AMI registration) in nine phases. Version-agnostic — pick the target OL version via `--env`. |
-| `env.properties.aws-ol10` | Build parameters for **Oracle Linux 10 Update 1** (x86_64). |
-| `env.properties.aws-ol9` | Build parameters for **Oracle Linux 9 Update 7** (x86_64). |
+| `env.properties.aws-ol10` | Build parameters for **Oracle Linux 10** (x86_64). The target update release is pinned solely by `ISO_URL` inside the template. |
+| `env.properties.aws-ol9` | Build parameters for **Oracle Linux 9** (x86_64). The target update release is pinned solely by `ISO_URL` inside the template. |
 | `env.properties.aws-ol8` | Build parameters for **Oracle Linux 8 Update 10** (x86_64). |
 | `env.properties.aws-ol7` | Build parameters for **Oracle Linux 7 Update 9** (x86_64) — **experimental / deprecated upstream**. See sections 9.6 and 10 for important caveats. |
 | `env.properties.aws-ol6` | Build parameters for **Oracle Linux 6 Update 10** (x86_64) — **experimental / not shipped upstream**. See sections 9.7 and 10 for important caveats. |
@@ -301,10 +301,10 @@ This role is required by AWS VM Import/Export to read the staged VMDK from S3. R
 Pick the env template that matches your target Oracle Linux version:
 
 ```bash
-# Oracle Linux 10 Update 1
+# Oracle Linux 10 (update release pinned by ISO_URL in the template)
 cp env.properties.aws-ol10 env.properties.local
 
-# Oracle Linux 9 Update 7
+# Oracle Linux 9 (update release pinned by ISO_URL in the template)
 cp env.properties.aws-ol9 env.properties.local
 
 # Oracle Linux 8 Update 10
@@ -506,7 +506,7 @@ To pin a specific region regardless of where the build runs, set `AWS_REGION="ap
 
 ### 9.4c `UPDATE_TO_LATEST` and kernel-level CVE remediation
 
-Every env template ships with `UPDATE_TO_LATEST="yes"`. The setting flows through Phase 4 into the upstream `distr/ol{N}-slim/provision.sh` `distr::configure` routine, which runs `dnf update -y` (OL8/9/10) or `yum update -y` (OL6/7) inside the guest after the ISO-based install completes. Without this step the resulting AMI would ship only the packages bundled on the ISO, missing every kernel and userspace fix published afterwards — a meaningful exposure for OL10 U1 in particular, where Linux kernel CVEs continue to surface frequently. Operators who explicitly do not want post-ISO updates (e.g. for byte-for-byte reproducibility) can set `UPDATE_TO_LATEST="no"` in `env.properties.local`; `"security"` is also accepted to restrict the update to security-tagged errata.
+Every env template ships with `UPDATE_TO_LATEST="yes"`. The setting flows through Phase 4 into the upstream `distr/ol{N}-slim/provision.sh` `distr::configure` routine, which runs `dnf update -y` (OL8/9/10) or `yum update -y` (OL6/7) inside the guest after the ISO-based install completes. Without this step the resulting AMI would ship only the packages bundled on the ISO, missing every kernel and userspace fix published afterwards — a meaningful exposure for OL10 in particular, where Linux kernel CVEs continue to surface frequently. Operators who explicitly do not want post-ISO updates (e.g. for byte-for-byte reproducibility) can set `UPDATE_TO_LATEST="no"` in `env.properties.local`; `"security"` is also accepted to restrict the update to security-tagged errata.
 
 ### 9.5 Why nested virtualization is the primary recommendation
 
