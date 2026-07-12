@@ -13,6 +13,22 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r88] - 2026-07-12 - chore: unify every tracked `.sh` at git mode 100755
+
+### Fixed
+- 14 `.sh` files were still tracked at `100644`: the 8 `lib/` libraries
+  (`acquire-rootfs.sh`, `epel.sh`, `os-profile.sh`, `pkg-availability.sh`,
+  `probe-common.sh`, `provision-test-env.sh`, `rhui-entitlement.sh`,
+  `ubi-pkgmgr.sh`), the 3 `tests/lib/` helpers (`assert.sh`, `heredoc.sh`,
+  `mock.sh`), and the 3 newest tiers (`t024_kdevelkver.sh`,
+  `t025_awsrhuicollect.sh`, `t026_rhuientitle.sh`). All are now `100755`.
+  Mode-only change; no content diff.
+- This applies the repository-wide convention adopted 2026-07-05: **every
+  tracked `*.sh` is committed executable (`100755`), sourced-only libraries
+  included, no exceptions** - superseding the r38 note that sourced
+  libraries stay `100644`. Machine check before commit:
+  `git ls-files -s -- '*.sh'` must report zero `100644` entries.
+
 ## [r87] - 2026-07-11 - feat: E1a - AWS-RHUI entitled-container materials library (B" injection, productionized)
 
 E1 (RHUI-entitled suite runs) begins. This revision ships the MATERIALS
