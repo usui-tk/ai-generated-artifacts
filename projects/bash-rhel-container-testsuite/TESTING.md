@@ -126,7 +126,7 @@ bash tests/run-all.sh
 A green run ends with, e.g.:
 
 ```
-SUITE: 827 passed, 0 skipped, 0 failed  (26 tiers, 0 tier-failure(s))
+SUITE: 828 passed, 0 skipped, 0 failed  (26 tiers, 0 tier-failure(s))
 ```
 
 Run a single tier directly (its exit status reflects pass/fail):
@@ -651,7 +651,7 @@ The full suite is green in the planning sandbox:
 ---- t013_toolcontract.sh ----     ## RESULT pass=18 fail=0 skip=0
 ---- t014_pkgavail.sh ----         ## RESULT pass=33 fail=0 skip=0
 ---- t015_installpins.sh ----      ## RESULT pass=17 fail=0 skip=0
----- t016_installintrospect.sh ----## RESULT pass=18 fail=0 skip=0
+---- t016_installintrospect.sh ----## RESULT pass=19 fail=0 skip=0
 ---- t017_probeverdict.sh ----     ## RESULT pass=8  fail=0 skip=0
 ---- t018_repoaccess.sh ----       ## RESULT pass=9  fail=0 skip=0
 ---- t019_enabuilddeps.sh ----     ## RESULT pass=8  fail=0 skip=0
@@ -662,7 +662,7 @@ The full suite is green in the planning sandbox:
 ---- t024_kdevelkver.sh ----       ## RESULT pass=6  fail=0 skip=0
 ---- t025_awsrhuicollect.sh ----   ## RESULT pass=149 fail=0 skip=0
 ---- t026_rhuientitle.sh ----      ## RESULT pass=43 fail=0 skip=0
-SUITE: 827 passed, 0 skipped, 0 failed  (26 tiers, 0 tier-failure(s))
+SUITE: 828 passed, 0 skipped, 0 failed  (26 tiers, 0 tier-failure(s))
 ```
 
 **L0 fixed count = 53 shell files** (every `.sh` in the project, incl. the 3 root

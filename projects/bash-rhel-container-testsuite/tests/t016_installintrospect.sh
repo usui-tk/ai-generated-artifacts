@@ -62,6 +62,13 @@ rm -rf "${empty}"
 kod="$(mktemp -d)"; printf 'noise\nversion=2.9.1\nnoise\n' > "${kod}/ena.ko"
 kov="$(ENA_LIB_ONLY=1 bash -c "${SRC} ko_module_version \"\$2\"" _ "${ENA}" "${kod}/ena.ko")"
 assert_eq "2.9.1" "${kov}" "ko_module_version -> version string from the built ena.ko"
+# r89 pin: a missing/unreadable ko must return EMPTY (rc 0), not silently die.
+# Both extraction pipes (modinfo | head, strings | sed | head) sit under the
+# installer's set -euo pipefail; unguarded, a failing extractor aborted the
+# function at the exact moment the false-success guard needed its input
+# (sibling of the olaws report_inbox_ena fix).
+kov_missing="$(ENA_LIB_ONLY=1 bash -c "${SRC} ko_module_version \"\$2\"" _ "${ENA}" "${kod}/no-such.ko")"
+assert_eq "" "${kov_missing}" "ko_module_version on a missing ko -> empty, survives pipefail"
 rm -rf "${kod}"
 
 # --- B1/B2: die emits one {"status":"fail",...} result in test mode ----------

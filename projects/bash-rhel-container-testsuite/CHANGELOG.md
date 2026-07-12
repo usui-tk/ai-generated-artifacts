@@ -13,6 +13,39 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r89] - 2026-07-12 - fix: pipefail-safe ko_module_version (false-success guard input could silently die)
+
+### Fixed
+- **`ko_module_version()` (install-aws_ena-driver.sh) could abort the
+  installer instead of returning empty.** Both extraction pipes sat
+  unguarded under the script's `set -euo pipefail`:
+  (1) `modinfo -F version ... | head -1` - whenever `modinfo` exists but
+  fails on the ko (malformed/non-module file: rc 1, "Exec format error"),
+  `pipefail` propagates the rc into the assignment and `errexit` kills the
+  function BEFORE the `strings` fallback is reached (the fallback was dead
+  code in any modinfo-present environment);
+  (2) the `strings ... | sed | head -1` fallback itself - as the last
+  element of the `||` list, a failing extraction (missing/unreadable ko)
+  makes the assignment the failing final command and `errexit` fires.
+  Both minimal-repro-confirmed (rc=1, function never returns). Production
+  impact: this function feeds the false-success guard (SPEC, r52) - a
+  malformed built `ena.ko` on a real host would kill the installer at the
+  exact moment the guard needed its input. Sibling of the olaws
+  `report_inbox_ena()` fix (unguarded `modinfo | head -1` under
+  `pipefail`); both pipes now carry the olaws canonical `|| true`, making
+  the "empty string when unreadable" contract hold on every path.
+- **Discovery provenance**: surfaced by the r88 gate re-run in a sandbox
+  where `kmod` (modinfo) had just been installed - the t016 fake-ko
+  fixture then took the modinfo branch and died. The failure reproduces
+  byte-identically at the pre-r88 HEAD in the same environment: latent
+  since the function's introduction, never caused by the mode chore.
+- **`tests/t016_installintrospect.sh`**: +1 regression pin - a missing ko
+  must yield EMPTY (rc 0), not a silent death (18 -> 19 asserts). The
+  existing fake-ko assert doubles as the modinfo-present pin, so the tier
+  is now green with and without `kmod` installed.
+- **TESTING.md**: suite baseline 827 -> **828** (26 tiers unchanged);
+  t016 example listing 18 -> 19.
+
 ## [r88] - 2026-07-12 - chore: unify every tracked `.sh` at git mode 100755
 
 ### Fixed

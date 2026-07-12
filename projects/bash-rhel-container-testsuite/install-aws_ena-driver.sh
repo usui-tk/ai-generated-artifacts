@@ -223,9 +223,9 @@ kdevel_kver() {
 ko_module_version() {
   local ko="$1" v=""
   if command -v modinfo >/dev/null 2>&1; then
-    v="$(modinfo -F version "${ko}" 2>/dev/null | head -1)"
+    v="$(modinfo -F version "${ko}" 2>/dev/null | head -1 || true)"
   fi
-  [ -n "${v}" ] || v="$(strings "${ko}" 2>/dev/null | sed -n 's/^version=\([0-9][0-9.]*\)/\1/p' | head -1)"
+  [ -n "${v}" ] || v="$(strings "${ko}" 2>/dev/null | sed -n 's/^version=\([0-9][0-9.]*\)/\1/p' | head -1 || true)"
   # r52: the built module reports a suffixed version (measured: 2.17.0 builds
   # as "2.17.0g") - normalize to the numeric prefix so the false-success
   # guard compares like with like.
