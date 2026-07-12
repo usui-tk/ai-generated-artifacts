@@ -78,4 +78,37 @@ assert_rc 1 "${rc}" "no required-symbol dump -> FAIL (cannot judge)"
 out="$(lc_symbols_verdict $'0x1111 sym_a' "")"; rc=$?
 assert_rc 1 "${rc}" "no Module.symvers -> FAIL (cannot judge)"
 
+# --- ledger reader (black-box regression pin) ---------------------------------
+# The verifier's row extractor once read a top-level key ("results") the ledger
+# schema never had ("entries" -- the key run-ena-buildtest-matrix.sh writes and
+# merges on), so every standalone verification silently judged 0 rows and exited
+# 0. Pin the schema key AND the loud-fail contract: a fixture `entries` ledger
+# (one ok + one fail row) against an empty bundle must extract exactly the ok
+# row, FAIL it loudly for the missing module, and exit non-zero -- never the
+# "no OK rows" no-op. python3 only; kmod not needed (the missing-module fail
+# fires before any modinfo/modprobe use).
+FXD="$(mktemp -d)"
+trap 'rm -rf "${FXD}"' EXIT
+cat > "${FXD}/ledger.json" <<'JSON'
+{
+  "schema_version": "1.1",
+  "ledger_type": "ena-buildtest-matrix",
+  "dedup_key": ["osmajor", "ena_version", "kver"],
+  "entries": [
+    { "osmajor": "6", "ena_version": "2.9.1", "kver": "4.1.12-124.48.6.el6uek.x86_64", "status": "ok" },
+    { "osmajor": "6", "ena_version": "2.10.0", "kver": "4.1.12-124.48.6.el6uek.x86_64", "status": "fail" }
+  ]
+}
+JSON
+mkdir -p "${FXD}/bundle"
+vout="$(bash "${VERIFIER}" --ledger "${FXD}/ledger.json" --bundle "${FXD}/bundle" 2>&1)"; vrc=$?
+assert_rc 1 "${vrc}" "entries-keyed ledger + empty bundle -> non-zero exit (ok row not load-ready)"
+assert_match "${vout}" '"ok_rows":1' "row extractor reads the 'entries' schema key and filters status==ok (1 of 2 rows)"
+assert_match "${vout}" 'module not in bundle' "missing bundle module for an ok row -> loud FAIL (no silent skip)"
+if printf '%s' "${vout}" | grep -q 'no OK rows in the ledger'; then
+  t_fail "verifier claimed 'no OK rows' against a ledger with an ok entry (schema-key regression)"
+else
+  t_pass "no 'no OK rows' no-op against a populated entries ledger"
+fi
+
 t_done

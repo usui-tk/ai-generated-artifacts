@@ -107,7 +107,7 @@ try:
     d = json.load(open(sys.argv[1]))
 except Exception as e:
     sys.stderr.write("ledger parse error: %s\n" % e); sys.exit(3)
-for r in d.get("results", []):
+for r in d.get("entries", []):
     if r.get("status") == "ok":
         print("\t".join([str(r.get("osmajor","")), str(r.get("ena_version","")), str(r.get("kver",""))]))
 PY

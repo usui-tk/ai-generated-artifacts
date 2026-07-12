@@ -50,6 +50,27 @@ This CHANGELOG is **English only** per the repository-wide
   The 2026-07-12 pin refresh below is now backed by harness-ledger evidence
   on all five majors.
 
+### Fixed (verify-ena-buildresults.sh: ledger reader used a wrong top-level key — verified 0 rows silently)
+- **Found by running the harness-recommended verify command against the real
+  2026-07-12 sweep evidence**: `verify-ena-buildresults.sh` printed
+  `no OK rows in the ledger` and exited 0 against a ledger holding 54 ok
+  rows. The row extractor read `d.get("results", [])` while the ledger
+  schema (written and merged by `run-ena-buildtest-matrix.sh`) has always
+  keyed the rows as `entries`. Every standalone verification to date was a
+  silent no-op with a success rc — the exact false-ok class the verifier
+  exists to prevent. Fixed to `entries`.
+- With the fix, the verifier judges the real bundle: L4a vermagic-match
+  passes 54/54; L4b is load-ready on OL6 (Module.symvers present,
+  CRC-matched) and correctly FAILS the other majors because the preserved
+  bundle carries `Module.symvers` only for the el6uek kver — a bundle
+  producer gap (tracked as a follow-up investigation; the verifier's
+  missing-artifact-is-FAIL discipline is working as designed there).
+- Regression pin: t016 gains a black-box section — a fixture `entries`
+  ledger (one ok + one fail row) against an empty bundle must yield
+  `"ok_rows":1` (schema key + status filter), a loud missing-module FAIL,
+  rc 1, and must NOT print `no OK rows`; 15 -> 19 asserts.
+  Suite: 492 -> 496 (with pykickstart + kmod present).
+
 ### Fixed (chore: unify every tracked `.sh` at git mode 100755, 2026-07-12)
 - 4 `.sh` files were still tracked at `100644`: the sourced test helpers
   `tests/lib/{assert,heredoc,mock}.sh` and `tests/t016_enaverifyresults.sh`.
