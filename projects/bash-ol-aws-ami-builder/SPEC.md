@@ -618,11 +618,11 @@ when producing an AWS-optimized AMI:
 | OL | Kernel package (UEK) | In-distro ENA (`modinfo`) | ENAv3 status (amzn-drivers) | Self-build pin |
 |----|----------------------|---------------------------|-----------------------------|----------------|
 | OL6 U10 | `kernel-uek-4.1.12-124.48.6.el6uek.x86_64` | `1.1.2` | `< 1.2.0` → ENAv3 ENI attach **fails** on Nitro v4+ | `ena_linux_2.9.1` |
-| OL7 U9  | `kernel-uek-5.4.17-2136.338.4.2.el7uek.x86_64` | `2.1.0K` | `1.2.0`–`< 2.2.9` → ENAv3 **performance degradation** | `ena_linux_2.17.0` |
+| OL7 U9  | `kernel-uek-5.4.17-2136.338.4.2.el7uek.x86_64` | `2.1.0K` | `1.2.0`–`< 2.2.9` → ENAv3 **performance degradation** | `ena_linux_2.17.2` |
 
 Both bundled drivers are below the `2.2.9` full-ENAv3 threshold, so on Nitro v4+
 instances the stock images either fail to attach an ENAv3 ENI (OL6) or run
-degraded (OL7). The pinned self-build versions (`2.9.1` / `2.17.0`) are both
+degraded (OL7). The pinned self-build versions (`2.9.1` / `2.17.2`) are both
 `>= 2.2.9`, restoring full ENAv3 support. (Versions/kernels above are the
 measured baseline as of 2026-06 and will shift as the OL ISOs receive errata;
 the installer always reports the before/after `modinfo` version.)
@@ -638,11 +638,12 @@ The installer is the remedy for OL's old in-distro ENA driver (e.g. OL6 ships
 ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
 
 - **Self-gates by OS major**: builds for **OL6** (pinned `ena_linux_2.9.1`) and
-  **OL7** (pinned `ena_linux_2.17.0`, the newest release confirmed to support
-  RHEL7 as of 2026-06). On **OL8/OL9/OL10** it resolves
+  **OL7** (pinned `ena_linux_2.17.2`, the newest release confirmed to support
+  RHEL7 — built ok on UEK6 `5.4.17-2136.338.4.2.el7uek` in the 2026-07-11
+  matrix run). On **OL8/OL9/OL10** it resolves
   `ena_linux` **latest** at runtime via `_ena_resolve_latest()` (`git
   ls-remote --tags` against `amzn/amzn-drivers`, HEAD-verifies the tarball,
-  falls back to `ENA_LATEST_FALLBACK_PIN` — default `2.17.0` — on failure),
+  falls back to `ENA_LATEST_FALLBACK_PIN` — default `2.17.2` — on failure),
   overridable via `ENA_DRIVER_VERSION` or the per-OS `ENA_VERSION_OL8/9/10`
   variables. This is **production** (ENA Express generation: the produced AMI
   must ship an express-capable driver): `build-ol-aws-ami.sh` injects the
@@ -680,7 +681,8 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
   (B.9's 2026-07-03 evaluation findings); the ENA Express metrics floor
   `2.8.0` is confirmed to **fail** on both (an upstream XDP symbol rename
   `2.8.0`'s `kcompat.h` predates) — see B.9 for the full findings and the
-  OL9-specific `gcc-toolset-14` compiler requirement. Pins are chosen as the
+  kernel-matching compiler requirements (`gcc-toolset-14` on OL9/UEKR8,
+  `gcc-toolset-11` on OL8/UEKR7). Pins are chosen as the
   newest release that **builds** on each target OS (the ENA driver is a
   kernel module; newer releases assume newer kernels/toolchains).
   - **OL6/UEK4 buildable window (`ena_linux` ≈ `[2.8.6, 2.9.1]`).** Validated on a
@@ -714,23 +716,35 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
   `kernel-uek` whose `-devel` may be pruned from the repos (`No package
   kernel-uek-devel-<ver> available`); since `yum` does not fail on a missing
   package, DKMS would otherwise abort with "kernel headers ... cannot be found".
-  The installer enables the UEK repo (`*UEKR4*`/`*UEKR6*`), tries the exact
+  The installer enables the UEK repo (`*UEKR4*`/`*UEKR6*`; on OL8 also
+  `*UEKR7*`, the track real OL8.10 AMIs run — the UEKR6-only glob was a
+  leftover of the pre-UEKR7 default), tries the exact
   `-devel`, and if the headers are still absent installs the **latest**
   `kernel-uek` + matching `-devel` and **retargets** to it (a guaranteed
   buildable pair).
-- **UEK detection (cross-kernel build, OL6).** The amzn-drivers Makefile derives
-  `IS_UEK` and `ENA_KERNEL_SUBVERSION_*` from `uname -r` (the *running* kernel),
-  and those gate the `kcompat.h` `page_ref_count` UEK-backport guard. Under the
-  libguestfs provisioning appliance `uname -r` is the non-UEK appliance kernel,
-  so the macros are unset and the guard redefines `page_ref_count` against a
-  backported UEK4 target (`>= 4.1.12-124.43.1`, e.g. `-124.48.6`) — a
-  build-breaking redefinition that the version pin alone does not avoid. Because
+- **UEK detection (cross-kernel build, OL6/OL8).** The amzn-drivers Makefile
+  derives `IS_UEK` and `ENA_KERNEL_SUBVERSION_*` from `uname -r` (the *running*
+  kernel), and those gate the UEK-backport guards in `kcompat.h`. Under the
+  libguestfs provisioning appliance — and in the container matrix's chroot —
+  `uname -r` is the non-UEK host/appliance kernel, so the macros are unset and
+  two guards are known to break the build: on **OL6/UEK4** the
+  `page_ref_count` guard redefines a symbol the backported kernel
+  (`>= 4.1.12-124.43.1`, e.g. `-124.48.6`) already provides; on **OL8/UEKR7**
+  the `bpf_warn_invalid_xdp_action` guard collapses the call to the pre-5.17
+  1-arg form against a kernel that backports the 3-arg mainline signature —
+  upstream `kcompat.h` explicitly excludes that macro for
+  `IS_UEK >= 5.15.0-100.96.32`, an exclusion that can only fire when `IS_UEK`
+  is set (reproduced and fix-verified in a container FT, 2026-07-12). Because
   the build already passes the target kernel as `BUILD_KERNEL`, the installer
-  patches that detection (OL6 only) to read `BUILD_KERNEL`, so the guard
-  evaluates against the DKMS target rather than the appliance. OL7/UEKR6 is a
-  `>= 4.6` kernel, so the `page_ref_count` block is compiled out regardless and
-  its Makefile is left untouched (per-OS isolation). Standalone runs on a live
-  instance are unaffected (`uname -r` is the real UEK kernel there).
+  patches that detection (OL6 and OL8) to read `BUILD_KERNEL`, so the guards
+  evaluate against the DKMS target rather than the appliance. OL7/UEK6 builds
+  `2.17.2` fine with `IS_UEK` unset (2026-07-11 matrix run: the
+  `page_ref_count` block is compiled out on `>= 4.6` kernels and the bpf
+  guard's 1-arg collapse matches UEK6's un-backported 5.4 signature);
+  OL9/OL10 UEKR8 (`6.12 >= 5.17`) version-exclude the bpf guard regardless of
+  `IS_UEK` — their Makefiles are left untouched (per-OS isolation).
+  Standalone runs on a live instance are unaffected (`uname -r` is the real
+  UEK kernel there).
 - **Builds via DKMS** (`REMAKE_INITRD`/`AUTOINSTALL`), so the module is rebuilt
   automatically across in-instance kernel upgrades. DKMS comes from EPEL —
   Oracle-provided `ol7_developer_EPEL` on OL7, and the Fedora **EPEL 6 archive**
@@ -2051,10 +2065,14 @@ containers, done in support of an ENA Express readiness investigation,
 established the following (not yet a full-release-list run — that is
 follow-up work for the maintainer's environment):
 
-- **OL9 and OL10 both build amzn-drivers latest (`2.17.0`) successfully
-  against UEKR8** (kernel `6.12.0-203.76.7.6.el{9,10}uek.x86_64`). `pin_for()`
-  therefore pins both to `2.17.0` (the confirmed-working QA-preflight canary),
-  not the ENA Express metrics floor `2.8.0`.
+- **OL9 and OL10 both build amzn-drivers latest successfully against UEKR8**
+  (`2.17.0` on `6.12.0-203.76.7.6.el{9,10}uek.x86_64`, 2026-07-03; `2.17.2` on
+  `6.12.0-204.92.4.2.el{9,10}uek.x86_64`, 2026-07-11 — that run also built
+  `2.17.2` ok on OL7/UEK6 and confirmed it still failing on OL6/UEK4; its
+  ledger refresh is deferred to the post-fix E2E re-run). `pin_for()`
+  therefore pins the QA-preflight canary to `2.17.2` on OL7–10 (the
+  confirmed-working newest release), not the ENA Express metrics floor
+  `2.8.0`; OL6 stays at its `2.9.1` ceiling.
 - **`2.8.0` fails to compile against UEKR8 on both OSes**, with an identical
   error: `ena_netdev.c` calls `xdp_do_flush_map()`, which upstream Linux
   renamed to `xdp_do_flush()` before the 6.12 baseline, and `2.8.0`'s
@@ -2071,8 +2089,24 @@ follow-up work for the maintainer's environment):
   `gcc-toolset-14` (confirmed via a real `yum install` transaction log), so
   `install-ena-driver.sh` prepends `/opt/rh/gcc-toolset-14/root/usr/bin` to
   `PATH` whenever `osmajor=9` and the target kernel is `6.x` — no separate
-  package install, and OL9/UEKR7, OL10, and OL6/7/8 are untouched (their base
+  package install, and OL9/UEKR7, OL10, and OL6/7 are untouched (their base
   gcc already matches).
+- **OL8/UEKR7 needs the same treatment, one toolset generation earlier**
+  (found by the first UEKR7 QA preflight, 2026-07-11, after the matrix moved
+  from the UEKR6 default): UEKR7's `5.15.0-322.203.3.3.el8uek` is built with
+  gcc `11.5.0` while OL8's base gcc is `8.5.0`, and the DKMS build dies on
+  unrecognized flags (`-ftrivial-auto-var-init=zero`,
+  `-fzero-call-used-regs=used-gpr`) before any driver code compiles.
+  `kernel-uek-devel` for UEKR7 declares `Requires: gcc-toolset-11` (verified
+  with `rpm -qR` in a container FT, 2026-07-12), so the installer prepends
+  `/opt/rh/gcc-toolset-11/root/usr/bin` to `PATH` whenever `osmajor=8` and
+  the target kernel is `5.15.x` — OL8/UEKR6 (5.4, built with the base gcc)
+  is untouched. The toolchain fix alone is not sufficient on OL8/UEKR7: the
+  build then hits the `IS_UEK`-gated `bpf_warn_invalid_xdp_action` kcompat
+  guard, so the B.9 UEK-detection retarget now also applies on OL8 (see
+  above). With both fixes, `2.17.2` builds and DKMS-installs as `2.17.2g`
+  against `5.15.0-322.203.3.3.el8uek` (container FT, 2026-07-12; the
+  harness-recorded proof lands with the post-fix E2E re-run).
 - **OL10's EPEL section is `ol10_u1_developer_EPEL`, not
   `ol10_developer_EPEL`** (confirmed from a real `oracle-epel-ol10.repo`
   shipped in the clean-core image): OL10's developer/EPEL path is versioned

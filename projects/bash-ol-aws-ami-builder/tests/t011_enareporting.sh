@@ -75,7 +75,7 @@ assert_in "${INST}" '^[[:space:]]*report_inbox_ena[[:space:]]*$' \
 pin6="$(grep -E "^ENA_VERSION_OL6=" "${INST}" | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1)"
 pin7="$(grep -E "^ENA_VERSION_OL7=" "${INST}" | sed -E 's/.*:-([^}"]+)\}.*/\1/' | head -1)"
 assert_eq "2.9.1"  "${pin6}" "ena-report: pin reader resolves OL6 default (2.9.1) from the live installer"
-assert_eq "2.17.0" "${pin7}" "ena-report: pin reader resolves OL7 default (2.17.0) from the live installer"
+assert_eq "2.17.2" "${pin7}" "ena-report: pin reader resolves OL7 default (2.17.2) from the live installer"
 
 # ---- (5) OL6-10 production wiring (ENA Express generation) ------------------
 # The self-build hook, the AMI identity, and the final summary all follow the

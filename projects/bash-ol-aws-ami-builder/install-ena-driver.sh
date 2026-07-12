@@ -29,10 +29,15 @@
 #              newer-kernel symbols absent here (pci_dev_id, irq_update_affinity_
 #              hint, ethtool_puts, netif_napi_add_config), so 2.10.0+ fail to
 #              compile. 2.9.1 is the last pre-ECC release -> the ceiling.)
-#     - OL7 -> ena_linux_2.17.0 (newest release supporting RHEL7 confirmed as of
-#              2026-06; RHEL7 remains in the driver's supported-distros list)
-#     - OL8 -> amzn-drivers LATEST resolved at runtime (same UEK6 family as
-#              OL7; 2.17.0 confirmed building in the container matrix).
+#     - OL7 -> ena_linux_2.17.2 (newest release supporting RHEL7; confirmed
+#              building on UEK6 5.4.17-2136.338.4.2.el7uek in the 2026-07-11
+#              container-matrix run; RHEL7 remains in the driver's
+#              supported-distros list)
+#     - OL8 -> amzn-drivers LATEST resolved at runtime. Target kernel is
+#              UEKR7 (5.15) -- what real OL8.10 AMIs from this pipeline run --
+#              which requires BOTH the gcc-toolset-11 PATH block and the UEK
+#              detection retarget below (2.17.2 confirmed building in a
+#              container FT, 2026-07-12). OL8/UEKR6 (5.4) needs neither.
 #              PRODUCTION: build-ol-aws-ami.sh injects the self-build hook on
 #              OL6-OL10 by default (ENA Express generation). Real AMI boot on
 #              OL8 self-build is not yet E2E-verified (container compile +
@@ -80,7 +85,7 @@ set -euo pipefail
 
 # ---- pinned versions (overridable) -----------------------------------------
 ENA_VERSION_OL6="${ENA_VERSION_OL6:-2.9.1}"
-ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.0}"
+ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.2}"
 # OL8/OL9/OL10 resolve to the amzn-drivers LATEST tag at runtime (see
 # _ena_resolve_latest below) unless explicitly pinned here or via
 # ENA_DRIVER_VERSION. Left empty by default = "resolve latest"; set a concrete
@@ -95,7 +100,7 @@ ENA_VERSION_OL9="${ENA_VERSION_OL9:-}"
 ENA_VERSION_OL10="${ENA_VERSION_OL10:-}"
 # Last-known-good fallback pin if _ena_resolve_latest cannot reach GitHub (no
 # network / rate-limited) -- keeps OL8/9/10 buildable rather than hard-failing.
-ENA_LATEST_FALLBACK_PIN="${ENA_LATEST_FALLBACK_PIN:-2.17.0}"
+ENA_LATEST_FALLBACK_PIN="${ENA_LATEST_FALLBACK_PIN:-2.17.2}"
 EPEL6_ARCHIVE_BASEURL="${EPEL6_ARCHIVE_BASEURL:-https://archives.fedoraproject.org/pub/archive/epel/6/x86_64/}"
 
 # ---- execution-environment switch (default = production) -------------------
@@ -526,7 +531,12 @@ ensure_kernel_devel() {
   case "${osmajor}" in
     6)  yk+=("--enablerepo=*UEKR4*") ;;
     7)  yk+=("--enablerepo=*UEKR6*") ;;
-    8)  yk+=("--enablerepo=*UEKR6*") ;;
+    # OL8 ships two UEK tracks (UEKR6 5.4 / UEKR7 5.15) and real OL8.10 AMIs
+    # from this pipeline run UEKR7 -- enable BOTH so the exact -devel for a
+    # UEKR7 target resolves without depending on the guest's own repo config
+    # (the old UEKR6-only glob was a leftover of the pre-UEKR7 default; the
+    # 2026-07-11 fidelity fix moved the matrix but missed this resolver).
+    8)  yk+=("--enablerepo=*UEKR7*" "--enablerepo=*UEKR6*") ;;
     9)  yk+=("--enablerepo=*UEKR8*") ;;
     10) yk+=("--enablerepo=*UEKR8*") ;;
   esac
@@ -575,6 +585,28 @@ if [[ "${osmajor}" == "9" && "${kver}" == 6.*uek* && -x /opt/rh/gcc-toolset-14/r
   log "OL9/UEKR8: using $(/opt/rh/gcc-toolset-14/root/usr/bin/gcc --version | head -1) (pulled in by kernel-uek-devel)"
 fi
 
+# ---- OL8/UEKR7: match the kernel's build-time gcc --------------------------
+# Same failure mode as OL9/UEKR8 above, one toolset generation earlier. OL8's
+# base OS gcc (8.5.0, appstream) is older than the compiler UEKR7's 5.15
+# kernel was actually built with (11.5.0) -- confirmed by the first UEKR7 QA
+# preflight (2026-07-11): the mismatch aborts the DKMS build on unrecognized
+# flags (-ftrivial-auto-var-init=zero, -fzero-call-used-regs=used-gpr) before
+# any driver-code issue is even reached; the preserved make.log states "The
+# kernel was built by: gcc (GCC) 11.5.0". Oracle's kernel-uek-devel-<ver>
+# package for UEKR7 ALREADY declares an RPM dependency on gcc-toolset-11
+# (verified with `rpm -qR kernel-uek-devel-5.15.0-322.203.3.3.el8uek` in a
+# container FT, 2026-07-12: Requires gcc-toolset-11 / -binutils / ...) -- so
+# no separate gcc-toolset install is needed here, only putting it ahead of the
+# base gcc on PATH for the rest of this script's build steps. Only OL8/UEKR7
+# (kver 5.15.x) hits this; OL8/UEKR6 (5.4, built with the base gcc) is left
+# untouched. The base /usr/bin/gcc symlink is never modified. With this block
+# (plus the UEK detection retarget below) ENA 2.17.2 builds and DKMS-installs
+# as 2.17.2g against 5.15.0-322.203.3.3.el8uek (container FT, 2026-07-12).
+if [[ "${osmajor}" == "8" && "${kver}" == 5.15.*uek* && -x /opt/rh/gcc-toolset-11/root/usr/bin/gcc ]]; then
+  export PATH="/opt/rh/gcc-toolset-11/root/usr/bin:${PATH}"
+  log "OL8/UEKR7: using $(/opt/rh/gcc-toolset-11/root/usr/bin/gcc --version | head -1) (pulled in by kernel-uek-devel)"
+fi
+
 use_dkms=1
 stage "enabling EPEL + installing dkms"
 setup_epel
@@ -607,16 +639,29 @@ rm -f "${src_tgz}"
   || die "unexpected archive layout for ena_linux_${ena_version}"
 mv "/usr/src/amzn-drivers-ena_linux_${ena_version}" "${src_dir}"
 
-# ---- retarget the amzn-drivers Makefile's UEK detection (OL6 cross-kernel) --
+# ---- retarget the amzn-drivers Makefile's UEK detection (OL6/OL8 cross-kernel)
 # The ENA Makefile derives IS_UEK and ENA_KERNEL_SUBVERSION_* from `uname -r`
-# (the RUNNING kernel). Under the libguestfs provisioning appliance `uname -r`
-# is the non-UEK appliance kernel, not the DKMS target, so neither macro is set;
-# the kcompat.h page_ref_count guard then mis-fires and redefines a symbol the
-# backported UEK4 kernel (>= 4.1.12-124.43.1, e.g. -124.48.6) already provides
-# -> "redefinition of 'page_ref_count'". The build already passes the target
-# kernel as BUILD_KERNEL, so point the detection at it instead. OL6-only
-# (per-OS isolation): OL7/UEKR6 is a >= 4.6 kernel, so the page_ref_count block
-# is compiled out regardless and its Makefile is left untouched.
+# (the RUNNING kernel). Under the libguestfs provisioning appliance -- and in
+# the container matrix's chroot -- `uname -r` is the non-UEK host/appliance
+# kernel, not the DKMS target, so neither macro is set and every UEK-gated
+# kcompat.h guard evaluates as "not UEK". Two guards are known to break the
+# build when that happens:
+#   - OL6/UEK4: the page_ref_count guard redefines a symbol the backported
+#     UEK4 kernel (>= 4.1.12-124.43.1, e.g. -124.48.6) already provides
+#     -> "redefinition of 'page_ref_count'".
+#   - OL8/UEKR7: the bpf_warn_invalid_xdp_action guard collapses the call to
+#     the pre-5.17 1-arg form, but UEKR7 5.15 backports the 3-arg mainline
+#     signature; upstream kcompat.h explicitly excludes the macro for
+#     IS_UEK >= 5.15.0-100.96.32 -- an exclusion that can only fire when
+#     IS_UEK is set -> "passing argument 1 ... makes pointer from integer"
+#     (reproduced and fix-verified in a container FT, 2026-07-12).
+# The build already passes the target kernel as BUILD_KERNEL, so point the
+# detection at it instead. OL6|OL8 only (per-OS isolation): OL7/UEK6 builds
+# 2.17.2 fine with IS_UEK unset (2026-07-11 matrix run -- the page_ref_count
+# block is compiled out on >= 4.6 kernels and the bpf guard's 1-arg collapse
+# matches UEK6's un-backported 5.4 signature); OL9/OL10 UEKR8 (6.12 >= 5.17)
+# version-exclude the bpf guard regardless of IS_UEK. Their Makefiles are
+# left untouched.
 patch_ena_uek_detection() {
   local mk="${src_dir}/kernel/linux/ena/Makefile" S='$' sentinel
   sentinel="echo \"${S}(BUILD_KERNEL)\" | grep uek"
@@ -637,7 +682,7 @@ patch_ena_uek_detection() {
     || die "[ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?)"
   log "[ena-uek-detect] retargeted ENA Makefile UEK detection to the DKMS target kernel (backup ${mk}.uek-detect.bak)"
 }
-if [[ "${osmajor}" == "6" ]]; then
+if [[ "${osmajor}" == "6" || "${osmajor}" == "8" ]]; then
   patch_ena_uek_detection
 fi
 

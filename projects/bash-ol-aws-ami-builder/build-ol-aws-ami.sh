@@ -551,7 +551,7 @@ load_env() {
       # majors (OL6/OL7) included.
       if [[ ! "${ENA_DRIVER_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         die "ENA_DRIVER_VERSION must be a concrete x.y.z version (got '${ENA_DRIVER_VERSION}').
-     Use e.g. ENA_DRIVER_VERSION=\"2.17.0\" in your env file, or leave it unset
+     Use e.g. ENA_DRIVER_VERSION=\"2.17.2\" in your env file, or leave it unset
      for the default chain (installer pin -> amzn-drivers latest -> fallback pin)."
       fi
       ENA_BUILD_VERSION="${ENA_DRIVER_VERSION}"

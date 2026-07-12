@@ -8,8 +8,8 @@
   "tarball_url_template": "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_<ver>.tar.gz",
   "tarball_check": "performed",
   "generated_by": "tests/ena/list-ena-releases.sh",
-  "count": 70,
-  "available_count": 70,
+  "count": 71,
+  "available_count": 71,
   "unavailable_count": 0,
   "versions": [
     { "version": "1.1.2", "tag": "ena_linux_1.1.2", "tarball_url": "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_1.1.2.tar.gz", "tarball_available": true, "tarball_http_status": "200", "ge_min": false, "express_verdict": "not-ready" },
@@ -81,6 +81,7 @@
     { "version": "2.15.0", "tag": "ena_linux_2.15.0", "tarball_url": "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_2.15.0.tar.gz", "tarball_available": true, "tarball_http_status": "200", "ge_min": true, "express_verdict": "express-ready" },
     { "version": "2.16.0", "tag": "ena_linux_2.16.0", "tarball_url": "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_2.16.0.tar.gz", "tarball_available": true, "tarball_http_status": "200", "ge_min": true, "express_verdict": "express-ready" },
     { "version": "2.16.1", "tag": "ena_linux_2.16.1", "tarball_url": "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_2.16.1.tar.gz", "tarball_available": true, "tarball_http_status": "200", "ge_min": true, "express_verdict": "express-ready" },
-    { "version": "2.17.0", "tag": "ena_linux_2.17.0", "tarball_url": "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_2.17.0.tar.gz", "tarball_available": true, "tarball_http_status": "200", "ge_min": true, "express_verdict": "express-ready" }
+    { "version": "2.17.0", "tag": "ena_linux_2.17.0", "tarball_url": "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_2.17.0.tar.gz", "tarball_available": true, "tarball_http_status": "200", "ge_min": true, "express_verdict": "express-ready" },
+    { "version": "2.17.2", "tag": "ena_linux_2.17.2", "tarball_url": "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_2.17.2.tar.gz", "tarball_available": true, "tarball_http_status": "200", "ge_min": true, "express_verdict": "express-ready" }
   ]
 }

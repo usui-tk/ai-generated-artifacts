@@ -20,6 +20,60 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (OL8/UEKR7 self-build: kernel-matching gcc-toolset-11 + UEK-detection retarget)
+- **Found by the first UEKR7 QA preflight (2026-07-11)**, immediately after
+  the OL8 matrix fidelity fix moved the default track from UEKR6 to UEKR7:
+  the preflight died with `no ena.ko found ... [make.log first error:
+  unrecognized command line option '-ftrivial-auto-var-init=zero']`. Two
+  independent defects, both reproduced and fix-verified in a container FT
+  against `kernel-uek-devel-5.15.0-322.203.3.3.el8uek` (2026-07-12):
+  1. **Toolchain mismatch**: UEKR7's kernel is built with gcc `11.5.0` while
+     OL8's base gcc is `8.5.0`, which rejects the kernel's hardening flags
+     (`-ftrivial-auto-var-init=zero`, `-fzero-call-used-regs=used-gpr`).
+     `kernel-uek-devel` for UEKR7 declares `Requires: gcc-toolset-11`
+     (verified with `rpm -qR`), so the installer now PATH-prepends
+     `/opt/rh/gcc-toolset-11/root/usr/bin` whenever `osmajor=8` and the
+     target kernel is `5.15.x` — the exact shape of the existing
+     OL9/UEKR8 `gcc-toolset-14` block. OL8/UEKR6 (5.4) is untouched;
+     `/usr/bin/gcc` is never modified.
+  2. **IS_UEK detection miss**: with the toolchain fixed, the build then died
+     on `bpf_warn_invalid_xdp_action` — upstream `kcompat.h` collapses the
+     call to the pre-5.17 1-arg form unless `IS_UEK >= 5.15.0-100.96.32`,
+     and the amzn Makefile derives `IS_UEK` from `uname -r` (the non-UEK
+     host/appliance kernel in a chroot/appliance build). The existing
+     `patch_ena_uek_detection()` retarget (previously OL6-only, for
+     `page_ref_count`) now also applies on OL8. OL7/UEK6 is proven
+     unaffected (`2.17.2` built ok with `IS_UEK` unset, 2026-07-11 run);
+     OL9/OL10 UEKR8 (`6.12 >= 5.17`) version-exclude the guard.
+  - With both fixes, ENA `2.17.2` builds and DKMS-installs as `2.17.2g`
+    against `5.15.0-322.203.3.3.el8uek` (container FT; the harness-recorded
+    proof lands with the post-fix E2E re-run).
+- **`ensure_kernel_devel()` OL8 repo glob was still `*UEKR6*`** — a leftover
+  of the pre-UEKR7 default that the 2026-07-11 matrix fidelity fix missed on
+  the real-guest header-resolution path. OL8 now enables `*UEKR7*` alongside
+  `*UEKR6*`, so the exact `-devel` for a UEKR7 target resolves without
+  depending on the guest's own repo config.
+- Tests: t010 re-scoped to the OL6|OL8 gate, gains structural pins for BOTH
+  gcc-toolset PATH blocks (12 -> 16 asserts); t011 follows the OL7 pin bump
+  below. Suite: 488 -> 492 (with pykickstart + kmod present).
+
+### Changed (ENA pins refreshed to 2.17.2 on the 2026-07-11 evidence run)
+- 30-version matrix run, 2026-07-11 (kernels: OL6 UEK4 `4.1.12-124.48.6`,
+  OL7 UEK6 `5.4.17-2136.338.4.2`, OL9/OL10 UEKR8 `6.12.0-204.92.4.2`; OL8
+  produced no rows — its preflight failure is the finding fixed above):
+  `2.17.2` builds ok on OL7/OL9/OL10 and still fails on OL6 (`2.9.1` ceiling
+  unchanged). Ledger/RESULTS refresh is deliberately deferred to the
+  post-fix E2E re-run (operator decision, 2026-07-12).
+- `install-ena-driver.sh`: `ENA_VERSION_OL7` 2.17.0 -> **2.17.2**;
+  `ENA_LATEST_FALLBACK_PIN` 2.17.0 -> **2.17.2** (operator decision,
+  2026-07-12). OL8/9/10 stay latest-resolving (unchanged).
+- QA-preflight canary `pin_for()` (matrix): OL7/OL8/OL9/OL10 2.17.0 ->
+  **2.17.2** (OL8 on the container-FT evidence pending its harness re-run);
+  OL6 stays `2.9.1`.
+- `tests/ena/ena-driver-releases.json`: regenerated catalog gains `2.17.2`
+  (70 -> 71 releases; upstream ships no `2.17.1`). This is the release-list
+  input, not the results ledger — the ledger itself is unchanged by design.
+
 ### Added (upstream provenance on every build + Phase-3 exit gate over the patched artifacts)
 - Commissioned from the OL7 2026-07-11 investigation: a build died ~30
   minutes in with an opaque "no operating systems were found" and left no

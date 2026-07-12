@@ -150,16 +150,19 @@ warn() { log "WARNING: $*" >&2; }
 die()  { log "ERROR: $*" >&2; exit 1; }
 hr()   { log "================================================================"; }
 
-# pinned ENA version per OL major (mirrors install-ena-driver.sh's defaults).
-# pinned ENA version per OL major (mirrors install-ena-driver.sh's defaults).
-# OL9/OL10 both pin to latest (2.17.0): a real buildtest run confirmed 2.8.0
-# fails to compile against UEKR8 (6.12) on BOTH OSes with an IDENTICAL error
-# (xdp_do_flush_map was renamed to xdp_do_flush in a mainline kernel these
-# drivers predate) -- so 2.8.0 is not just "unconfirmed", it is a confirmed
-# non-starter on UEKR8, and using it as the QA preflight canary would block
-# the matrix from ever reaching a version that CAN build. 2.17.0 is the
-# confirmed-working canary (OL10 built it successfully on UEKR8).
-pin_for() { case "$1" in 6) echo 2.9.1 ;; 7) echo 2.17.0 ;; 8) echo 2.17.0 ;; 9) echo 2.17.0 ;; 10) echo 2.17.0 ;; *) echo "" ;; esac; }
+# pinned ENA version per OL major (mirrors install-ena-driver.sh's defaults:
+# OL6/OL7 concrete pins; OL8/9/10 resolve latest, for which the canary is the
+# newest release CONFIRMED to build). The canary must be a confirmed-working
+# version: a real buildtest run confirmed 2.8.0 fails to compile against
+# UEKR8 (6.12) on OL9 and OL10 with an IDENTICAL error (xdp_do_flush_map was
+# renamed to xdp_do_flush in a mainline kernel these drivers predate) -- so a
+# too-old canary would block the matrix from ever reaching a version that CAN
+# build. 2.17.2 evidence: OL7 (UEK6 5.4.17-2136.338.4.2) and OL9/OL10 (UEKR8
+# 6.12.0-204.92.4.2) built it ok in the 2026-07-11 matrix run; OL8 (UEKR7
+# 5.15.0-322.203.3.3) built it as 2.17.2g in a container FT (2026-07-12) with
+# the installer's gcc-toolset-11 + UEK-detection fixes. OL6 stays 2.9.1 (the
+# UEK4 ceiling; 2.17.2 confirmed FAILING on OL6 in the same 2026-07-11 run).
+pin_for() { case "$1" in 6) echo 2.9.1 ;; 7) echo 2.17.2 ;; 8) echo 2.17.2 ;; 9) echo 2.17.2 ;; 10) echo 2.17.2 ;; *) echo "" ;; esac; }
 
 # ---- args ------------------------------------------------------------------
 while [ "$#" -gt 0 ]; do
