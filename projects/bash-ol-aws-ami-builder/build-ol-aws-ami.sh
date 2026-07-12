@@ -1357,7 +1357,7 @@ _record_upstream_provenance_patched() {
 # 1 even on the pristine upstream kickstart (the pre-existing '--nobase'
 # deprecation is counted), so its rc cannot gate without failing every build.
 _p3_validate_ks() {
-  local ks="$1" major="$2" fails=0 n
+  local ks="$1" major="$2" fails=0 n inc
   if [[ ! -s "${ks}" ]]; then
     log_error "  [P3GATE] kickstart missing or empty: ${ks}"
     return 1
@@ -1386,8 +1386,16 @@ _p3_validate_ks() {
       fails=$((fails+1))
     fi
   fi
+  # Section balance. Openers are ALL pykickstart section keywords -- %pre,
+  # %pre-install, %post, %packages, %addon, %anaconda, %onerror, %traceback
+  # -- each closed by exactly one '%end'; '%include' / '%ksappend' are NOT
+  # sections (no '%end') and must not be counted. The original opener list
+  # (packages|pre|post) was modeled on the OL7-era kickstart shape and
+  # missed the '%addon com_redhat_kdump --disable' section that OL8/9/10
+  # upstream kickstarts carry, failing every sound EL8-family artifact
+  # ("3 openers vs 4 '%end'", first fired on the 2026-07-13 OL8 E2E).
   local n_sec n_end
-  n_sec="$(grep -cE '^%(packages|pre|post)' "${ks}" || true)"
+  n_sec="$(grep -cE '^%(packages|pre-install|pre|post|addon|anaconda|onerror|traceback)([[:space:]]|$)' "${ks}" || true)"
   n_end="$(grep -cE '^%end$' "${ks}" || true)"
   if [[ "${n_sec}" -ne "${n_end}" ]]; then
     log_error "  [P3GATE] unbalanced kickstart sections: ${n_sec} openers vs ${n_end} '%end': ${ks}"
@@ -1398,10 +1406,24 @@ _p3_validate_ks() {
     log_error "  [P3GATE] expected exactly 1 'bootloader' line, found ${n}: ${ks}"
     fails=$((fails+1))
   fi
+  # Partitioning presence. OL6 (synthesized) / OL7 kickstarts carry static
+  # '^part ' lines; OL8/9/10 upstream kickstarts carry NONE by design: their
+  # %pre partitions the disk with parted and writes the generated 'part'
+  # commands to a file that a '%include' pulls in (observed shape at
+  # upstream cb0a65d3, unchanged since dab64a5 2025-02-20:
+  # '%include /tmp/partitions-ks.cfg', written at the end of %pre). Accept
+  # the dynamic shape only when BOTH halves are present -- the %include
+  # line AND its exact target path appearing inside a %pre body -- so an
+  # injection that eats either half still fails the gate loudly.
   n="$(grep -cE '^part ' "${ks}" || true)"
   if [[ "${n}" -lt 1 ]]; then
-    log_error "  [P3GATE] no 'part' lines found (partitioning missing): ${ks}"
-    fails=$((fails+1))
+    inc="$(grep -m1 -E '^%include[[:space:]]+[^[:space:]]+' "${ks}" | awk '{print $2}' || true)"
+    if [[ -z "${inc}" ]] || ! awk -v p="${inc}" \
+         '/^%pre/{inp=1; next} /^%end$/{inp=0} inp && index($0, p){f=1} END{exit !f}' \
+         "${ks}"; then
+      log_error "  [P3GATE] no partitioning found (no static 'part' lines and no %pre-generated '%include' partition file): ${ks}"
+      fails=$((fails+1))
+    fi
   fi
   return "${fails}"
 }

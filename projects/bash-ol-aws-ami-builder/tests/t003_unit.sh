@@ -268,6 +268,44 @@ if [ "${rc}" -ge 1 ]; then t_pass "p3-gate: duplicated sos line is caught (${rc}
 assert_eq 0 "$(run_p3 _p3_validate_provision "${p3tmp}/good-prov.sh")" "p3-gate: sound provision.sh passes (paired markers + terminated heredoc)"
 rc="$(run_p3 _p3_validate_provision "${p3tmp}/broken-prov.sh")"
 if [ "${rc}" -ge 1 ]; then t_pass "p3-gate: unpaired hook bracket is caught (${rc} findings)"; else t_fail "p3-gate: unpaired hook bracket is caught"; fi
+
+# EL8-family shape (regression pin, 2026-07-13 OL8 E2E false FAIL): OL8/9/10
+# upstream kickstarts carry an '%addon com_redhat_kdump' section and NO
+# static 'part' lines -- %pre partitions with parted and writes the ks
+# 'part' commands to /tmp/partitions-ks.cfg, pulled in by '%include'. The
+# fixture mirrors the real upstream ol8-ks.cfg shape (condensed); the
+# original gate failed this sound shape twice ("3 openers vs 4 '%end'" +
+# "no 'part' lines found").
+cat > "${p3tmp}/good-el8.cfg" <<'GOODKS8'
+bootloader --append="console=tty0" --location=mbr --timeout=1  --boot-drive=sda
+%pre --erroronfail --interpreter /bin/bash
+parted -s /dev/sda mklabel gpt
+for p in "${parts[@]}"; do
+  echo "$p"
+done > /tmp/partitions-ks.cfg
+%end
+%include /tmp/partitions-ks.cfg
+%packages
+# [ol-aws-ami-builder PATCH sos-package] sosreport tooling baked into every AMI
+sos
+hwdata
+%end
+%post --interpreter /bin/bash --log=/root/ks-post.log
+echo done
+%end
+%addon com_redhat_kdump --disable
+%end
+GOODKS8
+grep -v '^%include /tmp/partitions-ks.cfg$' "${p3tmp}/good-el8.cfg" > "${p3tmp}/noinc-el8.cfg"
+sed 's!> /tmp/partitions-ks.cfg$!> /tmp/other.cfg!'  "${p3tmp}/good-el8.cfg" > "${p3tmp}/prenogen-el8.cfg"
+sed '$d'                                             "${p3tmp}/good-el8.cfg" > "${p3tmp}/unend-el8.cfg"
+assert_eq 0 "$(run_p3 _p3_validate_ks "${p3tmp}/good-el8.cfg" 8)" "p3-gate: EL8-family shape (%addon + %pre-generated %include partitioning) passes (0 findings)"
+rc="$(run_p3 _p3_validate_ks "${p3tmp}/noinc-el8.cfg" 8)"
+if [ "${rc}" -ge 1 ]; then t_pass "p3-gate: dynamic partitioning with the %include line lost is caught (${rc} findings)"; else t_fail "p3-gate: dynamic partitioning with the %include line lost is caught"; fi
+rc="$(run_p3 _p3_validate_ks "${p3tmp}/prenogen-el8.cfg" 8)"
+if [ "${rc}" -ge 1 ]; then t_pass "p3-gate: %include whose target is not generated in %pre is caught (${rc} findings)"; else t_fail "p3-gate: %include whose target is not generated in %pre is caught"; fi
+rc="$(run_p3 _p3_validate_ks "${p3tmp}/unend-el8.cfg" 8)"
+if [ "${rc}" -ge 1 ]; then t_pass "p3-gate: unbalanced sections still caught with %addon counted (${rc} findings)"; else t_fail "p3-gate: unbalanced sections still caught with %addon counted"; fi
 rm -rf "${p3tmp}"
 
 t_done

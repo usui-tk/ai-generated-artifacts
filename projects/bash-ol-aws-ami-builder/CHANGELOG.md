@@ -20,6 +20,43 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (Phase-3 exit gate: false FAIL on every sound OL8/9/10 kickstart — %addon uncounted + dynamic partitioning unrecognized)
+- **First real firing of the 2026-07-11 exit gate against an EL8-family build
+  (OL8 E2E, 2026-07-13) failed a SOUND patched kickstart with 2 findings.**
+  Both were gate bugs, not artifact bugs: `_p3_validate_ks` modeled the
+  OL7-era kickstart shape only. (1) The section-opener count matched
+  `%(packages|pre|post)` and missed the `%addon com_redhat_kdump --disable`
+  section that OL8/9/10 upstream kickstarts carry -> "unbalanced kickstart
+  sections: 3 openers vs 4 '%end'". (2) It required static `^part ` lines,
+  but OL8/9/10 carry none by design: their `%pre` partitions the disk with
+  parted and writes the generated `part` commands to
+  `/tmp/partitions-ks.cfg`, pulled in by `%include` -> "no 'part' lines
+  found (partitioning missing)".
+- **Not an upstream regression**: upstream `ol8-ks.cfg` last changed at
+  dab64a5 (2025-02-20); re-cloned upstream HEAD cb0a65d3 matches the
+  provenance record of the failing build byte-for-byte on this shape. The
+  prior OL9/OL10 E2E successes predate the gate itself; OL6 (synthesized)
+  and OL7 keep the static-`part` shape and passed all along — this was the
+  gate's first contact with the EL8-family shape.
+- Fix: the opener regex now counts ALL pykickstart sections (`%pre`,
+  `%pre-install`, `%post`, `%packages`, `%addon`, `%anaconda`, `%onerror`,
+  `%traceback`; `%include`/`%ksappend` are non-sections and stay uncounted),
+  and the partitioning check accepts EITHER static `part` lines OR the
+  dynamic pair — a `%include` line whose exact target path also appears
+  inside a `%pre` body. Requiring the pair keeps the gate loud when an
+  injection eats either half (verified against the real upstream OL8 file:
+  removing the `%include`, retargeting the `%pre` write, or dropping one
+  `%end` each still yield a finding).
+- Verified against reality: the real upstream OL7/8/9/10 kickstarts, with
+  the real `_ks_add_sos_package` injection applied, all validate at
+  0 findings under the fixed gate.
+- Tests: t003 (B-T3) +4 asserts (55 -> 59) — an EL8-family-shaped fixture
+  mirroring the real upstream `ol8-ks.cfg` passes as the regression pin,
+  and its three broken derivatives (lost `%include`, `%pre` not generating
+  the target, missing `%end` with `%addon` present) stay caught. TESTING.md
+  B-T3 row and the SPEC `OLAWS-P3GATE01` marker row updated lock-step
+  (TESTING.md §0 totals remain deferred per the standing decision).
+
 ### Changed (ENA buildtest ledger + RESULTS: 2026-07-12 five-major express sweep recorded; single-sweep reset)
 - The deferred ledger/RESULTS refresh (see the pin-refresh entry below) has
   landed: the 2026-07-12 five-major express-scoped sweep (5 majors x 30
