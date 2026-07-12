@@ -20,6 +20,17 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (chore: unify every tracked `.sh` at git mode 100755, 2026-07-12)
+- 4 `.sh` files were still tracked at `100644`: the sourced test helpers
+  `tests/lib/{assert,heredoc,mock}.sh` and `tests/t016_enaverifyresults.sh`.
+  All are now `100755`. Mode-only change; no content diff.
+- This applies the repository-wide convention adopted 2026-07-05: **every
+  tracked `*.sh` is committed executable (`100755`), sourced-only libraries
+  included, no exceptions** - superseding the earlier note (the 2026-06
+  exec-bit normalization below) that sourced libraries stay `100644`.
+  Machine check before commit: `git ls-files -s -- '*.sh'` must report zero
+  `100644` entries.
+
 ### Fixed (OL8/UEKR7 self-build: kernel-matching gcc-toolset-11 + UEK-detection retarget)
 - **Found by the first UEKR7 QA preflight (2026-07-11)**, immediately after
   the OL8 matrix fidelity fix moved the default track from UEKR6 to UEKR7:
