@@ -21,6 +21,22 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
+## [r30] — 2026-07-12 — `ci-inline-pssa-and-pin-refresh`
+
+This is a **CI / documentation maintenance release**. Every entry below
+was already live on `main` as a workflows-only or documentation-only
+change (none of them touched `Download-SpeakerDeck.ps1`, per each
+entry's own note); this release folds them out of `[Unreleased]` under
+a proper heading and bumps the in-script revision identity so the
+`[rNN]` heading series stays 1:1 with `$Script:ScriptVersion`.
+
+### Changed
+
+- `$Script:ScriptVersion` bumped to `speakerdeck-2026.07.12-r30`,
+  `$Script:ScriptTag` set to `ci-inline-pssa-and-pin-refresh`. The
+  identity bump is the only script change in this release; behaviour
+  is identical to r29.
+
 ### Changed -- CI: migrate stage1/stage2 PSScriptAnalyzer off the unmaintained Marketplace action (workflows-only, no script version bump)
 
 `microsoft/psscriptanalyzer-action@v1.1` is unmaintained; the iso sibling
