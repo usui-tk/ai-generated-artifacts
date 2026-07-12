@@ -20,6 +20,36 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (ENA buildtest ledger + RESULTS: 2026-07-12 five-major express sweep recorded; single-sweep reset)
+- The deferred ledger/RESULTS refresh (see the pin-refresh entry below) has
+  landed: the 2026-07-12 five-major express-scoped sweep (5 majors x 30
+  versions = 150 cells, floor `min_version` 2.8.0) is now the working-tree
+  ledger, and every `RESULTS-ol<N>.md` is the harness-generated report of that
+  run. Headline per major (latest kernel, ok/30, max buildable):
+  OL6 UEK4 `4.1.12-124.48.6` 6/30 max **2.9.1** (ceiling unchanged);
+  OL7 UEK6 `5.4.17-2136.338.4.2` 13/30 max **2.17.2**;
+  OL8 **UEKR7 `5.15.0-322.203.3.3`** 17/30 max **2.17.2** — the first
+  harness-recorded proof of the gcc-toolset-11 + UEK-detection-retarget fixes
+  below (previously container-FT evidence only);
+  OL9 UEKR8 `6.12.0-204.92.4.2` 9/30 max **2.17.2**;
+  OL10 UEKR8 `6.12.0-204.92.4.2` 9/30 max **2.17.2**.
+  All 58 cells re-tested on an unchanged kernel (OL6/OL7) are
+  status-identical to the prior ledger — zero regressions.
+- **Single-sweep reset (operator decision, 2026-07-13)**: the committed ledger
+  is the 150-row sweep output verbatim; the 87 prior-kernel history rows
+  (OL8 UEK6-era `5.4.17-2136.356.4.3`, OL9/OL10 `6.12.0-203.76.7.6`) are
+  intentionally dropped from the working tree. The kernel-primary
+  keep-history design stays the norm for the post-release era; pre-release,
+  superseded-kernel evidence is not worth carrying, and it remains
+  recoverable from git history (same recovery route as the retired 210-row
+  pre-express ledger).
+- Pin cross-check against this evidence: **no pin moves** — the sweep confirms
+  every current pin (`ENA_VERSION_OL6` 2.9.1 = the OL6 ceiling;
+  `ENA_VERSION_OL7` / `ENA_LATEST_FALLBACK_PIN` 2.17.2 = the OL7-10 max;
+  matrix `pin_for()` OL6 2.9.1 / OL7-10 2.17.2; catalog latest 2.17.2).
+  The 2026-07-12 pin refresh below is now backed by harness-ledger evidence
+  on all five majors.
+
 ### Fixed (chore: unify every tracked `.sh` at git mode 100755, 2026-07-12)
 - 4 `.sh` files were still tracked at `100644`: the sourced test helpers
   `tests/lib/{assert,heredoc,mock}.sh` and `tests/t016_enaverifyresults.sh`.
