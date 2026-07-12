@@ -114,13 +114,17 @@ below — read these first; they are the single entry point to current state:
 When a change touches a *managed unit*, also read the relevant machine-generated
 operational state under [`governance/state/`](./governance/state/) (manifest /
 observations / ledger / reports). Session-to-session handoff follows
-**[ADR 0005](./governance/adr/0005-session-handoff-protocol.md)**: the Tier-P
-design docs stay unmanaged (out of repo), `STATUS.md` is the entry, and each
-static-point ships as one bundle — never piecemeal. **Durable decisions always
-land in-repo as ADRs — even from sessions that ship no other patch — with
-`STATUS.md` reflected in the same patch
+**[ADR 0032](./governance/adr/0032-four-project-session-model.md)**: sessions run
+in four stream-scoped Claude Projects (instructions = the stream's session
+contract; knowledge = thin slot files); slots carry **no verification values** —
+HEAD/tree hashes and gate expectations are derived fresh from a clone every
+session, with the authoritative expectations in `STATUS.md` +
+`governance/gate-coverage.md` — and `STATUS.md` remains the single in-repo
+entry. **Durable decisions always land in-repo as ADRs — even from sessions
+that ship no other patch — with `STATUS.md` reflected in the same patch
 ([ADR 0023](./governance/adr/0023-durable-decisions-land-in-repo-regardless-of-patch.md));
-the Tier-P bundle is reference, never the sole home of anything durable.**
+project knowledge and slots are reference, never the sole home of anything
+durable.**
 
 Before authoring ANY change, an LLM agent MUST:
 

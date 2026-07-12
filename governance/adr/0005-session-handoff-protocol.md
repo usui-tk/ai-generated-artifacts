@@ -1,16 +1,16 @@
 ---
 id: 0005
 title: session-handoff-protocol
-status: accepted
+status: superseded
 date: 2026-05-31
 supersedes: []
-superseded_by: null
+superseded_by: ["0032"]
 governs: []
 ---
 
-<!-- AI read-contract: authoritative for how work hands off between sessions — what is
-     in-repo vs. unmanaged, the single session entry point, and the static-point bundle
-     rule. Read on-demand; not loaded every session. -->
+<!-- AI read-contract: SUPERSEDED by ADR 0032 (four-project session model). This ADR is
+     history only — never the basis for a current decision. Read 0032 for the current
+     session-handoff protocol. -->
 
 # 0005 — Session-handoff protocol
 

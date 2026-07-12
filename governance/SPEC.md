@@ -324,7 +324,7 @@ CHANGELOG entry stating scope, goal, timebox; working artifacts quarantined unti
 the mode the per-phase loop is not applied and only the always-on sandbox gates run; the
 **hard boundary** is that canon bodies, vendored regions, `governance/`, and Layer-0 root
 docs are untouchable from inside the mode — a discovered canon/governance need exits into
-the normal `[AUTH]` loop. Genchi-genbutsu narrative may stay in Tier-P notes (ADR 0005); the
+the normal `[AUTH]` loop. Genchi-genbutsu narrative may stay in Tier-P notes (ADR 0032); the
 SPEC carries the distilled stable contract. **Exit is a conformance pass** (the ADR 0024
 promotion triggers, or folding a spike's keepers through the project's full gates).
 By-products: knowledge → `documents/research/<topic>/`; runnable tools/scripts → a new
