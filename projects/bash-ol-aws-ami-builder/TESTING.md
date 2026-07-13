@@ -631,14 +631,16 @@ The matrix is manual / on-demand (root + container; NOT a `run-all.sh` tier). Th
 release list (`ssm-agent-releases.json`) and the ledger
 (`ssm-installtest-ledger.json`) + `RESULTS-ol{6,7,8,9,10}.md` are committed. The
 committed ledger and reports are a **real** default-mode (`>= 3.3.3598.0`) run
-(50 rows = 10 versions x OL6/OL7/OL8/OL9/OL10): each OL is 8/10 ok, with
+(55 rows = 11 versions x OL6/OL7/OL8/OL9/OL10; the 2026-07-13 five-major sweep):
+each OL is 9/11 ok, with
 `3.3.3883.0` / `3.3.4364.0` the only fails (their RPMs return HTTP 403 at the
 S3 URL -- an upstream availability gap, not an install/run incompatibility), so
-every OL's verdict is `compliant-capable`. `kver` is each OL's provisioned UEK
+every OL's verdict is `compliant-capable` (max install+run `3.3.4793.0`).
+`kver` is each OL's provisioned UEK
 (OL6 `4.1.12-124.48.6.el6uek`, OL7/OL8 the UEK6 `5.4.17-*` kernels, OL9 UEK7
-`5.15.0-321.202.5.1.el9uek` / glibc 2.34, OL10 UEK8 `6.12.0-203.76.7.3.el10uek` /
+`5.15.0-322.203.3.3.el9uek` / glibc 2.34, OL10 UEK8 `6.12.0-204.92.4.2.el10uek` /
 glibc 2.39). All five majors ran on the maintainer's host (uniform
-`test_host_kernel` `6.12.0-211.22.1.el10_2`); since the agent runs on the host
+`test_host_kernel` `6.12.0-211.28.1.el10_2`); since the agent runs on the host
 kernel in a container the run does not exercise the OL kernel axis, but each
 install+run is real and the recorded `kver` is the provisioned OL UEK in
 each case. A later run in the maintainer's env / CI (a kernel-matched runner for

@@ -2263,19 +2263,20 @@ filter logic (`ssm_ge`, `go_min_kernel`, `ssm_in_scope`, `ssm_compliance`) is
 unit-tested by `tests/t018_ssmverdict.sh` (no container/network). The release list
 (`ssm-agent-releases.json`, the deterministic matrix INPUT) and the ledger
 (`ssm-installtest-ledger.json`) + `RESULTS-ol{6,7,8,9,10}.md` ARE committed: the
-release list is the full upstream snapshot (206 versions, RPM availability, go.mod
+release list is the full upstream snapshot (207 versions, RPM availability, go.mod
 `go_version`); the committed ledger and reports are a **real** default-mode
-(`>= 3.3.3598.0`) run (50 rows = 10 versions x OL6/OL7/OL8/OL9/OL10), OL6 UEK4
-`4.1.12-124.48.6.el6uek` / OL7 UEK6 `5.4.17-2136.338.4.2.el7uek` / OL8 UEK6
-`5.4.17-2136.356.4.2.el8uek` / OL9 UEK7 `5.15.0-321.202.5.1.el9uek` (glibc 2.34) /
-OL10 UEK8 `6.12.0-203.76.7.3.el10uek` (glibc 2.39). All five majors were run on
-the maintainer's host (uniform `test_host_kernel` `6.12.0-211.22.1.el10_2`); since
+(`>= 3.3.3598.0`) run (55 rows = 11 versions x OL6/OL7/OL8/OL9/OL10; the
+2026-07-13 five-major sweep), OL6 UEK4 `4.1.12-124.48.6.el6uek` / OL7 UEK6
+`5.4.17-2136.338.4.2.el7uek` / OL8 UEK6 `5.4.17-2136.357.3.2.el8uek` / OL9 UEK7
+`5.15.0-322.203.3.3.el9uek` (glibc 2.34) / OL10 UEK8
+`6.12.0-204.92.4.2.el10uek` (glibc 2.39). All five majors were run on
+the maintainer's host (uniform `test_host_kernel` `6.12.0-211.28.1.el10_2`); since
 the agent runs on the host kernel in a container the run does not exercise the OL
 kernel axis, but each install+run is real and the recorded `kver` is the
-provisioned OL UEK in each case. Each OL is **8/10 ok**: `3.3.3883.0`
+provisioned OL UEK in each case. Each OL is **9/11 ok**: `3.3.3883.0`
 and `3.3.4364.0` are the only fails — their RPMs are not published at the S3 URL
 (HTTP 403), an upstream availability gap, not an install/run incompatibility — so
-every OL's verdict is **compliant-capable** (max install+run `3.3.4624.0` >=
+every OL's verdict is **compliant-capable** (max install+run `3.3.4793.0` >=
 `3.3.3598.0`). A later run in the maintainer's env / CI (and a kernel-matched
 runner for a faithful kernel axis) grows the ledger via the kver-PRIMARY dedup
 append.

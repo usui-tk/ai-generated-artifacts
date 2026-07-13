@@ -10,16 +10,17 @@ References (AWS docs): [Run Command](https://docs.aws.amazon.com/systems-manager
 
 **Fidelity.** `status=ok` means the RPM installed AND the agent binary ran locally. Columns are grouped by category: **env_** = the OL test environment (read from the rpm db), **agent_** = the agent's own build attribute, **compat_** = a compatibility requirement derived from it. The **env_glibc** axis is faithful -- the container's real OL glibc gates a dynamic version's install/run. **env_kernel** (`rpm -q kernel-uek`) is the OL UEK a real instance runs, provisioned into the container only to record it; the binary itself actually executed on the **test_host_kernel** (the runner's kernel, since a container shares the host kernel), so the run does NOT exercise the OL kernel axis. The static kernel-axis signal is **compat_min_kernel** (the Go toolchain's minimum kernel from the release's go.mod). A faithful kernel run needs a kernel-matched runner or a real instance.
 
-## Test environment: OL8 kernel 5.4.17-2136.356.4.2.el8uek.x86_64
+## Test environment: OL8 kernel 5.4.17-2136.357.3.2.el8uek.x86_64
 
-- `env_kernel` : 5.4.17-2136.356.4.2.el8uek.x86_64  (`rpm -q kernel-uek` -- the OL UEK a real instance runs)
+- `env_kernel` : 5.4.17-2136.357.3.2.el8uek.x86_64  (`rpm -q kernel-uek` -- the OL UEK a real instance runs)
 - `env_glibc` : 2.28  (`rpm -q glibc`)
-- `test_host_kernel` : 6.12.0-211.22.1.el10_2.x86_64  (the agent binary actually executed on the runner's kernel; a container shares the host kernel, so the OL kernel axis is not exercised by the run)
+- `test_host_kernel` : 6.12.0-211.28.1.el10_2.x86_64  (the agent binary actually executed on the runner's kernel; a container shares the host kernel, so the OL kernel axis is not exercised by the run)
 
-Verdict: **compliant-capable** -- max install+run `3.3.4624.0` >= `3.3.3598.0` (remediation possible).
+Verdict: **compliant-capable** -- max install+run `3.3.4793.0` >= `3.3.3598.0` (remediation possible).
 
 | ssm_version | status | ran | agent_go_version | compat_min_kernel | note |
 |---|---|---|---|---|---|
+| 3.3.4793.0 | ok | yes | 1.25 | 3.2 | installed 3.3.4793.0 |
 | 3.3.4624.0 | ok | yes | 1.25 | 3.2 | installed 3.3.4624.0 |
 | 3.3.4515.0 | ok | yes | 1.25 | 3.2 | installed 3.3.4515.0 |
 | 3.3.4364.0 | fail | no | 1.25 | 3.2 | RPM fetch failed for 3.3.4364.0 (https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/3.3.4364.0/linux_amd64/amazon-ssm-agent.rpm) |

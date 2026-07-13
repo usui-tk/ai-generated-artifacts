@@ -20,6 +20,30 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (SSM install+run ledger + RESULTS: 2026-07-13 five-major sweep recorded; single-sweep replacement)
+- **Committed the real 2026-07-13 five-major SSM install+run sweep**: the ledger
+  (`tests/ssm/ssm-installtest-ledger.json`) and `RESULTS-ol{6,7,8,9,10}.md` now
+  record 55 rows = 11 in-scope versions (`>= 3.3.3598.0`) x OL6-OL10, all run on
+  the maintainer's host (uniform `test_host_kernel` `6.12.0-211.28.1.el10_2`).
+  Each OL is **9/11 ok** with max install+run **`3.3.4793.0`** (new upstream
+  release, ok on every major incl. OL6 glibc 2.12); the only fails remain
+  `3.3.3883.0` / `3.3.4364.0`, whose RPMs return HTTP 403 at the S3 URL (the
+  same upstream availability gap as the previous run, not an install/run
+  incompatibility) — every OL's verdict stays **compliant-capable**.
+- The release list (`tests/ssm/ssm-agent-releases.json`) grows to 207 versions
+  (adds `3.3.4793.0`, `rpm_available` 200/ok; no availability flag of any
+  existing version changed).
+- **Single-sweep replacement (user adjudication, mirroring the 2026-07-13 ENA
+  ledger reset)**: the ledger is replaced wholesale rather than grown via the
+  kver-PRIMARY dedup append — OL8/9/10 were provisioned with newer UEKs
+  (`5.4.17-2136.357.3.2.el8uek` / `5.15.0-322.203.3.3.el9uek` /
+  `6.12.0-204.92.4.2.el10uek`), and the superseded rows for the older kernels
+  remain recoverable from git history. The dedup-append growth model itself is
+  unchanged (SPEC B.10).
+- SPEC B.10 and TESTING.md committed-run paragraphs updated lock-step (row
+  count, per-OL kver, host kernel, max version, release-list count). No script
+  or test change; suite counts unchanged.
+
 ### Fixed (Phase-3 exit gate: false FAIL on every sound OL8/9/10 kickstart — %addon uncounted + dynamic partitioning unrecognized)
 - **First real firing of the 2026-07-11 exit gate against an EL8-family build
   (OL8 E2E, 2026-07-13) failed a SOUND patched kickstart with 2 findings.**

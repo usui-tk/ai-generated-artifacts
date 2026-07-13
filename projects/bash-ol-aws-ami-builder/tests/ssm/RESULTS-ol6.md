@@ -14,12 +14,13 @@ References (AWS docs): [Run Command](https://docs.aws.amazon.com/systems-manager
 
 - `env_kernel` : 4.1.12-124.48.6.el6uek.x86_64  (`rpm -q kernel-uek` -- the OL UEK a real instance runs)
 - `env_glibc` : 2.12  (`rpm -q glibc`)
-- `test_host_kernel` : 6.12.0-211.22.1.el10_2.x86_64  (the agent binary actually executed on the runner's kernel; a container shares the host kernel, so the OL kernel axis is not exercised by the run)
+- `test_host_kernel` : 6.12.0-211.28.1.el10_2.x86_64  (the agent binary actually executed on the runner's kernel; a container shares the host kernel, so the OL kernel axis is not exercised by the run)
 
-Verdict: **compliant-capable** -- max install+run `3.3.4624.0` >= `3.3.3598.0` (remediation possible).
+Verdict: **compliant-capable** -- max install+run `3.3.4793.0` >= `3.3.3598.0` (remediation possible).
 
 | ssm_version | status | ran | agent_go_version | compat_min_kernel | note |
 |---|---|---|---|---|---|
+| 3.3.4793.0 | ok | yes | 1.25 | 3.2 | installed 3.3.4793.0 |
 | 3.3.4624.0 | ok | yes | 1.25 | 3.2 | installed 3.3.4624.0 |
 | 3.3.4515.0 | ok | yes | 1.25 | 3.2 | installed 3.3.4515.0 |
 | 3.3.4364.0 | fail | no | 1.25 | 3.2 | RPM fetch failed for 3.3.4364.0 (https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/3.3.4364.0/linux_amd64/amazon-ssm-agent.rpm) |
