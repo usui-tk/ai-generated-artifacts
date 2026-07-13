@@ -108,4 +108,86 @@ assert_match "$(cat "${root}/etc/cloud/cloud.cfg.d/90_ol.cfg")" '^[[:space:]]+gr
 assert_match "$(cat "${root}/etc/cloud/cloud.cfg")" '^[[:space:]]+name: ec2-user[[:space:]]*$' \
   "timing: deferred hook aligned cloud.cfg default_user name to ec2-user"
 
+# ---- (c) nitro-initramfs presence-aware staging (SPEC D.28) ------------------
+# The nitro hook runs at SOURCE time -- before the ENA hook's DKMS build -- so
+# on slim OL8/9/10 (kernel-uek-modules removed upstream) the in-box ena does
+# not exist yet. The hook must only force drivers that are PRESENT, and the
+# ENA hook must append `ena` to the shared drop-in BEFORE invoking the
+# installer (whose own dracut regen bakes ena into the initramfs).
+
+# (c1) static: presence probe present; unconditional 3-driver literal absent
+nbody="$(extract_heredoc OLAWS_NITRO_BODY "${MAIN}")"
+if [ -z "${nbody}" ]; then
+  t_fail "nitro: OLAWS_NITRO_BODY extractable from build-ol-aws-ami.sh"
+  t_done
+  exit
+fi
+t_pass "nitro: OLAWS_NITRO_BODY extractable from build-ol-aws-ami.sh"
+assert_match "${nbody}" 'find "/lib/modules/\$\{kver\}" -name "\$\{drv\}\.ko\*"' \
+  "nitro: body probes per-driver presence for the target kernel (find .ko*)"
+if printf '%s\n' "${nbody}" | grep -Fq 'add_drivers+=" nvme nvme-core ena "'; then
+  t_fail "nitro: no unconditional nvme/nvme-core/ena drop-in literal (presence-aware only)"
+else
+  t_pass "nitro: no unconditional nvme/nvme-core/ena drop-in literal (presence-aware only)"
+fi
+
+# (c2) static: the ENA hook emits the guarded ena append BEFORE the installer
+# invoke. Reproduce the emitted guest lines by sourcing the wrapper's own
+# printf sequence (chmod .. through the invoke), as bin/provision.sh sees them.
+emitseg="$(awk '/printf .chmod \+x \/usr\/local\/sbin\/ol-aws-install-ena-driver/,/_ena_hook_invoke\}"$/' "${MAIN}")"
+emitted="$(SEG="${emitseg}" _ena_hook_invoke='OLAWS_T008_INVOKE_SENTINEL' bash -c 'eval "${SEG}"' 2>/dev/null)"
+append_ln="$(printf '%s\n' "${emitted}" | grep -n '^grep -qsw ena /etc/dracut.conf.d/02-ol-aws-nitro.conf' | head -1 | cut -d: -f1)"
+invoke_ln="$(printf '%s\n' "${emitted}" | grep -n '^OLAWS_T008_INVOKE_SENTINEL$' | head -1 | cut -d: -f1)"
+if [ -n "${append_ln}" ]; then
+  t_pass "nitro: ENA hook emits the guarded ena drop-in append (grep -qsw gate)"
+else
+  t_fail "nitro: ENA hook emits the guarded ena drop-in append (grep -qsw gate)"
+fi
+if [ -n "${append_ln}" ] && [ -n "${invoke_ln}" ] && [ "${append_ln}" -lt "${invoke_ln}" ]; then
+  t_pass "nitro: ena append precedes the installer invoke (installer regen bakes ena)"
+else
+  t_fail "nitro: ena append precedes the installer invoke (installer regen bakes ena)"
+fi
+
+# (c3) behavioural: slim-major state (no ena on disk) -> nvme-only drop-in,
+# explicit deferral, dracut still runs and the hook exits 0
+nroot="${work}/nitro"
+kv="5.15.0-322.203.3.3.el8uek.x86_64"
+mkdir -p "${nroot}/lib/modules/${kv}/kernel/drivers/nvme/host" \
+         "${nroot}/etc/dracut.conf.d" "${nroot}/boot" "${nroot}/bin"
+touch "${nroot}/lib/modules/${kv}/kernel/drivers/nvme/host/nvme.ko.xz" \
+      "${nroot}/lib/modules/${kv}/kernel/drivers/nvme/host/nvme-core.ko.xz"
+printf '#!/bin/sh\necho "dracut $*" >> "%s/dracut.log"\nexit 0\n' "${nroot}" > "${nroot}/bin/dracut"
+chmod +x "${nroot}/bin/dracut"
+printf '%s\n' "${nbody}" \
+  | sed -e "s#/lib/modules#${nroot}/lib/modules#g" \
+        -e "s#/etc/dracut.conf.d#${nroot}/etc/dracut.conf.d#g" \
+        -e "s#/boot/#${nroot}/boot/#g" \
+  > "${work}/nitro-hook.sh"
+nout="$(PATH="${nroot}/bin:${PATH}" sh "${work}/nitro-hook.sh" 2>&1)"
+nrc=$?
+nconf="${nroot}/etc/dracut.conf.d/02-ol-aws-nitro.conf"
+assert_rc 0 "${nrc}" "nitro: hook exits 0 without ena on disk (slim OL8/9/10 state)"
+assert_eq 'add_drivers+=" nvme nvme-core "' "$(cat "${nconf}")" \
+  "nitro: drop-in carries only present drivers (no ena) on the slim state"
+assert_match "${nout}" 'deferred: ena' \
+  "nitro: absent ena is reported as deferred (not forced, no dracut FAIL)"
+assert_match "$(cat "${nroot}/dracut.log" 2>/dev/null)" 'dracut -f' \
+  "nitro: initramfs regen still runs on the slim state"
+
+# (c4) behavioural: the emitted ena append line is effective and idempotent
+append_line="$(printf '%s\n' "${emitted}" | sed -n "${append_ln}p" | sed -e "s#/etc/dracut.conf.d#${nroot}/etc/dracut.conf.d#g")"
+eval "${append_line}"
+eval "${append_line}"
+assert_eq 1 "$(grep -c 'add_drivers+=" ena "' "${nconf}")" \
+  "nitro: emitted ena append adds ena exactly once (idempotent across re-runs)"
+
+# (c5) behavioural: with ena on disk (OL6/OL7 in-box, or post-DKMS) all three land
+mkdir -p "${nroot}/lib/modules/${kv}/kernel/drivers/net/ethernet/amazon/ena"
+touch "${nroot}/lib/modules/${kv}/kernel/drivers/net/ethernet/amazon/ena/ena.ko.xz"
+rm -f "${nconf}"
+PATH="${nroot}/bin:${PATH}" sh "${work}/nitro-hook.sh" >/dev/null 2>&1
+assert_eq 'add_drivers+=" nvme nvme-core ena "' "$(cat "${nconf}")" \
+  "nitro: drop-in carries nvme/nvme-core/ena when ena is present"
+
 t_done

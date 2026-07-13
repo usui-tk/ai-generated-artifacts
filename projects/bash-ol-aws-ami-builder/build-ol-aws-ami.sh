@@ -1745,9 +1745,17 @@ phase3_clone_repository() {
   local nitro_body
   nitro_body="$(cat <<'OLAWS_NITRO_BODY'
 #!/bin/sh
-# Ensure Nitro-essential drivers (nvme, ena) are present in the initramfs.
+# Ensure Nitro-essential drivers are present in the initramfs.
 # Targets the installed kernel (highest UEK under /lib/modules); `uname -r` is
 # the libguestfs appliance kernel during provisioning, so it is not used.
+# PRESENCE-AWARE: only drivers whose .ko exists for the target kernel enter the
+# dracut drop-in at this stage. On the slim OL8/9/10 images the in-box ena
+# lives in kernel-uek-modules, which the slim build removes (KERNEL_MODULES=no
+# upstream default), so ena is legitimately absent here; the ENA self-build
+# hook appends `ena` to the same drop-in after the DKMS install and its own
+# dracut regen bakes it in. Forcing an absent driver instead made this hook's
+# dracut FAIL ("Failed to find module 'ena'") and, on --skip-ena-driver
+# builds, left a drop-in that breaks every future in-instance dracut run.
 set -u
 kver=""
 for d in /lib/modules/*uek*/ ; do
@@ -1758,10 +1766,27 @@ for d in /lib/modules/*uek*/ ; do
   fi
 done
 [ -n "$kver" ] || { echo "[nitro-initramfs] no UEK kernel under /lib/modules; skipping"; exit 0; }
+present=""
+deferred=""
+for drv in nvme nvme-core ena; do
+  if [ -n "$(find "/lib/modules/${kver}" -name "${drv}.ko*" -print 2>/dev/null | head -1)" ]; then
+    present="${present} ${drv}"
+  else
+    deferred="${deferred} ${drv}"
+  fi
+done
 mkdir -p /etc/dracut.conf.d
-printf 'add_drivers+=" nvme nvme-core ena "\n' > /etc/dracut.conf.d/02-ol-aws-nitro.conf
+if [ -n "$present" ]; then
+  printf 'add_drivers+="%s "\n' "${present}" > /etc/dracut.conf.d/02-ol-aws-nitro.conf
+  echo "[nitro-initramfs] drop-in drivers:${present}"
+else
+  echo "[nitro-initramfs] no target drivers present for $kver; no drop-in written"
+fi
+if [ -n "$deferred" ]; then
+  echo "[nitro-initramfs] not present for $kver, deferred:${deferred} (expected for ena on slim OL8/9/10 -- the ENA self-build hook appends it after the DKMS install)"
+fi
 if command -v dracut >/dev/null 2>&1; then
-  echo "[nitro-initramfs] regenerating initramfs for $kver (force nvme/ena)"
+  echo "[nitro-initramfs] regenerating initramfs for $kver (force${present:-: nothing})"
   dracut -f "/boot/initramfs-${kver}.img" "$kver" || echo "[nitro-initramfs] WARNING: dracut -f failed for $kver"
 else
   echo "[nitro-initramfs] dracut not found; wrote dracut.conf.d drop-in only"
@@ -1783,7 +1808,7 @@ OLAWS_NITRO_BODY
         printf '# <<< [ol-aws-ami-builder PATCH nitro-initramfs] <<<\n'
       } >> "${aws_provision}"
       if grep -Fq '[ol-aws-ami-builder PATCH nitro-initramfs]' "${aws_provision}"; then
-        log_info "  [OLAWS-NVM01] Nitro initramfs-drivers hook injected (add_drivers nvme/ena + dracut -f)"
+        log_info "  [OLAWS-NVM01] Nitro initramfs-drivers hook injected (presence-aware add_drivers + dracut -f; ena deferred to the ENA hook when not in-box)"
       else
         die "Failed to inject Nitro initramfs-drivers hook into ${aws_provision}"
       fi
@@ -2073,6 +2098,12 @@ OLAWS_OL6_CLOUD_USER_BODY
         cat "${ena_installer}"
         printf 'OLAWS_ENA_INSTALLER_EOF\n'
         printf 'chmod +x /usr/local/sbin/ol-aws-install-ena-driver.sh\n'
+        printf '# The presence-aware nitro-initramfs hook only forces drivers that exist at\n'
+        printf '# its (earlier) stage; ena arrives via the DKMS build below. Add ena to the\n'
+        printf '# shared drop-in NOW (idempotent) so the installer'"'"'s own dracut regen bakes\n'
+        printf '# it into the initramfs and in-instance kernel updates keep it.\n'
+        printf '%s\n' 'mkdir -p /etc/dracut.conf.d'
+        printf '%s\n' 'grep -qsw ena /etc/dracut.conf.d/02-ol-aws-nitro.conf || printf '\''add_drivers+=" ena "\n'\'' >> /etc/dracut.conf.d/02-ol-aws-nitro.conf'
         printf '%s\n' "${_ena_hook_invoke}"
         printf '# <<< [ol-aws-ami-builder PATCH ena-driver-build] <<<\n'
       } >> "${aws_provision_ena}"

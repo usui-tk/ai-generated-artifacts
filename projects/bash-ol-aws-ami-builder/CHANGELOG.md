@@ -20,6 +20,35 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (nitro-initramfs hook: presence-aware drop-in — no more `dracut` FAIL on slim OL8/9/10; latent `--skip-ena-driver` drop-in breakage closed) — SPEC D.28
+- **Symptom (2026-07-13 OL8 real-build log)**: the nitro-initramfs hook's
+  `dracut -f` failed on every slim OL8/9/10 build with `Failed to find module
+  'ena'`. Default builds were rescued by the ENA hook's post-DKMS regen, but
+  the hook's own regen never took effect at its stage, and on
+  `--skip-ena-driver` builds of OL8/9/10 the persistent drop-in kept naming
+  the absent `ena` — breaking every future in-instance `dracut` run (kernel
+  updates) and never forcing `nvme` into the initramfs. Root cause: the hook
+  runs at source time (before the ENA DKMS build), and on slim OL8/9/10 the
+  in-box `ena` ships in `kernel-uek-modules`, removed by the upstream
+  `KERNEL_MODULES="no"` default (RPM-payload verified at
+  `5.15.0-322.203.3.3.el8uek`: `nvme`/`nvme-core` in kernel-uek-core, `ena`
+  in kernel-uek-modules) — there is nothing to force at that stage by design.
+- **Fix (two-stage, presence-aware)**: the hook now probes each candidate
+  (`nvme`, `nvme-core`, `ena`) with `find /lib/modules/<kver> -name '<drv>.ko*'`
+  and writes only present drivers into `02-ol-aws-nitro.conf`, logging absent
+  ones as deferred; the ENA hook appends `ena` to the same drop-in
+  (idempotent `grep -qsw` gate) **before** invoking the installer, whose own
+  post-DKMS `dracut -f` bakes it in. Final image unchanged on default builds
+  (nvme+ena); `--skip-ena-driver` OL8/9/10 builds now get a working nvme-only
+  drop-in; OL6/OL7 (in-box `ena`) behave as before. `[OLAWS-NVM01]` log line
+  updated.
+- Tests: `t008` gains static pins (presence probe present, unconditional
+  3-driver literal absent, emitted `ena` append precedes the installer invoke)
+  and behavioural runs of the extracted hook body against mock `/lib/modules`
+  trees with/without `ena` (+11 asserts; suite 497 -> 508). Docs lock-step:
+  SPEC ENA/initramfs requirement paragraph, B.4 injection-matrix nitro row,
+  D.22 Fix/Prevention, new D.28, Part-E marker table; TESTING.md B-T9 row.
+
 ### Fixed (OL8 real-build failure: 7 GB root overflow during UPDATE_TO_LATEST — LINUX_FIRMWARE="no")
 - **Root cause (2026-07-13 real AMI build generation, measured)**: the OL8
   build failed in guest provisioning — the `UPDATE_TO_LATEST` dnf transaction

@@ -601,12 +601,18 @@ omits nvme from the initramfs (observed on OL7 UEK R6: `nvme.ko` was on disk but
 absent from the initramfs, and Phase 6 CHECK 1 correctly FAILed). This is a boot
 requirement, so Phase 3 **always** (even with `--skip-ena-driver`) appends a hook
 to `cloud/aws/provision.sh` that writes `/etc/dracut.conf.d/02-ol-aws-nitro.conf`
-(`add_drivers+=" nvme nvme-core ena "`, which also persists across in-instance
-kernel updates) and regenerates the initramfs for the installed kernel
-(`dracut -f`). It targets the highest UEK under `/lib/modules` (the appliance's
-`uname -r` is not the guest's) and is best-effort — it never aborts the build;
-CHECK 1 verifies the result. OL6 already shipped nvme in its UEK4 initramfs, so
-the step is a harmless refresh there.
+and regenerates the initramfs for the installed kernel (`dracut -f`). The
+drop-in is **presence-aware** (D.28): it lists only the drivers whose `.ko`
+exists for the target kernel at the hook's (source-time, pre-DKMS) stage — on
+slim OL8/9/10 the in-box `ena` ships in `kernel-uek-modules`, which the
+upstream `KERNEL_MODULES="no"` default removes, so `ena` is legitimately absent
+there and is *deferred*: the ENA hook appends `ena` to the same drop-in right
+before invoking the installer, whose own `dracut -f` then bakes it in (and the
+drop-in persists across in-instance kernel updates). The hook targets the
+highest UEK under `/lib/modules` (the appliance's `uname -r` is not the
+guest's) and is best-effort — it never aborts the build; CHECK 1 verifies the
+result. OL6/OL7 carry an in-box `ena`, so all three drivers enter the drop-in
+at the first stage there.
 
 #### ENA driver self-build (`--skip-ena-driver`)
 
@@ -1391,7 +1397,7 @@ identifier. All are applied inside `phase3_clone_repository`. Current markers:
 | `[ol-aws-ami-builder PATCH kernel-uek-modules]` | `cloud/aws/provision.sh` | `OL_MAJOR_VERSION <= 7` | Skip the `kernel-uek-modules` install on OL6/OL7 (UEK < R7; bundled in `kernel-uek`) |
 | `[ol-aws-ami-builder PATCH declare-g-ol6]` | `env.properties.defaults` | `OL_MAJOR_VERSION == 6` | Guard `declare -gA REPO` with a `\|\| declare -A` fallback (bash 4.1 in the OL6 guest has no `declare -g`) |
 | `[ol-aws-ami-builder PATCH ol6-cloud-user]` | `cloud/aws/provision.sh` | `OL_MAJOR_VERSION == 6` | Wrap `cloud::cloud_init` so the OL6 cloud-init default user becomes `ec2-user` (strips the absent `systemd-journal` group; runs after the configs are written) — see D.26 |
-| `[ol-aws-ami-builder PATCH nitro-initramfs]` | `cloud/aws/provision.sh` | always (AWS cloud path) | Drop an `/etc/dracut.conf.d` `add_drivers` file forcing `nvme`/`ena` into the initramfs and regenerate it (Nitro boot requirement; Phase 6 CHECK 1 verifies the result) |
+| `[ol-aws-ami-builder PATCH nitro-initramfs]` | `cloud/aws/provision.sh` | always (AWS cloud path) | Drop a presence-aware `/etc/dracut.conf.d` `add_drivers` file (only drivers whose `.ko` exists at this stage; `ena` is deferred to the ENA hook on slim OL8/9/10 — D.28) and regenerate the initramfs (Nitro boot requirement; Phase 6 CHECK 1 verifies the result) |
 | `[ol-aws-ami-builder PATCH serial-console]` | `cloud/aws/provision.sh` | GRUB2 systems (OL7+; hook self-skips on OL6 GRUB Legacy) | AWS-recommended serial console in 3 layers: (1) `console=tty0 console=ttyS0,115200n8` on all entries via `grubby --update-kernel=ALL` (BLS-aware) + `GRUB_CMDLINE_LINUX`; (2) `GRUB_TERMINAL`/`GRUB_SERIAL_COMMAND` + `grub2-mkconfig`; (3) `serial-getty@ttyS0` enabled — see D.25 |
 | `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default, OL6-OL10; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; OL8/9/10 receive the host-resolved target via `ENA_DRIVER_VERSION`) — logged as `[OLAWS-ENA01]`, see A.13 |
 | `[ol-aws-ami-builder PATCH ssm-agent-install]` | `cloud/aws/provision.sh` | `SSM_AGENT_INSTALL == 1` (default; `--skip-ssm-agent` disables) | Inject the in-guest Amazon SSM Agent install+boot-enable hook (OL6-OL10; all majors `latest`; non-fatal) — logged as `[OLAWS-SSM01]`, see B.11 |
@@ -3381,10 +3387,12 @@ true positive, not a false negative.
 
 **Fix.** Phase 3 appends an always-on hook to `cloud/aws/provision.sh` (it runs
 even with `--skip-ena-driver`, because booting on Nitro is not optional) that
-writes `/etc/dracut.conf.d/02-ol-aws-nitro.conf` with
-`add_drivers+=" nvme nvme-core ena "` and regenerates the initramfs for the
-installed kernel with `dracut -f`. The drop-in also makes future in-instance
-kernel updates keep nvme/ena. See A.13 ("Nitro initramfs drivers").
+writes `/etc/dracut.conf.d/02-ol-aws-nitro.conf` and regenerates the initramfs
+for the installed kernel with `dracut -f`. Since D.28 the drop-in is
+**presence-aware** (only drivers whose `.ko` exists at the hook's stage; `ena`
+is appended later by the ENA hook on the slim majors). The drop-in also makes
+future in-instance kernel updates keep the forced drivers. See A.13 ("Nitro
+initramfs drivers").
 
 **Prevention.** The hook targets the highest UEK under `/lib/modules` (not the
 appliance `uname -r`) and is idempotent and best-effort; CHECK 1 then verifies
@@ -3668,6 +3676,54 @@ required, or to not target OL6 under such a policy.
 
 ---
 
+## D.28 nitro-initramfs hook `dracut` FAILs on slim OL8/9/10 — forced an `ena` that cannot exist at its stage
+
+**Symptom.** Every OL8/9/10 build log carries, from the nitro-initramfs hook:
+
+```
+dracut-install: Failed to find module 'ena'
+dracut: FAILED:  /usr/lib/dracut/dracut-install ... -m nvme nvme_core ena
+[nitro-initramfs] WARNING: dracut -f failed for <kver>
+```
+
+The build continues (the hook is best-effort), and default builds still end
+with a correct initramfs — but the message is a false alarm, and the defect is
+real underneath (observed in the 2026-07-13 OL8 real-build log).
+
+**Root cause — a staging impossibility, not a transient.** The hook is
+appended to `cloud/aws/provision.sh` as top-level statements, so it executes
+at **source time** (the same mechanism as D.26), before the ENA hook's DKMS
+build. On the slim OL8/9/10 images the in-box `ena` ships in
+`kernel-uek-modules`, which the upstream `KERNEL_MODULES="no"` default removes
+(RPM-payload verified at `5.15.0-322.203.3.3.el8uek`: `nvme`/`nvme-core` live
+in `kernel-uek-core`; `ena` lives in `kernel-uek-modules`). So at the hook's
+stage there is **no `ena` on disk to force** — the unconditional
+`add_drivers+=" nvme nvme-core ena "` drop-in made the hook's own `dracut -f`
+fail, leaving the initramfs *without the forced nvme* at that stage. Default
+builds were rescued by the ENA hook's later regen (post-DKMS, `ena` present,
+drop-in resolves). But on **`--skip-ena-driver` builds of OL8/9/10** there is
+no later regen: the initramfs never gets the forced `nvme`, and the persistent
+drop-in still names the absent `ena` — so **every future in-instance `dracut`
+run (e.g. a kernel update) fails too**. That is the latent defect.
+
+**Fix.** Two-stage, presence-aware staging: (1) the nitro hook probes each
+candidate (`nvme`, `nvme-core`, `ena`) with `find /lib/modules/<kver> -name
+'<drv>.ko*'` and writes only the present ones into the drop-in, logging absent
+ones as *deferred* — its `dracut -f` now always succeeds; (2) the ENA hook
+appends `ena` to the same drop-in (idempotent `grep -qsw` gate) **before**
+invoking the installer, whose own `dracut -f` (which runs after the DKMS
+install) bakes `ena` into the initramfs. Final image: drop-in and initramfs
+carry nvme+ena on default builds, nvme-only on `--skip-ena-driver` builds
+(where no `ena` exists at all), and OL6/OL7 (in-box `ena`) are unchanged.
+
+**Prevention.** `t008` (the hook execution-timing tier) pins both stages:
+statically (presence probe present, unconditional 3-driver literal absent, the
+emitted ena append precedes the installer invoke) and behaviourally (extracted
+hook body against a mock `/lib/modules` with and without `ena`; the emitted
+append line applied twice stays single).
+
+---
+
 # Part E — Logging & Diagnostics
 
 The wrapper emits a single, uniform log stream to the console and (by default)
@@ -3724,7 +3780,7 @@ the line is specific to one generation (e.g. `[OLAWS-USR01/OL6]`).
 | `OLAWS-UPSTREAM01` | upstream oracle-linux provenance on every build: full HEAD SHA + commit date/subject on the console, and `${WORKSPACE}/upstream-provenance.txt` with the applied wrapper patch markers + sha256 of every patched artifact (upstream is tracked at HEAD by design, so a failing build must always leave behind exactly what it built from) |
 | `OLAWS-P3GATE01` | Phase-3 exit gate over the ACTUALLY patched artifacts on the real build host, before any install work: structural kickstart conformance (single `%packages`, single in-section `sos`, marker uniqueness, `%end` balance over ALL pykickstart sections incl. `%addon`, bootloader shape, partitioning presence — static `part` lines OR the EL8-family dynamic pair of a `%include` line whose target is generated inside a `%pre` body), hook-bracket pairing + heredoc termination + `bash -n` on `cloud/aws/provision.sh` and `image-scripts.sh`. Any finding dies in seconds (with the provenance file cited) instead of ~30 opaque minutes in anaconda. ksvalidator, when installed, runs ADVISORY-only (it exits 1 even on the pristine upstream kickstart -- the pre-existing `--nobase` deprecation is counted -- so its rc cannot gate) |
 | `OLAWS-CFG01` | resolved feature knobs (`[DEBUG]`: ENA/IMDS/skip flags) |
-| `OLAWS-NVM01` | Nitro initramfs-drivers hook injected (nvme/ena into initramfs) |
+| `OLAWS-NVM01` | Nitro initramfs-drivers hook injected (presence-aware add_drivers; ena deferred to the ENA hook when not in-box — D.28) |
 | `OLAWS-ENA01` | in-guest ENA driver self-build hook injected |
 | `OLAWS-ENA02` | ENA self-build target resolved for the AMI identity + guest hook (installer pin, or host-resolved amzn-drivers latest / concrete fallback pin on OL8-10) |
 | `OLAWS-CON01` | serial-console (`ttyS0`) hook injected (GRUB2 / OL7+) |
