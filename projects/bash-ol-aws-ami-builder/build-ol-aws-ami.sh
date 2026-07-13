@@ -486,7 +486,8 @@ load_env() {
   setup_logging
 
   # Resolve the SSM Agent version for the persistent AMI identity + report.
-  # SSM_AGENT_RESOLVED starts as the per-OL target (OL6 pin, OL7-OL10 "latest");
+  # SSM_AGENT_RESOLVED starts as the per-OL target (the /latest/ alias on
+  # every OL major since 2026-07-13);
   # if it is "latest", resolve it to the concrete S3-published version so the AMI
   # name/description, the injection log, and the final report record a real
   # version instead of the word "latest" (unsuitable for a persistent artifact).
@@ -2097,8 +2098,8 @@ OLAWS_OL6_CLOUD_USER_BODY
   # cloud/aws/provision.sh SSM Agent install hook (default ON; OL6-OL10).
   #
   # Writes our install-ssm-agent.sh verbatim into the guest and runs it during
-  # provisioning: it fetches the per-OL Amazon SSM Agent RPM (OL6 pinned to a
-  # known-good build, OL7-OL10 the /latest/ alias) with a plain in-guest
+  # provisioning: it fetches the per-OL Amazon SSM Agent RPM (every OL major
+  # follows the /latest/ alias) with a plain in-guest
   # `curl -fsSL` (the same fetch model as the ENA hook -- normal TLS trust, no
   # -k), installs it with `rpm -Uvh`, and enables it for boot per init system
   # (systemd on OL7+, SysV/upstart on OL6). The result is an AMI that is AWS SSM

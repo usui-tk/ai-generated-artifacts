@@ -42,12 +42,16 @@
 set -euo pipefail
 
 # ---- pinned version (overridable) ------------------------------------------
-# Per-OL default: OL6 is pinned to a known-good build (the EL6 NSS/glibc combo is
-# the fragile one, so a fixed, install+run-verified version is safer than a moving
-# target); OL7-OL10 follow the `/latest/` S3 alias. An explicit SSM_AGENT_VERSION
-# overrides the per-OL default (the install-test matrix always sets it). This
-# mirrors install-ena-driver.sh's ENA_VERSION_OL<major> map.
-SSM_AGENT_VERSION_OL6="${SSM_AGENT_VERSION_OL6:-3.3.4624.0}"
+# Per-OL default: every OL major follows the `/latest/` S3 alias. OL6 was pinned
+# through 2026-07-13 (the EL6 NSS/glibc combo was judged the fragile one), but
+# the B.10 install+run sweeps have shown 11 consecutive releases ok on glibc
+# 2.12 with no fragility materializing, so the pin was lifted (user
+# adjudication, 2026-07-13). Policy if a breakage ever materializes: re-pin OL6
+# to the newest install+run-verified version from the B.10 ledger. An explicit
+# SSM_AGENT_VERSION overrides the per-OL default (the install-test matrix
+# always sets it). This mirrors install-ena-driver.sh's ENA_VERSION_OL<major>
+# map.
+SSM_AGENT_VERSION_OL6="${SSM_AGENT_VERSION_OL6:-latest}"
 SSM_AGENT_VERSION_OL7="${SSM_AGENT_VERSION_OL7:-latest}"
 SSM_AGENT_VERSION_OL8="${SSM_AGENT_VERSION_OL8:-latest}"
 SSM_AGENT_VERSION_OL9="${SSM_AGENT_VERSION_OL9:-latest}"
@@ -144,7 +148,7 @@ osmajor="$(detect_osmajor)"
 [[ -n "${osmajor}" ]] || die "cannot determine Oracle Linux major version"
 
 # Resolve the agent version: an explicit SSM_AGENT_VERSION wins; otherwise the
-# per-OL default (OL6 pinned, OL7-OL10 the /latest/ alias). The install-test
+# per-OL default (the /latest/ alias on every OL major). The install-test
 # matrix always sets SSM_AGENT_VERSION, so this per-OL fallback is production-only.
 if [[ -z "${ssm_version}" ]]; then
   case "${osmajor}" in

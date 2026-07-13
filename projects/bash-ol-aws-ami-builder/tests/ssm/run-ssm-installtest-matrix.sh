@@ -95,8 +95,10 @@ warn() { log "WARNING: $*" >&2; }
 die()  { log "ERROR: $*" >&2; exit 1; }
 hr()   { log "================================================================"; }
 
-# pinned QA-preflight version per OL major (a known-good smoke version).
-pin_for() { case "$1" in 6) echo 3.0.1479.0 ;; 7|8|9|10) echo 3.3.3598.0 ;; *) echo "" ;; esac; }
+# pinned QA-preflight version per OL major (a known-good smoke version): the
+# newest install+run-verified version from the committed ledger (3.3.4793.0 is
+# ok on every major in the 2026-07-13 sweep, incl. OL6 glibc 2.12).
+pin_for() { case "$1" in 6|7|8|9|10) echo 3.3.4793.0 ;; *) echo "" ;; esac; }
 
 # ===========================================================================
 # Pure helpers (no I/O) -- unit-tested by tests/t018_ssmverdict.sh. Keep each a

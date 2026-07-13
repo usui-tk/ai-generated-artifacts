@@ -20,7 +20,31 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
-### Changed (SSM install+run ledger + RESULTS: 2026-07-13 five-major sweep recorded; single-sweep replacement)
+### Changed (SSM Agent version policy: OL6 pin lifted — every OL major now follows `/latest/`; QA-preflight pins moved to the verified 3.3.4793.0)
+- **Design change (user adjudication, 2026-07-13): `install-ssm-agent.sh`'s
+  production default for OL6 moves from the pin `3.3.4624.0` to the `/latest/`
+  S3 alias**, unifying every OL major (OL6-OL10) on `latest`. Rationale: the
+  OL6 pin existed as a hedge against EL6 NSS/glibc fragility, but the B.10
+  install+run sweeps have shown 11 consecutive releases (through `3.3.4793.0`)
+  ok on OL6 glibc 2.12 with no fragility materializing. **Re-pin policy** (now
+  in SPEC B.11): if an OL6 breakage ever materializes, OL6 reverts to a pin on
+  the newest install+run-verified version from the B.10 ledger.
+- No wrapper code change: `_ssm_pin_for_major()` now returns `latest` for OL6
+  and the existing `_ssm_resolve_latest()` path (GitHub tag + S3 HEAD
+  verification) resolves it to a concrete version for the AMI name/description
+  and report, exactly as it already did for OL7-OL10 — the "AMI identity never
+  says latest" behavior is unchanged. Wrapper/installer comments updated.
+- **QA-preflight pins (`pin_for()` in `tests/ssm/run-ssm-installtest-matrix.sh`)
+  move to `3.3.4793.0` on every OL major** (was OL6 `3.0.1479.0` / OL7-OL10
+  `3.3.3598.0`): the newest install+run-verified version from the committed
+  ledger, ok on all five majors in the 2026-07-13 sweep. The old OL6 pin
+  `3.0.1479.0` was a below-minimum legacy build and its fetch showed a
+  transient timeout in the 2026-07-13 sweep preflight (recovered on retry).
+- Docs lock-step: SPEC B.4 injection-matrix SSM row + B.11 "Per-OL version"
+  paragraph rewritten; README.md / README.ja.md `install-ssm-agent.sh` rows
+  updated in sync. `tests/t018_ssmverdict.sh` is untouched — its
+  `3.3.4624.0` / `3.0.1479.0` literals are pure version-comparison fixture
+  values, not pins. No test-count change.
 - **Committed the real 2026-07-13 five-major SSM install+run sweep**: the ledger
   (`tests/ssm/ssm-installtest-ledger.json`) and `RESULTS-ol{6,7,8,9,10}.md` now
   record 55 rows = 11 in-scope versions (`>= 3.3.3598.0`) x OL6-OL10, all run on

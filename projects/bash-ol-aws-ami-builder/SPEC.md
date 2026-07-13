@@ -1368,7 +1368,7 @@ identifier. All are applied inside `phase3_clone_repository`. Current markers:
 | `[ol-aws-ami-builder PATCH nitro-initramfs]` | `cloud/aws/provision.sh` | always (AWS cloud path) | Drop an `/etc/dracut.conf.d` `add_drivers` file forcing `nvme`/`ena` into the initramfs and regenerate it (Nitro boot requirement; Phase 6 CHECK 1 verifies the result) |
 | `[ol-aws-ami-builder PATCH serial-console]` | `cloud/aws/provision.sh` | GRUB2 systems (OL7+; hook self-skips on OL6 GRUB Legacy) | AWS-recommended serial console in 3 layers: (1) `console=tty0 console=ttyS0,115200n8` on all entries via `grubby --update-kernel=ALL` (BLS-aware) + `GRUB_CMDLINE_LINUX`; (2) `GRUB_TERMINAL`/`GRUB_SERIAL_COMMAND` + `grub2-mkconfig`; (3) `serial-getty@ttyS0` enabled — see D.25 |
 | `[ol-aws-ami-builder PATCH ena-driver-build]` | `cloud/aws/provision.sh` | `ENA_DRIVER_BUILD == 1` (default, OL6-OL10; `--skip-ena-driver` disables) | Inject the in-guest Amazon ENA driver self-build hook (DKMS; OL8/9/10 receive the host-resolved target via `ENA_DRIVER_VERSION`) — logged as `[OLAWS-ENA01]`, see A.13 |
-| `[ol-aws-ami-builder PATCH ssm-agent-install]` | `cloud/aws/provision.sh` | `SSM_AGENT_INSTALL == 1` (default; `--skip-ssm-agent` disables) | Inject the in-guest Amazon SSM Agent install+boot-enable hook (OL6-OL10; OL6 pinned, OL7-OL10 `latest`; non-fatal) — logged as `[OLAWS-SSM01]`, see B.11 |
+| `[ol-aws-ami-builder PATCH ssm-agent-install]` | `cloud/aws/provision.sh` | `SSM_AGENT_INSTALL == 1` (default; `--skip-ssm-agent` disables) | Inject the in-guest Amazon SSM Agent install+boot-enable hook (OL6-OL10; all majors `latest`; non-fatal) — logged as `[OLAWS-SSM01]`, see B.11 |
 | `[ol-aws-ami-builder PATCH awscli-install]` | `cloud/aws/provision.sh` | `AWSCLI_INSTALL == 1` (default) **and** `OL_MAJOR_VERSION` in `6/7/8` (`--skip-awscli` disables; OL9/OL10 out of scope) | Inject the in-guest AWS CLI v2 install hook (OL6 pinned `2.17.51`, OL7/OL8 `latest`; v1 excluded via versionlock; non-fatal) — logged as `[OLAWS-AWSCLI01]`, see B.13 |
 | `[ol-aws-ami-builder PATCH sos-package]` | `distr/ol${N}-slim/ol${N}-ks.cfg` | `OL_MAJOR_VERSION >= 7` (always on; OL6 lists `sos` directly in its synthesized kickstart) | `_ks_add_sos_package`: insert `sos` (sosreport tooling) directly under the first `%packages` line, so every AMI can produce a sosreport out of the box — logged as `[OLAWS-SOS01]`; dies when the kickstart has no `%packages` section (assert-then-write) |
 | `[ol-aws-ami-builder PATCH amazon-time-sync]` | `cloud/aws/provision.sh` | `AMAZON_TIME_SYNC == "yes"` (OPT-IN; default OFF — env key or `--enable-amazon-time-sync`) | Append a guest-side block that adds 169.254.169.123 as the preferred time source (`/etc/chrony.conf` on OL7-OL10, `/etc/ntp.conf` on OL6; the guest block detects which file exists and re-checks before appending) — logged as `[OLAWS-TIMESYNC01]`, see B.14 |
@@ -2345,10 +2345,15 @@ the per-OL install+run evidence). Shipping a compliant agent by default means a
 freshly built AMI is SSM-manageable out of the box.
 
 **Per-OL version.** `install-ssm-agent.sh` holds the source-of-truth map
-`SSM_AGENT_VERSION_OL<major>`: **OL6 is pinned to `3.3.4624.0`** (a fixed,
-install+run-verified build — the EL6 NSS/glibc combination is the fragile one, so
-a moving target is riskier there), and **OL7-OL10 follow the `/latest/` S3 alias**.
-An explicit `SSM_AGENT_VERSION` overrides the map. The wrapper's
+`SSM_AGENT_VERSION_OL<major>`: **every OL major (OL6-OL10) follows the
+`/latest/` S3 alias**. OL6 was pinned to a fixed, install+run-verified build
+through 2026-07-13 (the EL6 NSS/glibc combination was judged the fragile one, so
+a moving target was considered riskier there), but the B.10 install+run sweeps
+have shown 11 consecutive releases ok on OL6 glibc 2.12 with no fragility
+materializing, so the pin was lifted (user adjudication, 2026-07-13). **Re-pin
+policy**: if an OL6 breakage ever materializes, OL6 reverts to a pin on the
+newest install+run-verified version from the B.10 ledger. An explicit
+`SSM_AGENT_VERSION` overrides the map. The wrapper's
 `_ssm_pin_for_major()` reads the same map for the AMI name/description marker
 (single source of truth, mirroring `_ena_pin_for_major()`).
 
