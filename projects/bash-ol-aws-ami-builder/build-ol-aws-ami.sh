@@ -1749,9 +1749,10 @@ phase3_clone_repository() {
 # Targets the installed kernel (highest UEK under /lib/modules); `uname -r` is
 # the libguestfs appliance kernel during provisioning, so it is not used.
 # PRESENCE-AWARE: only drivers whose .ko exists for the target kernel enter the
-# dracut drop-in at this stage. On the slim OL8/9/10 images the in-box ena
-# lives in kernel-uek-modules, which the slim build removes (KERNEL_MODULES=no
-# upstream default), so ena is legitimately absent here; the ENA self-build
+# dracut drop-in at this stage. On the slim OL8/9/10 builds the in-box ena is
+# not on disk at this (source-time, pre-DKMS) stage -- observed in the
+# 2026-07-13 build logs; it ships in kernel-uek-modules, which is not staged
+# at this point -- so ena is legitimately absent here; the ENA self-build
 # hook appends `ena` to the same drop-in after the DKMS install and its own
 # dracut regen bakes it in. Forcing an absent driver instead made this hook's
 # dracut FAIL ("Failed to find module 'ena'") and, on --skip-ena-driver

@@ -20,6 +20,47 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Verified (2026-07-13 real-boot E2E — B-T7/B-T8 executed on all five majors) / Changed (firmware narrative re-grounded on booted-image observations)
+- **B-T7/B-T8 executed for real**: the 2026-07-13 generation completed real
+  7 GB builds + registrations on ALL five majors (OL6 `ami-01724bfd463dede0e`,
+  OL7 `ami-0661c712ffbab6e0b`, OL8 `ami-0e06117c48124c634`, OL9
+  `ami-02408b9ed351ae526`, OL10 `ami-05c3164c73ce94eca`; ap-northeast-1) and
+  real EC2 boots with SSH login; sosreports collected on every instance
+  (r5dn.large / r6id.large / r7iz.large / r8i-flex.large ×2 — Nitro through
+  v6). Sosreport-verified: `ethtool -i` = self-built `2.9.1g`/`2.17.2g` on
+  every major (AMI-name = driving-driver invariant; closes the OL8-10
+  self-build gap), initramfs carries ena+nvme on all five (D.28 real-machine
+  confirmation; OL6 Nitro/NVMe path now traveled), baked-in SSM `3.3.4793.0`
+  installed AND running on all five (first real-boot proof of the
+  all-majors-`/latest/` policy), UUID fstab / NVMe root / serial console, zero
+  ena/nvme dmesg errors (only the expected OL6 unsigned-DKMS taint). AWS CLI
+  is not observable from sosreports (no `/usr/local` collection; build-time
+  verified). Status docs updated: TESTING.md "Boot-E2E evidence note
+  (2026-07-13)" + B-T7/B-T8 status, SPEC B.3.4 validation status, README.md /
+  README.ja.md (ENA row, OL6 Phase A/B/C note, development-history
+  supersession notes).
+- **Firmware narrative corrected to observed reality (user adjudication,
+  2026-07-13)**: the booted images of ALL five majors carry `linux-firmware`
+  and `kernel-uek-modules` for the target kernel — contradicting the earlier
+  entries' claims that OL9/OL10 ship without firmware, that
+  `LINUX_FIRMWARE="no"` converges OL8 with OL9/OL10 content, and that
+  kernel-uek-modules stays removed (those claims were derived from upstream
+  defaults, not from booted images; this entry supersedes them). What stands,
+  measured: EL8's uniquely uncompressed firmware (~1.88 GB installed) made the
+  OL8 `UPDATE_TO_LATEST` peak overflow 7 GB, and the `LINUX_FIRMWARE="no"`
+  pre-update removal created the headroom that let the 2026-07-13 OL8 rebuild
+  complete at 7 GB — the knob is a **build-time transaction-headroom knob, not
+  a final-content guarantee**; the packages re-enter via the later
+  provisioning flow (mechanism deliberately not investigated — user
+  adjudication; the build host was terminated; functionally benign per the
+  real-boot E2E). Reworded lock-step: SPEC B.3 key-table row + B.3.4 exception
+  paragraph, the ENA/initramfs paragraph + D.28 mechanism attribution (in-box
+  ena absence at hook stage is now stated as the direct log observation),
+  `env.properties.aws-ol8` comment, README.md / README.ja.md
+  `LINUX_FIRMWARE` rows, the nitro-body comment in `build-ol-aws-ami.sh`, and
+  comment/message wording in t006/t008. No assert-count change; suite stays
+  508.
+
 ### Fixed (nitro-initramfs hook: presence-aware drop-in — no more `dracut` FAIL on slim OL8/9/10; latent `--skip-ena-driver` drop-in breakage closed) — SPEC D.28
 - **Symptom (2026-07-13 OL8 real-build log)**: the nitro-initramfs hook's
   `dracut -f` failed on every slim OL8/9/10 build with `Failed to find module

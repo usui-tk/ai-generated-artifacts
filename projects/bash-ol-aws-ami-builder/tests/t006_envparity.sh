@@ -42,7 +42,7 @@ for n in "${ENVS[@]}"; do
   extras="$(comm -23 "${tmp}/${n}.keys" "${tmp}/core" | tr '\n' ' ' | sed 's/ *$//')"
   case "${n}" in
     ol6|ol7) assert_eq "KERNEL UEK_RELEASE" "${extras}" "env parity: ${n} extras are exactly KERNEL UEK_RELEASE" ;;
-    ol8)     assert_eq "LINUX_FIRMWARE" "${extras}" "env parity: ol8 extras are exactly LINUX_FIRMWARE (firmware dropped; SPEC B.3.4)" ;;
+    ol8)     assert_eq "LINUX_FIRMWARE" "${extras}" "env parity: ol8 extras are exactly LINUX_FIRMWARE (build-time update headroom; SPEC B.3.4)" ;;
     *)       assert_eq "" "${extras}" "env parity: ${n} has no orphan keys beyond the core" ;;
   esac
 done

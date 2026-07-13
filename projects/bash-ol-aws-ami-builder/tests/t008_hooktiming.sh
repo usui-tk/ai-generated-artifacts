@@ -110,7 +110,7 @@ assert_match "$(cat "${root}/etc/cloud/cloud.cfg")" '^[[:space:]]+name: ec2-user
 
 # ---- (c) nitro-initramfs presence-aware staging (SPEC D.28) ------------------
 # The nitro hook runs at SOURCE time -- before the ENA hook's DKMS build -- so
-# on slim OL8/9/10 (kernel-uek-modules removed upstream) the in-box ena does
+# on slim OL8/9/10 (the in-box ena is not on disk at that stage) the ena does
 # not exist yet. The hook must only force drivers that are PRESENT, and the
 # ENA hook must append `ena` to the shared drop-in BEFORE invoking the
 # installer (whose own dracut regen bakes ena into the initramfs).

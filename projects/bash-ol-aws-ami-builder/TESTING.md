@@ -97,8 +97,11 @@ B-T1 / B-T2 counts include the six `tests/cleancore/` clean-core builders (see
 "Container clean-core test base" below) and the AWS CLI v2 install-test scripts
 (`install-awscli.sh`, `tests/awscli/`): B-T1 and B-T2 parse- and lint-check
 **every** `.sh` in the project, so adding a script raises both counts by one. The
-host-runnable tiers (L0-L2) are complete; B-T7/B-T8 (L3/L4) remain deferred
-(builder host + AWS). A tier SKIPs cleanly when its optional dependency is absent.
+host-runnable tiers (L0-L2) are complete; B-T7/B-T8 (L3/L4) were **executed for
+real on the 2026-07-13 generation** (all five majors: real 7 GB builds, Phase 6
+offline inspection, and real EC2 boots — see the "Boot-E2E evidence note
+(2026-07-13)" below). They remain manual / on-demand (builder host + AWS), not
+run by `run-all.sh`. A tier SKIPs cleanly when its optional dependency is absent.
 
 ## Environment & version dependencies
 
@@ -153,6 +156,34 @@ AWS account; they are documented, not run by `run-all.sh`.
 > found running was hand-installed minutes before the sosreports), and the
 > 7 GB `DISK_SIZE_GB` (that generation was built at 10 GB). Those remain the
 > open [C]3 / B-T8 items for the current tree.
+
+> **Boot-E2E evidence note (2026-07-13) — closes the 2026-07-11 open items.**
+> The 2026-07-13 build generation (self-built ENA on ALL five majors, baked-in
+> SSM `/latest/`, `DISK_SIZE_GB=7`) completed **real builds + registrations**
+> (AMI IDs: OL6 `ami-01724bfd463dede0e`, OL7 `ami-0661c712ffbab6e0b`, OL8
+> `ami-0e06117c48124c634`, OL9 `ami-02408b9ed351ae526`, OL10
+> `ami-05c3164c73ce94eca`; ap-northeast-1) and **real EC2 boots with SSH login
+> on all five majors**; sosreports were collected on every instance
+> (`r5dn.large` / `r6id.large` / `r7iz.large` / `r8i-flex.large` ×2 — Nitro
+> generations through v6). What it proves, per the sosreports: (1) the
+> **AMI-name = driving-driver invariant held on all five majors** — `ethtool
+> -i` (dmesg ENA probe line on OL7, whose sos build predates the ethtool
+> capture) shows the self-built `2.9.1g` (OL6) / `2.17.2g` (OL7-OL10),
+> closing the OL8-10 self-build gap; (2) **the initramfs carries `ena` +
+> `nvme` on all five majors** (D.28 real-machine confirmation), and the OL6
+> Nitro/NVMe path is now traveled (NVMe root on r5dn.large); (3) the
+> **baked-in SSM Agent `3.3.4793.0` is installed AND running on all five**
+> (upstart on OL6, systemd active on OL7-10) — the first real-boot proof of
+> the all-majors-`/latest/` policy; (4) UUID-based fstab / NVMe root, serial
+> console (getty ttyS0 on OL7-10, GRUB cmdline on OL6), and **zero ena/nvme
+> error lines in dmesg** (the only warning is the expected unsigned-DKMS
+> module taint on OL6). Also observed: every booted image carries
+> `linux-firmware` + `kernel-uek-modules` for the target kernel (see SPEC
+> B.3.4 — the `LINUX_FIRMWARE=no` knob is build-time headroom, not final
+> content). NOT observable from sosreports: the AWS CLI v2 install (sos does
+> not collect `/usr/local`; verified at build time via the AMI
+> identity/report). Remaining open: SSM Run Command round-trip and
+> `--skip-*` build variants.
 
 ## Coverage ledger
 

@@ -448,7 +448,7 @@ and should usually be left alone.
 | `SELINUX` | `enforcing` | SELinux mode of the resulting AMI |
 | `ROOT_FS` | `xfs` | Root filesystem of the resulting AMI |
 | `DISK_SIZE_GB` | `7` | Root volume size of the AMI; uniform 7 GB across OL6-10 — see B.3.4 "Disk sizing" |
-| `LINUX_FIRMWARE` | `no` (OL8 only) | Drop the bulk `linux-firmware` package from the OL8 image (upstream distr knob). Firmware is device-side payload unused on EC2 VMs; EL8's uniquely uncompressed ~1.9 GB firmware otherwise overflows the 7 GB root during `UPDATE_TO_LATEST`. Converges OL8 with OL9/OL10 (whose distrs already remove firmware via `KERNEL_MODULES=no`); `linux-firmware-core` (kernel-uek-core's small dependency) is unaffected — see B.3.4 |
+| `LINUX_FIRMWARE` | `no` (OL8 only) | Remove the bulk `linux-firmware` package **before the in-guest update** (upstream distr knob) so the `UPDATE_TO_LATEST` transaction fits the 7 GB root — EL8's firmware is uniquely uncompressed (~1.9 GB installed) and otherwise overflows it. This is a **build-time headroom knob**: the booted 2026-07-13 images were observed to carry `linux-firmware` again (re-entering via the later provisioning flow), which is functionally benign. `linux-firmware-core` (kernel-uek-core's small dependency) is untouched — see B.3.4 |
 | `AMAZON_TIME_SYNC` | `no` | OPT-IN. `yes` (or `--enable-amazon-time-sync`) makes guest provisioning add the link-local Amazon Time Sync Service (169.254.169.123) as the preferred time source — see B.14 |
 | `ENA_DRIVER_VERSION` | (unset) | OPTIONAL user pin (emergency lever). A concrete `x.y.z` becomes the highest-priority self-built ENA version on every major: it enters the AMI identity AND the guest hook (no drift). Non-`x.y.z` values die in `load_env`. Unset = installer pin → latest → fallback chain |
 | `SERIAL_CONSOLE_RUNTIME` | `Yes` | Required for EC2 Serial Console |
@@ -604,9 +604,10 @@ to `cloud/aws/provision.sh` that writes `/etc/dracut.conf.d/02-ol-aws-nitro.conf
 and regenerates the initramfs for the installed kernel (`dracut -f`). The
 drop-in is **presence-aware** (D.28): it lists only the drivers whose `.ko`
 exists for the target kernel at the hook's (source-time, pre-DKMS) stage — on
-slim OL8/9/10 the in-box `ena` ships in `kernel-uek-modules`, which the
-upstream `KERNEL_MODULES="no"` default removes, so `ena` is legitimately absent
-there and is *deferred*: the ENA hook appends `ena` to the same drop-in right
+the slim OL8/9/10 builds the in-box `ena` is not on disk at that stage
+(observed directly in the 2026-07-13 build logs; the in-box `ena` ships in
+`kernel-uek-modules`, which is not staged at that point), so `ena` is
+*deferred*: the ENA hook appends `ena` to the same drop-in right
 before invoking the installer, whose own `dracut -f` then bakes it in (and the
 drop-in persists across in-instance kernel updates). The hook targets the
 highest UEK under `/lib/modules` (the appliance's `uname -r` is not the
@@ -1338,28 +1339,34 @@ safe and what bounds it:
   build-time-peak counterexample**: its `UPDATE_TO_LATEST` transaction failed
   ("installing package linux-firmware-… needs 631MB on the / filesystem") —
   root-caused below and fixed via `LINUX_FIRMWARE="no"`, keeping 7 GB uniform.
+  The OL8 rebuild then completed at 7 GB, and **all five 7 GB AMIs were
+  boot-verified on real EC2** (2026-07-13, sosreports — see TESTING.md
+  "Boot-E2E evidence note (2026-07-13)").
 
 **The OL8 linux-firmware exception (measured, 2026-07-13).** EL8 is the only
 major whose `linux-firmware` ships uncompressed firmware files — repodata
 measurement: OL8 latest ≈ 695 MB package / **≈ 1.88 GB installed**, vs OL9/OL10
-≈ 0.93 GB installed (xz-compressed). Upstream defaults compound the asymmetry:
-`ol9-slim`/`ol10-slim` remove kernel-modules **and `linux-firmware` entirely**
-under their `KERNEL_MODULES="no"` default, while `ol8-slim` splits firmware
-into a separate `LINUX_FIRMWARE` knob defaulting to `"yes"` — so only the OL8
-image carried (and upgraded) the bulk firmware during `UPDATE_TO_LATEST`,
-overflowing the 7 GB root. The fix sets `LINUX_FIRMWARE="no"` in
+≈ 0.93 GB installed (xz-compressed). During `UPDATE_TO_LATEST` the upgrade
+transaction transiently needs the new payload alongside the old one plus the
+download cache, and on OL8 that peak alone (~2.5 GB) blew the 7 GB root's
+remaining headroom ("needs 631MB more on /"), while the EL9/EL10 peaks are
+roughly half and fit. The fix sets `LINUX_FIRMWARE="no"` in
 `env.properties.aws-ol8` (upstream-native knob, wrapper passthrough
 pre-existing): the removal runs in `distr::kernel_config` *before* the update,
-freeing the GA firmware and eliminating the upgrade peak. **No dependency
-cascade**: the failed build's log shows `kernel-uek-modules` (the only
-`linux-firmware` requirer on UEK7) was already erased by the
-`KERNEL_MODULES="no"` default, and `kernel-uek-core` depends only on the small
-`linux-firmware-core`, which this knob does not touch (UEKR7 repodata + RPM
-payload verified: `nvme`/`nvme-core` live in kernel-uek-core; the in-box `ena`
-lives in the removed kernel-uek-modules — the AMI's ENA is the DKMS self-build
-either way). Firmware is not needed on EC2: blobs are device-side payloads for
-physical hardware (upstream's own env comment: "Linux firmware is not needed
-on VM instances"). Re-open trigger: if a future OL8 build overflows again even
+freeing the GA firmware footprint so the transaction fits — **empirically
+confirmed**: the 2026-07-13 OL8 rebuild with this knob completed at 7 GB and
+registered. **Scope of the effect (observed)**: this is a *build-time
+transaction-headroom* knob, not a final-content guarantee — the booted
+2026-07-13 images (sosreports, all five majors) carry `linux-firmware` and
+`kernel-uek-modules` for the target kernel, i.e. the packages re-enter through
+the later provisioning flow. The re-entry mechanism was deliberately left
+uninvestigated (user adjudication 2026-07-13; the build host had been
+terminated) — it is functionally benign (real-boot E2E verified boot, ENA and
+SSM on all five majors) and errs on the general-purpose side. The RPM-payload
+facts stand regardless: `nvme`/`nvme-core` ship in `kernel-uek-core`, the
+in-box `ena` ships in `kernel-uek-modules`, and the driving ENA is the DKMS
+self-build either way (boot-verified: `ethtool -i` = `2.17.2g`). Re-open
+trigger: if a future OL8 build overflows again even
 without firmware, revisit `DISK_SIZE_GB` for OL8 as the fallback lever.
 
 ---
@@ -3693,10 +3700,12 @@ real underneath (observed in the 2026-07-13 OL8 real-build log).
 **Root cause — a staging impossibility, not a transient.** The hook is
 appended to `cloud/aws/provision.sh` as top-level statements, so it executes
 at **source time** (the same mechanism as D.26), before the ENA hook's DKMS
-build. On the slim OL8/9/10 images the in-box `ena` ships in
-`kernel-uek-modules`, which the upstream `KERNEL_MODULES="no"` default removes
-(RPM-payload verified at `5.15.0-322.203.3.3.el8uek`: `nvme`/`nvme-core` live
-in `kernel-uek-core`; `ena` lives in `kernel-uek-modules`). So at the hook's
+build. On the slim OL8/9/10 builds the in-box `ena` is not on disk at that
+stage — observed directly in the 2026-07-13 OL8 build log (`[in-box ENA] …
+file=<not found>`); the RPM-payload split explains it (verified at
+`5.15.0-322.203.3.3.el8uek`: `nvme`/`nvme-core` live in `kernel-uek-core`,
+`ena` lives in `kernel-uek-modules`, which is not staged at the hook's point
+in the flow). So at the hook's
 stage there is **no `ena` on disk to force** — the unconditional
 `add_drivers+=" nvme nvme-core ena "` drop-in made the hook's own `dracut -f`
 fail, leaving the initramfs *without the forced nvme* at that stage. Default
