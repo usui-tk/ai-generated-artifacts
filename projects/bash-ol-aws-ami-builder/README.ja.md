@@ -332,6 +332,7 @@ vi env.properties.local
 | `AWS_REGION` | 空のままにすると EC2 IMDSv2/v1 から自動取得(EC2 外では `ap-northeast-1` にフォールバック)。明示的に指定するとオーバーライドされます。 |
 | `UPDATE_TO_LATEST` | デフォルト `yes`。ゲスト VM 内でインストール後に `dnf/yum update` を実行し、ISO リリース以降に発見された kernel および userspace の CVE を解消します。トレードオフを理解した上でのみ `security` や `no` に変更してください。 |
 | `DISK_SIZE_GB` | デフォルト `7`(OL6-10 一律。Oracle 公式 AWS AMI と同水準)。ルートパーティションは自動拡張(`--grow`)かつ `cloud-utils-growpart` 焼き込み済みのため、より大きい EBS ボリュームで起動すれば自動で広がります — この値は下限であって上限ではありません。SPEC B.3.4 参照。 |
+| `LINUX_FIRMWARE` | OL8 テンプレートのみ `no`。EC2 VM では使われない大容量 `linux-firmware` パッケージを外します。EL8 の firmware だけが非圧縮(installed 約 1.9 GB)で、保持したままだと `UPDATE_TO_LATEST` 中に 7 GB ルートが溢れます。OL9/OL10 は upstream 既定(`KERNEL_MODULES=no`)により元々 firmware なしで、`linux-firmware-core` は残ります。SPEC B.3.4 参照。 |
 | `AMAZON_TIME_SYNC` | デフォルト `no`(時刻設定は AMI のエンドユーザーに委ねる)。`yes` を指定するか `--enable-amazon-time-sync` を渡すと、link-local の Amazon Time Sync Service(`169.254.169.123`)をゲストの優先時刻ソースとして構成します。 |
 | `ENA_DRIVER_VERSION` | 任意のユーザーピン(緊急用レバー。通常は未設定のまま)。具体的な `x.y.z` を指定すると、全 OL メジャーでセルフビルド ENA ドライバー版数の最優先ソースになります — AMI 名とゲストビルドの両方に入るため、identity と成果物が常に一致します。未設定時は installer ピン(OL6/7)→ amzn-drivers latest(OL8-10)→ フォールバックピンの順。 |
 | `AMI_NAME` | 任意。未指定なら日時付きで自動生成 |

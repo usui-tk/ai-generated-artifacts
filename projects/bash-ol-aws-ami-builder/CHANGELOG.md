@@ -20,6 +20,36 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (OL8 real-build failure: 7 GB root overflow during UPDATE_TO_LATEST — LINUX_FIRMWARE="no")
+- **Root cause (2026-07-13 real AMI build generation, measured)**: the OL8
+  build failed in guest provisioning — the `UPDATE_TO_LATEST` dnf transaction
+  aborted with "installing package linux-firmware-… needs 631MB on the /
+  filesystem". EL8 is the only major whose `linux-firmware` ships uncompressed
+  (repodata: ≈ 695 MB package / ≈ 1.88 GB installed, vs ≈ 0.93 GB installed
+  xz-compressed on EL9/EL10), and upstream defaults compound it: `ol9-slim`/
+  `ol10-slim` remove kernel-modules **and linux-firmware** under
+  `KERNEL_MODULES="no"`, while `ol8-slim` keeps firmware behind a separate
+  `LINUX_FIRMWARE` knob defaulting `"yes"` — so only OL8 carried and upgraded
+  the bulk firmware, overflowing the 7 GB root. OL6/OL7/OL9/OL10 built and
+  registered successfully at 7 GB in the same generation.
+- **Fix**: `env.properties.aws-ol8` sets `LINUX_FIRMWARE="no"` (upstream-native
+  distr knob; the wrapper passthrough already existed with "No recommended for
+  cloud VMs"). Removal runs in `distr::kernel_config` before the update, so
+  both the GA firmware and the upgrade peak disappear; the uniform
+  `DISK_SIZE_GB=7` decision (2026-07-11) stands, and OL8 converges with the
+  OL9/OL10 image content. **No dependency cascade** (verified): the failed
+  build's log shows `kernel-uek-modules` — the only `linux-firmware` requirer
+  on UEK7 — was already erased by the `KERNEL_MODULES="no"` default;
+  `kernel-uek-core` needs only the small `linux-firmware-core` (untouched).
+  RPM-payload verification: `nvme`/`nvme-core` live in kernel-uek-core; the
+  in-box `ena` lives in the removed kernel-uek-modules (the AMI's ENA is the
+  DKMS self-build either way).
+- Docs lock-step: SPEC B.3 key table + B.3.4 (validation status now records
+  the empirical 2026-07-13 result and the OL8 firmware exception); README.md /
+  README.ja.md env-key tables. Tests: t006 env parity now allows exactly
+  `LINUX_FIRMWARE` as the OL8 extra key and pins its value to `"no"`
+  (+1 assert).
+
 ### Changed (SSM Agent version policy: OL6 pin lifted — every OL major now follows `/latest/`; QA-preflight pins moved to the verified 3.3.4793.0)
 - **Design change (user adjudication, 2026-07-13): `install-ssm-agent.sh`'s
   production default for OL6 moves from the pin `3.3.4624.0` to the `/latest/`

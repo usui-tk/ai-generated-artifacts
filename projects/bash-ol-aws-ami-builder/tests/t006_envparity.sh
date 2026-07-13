@@ -35,14 +35,19 @@ done
 core_count="$(wc -l < "${tmp}/core" | tr -d ' ')"
 assert_eq 21 "${core_count}" "env parity: 21 common-core keys across all templates (AMAZON_TIME_SYNC added)"
 
-# extras beyond core: allowed only as {KERNEL, UEK_RELEASE} and only for OL6/OL7
+# extras beyond core: allowed only as {KERNEL, UEK_RELEASE} (OL6/OL7) and
+# {LINUX_FIRMWARE} (OL8 -- the uncompressed EL8 firmware overflows the 7 GB
+# root during UPDATE_TO_LATEST; SPEC B.3.4)
 for n in "${ENVS[@]}"; do
   extras="$(comm -23 "${tmp}/${n}.keys" "${tmp}/core" | tr '\n' ' ' | sed 's/ *$//')"
   case "${n}" in
     ol6|ol7) assert_eq "KERNEL UEK_RELEASE" "${extras}" "env parity: ${n} extras are exactly KERNEL UEK_RELEASE" ;;
+    ol8)     assert_eq "LINUX_FIRMWARE" "${extras}" "env parity: ol8 extras are exactly LINUX_FIRMWARE (firmware dropped; SPEC B.3.4)" ;;
     *)       assert_eq "" "${extras}" "env parity: ${n} has no orphan keys beyond the core" ;;
   esac
 done
+assert_eq '"no"' "$(val_of "${PROJ}/env.properties.aws-ol8" LINUX_FIRMWARE)" \
+  "env parity: ol8 LINUX_FIRMWARE=no (EL8 uncompressed firmware vs 7 GB root; SPEC B.3.4)"
 
 # cross-file invariants + per-OS DISTR
 ref_bucket="$(val_of "${PROJ}/env.properties.aws-ol8" S3_BUCKET)"

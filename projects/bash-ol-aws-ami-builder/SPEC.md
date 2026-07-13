@@ -448,6 +448,7 @@ and should usually be left alone.
 | `SELINUX` | `enforcing` | SELinux mode of the resulting AMI |
 | `ROOT_FS` | `xfs` | Root filesystem of the resulting AMI |
 | `DISK_SIZE_GB` | `7` | Root volume size of the AMI; uniform 7 GB across OL6-10 — see B.3.4 "Disk sizing" |
+| `LINUX_FIRMWARE` | `no` (OL8 only) | Drop the bulk `linux-firmware` package from the OL8 image (upstream distr knob). Firmware is device-side payload unused on EC2 VMs; EL8's uniquely uncompressed ~1.9 GB firmware otherwise overflows the 7 GB root during `UPDATE_TO_LATEST`. Converges OL8 with OL9/OL10 (whose distrs already remove firmware via `KERNEL_MODULES=no`); `linux-firmware-core` (kernel-uek-core's small dependency) is unaffected — see B.3.4 |
 | `AMAZON_TIME_SYNC` | `no` | OPT-IN. `yes` (or `--enable-amazon-time-sync`) makes guest provisioning add the link-local Amazon Time Sync Service (169.254.169.123) as the preferred time source — see B.14 |
 | `ENA_DRIVER_VERSION` | (unset) | OPTIONAL user pin (emergency lever). A concrete `x.y.z` becomes the highest-priority self-built ENA version on every major: it enters the AMI identity AND the guest hook (no drift). Non-`x.y.z` values die in `load_env`. Unset = installer pin → latest → fallback chain |
 | `SERIAL_CONSOLE_RUNTIME` | `Yes` | Required for EC2 Serial Console |
@@ -1326,9 +1327,34 @@ safe and what bounds it:
   (`t006` pins every template to `DISK_SIZE_GB="7"`), not in wrapper logic.
   If a build does outgrow the disk, anaconda / the in-guest update fails fast
   and visibly in the build log.
-- **Validation status**: the 7 GB value is gate-verified (parity + docs); the
-  first real AMI build at 7 GB is part of the next E2E cycle ([C]3, B-T8) and
-  will confirm the build-time peak empirically.
+- **Validation status**: empirically confirmed by the 2026-07-13 real AMI build
+  generation. OL6/OL7/OL9/OL10 built and registered at 7 GB. **OL8 was the
+  build-time-peak counterexample**: its `UPDATE_TO_LATEST` transaction failed
+  ("installing package linux-firmware-… needs 631MB on the / filesystem") —
+  root-caused below and fixed via `LINUX_FIRMWARE="no"`, keeping 7 GB uniform.
+
+**The OL8 linux-firmware exception (measured, 2026-07-13).** EL8 is the only
+major whose `linux-firmware` ships uncompressed firmware files — repodata
+measurement: OL8 latest ≈ 695 MB package / **≈ 1.88 GB installed**, vs OL9/OL10
+≈ 0.93 GB installed (xz-compressed). Upstream defaults compound the asymmetry:
+`ol9-slim`/`ol10-slim` remove kernel-modules **and `linux-firmware` entirely**
+under their `KERNEL_MODULES="no"` default, while `ol8-slim` splits firmware
+into a separate `LINUX_FIRMWARE` knob defaulting to `"yes"` — so only the OL8
+image carried (and upgraded) the bulk firmware during `UPDATE_TO_LATEST`,
+overflowing the 7 GB root. The fix sets `LINUX_FIRMWARE="no"` in
+`env.properties.aws-ol8` (upstream-native knob, wrapper passthrough
+pre-existing): the removal runs in `distr::kernel_config` *before* the update,
+freeing the GA firmware and eliminating the upgrade peak. **No dependency
+cascade**: the failed build's log shows `kernel-uek-modules` (the only
+`linux-firmware` requirer on UEK7) was already erased by the
+`KERNEL_MODULES="no"` default, and `kernel-uek-core` depends only on the small
+`linux-firmware-core`, which this knob does not touch (UEKR7 repodata + RPM
+payload verified: `nvme`/`nvme-core` live in kernel-uek-core; the in-box `ena`
+lives in the removed kernel-uek-modules — the AMI's ENA is the DKMS self-build
+either way). Firmware is not needed on EC2: blobs are device-side payloads for
+physical hardware (upstream's own env comment: "Linux firmware is not needed
+on VM instances"). Re-open trigger: if a future OL8 build overflows again even
+without firmware, revisit `DISK_SIZE_GB` for OL8 as the fallback lever.
 
 ---
 
